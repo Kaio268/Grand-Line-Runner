@@ -1,0 +1,86 @@
+local Rebirths = {
+	[1] = {
+		Price = 1000,
+		SpeedNeeded = 15,
+		
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =1.5, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 150, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 150, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	
+	[2] = {
+		Price = 25000,
+		SpeedNeeded = 30,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =2, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 300, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 300, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	
+	[3] = {
+		Price = 300000,
+		SpeedNeeded = 45,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =2.5, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 450, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 450, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	[4] = {
+		Price = 2500000,
+		SpeedNeeded = 60,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =3, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 600, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 600, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	[5] = {
+		Price = 50000000,
+		SpeedNeeded = 75,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =3.5, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 750, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 750, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	[6] = {
+		Price = 250000000,
+		SpeedNeeded = 90,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =4, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 900, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 900, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	[7] = {
+		Price = 2500000000,
+		SpeedNeeded = 105,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =4.5, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 1200, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 1200, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+	[8] = {
+		Price = 10000000000,
+		SpeedNeeded = 120,
+
+		Getting = {
+			["Multipliers.MoneyMult"] = {Amount =5, Icon = "rbxassetid://134664902697800"},
+			["Potions.x2MoneyTime"] = {Amount = 1500, Icon = "rbxassetid://102766068687661"},
+			["Potions.x15WalkSpeedTime"] = {Amount = 1500, Icon = "rbxassetid://89427336475199"},
+		}
+	},
+}
+
+return Rebirths
