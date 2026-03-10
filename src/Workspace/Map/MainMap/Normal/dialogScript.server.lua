@@ -1,11 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players           = game:GetService("Players")
-local DialogModule      = require(ReplicatedStorage.DialogModule)
+local Players = game:GetService("Players")
+local DialogModule = require(ReplicatedStorage.DialogModule)
 
- local Brainrots = require(ReplicatedStorage.Modules.Configs:WaitForChild("Brainrots"))
+local Brainrots = require(ReplicatedStorage.Modules.Configs:WaitForChild("Brainrots"))
 
 local player = Players.LocalPlayer
-local npc    = script.Parent
+local npc = script.Parent
 local prompt = npc:WaitForChild("ProximityPrompt")
 local npcGui = npc:WaitForChild("Mesh"):WaitForChild("gui")
 
@@ -21,14 +21,18 @@ end
 
 local function getSellPrice(brainrotName)
 	local data = Brainrots[brainrotName]
-	if not data then return nil end
+	if not data then
+		return nil
+	end
 
 	if data.SellPrice then
 		return tonumber(data.SellPrice)
 	end
 
 	local income = tonumber(data.Income)
-	if not income then return nil end
+	if not income then
+		return nil
+	end
 
 	return income * SELL_TIME_SECONDS
 end
@@ -45,7 +49,7 @@ local dialogObject = DialogModule.new("OpenSell", npc, prompt)
 dialogObject:addDialog("YO brooo!", {
 	"I want to sell my inventory!",
 	"I want to sell this item!",
-	"How much does this item cost?"
+	"How much does this item cost?",
 })
 
 prompt.Triggered:Connect(function(plr)
@@ -58,14 +62,16 @@ end
 
 local function getTotalInventorySellValue()
 	local inv = getClientInventoryFolder()
-	if not inv then return 0 end
+	if not inv then
+		return 0
+	end
 
 	local total = 0
 
 	for _, brainrotFolder in ipairs(inv:GetChildren()) do
 		local name = brainrotFolder.Name
 		local qObj = brainrotFolder:FindFirstChild("Quantity")
-		local qty  = qObj and tonumber(qObj.Value) or 0
+		local qty = qObj and tonumber(qObj.Value) or 0
 
 		if qty > 0 then
 			local price = getSellPrice(name) or 0
@@ -76,9 +82,10 @@ local function getTotalInventorySellValue()
 	return total
 end
 
-
 dialogObject.responded:Connect(function(responseNum, dialogNum)
-	if dialogNum ~= 1 then return end
+	if dialogNum ~= 1 then
+		return
+	end
 
 	if responseNum == 1 then
 		local total = getTotalInventorySellValue()
@@ -89,7 +96,6 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 		script["Coin sfx"]:Play()
 		npc.PrimaryPart.Attachment["Greyscaled Coin 2"]:Emit(15)
 		npc.PrimaryPart.Attachment["Greyscaled Coin 1"]:Emit(15)
-
 	elseif responseNum == 2 then
 		local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
 		if not tool then
@@ -97,7 +103,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 			return
 		end
 
-		local name  = cleanName(tool.Name)
+		local name = cleanName(tool.Name)
 		local price = getSellPrice(name)
 		if not price or price <= 0 then
 			dialogObject:hideGui("You can't sell this item.")
@@ -110,7 +116,6 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 		script["Coin sfx"]:Play()
 		npc.PrimaryPart.Attachment["Greyscaled Coin 2"]:Emit(15)
 		npc.PrimaryPart.Attachment["Greyscaled Coin 1"]:Emit(15)
-
 	elseif responseNum == 3 then
 		local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
 		if not tool then
@@ -118,7 +123,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 			return
 		end
 
-		local name  = cleanName(tool.Name)
+		local name = cleanName(tool.Name)
 		local price = getSellPrice(name)
 
 		if price and price > 0 then
