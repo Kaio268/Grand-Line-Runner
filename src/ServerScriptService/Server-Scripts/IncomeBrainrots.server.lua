@@ -173,6 +173,15 @@ local function anchorModel(model)
 	end
 end
 
+local function makeStandVisualNonBlocking(model)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("BasePart") then
+			d.CanQuery = false
+			d.CanCollide = false
+		end
+	end
+end
+
 local function tryPlayIdle(model, animId)
 	animId = tonumber(animId)
 	if not animId or animId == 0 then
@@ -787,6 +796,7 @@ local function spawnStandBrainrot(player, standModel, handle, brainrotName)
 
 	ensurePrimaryPart(clone)
 	anchorModel(clone)
+	makeStandVisualNonBlocking(clone)
 	placeModelBottomOnHandleLeft(clone, handle)
 
 	ensureBrainrotHover(clone)
@@ -1133,6 +1143,7 @@ local function bindLevelUp(player, plot, standModel)
 		end
 
 		dmAdjust(plr, "leaderstats.Money", -cost)
+		dmAdjust(plr, "StandsLevels." .. standName, 1)
 		dmAdjust(plr, "Inventory." .. brainrotName .. ".Level", 1)
 
 		local newLvl = getBrainrotLevel(plr, brainrotName)
