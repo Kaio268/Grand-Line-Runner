@@ -28,6 +28,7 @@ local PlayerStore = ProfileStore.New(Key, GetTemplate)
 local Profiles: {[Player]: typeof(PlayerStore:StartSessionAsync())} = {}
 local Replicas: {[Player]: typeof(Replica)} = {}
 local ActiveBoostRoutines = {}  
+local DataManagerInitialized = false
 
 --// GlobalStore
 local GlobalData = GlobalStore.New("__GlobalData", {Players = {}})
@@ -147,6 +148,63 @@ end
 function DataManager:GetData(player : Player) : typeof(PlayerStore:StartSessionAsync().Data)?
 	local profile = DataManager:GetProfile(player)
 	return profile.Data
+end
+
+function DataManager:TryGetProfile(player: Player)
+	return Profiles[player]
+end
+
+function DataManager:TryGetReplica(player: Player)
+	return Replicas[player]
+end
+
+local function ReadValueFromProfile(profile, path: string)
+	local pathTable = path:split(".")
+	local pointer = profile
+
+	if pathTable[1] ~= "Data" then
+		pointer = profile.Data
+	end
+
+	for _, segment in ipairs(pathTable) do
+		pointer = pointer[segment]
+		if pointer == nil then
+			return nil
+		end
+	end
+
+	return pointer
+end
+
+function DataManager:IsReady(player: Player): boolean
+	return Profiles[player] ~= nil and Replicas[player] ~= nil
+end
+
+function DataManager:TryGetValue(player: Player, path: string)
+	local profile = self:TryGetProfile(player)
+	if profile == nil then
+		return nil, "no_profile"
+	end
+
+	return ReadValueFromProfile(profile, path), nil
+end
+
+function DataManager:TrySetValue(player: Player, path: string, newValue)
+	if not self:IsReady(player) then
+		return false, "not_ready"
+	end
+
+	self:SetValue(player, path, newValue)
+	return true, nil
+end
+
+function DataManager:TryAddValue(player: Player, path: string, addValue)
+	if not self:IsReady(player) then
+		return false, "not_ready"
+	end
+
+	self:AddValue(player, path, addValue)
+	return true, nil
 end
 
 --[[
@@ -667,9 +725,20 @@ end
 function PlayerAdded(player: Player)
 	-- Natychmiastowe tworzenie folderów z szablonu
 	if Settings.Experimental.CreateFolders == true then
-		for _, templateFolder in pairs(script.Data:GetChildren()) do
-			if not player:FindFirstChild(templateFolder.Name) then
-				templateFolder:Clone().Parent = player
+		local templateRoot = script:FindFirstChild("Data")
+		if templateRoot then
+			for _, templateFolder in pairs(templateRoot:GetChildren()) do
+				if not player:FindFirstChild(templateFolder.Name) then
+					templateFolder:Clone().Parent = player
+				end
+			end
+		else
+			warn(string.format("[DataManager]: Missing Data template folder under %s; skipping template clone for %s", script:GetFullName(), player.Name))
+			local leaderstats = player:FindFirstChild("leaderstats")
+			if not leaderstats then
+				leaderstats = Instance.new("Folder")
+				leaderstats.Name = "leaderstats"
+				leaderstats.Parent = player
 			end
 		end
 	else
@@ -1349,18 +1418,36 @@ end
 
 
 DataManager.init = function()
-	FillMessageFunctions()
-	CheckVersion()
+	if DataManagerInitialized then
+		return
+	end
 
-	SetupAnnouncementSubscription()
+	DataManagerInitialized = true
+	DataManager._initialized = true
+
+	FillMessageFunctions()
+	DataManager.Premades = Premades
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		task.spawn(PlayerAdded, player)
 	end
 	Players.PlayerAdded:Connect(PlayerAdded)
 	Players.PlayerRemoving:Connect(PlayerRemoving)
-	DataManager.Premades = Premades
-  
+
+	task.spawn(function()
+		local ok, err = pcall(CheckVersion)
+		if not ok then
+			warn("[DataManager]: Version check failed during init: ", err)
+		end
+	end)
+
+	task.spawn(function()
+		local ok, err = pcall(SetupAnnouncementSubscription)
+		if not ok then
+			warn("[DataManager]: Announcement subscription failed during init: ", err)
+		end
+	end)
+
 	game:BindToClose(function()
 		for _, player in ipairs(Players:GetPlayers()) do
 			task.spawn(PlayerRemoving, player)
