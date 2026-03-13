@@ -76,6 +76,29 @@ local function isSupportedWorldModel(instance)
 	return instance and (instance:IsA("Model") or instance:IsA("WorldModel"))
 end
 
+local function findPrimaryPartCandidate(worldModel)
+	if not isSupportedWorldModel(worldModel) then
+		return nil
+	end
+
+	local primaryPart = worldModel.PrimaryPart
+	if primaryPart and primaryPart:IsA("BasePart") then
+		return primaryPart
+	end
+
+	local handle = worldModel:FindFirstChild("Handle", true)
+	if handle and handle:IsA("BasePart") then
+		return handle
+	end
+
+	local namedPart = worldModel:FindFirstChild("Part", true)
+	if namedPart and namedPart:IsA("BasePart") then
+		return namedPart
+	end
+
+	return worldModel:FindFirstChildWhichIsA("BasePart", true)
+end
+
 function DevilFruitAssets.GetFruitFolder(fruitIdentifier)
 	local fruit, reason = resolveFruit(fruitIdentifier)
 	if not fruit then
@@ -134,8 +157,15 @@ function DevilFruitAssets.ValidateWorldModel(fruitIdentifier)
 		return false, "fruit_name_mismatch"
 	end
 
-	if not worldModel.PrimaryPart then
+	local primaryPart = findPrimaryPartCandidate(worldModel)
+	if not primaryPart then
 		return false, "missing_primary_part"
+	end
+
+	if worldModel.PrimaryPart ~= primaryPart then
+		pcall(function()
+			worldModel.PrimaryPart = primaryPart
+		end)
 	end
 
 	return true, worldModel, fruit

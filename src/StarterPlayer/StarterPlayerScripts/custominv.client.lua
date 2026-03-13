@@ -10,6 +10,7 @@ local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
 
 local hudInv = player:WaitForChild("PlayerGui"):WaitForChild("HUD"):WaitForChild("Inventory")
 local hotbarTemplate = hudInv:WaitForChild("toolButton")
@@ -26,6 +27,9 @@ local MAX_HOTBAR = 9
 
 local NORMAL = Color3.fromRGB(0, 0, 0)
 local SELECT = Color3.fromRGB(255, 255, 255)
+local TOOLTIP_BACKGROUND = Color3.fromRGB(20, 24, 32)
+local TOOLTIP_TEXT = Color3.fromRGB(245, 247, 250)
+local TOOLTIP_SUBTEXT = Color3.fromRGB(180, 188, 200)
 
 local equippedName = nil
 
@@ -35,6 +39,36 @@ local invButtons = {}
 local itemState = {}
 local acquisition = {}
 local acquisitionCounter = 0
+local hoverTooltip = {
+	Gui = nil,
+	Title = nil,
+	Rarity = nil,
+	Visible = false,
+}
+
+local RARITY_ORDER = {
+	Common = 1,
+	Uncommon = 2,
+	Rare = 3,
+	Epic = 4,
+	Legendary = 5,
+	Mythic = 6,
+	Godly = 7,
+	Secret = 8,
+	Omega = 9,
+}
+
+local RARITY_COLORS = {
+	Common = Color3.fromRGB(189, 196, 209),
+	Uncommon = Color3.fromRGB(112, 220, 140),
+	Rare = Color3.fromRGB(91, 170, 255),
+	Epic = Color3.fromRGB(200, 120, 255),
+	Legendary = Color3.fromRGB(255, 187, 74),
+	Mythic = Color3.fromRGB(255, 101, 134),
+	Godly = Color3.fromRGB(255, 84, 84),
+	Secret = Color3.fromRGB(255, 240, 110),
+	Omega = Color3.fromRGB(132, 255, 247),
+}
 
 local function setupLayout(parent)
 	local listLayout = parent:FindFirstChildOfClass("UIListLayout")
@@ -112,7 +146,90 @@ local function setCommon(b, icon, displayName)
 	local toolIcon = b:WaitForChild("ToolIcon")
 	local toolName = b:WaitForChild("toolName")
 	toolIcon.Image = icon or ""
+	toolIcon.ImageTransparency = (icon and icon ~= "") and 0 or 1
 	toolName.Text = displayName or ""
+end
+
+local function clearDevilFruitPreview(button)
+	local viewport = button:FindFirstChild("FruitViewport")
+	if viewport then
+		viewport:Destroy()
+	end
+end
+
+local function ensureDevilFruitPreview(button, fruitKey)
+	local toolIcon = button:FindFirstChild("ToolIcon")
+	if not toolIcon or not toolIcon:IsA("GuiObject") then
+		return false
+	end
+
+	local sourceModel = DevilFruitAssets.GetWorldModelByKey(fruitKey)
+	if not sourceModel then
+		clearDevilFruitPreview(button)
+		toolIcon.ImageTransparency = 1
+		return false
+	end
+
+	local viewport = button:FindFirstChild("FruitViewport")
+	if not viewport then
+		viewport = Instance.new("ViewportFrame")
+		viewport.Name = "FruitViewport"
+		viewport.Active = false
+		viewport.BackgroundTransparency = 1
+		viewport.BorderSizePixel = 0
+		viewport.LightColor = Color3.fromRGB(255, 255, 255)
+		viewport.LightDirection = Vector3.new(-1, -1, -1)
+		viewport.Ambient = Color3.fromRGB(190, 190, 190)
+		viewport.Parent = button
+	end
+
+	viewport.AnchorPoint = toolIcon.AnchorPoint
+	viewport.Position = toolIcon.Position
+	viewport.Size = toolIcon.Size
+	viewport.ZIndex = toolIcon.ZIndex + 1
+	viewport.Visible = true
+
+	for _, child in ipairs(viewport:GetChildren()) do
+		child:Destroy()
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewport
+
+	local modelClone = sourceModel:Clone()
+	modelClone.Parent = worldModel
+
+	if modelClone:IsA("Model") then
+		pcall(function()
+			modelClone:PivotTo(CFrame.Angles(math.rad(-10), math.rad(35), 0))
+		end)
+	end
+
+	for _, descendant in ipairs(modelClone:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+
+	local boxCF, boxSize = modelClone:GetBoundingBox()
+	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+
+	local camera = Instance.new("Camera")
+	camera.Name = "PreviewCamera"
+	camera.FieldOfView = 35
+	camera.CFrame = CFrame.lookAt(
+		boxCF.Position + Vector3.new(maxSize * 0.85, maxSize * 0.3, maxSize * 1.7),
+		boxCF.Position
+	)
+	camera.Parent = viewport
+
+	viewport.CurrentCamera = camera
+	toolIcon.ImageTransparency = 1
+
+	return true
 end
 
 local function setAmount(b, qty)
@@ -126,6 +243,22 @@ local function setAmount(b, qty)
 		amount.Visible = false
 		amount.Text = ""
 	end
+end
+
+local function setSlotVisual(b, slotValue)
+	local slotLabel = b:FindFirstChild("toolNumber")
+	if not slotLabel then
+		return
+	end
+
+	if slotValue == nil then
+		slotLabel.Visible = false
+		slotLabel.Text = ""
+		return
+	end
+
+	slotLabel.Visible = true
+	slotLabel.Text = tostring(slotValue)
 end
 
 local function ensureAcquired(key)
@@ -156,6 +289,132 @@ local function getDisplayName(kind, name)
 	return name
 end
 
+local function getRarity(kind, name)
+	if kind == "DevilFruit" then
+		local fruit = DevilFruitConfig.GetFruit(name)
+		return fruit and fruit.Rarity or ""
+	end
+
+	if kind == "Brainrot" then
+		local brainrot = Brainrots[name]
+		return brainrot and brainrot.Rarity or ""
+	end
+
+	if kind == "Gear" then
+		local gear = Gears[name]
+		return gear and gear.Type or "Gear"
+	end
+
+	return ""
+end
+
+local function getRarityRank(rarity)
+	return RARITY_ORDER[tostring(rarity or "")] or 0
+end
+
+local function getRarityColor(rarity)
+	return RARITY_COLORS[tostring(rarity or "")] or TOOLTIP_SUBTEXT
+end
+
+local function ensureTooltip()
+	if hoverTooltip.Gui and hoverTooltip.Gui.Parent then
+		return hoverTooltip
+	end
+
+	local tooltip = Instance.new("Frame")
+	tooltip.Name = "InventoryTooltip"
+	tooltip.AnchorPoint = Vector2.new(0, 0)
+	tooltip.AutomaticSize = Enum.AutomaticSize.XY
+	tooltip.BackgroundColor3 = TOOLTIP_BACKGROUND
+	tooltip.BackgroundTransparency = 0.08
+	tooltip.BorderSizePixel = 0
+	tooltip.Visible = false
+	tooltip.ZIndex = 60
+	tooltip.Parent = hudInv.Parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = tooltip
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Transparency = 0.82
+	stroke.Thickness = 1
+	stroke.Parent = tooltip
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 8)
+	padding.PaddingBottom = UDim.new(0, 8)
+	padding.PaddingLeft = UDim.new(0, 10)
+	padding.PaddingRight = UDim.new(0, 10)
+	padding.Parent = tooltip
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 2)
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = tooltip
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.AutomaticSize = Enum.AutomaticSize.XY
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.LayoutOrder = 1
+	title.Text = ""
+	title.TextColor3 = TOOLTIP_TEXT
+	title.TextSize = 14
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.ZIndex = 61
+	title.Parent = tooltip
+
+	local rarity = Instance.new("TextLabel")
+	rarity.Name = "Rarity"
+	rarity.AutomaticSize = Enum.AutomaticSize.XY
+	rarity.BackgroundTransparency = 1
+	rarity.Font = Enum.Font.GothamMedium
+	rarity.LayoutOrder = 2
+	rarity.Text = ""
+	rarity.TextColor3 = TOOLTIP_SUBTEXT
+	rarity.TextSize = 12
+	rarity.TextXAlignment = Enum.TextXAlignment.Left
+	rarity.ZIndex = 61
+	rarity.Parent = tooltip
+
+	hoverTooltip.Gui = tooltip
+	hoverTooltip.Title = title
+	hoverTooltip.Rarity = rarity
+
+	return hoverTooltip
+end
+
+local function updateTooltipPosition()
+	local tooltip = ensureTooltip()
+	if not tooltip.Visible or not tooltip.Gui then
+		return
+	end
+
+	local mouseLocation = UserInputService:GetMouseLocation()
+	tooltip.Gui.Position = UDim2.fromOffset(mouseLocation.X + 14, mouseLocation.Y + 14)
+end
+
+local function hideTooltip()
+	local tooltip = ensureTooltip()
+	tooltip.Visible = false
+	tooltip.Gui.Visible = false
+end
+
+local function showTooltip(displayName, rarityLabel)
+	local tooltip = ensureTooltip()
+	tooltip.Title.Text = tostring(displayName or "")
+	tooltip.Rarity.Text = tostring(rarityLabel or "")
+	tooltip.Rarity.TextColor3 = getRarityColor(rarityLabel)
+	tooltip.Visible = true
+	tooltip.Gui.Visible = true
+	updateTooltipPosition()
+end
+
 local function createButton(template, parent, kind, name)
 	local b = template:Clone()
 	b.Name = "Tool_" .. kind .. "_" .. name
@@ -168,6 +427,22 @@ local function createButton(template, parent, kind, name)
 	b:SetAttribute("IsItemButton", true)
 
 	applySelectedVisual(b, false)
+
+	b.MouseEnter:Connect(function()
+		local displayName = b:GetAttribute("DisplayName") or name
+		local rarityLabel = b:GetAttribute("RarityLabel") or ""
+		showTooltip(displayName, rarityLabel)
+	end)
+
+	b.MouseLeave:Connect(function()
+		hideTooltip()
+	end)
+
+	b.MouseMoved:Connect(function()
+		if hoverTooltip.Visible then
+			updateTooltipPosition()
+		end
+	end)
 
 	b.MouseButton1Click:Connect(function()
 		equipRemote:FireServer(b:GetAttribute("ItemKind"), b:GetAttribute("ItemName"))
@@ -203,11 +478,7 @@ local function refreshHotbarSlots()
 	for i, b in ipairs(list) do
 		local keyNum = slotKeyForIndex(i)
 		b:SetAttribute("SlotIndex", keyNum)
-
-		local tn = b:FindFirstChild("toolNumber")
-		if tn then
-			tn.Text = tostring(keyNum)
-		end
+		setSlotVisual(b, keyNum)
 	end
 end
 
@@ -265,6 +536,11 @@ local function getLists()
 	table.sort(devilFruitList, function(a, b)
 		local sa = itemState[a]
 		local sb = itemState[b]
+		local ra = getRarityRank(getRarity("DevilFruit", sa.name))
+		local rb = getRarityRank(getRarity("DevilFruit", sb.name))
+		if ra ~= rb then
+			return ra > rb
+		end
 		local da = getDisplayName("DevilFruit", sa.name)
 		local db = getDisplayName("DevilFruit", sb.name)
 		return da < db
@@ -319,7 +595,17 @@ local function rebuildUI()
 			end
 			local b = hotbarButtons[k]
 			b.LayoutOrder = i
-			setCommon(b, getIcon(st.kind, st.name), getDisplayName(st.kind, st.name))
+			local displayName = getDisplayName(st.kind, st.name)
+			local rarityLabel = getRarity(st.kind, st.name)
+			b:SetAttribute("DisplayName", displayName)
+			b:SetAttribute("RarityLabel", rarityLabel)
+			setCommon(b, getIcon(st.kind, st.name), displayName)
+			if st.kind == "DevilFruit" then
+				ensureDevilFruitPreview(b, st.name)
+			else
+				clearDevilFruitPreview(b)
+			end
+			setSlotVisual(b, slotKeyForIndex(i))
 
 			if st.kind == "Brainrot" then
 				setAmount(b, st.qty or 0)
@@ -337,7 +623,13 @@ local function rebuildUI()
 			end
 			local b = invButtons[k]
 			b.LayoutOrder = i
-			setCommon(b, getIcon(st.kind, st.name), getDisplayName(st.kind, st.name))
+			local displayName = getDisplayName(st.kind, st.name)
+			local rarityLabel = getRarity(st.kind, st.name)
+			b:SetAttribute("DisplayName", displayName)
+			b:SetAttribute("RarityLabel", rarityLabel)
+			setCommon(b, getIcon(st.kind, st.name), displayName)
+			clearDevilFruitPreview(b)
+			setSlotVisual(b, nil)
 			setAmount(b, st.qty or 0)
 		elseif st and st.kind == "DevilFruit" then
 			if not invButtons[k] or not invButtons[k].Parent then
@@ -345,7 +637,13 @@ local function rebuildUI()
 			end
 			local b = invButtons[k]
 			b.LayoutOrder = i
-			setCommon(b, getIcon(st.kind, st.name), getDisplayName(st.kind, st.name))
+			local displayName = getDisplayName(st.kind, st.name)
+			local rarityLabel = getRarity(st.kind, st.name)
+			b:SetAttribute("DisplayName", displayName)
+			b:SetAttribute("RarityLabel", rarityLabel)
+			setCommon(b, getIcon(st.kind, st.name), displayName)
+			ensureDevilFruitPreview(b, st.name)
+			setSlotVisual(b, nil)
 			setAmount(b, st.qty or 0)
 		end
 	end
@@ -445,6 +743,9 @@ end
 
 local function toggleInventory()
 	inventoryFrame.Visible = not inventoryFrame.Visible
+	if not inventoryFrame.Visible then
+		hideTooltip()
+	end
 end
 
 inventoryBtn.MouseButton1Click:Connect(toggleInventory)
@@ -461,6 +762,12 @@ UserInputService.InputBegan:Connect(function(input, gp)
 	local slot = keyToSlot[input.KeyCode]
 	if slot ~= nil then
 		activateSlot(slot)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement and hoverTooltip.Visible then
+		updateTooltipPosition()
 	end
 end)
 

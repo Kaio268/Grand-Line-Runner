@@ -331,6 +331,10 @@ local function clearFruitRuntimeState(player, fruitName)
 
 	if fruitName == "Mera Mera no Mi" then
 		player:SetAttribute("MeraFireBurstUntil", nil)
+	elseif fruitName == "Hie Hie no Mi" then
+		player:SetAttribute("HieIceBoostUntil", nil)
+		player:SetAttribute("HieIceBoostSpeedMultiplier", nil)
+		player:SetAttribute("HieIceBoostSpeedBonus", nil)
 	end
 end
 

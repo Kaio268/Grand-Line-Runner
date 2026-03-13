@@ -31,6 +31,30 @@ local DevilFruits = {
 				},
 			},
 		},
+		Hie = {
+			Id = "HieHieNoMi",
+			FruitKey = "Hie",
+			DisplayName = "Hie Hie no Mi",
+			AssetFolder = "Hie",
+			AbilityModule = "Hie",
+			Rarity = "Legendary",
+			Abilities = {
+				FreezeShot = {
+					KeyCode = Enum.KeyCode.Q,
+					Cooldown = 8,
+					Range = 120,
+					ProjectileSpeed = 170,
+					ProjectileRadius = 1.2,
+					FreezeDuration = 3,
+				},
+				IceBoost = {
+					KeyCode = Enum.KeyCode.E,
+					Cooldown = 18,
+					Duration = 4,
+					SpeedMultiplier = 2,
+				},
+			},
+		},
 	},
 }
 

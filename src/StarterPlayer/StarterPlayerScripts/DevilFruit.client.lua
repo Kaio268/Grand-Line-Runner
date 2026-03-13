@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HazardUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
+local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 
 local player = Players.LocalPlayer
 
@@ -501,6 +502,19 @@ local function getRootPart()
 	return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function getPlayerRootPart(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChild("HumanoidRootPart")
+end
+
 local function isDescendantOfClientWave(instance)
 	local map = Workspace:FindFirstChild("Map")
 	local waveFolder = map and map:FindFirstChild("WaveFolder")
@@ -531,27 +545,27 @@ local function getWaveTemplate(instance)
 end
 
 local function getHazardContainer(instance)
-	local root, hazardClass = HazardUtils.GetHazardInfo(instance)
+	local root, hazardClass, hazardType, canFreeze, freezeBehavior = HazardUtils.GetHazardInfo(instance)
 	if root then
-		return root, hazardClass
+		return root, hazardClass, hazardType, canFreeze, freezeBehavior
 	end
 
 	if isDescendantOfClientWave(instance) then
 		local template = getWaveTemplate(instance)
 		if template then
-			local _, templateClass = HazardUtils.GetHazardInfo(template)
-			if templateClass then
+			local _, templateClass, templateType, templateCanFreeze, templateFreezeBehavior = HazardUtils.GetHazardInfo(template)
+			if templateClass or templateType or templateCanFreeze or templateFreezeBehavior then
 				local current = instance
 				while current and current.Parent and current.Parent.Name ~= "ClientWaves" do
 					current = current.Parent
 				end
 
-				return current or instance, templateClass
+				return current or instance, templateClass, templateType, templateCanFreeze, templateFreezeBehavior
 			end
 		end
 	end
 
-	return nil, nil
+	return nil, nil, nil, false, nil
 end
 
 local function suppressPart(part, untilTime)
@@ -650,6 +664,200 @@ local function startFireBurst(payload)
 	if #activeFireBursts == 1 then
 		updateFireBursts()
 	end
+end
+
+local function getProjectileDirection(direction, rootPart)
+	if typeof(direction) ~= "Vector3" or direction.Magnitude <= 0.01 then
+		if not rootPart then
+			return Vector3.new(0, 0, -1)
+		end
+
+		direction = rootPart.CFrame.LookVector
+	end
+
+	local planarDirection = Vector3.new(direction.X, 0, direction.Z)
+	if planarDirection.Magnitude > 0.01 then
+		return planarDirection.Unit
+	end
+
+	if direction.Magnitude > 0.01 then
+		return direction.Unit
+	end
+
+	return Vector3.new(0, 0, -1)
+end
+
+local function createIceImpactEffect(position)
+	local burst = Instance.new("Part")
+	burst.Name = "HieFreezeImpact"
+	burst.Shape = Enum.PartType.Ball
+	burst.Anchored = true
+	burst.CanCollide = false
+	burst.CanTouch = false
+	burst.CanQuery = false
+	burst.Material = Enum.Material.Neon
+	burst.Color = Color3.fromRGB(175, 240, 255)
+	burst.Transparency = 0.15
+	burst.Size = Vector3.new(1.6, 1.6, 1.6)
+	burst.CFrame = CFrame.new(position)
+	burst.Parent = Workspace
+
+	local tween = TweenService:Create(burst, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(5.5, 5.5, 5.5),
+	})
+
+	tween:Play()
+	tween.Completed:Connect(function()
+		if burst.Parent then
+			burst:Destroy()
+		end
+	end)
+end
+
+local function createIceBoostEffect(targetPlayer, _payload)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return
+	end
+
+	local ring = Instance.new("Part")
+	ring.Name = "HieIceBoostRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = Color3.fromRGB(152, 232, 255)
+	ring.Transparency = 0.35
+	ring.Size = Vector3.new(0.2, 5, 5)
+	ring.CFrame = CFrame.new(rootPart.Position - Vector3.new(0, 2.5, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = Workspace
+
+	local tween = TweenService:Create(ring, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(0.2, 8, 8),
+	})
+
+	tween:Play()
+	tween.Completed:Connect(function()
+		if ring.Parent then
+			ring:Destroy()
+		end
+	end)
+end
+
+local function findFreezableHazardNearPosition(centerPosition, searchRadius, overlapParams)
+	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, searchRadius, overlapParams)
+	local closestContainer
+	local closestDistance = math.huge
+
+	for _, part in ipairs(nearbyParts) do
+		local container, _, _, canFreeze = getHazardContainer(part)
+		if container and canFreeze then
+			local distance = (part.Position - centerPosition).Magnitude
+			if distance < closestDistance then
+				closestDistance = distance
+				closestContainer = container
+			end
+		end
+	end
+
+	return closestContainer
+end
+
+local function findFreezableHazardAlongSegment(startPosition, endPosition, searchRadius, overlapParams)
+	local delta = endPosition - startPosition
+	local distance = delta.Magnitude
+	if distance <= 0.001 then
+		local container = findFreezableHazardNearPosition(startPosition, searchRadius, overlapParams)
+		return container, startPosition
+	end
+
+	local sampleSpacing = math.max(searchRadius * 0.55, 0.5)
+	local sampleCount = math.max(1, math.ceil(distance / sampleSpacing))
+
+	for sampleIndex = 0, sampleCount do
+		local alpha = sampleIndex / sampleCount
+		local samplePosition = startPosition:Lerp(endPosition, alpha)
+		local container = findFreezableHazardNearPosition(samplePosition, searchRadius, overlapParams)
+		if container then
+			return container, samplePosition
+		end
+	end
+
+	return nil, nil
+end
+
+local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return
+	end
+
+	local direction = getProjectileDirection(payload.Direction, rootPart)
+	local range = math.max(1, tonumber(payload.Range) or 0)
+	local speed = math.max(1, tonumber(payload.ProjectileSpeed) or 0)
+	local radius = math.max(0.25, tonumber(payload.ProjectileRadius) or 0.8)
+	local freezeDuration = math.max(0, tonumber(payload.FreezeDuration) or 0)
+	local startPosition = rootPart.Position + Vector3.new(0, 1.2, 0) + direction * 3
+
+	local projectile = Instance.new("Part")
+	projectile.Name = "HieFreezeShot"
+	projectile.Shape = Enum.PartType.Ball
+	projectile.Anchored = true
+	projectile.CanCollide = false
+	projectile.CanTouch = false
+	projectile.CanQuery = false
+	projectile.Material = Enum.Material.Neon
+	projectile.Color = Color3.fromRGB(173, 244, 255)
+	projectile.Transparency = 0.1
+	projectile.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
+	projectile.CFrame = CFrame.new(startPosition)
+	projectile.Parent = Workspace
+
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = { projectile, targetPlayer.Character }
+
+	task.spawn(function()
+		local traveledDistance = 0
+		local lastPosition = startPosition
+		local hasResolvedFreeze = false
+
+		while projectile.Parent and traveledDistance < range do
+			local dt = RunService.Heartbeat:Wait()
+			local stepDistance = math.min(speed * dt, range - traveledDistance)
+			if stepDistance <= 0 then
+				break
+			end
+
+			local nextPosition = lastPosition + direction * stepDistance
+			if shouldResolveHit and not hasResolvedFreeze and freezeDuration > 0 then
+				local overlapRadius = math.max(radius * 1.15, 1)
+				local hitContainer, impactPosition = findFreezableHazardAlongSegment(lastPosition, nextPosition, overlapRadius, overlapParams)
+				if hitContainer then
+					hasResolvedFreeze = true
+					local freezeApplied = HazardRuntime.Freeze(hitContainer, freezeDuration)
+					if not freezeApplied then
+						suppressHazard(hitContainer, os.clock() + freezeDuration)
+					end
+					createIceImpactEffect(impactPosition)
+					projectile.Position = impactPosition
+					break
+				end
+			end
+
+			projectile.Position = nextPosition
+			lastPosition = nextPosition
+			traveledDistance += stepDistance
+		end
+
+		if projectile.Parent then
+			projectile:Destroy()
+		end
+	end)
 end
 
 local function playOptionalEffect(targetPlayer, fruitName, abilityName)
@@ -797,6 +1005,15 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 
 	playOptionalEffect(targetPlayer, fruitName, abilityName)
 	createFallbackBurstEffect(targetPlayer, fruitName, abilityName, payload or {})
+
+	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
+		launchFreezeShot(targetPlayer, payload or {}, targetPlayer == player)
+		return
+	end
+
+	if fruitName == "Hie Hie no Mi" and abilityName == "IceBoost" then
+		createIceBoostEffect(targetPlayer, payload or {})
+	end
 end)
 
 player.CharacterRemoving:Connect(function()

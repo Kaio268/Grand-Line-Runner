@@ -226,6 +226,29 @@ local function setUpPart(part)
 	part.Massless = true
 end
 
+local function getPrimaryPartFromTemplate(template)
+	if not template or not (template:IsA("Model") or template:IsA("WorldModel")) then
+		return nil
+	end
+
+	local primaryPart = template.PrimaryPart
+	if primaryPart and primaryPart:IsA("BasePart") then
+		return primaryPart
+	end
+
+	local handle = template:FindFirstChild("Handle", true)
+	if handle and handle:IsA("BasePart") then
+		return handle
+	end
+
+	local namedPart = template:FindFirstChild("Part", true)
+	if namedPart and namedPart:IsA("BasePart") then
+		return namedPart
+	end
+
+	return template:FindFirstChildWhichIsA("BasePart", true)
+end
+
 local function buildFruitTool(fruitKey)
 	local isValid, worldModelOrReason, fruit = DevilFruitAssets.ValidateWorldModel(fruitKey)
 	if not isValid then
@@ -237,7 +260,7 @@ local function buildFruitTool(fruitKey)
 		return nil, "unsupported_tool_template"
 	end
 
-	local primaryPart = template.PrimaryPart
+	local primaryPart = getPrimaryPartFromTemplate(template)
 	if not primaryPart then
 		return nil, "missing_primary_part"
 	end
@@ -360,10 +383,12 @@ local function syncFruitTool(player, fruitKey, desiredCount)
 	end
 
 	for _ = 1, (desiredCount - count) do
-		local tool = buildFruitTool(fruitKey)
+		local tool, reason = buildFruitTool(fruitKey)
 		if tool then
 			hookTool(player, tool)
 			tool.Parent = backpack
+		else
+			warn(string.format("[DevilFruitInventoryService] Failed to build fruit tool for %s (%s)", tostring(fruitKey), tostring(reason)))
 		end
 	end
 end

@@ -16,6 +16,11 @@ local BrainrotsConfig = require(
 		:WaitForChild("Configs")
 		:WaitForChild("Brainrots")
 )
+local HazardRuntime = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("HazardRuntime")
+)
 
 local WavesFolder = ReplicatedStorage:WaitForChild("Waves")
 
@@ -311,6 +316,165 @@ end
 
 local rng = Random.new()
 
+local function getStringAttribute(source, attributeName, fallback)
+	if not source then
+		return fallback
+	end
+
+	local value = source:GetAttribute(attributeName)
+	if typeof(value) == "string" and value ~= "" then
+		return string.lower(value)
+	end
+
+	return fallback
+end
+
+local function getBooleanAttribute(source, attributeName, fallback)
+	if not source then
+		return fallback
+	end
+
+	local value = source:GetAttribute(attributeName)
+	if value == nil then
+		return fallback
+	end
+
+	if typeof(value) == "boolean" then
+		return value
+	end
+
+	if typeof(value) == "number" then
+		return value ~= 0
+	end
+
+	if typeof(value) == "string" then
+		local lowered = string.lower(value)
+		return lowered == "true" or lowered == "1" or lowered == "yes"
+	end
+
+	return fallback
+end
+
+local function applyHazardMetadata(clone, template)
+	clone:SetAttribute("HazardClass", getStringAttribute(template, "HazardClass", "major"))
+	clone:SetAttribute("HazardType", getStringAttribute(template, "HazardType", "wave"))
+	clone:SetAttribute("CanFreeze", getBooleanAttribute(template, "CanFreeze", true))
+	clone:SetAttribute("FreezeBehavior", getStringAttribute(template, "FreezeBehavior", "pause"))
+end
+
+local function forEachHazardPart(root, callback)
+	if root:IsA("BasePart") then
+		callback(root)
+		return
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			callback(descendant)
+		end
+	end
+end
+
+local function createFreezeController(hazardRoot, tween)
+	local controller = {
+		HazardRoot = hazardRoot,
+		Tween = tween,
+		FrozenUntil = 0,
+		TouchStates = {},
+		Destroyed = false,
+		FreezeToken = 0,
+	}
+
+	function controller:SetTouchEnabled(isEnabled)
+		forEachHazardPart(self.HazardRoot, function(part)
+			if isEnabled then
+				local originalState = self.TouchStates[part]
+				if originalState ~= nil then
+					part.CanTouch = originalState
+					self.TouchStates[part] = nil
+				end
+			else
+				if self.TouchStates[part] == nil then
+					self.TouchStates[part] = part.CanTouch
+				end
+				part.CanTouch = false
+			end
+		end)
+	end
+
+	function controller:SetFrozen(isFrozen)
+		if isFrozen then
+			if self.Tween and self.Tween.PlaybackState == Enum.PlaybackState.Playing then
+				pcall(function()
+					self.Tween:Pause()
+				end)
+			end
+			self:SetTouchEnabled(false)
+			return
+		end
+
+		self:SetTouchEnabled(true)
+
+		if self.Tween and self.HazardRoot.Parent and self.Tween.PlaybackState == Enum.PlaybackState.Paused then
+			pcall(function()
+				self.Tween:Play()
+			end)
+		end
+	end
+
+	function controller:Freeze(duration)
+		if self.Destroyed or not self.HazardRoot.Parent then
+			return false
+		end
+
+		local freezeDuration = math.max(0, tonumber(duration) or 0)
+		if freezeDuration <= 0 then
+			return false
+		end
+
+		self.FrozenUntil = math.max(self.FrozenUntil, os.clock() + freezeDuration)
+		self.FreezeToken += 1
+		local token = self.FreezeToken
+
+		self:SetFrozen(true)
+
+		task.spawn(function()
+			while not self.Destroyed and self.HazardRoot.Parent and os.clock() < self.FrozenUntil do
+				task.wait(0.05)
+			end
+
+			if self.Destroyed or self.FreezeToken ~= token then
+				return
+			end
+
+			if self.HazardRoot.Parent then
+				self:SetFrozen(false)
+			end
+		end)
+
+		return true
+	end
+
+	function controller:Destroy()
+		if self.Destroyed then
+			return
+		end
+
+		self.Destroyed = true
+		self:SetTouchEnabled(true)
+		HazardRuntime.Unregister(self.HazardRoot)
+	end
+
+	HazardRuntime.Register(hazardRoot, controller)
+	hazardRoot.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			controller:Destroy()
+		end
+	end)
+
+	return controller
+end
+
 local function chooseByChance(list)
 	local total = 0
 	for _, e in ipairs(list) do
@@ -519,6 +683,7 @@ local function spawnWave(entry)
 
 	anchor(clone)
 	hookKillOnTouch(clone, movePart)
+	applyHazardMetadata(clone, entry.Template)
 
 	local startCF, endCF
 	if clone:IsA("Model") and movePart then
@@ -547,8 +712,10 @@ local function spawnWave(entry)
 			TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
 			{ CFrame = endCF }
 		)
+		local freezeController = createFreezeController(clone, tween)
 		tween:Play()
 		tween.Completed:Connect(function()
+			freezeController:Destroy()
 			if clone.Parent then clone:Destroy() end
 		end)
 		return
@@ -674,11 +841,13 @@ local function spawnWave(entry)
 		TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
 		{ Value = 1 }
 	)
+	local freezeController = createFreezeController(clone, tween)
 
 	tween:Play()
 	tween.Completed:Connect(function()
 		if conn then conn:Disconnect() end
 		if alpha.Parent then alpha:Destroy() end
+		freezeController:Destroy()
 		if clone.Parent then clone:Destroy() end
 	end)
 end

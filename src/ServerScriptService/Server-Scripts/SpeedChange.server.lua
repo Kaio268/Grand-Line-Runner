@@ -5,6 +5,21 @@ local RunService = game:GetService("RunService")
 local DECREASE_PART = Workspace:WaitForChild("DecreaseSpeed")
 local FORCED_SPEED = 35
 
+local function getDevilFruitSpeedMultiplier(player)
+	local untilTime = player:GetAttribute("HieIceBoostUntil")
+	local speedMultiplier = player:GetAttribute("HieIceBoostSpeedMultiplier")
+
+	if typeof(untilTime) ~= "number" or typeof(speedMultiplier) ~= "number" then
+		return 1
+	end
+
+	if untilTime <= os.clock() then
+		return 1
+	end
+
+	return math.max(1, speedMultiplier)
+end
+
 local function hookCharacter(player, character)
 	local humanoid = character:WaitForChild("Humanoid")
 	local hidden = player:WaitForChild("HiddenLeaderstats")
@@ -20,11 +35,16 @@ local function hookCharacter(player, character)
 
 	local conns = {}
 
-	local function getDesiredSpeed()
+	local function getUnboostedSpeed()
 		if inDecreaseZone then
 			return FORCED_SPEED
 		end
+
 		return base + speedObj.Value
+	end
+
+	local function getDesiredSpeed()
+		return getUnboostedSpeed() * getDevilFruitSpeedMultiplier(player)
 	end
 
 	local function apply()
@@ -40,6 +60,18 @@ local function hookCharacter(player, character)
 		apply()
 	end)
 
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HieIceBoostUntil"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HieIceBoostSpeedMultiplier"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HieIceBoostSpeedBonus"):Connect(function()
+		apply()
+	end)
+
 	conns[#conns + 1] = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
 		if updating then return end
 
@@ -48,9 +80,11 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		local expected = base + speedObj.Value
+		local devilFruitSpeedMultiplier = getDevilFruitSpeedMultiplier(player)
+		local expected = getDesiredSpeed()
 		if humanoid.WalkSpeed ~= expected then
-			base = humanoid.WalkSpeed - speedObj.Value
+			local normalizedSpeed = humanoid.WalkSpeed / devilFruitSpeedMultiplier
+			base = normalizedSpeed - speedObj.Value
 			apply()
 		end
 	end)
