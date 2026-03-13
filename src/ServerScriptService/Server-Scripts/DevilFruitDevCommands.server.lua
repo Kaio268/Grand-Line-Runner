@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local TextChatService = game:GetService("TextChatService")
 
 local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("DevilFruitService"))
+local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
 
 local ADMIN_USER_IDS = {
 	1103783585,
@@ -61,9 +62,28 @@ local function processFruitCommand(player, argumentText)
 		return
 	end
 
+	local directEquipArgument = normalizedArgument:match("^equip%s+(.+)$")
+	if directEquipArgument then
+		local directFruit = FRUIT_ALIASES[normalizeText(directEquipArgument)]
+		if directFruit == nil then
+			warn(string.format("[DevFruitDevCommands] Unknown fruit alias '%s' from %s", directEquipArgument, player.Name))
+			return
+		end
+
+		local ok, persisted = DevilFruitService.SetEquippedFruit(player, directFruit)
+		if ok then
+			print(string.format("[DevFruitDevCommands] %s directly equipped Devil Fruit %s (persisted=%s)", player.Name, directFruit, tostring(persisted)))
+		end
+		return
+	end
+
 	local targetFruit = FRUIT_ALIASES[normalizedArgument]
 	if normalizedArgument == "clear" or normalizedArgument == "none" or normalizedArgument == "remove" then
-		targetFruit = ""
+		local ok, persisted = DevilFruitService.SetEquippedFruit(player, "")
+		if ok then
+			print(string.format("[DevFruitDevCommands] %s cleared Devil Fruit (persisted=%s)", player.Name, tostring(persisted)))
+		end
+		return
 	end
 
 	if targetFruit == nil then
@@ -71,10 +91,11 @@ local function processFruitCommand(player, argumentText)
 		return
 	end
 
-	local ok, persisted = DevilFruitService.SetEquippedFruit(player, targetFruit)
-	if ok then
-		local label = targetFruit ~= "" and targetFruit or "none"
-		print(string.format("[DevFruitDevCommands] %s set Devil Fruit to %s (persisted=%s)", player.Name, label, tostring(persisted)))
+	local granted, reason = DevilFruitInventoryService.GrantFruit(player, targetFruit, 1)
+	if granted then
+		print(string.format("[DevFruitDevCommands] %s granted Devil Fruit item %s", player.Name, targetFruit))
+	else
+		warn(string.format("[DevFruitDevCommands] Failed to grant %s to %s (%s)", targetFruit, player.Name, tostring(reason)))
 	end
 end
 

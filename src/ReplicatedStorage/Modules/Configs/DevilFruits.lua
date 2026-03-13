@@ -1,9 +1,13 @@
 local DevilFruits = {
 	None = "",
-	Fruits = {
-		["Mera Mera no Mi"] = {
+	Fruits = {},
+	FruitsByKey = {
+		Mera = {
 			Id = "MeraMeraNoMi",
+			FruitKey = "Mera",
 			DisplayName = "Mera Mera no Mi",
+			AssetFolder = "Mera",
+			AbilityModule = "Mera",
 			Rarity = "Legendary",
 			Abilities = {
 				FlameDash = {
@@ -30,16 +34,60 @@ local DevilFruits = {
 	},
 }
 
-function DevilFruits.GetFruit(name)
-	if typeof(name) ~= "string" or name == "" then
+local function normalizeIdentifier(value)
+	if typeof(value) ~= "string" then
 		return nil
 	end
 
-	return DevilFruits.Fruits[name]
+	local normalized = value:match("^%s*(.-)%s*$")
+	if normalized == "" then
+		return nil
+	end
+
+	return normalized
 end
 
-function DevilFruits.GetAbility(fruitName, abilityName)
-	local fruit = DevilFruits.GetFruit(fruitName)
+for fruitKey, fruit in pairs(DevilFruits.FruitsByKey) do
+	fruit.FruitKey = fruit.FruitKey or fruitKey
+	fruit.AssetFolder = fruit.AssetFolder or fruit.FruitKey
+	fruit.AbilityModule = fruit.AbilityModule or fruit.FruitKey
+	DevilFruits.Fruits[fruit.DisplayName] = fruit
+end
+
+function DevilFruits.GetFruit(identifier)
+	local normalized = normalizeIdentifier(identifier)
+	if not normalized then
+		return nil
+	end
+
+	return DevilFruits.Fruits[normalized] or DevilFruits.FruitsByKey[normalized]
+end
+
+function DevilFruits.GetFruitByKey(fruitKey)
+	local normalized = normalizeIdentifier(fruitKey)
+	if not normalized then
+		return nil
+	end
+
+	return DevilFruits.FruitsByKey[normalized]
+end
+
+function DevilFruits.ResolveFruitName(identifier)
+	if identifier == DevilFruits.None then
+		return DevilFruits.None
+	end
+
+	local fruit = DevilFruits.GetFruit(identifier)
+	return fruit and fruit.DisplayName or nil
+end
+
+function DevilFruits.GetFruitKey(identifier)
+	local fruit = DevilFruits.GetFruit(identifier)
+	return fruit and fruit.FruitKey or nil
+end
+
+function DevilFruits.GetAbility(fruitIdentifier, abilityName)
+	local fruit = DevilFruits.GetFruit(fruitIdentifier)
 	if not fruit or typeof(abilityName) ~= "string" then
 		return nil
 	end

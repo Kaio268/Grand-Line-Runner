@@ -14,6 +14,7 @@ local cooldownsByPlayer = {}
 local pendingPersistByPlayer = {}
 local persistTaskByPlayer = {}
 local hydrationTaskByPlayer = {}
+local fruitHandlerCache = {}
 local started = false
 
 local function getOrCreateRemotesFolder()
@@ -55,17 +56,73 @@ local FruitHandlersFolder = ModulesFolder:FindFirstChild("DevilFruits") or Modul
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local syncFruitAttribute
 
 if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
 end
 
-local FruitHandlers = {
-	["Mera Mera no Mi"] = require(FruitHandlersFolder:WaitForChild("MeraMeraNoMi")),
-}
-
 local function debugPrint(...)
 	print("[DevilFruitService]", ...)
+end
+
+local function resolveFruitName(fruitIdentifier)
+	if fruitIdentifier == DevilFruitConfig.None then
+		return DevilFruitConfig.None
+	end
+
+	return DevilFruitConfig.ResolveFruitName(fruitIdentifier)
+end
+
+local function normalizeStoredFruitName(fruitIdentifier)
+	local resolvedFruit = resolveFruitName(fruitIdentifier)
+	if resolvedFruit then
+		return resolvedFruit
+	end
+
+	return DevilFruitConfig.None
+end
+
+local function getFruitHandlerModuleName(fruitConfig)
+	if not fruitConfig then
+		return nil
+	end
+
+	return fruitConfig.AbilityModule or fruitConfig.HandlerModule or fruitConfig.FruitKey or fruitConfig.Id
+end
+
+local function getFruitHandler(fruitName)
+	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
+	if not fruitConfig then
+		return nil
+	end
+
+	local moduleName = getFruitHandlerModuleName(fruitConfig)
+	if typeof(moduleName) ~= "string" or moduleName == "" then
+		return nil
+	end
+
+	local cachedHandler = fruitHandlerCache[moduleName]
+	if cachedHandler ~= nil then
+		return cachedHandler or nil
+	end
+
+	local handlerModule = FruitHandlersFolder:FindFirstChild(moduleName)
+	if not handlerModule then
+		fruitHandlerCache[moduleName] = false
+		warn(string.format("[DevilFruitService] Missing fruit handler module '%s' for %s", moduleName, fruitConfig.DisplayName))
+		return nil
+	end
+
+	local ok, handler = pcall(require, handlerModule)
+	if not ok then
+		fruitHandlerCache[moduleName] = false
+		warn(string.format("[DevilFruitService] Failed to require fruit handler '%s': %s", moduleName, tostring(handler)))
+		return nil
+	end
+
+	fruitHandlerCache[moduleName] = handler
+	return handler
 end
 
 local function getPlayerFruitFolder(player)
@@ -130,7 +187,7 @@ end
 local function loadEquippedFruitFromData(player)
 	local storedValue = DataManager:TryGetValue(player, "DevilFruit.Equipped")
 	if typeof(storedValue) == "string" then
-		return storedValue
+		return normalizeStoredFruitName(storedValue)
 	end
 
 	return DevilFruitConfig.None
@@ -224,9 +281,10 @@ local function hydrateFruitFromData(player)
 
 			local storedValue, reason = DataManager:TryGetValue(player, "DevilFruit.Equipped")
 			if typeof(storedValue) == "string" then
+				local normalizedFruit = normalizeStoredFruitName(storedValue)
 				local fruitValue = getPlayerFruitValue(player)
-				fruitValue.Value = storedValue
-				syncFruitAttribute(player, storedValue)
+				fruitValue.Value = normalizedFruit
+				syncFruitAttribute(player, normalizedFruit)
 				break
 			end
 
@@ -258,24 +316,49 @@ local function getCooldownTable(player)
 	return playerCooldowns
 end
 
+local function clearFruitRuntimeState(player, fruitName)
+	if fruitName == DevilFruitConfig.None then
+		return
+	end
+
+	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
+	if fruitConfig and fruitConfig.Abilities then
+		local cooldowns = getCooldownTable(player)
+		for abilityName in pairs(fruitConfig.Abilities) do
+			cooldowns[abilityName] = nil
+		end
+	end
+
+	if fruitName == "Mera Mera no Mi" then
+		player:SetAttribute("MeraFireBurstUntil", nil)
+	end
+end
+
+local function applyEquippedFruitRuntimeState(player, fruitValue, fruitName)
+	fruitValue.Value = fruitName
+	syncFruitAttribute(player, fruitName)
+end
+
 local function getEquippedFruit(player)
 	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
 	if typeof(fruitAttribute) == "string" then
-		return fruitAttribute
+		return normalizeStoredFruitName(fruitAttribute)
 	end
 
 	local fruitValue = getPlayerFruitValue(player)
 	if fruitValue then
-		return fruitValue.Value
+		return normalizeStoredFruitName(fruitValue.Value)
 	end
 
 	return DevilFruitConfig.None
 end
 
-local function syncFruitAttribute(player, fruitName)
+syncFruitAttribute = function(player, fruitName)
 	local resolvedFruit = fruitName
 	if typeof(resolvedFruit) ~= "string" then
 		resolvedFruit = getEquippedFruit(player)
+	else
+		resolvedFruit = normalizeStoredFruitName(resolvedFruit)
 	end
 
 	player:SetAttribute("EquippedDevilFruit", resolvedFruit)
@@ -341,7 +424,7 @@ local function getCharacterContext(player, fruitName, abilityName)
 
 	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
 	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
-	local fruitHandler = FruitHandlers[fruitName]
+	local fruitHandler = getFruitHandler(fruitName)
 
 	if not fruitConfig or not abilityConfig or not fruitHandler then
 		return nil
@@ -352,6 +435,7 @@ local function getCharacterContext(player, fruitName, abilityName)
 		Character = character,
 		Humanoid = humanoid,
 		RootPart = rootPart,
+		FruitKey = fruitConfig.FruitKey,
 		FruitName = fruitName,
 		FruitConfig = fruitConfig,
 		AbilityName = abilityName,
@@ -436,6 +520,10 @@ function DevilFruitService.GetEquippedFruit(player)
 	return getEquippedFruit(player)
 end
 
+function DevilFruitService.GetEquippedFruitKey(player)
+	return DevilFruitConfig.GetFruitKey(getEquippedFruit(player))
+end
+
 function DevilFruitService.SetEquippedFruit(player, fruitName)
 	debugPrint("SetEquippedFruit STEP 1 - Player:", player and player.Name or "nil")
 	if not player or not player:IsA("Player") then
@@ -448,24 +536,30 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 		return false
 	end
 
-	debugPrint("SetEquippedFruit STEP 2 - Validating fruit:", fruitName)
-	if fruitName ~= DevilFruitConfig.None and not DevilFruitConfig.GetFruit(fruitName) then
+	local resolvedFruitName = resolveFruitName(fruitName)
+	debugPrint("SetEquippedFruit STEP 2 - Validating fruit:", fruitName, "->", resolvedFruitName or "nil")
+	if resolvedFruitName == nil then
 		debugPrint("SetEquippedFruit STEP 2A - Unknown fruit")
 		return false
 	end
 
 	debugPrint("SetEquippedFruit STEP 3 - Ensuring runtime DevilFruit folder/value")
 	local _, fruitValue = ensurePlayerFruitInstances(player)
+	local currentFruit = getEquippedFruit(player)
+
+	if currentFruit ~= DevilFruitConfig.None and currentFruit ~= resolvedFruitName then
+		debugPrint("SetEquippedFruit STEP 3A - Clearing runtime state for previous fruit:", currentFruit)
+		clearFruitRuntimeState(player, currentFruit)
+	end
 
 	debugPrint("SetEquippedFruit STEP 4 - Applying runtime state")
-	fruitValue.Value = fruitName
-	syncFruitAttribute(player, fruitName)
+	applyEquippedFruitRuntimeState(player, fruitValue, resolvedFruitName)
 
 	debugPrint("SetEquippedFruit STEP 5 - Queueing persistence through DataManager")
-	local persisted, reason = persistEquippedFruit(player, fruitName)
+	local persisted, reason = persistEquippedFruit(player, resolvedFruitName)
 	if not persisted then
 		debugPrint("SetEquippedFruit STEP 5A - Immediate persist unavailable:", tostring(reason))
-		queuePersist(player, fruitName)
+		queuePersist(player, resolvedFruitName)
 	end
 
 	debugPrint("SetEquippedFruit STEP 6 - Persist result:", persisted, reason)

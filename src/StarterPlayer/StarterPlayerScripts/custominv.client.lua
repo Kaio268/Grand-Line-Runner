@@ -9,6 +9,7 @@ local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
 
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local hudInv = player:WaitForChild("PlayerGui"):WaitForChild("HUD"):WaitForChild("Inventory")
 local hotbarTemplate = hudInv:WaitForChild("toolButton")
@@ -139,8 +140,20 @@ local function getIcon(kind, name)
 		local cfg = Brainrots[name]
 		return cfg and cfg.Render or ""
 	end
+	if kind == "DevilFruit" then
+		return ""
+	end
 	local cfg = Gears[name]
 	return cfg and cfg.Icon or ""
+end
+
+local function getDisplayName(kind, name)
+	if kind == "DevilFruit" then
+		local fruit = DevilFruitConfig.GetFruit(name)
+		return fruit and fruit.DisplayName or name
+	end
+
+	return name
 end
 
 local function createButton(template, parent, kind, name)
@@ -201,12 +214,15 @@ end
 local function getLists()
 	local gearsList = {}
 	local brainrotsList = {}
+	local devilFruitList = {}
 
 	for key, st in pairs(itemState) do
 		if st.kind == "Gear" and st.owned == true then
 			table.insert(gearsList, key)
 		elseif st.kind == "Brainrot" and (st.qty or 0) > 0 then
 			table.insert(brainrotsList, key)
+		elseif st.kind == "DevilFruit" and (st.qty or 0) > 0 then
+			table.insert(devilFruitList, key)
 		end
 	end
 
@@ -246,11 +262,19 @@ local function getLists()
 		return aa < ab
 	end)
 
-	return gearsList, brainrotsList
+	table.sort(devilFruitList, function(a, b)
+		local sa = itemState[a]
+		local sb = itemState[b]
+		local da = getDisplayName("DevilFruit", sa.name)
+		local db = getDisplayName("DevilFruit", sb.name)
+		return da < db
+	end)
+
+	return gearsList, brainrotsList, devilFruitList
 end
 
 local function rebuildUI()
-	local gearsList, brainrotsList = getLists()
+	local gearsList, brainrotsList, devilFruitList = getLists()
 
 	local hotbarKeys = {}
 	local invKeys = {}
@@ -273,6 +297,10 @@ local function rebuildUI()
 		end
 	end
 
+	for _, k in ipairs(devilFruitList) do
+		table.insert(invKeys, k)
+	end
+
 	local hotbarSet = {}
 	local invSet = {}
 
@@ -291,7 +319,7 @@ local function rebuildUI()
 			end
 			local b = hotbarButtons[k]
 			b.LayoutOrder = i
-			setCommon(b, getIcon(st.kind, st.name), st.name)
+			setCommon(b, getIcon(st.kind, st.name), getDisplayName(st.kind, st.name))
 
 			if st.kind == "Brainrot" then
 				setAmount(b, st.qty or 0)
@@ -309,7 +337,15 @@ local function rebuildUI()
 			end
 			local b = invButtons[k]
 			b.LayoutOrder = i
-			setCommon(b, getIcon(st.kind, st.name), st.name)
+			setCommon(b, getIcon(st.kind, st.name), getDisplayName(st.kind, st.name))
+			setAmount(b, st.qty or 0)
+		elseif st and st.kind == "DevilFruit" then
+			if not invButtons[k] or not invButtons[k].Parent then
+				invButtons[k] = createButton(invTemplate, invContainer, st.kind, st.name)
+			end
+			local b = invButtons[k]
+			b.LayoutOrder = i
+			setCommon(b, getIcon(st.kind, st.name), getDisplayName(st.kind, st.name))
 			setAmount(b, st.qty or 0)
 		end
 	end
@@ -359,6 +395,19 @@ updateRemote.OnClientEvent:Connect(function(kind, name, v)
 			itemState[key] = { kind = "Gear", name = name, owned = true }
 		else
 			itemState[key] = nil
+		end
+	elseif kind == "DevilFruit" then
+		local fruit = DevilFruitConfig.GetFruit(name)
+		if not fruit then return end
+
+		local qty = tonumber(v) or 0
+		local key = "DevilFruit|" .. fruit.FruitKey
+
+		if qty <= 0 then
+			itemState[key] = nil
+		else
+			ensureAcquired(key)
+			itemState[key] = { kind = "DevilFruit", name = fruit.FruitKey, qty = qty }
 		end
 	end
 

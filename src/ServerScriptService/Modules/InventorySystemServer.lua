@@ -23,12 +23,32 @@ local function getHumanoid(player)
 	return char:FindFirstChildOfClass("Humanoid")
 end
 
-local function unequipIfEquipped(player, toolName)
+local function findInventoryTool(container, kind, name)
+	if not container then return nil end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") then
+			local itemKind = child:GetAttribute("InventoryItemKind")
+			local itemName = child:GetAttribute("InventoryItemName")
+			if itemKind == kind and itemName == name then
+				return child
+			end
+
+			if child.Name == name then
+				return child
+			end
+		end
+	end
+
+	return nil
+end
+
+local function unequipIfEquipped(player, toolName, itemKind)
 	local char = player.Character
 	if not char then return end
 	local humanoid = getHumanoid(player)
 	if not humanoid then return end
-	local t = char:FindFirstChild(toolName)
+	local t = findInventoryTool(char, itemKind, toolName) or char:FindFirstChild(toolName)
 	if t and t:IsA("Tool") then
 		humanoid:UnequipTools()
 	end
@@ -52,14 +72,26 @@ local function ownsGear(player, name)
 	return bv.Value == true
 end
 
-local function toggleEquip(player, toolName)
+local function ownsDevilFruit(player, fruitKey)
+	local inv = player:FindFirstChild("Inventory")
+	if not inv then return false end
+	local devilFruits = inv:FindFirstChild("DevilFruits")
+	if not devilFruits or not devilFruits:IsA("Folder") then return false end
+	local fruitFolder = devilFruits:FindFirstChild(fruitKey)
+	if not fruitFolder or not fruitFolder:IsA("Folder") then return false end
+	local q = fruitFolder:FindFirstChild("Quantity")
+	if not q or not q:IsA("NumberValue") then return false end
+	return q.Value > 0
+end
+
+local function toggleEquip(player, kind, toolName)
 	local humanoid = getHumanoid(player)
 	if not humanoid then return end
 
 	local char = player.Character
 	if not char then return end
 
-	local equipped = char:FindFirstChild(toolName)
+	local equipped = findInventoryTool(char, kind, toolName) or char:FindFirstChild(toolName)
 	if equipped and equipped:IsA("Tool") then
 		humanoid:UnequipTools()
 		return
@@ -68,7 +100,7 @@ local function toggleEquip(player, toolName)
 	local bp = player:FindFirstChild("Backpack")
 	if not bp then return end
 
-	local tool = bp:FindFirstChild(toolName)
+	local tool = findInventoryTool(bp, kind, toolName) or bp:FindFirstChild(toolName)
 	if not tool or not tool:IsA("Tool") then return end
 
 	humanoid:UnequipTools()
@@ -77,9 +109,14 @@ end
 
 local function watchInventory(player, inventory)
 	local hooked = {}
+	local devilFruitHooked = {}
 
 	local function push(name, qty)
 		updateRemote:FireClient(player, "Brainrot", name, qty)
+	end
+
+	local function pushDevilFruit(name, qty)
+		updateRemote:FireClient(player, "DevilFruit", name, qty)
 	end
 
 	local function hookFolder(folder)
@@ -91,33 +128,91 @@ local function watchInventory(player, inventory)
 
 		push(folder.Name, qty.Value)
 		if qty.Value <= 0 then
-			unequipIfEquipped(player, folder.Name)
+			unequipIfEquipped(player, folder.Name, "Brainrot")
 		end
 
 		qty.Changed:Connect(function()
 			push(folder.Name, qty.Value)
 			if qty.Value <= 0 then
-				unequipIfEquipped(player, folder.Name)
+				unequipIfEquipped(player, folder.Name, "Brainrot")
+			end
+		end)
+	end
+
+	local function hookDevilFruitFolder(folder)
+		if devilFruitHooked[folder] then return end
+		devilFruitHooked[folder] = true
+
+		local qty = folder:WaitForChild("Quantity", 10)
+		if not qty or not qty:IsA("NumberValue") then return end
+
+		pushDevilFruit(folder.Name, qty.Value)
+		if qty.Value <= 0 then
+			unequipIfEquipped(player, folder.Name, "DevilFruit")
+		end
+
+		qty.Changed:Connect(function()
+			pushDevilFruit(folder.Name, qty.Value)
+			if qty.Value <= 0 then
+				unequipIfEquipped(player, folder.Name, "DevilFruit")
 			end
 		end)
 	end
 
 	for _, ch in ipairs(inventory:GetChildren()) do
-		if ch:IsA("Folder") then
+		if ch:IsA("Folder") and ch.Name ~= "DevilFruits" then
 			hookFolder(ch)
+		elseif ch:IsA("Folder") and ch.Name == "DevilFruits" then
+			for _, fruitFolder in ipairs(ch:GetChildren()) do
+				if fruitFolder:IsA("Folder") then
+					hookDevilFruitFolder(fruitFolder)
+				end
+			end
+
+			ch.ChildAdded:Connect(function(fruitFolder)
+				if fruitFolder:IsA("Folder") then
+					hookDevilFruitFolder(fruitFolder)
+				end
+			end)
+
+			ch.ChildRemoved:Connect(function(fruitFolder)
+				if fruitFolder:IsA("Folder") then
+					pushDevilFruit(fruitFolder.Name, 0)
+					unequipIfEquipped(player, fruitFolder.Name, "DevilFruit")
+				end
+			end)
 		end
 	end
 
 	inventory.ChildAdded:Connect(function(ch)
-		if ch:IsA("Folder") then
+		if ch:IsA("Folder") and ch.Name ~= "DevilFruits" then
 			hookFolder(ch)
+		elseif ch:IsA("Folder") and ch.Name == "DevilFruits" then
+			for _, fruitFolder in ipairs(ch:GetChildren()) do
+				if fruitFolder:IsA("Folder") then
+					hookDevilFruitFolder(fruitFolder)
+				end
+			end
+
+			ch.ChildAdded:Connect(function(fruitFolder)
+				if fruitFolder:IsA("Folder") then
+					hookDevilFruitFolder(fruitFolder)
+				end
+			end)
+
+			ch.ChildRemoved:Connect(function(fruitFolder)
+				if fruitFolder:IsA("Folder") then
+					pushDevilFruit(fruitFolder.Name, 0)
+					unequipIfEquipped(player, fruitFolder.Name, "DevilFruit")
+				end
+			end)
 		end
 	end)
 
 	inventory.ChildRemoved:Connect(function(ch)
-		if ch:IsA("Folder") then
+		if ch:IsA("Folder") and ch.Name ~= "DevilFruits" then
 			push(ch.Name, 0)
-			unequipIfEquipped(player, ch.Name)
+			unequipIfEquipped(player, ch.Name, "Brainrot")
 		end
 	end)
 end
@@ -171,13 +266,19 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 
 	if kind == "Brainrot" then
 		if not ownsBrainrot(player, name) then return end
-		toggleEquip(player, name)
+		toggleEquip(player, kind, name)
 		return
 	end
 
 	if kind == "Gear" then
 		if not ownsGear(player, name) then return end
-		toggleEquip(player, name)
+		toggleEquip(player, kind, name)
+		return
+	end
+
+	if kind == "DevilFruit" then
+		if not ownsDevilFruit(player, name) then return end
+		toggleEquip(player, kind, name)
 		return
 	end
 end)
