@@ -5,6 +5,9 @@ local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
+local eatAnimation = Instance.new("Animation")
+
+eatAnimation.AnimationId = "rbxassetid://79736681912541"
 
 local screenGui
 local panel
@@ -13,6 +16,34 @@ local bodyLabel
 local confirmButton
 local cancelButton
 local pendingPayload
+
+local function playEatAnimation()
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local hum = character:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then
+		return
+	end
+
+	local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 2)
+	if not animator then
+		return
+	end
+
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(eatAnimation)
+	end)
+	if not ok or not track then
+		return
+	end
+
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	track.Stopped:Wait()
+end
 
 local function ensurePromptGui()
 	if screenGui and screenGui.Parent then
@@ -136,8 +167,11 @@ local function ensurePromptGui()
 		end
 
 		panel.Visible = false
-		responseRemote:FireServer(true, pendingPayload.FruitKey)
+		local confirmedPayload = pendingPayload
 		pendingPayload = nil
+
+		playEatAnimation()
+		responseRemote:FireServer(true, confirmedPayload.FruitKey)
 	end)
 end
 
