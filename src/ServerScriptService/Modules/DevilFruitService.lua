@@ -7,6 +7,7 @@ local DevilFruitService = {}
 local REQUEST_REMOTE_NAME = "DevilFruitAbilityRequest"
 local STATE_REMOTE_NAME = "DevilFruitAbilityState"
 local EFFECT_REMOTE_NAME = "DevilFruitAbilityEffect"
+local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
 
@@ -306,6 +307,10 @@ local function cleanupPlayerState(player)
 	hydrationTaskByPlayer[player] = nil
 end
 
+local function isCooldownBypassEnabled(player)
+	return player:GetAttribute(COOLDOWN_BYPASS_ATTRIBUTE) == true
+end
+
 local function getCooldownTable(player)
 	local playerCooldowns = cooldownsByPlayer[player]
 	if not playerCooldowns then
@@ -402,6 +407,9 @@ local function hookPlayer(player)
 		local storedFruit = loadEquippedFruitFromData(player)
 		fruitValue.Value = storedFruit
 		syncFruitAttribute(player, storedFruit)
+		if player:GetAttribute(COOLDOWN_BYPASS_ATTRIBUTE) == nil then
+			player:SetAttribute(COOLDOWN_BYPASS_ATTRIBUTE, false)
+		end
 		hookFruitValue(player)
 		hydrateFruitFromData(player)
 
@@ -414,7 +422,7 @@ local function hookPlayer(player)
 	end)
 end
 
-local function getCharacterContext(player, fruitName, abilityName)
+local function getCharacterContext(player, fruitName, abilityName, requestPayload)
 	local character = player.Character
 	if not character then
 		return nil
@@ -445,10 +453,15 @@ local function getCharacterContext(player, fruitName, abilityName)
 		AbilityName = abilityName,
 		AbilityConfig = abilityConfig,
 		FruitHandler = fruitHandler,
+		RequestPayload = requestPayload,
 	}
 end
 
 local function isAbilityReady(player, abilityName)
+	if isCooldownBypassEnabled(player) then
+		return true, 0
+	end
+
 	local cooldowns = getCooldownTable(player)
 	local readyAt = cooldowns[abilityName]
 	if not readyAt then
@@ -464,6 +477,12 @@ local function isAbilityReady(player, abilityName)
 end
 
 local function setAbilityCooldown(player, abilityName, duration)
+	if isCooldownBypassEnabled(player) then
+		local cooldowns = getCooldownTable(player)
+		cooldowns[abilityName] = nil
+		return 0
+	end
+
 	local cooldowns = getCooldownTable(player)
 	local readyAt = os.clock() + duration
 	cooldowns[abilityName] = readyAt
@@ -488,9 +507,9 @@ local function fireAbilityActivated(player, fruitName, abilityName, readyAt, pay
 	RemoteBundle.Effect:FireAllClients(player, fruitName, abilityName, payload or {})
 end
 
-local function executeAbility(player, abilityName)
+local function executeAbility(player, abilityName, requestPayload)
 	local fruitName = getEquippedFruit(player)
-	local context = getCharacterContext(player, fruitName, abilityName)
+	local context = getCharacterContext(player, fruitName, abilityName, requestPayload)
 	if not context then
 		fireAbilityDenied(player, fruitName, abilityName, "InvalidContext")
 		return
@@ -571,6 +590,27 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	return true, persisted
 end
 
+function DevilFruitService.SetCooldownBypass(player, isEnabled)
+	if not player or not player:IsA("Player") then
+		return false
+	end
+
+	player:SetAttribute(COOLDOWN_BYPASS_ATTRIBUTE, isEnabled == true)
+	if isEnabled == true then
+		cooldownsByPlayer[player] = {}
+	end
+
+	return true
+end
+
+function DevilFruitService.GetCooldownBypass(player)
+	if not player or not player:IsA("Player") then
+		return false
+	end
+
+	return isCooldownBypassEnabled(player)
+end
+
 function DevilFruitService.IsHazardSuppressedForPlayer(player, instance)
 	local untilTime = player:GetAttribute("MeraFireBurstUntil")
 	if typeof(untilTime) ~= "number" then
@@ -594,7 +634,7 @@ function DevilFruitService.Start()
 	Players.PlayerAdded:Connect(hookPlayer)
 	Players.PlayerRemoving:Connect(cleanupPlayerState)
 
-	RemoteBundle.Request.OnServerEvent:Connect(function(player, abilityName)
+	RemoteBundle.Request.OnServerEvent:Connect(function(player, abilityName, requestPayload)
 		if typeof(abilityName) ~= "string" then
 			return
 		end
@@ -611,7 +651,7 @@ function DevilFruitService.Start()
 			return
 		end
 
-		executeAbility(player, abilityName)
+		executeAbility(player, abilityName, typeof(requestPayload) == "table" and requestPayload or nil)
 	end)
 end
 

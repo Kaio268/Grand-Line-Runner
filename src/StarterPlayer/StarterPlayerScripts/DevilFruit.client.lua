@@ -11,6 +11,13 @@ local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForC
 
 local player = Players.LocalPlayer
 
+local GOMU_AIM_RAY_DISTANCE = 500
+local GOMU_HIGHLIGHT_FILL_COLOR = Color3.fromRGB(255, 176, 120)
+local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
+local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
+local GOMU_AUTO_LATCH_BASE_RADIUS = 4
+local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+
 local function waitForChildSafe(parent, childName, timeout)
 	local deadline = os.clock() + (timeout or 15)
 	local child = parent:FindFirstChild(childName)
@@ -37,6 +44,10 @@ local suppressedParts = {}
 local activeFireBursts = {}
 local getFruitFolder
 local getEquippedFruit
+local gomuAimState = {
+	Highlight = nil,
+	TargetPlayer = nil,
+}
 local cooldownHud = {
 	CurrentFruit = nil,
 	Gui = nil,
@@ -61,6 +72,10 @@ local function formatCooldownTime(seconds)
 	end
 
 	return string.format("%.1fs", math.ceil(remaining * 10) / 10)
+end
+
+local function isCooldownBypassEnabled()
+	return player:GetAttribute("DevilFruitCooldownBypass") == true
 end
 
 local function getPlayerGui()
@@ -390,7 +405,7 @@ local function updateCooldownHud(forceRebuild)
 	setCooldownHudVisible(true)
 
 	for abilityName, row in pairs(cooldownHud.Rows) do
-		local readyAt = localCooldowns[abilityName] or 0
+		local readyAt = isCooldownBypassEnabled() and 0 or (localCooldowns[abilityName] or 0)
 		local remaining = math.max(0, readyAt - os.clock())
 		local total = math.max(row.Cooldown, 0.001)
 		local progress = math.clamp(1 - (remaining / total), 0, 1)
@@ -481,6 +496,10 @@ local function getAbilityForKeyCode(keyCode)
 end
 
 local function isLocallyReady(abilityName)
+	if isCooldownBypassEnabled() then
+		return true
+	end
+
 	local readyAt = localCooldowns[abilityName]
 	if not readyAt then
 		return true
@@ -513,6 +532,210 @@ local function getPlayerRootPart(targetPlayer)
 	end
 
 	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getCurrentCamera()
+	return Workspace.CurrentCamera
+end
+
+local function getPlanarDistance(a, b)
+	local delta = a - b
+	return Vector3.new(delta.X, 0, delta.Z).Magnitude
+end
+
+local function getPlayerFromDescendant(instance)
+	local current = instance
+	while current and current ~= Workspace do
+		if current:IsA("Model") then
+			local targetPlayer = Players:GetPlayerFromCharacter(current)
+			if targetPlayer then
+				return targetPlayer
+			end
+		end
+
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function getLookAimRay()
+	local camera = getCurrentCamera()
+	if not camera then
+		return nil
+	end
+
+	local viewportSize = camera.ViewportSize
+	return camera:ViewportPointToRay(viewportSize.X * 0.5, viewportSize.Y * 0.5)
+end
+
+local function getLookAimRaycast()
+	local unitRay = getLookAimRay()
+	if not unitRay then
+		return nil, nil, nil, nil
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = player.Character and { player.Character } or {}
+	params.IgnoreWater = true
+
+	local rayVector = unitRay.Direction * GOMU_AIM_RAY_DISTANCE
+	local result = Workspace:Raycast(unitRay.Origin, rayVector, params)
+	return result, (result and result.Position) or (unitRay.Origin + rayVector), unitRay.Origin, unitRay.Direction.Unit
+end
+
+local function getDistanceFromRay(rayOrigin, rayDirection, point)
+	local toPoint = point - rayOrigin
+	local projectedDistance = math.max(0, toPoint:Dot(rayDirection))
+	local closestPoint = rayOrigin + (rayDirection * projectedDistance)
+	return (point - closestPoint).Magnitude, projectedDistance
+end
+
+local function findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
+	local localRootPart = getRootPart()
+	if not localRootPart or not rayOrigin or not rayDirection then
+		return nil
+	end
+
+	local bestTargetPlayer
+	local bestScore = -math.huge
+
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		if targetPlayer ~= player and isGomuTargetInRange(targetPlayer, launchDistance) then
+			local targetRootPart = getPlayerRootPart(targetPlayer)
+			if targetRootPart then
+				local targetPosition = targetRootPart.Position + Vector3.new(0, 1.5, 0)
+				local toTarget = targetPosition - rayOrigin
+				local toTargetUnit = toTarget.Magnitude > 0.01 and toTarget.Unit or nil
+				local alignment = toTargetUnit and rayDirection:Dot(toTargetUnit) or -1
+				if alignment >= GOMU_AUTO_LATCH_MAX_ALIGNMENT then
+					local lateralDistance, projectedDistance = getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
+					local allowedRadius = math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
+					if lateralDistance <= allowedRadius then
+						local planarDistance = getPlanarDistance(localRootPart.Position, targetRootPart.Position)
+						local score = (alignment * 100) - (lateralDistance * 2) - (planarDistance * 0.1)
+						if score > bestScore then
+							bestScore = score
+							bestTargetPlayer = targetPlayer
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return bestTargetPlayer
+end
+
+local function ensureGomuHighlight()
+	local highlight = gomuAimState.Highlight
+	if highlight and highlight.Parent then
+		return highlight
+	end
+
+	highlight = Instance.new("Highlight")
+	highlight.Name = "GomuAimHighlight"
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.FillColor = GOMU_HIGHLIGHT_FILL_COLOR
+	highlight.FillTransparency = 0.45
+	highlight.OutlineColor = GOMU_HIGHLIGHT_OUTLINE_COLOR
+	highlight.OutlineTransparency = 0.05
+	highlight.Enabled = false
+	highlight.Parent = Workspace
+
+	gomuAimState.Highlight = highlight
+	return highlight
+end
+
+local function clearGomuHighlight()
+	local highlight = gomuAimState.Highlight
+	if highlight then
+		highlight.Enabled = false
+		highlight.Adornee = nil
+	end
+
+	gomuAimState.TargetPlayer = nil
+end
+
+local function isGomuTargetInRange(targetPlayer, maxDistance)
+	local localRootPart = getRootPart()
+	local targetRootPart = getPlayerRootPart(targetPlayer)
+	if not localRootPart or not targetRootPart then
+		return false
+	end
+
+	return getPlanarDistance(localRootPart.Position, targetRootPart.Position) <= (maxDistance + 0.5)
+end
+
+local function getGomuLaunchTarget(abilityConfig)
+	local result, fallbackPosition, rayOrigin, rayDirection = getLookAimRaycast()
+	local aimPosition = fallbackPosition
+	local launchDistance = math.max(0, tonumber(abilityConfig and abilityConfig.LaunchDistance) or 0)
+	local targetPlayer = findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
+
+	if not targetPlayer and result then
+		targetPlayer = getPlayerFromDescendant(result.Instance)
+		if targetPlayer == player or not isGomuTargetInRange(targetPlayer, launchDistance) then
+			targetPlayer = nil
+		end
+	end
+
+	if targetPlayer then
+		local targetRootPart = getPlayerRootPart(targetPlayer)
+		if targetRootPart then
+			aimPosition = targetRootPart.Position
+		end
+	end
+
+	if not aimPosition then
+		local rootPart = getRootPart()
+		if rootPart then
+			local fallbackDirection = rayDirection or rootPart.CFrame.LookVector
+			aimPosition = rootPart.Position + (fallbackDirection * GOMU_AIM_RAY_DISTANCE)
+		end
+	end
+
+	return aimPosition, targetPlayer
+end
+
+local function buildAbilityRequestPayload(fruitName, abilityName)
+	if fruitName ~= "Gomu Gomu no Mi" or abilityName ~= "RubberLaunch" then
+		return nil
+	end
+
+	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
+	local aimPosition, targetPlayer = getGomuLaunchTarget(abilityConfig)
+
+	return {
+		AimPosition = aimPosition,
+		TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
+	}
+end
+
+local function updateGomuAimAssist()
+	local fruitName = getEquippedFruit()
+	if fruitName ~= "Gomu Gomu no Mi" then
+		clearGomuHighlight()
+		return
+	end
+
+	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, "RubberLaunch")
+	if not abilityConfig then
+		clearGomuHighlight()
+		return
+	end
+
+	local _, targetPlayer = getGomuLaunchTarget(abilityConfig)
+	if not targetPlayer or not targetPlayer.Character then
+		clearGomuHighlight()
+		return
+	end
+
+	local highlight = ensureGomuHighlight()
+	highlight.Adornee = targetPlayer.Character
+	highlight.Enabled = true
+	gomuAimState.TargetPlayer = targetPlayer
 end
 
 local function isDescendantOfClientWave(instance)
@@ -860,11 +1083,46 @@ local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 	end)
 end
 
-local function playOptionalEffect(targetPlayer, fruitName, abilityName)
-	if fruitName ~= "Mera Mera no Mi" then
+local function addUniqueFolderName(folderNames, seenNames, folderName)
+	if typeof(folderName) ~= "string" or folderName == "" or seenNames[folderName] then
 		return
 	end
 
+	seenNames[folderName] = true
+	table.insert(folderNames, folderName)
+end
+
+local function getFruitEffectFolderNames(fruitName)
+	local fruit = DevilFruitConfig.GetFruit(fruitName)
+	local compactFruitName = typeof(fruitName) == "string" and (fruitName:gsub("[%W_]+", "")) or nil
+	local folderNames = {}
+	local seenNames = {}
+
+	addUniqueFolderName(folderNames, seenNames, fruit and fruit.Id)
+	addUniqueFolderName(folderNames, seenNames, fruit and fruit.AssetFolder)
+	addUniqueFolderName(folderNames, seenNames, fruit and fruit.AbilityModule)
+	addUniqueFolderName(folderNames, seenNames, fruit and fruit.FruitKey)
+	addUniqueFolderName(folderNames, seenNames, compactFruitName)
+
+	return folderNames
+end
+
+local function findFruitEffectFolder(rootFolder, fruitName)
+	if not rootFolder then
+		return nil
+	end
+
+	for _, folderName in ipairs(getFruitEffectFolderNames(fruitName)) do
+		local folder = rootFolder:FindFirstChild(folderName)
+		if folder then
+			return folder
+		end
+	end
+
+	return nil
+end
+
+local function playOptionalEffect(targetPlayer, fruitName, abilityName)
 	local character = targetPlayer.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then
@@ -873,7 +1131,7 @@ local function playOptionalEffect(targetPlayer, fruitName, abilityName)
 
 	local particlesFolder = ReplicatedStorage:FindFirstChild("Particles")
 	local devilFruitFolder = particlesFolder and particlesFolder:FindFirstChild("DevilFruits")
-	local fruitFolder = devilFruitFolder and devilFruitFolder:FindFirstChild("MeraMeraNoMi")
+	local fruitFolder = findFruitEffectFolder(devilFruitFolder, fruitName)
 	local template = fruitFolder and fruitFolder:FindFirstChild(abilityName)
 	if template then
 		local clone = template:Clone()
@@ -905,7 +1163,7 @@ local function playOptionalEffect(targetPlayer, fruitName, abilityName)
 
 	local soundsFolder = ReplicatedStorage:FindFirstChild("Sounds")
 	local soundDevilFruitFolder = soundsFolder and soundsFolder:FindFirstChild("DevilFruits")
-	local soundFruitFolder = soundDevilFruitFolder and soundDevilFruitFolder:FindFirstChild("MeraMeraNoMi")
+	local soundFruitFolder = findFruitEffectFolder(soundDevilFruitFolder, fruitName)
 	local soundTemplate = soundFruitFolder and soundFruitFolder:FindFirstChild(abilityName)
 	if soundTemplate and soundTemplate:IsA("Sound") then
 		local soundClone = soundTemplate:Clone()
@@ -918,6 +1176,34 @@ local function playOptionalEffect(targetPlayer, fruitName, abilityName)
 			end
 		end)
 	end
+end
+
+local function createGomuPulse(name, position, color, initialSize, finalSize, duration)
+	local pulse = Instance.new("Part")
+	pulse.Name = name
+	pulse.Shape = Enum.PartType.Ball
+	pulse.Anchored = true
+	pulse.CanCollide = false
+	pulse.CanTouch = false
+	pulse.CanQuery = false
+	pulse.Material = Enum.Material.Neon
+	pulse.Color = color
+	pulse.Transparency = 0.18
+	pulse.Size = Vector3.new(initialSize, initialSize, initialSize)
+	pulse.CFrame = CFrame.new(position)
+	pulse.Parent = Workspace
+
+	local tween = TweenService:Create(pulse, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(finalSize, finalSize, finalSize),
+	})
+
+	tween:Play()
+	tween.Completed:Connect(function()
+		if pulse.Parent then
+			pulse:Destroy()
+		end
+	end)
 end
 
 local function createFallbackBurstEffect(targetPlayer, fruitName, abilityName, payload)
@@ -960,6 +1246,71 @@ local function createFallbackBurstEffect(targetPlayer, fruitName, abilityName, p
 	end)
 end
 
+local function createRubberLaunchEffect(_targetPlayer, fruitName, abilityName, payload)
+	if fruitName ~= "Gomu Gomu no Mi" or abilityName ~= "RubberLaunch" then
+		return
+	end
+
+	local direction = typeof(payload.Direction) == "Vector3" and payload.Direction or Vector3.new(0, 0, -1)
+	local distance = math.max(0, tonumber(payload.Distance) or 0)
+	local startPosition = typeof(payload.StartPosition) == "Vector3" and payload.StartPosition or nil
+	local endPosition = typeof(payload.EndPosition) == "Vector3" and payload.EndPosition or nil
+
+	if not startPosition then
+		local rootPart = getRootPart()
+		startPosition = rootPart and rootPart.Position or Vector3.zero
+	end
+
+	if not endPosition then
+		endPosition = startPosition + (direction * distance)
+	end
+
+	startPosition += Vector3.new(0, 1.15, 0)
+	endPosition += Vector3.new(0, 1.15, 0)
+
+	local segment = endPosition - startPosition
+	local segmentLength = segment.Magnitude
+	local color = Color3.fromRGB(255, 190, 132)
+
+	if segmentLength > 0.2 then
+		local band = Instance.new("Part")
+		band.Name = "GomuRubberBand"
+		band.Anchored = true
+		band.CanCollide = false
+		band.CanTouch = false
+		band.CanQuery = false
+		band.Material = Enum.Material.Neon
+		band.Color = color
+		band.Transparency = 0.18
+		band.Size = Vector3.new(0.38, 0.38, segmentLength)
+		band.CFrame = CFrame.lookAt(startPosition:Lerp(endPosition, 0.5), endPosition)
+		band.Parent = Workspace
+
+		local tween = TweenService:Create(band, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Transparency = 1,
+			Size = Vector3.new(0.08, 0.08, segmentLength * 1.06),
+		})
+
+		tween:Play()
+		tween.Completed:Connect(function()
+			if band.Parent then
+				band:Destroy()
+			end
+		end)
+	end
+
+	createGomuPulse("GomuLaunchStart", startPosition, color, 1.25, 3.4, 0.22)
+	createGomuPulse("GomuLaunchEnd", endPosition, Color3.fromRGB(255, 232, 198), 0.95, 2.6, 0.2)
+
+	for sampleIndex = 1, 3 do
+		local alpha = sampleIndex / 4
+		local samplePosition = startPosition:Lerp(endPosition, alpha)
+		task.delay((sampleIndex - 1) * 0.03, function()
+			createGomuPulse("GomuLaunchTrail", samplePosition, color, 0.5, 1.4, 0.14)
+		end)
+	end
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
@@ -969,12 +1320,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
-	local _, abilityName = getAbilityForKeyCode(input.KeyCode)
+	local fruitName, abilityName = getAbilityForKeyCode(input.KeyCode)
 	if not abilityName or not isLocallyReady(abilityName) then
 		return
 	end
 
-	requestRemote:FireServer(abilityName)
+	requestRemote:FireServer(abilityName, buildAbilityRequestPayload(fruitName, abilityName))
 end)
 
 stateRemote.OnClientEvent:Connect(function(eventName, fruitName, abilityName, value, payload)
@@ -1005,6 +1356,7 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 
 	playOptionalEffect(targetPlayer, fruitName, abilityName)
 	createFallbackBurstEffect(targetPlayer, fruitName, abilityName, payload or {})
+	createRubberLaunchEffect(targetPlayer, fruitName, abilityName, payload or {})
 
 	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
 		launchFreezeShot(targetPlayer, payload or {}, targetPlayer == player)
@@ -1019,21 +1371,30 @@ end)
 player.CharacterRemoving:Connect(function()
 	activeFireBursts = {}
 	restoreSuppressedParts(math.huge)
+	clearGomuHighlight()
 end)
 
 player:GetAttributeChangedSignal("EquippedDevilFruit"):Connect(function()
 	hookFruitFolderSignals()
 	updateCooldownHud(true)
+	updateGomuAimAssist()
+end)
+
+player:GetAttributeChangedSignal("DevilFruitCooldownBypass"):Connect(function()
+	updateCooldownHud(false)
 end)
 
 player.ChildAdded:Connect(function(child)
 	if child.Name == "DevilFruit" then
 		hookFruitFolderSignals()
 		updateCooldownHud(true)
+		updateGomuAimAssist()
 	end
 end)
 
 RunService.RenderStepped:Connect(function()
+	updateGomuAimAssist()
+
 	local now = os.clock()
 	if now < nextHudRefreshAt then
 		return
@@ -1046,4 +1407,5 @@ end)
 task.defer(function()
 	hookFruitFolderSignals()
 	updateCooldownHud(true)
+	updateGomuAimAssist()
 end)

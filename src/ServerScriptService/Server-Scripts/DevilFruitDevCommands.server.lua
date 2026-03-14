@@ -16,6 +16,7 @@ local ADMIN_USER_IDS = {
 local FRUIT_ALIASES = {
 	mera = "Mera Mera no Mi",
 	hie = "Hie Hie no Mi",
+	gomu = "Gomu Gomu no Mi",
 }
 
 local RECENT_COMMAND_WINDOW = 0.4
@@ -61,6 +62,26 @@ local function processFruitCommand(player, argumentText)
 	local normalizedArgument = normalizeText(argumentText)
 	if normalizedArgument == "" then
 		warn(string.format("[DevFruitDevCommands] %s used /fruit without an argument", player.Name))
+		return
+	end
+
+	local cooldownArgument = normalizedArgument:match("^nocd%s*(.*)$")
+	if cooldownArgument ~= nil then
+		local normalizedCooldownArgument = normalizeText(cooldownArgument)
+		local nextState
+
+		if normalizedCooldownArgument == "on" then
+			nextState = true
+		elseif normalizedCooldownArgument == "off" then
+			nextState = false
+		else
+			warn(string.format("[DevFruitDevCommands] Invalid /fruit nocd argument '%s' from %s (expected 'on' or 'off')", normalizedCooldownArgument, player.Name))
+			return
+		end
+
+		if DevilFruitService.SetCooldownBypass(player, nextState) then
+			print(string.format("[DevFruitDevCommands] %s set Devil Fruit cooldown bypass to %s", player.Name, tostring(nextState)))
+		end
 		return
 	end
 

@@ -4,6 +4,12 @@ local Workspace = game:GetService("Workspace")
 local MeraMeraNoMi = {}
 
 local WALL_PADDING = 2
+local MIN_END_CARRY_SPEED = 52
+local END_CARRY_SPEED_FACTOR = 0.82
+
+local function smoothstep(alpha)
+	return alpha * alpha * (3 - (2 * alpha))
+end
 
 local function getDashDirection(humanoid, rootPart)
 	local moveDirection = humanoid.MoveDirection
@@ -138,6 +144,7 @@ function MeraMeraNoMi.FlameDash(context)
 	local instantDistance = dashDistance * instantDashFraction
 	local remainingDistance = math.max(dashDistance - instantDistance, 0)
 	local dashOwner = context.Player
+	local endCarrySpeed = math.max(humanoid.WalkSpeed, endDashSpeed * END_CARRY_SPEED_FACTOR, MIN_END_CARRY_SPEED)
 
 	task.spawn(function()
 		local elapsed = 0
@@ -154,6 +161,7 @@ function MeraMeraNoMi.FlameDash(context)
 		end
 
 		if remainingDistance <= 0.1 then
+			setHorizontalVelocity(rootPart, direction * endCarrySpeed)
 			if dashOwner and dashOwner.Parent then
 				pcall(function()
 					rootPart:SetNetworkOwner(dashOwner)
@@ -177,12 +185,13 @@ function MeraMeraNoMi.FlameDash(context)
 			local traveledDistance = getTravelDistance(burstStartPosition, rootPart.Position, direction)
 			local currentRemainingDistance = remainingDistance - traveledDistance
 			if currentRemainingDistance <= 0.1 then
+				setHorizontalVelocity(rootPart, direction * endCarrySpeed)
 				connection:Disconnect()
 				return
 			end
 
 			local alpha = math.clamp(elapsed / dashDuration, 0, 1)
-			local dashSpeed = startDashSpeed + ((endDashSpeed - startDashSpeed) * alpha)
+			local dashSpeed = startDashSpeed + ((endDashSpeed - startDashSpeed) * smoothstep(alpha))
 			local lookAheadDistance = math.max((dashSpeed * dt) + WALL_PADDING, WALL_PADDING + 1)
 			if shouldStopForWall(character, rootPart, direction, math.min(lookAheadDistance, currentRemainingDistance + WALL_PADDING)) then
 				stopDashVelocity(rootPart)
@@ -193,6 +202,7 @@ function MeraMeraNoMi.FlameDash(context)
 			setHorizontalVelocity(rootPart, direction * dashSpeed)
 
 			if alpha >= 1 then
+				setHorizontalVelocity(rootPart, direction * endCarrySpeed)
 				connection:Disconnect()
 			end
 		end)
