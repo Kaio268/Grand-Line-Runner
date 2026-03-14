@@ -7,7 +7,7 @@ local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
 local eatAnimation = Instance.new("Animation")
 
-eatAnimation.AnimationId = "rbxassetid://79736681912541"
+eatAnimation.AnimationId = "rbxassetid://125650953077554"
 
 local screenGui
 local panel

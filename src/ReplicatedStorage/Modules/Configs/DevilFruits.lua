@@ -10,6 +10,7 @@ local DevilFruits = {
 			AbilityModule = "Mera",
 			Rarity = "Legendary",
 			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			Aliases = { "mera", "mera mera" },
 			Abilities = {
 				FlameDash = {
 					KeyCode = Enum.KeyCode.Q,
@@ -40,6 +41,7 @@ local DevilFruits = {
 			AbilityModule = "Hie",
 			Rarity = "Legendary",
 			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			Aliases = { "hie", "hie hie" },
 			Abilities = {
 				FreezeShot = {
 					KeyCode = Enum.KeyCode.Q,
@@ -65,6 +67,7 @@ local DevilFruits = {
 			AbilityModule = "Gomu",
 			Rarity = "Rare",
 			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			Aliases = { "gomu", "gomu gomu" },
 			Abilities = {
 				RubberLaunch = {
 					KeyCode = Enum.KeyCode.Q,
@@ -87,14 +90,34 @@ local function normalizeIdentifier(value)
 		return nil
 	end
 
-	return normalized
+	return string.lower(normalized)
+end
+
+local lookupByIdentifier = {}
+
+local function registerIdentifier(identifier, fruit)
+	local normalized = normalizeIdentifier(identifier)
+	if not normalized then
+		return
+	end
+
+	lookupByIdentifier[normalized] = fruit
 end
 
 for fruitKey, fruit in pairs(DevilFruits.FruitsByKey) do
 	fruit.FruitKey = fruit.FruitKey or fruitKey
 	fruit.AssetFolder = fruit.AssetFolder or fruit.FruitKey
 	fruit.AbilityModule = fruit.AbilityModule or fruit.FruitKey
+	fruit.Aliases = fruit.Aliases or {}
 	DevilFruits.Fruits[fruit.DisplayName] = fruit
+
+	registerIdentifier(fruit.FruitKey, fruit)
+	registerIdentifier(fruit.DisplayName, fruit)
+	registerIdentifier(fruit.Id, fruit)
+
+	for _, alias in ipairs(fruit.Aliases) do
+		registerIdentifier(alias, fruit)
+	end
 end
 
 function DevilFruits.GetFruit(identifier)
@@ -103,16 +126,16 @@ function DevilFruits.GetFruit(identifier)
 		return nil
 	end
 
-	return DevilFruits.Fruits[normalized] or DevilFruits.FruitsByKey[normalized]
+	return lookupByIdentifier[normalized]
 end
 
 function DevilFruits.GetFruitByKey(fruitKey)
-	local normalized = normalizeIdentifier(fruitKey)
-	if not normalized then
-		return nil
+	local fruit = DevilFruits.GetFruit(fruitKey)
+	if fruit then
+		return fruit
 	end
 
-	return DevilFruits.FruitsByKey[normalized]
+	return nil
 end
 
 function DevilFruits.ResolveFruitName(identifier)
@@ -136,6 +159,19 @@ function DevilFruits.GetAbility(fruitIdentifier, abilityName)
 	end
 
 	return fruit.Abilities and fruit.Abilities[abilityName] or nil
+end
+
+function DevilFruits.GetAllFruits()
+	local fruits = {}
+	for _, fruit in pairs(DevilFruits.FruitsByKey) do
+		fruits[#fruits + 1] = fruit
+	end
+
+	table.sort(fruits, function(a, b)
+		return a.DisplayName < b.DisplayName
+	end)
+
+	return fruits
 end
 
 return DevilFruits

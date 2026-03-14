@@ -2,10 +2,12 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local TextChatService = game:GetService("TextChatService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("DevilFruitService"))
 local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local ADMIN_USER_IDS = {
 	1103783585,
@@ -13,16 +15,11 @@ local ADMIN_USER_IDS = {
 	780333260,
 }
 
-local FRUIT_ALIASES = {
-	mera = "Mera Mera no Mi",
-	hie = "Hie Hie no Mi",
-	gomu = "Gomu Gomu no Mi",
-}
-
 local RECENT_COMMAND_WINDOW = 0.4
 
 local adminSet = {}
 local recentCommands = {}
+local fruitAliases = {}
 
 for _, userId in ipairs(ADMIN_USER_IDS) do
 	adminSet[userId] = true
@@ -30,6 +27,25 @@ end
 
 local function normalizeText(text)
 	return tostring(text or ""):lower():match("^%s*(.-)%s*$") or ""
+end
+
+local function registerFruitAlias(alias, displayName)
+	local normalizedAlias = normalizeText(alias)
+	if normalizedAlias == "" then
+		return
+	end
+
+	fruitAliases[normalizedAlias] = displayName
+end
+
+for _, fruit in ipairs(DevilFruitConfig.GetAllFruits()) do
+	registerFruitAlias(fruit.FruitKey, fruit.DisplayName)
+	registerFruitAlias(fruit.DisplayName, fruit.DisplayName)
+	registerFruitAlias(fruit.Id, fruit.DisplayName)
+
+	for _, alias in ipairs(fruit.Aliases or {}) do
+		registerFruitAlias(alias, fruit.DisplayName)
+	end
 end
 
 local function isAuthorized(player)
@@ -87,7 +103,7 @@ local function processFruitCommand(player, argumentText)
 
 	local directEquipArgument = normalizedArgument:match("^equip%s+(.+)$")
 	if directEquipArgument then
-		local directFruit = FRUIT_ALIASES[normalizeText(directEquipArgument)]
+		local directFruit = fruitAliases[normalizeText(directEquipArgument)]
 		if directFruit == nil then
 			warn(string.format("[DevFruitDevCommands] Unknown fruit alias '%s' from %s", directEquipArgument, player.Name))
 			return
@@ -100,7 +116,7 @@ local function processFruitCommand(player, argumentText)
 		return
 	end
 
-	local targetFruit = FRUIT_ALIASES[normalizedArgument]
+	local targetFruit = fruitAliases[normalizedArgument]
 	if normalizedArgument == "clear" or normalizedArgument == "none" or normalizedArgument == "remove" then
 		local ok, persisted = DevilFruitService.SetEquippedFruit(player, "")
 		if ok then
