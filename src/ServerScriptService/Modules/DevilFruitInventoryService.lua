@@ -10,6 +10,18 @@ local TOOL_ATTR_FRUIT_KEY = "FruitKey"
 local TOOL_ATTR_FRUIT_NAME = "FruitName"
 local DEVIL_FRUITS_FOLDER_NAME = "DevilFruits"
 local PROMPT_TIMEOUT = 20
+local TOOL_HANDLE_SIZE = Vector3.new(0.35, 0.35, 0.35)
+local DEFAULT_TOOL_GRIP_BIAS = Vector3.new(0.7, -0.12, 0.18)
+local EXPLICIT_GRIP_ATTACHMENT_NAMES = {
+	"RightGripAttachment",
+	"GripAttachment",
+	"ToolGripAttachment",
+}
+local EXPLICIT_GRIP_PART_NAMES = {
+	"Handle",
+	"Grip",
+	"Hold",
+}
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
@@ -223,6 +235,8 @@ end
 local function setUpPart(part)
 	part.Anchored = false
 	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
 	part.Massless = true
 end
 
@@ -249,6 +263,128 @@ local function getPrimaryPartFromTemplate(template)
 	return template:FindFirstChildWhichIsA("BasePart", true)
 end
 
+local function getTemplateParts(template)
+	local parts = {}
+
+	for _, descendant in ipairs(template:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			table.insert(parts, descendant)
+		end
+	end
+
+	return parts
+end
+
+local function clampVector3(value, minValue, maxValue)
+	return Vector3.new(
+		math.clamp(value.X, minValue.X, maxValue.X),
+		math.clamp(value.Y, minValue.Y, maxValue.Y),
+		math.clamp(value.Z, minValue.Z, maxValue.Z)
+	)
+end
+
+local function expandBounds(relativeCFrame, size, currentMin, currentMax)
+	local halfSize = size * 0.5
+
+	for xSign = -1, 1, 2 do
+		for ySign = -1, 1, 2 do
+			for zSign = -1, 1, 2 do
+				local corner = relativeCFrame:PointToWorldSpace(Vector3.new(
+					halfSize.X * xSign,
+					halfSize.Y * ySign,
+					halfSize.Z * zSign
+				))
+
+				currentMin = Vector3.new(
+					math.min(currentMin.X, corner.X),
+					math.min(currentMin.Y, corner.Y),
+					math.min(currentMin.Z, corner.Z)
+				)
+				currentMax = Vector3.new(
+					math.max(currentMax.X, corner.X),
+					math.max(currentMax.Y, corner.Y),
+					math.max(currentMax.Z, corner.Z)
+				)
+			end
+		end
+	end
+
+	return currentMin, currentMax
+end
+
+local function getGripBias(fruit)
+	local gripBias = fruit and fruit.ToolGripBias
+	if typeof(gripBias) ~= "Vector3" then
+		return DEFAULT_TOOL_GRIP_BIAS
+	end
+
+	return Vector3.new(
+		math.clamp(gripBias.X, -1, 1),
+		math.clamp(gripBias.Y, -1, 1),
+		math.clamp(gripBias.Z, -1, 1)
+	)
+end
+
+local function getGripOffset(fruit)
+	local gripOffset = fruit and fruit.ToolGripOffset
+	if typeof(gripOffset) == "Vector3" then
+		return gripOffset
+	end
+
+	return Vector3.new()
+end
+
+local function findExplicitGripPivot(template)
+	for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
+		local attachment = template:FindFirstChild(attachmentName, true)
+		if attachment and attachment:IsA("Attachment") and attachment.Parent and attachment.Parent:IsA("BasePart") then
+			return attachment.WorldCFrame
+		end
+	end
+
+	for _, partName in ipairs(EXPLICIT_GRIP_PART_NAMES) do
+		local gripPart = template:FindFirstChild(partName, true)
+		if gripPart and gripPart:IsA("BasePart") then
+			return gripPart.CFrame
+		end
+	end
+
+	return nil
+end
+
+local function getAutomaticGripPivot(template, primaryPart, fruit)
+	local templateParts = getTemplateParts(template)
+	if #templateParts == 0 then
+		return primaryPart.CFrame
+	end
+
+	local localMin = Vector3.new(math.huge, math.huge, math.huge)
+	local localMax = Vector3.new(-math.huge, -math.huge, -math.huge)
+
+	for _, part in ipairs(templateParts) do
+		local relativeCFrame = primaryPart.CFrame:ToObjectSpace(part.CFrame)
+		localMin, localMax = expandBounds(relativeCFrame, part.Size, localMin, localMax)
+	end
+
+	local boundsCenter = (localMin + localMax) * 0.5
+	local halfExtents = (localMax - localMin) * 0.5
+	local gripBias = getGripBias(fruit)
+	local gripOffset = getGripOffset(fruit)
+	local gripLocalPosition = boundsCenter + Vector3.new(
+		halfExtents.X * gripBias.X,
+		halfExtents.Y * gripBias.Y,
+		halfExtents.Z * gripBias.Z
+	) + gripOffset
+
+	gripLocalPosition = clampVector3(gripLocalPosition, localMin, localMax)
+
+	return primaryPart.CFrame * CFrame.new(gripLocalPosition)
+end
+
+local function getGripPivot(template, primaryPart, fruit)
+	return findExplicitGripPivot(template) or getAutomaticGripPivot(template, primaryPart, fruit)
+end
+
 local function buildFruitTool(fruitKey)
 	local isValid, worldModelOrReason, fruit = DevilFruitAssets.ValidateWorldModel(fruitKey)
 	if not isValid then
@@ -265,6 +401,12 @@ local function buildFruitTool(fruitKey)
 		return nil, "missing_primary_part"
 	end
 
+	local gripPivot = getGripPivot(template, primaryPart, fruit)
+	local templateParts = getTemplateParts(template)
+	if #templateParts == 0 then
+		return nil, "missing_tool_parts"
+	end
+
 	local tool = Instance.new("Tool")
 	tool.Name = fruit.FruitKey
 	tool.ToolTip = fruit.DisplayName
@@ -275,33 +417,27 @@ local function buildFruitTool(fruitKey)
 	tool:SetAttribute(TOOL_ATTR_FRUIT_KEY, fruit.FruitKey)
 	tool:SetAttribute(TOOL_ATTR_FRUIT_NAME, fruit.DisplayName)
 
-	local clonesByOriginal = {}
-	for _, descendant in ipairs(template:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			local clone = descendant:Clone()
-			setUpPart(clone)
-			clone.CFrame = primaryPart.CFrame:ToObjectSpace(descendant.CFrame)
-			clone.Parent = tool
-			clonesByOriginal[descendant] = clone
-		end
-	end
-
-	local handle = clonesByOriginal[primaryPart]
-	if not handle then
-		tool:Destroy()
-		return nil, "missing_handle"
-	end
-
+	local handle = Instance.new("Part")
 	handle.Name = "Handle"
+	handle.Size = TOOL_HANDLE_SIZE
+	handle.Transparency = 1
+	setUpPart(handle)
 	handle.CFrame = CFrame.new()
+	handle.Parent = tool
 
-	for _, clone in pairs(clonesByOriginal) do
-		if clone ~= handle then
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = handle
-			weld.Part1 = clone
-			weld.Parent = handle
+	for _, part in ipairs(templateParts) do
+		local clone = part:Clone()
+		setUpPart(clone)
+		if clone.Name == "Handle" then
+			clone.Name = "FruitGeometryHandle"
 		end
+		clone.CFrame = gripPivot:ToObjectSpace(part.CFrame)
+		clone.Parent = tool
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = handle
+		weld.Part1 = clone
+		weld.Parent = handle
 	end
 
 	return tool
