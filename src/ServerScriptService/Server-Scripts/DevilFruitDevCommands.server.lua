@@ -70,6 +70,50 @@ local function markRecentCommand(player, commandText)
 	return true
 end
 
+local function grantAllFruits(player)
+	local grantedCount = 0
+	local alreadyOwnedCount = 0
+	local failedFruitNames = {}
+
+	for _, fruit in ipairs(DevilFruitConfig.GetAllFruits()) do
+		local quantity, quantityReason = DevilFruitInventoryService.GetFruitQuantity(player, fruit.FruitKey)
+		if quantity == nil then
+			table.insert(failedFruitNames, string.format("%s (%s)", fruit.DisplayName, tostring(quantityReason)))
+			continue
+		end
+
+		if quantity >= 1 then
+			alreadyOwnedCount += 1
+			continue
+		end
+
+		local granted, reason = DevilFruitInventoryService.GrantFruit(player, fruit.FruitKey, 1)
+		if granted then
+			grantedCount += 1
+		else
+			table.insert(failedFruitNames, string.format("%s (%s)", fruit.DisplayName, tostring(reason)))
+		end
+	end
+
+	if #failedFruitNames > 0 then
+		warn(string.format(
+			"[DevFruitDevCommands] %s used /fruit all (granted=%d, already_owned=%d, failed=%s)",
+			player.Name,
+			grantedCount,
+			alreadyOwnedCount,
+			table.concat(failedFruitNames, ", ")
+		))
+		return
+	end
+
+	print(string.format(
+		"[DevFruitDevCommands] %s used /fruit all (granted=%d, already_owned=%d)",
+		player.Name,
+		grantedCount,
+		alreadyOwnedCount
+	))
+end
+
 local function processFruitCommand(player, argumentText)
 	if not isAuthorized(player) then
 		return
@@ -78,6 +122,11 @@ local function processFruitCommand(player, argumentText)
 	local normalizedArgument = normalizeText(argumentText)
 	if normalizedArgument == "" then
 		warn(string.format("[DevFruitDevCommands] %s used /fruit without an argument", player.Name))
+		return
+	end
+
+	if normalizedArgument == "all" then
+		grantAllFruits(player)
 		return
 	end
 

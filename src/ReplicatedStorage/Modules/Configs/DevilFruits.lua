@@ -77,6 +77,51 @@ local DevilFruits = {
 				},
 			},
 		},
+		Tori = {
+			Id = "ToriToriNoMiModelPhoenix",
+			FruitKey = "Tori",
+			DisplayName = "Tori Tori no Mi",
+			AssetFolder = "Tori",
+			AbilityModule = "Tori",
+			Rarity = "Mythic",
+			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			Aliases = {
+				"tori",
+				"tori tori",
+				"phoenix",
+				"phoenix fruit",
+				"tori phoenix",
+			},
+			Passives = {
+				PhoenixGlide = {
+					JumpHeightMultiplier = 1.2,
+					FallSpeed = 18,
+					ForwardSpeed = 28,
+					Responsiveness = 8,
+					ActivateMaxVerticalSpeed = 6,
+				},
+			},
+			Abilities = {
+				PhoenixFlight = {
+					KeyCode = Enum.KeyCode.Q,
+					Cooldown = 13,
+					Duration = 4.5,
+					TakeoffDuration = 0.4,
+					InitialLift = 22,
+					MaxRiseHeight = 56,
+					FlightSpeed = 80,
+					VerticalSpeed = 90,
+					MaxDescendSpeed = 72,
+					HorizontalResponsiveness = 14,
+				},
+				PhoenixFlameShield = {
+					KeyCode = Enum.KeyCode.E,
+					Cooldown = 20,
+					Radius = 13,
+					Duration = 2.75,
+				},
+			},
+		},
 	},
 }
 

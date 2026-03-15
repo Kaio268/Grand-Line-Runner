@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HazardUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local ProtectionRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
 
 local player = Players.LocalPlayer
 
@@ -17,6 +18,15 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
+local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
+local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
+local PHOENIX_EFFECT_COLOR = Color3.fromRGB(108, 255, 214)
+local PHOENIX_EFFECT_ACCENT_COLOR = Color3.fromRGB(255, 188, 113)
+local HAZARD_SUPPRESSION_INTERVAL = 0.05
+local PHOENIX_SHIELD_PADDING = 2.5
+local PHOENIX_VERTICAL_DEADZONE = 0.12
+local MIN_DIRECTION_MAGNITUDE = 0.01
 
 local function waitForChildSafe(parent, childName, timeout)
 	local deadline = os.clock() + (timeout or 15)
@@ -42,11 +52,33 @@ local effectRemote = waitForChildSafe(remotes, "DevilFruitAbilityEffect", 15)
 local localCooldowns = {}
 local suppressedParts = {}
 local activeFireBursts = {}
+local activePhoenixShields = {}
+local hazardSuppressionLoopRunning = false
+local spaceHeld = false
+local flightInputState = {
+	Forward = false,
+	Backward = false,
+	Left = false,
+	Right = false,
+}
 local getFruitFolder
 local getEquippedFruit
 local gomuAimState = {
 	Highlight = nil,
 	TargetPlayer = nil,
+}
+local phoenixFlightState = {
+	Active = false,
+	EndTime = 0,
+	TakeoffEndTime = 0,
+	TakeoffVelocity = 0,
+	ActivationHeight = 0,
+	InitialLiftTarget = 0,
+	MaxHeight = 0,
+	FlightSpeed = 0,
+	VerticalSpeed = 0,
+	MaxDescendSpeed = 0,
+	HorizontalResponsiveness = 0,
 }
 local cooldownHud = {
 	CurrentFruit = nil,
@@ -534,8 +566,316 @@ local function getPlayerRootPart(targetPlayer)
 	return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function getHumanoid()
+	local character = getCharacter()
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
 local function getCurrentCamera()
 	return Workspace.CurrentCamera
+end
+
+local function getPlanarVector(vector)
+	return Vector3.new(vector.X, 0, vector.Z)
+end
+
+local function getCurrentLookVector(rootPart)
+	local camera = getCurrentCamera()
+	local lookVector = camera and camera.CFrame.LookVector or (rootPart and rootPart.CFrame.LookVector)
+	if typeof(lookVector) ~= "Vector3" or lookVector.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return Vector3.new(0, 0, -1)
+	end
+
+	return lookVector.Unit
+end
+
+local function getInitialLiftVelocity(initialLift)
+	local gravity = math.max(Workspace.Gravity, 0.01)
+	return math.sqrt(2 * gravity * math.max(initialLift, 0))
+end
+
+local function setFlightInputKeyState(keyCode, isPressed)
+	if keyCode == Enum.KeyCode.W or keyCode == Enum.KeyCode.Up then
+		flightInputState.Forward = isPressed
+		return true
+	end
+
+	if keyCode == Enum.KeyCode.S or keyCode == Enum.KeyCode.Down then
+		flightInputState.Backward = isPressed
+		return true
+	end
+
+	if keyCode == Enum.KeyCode.A or keyCode == Enum.KeyCode.Left then
+		flightInputState.Left = isPressed
+		return true
+	end
+
+	if keyCode == Enum.KeyCode.D or keyCode == Enum.KeyCode.Right then
+		flightInputState.Right = isPressed
+		return true
+	end
+
+	return false
+end
+
+local function getFlightInputAxes()
+	local forwardAxis = 0
+	local rightAxis = 0
+
+	if flightInputState.Forward then
+		forwardAxis += 1
+	end
+	if flightInputState.Backward then
+		forwardAxis -= 1
+	end
+	if flightInputState.Right then
+		rightAxis += 1
+	end
+	if flightInputState.Left then
+		rightAxis -= 1
+	end
+
+	return forwardAxis, rightAxis
+end
+
+local function getCameraRelativeFlightDirection(rootPart)
+	local forwardAxis, rightAxis = getFlightInputAxes()
+	if forwardAxis == 0 and rightAxis == 0 then
+		return Vector3.zero
+	end
+
+	local camera = getCurrentCamera()
+	local lookVector = camera and camera.CFrame.LookVector or getCurrentLookVector(rootPart)
+	local rightVector = camera and camera.CFrame.RightVector or (rootPart and rootPart.CFrame.RightVector) or Vector3.xAxis
+	local direction = (lookVector * forwardAxis) + (rightVector * rightAxis)
+	local magnitude = direction.Magnitude
+	if magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return Vector3.zero
+	end
+
+	return direction.Unit * math.min(math.sqrt((forwardAxis * forwardAxis) + (rightAxis * rightAxis)), 1)
+end
+
+local function faceCharacterTowards(direction)
+	if typeof(direction) ~= "Vector3" or direction.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return
+	end
+
+	local character = getCharacter()
+	local rootPart = getRootPart()
+	if not character or not rootPart then
+		return
+	end
+
+	local planarDirection = getPlanarVector(direction)
+	if planarDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return
+	end
+
+	local rootPosition = rootPart.Position
+	local targetCFrame = CFrame.lookAt(rootPosition, rootPosition + planarDirection.Unit, Vector3.yAxis)
+	character:PivotTo(targetCFrame)
+end
+
+local function getGlideConfig()
+	local fruitName = getEquippedFruit()
+	if fruitName ~= PHOENIX_FRUIT_NAME then
+		return nil
+	end
+
+	local fruit = DevilFruitConfig.GetFruit(fruitName)
+	return fruit and fruit.Passives and fruit.Passives.PhoenixGlide or nil
+end
+
+local function isPhoenixFlightActive(now)
+	now = now or os.clock()
+	return phoenixFlightState.Active and now < phoenixFlightState.EndTime
+end
+
+local function stopPhoenixFlight()
+	if not phoenixFlightState.Active then
+		return
+	end
+
+	phoenixFlightState.Active = false
+	phoenixFlightState.EndTime = 0
+	phoenixFlightState.TakeoffEndTime = 0
+	phoenixFlightState.TakeoffVelocity = 0
+	phoenixFlightState.ActivationHeight = 0
+	phoenixFlightState.InitialLiftTarget = 0
+	phoenixFlightState.MaxHeight = 0
+	phoenixFlightState.FlightSpeed = 0
+	phoenixFlightState.VerticalSpeed = 0
+	phoenixFlightState.MaxDescendSpeed = 0
+	phoenixFlightState.HorizontalResponsiveness = 0
+
+	local humanoid = getHumanoid()
+	if humanoid then
+		humanoid.AutoRotate = true
+	end
+end
+
+local function startPhoenixFlight(payload)
+	local rootPart = getRootPart()
+	local humanoid = getHumanoid()
+	if not rootPart or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	stopPhoenixFlight()
+
+	local duration = math.max(0.1, tonumber(payload.Duration) or 0)
+	local takeoffDuration = math.max(0.1, tonumber(payload.TakeoffDuration) or 0.4)
+	local initialLift = math.max(0, tonumber(payload.InitialLift) or 10)
+	local maxRiseHeight = math.max(initialLift, tonumber(payload.MaxRiseHeight) or initialLift)
+	local liftVelocity = getInitialLiftVelocity(initialLift)
+
+	phoenixFlightState.Active = true
+	phoenixFlightState.EndTime = os.clock() + duration
+	phoenixFlightState.TakeoffEndTime = os.clock() + takeoffDuration
+	phoenixFlightState.TakeoffVelocity = liftVelocity
+	phoenixFlightState.ActivationHeight = rootPart.Position.Y
+	phoenixFlightState.InitialLiftTarget = rootPart.Position.Y + initialLift
+	phoenixFlightState.MaxHeight = rootPart.Position.Y + maxRiseHeight
+	phoenixFlightState.FlightSpeed = math.max(0, tonumber(payload.FlightSpeed) or 78)
+	phoenixFlightState.VerticalSpeed = math.max(0, tonumber(payload.VerticalSpeed) or 52)
+	phoenixFlightState.MaxDescendSpeed = math.max(0, tonumber(payload.MaxDescendSpeed) or 58)
+	phoenixFlightState.HorizontalResponsiveness = math.max(1, tonumber(payload.HorizontalResponsiveness) or 10)
+
+	humanoid.AutoRotate = false
+	humanoid.Jump = true
+	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = Vector3.new(
+		currentVelocity.X,
+		math.max(currentVelocity.Y, liftVelocity),
+		currentVelocity.Z
+	)
+end
+
+local function updatePhoenixFlight(dt)
+	local now = os.clock()
+	if getEquippedFruit() ~= PHOENIX_FRUIT_NAME then
+		stopPhoenixFlight()
+		return
+	end
+
+	if not isPhoenixFlightActive(now) then
+		if phoenixFlightState.Active then
+			stopPhoenixFlight()
+		end
+		return
+	end
+
+	local rootPart = getRootPart()
+	local humanoid = getHumanoid()
+	if not rootPart or not humanoid or humanoid.Health <= 0 then
+		stopPhoenixFlight()
+		return
+	end
+
+	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+
+	local desiredFlightDirection = getCameraRelativeFlightDirection(rootPart)
+	local desiredVelocity = desiredFlightDirection * phoenixFlightState.FlightSpeed
+	local currentHeight = rootPart.Position.Y
+	local inTakeoffPhase = now < phoenixFlightState.TakeoffEndTime and currentHeight < phoenixFlightState.InitialLiftTarget
+	if desiredVelocity.Y > 0 and math.abs(desiredVelocity.Y) < (phoenixFlightState.VerticalSpeed * PHOENIX_VERTICAL_DEADZONE) then
+		desiredVelocity = Vector3.new(desiredVelocity.X, 0, desiredVelocity.Z)
+	end
+	if inTakeoffPhase then
+		desiredVelocity = Vector3.new(
+			desiredVelocity.X,
+			math.max(desiredVelocity.Y, phoenixFlightState.TakeoffVelocity),
+			desiredVelocity.Z
+		)
+	end
+	if currentHeight >= phoenixFlightState.MaxHeight and desiredVelocity.Y > 0 then
+		desiredVelocity = Vector3.new(desiredVelocity.X, 0, desiredVelocity.Z)
+	end
+
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	local response = math.clamp(phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
+	local nextVelocity
+	if inTakeoffPhase then
+		nextVelocity = Vector3.new(
+			currentVelocity.X + ((desiredVelocity.X - currentVelocity.X) * response),
+			math.max(currentVelocity.Y, desiredVelocity.Y),
+			currentVelocity.Z + ((desiredVelocity.Z - currentVelocity.Z) * response)
+		)
+	else
+		nextVelocity = currentVelocity:Lerp(desiredVelocity, response)
+	end
+	if desiredVelocity.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		nextVelocity = Vector3.zero
+	end
+	if currentHeight > (phoenixFlightState.MaxHeight + 0.5) then
+		nextVelocity = Vector3.new(nextVelocity.X, math.min(nextVelocity.Y, -14), nextVelocity.Z)
+	end
+
+	rootPart.AssemblyLinearVelocity = nextVelocity
+
+	local desiredPlanarDirection = getPlanarVector(desiredVelocity)
+	local nextPlanarDirection = getPlanarVector(nextVelocity)
+	if desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE or nextPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
+		local facingDirection = desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and desiredPlanarDirection or nextPlanarDirection
+		faceCharacterTowards(facingDirection)
+	end
+end
+
+local function updatePhoenixGlide(dt)
+	local glideConfig = getGlideConfig()
+	if not glideConfig or not spaceHeld or isPhoenixFlightActive() then
+		return
+	end
+
+	local rootPart = getRootPart()
+	local humanoid = getHumanoid()
+	if not rootPart or not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	local humanoidState = humanoid:GetState()
+	if humanoidState ~= Enum.HumanoidStateType.Freefall and humanoidState ~= Enum.HumanoidStateType.Jumping then
+		return
+	end
+
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	local activationThreshold = tonumber(glideConfig.ActivateMaxVerticalSpeed) or 6
+	if currentVelocity.Y > activationThreshold then
+		return
+	end
+
+	local desiredDirection = getPlanarVector(getCurrentLookVector(rootPart))
+	if desiredDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		desiredDirection = getPlanarVector(humanoid.MoveDirection)
+	end
+	if desiredDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		desiredDirection = getPlanarVector(rootPart.CFrame.LookVector)
+	end
+	if desiredDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return
+	end
+
+	local forwardSpeed = math.max(0, tonumber(glideConfig.ForwardSpeed) or 28)
+	local fallSpeed = math.max(0, tonumber(glideConfig.FallSpeed) or 18)
+	local response = math.clamp((tonumber(glideConfig.Responsiveness) or 8) * dt, 0, 1)
+	local desiredPlanarVelocity = desiredDirection.Unit * forwardSpeed
+	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(desiredPlanarVelocity, response)
+	local nextVerticalVelocity = currentVelocity.Y
+
+	if currentVelocity.Y <= 0 then
+		local desiredVerticalVelocity = -fallSpeed
+		nextVerticalVelocity = currentVelocity.Y + ((desiredVerticalVelocity - currentVelocity.Y) * response)
+	end
+
+	rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, nextVerticalVelocity, nextPlanarVelocity.Z)
 end
 
 local function getPlanarDistance(a, b)
@@ -806,10 +1146,12 @@ local function suppressPart(part, untilTime)
 
 	suppressedParts[part] = {
 		OriginalCanTouch = part.CanTouch,
+		OriginalCanCollide = part.CanCollide,
 		UntilTime = untilTime,
 	}
 
 	part.CanTouch = false
+	part.CanCollide = false
 end
 
 local function suppressHazard(container, untilTime)
@@ -835,12 +1177,81 @@ local function restoreSuppressedParts(now)
 			suppressedParts[part] = nil
 		elseif now >= state.UntilTime then
 			part.CanTouch = state.OriginalCanTouch
+			part.CanCollide = state.OriginalCanCollide
 			suppressedParts[part] = nil
 		end
 	end
 end
 
-local function updateFireBursts()
+local function isLocalPlayerInsidePhoenixShield(position)
+	local checkPosition = position
+	if typeof(checkPosition) ~= "Vector3" then
+		local rootPart = getRootPart()
+		checkPosition = rootPart and rootPart.Position or nil
+	end
+	if not checkPosition then
+		return false
+	end
+
+	local now = os.clock()
+	for shieldOwner, shield in pairs(activePhoenixShields) do
+		if now >= shield.EndTime then
+			activePhoenixShields[shieldOwner] = nil
+		else
+			local ownerRootPart = getPlayerRootPart(shieldOwner)
+			if ownerRootPart and getPlanarDistance(ownerRootPart.Position, checkPosition) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+ProtectionRuntime.Register("PhoenixProtection", function(targetPlayer, position)
+	if targetPlayer ~= player then
+		return false
+	end
+
+	return isLocalPlayerInsidePhoenixShield(position)
+end)
+
+local function buildLocalHazardOverlapParams()
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = player.Character and { player.Character } or {}
+	return overlapParams
+end
+
+local function suppressHazardsNearPosition(centerPosition, radius, untilTime, shouldSuppress)
+	if typeof(centerPosition) ~= "Vector3" or radius <= 0 then
+		return
+	end
+
+	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, buildLocalHazardOverlapParams())
+	for _, part in ipairs(nearbyParts) do
+		local container, hazardClass, hazardType = getHazardContainer(part)
+		if container and (shouldSuppress == nil or shouldSuppress(container, hazardClass, hazardType)) then
+			suppressHazard(container, untilTime)
+		end
+	end
+end
+
+local function hasActiveHazardProtection(now)
+	if #activeFireBursts > 0 then
+		return true
+	end
+
+	for _, shield in pairs(activePhoenixShields) do
+		if now < shield.EndTime then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function updateHazardSuppression()
 	local now = os.clock()
 	local rootPart = getRootPart()
 
@@ -851,25 +1262,43 @@ local function updateFireBursts()
 		else
 			-- Corridor hazards are client-created in this project, so Fire Burst
 			-- suppresses nearby minor hazards locally after the server authorizes it.
-			local overlapParams = OverlapParams.new()
-			overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-			overlapParams.FilterDescendantsInstances = { player.Character }
+			suppressHazardsNearPosition(rootPart.Position, burst.Radius, burst.EndTime, function(_, hazardClass)
+				return hazardClass == "minor"
+			end)
+		end
+	end
 
-			local nearbyParts = Workspace:GetPartBoundsInRadius(rootPart.Position, burst.Radius, overlapParams)
-			for _, part in ipairs(nearbyParts) do
-				local container, hazardClass = getHazardContainer(part)
-				if container and hazardClass == "minor" then
-					suppressHazard(container, burst.EndTime)
+	for shieldOwner, shield in pairs(activePhoenixShields) do
+		if now >= shield.EndTime then
+			activePhoenixShields[shieldOwner] = nil
+		else
+			local ownerRootPart = getPlayerRootPart(shieldOwner)
+			if not ownerRootPart then
+				if shieldOwner.Parent == nil then
+					activePhoenixShields[shieldOwner] = nil
 				end
+			elseif rootPart and getPlanarDistance(ownerRootPart.Position, rootPart.Position) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
+				suppressHazardsNearPosition(ownerRootPart.Position, shield.Radius, shield.EndTime)
 			end
 		end
 	end
 
 	restoreSuppressedParts(now)
 
-	if #activeFireBursts > 0 then
-		task.delay(0.05, updateFireBursts)
+	if hasActiveHazardProtection(now) then
+		task.delay(HAZARD_SUPPRESSION_INTERVAL, updateHazardSuppression)
+	else
+		hazardSuppressionLoopRunning = false
 	end
+end
+
+local function ensureHazardSuppressionLoop()
+	if hazardSuppressionLoopRunning then
+		return
+	end
+
+	hazardSuppressionLoopRunning = true
+	updateHazardSuppression()
 end
 
 local function startFireBurst(payload)
@@ -884,9 +1313,33 @@ local function startFireBurst(payload)
 		EndTime = os.clock() + duration,
 	})
 
-	if #activeFireBursts == 1 then
-		updateFireBursts()
+	ensureHazardSuppressionLoop()
+end
+
+local function startPhoenixShield(targetPlayer, payload)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return
 	end
+
+	local duration = tonumber(payload.Duration) or 0
+	local radius = tonumber(payload.Radius) or 0
+	if duration <= 0 or radius <= 0 then
+		return
+	end
+
+	local shieldState = activePhoenixShields[targetPlayer]
+	local shieldEndTime = os.clock() + duration
+	if shieldState then
+		shieldState.EndTime = math.max(shieldState.EndTime, shieldEndTime)
+		shieldState.Radius = math.max(shieldState.Radius, radius)
+	else
+		activePhoenixShields[targetPlayer] = {
+			EndTime = shieldEndTime,
+			Radius = radius,
+		}
+	end
+
+	ensureHazardSuppressionLoop()
 end
 
 local function getProjectileDirection(direction, rootPart)
@@ -1246,6 +1699,142 @@ local function createFallbackBurstEffect(targetPlayer, fruitName, abilityName, p
 	end)
 end
 
+local function createPhoenixFlightEffect(targetPlayer, fruitName, abilityName, _payload)
+	if fruitName ~= PHOENIX_FRUIT_NAME or abilityName ~= PHOENIX_FLIGHT_ABILITY then
+		return
+	end
+
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return
+	end
+
+	local burst = Instance.new("Part")
+	burst.Name = "PhoenixFlightBurst"
+	burst.Shape = Enum.PartType.Ball
+	burst.Anchored = true
+	burst.CanCollide = false
+	burst.CanTouch = false
+	burst.CanQuery = false
+	burst.Material = Enum.Material.Neon
+	burst.Color = PHOENIX_EFFECT_COLOR
+	burst.Transparency = 0.18
+	burst.Size = Vector3.new(2.25, 2.25, 2.25)
+	burst.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 1.5, 0))
+	burst.Parent = Workspace
+
+	local ring = Instance.new("Part")
+	ring.Name = "PhoenixFlightRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = PHOENIX_EFFECT_ACCENT_COLOR
+	ring.Transparency = 0.28
+	ring.Size = Vector3.new(0.22, 4.8, 4.8)
+	ring.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = Workspace
+
+	local burstTween = TweenService:Create(burst, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(7, 7, 7),
+	})
+	local ringTween = TweenService:Create(ring, TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(0.22, 9, 9),
+	})
+
+	burstTween:Play()
+	ringTween:Play()
+
+	burstTween.Completed:Connect(function()
+		if burst.Parent then
+			burst:Destroy()
+		end
+	end)
+
+	ringTween.Completed:Connect(function()
+		if ring.Parent then
+			ring:Destroy()
+		end
+	end)
+end
+
+local function createPhoenixShieldEffect(targetPlayer, fruitName, abilityName, payload)
+	if fruitName ~= PHOENIX_FRUIT_NAME or abilityName ~= PHOENIX_SHIELD_ABILITY then
+		return
+	end
+
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return
+	end
+
+	local radius = math.max(1, tonumber(payload.Radius) or 13)
+	local duration = math.max(0.1, tonumber(payload.Duration) or 2.75)
+	local endTime = os.clock() + duration
+
+	local ring = Instance.new("Part")
+	ring.Name = "PhoenixShieldRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = PHOENIX_EFFECT_COLOR
+	ring.Transparency = 0.32
+	ring.Size = Vector3.new(0.24, radius * 2, radius * 2)
+	ring.CFrame = CFrame.new(rootPart.Position - Vector3.new(0, 2.6, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = Workspace
+
+	local aura = Instance.new("Part")
+	aura.Name = "PhoenixShieldAura"
+	aura.Shape = Enum.PartType.Ball
+	aura.Anchored = true
+	aura.CanCollide = false
+	aura.CanTouch = false
+	aura.CanQuery = false
+	aura.Material = Enum.Material.ForceField
+	aura.Color = PHOENIX_EFFECT_ACCENT_COLOR
+	aura.Transparency = 0.72
+	aura.Size = Vector3.new(4.5, 4.5, 4.5)
+	aura.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 1.5, 0))
+	aura.Parent = Workspace
+
+	local ringTween = TweenService:Create(ring, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+		Transparency = 0.82,
+	})
+	local auraTween = TweenService:Create(aura, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+		Transparency = 1,
+	})
+
+	ringTween:Play()
+	auraTween:Play()
+
+	task.spawn(function()
+		while ring.Parent and aura.Parent and os.clock() < endTime do
+			local currentRootPart = getPlayerRootPart(targetPlayer)
+			if not currentRootPart then
+				break
+			end
+
+			ring.CFrame = CFrame.new(currentRootPart.Position - Vector3.new(0, 2.6, 0)) * CFrame.Angles(0, 0, math.rad(90))
+			aura.CFrame = CFrame.new(currentRootPart.Position + Vector3.new(0, 1.5, 0))
+			RunService.Heartbeat:Wait()
+		end
+
+		if ring.Parent then
+			ring:Destroy()
+		end
+		if aura.Parent then
+			aura:Destroy()
+		end
+	end)
+end
+
 local function createRubberLaunchEffect(_targetPlayer, fruitName, abilityName, payload)
 	if fruitName ~= "Gomu Gomu no Mi" or abilityName ~= "RubberLaunch" then
 		return
@@ -1320,12 +1909,30 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
+	if input.KeyCode == Enum.KeyCode.Space then
+		spaceHeld = true
+	end
+	setFlightInputKeyState(input.KeyCode, true)
+
 	local fruitName, abilityName = getAbilityForKeyCode(input.KeyCode)
+	if fruitName == PHOENIX_FRUIT_NAME and abilityName == PHOENIX_FLIGHT_ABILITY and isPhoenixFlightActive() then
+		stopPhoenixFlight()
+		return
+	end
+
 	if not abilityName or not isLocallyReady(abilityName) then
 		return
 	end
 
 	requestRemote:FireServer(abilityName, buildAbilityRequestPayload(fruitName, abilityName))
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.Space then
+		spaceHeld = false
+	end
+
+	setFlightInputKeyState(input.KeyCode, false)
 end)
 
 stateRemote.OnClientEvent:Connect(function(eventName, fruitName, abilityName, value, payload)
@@ -1354,30 +1961,62 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 		return
 	end
 
+	local resolvedPayload = payload or {}
+
 	playOptionalEffect(targetPlayer, fruitName, abilityName)
-	createFallbackBurstEffect(targetPlayer, fruitName, abilityName, payload or {})
-	createRubberLaunchEffect(targetPlayer, fruitName, abilityName, payload or {})
+	createFallbackBurstEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
+	createPhoenixFlightEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
+	createPhoenixShieldEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
+	createRubberLaunchEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
+
+	if fruitName == PHOENIX_FRUIT_NAME and abilityName == PHOENIX_FLIGHT_ABILITY then
+		if targetPlayer == player then
+			startPhoenixFlight(resolvedPayload)
+		end
+		return
+	end
+
+	if fruitName == PHOENIX_FRUIT_NAME and abilityName == PHOENIX_SHIELD_ABILITY then
+		startPhoenixShield(targetPlayer, resolvedPayload)
+		return
+	end
 
 	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
-		launchFreezeShot(targetPlayer, payload or {}, targetPlayer == player)
+		launchFreezeShot(targetPlayer, resolvedPayload, targetPlayer == player)
 		return
 	end
 
 	if fruitName == "Hie Hie no Mi" and abilityName == "IceBoost" then
-		createIceBoostEffect(targetPlayer, payload or {})
+		createIceBoostEffect(targetPlayer, resolvedPayload)
 	end
 end)
 
 player.CharacterRemoving:Connect(function()
 	activeFireBursts = {}
+	stopPhoenixFlight()
+	spaceHeld = false
+	flightInputState.Forward = false
+	flightInputState.Backward = false
+	flightInputState.Left = false
+	flightInputState.Right = false
+	hazardSuppressionLoopRunning = false
 	restoreSuppressedParts(math.huge)
 	clearGomuHighlight()
+end)
+
+player.CharacterAdded:Connect(function()
+	if hasActiveHazardProtection(os.clock()) then
+		ensureHazardSuppressionLoop()
+	end
 end)
 
 player:GetAttributeChangedSignal("EquippedDevilFruit"):Connect(function()
 	hookFruitFolderSignals()
 	updateCooldownHud(true)
 	updateGomuAimAssist()
+	if getEquippedFruit() ~= PHOENIX_FRUIT_NAME then
+		stopPhoenixFlight()
+	end
 end)
 
 player:GetAttributeChangedSignal("DevilFruitCooldownBypass"):Connect(function()
@@ -1389,7 +2028,15 @@ player.ChildAdded:Connect(function(child)
 		hookFruitFolderSignals()
 		updateCooldownHud(true)
 		updateGomuAimAssist()
+		if getEquippedFruit() ~= PHOENIX_FRUIT_NAME then
+			stopPhoenixFlight()
+		end
 	end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+	updatePhoenixFlight(dt)
+	updatePhoenixGlide(dt)
 end)
 
 RunService.RenderStepped:Connect(function()

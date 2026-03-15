@@ -21,6 +21,11 @@ local HazardRuntime = require(
 		:WaitForChild("DevilFruits")
 		:WaitForChild("HazardRuntime")
 )
+local ProtectionRuntime = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("ProtectionRuntime")
+)
 
 local WavesFolder = ReplicatedStorage:WaitForChild("Waves")
 
@@ -585,6 +590,11 @@ local function killLocalPlayer()
 	if not char then return end
 
 	local hum = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if hrp and ProtectionRuntime.IsProtected(LocalPlayer, hrp.Position, "WaveKill") then
+		return
+	end
+
 	if hum and hum.Health > 0 then
 		if KillMeEvent and KillMeEvent:IsA("RemoteEvent") then
 			KillMeEvent:FireServer()
