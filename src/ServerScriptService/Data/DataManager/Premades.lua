@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Types = require(ReplicatedStorage.Modules.Types)
+local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
 local Premades = {}
 local DataManager: Types.DataManager
@@ -8,8 +9,8 @@ function Premades.AddMoney(DataManager: Types.DataManager, Player: Player, Amoun
 	local finalAmount = Amount  * Player.Gamepasses.x2MoneyValue.Value * Player.Active.x2Money.Value
 		
 	if finalAmount ~= 0 then
-		DataManager:AddValue(Player, "leaderstats.Money", finalAmount)
-		DataManager:AddValue(Player, "TotalStats.TotalMoney", finalAmount)
+		DataManager:AddValue(Player, CurrencyUtil.getPrimaryPath(), finalAmount)
+		DataManager:AddValue(Player, CurrencyUtil.getTotalPath(), finalAmount)
 	end
 end
 

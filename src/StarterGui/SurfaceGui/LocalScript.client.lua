@@ -5,6 +5,7 @@ local player = Players.LocalPlayer
 
 local remote = ReplicatedStorage.Remotes:WaitForChild("PlotUpgradeRemote")
 local cfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local ui = script.Parent
 local info = ui:WaitForChild("Info")
@@ -39,7 +40,7 @@ end
 local function updateUI()
 	local cur = (upVal and upVal.Value) or 0
 	info.Text = tostring(cur) .. " -> " .. tostring(cur + 1)
-	textL.Text = short.roundNumber(priceFor(cur)) .. "$"
+	textL.Text = short.roundNumber(priceFor(cur)) .. CurrencyUtil.getCompactSuffix()
 end
 
 updateUI()

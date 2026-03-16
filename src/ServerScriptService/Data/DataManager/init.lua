@@ -18,10 +18,12 @@ local ProfileStore = require(game.ServerScriptService.Framework.ProfileStore)
 local GlobalStore = require(game.ServerScriptService.Framework.GlobalStore)
 local Replica = require(game.ServerScriptService.Framework.ReplicaServer)
 local GetTemplate = require(script.GetTemplate)
+local ProfileMigrations = require(script.ProfileMigrations)
 local MessageFunctions = require(script.MessageFunctions)
 local ProductFunctions = require(script.ProductFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
+local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -48,6 +50,22 @@ local SCRIPT_VERSION = script:GetTags()[1]
 	Primary message functions to DataManager:MessageAsync() function
 ]]
 
+local PathAliasLookup = {}
+
+for canonicalPath, aliases in pairs(EconomyConfig.PathAliases or {}) do
+	for _, alias in ipairs(aliases) do
+		PathAliasLookup[alias] = canonicalPath
+	end
+end
+
+local function NormalizeDataPath(path: string): string
+	if typeof(path) ~= "string" then
+		return path
+	end
+
+	return PathAliasLookup[path] or path
+end
+
 
 local function SanitizeAttributeValue(raw)
 	local t = typeof(raw)
@@ -64,6 +82,7 @@ local function SanitizeAttributeValue(raw)
 end
 
 local function GetInstanceFromPath(player: Player, path: string): Instance?
+	path = NormalizeDataPath(path)
 	local obj: Instance = player
 	for _, part in ipairs(path:split(".")) do
 		obj = obj:FindFirstChild(part)
@@ -159,6 +178,7 @@ function DataManager:TryGetReplica(player: Player)
 end
 
 local function ReadValueFromProfile(profile, path: string)
+	path = NormalizeDataPath(path)
 	local pathTable = path:split(".")
 	local pointer = profile
 
@@ -211,6 +231,7 @@ end
 	Function used to shorten code (isn't usable from the outside)
 ]]
 function GetPointer(path : string, profile : typeof(PlayerStore:StartSessionAsync())) : ({any?}?, {any?}?)
+	path = NormalizeDataPath(path)
 	local pathTable = path:split(".")
 	local pointer = profile
 
@@ -250,6 +271,7 @@ end
 
 
 local function ReconstructPath(Player: Player, Path: string, EndValue: any?)
+	Path = NormalizeDataPath(Path)
 	local PathTable = string.split(Path, ".")
 	local Pointer = self:GetData(Player)
 	for Index, PathPoint in ipairs(PathTable) do
@@ -582,7 +604,7 @@ end
 
 local function RecursiveRemove(data, folder : Folder)
 	for k, v in pairs(folder:GetChildren()) do
-		if not v:IsA("Folder") or not v:IsA("NumberValue") or not v:IsA("StringValue") or not v:IsA("IntValue") or not v:IsA("BoolValue") then
+		if not (v:IsA("Folder") or v:IsA("NumberValue") or v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("BoolValue")) then
 			continue
 		end
 
@@ -758,6 +780,7 @@ function PlayerAdded(player: Player)
 	if profile ~= nil then
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
+		ProfileMigrations.Apply(profile.Data)
 
 		profile.OnSessionEnd:Connect(function()
 			Profiles[player] = nil
@@ -1085,6 +1108,7 @@ end
 
 
 local function _getParentKeyAndPath(profile, path: string)
+	path = NormalizeDataPath(path)
 	local parts = path:split(".")
 	local t = profile.Data
 	local i = 1

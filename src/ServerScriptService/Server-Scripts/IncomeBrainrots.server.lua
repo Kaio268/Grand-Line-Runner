@@ -10,6 +10,7 @@ local StandUpgradeCost = require(ServerScriptService.Modules.StandsUpgrades)
 local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
 local shorten = require(ReplicatedStorage.Modules.Shorten)
+local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
 local stealProductByRarity = {
 	Common = 3512126073,
@@ -526,12 +527,11 @@ local function getStandIncomeDisplay(player, standName)
 end
 
 local function getPlayerMoney(player)
-	local ls = player:FindFirstChild("leaderstats")
-	local m = ls and ls:FindFirstChild("Money")
-	if m and m:IsA("NumberValue") then
-		return m.Value
+	local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
+	if moneyValue then
+		return moneyValue.Value
 	end
-	local v = dmGet(player, "leaderstats.Money")
+	local v = dmGet(player, CurrencyUtil.getPrimaryPath())
 	if typeof(v) == "number" then
 		return v
 	end
@@ -750,7 +750,7 @@ local function setHoverTextsNoTime(refs, player, brainrotName)
 	end
 
 	if refs.Income then
-		refs.Income.Text = shorten.roundNumber(math.floor(income)) .. "$/s"
+		refs.Income.Text = shorten.roundNumber(math.floor(income)) .. CurrencyUtil.getPerSecondSuffix()
 	end
 	if refs.Name then
 		refs.Name.Text = displayName
@@ -829,7 +829,7 @@ end
 local function setMoneyText(standModel, amount)
 	local money = getMoneyLabel(standModel)
 	if money then
-		money.Text = shorten.roundNumber(math.floor(amount)) .. "$"
+		money.Text = shorten.roundNumber(math.floor(amount)) .. CurrencyUtil.getCompactSuffix()
 	end
 end
 
@@ -1030,7 +1030,7 @@ local function updateLevelUpUI(player, standModel)
 	end
 
 	setLevelUpVisible(standModel, true)
-	if refs.Price then refs.Price.Text = "$" .. shorten.roundNumber(math.floor(cost)) end
+	if refs.Price then refs.Price.Text = shorten.roundNumber(math.floor(cost)) .. CurrencyUtil.getCompactSuffix() end
 	if refs.Upgrade then refs.Upgrade.Text = "Upgrade Level " .. tostring(nextLevel) end
 end
 
@@ -1096,8 +1096,8 @@ local function bindZoneCollect(player, plot, standModel)
 		local mult = getStandCollectMultiplier(plr, standName)
 		local collected = math.floor(baseToCollect * mult)
 
-		DataManager:AddValue(plr, "leaderstats.Money", collected)
-		DataManager:AddValue(plr, "TotalStats.TotalMoney", collected)
+		DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected)
+		DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected)
 
 		if MoneyCollectedRE then
 			MoneyCollectedRE:FireClient(plr, standModel, collected)
@@ -1142,7 +1142,7 @@ local function bindLevelUp(player, plot, standModel)
 			return
 		end
 
-		dmAdjust(plr, "leaderstats.Money", -cost)
+		dmAdjust(plr, CurrencyUtil.getPrimaryPath(), -cost)
 		dmAdjust(plr, "StandsLevels." .. standName, 1)
 		dmAdjust(plr, "Inventory." .. brainrotName .. ".Level", 1)
 

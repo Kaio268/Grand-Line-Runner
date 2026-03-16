@@ -6,13 +6,17 @@ local StarterGui = game:GetService("StarterGui")
 local player = Players.LocalPlayer
 
 local Rebirths = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local RebirthRemote = ReplicatedStorage:WaitForChild("RebirthRemote")
 
 local leaderstats = player:WaitForChild("leaderstats")
 local hiddenStats = player:WaitForChild("HiddenLeaderstats")
 
 local rebirthsValue = leaderstats:WaitForChild("Rebirths")
-local moneyValue = leaderstats:WaitForChild("Money")
+local moneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
+if not moneyValue then
+	error("Primary currency value object was not found for rebirth UI")
+end
 local speedValue = hiddenStats:WaitForChild("Speed")
 
 local frames = player:WaitForChild("PlayerGui"):WaitForChild("Frames")
@@ -136,7 +140,7 @@ local function applyUI(config)
 		return
 	end
 
-	moneyText.Text = tostring(config.Price) .. "$"
+	moneyText.Text = tostring(config.Price) .. CurrencyUtil.getCompactSuffix()
 	speedText.Text = tostring(speedValue.Value) .. "/" .. tostring(config.SpeedNeeded)
 
 	tweenBar(moneyBar, (config.Price and config.Price > 0) and (moneyValue.Value / config.Price) or 0)

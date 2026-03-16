@@ -85,11 +85,11 @@ local REWARDS = {
 		Popup = "LuckyBlock didn't give anything 😭",
 	},
 
-	["Money"] = {
+	["Doubloons"] = {
 		chance = 27, -- dość częste
 		amount = math.random(2500, 5000),
 		Give = function(plr, amount)
-			DataManager:AddValue(plr, "leaderstats.Money", amount)
+			DataManager:AddValue(plr, "leaderstats.Doubloons", amount)
 		end,
 		Popup = "You got {reward} +{amount}!",
 	},
@@ -100,7 +100,7 @@ local REWARDS = {
 		Give = function(plr, amount)
 			DataManager:AddValue(plr, "Potions.x2MoneyTime", amount)
 		end,
-		Popup = "You got 2 Minutes x2 Money Boost!",
+		Popup = "You got 2 Minutes x2 Doubloons Boost!",
 	},
 
 	["SpeedBoost"] = {

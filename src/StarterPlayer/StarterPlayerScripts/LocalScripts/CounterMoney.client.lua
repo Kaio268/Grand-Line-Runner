@@ -1,11 +1,17 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local rng = Random.new()
 
 local player = Players.LocalPlayer
-local moneyValue = player:WaitForChild("leaderstats"):WaitForChild("Money")
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local currencyConfig = CurrencyUtil.getConfig()
+local moneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
+if not moneyValue then
+	error("Primary currency value object was not found for CounterMoney")
+end
 
 local playerGui = player:WaitForChild("PlayerGui")
 local hud = playerGui:WaitForChild("HUD")
@@ -99,7 +105,7 @@ local function formatNumber(n)
 end
 
 local function moneyText(n)
-	return formatNumber(n) .. "$"
+	return formatNumber(n) .. CurrencyUtil.getCompactSuffix()
 end
 
 setGradient(normalG0, normalG1)
@@ -397,7 +403,7 @@ local function pushNotif(delta)
 
 	notifOrder += 1
 	lbl.LayoutOrder = notifOrder
-	lbl.Text = (delta > 0 and "+" or "-") .. formatNumber(math.abs(delta)) .. "$"
+	lbl.Text = (delta > 0 and "+" or "-") .. formatNumber(math.abs(delta)) .. CurrencyUtil.getCompactSuffix()
 
 	notifUid += 1
 	local uid = notifUid
@@ -507,7 +513,7 @@ local function spawnDollarBurst()
 		lbl.Position = pxToScaleUdim2(originPx, absSize)
 		lbl.ZIndex = particleLayer.ZIndex + 1
 		lbl.Font = Enum.Font.FredokaOne
-		lbl.Text = "$"
+		lbl.Text = currencyConfig.ShortLabel
 		lbl.TextScaled = true
 		lbl.TextColor3 = Color3.fromRGB(90, 255, 49)
 		lbl.TextTransparency = 0

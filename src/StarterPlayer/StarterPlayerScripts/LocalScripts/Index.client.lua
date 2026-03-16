@@ -10,6 +10,7 @@ local Configs = Modules:WaitForChild("Configs")
 local Brainrots = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
 local MoneyLib = require(Modules:WaitForChild("Shorten"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
 local claimRemote = ReplicatedStorage:WaitForChild("ClaimIndexReward")
@@ -202,7 +203,7 @@ local function setUnlocked(gui, displayName, data)
 	if bname and bname:IsA("TextLabel") then bname.Text = displayName end
 	if price and price:IsA("TextLabel") then
 		local income = tonumber(data.Income) or 0
-		price.Text = MoneyLib.roundNumber(income) .. "$/s"
+		price.Text = MoneyLib.roundNumber(income) .. CurrencyUtil.getPerSecondSuffix()
 	end
 	if rarity and rarity:IsA("TextLabel") then rarity.Text = tostring(data.Rarity or "") end
 	if icon and icon:IsA("ImageLabel") then

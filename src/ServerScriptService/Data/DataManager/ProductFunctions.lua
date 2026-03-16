@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local Types = require(ReplicatedStorage.Modules.Types)
 local addbrairntos = require(script.Parent.Parent.Parent.Modules.AddBrainrot)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local PlotSystem = workspace:WaitForChild("PlotSystem")
 local PlotsFolder = PlotSystem:WaitForChild("Plots")
@@ -127,8 +128,8 @@ local handlers = {
 	[3509346360] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
 		addbrairntos:AddBrainrot(player, "67", 1)
 		addbrairntos:AddBrainrot(player, "Dragon Cannelloni", 1)
-		DataManager:AddValue(player, "leaderstats.Money", 1_000_000_000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 1_000_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000_000)
 		DataManager:SetValue(player, "Packs.Super OP Starter Pack", true)
 	end,
 
@@ -138,8 +139,8 @@ local handlers = {
 
 	[3509346182] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
 		addbrairntos:AddBrainrot(player, "Tralalero Tralala", 1)
-		DataManager:AddValue(player, "leaderstats.Money", 1_000_000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 1_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000)
 		if DataManager:GetValue(player, "Gears.Lava SpeedCoil") then
 			DataManager:SetValue(player, "Gears.Lava SpeedCoil", true)
 		else
@@ -158,14 +159,14 @@ local handlers = {
 			DataManager:AddValue(player, "Gears", { ["Diamond SpeedCoil"] = true })
 		end
 
-		DataManager:AddValue(player, "leaderstats.Money", 100_000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 100_000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 100_000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 100_000)
 	end,
 
 	[3509345784] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
 		addbrairntos:AddBrainrot(player, "Odin Din Din Dun", 1)
-		DataManager:AddValue(player, "leaderstats.Money", 1000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 1000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1000)
 		DataManager:SetValue(player, "Packs.Starter Pack", true)
 
 		if DataManager:GetValue(player, "Gears.SpeedCoil") then

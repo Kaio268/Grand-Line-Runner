@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Interaction = {}
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local function forEachPart(model, fn)
 	for _, d in ipairs(model:GetDescendants()) do
@@ -270,7 +271,7 @@ function Interaction.SetHoverText(refs, entry, rarity, remaining, held)
 	local displayRarity = stripVariantPrefix(rawRarity, variantKey)
 
 	if refs.Income then
-		refs.Income.Text = tostring(income) .. "$/s"
+		refs.Income.Text = tostring(income) .. CurrencyUtil.getPerSecondSuffix()
 	end
 	if refs.Name then
 		refs.Name.Text = displayName

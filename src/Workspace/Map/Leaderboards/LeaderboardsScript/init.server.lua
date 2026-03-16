@@ -58,7 +58,7 @@ local Root = game.Workspace.Map.Leaderboards
 local Boards = {
 	{
 		name = "TotalMoney",
-		stat = "TotalMoney",
+		stat = "TotalDoubloons",
 		ds = DataStoreService:GetOrderedDataStore("TotalMonDa2ta0fbsdfb24"),
 		folder = Root:WaitForChild("TotalMoney"),
 		display = function(v) return Suffix(v) end,

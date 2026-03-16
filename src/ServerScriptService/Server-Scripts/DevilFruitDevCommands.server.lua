@@ -8,6 +8,7 @@ local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("Devi
 local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local ADMIN_USER_IDS = {
 	1103783585,
@@ -198,13 +199,12 @@ local function parseSignedAmount(text)
 end
 
 local function getDisplayedMoney(player)
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local moneyValue = leaderstats and leaderstats:FindFirstChild("Money")
-	if moneyValue and moneyValue:IsA("NumberValue") then
+	local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
+	if moneyValue then
 		return moneyValue.Value
 	end
 
-	local storedMoney = DataManager:GetValue(player, "leaderstats.Money")
+	local storedMoney = DataManager:GetValue(player, CurrencyUtil.getPrimaryPath())
 	return (typeof(storedMoney) == "number") and storedMoney or 0
 end
 
@@ -225,13 +225,13 @@ local function processMoneyCommand(player, argumentText)
 		amount = math.floor(amount)
 	end
 
-	local newMoney = DataManager:AdjustValue(player, "leaderstats.Money", amount)
+	local newMoney = DataManager:AdjustValue(player, CurrencyUtil.getPrimaryPath(), amount)
 	if typeof(newMoney) ~= "number" then
 		newMoney = getDisplayedMoney(player)
 	end
 
 	print(string.format(
-		"[DevFruitDevCommands] %s adjusted Money by %d (new balance=%d)",
+		"[DevFruitDevCommands] %s adjusted Doubloons by %d (new balance=%d)",
 		player.Name,
 		math.floor(amount),
 		math.floor(newMoney)

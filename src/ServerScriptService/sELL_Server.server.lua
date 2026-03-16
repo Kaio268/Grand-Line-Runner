@@ -5,6 +5,7 @@ local DataManager = require(script.Parent.Data.DataManager)
 local SellEvent   = ReplicatedStorage.Remotes:WaitForChild("SellItemEvent")
 
 local Brainrots = require(ReplicatedStorage.Modules.Configs:WaitForChild("Brainrots"))
+local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
 local SELL_TIME_SECONDS = 15
 
@@ -66,7 +67,7 @@ local function sellSingle(player, rawName)
 	if price <= 0 then return end
 
 	DataManager:SubValue(player, ("Inventory.%s.Quantity"):format(realKey), 1)
-	DataManager:AddValue(player, "leaderstats.Money", price)
+	DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), price)
 end
 
 local function sellAll(player)
@@ -89,7 +90,7 @@ local function sellAll(player)
 	end
 
 	if total > 0 then
-		DataManager:AddValue(player, "leaderstats.Money", total)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), total)
 	end
 end
 

@@ -8,6 +8,7 @@ end
 local DataManager = require(dmModule)
 
 local Rebirths = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local RebirthRemote = ReplicatedStorage:FindFirstChild("RebirthRemote")
 if not RebirthRemote then
@@ -46,7 +47,8 @@ RebirthRemote.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	local money = getNumber(player, "leaderstats.Money")
+	local moneyPath = CurrencyUtil.getPrimaryPath()
+	local money = getNumber(player, moneyPath)
 	local speed = getNumber(player, "HiddenLeaderstats.Speed")
 
 	local price = (typeof(config.Price) == "number") and config.Price or 0
@@ -57,7 +59,7 @@ RebirthRemote.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	setNumber(player, "leaderstats.Money", 0)
+	setNumber(player, moneyPath, 0)
 	setNumber(player, "HiddenLeaderstats.Speed", 1)
 	DataManager:AdjustValue(player, "leaderstats.Rebirths", 1)
 
