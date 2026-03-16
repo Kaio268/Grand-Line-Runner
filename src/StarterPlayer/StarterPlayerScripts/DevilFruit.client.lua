@@ -1024,13 +1024,15 @@ local function getGomuLaunchTarget(abilityConfig)
 	local result, fallbackPosition, rayOrigin, rayDirection = getLookAimRaycast()
 	local aimPosition = fallbackPosition
 	local launchDistance = math.max(0, tonumber(abilityConfig and abilityConfig.LaunchDistance) or 0)
-	local targetPlayer = findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
+	local targetPlayer
 
-	if not targetPlayer and result then
+	if result then
 		targetPlayer = getPlayerFromDescendant(result.Instance)
 		if targetPlayer == player or not isGomuTargetInRange(targetPlayer, launchDistance) then
 			targetPlayer = nil
 		end
+	elseif rayOrigin and rayDirection then
+		targetPlayer = findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
 	end
 
 	if targetPlayer then
