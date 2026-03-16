@@ -100,7 +100,7 @@ local function ensurePromptGui()
 	bodyLabel = Instance.new("TextLabel")
 	bodyLabel.Name = "Body"
 	bodyLabel.BackgroundTransparency = 1
-	bodyLabel.Position = UDim2.new(0, 0, 0, 42)
+	bodyLabel.Position = UDim2.fromOffset(0, 42)
 	bodyLabel.Size = UDim2.new(1, 0, 0, 92)
 	bodyLabel.Font = Enum.Font.Gotham
 	bodyLabel.Text = ""
@@ -114,7 +114,7 @@ local function ensurePromptGui()
 	confirmButton = Instance.new("TextButton")
 	confirmButton.Name = "Confirm"
 	confirmButton.AnchorPoint = Vector2.new(0, 1)
-	confirmButton.Position = UDim2.new(0, 0, 1, 0)
+	confirmButton.Position = UDim2.fromScale(0, 1)
 	confirmButton.Size = UDim2.fromOffset(180, 44)
 	confirmButton.BackgroundColor3 = Color3.fromRGB(255, 138, 44)
 	confirmButton.BorderSizePixel = 0
@@ -131,7 +131,7 @@ local function ensurePromptGui()
 	cancelButton = Instance.new("TextButton")
 	cancelButton.Name = "Cancel"
 	cancelButton.AnchorPoint = Vector2.new(1, 1)
-	cancelButton.Position = UDim2.new(1, 0, 1, 0)
+	cancelButton.Position = UDim2.fromScale(1, 1)
 	cancelButton.Size = UDim2.fromOffset(180, 44)
 	cancelButton.BackgroundColor3 = Color3.fromRGB(46, 42, 39)
 	cancelButton.BorderSizePixel = 0

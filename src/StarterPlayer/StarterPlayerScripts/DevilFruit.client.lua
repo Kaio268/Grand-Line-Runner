@@ -5,10 +5,14 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local HazardUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
-local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
-local ProtectionRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
+local DevilFruitConfig =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local HazardUtils =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
+local HazardRuntime =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local ProtectionRuntime =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
 
 local player = Players.LocalPlayer
 
@@ -253,7 +257,7 @@ local function ensureCooldownHud()
 		local list = Instance.new("Frame")
 		list.Name = "AbilityList"
 		list.BackgroundTransparency = 1
-		list.Size = UDim2.new(1, 0, 0, 0)
+		list.Size = UDim2.fromScale(1, 0)
 		list.AutomaticSize = Enum.AutomaticSize.Y
 		list.LayoutOrder = 3
 		list.Parent = panel
@@ -262,7 +266,6 @@ local function ensureCooldownHud()
 		listLayout.Padding = UDim.new(0, 6)
 		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		listLayout.Parent = list
-
 	end
 
 	local fruitLabel = panel and panel:FindFirstChild("FruitName")
@@ -338,7 +341,7 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "Name"
 	nameLabel.BackgroundTransparency = 1
-	nameLabel.Position = UDim2.new(0, 56, 0, 8)
+	nameLabel.Position = UDim2.fromOffset(56, 8)
 	nameLabel.Size = UDim2.new(1, -136, 0, 18)
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.Text = formatAbilityName(abilityName)
@@ -352,7 +355,7 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 	statusLabel.BackgroundTransparency = 1
 	statusLabel.AnchorPoint = Vector2.new(1, 0)
 	statusLabel.Position = UDim2.new(1, -10, 0, 8)
-	statusLabel.Size = UDim2.new(0, 72, 0, 18)
+	statusLabel.Size = UDim2.fromOffset(72, 18)
 	statusLabel.Font = Enum.Font.GothamBold
 	statusLabel.Text = "READY"
 	statusLabel.TextColor3 = Color3.fromRGB(116, 255, 161)
@@ -363,7 +366,7 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 	local detailLabel = Instance.new("TextLabel")
 	detailLabel.Name = "Detail"
 	detailLabel.BackgroundTransparency = 1
-	detailLabel.Position = UDim2.new(0, 56, 0, 27)
+	detailLabel.Position = UDim2.fromOffset(56, 27)
 	detailLabel.Size = UDim2.new(1, -68, 0, 12)
 	detailLabel.Font = Enum.Font.Gotham
 	detailLabel.Text = string.format("Cooldown %.1fs", tonumber(abilityConfig.Cooldown) or 0)
@@ -385,7 +388,7 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
-	fill.Size = UDim2.new(1, 0, 1, 0)
+	fill.Size = UDim2.fromScale(1, 1)
 	fill.BackgroundColor3 = Color3.fromRGB(116, 255, 161)
 	fill.BorderSizePixel = 0
 	fill.Parent = bar
@@ -446,7 +449,7 @@ local function updateCooldownHud(forceRebuild)
 		row.Status.Text = isReady and "READY" or ("CD " .. formatCooldownTime(remaining))
 		row.Status.TextColor3 = isReady and Color3.fromRGB(116, 255, 161) or Color3.fromRGB(255, 190, 116)
 		row.Detail.Text = isReady and "Move ready" or ("On cooldown for " .. formatCooldownTime(remaining))
-		row.Fill.Size = UDim2.new(progress, 0, 1, 0)
+		row.Fill.Size = UDim2.fromScale(progress, 1)
 		row.Fill.BackgroundColor3 = isReady and Color3.fromRGB(116, 255, 161) or Color3.fromRGB(255, 133, 44)
 	end
 end
@@ -650,7 +653,9 @@ local function getCameraRelativeFlightDirection(rootPart)
 
 	local camera = getCurrentCamera()
 	local lookVector = camera and camera.CFrame.LookVector or getCurrentLookVector(rootPart)
-	local rightVector = camera and camera.CFrame.RightVector or (rootPart and rootPart.CFrame.RightVector) or Vector3.xAxis
+	local rightVector = camera and camera.CFrame.RightVector
+		or (rootPart and rootPart.CFrame.RightVector)
+		or Vector3.xAxis
 	local direction = (lookVector * forwardAxis) + (rightVector * rightAxis)
 	local magnitude = direction.Magnitude
 	if magnitude <= MIN_DIRECTION_MAGNITUDE then
@@ -752,11 +757,8 @@ local function startPhoenixFlight(payload)
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 
 	local currentVelocity = rootPart.AssemblyLinearVelocity
-	rootPart.AssemblyLinearVelocity = Vector3.new(
-		currentVelocity.X,
-		math.max(currentVelocity.Y, liftVelocity),
-		currentVelocity.Z
-	)
+	rootPart.AssemblyLinearVelocity =
+		Vector3.new(currentVelocity.X, math.max(currentVelocity.Y, liftVelocity), currentVelocity.Z)
 end
 
 local function updatePhoenixFlight(dt)
@@ -785,8 +787,12 @@ local function updatePhoenixFlight(dt)
 	local desiredFlightDirection = getCameraRelativeFlightDirection(rootPart)
 	local desiredVelocity = desiredFlightDirection * phoenixFlightState.FlightSpeed
 	local currentHeight = rootPart.Position.Y
-	local inTakeoffPhase = now < phoenixFlightState.TakeoffEndTime and currentHeight < phoenixFlightState.InitialLiftTarget
-	if desiredVelocity.Y > 0 and math.abs(desiredVelocity.Y) < (phoenixFlightState.VerticalSpeed * PHOENIX_VERTICAL_DEADZONE) then
+	local inTakeoffPhase = now < phoenixFlightState.TakeoffEndTime
+		and currentHeight < phoenixFlightState.InitialLiftTarget
+	if
+		desiredVelocity.Y > 0
+		and math.abs(desiredVelocity.Y) < (phoenixFlightState.VerticalSpeed * PHOENIX_VERTICAL_DEADZONE)
+	then
 		desiredVelocity = Vector3.new(desiredVelocity.X, 0, desiredVelocity.Z)
 	end
 	if inTakeoffPhase then
@@ -823,8 +829,12 @@ local function updatePhoenixFlight(dt)
 
 	local desiredPlanarDirection = getPlanarVector(desiredVelocity)
 	local nextPlanarDirection = getPlanarVector(nextVelocity)
-	if desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE or nextPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
-		local facingDirection = desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and desiredPlanarDirection or nextPlanarDirection
+	if
+		desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE
+		or nextPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE
+	then
+		local facingDirection = desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and desiredPlanarDirection
+			or nextPlanarDirection
 		faceCharacterTowards(facingDirection)
 	end
 end
@@ -950,8 +960,10 @@ local function findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
 				local toTargetUnit = toTarget.Magnitude > 0.01 and toTarget.Unit or nil
 				local alignment = toTargetUnit and rayDirection:Dot(toTargetUnit) or -1
 				if alignment >= GOMU_AUTO_LATCH_MAX_ALIGNMENT then
-					local lateralDistance, projectedDistance = getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
-					local allowedRadius = math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
+					local lateralDistance, projectedDistance =
+						getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
+					local allowedRadius =
+						math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
 					if lateralDistance <= allowedRadius then
 						local planarDistance = getPlanarDistance(localRootPart.Position, targetRootPart.Position)
 						local score = (alignment * 100) - (lateralDistance * 2) - (planarDistance * 0.1)
@@ -1116,7 +1128,8 @@ local function getHazardContainer(instance)
 	if isDescendantOfClientWave(instance) then
 		local template = getWaveTemplate(instance)
 		if template then
-			local _, templateClass, templateType, templateCanFreeze, templateFreezeBehavior = HazardUtils.GetHazardInfo(template)
+			local _, templateClass, templateType, templateCanFreeze, templateFreezeBehavior =
+				HazardUtils.GetHazardInfo(template)
 			if templateClass or templateType or templateCanFreeze or templateFreezeBehavior then
 				local current = instance
 				while current and current.Parent and current.Parent.Name ~= "ClientWaves" do
@@ -1199,7 +1212,11 @@ local function isLocalPlayerInsidePhoenixShield(position)
 			activePhoenixShields[shieldOwner] = nil
 		else
 			local ownerRootPart = getPlayerRootPart(shieldOwner)
-			if ownerRootPart and getPlanarDistance(ownerRootPart.Position, checkPosition) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
+			if
+				ownerRootPart
+				and getPlanarDistance(ownerRootPart.Position, checkPosition)
+					<= (shield.Radius + PHOENIX_SHIELD_PADDING)
+			then
 				return true
 			end
 		end
@@ -1277,7 +1294,11 @@ local function updateHazardSuppression()
 				if shieldOwner.Parent == nil then
 					activePhoenixShields[shieldOwner] = nil
 				end
-			elseif rootPart and getPlanarDistance(ownerRootPart.Position, rootPart.Position) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
+			elseif
+				rootPart
+				and getPlanarDistance(ownerRootPart.Position, rootPart.Position)
+					<= (shield.Radius + PHOENIX_SHIELD_PADDING)
+			then
 				suppressHazardsNearPosition(ownerRootPart.Position, shield.Radius, shield.EndTime)
 			end
 		end
@@ -1512,7 +1533,8 @@ local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 			local nextPosition = lastPosition + direction * stepDistance
 			if shouldResolveHit and not hasResolvedFreeze and freezeDuration > 0 then
 				local overlapRadius = math.max(radius * 1.15, 1)
-				local hitContainer, impactPosition = findFreezableHazardAlongSegment(lastPosition, nextPosition, overlapRadius, overlapParams)
+				local hitContainer, impactPosition =
+					findFreezableHazardAlongSegment(lastPosition, nextPosition, overlapRadius, overlapParams)
 				if hitContainer then
 					hasResolvedFreeze = true
 					local freezeApplied = HazardRuntime.Freeze(hitContainer, freezeDuration)
@@ -1737,10 +1759,11 @@ local function createPhoenixFlightEffect(targetPlayer, fruitName, abilityName, _
 	ring.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, 0, math.rad(90))
 	ring.Parent = Workspace
 
-	local burstTween = TweenService:Create(burst, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Transparency = 1,
-		Size = Vector3.new(7, 7, 7),
-	})
+	local burstTween =
+		TweenService:Create(burst, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Transparency = 1,
+			Size = Vector3.new(7, 7, 7),
+		})
 	local ringTween = TweenService:Create(ring, TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Transparency = 1,
 		Size = Vector3.new(0.22, 9, 9),
@@ -1804,12 +1827,14 @@ local function createPhoenixShieldEffect(targetPlayer, fruitName, abilityName, p
 	aura.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 1.5, 0))
 	aura.Parent = Workspace
 
-	local ringTween = TweenService:Create(ring, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
-		Transparency = 0.82,
-	})
-	local auraTween = TweenService:Create(aura, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
-		Transparency = 1,
-	})
+	local ringTween =
+		TweenService:Create(ring, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+			Transparency = 0.82,
+		})
+	local auraTween =
+		TweenService:Create(aura, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
+			Transparency = 1,
+		})
 
 	ringTween:Play()
 	auraTween:Play()
@@ -1821,7 +1846,8 @@ local function createPhoenixShieldEffect(targetPlayer, fruitName, abilityName, p
 				break
 			end
 
-			ring.CFrame = CFrame.new(currentRootPart.Position - Vector3.new(0, 2.6, 0)) * CFrame.Angles(0, 0, math.rad(90))
+			ring.CFrame = CFrame.new(currentRootPart.Position - Vector3.new(0, 2.6, 0))
+				* CFrame.Angles(0, 0, math.rad(90))
 			aura.CFrame = CFrame.new(currentRootPart.Position + Vector3.new(0, 1.5, 0))
 			RunService.Heartbeat:Wait()
 		end
