@@ -3,6 +3,7 @@ local Players = game:GetService("Players")
 
 local Types = require(ReplicatedStorage.Modules.Types)
 local addbrairntos = require(script.Parent.Parent.Parent.Modules.AddBrainrot)
+local BrainrotInstanceService = require(script.Parent.Parent.Parent.Modules.BrainrotInstanceService)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
@@ -63,12 +64,14 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 	local ownerUserId = buyer:GetAttribute("StealOwnerUserId")
 	local standName = buyer:GetAttribute("StealStandName")
 	local brainrotName = buyer:GetAttribute("StealBrainrotName")
+	local brainrotInstanceId = buyer:GetAttribute("StealBrainrotInstanceId")
 	local expectedId = buyer:GetAttribute("StealProductId")
 	local ts = buyer:GetAttribute("StealTime")
 
 	buyer:SetAttribute("StealOwnerUserId", nil)
 	buyer:SetAttribute("StealStandName", nil)
 	buyer:SetAttribute("StealBrainrotName", nil)
+	buyer:SetAttribute("StealBrainrotInstanceId", nil)
 	buyer:SetAttribute("StealProductId", nil)
 	buyer:SetAttribute("StealTime", nil)
 
@@ -97,8 +100,17 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 	if current ~= brainrotName then
 		return
 	end
+	if typeof(brainrotInstanceId) == "string" and brainrotInstanceId ~= "" then
+		local currentInstanceId = BrainrotInstanceService.GetStandInstanceId(owner, standName)
+		if currentInstanceId ~= "" and currentInstanceId ~= brainrotInstanceId then
+			return
+		end
+	end
 
-	DataManager:SetValue(owner, "IncomeBrainrots." .. standName .. ".BrainrotName", "")
+	local transferredInstanceId = BrainrotInstanceService.TransferStandInstance(owner, buyer, standName)
+	if not transferredInstanceId then
+		return
+	end
 	DataManager:SetValue(owner, "IncomeBrainrots." .. standName .. ".IncomeToCollect", 0)
 
 	local plot = findPlotForUserId(ownerUserId)
@@ -121,7 +133,6 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 	end
 
 	ensureInventorySlot(buyer, brainrotName, DataManager)
-	DataManager:AddValue(buyer, "Inventory." .. brainrotName .. ".Quantity", 1)
 end
 
 local handlers = {

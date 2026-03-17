@@ -6,8 +6,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("DevilFruitService"))
 local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
+local GrandLineRushChestToolService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestToolService"))
+local GrandLineRushVerticalSliceService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
+local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:WaitForChild("GrandLineRushCorridorRunController"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local ADMIN_USER_IDS = {
@@ -21,6 +25,7 @@ local RECENT_COMMAND_WINDOW = 0.4
 local adminSet = {}
 local recentCommands = {}
 local fruitAliases = {}
+local chestTierAliases = {}
 
 for _, userId in ipairs(ADMIN_USER_IDS) do
 	adminSet[userId] = true
@@ -37,6 +42,15 @@ local function registerFruitAlias(alias, displayName)
 	end
 
 	fruitAliases[normalizedAlias] = displayName
+end
+
+local function registerChestAlias(alias, tierName)
+	local normalizedAlias = normalizeText(alias)
+	if normalizedAlias == "" then
+		return
+	end
+
+	chestTierAliases[normalizedAlias] = tierName
 end
 
 for _, fruit in ipairs(DevilFruitConfig.GetAllFruits()) do
@@ -238,6 +252,123 @@ local function processMoneyCommand(player, argumentText)
 	))
 end
 
+local function processSpawnCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local targetName = normalizeText(argumentText)
+	if targetName == "" then
+		warn(string.format("[DevFruitDevCommands] %s used /spawn without an argument", player.Name))
+		return
+	end
+
+	if targetName ~= "chest" and targetName ~= "crew" then
+		warn(string.format("[DevFruitDevCommands] Invalid /spawn target '%s' from %s", tostring(argumentText), player.Name))
+		return
+	end
+
+	if targetName == "chest" then
+		GrandLineRushCorridorRunController.Start()
+		local ok, result = GrandLineRushCorridorRunController.SpawnSharedChestInFrontOfPlayer(player)
+		if ok then
+			print(string.format("[DevFruitDevCommands] %s spawned shared chest reward via /spawn", player.Name))
+		else
+			warn(string.format(
+				"[DevFruitDevCommands] Failed /spawn chest for %s (%s)",
+				player.Name,
+				tostring(result or "unknown")
+			))
+		end
+		return
+	end
+
+	GrandLineRushVerticalSliceService.Start()
+
+	local rewardType = "Crew"
+	local depthBand = GrandLineRushEconomy.VerticalSlice.WorldRun.StartDepthBand or GrandLineRushEconomy.VerticalSlice.DefaultDepthBand
+	local response = GrandLineRushVerticalSliceService.StartRun(player, rewardType, depthBand)
+	if response and response.ok then
+		print(string.format("[DevFruitDevCommands] %s spawned live %s reward via /spawn", player.Name, targetName))
+	else
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /spawn %s for %s (%s)",
+			targetName,
+			player.Name,
+			tostring((response and response.error) or "unknown")
+		))
+	end
+end
+
+for tierName in pairs(GrandLineRushEconomy.Chests.Tiers or {}) do
+	registerChestAlias(tierName, tierName)
+end
+
+registerChestAlias("wood", "Wooden")
+registerChestAlias("wooden", "Wooden")
+registerChestAlias("iron", "Iron")
+registerChestAlias("gold", "Gold")
+registerChestAlias("legend", "Legendary")
+registerChestAlias("legendary", "Legendary")
+
+local function processChestCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local trimmedArguments = tostring(argumentText or ""):match("^%s*(.-)%s*$") or ""
+	if trimmedArguments == "" then
+		warn(string.format("[DevFruitDevCommands] %s used /chest without arguments", player.Name))
+		return
+	end
+
+	local rarityArgument, amountArgument = trimmedArguments:match("^(%S+)%s*(.*)$")
+	local chestTier = chestTierAliases[normalizeText(rarityArgument)]
+	if chestTier == nil then
+		warn(string.format("[DevFruitDevCommands] Invalid /chest rarity '%s' from %s", tostring(rarityArgument), player.Name))
+		return
+	end
+
+	local amount = 1
+	local normalizedAmount = tostring(amountArgument or ""):match("^%s*(.-)%s*$") or ""
+	if normalizedAmount ~= "" then
+		amount = tonumber(normalizedAmount)
+	end
+
+	if typeof(amount) ~= "number" or amount ~= amount or amount < 1 then
+		warn(string.format("[DevFruitDevCommands] Invalid /chest amount '%s' from %s", tostring(amountArgument), player.Name))
+		return
+	end
+
+	amount = math.floor(amount)
+	GrandLineRushChestToolService.Start()
+	GrandLineRushVerticalSliceService.Start()
+
+	local response = GrandLineRushVerticalSliceService.GrantChest(
+		player,
+		chestTier,
+		amount,
+		GrandLineRushEconomy.VerticalSlice.DefaultDepthBand
+	)
+
+	if response and response.ok then
+		print(string.format(
+			"[DevFruitDevCommands] %s granted %d %s chest(s) via /chest",
+			player.Name,
+			amount,
+			chestTier
+		))
+	else
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /chest %s %s for %s (%s)",
+			tostring(chestTier),
+			tostring(amount),
+			player.Name,
+			tostring((response and response.error) or "unknown")
+		))
+	end
+end
+
 local function getCommandNameAndArguments(rawText)
 	local normalizedText = normalizeText(rawText)
 	local commandName, argumentText = normalizedText:match("^/%s*(%S+)%s*(.*)$")
@@ -258,7 +389,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "spawn" and commandName ~= "chest" then
 		return
 	end
 
@@ -268,6 +399,16 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "fruit" then
 		processFruitCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "spawn" then
+		processSpawnCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "chest" then
+		processChestCommand(player, argumentText)
 		return
 	end
 
@@ -345,6 +486,68 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/money " .. normalizedText) or "/money"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local spawnCommand = commandsFolder:FindFirstChild("SpawnDevCommand")
+	if spawnCommand and not spawnCommand:IsA("TextChatCommand") then
+		spawnCommand:Destroy()
+		spawnCommand = nil
+	end
+
+	if not spawnCommand then
+		spawnCommand = Instance.new("TextChatCommand")
+		spawnCommand.Name = "SpawnDevCommand"
+		spawnCommand.PrimaryAlias = "/spawn"
+		spawnCommand.SecondaryAlias = "/spawn"
+		spawnCommand.AutocompleteVisible = false
+		spawnCommand.Parent = commandsFolder
+	end
+
+	spawnCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 6) == "/spawn" or normalizedText:sub(1, 7) == "/ spawn" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/spawn " .. normalizedText) or "/spawn"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local chestCommand = commandsFolder:FindFirstChild("ChestDevCommand")
+	if chestCommand and not chestCommand:IsA("TextChatCommand") then
+		chestCommand:Destroy()
+		chestCommand = nil
+	end
+
+	if not chestCommand then
+		chestCommand = Instance.new("TextChatCommand")
+		chestCommand.Name = "ChestDevCommand"
+		chestCommand.PrimaryAlias = "/chest"
+		chestCommand.SecondaryAlias = "/chest"
+		chestCommand.AutocompleteVisible = false
+		chestCommand.Parent = commandsFolder
+	end
+
+	chestCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 6) == "/chest" or normalizedText:sub(1, 7) == "/ chest" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/chest " .. normalizedText) or "/chest"
 		handleChatCommand(player, syntheticCommand)
 	end)
 end

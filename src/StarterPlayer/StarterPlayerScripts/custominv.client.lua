@@ -10,7 +10,54 @@ local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local ChestVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestVisuals"))
+local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local MetaClient = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushMetaClient"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
+
+local CHEST_ORDER = {
+	Wooden = 1,
+	Iron = 2,
+	Gold = 3,
+	Legendary = 4,
+}
+
+local RESOURCE_ORDER = {
+	Apple = 1,
+	Rice = 2,
+	Meat = 3,
+	SeaBeastMeat = 4,
+	CommonShipMaterial = 5,
+	RareShipMaterial = 6,
+}
+
+local RESOURCE_MATERIAL_DISPLAY = {
+	CommonShipMaterial = "Common Ship Material",
+	RareShipMaterial = "Rare Ship Material",
+}
+
+local CATEGORY_ORDER = {
+	Brainrots = 1,
+	DevilFruits = 2,
+	Resources = 3,
+}
+
+local CATEGORY_LABELS = {
+	Brainrots = "Brainrots",
+	DevilFruits = "Devil Fruits",
+	Resources = "Resources",
+}
+
+local CATEGORY_BUTTON_LABELS = {
+	Brainrots = "Brainrots",
+	DevilFruits = "DevFruits",
+	Resources = "Resources",
+}
+
+local CATEGORY_ALIASES = {
+	Brainrots = { "brainrot", "brainrots" },
+	Resources = { "resources", "resource", "soon" },
+}
 
 local hudInv = player:WaitForChild("PlayerGui"):WaitForChild("HUD"):WaitForChild("Inventory")
 local hotbarTemplate = hudInv:WaitForChild("toolButton")
@@ -32,9 +79,14 @@ local TOOLTIP_TEXT = Color3.fromRGB(245, 247, 250)
 local TOOLTIP_SUBTEXT = Color3.fromRGB(180, 188, 200)
 
 local equippedName = nil
+local activeInventoryCategory = "Brainrots"
 
 local hotbarButtons = {}
 local invButtons = {}
+local categoryButtons = {}
+local categoryRow = nil
+local createdCategoryRow = false
+local rebuildUI
 
 local itemState = {}
 local acquisition = {}
@@ -45,6 +97,15 @@ local hoverTooltip = {
 	Rarity = nil,
 	Visible = false,
 }
+local CHEST_DEBUG = true
+
+local function chestDebug(message, ...)
+	if CHEST_DEBUG ~= true then
+		return
+	end
+
+	warn(string.format("[GLR ChestDebug][HotbarClient] " .. tostring(message), ...))
+end
 
 local RARITY_ORDER = {
 	Common = 1,
@@ -150,11 +211,231 @@ local function setCommon(b, icon, displayName)
 	toolName.Text = displayName or ""
 end
 
+local function getResourceInfo(resourceKey)
+	local foodConfig = Economy.Food[resourceKey]
+	if foodConfig then
+		return {
+			DisplayName = tostring(foodConfig.DisplayName or resourceKey),
+			ResourceType = "Food",
+		}
+	end
+
+	return {
+		DisplayName = RESOURCE_MATERIAL_DISPLAY[resourceKey] or tostring(resourceKey),
+		ResourceType = "Material",
+	}
+end
+
 local function clearDevilFruitPreview(button)
 	local viewport = button:FindFirstChild("FruitViewport")
 	if viewport then
 		viewport:Destroy()
 	end
+end
+
+local function clearChestPreview(button)
+	local viewport = button:FindFirstChild("ChestViewport")
+	if viewport then
+		viewport:Destroy()
+	end
+end
+
+local function clearResourcePreview(button)
+	local viewport = button:FindFirstChild("ResourceViewport")
+	if viewport then
+		viewport:Destroy()
+	end
+end
+
+local function createResourcePreviewPart(parent, size, color, cf, shape, material)
+	local part = Instance.new("Part")
+	part.Size = size
+	part.Color = color
+	part.CFrame = cf
+	part.Shape = shape or Enum.PartType.Block
+	part.Material = material or Enum.Material.SmoothPlastic
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Parent = parent
+	return part
+end
+
+local function buildResourcePreviewModel(resourceKey)
+	local model = Instance.new("Model")
+	model.Name = "ResourcePreview"
+
+	if resourceKey == "Apple" then
+		createResourcePreviewPart(model, Vector3.new(0.9, 0.9, 0.9), Color3.fromRGB(214, 67, 52), CFrame.new(0, 0, 0), Enum.PartType.Ball, Enum.Material.SmoothPlastic)
+		createResourcePreviewPart(model, Vector3.new(0.12, 0.35, 0.12), Color3.fromRGB(86, 53, 31), CFrame.new(0, 0.5, 0), Enum.PartType.Cylinder, Enum.Material.Wood)
+		createResourcePreviewPart(model, Vector3.new(0.35, 0.12, 0.2), Color3.fromRGB(80, 170, 72), CFrame.new(0.18, 0.42, 0), Enum.PartType.Block, Enum.Material.Grass)
+	elseif resourceKey == "Rice" then
+		createResourcePreviewPart(model, Vector3.new(1.0, 0.35, 1.0), Color3.fromRGB(171, 106, 57), CFrame.new(0, -0.18, 0), Enum.PartType.Cylinder, Enum.Material.Wood)
+		createResourcePreviewPart(model, Vector3.new(0.82, 0.28, 0.82), Color3.fromRGB(242, 240, 223), CFrame.new(0, 0.08, 0), Enum.PartType.Cylinder, Enum.Material.Sand)
+	elseif resourceKey == "Meat" then
+		createResourcePreviewPart(model, Vector3.new(1.0, 0.7, 0.7), Color3.fromRGB(160, 64, 56), CFrame.new(0, 0, 0), Enum.PartType.Block, Enum.Material.SmoothPlastic)
+		createResourcePreviewPart(model, Vector3.new(0.22, 0.22, 0.9), Color3.fromRGB(231, 220, 208), CFrame.new(-0.6, 0, 0), Enum.PartType.Cylinder, Enum.Material.SmoothPlastic)
+	elseif resourceKey == "SeaBeastMeat" then
+		createResourcePreviewPart(model, Vector3.new(1.05, 0.78, 0.74), Color3.fromRGB(105, 41, 56), CFrame.new(0, 0, 0), Enum.PartType.Block, Enum.Material.SmoothPlastic)
+		createResourcePreviewPart(model, Vector3.new(0.18, 0.82, 0.7), Color3.fromRGB(76, 186, 199), CFrame.new(0.52, 0, 0), Enum.PartType.Block, Enum.Material.Neon)
+	elseif resourceKey == "RareShipMaterial" then
+		createResourcePreviewPart(model, Vector3.new(0.8, 1.0, 0.8), Color3.fromRGB(82, 171, 255), CFrame.new(0, 0, 0), Enum.PartType.Ball, Enum.Material.Neon)
+		createResourcePreviewPart(model, Vector3.new(0.22, 1.18, 0.22), Color3.fromRGB(183, 233, 255), CFrame.new(0, 0, 0), Enum.PartType.Block, Enum.Material.Glass)
+	else
+		createResourcePreviewPart(model, Vector3.new(0.95, 0.55, 0.7), Color3.fromRGB(149, 154, 163), CFrame.new(0, 0, 0), Enum.PartType.Block, Enum.Material.Metal)
+		createResourcePreviewPart(model, Vector3.new(0.95, 0.08, 0.7), Color3.fromRGB(202, 208, 216), CFrame.new(0, 0.18, 0), Enum.PartType.Block, Enum.Material.Metal)
+	end
+
+	return model
+end
+
+local function ensureResourcePreview(button, resourceKey)
+	local toolIcon = button:FindFirstChild("ToolIcon")
+	if not toolIcon or not toolIcon:IsA("GuiObject") then
+		return false
+	end
+
+	local viewport = button:FindFirstChild("ResourceViewport")
+	if not viewport then
+		viewport = Instance.new("ViewportFrame")
+		viewport.Name = "ResourceViewport"
+		viewport.Active = false
+		viewport.BackgroundTransparency = 1
+		viewport.BorderSizePixel = 0
+		viewport.LightColor = Color3.fromRGB(255, 255, 255)
+		viewport.LightDirection = Vector3.new(-1, -1, -1)
+		viewport.Ambient = Color3.fromRGB(210, 210, 210)
+		viewport.Parent = button
+	end
+
+	viewport.AnchorPoint = toolIcon.AnchorPoint
+	viewport.Position = toolIcon.Position
+	viewport.Size = toolIcon.Size
+	viewport.ZIndex = toolIcon.ZIndex + 1
+	viewport.Visible = true
+
+	for _, child in ipairs(viewport:GetChildren()) do
+		child:Destroy()
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewport
+
+	local model = buildResourcePreviewModel(resourceKey)
+	model.Parent = worldModel
+	pcall(function()
+		model:PivotTo(CFrame.Angles(math.rad(-12), math.rad(30), 0))
+	end)
+
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+
+	local boxCF, boxSize = model:GetBoundingBox()
+	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+
+	local camera = Instance.new("Camera")
+	camera.Name = "PreviewCamera"
+	camera.FieldOfView = 35
+	camera.CFrame = CFrame.lookAt(
+		boxCF.Position + Vector3.new(maxSize * 0.82, maxSize * 0.3, maxSize * 1.7),
+		boxCF.Position
+	)
+	camera.Parent = viewport
+
+	viewport.CurrentCamera = camera
+	toolIcon.ImageTransparency = 1
+
+	return true
+end
+
+local function ensureChestPreview(button, tierName)
+	local toolIcon = button:FindFirstChild("ToolIcon")
+	if not toolIcon or not toolIcon:IsA("GuiObject") then
+		return false
+	end
+
+	local viewport = button:FindFirstChild("ChestViewport")
+	if not viewport then
+		viewport = Instance.new("ViewportFrame")
+		viewport.Name = "ChestViewport"
+		viewport.Active = false
+		viewport.BackgroundTransparency = 1
+		viewport.BorderSizePixel = 0
+		viewport.LightColor = Color3.fromRGB(255, 255, 255)
+		viewport.LightDirection = Vector3.new(-1, -1, -1)
+		viewport.Ambient = Color3.fromRGB(205, 205, 205)
+		viewport.Parent = button
+	end
+
+	viewport.AnchorPoint = toolIcon.AnchorPoint
+	viewport.Position = toolIcon.Position
+	viewport.Size = toolIcon.Size
+	viewport.ZIndex = toolIcon.ZIndex + 1
+	viewport.Visible = true
+
+	for _, child in ipairs(viewport:GetChildren()) do
+		child:Destroy()
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewport
+
+	local modelClone = ChestVisuals.CreatePreviewModel(tierName)
+	modelClone.Parent = worldModel
+
+	if modelClone:IsA("BasePart") then
+		modelClone.CFrame = CFrame.new()
+	elseif modelClone:IsA("Model") then
+		pcall(function()
+			modelClone:PivotTo(CFrame.Angles(math.rad(-12), math.rad(35), 0))
+		end)
+	end
+
+	for _, descendant in ipairs(modelClone:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+		end
+	end
+
+	local boxCF
+	local boxSize
+	if modelClone:IsA("Model") then
+		boxCF, boxSize = modelClone:GetBoundingBox()
+	elseif modelClone:IsA("BasePart") then
+		boxCF, boxSize = modelClone.CFrame, modelClone.Size
+	else
+		clearChestPreview(button)
+		toolIcon.ImageTransparency = 1
+		return false
+	end
+
+	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+
+	local camera = Instance.new("Camera")
+	camera.Name = "PreviewCamera"
+	camera.FieldOfView = 35
+	camera.CFrame = CFrame.lookAt(
+		boxCF.Position + Vector3.new(maxSize * 0.8, maxSize * 0.35, maxSize * 1.75),
+		boxCF.Position
+	)
+	camera.Parent = viewport
+
+	viewport.CurrentCamera = camera
+	toolIcon.ImageTransparency = 1
+
+	return true
 end
 
 local function ensureDevilFruitPreview(button, fruitKey)
@@ -273,6 +554,9 @@ local function getIcon(kind, name)
 		local cfg = Brainrots[name]
 		return cfg and cfg.Render or ""
 	end
+	if kind == "Chest" then
+		return ""
+	end
 	if kind == "DevilFruit" then
 		return ""
 	end
@@ -281,6 +565,12 @@ local function getIcon(kind, name)
 end
 
 local function getDisplayName(kind, name)
+	if kind == "Chest" then
+		return string.format("%s Chest", tostring(name))
+	end
+	if kind == "Resource" then
+		return getResourceInfo(name).DisplayName
+	end
 	if kind == "DevilFruit" then
 		local fruit = DevilFruitConfig.GetFruit(name)
 		return fruit and fruit.DisplayName or name
@@ -290,6 +580,12 @@ local function getDisplayName(kind, name)
 end
 
 local function getRarity(kind, name)
+	if kind == "Chest" then
+		return tostring(name)
+	end
+	if kind == "Resource" then
+		return getResourceInfo(name).ResourceType
+	end
 	if kind == "DevilFruit" then
 		local fruit = DevilFruitConfig.GetFruit(name)
 		return fruit and fruit.Rarity or ""
@@ -415,6 +711,272 @@ local function showTooltip(displayName, rarityLabel)
 	updateTooltipPosition()
 end
 
+local function getAllButtonText(instance)
+	local textParts = {}
+
+	if instance:IsA("TextButton") or instance:IsA("TextLabel") then
+		textParts[#textParts + 1] = tostring(instance.Text or "")
+	end
+
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("TextButton") or descendant:IsA("TextLabel") then
+			textParts[#textParts + 1] = tostring(descendant.Text or "")
+		end
+	end
+
+	return string.lower(table.concat(textParts, " "))
+end
+
+local function buttonMatchesAliases(button, aliases)
+	local haystack = string.lower(button.Name) .. " " .. getAllButtonText(button)
+	for _, alias in ipairs(aliases) do
+		if string.find(haystack, alias, 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+local function setButtonLabel(button, text)
+	local setAny = false
+
+	if button:IsA("TextButton") then
+		button.Text = text
+		setAny = true
+	end
+
+	for _, descendant in ipairs(button:GetDescendants()) do
+		if descendant:IsA("TextButton") or descendant:IsA("TextLabel") then
+			descendant.Text = text
+			setAny = true
+		end
+	end
+
+	if not setAny then
+		local label = Instance.new("TextLabel")
+		label.Name = "Label"
+		label.BackgroundTransparency = 1
+		label.Size = UDim2.fromScale(1, 1)
+		label.Font = Enum.Font.GothamBold
+		label.Text = text
+		label.TextColor3 = Color3.fromRGB(255, 255, 255)
+		label.TextScaled = true
+		label.Parent = button
+	end
+end
+
+local function cloneSidebarCategoryButton(referenceButton, categoryKey)
+	local clone = referenceButton:Clone()
+	clone.Name = categoryKey
+	clone.Visible = true
+	clone.Parent = referenceButton.Parent
+	setButtonLabel(clone, CATEGORY_BUTTON_LABELS[categoryKey])
+	return clone
+end
+
+local function createFallbackSidebarButton(parent, categoryKey, orderIndex)
+	local button = Instance.new("TextButton")
+	button.Name = categoryKey
+	button.BackgroundColor3 = NORMAL
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = true
+	button.Size = UDim2.new(1, 0, 0, 58)
+	button.Position = UDim2.new(0, 0, 0, (orderIndex - 1) * 62)
+	button.Font = Enum.Font.GothamBold
+	button.Text = CATEGORY_BUTTON_LABELS[categoryKey]
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextScaled = true
+	button.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Color = NORMAL
+	stroke.Parent = button
+
+	return button
+end
+
+local function hideLegacyDevilFruitHeader(sidebarParent)
+	for _, descendant in ipairs(inventoryFrame:GetDescendants()) do
+		if descendant:IsDescendantOf(sidebarParent) then
+			continue
+		end
+
+		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+			local text = string.lower(tostring(descendant.Text or ""))
+			if text == "devil fruits" or text == "devfruits" then
+				descendant.Visible = false
+			end
+		end
+	end
+end
+
+local function refreshCategoryButtons()
+	for categoryKey, button in pairs(categoryButtons) do
+		if button and button.Parent then
+			applySelectedVisual(button, activeInventoryCategory == categoryKey)
+		end
+	end
+end
+
+local function setActiveCategory(categoryKey)
+	if CATEGORY_LABELS[categoryKey] == nil then
+		return
+	end
+
+	activeInventoryCategory = categoryKey
+	refreshCategoryButtons()
+	rebuildUI()
+end
+
+local function createFallbackCategoryButton(parent, categoryKey, orderIndex)
+	local button = Instance.new("TextButton")
+	button.Name = categoryKey .. "Tab"
+	button.BackgroundColor3 = NORMAL
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = true
+	button.Size = UDim2.new(0.32, -6, 1, 0)
+	button.Position = UDim2.new((orderIndex - 1) * 0.34, 0, 0, 0)
+	button.Font = Enum.Font.GothamBold
+	button.Text = CATEGORY_LABELS[categoryKey]
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextScaled = true
+	button.Parent = parent
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 10)
+	corner.Parent = button
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Color = NORMAL
+	stroke.Parent = button
+
+	return button
+end
+
+local function ensureCategoryTabs()
+	if next(categoryButtons) ~= nil then
+		return
+	end
+
+	local brainrotButton = nil
+	local resourcesButton = nil
+	for _, descendant in ipairs(inventoryFrame:GetDescendants()) do
+		if descendant:IsA("GuiButton") then
+			if brainrotButton == nil and buttonMatchesAliases(descendant, CATEGORY_ALIASES.Brainrots) then
+				brainrotButton = descendant
+			elseif resourcesButton == nil and buttonMatchesAliases(descendant, CATEGORY_ALIASES.Resources) then
+				resourcesButton = descendant
+			end
+		end
+	end
+
+	local sidebarParent = nil
+	if brainrotButton and brainrotButton.Parent then
+		sidebarParent = brainrotButton.Parent
+	elseif resourcesButton and resourcesButton.Parent then
+		sidebarParent = resourcesButton.Parent
+	end
+
+	if sidebarParent then
+		if brainrotButton then
+			categoryButtons.Brainrots = brainrotButton
+			setButtonLabel(brainrotButton, CATEGORY_BUTTON_LABELS.Brainrots)
+		end
+		if resourcesButton then
+			categoryButtons.Resources = resourcesButton
+			resourcesButton.Name = "Resources"
+			setButtonLabel(resourcesButton, CATEGORY_BUTTON_LABELS.Resources)
+		end
+	end
+
+	if sidebarParent and categoryButtons.DevilFruits == nil then
+		local referenceButton = categoryButtons.Brainrots or categoryButtons.Resources
+		if referenceButton then
+			categoryButtons.DevilFruits = cloneSidebarCategoryButton(referenceButton, "DevilFruits")
+			local usesLayoutOrder = referenceButton.Parent
+				and (
+					referenceButton.Parent:FindFirstChildOfClass("UIListLayout") ~= nil
+					or referenceButton.Parent:FindFirstChildOfClass("UIGridLayout") ~= nil
+				)
+			if usesLayoutOrder and categoryButtons.Brainrots then
+				categoryButtons.Brainrots.LayoutOrder = 1
+				categoryButtons.DevilFruits.LayoutOrder = 2
+				if categoryButtons.Resources then
+					categoryButtons.Resources.LayoutOrder = 3
+				end
+			elseif categoryButtons.Brainrots and categoryButtons.Resources then
+				local basePosition = categoryButtons.Brainrots.Position
+				local baseSize = categoryButtons.Brainrots.Size
+				categoryButtons.DevilFruits.Position = UDim2.new(
+					basePosition.X.Scale,
+					basePosition.X.Offset,
+					basePosition.Y.Scale,
+					basePosition.Y.Offset + baseSize.Y.Offset + 6
+				)
+				categoryButtons.DevilFruits.Size = baseSize
+				categoryButtons.Resources.Position = UDim2.new(
+					categoryButtons.Resources.Position.X.Scale,
+					categoryButtons.Resources.Position.X.Offset,
+					categoryButtons.DevilFruits.Position.Y.Scale,
+					categoryButtons.DevilFruits.Position.Y.Offset + baseSize.Y.Offset + 6
+				)
+			end
+		end
+	end
+
+	if sidebarParent == nil then
+		categoryRow = Instance.new("Frame")
+		categoryRow.Name = "CategorySidebar"
+		categoryRow.BackgroundTransparency = 1
+		categoryRow.Size = UDim2.new(0, 76, 1, -20)
+		categoryRow.Position = UDim2.new(0, 10, 0, 10)
+		categoryRow.Parent = inventoryFrame
+		createdCategoryRow = true
+
+		for _, categoryKey in ipairs({ "Brainrots", "DevilFruits", "Resources" }) do
+			local orderIndex = CATEGORY_ORDER[categoryKey]
+			if categoryButtons[categoryKey] == nil then
+				categoryButtons[categoryKey] = createFallbackSidebarButton(categoryRow, categoryKey, orderIndex)
+			end
+		end
+
+		scrollingFrame.Position = UDim2.new(
+			scrollingFrame.Position.X.Scale,
+			scrollingFrame.Position.X.Offset + 86,
+			scrollingFrame.Position.Y.Scale,
+			scrollingFrame.Position.Y.Offset
+		)
+		scrollingFrame.Size = UDim2.new(
+			scrollingFrame.Size.X.Scale,
+			scrollingFrame.Size.X.Offset - 86,
+			scrollingFrame.Size.Y.Scale,
+			scrollingFrame.Size.Y.Offset
+		)
+		sidebarParent = categoryRow
+	end
+
+	if sidebarParent then
+		hideLegacyDevilFruitHeader(sidebarParent)
+	end
+
+	for categoryKey, button in pairs(categoryButtons) do
+		if button and button.Parent then
+			setButtonLabel(button, CATEGORY_BUTTON_LABELS[categoryKey] or CATEGORY_LABELS[categoryKey])
+			button.MouseButton1Click:Connect(function()
+				setActiveCategory(categoryKey)
+			end)
+		end
+	end
+
+	refreshCategoryButtons()
+end
+
 local function createButton(template, parent, kind, name)
 	local b = template:Clone()
 	b.Name = "Tool_" .. kind .. "_" .. name
@@ -445,8 +1007,36 @@ local function createButton(template, parent, kind, name)
 	end)
 
 	b.MouseButton1Click:Connect(function()
+		if b:GetAttribute("ItemKind") == "Resource" then
+			return
+		end
+		if b:GetAttribute("ItemKind") == "Chest" then
+			chestDebug(
+				"hotbar/inventory click chest itemName=%s visible=%s slot=%s",
+				tostring(b:GetAttribute("ItemName")),
+				tostring(b.Visible),
+				tostring(b:GetAttribute("SlotIndex"))
+			)
+		end
 		equipRemote:FireServer(b:GetAttribute("ItemKind"), b:GetAttribute("ItemName"))
+		if b:GetAttribute("ItemKind") == "Chest" then
+			chestDebug(
+				"EquipToggleRemote fired from click payload={kind=%s,name=%s}",
+				tostring(b:GetAttribute("ItemKind")),
+				tostring(b:GetAttribute("ItemName"))
+			)
+		end
 	end)
+
+	if kind == "Chest" then
+		chestDebug(
+			"createButton chest key=%s parent=%s visible=%s active=%s",
+			tostring(name),
+			parent:GetFullName(),
+			tostring(b.Visible),
+			tostring(b.Active)
+		)
+	end
 
 	return b
 end
@@ -484,16 +1074,22 @@ end
 
 local function getLists()
 	local gearsList = {}
+	local chestsList = {}
 	local brainrotsList = {}
 	local devilFruitList = {}
+	local resourceList = {}
 
 	for key, st in pairs(itemState) do
 		if st.kind == "Gear" and st.owned == true then
 			table.insert(gearsList, key)
+		elseif st.kind == "Chest" and (st.qty or 0) > 0 then
+			table.insert(chestsList, key)
 		elseif st.kind == "Brainrot" and (st.qty or 0) > 0 then
 			table.insert(brainrotsList, key)
 		elseif st.kind == "DevilFruit" and (st.qty or 0) > 0 then
 			table.insert(devilFruitList, key)
+		elseif st.kind == "Resource" and (st.qty or 0) > 0 then
+			table.insert(resourceList, key)
 		end
 	end
 
@@ -546,16 +1142,43 @@ local function getLists()
 		return da < db
 	end)
 
-	return gearsList, brainrotsList, devilFruitList
+	table.sort(chestsList, function(a, b)
+		local sa = itemState[a]
+		local sb = itemState[b]
+		local oa = CHEST_ORDER[tostring(sa and sa.name or "")] or 999
+		local ob = CHEST_ORDER[tostring(sb and sb.name or "")] or 999
+		if oa ~= ob then
+			return oa < ob
+		end
+		return tostring(sa and sa.name or "") < tostring(sb and sb.name or "")
+	end)
+
+	table.sort(resourceList, function(a, b)
+		local sa = itemState[a]
+		local sb = itemState[b]
+		local oa = RESOURCE_ORDER[tostring(sa and sa.name or "")] or 999
+		local ob = RESOURCE_ORDER[tostring(sb and sb.name or "")] or 999
+		if oa ~= ob then
+			return oa < ob
+		end
+		return tostring(sa and sa.name or "") < tostring(sb and sb.name or "")
+	end)
+
+	return gearsList, chestsList, brainrotsList, devilFruitList, resourceList
 end
 
-local function rebuildUI()
-	local gearsList, brainrotsList, devilFruitList = getLists()
+rebuildUI = function()
+	local gearsList, chestsList, brainrotsList, devilFruitList, resourceList = getLists()
+	chestDebug("rebuildUI chestKeys=%s", table.concat(chestsList, ", "))
 
 	local hotbarKeys = {}
 	local invKeys = {}
 
 	for _, k in ipairs(gearsList) do
+		table.insert(hotbarKeys, k)
+	end
+
+	for _, k in ipairs(chestsList) do
 		table.insert(hotbarKeys, k)
 	end
 
@@ -573,8 +1196,21 @@ local function rebuildUI()
 		end
 	end
 
-	for _, k in ipairs(devilFruitList) do
-		table.insert(invKeys, k)
+	if activeInventoryCategory == "Resources" then
+		for _, k in ipairs(resourceList) do
+			table.insert(invKeys, k)
+		end
+	elseif activeInventoryCategory == "DevilFruits" then
+		for _, k in ipairs(devilFruitList) do
+			table.insert(invKeys, k)
+		end
+	else
+		for i = 1, #brainrotsList do
+			local k = brainrotsList[i]
+			if i > remaining then
+				table.insert(invKeys, k)
+			end
+		end
 	end
 
 	local hotbarSet = {}
@@ -602,22 +1238,38 @@ local function rebuildUI()
 			setCommon(b, getIcon(st.kind, st.name), displayName)
 			if st.kind == "DevilFruit" then
 				ensureDevilFruitPreview(b, st.name)
+				clearChestPreview(b)
+			elseif st.kind == "Chest" then
+				clearDevilFruitPreview(b)
+				ensureChestPreview(b, st.name)
 			else
 				clearDevilFruitPreview(b)
+				clearChestPreview(b)
 			end
 			setSlotVisual(b, slotKeyForIndex(i))
 
-			if st.kind == "Brainrot" then
+			if st.kind == "Brainrot" or st.kind == "Chest" then
 				setAmount(b, st.qty or 0)
 			else
 				setAmount(b, nil)
+			end
+
+			if st.kind == "Chest" then
+				chestDebug(
+					"hotbar chest slot key=%s slot=%s visible=%s amount=%s layoutOrder=%s",
+					k,
+					tostring(b:GetAttribute("SlotIndex")),
+					tostring(b.Visible),
+					tostring(st.qty or 0),
+					tostring(b.LayoutOrder)
+				)
 			end
 		end
 	end
 
 	for i, k in ipairs(invKeys) do
 		local st = itemState[k]
-		if st and st.kind == "Brainrot" then
+		if st and (st.kind == "Brainrot" or st.kind == "Chest" or st.kind == "Resource") then
 			if not invButtons[k] or not invButtons[k].Parent then
 				invButtons[k] = createButton(invTemplate, invContainer, st.kind, st.name)
 			end
@@ -628,7 +1280,19 @@ local function rebuildUI()
 			b:SetAttribute("DisplayName", displayName)
 			b:SetAttribute("RarityLabel", rarityLabel)
 			setCommon(b, getIcon(st.kind, st.name), displayName)
-			clearDevilFruitPreview(b)
+			if st.kind == "Chest" then
+				clearDevilFruitPreview(b)
+				clearResourcePreview(b)
+				ensureChestPreview(b, st.name)
+			elseif st.kind == "Resource" then
+				clearDevilFruitPreview(b)
+				clearChestPreview(b)
+				ensureResourcePreview(b, st.name)
+			else
+				clearDevilFruitPreview(b)
+				clearChestPreview(b)
+				clearResourcePreview(b)
+			end
 			setSlotVisual(b, nil)
 			setAmount(b, st.qty or 0)
 		elseif st and st.kind == "DevilFruit" then
@@ -642,6 +1306,8 @@ local function rebuildUI()
 			b:SetAttribute("DisplayName", displayName)
 			b:SetAttribute("RarityLabel", rarityLabel)
 			setCommon(b, getIcon(st.kind, st.name), displayName)
+			clearChestPreview(b)
+			clearResourcePreview(b)
 			ensureDevilFruitPreview(b, st.name)
 			setSlotVisual(b, nil)
 			setAmount(b, st.qty or 0)
@@ -667,7 +1333,48 @@ local function rebuildUI()
 	applySearchFilter()
 end
 
+local function syncResourcesFromState(state)
+	local foodInventory = state and state.FoodInventory or {}
+	local materials = state and state.Materials or {}
+
+	for foodKey in pairs(Economy.Food) do
+		local qty = math.max(0, tonumber(foodInventory[foodKey]) or 0)
+		local key = "Resource|" .. foodKey
+		if qty > 0 then
+			itemState[key] = {
+				kind = "Resource",
+				name = foodKey,
+				qty = qty,
+				resourceType = "Food",
+			}
+		else
+			itemState[key] = nil
+		end
+	end
+
+	for materialKey in pairs(RESOURCE_MATERIAL_DISPLAY) do
+		local qty = math.max(0, tonumber(materials[materialKey]) or 0)
+		local key = "Resource|" .. materialKey
+		if qty > 0 then
+			itemState[key] = {
+				kind = "Resource",
+				name = materialKey,
+				qty = qty,
+				resourceType = "Material",
+			}
+		else
+			itemState[key] = nil
+		end
+	end
+
+	rebuildUI()
+end
+
 updateRemote.OnClientEvent:Connect(function(kind, name, v)
+	if kind == "Chest" then
+		chestDebug("InventoryGearRemote received payload={kind=Chest,name=%s,qty=%s}", tostring(name), tostring(v))
+	end
+
 	if kind == "Brainrot" then
 		local cfg = Brainrots[name]
 		if not cfg then return end
@@ -707,9 +1414,33 @@ updateRemote.OnClientEvent:Connect(function(kind, name, v)
 			ensureAcquired(key)
 			itemState[key] = { kind = "DevilFruit", name = fruit.FruitKey, qty = qty }
 		end
+	elseif kind == "Chest" then
+		local qty = tonumber(v) or 0
+		local key = "Chest|" .. name
+
+		if qty <= 0 then
+			itemState[key] = nil
+		else
+			ensureAcquired(key)
+			itemState[key] = { kind = "Chest", name = name, qty = qty }
+		end
+
+		local chestKeys = {}
+		for itemKey, item in pairs(itemState) do
+			if item and item.kind == "Chest" then
+				chestKeys[#chestKeys + 1] = string.format("%s=%s", itemKey, tostring(item.qty))
+			end
+		end
+		table.sort(chestKeys)
+		chestDebug("itemState chest entries after update: %s", #chestKeys > 0 and table.concat(chestKeys, ", ") or "none")
 	end
 
 	rebuildUI()
+end)
+
+ensureCategoryTabs()
+MetaClient.ObserveState(function(state)
+	syncResourcesFromState(state)
 end)
 
 local keyToSlot = {
@@ -734,7 +1465,22 @@ local function activateSlot(slotKey)
 			and b:GetAttribute("ItemKind") ~= nil then
 
 			if b:GetAttribute("SlotIndex") == slotKey then
+				if b:GetAttribute("ItemKind") == "Chest" then
+					chestDebug(
+						"activateSlot chest slot=%s itemName=%s visible=%s",
+						tostring(slotKey),
+						tostring(b:GetAttribute("ItemName")),
+						tostring(b.Visible)
+					)
+				end
 				equipRemote:FireServer(b:GetAttribute("ItemKind"), b:GetAttribute("ItemName"))
+				if b:GetAttribute("ItemKind") == "Chest" then
+					chestDebug(
+						"EquipToggleRemote fired from slot payload={kind=%s,name=%s}",
+						tostring(b:GetAttribute("ItemKind")),
+						tostring(b:GetAttribute("ItemName"))
+					)
+				end
 				return
 			end
 		end
@@ -787,6 +1533,13 @@ local function hookCharacter(char)
 
 	char.ChildAdded:Connect(function(obj)
 		if obj:IsA("Tool") then
+			if obj:GetAttribute("InventoryItemKind") == "Chest" then
+				chestDebug(
+					"Character ChildAdded chest tool name=%s parent=%s",
+					tostring(obj.Name),
+					obj.Parent and obj.Parent:GetFullName() or "nil"
+				)
+			end
 			equippedName = obj.Name
 			updateSelection()
 		end
@@ -794,6 +1547,12 @@ local function hookCharacter(char)
 
 	char.ChildRemoved:Connect(function(obj)
 		if obj:IsA("Tool") and equippedName == obj.Name then
+			if obj:GetAttribute("InventoryItemKind") == "Chest" then
+				chestDebug(
+					"Character ChildRemoved chest tool name=%s",
+					tostring(obj.Name)
+				)
+			end
 			equippedName = nil
 			updateSelection()
 		end

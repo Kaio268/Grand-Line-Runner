@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local ProfileTemplate = require(script.Parent:WaitForChild("ProfileTemplate"))
+local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 
 local ProfileMigrations = {}
 
@@ -39,6 +40,74 @@ local function coerceBoolean(value, fallback)
 		return value
 	end
 	return fallback
+end
+
+local function getVariantAndBaseName(fullName)
+	fullName = tostring(fullName or "")
+
+	for _, variantKey in ipairs(VariantCfg.Order or {}) do
+		if variantKey ~= "Normal" then
+			local variantData = (VariantCfg.Versions or {})[variantKey]
+			local prefix = tostring((variantData and variantData.Prefix) or (variantKey .. " "))
+			if prefix ~= "" and fullName:sub(1, #prefix) == prefix then
+				return variantKey, fullName:sub(#prefix + 1)
+			end
+		end
+	end
+
+	return "Normal", fullName
+end
+
+local function isBrainrotInventoryEntry(key, entry)
+	if key == "Feed" or key == "DevilFruits" then
+		return false
+	end
+	if typeof(entry) ~= "table" then
+		return false
+	end
+	return entry.Quantity ~= nil
+		or entry.BaseName ~= nil
+		or entry.Variant ~= nil
+		or entry.Rarity ~= nil
+		or entry.Level ~= nil
+		or entry.CurrentXP ~= nil
+end
+
+local function normalizeBrainrotInstance(instanceId, instanceData, fallbackStorageName)
+	if typeof(instanceData) ~= "table" then
+		instanceData = {}
+	end
+
+	local storageName = tostring(instanceData.StorageName or fallbackStorageName or instanceData.BrainrotName or "")
+	if storageName == "" then
+		return nil
+	end
+
+	local variantKey = tostring(instanceData.Variant or "")
+	local baseName = tostring(instanceData.BaseName or "")
+	if baseName == "" then
+		variantKey, baseName = getVariantAndBaseName(storageName)
+	end
+	if variantKey == "" then
+		variantKey = "Normal"
+	end
+
+	return {
+		InstanceId = tostring(instanceId),
+		StorageName = storageName,
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = tostring(instanceData.Rarity or "Common"),
+		Income = coerceNumber(instanceData.Income, 0),
+		Render = tostring(instanceData.Render or ""),
+		GoldenRender = tostring(instanceData.GoldenRender or instanceData.Render or ""),
+		DiamondRender = tostring(instanceData.DiamondRender or instanceData.Render or ""),
+		Level = math.max(1, coerceNumber(instanceData.Level, 1)),
+		CurrentXP = math.max(0, coerceNumber(instanceData.CurrentXP, 0)),
+		AssignedStand = tostring(instanceData.AssignedStand or ""),
+		AcquiredAt = coerceNumber(instanceData.AcquiredAt, 0),
+		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
+	}
 end
 
 function ProfileMigrations.Apply(data)
@@ -96,6 +165,11 @@ function ProfileMigrations.Apply(data)
 	crewInventory.ById = ensureTable(crewInventory, "ById")
 	crewInventory.Order = ensureTable(crewInventory, "Order")
 
+	local brainrotInventory = ensureTable(data, "BrainrotInventory")
+	brainrotInventory.NextInstanceId = math.max(1, coerceNumber(brainrotInventory.NextInstanceId, 1))
+	brainrotInventory.ById = ensureTable(brainrotInventory, "ById")
+	brainrotInventory.Order = ensureTable(brainrotInventory, "Order")
+
 	local unopenedChests = ensureTable(data, "UnopenedChests")
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))
 	unopenedChests.ById = ensureTable(unopenedChests, "ById")
@@ -108,6 +182,144 @@ function ProfileMigrations.Apply(data)
 		local currentAmount = coerceNumber(foodInventory[foodKey], defaultAmount)
 		local legacyAmount = coerceNumber(legacyFeed[foodKey], 0)
 		foodInventory[foodKey] = math.max(currentAmount, legacyAmount)
+	end
+
+	for inventoryKey, inventoryEntry in pairs(inventory) do
+		if inventoryKey ~= "Feed" and inventoryKey ~= "DevilFruits" and typeof(inventoryEntry) == "table" then
+			local hasBrainrotFields = inventoryEntry.Quantity ~= nil
+				or inventoryEntry.Rarity ~= nil
+				or inventoryEntry.Level ~= nil
+				or inventoryEntry.BaseName ~= nil
+			if hasBrainrotFields then
+				inventoryEntry.Level = math.max(1, coerceNumber(inventoryEntry.Level, 1))
+				inventoryEntry.CurrentXP = math.max(0, coerceNumber(inventoryEntry.CurrentXP, 0))
+			end
+		end
+	end
+
+	local incomeBrainrots = ensureTable(data, "IncomeBrainrots")
+	for standName, standData in pairs(incomeBrainrots) do
+		if typeof(standData) == "table" then
+			if typeof(standData.BrainrotName) ~= "string" then
+				standData.BrainrotName = ""
+			end
+			if typeof(standData.BrainrotInstanceId) ~= "string" then
+				standData.BrainrotInstanceId = ""
+			end
+			if typeof(standData.IncomeToCollect) ~= "number" then
+				standData.IncomeToCollect = 0
+			end
+			incomeBrainrots[standName] = standData
+		end
+	end
+
+	local normalizedOrder = {}
+	local seenInstanceIds = {}
+	local maxBrainrotInstanceId = brainrotInventory.NextInstanceId - 1
+	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
+		local instanceId = tostring(rawInstanceId)
+		maxBrainrotInstanceId = math.max(maxBrainrotInstanceId, coerceNumber(tonumber(instanceId), 0))
+		local normalized = normalizeBrainrotInstance(instanceId, brainrotInventory.ById[instanceId])
+		if normalized and not seenInstanceIds[instanceId] then
+			brainrotInventory.ById[instanceId] = normalized
+			table.insert(normalizedOrder, instanceId)
+			seenInstanceIds[instanceId] = true
+		else
+			brainrotInventory.ById[instanceId] = nil
+		end
+	end
+
+	for rawInstanceId, instanceData in pairs(brainrotInventory.ById) do
+		local instanceId = tostring(rawInstanceId)
+		maxBrainrotInstanceId = math.max(maxBrainrotInstanceId, coerceNumber(tonumber(instanceId), 0))
+		if not seenInstanceIds[instanceId] then
+			local normalized = normalizeBrainrotInstance(instanceId, instanceData)
+			if normalized then
+				brainrotInventory.ById[instanceId] = normalized
+				table.insert(normalizedOrder, instanceId)
+				seenInstanceIds[instanceId] = true
+			else
+				brainrotInventory.ById[instanceId] = nil
+			end
+		end
+	end
+	brainrotInventory.Order = normalizedOrder
+	if brainrotInventory.NextInstanceId <= maxBrainrotInstanceId then
+		brainrotInventory.NextInstanceId = maxBrainrotInstanceId + 1
+	end
+
+	local function createBrainrotInstance(storageName, entry, assignedStand)
+		local instanceId = tostring(brainrotInventory.NextInstanceId)
+		brainrotInventory.NextInstanceId += 1
+
+		local normalized = normalizeBrainrotInstance(instanceId, {
+			StorageName = storageName,
+			BaseName = entry and entry.BaseName or nil,
+			Variant = entry and entry.Variant or nil,
+			Rarity = entry and entry.Rarity or nil,
+			Income = entry and entry.Income or nil,
+			Render = entry and entry.Render or nil,
+			GoldenRender = entry and entry.GoldenRender or nil,
+			DiamondRender = entry and entry.DiamondRender or nil,
+			Level = entry and entry.Level or 1,
+			CurrentXP = entry and entry.CurrentXP or 0,
+			AssignedStand = assignedStand or "",
+		}, storageName)
+
+		brainrotInventory.ById[instanceId] = normalized
+		table.insert(brainrotInventory.Order, instanceId)
+		return instanceId
+	end
+
+	if #brainrotInventory.Order == 0 then
+		local placedByStorage = {}
+		local standNamesByStorage = {}
+		for standName, standData in pairs(incomeBrainrots) do
+			local storageName = tostring(standData.BrainrotName or "")
+			if storageName ~= "" then
+				placedByStorage[storageName] = (placedByStorage[storageName] or 0) + 1
+				standNamesByStorage[storageName] = standNamesByStorage[storageName] or {}
+				table.insert(standNamesByStorage[storageName], tostring(standName))
+			end
+		end
+
+		for inventoryKey, inventoryEntry in pairs(inventory) do
+			if isBrainrotInventoryEntry(inventoryKey, inventoryEntry) then
+				local availableQuantity = math.max(0, coerceNumber(inventoryEntry.Quantity, 0))
+				local standNames = standNamesByStorage[inventoryKey] or {}
+				local totalInstances = availableQuantity + #standNames
+
+				for index = 1, totalInstances do
+					local assignedStand = standNames[index]
+					local instanceId = createBrainrotInstance(inventoryKey, inventoryEntry, assignedStand)
+					if assignedStand then
+						incomeBrainrots[assignedStand] = incomeBrainrots[assignedStand] or {}
+						incomeBrainrots[assignedStand].BrainrotName = inventoryKey
+						incomeBrainrots[assignedStand].BrainrotInstanceId = instanceId
+					end
+				end
+			end
+		end
+	end
+
+	local availableCounts = {}
+	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
+		local instanceData = brainrotInventory.ById[tostring(rawInstanceId)]
+		if instanceData then
+			if instanceData.AssignedStand ~= "" then
+				incomeBrainrots[instanceData.AssignedStand] = incomeBrainrots[instanceData.AssignedStand] or {}
+				incomeBrainrots[instanceData.AssignedStand].BrainrotName = instanceData.StorageName
+				incomeBrainrots[instanceData.AssignedStand].BrainrotInstanceId = tostring(rawInstanceId)
+			else
+				availableCounts[instanceData.StorageName] = (availableCounts[instanceData.StorageName] or 0) + 1
+			end
+		end
+	end
+
+	for inventoryKey, inventoryEntry in pairs(inventory) do
+		if isBrainrotInventoryEntry(inventoryKey, inventoryEntry) then
+			inventoryEntry.Quantity = availableCounts[inventoryKey] or 0
+		end
 	end
 
 	local materials = ensureTable(data, "Materials")

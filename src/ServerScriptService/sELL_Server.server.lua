@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 
 local DataManager = require(script.Parent.Data.DataManager)
+local BrainrotInstanceService = require(script.Parent.Modules.BrainrotInstanceService)
 local SellEvent   = ReplicatedStorage.Remotes:WaitForChild("SellItemEvent")
 
 local Brainrots = require(ReplicatedStorage.Modules.Configs:WaitForChild("Brainrots"))
@@ -66,7 +67,11 @@ local function sellSingle(player, rawName)
 	local price        = getSellPrice(brainrotName)
 	if price <= 0 then return end
 
-	DataManager:SubValue(player, ("Inventory.%s.Quantity"):format(realKey), 1)
+	local removedInstanceId = BrainrotInstanceService.RemoveAvailableInstance(player, realKey)
+	if not removedInstanceId then
+		return
+	end
+
 	DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), price)
 end
 
@@ -83,8 +88,13 @@ local function sellAll(player)
 			local price        = getSellPrice(brainrotName)
 
 			if price > 0 then
-				total += price * qty
-				DataManager:SetValue(player, ("Inventory.%s.Quantity"):format(key), 0)
+				local soldCount = 0
+				for _ = 1, qty do
+					if BrainrotInstanceService.RemoveAvailableInstance(player, key) then
+						soldCount += 1
+					end
+				end
+				total += price * soldCount
 			end
 		end
 	end

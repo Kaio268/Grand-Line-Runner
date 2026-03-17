@@ -76,6 +76,7 @@ local Economy = {
 			PromptHoldDuration = 0.25,
 			PromptMaxDistance = 14,
 			RewardHeightOffset = 3.5,
+			DebugChestSpawnAlphaOverride = 0.12,
 			RewardAlphaByDepthBand = {
 				Shallow = 0.25,
 				Mid = 0.5,
@@ -86,7 +87,29 @@ local Economy = {
 			RewardMaxLaneOffset = 10,
 			ExtractionZoneSize = Vector3.new(20, 8, 20),
 			StartHubSize = Vector3.new(16, 1, 16),
+			SharedChests = {
+				Enabled = true,
+				MaxActive = 3,
+				RespawnCheckInterval = 5,
+				RespawnDelay = 10,
+				SpawnTierToDepthBand = {
+					[1] = "Shallow",
+					[2] = "Shallow",
+					[3] = "Mid",
+					[4] = "Mid",
+					[5] = "Deep",
+					[6] = "Deep",
+					[7] = "Abyssal",
+					[8] = "Abyssal",
+					[9] = "Abyssal",
+				},
+			},
 		},
+	},
+
+	PlaceholderBaseUI = {
+		Enabled = true,
+		ToggleButtonText = "Ship Meta",
 	},
 
 	Food = {
@@ -105,6 +128,34 @@ local Economy = {
 		SeaBeastMeat = {
 			DisplayName = "Sea Beast Meat",
 			XP = 175,
+		},
+	},
+
+	Brainrots = {
+		MaxLevel = 50,
+		FoodAutoFeedPriority = {
+			"Apple",
+			"Rice",
+			"Meat",
+			"SeaBeastMeat",
+		},
+		BaseXPPerLevelBand = {
+			{ MinLevel = 1, MaxLevel = 10, XPPerLevel = 40 },
+			{ MinLevel = 11, MaxLevel = 20, XPPerLevel = 70 },
+			{ MinLevel = 21, MaxLevel = 30, XPPerLevel = 120 },
+			{ MinLevel = 31, MaxLevel = 40, XPPerLevel = 210 },
+			{ MinLevel = 41, MaxLevel = 50, XPPerLevel = 360 },
+		},
+		TotalXPMultiplierByRarity = {
+			Common = 1.00,
+			Uncommon = 1.20,
+			Rare = 1.50,
+			Epic = 1.90,
+			Legendary = 2.40,
+			Mythical = 3.10,
+			Celestial = 4.00,
+			Godly = 5.20,
+			Secret = 6.80,
 		},
 	},
 

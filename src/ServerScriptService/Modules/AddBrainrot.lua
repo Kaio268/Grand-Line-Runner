@@ -8,6 +8,7 @@ local Configs = Modules:WaitForChild("Configs")
 
 local BrainrotsCfg = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local BrainrotInstanceService = require(script.Parent:WaitForChild("BrainrotInstanceService"))
 
 local function validName(name)
 	if type(name) ~= "string" then return nil end
@@ -123,9 +124,37 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 	dmSet(DataManager, plr, basePath .. ".DiamondRender", diamondRender)
 
 	if DataManager.SetValue then
+		if DataManager:GetValue(plr, basePath .. ".Level") == nil then
+			DataManager:SetValue(plr, basePath .. ".Level", 1)
+		end
+		if DataManager:GetValue(plr, basePath .. ".CurrentXP") == nil then
+			DataManager:SetValue(plr, basePath .. ".CurrentXP", 0)
+		end
 		DataManager:SetValue(plr, basePath .. ".Income", tonumber(info.Income) or 0)
 		DataManager:SetValue(plr, basePath .. ".Rarity", tostring(info.Rarity or "Common"))
 	end
+
+	BrainrotInstanceService.EnsureInventoryMetadata(plr, brainrotName, {
+		StorageName = brainrotName,
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = tostring(info.Rarity or "Common"),
+		Income = tonumber(info.Income) or 0,
+		Render = render,
+		GoldenRender = goldenRender,
+		DiamondRender = diamondRender,
+	})
+	BrainrotInstanceService.CreateInstances(plr, brainrotName, n, {
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = tostring(info.Rarity or "Common"),
+		Income = tonumber(info.Income) or 0,
+		Render = render,
+		GoldenRender = goldenRender,
+		DiamondRender = diamondRender,
+		Level = 1,
+		CurrentXP = 0,
+	})
 
 	return true
 end

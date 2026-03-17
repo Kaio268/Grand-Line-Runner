@@ -560,6 +560,9 @@ function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
 		if ctx.HeldByUserId[player.UserId] then
 			return
 		end
+		if player:GetAttribute("CarriedMajorRewardType") ~= nil then
+			return
+		end
 
 		local char = player.Character
 		if not char then

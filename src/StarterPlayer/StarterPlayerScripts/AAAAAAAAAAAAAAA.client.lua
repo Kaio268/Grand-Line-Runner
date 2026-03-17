@@ -57,6 +57,7 @@ disasterTemplate.Visible = false
 
 local pfpClones = {}
 local waveIndicators = {}
+local chestIndicators = {}
 
 local function getImageNode(obj)
 	if not obj then return nil end
@@ -232,8 +233,78 @@ local function getWaveWorldPos(obj)
 	return nil
 end
 
+local function getRewardWorldPos(obj)
+	if not obj then
+		return nil
+	end
+
+	if obj:IsA("Model") then
+		local primary = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
+		if primary then
+			return primary.Position
+		end
+		return obj:GetPivot().Position
+	end
+
+	if obj:IsA("BasePart") then
+		return obj.Position
+	end
+
+	return nil
+end
+
 local disasterYScale = disasterTemplate.Position.Y.Scale
 local disasterYOffset = disasterTemplate.Position.Y.Offset
+
+local function createChestIndicator(rewardObject)
+	local indicator = Instance.new("TextLabel")
+	indicator.Name = "ChestIndicator_" .. rewardObject.Name
+	indicator.AnchorPoint = Vector2.new(0.5, 0.5)
+	indicator.AutomaticSize = Enum.AutomaticSize.None
+	indicator.BackgroundColor3 = Color3.fromRGB(184, 126, 56)
+	indicator.BorderSizePixel = 0
+	indicator.Size = UDim2.fromOffset(74, 26)
+	indicator.Text = "CHEST"
+	indicator.TextColor3 = Color3.fromRGB(255, 247, 198)
+	indicator.TextScaled = true
+	indicator.TextStrokeTransparency = 0
+	indicator.Font = Enum.Font.GothamBlack
+	indicator.Visible = true
+	indicator.ZIndex = 30
+	indicator.Parent = progressBar
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = indicator
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(59, 34, 8)
+	stroke.Thickness = 2
+	stroke.Parent = indicator
+
+	return indicator
+end
+
+local function ensureChestIndicator(rewardObject)
+	if chestIndicators[rewardObject] and chestIndicators[rewardObject].Parent then
+		return chestIndicators[rewardObject]
+	end
+
+	local indicator = createChestIndicator(rewardObject)
+	chestIndicators[rewardObject] = indicator
+	return indicator
+end
+
+local function removeUnusedChestIndicators(validMap)
+	for rewardObject, gui in pairs(chestIndicators) do
+		if not validMap[rewardObject] then
+			if gui and gui.Parent then
+				gui:Destroy()
+			end
+			chestIndicators[rewardObject] = nil
+		end
+	end
+end
 
 local function ensureWaveIndicator(waveObj)
 	if waveIndicators[waveObj] and waveIndicators[waveObj].Parent then
@@ -279,6 +350,30 @@ local function updateWaveIndicators()
 			end
 		end
 	end
+end
+
+local function updateChestIndicators()
+	local valid = {}
+	local controllerFolder = waveFolder:FindFirstChild("GrandLineRush")
+	local rewardFolder = controllerFolder and controllerFolder:FindFirstChild("RunRewards")
+	if not rewardFolder then
+		removeUnusedChestIndicators(valid)
+		return
+	end
+
+	for _, rewardObject in ipairs(rewardFolder:GetChildren()) do
+		if rewardObject:GetAttribute("RewardType") == "Chest" then
+			local pos = getRewardWorldPos(rewardObject)
+			if pos then
+				local indicator = ensureChestIndicator(rewardObject)
+				local a = getAlphaOnLine(pos)
+				indicator.Position = UDim2.new(alphaToXScale(a), 0, 0.28, 0)
+				valid[rewardObject] = true
+			end
+		end
+	end
+
+	removeUnusedChestIndicators(valid)
 end
 
 if ProgressBarSync and ProgressBarSync:IsA("RemoteEvent") then
@@ -880,6 +975,7 @@ updatePause()
 RunService.RenderStepped:Connect(function()
 	updatePfpPositions()
 	updateWaveIndicators()
+	updateChestIndicators()
 	updatePfpBrainrotAndSkull()
 end)
 

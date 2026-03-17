@@ -16,9 +16,18 @@ local stateChangedEvent = Instance.new("BindableEvent")
 local started = false
 local runtimeByPlayer = {}
 local deathConnections = {}
+local CHEST_DEBUG = true
 
 local CARRY_TOOL_NAME = "GrandLineRushMajorReward"
 local CHEST_TIER_ORDER = { "Wooden", "Iron", "Gold", "Legendary" }
+
+local function chestDebug(message, ...)
+	if CHEST_DEBUG ~= true then
+		return
+	end
+
+	warn(string.format("[GLR ChestDebug][Slice] " .. tostring(message), ...))
+end
 
 local function getOrCreateRemotesFolder()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -210,52 +219,6 @@ end
 
 local function createCarryTool(player, reward)
 	clearCarryTool(player)
-
-	local backpack = player:FindFirstChild("Backpack") or player:WaitForChild("Backpack", 5)
-	if not backpack then
-		return
-	end
-
-	local tool = Instance.new("Tool")
-	tool.Name = CARRY_TOOL_NAME
-	tool.CanBeDropped = false
-	tool.RequiresHandle = true
-	tool.ManualActivationOnly = true
-	tool.ToolTip = getRewardToolDisplay(reward)
-	tool:SetAttribute("GrandLineRushMajorReward", true)
-	tool:SetAttribute("RewardType", reward.RewardType)
-
-	local handle = Instance.new("Part")
-	handle.Name = "Handle"
-	handle.Size = Vector3.new(1.2, 1.2, 1.2)
-	handle.Material = Enum.Material.SmoothPlastic
-	handle.CanCollide = false
-	handle.CanTouch = false
-	handle.CanQuery = false
-	handle.Massless = true
-	handle.Color = if reward.RewardType == "Chest"
-		then Color3.fromRGB(164, 110, 54)
-		else Color3.fromRGB(74, 132, 255)
-	handle.Parent = tool
-
-	local label = Instance.new("BillboardGui")
-	label.Name = "Label"
-	label.Size = UDim2.fromOffset(120, 30)
-	label.StudsOffset = Vector3.new(0, 1.35, 0)
-	label.AlwaysOnTop = true
-	label.Parent = handle
-
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.Size = UDim2.fromScale(1, 1)
-	text.Text = getRewardToolDisplay(reward)
-	text.TextScaled = true
-	text.Font = Enum.Font.GothamBold
-	text.TextColor3 = Color3.new(1, 1, 1)
-	text.TextStrokeTransparency = 0
-	text.Parent = label
-
-	tool.Parent = backpack
 	player:SetAttribute("CarriedMajorRewardType", reward.RewardType)
 	player:SetAttribute("CarriedMajorRewardDisplayName", getRewardToolDisplay(reward))
 end
@@ -411,6 +374,7 @@ end
 local function addUnopenedChest(player, tierName, depthBand)
 	local profile, replica = getProfileAndReplica(player)
 	if not profile or not replica then
+		chestDebug("addUnopenedChest skipped for %s because profile/replica missing.", player and player.Name or "unknown")
 		return nil
 	end
 
@@ -428,6 +392,24 @@ local function addUnopenedChest(player, tierName, depthBand)
 		CreatedAt = os.time(),
 	}
 	table.insert(unopenedChests.Order, chestId)
+
+	local tierQuantity = 0
+	for _, existingChestId in ipairs(unopenedChests.Order) do
+		local entry = unopenedChests.ById[tostring(existingChestId)]
+		if entry and tostring(entry.Tier) == tostring(tierName) then
+			tierQuantity += 1
+		end
+	end
+
+	chestDebug(
+		"addUnopenedChest player=%s tier=%s depth=%s newChestId=%s tierQuantity=%d totalOrder=%d",
+		player.Name,
+		tostring(tierName),
+		tostring(depthBand),
+		tostring(chestId),
+		tierQuantity,
+		#unopenedChests.Order
+	)
 
 	syncPaths(player, replica, {
 		{ Path = { "UnopenedChests" }, Value = unopenedChests },
@@ -544,7 +526,7 @@ end
 
 function Service.FailRun(player, reason)
 	local runtime = getRuntime(player)
-	if runtime.InRun ~= true then
+	if runtime.InRun ~= true and runtime.CarriedReward == nil and runtime.SpawnedReward == nil then
 		return resolveActionResponse(player, false, nil, "not_in_run")
 	end
 
@@ -561,6 +543,13 @@ local function startRun(player, rewardType, depthBand)
 	local runtime = getRuntime(player)
 	if runtime.InRun then
 		return resolveActionResponse(player, false, nil, "run_already_active")
+	end
+	if runtime.CarriedReward ~= nil then
+		return resolveActionResponse(player, false, "Extract or lose your carried reward before starting a new run.", "already_carrying_reward")
+	end
+
+	if tostring(rewardType or "Chest") == "Chest" then
+		return resolveActionResponse(player, false, "Chests are shared corridor rewards and no longer start as private runs.", "chests_are_shared_world_rewards")
 	end
 
 	runtime.InRun = true
@@ -618,19 +607,31 @@ end
 
 local function extractRun(player)
 	local runtime = getRuntime(player)
-	if runtime.InRun ~= true then
-		return resolveActionResponse(player, false, nil, "not_in_run")
-	end
 	if runtime.CarriedReward == nil then
+		if runtime.InRun ~= true then
+			return resolveActionResponse(player, false, nil, "not_in_run")
+		end
 		return resolveActionResponse(player, false, nil, "no_carried_reward")
 	end
 
 	local carriedReward = runtime.CarriedReward
 	local message
+	chestDebug(
+		"extractRun success path player=%s carriedType=%s inRun=%s",
+		player.Name,
+		tostring(carriedReward and carriedReward.RewardType),
+		tostring(runtime.InRun)
+	)
 
 	if carriedReward.RewardType == "Chest" then
+		chestDebug(
+			"extractRun calling addUnopenedChest player=%s tier=%s depth=%s",
+			player.Name,
+			tostring(carriedReward.Tier),
+			tostring(carriedReward.DepthBand)
+		)
 		local chestId = addUnopenedChest(player, carriedReward.Tier, carriedReward.DepthBand)
-		message = string.format("Extracted %s and stored it in base inventory as chest #%s.", getRewardToolDisplay(carriedReward), tostring(chestId or "?"))
+		message = string.format("Extracted %s and added it to your hotbar as chest #%s.", getRewardToolDisplay(carriedReward), tostring(chestId or "?"))
 	else
 		local instanceId = addCrewInstance(player, {
 			Name = carriedReward.CrewName,
@@ -646,6 +647,41 @@ local function extractRun(player)
 	clearCarryTool(player)
 
 	return resolveActionResponse(player, true, message)
+end
+
+local function claimWorldChest(player, rewardData)
+	local runtime = getRuntime(player)
+	if runtime.InRun == true then
+		return resolveActionResponse(player, false, "Finish your current run before claiming a shared chest.", "run_already_active")
+	end
+	if runtime.CarriedReward ~= nil then
+		return resolveActionResponse(player, false, nil, "already_carrying_reward")
+	end
+	if player:GetAttribute("CarriedBrainrot") ~= nil then
+		return resolveActionResponse(player, false, "You cannot pick up a chest while carrying a brainrot.", "carrying_brainrot")
+	end
+
+	local tierName = tostring(rewardData and rewardData.Tier or "Wooden")
+	if Economy.Chests.Tiers[tierName] == nil then
+		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
+	end
+
+	local depthBand = tostring(rewardData and rewardData.DepthBand or Economy.VerticalSlice.DefaultDepthBand)
+	runtime.DepthBand = depthBand
+	runtime.SpawnedReward = nil
+	runtime.CarriedReward = {
+		RewardType = "Chest",
+		Tier = tierName,
+		DepthBand = depthBand,
+		Source = "SharedWorld",
+	}
+	runtime.ResolutionText = string.format(
+		"Carrying %s. Extract successfully to secure it.",
+		getRewardToolDisplay(runtime.CarriedReward)
+	)
+
+	createCarryTool(player, runtime.CarriedReward)
+	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
 local function openChest(player, requestedChestId)
@@ -859,8 +895,8 @@ local function bindCharacter(player, character)
 
 	deathConnections[player] = humanoid.Died:Connect(function()
 		local runtime = getRuntime(player)
-		if runtime.InRun then
-			Service.FailRun(player, "Run failed on defeat. Unextracted rewards were lost.")
+		if runtime.InRun or runtime.CarriedReward ~= nil then
+			Service.FailRun(player, "Defeated while carrying a reward. Unextracted rewards were lost.")
 		end
 	end)
 end
@@ -922,6 +958,10 @@ function Service.GetState(player)
 	return buildState(player)
 end
 
+function Service.PushState(player)
+	pushState(player)
+end
+
 function Service.StartRun(player, rewardType, depthBand)
 	return handleRequest(player, "StartRun", {
 		RewardType = rewardType,
@@ -929,12 +969,58 @@ function Service.StartRun(player, rewardType, depthBand)
 	})
 end
 
+function Service.CreateChestRewardData(depthBand)
+	local normalizedDepthBand = tostring(depthBand or Economy.VerticalSlice.DefaultDepthBand)
+	return {
+		RewardType = "Chest",
+		Tier = chooseChestTier(normalizedDepthBand),
+		DepthBand = normalizedDepthBand,
+	}
+end
+
 function Service.ClaimSpawnedReward(player)
 	return handleRequest(player, "ClaimReward")
 end
 
+function Service.ClaimWorldChest(player, rewardData)
+	if not waitForDataReady(player, 10) then
+		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+	ensureStarterCrew(player)
+	return claimWorldChest(player, rewardData)
+end
+
 function Service.ExtractRun(player)
 	return handleRequest(player, "ExtractRun")
+end
+
+function Service.GrantChest(player, tierName, amount, depthBand)
+	if not waitForDataReady(player, 10) then
+		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+
+	local normalizedTier = tostring(tierName or "")
+	if Economy.Chests.Tiers[normalizedTier] == nil then
+		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
+	end
+
+	local count = math.max(1, math.floor(tonumber(amount) or 1))
+	local normalizedDepthBand = tostring(depthBand or Economy.VerticalSlice.DefaultDepthBand)
+	local grantedCount = 0
+
+	for _ = 1, count do
+		local chestId = addUnopenedChest(player, normalizedTier, normalizedDepthBand)
+		if chestId ~= nil then
+			grantedCount += 1
+		end
+	end
+
+	if grantedCount <= 0 then
+		return resolveActionResponse(player, false, nil, "grant_failed")
+	end
+
+	local message = string.format("Granted %d %s chest%s.", grantedCount, normalizedTier, grantedCount == 1 and "" or "s")
+	return resolveActionResponse(player, true, message)
 end
 
 function Service.OpenChest(player, chestId)

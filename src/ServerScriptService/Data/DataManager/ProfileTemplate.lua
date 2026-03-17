@@ -59,6 +59,12 @@ local ProfileTemplate = {
 		Order = {},
 	},
 
+	BrainrotInventory = {
+		NextInstanceId = 1,
+		ById = {},
+		Order = {},
+	},
+
 	Ship = {
 		MaxSlots = Economy.Rules.MaxShipSlots,
 		Slots = {},
