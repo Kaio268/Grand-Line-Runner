@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("LeaderboardChatConfig"))
+end
+
 return {
 	Order = { "TotalMoney", "TotalPower", 'TotalWins'},
 

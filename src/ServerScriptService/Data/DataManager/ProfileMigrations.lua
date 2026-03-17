@@ -132,6 +132,22 @@ function ProfileMigrations.Apply(data)
 	totalStats[primaryCurrency.LegacyKeys.Total] = nil
 
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
+	local legacyHiddenLeadderstats = data.HiddenLeadderstats
+	if typeof(legacyHiddenLeadderstats) == "table" then
+		for key, value in pairs(legacyHiddenLeadderstats) do
+			if hiddenLeaderstats[key] == nil then
+				hiddenLeaderstats[key] = value
+			end
+		end
+
+		hiddenLeaderstats.PlotUpgrade = math.max(
+			coerceNumber(hiddenLeaderstats.PlotUpgrade, 0),
+			coerceNumber(legacyHiddenLeadderstats.PlotUpgrade, 0)
+		)
+		data.HiddenLeadderstats = nil
+	end
+
+	hiddenLeaderstats.PlotUpgrade = coerceNumber(hiddenLeaderstats.PlotUpgrade, 0)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
 	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
 

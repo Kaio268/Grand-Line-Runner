@@ -1,4 +1,8 @@
 
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Configs = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs")
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))

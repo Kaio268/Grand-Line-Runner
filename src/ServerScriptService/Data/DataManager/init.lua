@@ -24,6 +24,7 @@ local ProductFunctions = require(script.ProductFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
 local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -66,6 +67,94 @@ local function NormalizeDataPath(path: string): string
 	return PathAliasLookup[path] or path
 end
 
+local function DeepCopyTable(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, childValue in pairs(value) do
+		copy[key] = DeepCopyTable(childValue)
+	end
+
+	return copy
+end
+
+local function CreateProfileFromTemplate()
+	return DeepCopyTable(GetTemplate)
+end
+
+local function GetPathTable(path: string): {string}
+	local normalizedPath = NormalizeDataPath(path)
+	local pathTable = normalizedPath:split(".")
+
+	if pathTable[1] == "Data" then
+		table.remove(pathTable, 1)
+	end
+
+	return pathTable
+end
+
+local function ResolveDataPath(profile, path: string, createMissing: boolean?, defaultLeafValue: any?)
+	local pathTable = GetPathTable(path)
+	if #pathTable == 0 then
+		return nil, nil, pathTable, nil, "[DataManager]: Empty data path!"
+	end
+
+	local pointer = profile.Data
+	for index = 1, #pathTable - 1 do
+		local key = pathTable[index]
+		local nextPointer = pointer[key]
+
+		if nextPointer == nil then
+			if not createMissing then
+				return nil, nil, pathTable, nil, nil
+			end
+
+			nextPointer = {}
+			pointer[key] = nextPointer
+		elseif typeof(nextPointer) ~= "table" then
+			return nil, nil, pathTable, nil, string.format(
+				"[DataManager]: Can't traverse path '%s' because '%s' is %s, not table",
+				path,
+				tostring(key),
+				typeof(nextPointer)
+			)
+		end
+
+		pointer = nextPointer
+	end
+
+	local leafKey = pathTable[#pathTable]
+	local currentValue = pointer[leafKey]
+	if currentValue == nil and createMissing then
+		pointer[leafKey] = defaultLeafValue
+		currentValue = pointer[leafKey]
+	end
+
+	return pointer, leafKey, pathTable, currentValue, nil
+end
+
+local function GetRootDataKey(pathTable: {string}): string?
+	return pathTable[1]
+end
+
+local SyncPathToInstances
+
+local function SyncDataMutation(player: Player, replica, pathTable: {string}, value: any)
+	replica:Set(pathTable, value)
+
+	if GetRootDataKey(pathTable) == "leaderstats" and not Settings.Experimental.CreateFolders then
+		DataManager:Leaderstats(player)
+	elseif Settings.Experimental.CreateFolders then
+		SyncPathToInstances(player, pathTable, value)
+	else
+		DataManager:UpdateData(player)
+	end
+
+	Debug(player)
+end
+
 
 local function SanitizeAttributeValue(raw)
 	local t = typeof(raw)
@@ -97,8 +186,9 @@ local MessagesFunctions = {
 		local profile : typeof(Profiles[player]) = self:GetProfile(player)
 		local replica: typeof(Replicas[player]) = self:GetReplica(player)
 		if profile ~= nil and replica ~= nil then
-			profile.Data = GetTemplate
-			replica.Data = GetTemplate
+			local freshData = CreateProfileFromTemplate()
+			profile.Data = freshData
+			replica.Data = freshData
 
 			if Settings.Experimental.CreateFolders then
 				self:UpdateData(player)
@@ -178,22 +268,8 @@ function DataManager:TryGetReplica(player: Player)
 end
 
 local function ReadValueFromProfile(profile, path: string)
-	path = NormalizeDataPath(path)
-	local pathTable = path:split(".")
-	local pointer = profile
-
-	if pathTable[1] ~= "Data" then
-		pointer = profile.Data
-	end
-
-	for _, segment in ipairs(pathTable) do
-		pointer = pointer[segment]
-		if pointer == nil then
-			return nil
-		end
-	end
-
-	return pointer
+	local _, _, _, value = ResolveDataPath(profile, path, false)
+	return value
 end
 
 function DataManager:IsReady(player: Player): boolean
@@ -214,7 +290,11 @@ function DataManager:TrySetValue(player: Player, path: string, newValue)
 		return false, "not_ready"
 	end
 
-	self:SetValue(player, path, newValue)
+	local success, reason = self:SetValue(player, path, newValue)
+	if success == false then
+		return false, reason or "set_failed"
+	end
+
 	return true, nil
 end
 
@@ -223,7 +303,11 @@ function DataManager:TryAddValue(player: Player, path: string, addValue)
 		return false, "not_ready"
 	end
 
-	self:AddValue(player, path, addValue)
+	local success, reason = self:AddValue(player, path, addValue)
+	if success == false then
+		return false, reason or "add_failed"
+	end
+
 	return true, nil
 end
 
@@ -231,24 +315,8 @@ end
 	Function used to shorten code (isn't usable from the outside)
 ]]
 function GetPointer(path : string, profile : typeof(PlayerStore:StartSessionAsync())) : ({any?}?, {any?}?)
-	path = NormalizeDataPath(path)
-	local pathTable = path:split(".")
-	local pointer = profile
-
-	if pathTable[1] ~= "Data" then 
-		pointer = pointer.Data
-	end
-
-	for i = 1, #pathTable - 1 do
-		if pointer[pathTable[i]] == nil then break end
-		pointer = pointer[pathTable[i]]
-	end
-
-	if pointer[pathTable[#pathTable]] == nil then
-		return nil, pathTable
-	end
-
-	return pointer[pathTable[#pathTable]], pathTable
+	local _, _, pathTable, currentValue = ResolveDataPath(profile, path, false)
+	return currentValue, pathTable
 end
 
 --[[
@@ -270,25 +338,6 @@ end
 
 
 
-local function ReconstructPath(Player: Player, Path: string, EndValue: any?)
-	Path = NormalizeDataPath(Path)
-	local PathTable = string.split(Path, ".")
-	local Pointer = self:GetData(Player)
-	for Index, PathPoint in ipairs(PathTable) do
-		if Pointer[PathPoint] == nil then
-			Pointer[PathPoint] = {}
-			if Index == #PathTable then
-				Pointer[PathPoint] = EndValue or {}
-			end
-		end
-		if Pointer[PathPoint] ~= nil and typeof(Pointer[PathPoint]) ~= "table" and Index ~= #PathTable then
-			warn(string.format("[DataManager]: Can't reconstruct - found type %s at path step %s", typeof(Pointer[PathPoint]), PathPoint))
-			return
-		end
-		Pointer = Pointer[PathPoint]
-	end
-end
-
 --[[
 	Sets variable value
 	[player]: which player you want to change the date
@@ -299,64 +348,43 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
-		local pointer, pathTable = GetPointer(path, profile)
+		local defaultValue = if newValue == nil then true else DeepCopyTable(newValue)
+		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
-		if pointer == nil then
-			local currentPointer = profile
-
-			for i, e in pairs(pathTable) do
-				if i < #pathTable then
-					if currentPointer[e] ~= nil then
-						currentPointer = currentPointer[e]
-					else
-						currentPointer[e] = {}
-						currentPointer = currentPointer[e]
-					end
-				else
-					if currentPointer[e] ~= nil then
-						currentPointer = currentPointer[e]
-					else
-						currentPointer[e] = newValue == nil and true or newValue
-						currentPointer = currentPointer[e]
-					end
-				end
-			end
-
-			DataManager:UpdateData(player)
-		else
-			if newValue ~= nil then
-				if typeof(pointer) == typeof(newValue) then
-					pointer = newValue
-					replica:Set(pathTable, newValue)
-					if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-						DataManager:Leaderstats(player)
-					else
-						DataManager:UpdateData(player)
-					end
-
-					Debug(player)
-				else
-					warn(`[DataManager]: Given value ({newValue} : {typeof(newValue)}) must be the same type as (Data.{path} : {typeof(pointer)})!`)
-					return
-				end
-			else
-				if typeof(pointer) == "boolean" then
-					local newValue = not pointer
-					pointer = newValue
-					replica:Set(pathTable, newValue)
-					if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-						DataManager:Leaderstats(player)
-					else
-						DataManager:UpdateData(player)
-					end
-
-					Debug(player)
-				end
-			end
+		if err then
+			warn(err)
+			return false, "invalid_path"
 		end
+
+		if currentValue == nil then
+			currentValue = parent[leafKey]
+			SyncDataMutation(player, replica, pathTable, currentValue)
+			return true
+		end
+
+		local valueToStore = newValue
+		if valueToStore ~= nil then
+			if typeof(currentValue) ~= typeof(valueToStore) then
+				warn(`[DataManager]: Given value ({valueToStore} : {typeof(valueToStore)}) must be the same type as (Data.{path} : {typeof(currentValue)})!`)
+				return false, "type_mismatch"
+			end
+
+			valueToStore = DeepCopyTable(valueToStore)
+		else
+			if typeof(currentValue) ~= "boolean" then
+				warn(`[DataManager]: Can't toggle non-boolean value at Data.{path}!`)
+				return false, "invalid_toggle"
+			end
+
+			valueToStore = not currentValue
+		end
+
+		parent[leafKey] = valueToStore
+		SyncDataMutation(player, replica, pathTable, valueToStore)
+		return true
 	else
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 end
 
@@ -413,44 +441,46 @@ function DataManager:AddValue(player, path, addValue)
 	local replica = self:GetReplica(player)
 	if not (profile and replica) then
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 
-	local pointer, pathTable = GetPointer(path, profile)
+	local defaultValue = if typeof(addValue) == "number" then 0 else {}
+	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
 	-- ⬇️ nowość: zainicjuj brakującą ścieżkę
-	if pointer == nil then
-		local default = (typeof(addValue) == "number") and 0 or {}
-		ReconstructPath(player, path, default)
-		pointer, pathTable = GetPointer(path, profile)
+	if err then
+		warn(err)
+		return false, "invalid_path"
 	end
 
-	if typeof(addValue) == "table" and typeof(pointer) == "table" then
+	if typeof(addValue) == "table" and typeof(currentValue) == "table" then
+		local didChange = false
 		for k, v in pairs(addValue) do
-			if pointer[k] then warn("[DataManager]: value names are repeating!") else
-				pointer[k] = v
-				local _, childPath = GetPointer(path.."."..k, profile)
-				replica:Set(childPath, v)
+			if currentValue[k] ~= nil then
+				warn("[DataManager]: value names are repeating!")
+			else
+				currentValue[k] = DeepCopyTable(v)
+				didChange = true
 			end
 		end
-		DataManager:UpdateData(player)
-		Debug(player)
-		return
+
+		if didChange then
+			SyncDataMutation(player, replica, pathTable, currentValue)
+		end
+
+		return true
 	end
 
-	if typeof(pointer) == "number" and typeof(addValue) == "number" then
-		local final = pointer + addValue
+	if typeof(currentValue) == "number" and typeof(addValue) == "number" then
+		local final = currentValue + addValue
 		-- (nie ma sensu robić `pointer = pointer + final`; wystarczy Set do repliki)
-		replica:Set(pathTable, final)
-		if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-			DataManager:Leaderstats(player)
-		else
-			DataManager:UpdateData(player)
-		end
-		Debug(player)
-	else
-		warn("[DataManager]: You can add only numbers!")
+		parent[leafKey] = final
+		SyncDataMutation(player, replica, pathTable, final)
+		return true
 	end
+
+	warn("[DataManager]: You can add only numbers!")
+	return false, "invalid_add"
 end
 
 
@@ -464,40 +494,43 @@ function DataManager:SubValue(player : Player, path : string, subValue : (number
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
-		local pointer, pathTable = GetPointer(path, profile)
+		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, false)
+		if err then
+			warn(err)
+			return false, "invalid_path"
+		end
 
-		if typeof(subValue) == "table" and typeof(pointer) == "table" then
+		if typeof(subValue) == "table" and typeof(currentValue) == "table" then
+			local didChange = false
 			for Index, Value in pairs(subValue) do
-				if pointer[Value] == nil then
+				if currentValue[Value] == nil then
 					warn("[DataManager]: Couldn't find value!")
 					continue
 				end
 
-				local newPointer, newPathTable = GetPointer(path.."."..Value, profile)
-				replica:Set(newPathTable, nil)
-				pointer[Value] = nil
+				currentValue[Value] = nil
+				didChange = true
 			end
-			DataManager:UpdateData(player)
-			Debug(player)
-		else
-			if typeof(pointer) == typeof(subValue) and typeof(pointer) == "number" then
-				local targetNumber = pointer - subValue
-				replica:Set(pathTable, targetNumber)
-				pointer = targetNumber
-				if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-					DataManager:Leaderstats(player)
-				else
-					DataManager:UpdateData(player)
-				end
 
-				Debug(player)
+			if didChange then
+				SyncDataMutation(player, replica, pathTable, currentValue)
+			end
+
+			return true
+		else
+			if typeof(currentValue) == typeof(subValue) and typeof(currentValue) == "number" then
+				local targetNumber = currentValue - subValue
+				parent[leafKey] = targetNumber
+				SyncDataMutation(player, replica, pathTable, targetNumber)
+				return true
 			else
 				warn("[DataManager]: You can substract only numbers!")
+				return false, "invalid_subtract"
 			end
 		end
 	else
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 end
 
@@ -505,19 +538,24 @@ function DataManager:Clear(player : Player, path : string)
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
-		local pointer, pathTable = GetPointer(path, profile)
-		if typeof(pointer) == "table" then
-			pointer = {}
-			replica:Set(pathTable, {})
-		elseif typeof(pointer) ~= "table" then
-			warn("[DataManager]: You can clear only tables (folders)!")
-			return
+		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, false)
+		if err then
+			warn(err)
+			return false, "invalid_path"
 		end
-		DataManager:UpdateData(player)
-		Debug(player)
+
+		if typeof(currentValue) == "table" then
+			parent[leafKey] = {}
+			SyncDataMutation(player, replica, pathTable, parent[leafKey])
+		elseif typeof(currentValue) ~= "table" then
+			warn("[DataManager]: You can clear only tables (folders)!")
+			return false, "invalid_clear"
+		end
+
+		return true
 	else
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 end
 
@@ -620,6 +658,68 @@ local function RecursiveRemove(data, folder : Folder)
 			end
 		end
 	end
+end
+
+SyncPathToInstances = function(player: Player, pathTable: {string}, value: any)
+	if #pathTable == 0 then
+		return
+	end
+
+	local parent: Instance = player
+	for index = 1, #pathTable - 1 do
+		local segment = pathTable[index]
+		local child = parent:FindFirstChild(segment)
+		if child and not child:IsA("Folder") then
+			child:Destroy()
+			child = nil
+		end
+
+		if not child then
+			child = Instance.new("Folder")
+			child.Name = segment
+			child.Parent = parent
+		end
+
+		parent = child
+	end
+
+	local leafName = pathTable[#pathTable]
+	if typeof(value) == "table" then
+		local folder = parent:FindFirstChild(leafName)
+		if folder and not folder:IsA("Folder") then
+			folder:Destroy()
+			folder = nil
+		end
+
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = leafName
+			folder.Parent = parent
+		end
+
+		RecursiveUpdate(folder, value)
+		RecursiveRemove(value, folder)
+		return
+	end
+
+	local className = ConvertType(typeof(value))
+	if className == nil then
+		return
+	end
+
+	local valueObject = parent:FindFirstChild(leafName)
+	if valueObject and valueObject.ClassName ~= className then
+		valueObject:Destroy()
+		valueObject = nil
+	end
+
+	if not valueObject then
+		valueObject = Instance.new(className)
+		valueObject.Name = leafName
+		valueObject.Parent = parent
+	end
+
+	valueObject.Value = value
 end
 
 function DataManager:UpdateData(player : Player)
@@ -781,6 +881,7 @@ function PlayerAdded(player: Player)
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
 		ProfileMigrations.Apply(profile.Data)
+		ValidationChecks.WarnProfileData(player, profile.Data)
 
 		profile.OnSessionEnd:Connect(function()
 			Profiles[player] = nil
@@ -990,6 +1091,10 @@ end
 
 -- Dodaje wiadomość do kolejki
 local function EnqueuePurchaseAnnouncement(player: Player, productId: number, productName: string, price: number)
+	if RunService:IsStudio() then
+		return
+	end
+
 	local payload = {
 		UserId = player.UserId,
 		Username = player.Name,
@@ -1107,32 +1212,20 @@ function DataManager:EquipAnimal(player: Player, animalName: string)
 end
 
 
-local function _getParentKeyAndPath(profile, path: string)
-	path = NormalizeDataPath(path)
-	local parts = path:split(".")
-	local t = profile.Data
-	local i = 1
-	if parts[1] == "Data" then i = 2 end
-	for idx = i, #parts - 1 do
-		t[parts[idx]] = t[parts[idx]] or {}
-		t = t[parts[idx]]
-	end
-	return t, parts[#parts], parts
-end
-
-
 function DataManager:AdjustValue(player: Player, path: string, delta: number)
 	local profile = self:GetProfile(player)
 	local replica = self:GetReplica(player)
 	if not profile or not replica then return end
 
 	-- upewnij się, że ścieżka istnieje i ma początkowo 0
-	ReconstructPath(player, path, 0)
+	local parent, leafKey, pathTable, current, err = ResolveDataPath(profile, path, true, 0)
 
 	-- znajdź rodzica i klucz końcowy, żeby zapisać do profile.Data
-	local parent, leafKey, pathTable = _getParentKeyAndPath(profile, path)
+	if err then
+		warn(err)
+		return nil
+	end
 
-	local current = parent[leafKey]
 	if typeof(current) ~= "number" then
 		warn(string.format("[DataManager]: Can't adjust non-number at '%s' (type: %s)", path, typeof(current)))
 		return
@@ -1144,17 +1237,8 @@ function DataManager:AdjustValue(player: Player, path: string, delta: number)
 
 	local final = current + delta
 	parent[leafKey] = final               -- <— ZAPIS do profile.Data
-	replica:Set(pathTable, final)         -- aktualizacja repliki
+	SyncDataMutation(player, replica, pathTable, final)
 
-	-- poprawne sprawdzenie, czy modyfikujemy leaderstats
-	local rootKey = (pathTable[1] == "Data") and pathTable[2] or pathTable[1]
-	if rootKey == "leaderstats" and not Settings.Experimental.CreateFolders then
-		self:Leaderstats(player)
-	else
-		self:UpdateData(player)
-	end
-
-	Debug(player)
 	return final
 end
 
@@ -1316,19 +1400,17 @@ function DataManager:SetupBoostListeners(player: Player)
 			local profile = self:GetProfile(player)
 			if not profile then return end
 
-			local function dfs(tbl)
-				for k, v in pairs(tbl) do
-					if typeof(v) == "table" then
-						dfs(v)
-					elseif typeof(v) == "number" and type(k) == "string" and k:sub(-4) == "Time" then
-						if v > 0 then
-							local boostName = k:sub(1, #k - 4) -- obcina "Time"
-							DataManager:ResumeBoost(player, boostName)
-						end
-					end
+			local potions = profile.Data.Potions
+			if typeof(potions) ~= "table" then
+				return
+			end
+
+			for key, value in pairs(potions) do
+				if typeof(value) == "number" and type(key) == "string" and key:sub(-4) == "Time" and value > 0 then
+					local boostName = key:sub(1, #key - 4)
+					DataManager:ResumeBoost(player, boostName)
 				end
 			end
-			dfs(profile.Data)
 		end
 
 		-- Pierwszy skan po załadowaniu profilu
@@ -1366,6 +1448,10 @@ function DataManager:Version()
 end
 
 function CheckVersion()
+	if RunService:IsStudio() then
+		return
+	end
+
 	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
 
 	local AllVersions = GetVersion()
@@ -1420,6 +1506,10 @@ function GetVersion(version : string?)
 end
 
 local function SetupAnnouncementSubscription()
+	if RunService:IsStudio() then
+		return
+	end
+
 	local ok, err = pcall(function()
 		MessagingService:SubscribeAsync(ANNOUNCE_TOPIC, function(message)
 			local data = message.Data
@@ -1448,6 +1538,12 @@ DataManager.init = function()
 
 	DataManagerInitialized = true
 	DataManager._initialized = true
+	workspace:SetAttribute("DataManager_RuntimeSignature", "src-path-sync-2026-03-17")
+	workspace:SetAttribute("DataManager_TargetedSync", true)
+	workspace:SetAttribute(
+		"DataManager_SyncMode",
+		if Settings.Experimental.CreateFolders then "targeted_path_sync" else "legacy_update_data"
+	)
 
 	FillMessageFunctions()
 	DataManager.Premades = Premades
@@ -1469,6 +1565,13 @@ DataManager.init = function()
 		local ok, err = pcall(SetupAnnouncementSubscription)
 		if not ok then
 			warn("[DataManager]: Announcement subscription failed during init: ", err)
+		end
+	end)
+
+	task.spawn(function()
+		local ok, err = pcall(ValidationChecks.WarnMissingDependencies)
+		if not ok then
+			warn("[DataManager]: Validation checks failed during init: ", err)
 		end
 	end)
 

@@ -14,9 +14,9 @@ local textL = upgradeRoot:WaitForChild("Main"):WaitForChild("TextL")
 
 local short = require(ReplicatedStorage.Modules.Shorten)
 local function getUpgradeValueObject()
-	local stats = player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	local stats = player:FindFirstChild("HiddenLeaderstats")
 	if not stats then
-		stats = player:WaitForChild("HiddenLeadderstats", 4) or player:WaitForChild("HiddenLeaderstats", 4)
+		stats = player:WaitForChild("HiddenLeaderstats", 4)
 	end
 	if not stats then return nil end
 

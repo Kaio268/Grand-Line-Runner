@@ -194,40 +194,18 @@ local function loadEquippedFruitFromData(player)
 	return DevilFruitConfig.None
 end
 
-local function ensureFruitDataInProfile(player)
-	local profile = DataManager:TryGetProfile(player)
-	if not profile then
-		return false, "no_profile"
-	end
-
-	local data = profile.Data
-	if typeof(data.DevilFruit) ~= "table" then
-		data.DevilFruit = {}
-	end
-
-	if typeof(data.DevilFruit.Equipped) ~= "string" then
-		data.DevilFruit.Equipped = DevilFruitConfig.None
-	end
-
-	return true, profile
-end
-
 local function persistEquippedFruit(player, fruitName)
-	local profileOk, profileOrReason = ensureFruitDataInProfile(player)
-	if not profileOk then
-		return false, profileOrReason
+	local ensured, ensureReason = ensureFruitDataPath(player)
+	if not ensured then
+		return false, ensureReason
 	end
 
-	local profile = profileOrReason
-	profile.Data.DevilFruit.Equipped = fruitName
-
-	local replica = DataManager:TryGetReplica(player)
-	if replica then
-		replica:Set({ "DevilFruit", "Equipped" }, fruitName)
-		return true, "replica_synced"
+	local success, reason = DataManager:TrySetValue(player, "DevilFruit.Equipped", fruitName)
+	if not success then
+		return false, reason
 	end
 
-	return true, "profile_only"
+	return true, "data_manager_synced"
 end
 
 local function startPersistTask(player)

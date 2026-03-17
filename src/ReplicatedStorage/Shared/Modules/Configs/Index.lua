@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Index"))
+end
+
 local Index = {
 	[10] = {
 		Icon = "rbxassetid://109366282204505",

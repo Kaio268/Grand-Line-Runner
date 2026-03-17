@@ -81,7 +81,8 @@ local getPlayerStandBrainrotInstanceId
 local getBrainrotLevel
 local getStandLevelValue
 local dmSet
-local STAND_DEBUG = true
+local STAND_DEBUG = false
+local ensuredStandFolders = {}
 
 local function standDebug(message, ...)
 	if STAND_DEBUG ~= true then
@@ -345,9 +346,15 @@ local function dmEnsureStandFolder(player, standName)
 		return false
 	end
 
+	local playerCache = ensuredStandFolders[player]
+	if playerCache and playerCache[standName] == true then
+		return true
+	end
+
 	local brainrotPath = "IncomeBrainrots." .. standName .. ".BrainrotName"
 	local instancePath = "IncomeBrainrots." .. standName .. ".BrainrotInstanceId"
 	local incomePath = "IncomeBrainrots." .. standName .. ".IncomeToCollect"
+	local didRepair = false
 
 	local okName, nameVal = pcall(function()
 		return DataManager:GetValue(player, brainrotPath)
@@ -357,7 +364,7 @@ local function dmEnsureStandFolder(player, standName)
 	end
 
 	if nameVal == nil then
-		pcall(function()
+		local okRepairIncome = pcall(function()
 			local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
 			if typeof(incomeBrainrots) ~= "table" then
 				incomeBrainrots = {}
@@ -383,8 +390,12 @@ local function dmEnsureStandFolder(player, standName)
 
 			DataManager:SetValue(player, "IncomeBrainrots", incomeBrainrots)
 		end)
+		if not okRepairIncome then
+			return false
+		end
+		didRepair = true
 
-		pcall(function()
+		local okRepairLevels = pcall(function()
 			local lv = DataManager:GetValue(player, "StandsLevels")
 			if typeof(lv) ~= "table" then
 				lv = {}
@@ -394,19 +405,31 @@ local function dmEnsureStandFolder(player, standName)
 			end
 			DataManager:SetValue(player, "StandsLevels", lv)
 		end)
+		if not okRepairLevels then
+			return false
+		end
+		didRepair = true
 	else
 		if typeof(nameVal) ~= "string" then
-			pcall(function()
+			local okRepairName = pcall(function()
 				DataManager:SetValue(player, brainrotPath, "")
 			end)
+			if not okRepairName then
+				return false
+			end
+			didRepair = true
 		end
 		local okInstance, instanceVal = pcall(function()
 			return DataManager:GetValue(player, instancePath)
 		end)
 		if okInstance and typeof(instanceVal) ~= "string" then
-			pcall(function()
+			local okRepairInstance = pcall(function()
 				DataManager:SetValue(player, instancePath, "")
 			end)
+			if not okRepairInstance then
+				return false
+			end
+			didRepair = true
 		end
 
 		local okIncome, incVal = pcall(function()
@@ -416,17 +439,26 @@ local function dmEnsureStandFolder(player, standName)
 			return false
 		end
 		if incVal == nil or typeof(incVal) ~= "number" then
-			pcall(function()
+			local okRepairIncome = pcall(function()
 				DataManager:SetValue(player, incomePath, 0)
 			end)
+			if not okRepairIncome then
+				return false
+			end
+			didRepair = true
 		end
 	end
 
-	pcall(function()
-		if typeof(DataManager.UpdateData) == "function" then
-			DataManager:UpdateData(player)
-		end
-	end)
+	playerCache = ensuredStandFolders[player]
+	if not playerCache then
+		playerCache = {}
+		ensuredStandFolders[player] = playerCache
+	end
+	playerCache[standName] = true
+
+	if didRepair then
+		standDebug("dmEnsureStandFolder repaired player=%s stand=%s", player.Name, standName)
+	end
 
 	return true
 end
@@ -1689,6 +1721,7 @@ end)
 
 Players.PlayerRemoving:Connect(function(player)
 	playerStandList[player] = nil
+	ensuredStandFolders[player] = nil
 end)
 
 for _, p in ipairs(Players:GetPlayers()) do

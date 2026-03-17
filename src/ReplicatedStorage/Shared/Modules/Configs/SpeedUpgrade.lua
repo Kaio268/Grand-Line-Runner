@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpeedUpgrade"))
+end
+
 local SpeeUpgrade = {
 	[1] = {
 		Starter_Price = 200,

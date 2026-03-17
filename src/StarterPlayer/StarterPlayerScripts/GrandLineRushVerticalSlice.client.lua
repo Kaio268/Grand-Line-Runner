@@ -142,7 +142,7 @@ topBarGradient.Parent = topBar
 local title = createLabel(topBar, "Grand Line Rush Prototype Loop", UDim2.new(1, -20, 1, 0), UDim2.fromOffset(12, 0), 18)
 title.ZIndex = 21
 
-local subtitle = createLabel(panel, "Vertical slice: run -> extract -> open chest -> feed crew", UDim2.new(1, -28, 0, 18), UDim2.fromOffset(16, 68), 12)
+local subtitle = createLabel(panel, "Vertical slice: crew run -> extract -> open chest -> feed crew", UDim2.new(1, -28, 0, 18), UDim2.fromOffset(16, 68), 12)
 subtitle.TextColor3 = Color3.fromRGB(179, 222, 248)
 subtitle.Font = Enum.Font.GothamMedium
 subtitle.ZIndex = 21
@@ -187,7 +187,7 @@ actionLayout.CellPadding = UDim2.fromOffset(8, 8)
 actionLayout.CellSize = UDim2.fromOffset(140, 36)
 actionLayout.Parent = actionGrid
 
-local startChestButton = createButton(actionGrid, "Start Chest Run", nil, nil, Color3.fromRGB(120, 80, 37))
+local startChestButton = createButton(actionGrid, "World Chests Shared", nil, nil, Color3.fromRGB(73, 83, 93))
 local startCrewButton = createButton(actionGrid, "Start Crew Run", nil, nil, Color3.fromRGB(42, 97, 153))
 local claimRewardButton = createButton(actionGrid, "Pick Up Reward", nil, nil, Color3.fromRGB(53, 127, 107))
 local extractButton = createButton(actionGrid, "Extract Run", nil, nil, Color3.fromRGB(27, 124, 91))
@@ -460,6 +460,7 @@ local function render()
 	setButtonEnabled(extractButton, runState.InRun and runState.CarriedReward ~= nil)
 	setButtonEnabled(failRunButton, runState.InRun)
 	setButtonEnabled(openChestButton, (currentState.UnopenedChestCount or 0) > 0)
+	setButtonEnabled(startChestButton, false)
 end
 
 local function request(actionName, payload)
@@ -497,13 +498,6 @@ for depthBand, button in pairs(depthButtons) do
 		render()
 	end)
 end
-
-startChestButton.MouseButton1Click:Connect(function()
-	request("StartRun", {
-		RewardType = "Chest",
-		DepthBand = selectedDepthBand,
-	})
-end)
 
 startCrewButton.MouseButton1Click:Connect(function()
 	request("StartRun", {

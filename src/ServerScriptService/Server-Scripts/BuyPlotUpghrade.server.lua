@@ -10,21 +10,14 @@ local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local remote = ReplicatedStorage.Remotes:FindFirstChild("PlotUpgradeRemote")
 
 local busy = {}
+local PLOT_UPGRADE_PATH = "HiddenLeaderstats.PlotUpgrade"
 
 local function getUpgradePath(player: Player)
-	local a = player:FindFirstChild("HiddenLeadderstats")
-	if a and a:FindFirstChild("PlotUpgrade") then
-		return "HiddenLeadderstats.PlotUpgrade"
-	end
-	local b = player:FindFirstChild("HiddenLeaderstats")
-	if b and b:FindFirstChild("PlotUpgrade") then
-		return "HiddenLeaderstats.PlotUpgrade"
-	end
-	return "HiddenLeadderstats.PlotUpgrade"
+	return PLOT_UPGRADE_PATH
 end
 
 local function getCurrentUpgrade(player: Player, path: string)
-	local stats = player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	local stats = player:FindFirstChild("HiddenLeaderstats")
 	if stats then
 		local v = stats:FindFirstChild("PlotUpgrade")
 		if v and v:IsA("NumberValue") then

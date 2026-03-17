@@ -13,7 +13,7 @@ if not HiddenRoot then
 end
 
 local function getPlayerStats(player)
-	return player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	return player:FindFirstChild("HiddenLeaderstats")
 end
 
 local function getUpgradeValue(player)

@@ -25,6 +25,9 @@ local Economy = {
 		["TotalStats.TotalDoubloons"] = {
 			"TotalStats.TotalMoney",
 		},
+		["HiddenLeaderstats.PlotUpgrade"] = {
+			"HiddenLeadderstats.PlotUpgrade",
+		},
 	},
 
 	Rules = {

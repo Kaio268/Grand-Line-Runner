@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("LavaWaves"))
+end
+
 local Waves = {
 	["HAHAH"] = {
 		Speed = 60,

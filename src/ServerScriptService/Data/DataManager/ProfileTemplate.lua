@@ -22,10 +22,6 @@ local ProfileTemplate = {
 		Comets = 0,
 	},
 
-	HiddenLeadderstats = {
-		PlotUpgrade = 0,
-	},
-
 	TotalStats = {
 		[primaryCurrency.TotalKey] = 0,
 		TotalSpeed = 0,

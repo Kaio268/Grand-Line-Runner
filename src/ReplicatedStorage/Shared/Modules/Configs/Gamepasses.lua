@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+end
+
 local Gamepasses = {
 	["VIP"] = {
 		TYPE = "Gamepass",

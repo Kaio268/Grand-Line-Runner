@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
+end
+
 local Rebirths = {
 	[1] = {
 		Price = 1000,

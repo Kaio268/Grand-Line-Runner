@@ -2128,7 +2128,7 @@ function Icon.new()
 	-- dropdowns being open (not just this one) but this will work
 	-- fine for almost every use case for now.
 	self.selected:Connect(function()
-		local isDropdown = #self.dropdownIcons &gt; 0
+		local isDropdown = #self.dropdownIcons > 0
 		if isDropdown then
 			if StarterGui:GetCore("ChatActive") and self.alignment ~= "Right" then
 				self.chatWasPreviouslyActive = true
@@ -2869,7 +2869,7 @@ function Icon:convertLabelToNumberSpinner(numberSpinner, callback)
 
 			while totalDigitXSize &lt; NumberSpinnerXSize and self.isDestroyed ~= true do
 				task.wait(0.05)
-				if numOfDigits &gt; minDigits and numOfDigits &lt; maxDigits then
+				if numOfDigits > minDigits and numOfDigits &lt; maxDigits then
 					numberSpinner.TextSize = label.TextSize
 					break
 				else
@@ -2881,9 +2881,9 @@ function Icon:convertLabelToNumberSpinner(numberSpinner, callback)
 			end
 
 			local labelParentContainerXSize = getLabelParentContainerXSize()
-			while totalDigitXSize &gt; labelParentContainerXSize and self.isDestroyed ~= true do
+			while totalDigitXSize > labelParentContainerXSize and self.isDestroyed ~= true do
 				task.wait(0.05)
-				if numOfDigits &lt; maxDigits and numOfDigits &gt; minDigits then
+				if numOfDigits &lt; maxDigits and numOfDigits > minDigits then
 					numberSpinner.TextSize = label.TextSize
 					break
 				else
@@ -3997,7 +3997,7 @@ end</string>
 		
 		-- Listen for changes
 		menuJanitor:add(icon.toggled:Connect(function()
-			if #icon.menuIcons &gt; 0 then
+			if #icon.menuIcons > 0 then
 				icon.updateSize:Fire()
 			end
 		end))
@@ -4177,7 +4177,7 @@ end</string>
 		if not totalNotices then
 			return
 		end
-		local exceeded99 = totalNotices &gt; 99
+		local exceeded99 = totalNotices > 99
 		local noticeDisplay = (exceeded99 and "99+") or totalNotices
 		noticeLabel.Text = noticeDisplay
 		if exceeded99 then
@@ -4190,7 +4190,7 @@ end</string>
 			enabled = false
 		end
 		local parentIcon = Icon.getIconByUID(icon.parentIconUID)
-		local dropdownOrMenuActive = #icon.dropdownIcons &gt; 0 or #icon.menuIcons &gt; 0
+		local dropdownOrMenuActive = #icon.dropdownIcons > 0 or #icon.menuIcons > 0
 		if icon.isSelected and dropdownOrMenuActive then
 			enabled = false
 		elseif parentIcon and not parentIcon.isSelected then
@@ -4552,7 +4552,7 @@ return function(icon, Icon)
 			local widgetWidth = math.clamp(initialWidgetWidth, widgetMinimumWidth, viewportX)
 			local menuIcons = icon.menuIcons
 			local additionalWidth = 0
-			local hasMenu = #menuIcons &gt; 0
+			local hasMenu = #menuIcons > 0
 			local showMenu = hasMenu and icon.isSelected
 			if showMenu then
 				for _, frame in pairs(menu:GetChildren()) do
@@ -5072,7 +5072,7 @@ function Overflow.updateAvailableIcons(alignment)
 			if orderA &lt; orderB then
 				return true
 			end
-			if orderA &gt; orderB then
+			if orderA > orderB then
 				return false
 			end
 			return iconA.widget.AbsolutePosition.X &lt; iconB.widget.AbsolutePosition.X
@@ -5146,7 +5146,7 @@ function Overflow.updateBoundary(alignment)
 	local isLeft = alignment == "Left"
 	local isRight = not isLeft
 	local overflowIcon = overflowIcons[alignment]
-	if not overflowIcon and not isCentral and #ourOrderedIcons &gt; 0 then
+	if not overflowIcon and not isCentral and #ourOrderedIcons > 0 then
 		local order = (isLeft and -9999999) or 9999999
 		overflowIcon = Icon.new()--:setLabel(`{alignment}`)
 		overflowIcon:setImage(6069276526, "Deselected")
@@ -5215,7 +5215,7 @@ function Overflow.updateBoundary(alignment)
 					hasShifted = true
 				end
 			elseif isRight then
-				if centerBoundary &gt; removeBoundary then
+				if centerBoundary > removeBoundary then
 					if not beginCheckingCenterIcons or removeBoundary &lt; 0 then
 						secondaryCheck()
 						return
@@ -5254,7 +5254,7 @@ function Overflow.updateBoundary(alignment)
 			local oppositeXSize = Overflow.getWidth(oppositeOverflowIcon)
 			local oppositeBoundary = (isLeft and oppositeXPos - BOUNDARY_GAP) or oppositeXPos + oppositeXSize + BOUNDARY_GAP
 			local oppositeMenu = oppositeOverflowIcon:getInstance("Menu")
-			local isDominant = menu.AbsoluteCanvasSize.X &gt;= oppositeMenu.AbsoluteCanvasSize.X
+			local isDominant = menu.AbsoluteCanvasSize.X >= oppositeMenu.AbsoluteCanvasSize.X
 			if not usingNearestCenter then
 				local halfwayXPos = holderXPos + holderXSize/2
 				local halfwayBoundary = (isLeft and halfwayXPos - BOUNDARY_GAP/2) or halfwayXPos + BOUNDARY_GAP/2
@@ -5282,7 +5282,7 @@ function Overflow.updateBoundary(alignment)
 		local icon = ourOrderedIcons[i]
 		local widgetX = Overflow.getWidth(icon)
 		local xPos = realXPositions[icon.UID]
-		if (isLeft and xPos + widgetX &gt;= boundary) or (isRight and xPos &lt;= boundary) then
+		if (isLeft and xPos + widgetX >= boundary) or (isRight and xPos &lt;= boundary) then
 			joinOverflow = true
 		end
 	end
@@ -6242,7 +6242,7 @@ function Disconnect:Disconnect()
 end
 
 function Disconnect:__tostring()
-	return "Disconnect&lt;" .. tostring(self.Connected) .. "&gt;"
+	return "Disconnect&lt;" .. tostring(self.Connected) .. ">"
 end
 
 function Janitor.__index:LinkToInstance(Object, AllowMultiple)
@@ -6350,16 +6350,16 @@ return Reference</string>
 
 --- Connection
 
-type Connection&lt;Variant... = ...any&gt; = {
-	Disconnect: (self: Connection&lt;Variant...&gt;) -&gt; (),
+type Connection&lt;Variant... = ...any> = {
+	Disconnect: (self: Connection&lt;Variant...>) -> (),
 }
 
 --- Signal
 
-type Signal&lt;Variant... = ...any&gt; = {
-	Connect: (self: Signal&lt;Variant...&gt;, func: (Variant...) -&gt; ()) -&gt; Connection&lt;Variant...&gt;,
-    Once: (self: Signal&lt;Variant...&gt;, func: (Variant...) -&gt; ()) -&gt; Connection&lt;Variant...&gt;,
-	Wait: (self: Signal&lt;Variant...&gt;) -&gt; Variant...,
+type Signal&lt;Variant... = ...any> = {
+	Connect: (self: Signal&lt;Variant...>, func: (Variant...) -> ()) -> Connection&lt;Variant...>,
+    Once: (self: Signal&lt;Variant...>, func: (Variant...) -> ()) -> Connection&lt;Variant...>,
+	Wait: (self: Signal&lt;Variant...>) -> Variant...,
 }
 
 ----------------------
@@ -6390,7 +6390,7 @@ type StaticFunctions = {
 	),
 	setTopbarEnabled: typeof(
 		--[[
-			When set to &lt;code&gt;false&lt;/code&gt; all TopbarPlus ScreenGuis are hidden.
+			When set to &lt;code>false&lt;/code> all TopbarPlus ScreenGuis are hidden.
 			This does not impact Roblox's Topbar.
 		]]
 		function(enabled: boolean)
@@ -6420,7 +6420,7 @@ type Methods = {
 	-- CLASS FUNCTIONS
 	setName: typeof(
 		--[[
-			Sets the name of the Widget instance. This can be used in conjunction with &lt;code&gt;Icon.getIcon(name)&lt;/code&gt;
+			Sets the name of the Widget instance. This can be used in conjunction with &lt;code>Icon.getIcon(name)&lt;/code>
 		]]
 		function(self: Icon, name: string): Icon
 			return nil :: any
@@ -6428,7 +6428,7 @@ type Methods = {
 	),
 	getInstance: typeof(
 		--[[
-			Returns the first descendant found within the widget of name &lt;code&gt;instanceName&lt;/code&gt;.
+			Returns the first descendant found within the widget of name &lt;code>instanceName&lt;/code>.
 		]]
 		function(self: Icon, instanceName: string): Instance?
 			return (nil :: any) :: Instance?
@@ -6452,7 +6452,7 @@ type Methods = {
 	),
 	setEnabled: typeof(
 		--[[
-			When set to &lt;code&gt;false&lt;/code&gt; the icon will be disabled and hidden.
+			When set to &lt;code>false&lt;/code> the icon will be disabled and hidden.
 		]]
 		function(self: Icon, enabled: boolean): Icon
 			return nil :: any
@@ -6493,7 +6493,7 @@ type Methods = {
 	),
 	disableOverlay: typeof(
 		--[[
-			When set to &lt;code&gt;true&lt;/code&gt;, disables the shade effect which appears when the icon is pressed and released.
+			When set to &lt;code>true&lt;/code>, disables the shade effect which appears when the icon is pressed and released.
 		]]
 		function(self: Icon, disabled: boolean): Icon
 			return nil :: any
@@ -6501,7 +6501,7 @@ type Methods = {
 	),
 	setImage: typeof(
 		--[[
-			Applies an image to the icon based on the given &lt;code&gt;imageId&lt;/code&gt;. &lt;code&gt;imageId&lt;/code&gt; can be an assetId or a complete asset string.
+			Applies an image to the icon based on the given &lt;code>imageId&lt;/code>. &lt;code>imageId&lt;/code> can be an assetId or a complete asset string.
 		]]
 		function(self: Icon, imageId: string | number, iconState: IconState?): Icon
 			return nil :: any
@@ -6533,7 +6533,7 @@ type Methods = {
 	),
 	align: typeof(
 		--[[
-			This enables you to set the icon to the &lt;code&gt;"Left"&lt;/code&gt; (default), &lt;code&gt;"Center"&lt;/code&gt; or &lt;code&gt;"Right"&lt;/code&gt; side of the screen.
+			This enables you to set the icon to the &lt;code>"Left"&lt;/code> (default), &lt;code>"Center"&lt;/code> or &lt;code>"Right"&lt;/code> side of the screen.
 		]]
 		function(self: Icon, alignment: Alignment?): Icon
 			return nil :: any
@@ -6541,7 +6541,7 @@ type Methods = {
 	),
 	setWidth: typeof(
 		--[[
-			This sets the minimum width the icon can be (it can be larger for instance when setting a long label). The default width is &lt;code&gt;44&lt;/code&gt;.
+			This sets the minimum width the icon can be (it can be larger for instance when setting a long label). The default width is &lt;code>44&lt;/code>.
 		]]
 		function(self: Icon, minimumSize: number, iconState: IconState?): Icon
 			return nil :: any
@@ -6549,7 +6549,7 @@ type Methods = {
 	),
 	setImageScale: typeof(
 		--[[
-			How large the image is relative to the icon. The default value is &lt;code&gt;0.5&lt;/code&gt;.
+			How large the image is relative to the icon. The default value is &lt;code>0.5&lt;/code>.
 		]]
 		function(self: Icon, scale: number, iconState: IconState?): Icon
 			return nil :: any
@@ -6557,7 +6557,7 @@ type Methods = {
 	),
 	setImageRatio: typeof(
 		--[[
-			How stretched the image will appear. The default value is &lt;code&gt;1&lt;/code&gt; (a perfect square).
+			How stretched the image will appear. The default value is &lt;code>1&lt;/code> (a perfect square).
 		]]
 		function(self: Icon, ratio: number, iconState: IconState?): Icon
 			return nil :: any
@@ -6565,7 +6565,7 @@ type Methods = {
 	),
 	setTextSize: typeof(
 		--[[
-			The size of the icon labels' text. The default value is &lt;code&gt;16&lt;/code&gt;.
+			The size of the icon labels' text. The default value is &lt;code>16&lt;/code>.
 		]]
 		function(self: Icon, textSize: number, iconState: IconState?): Icon
 			return nil :: any
@@ -6582,10 +6582,10 @@ type Methods = {
 	setTextFont: typeof(
 		--[[
 			Sets the labels FontFace.
-			&lt;code&gt;font&lt;/code&gt; can be a font family name (such as &lt;code&gt;"Creepster"&lt;/code&gt;),
-			a font enum (such as &lt;code&gt;Enum.Font.Bangers&lt;/code&gt;),
-			a font ID (such as &lt;code&gt;12187370928&lt;/code&gt;),
-			or font family link (such as &lt;code&gt;"rbxasset://fonts/families/Sarpanch.json"&lt;/code&gt;).
+			&lt;code>font&lt;/code> can be a font family name (such as &lt;code>"Creepster"&lt;/code>),
+			a font enum (such as &lt;code>Enum.Font.Bangers&lt;/code>),
+			a font ID (such as &lt;code>12187370928&lt;/code>),
+			or font family link (such as &lt;code>"rbxasset://fonts/families/Sarpanch.json"&lt;/code>).
 		]]
 		function(self: Icon, font: string | Enum.Font, fontWeight: Enum.FontWeight?, fontStyle: Enum.FontSize?, iconState: IconState?): Icon
 			return nil :: any
@@ -6609,17 +6609,17 @@ type Methods = {
 	),
 	bindEvent: typeof(
 		--[[
-			Connects to an icon event with &lt;code&gt;iconEventName&lt;/code&gt;.
-			It's important to remember all event names are in &lt;code&gt;camelCase&lt;/code&gt;.
-			&lt;code&gt;callback&lt;/code&gt; is called with arguments &lt;code&gt;(self, ...)&lt;/code&gt; when the event is triggered.
+			Connects to an icon event with &lt;code>iconEventName&lt;/code>.
+			It's important to remember all event names are in &lt;code>camelCase&lt;/code>.
+			&lt;code>callback&lt;/code> is called with arguments &lt;code>(self, ...)&lt;/code> when the event is triggered.
 		]]
-		function(self: Icon, event: Events, callback: (...any) -&gt; ()): Icon
+		function(self: Icon, event: Events, callback: (...any) -> ()): Icon
 			return nil :: any
 		end
 	),
 	unbindEvent: typeof(
 		--[[
-			Unbinds the connection of the associated &lt;code&gt;iconEventName&lt;/code&gt;.
+			Unbinds the connection of the associated &lt;code>iconEventName&lt;/code>.
 		]]
 		function(self: Icon, event: Events): Icon
 			return nil :: any
@@ -6643,11 +6643,11 @@ type Methods = {
 	),
 	call: typeof(
 		--[[
-			Calls the function immediately via &lt;code&gt;task.spawn&lt;/code&gt;.
+			Calls the function immediately via &lt;code>task.spawn&lt;/code>.
 			The first argument passed is the icon itself.
 			This is useful when needing to extend the behaviour of an icon while remaining in the chain.
 		]]
-		function(self: Icon, func: (self: Icon) -&gt; (...any), ...: any): Icon
+		function(self: Icon, func: (self: Icon) -> (...any), ...: any): Icon
 			return nil :: any
 		end
 	),
@@ -6662,7 +6662,7 @@ type Methods = {
 	),
 	lock: typeof(
 		--[[
-			Prevents the icon being toggled by user-input (such as clicking), however, the icon can still be toggled via localscript using methods such as &lt;code&gt;icon:select()&lt;/code&gt;.
+			Prevents the icon being toggled by user-input (such as clicking), however, the icon can still be toggled via localscript using methods such as &lt;code>icon:select()&lt;/code>.
 		]]
 		function(self: Icon): Icon
 			return nil :: any
@@ -6678,7 +6678,7 @@ type Methods = {
 	),
 	debounce: typeof(
 		--[[
-			Locks the icon, yields for the given time, then unlocks the icon, effectively shorthand for &lt;code&gt;icon:lock() task.wait(seconds) icon:unlock()&lt;/code&gt;.
+			Locks the icon, yields for the given time, then unlocks the icon, effectively shorthand for &lt;code>icon:lock() task.wait(seconds) icon:unlock()&lt;/code>.
 			This is useful for applying cooldowns (to prevent an icon from being pressed again) after an icon has been selected or deselected.
 		]]
 		function(self: Icon, seconds: number): Icon
@@ -6687,8 +6687,8 @@ type Methods = {
 	),
 	autoDeselect: typeof(
 		--[[
-			When set to &lt;code&gt;true&lt;/code&gt; (the default) the icon is deselected when another icon (with autoDeselect enabled) is pressed.
-			Set to &lt;code&gt;false&lt;/code&gt; to prevent the icon being deselected when another icon is selected (a useful behaviour in dropdowns).
+			When set to &lt;code>true&lt;/code> (the default) the icon is deselected when another icon (with autoDeselect enabled) is pressed.
+			Set to &lt;code>false&lt;/code> to prevent the icon being deselected when another icon is selected (a useful behaviour in dropdowns).
 		]]
 		function(self: Icon, enabled: boolean?): Icon
 			return nil :: any
@@ -6705,7 +6705,7 @@ type Methods = {
 	),
 	setCaption: typeof(
 		--[[
-			Sets a caption. To remove, pass &lt;code&gt;nil&lt;/code&gt; as &lt;code&gt;text&lt;/code&gt;.
+			Sets a caption. To remove, pass &lt;code>nil&lt;/code> as &lt;code>text&lt;/code>.
 		]]
 		function(self: Icon, text: string?): Icon
 			return nil :: any
@@ -6713,7 +6713,7 @@ type Methods = {
 	),
 	setCaptionHint: typeof(
 		--[[
-			This customizes the appearance of the caption's hint without having to use &lt;code&gt;icon:bindToggleKey&lt;/code&gt;.
+			This customizes the appearance of the caption's hint without having to use &lt;code>icon:bindToggleKey&lt;/code>.
 		]]
 		function(self: Icon, keyCode: Enum.KeyCode): Icon
 			return nil :: any
@@ -6722,7 +6722,7 @@ type Methods = {
 	setDropdown: typeof(
 		--[[
 			Creates a vertical dropdown based upon the given table array of icons.
-			Pass an empty table &lt;code&gt;{}&lt;/code&gt; to remove the dropdown.
+			Pass an empty table &lt;code>{}&lt;/code> to remove the dropdown.
 		]]
 		function(self: Icon, icons: { Icon }): Icon
 			return nil :: any
@@ -6730,8 +6730,8 @@ type Methods = {
 	),
 	joinDropdown: typeof(
 		--[[
-			Joins the dropdown of &lt;code&gt;parentIcon&lt;/code&gt;.
-			This is what &lt;code&gt;icon:setDropdown&lt;/code&gt; calls internally on the icons within its array.
+			Joins the dropdown of &lt;code>parentIcon&lt;/code>.
+			This is what &lt;code>icon:setDropdown&lt;/code> calls internally on the icons within its array.
 		]]
 		function(self: Icon, parent: Icon): Icon
 			return nil :: any
@@ -6740,7 +6740,7 @@ type Methods = {
 	setMenu: typeof(
 		--[[
 			Creates a horizontal menu based upon the given array of icons.
-			Pass an empty table &lt;code&gt;{}&lt;/code&gt; to remove the menu.
+			Pass an empty table &lt;code>{}&lt;/code> to remove the menu.
 		]]
 		function(self: Icon, icons: { Icon }): Icon
 			return nil :: any
@@ -6749,7 +6749,7 @@ type Methods = {
 	setFixedMenu: typeof(
 		--[[
 			Creates a menu that is always selected and has it's close button hidden.
-			Pass an empty table &lt;code&gt;{}&lt;/code&gt; to remove the menu.
+			Pass an empty table &lt;code>{}&lt;/code> to remove the menu.
 		]]
 		function(self: Icon, icons: { Icon }): Icon
 			return nil :: any
@@ -6757,8 +6757,8 @@ type Methods = {
 	),
 	joinMenu: typeof(
 		--[[
-			Joins the menu of &lt;code&gt;parentIcon&lt;/code&gt;.
-			This is what &lt;code&gt;icon:setMenu&lt;/code&gt; calls internally on the icons within its array.
+			Joins the menu of &lt;code>parentIcon&lt;/code>.
+			This is what &lt;code>icon:setMenu&lt;/code> calls internally on the icons within its array.
 		]]
 		function(self: Icon, parentIcon: Icon): Icon
 			return nil :: any
@@ -6776,7 +6776,7 @@ type Methods = {
 		--[[
 			Unparents an icon from a parentIcon if it belongs to a dropdown or menu.
 		]]
-		function(self: Icon, numberSpinner: any, func: (...any) -&gt; (...any), ...: any): Icon
+		function(self: Icon, numberSpinner: any, func: (...any) -> (...any), ...: any): Icon
 			return nil :: any
 		end
 	),
@@ -6799,9 +6799,9 @@ type Fields = {
 	locked: boolean,
 
 	-- CLASS EVENTS
-	selected: Signal&lt;EventSource&gt;,
-	deselected: Signal&lt;EventSource&gt;,
-	toggled: Signal&lt;boolean, EventSource&gt;,
+	selected: Signal&lt;EventSource>,
+	deselected: Signal&lt;EventSource>,
+	toggled: Signal&lt;boolean, EventSource>,
 	viewingStarted: Signal,
 	viewingEnded: Signal,
 	notified: Signal,
@@ -6812,7 +6812,7 @@ export type Icon = Methods &amp; StaticFunctions --typeof(setmetatable({} :: Fie
 export type StaticIcon = {
 	new: typeof(
 		--[[
-			Constructs an empty &lt;code&gt;32x32&lt;/code&gt; icon on the topbar.
+			Constructs an empty &lt;code>32x32&lt;/code> icon on the topbar.
 		]]
 		function(): Icon
 			return (nil :: any) :: Icon
@@ -6906,7 +6906,7 @@ function Utility.copyTable(t)
 	return tCopy
 end
 
-local validCharacters = {"a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","1","2","3","4","5","6","7","8","9","0","&lt;","&gt;","?","@","{","}","[","]","!","(",")","=","+","~","#"}
+local validCharacters = {"a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","1","2","3","4","5","6","7","8","9","0","&lt;",">","?","@","{","}","[","]","!","(",")","=","+","~","#"}
 function Utility.generateUID(length)
 	length = length or 8
 	local UID = ""
@@ -7053,7 +7053,7 @@ function Utility.clipOutside(icon, instance)
 			local nextIconUID = ourUID
 			local shouldClipToParent = instance:GetAttribute("ClipToJoinedParent")
 			if shouldClipToParent then
-				for i = 1, 10 do -- This is safer than while true do and should never be &gt; 4 parents
+				for i = 1, 10 do -- This is safer than while true do and should never be > 4 parents
 					local nextIcon = Icon.getIconByUID(nextIconUID)
 					if not nextIcon then
 						break
@@ -7080,9 +7080,9 @@ function Utility.clipOutside(icon, instance)
 			local parentSize = parentInstance.AbsoluteSize
 			local posHalf = (pos + halfSize)
 			local exceededLeft = posHalf.X &lt; parentPos.X
-			local exceededRight = posHalf.X &gt; (parentPos.X + parentSize.X)
+			local exceededRight = posHalf.X > (parentPos.X + parentSize.X)
 			local exceededTop = posHalf.Y &lt; parentPos.Y
-			local exceededBottom = posHalf.Y &gt; (parentPos.Y + parentSize.Y)
+			local exceededBottom = posHalf.Y > (parentPos.Y + parentSize.Y)
 			local hasExceeded = exceededLeft or exceededRight or exceededTop or exceededBottom
 			if hasExceeded ~= isOutsideParent then
 				isOutsideParent = hasExceeded
@@ -7113,7 +7113,7 @@ function Utility.clipOutside(icon, instance)
 				local inputX = absoluteValue.X.Offset
 				if inputX &lt; SIDE_PADDING then
 					inputX = SIDE_PADDING
-				elseif inputX &gt; limitX then
+				elseif inputX > limitX then
 					inputX = limitX
 				end
 				absoluteValue = UDim2.fromOffset(inputX, absoluteValue.Y.Offset)
@@ -7395,7 +7395,7 @@ end
 
 	for _, d in ipairs(player:GetDescendants()) do
 		if d:IsA("NumberValue") then
- 			if #d.Name &gt; #TIME_SUFFIX and d.Name:sub(-#TIME_SUFFIX) == TIME_SUFFIX then
+ 			if #d.Name > #TIME_SUFFIX and d.Name:sub(-#TIME_SUFFIX) == TIME_SUFFIX then
 				bucket.timeRefs[d.Name] = d
 			end
 		elseif d:IsA("BoolValue") then
@@ -7410,7 +7410,7 @@ local function getTimeValue(player: Player, timeName: string): NumberValue?
 	local bucket = ensureBucket(player.UserId)
  	local ref = bucket.timeRefs[timeName]
 	if not isAlive(ref) then
- 		if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
+ 		if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
 			rescanPlayerTree(player)
 			ref = bucket.timeRefs[timeName]
 		else
@@ -7424,7 +7424,7 @@ local function getBoolValue(player: Player, name: string): BoolValue?
 	local bucket = ensureBucket(player.UserId)
 	local ref = bucket.boolRefs[name]
 	if not isAlive(ref) then
-		if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
+		if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
 			rescanPlayerTree(player)
 			ref = bucket.boolRefs[name]
 		else
@@ -7440,7 +7440,7 @@ function BoostReader:IsActive(boostName: string, player: Player?)
 	if not plr then return false end
 
  	local timeRef = getTimeValue(plr, boostName .. TIME_SUFFIX)
-	if timeRef and timeRef.Value and timeRef.Value &gt; 0 then
+	if timeRef and timeRef.Value and timeRef.Value > 0 then
 		return true
 	end
 
@@ -7449,10 +7449,10 @@ function BoostReader:IsActive(boostName: string, player: Player?)
 		return true
 	end
 
- 	if os.clock() - ensureBucket(plr.UserId).lastScan &gt;= SCAN_COOLDOWN then
+ 	if os.clock() - ensureBucket(plr.UserId).lastScan >= SCAN_COOLDOWN then
 		rescanPlayerTree(plr)
 		timeRef = getTimeValue(plr, boostName .. TIME_SUFFIX)
-		if timeRef and timeRef.Value &gt; 0 then return true end
+		if timeRef and timeRef.Value > 0 then return true end
 		boolRef = getBoolValue(plr, boostName)
 		if boolRef and boolRef.Value == true then return true end
 	end
@@ -7485,13 +7485,13 @@ end
 
  		lp.DescendantAdded:Connect(function()
 			local bucket = ensureBucket(lp.UserId)
-			if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
+			if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
 				rescanPlayerTree(lp)
 			end
 		end)
 		lp.DescendantRemoving:Connect(function()
 			local bucket = ensureBucket(lp.UserId)
-			if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
+			if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
 				rescanPlayerTree(lp)
 			end
 		end)
@@ -8709,6 +8709,9 @@ return CrewCatalog
 		["TotalStats.TotalDoubloons"] = {
 			"TotalStats.TotalMoney",
 		},
+		["HiddenLeaderstats.PlotUpgrade"] = {
+			"HiddenLeadderstats.PlotUpgrade",
+		},
 	},
 
 	Rules = {
@@ -9498,13 +9501,13 @@ MAD STUDIO
 	
 	Functions:
 	
-		Maid.New(key [any]) --&gt; [Maid]
+		Maid.New(key [any]) --> [Maid]
 			-- If "key" is passed, ":Cleanup()" method will be locked
 	
 	Methods [Maid]:
 	
-		Maid:IsActive() --&gt; [bool] -- Returns true if maid was not cleaned up
-		Maid:Add(any) --&gt; maid_token [MaidToken]
+		Maid:IsActive() --> [bool] -- Returns true if maid was not cleaned up
+		Maid:Add(any) --> maid_token [MaidToken]
 		Maid:Cleanup(...) -- Added functions will receive the tuple arguments;
 			After :Cleanup() is called, all successive objects added to the maid will be instantly cleaned up!
 			
@@ -9576,14 +9579,14 @@ end
 
 --[[
 export type MaidToken = {
-	Destroy: (self: MaidToken) -&gt; (),
-	Cleanup: (self: MaidToken, ...any) -&gt; (),
+	Destroy: (self: MaidToken) -> (),
+	Cleanup: (self: MaidToken, ...any) -> (),
 }
 
 export type Maid = {
-	IsActive: (self: Maid) -&gt; (boolean),
-	Add: (self: Maid, object: any) -&gt; MaidToken,
-	Cleanup: (...any) -&gt; (),
+	IsActive: (self: Maid) -> (boolean),
+	Add: (self: Maid, object: any) -> MaidToken,
+	Cleanup: (...any) -> (),
 }
 --]]
 
@@ -9699,13 +9702,13 @@ MAD STUDIO
 	
 	Functions:
 	
-		RateLimit.New(rate, is_full_wait) --&gt; [RateLimit]
+		RateLimit.New(rate, is_full_wait) --> [RateLimit]
 			rate           [number] -- Events per second allowed; Excessive events are dropped
 			is_full_wait   [bool] -- (Optional) If set to true, allows the next event to happen after the full rate period has passed
 			
 	Methods [RateLimit]:
 	
-		RateLimit:CheckRate(source) --&gt; is_to_be_processed [bool] -- Whether event should be processed
+		RateLimit:CheckRate(source) --> is_to_be_processed [bool] -- Whether event should be processed
 			source   [any]
 			
 		RateLimit:CleanSource(source) -- Forgets about the source - must be called for any object that
@@ -9730,7 +9733,7 @@ local RateLimits = {} -- {rate_limit = true, ...}
 local RateLimit = {}
 RateLimit.__index = RateLimit
 
-function RateLimit.New(rate : number, is_full_wait : boolean?) --&gt; [RateLimit]
+function RateLimit.New(rate : number, is_full_wait : boolean?) --> [RateLimit]
 	if rate &lt;= 0 then
 		error("[RateLimit]: Invalid rate")
 	end
@@ -9747,7 +9750,7 @@ function RateLimit.New(rate : number, is_full_wait : boolean?) --&gt; [RateLimit
 	return self
 end
 
-function RateLimit:CheckRate(source) : boolean --&gt; is_to_be_processed [bool] -- Whether event should be processed
+function RateLimit:CheckRate(source) : boolean --> is_to_be_processed [bool] -- Whether event should be processed
 	
 	local sources = self.sources
 	local os_clock = os.clock()
@@ -9831,7 +9834,7 @@ MAD STUDIO
 
 	Functions:
 			
-		Remote.New(name [string], is_unreliable [bool]) --&gt; [RemoteEvent]
+		Remote.New(name [string], is_unreliable [bool]) --> [RemoteEvent]
 			-- Calling this with the same name server-side twice will throw an error
 	
 --]]
@@ -9970,7 +9973,7 @@ function Remote.New(name: string, is_unreliable: boolean): RemoteEvent
 			while true do
 				remote = Container:FindFirstChild(name)
 				if remote == nil then
-					if missing_start ~= nil and os.clock() - missing_start &gt; REMOTE_MISSING_TIME then
+					if missing_start ~= nil and os.clock() - missing_start > REMOTE_MISSING_TIME then
 						missing_start = nil
 						warn(`[{script.Name}]: RemoteEvent "{name}" hasn't been defined server-side`)
 					end
@@ -10037,21 +10040,21 @@ MAD STUDIO
 
 	Functions:
 			
-		Signal.New() --&gt; [Signal]
+		Signal.New() --> [Signal]
 		
 	Methods [Signal]:
 	
-		Signal:Connect(listener) --&gt; [Connection] listener(...)
+		Signal:Connect(listener) --> [Connection] listener(...)
 			listener              [function]
 			
-		Signal:GetListenerCount() --&gt; [number]
+		Signal:GetListenerCount() --> [number]
 			
 		Signal:Fire(...)
 		
 		Signal:Wait()
 		
 		Signal:FireUntil(continue_callback, ...)
-			continue_callback   [function] () --&gt; continue [bool] (Stops firing if "true" is not returned)
+			continue_callback   [function] () --> continue [bool] (Stops firing if "true" is not returned)
 		
 	Methods [Connection]:
 	
@@ -10089,14 +10092,14 @@ end
 
 --[[
 export type Connection = {
-	Disconnect: (self: Connection) -&gt; (),
+	Disconnect: (self: Connection) -> (),
 }
 
 export type Signal = {
-	Connect: (self: Signal, listener: (...any) -&gt; ()) -&gt; (Connection),
-	GetListenerCount: (self: Signal) -&gt; (number),
-	Fire: (self: Signal, ...any) -&gt; (),
-	FireUntil: (self: Signal, continue_callback: () -&gt; boolean, ...any) -&gt; (),
+	Connect: (self: Signal, listener: (...any) -> ()) -> (Connection),
+	GetListenerCount: (self: Signal) -> (number),
+	Fire: (self: Signal, ...any) -> (),
+	FireUntil: (self: Signal, continue_callback: () -> boolean, ...any) -> (),
 }
 --]]
 
@@ -10142,7 +10145,7 @@ function Signal.New()
 
 end
 
-function Signal:Connect(listener: (...any) -&gt; ())
+function Signal:Connect(listener: (...any) -> ())
 	
 	if type(listener) ~= "function" then
 		error(`[{script.Name}]: \"listener\" must be a function; Received {typeof(listener)}`)
@@ -10190,7 +10193,7 @@ function Signal:Wait()
 	return coroutine.yield()
 end
 
-function Signal:FireUntil(continue_callback: () -&gt; boolean, ...)
+function Signal:FireUntil(continue_callback: () -> boolean, ...)
 	
 	if type(continue_callback) ~= "function" then
 		error(`[{script.Name}]: \"continue_callback\" must be a function; Received {typeof(continue_callback)}`)
@@ -14659,7 +14662,11 @@ end
           <Item class="ModuleScript" referent="105">
             <Properties>
               <string name="Name">BrainrotSpawnSettings</string>
-              <string name="Source"><![CDATA[return {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotSpawnSettings"))
+end
+
+return {
 	MaxPerPart = 7,
 	PlayerSpawnRadius = 500,
 	DespawnWhenNoPlayers = true,
@@ -14676,7 +14683,11 @@ end
           <Item class="ModuleScript" referent="106">
             <Properties>
               <string name="Name">BrainrotVariants</string>
-              <string name="Source"><![CDATA[local BrainrotVariants = {}
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+end
+
+local BrainrotVariants = {}
 
 BrainrotVariants.Order = { "Normal", "Golden", "Diamond" }
 
@@ -14719,6 +14730,10 @@ return BrainrotVariants
             <Properties>
               <string name="Name">Brainrots</string>
               <string name="Source"><![CDATA[
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Configs = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs")
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
@@ -15284,7 +15299,11 @@ return Brainrots
           <Item class="ModuleScript" referent="108">
             <Properties>
               <string name="Name">CometMerchant</string>
-              <string name="Source"><![CDATA[local CometMerchant = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CometMerchant"))
+end
+
+local CometMerchant = {
 	
 	All_Things = {
 		["Potions.x2MoneyTime"] = {
@@ -15380,7 +15399,11 @@ return CometMerchant
           <Item class="ModuleScript" referent="109">
             <Properties>
               <string name="Name">Gamepasses</string>
-              <string name="Source"><![CDATA[local Gamepasses = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+end
+
+local Gamepasses = {
 	["VIP"] = {
 		TYPE = "Gamepass",
 		ID = 1667049739,
@@ -15424,7 +15447,11 @@ return Gamepasses
           <Item class="ModuleScript" referent="110">
             <Properties>
               <string name="Name">Gears</string>
-              <string name="Source"><![CDATA[local Gears = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+end
+
+local Gears = {
 	["Slap"] = {
 		Type = "Weapon",
 		Price = 100,
@@ -15531,7 +15558,11 @@ return Gears
           <Item class="ModuleScript" referent="112">
             <Properties>
               <string name="Name">Index</string>
-              <string name="Source">local Index = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Index"))
+end
+
+local Index = {
 	[10] = {
 		Icon = "rbxassetid://109366282204505",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
@@ -15593,13 +15624,18 @@ return Gears
 	},
 }
 
-return Index</string>
+return Index
+]]></string>
             </Properties>
           </Item>
           <Item class="ModuleScript" referent="113">
             <Properties>
               <string name="Name">LavaWaves</string>
-              <string name="Source"><![CDATA[local Waves = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("LavaWaves"))
+end
+
+local Waves = {
 	["HAHAH"] = {
 		Speed = 60,
 		Chance = 100,
@@ -15620,7 +15656,11 @@ return Waves
           <Item class="ModuleScript" referent="114">
             <Properties>
               <string name="Name">LeaderboardChatConfig</string>
-              <string name="Source"><![CDATA[return {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("LeaderboardChatConfig"))
+end
+
+return {
 	Order = { "TotalMoney", "TotalPower", 'TotalWins'},
 
 	Boards = {
@@ -15658,7 +15698,11 @@ return Waves
           <Item class="ModuleScript" referent="115">
             <Properties>
               <string name="Name">PlotUpgrade</string>
-              <string name="Source"><![CDATA[return {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+end
+
+return {
 	StarterPrice = 1000,
 	PriceMult = 2,
 }
@@ -15668,7 +15712,11 @@ return Waves
           <Item class="ModuleScript" referent="116">
             <Properties>
               <string name="Name">Rebirths</string>
-              <string name="Source">local Rebirths = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
+end
+
+local Rebirths = {
 	[1] = {
 		Price = 1000,
 		SpeedNeeded = 15,
@@ -15753,13 +15801,18 @@ return Waves
 	},
 }
 
-return Rebirths</string>
+return Rebirths
+]]></string>
             </Properties>
           </Item>
           <Item class="ModuleScript" referent="117">
             <Properties>
               <string name="Name">Settings</string>
-              <string name="Source">local Settings = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Settings"))
+end
+
+local Settings = {
 	["Music"] = {Path = "Settings.Music", Type = "Slider", Start = 100},
 	["SoundEffects"] = {Path = "Settings.Sounds", Type = "Slider", Start = 100},
  
@@ -15768,13 +15821,18 @@ return Rebirths</string>
 
 }
 
-return Settings</string>
+return Settings
+]]></string>
             </Properties>
           </Item>
           <Item class="ModuleScript" referent="118">
             <Properties>
               <string name="Name">SpawnParts</string>
-              <string name="Source"><![CDATA[return {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
+end
+
+return {
 	DefaultLuckMult = 1,
 
 	LuckMult = {
@@ -15811,7 +15869,11 @@ return Settings</string>
           <Item class="ModuleScript" referent="119">
             <Properties>
               <string name="Name">SpeedUpgrade</string>
-              <string name="Source"><![CDATA[local SpeeUpgrade = {
+              <string name="Source"><![CDATA[do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpeedUpgrade"))
+end
+
+local SpeeUpgrade = {
 	[1] = {
 		Starter_Price = 200,
 		
@@ -16596,6 +16658,7 @@ local ProductFunctions = require(script.ProductFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
 local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -16638,6 +16701,94 @@ local function NormalizeDataPath(path: string): string
 	return PathAliasLookup[path] or path
 end
 
+local function DeepCopyTable(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, childValue in pairs(value) do
+		copy[key] = DeepCopyTable(childValue)
+	end
+
+	return copy
+end
+
+local function CreateProfileFromTemplate()
+	return DeepCopyTable(GetTemplate)
+end
+
+local function GetPathTable(path: string): {string}
+	local normalizedPath = NormalizeDataPath(path)
+	local pathTable = normalizedPath:split(".")
+
+	if pathTable[1] == "Data" then
+		table.remove(pathTable, 1)
+	end
+
+	return pathTable
+end
+
+local function ResolveDataPath(profile, path: string, createMissing: boolean?, defaultLeafValue: any?)
+	local pathTable = GetPathTable(path)
+	if #pathTable == 0 then
+		return nil, nil, pathTable, nil, "[DataManager]: Empty data path!"
+	end
+
+	local pointer = profile.Data
+	for index = 1, #pathTable - 1 do
+		local key = pathTable[index]
+		local nextPointer = pointer[key]
+
+		if nextPointer == nil then
+			if not createMissing then
+				return nil, nil, pathTable, nil, nil
+			end
+
+			nextPointer = {}
+			pointer[key] = nextPointer
+		elseif typeof(nextPointer) ~= "table" then
+			return nil, nil, pathTable, nil, string.format(
+				"[DataManager]: Can't traverse path '%s' because '%s' is %s, not table",
+				path,
+				tostring(key),
+				typeof(nextPointer)
+			)
+		end
+
+		pointer = nextPointer
+	end
+
+	local leafKey = pathTable[#pathTable]
+	local currentValue = pointer[leafKey]
+	if currentValue == nil and createMissing then
+		pointer[leafKey] = defaultLeafValue
+		currentValue = pointer[leafKey]
+	end
+
+	return pointer, leafKey, pathTable, currentValue, nil
+end
+
+local function GetRootDataKey(pathTable: {string}): string?
+	return pathTable[1]
+end
+
+local SyncPathToInstances
+
+local function SyncDataMutation(player: Player, replica, pathTable: {string}, value: any)
+	replica:Set(pathTable, value)
+
+	if GetRootDataKey(pathTable) == "leaderstats" and not Settings.Experimental.CreateFolders then
+		DataManager:Leaderstats(player)
+	elseif Settings.Experimental.CreateFolders then
+		SyncPathToInstances(player, pathTable, value)
+	else
+		DataManager:UpdateData(player)
+	end
+
+	Debug(player)
+end
+
 
 local function SanitizeAttributeValue(raw)
 	local t = typeof(raw)
@@ -16669,8 +16820,9 @@ local MessagesFunctions = {
 		local profile : typeof(Profiles[player]) = self:GetProfile(player)
 		local replica: typeof(Replicas[player]) = self:GetReplica(player)
 		if profile ~= nil and replica ~= nil then
-			profile.Data = GetTemplate
-			replica.Data = GetTemplate
+			local freshData = CreateProfileFromTemplate()
+			profile.Data = freshData
+			replica.Data = freshData
 
 			if Settings.Experimental.CreateFolders then
 				self:UpdateData(player)
@@ -16750,22 +16902,8 @@ function DataManager:TryGetReplica(player: Player)
 end
 
 local function ReadValueFromProfile(profile, path: string)
-	path = NormalizeDataPath(path)
-	local pathTable = path:split(".")
-	local pointer = profile
-
-	if pathTable[1] ~= "Data" then
-		pointer = profile.Data
-	end
-
-	for _, segment in ipairs(pathTable) do
-		pointer = pointer[segment]
-		if pointer == nil then
-			return nil
-		end
-	end
-
-	return pointer
+	local _, _, _, value = ResolveDataPath(profile, path, false)
+	return value
 end
 
 function DataManager:IsReady(player: Player): boolean
@@ -16786,7 +16924,11 @@ function DataManager:TrySetValue(player: Player, path: string, newValue)
 		return false, "not_ready"
 	end
 
-	self:SetValue(player, path, newValue)
+	local success, reason = self:SetValue(player, path, newValue)
+	if success == false then
+		return false, reason or "set_failed"
+	end
+
 	return true, nil
 end
 
@@ -16795,7 +16937,11 @@ function DataManager:TryAddValue(player: Player, path: string, addValue)
 		return false, "not_ready"
 	end
 
-	self:AddValue(player, path, addValue)
+	local success, reason = self:AddValue(player, path, addValue)
+	if success == false then
+		return false, reason or "add_failed"
+	end
+
 	return true, nil
 end
 
@@ -16803,24 +16949,8 @@ end
 	Function used to shorten code (isn't usable from the outside)
 ]]
 function GetPointer(path : string, profile : typeof(PlayerStore:StartSessionAsync())) : ({any?}?, {any?}?)
-	path = NormalizeDataPath(path)
-	local pathTable = path:split(".")
-	local pointer = profile
-
-	if pathTable[1] ~= "Data" then 
-		pointer = pointer.Data
-	end
-
-	for i = 1, #pathTable - 1 do
-		if pointer[pathTable[i]] == nil then break end
-		pointer = pointer[pathTable[i]]
-	end
-
-	if pointer[pathTable[#pathTable]] == nil then
-		return nil, pathTable
-	end
-
-	return pointer[pathTable[#pathTable]], pathTable
+	local _, _, pathTable, currentValue = ResolveDataPath(profile, path, false)
+	return currentValue, pathTable
 end
 
 --[[
@@ -16842,25 +16972,6 @@ end
 
 
 
-local function ReconstructPath(Player: Player, Path: string, EndValue: any?)
-	Path = NormalizeDataPath(Path)
-	local PathTable = string.split(Path, ".")
-	local Pointer = self:GetData(Player)
-	for Index, PathPoint in ipairs(PathTable) do
-		if Pointer[PathPoint] == nil then
-			Pointer[PathPoint] = {}
-			if Index == #PathTable then
-				Pointer[PathPoint] = EndValue or {}
-			end
-		end
-		if Pointer[PathPoint] ~= nil and typeof(Pointer[PathPoint]) ~= "table" and Index ~= #PathTable then
-			warn(string.format("[DataManager]: Can't reconstruct - found type %s at path step %s", typeof(Pointer[PathPoint]), PathPoint))
-			return
-		end
-		Pointer = Pointer[PathPoint]
-	end
-end
-
 --[[
 	Sets variable value
 	[player]: which player you want to change the date
@@ -16871,64 +16982,43 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
-		local pointer, pathTable = GetPointer(path, profile)
+		local defaultValue = if newValue == nil then true else DeepCopyTable(newValue)
+		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
-		if pointer == nil then
-			local currentPointer = profile
-
-			for i, e in pairs(pathTable) do
-				if i < #pathTable then
-					if currentPointer[e] ~= nil then
-						currentPointer = currentPointer[e]
-					else
-						currentPointer[e] = {}
-						currentPointer = currentPointer[e]
-					end
-				else
-					if currentPointer[e] ~= nil then
-						currentPointer = currentPointer[e]
-					else
-						currentPointer[e] = newValue == nil and true or newValue
-						currentPointer = currentPointer[e]
-					end
-				end
-			end
-
-			DataManager:UpdateData(player)
-		else
-			if newValue ~= nil then
-				if typeof(pointer) == typeof(newValue) then
-					pointer = newValue
-					replica:Set(pathTable, newValue)
-					if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-						DataManager:Leaderstats(player)
-					else
-						DataManager:UpdateData(player)
-					end
-
-					Debug(player)
-				else
-					warn(`[DataManager]: Given value ({newValue} : {typeof(newValue)}) must be the same type as (Data.{path} : {typeof(pointer)})!`)
-					return
-				end
-			else
-				if typeof(pointer) == "boolean" then
-					local newValue = not pointer
-					pointer = newValue
-					replica:Set(pathTable, newValue)
-					if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-						DataManager:Leaderstats(player)
-					else
-						DataManager:UpdateData(player)
-					end
-
-					Debug(player)
-				end
-			end
+		if err then
+			warn(err)
+			return false, "invalid_path"
 		end
+
+		if currentValue == nil then
+			currentValue = parent[leafKey]
+			SyncDataMutation(player, replica, pathTable, currentValue)
+			return true
+		end
+
+		local valueToStore = newValue
+		if valueToStore ~= nil then
+			if typeof(currentValue) ~= typeof(valueToStore) then
+				warn(`[DataManager]: Given value ({valueToStore} : {typeof(valueToStore)}) must be the same type as (Data.{path} : {typeof(currentValue)})!`)
+				return false, "type_mismatch"
+			end
+
+			valueToStore = DeepCopyTable(valueToStore)
+		else
+			if typeof(currentValue) ~= "boolean" then
+				warn(`[DataManager]: Can't toggle non-boolean value at Data.{path}!`)
+				return false, "invalid_toggle"
+			end
+
+			valueToStore = not currentValue
+		end
+
+		parent[leafKey] = valueToStore
+		SyncDataMutation(player, replica, pathTable, valueToStore)
+		return true
 	else
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 end
 
@@ -16985,44 +17075,46 @@ function DataManager:AddValue(player, path, addValue)
 	local replica = self:GetReplica(player)
 	if not (profile and replica) then
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 
-	local pointer, pathTable = GetPointer(path, profile)
+	local defaultValue = if typeof(addValue) == "number" then 0 else {}
+	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
 	-- ⬇️ nowość: zainicjuj brakującą ścieżkę
-	if pointer == nil then
-		local default = (typeof(addValue) == "number") and 0 or {}
-		ReconstructPath(player, path, default)
-		pointer, pathTable = GetPointer(path, profile)
+	if err then
+		warn(err)
+		return false, "invalid_path"
 	end
 
-	if typeof(addValue) == "table" and typeof(pointer) == "table" then
+	if typeof(addValue) == "table" and typeof(currentValue) == "table" then
+		local didChange = false
 		for k, v in pairs(addValue) do
-			if pointer[k] then warn("[DataManager]: value names are repeating!") else
-				pointer[k] = v
-				local _, childPath = GetPointer(path.."."..k, profile)
-				replica:Set(childPath, v)
+			if currentValue[k] ~= nil then
+				warn("[DataManager]: value names are repeating!")
+			else
+				currentValue[k] = DeepCopyTable(v)
+				didChange = true
 			end
 		end
-		DataManager:UpdateData(player)
-		Debug(player)
-		return
+
+		if didChange then
+			SyncDataMutation(player, replica, pathTable, currentValue)
+		end
+
+		return true
 	end
 
-	if typeof(pointer) == "number" and typeof(addValue) == "number" then
-		local final = pointer + addValue
+	if typeof(currentValue) == "number" and typeof(addValue) == "number" then
+		local final = currentValue + addValue
 		-- (nie ma sensu robić `pointer = pointer + final`; wystarczy Set do repliki)
-		replica:Set(pathTable, final)
-		if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-			DataManager:Leaderstats(player)
-		else
-			DataManager:UpdateData(player)
-		end
-		Debug(player)
-	else
-		warn("[DataManager]: You can add only numbers!")
+		parent[leafKey] = final
+		SyncDataMutation(player, replica, pathTable, final)
+		return true
 	end
+
+	warn("[DataManager]: You can add only numbers!")
+	return false, "invalid_add"
 end
 
 
@@ -17036,40 +17128,43 @@ function DataManager:SubValue(player : Player, path : string, subValue : (number
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
-		local pointer, pathTable = GetPointer(path, profile)
+		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, false)
+		if err then
+			warn(err)
+			return false, "invalid_path"
+		end
 
-		if typeof(subValue) == "table" and typeof(pointer) == "table" then
+		if typeof(subValue) == "table" and typeof(currentValue) == "table" then
+			local didChange = false
 			for Index, Value in pairs(subValue) do
-				if pointer[Value] == nil then
+				if currentValue[Value] == nil then
 					warn("[DataManager]: Couldn't find value!")
 					continue
 				end
 
-				local newPointer, newPathTable = GetPointer(path.."."..Value, profile)
-				replica:Set(newPathTable, nil)
-				pointer[Value] = nil
+				currentValue[Value] = nil
+				didChange = true
 			end
-			DataManager:UpdateData(player)
-			Debug(player)
-		else
-			if typeof(pointer) == typeof(subValue) and typeof(pointer) == "number" then
-				local targetNumber = pointer - subValue
-				replica:Set(pathTable, targetNumber)
-				pointer = targetNumber
-				if pathTable[2] == "leaderstats" and not Settings.Experimental.CreateFolders then
-					DataManager:Leaderstats(player)
-				else
-					DataManager:UpdateData(player)
-				end
 
-				Debug(player)
+			if didChange then
+				SyncDataMutation(player, replica, pathTable, currentValue)
+			end
+
+			return true
+		else
+			if typeof(currentValue) == typeof(subValue) and typeof(currentValue) == "number" then
+				local targetNumber = currentValue - subValue
+				parent[leafKey] = targetNumber
+				SyncDataMutation(player, replica, pathTable, targetNumber)
+				return true
 			else
 				warn("[DataManager]: You can substract only numbers!")
+				return false, "invalid_subtract"
 			end
 		end
 	else
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 end
 
@@ -17077,19 +17172,24 @@ function DataManager:Clear(player : Player, path : string)
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
-		local pointer, pathTable = GetPointer(path, profile)
-		if typeof(pointer) == "table" then
-			pointer = {}
-			replica:Set(pathTable, {})
-		elseif typeof(pointer) ~= "table" then
-			warn("[DataManager]: You can clear only tables (folders)!")
-			return
+		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, false)
+		if err then
+			warn(err)
+			return false, "invalid_path"
 		end
-		DataManager:UpdateData(player)
-		Debug(player)
+
+		if typeof(currentValue) == "table" then
+			parent[leafKey] = {}
+			SyncDataMutation(player, replica, pathTable, parent[leafKey])
+		elseif typeof(currentValue) ~= "table" then
+			warn("[DataManager]: You can clear only tables (folders)!")
+			return false, "invalid_clear"
+		end
+
+		return true
 	else
 		warn("[DataManager]: Couldn't find profile or (/and) replica!")
-		return
+		return false, "missing_state"
 	end
 end
 
@@ -17192,6 +17292,68 @@ local function RecursiveRemove(data, folder : Folder)
 			end
 		end
 	end
+end
+
+SyncPathToInstances = function(player: Player, pathTable: {string}, value: any)
+	if #pathTable == 0 then
+		return
+	end
+
+	local parent: Instance = player
+	for index = 1, #pathTable - 1 do
+		local segment = pathTable[index]
+		local child = parent:FindFirstChild(segment)
+		if child and not child:IsA("Folder") then
+			child:Destroy()
+			child = nil
+		end
+
+		if not child then
+			child = Instance.new("Folder")
+			child.Name = segment
+			child.Parent = parent
+		end
+
+		parent = child
+	end
+
+	local leafName = pathTable[#pathTable]
+	if typeof(value) == "table" then
+		local folder = parent:FindFirstChild(leafName)
+		if folder and not folder:IsA("Folder") then
+			folder:Destroy()
+			folder = nil
+		end
+
+		if not folder then
+			folder = Instance.new("Folder")
+			folder.Name = leafName
+			folder.Parent = parent
+		end
+
+		RecursiveUpdate(folder, value)
+		RecursiveRemove(value, folder)
+		return
+	end
+
+	local className = ConvertType(typeof(value))
+	if className == nil then
+		return
+	end
+
+	local valueObject = parent:FindFirstChild(leafName)
+	if valueObject and valueObject.ClassName ~= className then
+		valueObject:Destroy()
+		valueObject = nil
+	end
+
+	if not valueObject then
+		valueObject = Instance.new(className)
+		valueObject.Name = leafName
+		valueObject.Parent = parent
+	end
+
+	valueObject.Value = value
 end
 
 function DataManager:UpdateData(player : Player)
@@ -17353,6 +17515,7 @@ function PlayerAdded(player: Player)
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
 		ProfileMigrations.Apply(profile.Data)
+		ValidationChecks.WarnProfileData(player, profile.Data)
 
 		profile.OnSessionEnd:Connect(function()
 			Profiles[player] = nil
@@ -17562,6 +17725,10 @@ end
 
 -- Dodaje wiadomość do kolejki
 local function EnqueuePurchaseAnnouncement(player: Player, productId: number, productName: string, price: number)
+	if RunService:IsStudio() then
+		return
+	end
+
 	local payload = {
 		UserId = player.UserId,
 		Username = player.Name,
@@ -17679,32 +17846,20 @@ function DataManager:EquipAnimal(player: Player, animalName: string)
 end
 
 
-local function _getParentKeyAndPath(profile, path: string)
-	path = NormalizeDataPath(path)
-	local parts = path:split(".")
-	local t = profile.Data
-	local i = 1
-	if parts[1] == "Data" then i = 2 end
-	for idx = i, #parts - 1 do
-		t[parts[idx]] = t[parts[idx]] or {}
-		t = t[parts[idx]]
-	end
-	return t, parts[#parts], parts
-end
-
-
 function DataManager:AdjustValue(player: Player, path: string, delta: number)
 	local profile = self:GetProfile(player)
 	local replica = self:GetReplica(player)
 	if not profile or not replica then return end
 
 	-- upewnij się, że ścieżka istnieje i ma początkowo 0
-	ReconstructPath(player, path, 0)
+	local parent, leafKey, pathTable, current, err = ResolveDataPath(profile, path, true, 0)
 
 	-- znajdź rodzica i klucz końcowy, żeby zapisać do profile.Data
-	local parent, leafKey, pathTable = _getParentKeyAndPath(profile, path)
+	if err then
+		warn(err)
+		return nil
+	end
 
-	local current = parent[leafKey]
 	if typeof(current) ~= "number" then
 		warn(string.format("[DataManager]: Can't adjust non-number at '%s' (type: %s)", path, typeof(current)))
 		return
@@ -17716,17 +17871,8 @@ function DataManager:AdjustValue(player: Player, path: string, delta: number)
 
 	local final = current + delta
 	parent[leafKey] = final               -- <— ZAPIS do profile.Data
-	replica:Set(pathTable, final)         -- aktualizacja repliki
+	SyncDataMutation(player, replica, pathTable, final)
 
-	-- poprawne sprawdzenie, czy modyfikujemy leaderstats
-	local rootKey = (pathTable[1] == "Data") and pathTable[2] or pathTable[1]
-	if rootKey == "leaderstats" and not Settings.Experimental.CreateFolders then
-		self:Leaderstats(player)
-	else
-		self:UpdateData(player)
-	end
-
-	Debug(player)
 	return final
 end
 
@@ -17888,19 +18034,17 @@ function DataManager:SetupBoostListeners(player: Player)
 			local profile = self:GetProfile(player)
 			if not profile then return end
 
-			local function dfs(tbl)
-				for k, v in pairs(tbl) do
-					if typeof(v) == "table" then
-						dfs(v)
-					elseif typeof(v) == "number" and type(k) == "string" and k:sub(-4) == "Time" then
-						if v > 0 then
-							local boostName = k:sub(1, #k - 4) -- obcina "Time"
-							DataManager:ResumeBoost(player, boostName)
-						end
-					end
+			local potions = profile.Data.Potions
+			if typeof(potions) ~= "table" then
+				return
+			end
+
+			for key, value in pairs(potions) do
+				if typeof(value) == "number" and type(key) == "string" and key:sub(-4) == "Time" and value > 0 then
+					local boostName = key:sub(1, #key - 4)
+					DataManager:ResumeBoost(player, boostName)
 				end
 			end
-			dfs(profile.Data)
 		end
 
 		-- Pierwszy skan po załadowaniu profilu
@@ -17938,6 +18082,10 @@ function DataManager:Version()
 end
 
 function CheckVersion()
+	if RunService:IsStudio() then
+		return
+	end
+
 	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
 
 	local AllVersions = GetVersion()
@@ -17992,6 +18140,10 @@ function GetVersion(version : string?)
 end
 
 local function SetupAnnouncementSubscription()
+	if RunService:IsStudio() then
+		return
+	end
+
 	local ok, err = pcall(function()
 		MessagingService:SubscribeAsync(ANNOUNCE_TOPIC, function(message)
 			local data = message.Data
@@ -18020,6 +18172,12 @@ DataManager.init = function()
 
 	DataManagerInitialized = true
 	DataManager._initialized = true
+	workspace:SetAttribute("DataManager_RuntimeSignature", "src-path-sync-2026-03-17")
+	workspace:SetAttribute("DataManager_TargetedSync", true)
+	workspace:SetAttribute(
+		"DataManager_SyncMode",
+		if Settings.Experimental.CreateFolders then "targeted_path_sync" else "legacy_update_data"
+	)
 
 	FillMessageFunctions()
 	DataManager.Premades = Premades
@@ -18041,6 +18199,13 @@ DataManager.init = function()
 		local ok, err = pcall(SetupAnnouncementSubscription)
 		if not ok then
 			warn("[DataManager]: Announcement subscription failed during init: ", err)
+		end
+	end)
+
+	task.spawn(function()
+		local ok, err = pcall(ValidationChecks.WarnMissingDependencies)
+		if not ok then
+			warn("[DataManager]: Validation checks failed during init: ", err)
 		end
 	end)
 
@@ -18603,6 +18768,22 @@ function ProfileMigrations.Apply(data)
 	totalStats[primaryCurrency.LegacyKeys.Total] = nil
 
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
+	local legacyHiddenLeadderstats = data.HiddenLeadderstats
+	if typeof(legacyHiddenLeadderstats) == "table" then
+		for key, value in pairs(legacyHiddenLeadderstats) do
+			if hiddenLeaderstats[key] == nil then
+				hiddenLeaderstats[key] = value
+			end
+		end
+
+		hiddenLeaderstats.PlotUpgrade = math.max(
+			coerceNumber(hiddenLeaderstats.PlotUpgrade, 0),
+			coerceNumber(legacyHiddenLeadderstats.PlotUpgrade, 0)
+		)
+		data.HiddenLeadderstats = nil
+	end
+
+	hiddenLeaderstats.PlotUpgrade = coerceNumber(hiddenLeaderstats.PlotUpgrade, 0)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
 	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
 
@@ -18835,10 +19016,6 @@ local ProfileTemplate = {
 		Group = false,
 		PlotUpgrade = 0,
 		Comets = 0,
-	},
-
-	HiddenLeadderstats = {
-		PlotUpgrade = 0,
 	},
 
 	TotalStats = {
@@ -19288,7 +19465,7 @@ MAD STUDIO (by loleris)
 	
 	Functions:
 	
-		ProfileStore.New(store_name, template?) --&gt; [ProfileStore]
+		ProfileStore.New(store_name, template?) --> [ProfileStore]
 			store_name   [string] -- DataStore name
 			template     [table] or nil -- Profiles will default to given table (hard-copy) when no data was saved previously
 			
@@ -19306,37 +19483,37 @@ MAD STUDIO (by loleris)
 		
 	Methods [ProfileStore]:
 	
-		ProfileStore:StartSessionAsync(profile_key, params?) --&gt; [Profile] or nil
+		ProfileStore:StartSessionAsync(profile_key, params?) --> [Profile] or nil
 			profile_key [string] -- DataStore key
 			params      nil or [table]: -- Custom params; E.g. {Steal = true}
 				{
 					Steal = true, -- Pass this to disregard an existing session lock
-					Cancel = fn() -&gt; (boolean), -- Pass this to create a request cancel condition.
+					Cancel = fn() -> (boolean), -- Pass this to create a request cancel condition.
 						-- If the cancel function returns true, ProfileStore will stop trying to
 						-- start the session and return nil
 				}
 			
-		ProfileStore:MessageAsync(profile_key, message) --&gt; is_success [bool]
+		ProfileStore:MessageAsync(profile_key, message) --> is_success [bool]
 			profile_key [string] -- DataStore key
 			message     [table] -- Data to be messaged to the profile
 			
-		ProfileStore:GetAsync(profile_key, version?) --&gt; [Profile] or nil
+		ProfileStore:GetAsync(profile_key, version?) --> [Profile] or nil
 			-- Reads a profile without starting a session - will not autosave
 			profile_key   [string] -- DataStore key
 			version       nil or [string] -- DataStore key version
 
-		ProfileStore:VersionQuery(profile_key, sort_direction?, min_date?, max_date?) --&gt; [VersionQuery]
+		ProfileStore:VersionQuery(profile_key, sort_direction?, min_date?, max_date?) --> [VersionQuery]
 			profile_key      [string]
 			sort_direction   nil or [Enum.SortDirection]
 			min_date         nil or [DateTime]
 			max_date         nil or [DateTime]
 			
-		ProfileStore:RemoveAsync(profile_key) --&gt; is_success [bool]
+		ProfileStore:RemoveAsync(profile_key) --> is_success [bool]
 			-- Completely removes profile data from the DataStore / mock DataStore with no way to recover it.
 
 	Methods [VersionQuery]:
 
-		VersionQuery:NextAsync() --&gt; [Profile] or nil -- (Yields)
+		VersionQuery:NextAsync() --> [Profile] or nil -- (Yields)
 			-- Returned profile is similar to profiles returned by ProfileStore:GetAsync()
 		
 	Members [Profile]:
@@ -19385,7 +19562,7 @@ MAD STUDIO (by loleris)
 		
 	Methods [Profile]:
 	
-		Profile:IsActive() --&gt; [bool] -- If "true" is returned, changes to Profile.Data are guaranteed to save;
+		Profile:IsActive() --> [bool] -- If "true" is returned, changes to Profile.Data are guaranteed to save;
 			This guarantee is only valid until code yields (e.g. task.wait() is used).
 			
 		Profile:Reconcile() -- Fills in missing (nil) [string_key] = [value] pairs to the Profile.Data structure
@@ -19502,7 +19679,7 @@ local Signal do
 
 	end
 
-	function SignalClass:Connect(listener: (...any) -&gt; ())
+	function SignalClass:Connect(listener: (...any) -> ())
 
 		if type(listener) ~= "function" then
 			error(`[{script.Name}]: \"listener\" must be a function; Received {typeof(listener)}`)
@@ -19599,7 +19776,7 @@ local UpdateQueue = { -- For stability sake, we won't do UpdateAsync calls for t
 	--]]
 }
 
-local function WaitInUpdateQueue(session_token) --&gt; next_in_queue()
+local function WaitInUpdateQueue(session_token) --> next_in_queue()
 
 	local is_first = false
 
@@ -19705,7 +19882,7 @@ local function NewMockDataStoreKeyInfo(params)
 
 end
 
-local function MockUpdateAsync(mock_data_store, profile_store_name, key, transform_function, is_get_call) --&gt; loaded_data, key_info
+local function MockUpdateAsync(mock_data_store, profile_store_name, key, transform_function, is_get_call) --> loaded_data, key_info
 
 	local profile_store = mock_data_store[profile_store_name]
 
@@ -19753,7 +19930,7 @@ local function MockUpdateAsync(mock_data_store, profile_store_name, key, transfo
 
 end
 
-local function UpdateAsync(profile_store, profile_key, transform_params, is_user_mock, is_get_call, version) --&gt; loaded_data, key_info
+local function UpdateAsync(profile_store, profile_key, transform_params, is_user_mock, is_get_call, version) --> loaded_data, key_info
 	--transform_params = {
 	--	ExistingProfileHandle = function(latest_data),
 	--	MissingProfileHandle = function(latest_data),
@@ -19928,7 +20105,7 @@ local function AddProfileToAutoSave(profile)
 
 	table.insert(AutoSaveList, AutoSaveIndex, profile)
 
-	if #AutoSaveList &gt; 1 then
+	if #AutoSaveList > 1 then
 		AutoSaveIndex = AutoSaveIndex + 1
 	elseif #AutoSaveList == 1 then
 		-- First profile created - make sure it doesn't get immediately auto saved:
@@ -20218,7 +20395,7 @@ end
 
 export type JSONAcceptable = { JSONAcceptable } | { [string]: JSONAcceptable } | number | string | boolean | buffer
 
-export type Profile&lt;T&gt; = {
+export type Profile&lt;T> = {
 	Data: T &amp; JSONAcceptable,
 	LastSavedData: T &amp; JSONAcceptable,
 	FirstSessionTime: number,
@@ -20227,39 +20404,39 @@ export type Profile&lt;T&gt; = {
 	RobloxMetaData: JSONAcceptable,
 	UserIds: {number},
 	KeyInfo: DataStoreKeyInfo,
-	OnSave: {Connect: (self: any, listener: () -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
-	OnLastSave: {Connect: (self: any, listener: (reason: "Manual" | "External" | "Shutdown") -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
-	OnSessionEnd: {Connect: (self: any, listener: () -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
-	OnAfterSave: {Connect: (self: any, listener: (last_saved_data: T &amp; JSONAcceptable) -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
+	OnSave: {Connect: (self: any, listener: () -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnLastSave: {Connect: (self: any, listener: (reason: "Manual" | "External" | "Shutdown") -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnSessionEnd: {Connect: (self: any, listener: () -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnAfterSave: {Connect: (self: any, listener: (last_saved_data: T &amp; JSONAcceptable) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	ProfileStore: JSONAcceptable,
 	Key: string,
 
-	IsActive: (self: any) -&gt; (boolean),
-	Reconcile: (self: any) -&gt; (),
-	EndSession: (self: any) -&gt; (),
-	AddUserId: (self: any, user_id: number) -&gt; (),
-	RemoveUserId: (self: any, user_id: number) -&gt; (),
-	MessageHandler: (self: any, fn: (message: JSONAcceptable, processed: () -&gt; ()) -&gt; ()) -&gt; (),
-	Save: (self: any) -&gt; (),
-	SetAsync: (self: any) -&gt; (),
+	IsActive: (self: any) -> (boolean),
+	Reconcile: (self: any) -> (),
+	EndSession: (self: any) -> (),
+	AddUserId: (self: any, user_id: number) -> (),
+	RemoveUserId: (self: any, user_id: number) -> (),
+	MessageHandler: (self: any, fn: (message: JSONAcceptable, processed: () -> ()) -> ()) -> (),
+	Save: (self: any) -> (),
+	SetAsync: (self: any) -> (),
 }
 
-export type VersionQuery&lt;T&gt; = {
-	NextAsync: (self: any) -&gt; (Profile&lt;T&gt;?),
+export type VersionQuery&lt;T> = {
+	NextAsync: (self: any) -> (Profile&lt;T>?),
 }
 
-type ProfileStoreStandard&lt;T&gt; = {
+type ProfileStoreStandard&lt;T> = {
 	Name: string,
-	StartSessionAsync: (self: any, profile_key: string, params: {Steal: boolean?}) -&gt; (Profile&lt;T&gt;?),
-	MessageAsync: (self: any, profile_key: string, message: JSONAcceptable) -&gt; (boolean),
-	GetAsync: (self: any, profile_key: string, version: string?) -&gt; (Profile&lt;T&gt;?),
-	VersionQuery: (self: any, profile_key: string, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -&gt; (VersionQuery&lt;T&gt;),
-	RemoveAsync: (self: any, profile_key: string) -&gt; (boolean),
+	StartSessionAsync: (self: any, profile_key: string, params: {Steal: boolean?}) -> (Profile&lt;T>?),
+	MessageAsync: (self: any, profile_key: string, message: JSONAcceptable) -> (boolean),
+	GetAsync: (self: any, profile_key: string, version: string?) -> (Profile&lt;T>?),
+	VersionQuery: (self: any, profile_key: string, sort_direction: Enum.SortDirection?, min_date: DateTime | number | nil, max_date: DateTime | number | nil) -> (VersionQuery&lt;T>),
+	RemoveAsync: (self: any, profile_key: string) -> (boolean),
 }
 
-export type ProfileStore&lt;T&gt; = {
-	Mock: ProfileStoreStandard&lt;T&gt;,
-} &amp; ProfileStoreStandard&lt;T&gt;
+export type ProfileStore&lt;T> = {
+	Mock: ProfileStoreStandard&lt;T>,
+} &amp; ProfileStoreStandard&lt;T>
 
 type ConstantName = "AUTO_SAVE_PERIOD" | "LOAD_REPEAT_PERIOD" | "FIRST_LOAD_REPEAT" | "SESSION_STEAL"
 | "ASSUME_DEAD" | "START_SESSION_TIMEOUT" | "CRITICAL_STATE_ERROR_COUNT" | "CRITICAL_STATE_ERROR_EXPIRE"
@@ -20268,12 +20445,12 @@ type ConstantName = "AUTO_SAVE_PERIOD" | "LOAD_REPEAT_PERIOD" | "FIRST_LOAD_REPE
 export type ProfileStoreModule = {
 	IsClosing: boolean,
 	IsCriticalState: boolean,
-	OnError: {Connect: (self: any, listener: (message: string, store_name: string, profile_key: string) -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
-	OnOverwrite: {Connect: (self: any, listener: (store_name: string, profile_key: string) -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
-	OnCriticalToggle: {Connect: (self: any, listener: (is_critical: boolean) -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
+	OnError: {Connect: (self: any, listener: (message: string, store_name: string, profile_key: string) -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnOverwrite: {Connect: (self: any, listener: (store_name: string, profile_key: string) -> ()) -> ({Disconnect: (self: any) -> ()})},
+	OnCriticalToggle: {Connect: (self: any, listener: (is_critical: boolean) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	DataStoreState: "NotReady" | "NoInternet" | "NoAccess" | "Access",
-	New: &lt;T&gt;(store_name: string, template: (T &amp; JSONAcceptable)?) -&gt; (ProfileStore&lt;T&gt;),
-	SetConstant: (name: ConstantName, value: number) -&gt; ()
+	New: &lt;T>(store_name: string, template: (T &amp; JSONAcceptable)?) -> (ProfileStore&lt;T>),
+	SetConstant: (name: ConstantName, value: number) -> ()
 }
 
 local Profile = {}
@@ -20502,7 +20679,7 @@ function ProfileStore.New(store_name, template)
 		error(`[{script.Name}]: Invalid or missing "store_name"`)
 	elseif string.len(store_name) == 0 then
 		error(`[{script.Name}]: store_name cannot be an empty string`)
-	elseif string.len(store_name) &gt; 50 then
+	elseif string.len(store_name) > 50 then
 		error(`[{script.Name}]: store_name is too long`)
 	end
 
@@ -20589,7 +20766,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 		error(`[{script.Name}]: profile_key must be a string`)
 	elseif string.len(profile_key) == 0 then
 		error(`[{script.Name}]: Invalid profile_key`)
-	elseif string.len(profile_key) &gt; 50 then
+	elseif string.len(profile_key) > 50 then
 		error(`[{script.Name}]: profile_key is too long`)
 	end
 
@@ -20689,7 +20866,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 							if IsThisSession(active_session) == false then
 								local last_update = latest_data.MetaData.LastUpdate
 								if last_update ~= nil then
-									if os.time() - last_update &gt; ASSUME_DEAD then
+									if os.time() - last_update > ASSUME_DEAD then
 										latest_data.MetaData.ActiveSession = {PlaceId, JobId, unique_session_id}
 										latest_data.MetaData.ForceLoadSession = nil
 										return
@@ -20771,7 +20948,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 						profile.roblox_message_subscription = MessagingService:SubscribeAsync("PS_" .. unique_session_id, function(message)
 							if type(message.Data) == "table" and message.Data.LoadCount == profile.SessionLoadCount then
 								-- High reaction rate, based on numPlayers × 10 DataStore budget as of writing
-								if os.clock() - last_roblox_message &gt; 6 then 
+								if os.clock() - last_roblox_message > 6 then 
 									last_roblox_message = os.clock()
 									if profile:IsActive() == true then
 										if message.Data.EndSession == true then
@@ -20811,7 +20988,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 
 						if request_force_load == false then
 							force_load_steps = force_load_steps + 1
-							if force_load_steps &gt;= math.ceil(SESSION_STEAL / LOAD_REPEAT_PERIOD) then
+							if force_load_steps >= math.ceil(SESSION_STEAL / LOAD_REPEAT_PERIOD) then
 								steal_session = true
 							end
 						end
@@ -20824,7 +21001,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 
 						-- Attempt to load the profile again after a delay
 						local wait_until = os.clock() + if request_force_load == true then FIRST_LOAD_REPEAT else LOAD_REPEAT_PERIOD
-						repeat task.wait() until os.clock() &gt;= wait_until or ProfileStore.IsClosing == true
+						repeat task.wait() until os.clock() >= wait_until or ProfileStore.IsClosing == true
 
 					else
 						-- Another session tried to load this profile:
@@ -20847,7 +21024,7 @@ function ProfileStore:StartSessionAsync(profile_key, params)
 			local default_timeout = false
 
 			if params.Cancel == nil then
-				default_timeout = os.clock() - start &gt;= START_SESSION_TIMEOUT
+				default_timeout = os.clock() - start >= START_SESSION_TIMEOUT
 			end
 
 			if default_timeout == true or ProfileStore.IsClosing == true or cancel_condition() == true then
@@ -20875,7 +21052,7 @@ function ProfileStore:MessageAsync(profile_key, message)
 		error(`[{script.Name}]: profile_key must be a string`)
 	elseif string.len(profile_key) == 0 then
 		error(`[{script.Name}]: Invalid profile_key`)
-	elseif string.len(profile_key) &gt; 50 then
+	elseif string.len(profile_key) > 50 then
 		error(`[{script.Name}]: profile_key is too long`)
 	end
 
@@ -20917,7 +21094,7 @@ function ProfileStore:MessageAsync(profile_key, message)
 
 					-- Clearing queue if above limit:
 
-					while #update_list &gt; MAX_MESSAGE_QUEUE do
+					while #update_list > MAX_MESSAGE_QUEUE do
 						table.remove(update_list, 1)
 					end
 
@@ -20973,7 +21150,7 @@ function ProfileStore:GetAsync(profile_key, version)
 		error(`[{script.Name}]: profile_key must be a string`)
 	elseif string.len(profile_key) == 0 then
 		error(`[{script.Name}]: Invalid profile_key`)
-	elseif string.len(profile_key) &gt; 50 then
+	elseif string.len(profile_key) > 50 then
 		error(`[{script.Name}]: profile_key is too long`)
 	end
 
@@ -21131,7 +21308,7 @@ function ProfileVersionQuery.New(profile_store, profile_key, sort_direction, min
 end
 
 function MoveVersionQueryQueue(self) -- Hidden ProfileVersionQuery method
-	while #self.query_queue &gt; 0 do
+	while #self.query_queue > 0 do
 
 		local queue_entry = table.remove(self.query_queue, 1)
 
@@ -21354,10 +21531,10 @@ RunService.Heartbeat:Connect(function()
 	-- Auto saving:
 
 	local auto_save_list_length = #AutoSaveList
-	if auto_save_list_length &gt; 0 then
+	if auto_save_list_length > 0 then
 		local auto_save_index_speed = AUTO_SAVE_PERIOD / auto_save_list_length
 		local os_clock = os.clock()
-		while os_clock - LastAutoSave &gt; auto_save_index_speed do
+		while os_clock - LastAutoSave > auto_save_index_speed do
 			LastAutoSave = LastAutoSave + auto_save_index_speed
 			local profile = AutoSaveList[AutoSaveIndex]
 			if os_clock - profile.load_timestamp &lt; AUTO_SAVE_PERIOD / 2 then
@@ -21366,11 +21543,11 @@ RunService.Heartbeat:Connect(function()
 				for _ = 1, auto_save_list_length - 1 do
 					-- Move auto save index to the right:
 					AutoSaveIndex = AutoSaveIndex + 1
-					if AutoSaveIndex &gt; auto_save_list_length then
+					if AutoSaveIndex > auto_save_list_length then
 						AutoSaveIndex = 1
 					end
 					profile = AutoSaveList[AutoSaveIndex]
-					if os_clock - profile.load_timestamp &gt;= AUTO_SAVE_PERIOD / 2 then
+					if os_clock - profile.load_timestamp >= AUTO_SAVE_PERIOD / 2 then
 						break
 					else
 						profile = nil
@@ -21379,7 +21556,7 @@ RunService.Heartbeat:Connect(function()
 			end
 			-- Move auto save index to the right:
 			AutoSaveIndex = AutoSaveIndex + 1
-			if AutoSaveIndex &gt; auto_save_list_length then
+			if AutoSaveIndex > auto_save_list_length then
 				AutoSaveIndex = 1
 			end
 			-- Perform save call:
@@ -21392,16 +21569,16 @@ RunService.Heartbeat:Connect(function()
 	-- Critical state handling:
 
 	if ProfileStore.IsCriticalState == false then
-		if #IssueQueue &gt;= CRITICAL_STATE_ERROR_COUNT then
+		if #IssueQueue >= CRITICAL_STATE_ERROR_COUNT then
 			ProfileStore.IsCriticalState = true
 			ProfileStore.OnCriticalToggle:Fire(true)
 			CriticalStateStart = os.clock()
 			warn(`[{script.Name}]: Entered critical state`)
 		end
 	else
-		if #IssueQueue &gt;= CRITICAL_STATE_ERROR_COUNT then
+		if #IssueQueue >= CRITICAL_STATE_ERROR_COUNT then
 			CriticalStateStart = os.clock()
-		elseif os.clock() - CriticalStateStart &gt; CRITICAL_STATE_EXPIRE then
+		elseif os.clock() - CriticalStateStart > CRITICAL_STATE_EXPIRE then
 			ProfileStore.IsCriticalState = false
 			ProfileStore.OnCriticalToggle:Fire(false)
 			warn(`[{script.Name}]: Critical state ended`)
@@ -21414,7 +21591,7 @@ RunService.Heartbeat:Connect(function()
 		local issue_time = IssueQueue[1]
 		if issue_time == nil then
 			break
-		elseif os.clock() - issue_time &gt; CRITICAL_STATE_ERROR_EXPIRE then
+		elseif os.clock() - issue_time > CRITICAL_STATE_ERROR_EXPIRE then
 			table.remove(IssueQueue, 1)
 		else
 			break
@@ -21467,7 +21644,7 @@ task.spawn(function()
 		end
 
 		-- Yield until all active profile jobs are finished:
-		while on_close_save_job_count &gt; 0 or ActiveProfileLoadJobs &gt; 0 or ActiveProfileSaveJobs &gt; 0 do
+		while on_close_save_job_count > 0 or ActiveProfileLoadJobs > 0 or ActiveProfileSaveJobs > 0 do
 			task.wait()
 		end
 
@@ -21500,9 +21677,9 @@ MAD STUDIO
 	
 	Functions:
 	
-		Replica.Token(token_string) --&gt; [ReplicaToken] -- Only one token object can be created for each unique "token_string"
+		Replica.Token(token_string) --> [ReplicaToken] -- Only one token object can be created for each unique "token_string"
 	
-		Replica.New(params) --&gt; [Replica]
+		Replica.New(params) --> [Replica]
 			params   [table]:
 				{
 					Token = [ReplicaToken],
@@ -21512,7 +21689,7 @@ MAD STUDIO
 					WriteLib = ModuleScript,
 				}
 		
-		Replica.FromId(id) --&gt; [Replica] or nil
+		Replica.FromId(id) --> [Replica] or nil
 		
 	Members [Replica]:
 	
@@ -21539,10 +21716,10 @@ MAD STUDIO
 		Replica:SetValues(path, values)
 			values   [table]: {key = value, ...}
 			
-		Replica:TableInsert(path, value, index?) --&gt; new_index -- Performs table.insert(path, value)
-		Replica:TableRemove(path, index) --&gt; removed_value -- Performs table.remove(path, index)
+		Replica:TableInsert(path, value, index?) --> new_index -- Performs table.insert(path, value)
+		Replica:TableRemove(path, index) --> removed_value -- Performs table.remove(path, index)
 		
-		Replica:Write(function_name, ...) --&gt; ... -- Run WriteLib function with given parameters
+		Replica:Write(function_name, ...) --> ... -- Run WriteLib function with given parameters
 		
 		Replica:FireClient(player, ...) -- Will not replicate to unsubscribed players
 		Replica:FireAllClients(...) -- Will not replicate to unsubscribed players
@@ -21562,9 +21739,9 @@ MAD STUDIO
 		Replica:Subscribe(player) -- Replicates to player; WILL NOT subscribe to players that are not ready &amp; will throw a warning for trying to do so.
 		Replica:Unsubscribe(player) -- Destroys Replica for player
 		
-		Replica:Identify() --&gt; [string] -- Debug
+		Replica:Identify() --> [string] -- Debug
 
-		Replica:IsActive() --&gt; [bool]
+		Replica:IsActive() --> [bool]
 		
 		Replica:Destroy() -- Destroys replica and all of its descendants (Depth-first)
 	
@@ -21615,7 +21792,7 @@ local RemoteSignalUnreliable = Remote.New("ReplicaSignalUnreliable", true)   -- 
 
 local Index = 0
 
-local WriteLibCache: {[ModuleScript]: {[string | number]: {Id: number, fn: (...any) -&gt; (...any)}}} = {}
+local WriteLibCache: {[ModuleScript]: {[string | number]: {Id: number, fn: (...any) -> (...any)}}} = {}
 local WriteFlag = false
 local Tokens: {[string]: boolean} = {}
 local TokenValidate = {}
@@ -21702,27 +21879,27 @@ export type Replica = {
 	Parent: Replica?,
 	Children: {[Replica]: boolean?},
 	BoundInstance: Instance?,
-	OnServerEvent: {Connect: (self: any, listener: (Player, ...any) -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
+	OnServerEvent: {Connect: (self: any, listener: (Player, ...any) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	Maid: typeof(Maid),
 
-	Set: (self: any, path: {string}, value: any) -&gt; (),
-	SetValues: (self: any, path: {string}, values: {[string]: any}) -&gt; (),
-	TableInsert: (self: any, path: {string}, value: any, index: number?) -&gt; (number),
-	TableRemove: (self: any, path: {string}, index: number) -&gt; (any),
-	Write: (self: any, function_name: string, ...any) -&gt; (...any),
-	FireClient: (self: any, player: Player, ...any) -&gt; (),
-	FireAllClients: (self: any, ...any) -&gt; (),
-	UFireClient: (self: any, player: Player, ...any) -&gt; (),
-	UFireAllClients: (self: any, ...any) -&gt; (),
-	SetParent: (self: any, new_parent: Replica) -&gt; (),
-	BindToInstance: (self: any, instance: Instance) -&gt; (),
-	Replicate: (self: any) -&gt; (),
-	DontReplicate: (self: any) -&gt; (),
-	Subscribe: (self: any, player: Player) -&gt; (),
-	Unsubscribe: (self: any, player: Player) -&gt; (),
-	Identify: (self: any) -&gt; (string),
-	IsActive: (self: any) -&gt; (boolean),
-	Destroy: (self: any) -&gt; (),
+	Set: (self: any, path: {string}, value: any) -> (),
+	SetValues: (self: any, path: {string}, values: {[string]: any}) -> (),
+	TableInsert: (self: any, path: {string}, value: any, index: number?) -> (number),
+	TableRemove: (self: any, path: {string}, index: number) -> (any),
+	Write: (self: any, function_name: string, ...any) -> (...any),
+	FireClient: (self: any, player: Player, ...any) -> (),
+	FireAllClients: (self: any, ...any) -> (),
+	UFireClient: (self: any, player: Player, ...any) -> (),
+	UFireAllClients: (self: any, ...any) -> (),
+	SetParent: (self: any, new_parent: Replica) -> (),
+	BindToInstance: (self: any, instance: Instance) -> (),
+	Replicate: (self: any) -> (),
+	DontReplicate: (self: any) -> (),
+	Subscribe: (self: any, player: Player) -> (),
+	Unsubscribe: (self: any, player: Player) -> (),
+	Identify: (self: any) -> (string),
+	IsActive: (self: any) -> (boolean),
+	Destroy: (self: any) -> (),
 }
 
 local Replica = {
@@ -21841,7 +22018,7 @@ function Replica:Set(path: {string}, value: any)
 	
 	if #path == 1 then
 		pointer[path[1]] = value
-	elseif #path &gt; 1 then
+	elseif #path > 1 then
 		for i = 1, #path - 1 do
 			pointer = pointer[path[i]]
 		end
@@ -25068,40 +25245,18 @@ local function loadEquippedFruitFromData(player)
 	return DevilFruitConfig.None
 end
 
-local function ensureFruitDataInProfile(player)
-	local profile = DataManager:TryGetProfile(player)
-	if not profile then
-		return false, "no_profile"
-	end
-
-	local data = profile.Data
-	if typeof(data.DevilFruit) ~= "table" then
-		data.DevilFruit = {}
-	end
-
-	if typeof(data.DevilFruit.Equipped) ~= "string" then
-		data.DevilFruit.Equipped = DevilFruitConfig.None
-	end
-
-	return true, profile
-end
-
 local function persistEquippedFruit(player, fruitName)
-	local profileOk, profileOrReason = ensureFruitDataInProfile(player)
-	if not profileOk then
-		return false, profileOrReason
+	local ensured, ensureReason = ensureFruitDataPath(player)
+	if not ensured then
+		return false, ensureReason
 	end
 
-	local profile = profileOrReason
-	profile.Data.DevilFruit.Equipped = fruitName
-
-	local replica = DataManager:TryGetReplica(player)
-	if replica then
-		replica:Set({ "DevilFruit", "Equipped" }, fruitName)
-		return true, "replica_synced"
+	local success, reason = DataManager:TrySetValue(player, "DevilFruit.Equipped", fruitName)
+	if not success then
+		return false, reason
 	end
 
-	return true, "profile_only"
+	return true, "data_manager_synced"
 end
 
 local function startPersistTask(player)
@@ -29993,7 +30148,7 @@ local MAX_TIME = 0
 
 for _, cfg in pairs(RewardsConfig) do
 	TOTAL_REWARDS += 1
-	if cfg.Time &gt; MAX_TIME then
+	if cfg.Time > MAX_TIME then
 		MAX_TIME = cfg.Time
 	end
 end
@@ -30138,7 +30293,7 @@ Remote.OnServerEvent:Connect(function(plr, id)
 
 	claimSingleReward(plr, id)
 
-	if getClaimedCount(plr) &gt;= TOTAL_REWARDS then
+	if getClaimedCount(plr) >= TOTAL_REWARDS then
 		startNewCycle(plr)
 	end
 end)
@@ -30153,8 +30308,101 @@ end)
 return {}</string>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="169">
+        <Properties>
+          <string name="Name">ValidationChecks</string>
+          <string name="Source"><![CDATA[local ReplicatedFirst = game:GetService("ReplicatedFirst")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local ValidationChecks = {}
+
+local function readPath(root, path)
+	local current = root
+	for _, segment in ipairs(path) do
+		if current == nil then
+			return nil
+		end
+
+		current = current[segment]
+	end
+
+	return current
+end
+
+local function stringifyPath(path)
+	return table.concat(path, ".")
+end
+
+function ValidationChecks.ValidateProfileData(data)
+	local issues = {}
+	local requiredChecks = {
+		{ Path = { "leaderstats", "Doubloons" }, ExpectedType = "number" },
+		{ Path = { "HiddenLeaderstats", "PlotUpgrade" }, ExpectedType = "number" },
+		{ Path = { "FoodInventory" }, ExpectedType = "table" },
+		{ Path = { "BrainrotInventory", "ById" }, ExpectedType = "table" },
+		{ Path = { "CrewInventory", "ById" }, ExpectedType = "table" },
+		{ Path = { "UnopenedChests", "ById" }, ExpectedType = "table" },
+		{ Path = { "DevilFruit", "Equipped" }, ExpectedType = "string" },
+	}
+
+	for _, check in ipairs(requiredChecks) do
+		local value = readPath(data, check.Path)
+		if typeof(value) ~= check.ExpectedType then
+			table.insert(
+				issues,
+				string.format("%s expected %s, got %s", stringifyPath(check.Path), check.ExpectedType, typeof(value))
+			)
+		end
+	end
+
+	return issues
+end
+
+function ValidationChecks.WarnProfileData(player: Player, data)
+	local issues = ValidationChecks.ValidateProfileData(data)
+	if #issues > 0 then
+		warn(string.format("[Validation] %s profile data issues: %s", player.Name, table.concat(issues, " | ")))
+	end
+
+	return issues
+end
+
+function ValidationChecks.ValidateCoreDependencies()
+	local missing = {}
+	local checks = {
+		{ Root = Workspace, Label = "Workspace.PlotSystem", Path = { "PlotSystem" } },
+		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.BrainrotFolder", Path = { "BrainrotFolder" } },
+		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.Rarities", Path = { "Rarities" } },
+		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.Particles", Path = { "Particles" } },
+		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.LuckyBlock", Path = { "LuckyBlock" } },
+		{ Root = ReplicatedFirst, Label = "ReplicatedFirst.LoadingScreen", Path = { "LoadingScreen" } },
+	}
+
+	for _, check in ipairs(checks) do
+		if readPath(check.Root, check.Path) == nil then
+			table.insert(missing, check.Label)
+		end
+	end
+
+	return missing
+end
+
+function ValidationChecks.WarnMissingDependencies()
+	local missing = ValidationChecks.ValidateCoreDependencies()
+	if #missing > 0 then
+		warn("[Validation] Missing expected runtime dependencies: " .. table.concat(missing, ", "))
+	end
+
+	return missing
+end
+
+return ValidationChecks
+]]></string>
+        </Properties>
+      </Item>
     </Item>
-    <Item class="Script" referent="169">
+    <Item class="Script" referent="170">
       <Properties>
         <string name="Name">NametagManager</string>
         <token name="RunContext">0</token>
@@ -30255,15 +30503,15 @@ Players.PlayerAdded:Connect(function(Player)
 end)
 ]]></string>
       </Properties>
-      <Item class="BillboardGui" referent="170">
+      <Item class="BillboardGui" referent="171">
         <Properties>
           <string name="Name">Nametag</string>
         </Properties>
-        <Item class="TextLabel" referent="171">
+        <Item class="TextLabel" referent="172">
           <Properties>
             <string name="Name">Value</string>
           </Properties>
-          <Item class="Script" referent="172">
+          <Item class="Script" referent="173">
             <Properties>
               <string name="Name">Script</string>
               <token name="RunContext">0</token>
@@ -30344,7 +30592,7 @@ setMoneyText(coins.Value)
         </Item>
       </Item>
     </Item>
-    <Item class="Script" referent="173">
+    <Item class="Script" referent="174">
       <Properties>
         <string name="Name">PBAR</string>
         <token name="RunContext">0</token>
@@ -30424,7 +30672,7 @@ broadcastAll()
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="174">
+    <Item class="Script" referent="175">
       <Properties>
         <string name="Name">Script</string>
         <token name="RunContext">0</token>
@@ -30542,11 +30790,11 @@ end
  ]]></string>
       </Properties>
     </Item>
-    <Item class="Folder" referent="175">
+    <Item class="Folder" referent="176">
       <Properties>
         <string name="Name">Server-Scripts</string>
       </Properties>
-      <Item class="Script" referent="176">
+      <Item class="Script" referent="177">
         <Properties>
           <string name="Name">BuyPlotUpghrade</string>
           <token name="RunContext">0</token>
@@ -30562,21 +30810,14 @@ local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local remote = ReplicatedStorage.Remotes:FindFirstChild("PlotUpgradeRemote")
 
 local busy = {}
+local PLOT_UPGRADE_PATH = "HiddenLeaderstats.PlotUpgrade"
 
 local function getUpgradePath(player: Player)
-	local a = player:FindFirstChild("HiddenLeadderstats")
-	if a and a:FindFirstChild("PlotUpgrade") then
-		return "HiddenLeadderstats.PlotUpgrade"
-	end
-	local b = player:FindFirstChild("HiddenLeaderstats")
-	if b and b:FindFirstChild("PlotUpgrade") then
-		return "HiddenLeaderstats.PlotUpgrade"
-	end
-	return "HiddenLeadderstats.PlotUpgrade"
+	return PLOT_UPGRADE_PATH
 end
 
 local function getCurrentUpgrade(player: Player, path: string)
-	local stats = player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	local stats = player:FindFirstChild("HiddenLeaderstats")
 	if stats then
 		local v = stats:FindFirstChild("PlotUpgrade")
 		if v and v:IsA("NumberValue") then
@@ -30630,7 +30871,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="177">
+      <Item class="Script" referent="178">
         <Properties>
           <string name="Name">Collision Off</string>
           <token name="RunContext">0</token>
@@ -30658,7 +30899,7 @@ Players.PlayerAdded:connect(function(Player)
 end)</string>
         </Properties>
       </Item>
-      <Item class="Script" referent="178">
+      <Item class="Script" referent="179">
         <Properties>
           <string name="Name">CometEvent</string>
           <token name="RunContext">0</token>
@@ -31302,7 +31543,7 @@ sync()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="179">
+      <Item class="Script" referent="180">
         <Properties>
           <string name="Name">DevilFruit</string>
           <token name="RunContext">0</token>
@@ -31312,7 +31553,7 @@ DevilFruitService.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="180">
+      <Item class="Script" referent="181">
         <Properties>
           <string name="Name">DevilFruitDevCommands</string>
           <token name="RunContext">0</token>
@@ -31879,7 +32120,7 @@ setupTextChatCommand()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="181">
+      <Item class="Script" referent="182">
         <Properties>
           <string name="Name">DevilFruitMovement</string>
           <token name="RunContext">0</token>
@@ -32001,7 +32242,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="182">
+      <Item class="Script" referent="183">
         <Properties>
           <string name="Name">EquipGear</string>
           <token name="RunContext">0</token>
@@ -32105,7 +32346,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="183">
+      <Item class="Script" referent="184">
         <Properties>
           <string name="Name">GROUP</string>
           <token name="RunContext">0</token>
@@ -32152,7 +32393,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="184">
+      <Item class="Script" referent="185">
         <Properties>
           <string name="Name">GearShop</string>
           <token name="RunContext">0</token>
@@ -32281,7 +32522,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="185">
+      <Item class="Script" referent="186">
         <Properties>
           <string name="Name">GearShopRobux</string>
           <token name="RunContext">0</token>
@@ -32313,7 +32554,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="186">
+      <Item class="Script" referent="187">
         <Properties>
           <string name="Name">GrandLineRushChestToolService</string>
           <token name="RunContext">0</token>
@@ -32323,7 +32564,7 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="187">
+      <Item class="Script" referent="188">
         <Properties>
           <string name="Name">GrandLineRushCorridorRunController</string>
           <token name="RunContext">0</token>
@@ -32333,7 +32574,7 @@ controller.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="188">
+      <Item class="Script" referent="189">
         <Properties>
           <string name="Name">GrandLineRushVerticalSlice</string>
           <token name="RunContext">0</token>
@@ -32343,7 +32584,7 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="189">
+      <Item class="Script" referent="190">
         <Properties>
           <string name="Name">IncomeBrainrots</string>
           <token name="RunContext">0</token>
@@ -32430,7 +32671,8 @@ local getPlayerStandBrainrotInstanceId
 local getBrainrotLevel
 local getStandLevelValue
 local dmSet
-local STAND_DEBUG = true
+local STAND_DEBUG = false
+local ensuredStandFolders = {}
 
 local function standDebug(message, ...)
 	if STAND_DEBUG ~= true then
@@ -32694,9 +32936,15 @@ local function dmEnsureStandFolder(player, standName)
 		return false
 	end
 
+	local playerCache = ensuredStandFolders[player]
+	if playerCache and playerCache[standName] == true then
+		return true
+	end
+
 	local brainrotPath = "IncomeBrainrots." .. standName .. ".BrainrotName"
 	local instancePath = "IncomeBrainrots." .. standName .. ".BrainrotInstanceId"
 	local incomePath = "IncomeBrainrots." .. standName .. ".IncomeToCollect"
+	local didRepair = false
 
 	local okName, nameVal = pcall(function()
 		return DataManager:GetValue(player, brainrotPath)
@@ -32706,7 +32954,7 @@ local function dmEnsureStandFolder(player, standName)
 	end
 
 	if nameVal == nil then
-		pcall(function()
+		local okRepairIncome = pcall(function()
 			local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
 			if typeof(incomeBrainrots) ~= "table" then
 				incomeBrainrots = {}
@@ -32732,8 +32980,12 @@ local function dmEnsureStandFolder(player, standName)
 
 			DataManager:SetValue(player, "IncomeBrainrots", incomeBrainrots)
 		end)
+		if not okRepairIncome then
+			return false
+		end
+		didRepair = true
 
-		pcall(function()
+		local okRepairLevels = pcall(function()
 			local lv = DataManager:GetValue(player, "StandsLevels")
 			if typeof(lv) ~= "table" then
 				lv = {}
@@ -32743,19 +32995,31 @@ local function dmEnsureStandFolder(player, standName)
 			end
 			DataManager:SetValue(player, "StandsLevels", lv)
 		end)
+		if not okRepairLevels then
+			return false
+		end
+		didRepair = true
 	else
 		if typeof(nameVal) ~= "string" then
-			pcall(function()
+			local okRepairName = pcall(function()
 				DataManager:SetValue(player, brainrotPath, "")
 			end)
+			if not okRepairName then
+				return false
+			end
+			didRepair = true
 		end
 		local okInstance, instanceVal = pcall(function()
 			return DataManager:GetValue(player, instancePath)
 		end)
 		if okInstance and typeof(instanceVal) ~= "string" then
-			pcall(function()
+			local okRepairInstance = pcall(function()
 				DataManager:SetValue(player, instancePath, "")
 			end)
+			if not okRepairInstance then
+				return false
+			end
+			didRepair = true
 		end
 
 		local okIncome, incVal = pcall(function()
@@ -32765,17 +33029,26 @@ local function dmEnsureStandFolder(player, standName)
 			return false
 		end
 		if incVal == nil or typeof(incVal) ~= "number" then
-			pcall(function()
+			local okRepairIncome = pcall(function()
 				DataManager:SetValue(player, incomePath, 0)
 			end)
+			if not okRepairIncome then
+				return false
+			end
+			didRepair = true
 		end
 	end
 
-	pcall(function()
-		if typeof(DataManager.UpdateData) == "function" then
-			DataManager:UpdateData(player)
-		end
-	end)
+	playerCache = ensuredStandFolders[player]
+	if not playerCache then
+		playerCache = {}
+		ensuredStandFolders[player] = playerCache
+	end
+	playerCache[standName] = true
+
+	if didRepair then
+		standDebug("dmEnsureStandFolder repaired player=%s stand=%s", player.Name, standName)
+	end
 
 	return true
 end
@@ -34038,6 +34311,7 @@ end)
 
 Players.PlayerRemoving:Connect(function(player)
 	playerStandList[player] = nil
+	ensuredStandFolders[player] = nil
 end)
 
 for _, p in ipairs(Players:GetPlayers()) do
@@ -34096,7 +34370,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="190">
+      <Item class="Script" referent="191">
         <Properties>
           <string name="Name">Index</string>
           <token name="RunContext">0</token>
@@ -34207,7 +34481,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="191">
+      <Item class="Script" referent="192">
         <Properties>
           <string name="Name">LIMITEDREWARD</string>
           <token name="RunContext">0</token>
@@ -34243,7 +34517,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="192">
+      <Item class="Script" referent="193">
         <Properties>
           <string name="Name">LUCKYBLOCKEVTEN</string>
           <token name="RunContext">0</token>
@@ -34802,7 +35076,7 @@ sync()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="193">
+      <Item class="Script" referent="194">
         <Properties>
           <string name="Name">ModelToTool</string>
           <token name="RunContext">0</token>
@@ -35106,7 +35380,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="194">
+      <Item class="Script" referent="195">
         <Properties>
           <string name="Name">NoDisasters</string>
           <token name="RunContext">0</token>
@@ -35142,7 +35416,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="195">
+      <Item class="Script" referent="196">
         <Properties>
           <string name="Name">PlayerDeathAttributes</string>
           <token name="RunContext">0</token>
@@ -35180,7 +35454,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="196">
+      <Item class="Script" referent="197">
         <Properties>
           <string name="Name">Plot</string>
           <token name="RunContext">0</token>
@@ -35204,7 +35478,7 @@ end
 local connsByPlayer = {}
 
 local function getPlayerStats(player)
-	return player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	return player:FindFirstChild("HiddenLeaderstats")
 end
 
 local function getUpgradeValue(player)
@@ -35620,7 +35894,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="197">
+      <Item class="Script" referent="198">
         <Properties>
           <string name="Name">PlotUpgrades</string>
           <token name="RunContext">0</token>
@@ -35639,7 +35913,7 @@ if not HiddenRoot then
 end
 
 local function getPlayerStats(player)
-	return player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	return player:FindFirstChild("HiddenLeaderstats")
 end
 
 local function getUpgradeValue(player)
@@ -35850,7 +36124,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="198">
+      <Item class="Script" referent="199">
         <Properties>
           <string name="Name">Rebirth</string>
           <token name="RunContext">0</token>
@@ -35935,7 +36209,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="199">
+      <Item class="Script" referent="200">
         <Properties>
           <string name="Name">ServerLuck</string>
           <token name="RunContext">0</token>
@@ -35969,7 +36243,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="200">
+      <Item class="Script" referent="201">
         <Properties>
           <string name="Name">Service</string>
           <token name="RunContext">0</token>
@@ -35990,7 +36264,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="201">
+      <Item class="Script" referent="202">
         <Properties>
           <string name="Name">Settings</string>
           <token name="RunContext">0</token>
@@ -36040,7 +36314,7 @@ Players.PlayerRemoving:Connect(function(player) end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="202">
+      <Item class="Script" referent="203">
         <Properties>
           <string name="Name">SpawnBrainrots</string>
           <token name="RunContext">0</token>
@@ -36154,7 +36428,7 @@ local function weightForEntry(entry, partTier, serverLuckMult, chanceCap)
 	end
 
 	chanceCap = tonumber(chanceCap) or 100
-	if base &gt; chanceCap then
+	if base > chanceCap then
 		return 0
 	end
 
@@ -36182,7 +36456,7 @@ local function chooseForPart(partTier, serverLuckMult, chanceCap)
 
 	for i = 1, #entries do
 		local w = weightForEntry(entries[i], partTier, serverLuckMult, chanceCap)
-		if w &gt; 0 then
+		if w > 0 then
 			total += w
 			eligible[#eligible + 1] = entries[i]
 		end
@@ -36466,7 +36740,7 @@ end
 
 local function spawnOne(data)
 	local now = os.clock()
-	if occupiedCount(data) &gt;= SpawnerConfig.MaxPerPart then
+	if occupiedCount(data) >= SpawnerConfig.MaxPerPart then
 		return false
 	end
 
@@ -36638,7 +36912,7 @@ local function spawnRandomSecretIgnoreLimits()
 	end
 
 	local baseEntry
-	if #secretEntries &gt; 0 then
+	if #secretEntries > 0 then
 		baseEntry = secretEntries[rng:NextInteger(1, #secretEntries)]
 	else
 		warn("[LikeGoal] No Secret entries found, spawning random entry instead!")
@@ -36763,10 +37037,10 @@ while true do
 	local ops = 0
 	local n = #partDataList
 
-	if n &gt; 0 then
+	if n > 0 then
 		for _ = 1, n do
 			rrIndex += 1
-			if rrIndex &gt; n then
+			if rrIndex > n then
 				rrIndex = 1
 			end
 
@@ -36781,7 +37055,7 @@ while true do
 					local did = spawnOne(data)
 					if did then
 						ops += 1
-						if ops &gt;= SpawnerConfig.MaxSpawnOperationsPerTick then
+						if ops >= SpawnerConfig.MaxSpawnOperationsPerTick then
 							break
 						end
 					end
@@ -36807,7 +37081,7 @@ local function processSecretQueue()
 
 
 	task.spawn(function()
-		while pendingSecretSpawns &gt; 0 do
+		while pendingSecretSpawns > 0 do
 			local now = os.clock()
 
 
@@ -36838,7 +37112,7 @@ LikeGoalSpawnSecret.Event:Connect(function(count)
 end)</string>
         </Properties>
       </Item>
-      <Item class="Script" referent="203">
+      <Item class="Script" referent="204">
         <Properties>
           <string name="Name">SpawnWaves</string>
           <token name="RunContext">0</token>
@@ -36860,7 +37134,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="204">
+      <Item class="Script" referent="205">
         <Properties>
           <string name="Name">SpeedChange</string>
           <token name="RunContext">0</token>
@@ -37026,7 +37300,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="205">
+      <Item class="Script" referent="206">
         <Properties>
           <string name="Name">SpeedUpgrade</string>
           <token name="RunContext">0</token>
@@ -37119,7 +37393,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="206">
+      <Item class="Script" referent="207">
         <Properties>
           <string name="Name">StandsUpgrades</string>
           <token name="RunContext">0</token>
@@ -37451,7 +37725,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="207">
+      <Item class="Script" referent="208">
         <Properties>
           <string name="Name">gearwathced</string>
           <token name="RunContext">0</token>
@@ -37467,7 +37741,7 @@ devilFruitInventory.Start()
         </Properties>
       </Item>
     </Item>
-    <Item class="Script" referent="208">
+    <Item class="Script" referent="209">
       <Properties>
         <string name="Name">Server</string>
         <token name="RunContext">0</token>
@@ -37475,7 +37749,7 @@ devilFruitInventory.Start()
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="209">
+    <Item class="Script" referent="210">
       <Properties>
         <string name="Name">freereward</string>
         <token name="RunContext">0</token>
@@ -37502,7 +37776,7 @@ end)
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="210">
+    <Item class="Script" referent="211">
       <Properties>
         <string name="Name">sELL_Server</string>
         <token name="RunContext">0</token>
@@ -37624,7 +37898,7 @@ end)
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="211">
+    <Item class="Script" referent="212">
       <Properties>
         <string name="Name">tut</string>
         <token name="RunContext">0</token>
@@ -37642,35 +37916,35 @@ end)
       </Properties>
     </Item>
   </Item>
-  <Item class="StarterGui" referent="212">
+  <Item class="StarterGui" referent="213">
     <Properties>
       <string name="Name">StarterGui</string>
     </Properties>
-    <Item class="ScreenGui" referent="213">
+    <Item class="ScreenGui" referent="214">
       <Properties>
         <string name="Name">Frames</string>
       </Properties>
-      <Item class="Frame" referent="214">
+      <Item class="Frame" referent="215">
         <Properties>
           <string name="Name">Store</string>
         </Properties>
-        <Item class="ScrollingFrame" referent="215">
+        <Item class="ScrollingFrame" referent="216">
           <Properties>
             <string name="Name">ScrollingFrame</string>
           </Properties>
-          <Item class="Frame" referent="216">
+          <Item class="Frame" referent="217">
             <Properties>
               <string name="Name">Gamepasses</string>
             </Properties>
-            <Item class="Frame" referent="217">
+            <Item class="Frame" referent="218">
               <Properties>
                 <string name="Name">Vip</string>
               </Properties>
-              <Item class="TextButton" referent="218">
+              <Item class="TextButton" referent="219">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="219">
+                <Item class="LocalScript" referent="220">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -37723,15 +37997,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="220">
+            <Item class="Frame" referent="221">
               <Properties>
                 <string name="Name">x2Money</string>
               </Properties>
-              <Item class="TextButton" referent="221">
+              <Item class="TextButton" referent="222">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="222">
+                <Item class="LocalScript" referent="223">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -37786,11 +38060,11 @@ refreshPrice()
               </Item>
             </Item>
           </Item>
-          <Item class="Frame" referent="223">
+          <Item class="Frame" referent="224">
             <Properties>
               <string name="Name">LuckyBlock</string>
             </Properties>
-            <Item class="LocalScript" referent="224">
+            <Item class="LocalScript" referent="225">
               <Properties>
                 <string name="Name">LocalScript</string>
                 <string name="Source"><![CDATA[local gui = script.Parent
@@ -37928,19 +38202,19 @@ refresh()
               </Properties>
             </Item>
           </Item>
-          <Item class="Frame" referent="225">
+          <Item class="Frame" referent="226">
             <Properties>
               <string name="Name">Packs</string>
             </Properties>
-            <Item class="Frame" referent="226">
+            <Item class="Frame" referent="227">
               <Properties>
                 <string name="Name">StarterPack1</string>
               </Properties>
-              <Item class="TextButton" referent="227">
+              <Item class="TextButton" referent="228">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="228">
+                <Item class="LocalScript" referent="229">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -37985,15 +38259,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="229">
+            <Item class="Frame" referent="230">
               <Properties>
                 <string name="Name">StarterPack2</string>
               </Properties>
-              <Item class="TextButton" referent="230">
+              <Item class="TextButton" referent="231">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="231">
+                <Item class="LocalScript" referent="232">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -38038,15 +38312,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="232">
+            <Item class="Frame" referent="233">
               <Properties>
                 <string name="Name">StarterPack3</string>
               </Properties>
-              <Item class="TextButton" referent="233">
+              <Item class="TextButton" referent="234">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="234">
+                <Item class="LocalScript" referent="235">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService(`MarketplaceService`)
@@ -38093,19 +38367,19 @@ refreshPrice()
               </Item>
             </Item>
           </Item>
-          <Item class="Frame" referent="235">
+          <Item class="Frame" referent="236">
             <Properties>
               <string name="Name">Potions</string>
             </Properties>
-            <Item class="Frame" referent="236">
+            <Item class="Frame" referent="237">
               <Properties>
                 <string name="Name">Money</string>
               </Properties>
-              <Item class="TextButton" referent="237">
+              <Item class="TextButton" referent="238">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="238">
+                <Item class="LocalScript" referent="239">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -38149,15 +38423,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="239">
+            <Item class="Frame" referent="240">
               <Properties>
                 <string name="Name">Walkspeed</string>
               </Properties>
-              <Item class="TextButton" referent="240">
+              <Item class="TextButton" referent="241">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="241">
+                <Item class="LocalScript" referent="242">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -38200,11 +38474,11 @@ refreshPrice()
                   </Properties>
                 </Item>
               </Item>
-              <Item class="TextButton" referent="242">
+              <Item class="TextButton" referent="243">
                 <Properties>
                   <string name="Name">Buy2</string>
                 </Properties>
-                <Item class="LocalScript" referent="243">
+                <Item class="LocalScript" referent="244">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -38249,11 +38523,11 @@ refreshPrice()
               </Item>
             </Item>
           </Item>
-          <Item class="Frame" referent="244">
+          <Item class="Frame" referent="245">
             <Properties>
               <string name="Name">ServerLuck</string>
             </Properties>
-            <Item class="LocalScript" referent="245">
+            <Item class="LocalScript" referent="246">
               <Properties>
                 <string name="Name">LocalScript</string>
                 <string name="Source"><![CDATA[local gui = script.Parent
@@ -38364,19 +38638,19 @@ refresh()
         </Item>
       </Item>
     </Item>
-    <Item class="ScreenGui" referent="246">
+    <Item class="ScreenGui" referent="247">
       <Properties>
         <string name="Name">HUD</string>
       </Properties>
-      <Item class="Frame" referent="247">
+      <Item class="Frame" referent="248">
         <Properties>
           <string name="Name">Boosts</string>
         </Properties>
-        <Item class="ImageLabel" referent="248">
+        <Item class="ImageLabel" referent="249">
           <Properties>
             <string name="Name">ServerLuck</string>
           </Properties>
-          <Item class="LocalScript" referent="249">
+          <Item class="LocalScript" referent="250">
             <Properties>
               <string name="Name">LocalScript</string>
               <string name="Source"><![CDATA[
@@ -38408,11 +38682,11 @@ serverLuck:GetPropertyChangedSignal("Value"):Connect(updateImage)
           </Item>
         </Item>
       </Item>
-      <Item class="ImageButton" referent="250">
+      <Item class="ImageButton" referent="251">
         <Properties>
           <string name="Name">StopDisasters</string>
         </Properties>
-        <Item class="LocalScript" referent="251">
+        <Item class="LocalScript" referent="252">
           <Properties>
             <string name="Name">LocalScript</string>
             <string name="Source">script.Parent.MouseButton1Click:Connect(function()
@@ -38422,14 +38696,14 @@ end)</string>
         </Item>
       </Item>
     </Item>
-    <Item class="LocalScript" referent="252">
+    <Item class="LocalScript" referent="253">
       <Properties>
         <string name="Name">OpenUI</string>
         <string name="Source"><![CDATA[require(script.Open_UI)
  
  ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="253">
+      <Item class="ModuleScript" referent="254">
         <Properties>
           <string name="Name">Open_UI</string>
           <string name="Source"><![CDATA[local UIController = {}
@@ -38776,11 +39050,11 @@ return controller
         </Properties>
       </Item>
     </Item>
-    <Item class="SurfaceGui" referent="254">
+    <Item class="SurfaceGui" referent="255">
       <Properties>
         <string name="Name">SurfaceGui</string>
       </Properties>
-      <Item class="LocalScript" referent="255">
+      <Item class="LocalScript" referent="256">
         <Properties>
           <string name="Name">LocalScript</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -38799,9 +39073,9 @@ local textL = upgradeRoot:WaitForChild("Main"):WaitForChild("TextL")
 
 local short = require(ReplicatedStorage.Modules.Shorten)
 local function getUpgradeValueObject()
-	local stats = player:FindFirstChild("HiddenLeadderstats") or player:FindFirstChild("HiddenLeaderstats")
+	local stats = player:FindFirstChild("HiddenLeaderstats")
 	if not stats then
-		stats = player:WaitForChild("HiddenLeadderstats", 4) or player:WaitForChild("HiddenLeaderstats", 4)
+		stats = player:WaitForChild("HiddenLeaderstats", 4)
 	end
 	if not stats then return nil end
 
@@ -38851,15 +39125,15 @@ end
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="256">
+  <Item class="StarterPlayer" referent="257">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="257">
+    <Item class="StarterPlayerScripts" referent="258">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="258">
+      <Item class="LocalScript" referent="259">
         <Properties>
           <string name="Name">AAAAAAAAAAAAAAA</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -39859,7 +40133,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="259">
+      <Item class="LocalScript" referent="260">
         <Properties>
           <string name="Name">BOOSTS_CLIENT</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -39988,7 +40262,7 @@ inv.DescendantAdded:Connect(hookValue)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="260">
+      <Item class="LocalScript" referent="261">
         <Properties>
           <string name="Name">BrrBrrPatapimDialog</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -40731,14 +41005,14 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="261">
+      <Item class="LocalScript" referent="262">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[print("Hello world, from client!")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="262">
+      <Item class="LocalScript" referent="263">
         <Properties>
           <string name="Name">CometEvent</string>
           <string name="Source">local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40774,7 +41048,7 @@ local function rand(a, b)
 end
 
 local function clamp01(x)
-	return x &lt; 0 and 0 or (x &gt; 1 and 1 or x)
+	return x &lt; 0 and 0 or (x > 1 and 1 or x)
 end
 
 local function easeOutCubic(t)
@@ -41110,12 +41384,12 @@ local function animateCollect(cometId)
 			sparkles.Rate = math.max(5, 40 * distAlpha)
 		end
 
-		if t &gt; 0.85 then
+		if t > 0.85 then
 			local fade = (t - 0.85) / 0.15
 			setTransparency(clientComet, clamp01(fade))
 		end
 
-		if dist &lt;= CFG.HitDistance or t &gt;= 1 then
+		if dist &lt;= CFG.HitDistance or t >= 1 then
 			flyConn:Disconnect()
 			if clientComet and clientComet.Parent then
 				clientComet:Destroy()
@@ -41136,7 +41410,7 @@ CometCollectFX.OnClientEvent:Connect(function(cometId)
 end)</string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="263">
+      <Item class="LocalScript" referent="264">
         <Properties>
           <string name="Name">CoreGui</string>
           <string name="Source"><![CDATA[local StarterGui = game:GetService("StarterGui")
@@ -41154,7 +41428,7 @@ disableCoreGui(Enum.CoreGuiType.EmotesMenu)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="264">
+      <Item class="LocalScript" referent="265">
         <Properties>
           <string name="Name">DevilFruit</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -43218,7 +43492,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="265">
+      <Item class="LocalScript" referent="266">
         <Properties>
           <string name="Name">DevilFruitConsumePrompt</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -43422,7 +43696,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="266">
+      <Item class="LocalScript" referent="267">
         <Properties>
           <string name="Name">EVENTS</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -43491,7 +43765,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="267">
+      <Item class="LocalScript" referent="268">
         <Properties>
           <string name="Name">FavPormpt</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -43516,7 +43790,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="268">
+      <Item class="LocalScript" referent="269">
         <Properties>
           <string name="Name">GearShopNpcDialog</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -43552,7 +43826,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="269">
+      <Item class="LocalScript" referent="270">
         <Properties>
           <string name="Name">GrandLineRushBasePlaceholder</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -44164,7 +44438,7 @@ render(currentState or {})
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="270">
+      <Item class="LocalScript" referent="271">
         <Properties>
           <string name="Name">GrandLineRushVerticalSlice</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -44311,7 +44585,7 @@ topBarGradient.Parent = topBar
 local title = createLabel(topBar, "Grand Line Rush Prototype Loop", UDim2.new(1, -20, 1, 0), UDim2.fromOffset(12, 0), 18)
 title.ZIndex = 21
 
-local subtitle = createLabel(panel, "Vertical slice: run -> extract -> open chest -> feed crew", UDim2.new(1, -28, 0, 18), UDim2.fromOffset(16, 68), 12)
+local subtitle = createLabel(panel, "Vertical slice: crew run -> extract -> open chest -> feed crew", UDim2.new(1, -28, 0, 18), UDim2.fromOffset(16, 68), 12)
 subtitle.TextColor3 = Color3.fromRGB(179, 222, 248)
 subtitle.Font = Enum.Font.GothamMedium
 subtitle.ZIndex = 21
@@ -44356,7 +44630,7 @@ actionLayout.CellPadding = UDim2.fromOffset(8, 8)
 actionLayout.CellSize = UDim2.fromOffset(140, 36)
 actionLayout.Parent = actionGrid
 
-local startChestButton = createButton(actionGrid, "Start Chest Run", nil, nil, Color3.fromRGB(120, 80, 37))
+local startChestButton = createButton(actionGrid, "World Chests Shared", nil, nil, Color3.fromRGB(73, 83, 93))
 local startCrewButton = createButton(actionGrid, "Start Crew Run", nil, nil, Color3.fromRGB(42, 97, 153))
 local claimRewardButton = createButton(actionGrid, "Pick Up Reward", nil, nil, Color3.fromRGB(53, 127, 107))
 local extractButton = createButton(actionGrid, "Extract Run", nil, nil, Color3.fromRGB(27, 124, 91))
@@ -44629,6 +44903,7 @@ local function render()
 	setButtonEnabled(extractButton, runState.InRun and runState.CarriedReward ~= nil)
 	setButtonEnabled(failRunButton, runState.InRun)
 	setButtonEnabled(openChestButton, (currentState.UnopenedChestCount or 0) > 0)
+	setButtonEnabled(startChestButton, false)
 end
 
 local function request(actionName, payload)
@@ -44666,13 +44941,6 @@ for depthBand, button in pairs(depthButtons) do
 		render()
 	end)
 end
-
-startChestButton.MouseButton1Click:Connect(function()
-	request("StartRun", {
-		RewardType = "Chest",
-		DepthBand = selectedDepthBand,
-	})
-end)
 
 startCrewButton.MouseButton1Click:Connect(function()
 	request("StartRun", {
@@ -44728,7 +44996,7 @@ request("GetState")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="271">
+      <Item class="LocalScript" referent="272">
         <Properties>
           <string name="Name">Group</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -44900,7 +45168,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="272">
+      <Item class="LocalScript" referent="273">
         <Properties>
           <string name="Name">InviteFriendTopBar</string>
           <string name="Source"><![CDATA[local Icon = require(game:GetService("ReplicatedStorage").Icon)
@@ -44929,7 +45197,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="273">
+      <Item class="LocalScript" referent="274">
         <Properties>
           <string name="Name">Library</string>
           <string name="Source"><![CDATA[if not game:IsLoaded() then game.Loaded:Wait() end
@@ -44971,7 +45239,7 @@ local UIStrokeAdjuster = require(script.UIStrokeAdjuster)
 print("✅ Client {RP} took " .. (tick() - Start) .. "s to load!")
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="274">
+        <Item class="ModuleScript" referent="275">
           <Properties>
             <string name="Name">UIStrokeAdjuster</string>
             <string name="Source">--[=[
@@ -45239,7 +45507,7 @@ local update; update = RunService.Heartbeat:Connect(function()
 		-- Check if camera is within range
 		local magnitude = (camera.CFrame.Position - origin).Magnitude
 		local maxDistance = billboardGui.MaxDistance
-		if magnitude &gt; maxDistance then
+		if magnitude > maxDistance then
 			continue
 		end
 		
@@ -45277,8 +45545,8 @@ end
 -----[[  Module Functions ]]-----
 
 type UIStrokeAdjuster = {
-	TagScreenGui: (self: UIStrokeAdjuster, screenGui: ScreenGui) -&gt; (),
-	TagBillboardGui: (self: UIStrokeAdjuster, billboardGui: BillboardGui) -&gt; (),
+	TagScreenGui: (self: UIStrokeAdjuster, screenGui: ScreenGui) -> (),
+	TagBillboardGui: (self: UIStrokeAdjuster, billboardGui: BillboardGui) -> (),
 }
 type _UIStrokeAdjuster = UIStrokeAdjuster &amp; {
 
@@ -45309,7 +45577,7 @@ return UIStrokeAdjuster :: UIStrokeAdjuster</string>
           </Properties>
         </Item>
       </Item>
-      <Item class="LocalScript" referent="275">
+      <Item class="LocalScript" referent="276">
         <Properties>
           <string name="Name">LocalScript</string>
           <string name="Source">game:GetService('Workspace'):WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("GroupReward"):WaitForChild("Hitbox"):WaitForChild("ProximityPrompt").Triggered:Connect(function()
@@ -45317,11 +45585,11 @@ return UIStrokeAdjuster :: UIStrokeAdjuster</string>
 end)</string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="276">
+      <Item class="Folder" referent="277">
         <Properties>
           <string name="Name">LocalScripts</string>
         </Properties>
-        <Item class="LocalScript" referent="277">
+        <Item class="LocalScript" referent="278">
           <Properties>
             <string name="Name">AdminPanel</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -45693,7 +45961,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="278">
+        <Item class="LocalScript" referent="279">
           <Properties>
             <string name="Name">ButtonEffect</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -45770,7 +46038,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="279">
+        <Item class="LocalScript" referent="280">
           <Properties>
             <string name="Name">Button_Handler</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -46170,7 +46438,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="280">
+        <Item class="LocalScript" referent="281">
           <Properties>
             <string name="Name">CometMerchant</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -46321,7 +46589,7 @@ buildUI()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="281">
+        <Item class="LocalScript" referent="282">
           <Properties>
             <string name="Name">CounterComet</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -46624,7 +46892,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="282">
+        <Item class="LocalScript" referent="283">
           <Properties>
             <string name="Name">CounterMoney</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -47214,7 +47482,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="283">
+        <Item class="LocalScript" referent="284">
           <Properties>
             <string name="Name">CounterSpeed</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -47517,7 +47785,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="284">
+        <Item class="LocalScript" referent="285">
           <Properties>
             <string name="Name">GamepassAd</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -47760,7 +48028,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="285">
+        <Item class="LocalScript" referent="286">
           <Properties>
             <string name="Name">GearShop</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -48025,7 +48293,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="286">
+        <Item class="LocalScript" referent="287">
           <Properties>
             <string name="Name">GlobalAnno</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48090,7 +48358,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="287">
+        <Item class="LocalScript" referent="288">
           <Properties>
             <string name="Name">Index</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -48610,7 +48878,7 @@ buildIndexForVariant("Normal")
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="288">
+        <Item class="LocalScript" referent="289">
           <Properties>
             <string name="Name">LIMITEDREWARD</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -48808,7 +49076,7 @@ end
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="289">
+        <Item class="LocalScript" referent="290">
           <Properties>
             <string name="Name">LUCKYBLOCKEVENT</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -48954,7 +49222,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="290">
+        <Item class="LocalScript" referent="291">
           <Properties>
             <string name="Name">Rebirths</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -49137,7 +49405,7 @@ update()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="291">
+        <Item class="LocalScript" referent="292">
           <Properties>
             <string name="Name">Settings</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -49727,7 +49995,7 @@ end
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="292">
+        <Item class="LocalScript" referent="293">
           <Properties>
             <string name="Name">SpeedUpgrades</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -49908,7 +50176,7 @@ speedValueObj.Changed:Connect(updateAll)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="293">
+        <Item class="LocalScript" referent="294">
           <Properties>
             <string name="Name">VIP_Door</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -49988,7 +50256,7 @@ applyState()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="294">
+        <Item class="LocalScript" referent="295">
           <Properties>
             <string name="Name">aaaaaaaa</string>
             <string name="Source"><![CDATA[
@@ -50064,11 +50332,11 @@ task.defer(updateAllPlots)
           </Properties>
         </Item>
       </Item>
-      <Item class="Folder" referent="295">
+      <Item class="Folder" referent="296">
         <Properties>
           <string name="Name">Modules</string>
         </Properties>
-        <Item class="ModuleScript" referent="296">
+        <Item class="ModuleScript" referent="297">
           <Properties>
             <string name="Name">Time_Rewards</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -50574,7 +50842,7 @@ return {}
           </Properties>
         </Item>
       </Item>
-      <Item class="LocalScript" referent="297">
+      <Item class="LocalScript" referent="298">
         <Properties>
           <string name="Name">ProximityPromptScript</string>
           <string name="Source">local UserInputService = game:GetService("UserInputService")
@@ -50893,7 +51161,7 @@ local function createPrompt(prompt, inputType, gui)
 			buttonText.Visible = false
 			icon.Visible = true
 		elseif buttonTextString ~= nil and buttonTextString ~= '' then
-			if string.len(buttonTextString) &gt; 2 then
+			if string.len(buttonTextString) > 2 then
 				buttonText.TextSize = math.round(buttonText.TextSize * 6/7)
 			end
 			setupButtonTextTweens()
@@ -50931,7 +51199,7 @@ local function createPrompt(prompt, inputType, gui)
 		promptUI.Active = true
 	end
 
-	if prompt.HoldDuration &gt; 0 then
+	if prompt.HoldDuration > 0 then
 		local circleBar = resizeableInputFrame.ProgressBar
 		setUpCircularProgressBar(circleBar)
 		table.insert(tweensForButtonHoldBegin, TweenService:Create(circleBar.Progress, tweenInfoInFullDuration, { Value = 1 }))
@@ -50943,7 +51211,7 @@ local function createPrompt(prompt, inputType, gui)
 	local triggeredConnection
 	local triggerEndedConnection
 
-	if prompt.HoldDuration &gt; 0 then
+	if prompt.HoldDuration > 0 then
 		holdBeganConnection = prompt.PromptButtonHoldBegan:Connect(function()
 			for _, tween in ipairs(tweensForButtonHoldBegin) do
 				tween:Play()
@@ -51068,7 +51336,7 @@ end
 onLoad()</string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="298">
+      <Item class="ModuleScript" referent="299">
         <Properties>
           <string name="Name">ReplicaClient</string>
           <string name="Source">--[[
@@ -51089,11 +51357,11 @@ MAD STUDIO
 	
 		Replica.RequestData() -- Requests the server to start sending replica data
 		
-		Replica.OnNew(token, listener) --&gt; [Connection]
+		Replica.OnNew(token, listener) --> [Connection]
 			token      [string]
 			listener   [function] (replica)
 		
-		Replica.FromId(id) --&gt; [Replica] or nil
+		Replica.FromId(id) --> [Replica] or nil
 		
 	Members [Replica]:
 	
@@ -51117,27 +51385,27 @@ MAD STUDIO
 		-- [path]: {"Players", 2312310, "Health"} -- A path defines a key branch within Replica.Data
 		-- Listeners are called after Replica.Data mutation.
 	
-		Replica:OnSet(path, listener) --&gt; [Connection] -- (Only for :Set(); For :SetValues() you can use :OnChange())
+		Replica:OnSet(path, listener) --> [Connection] -- (Only for :Set(); For :SetValues() you can use :OnChange())
 			listener   [function] (new_value, old_value)
 			
-		Replica:OnWrite(function_name, listener) --&gt; [Connection]
+		Replica:OnWrite(function_name, listener) --> [Connection]
 			listener   [function] (...)
 			
-		Replica:OnChange(listener) --&gt; [Connection]
+		Replica:OnChange(listener) --> [Connection]
 			listener   [function] (action, path, param1, param2?)
 				-- ("Set",         path, value, old_value)
 				-- ("SetValues",   path, values)
 				-- ("TableInsert", path, value, index)
 				-- ("TableRemove", path, value, index)
 				
-		Replica:GetChild(token [string]) --&gt; [Replica] or nil -- Searches for a child replica with given token name
+		Replica:GetChild(token [string]) --> [Replica] or nil -- Searches for a child replica with given token name
 		
 		Replica:FireServer(...) -- Fire a signal to server-side listeners for this specific Replica; Must be subscribed
 		Replica:UFireServer(...) -- Same as "Replica:FireServer()", but using UnreliableRemoteEvent
 		
-		Replica:Identify() --&gt; [string] -- Debug
+		Replica:Identify() --> [string] -- Debug
 
-		Replica:IsActive() --&gt; [bool]
+		Replica:IsActive() --> [bool]
 	
 --]]
 
@@ -51182,7 +51450,7 @@ local RemoteBind = Remote.New("ReplicaBind")               -- (replica_id)
 local RemoteDestroy = Remote.New("ReplicaDestroy")         -- (replica_id)
 local RemoteSignalUnreliable = Remote.New("ReplicaSignalUnreliable", true)   -- (replica_id, ...)
 
-local WriteLibCache: {[ModuleScript]: {[string | number]: {Name: string, Id: number, fn: (...any) -&gt; (...any)}}} = {}
+local WriteLibCache: {[ModuleScript]: {[string | number]: {Name: string, Id: number, fn: (...any) -> (...any)}}} = {}
 local ReplicationFlag = false
 
 local function LoadWriteLib(module: ModuleScript)
@@ -51222,7 +51490,7 @@ end
 ----- Public -----
 
 export type Connection = {
-	Disconnect: (self: Connection) -&gt; (),
+	Disconnect: (self: Connection) -> (),
 }
 
 export type Replica = {
@@ -51233,17 +51501,17 @@ export type Replica = {
 	Parent: Replica?,
 	Children: {[Replica]: boolean?},
 	BoundInstance: Instance?,
-	OnClientEvent: {Connect: (self: any, listener: (...any) -&gt; ()) -&gt; ({Disconnect: (self: any) -&gt; ()})},
+	OnClientEvent: {Connect: (self: any, listener: (...any) -> ()) -> ({Disconnect: (self: any) -> ()})},
 	Maid: typeof(Maid),
 
-	OnSet: (self: any, path: {}, listener: () -&gt; ()) -&gt; (Connection),
-	OnWrite: (self: any, function_name: string, listener: (...any) -&gt; ()) -&gt; (Connection),
-	OnChange: (self: any, listener: (action: "Set" | "SetValues" | "TableInsert" | "TableRemove", path: {any}, param1: any, param2: any?) -&gt; ()) -&gt; (Connection),
-	GetChild: (self: any, token: string) -&gt; (Replica?),
-	FireServer: (self: any, ...any) -&gt; (),
-	UFireServer: (self: any, ...any) -&gt; (),
-	Identify: (self: any) -&gt; (string),
-	IsActive: (self: any) -&gt; (boolean),
+	OnSet: (self: any, path: {}, listener: () -> ()) -> (Connection),
+	OnWrite: (self: any, function_name: string, listener: (...any) -> ()) -> (Connection),
+	OnChange: (self: any, listener: (action: "Set" | "SetValues" | "TableInsert" | "TableRemove", path: {any}, param1: any, param2: any?) -> ()) -> (Connection),
+	GetChild: (self: any, token: string) -> (Replica?),
+	FireServer: (self: any, ...any) -> (),
+	UFireServer: (self: any, ...any) -> (),
+	Identify: (self: any) -> (string),
+	IsActive: (self: any) -> (boolean),
 }
 
 local Connection = {}
@@ -51365,7 +51633,7 @@ function Replica.RequestData()
 	
 end
 	
-function Replica.OnNew(token: string, listener: (replica: Replica) -&gt; ()): Connection
+function Replica.OnNew(token: string, listener: (replica: Replica) -> ()): Connection
 	
 	if type(token) ~= "string" then
 		error(`[{script.Name}]: "token" must be a string`)
@@ -51405,7 +51673,7 @@ function Replica.Test()
 	}
 end
 
-function Replica:OnSet(path: {}, listener: () -&gt; ()): Connection
+function Replica:OnSet(path: {}, listener: () -> ()): Connection
 	local path_key = table.concat(path, ".")
 	local listeners = self.set_listeners[path_key]
 	if listeners == nil then
@@ -51416,7 +51684,7 @@ function Replica:OnSet(path: {}, listener: () -&gt; ()): Connection
 	return ConnectionNew(listeners, listener)
 end
 
-function Replica:OnWrite(function_name: string, listener: (...any) -&gt; ()): Connection
+function Replica:OnWrite(function_name: string, listener: (...any) -> ()): Connection
 	local listeners = self.write_listeners[function_name]
 	if listeners == nil then
 		listeners = {}
@@ -51426,7 +51694,7 @@ function Replica:OnWrite(function_name: string, listener: (...any) -&gt; ()): Co
 	return ConnectionNew(listeners, listener)
 end
 
-function Replica:OnChange(listener: (action: "Set" | "SetValues" | "TableInsert" | "TableRemove", path: {any}, param1: any, param2: any?) -&gt; ()): Connection
+function Replica:OnChange(listener: (action: "Set" | "SetValues" | "TableInsert" | "TableRemove", path: {any}, param1: any, param2: any?) -> ()): Connection
 	return ConnectionNew(self.changed_listeners, listener)
 end
 
@@ -51707,7 +51975,7 @@ local function CreationScan(nested_creation, iterator, parent_id)
 	end
 end
 
-local function BreadthCreationSort(creation: {}, root_id: number?, iterator: (Id: number, SelfCreation: table) -&gt; ())
+local function BreadthCreationSort(creation: {}, root_id: number?, iterator: (Id: number, SelfCreation: table) -> ())
 	
 	-- self_creation = {token, tags, data, parent_id, write_module}
 	local top_creation = {} -- {Id = id, SelfCreation = self_creation}, ...
@@ -51785,7 +52053,7 @@ local function BreadthCreationSort(creation: {}, root_id: number?, iterator: (Id
 			msg ..= `[Id:{entry.Id};ParentId:{self_creation[4]};Token:{self_creation[1]};Tags:\{{tag_string}\}]\n`
 		end
 		
-		if #error_creation &gt; 50 then
+		if #error_creation > 50 then
 			msg ..= `(hiding {50 - #error_creation} more)\n`
 		end
 		
@@ -52032,7 +52300,7 @@ end
 return Replica</string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="299">
+      <Item class="LocalScript" referent="300">
         <Properties>
           <string name="Name">SellNpcDialog</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -52190,7 +52458,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="300">
+      <Item class="LocalScript" referent="301">
         <Properties>
           <string name="Name">StandsMenager</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -52596,7 +52864,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="301">
+      <Item class="LocalScript" referent="302">
         <Properties>
           <string name="Name">Unequipool'</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -52661,7 +52929,7 @@ rebirthFrame:GetPropertyChangedSignal("Visible"):Connect(onVisibleChanged)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="302">
+      <Item class="LocalScript" referent="303">
         <Properties>
           <string name="Name">abccc</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -52868,7 +53136,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="303">
+      <Item class="LocalScript" referent="304">
         <Properties>
           <string name="Name">chat tags</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -53176,7 +53444,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="304">
+      <Item class="LocalScript" referent="305">
         <Properties>
           <string name="Name">custominv</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -54750,11 +55018,11 @@ player.CharacterAdded:Connect(hookCharacter)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="305">
+      <Item class="Folder" referent="306">
         <Properties>
           <string name="Name">data</string>
         </Properties>
-        <Item class="ModuleScript" referent="306">
+        <Item class="ModuleScript" referent="307">
           <Properties>
             <string name="Name">Client_Data</string>
             <string name="Source">--// Requires
@@ -54822,7 +55090,7 @@ end
 return Data</string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="307">
+        <Item class="LocalScript" referent="308">
           <Properties>
             <string name="Name">Initialization</string>
             <string name="Source"><![CDATA[if not game:IsLoaded() then game.Loaded:Wait() end
@@ -54844,20 +55112,20 @@ print("✅ Client {RP} took " .. (tick() - Start) .. "s to load!")
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="308">
+  <Item class="Workspace" referent="309">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Folder" referent="309">
+    <Item class="Folder" referent="310">
       <Properties>
         <string name="Name">Map</string>
       </Properties>
-      <Item class="Folder" referent="310">
+      <Item class="Folder" referent="311">
         <Properties>
           <string name="Name">Leaderboards</string>
         </Properties>
-        <Item class="Script" referent="311">
+        <Item class="Script" referent="312">
           <Properties>
             <string name="Name">LeaderboardsScript</string>
             <token name="RunContext">0</token>
@@ -55372,7 +55640,7 @@ task.spawn(function()
 end)
 ]]></string>
           </Properties>
-          <Item class="Script" referent="312">
+          <Item class="Script" referent="313">
             <Properties>
               <string name="Name">Script</string>
               <token name="RunContext">0</token>
@@ -55382,16 +55650,16 @@ end)
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="313">
+      <Item class="Folder" referent="314">
         <Properties>
           <string name="Name">MainMap</string>
         </Properties>
-        <Item class="Model" referent="314">
+        <Item class="Model" referent="315">
           <Properties>
             <string name="Name">Brr Brr Patapim</string>
             <bool name="NeedsPivotMigration">false</bool>
           </Properties>
-          <Item class="Script" referent="315">
+          <Item class="Script" referent="316">
             <Properties>
               <string name="Name">Script</string>
               <token name="RunContext">0</token>
@@ -55415,7 +55683,7 @@ track:Play()
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Script" referent="316">
+          <Item class="Script" referent="317">
             <Properties>
               <string name="Name">dialogScript</string>
               <token name="RunContext">0</token>
@@ -55426,17 +55694,17 @@ track:Play()
             </Properties>
           </Item>
         </Item>
-        <Item class="Model" referent="317">
+        <Item class="Model" referent="318">
           <Properties>
             <string name="Name">Model</string>
             <bool name="NeedsPivotMigration">false</bool>
           </Properties>
-          <Item class="Model" referent="318">
+          <Item class="Model" referent="319">
             <Properties>
               <string name="Name">Normal</string>
               <bool name="NeedsPivotMigration">false</bool>
             </Properties>
-            <Item class="Script" referent="319">
+            <Item class="Script" referent="320">
               <Properties>
                 <string name="Name">Script</string>
                 <token name="RunContext">0</token>
@@ -55460,7 +55728,7 @@ track:Play()
 ]]></string>
               </Properties>
             </Item>
-            <Item class="Script" referent="320">
+            <Item class="Script" referent="321">
               <Properties>
                 <string name="Name">dialogScript</string>
                 <token name="RunContext">0</token>
@@ -55470,12 +55738,12 @@ track:Play()
             </Item>
           </Item>
         </Item>
-        <Item class="Model" referent="321">
+        <Item class="Model" referent="322">
           <Properties>
             <string name="Name">Normal</string>
             <bool name="NeedsPivotMigration">false</bool>
           </Properties>
-          <Item class="Script" referent="322">
+          <Item class="Script" referent="323">
             <Properties>
               <string name="Name">Script</string>
               <token name="RunContext">0</token>
@@ -55499,7 +55767,7 @@ track:Play()
 ]]></string>
             </Properties>
           </Item>
-          <Item class="Script" referent="323">
+          <Item class="Script" referent="324">
             <Properties>
               <string name="Name">dialogScript</string>
               <token name="RunContext">0</token>

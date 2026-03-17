@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
+end
+
 return {
 	DefaultLuckMult = 1,
 
