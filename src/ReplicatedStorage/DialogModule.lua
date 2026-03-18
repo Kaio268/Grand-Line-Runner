@@ -7,6 +7,7 @@ local runService = game:GetService("RunService")
 local userInputService = game:GetService("UserInputService")
 local collectionService = game:GetService("CollectionService")
 local players = game:GetService("Players")
+local SafeAnimation = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("SafeAnimation"))
 
 local TICK_SOUND = script.sounds.tick
 
@@ -83,10 +84,10 @@ function DialogModule.new(npcName, npc, prompt, animation)
 	self.animDialogStroke = tweenService:Create(self.npcGui.dialog.UIStroke, TweenInfo.new(0.3), { Transparency = 1 })
 
 	if animation ~= nil then
-		local newAnimation = Instance.new("Animation")
-		newAnimation.AnimationId = animation
-		local newAnimLoaded = npc:WaitForChild("Humanoid"):LoadAnimation(newAnimation)
-		newAnimLoaded:Play()
+		local newAnimLoaded = SafeAnimation.LoadTrack(npc, animation)
+		if newAnimLoaded then
+			newAnimLoaded:Play()
+		end
 	end
 
 	local frameCount = 0

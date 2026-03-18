@@ -6,8 +6,22 @@ local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local player = Players.LocalPlayer
-local npc = workspace:WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("Normal")
-local prompt = npc:WaitForChild("ProximityPrompt")
+local function findChildPath(root, names)
+	local current = root
+	for _, name in ipairs(names) do
+		if not current then
+			return nil
+		end
+		current = current:FindFirstChild(name)
+	end
+	return current
+end
+
+local npc = findChildPath(workspace, { "Map", "MainMap", "Normal" })
+local prompt = npc and npc:FindFirstChild("ProximityPrompt")
+if not npc or not prompt then
+	return
+end
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = remotes:WaitForChild("SellItemEvent")

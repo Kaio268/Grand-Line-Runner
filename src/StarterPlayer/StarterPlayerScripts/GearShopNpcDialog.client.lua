@@ -4,8 +4,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 
-local npc = workspace:WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("Model"):WaitForChild("Normal")
-local prompt = npc:WaitForChild("ProximityPrompt")
+local function findChildPath(root, names)
+	local current = root
+	for _, name in ipairs(names) do
+		if not current then
+			return nil
+		end
+		current = current:FindFirstChild(name)
+	end
+	return current
+end
+
+local npc = findChildPath(workspace, { "Map", "MainMap", "Model", "Normal" })
+local prompt = npc and npc:FindFirstChild("ProximityPrompt")
+if not npc or not prompt then
+	return
+end
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, prompt)
 dialogObject:addDialog("Do You Want To Open Gears Store?", {"Yea", "Nope"})

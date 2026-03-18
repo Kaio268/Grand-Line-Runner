@@ -8,6 +8,7 @@ local ServerMods = Modules:WaitForChild("Server"):WaitForChild("Brainrot")
 
 local SpawnerConfig = require(Configs:WaitForChild("BrainrotSpawnSettings"))
 local SpawnPartsCfg = require(Configs:WaitForChild("SpawnParts"))
+local SafeAnimation = require(Modules:WaitForChild("SafeAnimation"))
 local Registry = require(ServerMods:WaitForChild("Registry"))
 local Placement = require(ServerMods:WaitForChild("Placement"))
 local Interaction = require(ServerMods:WaitForChild("Interaction"))
@@ -164,26 +165,7 @@ local function chooseForPart(partTier, serverLuckMult, chanceCap)
 end
 
 local function tryPlayIdle(model, animId)
-	animId = tonumber(animId)
-	if not animId or animId == 0 then
-		return
-	end
-	local controller = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
-	if not controller then
-		return
-	end
-	local animator = controller:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = controller
-	end
-	local anim = Instance.new("Animation")
-	anim.AnimationId = "rbxassetid://" .. tostring(animId)
-	pcall(function()
-		local track = animator:LoadAnimation(anim)
-		track.Looped = true
-		track:Play()
-	end)
+	SafeAnimation.PlayLooped(model, animId)
 end
 
 local partDataList = {}

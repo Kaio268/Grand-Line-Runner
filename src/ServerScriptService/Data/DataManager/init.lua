@@ -139,6 +139,25 @@ local function GetRootDataKey(pathTable: {string}): string?
 	return pathTable[1]
 end
 
+local function ShouldClampNonNegative(path: string): boolean
+	local normalizedPath = NormalizeDataPath(path)
+	local primaryCurrency = EconomyConfig.Currency and EconomyConfig.Currency.Primary
+
+	if typeof(normalizedPath) ~= "string" or typeof(primaryCurrency) ~= "table" then
+		return false
+	end
+
+	return normalizedPath == primaryCurrency.Path or normalizedPath == primaryCurrency.TotalPath
+end
+
+local function ClampNumericPathValue(path: string, value)
+	if typeof(value) == "number" and ShouldClampNonNegative(path) then
+		return math.max(0, value)
+	end
+
+	return value
+end
+
 local SyncPathToInstances
 
 local function SyncDataMutation(player: Player, replica, pathTable: {string}, value: any)
@@ -349,6 +368,7 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
 		local defaultValue = if newValue == nil then true else DeepCopyTable(newValue)
+		defaultValue = ClampNumericPathValue(path, defaultValue)
 		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
 		if err then
@@ -370,6 +390,7 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 			end
 
 			valueToStore = DeepCopyTable(valueToStore)
+			valueToStore = ClampNumericPathValue(path, valueToStore)
 		else
 			if typeof(currentValue) ~= "boolean" then
 				warn(`[DataManager]: Can't toggle non-boolean value at Data.{path}!`)
@@ -472,7 +493,7 @@ function DataManager:AddValue(player, path, addValue)
 	end
 
 	if typeof(currentValue) == "number" and typeof(addValue) == "number" then
-		local final = currentValue + addValue
+		local final = ClampNumericPathValue(path, currentValue + addValue)
 		-- (nie ma sensu robić `pointer = pointer + final`; wystarczy Set do repliki)
 		parent[leafKey] = final
 		SyncDataMutation(player, replica, pathTable, final)
@@ -519,7 +540,7 @@ function DataManager:SubValue(player : Player, path : string, subValue : (number
 			return true
 		else
 			if typeof(currentValue) == typeof(subValue) and typeof(currentValue) == "number" then
-				local targetNumber = currentValue - subValue
+				local targetNumber = ClampNumericPathValue(path, currentValue - subValue)
 				parent[leafKey] = targetNumber
 				SyncDataMutation(player, replica, pathTable, targetNumber)
 				return true
@@ -1235,7 +1256,7 @@ function DataManager:AdjustValue(player: Player, path: string, delta: number)
 		return
 	end
 
-	local final = current + delta
+	local final = ClampNumericPathValue(path, current + delta)
 	parent[leafKey] = final               -- <— ZAPIS do profile.Data
 	SyncDataMutation(player, replica, pathTable, final)
 

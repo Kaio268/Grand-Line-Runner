@@ -28,6 +28,12 @@ local Economy = {
 		["HiddenLeaderstats.PlotUpgrade"] = {
 			"HiddenLeadderstats.PlotUpgrade",
 		},
+		["Materials.Timber"] = {
+			"Materials.CommonShipMaterial",
+		},
+		["Materials.Iron"] = {
+			"Materials.RareShipMaterial",
+		},
 	},
 
 	Rules = {
@@ -39,7 +45,7 @@ local Economy = {
 		CrewLevelsArePerInstance = true,
 		CrewMaxLevel = 50,
 		DuplicateCrewHandling = "StoreAsSeparateInstances",
-		MaxShipSlots = 6,
+		MaxShipSlots = 24,
 		LoseUnextractedRewardsOnRunFailure = true,
 	},
 
@@ -174,7 +180,7 @@ local Economy = {
 					},
 					Doubloons = 15,
 					Materials = {
-						CommonShipMaterial = 1,
+						Timber = 1,
 					},
 				},
 			},
@@ -188,7 +194,7 @@ local Economy = {
 					},
 					Doubloons = 30,
 					Materials = {
-						CommonShipMaterial = 2,
+						Timber = 2,
 					},
 				},
 			},
@@ -202,8 +208,8 @@ local Economy = {
 					},
 					Doubloons = 60,
 					Materials = {
-						RareShipMaterial = 1,
-						CommonShipMaterial = 1,
+						Iron = 1,
+						Timber = 1,
 					},
 				},
 			},
@@ -217,7 +223,8 @@ local Economy = {
 					},
 					Doubloons = 120,
 					Materials = {
-						RareShipMaterial = 2,
+						Iron = 2,
+						AncientTimber = 1,
 					},
 					DevilFruitChance = 0.10,
 				},

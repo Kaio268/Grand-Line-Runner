@@ -352,7 +352,7 @@ local function getNearestModel(character)
 end
 
 local function getBrrMesh()
-	return npc:WaitForChild("Mesh")
+	return npc:FindFirstChild("Mesh") or npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function findPlayerPlot()

@@ -1,17 +1,13 @@
 local tool = script.Parent
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SafeAnimation = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SafeAnimation"))
 
 local event = ReplicatedStorage:WaitForChild("Slap")
-
-local anim = Instance.new("Animation")
-anim.AnimationId = "rbxassetid://119351181413931"
 
 local player = game.Players.LocalPlayer
 local char = player.Character or player.CharacterAdded:Wait()
 local hum = char:WaitForChild("Humanoid")
-local animator = hum:WaitForChild("Animator")
-
-local animTrack = animator:LoadAnimation(anim)
+local animTrack = SafeAnimation.LoadTrack(hum, 119351181413931)
 
 tool.Activated:Connect(function()
 	local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -33,5 +29,7 @@ tool.Activated:Connect(function()
 
 	event:FireServer(hitPart)
 
-	animTrack:Play()
+	if animTrack then
+		animTrack:Play()
+	end
 end)

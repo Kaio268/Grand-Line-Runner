@@ -371,8 +371,9 @@ local function render()
 	for _, foodKey in ipairs(foodOrder) do
 		resourceParts[#resourceParts + 1] = string.format("%s x%d", Economy.Food[foodKey].DisplayName, tonumber(foodInventory[foodKey]) or 0)
 	end
-	resourceParts[#resourceParts + 1] = string.format("Common Mats x%d", tonumber(materials.CommonShipMaterial) or 0)
-	resourceParts[#resourceParts + 1] = string.format("Rare Mats x%d", tonumber(materials.RareShipMaterial) or 0)
+	resourceParts[#resourceParts + 1] = string.format("Timber x%d", tonumber(materials.Timber) or tonumber(materials.CommonShipMaterial) or 0)
+	resourceParts[#resourceParts + 1] = string.format("Iron x%d", tonumber(materials.Iron) or tonumber(materials.RareShipMaterial) or 0)
+	resourceParts[#resourceParts + 1] = string.format("Ancient Timber x%d", tonumber(materials.AncientTimber) or 0)
 	resourceParts[#resourceParts + 1] = string.format("Devil Fruits x%d", tonumber(currentState.DevilFruitCount) or 0)
 	resourcesLabel.Text = table.concat(resourceParts, "   |   ")
 

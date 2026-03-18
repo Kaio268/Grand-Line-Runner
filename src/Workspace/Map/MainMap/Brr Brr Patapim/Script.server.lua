@@ -1,17 +1,4 @@
-local ac = script.Parent:FindFirstChild("AnimationController") or script.Parent:FindFirstChildWhichIsA("AnimationController", true)
-if not ac then
-	warn(("%s is missing an AnimationController under %s"):format(script:GetFullName(), script.Parent:GetFullName()))
-	return
-end
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SafeAnimation = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SafeAnimation"))
 
-local animator = ac:FindFirstChild("Animator") or ac:FindFirstChildWhichIsA("Animator")
-if not animator then
-	animator = Instance.new("Animator")
-	animator.Parent = ac
-end
-
-local anim = Instance.new("Animation")
-anim.AnimationId = "rbxassetid://108530253041260"
-
-local track = animator:LoadAnimation(anim)
-track:Play()
+SafeAnimation.PlayLooped(script.Parent, 108530253041260)

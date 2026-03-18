@@ -83,6 +83,25 @@ local function getFailureMessage(errorCode)
 	return "Unable to use food on this brainrot right now."
 end
 
+local function findStandSurfaceGui(playerGui, standName)
+	if not playerGui then
+		return nil
+	end
+
+	local direct = playerGui:FindFirstChild(standName)
+	if direct and direct:IsA("SurfaceGui") then
+		return direct
+	end
+
+	for _, descendant in ipairs(playerGui:GetDescendants()) do
+		if descendant:IsA("SurfaceGui") and descendant.Name == standName then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
 local function updateStandGui(player, standName, progress)
 	if not progress then
 		return
@@ -93,7 +112,7 @@ local function updateStandGui(player, standName, progress)
 		return
 	end
 
-	local standGui = playerGui:FindFirstChild(standName)
+	local standGui = findStandSurfaceGui(playerGui, standName)
 	if not standGui or not standGui:FindFirstChild("LevelUp") or not standGui.LevelUp:FindFirstChild("Main") then
 		return
 	end
@@ -158,7 +177,7 @@ local function syncStandStateForProgress(player, fallbackStandName, progress)
 	local updatedAnyStand = false
 
 	if playerGui then
-		for _, gui in ipairs(playerGui:GetChildren()) do
+		for _, gui in ipairs(playerGui:GetDescendants()) do
 			if gui:IsA("SurfaceGui") and tonumber(gui.Name) then
 				local guiStandName = gui.Name
 				local guiBrainrotInstanceId = BrainrotInstanceService.GetStandInstanceId(player, guiStandName)

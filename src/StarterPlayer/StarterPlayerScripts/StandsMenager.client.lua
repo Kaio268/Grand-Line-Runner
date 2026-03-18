@@ -313,19 +313,56 @@ local function disconnectGui(name)
 	end
 end
 
+local function isStandSurfaceGui(gui)
+	return gui
+		and gui:IsA("SurfaceGui")
+		and tonumber(gui.Name) ~= nil
+end
+
+local function getOrCreateUpgradeButton(gui)
+	local button = gui:FindFirstChildWhichIsA("GuiButton", true)
+	if button then
+		return button
+	end
+
+	local root = gui:FindFirstChild("LevelUp", true)
+		or gui:FindFirstChild("Main", true)
+		or gui:FindFirstChildWhichIsA("GuiObject", true)
+	if not root then
+		return nil
+	end
+
+	local overlay = root:FindFirstChild("UpgradeHitbox")
+	if overlay and overlay:IsA("TextButton") then
+		return overlay
+	end
+
+	overlay = Instance.new("TextButton")
+	overlay.Name = "UpgradeHitbox"
+	overlay.AutoButtonColor = false
+	overlay.BackgroundTransparency = 1
+	overlay.BorderSizePixel = 0
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.Text = ""
+	overlay.ZIndex = root.ZIndex + 10
+	overlay.Parent = root
+
+	return overlay
+end
+
 local function bindGui(gui)
-	if not gui:IsA("SurfaceGui") or tonumber(gui.Name) == nil then
+	if not isStandSurfaceGui(gui) then
 		return
 	end
 
-	disconnectGui(gui.Name)
+	disconnectGui(gui)
 
-	local button = gui:FindFirstChildWhichIsA("TextButton", true)
+	local button = getOrCreateUpgradeButton(gui)
 	if not button then
 		return
 	end
 
-	connections[gui.Name] = button.MouseButton1Click:Connect(function()
+	connections[gui] = button.Activated:Connect(function()
 		if awaitingResultStandName then
 			return
 		end
@@ -385,16 +422,16 @@ resultRemote.OnClientEvent:Connect(function(payload)
 	clearApprovedFoodSession(standName)
 end)
 
-playerGui.ChildAdded:Connect(function(gui)
+playerGui.DescendantAdded:Connect(function(gui)
 	bindGui(gui)
 end)
 
-playerGui.ChildRemoved:Connect(function(gui)
-	if gui and gui:IsA("SurfaceGui") and tonumber(gui.Name) ~= nil then
-		disconnectGui(gui.Name)
+playerGui.DescendantRemoving:Connect(function(gui)
+	if isStandSurfaceGui(gui) then
+		disconnectGui(gui)
 	end
 end)
 
-for _, gui in ipairs(playerGui:GetChildren()) do
+for _, gui in ipairs(playerGui:GetDescendants()) do
 	bindGui(gui)
 end

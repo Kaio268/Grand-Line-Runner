@@ -8,9 +8,11 @@ local MAX_INCOME_ON_JOIN = 1e16
 
 local BrainrotFoodProgression = require(ServerScriptService.Modules:WaitForChild("BrainrotFoodProgression"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
 local shorten = require(ReplicatedStorage.Modules.Shorten)
+local SafeAnimation = require(ReplicatedStorage.Modules:WaitForChild("SafeAnimation"))
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
 local stealProductByRarity = {
@@ -66,6 +68,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local BrainrotsConfig = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local BrainrotRegistry = require(Modules:WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Registry"))
 local BrainrotFolder = ReplicatedStorage:WaitForChild("BrainrotFolder")
 
@@ -80,9 +83,11 @@ local getPlayerStandBrainrotName
 local getPlayerStandBrainrotInstanceId
 local getBrainrotLevel
 local getStandLevelValue
+local dmGet
 local dmSet
 local STAND_DEBUG = false
 local ensuredStandFolders = {}
+local standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction()
 
 local function standDebug(message, ...)
 	if STAND_DEBUG ~= true then
@@ -213,26 +218,7 @@ local function makeStandVisualNonBlocking(model)
 end
 
 local function tryPlayIdle(model, animId)
-	animId = tonumber(animId)
-	if not animId or animId == 0 then
-		return
-	end
-	local controller = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
-	if not controller then
-		return
-	end
-	local animator = controller:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = controller
-	end
-	local anim = Instance.new("Animation")
-	anim.AnimationId = "rbxassetid://" .. tostring(animId)
-	pcall(function()
-		local track = animator:LoadAnimation(anim)
-		track.Looped = true
-		track:Play()
-	end)
+	SafeAnimation.PlayLooped(model, animId)
 end
 
 local function getStandCollectMultiplier(player, standName)
@@ -255,7 +241,24 @@ local function getStandCollectMultiplier(player, standName)
 
 	local mult = tonumber(StandUpgradeMults[tostring(lvl)]) or 1
 	if mult <= 0 then mult = 1 end
-	return mult
+
+	local upgradeLevel = 0
+	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+	if hiddenLeaderstats then
+		local plotUpgradeValue = hiddenLeaderstats:FindFirstChild("PlotUpgrade")
+		if plotUpgradeValue and plotUpgradeValue:IsA("NumberValue") then
+			upgradeLevel = plotUpgradeValue.Value
+		end
+	end
+
+	if upgradeLevel <= 0 then
+		local storedUpgrade = dmGet(player, "HiddenLeaderstats.PlotUpgrade")
+		if typeof(storedUpgrade) == "number" then
+			upgradeLevel = storedUpgrade
+		end
+	end
+
+	return mult * PlotUpgradeConfig.GetSlotBonusMultiplier(upgradeLevel, standName)
 end
 
  
@@ -292,7 +295,7 @@ local function getInventoryQuantity(player, itemName)
 	return q.Value
 end
 
-local function dmGet(player, path)
+dmGet = function(player, path)
 	if not DataManager then
 		return nil
 	end
@@ -533,6 +536,187 @@ local function ensureInventoryLevelValue(player, brainrotName, level)
 	end
 end
 
+local function getPlayerShipUpgradeLevel(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return 0
+	end
+
+	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+	if hiddenLeaderstats then
+		local plotUpgradeValue = hiddenLeaderstats:FindFirstChild("PlotUpgrade")
+		if plotUpgradeValue and plotUpgradeValue:IsA("NumberValue") then
+			return PlotUpgradeConfig.ClampLevel(plotUpgradeValue.Value)
+		end
+	end
+
+	local storedUpgrade = dmGet(player, "HiddenLeaderstats.PlotUpgrade")
+	if typeof(storedUpgrade) == "number" then
+		return PlotUpgradeConfig.ClampLevel(storedUpgrade)
+	end
+
+	return 0
+end
+
+local function getSlotBonusPercent(bonusInfo)
+	if typeof(bonusInfo) ~= "table" then
+		return 0
+	end
+
+	return math.max(0, math.floor((((tonumber(bonusInfo.Multiplier) or 1) - 1) * 100) + 0.5))
+end
+
+local function getStandSlotState(player, standName)
+	local upgradeLevel = getPlayerShipUpgradeLevel(player)
+	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName)
+	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName)
+	local bonusInfo = isUsable and PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName) or nil
+
+	return {
+		Level = upgradeLevel,
+		Visible = isVisible,
+		Usable = isUsable,
+		BonusInfo = bonusInfo,
+		BonusPercent = getSlotBonusPercent(bonusInfo),
+		UnlockLevel = PlotUpgradeConfig.GetStandUnlockLevel(standName),
+	}
+end
+
+local function getShipSlotsTable(player)
+	local slots = dmGet(player, "Ship.Slots")
+	if typeof(slots) ~= "table" then
+		return {}
+	end
+
+	return slots
+end
+
+local function syncShipSlotAssignment(player, standName, slotData)
+	local slots = getShipSlotsTable(player)
+	if slotData == nil then
+		slots[standName] = nil
+	else
+		slots[standName] = slotData
+	end
+
+	dmSet(player, "Ship.Slots", slots)
+end
+
+local function reconcileAssignedStandState(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false
+	end
+
+	local existingStandState = dmGet(player, "IncomeBrainrots")
+	if typeof(existingStandState) ~= "table" then
+		existingStandState = {}
+	end
+
+	-- First, preserve any legacy stand assignment that still only exists
+	-- in IncomeBrainrots by materializing/rebinding its inventory instance.
+	for rawStandName, standData in pairs(existingStandState) do
+		if typeof(standData) == "table" then
+			local savedName = tostring(standData.BrainrotName or "")
+			if savedName ~= "" then
+				BrainrotInstanceService.EnsureStandInstance(player, tostring(rawStandName), savedName)
+			end
+		end
+	end
+
+	local brainrotInventory = BrainrotInstanceService.EnsureInventory(player)
+	if typeof(brainrotInventory) ~= "table" then
+		return false
+	end
+
+	local assignedByStand = {}
+	local byId = typeof(brainrotInventory.ById) == "table" and brainrotInventory.ById or {}
+	for rawInstanceId, instanceData in pairs(byId) do
+		if typeof(instanceData) == "table" then
+			local standName = tostring(instanceData.AssignedStand or "")
+			local storageName = tostring(instanceData.StorageName or "")
+			if standName ~= "" and storageName ~= "" then
+				assignedByStand[standName] = {
+					InstanceId = tostring(rawInstanceId),
+					StorageName = storageName,
+					Income = math.max(0, tonumber(instanceData.Income) or 0),
+				}
+			end
+		end
+	end
+
+	local normalizedStandState = {}
+	for rawStandName, standData in pairs(existingStandState) do
+		if typeof(standData) == "table" then
+			normalizedStandState[tostring(rawStandName)] = {
+				BrainrotName = tostring(standData.BrainrotName or ""),
+				BrainrotInstanceId = tostring(standData.BrainrotInstanceId or ""),
+				IncomeToCollect = typeof(standData.IncomeToCollect) == "number" and standData.IncomeToCollect or 0,
+			}
+		end
+	end
+
+	local rebuiltShipSlots = {}
+	local changedStandState = false
+	local referencedStands = {}
+
+	for standName, assignedData in pairs(assignedByStand) do
+		referencedStands[standName] = true
+
+		local standData = normalizedStandState[standName]
+		if typeof(standData) ~= "table" then
+			standData = {
+				BrainrotName = "",
+				BrainrotInstanceId = "",
+				IncomeToCollect = 0,
+			}
+			normalizedStandState[standName] = standData
+			changedStandState = true
+		end
+
+		if standData.BrainrotName ~= assignedData.StorageName then
+			standData.BrainrotName = assignedData.StorageName
+			changedStandState = true
+		end
+
+		if standData.BrainrotInstanceId ~= assignedData.InstanceId then
+			standData.BrainrotInstanceId = assignedData.InstanceId
+			changedStandState = true
+		end
+
+		if typeof(standData.IncomeToCollect) ~= "number" then
+			standData.IncomeToCollect = 0
+			changedStandState = true
+		end
+
+		rebuiltShipSlots[standName] = {
+			BrainrotInstanceId = assignedData.InstanceId,
+			BrainrotName = assignedData.StorageName,
+			Income = assignedData.Income,
+		}
+	end
+
+	for standName, standData in pairs(normalizedStandState) do
+		if not referencedStands[standName] then
+			local hadStaleAssignment = tostring(standData.BrainrotName or "") ~= ""
+				or tostring(standData.BrainrotInstanceId or "") ~= ""
+				or math.max(0, tonumber(standData.IncomeToCollect) or 0) > 0
+
+			if hadStaleAssignment then
+				standData.BrainrotName = ""
+				standData.BrainrotInstanceId = ""
+				standData.IncomeToCollect = 0
+				changedStandState = true
+			end
+		end
+	end
+
+	if changedStandState then
+		dmSet(player, "IncomeBrainrots", normalizedStandState)
+	end
+
+	dmSet(player, "Ship.Slots", rebuiltShipSlots)
+	return true
+end
+
 local function legacyFindBrainrotInfoByName(brainrotName)
 	if BrainrotsConfig[brainrotName] then
 		return BrainrotsConfig[brainrotName], brainrotName
@@ -721,21 +905,42 @@ local function updateStandPromptTexts(player, standModel)
 	end
 
 	local standName = standModel.Name
+	local slotState = player and player:IsA("Player") and getStandSlotState(player, standName) or nil
 	local brainrotName = ""
 
 	if player and player:IsA("Player") then
 		brainrotName = getPlayerStandBrainrotName(player, standName)
 	end
 
+	if slotState and slotState.Visible and not slotState.Usable then
+		prompt.ObjectText = "Slot Locked"
+		prompt.ActionText = PlotUpgradeConfig.GetLockedSlotDescription(slotState.Level, standName) or "Upgrade Ship"
+		return
+	end
+
 	if brainrotName ~= "" then
 		local resolved = resolveBrainrotRecord(player, brainrotName)
 		local info = resolved and resolved.Info or findBrainrotInfoByName(brainrotName, player)
 		local displayName = info and tostring(info.Name or info.DisplayName or resolved and resolved.CanonicalName or brainrotName) or tostring(brainrotName)
-		prompt.ObjectText = displayName
+		if slotState and slotState.BonusInfo then
+			prompt.ObjectText = string.format(
+				"%s (%s +%d%%)",
+				displayName,
+				tostring(slotState.BonusInfo.Label or "Bonus"),
+				slotState.BonusPercent
+			)
+		else
+			prompt.ObjectText = displayName
+		end
 		prompt.ActionText = "Pick Up"
 	else
-		prompt.ObjectText = tostring(standName)
-		prompt.ActionText = "Place Here"
+		if slotState and slotState.BonusInfo then
+			prompt.ObjectText = tostring(slotState.BonusInfo.Label or standName)
+			prompt.ActionText = string.format("Place Here (+%d%%)", slotState.BonusPercent)
+		else
+			prompt.ObjectText = tostring(standName)
+			prompt.ActionText = "Place Here"
+		end
 	end
 end
 
@@ -760,6 +965,16 @@ getBrainrotLevel = function(player, brainrotName)
 end
 
 local function getBaseIncome(player, brainrotName)
+	local instanceId, instanceData = BrainrotInstanceService.GetInstance(player, brainrotName)
+	if instanceData then
+		local instanceIncome = tonumber(instanceData.Income) or 0
+		if instanceIncome > 0 then
+			return instanceIncome
+		end
+
+		brainrotName = instanceData.StorageName
+	end
+
 	local resolved = resolveBrainrotRecord(player, brainrotName)
 	local info = resolved and resolved.Info or findBrainrotInfoByName(brainrotName, player)
 	local base = info and (tonumber(info.Income) or 0) or 0
@@ -774,6 +989,64 @@ local function getIncomeWithLevel(player, brainrotName)
 	local lvl = getBrainrotLevel(player, brainrotName)
 	local mult =1
 	return base * mult
+end
+
+local function getStandIncomePerTick(player, standName)
+	local brainrotInstanceId = getPlayerStandBrainrotInstanceId(player, standName)
+	if brainrotInstanceId ~= "" then
+		local incomeFromInstance = getIncomeWithLevel(player, brainrotInstanceId)
+		if incomeFromInstance > 0 then
+			return incomeFromInstance, brainrotInstanceId
+		end
+
+		local _, instanceData = BrainrotInstanceService.GetInstance(player, brainrotInstanceId)
+		if instanceData then
+			local storedIncome = math.max(0, tonumber(instanceData.Income) or 0)
+			if storedIncome > 0 then
+				return storedIncome, brainrotInstanceId
+			end
+		end
+	end
+
+	local brainrotName = getPlayerStandBrainrotName(player, standName)
+	if brainrotName == "" then
+		return 0, ""
+	end
+
+	return getIncomeWithLevel(player, brainrotName), brainrotInstanceId ~= "" and brainrotInstanceId or brainrotName
+end
+
+local function registerPlacedStandIncome(player, standName, placedInstanceId, placedInstance)
+	local instanceId = tostring(placedInstanceId or "")
+	local storageName = placedInstance and tostring(placedInstance.StorageName or "") or getPlayerStandBrainrotName(player, standName)
+	local incomePerTick = math.max(0, tonumber(placedInstance and placedInstance.Income) or 0)
+
+	if incomePerTick <= 0 then
+		incomePerTick = getIncomeWithLevel(player, instanceId ~= "" and instanceId or storageName)
+	end
+
+	dmSet(player, "IncomeBrainrots." .. standName .. ".BrainrotName", storageName)
+	dmSet(player, "IncomeBrainrots." .. standName .. ".BrainrotInstanceId", instanceId)
+	dmSet(player, "IncomeBrainrots." .. standName .. ".IncomeToCollect", math.max(0, math.floor(incomePerTick)))
+	syncShipSlotAssignment(player, standName, {
+		BrainrotInstanceId = instanceId,
+		BrainrotName = storageName,
+		Income = math.max(0, math.floor(incomePerTick)),
+	})
+
+	print(string.format(
+		"[ShipIncomeDebug] placed stand=%s brainrotId=%s income=%d",
+		tostring(standName),
+		instanceId ~= "" and instanceId or storageName,
+		math.max(0, math.floor(incomePerTick))
+	))
+
+	return incomePerTick
+end
+
+local function clearPlacedStandIncome(player, standName)
+	dmSet(player, "IncomeBrainrots." .. standName .. ".IncomeToCollect", 0)
+	syncShipSlotAssignment(player, standName, nil)
 end
 
 local function getStandIncomeDisplay(player, standName)
@@ -1103,8 +1376,50 @@ end
 local function setMoneyText(standModel, amount)
 	local money = getMoneyLabel(standModel)
 	if money then
+		money.TextWrapped = true
 		money.Text = shorten.roundNumber(math.floor(amount)) .. CurrencyUtil.getCompactSuffix()
 	end
+end
+
+local function setMoneyLabelText(standModel, text)
+	local money = getMoneyLabel(standModel)
+	if money then
+		money.TextWrapped = true
+		money.Text = tostring(text)
+	end
+end
+
+local function updateStandMoneyText(player, standModel)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	local standName = standModel.Name
+	local slotState = getStandSlotState(player, standName)
+	if slotState.Visible and not slotState.Usable then
+		setMoneyLabelText(standModel, "LOCKED")
+		return
+	end
+
+	local brainrotName = getPlayerStandBrainrotName(player, standName)
+	local incomeText = shorten.roundNumber(math.floor(getStandIncomeDisplay(player, standName))) .. CurrencyUtil.getCompactSuffix()
+	if brainrotName == "" and slotState.BonusInfo then
+		setMoneyLabelText(
+			standModel,
+			string.format("%s +%d%%", tostring(slotState.BonusInfo.Label or "Bonus"), slotState.BonusPercent)
+		)
+		return
+	end
+
+	if brainrotName ~= "" and slotState.BonusInfo then
+		setMoneyLabelText(
+			standModel,
+			string.format("%s +%d%%\n%s", tostring(slotState.BonusInfo.Label or "Bonus"), slotState.BonusPercent, incomeText)
+		)
+		return
+	end
+
+	setMoneyText(standModel, getStandIncomeDisplay(player, standName))
 end
 
 local function getHitBoxPart(standModel)
@@ -1288,6 +1603,14 @@ local function updateLevelUpUI(player, standModel)
 	if not refs then return end
 
 	local standName = standModel.Name
+	local slotState = getStandSlotState(player, standName)
+	if slotState.Visible and not slotState.Usable then
+		setLevelUpVisible(standModel, false, player)
+		if refs.Price then refs.Price.Text = "" end
+		if refs.Upgrade then refs.Upgrade.Text = "" end
+		return
+	end
+
 	local brainrotName = getPlayerStandBrainrotName(player, standName)
 	local brainrotInstanceId = getPlayerStandBrainrotInstanceId(player, standName)
 
@@ -1387,9 +1710,15 @@ local function bindZoneCollect(player, plot, standModel)
 			return
 		end
 
+		local slotState = getStandSlotState(plr, standName)
+		if slotState.Visible and not slotState.Usable then
+			updateStandMoneyText(plr, standModel)
+			return
+		end
+
 		local baseToCollect = getPlayerStandIncome(plr, standName)
 		if baseToCollect <= 0 then
-			setMoneyText(standModel, 0)
+			updateStandMoneyText(plr, standModel)
 			return
 		end
 
@@ -1405,7 +1734,7 @@ local function bindZoneCollect(player, plot, standModel)
 			MoneyCollectedRE:FireClient(plr, standModel, collected)
 		end
 
-		setMoneyText(standModel, 0)
+		updateStandMoneyText(plr, standModel)
 	end)
 end
 
@@ -1446,7 +1775,7 @@ local function bindStandPrompt(player, plot, standModel)
 
 	dmEnsureStandFolder(player, standModel.Name)
 	standDebug("bindStandPrompt ready player=%s stand=%s savedBrainrot=%s", player.Name, standModel.Name, tostring(getPlayerStandBrainrotName(player, standModel.Name)))
-	setMoneyText(standModel, getStandIncomeDisplay(player, standModel.Name))
+	updateStandMoneyText(player, standModel)
 	bindZoneCollect(player, plot, standModel)
 	bindLevelUp(player, plot, standModel)
 	updateStandPromptTexts(player, standModel)
@@ -1496,15 +1825,23 @@ local function bindStandPrompt(player, plot, standModel)
 			end
 
 			dmEnsureStandFolder(plr, standName)
+			local slotState = getStandSlotState(plr, standName)
+			if slotState.Visible and not slotState.Usable then
+				updateStandMoneyText(plr, standModel)
+				updateLevelUpUI(plr, standModel)
+				updateStandPromptTexts(plr, standModel)
+				return
+			end
 
 			local current = getPlayerStandBrainrotName(plr, standName)
 			if current ~= "" then
 				local releasedInstanceId, releasedInstance = BrainrotInstanceService.ReleaseStandInstance(plr, standName)
 				local storageName = releasedInstance and releasedInstance.StorageName or current
 				standDebug("pickup from stand player=%s stand=%s savedName=%s storageName=%s instanceId=%s", plr.Name, standName, tostring(current), tostring(storageName), tostring(releasedInstanceId))
+				clearPlacedStandIncome(plr, standName)
 				setStandLevel(plr, standName, 1)
 				clearStandVisual(standModel)
-				setMoneyText(standModel, getStandIncomeDisplay(plr, standName))
+				updateStandMoneyText(plr, standModel)
 				updateLevelUpUI(plr, standModel)
 				updateStandPromptTexts(plr, standModel)
 				return
@@ -1530,6 +1867,7 @@ local function bindStandPrompt(player, plot, standModel)
 
 			getBrainrotLevel(plr, placedInstanceId)
 			syncStandLevelFromBrainrot(plr, standName, placedInstanceId)
+			local incomePerTick = registerPlacedStandIncome(plr, standName, placedInstanceId, placedInstance)
 			standDebug("place accepted player=%s stand=%s tool=%s quantityBefore=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(qty), tostring(placedInstanceId))
 
 			spawnStandBrainrot(plr, standModel, handle, placedInstance.StorageName)
@@ -1540,10 +1878,10 @@ local function bindStandPrompt(player, plot, standModel)
 				standName,
 				tostring(toolName),
 				tostring(placedModel and placedModel:GetFullName() or "nil"),
-				tostring(getIncomeWithLevel(plr, placedInstance.StorageName)),
+				tostring(incomePerTick),
 				tostring(placedInstanceId)
 			)
-			setMoneyText(standModel, getStandIncomeDisplay(plr, standName))
+			updateStandMoneyText(plr, standModel)
 			updateLevelUpUI(plr, standModel)
 			updateStandPromptTexts(plr, standModel)
 		end, debug.traceback)
@@ -1584,6 +1922,10 @@ local function registerStand(player, plot, standModel)
 			if handle and handle:IsA("BasePart") then
 				standDebug("registerStand before savedName lookup player=%s stand=%s", player.Name, standModel.Name)
 				local name = getPlayerStandBrainrotName(player, standModel.Name)
+				if name == "" then
+					reconcileAssignedStandState(player)
+					name = getPlayerStandBrainrotName(player, standModel.Name)
+				end
 				standDebug("registerStand after savedName lookup player=%s stand=%s savedName=%s", player.Name, standModel.Name, tostring(name))
 				if name ~= "" then
 					standDebug("registerStand savedBrainrot branch entered player=%s stand=%s", player.Name, standModel.Name)
@@ -1606,8 +1948,15 @@ local function registerStand(player, plot, standModel)
 					updateStandHover(player, standModel, name)
 					standDebug("registerStand after updateStandHover player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand restore-done player=%s stand=%s incomePerTick=%s", player.Name, standModel.Name, tostring(getIncomeWithLevel(player, name)))
+					local restoredIncome = getStandIncomePerTick(player, standModel.Name)
+					syncShipSlotAssignment(player, standModel.Name, {
+						BrainrotInstanceId = tostring(restoredInstanceId or ""),
+						BrainrotName = name,
+						Income = math.max(0, math.floor(restoredIncome)),
+					})
 				else
 					standDebug("registerStand empty branch entered player=%s stand=%s", player.Name, standModel.Name)
+					clearPlacedStandIncome(player, standModel.Name)
 					setStandLevel(player, standModel.Name, 1)
 					clearStandVisual(standModel)
 					standDebug("registerStand empty player=%s stand=%s", player.Name, standModel.Name)
@@ -1615,7 +1964,7 @@ local function registerStand(player, plot, standModel)
 			end
 
 			standDebug("registerStand before setMoneyText player=%s stand=%s", player.Name, standModel.Name)
-			setMoneyText(standModel, getStandIncomeDisplay(player, standModel.Name))
+			updateStandMoneyText(player, standModel)
 			standDebug("registerStand after setMoneyText player=%s stand=%s", player.Name, standModel.Name)
 			standDebug("registerStand before updateLevelUpUI player=%s stand=%s", player.Name, standModel.Name)
 			updateLevelUpUI(player, standModel)
@@ -1703,11 +2052,79 @@ local function scanAndBindPlot(player, plot)
 	end)
 end
 
+local function clearBoundStateForStand(standModel)
+	if typeof(standModel) ~= "Instance" or not standModel:IsA("Model") then
+		return
+	end
+
+	local handle = standModel:FindFirstChild("Handle", true)
+	if handle and handle:IsA("BasePart") then
+		local prompt = handle:FindFirstChildOfClass("ProximityPrompt")
+		if prompt then
+			promptBound[prompt] = nil
+		end
+	end
+
+	local zone = getHitBoxPart(standModel)
+	if zone then
+		zoneBound[zone] = nil
+	end
+
+	local levelUpPart = getLevelUpPart(standModel)
+	local clickDetector = levelUpPart and levelUpPart:FindFirstChildOfClass("ClickDetector")
+	if clickDetector then
+		levelUpBound[clickDetector] = nil
+	end
+end
+
+local function clearPlotScanStateForPlayer(player)
+	for plot in pairs(plotScanBound) do
+		if not plot or not plot.Parent then
+			plotScanBound[plot] = nil
+		else
+			local ownerUserId = plot:GetAttribute("OwnerUserId")
+			local ownerName = plot:GetAttribute("OwnerName")
+			if ownerUserId == player.UserId or plot.Name == player.Name or ownerName == player.Name then
+				plotScanBound[plot] = nil
+			end
+		end
+	end
+end
+
+local function clearPlayerStandRuntime(player)
+	local stands = playerStandList[player]
+	if stands then
+		for i = 1, #stands do
+			clearBoundStateForStand(stands[i])
+		end
+	end
+
+	playerStandList[player] = nil
+	ensuredStandFolders[player] = nil
+	touchDebounce[player] = nil
+	stealPromptDebounce[player] = nil
+	clearPlotScanStateForPlayer(player)
+end
+
+local function refreshPlayerStandRuntime(player)
+	clearPlayerStandRuntime(player)
+	reconcileAssignedStandState(player)
+
+	local plot = waitForPlot(player, 10)
+	if not plot then
+		return false, "plot_not_found"
+	end
+
+	scanAndBindPlot(player, plot)
+	return true
+end
+
 
 Players.PlayerAdded:Connect(function(player)
 	standDebug("PlayerAdded player=%s", player.Name)
 	task.spawn(function()
 		resetHugeIncomeOnJoin(player)
+		reconcileAssignedStandState(player)
 
 		local plot = waitForPlot(player, 25)
 		if not plot then
@@ -1718,19 +2135,36 @@ Players.PlayerAdded:Connect(function(player)
 	end)
 end)
 
+standCommandFunction.OnInvoke = function(action, player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	if action == "clear" then
+		clearPlayerStandRuntime(player)
+		return true
+	end
+
+	if action == "refresh" then
+		return refreshPlayerStandRuntime(player)
+	end
+
+	return false, "unsupported_action"
+end
+
 
 Players.PlayerRemoving:Connect(function(player)
-	playerStandList[player] = nil
-	ensuredStandFolders[player] = nil
+	clearPlayerStandRuntime(player)
 end)
 
 for _, p in ipairs(Players:GetPlayers()) do
 	task.spawn(function()
 		standDebug("bootstrap existing_player=%s", p.Name)
+		resetHugeIncomeOnJoin(p)
+		reconcileAssignedStandState(p)
 		local plot = waitForPlot(p, 5)
 		if plot then
 			scanAndBindPlot(p, plot)
-			resetHugeIncomeOnJoin(p)
 		else
 			standDebug("bootstrap existing_player=%s reason=no_plot", p.Name)
 		end
@@ -1754,7 +2188,7 @@ task.spawn(function()
 
 						local brainrotName = getPlayerStandBrainrotName(plr, standName)
 						if brainrotName ~= "" then
-							local inc = getIncomeWithLevel(plr, brainrotName)
+							local inc = getStandIncomePerTick(plr, standName)
 							if inc ~= 0 then
 								zeroIncomeLogged[plr] = zeroIncomeLogged[plr] or {}
 								zeroIncomeLogged[plr][standName] = nil
@@ -1768,7 +2202,7 @@ task.spawn(function()
 							end
 						end
 
-						setMoneyText(standModel, getStandIncomeDisplay(plr, standName))
+						updateStandMoneyText(plr, standModel)
 						updateLevelUpUI(plr, standModel)
 						updateStandPromptTexts(plr, standModel)
 					end

@@ -1,6 +1,8 @@
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 
 local PlotSystem = workspace:WaitForChild("PlotSystem")
 local PlotsFolder = PlotSystem:WaitForChild("Plots")
@@ -69,12 +71,6 @@ local function moveTo(inst, parent)
 	end
 end
 
-local function computeMaxStand(upgrade)
-	local addFloor2 = math.clamp(upgrade - 1, 0, 8)
-	local addFloor3 = math.clamp(upgrade - 10, 0, 8)
-	return 8 + addFloor2 + addFloor3
-end
-
 local function findFloor(map, hidden, floorName)
 	if map then
 		local f = map:FindFirstChild(floorName, true)
@@ -87,7 +83,33 @@ local function findFloor(map, hidden, floorName)
 	return nil, nil
 end
 
+local function setStandSlotAttributes(standModel, upgrade)
+	if not standModel or not standModel:IsA("Model") then
+		return
+	end
+
+	local standName = standModel.Name
+	local isVisible = PlotUpgradeConfig.IsStandVisible(upgrade, standName)
+	local isUsable = PlotUpgradeConfig.IsStandUsable(upgrade, standName)
+	local bonusInfo = PlotUpgradeConfig.GetSlotBonusInfo(upgrade, standName)
+	local unlockLevel = PlotUpgradeConfig.GetStandUnlockLevel(standName)
+	local bonusPercent = 0
+
+	if bonusInfo then
+		bonusPercent = math.max(0, math.floor((((tonumber(bonusInfo.Multiplier) or 1) - 1) * 100) + 0.5))
+	end
+
+	standModel:SetAttribute("ShipSlotVisible", isVisible)
+	standModel:SetAttribute("ShipSlotUsable", isUsable)
+	standModel:SetAttribute("ShipSlotLocked", isVisible and not isUsable)
+	standModel:SetAttribute("ShipSlotRole", bonusInfo and tostring(bonusInfo.Label or "") or "")
+	standModel:SetAttribute("ShipSlotBonusPercent", bonusPercent)
+	standModel:SetAttribute("ShipSlotUnlockLevel", unlockLevel)
+end
+
 local function applyUpgrade(player, upgrade)
+	upgrade = PlotUpgradeConfig.ClampLevel(upgrade)
+
 	local plot = getPlot(player)
 	if not plot then return false end
 
@@ -102,7 +124,7 @@ local function applyUpgrade(player, upgrade)
 		local floor3, where3 = findFloor(map, hidden, "Floor3")
 
 		if floor2 then
-			if upgrade >= 1 then
+			if PlotUpgradeConfig.IsFloorUnlocked(upgrade, "Floor2") then
 				if where2 == "hidden" then moveTo(floor2, map) did = true end
 			else
 				if where2 == "map" then moveTo(floor2, hidden) did = true end
@@ -110,7 +132,7 @@ local function applyUpgrade(player, upgrade)
 		end
 
 		if floor3 then
-			if upgrade >= 10 then
+			if PlotUpgradeConfig.IsFloorUnlocked(upgrade, "Floor3") then
 				if where3 == "hidden" then moveTo(floor3, map) did = true end
 			else
 				if where3 == "map" then moveTo(floor3, hidden) did = true end
@@ -119,24 +141,31 @@ local function applyUpgrade(player, upgrade)
 	end
 
 	if stands then
-		local maxStand = computeMaxStand(upgrade)
-
 		for _, child in ipairs(stands:GetChildren()) do
-			local n = tonumber(child.Name)
-			if n and n > maxStand then
-				moveTo(child, hidden)
-				did = true
+			local standName = child.Name
+			if tonumber(standName) then
+				setStandSlotAttributes(child, upgrade)
+				if not PlotUpgradeConfig.IsStandVisible(upgrade, standName) then
+					moveTo(child, hidden)
+					did = true
+				end
 			end
 		end
 
-		for i = 1, maxStand do
-			local name = tostring(i)
-			if not stands:FindFirstChild(name) then
-				local h = hidden:FindFirstChild(name)
-				if h then
-					moveTo(h, stands)
+		for _, child in ipairs(hidden:GetChildren()) do
+			local standName = child.Name
+			if tonumber(standName) then
+				setStandSlotAttributes(child, upgrade)
+				if PlotUpgradeConfig.IsStandVisible(upgrade, standName) then
+					moveTo(child, stands)
 					did = true
 				end
+			end
+		end
+
+		for _, child in ipairs(stands:GetChildren()) do
+			if tonumber(child.Name) then
+				setStandSlotAttributes(child, upgrade)
 			end
 		end
 	end

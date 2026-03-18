@@ -1,7 +1,10 @@
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 
 local PlotSystem = workspace:WaitForChild("PlotSystem")
 local Template = PlotSystem:WaitForChild("Plot")
@@ -16,6 +19,7 @@ if not HiddenRoot then
 end
 
 local connsByPlayer = {}
+local plotCommandFunction = ShipRuntimeSignals.GetPlotCommandFunction()
 
 local function getPlayerStats(player)
 	return player:FindFirstChild("HiddenLeaderstats")
@@ -29,12 +33,6 @@ local function getUpgradeValue(player)
 		return v
 	end
 	return nil
-end
-
-local function computeMaxStand(upgrade)
-	local addFloor2 = math.clamp(upgrade - 1, 0, 8)
-	local addFloor3 = math.clamp(upgrade - 10, 0, 8)
-	return 8 + addFloor2 + addFloor3
 end
 
 local function ensurePlotGuid(plot)
@@ -75,7 +73,47 @@ local function findFloor(map, hidden, floorName)
 	return nil, nil
 end
 
+local function getOwnedPlot(player)
+	for _, plot in ipairs(PlotsFolder:GetChildren()) do
+		if plot:IsA("Model") then
+			local ownerId = plot:GetAttribute("OwnerUserId")
+			local ownerName = plot:GetAttribute("OwnerName")
+			if ownerId == player.UserId or plot.Name == player.Name or ownerName == player.Name then
+				return plot
+			end
+		end
+	end
+
+	return nil
+end
+
+local function setStandSlotAttributes(standModel, upgrade)
+	if not standModel or not standModel:IsA("Model") then
+		return
+	end
+
+	local standName = standModel.Name
+	local isVisible = PlotUpgradeConfig.IsStandVisible(upgrade, standName)
+	local isUsable = PlotUpgradeConfig.IsStandUsable(upgrade, standName)
+	local bonusInfo = PlotUpgradeConfig.GetSlotBonusInfo(upgrade, standName)
+	local unlockLevel = PlotUpgradeConfig.GetStandUnlockLevel(standName)
+	local bonusPercent = 0
+
+	if bonusInfo then
+		bonusPercent = math.max(0, math.floor((((tonumber(bonusInfo.Multiplier) or 1) - 1) * 100) + 0.5))
+	end
+
+	standModel:SetAttribute("ShipSlotVisible", isVisible)
+	standModel:SetAttribute("ShipSlotUsable", isUsable)
+	standModel:SetAttribute("ShipSlotLocked", isVisible and not isUsable)
+	standModel:SetAttribute("ShipSlotRole", bonusInfo and tostring(bonusInfo.Label or "") or "")
+	standModel:SetAttribute("ShipSlotBonusPercent", bonusPercent)
+	standModel:SetAttribute("ShipSlotUnlockLevel", unlockLevel)
+end
+
 local function applyPlotUpgrade(plot, upgrade)
+	upgrade = PlotUpgradeConfig.ClampLevel(upgrade)
+
 	local hidden = getHiddenFolder(plot)
 	local map = plot:FindFirstChild("Map")
 	local stands = plot:FindFirstChild("Stands")
@@ -85,7 +123,7 @@ local function applyPlotUpgrade(plot, upgrade)
 		local floor3, where3 = findFloor(map, hidden, "Floor3")
 
 		if floor2 then
-			if upgrade >= 1 then
+			if PlotUpgradeConfig.IsFloorUnlocked(upgrade, "Floor2") then
 				if where2 == "hidden" then moveTo(floor2, map) end
 			else
 				if where2 == "map" then moveTo(floor2, hidden) end
@@ -93,7 +131,7 @@ local function applyPlotUpgrade(plot, upgrade)
 		end
 
 		if floor3 then
-			if upgrade >= 10 then
+			if PlotUpgradeConfig.IsFloorUnlocked(upgrade, "Floor3") then
 				if where3 == "hidden" then moveTo(floor3, map) end
 			else
 				if where3 == "map" then moveTo(floor3, hidden) end
@@ -102,22 +140,29 @@ local function applyPlotUpgrade(plot, upgrade)
 	end
 
 	if stands then
-		local maxStand = computeMaxStand(upgrade)
-
 		for _, child in ipairs(stands:GetChildren()) do
-			local n = tonumber(child.Name)
-			if n and n > maxStand then
-				moveTo(child, hidden)
+			local standName = child.Name
+			if tonumber(standName) then
+				setStandSlotAttributes(child, upgrade)
+				if not PlotUpgradeConfig.IsStandVisible(upgrade, standName) then
+					moveTo(child, hidden)
+				end
 			end
 		end
 
-		for i = 1, maxStand do
-			local name = tostring(i)
-			if not stands:FindFirstChild(name) then
-				local h = hidden:FindFirstChild(name)
-				if h then
-					moveTo(h, stands)
+		for _, child in ipairs(hidden:GetChildren()) do
+			local standName = child.Name
+			if tonumber(standName) then
+				setStandSlotAttributes(child, upgrade)
+				if PlotUpgradeConfig.IsStandVisible(upgrade, standName) then
+					moveTo(child, stands)
 				end
+			end
+		end
+
+		for _, child in ipairs(stands:GetChildren()) do
+			if tonumber(child.Name) then
+				setStandSlotAttributes(child, upgrade)
 			end
 		end
 	end
@@ -236,6 +281,24 @@ local function teleportToPlot(plr, plot)
 	teleportToPart(plr, spawnPart)
 end
 
+local function standHasPlacedBrainrot(stand)
+	return stand and stand:FindFirstChild("PlacedBrainrot") ~= nil
+end
+
+local function syncStandButtonGuiParent(plr, stand, button, sg)
+	if not (plr and stand and button and sg) then
+		return
+	end
+
+	local playerGui = plr:FindFirstChild("PlayerGui")
+	if playerGui and standHasPlacedBrainrot(stand) then
+		sg.Parent = playerGui
+		return
+	end
+
+	sg.Parent = button
+end
+
 local function SetUpButton(plr, stand)
 	local button = stand:WaitForChild("LevelUp", 5)
 	if not button then return end
@@ -246,24 +309,16 @@ local function SetUpButton(plr, stand)
 	sg.ResetOnSpawn = false
 	sg.Name = stand.Name
 
+	syncStandButtonGuiParent(plr, stand, button, sg)
+
 	local addedConn = stand.ChildAdded:Connect(function(child)
 		if not child:IsA("Model") then return end
-		if plr:FindFirstChild("PlayerGui") then
-			sg.Parent = plr.PlayerGui
-		end
+		syncStandButtonGuiParent(plr, stand, button, sg)
 	end)
 
 	local removedConn = stand.ChildRemoved:Connect(function(child)
 		if not child:IsA("Model") then return end
-		pcall(function()
-			if not plr:FindFirstChild("PlayerGui") then return end
-			for _, gui in plr.PlayerGui:GetChildren() do
-				if gui:IsA("SurfaceGui") and gui.Adornee == button then
-					gui.Parent = button
-					break
-				end
-			end
-		end)
+		syncStandButtonGuiParent(plr, stand, button, sg)
 	end)
 
 	return addedConn, removedConn
@@ -273,17 +328,33 @@ local function HandleStands(plr, plot)
 	local standsFolder = plot:WaitForChild("Stands", 10)
 	if not standsFolder then return end
 
+	connsByPlayer[plr] = connsByPlayer[plr] or {}
+
 	for _, v in ipairs(standsFolder:GetChildren()) do
 		if v:IsA("Model") then
-			SetUpButton(plr, v)
+			local addedConn, removedConn = SetUpButton(plr, v)
+			if addedConn then
+				table.insert(connsByPlayer[plr], addedConn)
+			end
+			if removedConn then
+				table.insert(connsByPlayer[plr], removedConn)
+			end
 		end
 	end
 
-	standsFolder.ChildAdded:Connect(function(child)
+	local standsAddedConn = standsFolder.ChildAdded:Connect(function(child)
 		if child:IsA("Model") then
-			SetUpButton(plr, child)
+			local addedConn, removedConn = SetUpButton(plr, child)
+			if addedConn then
+				table.insert(connsByPlayer[plr], addedConn)
+			end
+			if removedConn then
+				table.insert(connsByPlayer[plr], removedConn)
+			end
 		end
 	end)
+
+	table.insert(connsByPlayer[plr], standsAddedConn)
 end
 
 local function disconnectPlayerConns(plr)
@@ -297,6 +368,19 @@ local function disconnectPlayerConns(plr)
 		end)
 	end
 	connsByPlayer[plr] = nil
+end
+
+local function clearPlayerStandSurfaceGuis(plr)
+	local playerGui = plr:FindFirstChild("PlayerGui")
+	if not playerGui then
+		return
+	end
+
+	for _, child in ipairs(playerGui:GetChildren()) do
+		if child:IsA("SurfaceGui") and tonumber(child.Name) then
+			child:Destroy()
+		end
+	end
 end
 
 local function setupUpgradeSync(plr, plot)
@@ -338,15 +422,24 @@ local function setupUpgradeSync(plr, plot)
 	end)
 end
 
-local function assignPlot(plr)
-	ensurePlotsExist()
-	local plot = getFreePlot()
-	if not plot then return end
+local function claimPlot(plr, plot)
+	if not plot then
+		return nil
+	end
 
 	plot:SetAttribute("OwnerUserId", plr.UserId)
 	plot:SetAttribute("OwnerName", plr.Name)
 	plot.Name = plr.Name
- 	plr.PlayerGui:WaitForChild("SurfaceGui").Adornee =  plot.SlotsUpgrades.MainPart
+
+	local upgradeValue = getUpgradeValue(plr)
+	applyPlotUpgrade(plot, upgradeValue and upgradeValue.Value or 0)
+	clearPlayerStandSurfaceGuis(plr)
+
+	local surfaceGui = plr.PlayerGui and (plr.PlayerGui:FindFirstChild("SurfaceGui") or plr.PlayerGui:WaitForChild("SurfaceGui", 5))
+	if surfaceGui and plot:FindFirstChild("SlotsUpgrades") and plot.SlotsUpgrades:FindFirstChild("MainPart") then
+		surfaceGui.Adornee = plot.SlotsUpgrades.MainPart
+	end
+
 	local sign = plot:FindFirstChild("Sign", true)
 	if sign then
 		local pd = sign:FindFirstChild("PlayerDisplay", true)
@@ -366,8 +459,14 @@ local function assignPlot(plr)
 	end
 
 	teleportToPlot(plr, plot)
-	HandleStands(plr, plot)
 	setupUpgradeSync(plr, plot)
+	HandleStands(plr, plot)
+	return plot
+end
+
+local function assignPlot(plr)
+	ensurePlotsExist()
+	return claimPlot(plr, getFreePlot())
 end
 
 local function respawnFreshPlot(oldPlot)
@@ -409,10 +508,44 @@ local function respawnFreshPlot(oldPlot)
 		end
 
 		hidePlotDefaults(newPlot)
+		return newPlot
 	end
+
+	return nil
+end
+
+local function resetPlayerPlot(plr)
+	disconnectPlayerConns(plr)
+	clearPlayerStandSurfaceGuis(plr)
+
+	local existingPlot = getOwnedPlot(plr)
+	local resetPlot = existingPlot and respawnFreshPlot(existingPlot) or nil
+	if not resetPlot then
+		ensurePlotsExist()
+		resetPlot = getFreePlot()
+	end
+
+	return claimPlot(plr, resetPlot)
 end
 
 ensurePlotsExist()
+
+plotCommandFunction.OnInvoke = function(action, player)
+	if action ~= "reset" then
+		return false, "unsupported_action"
+	end
+
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	local plot = resetPlayerPlot(player)
+	if not plot then
+		return false, "plot_unavailable"
+	end
+
+	return true, plot
+end
 
 Players.PlayerAdded:Connect(function(plr)
 	assignPlot(plr)
@@ -420,14 +553,8 @@ end)
 
 Players.PlayerRemoving:Connect(function(plr)
 	disconnectPlayerConns(plr)
-	for _, m in ipairs(PlotsFolder:GetChildren()) do
-		if m:IsA("Model") then
-			local ownerId = m:GetAttribute("OwnerUserId")
-			local ownerName = m:GetAttribute("OwnerName")
-			if ownerId == plr.UserId or m.Name == plr.Name or ownerName == plr.Name then
-				respawnFreshPlot(m)
-				break
-			end
-		end
+	local plot = getOwnedPlot(plr)
+	if plot then
+		respawnFreshPlot(plot)
 	end
 end)
