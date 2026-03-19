@@ -28,6 +28,12 @@ local Economy = {
 		["HiddenLeaderstats.PlotUpgrade"] = {
 			"HiddenLeadderstats.PlotUpgrade",
 		},
+		["Materials.Timber"] = {
+			"Materials.CommonShipMaterial",
+		},
+		["Materials.Iron"] = {
+			"Materials.RareShipMaterial",
+		},
 	},
 
 	Rules = {
@@ -39,7 +45,7 @@ local Economy = {
 		CrewLevelsArePerInstance = true,
 		CrewMaxLevel = 50,
 		DuplicateCrewHandling = "StoreAsSeparateInstances",
-		MaxShipSlots = 6,
+		MaxShipSlots = 24,
 		LoseUnextractedRewardsOnRunFailure = true,
 	},
 
@@ -111,7 +117,7 @@ local Economy = {
 	},
 
 	PlaceholderBaseUI = {
-		Enabled = true,
+		Enabled = false,
 		ToggleButtonText = "Ship Meta",
 	},
 

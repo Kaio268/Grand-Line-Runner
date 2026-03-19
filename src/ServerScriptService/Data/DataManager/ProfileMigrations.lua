@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ProfileTemplate = require(script.Parent:WaitForChild("ProfileTemplate"))
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 
@@ -140,14 +141,17 @@ function ProfileMigrations.Apply(data)
 			end
 		end
 
-		hiddenLeaderstats.PlotUpgrade = math.max(
-			coerceNumber(hiddenLeaderstats.PlotUpgrade, 0),
-			coerceNumber(legacyHiddenLeadderstats.PlotUpgrade, 0)
+		hiddenLeaderstats.PlotUpgrade = math.min(
+			PlotUpgradeConfig.MaxLevel,
+			math.max(
+				coerceNumber(hiddenLeaderstats.PlotUpgrade, 0),
+				coerceNumber(legacyHiddenLeadderstats.PlotUpgrade, 0)
+			)
 		)
 		data.HiddenLeadderstats = nil
 	end
 
-	hiddenLeaderstats.PlotUpgrade = coerceNumber(hiddenLeaderstats.PlotUpgrade, 0)
+	hiddenLeaderstats.PlotUpgrade = math.clamp(coerceNumber(hiddenLeaderstats.PlotUpgrade, 0), 0, PlotUpgradeConfig.MaxLevel)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
 	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
 
@@ -340,8 +344,11 @@ function ProfileMigrations.Apply(data)
 
 	local materials = ensureTable(data, "Materials")
 	materials.Inventory = ensureTable(materials, "Inventory")
-	materials.CommonShipMaterial = coerceNumber(materials.CommonShipMaterial, 0)
-	materials.RareShipMaterial = coerceNumber(materials.RareShipMaterial, 0)
+	materials.Timber = math.max(coerceNumber(materials.Timber, 0), coerceNumber(materials.CommonShipMaterial, 0))
+	materials.Iron = math.max(coerceNumber(materials.Iron, 0), coerceNumber(materials.RareShipMaterial, 0))
+	materials.AncientTimber = coerceNumber(materials.AncientTimber, 0)
+	materials.CommonShipMaterial = materials.Timber
+	materials.RareShipMaterial = materials.Iron
 
 	local active = ensureTable(data, "Active")
 	active.x2Money = coerceNumber(active.x2Money, 1)

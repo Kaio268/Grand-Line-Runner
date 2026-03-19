@@ -77,6 +77,9 @@ local ProfileTemplate = {
 	},
 
 	Materials = {
+		Timber = 0,
+		Iron = 0,
+		AncientTimber = 0,
 		CommonShipMaterial = 0,
 		RareShipMaterial = 0,
 		Inventory = {},

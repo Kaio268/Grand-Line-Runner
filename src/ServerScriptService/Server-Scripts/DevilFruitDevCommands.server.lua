@@ -6,12 +6,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("DevilFruitService"))
 local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
+local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
 local GrandLineRushChestToolService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestToolService"))
 local GrandLineRushVerticalSliceService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
 local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:WaitForChild("GrandLineRushCorridorRunController"))
+local ShipResetService = require(ServerScriptService.Modules:WaitForChild("ShipResetService"))
+local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local ADMIN_USER_IDS = {
@@ -26,6 +31,7 @@ local adminSet = {}
 local recentCommands = {}
 local fruitAliases = {}
 local chestTierAliases = {}
+local resourceAliases = {}
 
 for _, userId in ipairs(ADMIN_USER_IDS) do
 	adminSet[userId] = true
@@ -33,6 +39,25 @@ end
 
 local function normalizeText(text)
 	return tostring(text or ""):lower():match("^%s*(.-)%s*$") or ""
+end
+
+local function cloneValue(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local cloned = {}
+	for key, nestedValue in pairs(value) do
+		cloned[key] = cloneValue(nestedValue)
+	end
+
+	return cloned
+end
+
+local function normalizeResourceAlias(text)
+	local normalized = normalizeText(text)
+	normalized = normalized:gsub("[_%-%s]+", " ")
+	return normalized
 end
 
 local function registerFruitAlias(alias, displayName)
@@ -51,6 +76,16 @@ local function registerChestAlias(alias, tierName)
 	end
 
 	chestTierAliases[normalizedAlias] = tierName
+end
+
+local function registerResourceAlias(alias, resourceData)
+	local normalizedAlias = normalizeResourceAlias(alias)
+	if normalizedAlias == "" or typeof(resourceData) ~= "table" then
+		return
+	end
+
+	resourceAliases[normalizedAlias] = resourceData
+	resourceAliases[normalizedAlias:gsub("%s+", "")] = resourceData
 end
 
 for _, fruit in ipairs(DevilFruitConfig.GetAllFruits()) do
@@ -83,6 +118,22 @@ local function markRecentCommand(player, commandText)
 	end
 
 	return true
+end
+
+local function invokeRuntimeCommand(bindable, action, player)
+	local ok, result, extra = pcall(function()
+		return bindable:Invoke(action, player)
+	end)
+
+	if not ok then
+		return false, result
+	end
+
+	if result == false then
+		return false, extra or "runtime_command_failed"
+	end
+
+	return true, extra
 end
 
 local function grantAllFruits(player)
@@ -212,6 +263,19 @@ local function parseSignedAmount(text)
 	return tonumber(normalized)
 end
 
+local function parseWholeAmount(text)
+	local amount = parseSignedAmount(text)
+	if typeof(amount) ~= "number" or amount ~= amount then
+		return nil
+	end
+
+	if amount < 0 then
+		return math.ceil(amount)
+	end
+
+	return math.floor(amount)
+end
+
 local function getDisplayedMoney(player)
 	local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
 	if moneyValue then
@@ -227,29 +291,257 @@ local function processMoneyCommand(player, argumentText)
 		return
 	end
 
-	local amount = parseSignedAmount(argumentText)
-	if typeof(amount) ~= "number" or amount == 0 or amount ~= amount then
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		warn(string.format("[DevFruitDevCommands] Invalid /money usage from %s. Use /money <delta>, /money set <amount>, or /money clear", player.Name))
+		return
+	end
+
+	if normalizedArgument == "clear" or normalizedArgument == "reset" or normalizedArgument == "zero" then
+		local previousMoney = getDisplayedMoney(player)
+		local success = DataManager:SetValue(player, CurrencyUtil.getPrimaryPath(), 0)
+		if success == false then
+			warn(string.format("[DevFruitDevCommands] Failed to clear Doubloons for %s", player.Name))
+			return
+		end
+
+		local newMoney = getDisplayedMoney(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s cleared Doubloons (old balance=%d, new balance=%d)",
+			player.Name,
+			math.floor(previousMoney),
+			math.floor(newMoney)
+		))
+		return
+	end
+
+	local setArgument = normalizedArgument:match("^set%s+(.+)$")
+	if setArgument ~= nil then
+		local targetAmount = parseWholeAmount(setArgument)
+		if typeof(targetAmount) ~= "number" then
+			warn(string.format("[DevFruitDevCommands] Invalid /money set amount '%s' from %s", tostring(setArgument), player.Name))
+			return
+		end
+
+		local previousMoney = getDisplayedMoney(player)
+		local success = DataManager:SetValue(player, CurrencyUtil.getPrimaryPath(), targetAmount)
+		if success == false then
+			warn(string.format("[DevFruitDevCommands] Failed to set Doubloons for %s", player.Name))
+			return
+		end
+
+		local newMoney = getDisplayedMoney(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s set Doubloons to %d (old balance=%d, new balance=%d)",
+			player.Name,
+			math.floor(targetAmount),
+			math.floor(previousMoney),
+			math.floor(newMoney)
+		))
+		return
+	end
+
+	local amount = parseWholeAmount(argumentText)
+	if typeof(amount) ~= "number" or amount == 0 then
 		warn(string.format("[DevFruitDevCommands] Invalid /money amount '%s' from %s", tostring(argumentText), player.Name))
 		return
 	end
 
-	if amount < 0 then
-		amount = math.ceil(amount)
-	else
-		amount = math.floor(amount)
-	end
-
+	local previousMoney = getDisplayedMoney(player)
 	local newMoney = DataManager:AdjustValue(player, CurrencyUtil.getPrimaryPath(), amount)
 	if typeof(newMoney) ~= "number" then
 		newMoney = getDisplayedMoney(player)
 	end
 
+	local appliedDelta = math.floor(newMoney - previousMoney)
 	print(string.format(
-		"[DevFruitDevCommands] %s adjusted Doubloons by %d (new balance=%d)",
+		"[DevFruitDevCommands] %s adjusted Doubloons by %d (applied=%d, new balance=%d)",
 		player.Name,
 		math.floor(amount),
+		appliedDelta,
 		math.floor(newMoney)
 	))
+end
+
+local function getTrackedResourceValue(player, resourceData)
+	if typeof(resourceData) ~= "table" then
+		return nil
+	end
+
+	if resourceData.Kind == "currency" then
+		return getDisplayedMoney(player)
+	end
+
+	local value = DataManager:GetValue(player, tostring(resourceData.Path or ""))
+	if typeof(value) == "number" then
+		return value
+	end
+
+	return nil
+end
+
+local function processGiveCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local trimmedArguments = tostring(argumentText or ""):match("^%s*(.-)%s*$") or ""
+	if trimmedArguments == "" then
+		warn(string.format("[DevFruitDevCommands] Invalid /give usage from %s. Use /give <resource> <amount>", player.Name))
+		return
+	end
+
+	local resourceArgument, amountArgument = trimmedArguments:match("^(.-)%s+([^%s]+)$")
+	if resourceArgument == nil or amountArgument == nil then
+		warn(string.format("[DevFruitDevCommands] Invalid /give usage from %s. Use /give <resource> <amount>", player.Name))
+		return
+	end
+
+	local resourceKey = normalizeResourceAlias(resourceArgument)
+	local resourceData = resourceAliases[resourceKey] or resourceAliases[resourceKey:gsub("%s+", "")]
+	if typeof(resourceData) ~= "table" then
+		warn(string.format("[DevFruitDevCommands] Unknown /give resource '%s' from %s", tostring(resourceArgument), player.Name))
+		return
+	end
+
+	local amount = parseWholeAmount(amountArgument)
+	if typeof(amount) ~= "number" or amount <= 0 then
+		warn(string.format("[DevFruitDevCommands] Invalid /give amount '%s' from %s", tostring(amountArgument), player.Name))
+		return
+	end
+
+	local newValue
+	if resourceData.Kind == "currency" then
+		newValue = DataManager:AdjustValue(player, tostring(resourceData.Path), amount)
+	else
+		newValue = DataManager:AdjustValue(player, tostring(resourceData.Path), amount)
+		if typeof(newValue) == "number" and typeof(resourceData.MirrorPath) == "string" and resourceData.MirrorPath ~= "" then
+			DataManager:SetValue(player, resourceData.MirrorPath, newValue)
+		end
+	end
+
+	if typeof(newValue) ~= "number" then
+		newValue = getTrackedResourceValue(player, resourceData)
+	end
+
+	if typeof(newValue) ~= "number" then
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /give %s %d for %s",
+			tostring(resourceData.DisplayName or resourceArgument),
+			amount,
+			player.Name
+		))
+		return
+	end
+
+	GrandLineRushVerticalSliceService.Start()
+	GrandLineRushVerticalSliceService.PushState(player)
+
+	print(string.format(
+		"[DevFruitDevCommands] %s granted %d %s via /give (new total=%d)",
+		player.Name,
+		math.floor(amount),
+		tostring(resourceData.DisplayName or resourceArgument),
+		math.floor(newValue)
+	))
+end
+
+local function processShipResetCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument ~= "" and normalizedArgument ~= "me" and normalizedArgument ~= "self" then
+		warn(string.format("[DevFruitDevCommands] Invalid /shipreset usage from %s. Use /shipreset", player.Name))
+		return
+	end
+
+	local success, result = ShipResetService.ResetPlayerShip(player)
+	if not success then
+		warn(string.format("[DevFruitDevCommands] Failed /shipreset for %s (%s)", player.Name, tostring(result)))
+		return
+	end
+
+	local starterSlots = typeof(result) == "table" and tonumber(result.StarterSlots) or 0
+	local shipLevel = typeof(result) == "table" and tonumber(result.ShipLevel) or 0
+	print(string.format(
+		"[DevFruitDevCommands] %s reset ship progression (ship level=%d, starter slots=%d)",
+		player.Name,
+		math.floor(shipLevel),
+		math.floor(starterSlots)
+	))
+end
+
+local function processClearCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument ~= "inv" and normalizedArgument ~= "inventory" then
+		warn(string.format("[DevFruitDevCommands] Invalid /clear usage from %s. Use /clear inv", player.Name))
+		return
+	end
+
+	local failures = {}
+	local standCommand = ShipRuntimeSignals.GetStandCommandFunction()
+	DevilFruitInventoryService.Start()
+	local ok, reason = invokeRuntimeCommand(standCommand, "clear", player)
+	if not ok then
+		table.insert(failures, "runtime_clear:" .. tostring(reason))
+	end
+
+	local function setTemplatePath(path, templateValue)
+		if DataManager:SetValue(player, path, cloneValue(templateValue)) == false then
+			table.insert(failures, "set_" .. tostring(path))
+		end
+	end
+
+	setTemplatePath("Inventory", ProfileTemplate.Inventory)
+	setTemplatePath("UnopenedChests", ProfileTemplate.UnopenedChests)
+	setTemplatePath("FoodInventory", ProfileTemplate.FoodInventory)
+	setTemplatePath("CrewInventory", ProfileTemplate.CrewInventory)
+	setTemplatePath("BrainrotInventory", ProfileTemplate.BrainrotInventory)
+	setTemplatePath("Materials", ProfileTemplate.Materials)
+	setTemplatePath("Chef", ProfileTemplate.Chef)
+	setTemplatePath("Ship", ProfileTemplate.Ship)
+	setTemplatePath("IncomeBrainrots", ProfileTemplate.IncomeBrainrots)
+	setTemplatePath("StandsLevels", ProfileTemplate.StandsLevels)
+
+	local fruitCleared = DevilFruitService.SetEquippedFruit(player, "")
+	if fruitCleared ~= true then
+		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
+			table.insert(failures, "set_DevilFruit")
+		end
+	else
+		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
+			table.insert(failures, "set_DevilFruit")
+		end
+	end
+
+	BrainrotInstanceService.SyncAvailableCounts(player)
+
+	ok, reason = invokeRuntimeCommand(standCommand, "refresh", player)
+	if not ok then
+		table.insert(failures, "runtime_refresh:" .. tostring(reason))
+	end
+
+	GrandLineRushChestToolService.Start()
+	GrandLineRushChestToolService.SyncPlayer(player)
+	GrandLineRushVerticalSliceService.Start()
+	GrandLineRushVerticalSliceService.PushState(player)
+
+	if #failures > 0 then
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /clear inv for %s (%s)",
+			player.Name,
+			table.concat(failures, ", ")
+		))
+		return
+	end
+
+	print(string.format("[DevFruitDevCommands] %s cleared inventory via /clear inv", player.Name))
 end
 
 local function processSpawnCommand(player, argumentText)
@@ -298,6 +590,55 @@ local function processSpawnCommand(player, argumentText)
 			tostring((response and response.error) or "unknown")
 		))
 	end
+end
+
+local primaryCurrencyConfig = CurrencyUtil.getConfig()
+local doubloonResource = {
+	Kind = "currency",
+	Path = CurrencyUtil.getPrimaryPath(),
+	DisplayName = tostring(primaryCurrencyConfig.DisplayName or primaryCurrencyConfig.Key or "Doubloons"),
+}
+
+registerResourceAlias("doubloons", doubloonResource)
+registerResourceAlias("doubloon", doubloonResource)
+registerResourceAlias("money", doubloonResource)
+registerResourceAlias(primaryCurrencyConfig.Key, doubloonResource)
+registerResourceAlias(primaryCurrencyConfig.DisplayName, doubloonResource)
+
+for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder or {}) do
+	local displayName = tostring(PlotUpgradeConfig.MaterialDisplayNames[materialKey] or materialKey)
+	local resourceData = {
+		Kind = "material",
+		Key = materialKey,
+		Path = "Materials." .. tostring(materialKey),
+		DisplayName = displayName,
+		MirrorPath = if materialKey == "Timber"
+			then "Materials.CommonShipMaterial"
+			elseif materialKey == "Iron"
+			then "Materials.RareShipMaterial"
+			else nil,
+	}
+
+	registerResourceAlias(materialKey, resourceData)
+	registerResourceAlias(displayName, resourceData)
+end
+
+registerResourceAlias("common ship material", resourceAliases["timber"])
+registerResourceAlias("commonshipmaterial", resourceAliases["timber"])
+registerResourceAlias("rare ship material", resourceAliases["iron"])
+registerResourceAlias("rareshipmaterial", resourceAliases["iron"])
+
+for foodKey, foodData in pairs(GrandLineRushEconomy.Food or {}) do
+	local displayName = tostring((typeof(foodData) == "table" and foodData.DisplayName) or foodKey)
+	local resourceData = {
+		Kind = "food",
+		Key = foodKey,
+		Path = "FoodInventory." .. tostring(foodKey),
+		DisplayName = displayName,
+	}
+
+	registerResourceAlias(foodKey, resourceData)
+	registerResourceAlias(displayName, resourceData)
 end
 
 for tierName in pairs(GrandLineRushEconomy.Chests.Tiers or {}) do
@@ -389,7 +730,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "spawn" and commandName ~= "chest" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" then
 		return
 	end
 
@@ -407,8 +748,23 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
+	if commandName == "give" then
+		processGiveCommand(player, argumentText)
+		return
+	end
+
 	if commandName == "chest" then
 		processChestCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "shipreset" then
+		processShipResetCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "clear" then
+		processClearCommand(player, argumentText)
 		return
 	end
 
@@ -489,6 +845,37 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand)
 	end)
 
+	local giveCommand = commandsFolder:FindFirstChild("GiveDevCommand")
+	if giveCommand and not giveCommand:IsA("TextChatCommand") then
+		giveCommand:Destroy()
+		giveCommand = nil
+	end
+
+	if not giveCommand then
+		giveCommand = Instance.new("TextChatCommand")
+		giveCommand.Name = "GiveDevCommand"
+		giveCommand.PrimaryAlias = "/give"
+		giveCommand.SecondaryAlias = "/give"
+		giveCommand.AutocompleteVisible = false
+		giveCommand.Parent = commandsFolder
+	end
+
+	giveCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 5) == "/give" or normalizedText:sub(1, 6) == "/ give" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/give " .. normalizedText) or "/give"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
 	local spawnCommand = commandsFolder:FindFirstChild("SpawnDevCommand")
 	if spawnCommand and not spawnCommand:IsA("TextChatCommand") then
 		spawnCommand:Destroy()
@@ -548,6 +935,68 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/chest " .. normalizedText) or "/chest"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local shipResetCommand = commandsFolder:FindFirstChild("ShipResetDevCommand")
+	if shipResetCommand and not shipResetCommand:IsA("TextChatCommand") then
+		shipResetCommand:Destroy()
+		shipResetCommand = nil
+	end
+
+	if not shipResetCommand then
+		shipResetCommand = Instance.new("TextChatCommand")
+		shipResetCommand.Name = "ShipResetDevCommand"
+		shipResetCommand.PrimaryAlias = "/shipreset"
+		shipResetCommand.SecondaryAlias = "/shipreset"
+		shipResetCommand.AutocompleteVisible = false
+		shipResetCommand.Parent = commandsFolder
+	end
+
+	shipResetCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 10) == "/shipreset" or normalizedText:sub(1, 11) == "/ shipreset" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/shipreset " .. normalizedText) or "/shipreset"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local clearCommand = commandsFolder:FindFirstChild("ClearDevCommand")
+	if clearCommand and not clearCommand:IsA("TextChatCommand") then
+		clearCommand:Destroy()
+		clearCommand = nil
+	end
+
+	if not clearCommand then
+		clearCommand = Instance.new("TextChatCommand")
+		clearCommand.Name = "ClearDevCommand"
+		clearCommand.PrimaryAlias = "/clear"
+		clearCommand.SecondaryAlias = "/clear"
+		clearCommand.AutocompleteVisible = false
+		clearCommand.Parent = commandsFolder
+	end
+
+	clearCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 6) == "/clear" or normalizedText:sub(1, 7) == "/ clear" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/clear " .. normalizedText) or "/clear"
 		handleChatCommand(player, syntheticCommand)
 	end)
 end

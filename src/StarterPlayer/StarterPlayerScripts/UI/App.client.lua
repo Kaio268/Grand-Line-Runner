@@ -18,10 +18,12 @@ local Brainrots = require(Modules:WaitForChild("Configs"):WaitForChild("Brainrot
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
+local shipUpgradeResultRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShipUpgradeResultRemote")
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactInventoryRoot"
@@ -94,6 +96,27 @@ local RESOURCE_DISPLAY = {
 	AncientTimber = "Ancient Timber",
 }
 
+local RESOURCE_RARITY = {
+	Apple = "Common",
+	Rice = "Common",
+	Meat = "Rare",
+	SeaBeastMeat = "Legendary",
+	Timber = "Common",
+	Iron = "Rare",
+	AncientTimber = "Legendary",
+}
+
+local RESOURCE_RARITY_COLORS = {
+	Common = Color3.fromRGB(112, 220, 140),
+	Rare = Color3.fromRGB(91, 170, 255),
+	Legendary = Color3.fromRGB(255, 187, 74),
+}
+
+local function getStandLevelMultiplier(level)
+	local safeLevel = math.clamp(math.floor(tonumber(level) or 1), 1, 50)
+	return 1 + ((safeLevel - 1) * 0.25)
+end
+
 local KEY_TO_SLOT = {
 	[Enum.KeyCode.One] = 1,
 	[Enum.KeyCode.Two] = 2,
@@ -127,6 +150,7 @@ local stopObservingState = nil
 local scheduleRender
 local syncDevilFruitsFromInventory
 local lastToggleLayoutSignature = nil
+local shipUpgradeModal = nil
 
 local uiState = {
 	isOpen = false,
@@ -203,17 +227,298 @@ end
 
 local function getResourceInfo(resourceKey)
 	local food = Economy.Food[resourceKey]
+	local rarity = RESOURCE_RARITY[resourceKey] or "Common"
 	if food then
 		return {
 			displayName = tostring(food.DisplayName or resourceKey),
 			subtitle = "Food",
+			rarity = rarity,
 		}
 	end
 
 	return {
 		displayName = RESOURCE_DISPLAY[resourceKey] or tostring(resourceKey),
 		subtitle = "Material",
+		rarity = rarity,
 	}
+end
+
+local function getRarityLabel(kind, name)
+	if kind == "Chest" then
+		return tostring(name)
+	end
+
+	if kind == "Resource" then
+		local info = getResourceInfo(name)
+		return tostring(info.rarity or "Common")
+	end
+
+	if kind == "DevilFruit" then
+		local fruit = DevilFruits.GetFruit(name)
+		return fruit and tostring(fruit.Rarity or "") or ""
+	end
+
+	if kind == "Brainrot" then
+		local brainrot = Brainrots[name]
+		return brainrot and tostring(brainrot.Rarity or "") or ""
+	end
+
+	if kind == "Gear" then
+		local gear = Gears[name]
+		return gear and tostring(gear.Type or "Gear") or "Gear"
+	end
+
+	return ""
+end
+
+local function getItemSortRank(kind, name)
+	if kind == "Brainrot" or kind == "DevilFruit" then
+		return RARITY_ORDER[getRarityLabel(kind, name)] or 0
+	end
+
+	if kind == "Chest" then
+		return CHEST_ORDER[tostring(name)] or 0
+	end
+
+	if kind == "Resource" then
+		local rarityRank = RARITY_ORDER[getRarityLabel(kind, name)] or 0
+		local resourceRank = RESOURCE_ORDER[tostring(name)] or 0
+		return (rarityRank * 100) + resourceRank
+	end
+
+	if kind == "Gear" then
+		local gear = Gears[name]
+		return math.max(0, tonumber(gear and gear.Price) or 0)
+	end
+
+	return 0
+end
+
+local function getBrainrotLevelForStand(standName)
+	local standsLevels = player:FindFirstChild("StandsLevels")
+	local levelValue = standsLevels and standsLevels:FindFirstChild(tostring(standName))
+	return math.max(1, math.floor(tonumber(levelValue and levelValue.Value) or 1))
+end
+
+local function getClientShipUpgradeLevel()
+	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
+	local plotUpgradeValue = hiddenLeaderstats and hiddenLeaderstats:FindFirstChild("PlotUpgrade")
+	local rawLevel = plotUpgradeValue and plotUpgradeValue:IsA("ValueBase") and plotUpgradeValue.Value or 0
+
+	if PlotUpgradeConfig and PlotUpgradeConfig.ClampLevel then
+		return PlotUpgradeConfig.ClampLevel(rawLevel)
+	end
+
+	return math.max(0, math.floor(tonumber(rawLevel) or 0))
+end
+
+local function getBrainrotIncomePerTick(standName, brainrotName)
+	local info = Brainrots[brainrotName]
+	local baseIncome = tonumber(info and info.Income) or 0
+	if baseIncome <= 0 then
+		return 0
+	end
+
+	local level = getBrainrotLevelForStand(standName)
+	local levelMultiplier = getStandLevelMultiplier(level)
+	local shipUpgradeLevel = getClientShipUpgradeLevel()
+	local slotMultiplier = 1
+	if PlotUpgradeConfig and PlotUpgradeConfig.GetSlotBonusMultiplier then
+		slotMultiplier = tonumber(PlotUpgradeConfig.GetSlotBonusMultiplier(shipUpgradeLevel, tostring(standName))) or 1
+	end
+
+	return math.max(0, baseIncome * levelMultiplier * slotMultiplier)
+end
+
+local function getItemDisplayName(kind, name)
+	if kind == "Chest" then
+		return string.format("%s Chest", tostring(name or "Chest"))
+	end
+
+	if kind == "Resource" then
+		local info = getResourceInfo(name)
+		return tostring(info.displayName or name or "Resource")
+	end
+
+	if kind == "DevilFruit" then
+		local fruit = DevilFruits.GetFruit(name)
+		if fruit and fruit.DisplayName then
+			return tostring(fruit.DisplayName)
+		end
+		return tostring(name or "Devil Fruit")
+	end
+
+	if kind == "Brainrot" then
+		local brainrot = Brainrots[name]
+		if brainrot and brainrot.DisplayName then
+			return tostring(brainrot.DisplayName)
+		end
+		return tostring(name or "Brainrot")
+	end
+
+	if kind == "Gear" then
+		local gear = Gears[name]
+		if gear and gear.DisplayName then
+			return tostring(gear.DisplayName)
+		end
+		return tostring(name or "Gear")
+	end
+
+	return tostring(name or kind or "Unknown Item")
+end
+
+local function compareInventoryKeys(a, b)
+	local stateA = itemState[a]
+	local stateB = itemState[b]
+	if not stateA or not stateB then
+		return tostring(a) < tostring(b)
+	end
+
+	local rankA = getItemSortRank(stateA.kind, stateA.name)
+	local rankB = getItemSortRank(stateB.kind, stateB.name)
+	if rankA ~= rankB then
+		return rankA > rankB
+	end
+
+	if stateA.kind == stateB.kind and stateA.kind == "Brainrot" then
+		local nameA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name) or ""))
+		local nameB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name) or ""))
+		if nameA ~= nameB then
+			return nameA < nameB
+		end
+	end
+
+	if stateA.kind == stateB.kind then
+		if stateA.kind == "Resource" then
+			local resourceOrderA = RESOURCE_ORDER[tostring(stateA.name)] or 0
+			local resourceOrderB = RESOURCE_ORDER[tostring(stateB.name)] or 0
+			if resourceOrderA ~= resourceOrderB then
+				return resourceOrderA > resourceOrderB
+			end
+		elseif stateA.kind == "Chest" then
+			local chestOrderA = CHEST_ORDER[tostring(stateA.name)] or 0
+			local chestOrderB = CHEST_ORDER[tostring(stateB.name)] or 0
+			if chestOrderA ~= chestOrderB then
+				return chestOrderA > chestOrderB
+			end
+		end
+	end
+
+	local quantityA = tonumber(stateA.qty) or (stateA.owned and 1 or 0)
+	local quantityB = tonumber(stateB.qty) or (stateB.owned and 1 or 0)
+	if quantityA ~= quantityB then
+		return quantityA > quantityB
+	end
+
+	local displayA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name) or ""))
+	local displayB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name) or ""))
+	if displayA ~= displayB then
+		return displayA < displayB
+	end
+
+	local acquireA = acquisition[a] or math.huge
+	local acquireB = acquisition[b] or math.huge
+	if acquireA ~= acquireB then
+		return acquireA < acquireB
+	end
+
+	return tostring(a) < tostring(b)
+end
+
+local function countUsableSlotsForFloor(level, floorName)
+	local floorRange = PlotUpgradeConfig.StandFloorRanges[tostring(floorName)]
+	if typeof(floorRange) ~= "table" then
+		return 0
+	end
+
+	local startStand = tonumber(floorRange[1]) or 0
+	local endStand = tonumber(floorRange[2]) or -1
+	local total = 0
+
+	for standNumber = startStand, endStand do
+		if PlotUpgradeConfig.IsStandUsable(level, tostring(standNumber)) then
+			total += 1
+		end
+	end
+
+	return total
+end
+
+local function formatBonusPercent(multiplier)
+	local percent = math.floor(((tonumber(multiplier) or 1) - 1) * 100 + 0.5)
+	return string.format("+%d%%", percent)
+end
+
+local function buildShipUpgradeGainLines(level, description, isMaxLevel)
+	local lines = {}
+	local seen = {}
+	local previousLevel = math.max(0, PlotUpgradeConfig.ClampLevel(level) - 1)
+
+	local function pushLine(text, key)
+		local value = trim(text)
+		local dedupeKey = tostring(key or value)
+		if value == "" or seen[dedupeKey] then
+			return
+		end
+		seen[dedupeKey] = true
+		lines[#lines + 1] = value
+	end
+
+	for _, floorName in ipairs({ "Floor1", "Floor2", "Floor3" }) do
+		local wasUnlocked = PlotUpgradeConfig.IsFloorUnlocked(previousLevel, floorName)
+		local isUnlocked = PlotUpgradeConfig.IsFloorUnlocked(level, floorName)
+		local previousCount = countUsableSlotsForFloor(previousLevel, floorName)
+		local currentCount = countUsableSlotsForFloor(level, floorName)
+		local floorLabel = string.gsub(floorName, "Floor", "Floor ")
+
+		if (not wasUnlocked) and isUnlocked then
+			pushLine(string.format("Unlocked %s", floorLabel), floorName .. ":unlock")
+		end
+
+		if currentCount > previousCount then
+			pushLine(string.format("%s now supports %d usable slots", floorLabel, currentCount), floorName .. ":slots")
+		end
+	end
+
+	local bonusEntries = {}
+	for standName, bonusInfo in pairs(PlotUpgradeConfig.SlotBonuses) do
+		bonusEntries[#bonusEntries + 1] = {
+			standName = standName,
+			info = bonusInfo,
+		}
+	end
+
+	table.sort(bonusEntries, function(a, b)
+		local unlockA = tonumber(a.info.UnlockLevel) or math.huge
+		local unlockB = tonumber(b.info.UnlockLevel) or math.huge
+		if unlockA == unlockB then
+			return tostring(a.standName) < tostring(b.standName)
+		end
+		return unlockA < unlockB
+	end)
+
+	for _, entry in ipairs(bonusEntries) do
+		local bonusInfo = entry.info
+		if tonumber(bonusInfo.UnlockLevel) == level then
+			pushLine(string.format(
+				"%s unlocked on Floor %d Slot %d (%s income)",
+				tostring(bonusInfo.Label or "Bonus Slot"),
+				tonumber(bonusInfo.Floor) or 1,
+				tonumber(bonusInfo.Slot) or 1,
+				formatBonusPercent(bonusInfo.Multiplier)
+			), tostring(entry.standName) .. ":bonus")
+		end
+	end
+
+	if isMaxLevel then
+		pushLine("Ship frame reinforced to maximum level", "max")
+	end
+
+	if #lines == 0 then
+		pushLine(description ~= "" and description or "Ship upgraded successfully", "fallback")
+	end
+
+	return lines
 end
 
 local function getDisplayName(kind, name)
@@ -301,17 +606,8 @@ local function getAccentColor(kind, name, state)
 	end
 
 	if kind == "Resource" then
-		if state and state.resourceType == "Food" then
-			return Color3.fromRGB(113, 216, 146)
-		end
-
-		if name == "Iron" then
-			return Color3.fromRGB(156, 172, 196)
-		end
-		if name == "AncientTimber" then
-			return Color3.fromRGB(132, 197, 146)
-		end
-		return Color3.fromRGB(191, 143, 86)
+		local rarity = getResourceInfo(name).rarity
+		return RESOURCE_RARITY_COLORS[rarity] or RESOURCE_RARITY_COLORS.Common
 	end
 
 	return Color3.fromRGB(93, 203, 200)
@@ -413,46 +709,69 @@ local function buildCaptainLogData(query)
 	end
 
 	for standName in pairs(standNames) do
-		local slotFolder = slotsFolder and slotsFolder:FindFirstChild(standName)
-		local standIncomeFolder = incomeFolder and incomeFolder:FindFirstChild(standName)
-		local brainrotName = tostring(readChildValue(slotFolder, "BrainrotName") or readChildValue(standIncomeFolder, "BrainrotName") or "")
+		local ok, entry, collectable = pcall(function()
+			local slotFolder = slotsFolder and slotsFolder:FindFirstChild(standName)
+			local standIncomeFolder = incomeFolder and incomeFolder:FindFirstChild(standName)
+			local brainrotName = tostring(readChildValue(slotFolder, "BrainrotName") or readChildValue(standIncomeFolder, "BrainrotName") or "")
 
-		if brainrotName ~= "" then
-			totalPlaced += 1
-			local incomePerTick = math.max(0, tonumber(readChildValue(slotFolder, "Income")) or 0)
-			local collectable = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
+			if brainrotName == "" then
+				return nil, 0
+			end
+
+			local standLevel = getBrainrotLevelForStand(standName)
+			local incomePerTick = getBrainrotIncomePerTick(standName, brainrotName)
+			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
 			local subtitle = getSubtitle("Brainrot", brainrotName)
 			local displayName = getDisplayName("Brainrot", brainrotName)
 
-			local entry = {
+			local nextEntry = {
 				key = standName,
 				standName = standName,
 				brainrotName = brainrotName,
 				displayName = displayName,
 				subtitle = subtitle,
-				footer = "",
+				footer = string.format("%s  |  %s D ready", standName, formatNumber(incomeToCollect)),
 				image = getIcon("Brainrot", brainrotName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				accentColor = getAccentColor("Brainrot", brainrotName),
+				level = standLevel,
 				incomePerTick = incomePerTick,
-				collectable = collectable,
+				collectable = incomeToCollect,
 			}
 
-			entry.footer = string.format("%s  |  %s D ready", standName, formatNumber(collectable))
+			return nextEntry, incomeToCollect
+		end)
 
+		if ok and entry then
+			totalPlaced += 1
+			totalCollectable += collectable or 0
 			if matchesQuery(entry, query) then
 				entries[#entries + 1] = entry
 			end
-
-			totalCollectable += collectable
 		end
 	end
 
 	table.sort(entries, function(a, b)
-		if a.incomePerTick == b.incomePerTick then
-			return tostring(a.standName) < tostring(b.standName)
+		local rankA = RARITY_ORDER[tostring(a.subtitle or "")] or 0
+		local rankB = RARITY_ORDER[tostring(b.subtitle or "")] or 0
+		if rankA ~= rankB then
+			return rankA > rankB
 		end
-		return a.incomePerTick > b.incomePerTick
+		local nameA = string.lower(tostring(a.displayName or ""))
+		local nameB = string.lower(tostring(b.displayName or ""))
+		if nameA ~= nameB then
+			return nameA < nameB
+		end
+		if (a.level or 0) ~= (b.level or 0) then
+			return (a.level or 0) > (b.level or 0)
+		end
+		if a.collectable ~= b.collectable then
+			return (a.collectable or 0) > (b.collectable or 0)
+		end
+		if a.incomePerTick ~= b.incomePerTick then
+			return (a.incomePerTick or 0) > (b.incomePerTick or 0)
+		end
+		return tostring(a.standName) < tostring(b.standName)
 	end)
 
 	return {
@@ -486,50 +805,23 @@ local function buildLists()
 	end
 
 	table.sort(gearsList, function(a, b)
-		local gearA = Gears[itemState[a].name]
-		local gearB = Gears[itemState[b].name]
-		local priorityA = gearA and gearA.Type == "Weapon" and 1 or (gearA and gearA.Type == "Speed" and 2 or 3)
-		local priorityB = gearB and gearB.Type == "Weapon" and 1 or (gearB and gearB.Type == "Speed" and 2 or 3)
-		if priorityA == priorityB then
-			return tostring(itemState[a].name) < tostring(itemState[b].name)
-		end
-		return priorityA < priorityB
+		return compareInventoryKeys(a, b)
 	end)
 
 	table.sort(chestsList, function(a, b)
-		local orderA = CHEST_ORDER[tostring(itemState[a].name)] or 99
-		local orderB = CHEST_ORDER[tostring(itemState[b].name)] or 99
-		if orderA == orderB then
-			return tostring(itemState[a].name) < tostring(itemState[b].name)
-		end
-		return orderA < orderB
+		return compareInventoryKeys(a, b)
 	end)
 
 	table.sort(brainrotsList, function(a, b)
-		local acquireA = acquisition[a] or math.huge
-		local acquireB = acquisition[b] or math.huge
-		if acquireA == acquireB then
-			return tostring(itemState[a].name) < tostring(itemState[b].name)
-		end
-		return acquireA < acquireB
+		return compareInventoryKeys(a, b)
 	end)
 
 	table.sort(devilFruitList, function(a, b)
-		local rankA = RARITY_ORDER[getSubtitle("DevilFruit", itemState[a].name)] or 0
-		local rankB = RARITY_ORDER[getSubtitle("DevilFruit", itemState[b].name)] or 0
-		if rankA == rankB then
-			return getDisplayName("DevilFruit", itemState[a].name) < getDisplayName("DevilFruit", itemState[b].name)
-		end
-		return rankA > rankB
+		return compareInventoryKeys(a, b)
 	end)
 
 	table.sort(resourceList, function(a, b)
-		local orderA = RESOURCE_ORDER[tostring(itemState[a].name)] or 99
-		local orderB = RESOURCE_ORDER[tostring(itemState[b].name)] or 99
-		if orderA == orderB then
-			return tostring(itemState[a].name) < tostring(itemState[b].name)
-		end
-		return orderA < orderB
+		return compareInventoryKeys(a, b)
 	end)
 
 	return gearsList, chestsList, brainrotsList, devilFruitList, resourceList
@@ -668,7 +960,16 @@ local function buildRenderData()
 		end
 	end
 
-	local captainLog = buildCaptainLogData(query)
+	local captainLogOk, captainLog = pcall(buildCaptainLogData, query)
+	if not captainLogOk or typeof(captainLog) ~= "table" then
+		captainLog = {
+			entries = {},
+			filteredCount = 0,
+			placedCount = 0,
+			totalCollectable = 0,
+			totalCount = 0,
+		}
+	end
 
 	return {
 		hotbarSlots = hotbarSlots,
@@ -688,6 +989,7 @@ local function buildRenderData()
 		filteredCount = #items,
 		totalCount = #activeKeys,
 		query = uiState.query,
+		shipUpgradeModal = shipUpgradeModal,
 	}
 end
 
@@ -826,6 +1128,7 @@ local function bindShipDataTracking()
 	local watchedRoots = {
 		IncomeBrainrots = true,
 		Inventory = true,
+		StandsLevels = true,
 		Ship = true,
 		leaderstats = true,
 		Materials = true,
@@ -867,6 +1170,7 @@ local function render()
 		filteredCount = data.filteredCount,
 		totalCount = data.totalCount,
 		query = data.query,
+		shipUpgradeModal = data.shipUpgradeModal,
 		toggleLayout = getToggleLayout(),
 		toggleIcon = getLegacyInventoryIcon(),
 		onToggle = function()
@@ -890,6 +1194,10 @@ local function render()
 			if entry and entry.kind ~= "Resource" then
 				equipRemote:FireServer(entry.kind, entry.name)
 			end
+		end,
+		onDismissShipUpgradeModal = function()
+			shipUpgradeModal = nil
+			render()
 		end,
 	}), playerGui))
 end
@@ -1084,6 +1392,25 @@ trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 		end
 	end
 
+	scheduleRender()
+end, cleanupConnections)
+
+trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+
+	local level = PlotUpgradeConfig.ClampLevel(payload.Level)
+	local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
+	local isMaxLevel = payload.IsMaxLevel == true
+	local gainLines = buildShipUpgradeGainLines(level, description, isMaxLevel)
+
+	shipUpgradeModal = {
+		Title = string.format("Ship upgraded to Lv %d", level),
+		AccentText = isMaxLevel and "Ship Max Level" or "Ship Upgrade Complete",
+		Lines = gainLines,
+		IsMaxLevel = isMaxLevel,
+	}
 	scheduleRender()
 end, cleanupConnections)
 

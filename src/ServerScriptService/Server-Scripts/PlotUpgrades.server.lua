@@ -1,6 +1,9 @@
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 
 local PlotSystem = workspace:WaitForChild("PlotSystem")
 local PlotsFolder = PlotSystem:WaitForChild("Plots")
@@ -18,28 +21,34 @@ end
 
 local function getUpgradeValue(player)
 	local stats = getPlayerStats(player)
-	if not stats then return nil end
-	local v = stats:FindFirstChild("PlotUpgrade")
-	if v and v:IsA("NumberValue") then
-		return v
+	if not stats then
+		return nil
 	end
+
+	local valueObject = stats:FindFirstChild("PlotUpgrade")
+	if valueObject and valueObject:IsA("NumberValue") then
+		return valueObject
+	end
+
 	return nil
 end
 
 local function getPlot(player)
-	for _, m in ipairs(PlotsFolder:GetChildren()) do
-		if m:IsA("Model") then
-			local ownerId = m:GetAttribute("OwnerUserId")
+	for _, plot in ipairs(PlotsFolder:GetChildren()) do
+		if plot:IsA("Model") then
+			local ownerId = plot:GetAttribute("OwnerUserId")
 			if ownerId == player.UserId then
-				return m
+				return plot
 			end
 		end
 	end
-	for _, m in ipairs(PlotsFolder:GetChildren()) do
-		if m:IsA("Model") and m.Name == player.Name then
-			return m
+
+	for _, plot in ipairs(PlotsFolder:GetChildren()) do
+		if plot:IsA("Model") and plot.Name == player.Name then
+			return plot
 		end
 	end
+
 	return nil
 end
 
@@ -54,13 +63,13 @@ end
 
 local function getHiddenFolder(plot)
 	local id = ensurePlotGuid(plot)
-	local f = HiddenRoot:FindFirstChild(id)
-	if not f then
-		f = Instance.new("Folder")
-		f.Name = id
-		f.Parent = HiddenRoot
+	local folder = HiddenRoot:FindFirstChild(id)
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = id
+		folder.Parent = HiddenRoot
 	end
-	return f
+	return folder
 end
 
 local function moveTo(inst, parent)
@@ -69,127 +78,187 @@ local function moveTo(inst, parent)
 	end
 end
 
-local function computeMaxStand(upgrade)
-	local addFloor2 = math.clamp(upgrade - 1, 0, 8)
-	local addFloor3 = math.clamp(upgrade - 10, 0, 8)
-	return 8 + addFloor2 + addFloor3
-end
-
 local function findFloor(map, hidden, floorName)
 	if map then
-		local f = map:FindFirstChild(floorName, true)
-		if f then return f, "map" end
+		local floor = map:FindFirstChild(floorName, true)
+		if floor then
+			return floor, "map"
+		end
 	end
+
 	if hidden then
-		local f = hidden:FindFirstChild(floorName)
-		if f then return f, "hidden" end
+		local floor = hidden:FindFirstChild(floorName)
+		if floor then
+			return floor, "hidden"
+		end
 	end
+
 	return nil, nil
 end
 
-local function applyUpgrade(player, upgrade)
+local function setStandSlotAttributes(standModel, upgradeLevel)
+	if not standModel or not standModel:IsA("Model") then
+		return
+	end
+
+	local standName = standModel.Name
+	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName)
+	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName)
+	local bonusInfo = PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName)
+	local unlockLevel = PlotUpgradeConfig.GetStandUnlockLevel(standName)
+	local bonusPercent = 0
+
+	if bonusInfo then
+		bonusPercent = math.max(0, math.floor((((tonumber(bonusInfo.Multiplier) or 1) - 1) * 100) + 0.5))
+	end
+
+	standModel:SetAttribute("ShipSlotVisible", isVisible)
+	standModel:SetAttribute("ShipSlotUsable", isUsable)
+	standModel:SetAttribute("ShipSlotLocked", isVisible and not isUsable)
+	standModel:SetAttribute("ShipSlotRole", bonusInfo and tostring(bonusInfo.Label or "") or "")
+	standModel:SetAttribute("ShipSlotBonusPercent", bonusPercent)
+	standModel:SetAttribute("ShipSlotUnlockLevel", unlockLevel)
+end
+
+local function applyUpgrade(player, upgradeLevel)
+	upgradeLevel = PlotUpgradeConfig.ClampLevel(upgradeLevel)
+
 	local plot = getPlot(player)
-	if not plot then return false end
+	if not plot then
+		return false
+	end
 
 	local hidden = getHiddenFolder(plot)
 	local map = plot:FindFirstChild("Map")
 	local stands = plot:FindFirstChild("Stands")
-
-	local did = false
+	local didChange = false
 
 	if map then
 		local floor2, where2 = findFloor(map, hidden, "Floor2")
 		local floor3, where3 = findFloor(map, hidden, "Floor3")
 
 		if floor2 then
-			if upgrade >= 1 then
-				if where2 == "hidden" then moveTo(floor2, map) did = true end
+			if PlotUpgradeConfig.IsFloorUnlocked(upgradeLevel, "Floor2") then
+				if where2 == "hidden" then
+					moveTo(floor2, map)
+					didChange = true
+				end
 			else
-				if where2 == "map" then moveTo(floor2, hidden) did = true end
+				if where2 == "map" then
+					moveTo(floor2, hidden)
+					didChange = true
+				end
 			end
 		end
 
 		if floor3 then
-			if upgrade >= 10 then
-				if where3 == "hidden" then moveTo(floor3, map) did = true end
+			if PlotUpgradeConfig.IsFloorUnlocked(upgradeLevel, "Floor3") then
+				if where3 == "hidden" then
+					moveTo(floor3, map)
+					didChange = true
+				end
 			else
-				if where3 == "map" then moveTo(floor3, hidden) did = true end
-			end
-		end
-	end
-
-	if stands then
-		local maxStand = computeMaxStand(upgrade)
-
-		for _, child in ipairs(stands:GetChildren()) do
-			local n = tonumber(child.Name)
-			if n and n > maxStand then
-				moveTo(child, hidden)
-				did = true
-			end
-		end
-
-		for i = 1, maxStand do
-			local name = tostring(i)
-			if not stands:FindFirstChild(name) then
-				local h = hidden:FindFirstChild(name)
-				if h then
-					moveTo(h, stands)
-					did = true
+				if where3 == "map" then
+					moveTo(floor3, hidden)
+					didChange = true
 				end
 			end
 		end
 	end
 
-	return did
+	if stands then
+		for _, child in ipairs(stands:GetChildren()) do
+			local standName = child.Name
+			if tonumber(standName) then
+				setStandSlotAttributes(child, upgradeLevel)
+				if not PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName) then
+					moveTo(child, hidden)
+					didChange = true
+				end
+			end
+		end
+
+		for _, child in ipairs(hidden:GetChildren()) do
+			local standName = child.Name
+			if tonumber(standName) then
+				setStandSlotAttributes(child, upgradeLevel)
+				if PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName) then
+					moveTo(child, stands)
+					didChange = true
+				end
+			end
+		end
+
+		for _, child in ipairs(stands:GetChildren()) do
+			if tonumber(child.Name) then
+				setStandSlotAttributes(child, upgradeLevel)
+			end
+		end
+	end
+
+	return didChange
 end
 
 local function waitForPlot(player, timeout)
-	local t0 = os.clock()
+	local startTime = os.clock()
 	while player.Parent do
-		if getPlot(player) then return true end
-		if timeout and (os.clock() - t0) >= timeout then return false end
+		if getPlot(player) then
+			return true
+		end
+		if timeout and (os.clock() - startTime) >= timeout then
+			return false
+		end
 		task.wait(0.2)
 	end
 	return false
 end
 
 local function setupPlayer(player)
-	local up
-	while player.Parent and not up do
-		up = getUpgradeValue(player)
-		if not up then task.wait(0.2) end
+	local upgradeValue
+	while player.Parent and not upgradeValue do
+		upgradeValue = getUpgradeValue(player)
+		if not upgradeValue then
+			task.wait(0.2)
+		end
 	end
-	if not player.Parent or not up then return end
+	if not player.Parent or not upgradeValue then
+		return
+	end
 
 	waitForPlot(player, 20)
 
 	local pending = false
 	local function scheduleApply()
-		if pending then return end
+		if pending then
+			return
+		end
 		pending = true
 		task.defer(function()
 			pending = false
-			if player.Parent and up.Parent then
-				applyUpgrade(player, up.Value)
+			if player.Parent and upgradeValue.Parent then
+				applyUpgrade(player, upgradeValue.Value)
 			end
 		end)
 	end
 
 	scheduleApply()
 
-	local upConn = up:GetPropertyChangedSignal("Value"):Connect(function()
+	local upgradeConn = upgradeValue:GetPropertyChangedSignal("Value"):Connect(function()
 		scheduleApply()
 	end)
 
 	local plotConn
 	local function hookPlot()
 		local plot = getPlot(player)
-		if not plot then return end
-		if plotConn then plotConn:Disconnect() end
+		if not plot then
+			return
+		end
+		if plotConn then
+			plotConn:Disconnect()
+		end
 		plotConn = plot.DescendantAdded:Connect(function(inst)
-			local n = inst.Name
-			if n == "Map" or n == "Stands" or n == "Floor2" or n == "Floor3" or tonumber(n) then
+			local name = inst.Name
+			if name == "Map" or name == "Stands" or name == "Floor2" or name == "Floor3" or tonumber(name) then
 				scheduleApply()
 			end
 		end)
@@ -197,9 +266,8 @@ local function setupPlayer(player)
 
 	hookPlot()
 
-	local retryConn
-	retryConn = task.spawn(function()
-		while player.Parent and up.Parent do
+	task.spawn(function()
+		while player.Parent and upgradeValue.Parent do
 			if getPlot(player) then
 				hookPlot()
 				scheduleApply()
@@ -211,13 +279,17 @@ local function setupPlayer(player)
 
 	player.AncestryChanged:Connect(function(_, parent)
 		if not parent then
-			if upConn then upConn:Disconnect() end
-			if plotConn then plotConn:Disconnect() end
+			if upgradeConn then
+				upgradeConn:Disconnect()
+			end
+			if plotConn then
+				plotConn:Disconnect()
+			end
 		end
 	end)
 end
 
 Players.PlayerAdded:Connect(setupPlayer)
-for _, p in ipairs(Players:GetPlayers()) do
-	task.spawn(setupPlayer, p)
+for _, player in ipairs(Players:GetPlayers()) do
+	task.spawn(setupPlayer, player)
 end

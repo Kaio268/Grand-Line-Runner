@@ -1,6 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local GuiService = game:GetService("GuiService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -267,14 +266,17 @@ local function useInteractiveState(enabled, allowPress)
 		end
 
 		local mousePosition = UserInputService:GetMouseLocation()
-		local hitObjects = GuiService:GetGuiObjectsAtPosition(mousePosition.X, mousePosition.Y)
-		for _, guiObject in ipairs(hitObjects) do
-			if guiObject == target or guiObject:IsDescendantOf(target) then
-				return true
-			end
-		end
+		local absolutePosition = target.AbsolutePosition
+		local absoluteSize = target.AbsoluteSize
+		local minX = absolutePosition.X
+		local minY = absolutePosition.Y
+		local maxX = minX + absoluteSize.X
+		local maxY = minY + absoluteSize.Y
 
-		return false
+		return mousePosition.X >= minX
+			and mousePosition.X <= maxX
+			and mousePosition.Y >= minY
+			and mousePosition.Y <= maxY
 	end
 
 	React.useEffect(function()
@@ -1438,6 +1440,193 @@ local function captainsLogRow(props)
 	})
 end
 
+local function shipUpgradeModal(props)
+	local modal = props.modal or {}
+	local lines = modal.Lines or modal.lines or {}
+	local accent = modal.IsMaxLevel and PALETTE.Gold or PALETTE.Green
+	local listChildren = {
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+
+	if #lines == 0 then
+		lines = { "Ship upgraded successfully." }
+	end
+
+	for index, line in ipairs(lines) do
+		listChildren["Gain" .. tostring(index)] = e("Frame", {
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundColor3 = PALETTE.PanelAlt,
+			BackgroundTransparency = 0.04,
+			BorderSizePixel = 0,
+			LayoutOrder = index,
+			Size = UDim2.new(1, 0, 0, 0),
+			ZIndex = 84,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 12),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = 0.72,
+				Thickness = 1,
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 10),
+				PaddingBottom = UDim.new(0, 10),
+				PaddingLeft = UDim.new(0, 14),
+				PaddingRight = UDim.new(0, 14),
+			}),
+			Dot = e("Frame", {
+				BackgroundColor3 = accent,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(0, 7),
+				Size = UDim2.fromOffset(8, 8),
+				ZIndex = 85,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 999),
+				}),
+			}),
+			Text = e("TextLabel", {
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamMedium,
+				Position = UDim2.fromOffset(18, 0),
+				Size = UDim2.new(1, -18, 0, 0),
+				Text = tostring(line),
+				TextColor3 = PALETTE.Text,
+				TextSize = 16,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				ZIndex = 85,
+			}),
+		})
+	end
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 70,
+	}, {
+		Overlay = e("TextButton", {
+			AutoButtonColor = false,
+			BackgroundColor3 = PALETTE.Background,
+			BackgroundTransparency = 0.26,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			Text = "",
+			ZIndex = 70,
+		}),
+		Panel = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundColor3 = PALETTE.InkSoft,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(500, 0),
+			ZIndex = 80,
+		}, {
+			SizeConstraint = e("UISizeConstraint", {
+				MaxSize = Vector2.new(540, 720),
+				MinSize = Vector2.new(440, 0),
+			}),
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 18),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = 0.42,
+				Thickness = 1.2,
+			}),
+			Gradient = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 33, 56)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(13, 21, 38)),
+				}),
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 18),
+				PaddingBottom = UDim.new(0, 18),
+				PaddingLeft = UDim.new(0, 18),
+				PaddingRight = UDim.new(0, 18),
+			}),
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Vertical,
+				Padding = UDim.new(0, 12),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+			Eyebrow = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = 1,
+				Size = UDim2.new(1, 0, 0, 16),
+				Text = tostring(modal.AccentText or "Ship Upgrade Complete"),
+				TextColor3 = accent,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 81,
+			}),
+			Title = e("TextLabel", {
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Cartoon,
+				LayoutOrder = 2,
+				Size = UDim2.new(1, 0, 0, 0),
+				Text = tostring(modal.Title or "Ship upgraded"),
+				TextColor3 = PALETTE.Cream,
+				TextSize = 34,
+				TextStrokeTransparency = 0.62,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				ZIndex = 81,
+			}),
+			Body = e("Frame", {
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				LayoutOrder = 3,
+				Size = UDim2.new(1, 0, 0, 0),
+				ZIndex = 81,
+			}, listChildren),
+			ActionRow = e("Frame", {
+				BackgroundTransparency = 1,
+				LayoutOrder = 4,
+				Size = UDim2.new(1, 0, 0, 44),
+				ZIndex = 81,
+			}, {
+				Okay = e("TextButton", {
+					AnchorPoint = Vector2.new(1, 0),
+					AutoButtonColor = false,
+					BackgroundColor3 = accent,
+					BorderSizePixel = 0,
+					Position = UDim2.new(1, 0, 0, 0),
+					Size = UDim2.fromOffset(136, 42),
+					Text = "Okay",
+					TextColor3 = Color3.fromRGB(14, 21, 22),
+					TextSize = 18,
+					Font = Enum.Font.GothamBold,
+					ZIndex = 82,
+					[React.Event.Activated] = props.onDismiss,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 12),
+					}),
+					Stroke = e("UIStroke", {
+						Color = Color3.fromRGB(255, 255, 255),
+						Transparency = 0.86,
+					}),
+				}),
+			}),
+		}),
+	})
+end
+
 local function App(props)
 	local summary = props.summary or {}
 	local activeView = props.activeView or "Inventory"
@@ -1625,9 +1814,9 @@ local function App(props)
 		local ledgerEntries = {
 			{ label = "Doubloons", value = formatNumber(summary.doubloons or 0) .. " D", valueColor3 = PALETTE.Gold },
 			{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
-			{ label = "Timber", value = formatNumber(summary.timber or 0), valueColor3 = Color3.fromRGB(205, 164, 102) },
-			{ label = "Iron", value = formatNumber(summary.iron or 0), valueColor3 = Color3.fromRGB(190, 200, 224) },
-			{ label = "Ancient Timber", value = formatNumber(summary.ancientTimber or 0), valueColor3 = PALETTE.Green },
+			{ label = "Timber", value = formatNumber(summary.timber or 0), valueColor3 = Color3.fromRGB(112, 220, 140) },
+			{ label = "Iron", value = formatNumber(summary.iron or 0), valueColor3 = Color3.fromRGB(91, 170, 255) },
+			{ label = "Ancient Timber", value = formatNumber(summary.ancientTimber or 0), valueColor3 = Color3.fromRGB(255, 187, 74) },
 		}
 
 		for index, entry in ipairs(ledgerEntries) do
@@ -2067,6 +2256,13 @@ local function App(props)
 					}, footerChildren),
 				}),
 			}),
+		})
+	end
+
+	if props.shipUpgradeModal then
+		children.ShipUpgradeModal = e(shipUpgradeModal, {
+			modal = props.shipUpgradeModal,
+			onDismiss = props.onDismissShipUpgradeModal,
 		})
 	end
 

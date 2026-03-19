@@ -6,6 +6,7 @@ local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChil
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 
 local Service = {}
 
@@ -146,6 +147,20 @@ local function syncPaths(player, replica, changedPaths)
 	end
 
 	DataManager:UpdateData(player)
+end
+
+local function normalizeMaterialsTable(materials)
+	if typeof(materials) ~= "table" then
+		materials = {}
+	end
+
+	materials.Timber = math.max(0, tonumber(materials.Timber) or tonumber(materials.CommonShipMaterial) or 0)
+	materials.Iron = math.max(0, tonumber(materials.Iron) or tonumber(materials.RareShipMaterial) or 0)
+	materials.AncientTimber = math.max(0, tonumber(materials.AncientTimber) or 0)
+	materials.CommonShipMaterial = materials.Timber
+	materials.RareShipMaterial = materials.Iron
+
+	return materials
 end
 
 local function getShipIncomeMultiplier(level)
@@ -438,7 +453,7 @@ local function buildState(player)
 	local unopenedChests = dataRoot.UnopenedChests or {}
 	local crewInventory = dataRoot.CrewInventory or {}
 	local foodInventory = dataRoot.FoodInventory or {}
-	local materials = dataRoot.Materials or {}
+	local materials = normalizeMaterialsTable(dataRoot.Materials)
 	local leaderstats = dataRoot.leaderstats or {}
 	local devilFruits = ((dataRoot.Inventory or {}).DevilFruits) or {}
 
@@ -487,8 +502,11 @@ local function buildState(player)
 			SeaBeastMeat = tonumber(foodInventory.SeaBeastMeat) or 0,
 		},
 		Materials = {
-			CommonShipMaterial = tonumber(materials.CommonShipMaterial) or 0,
-			RareShipMaterial = tonumber(materials.RareShipMaterial) or 0,
+			Timber = tonumber(materials.Timber) or 0,
+			Iron = tonumber(materials.Iron) or 0,
+			AncientTimber = tonumber(materials.AncientTimber) or 0,
+			CommonShipMaterial = tonumber(materials.Timber) or 0,
+			RareShipMaterial = tonumber(materials.Iron) or 0,
 		},
 		DevilFruitCount = devilFruitCount,
 		Crews = crewSummaries,
@@ -715,7 +733,8 @@ local function openChest(player, requestedChestId)
 	local foodRewards = rewards.Food or {}
 	local materialRewards = rewards.Materials or {}
 	local foodInventory = dataRoot.FoodInventory
-	local materials = dataRoot.Materials
+	local materials = normalizeMaterialsTable(dataRoot.Materials)
+	dataRoot.Materials = materials
 	local leaderstats = dataRoot.leaderstats
 	local totalStats = dataRoot.TotalStats
 	local changedPaths = {}
@@ -728,6 +747,7 @@ local function openChest(player, requestedChestId)
 	for materialKey, amount in pairs(materialRewards) do
 		materials[materialKey] = math.max(0, tonumber(materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
 	end
+	normalizeMaterialsTable(materials)
 	changedPaths[#changedPaths + 1] = { Path = { "Materials" }, Value = materials }
 
 	local doubloonReward = math.max(0, tonumber(rewards.Doubloons) or 0)
@@ -763,6 +783,16 @@ local function openChest(player, requestedChestId)
 	local rewardParts = {}
 	for foodKey, amount in pairs(foodRewards) do
 		rewardParts[#rewardParts + 1] = string.format("%dx %s", amount, Economy.Food[foodKey].DisplayName)
+	end
+	for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder) do
+		local amount = math.max(0, tonumber(materialRewards[materialKey]) or 0)
+		if amount > 0 then
+			rewardParts[#rewardParts + 1] = string.format(
+				"%dx %s",
+				amount,
+				tostring(PlotUpgradeConfig.MaterialDisplayNames[materialKey] or materialKey)
+			)
+		end
 	end
 	if doubloonReward > 0 then
 		rewardParts[#rewardParts + 1] = string.format("%d Doubloons", doubloonReward)
