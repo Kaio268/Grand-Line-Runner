@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -151,6 +152,52 @@ local scheduleRender
 local syncDevilFruitsFromInventory
 local lastToggleLayoutSignature = nil
 local shipUpgradeModal = nil
+local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
+local MODAL_BLOCKED_INPUTS = {
+	Enum.UserInputType.MouseButton1,
+	Enum.UserInputType.MouseButton2,
+	Enum.UserInputType.MouseWheel,
+	Enum.UserInputType.Touch,
+	Enum.KeyCode.E,
+	Enum.KeyCode.F,
+	Enum.KeyCode.Backquote,
+	Enum.KeyCode.One,
+	Enum.KeyCode.Two,
+	Enum.KeyCode.Three,
+	Enum.KeyCode.Four,
+	Enum.KeyCode.Five,
+	Enum.KeyCode.Six,
+	Enum.KeyCode.Seven,
+	Enum.KeyCode.Eight,
+	Enum.KeyCode.Nine,
+	Enum.KeyCode.Zero,
+	Enum.KeyCode.ButtonA,
+	Enum.KeyCode.ButtonB,
+	Enum.KeyCode.ButtonX,
+	Enum.KeyCode.ButtonY,
+}
+local modalInputSinkBound = false
+
+local function sinkModalInput()
+	return Enum.ContextActionResult.Sink
+end
+
+local function updateModalInputCapture()
+	local modalOpen = shipUpgradeModal ~= nil
+	if modalOpen and not modalInputSinkBound then
+		ContextActionService:BindActionAtPriority(
+			MODAL_INPUT_SINK_ACTION,
+			sinkModalInput,
+			false,
+			Enum.ContextActionPriority.High.Value,
+			table.unpack(MODAL_BLOCKED_INPUTS)
+		)
+		modalInputSinkBound = true
+	elseif (not modalOpen) and modalInputSinkBound then
+		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)
+		modalInputSinkBound = false
+	end
+end
 
 local uiState = {
 	isOpen = false,
@@ -1174,29 +1221,45 @@ local function render()
 		toggleLayout = getToggleLayout(),
 		toggleIcon = getLegacyInventoryIcon(),
 		onToggle = function()
+			if shipUpgradeModal ~= nil then
+				return
+			end
 			uiState.isOpen = not uiState.isOpen
 			render()
 		end,
 		onSelectView = function(viewKey)
+			if shipUpgradeModal ~= nil then
+				return
+			end
 			uiState.activeView = viewKey
 			uiState.query = ""
 			render()
 		end,
 		onSelectCategory = function(categoryKey)
+			if shipUpgradeModal ~= nil then
+				return
+			end
 			uiState.activeCategory = categoryKey
 			render()
 		end,
 		onQueryChanged = function(nextQuery)
+			if shipUpgradeModal ~= nil then
+				return
+			end
 			uiState.query = nextQuery
 			render()
 		end,
 		onActivateItem = function(entry)
+			if shipUpgradeModal ~= nil then
+				return
+			end
 			if entry and entry.kind ~= "Resource" then
 				equipRemote:FireServer(entry.kind, entry.name)
 			end
 		end,
 		onDismissShipUpgradeModal = function()
 			shipUpgradeModal = nil
+			updateModalInputCapture()
 			render()
 		end,
 	}), playerGui))
@@ -1400,6 +1463,10 @@ trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
 		return
 	end
 
+	if shipUpgradeModal ~= nil then
+		return
+	end
+
 	local level = PlotUpgradeConfig.ClampLevel(payload.Level)
 	local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
 	local isMaxLevel = payload.IsMaxLevel == true
@@ -1411,6 +1478,7 @@ trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
 		Lines = gainLines,
 		IsMaxLevel = isMaxLevel,
 	}
+	updateModalInputCapture()
 	scheduleRender()
 end, cleanupConnections)
 
@@ -1421,7 +1489,7 @@ stopObservingState = MetaClient.ObserveState(function(state)
 end)
 
 trackConnection(UserInputService.InputBegan, function(input, gameProcessed)
-	if gameProcessed or UserInputService:GetFocusedTextBox() then
+	if shipUpgradeModal ~= nil or gameProcessed or UserInputService:GetFocusedTextBox() then
 		return
 	end
 
@@ -1481,6 +1549,10 @@ task.defer(scheduleRender)
 
 script.Destroying:Connect(function()
 	destroyed = true
+	if modalInputSinkBound then
+		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)
+		modalInputSinkBound = false
+	end
 	disconnectAll(cleanupConnections)
 	disconnectAll(characterConnections)
 	disconnectAll(hudLayoutConnections)

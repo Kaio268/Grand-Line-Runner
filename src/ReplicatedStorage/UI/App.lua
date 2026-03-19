@@ -1508,118 +1508,138 @@ local function shipUpgradeModal(props)
 		})
 	end
 
-	return e("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromScale(1, 1),
-		ZIndex = 70,
+	return e("ScreenGui", {
+		Name = "ReactShipUpgradeModal",
+		DisplayOrder = 500,
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Overlay = e("TextButton", {
-			AutoButtonColor = false,
-			BackgroundColor3 = PALETTE.Background,
-			BackgroundTransparency = 0.26,
-			BorderSizePixel = 0,
+		ModalRoot = e("Frame", {
+			Active = true,
+			BackgroundTransparency = 1,
 			Size = UDim2.fromScale(1, 1),
-			Text = "",
 			ZIndex = 70,
-		}),
-		Panel = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			AutomaticSize = Enum.AutomaticSize.Y,
-			BackgroundColor3 = PALETTE.InkSoft,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(500, 0),
-			ZIndex = 80,
 		}, {
-			SizeConstraint = e("UISizeConstraint", {
-				MaxSize = Vector2.new(540, 720),
-				MinSize = Vector2.new(440, 0),
+			Backdrop = e("Frame", {
+				Active = true,
+				BackgroundColor3 = PALETTE.Background,
+				BackgroundTransparency = 0.26,
+				BorderSizePixel = 0,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = 70,
 			}),
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 18),
-			}),
-			Stroke = e("UIStroke", {
-				Color = accent,
-				Transparency = 0.42,
-				Thickness = 1.2,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 33, 56)),
-					ColorSequenceKeypoint.new(1, Color3.fromRGB(13, 21, 38)),
-				}),
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 18),
-				PaddingBottom = UDim.new(0, 18),
-				PaddingLeft = UDim.new(0, 18),
-				PaddingRight = UDim.new(0, 18),
-			}),
-			List = e("UIListLayout", {
-				FillDirection = Enum.FillDirection.Vertical,
-				Padding = UDim.new(0, 12),
-				SortOrder = Enum.SortOrder.LayoutOrder,
-			}),
-			Eyebrow = e("TextLabel", {
+			InputBlocker = e("Frame", {
+				Active = true,
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				LayoutOrder = 1,
-				Size = UDim2.new(1, 0, 0, 16),
-				Text = tostring(modal.AccentText or "Ship Upgrade Complete"),
-				TextColor3 = accent,
-				TextSize = 12,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = 81,
+				BorderSizePixel = 0,
+				Selectable = false,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = 71,
+				[React.Event.InputBegan] = function() end,
+				[React.Event.InputChanged] = function() end,
+				[React.Event.InputEnded] = function() end,
 			}),
-			Title = e("TextLabel", {
+			Panel = e("Frame", {
+				Active = true,
+				AnchorPoint = Vector2.new(0.5, 0.5),
 				AutomaticSize = Enum.AutomaticSize.Y,
-				BackgroundTransparency = 1,
-				Font = Enum.Font.Cartoon,
-				LayoutOrder = 2,
-				Size = UDim2.new(1, 0, 0, 0),
-				Text = tostring(modal.Title or "Ship upgraded"),
-				TextColor3 = PALETTE.Cream,
-				TextSize = 34,
-				TextStrokeTransparency = 0.62,
-				TextWrapped = true,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				TextYAlignment = Enum.TextYAlignment.Top,
-				ZIndex = 81,
-			}),
-			Body = e("Frame", {
-				AutomaticSize = Enum.AutomaticSize.Y,
-				BackgroundTransparency = 1,
-				LayoutOrder = 3,
-				Size = UDim2.new(1, 0, 0, 0),
-				ZIndex = 81,
-			}, listChildren),
-			ActionRow = e("Frame", {
-				BackgroundTransparency = 1,
-				LayoutOrder = 4,
-				Size = UDim2.new(1, 0, 0, 44),
-				ZIndex = 81,
+				BackgroundColor3 = PALETTE.InkSoft,
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(500, 0),
+				ZIndex = 80,
 			}, {
-				Okay = e("TextButton", {
-					AnchorPoint = Vector2.new(1, 0),
-					AutoButtonColor = false,
-					BackgroundColor3 = accent,
-					BorderSizePixel = 0,
-					Position = UDim2.new(1, 0, 0, 0),
-					Size = UDim2.fromOffset(136, 42),
-					Text = "Okay",
-					TextColor3 = Color3.fromRGB(14, 21, 22),
-					TextSize = 18,
-					Font = Enum.Font.GothamBold,
-					ZIndex = 82,
-					[React.Event.Activated] = props.onDismiss,
-				}, {
-					Corner = e("UICorner", {
-						CornerRadius = UDim.new(0, 12),
+				SizeConstraint = e("UISizeConstraint", {
+					MaxSize = Vector2.new(540, 720),
+					MinSize = Vector2.new(440, 0),
+				}),
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 18),
+				}),
+				Stroke = e("UIStroke", {
+					Color = accent,
+					Transparency = 0.42,
+					Thickness = 1.2,
+				}),
+				Gradient = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 33, 56)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(13, 21, 38)),
 					}),
-					Stroke = e("UIStroke", {
-						Color = Color3.fromRGB(255, 255, 255),
-						Transparency = 0.86,
+				}),
+				Padding = e("UIPadding", {
+					PaddingTop = UDim.new(0, 18),
+					PaddingBottom = UDim.new(0, 18),
+					PaddingLeft = UDim.new(0, 18),
+					PaddingRight = UDim.new(0, 18),
+				}),
+				List = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Vertical,
+					Padding = UDim.new(0, 12),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+				}),
+				Eyebrow = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBold,
+					LayoutOrder = 1,
+					Size = UDim2.new(1, 0, 0, 16),
+					Text = tostring(modal.AccentText or "Ship Upgrade Complete"),
+					TextColor3 = accent,
+					TextSize = 12,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ZIndex = 81,
+				}),
+				Title = e("TextLabel", {
+					AutomaticSize = Enum.AutomaticSize.Y,
+					BackgroundTransparency = 1,
+					Font = Enum.Font.Cartoon,
+					LayoutOrder = 2,
+					Size = UDim2.new(1, 0, 0, 0),
+					Text = tostring(modal.Title or "Ship upgraded"),
+					TextColor3 = PALETTE.Cream,
+					TextSize = 34,
+					TextStrokeTransparency = 0.62,
+					TextWrapped = true,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Top,
+					ZIndex = 81,
+				}),
+				Body = e("Frame", {
+					AutomaticSize = Enum.AutomaticSize.Y,
+					BackgroundTransparency = 1,
+					LayoutOrder = 3,
+					Size = UDim2.new(1, 0, 0, 0),
+					ZIndex = 81,
+				}, listChildren),
+				ActionRow = e("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = 4,
+					Size = UDim2.new(1, 0, 0, 44),
+					ZIndex = 81,
+				}, {
+					Okay = e("TextButton", {
+						AnchorPoint = Vector2.new(1, 0),
+						AutoButtonColor = false,
+						BackgroundColor3 = accent,
+						BorderSizePixel = 0,
+						Position = UDim2.new(1, 0, 0, 0),
+						Size = UDim2.fromOffset(136, 42),
+						Text = "Okay",
+						TextColor3 = Color3.fromRGB(14, 21, 22),
+						TextSize = 18,
+						Font = Enum.Font.GothamBold,
+						ZIndex = 82,
+						[React.Event.Activated] = props.onDismiss,
+					}, {
+						Corner = e("UICorner", {
+							CornerRadius = UDim.new(0, 12),
+						}),
+						Stroke = e("UIStroke", {
+							Color = Color3.fromRGB(255, 255, 255),
+							Transparency = 0.86,
+						}),
 					}),
 				}),
 			}),
@@ -2259,20 +2279,24 @@ local function App(props)
 		})
 	end
 
+	local appChildren = {
+		Main = e("ScreenGui", {
+			Name = "ReactInventoryUi",
+			DisplayOrder = 20,
+			IgnoreGuiInset = true,
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		}, children),
+	}
+
 	if props.shipUpgradeModal then
-		children.ShipUpgradeModal = e(shipUpgradeModal, {
+		appChildren.ShipUpgradeModal = e(shipUpgradeModal, {
 			modal = props.shipUpgradeModal,
 			onDismiss = props.onDismissShipUpgradeModal,
 		})
 	end
 
-	return e("ScreenGui", {
-		Name = "ReactInventoryUi",
-		DisplayOrder = 20,
-		IgnoreGuiInset = true,
-		ResetOnSpawn = false,
-		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-	}, children)
+	return e(React.Fragment, nil, appChildren)
 end
 
 return App
