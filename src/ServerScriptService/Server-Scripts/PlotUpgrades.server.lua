@@ -33,6 +33,29 @@ local function getUpgradeValue(player)
 	return nil
 end
 
+local function getRebirthValue(player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return nil
+	end
+
+	local valueObject = leaderstats:FindFirstChild("Rebirths")
+	if valueObject and valueObject:IsA("NumberValue") then
+		return valueObject
+	end
+
+	return nil
+end
+
+local function getRebirthCount(player)
+	local rebirthValue = getRebirthValue(player)
+	if rebirthValue then
+		return math.max(0, math.floor(tonumber(rebirthValue.Value) or 0))
+	end
+
+	return 0
+end
+
 local function getPlot(player)
 	for _, plot in ipairs(PlotsFolder:GetChildren()) do
 		if plot:IsA("Model") then
@@ -96,15 +119,15 @@ local function findFloor(map, hidden, floorName)
 	return nil, nil
 end
 
-local function setStandSlotAttributes(standModel, upgradeLevel)
+local function setStandSlotAttributes(standModel, upgradeLevel, rebirthCount)
 	if not standModel or not standModel:IsA("Model") then
 		return
 	end
 
 	local standName = standModel.Name
-	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName)
-	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName)
-	local bonusInfo = PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName)
+	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName, rebirthCount)
+	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName, rebirthCount)
+	local bonusInfo = PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName, rebirthCount)
 	local unlockLevel = PlotUpgradeConfig.GetStandUnlockLevel(standName)
 	local bonusPercent = 0
 
@@ -120,8 +143,9 @@ local function setStandSlotAttributes(standModel, upgradeLevel)
 	standModel:SetAttribute("ShipSlotUnlockLevel", unlockLevel)
 end
 
-local function applyUpgrade(player, upgradeLevel)
+local function applyUpgrade(player, upgradeLevel, rebirthCount)
 	upgradeLevel = PlotUpgradeConfig.ClampLevel(upgradeLevel)
+	rebirthCount = math.max(0, math.floor(tonumber(rebirthCount) or 0))
 
 	local plot = getPlot(player)
 	if not plot then
@@ -138,7 +162,7 @@ local function applyUpgrade(player, upgradeLevel)
 		local floor3, where3 = findFloor(map, hidden, "Floor3")
 
 		if floor2 then
-			if PlotUpgradeConfig.IsFloorUnlocked(upgradeLevel, "Floor2") then
+			if PlotUpgradeConfig.IsFloorUnlocked(upgradeLevel, "Floor2", rebirthCount) then
 				if where2 == "hidden" then
 					moveTo(floor2, map)
 					didChange = true
@@ -152,7 +176,7 @@ local function applyUpgrade(player, upgradeLevel)
 		end
 
 		if floor3 then
-			if PlotUpgradeConfig.IsFloorUnlocked(upgradeLevel, "Floor3") then
+			if PlotUpgradeConfig.IsFloorUnlocked(upgradeLevel, "Floor3", rebirthCount) then
 				if where3 == "hidden" then
 					moveTo(floor3, map)
 					didChange = true
@@ -170,8 +194,8 @@ local function applyUpgrade(player, upgradeLevel)
 		for _, child in ipairs(stands:GetChildren()) do
 			local standName = child.Name
 			if tonumber(standName) then
-				setStandSlotAttributes(child, upgradeLevel)
-				if not PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName) then
+				setStandSlotAttributes(child, upgradeLevel, rebirthCount)
+				if not PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName, rebirthCount) then
 					moveTo(child, hidden)
 					didChange = true
 				end
@@ -181,8 +205,8 @@ local function applyUpgrade(player, upgradeLevel)
 		for _, child in ipairs(hidden:GetChildren()) do
 			local standName = child.Name
 			if tonumber(standName) then
-				setStandSlotAttributes(child, upgradeLevel)
-				if PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName) then
+				setStandSlotAttributes(child, upgradeLevel, rebirthCount)
+				if PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName, rebirthCount) then
 					moveTo(child, stands)
 					didChange = true
 				end
@@ -191,7 +215,7 @@ local function applyUpgrade(player, upgradeLevel)
 
 		for _, child in ipairs(stands:GetChildren()) do
 			if tonumber(child.Name) then
-				setStandSlotAttributes(child, upgradeLevel)
+				setStandSlotAttributes(child, upgradeLevel, rebirthCount)
 			end
 		end
 	end
@@ -215,12 +239,21 @@ end
 
 local function setupPlayer(player)
 	local upgradeValue
+	local rebirthValue
 	while player.Parent and not upgradeValue do
 		upgradeValue = getUpgradeValue(player)
 		if not upgradeValue then
 			task.wait(0.2)
 		end
 	end
+
+	while player.Parent and not rebirthValue do
+		rebirthValue = getRebirthValue(player)
+		if not rebirthValue then
+			task.wait(0.2)
+		end
+	end
+
 	if not player.Parent or not upgradeValue then
 		return
 	end
@@ -236,7 +269,7 @@ local function setupPlayer(player)
 		task.defer(function()
 			pending = false
 			if player.Parent and upgradeValue.Parent then
-				applyUpgrade(player, upgradeValue.Value)
+				applyUpgrade(player, upgradeValue.Value, rebirthValue and rebirthValue.Value or getRebirthCount(player))
 			end
 		end)
 	end
@@ -246,6 +279,12 @@ local function setupPlayer(player)
 	local upgradeConn = upgradeValue:GetPropertyChangedSignal("Value"):Connect(function()
 		scheduleApply()
 	end)
+	local rebirthConn
+	if rebirthValue then
+		rebirthConn = rebirthValue:GetPropertyChangedSignal("Value"):Connect(function()
+			scheduleApply()
+		end)
+	end
 
 	local plotConn
 	local function hookPlot()
@@ -281,6 +320,9 @@ local function setupPlayer(player)
 		if not parent then
 			if upgradeConn then
 				upgradeConn:Disconnect()
+			end
+			if rebirthConn then
+				rebirthConn:Disconnect()
 			end
 			if plotConn then
 				plotConn:Disconnect()

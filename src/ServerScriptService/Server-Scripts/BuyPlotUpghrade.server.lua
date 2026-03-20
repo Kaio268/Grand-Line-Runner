@@ -108,6 +108,23 @@ local function getMoney(player)
 	return 0
 end
 
+local function getRebirthCount(player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local rebirthValue = leaderstats:FindFirstChild("Rebirths")
+		if rebirthValue and rebirthValue:IsA("NumberValue") then
+			return math.max(0, math.floor(tonumber(rebirthValue.Value) or 0))
+		end
+	end
+
+	local storedValue = DataManager:GetValue(player, "leaderstats.Rebirths")
+	if typeof(storedValue) == "number" then
+		return math.max(0, math.floor(storedValue))
+	end
+
+	return 0
+end
+
 local function getMaterialAmount(player, materialKey)
 	local pathInfo = MATERIAL_PATHS[materialKey]
 	local materialFolder = player:FindFirstChild("Materials")
@@ -162,15 +179,42 @@ local function addMaterialMutations(mutations, materialKey, remainingAmount)
 	end
 end
 
-local function fireUpgradeResult(player, newLevel)
+local function fireUpgradeResult(player, payload)
 	if not player or player.Parent ~= Players then
 		return
 	end
 
-	upgradeResultRemote:FireClient(player, {
+	upgradeResultRemote:FireClient(player, payload)
+end
+
+local function fireUpgradeSuccess(player, newLevel)
+	fireUpgradeResult(player, {
+		Success = true,
 		Level = cfg.ClampLevel(newLevel),
 		Description = cfg.GetLevelUnlockDescription(newLevel),
 		IsMaxLevel = cfg.IsMaxLevel(newLevel),
+	})
+end
+
+local function fireUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
+	fireUpgradeResult(player, {
+		Success = false,
+		IsError = true,
+		ErrorCode = "rebirth_required",
+		Title = string.format("Ship Lv %d Locked", cfg.ClampLevel(targetLevel)),
+		AccentText = "Rebirth Required",
+		Lines = {
+			string.format(
+				"Ship Lv %d requires %d rebirth%s.",
+				cfg.ClampLevel(targetLevel),
+				requiredRebirths,
+				requiredRebirths == 1 and "" or "s"
+			),
+			string.format("Current rebirths: %d", currentRebirths),
+		},
+		Level = cfg.ClampLevel(targetLevel),
+		RequiredRebirths = requiredRebirths,
+		CurrentRebirths = currentRebirths,
 	})
 end
 
@@ -188,6 +232,15 @@ remote.OnServerEvent:Connect(function(player)
 
 	local requirement = cfg.GetRequirementForLevel(current)
 	if typeof(requirement) ~= "table" then
+		busy[player] = nil
+		return
+	end
+
+	local targetLevel = cfg.ClampLevel(tonumber(requirement.TargetLevel) or (current + 1))
+	local currentRebirths = getRebirthCount(player)
+	local requiredRebirths = math.max(0, math.floor(tonumber(requirement.Rebirths) or 0))
+	if currentRebirths < requiredRebirths then
+		fireUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
 		busy[player] = nil
 		return
 	end
@@ -237,7 +290,7 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	GrandLineRushVerticalSliceService.PushState(player)
-	fireUpgradeResult(player, newLevel)
+	fireUpgradeSuccess(player, newLevel)
 	busy[player] = nil
 end)
 

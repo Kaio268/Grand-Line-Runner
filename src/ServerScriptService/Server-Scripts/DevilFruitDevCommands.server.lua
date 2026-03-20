@@ -286,6 +286,23 @@ local function getDisplayedMoney(player)
 	return (typeof(storedMoney) == "number") and storedMoney or 0
 end
 
+local function getDisplayedRebirths(player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local rebirthsValue = leaderstats:FindFirstChild("Rebirths")
+		if rebirthsValue and rebirthsValue:IsA("NumberValue") then
+			return math.max(0, math.floor(tonumber(rebirthsValue.Value) or 0))
+		end
+	end
+
+	local storedRebirths = DataManager:GetValue(player, "leaderstats.Rebirths")
+	if typeof(storedRebirths) == "number" then
+		return math.max(0, math.floor(storedRebirths))
+	end
+
+	return 0
+end
+
 local function processMoneyCommand(player, argumentText)
 	if not isAuthorized(player) then
 		return
@@ -360,6 +377,94 @@ local function processMoneyCommand(player, argumentText)
 		math.floor(amount),
 		appliedDelta,
 		math.floor(newMoney)
+	))
+end
+
+local function processRebirthCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /rebirth usage from %s. Use /rebirth set <amount>, /rebirth add <amount>, or /rebirth reset",
+			player.Name
+		))
+		return
+	end
+
+	if normalizedArgument == "clear" or normalizedArgument == "reset" or normalizedArgument == "zero" then
+		local previousRebirths = getDisplayedRebirths(player)
+		local success = DataManager:SetValue(player, "leaderstats.Rebirths", 0)
+		if success == false then
+			warn(string.format("[DevFruitDevCommands] Failed to reset Rebirths for %s", player.Name))
+			return
+		end
+
+		local newRebirths = getDisplayedRebirths(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s reset Rebirths (old=%d, new=%d)",
+			player.Name,
+			math.floor(previousRebirths),
+			math.floor(newRebirths)
+		))
+		return
+	end
+
+	local setArgument = normalizedArgument:match("^set%s+(.+)$")
+	if setArgument ~= nil then
+		local targetAmount = parseWholeAmount(setArgument)
+		if typeof(targetAmount) ~= "number" or targetAmount < 0 then
+			warn(string.format("[DevFruitDevCommands] Invalid /rebirth set amount '%s' from %s", tostring(setArgument), player.Name))
+			return
+		end
+
+		local previousRebirths = getDisplayedRebirths(player)
+		local success = DataManager:SetValue(player, "leaderstats.Rebirths", targetAmount)
+		if success == false then
+			warn(string.format("[DevFruitDevCommands] Failed to set Rebirths for %s", player.Name))
+			return
+		end
+
+		local newRebirths = getDisplayedRebirths(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s set Rebirths to %d (old=%d, new=%d)",
+			player.Name,
+			math.floor(targetAmount),
+			math.floor(previousRebirths),
+			math.floor(newRebirths)
+		))
+		return
+	end
+
+	local addArgument = normalizedArgument:match("^add%s+(.+)$")
+	if addArgument ~= nil then
+		local amount = parseWholeAmount(addArgument)
+		if typeof(amount) ~= "number" or amount < 0 then
+			warn(string.format("[DevFruitDevCommands] Invalid /rebirth add amount '%s' from %s", tostring(addArgument), player.Name))
+			return
+		end
+
+		local previousRebirths = getDisplayedRebirths(player)
+		local newRebirths = DataManager:AdjustValue(player, "leaderstats.Rebirths", amount)
+		if typeof(newRebirths) ~= "number" then
+			newRebirths = getDisplayedRebirths(player)
+		end
+
+		print(string.format(
+			"[DevFruitDevCommands] %s added %d Rebirths (old=%d, new=%d)",
+			player.Name,
+			math.floor(amount),
+			math.floor(previousRebirths),
+			math.floor(newRebirths)
+		))
+		return
+	end
+
+	warn(string.format(
+		"[DevFruitDevCommands] Invalid /rebirth usage from %s. Use /rebirth set <amount>, /rebirth add <amount>, or /rebirth reset",
+		player.Name
 	))
 end
 
@@ -730,7 +835,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "rebirth" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" then
 		return
 	end
 
@@ -740,6 +845,11 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "fruit" then
 		processFruitCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "rebirth" then
+		processRebirthCommand(player, argumentText)
 		return
 	end
 
@@ -842,6 +952,37 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/money " .. normalizedText) or "/money"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local rebirthCommand = commandsFolder:FindFirstChild("RebirthDevCommand")
+	if rebirthCommand and not rebirthCommand:IsA("TextChatCommand") then
+		rebirthCommand:Destroy()
+		rebirthCommand = nil
+	end
+
+	if not rebirthCommand then
+		rebirthCommand = Instance.new("TextChatCommand")
+		rebirthCommand.Name = "RebirthDevCommand"
+		rebirthCommand.PrimaryAlias = "/rebirth"
+		rebirthCommand.SecondaryAlias = "/rebirth"
+		rebirthCommand.AutocompleteVisible = false
+		rebirthCommand.Parent = commandsFolder
+	end
+
+	rebirthCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 8) == "/rebirth" or normalizedText:sub(1, 9) == "/ rebirth" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/rebirth " .. normalizedText) or "/rebirth"
 		handleChatCommand(player, syntheticCommand)
 	end)
 

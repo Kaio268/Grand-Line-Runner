@@ -13,7 +13,6 @@ local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
 local shorten = require(ReplicatedStorage.Modules.Shorten)
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
-local PlotUpgradeConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 
 local stealProductByRarity = {
 	Common = 3512126073,
@@ -69,6 +68,7 @@ local Configs = Modules:WaitForChild("Configs")
 local BrainrotsConfig = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
+local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
 local BrainrotRegistry = require(Modules:WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Registry"))
 local BrainrotFolder = ReplicatedStorage:WaitForChild("BrainrotFolder")
 
@@ -259,6 +259,7 @@ local function getStandCollectMultiplier(player, standName)
 
 	local mult = tonumber(StandUpgradeMults[tostring(lvl)]) or 1
 	if mult <= 0 then mult = 1 end
+	local rebirthCount = 0
 
 	local upgradeLevel = 0
 	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
@@ -279,7 +280,27 @@ local function getStandCollectMultiplier(player, standName)
 		end
 	end
 
-	return mult * PlotUpgradeConfig.GetSlotBonusMultiplier(upgradeLevel, standName)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		local rebirthValue = leaderstats:FindFirstChild("Rebirths")
+		if rebirthValue and rebirthValue:IsA("NumberValue") then
+			rebirthCount = math.max(0, math.floor(tonumber(rebirthValue.Value) or 0))
+		else
+			local storedRebirths = dmGet(player, "leaderstats.Rebirths")
+			if typeof(storedRebirths) == "number" then
+				rebirthCount = math.max(0, math.floor(storedRebirths))
+			end
+		end
+	else
+		local storedRebirths = dmGet(player, "leaderstats.Rebirths")
+		if typeof(storedRebirths) == "number" then
+			rebirthCount = math.max(0, math.floor(storedRebirths))
+		end
+	end
+
+	return mult
+		* PlotUpgradeConfig.GetSlotBonusMultiplier(upgradeLevel, standName, rebirthCount)
+		* RebirthConfig.GetShipIncomeMultiplier(rebirthCount)
 end
 
  
@@ -390,12 +411,25 @@ end
 
 local function getStandSlotState(player, standName)
 	local upgradeLevel = getPlayerShipUpgradeLevel(player)
-	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName)
-	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName)
-	local bonusInfo = isUsable and PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName) or nil
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local rebirthValue = leaderstats and leaderstats:FindFirstChild("Rebirths")
+	local rebirthCount = 0
+	if rebirthValue and rebirthValue:IsA("NumberValue") then
+		rebirthCount = math.max(0, math.floor(tonumber(rebirthValue.Value) or 0))
+	else
+		local storedRebirths = dmGet(player, "leaderstats.Rebirths")
+		if typeof(storedRebirths) == "number" then
+			rebirthCount = math.max(0, math.floor(storedRebirths))
+		end
+	end
+
+	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName, rebirthCount)
+	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName, rebirthCount)
+	local bonusInfo = isUsable and PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName, rebirthCount) or nil
 
 	return {
 		Level = upgradeLevel,
+		Rebirths = rebirthCount,
 		Visible = isVisible,
 		Usable = isUsable,
 		BonusInfo = bonusInfo,
@@ -824,7 +858,7 @@ local function updateStandPromptTexts(player, standModel)
 
 	if slotState and slotState.Visible and not slotState.Usable then
 		prompt.ObjectText = "Slot Locked"
-		prompt.ActionText = PlotUpgradeConfig.GetLockedSlotDescription(slotState.Level, standName) or "Upgrade Ship"
+		prompt.ActionText = PlotUpgradeConfig.GetLockedSlotDescription(slotState.Level, standName, slotState.Rebirths) or "Upgrade Ship"
 		return
 	end
 

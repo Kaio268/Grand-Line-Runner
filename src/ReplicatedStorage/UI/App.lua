@@ -1443,7 +1443,7 @@ end
 local function shipUpgradeModal(props)
 	local modal = props.modal or {}
 	local lines = modal.Lines or modal.lines or {}
-	local accent = modal.IsMaxLevel and PALETTE.Gold or PALETTE.Green
+	local accent = modal.IsError and PALETTE.Rose or (modal.IsMaxLevel and PALETTE.Gold or PALETTE.Green)
 	local listChildren = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Vertical,
@@ -1833,6 +1833,8 @@ local function App(props)
 
 		local ledgerEntries = {
 			{ label = "Doubloons", value = formatNumber(summary.doubloons or 0) .. " D", valueColor3 = PALETTE.Gold },
+			{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
+			{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
 			{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
 			{ label = "Timber", value = formatNumber(summary.timber or 0), valueColor3 = Color3.fromRGB(112, 220, 140) },
 			{ label = "Iron", value = formatNumber(summary.iron or 0), valueColor3 = Color3.fromRGB(91, 170, 255) },

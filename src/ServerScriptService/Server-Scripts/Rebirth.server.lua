@@ -6,6 +6,7 @@ if not dmModule then
 	error("DataManager module not found in ServerScriptService")
 end
 local DataManager = require(dmModule)
+local ShipResetService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipResetService"))
 
 local Rebirths = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -35,44 +36,40 @@ local function setNumber(player, path, target)
 	end
 end
 
+local function getShipLevel(player)
+	local hiddenStats = player:FindFirstChild("HiddenLeaderstats")
+	if hiddenStats then
+		local valueObject = hiddenStats:FindFirstChild("PlotUpgrade")
+		if valueObject and valueObject:IsA("NumberValue") then
+			return math.max(0, math.floor(tonumber(valueObject.Value) or 0))
+		end
+	end
+
+	return math.max(0, math.floor(tonumber(DataManager:GetValue(player, "HiddenLeaderstats.PlotUpgrade")) or 0))
+end
+
 RebirthRemote.OnServerEvent:Connect(function(player)
 	if serverDebounce[player] then return end
 	serverDebounce[player] = true
 
 	local rebirthsCount = getNumber(player, "leaderstats.Rebirths")
-	local nextIndex = rebirthsCount + 1
-	local config = Rebirths[nextIndex]
-	if not config then
+	local moneyPath = CurrencyUtil.getPrimaryPath()
+	local money = getNumber(player, moneyPath)
+	local shipLevel = getShipLevel(player)
+	local canRebirth = Rebirths.CanRebirth(rebirthsCount, shipLevel, money)
+	if not canRebirth then
 		serverDebounce[player] = nil
 		return
 	end
 
-	local moneyPath = CurrencyUtil.getPrimaryPath()
-	local money = getNumber(player, moneyPath)
-	local speed = getNumber(player, "HiddenLeaderstats.Speed")
-
-	local price = (typeof(config.Price) == "number") and config.Price or 0
-	local speedNeeded = (typeof(config.SpeedNeeded) == "number") and config.SpeedNeeded or 0
-
-	if money < price or speed < speedNeeded then
+	local resetOk = ShipResetService.ResetPlayerShip(player)
+	if resetOk == false then
 		serverDebounce[player] = nil
 		return
 	end
 
 	setNumber(player, moneyPath, 0)
-	setNumber(player, "HiddenLeaderstats.Speed", 1)
 	DataManager:AdjustValue(player, "leaderstats.Rebirths", 1)
-
-	if typeof(config.Getting) == "table" then
-		for path, info in pairs(config.Getting) do
-			if typeof(path) == "string" and typeof(info) == "table" then
-				local amount = info.Amount
-				if typeof(amount) == "number" then
-					setNumber(player, path, amount)
-				end
-			end
-		end
-	end
 
 	serverDebounce[player] = nil
 end)

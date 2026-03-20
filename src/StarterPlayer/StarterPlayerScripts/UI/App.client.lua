@@ -20,6 +20,7 @@ local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
@@ -210,6 +211,7 @@ local cleanupConnections = {}
 local characterConnections = {}
 local hudLayoutConnections = {}
 local shipDataConnections = {}
+local rebirthSummaryConnections = {}
 
 local function disconnectAll(bucket)
 	for _, connection in ipairs(bucket) do
@@ -263,6 +265,11 @@ local function formatNumber(value)
 	end
 
 	return number < 0 and ("-" .. formatted) or formatted
+end
+
+local function formatMultiplier(value)
+	local rounded = math.floor((tonumber(value) or 1) * 100 + 0.5) / 100
+	return string.format("%.2fx", rounded)
 end
 
 local function ensureAcquired(key)
@@ -472,7 +479,7 @@ local function compareInventoryKeys(a, b)
 	return tostring(a) < tostring(b)
 end
 
-local function countUsableSlotsForFloor(level, floorName)
+local function countUsableSlotsForFloor(level, floorName, rebirths)
 	local floorRange = PlotUpgradeConfig.StandFloorRanges[tostring(floorName)]
 	if typeof(floorRange) ~= "table" then
 		return 0
@@ -483,7 +490,7 @@ local function countUsableSlotsForFloor(level, floorName)
 	local total = 0
 
 	for standNumber = startStand, endStand do
-		if PlotUpgradeConfig.IsStandUsable(level, tostring(standNumber)) then
+		if PlotUpgradeConfig.IsStandUsable(level, tostring(standNumber), rebirths) then
 			total += 1
 		end
 	end
@@ -500,6 +507,12 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	local lines = {}
 	local seen = {}
 	local previousLevel = math.max(0, PlotUpgradeConfig.ClampLevel(level) - 1)
+	local rebirths = 0
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local rebirthValue = leaderstats and leaderstats:FindFirstChild("Rebirths")
+	if rebirthValue and rebirthValue:IsA("ValueBase") then
+		rebirths = math.max(0, math.floor(tonumber(rebirthValue.Value) or 0))
+	end
 
 	local function pushLine(text, key)
 		local value = trim(text)
@@ -512,10 +525,10 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	end
 
 	for _, floorName in ipairs({ "Floor1", "Floor2", "Floor3" }) do
-		local wasUnlocked = PlotUpgradeConfig.IsFloorUnlocked(previousLevel, floorName)
-		local isUnlocked = PlotUpgradeConfig.IsFloorUnlocked(level, floorName)
-		local previousCount = countUsableSlotsForFloor(previousLevel, floorName)
-		local currentCount = countUsableSlotsForFloor(level, floorName)
+		local wasUnlocked = PlotUpgradeConfig.IsFloorUnlocked(previousLevel, floorName, rebirths)
+		local isUnlocked = PlotUpgradeConfig.IsFloorUnlocked(level, floorName, rebirths)
+		local previousCount = countUsableSlotsForFloor(previousLevel, floorName, rebirths)
+		local currentCount = countUsableSlotsForFloor(level, floorName, rebirths)
 		local floorLabel = string.gsub(floorName, "Floor", "Floor ")
 
 		if (not wasUnlocked) and isUnlocked then
@@ -681,6 +694,25 @@ local function readPlayerDoubloons()
 	end
 
 	return math.max(0, tonumber(metaState and metaState.Doubloons) or 0)
+end
+
+local function readPlayerRebirths()
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local value = readChildValue(leaderstats, "Rebirths")
+	if typeof(value) == "number" then
+		return math.max(0, math.floor(value))
+	end
+
+	return 0
+end
+
+local function readPlayerShipIncomeMultiplier(rebirths)
+	local multiplier = RebirthConfig.GetShipIncomeMultiplier(rebirths)
+	if typeof(multiplier) == "number" then
+		return multiplier
+	end
+
+	return 1
 end
 
 local function readPlayerMaterials()
@@ -998,6 +1030,8 @@ local function buildRenderData()
 	}
 
 	local liveMaterials = readPlayerMaterials()
+	local liveRebirths = readPlayerRebirths()
+	local liveMultiplier = readPlayerShipIncomeMultiplier(liveRebirths)
 	local chestCount = readPlayerChestCount(chestsList)
 
 	local totalStacks = 0
@@ -1025,6 +1059,8 @@ local function buildRenderData()
 		captainLog = captainLog,
 		summary = {
 			doubloons = readPlayerDoubloons(),
+			rebirths = liveRebirths,
+			multiplier = formatMultiplier(liveMultiplier),
 			chests = chestCount,
 			timber = liveMaterials.Timber,
 			iron = liveMaterials.Iron,
@@ -1199,6 +1235,34 @@ local function bindShipDataTracking()
 			scheduleRender()
 		end
 	end, shipDataConnections)
+end
+
+local function bindRebirthSummaryTracking()
+	disconnectAll(rebirthSummaryConnections)
+
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		return
+	end
+
+	local rebirthsValue = leaderstats:FindFirstChild("Rebirths")
+	if rebirthsValue and rebirthsValue:IsA("ValueBase") then
+		trackConnection(rebirthsValue.Changed, scheduleRender, rebirthSummaryConnections)
+	end
+
+	trackConnection(leaderstats.ChildAdded, function(child)
+		if child.Name == "Rebirths" then
+			task.defer(bindRebirthSummaryTracking)
+			scheduleRender()
+		end
+	end, rebirthSummaryConnections)
+
+	trackConnection(leaderstats.ChildRemoved, function(child)
+		if child.Name == "Rebirths" then
+			task.defer(bindRebirthSummaryTracking)
+			scheduleRender()
+		end
+	end, rebirthSummaryConnections)
 end
 
 local function render()
@@ -1467,6 +1531,30 @@ trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
 		return
 	end
 
+	if payload.Success == false then
+		local lines = {}
+		if typeof(payload.Lines) == "table" then
+			for _, line in ipairs(payload.Lines) do
+				if typeof(line) == "string" and trim(line) ~= "" then
+					lines[#lines + 1] = trim(line)
+				end
+			end
+		end
+		if #lines == 0 then
+			lines = { trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
+		end
+
+		shipUpgradeModal = {
+			Title = tostring(payload.Title or "Ship Upgrade Locked"),
+			AccentText = tostring(payload.AccentText or "Requirement Not Met"),
+			Lines = lines,
+			IsError = payload.IsError ~= false,
+		}
+		updateModalInputCapture()
+		scheduleRender()
+		return
+	end
+
 	local level = PlotUpgradeConfig.ClampLevel(payload.Level)
 	local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
 	local isMaxLevel = payload.IsMaxLevel == true
@@ -1540,10 +1628,23 @@ if player.Character then
 end
 
 trackConnection(player.CharacterAdded, hookCharacter, cleanupConnections)
+trackConnection(player.ChildAdded, function(child)
+	if child.Name == "leaderstats" then
+		task.defer(bindRebirthSummaryTracking)
+		scheduleRender()
+	end
+end, cleanupConnections)
+trackConnection(player.ChildRemoved, function(child)
+	if child.Name == "leaderstats" then
+		task.defer(bindRebirthSummaryTracking)
+		scheduleRender()
+	end
+end, cleanupConnections)
 
 hideLegacyInventory()
 bindHudLayoutTracking()
 bindShipDataTracking()
+bindRebirthSummaryTracking()
 render()
 task.defer(scheduleRender)
 
@@ -1557,6 +1658,7 @@ script.Destroying:Connect(function()
 	disconnectAll(characterConnections)
 	disconnectAll(hudLayoutConnections)
 	disconnectAll(shipDataConnections)
+	disconnectAll(rebirthSummaryConnections)
 	if stopObservingState then
 		stopObservingState()
 		stopObservingState = nil

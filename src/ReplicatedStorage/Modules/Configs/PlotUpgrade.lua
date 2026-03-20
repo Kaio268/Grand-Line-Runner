@@ -111,6 +111,17 @@ local Config = {
 		},
 	},
 
+	RebirthRequirementsByLevel = {
+		[1] = 0,
+		[2] = 0,
+		[3] = 0,
+		[4] = 0,
+		[5] = 1,
+		[6] = 3,
+		[7] = 6,
+		[8] = 10,
+	},
+
 	SlotBonuses = {
 		["1"] = {
 			Label = "Captain Slot",
@@ -160,7 +171,17 @@ function Config.GetRequirementForLevel(level)
 		return nil
 	end
 
-	return Config.RequirementsByLevel[clamped]
+	local requirement = Config.RequirementsByLevel[clamped]
+	if typeof(requirement) ~= "table" then
+		return nil
+	end
+
+	return {
+		Doubloons = math.max(0, math.floor(tonumber(requirement.Doubloons) or 0)),
+		Materials = table.clone(typeof(requirement.Materials) == "table" and requirement.Materials or {}),
+		Rebirths = Config.GetRequiredRebirthsForLevel(clamped + 1),
+		TargetLevel = clamped + 1,
+	}
 end
 
 function Config.GetMaterialCost(requirement, materialKey)
@@ -176,14 +197,38 @@ function Config.GetMaterialCost(requirement, materialKey)
 	return math.max(0, math.floor(tonumber(materials[materialKey]) or 0))
 end
 
-function Config.GetUsableStandCount(level)
+function Config.GetRequiredRebirthsForLevel(level)
 	local clamped = Config.ClampLevel(level)
+	if clamped <= 0 then
+		return 0
+	end
+
+	return math.max(0, math.floor(tonumber(Config.RebirthRequirementsByLevel[clamped]) or 0))
+end
+
+function Config.HasRequiredRebirthsForLevel(level, rebirths)
+	local required = Config.GetRequiredRebirthsForLevel(level)
+	local currentRebirths = math.max(0, math.floor(tonumber(rebirths) or 0))
+	return currentRebirths >= required
+end
+
+function Config.GetEffectiveLevel(level, rebirths)
+	local clamped = Config.ClampLevel(level)
+	while clamped > 0 and not Config.HasRequiredRebirthsForLevel(clamped, rebirths) do
+		clamped -= 1
+	end
+
+	return clamped
+end
+
+function Config.GetUsableStandCount(level, rebirths)
+	local clamped = Config.GetEffectiveLevel(level, rebirths)
 	return Config.UsableStandCountByLevel[clamped] or 0
 end
 
-function Config.IsFloorUnlocked(level, floorName)
+function Config.IsFloorUnlocked(level, floorName, rebirths)
 	local unlockLevel = Config.FloorUnlockLevels[tostring(floorName)] or math.huge
-	return Config.ClampLevel(level) >= unlockLevel
+	return Config.GetEffectiveLevel(level, rebirths) >= unlockLevel
 end
 
 function Config.GetStandFloorName(standName)
@@ -203,27 +248,27 @@ function Config.GetStandFloorName(standName)
 	return nil
 end
 
-function Config.IsStandVisible(level, standName)
+function Config.IsStandVisible(level, standName, rebirths)
 	local floorName = Config.GetStandFloorName(standName)
 	if floorName == nil then
 		return false
 	end
 
-	return Config.IsFloorUnlocked(level, floorName)
+	return Config.IsFloorUnlocked(level, floorName, rebirths)
 end
 
-function Config.IsStandUsable(level, standName)
+function Config.IsStandUsable(level, standName, rebirths)
 	local standNumber = tonumber(tostring(standName or ""))
 	if not standNumber then
 		return false
 	end
 
-	return Config.IsStandVisible(level, standName) and standNumber <= Config.GetUsableStandCount(level)
+	return Config.IsStandVisible(level, standName, rebirths) and standNumber <= Config.GetUsableStandCount(level, rebirths)
 end
 
 function Config.GetStandUnlockLevel(standName)
 	for level = 0, Config.MaxLevel do
-		if Config.IsStandUsable(level, standName) then
+		if Config.IsStandUsable(level, standName, math.huge) then
 			return level
 		end
 	end
@@ -231,13 +276,19 @@ function Config.GetStandUnlockLevel(standName)
 	return nil
 end
 
-function Config.GetLockedSlotDescription(level, standName)
-	if not Config.IsStandVisible(level, standName) or Config.IsStandUsable(level, standName) then
+function Config.GetLockedSlotDescription(level, standName, rebirths)
+	if not Config.IsStandVisible(level, standName, rebirths) or Config.IsStandUsable(level, standName, rebirths) then
 		return nil
 	end
 
 	local unlockLevel = Config.GetStandUnlockLevel(standName)
 	if unlockLevel ~= nil then
+		local requiredRebirths = Config.GetRequiredRebirthsForLevel(unlockLevel)
+		local currentRebirths = math.max(0, math.floor(tonumber(rebirths) or 0))
+		if currentRebirths < requiredRebirths then
+			return string.format("Requires %d rebirth%s", requiredRebirths, requiredRebirths == 1 and "" or "s")
+		end
+
 		return string.format("Unlock at Lv %d", unlockLevel)
 	end
 
@@ -255,24 +306,35 @@ end
 
 function Config.GetLevelUnlockDescription(level)
 	local clamped = Config.ClampLevel(level)
-	return Config.LevelUnlockDescriptions[clamped] or ("Unlock level " .. tostring(clamped))
+	local description = Config.LevelUnlockDescriptions[clamped] or ("Unlock level " .. tostring(clamped))
+	local requiredRebirths = Config.GetRequiredRebirthsForLevel(clamped)
+	if requiredRebirths > 0 then
+		return string.format(
+			"%s (Requires %d rebirth%s)",
+			description,
+			requiredRebirths,
+			requiredRebirths == 1 and "" or "s"
+		)
+	end
+
+	return description
 end
 
-function Config.GetSlotBonusInfo(level, standName)
+function Config.GetSlotBonusInfo(level, standName, rebirths)
 	local entry = Config.SlotBonuses[tostring(standName)]
 	if typeof(entry) ~= "table" then
 		return nil
 	end
 
-	if Config.ClampLevel(level) < tonumber(entry.UnlockLevel or Config.MaxLevel) then
+	if Config.GetEffectiveLevel(level, rebirths) < tonumber(entry.UnlockLevel or Config.MaxLevel) then
 		return nil
 	end
 
 	return entry
 end
 
-function Config.GetSlotBonusMultiplier(level, standName)
-	local info = Config.GetSlotBonusInfo(level, standName)
+function Config.GetSlotBonusMultiplier(level, standName, rebirths)
+	local info = Config.GetSlotBonusInfo(level, standName, rebirths)
 	if info then
 		return tonumber(info.Multiplier) or 1
 	end

@@ -33,6 +33,29 @@ end
 
 local upVal = getUpgradeValueObject()
 
+local function getRebirthValueObject()
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then
+		leaderstats = player:WaitForChild("leaderstats", 4)
+	end
+	if not leaderstats then
+		return nil
+	end
+
+	local valueObject = leaderstats:FindFirstChild("Rebirths") or leaderstats:WaitForChild("Rebirths", 4)
+	if valueObject and valueObject:IsA("NumberValue") then
+		return valueObject
+	end
+
+	return nil
+end
+
+local rebirthVal = getRebirthValueObject()
+
+local function getCurrentRebirths()
+	return rebirthVal and math.max(0, tonumber(rebirthVal.Value) or 0) or 0
+end
+
 local function formatRequirementText(requirement)
 	if typeof(requirement) ~= "table" then
 		return "MAXED"
@@ -56,6 +79,11 @@ local function formatRequirementText(requirement)
 
 	if #materialParts > 0 then
 		lines[#lines + 1] = table.concat(materialParts, " | ")
+	end
+
+	local requiredRebirths = math.max(0, math.floor(tonumber(requirement.Rebirths) or 0))
+	if requiredRebirths > 0 then
+		lines[#lines + 1] = string.format("Rebirths %d / %d", getCurrentRebirths(), requiredRebirths)
 	end
 
 	return table.concat(lines, "\n")
@@ -115,6 +143,7 @@ local function updateUI()
 
 	local nextLevel = cfg.GetNextLevel(currentLevel) or currentLevel
 	local requirement = cfg.GetRequirementForLevel(currentLevel)
+	local requiredRebirths = math.max(0, math.floor(tonumber(requirement and requirement.Rebirths) or 0))
 	info.Text = string.format(
 		"Ship Lv %d / %d -> %d\n%s",
 		currentLevel,
@@ -122,6 +151,9 @@ local function updateUI()
 		nextLevel,
 		cfg.GetNextUnlockDescription(currentLevel)
 	)
+	if requiredRebirths > 0 then
+		info.Text ..= string.format("\nRebirths %d / %d", getCurrentRebirths(), requiredRebirths)
+	end
 	textL.Text = formatRequirementText(requirement)
 	setButtonEnabled(true)
 end
@@ -129,6 +161,9 @@ end
 updateUI()
 if upVal then
 	upVal:GetPropertyChangedSignal("Value"):Connect(updateUI)
+end
+if rebirthVal then
+	rebirthVal:GetPropertyChangedSignal("Value"):Connect(updateUI)
 end
 
 if clickButton then

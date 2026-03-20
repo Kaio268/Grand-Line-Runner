@@ -17,7 +17,7 @@ local moneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
 if not moneyValue then
 	error("Primary currency value object was not found for rebirth UI")
 end
-local speedValue = hiddenStats:WaitForChild("Speed")
+local shipLevelValue = hiddenStats:WaitForChild("PlotUpgrade")
 
 local frames = player:WaitForChild("PlayerGui"):WaitForChild("Frames")
 local main = frames:WaitForChild("Rebirth"):WaitForChild("Main")
@@ -28,9 +28,9 @@ local moneyUI = main:WaitForChild("Money")
 local moneyText = moneyUI:WaitForChild("Value")
 local moneyBar = moneyUI:WaitForChild("Bar")
 
-local speedUI = main:WaitForChild("Speed")
-local speedText = speedUI:WaitForChild("Value")
-local speedBar = speedUI:WaitForChild("Bar")
+local shipUI = main:WaitForChild("Speed")
+local shipText = shipUI:WaitForChild("Value")
+local shipBar = shipUI:WaitForChild("Bar")
 
 local youGet = main:WaitForChild("YouGet")
 local template = youGet:WaitForChild("Template")
@@ -44,7 +44,7 @@ local notIndicator = nil
 
 local function tweenBar(bar, pct)
 	pct = math.clamp(pct, 0, 1)
-	TweenService:Create(bar, tweenInfo, {Size = UDim2.new(pct, 0, 1, 0)}):Play()
+	TweenService:Create(bar, tweenInfo, { Size = UDim2.new(pct, 0, 1, 0) }):Play()
 end
 
 local function clearYouGet()
@@ -67,6 +67,15 @@ local function setAmount(obj, amount)
 	pcall(function()
 		obj.Text = "x" .. tostring(amount or "")
 	end)
+end
+
+local function setSectionLabel(section, text)
+	for _, descendant in ipairs(section:GetDescendants()) do
+		if descendant:IsA("TextLabel") and descendant.Name ~= "Value" then
+			descendant.Text = text
+			return
+		end
+	end
 end
 
 local function rebuildGetting(config)
@@ -116,8 +125,8 @@ end
 local function canRebirth(config)
 	if not config then return false end
 	local price = tonumber(config.Price) or 0
-	local speedNeeded = tonumber(config.SpeedNeeded) or 0
-	return moneyValue.Value >= price and speedValue.Value >= speedNeeded
+	local shipLevelNeeded = tonumber(config.PlotUpgradeNeeded) or 0
+	return moneyValue.Value >= price and shipLevelValue.Value >= shipLevelNeeded
 end
 
 local function refreshNot(config)
@@ -132,26 +141,32 @@ end
 local function applyUI(config)
 	if not config then
 		moneyText.Text = "MAX"
-		speedText.Text = "MAX"
+		shipText.Text = "MAX"
 		clearYouGet()
 		tweenBar(moneyBar, 1)
-		tweenBar(speedBar, 1)
+		tweenBar(shipBar, 1)
 		refreshNot(nil)
 		return
 	end
 
-	moneyText.Text = tostring(config.Price) .. CurrencyUtil.getCompactSuffix()
-	speedText.Text = tostring(speedValue.Value) .. "/" .. tostring(config.SpeedNeeded)
+	local price = math.max(0, tonumber(config.Price) or 0)
+	local shipLevelNeeded = math.max(0, tonumber(config.PlotUpgradeNeeded) or 0)
 
-	tweenBar(moneyBar, (config.Price and config.Price > 0) and (moneyValue.Value / config.Price) or 0)
-	tweenBar(speedBar, (config.SpeedNeeded and config.SpeedNeeded > 0) and (speedValue.Value / config.SpeedNeeded) or 0)
+	setSectionLabel(moneyUI, "Doubloons")
+	setSectionLabel(shipUI, "Ship Level")
+
+	moneyText.Text = string.format("%s / %s", CurrencyUtil.formatCompact(moneyValue.Value), CurrencyUtil.formatCompact(price))
+	shipText.Text = string.format("Lv %d / %d", math.max(0, shipLevelValue.Value), shipLevelNeeded)
+
+	tweenBar(moneyBar, price > 0 and (moneyValue.Value / price) or 1)
+	tweenBar(shipBar, shipLevelNeeded > 0 and (shipLevelValue.Value / shipLevelNeeded) or 1)
 
 	refreshNot(config)
 end
 
 local function update()
 	local nextIndex = rebirthsValue.Value + 1
-	local config = Rebirths[nextIndex]
+	local config = Rebirths.GetConfig(nextIndex)
 
 	if currentIndex ~= nextIndex then
 		currentIndex = nextIndex
@@ -163,7 +178,7 @@ end
 
 rebirthsValue:GetPropertyChangedSignal("Value"):Connect(update)
 moneyValue:GetPropertyChangedSignal("Value"):Connect(update)
-speedValue:GetPropertyChangedSignal("Value"):Connect(update)
+shipLevelValue:GetPropertyChangedSignal("Value"):Connect(update)
 
 rebirthButton.MouseButton1Click:Connect(function()
 	if clickDebounce then return end
