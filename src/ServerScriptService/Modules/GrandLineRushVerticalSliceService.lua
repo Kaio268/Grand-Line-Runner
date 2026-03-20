@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -259,6 +260,10 @@ local function sanitizeReward(reward)
 	return data
 end
 
+local function getBountyBreakdown(player)
+	return BountyService.GetBreakdown(player)
+end
+
 local function chooseWeightedKey(weightTable, orderedKeys)
 	local totalWeight = 0
 	for _, key in ipairs(orderedKeys) do
@@ -486,6 +491,7 @@ local function buildState(player)
 
 	return {
 		Doubloons = tonumber(leaderstats.Doubloons) or 0,
+		Bounty = getBountyBreakdown(player),
 		Run = {
 			InRun = runtime.InRun,
 			DepthBand = runtime.DepthBand,
@@ -649,13 +655,36 @@ local function extractRun(player)
 			tostring(carriedReward.DepthBand)
 		)
 		local chestId = addUnopenedChest(player, carriedReward.Tier, carriedReward.DepthBand)
+		if chestId == nil then
+			return resolveActionResponse(player, false, nil, "persist_chest_failed")
+		end
 		message = string.format("Extracted %s and added it to your hotbar as chest #%s.", getRewardToolDisplay(carriedReward), tostring(chestId or "?"))
 	else
 		local instanceId = addCrewInstance(player, {
 			Name = carriedReward.CrewName,
 			Rarity = carriedReward.Rarity,
 		}, "RunReward")
+		if instanceId == nil then
+			return resolveActionResponse(player, false, nil, "persist_crew_failed")
+		end
 		message = string.format("Extracted crew reward and recruited %s (%s) as crew #%s.", tostring(carriedReward.CrewName), tostring(carriedReward.Rarity), tostring(instanceId or "?"))
+	end
+
+	local extractionBounty, _ = BountyService.AwardExtractionBountyForReward(player, carriedReward)
+	if extractionBounty > 0 then
+		message = string.format(
+			"%s (+%s Bounty)",
+			message,
+			BountyService.FormatNumber(extractionBounty)
+		)
+	elseif carriedReward.RewardType == "Chest" or carriedReward.RewardType == "Crew" then
+		warn(string.format(
+			"[GrandLineRushBounty] Extracted reward granted no bounty player=%s type=%s tier=%s rarity=%s",
+			player.Name,
+			tostring(carriedReward.RewardType),
+			tostring(carriedReward.Tier),
+			tostring(carriedReward.Rarity)
+		))
 	end
 
 	runtime.InRun = false

@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("DevilFruitService"))
 local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
 local GrandLineRushChestToolService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestToolService"))
 local GrandLineRushVerticalSliceService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
 local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:WaitForChild("GrandLineRushCorridorRunController"))
@@ -303,6 +304,15 @@ local function getDisplayedRebirths(player)
 	return 0
 end
 
+local function getDisplayedBountyBreakdown(player)
+	local breakdown = BountyService.GetBreakdown(player)
+	return {
+		Crew = math.max(0, math.floor(tonumber(breakdown.Crew) or 0)),
+		LifetimeExtraction = math.max(0, math.floor(tonumber(breakdown.LifetimeExtraction) or 0)),
+		Total = math.max(0, math.floor(tonumber(breakdown.Total) or 0)),
+	}
+end
+
 local function processMoneyCommand(player, argumentText)
 	if not isAuthorized(player) then
 		return
@@ -468,6 +478,115 @@ local function processRebirthCommand(player, argumentText)
 	))
 end
 
+local function processBountyCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /bounty usage from %s. Use /bounty set <amount>, /bounty add <amount>, /bounty reset, or /bounty debug",
+			player.Name
+		))
+		return
+	end
+
+	if normalizedArgument == "debug" or normalizedArgument == "info" or normalizedArgument == "status" then
+		local breakdown = BountyService.RefreshPlayerBounty(player) or getDisplayedBountyBreakdown(player)
+		GrandLineRushVerticalSliceService.Start()
+		GrandLineRushVerticalSliceService.PushState(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s bounty debug crew=%d extraction=%d total=%d",
+			player.Name,
+			math.floor(tonumber(breakdown.Crew) or 0),
+			math.floor(tonumber(breakdown.LifetimeExtraction) or 0),
+			math.floor(tonumber(breakdown.Total) or 0)
+		))
+		return
+	end
+
+	if normalizedArgument == "clear" or normalizedArgument == "reset" or normalizedArgument == "zero" then
+		local previous = getDisplayedBountyBreakdown(player)
+		local breakdown = BountyService.SetLifetimeExtractionBounty(player, 0)
+		if breakdown == nil then
+			warn(string.format("[DevFruitDevCommands] Failed to reset lifetime bounty for %s", player.Name))
+			return
+		end
+
+		GrandLineRushVerticalSliceService.Start()
+		GrandLineRushVerticalSliceService.PushState(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s reset lifetime extraction bounty (old=%d, crew=%d, total=%d)",
+			player.Name,
+			math.floor(previous.LifetimeExtraction),
+			math.floor(tonumber(breakdown.Crew) or 0),
+			math.floor(tonumber(breakdown.Total) or 0)
+		))
+		return
+	end
+
+	local setArgument = normalizedArgument:match("^set%s+(.+)$")
+	if setArgument ~= nil then
+		local targetAmount = parseWholeAmount(setArgument)
+		if typeof(targetAmount) ~= "number" or targetAmount < 0 then
+			warn(string.format("[DevFruitDevCommands] Invalid /bounty set amount '%s' from %s", tostring(setArgument), player.Name))
+			return
+		end
+
+		local previous = getDisplayedBountyBreakdown(player)
+		local breakdown = BountyService.SetLifetimeExtractionBounty(player, targetAmount)
+		if breakdown == nil then
+			warn(string.format("[DevFruitDevCommands] Failed to set lifetime bounty for %s", player.Name))
+			return
+		end
+
+		GrandLineRushVerticalSliceService.Start()
+		GrandLineRushVerticalSliceService.PushState(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s set lifetime extraction bounty to %d (old=%d, total=%d)",
+			player.Name,
+			math.floor(targetAmount),
+			math.floor(previous.LifetimeExtraction),
+			math.floor(tonumber(breakdown.Total) or 0)
+		))
+		return
+	end
+
+	local addArgument = normalizedArgument:match("^add%s+(.+)$")
+	if addArgument ~= nil then
+		local amount = parseWholeAmount(addArgument)
+		if typeof(amount) ~= "number" or amount < 0 then
+			warn(string.format("[DevFruitDevCommands] Invalid /bounty add amount '%s' from %s", tostring(addArgument), player.Name))
+			return
+		end
+
+		local previous = getDisplayedBountyBreakdown(player)
+		local breakdown, grantedAmount = BountyService.AddLifetimeExtractionBounty(player, amount)
+		if breakdown == nil then
+			warn(string.format("[DevFruitDevCommands] Failed to add lifetime bounty for %s", player.Name))
+			return
+		end
+
+		GrandLineRushVerticalSliceService.Start()
+		GrandLineRushVerticalSliceService.PushState(player)
+		print(string.format(
+			"[DevFruitDevCommands] %s added %d lifetime extraction bounty (old=%d, new=%d, total=%d)",
+			player.Name,
+			math.floor(grantedAmount or 0),
+			math.floor(previous.LifetimeExtraction),
+			math.floor(tonumber(breakdown.LifetimeExtraction) or 0),
+			math.floor(tonumber(breakdown.Total) or 0)
+		))
+		return
+	end
+
+	warn(string.format(
+		"[DevFruitDevCommands] Invalid /bounty usage from %s. Use /bounty set <amount>, /bounty add <amount>, /bounty reset, or /bounty debug",
+		player.Name
+	))
+end
+
 local function getTrackedResourceValue(player, resourceData)
 	if typeof(resourceData) ~= "table" then
 		return nil
@@ -570,6 +689,7 @@ local function processShipResetCommand(player, argumentText)
 
 	local starterSlots = typeof(result) == "table" and tonumber(result.StarterSlots) or 0
 	local shipLevel = typeof(result) == "table" and tonumber(result.ShipLevel) or 0
+	BountyService.RefreshPlayerBounty(player)
 	print(string.format(
 		"[DevFruitDevCommands] %s reset ship progression (ship level=%d, starter slots=%d)",
 		player.Name,
@@ -626,6 +746,7 @@ local function processClearCommand(player, argumentText)
 	end
 
 	BrainrotInstanceService.SyncAvailableCounts(player)
+	BountyService.RefreshPlayerBounty(player)
 
 	ok, reason = invokeRuntimeCommand(standCommand, "refresh", player)
 	if not ok then
@@ -835,7 +956,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "rebirth" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" then
 		return
 	end
 
@@ -850,6 +971,11 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "rebirth" then
 		processRebirthCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "bounty" then
+		processBountyCommand(player, argumentText)
 		return
 	end
 
@@ -983,6 +1109,37 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/rebirth " .. normalizedText) or "/rebirth"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local bountyCommand = commandsFolder:FindFirstChild("BountyDevCommand")
+	if bountyCommand and not bountyCommand:IsA("TextChatCommand") then
+		bountyCommand:Destroy()
+		bountyCommand = nil
+	end
+
+	if not bountyCommand then
+		bountyCommand = Instance.new("TextChatCommand")
+		bountyCommand.Name = "BountyDevCommand"
+		bountyCommand.PrimaryAlias = "/bounty"
+		bountyCommand.SecondaryAlias = "/bounty"
+		bountyCommand.AutocompleteVisible = false
+		bountyCommand.Parent = commandsFolder
+	end
+
+	bountyCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 7) == "/bounty" or normalizedText:sub(1, 8) == "/ bounty" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/bounty " .. normalizedText) or "/bounty"
 		handleChatCommand(player, syntheticCommand)
 	end)
 

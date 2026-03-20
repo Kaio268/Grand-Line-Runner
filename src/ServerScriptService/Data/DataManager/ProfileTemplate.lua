@@ -9,6 +9,7 @@ local ProfileTemplate = {
 	leaderstats = {
 		[primaryCurrency.Key] = 0,
 		Rebirths = 0,
+		Bounty = 0,
 	},
 
 	HiddenLeaderstats = {
@@ -40,6 +41,12 @@ local ProfileTemplate = {
 		NextChestId = 1,
 		ById = {},
 		Order = {},
+	},
+
+	Bounty = {
+		LifetimeExtraction = 0,
+		Crew = 0,
+		Total = 0,
 	},
 
 	FoodInventory = {

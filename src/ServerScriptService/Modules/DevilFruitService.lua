@@ -10,6 +10,8 @@ local EFFECT_REMOTE_NAME = "DevilFruitAbilityEffect"
 local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
+local HYDRATION_READY_TIMEOUT = 30
+local SET_PERSIST_READY_TIMEOUT = 10
 
 local cooldownsByPlayer = {}
 local pendingPersistByPlayer = {}
@@ -159,6 +161,20 @@ local function getPlayerFruitValue(player)
 	return equipped
 end
 
+local function waitForDataReady(player, timeoutSeconds)
+	local deadline = os.clock() + (timeoutSeconds or SET_PERSIST_READY_TIMEOUT)
+
+	while player.Parent == Players and os.clock() <= deadline do
+		if DataManager:IsReady(player) then
+			return true
+		end
+
+		task.wait(0.1)
+	end
+
+	return DataManager:IsReady(player)
+end
+
 local function ensureFruitDataPath(player)
 	local fruitData, reason = DataManager:TryGetValue(player, "DevilFruit")
 	if reason ~= nil then
@@ -208,6 +224,14 @@ local function persistEquippedFruit(player, fruitName)
 	return true, "data_manager_synced"
 end
 
+local function applyEquippedFruitValue(player, fruitName)
+	local normalizedFruit = normalizeStoredFruitName(fruitName)
+	local fruitValue = getPlayerFruitValue(player)
+	fruitValue.Value = normalizedFruit
+	syncFruitAttribute(player, normalizedFruit)
+	return normalizedFruit
+end
+
 local function startPersistTask(player)
 	if persistTaskByPlayer[player] then
 		return
@@ -215,8 +239,18 @@ local function startPersistTask(player)
 
 	persistTaskByPlayer[player] = task.spawn(function()
 		local attempts = 0
+		local deadline = os.clock() + (MAX_PERSIST_ATTEMPTS * PERSIST_RETRY_DELAY)
 
 		while player.Parent == Players and pendingPersistByPlayer[player] ~= nil and attempts < MAX_PERSIST_ATTEMPTS do
+			if not DataManager:IsReady(player) then
+				if os.clock() >= deadline then
+					break
+				end
+
+				task.wait(PERSIST_RETRY_DELAY)
+				continue
+			end
+
 			attempts += 1
 			local targetFruit = pendingPersistByPlayer[player]
 			debugPrint(string.format("Persist attempt %d for %s", attempts, player.Name), targetFruit)
@@ -253,32 +287,47 @@ local function hydrateFruitFromData(player)
 	end
 
 	hydrationTaskByPlayer[player] = task.spawn(function()
-		for _ = 1, MAX_PERSIST_ATTEMPTS do
-			if player.Parent ~= Players then
-				break
-			end
-
-			local storedValue, reason = DataManager:TryGetValue(player, "DevilFruit.Equipped")
-			if typeof(storedValue) == "string" then
-				local normalizedFruit = normalizeStoredFruitName(storedValue)
-				local fruitValue = getPlayerFruitValue(player)
-				fruitValue.Value = normalizedFruit
-				syncFruitAttribute(player, normalizedFruit)
-				break
-			end
-
-			if reason ~= "not_ready" then
-				break
-			end
-
-			task.wait(PERSIST_RETRY_DELAY)
+		if not waitForDataReady(player, HYDRATION_READY_TIMEOUT) then
+			hydrationTaskByPlayer[player] = nil
+			return
 		end
 
+		local pendingFruit = pendingPersistByPlayer[player]
+		if typeof(pendingFruit) == "string" then
+			local persisted = persistEquippedFruit(player, normalizeStoredFruitName(pendingFruit))
+			if persisted then
+				pendingPersistByPlayer[player] = nil
+			else
+				queuePersist(player, pendingFruit)
+			end
+
+			applyEquippedFruitValue(player, pendingFruit)
+			hydrationTaskByPlayer[player] = nil
+			return
+		end
+
+		applyEquippedFruitValue(player, loadEquippedFruitFromData(player))
 		hydrationTaskByPlayer[player] = nil
 	end)
 end
 
 local function cleanupPlayerState(player)
+	local targetFruit = pendingPersistByPlayer[player]
+	if typeof(targetFruit) ~= "string" then
+		targetFruit = getEquippedFruit(player)
+	end
+
+	if DataManager:IsReady(player) then
+		local persisted, reason = persistEquippedFruit(player, normalizeStoredFruitName(targetFruit))
+		if not persisted then
+			warn(string.format(
+				"[DevilFruitService] Failed final equipped fruit flush for %s: %s",
+				player.Name,
+				tostring(reason)
+			))
+		end
+	end
+
 	cooldownsByPlayer[player] = nil
 	pendingPersistByPlayer[player] = nil
 	persistTaskByPlayer[player] = nil
@@ -381,10 +430,7 @@ end
 
 local function hookPlayer(player)
 	task.spawn(function()
-		local _, fruitValue = ensurePlayerFruitInstances(player)
-		local storedFruit = loadEquippedFruitFromData(player)
-		fruitValue.Value = storedFruit
-		syncFruitAttribute(player, storedFruit)
+		applyEquippedFruitValue(player, DevilFruitConfig.None)
 		if player:GetAttribute(COOLDOWN_BYPASS_ATTRIBUTE) == nil then
 			player:SetAttribute(COOLDOWN_BYPASS_ATTRIBUTE, false)
 		end
@@ -560,7 +606,16 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	local persisted, reason = persistEquippedFruit(player, resolvedFruitName)
 	if not persisted then
 		debugPrint("SetEquippedFruit STEP 5A - Immediate persist unavailable:", tostring(reason))
-		queuePersist(player, resolvedFruitName)
+		if (reason == "not_ready" or reason == "no_profile") and waitForDataReady(player, SET_PERSIST_READY_TIMEOUT) then
+			persisted, reason = persistEquippedFruit(player, resolvedFruitName)
+		end
+		if not persisted then
+			queuePersist(player, resolvedFruitName)
+		else
+			pendingPersistByPlayer[player] = nil
+		end
+	else
+		pendingPersistByPlayer[player] = nil
 	end
 
 	debugPrint("SetEquippedFruit STEP 6 - Persist result:", persisted, reason)

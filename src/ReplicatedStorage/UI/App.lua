@@ -1405,7 +1405,11 @@ local function captainsLogRow(props)
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(104, 58),
 			Size = UDim2.new(1, -360, 0, 16),
-			Text = string.format("Ready to collect: %s D", formatNumber(entry.collectable or 0)),
+			Text = string.format(
+				"Bounty: %s  |  %s D ready",
+				formatNumber(entry.bounty or 0),
+				formatNumber(entry.collectable or 0)
+			),
 			TextColor3 = accent,
 			TextSize = 12,
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -1832,6 +1836,9 @@ local function App(props)
 		}
 
 		local ledgerEntries = {
+			{ label = "Total Bounty", value = formatNumber(summary.bounty or 0), valueColor3 = PALETTE.Gold },
+			{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
+			{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
 			{ label = "Doubloons", value = formatNumber(summary.doubloons or 0) .. " D", valueColor3 = PALETTE.Gold },
 			{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 			{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },

@@ -22,6 +22,7 @@ local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineR
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
+local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
@@ -706,6 +707,44 @@ local function readPlayerRebirths()
 	return 0
 end
 
+local function readPlayerBountySummary()
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local bountyFolder = player:FindFirstChild("Bounty")
+	local metaBounty = metaState and metaState.Bounty or {}
+
+	local crewBounty = math.max(
+		0,
+		math.floor(
+			tonumber(readChildValue(bountyFolder, "Crew"))
+				or tonumber(metaBounty.Crew)
+				or 0
+		)
+	)
+	local extractionBounty = math.max(
+		0,
+		math.floor(
+			tonumber(readChildValue(bountyFolder, "LifetimeExtraction"))
+				or tonumber(metaBounty.LifetimeExtraction)
+				or 0
+		)
+	)
+	local totalBounty = math.max(
+		0,
+		math.floor(
+			tonumber(readChildValue(leaderstats, "Bounty"))
+				or tonumber(readChildValue(bountyFolder, "Total"))
+				or tonumber(metaBounty.Total)
+				or (crewBounty + extractionBounty)
+		)
+	)
+
+	return {
+		total = totalBounty,
+		crew = crewBounty,
+		extraction = extractionBounty,
+	}
+end
+
 local function readPlayerShipIncomeMultiplier(rebirths)
 	local multiplier = RebirthConfig.GetShipIncomeMultiplier(rebirths)
 	if typeof(multiplier) == "number" then
@@ -802,6 +841,10 @@ local function buildCaptainLogData(query)
 			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
 			local subtitle = getSubtitle("Brainrot", brainrotName)
 			local displayName = getDisplayName("Brainrot", brainrotName)
+			local bounty = math.max(0, BountyResolver.ResolveBrainrotBounty({
+				StorageName = brainrotName,
+				Level = standLevel,
+			}))
 
 			local nextEntry = {
 				key = standName,
@@ -814,6 +857,7 @@ local function buildCaptainLogData(query)
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				accentColor = getAccentColor("Brainrot", brainrotName),
 				level = standLevel,
+				bounty = bounty,
 				incomePerTick = incomePerTick,
 				collectable = incomeToCollect,
 			}
@@ -1033,6 +1077,7 @@ local function buildRenderData()
 	local liveRebirths = readPlayerRebirths()
 	local liveMultiplier = readPlayerShipIncomeMultiplier(liveRebirths)
 	local chestCount = readPlayerChestCount(chestsList)
+	local bountySummary = readPlayerBountySummary()
 
 	local totalStacks = 0
 	for _, state in pairs(itemState) do
@@ -1058,6 +1103,9 @@ local function buildRenderData()
 		categories = categories,
 		captainLog = captainLog,
 		summary = {
+			bounty = bountySummary.total,
+			crewBounty = bountySummary.crew,
+			extractionBounty = bountySummary.extraction,
 			doubloons = readPlayerDoubloons(),
 			rebirths = liveRebirths,
 			multiplier = formatMultiplier(liveMultiplier),
@@ -1209,6 +1257,7 @@ local function bindShipDataTracking()
 	end
 
 	local watchedRoots = {
+		Bounty = true,
 		IncomeBrainrots = true,
 		Inventory = true,
 		StandsLevels = true,

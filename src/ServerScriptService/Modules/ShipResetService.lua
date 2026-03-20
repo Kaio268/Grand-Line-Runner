@@ -3,6 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -66,6 +67,8 @@ local function releaseAllAssignedShipUnits(player)
 		if success == false then
 			return false, "failed_to_release_assigned_units"
 		end
+
+		BountyService.RefreshPlayerBounty(player, brainrotInventory)
 	end
 
 	BrainrotInstanceService.SyncAvailableCounts(player)

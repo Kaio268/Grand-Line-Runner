@@ -6,6 +6,7 @@ local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 
 local Module = {}
 local DataManagerModule
+local inventorySavedCallbacks = {}
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -26,6 +27,15 @@ local function getDataManager()
 		DataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 	end
 	return DataManagerModule
+end
+
+local function notifyInventorySaved(player, brainrotInventory)
+	for callback in pairs(inventorySavedCallbacks) do
+		local ok, err = pcall(callback, player, brainrotInventory)
+		if not ok then
+			warn(string.format("[BrainrotInstanceService] Inventory save callback failed: %s", tostring(err)))
+		end
+	end
 end
 
 local function getVariantAndBaseName(fullName)
@@ -140,6 +150,7 @@ end
 
 local function saveBrainrotInventory(player, brainrotInventory)
 	getDataManager():SetValue(player, "BrainrotInventory", brainrotInventory)
+	notifyInventorySaved(player, brainrotInventory)
 end
 
 local function getBrainrotInventory(player)
@@ -331,6 +342,18 @@ end
 
 function Module.EnsureInventory(player)
 	return getBrainrotInventory(player)
+end
+
+function Module.RegisterInventorySavedCallback(callback)
+	if typeof(callback) ~= "function" then
+		error("[BrainrotInstanceService] RegisterInventorySavedCallback expects a function")
+	end
+
+	inventorySavedCallbacks[callback] = true
+
+	return function()
+		inventorySavedCallbacks[callback] = nil
+	end
 end
 
 function Module.SyncAvailableCounts(player)

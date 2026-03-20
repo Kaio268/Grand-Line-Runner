@@ -124,6 +124,7 @@ function ProfileMigrations.Apply(data)
 	local resolvedMoney = math.max(legacyMoney, typoMoney)
 
 	leaderstats[primaryCurrency.Key] = coerceNumber(leaderstats[primaryCurrency.Key], resolvedMoney)
+	leaderstats.Bounty = math.max(0, coerceNumber(leaderstats.Bounty, 0))
 	leaderstats[primaryCurrency.LegacyKeys.Leaderstat] = nil
 	leaderstats[primaryCurrency.LegacyKeys.LeaderstatTypo] = nil
 
@@ -131,6 +132,17 @@ function ProfileMigrations.Apply(data)
 	local legacyTotal = coerceNumber(totalStats[primaryCurrency.LegacyKeys.Total], 0)
 	totalStats[primaryCurrency.TotalKey] = coerceNumber(totalStats[primaryCurrency.TotalKey], legacyTotal)
 	totalStats[primaryCurrency.LegacyKeys.Total] = nil
+
+	local bounty = ensureTable(data, "Bounty")
+	bounty.LifetimeExtraction = math.max(0, coerceNumber(bounty.LifetimeExtraction, 0))
+	bounty.Crew = math.max(0, coerceNumber(bounty.Crew, 0))
+	bounty.Total = math.max(0, coerceNumber(bounty.Total, leaderstats.Bounty))
+	leaderstats.Bounty = math.max(leaderstats.Bounty, bounty.Total)
+
+	local devilFruit = ensureTable(data, "DevilFruit")
+	if typeof(devilFruit.Equipped) ~= "string" then
+		devilFruit.Equipped = ProfileTemplate.DevilFruit.Equipped
+	end
 
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
 	local legacyHiddenLeadderstats = data.HiddenLeadderstats

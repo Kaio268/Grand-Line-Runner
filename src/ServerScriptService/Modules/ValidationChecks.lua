@@ -25,7 +25,11 @@ function ValidationChecks.ValidateProfileData(data)
 	local issues = {}
 	local requiredChecks = {
 		{ Path = { "leaderstats", "Doubloons" }, ExpectedType = "number" },
+		{ Path = { "leaderstats", "Bounty" }, ExpectedType = "number" },
 		{ Path = { "HiddenLeaderstats", "PlotUpgrade" }, ExpectedType = "number" },
+		{ Path = { "Bounty", "LifetimeExtraction" }, ExpectedType = "number" },
+		{ Path = { "Bounty", "Crew" }, ExpectedType = "number" },
+		{ Path = { "Bounty", "Total" }, ExpectedType = "number" },
 		{ Path = { "FoodInventory" }, ExpectedType = "table" },
 		{ Path = { "BrainrotInventory", "ById" }, ExpectedType = "table" },
 		{ Path = { "CrewInventory", "ById" }, ExpectedType = "table" },
