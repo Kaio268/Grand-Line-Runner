@@ -1,6 +1,7 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-
+local flameDashAnimation = "rbxassetid://93759237368646"
+local flameBurstAnimation = "rbxassetid://92151793966516"
 local MeraMeraNoMi = {}
 
 local WALL_PADDING = 2
@@ -9,6 +10,24 @@ local END_CARRY_SPEED_FACTOR = 0.82
 
 local function smoothstep(alpha)
 	return alpha * alpha * (3 - (2 * alpha))
+end
+
+local function playFlameDashAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = flameDashAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
+
+local function playFlameBurstAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = flameBurstAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
 end
 
 local function getDashDirection(humanoid, rootPart)
@@ -124,7 +143,7 @@ function MeraMeraNoMi.FlameDash(context)
 	local humanoid = context.Humanoid
 	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
-
+	playFlameDashAnimation(humanoid)
 	local direction = getDashDirection(humanoid, rootPart)
 	local maxDashDistance = getMaxDashDistance(humanoid, rootPart, abilityConfig)
 	local dashDistance = getDashDistance(character, rootPart, direction, maxDashDistance)
@@ -193,7 +212,14 @@ function MeraMeraNoMi.FlameDash(context)
 			local alpha = math.clamp(elapsed / dashDuration, 0, 1)
 			local dashSpeed = startDashSpeed + ((endDashSpeed - startDashSpeed) * smoothstep(alpha))
 			local lookAheadDistance = math.max((dashSpeed * dt) + WALL_PADDING, WALL_PADDING + 1)
-			if shouldStopForWall(character, rootPart, direction, math.min(lookAheadDistance, currentRemainingDistance + WALL_PADDING)) then
+			if
+				shouldStopForWall(
+					character,
+					rootPart,
+					direction,
+					math.min(lookAheadDistance, currentRemainingDistance + WALL_PADDING)
+				)
+			then
 				stopDashVelocity(rootPart)
 				connection:Disconnect()
 				return
@@ -229,7 +255,7 @@ end
 
 function MeraMeraNoMi.FireBurst(context)
 	local abilityConfig = context.AbilityConfig
-
+	playFlameBurstAnimation(context.Humanoid)
 	return {
 		Radius = abilityConfig.Radius,
 		Duration = abilityConfig.Duration,

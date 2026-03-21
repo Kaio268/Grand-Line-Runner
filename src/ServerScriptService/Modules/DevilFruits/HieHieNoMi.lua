@@ -1,4 +1,14 @@
 local HieHieNoMi = {}
+local iceBlastAnimation = "rbxassetid://112900668980719"
+
+local function playIceBlastAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBlastAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
 
 local function getForwardDirection(rootPart)
 	local look = rootPart.CFrame.LookVector
@@ -15,6 +25,7 @@ local function getForwardDirection(rootPart)
 end
 
 function HieHieNoMi.FreezeShot(context)
+	playIceBlastAnimation(context.Humanoid)
 	local abilityConfig = context.AbilityConfig
 	local direction = getForwardDirection(context.RootPart)
 
