@@ -5,10 +5,12 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
+local UiModalState = require(Modules:WaitForChild("UiModalState"))
 
 local ShopFolder = UiFolder:WaitForChild("Shop")
 local ShopShell = require(ShopFolder:WaitForChild("ShopShell"))
@@ -103,6 +105,7 @@ end
 local function syncOverlayState()
 	local isVisible = storeFrame.Visible
 	shopBackdrop.Visible = isVisible
+	UiModalState.SetOpen("ShopModal", isVisible)
 end
 
 local function disconnectAll()
@@ -254,6 +257,7 @@ render()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	UiModalState.SetOpen("ShopModal", false)
 	disconnectAll()
 	purchaseAdapter:destroy()
 	shopBackdrop.Visible = false

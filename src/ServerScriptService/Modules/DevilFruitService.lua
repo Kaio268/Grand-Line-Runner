@@ -58,6 +58,8 @@ local ModulesFolder = script.Parent
 local FruitHandlersFolder = ModulesFolder:FindFirstChild("DevilFruits") or ModulesFolder:WaitForChild("DevilFruits")
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local syncFruitAttribute
 
@@ -317,6 +319,11 @@ local function cleanupPlayerState(player)
 		targetFruit = getEquippedFruit(player)
 	end
 
+	local currentFruit = getEquippedFruit(player)
+	if currentFruit ~= DevilFruitConfig.None then
+		clearFruitRuntimeState(player, currentFruit)
+	end
+
 	if DataManager:IsReady(player) then
 		local persisted, reason = persistEquippedFruit(player, normalizeStoredFruitName(targetFruit))
 		if not persisted then
@@ -367,6 +374,14 @@ local function clearFruitRuntimeState(player, fruitName)
 		player:SetAttribute("HieIceBoostUntil", nil)
 		player:SetAttribute("HieIceBoostSpeedMultiplier", nil)
 		player:SetAttribute("HieIceBoostSpeedBonus", nil)
+	end
+
+	local fruitHandler = getFruitHandler(fruitName)
+	if fruitHandler and typeof(fruitHandler.ClearRuntimeState) == "function" then
+		local ok, err = pcall(fruitHandler.ClearRuntimeState, player, fruitName)
+		if not ok then
+			warn(string.format("[DevilFruitService] Failed to clear runtime state for %s: %s", fruitName, tostring(err)))
+		end
 	end
 end
 
@@ -518,6 +533,15 @@ local function clearAbilityCooldown(player, abilityName)
 	cooldowns[abilityName] = nil
 end
 
+local function shouldStartCooldownOnResolve(abilityConfig)
+	if typeof(abilityConfig) ~= "table" then
+		return false
+	end
+
+	local cooldownStartsOn = abilityConfig.CooldownStartsOn
+	return typeof(cooldownStartsOn) == "string" and string.lower(cooldownStartsOn) == "resolve"
+end
+
 local function fireAbilityDenied(player, fruitName, abilityName, reason, readyAt)
 	RemoteBundle.State:FireClient(player, "Denied", fruitName or DevilFruitConfig.None, abilityName, reason, readyAt or 0)
 end
@@ -551,13 +575,51 @@ local function executeAbility(player, abilityName, requestPayload)
 		return
 	end
 
-	local nextReadyAt = setAbilityCooldown(player, abilityName, context.AbilityConfig.Cooldown)
-	local ok, payload = pcall(abilityHandler, context)
+	local startsCooldownOnResolve = shouldStartCooldownOnResolve(context.AbilityConfig)
+	local nextReadyAt = 0
+	local reservedCooldown = false
+	if not startsCooldownOnResolve then
+		nextReadyAt = setAbilityCooldown(player, abilityName, context.AbilityConfig.Cooldown)
+		reservedCooldown = true
+	end
+
+	local ok, payload, control = pcall(abilityHandler, context)
 	if not ok then
-		clearAbilityCooldown(player, abilityName)
+		if reservedCooldown then
+			clearAbilityCooldown(player, abilityName)
+		end
 		warn("[DevilFruitService] Failed to execute " .. fruitName .. " / " .. abilityName .. ": " .. tostring(payload))
 		fireAbilityDenied(player, fruitName, abilityName, "ExecutionFailed")
 		return
+	end
+
+	local applyCooldown = true
+	local cooldownDuration = context.AbilityConfig.Cooldown
+	if typeof(control) == "table" then
+		if control.ApplyCooldown == false then
+			applyCooldown = false
+		end
+
+		local overrideDuration = tonumber(control.CooldownDuration)
+		if overrideDuration then
+			cooldownDuration = overrideDuration
+		end
+	end
+
+	if startsCooldownOnResolve then
+		if applyCooldown then
+			nextReadyAt = setAbilityCooldown(player, abilityName, cooldownDuration)
+		else
+			clearAbilityCooldown(player, abilityName)
+			nextReadyAt = 0
+		end
+	else
+		if not applyCooldown then
+			clearAbilityCooldown(player, abilityName)
+			nextReadyAt = 0
+		elseif tonumber(cooldownDuration) and cooldownDuration ~= context.AbilityConfig.Cooldown then
+			nextReadyAt = setAbilityCooldown(player, abilityName, cooldownDuration)
+		end
 	end
 
 	fireAbilityActivated(player, fruitName, abilityName, nextReadyAt, payload)
@@ -601,6 +663,10 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 
 	debugPrint("SetEquippedFruit STEP 4 - Applying runtime state")
 	applyEquippedFruitRuntimeState(player, fruitValue, resolvedFruitName)
+
+	if resolvedFruitName ~= DevilFruitConfig.None then
+		TitleService.UnlockTitle(player, "EnemyOfTheSea")
+	end
 
 	debugPrint("SetEquippedFruit STEP 5 - Queueing persistence through DataManager")
 	local persisted, reason = persistEquippedFruit(player, resolvedFruitName)
@@ -659,6 +725,7 @@ function DevilFruitService.Start()
 	end
 
 	started = true
+	HitEffectService.Start()
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		hookPlayer(player)

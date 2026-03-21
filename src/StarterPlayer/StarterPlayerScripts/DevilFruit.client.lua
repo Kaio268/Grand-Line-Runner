@@ -11,6 +11,8 @@ local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForC
 local ProtectionRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
 
 local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = "GameplayModalOpen"
 
 local GOMU_AIM_RAY_DISTANCE = 500
 local GOMU_HIGHLIGHT_FILL_COLOR = Color3.fromRGB(255, 176, 120)
@@ -111,7 +113,11 @@ local function isCooldownBypassEnabled()
 end
 
 local function getPlayerGui()
-	return waitForChildSafe(player, "PlayerGui", 15)
+	return playerGui
+end
+
+local function isGameplayModalOpen()
+	return playerGui:GetAttribute(GAMEPLAY_MODAL_OPEN_ATTRIBUTE) == true
 end
 
 local function ensureStroke(instance, color, transparency, thickness)
@@ -284,8 +290,9 @@ end
 
 local function setCooldownHudVisible(isVisible)
 	ensureCooldownHud()
-	cooldownHud.Gui.Enabled = isVisible
-	cooldownHud.Panel.Visible = isVisible
+	local shouldShow = isVisible and not isGameplayModalOpen()
+	cooldownHud.Gui.Enabled = shouldShow
+	cooldownHud.Panel.Visible = shouldShow
 end
 
 local function hideCooldownHud()
@@ -1699,6 +1706,118 @@ local function createFallbackBurstEffect(targetPlayer, fruitName, abilityName, p
 	end)
 end
 
+local function getEffectOriginPosition(targetPlayer, payload)
+	if typeof(payload) == "table" and typeof(payload.OriginPosition) == "Vector3" then
+		return payload.OriginPosition
+	end
+
+	local rootPart = getPlayerRootPart(targetPlayer)
+	return rootPart and rootPart.Position or nil
+end
+
+local function destroyMinorHazardsNearPosition(centerPosition, radius)
+	if typeof(centerPosition) ~= "Vector3" or radius <= 0 then
+		return 0
+	end
+
+	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, buildLocalHazardOverlapParams())
+	local destroyedContainers = {}
+	local destroyedCount = 0
+
+	for _, part in ipairs(nearbyParts) do
+		local container, hazardClass = getHazardContainer(part)
+		if container and hazardClass == "minor" and not destroyedContainers[container] then
+			destroyedContainers[container] = true
+
+			local destroyed = HazardRuntime.Destroy(container)
+			if not destroyed and container.Parent then
+				container:Destroy()
+				destroyed = true
+			end
+
+			if destroyed then
+				destroyedCount += 1
+			end
+		end
+	end
+
+	return destroyedCount
+end
+
+local function createBomuDetonationEffect(targetPlayer, fruitName, abilityName, payload)
+	if fruitName ~= "Bomu Bomu no Mi" then
+		return
+	end
+
+	if abilityName ~= "LandMine" then
+		return
+	end
+
+	if payload and payload.Action ~= "Detonated" then
+		return
+	end
+
+	local originPosition = getEffectOriginPosition(targetPlayer, payload)
+	if not originPosition then
+		return
+	end
+
+	local radius = math.max(1, tonumber(payload and payload.Radius) or 8)
+
+	local flash = Instance.new("Part")
+	flash.Name = "BomuDetonationFlash"
+	flash.Shape = Enum.PartType.Ball
+	flash.Anchored = true
+	flash.CanCollide = false
+	flash.CanTouch = false
+	flash.CanQuery = false
+	flash.Material = Enum.Material.Neon
+	flash.Color = Color3.fromRGB(255, 225, 153)
+	flash.Transparency = 0.12
+	flash.Size = Vector3.new(2, 2, 2)
+	flash.CFrame = CFrame.new(originPosition)
+	flash.Parent = Workspace
+
+	local ring = Instance.new("Part")
+	ring.Name = "BomuDetonationRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanTouch = false
+	ring.CanQuery = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = Color3.fromRGB(255, 171, 82)
+	ring.Transparency = 0.25
+	ring.Size = Vector3.new(0.25, radius * 0.8, radius * 0.8)
+	ring.CFrame = CFrame.new(originPosition) * CFrame.Angles(0, 0, math.rad(90))
+	ring.Parent = Workspace
+
+	local flashTween = TweenService:Create(flash, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(radius * 2.2, radius * 2.2, radius * 2.2),
+	})
+
+	local ringTween = TweenService:Create(ring, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(0.25, radius * 2.35, radius * 2.35),
+	})
+
+	flashTween:Play()
+	ringTween:Play()
+
+	flashTween.Completed:Connect(function()
+		if flash.Parent then
+			flash:Destroy()
+		end
+	end)
+
+	ringTween.Completed:Connect(function()
+		if ring.Parent then
+			ring:Destroy()
+		end
+	end)
+end
+
 local function createPhoenixFlightEffect(targetPlayer, fruitName, abilityName, _payload)
 	if fruitName ~= PHOENIX_FRUIT_NAME or abilityName ~= PHOENIX_FLIGHT_ABILITY then
 		return
@@ -1965,6 +2084,7 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 
 	playOptionalEffect(targetPlayer, fruitName, abilityName)
 	createFallbackBurstEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
+	createBomuDetonationEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	createPhoenixFlightEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	createPhoenixShieldEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	createRubberLaunchEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
@@ -1988,6 +2108,17 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 
 	if fruitName == "Hie Hie no Mi" and abilityName == "IceBoost" then
 		createIceBoostEffect(targetPlayer, resolvedPayload)
+	end
+
+	if fruitName == "Bomu Bomu no Mi"
+		and abilityName == "LandMine"
+		and resolvedPayload.Action == "Detonated"
+		and resolvedPayload.DestroyMinorHazards == true then
+		local originPosition = getEffectOriginPosition(targetPlayer, resolvedPayload)
+		local radius = math.max(0, tonumber(resolvedPayload.Radius) or 0)
+		if originPosition and radius > 0 then
+			destroyMinorHazardsNearPosition(originPosition, radius)
+		end
 	end
 end)
 
@@ -2020,6 +2151,10 @@ player:GetAttributeChangedSignal("EquippedDevilFruit"):Connect(function()
 end)
 
 player:GetAttributeChangedSignal("DevilFruitCooldownBypass"):Connect(function()
+	updateCooldownHud(false)
+end)
+
+playerGui:GetAttributeChangedSignal(GAMEPLAY_MODAL_OPEN_ATTRIBUTE):Connect(function()
 	updateCooldownHud(false)
 end)
 

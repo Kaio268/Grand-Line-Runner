@@ -43,4 +43,22 @@ function HazardRuntime.Freeze(instance, duration)
 	return controller:Freeze(duration) ~= false, rootInstance, controller
 end
 
+function HazardRuntime.Destroy(instance)
+	local rootInstance, controller = HazardRuntime.GetController(instance)
+	local targetInstance = rootInstance or instance
+	if typeof(targetInstance) ~= "Instance" then
+		return false, rootInstance, controller
+	end
+
+	if controller and typeof(controller.Destroy) == "function" then
+		controller:Destroy()
+	end
+
+	if targetInstance.Parent then
+		targetInstance:Destroy()
+	end
+
+	return true, rootInstance, controller
+end
+
 return HazardRuntime

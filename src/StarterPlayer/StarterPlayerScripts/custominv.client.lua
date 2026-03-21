@@ -444,8 +444,8 @@ local function ensureDevilFruitPreview(button, fruitKey)
 		return false
 	end
 
-	local sourceModel = DevilFruitAssets.GetWorldModelByKey(fruitKey)
-	if not sourceModel then
+	local modelClone = DevilFruitAssets.ClonePreviewWorldModel(fruitKey)
+	if not modelClone then
 		clearDevilFruitPreview(button)
 		toolIcon.ImageTransparency = 1
 		return false
@@ -477,7 +477,6 @@ local function ensureDevilFruitPreview(button, fruitKey)
 	local worldModel = Instance.new("WorldModel")
 	worldModel.Parent = viewport
 
-	local modelClone = sourceModel:Clone()
 	modelClone.Parent = worldModel
 
 	if modelClone:IsA("Model") then

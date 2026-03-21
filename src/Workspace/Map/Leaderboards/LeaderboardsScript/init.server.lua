@@ -15,6 +15,9 @@ local REFRESH_SECONDS = 120
 local MIN_SAVE_INTERVAL = 60
 local DEBOUNCE_SECONDS = 5
 local MAX_WRITES_PER_CYCLE = 20
+local PAGE_SIZE = 100
+local BOUNTY_REFRESH_AFTER_WRITE_SECONDS = 6
+local MIN_BOUNTY_REFRESH_INTERVAL = 15
 local DEBUG = false
 
 local function dbg(...)
@@ -55,6 +58,34 @@ local function Suffix(n)
 end
 
 local Root = game.Workspace.Map.Leaderboards
+
+local function resolveBoardFolder(primaryName, fallbackName)
+	return Root:FindFirstChild(primaryName) or Root:WaitForChild(fallbackName or primaryName)
+end
+
+local function normalizeBoardLabelText(text)
+	return string.lower(string.gsub(tostring(text or ""), "[%s_%-']", ""))
+end
+
+local function relabelBoardFolder(board)
+	if typeof(board) ~= "table" or not board.folder or typeof(board.headerText) ~= "string" then
+		return
+	end
+
+	local aliases = {}
+	for _, alias in ipairs(board.legacyLabels or {}) do
+		aliases[normalizeBoardLabelText(alias)] = true
+	end
+
+	for _, descendant in ipairs(board.folder:GetDescendants()) do
+		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+			if aliases[normalizeBoardLabelText(descendant.Text)] then
+				descendant.Text = board.headerText
+			end
+		end
+	end
+end
+
 local Boards = {
 	{
 		name = "TotalMoney",
@@ -71,11 +102,13 @@ local Boards = {
 		display = function(v) return Suffix(v) end,
 	},
 	{
-		name = "TimePlayed",
-		stat = "TimePlayed",
-		ds = DataStoreService:GetOrderedDataStore("TotsddsaaddnData0fbsdfb24"),
-		folder = Root:WaitForChild("TimePlayed"),
-		display = function(v) return shornten.timeSuffix(v) end,
+		name = "Bounty",
+		stat = "Bounty",
+		ds = DataStoreService:GetOrderedDataStore("GrandLineRush_BountyLeaderboard_v1"),
+		folder = resolveBoardFolder("Bounty", "TimePlayed"),
+		display = function(v) return Suffix(v) end,
+		headerText = "Bounty",
+		legacyLabels = { "Time Played", "TimePlayed", "Total Time Played" },
 	},
 }
 
@@ -128,6 +161,7 @@ end
 
 for _, b in ipairs(Boards) do
 	b.views = getContainers(b.folder)
+	relabelBoardFolder(b)
 end
 
 local uidCache, dispCache = {}, {}
@@ -171,6 +205,26 @@ local function clearContainer(container)
 end
 
 local lastRanks = {}
+local boardSnapshotReady = {}
+local boardVisibleCounts = {}
+local lastBoardFillAt = {}
+local pendingBoardRefreshes = {}
+local fillBoard
+
+local function publishBoardMetadata(board)
+	local readyAttr = "LB_" .. board.name .. "_Ready"
+	local visibleLimitAttr = "LB_" .. board.name .. "_VisibleLimit"
+	local visibleCountAttr = "LB_" .. board.name .. "_VisibleCount"
+	local visibleLimit = board.pageSize or PAGE_SIZE
+	local visibleCount = boardVisibleCounts[board.name] or 0
+	local ready = boardSnapshotReady[board.name] == true
+
+	for _, plr in ipairs(Players:GetPlayers()) do
+		plr:SetAttribute(readyAttr, ready)
+		plr:SetAttribute(visibleLimitAttr, visibleLimit)
+		plr:SetAttribute(visibleCountAttr, visibleCount)
+	end
+end
 
 local function updateChatTagsForBoard(board, page)
 	local included = {}
@@ -181,13 +235,22 @@ local function updateChatTagsForBoard(board, page)
 	end
 
 	lastRanks[board.name] = included
+	boardSnapshotReady[board.name] = true
+	boardVisibleCounts[board.name] = #page
 
 	local attrLB = "LB_" .. board.name
 	local cfgAttr = LBChat and LBChat.Boards and LBChat.Boards[board.name] and LBChat.Boards[board.name].attr
+	local readyAttr = "LB_" .. board.name .. "_Ready"
+	local visibleLimitAttr = "LB_" .. board.name .. "_VisibleLimit"
+	local visibleCountAttr = "LB_" .. board.name .. "_VisibleCount"
+	local visibleLimit = board.pageSize or PAGE_SIZE
 
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local r = included[plr.Name]
-		if r and r >= 1 and r <= 100 then
+		plr:SetAttribute(readyAttr, true)
+		plr:SetAttribute(visibleLimitAttr, visibleLimit)
+		plr:SetAttribute(visibleCountAttr, #page)
+		if r and r >= 1 and r <= visibleLimit then
 			plr:SetAttribute(attrLB, r)
 			if cfgAttr then plr:SetAttribute(cfgAttr, r) end
 		else
@@ -265,6 +328,28 @@ local function writeOne(board, playerName, encoded)
 	return ok
 end
 
+local function queueBoardRefresh(board, delaySeconds)
+	if board.name ~= "Bounty" or typeof(fillBoard) ~= "function" then
+		return
+	end
+
+	if pendingBoardRefreshes[board.name] then
+		return
+	end
+
+	pendingBoardRefreshes[board.name] = true
+	task.delay(delaySeconds or BOUNTY_REFRESH_AFTER_WRITE_SECONDS, function()
+		local elapsed = os.clock() - (lastBoardFillAt[board.name] or 0)
+		local remaining = math.max(0, MIN_BOUNTY_REFRESH_INTERVAL - elapsed)
+		if remaining > 0 then
+			task.wait(remaining)
+		end
+
+		fillBoard(board)
+		pendingBoardRefreshes[board.name] = nil
+	end)
+end
+
 local function drainQueue()
 	while true do
 		local processed = 0
@@ -283,6 +368,9 @@ local function drainQueue()
 							local ok = writeOne(b, key, entry.encoded)
 							pending[b.name][key] = nil
 							processed += 1
+							if ok then
+								queueBoardRefresh(b)
+							end
 							if not ok then
 								pending[b.name][key] = entry
 								pendingOrder[#pendingOrder + 1] = {b = b, key = key}
@@ -324,8 +412,9 @@ local function pushOne(board, plr)
 	queueSave(board, plr, val)
 end
 
-local function fillBoard(board)
+fillBoard = function(board)
 	if not board.views or #board.views == 0 then return end
+	lastBoardFillAt[board.name] = os.clock()
 	for _, view in ipairs(board.views) do
 		if view.container then
 			clearContainer(view.container)
@@ -336,7 +425,7 @@ local function fillBoard(board)
 	while tries < 10 and not gotPage do
 		local budget = DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetSortedAsync)
 		if budget > 0 then
-			local ok, pages = DSCall(function() return board.ds:GetSortedAsync(false, 100) end, 5)
+			local ok, pages = DSCall(function() return board.ds:GetSortedAsync(false, board.pageSize or PAGE_SIZE) end, 5)
 			if ok then
 				gotPage = pages:GetCurrentPage()
 				break
@@ -384,6 +473,13 @@ local function initRankAttributes(plr)
 		for _, cfg in pairs(LBChat.Boards) do
 			if cfg.attr then plr:SetAttribute(cfg.attr, nil) end
 		end
+	end
+
+	for _, board in ipairs(Boards) do
+		plr:SetAttribute("LB_" .. board.name, nil)
+		plr:SetAttribute("LB_" .. board.name .. "_Ready", boardSnapshotReady[board.name] == true)
+		plr:SetAttribute("LB_" .. board.name .. "_VisibleLimit", board.pageSize or PAGE_SIZE)
+		plr:SetAttribute("LB_" .. board.name .. "_VisibleCount", boardVisibleCounts[board.name] or 0)
 	end
 end
 
@@ -467,12 +563,16 @@ Players.PlayerAdded:Connect(function(plr)
 	task.defer(function()
 		for _, board in ipairs(Boards) do
 			local included = lastRanks[board.name]
+			plr:SetAttribute("LB_" .. board.name .. "_Ready", boardSnapshotReady[board.name] == true)
+			plr:SetAttribute("LB_" .. board.name .. "_VisibleLimit", board.pageSize or PAGE_SIZE)
+			plr:SetAttribute("LB_" .. board.name .. "_VisibleCount", boardVisibleCounts[board.name] or 0)
 			if included then
 				local r = included[plr.Name]
 				local attrLB = "LB_" .. board.name
 				local cfgAttr = LBChat and LBChat.Boards and LBChat.Boards[board.name] and LBChat.Boards[board.name].attr
+				local visibleLimit = board.pageSize or PAGE_SIZE
 
-				if r and r >= 1 and r <= 100 then
+				if r and r >= 1 and r <= visibleLimit then
 					plr:SetAttribute(attrLB, r)
 					if cfgAttr then plr:SetAttribute(cfgAttr, r) end
 				else

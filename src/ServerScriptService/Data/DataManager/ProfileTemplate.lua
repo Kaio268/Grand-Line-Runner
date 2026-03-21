@@ -49,6 +49,11 @@ local ProfileTemplate = {
 		Total = 0,
 	},
 
+	Titles = {
+		Unlocked = {},
+		Equipped = "",
+	},
+
 	FoodInventory = {
 		Apple = 0,
 		Rice = 0,

@@ -139,6 +139,12 @@ function ProfileMigrations.Apply(data)
 	bounty.Total = math.max(0, coerceNumber(bounty.Total, leaderstats.Bounty))
 	leaderstats.Bounty = math.max(leaderstats.Bounty, bounty.Total)
 
+	local titles = ensureTable(data, "Titles")
+	titles.Unlocked = ensureTable(titles, "Unlocked")
+	if typeof(titles.Equipped) ~= "string" then
+		titles.Equipped = ""
+	end
+
 	local devilFruit = ensureTable(data, "DevilFruit")
 	if typeof(devilFruit.Equipped) ~= "string" then
 		devilFruit.Equipped = ProfileTemplate.DevilFruit.Equipped

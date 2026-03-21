@@ -30,6 +30,8 @@ function ValidationChecks.ValidateProfileData(data)
 		{ Path = { "Bounty", "LifetimeExtraction" }, ExpectedType = "number" },
 		{ Path = { "Bounty", "Crew" }, ExpectedType = "number" },
 		{ Path = { "Bounty", "Total" }, ExpectedType = "number" },
+		{ Path = { "Titles", "Unlocked" }, ExpectedType = "table" },
+		{ Path = { "Titles", "Equipped" }, ExpectedType = "string" },
 		{ Path = { "FoodInventory" }, ExpectedType = "table" },
 		{ Path = { "BrainrotInventory", "ById" }, ExpectedType = "table" },
 		{ Path = { "CrewInventory", "ById" }, ExpectedType = "table" },

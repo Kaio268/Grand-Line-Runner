@@ -2,18 +2,26 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 
 local function getJumpHeightMultiplier(player)
 	local fruitName = player:GetAttribute("EquippedDevilFruit")
 	if typeof(fruitName) ~= "string" or fruitName == "" then
-		return 1
+		fruitName = nil
 	end
 
-	local fruit = DevilFruitConfig.GetFruit(fruitName)
+	local fruit = fruitName and DevilFruitConfig.GetFruit(fruitName) or nil
 	local glideConfig = fruit and fruit.Passives and fruit.Passives.PhoenixGlide
 	local jumpHeightMultiplier = glideConfig and tonumber(glideConfig.JumpHeightMultiplier)
 	if not jumpHeightMultiplier or jumpHeightMultiplier <= 0 then
-		return 1
+		jumpHeightMultiplier = 1
+	end
+
+	local attributes = HitEffectConfig.Attributes
+	local untilTime = player:GetAttribute(attributes.Until)
+	local hitEffectJumpMultiplier = player:GetAttribute(attributes.JumpMultiplier)
+	if typeof(untilTime) == "number" and typeof(hitEffectJumpMultiplier) == "number" and untilTime > os.clock() then
+		jumpHeightMultiplier *= math.max(0, hitEffectJumpMultiplier)
 	end
 
 	return jumpHeightMultiplier
@@ -53,6 +61,14 @@ local function hookCharacter(player, character)
 		apply()
 	end)
 
+	connections[#connections + 1] = player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Until):Connect(function()
+		apply()
+	end)
+
+	connections[#connections + 1] = player:GetAttributeChangedSignal(HitEffectConfig.Attributes.JumpMultiplier):Connect(function()
+		apply()
+	end)
+
 	connections[#connections + 1] = humanoid:GetPropertyChangedSignal("UseJumpPower"):Connect(function()
 		if updating then
 			return
@@ -74,7 +90,8 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		baseJumpPower = humanoid.JumpPower / math.max(getJumpPowerMultiplier(player), 0.01)
+		local jumpPowerMultiplier = math.max(getJumpPowerMultiplier(player), 0.01)
+		baseJumpPower = humanoid.JumpPower / jumpPowerMultiplier
 		apply()
 	end)
 
@@ -83,7 +100,8 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		baseJumpHeight = humanoid.JumpHeight / math.max(getJumpHeightMultiplier(player), 0.01)
+		local jumpHeightMultiplier = math.max(getJumpHeightMultiplier(player), 0.01)
+		baseJumpHeight = humanoid.JumpHeight / jumpHeightMultiplier
 		apply()
 	end)
 

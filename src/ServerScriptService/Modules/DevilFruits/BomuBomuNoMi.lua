@@ -1,0 +1,472 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
+
+local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local HazardUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
+local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+
+local BomuBomuNoMi = {}
+
+local activeMinesByPlayer = {}
+
+local EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
+local LAND_MINE_MODEL_NAME = "BomuLandMine"
+local GROUND_CAST_HEIGHT = 4
+local GROUND_CAST_DISTANCE = 18
+local MINE_BODY_HEIGHT = 0.34
+local OWNER_NETWORK_OWNER_RELEASE_DELAY = 0.35
+
+local function getPlanarUnitOrFallback(vector, fallback)
+	local planarVector = Vector3.new(vector.X, 0, vector.Z)
+	if planarVector.Magnitude > 0.01 then
+		return planarVector.Unit
+	end
+
+	if typeof(fallback) == "Vector3" and fallback.Magnitude > 0.01 then
+		local planarFallback = Vector3.new(fallback.X, 0, fallback.Z)
+		if planarFallback.Magnitude > 0.01 then
+			return planarFallback.Unit
+		end
+	end
+
+	return Vector3.new(0, 0, -1)
+end
+
+local function isPlayerCharacterDescendant(instance)
+	local current = instance
+	while current and current ~= Workspace do
+		if Players:GetPlayerFromCharacter(current) then
+			return true
+		end
+
+		current = current.Parent
+	end
+
+	return false
+end
+
+local function buildOverlapParams(character, extraExclusions)
+	local exclusions = {}
+	if character then
+		exclusions[#exclusions + 1] = character
+	end
+
+	if type(extraExclusions) == "table" then
+		for _, exclusion in ipairs(extraExclusions) do
+			if typeof(exclusion) == "Instance" then
+				exclusions[#exclusions + 1] = exclusion
+			end
+		end
+	end
+
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = exclusions
+	return overlapParams
+end
+
+local function buildGroundRaycastParams(character, extraExclusions)
+	local exclusions = {}
+	if character then
+		exclusions[#exclusions + 1] = character
+	end
+
+	if type(extraExclusions) == "table" then
+		for _, exclusion in ipairs(extraExclusions) do
+			if typeof(exclusion) == "Instance" then
+				exclusions[#exclusions + 1] = exclusion
+			end
+		end
+	end
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = exclusions
+	raycastParams.IgnoreWater = false
+	return raycastParams
+end
+
+local function ensureEffectsFolder()
+	local folder = Workspace:FindFirstChild(EFFECTS_FOLDER_NAME)
+	if folder and folder:IsA("Folder") then
+		return folder
+	end
+
+	if folder then
+		folder:Destroy()
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = EFFECTS_FOLDER_NAME
+	folder.Parent = Workspace
+	return folder
+end
+
+local function destroyMinorHazards(centerPosition, radius, character)
+	local overlapParams = buildOverlapParams(character)
+	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, overlapParams)
+	local destroyedCount = 0
+	local seenContainers = {}
+
+	for _, part in ipairs(nearbyParts) do
+		local container, hazardClass = HazardUtils.GetHazardInfo(part)
+		if container
+			and hazardClass == "minor"
+			and container.Parent
+			and container:IsDescendantOf(Workspace)
+			and not seenContainers[container]
+			and not isPlayerCharacterDescendant(container) then
+			seenContainers[container] = true
+
+			local destroyed = HazardRuntime.Destroy(container)
+			if not destroyed and container.Parent then
+				local ok = pcall(function()
+					container:Destroy()
+				end)
+				destroyed = ok
+			end
+
+			if destroyed then
+				destroyedCount += 1
+			end
+		end
+	end
+
+	return destroyedCount
+end
+
+local function getAffectedTargets(sourcePlayer, centerPosition, radius)
+	local targets = {}
+
+	for _, candidate in ipairs(Players:GetPlayers()) do
+		if candidate ~= sourcePlayer then
+			local character = candidate.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+			if humanoid and rootPart and humanoid.Health > 0 then
+				local distance = (rootPart.Position - centerPosition).Magnitude
+				if distance <= radius then
+					targets[#targets + 1] = {
+						Player = candidate,
+						RootPart = rootPart,
+					}
+				end
+			end
+		end
+	end
+
+	return targets
+end
+
+local function getKnockbackVector(centerPosition, targetRootPart, fallbackDirection, abilityConfig)
+	local direction = getPlanarUnitOrFallback(targetRootPart.Position - centerPosition, fallbackDirection)
+	local horizontalStrength = math.max(0, tonumber(abilityConfig.KnockbackHorizontal) or 0)
+	local verticalStrength = math.max(0, tonumber(abilityConfig.KnockbackVertical) or 0)
+
+	return (direction * horizontalStrength) + Vector3.new(0, verticalStrength, 0)
+end
+
+local function applyLaunchVelocity(rootPart, launchVelocity)
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = launchVelocity
+
+	local velocityDelta = launchVelocity - currentVelocity
+	local impulse = velocityDelta * rootPart.AssemblyMass
+	rootPart:ApplyImpulse(impulse)
+end
+
+local function getActiveMineEntry(player)
+	local mineEntry = activeMinesByPlayer[player]
+	if not mineEntry then
+		return nil
+	end
+
+	local mineModel = mineEntry.Model
+	if typeof(mineModel) ~= "Instance" or not mineModel.Parent then
+		activeMinesByPlayer[player] = nil
+		return nil
+	end
+
+	return mineEntry
+end
+
+local function clearActiveMine(player)
+	local mineEntry = activeMinesByPlayer[player]
+	activeMinesByPlayer[player] = nil
+
+	if not mineEntry then
+		return nil
+	end
+
+	local mineModel = mineEntry.Model
+	if typeof(mineModel) == "Instance" and mineModel.Parent then
+		mineModel:Destroy()
+	end
+
+	return mineEntry
+end
+
+local function setDisplayPartDefaults(part)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+	part.CastShadow = false
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+end
+
+local function createDisplayPart(parent, name, size, color, cframe, shape, material, transparency)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.Color = color
+	part.CFrame = cframe
+	part.Shape = shape or Enum.PartType.Block
+	part.Material = material or Enum.Material.SmoothPlastic
+	part.Transparency = transparency or 0
+	setDisplayPartDefaults(part)
+	part.Parent = parent
+	return part
+end
+
+local function createLandMineModel(player, groundPosition, radius)
+	local model = Instance.new("Model")
+	model.Name = string.format("%s_%d", LAND_MINE_MODEL_NAME, player.UserId)
+	model:SetAttribute("FruitKey", "Bomu")
+	model:SetAttribute("OwnerUserId", player.UserId)
+
+	local indicatorPosition = groundPosition + Vector3.new(0, 0.03, 0)
+	createDisplayPart(
+		model,
+		"RadiusIndicator",
+		Vector3.new(0.08, radius * 2, radius * 2),
+		Color3.fromRGB(255, 64, 64),
+		CFrame.new(indicatorPosition) * CFrame.Angles(0, 0, math.rad(90)),
+		Enum.PartType.Cylinder,
+		Enum.Material.Neon,
+		0.72
+	)
+	createDisplayPart(
+		model,
+		"RadiusCore",
+		Vector3.new(0.04, radius * 1.2, radius * 1.2),
+		Color3.fromRGB(255, 110, 92),
+		CFrame.new(indicatorPosition + Vector3.new(0, 0.01, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+		Enum.PartType.Cylinder,
+		Enum.Material.Neon,
+		0.82
+	)
+
+	local bodyPosition = groundPosition + Vector3.new(0, MINE_BODY_HEIGHT, 0)
+	local body = createDisplayPart(
+		model,
+		"Body",
+		Vector3.new(1.15, 0.48, 1.15),
+		Color3.fromRGB(38, 36, 36),
+		CFrame.new(bodyPosition),
+		Enum.PartType.Cylinder,
+		Enum.Material.Metal,
+		0
+	)
+	body.Orientation = Vector3.new(90, 0, 0)
+
+	createDisplayPart(
+		model,
+		"Cap",
+		Vector3.new(0.58, 0.2, 0.58),
+		Color3.fromRGB(198, 44, 44),
+		CFrame.new(bodyPosition + Vector3.new(0, 0.18, 0)),
+		Enum.PartType.Cylinder,
+		Enum.Material.SmoothPlastic,
+		0
+	).Orientation = Vector3.new(90, 0, 0)
+
+	createDisplayPart(
+		model,
+		"Beacon",
+		Vector3.new(0.24, 0.24, 0.24),
+		Color3.fromRGB(255, 82, 82),
+		CFrame.new(bodyPosition + Vector3.new(0, 0.34, 0)),
+		Enum.PartType.Ball,
+		Enum.Material.Neon,
+		0.08
+	)
+
+	model.PrimaryPart = body
+	model.Parent = ensureEffectsFolder()
+	return model, bodyPosition
+end
+
+local function scheduleMineCleanup(player, mineEntry, lifetime)
+	if lifetime <= 0 then
+		return
+	end
+
+	task.delay(lifetime, function()
+		if activeMinesByPlayer[player] == mineEntry then
+			clearActiveMine(player)
+		end
+	end)
+end
+
+local function getMinePlacementPosition(context)
+	local abilityConfig = context.AbilityConfig
+	local character = context.Character
+	local humanoid = context.Humanoid
+	local rootPart = context.RootPart
+	local placementDirection = getPlanarUnitOrFallback(humanoid.MoveDirection, rootPart.CFrame.LookVector)
+	local placementDistance = math.max(0, tonumber(abilityConfig.PlacementDistance) or 0)
+	local castOrigin = rootPart.Position + (placementDirection * placementDistance) + Vector3.new(0, GROUND_CAST_HEIGHT, 0)
+	local raycastParams = buildGroundRaycastParams(character)
+	local result = Workspace:Raycast(castOrigin, Vector3.new(0, -GROUND_CAST_DISTANCE, 0), raycastParams)
+
+	if result then
+		return result.Position + (result.Normal * 0.02)
+	end
+
+	local fallbackHeight = math.max((humanoid.HipHeight or 2) + 2.5, 4)
+	return rootPart.Position + (placementDirection * placementDistance) - Vector3.new(0, fallbackHeight, 0)
+end
+
+local function buildExplosionPayload(context, centerPosition, abilityConfig)
+	local radius = math.max(0, tonumber(abilityConfig.Radius) or 0)
+	local knockdownDuration = math.max(0, tonumber(abilityConfig.KnockdownDuration) or 0)
+	local fallbackDirection = getPlanarUnitOrFallback(context.RootPart.CFrame.LookVector, nil)
+	local destroyedHazardCount = destroyMinorHazards(centerPosition, radius, context.Character)
+	local affectedUserIds = {}
+
+	for _, target in ipairs(getAffectedTargets(context.Player, centerPosition, radius)) do
+		local knockbackVector = getKnockbackVector(centerPosition, target.RootPart, fallbackDirection, abilityConfig)
+		local applied = HitEffectService.ApplyEffect(target.Player, "Knockdown", {
+			Duration = knockdownDuration,
+			DropPosition = target.RootPart.Position,
+			KnockbackVector = knockbackVector,
+		})
+		if applied then
+			affectedUserIds[#affectedUserIds + 1] = target.Player.UserId
+		end
+	end
+
+	return {
+		Radius = radius,
+		OriginPosition = centerPosition,
+		KnockdownDuration = knockdownDuration,
+		DestroyMinorHazards = true,
+		DestroyedHazardCount = destroyedHazardCount,
+		AffectedUserIds = affectedUserIds,
+	}
+end
+
+local function applyOwnerLaunch(context, centerPosition, abilityConfig)
+	local ownerLaunchRadius = math.max(0, tonumber(abilityConfig.OwnerLaunchRadius) or 0)
+	if ownerLaunchRadius <= 0 then
+		return false
+	end
+
+	local player = context.Player
+	local character = context.Character
+	local humanoid = context.Humanoid
+	local rootPart = context.RootPart
+	if not rootPart or not rootPart.Parent or not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+
+	local launchCenter = typeof(centerPosition) == "Vector3" and centerPosition or rootPart.Position
+	local planarOffset = Vector3.new(rootPart.Position.X - launchCenter.X, 0, rootPart.Position.Z - launchCenter.Z)
+	if planarOffset.Magnitude > ownerLaunchRadius then
+		return false
+	end
+
+	local direction = getPlanarUnitOrFallback(planarOffset, rootPart.CFrame.LookVector)
+	local launchHorizontal = math.max(0, tonumber(abilityConfig.OwnerLaunchHorizontal) or 0)
+	local launchVertical = math.max(0, tonumber(abilityConfig.OwnerLaunchVertical) or 0)
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	local inheritedHorizontalVelocity = Vector3.new(currentVelocity.X, 0, currentVelocity.Z) * 0.18
+	local launchHorizontalVelocity = (direction * launchHorizontal) + inheritedHorizontalVelocity
+	local launchVelocity = Vector3.new(
+		launchHorizontalVelocity.X,
+		math.max(currentVelocity.Y, 0) + launchVertical,
+		launchHorizontalVelocity.Z
+	)
+
+	task.spawn(function()
+		pcall(function()
+			rootPart:SetNetworkOwner(nil)
+		end)
+
+		humanoid.Jump = true
+		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+		applyLaunchVelocity(rootPart, launchVelocity)
+
+		task.delay(OWNER_NETWORK_OWNER_RELEASE_DELAY, function()
+			if not character.Parent or humanoid.Health <= 0 or not rootPart.Parent then
+				return
+			end
+
+			if player and player.Parent then
+				pcall(function()
+					rootPart:SetNetworkOwner(player)
+				end)
+			end
+		end)
+	end)
+
+	return true
+end
+
+function BomuBomuNoMi.LandMine(context)
+	local activeMine = getActiveMineEntry(context.Player)
+	if activeMine then
+		clearActiveMine(context.Player)
+
+		local payload = buildExplosionPayload(context, activeMine.OriginPosition or context.RootPart.Position, context.AbilityConfig)
+		payload.Action = "Detonated"
+		payload.Source = "LandMine"
+		payload.MinePosition = activeMine.GroundPosition or activeMine.OriginPosition
+		payload.OwnerLaunched = applyOwnerLaunch(
+			context,
+			activeMine.GroundPosition or activeMine.OriginPosition or context.RootPart.Position,
+			context.AbilityConfig
+		)
+
+		return payload, {
+			ApplyCooldown = true,
+		}
+	end
+
+	local radius = math.max(0, tonumber(context.AbilityConfig.Radius) or 0)
+	local lifetime = math.max(0, tonumber(context.AbilityConfig.MineLifetime) or 0)
+	local groundPosition = getMinePlacementPosition(context)
+	local mineModel, originPosition = createLandMineModel(context.Player, groundPosition, radius)
+	local mineEntry = {
+		Model = mineModel,
+		GroundPosition = groundPosition,
+		OriginPosition = originPosition,
+		PlacedAt = os.clock(),
+	}
+
+	activeMinesByPlayer[context.Player] = mineEntry
+	scheduleMineCleanup(context.Player, mineEntry, lifetime)
+
+	return {
+		Action = "Placed",
+		Source = "LandMine",
+		Radius = radius,
+		MinePosition = groundPosition,
+		OriginPosition = originPosition,
+		MineLifetime = lifetime,
+	}, {
+		ApplyCooldown = false,
+	}
+end
+
+function BomuBomuNoMi.ClearRuntimeState(player)
+	clearActiveMine(player)
+end
+
+return BomuBomuNoMi

@@ -529,7 +529,38 @@ local function buildChestPlacementHint(placement)
 	return string.format("Chest spawned on %s.", tostring(placement.SpawnPart.Name))
 end
 
+local function getDroppedRewardPivot(rewardObject, worldPosition, ignoreInstances)
+	local castOrigin = worldPosition + Vector3.new(0, 10, 0)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { rewardObject }
+	if typeof(ignoreInstances) == "table" then
+		for _, instance in ipairs(ignoreInstances) do
+			params.FilterDescendantsInstances[#params.FilterDescendantsInstances + 1] = instance
+		end
+	end
+	params.IgnoreWater = true
+
+	local result = Workspace:Raycast(castOrigin, Vector3.new(0, -30, 0), params)
+	local surfacePosition = result and result.Position or worldPosition
+
+	local boxCF, boxSize = getObjectBoundingBox(rewardObject)
+	local pivot = getObjectPivot(rewardObject)
+	local offset = pivot:ToObjectSpace(boxCF)
+	local rotation = pivot - pivot.Position
+	local desiredBoxCF = CFrame.new(surfacePosition + Vector3.new(0, boxSize.Y / 2, 0)) * rotation
+
+	return desiredBoxCF * offset:Inverse()
+end
+
 local function positionRewardObject(player, rewardObject, rewardState, startPart, endPart)
+	if rewardState and typeof(rewardState.WorldDropPosition) == "Vector3" then
+		local character = player.Character
+		local ignoreInstances = character and { character } or nil
+		setObjectCFrame(rewardObject, getDroppedRewardPivot(rewardObject, rewardState.WorldDropPosition, ignoreInstances))
+		return nil
+	end
+
 	if rewardState and rewardState.RewardType == "Chest" then
 		local chestPlacement = getOrCreateChestSpawnPlacement(player, rewardObject)
 		if chestPlacement and chestPlacement.SpawnPart and chestPlacement.SpawnPart.Parent then
@@ -973,18 +1004,8 @@ local function spawnSharedChestNode(rewardFolder, carriedFolder)
 		end
 
 		sharedChestNodesById[chestId] = nil
-		carriedSharedChestByUserId[triggerPlayer.UserId] = {
-			ChestId = chestId,
-			Object = rewardObject,
-			RootPart = rootPart,
-		}
-
-		rewardObject:SetAttribute("ClaimedByUserId", triggerPlayer.UserId)
-		if not applyCarriedRewardState(triggerPlayer, rewardObject, rootPart, carriedFolder) then
-			destroyCarriedSharedChest(triggerPlayer.UserId)
-			SliceService.FailRun(triggerPlayer, "Could not carry the chest. The reward was lost.")
-			sendPopup(triggerPlayer, "Could not carry chest.", ERROR_COLOR, true)
-			return
+		if rewardObject.Parent then
+			rewardObject:Destroy()
 		end
 
 		sendPopup(triggerPlayer, buildResponseMessage(response, "Chest picked up. Bring it back to extract."), SUCCESS_COLOR, false)
@@ -1111,12 +1132,12 @@ local function syncPlayerRewardObject(player, state, rewardFolder, carriedFolder
 	local runState = state and state.Run or {}
 	local spawnedReward = runState.SpawnedReward
 	local carriedReward = runState.CarriedReward
-	if runState.InRun == true and spawnedReward ~= nil then
+	if spawnedReward ~= nil then
 		createRewardObject(player, spawnedReward, rewardFolder, carriedFolder, startPart, endPart, false)
 		return
 	end
 
-	if runState.InRun == true and carriedReward ~= nil then
+	if carriedReward ~= nil then
 		createRewardObject(player, carriedReward, rewardFolder, carriedFolder, startPart, endPart, true)
 		return
 	end
@@ -1453,17 +1474,8 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 		end
 
 		sharedChestNodesById[chestId] = nil
-		carriedSharedChestByUserId[triggerPlayer.UserId] = {
-			ChestId = chestId,
-			Object = rewardObject,
-			RootPart = rootPart,
-		}
-
-		if not applyCarriedRewardState(triggerPlayer, rewardObject, rootPart, carriedFolder) then
-			destroyCarriedSharedChest(triggerPlayer.UserId)
-			SliceService.FailRun(triggerPlayer, "Could not carry the chest. The reward was lost.")
-			sendPopup(triggerPlayer, "Could not carry chest.", ERROR_COLOR, true)
-			return
+		if rewardObject.Parent then
+			rewardObject:Destroy()
 		end
 	end)
 

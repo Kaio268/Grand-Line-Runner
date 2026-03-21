@@ -1,9 +1,11 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DECREASE_PART = Workspace:WaitForChild("DecreaseSpeed")
 local FORCED_SPEED = 35
+local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 
 local function getDevilFruitSpeedMultiplier(player)
 	local untilTime = player:GetAttribute("HieIceBoostUntil")
@@ -18,6 +20,22 @@ local function getDevilFruitSpeedMultiplier(player)
 	end
 
 	return math.max(1, speedMultiplier)
+end
+
+local function getHitEffectSpeedMultiplier(player)
+	local attributes = HitEffectConfig.Attributes
+	local untilTime = player:GetAttribute(attributes.Until)
+	local speedMultiplier = player:GetAttribute(attributes.WalkSpeedMultiplier)
+
+	if typeof(untilTime) ~= "number" or typeof(speedMultiplier) ~= "number" then
+		return 1
+	end
+
+	if untilTime <= os.clock() then
+		return 1
+	end
+
+	return math.max(0, speedMultiplier)
 end
 
 local function hookCharacter(player, character)
@@ -44,7 +62,7 @@ local function hookCharacter(player, character)
 	end
 
 	local function getDesiredSpeed()
-		return getUnboostedSpeed() * getDevilFruitSpeedMultiplier(player)
+		return getUnboostedSpeed() * getDevilFruitSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
 	end
 
 	local function apply()
@@ -72,6 +90,14 @@ local function hookCharacter(player, character)
 		apply()
 	end)
 
+	conns[#conns + 1] = player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Until):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(HitEffectConfig.Attributes.WalkSpeedMultiplier):Connect(function()
+		apply()
+	end)
+
 	conns[#conns + 1] = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
 		if updating then return end
 
@@ -80,10 +106,15 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		local devilFruitSpeedMultiplier = getDevilFruitSpeedMultiplier(player)
+		local totalSpeedMultiplier = getDevilFruitSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
 		local expected = getDesiredSpeed()
 		if humanoid.WalkSpeed ~= expected then
-			local normalizedSpeed = humanoid.WalkSpeed / devilFruitSpeedMultiplier
+			if totalSpeedMultiplier <= 0 then
+				apply()
+				return
+			end
+
+			local normalizedSpeed = humanoid.WalkSpeed / totalSpeedMultiplier
 			base = normalizedSpeed - speedObj.Value
 			apply()
 		end

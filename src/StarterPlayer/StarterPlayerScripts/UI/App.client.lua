@@ -18,14 +18,17 @@ local App = require(UiFolder:WaitForChild("App"))
 local Brainrots = require(Modules:WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
+local UiModalState = require(Modules:WaitForChild("UiModalState"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
+local titleEquipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TitleEquipRequest")
 local shipUpgradeResultRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShipUpgradeResultRemote")
 
 local rootContainer = Instance.new("Folder")
@@ -213,6 +216,7 @@ local characterConnections = {}
 local hudLayoutConnections = {}
 local shipDataConnections = {}
 local rebirthSummaryConnections = {}
+local titleAttributeConnections = {}
 
 local function disconnectAll(bucket)
 	for _, connection in ipairs(bucket) do
@@ -240,6 +244,9 @@ local function matchesQuery(entry, query)
 		tostring(entry.displayName or ""),
 		tostring(entry.subtitle or ""),
 		tostring(entry.footer or ""),
+		tostring(entry.description or ""),
+		tostring(entry.requirementText or ""),
+		tostring(entry.stateText or ""),
 	}, " "))
 
 	return string.find(haystack, string.lower(query), 1, true) ~= nil
@@ -804,6 +811,251 @@ local function readPlayerChestCount(chestsList)
 	return chestCount
 end
 
+local function readPersistentTitleUnlocked(titleId)
+	local titlesFolder = player:FindFirstChild("Titles")
+	local unlockedFolder = titlesFolder and titlesFolder:FindFirstChild("Unlocked")
+	local valueObject = unlockedFolder and unlockedFolder:FindFirstChild(titleId)
+	return valueObject ~= nil and valueObject:IsA("BoolValue") and valueObject.Value == true
+end
+
+local function readEquippedTitleId()
+	local titlesFolder = player:FindFirstChild("Titles")
+	local equippedValue = titlesFolder and titlesFolder:FindFirstChild("Equipped")
+	if equippedValue and equippedValue:IsA("StringValue") then
+		local equippedTitleId = trim(equippedValue.Value)
+		if equippedTitleId ~= "" then
+			return equippedTitleId
+		end
+	end
+
+	local equippedAttribute = player:GetAttribute("EquippedTitleId")
+	if typeof(equippedAttribute) == "string" and trim(equippedAttribute) ~= "" then
+		return trim(equippedAttribute)
+	end
+
+	return nil
+end
+
+local function readDynamicTitleStatus(titleDefinition, trackedValue)
+	if typeof(titleDefinition) ~= "table" then
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = "Unknown",
+			statusKey = "Unknown",
+			visibleLimit = 0,
+		}
+	end
+
+	local rankAttribute = titleDefinition.RankAttribute
+	if typeof(rankAttribute) ~= "string" or rankAttribute == "" then
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = "Unknown",
+			statusKey = "Unknown",
+			visibleLimit = 0,
+		}
+	end
+
+	local requiredRank = math.max(1, math.floor(tonumber(titleDefinition.RequiredRank) or 1))
+	local currentRank = tonumber(player:GetAttribute(rankAttribute))
+	local visibleLimit = math.max(1, math.floor(tonumber(player:GetAttribute(rankAttribute .. "_VisibleLimit")) or 100))
+	local visibleCount = math.max(0, math.floor(tonumber(player:GetAttribute(rankAttribute .. "_VisibleCount")) or 0))
+	local boardReady = player:GetAttribute(rankAttribute .. "_Ready") == true
+
+	if currentRank ~= nil and currentRank >= 1 then
+		return {
+			unlocked = currentRank <= requiredRank,
+			currentRank = currentRank,
+			rankLabel = "#" .. tostring(math.floor(currentRank + 0.5)),
+			statusKey = "Ranked",
+			visibleLimit = visibleLimit,
+		}
+	end
+
+	if math.max(0, tonumber(trackedValue) or 0) <= 0 then
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = "No Bounty Yet",
+			statusKey = "NoBounty",
+			visibleLimit = visibleLimit,
+		}
+	end
+
+	if boardReady then
+		if visibleCount < visibleLimit then
+			return {
+				unlocked = false,
+				currentRank = nil,
+				rankLabel = "Board Updating...",
+				statusKey = "PendingBoard",
+				visibleLimit = visibleLimit,
+			}
+		end
+
+		return {
+			unlocked = false,
+			currentRank = nil,
+			rankLabel = string.format("Outside Top %d", visibleLimit),
+			statusKey = "OutsideTopBoard",
+			visibleLimit = visibleLimit,
+		}
+	end
+
+	return {
+		unlocked = false,
+		currentRank = nil,
+		rankLabel = "Checking Board...",
+		statusKey = "PendingBoard",
+		visibleLimit = visibleLimit,
+	}
+end
+
+local function blendColor(a, b, t)
+	return Color3.new(
+		a.R + (b.R - a.R) * t,
+		a.G + (b.G - a.G) * t,
+		a.B + (b.B - a.B) * t
+	)
+end
+
+local function resolveTitleVisualStyle(titleDefinition, unlocked)
+	local visualStyle = typeof(titleDefinition.VisualStyle) == "table" and titleDefinition.VisualStyle or {}
+	local neutralAccent = Color3.fromRGB(97, 114, 146)
+	local neutralSurfaceTop = Color3.fromRGB(16, 22, 35)
+	local neutralSurfaceBottom = Color3.fromRGB(10, 15, 25)
+	local neutralSeal = Color3.fromRGB(56, 67, 90)
+	local accentColor = visualStyle.AccentColor or Color3.fromRGB(112, 214, 255)
+	local surfaceColor = visualStyle.SurfaceColor or neutralSurfaceTop
+	local surfaceColor2 = visualStyle.SurfaceColor2 or neutralSurfaceBottom
+	local sealColor = visualStyle.SealColor or accentColor
+	local ledgerColor = visualStyle.LedgerColor or accentColor
+
+	if unlocked then
+		return {
+			accentColor = accentColor,
+			surfaceColor = surfaceColor,
+			surfaceColor2 = surfaceColor2,
+			sealColor = sealColor,
+			ledgerColor = ledgerColor,
+		}
+	end
+
+	return {
+		accentColor = blendColor(accentColor, neutralAccent, 0.55),
+		surfaceColor = blendColor(surfaceColor, neutralSurfaceTop, 0.52),
+		surfaceColor2 = blendColor(surfaceColor2, neutralSurfaceBottom, 0.4),
+		sealColor = blendColor(sealColor, neutralSeal, 0.55),
+		ledgerColor = blendColor(ledgerColor, neutralAccent, 0.35),
+	}
+end
+
+local function buildTitlesData(query)
+	local entries = {}
+	local totalCount = 0
+	local unlockedCount = 0
+	local persistentUnlockedCount = 0
+	local dynamicUnlockedCount = 0
+	local bountySummary = readPlayerBountySummary()
+	local equippedTitleId = readEquippedTitleId()
+	local equippedTitleLabel = "None"
+	local equippedTitleColor = nil
+	local bountyRankLabel = "Checking Board..."
+	local bountyRankValue = nil
+	local bountyRankStatus = "PendingBoard"
+
+	for _, titleDefinition in ipairs(Titles.GetAll()) do
+		totalCount += 1
+
+		local persistentUnlocked = titleDefinition.UnlockType == "Persistent"
+			and readPersistentTitleUnlocked(titleDefinition.Id)
+			or false
+		local dynamicUnlocked = false
+		local currentRank = nil
+		local rankLabel = nil
+		local rankStatusKey = nil
+		if titleDefinition.UnlockType == "DynamicRank" then
+			local dynamicStatus = readDynamicTitleStatus(titleDefinition, bountySummary.total)
+			dynamicUnlocked = dynamicStatus.unlocked == true
+			currentRank = dynamicStatus.currentRank
+			rankLabel = dynamicStatus.rankLabel
+			rankStatusKey = dynamicStatus.statusKey
+		end
+
+		local unlocked = persistentUnlocked or dynamicUnlocked
+		local visualStyle = resolveTitleVisualStyle(titleDefinition, unlocked)
+		if persistentUnlocked then
+			persistentUnlockedCount += 1
+		end
+		if dynamicUnlocked then
+			dynamicUnlockedCount += 1
+		end
+		if unlocked then
+			unlockedCount += 1
+		end
+
+		local isEquipped = equippedTitleId ~= nil and equippedTitleId == titleDefinition.Id
+		if isEquipped then
+			equippedTitleLabel = tostring(titleDefinition.DisplayName or titleDefinition.Id)
+			equippedTitleColor = visualStyle.ledgerColor
+		end
+
+		local entry = {
+			key = tostring(titleDefinition.Id or totalCount),
+			titleId = tostring(titleDefinition.Id or ""),
+			displayName = tostring(titleDefinition.DisplayName or titleDefinition.Id or "Title"),
+			subtitle = titleDefinition.UnlockType == "DynamicRank" and "Leaderboard Title" or "Persistent Title",
+			footer = tostring(titleDefinition.RequirementText or ""),
+			description = tostring(titleDefinition.Description or ""),
+			requirementText = tostring(titleDefinition.RequirementText or ""),
+			stateText = isEquipped and "Equipped" or (unlocked and "Unlocked" or "Locked"),
+			unlocked = unlocked,
+			persistentUnlocked = persistentUnlocked,
+			dynamicUnlocked = dynamicUnlocked,
+			isEquipped = isEquipped,
+			actionLabel = isEquipped and "Unequip" or (unlocked and "Equip" or nil),
+			canToggleEquipped = isEquipped or unlocked,
+			currentRank = currentRank,
+			rankLabel = rankLabel,
+			rankStatusKey = rankStatusKey,
+			accentColor = visualStyle.accentColor,
+			surfaceColor = visualStyle.surfaceColor,
+			surfaceColor2 = visualStyle.surfaceColor2,
+			sealColor = visualStyle.sealColor,
+			stateColor = visualStyle.accentColor,
+		}
+
+		if titleDefinition.Id == "PirateEmperor" then
+			bountyRankValue = currentRank
+			bountyRankLabel = rankLabel or bountyRankLabel
+			bountyRankStatus = rankStatusKey or bountyRankStatus
+		end
+
+		if matchesQuery(entry, query) then
+			entries[#entries + 1] = entry
+		end
+	end
+
+	return {
+		entries = entries,
+		filteredCount = #entries,
+		totalCount = totalCount,
+		unlockedCount = unlockedCount,
+		lockedCount = math.max(0, totalCount - unlockedCount),
+		persistentUnlockedCount = persistentUnlockedCount,
+		dynamicUnlockedCount = dynamicUnlockedCount,
+		equippedTitleId = equippedTitleId,
+		equippedTitleLabel = equippedTitleLabel,
+		equippedTitleColor = equippedTitleColor,
+		bountyRank = bountyRankValue,
+		bountyRankLabel = bountyRankLabel,
+		bountyRankStatus = bountyRankStatus,
+		bountyTotal = bountySummary.total,
+	}
+end
+
 local function buildCaptainLogData(query)
 	local entries = {}
 	local totalCollectable = 0
@@ -1097,11 +1349,26 @@ local function buildRenderData()
 		}
 	end
 
+	local titlesOk, titles = pcall(buildTitlesData, query)
+	if not titlesOk or typeof(titles) ~= "table" then
+		titles = {
+			entries = {},
+			filteredCount = 0,
+			totalCount = 0,
+			unlockedCount = 0,
+			lockedCount = 0,
+			persistentUnlockedCount = 0,
+			dynamicUnlockedCount = 0,
+			bountyRank = nil,
+		}
+	end
+
 	return {
 		hotbarSlots = hotbarSlots,
 		items = items,
 		categories = categories,
 		captainLog = captainLog,
+		titles = titles,
 		summary = {
 			bounty = bountySummary.total,
 			crewBounty = bountySummary.crew,
@@ -1262,6 +1529,7 @@ local function bindShipDataTracking()
 		Inventory = true,
 		StandsLevels = true,
 		Ship = true,
+		Titles = true,
 		leaderstats = true,
 		Materials = true,
 		UnopenedChests = true,
@@ -1284,6 +1552,24 @@ local function bindShipDataTracking()
 			scheduleRender()
 		end
 	end, shipDataConnections)
+end
+
+local function bindTitleTracking()
+	disconnectAll(titleAttributeConnections)
+
+	local watchedAttributes = {}
+	for _, titleDefinition in ipairs(Titles.GetAll()) do
+		local rankAttribute = titleDefinition.RankAttribute
+		if typeof(rankAttribute) == "string" and rankAttribute ~= "" and not watchedAttributes[rankAttribute] then
+			watchedAttributes[rankAttribute] = true
+			trackConnection(player:GetAttributeChangedSignal(rankAttribute), scheduleRender, titleAttributeConnections)
+			trackConnection(player:GetAttributeChangedSignal(rankAttribute .. "_Ready"), scheduleRender, titleAttributeConnections)
+			trackConnection(player:GetAttributeChangedSignal(rankAttribute .. "_VisibleLimit"), scheduleRender, titleAttributeConnections)
+			trackConnection(player:GetAttributeChangedSignal(rankAttribute .. "_VisibleCount"), scheduleRender, titleAttributeConnections)
+		end
+	end
+
+	trackConnection(player:GetAttributeChangedSignal("EquippedTitleId"), scheduleRender, titleAttributeConnections)
 end
 
 local function bindRebirthSummaryTracking()
@@ -1316,6 +1602,7 @@ end
 
 local function render()
 	local data = buildRenderData()
+	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
 
 	root:render(ReactRoblox.createPortal(React.createElement(App, {
 		isOpen = uiState.isOpen,
@@ -1325,6 +1612,7 @@ local function render()
 		categories = data.categories,
 		items = data.items,
 		captainLog = data.captainLog,
+		titles = data.titles,
 		hotbarSlots = data.hotbarSlots,
 		summary = data.summary,
 		filteredCount = data.filteredCount,
@@ -1361,6 +1649,18 @@ local function render()
 			end
 			uiState.query = nextQuery
 			render()
+		end,
+		onToggleTitle = function(entry)
+			if shipUpgradeModal ~= nil or typeof(entry) ~= "table" then
+				return
+			end
+
+			local titleId = tostring(entry.titleId or "")
+			if titleId == "" then
+				return
+			end
+
+			titleEquipRemote:FireServer(entry.isEquipped and "" or titleId)
 		end,
 		onActivateItem = function(entry)
 			if shipUpgradeModal ~= nil then
@@ -1693,12 +1993,14 @@ end, cleanupConnections)
 hideLegacyInventory()
 bindHudLayoutTracking()
 bindShipDataTracking()
+bindTitleTracking()
 bindRebirthSummaryTracking()
 render()
 task.defer(scheduleRender)
 
 script.Destroying:Connect(function()
 	destroyed = true
+	UiModalState.SetOpen("InventoryModal", false)
 	if modalInputSinkBound then
 		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)
 		modalInputSinkBound = false

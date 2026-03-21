@@ -11,7 +11,10 @@ local NametagSettings = {
 local Players = game:GetService("Players")
 
 local SHOW_TOP = 100
-local BoardNames = {"TotalMoney", "TotalSpeed", "TimePlayed"}
+local BoardNames = {"TotalMoney", "TotalSpeed", "Bounty"}
+local BoardIconFallbacks = {
+	Bounty = "TimePlayed",
+}
 
 local function getRankForBoard(player, boardName)
 	local r = player:GetAttribute("LB_" .. boardName)
@@ -48,6 +51,7 @@ Players.PlayerAdded:Connect(function(Player)
 			if not lbs then return end
 
 			local icon = lbs:FindFirstChild(boardName)
+				or (BoardIconFallbacks[boardName] and lbs:FindFirstChild(BoardIconFallbacks[boardName]))
 			if not icon then return end
 			if not (icon:IsA("ImageLabel") or icon:IsA("Frame")) then return end
 

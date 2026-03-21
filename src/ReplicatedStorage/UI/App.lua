@@ -52,6 +52,15 @@ local function formatNumber(value)
 	return number < 0 and ("-" .. formatted) or formatted
 end
 
+local function formatLeaderboardRank(rank)
+	local numericRank = tonumber(rank)
+	if numericRank and numericRank >= 1 then
+		return "#" .. tostring(math.floor(numericRank + 0.5))
+	end
+
+	return "Unranked"
+end
+
 local function initials(text)
 	local letters = {}
 	for token in string.gmatch(tostring(text or ""), "%S+") do
@@ -197,7 +206,7 @@ local function PreviewViewport(props)
 
 		local previewModel
 		if props.previewKind == "DevilFruit" then
-			previewModel = DevilFruitAssets.CloneWorldModel(props.previewName)
+			previewModel = DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
 		elseif props.previewKind == "Chest" then
 			previewModel = ChestVisuals.CreatePreviewModel(props.previewName)
 		elseif props.previewKind == "Resource" then
@@ -977,16 +986,18 @@ local function modeTab(props)
 end
 
 local function ledgerLine(props)
+	local multiLine = props.multiLine == true
+
 	return e("Frame", {
 		BackgroundTransparency = 1,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, 28),
+		Size = UDim2.new(1, 0, 0, multiLine and 44 or 28),
 	}, {
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.fromOffset(0, -1),
-			Size = UDim2.new(0.58, 0, 1, 0),
+			Size = multiLine and UDim2.new(1, 0, 0, 16) or UDim2.new(0.58, 0, 1, 0),
 			Text = props.label or "",
 			TextColor3 = PALETTE.Cream,
 			TextSize = 18,
@@ -994,16 +1005,19 @@ local function ledgerLine(props)
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Value = e("TextLabel", {
-			AnchorPoint = Vector2.new(1, 0),
+			AnchorPoint = multiLine and Vector2.new(0, 0) or Vector2.new(1, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(1, 0, 0, 3),
-			Size = UDim2.new(0.42, 0, 1, 0),
+			Position = multiLine and UDim2.fromOffset(0, 18) or UDim2.new(1, 0, 0, 3),
+			Size = multiLine and UDim2.new(1, 0, 0, 22) or UDim2.new(0.42, 0, 1, 0),
 			Text = props.value or "",
 			TextColor3 = props.valueColor3 or PALETTE.Cyan,
-			TextSize = 18,
+			TextSize = multiLine and 15 or 18,
 			TextStrokeTransparency = 0.8,
-			TextXAlignment = Enum.TextXAlignment.Right,
+			TextTruncate = multiLine and Enum.TextTruncate.AtEnd or Enum.TextTruncate.None,
+			TextWrapped = multiLine,
+			TextXAlignment = multiLine and Enum.TextXAlignment.Left or Enum.TextXAlignment.Right,
+			TextYAlignment = multiLine and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
 		}),
 	})
 end
@@ -1444,6 +1458,197 @@ local function captainsLogRow(props)
 	})
 end
 
+local function titleRegistryRow(props)
+	local entry = props.entry or {}
+	local unlocked = entry.unlocked == true or entry.isEquipped == true
+	local accent = entry.accentColor or (unlocked and PALETTE.Gold or PALETTE.Steel)
+	local surfaceColor = entry.surfaceColor or Color3.fromRGB(16, 22, 35)
+	local surfaceColor2 = entry.surfaceColor2 or Color3.fromRGB(10, 15, 25)
+	local sealColor = entry.sealColor or accent:Lerp(Color3.fromRGB(52, 57, 74), unlocked and 0.62 or 0.82)
+	local stateFill = unlocked and (entry.stateColor or accent) or Color3.fromRGB(44, 51, 67)
+	local stateTextColor = unlocked and PALETTE.Ink or PALETTE.Cream
+
+	return e("Frame", {
+		BackgroundColor3 = surfaceColor,
+		BackgroundTransparency = 0.02,
+		BorderSizePixel = 0,
+		LayoutOrder = props.layoutOrder or 0,
+		Size = UDim2.new(1, 0, 0, 104),
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 12),
+		}),
+		Stroke = e("UIStroke", {
+			Color = accent,
+			Transparency = unlocked and 0.12 or 0.34,
+			Thickness = unlocked and 1.35 or 1.1,
+		}),
+		Glow = e("UIStroke", {
+			Color = accent,
+			Transparency = unlocked and 0.9 or 0.96,
+			Thickness = 2,
+		}),
+		Gradient = e("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, surfaceColor),
+				ColorSequenceKeypoint.new(1, surfaceColor2),
+			}),
+			Rotation = 90,
+		}),
+		Accent = e("Frame", {
+			BackgroundColor3 = accent,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.new(0, 5, 1, 0),
+			ZIndex = 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 12),
+			}),
+		}),
+		Seal = e("Frame", {
+			BackgroundColor3 = sealColor,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(16, 16),
+			Size = UDim2.fromOffset(72, 72),
+			ZIndex = 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 14),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = unlocked and 0.26 or 0.58,
+				Thickness = 1,
+			}),
+			Mark = e("TextLabel", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Cartoon,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.new(1, -12, 1, -12),
+				Text = unlocked and (entry.fallbackText or initials(entry.displayName)) or "?",
+				TextColor3 = PALETTE.Cream,
+				TextSize = 30,
+				TextStrokeTransparency = 0.56,
+				ZIndex = 3,
+			}),
+		}),
+		Name = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Cartoon,
+			Position = UDim2.fromOffset(104, 10),
+			Size = UDim2.new(1, -250, 0, 28),
+			Text = entry.displayName or "",
+			TextColor3 = PALETTE.Cream,
+			TextSize = 24,
+			TextStrokeTransparency = 0.62,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		StateChip = e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			BackgroundColor3 = stateFill,
+			BackgroundTransparency = unlocked and 0.02 or 0.16,
+			Position = UDim2.new(1, -18, 14 / 104, 0),
+			Font = Enum.Font.GothamBold,
+			Text = string.upper(entry.stateText or (unlocked and "Unlocked" or "Locked")),
+			TextColor3 = stateTextColor,
+			TextSize = 10,
+			ZIndex = 3,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 5),
+				PaddingBottom = UDim.new(0, 5),
+				PaddingLeft = UDim.new(0, 10),
+				PaddingRight = UDim.new(0, 10),
+			}),
+		}),
+		Subtitle = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(106, 38),
+			Size = UDim2.new(1, -268, 0, 16),
+			Text = tostring(entry.subtitle or "Title"),
+			TextColor3 = accent,
+			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		Description = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Gotham,
+			Position = UDim2.fromOffset(106, 56),
+			Size = UDim2.new(1, -176, 0, 16),
+			Text = tostring(entry.description or ""),
+			TextColor3 = Color3.fromRGB(181, 191, 210),
+			TextSize = 12,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		Requirement = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			Position = UDim2.fromOffset(106, 76),
+			Size = UDim2.new(1, -176, 0, 16),
+			Text = "Requirement: " .. tostring(entry.requirementText or ""),
+			TextColor3 = unlocked and PALETTE.Cream or PALETTE.Muted,
+			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		Rank = (entry.currentRank or entry.rankLabel) and e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 1),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(1, -18, 1, -12),
+			Size = UDim2.fromOffset(152, 16),
+			Text = entry.currentRank and ("Rank " .. formatLeaderboardRank(entry.currentRank))
+				or tostring(entry.rankLabel or ""),
+			TextColor3 = accent,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 3,
+		}) or nil,
+		Action = entry.actionLabel and e("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			AutoButtonColor = false,
+			BackgroundColor3 = entry.isEquipped and Color3.fromRGB(44, 54, 72) or accent,
+			BackgroundTransparency = entry.canToggleEquipped and 0.02 or 0.28,
+			BorderSizePixel = 0,
+			Position = UDim2.new(1, -18, 0.5, 0),
+			Size = UDim2.fromOffset(104, 34),
+			Text = tostring(entry.actionLabel),
+			TextColor3 = entry.isEquipped and PALETTE.Cream or Color3.fromRGB(14, 21, 22),
+			TextSize = 16,
+			Font = Enum.Font.GothamBold,
+			ZIndex = 3,
+			[React.Event.Activated] = function()
+				if props.onToggleTitle then
+					props.onToggleTitle(entry)
+				end
+			end,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = entry.isEquipped and 0.08 or 0.72,
+				Thickness = entry.isEquipped and 1.2 or 1,
+			}),
+		}) or nil,
+	})
+end
+
 local function shipUpgradeModal(props)
 	local modal = props.modal or {}
 	local lines = modal.Lines or modal.lines or {}
@@ -1653,8 +1858,11 @@ end
 
 local function App(props)
 	local summary = props.summary or {}
+	local titles = props.titles or {}
 	local activeView = props.activeView or "Inventory"
 	local showingCaptainLog = activeView == "CaptainLog"
+	local showingTitles = activeView == "Titles"
+	local showingInventory = not showingCaptainLog and not showingTitles
 	local toggleLayout = props.toggleLayout or {}
 	local dockToggleLeft = toggleLayout.dock == "hotbarLeft"
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
@@ -1683,6 +1891,8 @@ local function App(props)
 
 	if showingCaptainLog then
 		activeAccent = PALETTE.Orange
+	elseif showingTitles then
+		activeAccent = PALETTE.Gold
 	end
 
 	local children = {
@@ -1810,8 +2020,9 @@ local function App(props)
 		}
 
 		local modeTabs = {
-			{ key = "Inventory", label = "Inventory", fillColor3 = PALETTE.Sea },
-			{ key = "CaptainLog", label = "Captain's Log", fillColor3 = PALETTE.Orange },
+			{ key = "Inventory", label = "Inventory", fillColor3 = PALETTE.Sea, size = UDim2.fromOffset(124, 38) },
+			{ key = "CaptainLog", label = "Captain's Log", fillColor3 = PALETTE.Orange, size = UDim2.fromOffset(152, 38) },
+			{ key = "Titles", label = "Titles", fillColor3 = PALETTE.Gold, size = UDim2.fromOffset(112, 38) },
 		}
 
 		for index, mode in ipairs(modeTabs) do
@@ -1820,7 +2031,7 @@ local function App(props)
 				label = mode.label,
 				fillColor3 = mode.fillColor3,
 				active = activeView == mode.key,
-				size = UDim2.fromOffset(index == 1 and 124 or 152, 38),
+				size = mode.size,
 				onActivated = function()
 					props.onSelectView(mode.key)
 				end,
@@ -1835,18 +2046,50 @@ local function App(props)
 			}),
 		}
 
-		local ledgerEntries = {
-			{ label = "Total Bounty", value = formatNumber(summary.bounty or 0), valueColor3 = PALETTE.Gold },
-			{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
-			{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
-			{ label = "Doubloons", value = formatNumber(summary.doubloons or 0) .. " D", valueColor3 = PALETTE.Gold },
-			{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
-			{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
-			{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
-			{ label = "Timber", value = formatNumber(summary.timber or 0), valueColor3 = Color3.fromRGB(112, 220, 140) },
-			{ label = "Iron", value = formatNumber(summary.iron or 0), valueColor3 = Color3.fromRGB(91, 170, 255) },
-			{ label = "Ancient Timber", value = formatNumber(summary.ancientTimber or 0), valueColor3 = Color3.fromRGB(255, 187, 74) },
-		}
+		local ledgerEntries
+		if showingTitles then
+			ledgerEntries = {
+				{
+					label = "Equipped Title",
+					value = tostring(titles.equippedTitleLabel or "None"),
+					valueColor3 = titles.equippedTitleColor or PALETTE.Cream,
+					multiLine = true,
+				},
+				{
+					label = "Unlocked Titles",
+					value = string.format("%d / %d", titles.unlockedCount or 0, titles.totalCount or 0),
+					valueColor3 = PALETTE.Gold,
+				},
+				{
+					label = "Persistent Titles",
+					value = tostring(titles.persistentUnlockedCount or 0),
+					valueColor3 = PALETTE.Sea,
+				},
+				{
+					label = "Dynamic Titles",
+					value = tostring(titles.dynamicUnlockedCount or 0),
+					valueColor3 = PALETTE.Orange,
+				},
+				{
+					label = "Bounty Rank",
+					value = tostring(titles.bountyRankLabel or formatLeaderboardRank(titles.bountyRank)),
+					valueColor3 = PALETTE.Cyan,
+				},
+			}
+		else
+			ledgerEntries = {
+				{ label = "Total Bounty", value = formatNumber(summary.bounty or 0), valueColor3 = PALETTE.Gold },
+				{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
+				{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
+				{ label = "Doubloons", value = formatNumber(summary.doubloons or 0) .. " D", valueColor3 = PALETTE.Gold },
+				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
+				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
+				{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
+				{ label = "Timber", value = formatNumber(summary.timber or 0), valueColor3 = Color3.fromRGB(112, 220, 140) },
+				{ label = "Iron", value = formatNumber(summary.iron or 0), valueColor3 = Color3.fromRGB(91, 170, 255) },
+				{ label = "Ancient Timber", value = formatNumber(summary.ancientTimber or 0), valueColor3 = Color3.fromRGB(255, 187, 74) },
+			}
+		end
 
 		for index, entry in ipairs(ledgerEntries) do
 			ledgerChildren["Entry" .. tostring(index)] = e(ledgerLine, {
@@ -1854,6 +2097,7 @@ local function App(props)
 				label = entry.label,
 				value = entry.value,
 				valueColor3 = entry.valueColor3,
+				multiLine = entry.multiLine,
 			})
 		end
 
@@ -1869,6 +2113,22 @@ local function App(props)
 			captainLogChildren["Row" .. tostring(index)] = e(captainsLogRow, {
 				entry = entry,
 				layoutOrder = index,
+			})
+		end
+
+		local titleChildren = {
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Vertical,
+				Padding = UDim.new(0, 10),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+		}
+
+		for index, entry in ipairs((props.titles and props.titles.entries) or {}) do
+			titleChildren["Row" .. tostring(index)] = e(titleRegistryRow, {
+				entry = entry,
+				layoutOrder = index,
+				onToggleTitle = props.onToggleTitle,
 			})
 		end
 
@@ -1934,7 +2194,7 @@ local function App(props)
 					AnchorPoint = Vector2.new(0, 0),
 					BackgroundTransparency = 1,
 					Position = UDim2.fromOffset(24, 16),
-					Size = UDim2.fromOffset(292, 40),
+					Size = UDim2.fromOffset(412, 40),
 					ZIndex = 8,
 				}, topModeChildren),
 				Close = e("TextButton", {
@@ -1999,7 +2259,7 @@ local function App(props)
 						Font = Enum.Font.Cartoon,
 						Position = UDim2.fromOffset(16, 14),
 						Size = UDim2.new(1, -32, 0, 28),
-						Text = "Captain's Ledger",
+						Text = showingTitles and "Title Registry" or "Captain's Ledger",
 						TextColor3 = PALETTE.Cream,
 						TextSize = 28,
 						TextStrokeTransparency = 0.6,
@@ -2011,7 +2271,9 @@ local function App(props)
 						Font = Enum.Font.Gotham,
 						Position = UDim2.fromOffset(16, 44),
 						Size = UDim2.new(1, -32, 0, 30),
-						Text = "Current haul and ship stores at a glance.",
+						Text = showingTitles
+								and "Honor marks tied to your long-term feats and current bounty rank."
+							or "Current haul and ship stores at a glance.",
 						TextColor3 = Color3.fromRGB(178, 189, 211),
 						TextSize = 12,
 						TextWrapped = true,
@@ -2043,7 +2305,7 @@ local function App(props)
 					BackgroundTransparency = 0.02,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(286, 90),
-					Size = showingCaptainLog and UDim2.new(1, -312, 1, -116) or UDim2.new(1, -312, 1, -186),
+					Size = showingInventory and UDim2.new(1, -312, 1, -186) or UDim2.new(1, -312, 1, -116),
 					ZIndex = 7,
 				}, {
 					Corner = e("UICorner", {
@@ -2066,7 +2328,8 @@ local function App(props)
 						Font = Enum.Font.GothamBold,
 						Position = UDim2.fromOffset(18, 12),
 						Size = UDim2.new(1, -320, 0, 14),
-						Text = showingCaptainLog and "Ship Income Overview" or "Captain's Hold",
+						Text = showingCaptainLog and "Ship Income Overview"
+							or (showingTitles and "Crew Honors" or "Captain's Hold"),
 						TextColor3 = activeAccent,
 						TextSize = 12,
 						TextXAlignment = Enum.TextXAlignment.Left,
@@ -2077,7 +2340,8 @@ local function App(props)
 						Font = Enum.Font.Cartoon,
 						Position = UDim2.fromOffset(18, 22),
 						Size = UDim2.new(1, -320, 0, 30),
-						Text = showingCaptainLog and "Captain's Log" or (props.activeCategoryLabel or "Inventory"),
+						Text = showingCaptainLog and "Captain's Log"
+							or (showingTitles and "Titles" or (props.activeCategoryLabel or "Inventory")),
 						TextColor3 = PALETTE.Cream,
 						TextSize = 34,
 						TextStrokeTransparency = 0.58,
@@ -2096,7 +2360,14 @@ local function App(props)
 								(props.captainLog and props.captainLog.filteredCount) or 0,
 								(props.captainLog and props.captainLog.totalCount) or 0
 							)
-							or string.format("%d shown of %d items ready to manage", props.filteredCount or 0, props.totalCount or 0),
+							or (showingTitles
+								and string.format(
+									"%d of %d titles visible, %d unlocked",
+									(props.titles and props.titles.filteredCount) or 0,
+									(props.titles and props.titles.totalCount) or 0,
+									(props.titles and props.titles.unlockedCount) or 0
+								)
+								or string.format("%d shown of %d items ready to manage", props.filteredCount or 0, props.totalCount or 0)),
 						TextColor3 = Color3.fromRGB(175, 187, 207),
 						TextSize = 12,
 						TextXAlignment = Enum.TextXAlignment.Left,
@@ -2124,7 +2395,8 @@ local function App(props)
 							ClearTextOnFocus = false,
 							Font = Enum.Font.GothamBold,
 							PlaceholderColor3 = Color3.fromRGB(133, 136, 144),
-							PlaceholderText = showingCaptainLog and "Search placed brainrots..." or "Search inventory...",
+							PlaceholderText = showingCaptainLog and "Search placed brainrots..."
+								or (showingTitles and "Search titles..." or "Search inventory..."),
 							Position = UDim2.fromOffset(36, 0),
 							Size = UDim2.new(1, -44, 1, 0),
 							Text = props.query or "",
@@ -2220,7 +2492,75 @@ local function App(props)
 								ZIndex = 9,
 							}),
 						}) or nil,
-						Grid = not showingCaptainLog and e("ScrollingFrame", {
+						TitleSummary = showingTitles and e("Frame", {
+							BackgroundColor3 = Color3.fromRGB(16, 22, 37),
+							BackgroundTransparency = 0.04,
+							BorderSizePixel = 0,
+							Position = UDim2.fromOffset(14, 14),
+							Size = UDim2.new(1, -28, 0, 58),
+							ZIndex = 8,
+						}, {
+							Corner = e("UICorner", {
+								CornerRadius = UDim.new(0, 10),
+							}),
+							Stroke = e("UIStroke", {
+								Color = Color3.fromRGB(72, 93, 134),
+								Transparency = 0.12,
+							}),
+							UnlockedLabel = e("TextLabel", {
+								BackgroundTransparency = 1,
+								Font = Enum.Font.GothamBold,
+								Position = UDim2.fromOffset(16, 10),
+								Size = UDim2.new(0.5, 0, 0, 14),
+								Text = "Unlocked Titles",
+								TextColor3 = PALETTE.Muted,
+								TextSize = 11,
+								TextXAlignment = Enum.TextXAlignment.Left,
+								ZIndex = 9,
+							}),
+							UnlockedValue = e("TextLabel", {
+								BackgroundTransparency = 1,
+								Font = Enum.Font.Cartoon,
+								Position = UDim2.fromOffset(16, 22),
+								Size = UDim2.new(0.5, -10, 0, 26),
+								Text = string.format(
+									"%d / %d",
+									(props.titles and props.titles.unlockedCount) or 0,
+									(props.titles and props.titles.totalCount) or 0
+								),
+								TextColor3 = PALETTE.Gold,
+								TextSize = 28,
+								TextStrokeTransparency = 0.56,
+								TextXAlignment = Enum.TextXAlignment.Left,
+								ZIndex = 9,
+							}),
+							BountyLabel = e("TextLabel", {
+								AnchorPoint = Vector2.new(1, 0),
+								BackgroundTransparency = 1,
+								Font = Enum.Font.GothamBold,
+								Position = UDim2.new(1, -16, 10 / 58, 0),
+								Size = UDim2.fromOffset(180, 14),
+								Text = "Bounty Rank",
+								TextColor3 = PALETTE.Muted,
+								TextSize = 11,
+								TextXAlignment = Enum.TextXAlignment.Right,
+								ZIndex = 9,
+							}),
+							BountyValue = e("TextLabel", {
+								AnchorPoint = Vector2.new(1, 0),
+								BackgroundTransparency = 1,
+								Font = Enum.Font.Cartoon,
+								Position = UDim2.new(1, -16, 22 / 58, 0),
+								Size = UDim2.fromOffset(180, 26),
+								Text = tostring((props.titles and props.titles.bountyRankLabel) or formatLeaderboardRank(props.titles and props.titles.bountyRank)),
+								TextColor3 = activeAccent,
+								TextSize = 28,
+								TextStrokeTransparency = 0.56,
+								TextXAlignment = Enum.TextXAlignment.Right,
+								ZIndex = 9,
+							}),
+						}) or nil,
+						Grid = showingInventory and e("ScrollingFrame", {
 							AutomaticCanvasSize = Enum.AutomaticSize.Y,
 							BackgroundTransparency = 1,
 							BorderSizePixel = 0,
@@ -2242,7 +2582,20 @@ local function App(props)
 							Size = UDim2.new(1, -28, 1, -96),
 							ZIndex = 8,
 						}, captainLogChildren) or nil,
-						Empty = (showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0 or (not showingCaptainLog and #(props.items or {}) == 0)) and e("TextLabel", {
+						TitleList = showingTitles and e("ScrollingFrame", {
+							AutomaticCanvasSize = Enum.AutomaticSize.Y,
+							BackgroundTransparency = 1,
+							BorderSizePixel = 0,
+							CanvasSize = UDim2.new(),
+							Position = UDim2.fromOffset(14, 82),
+							ScrollBarImageColor3 = PALETTE.Cream,
+							ScrollBarThickness = 7,
+							Size = UDim2.new(1, -28, 1, -96),
+							ZIndex = 8,
+						}, titleChildren) or nil,
+						Empty = (showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0
+								or (showingTitles and #((props.titles and props.titles.entries) or {}) == 0)
+								or (showingInventory and #(props.items or {}) == 0)) and e("TextLabel", {
 							AnchorPoint = Vector2.new(0.5, 0.5),
 							BackgroundTransparency = 1,
 							Font = Enum.Font.Cartoon,
@@ -2252,7 +2605,13 @@ local function App(props)
 									and (((props.captainLog and props.captainLog.totalCount) or 0) > 0
 										and "No placed brainrots match that search."
 										or "No brainrots are placed on your ship yet.")
-								or ((props.totalCount or 0) > 0 and "No inventory items match that search." or "Nothing in this hold yet."),
+								or (showingTitles
+									and (((props.titles and props.titles.totalCount) or 0) > 0
+										and "No titles match that search."
+										or "No titles are registered yet.")
+									or ((props.totalCount or 0) > 0
+										and "No inventory items match that search."
+										or "Nothing in this hold yet.")),
 							TextColor3 = Color3.fromRGB(191, 198, 212),
 							TextSize = 24,
 							TextStrokeTransparency = 0.6,
@@ -2266,7 +2625,7 @@ local function App(props)
 					BorderSizePixel = 0,
 					Position = UDim2.new(0, 286, 1, -86),
 					Size = UDim2.new(1, -312, 0, 58),
-					Visible = not showingCaptainLog,
+					Visible = showingInventory,
 					ZIndex = 7,
 				}, {
 					Corner = e("UICorner", {
@@ -2291,7 +2650,7 @@ local function App(props)
 	local appChildren = {
 		Main = e("ScreenGui", {
 			Name = "ReactInventoryUi",
-			DisplayOrder = 20,
+			DisplayOrder = 90,
 			IgnoreGuiInset = true,
 			ResetOnSpawn = false,
 			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,

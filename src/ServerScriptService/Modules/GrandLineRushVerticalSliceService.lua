@@ -22,6 +22,8 @@ local CHEST_DEBUG = true
 
 local CARRY_TOOL_NAME = "GrandLineRushMajorReward"
 local CHEST_TIER_ORDER = { "Wooden", "Iron", "Gold", "Legendary" }
+local FORCED_DROP_PROTECTION_ATTRIBUTE = "GrandLineRushCarryDropProtectedUntil"
+local FORCED_DROP_PROTECTION_DURATION = 0.9
 
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
@@ -223,6 +225,7 @@ local function clearCarryTool(player)
 
 	player:SetAttribute("CarriedMajorRewardType", nil)
 	player:SetAttribute("CarriedMajorRewardDisplayName", nil)
+	player:SetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE, nil)
 end
 
 local function getRewardToolDisplay(reward)
@@ -237,9 +240,10 @@ local function createCarryTool(player, reward)
 	clearCarryTool(player)
 	player:SetAttribute("CarriedMajorRewardType", reward.RewardType)
 	player:SetAttribute("CarriedMajorRewardDisplayName", getRewardToolDisplay(reward))
+	player:SetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE, os.clock() + FORCED_DROP_PROTECTION_DURATION)
 end
 
-local function sanitizeReward(reward)
+local function cloneRewardData(reward)
 	if not reward then
 		return nil
 	end
@@ -247,7 +251,8 @@ local function sanitizeReward(reward)
 	local data = {
 		RewardType = reward.RewardType,
 		DepthBand = reward.DepthBand,
-		DisplayName = getRewardToolDisplay(reward),
+		DisplayName = reward.DisplayName,
+		Source = reward.Source,
 	}
 
 	if reward.RewardType == "Chest" then
@@ -257,6 +262,20 @@ local function sanitizeReward(reward)
 		data.CrewName = reward.CrewName
 	end
 
+	if typeof(reward.WorldDropPosition) == "Vector3" then
+		data.WorldDropPosition = reward.WorldDropPosition
+	end
+
+	return data
+end
+
+local function sanitizeReward(reward)
+	local data = cloneRewardData(reward)
+	if not data then
+		return nil
+	end
+
+	data.DisplayName = getRewardToolDisplay(reward)
 	return data
 end
 
@@ -571,6 +590,9 @@ local function startRun(player, rewardType, depthBand)
 	if runtime.CarriedReward ~= nil then
 		return resolveActionResponse(player, false, "Extract or lose your carried reward before starting a new run.", "already_carrying_reward")
 	end
+	if runtime.SpawnedReward ~= nil then
+		return resolveActionResponse(player, false, "Recover or lose your dropped reward before starting a new run.", "unresolved_spawned_reward")
+	end
 
 	if tostring(rewardType or "Chest") == "Chest" then
 		return resolveActionResponse(player, false, "Chests are shared corridor rewards and no longer start as private runs.", "chests_are_shared_world_rewards")
@@ -608,17 +630,18 @@ end
 
 local function claimSpawnedReward(player)
 	local runtime = getRuntime(player)
-	if runtime.InRun ~= true then
-		return resolveActionResponse(player, false, nil, "not_in_run")
-	end
 	if runtime.SpawnedReward == nil then
+		if runtime.InRun ~= true then
+			return resolveActionResponse(player, false, nil, "not_in_run")
+		end
 		return resolveActionResponse(player, false, nil, "no_spawned_reward")
 	end
 	if runtime.CarriedReward ~= nil then
 		return resolveActionResponse(player, false, nil, "already_carrying_reward")
 	end
 
-	runtime.CarriedReward = runtime.SpawnedReward
+	runtime.CarriedReward = cloneRewardData(runtime.SpawnedReward)
+	runtime.CarriedReward.WorldDropPosition = nil
 	runtime.SpawnedReward = nil
 	runtime.ResolutionText = string.format(
 		"Carrying %s. Extract successfully to secure it.",
@@ -701,6 +724,9 @@ local function claimWorldChest(player, rewardData)
 	if runtime.InRun == true then
 		return resolveActionResponse(player, false, "Finish your current run before claiming a shared chest.", "run_already_active")
 	end
+	if runtime.SpawnedReward ~= nil then
+		return resolveActionResponse(player, false, "Recover or lose your dropped reward before claiming another chest.", "unresolved_spawned_reward")
+	end
 	if runtime.CarriedReward ~= nil then
 		return resolveActionResponse(player, false, nil, "already_carrying_reward")
 	end
@@ -728,6 +754,49 @@ local function claimWorldChest(player, rewardData)
 	)
 
 	createCarryTool(player, runtime.CarriedReward)
+	return resolveActionResponse(player, true, runtime.ResolutionText)
+end
+
+local function canForceCarryDrop(player, runtime)
+	runtime = runtime or getRuntime(player)
+	if runtime.CarriedReward == nil then
+		return false, "no_carried_reward"
+	end
+
+	local protectedUntil = player:GetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE)
+	if typeof(protectedUntil) == "number" and protectedUntil > os.clock() then
+		return false, "carry_drop_protected"
+	end
+
+	return true, nil
+end
+
+local function dropCarriedReward(player, options)
+	local runtime = getRuntime(player)
+	local canDrop, reason = canForceCarryDrop(player, runtime)
+	if not canDrop then
+		return resolveActionResponse(player, false, nil, reason)
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local droppedReward = cloneRewardData(runtime.CarriedReward)
+	if not droppedReward then
+		return resolveActionResponse(player, false, nil, "missing_carried_reward")
+	end
+
+	local dropPosition = options.DropPosition
+	if typeof(dropPosition) == "Vector3" then
+		droppedReward.WorldDropPosition = dropPosition
+	end
+
+	runtime.SpawnedReward = droppedReward
+	runtime.CarriedReward = nil
+	runtime.ResolutionText = string.format(
+		"%s was dropped. Recover it before extracting.",
+		getRewardToolDisplay(droppedReward)
+	)
+	clearCarryTool(player)
+
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
@@ -954,8 +1023,8 @@ local function bindCharacter(player, character)
 
 	deathConnections[player] = humanoid.Died:Connect(function()
 		local runtime = getRuntime(player)
-		if runtime.InRun or runtime.CarriedReward ~= nil then
-			Service.FailRun(player, "Defeated while carrying a reward. Unextracted rewards were lost.")
+		if runtime.InRun or runtime.CarriedReward ~= nil or runtime.SpawnedReward ~= nil then
+			Service.FailRun(player, "Defeated before securing the reward. Unextracted rewards were lost.")
 		end
 	end)
 end
@@ -1047,6 +1116,14 @@ function Service.ClaimWorldChest(player, rewardData)
 	end
 	ensureStarterCrew(player)
 	return claimWorldChest(player, rewardData)
+end
+
+function Service.CanForceCarryDrop(player)
+	return canForceCarryDrop(player)
+end
+
+function Service.DropCarriedReward(player, options)
+	return dropCarriedReward(player, options)
 end
 
 function Service.ExtractRun(player)
