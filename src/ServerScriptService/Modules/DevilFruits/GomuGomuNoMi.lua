@@ -1,6 +1,6 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-
+local gomuRocketAnim = "rbxassetid://132601884231434"
 local GomuGomuNoMi = {}
 
 local WALL_PADDING = 1.5
@@ -10,6 +10,15 @@ local MIN_VERTICAL_LAUNCH_SPEED = 52
 local HORIZONTAL_SPEED_MULTIPLIER = 1.9
 local VERTICAL_SPEED_RATIO = 0.58
 local NETWORK_OWNER_RELEASE_DELAY = 0.45
+
+local function playGomuRocketAnim(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = gomuRocketAnim
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
 
 local function getPlanarVector(vector)
 	return Vector3.new(vector.X, 0, vector.Z)
@@ -89,20 +98,12 @@ end
 local function getLaunchVelocity(direction, launchDistance, maxDistance, launchDuration)
 	local averageSpeed = launchDistance / launchDuration
 	local distanceAlpha = math.clamp(maxDistance > 0 and (launchDistance / maxDistance) or 1, 0.25, 1)
-	local horizontalLaunchSpeed = math.max(
-		averageSpeed * HORIZONTAL_SPEED_MULTIPLIER,
-		MIN_HORIZONTAL_LAUNCH_SPEED * distanceAlpha
-	)
-	local verticalLaunchSpeed = math.max(
-		horizontalLaunchSpeed * VERTICAL_SPEED_RATIO,
-		MIN_VERTICAL_LAUNCH_SPEED * distanceAlpha
-	)
+	local horizontalLaunchSpeed =
+		math.max(averageSpeed * HORIZONTAL_SPEED_MULTIPLIER, MIN_HORIZONTAL_LAUNCH_SPEED * distanceAlpha)
+	local verticalLaunchSpeed =
+		math.max(horizontalLaunchSpeed * VERTICAL_SPEED_RATIO, MIN_VERTICAL_LAUNCH_SPEED * distanceAlpha)
 
-	return Vector3.new(
-		direction.X * horizontalLaunchSpeed,
-		verticalLaunchSpeed,
-		direction.Z * horizontalLaunchSpeed
-	)
+	return Vector3.new(direction.X * horizontalLaunchSpeed, verticalLaunchSpeed, direction.Z * horizontalLaunchSpeed)
 end
 
 local function applyLaunchVelocity(rootPart, launchVelocity)
@@ -119,7 +120,7 @@ function GomuGomuNoMi.RubberLaunch(context)
 	local humanoid = context.Humanoid
 	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
-
+	playGomuRocketAnim(humanoid)
 	local direction, targetPosition, targetPlayer = getLaunchDirectionAndTarget(context)
 	local startPosition = rootPart.Position
 	local maxDistance = math.max(0, tonumber(abilityConfig.LaunchDistance) or 20)

@@ -44,7 +44,6 @@ function HieHieNoMi.IceBoost(context)
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
 	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or 2)
 	local untilTime = os.clock() + duration
-
 	player:SetAttribute("HieIceBoostUntil", untilTime)
 	player:SetAttribute("HieIceBoostSpeedMultiplier", speedMultiplier)
 	player:SetAttribute("HieIceBoostSpeedBonus", nil)

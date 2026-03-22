@@ -172,6 +172,7 @@ local function ensurePromptGui()
 
 		playEatAnimation()
 		responseRemote:FireServer(true, confirmedPayload.FruitKey)
+		print("[DevilFruitPrompt] FruitKey:", tostring(confirmedPayload.FruitKey))
 	end)
 end
 
