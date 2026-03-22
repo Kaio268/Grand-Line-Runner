@@ -20,6 +20,8 @@ local PurchaseAdapter = require(ShopFolder:WaitForChild("PurchaseAdapter"))
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactShopRoot"
 
+local FRAMES_DISPLAY_ORDER = 120
+
 local root = ReactRoblox.createRoot(rootContainer)
 
 local destroyed = false
@@ -78,7 +80,7 @@ end
 
 local function ensureStoreFrameLayout()
 	if framesGui:IsA("ScreenGui") then
-		framesGui.DisplayOrder = math.max(framesGui.DisplayOrder, 80)
+		framesGui.DisplayOrder = math.max(framesGui.DisplayOrder, FRAMES_DISPLAY_ORDER)
 		framesGui.IgnoreGuiInset = true
 		framesGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	end

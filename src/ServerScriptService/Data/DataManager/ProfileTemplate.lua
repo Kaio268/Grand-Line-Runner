@@ -101,6 +101,11 @@ local ProfileTemplate = {
 		Equipped = DevilFruitConfig.None,
 	},
 
+	IndexCollection = {
+		Brainrots = {},
+		DevilFruits = {},
+	},
+
 	IncomeBrainrots = {},
 	StandsLevels = {},
 	Gears = {},

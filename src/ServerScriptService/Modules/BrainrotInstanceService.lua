@@ -3,6 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+local IndexCollectionService = require(script.Parent:WaitForChild("IndexCollectionService"))
 
 local Module = {}
 local DataManagerModule
@@ -327,6 +328,12 @@ local function createInstanceInternal(player, brainrotInventory, storageName, ov
 		LastReleasedAt = overrides and overrides.LastReleasedAt or 0,
 	})
 	table.insert(brainrotInventory.Order, instanceId)
+	IndexCollectionService.MarkBrainrotDiscovered(
+		player,
+		storageName,
+		overrides and overrides.BaseName or metadata.BaseName,
+		overrides and overrides.Variant or metadata.Variant
+	)
 
 	return instanceId, brainrotInventory.ById[instanceId]
 end
@@ -665,6 +672,12 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 		LastReleasedAt = os.time(),
 	})
 	table.insert(buyerInventory.Order, 1, buyerInstanceId)
+	IndexCollectionService.MarkBrainrotDiscovered(
+		buyerPlayer,
+		instanceData.StorageName,
+		instanceData.BaseName,
+		instanceData.Variant
+	)
 	saveBrainrotInventory(buyerPlayer, buyerInventory)
 	syncAvailableCounts(buyerPlayer, buyerInventory)
 

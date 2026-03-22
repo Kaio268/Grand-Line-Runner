@@ -19,6 +19,8 @@ local CONFIG = {
 	EASING_DIR_OUT = Enum.EasingDirection.Out,
 }
 
+local FRAMES_DISPLAY_ORDER = 120
+
 local function tween(obj: Instance, props: {[string]: any}, time: number, style, dir)
 	return TweenService:Create(obj, TweenInfo.new(time, style, dir), props)
 end
@@ -321,6 +323,11 @@ function UIController.new(player: Player)
 	self.PlayerGui = player:WaitForChild("PlayerGui")
 	self.Main = self.PlayerGui:WaitForChild("HUD")
 	self.FramesFolder = self.PlayerGui:WaitForChild("Frames")
+	if self.FramesFolder:IsA("ScreenGui") then
+		self.FramesFolder.DisplayOrder = math.max(self.FramesFolder.DisplayOrder, FRAMES_DISPLAY_ORDER)
+		self.FramesFolder.IgnoreGuiInset = true
+		self.FramesFolder.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	end
 	self.CurrentFrame = nil
 	self.IsAnimating = false
 	self.PlantVisible = false

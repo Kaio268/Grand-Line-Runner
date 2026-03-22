@@ -26,6 +26,7 @@ local EXPLICIT_GRIP_PART_NAMES = {
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
+local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 
 local promptRemote
@@ -175,7 +176,12 @@ function DevilFruitInventoryService.GrantFruit(player, fruitIdentifier, amount)
 		return false, "missing_quantity"
 	end
 
-	return DataManager:TrySetValue(player, getFruitInventoryPath(fruit.FruitKey), currentQuantity + increment)
+	local success, setReason = DataManager:TrySetValue(player, getFruitInventoryPath(fruit.FruitKey), currentQuantity + increment)
+	if success then
+		IndexCollectionService.MarkDevilFruitDiscovered(player, fruit.FruitKey)
+	end
+
+	return success, setReason
 end
 
 function DevilFruitInventoryService.ConsumeFruit(player, fruitIdentifier, amount)

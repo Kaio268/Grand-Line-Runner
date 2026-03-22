@@ -37,6 +37,8 @@ function ValidationChecks.ValidateProfileData(data)
 		{ Path = { "CrewInventory", "ById" }, ExpectedType = "table" },
 		{ Path = { "UnopenedChests", "ById" }, ExpectedType = "table" },
 		{ Path = { "DevilFruit", "Equipped" }, ExpectedType = "string" },
+		{ Path = { "IndexCollection", "Brainrots" }, ExpectedType = "table" },
+		{ Path = { "IndexCollection", "DevilFruits" }, ExpectedType = "table" },
 	}
 
 	for _, check in ipairs(requiredChecks) do

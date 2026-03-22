@@ -1873,6 +1873,7 @@ local function App(props)
 	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth
 		+ math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
+	local bottomBarZIndex = props.isOpen and 2 or 10
 	local filledHotbarCount = 0
 	local activeAccent = PALETTE.Sea
 
@@ -1901,7 +1902,7 @@ local function App(props)
 			BackgroundTransparency = 1,
 			Position = UDim2.new(0.5, 0, 1, -20),
 			Size = UDim2.fromOffset(bottomBarWidth, 92),
-			ZIndex = 10,
+			ZIndex = bottomBarZIndex,
 		}, {
 			Toggle = e(inventoryToggleButton, {
 				toggleLayout = {
@@ -1911,14 +1912,14 @@ local function App(props)
 					compact = toggleLayout.compact,
 				},
 				toggleIcon = props.toggleIcon,
-				zIndexBase = 10,
+				zIndexBase = bottomBarZIndex,
 				onToggle = props.onToggle,
 			}),
 			Hotbar = e("Frame", {
 				BackgroundTransparency = 1,
 				Position = UDim2.fromOffset(dockToggleLeft and (toggleWidth + toggleGap) or 0, 0),
 				Size = UDim2.fromOffset(hotbarWidth, 84),
-				ZIndex = 10,
+				ZIndex = bottomBarZIndex,
 			}, {
 				Label = e("TextLabel", {
 					BackgroundTransparency = 1,
@@ -1929,7 +1930,7 @@ local function App(props)
 					TextColor3 = PALETTE.Steel,
 					TextSize = 11,
 					TextXAlignment = Enum.TextXAlignment.Left,
-					ZIndex = 11,
+					ZIndex = bottomBarZIndex + 1,
 				}),
 				Scroller = e("ScrollingFrame", {
 					AutomaticCanvasSize = Enum.AutomaticSize.X,
@@ -1941,7 +1942,7 @@ local function App(props)
 					ScrollBarThickness = 0,
 					ScrollingDirection = Enum.ScrollingDirection.X,
 					Size = UDim2.new(1, 0, 0, 64),
-					ZIndex = 11,
+					ZIndex = bottomBarZIndex + 1,
 				}, (function()
 					local slotChildren = {
 						List = e("UIListLayout", {
@@ -1956,7 +1957,7 @@ local function App(props)
 						slotChildren["Slot" .. tostring(index)] = e(hotbarSlot, {
 							slot = slot,
 							layoutOrder = index,
-							zIndexBase = 10,
+							zIndexBase = bottomBarZIndex,
 							onActivated = props.onActivateItem,
 						})
 					end

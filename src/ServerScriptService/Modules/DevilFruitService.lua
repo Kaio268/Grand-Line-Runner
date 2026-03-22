@@ -59,6 +59,7 @@ local FruitHandlersFolder = ModulesFolder:FindFirstChild("DevilFruits") or Modul
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local syncFruitAttribute
@@ -665,6 +666,7 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	applyEquippedFruitRuntimeState(player, fruitValue, resolvedFruitName)
 
 	if resolvedFruitName ~= DevilFruitConfig.None then
+		IndexCollectionService.MarkDevilFruitDiscovered(player, resolvedFruitName)
 		TitleService.UnlockTitle(player, "EnemyOfTheSea")
 	end
 

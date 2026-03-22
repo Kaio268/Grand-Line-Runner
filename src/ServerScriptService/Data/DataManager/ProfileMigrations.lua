@@ -3,11 +3,20 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ProfileTemplate = require(script.Parent:WaitForChild("ProfileTemplate"))
+local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local ProfileMigrations = {}
 
 local primaryCurrency = Economy.Currency.Primary
+local VALID_BRAINROT_ITEM_IDS = {}
+
+for itemId, info in pairs(BrainrotsCfg) do
+	if type(info) == "table" then
+		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
+	end
+end
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -57,6 +66,64 @@ local function getVariantAndBaseName(fullName)
 	end
 
 	return "Normal", fullName
+end
+
+local function getVariantInfo(variantKey)
+	if variantKey == "Normal" or not variantKey then
+		return (VariantCfg.Versions or {}).Normal or { Prefix = "", IncomeMult = 1 }
+	end
+
+	return (VariantCfg.Versions or {})[variantKey]
+end
+
+local function getVariantItemId(variantKey, baseName)
+	if typeof(baseName) ~= "string" or baseName == "" then
+		return nil
+	end
+
+	if variantKey == "Normal" or not variantKey then
+		return baseName
+	end
+
+	local variantInfo = getVariantInfo(variantKey)
+	local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
+	return prefix .. baseName
+end
+
+local function normalizeVariantKey(variantKey)
+	local candidate = tostring(variantKey or "")
+	for _, supportedVariant in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
+		if candidate == supportedVariant then
+			return supportedVariant
+		end
+	end
+
+	return "Normal"
+end
+
+local function resolveBrainrotItemId(storageName, baseName, variantKey)
+	local storageNameValue = tostring(storageName or "")
+	local baseNameValue = tostring(baseName or "")
+	local normalizedVariant = normalizeVariantKey(variantKey)
+
+	if baseNameValue == "" and storageNameValue ~= "" then
+		local parsedVariant, parsedBaseName = getVariantAndBaseName(storageNameValue)
+		normalizedVariant = normalizeVariantKey(parsedVariant)
+		baseNameValue = parsedBaseName
+	end
+
+	if baseNameValue ~= "" then
+		local itemId = getVariantItemId(normalizedVariant, baseNameValue)
+		if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
+			return itemId
+		end
+	end
+
+	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
+		return storageNameValue
+	end
+
+	return nil
 end
 
 local function isBrainrotInventoryEntry(key, entry)
@@ -150,6 +217,24 @@ function ProfileMigrations.Apply(data)
 		devilFruit.Equipped = ProfileTemplate.DevilFruit.Equipped
 	end
 
+	local indexCollection = ensureTable(data, "IndexCollection")
+	local discoveredBrainrots = ensureTable(indexCollection, "Brainrots")
+	local discoveredDevilFruits = ensureTable(indexCollection, "DevilFruits")
+
+	local function recordBrainrotDiscovered(storageName, baseName, variantKey)
+		local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
+		if itemId then
+			discoveredBrainrots[itemId] = true
+		end
+	end
+
+	local function recordDevilFruitDiscovered(fruitIdentifier)
+		local fruit = DevilFruitConfig.GetFruit(fruitIdentifier)
+		if fruit then
+			discoveredDevilFruits[fruit.FruitKey] = true
+		end
+	end
+
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
 	local legacyHiddenLeadderstats = data.HiddenLeadderstats
 	if typeof(legacyHiddenLeadderstats) == "table" then
@@ -216,6 +301,7 @@ function ProfileMigrations.Apply(data)
 	local foodInventory = ensureTable(data, "FoodInventory")
 	local inventory = ensureTable(data, "Inventory")
 	local legacyFeed = ensureTable(inventory, "Feed")
+	local inventoryDevilFruits = ensureTable(inventory, "DevilFruits")
 	for foodKey, defaultAmount in pairs(ProfileTemplate.FoodInventory) do
 		local currentAmount = coerceNumber(foodInventory[foodKey], defaultAmount)
 		local legacyAmount = coerceNumber(legacyFeed[foodKey], 0)
@@ -231,8 +317,17 @@ function ProfileMigrations.Apply(data)
 			if hasBrainrotFields then
 				inventoryEntry.Level = math.max(1, coerceNumber(inventoryEntry.Level, 1))
 				inventoryEntry.CurrentXP = math.max(0, coerceNumber(inventoryEntry.CurrentXP, 0))
+				recordBrainrotDiscovered(inventoryKey, inventoryEntry.BaseName, inventoryEntry.Variant)
 			end
 		end
+	end
+
+	for fruitKey in pairs(inventoryDevilFruits) do
+		recordDevilFruitDiscovered(fruitKey)
+	end
+
+	if typeof(devilFruit.Equipped) == "string" and devilFruit.Equipped ~= ProfileTemplate.DevilFruit.Equipped then
+		recordDevilFruitDiscovered(devilFruit.Equipped)
 	end
 
 	local incomeBrainrots = ensureTable(data, "IncomeBrainrots")
@@ -284,6 +379,13 @@ function ProfileMigrations.Apply(data)
 	brainrotInventory.Order = normalizedOrder
 	if brainrotInventory.NextInstanceId <= maxBrainrotInstanceId then
 		brainrotInventory.NextInstanceId = maxBrainrotInstanceId + 1
+	end
+
+	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
+		local instanceData = brainrotInventory.ById[tostring(rawInstanceId)]
+		if instanceData then
+			recordBrainrotDiscovered(instanceData.StorageName, instanceData.BaseName, instanceData.Variant)
+		end
 	end
 
 	local function createBrainrotInstance(storageName, entry, assignedStand)
