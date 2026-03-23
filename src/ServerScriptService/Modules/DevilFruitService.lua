@@ -83,8 +83,8 @@ local function swaptoR6G(player, newModelName)
 
 	-- 1. SETUP THE NEW RIG
 	local originalCFrame = character:GetPivot()
-	-- Add 3 studs to the Y-axis (Up) to prevent clipping under the map
-	local safeCFrame = originalCFrame + Vector3.new(0, 3, 0)
+	-- Add extra studs to the Y-axis (Up) to prevent clipping under the map
+	local safeCFrame = originalCFrame + Vector3.new(0, 5, 0)
 
 	local newCharacter = modelTemplate:Clone()
 	newCharacter.Name = player.Name
@@ -120,7 +120,7 @@ local function swaptoR6G(player, newModelName)
 		end)
 	end
 
-	if newHumanoid then
+	if newHumanoid and newModelName == "R6G" then
 		-- Ensure the Humanoid recognizes the rig as R15 (since R6G is a modified R15)
 		newHumanoid.HipHeight = 2
 		newHumanoid.RigType = Enum.HumanoidRigType.R15
@@ -136,10 +136,14 @@ end
 
 -- Updated helper to handle the Gomu vs. Standard Fruit logic clearly
 local function applyFruitCharacterModel(player, fruitName)
+	local character = player.Character
 	if fruitName == "Gomu Gomu no Mi" then
 		swaptoR6G(player, "R6G")
 	else
-		swaptoR6G(player)
+		-- User indicates models have a StringValue "R6" if they are the R6 model
+		if character and not character:FindFirstChild("R6") then
+			swaptoR6G(player, "R6")
+		end
 	end
 end
 

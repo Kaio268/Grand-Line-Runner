@@ -167,7 +167,7 @@ local function toggleEquip(player, kind, name)
 
 		if not isActualWeld then
 			-- Identify the correct arm part for the R6G model
-			local gripPart = char:FindFirstChild("RightLowerArm") or char:FindFirstChild("Right Arm")
+			local gripPart = char:FindFirstChild("RightHand") or char:FindFirstChild("RightLowerArm") or char:FindFirstChild("Right Arm")
 
 			if gripPart then
 				-- Create a manual weld because Roblox's default system ignored this rig
