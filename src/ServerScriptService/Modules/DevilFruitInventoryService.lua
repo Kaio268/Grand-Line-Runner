@@ -23,8 +23,10 @@ local EXPLICIT_GRIP_PART_NAMES = {
 	"Hold",
 }
 
-local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
+local DevilFruitConfig =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local DevilFruitAssets =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 
@@ -213,9 +215,11 @@ local function findFruitTools(container, fruitKey)
 	end
 
 	for _, child in ipairs(container:GetChildren()) do
-		if child:IsA("Tool")
+		if
+			child:IsA("Tool")
 			and child:GetAttribute(TOOL_ATTR_KIND) == "DevilFruit"
-			and child:GetAttribute(TOOL_ATTR_NAME) == fruitKey then
+			and child:GetAttribute(TOOL_ATTR_NAME) == fruitKey
+		then
 			table.insert(tools, child)
 		end
 	end
@@ -289,11 +293,9 @@ local function expandBounds(relativeCFrame, size, currentMin, currentMax)
 	for xSign = -1, 1, 2 do
 		for ySign = -1, 1, 2 do
 			for zSign = -1, 1, 2 do
-				local corner = relativeCFrame:PointToWorldSpace(Vector3.new(
-					halfSize.X * xSign,
-					halfSize.Y * ySign,
-					halfSize.Z * zSign
-				))
+				local corner = relativeCFrame:PointToWorldSpace(
+					Vector3.new(halfSize.X * xSign, halfSize.Y * ySign, halfSize.Z * zSign)
+				)
 
 				currentMin = Vector3.new(
 					math.min(currentMin.X, corner.X),
@@ -318,11 +320,7 @@ local function getGripBias(fruit)
 		return DEFAULT_TOOL_GRIP_BIAS
 	end
 
-	return Vector3.new(
-		math.clamp(gripBias.X, -1, 1),
-		math.clamp(gripBias.Y, -1, 1),
-		math.clamp(gripBias.Z, -1, 1)
-	)
+	return Vector3.new(math.clamp(gripBias.X, -1, 1), math.clamp(gripBias.Y, -1, 1), math.clamp(gripBias.Z, -1, 1))
 end
 
 local function getGripOffset(fruit)
@@ -370,11 +368,9 @@ local function getAutomaticGripPivot(template, primaryPart, fruit)
 	local halfExtents = (localMax - localMin) * 0.5
 	local gripBias = getGripBias(fruit)
 	local gripOffset = getGripOffset(fruit)
-	local gripLocalPosition = boundsCenter + Vector3.new(
-		halfExtents.X * gripBias.X,
-		halfExtents.Y * gripBias.Y,
-		halfExtents.Z * gripBias.Z
-	) + gripOffset
+	local gripLocalPosition = boundsCenter
+		+ Vector3.new(halfExtents.X * gripBias.X, halfExtents.Y * gripBias.Y, halfExtents.Z * gripBias.Z)
+		+ gripOffset
 
 	gripLocalPosition = clampVector3(gripLocalPosition, localMin, localMax)
 
@@ -439,7 +435,6 @@ local function buildFruitTool(fruitKey)
 		weld.Part1 = clone
 		weld.Parent = handle
 	end
-
 	return tool
 end
 
@@ -524,7 +519,13 @@ local function syncFruitTool(player, fruitKey, desiredCount)
 			hookTool(player, tool)
 			tool.Parent = backpack
 		else
-			warn(string.format("[DevilFruitInventoryService] Failed to build fruit tool for %s (%s)", tostring(fruitKey), tostring(reason)))
+			warn(
+				string.format(
+					"[DevilFruitInventoryService] Failed to build fruit tool for %s (%s)",
+					tostring(fruitKey),
+					tostring(reason)
+				)
+			)
 		end
 	end
 end
@@ -652,14 +653,27 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 
 	local consumed, consumeReason = DevilFruitInventoryService.ConsumeFruit(player, fruitKey, 1)
 	if not consumed then
-		warn(string.format("[DevilFruitInventoryService] Failed to consume %s for %s: %s", fruitKey, player.Name, tostring(consumeReason)))
+		warn(
+			string.format(
+				"[DevilFruitInventoryService] Failed to consume %s for %s: %s",
+				fruitKey,
+				player.Name,
+				tostring(consumeReason)
+			)
+		)
 		return
 	end
 
 	local equipped = DevilFruitService.SetEquippedFruit(player, fruitKey)
 	if not equipped then
 		DevilFruitInventoryService.GrantFruit(player, fruitKey, 1)
-		warn(string.format("[DevilFruitInventoryService] Failed to equip %s for %s after consuming", fruitKey, player.Name))
+		warn(
+			string.format(
+				"[DevilFruitInventoryService] Failed to equip %s for %s after consuming",
+				fruitKey,
+				player.Name
+			)
+		)
 		return
 	end
 

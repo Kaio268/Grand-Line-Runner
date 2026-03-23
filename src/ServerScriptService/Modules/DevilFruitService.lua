@@ -55,12 +55,92 @@ local RemoteBundle = getRemoteBundle()
 local ModulesFolder = script.Parent
 local FruitHandlersFolder = ModulesFolder:FindFirstChild("DevilFruits") or ModulesFolder:WaitForChild("DevilFruits")
 
-local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local DevilFruitConfig =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local syncFruitAttribute
 
 if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
+end
+
+local function swaptoR6G(player, newModelName)
+	local character = player.Character or player.CharacterAdded:Wait()
+	-- Wait a frame to ensure the character is fully in the workspace
+	task.wait()
+
+	-- NEW CHECK: Only skip if the character is ALREADY using the requested model.
+	-- This allows swapping from "R6" to "R6G" (Mera to Gomu).
+	if character:GetAttribute("CurrentModelAsset") == newModelName then
+		return
+	end
+
+	local modelTemplate = ReplicatedStorage.Assets.CharacterModels:FindFirstChild(newModelName)
+	if not modelTemplate then
+		warn("[DevilFruitService] Could not find model template: " .. newModelName)
+		return
+	end
+
+	-- 1. SETUP THE NEW RIG
+	local originalCFrame = character:GetPivot()
+	-- Add 3 studs to the Y-axis (Up) to prevent clipping under the map
+	local safeCFrame = originalCFrame + Vector3.new(0, 3, 0)
+
+	local newCharacter = modelTemplate:Clone()
+	newCharacter.Name = player.Name
+
+	-- Track the specific model asset so we can swap between different custom models later
+	newCharacter:SetAttribute("CurrentModelAsset", newModelName)
+	newCharacter:SetAttribute("IsModifiedR15", true)
+
+	local newHumanoid = newCharacter:FindFirstChildOfClass("Humanoid")
+	if not newHumanoid then
+		newCharacter:Destroy()
+		return
+	end
+
+	-- 2. APPLY APPEARANCE
+	local success, playerDescription = pcall(function()
+		return Players:GetHumanoidDescriptionFromUserId(player.UserId)
+	end)
+
+	if success and playerDescription then
+		playerDescription.HeadScale, playerDescription.HeightScale = 1, 1
+		playerDescription.WidthScale, playerDescription.DepthScale = 1, 1
+
+		local templateDescription = newHumanoid:GetAppliedDescription()
+		playerDescription.LeftArm = templateDescription.LeftArm
+		playerDescription.RightArm = templateDescription.RightArm
+		playerDescription.LeftLeg = templateDescription.LeftLeg
+		playerDescription.RightLeg = templateDescription.RightLeg
+		playerDescription.Torso = templateDescription.Torso
+
+		pcall(function()
+			newHumanoid:ApplyDescription(playerDescription)
+		end)
+	end
+
+	if newHumanoid then
+		-- Ensure the Humanoid recognizes the rig as R15 (since R6G is a modified R15)
+		newHumanoid.HipHeight = 2
+		newHumanoid.RigType = Enum.HumanoidRigType.R15
+	end
+
+	-- 3. PERFORM THE SWAP
+	player.Character = newCharacter
+	newCharacter:PivotTo(safeCFrame)
+	newCharacter.Parent = workspace
+
+	character:Destroy()
+end
+
+-- Updated helper to handle the Gomu vs. Standard Fruit logic clearly
+local function applyFruitCharacterModel(player, fruitName)
+	if fruitName == "Gomu Gomu no Mi" then
+		swaptoR6G(player, "R6G")
+	else
+		swaptoR6G(player)
+	end
 end
 
 local function debugPrint(...)
@@ -111,14 +191,22 @@ local function getFruitHandler(fruitName)
 	local handlerModule = FruitHandlersFolder:FindFirstChild(moduleName)
 	if not handlerModule then
 		fruitHandlerCache[moduleName] = false
-		warn(string.format("[DevilFruitService] Missing fruit handler module '%s' for %s", moduleName, fruitConfig.DisplayName))
+		warn(
+			string.format(
+				"[DevilFruitService] Missing fruit handler module '%s' for %s",
+				moduleName,
+				fruitConfig.DisplayName
+			)
+		)
 		return nil
 	end
 
 	local ok, handler = pcall(require, handlerModule)
 	if not ok then
 		fruitHandlerCache[moduleName] = false
-		warn(string.format("[DevilFruitService] Failed to require fruit handler '%s': %s", moduleName, tostring(handler)))
+		warn(
+			string.format("[DevilFruitService] Failed to require fruit handler '%s': %s", moduleName, tostring(handler))
+		)
 		return nil
 	end
 
@@ -257,7 +345,13 @@ local function startPersistTask(player)
 		end
 
 		if pendingPersistByPlayer[player] ~= nil and attempts >= MAX_PERSIST_ATTEMPTS then
-			warn(string.format("[DevilFruitService] Failed to persist equipped fruit for %s after %d attempts", player.Name, attempts))
+			warn(
+				string.format(
+					"[DevilFruitService] Failed to persist equipped fruit for %s after %d attempts",
+					player.Name,
+					attempts
+				)
+			)
 		end
 
 		persistTaskByPlayer[player] = nil
@@ -419,6 +513,14 @@ local function hookPlayer(player)
 				syncFruitAttribute(player, getPlayerFruitValue(player).Value)
 			end
 		end)
+
+		-- ADDED THIS BLOCK: Swap the model every time the player respawns
+		player.CharacterAdded:Connect(function(character)
+			local currentFruit = getEquippedFruit(player)
+			if currentFruit ~= DevilFruitConfig.None then
+				applyFruitCharacterModel(player, currentFruit)
+			end
+		end)
 	end)
 end
 
@@ -495,7 +597,14 @@ local function clearAbilityCooldown(player, abilityName)
 end
 
 local function fireAbilityDenied(player, fruitName, abilityName, reason, readyAt)
-	RemoteBundle.State:FireClient(player, "Denied", fruitName or DevilFruitConfig.None, abilityName, reason, readyAt or 0)
+	RemoteBundle.State:FireClient(
+		player,
+		"Denied",
+		fruitName or DevilFruitConfig.None,
+		abilityName,
+		reason,
+		readyAt or 0
+	)
 end
 
 local function fireAbilityActivated(player, fruitName, abilityName, readyAt, payload)
@@ -577,6 +686,11 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 
 	debugPrint("SetEquippedFruit STEP 4 - Applying runtime state")
 	applyEquippedFruitRuntimeState(player, fruitValue, resolvedFruitName)
+
+	-- ADDED THIS LINE: Apply the model swap immediately upon equipping
+	if player.Character then
+		applyFruitCharacterModel(player, resolvedFruitName)
+	end
 
 	debugPrint("SetEquippedFruit STEP 5 - Queueing persistence through DataManager")
 	local persisted, reason = persistEquippedFruit(player, resolvedFruitName)
