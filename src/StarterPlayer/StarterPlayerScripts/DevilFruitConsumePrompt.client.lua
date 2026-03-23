@@ -33,6 +33,15 @@ local function playEatAnimation()
 		return
 	end
 
+	if character:FindFirstChild("R6") and character:FindFirstChild("R6"):IsA("StringValue") then
+		eatAnimation.AnimationId = "rbxassetid://85983089868979"
+	elseif character:FindFirstChild("R6G") and character:FindFirstChild("R6G"):IsA("StringValue") then
+		eatAnimation.AnimationId = "rbxassetid://87595968126136" -- TODO: Replace with your actual R6G Animation ID!
+	else
+		-- Default to the R6 animation if neither StringValue is present
+		eatAnimation.AnimationId = "rbxassetid://85983089868979"
+	end
+
 	local ok, track = pcall(function()
 		return animator:LoadAnimation(eatAnimation)
 	end)
