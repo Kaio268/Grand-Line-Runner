@@ -22,6 +22,7 @@ if not HiddenRoot then
 end
 
 local connsByPlayer = {}
+local characterSpawnConnsByPlayer = {}
 local plotCommandFunction = ShipRuntimeSignals.GetPlotCommandFunction()
 local getSpawnPart
 local DEBUG_TRACE = RunService:IsStudio()
@@ -64,6 +65,14 @@ local function playerTrace(message, ...)
 	end
 
 	print(string.format("[PLAYER TRACE] " .. message, ...))
+end
+
+local function spawnTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[SPAWN TRACE] " .. message, ...))
 end
 
 local function ownershipTrace(message, ...)
@@ -462,17 +471,35 @@ getSpawnPart = function(plot)
 	return nil
 end
 
-local function teleportToCFrame(player, cf)
+local function getSpawnCFrameFromPart(part)
+	if not part or not part:IsA("BasePart") then
+		return nil
+	end
+
+	return part.CFrame + Vector3.new(0, 3, 0)
+end
+
+local function teleportToCFrame(player, cf, context, targetCharacter)
+	context = tostring(context or "teleport")
+
 	local function doTeleport(character)
 		local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
 		if not hrp then
+			playerTrace(
+				"teleportSkipped player=%s context=%s character=%s reason=missing_hrp target=%s",
+				player.Name,
+				context,
+				formatInstancePath(character),
+				formatVector3(cf.Position)
+			)
 			return
 		end
 
 		local beforePosition = hrp.Position
 		playerTrace(
-			"teleportBefore player=%s character=%s hrp=%s from=%s target=%s",
+			"teleportBefore player=%s context=%s character=%s hrp=%s from=%s target=%s",
 			player.Name,
+			context,
 			formatInstancePath(character),
 			formatInstancePath(hrp),
 			formatVector3(beforePosition),
@@ -481,8 +508,9 @@ local function teleportToCFrame(player, cf)
 		character:PivotTo(cf)
 
 		playerTrace(
-			"teleportAfterImmediate player=%s character=%s hrp=%s pos=%s",
+			"teleportAfterImmediate player=%s context=%s character=%s hrp=%s pos=%s",
 			player.Name,
+			context,
 			formatInstancePath(character),
 			formatInstancePath(hrp),
 			formatVector3(hrp.Position)
@@ -491,8 +519,9 @@ local function teleportToCFrame(player, cf)
 		task.defer(function()
 			if player.Parent and character.Parent and hrp.Parent then
 				playerTrace(
-					"teleportAfterDeferred player=%s character=%s hrp=%s pos=%s",
+					"teleportAfterDeferred player=%s context=%s character=%s hrp=%s pos=%s",
 					player.Name,
+					context,
 					formatInstancePath(character),
 					formatInstancePath(hrp),
 					formatVector3(hrp.Position)
@@ -501,7 +530,9 @@ local function teleportToCFrame(player, cf)
 		end)
 	end
 
-	if player.Character then
+	if targetCharacter then
+		doTeleport(targetCharacter)
+	elseif player.Character then
 		doTeleport(player.Character)
 	else
 		player.CharacterAdded:Wait()
@@ -511,35 +542,48 @@ local function teleportToCFrame(player, cf)
 	end
 end
 
-local function teleportToPart(player, part)
+local function teleportToPart(player, part, context, targetCharacter)
 	if not part or not part:IsA("BasePart") then
-		return
+		return false
 	end
-	teleportToCFrame(player, part.CFrame + Vector3.new(0, 3, 0))
+
+	local targetCFrame = getSpawnCFrameFromPart(part)
+	if not targetCFrame then
+		return false
+	end
+
+	teleportToCFrame(player, targetCFrame, context or "teleportToPart", targetCharacter)
+	return true
 end
 
-local function teleportToPlot(player, plot)
+local function teleportToPlot(player, plot, context, targetCharacter)
 	if not plot then
-		return
+		return false
 	end
 	local spawnPart = getSpawnPart(plot)
 	if not spawnPart then
-		plotTrace("teleportToPlot player=%s plot=%s spawn=<nil>", player.Name, formatInstancePath(plot))
-		return
+		plotTrace(
+			"teleportToPlot player=%s context=%s plot=%s spawn=<nil>",
+			player.Name,
+			tostring(context or "teleportToPlot"),
+			formatInstancePath(plot)
+		)
+		return false
 	end
 
 	local slot = plot:FindFirstChild("Slot")
 	local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
 	plotTrace(
-		"teleportToPlot player=%s plot=%s slot=%s slotPos=%s spawn=%s spawnPos=%s",
+		"teleportToPlot player=%s context=%s plot=%s slot=%s slotPos=%s spawn=%s spawnPos=%s",
 		player.Name,
+		tostring(context or "teleportToPlot"),
 		formatInstancePath(plot),
 		formatInstancePath(posPart),
 		formatVector3(posPart and posPart.Position or nil),
 		formatInstancePath(spawnPart),
 		formatVector3(spawnPart.Position)
 	)
-	teleportToPart(player, spawnPart)
+	return teleportToPart(player, spawnPart, context or "teleportToPlot", targetCharacter)
 end
 
 local function standHasPlacedBrainrot(stand)
@@ -1058,6 +1102,191 @@ local function ensurePlayerPlotAssigned(player, source)
 	return assignedPlot
 end
 
+local function disconnectCharacterSpawnConn(player)
+	local connection = characterSpawnConnsByPlayer[player]
+	if not connection then
+		return
+	end
+
+	pcall(function()
+		connection:Disconnect()
+	end)
+	characterSpawnConnsByPlayer[player] = nil
+end
+
+local function handleCharacterSpawnAtPlot(player, character, source)
+	source = tostring(source or "character_added")
+
+	local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
+	local initialPosition = hrp and hrp.Position or nil
+	playerTrace(
+		"characterAdded player=%s userId=%s source=%s character=%s hrp=%s pos=%s",
+		player.Name,
+		tostring(player.UserId),
+		source,
+		formatInstancePath(character),
+		formatInstancePath(hrp),
+		formatVector3(initialPosition)
+	)
+	spawnTrace(
+		"characterAdded player=%s userId=%s source=%s character=%s initialPos=%s",
+		player.Name,
+		tostring(player.UserId),
+		source,
+		formatInstancePath(character),
+		formatVector3(initialPosition)
+	)
+
+	local ownedPlot = getOwnedPlot(player)
+	if not ownedPlot then
+		spawnTrace(
+			"ownedPlotMissing player=%s userId=%s source=%s action=wait_for_existing_assignment",
+			player.Name,
+			tostring(player.UserId),
+			source
+		)
+
+		local deadline = os.clock() + 5
+		while player.Parent and character.Parent and os.clock() <= deadline and not ownedPlot do
+			task.wait(0.25)
+			ownedPlot = getOwnedPlot(player)
+		end
+	end
+
+	if not ownedPlot then
+		spawnTrace(
+			"ownedPlotNotFound player=%s userId=%s source=%s action=ensure_assignment",
+			player.Name,
+			tostring(player.UserId),
+			source
+		)
+		ownedPlot = ensurePlayerPlotAssigned(player, source .. "_spawn")
+	end
+
+	local spawnPart = ownedPlot and getSpawnPart(ownedPlot) or nil
+	local targetCFrame = getSpawnCFrameFromPart(spawnPart)
+	local fallbackReason = nil
+	if not ownedPlot then
+		fallbackReason = "no_valid_plot"
+	elseif not spawnPart then
+		fallbackReason = "plot_missing_spawn"
+	elseif not targetCFrame then
+		fallbackReason = "invalid_spawn_cframe"
+	end
+
+	plotTrace(
+		"characterSpawnResolve player=%s userId=%s source=%s ownedPlot=%s spawn=%s spawnPos=%s fallbackUsed=%s",
+		player.Name,
+		tostring(player.UserId),
+		source,
+		formatInstancePath(ownedPlot),
+		formatInstancePath(spawnPart),
+		formatVector3(spawnPart and spawnPart.Position or nil),
+		tostring(fallbackReason ~= nil)
+	)
+
+	if targetCFrame then
+		spawnTrace(
+			"spawnSelected player=%s userId=%s source=%s ownedPlotFound=true fallbackUsed=false plot=%s spawn=%s chosenSpawnLocation=%s",
+			player.Name,
+			tostring(player.UserId),
+			source,
+			formatInstancePath(ownedPlot),
+			formatInstancePath(spawnPart),
+			formatVector3(targetCFrame.Position)
+		)
+		teleportToCFrame(player, targetCFrame, "plot_spawn:" .. source, character)
+
+		task.defer(function()
+			local liveHrp = character.Parent and (character:FindFirstChild("HumanoidRootPart") or hrp) or nil
+			spawnTrace(
+				"spawnFinal player=%s userId=%s source=%s fallbackUsed=false finalCharacterPosition=%s",
+				player.Name,
+				tostring(player.UserId),
+				source,
+				formatVector3(liveHrp and liveHrp.Position or nil)
+			)
+		end)
+
+		return true
+	end
+
+	spawnTrace(
+		"spawnFallback player=%s userId=%s source=%s ownedPlotFound=%s fallbackUsed=true reason=%s chosenSpawnLocation=%s",
+		player.Name,
+		tostring(player.UserId),
+		source,
+		tostring(ownedPlot ~= nil),
+		tostring(fallbackReason or "unknown"),
+		formatVector3(initialPosition)
+	)
+
+	task.defer(function()
+		local liveHrp = character.Parent and (character:FindFirstChild("HumanoidRootPart") or hrp) or nil
+		spawnTrace(
+			"spawnFinal player=%s userId=%s source=%s fallbackUsed=true finalCharacterPosition=%s",
+			player.Name,
+			tostring(player.UserId),
+			source,
+			formatVector3(liveHrp and liveHrp.Position or nil)
+		)
+	end)
+
+	return false
+end
+
+local function attachCharacterSpawnHandler(player, source)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	if characterSpawnConnsByPlayer[player] then
+		return
+	end
+
+	spawnTrace(
+		"attachCharacterSpawnHandler player=%s userId=%s source=%s existingCharacter=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(source),
+		tostring(player.Character ~= nil)
+	)
+
+	characterSpawnConnsByPlayer[player] = player.CharacterAdded:Connect(function(character)
+		local ok, err = xpcall(function()
+			handleCharacterSpawnAtPlot(player, character, "CharacterAdded")
+		end, debug.traceback)
+
+		if not ok then
+			spawnTrace(
+				"characterSpawnError player=%s userId=%s source=%s error=%s",
+				player.Name,
+				tostring(player.UserId),
+				"CharacterAdded",
+				tostring(err)
+			)
+		end
+	end)
+
+	if player.Character then
+		task.spawn(function()
+			local ok, err = xpcall(function()
+				handleCharacterSpawnAtPlot(player, player.Character, tostring(source) .. "_existing_character")
+			end, debug.traceback)
+
+			if not ok then
+				spawnTrace(
+					"characterSpawnError player=%s userId=%s source=%s error=%s",
+					player.Name,
+					tostring(player.UserId),
+					tostring(source) .. "_existing_character",
+					tostring(err)
+				)
+			end
+		end)
+	end
+end
+
 local playerAddedConnection = nil
 if canAttachPlayerAdded then
 	playerAddedConnection = Players.PlayerAdded:Connect(function(player)
@@ -1066,18 +1295,10 @@ if canAttachPlayerAdded then
 		local ok, err = pcall(function()
 			assignTrace("PlayerAdded first_line player=%s userId=%s", player.Name, tostring(player.UserId))
 			plotTrace("PlayerAdded player=%s", player.Name)
+			playerTrace("playerJoined player=%s userId=%s", player.Name, tostring(player.UserId))
+			spawnTrace("playerJoined player=%s userId=%s", player.Name, tostring(player.UserId))
 			ownershipTrace("PlayerAdded player=%s userId=%s event=player_added", player.Name, tostring(player.UserId))
-			player.CharacterAdded:Connect(function(character)
-				local hrp = character:WaitForChild("HumanoidRootPart", 10)
-				playerTrace(
-					"characterAdded player=%s userId=%s character=%s hrp=%s pos=%s",
-					player.Name,
-					tostring(player.UserId),
-					formatInstancePath(character),
-					formatInstancePath(hrp),
-					formatVector3(hrp and hrp.Position or nil)
-				)
-			end)
+			attachCharacterSpawnHandler(player, "PlayerAdded")
 			ownershipTrace("PlayerAdded player=%s userId=%s event=assign_plot_begin", player.Name, tostring(player.UserId))
 			assignTrace("PlayerAdded before assignPlot player=%s userId=%s", player.Name, tostring(player.UserId))
 			local assignedPlot = ensurePlayerPlotAssigned(player, "player_added")
@@ -1129,10 +1350,12 @@ assignTrace(
 
 for _, existingPlayer in ipairs(Players:GetPlayers()) do
 	assignTrace("bootstrap_existing_player player=%s userId=%s", existingPlayer.Name, tostring(existingPlayer.UserId))
+	attachCharacterSpawnHandler(existingPlayer, "bootstrap")
 	ensurePlayerPlotAssigned(existingPlayer, "bootstrap")
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	disconnectCharacterSpawnConn(player)
 	disconnectPlayerConns(player)
 	local plot = getOwnedPlot(player)
 	if plot then
