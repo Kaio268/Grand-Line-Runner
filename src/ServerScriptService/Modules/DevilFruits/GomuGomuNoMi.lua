@@ -1,6 +1,6 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-local gomuRocketAnim = "rbxassetid://132601884231434"
+local gomuRocketAnim = "rbxassetid://135988661193623"
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GomuGomuNoMi = {}
