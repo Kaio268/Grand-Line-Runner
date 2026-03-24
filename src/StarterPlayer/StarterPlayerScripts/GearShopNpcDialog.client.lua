@@ -3,8 +3,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
-local npc = workspace:WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("Model"):WaitForChild("Normal")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot" },
+	nil,
+	{
+		warn = true,
+		context = "GearShopNpcDialog",
+	}
+)
+local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Model"):WaitForChild("Normal")
 local prompt = npc:WaitForChild("ProximityPrompt")
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, prompt)

@@ -3,9 +3,54 @@ local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local DECREASE_PART = Workspace:WaitForChild("DecreaseSpeed")
 local FORCED_SPEED = 35
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
+local DEBUG_TRACE = RunService:IsStudio()
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if not instance then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function zoneTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[ZONE TRACE] " .. message, ...))
+end
+
+local function logZoneResolution(context)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	local refs = MapResolver.GetRefs()
+	zoneTrace(
+		"context=%s activeMap=%s mapPath=%s boundary=%s boundaryPos=%s boundarySize=%s",
+		tostring(context),
+		tostring(refs.ActiveMapName),
+		formatInstancePath(refs.MapRoot),
+		formatInstancePath(DECREASE_PART),
+		formatVector3(DECREASE_PART.Position),
+		formatVector3(DECREASE_PART.Size)
+	)
+end
+
+logZoneResolution("SpeedChange.server")
 
 local function getDevilFruitSpeedMultiplier(player)
 	local untilTime = player:GetAttribute("HieIceBoostUntil")
@@ -72,7 +117,33 @@ local function hookCharacter(player, character)
 		updating = false
 	end
 
+	local function logSpeedState(reason, oldState, newState)
+		zoneTrace(
+			"player=%s reason=%s zone=%s zonePos=%s zoneSize=%s oldState=%s newState=%s appliedSpeed=%s base=%s purchasedSpeed=%s activeMap=%s mapPath=%s",
+			player.Name,
+			tostring(reason),
+			formatInstancePath(DECREASE_PART),
+			formatVector3(DECREASE_PART.Position),
+			formatVector3(DECREASE_PART.Size),
+			tostring(oldState),
+			tostring(newState),
+			tostring(humanoid.WalkSpeed),
+			tostring(base),
+			tostring(speedObj.Value),
+			tostring(MapResolver.GetRefs().ActiveMapName),
+			formatInstancePath(MapResolver.GetRefs().MapRoot)
+		)
+	end
+
 	apply()
+	zoneTrace(
+		"player=%s hookCharacter zone=%s initialInZone=%s appliedSpeed=%s character=%s",
+		player.Name,
+		formatInstancePath(DECREASE_PART),
+		tostring(inDecreaseZone),
+		tostring(humanoid.WalkSpeed),
+		formatInstancePath(character)
+	)
 
 	conns[#conns + 1] = speedObj.Changed:Connect(function()
 		apply()
@@ -129,8 +200,10 @@ local function hookCharacter(player, character)
 
 		touchingCount += 1
 		if not inDecreaseZone then
+			local oldState = inDecreaseZone
 			inDecreaseZone = true
 			apply()
+			logSpeedState("DecreaseSpeed.Touched", oldState, inDecreaseZone)
 		end
 	end)
 
@@ -141,8 +214,10 @@ local function hookCharacter(player, character)
 		if touchingCount <= 0 then
 			touchingCount = 0
 			if inDecreaseZone then
+				local oldState = inDecreaseZone
 				inDecreaseZone = false
 				apply()
+				logSpeedState("DecreaseSpeed.TouchEnded", oldState, inDecreaseZone)
 			end
 		end
 	end)
@@ -164,9 +239,11 @@ local function hookCharacter(player, character)
 		end
 
 		if not stillTouching then
+			local oldState = inDecreaseZone
 			inDecreaseZone = false
 			touchingCount = 0
 			apply()
+			logSpeedState("DecreaseSpeed.HeartbeatExit", oldState, inDecreaseZone)
 		end
 	end)
 

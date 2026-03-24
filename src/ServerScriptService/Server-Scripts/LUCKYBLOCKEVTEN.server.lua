@@ -2,9 +2,18 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 
+local MapResolver = require(ReplicatedStorage.Modules:WaitForChild("MapResolver"))
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
-local Map = workspace:WaitForChild("Map")
-local SpawnPartsFolder = Map:WaitForChild("SpawnPart")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot", "SpawnFolder" },
+	nil,
+	{
+		warn = true,
+		context = "LuckyBlockEvent",
+	}
+)
+local Map = refs.MapRoot
+local SpawnPartsFolder = refs.SpawnFolder
 
 local LuckyTemplate = ReplicatedStorage:WaitForChild("LuckyBlock")
 LuckyTemplate.Archivable = true

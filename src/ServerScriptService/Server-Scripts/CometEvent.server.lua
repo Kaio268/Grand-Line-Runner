@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local DEBUG = true
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local function log(...)
 	if DEBUG then
 		print("[COMET]", ...)
@@ -18,8 +19,16 @@ end
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 local CurrentEventTime = workspace:WaitForChild("CurrentEventTime")
 
-local Map = workspace:WaitForChild("Map")
-local SpawnPartsFolder = Map:WaitForChild("SpawnPart")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot", "SpawnFolder" },
+	nil,
+	{
+		warn = true,
+		context = "CometEvent",
+	}
+)
+local Map = refs.MapRoot
+local SpawnPartsFolder = refs.SpawnFolder
 
 local CometTemplate = ReplicatedStorage:WaitForChild("Comet")
 CometTemplate.Archivable = true

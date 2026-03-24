@@ -4,9 +4,18 @@ local Players = game:GetService("Players")
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
 local player = Players.LocalPlayer
-local npc = workspace:WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("Normal")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot" },
+	nil,
+	{
+		warn = true,
+		context = "SellNpcDialog",
+	}
+)
+local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Normal")
 local prompt = npc:WaitForChild("ProximityPrompt")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")

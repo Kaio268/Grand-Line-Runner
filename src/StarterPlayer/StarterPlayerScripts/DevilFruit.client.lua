@@ -5,10 +5,12 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
-local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local HazardUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
-local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
-local ProtectionRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
+local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local ProtectionRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -1086,9 +1088,7 @@ local function updateGomuAimAssist()
 end
 
 local function isDescendantOfClientWave(instance)
-	local map = Workspace:FindFirstChild("Map")
-	local waveFolder = map and map:FindFirstChild("WaveFolder")
-	local clientWavesFolder = waveFolder and waveFolder:FindFirstChild("ClientWaves")
+	local clientWavesFolder = MapResolver.GetRefs().ClientWaves
 	if not clientWavesFolder then
 		return false
 	end

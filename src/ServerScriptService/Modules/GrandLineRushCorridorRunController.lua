@@ -2,9 +2,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local ChestVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestVisuals"))
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
@@ -20,11 +22,62 @@ local extractionTouchDebounce = {}
 local sharedChestSequence = 0
 local nextSharedChestRespawnAt = 0
 local worldRandom = Random.new()
+local DEBUG_TRACE = RunService:IsStudio()
+local loggedExtractionTouchByPlayer = {}
+local VALID_SPAWN_RARITY_NAMES = SpawnPartsConfig.RarityTier or {}
 
 local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)
 local ERROR_COLOR = Color3.fromRGB(255, 104, 104)
 local INFO_COLOR = Color3.fromRGB(119, 217, 255)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if not instance then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function mapTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[MAP TRACE] " .. message, ...))
+end
+
+local function waveTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[WAVE TRACE] " .. message, ...))
+end
+
+local function zoneTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[ZONE TRACE] " .. message, ...))
+end
+
+local function runTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[RUN TRACE] " .. message, ...))
+end
 
 local function sendPopup(player, text, color, isError)
 	if not player or player.Parent ~= Players then
@@ -42,39 +95,13 @@ local function buildResponseMessage(response, fallbackMessage)
 	return fallbackMessage
 end
 
-local function getWaveParts()
-	local map = Workspace:FindFirstChild("Map")
-	local waveFolder = map and map:FindFirstChild("WaveFolder")
-	local startPart = waveFolder and waveFolder:FindFirstChild("Start")
-	local endPart = waveFolder and waveFolder:FindFirstChild("End")
-	if not (startPart and startPart:IsA("BasePart") and endPart and endPart:IsA("BasePart")) then
-		return nil
-	end
-
-	return waveFolder, startPart, endPart
-end
-
 local function getMapHitBox()
-	local map = Workspace:FindFirstChild("Map")
-	local hitBox = map and map:FindFirstChild("HitBox")
+	local hitBox = MapResolver.GetRefs().HitBox
 	if hitBox and hitBox:IsA("BasePart") then
 		return hitBox
 	end
 
 	return nil
-end
-
-local function waitForWaveParts(timeoutSeconds)
-	local deadline = os.clock() + (timeoutSeconds or 10)
-	while os.clock() <= deadline do
-		local waveFolder, startPart, endPart = getWaveParts()
-		if waveFolder and startPart and endPart then
-			return waveFolder, startPart, endPart
-		end
-		task.wait(0.2)
-	end
-
-	return getWaveParts()
 end
 
 local function getOrCreateFolder(parent, name)
@@ -363,67 +390,115 @@ local function computeObjectPivotOnSpawnPart(object, spawnPart, localXZ, yaw)
 end
 
 local function getSpawnPartsFolder()
-	local map = Workspace:FindFirstChild("Map")
-	return map and map:FindFirstChild("SpawnPart")
+	return MapResolver.GetRefs().SpawnFolder
 end
 
-local function getNearestBrainrotSpawnContext(player)
-	local spawnFolder = getSpawnPartsFolder()
-	if not spawnFolder then
-		return nil
-	end
+local function isValidSpawnRarityPart(spawnPart)
+	return spawnPart
+		and spawnPart:IsA("BasePart")
+		and VALID_SPAWN_RARITY_NAMES[tostring(spawnPart.Name)] ~= nil
+end
 
-	local character = player.Character
-	local hrp = character and character:FindFirstChild("HumanoidRootPart")
-	local referencePosition = hrp and hrp.Position
-	if not referencePosition then
-		return nil
-	end
+local function getBiomeSpawnParts()
+	local refs = MapResolver.GetRefs()
+	local mapRoot = refs.MapRoot
+	local biomesRoot = mapRoot and mapRoot:FindFirstChild("Biomes")
+	local spawnParts = {}
 
-	local nearestContext = nil
-	local nearestDistance = math.huge
-	local nearestSpawnPart = nil
-	local nearestSpawnPartDistance = math.huge
-
-	for _, spawnPart in ipairs(spawnFolder:GetChildren()) do
-		if spawnPart:IsA("BasePart") then
-			local spawnDistance = (spawnPart.Position - referencePosition).Magnitude
-			if spawnDistance < nearestSpawnPartDistance then
-				nearestSpawnPartDistance = spawnDistance
-				nearestSpawnPart = spawnPart
-			end
-
-			local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
-			if brainrotsFolder then
-				for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
-					local rootPart = getObjectRootPart(candidate)
-					if rootPart then
-						local distance = (rootPart.Position - referencePosition).Magnitude
-						if distance < nearestDistance then
-							nearestDistance = distance
-							nearestContext = {
-								SpawnPart = spawnPart,
-								Brainrot = candidate,
-							}
-						end
+	if biomesRoot then
+		waveTrace(
+			"chestSpawnDiscovery mode=Biomes map=%s biomesRoot=%s topLevelBiomeCount=%s",
+			formatInstancePath(mapRoot),
+			formatInstancePath(biomesRoot),
+			tostring(#biomesRoot:GetChildren())
+		)
+		for _, biomeContainer in ipairs(biomesRoot:GetChildren()) do
+			local innerBiome = biomeContainer:FindFirstChild(biomeContainer.Name)
+			if innerBiome then
+				waveTrace(
+					"chestSpawnDiscovery biome=%s innerBiome=%s",
+					formatInstancePath(biomeContainer),
+					formatInstancePath(innerBiome)
+				)
+				for _, descendant in ipairs(innerBiome:GetDescendants()) do
+					if isValidSpawnRarityPart(descendant) then
+						spawnParts[#spawnParts + 1] = descendant
 					end
+				end
+			else
+				waveTrace(
+					"chestSpawnDiscovery skippedBiome=%s reason=missing_inner_biome expected=%s",
+					formatInstancePath(biomeContainer),
+					tostring(biomeContainer.Name)
+				)
+			end
+		end
+	else
+		local spawnFolder = getSpawnPartsFolder()
+		waveTrace(
+			"chestSpawnDiscovery mode=LegacySpawnFolder map=%s spawnFolder=%s",
+			formatInstancePath(mapRoot),
+			formatInstancePath(spawnFolder)
+		)
+		if spawnFolder then
+			for _, spawnPart in ipairs(spawnFolder:GetChildren()) do
+				if isValidSpawnRarityPart(spawnPart) then
+					spawnParts[#spawnParts + 1] = spawnPart
 				end
 			end
 		end
 	end
 
-	if nearestContext then
-		return nearestContext
+	waveTrace("chestSpawnDiscovery resultCount=%s", tostring(#spawnParts))
+	return spawnParts
+end
+
+local function getAllBrainrotSpawnContexts()
+	local contexts = {}
+
+	for _, spawnPart in ipairs(getBiomeSpawnParts()) do
+		local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
+		local hadBrainrot = false
+		if brainrotsFolder then
+			for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
+				if getObjectRootPart(candidate) then
+					hadBrainrot = true
+					contexts[#contexts + 1] = {
+						SpawnPart = spawnPart,
+						Brainrot = candidate,
+					}
+				end
+			end
+		end
+
+		if not hadBrainrot then
+			contexts[#contexts + 1] = {
+				SpawnPart = spawnPart,
+				Brainrot = nil,
+			}
+		end
 	end
 
-	if nearestSpawnPart then
-		return {
-			SpawnPart = nearestSpawnPart,
-			Brainrot = nil,
-		}
+	return contexts
+end
+
+local function chooseRandomBrainrotSpawnContext()
+	local contexts = getAllBrainrotSpawnContexts()
+	if #contexts == 0 then
+		return nil
 	end
 
-	return nil
+	local chosen = contexts[worldRandom:NextInteger(1, #contexts)]
+	local chosenBrainrotRoot = getObjectRootPart(chosen.Brainrot)
+	waveTrace(
+		"chestSpawnContext chosenCount=%s chosenSpawnPart=%s chosenSpawnPartPos=%s sourceBrainrot=%s sourceBrainrotPos=%s",
+		tostring(#contexts),
+		formatInstancePath(chosen.SpawnPart),
+		formatVector3(chosen.SpawnPart and chosen.SpawnPart.Position or nil),
+		formatInstancePath(chosen.Brainrot),
+		formatVector3(chosenBrainrotRoot and chosenBrainrotRoot.Position or nil)
+	)
+	return chosen
 end
 
 local function getOccupiedSpawnOffsets(spawnPart, ignoreInstance)
@@ -465,8 +540,9 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		return existing
 	end
 
-	local spawnContext = getNearestBrainrotSpawnContext(player)
+	local spawnContext = chooseRandomBrainrotSpawnContext()
 	if not spawnContext or not spawnContext.SpawnPart then
+		waveTrace("chestPlacement skipped player=%s reason=no_spawn_context", player.Name)
 		return nil
 	end
 
@@ -490,11 +566,13 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		baseOffset + Vector2.new(-spacing * 0.7, spacing * 0.7),
 		baseOffset + Vector2.new(spacing * 0.7, -spacing * 0.7),
 		baseOffset + Vector2.new(-spacing * 0.7, -spacing * 0.7),
-		Vector2.zero,
 	}
+	if not spawnContext.Brainrot then
+		candidateOffsets[#candidateOffsets + 1] = Vector2.zero
+	end
 
 	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.Brainrot)
-	local chosenOffset = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffsets[#candidateOffsets])
+	local chosenOffset = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffsets[#candidateOffsets] or Vector2.zero)
 	for _, candidateOffset in ipairs(candidateOffsets) do
 		local clamped = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffset)
 		if isOffsetClear(clamped, occupiedOffsets, math.max(3.5, spacing * 0.8)) then
@@ -510,6 +588,14 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		SourceBrainrotName = spawnContext.Brainrot and spawnContext.Brainrot.Name or nil,
 	}
 	rewardPlacementsByUserId[player.UserId] = placement
+	waveTrace(
+		"chestPlacement player=%s spawnPart=%s spawnPartPos=%s sourceBrainrot=%s localXZ=%s",
+		player.Name,
+		formatInstancePath(spawnPart),
+		formatVector3(spawnPart.Position),
+		tostring(placement.SourceBrainrotName),
+		formatVector3(Vector3.new(chosenOffset.X, 0, chosenOffset.Y))
+	)
 	return placement
 end
 
@@ -790,35 +876,9 @@ local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFo
 end
 
 local function getAllSharedChestSpawnContexts()
-	local spawnFolder = getSpawnPartsFolder()
-	if not spawnFolder then
-		return {}
-	end
-
 	local contexts = {}
-	for _, spawnPart in ipairs(spawnFolder:GetChildren()) do
-		if spawnPart:IsA("BasePart") then
-			local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
-			local hadBrainrot = false
-			if brainrotsFolder then
-				for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
-					if getObjectRootPart(candidate) then
-						hadBrainrot = true
-						contexts[#contexts + 1] = {
-							SpawnPart = spawnPart,
-							Brainrot = candidate,
-						}
-					end
-				end
-			end
-
-			if not hadBrainrot then
-				contexts[#contexts + 1] = {
-					SpawnPart = spawnPart,
-					Brainrot = nil,
-				}
-			end
-		end
+	for _, context in ipairs(getAllBrainrotSpawnContexts()) do
+		contexts[#contexts + 1] = context
 	end
 
 	return contexts
@@ -872,15 +932,17 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 		baseOffset + Vector2.new(-spacing * 0.7, spacing * 0.7),
 		baseOffset + Vector2.new(spacing * 0.7, -spacing * 0.7),
 		baseOffset + Vector2.new(-spacing * 0.7, -spacing * 0.7),
-		Vector2.zero,
 	}
+	if not spawnContext.Brainrot then
+		candidateOffsets[#candidateOffsets + 1] = Vector2.zero
+	end
 
 	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.Brainrot)
 	for _, offset in ipairs(getOccupiedSharedChestOffsets(spawnPart)) do
 		occupiedOffsets[#occupiedOffsets + 1] = offset
 	end
 
-	local chosenOffset = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffsets[#candidateOffsets])
+	local chosenOffset = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffsets[#candidateOffsets] or Vector2.zero)
 	for _, candidateOffset in ipairs(candidateOffsets) do
 		local clamped = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffset)
 		if isOffsetClear(clamped, occupiedOffsets, math.max(3.5, spacing * 0.8)) then
@@ -948,6 +1010,14 @@ local function spawnSharedChestNode(rewardFolder, carriedFolder)
 
 	local placement = buildSharedChestPlacement(rewardObject, spawnContext)
 	if placement then
+		waveTrace(
+			"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceBrainrot=%s localXZ=%s",
+			tostring(chestId),
+			formatInstancePath(placement.SpawnPart),
+			formatVector3(placement.SpawnPart and placement.SpawnPart.Position or nil),
+			tostring(placement.SourceBrainrotName),
+			formatVector3(Vector3.new(placement.LocalXZ.X, 0, placement.LocalXZ.Y))
+		)
 		setObjectCFrame(
 			rewardObject,
 			computeObjectPivotOnSpawnPart(
@@ -1237,7 +1307,28 @@ function Controller.Start()
 	SliceService.Start()
 	started = true
 
-	local waveFolder, startPart, endPart = waitForWaveParts(15)
+	local resolvedRefs = MapResolver.WaitForRefs(
+		{ "WaveFolder", "WaveStart", "WaveEnd" },
+		15,
+		{
+			warn = true,
+			context = "GrandLineRushCorridorRunController",
+		}
+	)
+	local waveFolder = resolvedRefs.WaveFolder
+	local startPart = resolvedRefs.WaveStart
+	local endPart = resolvedRefs.WaveEnd
+	mapTrace(
+		"GrandLineRush requestedMap=%s activeMap=%s mapPath=%s waveFolder=%s start=%s startPos=%s end=%s endPos=%s",
+		tostring(resolvedRefs.RequestedMapName),
+		tostring(resolvedRefs.ActiveMapName),
+		formatInstancePath(resolvedRefs.MapRoot),
+		formatInstancePath(waveFolder),
+		formatInstancePath(startPart),
+		formatVector3(startPart and startPart.Position or nil),
+		formatInstancePath(endPart),
+		formatVector3(endPart and endPart.Position or nil)
+	)
 	if not (waveFolder and startPart and endPart) then
 		started = false
 		warn("[GrandLineRushCorridorRunController] WaveFolder.Start/End not found; corridor integration skipped.")
@@ -1252,6 +1343,30 @@ function Controller.Start()
 
 	local crewPrompt = getOrCreatePrompt(startHub, "StartCrewRunPrompt", "Start Crew Run", "Grand Line Rush Corridor")
 	local sharedHitBox = getMapHitBox()
+	zoneTrace(
+		"corridorZones activeMap=%s mapPath=%s waveFolder=%s extractionZone=%s extractionPos=%s extractionSize=%s sharedHitBox=%s sharedHitBoxPos=%s sharedHitBoxSize=%s",
+		tostring(resolvedRefs.ActiveMapName),
+		formatInstancePath(resolvedRefs.MapRoot),
+		formatInstancePath(waveFolder),
+		formatInstancePath(extractionZone),
+		formatVector3(extractionZone.Position),
+		formatVector3(extractionZone.Size),
+		formatInstancePath(sharedHitBox),
+		formatVector3(sharedHitBox and sharedHitBox.Position or nil),
+		formatVector3(sharedHitBox and sharedHitBox.Size or nil)
+	)
+	waveTrace(
+		"corridorRuntime waveFolder=%s startHub=%s startHubPos=%s extractionZone=%s extractionPos=%s sharedHitBox=%s sharedHitBoxPos=%s rewardFolder=%s carriedFolder=%s",
+		formatInstancePath(waveFolder),
+		formatInstancePath(startHub),
+		formatVector3(startHub.Position),
+		formatInstancePath(extractionZone),
+		formatVector3(extractionZone.Position),
+		formatInstancePath(sharedHitBox),
+		formatVector3(sharedHitBox and sharedHitBox.Position or nil),
+		formatInstancePath(rewardFolder),
+		formatInstancePath(carriedFolder)
+	)
 
 	local function startRunForPlayer(player, rewardType)
 		local response = SliceService.StartRun(player, rewardType, worldConfig.StartDepthBand or Economy.VerticalSlice.DefaultDepthBand)
@@ -1267,29 +1382,98 @@ function Controller.Start()
 		startRunForPlayer(player, "Crew")
 	end)
 
-	local function tryExtractFromTouch(hit)
+	local function tryExtractFromTouch(hit, sourceLabel, sourcePart)
 		local player = findPlayerFromHit(hit)
 		if not player or not canTriggerExtraction(player) then
+			if player then
+				zoneTrace(
+					"corridorBoundaryTouchSkipped player=%s source=%s sourcePath=%s reason=debounced_or_invalid",
+					player.Name,
+					tostring(sourceLabel),
+					formatInstancePath(sourcePart)
+				)
+			end
 			return
+		end
+
+		zoneTrace(
+			"corridorBoundaryTouched player=%s source=%s sourcePath=%s sourcePos=%s sourceSize=%s activeMap=%s mapPath=%s",
+			player.Name,
+			tostring(sourceLabel),
+			formatInstancePath(sourcePart),
+			formatVector3(sourcePart and sourcePart.Position or nil),
+			formatVector3(sourcePart and sourcePart.Size or nil),
+			tostring(resolvedRefs.ActiveMapName),
+			formatInstancePath(resolvedRefs.MapRoot)
+		)
+
+		if not loggedExtractionTouchByPlayer[player.UserId] then
+			loggedExtractionTouchByPlayer[player.UserId] = true
+			waveTrace(
+				"tryExtractFromTouch player=%s extractionZone=%s extractionPos=%s sharedHitBox=%s sharedHitBoxPos=%s",
+				player.Name,
+				formatInstancePath(extractionZone),
+				formatVector3(extractionZone.Position),
+				formatInstancePath(sharedHitBox),
+				formatVector3(sharedHitBox and sharedHitBox.Position or nil)
+			)
 		end
 
 		local state = SliceService.GetState(player)
 		local runState = state and state.Run or {}
 		if runState.CarriedReward == nil then
+			runTrace(
+				"extractTouchSkipped player=%s source=%s sourcePath=%s reason=no_carried_reward inRun=%s",
+				player.Name,
+				tostring(sourceLabel),
+				formatInstancePath(sourcePart),
+				tostring(runState.InRun)
+			)
 			return
 		end
 
+		runTrace(
+			"extractTouchBegin player=%s source=%s sourcePath=%s carriedType=%s activeMap=%s",
+			player.Name,
+			tostring(sourceLabel),
+			formatInstancePath(sourcePart),
+			tostring(runState.CarriedReward and runState.CarriedReward.RewardType),
+			tostring(resolvedRefs.ActiveMapName)
+		)
 		local response = SliceService.ExtractRun(player)
+		local stateAfter = SliceService.GetState(player)
+		local runAfter = stateAfter and stateAfter.Run or {}
 		if response.ok then
+			runTrace(
+				"extractTouchSuccess player=%s source=%s sourcePath=%s message=%s carriedAfter=%s unopenedChestCount=%s",
+				player.Name,
+				tostring(sourceLabel),
+				formatInstancePath(sourcePart),
+				tostring(response.message),
+				tostring(runAfter.CarriedReward ~= nil),
+				tostring(stateAfter and stateAfter.UnopenedChestCount or "nil")
+			)
 			sendPopup(player, buildResponseMessage(response, "Reward extracted."), SUCCESS_COLOR, false)
 		else
+			runTrace(
+				"extractTouchFailed player=%s source=%s sourcePath=%s error=%s message=%s",
+				player.Name,
+				tostring(sourceLabel),
+				formatInstancePath(sourcePart),
+				tostring(response and response.error),
+				tostring(response and response.message)
+			)
 			sendPopup(player, buildResponseMessage(response, "Could not extract reward."), ERROR_COLOR, true)
 		end
 	end
 
-	extractionZone.Touched:Connect(tryExtractFromTouch)
+	extractionZone.Touched:Connect(function(hit)
+		tryExtractFromTouch(hit, "ExtractionZone", extractionZone)
+	end)
 	if sharedHitBox then
-		sharedHitBox.Touched:Connect(tryExtractFromTouch)
+		sharedHitBox.Touched:Connect(function(hit)
+			tryExtractFromTouch(hit, "SharedHitBox", sharedHitBox)
+		end)
 	end
 
 	SliceService.StateChanged:Connect(function(player, state)

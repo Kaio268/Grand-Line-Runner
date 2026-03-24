@@ -3,12 +3,21 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local Point = require(ReplicatedStorage:WaitForChild("Point"))
 
 local remote = ReplicatedStorage:FindFirstChild("TutorialrrrrFinished")
 
 local player = Players.LocalPlayer
-local npc = workspace:WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("Brr Brr Patapim")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot" },
+	nil,
+	{
+		warn = true,
+		context = "BrrBrrPatapimDialog",
+	}
+)
+local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Brr Brr Patapim")
 local npcPrompt = npc:WaitForChild("ProximityPrompt")
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, npcPrompt)
@@ -252,8 +261,14 @@ local function ensureBeam(character)
 end
 
 local function getSpawnContainer()
-	local map = workspace:WaitForChild("Map")
-	return map:WaitForChild("SpawnPart")
+	return MapResolver.WaitForRefs(
+		{ "SpawnFolder" },
+		nil,
+		{
+			warn = true,
+			context = "BrrBrrPatapimDialog.SpawnFolder",
+		}
+	).SpawnFolder
 end
 
 local function modelHasPrompt(model)

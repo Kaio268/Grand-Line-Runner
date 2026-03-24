@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local MarketplaceService = game:GetService("MarketplaceService")
+local RunService = game:GetService("RunService")
 
 local STEAL_PRODUCT_ID = 3512126073
 local MAX_INCOME_ON_JOIN = 1e16
@@ -87,6 +88,117 @@ local dmSet
 local STAND_DEBUG = false
 local ensuredStandFolders = {}
 local standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction()
+local DEBUG_TRACE = RunService:IsStudio()
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if not instance then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function ownershipTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[OWNERSHIP TRACE] t=%.3f " .. message, os.clock(), ...))
+end
+
+local function plotTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[PLOT TRACE] t=%.3f " .. message, os.clock(), ...))
+end
+
+local function saveTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[SAVE TRACE] t=%.3f " .. message, os.clock(), ...))
+end
+
+local function countSavedStandEntries(incomeBrainrots)
+	if typeof(incomeBrainrots) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _, standData in pairs(incomeBrainrots) do
+		if typeof(standData) == "table" and tostring(standData.BrainrotName or "") ~= "" then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function countTableEntries(value)
+	if typeof(value) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _ in pairs(value) do
+		count += 1
+	end
+
+	return count
+end
+
+local function logSavedShipSnapshot(player, context)
+	if not DEBUG_TRACE or not DataManager then
+		return
+	end
+
+	local ok, result = pcall(function()
+		local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
+		local standsLevels = DataManager:GetValue(player, "StandsLevels")
+		local shipSlots = DataManager:GetValue(player, "Ship.Slots")
+		local plotUpgrade = DataManager:GetValue(player, "HiddenLeaderstats.PlotUpgrade")
+
+		return {
+			IncomeBrainrots = incomeBrainrots,
+			StandsLevels = standsLevels,
+			ShipSlots = shipSlots,
+			PlotUpgrade = plotUpgrade,
+		}
+	end)
+
+	if not ok then
+		saveTrace(
+			"snapshot context=%s player=%s userId=%s result=lookup_failed reason=%s",
+			tostring(context),
+			player.Name,
+			tostring(player.UserId),
+			tostring(result)
+		)
+		return
+	end
+
+	saveTrace(
+		"snapshot context=%s player=%s userId=%s plotUpgrade=%s savedStandEntries=%s standsLevels=%s shipSlots=%s",
+		tostring(context),
+		player.Name,
+		tostring(player.UserId),
+		tostring(result.PlotUpgrade),
+		tostring(countSavedStandEntries(result.IncomeBrainrots)),
+		tostring(countTableEntries(result.StandsLevels)),
+		tostring(countTableEntries(result.ShipSlots))
+	)
+end
 
 local function standDebug(message, ...)
 	if STAND_DEBUG ~= true then
@@ -1314,7 +1426,22 @@ local function findPlotForPlayer(player)
 	for _, m in ipairs(PlotsFolder:GetChildren()) do
 		if m:IsA("Model") then
 			local owner = m:GetAttribute("OwnerUserId")
-			if owner == player.UserId then
+			local ownerName = m:GetAttribute("OwnerName")
+			local matchedByUserId = owner == player.UserId
+			local decision = matchedByUserId and "accepted" or "rejected_owner_userid_mismatch"
+			ownershipTrace(
+				"findPlotForPlayer player=%s userId=%s plot=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s plotName=%s matchedByUserId=%s decision=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(m),
+				tostring(owner),
+				typeof(owner),
+				tostring(ownerName),
+				tostring(m.Name),
+				tostring(matchedByUserId),
+				decision
+			)
+			if matchedByUserId then
 				return m
 			end
 		end
@@ -1325,15 +1452,64 @@ end
 local function waitForPlot(player, timeout)
 	local t0 = os.clock()
 	standDebug("waitForPlot begin player=%s timeout=%s", player.Name, tostring(timeout or 15))
+	saveTrace(
+		"restoreWait begin player=%s userId=%s timeout=%s check=plot.OwnerUserId==player.UserId",
+		player.Name,
+		tostring(player.UserId),
+		tostring(timeout or 15)
+	)
+	ownershipTrace(
+		"waitForPlot begin player=%s userId=%s timeout=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(timeout or 15)
+	)
 	while os.clock() - t0 < (timeout or 15) do
 		local plot = findPlotForPlayer(player)
 		if plot then
 			standDebug("waitForPlot found player=%s plot=%s", player.Name, plot:GetFullName())
+			local slot = plot:FindFirstChild("Slot")
+			local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
+			local spawnPart = plot:FindFirstChild("SpawnLocation", true)
+			plotTrace(
+				"waitForPlot found player=%s userId=%s plot=%s slot=%s slotPos=%s spawn=%s spawnPos=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s accepted=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(plot),
+				formatInstancePath(posPart),
+				formatVector3(posPart and posPart.Position or nil),
+				formatInstancePath(spawnPart),
+				formatVector3(spawnPart and spawnPart:IsA("BasePart") and spawnPart.Position or nil),
+				tostring(plot:GetAttribute("OwnerUserId")),
+				typeof(plot:GetAttribute("OwnerUserId")),
+				tostring(plot:GetAttribute("OwnerName")),
+				"true"
+			)
+			saveTrace(
+				"restoreWait accepted player=%s userId=%s plot=%s plotOwnerUserId=%s plotOwnerUserIdType=%s reason=owner_userid_match",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(plot),
+				tostring(plot:GetAttribute("OwnerUserId")),
+				typeof(plot:GetAttribute("OwnerUserId"))
+			)
 			return plot
 		end
 		task.wait(0.25)
 	end
 	standDebug("waitForPlot timed_out player=%s", player.Name)
+	saveTrace(
+		"restoreWait skipped player=%s userId=%s reason=no_plot_with_matching_owner_userid timeout=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(timeout or 15)
+	)
+	ownershipTrace(
+		"waitForPlot timed_out player=%s userId=%s timeout=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(timeout or 15)
+	)
 	return nil
 end
 
@@ -1769,6 +1945,16 @@ end
 
 local function registerStand(player, plot, standModel)
 	standDebug("registerStand begin player=%s stand=%s", player.Name, standModel.Name)
+	saveTrace(
+		"registerStand begin player=%s userId=%s plot=%s stand=%s standPath=%s ownerUserId=%s ownerName=%s",
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(plot),
+		tostring(standModel.Name),
+		formatInstancePath(standModel),
+		tostring(plot and plot:GetAttribute("OwnerUserId")),
+		tostring(plot and plot:GetAttribute("OwnerName"))
+	)
 	local list = playerStandList[player]
 	if not list then
 		list = {}
@@ -1797,6 +1983,17 @@ local function registerStand(player, plot, standModel)
 			if handle and handle:IsA("BasePart") then
 				standDebug("registerStand before savedName lookup player=%s stand=%s", player.Name, standModel.Name)
 				local name = getPlayerStandBrainrotName(player, standModel.Name)
+				local savedInstanceId = getPlayerStandBrainrotInstanceId(player, standModel.Name)
+				saveTrace(
+					"restoreCheck player=%s userId=%s plot=%s stand=%s savedName=%s savedInstanceId=%s handle=%s",
+					player.Name,
+					tostring(player.UserId),
+					formatInstancePath(plot),
+					tostring(standModel.Name),
+					tostring(name),
+					tostring(savedInstanceId),
+					formatInstancePath(handle)
+				)
 				standDebug("registerStand after savedName lookup player=%s stand=%s savedName=%s", player.Name, standModel.Name, tostring(name))
 				if name ~= "" then
 					standDebug("registerStand savedBrainrot branch entered player=%s stand=%s", player.Name, standModel.Name)
@@ -1804,6 +2001,15 @@ local function registerStand(player, plot, standModel)
 					standDebug("registerStand before ensureStandInstance player=%s stand=%s", player.Name, standModel.Name)
 					local restoredInstanceId, restoredInstance = BrainrotInstanceService.EnsureStandInstance(player, standModel.Name, name)
 					local persistedName = restoredInstance and restoredInstance.StorageName or name
+					saveTrace(
+						"restoreLookup player=%s userId=%s stand=%s requestedName=%s restoredInstanceId=%s persistedName=%s",
+						player.Name,
+						tostring(player.UserId),
+						tostring(standModel.Name),
+						tostring(name),
+						tostring(restoredInstanceId),
+						tostring(persistedName)
+					)
 					standDebug("registerStand after ensureStandInstance player=%s stand=%s instanceId=%s persisted=%s", player.Name, standModel.Name, tostring(restoredInstanceId), tostring(persistedName))
 					name = persistedName
 					standDebug("registerStand before getBrainrotLevel player=%s stand=%s", player.Name, standModel.Name)
@@ -1814,12 +2020,29 @@ local function registerStand(player, plot, standModel)
 					standDebug("registerStand after syncStandLevelFromBrainrot player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand before spawnStandBrainrot player=%s stand=%s", player.Name, standModel.Name)
 					spawnStandBrainrot(player, standModel, handle, name)
+					local placedModel = standModel:FindFirstChild("PlacedBrainrot")
+					saveTrace(
+						"restoreApplied player=%s userId=%s stand=%s savedName=%s restoredInstanceId=%s placedModel=%s placedPivot=%s",
+						player.Name,
+						tostring(player.UserId),
+						tostring(standModel.Name),
+						tostring(name),
+						tostring(restoredInstanceId),
+						formatInstancePath(placedModel),
+						formatVector3(placedModel and placedModel:IsA("Model") and placedModel:GetPivot().Position or nil)
+					)
 					standDebug("registerStand after spawnStandBrainrot player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand before updateStandHover player=%s stand=%s", player.Name, standModel.Name)
 					updateStandHover(player, standModel, name)
 					standDebug("registerStand after updateStandHover player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand restore-done player=%s stand=%s incomePerTick=%s", player.Name, standModel.Name, tostring(getIncomeWithLevel(player, name)))
 				else
+					saveTrace(
+						"restoreSkipped player=%s userId=%s stand=%s reason=empty_saved_name",
+						player.Name,
+						tostring(player.UserId),
+						tostring(standModel.Name)
+					)
 					standDebug("registerStand empty branch entered player=%s stand=%s", player.Name, standModel.Name)
 					clearPlacedStandIncome(player, standModel.Name)
 					setStandLevel(player, standModel.Name, 1)
@@ -1859,17 +2082,28 @@ end
 
 local function scanAndBindPlot(player, plot)
 	standDebug("scanAndBindPlot begin player=%s plot=%s", player and player.Name or "nil", plot and plot:GetFullName() or "nil")
+	plotTrace(
+		"scanAndBindPlot player=%s userId=%s plot=%s ownerUserId=%s ownerName=%s",
+		player and player.Name or "nil",
+		tostring(player and player.UserId or "nil"),
+		formatInstancePath(plot),
+		tostring(plot and plot:GetAttribute("OwnerUserId")),
+		tostring(plot and plot:GetAttribute("OwnerName"))
+	)
 	if not player or not player.Parent then
 		standDebug("scanAndBindPlot abort reason=invalid_player")
+		saveTrace("scanAndBindPlot skipped player=<nil> reason=invalid_player")
 		return
 	end
 	if not plot or not plot.Parent then
 		standDebug("scanAndBindPlot abort player=%s reason=invalid_plot", player.Name)
+		saveTrace("scanAndBindPlot skipped player=%s userId=%s reason=invalid_plot", player.Name, tostring(player.UserId))
 		return
 	end
 
 	if plotScanBound[plot] then
 		standDebug("scanAndBindPlot skip player=%s plot=%s reason=already_bound", player.Name, plot:GetFullName())
+		saveTrace("scanAndBindPlot skipped player=%s userId=%s plot=%s reason=already_bound", player.Name, tostring(player.UserId), formatInstancePath(plot))
 		return
 	end
 	plotScanBound[plot] = true
@@ -1877,6 +2111,12 @@ local function scanAndBindPlot(player, plot)
 	local stands = waitForStandsFolder(plot, 25)
 	if not stands then
 		standDebug("scanAndBindPlot failed player=%s plot=%s reason=no_stands_folder", player.Name, plot:GetFullName())
+		saveTrace(
+			"scanAndBindPlot failed player=%s userId=%s plot=%s reason=no_stands_folder",
+			player.Name,
+			tostring(player.UserId),
+			formatInstancePath(plot)
+		)
 		plotScanBound[plot] = nil
 		return
 	end
@@ -1989,13 +2229,25 @@ end
 Players.PlayerAdded:Connect(function(player)
 	standDebug("PlayerAdded player=%s", player.Name)
 	task.spawn(function()
+		saveTrace("PlayerAdded begin player=%s userId=%s event=restore_begin", player.Name, tostring(player.UserId))
+		logSavedShipSnapshot(player, "PlayerAdded")
 		resetHugeIncomeOnJoin(player)
 
 		local plot = waitForPlot(player, 25)
 		if not plot then
 			standDebug("PlayerAdded abort player=%s reason=no_plot", player.Name)
+			saveTrace("PlayerAdded restoreSkipped player=%s userId=%s reason=no_plot_owned_by_userid", player.Name, tostring(player.UserId))
 			return
 		end
+		saveTrace(
+			"PlayerAdded plotReady player=%s userId=%s plot=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s event=restore_continue",
+			player.Name,
+			tostring(player.UserId),
+			formatInstancePath(plot),
+			tostring(plot:GetAttribute("OwnerUserId")),
+			typeof(plot:GetAttribute("OwnerUserId")),
+			tostring(plot:GetAttribute("OwnerName"))
+		)
 		scanAndBindPlot(player, plot)
 	end)
 end)

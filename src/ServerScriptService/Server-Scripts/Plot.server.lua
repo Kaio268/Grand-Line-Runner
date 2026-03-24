@@ -3,7 +3,9 @@ local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 
@@ -21,6 +23,108 @@ end
 
 local connsByPlayer = {}
 local plotCommandFunction = ShipRuntimeSignals.GetPlotCommandFunction()
+local getSpawnPart
+local DEBUG_TRACE = RunService:IsStudio()
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if not instance then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function plotTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[PLOT TRACE] " .. message, ...))
+end
+
+local function mapTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[MAP TRACE] " .. message, ...))
+end
+
+local function playerTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[PLAYER TRACE] " .. message, ...))
+end
+
+local function ownershipTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[OWNERSHIP TRACE] t=%.3f " .. message, os.clock(), ...))
+end
+
+local function saveTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[SAVE TRACE] t=%.3f " .. message, os.clock(), ...))
+end
+
+local function assignTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[ASSIGN TRACE] t=%.3f " .. message, os.clock(), ...))
+end
+
+local function getPlotCount()
+	local count = 0
+	for _, plot in ipairs(PlotsFolder:GetChildren()) do
+		if plot:IsA("Model") then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function logAllPlotsForAssignment(context)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	for _, plot in ipairs(PlotsFolder:GetChildren()) do
+		if plot:IsA("Model") then
+			local ownerUserId = plot:GetAttribute("OwnerUserId")
+			local ownerName = plot:GetAttribute("OwnerName")
+			local slot = plot:FindFirstChild("Slot")
+			local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
+			assignTrace(
+				"context=%s plot=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s plotName=%s slot=%s slotPos=%s",
+				tostring(context),
+				formatInstancePath(plot),
+				tostring(ownerUserId),
+				typeof(ownerUserId),
+				tostring(ownerName),
+				tostring(plot.Name),
+				formatInstancePath(posPart),
+				formatVector3(posPart and posPart.Position or nil)
+			)
+		end
+	end
+end
 
 local function getPlayerStats(player)
 	return player:FindFirstChild("HiddenLeaderstats")
@@ -112,7 +216,22 @@ local function getOwnedPlot(player)
 		if plot:IsA("Model") then
 			local ownerId = plot:GetAttribute("OwnerUserId")
 			local ownerName = plot:GetAttribute("OwnerName")
-			if ownerId == player.UserId or plot.Name == player.Name or ownerName == player.Name then
+			local matchedByUserId = ownerId == player.UserId
+			local matchedByPlotName = plot.Name == player.Name
+			local matchedByOwnerName = ownerName == player.Name
+			ownershipTrace(
+				"getOwnedPlot player=%s userId=%s plot=%s ownerUserId=%s ownerName=%s plotName=%s matchedByUserId=%s matchedByPlotName=%s matchedByOwnerName=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(plot),
+				tostring(ownerId),
+				tostring(ownerName),
+				tostring(plot.Name),
+				tostring(matchedByUserId),
+				tostring(matchedByPlotName),
+				tostring(matchedByOwnerName)
+			)
+			if matchedByUserId or matchedByPlotName or matchedByOwnerName then
 				return plot
 			end
 		end
@@ -242,6 +361,18 @@ local function createPlotForPos(posPart)
 	clone.Parent = PlotsFolder
 	placePlotAtPos(clone, posPart)
 	hidePlotDefaults(clone)
+
+	local spawnPart = getSpawnPart(clone)
+	plotTrace(
+		"createPlotForPos pos=%s posPath=%s plot=%s plotPivot=%s spawn=%s spawnPos=%s",
+		tostring(posPart.Name),
+		formatInstancePath(posPart),
+		formatInstancePath(clone),
+		formatVector3(clone:GetPivot().Position),
+		formatInstancePath(spawnPart),
+		formatVector3(spawnPart and spawnPart.Position or nil)
+	)
+
 	return clone
 end
 
@@ -258,19 +389,51 @@ local function findPlotBySlot(posPart)
 end
 
 local function ensurePlotsExist()
+	assignTrace(
+		"ensurePlotsExist begin positionsFolder=%s existingPlotCount=%s",
+		formatInstancePath(Positions),
+		tostring(getPlotCount())
+	)
+
 	for _, child in ipairs(Positions:GetChildren()) do
 		if child:IsA("BasePart") and child.Name == "Pos" then
-			if not findPlotBySlot(child) then
+			local existingPlot = findPlotBySlot(child)
+			plotTrace(
+				"ensurePlotsExist posPath=%s pos=%s existingPlot=%s",
+				formatInstancePath(child),
+				formatVector3(child.Position),
+				formatInstancePath(existingPlot)
+			)
+
+			if not existingPlot then
 				createPlotForPos(child)
 			end
 		end
 	end
+
+	assignTrace(
+		"ensurePlotsExist end plotCount=%s",
+		tostring(getPlotCount())
+	)
 end
 
 local function getFreePlot()
 	for _, plot in ipairs(PlotsFolder:GetChildren()) do
 		if plot:IsA("Model") then
 			local owner = plot:GetAttribute("OwnerUserId")
+			local ownerName = plot:GetAttribute("OwnerName")
+			local slot = plot:FindFirstChild("Slot")
+			local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
+			ownershipTrace(
+				"getFreePlot candidate plot=%s ownerUserId=%s ownerName=%s plotName=%s slot=%s slotPos=%s isFree=%s",
+				formatInstancePath(plot),
+				tostring(owner),
+				tostring(ownerName),
+				tostring(plot.Name),
+				formatInstancePath(posPart),
+				formatVector3(posPart and posPart.Position or nil),
+				tostring(owner == nil)
+			)
 			if owner == nil then
 				return plot
 			end
@@ -279,7 +442,7 @@ local function getFreePlot()
 	return nil
 end
 
-local function getSpawnPart(plot)
+getSpawnPart = function(plot)
 	local spawn = plot:FindFirstChild("SpawnLocation", true)
 	if spawn and spawn:IsA("BasePart") then
 		return spawn
@@ -305,7 +468,37 @@ local function teleportToCFrame(player, cf)
 		if not hrp then
 			return
 		end
+
+		local beforePosition = hrp.Position
+		playerTrace(
+			"teleportBefore player=%s character=%s hrp=%s from=%s target=%s",
+			player.Name,
+			formatInstancePath(character),
+			formatInstancePath(hrp),
+			formatVector3(beforePosition),
+			formatVector3(cf.Position)
+		)
 		character:PivotTo(cf)
+
+		playerTrace(
+			"teleportAfterImmediate player=%s character=%s hrp=%s pos=%s",
+			player.Name,
+			formatInstancePath(character),
+			formatInstancePath(hrp),
+			formatVector3(hrp.Position)
+		)
+
+		task.defer(function()
+			if player.Parent and character.Parent and hrp.Parent then
+				playerTrace(
+					"teleportAfterDeferred player=%s character=%s hrp=%s pos=%s",
+					player.Name,
+					formatInstancePath(character),
+					formatInstancePath(hrp),
+					formatVector3(hrp.Position)
+				)
+			end
+		end)
 	end
 
 	if player.Character then
@@ -331,8 +524,21 @@ local function teleportToPlot(player, plot)
 	end
 	local spawnPart = getSpawnPart(plot)
 	if not spawnPart then
+		plotTrace("teleportToPlot player=%s plot=%s spawn=<nil>", player.Name, formatInstancePath(plot))
 		return
 	end
+
+	local slot = plot:FindFirstChild("Slot")
+	local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
+	plotTrace(
+		"teleportToPlot player=%s plot=%s slot=%s slotPos=%s spawn=%s spawnPos=%s",
+		player.Name,
+		formatInstancePath(plot),
+		formatInstancePath(posPart),
+		formatVector3(posPart and posPart.Position or nil),
+		formatInstancePath(spawnPart),
+		formatVector3(spawnPart.Position)
+	)
 	teleportToPart(player, spawnPart)
 end
 
@@ -492,12 +698,38 @@ local function setupUpgradeSync(player, plot)
 		end
 
 		if not player.Parent or not upgradeValue then
+			saveTrace(
+				"setupUpgradeSync aborted player=%s userId=%s plot=%s reason=missing_upgrade_value rebirthValue=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(plot),
+				tostring(rebirthValue ~= nil)
+			)
 			return
 		end
+
+		saveTrace(
+			"setupUpgradeSync ready player=%s userId=%s plot=%s upgradePath=%s upgrade=%s rebirthPath=%s rebirth=%s",
+			player.Name,
+			tostring(player.UserId),
+			formatInstancePath(plot),
+			formatInstancePath(upgradeValue),
+			tostring(upgradeValue.Value),
+			formatInstancePath(rebirthValue),
+			tostring(rebirthValue and rebirthValue.Value or 0)
+		)
 
 		local function applyCurrent()
 			latestLevel = upgradeValue.Value
 			latestRebirths = rebirthValue and rebirthValue.Value or 0
+			saveTrace(
+				"setupUpgradeSync apply player=%s userId=%s plot=%s upgrade=%s rebirths=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(plot),
+				tostring(latestLevel),
+				tostring(latestRebirths)
+			)
 			scheduleApply()
 		end
 
@@ -524,8 +756,23 @@ end
 
 local function claimPlot(player, plot)
 	if not plot then
+		ownershipTrace("claimPlot player=%s userId=%s plot=<nil> reason=no_plot", player.Name, tostring(player.UserId))
 		return nil
 	end
+
+	local previousOwnerUserId = plot:GetAttribute("OwnerUserId")
+	local previousOwnerName = plot:GetAttribute("OwnerName")
+	local previousPlotName = plot.Name
+	ownershipTrace(
+		"claimPlot before player=%s userId=%s plot=%s previousOwnerUserId=%s previousOwnerUserIdType=%s previousOwnerName=%s previousPlotName=%s",
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(plot),
+		tostring(previousOwnerUserId),
+		typeof(previousOwnerUserId),
+		tostring(previousOwnerName),
+		tostring(previousPlotName)
+	)
 
 	plot:SetAttribute("OwnerUserId", player.UserId)
 	plot:SetAttribute("OwnerName", player.Name)
@@ -559,6 +806,37 @@ local function claimPlot(player, plot)
 		end
 	end
 
+	local slot = plot:FindFirstChild("Slot")
+	local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
+	local spawnPart = getSpawnPart(plot)
+	local assignedOwnerUserId = plot:GetAttribute("OwnerUserId")
+	local assignedOwnerName = plot:GetAttribute("OwnerName")
+	ownershipTrace(
+		"claimPlot after player=%s userId=%s plot=%s ownerUserId=%s ownerUserIdType=%s ownerMatchesPlayer=%s ownerName=%s plotName=%s slot=%s slotPos=%s spawn=%s spawnPos=%s",
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(plot),
+		tostring(assignedOwnerUserId),
+		typeof(assignedOwnerUserId),
+		tostring(assignedOwnerUserId == player.UserId),
+		tostring(assignedOwnerName),
+		tostring(plot.Name),
+		formatInstancePath(posPart),
+		formatVector3(posPart and posPart.Position or nil),
+		formatInstancePath(spawnPart),
+		formatVector3(spawnPart and spawnPart.Position or nil)
+	)
+	plotTrace(
+		"claimPlot player=%s plot=%s plotPivot=%s slot=%s slotPos=%s spawn=%s spawnPos=%s",
+		player.Name,
+		formatInstancePath(plot),
+		formatVector3(plot:GetPivot().Position),
+		formatInstancePath(posPart),
+		formatVector3(posPart and posPart.Position or nil),
+		formatInstancePath(spawnPart),
+		formatVector3(spawnPart and spawnPart.Position or nil)
+	)
+
 	teleportToPlot(player, plot)
 	setupUpgradeSync(player, plot)
 	handleStands(player, plot)
@@ -566,14 +844,79 @@ local function claimPlot(player, plot)
 end
 
 local function assignPlot(player)
+	assignTrace(
+		"assign_plot_begin player=%s userId=%s plotCountBeforeEnsure=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(getPlotCount())
+	)
+
 	ensurePlotsExist()
-	return claimPlot(player, getFreePlot())
+	assignTrace(
+		"assign_plot_after_ensure player=%s userId=%s plotCountAfterEnsure=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(getPlotCount())
+	)
+	logAllPlotsForAssignment("assign_before_selection")
+
+	local existingPlot = getOwnedPlot(player)
+	local freePlot = getFreePlot()
+	ownershipTrace(
+		"assignPlot player=%s userId=%s existingOwnedPlot=%s existingOwnedPlotPivot=%s freePlot=%s freePlotPivot=%s",
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(existingPlot),
+		formatVector3(existingPlot and existingPlot:GetPivot().Position or nil),
+		formatInstancePath(freePlot),
+		formatVector3(freePlot and freePlot:GetPivot().Position or nil)
+	)
+
+	if not freePlot then
+		assignTrace(
+			"assign_plot_skipped player=%s userId=%s reason=no_free_plot_found existingOwnedPlot=%s",
+			player.Name,
+			tostring(player.UserId),
+			formatInstancePath(existingPlot)
+		)
+		return claimPlot(player, freePlot)
+	end
+
+	assignTrace(
+		"assign_plot_free_plot_found player=%s userId=%s freePlot=%s freePlotPivot=%s",
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(freePlot),
+		formatVector3(freePlot:GetPivot().Position)
+	)
+
+	local claimedPlot = claimPlot(player, freePlot)
+	assignTrace(
+		"assign_plot_end player=%s userId=%s claimedPlot=%s claimedOwnerUserId=%s claimedOwnerUserIdType=%s",
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(claimedPlot),
+		tostring(claimedPlot and claimedPlot:GetAttribute("OwnerUserId")),
+		typeof(claimedPlot and claimedPlot:GetAttribute("OwnerUserId"))
+	)
+	logAllPlotsForAssignment("assign_after_claim")
+	return claimedPlot
 end
 
 local function respawnFreshPlot(oldPlot)
 	local guid = oldPlot:GetAttribute("PlotGuid")
 	local slot = oldPlot:FindFirstChild("Slot")
 	local posPart = slot and slot.Value
+
+	assignTrace(
+		"respawnFreshPlot oldPlot=%s oldOwnerUserId=%s oldOwnerUserIdType=%s oldOwnerName=%s slot=%s slotPos=%s",
+		formatInstancePath(oldPlot),
+		tostring(oldPlot:GetAttribute("OwnerUserId")),
+		typeof(oldPlot:GetAttribute("OwnerUserId")),
+		tostring(oldPlot:GetAttribute("OwnerName")),
+		formatInstancePath(posPart),
+		formatVector3(posPart and posPart.Position or nil)
+	)
 
 	oldPlot:Destroy()
 
@@ -589,6 +932,13 @@ local function respawnFreshPlot(oldPlot)
 		newPlot:SetAttribute("OwnerUserId", nil)
 		newPlot:SetAttribute("OwnerName", nil)
 		newPlot.Name = "Plot"
+		assignTrace(
+			"respawnFreshPlot newPlot=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s",
+			formatInstancePath(newPlot),
+			tostring(newPlot:GetAttribute("OwnerUserId")),
+			typeof(newPlot:GetAttribute("OwnerUserId")),
+			tostring(newPlot:GetAttribute("OwnerName"))
+		)
 
 		local sign = newPlot:FindFirstChild("Sign", true)
 		if sign then
@@ -630,10 +980,157 @@ local function resetPlayerPlot(player)
 end
 
 ensurePlotsExist()
+assignTrace(
+	"script_init ensurePlotsExist_done plotCount=%s existingPlayers=%s",
+	tostring(getPlotCount()),
+	tostring(#Players:GetPlayers())
+)
+if DEBUG_TRACE and #Players:GetPlayers() > 0 then
+	for _, existingPlayer in ipairs(Players:GetPlayers()) do
+		assignTrace(
+			"script_init existing_player player=%s userId=%s reason=no_existing_player_bootstrap_in_plot_server",
+			existingPlayer.Name,
+			tostring(existingPlayer.UserId)
+		)
+	end
+end
 
-Players.PlayerAdded:Connect(function(player)
-	assignPlot(player)
-end)
+local canAttachPlayerAdded = true
+do
+	local ok, err = xpcall(function()
+		local refs = MapResolver.GetRefs()
+		mapTrace(
+			"PlotServer requestedMap=%s activeMap=%s mapPath=%s plotSystem=%s positions=%s plotsFolder=%s template=%s",
+			tostring(refs.RequestedMapName),
+			tostring(refs.ActiveMapName),
+			formatInstancePath(refs.MapRoot),
+			formatInstancePath(PlotSystem),
+			formatInstancePath(Positions),
+			formatInstancePath(PlotsFolder),
+			formatInstancePath(Template)
+		)
+	end, debug.traceback)
+
+	if not ok then
+		canAttachPlayerAdded = false
+		assignTrace("connection_blocked reason=%s", tostring(err))
+	end
+end
+
+assignTrace("connecting PlayerAdded")
+assignTrace(
+	"player_added_connect_before_attach plotCount=%s existingPlayers=%s canAttach=%s",
+	tostring(getPlotCount()),
+	tostring(#Players:GetPlayers()),
+	tostring(canAttachPlayerAdded)
+)
+
+local function ensurePlayerPlotAssigned(player, source)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		assignTrace("%s_assign_skipped player=<invalid> reason=invalid_player", tostring(source))
+		return nil
+	end
+
+	local existingPlot = getOwnedPlot(player)
+	local existingOwnerUserId = existingPlot and existingPlot:GetAttribute("OwnerUserId") or nil
+	if existingPlot and existingOwnerUserId == player.UserId then
+		assignTrace(
+			"%s_assign_skipped player=%s userId=%s reason=already_assigned plot=%s ownerUserId=%s",
+			tostring(source),
+			player.Name,
+			tostring(player.UserId),
+			formatInstancePath(existingPlot),
+			tostring(existingOwnerUserId)
+		)
+		return existingPlot
+	end
+
+	assignTrace("%s_assign_begin player=%s userId=%s", tostring(source), player.Name, tostring(player.UserId))
+	local assignedPlot = assignPlot(player)
+	assignTrace(
+		"%s_assign_end player=%s userId=%s plot=%s ownerUserId=%s",
+		tostring(source),
+		player.Name,
+		tostring(player.UserId),
+		formatInstancePath(assignedPlot),
+		tostring(assignedPlot and assignedPlot:GetAttribute("OwnerUserId"))
+	)
+	return assignedPlot
+end
+
+local playerAddedConnection = nil
+if canAttachPlayerAdded then
+	playerAddedConnection = Players.PlayerAdded:Connect(function(player)
+		assignTrace("PlayerAdded fired player=%s userId=%s", player.Name, tostring(player.UserId))
+
+		local ok, err = pcall(function()
+			assignTrace("PlayerAdded first_line player=%s userId=%s", player.Name, tostring(player.UserId))
+			plotTrace("PlayerAdded player=%s", player.Name)
+			ownershipTrace("PlayerAdded player=%s userId=%s event=player_added", player.Name, tostring(player.UserId))
+			player.CharacterAdded:Connect(function(character)
+				local hrp = character:WaitForChild("HumanoidRootPart", 10)
+				playerTrace(
+					"characterAdded player=%s userId=%s character=%s hrp=%s pos=%s",
+					player.Name,
+					tostring(player.UserId),
+					formatInstancePath(character),
+					formatInstancePath(hrp),
+					formatVector3(hrp and hrp.Position or nil)
+				)
+			end)
+			ownershipTrace("PlayerAdded player=%s userId=%s event=assign_plot_begin", player.Name, tostring(player.UserId))
+			assignTrace("PlayerAdded before assignPlot player=%s userId=%s", player.Name, tostring(player.UserId))
+			local assignedPlot = ensurePlayerPlotAssigned(player, "player_added")
+			assignTrace(
+				"PlayerAdded after assignPlot player=%s userId=%s plot=%s ownerUserId=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(assignedPlot),
+				tostring(assignedPlot and assignedPlot:GetAttribute("OwnerUserId"))
+			)
+			ownershipTrace("PlayerAdded player=%s userId=%s event=assign_plot_end", player.Name, tostring(player.UserId))
+			if not assignedPlot then
+				assignTrace(
+					"PlayerAdded assignment_skipped player=%s userId=%s reason=assignPlot_returned_nil",
+					player.Name,
+					tostring(player.UserId)
+				)
+				return
+			end
+
+			assignTrace(
+				"PlayerAdded assignment_complete player=%s userId=%s plot=%s ownerUserId=%s",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(assignedPlot),
+				tostring(assignedPlot:GetAttribute("OwnerUserId"))
+			)
+		end)
+
+		if not ok then
+			assignTrace(
+				"player_added_error player=%s userId=%s err=%s",
+				player and player.Name or "<nil>",
+				tostring(player and player.UserId or "nil"),
+				tostring(err)
+			)
+		end
+	end)
+	assignTrace("PlayerAdded connected")
+else
+	assignTrace("connection_blocked reason=player_added_not_attached")
+end
+
+assignTrace(
+	"player_added_connect_after_attach connected=%s existingPlayers=%s",
+	tostring(playerAddedConnection ~= nil),
+	tostring(#Players:GetPlayers())
+)
+
+for _, existingPlayer in ipairs(Players:GetPlayers()) do
+	assignTrace("bootstrap_existing_player player=%s userId=%s", existingPlayer.Name, tostring(existingPlayer.UserId))
+	ensurePlayerPlotAssigned(existingPlayer, "bootstrap")
+end
 
 Players.PlayerRemoving:Connect(function(player)
 	disconnectPlayerConns(player)

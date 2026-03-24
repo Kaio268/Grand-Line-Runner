@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local RunService = game:GetService("RunService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
@@ -19,6 +20,7 @@ local started = false
 local runtimeByPlayer = {}
 local deathConnections = {}
 local CHEST_DEBUG = true
+local DEBUG_TRACE = RunService:IsStudio()
 
 local CARRY_TOOL_NAME = "GrandLineRushMajorReward"
 local CHEST_TIER_ORDER = { "Wooden", "Iron", "Gold", "Legendary" }
@@ -31,6 +33,14 @@ local function chestDebug(message, ...)
 	end
 
 	warn(string.format("[GLR ChestDebug][Slice] " .. tostring(message), ...))
+end
+
+local function runTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[RUN TRACE] " .. message, ...))
 end
 
 local function getOrCreateRemotesFolder()
@@ -663,6 +673,14 @@ local function extractRun(player)
 
 	local carriedReward = runtime.CarriedReward
 	local message
+	runTrace(
+		"sliceExtractBegin player=%s carriedType=%s tier=%s crew=%s inRun=%s",
+		player.Name,
+		tostring(carriedReward and carriedReward.RewardType),
+		tostring(carriedReward and carriedReward.Tier),
+		tostring(carriedReward and carriedReward.CrewName),
+		tostring(runtime.InRun)
+	)
 	chestDebug(
 		"extractRun success path player=%s carriedType=%s inRun=%s",
 		player.Name,
@@ -679,8 +697,21 @@ local function extractRun(player)
 		)
 		local chestId = addUnopenedChest(player, carriedReward.Tier, carriedReward.DepthBand)
 		if chestId == nil then
+			runTrace(
+				"sliceExtractFailed player=%s reason=persist_chest_failed carriedType=%s tier=%s",
+				player.Name,
+				tostring(carriedReward.RewardType),
+				tostring(carriedReward.Tier)
+			)
 			return resolveActionResponse(player, false, nil, "persist_chest_failed")
 		end
+		runTrace(
+			"sliceExtractPersistedChest player=%s tier=%s chestId=%s depth=%s action=add_to_hotbar_state",
+			player.Name,
+			tostring(carriedReward.Tier),
+			tostring(chestId),
+			tostring(carriedReward.DepthBand)
+		)
 		message = string.format("Extracted %s and added it to your hotbar as chest #%s.", getRewardToolDisplay(carriedReward), tostring(chestId or "?"))
 	else
 		local instanceId = addCrewInstance(player, {
@@ -688,8 +719,21 @@ local function extractRun(player)
 			Rarity = carriedReward.Rarity,
 		}, "RunReward")
 		if instanceId == nil then
+			runTrace(
+				"sliceExtractFailed player=%s reason=persist_crew_failed carriedType=%s crew=%s",
+				player.Name,
+				tostring(carriedReward.RewardType),
+				tostring(carriedReward.CrewName)
+			)
 			return resolveActionResponse(player, false, nil, "persist_crew_failed")
 		end
+		runTrace(
+			"sliceExtractPersistedCrew player=%s crew=%s rarity=%s instanceId=%s",
+			player.Name,
+			tostring(carriedReward.CrewName),
+			tostring(carriedReward.Rarity),
+			tostring(instanceId)
+		)
 		message = string.format("Extracted crew reward and recruited %s (%s) as crew #%s.", tostring(carriedReward.CrewName), tostring(carriedReward.Rarity), tostring(instanceId or "?"))
 	end
 
@@ -715,6 +759,13 @@ local function extractRun(player)
 	runtime.CarriedReward = nil
 	runtime.ResolutionText = message
 	clearCarryTool(player)
+	runTrace(
+		"sliceExtractComplete player=%s message=%s inRun=%s carriedAfter=%s",
+		player.Name,
+		tostring(message),
+		tostring(runtime.InRun),
+		tostring(runtime.CarriedReward ~= nil)
+	)
 
 	return resolveActionResponse(player, true, message)
 end
