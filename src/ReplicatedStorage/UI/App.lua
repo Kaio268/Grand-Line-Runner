@@ -44,18 +44,30 @@ local PALETTE = {
 }
 
 local function formatNumber(value)
-	local number = math.floor(tonumber(value) or 0)
-	local formatted = tostring(math.abs(number))
+	local number = tonumber(value) or 0
+	local sign = number < 0 and "-" or ""
+	local absValue = math.abs(number)
 
-	while true do
-		local updated, count = formatted:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
-		formatted = updated
-		if count == 0 then
-			break
+	local suffixes = {
+		{ value = 1e18, suffix = "Qui" },
+		{ value = 1e15, suffix = "Qd" },
+		{ value = 1e12, suffix = "T" },
+		{ value = 1e9, suffix = "B" },
+		{ value = 1e6, suffix = "M" },
+		{ value = 1e3, suffix = "K" },
+	}
+
+	for _, entry in ipairs(suffixes) do
+		if absValue >= entry.value then
+			local scaled = absValue / entry.value
+			local decimals = if scaled >= 100 then 0 elseif scaled >= 10 then 1 else 2
+			local text = string.format("%." .. tostring(decimals) .. "f", scaled)
+			text = text:gsub("%.?0+$", "")
+			return sign .. text .. entry.suffix
 		end
 	end
 
-	return number < 0 and ("-" .. formatted) or formatted
+	return sign .. tostring(math.floor(absValue + 0.5))
 end
 
 local function formatLeaderboardRank(rank)
@@ -1075,15 +1087,38 @@ local function inventoryToggleButton(props)
 			}),
 		}),
 		Icon = iconChild,
+		KeyHint = compact and e("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			BackgroundColor3 = Color3.fromRGB(11, 18, 32),
+			BackgroundTransparency = 0.14,
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamBlack,
+			Position = UDim2.new(0.5, 0, 0, 4),
+			Size = UDim2.fromOffset(18, 16),
+			Text = "F",
+			TextColor3 = Color3.fromRGB(233, 242, 255),
+			TextSize = 10,
+			TextStrokeTransparency = 0.7,
+			ZIndex = zIndexBase + 4,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 5),
+			}),
+			Stroke = e("UIStroke", {
+				Color = Color3.fromRGB(91, 117, 166),
+				Transparency = 0.3,
+				Thickness = 1,
+			}),
+		}) or nil,
 		Title = e("TextLabel", {
 			AnchorPoint = compact and Vector2.new(0.5, 1) or Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBlack,
-			Position = compact and UDim2.new(0.5, 0, 1, -4) or UDim2.new(0.5, 0, 0, 10),
+			Position = compact and UDim2.new(0.5, 0, 1, -3) or UDim2.new(0.5, 0, 0, 10),
 			Size = UDim2.new(1, -8, 0, compact and 16 or 16),
 			Text = "Inventory",
 			TextColor3 = PALETTE.Cream,
-			TextSize = compact and 11 or 13,
+			TextSize = compact and 10 or 13,
 			TextStrokeTransparency = compact and 0.5 or 0.65,
 			TextStrokeColor3 = Color3.fromRGB(8, 12, 20),
 			TextWrapped = true,
@@ -2041,6 +2076,8 @@ local function App(props)
 	local showingInventory = not showingCaptainLog and not showingTitles
 	local toggleLayout = props.toggleLayout or {}
 	local dockToggleLeft = toggleLayout.dock == "hotbarLeft"
+	local dockToggleSlot = toggleLayout.dock == "hotbarSlot"
+	local toggleSlotIndex = math.max(1, math.floor(tonumber(toggleLayout.slotIndex) or 5))
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
 	local toggleGap = dockToggleLeft and 20 or 0
 	local hotbarSlotCount = math.max(1, #(props.hotbarSlots or {}))
@@ -2049,6 +2086,10 @@ local function App(props)
 	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth
 		+ math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
+	local toggleSlotX = math.max(0, (toggleSlotIndex - 1) * (hotbarSlotWidth + hotbarSlotGap))
+	local resolvedTogglePosition = dockToggleLeft and UDim2.fromOffset(0, 20)
+		or (dockToggleSlot and UDim2.fromOffset(toggleSlotX, 20) or toggleLayout.position)
+	local hotbarOffsetX = dockToggleLeft and (toggleWidth + toggleGap) or 0
 	local bottomBarZIndex = props.isOpen and 2 or 10
 	local filledHotbarCount = 0
 	local activeAccent = PALETTE.Sea
@@ -2083,7 +2124,7 @@ local function App(props)
 			Toggle = e(inventoryToggleButton, {
 				toggleLayout = {
 					anchorPoint = Vector2.new(0, 0),
-					position = dockToggleLeft and UDim2.fromOffset(0, 18) or toggleLayout.position,
+					position = resolvedTogglePosition,
 					size = toggleLayout.size,
 					compact = toggleLayout.compact,
 				},
@@ -2093,7 +2134,7 @@ local function App(props)
 			}),
 			Hotbar = e("Frame", {
 				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(dockToggleLeft and (toggleWidth + toggleGap) or 0, 0),
+				Position = UDim2.fromOffset(hotbarOffsetX, 0),
 				Size = UDim2.fromOffset(hotbarWidth, 84),
 				ZIndex = bottomBarZIndex,
 			}, {

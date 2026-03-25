@@ -156,6 +156,7 @@ local stopObservingState = nil
 local scheduleRender
 local syncDevilFruitsFromInventory
 local lastToggleLayoutSignature = nil
+local cachedLegacyInventoryIcon = nil
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
@@ -261,18 +262,30 @@ local function shortName(text)
 end
 
 local function formatNumber(value)
-	local number = math.floor(tonumber(value) or 0)
-	local formatted = tostring(math.abs(number))
+	local number = tonumber(value) or 0
+	local sign = number < 0 and "-" or ""
+	local absValue = math.abs(number)
 
-	while true do
-		local updated, count = formatted:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
-		formatted = updated
-		if count == 0 then
-			break
+	local suffixes = {
+		{ value = 1e18, suffix = "Qui" },
+		{ value = 1e15, suffix = "Qd" },
+		{ value = 1e12, suffix = "T" },
+		{ value = 1e9, suffix = "B" },
+		{ value = 1e6, suffix = "M" },
+		{ value = 1e3, suffix = "K" },
+	}
+
+	for _, entry in ipairs(suffixes) do
+		if absValue >= entry.value then
+			local scaled = absValue / entry.value
+			local decimals = if scaled >= 100 then 0 elseif scaled >= 10 then 1 else 2
+			local text = string.format("%." .. tostring(decimals) .. "f", scaled)
+			text = text:gsub("%.?0+$", "")
+			return sign .. text .. entry.suffix
 		end
 	end
 
-	return number < 0 and ("-" .. formatted) or formatted
+	return sign .. tostring(math.floor(absValue + 0.5))
 end
 
 local function formatMultiplier(value)
@@ -1410,8 +1423,8 @@ end
 local function getToggleLayout()
 	return {
 		anchorPoint = Vector2.new(0, 0),
-		position = UDim2.fromOffset(0, 18),
-		size = UDim2.fromOffset(74, 74),
+		position = UDim2.fromOffset(0, 20),
+		size = UDim2.fromOffset(64, 64),
 		compact = true,
 		dock = "hotbarLeft",
 	}
@@ -1422,7 +1435,7 @@ local function getLegacyInventoryIcon()
 	local inventoryGui = hud and hud:FindFirstChild("Inventory")
 	local legacyButton = inventoryGui and inventoryGui:FindFirstChild("InventoryBtn", true)
 	if not legacyButton then
-		return nil
+		return cachedLegacyInventoryIcon
 	end
 
 	local bestCandidate = nil
@@ -1455,16 +1468,18 @@ local function getLegacyInventoryIcon()
 	end
 
 	if not bestCandidate then
-		return nil
+		return cachedLegacyInventoryIcon
 	end
 
-	return {
+	cachedLegacyInventoryIcon = {
 		image = bestCandidate.Image,
 		imageColor3 = bestCandidate.ImageColor3,
 		imageRectOffset = bestCandidate.ImageRectOffset,
 		imageRectSize = bestCandidate.ImageRectSize,
 		scaleType = bestCandidate.ScaleType,
 	}
+
+	return cachedLegacyInventoryIcon
 end
 
 local function getToggleLayoutSignature()

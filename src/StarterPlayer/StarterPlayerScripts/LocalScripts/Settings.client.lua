@@ -174,18 +174,18 @@ do
 	applySoundsVolume(currentSoundsValue)
 end
 
-local MIN_X = 0.1
-local MAX_X = 0.84
+local MIN_X = 0
+local MAX_X = 1
 local RANGE_X = MAX_X - MIN_X
 
 local function valueToX(value)
 	value = clamp(value, 0, 100)
-	return MAX_X - (value / 100) * RANGE_X
+	return MIN_X + (value / 100) * RANGE_X
 end
 
 local function xToValue(x)
 	x = clamp(x, MIN_X, MAX_X)
-	return math.floor(((MAX_X - x) / RANGE_X) * 100 + 0.5)
+	return math.floor(((x - MIN_X) / RANGE_X) * 100 + 0.5)
 end
 
 local function findGradient(parent)

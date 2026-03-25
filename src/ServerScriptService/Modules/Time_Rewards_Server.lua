@@ -5,21 +5,27 @@ local TimeRewardsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild
 local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
 local DataManager = require(script.Parent.Parent.Data.DataManager)
 local BrainrotModule = require(script.Parent.AddBrainrot)
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local Remote = TimeRewardsFolder:WaitForChild("TimeRewardEvent")
 local InstantRewardsEvent = TimeRewardsFolder:WaitForChild("TriggerInstantRewards")
 
 local claimed = {}
-local cycleStart = {}
+local queueStart = {}
+local orderedRewardIds = {}
 local TOTAL_REWARDS = 0
 local MAX_TIME = 0
 
-for _, cfg in pairs(RewardsConfig) do
+for id, cfg in pairs(RewardsConfig) do
 	TOTAL_REWARDS += 1
+	table.insert(orderedRewardIds, id)
 	if cfg.Time > MAX_TIME then
 		MAX_TIME = cfg.Time
 	end
 end
+table.sort(orderedRewardIds, function(a, b)
+	return a < b
+end)
 
 local function rollReward(tbl)
 	local roll = math.random(1, 100)
@@ -33,23 +39,33 @@ local function rollReward(tbl)
 end
 
 local function addReward(plr: Player, rewardName: string, amount: number)
+	local function tryAddValue(path, delta)
+		local ok, result = pcall(function()
+			return DataManager:AddValue(plr, path, delta)
+		end)
+		return ok and result ~= false
+	end
+
+	local normalizedRewardName = tostring(rewardName)
+	if normalizedRewardName == "Money" or normalizedRewardName == "Doubloons" then
+		return tryAddValue(CurrencyUtil.getPrimaryPath(), amount)
+	end
+
 	local inv = plr:FindFirstChild("Inventory")
 	local feed = inv and inv:FindFirstChild("Feed")
-	local stat = feed and feed:FindFirstChild(rewardName)
+	local stat = feed and feed:FindFirstChild(normalizedRewardName)
 	if stat then
-		DataManager:AddValue(plr, "Inventory.Feed." .. rewardName, amount)
-		return
+		return tryAddValue("Inventory.Feed." .. normalizedRewardName, amount)
 	end
 	for _, folder in ipairs(plr:GetChildren()) do
 		if folder:IsA("Folder") then
-			local statObj = folder:FindFirstChild(rewardName)
+			local statObj = folder:FindFirstChild(normalizedRewardName)
 			if statObj then
-				DataManager:AddValue(plr, folder.Name .. "." .. rewardName, amount)
-				return
+				return tryAddValue(folder.Name .. "." .. normalizedRewardName, amount)
 			end
 		end
 	end
-	DataManager:AddValue(plr, rewardName, amount)
+	return tryAddValue(normalizedRewardName, amount)
 end
 
 local function getClaimedCount(plr: Player)
@@ -65,9 +81,23 @@ local function getClaimedCount(plr: Player)
 end
 
 local function startNewCycle(plr: Player)
-	cycleStart[plr] = os.time()
+	queueStart[plr] = os.time()
 	claimed[plr] = {}
-	Remote:FireClient(plr, "cycleReset", cycleStart[plr])
+	Remote:FireClient(plr, "cycleReset", queueStart[plr])
+end
+
+local function getNextRewardId(plr: Player)
+	local playerClaimed = claimed[plr]
+	if not playerClaimed then
+		return orderedRewardIds[1]
+	end
+
+	for _, id in ipairs(orderedRewardIds) do
+		if playerClaimed[id] ~= true then
+			return id
+		end
+	end
+	return nil
 end
 
 local function claimSingleReward(plr: Player, id: number)
@@ -87,11 +117,15 @@ local function claimSingleReward(plr: Player, id: number)
 			return
 		end
 	else
-		addReward(plr, rewardName, amount)
+		local rewarded = addReward(plr, rewardName, amount)
+		if not rewarded then
+			return
+		end
 	end
 
 	claimed[plr][id] = true
-	Remote:FireClient(plr, "claimed", id, rewardName, amount)
+	queueStart[plr] = os.time()
+	Remote:FireClient(plr, "claimed", id, rewardName, amount, queueStart[plr])
 end
 
 local function instantClaimAll(plr: Player)
@@ -110,20 +144,20 @@ local function instantClaimAll(plr: Player)
 end
 
 Players.PlayerAdded:Connect(function(plr)
-	cycleStart[plr] = os.time()
+	queueStart[plr] = os.time()
 	claimed[plr] = {}
-	Remote:FireClient(plr, "startCycle", cycleStart[plr])
+	Remote:FireClient(plr, "startCycle", queueStart[plr])
 end)
 
 for _, p in ipairs(Players:GetPlayers()) do
-	cycleStart[p] = os.time()
+	queueStart[p] = os.time()
 	claimed[p] = {}
-	Remote:FireClient(p, "startCycle", cycleStart[p])
+	Remote:FireClient(p, "startCycle", queueStart[p])
 end
 
 Players.PlayerRemoving:Connect(function(plr)
 	claimed[plr] = nil
-	cycleStart[plr] = nil
+	queueStart[plr] = nil
 end)
 
 Remote.OnServerEvent:Connect(function(plr, id)
@@ -139,7 +173,7 @@ Remote.OnServerEvent:Connect(function(plr, id)
 
 	if not claimed[plr] then
 		claimed[plr] = {}
-		cycleStart[plr] = os.time()
+		queueStart[plr] = os.time()
 	end
 
 	if claimed[plr][id] then
@@ -147,19 +181,34 @@ Remote.OnServerEvent:Connect(function(plr, id)
 		return
 	end
 
-	local startTime = cycleStart[plr]
-	if not startTime then
-		cycleStart[plr] = os.time()
-		startTime = cycleStart[plr]
+	local nextRewardId = getNextRewardId(plr)
+	if nextRewardId == nil then
+		startNewCycle(plr)
+		return
 	end
-
-	local elapsed = os.time() - startTime
-	if elapsed < cfg.Time then
-		Remote:FireClient(plr, "notReady", id, cfg.Time - elapsed)
+	if id ~= nextRewardId then
+		Remote:FireClient(plr, "notReady", id, 0)
 		return
 	end
 
-	claimSingleReward(plr, id)
+	local cfgNext = RewardsConfig[nextRewardId]
+	if not cfgNext then
+		return
+	end
+
+	local startTime = queueStart[plr]
+	if not startTime then
+		queueStart[plr] = os.time()
+		startTime = queueStart[plr]
+	end
+
+	local elapsed = os.time() - startTime
+	if elapsed < cfgNext.Time then
+		Remote:FireClient(plr, "notReady", id, cfgNext.Time - elapsed)
+		return
+	end
+
+	claimSingleReward(plr, nextRewardId)
 
 	if getClaimedCount(plr) >= TOTAL_REWARDS then
 		startNewCycle(plr)

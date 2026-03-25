@@ -33,6 +33,7 @@ local threads = {}
 local slotsById = {}
 local orderedIds = {}
 local totalGifts = 0
+local queueStartEpoch = os.time()
 
 local DEBUG = false
 local function dprint(...)
@@ -175,24 +176,26 @@ local function updateHud()
 		return
 	end
 
-	local now = os.clock()
 	local readyCount = 0
 	local minRemaining = nil
-
+	local nextId = nil
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local slotFrame = slotsById[id]
 		if slotFrame and slotFrame.Parent and not slotFrame:GetAttribute("Claimed") then
-			local et = endTimes[id]
-			if et then
-				local rem = et - now
-				if rem <= 0 then
-					readyCount += 1
-				else
-					if minRemaining == nil or rem < minRemaining then
-						minRemaining = rem
-					end
-				end
+			nextId = id
+			break
+		end
+	end
+
+	if nextId then
+		local et = endTimes[nextId]
+		if et then
+			local rem = et - os.clock()
+			if rem <= 0 then
+				readyCount = 1
+			else
+				minRemaining = rem
 			end
 		end
 	end
@@ -386,6 +389,8 @@ local function buildSlotsWithWait()
 end
 
 local function initialiseButtons(serverStartEpoch: number)
+	queueStartEpoch = serverStartEpoch
+
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local cfg = RewardsConfig[id]
@@ -393,27 +398,57 @@ local function initialiseButtons(serverStartEpoch: number)
 
 		if slotFrame and cfg then
 			stopCountdown(id)
-			slotFrame:SetAttribute("Claimed", false)
 			setRewData(slotFrame, cfg)
-
-			if cfg.Time == nil then
-				setTimerCountdown(slotFrame, "ERR")
+			if slotFrame:GetAttribute("Claimed") then
+				setTimerClaimed(slotFrame)
+				endTimes[id] = nil
 			else
-				local elapsed = os.time() - serverStartEpoch
-				local remaining = math.max(0, cfg.Time - elapsed)
-				endTimes[id] = os.clock() + remaining
+				setTimerCountdown(slotFrame, "--")
+				endTimes[id] = nil
+			end
+		end
+	end
 
-				if remaining > 0 then
-					setTimerCountdown(slotFrame, Shorten.timeSuffixTwo(remaining))
-					startCountdown(id)
-				else
-					setTimerReady(slotFrame)
-				end
+	local nextId = nil
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		local slotFrame = slotsById[id]
+		if slotFrame and not slotFrame:GetAttribute("Claimed") then
+			nextId = id
+			break
+		end
+	end
+
+	if nextId then
+		local cfg = RewardsConfig[nextId]
+		local slotFrame = slotsById[nextId]
+		if cfg and slotFrame then
+			local elapsed = os.time() - queueStartEpoch
+			local remaining = math.max(0, (tonumber(cfg.Time) or 0) - elapsed)
+			endTimes[nextId] = os.clock() + remaining
+			if remaining > 0 then
+				local ok, txt = pcall(function()
+					return Shorten.timeSuffixTwo(remaining)
+				end)
+				setTimerCountdown(slotFrame, ok and txt or (tostring(remaining) .. "s"))
+				startCountdown(nextId)
+			else
+				setTimerReady(slotFrame)
 			end
 		end
 	end
 
 	updateHud()
+end
+
+local function resetClaimStateForCycle()
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		local slotFrame = slotsById[id]
+		if slotFrame then
+			slotFrame:SetAttribute("Claimed", false)
+		end
+	end
 end
 
 local building = false
@@ -459,6 +494,7 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			end
 			return
 		end
+		resetClaimStateForCycle()
 		initialiseButtons(a)
 
 	elseif action == "forceReady" then
@@ -483,6 +519,13 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		slotFrame:SetAttribute("Claimed", true)
 		stopCountdown(id)
 		setTimerClaimed(slotFrame)
+		local nextStartEpoch = tonumber(c)
+		if nextStartEpoch then
+			queueStartEpoch = nextStartEpoch
+		else
+			queueStartEpoch = os.time()
+		end
+		initialiseButtons(queueStartEpoch)
 		updateHud()
 
 	elseif action == "notReady" then
