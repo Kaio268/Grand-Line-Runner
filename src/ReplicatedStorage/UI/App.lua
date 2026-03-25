@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -9,6 +10,11 @@ local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChil
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 
 local e = React.createElement
+local INVENTORY_MODAL_OPEN_POSITION = UDim2.fromScale(0.5, 0.49)
+local INVENTORY_MODAL_CLOSED_POSITION = UDim2.new(0.5, 0, 10, 0)
+local INVENTORY_MODAL_OPEN_TIME = 0.16
+local INVENTORY_MODAL_CLOSE_TIME = 0.16
+local INVENTORY_MODAL_BACKDROP_TRANSPARENCY = 0.28
 
 local PALETTE = {
 	Background = Color3.fromRGB(16, 12, 11),
@@ -336,6 +342,176 @@ local function mergeProps(baseProps, extraProps)
 		merged[key] = value
 	end
 	return merged
+end
+
+local function AnimatedInventoryModal(props)
+	local mounted, setMounted = React.useState(props.isOpen == true)
+	local cachedPanelChildren, setCachedPanelChildren = React.useState(props.panelChildren)
+	local rootRef = React.useRef(nil)
+	local backdropRef = React.useRef(nil)
+	local panelRef = React.useRef(nil)
+	local scaleRef = React.useRef(nil)
+	local animationStateRef = React.useRef(props.isOpen and "open" or "closed")
+	local activeTweensRef = React.useRef({})
+
+	local function cancelActiveTweens()
+		for _, tween in ipairs(activeTweensRef.current) do
+			tween:Cancel()
+		end
+		table.clear(activeTweensRef.current)
+	end
+
+	local function playOpenAnimation()
+		local backdrop = backdropRef.current
+		local panel = panelRef.current
+		local scale = scaleRef.current
+		if not backdrop or not panel or not scale then
+			return
+		end
+
+		cancelActiveTweens()
+		animationStateRef.current = "opening"
+
+		backdrop.BackgroundTransparency = 1
+		panel.Position = props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION
+		scale.Scale = 0
+
+		local tweenInfo = TweenInfo.new(
+			props.openTime or INVENTORY_MODAL_OPEN_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		)
+
+		local backdropTween = TweenService:Create(backdrop, tweenInfo, {
+			BackgroundTransparency = props.backdropTransparency or INVENTORY_MODAL_BACKDROP_TRANSPARENCY,
+		})
+		local positionTween = TweenService:Create(panel, tweenInfo, {
+			Position = props.openPosition or INVENTORY_MODAL_OPEN_POSITION,
+		})
+		local scaleTween = TweenService:Create(scale, tweenInfo, {
+			Scale = 1,
+		})
+
+		activeTweensRef.current = { backdropTween, positionTween, scaleTween }
+		positionTween.Completed:Connect(function()
+			if animationStateRef.current == "opening" then
+				animationStateRef.current = "open"
+			end
+		end)
+
+		backdropTween:Play()
+		positionTween:Play()
+		scaleTween:Play()
+	end
+
+	local function playCloseAnimation()
+		local backdrop = backdropRef.current
+		local panel = panelRef.current
+		local scale = scaleRef.current
+		if not backdrop or not panel or not scale then
+			setMounted(false)
+			animationStateRef.current = "closed"
+			return
+		end
+
+		cancelActiveTweens()
+		animationStateRef.current = "closing"
+
+		local tweenInfo = TweenInfo.new(
+			props.closeTime or INVENTORY_MODAL_CLOSE_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.In
+		)
+
+		local backdropTween = TweenService:Create(backdrop, tweenInfo, {
+			BackgroundTransparency = 1,
+		})
+		local positionTween = TweenService:Create(panel, tweenInfo, {
+			Position = props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION,
+		})
+		local scaleTween = TweenService:Create(scale, tweenInfo, {
+			Scale = 0,
+		})
+
+		activeTweensRef.current = { backdropTween, positionTween, scaleTween }
+		positionTween.Completed:Connect(function()
+			if animationStateRef.current == "closing" then
+				animationStateRef.current = "closed"
+				setMounted(false)
+			end
+		end)
+
+		backdropTween:Play()
+		positionTween:Play()
+		scaleTween:Play()
+	end
+
+	React.useEffect(function()
+		if props.isOpen and props.panelChildren then
+			setCachedPanelChildren(props.panelChildren)
+		end
+	end, { props.isOpen, props.panelChildren })
+
+	React.useEffect(function()
+		if props.isOpen then
+			if not mounted then
+				setMounted(true)
+				return
+			end
+
+			if animationStateRef.current ~= "open" and animationStateRef.current ~= "opening" then
+				task.defer(playOpenAnimation)
+			end
+		elseif mounted and animationStateRef.current ~= "closing" and animationStateRef.current ~= "closed" then
+			task.defer(playCloseAnimation)
+		end
+	end, { props.isOpen, mounted, cachedPanelChildren })
+
+	React.useEffect(function()
+		return function()
+			cancelActiveTweens()
+		end
+	end, {})
+
+	if not mounted or not cachedPanelChildren then
+		return nil
+	end
+
+	local panelChildren = {
+		Scale = e("UIScale", {
+			ref = scaleRef,
+			Scale = props.isOpen and 1 or 0,
+		}),
+	}
+
+	for key, value in pairs(cachedPanelChildren) do
+		panelChildren[key] = value
+	end
+
+	return e("Frame", {
+		ref = rootRef,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 4,
+	}, {
+		Backdrop = e("Frame", {
+			ref = backdropRef,
+			BackgroundColor3 = PALETTE.Ink,
+			BackgroundTransparency = props.isOpen and (props.backdropTransparency or INVENTORY_MODAL_BACKDROP_TRANSPARENCY) or 1,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 4,
+		}),
+		Panel = e("Frame", {
+			ref = panelRef,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Position = props.isOpen and (props.openPosition or INVENTORY_MODAL_OPEN_POSITION) or (props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION),
+			Size = props.panelSize or UDim2.new(0.82, 0, 0.76, 0),
+			ZIndex = 5,
+		}, panelChildren),
+	})
 end
 
 local function statChip(props)
@@ -1967,6 +2143,7 @@ local function App(props)
 			}),
 		}),
 	}
+	local modalPanelChildren = nil
 
 	if props.isOpen then
 		local gridChildren = {
@@ -2133,21 +2310,7 @@ local function App(props)
 			})
 		end
 
-		children.Backdrop = e("Frame", {
-			BackgroundColor3 = PALETTE.Ink,
-			BackgroundTransparency = 0.28,
-			BorderSizePixel = 0,
-			Size = UDim2.fromScale(1, 1),
-			ZIndex = 4,
-		})
-
-		children.Panel = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			Position = UDim2.fromScale(0.5, 0.49),
-			Size = UDim2.new(0.82, 0, 0.76, 0),
-			ZIndex = 5,
-		}, {
+		modalPanelChildren = {
 			SizeConstraint = e("UISizeConstraint", {
 				MaxSize = Vector2.new(1180, 760),
 				MinSize = Vector2.new(860, 560),
@@ -2645,8 +2808,17 @@ local function App(props)
 					}, footerChildren),
 				}),
 			}),
-		})
+		}
 	end
+
+	children.InventoryModal = e(AnimatedInventoryModal, {
+		isOpen = props.isOpen,
+		panelChildren = modalPanelChildren,
+		panelSize = UDim2.new(0.82, 0, 0.76, 0),
+		openPosition = INVENTORY_MODAL_OPEN_POSITION,
+		closedPosition = INVENTORY_MODAL_CLOSED_POSITION,
+		backdropTransparency = INVENTORY_MODAL_BACKDROP_TRANSPARENCY,
+	})
 
 	local appChildren = {
 		Main = e("ScreenGui", {

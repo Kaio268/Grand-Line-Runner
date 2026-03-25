@@ -169,22 +169,62 @@ end
 
 function UIController:_cacheButtons()
 	self.Buttons = {}
+	self._buttonConnections = self._buttonConnections or {}
+
+	local function connectButton(btn: Instance)
+		if not (btn:IsA("TextButton") or btn:IsA("ImageButton")) then
+			return
+		end
+
+		if self._buttonConnections[btn] then
+			return
+		end
+
+		table.insert(self.Buttons, btn)
+		self._buttonConnections[btn] = btn.MouseButton1Click:Connect(function()
+			if self.ActiveErrorFrame or self.IsAnimating then return end
+			local target = self.FramesFolder:FindFirstChild(btn.Name)
+			if target and target:IsA("Frame") then
+				self:ToggleFrame(target)
+			end
+		end)
+	end
+
+	local function disconnectButton(btn: Instance)
+		local connection = self._buttonConnections[btn]
+		if connection then
+			connection:Disconnect()
+			self._buttonConnections[btn] = nil
+		end
+
+		for index = #self.Buttons, 1, -1 do
+			if self.Buttons[index] == btn then
+				table.remove(self.Buttons, index)
+			end
+		end
+	end
+
 	for _, obj in ipairs(self.Main:GetDescendants()) do
-		if (obj:IsA("TextButton") or obj:IsA("ImageButton")) then
-			table.insert(self.Buttons, obj)
-		end
+		connectButton(obj)
 	end
-	for _, btn: Instance in ipairs(self.Buttons) do
-		if btn:IsA("TextButton") or btn:IsA("ImageButton") then
-			btn.MouseButton1Click:Connect(function()
-				if self.ActiveErrorFrame or self.IsAnimating then return end
-				local target = self.FramesFolder:FindFirstChild(btn.Name)
-				if target and target:IsA("Frame") then
-					self:ToggleFrame(target)
-				end
-			end)
-		end
+
+	if self._buttonAddedConnection then
+		self._buttonAddedConnection:Disconnect()
 	end
+	self._buttonAddedConnection = self.Main.DescendantAdded:Connect(connectButton)
+
+	if self._buttonRemovingConnection then
+		self._buttonRemovingConnection:Disconnect()
+	end
+	self._buttonRemovingConnection = self.Main.DescendantRemoving:Connect(disconnectButton)
+end
+
+function UIController:RefreshButtons()
+	if not self.Main or not self.Main.Parent then
+		return
+	end
+
+	self:_cacheButtons()
 end
 
 function UIController:_initializeFrames()

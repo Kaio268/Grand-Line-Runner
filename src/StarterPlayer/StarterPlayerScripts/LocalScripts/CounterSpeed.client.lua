@@ -1,8 +1,10 @@
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
-
-local rng = Random.new()
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HudStatNotificationService = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudStatNotificationService"))
+local CounterVisibilityUtil = require(script.Parent:WaitForChild("CounterVisibilityUtil"))
+local Shorten = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
 
 local player = Players.LocalPlayer
 local moneyValue = player:WaitForChild("HiddenLeaderstats"):WaitForChild("Speed")
@@ -31,6 +33,8 @@ if icon then
 		iconScale.Parent = icon
 	end
 end
+
+CounterVisibilityUtil.hideCompatibilityCounter(counter, { icon })
 
 local normalG0 = Color3.fromRGB(255, 121, 121)
 local normalG1 = Color3.fromRGB(255, 201, 176)
@@ -61,26 +65,21 @@ local function setStroke(c)
 end
 
 local function formatNumber(n)
-	local sign = ""
-	if n < 0 then
-		sign = "-"
-		n = -n
-	end
-	local s = tostring(math.floor(n + 0.5))
-	local out = {}
-	local count = 0
-	for i = #s, 1, -1 do
-		count += 1
-		out[#out + 1] = s:sub(i, i)
-		if count % 3 == 0 and i > 1 then
-			out[#out + 1] = ","
-		end
-	end
-	return sign .. table.concat(out):reverse()
+	return Shorten.withCommas(math.floor((tonumber(n) or 0) + 0.5))
 end
 
 local function moneyText(n)
 	return formatNumber(n) .. " Speed"
+end
+
+local function pushNotif(delta)
+	HudStatNotificationService.pushValueChange({
+		kind = "Speed",
+		delta = delta,
+		valueText = formatNumber(math.abs(delta)),
+		labelText = HudStatNotificationService.getLabelFromFormattedText(moneyText(0), counter.Name),
+		icon = HudStatNotificationService.snapshotIcon(icon),
+	})
 end
 
 setGradient(normalG0, normalG1)
@@ -293,5 +292,5 @@ moneyValue:GetPropertyChangedSignal("Value"):Connect(function()
 	local diff = newVal - last
 	last = newVal
 	animateMoney(newVal)
- 	 
+	pushNotif(diff)
 end)

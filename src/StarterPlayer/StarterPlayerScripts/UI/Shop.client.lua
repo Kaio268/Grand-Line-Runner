@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
+local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 
 local ShopFolder = UiFolder:WaitForChild("Shop")
 local ShopShell = require(ShopFolder:WaitForChild("ShopShell"))
@@ -31,6 +32,15 @@ local noticeToken = 0
 
 local framesGui = playerGui:WaitForChild("Frames")
 local storeFrame = framesGui:WaitForChild("Store")
+local modalAdapter = ReactFrameModalAdapter.new({
+	playerGui = playerGui,
+	frameName = "Store",
+	hostName = "ReactStoreHost",
+	backdropName = "ReactStoreBackdrop",
+	modalStateKey = "ShopModal",
+	minSize = Vector2.new(980, 680),
+	maxSize = Vector2.new(1340, 860),
+})
 local shopBackdrop = framesGui:FindFirstChild("ReactStoreBackdrop")
 if not shopBackdrop then
 	shopBackdrop = Instance.new("Frame")
@@ -192,18 +202,17 @@ local function buildCatalogViewModel()
 end
 
 local function render()
-	hideLegacyStoreContents()
+	local host = modalAdapter:EnsureHost()
+	if not host then
+		return
+	end
 
 	local catalogView = buildCatalogViewModel()
 	root:render(ReactRoblox.createPortal(React.createElement(ShopShell, {
 		catalog = catalogView,
 		noticeText = noticeText,
 		onClose = function()
-			if uiController and uiController.ToggleFrame then
-				uiController:ToggleFrame(storeFrame)
-			else
-				storeFrame.Visible = false
-			end
+			modalAdapter:Close()
 		end,
 		onPurchaseRequested = function(item)
 			local success, message = purchaseAdapter:requestPurchase(item)
@@ -226,7 +235,7 @@ local function render()
 		end,
 		onSectionSelected = function()
 		end,
-	}), shopHost))
+	}), host))
 end
 
 scheduleRender = function()
@@ -246,22 +255,31 @@ end
 purchaseAdapter:primeCatalog(Catalog)
 
 table.insert(cleanupConnections, purchaseAdapter:subscribe(scheduleRender))
-table.insert(cleanupConnections, storeFrame.ChildAdded:Connect(function()
-		task.defer(hideLegacyStoreContents)
-	end))
-table.insert(cleanupConnections, storeFrame:GetPropertyChangedSignal("Visible"):Connect(function()
-		task.defer(syncOverlayState)
-		task.defer(hideLegacyStoreContents)
-	end))
+modalAdapter:SetScheduleRender(scheduleRender)
+modalAdapter:BindFramesFolderTracking()
+table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
+	if child.Name == "Frames" or child.Name == "OpenUI" then
+		if child.Name == "Frames" then
+			shopBackdrop = nil
+		end
+		modalAdapter:HandlePlayerGuiChildAdded(child)
+	end
+end))
+table.insert(cleanupConnections, playerGui.ChildRemoved:Connect(function(child)
+	if child.Name == "Frames" or child.Name == "OpenUI" then
+		if child.Name == "Frames" then
+			shopBackdrop = nil
+		end
+		modalAdapter:HandlePlayerGuiChildRemoved(child)
+	end
+end))
 
-hideLegacyStoreContents()
 render()
 
 script.Destroying:Connect(function()
 	destroyed = true
-	UiModalState.SetOpen("ShopModal", false)
 	disconnectAll()
 	purchaseAdapter:destroy()
-	shopBackdrop.Visible = false
+	modalAdapter:Destroy()
 	root:unmount()
 end)

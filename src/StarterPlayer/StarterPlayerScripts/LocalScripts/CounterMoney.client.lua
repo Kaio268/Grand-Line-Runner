@@ -2,11 +2,16 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 
 local rng = Random.new()
 
 local player = Players.LocalPlayer
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local HudCounterConfig = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudCounterConfig"))
+local HudStatNotificationService = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudStatNotificationService"))
+local CounterVisibilityUtil = require(script.Parent:WaitForChild("CounterVisibilityUtil"))
+local Shorten = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
 local currencyConfig = CurrencyUtil.getConfig()
 local moneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
 if not moneyValue then
@@ -23,6 +28,65 @@ local uiGradient = textLabel:WaitForChild("UIGradient")
 local uiStroke = textLabel:WaitForChild("UIStroke")
 local icon = counter:FindFirstChildWhichIsA("ImageLabel")
 
+local function ensureFrame(parent, name, zIndex)
+	local frame = parent:FindFirstChild(name)
+	if frame and frame:IsA("Frame") then
+		frame.BackgroundTransparency = 1
+		frame.BorderSizePixel = 0
+		frame.ClipsDescendants = false
+		frame.ZIndex = zIndex
+		return frame
+	end
+
+	frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundTransparency = 1
+	frame.BorderSizePixel = 0
+	frame.ClipsDescendants = false
+	frame.ZIndex = zIndex
+	frame.Parent = parent
+
+	return frame
+end
+
+local function ensureVisibleFxHosts()
+	local displayLayer = ensureFrame(hud, "ReactHudCountersLayer", HudCounterConfig.DisplayLayerZIndex)
+	local moneyAnchor = ensureFrame(displayLayer, "ReactHudMoneyRowAnchor", HudCounterConfig.DisplayLayerZIndex + 10)
+	local notifications = ensureFrame(displayLayer, "ReactHudCounterNotifications", HudCounterConfig.DisplayLayerZIndex + 12)
+	local particles = ensureFrame(moneyAnchor, "ReactHudMoneyParticles", HudCounterConfig.DisplayLayerZIndex + 11)
+
+	local totalHeight = HudCounterConfig.getTotalHeight(3)
+	local moneyRowY = HudCounterConfig.getRowY(3)
+	local _, bottomRightInset = GuiService:GetGuiInset()
+
+	displayLayer.AnchorPoint = Vector2.new(0, 1)
+	displayLayer.Position = UDim2.new(0, HudCounterConfig.LeftPadding, 1, -(HudCounterConfig.BottomPadding + bottomRightInset.Y))
+	displayLayer.Size = UDim2.new(0, HudCounterConfig.Width, 0, totalHeight)
+
+	moneyAnchor.AnchorPoint = Vector2.new(0, 0)
+	moneyAnchor.Position = UDim2.new(0, HudCounterConfig.getContentLeft(), 0, moneyRowY)
+	moneyAnchor.Size = UDim2.new(0, HudCounterConfig.getContentWidth(), 0, HudCounterConfig.RowHeight)
+
+	particles.AnchorPoint = Vector2.new(0, 0)
+	particles.Position = UDim2.fromOffset(0, 0)
+	particles.Size = UDim2.fromScale(1, 1)
+
+	notifications.AnchorPoint = Vector2.new(0, 0)
+	notifications.Position = UDim2.new(
+		0,
+		HudCounterConfig.getNotificationX(),
+		0,
+		math.max(0, moneyRowY - HudCounterConfig.NotificationHeight + 6)
+	)
+	notifications.Size = UDim2.new(0, HudCounterConfig.NotificationWidth, 0, HudCounterConfig.NotificationHeight)
+
+	return moneyAnchor, notifications, particles
+end
+
+local function trim(text)
+	return (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
 local textScale = textLabel:FindFirstChildOfClass("UIScale")
 if not textScale then
 	textScale = Instance.new("UIScale")
@@ -38,23 +102,22 @@ if icon then
 	end
 end
 
-local notFrame = counters:WaitForChild("Not")
-local plusTemplate = notFrame:WaitForChild("Plus")
-local minusTemplate = notFrame:WaitForChild("Minus")
-plusTemplate.Visible = false
-minusTemplate.Visible = false
+local legacyNotFrame = counters:FindFirstChild("Not")
+local moneyAnchor, _, particleLayer = ensureVisibleFxHosts()
 
-local particleLayer = counter:FindFirstChild("MoneyParticles")
-if not particleLayer then
-	particleLayer = Instance.new("Frame")
-	particleLayer.Name = "MoneyParticles"
-	particleLayer.BackgroundTransparency = 1
-	particleLayer.BorderSizePixel = 0
-	particleLayer.Size = UDim2.new(1, 0, 1, 0)
-	particleLayer.Position = UDim2.new(0, 0, 0, 0)
-	particleLayer.ClipsDescendants = false
-	particleLayer.ZIndex = math.max(textLabel.ZIndex, counter.ZIndex) + 10
-	particleLayer.Parent = counter
+CounterVisibilityUtil.hideCompatibilityCounter(counter, { icon })
+if legacyNotFrame then
+	CounterVisibilityUtil.hideGuiObject(legacyNotFrame)
+	for _, child in ipairs(legacyNotFrame:GetChildren()) do
+		if child:IsA("GuiObject") then
+			CounterVisibilityUtil.hideGuiObject(child)
+		end
+	end
+end
+
+local legacyParticleLayer = counter:FindFirstChild("MoneyParticles")
+if legacyParticleLayer then
+	CounterVisibilityUtil.hideGuiObject(legacyParticleLayer)
 end
 
 local normalG0 = Color3.fromRGB(62, 181, 35)
@@ -86,26 +149,21 @@ local function setStroke(c)
 end
 
 local function formatNumber(n)
-	local sign = ""
-	if n < 0 then
-		sign = "-"
-		n = -n
-	end
-	local s = tostring(math.floor(n + 0.5))
-	local out = {}
-	local count = 0
-	for i = #s, 1, -1 do
-		count += 1
-		out[#out + 1] = s:sub(i, i)
-		if count % 3 == 0 and i > 1 then
-			out[#out + 1] = ","
-		end
-	end
-	return sign .. table.concat(out):reverse()
+	return Shorten.withCommas(math.floor((tonumber(n) or 0) + 0.5))
 end
 
 local function moneyText(n)
 	return formatNumber(n) .. CurrencyUtil.getCompactSuffix()
+end
+
+local function pushNotif(delta)
+	HudStatNotificationService.pushValueChange({
+		kind = "Money",
+		delta = delta,
+		valueText = formatNumber(math.abs(delta)),
+		labelText = HudStatNotificationService.getLabelFromFormattedText(moneyText(0), trim(CurrencyUtil.getCompactSuffix())),
+		icon = HudStatNotificationService.snapshotIcon(icon),
+	})
 end
 
 setGradient(normalG0, normalG1)
@@ -309,145 +367,16 @@ local function animateMoney(target)
 	activeTween:Play()
 end
 
-local function ensureScale(o)
-	local s = o:FindFirstChildOfClass("UIScale")
-	if not s then
-		s = Instance.new("UIScale")
-		s.Parent = o
-	end
-	return s
-end
-
-local function animateNotifIn(lbl)
-	local s = ensureScale(lbl)
-	lbl.Visible = true
-	lbl.Rotation = rng:NextNumber(-8, 8)
-	s.Scale = 0.35
-
-	if lbl:IsA("TextLabel") or lbl:IsA("TextButton") then
-		lbl.TextTransparency = 1
-	end
-	local st = lbl:FindFirstChildOfClass("UIStroke")
-	if st then
-		st.Transparency = 1
-	end
-
-	local t1 = TweenService:Create(s, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
-	local t2 = TweenService:Create(lbl, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Rotation = 0, TextTransparency = 0 })
-	local t3
-	if st then
-		t3 = TweenService:Create(st, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 0 })
-	end
-
-	t1:Play()
-	t2:Play()
-	if t3 then t3:Play() end
-end
-
-local function animateNotifOut(lbl)
-	if not lbl or not lbl.Parent then return end
-	if lbl:GetAttribute("Closing") then return end
-	lbl:SetAttribute("Closing", true)
-
-	local s = ensureScale(lbl)
-	local st = lbl:FindFirstChildOfClass("UIStroke")
-
-	local t1 = TweenService:Create(s, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = 0.2 })
-	local t2 = TweenService:Create(lbl, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Rotation = rng:NextNumber(-14, 14), TextTransparency = 1 })
-	local t3
-	if st then
-		t3 = TweenService:Create(st, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Transparency = 1 })
-	end
-
-	local cleaned = false
-	local function cleanup()
-		if cleaned then return end
-		cleaned = true
-		if lbl and lbl.Parent then
-			lbl:Destroy()
-		end
-	end
-
-	t1.Completed:Connect(cleanup)
-	task.delay(0.25, cleanup)
-
-	t1:Play()
-	t2:Play()
-	if t3 then t3:Play() end
-end
-
-local notifQueue = {}
-local notifOrder = 0
-local notifUid = 0
-local notifAlive = {}
-
-local MAX_NOTIFS = 6
-local NOTIF_LIFE = 1.6
-
-local function removeQueue(uid)
-	for i = #notifQueue, 1, -1 do
-		if notifQueue[i] == uid then
-			table.remove(notifQueue, i)
-			return
-		end
-	end
-end
-
-local function pushNotif(delta)
-	if delta == 0 then return end
-
-	local template = delta > 0 and plusTemplate or minusTemplate
-	local lbl = template:Clone()
-	lbl.Parent = notFrame
-	lbl.Visible = true
-
-	notifOrder += 1
-	lbl.LayoutOrder = notifOrder
-	lbl.Text = (delta > 0 and "+" or "-") .. formatNumber(math.abs(delta)) .. CurrencyUtil.getCompactSuffix()
-
-	notifUid += 1
-	local uid = notifUid
-	notifAlive[uid] = true
-	lbl:SetAttribute("NotifId", uid)
-
-	table.insert(notifQueue, uid)
-
-	animateNotifIn(lbl)
-
-	task.delay(NOTIF_LIFE, function()
-		if notifAlive[uid] then
-			notifAlive[uid] = false
-			removeQueue(uid)
-			if lbl and lbl.Parent then
-				animateNotifOut(lbl)
-			end
-		end
-	end)
-
-	while #notifQueue > MAX_NOTIFS do
-		local oldUid = table.remove(notifQueue, 1)
-		if notifAlive[oldUid] then
-			notifAlive[oldUid] = false
-		end
-		for _, child in ipairs(notFrame:GetChildren()) do
-			if child:IsA("GuiObject") and child:GetAttribute("NotifId") == oldUid then
-				animateNotifOut(child)
-				break
-			end
-		end
-	end
-end
-
 local particles = {}
 local particleConn
 
 local function getBurstOriginPx()
-	local cAbs = counter.AbsolutePosition
-	local tAbs = textLabel.AbsolutePosition
-	local tSize = textLabel.AbsoluteSize
-	local x = (tAbs.X - cAbs.X) + tSize.X * 0.5
-	local y = (tAbs.Y - cAbs.Y) + tSize.Y * 0.05
-	return Vector2.new(x, y), Vector2.new(tSize.X, tSize.Y)
+	local anchorSize = moneyAnchor.AbsoluteSize
+	local barX = HudCounterConfig.getBarX()
+	local barWidth = math.max(1, anchorSize.X - barX)
+	local x = barX + (barWidth * 0.45)
+	local y = anchorSize.Y * 0.5
+	return Vector2.new(x, y), anchorSize
 end
 
 local function pxToScaleUdim2(px, absSize)

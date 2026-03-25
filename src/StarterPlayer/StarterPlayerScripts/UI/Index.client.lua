@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
+local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 
 local IndexFolder = UiFolder:WaitForChild("Index")
 
@@ -55,6 +56,16 @@ local lastIndexViewModelError = nil
 local claimRemoteConnection = nil
 local pendingClaimRequests = {}
 local claimedRewardOverrides = {}
+local modalAdapter = ReactFrameModalAdapter.new({
+	playerGui = playerGui,
+	frameName = "Index",
+	hostName = "ReactIndexHost",
+	backdropName = "ReactIndexBackdrop",
+	modalStateKey = "IndexModal",
+	minSize = Vector2.new(1080, 680),
+	maxSize = Vector2.new(1360, 860),
+	allowFallback = true,
+})
 
 local function buildEmptyViewModel()
 	return {
@@ -837,18 +848,15 @@ local function render()
 		return
 	end
 
-	if not uiController then
-		uiController = tryLoadUiController()
-	end
+	uiController = modalAdapter:GetUiController()
 
-	local host = ensureLegacyHost()
+	local host = modalAdapter:EnsureHost()
 	if host then
+		legacyFrame = modalAdapter:GetFrame()
 		local _, indexScreen = loadIndexModules()
 		local viewModel = buildViewModel(false)
 
-		if fallbackGui then
-			fallbackGui.Enabled = false
-		end
+		modalAdapter:SetFallbackEnabled(false)
 
 		local content
 		if indexScreen then
@@ -859,11 +867,7 @@ local function render()
 				devilFruitCollection = viewModel.devilFruitCollection,
 				onClaimRewardRequested = fireClaimReward,
 				onClose = function()
-					if uiController and uiController.ToggleFrame and legacyFrame then
-						uiController:ToggleFrame(legacyFrame)
-					elseif legacyFrame then
-						legacyFrame.Visible = false
-					end
+					modalAdapter:Close()
 				end,
 				rewards = viewModel.rewards,
 				tabs = viewModel.tabs,
@@ -874,29 +878,19 @@ local function render()
 				"Loading Index",
 				"Preparing the new Index view. This should only take a moment.",
 				function()
-					if uiController and uiController.ToggleFrame and legacyFrame then
-						uiController:ToggleFrame(legacyFrame)
-					elseif legacyFrame then
-						legacyFrame.Visible = false
-					end
+					modalAdapter:Close()
 				end
 			)
 		end
 
 		root:render(ReactRoblox.createPortal(content, host))
-		syncOverlayState()
+		modalAdapter:SyncOverlayState()
 		return
 	end
 
-	local fallbackHost = ensureFallbackHost()
-	if fallbackGui then
-		fallbackGui.Enabled = true
-	end
-
-	if indexBackdrop then
-		indexBackdrop.Visible = false
-	end
-
+	local fallbackHost = modalAdapter:EnsureFallbackHost()
+	modalAdapter:SetFallbackEnabled(true)
+	modalAdapter:HideBackdrop()
 	UiModalState.SetOpen("IndexModal", false)
 
 	root:render(ReactRoblox.createPortal(e(StandaloneIndexApp), fallbackHost))
@@ -965,10 +959,8 @@ trackConnection(playerGui.ChildAdded, function(child)
 		if child.Name == "Frames" then
 			legacyFrame = nil
 			indexBackdrop = nil
-			bindFramesFolderTracking()
-		elseif child.Name == "OpenUI" then
-			uiController = nil
 		end
+		modalAdapter:HandlePlayerGuiChildAdded(child)
 
 		task.defer(scheduleRender)
 	end
@@ -979,16 +971,15 @@ trackConnection(playerGui.ChildRemoved, function(child)
 		if child.Name == "Frames" then
 			legacyFrame = nil
 			indexBackdrop = nil
-			disconnectAll(framesFolderConnections)
-		elseif child.Name == "OpenUI" then
-			uiController = nil
 		end
+		modalAdapter:HandlePlayerGuiChildRemoved(child)
 
 		task.defer(scheduleRender)
 	end
 end, cleanupConnections)
 
-bindFramesFolderTracking()
+modalAdapter:SetScheduleRender(scheduleRender)
+modalAdapter:BindFramesFolderTracking()
 render()
 
 script.Destroying:Connect(function()
@@ -1005,10 +996,7 @@ script.Destroying:Connect(function()
 		claimRemoteConnection:Disconnect()
 		claimRemoteConnection = nil
 	end
-	UiModalState.SetOpen("IndexModal", false)
-	if indexBackdrop then
-		indexBackdrop.Visible = false
-	end
+	modalAdapter:Destroy()
 	root:unmount()
 
 	if fallbackGui then
