@@ -7,6 +7,10 @@ local HieHieNoMi = {}
 local iceBlastAnimation = "rbxassetid://112900668980719"
 local iceBoostAnimation = "rbxassetid://84130968608346"
 
+local lastSpawnInfo = {}
+local TRAIL_DISTANCE_THRESHOLD = 2.2
+local TRAIL_TIME_THRESHOLD = 0.1
+
 local function playIceBlastAnimation(humanoid)
 	local animation = Instance.new("Animation")
 	animation.AnimationId = iceBlastAnimation
@@ -167,14 +171,33 @@ local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local effectTrigger = remotes and remotes:FindFirstChild("DevilFruitEffectTrigger")
 
 if effectTrigger then
-	effectTrigger.OnServerEvent:Connect(function(player, effectName, ...)
+	effectTrigger.OnServerEvent:Connect(function(player, effectName, rootCFrame, duration)
 		if effectName == "IceTrail" then
 			local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
-			if fruitAttribute == "Hie Hie no Mi" then
-				spawnIceTrail(player, ...)
+			if fruitAttribute == "Hie Hie no Mi" and typeof(rootCFrame) == "CFrame" then
+				local now = os.clock()
+				local info = lastSpawnInfo[player]
+				
+				if info then
+					local distance = (rootCFrame.Position - info.Position).Magnitude
+					if distance < TRAIL_DISTANCE_THRESHOLD or (now - info.Time) < TRAIL_TIME_THRESHOLD then
+						return
+					end
+				end
+				
+				lastSpawnInfo[player] = {
+					Position = rootCFrame.Position,
+					Time = now
+				}
+				
+				spawnIceTrail(player, rootCFrame, duration)
 			end
 		end
 	end)
 end
+
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+	lastSpawnInfo[player] = nil
+end)
 
 return HieHieNoMi
