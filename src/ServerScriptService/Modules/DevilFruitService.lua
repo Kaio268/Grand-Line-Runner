@@ -391,7 +391,13 @@ local function hydrateFruitFromData(player)
 			return
 		end
 
-		applyEquippedFruitValue(player, loadEquippedFruitFromData(player))
+		local fruitName = loadEquippedFruitFromData(player)
+		applyEquippedFruitValue(player, fruitName)
+
+		if player.Character then
+			applyFruitCharacterModel(player, fruitName)
+		end
+
 		hydrationTaskByPlayer[player] = nil
 	end)
 end
@@ -544,6 +550,11 @@ local function hookPlayer(player)
 
 		-- ADDED THIS BLOCK: Swap the model every time the player respawns
 		player.CharacterAdded:Connect(function(character)
+			-- Ensure we wait for hydration/data if this is the initial spawn
+			if not DataManager:IsReady(player) then
+				waitForDataReady(player, HYDRATION_READY_TIMEOUT)
+			end
+
 			local currentFruit = getEquippedFruit(player)
 			if currentFruit ~= DevilFruitConfig.None then
 				applyFruitCharacterModel(player, currentFruit)

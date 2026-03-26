@@ -55,6 +55,7 @@ local localCooldowns = {}
 local suppressedParts = {}
 local activeFireBursts = {}
 local activePhoenixShields = {}
+local activeIceBoosts = {}
 local hazardSuppressionLoopRunning = false
 local spaceHeld = false
 local flightInputState = {
@@ -1398,10 +1399,104 @@ local function createIceImpactEffect(position)
 	end)
 end
 
-local function createIceBoostEffect(targetPlayer, _payload)
+---Function to clone Icetrail during Ice Boost
+local function cloneIceTrail(character, rootPart, humanoid, iceTrail, duration)
+	local trailClone = iceTrail:Clone()
+	if not trailClone then return end
+
+	trailClone.Parent = Workspace 
+
+	local rayOrigin = rootPart.Position
+	local rayDirection = Vector3.new(0, -10, 0)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {character}
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	local spawnPos = rayResult and rayResult.Position or (rootPart.Position - Vector3.new(0, 3, 0))
+
+	local spawnCFrame = CFrame.new(spawnPos) * rootPart.CFrame.Rotation
+	local baseplate = Workspace:FindFirstChild("Baseplate") or Workspace.Terrain
+
+	if trailClone:IsA("Model") then
+		trailClone:PivotTo(spawnCFrame)
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = baseplate
+		weld.Part1 = trailClone.PrimaryPart or trailClone:FindFirstChildWhichIsA("BasePart")
+		weld.Parent = trailClone
+	else
+		trailClone.CFrame = spawnCFrame
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = baseplate
+		weld.Part1 = trailClone
+		weld.Parent = trailClone
+	end
+
+	task.delay(duration, function()
+		if trailClone then
+			trailClone:Destroy()
+		end
+	end)
+end
+
+local function createIceBoostEffect(targetPlayer, payload)
+	local character = targetPlayer.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
 	local rootPart = getPlayerRootPart(targetPlayer)
-	if not rootPart then
+	if not rootPart or not humanoid then
 		return
+	end
+
+	local duration = tonumber(payload and payload.Duration) or 0
+	local iceTrail = ReplicatedStorage:FindFirstChild("Assets") 
+		and ReplicatedStorage.Assets:FindFirstChild("Particles") 
+		and ReplicatedStorage.Assets.Particles:FindFirstChild("IceTrail")
+
+	if iceTrail and duration > 0 then
+		local existing = activeIceBoosts[targetPlayer]
+		if existing then
+			existing:Disconnect()
+			activeIceBoosts[targetPlayer] = nil
+		end
+
+		task.spawn(function()
+			local lastSpawnPos = rootPart.Position
+			local lastSpawnTime = 0
+			local startTime = os.clock()
+			local connection
+
+			-- Initial spawn
+			cloneIceTrail(character, rootPart, humanoid, iceTrail, duration)
+			lastSpawnTime = os.clock()
+
+			connection = RunService.Heartbeat:Connect(function()
+				local now = os.clock()
+				if now - startTime >= duration or not (character.Parent and humanoid.Health > 0 and rootPart.Parent) then
+					connection:Disconnect()
+					if activeIceBoosts[targetPlayer] == connection then
+						activeIceBoosts[targetPlayer] = nil
+					end
+					return
+				end
+
+				if humanoid.MoveDirection.Magnitude > 0 then
+					local currentPos = rootPart.Position
+					local distance = (currentPos - lastSpawnPos).Magnitude
+
+					-- Increase distance threshold to prevent stacking
+					-- Also add a small time debounce
+					if distance > 2.2 and (now - lastSpawnTime) > 0.1 then
+						cloneIceTrail(character, rootPart, humanoid, iceTrail, duration)
+						lastSpawnPos = currentPos
+						lastSpawnTime = now
+					end
+				end
+			end)
+			
+			activeIceBoosts[targetPlayer] = connection
+		end)
 	end
 
 	local ring = Instance.new("Part")
