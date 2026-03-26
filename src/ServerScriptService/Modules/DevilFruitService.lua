@@ -7,6 +7,7 @@ local DevilFruitService = {}
 local REQUEST_REMOTE_NAME = "DevilFruitAbilityRequest"
 local STATE_REMOTE_NAME = "DevilFruitAbilityState"
 local EFFECT_REMOTE_NAME = "DevilFruitAbilityEffect"
+local EFFECT_TRIGGER_REMOTE_NAME = "DevilFruitEffectTrigger"
 local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
@@ -50,6 +51,7 @@ local function getRemoteBundle()
 		Request = getOrCreateRemote(remotes, REQUEST_REMOTE_NAME),
 		State = getOrCreateRemote(remotes, STATE_REMOTE_NAME),
 		Effect = getOrCreateRemote(remotes, EFFECT_REMOTE_NAME),
+		EffectTrigger = getOrCreateRemote(remotes, EFFECT_TRIGGER_REMOTE_NAME),
 	}
 end
 

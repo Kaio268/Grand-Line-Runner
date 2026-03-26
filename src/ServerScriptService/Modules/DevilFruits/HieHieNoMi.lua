@@ -1,6 +1,7 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
 
 local HieHieNoMi = {}
 local iceBlastAnimation = "rbxassetid://112900668980719"
@@ -116,6 +117,64 @@ function HieHieNoMi.IceBoost(context)
 		Duration = duration,
 		SpeedMultiplier = speedMultiplier,
 	}
+end
+
+local function spawnIceTrail(player, rootCFrame, duration)
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local hieParticles = assets and assets:FindFirstChild("HieParticles")
+	local iceTrail = hieParticles and hieParticles:FindFirstChild("IceTrail")
+
+	if not iceTrail then return end
+
+	local character = player.Character
+	if not character then return end
+
+	local rayOrigin = rootCFrame.Position
+	local rayDirection = Vector3.new(0, -10, 0)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {character}
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	local spawnPos = rayResult and rayResult.Position or (rootCFrame.Position - Vector3.new(0, 3, 0))
+	local spawnCFrame = CFrame.new(spawnPos) * rootCFrame.Rotation
+
+	local trailClone = iceTrail:Clone()
+	trailClone.Parent = Workspace
+
+	local baseplate = Workspace:FindFirstChild("Baseplate") or Workspace.Terrain
+
+	if trailClone:IsA("Model") then
+		trailClone:PivotTo(spawnCFrame)
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = baseplate
+		weld.Part1 = trailClone.PrimaryPart or trailClone:FindFirstChildWhichIsA("BasePart")
+		weld.Parent = trailClone
+	else
+		trailClone.CFrame = spawnCFrame
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = baseplate
+		weld.Part1 = trailClone
+		weld.Parent = trailClone
+	end
+
+	Debris:AddItem(trailClone, duration)
+end
+
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local effectTrigger = remotes and remotes:FindFirstChild("DevilFruitEffectTrigger")
+
+if effectTrigger then
+	effectTrigger.OnServerEvent:Connect(function(player, effectName, ...)
+		if effectName == "IceTrail" then
+			local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
+			if fruitAttribute == "Hie Hie no Mi" then
+				spawnIceTrail(player, ...)
+			end
+		end
+	end)
 end
 
 return HieHieNoMi

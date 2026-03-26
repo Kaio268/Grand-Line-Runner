@@ -1,78 +1,173 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local flameDashAnimation = "rbxassetid://93759237368646"
-local flameBurstAnimation = "rbxassetid://92151793966516"
+local Debris = game:GetService("Debris")
+local flameDashAnimation = "rbxassetid://73285936367231"
+local flameBurstAnimation = "rbxassetid://130411347773227"
 local MeraMeraNoMi = {}
 
 local WALL_PADDING = 2
 local MIN_END_CARRY_SPEED = 52
 local END_CARRY_SPEED_FACTOR = 0.82
 
-local function playFlameDashAnimation(humanoid)
+local function spawnStationaryGroundParticles(character, target, folder, emitCountMultiplier)
+	local meraParticles = ReplicatedStorage:FindFirstChild("MeraParticles") or (ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("MeraParticles"))
+	local targetFolder = meraParticles and meraParticles:FindFirstChild(folder)
+	
+	if not targetFolder then return end
+
+	local targetCFrame = typeof(target) == "CFrame" and target or CFrame.new(target)
+	local position = targetCFrame.Position
+
+	-- Ground detection
+	local rayOrigin = position + Vector3.new(0, 2, 0)
+	local rayDirection = Vector3.new(0, -10, 0)
+	local params = RaycastParams.new()
+	params.FilterDescendantsInstances = { character }
+	params.FilterType = Enum.RaycastFilterType.Exclude
+
+	local result = Workspace:Raycast(rayOrigin, rayDirection, params)
+	local spawnPos = result and result.Position or (position - Vector3.new(0, 3, 0))
+
+	-- Create a temporary part to hold the particles
+	local effectPart = Instance.new("Part")
+	effectPart.Name = "MeraEffect"
+	effectPart.Size = Vector3.new(1, 1, 1)
+	effectPart.Transparency = 1
+	effectPart.CanCollide = false
+	effectPart.Anchored = true
+	-- Use ground position but keep original rotation
+	effectPart.CFrame = CFrame.new(spawnPos) * targetCFrame.Rotation
+	effectPart.Parent = Workspace
+	
+	for _, particle in ipairs(targetFolder:GetChildren()) do
+		if particle:IsA("ParticleEmitter") then
+			local clone = particle:Clone()
+			clone.LockedToPart = false
+			clone.Parent = effectPart
+			clone:Emit((clone:GetAttribute("EmitCount") or 100) * (emitCountMultiplier or 1))
+		end
+	end
+	
+	Debris:AddItem(effectPart, 3)
+end
+
+local function playFlameDashAnimation(humanoid, character, rootPart)
 	local animation = Instance.new("Animation")
 	animation.AnimationId = flameDashAnimation
 	local track = humanoid:LoadAnimation(animation)
 	track.Priority = Enum.AnimationPriority.Action
 
+	local flameConnection
+	local dashConnection
+
+	-- Cleanup function for all connections
+	local function cleanup()
+		if flameConnection then
+			flameConnection:Disconnect()
+			flameConnection = nil
+		end
+		if dashConnection then
+			dashConnection:Disconnect()
+			dashConnection = nil
+		end
+	end
+
+	-- Start event: Start Flame (fixed) until End, and Dash (trail) until Trail
+	track:GetMarkerReachedSignal("Start"):Connect(function()
+		local startPos = rootPart.Position
+		cleanup()
+		
+		-- Flame loop at fixed position
+		flameConnection = RunService.Heartbeat:Connect(function()
+			if not rootPart.Parent or not character.Parent then return end
+			spawnStationaryGroundParticles(character, startPos, "Flame", 0.5)
+		end)
+		
+		-- Dash loop following player with rotation
+		dashConnection = RunService.Heartbeat:Connect(function()
+			if not rootPart.Parent or not character.Parent then return end
+			local rotationOffset = CFrame.Angles(0, math.rad(90), 0)
+			local spawnCFrame = rootPart.CFrame * rotationOffset
+			spawnStationaryGroundParticles(character, spawnCFrame, "Dash", 0.5)
+		end)
+	end)
+
+	-- Trail event: Stop Dash emission
+	track:GetMarkerReachedSignal("Trail"):Connect(function()
+		if dashConnection then
+			dashConnection:Disconnect()
+			dashConnection = nil
+		end
+	end)
+
+	-- TrailEnd event: Burst Trail particles with rotation
+	track:GetMarkerReachedSignal("TrailEnd"):Connect(function()
+		local rotationOffset = CFrame.Angles(0, math.rad(90), 0)
+		local spawnCFrame = rootPart.CFrame * rotationOffset
+		spawnStationaryGroundParticles(character, spawnCFrame, "Trail")
+	end)
+
+	-- End event: Stop Flame effect
+	track:GetMarkerReachedSignal("End"):Connect(function()
+		cleanup()
+	end)
+
 	track:Play()
+
+	track.Stopped:Connect(function()
+		cleanup()
+	end)
+
 	return track
 end
 
-local function cloneFlameBurst(character, foot, flameBurst)
-	print("Marker Reached!")
 
-	local flameBurstClone = flameBurst:Clone()
-	if not flameBurstClone then return end
-
-	-- Parent it to the character so it moves with you
-	flameBurstClone.Parent = character 
-
-	-- Position it at the character and match their orientation (X/Z axis)
-	local spawnCFrame = foot.CFrame * CFrame.new(0, 0, 0)
-
-	if flameBurstClone:IsA("Model") then
-		if not flameBurstClone.PrimaryPart then
-			flameBurstClone.PrimaryPart = flameBurstClone:FindFirstChildWhichIsA("BasePart")
-		end
-		
-		if flameBurstClone.PrimaryPart then
-			flameBurstClone:SetPrimaryPartCFrame(spawnCFrame)
-
-			-- Optional: Weld it to the player so it follows them as they move
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = foot
-			weld.Part1 = flameBurstClone.PrimaryPart
-			weld.Parent = flameBurstClone
-		end
-	elseif flameBurstClone:IsA("BasePart") then
-		flameBurstClone.CFrame = spawnCFrame
-
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = foot
-		weld.Part1 = flameBurstClone
-		weld.Parent = flameBurstClone
-	end
-
-	task.wait(1.5)
-	if flameBurstClone then
-		flameBurstClone:Destroy()
-	end
-end
-
-local function playFlameBurstAnimation(humanoid, character, foot, flameBurst)
+local function playFlameBurstAnimation(humanoid, character, rootPart)
 	local animation = Instance.new("Animation")
 	animation.AnimationId = flameBurstAnimation
 	local track = humanoid:LoadAnimation(animation)
 	track.Priority = Enum.AnimationPriority.Action
-	
-	if flameBurst then
-		track:GetMarkerReachedSignal("FlameBurst"):Connect(function()
-			cloneFlameBurst(character, foot, flameBurst)
+
+	local ringConnection
+
+	-- Start event: Sustained Ring effect at feet
+	track:GetMarkerReachedSignal("Start"):Connect(function()
+		if ringConnection then ringConnection:Disconnect() end
+		ringConnection = RunService.Heartbeat:Connect(function()
+			if not rootPart.Parent or not character.Parent then return end
+			spawnStationaryGroundParticles(character, rootPart.Position, "Ring", 0.5)
 		end)
-	end
-	
+	end)
+
+	-- FlameBurst event: Big burst at feet
+	track:GetMarkerReachedSignal("FlameBurst"):Connect(function()
+		-- Clean up Ring emission if active first
+		if ringConnection then
+			ringConnection:Disconnect()
+			ringConnection = nil
+		end
+		
+		spawnStationaryGroundParticles(character, rootPart.Position, "Burst", 1.5)
+	end)
+
+	-- End event: Stop Ring effect
+	track:GetMarkerReachedSignal("End"):Connect(function()
+		if ringConnection then
+			ringConnection:Disconnect()
+			ringConnection = nil
+		end
+	end)
+
 	track:Play()
+
+	track.Stopped:Connect(function()
+		if ringConnection then
+			ringConnection:Disconnect()
+			ringConnection = nil
+		end
+	end)
+
 	return track
 end
 
@@ -196,11 +291,8 @@ function MeraMeraNoMi.FlameDash(context)
 	local abilityConfig = context.AbilityConfig
 	
 	local foot = character:FindFirstChild("RightFoot") or character:FindFirstChild("Right Leg") or rootPart
-	local baseplate = Workspace:FindFirstChild("Baseplate") or Workspace.Terrain
-	local flame = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Particles") and ReplicatedStorage.Assets.Particles:FindFirstChild("Flame")
-	local trail = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Particles") and ReplicatedStorage.Assets.Particles:FindFirstChild("FlameTrail")
-
-	playFlameDashAnimation(humanoid, character, rootPart, foot, baseplate, flame, trail)
+	
+	playFlameDashAnimation(humanoid, character, rootPart)
 
 	local direction = getDashDirection(humanoid, rootPart)
 	local maxDashDistance = getMaxDashDistance(humanoid, rootPart, abilityConfig)
@@ -230,6 +322,13 @@ function MeraMeraNoMi.FlameDash(context)
 		pcall(function()
 			rootPart:SetNetworkOwner(nil)
 		end)
+
+		local dashDelay = tonumber(abilityConfig.DashDelay) or 0.1
+		if dashDelay > 0 then
+			task.wait(dashDelay)
+		end
+
+		if not character.Parent or not rootPart.Parent then return end
 
 		if instantDistance > 0.05 and character.Parent and rootPart.Parent then
 			local targetRootPosition = startPosition + direction * instantDistance
@@ -307,13 +406,10 @@ end
 function MeraMeraNoMi.FireBurst(context)
 	local character = context.Character
 	local humanoid = context.Humanoid
+	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
 	
-	-- Fallback chain for foot, depending on Rig type
-	local foot = character:FindFirstChild("RightFoot") or character:FindFirstChild("Right Leg") or context.RootPart
-	local flameBurst = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("Particles") and ReplicatedStorage.Assets.Particles:FindFirstChild("FlameBurst")
-
-	local flameburstTrack = playFlameBurstAnimation(humanoid, character, foot, flameBurst)
+	playFlameBurstAnimation(humanoid, character, rootPart)
 
 	return {
 		Radius = abilityConfig.Radius,

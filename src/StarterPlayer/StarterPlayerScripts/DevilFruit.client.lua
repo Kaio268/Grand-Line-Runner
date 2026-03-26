@@ -50,6 +50,7 @@ local remotes = waitForChildSafe(ReplicatedStorage, "Remotes", 15)
 local requestRemote = waitForChildSafe(remotes, "DevilFruitAbilityRequest", 15)
 local stateRemote = waitForChildSafe(remotes, "DevilFruitAbilityState", 15)
 local effectRemote = waitForChildSafe(remotes, "DevilFruitAbilityEffect", 15)
+local effectTriggerRemote = waitForChildSafe(remotes, "DevilFruitEffectTrigger", 15)
 
 local localCooldowns = {}
 local suppressedParts = {}
@@ -1399,47 +1400,7 @@ local function createIceImpactEffect(position)
 	end)
 end
 
----Function to clone Icetrail during Ice Boost
-local function cloneIceTrail(character, rootPart, humanoid, iceTrail, duration)
-	local trailClone = iceTrail:Clone()
-	if not trailClone then return end
-
-	trailClone.Parent = Workspace 
-
-	local rayOrigin = rootPart.Position
-	local rayDirection = Vector3.new(0, -10, 0)
-	local raycastParams = RaycastParams.new()
-	raycastParams.FilterDescendantsInstances = {character}
-	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-
-	local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
-	local spawnPos = rayResult and rayResult.Position or (rootPart.Position - Vector3.new(0, 3, 0))
-
-	local spawnCFrame = CFrame.new(spawnPos) * rootPart.CFrame.Rotation
-	local baseplate = Workspace:FindFirstChild("Baseplate") or Workspace.Terrain
-
-	if trailClone:IsA("Model") then
-		trailClone:PivotTo(spawnCFrame)
-
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = baseplate
-		weld.Part1 = trailClone.PrimaryPart or trailClone:FindFirstChildWhichIsA("BasePart")
-		weld.Parent = trailClone
-	else
-		trailClone.CFrame = spawnCFrame
-
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = baseplate
-		weld.Part1 = trailClone
-		weld.Parent = trailClone
-	end
-
-	task.delay(duration, function()
-		if trailClone then
-			trailClone:Destroy()
-		end
-	end)
-end
+-- Removal of cloneIceTrail function as it's now handled server-side
 
 local function createIceBoostEffect(targetPlayer, payload)
 	local character = targetPlayer.Character
@@ -1450,11 +1411,8 @@ local function createIceBoostEffect(targetPlayer, payload)
 	end
 
 	local duration = tonumber(payload and payload.Duration) or 0
-	local iceTrail = ReplicatedStorage:FindFirstChild("Assets") 
-		and ReplicatedStorage.Assets:FindFirstChild("Particles") 
-		and ReplicatedStorage.Assets.Particles:FindFirstChild("IceTrail")
-
-	if iceTrail and duration > 0 then
+	
+	if duration > 0 then
 		local existing = activeIceBoosts[targetPlayer]
 		if existing then
 			existing:Disconnect()
@@ -1468,7 +1426,9 @@ local function createIceBoostEffect(targetPlayer, payload)
 			local connection
 
 			-- Initial spawn
-			cloneIceTrail(character, rootPart, humanoid, iceTrail, duration)
+			if targetPlayer == player then
+				effectTriggerRemote:FireServer("IceTrail", rootPart.CFrame, duration)
+			end
 			lastSpawnTime = os.clock()
 
 			connection = RunService.Heartbeat:Connect(function()
@@ -1481,14 +1441,12 @@ local function createIceBoostEffect(targetPlayer, payload)
 					return
 				end
 
-				if humanoid.MoveDirection.Magnitude > 0 then
+				if targetPlayer == player and humanoid.MoveDirection.Magnitude > 0 then
 					local currentPos = rootPart.Position
 					local distance = (currentPos - lastSpawnPos).Magnitude
 
-					-- Increase distance threshold to prevent stacking
-					-- Also add a small time debounce
 					if distance > 2.2 and (now - lastSpawnTime) > 0.1 then
-						cloneIceTrail(character, rootPart, humanoid, iceTrail, duration)
+						effectTriggerRemote:FireServer("IceTrail", rootPart.CFrame, duration)
 						lastSpawnPos = currentPos
 						lastSpawnTime = now
 					end
