@@ -106,6 +106,12 @@ local ProfileTemplate = {
 		DevilFruits = {},
 	},
 
+	TimeRewards = {
+		CycleStartPlayTime = 0,
+		ClaimedRewards = {},
+		LastClaimPlayTime = 0,
+	},
+
 	IncomeBrainrots = {},
 	StandsLevels = {},
 	Gears = {},

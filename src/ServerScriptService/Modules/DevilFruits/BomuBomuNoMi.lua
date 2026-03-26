@@ -4,7 +4,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
-local HazardUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
 local BomuBomuNoMi = {}
@@ -32,19 +31,6 @@ local function getPlanarUnitOrFallback(vector, fallback)
 	end
 
 	return Vector3.new(0, 0, -1)
-end
-
-local function isPlayerCharacterDescendant(instance)
-	local current = instance
-	while current and current ~= Workspace do
-		if Players:GetPlayerFromCharacter(current) then
-			return true
-		end
-
-		current = current.Parent
-	end
-
-	return false
 end
 
 local function buildOverlapParams(character, extraExclusions)
@@ -105,32 +91,24 @@ local function ensureEffectsFolder()
 end
 
 local function destroyMinorHazards(centerPosition, radius, character)
-	local overlapParams = buildOverlapParams(character)
-	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, overlapParams)
 	local destroyedCount = 0
-	local seenContainers = {}
+	local hazards = HazardRuntime.FindHazardsInRadius(
+		centerPosition,
+		radius,
+		{
+			AllowedClasses = {
+				minor = true,
+			},
+			PlayerRootPosition = centerPosition,
+			MaxPlayerDistance = math.max(0, tonumber(radius) or 0) + 8,
+			ExcludeInstances = character and { character } or nil,
+			MaxUniqueHazards = 8,
+		}
+	)
 
-	for _, part in ipairs(nearbyParts) do
-		local container, hazardClass = HazardUtils.GetHazardInfo(part)
-		if container
-			and hazardClass == "minor"
-			and container.Parent
-			and container:IsDescendantOf(Workspace)
-			and not seenContainers[container]
-			and not isPlayerCharacterDescendant(container) then
-			seenContainers[container] = true
-
-			local destroyed = HazardRuntime.Destroy(container)
-			if not destroyed and container.Parent then
-				local ok = pcall(function()
-					container:Destroy()
-				end)
-				destroyed = ok
-			end
-
-			if destroyed then
-				destroyedCount += 1
-			end
+	for _, hazard in ipairs(hazards) do
+		if HazardRuntime.Destroy(hazard.Root) then
+			destroyedCount += 1
 		end
 	end
 

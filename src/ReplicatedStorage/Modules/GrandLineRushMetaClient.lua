@@ -11,6 +11,12 @@ local MetaClient = {
 	_observers = {},
 }
 
+local SAFE_CLIENT_ACTIONS = {
+	GetState = true,
+	OpenChest = true,
+	FeedCrew = true,
+}
+
 local player = Players.LocalPlayer
 local requestRemote
 local stateRemote
@@ -93,6 +99,15 @@ end
 
 function MetaClient.Request(actionName, payload)
 	MetaClient.Init()
+
+	if SAFE_CLIENT_ACTIONS[actionName] ~= true then
+		return {
+			ok = false,
+			message = "That request is no longer client-authorized.",
+			error = "action_not_client_authorized",
+			state = MetaClient._state,
+		}
+	end
 
 	local ok, response = pcall(function()
 		return requestRemote:InvokeServer(actionName, payload)

@@ -55,7 +55,7 @@ local function getRequestedTargetPosition(context)
 	return nil, nil
 end
 
-local function getLaunchDirectionAndTarget(context)
+local function getLaunchDirectionAndTarget(context, maxDistance)
 	local rootPart = context.RootPart
 	local rootPosition = rootPart.Position
 	local targetPosition, targetPlayer = getRequestedTargetPosition(context)
@@ -63,12 +63,15 @@ local function getLaunchDirectionAndTarget(context)
 	if targetPosition then
 		local direction = getPlanarUnitOrNil(targetPosition - rootPosition)
 		if direction then
-			return direction, Vector3.new(targetPosition.X, rootPosition.Y, targetPosition.Z), targetPlayer
+			if targetPlayer then
+				return direction, Vector3.new(targetPosition.X, rootPosition.Y, targetPosition.Z), targetPlayer
+			end
+
+			return direction, rootPosition + (direction * maxDistance), nil
 		end
 	end
 
 	local fallbackDirection = getFallbackDirection(rootPart)
-	local maxDistance = math.max(0, tonumber(context.AbilityConfig.LaunchDistance) or 20)
 	return fallbackDirection, rootPosition + (fallbackDirection * maxDistance), nil
 end
 
@@ -120,9 +123,9 @@ function GomuGomuNoMi.RubberLaunch(context)
 	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
 
-	local direction, targetPosition, targetPlayer = getLaunchDirectionAndTarget(context)
-	local startPosition = rootPart.Position
 	local maxDistance = math.max(0, tonumber(abilityConfig.LaunchDistance) or 20)
+	local direction, targetPosition, targetPlayer = getLaunchDirectionAndTarget(context, maxDistance)
+	local startPosition = rootPart.Position
 	local launchDistance = getLaunchDistance(character, rootPart, direction, maxDistance)
 	local launchDuration = math.max(0.05, tonumber(abilityConfig.LaunchDuration) or 0.35)
 	local launchVelocity = getLaunchVelocity(direction, launchDistance, maxDistance, launchDuration)

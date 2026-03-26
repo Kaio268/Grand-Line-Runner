@@ -571,6 +571,15 @@ local function resolveActionResponse(player, ok, message, errorCode)
 	}
 end
 
+local function preparePlayerState(player)
+	if not waitForDataReady(player, 10) then
+		return false, resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+
+	ensureStarterCrew(player)
+	return true
+end
+
 local function setResolution(player, text)
 	local runtime = getRuntime(player)
 	runtime.ResolutionText = text
@@ -1034,24 +1043,13 @@ local function handleRequest(player, actionName, payload)
 		return resolveActionResponse(player, false, nil, "invalid_action")
 	end
 
-	if not waitForDataReady(player, 10) then
-		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
 	end
-
-	ensureStarterCrew(player)
 
 	if actionName == "GetState" then
 		return resolveActionResponse(player, true)
-	elseif actionName == "StartRun" then
-		local rewardType = payload and payload.RewardType or "Chest"
-		local depthBand = payload and payload.DepthBand or Economy.VerticalSlice.DefaultDepthBand
-		return startRun(player, rewardType, depthBand)
-	elseif actionName == "ClaimReward" then
-		return claimSpawnedReward(player)
-	elseif actionName == "ExtractRun" then
-		return extractRun(player)
-	elseif actionName == "FailRun" then
-		return Service.FailRun(player, "Run failed. Unextracted rewards were lost.")
 	elseif actionName == "OpenChest" then
 		return openChest(player, payload and payload.ChestId)
 	elseif actionName == "FeedCrew" then
@@ -1142,10 +1140,12 @@ function Service.PushState(player)
 end
 
 function Service.StartRun(player, rewardType, depthBand)
-	return handleRequest(player, "StartRun", {
-		RewardType = rewardType,
-		DepthBand = depthBand,
-	})
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return startRun(player, rewardType, depthBand)
 end
 
 function Service.CreateChestRewardData(depthBand)
@@ -1158,14 +1158,20 @@ function Service.CreateChestRewardData(depthBand)
 end
 
 function Service.ClaimSpawnedReward(player)
-	return handleRequest(player, "ClaimReward")
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return claimSpawnedReward(player)
 end
 
 function Service.ClaimWorldChest(player, rewardData)
-	if not waitForDataReady(player, 10) then
-		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
 	end
-	ensureStarterCrew(player)
+
 	return claimWorldChest(player, rewardData)
 end
 
@@ -1178,7 +1184,12 @@ function Service.DropCarriedReward(player, options)
 end
 
 function Service.ExtractRun(player)
-	return handleRequest(player, "ExtractRun")
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return extractRun(player)
 end
 
 function Service.GrantChest(player, tierName, amount, depthBand)
@@ -1211,16 +1222,21 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 end
 
 function Service.OpenChest(player, chestId)
-	return handleRequest(player, "OpenChest", {
-		ChestId = chestId,
-	})
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return openChest(player, chestId)
 end
 
 function Service.FeedCrew(player, crewInstanceId, foodKey)
-	return handleRequest(player, "FeedCrew", {
-		CrewInstanceId = crewInstanceId,
-		FoodKey = foodKey,
-	})
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return feedCrew(player, crewInstanceId, foodKey)
 end
 
 return Service

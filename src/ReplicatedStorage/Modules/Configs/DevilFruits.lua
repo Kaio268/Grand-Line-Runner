@@ -46,6 +46,7 @@ local DevilFruits = {
 				FreezeShot = {
 					KeyCode = Enum.KeyCode.Q,
 					Cooldown = 8,
+					ServerRequestThrottle = 0.35,
 					Range = 120,
 					ProjectileSpeed = 170,
 					ProjectileRadius = 1.2,
@@ -74,6 +75,14 @@ local DevilFruits = {
 					Cooldown = 8,
 					LaunchDistance = 20,
 					LaunchDuration = 0.35,
+					RequestPayloadSchema = {
+						MaxKeys = 2,
+						MaxHintDistance = 600,
+						Fields = {
+							AimPosition = "Vector3",
+							TargetPlayerUserId = "UserId",
+						},
+					},
 				},
 			},
 		},
@@ -91,6 +100,7 @@ local DevilFruits = {
 					KeyCode = Enum.KeyCode.Q,
 					Cooldown = 15,
 					CooldownStartsOn = "Resolve",
+					ServerRequestThrottle = 0.35,
 					PlacementDistance = 4,
 					MineLifetime = 60,
 					Radius = 8,

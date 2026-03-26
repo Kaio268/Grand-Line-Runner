@@ -9,7 +9,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
-local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local ProtectionRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
 
 local player = Players.LocalPlayer
@@ -1431,49 +1430,7 @@ local function createIceBoostEffect(targetPlayer, _payload)
 	end)
 end
 
-local function findFreezableHazardNearPosition(centerPosition, searchRadius, overlapParams)
-	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, searchRadius, overlapParams)
-	local closestContainer
-	local closestDistance = math.huge
-
-	for _, part in ipairs(nearbyParts) do
-		local container, _, _, canFreeze = getHazardContainer(part)
-		if container and canFreeze then
-			local distance = (part.Position - centerPosition).Magnitude
-			if distance < closestDistance then
-				closestDistance = distance
-				closestContainer = container
-			end
-		end
-	end
-
-	return closestContainer
-end
-
-local function findFreezableHazardAlongSegment(startPosition, endPosition, searchRadius, overlapParams)
-	local delta = endPosition - startPosition
-	local distance = delta.Magnitude
-	if distance <= 0.001 then
-		local container = findFreezableHazardNearPosition(startPosition, searchRadius, overlapParams)
-		return container, startPosition
-	end
-
-	local sampleSpacing = math.max(searchRadius * 0.55, 0.5)
-	local sampleCount = math.max(1, math.ceil(distance / sampleSpacing))
-
-	for sampleIndex = 0, sampleCount do
-		local alpha = sampleIndex / sampleCount
-		local samplePosition = startPosition:Lerp(endPosition, alpha)
-		local container = findFreezableHazardNearPosition(samplePosition, searchRadius, overlapParams)
-		if container then
-			return container, samplePosition
-		end
-	end
-
-	return nil, nil
-end
-
-local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
+local function launchFreezeShot(targetPlayer, payload)
 	local rootPart = getPlayerRootPart(targetPlayer)
 	if not rootPart then
 		return
@@ -1483,8 +1440,13 @@ local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 	local range = math.max(1, tonumber(payload.Range) or 0)
 	local speed = math.max(1, tonumber(payload.ProjectileSpeed) or 0)
 	local radius = math.max(0.25, tonumber(payload.ProjectileRadius) or 0.8)
-	local freezeDuration = math.max(0, tonumber(payload.FreezeDuration) or 0)
-	local startPosition = rootPart.Position + Vector3.new(0, 1.2, 0) + direction * 3
+	local startPosition = typeof(payload.StartPosition) == "Vector3"
+		and payload.StartPosition
+		or (rootPart.Position + Vector3.new(0, 1.2, 0) + direction * 3)
+	local endPosition = typeof(payload.EndPosition) == "Vector3"
+		and payload.EndPosition
+		or (startPosition + direction * range)
+	local finalPosition = typeof(payload.HitPosition) == "Vector3" and payload.HitPosition or endPosition
 
 	local projectile = Instance.new("Part")
 	projectile.Name = "HieFreezeShot"
@@ -1500,41 +1462,27 @@ local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 	projectile.CFrame = CFrame.new(startPosition)
 	projectile.Parent = Workspace
 
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = { projectile, targetPlayer.Character }
-
 	task.spawn(function()
+		local totalDistance = (finalPosition - startPosition).Magnitude
 		local traveledDistance = 0
 		local lastPosition = startPosition
-		local hasResolvedFreeze = false
 
-		while projectile.Parent and traveledDistance < range do
+		while projectile.Parent and traveledDistance < totalDistance do
 			local dt = RunService.Heartbeat:Wait()
-			local stepDistance = math.min(speed * dt, range - traveledDistance)
+			local stepDistance = math.min(speed * dt, totalDistance - traveledDistance)
 			if stepDistance <= 0 then
 				break
 			end
 
 			local nextPosition = lastPosition + direction * stepDistance
-			if shouldResolveHit and not hasResolvedFreeze and freezeDuration > 0 then
-				local overlapRadius = math.max(radius * 1.15, 1)
-				local hitContainer, impactPosition = findFreezableHazardAlongSegment(lastPosition, nextPosition, overlapRadius, overlapParams)
-				if hitContainer then
-					hasResolvedFreeze = true
-					local freezeApplied = HazardRuntime.Freeze(hitContainer, freezeDuration)
-					if not freezeApplied then
-						suppressHazard(hitContainer, os.clock() + freezeDuration)
-					end
-					createIceImpactEffect(impactPosition)
-					projectile.Position = impactPosition
-					break
-				end
-			end
-
 			projectile.Position = nextPosition
 			lastPosition = nextPosition
 			traveledDistance += stepDistance
+		end
+
+		projectile.Position = finalPosition
+		if payload.HazardHit == true then
+			createIceImpactEffect(finalPosition)
 		end
 
 		if projectile.Parent then
@@ -1713,35 +1661,6 @@ local function getEffectOriginPosition(targetPlayer, payload)
 
 	local rootPart = getPlayerRootPart(targetPlayer)
 	return rootPart and rootPart.Position or nil
-end
-
-local function destroyMinorHazardsNearPosition(centerPosition, radius)
-	if typeof(centerPosition) ~= "Vector3" or radius <= 0 then
-		return 0
-	end
-
-	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, buildLocalHazardOverlapParams())
-	local destroyedContainers = {}
-	local destroyedCount = 0
-
-	for _, part in ipairs(nearbyParts) do
-		local container, hazardClass = getHazardContainer(part)
-		if container and hazardClass == "minor" and not destroyedContainers[container] then
-			destroyedContainers[container] = true
-
-			local destroyed = HazardRuntime.Destroy(container)
-			if not destroyed and container.Parent then
-				container:Destroy()
-				destroyed = true
-			end
-
-			if destroyed then
-				destroyedCount += 1
-			end
-		end
-	end
-
-	return destroyedCount
 end
 
 local function createBomuDetonationEffect(targetPlayer, fruitName, abilityName, payload)
@@ -2102,7 +2021,7 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 	end
 
 	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
-		launchFreezeShot(targetPlayer, resolvedPayload, targetPlayer == player)
+		launchFreezeShot(targetPlayer, resolvedPayload)
 		return
 	end
 
@@ -2110,16 +2029,6 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 		createIceBoostEffect(targetPlayer, resolvedPayload)
 	end
 
-	if fruitName == "Bomu Bomu no Mi"
-		and abilityName == "LandMine"
-		and resolvedPayload.Action == "Detonated"
-		and resolvedPayload.DestroyMinorHazards == true then
-		local originPosition = getEffectOriginPosition(targetPlayer, resolvedPayload)
-		local radius = math.max(0, tonumber(resolvedPayload.Radius) or 0)
-		if originPosition and radius > 0 then
-			destroyMinorHazardsNearPosition(originPosition, radius)
-		end
-	end
 end)
 
 player.CharacterRemoving:Connect(function()

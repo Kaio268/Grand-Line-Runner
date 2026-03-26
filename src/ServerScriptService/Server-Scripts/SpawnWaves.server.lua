@@ -91,7 +91,10 @@ end
 
 local remotesFolder = getOrCreateRemotesFolder()
 local killMeRemote = getOrCreateRemoteEvent(remotesFolder, "KillMe")
-local hazardActionRemote = getOrCreateRemoteEvent(remotesFolder, HAZARD_ACTION_REMOTE_NAME)
+local legacyHazardRemote = remotesFolder:FindFirstChild(HAZARD_ACTION_REMOTE_NAME)
+if legacyHazardRemote then
+	legacyHazardRemote:Destroy()
+end
 
 killMeRemote.OnServerEvent:Connect(function(player)
 	local character = player.Character
@@ -397,27 +400,6 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed)
 		controller:Destroy()
 	end)
 end
-
-local function isSharedHazardInstance(instance)
-	if typeof(instance) ~= "Instance" then
-		return false
-	end
-
-	local _, _, hazardsFolder = resolveHazardRefs()
-	return hazardsFolder ~= nil and instance:IsDescendantOf(hazardsFolder)
-end
-
-hazardActionRemote.OnServerEvent:Connect(function(_, actionName, targetInstance, actionValue)
-	if not isSharedHazardInstance(targetInstance) then
-		return
-	end
-
-	if actionName == "Freeze" then
-		HazardRuntime.Freeze(targetInstance, actionValue)
-	elseif actionName == "Destroy" then
-		HazardRuntime.Destroy(targetInstance)
-	end
-end)
 
 local noDisastersTimer = Workspace:FindFirstChild("NoDisastersTimer") or Workspace:WaitForChild("NoDisastersTimer", 15)
 local spawnPaused = nil

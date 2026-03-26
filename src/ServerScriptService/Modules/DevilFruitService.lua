@@ -62,6 +62,7 @@ local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):Wai
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local DevilFruitRequestGuard = require(ModulesFolder:WaitForChild("DevilFruitRequestGuard"))
 local syncFruitAttribute
 
 if not DataManager._initialized and typeof(DataManager.init) == "function" then
@@ -340,6 +341,7 @@ local function cleanupPlayerState(player)
 	pendingPersistByPlayer[player] = nil
 	persistTaskByPlayer[player] = nil
 	hydrationTaskByPlayer[player] = nil
+	DevilFruitRequestGuard.CleanupPlayer(player)
 end
 
 local function isCooldownBypassEnabled(player)
@@ -462,20 +464,36 @@ local function hookPlayer(player)
 	end)
 end
 
-local function getCharacterContext(player, fruitName, abilityName, requestPayload)
+local function getAliveCharacterState(player)
 	local character = player.Character
 	if not character then
-		return nil
+		return nil, "NoCharacter"
 	end
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local rootPart = character:FindFirstChild("HumanoidRootPart")
 	if not humanoid or not rootPart or humanoid.Health <= 0 then
+		return nil, "InvalidHumanoid"
+	end
+
+	return {
+		Character = character,
+		Humanoid = humanoid,
+		RootPart = rootPart,
+	}, nil
+end
+
+local function getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
+	local resolvedCharacterState = characterState
+	if type(resolvedCharacterState) ~= "table" then
+		resolvedCharacterState = getAliveCharacterState(player)
+	end
+
+	if type(resolvedCharacterState) ~= "table" then
 		return nil
 	end
 
 	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
-	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
 	local fruitHandler = getFruitHandler(fruitName)
 
 	if not fruitConfig or not abilityConfig or not fruitHandler then
@@ -484,9 +502,9 @@ local function getCharacterContext(player, fruitName, abilityName, requestPayloa
 
 	return {
 		Player = player,
-		Character = character,
-		Humanoid = humanoid,
-		RootPart = rootPart,
+		Character = resolvedCharacterState.Character,
+		Humanoid = resolvedCharacterState.Humanoid,
+		RootPart = resolvedCharacterState.RootPart,
 		FruitKey = fruitConfig.FruitKey,
 		FruitName = fruitName,
 		FruitConfig = fruitConfig,
@@ -494,6 +512,9 @@ local function getCharacterContext(player, fruitName, abilityName, requestPayloa
 		AbilityConfig = abilityConfig,
 		FruitHandler = fruitHandler,
 		RequestPayload = requestPayload,
+		ReportSuspicious = function(reason, detail, weight)
+			DevilFruitRequestGuard.RecordSuspicious(player, reason, detail, weight)
+		end,
 	}
 end
 
@@ -556,22 +577,24 @@ local function fireAbilityActivated(player, fruitName, abilityName, readyAt, pay
 	RemoteBundle.Effect:FireAllClients(player, fruitName, abilityName, payload or {})
 end
 
-local function executeAbility(player, abilityName, requestPayload)
-	local fruitName = getEquippedFruit(player)
-	local context = getCharacterContext(player, fruitName, abilityName, requestPayload)
+local function executeAbility(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
+	local context = getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
 	if not context then
+		DevilFruitRequestGuard.RecordRejection(player, "InvalidContext", abilityName)
 		fireAbilityDenied(player, fruitName, abilityName, "InvalidContext")
 		return
 	end
 
 	local abilityHandler = context.FruitHandler[abilityName]
 	if typeof(abilityHandler) ~= "function" then
+		DevilFruitRequestGuard.RecordRejection(player, "UnknownAbility", abilityName)
 		fireAbilityDenied(player, fruitName, abilityName, "MissingHandler")
 		return
 	end
 
 	local isReady, readyAt = isAbilityReady(player, abilityName)
 	if not isReady then
+		DevilFruitRequestGuard.RecordRejection(player, "Cooldown", abilityName)
 		fireAbilityDenied(player, fruitName, abilityName, "Cooldown", readyAt)
 		return
 	end
@@ -590,6 +613,7 @@ local function executeAbility(player, abilityName, requestPayload)
 			clearAbilityCooldown(player, abilityName)
 		end
 		warn("[DevilFruitService] Failed to execute " .. fruitName .. " / " .. abilityName .. ": " .. tostring(payload))
+		DevilFruitRequestGuard.RecordRejection(player, "ExecutionFailed", abilityName)
 		fireAbilityDenied(player, fruitName, abilityName, "ExecutionFailed")
 		return
 	end
@@ -624,6 +648,7 @@ local function executeAbility(player, abilityName, requestPayload)
 	end
 
 	fireAbilityActivated(player, fruitName, abilityName, nextReadyAt, payload)
+	DevilFruitRequestGuard.RecordAccepted(player, fruitName, abilityName)
 end
 
 function DevilFruitService.GetEquippedFruit(player)
@@ -737,23 +762,47 @@ function DevilFruitService.Start()
 	Players.PlayerRemoving:Connect(cleanupPlayerState)
 
 	RemoteBundle.Request.OnServerEvent:Connect(function(player, abilityName, requestPayload)
-		if typeof(abilityName) ~= "string" then
+		local preflightOk, preflightReason, preflightReadyAt = DevilFruitRequestGuard.Preflight(player, abilityName, requestPayload)
+		if not preflightOk then
+			fireAbilityDenied(player, getEquippedFruit(player), abilityName, preflightReason, preflightReadyAt)
 			return
 		end
 
+		local characterState, characterReason = getAliveCharacterState(player)
 		local equippedFruit = getEquippedFruit(player)
+		if not characterState then
+			DevilFruitRequestGuard.RecordRejection(player, "InvalidContext", characterReason)
+			fireAbilityDenied(player, equippedFruit, abilityName, "InvalidContext")
+			return
+		end
+
 		if equippedFruit == DevilFruitConfig.None then
+			DevilFruitRequestGuard.RecordRejection(player, "NoFruit", abilityName)
 			fireAbilityDenied(player, equippedFruit, abilityName, "NoFruit")
 			return
 		end
 
 		local abilityConfig = DevilFruitConfig.GetAbility(equippedFruit, abilityName)
 		if not abilityConfig then
+			DevilFruitRequestGuard.RecordRejection(player, "UnknownAbility", abilityName)
 			fireAbilityDenied(player, equippedFruit, abilityName, "UnknownAbility")
 			return
 		end
 
-		executeAbility(player, abilityName, typeof(requestPayload) == "table" and requestPayload or nil)
+		local requestAllowed, sanitizedPayload, rejectionReason, rejectionReadyAt = DevilFruitRequestGuard.ValidateAndReserve(
+			player,
+			equippedFruit,
+			abilityName,
+			abilityConfig,
+			requestPayload,
+			characterState
+		)
+		if not requestAllowed then
+			fireAbilityDenied(player, equippedFruit, abilityName, rejectionReason, rejectionReadyAt)
+			return
+		end
+
+		executeAbility(player, equippedFruit, abilityName, abilityConfig, sanitizedPayload, characterState)
 	end)
 end
 

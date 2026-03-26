@@ -385,7 +385,23 @@ local function buildSlotsWithWait()
 	return false
 end
 
-local function initialiseButtons(serverStartEpoch: number)
+local function normalizeClaimedRewards(rawClaimedRewards)
+	local claimedRewards = {}
+	if typeof(rawClaimedRewards) ~= "table" then
+		return claimedRewards
+	end
+
+	for rawKey, rawValue in pairs(rawClaimedRewards) do
+		local id = tonumber(rawKey)
+		if id and rawValue == true then
+			claimedRewards[tostring(id)] = true
+		end
+	end
+
+	return claimedRewards
+end
+
+local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local cfg = RewardsConfig[id]
@@ -416,17 +432,82 @@ local function initialiseButtons(serverStartEpoch: number)
 	updateHud()
 end
 
+local function initialiseButtonsFromState(syncState)
+	if typeof(syncState) ~= "table" then
+		dwarn("syncState payload must be a table, got", typeof(syncState))
+		return
+	end
+
+	local cycleStartPlayTime = tonumber(syncState.CycleStartPlayTime)
+	local currentPlayTime = tonumber(syncState.CurrentPlayTime)
+	if not cycleStartPlayTime or not currentPlayTime then
+		dwarn("syncState missing play time fields", syncState)
+		return
+	end
+
+	local claimedRewards = normalizeClaimedRewards(syncState.ClaimedRewards)
+	local elapsedPlayTime = math.max(0, currentPlayTime - cycleStartPlayTime)
+
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		local cfg = RewardsConfig[id]
+		local slotFrame = slotsById[id]
+
+		if slotFrame and cfg then
+			stopCountdown(id)
+			setRewData(slotFrame, cfg)
+
+			local claimed = claimedRewards[tostring(id)] == true
+			slotFrame:SetAttribute("Claimed", claimed)
+
+			if claimed then
+				endTimes[id] = nil
+				setTimerClaimed(slotFrame)
+			elseif cfg.Time == nil then
+				setTimerCountdown(slotFrame, "ERR")
+			else
+				local remaining = math.max(0, cfg.Time - elapsedPlayTime)
+				endTimes[id] = os.clock() + remaining
+
+				if remaining > 0 then
+					setTimerCountdown(slotFrame, Shorten.timeSuffixTwo(remaining))
+					startCountdown(id)
+				else
+					setTimerReady(slotFrame)
+				end
+			end
+		end
+	end
+
+	updateHud()
+end
+
 local building = false
-local pendingEpoch: number? = nil
+local pendingState = nil
+
+local function applyPendingState()
+	if pendingState == nil then
+		return
+	end
+
+	local state = pendingState
+	pendingState = nil
+
+	if typeof(state) == "table" then
+		initialiseButtonsFromState(state)
+	elseif typeof(state) == "number" then
+		initialiseButtonsFromLegacyEpoch(state)
+	else
+		dwarn("Unsupported pending time reward state", typeof(state))
+	end
+end
 
 task.spawn(function()
 	building = true
 	local ok = buildSlotsWithWait()
 	building = false
-	if ok and pendingEpoch then
-		local epoch = pendingEpoch
-		pendingEpoch = nil
-		initialiseButtons(epoch)
+	if ok then
+		applyPendingState()
 	end
 end)
 
@@ -438,28 +519,43 @@ task.spawn(function()
 end)
 
 Remote.OnClientEvent:Connect(function(action, a, b, c)
-	if action == "startCycle" or action == "cycleReset" then
-		if typeof(a) ~= "number" then
-			dwarn("startCycle/cycleReset bad epoch:", a, "typeof:", typeof(a))
-			return
-		end
+	if action == "syncState" then
 		if totalGifts == 0 then
-			pendingEpoch = a
+			pendingState = a
 			if not building then
 				task.spawn(function()
 					building = true
 					local ok = buildSlotsWithWait()
 					building = false
-					if ok and pendingEpoch then
-						local epoch = pendingEpoch
-						pendingEpoch = nil
-						initialiseButtons(epoch)
+					if ok then
+						applyPendingState()
 					end
 				end)
 			end
 			return
 		end
-		initialiseButtons(a)
+		initialiseButtonsFromState(a)
+
+	elseif action == "startCycle" or action == "cycleReset" then
+		if typeof(a) ~= "number" then
+			dwarn("startCycle/cycleReset bad epoch:", a, "typeof:", typeof(a))
+			return
+		end
+		if totalGifts == 0 then
+			pendingState = a
+			if not building then
+				task.spawn(function()
+					building = true
+					local ok = buildSlotsWithWait()
+					building = false
+					if ok then
+						applyPendingState()
+					end
+				end)
+			end
+			return
+		end
+		initialiseButtonsFromLegacyEpoch(a)
 
 	elseif action == "forceReady" then
 		for i = 1, totalGifts do
@@ -486,6 +582,23 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		updateHud()
 
 	elseif action == "notReady" then
+		local id = tonumber(a)
+		local remaining = tonumber(b)
+		local slotFrame = id and slotsById[id]
+		if slotFrame and not slotFrame:GetAttribute("Claimed") and remaining then
+			local clampedRemaining = math.max(0, math.ceil(remaining))
+			endTimes[id] = os.clock() + clampedRemaining
+			stopCountdown(id)
+			if clampedRemaining > 0 then
+				local ok, text = pcall(function()
+					return Shorten.timeSuffixTwo(clampedRemaining)
+				end)
+				setTimerCountdown(slotFrame, ok and text or (tostring(clampedRemaining) .. "s"))
+				startCountdown(id)
+			else
+				setTimerReady(slotFrame)
+			end
+		end
 		updateHud()
 
 	elseif action == "alreadyClaimed" then

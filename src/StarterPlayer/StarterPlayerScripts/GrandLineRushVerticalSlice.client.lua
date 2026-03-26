@@ -48,6 +48,11 @@ local selectedDepthBand = verticalSliceConfig.DefaultDepthBand
 local selectedCrewId = nil
 local currentState = nil
 local lastMessage = "Open the prototype panel and validate the loop."
+local SAFE_CLIENT_ACTIONS = {
+	GetState = true,
+	OpenChest = true,
+	FeedCrew = true,
+}
 
 local function createCorner(parent, radius)
 	local corner = Instance.new("UICorner")
@@ -172,7 +177,7 @@ do
 	end
 end
 
-local actionLabel = createLabel(panel, "Run Actions", UDim2.new(1, -28, 0, 18), UDim2.fromOffset(16, 168), 13)
+local actionLabel = createLabel(panel, "Corridor Actions (server-observed only)", UDim2.new(1, -28, 0, 18), UDim2.fromOffset(16, 168), 13)
 actionLabel.TextColor3 = Color3.fromRGB(255, 222, 156)
 actionLabel.ZIndex = 21
 
@@ -188,10 +193,10 @@ actionLayout.CellSize = UDim2.fromOffset(140, 36)
 actionLayout.Parent = actionGrid
 
 local startChestButton = createButton(actionGrid, "World Chests Shared", nil, nil, Color3.fromRGB(73, 83, 93))
-local startCrewButton = createButton(actionGrid, "Start Crew Run", nil, nil, Color3.fromRGB(42, 97, 153))
-local claimRewardButton = createButton(actionGrid, "Pick Up Reward", nil, nil, Color3.fromRGB(53, 127, 107))
-local extractButton = createButton(actionGrid, "Extract Run", nil, nil, Color3.fromRGB(27, 124, 91))
-local failRunButton = createButton(actionGrid, "Fail Run", nil, nil, Color3.fromRGB(148, 62, 62))
+local startCrewButton = createButton(actionGrid, "Start At Corridor", nil, nil, Color3.fromRGB(42, 97, 153))
+local claimRewardButton = createButton(actionGrid, "Pick Up In World", nil, nil, Color3.fromRGB(53, 127, 107))
+local extractButton = createButton(actionGrid, "Extract In Zone", nil, nil, Color3.fromRGB(27, 124, 91))
+local failRunButton = createButton(actionGrid, "Fail On Server", nil, nil, Color3.fromRGB(148, 62, 62))
 
 for _, button in ipairs({ startChestButton, startCrewButton, claimRewardButton, extractButton, failRunButton }) do
 	button.ZIndex = 21
@@ -310,6 +315,13 @@ crewList.Size = UDim2.new(1, -28, 0, panelHeight - 612)
 local function setMessage(text)
 	lastMessage = text or lastMessage
 	messageLabel.Text = lastMessage
+end
+
+local function setWorldInteractionMessage(actionName)
+	setMessage(string.format(
+		"%s is now server-observed only. Use the real corridor start prompt, reward pickup prompt, or extraction zone.",
+		tostring(actionName or "That action")
+	))
 end
 
 local function setButtonEnabled(button, enabled)
@@ -456,14 +468,20 @@ local function render()
 		end)
 	end
 
-	setButtonEnabled(claimRewardButton, runState.InRun and runState.SpawnedReward ~= nil)
-	setButtonEnabled(extractButton, runState.InRun and runState.CarriedReward ~= nil)
-	setButtonEnabled(failRunButton, runState.InRun)
+	setButtonEnabled(claimRewardButton, false)
+	setButtonEnabled(extractButton, false)
+	setButtonEnabled(failRunButton, false)
 	setButtonEnabled(openChestButton, (currentState.UnopenedChestCount or 0) > 0)
 	setButtonEnabled(startChestButton, false)
+	setButtonEnabled(startCrewButton, false)
 end
 
 local function request(actionName, payload)
+	if SAFE_CLIENT_ACTIONS[actionName] ~= true then
+		setWorldInteractionMessage(actionName)
+		return
+	end
+
 	local ok, response = pcall(function()
 		return requestRemote:InvokeServer(actionName, payload)
 	end)
@@ -500,22 +518,19 @@ for depthBand, button in pairs(depthButtons) do
 end
 
 startCrewButton.MouseButton1Click:Connect(function()
-	request("StartRun", {
-		RewardType = "Crew",
-		DepthBand = selectedDepthBand,
-	})
+	setWorldInteractionMessage("StartRun")
 end)
 
 claimRewardButton.MouseButton1Click:Connect(function()
-	request("ClaimReward")
+	setWorldInteractionMessage("ClaimReward")
 end)
 
 extractButton.MouseButton1Click:Connect(function()
-	request("ExtractRun")
+	setWorldInteractionMessage("ExtractRun")
 end)
 
 failRunButton.MouseButton1Click:Connect(function()
-	request("FailRun")
+	setWorldInteractionMessage("FailRun")
 end)
 
 openChestButton.MouseButton1Click:Connect(function()
