@@ -1,4 +1,53 @@
 local HieHieNoMi = {}
+local iceBlastAnimation = "rbxassetid://112900668980719"
+local iceBoostAnimation = "rbxassetid://84130968608346"
+
+local function playIceBlastAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBlastAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
+
+local function playIceBoostAnimation(humanoid, duration)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBoostAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	
+	local moveConnection
+	moveConnection = humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+		if humanoid.MoveDirection.Magnitude > 0 then
+			if not track.IsPlaying then
+				track:Play()
+			end
+		else
+			if track.IsPlaying then
+				track:Stop()
+			end
+		end
+	end)
+
+	if humanoid.MoveDirection.Magnitude > 0 then
+		track:Play()
+	end
+
+	task.delay(duration, function()
+		if moveConnection then
+			moveConnection:Disconnect()
+		end
+		if track then
+			track:Stop()
+			track:Destroy()
+		end
+	end)
+
+	return track
+end
+
+
 
 local function getForwardDirection(rootPart)
 	local look = rootPart.CFrame.LookVector
@@ -15,6 +64,8 @@ local function getForwardDirection(rootPart)
 end
 
 function HieHieNoMi.FreezeShot(context)
+	local humanoid = context.Humanoid
+	playIceBlastAnimation(humanoid)
 	local abilityConfig = context.AbilityConfig
 	local direction = getForwardDirection(context.RootPart)
 
@@ -31,6 +82,8 @@ function HieHieNoMi.IceBoost(context)
 	local player = context.Player
 	local abilityConfig = context.AbilityConfig
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
+	local humanoid = context.Humanoid
+	playIceBoostAnimation(humanoid, duration)
 	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or 2)
 	local untilTime = os.clock() + duration
 

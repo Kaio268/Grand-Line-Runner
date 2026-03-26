@@ -1,11 +1,31 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-
+local flameDashAnimation = "rbxassetid://93759237368646"
+local flameBurstAnimation = "rbxassetid://92151793966516"
 local MeraMeraNoMi = {}
 
 local WALL_PADDING = 2
 local MIN_END_CARRY_SPEED = 52
 local END_CARRY_SPEED_FACTOR = 0.82
+
+local function playFlameDashAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = flameDashAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
+
+local function playFlameBurstAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = flameBurstAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
+
 
 local function smoothstep(alpha)
 	return alpha * alpha * (3 - (2 * alpha))
@@ -122,6 +142,7 @@ end
 function MeraMeraNoMi.FlameDash(context)
 	local character = context.Character
 	local humanoid = context.Humanoid
+	playFlameDashAnimation(humanoid)
 	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
 
@@ -228,6 +249,8 @@ function MeraMeraNoMi.FlameDash(context)
 end
 
 function MeraMeraNoMi.FireBurst(context)
+	local humanoid = context.Humanoid
+	playFlameBurstAnimation(humanoid)
 	local abilityConfig = context.AbilityConfig
 
 	return {

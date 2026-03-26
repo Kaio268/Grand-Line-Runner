@@ -1,6 +1,6 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-
+local gomuRocketAnim = "rbxassetid://106521727746519"
 local GomuGomuNoMi = {}
 
 local WALL_PADDING = 1.5
@@ -10,6 +10,15 @@ local MIN_VERTICAL_LAUNCH_SPEED = 52
 local HORIZONTAL_SPEED_MULTIPLIER = 1.9
 local VERTICAL_SPEED_RATIO = 0.58
 local NETWORK_OWNER_RELEASE_DELAY = 0.45
+
+local function playGomuRocketAnim(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = gomuRocketAnim
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
 
 local function getPlanarVector(vector)
 	return Vector3.new(vector.X, 0, vector.Z)
@@ -117,6 +126,7 @@ end
 function GomuGomuNoMi.RubberLaunch(context)
 	local character = context.Character
 	local humanoid = context.Humanoid
+	playGomuRocketAnim(humanoid)
 	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
 
