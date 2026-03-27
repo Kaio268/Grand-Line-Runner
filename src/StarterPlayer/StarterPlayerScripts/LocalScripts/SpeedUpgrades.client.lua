@@ -139,8 +139,8 @@ local function updateOne(frameName, frame, cfg, speedVal)
 	local addSpeedText = (addSpeed >= 0 and ("+" .. fmt(addSpeed)) or fmt(addSpeed)) .. " Speed"
 
 	setText(template:FindFirstChild("AddSpeed"), addSpeedText)
-	setText(template:FindFirstChild("Now"), fmt(speedVal))
-	setText(template:FindFirstChild("After"), fmt(speedVal + addSpeed))
+	setText(template:FindFirstChild("Now"), "Current: " .. fmt(speedVal))
+	setText(template:FindFirstChild("After"), "After: " .. fmt(speedVal + addSpeed))
 
 	local cost = computeCost(cfg, speedVal)
 

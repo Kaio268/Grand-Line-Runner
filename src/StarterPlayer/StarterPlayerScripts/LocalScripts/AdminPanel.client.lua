@@ -43,11 +43,13 @@ template.Visible = false
 
 local controller
 do
-	local ok, mod = pcall(function()
-		return require(playerGui:WaitForChild("OpenUI"):WaitForChild("Open_UI"))
-	end)
-	if ok then
-		controller = mod
+	local openUi = playerGui:FindFirstChild("OpenUI")
+	local openModule = openUi and openUi:FindFirstChild("Open_UI")
+	if openModule then
+		local ok, mod = pcall(require, openModule)
+		if ok then
+			controller = mod
+		end
 	end
 end
 

@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
+local RunService = game:GetService("RunService")
 
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
@@ -9,27 +10,46 @@ local Point = require(ReplicatedStorage:WaitForChild("Point"))
 local remote = ReplicatedStorage:FindFirstChild("TutorialrrrrFinished")
 
 local player = Players.LocalPlayer
-local refs = MapResolver.WaitForRefs(
-	{ "MapRoot" },
-	nil,
-	{
-		warn = true,
-		context = "BrrBrrPatapimDialog",
-	}
-)
+local refs = MapResolver.WaitForRefs({ "MapRoot" }, nil, {
+	warn = true,
+	context = "BrrBrrPatapimDialog",
+})
 local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Brr Brr Patapim")
 local npcPrompt = npc:WaitForChild("ProximityPrompt")
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, npcPrompt)
-dialogObject:addDialog("Do You Want To Open Speed Upgrades?", {"Yea", "Nope"})
+dialogObject:addDialog("Do You Want To Open Speed Upgrades?", { "Yea", "Nope" })
 
-local open = require(player.PlayerGui:WaitForChild("OpenUI"):WaitForChild("Open_UI"))
+local function openFrame(frameName)
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then
+		return
+	end
 
-local FIRST_POS = UDim2.new(0.566, 0, 0.431, 0)
-local FIRST_SIZE = UDim2.new(0.164, 0, 0.093, 0)
+	local openUi = playerGui:FindFirstChild("OpenUI")
+	local openModule = openUi and openUi:FindFirstChild("Open_UI")
+	if openModule then
+		local ok, controller = pcall(require, openModule)
+		if ok and controller and controller.OpenFrame then
+			controller:OpenFrame(frameName)
+			return
+		end
+	end
 
-local SECOND_POS = UDim2.new(0.632, 0, 0.285, 0)
-local SECOND_SIZE = UDim2.new(0.056, 0, 0.093, 0)
+	local frames = playerGui:FindFirstChild("Frames")
+	local frame = frames and frames:FindFirstChild(frameName)
+	if frame and frame:IsA("Frame") then
+		frame.Visible = true
+	end
+end
+
+local FALLBACK_FIRST_POS = UDim2.new(0.566, 0, 0.431, 0)
+local FALLBACK_FIRST_SIZE = UDim2.new(0.164, 0, 0.093, 0)
+
+local FALLBACK_SECOND_POS = UDim2.new(0.632, 0, 0.285, 0)
+local FALLBACK_SECOND_SIZE = UDim2.new(0.056, 0, 0.093, 0)
+local STEP2_SPOTLIGHT_Y_OFFSET = 60
+local STEP3_SPOTLIGHT_Y_OFFSET = 60
 
 local tutorialValue
 local tutorialDisabled = false
@@ -146,16 +166,26 @@ local function clearPromptQueue()
 end
 
 local buyConn
+local buyClickConn
 local xConn
+local spotlightConn
 
 local function disconnectPoint()
 	if buyConn then
 		buyConn:Disconnect()
 		buyConn = nil
 	end
+	if buyClickConn then
+		buyClickConn:Disconnect()
+		buyClickConn = nil
+	end
 	if xConn then
 		xConn:Disconnect()
 		xConn = nil
+	end
+	if spotlightConn then
+		spotlightConn:Disconnect()
+		spotlightConn = nil
 	end
 end
 
@@ -164,11 +194,214 @@ local function getButtons()
 	local frames = pg:WaitForChild("Frames")
 	local speedUpgrade = frames:WaitForChild("SpeedUpgrade")
 	local main = speedUpgrade:WaitForChild("Main")
-	local slot1 = main:WaitForChild("1")
-	local buy = slot1:WaitForChild("Buy")
 	local topBar = speedUpgrade:WaitForChild("TopBar")
 	local x = topBar:WaitForChild("X")
-	return buy, x
+
+	local function isGuiActuallyVisible(guiObject)
+		if not (guiObject and guiObject:IsA("GuiObject")) then
+			return false
+		end
+		local current = guiObject
+		while current and current ~= speedUpgrade do
+			if current:IsA("GuiObject") and current.Visible == false then
+				return false
+			end
+			current = current.Parent
+		end
+		return speedUpgrade.Visible == true
+	end
+
+	local preferredSlot = main:FindFirstChild("1")
+	if preferredSlot and preferredSlot:IsA("GuiObject") then
+		local preferredBuy = preferredSlot:FindFirstChild("Buy", true)
+		if preferredBuy and preferredBuy:IsA("GuiButton") and isGuiActuallyVisible(preferredBuy) then
+			return preferredBuy, x, speedUpgrade
+		end
+	end
+
+	local bestBuy = nil
+	local bestOrder = math.huge
+
+	for _, child in ipairs(main:GetChildren()) do
+		if child:IsA("GuiObject") then
+			local buy = child:FindFirstChild("Buy", true)
+			if buy and buy:IsA("GuiButton") and isGuiActuallyVisible(buy) then
+				local order = child.LayoutOrder
+				if typeof(order) ~= "number" then
+					order = tonumber(child.Name) or math.huge
+				end
+				if order < bestOrder then
+					bestOrder = order
+					bestBuy = buy
+				end
+			end
+		end
+	end
+
+	if not bestBuy then
+		local slot1 = main:FindFirstChild("1")
+		if slot1 then
+			local fallbackBuy = slot1:FindFirstChild("Buy", true)
+			if fallbackBuy and fallbackBuy:IsA("GuiButton") then
+				bestBuy = fallbackBuy
+			end
+		end
+	end
+
+	return bestBuy, x, speedUpgrade
+end
+
+local function getViewportSize()
+	local camera = workspace.CurrentCamera
+	if not camera then
+		return Vector2.new(1920, 1080)
+	end
+
+	local size = camera.ViewportSize
+	if size.X <= 0 or size.Y <= 0 then
+		return Vector2.new(1920, 1080)
+	end
+
+	return Vector2.new(size.X, size.Y)
+end
+
+local function waitForAbsoluteBounds(guiObject, timeoutSeconds)
+	local timeoutAt = os.clock() + (timeoutSeconds or 1.25)
+	while guiObject and guiObject.Parent and os.clock() < timeoutAt do
+		local size = guiObject.AbsoluteSize
+		if size.X > 0 and size.Y > 0 then
+			return guiObject.AbsolutePosition, size
+		end
+		task.wait()
+	end
+
+	return nil, nil
+end
+
+local function waitForGuiReady(guiObject, frame, timeoutSeconds)
+	local timeoutAt = os.clock() + (timeoutSeconds or 2)
+	while os.clock() < timeoutAt do
+		if tutorialDisabled or finishedSent then
+			return false
+		end
+		if guiObject and guiObject.Parent and frame and frame.Visible then
+			local size = guiObject.AbsoluteSize
+			if size.X > 0 and size.Y > 0 then
+				return true
+			end
+		end
+		task.wait()
+	end
+	return false
+end
+
+local function makePointRect(guiObject, paddingX, paddingY, offsetX, offsetY)
+	if not guiObject or not guiObject:IsA("GuiObject") then
+		return nil, nil
+	end
+
+	local absolutePosition, absoluteSize = waitForAbsoluteBounds(guiObject, 1.25)
+	if not absolutePosition or not absoluteSize then
+		return nil, nil
+	end
+
+	local viewport = getViewportSize()
+	local padX = math.max(0, tonumber(paddingX) or 0)
+	local padY = math.max(0, tonumber(paddingY) or 0)
+	local offX = tonumber(offsetX) or 0
+	local offY = tonumber(offsetY) or 0
+
+	local widthPx = absoluteSize.X + (padX * 2)
+	local heightPx = absoluteSize.Y + (padY * 2)
+
+	local centerX = absolutePosition.X + (absoluteSize.X * 0.5) + offX
+	local centerY = absolutePosition.Y + (absoluteSize.Y * 0.5) + offY
+
+	local size = UDim2.new(widthPx / viewport.X, 0, heightPx / viewport.Y, 0)
+	local position = UDim2.new(centerX / viewport.X, 0, centerY / viewport.Y, 0)
+	return size, position
+end
+
+local function makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
+	if not guiObject or not guiObject:IsA("GuiObject") then
+		return nil, nil
+	end
+
+	local absoluteSize = guiObject.AbsoluteSize
+	if absoluteSize.X <= 0 or absoluteSize.Y <= 0 then
+		return nil, nil
+	end
+
+	local absolutePosition = guiObject.AbsolutePosition
+	local viewport = getViewportSize()
+	local padX = math.max(0, tonumber(paddingX) or 0)
+	local padY = math.max(0, tonumber(paddingY) or 0)
+	local offX = tonumber(offsetX) or 0
+	local offY = tonumber(offsetY) or 0
+
+	local widthPx = absoluteSize.X + (padX * 2)
+	local heightPx = absoluteSize.Y + (padY * 2)
+
+	local centerX = absolutePosition.X + (absoluteSize.X * 0.5) + offX
+	local centerY = absolutePosition.Y + (absoluteSize.Y * 0.5) + offY
+
+	local size = UDim2.new(widthPx / viewport.X, 0, heightPx / viewport.Y, 0)
+	local position = UDim2.new(centerX / viewport.X, 0, centerY / viewport.Y, 0)
+	return size, position
+end
+
+local function pointAtGui(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
+	local size, position = makePointRect(guiObject, paddingX, paddingY, offsetX, offsetY)
+	if not size or not position then
+		size = fallbackSize
+		position = fallbackPosition
+	end
+
+	Point.Set(size, position, {
+		posMode = "center",
+	})
+end
+
+local function pointAtGuiNow(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
+	local size, position = makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
+	if not size or not position then
+		size = fallbackSize
+		position = fallbackPosition
+	end
+
+	Point.Set(size, position, {
+		posMode = "center",
+	})
+end
+
+local function startSpotlightFollow(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
+	if spotlightConn then
+		spotlightConn:Disconnect()
+		spotlightConn = nil
+	end
+
+	pointAtGui(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
+
+	spotlightConn = RunService.RenderStepped:Connect(function()
+		if tutorialDisabled or finishedSent then
+			return
+		end
+		local size, position = makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
+		if not size or not position then
+			size = fallbackSize
+			position = fallbackPosition
+		end
+		if Point.Update then
+			Point.Update(size, position, {
+				posMode = "center",
+			})
+		else
+			Point.Set(size, position, {
+				posMode = "center",
+				duration = 0,
+			})
+		end
+	end)
 end
 
 local function isAlive(character)
@@ -261,14 +494,10 @@ local function ensureBeam(character)
 end
 
 local function getSpawnContainer()
-	return MapResolver.WaitForRefs(
-		{ "SpawnFolder" },
-		nil,
-		{
-			warn = true,
-			context = "BrrBrrPatapimDialog.SpawnFolder",
-		}
-	).SpawnFolder
+	return MapResolver.WaitForRefs({ "SpawnFolder" }, nil, {
+		warn = true,
+		context = "BrrBrrPatapimDialog.SpawnFolder",
+	}).SpawnFolder
 end
 
 local function modelHasPrompt(model)
@@ -305,65 +534,87 @@ local function getModelTargetPart(model)
 	return model:FindFirstChildWhichIsA("BasePart", true)
 end
 
-local function getNearestModel(character)
+local function getNearestBrainrotTarget(character)
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if not hrp then
-		return nil
+		return nil, nil, nil
 	end
 
 	local origin = hrp.Position
 	local container = getSpawnContainer()
+	local mapRoot = refs and refs.MapRoot
 
 	local bestModel = nil
+	local bestPrompt = nil
+	local bestPart = nil
 	local bestDist = math.huge
-	local seen = {}
 
-	local function considerModel(model)
-		if seen[model] then
-			return
+	local roots = {}
+
+	local brainrotsWorld = mapRoot and mapRoot:FindFirstChild("BrainrotsWorld")
+	local droppedFolder = brainrotsWorld and brainrotsWorld:FindFirstChild("Dropped")
+	if droppedFolder then
+		table.insert(roots, droppedFolder)
+	end
+
+	if container and container:IsDescendantOf(workspace) then
+		local spawnBrainrotsFolder = container:FindFirstChild("Brainrots")
+		if spawnBrainrotsFolder then
+			table.insert(roots, spawnBrainrotsFolder)
 		end
-		seen[model] = true
-		if not modelHasPrompt(model) then
-			return
-		end
-
-		local pos
-		local ok, pivot = pcall(function()
-			return model:GetPivot()
-		end)
-
-		if ok and pivot then
-			pos = pivot.Position
-		else
-			local pp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-			if pp then
-				pos = pp.Position
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Instance") then
+				local brainrots = child:FindFirstChild("Brainrots")
+				if brainrots then
+					table.insert(roots, brainrots)
+				end
 			end
 		end
+	end
 
-		if not pos then
+	local function considerPrompt(prompt)
+		if not (prompt and prompt:IsA("ProximityPrompt")) then
+			return
+		end
+		if prompt.Enabled ~= true or not prompt:IsDescendantOf(workspace) then
+			return
+		end
+		if tostring(prompt.ObjectText or "") ~= "Hold to Get" then
 			return
 		end
 
-		local dist = (pos - origin).Magnitude
+		local promptParent = prompt.Parent
+		if promptParent and promptParent:IsA("Attachment") then
+			promptParent = promptParent.Parent
+		end
+		if not (promptParent and promptParent:IsA("BasePart")) then
+			return
+		end
+
+		local model = prompt:FindFirstAncestorOfClass("Model")
+		if not (model and model:IsDescendantOf(workspace)) then
+			return
+		end
+
+		local targetPart = promptParent
+		local dist = (targetPart.Position - origin).Magnitude
 		if dist < bestDist then
 			bestDist = dist
 			bestModel = model
+			bestPrompt = prompt
+			bestPart = targetPart
 		end
 	end
 
-	for _, obj in ipairs(container:GetChildren()) do
-		if obj:IsA("Model") then
-			considerModel(obj)
-		end
-		for _, desc in ipairs(obj:GetDescendants()) do
-			if desc:IsA("Model") then
-				considerModel(desc)
+	for _, root in ipairs(roots) do
+		if root and root:IsDescendantOf(workspace) then
+			for _, prompt in ipairs(root:GetDescendants()) do
+				considerPrompt(prompt)
 			end
 		end
 	end
 
-	return bestModel
+	return bestModel, bestPrompt, bestPart
 end
 
 local function getBrrMesh()
@@ -526,53 +777,27 @@ local function runBeamLoop(character)
 		elseif beamStage == "BRAINROT" then
 			setTutorial(4, "Follow the beam to the nearest Brainrot and hold E to collect it.")
 
-			local model = getNearestModel(character)
-			if not model then
+			local model, nearestPrompt, targetPart = getNearestBrainrotTarget(character)
+			if not model or not targetPart then
 				hideBeam()
+				currentBrainrotModel = nil
+				currentBrainrotPrompt = nil
 				task.wait(0.2)
 			else
 				currentBrainrotModel = model
-				currentBrainrotPrompt = getModelPrompt(model)
-				local targetPart = getModelTargetPart(model)
+				currentBrainrotPrompt = nearestPrompt or getModelPrompt(model)
 				setTargetPart(targetPart)
-
-				while beamActive and beamStage == "BRAINROT" and character.Parent and isAlive(character) do
-					if not aliveInWorkspace(currentBrainrotModel) then
-						hideBeam()
+				local prompt = popPrompt()
+				if prompt then
+					if
+						(currentBrainrotPrompt and prompt == currentBrainrotPrompt)
+						or (currentBrainrotModel and prompt:IsDescendantOf(currentBrainrotModel))
+					then
+						beamStage = "WAIT_FOR_FOLDER"
 						clearPromptQueue()
-						currentBrainrotModel = nil
-						currentBrainrotPrompt = nil
-						break
-					end
-
-					if currentBrainrotPrompt and not aliveInWorkspace(currentBrainrotPrompt) then
-						hideBeam()
-						clearPromptQueue()
-						currentBrainrotModel = nil
-						currentBrainrotPrompt = nil
-						break
-					end
-
-					if targetPart and not aliveInWorkspace(targetPart) then
-						hideBeam()
-						clearPromptQueue()
-						currentBrainrotModel = nil
-						currentBrainrotPrompt = nil
-						break
-					end
-
-					local prompt = popPrompt()
-					if prompt then
-						if (currentBrainrotPrompt and prompt == currentBrainrotPrompt)
-							or (currentBrainrotModel and prompt:IsDescendantOf(currentBrainrotModel)) then
-							beamStage = "WAIT_FOR_FOLDER"
-							clearPromptQueue()
-							break
-						end
-					else
-						task.wait(0.1)
 					end
 				end
+				task.wait(0.08)
 			end
 		elseif beamStage == "WAIT_FOR_FOLDER" then
 			if inventoryHasAnyFolder() then
@@ -660,21 +885,46 @@ local function startSpeedUpgradeTutorial()
 	disconnectPoint()
 
 	setTutorial(2, "Click the highlighted button to buy a Speed Upgrade.")
-	Point.Set(FIRST_SIZE, FIRST_POS)
+	local buyButton, xButton, speedUpgradeFrame = getButtons()
+	waitForGuiReady(buyButton, speedUpgradeFrame, 2.5)
+	startSpotlightFollow(buyButton, 2, 2, FALLBACK_FIRST_SIZE, FALLBACK_FIRST_POS, 0, STEP2_SPOTLIGHT_Y_OFFSET)
+
+	local hidden = player:FindFirstChild("HiddenLeaderstats") or player:WaitForChild("HiddenLeaderstats")
+	local speedValue = hidden:FindFirstChild("Speed") or hidden:WaitForChild("Speed")
+	local speedStart = (speedValue and (speedValue:IsA("NumberValue") or speedValue:IsA("IntValue")))
+			and speedValue.Value
+		or nil
+	local didAdvanceToStep3 = false
+
+	local function advanceToStep3()
+		if didAdvanceToStep3 or tutorialDisabled or finishedSent then
+			return
+		end
+		didAdvanceToStep3 = true
+		setTutorial(3, "Good! Now click X to close the menu.")
+		waitForGuiReady(xButton, speedUpgradeFrame, 1.5)
+		startSpotlightFollow(xButton, 6, 6, FALLBACK_SECOND_SIZE, FALLBACK_SECOND_POS, 0, STEP3_SPOTLIGHT_Y_OFFSET)
+	end
 
 	task.spawn(function()
-		local buyButton, xButton = getButtons()
+		if speedValue then
+			buyConn = speedValue:GetPropertyChangedSignal("Value"):Connect(function()
+				if speedStart == nil then
+					advanceToStep3()
+					return
+				end
+				if speedValue.Value > speedStart then
+					advanceToStep3()
+				end
+			end)
+		end
 
-		buyConn = buyButton.Activated:Connect(function()
-			if tutorialDisabled or finishedSent then
-				return
-			end
-			setTutorial(3, "Good! Now click X to close the menu.")
-			Point.Set(SECOND_SIZE, SECOND_POS)
-		end)
+		if buyButton then
+			buyClickConn = buyButton.Activated:Connect(advanceToStep3)
+		end
 
 		xConn = xButton.Activated:Connect(function()
-			if tutorialDisabled or finishedSent then
+			if tutorialDisabled or finishedSent or not didAdvanceToStep3 then
 				return
 			end
 
@@ -704,7 +954,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 
 	if responseNum == 1 then
 		dialogObject:hideGui("Okay!!")
-		open:OpenFrame("SpeedUpgrade")
+		openFrame("SpeedUpgrade")
 
 		if tutorialDisabled or finishedSent then
 			setTutorialGuiVisible(false)

@@ -5,6 +5,7 @@ local TimeRewardsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild
 local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
 local DataManager = require(script.Parent.Parent.Data.DataManager)
 local BrainrotModule = require(script.Parent.AddBrainrot)
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local Remote = TimeRewardsFolder:WaitForChild("TimeRewardEvent")
 local InstantRewardsEvent = TimeRewardsFolder:WaitForChild("TriggerInstantRewards")
@@ -230,23 +231,28 @@ local function rollReward(tbl)
 end
 
 local function addReward(player: Player, rewardName: string, amount: number)
+	local normalizedRewardName = tostring(rewardName)
+	if normalizedRewardName == "Money" or normalizedRewardName == "Doubloons" then
+		return DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), amount)
+	end
+
 	local inventory = player:FindFirstChild("Inventory")
 	local feed = inventory and inventory:FindFirstChild("Feed")
-	local stat = feed and feed:FindFirstChild(rewardName)
+	local stat = feed and feed:FindFirstChild(normalizedRewardName)
 	if stat then
-		return DataManager:TryAddValue(player, "Inventory.Feed." .. rewardName, amount)
+		return DataManager:TryAddValue(player, "Inventory.Feed." .. normalizedRewardName, amount)
 	end
 
 	for _, folder in ipairs(player:GetChildren()) do
 		if folder:IsA("Folder") then
-			local statObj = folder:FindFirstChild(rewardName)
+			local statObj = folder:FindFirstChild(normalizedRewardName)
 			if statObj then
-				return DataManager:TryAddValue(player, folder.Name .. "." .. rewardName, amount)
+				return DataManager:TryAddValue(player, folder.Name .. "." .. normalizedRewardName, amount)
 			end
 		end
 	end
 
-	return DataManager:TryAddValue(player, rewardName, amount)
+	return DataManager:TryAddValue(player, normalizedRewardName, amount)
 end
 
 local function grantReward(player: Player, rewardId: number)

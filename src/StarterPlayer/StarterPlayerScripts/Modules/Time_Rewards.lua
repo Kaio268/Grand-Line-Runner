@@ -155,6 +155,17 @@ local function setTimerClaimed(slotFrame: Instance)
 	setTimerText(slotFrame, CLAIMED_TEXT, GREEN_COLOR)
 end
 
+local function formatDurationText(seconds: number): string
+	local clampedSeconds = math.max(0, math.ceil(tonumber(seconds) or 0))
+	local ok, formattedText = pcall(function()
+		return Shorten.timeSuffixTwo(clampedSeconds)
+	end)
+	if ok then
+		return formattedText
+	end
+	return tostring(clampedSeconds) .. "s"
+end
+
 local function stopCountdown(id: number)
 	local th = threads[id]
 	if th then
@@ -211,11 +222,7 @@ local function updateHud()
 		if minRemaining == nil then
 			text = "--"
 		else
-			local secs = math.max(0, math.ceil(minRemaining))
-			local ok, t = pcall(function()
-				return Shorten.timeSuffixTwo(secs)
-			end)
-			text = ok and t or (tostring(secs) .. "s")
+			text = formatDurationText(minRemaining)
 		end
 	end
 
@@ -257,15 +264,7 @@ local function startCountdown(id: number)
 				return
 			end
 
-			local ok, txt = pcall(function()
-				return Shorten.timeSuffixTwo(remaining)
-			end)
-			if ok then
-				setTimerCountdown(slotFrame, txt)
-			else
-				setTimerCountdown(slotFrame, tostring(remaining) .. "s")
-			end
-
+			setTimerCountdown(slotFrame, formatDurationText(remaining))
 			RunService.Heartbeat:Wait()
 		end
 	end)
@@ -420,7 +419,7 @@ local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 				endTimes[id] = os.clock() + remaining
 
 				if remaining > 0 then
-					setTimerCountdown(slotFrame, Shorten.timeSuffixTwo(remaining))
+					setTimerCountdown(slotFrame, formatDurationText(remaining))
 					startCountdown(id)
 				else
 					setTimerReady(slotFrame)
@@ -470,7 +469,7 @@ local function initialiseButtonsFromState(syncState)
 				endTimes[id] = os.clock() + remaining
 
 				if remaining > 0 then
-					setTimerCountdown(slotFrame, Shorten.timeSuffixTwo(remaining))
+					setTimerCountdown(slotFrame, formatDurationText(remaining))
 					startCountdown(id)
 				else
 					setTimerReady(slotFrame)
@@ -578,6 +577,7 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		end
 		slotFrame:SetAttribute("Claimed", true)
 		stopCountdown(id)
+		endTimes[id] = nil
 		setTimerClaimed(slotFrame)
 		updateHud()
 
@@ -590,10 +590,7 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			endTimes[id] = os.clock() + clampedRemaining
 			stopCountdown(id)
 			if clampedRemaining > 0 then
-				local ok, text = pcall(function()
-					return Shorten.timeSuffixTwo(clampedRemaining)
-				end)
-				setTimerCountdown(slotFrame, ok and text or (tostring(clampedRemaining) .. "s"))
+				setTimerCountdown(slotFrame, formatDurationText(clampedRemaining))
 				startCountdown(id)
 			else
 				setTimerReady(slotFrame)

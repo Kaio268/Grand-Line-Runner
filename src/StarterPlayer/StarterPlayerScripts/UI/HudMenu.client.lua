@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -26,14 +27,27 @@ local TILE_DEFS = {
 	{ name = "Rebirth", label = "Rebirth", badgeText = "NEW" },
 }
 
+local TILE_POSITIONS = {
+	Store = Vector2.new(0, 0),
+	Index = Vector2.new(90, 0),
+	Gifts = Vector2.new(0, 90),
+	Settings = Vector2.new(90, 90),
+	Rebirth = Vector2.new(0, 180),
+}
+
 local PROTECTED_CHILDREN = {
 	Not = true,
 	Timer = true,
 	ReactHudMenuTileRoot = true,
 }
 
+local HOVER_IDLE_SCALE = 1
+local HOVER_ACTIVE_SCALE = 0.95
+local HOVER_TWEEN = TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
 local destroyed = false
 local renderQueued = false
+local hoverBindings = {}
 
 local function isTextGuiObject(instance)
 	return instance
@@ -281,6 +295,8 @@ local function ensureContainer(hud)
 	local lButtons = hud:FindFirstChild("LButtons")
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.ClipsDescendants = false
+		lButtons.Size = UDim2.fromOffset(188, 274)
+		lButtons.Position = UDim2.fromOffset(10, 250)
 		return lButtons
 	end
 
@@ -289,22 +305,80 @@ local function ensureContainer(hud)
 	created.BackgroundTransparency = 1
 	created.BorderSizePixel = 0
 	created.ClipsDescendants = false
-	created.Position = UDim2.fromOffset(18, 116)
-	created.Size = UDim2.fromOffset(96, 480)
+	created.Position = UDim2.fromOffset(10, 250)
+	created.Size = UDim2.fromOffset(188, 274)
 	created.Parent = hud
-
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 10)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = created
 
 	return created
 end
 
+local function clearHoverBinding(button)
+	local binding = hoverBindings[button]
+	if not binding then
+		return
+	end
+
+	for _, connection in ipairs(binding.connections) do
+		connection:Disconnect()
+	end
+
+	hoverBindings[button] = nil
+end
+
+local function ensureHoverScale(button)
+	if not button or not button:IsA("GuiButton") then
+		return
+	end
+
+	if hoverBindings[button] then
+		return
+	end
+
+	local scale = button:FindFirstChild("ReactHudHoverScale")
+	if not scale or not scale:IsA("UIScale") then
+		scale = Instance.new("UIScale")
+		scale.Name = "ReactHudHoverScale"
+		scale.Scale = HOVER_IDLE_SCALE
+		scale.Parent = button
+	end
+
+	local activeTween = nil
+	local function tweenTo(targetScale)
+		if activeTween then
+			activeTween:Cancel()
+		end
+
+		activeTween = TweenService:Create(scale, HOVER_TWEEN, {
+			Scale = targetScale,
+		})
+		activeTween:Play()
+	end
+
+	hoverBindings[button] = {
+		connections = {
+			button.MouseEnter:Connect(function()
+				tweenTo(HOVER_ACTIVE_SCALE)
+			end),
+			button.MouseLeave:Connect(function()
+				tweenTo(HOVER_IDLE_SCALE)
+			end),
+			button.Destroying:Connect(function()
+				clearHoverBinding(button)
+			end),
+		},
+	}
+end
+
 local function ensureShell(container, definition, index)
+	local mappedPosition = TILE_POSITIONS[definition.name]
 	local existing = container:FindFirstChild(definition.name)
 	if existing and existing:IsA("GuiButton") then
 		existing.ClipsDescendants = false
+		existing.Size = UDim2.fromOffset(84, 84)
+		existing.LayoutOrder = index
+		if mappedPosition then
+			existing.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
+		end
 		return existing
 	end
 
@@ -317,9 +391,9 @@ local function ensureShell(container, definition, index)
 	button.ImageTransparency = 1
 	button.LayoutOrder = index
 	button.Size = UDim2.fromOffset(84, 84)
-
-	local hasLayout = container:FindFirstChildOfClass("UIListLayout") ~= nil
-	if not hasLayout then
+	if mappedPosition then
+		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
+	else
 		button.Position = UDim2.fromOffset(0, (index - 1) * 94)
 	end
 
@@ -489,6 +563,8 @@ local function ensureTimer(button, defaultText)
 
 	if isTextGuiObject(timer) then
 		timer.BackgroundTransparency = 0.08
+		timer.Position = UDim2.new(0.5, 0, 0, 6)
+		timer.Size = UDim2.new(1, -10, 0, 20)
 		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
 		timer.TextStrokeTransparency = 0.08
 		timer.ZIndex = math.max(timer.ZIndex, button.ZIndex + 9, 11)
@@ -623,6 +699,7 @@ local function buildTiles()
 
 	for index, definition in ipairs(TILE_DEFS) do
 		local button = ensureShell(container, definition, index)
+		ensureHoverScale(button)
 		ensureCompatibility(button, definition)
 		local style = buildTileStyle(button)
 		hideLegacyVisuals(button)
@@ -693,5 +770,8 @@ scheduleRender()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	for button in pairs(hoverBindings) do
+		clearHoverBinding(button)
+	end
 	root:unmount()
 end)

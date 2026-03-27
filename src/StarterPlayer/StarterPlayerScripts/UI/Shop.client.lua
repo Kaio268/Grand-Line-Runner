@@ -10,7 +10,6 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
-local UiModalState = require(Modules:WaitForChild("UiModalState"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 
 local ShopFolder = UiFolder:WaitForChild("Shop")
@@ -21,8 +20,6 @@ local PurchaseAdapter = require(ShopFolder:WaitForChild("PurchaseAdapter"))
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactShopRoot"
 
-local FRAMES_DISPLAY_ORDER = 120
-
 local root = ReactRoblox.createRoot(rootContainer)
 
 local destroyed = false
@@ -30,8 +27,6 @@ local renderQueued = false
 local noticeText = nil
 local noticeToken = 0
 
-local framesGui = playerGui:WaitForChild("Frames")
-local storeFrame = framesGui:WaitForChild("Store")
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Store",
@@ -40,36 +35,8 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	modalStateKey = "ShopModal",
 	minSize = Vector2.new(980, 680),
 	maxSize = Vector2.new(1340, 860),
+	createFrameIfMissing = true,
 })
-local shopBackdrop = framesGui:FindFirstChild("ReactStoreBackdrop")
-if not shopBackdrop then
-	shopBackdrop = Instance.new("Frame")
-	shopBackdrop.Name = "ReactStoreBackdrop"
-	shopBackdrop.BackgroundColor3 = Color3.fromRGB(3, 8, 18)
-	shopBackdrop.BackgroundTransparency = 0.42
-	shopBackdrop.BorderSizePixel = 0
-	shopBackdrop.Size = UDim2.fromScale(1, 1)
-	shopBackdrop.Visible = false
-	shopBackdrop.ZIndex = 80
-	shopBackdrop.Active = true
-	shopBackdrop.Parent = framesGui
-end
-
-local shopHost = storeFrame:FindFirstChild("ReactStoreHost")
-if not shopHost then
-	shopHost = Instance.new("Frame")
-	shopHost.Name = "ReactStoreHost"
-	shopHost.BackgroundTransparency = 1
-	shopHost.BorderSizePixel = 0
-	shopHost.Size = UDim2.fromScale(1, 1)
-	shopHost.ZIndex = 140
-	shopHost.Active = true
-	shopHost.Parent = storeFrame
-end
-
-local openUiScript = playerGui:WaitForChild("OpenUI")
-local openUiModule = openUiScript:WaitForChild("Open_UI")
-local uiController = require(openUiModule)
 
 local purchaseAdapter = PurchaseAdapter.new(player)
 local cleanupConnections = {}
@@ -77,6 +44,12 @@ local cleanupConnections = {}
 local scheduleRender
 
 local function suppressLegacyStoreDecor()
+	local storeFrame = modalAdapter:GetFrame()
+	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
+	if not storeFrame then
+		return
+	end
+
 	for _, child in ipairs(storeFrame:GetChildren()) do
 		if child ~= shopHost then
 			if child:IsA("GuiObject") then
@@ -89,10 +62,10 @@ local function suppressLegacyStoreDecor()
 end
 
 local function ensureStoreFrameLayout()
-	if framesGui:IsA("ScreenGui") then
-		framesGui.DisplayOrder = math.max(framesGui.DisplayOrder, FRAMES_DISPLAY_ORDER)
-		framesGui.IgnoreGuiInset = true
-		framesGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	local storeFrame = modalAdapter:GetFrame()
+	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
+	if not (storeFrame and shopHost) then
+		return
 	end
 
 	storeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -115,9 +88,7 @@ local function ensureStoreFrameLayout()
 end
 
 local function syncOverlayState()
-	local isVisible = storeFrame.Visible
-	shopBackdrop.Visible = isVisible
-	UiModalState.SetOpen("ShopModal", isVisible)
+	modalAdapter:SyncOverlayState()
 end
 
 local function disconnectAll()
@@ -128,6 +99,12 @@ local function disconnectAll()
 end
 
 local function hideLegacyStoreContents()
+	local storeFrame = modalAdapter:GetFrame()
+	local shopHost = storeFrame and storeFrame:FindFirstChild("ReactStoreHost")
+	if not (storeFrame and shopHost) then
+		return
+	end
+
 	ensureStoreFrameLayout()
 	syncOverlayState()
 	storeFrame.BackgroundTransparency = 1
@@ -206,6 +183,7 @@ local function render()
 	if not host then
 		return
 	end
+	hideLegacyStoreContents()
 
 	local catalogView = buildCatalogViewModel()
 	root:render(ReactRoblox.createPortal(React.createElement(ShopShell, {
@@ -259,17 +237,11 @@ modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
 table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
 	if child.Name == "Frames" or child.Name == "OpenUI" then
-		if child.Name == "Frames" then
-			shopBackdrop = nil
-		end
 		modalAdapter:HandlePlayerGuiChildAdded(child)
 	end
 end))
 table.insert(cleanupConnections, playerGui.ChildRemoved:Connect(function(child)
 	if child.Name == "Frames" or child.Name == "OpenUI" then
-		if child.Name == "Frames" then
-			shopBackdrop = nil
-		end
 		modalAdapter:HandlePlayerGuiChildRemoved(child)
 	end
 end))

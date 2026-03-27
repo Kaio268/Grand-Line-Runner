@@ -63,6 +63,9 @@ local hudInv = player:WaitForChild("PlayerGui"):WaitForChild("HUD"):WaitForChild
 local hotbarTemplate = hudInv:WaitForChild("toolButton")
 local hotbarContainer = hotbarTemplate.Parent
 local inventoryBtn = hudInv:WaitForChild("InventoryBtn")
+inventoryBtn.Image = "rbxassetid://129583821766521"
+inventoryBtn.ImageTransparency = 0
+inventoryBtn.ScaleType = Enum.ScaleType.Fit
 
 local inb = hudInv:WaitForChild("Inv")
 local inventoryFrame = inb:WaitForChild("InventoryFrame")
