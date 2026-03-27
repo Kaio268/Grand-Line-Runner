@@ -2,7 +2,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
-local flameDashAnimation = "rbxassetid://73285936367231"
+local flameDashAnimation = "rbxassetid://124285257843194"
 local flameBurstAnimation = "rbxassetid://130411347773227"
 local MeraMeraNoMi = {}
 
