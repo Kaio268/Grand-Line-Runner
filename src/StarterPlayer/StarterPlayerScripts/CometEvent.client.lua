@@ -55,7 +55,9 @@ end
 
 local function getHead()
 	local ch = player.Character
-	if not ch then return nil end
+	if not ch then
+		return nil
+	end
 	return ch:FindFirstChild("Head") or ch:FindFirstChild("HumanoidRootPart")
 end
 
@@ -81,7 +83,9 @@ local function setPivot(inst, cf)
 		inst:PivotTo(cf)
 	else
 		local r = getRoot(inst)
-		if r then r.CFrame = cf end
+		if r then
+			r.CFrame = cf
+		end
 	end
 end
 
@@ -90,7 +94,9 @@ local function getPivot(inst)
 		return inst:GetPivot()
 	else
 		local r = getRoot(inst)
-		if r then return r.CFrame end
+		if r then
+			return r.CFrame
+		end
 	end
 	return CFrame.new()
 end
@@ -215,7 +221,9 @@ end
 
 local function createTrail(parent)
 	local root = getRoot(parent)
-	if not root then return end
+	if not root then
+		return
+	end
 
 	local att0 = Instance.new("Attachment")
 	local att1 = Instance.new("Attachment")
@@ -292,10 +300,14 @@ local function animateCollect(cometId)
 	local center = head.Position
 	local initialOffset = flyStartPos - center
 	local initialRadius = initialOffset.Magnitude
-	if initialRadius < 4 then initialRadius = 4 end
+	if initialRadius < 4 then
+		initialRadius = 4
+	end
 
 	local startDistToHead = (flyStartPos - head.Position).Magnitude
-	if startDistToHead < 4 then startDistToHead = 4 end
+	if startDistToHead < 4 then
+		startDistToHead = 4
+	end
 
 	local baseAngle = math.atan2(initialOffset.Z, initialOffset.X)
 	local orbitDir = math.random(0, 1) == 0 and -1 or 1
@@ -310,7 +322,9 @@ local function animateCollect(cometId)
 	local flyConn
 	flyConn = RunService.RenderStepped:Connect(function()
 		if not clientComet or not clientComet.Parent then
-			if flyConn then flyConn:Disconnect() end
+			if flyConn then
+				flyConn:Disconnect()
+			end
 			return
 		end
 
@@ -343,7 +357,9 @@ local function animateCollect(cometId)
 		end
 
 		local radiusScale = 1 - t * 0.7
-		if radiusScale < 0.2 then radiusScale = 0.2 end
+		if radiusScale < 0.2 then
+			radiusScale = 0.2
+		end
 
 		local heightKick = math.sin(t * math.pi) * CFG.HeightKickMult
 		local p1 = center + rotateOffset(p1BaseOffset) * radiusScale + Vector3.new(0, 2 + heightKick, 0)
@@ -386,7 +402,9 @@ local function animateCollect(cometId)
 end
 
 CometCollectFX.OnClientEvent:Connect(function(cometId)
-	if type(cometId) ~= "string" then return end
+	if type(cometId) ~= "string" then
+		return
+	end
 	task.spawn(function()
 		animateCollect(cometId)
 	end)

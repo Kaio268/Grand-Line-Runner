@@ -323,7 +323,7 @@ end
 
 local function getGroundPosition(pos, ignore)
 	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Blacklist
+	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = ignore or {}
 	local origin = pos + Vector3.new(0, 6, 0)
 	local result = workspace:Raycast(origin, Vector3.new(0, -300, 0), params)
@@ -352,7 +352,7 @@ local function settleToGroundThenAnchor(model)
 		if primary then
 			local origin = primary.Position
 			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Blacklist
+			params.FilterType = Enum.RaycastFilterType.Exclude
 			params.FilterDescendantsInstances = { model }
 			local r = workspace:Raycast(origin, Vector3.new(0, -12, 0), params)
 			if r and (origin.Y - r.Position.Y) <= 1.2 then

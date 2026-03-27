@@ -1275,6 +1275,8 @@ local function getDistanceFromRay(rayOrigin, rayDirection, point)
 	return (point - closestPoint).Magnitude, projectedDistance
 end
 
+local isGomuTargetInRange
+
 local function findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
 	local localRootPart = getRootPart()
 	if not localRootPart or not rayOrigin or not rayDirection then
@@ -1341,7 +1343,7 @@ local function clearGomuHighlight()
 	gomuAimState.TargetPlayer = nil
 end
 
-local function isGomuTargetInRange(targetPlayer, maxDistance)
+isGomuTargetInRange = function(targetPlayer, maxDistance)
 	local localRootPart = getRootPart()
 	local targetRootPart = getPlayerRootPart(targetPlayer)
 	if not localRootPart or not targetRootPart then

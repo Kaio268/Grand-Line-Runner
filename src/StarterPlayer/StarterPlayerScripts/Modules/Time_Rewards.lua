@@ -34,14 +34,16 @@ local slotsById = {}
 local orderedIds = {}
 local totalGifts = 0
 
-local DEBUG = false
-local function dprint(...)
-	if DEBUG then
-		print("[TimeRewardsClient]", ...)
+local GIFT_DEBUG = false
+
+local function giftLog(tag: string, ...)
+	if GIFT_DEBUG then
+		print(tag, ...)
 	end
 end
-local function dwarn(...)
-	warn("[TimeRewardsClient]", ...)
+
+local function giftError(...)
+	warn("[GIFT][ERROR]", ...)
 end
 
 local function safeName(inst)
@@ -110,27 +112,43 @@ end
 
 local function setRewData(slotFrame: Instance, cfg)
 	if not cfg then
-		dwarn("Missing cfg for slot", safeName(slotFrame))
+		giftError("Missing reward config for slot", safeName(slotFrame))
 		return
 	end
 
 	local rewNameObj = findTextObj(slotFrame, "RewName")
+	local titleAssigned = false
 	if rewNameObj then
 		rewNameObj.Text = tostring(cfg.RewName or "")
+		titleAssigned = true
 	else
-		dwarn("Missing RewName (anywhere) in", safeName(slotFrame))
+		giftError("Missing RewName label in", safeName(slotFrame))
 	end
 
 	local iconObj = findImageObj(slotFrame, "Icon")
+	local iconAssigned = false
 	if iconObj then
 		if cfg.Icon ~= nil then
 			iconObj.Image = tostring(cfg.Icon)
+			iconAssigned = true
 		else
-			dwarn("cfg.Icon is nil for id", slotFrame:GetAttribute("RewardId"))
+			giftError("Reward icon is nil for id", slotFrame:GetAttribute("RewardId"))
 		end
 	else
-		dwarn("Missing Icon (anywhere) in", safeName(slotFrame))
+		giftError("Missing Icon image in", safeName(slotFrame))
 	end
+
+	giftLog(
+		"[GIFT][ROW]",
+		string.format(
+			"slot=%s rewardId=%s rewardName=%s titleAssigned=%s iconAssigned=%s",
+			safeName(slotFrame),
+			tostring(slotFrame:GetAttribute("RewardId")),
+			tostring(cfg.RewName or ""),
+			tostring(titleAssigned),
+			tostring(iconAssigned)
+		)
+	)
 end
 
 local function setTimerText(slotFrame: Instance, text: string, color: Color3)
@@ -139,7 +157,7 @@ local function setTimerText(slotFrame: Instance, text: string, color: Color3)
 		timerObj.Text = text
 		timerObj.TextColor3 = color
 	else
-		dwarn("Missing Timer (anywhere) in", safeName(slotFrame))
+		giftError("Missing Timer label in", safeName(slotFrame))
 	end
 end
 
@@ -164,6 +182,35 @@ local function formatDurationText(seconds: number): string
 		return formattedText
 	end
 	return tostring(clampedSeconds) .. "s"
+end
+
+local function getClaimedCount(rawClaimedRewards): number
+	local count = 0
+	if typeof(rawClaimedRewards) ~= "table" then
+		return count
+	end
+
+	for _, claimed in pairs(rawClaimedRewards) do
+		if claimed == true then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function summarizeRewardEntries(cfg): string
+	if typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
+		return "none"
+	end
+
+	local rewardNames = {}
+	for rewardName in pairs(cfg.Rewards) do
+		table.insert(rewardNames, tostring(rewardName))
+	end
+	table.sort(rewardNames)
+
+	return table.concat(rewardNames, ",")
 end
 
 local function stopCountdown(id: number)
@@ -239,7 +286,7 @@ local function startCountdown(id: number)
 
 	local slotFrame = slotsById[id]
 	if not slotFrame then
-		dwarn("startCountdown: no slotFrame for id", id)
+		giftError("startCountdown missing slot frame for id", id)
 		return
 	end
 
@@ -273,7 +320,7 @@ end
 local function hookButton(id: number)
 	local slotFrame = slotsById[id]
 	if not slotFrame then
-		dwarn("hookButton: no slotFrame for id", id)
+		giftError("hookButton missing slot frame for id", id)
 		return
 	end
 	if slotFrame:GetAttribute("Hooked") then
@@ -282,7 +329,7 @@ local function hookButton(id: number)
 
 	local claimBtn = getClaimButton(slotFrame)
 	if not claimBtn then
-		dwarn("hookButton: no GuiButton inside", safeName(slotFrame), "for id", id)
+		giftError("hookButton missing claim button in", safeName(slotFrame), "for id", id)
 		return
 	end
 
@@ -354,9 +401,15 @@ local function buildSlotsOnce()
 	totalGifts = math.min(#orderedIds, #templates)
 	table.clear(slotsById)
 
+	giftLog(
+		"[GIFT][DATA]",
+		string.format("slotTemplates=%d configRewards=%d renderable=%d", #templates, #orderedIds, totalGifts)
+	)
+
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local slotFrame = templates[i]
+		local cfg = RewardsConfig[id]
 
 		slotsById[id] = slotFrame
 		slotFrame.Visible = true
@@ -364,7 +417,18 @@ local function buildSlotsOnce()
 		slotFrame:SetAttribute("Claimed", false)
 		slotFrame:SetAttribute("Hooked", false)
 
-		setRewData(slotFrame, RewardsConfig[id])
+		giftLog(
+			"[GIFT][ROW]",
+			string.format(
+				"mapped rewardId=%d slot=%s rewardName=%s rewards=%s",
+				id,
+				safeName(slotFrame),
+				tostring(cfg and cfg.RewName or ""),
+				summarizeRewardEntries(cfg)
+			)
+		)
+
+		setRewData(slotFrame, cfg)
 		setTimerCountdown(slotFrame, "--")
 		hookButton(id)
 	end
@@ -380,7 +444,7 @@ local function buildSlotsWithWait()
 		end
 		task.wait(0.2)
 	end
-	dwarn("No slot frames found after waiting.")
+	giftError("No slot frames found after waiting for Gifts UI templates")
 	return false
 end
 
@@ -401,6 +465,8 @@ local function normalizeClaimedRewards(rawClaimedRewards)
 end
 
 local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
+	giftLog("[GIFT][DATA]", string.format("applying legacy epoch=%d", serverStartEpoch))
+
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local cfg = RewardsConfig[id]
@@ -421,8 +487,16 @@ local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 				if remaining > 0 then
 					setTimerCountdown(slotFrame, formatDurationText(remaining))
 					startCountdown(id)
+					giftLog(
+						"[GIFT][RENDER]",
+						string.format("rewardId=%d rewardName=%s state=countdown remaining=%s", id, tostring(cfg.RewName or ""), formatDurationText(remaining))
+					)
 				else
 					setTimerReady(slotFrame)
+					giftLog(
+						"[GIFT][RENDER]",
+						string.format("rewardId=%d rewardName=%s state=ready", id, tostring(cfg.RewName or ""))
+					)
 				end
 			end
 		end
@@ -433,19 +507,30 @@ end
 
 local function initialiseButtonsFromState(syncState)
 	if typeof(syncState) ~= "table" then
-		dwarn("syncState payload must be a table, got", typeof(syncState))
+		giftError("syncState payload must be a table, got", typeof(syncState))
 		return
 	end
 
 	local cycleStartPlayTime = tonumber(syncState.CycleStartPlayTime)
 	local currentPlayTime = tonumber(syncState.CurrentPlayTime)
 	if not cycleStartPlayTime or not currentPlayTime then
-		dwarn("syncState missing play time fields", syncState)
+		giftError("syncState missing play time fields", syncState)
 		return
 	end
 
 	local claimedRewards = normalizeClaimedRewards(syncState.ClaimedRewards)
 	local elapsedPlayTime = math.max(0, currentPlayTime - cycleStartPlayTime)
+
+	giftLog(
+		"[GIFT][DATA]",
+		string.format(
+			"received syncState claimed=%d currentPlayTime=%d cycleStart=%d elapsed=%d",
+			getClaimedCount(claimedRewards),
+			currentPlayTime,
+			cycleStartPlayTime,
+			elapsedPlayTime
+		)
+	)
 
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
@@ -462,8 +547,13 @@ local function initialiseButtonsFromState(syncState)
 			if claimed then
 				endTimes[id] = nil
 				setTimerClaimed(slotFrame)
+				giftLog(
+					"[GIFT][RENDER]",
+					string.format("rewardId=%d rewardName=%s state=claimed", id, tostring(cfg.RewName or ""))
+				)
 			elseif cfg.Time == nil then
 				setTimerCountdown(slotFrame, "ERR")
+				giftError("Reward config missing Time for id", id)
 			else
 				local remaining = math.max(0, cfg.Time - elapsedPlayTime)
 				endTimes[id] = os.clock() + remaining
@@ -471,8 +561,16 @@ local function initialiseButtonsFromState(syncState)
 				if remaining > 0 then
 					setTimerCountdown(slotFrame, formatDurationText(remaining))
 					startCountdown(id)
+					giftLog(
+						"[GIFT][RENDER]",
+						string.format("rewardId=%d rewardName=%s state=countdown remaining=%s", id, tostring(cfg.RewName or ""), formatDurationText(remaining))
+					)
 				else
 					setTimerReady(slotFrame)
+					giftLog(
+						"[GIFT][RENDER]",
+						string.format("rewardId=%d rewardName=%s state=ready", id, tostring(cfg.RewName or ""))
+					)
 				end
 			end
 		end
@@ -497,8 +595,21 @@ local function applyPendingState()
 	elseif typeof(state) == "number" then
 		initialiseButtonsFromLegacyEpoch(state)
 	else
-		dwarn("Unsupported pending time reward state", typeof(state))
+		giftError("Unsupported pending time reward state", typeof(state))
 	end
+end
+
+giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+	if giftsFrame.Visible then
+		giftLog(
+			"[GIFT][OPEN]",
+			string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts)
+		)
+	end
+end)
+
+if giftsFrame.Visible then
+	giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
 end
 
 task.spawn(function()
@@ -519,6 +630,8 @@ end)
 
 Remote.OnClientEvent:Connect(function(action, a, b, c)
 	if action == "syncState" then
+		local claimedPayload = if typeof(a) == "table" then a.ClaimedRewards else nil
+		giftLog("[GIFT][DATA]", "remoteAction=syncState", "claimedCount", getClaimedCount(claimedPayload), "totalSlots", totalGifts)
 		if totalGifts == 0 then
 			pendingState = a
 			if not building then
@@ -537,9 +650,10 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 
 	elseif action == "startCycle" or action == "cycleReset" then
 		if typeof(a) ~= "number" then
-			dwarn("startCycle/cycleReset bad epoch:", a, "typeof:", typeof(a))
+			giftError("startCycle/cycleReset bad epoch", a, "typeof", typeof(a))
 			return
 		end
+		giftLog("[GIFT][DATA]", "remoteAction", action, "epoch", a)
 		if totalGifts == 0 then
 			pendingState = a
 			if not building then
@@ -557,6 +671,7 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		initialiseButtonsFromLegacyEpoch(a)
 
 	elseif action == "forceReady" then
+		giftLog("[GIFT][RENDER]", "remoteAction=forceReady", "totalSlots", totalGifts)
 		for i = 1, totalGifts do
 			local id = orderedIds[i]
 			local slotFrame = slotsById[id]
@@ -572,13 +687,17 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		local id = a
 		local slotFrame = slotsById[id]
 		if not slotFrame then
-			dwarn("claimed: no slotFrame for id", id)
+			giftError("claimed action missing slot frame for id", id)
 			return
 		end
 		slotFrame:SetAttribute("Claimed", true)
 		stopCountdown(id)
 		endTimes[id] = nil
 		setTimerClaimed(slotFrame)
+		giftLog(
+			"[GIFT][RENDER]",
+			string.format("remoteAction=claimed rewardId=%s rewardName=%s amount=%s", tostring(id), tostring(b), tostring(c))
+		)
 		updateHud()
 
 	elseif action == "notReady" then
@@ -592,17 +711,25 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			if clampedRemaining > 0 then
 				setTimerCountdown(slotFrame, formatDurationText(clampedRemaining))
 				startCountdown(id)
+				giftLog(
+					"[GIFT][RENDER]",
+					string.format("remoteAction=notReady rewardId=%d remaining=%s", id, formatDurationText(clampedRemaining))
+				)
 			else
 				setTimerReady(slotFrame)
+				giftLog("[GIFT][RENDER]", string.format("remoteAction=notReady rewardId=%d state=ready", id))
 			end
+		elseif id == nil or remaining == nil then
+			giftError("notReady payload missing id or remaining", a, b)
 		end
 		updateHud()
 
 	elseif action == "alreadyClaimed" then
+		giftLog("[GIFT][RENDER]", "remoteAction=alreadyClaimed", "rewardId", a)
 		updateHud()
 
 	else
-		dwarn("Unknown action:", action)
+		giftError("Unknown time reward action", action)
 	end
 end)
 

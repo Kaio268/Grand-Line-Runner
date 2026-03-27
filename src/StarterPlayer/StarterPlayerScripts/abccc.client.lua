@@ -155,10 +155,6 @@ if GuiService.MenuOpened then
 	end)
 end
 
-if GuiService.MenuClosed then
-	
-end
-
 UserInputService.InputBegan:Connect(function(input)
 	if input.KeyCode == Enum.KeyCode.Escape then
 		task.defer(function()

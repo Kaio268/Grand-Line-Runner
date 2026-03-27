@@ -84,14 +84,14 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 	local template = popUpsFolder:WaitForChild("Template")
 
 	if activePopups[text] then
-		local data = activePopups[text]
-		local popup = data.popup
-		if data.removalInProgress then
-			if data.outTween then
-				-- Jeśli trwa tween wychodzący, anulujemy go (można ewentualnie stwierdzić, że usuniemy i utworzymy nowy)
-			end
-			popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
-			local uiScale = popup:FindFirstChildOfClass("UIScale")
+			local data = activePopups[text]
+			local popup = data.popup
+			if data.removalInProgress then
+				if data.outTween then
+					data.outTween:Cancel()
+				end
+				popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
+				local uiScale = popup:FindFirstChildOfClass("UIScale")
 			if uiScale then uiScale.Scale = 1 end
 			data.removalInProgress = false
 		end

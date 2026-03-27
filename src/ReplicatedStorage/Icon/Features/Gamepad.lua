@@ -75,13 +75,11 @@ function Gamepad.start(incomingIcon)
 				if not previousHighlightedIcon then
 					previousHighlightedIcon = Gamepad.getIconToHighlight()
 				end
-				if newIndicator == Icon.highlightKey then
-					-- We only display the highlightKey once to show
-					-- the user how to highlight the topbar icon
-					usedIndicatorOnce = true
-				else
-					--usedBOnce = true
-				end
+					if newIndicator == Icon.highlightKey then
+						-- We only display the highlightKey once to show
+						-- the user how to highlight the topbar icon
+						usedIndicatorOnce = true
+					end
 				if previousHighlightedIcon then
 					previousHighlightedIcon:setIndicator(newIndicator)
 				end

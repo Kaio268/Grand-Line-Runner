@@ -734,16 +734,10 @@ local function processClearCommand(player, argumentText)
 	setTemplatePath("IncomeBrainrots", ProfileTemplate.IncomeBrainrots)
 	setTemplatePath("StandsLevels", ProfileTemplate.StandsLevels)
 
-	local fruitCleared = DevilFruitService.SetEquippedFruit(player, "")
-	if fruitCleared ~= true then
+		DevilFruitService.SetEquippedFruit(player, "")
 		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
 			table.insert(failures, "set_DevilFruit")
 		end
-	else
-		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
-			table.insert(failures, "set_DevilFruit")
-		end
-	end
 
 	BrainrotInstanceService.SyncAvailableCounts(player)
 	BountyService.RefreshPlayerBounty(player)

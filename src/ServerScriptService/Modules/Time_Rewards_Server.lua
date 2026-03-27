@@ -23,6 +23,18 @@ local claimLocks = {}
 local lastClaimRequestAt = {}
 local rewardIds = {}
 
+local GIFT_DEBUG = false
+
+local function giftLog(tag: string, ...)
+	if GIFT_DEBUG then
+		print(tag, ...)
+	end
+end
+
+local function giftError(...)
+	warn("[GIFT][ERROR]", ...)
+end
+
 for id in pairs(RewardsConfig) do
 	table.insert(rewardIds, id)
 end
@@ -30,6 +42,21 @@ end
 table.sort(rewardIds)
 
 local TOTAL_REWARDS = #rewardIds
+
+local function getClaimedCountFromMap(rawClaimedRewards): number
+	local count = 0
+	if typeof(rawClaimedRewards) ~= "table" then
+		return count
+	end
+
+	for _, claimed in pairs(rawClaimedRewards) do
+		if claimed == true then
+			count += 1
+		end
+	end
+
+	return count
+end
 
 local function waitForDataReady(player: Player, timeoutSeconds: number): boolean
 	if DataManager:IsReady(player) then
@@ -187,7 +214,19 @@ local function buildClientState(state, currentPlayTime: number)
 end
 
 local function fireClientState(player: Player, state, currentPlayTime: number)
-	Remote:FireClient(player, "syncState", buildClientState(state, currentPlayTime))
+	local clientState = buildClientState(state, currentPlayTime)
+	giftLog(
+		"[GIFT][DATA]",
+		string.format(
+			"player=%s action=syncState claimed=%d totalRewards=%d currentPlayTime=%d cycleStart=%d",
+			player.Name,
+			getClaimedCountFromMap(clientState.ClaimedRewards),
+			TOTAL_REWARDS,
+			clientState.CurrentPlayTime,
+			clientState.CycleStartPlayTime
+		)
+	)
+	Remote:FireClient(player, "syncState", clientState)
 end
 
 local function getClaimedCount(state): number
@@ -294,11 +333,13 @@ end
 
 local function syncPlayerState(player: Player)
 	if not waitForDataReady(player, DATA_READY_TIMEOUT) then
+		giftError("Timed out waiting for time rewards data for", player.Name)
 		return false
 	end
 
-	local state, currentPlayTime = ensureTimeRewardState(player)
+	local state, currentPlayTime, reason = ensureTimeRewardState(player)
 	if not state then
+		giftError("Failed to build time rewards state for", player.Name, reason or "unknown_reason")
 		return false
 	end
 
@@ -337,16 +378,28 @@ local function claimReward(player: Player, rewardId: number)
 
 	local state, currentPlayTime = ensureTimeRewardState(player)
 	if not state then
+		giftError("Missing time rewards state during claim for", player.Name, rewardId)
 		return
 	end
 
 	if isRewardClaimed(state, rewardId) then
+		giftLog("[GIFT][DATA]", "player", player.Name, "action=alreadyClaimed", "rewardId", rewardId)
 		Remote:FireClient(player, "alreadyClaimed", rewardId)
 		return
 	end
 
 	local elapsedPlayTime = getElapsedPlayTime(state, currentPlayTime)
 	if elapsedPlayTime < config.Time then
+		giftLog(
+			"[GIFT][DATA]",
+			"player",
+			player.Name,
+			"action=notReady",
+			"rewardId",
+			rewardId,
+			"remaining",
+			config.Time - elapsedPlayTime
+		)
 		Remote:FireClient(player, "notReady", rewardId, config.Time - elapsedPlayTime)
 		return
 	end
@@ -364,7 +417,7 @@ local function claimReward(player: Player, rewardId: number)
 		state.ClaimedRewards = previousClaimedRewards
 		state.LastClaimPlayTime = previousLastClaimPlayTime
 		claimLocks[player] = nil
-		warn("[TimeRewardsServer] Failed to persist claim state:", player, rewardId, persistReason)
+		giftError("Failed to persist claim state", player.Name, rewardId, persistReason)
 		return
 	end
 
@@ -374,17 +427,27 @@ local function claimReward(player: Player, rewardId: number)
 		state.LastClaimPlayTime = previousLastClaimPlayTime
 		persistTimeRewardState(player, state)
 		claimLocks[player] = nil
-		warn("[TimeRewardsServer] Failed to grant time reward:", player, rewardId, grantReason)
+		giftError("Failed to grant time reward", player.Name, rewardId, grantReason)
 		return
 	end
 
+	giftLog(
+		"[GIFT][DATA]",
+		string.format(
+			"player=%s action=claimed rewardId=%d rewardName=%s amount=%s",
+			player.Name,
+			rewardId,
+			tostring(rewardName),
+			tostring(amount)
+		)
+	)
 	Remote:FireClient(player, "claimed", rewardId, rewardName, amount)
 
 	if getClaimedCount(state) >= TOTAL_REWARDS then
 		resetCycleState(state, currentPlayTime)
 		local resetPersisted, resetReason = persistTimeRewardState(player, state)
 		if not resetPersisted then
-			warn("[TimeRewardsServer] Failed to persist cycle reset:", player, resetReason)
+			giftError("Failed to persist time rewards cycle reset", player.Name, resetReason)
 		end
 	end
 
@@ -405,6 +468,7 @@ local function instantClaimAll(player: Player)
 
 	local state, currentPlayTime = ensureTimeRewardState(player)
 	if not state then
+		giftError("Missing time rewards state during instant claim for", player.Name)
 		return
 	end
 
@@ -416,6 +480,16 @@ local function instantClaimAll(player: Player)
 			if rewardGranted then
 				markRewardClaimed(state, rewardId)
 				state.LastClaimPlayTime = currentPlayTime
+				giftLog(
+					"[GIFT][DATA]",
+					string.format(
+						"player=%s action=claimed rewardId=%d rewardName=%s amount=%s source=instant",
+						player.Name,
+						rewardId,
+						tostring(rewardName),
+						tostring(amount)
+					)
+				)
 				Remote:FireClient(player, "claimed", rewardId, rewardName, amount)
 			end
 		end
@@ -427,7 +501,7 @@ local function instantClaimAll(player: Player)
 
 	local persisted, reason = persistTimeRewardState(player, state)
 	if not persisted then
-		warn("[TimeRewardsServer] Failed to persist instant reward state:", player, reason)
+		giftError("Failed to persist instant reward state", player.Name, reason)
 	end
 
 	fireClientState(player, state, currentPlayTime)

@@ -106,33 +106,79 @@ local function hardRestore()
 	counter.Rotation = homeCounterRot
 	textLabel.Rotation = homeTextRot
 	textScale.Scale = homeTextScale
-	if icon then icon.Rotation = homeIconRot end
-	if iconScale then iconScale.Scale = homeIconScale end
+	if icon then
+		icon.Rotation = homeIconRot
+	end
+	if iconScale then
+		iconScale.Scale = homeIconScale
+	end
 end
 
 local function clearActive()
-	if connRender then connRender:Disconnect() connRender = nil end
-	if connValueChanged then connValueChanged:Disconnect() connValueChanged = nil end
-	if connCompleted then connCompleted:Disconnect() connCompleted = nil end
+	if connRender then
+		connRender:Disconnect()
+		connRender = nil
+	end
+	if connValueChanged then
+		connValueChanged:Disconnect()
+		connValueChanged = nil
+	end
+	if connCompleted then
+		connCompleted:Disconnect()
+		connCompleted = nil
+	end
 
-	if activeTween then activeTween:Cancel() activeTween = nil end
-	if activeNum then activeNum:Destroy() activeNum = nil end
+	if activeTween then
+		activeTween:Cancel()
+		activeTween = nil
+	end
+	if activeNum then
+		activeNum:Destroy()
+		activeNum = nil
+	end
 
-	if restoreTween then restoreTween:Cancel() restoreTween = nil end
-	if restoreBlend then restoreBlend:Destroy() restoreBlend = nil end
+	if restoreTween then
+		restoreTween:Cancel()
+		restoreTween = nil
+	end
+	if restoreBlend then
+		restoreBlend:Destroy()
+		restoreBlend = nil
+	end
 
-	if posTween then posTween:Cancel() posTween = nil end
-	if rotTween then rotTween:Cancel() rotTween = nil end
-	if textRotTween then textRotTween:Cancel() textRotTween = nil end
-	if iconRotTween then iconRotTween:Cancel() iconRotTween = nil end
-	if textScaleTween then textScaleTween:Cancel() textScaleTween = nil end
-	if iconScaleTween then iconScaleTween:Cancel() iconScaleTween = nil end
+	if posTween then
+		posTween:Cancel()
+		posTween = nil
+	end
+	if rotTween then
+		rotTween:Cancel()
+		rotTween = nil
+	end
+	if textRotTween then
+		textRotTween:Cancel()
+		textRotTween = nil
+	end
+	if iconRotTween then
+		iconRotTween:Cancel()
+		iconRotTween = nil
+	end
+	if textScaleTween then
+		textScaleTween:Cancel()
+		textScaleTween = nil
+	end
+	if iconScaleTween then
+		iconScaleTween:Cancel()
+		iconScaleTween = nil
+	end
 
 	hardRestore()
 end
 
 local function animateBackToNormal(id)
-	if restoreBlend then restoreBlend:Destroy() restoreBlend = nil end
+	if restoreBlend then
+		restoreBlend:Destroy()
+		restoreBlend = nil
+	end
 	restoreBlend = Instance.new("NumberValue")
 	restoreBlend.Value = 0
 
@@ -142,7 +188,9 @@ local function animateBackToNormal(id)
 	local c
 	c = restoreBlend:GetPropertyChangedSignal("Value"):Connect(function()
 		if id ~= animId then
-			if c then c:Disconnect() end
+			if c then
+			c:Disconnect()
+		end
 			return
 		end
 		local a = restoreBlend.Value
@@ -152,9 +200,16 @@ local function animateBackToNormal(id)
 
 	restoreTween = TweenService:Create(restoreBlend, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Value = 1 })
 	restoreTween.Completed:Connect(function()
-		if c then c:Disconnect() end
-		if id ~= animId then return end
-		if restoreBlend then restoreBlend:Destroy() restoreBlend = nil end
+		if c then
+			c:Disconnect()
+		end
+		if id ~= animId then
+			return
+		end
+		if restoreBlend then
+		restoreBlend:Destroy()
+		restoreBlend = nil
+	end
 		restoreTween = nil
 	end)
 	restoreTween:Play()
@@ -218,7 +273,9 @@ local function animateMoney(target)
 	activeNum.Value = start
 
 	connValueChanged = activeNum:GetPropertyChangedSignal("Value"):Connect(function()
-		if id ~= animId then return end
+		if id ~= animId then
+			return
+		end
 		local v = math.floor(activeNum.Value + 0.5)
 		displayed = v
 		textLabel.Text = moneyText(v)
@@ -234,7 +291,9 @@ local function animateMoney(target)
 	local iconPunch = isUp and 0.06 or 0.05
 
 	connRender = RunService.RenderStepped:Connect(function()
-		if id ~= animId then return end
+		if id ~= animId then
+			return
+		end
 		local t = os.clock()
 		local p = math.clamp((t - t0) / duration, 0, 1)
 
@@ -262,19 +321,32 @@ local function animateMoney(target)
 		end
 
 		if p >= 1 then
-			if connRender then connRender:Disconnect() connRender = nil end
+			if connRender then
+		connRender:Disconnect()
+		connRender = nil
+	end
 		end
 	end)
 
 	connCompleted = activeTween.Completed:Connect(function(state)
-		if id ~= animId then return end
-		if state ~= Enum.PlaybackState.Completed then return end
+		if id ~= animId then
+			return
+		end
+		if state ~= Enum.PlaybackState.Completed then
+			return
+		end
 
 		displayed = target
 		textLabel.Text = moneyText(target)
 
-		if connValueChanged then connValueChanged:Disconnect() connValueChanged = nil end
-		if activeNum then activeNum:Destroy() activeNum = nil end
+		if connValueChanged then
+		connValueChanged:Disconnect()
+		connValueChanged = nil
+	end
+		if activeNum then
+		activeNum:Destroy()
+		activeNum = nil
+	end
 		activeTween = nil
 
 		animateBackToNormal(id)
@@ -288,7 +360,9 @@ end
 local last = moneyValue.Value
 moneyValue:GetPropertyChangedSignal("Value"):Connect(function()
 	local newVal = moneyValue.Value
-	if newVal == last then return end
+	if newVal == last then
+		return
+	end
 	local diff = newVal - last
 	last = newVal
 	animateMoney(newVal)

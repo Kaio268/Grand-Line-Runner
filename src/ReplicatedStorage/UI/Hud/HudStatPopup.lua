@@ -25,7 +25,6 @@ end
 
 local function renderLayeredText(name, props)
 	return e("Frame", {
-		Name = name,
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
@@ -35,7 +34,6 @@ local function renderLayeredText(name, props)
 		ZIndex = props.zIndex,
 	}, {
 		Shadow = e("TextLabel", {
-			Name = "Shadow",
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
@@ -55,7 +53,6 @@ local function renderLayeredText(name, props)
 			ZIndex = props.zIndex,
 		}),
 		Main = e("TextLabel", {
-			Name = "Main",
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
@@ -134,7 +131,6 @@ local function HudStatPopup(props)
 	local labelText = tostring(notification.labelText or "")
 
 	return e("Frame", {
-		Name = string.format("ReactHudStatPopup_%s", tostring(notification.id)),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		LayoutOrder = tonumber(props.layoutOrder) or 1,
@@ -142,7 +138,6 @@ local function HudStatPopup(props)
 		ZIndex = 20,
 	}, {
 		Inner = e("Frame", {
-			Name = "ReactHudStatPopupInner",
 			AnchorPoint = Vector2.new(0, 1),
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 1,
@@ -163,7 +158,6 @@ local function HudStatPopup(props)
 				VerticalAlignment = Enum.VerticalAlignment.Center,
 			}),
 			Icon = icon and icon.image and e("ImageLabel", {
-				Name = "ReactHudStatPopupIcon",
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
 				Image = icon.image,
@@ -178,7 +172,6 @@ local function HudStatPopup(props)
 				ZIndex = 22,
 			}) or nil,
 			TextGroup = e("Frame", {
-				Name = "ReactHudStatPopupTextGroup",
 				AutomaticSize = Enum.AutomaticSize.X,
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
