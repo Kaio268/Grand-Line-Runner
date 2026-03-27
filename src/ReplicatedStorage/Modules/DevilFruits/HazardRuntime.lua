@@ -106,62 +106,96 @@ function HazardRuntime.GetController(instance)
 	return nil, nil
 end
 
+function HazardRuntime.GetSharedHazardsFolder()
+	return getSharedHazardsFolder()
+end
+
 function HazardRuntime.GetServerHazardContext(instance, options)
 	if not RunService:IsServer() or typeof(instance) ~= "Instance" then
-		return nil
+		return nil, {
+			HitInstance = instance,
+			Reason = "invalid_instance",
+		}
 	end
 
 	options = type(options) == "table" and options or {}
+	local diagnostics = {
+		HitInstance = instance,
+		Reason = "unknown",
+	}
 
 	local hazardsFolder = typeof(options.HazardsFolder) == "Instance" and options.HazardsFolder or getSharedHazardsFolder()
 	if not hazardsFolder then
-		return nil
+		diagnostics.Reason = "missing_hazards_folder"
+		return nil, diagnostics
 	end
 
 	local hazardRoot, hazardClass, hazardType, canFreeze, freezeBehavior = HazardUtils.GetHazardInfo(instance)
 	if not hazardRoot or not hazardRoot.Parent then
-		return nil
+		diagnostics.Reason = "no_hazard_root"
+		return nil, diagnostics
 	end
 
+	diagnostics.HazardRoot = hazardRoot
+	diagnostics.MatchSource = instance == hazardRoot and "direct" or "ancestor"
+
 	if not hazardRoot:IsDescendantOf(hazardsFolder) then
-		return nil
+		diagnostics.Reason = "outside_hazards_folder"
+		return nil, diagnostics
 	end
 
 	local controllerRoot, controller = HazardRuntime.GetController(hazardRoot)
 	if controllerRoot ~= hazardRoot or type(controller) ~= "table" then
-		return nil
+		diagnostics.ControllerRoot = controllerRoot
+		diagnostics.Reason = "missing_controller"
+		return nil, diagnostics
 	end
 
 	if controller.Destroyed == true then
-		return nil
+		diagnostics.ControllerRoot = controllerRoot
+		diagnostics.Reason = "destroyed_controller"
+		return nil, diagnostics
 	end
 
 	if options.RequireCanFreeze == true and canFreeze ~= true then
-		return nil
+		diagnostics.Reason = "not_freezable"
+		return nil, diagnostics
 	end
 
 	if not matchesStringSet(hazardClass, options.AllowedClasses) then
-		return nil
+		diagnostics.Reason = "disallowed_class"
+		return nil, diagnostics
 	end
 
 	if not matchesStringSet(hazardType, options.AllowedTypes) then
-		return nil
+		diagnostics.Reason = "disallowed_type"
+		return nil, diagnostics
 	end
 
 	local position = getPivotPosition(hazardRoot)
 	if position == nil then
-		return nil
+		diagnostics.Reason = "missing_position"
+		return nil, diagnostics
 	end
+
+	diagnostics.RootPosition = position
 
 	local playerRootPosition = options.PlayerRootPosition
 	if typeof(playerRootPosition) == "Vector3" then
 		local maxPlayerDistance = math.max(0, tonumber(options.MaxPlayerDistance) or 0)
 		if maxPlayerDistance > 0 and (position - playerRootPosition).Magnitude > maxPlayerDistance then
-			return nil
+			local referencePosition = typeof(options.HitPosition) == "Vector3" and options.HitPosition or position
+			diagnostics.DistanceReference = referencePosition == position and "root" or "hit"
+			diagnostics.DistancePosition = referencePosition
+			diagnostics.DistanceToPlayer = (referencePosition - playerRootPosition).Magnitude
+			if diagnostics.DistanceToPlayer > maxPlayerDistance then
+				diagnostics.Reason = "too_far_from_player"
+				return nil, diagnostics
+			end
 		end
 	end
 
-	return {
+	local context = {
 		Root = hazardRoot,
 		Controller = controller,
 		HazardClass = hazardClass,
@@ -169,7 +203,12 @@ function HazardRuntime.GetServerHazardContext(instance, options)
 		CanFreeze = canFreeze == true,
 		FreezeBehavior = freezeBehavior,
 		Position = position,
+		MatchSource = diagnostics.MatchSource,
+		HitInstance = instance,
+		HitPosition = typeof(options.HitPosition) == "Vector3" and options.HitPosition or nil,
 	}
+	diagnostics.Reason = "ok"
+	return context, diagnostics
 end
 
 function HazardRuntime.FindHazardsInRadius(centerPosition, radius, options)
@@ -208,6 +247,7 @@ function HazardRuntime.FindHazardsInRadius(centerPosition, radius, options)
 			AllowedTypes = options.AllowedTypes,
 			PlayerRootPosition = options.PlayerRootPosition,
 			MaxPlayerDistance = options.MaxPlayerDistance,
+			HitPosition = part.Position,
 		})
 		if context and not seenRoots[context.Root] then
 			seenRoots[context.Root] = true

@@ -30,6 +30,18 @@ local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_VERTICAL_DEADZONE = 0.12
 local MIN_DIRECTION_MAGNITUDE = 0.01
+local HIE_AIM_DEBUG = RunService:IsStudio()
+local HIE_VFX_DEBUG = RunService:IsStudio()
+local HIE_VFX_VERBOSE = false
+local HIE_DEFAULT_AIM_RAY_DISTANCE = 700
+local HIE_AIM_PLANE_HEIGHT_OFFSET = 1.2
+local HIE_MAX_AIM_FILTER_PASSES = 12
+local HIE_AIM_HELPER_NAMES = {
+	HitBox = true,
+	ExtractionZone = true,
+	RunHub = true,
+	DecreaseSpeed = true,
+}
 
 local function waitForChildSafe(parent, childName, timeout)
 	local deadline = os.clock() + (timeout or 15)
@@ -56,6 +68,8 @@ local localCooldowns = {}
 local suppressedParts = {}
 local activeFireBursts = {}
 local activePhoenixShields = {}
+local activeHieFreezeShots = {}
+local pendingHieFreezeShotResolutions = {}
 local hazardSuppressionLoopRunning = false
 local spaceHeld = false
 local flightInputState = {
@@ -64,6 +78,8 @@ local flightInputState = {
 	Left = false,
 	Right = false,
 }
+local resolveFreezeShotVisual
+local playOptionalEffect
 local getFruitFolder
 local getEquippedFruit
 local gomuAimState = {
@@ -95,6 +111,93 @@ local clearCooldownRows
 
 local HUD_REFRESH_INTERVAL = 0.05
 local nextHudRefreshAt = 0
+
+local function formatHieVfxVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function describeFreezeShotPayload(payload)
+	payload = payload or {}
+
+	return string.format(
+		"phase=%s projectileId=%s start=%s impact=%s speed=%s baseSpeed=%s velocity=%s inherited=%s radius=%s maxDistance=%s startedAt=%s resolvedAt=%s hitKind=%s hitLabel=%s resolveReason=%s",
+		tostring(payload.Phase),
+		tostring(payload.ProjectileId),
+		formatHieVfxVector3(payload.StartPosition),
+		formatHieVfxVector3(payload.ImpactPosition),
+		tostring(payload.ProjectileSpeed),
+		tostring(payload.BaseProjectileSpeed),
+		formatHieVfxVector3(payload.ProjectileVelocity),
+		formatHieVfxVector3(payload.InheritedVelocity),
+		tostring(payload.ProjectileRadius),
+		tostring(payload.MaxDistance or payload.Range),
+		tostring(payload.StartedAt),
+		tostring(payload.ResolvedAt),
+		tostring(payload.HitKind),
+		tostring(payload.HitLabel),
+		tostring(payload.ResolveReason)
+	)
+end
+
+local function logHieVfx(tag, message, ...)
+	if not HIE_VFX_DEBUG then
+		return
+	end
+
+	local prefix = "[HIE][VFX]"
+	if typeof(tag) == "string" and tag ~= "" then
+		prefix ..= string.format("[%s]", tag)
+	end
+
+	print(string.format(prefix .. " " .. message, ...))
+end
+
+local function logHieVfxVerbose(message, ...)
+	if not (HIE_VFX_DEBUG and HIE_VFX_VERBOSE) then
+		return
+	end
+
+	print(string.format("[HIE][VFX][STEP] " .. message, ...))
+end
+
+local function logHieVfxError(message, ...)
+	warn(string.format("[HIE][VFX][ERROR] " .. message, ...))
+end
+
+local function logHieAimClient(tag, message, ...)
+	if not HIE_AIM_DEBUG then
+		return
+	end
+
+	local prefix = "[HIE][AIM][CLIENT]"
+	if typeof(tag) == "string" and tag ~= "" then
+		prefix = string.format("[HIE][AIM][%s]", tag)
+	end
+
+	print(string.format(prefix .. " " .. message, ...))
+end
+
+local function hasTruthyInstanceAttribute(instance, attributeName)
+	if typeof(instance) ~= "Instance" then
+		return false
+	end
+
+	local value = instance:GetAttribute(attributeName)
+	if value == true then
+		return true
+	end
+
+	if typeof(value) == "string" then
+		local lowered = string.lower(value)
+		return lowered == "true" or lowered == "1" or lowered == "yes"
+	end
+
+	return false
+end
 
 local function formatAbilityName(abilityName)
 	return tostring(abilityName):gsub("(%l)(%u)", "%1 %2")
@@ -933,6 +1036,238 @@ local function getLookAimRaycast()
 	return result, (result and result.Position) or (unitRay.Origin + rayVector), unitRay.Origin, unitRay.Direction.Unit
 end
 
+local function getCursorAimRay()
+	local camera = getCurrentCamera()
+	if not camera then
+		return nil, nil
+	end
+
+	local mouseLocation = UserInputService:GetMouseLocation()
+	return camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y), mouseLocation
+end
+
+local function getCursorAimRaycast(maxDistance)
+	local unitRay, mouseLocation = getCursorAimRay()
+	if not unitRay then
+		return nil, nil, nil, nil, mouseLocation
+	end
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = player.Character and { player.Character } or {}
+	params.IgnoreWater = true
+
+	local rayDistance = math.max(1, tonumber(maxDistance) or HIE_DEFAULT_AIM_RAY_DISTANCE)
+	local rayVector = unitRay.Direction * rayDistance
+	local result = Workspace:Raycast(unitRay.Origin, rayVector, params)
+	return result, (result and result.Position) or (unitRay.Origin + rayVector), unitRay.Origin, unitRay.Direction.Unit, mouseLocation
+end
+
+local function projectPointToHorizontalPlane(point, planeY)
+	if typeof(point) ~= "Vector3" then
+		return nil
+	end
+
+	return Vector3.new(point.X, planeY, point.Z)
+end
+
+local function getHorizontalRayPlaneIntersection(rayOrigin, rayDirection, planeY, maxDistance)
+	if typeof(rayOrigin) ~= "Vector3" or typeof(rayDirection) ~= "Vector3" then
+		return nil
+	end
+
+	if math.abs(rayDirection.Y) <= 0.0001 then
+		return nil
+	end
+
+	local distance = (planeY - rayOrigin.Y) / rayDirection.Y
+	if distance <= 0 then
+		return nil
+	end
+
+	local maxAllowedDistance = math.max(1, tonumber(maxDistance) or HIE_DEFAULT_AIM_RAY_DISTANCE)
+	if distance > maxAllowedDistance then
+		return nil
+	end
+
+	return rayOrigin + (rayDirection * distance)
+end
+
+local function isCharacterDescendant(instance)
+	return getPlayerFromDescendant(instance) ~= nil
+end
+
+local function getHieAimExclusion(instance)
+	if typeof(instance) ~= "Instance" then
+		return false, nil, nil
+	end
+
+	if instance == Workspace.Terrain then
+		return false, nil, nil
+	end
+
+	if isCharacterDescendant(instance) then
+		return false, nil, nil
+	end
+
+	local hazardRoot = HazardUtils.GetHazardInfo(instance)
+	if hazardRoot then
+		return false, nil, nil
+	end
+
+	local current = instance
+	while current and current ~= Workspace do
+		if hasTruthyInstanceAttribute(current, "IgnoreAim")
+			or hasTruthyInstanceAttribute(current, "AimIgnore")
+			or hasTruthyInstanceAttribute(current, "IgnoreProjectiles")
+			or hasTruthyInstanceAttribute(current, "ProjectileIgnore") then
+			return true, current, "ConfiguredIgnore"
+		end
+
+		local loweredName = string.lower(current.Name)
+		if HIE_AIM_HELPER_NAMES[current.Name]
+			or loweredName:find("hitbox", 1, true)
+			or loweredName:find("trigger", 1, true)
+			or loweredName:find("boundary", 1, true)
+			or loweredName == "decreasespeed"
+			or (current:IsA("BasePart") and current.CanCollide ~= true and loweredName:find("zone", 1, true)) then
+			return true, current, current.Name
+		end
+
+		current = current.Parent
+	end
+
+	if instance:IsA("BasePart") and instance.CanCollide ~= true then
+		return true, instance, "NonCollidable"
+	end
+
+	return false, nil, nil
+end
+
+local function getHieFreezeAimRaycast(maxDistance)
+	local unitRay, mouseLocation = getCursorAimRay()
+	if not unitRay then
+		return nil, nil, nil, nil, mouseLocation
+	end
+
+	local rayDistance = math.max(1, tonumber(maxDistance) or HIE_DEFAULT_AIM_RAY_DISTANCE)
+	local rayVector = unitRay.Direction * rayDistance
+	local ignoredInstances = player.Character and { player.Character } or {}
+
+	for _ = 1, HIE_MAX_AIM_FILTER_PASSES do
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = ignoredInstances
+		params.IgnoreWater = true
+
+		local result = Workspace:Raycast(unitRay.Origin, rayVector, params)
+		if not result then
+			return nil, nil, unitRay.Origin, unitRay.Direction.Unit, mouseLocation
+		end
+
+		local shouldExclude, excludeInstance, excludeReason = getHieAimExclusion(result.Instance)
+		logHieAimClient(
+			"FILTER",
+			"hit=%s excluded=%s reason=%s hitPosition=%s",
+			result.Instance:GetFullName(),
+			tostring(shouldExclude),
+			tostring(excludeReason or "Accepted"),
+			formatHieVfxVector3(result.Position)
+		)
+
+		if not shouldExclude then
+			return result, result.Position, unitRay.Origin, unitRay.Direction.Unit, mouseLocation
+		end
+
+		ignoredInstances[#ignoredInstances + 1] = excludeInstance or result.Instance
+	end
+
+	logHieAimClient(
+		"FILTER",
+		"raycast exhausted filterPasses=%d fallback=true rayOrigin=%s rayDirection=%s",
+		HIE_MAX_AIM_FILTER_PASSES,
+		formatHieVfxVector3(unitRay.Origin),
+		formatHieVfxVector3(unitRay.Direction.Unit)
+	)
+
+	return nil, nil, unitRay.Origin, unitRay.Direction.Unit, mouseLocation
+end
+
+local function resolveHiePlanarAimPoint(rootPart, candidatePosition, abilityConfig)
+	if not rootPart or typeof(candidatePosition) ~= "Vector3" then
+		return nil, "InvalidCandidate", nil
+	end
+
+	local aimOrigin = rootPart.Position + Vector3.new(0, HIE_AIM_PLANE_HEIGHT_OFFSET, 0)
+	local projectedPosition = projectPointToHorizontalPlane(candidatePosition, aimOrigin.Y)
+	local planarOffset = projectedPosition - aimOrigin
+	local planarMagnitude = planarOffset.Magnitude
+	local minDistance = math.max(0.5, tonumber(abilityConfig and abilityConfig.MinimumAimDistance) or 6)
+	if planarMagnitude < minDistance then
+		return nil, "TooClose", nil
+	end
+
+	local forwardPlanar = getPlanarVector(rootPart.CFrame.LookVector)
+	if forwardPlanar.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		forwardPlanar = Vector3.new(0, 0, -1)
+	end
+
+	local forwardDot = forwardPlanar.Unit:Dot(planarOffset.Unit)
+	local maxDistance = math.max(minDistance, tonumber(abilityConfig and abilityConfig.Range) or 0)
+	local clampedDistance = math.clamp(planarMagnitude, minDistance, maxDistance)
+	return aimOrigin + (planarOffset.Unit * clampedDistance), nil, forwardDot
+end
+
+local function getHieFallbackAimPoint(rootPart, rayOrigin, rayDirection, abilityConfig)
+	if not rootPart then
+		return nil, "MissingRoot"
+	end
+
+	local aimOrigin = rootPart.Position + Vector3.new(0, HIE_AIM_PLANE_HEIGHT_OFFSET, 0)
+	local aimRayDistance = math.max(1, tonumber(abilityConfig and abilityConfig.AimRayDistance) or HIE_DEFAULT_AIM_RAY_DISTANCE)
+	local planePoint = getHorizontalRayPlaneIntersection(rayOrigin, rayDirection, aimOrigin.Y, aimRayDistance)
+	if planePoint then
+		local resolvedPoint, rejectReason, forwardDot = resolveHiePlanarAimPoint(rootPart, planePoint, abilityConfig)
+		if resolvedPoint then
+			logHieAimClient(
+				"FALLBACK",
+				"mode=plane resolved=true aimPoint=%s origin=%s forwardDot=%.2f",
+				formatHieVfxVector3(resolvedPoint),
+				formatHieVfxVector3(aimOrigin),
+				forwardDot or 0
+			)
+			return resolvedPoint
+		end
+
+		logHieAimClient(
+			"FALLBACK",
+			"mode=plane resolved=false reason=%s planePoint=%s origin=%s",
+			tostring(rejectReason),
+			formatHieVfxVector3(planePoint),
+			formatHieVfxVector3(aimOrigin)
+		)
+	end
+
+	local forwardPlanar = getPlanarVector(rootPart.CFrame.LookVector)
+	if forwardPlanar.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		forwardPlanar = Vector3.new(0, 0, -1)
+	end
+
+	local fallbackDistance = math.max(
+		math.max(tonumber(abilityConfig and abilityConfig.MinimumAimDistance) or 6, 18),
+		math.min(tonumber(abilityConfig and abilityConfig.Range) or 45, aimRayDistance)
+	)
+	local fallbackPoint = aimOrigin + (forwardPlanar.Unit * fallbackDistance)
+	logHieAimClient(
+		"FALLBACK",
+		"mode=forward aimPoint=%s origin=%s direction=%s",
+		formatHieVfxVector3(fallbackPoint),
+		formatHieVfxVector3(aimOrigin),
+		formatHieVfxVector3(forwardPlanar.Unit)
+	)
+	return fallbackPoint
+end
+
 local function getDistanceFromRay(rayOrigin, rayDirection, point)
 	local toPoint = point - rayOrigin
 	local projectedDistance = math.max(0, toPoint:Dot(rayDirection))
@@ -1047,18 +1382,66 @@ local function getGomuLaunchTarget(abilityConfig)
 	return aimPosition, targetPlayer
 end
 
-local function buildAbilityRequestPayload(fruitName, abilityName)
-	if fruitName ~= "Gomu Gomu no Mi" or abilityName ~= "RubberLaunch" then
-		return nil
+local function getHieFreezeShotAimPosition(abilityConfig)
+	local aimRayDistance = math.max(1, tonumber(abilityConfig and abilityConfig.AimRayDistance) or HIE_DEFAULT_AIM_RAY_DISTANCE)
+	local rootPart = getRootPart()
+	local result, hitPosition, rayOrigin, rayDirection, mouseLocation = getHieFreezeAimRaycast(aimRayDistance)
+	if rootPart and hitPosition then
+		local chosenAimPosition, rejectReason, forwardDot = resolveHiePlanarAimPoint(rootPart, hitPosition, abilityConfig)
+		if chosenAimPosition then
+			local flattenedY = math.abs(hitPosition.Y - chosenAimPosition.Y) > 0.01
+			logHieAimClient(
+				"CLIENT",
+				"captured=true mouse=%s hit=%s chosenAim=%s rayOrigin=%s rayDirection=%s flattenedY=%s forwardDot=%.2f",
+				tostring(mouseLocation),
+				result and result.Instance and result.Instance:GetFullName() or "<none>",
+				formatHieVfxVector3(chosenAimPosition),
+				formatHieVfxVector3(rayOrigin),
+				formatHieVfxVector3(rayDirection),
+				tostring(flattenedY),
+				forwardDot or 0
+			)
+			return chosenAimPosition
+		end
+
+		logHieAimClient(
+			"FALLBACK",
+			"capturedHitRejected=true reason=%s mouse=%s hit=%s hitPosition=%s",
+			tostring(rejectReason),
+			tostring(mouseLocation),
+			result and result.Instance and result.Instance:GetFullName() or "<none>",
+			formatHieVfxVector3(hitPosition)
+		)
 	end
 
-	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
-	local aimPosition, targetPlayer = getGomuLaunchTarget(abilityConfig)
+	if rootPart then
+		return getHieFallbackAimPoint(rootPart, rayOrigin, rayDirection, abilityConfig)
+	end
 
-	return {
-		AimPosition = aimPosition,
-		TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
-	}
+	logHieAimClient("FALLBACK", "captured=false reason=no_cursor_ray_and_no_root")
+	return nil
+end
+
+local function buildAbilityRequestPayload(fruitName, abilityName)
+	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
+		local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
+		local aimPosition = getHieFreezeShotAimPosition(abilityConfig)
+		return aimPosition and {
+			AimPosition = aimPosition,
+		} or nil
+	end
+
+	if fruitName == "Gomu Gomu no Mi" and abilityName == "RubberLaunch" then
+		local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
+		local aimPosition, targetPlayer = getGomuLaunchTarget(abilityConfig)
+
+		return {
+			AimPosition = aimPosition,
+			TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
+		}
+	end
+
+	return nil
 end
 
 local function updateGomuAimAssist()
@@ -1369,6 +1752,59 @@ local function getProjectileDirection(direction, rootPart)
 	return Vector3.new(0, 0, -1)
 end
 
+local function getFreezeShotVelocity(payload, direction, speed)
+	if typeof(payload.ProjectileVelocity) == "Vector3" and payload.ProjectileVelocity.Magnitude > 0.01 then
+		return payload.ProjectileVelocity
+	end
+
+	return direction * math.max(1, speed)
+end
+
+local function setFreezeShotVisualTransform(part, position, velocity, fallbackDirection)
+	if not part then
+		return
+	end
+
+	local facing = typeof(velocity) == "Vector3" and velocity.Magnitude > 0.01 and velocity.Unit or fallbackDirection
+	if typeof(facing) ~= "Vector3" or facing.Magnitude <= 0.01 then
+		facing = Vector3.new(0, 0, -1)
+	end
+
+	part.CFrame = CFrame.lookAt(position, position + facing)
+end
+
+local function getFreezeShotTravelSnapshot(startPosition, velocity, maxDistance, startedAt, queryTime, resolutionPayload)
+	local speed = typeof(velocity) == "Vector3" and velocity.Magnitude or 0
+	local elapsed = math.max(0, queryTime - startedAt)
+	local maxTravelTime = speed > 0.01 and (maxDistance / speed) or 0
+	local effectiveTravelTime = math.min(elapsed, maxTravelTime)
+	local distance = math.min(speed * effectiveTravelTime, maxDistance)
+	local position = startPosition + (velocity * effectiveTravelTime)
+	local clamped = effectiveTravelTime < elapsed
+	local clampReason = clamped and "max_distance" or "none"
+
+	if type(resolutionPayload) == "table" then
+		local resolvedAt = tonumber(resolutionPayload.ResolvedAt)
+		local impactPosition = typeof(resolutionPayload.ImpactPosition) == "Vector3" and resolutionPayload.ImpactPosition or nil
+		if resolvedAt and impactPosition and queryTime >= resolvedAt then
+			position = impactPosition
+			distance = math.min((impactPosition - startPosition).Magnitude, maxDistance)
+			clamped = true
+			clampReason = "resolved"
+		end
+	end
+
+	return {
+		Position = position,
+		Elapsed = elapsed,
+		Distance = distance,
+		Speed = speed,
+		Clamped = clamped,
+		ClampReason = clampReason,
+		EffectiveTravelTime = effectiveTravelTime,
+	}
+end
+
 local function createIceImpactEffect(position)
 	local burst = Instance.new("Part")
 	burst.Name = "HieFreezeImpact"
@@ -1430,65 +1866,388 @@ local function createIceBoostEffect(targetPlayer, _payload)
 	end)
 end
 
-local function launchFreezeShot(targetPlayer, payload)
-	local rootPart = getPlayerRootPart(targetPlayer)
-	if not rootPart then
+local function destroyFreezeShotPart(projectileState)
+	if projectileState and projectileState.Part and projectileState.Part.Parent then
+		projectileState.Part:Destroy()
+	end
+end
+
+local function cleanupFreezeShot(projectileId)
+	local projectileState = activeHieFreezeShots[projectileId]
+	if not projectileState then
 		return
 	end
 
+	activeHieFreezeShots[projectileId] = nil
+	destroyFreezeShotPart(projectileState)
+	logHieVfx("CLEANUP", "projectileId=%s cleanedUp=true", tostring(projectileId))
+end
+
+-- Temporary primitive projectile, isolated so it can be swapped for final Hie VFX later.
+local function createTemporaryFreezeShotVisual(radius, startPosition, initialVelocity)
+	local ok, projectile = pcall(function()
+		local part = Instance.new("Part")
+		part.Name = "HieFreezeShotTemp"
+		part.Shape = Enum.PartType.Ball
+		part.Anchored = true
+		part.CanCollide = false
+		part.CanTouch = false
+		part.CanQuery = false
+		part.CastShadow = false
+		part.Material = Enum.Material.Neon
+		part.Color = Color3.fromRGB(173, 244, 255)
+		part.Transparency = 0.08
+		part.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
+		setFreezeShotVisualTransform(part, startPosition, initialVelocity, nil)
+
+		local light = Instance.new("PointLight")
+		light.Name = "Glow"
+		light.Color = Color3.fromRGB(196, 248, 255)
+		light.Brightness = 1.8
+		light.Range = math.max(6, radius * 8)
+		light.Parent = part
+
+		local attachment0 = Instance.new("Attachment")
+		attachment0.Name = "TrailStart"
+		attachment0.Position = Vector3.new(0, 0, -radius * 0.55)
+		attachment0.Parent = part
+
+		local attachment1 = Instance.new("Attachment")
+		attachment1.Name = "TrailEnd"
+		attachment1.Position = Vector3.new(0, 0, radius * 0.55)
+		attachment1.Parent = part
+
+		local trail = Instance.new("Trail")
+		trail.Name = "Trail"
+		trail.Attachment0 = attachment0
+		trail.Attachment1 = attachment1
+		trail.Color = ColorSequence.new(
+			Color3.fromRGB(255, 255, 255),
+			Color3.fromRGB(153, 234, 255)
+		)
+		trail.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.08),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		trail.LightEmission = 1
+		trail.Lifetime = 0.09
+		trail.MinLength = 0.02
+		trail.Enabled = true
+		trail.Parent = part
+
+		part.Parent = Workspace
+		return part
+	end)
+
+	if not ok then
+		logHieVfxError("temporary projectile creation failed detail=%s", tostring(projectile))
+		return nil
+	end
+
+	logHieVfx(
+		"PROJECTILE",
+		"temporary projectile created success=true radius=%.2f start=%s",
+		radius,
+		formatHieVfxVector3(startPosition)
+	)
+
+	return projectile
+end
+
+local function registerFreezeShotLaunch(targetPlayer, payload)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		logHieVfxError("launch ignored missingRoot player=%s payload={%s}", targetPlayer.Name, describeFreezeShotPayload(payload))
+		return false
+	end
+
+	local projectileId = tostring(payload.ProjectileId or "")
+	if projectileId == "" then
+		logHieVfxError("launch ignored missingProjectileId player=%s payload={%s}", targetPlayer.Name, describeFreezeShotPayload(payload))
+		return false
+	end
+
+	logHieVfx("INIT", "launch received player=%s payload={%s}", targetPlayer.Name, describeFreezeShotPayload(payload))
+
+	cleanupFreezeShot(projectileId)
+
+	local receiptTime = Workspace:GetServerTimeNow()
+	local pendingResolution = pendingHieFreezeShotResolutions[projectileId]
 	local direction = getProjectileDirection(payload.Direction, rootPart)
-	local range = math.max(1, tonumber(payload.Range) or 0)
 	local speed = math.max(1, tonumber(payload.ProjectileSpeed) or 0)
 	local radius = math.max(0.25, tonumber(payload.ProjectileRadius) or 0.8)
+	local maxDistance = math.max(1, tonumber(payload.MaxDistance) or tonumber(payload.Range) or 0)
+	local lifetime = math.max(0.05, tonumber(payload.Lifetime) or (maxDistance / speed))
+	local startedAt = tonumber(payload.StartedAt) or Workspace:GetServerTimeNow()
 	local startPosition = typeof(payload.StartPosition) == "Vector3"
 		and payload.StartPosition
 		or (rootPart.Position + Vector3.new(0, 1.2, 0) + direction * 3)
-	local endPosition = typeof(payload.EndPosition) == "Vector3"
-		and payload.EndPosition
-		or (startPosition + direction * range)
-	local finalPosition = typeof(payload.HitPosition) == "Vector3" and payload.HitPosition or endPosition
+	local projectileVelocity = getFreezeShotVelocity(payload, direction, speed)
+	speed = math.max(1, projectileVelocity.Magnitude)
+	direction = projectileVelocity.Magnitude > 0.01 and projectileVelocity.Unit or direction
+	local spawnSnapshot = getFreezeShotTravelSnapshot(
+		startPosition,
+		projectileVelocity,
+		maxDistance,
+		startedAt,
+		receiptTime,
+		pendingResolution and pendingResolution.Payload or nil
+	)
+	local visualStartPosition = spawnSnapshot.Position
+	local fastForwardDistance = (visualStartPosition - startPosition).Magnitude
 
-	local projectile = Instance.new("Part")
-	projectile.Name = "HieFreezeShot"
-	projectile.Shape = Enum.PartType.Ball
-	projectile.Anchored = true
-	projectile.CanCollide = false
-	projectile.CanTouch = false
-	projectile.CanQuery = false
-	projectile.Material = Enum.Material.Neon
-	projectile.Color = Color3.fromRGB(173, 244, 255)
-	projectile.Transparency = 0.1
-	projectile.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
-	projectile.CFrame = CFrame.new(startPosition)
-	projectile.Parent = Workspace
+	if fastForwardDistance > 0.05 then
+		logHieVfx(
+			"DESYNC",
+			"projectileId=%s receipt=%.3f startedAt=%.3f elapsed=%.3f rawStart=%s visualStart=%s offset=%.2f velocity=%s",
+			projectileId,
+			receiptTime,
+			startedAt,
+			spawnSnapshot.Elapsed,
+			formatHieVfxVector3(startPosition),
+			formatHieVfxVector3(visualStartPosition),
+			fastForwardDistance,
+			formatHieVfxVector3(projectileVelocity)
+		)
+	end
 
-	task.spawn(function()
-		local totalDistance = (finalPosition - startPosition).Magnitude
-		local traveledDistance = 0
-		local lastPosition = startPosition
+	logHieVfx(
+		"FASTFORWARD",
+		"projectileId=%s receipt=%.3f startedAt=%.3f elapsed=%.3f rawStart=%s visualStart=%s velocity=%s maxDistance=%.2f clamped=%s reason=%s",
+		projectileId,
+		receiptTime,
+		startedAt,
+		spawnSnapshot.Elapsed,
+		formatHieVfxVector3(startPosition),
+		formatHieVfxVector3(visualStartPosition),
+		formatHieVfxVector3(projectileVelocity),
+		maxDistance,
+		tostring(spawnSnapshot.Clamped),
+		spawnSnapshot.ClampReason
+	)
 
-		while projectile.Parent and traveledDistance < totalDistance do
-			local dt = RunService.Heartbeat:Wait()
-			local stepDistance = math.min(speed * dt, totalDistance - traveledDistance)
-			if stepDistance <= 0 then
-				break
+	local projectile = createTemporaryFreezeShotVisual(radius, visualStartPosition, projectileVelocity)
+	if not projectile then
+		logHieVfxError("launch failed visualCreation=false projectileId=%s player=%s", projectileId, targetPlayer.Name)
+		return false
+	end
+
+	activeHieFreezeShots[projectileId] = {
+		Id = projectileId,
+		Part = projectile,
+		Direction = direction,
+		Velocity = projectileVelocity,
+		Speed = speed,
+		Radius = radius,
+		MaxDistance = maxDistance,
+		Lifetime = lifetime,
+		StartedAt = startedAt,
+		StartPosition = startPosition,
+		ResolvedAt = nil,
+		ImpactPosition = nil,
+		ImpactEffectPlayed = false,
+		ShouldCreateImpact = false,
+	}
+
+	logHieVfx(
+		"SPAWN",
+		"projectile initialized player=%s projectileId=%s receipt=%.3f startedAt=%.3f speed=%.2f velocity=%s rawStart=%s visualStart=%s maxDistance=%.2f radius=%.2f lifetime=%.2f",
+		targetPlayer.Name,
+		projectileId,
+		receiptTime,
+		startedAt,
+		speed,
+		formatHieVfxVector3(projectileVelocity),
+		formatHieVfxVector3(startPosition),
+		formatHieVfxVector3(visualStartPosition),
+		maxDistance,
+		radius,
+		lifetime
+	)
+
+	if pendingResolution then
+		pendingHieFreezeShotResolutions[projectileId] = nil
+		logHieVfx(
+			"PROJECTILE",
+			"applying queued resolution projectileId=%s createImpact=%s",
+			projectileId,
+			tostring(pendingResolution.ShouldCreateImpact)
+		)
+		resolveFreezeShotVisual(pendingResolution.Payload, pendingResolution.ShouldCreateImpact)
+	end
+
+	return true
+end
+
+resolveFreezeShotVisual = function(payload, shouldCreateImpact)
+	local projectileId = tostring(payload.ProjectileId or "")
+	if projectileId == "" then
+		logHieVfxError("resolution ignored missingProjectileId payload={%s}", describeFreezeShotPayload(payload))
+		return false
+	end
+
+	logHieVfx(
+		"PROJECTILE",
+		"resolution received projectileId=%s createImpact=%s payload={%s}",
+		projectileId,
+		tostring(shouldCreateImpact),
+		describeFreezeShotPayload(payload)
+	)
+
+	local projectileState = activeHieFreezeShots[projectileId]
+	if not projectileState then
+		pendingHieFreezeShotResolutions[projectileId] = {
+			Payload = payload,
+			ShouldCreateImpact = shouldCreateImpact,
+		}
+		logHieVfx(
+			"PROJECTILE",
+			"resolution queued waitingForLaunch projectileId=%s createImpact=%s",
+			projectileId,
+			tostring(shouldCreateImpact)
+		)
+		return false
+	end
+
+	projectileState.ResolvedAt = tonumber(payload.ResolvedAt) or Workspace:GetServerTimeNow()
+	projectileState.ImpactPosition = typeof(payload.ImpactPosition) == "Vector3" and payload.ImpactPosition or projectileState.Part.Position
+	projectileState.ShouldCreateImpact = shouldCreateImpact
+	return true
+end
+
+local function tryPlayFreezeShotOptionalEffect(targetPlayer)
+	if typeof(playOptionalEffect) ~= "function" then
+		logHieVfx("PROJECTILE", "optional effect helper unavailable, using temporary projectile fallback only")
+		return
+	end
+
+	local ok, err = pcall(playOptionalEffect, targetPlayer, "Hie Hie no Mi", "FreezeShot")
+	if not ok then
+		logHieVfxError("optional effect helper failed player=%s detail=%s", targetPlayer.Name, tostring(err))
+		return false
+	end
+
+	logHieVfx("PROJECTILE", "optional effect helper succeeded player=%s", targetPlayer.Name)
+	return true
+end
+
+local function updateFreezeShots()
+	local serverNow = Workspace:GetServerTimeNow()
+	local cleanupIds = {}
+
+	for projectileId, projectileState in pairs(activeHieFreezeShots) do
+		if not projectileState.Part or not projectileState.Part.Parent then
+			logHieVfxError("projectile visual missing projectileId=%s cleanedUp=true", projectileId)
+			cleanupIds[#cleanupIds + 1] = projectileId
+			continue
+		end
+
+		local elapsed = math.max(0, serverNow - projectileState.StartedAt)
+		local maxTravelTime = projectileState.Speed > 0 and (projectileState.MaxDistance / projectileState.Speed) or 0
+		local effectiveTravelTime = math.min(elapsed, maxTravelTime)
+		local traveledDistance = math.min(projectileState.Speed * effectiveTravelTime, projectileState.MaxDistance)
+		local currentPosition = projectileState.StartPosition + (projectileState.Velocity * effectiveTravelTime)
+
+		if HIE_VFX_VERBOSE then
+			logHieVfxVerbose(
+				"projectileId=%s elapsed=%.2f distance=%.2f current=%s velocity=%s",
+				projectileId,
+				elapsed,
+				traveledDistance,
+				formatHieVfxVector3(currentPosition),
+				formatHieVfxVector3(projectileState.Velocity)
+			)
+		end
+
+		if projectileState.ResolvedAt ~= nil then
+			local resolvedPosition = projectileState.ImpactPosition or currentPosition
+			if serverNow >= projectileState.ResolvedAt then
+				setFreezeShotVisualTransform(
+					projectileState.Part,
+					resolvedPosition,
+					projectileState.Velocity,
+					projectileState.Direction
+				)
+
+				if projectileState.ShouldCreateImpact and not projectileState.ImpactEffectPlayed then
+					projectileState.ImpactEffectPlayed = true
+					logHieVfx(
+						"IMPACT",
+						"rendering impact projectileId=%s position=%s",
+						projectileId,
+						formatHieVfxVector3(resolvedPosition)
+					)
+					local impactOk, impactError = pcall(createIceImpactEffect, resolvedPosition)
+					if not impactOk then
+						logHieVfxError("impact effect failed projectileId=%s detail=%s", projectileId, tostring(impactError))
+					end
+				end
+
+				cleanupIds[#cleanupIds + 1] = projectileId
+				continue
 			end
-
-			local nextPosition = lastPosition + direction * stepDistance
-			projectile.Position = nextPosition
-			lastPosition = nextPosition
-			traveledDistance += stepDistance
 		end
 
-		projectile.Position = finalPosition
-		if payload.HazardHit == true then
-			createIceImpactEffect(finalPosition)
+		setFreezeShotVisualTransform(
+			projectileState.Part,
+			currentPosition,
+			projectileState.Velocity,
+			projectileState.Direction
+		)
+
+		if elapsed >= (projectileState.Lifetime + 0.2) then
+			logHieVfx("PROJECTILE", "forcing cleanup expiredVisual=true projectileId=%s", projectileId)
+			cleanupIds[#cleanupIds + 1] = projectileId
+		end
+	end
+
+	for _, projectileId in ipairs(cleanupIds) do
+		cleanupFreezeShot(projectileId)
+	end
+end
+
+local function handleFreezeShotEffect(targetPlayer, payload)
+	local resolvedPayload = payload or {}
+	local phase = typeof(resolvedPayload.Phase) == "string" and resolvedPayload.Phase or "Launch"
+
+	logHieVfx(
+		"INIT",
+		"effect received player=%s phase=%s payload={%s}",
+		targetPlayer.Name,
+		phase,
+		describeFreezeShotPayload(resolvedPayload)
+	)
+
+	local ok, err = pcall(function()
+		if phase == "Launch" then
+			tryPlayFreezeShotOptionalEffect(targetPlayer)
+			registerFreezeShotLaunch(targetPlayer, resolvedPayload)
+			return
 		end
 
-		if projectile.Parent then
-			projectile:Destroy()
+		if phase == "Impact" then
+			resolveFreezeShotVisual(resolvedPayload, true)
+			return
 		end
+
+		if phase == "Expire" then
+			logHieVfx("PROJECTILE", "impactless expiry received projectileId=%s", tostring(resolvedPayload.ProjectileId))
+			resolveFreezeShotVisual(resolvedPayload, false)
+			return
+		end
+
+		logHieVfxError("unknown phase=%s player=%s payload={%s}", tostring(phase), targetPlayer.Name, describeFreezeShotPayload(resolvedPayload))
 	end)
+
+	if not ok then
+		logHieVfxError(
+			"handler failed player=%s phase=%s detail=%s payload={%s}",
+			targetPlayer.Name,
+			tostring(phase),
+			tostring(err),
+			describeFreezeShotPayload(resolvedPayload)
+		)
+	end
 end
 
 local function addUniqueFolderName(folderNames, seenNames, folderName)
@@ -1530,7 +2289,7 @@ local function findFruitEffectFolder(rootFolder, fruitName)
 	return nil
 end
 
-local function playOptionalEffect(targetPlayer, fruitName, abilityName)
+playOptionalEffect = function(targetPlayer, fruitName, abilityName)
 	local character = targetPlayer.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	if not rootPart then
@@ -2001,6 +2760,11 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 
 	local resolvedPayload = payload or {}
 
+	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
+		handleFreezeShotEffect(targetPlayer, resolvedPayload)
+		return
+	end
+
 	playOptionalEffect(targetPlayer, fruitName, abilityName)
 	createFallbackBurstEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	createBomuDetonationEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
@@ -2020,19 +2784,24 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 		return
 	end
 
-	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
-		launchFreezeShot(targetPlayer, resolvedPayload)
-		return
-	end
-
 	if fruitName == "Hie Hie no Mi" and abilityName == "IceBoost" then
 		createIceBoostEffect(targetPlayer, resolvedPayload)
 	end
 
 end)
 
+RunService.Heartbeat:Connect(updateFreezeShots)
+
 player.CharacterRemoving:Connect(function()
 	activeFireBursts = {}
+	local projectileIds = {}
+	for projectileId in pairs(activeHieFreezeShots) do
+		projectileIds[#projectileIds + 1] = projectileId
+	end
+	for _, projectileId in ipairs(projectileIds) do
+		cleanupFreezeShot(projectileId)
+	end
+	pendingHieFreezeShotResolutions = {}
 	stopPhoenixFlight()
 	spaceHeld = false
 	flightInputState.Forward = false

@@ -512,6 +512,23 @@ local function getCharacterContext(player, fruitName, abilityName, abilityConfig
 		AbilityConfig = abilityConfig,
 		FruitHandler = fruitHandler,
 		RequestPayload = requestPayload,
+		EmitEffect = function(effectAbilityName, effectPayload, effectTargetPlayer)
+			local targetPlayer = effectTargetPlayer
+			if targetPlayer ~= nil and (not targetPlayer:IsA("Player") or targetPlayer.Parent ~= Players) then
+				targetPlayer = nil
+			end
+
+			if targetPlayer == nil and player.Parent == Players then
+				targetPlayer = player
+			end
+
+			if targetPlayer == nil then
+				return false
+			end
+
+			RemoteBundle.Effect:FireAllClients(targetPlayer, fruitName, effectAbilityName or abilityName, effectPayload or {})
+			return true
+		end,
 		ReportSuspicious = function(reason, detail, weight)
 			DevilFruitRequestGuard.RecordSuspicious(player, reason, detail, weight)
 		end,

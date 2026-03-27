@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local AffectableRegistry = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 
 local CONFIG = {
 	SpawnDelayMin = 2,
@@ -13,6 +14,7 @@ local CONFIG = {
 	MinimumForwardSpacing = 15,
 	HazardClass = "major",
 	FreezeBehavior = "pause",
+	AffectablePadding = Vector3.new(2, 1, 4),
 	Variants = {
 		{
 			Name = "Normal",
@@ -114,6 +116,15 @@ local function getPivot(instance)
 	end
 
 	return instance.CFrame
+end
+
+local function matchesStringSet(value, allowedValues)
+	if type(allowedValues) ~= "table" then
+		return true
+	end
+
+	local normalizedValue = string.lower(tostring(value or ""))
+	return allowedValues[normalizedValue] == true
 end
 
 local function setPivot(instance, cframeValue)
@@ -328,9 +339,72 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed)
 		Destroyed = false,
 		FrozenUntil = 0,
 		Alpha = 0,
+		CurrentCFrame = startCF,
 		Position = startCF.Position,
+		VolumeSize = hazardSize,
 		Width = hazardSize.X,
 	}
+
+	controller.AffectableEntityId = AffectableRegistry.RegisterEntity({
+		EntityType = AffectableRegistry.EntityType.Hazard,
+		RootInstance = hazardRoot,
+		Controller = controller,
+		Metadata = {
+			HazardClass = string.lower(tostring(hazardRoot:GetAttribute("HazardClass") or CONFIG.HazardClass)),
+			HazardType = string.lower(tostring(hazardRoot:GetAttribute("HazardType") or "Wave")),
+			CanFreeze = hazardRoot:GetAttribute("CanFreeze") == true,
+			FreezeBehavior = string.lower(tostring(hazardRoot:GetAttribute("FreezeBehavior") or CONFIG.FreezeBehavior)),
+			Padding = CONFIG.AffectablePadding,
+		},
+		IsActive = function(entity)
+			return entity.Controller.Destroyed ~= true and hazardRoot.Parent ~= nil
+		end,
+		CanBeAffectedBy = function(entity, query)
+			local metadata = entity.Metadata or {}
+			if query and query.RequireCanFreeze == true and metadata.CanFreeze ~= true then
+				return false, "not_freezable"
+			end
+
+			if query and not matchesStringSet(metadata.HazardClass, query.AllowedHazardClasses) then
+				return false, "disallowed_class"
+			end
+
+			if query and not matchesStringSet(metadata.HazardType, query.AllowedHazardTypes) then
+				return false, "disallowed_type"
+			end
+
+			return true, "ok"
+		end,
+		GetVolumes = function(entity)
+			if entity.Controller.Destroyed == true or not hazardRoot.Parent then
+				return {}
+			end
+
+			return {
+				{
+					Type = AffectableRegistry.VolumeType.Box,
+					CFrame = entity.Controller.CurrentCFrame,
+					Size = entity.Controller.VolumeSize,
+					Padding = entity.Metadata and entity.Metadata.Padding or CONFIG.AffectablePadding,
+				},
+			}
+		end,
+		ResolveData = function(entity, match)
+			local metadata = entity.Metadata or {}
+			return {
+				Label = formatInstancePath(hazardRoot),
+				Root = hazardRoot,
+				Controller = entity.Controller,
+				HazardClass = metadata.HazardClass,
+				HazardType = metadata.HazardType,
+				CanFreeze = metadata.CanFreeze == true,
+				FreezeBehavior = metadata.FreezeBehavior,
+				Position = entity.Controller.Position or getPivot(hazardRoot).Position,
+				HitPosition = match and match.HitPosition or nil,
+				MatchSource = "volume",
+			}
+		end,
+	})
 
 	function controller:Freeze(duration)
 		if self.Destroyed or not self.HazardRoot.Parent then
@@ -358,6 +432,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed)
 
 		self.Destroyed = true
 		activeHazardStates[self.HazardRoot] = nil
+		AffectableRegistry.UnregisterEntity(self.AffectableEntityId)
 		HazardRuntime.Unregister(self.HazardRoot)
 		if self.HazardRoot.Parent then
 			self.HazardRoot:Destroy()
@@ -377,6 +452,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed)
 
 		if distance <= 1e-4 then
 			controller.Alpha = 1
+			controller.CurrentCFrame = endCF
 			controller.Position = endCF.Position
 			setPivot(hazardRoot, endCF)
 			controller:Destroy()
@@ -390,12 +466,14 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed)
 				alpha = math.min(alpha + (speed * dt) / distance, 1)
 				controller.Alpha = alpha
 				local currentCF = startCF:Lerp(endCF, alpha)
+				controller.CurrentCFrame = currentCF
 				controller.Position = currentCF.Position
 				setPivot(hazardRoot, currentCF)
 			end
 		end
 
 		controller.Alpha = 1
+		controller.CurrentCFrame = endCF
 		controller.Position = endCF.Position
 		controller:Destroy()
 	end)

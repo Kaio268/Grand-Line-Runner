@@ -1,7 +1,10 @@
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
+
+local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 
 local MeleeAttackService = {}
 
@@ -146,7 +149,7 @@ local function isSwingActive(player, swing, tool)
 	return os.clock() <= swing.ExpiresAt
 end
 
-local function findTargetFromRaycast(attackerCharacter, attackerRootPart, tool, config)
+local function findHitFromRaycast(attackerCharacter, attackerRootPart, tool, config)
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { attackerCharacter, tool }
@@ -163,23 +166,41 @@ local function findTargetFromRaycast(attackerCharacter, attackerRootPart, tool, 
 		return nil
 	end
 
-	return hitPart:FindFirstAncestorOfClass("Model")
+	return result
 end
 
-local function getValidatedTarget(player, attackerCharacter, attackerRootPart, tool, swing, config)
-	local targetCharacter = findTargetFromRaycast(attackerCharacter, attackerRootPart, tool, config)
-	if not targetCharacter or targetCharacter == attackerCharacter then
+local function resolveValidatedTarget(player, attackerCharacter, attackerRootPart, tool, swing, config)
+	local raycastResult = findHitFromRaycast(attackerCharacter, attackerRootPart, tool, config)
+	if not raycastResult then
 		return nil
 	end
 
-	local targetPlayer = Players:GetPlayerFromCharacter(targetCharacter)
-	if not targetPlayer or targetPlayer == player then
+	local hitResult = HitResolver.ResolveHitInstance({
+		ProjectileId = string.format("melee:%d:%d", player.UserId, swing.Id),
+		HitInstance = raycastResult.Instance,
+		HitPosition = raycastResult.Position,
+		AttackerPlayer = player,
+		OriginPosition = attackerRootPart.Position,
+		PlayerRootPosition = attackerRootPart.Position,
+		MaxPlayerDistance = config.MaxRange,
+		ClassificationOrder = HitResolver.DEFAULT_DIRECT_CLASSIFICATION_ORDER,
+		DebugEnabled = false,
+		TracePrefix = "HIT",
+	})
+	if not hitResult then
 		return nil
 	end
 
-	local targetHumanoid = targetCharacter:FindFirstChildOfClass("Humanoid")
-	local targetRootPart = targetCharacter:FindFirstChild("HumanoidRootPart")
-	if not targetHumanoid or targetHumanoid.Health <= 0 or not targetRootPart then
+	print("[HIT] Melee hit:", hitResult.Type, hitResult.Model and hitResult.Model.Name)
+
+	if hitResult.Type ~= HitResolver.ResultKind.Player then
+		return nil
+	end
+
+	local targetModel = hitResult.Model
+	local targetHumanoid = hitResult.Humanoid
+	local targetRootPart = hitResult.RootPart
+	if not targetModel or not targetHumanoid or not targetRootPart then
 		return nil
 	end
 
@@ -198,7 +219,7 @@ local function getValidatedTarget(player, attackerCharacter, attackerRootPart, t
 		return nil
 	end
 
-	return targetPlayer, targetCharacter, targetHumanoid, targetRootPart
+	return hitResult, targetHumanoid, targetRootPart
 end
 
 local function applyRagdollAndPush(attackerRootPart, targetHumanoid, targetRootPart, config)
@@ -265,8 +286,8 @@ local function handleToolActivated(tool)
 		return
 	end
 
-	local _, _, targetHumanoid, targetRootPart =
-		getValidatedTarget(player, attackerCharacter, attackerRootPart, tool, swing, config)
+	local _, targetHumanoid, targetRootPart =
+		resolveValidatedTarget(player, attackerCharacter, attackerRootPart, tool, swing, config)
 	if not targetHumanoid or not targetRootPart then
 		return
 	end

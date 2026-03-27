@@ -30,6 +30,17 @@ local HitEffects = {
 				AutoRotate = false,
 			},
 		},
+		Freeze = {
+			DisplayName = "Freeze",
+			Duration = 3,
+			Priority = 25,
+			ForcesCarryDrop = false,
+			Movement = {
+				WalkSpeedMultiplier = 0,
+				JumpMultiplier = 0,
+				AutoRotate = false,
+			},
+		},
 		Slow = {
 			DisplayName = "Slow",
 			Duration = 1.5,

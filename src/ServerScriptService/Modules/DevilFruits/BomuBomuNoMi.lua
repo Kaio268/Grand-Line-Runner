@@ -1,9 +1,9 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
+local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
 local BomuBomuNoMi = {}
@@ -31,26 +31,6 @@ local function getPlanarUnitOrFallback(vector, fallback)
 	end
 
 	return Vector3.new(0, 0, -1)
-end
-
-local function buildOverlapParams(character, extraExclusions)
-	local exclusions = {}
-	if character then
-		exclusions[#exclusions + 1] = character
-	end
-
-	if type(extraExclusions) == "table" then
-		for _, exclusion in ipairs(extraExclusions) do
-			if typeof(exclusion) == "Instance" then
-				exclusions[#exclusions + 1] = exclusion
-			end
-		end
-	end
-
-	local overlapParams = OverlapParams.new()
-	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
-	overlapParams.FilterDescendantsInstances = exclusions
-	return overlapParams
 end
 
 local function buildGroundRaycastParams(character, extraExclusions)
@@ -88,54 +68,6 @@ local function ensureEffectsFolder()
 	folder.Name = EFFECTS_FOLDER_NAME
 	folder.Parent = Workspace
 	return folder
-end
-
-local function destroyMinorHazards(centerPosition, radius, character)
-	local destroyedCount = 0
-	local hazards = HazardRuntime.FindHazardsInRadius(
-		centerPosition,
-		radius,
-		{
-			AllowedClasses = {
-				minor = true,
-			},
-			PlayerRootPosition = centerPosition,
-			MaxPlayerDistance = math.max(0, tonumber(radius) or 0) + 8,
-			ExcludeInstances = character and { character } or nil,
-			MaxUniqueHazards = 8,
-		}
-	)
-
-	for _, hazard in ipairs(hazards) do
-		if HazardRuntime.Destroy(hazard.Root) then
-			destroyedCount += 1
-		end
-	end
-
-	return destroyedCount
-end
-
-local function getAffectedTargets(sourcePlayer, centerPosition, radius)
-	local targets = {}
-
-	for _, candidate in ipairs(Players:GetPlayers()) do
-		if candidate ~= sourcePlayer then
-			local character = candidate.Character
-			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-			local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-			if humanoid and rootPart and humanoid.Health > 0 then
-				local distance = (rootPart.Position - centerPosition).Magnitude
-				if distance <= radius then
-					targets[#targets + 1] = {
-						Player = candidate,
-						RootPart = rootPart,
-					}
-				end
-			end
-		end
-	end
-
-	return targets
 end
 
 local function getKnockbackVector(centerPosition, targetRootPart, fallbackDirection, abilityConfig)
@@ -314,18 +246,39 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 	local radius = math.max(0, tonumber(abilityConfig.Radius) or 0)
 	local knockdownDuration = math.max(0, tonumber(abilityConfig.KnockdownDuration) or 0)
 	local fallbackDirection = getPlanarUnitOrFallback(context.RootPart.CFrame.LookVector, nil)
-	local destroyedHazardCount = destroyMinorHazards(centerPosition, radius, context.Character)
 	local affectedUserIds = {}
+	local destroyedHazardCount = 0
+	local resolvedHits = HitResolver.ResolveRadiusHits({
+		QueryId = string.format("bomu:%d:%d", context.Player.UserId, math.floor(os.clock() * 1000)),
+		CenterPosition = centerPosition,
+		Radius = radius,
+		AttackerPlayer = context.Player,
+		IncludePlayers = true,
+		IncludeHazards = true,
+		AllowedHazardClasses = {
+			minor = true,
+		},
+		PlayerRootPosition = centerPosition,
+		MaxPlayerDistance = radius + 8,
+		MaxHazardTargets = 8,
+		TracePrefix = "HIT",
+	})
 
-	for _, target in ipairs(getAffectedTargets(context.Player, centerPosition, radius)) do
-		local knockbackVector = getKnockbackVector(centerPosition, target.RootPart, fallbackDirection, abilityConfig)
-		local applied = HitEffectService.ApplyEffect(target.Player, "Knockdown", {
-			Duration = knockdownDuration,
-			DropPosition = target.RootPart.Position,
-			KnockbackVector = knockbackVector,
-		})
-		if applied then
-			affectedUserIds[#affectedUserIds + 1] = target.Player.UserId
+	for _, hitInfo in ipairs(resolvedHits) do
+		if hitInfo.Kind == HitResolver.ResultKind.Player and hitInfo.Player and hitInfo.RootPart then
+			local knockbackVector = getKnockbackVector(centerPosition, hitInfo.RootPart, fallbackDirection, abilityConfig)
+			local applied = HitEffectService.ApplyEffect(hitInfo.Player, "Knockdown", {
+				Duration = knockdownDuration,
+				DropPosition = hitInfo.RootPart.Position,
+				KnockbackVector = knockbackVector,
+			})
+			if applied then
+				affectedUserIds[#affectedUserIds + 1] = hitInfo.Player.UserId
+			end
+		elseif hitInfo.Kind == HitResolver.ResultKind.Hazard and hitInfo.Hazard and hitInfo.Hazard.Root then
+			if HazardRuntime.Destroy(hitInfo.Hazard.Root) then
+				destroyedHazardCount += 1
+			end
 		end
 	end
 
