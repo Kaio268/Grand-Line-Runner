@@ -20,6 +20,7 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+local GOMU_ROCKET_ANIM = "rbxassetid://106521727746519"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
@@ -2010,6 +2011,16 @@ end
 local function createRubberLaunchEffect(_targetPlayer, fruitName, abilityName, payload)
 	if fruitName ~= "Gomu Gomu no Mi" or abilityName ~= "RubberLaunch" then
 		return
+	end
+
+	local character = _targetPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local animation = Instance.new("Animation")
+		animation.AnimationId = GOMU_ROCKET_ANIM
+		local track = humanoid:LoadAnimation(animation)
+		track.Priority = Enum.AnimationPriority.Action
+		track:Play()
 	end
 
 	local direction = typeof(payload.Direction) == "Vector3" and payload.Direction or Vector3.new(0, 0, -1)
