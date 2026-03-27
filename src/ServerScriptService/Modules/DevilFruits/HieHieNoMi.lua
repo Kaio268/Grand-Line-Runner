@@ -74,9 +74,25 @@ end
 
 function HieHieNoMi.FreezeShot(context)
 	local humanoid = context.Humanoid
-	playIceBlastAnimation(humanoid)
+	local track = playIceBlastAnimation(humanoid)
 	local abilityConfig = context.AbilityConfig
 	local direction = getForwardDirection(context.RootPart)
+
+	-- Wait for "IceBlast" marker with a 1.0s timeout safety
+	local startTime = os.clock()
+	local markerReached = false
+	local markerConnection
+	markerConnection = track:GetMarkerReachedSignal("IceBlast"):Connect(function()
+		markerReached = true
+	end)
+
+	while not markerReached and (os.clock() - startTime) < 1.0 do
+		task.wait()
+	end
+
+	if markerConnection then
+		markerConnection:Disconnect()
+	end
 
 	return {
 		Direction = direction,

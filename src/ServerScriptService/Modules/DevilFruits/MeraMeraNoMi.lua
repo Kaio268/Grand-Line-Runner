@@ -73,17 +73,22 @@ local function playFlameDashAnimation(humanoid, character, rootPart)
 		end
 	end
 
-	-- Start event: Start Flame (fixed) until End, and Dash (trail) until Trail
+	-- Start event: Start Flame (fixed) until End
 	track:GetMarkerReachedSignal("Start"):Connect(function()
 		local startPos = rootPart.Position
-		cleanup()
+		if flameConnection then flameConnection:Disconnect() end
 		
 		-- Flame loop at fixed position
 		flameConnection = RunService.Heartbeat:Connect(function()
 			if not rootPart.Parent or not character.Parent then return end
 			spawnStationaryGroundParticles(character, startPos, "Flame", 0.5)
 		end)
-		
+	end)
+
+	-- Trail event: Start Dash emission (moving trail)
+	track:GetMarkerReachedSignal("Trail"):Connect(function()
+		if dashConnection then dashConnection:Disconnect() end
+
 		-- Dash loop following player with rotation
 		dashConnection = RunService.Heartbeat:Connect(function()
 			if not rootPart.Parent or not character.Parent then return end
@@ -93,22 +98,19 @@ local function playFlameDashAnimation(humanoid, character, rootPart)
 		end)
 	end)
 
-	-- Trail event: Stop Dash emission
-	track:GetMarkerReachedSignal("Trail"):Connect(function()
+	-- TrailEnd event: Stop Dash emission and spawn Trail particles
+	track:GetMarkerReachedSignal("TrailEnd"):Connect(function()
 		if dashConnection then
 			dashConnection:Disconnect()
 			dashConnection = nil
 		end
-	end)
 
-	-- TrailEnd event: Burst Trail particles with rotation
-	track:GetMarkerReachedSignal("TrailEnd"):Connect(function()
 		local rotationOffset = CFrame.Angles(0, math.rad(90), 0)
 		local spawnCFrame = rootPart.CFrame * rotationOffset
 		spawnStationaryGroundParticles(character, spawnCFrame, "Trail")
 	end)
 
-	-- End event: Stop Flame effect
+	-- End event: Stop all effects
 	track:GetMarkerReachedSignal("End"):Connect(function()
 		cleanup()
 	end)
@@ -292,7 +294,7 @@ function MeraMeraNoMi.FlameDash(context)
 	
 	local foot = character:FindFirstChild("RightFoot") or character:FindFirstChild("Right Leg") or rootPart
 	
-	playFlameDashAnimation(humanoid, character, rootPart)
+	local track = playFlameDashAnimation(humanoid, character, rootPart)
 
 	local direction = getDashDirection(humanoid, rootPart)
 	local maxDashDistance = getMaxDashDistance(humanoid, rootPart, abilityConfig)
@@ -323,9 +325,20 @@ function MeraMeraNoMi.FlameDash(context)
 			rootPart:SetNetworkOwner(nil)
 		end)
 
-		local dashDelay = tonumber(abilityConfig.DashDelay) or 0.1
-		if dashDelay > 0 then
-			task.wait(dashDelay)
+		-- Wait for "Trail" marker with a 1.0s timeout safety
+		local startTime = os.clock()
+		local markerReached = false
+		local markerConnection
+		markerConnection = track:GetMarkerReachedSignal("Trail"):Connect(function()
+			markerReached = true
+		end)
+
+		while not markerReached and (os.clock() - startTime) < 1.0 do
+			task.wait()
+		end
+
+		if markerConnection then
+			markerConnection:Disconnect()
 		end
 
 		if not character.Parent or not rootPart.Parent then return end
