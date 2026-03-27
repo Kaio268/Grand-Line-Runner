@@ -9,6 +9,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
+local MeraDashShared = require(Modules:WaitForChild("DevilFruits"):WaitForChild("MeraDashShared"))
 local ProtectionRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
 
 local player = Players.LocalPlayer
@@ -21,6 +22,14 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+local MERA_FRUIT_NAME = "Mera Mera no Mi"
+local MERA_FLAME_DASH_ABILITY = "FlameDash"
+local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
+local MERA_DASH_MAX_RUNTIME_GRACE = 0.18
+local MERA_DASH_CORRECTION_SNAP_DISTANCE = 8
+local MERA_DASH_DIRECTION_TOLERANCE = 8
+local MERA_DASH_DISTANCE_TOLERANCE = 4
+local MERA_DASH_CAMERA_FOV_BOOST = 6
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
@@ -70,6 +79,7 @@ local activeFireBursts = {}
 local activePhoenixShields = {}
 local activeHieFreezeShots = {}
 local pendingHieFreezeShotResolutions = {}
+local activeMeraFlameDash = nil
 local hazardSuppressionLoopRunning = false
 local spaceHeld = false
 local flightInputState = {
@@ -85,6 +95,10 @@ local getEquippedFruit
 local gomuAimState = {
 	Highlight = nil,
 	TargetPlayer = nil,
+}
+local meraDashState = {
+	CameraTween = nil,
+	Sequence = 0,
 }
 local phoenixFlightState = {
 	Active = false,
@@ -179,6 +193,39 @@ local function logHieAimClient(tag, message, ...)
 	end
 
 	print(string.format(prefix .. " " .. message, ...))
+end
+
+local function getSharedTimestamp()
+	return Workspace:GetServerTimeNow()
+end
+
+local function isMeraDashDebugEnabled()
+	return ReplicatedStorage:GetAttribute(MERA_DASH_DEBUG_ATTRIBUTE) == true
+		or player:GetAttribute(MERA_DASH_DEBUG_ATTRIBUTE) == true
+end
+
+local function formatMeraDashVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function logMeraDashClient(message, ...)
+	if not isMeraDashDebugEnabled() then
+		return
+	end
+
+	print(string.format("[MERA DASH][CLIENT] " .. message, ...))
+end
+
+local function logMeraDashRecon(message, ...)
+	if not isMeraDashDebugEnabled() then
+		return
+	end
+
+	print(string.format("[MERA DASH][RECON] " .. message, ...))
 end
 
 local function hasTruthyInstanceAttribute(instance, attributeName)
@@ -702,6 +749,62 @@ local function getCurrentLookVector(rootPart)
 	end
 
 	return lookVector.Unit
+end
+
+local function getCharacterPivotOffset(character, rootPart)
+	local pivot = character:GetPivot()
+	return pivot.Position - rootPart.Position
+end
+
+local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
+	local offset = getCharacterPivotOffset(character, rootPart)
+	local pivot = character:GetPivot()
+	local rotation = pivot - pivot.Position
+	local targetPivot = CFrame.new(targetRootPosition + offset) * rotation
+	character:PivotTo(targetPivot)
+end
+
+local function setHorizontalVelocity(rootPart, horizontalVelocity)
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = Vector3.new(horizontalVelocity.X, currentVelocity.Y, horizontalVelocity.Z)
+end
+
+local function stopHorizontalVelocity(rootPart)
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
+end
+
+local function kickMeraDashCamera()
+	local camera = getCurrentCamera()
+	if not camera then
+		return
+	end
+
+	local baselineFov = camera.FieldOfView
+	local boostedFov = math.min(baselineFov + MERA_DASH_CAMERA_FOV_BOOST, 95)
+
+	if meraDashState.CameraTween then
+		meraDashState.CameraTween:Cancel()
+		meraDashState.CameraTween = nil
+	end
+
+	local punchOut = TweenService:Create(camera, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		FieldOfView = boostedFov,
+	})
+	local settle = TweenService:Create(camera, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		FieldOfView = baselineFov,
+	})
+
+	meraDashState.CameraTween = settle
+	punchOut:Play()
+	punchOut.Completed:Connect(function()
+		settle:Play()
+	end)
+	settle.Completed:Connect(function()
+		if meraDashState.CameraTween == settle then
+			meraDashState.CameraTween = nil
+		end
+	end)
 end
 
 local function getInitialLiftVelocity(initialLift)
@@ -2375,6 +2478,65 @@ local function createGomuPulse(name, position, color, initialSize, finalSize, du
 	end)
 end
 
+local function createFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
+	if typeof(startPosition) ~= "Vector3" then
+		return
+	end
+
+	local resolvedDirection = typeof(direction) == "Vector3" and direction or Vector3.new(0, 0, -1)
+	if resolvedDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		resolvedDirection = Vector3.new(0, 0, -1)
+	else
+		resolvedDirection = resolvedDirection.Unit
+	end
+
+	local origin = startPosition + Vector3.new(0, 1.1, 0)
+	local destination = typeof(endPosition) == "Vector3" and (endPosition + Vector3.new(0, 1.1, 0))
+		or (origin + (resolvedDirection * 14))
+	local segment = destination - origin
+	local segmentLength = segment.Magnitude
+	local primaryColor = isPredicted and Color3.fromRGB(255, 185, 92) or Color3.fromRGB(255, 137, 56)
+	local accentColor = Color3.fromRGB(255, 232, 180)
+
+	createGomuPulse("MeraDashPulseStart", origin, primaryColor, 1.6, 4.8, 0.18)
+	createGomuPulse("MeraDashPulseEnd", destination, accentColor, 1.1, 3.2, 0.16)
+
+	if segmentLength > 0.2 then
+		local streak = Instance.new("Part")
+		streak.Name = "MeraDashStreak"
+		streak.Anchored = true
+		streak.CanCollide = false
+		streak.CanTouch = false
+		streak.CanQuery = false
+		streak.Material = Enum.Material.Neon
+		streak.Color = primaryColor
+		streak.Transparency = 0.22
+		streak.Size = Vector3.new(0.65, 0.65, segmentLength)
+		streak.CFrame = CFrame.lookAt(origin:Lerp(destination, 0.5), destination)
+		streak.Parent = Workspace
+
+		local streakTween = TweenService:Create(streak, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Transparency = 1,
+			Size = Vector3.new(0.14, 0.14, segmentLength * 1.06),
+		})
+
+		streakTween:Play()
+		streakTween.Completed:Connect(function()
+			if streak.Parent then
+				streak:Destroy()
+			end
+		end)
+	end
+
+	for sampleIndex = 1, 4 do
+		local alpha = sampleIndex / 5
+		local samplePosition = origin:Lerp(destination, alpha)
+		task.delay((sampleIndex - 1) * 0.02, function()
+			createGomuPulse("MeraDashTrail", samplePosition, primaryColor, 0.45, 1.35, 0.12)
+		end)
+	end
+end
+
 local function createFallbackBurstEffect(targetPlayer, fruitName, abilityName, payload)
 	if fruitName ~= "Mera Mera no Mi" or abilityName ~= "FireBurst" then
 		return
@@ -2699,6 +2861,389 @@ local function createRubberLaunchEffect(_targetPlayer, fruitName, abilityName, p
 	end
 end
 
+local function clearActiveMeraFlameDash(state)
+	if activeMeraFlameDash == state then
+		activeMeraFlameDash = nil
+	end
+end
+
+local function finishLocalMeraFlameDash(state, reason, interrupted)
+	if not state or state.MotionFinished then
+		return
+	end
+
+	state.MotionFinished = true
+	state.LocalEndAt = getSharedTimestamp()
+	state.LocalResolveReason = reason
+	state.LocalInterrupted = interrupted == true
+
+	if state.MotionConnection then
+		state.MotionConnection:Disconnect()
+		state.MotionConnection = nil
+	end
+
+	logMeraDashClient(
+		"local_summary seq=%s start=%.6f end=%.6f localDuration=%.3f reason=%s interrupted=%s corrected=%s correctionSnap=%s canceled=%s serverResolved=%s",
+		tostring(state.Sequence),
+		tonumber(state.LocalStartAt) or 0,
+		tonumber(state.LocalEndAt) or 0,
+		math.max(0, (tonumber(state.LocalEndAt) or 0) - (tonumber(state.LocalStartAt) or 0)),
+		tostring(reason),
+		tostring(interrupted == true),
+		tostring(state.Corrected == true),
+		tostring(state.CorrectionSnap == true),
+		tostring(state.Canceled == true),
+		tostring(state.ServerResolved == true)
+	)
+
+	if state.ServerResolved or state.Canceled or state.Denied then
+		clearActiveMeraFlameDash(state)
+	end
+end
+
+local function beginPredictedMeraFlameDash()
+	local inputReceivedAt = getSharedTimestamp()
+	local character = getCharacter()
+	local humanoid = getHumanoid()
+	local rootPart = getRootPart()
+	local abilityConfig = DevilFruitConfig.GetAbility(MERA_FRUIT_NAME, MERA_FLAME_DASH_ABILITY)
+
+	logMeraDashClient(
+		"input_received ts=%.6f player=%s rootReady=%s humanoidReady=%s",
+		inputReceivedAt,
+		player.Name,
+		tostring(rootPart ~= nil),
+		tostring(humanoid ~= nil)
+	)
+
+	if not character or not humanoid or not rootPart or not abilityConfig then
+		return nil
+	end
+
+	if activeMeraFlameDash and not activeMeraFlameDash.MotionFinished then
+		activeMeraFlameDash.Canceled = true
+		activeMeraFlameDash.ServerResolved = true
+		finishLocalMeraFlameDash(activeMeraFlameDash, "superseded_prediction", true)
+	end
+
+	local localPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, nil)
+	local requestTargetPosition = rootPart.Position + (localPlan.Direction * localPlan.MaxDistance)
+	local state = {
+		Sequence = meraDashState.Sequence + 1,
+		InputReceivedAt = inputReceivedAt,
+		LocalStartAt = getSharedTimestamp(),
+		StartPosition = rootPart.Position,
+		OriginalPredictedDirection = localPlan.Direction,
+		OriginalPredictedDistance = localPlan.Distance,
+		OriginalRequestedDistance = localPlan.RequestedDistance,
+		ConfirmedDirection = nil,
+		ConfirmedDistance = nil,
+		Direction = localPlan.Direction,
+		Plan = {
+			Direction = localPlan.Direction,
+			Distance = localPlan.Distance,
+			Duration = localPlan.Duration,
+			InstantDistance = localPlan.InstantDistance,
+			StartDashSpeed = localPlan.StartDashSpeed,
+			EndDashSpeed = localPlan.EndDashSpeed,
+			EndCarrySpeed = localPlan.EndCarrySpeed,
+		},
+		TraveledDistance = 0,
+		WallShortened = localPlan.WallShortened,
+		LocalEffectPlayed = false,
+		MotionFinished = false,
+		Canceled = false,
+		CorrectionSnap = false,
+		Corrected = false,
+		Reconciled = false,
+		ServerResolved = false,
+	}
+
+	meraDashState.Sequence = state.Sequence
+	activeMeraFlameDash = state
+
+	local startupDelayMs = math.max(0, (state.LocalStartAt - inputReceivedAt) * 1000)
+	logMeraDashClient(
+		"local_start ts=%.6f seq=%s startupDelayMs=%.2f direction=%s predictedDistance=%.2f requestedDistance=%.2f duration=%.3f wallShortened=%s",
+		state.LocalStartAt,
+		tostring(state.Sequence),
+		startupDelayMs,
+		formatMeraDashVector3(localPlan.Direction),
+		localPlan.Distance,
+		localPlan.RequestedDistance,
+		localPlan.Duration,
+		tostring(localPlan.WallShortened)
+	)
+
+	if localPlan.Distance <= 0.05 then
+		finishLocalMeraFlameDash(state, "blocked_at_start", true)
+	else
+		local predictedEndPosition = state.StartPosition + (localPlan.Direction * localPlan.Distance)
+		createFlameDashEffectVisual(state.StartPosition, predictedEndPosition, localPlan.Direction, true)
+		playOptionalEffect(player, MERA_FRUIT_NAME, MERA_FLAME_DASH_ABILITY)
+		kickMeraDashCamera()
+		state.LocalEffectPlayed = true
+
+		if localPlan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
+			local targetRootPosition = state.StartPosition + (localPlan.Direction * localPlan.InstantDistance)
+			pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
+		end
+
+		setHorizontalVelocity(rootPart, localPlan.Direction * localPlan.StartDashSpeed)
+
+		local maxRuntime = math.max(localPlan.Duration + MERA_DASH_MAX_RUNTIME_GRACE, 0.08)
+		state.MotionConnection = RunService.Heartbeat:Connect(function(dt)
+			if activeMeraFlameDash ~= state then
+				finishLocalMeraFlameDash(state, "replaced_active_state", true)
+				return
+			end
+
+			if not character.Parent or not rootPart.Parent or humanoid.Health <= 0 then
+				finishLocalMeraFlameDash(state, "interrupted_invalid_state", true)
+				return
+			end
+
+			state.TraveledDistance = MeraDashShared.GetTravelDistance(state.StartPosition, rootPart.Position, state.Plan.Direction)
+			local currentRemainingDistance = state.Plan.Distance - state.TraveledDistance
+			if currentRemainingDistance <= 0.1 then
+				setHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
+				finishLocalMeraFlameDash(state, "completed", false)
+				return
+			end
+
+			local elapsed = math.max(0, getSharedTimestamp() - state.LocalStartAt)
+			local alpha = math.clamp(elapsed / state.Plan.Duration, 0, 1)
+			local dashSpeed = state.Plan.StartDashSpeed
+				+ ((state.Plan.EndDashSpeed - state.Plan.StartDashSpeed) * MeraDashShared.Smoothstep(alpha))
+			local lookAheadDistance = math.min(
+				MeraDashShared.GetLookAheadDistance(dashSpeed, dt),
+				currentRemainingDistance + 2
+			)
+
+			if MeraDashShared.ShouldStopForWall(character, rootPart, state.Plan.Direction, lookAheadDistance) then
+				stopHorizontalVelocity(rootPart)
+				finishLocalMeraFlameDash(state, "wall_blocked_mid_dash", true)
+				return
+			end
+
+			setHorizontalVelocity(rootPart, state.Plan.Direction * dashSpeed)
+
+			if elapsed >= maxRuntime then
+				setHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
+				finishLocalMeraFlameDash(state, "max_runtime_reached", true)
+			end
+		end)
+	end
+
+	return {
+		DashTargetPosition = requestTargetPosition,
+	}
+end
+
+local function handleLocalMeraFlameDashConfirmed(payload)
+	if typeof(payload) ~= "table" or payload.Phase ~= "Start" then
+		return
+	end
+
+	local state = activeMeraFlameDash
+	if not state then
+		logMeraDashRecon(
+			"confirmed_without_prediction ts=%.6f start=%.6f distance=%.2f direction=%s",
+			getSharedTimestamp(),
+			tonumber(payload.StartedAt) or 0,
+			tonumber(payload.Distance) or 0,
+			formatMeraDashVector3(payload.Direction)
+		)
+		return
+	end
+
+	local authoritativeDirection = typeof(payload.Direction) == "Vector3" and payload.Direction or state.Plan.Direction
+	local authoritativeDistance = tonumber(payload.Distance) or state.Plan.Distance
+	local distanceDelta = authoritativeDistance - state.OriginalPredictedDistance
+	local directionDelta = MeraDashShared.GetDirectionDeltaDegrees(state.OriginalPredictedDirection, authoritativeDirection)
+	local startDeltaMs = math.max(0, ((tonumber(payload.StartedAt) or getSharedTimestamp()) - state.LocalStartAt) * 1000)
+
+	state.Reconciled = true
+	state.ConfirmedDirection = authoritativeDirection
+	state.ConfirmedDistance = authoritativeDistance
+	state.Plan.Direction = authoritativeDirection
+	state.Plan.Distance = authoritativeDistance
+	state.Plan.Duration = tonumber(payload.Duration) or state.Plan.Duration
+	state.Plan.InstantDistance = tonumber(payload.InstantDistance) or state.Plan.InstantDistance
+	state.Plan.StartDashSpeed = tonumber(payload.StartDashSpeed) or state.Plan.StartDashSpeed
+	state.Plan.EndDashSpeed = tonumber(payload.EndDashSpeed) or state.Plan.EndDashSpeed
+	state.Plan.EndCarrySpeed = tonumber(payload.EndCarrySpeed) or state.Plan.EndCarrySpeed
+
+	local corrected = math.abs(distanceDelta) > MERA_DASH_DISTANCE_TOLERANCE or directionDelta > MERA_DASH_DIRECTION_TOLERANCE
+	local correctionSnap = false
+	local rootPart = getRootPart()
+	local serverStartPosition = typeof(payload.StartPosition) == "Vector3" and payload.StartPosition or state.StartPosition
+	local currentProgress = math.min(state.TraveledDistance, authoritativeDistance)
+	if rootPart then
+		local correctionTarget = serverStartPosition + (authoritativeDirection * currentProgress)
+		local correctionDelta = (rootPart.Position - correctionTarget).Magnitude
+		if correctionDelta > MERA_DASH_CORRECTION_SNAP_DISTANCE or directionDelta > MERA_DASH_DIRECTION_TOLERANCE then
+			local character = getCharacter()
+			if character then
+				pivotCharacterToRootPosition(character, rootPart, correctionTarget)
+				correctionSnap = true
+			end
+		end
+	end
+
+	state.Corrected = corrected
+	state.CorrectionSnap = state.CorrectionSnap or correctionSnap
+	state.StartPosition = serverStartPosition
+	state.Direction = authoritativeDirection
+
+	logMeraDashRecon(
+		"confirmed ts=%.6f seq=%s startDeltaMs=%.2f predictedDistance=%.2f actualDistance=%.2f distanceDelta=%.2f predictedDir=%s actualDir=%s directionDelta=%.2f corrected=%s correctionSnap=%s wallShortened=%s validationAdjusted=%s",
+		getSharedTimestamp(),
+		tostring(state.Sequence),
+		startDeltaMs,
+		state.OriginalPredictedDistance,
+		authoritativeDistance,
+		distanceDelta,
+		formatMeraDashVector3(state.OriginalPredictedDirection),
+		formatMeraDashVector3(authoritativeDirection),
+		directionDelta,
+		tostring(corrected),
+		tostring(correctionSnap),
+		tostring(payload.WallShortened == true),
+		tostring(payload.ValidationAdjusted == true)
+	)
+
+	if state.MotionFinished then
+		logMeraDashRecon(
+			"confirmed_after_local_finish seq=%s localReason=%s",
+			tostring(state.Sequence),
+			tostring(state.LocalResolveReason)
+		)
+	end
+end
+
+local function handleLocalMeraFlameDashDenied(reason)
+	local state = activeMeraFlameDash
+	if not state then
+		return
+	end
+
+	state.Canceled = true
+	state.Denied = true
+	state.ServerResolved = true
+
+	local rootPart = getRootPart()
+	if rootPart then
+		stopHorizontalVelocity(rootPart)
+	end
+
+	logMeraDashRecon(
+		"denied ts=%.6f seq=%s reason=%s localStarted=%.6f predictedDistance=%.2f",
+		getSharedTimestamp(),
+		tostring(state.Sequence),
+		tostring(reason),
+		tonumber(state.LocalStartAt) or 0,
+		tonumber(state.OriginalPredictedDistance) or 0
+	)
+
+	finishLocalMeraFlameDash(state, "server_denied_" .. tostring(reason), true)
+	clearActiveMeraFlameDash(state)
+end
+
+local function handleLocalMeraFlameDashResolved(payload)
+	if typeof(payload) ~= "table" or payload.Phase ~= "Resolve" then
+		return
+	end
+
+	local state = activeMeraFlameDash
+	if not state then
+		logMeraDashRecon(
+			"resolve_without_prediction ts=%.6f reason=%s traveled=%.2f endedEarly=%s",
+			getSharedTimestamp(),
+			tostring(payload.ResolveReason),
+			tonumber(payload.TraveledDistance) or 0,
+			tostring(payload.EndedEarly == true)
+		)
+		return
+	end
+
+	state.ServerResolved = true
+
+	local actualDistance = tonumber(payload.TraveledDistance) or 0
+	local distanceDelta = actualDistance - state.OriginalPredictedDistance
+	local authoritativeDirection = state.ConfirmedDirection or state.Plan.Direction
+	local directionDelta = MeraDashShared.GetDirectionDeltaDegrees(state.OriginalPredictedDirection, authoritativeDirection)
+	local correctionSnap = false
+	local rootPart = getRootPart()
+	if rootPart and typeof(payload.ActualEndPosition) == "Vector3" then
+		local correctionDistance = (rootPart.Position - payload.ActualEndPosition).Magnitude
+		if correctionDistance > MERA_DASH_CORRECTION_SNAP_DISTANCE and not state.MotionFinished then
+			local character = getCharacter()
+			if character then
+				pivotCharacterToRootPosition(character, rootPart, payload.ActualEndPosition)
+				correctionSnap = true
+			end
+		end
+	end
+
+	state.CorrectionSnap = state.CorrectionSnap or correctionSnap
+
+	logMeraDashRecon(
+		"resolved ts=%.6f seq=%s predictedDistance=%.2f actualDistance=%.2f distanceDelta=%.2f directionDelta=%.2f correctionSnap=%s interrupted=%s endedEarly=%s reason=%s",
+		getSharedTimestamp(),
+		tostring(state.Sequence),
+		state.OriginalPredictedDistance,
+		actualDistance,
+		distanceDelta,
+		directionDelta,
+		tostring(correctionSnap),
+		tostring(payload.Interrupted == true),
+		tostring(payload.EndedEarly == true),
+		tostring(payload.ResolveReason)
+	)
+
+	if not state.MotionFinished or payload.Interrupted == true or payload.EndedEarly == true then
+		if rootPart then
+			stopHorizontalVelocity(rootPart)
+		end
+		finishLocalMeraFlameDash(state, "server_resolve_" .. tostring(payload.ResolveReason), payload.Interrupted == true)
+	end
+
+	clearActiveMeraFlameDash(state)
+end
+
+local function handleMeraFlameDashEffect(targetPlayer, payload)
+	local resolvedPayload = payload or {}
+	local phase = typeof(resolvedPayload.Phase) == "string" and resolvedPayload.Phase or "Start"
+
+	if targetPlayer == player and phase == "Resolve" then
+		handleLocalMeraFlameDashResolved(resolvedPayload)
+		return true
+	end
+
+	if phase ~= "Start" then
+		return true
+	end
+
+	local direction = typeof(resolvedPayload.Direction) == "Vector3" and resolvedPayload.Direction or Vector3.new(0, 0, -1)
+	local startPosition = typeof(resolvedPayload.StartPosition) == "Vector3" and resolvedPayload.StartPosition or nil
+	local endPosition = typeof(resolvedPayload.EndPosition) == "Vector3" and resolvedPayload.EndPosition or nil
+	if not startPosition then
+		local rootPart = getPlayerRootPart(targetPlayer)
+		startPosition = rootPart and rootPart.Position or nil
+	end
+	if not endPosition and startPosition then
+		endPosition = startPosition + (direction * (tonumber(resolvedPayload.Distance) or 14))
+	end
+
+	if not (targetPlayer == player and activeMeraFlameDash and activeMeraFlameDash.LocalEffectPlayed) then
+		playOptionalEffect(targetPlayer, MERA_FRUIT_NAME, MERA_FLAME_DASH_ABILITY)
+		createFlameDashEffectVisual(startPosition, endPosition, direction, false)
+	end
+
+	return true
+end
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
@@ -2723,7 +3268,14 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
-	requestRemote:FireServer(abilityName, buildAbilityRequestPayload(fruitName, abilityName))
+	local requestPayload
+	if fruitName == MERA_FRUIT_NAME and abilityName == MERA_FLAME_DASH_ABILITY then
+		requestPayload = beginPredictedMeraFlameDash()
+	else
+		requestPayload = buildAbilityRequestPayload(fruitName, abilityName)
+	end
+
+	requestRemote:FireServer(abilityName, requestPayload)
 end)
 
 UserInputService.InputEnded:Connect(function(input)
@@ -2740,10 +3292,18 @@ stateRemote.OnClientEvent:Connect(function(eventName, fruitName, abilityName, va
 		localCooldowns[abilityName] = readyAt
 		updateCooldownHud()
 
+		if fruitName == MERA_FRUIT_NAME and abilityName == MERA_FLAME_DASH_ABILITY then
+			handleLocalMeraFlameDashConfirmed(payload or {})
+		end
+
 		if fruitName == "Mera Mera no Mi" and abilityName == "FireBurst" then
 			startFireBurst(payload or {})
 		end
 		return
+	end
+
+	if eventName == "Denied" and fruitName == MERA_FRUIT_NAME and abilityName == MERA_FLAME_DASH_ABILITY then
+		handleLocalMeraFlameDashDenied(value)
 	end
 
 	if eventName == "Denied" and value == "Cooldown" then
@@ -2764,6 +3324,11 @@ effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName
 
 	if fruitName == "Hie Hie no Mi" and abilityName == "FreezeShot" then
 		handleFreezeShotEffect(targetPlayer, resolvedPayload)
+		return
+	end
+
+	if fruitName == MERA_FRUIT_NAME and abilityName == MERA_FLAME_DASH_ABILITY then
+		handleMeraFlameDashEffect(targetPlayer, resolvedPayload)
 		return
 	end
 
@@ -2796,6 +3361,12 @@ RunService.Heartbeat:Connect(updateFreezeShots)
 
 player.CharacterRemoving:Connect(function()
 	activeFireBursts = {}
+	if activeMeraFlameDash then
+		activeMeraFlameDash.Canceled = true
+		activeMeraFlameDash.ServerResolved = true
+		finishLocalMeraFlameDash(activeMeraFlameDash, "character_removing", true)
+		clearActiveMeraFlameDash(activeMeraFlameDash)
+	end
 	local projectileIds = {}
 	for projectileId in pairs(activeHieFreezeShots) do
 		projectileIds[#projectileIds + 1] = projectileId

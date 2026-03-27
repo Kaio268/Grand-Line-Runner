@@ -3,9 +3,94 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SettingsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Settings"))
 local SpeedUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpeedUpgrade"))
+local TimeRewardsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TimeRewards"):WaitForChild("Config"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local HUD_DEBUG = false
+local ensureFrame
+local ensureTextLabel
+local ensureImageLabel
+local ensureImageButton
+local ensureTextButton
+
+local function hudLog(tag, ...)
+	if HUD_DEBUG then
+		print(tag, ...)
+	end
+end
+
+local function hudError(...)
+	warn("[HUD][ERROR]", ...)
+end
+
+local function ensureLegacyHudCompatibility(hud)
+	hudLog("[HUD][LEGACY]", "enter", hud and hud:GetFullName() or "nil")
+	if hud == nil then
+		hudError("ensureLegacyHudCompatibility called with nil HUD")
+		return
+	end
+
+	if not ensureFrame or not ensureTextLabel or not ensureImageLabel or not ensureTextButton then
+		hudError(
+			"Missing legacy compatibility helpers",
+			"ensureFrame=" .. tostring(ensureFrame),
+			"ensureTextLabel=" .. tostring(ensureTextLabel),
+			"ensureImageLabel=" .. tostring(ensureImageLabel),
+			"ensureTextButton=" .. tostring(ensureTextButton)
+		)
+		return
+	end
+
+	local gamepassesAd = ensureFrame(hud, "GamepassesAd")
+	gamepassesAd.Visible = false
+	gamepassesAd.Size = UDim2.fromOffset(260, 120)
+	gamepassesAd.Position = UDim2.new(1, -280, 0.5, -60)
+	if not gamepassesAd:FindFirstChildOfClass("UIScale") then
+		Instance.new("UIScale").Parent = gamepassesAd
+	end
+	ensureImageLabel(gamepassesAd, "Icon").Size = UDim2.fromOffset(56, 56)
+	ensureTextLabel(gamepassesAd, "Info").Size = UDim2.fromOffset(160, 28)
+	local productName = ensureTextLabel(gamepassesAd, "PName")
+	productName.Size = UDim2.fromOffset(160, 28)
+	ensureTextLabel(productName, "Shadow").Size = UDim2.fromScale(1, 1)
+	ensureTextLabel(gamepassesAd, "Price").Size = UDim2.fromOffset(96, 24)
+	ensureImageLabel(gamepassesAd, "ImageLabel").Size = UDim2.fromOffset(24, 24)
+	ensureFrame(gamepassesAd, "Time").Size = UDim2.new(1, 0, 0, 6)
+	ensureTextButton(gamepassesAd, "TextButton").Size = UDim2.new(1, 0, 1, 0)
+
+	local inventory = ensureFrame(hud, "Inventory")
+	local hotbarTemplate = ensureTextButton(inventory, "toolButton")
+	hotbarTemplate.Visible = false
+	hotbarTemplate.Size = UDim2.fromOffset(52, 52)
+	local inv = ensureFrame(inventory, "Inv")
+	inv.Visible = false
+	local inventoryFrame = ensureFrame(inv, "InventoryFrame")
+	local scrollingFrame = inventoryFrame:FindFirstChild("ScrollingFrame")
+	if not (scrollingFrame and scrollingFrame:IsA("ScrollingFrame")) then
+		scrollingFrame = Instance.new("ScrollingFrame")
+		scrollingFrame.Name = "ScrollingFrame"
+		scrollingFrame.BackgroundTransparency = 1
+		scrollingFrame.BorderSizePixel = 0
+		scrollingFrame.CanvasSize = UDim2.fromOffset(0, 0)
+		scrollingFrame.Parent = inventoryFrame
+	end
+	scrollingFrame.Size = UDim2.new(1, 0, 1, 0)
+	local inventoryTemplate = ensureTextButton(scrollingFrame, "toolButton")
+	inventoryTemplate.Visible = false
+	inventoryTemplate.Size = UDim2.fromOffset(80, 80)
+
+	hudLog(
+		"[HUD][LEGACY]",
+		string.format(
+			"gamepassesAd=%s inventory=%s hotbarTemplate=%s inventoryTemplate=%s",
+			gamepassesAd:GetFullName(),
+			inventory:GetFullName(),
+			hotbarTemplate:GetFullName(),
+			inventoryTemplate:GetFullName()
+		)
+	)
+end
 
 local HUD_BUTTON_LAYOUT = {
 	Store = UDim2.fromOffset(0, 0),
@@ -15,9 +100,18 @@ local HUD_BUTTON_LAYOUT = {
 	Rebirth = UDim2.fromOffset(0, 180),
 }
 
+local HUD_BUTTON_NAMES = {
+	Store = true,
+	Index = true,
+	Gifts = true,
+	Settings = true,
+	Rebirth = true,
+}
+
 local function ensureScreenGui(name, displayOrder)
 	local existing = playerGui:FindFirstChild(name)
 	if existing and existing:IsA("ScreenGui") then
+		existing.Enabled = true
 		existing.IgnoreGuiInset = true
 		existing.ResetOnSpawn = false
 		existing.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -31,6 +125,7 @@ local function ensureScreenGui(name, displayOrder)
 
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = name
+	screenGui.Enabled = true
 	screenGui.IgnoreGuiInset = true
 	screenGui.ResetOnSpawn = false
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -39,7 +134,7 @@ local function ensureScreenGui(name, displayOrder)
 	return screenGui
 end
 
-local function ensureFrame(parent, name)
+ensureFrame = function(parent, name)
 	local frame = parent:FindFirstChild(name)
 	if frame and frame:IsA("Frame") then
 		return frame
@@ -58,7 +153,7 @@ local function ensureFrame(parent, name)
 	return frame
 end
 
-local function ensureTextLabel(parent, name)
+ensureTextLabel = function(parent, name)
 	local label = parent:FindFirstChild(name)
 	if label and label:IsA("TextLabel") then
 		return label
@@ -80,7 +175,7 @@ local function ensureTextLabel(parent, name)
 	return label
 end
 
-local function ensureImageLabel(parent, name)
+ensureImageLabel = function(parent, name)
 	local image = parent:FindFirstChild(name)
 	if image and image:IsA("ImageLabel") then
 		return image
@@ -99,7 +194,7 @@ local function ensureImageLabel(parent, name)
 	return image
 end
 
-local function ensureImageButton(parent, name)
+ensureImageButton = function(parent, name)
 	local button = parent:FindFirstChild(name)
 	if button and button:IsA("ImageButton") then
 		return button
@@ -119,7 +214,16 @@ local function ensureImageButton(parent, name)
 	return button
 end
 
-local function ensureTextButton(parent, name)
+local function ensureGuiButton(parent, name)
+	local button = parent:FindFirstChild(name)
+	if button and button:IsA("GuiButton") then
+		return button
+	end
+
+	return ensureImageButton(parent, name)
+end
+
+ensureTextButton = function(parent, name)
 	local button = parent:FindFirstChild(name)
 	if button and button:IsA("TextButton") then
 		return button
@@ -228,7 +332,10 @@ local function ensureCounterHost(counters, name, iconImage)
 end
 
 local function ensureHudButton(lButtons, name, showTimer)
-	local button = ensureImageButton(lButtons, name)
+	local button = ensureGuiButton(lButtons, name)
+	button.Visible = true
+	button.Active = true
+	button.AutoButtonColor = false
 	button.Size = UDim2.fromOffset(84, 84)
 	button.Position = HUD_BUTTON_LAYOUT[name] or UDim2.fromOffset(0, 0)
 	button.ClipsDescendants = false
@@ -246,16 +353,75 @@ local function ensureHudButton(lButtons, name, showTimer)
 	badgeText.TextScaled = true
 	badgeText.Text = "0"
 
-	local timer = ensureTextLabel(button, "Timer")
-	timer.Visible = showTimer == true
-	timer.Text = "--"
-	timer.Size = UDim2.fromOffset(72, 20)
-	timer.Position = UDim2.new(0.5, -36, 1, -24)
-	timer.TextScaled = true
-	local timer2 = ensureTextLabel(timer, "Timer2")
-	timer2.Visible = true
-	timer2.Text = "--"
-	timer2.Size = UDim2.fromScale(1, 1)
+	local summaryTimer = button:FindFirstChild("GiftSummaryTimer")
+
+	for _, descendant in ipairs(button:GetDescendants()) do
+		if descendant.Name == "Timer" or descendant.Name == "Timer2" or (descendant.Name == "GiftSummaryTimer" and showTimer ~= true) then
+			local descendantPath = descendant:GetFullName()
+			descendant:Destroy()
+			hudLog(
+				"[HUD][TIMER]",
+				string.format(
+					"button=%s removedDescendant=%s giftsSummaryRequested=%s",
+					button:GetFullName(),
+					descendantPath,
+					tostring(showTimer == true)
+				)
+			)
+		end
+	end
+
+	if showTimer == true then
+		if summaryTimer and not summaryTimer:IsA("TextLabel") then
+			summaryTimer:Destroy()
+			summaryTimer = nil
+		end
+		if not summaryTimer then
+			summaryTimer = ensureTextLabel(button, "GiftSummaryTimer")
+		end
+
+		summaryTimer.Visible = true
+		summaryTimer.AnchorPoint = Vector2.new(0.5, 0)
+		summaryTimer.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
+		summaryTimer.BackgroundTransparency = 0.08
+		summaryTimer.BorderSizePixel = 0
+		summaryTimer.Font = Enum.Font.GothamBold
+		summaryTimer.Position = UDim2.new(0.5, 0, 0, 8)
+		summaryTimer.Size = UDim2.new(1, -20, 0, 18)
+		summaryTimer.Text = "--"
+		summaryTimer.TextColor3 = Color3.fromRGB(255, 245, 224)
+		summaryTimer.TextScaled = true
+		summaryTimer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
+		summaryTimer.TextStrokeTransparency = 0.08
+		summaryTimer.TextXAlignment = Enum.TextXAlignment.Center
+		summaryTimer.TextYAlignment = Enum.TextYAlignment.Center
+		summaryTimer.ZIndex = math.max(button.ZIndex + 9, 11)
+		ensureUICorner(summaryTimer, 9)
+		ensureUIStroke(summaryTimer, Color3.fromRGB(255, 237, 203), 1).Transparency = 0.6
+		ensureUIGradient(summaryTimer, Color3.fromRGB(29, 39, 57), Color3.fromRGB(8, 13, 22)).Rotation = 90
+
+		hudLog(
+			"[HUD][TIMER]",
+			string.format("button=%s summaryTimer=%s visible=%s", button:GetFullName(), summaryTimer:GetFullName(), tostring(summaryTimer.Visible))
+		)
+	elseif summaryTimer and summaryTimer:IsA("GuiObject") then
+		summaryTimer:Destroy()
+	end
+
+	hudLog(
+		"[HUD][SIDEBAR]",
+		string.format(
+			"button=%s class=%s visible=%s active=%s descendants=%d position=%s size=%s showTimer=%s",
+			button:GetFullName(),
+			button.ClassName,
+			tostring(button.Visible),
+			tostring(button.Active),
+			#button:GetDescendants(),
+			tostring(button.Position),
+			tostring(button.Size),
+			tostring(showTimer == true)
+		)
+	)
 
 	return button
 end
@@ -290,26 +456,79 @@ local function ensureSlotCard(slot, layoutOrder)
 	ensureUICorner(icon, 8)
 end
 
+local function getTimeRewardCount()
+	local count = 0
+	for rewardId in pairs(TimeRewardsConfig) do
+		if tonumber(rewardId) ~= nil then
+			count += 1
+		end
+	end
+	return math.max(count, 1)
+end
+
 local function ensureGiftsSlots(giftsMain)
 	giftsMain.BackgroundTransparency = 1
 	giftsMain.Size = UDim2.new(1, -26, 1, -66)
 	giftsMain.Position = UDim2.fromOffset(13, 54)
+	giftsMain.ClipsDescendants = true
 
-	local list = giftsMain:FindFirstChildOfClass("UIListLayout")
+	local scroll = giftsMain:FindFirstChild("Scroll")
+	if scroll and not scroll:IsA("ScrollingFrame") then
+		scroll:Destroy()
+		scroll = nil
+	end
+	if not scroll then
+		scroll = Instance.new("ScrollingFrame")
+		scroll.Name = "Scroll"
+		scroll.Parent = giftsMain
+	end
+
+	clearChildren(giftsMain, {
+		Scroll = true,
+	})
+
+	scroll.Active = true
+	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroll.BackgroundTransparency = 1
+	scroll.BorderSizePixel = 0
+	scroll.CanvasSize = UDim2.fromOffset(0, 0)
+	scroll.ClipsDescendants = true
+	scroll.Position = UDim2.fromScale(0, 0)
+	scroll.ScrollBarImageColor3 = Color3.fromRGB(246, 204, 117)
+	scroll.ScrollBarThickness = 8
+	scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+	scroll.ScrollingEnabled = true
+	scroll.Size = UDim2.fromScale(1, 1)
+	scroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+
+	local list = scroll:FindFirstChild("SlotLayout")
+	if list and not list:IsA("UIListLayout") then
+		list:Destroy()
+		list = nil
+	end
 	if not list then
 		list = Instance.new("UIListLayout")
-		list.Parent = giftsMain
+		list.Name = "SlotLayout"
+		list.Parent = scroll
 	end
 	list.FillDirection = Enum.FillDirection.Vertical
 	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	list.SortOrder = Enum.SortOrder.LayoutOrder
 	list.Padding = UDim.new(0, 8)
 
-	for index = 1, 5 do
-		local slot = ensureTextButton(giftsMain, "Slot" .. tostring(index))
+	local preserveNames = {
+		SlotLayout = true,
+	}
+	local rewardCount = getTimeRewardCount()
+	for index = 1, rewardCount do
+		local slotName = "Slot" .. tostring(index)
+		preserveNames[slotName] = true
+		local slot = ensureTextButton(scroll, slotName)
 		slot.Visible = true
 		ensureSlotCard(slot, index)
 	end
+
+	clearChildren(scroll, preserveNames)
 end
 
 local function ensureRebirthRequirement(parent, name, yOffset)
@@ -785,12 +1004,25 @@ end
 
 local function ensureHud()
 	local hud = ensureScreenGui("HUD", 110)
+	hud.Enabled = true
 
 	local lButtons = ensureFrame(hud, "LButtons")
-	clearChildren(lButtons)
+	clearChildren(lButtons, HUD_BUTTON_NAMES)
+	lButtons.Visible = true
 	lButtons.Size = UDim2.fromOffset(188, 274)
 	lButtons.Position = UDim2.fromOffset(10, 250)
 	lButtons.ClipsDescendants = false
+
+	hudLog(
+		"[HUD][BOOT]",
+		string.format(
+			"hud=%s enabled=%s sidebar=%s preservedChildren=%d",
+			hud:GetFullName(),
+			tostring(hud.Enabled),
+			lButtons:GetFullName(),
+			#lButtons:GetChildren()
+		)
+	)
 
 	ensureHudButton(lButtons, "Store", false)
 	ensureHudButton(lButtons, "Index", false)
@@ -888,6 +1120,8 @@ local function ensureHud()
 	local shadow = ensureTextLabel(textLb, "Shadow")
 	shadow.Size = UDim2.fromScale(1, 1)
 	ensureImageLabel(annTemplate, "PFP").Size = UDim2.fromOffset(56, 56)
+
+	ensureLegacyHudCompatibility(hud)
 end
 
 local function ensureFrames()

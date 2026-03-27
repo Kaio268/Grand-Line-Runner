@@ -32,6 +32,8 @@ local PlayerStore = ProfileStore.New(Key, GetTemplate)
 local Profiles: {[Player]: typeof(PlayerStore:StartSessionAsync())} = {}
 local Replicas: {[Player]: typeof(Replica)} = {}
 local ActiveBoostRoutines = {}  
+local PendingHardResetByUserId: {[number]: boolean} = {}
+local SuppressSessionEndKickByUserId: {[number]: boolean} = {}
 local DataManagerInitialized = false
 
 --// GlobalStore
@@ -47,6 +49,10 @@ local CLASS_NAMES = {["string"] = "StringValue", ["number"] = "NumberValue", ["b
 local PURCHASE_ID_CACHE_SIZE = 100
 local PASTEBIN = "https://pastebin.com/raw/JT4wrgrq"
 local SCRIPT_VERSION = script:GetTags()[1]
+local HARD_RESET_KICK_MESSAGE = "Your data was reset. Rejoin for a fresh start."
+local HARD_RESET_FAILURE_KICK_MESSAGE = "Your data reset could not be completed cleanly. Rejoin to restore your session."
+local HARD_RESET_PROGRESS_KICK_MESSAGE = "A data reset is still being applied to your account. Rejoin in a moment."
+local HARD_RESET_SAVE_TIMEOUT = 30
 
 --[[
 	Primary message functions to DataManager:MessageAsync() function
@@ -83,6 +89,18 @@ end
 
 local function CreateProfileFromTemplate()
 	return DeepCopyTable(GetTemplate)
+end
+
+local function dataResetLog(...)
+	print("[DATA][RESET]", ...)
+end
+
+local function dataResetSuccess(...)
+	print("[DATA][RESET][SUCCESS]", ...)
+end
+
+local function dataResetError(...)
+	warn("[DATA][RESET][ERROR]", ...)
 end
 
 local function GetPathTable(path: string): {string}
@@ -568,6 +586,144 @@ function DataManager:ResetData(userId : number) : boolean
 	return DataManager:MessageAsync(userId, {Key = "ResetData"})
 end
 
+local function getProfileKeyForUserId(userId: number): string
+	return `Player_{userId}`
+end
+
+local function waitForFinalProfileSave(profile, timeoutSeconds: number): (boolean, string?)
+	if profile == nil then
+		return true, nil
+	end
+
+	local saveCompleted = false
+	local saveConnection = profile.OnAfterSave:Connect(function()
+		saveCompleted = true
+	end)
+
+	profile:EndSession()
+
+	local deadline = os.clock() + math.max(1, timeoutSeconds)
+	while saveCompleted ~= true and os.clock() < deadline do
+		task.wait(0.1)
+	end
+
+	saveConnection:Disconnect()
+
+	if saveCompleted == true then
+		return true, nil
+	end
+
+	return false, "save_timeout"
+end
+
+local function acquireResetControlProfile(profileKey: string, userId: number)
+	local profile = PlayerStore:StartSessionAsync(profileKey, {
+		Steal = true,
+		Cancel = function()
+			return ProfileStore.IsClosing == true or PendingHardResetByUserId[userId] ~= true
+		end,
+	})
+
+	if profile == nil then
+		return nil, "control_session_failed"
+	end
+
+	return profile, nil
+end
+
+function DataManager:IsHardResetPending(userId: number): boolean
+	return PendingHardResetByUserId[userId] == true
+end
+
+function DataManager:HardResetData(userId: number, kickMessage: string?): (boolean, string?)
+	if typeof(userId) ~= "number" or userId % 1 ~= 0 or userId <= 0 then
+		dataResetError("Rejected hard reset with invalid userId", tostring(userId))
+		return false, "invalid_user_id"
+	end
+
+	local profileKey = getProfileKeyForUserId(userId)
+	local finalKickMessage = tostring(kickMessage or HARD_RESET_KICK_MESSAGE)
+	local targetPlayer = Players:GetPlayerByUserId(userId)
+
+	if PendingHardResetByUserId[userId] == true then
+		dataResetError("Hard reset already in progress", "userId", userId, "profileKey", profileKey)
+		return false, "reset_in_progress"
+	end
+
+	PendingHardResetByUserId[userId] = true
+	dataResetLog("begin", "userId", userId, "profileKey", profileKey, "online", targetPlayer ~= nil)
+
+	local function finish(success: boolean, reason: string?)
+		PendingHardResetByUserId[userId] = nil
+		SuppressSessionEndKickByUserId[userId] = nil
+
+		if success then
+			dataResetSuccess("wipe_complete", "userId", userId, "profileKey", profileKey, "online", targetPlayer ~= nil)
+			return true, nil
+		end
+
+		dataResetError("wipe_failed", "userId", userId, "profileKey", profileKey, "reason", tostring(reason))
+		return false, reason
+	end
+
+	if targetPlayer ~= nil then
+		SuppressSessionEndKickByUserId[userId] = true
+
+		local profile = self:TryGetProfile(targetPlayer)
+		if profile ~= nil then
+			local saved, saveReason = waitForFinalProfileSave(profile, HARD_RESET_SAVE_TIMEOUT)
+			if not saved then
+				if targetPlayer.Parent == Players then
+					targetPlayer:Kick(HARD_RESET_FAILURE_KICK_MESSAGE)
+				end
+				return finish(false, saveReason)
+			end
+		elseif targetPlayer.Parent == Players then
+			targetPlayer:Kick(finalKickMessage)
+		end
+
+		Profiles[targetPlayer] = nil
+		ActiveBoostRoutines[targetPlayer] = nil
+		ReplicaPlayerRemoving(targetPlayer)
+
+		if profile == nil then
+			local controlProfile, controlReason = acquireResetControlProfile(profileKey, userId)
+			if controlProfile == nil then
+				return finish(false, controlReason)
+			end
+
+			local saved, saveReason = waitForFinalProfileSave(controlProfile, HARD_RESET_SAVE_TIMEOUT)
+			if not saved then
+				return finish(false, saveReason)
+			end
+		end
+	else
+		local controlProfile, controlReason = acquireResetControlProfile(profileKey, userId)
+		if controlProfile == nil then
+			return finish(false, controlReason)
+		end
+
+		local saved, saveReason = waitForFinalProfileSave(controlProfile, HARD_RESET_SAVE_TIMEOUT)
+		if not saved then
+			return finish(false, saveReason)
+		end
+	end
+
+	local removed = PlayerStore:RemoveAsync(profileKey)
+	if removed ~= true then
+		if targetPlayer and targetPlayer.Parent == Players then
+			targetPlayer:Kick(HARD_RESET_FAILURE_KICK_MESSAGE)
+		end
+		return finish(false, "remove_failed")
+	end
+
+	if targetPlayer and targetPlayer.Parent == Players then
+		targetPlayer:Kick(finalKickMessage)
+	end
+
+	return finish(true, nil)
+end
+
 --[[
 	Update or create player leaderstats
 	[player]: player you want to create/update leaderstats
@@ -848,6 +1004,11 @@ local function AddNewGlobalPlayer(player : Player)
 end
 
 function PlayerAdded(player: Player)
+	if PendingHardResetByUserId[player.UserId] == true then
+		dataResetLog("reject_join_during_wipe", "player", player.Name, "userId", player.UserId)
+		player:Kick(HARD_RESET_PROGRESS_KICK_MESSAGE)
+		return
+	end
 	-- Natychmiastowe tworzenie folderów z szablonu
 	if Settings.Experimental.CreateFolders == true then
 		local templateRoot = script:FindFirstChild("Data")
@@ -888,6 +1049,14 @@ function PlayerAdded(player: Player)
 
 		profile.OnSessionEnd:Connect(function()
 			Profiles[player] = nil
+			ActiveBoostRoutines[player] = nil
+			ReplicaPlayerRemoving(player)
+
+			if SuppressSessionEndKickByUserId[player.UserId] == true then
+				dataResetLog("session_end_suppressed", "player", player.Name, "userId", player.UserId)
+				return
+			end
+
 			player:Kick("Profile session end - Please rejoin!")
 		end)
 

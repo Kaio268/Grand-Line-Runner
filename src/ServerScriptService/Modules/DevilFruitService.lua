@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Workspace = game:GetService("Workspace")
 
 local DevilFruitService = {}
 
@@ -8,6 +9,9 @@ local REQUEST_REMOTE_NAME = "DevilFruitAbilityRequest"
 local STATE_REMOTE_NAME = "DevilFruitAbilityState"
 local EFFECT_REMOTE_NAME = "DevilFruitAbilityEffect"
 local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
+local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
+local MERA_FRUIT_NAME = "Mera Mera no Mi"
+local MERA_FLAME_DASH_ABILITY = "FlameDash"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
 local HYDRATION_READY_TIMEOUT = 30
@@ -73,6 +77,40 @@ end
 
 local function debugPrint(...)
 	print("[DevilFruitService]", ...)
+end
+
+local function getSharedTimestamp()
+	return Workspace:GetServerTimeNow()
+end
+
+local function isMeraDashDebugEnabled(player)
+	return ReplicatedStorage:GetAttribute(MERA_DASH_DEBUG_ATTRIBUTE) == true
+		or (player and player:GetAttribute(MERA_DASH_DEBUG_ATTRIBUTE) == true)
+end
+
+local function shouldLogMeraDashAttempt(fruitName, abilityName)
+	return abilityName == MERA_FLAME_DASH_ABILITY or fruitName == MERA_FRUIT_NAME
+end
+
+local function logMeraDashServer(player, message, ...)
+	if not isMeraDashDebugEnabled(player) then
+		return
+	end
+
+	print(string.format("[MERA DASH][SERVER] " .. message, ...))
+end
+
+local function countPayloadKeys(payload)
+	if typeof(payload) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _ in pairs(payload) do
+		count += 1
+	end
+
+	return count
 end
 
 local function resolveFruitName(fruitIdentifier)
@@ -485,7 +523,7 @@ local function getAliveCharacterState(player)
 	}, nil
 end
 
-local function getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
+local function getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
 	local resolvedCharacterState = characterState
 	if type(resolvedCharacterState) ~= "table" then
 		resolvedCharacterState = getAliveCharacterState(player)
@@ -514,6 +552,7 @@ local function getCharacterContext(player, fruitName, abilityName, abilityConfig
 		AbilityConfig = abilityConfig,
 		FruitHandler = fruitHandler,
 		RequestPayload = requestPayload,
+		RequestReceivedAt = requestMetadata and requestMetadata.ReceivedAt or nil,
 		EmitEffect = function(effectAbilityName, effectPayload, effectTargetPlayer)
 			local targetPlayer = effectTargetPlayer
 			if targetPlayer ~= nil and (not targetPlayer:IsA("Player") or targetPlayer.Parent ~= Players) then
@@ -596,8 +635,8 @@ local function fireAbilityActivated(player, fruitName, abilityName, readyAt, pay
 	RemoteBundle.Effect:FireAllClients(player, fruitName, abilityName, payload or {})
 end
 
-local function executeAbility(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
-	local context = getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
+local function executeAbility(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
+	local context = getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
 	if not context then
 		DevilFruitRequestGuard.RecordRejection(player, "InvalidContext", abilityName)
 		fireAbilityDenied(player, fruitName, abilityName, "InvalidContext")
@@ -781,8 +820,32 @@ function DevilFruitService.Start()
 	Players.PlayerRemoving:Connect(cleanupPlayerState)
 
 	RemoteBundle.Request.OnServerEvent:Connect(function(player, abilityName, requestPayload)
+		local requestReceivedAt = getSharedTimestamp()
+		if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
+			logMeraDashServer(
+				player,
+				"request_received ts=%.6f player=%s equipped=%s ability=%s payloadKeys=%s",
+				requestReceivedAt,
+				player.Name,
+				tostring(getEquippedFruit(player)),
+				tostring(abilityName),
+				tostring(countPayloadKeys(requestPayload))
+			)
+		end
+
 		local preflightOk, preflightReason, preflightReadyAt = DevilFruitRequestGuard.Preflight(player, abilityName, requestPayload)
 		if not preflightOk then
+			if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
+				logMeraDashServer(
+					player,
+					"request_rejected ts=%.6f player=%s ability=%s reason=%s stage=preflight processingMs=%.2f",
+					getSharedTimestamp(),
+					player.Name,
+					tostring(abilityName),
+					tostring(preflightReason),
+					(getSharedTimestamp() - requestReceivedAt) * 1000
+				)
+			end
 			fireAbilityDenied(player, getEquippedFruit(player), abilityName, preflightReason, preflightReadyAt)
 			return
 		end
@@ -791,12 +854,35 @@ function DevilFruitService.Start()
 		local equippedFruit = getEquippedFruit(player)
 		if not characterState then
 			DevilFruitRequestGuard.RecordRejection(player, "InvalidContext", characterReason)
+			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
+				logMeraDashServer(
+					player,
+					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=%s stage=context processingMs=%.2f",
+					getSharedTimestamp(),
+					player.Name,
+					tostring(equippedFruit),
+					tostring(abilityName),
+					tostring(characterReason),
+					(getSharedTimestamp() - requestReceivedAt) * 1000
+				)
+			end
 			fireAbilityDenied(player, equippedFruit, abilityName, "InvalidContext")
 			return
 		end
 
 		if equippedFruit == DevilFruitConfig.None then
 			DevilFruitRequestGuard.RecordRejection(player, "NoFruit", abilityName)
+			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
+				logMeraDashServer(
+					player,
+					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=NoFruit stage=equipped processingMs=%.2f",
+					getSharedTimestamp(),
+					player.Name,
+					tostring(equippedFruit),
+					tostring(abilityName),
+					(getSharedTimestamp() - requestReceivedAt) * 1000
+				)
+			end
 			fireAbilityDenied(player, equippedFruit, abilityName, "NoFruit")
 			return
 		end
@@ -804,6 +890,17 @@ function DevilFruitService.Start()
 		local abilityConfig = DevilFruitConfig.GetAbility(equippedFruit, abilityName)
 		if not abilityConfig then
 			DevilFruitRequestGuard.RecordRejection(player, "UnknownAbility", abilityName)
+			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
+				logMeraDashServer(
+					player,
+					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=UnknownAbility stage=config processingMs=%.2f",
+					getSharedTimestamp(),
+					player.Name,
+					tostring(equippedFruit),
+					tostring(abilityName),
+					(getSharedTimestamp() - requestReceivedAt) * 1000
+				)
+			end
 			fireAbilityDenied(player, equippedFruit, abilityName, "UnknownAbility")
 			return
 		end
@@ -817,11 +914,25 @@ function DevilFruitService.Start()
 			characterState
 		)
 		if not requestAllowed then
+			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
+				logMeraDashServer(
+					player,
+					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=%s stage=validate processingMs=%.2f",
+					getSharedTimestamp(),
+					player.Name,
+					tostring(equippedFruit),
+					tostring(abilityName),
+					tostring(rejectionReason),
+					(getSharedTimestamp() - requestReceivedAt) * 1000
+				)
+			end
 			fireAbilityDenied(player, equippedFruit, abilityName, rejectionReason, rejectionReadyAt)
 			return
 		end
 
-		executeAbility(player, equippedFruit, abilityName, abilityConfig, sanitizedPayload, characterState)
+		executeAbility(player, equippedFruit, abilityName, abilityConfig, sanitizedPayload, characterState, {
+			ReceivedAt = requestReceivedAt,
+		})
 	end)
 end
 

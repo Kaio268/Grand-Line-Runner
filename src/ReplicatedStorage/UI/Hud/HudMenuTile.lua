@@ -51,6 +51,7 @@ local function renderVisualImage(name, style)
 	end
 
 	return e("ImageLabel", {
+		Name = name,
 		AnchorPoint = style.anchorPoint,
 		BackgroundColor3 = style.backgroundColor3,
 		BackgroundTransparency = style.backgroundTransparency,
@@ -76,6 +77,7 @@ end
 
 local function renderFallbackBackground()
 	return e("Frame", {
+		Name = "ReactHudMenuBackgroundFallback",
 		BackgroundColor3 = Color3.fromRGB(22, 30, 44),
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
@@ -106,6 +108,7 @@ local function renderFallbackIcon(style)
 	local iconStyle = style or FALLBACK_ICON_STYLE
 
 	return e("Frame", {
+		Name = "ReactHudMenuFallbackIcon",
 		AnchorPoint = iconStyle.anchorPoint,
 		BackgroundColor3 = Color3.fromRGB(255, 236, 191),
 		BackgroundTransparency = 0.72,
@@ -136,6 +139,7 @@ local function renderTitleBand(bandStyle)
 	local style = bandStyle or TITLE_BAND_STYLE
 
 	return e("Frame", {
+		Name = "ReactHudTitleBand",
 		AnchorPoint = style.anchorPoint or TITLE_BAND_STYLE.anchorPoint,
 		BackgroundColor3 = Color3.fromRGB(7, 12, 20),
 		BackgroundTransparency = 0.18,
@@ -167,6 +171,7 @@ local function renderTitle(label, titleStyle)
 	local style = titleStyle or FALLBACK_TITLE_STYLE
 
 	return e("TextLabel", {
+		Name = "ReactHudTitle",
 		AnchorPoint = style.anchorPoint or FALLBACK_TITLE_STYLE.anchorPoint,
 		BackgroundTransparency = style.backgroundTransparency or 1,
 		BorderSizePixel = 0,
@@ -216,9 +221,11 @@ local function HudMenuTile(props)
 	end
 
 	return ReactRoblox.createPortal(e("Frame", {
+		Name = "ReactHudMenuTileRoot",
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
+		Visible = true,
 		Size = UDim2.fromScale(1, 1),
 		ZIndex = math.max((style.background and style.background.zIndex or 4), 4),
 	}, children), host)

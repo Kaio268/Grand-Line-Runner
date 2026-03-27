@@ -18,8 +18,6 @@ local giftsMainFrame = giftsFrame:WaitForChild("Main")
 local hudFrame = guiRoot:WaitForChild("HUD")
 local lButtons = hudFrame:WaitForChild("LButtons")
 local hudGifts = lButtons:WaitForChild("Gifts")
-local hudTimer = hudGifts:WaitForChild("Timer")
-local hudTimer2 = hudTimer:WaitForChild("Timer2")
 local hudNot = hudGifts:WaitForChild("Not")
 local hudNotText = hudNot:WaitForChild("TextLB")
 
@@ -27,12 +25,12 @@ local READY_TEXT = "Claim"
 local CLAIMED_TEXT = "Claimed"
 local WHITE_COLOR = Color3.new(1, 1, 1)
 local GREEN_COLOR = Color3.new(0, 1, 0)
-
 local endTimes = {}
 local threads = {}
 local slotsById = {}
 local orderedIds = {}
 local totalGifts = 0
+local timerLogStateByPath = {}
 
 local GIFT_DEBUG = false
 
@@ -56,30 +54,168 @@ local function safeName(inst)
 	return ok and full or tostring(inst)
 end
 
+local function getGiftsSlotContainer()
+	local scroll = giftsMainFrame:FindFirstChild("Scroll")
+	if scroll and scroll:IsA("ScrollingFrame") then
+		return scroll
+	end
+	if giftsMainFrame:IsA("ScrollingFrame") then
+		return giftsMainFrame
+	end
+	return giftsMainFrame
+end
+
+local function getGiftsListLayout(container: Instance)
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("UIListLayout") then
+			return child
+		end
+	end
+	return nil
+end
+
+local function formatRewardIdList(ids): string
+	if #ids == 0 then
+		return "none"
+	end
+
+	local values = table.create(#ids)
+	for index, rewardId in ipairs(ids) do
+		values[index] = tostring(rewardId)
+	end
+	return table.concat(values, ",")
+end
+
+local function logScrollState(context: string)
+	local container = getGiftsSlotContainer()
+	local layout = getGiftsListLayout(container)
+	local slotCount = 0
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("GuiObject") and string.match(child.Name, "^Slot%d+$") then
+			slotCount += 1
+		end
+	end
+
+	giftLog(
+		"[GIFT][SCROLL]",
+		string.format(
+			"context=%s main=%s container=%s class=%s scrollingEnabled=%s active=%s canvasSize=%s automaticCanvasSize=%s clipsDescendants=%s layoutContentSize=%s slotCount=%d",
+			context,
+			safeName(giftsMainFrame),
+			safeName(container),
+			container.ClassName,
+			tostring(container:IsA("ScrollingFrame") and container.ScrollingEnabled or false),
+			tostring(container:IsA("GuiObject") and container.Active or false),
+			tostring(container:IsA("ScrollingFrame") and container.CanvasSize or "n/a"),
+			tostring(container:IsA("ScrollingFrame") and container.AutomaticCanvasSize or "n/a"),
+			tostring(container:IsA("GuiObject") and container.ClipsDescendants or false),
+			tostring(layout and layout.AbsoluteContentSize or "nil"),
+			slotCount
+		)
+	)
+end
+
+giftLog(
+	"[GIFT][BOOT]",
+	string.format(
+		"module=%s giftsFrame=%s hud=%s",
+		safeName(script),
+		safeName(giftsFrame),
+		safeName(hudFrame)
+	)
+)
+
+local function isTextGuiObject(obj: Instance?): boolean
+	return obj ~= nil and (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox"))
+end
+
+local function isImageGuiObject(obj: Instance?): boolean
+	return obj ~= nil and (obj:IsA("ImageLabel") or obj:IsA("ImageButton"))
+end
+
+local function getDirectTextObj(parent: Instance, name: string)
+	local obj = parent:FindFirstChild(name)
+	if isTextGuiObject(obj) then
+		return obj
+	end
+	return nil
+end
+
+local function getDirectImageObj(parent: Instance, name: string)
+	local obj = parent:FindFirstChild(name)
+	if isImageGuiObject(obj) then
+		return obj
+	end
+	return nil
+end
+
+local function getGiftSummaryTimer()
+	local summary = hudGifts:FindFirstChild("GiftSummaryTimer")
+	if isTextGuiObject(summary) then
+		return summary
+	end
+	return nil
+end
+
+local function auditSidebarTimers(context: string)
+	for _, child in ipairs(lButtons:GetChildren()) do
+		if child:IsA("GuiObject") then
+			local timer = child:FindFirstChild("Timer")
+			if timer and timer:IsA("GuiObject") then
+				giftError("Sidebar timer target detected", "context", context, "button", safeName(child), "timer", safeName(timer))
+				giftLog(
+					"[HUD][TIMER]",
+					string.format(
+						"context=%s button=%s timer=%s visible=%s belongsToGiftsButton=%s validTarget=false",
+						context,
+						safeName(child),
+						safeName(timer),
+						tostring(timer.Visible),
+						tostring(child == hudGifts)
+					)
+				)
+			end
+
+			local summary = child:FindFirstChild("GiftSummaryTimer")
+			if summary and summary:IsA("GuiObject") then
+				if child ~= hudGifts then
+					giftError("Non-Gifts summary timer target detected", "context", context, "button", safeName(child), "summary", safeName(summary))
+					giftLog(
+						"[GIFT][SUMMARY]",
+						string.format(
+							"context=%s button=%s summary=%s validTarget=false",
+							context,
+							safeName(child),
+							safeName(summary)
+						)
+					)
+				else
+					giftLog(
+						"[GIFT][SUMMARY]",
+						string.format(
+							"context=%s button=%s summary=%s validTarget=true visible=%s",
+							context,
+							safeName(child),
+							safeName(summary),
+							tostring(summary.Visible)
+						)
+					)
+				end
+			end
+		end
+	end
+end
+
 local function isSlotFrame(obj: Instance)
 	if not obj:IsA("GuiObject") then
 		return false
 	end
-	if obj == giftsMainFrame then
+	if obj.Parent ~= getGiftsSlotContainer() then
 		return false
 	end
-	local rn = obj:FindFirstChild("RewName", true)
-	local tm = obj:FindFirstChild("Timer", true)
-	local ic = obj:FindFirstChild("Icon", true)
-	return rn ~= nil and tm ~= nil and ic ~= nil
-end
-
-local function getDepthFromRoot(obj: Instance, root: Instance)
-	local depth = 0
-	local cur = obj
-	while cur and cur ~= root do
-		cur = cur.Parent
-		depth += 1
-	end
-	if cur ~= root then
-		return math.huge
-	end
-	return depth
+	return getDirectTextObj(obj, "RewName") ~= nil
+		and getDirectTextObj(obj, "Timer") ~= nil
+		and getDirectImageObj(obj, "Icon") ~= nil
 end
 
 local function getClaimButton(slotFrame: Instance)
@@ -94,20 +230,19 @@ local function getClaimButton(slotFrame: Instance)
 	return nil
 end
 
-local function findTextObj(slotFrame: Instance, name: string)
-	local obj = slotFrame:FindFirstChild(name, true)
-	if obj and (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox")) then
-		return obj
-	end
-	return nil
-end
-
-local function findImageObj(slotFrame: Instance, name: string)
-	local obj = slotFrame:FindFirstChild(name, true)
-	if obj and (obj:IsA("ImageLabel") or obj:IsA("ImageButton")) then
-		return obj
-	end
-	return nil
+local function logHudBinding()
+	giftLog(
+		"[GIFT][BIND]",
+		string.format(
+			"hudButton=%s badge=%s badgeText=%s summaryTimer=%s",
+			safeName(hudGifts),
+			safeName(hudNot),
+			safeName(hudNotText),
+			safeName(getGiftSummaryTimer())
+		)
+	)
+	auditSidebarTimers("bind")
+	logScrollState("bind")
 end
 
 local function setRewData(slotFrame: Instance, cfg)
@@ -116,7 +251,7 @@ local function setRewData(slotFrame: Instance, cfg)
 		return
 	end
 
-	local rewNameObj = findTextObj(slotFrame, "RewName")
+	local rewNameObj = getDirectTextObj(slotFrame, "RewName")
 	local titleAssigned = false
 	if rewNameObj then
 		rewNameObj.Text = tostring(cfg.RewName or "")
@@ -125,7 +260,7 @@ local function setRewData(slotFrame: Instance, cfg)
 		giftError("Missing RewName label in", safeName(slotFrame))
 	end
 
-	local iconObj = findImageObj(slotFrame, "Icon")
+	local iconObj = getDirectImageObj(slotFrame, "Icon")
 	local iconAssigned = false
 	if iconObj then
 		if cfg.Icon ~= nil then
@@ -152,12 +287,42 @@ local function setRewData(slotFrame: Instance, cfg)
 end
 
 local function setTimerText(slotFrame: Instance, text: string, color: Color3)
-	local timerObj = findTextObj(slotFrame, "Timer")
+	local rewardId = slotFrame:GetAttribute("RewardId")
+	if not isSlotFrame(slotFrame) then
+		giftError("Refused to write timer outside Gifts row", safeName(slotFrame), "rewardId", rewardId)
+		giftLog(
+			"[GIFT][TIMER]",
+			string.format(
+				"rewardId=%s row=%s timer=nil text=%s belongsToGifts=false fallbackUsed=false",
+				tostring(rewardId),
+				safeName(slotFrame),
+				text
+			)
+		)
+		return
+	end
+
+	local timerObj = getDirectTextObj(slotFrame, "Timer")
 	if timerObj then
 		timerObj.Text = text
 		timerObj.TextColor3 = color
+		local timerPath = safeName(timerObj)
+		local stateKey = string.format("%s|%s|%s", tostring(rewardId), text, tostring(color))
+		if timerLogStateByPath[timerPath] ~= stateKey then
+			timerLogStateByPath[timerPath] = stateKey
+			giftLog(
+				"[GIFT][TIMER]",
+				string.format(
+					"rewardId=%s row=%s timer=%s text=%s belongsToGifts=true fallbackUsed=false",
+					tostring(rewardId),
+					safeName(slotFrame),
+					timerPath,
+					text
+				)
+			)
+		end
 	else
-		giftError("Missing Timer label in", safeName(slotFrame))
+		giftError("Missing direct Timer label in", safeName(slotFrame))
 	end
 end
 
@@ -173,7 +338,39 @@ local function setTimerClaimed(slotFrame: Instance)
 	setTimerText(slotFrame, CLAIMED_TEXT, GREEN_COLOR)
 end
 
-local function formatDurationText(seconds: number): string
+local summaryLogState = nil
+local badgeLogState = nil
+local formatDurationText
+
+local function setSummaryTimer(text: string, nextRewardId: number?, nextRemaining: number?, readyCount: number)
+	local summary = getGiftSummaryTimer()
+	if not summary then
+		giftError("Missing Gifts summary timer on sidebar button", safeName(hudGifts))
+		return
+	end
+
+	summary.Visible = true
+	summary.Text = text
+
+	local remainingText = nextRemaining ~= nil and formatDurationText(nextRemaining) or "nil"
+	local stateKey = string.format("%s|%s|%s|%s", text, tostring(nextRewardId), remainingText, tostring(readyCount))
+	if summaryLogState ~= stateKey then
+		summaryLogState = stateKey
+		giftLog(
+			"[GIFT][SUMMARY]",
+			string.format(
+				"nextRewardId=%s nextRemaining=%s readyCount=%s summary=%s text=%s",
+				tostring(nextRewardId),
+				remainingText,
+				tostring(readyCount),
+				safeName(summary),
+				text
+			)
+		)
+	end
+end
+
+formatDurationText = function(seconds: number): string
 	local clampedSeconds = math.max(0, math.ceil(tonumber(seconds) or 0))
 	local ok, formattedText = pcall(function()
 		return Shorten.timeSuffixTwo(clampedSeconds)
@@ -182,6 +379,77 @@ local function formatDurationText(seconds: number): string
 		return formattedText
 	end
 	return tostring(clampedSeconds) .. "s"
+end
+
+local function evaluateHudState()
+	local now = os.clock()
+	local readyCount = 0
+	local readyIds = {}
+	local nextRewardId = nil
+	local minRemaining = nil
+
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		local slotFrame = slotsById[id]
+		if slotFrame and slotFrame.Parent and not slotFrame:GetAttribute("Claimed") then
+			local et = endTimes[id]
+			if et then
+				local rem = et - now
+				if rem <= 0 then
+					readyCount += 1
+					table.insert(readyIds, id)
+					if nextRewardId == nil then
+						nextRewardId = id
+						minRemaining = 0
+					end
+				elseif minRemaining == nil or rem < minRemaining then
+					minRemaining = rem
+					nextRewardId = id
+				end
+			end
+		end
+	end
+
+	return {
+		readyCount = readyCount,
+		readyIds = readyIds,
+		nextRewardId = nextRewardId,
+		minRemaining = minRemaining,
+	}
+end
+
+local function logBadgeState(hudState)
+	local nextRemainingText = hudState.minRemaining ~= nil and formatDurationText(hudState.minRemaining) or "nil"
+	local reason = "allMappedRewardsClaimed"
+	if hudState.readyCount > 0 then
+		reason = "claimableRewardIds=" .. formatRewardIdList(hudState.readyIds)
+	elseif hudState.nextRewardId ~= nil then
+		reason = "nextRewardId=" .. tostring(hudState.nextRewardId)
+	end
+
+	local stateKey = string.format(
+		"%d|%s|%s|%s",
+		hudState.readyCount,
+		formatRewardIdList(hudState.readyIds),
+		tostring(hudState.nextRewardId),
+		nextRemainingText
+	)
+	if badgeLogState ~= stateKey then
+		badgeLogState = stateKey
+		giftLog(
+			"[GIFT][BADGE]",
+			string.format(
+				"badge=%s badgeText=%s readyCount=%d claimableRewardIds=%s nextRewardId=%s nextRemaining=%s reason=%s",
+				safeName(hudNot),
+				safeName(hudNotText),
+				hudState.readyCount,
+				formatRewardIdList(hudState.readyIds),
+				tostring(hudState.nextRewardId),
+				nextRemainingText,
+				reason
+			)
+		)
+	end
 end
 
 local function getClaimedCount(rawClaimedRewards): number
@@ -224,60 +492,27 @@ end
 local function updateHud()
 	if totalGifts <= 0 then
 		hudNot.Visible = false
-		if hudTimer:IsA("TextLabel") or hudTimer:IsA("TextButton") or hudTimer:IsA("TextBox") then
-			hudTimer.Text = "--"
+		if isTextGuiObject(hudNotText) then
+			hudNotText.Text = "0"
 		end
-		if hudTimer2:IsA("TextLabel") or hudTimer2:IsA("TextButton") or hudTimer2:IsA("TextBox") then
-			hudTimer2.Text = "--"
-		end
+		setSummaryTimer("--", nil, nil, 0)
 		return
 	end
 
-	local now = os.clock()
-	local readyCount = 0
-	local minRemaining = nil
+	local hudState = evaluateHudState()
 
-	for i = 1, totalGifts do
-		local id = orderedIds[i]
-		local slotFrame = slotsById[id]
-		if slotFrame and slotFrame.Parent and not slotFrame:GetAttribute("Claimed") then
-			local et = endTimes[id]
-			if et then
-				local rem = et - now
-				if rem <= 0 then
-					readyCount += 1
-				else
-					if minRemaining == nil or rem < minRemaining then
-						minRemaining = rem
-					end
-				end
-			end
-		end
+	hudNot.Visible = hudState.readyCount > 0
+	if isTextGuiObject(hudNotText) then
+		hudNotText.Text = tostring(hudState.readyCount)
 	end
+	logBadgeState(hudState)
 
-	hudNot.Visible = readyCount > 0
-	if readyCount > 0 then
-		if hudNotText:IsA("TextLabel") or hudNotText:IsA("TextButton") or hudNotText:IsA("TextBox") then
-			hudNotText.Text = tostring(readyCount)
-		end
-	end
-
-	local text
-	if readyCount > 0 then
-		text = READY_TEXT
+	if hudState.readyCount > 0 then
+		setSummaryTimer(READY_TEXT, hudState.nextRewardId, 0, hudState.readyCount)
+	elseif hudState.minRemaining ~= nil then
+		setSummaryTimer(formatDurationText(hudState.minRemaining), hudState.nextRewardId, hudState.minRemaining, hudState.readyCount)
 	else
-		if minRemaining == nil then
-			text = "--"
-		else
-			text = formatDurationText(minRemaining)
-		end
-	end
-
-	if hudTimer:IsA("TextLabel") or hudTimer:IsA("TextButton") or hudTimer:IsA("TextBox") then
-		hudTimer.Text = text
-	end
-	if hudTimer2:IsA("TextLabel") or hudTimer2:IsA("TextButton") or hudTimer2:IsA("TextBox") then
-		hudTimer2.Text = text
+		setSummaryTimer("--", nil, nil, hudState.readyCount)
 	end
 end
 
@@ -345,38 +580,14 @@ end
 
 local function collectSlotFrames()
 	local candidates = {}
-	for _, inst in ipairs(giftsMainFrame:GetDescendants()) do
+	local slotContainer = getGiftsSlotContainer()
+	for _, inst in ipairs(slotContainer:GetChildren()) do
 		if isSlotFrame(inst) then
 			table.insert(candidates, inst)
 		end
 	end
 
 	table.sort(candidates, function(a, b)
-		return getDepthFromRoot(a, giftsMainFrame) < getDepthFromRoot(b, giftsMainFrame)
-	end)
-
-	local candSet = {}
-	for _, c in ipairs(candidates) do
-		candSet[c] = true
-	end
-
-	local top = {}
-	for _, c in ipairs(candidates) do
-		local p = c.Parent
-		local nested = false
-		while p and p ~= giftsMainFrame do
-			if candSet[p] then
-				nested = true
-				break
-			end
-			p = p.Parent
-		end
-		if not nested then
-			table.insert(top, c)
-		end
-	end
-
-	table.sort(top, function(a, b)
 		local la = a.LayoutOrder or 0
 		local lb = b.LayoutOrder or 0
 		if la ~= lb then
@@ -385,7 +596,7 @@ local function collectSlotFrames()
 		return a.Name < b.Name
 	end)
 
-	return top
+	return candidates
 end
 
 local function buildSlotsOnce()
@@ -397,19 +608,30 @@ local function buildSlotsOnce()
 		return a < b
 	end)
 
+	logScrollState("buildSlots")
+
 	local templates = collectSlotFrames()
 	totalGifts = math.min(#orderedIds, #templates)
 	table.clear(slotsById)
 
 	giftLog(
 		"[GIFT][DATA]",
-		string.format("slotTemplates=%d configRewards=%d renderable=%d", #templates, #orderedIds, totalGifts)
+		string.format(
+			"slotTemplates=%d configRewards=%d renderable=%d slotContainer=%s",
+			#templates,
+			#orderedIds,
+			totalGifts,
+			safeName(getGiftsSlotContainer())
+		)
 	)
+	auditSidebarTimers("rowmap")
 
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local slotFrame = templates[i]
 		local cfg = RewardsConfig[id]
+		local rowTimer = getDirectTextObj(slotFrame, "Timer")
+		local rowTitle = getDirectTextObj(slotFrame, "RewName")
 
 		slotsById[id] = slotFrame
 		slotFrame.Visible = true
@@ -418,11 +640,14 @@ local function buildSlotsOnce()
 		slotFrame:SetAttribute("Hooked", false)
 
 		giftLog(
-			"[GIFT][ROW]",
+			"[GIFT][ROWMAP]",
 			string.format(
-				"mapped rewardId=%d slot=%s rewardName=%s rewards=%s",
+				"mapped rewardId=%d slot=%s rowName=%s timer=%s title=%s rewardName=%s rewards=%s fallbackUsed=false",
 				id,
 				safeName(slotFrame),
+				slotFrame.Name,
+				safeName(rowTimer),
+				safeName(rowTitle),
 				tostring(cfg and cfg.RewName or ""),
 				summarizeRewardEntries(cfg)
 			)
@@ -437,14 +662,25 @@ local function buildSlotsOnce()
 end
 
 local function buildSlotsWithWait()
+	local expectedRewards = 0
 	for _ = 1, 50 do
 		buildSlotsOnce()
-		if totalGifts > 0 then
+		expectedRewards = #orderedIds
+		if expectedRewards > 0 and totalGifts >= expectedRewards then
 			return true
 		end
 		task.wait(0.2)
 	end
-	giftError("No slot frames found after waiting for Gifts UI templates")
+	logScrollState("waitTimeout")
+	giftError(
+		"Gifts UI did not expose all reward slots after waiting",
+		"expected",
+		expectedRewards,
+		"found",
+		totalGifts,
+		"container",
+		safeName(getGiftsSlotContainer())
+	)
 	return false
 end
 
@@ -599,8 +835,11 @@ local function applyPendingState()
 	end
 end
 
+logHudBinding()
+
 giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if giftsFrame.Visible then
+		logScrollState("panelOpen")
 		giftLog(
 			"[GIFT][OPEN]",
 			string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts)
@@ -609,6 +848,7 @@ giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 end)
 
 if giftsFrame.Visible then
+	logScrollState("panelOpen")
 	giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
 end
 

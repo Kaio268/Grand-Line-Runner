@@ -1,44 +1,38 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MeraDashShared = require(Modules:WaitForChild("DevilFruits"):WaitForChild("MeraDashShared"))
+
 local MeraMeraNoMi = {}
 
-local WALL_PADDING = 2
-local MIN_END_CARRY_SPEED = 52
-local END_CARRY_SPEED_FACTOR = 0.82
+local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
+local MAX_RUNTIME_GRACE = 0.18
 
-local function smoothstep(alpha)
-	return alpha * alpha * (3 - (2 * alpha))
+local function getSharedTimestamp()
+	return Workspace:GetServerTimeNow()
 end
 
-local function getDashDirection(humanoid, rootPart)
-	local moveDirection = humanoid.MoveDirection
-	if moveDirection.Magnitude > 0.01 then
-		return Vector3.new(moveDirection.X, 0, moveDirection.Z).Unit
-	end
-
-	local look = rootPart.CFrame.LookVector
-	local flatLook = Vector3.new(look.X, 0, look.Z)
-	if flatLook.Magnitude > 0.01 then
-		return flatLook.Unit
-	end
-
-	return Vector3.new(0, 0, -1)
+local function isDashDebugEnabled(player)
+	return ReplicatedStorage:GetAttribute(MERA_DASH_DEBUG_ATTRIBUTE) == true
+		or (player and player:GetAttribute(MERA_DASH_DEBUG_ATTRIBUTE) == true)
 end
 
-local function getDashDistance(character, rootPart, direction, maxDistance)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { character }
-	params.IgnoreWater = true
-
-	local result = Workspace:Raycast(rootPart.Position, direction * maxDistance, params)
-	if not result then
-		return maxDistance
+local function logDash(player, message, ...)
+	if not isDashDebugEnabled(player) then
+		return
 	end
 
-	local distance = math.max(result.Distance - WALL_PADDING, 0)
-	return math.min(distance, maxDistance)
+	print(string.format("[MERA DASH][SERVER] " .. message, ...))
+end
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
 end
 
 local function getCharacterPivotOffset(character, rootPart)
@@ -46,49 +40,12 @@ local function getCharacterPivotOffset(character, rootPart)
 	return pivot.Position - rootPart.Position
 end
 
-local function getPlanarVector(vector)
-	return Vector3.new(vector.X, 0, vector.Z)
-end
-
-local function getPlanarMagnitude(vector)
-	return getPlanarVector(vector).Magnitude
-end
-
-local function getTravelDistance(startPosition, currentPosition, direction)
-	local delta = getPlanarVector(currentPosition - startPosition)
-	return math.max(delta:Dot(direction), 0)
-end
-
-local function getCurrentPlanarSpeed(humanoid, rootPart)
-	return math.max(humanoid.WalkSpeed, getPlanarMagnitude(rootPart.AssemblyLinearVelocity))
-end
-
-local function getMaxDashDistance(humanoid, rootPart, abilityConfig)
-	local baseDashDistance = tonumber(abilityConfig.DashDistance) or 42
-	local distanceSpeedBonusFactor = tonumber(abilityConfig.DistanceSpeedBonusFactor) or 0
-	local maxDistanceSpeedBonus = tonumber(abilityConfig.MaxDistanceSpeedBonus) or 0
-	local currentPlanarSpeed = getCurrentPlanarSpeed(humanoid, rootPart)
-	local bonusDistance = math.min(currentPlanarSpeed * distanceSpeedBonusFactor, maxDistanceSpeedBonus)
-
-	return baseDashDistance + bonusDistance
-end
-
-local function getDashSpeeds(humanoid, rootPart, abilityConfig)
-	local currentPlanarSpeed = getCurrentPlanarSpeed(humanoid, rootPart)
-	local baseDashSpeed = tonumber(abilityConfig.BaseDashSpeed) or 120
-	local dashSpeedMultiplier = tonumber(abilityConfig.DashSpeedMultiplier) or 2.8
-	local endDashSpeedMultiplier = tonumber(abilityConfig.EndDashSpeedMultiplier) or 1.1
-	local maxDashSpeed = tonumber(abilityConfig.MaxDashSpeed)
-
-	local startDashSpeed = math.max(baseDashSpeed, currentPlanarSpeed * dashSpeedMultiplier)
-	if maxDashSpeed then
-		startDashSpeed = math.min(startDashSpeed, maxDashSpeed)
-	end
-
-	local endDashSpeed = math.max(humanoid.WalkSpeed, currentPlanarSpeed * endDashSpeedMultiplier)
-	endDashSpeed = math.min(endDashSpeed, startDashSpeed)
-
-	return currentPlanarSpeed, startDashSpeed, endDashSpeed
+local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
+	local offset = getCharacterPivotOffset(character, rootPart)
+	local pivot = character:GetPivot()
+	local rotation = pivot - pivot.Position
+	local targetPivot = CFrame.new(targetRootPosition + offset) * rotation
+	character:PivotTo(targetPivot)
 end
 
 local function setHorizontalVelocity(rootPart, horizontalVelocity)
@@ -101,130 +58,223 @@ local function stopDashVelocity(rootPart)
 	rootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
 end
 
-local function shouldStopForWall(character, rootPart, direction, lookAheadDistance)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = { character }
-	params.IgnoreWater = true
+local function getDashTargetPosition(context)
+	local requestPayload = context.RequestPayload
+	if type(requestPayload) ~= "table" then
+		return nil
+	end
 
-	local result = Workspace:Raycast(rootPart.Position, direction * lookAheadDistance, params)
-	return result ~= nil
+	return requestPayload.DashTargetPosition
 end
 
-local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
-	local offset = getCharacterPivotOffset(character, rootPart)
-	local pivot = character:GetPivot()
-	local rotation = pivot - pivot.Position
-	local targetPivot = CFrame.new(targetRootPosition + offset) * rotation
-	character:PivotTo(targetPivot)
+local function getRequestedDirection(rootPart, dashTargetPosition)
+	if typeof(dashTargetPosition) ~= "Vector3" then
+		return nil
+	end
+
+	local delta = MeraDashShared.GetPlanarVector(dashTargetPosition - rootPart.Position)
+	if delta.Magnitude <= 0.01 then
+		return nil
+	end
+
+	return delta.Unit
+end
+
+local function buildStartPayload(plan, requestReceivedAt, dashStartAt, startPosition, requestedDirection, rawRequestedDistance)
+	local directionDeltaDegrees = requestedDirection and MeraDashShared.GetDirectionDeltaDegrees(requestedDirection, plan.Direction) or 0
+	local validationAdjusted = rawRequestedDistance > (plan.RequestedDistance + 0.05) or directionDeltaDegrees > 1
+
+	return {
+		Phase = "Start",
+		Direction = plan.Direction,
+		DirectionSource = plan.DirectionSource,
+		RequestedDirection = requestedDirection,
+		RawRequestedDistance = rawRequestedDistance,
+		RequestedDistance = plan.RequestedDistance,
+		MaxDistance = plan.MaxDistance,
+		Distance = plan.Distance,
+		Duration = plan.Duration,
+		InstantDistance = plan.InstantDistance,
+		RemainingDistance = plan.RemainingDistance,
+		StartDashSpeed = plan.StartDashSpeed,
+		EndDashSpeed = plan.EndDashSpeed,
+		EndCarrySpeed = plan.EndCarrySpeed,
+		RequiredBurstSpeed = plan.RequiredBurstSpeed,
+		WallShortened = plan.WallShortened,
+		ValidationAdjusted = validationAdjusted,
+		DirectionDeltaDegrees = directionDeltaDegrees,
+		RequestReceivedAt = requestReceivedAt,
+		StartedAt = dashStartAt,
+		ServerProcessingTimeMs = math.max(0, (dashStartAt - requestReceivedAt) * 1000),
+		StartPosition = startPosition,
+		EndPosition = startPosition + (plan.Direction * plan.Distance),
+	}
+end
+
+local function emitResolvePayload(context, plan, resolveState)
+	local resolvePayload = {
+		Phase = "Resolve",
+		Direction = plan.Direction,
+		Distance = plan.Distance,
+		RequestedDistance = plan.RequestedDistance,
+		TraveledDistance = resolveState.TraveledDistance,
+		DistanceShortfall = math.max(0, plan.Distance - resolveState.TraveledDistance),
+		StartedAt = resolveState.StartedAt,
+		EndedAt = resolveState.EndedAt,
+		ActualDuration = math.max(0, resolveState.EndedAt - resolveState.StartedAt),
+		ResolveReason = resolveState.ResolveReason,
+		Interrupted = resolveState.Interrupted,
+		EndedEarly = resolveState.TraveledDistance + 0.5 < plan.Distance,
+		WallShortened = plan.WallShortened,
+		StartPosition = resolveState.StartPosition,
+		ActualEndPosition = resolveState.EndPosition,
+		EndPosition = resolveState.StartPosition + (plan.Direction * plan.Distance),
+	}
+
+	context.EmitEffect("FlameDash", resolvePayload)
+	return resolvePayload
 end
 
 function MeraMeraNoMi.FlameDash(context)
 	local character = context.Character
 	local humanoid = context.Humanoid
 	local rootPart = context.RootPart
-	local abilityConfig = context.AbilityConfig
-
-	local direction = getDashDirection(humanoid, rootPart)
-	local maxDashDistance = getMaxDashDistance(humanoid, rootPart, abilityConfig)
-	local dashDistance = getDashDistance(character, rootPart, direction, maxDashDistance)
-	local dashDuration = tonumber(abilityConfig.DashDuration) or 0.18
-	local _, startDashSpeed, endDashSpeed = getDashSpeeds(humanoid, rootPart, abilityConfig)
-	local instantDashFraction = math.clamp(tonumber(abilityConfig.InstantDashFraction) or 0.58, 0, 1)
-
-	if dashDistance <= 0.05 then
-		return {
-			Direction = direction,
-			Distance = 0,
-			Duration = dashDuration,
-		}
-	end
-
+	local player = context.Player
+	local requestReceivedAt = tonumber(context.RequestReceivedAt) or getSharedTimestamp()
+	local dashTargetPosition = getDashTargetPosition(context)
+	local requestedDirection = getRequestedDirection(rootPart, dashTargetPosition)
+	local rawRequestedDistance = typeof(dashTargetPosition) == "Vector3"
+			and MeraDashShared.GetPlanarMagnitude(dashTargetPosition - rootPart.Position)
+		or MeraDashShared.GetMaxDashDistance(humanoid, rootPart, context.AbilityConfig)
+	local plan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, context.AbilityConfig, dashTargetPosition)
+	local dashStartAt = getSharedTimestamp()
 	local startPosition = rootPart.Position
-	local instantDistance = dashDistance * instantDashFraction
-	local remainingDistance = math.max(dashDistance - instantDistance, 0)
-	local dashOwner = context.Player
-	local endCarrySpeed = math.max(humanoid.WalkSpeed, endDashSpeed * END_CARRY_SPEED_FACTOR, MIN_END_CARRY_SPEED)
+	local startPayload = buildStartPayload(plan, requestReceivedAt, dashStartAt, startPosition, requestedDirection, rawRequestedDistance)
+
+	logDash(
+		player,
+		"request_accepted ts=%.6f player=%s direction=%s requestedDir=%s source=%s intended=%.2f final=%.2f max=%.2f wallShortened=%s duration=%.3f processingMs=%.2f validationAdjusted=%s",
+		dashStartAt,
+		player.Name,
+		formatVector3(plan.Direction),
+		formatVector3(requestedDirection),
+		tostring(plan.DirectionSource),
+		plan.RequestedDistance,
+		plan.Distance,
+		plan.MaxDistance,
+		tostring(plan.WallShortened),
+		plan.Duration,
+		startPayload.ServerProcessingTimeMs,
+		tostring(startPayload.ValidationAdjusted)
+	)
 
 	task.spawn(function()
-		local elapsed = 0
+		local resolveReason = "completed"
+		local interrupted = false
 		local connection
-
-		pcall(function()
-			rootPart:SetNetworkOwner(nil)
-		end)
-
-		if instantDistance > 0.05 and character.Parent and rootPart.Parent then
-			local targetRootPosition = startPosition + direction * instantDistance
-			pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
-			setHorizontalVelocity(rootPart, direction * startDashSpeed)
-		end
-
-		if remainingDistance <= 0.1 then
-			setHorizontalVelocity(rootPart, direction * endCarrySpeed)
-			if dashOwner and dashOwner.Parent then
-				pcall(function()
-					rootPart:SetNetworkOwner(dashOwner)
-				end)
-			end
-			return
-		end
-
+		local elapsed = 0
+		local maxRuntime = math.max(plan.Duration + MAX_RUNTIME_GRACE, 0.08)
 		local burstStartPosition = rootPart.Position
 
-		connection = RunService.Heartbeat:Connect(function(dt)
-			if not character.Parent or humanoid.Health <= 0 or not rootPart.Parent then
-				if connection then
+		if plan.Distance <= 0.05 then
+			resolveReason = "blocked_at_start"
+		else
+			if plan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
+				local targetRootPosition = startPosition + (plan.Direction * plan.InstantDistance)
+				pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
+			end
+
+			setHorizontalVelocity(rootPart, plan.Direction * plan.StartDashSpeed)
+			burstStartPosition = rootPart.Position
+
+			if plan.RemainingDistance > 0.1 then
+				connection = RunService.Heartbeat:Connect(function(dt)
+					if not character.Parent or not rootPart.Parent or humanoid.Health <= 0 then
+						resolveReason = "interrupted_invalid_state"
+						interrupted = true
+						connection:Disconnect()
+						return
+					end
+
+					elapsed += dt
+
+					local traveledDistance = MeraDashShared.GetTravelDistance(burstStartPosition, rootPart.Position, plan.Direction)
+					local currentRemainingDistance = plan.RemainingDistance - traveledDistance
+					if currentRemainingDistance <= 0.1 then
+						setHorizontalVelocity(rootPart, plan.Direction * plan.EndCarrySpeed)
+						resolveReason = "completed"
+						connection:Disconnect()
+						return
+					end
+
+					local alpha = math.clamp(elapsed / plan.Duration, 0, 1)
+					local dashSpeed = plan.StartDashSpeed
+						+ ((plan.EndDashSpeed - plan.StartDashSpeed) * MeraDashShared.Smoothstep(alpha))
+					local lookAheadDistance = math.min(
+						MeraDashShared.GetLookAheadDistance(dashSpeed, dt),
+						currentRemainingDistance + 2
+					)
+					if MeraDashShared.ShouldStopForWall(character, rootPart, plan.Direction, lookAheadDistance) then
+						stopDashVelocity(rootPart)
+						resolveReason = "wall_blocked_mid_dash"
+						interrupted = true
+						connection:Disconnect()
+						return
+					end
+
+					setHorizontalVelocity(rootPart, plan.Direction * dashSpeed)
+
+					if elapsed >= maxRuntime then
+						setHorizontalVelocity(rootPart, plan.Direction * plan.EndCarrySpeed)
+						resolveReason = "max_runtime_reached"
+						interrupted = true
+						connection:Disconnect()
+					end
+				end)
+
+				task.wait(maxRuntime + 0.05)
+				if connection and connection.Connected then
+					resolveReason = "timeout_disconnect"
+					interrupted = true
 					connection:Disconnect()
 				end
-				return
+			else
+				setHorizontalVelocity(rootPart, plan.Direction * plan.EndCarrySpeed)
+				resolveReason = "instant_commit_only"
 			end
-
-			elapsed += dt
-
-			local traveledDistance = getTravelDistance(burstStartPosition, rootPart.Position, direction)
-			local currentRemainingDistance = remainingDistance - traveledDistance
-			if currentRemainingDistance <= 0.1 then
-				setHorizontalVelocity(rootPart, direction * endCarrySpeed)
-				connection:Disconnect()
-				return
-			end
-
-			local alpha = math.clamp(elapsed / dashDuration, 0, 1)
-			local dashSpeed = startDashSpeed + ((endDashSpeed - startDashSpeed) * smoothstep(alpha))
-			local lookAheadDistance = math.max((dashSpeed * dt) + WALL_PADDING, WALL_PADDING + 1)
-			if shouldStopForWall(character, rootPart, direction, math.min(lookAheadDistance, currentRemainingDistance + WALL_PADDING)) then
-				stopDashVelocity(rootPart)
-				connection:Disconnect()
-				return
-			end
-
-			setHorizontalVelocity(rootPart, direction * dashSpeed)
-
-			if alpha >= 1 then
-				setHorizontalVelocity(rootPart, direction * endCarrySpeed)
-				connection:Disconnect()
-			end
-		end)
-
-		task.wait(dashDuration + 0.05)
-
-		if connection and connection.Connected then
-			connection:Disconnect()
 		end
 
-		if dashOwner and dashOwner.Parent then
-			pcall(function()
-				rootPart:SetNetworkOwner(dashOwner)
-			end)
-		end
+		local dashEndAt = getSharedTimestamp()
+		local endPosition = rootPart.Parent and rootPart.Position or startPosition
+		local traveledDistance = MeraDashShared.GetTravelDistance(startPosition, endPosition, plan.Direction)
+		local resolvePayload = emitResolvePayload(context, plan, {
+			StartedAt = dashStartAt,
+			EndedAt = dashEndAt,
+			StartPosition = startPosition,
+			EndPosition = endPosition,
+			TraveledDistance = traveledDistance,
+			ResolveReason = resolveReason,
+			Interrupted = interrupted,
+		})
+
+		logDash(
+			player,
+			"dash_summary ts=%.6f player=%s start=%.6f finish=%.6f duration=%.3f planned=%.2f traveled=%.2f shortfall=%.2f resolve=%s interrupted=%s wallShortened=%s",
+			dashEndAt,
+			player.Name,
+			dashStartAt,
+			dashEndAt,
+			resolvePayload.ActualDuration,
+			plan.Distance,
+			resolvePayload.TraveledDistance,
+			resolvePayload.DistanceShortfall,
+			tostring(resolveReason),
+			tostring(interrupted),
+			tostring(plan.WallShortened)
+		)
 	end)
 
-	return {
-		Direction = direction,
-		Distance = dashDistance,
-		Duration = dashDuration,
-	}
+	return startPayload
 end
 
 function MeraMeraNoMi.FireBurst(context)
