@@ -22,6 +22,7 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+local GOMU_ROCKET_ANIM = "rbxassetid://106521727746519"
 local MERA_FRUIT_NAME = "Mera Mera no Mi"
 local MERA_FLAME_DASH_ABILITY = "FlameDash"
 local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
@@ -72,6 +73,7 @@ local remotes = waitForChildSafe(ReplicatedStorage, "Remotes", 15)
 local requestRemote = waitForChildSafe(remotes, "DevilFruitAbilityRequest", 15)
 local stateRemote = waitForChildSafe(remotes, "DevilFruitAbilityState", 15)
 local effectRemote = waitForChildSafe(remotes, "DevilFruitAbilityEffect", 15)
+local effectTriggerRemote = waitForChildSafe(remotes, "DevilFruitEffectTrigger", 15)
 
 local localCooldowns = {}
 local suppressedParts = {}
@@ -80,6 +82,7 @@ local activePhoenixShields = {}
 local activeHieFreezeShots = {}
 local pendingHieFreezeShotResolutions = {}
 local activeMeraFlameDash = nil
+local activeIceBoosts = {}
 local hazardSuppressionLoopRunning = false
 local spaceHeld = false
 local flightInputState = {
@@ -1938,10 +1941,61 @@ local function createIceImpactEffect(position)
 	end)
 end
 
-local function createIceBoostEffect(targetPlayer, _payload)
+-- Removal of cloneIceTrail function as it's now handled server-side
+
+local function createIceBoostEffect(targetPlayer, payload)
+	local character = targetPlayer.Character
+	local humanoid = character and character:FindFirstChild("Humanoid")
 	local rootPart = getPlayerRootPart(targetPlayer)
-	if not rootPart then
+	if not rootPart or not humanoid then
 		return
+	end
+
+	local duration = tonumber(payload and payload.Duration) or 0
+
+	if duration > 0 then
+		local existing = activeIceBoosts[targetPlayer]
+		if existing then
+			existing:Disconnect()
+			activeIceBoosts[targetPlayer] = nil
+		end
+
+		task.spawn(function()
+			local lastSpawnPos = rootPart.Position
+			local lastSpawnTime = 0
+			local startTime = os.clock()
+			local connection
+
+			-- Initial spawn
+			if targetPlayer == player then
+				effectTriggerRemote:FireServer("IceTrail", rootPart.CFrame, duration)
+			end
+			lastSpawnTime = os.clock()
+
+			connection = RunService.Heartbeat:Connect(function()
+				local now = os.clock()
+				if now - startTime >= duration or not (character.Parent and humanoid.Health > 0 and rootPart.Parent) then
+					connection:Disconnect()
+					if activeIceBoosts[targetPlayer] == connection then
+						activeIceBoosts[targetPlayer] = nil
+					end
+					return
+				end
+
+				if targetPlayer == player and humanoid.MoveDirection.Magnitude > 0 then
+					local currentPos = rootPart.Position
+					local distance = (currentPos - lastSpawnPos).Magnitude
+
+					if distance > 2.2 and (now - lastSpawnTime) > 0.1 then
+						effectTriggerRemote:FireServer("IceTrail", rootPart.CFrame, duration)
+						lastSpawnPos = currentPos
+						lastSpawnTime = now
+					end
+				end
+			end)
+
+			activeIceBoosts[targetPlayer] = connection
+		end)
 	end
 
 	local ring = Instance.new("Part")
@@ -2799,6 +2853,16 @@ end
 local function createRubberLaunchEffect(_targetPlayer, fruitName, abilityName, payload)
 	if fruitName ~= "Gomu Gomu no Mi" or abilityName ~= "RubberLaunch" then
 		return
+	end
+
+	local character = _targetPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local animation = Instance.new("Animation")
+		animation.AnimationId = GOMU_ROCKET_ANIM
+		local track = humanoid:LoadAnimation(animation)
+		track.Priority = Enum.AnimationPriority.Action
+		track:Play()
 	end
 
 	local direction = typeof(payload.Direction) == "Vector3" and payload.Direction or Vector3.new(0, 0, -1)

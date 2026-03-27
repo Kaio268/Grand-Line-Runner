@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
+local Debris = game:GetService("Debris")
 
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
@@ -9,6 +10,59 @@ local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForC
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
 local HieHieNoMi = {}
+local iceBlastAnimation = "rbxassetid://112900668980719"
+local iceBoostAnimation = "rbxassetid://84130968608346"
+
+local lastSpawnInfo = {}
+local TRAIL_DISTANCE_THRESHOLD = 2.2
+local TRAIL_TIME_THRESHOLD = 0.1
+
+local function playIceBlastAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBlastAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
+
+local function playIceBoostAnimation(humanoid, duration)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBoostAnimation
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+
+	local moveConnection
+	moveConnection = humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+		if humanoid.MoveDirection.Magnitude > 0 then
+			if not track.IsPlaying then
+				track:Play()
+			end
+		else
+			if track.IsPlaying then
+				track:Stop()
+			end
+		end
+	end)
+
+	if humanoid.MoveDirection.Magnitude > 0 then
+		track:Play()
+	end
+
+	task.delay(duration, function()
+		if moveConnection then
+			moveConnection:Disconnect()
+		end
+		if track then
+			track:Stop()
+			track:Destroy()
+		end
+	end)
+
+	return track
+end
+
+
 
 local DEBUG = RunService:IsStudio()
 local VERBOSE_DEBUG = false
@@ -922,7 +976,25 @@ local function simulateProjectile(context, state)
 end
 
 function HieHieNoMi.FreezeShot(context)
+	local humanoid = context.Humanoid
+	local track = playIceBlastAnimation(humanoid)
 	local abilityConfig = context.AbilityConfig
+
+	-- Align projectile release with Eric's animation marker when present.
+	local startTime = os.clock()
+	local markerReached = false
+	local markerConnection = track:GetMarkerReachedSignal("IceBlast"):Connect(function()
+		markerReached = true
+	end)
+
+	while not markerReached and (os.clock() - startTime) < 1.0 do
+		task.wait()
+	end
+
+	if markerConnection then
+		markerConnection:Disconnect()
+	end
+
 	local settings = getProjectileSettings(abilityConfig)
 	local slotLabel = tostring(abilityConfig.KeyCode or "Q")
 	local originPosition = context.RootPart.Position
@@ -1002,8 +1074,14 @@ end
 
 function HieHieNoMi.IceBoost(context)
 	local player = context.Player
+	local character = context.Character
+	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
+	local humanoid = context.Humanoid
+
+	playIceBoostAnimation(humanoid, duration)
+
 	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or 2)
 	local untilTime = os.clock() + duration
 
@@ -1031,5 +1109,82 @@ function HieHieNoMi.IceBoost(context)
 end
 
 logMessage("INIT", "Freeze Shot runtime initialized")
+
+local function spawnIceTrail(player, rootCFrame, duration)
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local hieParticles = assets and assets:FindFirstChild("HieParticles")
+	local iceTrail = hieParticles and hieParticles:FindFirstChild("IceTrail")
+
+	if not iceTrail then return end
+
+	local character = player.Character
+	if not character then return end
+
+	local rayOrigin = rootCFrame.Position
+	local rayDirection = Vector3.new(0, -10, 0)
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {character}
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+	local spawnPos = rayResult and rayResult.Position or (rootCFrame.Position - Vector3.new(0, 3, 0))
+	local spawnCFrame = CFrame.new(spawnPos) * rootCFrame.Rotation
+
+	local trailClone = iceTrail:Clone()
+	trailClone.Parent = Workspace
+
+	local baseplate = Workspace:FindFirstChild("Baseplate") or Workspace.Terrain
+
+	if trailClone:IsA("Model") then
+		trailClone:PivotTo(spawnCFrame)
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = baseplate
+		weld.Part1 = trailClone.PrimaryPart or trailClone:FindFirstChildWhichIsA("BasePart")
+		weld.Parent = trailClone
+	else
+		trailClone.CFrame = spawnCFrame
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = baseplate
+		weld.Part1 = trailClone
+		weld.Parent = trailClone
+	end
+
+	Debris:AddItem(trailClone, duration)
+end
+
+local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+local effectTrigger = remotes and remotes:FindFirstChild("DevilFruitEffectTrigger")
+
+if effectTrigger then
+	effectTrigger.OnServerEvent:Connect(function(player, effectName, rootCFrame, duration)
+		if effectName == "IceTrail" then
+			local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
+			if fruitAttribute == "Hie Hie no Mi" and typeof(rootCFrame) == "CFrame" then
+				local now = os.clock()
+				local info = lastSpawnInfo[player]
+
+				if info then
+					local distance = (rootCFrame.Position - info.Position).Magnitude
+					if distance < TRAIL_DISTANCE_THRESHOLD or (now - info.Time) < TRAIL_TIME_THRESHOLD then
+						return
+					end
+				end
+
+				lastSpawnInfo[player] = {
+					Position = rootCFrame.Position,
+					Time = now
+				}
+
+				spawnIceTrail(player, rootCFrame, duration)
+			end
+		end
+	end)
+end
+
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+	lastSpawnInfo[player] = nil
+end)
 
 return HieHieNoMi

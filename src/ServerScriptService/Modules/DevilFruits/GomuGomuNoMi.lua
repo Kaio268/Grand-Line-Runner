@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
-
 local GomuGomuNoMi = {}
 
 local WALL_PADDING = 1.5

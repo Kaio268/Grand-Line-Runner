@@ -7,7 +7,7 @@ local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
 local eatAnimation = Instance.new("Animation")
 
-eatAnimation.AnimationId = "rbxassetid://125650953077554"
+eatAnimation.AnimationId = "rbxassetid://85983089868979"
 
 local screenGui
 local panel
@@ -31,6 +31,15 @@ local function playEatAnimation()
 	local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 2)
 	if not animator then
 		return
+	end
+
+	if character:FindFirstChild("R6") and character:FindFirstChild("R6"):IsA("StringValue") then
+		eatAnimation.AnimationId = "rbxassetid://85983089868979"
+	elseif character:FindFirstChild("R6G") and character:FindFirstChild("R6G"):IsA("StringValue") then
+		eatAnimation.AnimationId = "rbxassetid://87595968126136" -- TODO: Replace with your actual R6G Animation ID!
+	else
+		-- Default to the R6 animation if neither StringValue is present
+		eatAnimation.AnimationId = "rbxassetid://85983089868979"
 	end
 
 	local ok, track = pcall(function()
