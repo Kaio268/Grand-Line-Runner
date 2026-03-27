@@ -132,7 +132,6 @@ local function renderLayeredText(name, props)
 	local mainOffset = props.mainOffset or Vector2.zero
 
 	return e("Frame", {
-		Name = name,
 		AutomaticSize = Enum.AutomaticSize.X,
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
@@ -142,7 +141,6 @@ local function renderLayeredText(name, props)
 		ZIndex = props.zIndex,
 	}, {
 		Shadow = e("TextLabel", {
-			Name = "Shadow",
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
@@ -163,7 +161,6 @@ local function renderLayeredText(name, props)
 			ZIndex = props.zIndex,
 		}),
 		Main = e("TextLabel", {
-			Name = "Main",
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
@@ -268,7 +265,6 @@ local function HudStatCounter(props)
 	local rowZIndex = 4
 
 	return e("Frame", {
-		Name = "ReactHudStatRow",
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
@@ -276,7 +272,6 @@ local function HudStatCounter(props)
 		Size = UDim2.new(1, 0, 0, rowHeight),
 	}, {
 		RowShadow = e("Frame", {
-			Name = "ReactHudStatRowShadow",
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundColor3 = Color3.fromRGB(0, 0, 0),
 			BackgroundTransparency = 0.92,
@@ -290,7 +285,6 @@ local function HudStatCounter(props)
 			}),
 		}),
 		RowSurface = e("Frame", {
-			Name = "ReactHudStatRowSurface",
 			BackgroundColor3 = HudStatsTheme.Row.BackgroundColor,
 			BackgroundTransparency = HudStatsTheme.Row.BackgroundTransparency,
 			BorderSizePixel = 0,
@@ -318,7 +312,6 @@ local function HudStatCounter(props)
 			}),
 		}),
 		RowContent = e("Frame", {
-			Name = "ReactHudStatRowContent",
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Size = UDim2.new(1, 0, 1, 0),
@@ -332,7 +325,6 @@ local function HudStatCounter(props)
 				VerticalAlignment = Enum.VerticalAlignment.Center,
 			}),
 			IconSlot = e("Frame", {
-				Name = "ReactHudStatIconSlot",
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
 				LayoutOrder = 1,
@@ -340,7 +332,6 @@ local function HudStatCounter(props)
 				ZIndex = rowZIndex + 3,
 			}, {
 				IconPlateShadow = e("Frame", {
-					Name = "ReactHudStatIconPlateShadow",
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					BackgroundColor3 = Color3.fromRGB(4, 4, 7),
 					BackgroundTransparency = HudStatsTheme.Row.IconPlateShadowTransparency,
@@ -354,7 +345,6 @@ local function HudStatCounter(props)
 					}),
 				}),
 				IconPlate = e("Frame", {
-					Name = "ReactHudStatIconPlate",
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					BackgroundColor3 = HudStatsTheme.Row.IconPlateColor,
 					BackgroundTransparency = HudStatsTheme.Row.IconPlateTransparency,
@@ -373,7 +363,6 @@ local function HudStatCounter(props)
 					}),
 				}),
 				IconGlow = e("Frame", {
-					Name = "ReactHudStatIconGlow",
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					BackgroundColor3 = palette.glow,
 					BackgroundTransparency = HudStatsTheme.Row.IconGlowTransparency,
@@ -387,7 +376,6 @@ local function HudStatCounter(props)
 					}),
 				}),
 				Icon = hasIconImage and e("ImageLabel", {
-					Name = "ReactHudStatIcon",
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
@@ -408,7 +396,6 @@ local function HudStatCounter(props)
 				}) or nil,
 			}),
 			Content = e("Frame", {
-				Name = "ReactHudStatContent",
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
 				LayoutOrder = 2,
@@ -420,7 +407,6 @@ local function HudStatCounter(props)
 					PaddingRight = UDim.new(0, HudStatsTheme.Row.ContentPaddingRight),
 				}),
 				TextCluster = e("Frame", {
-					Name = "ReactHudStatTextCluster",
 					AnchorPoint = Vector2.new(0, 0.5),
 					AutomaticSize = Enum.AutomaticSize.X,
 					BackgroundTransparency = 1,
@@ -468,7 +454,6 @@ local function HudStatCounter(props)
 			}),
 		}),
 		Divider = showDivider and e("Frame", {
-			Name = "ReactHudStatDivider",
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundColor3 = HudStatsTheme.Card.DividerColor,
 			BackgroundTransparency = HudStatsTheme.Card.DividerTransparency,

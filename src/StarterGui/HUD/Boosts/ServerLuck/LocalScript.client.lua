@@ -15,7 +15,6 @@ local function updateImage()
 
 	if newImage then
 		imageObject.Image = newImage
-	else
 	end
 end
 

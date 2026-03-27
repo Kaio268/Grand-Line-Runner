@@ -178,24 +178,21 @@ local function updateHud()
 
 	local readyCount = 0
 	local minRemaining = nil
-	local nextId = nil
+
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local slotFrame = slotsById[id]
 		if slotFrame and slotFrame.Parent and not slotFrame:GetAttribute("Claimed") then
-			nextId = id
-			break
-		end
-	end
-
-	if nextId then
-		local et = endTimes[nextId]
-		if et then
-			local rem = et - os.clock()
-			if rem <= 0 then
-				readyCount = 1
-			else
-				minRemaining = rem
+			local et = endTimes[id]
+			if et then
+				local rem = et - os.clock()
+				if rem <= 0 then
+					readyCount += 1
+				else
+					if minRemaining == nil or rem < minRemaining then
+						minRemaining = rem
+					end
+				end
 			end
 		end
 	end
@@ -208,18 +205,16 @@ local function updateHud()
 	end
 
 	local text
-	if readyCount > 0 then
+	if minRemaining ~= nil then
+		local secs = math.max(0, math.ceil(minRemaining))
+		local ok, t = pcall(function()
+			return Shorten.timeSuffixTwo(secs)
+		end)
+		text = ok and t or (tostring(secs) .. "s")
+	elseif readyCount > 0 then
 		text = READY_TEXT
 	else
-		if minRemaining == nil then
-			text = "--"
-		else
-			local secs = math.max(0, math.ceil(minRemaining))
-			local ok, t = pcall(function()
-				return Shorten.timeSuffixTwo(secs)
-			end)
-			text = ok and t or (tostring(secs) .. "s")
-		end
+		text = "--"
 	end
 
 	if hudTimer:IsA("TextLabel") or hudTimer:IsA("TextButton") or hudTimer:IsA("TextBox") then
@@ -409,32 +404,31 @@ local function initialiseButtons(serverStartEpoch: number)
 		end
 	end
 
-	local nextId = nil
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		stopCountdown(id)
+	end
+
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
 		local slotFrame = slotsById[id]
-		if slotFrame and not slotFrame:GetAttribute("Claimed") then
-			nextId = id
-			break
-		end
-	end
-
-	if nextId then
-		local cfg = RewardsConfig[nextId]
-		local slotFrame = slotsById[nextId]
-		if cfg and slotFrame then
-			local elapsed = os.time() - queueStartEpoch
-			local remaining = math.max(0, (tonumber(cfg.Time) or 0) - elapsed)
-			endTimes[nextId] = os.clock() + remaining
-			if remaining > 0 then
+		local isClaimed = slotFrame and slotFrame:GetAttribute("Claimed")
+		if slotFrame and not isClaimed then
+			local cfg = RewardsConfig[id]
+			local unlockAfter = math.max(0, tonumber(cfg and cfg.Time) or 0)
+			local remaining = math.max(0, (queueStartEpoch + unlockAfter) - os.time())
+			endTimes[id] = os.clock() + remaining
+			if remaining <= 0 then
+				setTimerReady(slotFrame)
+			else
 				local ok, txt = pcall(function()
 					return Shorten.timeSuffixTwo(remaining)
 				end)
 				setTimerCountdown(slotFrame, ok and txt or (tostring(remaining) .. "s"))
-				startCountdown(nextId)
-			else
-				setTimerReady(slotFrame)
 			end
+				startCountdown(id)
+		else
+			endTimes[id] = nil
 		end
 	end
 
@@ -528,11 +522,8 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		initialiseButtons(queueStartEpoch)
 		updateHud()
 
-	elseif action == "notReady" then
-		updateHud()
-
-	elseif action == "alreadyClaimed" then
-		updateHud()
+		elseif action == "notReady" or action == "alreadyClaimed" then
+			updateHud()
 
 	else
 		dwarn("Unknown action:", action)

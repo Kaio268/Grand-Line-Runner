@@ -60,9 +60,7 @@ return function(icon, Icon)
 		end
 		local parentIcon = Icon.getIconByUID(icon.parentIconUID)
 		local dropdownOrMenuActive = #icon.dropdownIcons > 0 or #icon.menuIcons > 0
-		if icon.isSelected and dropdownOrMenuActive then
-			enabled = false
-		elseif parentIcon and not parentIcon.isSelected then
+		if (icon.isSelected and dropdownOrMenuActive) or (parentIcon and not parentIcon.isSelected) then
 			enabled = false
 		end
 		Utility.setVisible(notice, enabled, "NoticeHandler")

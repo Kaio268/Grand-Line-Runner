@@ -68,7 +68,9 @@ end
 
 function UIController:_forceHide(frame: Frame)
 	local scale = frame:FindFirstChildOfClass("UIScale")
-	if scale then scale.Scale = 0 end
+	if scale then
+		scale.Scale = 0
+	end
 	frame.Visible = false
 	if self.CurrentFrame == frame then
 		self.CurrentFrame = nil
@@ -88,7 +90,9 @@ function UIController:_closeNonPlant()
 	local t1 = tween(f, { Position = UDim2.new(0.5, 0, 10, 0) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	t1:Play()
-	if t2 then t2:Play() end
+	if t2 then
+		t2:Play()
+	end
 	t1.Completed:Wait()
 	f.Visible = false
 	self.CurrentFrame = nil
@@ -148,7 +152,9 @@ function UIController:_openPlant()
 end
 
 function UIController:_closePlant()
-	if not self.PlantVisible then return end
+	if not self.PlantVisible then
+		return
+	end
 	local frame: Frame = self.PlantInventory
 	self.IsAnimating = true
 	local scale = frame:FindFirstChildOfClass("UIScale")
@@ -182,7 +188,9 @@ function UIController:_cacheButtons()
 
 		table.insert(self.Buttons, btn)
 		self._buttonConnections[btn] = btn.MouseButton1Click:Connect(function()
-			if self.ActiveErrorFrame or self.IsAnimating then return end
+			if self.ActiveErrorFrame or self.IsAnimating then
+				return
+			end
 			local target = self.FramesFolder:FindFirstChild(btn.Name)
 			if target and target:IsA("Frame") then
 				self:ToggleFrame(target)
@@ -258,14 +266,22 @@ function UIController:_initializePartTriggers()
 	self._hookedParts = self._hookedParts or {}
 
 	local function hookPart(part: Instance, forcedFrameName: string?)
-		if not part:IsA("BasePart") then return end
-		if self._hookedParts[part] then return end
+		if not part:IsA("BasePart") then
+			return
+		end
+		if self._hookedParts[part] then
+			return
+		end
 		self._hookedParts[part] = true
 
 		part.Touched:Connect(function(hit)
-			if self.ActiveErrorFrame or self.IsAnimating then return end
+			if self.ActiveErrorFrame or self.IsAnimating then
+				return
+			end
 			local char = self.Player.Character
-			if not char or not hit:IsDescendantOf(char) then return end
+			if not char or not hit:IsDescendantOf(char) then
+				return
+			end
 
 			local frameName = forcedFrameName
 			if not frameName then
@@ -274,7 +290,9 @@ function UIController:_initializePartTriggers()
 					frameName = attr
 				end
 			end
-			if not frameName then return end
+			if not frameName then
+				return
+			end
 
 			local frame = self.FramesFolder:FindFirstChild(frameName)
 			if frame and frame:IsA("Frame") and not frame.Visible then
@@ -305,8 +323,12 @@ function UIController:_initializePartTriggers()
 end
 
 function UIController:ToggleFrame(frame: Frame)
-	if self.ActiveErrorFrame then return end
-	if self.IsAnimating then return end
+	if self.ActiveErrorFrame then
+		return
+	end
+	if self.IsAnimating then
+		return
+	end
 
 	for _, other in ipairs(self:_getVisibleNonPlantFrames()) do
 		if other ~= frame then
@@ -338,7 +360,9 @@ function UIController:ToggleFrame(frame: Frame)
 end
 
 function UIController:CloseAllFrames()
-	if self.ActiveErrorFrame or self.IsAnimating then return end
+	if self.ActiveErrorFrame or self.IsAnimating then
+		return
+	end
 	self:_closeNonPlant()
 	self:_closePlant()
 	for _, f in ipairs(self:_getVisibleNonPlantFrames()) do
@@ -348,7 +372,9 @@ function UIController:CloseAllFrames()
 end
 
 function UIController:OpenFrame(frameName: string)
-	if self.ActiveErrorFrame or self.IsAnimating then return end
+	if self.ActiveErrorFrame or self.IsAnimating then
+		return
+	end
 	local frame = self.FramesFolder:FindFirstChild(frameName)
 	if frame and frame:IsA("Frame") then
 		self:ToggleFrame(frame)

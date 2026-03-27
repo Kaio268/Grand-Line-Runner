@@ -50,8 +50,7 @@ local renderQueued = false
 local hoverBindings = {}
 
 local function isTextGuiObject(instance)
-	return instance
-		and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+	return instance and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
 end
 
 local function isReactNode(instance)
@@ -509,9 +508,7 @@ local function ensureBadge(button, defaultText)
 	for _, descendant in ipairs(badge:GetDescendants()) do
 		if descendant:IsA("GuiObject") then
 			descendant.ZIndex = math.max(descendant.ZIndex, badge.ZIndex + 1, 33)
-		elseif descendant:IsA("UIStroke") then
-			descendant.Enabled = true
-		elseif descendant:IsA("UIGradient") then
+		elseif descendant:IsA("UIStroke") or descendant:IsA("UIGradient") then
 			descendant.Enabled = true
 		end
 	end
@@ -529,13 +526,15 @@ local function ensureTimer(button, defaultText)
 		timer.BackgroundTransparency = 0.08
 		timer.BorderSizePixel = 0
 		timer.Font = Enum.Font.GothamBold
-		timer.Position = UDim2.new(0.5, 0, 0, 6)
-		timer.Size = UDim2.new(1, -10, 0, 20)
+		timer.Position = UDim2.new(0.12, 0, 0, 0.1)
+		timer.Size = UDim2.new(1, -20, 0, 18)
 		timer.Text = tostring(defaultText or "--")
 		timer.TextColor3 = Color3.fromRGB(255, 245, 224)
 		timer.TextScaled = true
 		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
 		timer.TextStrokeTransparency = 0.08
+		timer.TextXAlignment = Enum.TextXAlignment.Center
+		timer.TextYAlignment = Enum.TextYAlignment.Center
 		timer.ZIndex = math.max(button.ZIndex + 9, 11)
 		timer.Parent = button
 
@@ -563,10 +562,12 @@ local function ensureTimer(button, defaultText)
 
 	if isTextGuiObject(timer) then
 		timer.BackgroundTransparency = 0.08
-		timer.Position = UDim2.new(0.5, 0, 0, 6)
-		timer.Size = UDim2.new(1, -10, 0, 20)
+		timer.Position = UDim2.new(0.12, 0, 0, 0.1)
+		timer.Size = UDim2.new(1, -20, 0, 18)
 		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
 		timer.TextStrokeTransparency = 0.08
+		timer.TextXAlignment = Enum.TextXAlignment.Center
+		timer.TextYAlignment = Enum.TextYAlignment.Center
 		timer.ZIndex = math.max(timer.ZIndex, button.ZIndex + 9, 11)
 	end
 
@@ -593,6 +594,7 @@ local function ensureTimer(button, defaultText)
 		timer2.TextStrokeColor3 = timer.TextStrokeColor3
 		timer2.TextStrokeTransparency = timer.TextStrokeTransparency
 		timer2.ZIndex = math.max(timer2.ZIndex, timer.ZIndex + 1, 12)
+		timer2.Visible = false
 	end
 
 	return timer

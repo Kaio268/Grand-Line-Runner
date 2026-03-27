@@ -1,6 +1,7 @@
 --// Main
 local DataManager = {}
-DataManager.__index = DataManager; self = setmetatable({}, DataManager)
+DataManager.__index = DataManager
+local self = setmetatable({}, DataManager)
 
 --// Other 
 local Key: string = script:GetAttribute("Data_Key") or "DefaultKey_123"
@@ -580,7 +581,8 @@ function DataManager:Leaderstats(player : Player)
 
 	local folder = player:FindFirstChild("leaderstats")
 	if not folder then
-		folder = Instance.new("Folder", player)
+		folder = Instance.new("Folder")
+		folder.Parent = player
 		folder.Name = "leaderstats"
 	end
 
@@ -588,7 +590,8 @@ function DataManager:Leaderstats(player : Player)
 		for index, value in pairs(playerProfile.Data.leaderstats) do
 			local element = folder:FindFirstChild(index)
 			if not element then
-				element = Instance.new(CLASS_NAMES[typeof(value)], folder)
+				element = Instance.new(CLASS_NAMES[typeof(value)])
+				element.Parent = folder
 				element.Name = index
 			end
 			element.Value = value

@@ -85,7 +85,6 @@ local function SectionBlock(props)
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		LayoutOrder = props.layoutOrder or 0,
-		Name = "Section_" .. tostring(section.key),
 		Size = UDim2.new(1, 0, 0, 0),
 		ZIndex = props.zIndex,
 	}, {

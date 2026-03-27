@@ -19,6 +19,8 @@ local persistTaskByPlayer = {}
 local hydrationTaskByPlayer = {}
 local fruitHandlerCache = {}
 local started = false
+local getEquippedFruit
+local clearFruitRuntimeState
 
 local function getOrCreateRemotesFolder()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -356,7 +358,7 @@ local function getCooldownTable(player)
 	return playerCooldowns
 end
 
-local function clearFruitRuntimeState(player, fruitName)
+clearFruitRuntimeState = function(player, fruitName)
 	if fruitName == DevilFruitConfig.None then
 		return
 	end
@@ -391,7 +393,7 @@ local function applyEquippedFruitRuntimeState(player, fruitValue, fruitName)
 	syncFruitAttribute(player, fruitName)
 end
 
-local function getEquippedFruit(player)
+getEquippedFruit = function(player)
 	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
 	if typeof(fruitAttribute) == "string" then
 		return normalizeStoredFruitName(fruitAttribute)

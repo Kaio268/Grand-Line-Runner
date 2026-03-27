@@ -161,13 +161,11 @@ local function createPrompt(prompt, inputType, gui)
 		table.insert(tweensForFadeIn, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = imageTransparency }))
 	end
 
-	local function setupUnexpectedChildTweens(child)
-		if child:IsA("UIStroke") then
-			setupUIStrokeTweens(child)
-		elseif child:IsA("UIGradient") then
-			-- The Transparency property of UIGradients is not tweenable
-		elseif child:IsA("GuiObject") then
-			setupGUIObjectTweens(child)
+		local function setupUnexpectedChildTweens(child)
+			if child:IsA("UIStroke") then
+				setupUIStrokeTweens(child)
+			elseif child:IsA("GuiObject") then
+				setupGUIObjectTweens(child)
 
 			if child:IsA("TextLabel") then
 				setupTextLabelTweens(child)

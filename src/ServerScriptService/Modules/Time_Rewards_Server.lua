@@ -124,13 +124,12 @@ local function claimSingleReward(plr: Player, id: number)
 	end
 
 	claimed[plr][id] = true
-	queueStart[plr] = os.time()
 	Remote:FireClient(plr, "claimed", id, rewardName, amount, queueStart[plr])
 end
 
 local function instantClaimAll(plr: Player)
-	if not cycleStart[plr] then
-		cycleStart[plr] = os.time()
+	if not queueStart[plr] then
+		queueStart[plr] = os.time()
 	end
 	if not claimed[plr] then
 		claimed[plr] = {}
@@ -181,21 +180,6 @@ Remote.OnServerEvent:Connect(function(plr, id)
 		return
 	end
 
-	local nextRewardId = getNextRewardId(plr)
-	if nextRewardId == nil then
-		startNewCycle(plr)
-		return
-	end
-	if id ~= nextRewardId then
-		Remote:FireClient(plr, "notReady", id, 0)
-		return
-	end
-
-	local cfgNext = RewardsConfig[nextRewardId]
-	if not cfgNext then
-		return
-	end
-
 	local startTime = queueStart[plr]
 	if not startTime then
 		queueStart[plr] = os.time()
@@ -203,12 +187,13 @@ Remote.OnServerEvent:Connect(function(plr, id)
 	end
 
 	local elapsed = os.time() - startTime
-	if elapsed < cfgNext.Time then
-		Remote:FireClient(plr, "notReady", id, cfgNext.Time - elapsed)
+	local requiredElapsed = math.max(0, tonumber(cfg.Time) or 0)
+	if elapsed < requiredElapsed then
+		Remote:FireClient(plr, "notReady", id, requiredElapsed - elapsed)
 		return
 	end
 
-	claimSingleReward(plr, nextRewardId)
+	claimSingleReward(plr, id)
 
 	if getClaimedCount(plr) >= TOTAL_REWARDS then
 		startNewCycle(plr)

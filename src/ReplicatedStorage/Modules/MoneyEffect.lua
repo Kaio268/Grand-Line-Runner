@@ -66,8 +66,12 @@ local function setAnchored(inst: Instance, anchored: boolean)
 end
 
 local function getPivotCF(inst: Instance): CFrame
-	if inst:IsA("BasePart") then return inst.CFrame end
-	if inst:IsA("Model") then return inst:GetPivot() end
+	if inst:IsA("BasePart") then
+		return inst.CFrame
+	end
+	if inst:IsA("Model") then
+		return inst:GetPivot()
+	end
 	return CFrame.new()
 end
 
@@ -90,7 +94,9 @@ end
 
 local function getHeadPosition(): Vector3?
 	local char = player.Character
-	if not char then return nil end
+	if not char then
+		return nil
+	end
 	local head = char:FindFirstChild("Head")
 	if head and head:IsA("BasePart") then
 		return head.Position
@@ -100,7 +106,9 @@ end
 
 local function playCollectHighlight()
 	local char = player.Character
-	if not char then return end
+	if not char then
+		return
+	end
 	local hl = Instance.new("Highlight")
 	hl.Adornee = char
 	hl.FillColor = Color3.fromRGB(80, 255, 120)
@@ -184,11 +192,15 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 				local popConn
 				popConn = RunService.RenderStepped:Connect(function()
 					if not d or not d.Parent then
-						if popConn then popConn:Disconnect() end
+						if popConn then
+							popConn:Disconnect()
+						end
 						return
 					end
 					local t = (os.clock() - popStart)/CFG.PopTime
-					if t > 1 then t = 1 end
+					if t > 1 then
+						t = 1
+					end
 					local a = easeOutCubic(t)
 					local pos = oPos:Lerp(apex, a)
 					local spin = a * math.pi * 2
@@ -200,7 +212,9 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 				end)
 
 				task.wait(CFG.PopTime)
-				if not d or not d.Parent then return end
+				if not d or not d.Parent then
+					return
+				end
 
 				local hoverT = math.max(0.15, CFG.HoverTimeBase + rand(-CFG.HoverTimeSpread, CFG.HoverTimeSpread))
 				local hoverStart = getPivotCF(d).Position
@@ -216,7 +230,9 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 				local hoverConn
 				hoverConn = RunService.RenderStepped:Connect(function()
 					if not d or not d.Parent then
-						if hoverConn then hoverConn:Disconnect() end
+						if hoverConn then
+							hoverConn:Disconnect()
+						end
 						return
 					end
 					local el = os.clock() - hoverStartTime
@@ -238,7 +254,9 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 				end)
 
 				task.wait(hoverT)
-				if not d or not d.Parent then return end
+				if not d or not d.Parent then
+					return
+				end
 
 				local flyStartPos = getPivotCF(d).Position
 				local char = player.Character
@@ -253,10 +271,14 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 
 				local initialOffset = flyStartPos - center
 				local initialRadius = initialOffset.Magnitude
-				if initialRadius < 4 then initialRadius = 4 end
+				if initialRadius < 4 then
+					initialRadius = 4
+				end
 
 				local startDistToHead = (flyStartPos - headPos0).Magnitude
-				if startDistToHead < 4 then startDistToHead = 4 end
+				if startDistToHead < 4 then
+					startDistToHead = 4
+				end
 
 				local baseAngle = math.atan2(initialOffset.Z, initialOffset.X)
 				local orbitDir = math.random(0,1) == 0 and -1 or 1
@@ -281,7 +303,9 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 				local flyConn
 				flyConn = RunService.RenderStepped:Connect(function()
 					if not d or not d.Parent then
-						if flyConn then flyConn:Disconnect() end
+						if flyConn then
+							flyConn:Disconnect()
+						end
 						return
 					end
 
@@ -322,7 +346,9 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 					end
 
 					local radiusScale = 1 - t*0.7
-					if radiusScale < 0.2 then radiusScale = 0.2 end
+					if radiusScale < 0.2 then
+						radiusScale = 0.2
+					end
 
 					local heightKick = math.sin(t*math.pi)*2
 					local p1 = center + rotateOffset(p1BaseOffset)*radiusScale + Vector3.new(0,2 + heightKick,0)

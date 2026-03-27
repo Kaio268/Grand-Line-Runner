@@ -6,6 +6,89 @@ local RunService = game:GetService("RunService")
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local Point = require(ReplicatedStorage:WaitForChild("Point"))
+local SpawnPartsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local BrainrotsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+
+local VariantPrefixes = { "Golden ", "Diamond " }
+do
+	local ok, cfg = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+	end)
+	if ok and typeof(cfg) == "table" and typeof(cfg.Versions) == "table" then
+		local prefixes = {}
+		for _, variantData in pairs(cfg.Versions) do
+			if typeof(variantData) == "table" and typeof(variantData.Prefix) == "string" and variantData.Prefix ~= "" then
+				prefixes[variantData.Prefix] = true
+			end
+		end
+		VariantPrefixes = {}
+		for prefix in pairs(prefixes) do
+			table.insert(VariantPrefixes, prefix)
+		end
+	end
+end
+
+local KnownBrainrotNames = {}
+for brainrotName in pairs(BrainrotsConfig) do
+	KnownBrainrotNames[tostring(brainrotName)] = true
+end
+
+local function stripVariantPrefix(name)
+	local raw = tostring(name or "")
+	for _, prefix in ipairs(VariantPrefixes) do
+		if string.sub(raw, 1, #prefix) == prefix then
+			return string.sub(raw, #prefix + 1)
+		end
+	end
+	return raw
+end
+
+local function isLikelyBrainrotModelName(name)
+	local raw = tostring(name or "")
+	if raw == "" then
+		return false
+	end
+	if KnownBrainrotNames[raw] then
+		return true
+	end
+	local stripped = stripVariantPrefix(raw)
+	return KnownBrainrotNames[stripped] == true
+end
+
+local TUTORIAL_DEBUG = true
+local debugLastAt = {}
+
+local function getInstancePath(inst)
+	if not inst then
+		return "nil"
+	end
+	local ok, path = pcall(function()
+		return inst:GetFullName()
+	end)
+	if ok and path then
+		return path
+	end
+	return tostring(inst)
+end
+
+local function debugTutorial(key, message, throttleSeconds)
+	if not TUTORIAL_DEBUG then
+		return
+	end
+
+	local keyName = tostring(key or "GEN")
+	local interval = tonumber(throttleSeconds) or 0
+	local now = os.clock()
+	local last = debugLastAt[keyName] or 0
+	if interval > 0 and (now - last) < interval then
+		return
+	end
+	debugLastAt[keyName] = now
+	print(string.format("[TUTORIAL][%s][%.2f] %s", keyName, now, tostring(message)))
+end
+
+local lastBrainrotModelSweepAt = 0
+local lastBrainrotModelSweepResult = nil
 
 local remote = ReplicatedStorage:FindFirstChild("TutorialrrrrFinished")
 
@@ -504,6 +587,41 @@ local function modelHasPrompt(model)
 	return model and model:IsA("Model") and model:FindFirstChildWhichIsA("ProximityPrompt", true) ~= nil
 end
 
+local function hasCarriedBrainrot()
+	local carried = player:GetAttribute("CarriedBrainrot")
+	return typeof(carried) == "string" and carried ~= ""
+end
+
+local function hasBrainrotTool(container)
+	if not container then
+		return false
+	end
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") and isLikelyBrainrotModelName(child.Name) then
+			return true
+		end
+	end
+	return false
+end
+
+local function hasCollectedBrainrotForTutorial()
+	if hasCarriedBrainrot() or inventoryHasAnyFolder() then
+		return true
+	end
+
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if hasBrainrotTool(backpack) then
+		return true
+	end
+
+	local character = player.Character
+	if hasBrainrotTool(character) then
+		return true
+	end
+
+	return false
+end
+
 local function getModelPrompt(model)
 	if not model or not model:IsA("Model") then
 		return nil
@@ -548,8 +666,20 @@ local function getNearestBrainrotTarget(character)
 	local bestPrompt = nil
 	local bestPart = nil
 	local bestDist = math.huge
+	local debugInfo = {
+		roots = 0,
+		promptCandidates = 0,
+		modelCandidates = 0,
+		partCandidates = 0,
+		hoverCandidates = 0,
+		source = "none",
+	}
 
 	local roots = {}
+	local validRarityParts = {}
+	for rarityName in pairs((SpawnPartsConfig and SpawnPartsConfig.RarityTier) or {}) do
+		validRarityParts[tostring(rarityName)] = true
+	end
 
 	local brainrotsWorld = mapRoot and mapRoot:FindFirstChild("BrainrotsWorld")
 	local droppedFolder = brainrotsWorld and brainrotsWorld:FindFirstChild("Dropped")
@@ -572,14 +702,25 @@ local function getNearestBrainrotTarget(character)
 		end
 	end
 
-	local function considerPrompt(prompt)
+	-- Newer biome layouts can store active brainrots under Biomes/*/*/Brainrots.
+	local biomesRoot = mapRoot and mapRoot:FindFirstChild("Biomes")
+	if biomesRoot then
+		for _, descendant in ipairs(biomesRoot:GetDescendants()) do
+			if
+				(descendant:IsA("Folder") and descendant.Name == "Brainrots")
+				or (descendant:IsA("BasePart") and validRarityParts[descendant.Name])
+			then
+				table.insert(roots, descendant)
+			end
+		end
+	end
+
+	local function considerPrompt(prompt, source)
 		if not (prompt and prompt:IsA("ProximityPrompt")) then
 			return
 		end
-		if prompt.Enabled ~= true or not prompt:IsDescendantOf(workspace) then
-			return
-		end
-		if tostring(prompt.ObjectText or "") ~= "Hold to Get" then
+		debugInfo.promptCandidates += 1
+		if not prompt:IsDescendantOf(workspace) then
 			return
 		end
 
@@ -603,18 +744,278 @@ local function getNearestBrainrotTarget(character)
 			bestModel = model
 			bestPrompt = prompt
 			bestPart = targetPart
+			debugInfo.source = source or "prompt"
+		end
+	end
+
+	local function considerModel(model, source)
+		if not (model and model:IsA("Model") and model:IsDescendantOf(workspace)) then
+			return
+		end
+		debugInfo.modelCandidates += 1
+
+		local targetPart = getModelTargetPart(model)
+		if not targetPart then
+			return
+		end
+
+		local prompt = getModelPrompt(model)
+		local dist = (targetPart.Position - origin).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestModel = model
+			bestPrompt = prompt
+			bestPart = targetPart
+			debugInfo.source = source or "model"
+		end
+	end
+
+	local function considerPart(part, source)
+		if not (part and part:IsA("BasePart") and part:IsDescendantOf(workspace)) then
+			return
+		end
+		debugInfo.partCandidates += 1
+
+		local model = part:FindFirstAncestorOfClass("Model")
+		local prompt = model and getModelPrompt(model) or part:FindFirstChildWhichIsA("ProximityPrompt")
+		local dist = (part.Position - origin).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestModel = model
+			bestPrompt = prompt
+			bestPart = part
+			debugInfo.source = source or "part"
+		end
+	end
+
+	local function considerVisualBrainrotModel(model, source)
+		if not (model and model:IsA("Model") and model:IsDescendantOf(workspace)) then
+			return
+		end
+		debugInfo.hoverCandidates += 1
+
+		local hover = model:FindFirstChild("BrainrotHover", true) or model:FindFirstChild("BrainortHover", true)
+		if not hover then
+			return
+		end
+
+		local part = getModelTargetPart(model)
+		if not part then
+			return
+		end
+
+		local prompt = getModelPrompt(model)
+		local dist = (part.Position - origin).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestModel = model
+			bestPrompt = prompt
+			bestPart = part
+			debugInfo.source = source or "hover"
 		end
 	end
 
 	for _, root in ipairs(roots) do
 		if root and root:IsDescendantOf(workspace) then
+			debugInfo.roots += 1
 			for _, prompt in ipairs(root:GetDescendants()) do
-				considerPrompt(prompt)
+				considerPrompt(prompt, "root_prompt")
 			end
 		end
 	end
 
-	return bestModel, bestPrompt, bestPart
+	-- Fallback 1: some brainrots may be present without usable prompt filters.
+	if not bestModel then
+		for _, root in ipairs(roots) do
+			if root and root:IsDescendantOf(workspace) then
+				for _, candidate in ipairs(root:GetDescendants()) do
+					if candidate:IsA("Model") and (modelHasPrompt(candidate) or candidate:FindFirstChildWhichIsA("BasePart", true)) then
+						considerModel(candidate, "root_model")
+					elseif candidate:IsA("BasePart") then
+						considerPart(candidate, "root_part")
+					end
+				end
+			end
+		end
+	end
+
+	-- Fallback 2: global prompt scan near spawn area in case folder layout changed.
+	if not bestModel then
+		for _, prompt in ipairs(workspace:GetDescendants()) do
+			if prompt:IsA("ProximityPrompt") then
+				local action = string.lower(tostring(prompt.ActionText or ""))
+				local objectText = string.lower(tostring(prompt.ObjectText or ""))
+				local likelyCollectPrompt = string.find(action, "collect", 1, true)
+					or string.find(action, "get", 1, true)
+					or string.find(objectText, "collect", 1, true)
+					or string.find(objectText, "get", 1, true)
+				if likelyCollectPrompt then
+					considerPrompt(prompt, "global_collect_prompt")
+				end
+			end
+		end
+	end
+
+	-- Fallback 3: nearest visible brainrot model marker.
+	if not bestModel then
+		local now = os.clock()
+		if now - lastBrainrotModelSweepAt >= 0.45 then
+			lastBrainrotModelSweepAt = now
+			lastBrainrotModelSweepResult = nil
+			if mapRoot then
+				for _, candidate in ipairs(mapRoot:GetDescendants()) do
+					if candidate:IsA("Model") then
+						if isLikelyBrainrotModelName(candidate.Name) then
+							considerModel(candidate, "map_name_match")
+						end
+						if not bestModel then
+							considerVisualBrainrotModel(candidate, "map_visual_hover")
+						end
+					end
+					if bestModel then
+						lastBrainrotModelSweepResult = {
+							model = bestModel,
+							prompt = bestPrompt,
+							part = bestPart,
+						}
+					end
+				end
+			end
+		elseif lastBrainrotModelSweepResult then
+			local cached = lastBrainrotModelSweepResult
+			if
+				cached.model
+				and cached.part
+				and cached.model:IsDescendantOf(workspace)
+				and cached.part:IsDescendantOf(workspace)
+			then
+				bestModel = cached.model
+				bestPrompt = cached.prompt
+				bestPart = cached.part
+			end
+		end
+	end
+
+	-- Fallback 4: nearest non-player humanoid model in map area.
+	if not bestModel and mapRoot then
+		for _, candidate in ipairs(mapRoot:GetDescendants()) do
+			if candidate:IsA("Model") and candidate ~= character then
+				local humanoid = candidate:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					local nameLower = string.lower(candidate.Name)
+					if
+						not string.find(nameLower, "chest", 1, true)
+						and not string.find(nameLower, "stand", 1, true)
+						and not string.find(nameLower, "plot", 1, true)
+					then
+						considerModel(candidate, "map_non_player_humanoid")
+					end
+				end
+			end
+		end
+	end
+
+	-- Fallback 5: scan every "Brainrots" folder in workspace directly.
+	if not bestModel then
+		for _, folder in ipairs(workspace:GetDescendants()) do
+			if folder:IsA("Folder") and folder.Name == "Brainrots" then
+				for _, candidate in ipairs(folder:GetChildren()) do
+					if candidate:IsA("Model") then
+						considerModel(candidate, "workspace_brainrots_folder_model")
+					elseif candidate:IsA("BasePart") then
+						considerPart(candidate, "workspace_brainrots_folder_part")
+					end
+				end
+			end
+		end
+	end
+
+	-- Fallback 6: nearest visible brainrot hover adornee.
+	if not bestModel then
+		for _, gui in ipairs(workspace:GetDescendants()) do
+			if gui:IsA("BillboardGui") and (gui.Name == "BrainrotHover" or gui.Name == "BrainortHover") then
+				local adornee = gui.Adornee
+				if adornee and adornee:IsA("BasePart") then
+					considerPart(adornee, "brainrot_hover_adornee")
+				end
+			end
+		end
+	end
+
+	-- Fallback 7: nearest non-player prompt in world to ensure beam visibility.
+	if not bestPart then
+		local characterModel = character
+		for _, prompt in ipairs(workspace:GetDescendants()) do
+			if prompt:IsA("ProximityPrompt") then
+				local p = prompt.Parent
+				if p and p:IsA("Attachment") then
+					p = p.Parent
+				end
+				if p and p:IsA("BasePart") then
+					local ownerModel = p:FindFirstAncestorOfClass("Model")
+					if ownerModel and ownerModel ~= characterModel and ownerModel ~= npc then
+						local ownerLower = string.lower(ownerModel.Name)
+						local shouldSkip = string.find(ownerLower, "sell", 1, true)
+							or string.find(ownerLower, "upgrade", 1, true)
+							or string.find(ownerLower, "stand", 1, true)
+							or string.find(ownerLower, "plot", 1, true)
+						if not shouldSkip then
+							considerPrompt(prompt, "global_non_player_prompt")
+						end
+					end
+				end
+			end
+		end
+	end
+
+	debugInfo.bestDist = bestDist
+	return bestModel, bestPrompt, bestPart, debugInfo
+end
+
+local function getFallbackSpawnTargetPart(character)
+	local hrp = character and character:FindFirstChild("HumanoidRootPart")
+	if not hrp then
+		return nil
+	end
+
+	local origin = hrp.Position
+	local bestPart = nil
+	local bestDist = math.huge
+	local validRarityParts = {}
+	for rarityName in pairs((SpawnPartsConfig and SpawnPartsConfig.RarityTier) or {}) do
+		validRarityParts[tostring(rarityName)] = true
+	end
+
+	local function considerPart(part)
+		if not (part and part:IsA("BasePart") and part:IsDescendantOf(workspace)) then
+			return
+		end
+		local dist = (part.Position - origin).Magnitude
+		if dist < bestDist then
+			bestDist = dist
+			bestPart = part
+		end
+	end
+
+	local spawnFolder = getSpawnContainer()
+	if spawnFolder and spawnFolder:IsDescendantOf(workspace) then
+		for _, descendant in ipairs(spawnFolder:GetDescendants()) do
+			if descendant:IsA("BasePart") and validRarityParts[descendant.Name] then
+				considerPart(descendant)
+			end
+		end
+	end
+
+	local biomesRoot = refs and refs.MapRoot and refs.MapRoot:FindFirstChild("Biomes")
+	if biomesRoot then
+		for _, descendant in ipairs(biomesRoot:GetDescendants()) do
+			if descendant:IsA("BasePart") and validRarityParts[descendant.Name] then
+				considerPart(descendant)
+			end
+		end
+	end
+
+	return bestPart
 end
 
 local function getBrrMesh()
@@ -722,6 +1123,7 @@ local function startInitialBeamToBrr()
 
 	beamActive = true
 	beamStage = "TO_BRR"
+	debugTutorial("STAGE", "Entered TO_BRR", 0)
 
 	setTutorial(1, "Follow the beam to Brr Brr Patapim and hold E to interact.")
 
@@ -737,6 +1139,7 @@ local function startPlotStandStep()
 
 	beamActive = true
 	beamStage = "PLOT_STAND"
+	debugTutorial("STAGE", "Entered PLOT_STAND", 0)
 
 	setTutorial(5, "Go to your Stand, equip the Brainrot you collected, and place it on the Stand.")
 end
@@ -773,32 +1176,96 @@ local function runBeamLoop(character)
 
 		if beamStage == "TO_BRR" then
 			setTargetPart(getBrrMesh())
+			debugTutorial("BEAM_TO_BRR", "target=" .. getInstancePath(getBrrMesh()), 1.5)
 			task.wait(0.2)
 		elseif beamStage == "BRAINROT" then
 			setTutorial(4, "Follow the beam to the nearest Brainrot and hold E to collect it.")
 
-			local model, nearestPrompt, targetPart = getNearestBrainrotTarget(character)
-			if not model or not targetPart then
-				hideBeam()
-				currentBrainrotModel = nil
-				currentBrainrotPrompt = nil
-				task.wait(0.2)
-			else
+			local model, nearestPrompt, targetPart, debugInfo = getNearestBrainrotTarget(character)
+
+			-- Keep aiming at whichever brainrot is currently closest and active.
+			if model and targetPart then
 				currentBrainrotModel = model
 				currentBrainrotPrompt = nearestPrompt or getModelPrompt(model)
 				setTargetPart(targetPart)
-				local prompt = popPrompt()
-				if prompt then
-					if
-						(currentBrainrotPrompt and prompt == currentBrainrotPrompt)
-						or (currentBrainrotModel and prompt:IsDescendantOf(currentBrainrotModel))
-					then
-						beamStage = "WAIT_FOR_FOLDER"
-						clearPromptQueue()
-					end
+				debugTutorial(
+					"STEP4_TARGET",
+					string.format(
+						"source=%s model=%s part=%s prompt=%s dist=%.2f",
+						tostring(debugInfo and debugInfo.source or "unknown"),
+						getInstancePath(model),
+						getInstancePath(targetPart),
+						getInstancePath(currentBrainrotPrompt),
+						tonumber(debugInfo and debugInfo.bestDist) or -1
+					),
+					0.4
+				)
+			elseif currentBrainrotModel and aliveInWorkspace(currentBrainrotModel) then
+				local fallbackPart = getModelTargetPart(currentBrainrotModel)
+				if fallbackPart then
+					setTargetPart(fallbackPart)
+					debugTutorial(
+						"STEP4_TARGET",
+						"using cached model target=" .. getInstancePath(fallbackPart),
+						0.4
+					)
+				else
+					hideBeam()
+					debugTutorial("STEP4_HIDE", "cached model had no valid part; hiding beam", 0.8)
 				end
-				task.wait(0.08)
+			else
+				currentBrainrotModel = nil
+				currentBrainrotPrompt = nil
+				local fallbackPart = getFallbackSpawnTargetPart(character)
+				if fallbackPart then
+					setTargetPart(fallbackPart)
+					debugTutorial(
+						"STEP4_FALLBACK",
+						"using spawn fallback part=" .. getInstancePath(fallbackPart),
+						0.7
+					)
+				else
+					hideBeam()
+					debugTutorial(
+						"STEP4_NOT_FOUND",
+						string.format(
+							"no brainrot target found (roots=%s prompts=%s models=%s parts=%s hovers=%s)",
+							tostring(debugInfo and debugInfo.roots or 0),
+							tostring(debugInfo and debugInfo.promptCandidates or 0),
+							tostring(debugInfo and debugInfo.modelCandidates or 0),
+							tostring(debugInfo and debugInfo.partCandidates or 0),
+							tostring(debugInfo and debugInfo.hoverCandidates or 0)
+						),
+						0.7
+					)
+				end
 			end
+
+			-- Advance only when collection is confirmed.
+			local prompt = popPrompt()
+			if prompt then
+				if
+					(currentBrainrotPrompt and prompt == currentBrainrotPrompt)
+					or (currentBrainrotModel and prompt:IsDescendantOf(currentBrainrotModel))
+				then
+					debugTutorial("STEP4_PROGRESS", "brainrot prompt triggered, advancing to stand step", 0)
+					clearPromptQueue()
+					startPlotStandStep()
+					task.wait(0.08)
+					continue
+				end
+			end
+
+			if hasCollectedBrainrotForTutorial() then
+				debugTutorial("STEP4_PROGRESS", "carried/inventory detected, advancing to stand step", 0)
+				clearPromptQueue()
+				startPlotStandStep()
+				task.wait(0.08)
+				continue
+			end
+			debugTutorial("STEP4_WAIT", "no collected brainrot detected yet", 1.2)
+
+			task.wait(0.08)
 		elseif beamStage == "WAIT_FOR_FOLDER" then
 			if inventoryHasAnyFolder() then
 				startPlotStandStep()
@@ -934,6 +1401,7 @@ local function startSpeedUpgradeTutorial()
 			setTutorial(4, "Follow the beam to the nearest Brainrot and hold E to collect it.")
 			beamActive = true
 			beamStage = "BRAINROT"
+			debugTutorial("STAGE", "Entered BRAINROT from Step 3 close", 0)
 
 			local character = player.Character
 			if character then

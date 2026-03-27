@@ -170,11 +170,9 @@ for index, gear in ipairs(gearList) do
 	setText(robuxText, "" .. shorten.roundNumber(robuxPrice))
 
 	local iconObj = clone:FindFirstChild("Icon")
-	if iconObj and iconObj:IsA("ImageLabel") then
-		iconObj.Image = icon
-	elseif iconObj and iconObj:IsA("ImageButton") then
-		iconObj.Image = icon
-	end
+		if iconObj and (iconObj:IsA("ImageLabel") or iconObj:IsA("ImageButton")) then
+			iconObj.Image = icon
+		end
 
 	local addSpeed = clone:FindFirstChild("AddSpeed")
 	if addSpeed then

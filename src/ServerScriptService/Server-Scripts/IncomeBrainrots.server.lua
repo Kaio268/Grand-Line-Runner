@@ -72,6 +72,7 @@ local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
 local BrainrotRegistry = require(Modules:WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Registry"))
 local BrainrotFolder = ReplicatedStorage:WaitForChild("BrainrotFolder")
+local dmGet
 
 local PlotSystem = workspace:WaitForChild("PlotSystem")
 local PlotsFolder = PlotSystem:WaitForChild("Plots")
@@ -449,7 +450,7 @@ local function getInventoryQuantity(player, itemName)
 	return q.Value
 end
 
-local function dmGet(player, path)
+dmGet = function(player, path)
 	if not DataManager then
 		return nil
 	end
@@ -893,13 +894,11 @@ local function resolveBrainrotRecord(player, brainrotName)
 			local canonicalName = BrainrotRegistry.MakeVariantId(baseName, finalVariant)
 			local storageName = rawName
 
-			if hasInventoryBrainrotEntry(player, candidateName) then
-				storageName = candidateName
-			elseif hasInventoryBrainrotEntry(player, canonicalName) then
-				storageName = canonicalName
-			elseif not hasInventoryBrainrotEntry(player, rawName) then
-				storageName = canonicalName
-			end
+				if hasInventoryBrainrotEntry(player, candidateName) then
+					storageName = candidateName
+				elseif hasInventoryBrainrotEntry(player, canonicalName) or not hasInventoryBrainrotEntry(player, rawName) then
+					storageName = canonicalName
+				end
 
 			return {
 				RawName = rawName,

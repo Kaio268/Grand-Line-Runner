@@ -646,7 +646,7 @@ local function tabButton(props)
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamSemibold,
+				Font = Enum.Font.GothamMedium,
 			Position = UDim2.fromOffset(16, 0),
 			Size = UDim2.new(1, -54, 1, 0),
 			Text = props.label or "",
@@ -1929,7 +1929,6 @@ local function shipUpgradeModal(props)
 	end
 
 	return e("ScreenGui", {
-		Name = "ReactShipUpgradeModal",
 		DisplayOrder = 500,
 		IgnoreGuiInset = true,
 		ResetOnSpawn = false,
@@ -2863,7 +2862,6 @@ local function App(props)
 
 	local appChildren = {
 		Main = e("ScreenGui", {
-			Name = "ReactInventoryUi",
 			DisplayOrder = 90,
 			IgnoreGuiInset = true,
 			ResetOnSpawn = false,
