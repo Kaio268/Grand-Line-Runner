@@ -77,7 +77,7 @@ end
 
 local function renderFallbackBackground()
 	return e("Frame", {
-		Name = "ReactHudMenuFallbackBackground",
+		Name = "ReactHudMenuBackgroundFallback",
 		BackgroundColor3 = Color3.fromRGB(22, 30, 44),
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
@@ -139,7 +139,7 @@ local function renderTitleBand(bandStyle)
 	local style = bandStyle or TITLE_BAND_STYLE
 
 	return e("Frame", {
-		Name = "ReactHudMenuTitleBand",
+		Name = "ReactHudTitleBand",
 		AnchorPoint = style.anchorPoint or TITLE_BAND_STYLE.anchorPoint,
 		BackgroundColor3 = Color3.fromRGB(7, 12, 20),
 		BackgroundTransparency = 0.18,
@@ -171,7 +171,7 @@ local function renderTitle(label, titleStyle)
 	local style = titleStyle or FALLBACK_TITLE_STYLE
 
 	return e("TextLabel", {
-		Name = "ReactHudMenuTitle",
+		Name = "ReactHudTitle",
 		AnchorPoint = style.anchorPoint or FALLBACK_TITLE_STYLE.anchorPoint,
 		BackgroundTransparency = style.backgroundTransparency or 1,
 		BorderSizePixel = 0,
@@ -225,6 +225,7 @@ local function HudMenuTile(props)
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
+		Visible = true,
 		Size = UDim2.fromScale(1, 1),
 		ZIndex = math.max((style.background and style.background.zIndex or 4), 4),
 	}, children), host)

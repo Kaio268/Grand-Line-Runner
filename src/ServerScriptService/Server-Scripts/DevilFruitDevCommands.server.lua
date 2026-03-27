@@ -27,9 +27,11 @@ local ADMIN_USER_IDS = {
 }
 
 local RECENT_COMMAND_WINDOW = 0.4
+local WIPE_CONFIRM_WINDOW = 20
 
 local adminSet = {}
 local recentCommands = {}
+local pendingWipeConfirmations = {}
 local fruitAliases = {}
 local chestTierAliases = {}
 local resourceAliases = {}
@@ -40,6 +42,10 @@ end
 
 local function normalizeText(text)
 	return tostring(text or ""):lower():match("^%s*(.-)%s*$") or ""
+end
+
+local function trimText(text)
+	return tostring(text or ""):match("^%s*(.-)%s*$") or ""
 end
 
 local function cloneValue(value)
@@ -53,6 +59,84 @@ local function cloneValue(value)
 	end
 
 	return cloned
+end
+
+local function splitWipeArguments(argumentText)
+	local trimmed = trimText(argumentText)
+	if trimmed == "" then
+		return "", false
+	end
+
+	local targetSpec, trailingToken = trimmed:match("^(.-)%s+(%S+)$")
+	if targetSpec and normalizeText(trailingToken) == "confirm" then
+		return trimText(targetSpec), true
+	end
+
+	return trimmed, false
+end
+
+local function resolveResetTarget(requestingPlayer, targetSpec)
+	local normalizedTarget = normalizeText(targetSpec)
+	if normalizedTarget == "" then
+		return nil, nil, nil, "missing_target"
+	end
+
+	if normalizedTarget == "me" or normalizedTarget == "self" then
+		return requestingPlayer.UserId, requestingPlayer.Name, requestingPlayer, nil
+	end
+
+	local numericUserId = tonumber(normalizedTarget)
+	if typeof(numericUserId) == "number" and numericUserId > 0 and numericUserId % 1 == 0 then
+		local onlinePlayer = Players:GetPlayerByUserId(numericUserId)
+		local resolvedLabel = onlinePlayer and onlinePlayer.Name or tostring(math.floor(numericUserId))
+		return math.floor(numericUserId), resolvedLabel, onlinePlayer, nil
+	end
+
+	local exactMatch = nil
+	local prefixMatch = nil
+	local ambiguousPrefix = false
+
+	for _, candidate in ipairs(Players:GetPlayers()) do
+		local candidateName = normalizeText(candidate.Name)
+		local candidateDisplayName = normalizeText(candidate.DisplayName)
+		if normalizedTarget == candidateName or normalizedTarget == candidateDisplayName then
+			exactMatch = candidate
+			break
+		end
+
+		local matchesPrefix = candidateName:sub(1, #normalizedTarget) == normalizedTarget
+			or candidateDisplayName:sub(1, #normalizedTarget) == normalizedTarget
+		if matchesPrefix then
+			if prefixMatch and prefixMatch ~= candidate then
+				ambiguousPrefix = true
+			else
+				prefixMatch = candidate
+			end
+		end
+	end
+
+	if exactMatch then
+		return exactMatch.UserId, exactMatch.Name, exactMatch, nil
+	end
+
+	if prefixMatch and ambiguousPrefix ~= true then
+		return prefixMatch.UserId, prefixMatch.Name, prefixMatch, nil
+	end
+
+	if ambiguousPrefix then
+		return nil, nil, nil, "ambiguous_target"
+	end
+
+	local ok, resolvedUserId = pcall(function()
+		return Players:GetUserIdFromNameAsync(targetSpec)
+	end)
+	if ok and typeof(resolvedUserId) == "number" and resolvedUserId > 0 then
+		local onlinePlayer = Players:GetPlayerByUserId(resolvedUserId)
+		local resolvedLabel = onlinePlayer and onlinePlayer.Name or trimText(targetSpec)
+		return resolvedUserId, resolvedLabel, onlinePlayer, nil
+	end
+
+	return nil, nil, nil, "target_not_found"
 end
 
 local function normalizeResourceAlias(text)
@@ -734,16 +818,10 @@ local function processClearCommand(player, argumentText)
 	setTemplatePath("IncomeBrainrots", ProfileTemplate.IncomeBrainrots)
 	setTemplatePath("StandsLevels", ProfileTemplate.StandsLevels)
 
-	local fruitCleared = DevilFruitService.SetEquippedFruit(player, "")
-	if fruitCleared ~= true then
+		DevilFruitService.SetEquippedFruit(player, "")
 		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
 			table.insert(failures, "set_DevilFruit")
 		end
-	else
-		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
-			table.insert(failures, "set_DevilFruit")
-		end
-	end
 
 	BrainrotInstanceService.SyncAvailableCounts(player)
 	BountyService.RefreshPlayerBounty(player)
@@ -768,6 +846,112 @@ local function processClearCommand(player, argumentText)
 	end
 
 	print(string.format("[DevFruitDevCommands] %s cleared inventory via /clear inv", player.Name))
+end
+
+local function processWipePlayerCommand(player, argumentText, commandName)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local targetSpec, wantsConfirm = splitWipeArguments(argumentText)
+	if targetSpec == "" then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /%s usage from %s. Use /%s <playerName|userId> and then /%s <playerName|userId> confirm",
+			tostring(commandName),
+			player.Name,
+			tostring(commandName),
+			tostring(commandName)
+		))
+		return
+	end
+
+	local targetUserId, targetLabel, targetPlayer, resolveReason = resolveResetTarget(player, targetSpec)
+	if targetUserId == nil then
+		if resolveReason == "ambiguous_target" then
+			warn(string.format(
+				"[DevFruitDevCommands] Ambiguous /%s target '%s' from %s. Use an exact player name or userId.",
+				tostring(commandName),
+				tostring(targetSpec),
+				player.Name
+			))
+			return
+		end
+
+		warn(string.format(
+			"[DevFruitDevCommands] Unknown /%s target '%s' from %s",
+			tostring(commandName),
+			tostring(targetSpec),
+			player.Name
+		))
+		return
+	end
+
+	local now = os.clock()
+	local existingConfirmation = pendingWipeConfirmations[player.UserId]
+	if existingConfirmation and now > existingConfirmation.expiresAt then
+		pendingWipeConfirmations[player.UserId] = nil
+		existingConfirmation = nil
+	end
+
+	if wantsConfirm ~= true then
+		pendingWipeConfirmations[player.UserId] = {
+			targetUserId = targetUserId,
+			targetLabel = targetLabel,
+			targetSpec = targetSpec,
+			expiresAt = now + WIPE_CONFIRM_WINDOW,
+		}
+
+		warn(string.format(
+			"[DevFruitDevCommands] Confirmation required. Re-run /%s %s confirm within %d seconds to permanently wipe %s (userId=%d).",
+			tostring(commandName),
+			tostring(targetSpec),
+			WIPE_CONFIRM_WINDOW,
+			tostring(targetLabel),
+			targetUserId
+		))
+		return
+	end
+
+	if existingConfirmation == nil or existingConfirmation.targetUserId ~= targetUserId then
+		warn(string.format(
+			"[DevFruitDevCommands] No matching pending wipe confirmation for %s. Run /%s %s first, then confirm.",
+			player.Name,
+			tostring(commandName),
+			tostring(targetSpec)
+		))
+		return
+	end
+
+	pendingWipeConfirmations[player.UserId] = nil
+
+	print(string.format(
+		"[DevFruitDevCommands] %s confirmed /%s for %s (userId=%d, online=%s)",
+		player.Name,
+		tostring(commandName),
+		tostring(targetLabel),
+		targetUserId,
+		tostring(targetPlayer ~= nil)
+	))
+
+	local success, reason = DataManager:HardResetData(targetUserId)
+	if success ~= true then
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /%s for %s (userId=%d, reason=%s)",
+			tostring(commandName),
+			tostring(targetLabel),
+			targetUserId,
+			tostring(reason)
+		))
+		return
+	end
+
+	print(string.format(
+		"[DevFruitDevCommands] %s wiped persistent profile data for %s (userId=%d, online=%s)",
+		player.Name,
+		tostring(targetLabel),
+		targetUserId,
+		tostring(targetPlayer ~= nil)
+	))
 end
 
 local function processSpawnCommand(player, argumentText)
@@ -956,7 +1140,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" and commandName ~= "wipeplayer" and commandName ~= "resetprogress" then
 		return
 	end
 
@@ -1001,6 +1185,11 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "clear" then
 		processClearCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "wipeplayer" or commandName == "resetprogress" then
+		processWipePlayerCommand(player, argumentText, commandName)
 		return
 	end
 
@@ -1295,6 +1484,37 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/clear " .. normalizedText) or "/clear"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local wipeCommand = commandsFolder:FindFirstChild("WipePlayerDevCommand")
+	if wipeCommand and not wipeCommand:IsA("TextChatCommand") then
+		wipeCommand:Destroy()
+		wipeCommand = nil
+	end
+
+	if not wipeCommand then
+		wipeCommand = Instance.new("TextChatCommand")
+		wipeCommand.Name = "WipePlayerDevCommand"
+		wipeCommand.PrimaryAlias = "/wipeplayer"
+		wipeCommand.SecondaryAlias = "/resetprogress"
+		wipeCommand.AutocompleteVisible = false
+		wipeCommand.Parent = commandsFolder
+	end
+
+	wipeCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 11) == "/wipeplayer" or normalizedText:sub(1, 14) == "/resetprogress" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/wipeplayer " .. normalizedText) or "/wipeplayer"
 		handleChatCommand(player, syntheticCommand)
 	end)
 end

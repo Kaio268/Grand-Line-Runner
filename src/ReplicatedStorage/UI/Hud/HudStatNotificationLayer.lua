@@ -78,7 +78,6 @@ local function HudStatNotificationLayer(props)
 	end
 
 	return ReactRoblox.createPortal(e("Frame", {
-		Name = "ReactHudStatNotificationsMount",
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,

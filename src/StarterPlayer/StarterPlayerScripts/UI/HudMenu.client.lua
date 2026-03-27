@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -15,29 +16,64 @@ local e = React.createElement
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactHudMenuRoot"
+rootContainer.Parent = playerGui
 
 local root = ReactRoblox.createRoot(rootContainer)
+local HUD_DEBUG = false
+
+local function hudLog(tag, ...)
+	if HUD_DEBUG then
+		print(tag, ...)
+	end
+end
+
+local function hudError(...)
+	warn("[HUD][ERROR]", ...)
+end
+
+local function safeName(instance)
+	if not instance then
+		return "nil"
+	end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+	return ok and fullName or tostring(instance)
+end
 
 local TILE_DEFS = {
 	{ name = "Store", label = "Store" },
 	{ name = "Index", label = "Index", badgeText = "0" },
-	{ name = "Gifts", label = "Gifts", badgeText = "0", timerText = "--" },
+	{ name = "Gifts", label = "Gifts", badgeText = "0", hasSummaryTimer = true },
 	{ name = "Settings", label = "Settings" },
 	{ name = "Rebirth", label = "Rebirth", badgeText = "NEW" },
 }
 
+local TILE_POSITIONS = {
+	Store = Vector2.new(0, 0),
+	Index = Vector2.new(90, 0),
+	Gifts = Vector2.new(0, 90),
+	Settings = Vector2.new(90, 90),
+	Rebirth = Vector2.new(0, 180),
+}
+
 local PROTECTED_CHILDREN = {
 	Not = true,
-	Timer = true,
+	GiftSummaryTimer = true,
 	ReactHudMenuTileRoot = true,
 }
 
+local HOVER_IDLE_SCALE = 1
+local HOVER_ACTIVE_SCALE = 0.95
+local HOVER_TWEEN = TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
 local destroyed = false
 local renderQueued = false
+local hoverBindings = {}
 
 local function isTextGuiObject(instance)
-	return instance
-		and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+	return instance and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
 end
 
 local function isReactNode(instance)
@@ -280,7 +316,10 @@ end
 local function ensureContainer(hud)
 	local lButtons = hud:FindFirstChild("LButtons")
 	if lButtons and lButtons:IsA("GuiObject") then
+		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
+		lButtons.Size = UDim2.fromOffset(188, 274)
+		lButtons.Position = UDim2.fromOffset(10, 250)
 		return lButtons
 	end
 
@@ -289,37 +328,100 @@ local function ensureContainer(hud)
 	created.BackgroundTransparency = 1
 	created.BorderSizePixel = 0
 	created.ClipsDescendants = false
-	created.Position = UDim2.fromOffset(18, 116)
-	created.Size = UDim2.fromOffset(96, 480)
+	created.Visible = true
+	created.Position = UDim2.fromOffset(10, 250)
+	created.Size = UDim2.fromOffset(188, 274)
 	created.Parent = hud
-
-	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 10)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = created
 
 	return created
 end
 
+local function clearHoverBinding(button)
+	local binding = hoverBindings[button]
+	if not binding then
+		return
+	end
+
+	for _, connection in ipairs(binding.connections) do
+		connection:Disconnect()
+	end
+
+	hoverBindings[button] = nil
+end
+
+local function ensureHoverScale(button)
+	if not button or not button:IsA("GuiButton") then
+		return
+	end
+
+	if hoverBindings[button] then
+		return
+	end
+
+	local scale = button:FindFirstChild("ReactHudHoverScale")
+	if not scale or not scale:IsA("UIScale") then
+		scale = Instance.new("UIScale")
+		scale.Name = "ReactHudHoverScale"
+		scale.Scale = HOVER_IDLE_SCALE
+		scale.Parent = button
+	end
+
+	local activeTween = nil
+	local function tweenTo(targetScale)
+		if activeTween then
+			activeTween:Cancel()
+		end
+
+		activeTween = TweenService:Create(scale, HOVER_TWEEN, {
+			Scale = targetScale,
+		})
+		activeTween:Play()
+	end
+
+	hoverBindings[button] = {
+		connections = {
+			button.MouseEnter:Connect(function()
+				tweenTo(HOVER_ACTIVE_SCALE)
+			end),
+			button.MouseLeave:Connect(function()
+				tweenTo(HOVER_IDLE_SCALE)
+			end),
+			button.Destroying:Connect(function()
+				clearHoverBinding(button)
+			end),
+		},
+	}
+end
+
 local function ensureShell(container, definition, index)
+	local mappedPosition = TILE_POSITIONS[definition.name]
 	local existing = container:FindFirstChild(definition.name)
 	if existing and existing:IsA("GuiButton") then
+		existing.Visible = true
+		existing.Active = true
 		existing.ClipsDescendants = false
+		existing.Size = UDim2.fromOffset(84, 84)
+		existing.LayoutOrder = index
+		if mappedPosition then
+			existing.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
+		end
 		return existing
 	end
 
 	local button = Instance.new("ImageButton")
 	button.Name = definition.name
 	button.AutoButtonColor = false
+	button.Active = true
 	button.BackgroundTransparency = 1
 	button.BorderSizePixel = 0
 	button.ClipsDescendants = false
 	button.ImageTransparency = 1
+	button.Visible = true
 	button.LayoutOrder = index
 	button.Size = UDim2.fromOffset(84, 84)
-
-	local hasLayout = container:FindFirstChildOfClass("UIListLayout") ~= nil
-	if not hasLayout then
+	if mappedPosition then
+		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
+	else
 		button.Position = UDim2.fromOffset(0, (index - 1) * 94)
 	end
 
@@ -435,9 +537,7 @@ local function ensureBadge(button, defaultText)
 	for _, descendant in ipairs(badge:GetDescendants()) do
 		if descendant:IsA("GuiObject") then
 			descendant.ZIndex = math.max(descendant.ZIndex, badge.ZIndex + 1, 33)
-		elseif descendant:IsA("UIStroke") then
-			descendant.Enabled = true
-		elseif descendant:IsA("UIGradient") then
+		elseif descendant:IsA("UIStroke") or descendant:IsA("UIGradient") then
 			descendant.Enabled = true
 		end
 	end
@@ -455,13 +555,15 @@ local function ensureTimer(button, defaultText)
 		timer.BackgroundTransparency = 0.08
 		timer.BorderSizePixel = 0
 		timer.Font = Enum.Font.GothamBold
-		timer.Position = UDim2.new(0.5, 0, 0, 6)
-		timer.Size = UDim2.new(1, -10, 0, 20)
+		timer.Position = UDim2.new(0.12, 0, 0, 0.1)
+		timer.Size = UDim2.new(1, -20, 0, 18)
 		timer.Text = tostring(defaultText or "--")
 		timer.TextColor3 = Color3.fromRGB(255, 245, 224)
 		timer.TextScaled = true
 		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
 		timer.TextStrokeTransparency = 0.08
+		timer.TextXAlignment = Enum.TextXAlignment.Center
+		timer.TextYAlignment = Enum.TextYAlignment.Center
 		timer.ZIndex = math.max(button.ZIndex + 9, 11)
 		timer.Parent = button
 
@@ -489,8 +591,12 @@ local function ensureTimer(button, defaultText)
 
 	if isTextGuiObject(timer) then
 		timer.BackgroundTransparency = 0.08
+		timer.Position = UDim2.new(0.12, 0, 0, 0.1)
+		timer.Size = UDim2.new(1, -20, 0, 18)
 		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
 		timer.TextStrokeTransparency = 0.08
+		timer.TextXAlignment = Enum.TextXAlignment.Center
+		timer.TextYAlignment = Enum.TextYAlignment.Center
 		timer.ZIndex = math.max(timer.ZIndex, button.ZIndex + 9, 11)
 	end
 
@@ -517,9 +623,102 @@ local function ensureTimer(button, defaultText)
 		timer2.TextStrokeColor3 = timer.TextStrokeColor3
 		timer2.TextStrokeTransparency = timer.TextStrokeTransparency
 		timer2.ZIndex = math.max(timer2.ZIndex, timer.ZIndex + 1, 12)
+		timer2.Visible = false
 	end
 
 	return timer
+end
+
+local function removeSidebarTimers(button, context, keepGiftSummary)
+	local timers = {}
+	for _, descendant in ipairs(button:GetDescendants()) do
+		if descendant:IsA("GuiObject")
+			and (descendant.Name == "Timer"
+				or descendant.Name == "Timer2"
+				or (descendant.Name == "GiftSummaryTimer" and keepGiftSummary ~= true))
+		then
+			table.insert(timers, descendant)
+		end
+	end
+
+	if #timers == 0 then
+		hudLog("[HUD][TIMER]", string.format("context=%s button=%s timers=0", context, safeName(button)))
+		return
+	end
+
+	for _, timer in ipairs(timers) do
+		local timerPath = safeName(timer)
+		timer:Destroy()
+		hudLog(
+			"[HUD][TIMER]",
+			string.format("context=%s button=%s removed=%s", context, safeName(button), timerPath)
+		)
+	end
+end
+
+local function ensureGiftSummaryTimer(button)
+	local summary = button:FindFirstChild("GiftSummaryTimer")
+	if summary and not summary:IsA("TextLabel") then
+		summary:Destroy()
+		summary = nil
+	end
+
+	if not summary then
+		summary = Instance.new("TextLabel")
+		summary.Name = "GiftSummaryTimer"
+		summary.Parent = button
+	end
+
+	summary.Visible = true
+	summary.AnchorPoint = Vector2.new(0.5, 0)
+	summary.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
+	summary.BackgroundTransparency = 0.08
+	summary.BorderSizePixel = 0
+	summary.Font = Enum.Font.GothamBold
+	summary.Position = UDim2.new(0.5, 0, 0, 8)
+	summary.Size = UDim2.new(1, -20, 0, 18)
+	summary.Text = tostring(summary.Text ~= "" and summary.Text or "--")
+	summary.TextColor3 = Color3.fromRGB(255, 245, 224)
+	summary.TextScaled = true
+	summary.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
+	summary.TextStrokeTransparency = 0.08
+	summary.TextXAlignment = Enum.TextXAlignment.Center
+	summary.TextYAlignment = Enum.TextYAlignment.Center
+	summary.ZIndex = math.max(button.ZIndex + 9, 11)
+
+	local corner = summary:FindFirstChildOfClass("UICorner")
+	if not corner then
+		corner = Instance.new("UICorner")
+		corner.Parent = summary
+	end
+	corner.CornerRadius = UDim.new(0, 9)
+
+	local stroke = summary:FindFirstChildOfClass("UIStroke")
+	if not stroke then
+		stroke = Instance.new("UIStroke")
+		stroke.Parent = summary
+	end
+	stroke.Name = "ReactHudGiftSummaryTimerStroke"
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = Color3.fromRGB(255, 237, 203)
+	stroke.Transparency = 0.6
+	stroke.Thickness = 1
+
+	local gradient = summary:FindFirstChildOfClass("UIGradient")
+	if not gradient then
+		gradient = Instance.new("UIGradient")
+		gradient.Parent = summary
+	end
+	gradient.Name = "ReactHudGiftSummaryTimerGradient"
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(29, 39, 57)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 22)),
+	})
+	gradient.Rotation = 90
+
+	hudLog("[HUD][TIMER]", string.format("button=%s summaryTimer=%s", safeName(button), safeName(summary)))
+
+	return summary
 end
 
 local function ensureCompatibility(button, definition)
@@ -527,8 +726,9 @@ local function ensureCompatibility(button, definition)
 		ensureBadge(button, definition.badgeText)
 	end
 
-	if definition.timerText then
-		ensureTimer(button, definition.timerText)
+	removeSidebarTimers(button, definition.name, definition.hasSummaryTimer == true)
+	if definition.hasSummaryTimer == true then
+		ensureGiftSummaryTimer(button)
 	end
 end
 
@@ -550,6 +750,56 @@ local function hideLegacyVisuals(button)
 			elseif descendant:IsA("UIStroke") or descendant:IsA("UIGradient") then
 				descendant.Enabled = false
 			end
+		end
+	end
+end
+
+local function logVisualTree(button)
+	if HUD_DEBUG ~= true then
+		return
+	end
+
+	local visualRoot = button:FindFirstChild("ReactHudMenuTileRoot")
+	if not visualRoot or not visualRoot:IsA("GuiObject") then
+		hudError("Missing React sidebar visual root for", safeName(button))
+		return
+	end
+
+	hudLog(
+		"[HUD][VISUAL]",
+		string.format(
+			"button=%s root=%s visible=%s zIndex=%s",
+			safeName(button),
+			safeName(visualRoot),
+			tostring(visualRoot.Visible),
+			tostring(visualRoot.ZIndex)
+		)
+	)
+
+	for _, descendant in ipairs(visualRoot:GetDescendants()) do
+		if descendant:IsA("GuiObject") then
+			local imageTransparency = "n/a"
+			if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+				imageTransparency = tostring(descendant.ImageTransparency)
+			end
+
+			local textTransparency = "n/a"
+			if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+				textTransparency = tostring(descendant.TextTransparency)
+			end
+
+			hudLog(
+				"[HUD][VISUAL]",
+				string.format(
+					"node=%s visible=%s backgroundTransparency=%s imageTransparency=%s textTransparency=%s zIndex=%s",
+					safeName(descendant),
+					tostring(descendant.Visible),
+					tostring(descendant.BackgroundTransparency),
+					imageTransparency,
+					textTransparency,
+					tostring(descendant.ZIndex)
+				)
+			)
 		end
 	end
 end
@@ -618,14 +868,31 @@ end
 
 local function buildTiles()
 	local hud = playerGui:FindFirstChild("HUD") or playerGui:WaitForChild("HUD")
+	if hud:IsA("ScreenGui") then
+		hud.Enabled = true
+	end
 	local container = ensureContainer(hud)
 	local tiles = {}
 
+	hudLog("[HUD][BOOT]", "hud", hud:GetFullName(), "enabled", hud.Enabled, "sidebar", container:GetFullName())
+
 	for index, definition in ipairs(TILE_DEFS) do
 		local button = ensureShell(container, definition, index)
+		ensureHoverScale(button)
 		ensureCompatibility(button, definition)
 		local style = buildTileStyle(button)
 		hideLegacyVisuals(button)
+		hudLog(
+			"[HUD][VISIBILITY]",
+			string.format(
+				"button=%s visible=%s active=%s imageTransparency=%s backgroundTransparency=%s",
+				button:GetFullName(),
+				tostring(button.Visible),
+				tostring(button.Active),
+				tostring(button:IsA("ImageButton") and button.ImageTransparency or "n/a"),
+				tostring(button.BackgroundTransparency)
+			)
+		)
 
 		tiles[index] = {
 			name = definition.name,
@@ -636,6 +903,11 @@ local function buildTiles()
 	end
 
 	refreshOpenUiBindings()
+	task.defer(function()
+		for _, tile in ipairs(tiles) do
+			logVisualTree(tile.host)
+		end
+	end)
 
 	return tiles
 end
@@ -693,5 +965,8 @@ scheduleRender()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	for button in pairs(hoverBindings) do
+		clearHoverBinding(button)
+	end
 	root:unmount()
 end)

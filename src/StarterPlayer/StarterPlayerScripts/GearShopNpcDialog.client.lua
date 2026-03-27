@@ -19,7 +19,28 @@ local prompt = npc:WaitForChild("ProximityPrompt")
 local dialogObject = DialogModule.new("OpenFishingShop", npc, prompt)
 dialogObject:addDialog("Do You Want To Open Gears Store?", {"Yea", "Nope"})
 
-local open = require(player:WaitForChild("PlayerGui"):WaitForChild("OpenUI"):WaitForChild("Open_UI"))
+local function openFrame(frameName)
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not playerGui then
+		return
+	end
+
+	local openUi = playerGui:FindFirstChild("OpenUI")
+	local openModule = openUi and openUi:FindFirstChild("Open_UI")
+	if openModule then
+		local ok, controller = pcall(require, openModule)
+		if ok and controller and controller.OpenFrame then
+			controller:OpenFrame(frameName)
+			return
+		end
+	end
+
+	local frames = playerGui:FindFirstChild("Frames")
+	local frame = frames and frames:FindFirstChild(frameName)
+	if frame and frame:IsA("Frame") then
+		frame.Visible = true
+	end
+end
 
 prompt.Triggered:Connect(function(triggeringPlayer)
 	dialogObject:triggerDialog(triggeringPlayer or player, 1)
@@ -32,7 +53,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 
 	if responseNum == 1 then
 		dialogObject:hideGui("Okay!!")
-		open:OpenFrame("GearStore")
+		openFrame("GearStore")
 	elseif responseNum == 2 then
 		dialogObject:hideGui("Alr, bye!")
 	end

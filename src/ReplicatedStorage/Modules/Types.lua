@@ -16,6 +16,8 @@ export type DataManager = {
 	GetValue : (self: any, player: Player, path: string) -> (),
 	Leaderstats : (self: any, player: Player) -> (),
 	LoadBackup : (self: any, profile: {any}) -> (),
+	HardResetData : (self: any, userId: number, kickMessage: string?) -> (boolean, string?),
+	IsHardResetPending : (self: any, userId: number) -> boolean,
 	MessageAsync : (self: any, userId: number, message: {any?}) -> boolean,
 	PromptProductPurchase : (self: any, player: Player, productId: number) -> (),
 	ResetData : (self: any, userId: number) -> boolean,

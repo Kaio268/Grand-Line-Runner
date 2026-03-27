@@ -49,7 +49,6 @@ local function HudStatRow(props)
 	end
 
 	return ReactRoblox.createPortal(e("Frame", {
-		Name = "ReactHudCountersStack",
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
@@ -63,7 +62,6 @@ local function HudStatRow(props)
 			PaddingRight = UDim.new(0, panelPadding.Right),
 		}),
 		Rows = e("Frame", {
-			Name = "ReactHudStatsRows",
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
