@@ -2,6 +2,11 @@ local DevilFruits = {
 	None = "",
 	GripDefaults = {
 		RuntimeGrip = CFrame.new(0, -0.08, -0.95),
+		Models = {
+			R6G = {
+				RuntimeGrip = CFrame.new(),
+			},
+		},
 		Contexts = {
 			Eat = {
 				RuntimeGrip = CFrame.new(0.12, 0.42, -0.58),
@@ -134,6 +139,9 @@ local DevilFruits = {
 			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
 			GripProfiles = {
 				Models = {
+					R6G = {
+						RuntimeGrip = CFrame.new(),
+					},
 					ModelSwap = {
 						RuntimeGrip = CFrame.new(),
 					},
@@ -146,6 +154,12 @@ local DevilFruits = {
 					Cooldown = 8,
 					LaunchDistance = 20,
 					LaunchDuration = 0.35,
+					Animation = {
+						AssetName = "Rocket",
+						FadeTime = 0.04,
+						StopFadeTime = 0.08,
+						PlaybackSpeed = 1,
+					},
 					RequestPayloadSchema = {
 						MaxKeys = 2,
 						MaxHintDistance = 600,

@@ -81,6 +81,108 @@ if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
 end
 
+local function swaptoR6G(player, newModelName)
+	local character = player.Character or player.CharacterAdded:Wait()
+	-- Wait a frame to ensure the character is fully in the workspace
+	task.wait()
+
+	-- NEW CHECK: Only skip if the character is ALREADY using the requested model.
+	-- This allows swapping from "R6" to "R6G" (Mera to Gomu).
+	if character:GetAttribute("CurrentModelAsset") == newModelName then
+		return
+	end
+
+	local modelTemplate = ReplicatedStorage.Assets.CharacterModels:FindFirstChild(newModelName)
+	if not modelTemplate then
+		warn("[DevilFruitService] Could not find model template: " .. newModelName)
+		return
+	end
+
+	-- 1. SETUP THE NEW RIG
+	local originalCFrame = character:GetPivot()
+	-- Add extra studs to the Y-axis (Up) to prevent clipping under the map
+	local safeCFrame = originalCFrame + Vector3.new(0, 5, 0)
+
+	local newCharacter = modelTemplate:Clone()
+	newCharacter.Name = player.Name
+
+	-- Track the specific model asset so we can swap between different custom models later
+	newCharacter:SetAttribute("CurrentModelAsset", newModelName)
+	newCharacter:SetAttribute("EatAnimationRig", newModelName)
+	newCharacter:SetAttribute("FruitModelVariant", newModelName)
+	newCharacter:SetAttribute("IsModifiedR15", true)
+
+	local newHumanoid = newCharacter:FindFirstChildOfClass("Humanoid")
+	if not newHumanoid then
+		newCharacter:Destroy()
+		return
+	end
+
+	-- 2. APPLY APPEARANCE
+	local success, playerDescription = pcall(function()
+		return Players:GetHumanoidDescriptionFromUserId(player.UserId)
+	end)
+
+	if success and playerDescription then
+		playerDescription.HeadScale, playerDescription.HeightScale = 1, 1
+		playerDescription.WidthScale, playerDescription.DepthScale = 1, 1
+
+		local templateDescription = newHumanoid:GetAppliedDescription()
+		playerDescription.LeftArm = templateDescription.LeftArm
+		playerDescription.RightArm = templateDescription.RightArm
+		playerDescription.LeftLeg = templateDescription.LeftLeg
+		playerDescription.RightLeg = templateDescription.RightLeg
+		playerDescription.Torso = templateDescription.Torso
+
+		pcall(function()
+			newHumanoid:ApplyDescription(playerDescription)
+		end)
+	end
+
+	if newHumanoid and newModelName == "R6G" then
+		-- Ensure the Humanoid recognizes the rig as R15 (since R6G is a modified R15)
+		newHumanoid.HipHeight = 2
+		newHumanoid.RigType = Enum.HumanoidRigType.R15
+	end
+
+	if newHumanoid then
+		newHumanoid:SetAttribute("EatAnimationRig", newModelName)
+		newHumanoid:SetAttribute("FruitModelVariant", newModelName)
+	end
+
+	player:SetAttribute("EatAnimationRig", newModelName)
+	player:SetAttribute("FruitModelVariant", newModelName)
+
+	-- 3. PERFORM THE SWAP
+	player.Character = newCharacter
+	newCharacter:PivotTo(safeCFrame)
+	newCharacter.Parent = workspace
+
+	character:Destroy()
+end
+
+local function getDesiredCharacterModelAsset(fruitName)
+	if fruitName == "Gomu Gomu no Mi" then
+		return "R6G"
+	end
+
+	return "R6"
+end
+
+local function applyFruitCharacterModel(player, fruitName)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local desiredModelAsset = getDesiredCharacterModelAsset(fruitName)
+	if character:GetAttribute("CurrentModelAsset") == desiredModelAsset then
+		return
+	end
+
+	swaptoR6G(player, desiredModelAsset)
+end
+
 local function debugPrint(...)
 	print("[DevilFruitService]", ...)
 end
@@ -301,11 +403,22 @@ local function hydrateFruitFromData(player)
 			end
 
 			applyEquippedFruitValue(player, pendingFruit)
+
+			if player.Character then
+				applyFruitCharacterModel(player, pendingFruit)
+			end
+
 			hydrationTaskByPlayer[player] = nil
 			return
 		end
 
-		applyEquippedFruitValue(player, loadEquippedFruitFromData(player))
+		local hydratedFruit = loadEquippedFruitFromData(player)
+		applyEquippedFruitValue(player, hydratedFruit)
+
+		if player.Character then
+			applyFruitCharacterModel(player, hydratedFruit)
+		end
+
 		hydrationTaskByPlayer[player] = nil
 	end)
 end
@@ -447,6 +560,7 @@ local function hookPlayer(player)
 		if player:GetAttribute(COOLDOWN_BYPASS_ATTRIBUTE) == nil then
 			player:SetAttribute(COOLDOWN_BYPASS_ATTRIBUTE, false)
 		end
+		applyFruitCharacterModel(player, DevilFruitConfig.None)
 		hookFruitValue(player)
 		hydrateFruitFromData(player)
 
@@ -455,6 +569,17 @@ local function hookPlayer(player)
 				hookFruitValue(player)
 				syncFruitAttribute(player, getPlayerFruitValue(player).Value)
 			end
+		end)
+
+		player.CharacterAdded:Connect(function(character)
+			task.defer(function()
+				if player.Character ~= character then
+					return
+				end
+
+				local equippedFruit = getEquippedFruit(player)
+				applyFruitCharacterModel(player, equippedFruit)
+			end)
 		end)
 	end)
 end
@@ -653,6 +778,11 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	if resolvedFruitName ~= DevilFruitConfig.None then
 		IndexCollectionService.MarkDevilFruitDiscovered(player, resolvedFruitName)
 		TitleService.UnlockTitle(player, "EnemyOfTheSea")
+	end
+
+	-- ADDED THIS LINE: Apply the model swap immediately upon equipping
+	if player.Character then
+		applyFruitCharacterModel(player, resolvedFruitName)
 	end
 
 	debugPrint("SetEquippedFruit STEP 5 - Queueing persistence through DataManager")

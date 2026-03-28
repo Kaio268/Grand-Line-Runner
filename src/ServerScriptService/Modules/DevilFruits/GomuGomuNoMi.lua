@@ -1,6 +1,8 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
+local GomuAnimationController = require(script.Parent:WaitForChild("GomuAnimationController"))
+
 local GomuGomuNoMi = {}
 
 local WALL_PADDING = 1.5
@@ -122,6 +124,8 @@ function GomuGomuNoMi.RubberLaunch(context)
 	local humanoid = context.Humanoid
 	local rootPart = context.RootPart
 	local abilityConfig = context.AbilityConfig
+	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
+	local animationState = GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
 
 	local maxDistance = math.max(0, tonumber(abilityConfig.LaunchDistance) or 20)
 	local direction, targetPosition, targetPlayer = getLaunchDirectionAndTarget(context, maxDistance)
@@ -132,6 +136,10 @@ function GomuGomuNoMi.RubberLaunch(context)
 	local launchOwner = context.Player
 
 	if launchDistance <= 0.05 then
+		if animationState then
+			GomuAnimationController.StopAnimation(animationState, "blocked_at_start")
+		end
+
 		return {
 			Direction = direction,
 			Distance = 0,
@@ -165,6 +173,12 @@ function GomuGomuNoMi.RubberLaunch(context)
 			end
 		end)
 	end)
+
+	if animationState then
+		task.delay(launchDuration, function()
+			GomuAnimationController.StopAnimation(animationState, "launch_complete")
+		end)
+	end
 
 	return {
 		Direction = direction,

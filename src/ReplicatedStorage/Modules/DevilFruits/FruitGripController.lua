@@ -120,6 +120,11 @@ local function resolveModelVariantFromInstance(instance, fruitKey)
 		end
 	end
 
+	local currentModelAsset = normalizeModelVariant(instance:GetAttribute("CurrentModelAsset"))
+	if currentModelAsset then
+		return currentModelAsset, "CurrentModelAsset"
+	end
+
 	return nil
 end
 
@@ -204,6 +209,13 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 		mergeProfile(profile, globalGripDefaults, "global_default")
 	end
 
+	local globalModelProfile = modelVariant and globalGripDefaults and type(globalGripDefaults.Models) == "table"
+		and globalGripDefaults.Models[modelVariant]
+		or nil
+	if globalModelProfile then
+		mergeProfile(profile, globalModelProfile, "global_model:" .. tostring(modelVariant))
+	end
+
 	mergeProfile(profile, {
 		AssetGripBias = fruit.ToolGripBias,
 		AssetGripOffset = fruit.ToolGripOffset,
@@ -231,6 +243,10 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 		local contextProfile = contextName and type(gripProfiles.Contexts) == "table" and gripProfiles.Contexts[contextName] or nil
 		if contextProfile then
 			mergeProfile(profile, contextProfile, "context:" .. tostring(contextName))
+		end
+
+		if globalModelProfile and contextName and type(globalModelProfile.Contexts) == "table" then
+			mergeProfile(profile, globalModelProfile.Contexts[contextName], "global_model_context:" .. tostring(modelVariant) .. ":" .. tostring(contextName))
 		end
 
 		if modelProfile and contextName and type(modelProfile.Contexts) == "table" then

@@ -19,6 +19,8 @@ local PREVIOUS_FIRE_BURST_RADIUS = 50
 local DEFAULT_FIRE_BURST_DISPERSE_BUFFER = 0.15
 local DEFAULT_FIRE_BURST_DISPERSE_MIN_LIFETIME = 0.35
 local DEFAULT_FIRE_BURST_FADE_TIME = 0.22
+local DEFAULT_FLAME_DASH_STAGE_LIFETIME = 0.4
+local FLAME_DASH_EFFECT_NAME = "Flame Dash"
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -662,6 +664,48 @@ function MeraVfx.PlayFireBurst(options)
 	end
 
 	return state
+end
+
+function MeraVfx.PlayFlameDashEffect(options)
+	options = options or {}
+
+	local stageName = options.StageName or options.FolderName
+	if typeof(stageName) ~= "string" or stageName == "" then
+		logWarn("missing VFX folder/model/attachment/emitter move=FlameDash path=%s detail=invalid_stage", buildPathLabel(FLAME_DASH_EFFECT_NAME))
+		return nil
+	end
+
+	local rootPart = options.RootPart
+	local direction = options.Direction
+	if not direction and rootPart and rootPart.Parent then
+		direction = rootPart.CFrame.LookVector
+	end
+
+	return playEffect("FlameDash", FLAME_DASH_EFFECT_NAME, stageName, {
+		RootPart = rootPart,
+		Direction = direction,
+		LocalOffset = options.LocalOffset,
+		Lifetime = math.max(0.1, tonumber(options.Lifetime) or DEFAULT_FLAME_DASH_STAGE_LIFETIME),
+		DefaultEmitCount = tonumber(options.DefaultEmitCount),
+		Scale = tonumber(options.Scale),
+		FollowDuration = math.max(0, tonumber(options.FollowDuration) or 0),
+		AutoCleanup = options.AutoCleanup ~= false,
+	})
+end
+
+function MeraVfx.PlayFlameDashBurst(options)
+	options = options or {}
+	return MeraVfx.PlayFlameDashEffect({
+		StageName = options.StageName or options.FolderName,
+		RootPart = options.RootPart,
+		Direction = options.Direction,
+		LocalOffset = options.LocalOffset,
+		Lifetime = options.Lifetime,
+		DefaultEmitCount = options.DefaultEmitCount,
+		Scale = options.Scale,
+		FollowDuration = options.FollowDuration,
+		AutoCleanup = options.AutoCleanup,
+	})
 end
 
 return MeraVfx

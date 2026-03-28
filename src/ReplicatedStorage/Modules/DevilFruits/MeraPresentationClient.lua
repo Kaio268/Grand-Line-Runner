@@ -17,6 +17,13 @@ local WARN_COOLDOWN = 3
 local DEFAULT_FADE_TIME = 0.05
 local DEFAULT_STOP_FADE_TIME = 0.08
 local PREVIOUS_FIRE_BURST_RADIUS = 50
+local FLAME_DASH_LOOP_INTERVAL = 0.05
+local FLAME_DASH_STAGE_LIFETIME = 0.4
+local FLAME_DASH_MARKER_START = "Start"
+local FLAME_DASH_MARKER_END = "End"
+local FLAME_DASH_MARKER_TRAIL = "Trail"
+local FLAME_DASH_MARKER_TRAIL_END = "TrailEnd"
+local FLAME_DASH_START_FALLBACK_DELAY = 0.03
 
 local function logMove(message, ...)
 	if not DEBUG_INFO then
@@ -155,6 +162,7 @@ function MeraPresentationClient.new(config)
 	local self = setmetatable({}, MeraPresentationClient)
 	self.player = config and config.player or Players.LocalPlayer
 	self.activeTracksByPlayer = setmetatable({}, { __mode = "k" })
+	self.activeFlameDashVfxByPlayer = setmetatable({}, { __mode = "k" })
 	return self
 end
 
@@ -179,10 +187,191 @@ function MeraPresentationClient:GetTrackBucket(targetPlayer)
 	return bucket
 end
 
-function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAssetName)
+function MeraPresentationClient:StopFlameDashVfx(targetPlayer)
+	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	if not state then
+		return false
+	end
+
+	self.activeFlameDashVfxByPlayer[targetPlayer] = nil
+
+	if typeof(state.FlameConnection) == "RBXScriptConnection" then
+		state.FlameConnection:Disconnect()
+	end
+
+	if typeof(state.DashConnection) == "RBXScriptConnection" then
+		state.DashConnection:Disconnect()
+	end
+
+	if typeof(state.StoppedConnection) == "RBXScriptConnection" then
+		state.StoppedConnection:Disconnect()
+	end
+
+	if type(state.MarkerConnections) == "table" then
+		for _, connection in ipairs(state.MarkerConnections) do
+			connection:Disconnect()
+		end
+	end
+
+	return true
+end
+
+function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, track)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	local character = targetPlayer and targetPlayer.Character
+	if not rootPart or not character then
+		return false
+	end
+
+	self:StopFlameDashVfx(targetPlayer)
+
+	local startPosition = typeof(payload) == "table" and payload.StartPosition or nil
+	if typeof(startPosition) ~= "Vector3" then
+		startPosition = rootPart.Position
+	end
+
+	local state = {
+		StartPosition = startPosition,
+		MarkerHits = {},
+	}
+	self.activeFlameDashVfxByPlayer[targetPlayer] = state
+
+	local function startLoop(callback)
+		local accumulator = 0
+		return RunService.Heartbeat:Connect(function(dt)
+			if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
+				return
+			end
+
+			if not rootPart.Parent or not character.Parent then
+				return
+			end
+
+			accumulator += dt
+			if accumulator < FLAME_DASH_LOOP_INTERVAL then
+				return
+			end
+
+			accumulator = 0
+			callback()
+		end)
+	end
+
+	local function emitStage(stageName)
+		MeraVfx.PlayFlameDashEffect({
+			StageName = stageName,
+			RootPart = rootPart,
+			Direction = rootPart.CFrame.LookVector,
+			Lifetime = FLAME_DASH_STAGE_LIFETIME,
+			FollowDuration = FLAME_DASH_LOOP_INTERVAL,
+		})
+	end
+
+	local function stopLoop(connectionName)
+		local connection = state[connectionName]
+		if typeof(connection) == "RBXScriptConnection" then
+			connection:Disconnect()
+		end
+		state[connectionName] = nil
+	end
+
+	local function startStageLoop(connectionName, stageName)
+		stopLoop(connectionName)
+		emitStage(stageName)
+		state[connectionName] = startLoop(function()
+			emitStage(stageName)
+		end)
+	end
+
+	local function bindMarker(markerName, callback)
+		if typeof(track) ~= "Instance" or not track:IsA("AnimationTrack") then
+			return
+		end
+
+		local ok, connection = pcall(function()
+			return track:GetMarkerReachedSignal(markerName):Connect(function()
+				if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
+					return
+				end
+
+				state.MarkerHits[markerName] = true
+				callback()
+			end)
+		end)
+		if ok and connection then
+			state.MarkerConnections = state.MarkerConnections or {}
+			table.insert(state.MarkerConnections, connection)
+		else
+			logAnimWarn(
+				"animation missing or failed to load move=FlameDash detail=marker_connect_failed:%s marker=%s",
+				tostring(connection),
+				tostring(markerName)
+			)
+		end
+	end
+
+	bindMarker(FLAME_DASH_MARKER_START, function()
+		startStageLoop("FlameConnection", "Flame")
+	end)
+
+	bindMarker(FLAME_DASH_MARKER_END, function()
+		stopLoop("FlameConnection")
+	end)
+
+	bindMarker(FLAME_DASH_MARKER_TRAIL, function()
+		startStageLoop("DashConnection", "Dash")
+	end)
+
+	bindMarker(FLAME_DASH_MARKER_TRAIL_END, function()
+		stopLoop("DashConnection")
+		emitStage("Trail")
+	end)
+
+	if typeof(track) == "Instance" and track:IsA("AnimationTrack") then
+		task.delay(FLAME_DASH_START_FALLBACK_DELAY, function()
+			if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
+				return
+			end
+
+			if state.MarkerHits[FLAME_DASH_MARKER_START] then
+				return
+			end
+
+			startStageLoop("FlameConnection", "Flame")
+		end)
+
+		state.StoppedConnection = track.Stopped:Connect(function()
+			if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
+				return
+			end
+
+			if state.DashConnection and not state.MarkerHits[FLAME_DASH_MARKER_TRAIL_END] then
+				stopLoop("DashConnection")
+				emitStage("Trail")
+			elseif state.FlameConnection and not state.MarkerHits[FLAME_DASH_MARKER_END] then
+				stopLoop("FlameConnection")
+				emitStage("Trail")
+			end
+
+			self:StopFlameDashVfx(targetPlayer)
+		end)
+	else
+		startStageLoop("FlameConnection", "Flame")
+	end
+
+	return true
+end
+
+function MeraPresentationClient:EmitFlameDashTrail(targetPlayer, finalPosition, direction)
+	return true
+end
+
+function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAssetName, options)
 	if not targetPlayer or not targetPlayer:IsA("Player") then
 		return nil
 	end
+
+	options = type(options) == "table" and options or {}
 
 	local animationConfig = self:GetAnimationConfig(moveName)
 	local assetName = (animationConfig and animationConfig.AssetName) or defaultAssetName
@@ -218,9 +407,12 @@ function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAss
 
 	local fadeTime = math.max(0, tonumber(animationConfig and animationConfig.FadeTime) or DEFAULT_FADE_TIME)
 	local playbackSpeed = tonumber(animationConfig and animationConfig.PlaybackSpeed) or 1
+
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = animationConfig and animationConfig.Looped == true or false
-	track:Play(fadeTime, 1, playbackSpeed)
+	if options.DeferPlay ~= true then
+		track:Play(fadeTime, 1, playbackSpeed)
+	end
 	track.Stopped:Connect(function()
 		if bucket[moveName] == track then
 			bucket[moveName] = nil
@@ -236,7 +428,18 @@ function MeraPresentationClient:PlayFlameDashStartup(targetPlayer, _payload, _is
 		return false
 	end
 
-	self:PlayAnimation(targetPlayer, "FlameDash", "FlameDash")
+	local animationConfig = self:GetAnimationConfig("FlameDash")
+	local track = self:PlayAnimation(targetPlayer, "FlameDash", "FlameDash", {
+		DeferPlay = true,
+	})
+	self:StartFlameDashVfx(targetPlayer, _payload or {}, track)
+
+	if typeof(track) == "Instance" and track:IsA("AnimationTrack") then
+		local fadeTime = math.max(0, tonumber(animationConfig and animationConfig.FadeTime) or DEFAULT_FADE_TIME)
+		local playbackSpeed = tonumber(animationConfig and animationConfig.PlaybackSpeed) or 1
+		track:Play(fadeTime, 1, playbackSpeed)
+	end
+
 	return true
 end
 
@@ -245,11 +448,12 @@ function MeraPresentationClient:PlayFlameDashComplete(_targetPlayer, _payload)
 end
 
 function MeraPresentationClient:MarkFlameDashTrailPredictedComplete(_targetPlayer, _reason, _finalPosition, _direction)
-	return false
+	return true
 end
 
 function MeraPresentationClient:StopFlameDashTrail(_targetPlayer, _reason, _finalPosition, _direction)
-	return false
+	self:StopFlameDashVfx(_targetPlayer)
+	return true
 end
 
 function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
@@ -293,6 +497,8 @@ function MeraPresentationClient:HandleCharacterRemoving(targetPlayer)
 		clearTrackBucket(bucket)
 		self.activeTracksByPlayer[player] = nil
 	end
+
+	self:StopFlameDashVfx(player)
 end
 
 function MeraPresentationClient:HandlePlayerRemoving(leavingPlayer)

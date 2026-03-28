@@ -22,6 +22,8 @@ local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.35
 local WARN_COOLDOWN = 3
 local ANIMATE_WARN_COOLDOWN = 4
+local MIN_VISIBLE_PLAY_TIME = 0.85
+local POST_PLAY_BUFFER = 0.1
 local OWN_DIAGNOSTIC_PREFIXES = {
 	"[ANIMATE][WARN]",
 	"[ANIMATE]",
@@ -248,6 +250,19 @@ local function normalizeRigFolderName(value)
 	return nil
 end
 
+local function detectRigFromModelAsset(target)
+	if not target then
+		return nil
+	end
+
+	local currentModelAsset = normalizeRigFolderName(target:GetAttribute("CurrentModelAsset"))
+	if currentModelAsset then
+		return currentModelAsset
+	end
+
+	return nil
+end
+
 local function detectRigFolderName(player, character, humanoid)
 	local attributeTargets = { character, humanoid, player }
 	for _, target in ipairs(attributeTargets) do
@@ -258,6 +273,12 @@ local function detectRigFolderName(player, character, humanoid)
 					logInfo("rig detected: %s source=%s", normalized, attributeName)
 					return normalized
 				end
+			end
+
+			local modelAssetRig = detectRigFromModelAsset(target)
+			if modelAssetRig then
+				logInfo("rig detected: %s source=CurrentModelAsset", modelAssetRig)
+				return modelAssetRig
 			end
 		end
 	end
@@ -468,6 +489,15 @@ function EatAnimationClient.Play(player, fruitKey)
 	local timeoutAt = os.clock() + math.max(0.75, (tonumber(track.Length) or 0) + 0.35)
 	while not completed and os.clock() < timeoutAt do
 		task.wait()
+	end
+
+	local visiblePlayDeadline = activePlaybackInfo.StartedAt + MIN_VISIBLE_PLAY_TIME
+	while os.clock() < visiblePlayDeadline do
+		task.wait()
+	end
+
+	if playConfirmed and POST_PLAY_BUFFER > 0 then
+		task.wait(POST_PLAY_BUFFER)
 	end
 
 	if connection then
