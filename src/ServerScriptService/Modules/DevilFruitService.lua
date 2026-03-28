@@ -10,8 +10,6 @@ local STATE_REMOTE_NAME = "DevilFruitAbilityState"
 local EFFECT_REMOTE_NAME = "DevilFruitAbilityEffect"
 local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
 local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
-local MERA_FRUIT_NAME = "Mera Mera no Mi"
-local MERA_FLAME_DASH_ABILITY = "FlameDash"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
 local HYDRATION_READY_TIMEOUT = 30
@@ -21,7 +19,6 @@ local cooldownsByPlayer = {}
 local pendingPersistByPlayer = {}
 local persistTaskByPlayer = {}
 local hydrationTaskByPlayer = {}
-local fruitHandlerCache = {}
 local started = false
 local getEquippedFruit
 local clearFruitRuntimeState
@@ -62,14 +59,23 @@ end
 local RemoteBundle = getRemoteBundle()
 local ModulesFolder = script.Parent
 local FruitHandlersFolder = ModulesFolder:FindFirstChild("DevilFruits") or ModulesFolder:WaitForChild("DevilFruits")
+local ServerArchitectureFolder = FruitHandlersFolder:WaitForChild("Server")
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local Registry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Registry"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local DevilFruitRequestGuard = require(ModulesFolder:WaitForChild("DevilFruitRequestGuard"))
+local FruitModuleLoader = require(ServerArchitectureFolder:WaitForChild("FruitModuleLoader"))
+local DevilFruitSecurity = require(ServerArchitectureFolder:WaitForChild("DevilFruitSecurity"))
+local DevilFruitReplication = require(ServerArchitectureFolder:WaitForChild("DevilFruitReplication"))
+local DevilFruitValidation = require(ServerArchitectureFolder:WaitForChild("DevilFruitValidation"))
+local DevilFruitAbilityRunner = require(ServerArchitectureFolder:WaitForChild("DevilFruitAbilityRunner"))
 local syncFruitAttribute
+local serverFruitModuleLoader = FruitModuleLoader.new()
+local replication = DevilFruitReplication.new(RemoteBundle)
 
 if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
@@ -89,7 +95,7 @@ local function isMeraDashDebugEnabled(player)
 end
 
 local function shouldLogMeraDashAttempt(fruitName, abilityName)
-	return abilityName == MERA_FLAME_DASH_ABILITY or fruitName == MERA_FRUIT_NAME
+	return abilityName == "FlameDash" or fruitName == "Mera Mera no Mi"
 end
 
 local function logMeraDashServer(player, message, ...)
@@ -100,25 +106,16 @@ local function logMeraDashServer(player, message, ...)
 	print(string.format("[MERA DASH][SERVER] " .. message, ...))
 end
 
-local function countPayloadKeys(payload)
-	if typeof(payload) ~= "table" then
-		return 0
-	end
-
-	local count = 0
-	for _ in pairs(payload) do
-		count += 1
-	end
-
-	return count
-end
-
 local function resolveFruitName(fruitIdentifier)
 	if fruitIdentifier == DevilFruitConfig.None then
 		return DevilFruitConfig.None
 	end
 
-	return DevilFruitConfig.ResolveFruitName(fruitIdentifier)
+	return Registry.ResolveFruitName(fruitIdentifier)
+end
+
+local function getFruitHandler(fruitName)
+	return serverFruitModuleLoader:GetHandler(fruitName)
 end
 
 local function normalizeStoredFruitName(fruitIdentifier)
@@ -128,48 +125,6 @@ local function normalizeStoredFruitName(fruitIdentifier)
 	end
 
 	return DevilFruitConfig.None
-end
-
-local function getFruitHandlerModuleName(fruitConfig)
-	if not fruitConfig then
-		return nil
-	end
-
-	return fruitConfig.AbilityModule or fruitConfig.HandlerModule or fruitConfig.FruitKey or fruitConfig.Id
-end
-
-local function getFruitHandler(fruitName)
-	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
-	if not fruitConfig then
-		return nil
-	end
-
-	local moduleName = getFruitHandlerModuleName(fruitConfig)
-	if typeof(moduleName) ~= "string" or moduleName == "" then
-		return nil
-	end
-
-	local cachedHandler = fruitHandlerCache[moduleName]
-	if cachedHandler ~= nil then
-		return cachedHandler or nil
-	end
-
-	local handlerModule = FruitHandlersFolder:FindFirstChild(moduleName)
-	if not handlerModule then
-		fruitHandlerCache[moduleName] = false
-		warn(string.format("[DevilFruitService] Missing fruit handler module '%s' for %s", moduleName, fruitConfig.DisplayName))
-		return nil
-	end
-
-	local ok, handler = pcall(require, handlerModule)
-	if not ok then
-		fruitHandlerCache[moduleName] = false
-		warn(string.format("[DevilFruitService] Failed to require fruit handler '%s': %s", moduleName, tostring(handler)))
-		return nil
-	end
-
-	fruitHandlerCache[moduleName] = handler
-	return handler
 end
 
 local function getPlayerFruitFolder(player)
@@ -567,7 +522,7 @@ local function getCharacterContext(player, fruitName, abilityName, abilityConfig
 				return false
 			end
 
-			RemoteBundle.Effect:FireAllClients(targetPlayer, fruitName, effectAbilityName or abilityName, effectPayload or {})
+			replication:BroadcastEffect(targetPlayer, fruitName, effectAbilityName or abilityName, effectPayload or {})
 			return true
 		end,
 		ReportSuspicious = function(reason, detail, weight)
@@ -623,7 +578,7 @@ local function shouldStartCooldownOnResolve(abilityConfig)
 end
 
 local function fireAbilityDenied(player, fruitName, abilityName, reason, readyAt)
-	RemoteBundle.State:FireClient(player, "Denied", fruitName or DevilFruitConfig.None, abilityName, reason, readyAt or 0)
+	replication:FireDenied(player, fruitName or DevilFruitConfig.None, abilityName, reason, readyAt or 0)
 end
 
 local function fireAbilityActivated(player, fruitName, abilityName, readyAt, payload)
@@ -631,82 +586,29 @@ local function fireAbilityActivated(player, fruitName, abilityName, readyAt, pay
 		player:SetAttribute("MeraFireBurstUntil", os.clock() + ((payload and payload.Duration) or 0))
 	end
 
-	RemoteBundle.State:FireClient(player, "Activated", fruitName, abilityName, readyAt, payload or {})
-	RemoteBundle.Effect:FireAllClients(player, fruitName, abilityName, payload or {})
+	replication:FireActivated(player, fruitName, abilityName, readyAt, payload or {})
+	replication:BroadcastEffect(player, fruitName, abilityName, payload or {})
 end
 
 local function executeAbility(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
-	local context = getCharacterContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
-	if not context then
-		DevilFruitRequestGuard.RecordRejection(player, "InvalidContext", abilityName)
-		fireAbilityDenied(player, fruitName, abilityName, "InvalidContext")
-		return
-	end
-
-	local abilityHandler = context.FruitHandler[abilityName]
-	if typeof(abilityHandler) ~= "function" then
-		DevilFruitRequestGuard.RecordRejection(player, "UnknownAbility", abilityName)
-		fireAbilityDenied(player, fruitName, abilityName, "MissingHandler")
-		return
-	end
-
-	local isReady, readyAt = isAbilityReady(player, abilityName)
-	if not isReady then
-		DevilFruitRequestGuard.RecordRejection(player, "Cooldown", abilityName)
-		fireAbilityDenied(player, fruitName, abilityName, "Cooldown", readyAt)
-		return
-	end
-
-	local startsCooldownOnResolve = shouldStartCooldownOnResolve(context.AbilityConfig)
-	local nextReadyAt = 0
-	local reservedCooldown = false
-	if not startsCooldownOnResolve then
-		nextReadyAt = setAbilityCooldown(player, abilityName, context.AbilityConfig.Cooldown)
-		reservedCooldown = true
-	end
-
-	local ok, payload, control = pcall(abilityHandler, context)
-	if not ok then
-		if reservedCooldown then
-			clearAbilityCooldown(player, abilityName)
-		end
-		warn("[DevilFruitService] Failed to execute " .. fruitName .. " / " .. abilityName .. ": " .. tostring(payload))
-		DevilFruitRequestGuard.RecordRejection(player, "ExecutionFailed", abilityName)
-		fireAbilityDenied(player, fruitName, abilityName, "ExecutionFailed")
-		return
-	end
-
-	local applyCooldown = true
-	local cooldownDuration = context.AbilityConfig.Cooldown
-	if typeof(control) == "table" then
-		if control.ApplyCooldown == false then
-			applyCooldown = false
-		end
-
-		local overrideDuration = tonumber(control.CooldownDuration)
-		if overrideDuration then
-			cooldownDuration = overrideDuration
-		end
-	end
-
-	if startsCooldownOnResolve then
-		if applyCooldown then
-			nextReadyAt = setAbilityCooldown(player, abilityName, cooldownDuration)
-		else
-			clearAbilityCooldown(player, abilityName)
-			nextReadyAt = 0
-		end
-	else
-		if not applyCooldown then
-			clearAbilityCooldown(player, abilityName)
-			nextReadyAt = 0
-		elseif tonumber(cooldownDuration) and cooldownDuration ~= context.AbilityConfig.Cooldown then
-			nextReadyAt = setAbilityCooldown(player, abilityName, cooldownDuration)
-		end
-	end
-
-	fireAbilityActivated(player, fruitName, abilityName, nextReadyAt, payload)
-	DevilFruitRequestGuard.RecordAccepted(player, fruitName, abilityName)
+	DevilFruitAbilityRunner.Execute({
+		Player = player,
+		FruitName = fruitName,
+		AbilityName = abilityName,
+		AbilityConfig = abilityConfig,
+		RequestPayload = requestPayload,
+		CharacterState = characterState,
+		RequestMetadata = requestMetadata,
+		RequestGuard = DevilFruitRequestGuard,
+		Security = DevilFruitSecurity,
+		GetContext = getCharacterContext,
+		IsAbilityReady = isAbilityReady,
+		SetAbilityCooldown = setAbilityCooldown,
+		ClearAbilityCooldown = clearAbilityCooldown,
+		ShouldStartCooldownOnResolve = shouldStartCooldownOnResolve,
+		FireDenied = fireAbilityDenied,
+		FireActivated = fireAbilityActivated,
+	})
 end
 
 function DevilFruitService.GetEquippedFruit(player)
@@ -821,116 +723,36 @@ function DevilFruitService.Start()
 
 	RemoteBundle.Request.OnServerEvent:Connect(function(player, abilityName, requestPayload)
 		local requestReceivedAt = getSharedTimestamp()
-		if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
-			logMeraDashServer(
-				player,
-				"request_received ts=%.6f player=%s equipped=%s ability=%s payloadKeys=%s",
-				requestReceivedAt,
-				player.Name,
-				tostring(getEquippedFruit(player)),
-				tostring(abilityName),
-				tostring(countPayloadKeys(requestPayload))
-			)
-		end
-
-		local preflightOk, preflightReason, preflightReadyAt = DevilFruitRequestGuard.Preflight(player, abilityName, requestPayload)
-		if not preflightOk then
+		local requestOk, validated = DevilFruitValidation.ValidateRequest({
+			Player = player,
+			AbilityName = abilityName,
+			RequestPayload = requestPayload,
+			RequestGuard = DevilFruitRequestGuard,
+			Security = DevilFruitSecurity,
+			NoneFruitName = DevilFruitConfig.None,
+			GetEquippedFruit = getEquippedFruit,
+			GetAliveCharacterState = getAliveCharacterState,
+			GetAbilityConfig = function(fruitName, resolvedAbilityName)
+				local abilityEntry = Registry.GetAbility(fruitName, resolvedAbilityName)
+				return abilityEntry and abilityEntry.Config or DevilFruitConfig.GetAbility(fruitName, resolvedAbilityName)
+			end,
+			FireDenied = fireAbilityDenied,
+		})
+		if not requestOk then
 			if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
 				logMeraDashServer(
 					player,
-					"request_rejected ts=%.6f player=%s ability=%s reason=%s stage=preflight processingMs=%.2f",
+					"request_handled_by_validation ts=%.6f player=%s ability=%s processingMs=%.2f",
 					getSharedTimestamp(),
 					player.Name,
-					tostring(abilityName),
-					tostring(preflightReason),
-					(getSharedTimestamp() - requestReceivedAt) * 1000
-				)
-			end
-			fireAbilityDenied(player, getEquippedFruit(player), abilityName, preflightReason, preflightReadyAt)
-			return
-		end
-
-		local characterState, characterReason = getAliveCharacterState(player)
-		local equippedFruit = getEquippedFruit(player)
-		if not characterState then
-			DevilFruitRequestGuard.RecordRejection(player, "InvalidContext", characterReason)
-			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
-				logMeraDashServer(
-					player,
-					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=%s stage=context processingMs=%.2f",
-					getSharedTimestamp(),
-					player.Name,
-					tostring(equippedFruit),
-					tostring(abilityName),
-					tostring(characterReason),
-					(getSharedTimestamp() - requestReceivedAt) * 1000
-				)
-			end
-			fireAbilityDenied(player, equippedFruit, abilityName, "InvalidContext")
-			return
-		end
-
-		if equippedFruit == DevilFruitConfig.None then
-			DevilFruitRequestGuard.RecordRejection(player, "NoFruit", abilityName)
-			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
-				logMeraDashServer(
-					player,
-					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=NoFruit stage=equipped processingMs=%.2f",
-					getSharedTimestamp(),
-					player.Name,
-					tostring(equippedFruit),
 					tostring(abilityName),
 					(getSharedTimestamp() - requestReceivedAt) * 1000
 				)
 			end
-			fireAbilityDenied(player, equippedFruit, abilityName, "NoFruit")
 			return
 		end
 
-		local abilityConfig = DevilFruitConfig.GetAbility(equippedFruit, abilityName)
-		if not abilityConfig then
-			DevilFruitRequestGuard.RecordRejection(player, "UnknownAbility", abilityName)
-			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
-				logMeraDashServer(
-					player,
-					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=UnknownAbility stage=config processingMs=%.2f",
-					getSharedTimestamp(),
-					player.Name,
-					tostring(equippedFruit),
-					tostring(abilityName),
-					(getSharedTimestamp() - requestReceivedAt) * 1000
-				)
-			end
-			fireAbilityDenied(player, equippedFruit, abilityName, "UnknownAbility")
-			return
-		end
-
-		local requestAllowed, sanitizedPayload, rejectionReason, rejectionReadyAt = DevilFruitRequestGuard.ValidateAndReserve(
-			player,
-			equippedFruit,
-			abilityName,
-			abilityConfig,
-			requestPayload,
-			characterState
-		)
-		if not requestAllowed then
-			if shouldLogMeraDashAttempt(equippedFruit, abilityName) then
-				logMeraDashServer(
-					player,
-					"request_rejected ts=%.6f player=%s fruit=%s ability=%s reason=%s stage=validate processingMs=%.2f",
-					getSharedTimestamp(),
-					player.Name,
-					tostring(equippedFruit),
-					tostring(abilityName),
-					tostring(rejectionReason),
-					(getSharedTimestamp() - requestReceivedAt) * 1000
-				)
-			end
-			fireAbilityDenied(player, equippedFruit, abilityName, rejectionReason, rejectionReadyAt)
-			return
-		end
-
-		executeAbility(player, equippedFruit, abilityName, abilityConfig, sanitizedPayload, characterState, {
+		executeAbility(player, validated.EquippedFruit, abilityName, validated.AbilityConfig, validated.SanitizedPayload, validated.CharacterState, {
 			ReceivedAt = requestReceivedAt,
 		})
 	end)

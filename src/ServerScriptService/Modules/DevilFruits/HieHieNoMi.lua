@@ -115,6 +115,10 @@ local function getPlanarAngleDegrees(currentDirection, desiredDirection)
 	return math.deg(math.acos(facingDot)), currentPlanar, desiredPlanar, facingDot
 end
 
+local function isVerticalAimEnabled(abilityConfig)
+	return abilityConfig ~= nil and abilityConfig.AllowVerticalAim == true
+end
+
 local function applyFreezeShotTurn(context, desiredDirection, abilityConfig)
 	local thresholdDegrees = math.max(0, tonumber(abilityConfig.TurnThresholdDegrees) or DEFAULT_TURN_THRESHOLD_DEGREES)
 	local angleDegrees, currentFacing, desiredFacing, facingDot = getPlanarAngleDegrees(
@@ -210,7 +214,14 @@ local function resolveFreezeShotDirection(context, baseOriginPosition, abilityCo
 	local fallbackDirection = getForwardDirection(context.RootPart)
 	local requestPayload = context.RequestPayload
 	local rawAimPosition = type(requestPayload) == "table" and requestPayload.AimPosition or nil
+	local verticalAimEnabled = isVerticalAimEnabled(abilityConfig)
 	if typeof(rawAimPosition) ~= "Vector3" then
+		logMessage(
+			"WARN",
+			"aim rejected reason=missing_aim player=%s origin=%s",
+			context.Player.Name,
+			formatVector3(baseOriginPosition)
+		)
 		logMessage(
 			"AIM][FALLBACK",
 			"player=%s reason=missing_aim origin=%s fallbackDirection=%s",
@@ -221,10 +232,29 @@ local function resolveFreezeShotDirection(context, baseOriginPosition, abilityCo
 		return fallbackDirection, nil, false, true
 	end
 
-	local sanitizedAimPosition = Vector3.new(rawAimPosition.X, baseOriginPosition.Y, rawAimPosition.Z)
+	logMessage(
+		"AIM][SERVER",
+		"rawAimPosition=%s verticalAimEnabled=%s player=%s",
+		formatVector3(rawAimPosition),
+		tostring(verticalAimEnabled),
+		context.Player.Name
+	)
+
+	local sanitizedAimPosition = verticalAimEnabled
+		and rawAimPosition
+		or Vector3.new(rawAimPosition.X, baseOriginPosition.Y, rawAimPosition.Z)
 	local rawAimVector = sanitizedAimPosition - baseOriginPosition
 	local minAimDistance = math.max(0.5, tonumber(abilityConfig.MinimumAimDistance) or DEFAULT_MIN_AIM_DISTANCE)
 	if rawAimVector.Magnitude < minAimDistance then
+		logMessage(
+			"WARN",
+			"aim rejected reason=aim_too_close player=%s rawAimPosition=%s origin=%s minDistance=%.2f verticalAimEnabled=%s",
+			context.Player.Name,
+			formatVector3(rawAimPosition),
+			formatVector3(baseOriginPosition),
+			minAimDistance,
+			tostring(verticalAimEnabled)
+		)
 		logMessage(
 			"AIM][FALLBACK",
 			"player=%s reason=aim_too_close aimPosition=%s origin=%s minDistance=%.2f fallbackDirection=%s",
@@ -237,10 +267,10 @@ local function resolveFreezeShotDirection(context, baseOriginPosition, abilityCo
 		return fallbackDirection, sanitizedAimPosition, false, true
 	end
 
-	local planarDirection = rawAimVector.Unit
-	local forwardDot = fallbackDirection:Dot(planarDirection)
+	local finalDirection = rawAimVector.Unit
+	local forwardDot = fallbackDirection:Dot(finalDirection)
 
-	local flattenedY = math.abs(rawAimPosition.Y - sanitizedAimPosition.Y) > 0.001
+	local flattenedY = not verticalAimEnabled and math.abs(rawAimPosition.Y - sanitizedAimPosition.Y) > 0.001
 	if flattenedY then
 		logMessage(
 			"AIM][FILTER",
@@ -254,16 +284,17 @@ local function resolveFreezeShotDirection(context, baseOriginPosition, abilityCo
 
 	logMessage(
 		"AIM][SERVER",
-		"player=%s rawAimPosition=%s chosenAimPosition=%s origin=%s finalDirection=%s forwardDot=%.2f flattenedY=%s fallback=false",
+		"player=%s rawAimPosition=%s chosenAimPosition=%s origin=%s finalDirection3D=%s forwardDot=%.2f flattenedY=%s verticalAimEnabled=%s fallback=false",
 		context.Player.Name,
 		formatVector3(rawAimPosition),
 		formatVector3(sanitizedAimPosition),
 		formatVector3(baseOriginPosition),
-		formatVector3(planarDirection),
+		formatVector3(finalDirection),
 		forwardDot,
-		tostring(flattenedY)
+		tostring(flattenedY),
+		tostring(verticalAimEnabled)
 	)
-	return planarDirection, sanitizedAimPosition, flattenedY, false
+	return finalDirection, sanitizedAimPosition, flattenedY, false
 end
 
 local function nextProjectileId(player)
@@ -692,6 +723,18 @@ local function cleanupProjectile(state, reason)
 end
 
 local function emitResolution(context, state, phase, hitKind, hitLabel, impactPosition, resolveReason)
+	if phase == "Impact" then
+		logMessage(
+			"HIT",
+			"projectileId=%s impact=%s kind=%s label=%s reason=%s",
+			state.Id,
+			formatVector3(impactPosition),
+			tostring(hitKind),
+			tostring(hitLabel),
+			tostring(resolveReason)
+		)
+	end
+
 	logMessage(
 		"RESOLVE",
 		"projectileId=%s phase=%s kind=%s label=%s reason=%s impact=%s distance=%.2f",

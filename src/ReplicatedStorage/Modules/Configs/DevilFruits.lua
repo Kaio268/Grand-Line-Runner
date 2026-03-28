@@ -62,6 +62,7 @@ local DevilFruits = {
 					Range = 180,
 					AimRayDistance = 700,
 					MinimumAimDistance = 6,
+					AllowVerticalAim = true,
 					TurnThresholdDegrees = 28,
 					ProjectileSpeed = 240,
 					ProjectileRadius = 1.2,

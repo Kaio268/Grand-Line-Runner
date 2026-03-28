@@ -1,3 +1,5 @@
-local DevilFruitService = require(game:GetService("ServerScriptService").Modules:WaitForChild("DevilFruitService"))
+local DevilFruitServerController = require(
+	game:GetService("ServerScriptService").Modules:WaitForChild("DevilFruits"):WaitForChild("Server"):WaitForChild("DevilFruitServerController")
+)
 
-DevilFruitService.Start()
+DevilFruitServerController.Start()
