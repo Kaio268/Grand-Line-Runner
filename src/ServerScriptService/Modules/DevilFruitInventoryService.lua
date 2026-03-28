@@ -11,7 +11,6 @@ local TOOL_ATTR_FRUIT_NAME = "FruitName"
 local DEVIL_FRUITS_FOLDER_NAME = "DevilFruits"
 local PROMPT_TIMEOUT = 20
 local TOOL_HANDLE_SIZE = Vector3.new(0.35, 0.35, 0.35)
-local DEFAULT_TOOL_GRIP_BIAS = Vector3.new(0.7, -0.12, 0.18)
 local EXPLICIT_GRIP_ATTACHMENT_NAMES = {
 	"RightGripAttachment",
 	"GripAttachment",
@@ -25,6 +24,7 @@ local EXPLICIT_GRIP_PART_NAMES = {
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
+local FruitGripController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("FruitGripController"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
@@ -318,28 +318,6 @@ local function expandBounds(relativeCFrame, size, currentMin, currentMax)
 	return currentMin, currentMax
 end
 
-local function getGripBias(fruit)
-	local gripBias = fruit and fruit.ToolGripBias
-	if typeof(gripBias) ~= "Vector3" then
-		return DEFAULT_TOOL_GRIP_BIAS
-	end
-
-	return Vector3.new(
-		math.clamp(gripBias.X, -1, 1),
-		math.clamp(gripBias.Y, -1, 1),
-		math.clamp(gripBias.Z, -1, 1)
-	)
-end
-
-local function getGripOffset(fruit)
-	local gripOffset = fruit and fruit.ToolGripOffset
-	if typeof(gripOffset) == "Vector3" then
-		return gripOffset
-	end
-
-	return Vector3.new()
-end
-
 local function findExplicitGripPivot(template)
 	for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
 		local attachment = template:FindFirstChild(attachmentName, true)
@@ -358,7 +336,7 @@ local function findExplicitGripPivot(template)
 	return nil
 end
 
-local function getAutomaticGripPivot(template, primaryPart, fruit)
+local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
 	local templateParts = getTemplateParts(template)
 	if #templateParts == 0 then
 		return primaryPart.CFrame
@@ -374,8 +352,9 @@ local function getAutomaticGripPivot(template, primaryPart, fruit)
 
 	local boundsCenter = (localMin + localMax) * 0.5
 	local halfExtents = (localMax - localMin) * 0.5
-	local gripBias = getGripBias(fruit)
-	local gripOffset = getGripOffset(fruit)
+	local gripProfile = FruitGripController.GetBuildGripSettings(fruit and fruit.FruitKey or nil, gripOptions)
+	local gripBias = gripProfile.AssetGripBias
+	local gripOffset = gripProfile.AssetGripOffset
 	local gripLocalPosition = boundsCenter + Vector3.new(
 		halfExtents.X * gripBias.X,
 		halfExtents.Y * gripBias.Y,
@@ -387,11 +366,11 @@ local function getAutomaticGripPivot(template, primaryPart, fruit)
 	return primaryPart.CFrame * CFrame.new(gripLocalPosition)
 end
 
-local function getGripPivot(template, primaryPart, fruit)
-	return findExplicitGripPivot(template) or getAutomaticGripPivot(template, primaryPart, fruit)
+local function getGripPivot(template, primaryPart, fruit, gripOptions)
+	return findExplicitGripPivot(template) or getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
 end
 
-local function buildFruitTool(fruitKey)
+local function buildFruitTool(player, fruitKey)
 	local isValid, worldModelOrReason, fruit = DevilFruitAssets.ValidateWorldModel(fruitKey)
 	if not isValid then
 		return nil, worldModelOrReason
@@ -407,7 +386,12 @@ local function buildFruitTool(fruitKey)
 		return nil, "missing_primary_part"
 	end
 
-	local gripPivot = getGripPivot(template, primaryPart, fruit)
+	local character = player and player.Character or nil
+	local gripOptions = {
+		Player = player,
+		Character = character,
+	}
+	local gripPivot = getGripPivot(template, primaryPart, fruit, gripOptions)
 	local templateParts = getTemplateParts(template)
 	if #templateParts == 0 then
 		return nil, "missing_tool_parts"
@@ -445,6 +429,12 @@ local function buildFruitTool(fruitKey)
 		weld.Part1 = clone
 		weld.Parent = handle
 	end
+
+	FruitGripController.ApplyToolGrip(tool, fruit.FruitKey, {
+		Tool = tool,
+		Player = player,
+		Character = character,
+	})
 
 	return tool
 end
@@ -484,6 +474,20 @@ local function hookTool(player, tool)
 	end
 
 	tool:SetAttribute("__DevilFruitConsumeBound", true)
+	tool.Equipped:Connect(function()
+		FruitGripController.ApplyToolGrip(tool, tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), {
+			Tool = tool,
+			Player = player,
+			Character = player.Character,
+		})
+	end)
+	tool.Unequipped:Connect(function()
+		FruitGripController.ApplyToolGrip(tool, tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), {
+			Tool = tool,
+			Player = player,
+			Character = player.Character,
+		})
+	end)
 	tool.Activated:Connect(function()
 		if not isToolOwnedByPlayer(tool, player) then
 			return
@@ -525,7 +529,7 @@ local function syncFruitTool(player, fruitKey, desiredCount)
 	end
 
 	for _ = 1, (desiredCount - count) do
-		local tool, reason = buildFruitTool(fruitKey)
+		local tool, reason = buildFruitTool(player, fruitKey)
 		if tool then
 			hookTool(player, tool)
 			tool.Parent = backpack

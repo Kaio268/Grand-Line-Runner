@@ -14,7 +14,6 @@ MeraDashClient.__index = MeraDashClient
 MeraDashClient.FRUIT_NAME = "Mera Mera no Mi"
 MeraDashClient.ABILITY_NAME = "FlameDash"
 
-local DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
 local MAX_RUNTIME_GRACE = 0.18
 local CORRECTION_SNAP_DISTANCE = 8
 local DIRECTION_TOLERANCE = 8
@@ -23,11 +22,6 @@ local CAMERA_FOV_BOOST = 6
 
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
-end
-
-local function isDebugEnabled(player)
-	return ReplicatedStorage:GetAttribute(DEBUG_ATTRIBUTE) == true
-		or player:GetAttribute(DEBUG_ATTRIBUTE) == true
 end
 
 local function formatVector3(value)
@@ -51,20 +45,13 @@ local function getPlayerRootPart(targetPlayer)
 	return character:FindFirstChild("HumanoidRootPart")
 end
 
-local function logClient(player, message, ...)
-	if not isDebugEnabled(player) then
-		return
-	end
-
-	print(string.format("[MERA DASH][CLIENT] " .. message, ...))
+local function logClient(_player, _message, ...)
 end
 
-local function logRecon(player, message, ...)
-	if not isDebugEnabled(player) then
-		return
-	end
+local function logRecon(_player, _message, ...)
+end
 
-	print(string.format("[MERA DASH][RECON] " .. message, ...))
+local function logMove(_player, _message, ...)
 end
 
 function MeraDashClient.new(config)
@@ -74,6 +61,12 @@ function MeraDashClient.new(config)
 	self.player = config.player or Players.LocalPlayer
 	self.PlayOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or function() end
 	self.CreateEffectVisual = type(config.CreateEffectVisual) == "function" and config.CreateEffectVisual or function() end
+	self.PlayFlameDashStartup = type(config.PlayFlameDashStartup) == "function" and config.PlayFlameDashStartup or function() end
+	self.PlayFlameDashComplete = type(config.PlayFlameDashComplete) == "function" and config.PlayFlameDashComplete or function() end
+	self.MarkFlameDashTrailPredictedComplete = type(config.MarkFlameDashTrailPredictedComplete) == "function"
+		and config.MarkFlameDashTrailPredictedComplete
+		or function() end
+	self.StopFlameDashTrail = type(config.StopFlameDashTrail) == "function" and config.StopFlameDashTrail or function() end
 	self.activeDash = nil
 	self.cameraTween = nil
 	self.sequence = 0
@@ -185,6 +178,14 @@ function MeraDashClient:FinishLocalDash(state, reason, interrupted)
 	if rootPart then
 		self:StopHorizontalVelocity(rootPart)
 	end
+	if not state.ServerResolved then
+		self.MarkFlameDashTrailPredictedComplete(
+			self.player,
+			reason,
+			rootPart and rootPart.Position or nil,
+			state.Plan and state.Plan.Direction or state.Direction
+		)
+	end
 
 	logClient(
 		self.player,
@@ -197,6 +198,13 @@ function MeraDashClient:FinishLocalDash(state, reason, interrupted)
 		tonumber(state.OriginalPredictedDistance) or 0,
 		tostring(state.Corrected == true),
 		tostring(state.CorrectionSnap == true)
+	)
+	logMove(
+		self.player,
+		"move=FlameDash complete player=%s reason=%s interrupted=%s",
+		self.player.Name,
+		tostring(reason),
+		tostring(interrupted == true)
 	)
 
 	if state.ServerResolved then
@@ -288,6 +296,12 @@ function MeraDashClient:BeginPredictedRequest()
 		self:FinishLocalDash(state, "blocked_at_start", true)
 	else
 		local predictedEndPosition = state.StartPosition + (localPlan.Direction * localPlan.Distance)
+		logMove(self.player, "move=FlameDash startup source=predicted player=%s", self.player.Name)
+		self.PlayFlameDashStartup(self.player, {
+			Direction = localPlan.Direction,
+			StartPosition = state.StartPosition,
+			EndPosition = predictedEndPosition,
+		}, true)
 		self.CreateEffectVisual(state.StartPosition, predictedEndPosition, localPlan.Direction, true)
 		self.PlayOptionalEffect(self.player, MeraDashClient.FRUIT_NAME, MeraDashClient.ABILITY_NAME)
 		self:KickCamera()
@@ -459,7 +473,10 @@ function MeraDashClient:HandleDenied(reason)
 		tonumber(state.OriginalPredictedDistance) or 0
 	)
 
+	local finalPosition = rootPart and rootPart.Position or nil
+	local finalDirection = state.Plan and state.Plan.Direction or state.Direction
 	self:FinishLocalDash(state, "server_denied_" .. tostring(reason), true)
+	self.StopFlameDashTrail(self.player, "server_denied_" .. tostring(reason), finalPosition, finalDirection)
 	self:ClearActiveState(state)
 end
 
@@ -531,8 +548,12 @@ function MeraDashClient:HandleEffect(targetPlayer, payload)
 	local resolvedPayload = payload or {}
 	local phase = typeof(resolvedPayload.Phase) == "string" and resolvedPayload.Phase or "Start"
 
-	if targetPlayer == self.player and phase == "Resolve" then
-		self:HandleResolved(resolvedPayload)
+	if phase == "Resolve" then
+		if targetPlayer == self.player then
+			self:HandleResolved(resolvedPayload)
+		end
+
+		self.PlayFlameDashComplete(targetPlayer, resolvedPayload)
 		return true
 	end
 
@@ -552,6 +573,8 @@ function MeraDashClient:HandleEffect(targetPlayer, payload)
 	end
 
 	if not (targetPlayer == self.player and self.activeDash and self.activeDash.LocalEffectPlayed) then
+		logMove(self.player, "move=FlameDash startup source=replicated target=%s", targetPlayer.Name)
+		self.PlayFlameDashStartup(targetPlayer, resolvedPayload, false)
 		self.PlayOptionalEffect(targetPlayer, MeraDashClient.FRUIT_NAME, MeraDashClient.ABILITY_NAME)
 		self.CreateEffectVisual(startPosition, endPosition, direction, false)
 	end

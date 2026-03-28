@@ -1,5 +1,13 @@
 local DevilFruits = {
 	None = "",
+	GripDefaults = {
+		RuntimeGrip = CFrame.new(0, -0.08, -0.95),
+		Contexts = {
+			Eat = {
+				RuntimeGrip = CFrame.new(0.12, 0.42, -0.58),
+			},
+		},
+	},
 	Fruits = {},
 	FruitsByKey = {
 		Mera = {
@@ -36,12 +44,27 @@ local DevilFruits = {
 							DashTargetPosition = "Vector3",
 						},
 					},
+					Animation = {
+						AssetName = "FlameDash",
+						FadeTime = 0.04,
+						StopFadeTime = 0.08,
+						PlaybackSpeed = 1.12,
+					},
 				},
 				FireBurst = {
 					KeyCode = Enum.KeyCode.E,
 					Cooldown = 14,
-					Radius = 10,
+					Radius = 30,
 					Duration = 0.6,
+					VisualBaseRadius = 10,
+					Animation = {
+						AssetName = "FlameBurst",
+						ReleaseMarker = "Release",
+						ReleaseFallbackTime = 0.22,
+						FadeTime = 0.06,
+						StopFadeTime = 0.1,
+						PlaybackSpeed = 1,
+					},
 				},
 			},
 		},
@@ -72,6 +95,13 @@ local DevilFruits = {
 					MaxInheritedSpeed = 140,
 					SpawnLeadTime = 0.08,
 					MaxSpawnLead = 8,
+					Animation = {
+						AssetName = "IceBlast",
+						ReleaseMarker = "IceBlast",
+						ReleaseFallbackTime = 0.22,
+						FadeTime = 0.08,
+						StopFadeTime = 0.08,
+					},
 					RequestPayloadSchema = {
 						MaxKeys = 1,
 						MaxHintDistance = 700,
@@ -85,6 +115,12 @@ local DevilFruits = {
 					Cooldown = 18,
 					Duration = 4,
 					SpeedMultiplier = 2,
+					Animation = {
+						AssetName = "IceBoost",
+						FadeTime = 0.08,
+						StopFadeTime = 0.12,
+						Looped = true,
+					},
 				},
 			},
 		},
@@ -96,6 +132,13 @@ local DevilFruits = {
 			AbilityModule = "Gomu",
 			Rarity = "Rare",
 			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			GripProfiles = {
+				Models = {
+					ModelSwap = {
+						RuntimeGrip = CFrame.new(),
+					},
+				},
+			},
 			Aliases = { "gomu", "gomu gomu" },
 			Abilities = {
 				RubberLaunch = {

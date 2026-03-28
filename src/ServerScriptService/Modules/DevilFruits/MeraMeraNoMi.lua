@@ -3,12 +3,17 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local MeraDashShared = require(Modules:WaitForChild("DevilFruits"):WaitForChild("MeraDashShared"))
+local MeraAnimationController = require(script.Parent:WaitForChild("MeraAnimationController"))
 
 local MeraMeraNoMi = {}
 
 local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
 local MAX_RUNTIME_GRACE = 0.18
+local DEBUG_INFO = RunService:IsStudio()
+local MOVE_LOG_COOLDOWN = 0.08
+local PREVIOUS_FIRE_BURST_RADIUS = 50
 
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
@@ -25,6 +30,18 @@ local function logDash(player, message, ...)
 	end
 
 	print(string.format("[MERA DASH][SERVER] " .. message, ...))
+end
+
+local function logMove(player, message, ...)
+	if not (DEBUG_INFO or isDashDebugEnabled(player)) then
+		return
+	end
+
+	if not DiagnosticLogLimiter.ShouldEmit("MeraMeraNoMi:MOVE", DiagnosticLogLimiter.BuildKey(message, ...), MOVE_LOG_COOLDOWN) then
+		return
+	end
+
+	print(string.format("[MERA MOVE] " .. message, ...))
 end
 
 local function formatVector3(value)
@@ -167,6 +184,7 @@ function MeraMeraNoMi.FlameDash(context)
 		startPayload.ServerProcessingTimeMs,
 		tostring(startPayload.ValidationAdjusted)
 	)
+	logMove(player, "move=FlameDash startup source=server_authorized player=%s", player.Name)
 
 	task.spawn(function()
 		local resolveReason = "completed"
@@ -186,6 +204,7 @@ function MeraMeraNoMi.FlameDash(context)
 
 			setHorizontalVelocity(rootPart, plan.Direction * plan.StartDashSpeed)
 			burstStartPosition = rootPart.Position
+			logMove(player, "move=FlameDash release source=server_authorized player=%s", player.Name)
 
 			if plan.RemainingDistance > 0.1 then
 				connection = RunService.Heartbeat:Connect(function(dt)
@@ -272,6 +291,13 @@ function MeraMeraNoMi.FlameDash(context)
 			tostring(interrupted),
 			tostring(plan.WallShortened)
 		)
+		logMove(
+			player,
+			"move=FlameDash complete source=server_authorized player=%s reason=%s interrupted=%s",
+			player.Name,
+			tostring(resolveReason),
+			tostring(interrupted)
+		)
 	end)
 
 	return startPayload
@@ -279,10 +305,33 @@ end
 
 function MeraMeraNoMi.FireBurst(context)
 	local abilityConfig = context.AbilityConfig
+	local player = context.Player
+	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
+	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
+	local radius = math.max(0, tonumber(abilityConfig.Radius) or 0)
+
+	logMove(player, "move=FireBurst startup player=%s", player and player.Name or "<unknown>")
+	logMove(
+		player,
+		"move=FireBurst radius old=%s new=%s",
+		tostring(PREVIOUS_FIRE_BURST_RADIUS),
+		tostring(radius)
+	)
+	local animationState = MeraAnimationController.PlayFireBurstAnimation(context.Character, animationConfig)
+	MeraAnimationController.WaitForFireBurstRelease(animationState, animationConfig)
+	logMove(player, "move=FireBurst release player=%s", player and player.Name or "<unknown>")
+
+	if player then
+		task.delay(duration, function()
+			if player.Parent ~= nil then
+				logMove(player, "move=FireBurst complete player=%s", player.Name)
+			end
+		end)
+	end
 
 	return {
-		Radius = abilityConfig.Radius,
-		Duration = abilityConfig.Duration,
+		Radius = radius,
+		Duration = duration,
 	}
 end
 

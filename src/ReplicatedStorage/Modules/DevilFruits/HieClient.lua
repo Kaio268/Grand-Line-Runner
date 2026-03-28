@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local HieVfx = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HieVfx"))
 
@@ -19,6 +20,8 @@ HieClient.ICE_BOOST_ABILITY = "IceBoost"
 local DEBUG_AIM = RunService:IsStudio()
 local DEBUG_VFX = RunService:IsStudio()
 local DEBUG_VFX_VERBOSE = false
+local LOG_INFO_COOLDOWN = 0.2
+local LOG_WARN_COOLDOWN = 3
 local BURST_CONFIG = {
 	BurstCount = 5,
 	BurstInterval = 0.045,
@@ -95,6 +98,14 @@ local function logVfx(tag, message, ...)
 		return
 	end
 
+	if not DiagnosticLogLimiter.ShouldEmit(
+		"HieClient:VFX",
+		tostring(tag or "") .. "::" .. DiagnosticLogLimiter.BuildKey(message, ...),
+		LOG_INFO_COOLDOWN
+	) then
+		return
+	end
+
 	local prefix = "[HIE][VFX]"
 	if typeof(tag) == "string" and tag ~= "" then
 		prefix ..= string.format("[%s]", tag)
@@ -108,10 +119,18 @@ local function logVfxVerbose(message, ...)
 		return
 	end
 
+	if not DiagnosticLogLimiter.ShouldEmit("HieClient:VFX_VERBOSE", DiagnosticLogLimiter.BuildKey(message, ...), 1) then
+		return
+	end
+
 	print(string.format("[HIE][VFX][STEP] " .. message, ...))
 end
 
 local function logVfxError(message, ...)
+	if not DiagnosticLogLimiter.ShouldEmit("HieClient:VFX_ERROR", DiagnosticLogLimiter.BuildKey(message, ...), LOG_WARN_COOLDOWN) then
+		return
+	end
+
 	warn(string.format("[HIE][VFX][ERROR] " .. message, ...))
 end
 
@@ -120,15 +139,31 @@ local function logBurst(message, ...)
 		return
 	end
 
+	if not DiagnosticLogLimiter.ShouldEmit("HieClient:BURST", DiagnosticLogLimiter.BuildKey(message, ...), LOG_INFO_COOLDOWN) then
+		return
+	end
+
 	print(string.format("[HIE BURST] " .. message, ...))
 end
 
 local function warnBurst(message, ...)
+	if not DiagnosticLogLimiter.ShouldEmit("HieClient:BURST_WARN", DiagnosticLogLimiter.BuildKey(message, ...), LOG_WARN_COOLDOWN) then
+		return
+	end
+
 	warn(string.format("[HIE BURST][WARN] " .. message, ...))
 end
 
 local function logAim(tag, message, ...)
 	if not DEBUG_AIM then
+		return
+	end
+
+	if not DiagnosticLogLimiter.ShouldEmit(
+		"HieClient:AIM",
+		tostring(tag or "") .. "::" .. DiagnosticLogLimiter.BuildKey(message, ...),
+		LOG_INFO_COOLDOWN
+	) then
 		return
 	end
 

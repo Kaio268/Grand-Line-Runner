@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
+local HieAnimationController = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HieAnimationController"))
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
@@ -361,6 +362,16 @@ local function resolveFreezeShotVelocity(context, direction, settings)
 		FinalSpeed = finalSpeed,
 		SpawnLeadDistance = spawnLeadDistance,
 	}
+end
+
+local function playFreezeShotAnimationAndWait(context, abilityConfig)
+	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
+	local animationState = HieAnimationController.PlayFreezeShotAnimation(context.Character, animationConfig)
+	if not animationState then
+		return false
+	end
+
+	return HieAnimationController.WaitForFreezeShotRelease(animationState)
 end
 
 local function resolveProjectileStep(state, origin, displacement)
@@ -973,6 +984,8 @@ function HieHieNoMi.FreezeShot(context)
 	local direction, aimPosition = resolveFreezeShotDirection(context, aimOriginPosition, abilityConfig)
 	local finalFacing = applyFreezeShotTurn(context, direction, abilityConfig)
 
+	playFreezeShotAnimationAndWait(context, abilityConfig)
+
 	originPosition = context.RootPart.Position
 	aimOriginPosition = originPosition + Vector3.new(0, PROJECTILE_VERTICAL_OFFSET, 0)
 	local velocityData = resolveFreezeShotVelocity(context, direction, settings)
@@ -1053,9 +1066,11 @@ function HieHieNoMi.IceBoost(context)
 	player:SetAttribute("HieIceBoostUntil", untilTime)
 	player:SetAttribute("HieIceBoostSpeedMultiplier", speedMultiplier)
 	player:SetAttribute("HieIceBoostSpeedBonus", nil)
+	HieAnimationController.PlayIceBoostAnimation(player, context.Character, abilityConfig.Animation, untilTime)
 
 	task.delay(duration + 0.05, function()
 		if player.Parent == nil then
+			HieAnimationController.StopIceBoostAnimation(player, untilTime, "player_removed")
 			return
 		end
 
@@ -1064,6 +1079,9 @@ function HieHieNoMi.IceBoost(context)
 			player:SetAttribute("HieIceBoostUntil", nil)
 			player:SetAttribute("HieIceBoostSpeedMultiplier", nil)
 			player:SetAttribute("HieIceBoostSpeedBonus", nil)
+			HieAnimationController.StopIceBoostAnimation(player, untilTime, "duration_complete")
+		elseif typeof(currentUntil) ~= "number" or currentUntil < untilTime then
+			HieAnimationController.StopIceBoostAnimation(player, untilTime, "interrupted")
 		end
 	end)
 

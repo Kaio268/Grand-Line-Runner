@@ -3,6 +3,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
+
 local HieVfx = {}
 
 local DEBUG_ENABLED = RunService:IsStudio()
@@ -16,9 +18,15 @@ local ICE_BOOST_CHILDREN = { "FX", "A", "Attachment", "B", "smoke", "snowflake",
 local DEFAULT_EMIT_COUNT = 20
 local IMPACT_LIFETIME = 2.5
 local ICE_BOOST_ROOT_OFFSET = CFrame.new(0, -2.5, 0)
+local INFO_COOLDOWN = 0.25
+local WARN_COOLDOWN = 3
 
 local function debugLog(message, ...)
 	if not DEBUG_ENABLED then
+		return
+	end
+
+	if not DiagnosticLogLimiter.ShouldEmit("HieVfx:INFO", DiagnosticLogLimiter.BuildKey(message, ...), INFO_COOLDOWN) then
 		return
 	end
 
@@ -26,6 +34,10 @@ local function debugLog(message, ...)
 end
 
 local function warnLog(message, ...)
+	if not DiagnosticLogLimiter.ShouldEmit("HieVfx:WARN", DiagnosticLogLimiter.BuildKey(message, ...), WARN_COOLDOWN) then
+		return
+	end
+
 	warn(string.format("[HIE VFX][WARN] " .. message, ...))
 end
 
