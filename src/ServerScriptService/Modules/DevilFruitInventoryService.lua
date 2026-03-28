@@ -417,7 +417,7 @@ local function buildFruitTool(fruitKey)
 	tool.Name = fruit.FruitKey
 	tool.ToolTip = fruit.DisplayName
 	tool.CanBeDropped = false
-	tool.RequiresHandle = true
+	tool.RequiresHandle = false
 	tool:SetAttribute(TOOL_ATTR_KIND, "DevilFruit")
 	tool:SetAttribute(TOOL_ATTR_NAME, fruit.FruitKey)
 	tool:SetAttribute(TOOL_ATTR_FRUIT_KEY, fruit.FruitKey)

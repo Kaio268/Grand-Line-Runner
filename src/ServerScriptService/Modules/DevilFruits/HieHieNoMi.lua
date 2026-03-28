@@ -2,7 +2,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
-
+local animations = ReplicatedStorage:WaitForChild("Animations")
+local iceBlastAnimation = animations:WaitForChild("Hie"):WaitForChild("IceBlast")
+local iceBoostAnimation = animations:WaitForChild("Hie"):WaitForChild("IceBoost")
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
@@ -964,7 +966,21 @@ local function simulateProjectile(context, state)
 	end
 end
 
+local function playIceBlastAnimation(humanoid)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBlastAnimation.AnimationId
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	track:Play()
+	return track
+end
+
 function HieHieNoMi.FreezeShot(context)
+	local humanoid = context.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	playIceBlastAnimation(humanoid)
 	local abilityConfig = context.AbilityConfig
 	local settings = getProjectileSettings(abilityConfig)
 	local slotLabel = tostring(abilityConfig.KeyCode or "Q")
@@ -1042,11 +1058,51 @@ function HieHieNoMi.FreezeShot(context)
 
 	return buildLaunchPayload(state)
 end
+local function playIceBoostAnimation(humanoid, duration)
+	local animation = Instance.new("Animation")
+	animation.AnimationId = iceBoostAnimation.AnimationId
+	local track = humanoid:LoadAnimation(animation)
+	track.Priority = Enum.AnimationPriority.Action
+	
+	local moveConnection
+	moveConnection = humanoid:GetPropertyChangedSignal("MoveDirection"):Connect(function()
+		if humanoid.MoveDirection.Magnitude > 0 then
+			if not track.IsPlaying then
+				track:Play()
+			end
+		else
+			if track.IsPlaying then
+				track:Stop()
+			end
+		end
+	end)
+
+	if humanoid.MoveDirection.Magnitude > 0 then
+		track:Play()
+	end
+
+	task.delay(duration, function()
+		if moveConnection then
+			moveConnection:Disconnect()
+		end
+		if track then
+			track:Stop()
+			track:Destroy()
+		end
+	end)
+
+	return track
+end
 
 function HieHieNoMi.IceBoost(context)
 	local player = context.Player
 	local abilityConfig = context.AbilityConfig
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
+	local humanoid = context.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then
+		return
+	end
+	playIceBoostAnimation(humanoid, duration)
 	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or 2)
 	local untilTime = os.clock() + duration
 

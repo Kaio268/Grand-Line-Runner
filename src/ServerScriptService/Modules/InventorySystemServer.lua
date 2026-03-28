@@ -89,6 +89,10 @@ local function unequipIfEquipped(player, toolName, itemKind)
 	local t = findInventoryTool(char, itemKind, toolName) or char:FindFirstChild(toolName)
 	if t and t:IsA("Tool") then
 		humanoid:UnequipTools()
+		local manualGrip = char:FindFirstChild("ManualGrip", true)
+		if manualGrip then
+			manualGrip:Destroy()
+		end
 	end
 end
 
@@ -160,6 +164,10 @@ local function toggleEquip(player, kind, toolName)
 			)
 		end
 		humanoid:UnequipTools()
+		local manualGrip = char:FindFirstChild("ManualGrip", true)
+		if manualGrip then
+			manualGrip:Destroy()
+		end
 		return
 	end
 
@@ -194,6 +202,37 @@ local function toggleEquip(player, kind, toolName)
 			return
 		end
 
+		local function enforceWeld(finalTool)
+			local handle = finalTool:FindFirstChild("Handle")
+			if not handle then return end
+
+			local existingGrip = refreshedChar:FindFirstChild("RightGrip", true)
+			local isActualWeld = existingGrip and existingGrip:IsA("Weld")
+
+			if not isActualWeld then
+				local gripPart = refreshedChar:FindFirstChild("RightHand")
+					or refreshedChar:FindFirstChild("RightLowerArm")
+					or refreshedChar:FindFirstChild("Right Arm")
+
+				if gripPart then
+					local weld = Instance.new("Weld")
+					weld.Name = "ManualGrip"
+					weld.Part0 = gripPart
+					weld.Part1 = handle
+					weld.C1 = finalTool.Grip
+
+					local attachment = gripPart:FindFirstChild("RightGripAttachment")
+						or gripPart:FindFirstChild("RightGrip")
+					if attachment and attachment:IsA("Attachment") then
+						weld.C0 = attachment.CFrame
+					end
+
+					weld.Parent = handle
+					print("[Inventory] Applied manual weld for R6G model compatibility.")
+				end
+			end
+		end
+
 		local equipped = findInventoryTool(refreshedChar, kind, toolName) or refreshedChar:FindFirstChild(toolName)
 		if equipped and equipped:IsA("Tool") then
 			if kind == "Chest" then
@@ -204,6 +243,7 @@ local function toggleEquip(player, kind, toolName)
 					equipped.Parent and equipped.Parent:GetFullName() or "nil"
 				)
 			end
+			enforceWeld(equipped)
 			return
 		end
 
@@ -221,6 +261,7 @@ local function toggleEquip(player, kind, toolName)
 			pcall(function()
 				fallbackTool.Parent = refreshedChar
 			end)
+			enforceWeld(fallbackTool)
 		elseif kind == "Chest" then
 			chestDebug(
 				"toggleEquip chest failed to find tool after EquipTool player=%s tool=%s",

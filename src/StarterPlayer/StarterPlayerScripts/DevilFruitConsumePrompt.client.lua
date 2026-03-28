@@ -5,9 +5,14 @@ local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
-local eatAnimation = Instance.new("Animation")
 
-eatAnimation.AnimationId = "rbxassetid://125650953077554"
+local eatAnimation = Instance.new("Animation")
+local animations = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Animations")
+
+local R6 = animations.EatFruit:WaitForChild("R6")
+local R6G = animations.EatFruit:WaitForChild("R6G")
+
+eatAnimation.AnimationId = R6.AnimationId
 
 local screenGui
 local panel
@@ -16,6 +21,27 @@ local bodyLabel
 local confirmButton
 local cancelButton
 local pendingPayload
+
+local function getCurrentModelAsset(character, humanoid)
+	local modelAsset = character:GetAttribute("CurrentModelAsset")
+	if modelAsset == "R6" or modelAsset == "R6G" then
+		return modelAsset
+	end
+
+	if character:FindFirstChild("R6G") and character.R6G:IsA("StringValue") then
+		return "R6G"
+	end
+
+	if character:FindFirstChild("R6") and character.R6:IsA("StringValue") then
+		return "R6"
+	end
+
+	if humanoid and humanoid.RigType == Enum.HumanoidRigType.R15 then
+		return "R6G"
+	end
+
+	return "R6"
+end
 
 local function playEatAnimation()
 	local character = player.Character
@@ -33,6 +59,13 @@ local function playEatAnimation()
 		return
 	end
 
+	local currentModelAsset = getCurrentModelAsset(character, hum)
+	if currentModelAsset == "R6G" then
+		eatAnimation.AnimationId = R6G.AnimationId
+	else
+		eatAnimation.AnimationId = R6.AnimationId
+	end
+
 	local ok, track = pcall(function()
 		return animator:LoadAnimation(eatAnimation)
 	end)
@@ -42,7 +75,25 @@ local function playEatAnimation()
 
 	track.Priority = Enum.AnimationPriority.Action
 	track:Play()
-	track.Stopped:Wait()
+
+	local stopped = false
+	local stoppedConnection
+	stoppedConnection = track.Stopped:Connect(function()
+		stopped = true
+		if stoppedConnection then
+			stoppedConnection:Disconnect()
+			stoppedConnection = nil
+		end
+	end)
+
+	local timeoutAt = os.clock() + math.max(track.Length, 0.1) + 0.5
+	while not stopped and os.clock() < timeoutAt do
+		task.wait()
+	end
+
+	if stoppedConnection then
+		stoppedConnection:Disconnect()
+	end
 end
 
 local function ensurePromptGui()
