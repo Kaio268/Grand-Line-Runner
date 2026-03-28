@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local animations = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Animations")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -20,7 +21,7 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
-local GOMU_ROCKET_ANIM = "rbxassetid://106521727746519"
+local GOMU_ROCKET_ANIM = animations.Gomu:WaitForChild("Rocket")
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
@@ -1527,6 +1528,29 @@ local function findFreezableHazardAlongSegment(startPosition, endPosition, searc
 	return nil, nil
 end
 
+-- 1. Reference the Explosion folder
+local ExplosionFolder = ReplicatedStorage.Assets.HieParticles:WaitForChild("Explosion")
+
+-- Helper function to trigger the particles
+local function emitExplosion(position)
+	-- We use an attachment so the particles stay at the hit spot even after projectile is gone
+	local attachment = Instance.new("Attachment")
+	attachment.CFrame = CFrame.new(position)
+	attachment.Parent = workspace.Terrain
+	
+	for _, effect in ipairs(ExplosionFolder:GetChildren()) do
+		if effect:IsA("ParticleEmitter") then
+			local clone = effect:Clone()
+			clone.Parent = attachment
+			-- Emit the count specified in the emitter or a default value (e.g., 20)
+			clone:Emit(clone:GetAttribute("EmitCount") or 25) 
+		end
+	end
+	
+	-- Clean up the attachment after particles finish
+	game:GetService("Debris"):AddItem(attachment, 3) 
+end
+
 local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 	local rootPart = getPlayerRootPart(targetPlayer)
 	if not rootPart then
@@ -1540,9 +1564,9 @@ local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 	local freezeDuration = math.max(0, tonumber(payload.FreezeDuration) or 0)
 	local startPosition = rootPart.Position + Vector3.new(0, 1.2, 0) + direction * 3
 
-	local projectile = Instance.new("Part")
+	local projectile = ReplicatedStorage.Assets.HieParticles:WaitForChild("ice shard"):Clone()
 	projectile.Name = "HieFreezeShot"
-	projectile.Shape = Enum.PartType.Ball
+	--projectile.Shape = Enum.PartType.Ball
 	projectile.Anchored = true
 	projectile.CanCollide = false
 	projectile.CanTouch = false
@@ -1592,6 +1616,7 @@ local function launchFreezeShot(targetPlayer, payload, shouldResolveHit)
 		end
 
 		if projectile.Parent then
+			emitExplosion(projectile.Position)
 			projectile:Destroy()
 		end
 	end)
@@ -2017,7 +2042,7 @@ local function createRubberLaunchEffect(_targetPlayer, fruitName, abilityName, p
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		local animation = Instance.new("Animation")
-		animation.AnimationId = GOMU_ROCKET_ANIM
+		animation.AnimationId = GOMU_ROCKET_ANIM.AnimationId
 		local track = humanoid:LoadAnimation(animation)
 		track.Priority = Enum.AnimationPriority.Action
 		track:Play()

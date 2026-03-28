@@ -1,9 +1,10 @@
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local animations = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Animations")
 local Debris = game:GetService("Debris")
-local flameDashAnimation = "rbxassetid://124285257843194"
-local flameBurstAnimation = "rbxassetid://130411347773227"
+local flameDashAnimation = animations.Mera:WaitForChild("FlameDash")
+local flameBurstAnimation = animations.Mera:WaitForChild("FlameBurst")
 local MeraMeraNoMi = {}
 
 local WALL_PADDING = 2
@@ -54,7 +55,7 @@ end
 
 local function playFlameDashAnimation(humanoid, character, rootPart)
 	local animation = Instance.new("Animation")
-	animation.AnimationId = flameDashAnimation
+	animation.AnimationId = flameDashAnimation.AnimationId
 	local track = humanoid:LoadAnimation(animation)
 	track.Priority = Enum.AnimationPriority.Action
 
@@ -127,7 +128,7 @@ end
 
 local function playFlameBurstAnimation(humanoid, character, rootPart)
 	local animation = Instance.new("Animation")
-	animation.AnimationId = flameBurstAnimation
+	animation.AnimationId = flameBurstAnimation.AnimationId
 	local track = humanoid:LoadAnimation(animation)
 	track.Priority = Enum.AnimationPriority.Action
 

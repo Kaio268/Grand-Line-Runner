@@ -2,10 +2,10 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")
-
+local animations = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Animations")
 local HieHieNoMi = {}
-local iceBlastAnimation = "rbxassetid://112900668980719"
-local iceBoostAnimation = "rbxassetid://84130968608346"
+local iceBlastAnimation = animations.Hie:WaitForChild("IceBlast")
+local iceBoostAnimation = animations.Hie:WaitForChild("IceBoost")
 
 local lastSpawnInfo = {}
 local TRAIL_DISTANCE_THRESHOLD = 2.2
@@ -13,7 +13,7 @@ local TRAIL_TIME_THRESHOLD = 0.1
 
 local function playIceBlastAnimation(humanoid)
 	local animation = Instance.new("Animation")
-	animation.AnimationId = iceBlastAnimation
+	animation.AnimationId = iceBlastAnimation.AnimationId
 	local track = humanoid:LoadAnimation(animation)
 	track.Priority = Enum.AnimationPriority.Action
 	track:Play()
@@ -22,7 +22,7 @@ end
 
 local function playIceBoostAnimation(humanoid, duration)
 	local animation = Instance.new("Animation")
-	animation.AnimationId = iceBoostAnimation
+	animation.AnimationId = iceBoostAnimation.AnimationId
 	local track = humanoid:LoadAnimation(animation)
 	track.Priority = Enum.AnimationPriority.Action
 	
