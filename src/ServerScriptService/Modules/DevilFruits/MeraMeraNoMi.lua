@@ -310,21 +310,21 @@ function MeraMeraNoMi.FireBurst(context)
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
 	local radius = math.max(0, tonumber(abilityConfig.Radius) or 0)
 
-	logMove(player, "move=FireBurst startup player=%s", player and player.Name or "<unknown>")
+	logMove(player, "move=FlameBurst startup player=%s", player and player.Name or "<unknown>")
 	logMove(
 		player,
-		"move=FireBurst radius old=%s new=%s",
+		"move=FlameBurst radius old=%s new=%s",
 		tostring(PREVIOUS_FIRE_BURST_RADIUS),
 		tostring(radius)
 	)
 	local animationState = MeraAnimationController.PlayFireBurstAnimation(context.Character, animationConfig)
 	MeraAnimationController.WaitForFireBurstRelease(animationState, animationConfig)
-	logMove(player, "move=FireBurst release player=%s", player and player.Name or "<unknown>")
+	logMove(player, "move=FlameBurst release player=%s", player and player.Name or "<unknown>")
 
 	if player then
 		task.delay(duration, function()
 			if player.Parent ~= nil then
-				logMove(player, "move=FireBurst complete player=%s", player.Name)
+				logMove(player, "move=FlameBurst complete player=%s", player.Name)
 			end
 		end)
 	end

@@ -17,13 +17,16 @@ local WARN_COOLDOWN = 3
 local DEFAULT_FADE_TIME = 0.05
 local DEFAULT_STOP_FADE_TIME = 0.08
 local PREVIOUS_FIRE_BURST_RADIUS = 50
-local FLAME_DASH_LOOP_INTERVAL = 0.05
-local FLAME_DASH_STAGE_LIFETIME = 0.4
-local FLAME_DASH_MARKER_START = "Start"
-local FLAME_DASH_MARKER_END = "End"
-local FLAME_DASH_MARKER_TRAIL = "Trail"
-local FLAME_DASH_MARKER_TRAIL_END = "TrailEnd"
-local FLAME_DASH_START_FALLBACK_DELAY = 0.03
+local FLAME_DASH_TRAIL_SPACING = 2.8
+local FLAME_DASH_STOP_SPEED_THRESHOLD = 3
+local FLAME_DASH_FINAL_POSITION_TOLERANCE = 1.25
+local FLAME_DASH_FINALIZE_SETTLE_TIME = 0.05
+local FLAME_DASH_FINALIZE_MAX_WAIT = 0.35
+local FLAME_DASH_PREDICTED_FINALIZE_TIMEOUT = 0.75
+local FLAME_DASH_TRAIL_POST_STOP_HOLD_DURATION = 0.65
+local FLAME_DASH_TRAIL_ORDERED_FADE_DURATION = 0.09
+local FLAME_DASH_TRAIL_ORDERED_FADE_STEP_INTERVAL = 0.04
+local FLAME_DASH_FINAL_STAMP_EPSILON = 0.05
 
 local function logMove(message, ...)
 	if not DEBUG_INFO then
@@ -68,6 +71,62 @@ local function getPlayerRootPart(targetPlayer)
 	end
 
 	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function getPlanarDirection(vector, fallbackDirection)
+	local planarVector = typeof(vector) == "Vector3" and Vector3.new(vector.X, 0, vector.Z) or nil
+	if planarVector and planarVector.Magnitude > 0.01 then
+		return planarVector.Unit
+	end
+
+	local fallback = typeof(fallbackDirection) == "Vector3"
+			and Vector3.new(fallbackDirection.X, 0, fallbackDirection.Z)
+		or Vector3.new(0, 0, -1)
+	if fallback.Magnitude <= 0.01 then
+		fallback = Vector3.new(0, 0, -1)
+	end
+
+	return fallback.Unit
+end
+
+local function getPlanarMagnitude(vector)
+	if typeof(vector) ~= "Vector3" then
+		return 0
+	end
+
+	return Vector3.new(vector.X, 0, vector.Z).Magnitude
+end
+
+local function getPlanarDistance(fromPosition, toPosition)
+	if typeof(fromPosition) ~= "Vector3" or typeof(toPosition) ~= "Vector3" then
+		return math.huge
+	end
+
+	return Vector3.new(toPosition.X - fromPosition.X, 0, toPosition.Z - fromPosition.Z).Magnitude
+end
+
+local function resolveDashDirection(rootPart, preferredDirection)
+	if not rootPart or not rootPart.Parent then
+		return getPlanarDirection(preferredDirection, Vector3.new(0, 0, -1))
+	end
+
+	local velocityDirection = getPlanarDirection(rootPart.AssemblyLinearVelocity, nil)
+	if velocityDirection then
+		local planarVelocity = Vector3.new(rootPart.AssemblyLinearVelocity.X, 0, rootPart.AssemblyLinearVelocity.Z)
+		if planarVelocity.Magnitude > 8 then
+			return velocityDirection
+		end
+	end
+
+	return getPlanarDirection(preferredDirection, rootPart.CFrame.LookVector)
 end
 
 local function buildAnimationPath(assetName)
@@ -187,7 +246,131 @@ function MeraPresentationClient:GetTrackBucket(targetPlayer)
 	return bucket
 end
 
-function MeraPresentationClient:StopFlameDashVfx(targetPlayer)
+function MeraPresentationClient:RequestFlameDashFinalization(targetPlayer, reason, finalPosition, direction, source)
+	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	if not state then
+		return false
+	end
+
+	local now = os.clock()
+	local requestSource = tostring(source or "authoritative")
+	local request = state.PendingFinalize or {}
+	request.Reason = reason
+	request.Source = requestSource
+	request.Direction = resolveDashDirection(state.RootPart, direction or state.Direction)
+	request.RequestedAt = now
+	if typeof(finalPosition) == "Vector3" then
+		request.RequestedFinalPosition = finalPosition
+	end
+
+	state.PendingFinalize = request
+	return true
+end
+
+function MeraPresentationClient:FillFlameDashTrailToFinalStop(state, finalPosition, direction)
+	if not state or not state.TrailState or typeof(finalPosition) ~= "Vector3" then
+		return 0
+	end
+
+	local sampledPosition = typeof(state.LastTrailSamplePosition) == "Vector3" and state.LastTrailSamplePosition or finalPosition
+	local segment = finalPosition - sampledPosition
+	local planarSegment = Vector3.new(segment.X, 0, segment.Z)
+	local segmentDistance = planarSegment.Magnitude
+	local segmentDirection = getPlanarDirection(planarSegment, direction or state.Direction)
+	local addedStamps = 0
+
+	while segmentDistance >= FLAME_DASH_TRAIL_SPACING do
+		sampledPosition = sampledPosition + (segmentDirection * FLAME_DASH_TRAIL_SPACING)
+		sampledPosition = Vector3.new(sampledPosition.X, finalPosition.Y, sampledPosition.Z)
+		if MeraVfx.UpdateFlameDashTrail(state.TrailState, {
+			Position = sampledPosition,
+			Direction = segmentDirection,
+		}) then
+			addedStamps += 1
+		end
+		segmentDistance -= FLAME_DASH_TRAIL_SPACING
+	end
+
+	if getPlanarDistance(sampledPosition, finalPosition) > FLAME_DASH_FINAL_STAMP_EPSILON
+		or math.abs(sampledPosition.Y - finalPosition.Y) > FLAME_DASH_FINAL_STAMP_EPSILON then
+		if MeraVfx.UpdateFlameDashTrail(state.TrailState, {
+			Position = finalPosition,
+			Direction = segmentDirection,
+		}) then
+			addedStamps += 1
+		end
+	end
+
+	state.LastTrailSamplePosition = finalPosition
+	return addedStamps
+end
+
+function MeraPresentationClient:FinalizeFlameDashVfx(targetPlayer, state, finalizeData, finalPosition, direction)
+	if not state or state.Finalized then
+		return false
+	end
+
+	state.Finalized = true
+	self.activeFlameDashVfxByPlayer[targetPlayer] = nil
+
+	if typeof(state.UpdateConnection) == "RBXScriptConnection" then
+		state.UpdateConnection:Disconnect()
+		state.UpdateConnection = nil
+	end
+
+	local resolvedDirection = resolveDashDirection(state.RootPart, direction or state.Direction)
+	local resolvedFinalPosition = typeof(finalPosition) == "Vector3"
+		and finalPosition
+		or (typeof(state.LastRootPosition) == "Vector3" and state.LastRootPosition or (state.RootPart and state.RootPart.Position))
+	if typeof(resolvedFinalPosition) ~= "Vector3" and typeof(finalizeData and finalizeData.RequestedFinalPosition) == "Vector3" then
+		resolvedFinalPosition = finalizeData.RequestedFinalPosition
+	end
+
+	state.Direction = resolvedDirection
+	state.LastRootPosition = resolvedFinalPosition or state.LastRootPosition
+
+	logMove(
+		"move=FlameDash final stop position=%s player=%s reason=%s",
+		formatVector3(resolvedFinalPosition),
+		targetPlayer.Name,
+		tostring(finalizeData and finalizeData.Reason or "complete")
+	)
+
+	self:FillFlameDashTrailToFinalStop(state, resolvedFinalPosition, resolvedDirection)
+
+	MeraVfx.StopFlameDashTrail(state.TrailState, {
+		Direction = resolvedDirection,
+		HoldDuration = FLAME_DASH_TRAIL_POST_STOP_HOLD_DURATION,
+		OrderedFadeDuration = FLAME_DASH_TRAIL_ORDERED_FADE_DURATION,
+		OrderedFadeStepInterval = FLAME_DASH_TRAIL_ORDERED_FADE_STEP_INTERVAL,
+	})
+
+	return true
+end
+
+function MeraPresentationClient:TryFinalizeFlameDashVfx(targetPlayer, state, currentPosition, currentDirection)
+	local finalizeData = state and state.PendingFinalize
+	if not finalizeData then
+		return false
+	end
+
+	local now = os.clock()
+	local elapsed = math.max(0, now - (tonumber(finalizeData.RequestedAt) or now))
+	local planarSpeed = getPlanarMagnitude(state.RootPart and state.RootPart.AssemblyLinearVelocity or nil)
+	local requestedFinalPosition = finalizeData.RequestedFinalPosition
+	local atRequestedStop = typeof(requestedFinalPosition) ~= "Vector3"
+		or getPlanarDistance(currentPosition, requestedFinalPosition) <= FLAME_DASH_FINAL_POSITION_TOLERANCE
+	local speedSettled = elapsed >= FLAME_DASH_FINALIZE_SETTLE_TIME and planarSpeed <= FLAME_DASH_STOP_SPEED_THRESHOLD
+	local timedOut = elapsed >= FLAME_DASH_FINALIZE_MAX_WAIT
+
+	if not ((speedSettled and atRequestedStop) or timedOut) then
+		return false
+	end
+
+	return self:FinalizeFlameDashVfx(targetPlayer, state, finalizeData, currentPosition, currentDirection)
+end
+
+function MeraPresentationClient:StopFlameDashVfx(targetPlayer, reason, finalPosition, direction)
 	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
 	if not state then
 		return false
@@ -195,174 +378,135 @@ function MeraPresentationClient:StopFlameDashVfx(targetPlayer)
 
 	self.activeFlameDashVfxByPlayer[targetPlayer] = nil
 
-	if typeof(state.FlameConnection) == "RBXScriptConnection" then
-		state.FlameConnection:Disconnect()
+	if typeof(state.UpdateConnection) == "RBXScriptConnection" then
+		state.UpdateConnection:Disconnect()
 	end
 
-	if typeof(state.DashConnection) == "RBXScriptConnection" then
-		state.DashConnection:Disconnect()
-	end
-
-	if typeof(state.StoppedConnection) == "RBXScriptConnection" then
-		state.StoppedConnection:Disconnect()
-	end
-
-	if type(state.MarkerConnections) == "table" then
-		for _, connection in ipairs(state.MarkerConnections) do
-			connection:Disconnect()
-		end
-	end
+	local resolvedDirection = resolveDashDirection(state.RootPart, direction or state.Direction)
+	MeraVfx.StopFlameDashTrail(state.TrailState, {
+		Direction = resolvedDirection,
+		ImmediateCleanup = true,
+	})
+	logMove(
+		"move=FlameDash trail stop player=%s reason=%s finalPosition=%s direction=%s stamps=%d",
+		targetPlayer.Name,
+		tostring(reason),
+		formatVector3(finalPosition or state.LastRootPosition),
+		formatVector3(resolvedDirection),
+		tonumber(state.TrailState and state.TrailState.StampCount) or 0
+	)
 
 	return true
 end
 
-function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, track)
+function MeraPresentationClient:EmitFlameDashTrail(targetPlayer, position, direction)
+	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	if not state or not state.TrailState then
+		return false
+	end
+
+	MeraVfx.UpdateFlameDashTrail(state.TrailState, {
+		Position = position,
+		Direction = direction,
+	})
+	return true
+end
+
+function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 	local rootPart = getPlayerRootPart(targetPlayer)
 	local character = targetPlayer and targetPlayer.Character
 	if not rootPart or not character then
 		return false
 	end
 
-	self:StopFlameDashVfx(targetPlayer)
+	self:StopFlameDashVfx(targetPlayer, "restart", rootPart.Position, rootPart.CFrame.LookVector)
 
 	local startPosition = typeof(payload) == "table" and payload.StartPosition or nil
 	if typeof(startPosition) ~= "Vector3" then
 		startPosition = rootPart.Position
 	end
 
+	local preferredDirection = typeof(payload) == "table" and payload.Direction or nil
+	local resolvedDirection = resolveDashDirection(rootPart, preferredDirection)
 	local state = {
-		StartPosition = startPosition,
-		MarkerHits = {},
+		RootPart = rootPart,
+		Character = character,
+		Direction = resolvedDirection,
+		LastRootPosition = rootPart.Position,
+		LastTrailSamplePosition = startPosition,
 	}
+
+	state.TrailState = MeraVfx.StartFlameDashTrail({
+		RootPart = rootPart,
+		Direction = resolvedDirection,
+	})
 	self.activeFlameDashVfxByPlayer[targetPlayer] = state
 
-	local function startLoop(callback)
-		local accumulator = 0
-		return RunService.Heartbeat:Connect(function(dt)
-			if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
-				return
-			end
+	logMove(
+		"move=FlameDash start player=%s direction=%s startPosition=%s",
+		targetPlayer.Name,
+		formatVector3(resolvedDirection),
+		formatVector3(startPosition)
+	)
+	logMove(
+		"move=FlameDash trail start player=%s startPosition=%s spacing=%.2f direction=%s",
+		targetPlayer.Name,
+		formatVector3(startPosition),
+		FLAME_DASH_TRAIL_SPACING,
+		formatVector3(resolvedDirection)
+	)
+	self:EmitFlameDashTrail(targetPlayer, startPosition, resolvedDirection)
 
-			if not rootPart.Parent or not character.Parent then
-				return
-			end
-
-			accumulator += dt
-			if accumulator < FLAME_DASH_LOOP_INTERVAL then
-				return
-			end
-
-			accumulator = 0
-			callback()
-		end)
-	end
-
-	local function emitStage(stageName)
-		MeraVfx.PlayFlameDashEffect({
-			StageName = stageName,
-			RootPart = rootPart,
-			Direction = rootPart.CFrame.LookVector,
-			Lifetime = FLAME_DASH_STAGE_LIFETIME,
-			FollowDuration = FLAME_DASH_LOOP_INTERVAL,
-		})
-	end
-
-	local function stopLoop(connectionName)
-		local connection = state[connectionName]
-		if typeof(connection) == "RBXScriptConnection" then
-			connection:Disconnect()
-		end
-		state[connectionName] = nil
-	end
-
-	local function startStageLoop(connectionName, stageName)
-		stopLoop(connectionName)
-		emitStage(stageName)
-		state[connectionName] = startLoop(function()
-			emitStage(stageName)
-		end)
-	end
-
-	local function bindMarker(markerName, callback)
-		if typeof(track) ~= "Instance" or not track:IsA("AnimationTrack") then
+	state.UpdateConnection = RunService.Heartbeat:Connect(function()
+		if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
 			return
 		end
 
-		local ok, connection = pcall(function()
-			return track:GetMarkerReachedSignal(markerName):Connect(function()
-				if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
-					return
-				end
-
-				state.MarkerHits[markerName] = true
-				callback()
-			end)
-		end)
-		if ok and connection then
-			state.MarkerConnections = state.MarkerConnections or {}
-			table.insert(state.MarkerConnections, connection)
-		else
-			logAnimWarn(
-				"animation missing or failed to load move=FlameDash detail=marker_connect_failed:%s marker=%s",
-				tostring(connection),
-				tostring(markerName)
-			)
+		if not rootPart.Parent or not character.Parent then
+			self:StopFlameDashVfx(targetPlayer, "invalid_state", state.LastRootPosition, state.Direction)
+			return
 		end
-	end
 
-	bindMarker(FLAME_DASH_MARKER_START, function()
-		startStageLoop("FlameConnection", "Flame")
-	end)
+		local currentPosition = rootPart.Position
+		local currentDirection = resolveDashDirection(rootPart, state.Direction)
+		state.Direction = currentDirection
+		state.LastRootPosition = currentPosition
 
-	bindMarker(FLAME_DASH_MARKER_END, function()
-		stopLoop("FlameConnection")
-	end)
-
-	bindMarker(FLAME_DASH_MARKER_TRAIL, function()
-		startStageLoop("DashConnection", "Dash")
-	end)
-
-	bindMarker(FLAME_DASH_MARKER_TRAIL_END, function()
-		stopLoop("DashConnection")
-		emitStage("Trail")
-	end)
-
-	if typeof(track) == "Instance" and track:IsA("AnimationTrack") then
-		task.delay(FLAME_DASH_START_FALLBACK_DELAY, function()
-			if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
-				return
+		local segment = currentPosition - state.LastTrailSamplePosition
+		local planarSegment = Vector3.new(segment.X, 0, segment.Z)
+		local segmentDistance = planarSegment.Magnitude
+		local now = os.clock()
+		if segmentDistance >= FLAME_DASH_TRAIL_SPACING then
+			local segmentDirection = getPlanarDirection(planarSegment, currentDirection)
+			local sampledPosition = state.LastTrailSamplePosition
+			while segmentDistance >= FLAME_DASH_TRAIL_SPACING do
+				sampledPosition = sampledPosition + (segmentDirection * FLAME_DASH_TRAIL_SPACING)
+				sampledPosition = Vector3.new(sampledPosition.X, currentPosition.Y, sampledPosition.Z)
+				self:EmitFlameDashTrail(targetPlayer, sampledPosition, segmentDirection)
+				segmentDistance = segmentDistance - FLAME_DASH_TRAIL_SPACING
 			end
 
-			if state.MarkerHits[FLAME_DASH_MARKER_START] then
-				return
+			state.LastTrailSamplePosition = sampledPosition
+		end
+
+		if not state.PendingFinalize and state.PredictedCompleteAt then
+			local predictedElapsed = math.max(0, now - state.PredictedCompleteAt)
+			if predictedElapsed >= FLAME_DASH_PREDICTED_FINALIZE_TIMEOUT then
+				self:RequestFlameDashFinalization(
+					targetPlayer,
+					"predicted_timeout_" .. tostring(state.PredictedCompleteReason or "complete"),
+					state.PredictedFinalPosition,
+					state.PredictedDirection,
+					"predicted_fallback"
+				)
 			end
+		end
 
-			startStageLoop("FlameConnection", "Flame")
-		end)
+		if self:TryFinalizeFlameDashVfx(targetPlayer, state, currentPosition, currentDirection) then
+			return
+		end
+	end)
 
-		state.StoppedConnection = track.Stopped:Connect(function()
-			if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
-				return
-			end
-
-			if state.DashConnection and not state.MarkerHits[FLAME_DASH_MARKER_TRAIL_END] then
-				stopLoop("DashConnection")
-				emitStage("Trail")
-			elseif state.FlameConnection and not state.MarkerHits[FLAME_DASH_MARKER_END] then
-				stopLoop("FlameConnection")
-				emitStage("Trail")
-			end
-
-			self:StopFlameDashVfx(targetPlayer)
-		end)
-	else
-		startStageLoop("FlameConnection", "Flame")
-	end
-
-	return true
-end
-
-function MeraPresentationClient:EmitFlameDashTrail(targetPlayer, finalPosition, direction)
 	return true
 end
 
@@ -443,16 +587,29 @@ function MeraPresentationClient:PlayFlameDashStartup(targetPlayer, _payload, _is
 	return true
 end
 
-function MeraPresentationClient:PlayFlameDashComplete(_targetPlayer, _payload)
+function MeraPresentationClient:PlayFlameDashComplete(targetPlayer, payload)
+	local finalPosition = type(payload) == "table" and (payload.ActualEndPosition or payload.EndPosition) or nil
+	local finalDirection = type(payload) == "table" and payload.Direction or nil
+	local reason = type(payload) == "table" and payload.ResolveReason or "server_resolve"
+	self:RequestFlameDashFinalization(targetPlayer, reason, finalPosition, finalDirection, "authoritative")
 	return true
 end
 
-function MeraPresentationClient:MarkFlameDashTrailPredictedComplete(_targetPlayer, _reason, _finalPosition, _direction)
+function MeraPresentationClient:MarkFlameDashTrailPredictedComplete(targetPlayer, reason, finalPosition, direction)
+	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	if not state then
+		return false
+	end
+
+	state.PredictedCompleteAt = os.clock()
+	state.PredictedCompleteReason = reason
+	state.PredictedFinalPosition = typeof(finalPosition) == "Vector3" and finalPosition or state.LastRootPosition
+	state.PredictedDirection = resolveDashDirection(state.RootPart, direction or state.Direction)
 	return true
 end
 
-function MeraPresentationClient:StopFlameDashTrail(_targetPlayer, _reason, _finalPosition, _direction)
-	self:StopFlameDashVfx(_targetPlayer)
+function MeraPresentationClient:StopFlameDashTrail(targetPlayer, reason, finalPosition, direction)
+	self:StopFlameDashVfx(targetPlayer, reason, finalPosition, direction)
 	return true
 end
 
@@ -464,7 +621,8 @@ function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
 
 	local duration = math.max(0, tonumber(type(payload) == "table" and payload.Duration) or 0)
 	local radius = math.max(0, tonumber(type(payload) == "table" and payload.Radius) or 0)
-	logMove("move=FireBurst radius old=%s new=%s", tostring(PREVIOUS_FIRE_BURST_RADIUS), tostring(radius))
+	logMove("move=FlameBurst startup player=%s", targetPlayer.Name)
+	logMove("move=FlameBurst radius old=%s new=%s", tostring(PREVIOUS_FIRE_BURST_RADIUS), tostring(radius))
 	MeraVfx.PlayFireBurst({
 		RootPart = rootPart,
 		Direction = rootPart.CFrame.LookVector,
@@ -472,15 +630,15 @@ function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
 		Radius = radius,
 	})
 
-	logMove("move=FireBurst release player=%s", targetPlayer.Name)
+	logMove("move=FlameBurst release player=%s", targetPlayer.Name)
 	if duration > 0 then
 		task.delay(duration, function()
 			if targetPlayer.Parent ~= nil then
-				logMove("move=FireBurst complete player=%s", targetPlayer.Name)
+				logMove("move=FlameBurst complete player=%s", targetPlayer.Name)
 			end
 		end)
 	else
-		logMove("move=FireBurst complete player=%s", targetPlayer.Name)
+		logMove("move=FlameBurst complete player=%s", targetPlayer.Name)
 	end
 
 	return true
