@@ -1,8 +1,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Registry = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Registry"))
-local DevilFruitLogger = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DevilFruitLogger"))
+local SharedFolder = Modules:WaitForChild("DevilFruits"):WaitForChild("Shared")
+local Registry = require(SharedFolder:WaitForChild("Registry"))
+local DevilFruitLogger = require(SharedFolder:WaitForChild("DevilFruitLogger"))
 
 local DevilFruitEffectRouter = {}
 DevilFruitEffectRouter.__index = DevilFruitEffectRouter

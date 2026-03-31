@@ -1019,7 +1019,17 @@ local function getFallbackSpawnTargetPart(character)
 end
 
 local function getBrrMesh()
-	return npc:WaitForChild("Mesh")
+	local mesh = npc:FindFirstChild("Mesh")
+	if mesh then
+		return mesh
+	end
+
+	mesh = npc:WaitForChild("Mesh", 2)
+	if mesh then
+		return mesh
+	end
+
+	return npc.PrimaryPart or npc:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function findPlayerPlot()

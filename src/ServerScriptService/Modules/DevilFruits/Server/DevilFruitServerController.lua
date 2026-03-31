@@ -4,8 +4,8 @@ local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):Wa
 
 local DevilFruitServerController = {}
 
-function DevilFruitServerController.Start()
-	DevilFruitService.Start()
+function DevilFruitServerController.Start(startSource)
+	DevilFruitService.Start(startSource or "DevilFruitServerController")
 end
 
 return DevilFruitServerController

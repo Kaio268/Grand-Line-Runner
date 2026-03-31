@@ -69,7 +69,6 @@ function ValidationChecks.ValidateCoreDependencies()
 		{ Root = Workspace, Label = "Workspace.PlotSystem", Path = { "PlotSystem" } },
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.BrainrotFolder", Path = { "BrainrotFolder" } },
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.Rarities", Path = { "Rarities" } },
-		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.Particles", Path = { "Particles" } },
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.LuckyBlock", Path = { "LuckyBlock" } },
 		{ Root = ReplicatedFirst, Label = "ReplicatedFirst.LoadingScreen", Path = { "LoadingScreen" } },
 	}

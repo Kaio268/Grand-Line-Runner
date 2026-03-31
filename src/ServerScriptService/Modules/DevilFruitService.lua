@@ -5,11 +5,9 @@ local Workspace = game:GetService("Workspace")
 
 local DevilFruitService = {}
 
-local REQUEST_REMOTE_NAME = "DevilFruitAbilityRequest"
-local STATE_REMOTE_NAME = "DevilFruitAbilityState"
-local EFFECT_REMOTE_NAME = "DevilFruitAbilityEffect"
 local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
 local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
+local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
 local HYDRATION_READY_TIMEOUT = 30
@@ -22,47 +20,15 @@ local hydrationTaskByPlayer = {}
 local started = false
 local getEquippedFruit
 local clearFruitRuntimeState
-
-local function getOrCreateRemotesFolder()
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	if not remotes then
-		remotes = Instance.new("Folder")
-		remotes.Name = "Remotes"
-		remotes.Parent = ReplicatedStorage
-	end
-
-	return remotes
-end
-
-local function getOrCreateRemote(parent, name)
-	local remote = parent:FindFirstChild(name)
-	if remote and remote:IsA("RemoteEvent") then
-		return remote
-	end
-
-	remote = Instance.new("RemoteEvent")
-	remote.Name = name
-	remote.Parent = parent
-	return remote
-end
-
-local function getRemoteBundle()
-	local remotes = getOrCreateRemotesFolder()
-
-	return {
-		Request = getOrCreateRemote(remotes, REQUEST_REMOTE_NAME),
-		State = getOrCreateRemote(remotes, STATE_REMOTE_NAME),
-		Effect = getOrCreateRemote(remotes, EFFECT_REMOTE_NAME),
-	}
-end
-
-local RemoteBundle = getRemoteBundle()
 local ModulesFolder = script.Parent
 local FruitHandlersFolder = ModulesFolder:FindFirstChild("DevilFruits") or ModulesFolder:WaitForChild("DevilFruits")
 local ServerArchitectureFolder = FruitHandlersFolder:WaitForChild("Server")
+local SharedFruitModules = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared")
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local Registry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Registry"))
+local Registry = require(SharedFruitModules:WaitForChild("Registry"))
+local DevilFruitLogger = require(SharedFruitModules:WaitForChild("DevilFruitLogger"))
+local DevilFruitRemotes = require(SharedFruitModules:WaitForChild("DevilFruitRemotes"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
@@ -75,7 +41,9 @@ local DevilFruitValidation = require(ServerArchitectureFolder:WaitForChild("Devi
 local DevilFruitAbilityRunner = require(ServerArchitectureFolder:WaitForChild("DevilFruitAbilityRunner"))
 local syncFruitAttribute
 local serverFruitModuleLoader = FruitModuleLoader.new()
-local replication = DevilFruitReplication.new(RemoteBundle)
+local remoteBundle
+local replication
+local requestRemoteConnection
 
 if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
@@ -187,6 +155,60 @@ local function debugPrint(...)
 	print("[DevilFruitService]", ...)
 end
 
+local function getRemoteBundle()
+	if remoteBundle then
+		return remoteBundle
+	end
+
+	remoteBundle = DevilFruitRemotes.GetBundle()
+	replication = DevilFruitReplication.new(remoteBundle)
+	return remoteBundle
+end
+
+local function describeRemote(instance)
+	return DevilFruitRemotes.DescribeInstance(instance)
+end
+
+local function countPayloadKeys(payload)
+	if typeof(payload) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _ in pairs(payload) do
+		count += 1
+	end
+
+	return count
+end
+
+local function describePayloadForAudit(payload)
+	if typeof(payload) ~= "table" then
+		return string.format("type=%s value=%s", typeof(payload), tostring(payload))
+	end
+
+	local keys = {}
+	for key in pairs(payload) do
+		keys[#keys + 1] = key
+	end
+
+	table.sort(keys, function(left, right)
+		return tostring(left) < tostring(right)
+	end)
+
+	local parts = {}
+	for _, key in ipairs(keys) do
+		local value = payload[key]
+		if typeof(value) == "Vector3" then
+			parts[#parts + 1] = string.format("%s=(%.2f, %.2f, %.2f)", tostring(key), value.X, value.Y, value.Z)
+		else
+			parts[#parts + 1] = string.format("%s=%s", tostring(key), tostring(value))
+		end
+	end
+
+	return string.format("type=table keys=%d payload={%s}", #keys, table.concat(parts, ", "))
+end
+
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
 end
@@ -198,6 +220,20 @@ end
 
 local function shouldLogMeraDashAttempt(fruitName, abilityName)
 	return abilityName == "FlameDash" or fruitName == "Mera Mera no Mi"
+end
+
+local function shouldLogMeraAudit(fruitName, abilityName)
+	return fruitName == "Mera Mera no Mi" or abilityName == "FlameDash" or abilityName == "FireBurst"
+end
+
+local function logMeraAudit(level, message, ...)
+	local formattedMessage = string.format("[%s] " .. message, MERA_AUDIT_MARKER, ...)
+	if level == "WARN" then
+		DevilFruitLogger.Warn("SERVER", formattedMessage)
+		return
+	end
+
+	DevilFruitLogger.Info("SERVER", formattedMessage)
 end
 
 local function logMeraDashServer(player, message, ...)
@@ -260,6 +296,19 @@ end
 local function getPlayerFruitValue(player)
 	local _, equipped = ensurePlayerFruitInstances(player)
 	return equipped
+end
+
+local function getEquippedFruitValue(player)
+	local fruitValue = getPlayerFruitValue(player)
+	if not fruitValue then
+		return DevilFruitConfig.None
+	end
+
+	if typeof(fruitValue.Value) ~= "string" then
+		return DevilFruitConfig.None
+	end
+
+	return DevilFruitConfig.ResolveFruitName(fruitValue.Value) or DevilFruitConfig.None
 end
 
 local function waitForDataReady(player, timeoutSeconds)
@@ -502,14 +551,14 @@ local function applyEquippedFruitRuntimeState(player, fruitValue, fruitName)
 end
 
 getEquippedFruit = function(player)
-	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
-	if typeof(fruitAttribute) == "string" then
-		return normalizeStoredFruitName(fruitAttribute)
-	end
-
 	local fruitValue = getPlayerFruitValue(player)
 	if fruitValue then
 		return normalizeStoredFruitName(fruitValue.Value)
+	end
+
+	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
+	if typeof(fruitAttribute) == "string" then
+		return normalizeStoredFruitName(fruitAttribute)
 	end
 
 	return DevilFruitConfig.None
@@ -524,6 +573,14 @@ syncFruitAttribute = function(player, fruitName)
 	end
 
 	player:SetAttribute("EquippedDevilFruit", resolvedFruit)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"equipped sync player=%s equipped=%s attr=%s value=%s",
+		player.Name,
+		tostring(resolvedFruit),
+		tostring(player:GetAttribute("EquippedDevilFruit")),
+		tostring(getEquippedFruitValue(player))
+	)
 end
 
 local function hookFruitValue(player)
@@ -716,7 +773,7 @@ local function fireAbilityActivated(player, fruitName, abilityName, readyAt, pay
 end
 
 local function executeAbility(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
-	DevilFruitAbilityRunner.Execute({
+	return DevilFruitAbilityRunner.Execute({
 		Player = player,
 		FruitName = fruitName,
 		AbilityName = abilityName,
@@ -734,6 +791,170 @@ local function executeAbility(player, fruitName, abilityName, abilityConfig, req
 		FireDenied = fireAbilityDenied,
 		FireActivated = fireAbilityActivated,
 	})
+end
+
+local function handleAbilityRequest(player, abilityName, requestPayload)
+	local requestRemote = getRemoteBundle().Request
+	local requestIdentity = describeRemote(requestRemote)
+	local requestReceivedAt = getSharedTimestamp()
+	local equippedFruitAtReceipt = getEquippedFruit(player)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"request received remote=%s path=%s runtimeId=%s debugId=%s object=%s player=%s ability=%s payloadKeys=%d ts=%.6f",
+		tostring(requestIdentity.Name),
+		tostring(requestIdentity.Path),
+		tostring(requestIdentity.RuntimeId),
+		tostring(requestIdentity.DebugId),
+		tostring(requestIdentity.Object),
+		player and player.Name or "<nil>",
+		tostring(abilityName),
+		countPayloadKeys(requestPayload),
+		requestReceivedAt
+	)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"remote event entered remote=%s path=%s runtimeId=%s debugId=%s object=%s player=%s ability=%s payloadKeys=%d",
+		tostring(requestIdentity.Name),
+		tostring(requestIdentity.Path),
+		tostring(requestIdentity.RuntimeId),
+		tostring(requestIdentity.DebugId),
+		tostring(requestIdentity.Object),
+		player and player.Name or "<nil>",
+		tostring(abilityName),
+		countPayloadKeys(requestPayload)
+	)
+	if shouldLogMeraAudit(equippedFruitAtReceipt, abilityName) then
+		logMeraAudit(
+			"INFO",
+			"Mera server request received player=%s equipped=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payload=%s",
+			player and player.Name or "<nil>",
+			tostring(equippedFruitAtReceipt),
+			tostring(abilityName),
+			tostring(requestIdentity.Name),
+			tostring(requestIdentity.Path),
+			tostring(requestIdentity.RuntimeId),
+			tostring(requestIdentity.DebugId),
+			tostring(requestIdentity.Object),
+			describePayloadForAudit(requestPayload)
+		)
+	end
+
+	local requestOk, validated = DevilFruitValidation.ValidateRequest({
+		Player = player,
+		AbilityName = abilityName,
+		RequestPayload = requestPayload,
+		RequestGuard = DevilFruitRequestGuard,
+		Security = DevilFruitSecurity,
+		NoneFruitName = DevilFruitConfig.None,
+		GetEquippedFruit = getEquippedFruit,
+		GetAliveCharacterState = getAliveCharacterState,
+		GetAbilityConfig = function(fruitName, resolvedAbilityName)
+			local abilityEntry = Registry.GetAbility(fruitName, resolvedAbilityName)
+			return abilityEntry and abilityEntry.Config or DevilFruitConfig.GetAbility(fruitName, resolvedAbilityName)
+		end,
+		FireDenied = fireAbilityDenied,
+	})
+	if not requestOk then
+		DevilFruitLogger.Warn(
+			"SERVER",
+			"request rejected player=%s ability=%s stage=validation",
+			player and player.Name or "<nil>",
+			tostring(abilityName)
+		)
+		if shouldLogMeraAudit(equippedFruitAtReceipt, abilityName) then
+			logMeraAudit(
+				"WARN",
+				"Mera server request rejected player=%s equipped=%s ability=%s stage=validation payload=%s",
+				player and player.Name or "<nil>",
+				tostring(equippedFruitAtReceipt),
+				tostring(abilityName),
+				describePayloadForAudit(requestPayload)
+			)
+		end
+		if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
+			logMeraDashServer(
+				player,
+				"request_handled_by_validation ts=%.6f player=%s ability=%s processingMs=%.2f",
+				getSharedTimestamp(),
+				player.Name,
+				tostring(abilityName),
+				(getSharedTimestamp() - requestReceivedAt) * 1000
+			)
+		end
+		return
+	end
+	DevilFruitLogger.Info(
+		"SERVER",
+		"request validated player=%s fruit=%s ability=%s payloadKeys=%d",
+		player.Name,
+		tostring(validated.EquippedFruit),
+		tostring(abilityName),
+		countPayloadKeys(validated.SanitizedPayload)
+	)
+	if shouldLogMeraAudit(validated.EquippedFruit, abilityName) then
+		logMeraAudit(
+			"INFO",
+			"Mera server request validated player=%s fruit=%s ability=%s payload=%s",
+			player.Name,
+			tostring(validated.EquippedFruit),
+			tostring(abilityName),
+			describePayloadForAudit(validated.SanitizedPayload)
+		)
+	end
+
+	local executed = executeAbility(player, validated.EquippedFruit, abilityName, validated.AbilityConfig, validated.SanitizedPayload, validated.CharacterState, {
+		ReceivedAt = requestReceivedAt,
+	})
+	DevilFruitLogger.Info(
+		"SERVER",
+		"request execution complete player=%s fruit=%s ability=%s executed=%s",
+		player.Name,
+		tostring(validated.EquippedFruit),
+		tostring(abilityName),
+		tostring(executed == true)
+	)
+	if shouldLogMeraAudit(validated.EquippedFruit, abilityName) then
+		logMeraAudit(
+			executed == true and "INFO" or "WARN",
+			"Mera server request execution complete player=%s fruit=%s ability=%s executed=%s",
+			player.Name,
+			tostring(validated.EquippedFruit),
+			tostring(abilityName),
+			tostring(executed == true)
+		)
+	end
+end
+
+local function ensureRequestRemoteConnection()
+	if requestRemoteConnection then
+		return requestRemoteConnection
+	end
+
+	local bundle = getRemoteBundle()
+	local requestIdentity = describeRemote(bundle.Request)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"remote connection binding request=%s path=%s runtimeId=%s debugId=%s object=%s state=%s effect=%s folder=%s",
+		tostring(requestIdentity.Name),
+		tostring(requestIdentity.Path),
+		tostring(requestIdentity.RuntimeId),
+		tostring(requestIdentity.DebugId),
+		tostring(requestIdentity.Object),
+		tostring(describeRemote(bundle.State).Path),
+		tostring(describeRemote(bundle.Effect).Path),
+		tostring(bundle.Folder:GetFullName())
+	)
+	requestRemoteConnection = bundle.Request.OnServerEvent:Connect(handleAbilityRequest)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"remote connection ready request=%s path=%s runtimeId=%s debugId=%s object=%s",
+		tostring(requestIdentity.Name),
+		tostring(requestIdentity.Path),
+		tostring(requestIdentity.RuntimeId),
+		tostring(requestIdentity.DebugId),
+		tostring(requestIdentity.Object)
+	)
+	return requestRemoteConnection
 end
 
 function DevilFruitService.GetEquippedFruit(player)
@@ -766,6 +987,8 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	debugPrint("SetEquippedFruit STEP 3 - Ensuring runtime DevilFruit folder/value")
 	local _, fruitValue = ensurePlayerFruitInstances(player)
 	local currentFruit = getEquippedFruit(player)
+	serverFruitModuleLoader:ResetHandler(currentFruit)
+	serverFruitModuleLoader:ResetHandler(resolvedFruitName)
 
 	if currentFruit ~= DevilFruitConfig.None and currentFruit ~= resolvedFruitName then
 		debugPrint("SetEquippedFruit STEP 3A - Clearing runtime state for previous fruit:", currentFruit)
@@ -774,6 +997,15 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 
 	debugPrint("SetEquippedFruit STEP 4 - Applying runtime state")
 	applyEquippedFruitRuntimeState(player, fruitValue, resolvedFruitName)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"equipped fruit applied player=%s requested=%s resolved=%s value=%s attr=%s",
+		player.Name,
+		tostring(fruitName),
+		tostring(resolvedFruitName),
+		tostring(getEquippedFruitValue(player)),
+		tostring(player:GetAttribute("EquippedDevilFruit"))
+	)
 
 	if resolvedFruitName ~= DevilFruitConfig.None then
 		IndexCollectionService.MarkDevilFruitDiscovered(player, resolvedFruitName)
@@ -836,12 +1068,29 @@ function DevilFruitService.IsHazardSuppressedForPlayer(player, instance)
 	return untilTime > os.clock()
 end
 
-function DevilFruitService.Start()
+function DevilFruitService.Start(startSource)
 	if started then
+		DevilFruitLogger.Info(
+			"SERVER",
+			"service start skipped source=%s reason=already_started",
+			tostring(startSource or "unknown")
+		)
 		return
 	end
 
 	started = true
+	ensureRequestRemoteConnection()
+	local requestIdentity = describeRemote(getRemoteBundle().Request)
+	DevilFruitLogger.Info(
+		"SERVER",
+		"service start begin source=%s request=%s path=%s runtimeId=%s debugId=%s object=%s",
+		tostring(startSource or "unknown"),
+		tostring(requestIdentity.Name),
+		tostring(requestIdentity.Path),
+		tostring(requestIdentity.RuntimeId),
+		tostring(requestIdentity.DebugId),
+		tostring(requestIdentity.Object)
+	)
 	HitEffectService.Start()
 
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -850,42 +1099,11 @@ function DevilFruitService.Start()
 
 	Players.PlayerAdded:Connect(hookPlayer)
 	Players.PlayerRemoving:Connect(cleanupPlayerState)
-
-	RemoteBundle.Request.OnServerEvent:Connect(function(player, abilityName, requestPayload)
-		local requestReceivedAt = getSharedTimestamp()
-		local requestOk, validated = DevilFruitValidation.ValidateRequest({
-			Player = player,
-			AbilityName = abilityName,
-			RequestPayload = requestPayload,
-			RequestGuard = DevilFruitRequestGuard,
-			Security = DevilFruitSecurity,
-			NoneFruitName = DevilFruitConfig.None,
-			GetEquippedFruit = getEquippedFruit,
-			GetAliveCharacterState = getAliveCharacterState,
-			GetAbilityConfig = function(fruitName, resolvedAbilityName)
-				local abilityEntry = Registry.GetAbility(fruitName, resolvedAbilityName)
-				return abilityEntry and abilityEntry.Config or DevilFruitConfig.GetAbility(fruitName, resolvedAbilityName)
-			end,
-			FireDenied = fireAbilityDenied,
-		})
-		if not requestOk then
-			if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
-				logMeraDashServer(
-					player,
-					"request_handled_by_validation ts=%.6f player=%s ability=%s processingMs=%.2f",
-					getSharedTimestamp(),
-					player.Name,
-					tostring(abilityName),
-					(getSharedTimestamp() - requestReceivedAt) * 1000
-				)
-			end
-			return
-		end
-
-		executeAbility(player, validated.EquippedFruit, abilityName, validated.AbilityConfig, validated.SanitizedPayload, validated.CharacterState, {
-			ReceivedAt = requestReceivedAt,
-		})
-	end)
+	DevilFruitLogger.Info("SERVER", "service start complete source=%s", tostring(startSource or "unknown"))
 end
+
+task.defer(function()
+	DevilFruitService.Start("module_auto_start")
+end)
 
 return DevilFruitService

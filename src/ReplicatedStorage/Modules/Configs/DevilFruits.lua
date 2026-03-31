@@ -50,7 +50,7 @@ local DevilFruits = {
 						},
 					},
 					Animation = {
-						AssetName = "FlameDash",
+						AssetName = "Flame Dash",
 						FadeTime = 0.04,
 						StopFadeTime = 0.08,
 						PlaybackSpeed = 1.12,
@@ -63,7 +63,7 @@ local DevilFruits = {
 					Duration = 0.6,
 					VisualBaseRadius = 10,
 					Animation = {
-						AssetName = "FlameBurst",
+						AssetName = "Flame burst",
 						ReleaseMarker = "Release",
 						ReleaseFallbackTime = 0.22,
 						FadeTime = 0.06,

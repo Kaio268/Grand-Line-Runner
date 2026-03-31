@@ -7,6 +7,10 @@ local AnimationLoadDiagnostics = {}
 local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.5
 local WARN_COOLDOWN = 3
+local PERMISSION_DENIED_COOLDOWN = 300
+local LOAD_FAILURE_COOLDOWN = 15
+
+local cachedFailureByAssetKey = {}
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -26,6 +30,62 @@ local function logWarn(message, ...)
 	end
 
 	warn(string.format("[ANIM LOAD][WARN] " .. message, ...))
+end
+
+local function getAnimationId(animation)
+	if typeof(animation) == "Instance" and animation:IsA("Animation") then
+		return tostring(animation.AnimationId or "")
+	end
+
+	return tostring(animation or "")
+end
+
+function AnimationLoadDiagnostics.BuildAssetKey(animation)
+	local animationId = getAnimationId(animation)
+	if animationId ~= "" and animationId ~= "<nil>" then
+		return animationId
+	end
+
+	return AnimationLoadDiagnostics.DescribeAnimation(animation)
+end
+
+function AnimationLoadDiagnostics.IsPermissionFailure(detail)
+	local loweredDetail = string.lower(tostring(detail or ""))
+	return loweredDetail == "permission_denied"
+		or string.find(loweredDetail, "permission_denied", 1, true) ~= nil
+		or AnimationLoadDiagnostics.IsPermissionError(detail)
+end
+
+function AnimationLoadDiagnostics.GetCachedFailure(animation)
+	local assetKey = AnimationLoadDiagnostics.BuildAssetKey(animation)
+	local state = cachedFailureByAssetKey[assetKey]
+	if type(state) ~= "table" then
+		return nil
+	end
+
+	if (tonumber(state.RetryAt) or 0) <= os.clock() then
+		cachedFailureByAssetKey[assetKey] = nil
+		return nil
+	end
+
+	return state
+end
+
+function AnimationLoadDiagnostics.RememberFailure(animation, detail)
+	local assetKey = AnimationLoadDiagnostics.BuildAssetKey(animation)
+	local failureDetail = tostring(detail or "load_failed")
+	local cooldown = AnimationLoadDiagnostics.IsPermissionFailure(failureDetail)
+		and PERMISSION_DENIED_COOLDOWN
+		or LOAD_FAILURE_COOLDOWN
+	cachedFailureByAssetKey[assetKey] = {
+		Detail = failureDetail,
+		RetryAt = os.clock() + cooldown,
+	}
+end
+
+function AnimationLoadDiagnostics.ClearFailure(animation)
+	local assetKey = AnimationLoadDiagnostics.BuildAssetKey(animation)
+	cachedFailureByAssetKey[assetKey] = nil
 end
 
 function AnimationLoadDiagnostics.DescribeAnimation(animation)
@@ -66,19 +126,33 @@ function AnimationLoadDiagnostics.LoadTrack(animator, animation, sourceLabel)
 		return nil, "invalid_animation_instance"
 	end
 
+	local cachedFailure = AnimationLoadDiagnostics.GetCachedFailure(animation)
+	if cachedFailure then
+		logInfo(
+			"skipped cached asset=%s source=%s detail=%s",
+			assetDescription,
+			resolvedSource,
+			tostring(cachedFailure.Detail)
+		)
+		return nil, cachedFailure.Detail
+	end
+
 	local ok, trackOrError = pcall(function()
 		return animator:LoadAnimation(animation)
 	end)
 	if ok and trackOrError then
+		AnimationLoadDiagnostics.ClearFailure(animation)
 		return trackOrError, nil
 	end
 
 	local errorMessage = tostring(trackOrError)
 	if AnimationLoadDiagnostics.IsPermissionError(errorMessage) then
+		AnimationLoadDiagnostics.RememberFailure(animation, "permission_denied")
 		logWarn("permission denied asset=%s source=%s detail=%s", assetDescription, resolvedSource, errorMessage)
 		return nil, "permission_denied"
 	end
 
+	AnimationLoadDiagnostics.RememberFailure(animation, errorMessage)
 	logWarn("failed to load asset=%s source=%s detail=%s", assetDescription, resolvedSource, errorMessage)
 	return nil, errorMessage
 end

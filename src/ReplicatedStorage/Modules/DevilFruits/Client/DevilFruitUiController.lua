@@ -1,7 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Registry = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Registry"))
+local Registry = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("Registry"))
 
 local DevilFruitUiController = {}
 

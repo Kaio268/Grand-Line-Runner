@@ -67,8 +67,12 @@ local HEIGHT_MAX = 520
 local COMET_GROUP = "Comets"
 local BRAINROT_GROUP = "Brainrots"
 
-pcall(function() PhysicsService:CreateCollisionGroup(COMET_GROUP) end)
-pcall(function() PhysicsService:CreateCollisionGroup(BRAINROT_GROUP) end)
+pcall(function()
+	PhysicsService:RegisterCollisionGroup(COMET_GROUP)
+end)
+pcall(function()
+	PhysicsService:RegisterCollisionGroup(BRAINROT_GROUP)
+end)
 pcall(function()
 	PhysicsService:CollisionGroupSetCollidable(COMET_GROUP, BRAINROT_GROUP, false)
 end)
@@ -206,7 +210,7 @@ end
 local function setCollisionGroup(inst, groupName)
 	forEachPart(inst, function(p)
 		pcall(function()
-			PhysicsService:SetPartCollisionGroup(p, groupName)
+			p.CollisionGroup = groupName
 		end)
 	end)
 end
@@ -393,7 +397,7 @@ local function tagBrainrotsCollision()
 			brainrotsFolder.DescendantAdded:Connect(function(obj)
 				if obj:IsA("BasePart") then
 					pcall(function()
-						PhysicsService:SetPartCollisionGroup(obj, BRAINROT_GROUP)
+						obj.CollisionGroup = BRAINROT_GROUP
 					end)
 				end
 			end)

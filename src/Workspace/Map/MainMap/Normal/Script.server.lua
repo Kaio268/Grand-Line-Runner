@@ -1,17 +1,3 @@
-local ac = script.Parent:FindFirstChild("AnimationController") or script.Parent:FindFirstChildWhichIsA("AnimationController", true)
-if not ac then
-	warn(("%s is missing an AnimationController under %s"):format(script:GetFullName(), script.Parent:GetFullName()))
-	return
-end
+local LegacyAmbientAnimation = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("LegacyAmbientAnimation"))
 
-local animator = ac:FindFirstChild("Animator") or ac:FindFirstChildWhichIsA("Animator")
-if not animator then
-	animator = Instance.new("Animator")
-	animator.Parent = ac
-end
-
-local anim = Instance.new("Animation")
-anim.AnimationId = "rbxassetid://94395632772482"
-
-local track = animator:LoadAnimation(anim)
-track:Play()
+LegacyAmbientAnimation.PlayLoop(script.Parent, "rbxassetid://94395632772482", script:GetFullName())

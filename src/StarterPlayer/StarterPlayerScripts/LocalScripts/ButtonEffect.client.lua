@@ -4,9 +4,8 @@ local Debris = game:GetService("Debris")
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local MoneyCollectedRE = Remotes:WaitForChild("StandMoneyCollected")
 
-local Particles = ReplicatedStorage:WaitForChild("Particles")
-local MoneyEffectTemplate = Particles:WaitForChild("MoneyEffect")
- 
+local Particles = ReplicatedStorage:FindFirstChild("Particles")
+local MoneyEffectTemplate = Particles and Particles:FindFirstChild("MoneyEffect")
 
 local dropMod = ReplicatedStorage.Modules.MoneyEffect
 
@@ -58,10 +57,12 @@ MoneyCollectedRE.OnClientEvent:Connect(function(standModel, amount)
 		return
 	end
 
-	local fx = MoneyEffectTemplate:Clone()
-	fx.Parent = pp
-	emitAll(fx)
-	Debris:AddItem(fx, 3)
+	if MoneyEffectTemplate then
+		local fx = MoneyEffectTemplate:Clone()
+		fx.Parent = pp
+		emitAll(fx)
+		Debris:AddItem(fx, 3)
+	end
 
 	if DropDollars and typeof(DropDollars.DropDollars) == "function" then
 		local a = tonumber(amount) or 0

@@ -330,11 +330,6 @@ local function refreshLiveFolders()
 end
 
 local function getEquippedDevilFruit()
-	local equippedAttribute = player:GetAttribute("EquippedDevilFruit")
-	if typeof(equippedAttribute) == "string" and equippedAttribute ~= "" and equippedAttribute ~= "None" then
-		return equippedAttribute
-	end
-
 	local devilFruitFolder = devilFruitStateFolder or player:FindFirstChild("DevilFruit")
 	local equippedValue = devilFruitFolder and devilFruitFolder:FindFirstChild("Equipped")
 	if equippedValue and equippedValue:IsA("StringValue") then
@@ -342,6 +337,11 @@ local function getEquippedDevilFruit()
 		if value ~= "" and value ~= "None" then
 			return value
 		end
+	end
+
+	local equippedAttribute = player:GetAttribute("EquippedDevilFruit")
+	if typeof(equippedAttribute) == "string" and equippedAttribute ~= "" and equippedAttribute ~= "None" then
+		return equippedAttribute
 	end
 
 	return nil

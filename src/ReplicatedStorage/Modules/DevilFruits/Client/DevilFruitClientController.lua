@@ -10,11 +10,15 @@ local started = false
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local Registry = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Registry"))
+local DevilFruits = Modules:WaitForChild("DevilFruits")
+local SharedFolder = DevilFruits:WaitForChild("Shared")
+local Registry = require(SharedFolder:WaitForChild("Registry"))
+local DevilFruitLogger = require(SharedFolder:WaitForChild("DevilFruitLogger"))
+local DevilFruitRemotes = require(SharedFolder:WaitForChild("DevilFruitRemotes"))
 local ClientEffectVisuals = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ClientEffectVisuals"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local ProtectionRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
-local FruitModuleLoader = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("FruitModuleLoader"))
+local FruitModuleLoader = require(SharedFolder:WaitForChild("FruitModuleLoader"))
 local DevilFruitInputController = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitInputController"))
 local DevilFruitEffectRouter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitEffectRouter"))
 local DevilFruitUiController = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitUiController"))
@@ -36,27 +40,12 @@ local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_VERTICAL_DEADZONE = 0.12
 local MIN_DIRECTION_MAGNITUDE = 0.01
+local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 
-local function waitForChildSafe(parent, childName, timeout)
-	local deadline = os.clock() + (timeout or 15)
-	local child = parent:FindFirstChild(childName)
-
-	while not child and os.clock() < deadline do
-		task.wait(0.1)
-		child = parent:FindFirstChild(childName)
-	end
-
-	if child then
-		return child
-	end
-
-	error(string.format("[DevilFruit] Timed out waiting for %s.%s", parent:GetFullName(), childName))
-end
-
-local remotes = waitForChildSafe(ReplicatedStorage, "Remotes", 15)
-local requestRemote = waitForChildSafe(remotes, "DevilFruitAbilityRequest", 15)
-local stateRemote = waitForChildSafe(remotes, "DevilFruitAbilityState", 15)
-local effectRemote = waitForChildSafe(remotes, "DevilFruitAbilityEffect", 15)
+local RemoteBundle = DevilFruitRemotes.GetBundle()
+local requestRemote = RemoteBundle.Request
+local stateRemote = RemoteBundle.State
+local effectRemote = RemoteBundle.Effect
 
 local localCooldowns = {}
 local suppressedParts = {}
@@ -76,6 +65,8 @@ local getEquippedFruit
 local fruitModuleLoader
 local inputController
 local effectRouter
+local syncDevilFruitClientState
+local lastSyncedFruitName = DevilFruitConfig.None
 local gomuAimState = {
 	Highlight = nil,
 	TargetPlayer = nil,
@@ -108,6 +99,77 @@ local nextHudRefreshAt = 0
 
 local function logDevilFruitClient(message, ...)
 	print(string.format("[DEVILFRUIT CLIENT] " .. message, ...))
+end
+
+local function logDevilFruitRequest(message, ...)
+	if not RunService:IsStudio() then
+		return
+	end
+
+	DevilFruitLogger.Info("REQUEST", message, ...)
+end
+
+local function countPayloadKeys(payload)
+	if typeof(payload) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _ in pairs(payload) do
+		count += 1
+	end
+
+	return count
+end
+
+local function describeRemote(instance)
+	return DevilFruitRemotes.DescribeInstance(instance)
+end
+
+local function formatVector3ForLog(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function describePayloadForAudit(payload)
+	if typeof(payload) ~= "table" then
+		return string.format("type=%s value=%s", typeof(payload), formatVector3ForLog(payload))
+	end
+
+	local keys = {}
+	for key in pairs(payload) do
+		keys[#keys + 1] = key
+	end
+
+	table.sort(keys, function(left, right)
+		return tostring(left) < tostring(right)
+	end)
+
+	local parts = {}
+	for _, key in ipairs(keys) do
+		parts[#parts + 1] = string.format("%s=%s", tostring(key), formatVector3ForLog(payload[key]))
+	end
+
+	return string.format("type=table keys=%d payload={%s}", #keys, table.concat(parts, ", "))
+end
+
+local function shouldTraceAbilityInput(keyCode)
+	return keyCode == Enum.KeyCode.Q or keyCode == Enum.KeyCode.E
+end
+
+local function normalizeEquippedFruitName(fruitIdentifier)
+	if typeof(fruitIdentifier) ~= "string" then
+		return DevilFruitConfig.None
+	end
+
+	if fruitIdentifier == DevilFruitConfig.None or fruitIdentifier == "None" then
+		return DevilFruitConfig.None
+	end
+
+	return Registry.ResolveFruitName(fruitIdentifier) or fruitIdentifier
 end
 
 local function formatAbilityName(abilityName)
@@ -450,17 +512,17 @@ getFruitFolder = function()
 end
 
 getEquippedFruit = function()
-	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
-	if typeof(fruitAttribute) == "string" then
-		return fruitAttribute
-	end
-
 	local fruitFolder = getFruitFolder()
 	if fruitFolder then
 		local equipped = fruitFolder:FindFirstChild("Equipped")
 		if equipped and equipped:IsA("StringValue") then
-			return equipped.Value
+			return normalizeEquippedFruitName(equipped.Value)
 		end
+	end
+
+	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
+	if typeof(fruitAttribute) == "string" then
+		return normalizeEquippedFruitName(fruitAttribute)
 	end
 
 	return DevilFruitConfig.None
@@ -477,6 +539,11 @@ local function hookEquippedFruitValue(equippedValue)
 
 	equippedValue:SetAttribute("__DevilFruitHudHooked", true)
 	equippedValue:GetPropertyChangedSignal("Value"):Connect(function()
+		if typeof(syncDevilFruitClientState) == "function" then
+			task.defer(syncDevilFruitClientState)
+			return
+		end
+
 		updateCooldownHud(true)
 	end)
 end
@@ -1067,13 +1134,42 @@ end
 
 local function buildAbilityRequestPayload(fruitName, abilityName)
 	local abilityEntry = Registry.GetAbility(fruitName, abilityName)
+	local character = getCharacter()
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid") or nil
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart") or nil
+	local moveDirection = humanoid and humanoid.MoveDirection or nil
+	logDevilFruitRequest(
+		"client build begin fruit=%s ability=%s abilityEntry=%s character=%s humanoid=%s root=%s moveDir=%s lookDir=%s",
+		tostring(fruitName),
+		tostring(abilityName),
+		tostring(abilityEntry ~= nil),
+		tostring(character ~= nil),
+		tostring(humanoid ~= nil),
+		tostring(rootPart ~= nil),
+		formatVector3ForLog(moveDirection),
+		formatVector3ForLog(rootPart and rootPart.CFrame.LookVector or nil)
+	)
 	if inputController then
-		return inputController:BuildRequestPayload(fruitName, abilityName, abilityEntry, function()
+		local payload = inputController:BuildRequestPayload(fruitName, abilityName, abilityEntry, function()
 			return buildDefaultAbilityRequestPayload(fruitName, abilityName)
 		end)
+		logDevilFruitRequest(
+			"client build end fruit=%s ability=%s payloadKeys=%d",
+			tostring(fruitName),
+			tostring(abilityName),
+			countPayloadKeys(payload)
+		)
+		return payload
 	end
 
-	return buildDefaultAbilityRequestPayload(fruitName, abilityName)
+	local fallbackPayload = buildDefaultAbilityRequestPayload(fruitName, abilityName)
+	logDevilFruitRequest(
+		"client build end fruit=%s ability=%s payloadKeys=%d source=default_builder_only",
+		tostring(fruitName),
+		tostring(abilityName),
+		countPayloadKeys(fallbackPayload)
+	)
+	return fallbackPayload
 end
 
 local function updateGomuAimAssist()
@@ -1504,26 +1600,87 @@ effectRouter = DevilFruitEffectRouter.new({
 
 local function initializeDevilFruitClient()
 	logDevilFruitClient("init begin")
+	local requestIdentity = describeRemote(requestRemote)
+	logDevilFruitClient(
+		"remote bundle resolved request=%s path=%s runtimeId=%s debugId=%s object=%s state=%s effect=%s folder=%s",
+		tostring(requestIdentity.Name),
+		tostring(requestIdentity.Path),
+		tostring(requestIdentity.RuntimeId),
+		tostring(requestIdentity.DebugId),
+		tostring(requestIdentity.Object),
+		tostring(describeRemote(stateRemote).Path),
+		tostring(describeRemote(effectRemote).Path),
+		tostring(RemoteBundle.Folder:GetFullName())
+	)
 
-	local function syncDevilFruitClientState()
+	syncDevilFruitClientState = function()
+		local currentFruitName = getEquippedFruit()
+		if currentFruitName ~= lastSyncedFruitName then
+			fruitModuleLoader:ResetFruit(lastSyncedFruitName)
+			fruitModuleLoader:ResetFruit(currentFruitName)
+			logDevilFruitClient(
+				"fruit changed previous=%s current=%s",
+				tostring(lastSyncedFruitName),
+				tostring(currentFruitName)
+			)
+			lastSyncedFruitName = currentFruitName
+		end
+
 		hookFruitFolderSignals()
 		updateCooldownHud(true)
 		updateGomuAimAssist()
-		if getEquippedFruit() ~= PHOENIX_FRUIT_NAME then
+		if currentFruitName ~= PHOENIX_FRUIT_NAME then
 			stopPhoenixFlight()
 		end
-		logDevilFruitClient("fruit state synced")
+		local fruitFolder = getFruitFolder()
+		local equippedValue = fruitFolder and fruitFolder:FindFirstChild("Equipped")
+		local equippedValueText = equippedValue and equippedValue:IsA("StringValue") and equippedValue.Value or "<nil>"
+		logDevilFruitClient(
+			"fruit state synced equipped=%s attr=%s value=%s",
+			tostring(currentFruitName),
+			tostring(player:GetAttribute("EquippedDevilFruit")),
+			tostring(equippedValueText)
+		)
 	end
 
 	ensureCooldownHud()
 	logDevilFruitClient("UI bind success")
 
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		local traceAbilityInput = shouldTraceAbilityInput(input.KeyCode)
+		local equippedFruitName = traceAbilityInput and getEquippedFruit() or nil
+		local focusedTextBox = UserInputService:GetFocusedTextBox()
+		if traceAbilityInput then
+			logDevilFruitClient(
+				"bind raw key=%s processed=%s focused=%s modal=%s equipped=%s",
+				tostring(input.KeyCode.Name),
+				tostring(gameProcessed),
+				tostring(focusedTextBox ~= nil),
+				tostring(isGameplayModalOpen()),
+				tostring(equippedFruitName)
+			)
+		end
+
 		if gameProcessed then
+			if traceAbilityInput then
+				logDevilFruitClient(
+					"bind blocked key=%s reason=game_processed equipped=%s",
+					tostring(input.KeyCode.Name),
+					tostring(equippedFruitName)
+				)
+			end
 			return
 		end
 
-		if UserInputService:GetFocusedTextBox() then
+		if focusedTextBox then
+			if traceAbilityInput then
+				logDevilFruitClient(
+					"bind blocked key=%s reason=textbox_focus textbox=%s equipped=%s",
+					tostring(input.KeyCode.Name),
+					tostring(focusedTextBox:GetFullName()),
+					tostring(equippedFruitName)
+				)
+			end
 			return
 		end
 
@@ -1532,21 +1689,134 @@ local function initializeDevilFruitClient()
 		end
 		setFlightInputKeyState(input.KeyCode, true)
 
-		local fruitName, abilityName = getAbilityForKeyCode(input.KeyCode)
+		local fruitName, abilityName, abilityEntry = getAbilityForKeyCode(input.KeyCode)
+		if traceAbilityInput then
+			logDevilFruitClient(
+				"bind lookup key=%s equipped=%s resolvedFruit=%s ability=%s hasEntry=%s",
+				tostring(input.KeyCode.Name),
+				tostring(equippedFruitName),
+				tostring(fruitName),
+				tostring(abilityName),
+				tostring(abilityEntry ~= nil)
+			)
+		end
 		if fruitName == PHOENIX_FRUIT_NAME and abilityName == PHOENIX_FLIGHT_ABILITY and isPhoenixFlightActive() then
 			stopPhoenixFlight()
 			return
 		end
 
-		if not abilityName or not isLocallyReady(abilityName) then
+		if not abilityName then
+			if input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
+				logDevilFruitClient(
+					"bind ignored key=%s equipped=%s reason=no_ability",
+					tostring(input.KeyCode.Name),
+					tostring(fruitName or getEquippedFruit())
+				)
+			end
 			return
 		end
 
+		if not isLocallyReady(abilityName) then
+			logDevilFruitClient(
+				"bind ignored key=%s fruit=%s ability=%s reason=local_cooldown",
+				tostring(input.KeyCode.Name),
+				tostring(fruitName),
+				tostring(abilityName)
+			)
+			return
+		end
+
+		local requestStartedAt = os.clock()
+		local requestIdentity = describeRemote(requestRemote)
+		logDevilFruitRequest(
+			"client dispatch begin key=%s fruit=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s",
+			tostring(input.KeyCode.Name),
+			tostring(fruitName),
+			tostring(abilityName),
+			tostring(requestIdentity.Name),
+			tostring(requestIdentity.Path),
+			tostring(requestIdentity.RuntimeId),
+			tostring(requestIdentity.DebugId),
+			tostring(requestIdentity.Object)
+		)
 		local requestPayload = inputController:BuildPredictedRequest(fruitName, abilityName, function()
 			return buildAbilityRequestPayload(fruitName, abilityName)
 		end)
+		logDevilFruitClient(
+			"bind dispatch key=%s fruit=%s ability=%s payloadKeys=%d",
+			tostring(input.KeyCode.Name),
+			tostring(fruitName),
+			tostring(abilityName),
+			countPayloadKeys(requestPayload)
+		)
+		logDevilFruitClient(
+			"remote fire begin key=%s fruit=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payloadKeys=%d",
+			tostring(input.KeyCode.Name),
+			tostring(fruitName),
+			tostring(abilityName),
+			tostring(requestIdentity.Name),
+			tostring(requestIdentity.Path),
+			tostring(requestIdentity.RuntimeId),
+			tostring(requestIdentity.DebugId),
+			tostring(requestIdentity.Object),
+			countPayloadKeys(requestPayload)
+		)
+		if fruitName == "Mera Mera no Mi" then
+			logDevilFruitRequest(
+				"[%s] Mera FireServer begin ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payload=%s",
+				MERA_AUDIT_MARKER,
+				tostring(abilityName),
+				tostring(requestIdentity.Name),
+				tostring(requestIdentity.Path),
+				tostring(requestIdentity.RuntimeId),
+				tostring(requestIdentity.DebugId),
+				tostring(requestIdentity.Object),
+				describePayloadForAudit(requestPayload)
+			)
+		end
 
 		requestRemote:FireServer(abilityName, requestPayload)
+		if fruitName == "Mera Mera no Mi" then
+			logDevilFruitRequest(
+				"[%s] Mera FireServer end ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payload=%s",
+				MERA_AUDIT_MARKER,
+				tostring(abilityName),
+				tostring(requestIdentity.Name),
+				tostring(requestIdentity.Path),
+				tostring(requestIdentity.RuntimeId),
+				tostring(requestIdentity.DebugId),
+				tostring(requestIdentity.Object),
+				describePayloadForAudit(requestPayload)
+			)
+		end
+		logDevilFruitClient(
+			"remote fire end key=%s fruit=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payloadKeys=%d",
+			tostring(input.KeyCode.Name),
+			tostring(fruitName),
+			tostring(abilityName),
+			tostring(requestIdentity.Name),
+			tostring(requestIdentity.Path),
+			tostring(requestIdentity.RuntimeId),
+			tostring(requestIdentity.DebugId),
+			tostring(requestIdentity.Object),
+			countPayloadKeys(requestPayload)
+		)
+		logDevilFruitRequest(
+			"client dispatch end key=%s fruit=%s ability=%s payloadKeys=%d elapsedMs=%.2f",
+			tostring(input.KeyCode.Name),
+			tostring(fruitName),
+			tostring(abilityName),
+			countPayloadKeys(requestPayload),
+			(os.clock() - requestStartedAt) * 1000
+		)
+		if traceAbilityInput then
+			logDevilFruitClient(
+				"bind remote fired key=%s fruit=%s ability=%s",
+				tostring(input.KeyCode.Name),
+				tostring(fruitName),
+				tostring(abilityName)
+			)
+		end
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)

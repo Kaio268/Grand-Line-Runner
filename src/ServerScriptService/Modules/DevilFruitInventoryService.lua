@@ -25,6 +25,7 @@ local EXPLICIT_GRIP_PART_NAMES = {
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local FruitGripController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("FruitGripController"))
+local DevilFruitLogger = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
@@ -660,6 +661,15 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 		return
 	end
 
+	DevilFruitLogger.Info(
+		"SERVER",
+		"consume confirmed player=%s currentFruit=%s targetFruit=%s tool=%s",
+		player.Name,
+		tostring(currentFruitName),
+		tostring(targetFruitName),
+		tostring(tool and tool:GetFullName() or "<nil>")
+	)
+
 	local consumed, consumeReason = DevilFruitInventoryService.ConsumeFruit(player, fruitKey, 1)
 	if not consumed then
 		warn(string.format("[DevilFruitInventoryService] Failed to consume %s for %s: %s", fruitKey, player.Name, tostring(consumeReason)))
@@ -672,6 +682,13 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 		warn(string.format("[DevilFruitInventoryService] Failed to equip %s for %s after consuming", fruitKey, player.Name))
 		return
 	end
+	DevilFruitLogger.Info(
+		"SERVER",
+		"consume equip applied player=%s equippedFruit=%s targetFruit=%s",
+		player.Name,
+		tostring(DevilFruitService.GetEquippedFruit(player)),
+		tostring(targetFruitName)
+	)
 
 	if tool and tool.Parent then
 		tool:Destroy()
