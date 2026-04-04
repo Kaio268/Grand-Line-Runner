@@ -5,6 +5,8 @@ local React = require(Packages:WaitForChild("React"))
 
 local e = React.createElement
 local SEGMENT_GAP_PX = 4
+local AVATAR_MARKER_SIZE = 32
+local WAVE_MARKER_SIZE = 34
 
 local SEGMENT_COLORS = {
 	Color3.fromRGB(56, 67, 98),
@@ -51,7 +53,7 @@ local function avatarMarker(props)
 	return marker({
 		alpha = props.alpha,
 		yScale = 0.5,
-		size = 24,
+		size = props.size or AVATAR_MARKER_SIZE,
 		zIndex = 8,
 		children = {
 				Backdrop = e("Frame", {
@@ -100,7 +102,7 @@ local function waveMarker(props)
 	return marker({
 		alpha = props.alpha,
 		yScale = 0.5,
-		size = 24,
+		size = props.size or WAVE_MARKER_SIZE,
 		zIndex = 9,
 		children = {
 			Icon = e("ImageLabel", {

@@ -117,12 +117,7 @@ end
 
 giftLog(
 	"[GIFT][BOOT]",
-	string.format(
-		"module=%s giftsFrame=%s hud=%s",
-		safeName(script),
-		safeName(giftsFrame),
-		safeName(hudFrame)
-	)
+	string.format("module=%s giftsFrame=%s hud=%s", safeName(script), safeName(giftsFrame), safeName(hudFrame))
 )
 
 local function isTextGuiObject(obj: Instance?): boolean
@@ -157,12 +152,110 @@ local function getGiftSummaryTimer()
 	return nil
 end
 
+local function ensureGiftSummaryTimer()
+	for _, child in ipairs(lButtons:GetChildren()) do
+		if child:IsA("GuiObject") and child ~= hudGifts then
+			local wrongTimer = child:FindFirstChild("Timer")
+			if wrongTimer and wrongTimer:IsA("GuiObject") then
+				wrongTimer:Destroy()
+			end
+			local wrongTimer2 = child:FindFirstChild("Timer2")
+			if wrongTimer2 and wrongTimer2:IsA("GuiObject") then
+				wrongTimer2:Destroy()
+			end
+			local misplaced = child:FindFirstChild("GiftSummaryTimer")
+			if misplaced and misplaced:IsA("GuiObject") then
+				misplaced:Destroy()
+			end
+		end
+	end
+
+	local giftsWrongTimer = hudGifts:FindFirstChild("Timer")
+	if giftsWrongTimer and giftsWrongTimer:IsA("GuiObject") then
+		giftsWrongTimer:Destroy()
+	end
+	local giftsWrongTimer2 = hudGifts:FindFirstChild("Timer2")
+	if giftsWrongTimer2 and giftsWrongTimer2:IsA("GuiObject") then
+		giftsWrongTimer2:Destroy()
+	end
+
+	local summary = hudGifts:FindFirstChild("GiftSummaryTimer")
+	if summary and not isTextGuiObject(summary) then
+		summary:Destroy()
+		summary = nil
+	end
+
+	if not summary then
+		summary = Instance.new("TextLabel")
+		summary.Name = "GiftSummaryTimer"
+		summary.Parent = hudGifts
+	end
+
+	summary.Visible = true
+	summary.AnchorPoint = Vector2.new(0.5, 0)
+	summary.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
+	summary.BackgroundTransparency = 0.16
+	summary.BorderSizePixel = 0
+	summary.Font = Enum.Font.GothamBold
+	summary.Position = UDim2.new(0.5, 0, 0, 4)
+	summary.Size = UDim2.fromOffset(60, 18)
+	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
+	summary.TextScaled = false
+	summary.TextSize = 13
+	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	summary.TextStrokeTransparency = 0
+	summary.TextTransparency = 0
+	summary.TextXAlignment = Enum.TextXAlignment.Center
+	summary.TextYAlignment = Enum.TextYAlignment.Center
+	summary.ZIndex = math.max(summary.ZIndex, 300)
+
+	local corner = summary:FindFirstChildOfClass("UICorner")
+	if not corner then
+		corner = Instance.new("UICorner")
+		corner.Parent = summary
+	end
+	corner.CornerRadius = UDim.new(0, 9)
+
+	local stroke = summary:FindFirstChildOfClass("UIStroke")
+	if not stroke then
+		stroke = Instance.new("UIStroke")
+		stroke.Parent = summary
+	end
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Color = Color3.fromRGB(255, 237, 203)
+	stroke.Transparency = 0.6
+	stroke.Thickness = 1
+	stroke.Enabled = true
+
+	local gradient = summary:FindFirstChildOfClass("UIGradient")
+	if not gradient then
+		gradient = Instance.new("UIGradient")
+		gradient.Parent = summary
+	end
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(29, 39, 57)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 22)),
+	})
+	gradient.Rotation = 90
+	gradient.Enabled = false
+
+	return summary
+end
+
 local function auditSidebarTimers(context: string)
 	for _, child in ipairs(lButtons:GetChildren()) do
 		if child:IsA("GuiObject") then
 			local timer = child:FindFirstChild("Timer")
 			if timer and timer:IsA("GuiObject") then
-				giftError("Sidebar timer target detected", "context", context, "button", safeName(child), "timer", safeName(timer))
+				giftError(
+					"Sidebar timer target detected",
+					"context",
+					context,
+					"button",
+					safeName(child),
+					"timer",
+					safeName(timer)
+				)
 				giftLog(
 					"[HUD][TIMER]",
 					string.format(
@@ -179,7 +272,15 @@ local function auditSidebarTimers(context: string)
 			local summary = child:FindFirstChild("GiftSummaryTimer")
 			if summary and summary:IsA("GuiObject") then
 				if child ~= hudGifts then
-					giftError("Non-Gifts summary timer target detected", "context", context, "button", safeName(child), "summary", safeName(summary))
+					giftError(
+						"Non-Gifts summary timer target detected",
+						"context",
+						context,
+						"button",
+						safeName(child),
+						"summary",
+						safeName(summary)
+					)
 					giftLog(
 						"[GIFT][SUMMARY]",
 						string.format(
@@ -343,14 +444,15 @@ local badgeLogState = nil
 local formatDurationText
 
 local function setSummaryTimer(text: string, nextRewardId: number?, nextRemaining: number?, readyCount: number)
-	local summary = getGiftSummaryTimer()
-	if not summary then
-		giftError("Missing Gifts summary timer on sidebar button", safeName(hudGifts))
-		return
-	end
+	local summary = ensureGiftSummaryTimer()
 
 	summary.Visible = true
-	summary.Text = text
+	summary.Text = tostring(text ~= nil and text ~= "" and text or "--")
+	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
+	summary.TextTransparency = 0
+	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	summary.TextStrokeTransparency = 0
+	summary.ZIndex = math.max(summary.ZIndex, 40)
 
 	local remainingText = nextRemaining ~= nil and formatDurationText(nextRemaining) or "nil"
 	local stateKey = string.format("%s|%s|%s|%s", text, tostring(nextRewardId), remainingText, tostring(readyCount))
@@ -510,7 +612,12 @@ local function updateHud()
 	if hudState.readyCount > 0 then
 		setSummaryTimer(READY_TEXT, hudState.nextRewardId, 0, hudState.readyCount)
 	elseif hudState.minRemaining ~= nil then
-		setSummaryTimer(formatDurationText(hudState.minRemaining), hudState.nextRewardId, hudState.minRemaining, hudState.readyCount)
+		setSummaryTimer(
+			formatDurationText(hudState.minRemaining),
+			hudState.nextRewardId,
+			hudState.minRemaining,
+			hudState.readyCount
+		)
 	else
 		setSummaryTimer("--", nil, nil, hudState.readyCount)
 	end
@@ -666,7 +773,9 @@ local function buildSlotsWithWait()
 	for _ = 1, 50 do
 		buildSlotsOnce()
 		expectedRewards = #orderedIds
-		if expectedRewards > 0 and totalGifts >= expectedRewards then
+		-- Accept partial slot sets so countdown sync still runs even when UI exposes fewer
+		-- visible slot templates than configured rewards.
+		if totalGifts > 0 then
 			return true
 		end
 		task.wait(0.2)
@@ -725,7 +834,12 @@ local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 					startCountdown(id)
 					giftLog(
 						"[GIFT][RENDER]",
-						string.format("rewardId=%d rewardName=%s state=countdown remaining=%s", id, tostring(cfg.RewName or ""), formatDurationText(remaining))
+						string.format(
+							"rewardId=%d rewardName=%s state=countdown remaining=%s",
+							id,
+							tostring(cfg.RewName or ""),
+							formatDurationText(remaining)
+						)
 					)
 				else
 					setTimerReady(slotFrame)
@@ -799,7 +913,12 @@ local function initialiseButtonsFromState(syncState)
 					startCountdown(id)
 					giftLog(
 						"[GIFT][RENDER]",
-						string.format("rewardId=%d rewardName=%s state=countdown remaining=%s", id, tostring(cfg.RewName or ""), formatDurationText(remaining))
+						string.format(
+							"rewardId=%d rewardName=%s state=countdown remaining=%s",
+							id,
+							tostring(cfg.RewName or ""),
+							formatDurationText(remaining)
+						)
 					)
 				else
 					setTimerReady(slotFrame)
@@ -817,6 +936,7 @@ end
 
 local building = false
 local pendingState = nil
+local hasReceivedServerSync = false
 
 local function applyPendingState()
 	if pendingState == nil then
@@ -840,10 +960,7 @@ logHudBinding()
 giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	if giftsFrame.Visible then
 		logScrollState("panelOpen")
-		giftLog(
-			"[GIFT][OPEN]",
-			string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts)
-		)
+		giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
 	end
 end)
 
@@ -858,6 +975,11 @@ task.spawn(function()
 	building = false
 	if ok then
 		applyPendingState()
+		-- Fallback: if the server sync has not arrived yet, start local countdowns
+		-- from now so timers do not remain as "--" in UI.
+		if not hasReceivedServerSync then
+			initialiseButtonsFromLegacyEpoch(os.time())
+		end
 	end
 end)
 
@@ -870,8 +992,16 @@ end)
 
 Remote.OnClientEvent:Connect(function(action, a, b, c)
 	if action == "syncState" then
+		hasReceivedServerSync = true
 		local claimedPayload = if typeof(a) == "table" then a.ClaimedRewards else nil
-		giftLog("[GIFT][DATA]", "remoteAction=syncState", "claimedCount", getClaimedCount(claimedPayload), "totalSlots", totalGifts)
+		giftLog(
+			"[GIFT][DATA]",
+			"remoteAction=syncState",
+			"claimedCount",
+			getClaimedCount(claimedPayload),
+			"totalSlots",
+			totalGifts
+		)
 		if totalGifts == 0 then
 			pendingState = a
 			if not building then
@@ -887,8 +1017,8 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			return
 		end
 		initialiseButtonsFromState(a)
-
 	elseif action == "startCycle" or action == "cycleReset" then
+		hasReceivedServerSync = true
 		if typeof(a) ~= "number" then
 			giftError("startCycle/cycleReset bad epoch", a, "typeof", typeof(a))
 			return
@@ -909,7 +1039,6 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			return
 		end
 		initialiseButtonsFromLegacyEpoch(a)
-
 	elseif action == "forceReady" then
 		giftLog("[GIFT][RENDER]", "remoteAction=forceReady", "totalSlots", totalGifts)
 		for i = 1, totalGifts do
@@ -922,7 +1051,6 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			end
 		end
 		updateHud()
-
 	elseif action == "claimed" then
 		local id = a
 		local slotFrame = slotsById[id]
@@ -936,10 +1064,14 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		setTimerClaimed(slotFrame)
 		giftLog(
 			"[GIFT][RENDER]",
-			string.format("remoteAction=claimed rewardId=%s rewardName=%s amount=%s", tostring(id), tostring(b), tostring(c))
+			string.format(
+				"remoteAction=claimed rewardId=%s rewardName=%s amount=%s",
+				tostring(id),
+				tostring(b),
+				tostring(c)
+			)
 		)
 		updateHud()
-
 	elseif action == "notReady" then
 		local id = tonumber(a)
 		local remaining = tonumber(b)
@@ -953,7 +1085,11 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 				startCountdown(id)
 				giftLog(
 					"[GIFT][RENDER]",
-					string.format("remoteAction=notReady rewardId=%d remaining=%s", id, formatDurationText(clampedRemaining))
+					string.format(
+						"remoteAction=notReady rewardId=%d remaining=%s",
+						id,
+						formatDurationText(clampedRemaining)
+					)
 				)
 			else
 				setTimerReady(slotFrame)
@@ -963,11 +1099,9 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			giftError("notReady payload missing id or remaining", a, b)
 		end
 		updateHud()
-
 	elseif action == "alreadyClaimed" then
 		giftLog("[GIFT][RENDER]", "remoteAction=alreadyClaimed", "rewardId", a)
 		updateHud()
-
 	else
 		giftError("Unknown time reward action", action)
 	end
