@@ -5,27 +5,11 @@ MeraAssetCatalog.AnimationCandidates = {
 	FireBurst = { "Flame burst", "Flame Burst", "FlameBurst" },
 }
 
+-- Ability animation fallbacks must stay fruit-specific. Reusing an unrelated slap
+-- animation here produces misleading permission errors and incorrect playback.
 MeraAssetCatalog.RuntimeAnimationFallbacks = {
-	FlameDash = {
-		{
-			Type = "animation_id",
-			Name = "ProjectSlapDashFallback",
-			AnimationId = "rbxassetid://119351181413931",
-			Path = "ReplicatedStorage/Gears/Slap/Client.client.lua",
-			Source = "project_runtime_primary_slap_dash",
-			SupportsReleaseMarker = false,
-		},
-	},
-	FireBurst = {
-		{
-			Type = "animation_id",
-			Name = "ProjectSlapBurstFallback",
-			AnimationId = "rbxassetid://119351181413931",
-			Path = "ReplicatedStorage/Gears/Slap/Client.client.lua",
-			Source = "project_runtime_primary_slap_burst",
-			SupportsReleaseMarker = false,
-		},
-	},
+	FlameDash = {},
+	FireBurst = {},
 }
 
 MeraAssetCatalog.VfxEffectCandidates = {

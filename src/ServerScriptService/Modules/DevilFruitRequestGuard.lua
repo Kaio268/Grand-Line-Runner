@@ -240,6 +240,13 @@ local function sanitizePayloadBySchema(player, payload, schema, characterState)
 			end
 
 			sanitized[key] = value
+		elseif expectedType == "DirectionVector3" then
+			if not validateVector3(value) or value.Magnitude <= 0.01 or value.Magnitude > 1.1 then
+				addSuspicion(player, "PayloadInvalidValue", key)
+				return false, nil, "MalformedPayload", 0
+			end
+
+			sanitized[key] = value
 		elseif expectedType == "UserId" then
 			if not validateUserId(value) then
 				addSuspicion(player, "PayloadInvalidValue", key)

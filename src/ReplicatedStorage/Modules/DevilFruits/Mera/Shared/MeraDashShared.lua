@@ -7,6 +7,11 @@ local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local DEFAULT_MIN_END_CARRY_SPEED = 52
 local DEFAULT_END_CARRY_SPEED_FACTOR = 0.82
+local DEFAULT_COMPLETION_TOLERANCE = 3
+local DEFAULT_RUNTIME_GRACE = 0.24
+local DEFAULT_CORRECTION_SNAP_DISTANCE = 12
+local DEFAULT_DISTANCE_TOLERANCE = 6
+local DEFAULT_FINAL_SNAP_TOLERANCE = 4
 
 local function getPlanarVector(vector)
 	return Vector3.new(vector.X, 0, vector.Z)
@@ -48,6 +53,31 @@ end
 
 function MeraDashShared.GetCurrentPlanarSpeed(humanoid, rootPart)
 	return math.max(humanoid.WalkSpeed, MeraDashShared.GetPlanarMagnitude(rootPart.AssemblyLinearVelocity))
+end
+
+function MeraDashShared.GetCompletionTolerance(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.CompletionTolerance) or DEFAULT_COMPLETION_TOLERANCE, 0.1)
+end
+
+function MeraDashShared.GetRuntimeGrace(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.RuntimeGrace) or DEFAULT_RUNTIME_GRACE, 0)
+end
+
+function MeraDashShared.GetCorrectionSnapDistance(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.ClientCorrectionSnapDistance) or DEFAULT_CORRECTION_SNAP_DISTANCE, 0)
+end
+
+function MeraDashShared.GetDistanceTolerance(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.ClientDistanceTolerance) or DEFAULT_DISTANCE_TOLERANCE, 0)
+end
+
+function MeraDashShared.GetFinalSnapTolerance(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.FinalSnapTolerance) or DEFAULT_FINAL_SNAP_TOLERANCE, 0)
 end
 
 function MeraDashShared.ResolveDirection(humanoid, rootPart, dashTargetPosition)

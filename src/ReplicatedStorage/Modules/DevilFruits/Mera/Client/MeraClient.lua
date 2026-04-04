@@ -126,6 +126,7 @@ function MeraFruitClient:GetPresentation()
 		local ok, result = pcall(function()
 			return presentationModule.new({
 				player = self.player,
+				createEffectVisual = self.createEffectVisual,
 			})
 		end)
 		if ok and result then
@@ -154,6 +155,9 @@ function MeraFruitClient.Create(config)
 	config = config or {}
 	local self = setmetatable({}, MeraFruitClient)
 	self.player = config.player
+	self.createEffectVisual = type(config.CreateEffectVisual) == "function"
+		and config.CreateEffectVisual
+		or nil
 	self.playOptionalEffect = function(targetPlayer, fruitName, abilityName)
 		if abilityName == "FlameDash" or abilityName == "FireBurst" then
 			return
@@ -166,7 +170,7 @@ function MeraFruitClient.Create(config)
 	self.impl = MeraDashClient.new({
 		player = config.player,
 		PlayOptionalEffect = self.playOptionalEffect,
-		CreateEffectVisual = function() end,
+		CreateEffectVisual = self.createEffectVisual or function() end,
 		PlayFlameDashStartup = function(targetPlayer, payload, isPredicted)
 			return self:GetPresentation():PlayFlameDashStartup(targetPlayer, payload, isPredicted)
 		end,

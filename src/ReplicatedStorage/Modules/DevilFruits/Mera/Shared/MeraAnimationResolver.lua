@@ -184,7 +184,7 @@ local function collectNamedCandidates(root, moveName, candidateName, candidates,
 			return
 		end
 
-			processedContainers[container] = true
+		processedContainers[container] = true
 		local containerPath = container:GetFullName()
 		for _, animation in ipairs(collectAnimationsFromContainer(container, moveName, candidateName)) do
 			appendAnimationCandidate(candidates, seenAnimations, animation, containerPath, sourceLabel, true)
@@ -231,8 +231,6 @@ function MeraAnimationResolver.CollectAnimationCandidates(moveName, configuredAs
 	local candidates = {}
 	local seenAnimations = {}
 
-	collectRuntimeFallbackCandidates(moveName, candidates, seenAnimations)
-
 	for _, root in ipairs(getAnimationSearchRoots()) do
 		for _, candidateName in ipairs(candidateNames) do
 			collectNamedCandidates(root, moveName, candidateName, candidates, seenAnimations)
@@ -240,6 +238,8 @@ function MeraAnimationResolver.CollectAnimationCandidates(moveName, configuredAs
 
 		collectKeywordCandidates(root, moveName, candidates, seenAnimations)
 	end
+
+	collectRuntimeFallbackCandidates(moveName, candidates, seenAnimations)
 
 	return candidates, candidateNames
 end

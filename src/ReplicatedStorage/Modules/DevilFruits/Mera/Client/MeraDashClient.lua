@@ -21,10 +21,9 @@ MeraDashClient.FRUIT_NAME = "Mera Mera no Mi"
 MeraDashClient.ABILITY_NAME = "FlameDash"
 local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 
-local MAX_RUNTIME_GRACE = 0.18
-local CORRECTION_SNAP_DISTANCE = 8
+local CORRECTION_SNAP_DISTANCE = 12
 local DIRECTION_TOLERANCE = 8
-local DISTANCE_TOLERANCE = 4
+local DISTANCE_TOLERANCE = 6
 local CAMERA_FOV_BOOST = 6
 
 local function getSharedTimestamp()
@@ -323,6 +322,11 @@ function MeraDashClient:BeginPredictedRequest()
 	end
 
 	local requestTargetPosition = rootPart.Position + (localPlan.Direction * localPlan.Distance)
+	local visualDirection = localPlan.Direction
+	local completionTolerance = MeraDashShared.GetCompletionTolerance(abilityConfig)
+	local runtimeGrace = MeraDashShared.GetRuntimeGrace(abilityConfig)
+	local correctionSnapDistance = MeraDashShared.GetCorrectionSnapDistance(abilityConfig)
+	local distanceTolerance = MeraDashShared.GetDistanceTolerance(abilityConfig)
 	local state = {
 		Sequence = self.sequence + 1,
 		InputReceivedAt = inputReceivedAt,
@@ -345,7 +349,9 @@ function MeraDashClient:BeginPredictedRequest()
 		},
 		TraveledDistance = 0,
 		WallShortened = localPlan.WallShortened,
-		LocalEffectPlayed = false,
+		CompletionTolerance = completionTolerance,
+		CorrectionSnapDistance = correctionSnapDistance,
+		DistanceTolerance = distanceTolerance,
 		MotionFinished = false,
 		Canceled = false,
 		CorrectionSnap = false,
@@ -381,33 +387,10 @@ function MeraDashClient:BeginPredictedRequest()
 		)
 		self:FinishLocalDash(state, "blocked_at_start", true)
 	else
-		local predictedEndPosition = state.StartPosition + (localPlan.Direction * localPlan.Distance)
-		logMove(self.player, "move=FlameDash startup source=predicted player=%s", self.player.Name)
 		task.defer(function()
-			safeCallNonCriticalCallback("PlayFlameDashStartup", self.PlayFlameDashStartup, self.player, {
-				Direction = localPlan.Direction,
-				StartPosition = state.StartPosition,
-				EndPosition = predictedEndPosition,
-			}, true)
-			safeCallNonCriticalCallback(
-				"CreateEffectVisual",
-				self.CreateEffectVisual,
-				state.StartPosition,
-				predictedEndPosition,
-				localPlan.Direction,
-				true
-			)
-			safeCallNonCriticalCallback(
-				"PlayOptionalEffect",
-				self.PlayOptionalEffect,
-				self.player,
-				MeraDashClient.FRUIT_NAME,
-				MeraDashClient.ABILITY_NAME
-			)
 			safeCallNonCriticalCallback("KickCamera", function()
 				self:KickCamera()
 			end)
-			state.LocalEffectPlayed = true
 		end)
 
 		if localPlan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
@@ -417,7 +400,7 @@ function MeraDashClient:BeginPredictedRequest()
 
 		self:SetHorizontalVelocity(rootPart, localPlan.Direction * localPlan.StartDashSpeed)
 
-		local maxRuntime = math.max(localPlan.Duration + MAX_RUNTIME_GRACE, 0.08)
+		local maxRuntime = math.max(localPlan.Duration + runtimeGrace, 0.08)
 		state.MotionConnection = RunService.Heartbeat:Connect(function(dt)
 			if self.activeDash ~= state then
 				self:FinishLocalDash(state, "replaced_active_state", true)
@@ -431,7 +414,7 @@ function MeraDashClient:BeginPredictedRequest()
 
 			state.TraveledDistance = MeraDashShared.GetTravelDistance(state.StartPosition, rootPart.Position, state.Plan.Direction)
 			local currentRemainingDistance = state.Plan.Distance - state.TraveledDistance
-			if currentRemainingDistance <= 0.1 then
+			if currentRemainingDistance <= state.CompletionTolerance then
 				self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
 				self:FinishLocalDash(state, "completed", false)
 				return
@@ -471,6 +454,7 @@ function MeraDashClient:BeginPredictedRequest()
 	)
 	return {
 		DashTargetPosition = requestTargetPosition,
+		VisualDirection = visualDirection,
 	}
 end
 
@@ -509,7 +493,9 @@ function MeraDashClient:HandleConfirmed(payload)
 	state.Plan.EndDashSpeed = tonumber(payload.EndDashSpeed) or state.Plan.EndDashSpeed
 	state.Plan.EndCarrySpeed = tonumber(payload.EndCarrySpeed) or state.Plan.EndCarrySpeed
 
-	local corrected = math.abs(distanceDelta) > DISTANCE_TOLERANCE or directionDelta > DIRECTION_TOLERANCE
+	local distanceTolerance = state.DistanceTolerance or DISTANCE_TOLERANCE
+	local correctionSnapDistance = state.CorrectionSnapDistance or CORRECTION_SNAP_DISTANCE
+	local corrected = math.abs(distanceDelta) > distanceTolerance or directionDelta > DIRECTION_TOLERANCE
 	local correctionSnap = false
 	local rootPart = self:GetRootPart()
 	local serverStartPosition = typeof(payload.StartPosition) == "Vector3" and payload.StartPosition or state.StartPosition
@@ -517,7 +503,7 @@ function MeraDashClient:HandleConfirmed(payload)
 	if rootPart then
 		local correctionTarget = serverStartPosition + (authoritativeDirection * currentProgress)
 		local correctionDelta = (rootPart.Position - correctionTarget).Magnitude
-		if correctionDelta > CORRECTION_SNAP_DISTANCE or directionDelta > DIRECTION_TOLERANCE then
+		if correctionDelta > correctionSnapDistance or directionDelta > DIRECTION_TOLERANCE then
 			local character = self:GetCharacter()
 			if character then
 				self:PivotCharacterToRootPosition(character, rootPart, correctionTarget)
@@ -624,9 +610,10 @@ function MeraDashClient:HandleResolved(payload)
 	local directionDelta = MeraDashShared.GetDirectionDeltaDegrees(state.OriginalPredictedDirection, authoritativeDirection)
 	local correctionSnap = false
 	local rootPart = self:GetRootPart()
+	local correctionSnapDistance = state.CorrectionSnapDistance or CORRECTION_SNAP_DISTANCE
 	if rootPart and typeof(payload.ActualEndPosition) == "Vector3" then
 		local correctionDistance = (rootPart.Position - payload.ActualEndPosition).Magnitude
-		if correctionDistance > CORRECTION_SNAP_DISTANCE and not state.MotionFinished then
+		if correctionDistance > correctionSnapDistance and not state.MotionFinished then
 			local character = self:GetCharacter()
 			if character then
 				self:PivotCharacterToRootPosition(character, rootPart, payload.ActualEndPosition)
@@ -690,16 +677,22 @@ function MeraDashClient:HandleEffect(targetPlayer, payload)
 		endPosition = startPosition + (direction * (tonumber(resolvedPayload.Distance) or 14))
 	end
 
-	if not (targetPlayer == self.player and self.activeDash and self.activeDash.LocalEffectPlayed) then
-		logMove(self.player, "move=FlameDash startup source=replicated target=%s", targetPlayer.Name)
-		safeCallNonCriticalCallback("PlayFlameDashStartup", self.PlayFlameDashStartup, targetPlayer, resolvedPayload, false)
-		safeCallNonCriticalCallback(
-			"PlayOptionalEffect",
-			self.PlayOptionalEffect,
-			targetPlayer,
-			MeraDashClient.FRUIT_NAME,
-			MeraDashClient.ABILITY_NAME
-		)
+	logMove(self.player, "move=FlameDash startup source=replicated target=%s", targetPlayer.Name)
+	local presentationCallbackOk, presentationStarted = safeCallNonCriticalCallback(
+		"PlayFlameDashStartup",
+		self.PlayFlameDashStartup,
+		targetPlayer,
+		resolvedPayload,
+		false
+	)
+	safeCallNonCriticalCallback(
+		"PlayOptionalEffect",
+		self.PlayOptionalEffect,
+		targetPlayer,
+		MeraDashClient.FRUIT_NAME,
+		MeraDashClient.ABILITY_NAME
+	)
+	if not presentationCallbackOk or presentationStarted ~= true then
 		safeCallNonCriticalCallback("CreateEffectVisual", self.CreateEffectVisual, startPosition, endPosition, direction, false)
 	end
 

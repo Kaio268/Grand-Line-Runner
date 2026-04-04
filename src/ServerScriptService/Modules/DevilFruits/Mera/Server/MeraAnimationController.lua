@@ -145,6 +145,14 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 	logAnimPipeline("INFO", "server animator ready fruit=%s move=%s asset=%s", "Mera Mera no Mi", tostring(moveName), tostring(assetName))
 
 	local animationCandidates, candidateNames = MeraAnimationResolver.CollectAnimationCandidates(moveName, assetName, defaultAssetName)
+	if #animationCandidates == 0 then
+		logWarn(
+			"animation candidate catalog empty move=%s path=%s names=%s detail=no_animation_candidates",
+			tostring(moveName),
+			tostring(MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or assetName)),
+			table.concat(candidateNames or {}, "|")
+		)
+	end
 	local selectedTrack
 	local selectedCandidate
 	local lastFailure = "missing_animation"
@@ -282,28 +290,42 @@ local function waitForRelease(moveName, animationState, animationConfig)
 		if fallbackTime > 0 then
 			task.wait(fallbackTime)
 		end
-		return false
+		return false, fallbackTime > 0 and "fallback" or "immediate"
 	end
 
 	if animationState.SupportsReleaseMarker == false then
 		if fallbackTime > 0 then
 			task.wait(fallbackTime)
 		end
-		return false
+		return false, fallbackTime > 0 and "fallback" or "immediate"
 	end
 
 	if typeof(markerName) ~= "string" or markerName == "" then
 		if fallbackTime > 0 then
 			task.wait(fallbackTime)
 		end
-		return false
+		return false, fallbackTime > 0 and "fallback" or "immediate"
 	end
 
 	local markerReached = false
+	local releaseSource = fallbackTime > 0 and "fallback" or "track_stop"
+	local resolved = false
 	local connection
+	local stoppedConnection
+	local releaseSignal = Instance.new("BindableEvent")
+	local function complete(source, reachedMarker)
+		if resolved then
+			return
+		end
+
+		resolved = true
+		markerReached = reachedMarker == true
+		releaseSource = source
+		releaseSignal:Fire()
+	end
 	local ok, err = pcall(function()
 		connection = animationState.Track:GetMarkerReachedSignal(markerName):Connect(function()
-			markerReached = true
+			complete("marker", true)
 		end)
 	end)
 	if not ok then
@@ -316,19 +338,37 @@ local function waitForRelease(moveName, animationState, animationConfig)
 		if fallbackTime > 0 then
 			task.wait(fallbackTime)
 		end
-		return false
+		releaseSignal:Destroy()
+		return false, fallbackTime > 0 and "fallback" or "immediate"
 	end
 
-	local timeoutAt = os.clock() + math.max(fallbackTime, 0.01)
-	while not markerReached and animationState.Track.IsPlaying and os.clock() < timeoutAt do
-		task.wait()
+	stoppedConnection = animationState.Track.Stopped:Connect(function()
+		if fallbackTime <= 0 then
+			complete("track_stop", false)
+		end
+	end)
+
+	if fallbackTime > 0 then
+		task.delay(fallbackTime, function()
+			complete("fallback", false)
+		end)
+	elseif not animationState.Track.IsPlaying then
+		complete("track_stop", false)
 	end
 
+	if not resolved then
+		releaseSignal.Event:Wait()
+	end
+
+	releaseSignal:Destroy()
 	if connection then
 		connection:Disconnect()
 	end
+	if stoppedConnection then
+		stoppedConnection:Disconnect()
+	end
 
-	if not markerReached and fallbackTime > 0 then
+	if not markerReached and releaseSource == "fallback" then
 		logWarn(
 			"animation missing or failed to load move=%s path=%s detail=marker_timeout:%s",
 			tostring(moveName),
@@ -337,7 +377,7 @@ local function waitForRelease(moveName, animationState, animationConfig)
 		)
 	end
 
-	return markerReached
+	return markerReached, releaseSource
 end
 
 function MeraAnimationController.PlayFlameDashAnimation(character, animationConfig)

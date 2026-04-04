@@ -112,8 +112,8 @@ function ClientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endP
 	local primaryColor = isPredicted and Color3.fromRGB(255, 185, 92) or Color3.fromRGB(255, 137, 56)
 	local accentColor = Color3.fromRGB(255, 232, 180)
 
-	createPulse("MeraDashPulseStart", origin, primaryColor, 1.6, 4.8, 0.18)
-	createPulse("MeraDashPulseEnd", destination, accentColor, 1.1, 3.2, 0.16)
+	createPulse("MeraDashPulseStart", origin, primaryColor, 2.2, 6.2, 0.24)
+	createPulse("MeraDashPulseEnd", destination, accentColor, 1.6, 4.4, 0.22)
 
 	if segmentLength > 0.2 then
 		local streak = Instance.new("Part")
@@ -124,29 +124,52 @@ function ClientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endP
 		streak.CanQuery = false
 		streak.Material = Enum.Material.Neon
 		streak.Color = primaryColor
-		streak.Transparency = 0.22
-		streak.Size = Vector3.new(0.65, 0.65, segmentLength)
+		streak.Transparency = 0.12
+		streak.Size = Vector3.new(1.15, 1.15, segmentLength)
 		streak.CFrame = CFrame.lookAt(origin:Lerp(destination, 0.5), destination)
 		streak.Parent = Workspace
 
-		local streakTween = TweenService:Create(streak, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		local aura = Instance.new("Part")
+		aura.Name = "MeraDashAura"
+		aura.Anchored = true
+		aura.CanCollide = false
+		aura.CanTouch = false
+		aura.CanQuery = false
+		aura.Material = Enum.Material.Neon
+		aura.Color = accentColor
+		aura.Transparency = 0.72
+		aura.Size = Vector3.new(2.2, 2.2, segmentLength * 1.04)
+		aura.CFrame = streak.CFrame
+		aura.Parent = Workspace
+
+		local streakTween = TweenService:Create(streak, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 			Transparency = 1,
-			Size = Vector3.new(0.14, 0.14, segmentLength * 1.06),
+			Size = Vector3.new(0.2, 0.2, segmentLength * 1.1),
+		})
+		local auraTween = TweenService:Create(aura, TweenInfo.new(0.26, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Transparency = 1,
+			Size = Vector3.new(3.6, 3.6, segmentLength * 1.12),
 		})
 
 		streakTween:Play()
+		auraTween:Play()
 		streakTween.Completed:Connect(function()
 			if streak.Parent then
 				streak:Destroy()
 			end
 		end)
+		auraTween.Completed:Connect(function()
+			if aura.Parent then
+				aura:Destroy()
+			end
+		end)
 	end
 
-	for sampleIndex = 1, 4 do
-		local alpha = sampleIndex / 5
+	for sampleIndex = 1, 6 do
+		local alpha = sampleIndex / 7
 		local samplePosition = origin:Lerp(destination, alpha)
 		task.delay((sampleIndex - 1) * 0.02, function()
-			createPulse("MeraDashTrail", samplePosition, primaryColor, 0.45, 1.35, 0.12)
+			createPulse("MeraDashTrail", samplePosition, primaryColor, 0.8, 2.1, 0.18)
 		end)
 	end
 end

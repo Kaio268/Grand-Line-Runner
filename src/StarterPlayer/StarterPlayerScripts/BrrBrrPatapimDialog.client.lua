@@ -3,6 +3,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local RunService = game:GetService("RunService")
 
+-- Temporary kill-switch for the legacy onboarding/tutorial flow.
+-- Important: this script also owns the Brr NPC's normal yes/no dialog and
+-- the Speed Upgrade UI open action, so we do NOT return early here.
+-- Instead we mark the tutorial portion as disabled later while still letting
+-- the regular NPC interaction wiring stay alive.
+local TEMPORARILY_DISABLE_TUTORIAL = true
+
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local Point = require(ReplicatedStorage:WaitForChild("Point"))
@@ -135,7 +142,7 @@ local STEP2_SPOTLIGHT_Y_OFFSET = 60
 local STEP3_SPOTLIGHT_Y_OFFSET = 60
 
 local tutorialValue
-local tutorialDisabled = false
+local tutorialDisabled = TEMPORARILY_DISABLE_TUTORIAL
 local finishedSent = false
 
 local function getTutorialValue()
@@ -1459,6 +1466,12 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 end)
 
 task.spawn(function()
+	if tutorialDisabled then
+		stopAllTutorialSystems()
+		setTutorialGuiVisible(false)
+		return
+	end
+
 	tutorialValue = getTutorialValue()
 
 	if tutorialValue.Value == true then

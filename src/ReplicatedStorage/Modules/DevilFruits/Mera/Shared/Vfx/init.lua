@@ -1,11 +1,20 @@
--- Shared/Vfx/init.lua
--- Thin VFX bootstrap for Mera Mera no Mi.
---
--- Loads FlameDashVfx and FireBurstVfx in isolation via pcall.
--- One module failure cannot kill the other.
--- This file has well under 200 locals — the previous version exceeded Luau's
--- compile-time limit of 200 local registers, preventing the entire module
--- from loading at all.
+--[[
+	Mera shared VFX bootstrap.
+
+	This file is intentionally a thin adapter between high-level presentation code and
+	per-move VFX modules such as `FlameDashVfx` and `FireBurstVfx`.
+
+	It owns:
+	- isolated module loading so one move's VFX cannot break another's
+	- a stable public API for `MeraPresentationClient`
+	- defensive `pcall` wrappers around each delegated VFX call
+	- a small legacy `StopRuntimeState` helper for older state shapes
+
+	It does not own:
+	- move sequencing
+	- gameplay logic
+	- animation timing
+]]
 
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
@@ -15,123 +24,117 @@ print("[MERA VFX] bootstrap load begin")
 local FlameDashVfx = nil
 local FireBurstVfx = nil
 
-do
+-- ============================================================================
+-- Isolated Module Loading
+-- ============================================================================
+-- Each move module is loaded separately so a failure in one visual stack does not
+-- cascade into the other move.
+
+local function loadIsolatedVfxModule(moduleName)
 	local ok, result = pcall(function()
-		return require(script:WaitForChild("FlameDashVfx"))
+		return require(script:WaitForChild(moduleName))
 	end)
+
 	if ok and result then
-		FlameDashVfx = result
-		print("[MERA VFX] bootstrap load success module=FlameDashVfx")
-	else
-		warn("[MERA VFX] bootstrap load fail module=FlameDashVfx reason=" .. tostring(result))
+		print("[MERA VFX] bootstrap load success module=" .. moduleName)
+		return result
 	end
+
+	warn("[MERA VFX] bootstrap load fail module=" .. moduleName .. " reason=" .. tostring(result))
+	return nil
 end
 
-do
-	local ok, result = pcall(function()
-		return require(script:WaitForChild("FireBurstVfx"))
-	end)
-	if ok and result then
-		FireBurstVfx = result
-		print("[MERA VFX] bootstrap load success module=FireBurstVfx")
-	else
-		warn("[MERA VFX] bootstrap load fail module=FireBurstVfx reason=" .. tostring(result))
-	end
-end
+FlameDashVfx = loadIsolatedVfxModule("FlameDashVfx")
+FireBurstVfx = loadIsolatedVfxModule("FireBurstVfx")
 
 local allLoaded = FlameDashVfx ~= nil and FireBurstVfx ~= nil
 print("[MERA VFX] bootstrap load " .. (allLoaded and "success" or "partial"))
 
--- ─── Public API ──────────────────────────────────────────────────────────────
--- Matches the API surface expected by MeraPresentationClient exactly.
--- All calls are wrapped in pcall so a runtime error in one effect cannot
--- propagate back into the presentation layer.
+-- ============================================================================
+-- Safe Delegation Helpers
+-- ============================================================================
+-- Presentation code should not have to repeat the same `pcall`/warning pattern for
+-- every phase call, so this file centralizes that defensive wrapper behavior.
+
+local function callVfxMethod(moduleRef, methodName, failureLabel, ...)
+	if not moduleRef then
+		print("[MERA VFX] " .. tostring(failureLabel) .. " skip reason=module_not_loaded")
+		return false, nil
+	end
+
+	local method = moduleRef[methodName]
+	if type(method) ~= "function" then
+		warn("[MERA VFX] missing method label=" .. tostring(failureLabel) .. " method=" .. tostring(methodName))
+		return false, nil
+	end
+
+	local ok, result = pcall(method, ...)
+	if not ok then
+		warn("[MERA VFX] " .. tostring(failureLabel) .. " error=" .. tostring(result))
+		return false, nil
+	end
+
+	return true, result
+end
 
 local MeraVfx = {}
 
--- ── FlameDash ────────────────────────────────────────────────────────────────
+-- ============================================================================
+-- FlameDash Delegation
+-- ============================================================================
+-- Presentation treats FlameDash as startup + body/follow + trail + cleanup.
+-- The public names here stay aligned with that presentation vocabulary.
 
 function MeraVfx.PlayFlameDashStartup(options)
-	if not FlameDashVfx then
-		return nil
-	end
-	local ok, result = pcall(FlameDashVfx.PlayStartup, options)
-	if not ok then
-		warn("[MERA VFX] FlameDash startup error=" .. tostring(result))
-		return nil
-	end
-	return result
+	local ok, result = callVfxMethod(FlameDashVfx, "PlayStartup", "FlameDash startup", options)
+	return ok and result or nil
 end
 
--- StartFlameDashHead maps to the body flame that follows the player.
+-- Legacy naming note:
+-- `Head` is the active body/follow slash. The public API name remains stable for
+-- callers, but the comment clarifies the move role.
 function MeraVfx.StartFlameDashHead(options)
-	if not FlameDashVfx then
-		return nil
-	end
-	local ok, result = pcall(FlameDashVfx.StartBody, options)
-	if not ok then
-		warn("[MERA VFX] FlameDash head error=" .. tostring(result))
-		return nil
-	end
-	return result
+	local ok, result = callVfxMethod(FlameDashVfx, "StartBody", "FlameDash body", options)
+	return ok and result or nil
 end
 
--- StartFlameDashPart maps to the stamp-based trail.
+-- Legacy naming note:
+-- `Part` is the stamped trail layer. The comment keeps the role obvious without
+-- changing the external method name expected by presentation code.
 function MeraVfx.StartFlameDashPart(options)
-	if not FlameDashVfx then
-		return nil
-	end
-	local ok, result = pcall(FlameDashVfx.StartTrail, options)
-	if not ok then
-		warn("[MERA VFX] FlameDash part error=" .. tostring(result))
-		return nil
-	end
-	return result
+	local ok, result = callVfxMethod(FlameDashVfx, "StartTrail", "FlameDash trail", options)
+	return ok and result or nil
 end
 
 function MeraVfx.UpdateFlameDashHead(state, options)
-	if not FlameDashVfx or not state then
-		return false
-	end
-	local ok, result = pcall(FlameDashVfx.UpdateBody, state, options)
-	if not ok then
-		return false
-	end
-	return result == true
+	local ok, result = callVfxMethod(FlameDashVfx, "UpdateBody", "FlameDash body update", state, options)
+	return ok and result == true or false
 end
 
 function MeraVfx.UpdateFlameDashPart(state, options)
-	if not FlameDashVfx or not state then
-		return false
-	end
-	local ok, result = pcall(FlameDashVfx.UpdateTrail, state, options)
-	if not ok then
-		return false
-	end
-	return result == true
+	local ok, result = callVfxMethod(FlameDashVfx, "UpdateTrail", "FlameDash trail update", state, options)
+	return ok and result == true or false
 end
 
 function MeraVfx.StopFlameDashHead(state, options)
-	if not FlameDashVfx or not state then
-		return
-	end
-	pcall(FlameDashVfx.StopBody, state, options)
+	callVfxMethod(FlameDashVfx, "StopBody", "FlameDash body stop", state, options)
 end
 
 function MeraVfx.StopFlameDashPart(state, options)
-	if not FlameDashVfx or not state then
-		return
-	end
-	pcall(FlameDashVfx.StopTrail, state, options)
+	callVfxMethod(FlameDashVfx, "StopTrail", "FlameDash trail stop", state, options)
 end
 
--- StopRuntimeState handles any generic state (startup, body, trail, burst startup).
--- Works by disconnecting any follow/update connections then scheduling cleanup.
+function MeraVfx.StopFlameDashStartup(state, options)
+	callVfxMethod(FlameDashVfx, "StopStartup", "FlameDash startup stop", state, options)
+end
+
+-- Some older state shapes still need a generic cleanup path. This is kept as a
+-- small fallback helper, not the preferred orchestration path for new move code.
 function MeraVfx.StopRuntimeState(state, options)
 	if type(state) ~= "table" then
 		return
 	end
-	-- Disconnect any follow or heartbeat connection stored on the state.
+
 	if typeof(state.FollowConnection) == "RBXScriptConnection" then
 		state.FollowConnection:Disconnect()
 		state.FollowConnection = nil
@@ -140,8 +143,8 @@ function MeraVfx.StopRuntimeState(state, options)
 		state.Connection:Disconnect()
 		state.Connection = nil
 	end
+
 	state.Active = false
-	-- Clean up any clone.
 	local clone = state.Clone
 	state.Clone = nil
 	if clone and clone.Parent then
@@ -157,46 +160,36 @@ function MeraVfx.StopRuntimeState(state, options)
 	end
 end
 
-function MeraVfx.LogFlameDashCleanup(options)
-	if RunService:IsStudio() then
-		print(string.format(
-			"[MERA VFX] FlameDash cleanup complete startup=%s part=%s dash=%s",
-			tostring(options and options.Startup),
-			tostring(options and options.Part),
-			tostring(options and options.Dash)
-		))
-	end
+function MeraVfx.LogFlameDashCleanup(_options)
+	return nil
 end
 
--- ── FireBurst ────────────────────────────────────────────────────────────────
+-- ============================================================================
+-- FireBurst Delegation
+-- ============================================================================
+-- Presentation treats FireBurst as startup/charge -> release/burst -> cleanup.
 
 function MeraVfx.PlayFireBurstStartup(options)
-	if not FireBurstVfx then
-		print("[MERA VFX] FireBurst start skip reason=module_not_loaded")
-		return nil
-	end
-	local ok, result = pcall(FireBurstVfx.PlayStartup, options)
-	if not ok then
-		warn("[MERA VFX] FireBurst startup error=" .. tostring(result))
-		return nil
-	end
-	return result
+	local ok, result = callVfxMethod(FireBurstVfx, "PlayStartup", "FireBurst startup", options)
+	return ok and result or nil
+end
+
+function MeraVfx.StopFireBurstStartup(state, options)
+	local ok, result = callVfxMethod(FireBurstVfx, "StopStartup", "FireBurst startup stop", state, options)
+	return ok and result == true or false
 end
 
 function MeraVfx.PlayFireBurst(options)
-	if not FireBurstVfx then
-		print("[MERA VFX] FireBurst release skip reason=module_not_loaded")
-		return false
-	end
-	local ok, result = pcall(FireBurstVfx.PlayBurst, options)
-	if not ok then
-		warn("[MERA VFX] FireBurst burst error=" .. tostring(result))
-		return false
-	end
-	return result == true
+	local ok, result = callVfxMethod(FireBurstVfx, "PlayBurst", "FireBurst burst", options)
+	return ok and result or nil
 end
 
--- Alias used by older call sites.
+function MeraVfx.StopFireBurst(state, options)
+	local ok, result = callVfxMethod(FireBurstVfx, "StopBurst", "FireBurst burst stop", state, options)
+	return ok and result == true or false
+end
+
+-- Alias kept for older call sites that still say FlameBurst.
 MeraVfx.PlayFlameBurst = MeraVfx.PlayFireBurst
 
 return MeraVfx
