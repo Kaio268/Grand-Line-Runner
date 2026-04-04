@@ -8,9 +8,9 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local e = React.createElement
 
 local FALLBACK_TITLE_STYLE = {
-	anchorPoint = Vector2.new(0.5, 1),
-	position = UDim2.new(0.5, 0, 1, -6),
-	size = UDim2.new(1, -12, 0, 22),
+	anchorPoint = Vector2.new(0.5, 0),
+	position = UDim2.new(0.5, 0, 0.74, 0),
+	size = UDim2.new(1, -8, 0, 18),
 	textColor3 = Color3.fromRGB(255, 250, 240),
 	textStrokeColor3 = Color3.fromRGB(6, 10, 18),
 	textStrokeTransparency = 0.02,
@@ -25,8 +25,8 @@ local FALLBACK_TITLE_STYLE = {
 
 local FALLBACK_ICON_STYLE = {
 	anchorPoint = Vector2.new(0.5, 0.5),
-	position = UDim2.new(0.5, 0, 0.42, 0),
-	size = UDim2.new(0, 40, 0, 40),
+	position = UDim2.new(0.5, 0, 0.34, 0),
+	size = UDim2.new(0, 54, 0, 54),
 	imageColor3 = Color3.fromRGB(255, 255, 255),
 	imageTransparency = 0,
 	backgroundTransparency = 1,
@@ -203,10 +203,16 @@ local function HudMenuTile(props)
 	local style = props.style or {}
 	local titleStyle = style.title or FALLBACK_TITLE_STYLE
 	local children = {
-		Background = renderVisualImage("ReactHudMenuBackground", style.background) or renderFallbackBackground(),
-		TitleBand = renderTitleBand(style.titleBand),
 		Title = renderTitle(props.label, titleStyle),
 	}
+
+	if style.showBackground ~= false then
+		children.Background = renderVisualImage("ReactHudMenuBackground", style.background) or renderFallbackBackground()
+	end
+
+	if style.showTitleBand == true then
+		children.TitleBand = renderTitleBand(style.titleBand)
+	end
 
 	local iconNode = renderVisualImage("ReactHudMenuIcon", style.icon or FALLBACK_ICON_STYLE)
 	if iconNode then

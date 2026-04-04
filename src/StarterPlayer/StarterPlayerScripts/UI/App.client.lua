@@ -157,6 +157,7 @@ local scheduleRender
 local syncDevilFruitsFromInventory
 local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
+local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
@@ -581,13 +582,16 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	for _, entry in ipairs(bonusEntries) do
 		local bonusInfo = entry.info
 		if tonumber(bonusInfo.UnlockLevel) == level then
-			pushLine(string.format(
-				"%s unlocked on Floor %d Slot %d (%s income)",
-				tostring(bonusInfo.Label or "Bonus Slot"),
-				tonumber(bonusInfo.Floor) or 1,
-				tonumber(bonusInfo.Slot) or 1,
-				formatBonusPercent(bonusInfo.Multiplier)
-			), tostring(entry.standName) .. ":bonus")
+			pushLine(
+				string.format(
+					"%s unlocked on Floor %d Slot %d (%s income)",
+					tostring(bonusInfo.Label or "Bonus Slot"),
+					tonumber(bonusInfo.Floor) or 1,
+					tonumber(bonusInfo.Slot) or 1,
+					formatBonusPercent(bonusInfo.Multiplier)
+				),
+				tostring(entry.standName) .. ":bonus"
+			)
 		end
 	end
 
@@ -732,20 +736,12 @@ local function readPlayerBountySummary()
 	local bountyFolder = player:FindFirstChild("Bounty")
 	local metaBounty = metaState and metaState.Bounty or {}
 
-	local crewBounty = math.max(
-		0,
-		math.floor(
-			tonumber(readChildValue(bountyFolder, "Crew"))
-				or tonumber(metaBounty.Crew)
-				or 0
-		)
-	)
+	local crewBounty =
+		math.max(0, math.floor(tonumber(readChildValue(bountyFolder, "Crew")) or tonumber(metaBounty.Crew) or 0))
 	local extractionBounty = math.max(
 		0,
 		math.floor(
-			tonumber(readChildValue(bountyFolder, "LifetimeExtraction"))
-				or tonumber(metaBounty.LifetimeExtraction)
-				or 0
+			tonumber(readChildValue(bountyFolder, "LifetimeExtraction")) or tonumber(metaBounty.LifetimeExtraction) or 0
 		)
 	)
 	local totalBounty = math.max(
@@ -797,9 +793,7 @@ local function readPlayerMaterials()
 		),
 		AncientTimber = math.max(
 			0,
-			tonumber(readChildValue(materialsFolder, "AncientTimber"))
-				or tonumber(metaMaterials.AncientTimber)
-				or 0
+			tonumber(readChildValue(materialsFolder, "AncientTimber")) or tonumber(metaMaterials.AncientTimber) or 0
 		),
 	}
 end
@@ -927,11 +921,7 @@ local function readDynamicTitleStatus(titleDefinition, trackedValue)
 end
 
 local function blendColor(a, b, t)
-	return Color3.new(
-		a.R + (b.R - a.R) * t,
-		a.G + (b.G - a.G) * t,
-		a.B + (b.B - a.B) * t
-	)
+	return Color3.new(a.R + (b.R - a.R) * t, a.G + (b.G - a.G) * t, a.B + (b.B - a.B) * t)
 end
 
 local function resolveTitleVisualStyle(titleDefinition, unlocked)
@@ -983,7 +973,7 @@ local function buildTitlesData(query)
 		totalCount += 1
 
 		local persistentUnlocked = titleDefinition.UnlockType == "Persistent"
-			and readPersistentTitleUnlocked(titleDefinition.Id)
+				and readPersistentTitleUnlocked(titleDefinition.Id)
 			or false
 		local dynamicUnlocked = false
 		local currentRank = nil
@@ -1095,7 +1085,9 @@ local function buildCaptainLogData(query)
 		local ok, entry, collectable = pcall(function()
 			local slotFolder = slotsFolder and slotsFolder:FindFirstChild(standName)
 			local standIncomeFolder = incomeFolder and incomeFolder:FindFirstChild(standName)
-			local brainrotName = tostring(readChildValue(slotFolder, "BrainrotName") or readChildValue(standIncomeFolder, "BrainrotName") or "")
+			local brainrotName = tostring(
+				readChildValue(slotFolder, "BrainrotName") or readChildValue(standIncomeFolder, "BrainrotName") or ""
+			)
 
 			if brainrotName == "" then
 				return nil, 0
@@ -1106,10 +1098,13 @@ local function buildCaptainLogData(query)
 			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
 			local subtitle = getSubtitle("Brainrot", brainrotName)
 			local displayName = getDisplayName("Brainrot", brainrotName)
-			local bounty = math.max(0, BountyResolver.ResolveBrainrotBounty({
-				StorageName = brainrotName,
-				Level = standLevel,
-			}))
+			local bounty = math.max(
+				0,
+				BountyResolver.ResolveBrainrotBounty({
+					StorageName = brainrotName,
+					Level = standLevel,
+				})
+			)
 
 			local nextEntry = {
 				key = standName,
@@ -1423,14 +1418,24 @@ end
 local function getToggleLayout()
 	return {
 		anchorPoint = Vector2.new(0, 0),
-		position = UDim2.fromOffset(0, 20),
-		size = UDim2.fromOffset(64, 64),
+		position = UDim2.fromOffset(0, 16),
+		size = UDim2.fromOffset(74, 74),
 		compact = true,
 		dock = "hotbarLeft",
 	}
 end
 
 local function getLegacyInventoryIcon()
+	if not cachedLegacyInventoryIcon then
+		cachedLegacyInventoryIcon = {
+			image = INVENTORY_ICON_OVERRIDE,
+			imageColor3 = Color3.fromRGB(255, 255, 255),
+			imageRectOffset = Vector2.zero,
+			imageRectSize = Vector2.zero,
+			scaleType = Enum.ScaleType.Fit,
+		}
+	end
+
 	local hud = playerGui:FindFirstChild("HUD")
 	local inventoryGui = hud and hud:FindFirstChild("Inventory")
 	local legacyButton = inventoryGui and inventoryGui:FindFirstChild("InventoryBtn", true)
@@ -1472,11 +1477,11 @@ local function getLegacyInventoryIcon()
 	end
 
 	cachedLegacyInventoryIcon = {
-		image = bestCandidate.Image,
+		image = INVENTORY_ICON_OVERRIDE,
 		imageColor3 = bestCandidate.ImageColor3,
-		imageRectOffset = bestCandidate.ImageRectOffset,
-		imageRectSize = bestCandidate.ImageRectSize,
-		scaleType = bestCandidate.ScaleType,
+		imageRectOffset = Vector2.zero,
+		imageRectSize = Vector2.zero,
+		scaleType = Enum.ScaleType.Fit,
 	}
 
 	return cachedLegacyInventoryIcon
@@ -1578,9 +1583,21 @@ local function bindTitleTracking()
 		if typeof(rankAttribute) == "string" and rankAttribute ~= "" and not watchedAttributes[rankAttribute] then
 			watchedAttributes[rankAttribute] = true
 			trackConnection(player:GetAttributeChangedSignal(rankAttribute), scheduleRender, titleAttributeConnections)
-			trackConnection(player:GetAttributeChangedSignal(rankAttribute .. "_Ready"), scheduleRender, titleAttributeConnections)
-			trackConnection(player:GetAttributeChangedSignal(rankAttribute .. "_VisibleLimit"), scheduleRender, titleAttributeConnections)
-			trackConnection(player:GetAttributeChangedSignal(rankAttribute .. "_VisibleCount"), scheduleRender, titleAttributeConnections)
+			trackConnection(
+				player:GetAttributeChangedSignal(rankAttribute .. "_Ready"),
+				scheduleRender,
+				titleAttributeConnections
+			)
+			trackConnection(
+				player:GetAttributeChangedSignal(rankAttribute .. "_VisibleLimit"),
+				scheduleRender,
+				titleAttributeConnections
+			)
+			trackConnection(
+				player:GetAttributeChangedSignal(rankAttribute .. "_VisibleCount"),
+				scheduleRender,
+				titleAttributeConnections
+			)
 		end
 	end
 
@@ -1619,78 +1636,81 @@ local function render()
 	local data = buildRenderData()
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
 
-	root:render(ReactRoblox.createPortal(React.createElement(App, {
-		isOpen = uiState.isOpen,
-		activeView = data.activeView,
-		activeCategory = uiState.activeCategory,
-		activeCategoryLabel = data.activeCategoryLabel,
-		categories = data.categories,
-		items = data.items,
-		captainLog = data.captainLog,
-		titles = data.titles,
-		hotbarSlots = data.hotbarSlots,
-		summary = data.summary,
-		filteredCount = data.filteredCount,
-		totalCount = data.totalCount,
-		query = data.query,
-		shipUpgradeModal = data.shipUpgradeModal,
-		toggleLayout = getToggleLayout(),
-		toggleIcon = getLegacyInventoryIcon(),
-		onToggle = function()
-			if shipUpgradeModal ~= nil then
-				return
-			end
-			uiState.isOpen = not uiState.isOpen
-			render()
-		end,
-		onSelectView = function(viewKey)
-			if shipUpgradeModal ~= nil then
-				return
-			end
-			uiState.activeView = viewKey
-			uiState.query = ""
-			render()
-		end,
-		onSelectCategory = function(categoryKey)
-			if shipUpgradeModal ~= nil then
-				return
-			end
-			uiState.activeCategory = categoryKey
-			render()
-		end,
-		onQueryChanged = function(nextQuery)
-			if shipUpgradeModal ~= nil then
-				return
-			end
-			uiState.query = nextQuery
-			render()
-		end,
-		onToggleTitle = function(entry)
-			if shipUpgradeModal ~= nil or typeof(entry) ~= "table" then
-				return
-			end
+	root:render(ReactRoblox.createPortal(
+		React.createElement(App, {
+			isOpen = uiState.isOpen,
+			activeView = data.activeView,
+			activeCategory = uiState.activeCategory,
+			activeCategoryLabel = data.activeCategoryLabel,
+			categories = data.categories,
+			items = data.items,
+			captainLog = data.captainLog,
+			titles = data.titles,
+			hotbarSlots = data.hotbarSlots,
+			summary = data.summary,
+			filteredCount = data.filteredCount,
+			totalCount = data.totalCount,
+			query = data.query,
+			shipUpgradeModal = data.shipUpgradeModal,
+			toggleLayout = getToggleLayout(),
+			toggleIcon = getLegacyInventoryIcon(),
+			onToggle = function()
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				uiState.isOpen = not uiState.isOpen
+				render()
+			end,
+			onSelectView = function(viewKey)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				uiState.activeView = viewKey
+				uiState.query = ""
+				render()
+			end,
+			onSelectCategory = function(categoryKey)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				uiState.activeCategory = categoryKey
+				render()
+			end,
+			onQueryChanged = function(nextQuery)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				uiState.query = nextQuery
+				render()
+			end,
+			onToggleTitle = function(entry)
+				if shipUpgradeModal ~= nil or typeof(entry) ~= "table" then
+					return
+				end
 
-			local titleId = tostring(entry.titleId or "")
-			if titleId == "" then
-				return
-			end
+				local titleId = tostring(entry.titleId or "")
+				if titleId == "" then
+					return
+				end
 
-			titleEquipRemote:FireServer(entry.isEquipped and "" or titleId)
-		end,
-		onActivateItem = function(entry)
-			if shipUpgradeModal ~= nil then
-				return
-			end
-			if entry and entry.kind ~= "Resource" then
-				equipRemote:FireServer(entry.kind, entry.name)
-			end
-		end,
-		onDismissShipUpgradeModal = function()
-			shipUpgradeModal = nil
-			updateModalInputCapture()
-			render()
-		end,
-	}), playerGui))
+				titleEquipRemote:FireServer(entry.isEquipped and "" or titleId)
+			end,
+			onActivateItem = function(entry)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				if entry and entry.kind ~= "Resource" then
+					equipRemote:FireServer(entry.kind, entry.name)
+				end
+			end,
+			onDismissShipUpgradeModal = function()
+				shipUpgradeModal = nil
+				updateModalInputCapture()
+				render()
+			end,
+		}),
+		playerGui
+	))
 end
 
 scheduleRender = function()

@@ -22,6 +22,14 @@ local STAT_ORDER = {
 	{ name = "Money", kind = "Money" },
 }
 
+local STAT_ICON_ASSET_OVERRIDES = {
+	Comet = "",
+	Speed = "rbxassetid://108512951338844",
+	Money = "rbxassetid://105592440149778",
+}
+
+local iconOverrideSources = {}
+
 local COUNTERS_LEFT_PADDING = HudCounterConfig.LeftPadding
 local COUNTERS_BOTTOM_PADDING = HudCounterConfig.BottomPadding
 local COUNTERS_WIDTH = HudCounterConfig.Width
@@ -404,6 +412,31 @@ local function buildItems(counters)
 
 	local iconByName, orderedIcons = assignIcons(counters, hosts)
 
+	local function getIconOverrideSource(statName)
+		local image = STAT_ICON_ASSET_OVERRIDES[statName]
+		if not image then
+			return nil
+		end
+
+		local existing = iconOverrideSources[statName]
+		if existing and existing:IsA("ImageLabel") then
+			existing.Image = image
+			return existing
+		end
+
+		local source = Instance.new("ImageLabel")
+		source.Name = "ReactHudCounterIconOverride_" .. tostring(statName)
+		source.BackgroundTransparency = 1
+		source.BorderSizePixel = 0
+		source.Size = UDim2.fromOffset(38, 38)
+		source.Image = image
+		source.ImageTransparency = 0
+		source.ImageColor3 = Color3.fromRGB(255, 255, 255)
+		source.ScaleType = Enum.ScaleType.Fit
+		iconOverrideSources[statName] = source
+		return source
+	end
+
 	for index, host in ipairs(hosts) do
 		local statKind = host.Name
 		for _, stat in ipairs(STAT_ORDER) do
@@ -413,7 +446,8 @@ local function buildItems(counters)
 			end
 		end
 
-		local iconSource = iconByName[host.Name]
+		local iconSource = getIconOverrideSource(host.Name)
+			or iconByName[host.Name]
 			or orderedIcons[index]
 			or findCounterIcon(counters, host, host.Name)
 

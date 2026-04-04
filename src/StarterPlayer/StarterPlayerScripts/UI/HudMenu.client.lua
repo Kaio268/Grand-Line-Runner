@@ -52,10 +52,24 @@ local TILE_DEFS = {
 
 local TILE_POSITIONS = {
 	Store = Vector2.new(0, 0),
-	Index = Vector2.new(90, 0),
-	Gifts = Vector2.new(0, 90),
-	Settings = Vector2.new(90, 90),
-	Rebirth = Vector2.new(0, 180),
+	Index = Vector2.new(94, 0),
+	Gifts = Vector2.new(0, 94),
+	Settings = Vector2.new(94, 94),
+	Rebirth = Vector2.new(0, 188),
+}
+
+local HUD_ICON_ASSET_OVERRIDES = {
+	Store = "rbxassetid://87636652264235",
+	Index = "rbxassetid://77322372470208",
+	Gifts = "rbxassetid://131189007512696",
+	Claim = "rbxassetid://131189007512696",
+	Settings = "rbxassetid://125384263224347",
+	Rebirth = "rbxassetid://116163404622119",
+}
+
+local HUD_ICON_SIZE_OVERRIDES = {
+	Store = Vector2.new(76, 76),
+	Settings = Vector2.new(68, 68),
 }
 
 local PROTECTED_CHILDREN = {
@@ -318,7 +332,7 @@ local function ensureContainer(hud)
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
-		lButtons.Size = UDim2.fromOffset(188, 274)
+		lButtons.Size = UDim2.fromOffset(198, 288)
 		lButtons.Position = UDim2.fromOffset(10, 250)
 		return lButtons
 	end
@@ -330,7 +344,7 @@ local function ensureContainer(hud)
 	created.ClipsDescendants = false
 	created.Visible = true
 	created.Position = UDim2.fromOffset(10, 250)
-	created.Size = UDim2.fromOffset(188, 274)
+	created.Size = UDim2.fromOffset(198, 288)
 	created.Parent = hud
 
 	return created
@@ -400,7 +414,7 @@ local function ensureShell(container, definition, index)
 		existing.Visible = true
 		existing.Active = true
 		existing.ClipsDescendants = false
-		existing.Size = UDim2.fromOffset(84, 84)
+		existing.Size = UDim2.fromOffset(92, 92)
 		existing.LayoutOrder = index
 		if mappedPosition then
 			existing.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
@@ -418,7 +432,7 @@ local function ensureShell(container, definition, index)
 	button.ImageTransparency = 1
 	button.Visible = true
 	button.LayoutOrder = index
-	button.Size = UDim2.fromOffset(84, 84)
+	button.Size = UDim2.fromOffset(92, 92)
 	if mappedPosition then
 		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
 	else
@@ -632,10 +646,13 @@ end
 local function removeSidebarTimers(button, context, keepGiftSummary)
 	local timers = {}
 	for _, descendant in ipairs(button:GetDescendants()) do
-		if descendant:IsA("GuiObject")
-			and (descendant.Name == "Timer"
+		if
+			descendant:IsA("GuiObject")
+			and (
+				descendant.Name == "Timer"
 				or descendant.Name == "Timer2"
-				or (descendant.Name == "GiftSummaryTimer" and keepGiftSummary ~= true))
+				or (descendant.Name == "GiftSummaryTimer" and keepGiftSummary ~= true)
+			)
 		then
 			table.insert(timers, descendant)
 		end
@@ -649,14 +666,30 @@ local function removeSidebarTimers(button, context, keepGiftSummary)
 	for _, timer in ipairs(timers) do
 		local timerPath = safeName(timer)
 		timer:Destroy()
-		hudLog(
-			"[HUD][TIMER]",
-			string.format("context=%s button=%s removed=%s", context, safeName(button), timerPath)
-		)
+		hudLog("[HUD][TIMER]", string.format("context=%s button=%s removed=%s", context, safeName(button), timerPath))
 	end
 end
 
 local function ensureGiftSummaryTimer(button)
+	for _, sibling in ipairs(button.Parent:GetChildren()) do
+		if sibling:IsA("GuiObject") then
+			local wrongTimer = sibling:FindFirstChild("Timer")
+			if wrongTimer and wrongTimer:IsA("GuiObject") then
+				wrongTimer:Destroy()
+			end
+			local wrongTimer2 = sibling:FindFirstChild("Timer2")
+			if wrongTimer2 and wrongTimer2:IsA("GuiObject") then
+				wrongTimer2:Destroy()
+			end
+			if sibling ~= button then
+				local wrongSummary = sibling:FindFirstChild("GiftSummaryTimer")
+				if wrongSummary and wrongSummary:IsA("GuiObject") then
+					wrongSummary:Destroy()
+				end
+			end
+		end
+	end
+
 	local summary = button:FindFirstChild("GiftSummaryTimer")
 	if summary and not summary:IsA("TextLabel") then
 		summary:Destroy()
@@ -672,19 +705,20 @@ local function ensureGiftSummaryTimer(button)
 	summary.Visible = true
 	summary.AnchorPoint = Vector2.new(0.5, 0)
 	summary.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
-	summary.BackgroundTransparency = 0.08
+	summary.BackgroundTransparency = 0.16
 	summary.BorderSizePixel = 0
 	summary.Font = Enum.Font.GothamBold
-	summary.Position = UDim2.new(0.5, 0, 0, 8)
-	summary.Size = UDim2.new(1, -20, 0, 18)
+	summary.Position = UDim2.new(0.5, 0, 0, 4)
+	summary.Size = UDim2.fromOffset(60, 18)
 	summary.Text = tostring(summary.Text ~= "" and summary.Text or "--")
-	summary.TextColor3 = Color3.fromRGB(255, 245, 224)
-	summary.TextScaled = true
-	summary.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
-	summary.TextStrokeTransparency = 0.08
+	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
+	summary.TextScaled = false
+	summary.TextSize = 13
+	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	summary.TextStrokeTransparency = 0
 	summary.TextXAlignment = Enum.TextXAlignment.Center
 	summary.TextYAlignment = Enum.TextYAlignment.Center
-	summary.ZIndex = math.max(button.ZIndex + 9, 11)
+	summary.ZIndex = math.max(button.ZIndex + 300, 300)
 
 	local corner = summary:FindFirstChildOfClass("UICorner")
 	if not corner then
@@ -703,6 +737,7 @@ local function ensureGiftSummaryTimer(button)
 	stroke.Color = Color3.fromRGB(255, 237, 203)
 	stroke.Transparency = 0.6
 	stroke.Thickness = 1
+	stroke.Enabled = true
 
 	local gradient = summary:FindFirstChildOfClass("UIGradient")
 	if not gradient then
@@ -715,6 +750,7 @@ local function ensureGiftSummaryTimer(button)
 		ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 22)),
 	})
 	gradient.Rotation = 90
+	gradient.Enabled = false
 
 	hudLog("[HUD][TIMER]", string.format("button=%s summaryTimer=%s", safeName(button), safeName(summary)))
 
@@ -808,15 +844,15 @@ local function normalizeTitleStyle(titleStyle)
 	local style = titleStyle or {}
 
 	return {
-		anchorPoint = Vector2.new(0.5, 1),
+		anchorPoint = Vector2.new(0.5, 0),
 		backgroundTransparency = 1,
 		font = style.font or Enum.Font.GothamBold,
 		fontFace = style.fontFace,
-		position = UDim2.new(0.5, 0, 1, -6),
+		position = UDim2.new(0.5, 0, 0.65, 0),
 		rotation = 0,
-		size = UDim2.new(1, -12, 0, clampNumber(style.textSize, 15, 18) + 6),
+		size = UDim2.new(1, -8, 0, clampNumber(style.textSize, 14, 17) + 4),
 		textColor3 = Color3.fromRGB(255, 250, 240),
-		textSize = clampNumber(style.textSize, 15, 18),
+		textSize = clampNumber(style.textSize, 14, 17),
 		textStrokeColor3 = Color3.fromRGB(6, 10, 18),
 		textStrokeTransparency = 0.02,
 		textTransparency = 0,
@@ -839,13 +875,45 @@ end
 local function buildTileStyle(button)
 	local backgroundStyle, backgroundCandidate = pickBackground(button)
 	local iconStyle = pickIcon(button, backgroundCandidate)
+	local overrideIcon = HUD_ICON_ASSET_OVERRIDES[button.Name]
+	if overrideIcon then
+		if iconStyle then
+			iconStyle.image = overrideIcon
+		else
+			iconStyle = {
+				anchorPoint = Vector2.new(0.5, 0.5),
+				backgroundTransparency = 1,
+				image = overrideIcon,
+				imageColor3 = Color3.fromRGB(255, 255, 255),
+				imageRectOffset = Vector2.zero,
+				imageRectSize = Vector2.zero,
+				imageTransparency = 0,
+				position = UDim2.fromScale(0.5, 0.34),
+				rotation = 0,
+				scaleType = Enum.ScaleType.Fit,
+				size = UDim2.fromOffset(54, 54),
+				zIndex = 18,
+			}
+		end
+	end
+
+	if iconStyle then
+		local iconSize = HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66)
+		iconStyle.position = UDim2.fromScale(0.5, 0.34)
+		iconStyle.size = UDim2.fromOffset(iconSize.X, iconSize.Y)
+		iconStyle.scaleType = Enum.ScaleType.Fit
+		iconStyle.backgroundTransparency = 1
+		iconStyle.zIndex = math.max(clampNumber(iconStyle.zIndex, 14, 24), 18)
+	end
 
 	return {
 		background = backgroundStyle,
 		icon = iconStyle,
-		accent = findAccentStyle(button, backgroundCandidate, iconStyle),
+		accent = nil,
 		title = normalizeTitleStyle(pickTitleStyle(button)),
 		titleBand = buildTitleBandStyle(),
+		showBackground = false,
+		showTitleBand = false,
 	}
 end
 

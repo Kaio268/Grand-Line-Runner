@@ -8,6 +8,11 @@ local TimeRewardsConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local HUD_DEBUG = false
+local DEFAULT_COUNTER_ICONS = {
+	Comet = "",
+	Speed = "rbxassetid://108512951338844",
+	Money = "rbxassetid://105592440149778",
+}
 local ensureFrame
 local ensureTextLabel
 local ensureImageLabel
@@ -294,6 +299,32 @@ local function clearChildren(parent, preserveNames)
 	end
 end
 
+local function captureLegacyCounterImages(counters)
+	local images = {
+		Comet = DEFAULT_COUNTER_ICONS.Comet,
+		Speed = DEFAULT_COUNTER_ICONS.Speed,
+		Money = DEFAULT_COUNTER_ICONS.Money,
+	}
+	if not counters then
+		return images
+	end
+
+	for _, statName in ipairs({ "Comet", "Speed", "Money" }) do
+		local host = counters:FindFirstChild(statName)
+		if host then
+			local icon = host:FindFirstChild("Icon")
+			if not (icon and icon:IsA("ImageLabel")) then
+				icon = host:FindFirstChildWhichIsA("ImageLabel", true)
+			end
+			if icon and icon:IsA("ImageLabel") and tostring(icon.Image) ~= "" then
+				images[statName] = tostring(icon.Image)
+			end
+		end
+	end
+
+	return images
+end
+
 local function ensureCounterHost(counters, name, iconImage)
 	local host = counters:FindFirstChild(name)
 	if host and not host:IsA("TextLabel") then
@@ -558,13 +589,14 @@ local function ensureRebirthRequirement(parent, name, yOffset)
 	track.BackgroundTransparency = 0.15
 	track.Size = UDim2.new(1, -20, 0, 10)
 	track.Position = UDim2.fromOffset(10, 56)
+	track.ClipsDescendants = true
 	ensureUICorner(track, 999)
 
-	local bar = ensureFrame(section, "Bar")
+	local bar = ensureFrame(track, "Bar")
 	bar.BackgroundColor3 = Color3.fromRGB(102, 220, 146)
 	bar.BackgroundTransparency = 0
-	bar.Size = UDim2.new(0.3, -20, 0, 10)
-	bar.Position = UDim2.fromOffset(10, 56)
+	bar.Size = UDim2.new(0, 0, 1, 0)
+	bar.Position = UDim2.fromOffset(0, 0)
 	ensureUICorner(bar, 999)
 
 	return section
@@ -1031,20 +1063,21 @@ local function ensureHud()
 	ensureHudButton(lButtons, "Rebirth", false)
 
 	local counters = ensureFrame(hud, "Counters")
+	local legacyCounterImages = captureLegacyCounterImages(counters)
 	clearChildren(counters)
 	counters.Size = UDim2.fromOffset(250, 172)
 	counters.Position = UDim2.fromOffset(24, 520)
 	counters.ClipsDescendants = false
 
-	local comet = ensureCounterHost(counters, "Comet")
+	local comet = ensureCounterHost(counters, "Comet", legacyCounterImages.Comet)
 	comet.Position = UDim2.fromOffset(0, 0)
 	ensureUIGradient(comet, Color3.fromRGB(185, 159, 222), Color3.fromRGB(226, 240, 255))
 
-	local speed = ensureCounterHost(counters, "Speed")
+	local speed = ensureCounterHost(counters, "Speed", legacyCounterImages.Speed)
 	speed.Position = UDim2.fromOffset(0, 52)
 	ensureUIGradient(speed, Color3.fromRGB(255, 122, 122), Color3.fromRGB(255, 204, 176))
 
-	local money = ensureCounterHost(counters, "Money")
+	local money = ensureCounterHost(counters, "Money", legacyCounterImages.Money)
 	money.Position = UDim2.fromOffset(0, 104)
 	ensureUIGradient(money, Color3.fromRGB(62, 181, 35), Color3.fromRGB(198, 255, 76))
 

@@ -56,6 +56,17 @@ local Rewards = {
 	},
 	
 	[6] = {
+		RewName = "Bombardiro Crocodilo",
+		Icon = "rbxassetid://108324428541699",
+
+		Time               = 2100,
+		RewardTextTemplate = "You Get %d %s",
+		Rewards            = {
+			["Bombardiro Crocodilo"] = {Chance = 100, Amount  = 1, Brainrot = true},
+		},
+	},
+	
+	[7] = {
 		RewName = "Frigo Camelo",
 		Icon = "rbxassetid://84916034746691",
 
@@ -66,7 +77,7 @@ local Rewards = {
 		},
 	},
 	
-	[7] = {
+	[8] = {
 		RewName = "+ 100000 Money",
 		Icon = "rbxassetid://134664902697800",
 
@@ -77,16 +88,6 @@ local Rewards = {
 		},
 	},
 	
-	[8] = {
-		RewName = "Bombardiro Crocodilo",
-		Icon = "rbxassetid://108324428541699",
-
-		Time               = 5400,
-		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
-			["Bombardiro Crocodilo"] = {Chance = 100, Amount  = 1, Brainrot = true},
-		},
-	},
 }
 
 return Rewards

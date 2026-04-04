@@ -1002,8 +1002,8 @@ local function inventoryToggleButton(props)
 	local compact = layout.compact == true
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(props.onToggle ~= nil)
 	local zIndexBase = props.zIndexBase or 0
-	local iconPosition = compact and UDim2.new(0.5, 0, 0, 28) or UDim2.new(0.5, 0, 0.44, 0)
-	local iconSize = compact and UDim2.fromOffset(34, 34) or UDim2.fromOffset(34, 34)
+	local iconPosition = compact and UDim2.new(0.5, 0, 0, 38) or UDim2.new(0.5, 0, 0.44, 0)
+	local iconSize = compact and UDim2.fromOffset(56, 56) or UDim2.fromOffset(34, 34)
 	local toggleIcon = props.toggleIcon or {}
 	local hasLegacyIcon = typeof(toggleIcon.image) == "string" and toggleIcon.image ~= ""
 
@@ -1093,7 +1093,7 @@ local function inventoryToggleButton(props)
 			BackgroundTransparency = 0.14,
 			BorderSizePixel = 0,
 			Font = Enum.Font.GothamBlack,
-			Position = UDim2.new(0.5, 0, 0, 4),
+			Position = UDim2.new(0.5, 0, 0, 2),
 			Size = UDim2.fromOffset(18, 16),
 			Text = "F",
 			TextColor3 = Color3.fromRGB(233, 242, 255),
@@ -1114,11 +1114,11 @@ local function inventoryToggleButton(props)
 			AnchorPoint = compact and Vector2.new(0.5, 1) or Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBlack,
-			Position = compact and UDim2.new(0.5, 0, 1, -3) or UDim2.new(0.5, 0, 0, 10),
-			Size = UDim2.new(1, -8, 0, compact and 16 or 16),
+			Position = compact and UDim2.new(0.5, 0, 1, -1) or UDim2.new(0.5, 0, 0, 10),
+			Size = UDim2.new(1, -6, 0, compact and 15 or 16),
 			Text = "Inventory",
 			TextColor3 = PALETTE.Cream,
-			TextSize = compact and 10 or 13,
+			TextSize = compact and 11 or 13,
 			TextStrokeTransparency = compact and 0.5 or 0.65,
 			TextStrokeColor3 = Color3.fromRGB(8, 12, 20),
 			TextWrapped = true,
