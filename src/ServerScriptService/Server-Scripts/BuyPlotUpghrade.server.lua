@@ -7,14 +7,75 @@ local GrandLineRushVerticalSliceService = require(ServerScriptService:WaitForChi
 local cfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
-local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
-local remote = remotesFolder:WaitForChild("PlotUpgradeRemote")
-local upgradeResultRemote = remotesFolder:FindFirstChild("ShipUpgradeResultRemote")
-if not upgradeResultRemote then
-	upgradeResultRemote = Instance.new("RemoteEvent")
-	upgradeResultRemote.Name = "ShipUpgradeResultRemote"
-	upgradeResultRemote.Parent = remotesFolder
+local PLOT_UPGRADE_DEBUG = true
+local PLOT_UPGRADE_LOG_PREFIX = "[PlotUpgradeServer]"
+
+local function formatDebugMessage(message, ...)
+	if select("#", ...) > 0 then
+		local ok, formatted = pcall(string.format, tostring(message), ...)
+		if ok then
+			return formatted
+		end
+	end
+
+	return tostring(message)
 end
+
+local function plotUpgradeLog(message, ...)
+	if PLOT_UPGRADE_DEBUG ~= true then
+		return
+	end
+
+	print(PLOT_UPGRADE_LOG_PREFIX, formatDebugMessage(message, ...))
+end
+
+local function plotUpgradeWarn(message, ...)
+	warn(PLOT_UPGRADE_LOG_PREFIX, formatDebugMessage(message, ...))
+end
+
+local function getOrCreateRemotesFolder()
+	local folder = ReplicatedStorage:FindFirstChild("Remotes")
+	if folder and folder:IsA("Folder") then
+		return folder
+	end
+
+	if folder then
+		folder:Destroy()
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = "Remotes"
+	folder.Parent = ReplicatedStorage
+	plotUpgradeWarn("Created missing ReplicatedStorage.Remotes folder.")
+	return folder
+end
+
+local function getOrCreateRemoteEvent(parent, remoteName)
+	local remoteEvent = parent:FindFirstChild(remoteName)
+	if remoteEvent and remoteEvent:IsA("RemoteEvent") then
+		return remoteEvent
+	end
+
+	if remoteEvent then
+		remoteEvent:Destroy()
+	end
+
+	remoteEvent = Instance.new("RemoteEvent")
+	remoteEvent.Name = remoteName
+	remoteEvent.Parent = parent
+	plotUpgradeWarn("Created missing remote %s.", remoteName)
+	return remoteEvent
+end
+
+local remotesFolder = getOrCreateRemotesFolder()
+local remote = getOrCreateRemoteEvent(remotesFolder, "PlotUpgradeRemote")
+local upgradeResultRemote = getOrCreateRemoteEvent(remotesFolder, "ShipUpgradeResultRemote")
+
+plotUpgradeLog(
+	"Initialized remotes plot=%s shipUpgrade=%s",
+	remote:GetFullName(),
+	upgradeResultRemote:GetFullName()
+)
 
 local busy = {}
 local PLOT_UPGRADE_PATH = "HiddenLeaderstats.PlotUpgrade"
@@ -184,6 +245,13 @@ local function fireUpgradeResult(player, payload)
 		return
 	end
 
+	plotUpgradeLog(
+		"FireClient player=%s success=%s level=%s error=%s",
+		player.Name,
+		tostring(payload and payload.Success),
+		tostring(payload and payload.Level),
+		tostring(payload and payload.ErrorCode)
+	)
 	upgradeResultRemote:FireClient(player, payload)
 end
 
@@ -219,19 +287,24 @@ local function fireUpgradeFailure(player, targetLevel, requiredRebirths, current
 end
 
 remote.OnServerEvent:Connect(function(player)
+	plotUpgradeLog("Upgrade requested by %s", player and player.Name or "unknown")
+
 	if busy[player] then
+		plotUpgradeWarn("Ignoring duplicate upgrade request for %s while busy.", player.Name)
 		return
 	end
 	busy[player] = true
 
 	local current = getCurrentUpgrade(player, PLOT_UPGRADE_PATH)
 	if cfg.IsMaxLevel(current) then
+		plotUpgradeLog("Player %s is already at max ship level %s.", player.Name, tostring(current))
 		busy[player] = nil
 		return
 	end
 
 	local requirement = cfg.GetRequirementForLevel(current)
 	if typeof(requirement) ~= "table" then
+		plotUpgradeWarn("Missing requirement table for player=%s currentLevel=%s.", player.Name, tostring(current))
 		busy[player] = nil
 		return
 	end
@@ -240,6 +313,12 @@ remote.OnServerEvent:Connect(function(player)
 	local currentRebirths = getRebirthCount(player)
 	local requiredRebirths = math.max(0, math.floor(tonumber(requirement.Rebirths) or 0))
 	if currentRebirths < requiredRebirths then
+		plotUpgradeLog(
+			"Rebirth requirement failed player=%s current=%d required=%d",
+			player.Name,
+			currentRebirths,
+			requiredRebirths
+		)
 		fireUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
 		busy[player] = nil
 		return
@@ -248,6 +327,12 @@ remote.OnServerEvent:Connect(function(player)
 	local currentMoney = getMoney(player)
 	local doubloonCost = math.max(0, math.floor(tonumber(requirement.Doubloons) or 0))
 	if currentMoney < doubloonCost then
+		plotUpgradeLog(
+			"Doubloon requirement failed player=%s balance=%d cost=%d",
+			player.Name,
+			currentMoney,
+			doubloonCost
+		)
 		busy[player] = nil
 		return
 	end
@@ -259,6 +344,13 @@ remote.OnServerEvent:Connect(function(player)
 		materialBalances[materialKey] = currentAmount
 
 		if currentAmount < requiredAmount then
+			plotUpgradeLog(
+				"Material requirement failed player=%s material=%s current=%d required=%d",
+				player.Name,
+				materialKey,
+				currentAmount,
+				requiredAmount
+			)
 			busy[player] = nil
 			return
 		end
@@ -285,11 +377,13 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	if not applyMutations(player, mutations) then
+		plotUpgradeWarn("Failed to apply plot upgrade mutations for %s.", player.Name)
 		busy[player] = nil
 		return
 	end
 
 	GrandLineRushVerticalSliceService.PushState(player)
+	plotUpgradeLog("Upgrade succeeded player=%s newLevel=%d", player.Name, newLevel)
 	fireUpgradeSuccess(player, newLevel)
 	busy[player] = nil
 end)

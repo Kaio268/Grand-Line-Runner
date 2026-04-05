@@ -7,6 +7,32 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local INVENTORY_UI_DEBUG = true
+local INVENTORY_UI_LOG_PREFIX = "[InventoryUI]"
+
+local function formatDebugMessage(message, ...)
+	if select("#", ...) > 0 then
+		local ok, formatted = pcall(string.format, tostring(message), ...)
+		if ok then
+			return formatted
+		end
+	end
+
+	return tostring(message)
+end
+
+local function inventoryLog(message, ...)
+	if INVENTORY_UI_DEBUG ~= true then
+		return
+	end
+
+	print(INVENTORY_UI_LOG_PREFIX, formatDebugMessage(message, ...))
+end
+
+local function inventoryWarn(message, ...)
+	warn(INVENTORY_UI_LOG_PREFIX, formatDebugMessage(message, ...))
+end
+
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
@@ -28,13 +54,16 @@ local UiModalState = require(Modules:WaitForChild("UiModalState"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
-local titleEquipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TitleEquipRequest")
-local shipUpgradeResultRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShipUpgradeResultRemote")
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local titleEquipRemote = remotesFolder:FindFirstChild("TitleEquipRequest")
+local shipUpgradeResultRemote = remotesFolder:FindFirstChild("ShipUpgradeResultRemote")
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactInventoryRoot"
 
 local root = ReactRoblox.createRoot(rootContainer)
+
+inventoryLog("Booting React inventory UI script.")
 
 local MAX_BRAINROT_HOTBAR = 9
 
@@ -149,6 +178,7 @@ local acquisition = {}
 local acquisitionCounter = 0
 local metaState = nil
 local equippedName = nil
+local buildShipUpgradeGainLines
 local keyboardHotbar = {}
 local renderQueued = false
 local destroyed = false
@@ -159,6 +189,8 @@ local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
 local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
 local shipUpgradeModal = nil
+local shipUpgradeRemoteConnection = nil
+local lastRenderDebugSignature = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
 	Enum.UserInputType.MouseButton1,
@@ -235,6 +267,120 @@ end
 
 local function trim(text)
 	return tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function countFilledHotbarSlots(hotbarSlots)
+	local count = 0
+	for _, slot in ipairs(hotbarSlots or {}) do
+		if slot.item ~= nil then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function handleShipUpgradeResult(payload)
+	if typeof(payload) ~= "table" then
+		inventoryWarn("Ignored ShipUpgradeResultRemote payload of type %s.", typeof(payload))
+		return
+	end
+
+	inventoryLog(
+		"Received ship upgrade payload success=%s level=%s error=%s",
+		tostring(payload.Success),
+		tostring(payload.Level),
+		tostring(payload.ErrorCode)
+	)
+
+	if shipUpgradeModal ~= nil then
+		return
+	end
+
+	if payload.Success == false then
+		local lines = {}
+		if typeof(payload.Lines) == "table" then
+			for _, line in ipairs(payload.Lines) do
+				if typeof(line) == "string" and trim(line) ~= "" then
+					lines[#lines + 1] = trim(line)
+				end
+			end
+		end
+		if #lines == 0 then
+			lines = { trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
+		end
+
+		shipUpgradeModal = {
+			Title = tostring(payload.Title or "Ship Upgrade Locked"),
+			AccentText = tostring(payload.AccentText or "Requirement Not Met"),
+			Lines = lines,
+			IsError = payload.IsError ~= false,
+		}
+		updateModalInputCapture()
+		scheduleRender()
+		return
+	end
+
+	local level = PlotUpgradeConfig.ClampLevel(payload.Level)
+	local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
+	local isMaxLevel = payload.IsMaxLevel == true
+	local gainLines = buildShipUpgradeGainLines(level, description, isMaxLevel)
+
+	shipUpgradeModal = {
+		Title = string.format("Ship upgraded to Lv %d", level),
+		AccentText = isMaxLevel and "Ship Max Level" or "Ship Upgrade Complete",
+		Lines = gainLines,
+		IsMaxLevel = isMaxLevel,
+	}
+	updateModalInputCapture()
+	scheduleRender()
+end
+
+local function bindShipUpgradeResultRemote(remote)
+	if remote ~= nil and not remote:IsA("RemoteEvent") then
+		inventoryWarn("ShipUpgradeResultRemote exists but is not a RemoteEvent: %s", remote.ClassName)
+		return
+	end
+
+	if shipUpgradeRemoteConnection then
+		shipUpgradeRemoteConnection:Disconnect()
+		shipUpgradeRemoteConnection = nil
+	end
+
+	shipUpgradeResultRemote = remote
+	if shipUpgradeResultRemote == nil then
+		inventoryWarn("ShipUpgradeResultRemote unavailable. Inventory UI will stay mounted and retry when it appears.")
+		return
+	end
+
+	shipUpgradeRemoteConnection = shipUpgradeResultRemote.OnClientEvent:Connect(handleShipUpgradeResult)
+	table.insert(cleanupConnections, shipUpgradeRemoteConnection)
+	inventoryLog("Bound ShipUpgradeResultRemote at %s", shipUpgradeResultRemote:GetFullName())
+end
+
+local function refreshOptionalRemotes()
+	local titleCandidate = remotesFolder:FindFirstChild("TitleEquipRequest")
+	if titleCandidate and titleCandidate:IsA("RemoteEvent") then
+		if titleEquipRemote ~= titleCandidate then
+			titleEquipRemote = titleCandidate
+			inventoryLog("Bound TitleEquipRequest at %s", titleEquipRemote:GetFullName())
+		end
+	elseif titleCandidate ~= nil then
+		titleEquipRemote = nil
+		inventoryWarn("TitleEquipRequest exists but is not a RemoteEvent: %s", titleCandidate.ClassName)
+	end
+
+	if shipUpgradeRemoteConnection == nil then
+		local shipRemoteCandidate = remotesFolder:FindFirstChild("ShipUpgradeResultRemote")
+		if shipRemoteCandidate and shipRemoteCandidate:IsA("RemoteEvent") then
+			bindShipUpgradeResultRemote(shipRemoteCandidate)
+		elseif shipRemoteCandidate ~= nil then
+			shipUpgradeResultRemote = nil
+			inventoryWarn("ShipUpgradeResultRemote exists but is not a RemoteEvent: %s", shipRemoteCandidate.ClassName)
+		else
+			bindShipUpgradeResultRemote(nil)
+		end
+	end
 end
 
 local function matchesQuery(entry, query)
@@ -525,7 +671,7 @@ local function formatBonusPercent(multiplier)
 	return string.format("+%d%%", percent)
 end
 
-local function buildShipUpgradeGainLines(level, description, isMaxLevel)
+buildShipUpgradeGainLines = function(level, description, isMaxLevel)
 	local lines = {}
 	local seen = {}
 	local previousLevel = math.max(0, PlotUpgradeConfig.ClampLevel(level) - 1)
@@ -1636,6 +1782,29 @@ local function render()
 	local data = buildRenderData()
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
 
+	local renderSignature = table.concat({
+		tostring(uiState.isOpen),
+		tostring(uiState.activeCategory),
+		tostring(#(data.items or {})),
+		tostring(countFilledHotbarSlots(data.hotbarSlots)),
+		tostring(#(data.hotbarSlots or {})),
+		tostring(titleEquipRemote ~= nil),
+		tostring(shipUpgradeResultRemote ~= nil),
+	}, "|")
+	if renderSignature ~= lastRenderDebugSignature then
+		lastRenderDebugSignature = renderSignature
+		inventoryLog(
+			"Render open=%s category=%s filteredItems=%d hotbarFilled=%d totalHotbar=%d remotes={title=%s,ship=%s}",
+			tostring(uiState.isOpen),
+			tostring(uiState.activeCategory),
+			#(data.items or {}),
+			countFilledHotbarSlots(data.hotbarSlots),
+			#(data.hotbarSlots or {}),
+			tostring(titleEquipRemote ~= nil),
+			tostring(shipUpgradeResultRemote ~= nil)
+		)
+	end
+
 	root:render(ReactRoblox.createPortal(
 		React.createElement(App, {
 			isOpen = uiState.isOpen,
@@ -1690,6 +1859,11 @@ local function render()
 
 				local titleId = tostring(entry.titleId or "")
 				if titleId == "" then
+					return
+				end
+
+				if titleEquipRemote == nil then
+					inventoryWarn("TitleEquipRequest missing; cannot toggle title %s yet.", titleId)
 					return
 				end
 
@@ -1847,6 +2021,13 @@ local function hookCharacter(character)
 end
 
 trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
+	inventoryLog(
+		"Inventory update kind=%s name=%s value=%s",
+		tostring(kind),
+		tostring(name),
+		tostring(value)
+	)
+
 	if kind == "Brainrot" then
 		local quantity = tonumber(value) or 0
 		local key = "Brainrot|" .. tostring(name)
@@ -1906,56 +2087,14 @@ trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 	scheduleRender()
 end, cleanupConnections)
 
-trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
-	if typeof(payload) ~= "table" then
-		return
-	end
-
-	if shipUpgradeModal ~= nil then
-		return
-	end
-
-	if payload.Success == false then
-		local lines = {}
-		if typeof(payload.Lines) == "table" then
-			for _, line in ipairs(payload.Lines) do
-				if typeof(line) == "string" and trim(line) ~= "" then
-					lines[#lines + 1] = trim(line)
-				end
-			end
-		end
-		if #lines == 0 then
-			lines = { trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
-		end
-
-		shipUpgradeModal = {
-			Title = tostring(payload.Title or "Ship Upgrade Locked"),
-			AccentText = tostring(payload.AccentText or "Requirement Not Met"),
-			Lines = lines,
-			IsError = payload.IsError ~= false,
-		}
-		updateModalInputCapture()
-		scheduleRender()
-		return
-	end
-
-	local level = PlotUpgradeConfig.ClampLevel(payload.Level)
-	local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
-	local isMaxLevel = payload.IsMaxLevel == true
-	local gainLines = buildShipUpgradeGainLines(level, description, isMaxLevel)
-
-	shipUpgradeModal = {
-		Title = string.format("Ship upgraded to Lv %d", level),
-		AccentText = isMaxLevel and "Ship Max Level" or "Ship Upgrade Complete",
-		Lines = gainLines,
-		IsMaxLevel = isMaxLevel,
-	}
-	updateModalInputCapture()
-	scheduleRender()
-end, cleanupConnections)
-
 stopObservingState = MetaClient.ObserveState(function(state)
 	metaState = state
+	inventoryLog(
+		"Meta state received inventory=%s materials=%s foodInventory=%s",
+		tostring(type(state) == "table" and state.Inventory ~= nil),
+		tostring(type(state) == "table" and state.Materials ~= nil),
+		tostring(type(state) == "table" and state.FoodInventory ~= nil)
+	)
 	syncResourcesFromState(state)
 	scheduleRender()
 end)
@@ -2025,6 +2164,31 @@ trackConnection(player.ChildRemoved, function(child)
 	end
 end, cleanupConnections)
 
+trackConnection(remotesFolder.ChildAdded, function(child)
+	if child.Name == "TitleEquipRequest" and child:IsA("RemoteEvent") then
+		titleEquipRemote = child
+		inventoryLog("Detected TitleEquipRequest after startup at %s", child:GetFullName())
+	elseif child.Name == "ShipUpgradeResultRemote" and child:IsA("RemoteEvent") then
+		inventoryLog("Detected ShipUpgradeResultRemote after startup at %s", child:GetFullName())
+		bindShipUpgradeResultRemote(child)
+	end
+end, cleanupConnections)
+
+trackConnection(remotesFolder.ChildRemoved, function(child)
+	if child == titleEquipRemote then
+		titleEquipRemote = nil
+		inventoryWarn("TitleEquipRequest was removed; title toggles are disabled until it returns.")
+	elseif child == shipUpgradeResultRemote then
+		if shipUpgradeRemoteConnection then
+			shipUpgradeRemoteConnection:Disconnect()
+			shipUpgradeRemoteConnection = nil
+		end
+		shipUpgradeResultRemote = nil
+		inventoryWarn("ShipUpgradeResultRemote was removed; ship upgrade notifications are paused until it returns.")
+	end
+end, cleanupConnections)
+
+refreshOptionalRemotes()
 hideLegacyInventory()
 bindHudLayoutTracking()
 bindShipDataTracking()

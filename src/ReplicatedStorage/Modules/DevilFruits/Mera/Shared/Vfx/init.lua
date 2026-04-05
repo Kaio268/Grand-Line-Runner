@@ -77,6 +77,41 @@ local function callVfxMethod(moduleRef, methodName, failureLabel, ...)
 	return true, result
 end
 
+local function callFirstAvailableVfxMethod(moduleRef, methodNames, failureLabel, ...)
+	if not moduleRef then
+		print("[MERA VFX] " .. tostring(failureLabel) .. " skip reason=module_not_loaded")
+		return false, nil
+	end
+
+	for _, methodName in ipairs(methodNames) do
+		local method = moduleRef[methodName]
+		if type(method) == "function" then
+			local ok, result = pcall(method, ...)
+			if not ok then
+				warn(
+					"[MERA VFX] "
+						.. tostring(failureLabel)
+						.. " error="
+						.. tostring(result)
+						.. " method="
+						.. tostring(methodName)
+				)
+				return false, nil
+			end
+
+			return true, result
+		end
+	end
+
+	warn(
+		"[MERA VFX] missing method label="
+			.. tostring(failureLabel)
+			.. " methods="
+			.. table.concat(methodNames, ",")
+	)
+	return false, nil
+end
+
 local MeraVfx = {}
 
 -- ============================================================================
@@ -86,7 +121,12 @@ local MeraVfx = {}
 -- The public names here stay aligned with that presentation vocabulary.
 
 function MeraVfx.PlayFlameDashStartup(options)
-	local ok, result = callVfxMethod(FlameDashVfx, "PlayStartup", "FlameDash startup", options)
+	local ok, result = callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "PlayFlameDashStartup", "PlayStartup" },
+		"FlameDash startup",
+		options
+	)
 	return ok and result or nil
 end
 
@@ -94,7 +134,12 @@ end
 -- `Head` is the active body/follow slash. The public API name remains stable for
 -- callers, but the comment clarifies the move role.
 function MeraVfx.StartFlameDashHead(options)
-	local ok, result = callVfxMethod(FlameDashVfx, "StartBody", "FlameDash body", options)
+	local ok, result = callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "StartFlameDashHead", "StartBody" },
+		"FlameDash body",
+		options
+	)
 	return ok and result or nil
 end
 
@@ -102,30 +147,65 @@ end
 -- `Part` is the stamped trail layer. The comment keeps the role obvious without
 -- changing the external method name expected by presentation code.
 function MeraVfx.StartFlameDashPart(options)
-	local ok, result = callVfxMethod(FlameDashVfx, "StartTrail", "FlameDash trail", options)
+	local ok, result = callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "StartFlameDashPart", "StartTrail" },
+		"FlameDash trail",
+		options
+	)
 	return ok and result or nil
 end
 
 function MeraVfx.UpdateFlameDashHead(state, options)
-	local ok, result = callVfxMethod(FlameDashVfx, "UpdateBody", "FlameDash body update", state, options)
+	local ok, result = callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "UpdateFlameDashHead", "UpdateBody" },
+		"FlameDash body update",
+		state,
+		options
+	)
 	return ok and result == true or false
 end
 
 function MeraVfx.UpdateFlameDashPart(state, options)
-	local ok, result = callVfxMethod(FlameDashVfx, "UpdateTrail", "FlameDash trail update", state, options)
+	local ok, result = callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "UpdateFlameDashPart", "UpdateTrail" },
+		"FlameDash trail update",
+		state,
+		options
+	)
 	return ok and result == true or false
 end
 
 function MeraVfx.StopFlameDashHead(state, options)
-	callVfxMethod(FlameDashVfx, "StopBody", "FlameDash body stop", state, options)
+	callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "StopFlameDashHead", "StopBody" },
+		"FlameDash body stop",
+		state,
+		options
+	)
 end
 
 function MeraVfx.StopFlameDashPart(state, options)
-	callVfxMethod(FlameDashVfx, "StopTrail", "FlameDash trail stop", state, options)
+	callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "StopFlameDashPart", "StopTrail" },
+		"FlameDash trail stop",
+		state,
+		options
+	)
 end
 
 function MeraVfx.StopFlameDashStartup(state, options)
-	callVfxMethod(FlameDashVfx, "StopStartup", "FlameDash startup stop", state, options)
+	callFirstAvailableVfxMethod(
+		FlameDashVfx,
+		{ "StopFlameDashStartup", "StopStartup" },
+		"FlameDash startup stop",
+		state,
+		options
+	)
 end
 
 -- Some older state shapes still need a generic cleanup path. This is kept as a
