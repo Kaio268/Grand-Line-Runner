@@ -23,11 +23,6 @@ function DevilFruitEffectRouter.new(config)
 	self.clientEffectVisuals = config.clientEffectVisuals
 	self.playOptionalEffect = config.playOptionalEffect
 	self.player = config.player
-	self.onPhoenixFlight = config.onPhoenixFlight
-	self.onPhoenixShield = config.onPhoenixShield
-	self.phoenixFruitName = config.phoenixFruitName
-	self.phoenixFlightAbility = config.phoenixFlightAbility
-	self.phoenixShieldAbility = config.phoenixShieldAbility
 	return self
 end
 
@@ -58,20 +53,6 @@ function DevilFruitEffectRouter:HandleEffect(targetPlayer, fruitName, abilityNam
 	self.clientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreateRubberLaunchEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
-
-	if fruitName == self.phoenixFruitName and abilityName == self.phoenixFlightAbility then
-		if targetPlayer == self.player and typeof(self.onPhoenixFlight) == "function" then
-			self.onPhoenixFlight(resolvedPayload)
-		end
-		return true
-	end
-
-	if fruitName == self.phoenixFruitName and abilityName == self.phoenixShieldAbility then
-		if typeof(self.onPhoenixShield) == "function" then
-			self.onPhoenixShield(targetPlayer, resolvedPayload)
-		end
-		return true
-	end
 
 	return true
 end

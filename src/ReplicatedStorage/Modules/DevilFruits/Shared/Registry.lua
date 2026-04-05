@@ -78,6 +78,14 @@ local DEFAULT_EFFECT_CONTRACT = {
 local fruitEntriesByName = {}
 local fruitEntriesByKey = {}
 local STRUCTURED_FRUIT_ENTRY_MODULES = {
+	Bomu = {
+		Client = "BomuClient",
+		Server = "BomuServer",
+	},
+	Gomu = {
+		Client = "GomuClient",
+		Server = "GomuServer",
+	},
 	Mera = {
 		Client = "MeraClient",
 		Server = "MeraServer",
@@ -85,6 +93,10 @@ local STRUCTURED_FRUIT_ENTRY_MODULES = {
 	Hie = {
 		Client = "HieClient",
 		Server = "HieServer",
+	},
+	Tori = {
+		Client = "ToriClient",
+		Server = "ToriServer",
 	},
 }
 

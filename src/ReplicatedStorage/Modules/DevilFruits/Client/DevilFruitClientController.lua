@@ -1119,16 +1119,6 @@ local function getGomuLaunchTarget(abilityConfig)
 end
 
 local function buildDefaultAbilityRequestPayload(fruitName, abilityName)
-	if fruitName == "Gomu Gomu no Mi" and abilityName == "RubberLaunch" then
-		local abilityConfig = DevilFruitConfig.GetAbility(fruitName, abilityName)
-		local aimPosition, targetPlayer = getGomuLaunchTarget(abilityConfig)
-
-		return {
-			AimPosition = aimPosition,
-			TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
-		}
-	end
-
 	return nil
 end
 
@@ -1577,6 +1567,13 @@ end
 
 fruitModuleLoader = FruitModuleLoader.new({
 	player = player,
+	clientEffectVisuals = clientEffectVisuals,
+	GetCharacter = getCharacter,
+	GetCurrentCamera = getCurrentCamera,
+	GetEquippedFruit = getEquippedFruit,
+	GetHumanoid = getHumanoid,
+	GetLocalRootPart = getRootPart,
+	GetPlayerRootPart = getPlayerRootPart,
 	PlayOptionalEffect = playOptionalEffect,
 	CreateEffectVisual = function(startPosition, endPosition, direction, isPredicted)
 		clientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
@@ -1591,11 +1588,6 @@ effectRouter = DevilFruitEffectRouter.new({
 	loader = fruitModuleLoader,
 	playOptionalEffect = playOptionalEffect,
 	clientEffectVisuals = clientEffectVisuals,
-	onPhoenixFlight = startPhoenixFlight,
-	onPhoenixShield = startPhoenixShield,
-	phoenixFruitName = PHOENIX_FRUIT_NAME,
-	phoenixFlightAbility = PHOENIX_FLIGHT_ABILITY,
-	phoenixShieldAbility = PHOENIX_SHIELD_ABILITY,
 })
 
 local function initializeDevilFruitClient()
@@ -1615,9 +1607,9 @@ local function initializeDevilFruitClient()
 
 	syncDevilFruitClientState = function()
 		local currentFruitName = getEquippedFruit()
+		local previousFruitName = lastSyncedFruitName
 		if currentFruitName ~= lastSyncedFruitName then
-			fruitModuleLoader:ResetFruit(lastSyncedFruitName)
-			fruitModuleLoader:ResetFruit(currentFruitName)
+			fruitModuleLoader:CallControllerMethod(previousFruitName, "HandleUnequipped", currentFruitName)
 			logDevilFruitClient(
 				"fruit changed previous=%s current=%s",
 				tostring(lastSyncedFruitName),
@@ -1626,12 +1618,13 @@ local function initializeDevilFruitClient()
 			lastSyncedFruitName = currentFruitName
 		end
 
+		local warmedController = fruitModuleLoader:GetController(currentFruitName)
+		if warmedController and currentFruitName ~= previousFruitName then
+			fruitModuleLoader:CallControllerMethod(currentFruitName, "HandleEquipped", previousFruitName)
+		end
+
 		hookFruitFolderSignals()
 		updateCooldownHud(true)
-		updateGomuAimAssist()
-		if currentFruitName ~= PHOENIX_FRUIT_NAME then
-			stopPhoenixFlight()
-		end
 		local fruitFolder = getFruitFolder()
 		local equippedValue = fruitFolder and fruitFolder:FindFirstChild("Equipped")
 		local equippedValueText = equippedValue and equippedValue:IsA("StringValue") and equippedValue.Value or "<nil>"
@@ -1684,10 +1677,15 @@ local function initializeDevilFruitClient()
 			return
 		end
 
-		if input.KeyCode == Enum.KeyCode.Space then
-			spaceHeld = true
+		local handledByCurrentFruit, shouldConsumeInput = fruitModuleLoader:CallControllerMethod(
+			equippedFruitName or getEquippedFruit(),
+			"HandleInputBegan",
+			input,
+			gameProcessed
+		)
+		if handledByCurrentFruit and shouldConsumeInput then
+			return
 		end
-		setFlightInputKeyState(input.KeyCode, true)
 
 		local fruitName, abilityName, abilityEntry = getAbilityForKeyCode(input.KeyCode)
 		if traceAbilityInput then
@@ -1700,11 +1698,6 @@ local function initializeDevilFruitClient()
 				tostring(abilityEntry ~= nil)
 			)
 		end
-		if fruitName == PHOENIX_FRUIT_NAME and abilityName == PHOENIX_FLIGHT_ABILITY and isPhoenixFlightActive() then
-			stopPhoenixFlight()
-			return
-		end
-
 		if not abilityName then
 			if input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
 				logDevilFruitClient(
@@ -1820,11 +1813,7 @@ local function initializeDevilFruitClient()
 	end)
 
 	UserInputService.InputEnded:Connect(function(input)
-		if input.KeyCode == Enum.KeyCode.Space then
-			spaceHeld = false
-		end
-
-		setFlightInputKeyState(input.KeyCode, false)
+		fruitModuleLoader:CallControllerMethod(getEquippedFruit(), "HandleInputEnded", input)
 	end)
 	logDevilFruitClient("keybind connect success")
 
@@ -1861,22 +1850,15 @@ local function initializeDevilFruitClient()
 		effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
 	end)
 
-	RunService.Heartbeat:Connect(function()
-		fruitModuleLoader:ForEachLoadedController("Update")
+	RunService.Heartbeat:Connect(function(dt)
+		fruitModuleLoader:ForEachLoadedController("Update", dt)
 	end)
 
 	player.CharacterRemoving:Connect(function()
 		activeFireBursts = {}
 		fruitModuleLoader:ForEachLoadedController("HandleCharacterRemoving")
-		stopPhoenixFlight()
-		spaceHeld = false
-		flightInputState.Forward = false
-		flightInputState.Backward = false
-		flightInputState.Left = false
-		flightInputState.Right = false
 		hazardSuppressionLoopRunning = false
 		restoreSuppressedParts(math.huge)
-		clearGomuHighlight()
 	end)
 
 	Players.PlayerRemoving:Connect(function(leavingPlayer)
@@ -1907,13 +1889,8 @@ local function initializeDevilFruitClient()
 		end
 	end)
 
-	RunService.Heartbeat:Connect(function(dt)
-		updatePhoenixFlight(dt)
-		updatePhoenixGlide(dt)
-	end)
-
 	RunService.RenderStepped:Connect(function()
-		updateGomuAimAssist()
+		fruitModuleLoader:ForEachLoadedController("RenderUpdate")
 
 		local now = os.clock()
 		if now < nextHudRefreshAt then

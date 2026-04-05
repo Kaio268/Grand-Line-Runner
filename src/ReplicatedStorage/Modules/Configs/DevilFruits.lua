@@ -220,12 +220,10 @@ local DevilFruits = {
 				"tori phoenix",
 			},
 			Passives = {
-				PhoenixGlide = {
-					JumpHeightMultiplier = 1.2,
-					FallSpeed = 18,
-					ForwardSpeed = 28,
-					Responsiveness = 8,
-					ActivateMaxVerticalSpeed = 6,
+				PhoenixRebirth = {
+					RestoreDelay = 0.45,
+					ImmunityDuration = 1,
+					RestoreHealthPercent = 1,
 				},
 			},
 			Abilities = {
@@ -235,7 +233,7 @@ local DevilFruits = {
 					Duration = 4.5,
 					TakeoffDuration = 0.4,
 					InitialLift = 22,
-					MaxRiseHeight = 56,
+					MaxRiseHeight = 132,
 					FlightSpeed = 80,
 					VerticalSpeed = 90,
 					MaxDescendSpeed = 72,

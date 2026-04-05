@@ -2,10 +2,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local function getNamedFolder(parent, childName)
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.Name == childName and child:IsA("Folder") then
+			return child
+		end
+	end
+
+	error(string.format("Missing Folder named %s under %s", childName, parent:GetFullName()))
+end
+
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
+local devilFruitModules = game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("DevilFruits")
+local ToriPassiveService = require(getNamedFolder(devilFruitModules, "Tori"):WaitForChild("Server"):WaitForChild("ToriPassiveService"))
 
 local CONFIG = {
 	SpawnDelayMin = 2,
@@ -106,6 +118,9 @@ killMeRemote.OnServerEvent:Connect(function(player)
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
+		if ToriPassiveService.TryConsumeRebirth(player, "WaveKill") then
+			return
+		end
 		humanoid.Health = 0
 	end
 end)
