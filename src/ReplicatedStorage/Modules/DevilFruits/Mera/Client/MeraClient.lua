@@ -174,6 +174,9 @@ function MeraFruitClient.Create(config)
 		PlayFlameDashStartup = function(targetPlayer, payload, isPredicted)
 			return self:GetPresentation():PlayFlameDashStartup(targetPlayer, payload, isPredicted)
 		end,
+		WaitForFlameDashTrail = function(targetPlayer)
+			return self:GetPresentation():WaitForFlameDashTrail(targetPlayer)
+		end,
 		PlayFlameDashComplete = function(targetPlayer, payload)
 			return self:GetPresentation():PlayFlameDashComplete(targetPlayer, payload)
 		end,

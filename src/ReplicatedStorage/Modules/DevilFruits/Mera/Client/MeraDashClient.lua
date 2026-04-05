@@ -115,6 +115,7 @@ function MeraDashClient.new(config)
 	self.PlayOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or function() end
 	self.CreateEffectVisual = type(config.CreateEffectVisual) == "function" and config.CreateEffectVisual or function() end
 	self.PlayFlameDashStartup = type(config.PlayFlameDashStartup) == "function" and config.PlayFlameDashStartup or function() end
+	self.WaitForFlameDashTrail = type(config.WaitForFlameDashTrail) == "function" and config.WaitForFlameDashTrail or function() end
 	self.PlayFlameDashComplete = type(config.PlayFlameDashComplete) == "function" and config.PlayFlameDashComplete or function() end
 	self.MarkFlameDashTrailPredictedComplete = type(config.MarkFlameDashTrailPredictedComplete) == "function"
 		and config.MarkFlameDashTrailPredictedComplete
@@ -393,54 +394,83 @@ function MeraDashClient:BeginPredictedRequest()
 			end)
 		end)
 
-		if localPlan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
-			local targetRootPosition = state.StartPosition + (localPlan.Direction * localPlan.InstantDistance)
-			self:PivotCharacterToRootPosition(character, rootPart, targetRootPosition)
-		end
+		task.spawn(function()
+			safeCallNonCriticalCallback(
+				"PlayFlameDashStartup",
+				self.PlayFlameDashStartup,
+				self.player,
+				{
+					StartPosition = state.StartPosition,
+					Direction = state.Direction,
+				},
+				true
+			)
 
-		self:SetHorizontalVelocity(rootPart, localPlan.Direction * localPlan.StartDashSpeed)
+			safeCallNonCriticalCallback(
+				"WaitForFlameDashTrail",
+				self.WaitForFlameDashTrail,
+				self.player
+			)
 
-		local maxRuntime = math.max(localPlan.Duration + runtimeGrace, 0.08)
-		state.MotionConnection = RunService.Heartbeat:Connect(function(dt)
 			if self.activeDash ~= state then
-				self:FinishLocalDash(state, "replaced_active_state", true)
 				return
 			end
-
+			
 			if not character.Parent or not rootPart.Parent or humanoid.Health <= 0 then
 				self:FinishLocalDash(state, "interrupted_invalid_state", true)
 				return
 			end
 
-			state.TraveledDistance = MeraDashShared.GetTravelDistance(state.StartPosition, rootPart.Position, state.Plan.Direction)
-			local currentRemainingDistance = state.Plan.Distance - state.TraveledDistance
-			if currentRemainingDistance <= state.CompletionTolerance then
-				self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
-				self:FinishLocalDash(state, "completed", false)
-				return
+			if localPlan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
+				local targetRootPosition = state.StartPosition + (localPlan.Direction * localPlan.InstantDistance)
+				self:PivotCharacterToRootPosition(character, rootPart, targetRootPosition)
 			end
 
-			local elapsed = math.max(0, getSharedTimestamp() - state.LocalStartAt)
-			local alpha = math.clamp(elapsed / state.Plan.Duration, 0, 1)
-			local dashSpeed = state.Plan.StartDashSpeed
-				+ ((state.Plan.EndDashSpeed - state.Plan.StartDashSpeed) * MeraDashShared.Smoothstep(alpha))
-			local lookAheadDistance = math.min(
-				MeraDashShared.GetLookAheadDistance(dashSpeed, dt),
-				currentRemainingDistance + 2
-			)
+			self:SetHorizontalVelocity(rootPart, localPlan.Direction * localPlan.StartDashSpeed)
 
-			if MeraDashShared.ShouldStopForWall(character, rootPart, state.Plan.Direction, lookAheadDistance) then
-				self:StopHorizontalVelocity(rootPart)
-				self:FinishLocalDash(state, "wall_blocked_mid_dash", true)
-				return
-			end
 
-			self:SetHorizontalVelocity(rootPart, state.Plan.Direction * dashSpeed)
+			local maxRuntime = math.max(localPlan.Duration + runtimeGrace, 0.08)
+			state.MotionConnection = RunService.Heartbeat:Connect(function(dt)
+				if self.activeDash ~= state then
+					self:FinishLocalDash(state, "replaced_active_state", true)
+					return
+				end
 
-			if elapsed >= maxRuntime then
-				self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
-				self:FinishLocalDash(state, "max_runtime_reached", true)
-			end
+				if not character.Parent or not rootPart.Parent or humanoid.Health <= 0 then
+					self:FinishLocalDash(state, "interrupted_invalid_state", true)
+					return
+				end
+
+				state.TraveledDistance = MeraDashShared.GetTravelDistance(state.StartPosition, rootPart.Position, state.Plan.Direction)
+				local currentRemainingDistance = state.Plan.Distance - state.TraveledDistance
+				if currentRemainingDistance <= state.CompletionTolerance then
+					self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
+					self:FinishLocalDash(state, "completed", false)
+					return
+				end
+
+				local elapsed = math.max(0, getSharedTimestamp() - state.LocalStartAt)
+				local alpha = math.clamp(elapsed / state.Plan.Duration, 0, 1)
+				local dashSpeed = state.Plan.StartDashSpeed
+					+ ((state.Plan.EndDashSpeed - state.Plan.StartDashSpeed) * MeraDashShared.Smoothstep(alpha))
+				local lookAheadDistance = math.min(
+					MeraDashShared.GetLookAheadDistance(dashSpeed, dt),
+					currentRemainingDistance + 2
+				)
+
+				if MeraDashShared.ShouldStopForWall(character, rootPart, state.Plan.Direction, lookAheadDistance) then
+					self:StopHorizontalVelocity(rootPart)
+					self:FinishLocalDash(state, "wall_blocked_mid_dash", true)
+					return
+				end
+
+				self:SetHorizontalVelocity(rootPart, state.Plan.Direction * dashSpeed)
+
+				if elapsed >= maxRuntime then
+					self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
+					self:FinishLocalDash(state, "max_runtime_reached", true)
+				end
+			end)
 		end)
 	end
 
@@ -678,13 +708,20 @@ function MeraDashClient:HandleEffect(targetPlayer, payload)
 	end
 
 	logMove(self.player, "move=FlameDash startup source=replicated target=%s", targetPlayer.Name)
-	local presentationCallbackOk, presentationStarted = safeCallNonCriticalCallback(
-		"PlayFlameDashStartup",
-		self.PlayFlameDashStartup,
-		targetPlayer,
-		resolvedPayload,
-		false
-	)
+	local presentationCallbackOk, presentationStarted = false, false
+	local isActivePrediction = targetPlayer == self.player and self.activeDash ~= nil and not self.activeDash.ServerResolved
+	if not isActivePrediction then
+		presentationCallbackOk, presentationStarted = safeCallNonCriticalCallback(
+			"PlayFlameDashStartup",
+			self.PlayFlameDashStartup,
+			targetPlayer,
+			resolvedPayload,
+			false
+		)
+	else
+		presentationCallbackOk = true
+		presentationStarted = true
+	end
 	safeCallNonCriticalCallback(
 		"PlayOptionalEffect",
 		self.PlayOptionalEffect,
