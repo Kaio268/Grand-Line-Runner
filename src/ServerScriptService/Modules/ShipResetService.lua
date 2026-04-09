@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
 local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
@@ -11,8 +12,10 @@ local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 local Module = {}
 
 local SHIP_UPGRADE_PATH = string.format("HiddenLeaderstats.%s", tostring(PlotUpgradeConfig.InternalStatName or "PlotUpgrade"))
+local SPEED_PATH = "HiddenLeaderstats.Speed"
 local STAND_STATE_PATH = "IncomeBrainrots"
 local STAND_LEVEL_PATH = "StandsLevels"
+local DEFAULT_SPEED = math.max(1, math.floor(tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1))
 local SHIP_RESET_ATTRIBUTES = {
 	"StealOwnerUserId",
 	"StealStandName",
@@ -90,6 +93,10 @@ function Module.ResetPlayerShip(player)
 
 	if DataManager:SetValue(player, SHIP_UPGRADE_PATH, 0) == false then
 		return false, "failed_to_reset_ship_level"
+	end
+
+	if DataManager:SetValue(player, SPEED_PATH, DEFAULT_SPEED) == false then
+		return false, "failed_to_reset_speed"
 	end
 
 	if DataManager:Clear(player, STAND_STATE_PATH) == false then

@@ -24,13 +24,28 @@ local main = frames:WaitForChild("Rebirth"):WaitForChild("Main")
 
 local rebirthButton = main:WaitForChild("Rebirth")
 
+local function getSectionBar(section, sectionName)
+	local directBar = section:FindFirstChild("Bar")
+	if directBar and directBar:IsA("GuiObject") then
+		return directBar
+	end
+
+	local track = section:WaitForChild("Track")
+	local nestedBar = track:WaitForChild("Bar")
+	if nestedBar:IsA("GuiObject") then
+		return nestedBar
+	end
+
+	error(string.format("Rebirth %s bar was not found", sectionName))
+end
+
 local moneyUI = main:WaitForChild("Money")
 local moneyText = moneyUI:WaitForChild("Value")
-local moneyBar = moneyUI:WaitForChild("Bar")
+local moneyBar = getSectionBar(moneyUI, "money")
 
 local shipUI = main:WaitForChild("Speed")
 local shipText = shipUI:WaitForChild("Value")
-local shipBar = shipUI:WaitForChild("Bar")
+local shipBar = getSectionBar(shipUI, "ship")
 
 local youGet = main:WaitForChild("YouGet")
 local template = youGet:WaitForChild("Template")
