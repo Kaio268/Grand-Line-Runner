@@ -18,6 +18,7 @@ local App = require(UiFolder:WaitForChild("App"))
 local Brainrots = require(Modules:WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -35,15 +36,6 @@ local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactInventoryRoot"
 
 local root = ReactRoblox.createRoot(rootContainer)
-
-local MAX_BRAINROT_HOTBAR = 9
-
-local CHEST_ORDER = {
-	Wooden = 1,
-	Iron = 2,
-	Gold = 3,
-	Legendary = 4,
-}
 
 local RESOURCE_ORDER = {
 	Apple = 1,
@@ -70,7 +62,7 @@ local RARITY_ORDER = {
 
 local CATEGORY_DEFS = {
 	Brainrots = {
-		label = "Brainrots",
+		label = "Treasure",
 		accentColor = Color3.fromRGB(93, 203, 200),
 	},
 	DevilFruits = {
@@ -148,12 +140,14 @@ local itemState = {}
 local acquisition = {}
 local acquisitionCounter = 0
 local metaState = nil
+local equippedKind = nil
 local equippedName = nil
 local keyboardHotbar = {}
 local renderQueued = false
 local destroyed = false
 local stopObservingState = nil
 local scheduleRender
+local syncChestsFromInventory
 local syncDevilFruitsFromInventory
 local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
@@ -217,6 +211,7 @@ local cleanupConnections = {}
 local characterConnections = {}
 local hudLayoutConnections = {}
 local shipDataConnections = {}
+local chestInventoryConnections = {}
 local rebirthSummaryConnections = {}
 local titleAttributeConnections = {}
 
@@ -321,7 +316,7 @@ end
 
 local function getRarityLabel(kind, name)
 	if kind == "Chest" then
-		return tostring(name)
+		return ChestUtils.GetRarityLabel(name)
 	end
 
 	if kind == "Resource" then
@@ -353,7 +348,7 @@ local function getItemSortRank(kind, name)
 	end
 
 	if kind == "Chest" then
-		return CHEST_ORDER[tostring(name)] or 0
+		return ChestUtils.GetSortRank(name)
 	end
 
 	if kind == "Resource" then
@@ -408,7 +403,7 @@ end
 
 local function getItemDisplayName(kind, name)
 	if kind == "Chest" then
-		return string.format("%s Chest", tostring(name or "Chest"))
+		return ChestUtils.GetDisplayName(name or "Chest")
 	end
 
 	if kind == "Resource" then
@@ -472,8 +467,8 @@ local function compareInventoryKeys(a, b)
 				return resourceOrderA > resourceOrderB
 			end
 		elseif stateA.kind == "Chest" then
-			local chestOrderA = CHEST_ORDER[tostring(stateA.name)] or 0
-			local chestOrderB = CHEST_ORDER[tostring(stateB.name)] or 0
+			local chestOrderA = ChestUtils.GetSortRank(tostring(stateA.name))
+			local chestOrderB = ChestUtils.GetSortRank(tostring(stateB.name))
 			if chestOrderA ~= chestOrderB then
 				return chestOrderA > chestOrderB
 			end
@@ -608,7 +603,7 @@ end
 
 local function getDisplayName(kind, name)
 	if kind == "Chest" then
-		return string.format("%s Chest", tostring(name))
+		return ChestUtils.GetDisplayName(name)
 	end
 
 	if kind == "Resource" then
@@ -816,6 +811,11 @@ local function readPlayerChestCount(chestsList)
 	end
 
 	return chestCount
+end
+
+local function readPlayerMythicKeys()
+	local mythicKeyProgress = metaState and metaState.MythicKeyProgress
+	return math.max(0, math.floor(tonumber(mythicKeyProgress and mythicKeyProgress.current) or 0))
 end
 
 local function readPersistentTitleUnlocked(titleId)
@@ -1213,7 +1213,11 @@ end
 local function buildEntry(key, state)
 	local displayName = getDisplayName(state.kind, state.name)
 	local subtitle = getSubtitle(state.kind, state.name)
-	local kindFooter = state.kind == "Resource" and "Display only" or "Click to equip"
+	local isEquipped = tostring(state.name) == tostring(equippedName)
+		and (equippedKind == nil or tostring(state.kind) == tostring(equippedKind))
+	local kindFooter = if state.kind == "Resource"
+		then "Display only"
+		else (isEquipped and "Click to unequip" or "Click to equip")
 	local previewKind = nil
 	local previewName = nil
 
@@ -1243,7 +1247,7 @@ local function buildEntry(key, state)
 		quantity = state.qty,
 		accentColor = getAccentColor(state.kind, state.name, state),
 		interactive = state.kind ~= "Resource",
-		isEquipped = equippedName ~= nil and tostring(state.name) == tostring(equippedName),
+		isEquipped = isEquipped,
 	}
 end
 
@@ -1255,6 +1259,7 @@ local function slotLabelForIndex(index)
 end
 
 local function buildRenderData()
+	syncChestsFromInventory()
 	syncDevilFruitsFromInventory()
 
 	local gearsList, chestsList, brainrotsList, devilFruitList, resourceList = buildLists()
@@ -1264,13 +1269,8 @@ local function buildRenderData()
 	for _, key in ipairs(gearsList) do
 		hotbarKeys[#hotbarKeys + 1] = key
 	end
-	for _, key in ipairs(chestsList) do
+	for _, key in ipairs(brainrotsList) do
 		hotbarKeys[#hotbarKeys + 1] = key
-	end
-	for index, key in ipairs(brainrotsList) do
-		if index <= MAX_BRAINROT_HOTBAR then
-			hotbarKeys[#hotbarKeys + 1] = key
-		end
 	end
 
 	local hotbarSlots = {}
@@ -1298,8 +1298,14 @@ local function buildRenderData()
 		}
 	end
 
-	local activeKeys = uiState.activeCategory == "DevilFruits" and devilFruitList
-		or (uiState.activeCategory == "Resources" and resourceList or brainrotsList)
+	local activeKeys
+	if uiState.activeCategory == "DevilFruits" then
+		activeKeys = devilFruitList
+	elseif uiState.activeCategory == "Resources" then
+		activeKeys = resourceList
+	else
+		activeKeys = chestsList
+	end
 
 	local items = {}
 	for _, key in ipairs(activeKeys) do
@@ -1316,7 +1322,7 @@ local function buildRenderData()
 		{
 			key = "Brainrots",
 			label = CATEGORY_DEFS.Brainrots.label,
-			count = #brainrotsList,
+			count = #chestsList,
 			accentColor = CATEGORY_DEFS.Brainrots.accentColor,
 		},
 		{
@@ -1333,10 +1339,10 @@ local function buildRenderData()
 		},
 	}
 
-	local liveMaterials = readPlayerMaterials()
 	local liveRebirths = readPlayerRebirths()
 	local liveMultiplier = readPlayerShipIncomeMultiplier(liveRebirths)
 	local chestCount = readPlayerChestCount(chestsList)
+	local mythicKeyCount = readPlayerMythicKeys()
 	local bountySummary = readPlayerBountySummary()
 
 	local totalStacks = 0
@@ -1385,9 +1391,7 @@ local function buildRenderData()
 			rebirths = liveRebirths,
 			multiplier = formatMultiplier(liveMultiplier),
 			chests = chestCount,
-			timber = liveMaterials.Timber,
-			iron = liveMaterials.Iron,
-			ancientTimber = liveMaterials.AncientTimber,
+			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
 		},
 		activeView = uiState.activeView,
@@ -1545,6 +1549,7 @@ local function bindShipDataTracking()
 
 	local watchedRoots = {
 		Bounty = true,
+		ChestInventory = true,
 		IncomeBrainrots = true,
 		Inventory = true,
 		StandsLevels = true,
@@ -1572,6 +1577,68 @@ local function bindShipDataTracking()
 			scheduleRender()
 		end
 	end, shipDataConnections)
+end
+
+local function bindChestInventoryTracking()
+	disconnectAll(chestInventoryConnections)
+
+	local function watchChestFolder(folder)
+		if not (folder and folder:IsA("Folder")) then
+			return
+		end
+
+		for _, descendant in ipairs(folder:GetDescendants()) do
+			if descendant:IsA("ValueBase") then
+				trackConnection(descendant:GetPropertyChangedSignal("Value"), scheduleRender, chestInventoryConnections)
+			end
+		end
+
+		trackConnection(folder.DescendantAdded, function(descendant)
+			if descendant:IsA("ValueBase") then
+				trackConnection(descendant:GetPropertyChangedSignal("Value"), scheduleRender, chestInventoryConnections)
+			end
+			scheduleRender()
+		end, chestInventoryConnections)
+
+		trackConnection(folder.DescendantRemoving, function()
+			scheduleRender()
+		end, chestInventoryConnections)
+	end
+
+	local function watchChestInventoryRoot(root)
+		if not (root and root:IsA("Folder")) then
+			return
+		end
+
+		for _, child in ipairs(root:GetChildren()) do
+			watchChestFolder(child)
+		end
+
+		trackConnection(root.ChildAdded, function(child)
+			watchChestFolder(child)
+			scheduleRender()
+		end, chestInventoryConnections)
+
+		trackConnection(root.ChildRemoved, function()
+			scheduleRender()
+		end, chestInventoryConnections)
+	end
+
+	watchChestInventoryRoot(player:FindFirstChild("ChestInventory"))
+
+	trackConnection(player.ChildAdded, function(child)
+		if child.Name == "ChestInventory" then
+			task.defer(bindChestInventoryTracking)
+			scheduleRender()
+		end
+	end, chestInventoryConnections)
+
+	trackConnection(player.ChildRemoved, function(child)
+		if child.Name == "ChestInventory" then
+			task.defer(bindChestInventoryTracking)
+			scheduleRender()
+		end
+	end, chestInventoryConnections)
 end
 
 local function bindTitleTracking()
@@ -1771,6 +1838,47 @@ local function syncResourcesFromState(state)
 	end
 end
 
+syncChestsFromInventory = function()
+	local chestInventoryFolder = player:FindFirstChild("ChestInventory")
+	local seenChestKeys = {}
+	local foundChestFolders = false
+
+	if not chestInventoryFolder then
+		return
+	end
+
+	for _, chestFolder in ipairs(chestInventoryFolder:GetChildren()) do
+		if chestFolder:IsA("Folder") then
+			foundChestFolders = true
+			local chestName = chestFolder.Name
+			local quantity = math.max(0, tonumber(readChildValue(chestFolder, "Quantity")) or 0)
+			local key = "Chest|" .. tostring(chestName)
+			seenChestKeys[key] = true
+
+			if quantity > 0 then
+				ensureAcquired(key)
+				itemState[key] = {
+					kind = "Chest",
+					name = chestName,
+					qty = quantity,
+				}
+			else
+				itemState[key] = nil
+			end
+		end
+	end
+
+	if not foundChestFolders then
+		return
+	end
+
+	for key, state in pairs(itemState) do
+		if state.kind == "Chest" and not seenChestKeys[key] then
+			itemState[key] = nil
+		end
+	end
+end
+
 syncDevilFruitsFromInventory = function()
 	local inventoryFolder = player:FindFirstChild("Inventory")
 	local devilFruitsFolder = inventoryFolder and inventoryFolder:FindFirstChild("DevilFruits")
@@ -1816,32 +1924,65 @@ local function activateSlot(slotNumber)
 	end
 end
 
-local function scanEquipped(character)
-	local nextEquipped = nil
+local function resolveEquippedItemName(tool)
+	if not tool or not tool:IsA("Tool") then
+		return nil, nil
+	end
+
+	local canonicalName = tool:GetAttribute("InvItem") or tool:GetAttribute("InventoryItemName")
+	local canonicalKind = tool:GetAttribute("InventoryItemKind")
+	if typeof(canonicalName) == "string" and canonicalName ~= "" then
+		return canonicalKind, canonicalName
+	end
+
+	return canonicalKind, tool.Name
+end
+
+local function syncEquippedState(character)
+	local attributeKind = player:GetAttribute("EquippedInventoryItemKind")
+	local attributeName = player:GetAttribute("EquippedInventoryItemName")
+	if typeof(attributeName) == "string" and attributeName ~= "" then
+		equippedKind = if typeof(attributeKind) == "string" and attributeKind ~= "" then attributeKind else nil
+		equippedName = attributeName
+		scheduleRender()
+		return
+	end
+
+	local nextEquippedKind = nil
+	local nextEquippedName = nil
 	for _, child in ipairs(character:GetChildren()) do
 		if child:IsA("Tool") then
-			nextEquipped = child.Name
+			nextEquippedKind, nextEquippedName = resolveEquippedItemName(child)
 			break
 		end
 	end
-	equippedName = nextEquipped
+
+	equippedKind = if typeof(nextEquippedKind) == "string" and nextEquippedKind ~= "" then nextEquippedKind else nil
+	equippedName = nextEquippedName
 	scheduleRender()
 end
 
 local function hookCharacter(character)
 	disconnectAll(characterConnections)
-	scanEquipped(character)
+	syncEquippedState(character)
 
 	trackConnection(character.ChildAdded, function(child)
 		if child:IsA("Tool") then
-			equippedName = child.Name
-			scheduleRender()
+			task.defer(function()
+				if character.Parent ~= nil then
+					syncEquippedState(character)
+				end
+			end)
 		end
 	end, characterConnections)
 
 	trackConnection(character.ChildRemoved, function(child)
-		if child:IsA("Tool") and equippedName == child.Name then
-			scanEquipped(character)
+		if child:IsA("Tool") then
+			task.defer(function()
+				if character.Parent ~= nil then
+					syncEquippedState(character)
+				end
+			end)
 		end
 	end, characterConnections)
 end
@@ -1999,6 +2140,24 @@ trackConnection(workspace:GetPropertyChangedSignal("CurrentCamera"), function()
 	scheduleRender()
 end, cleanupConnections)
 
+trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemKind"), function()
+	if player.Character then
+		syncEquippedState(player.Character)
+	else
+		equippedKind = nil
+		scheduleRender()
+	end
+end, cleanupConnections)
+
+trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemName"), function()
+	if player.Character then
+		syncEquippedState(player.Character)
+	else
+		equippedName = nil
+		scheduleRender()
+	end
+end, cleanupConnections)
+
 trackConnection(RunService.Heartbeat, function()
 	local signature = getToggleLayoutSignature()
 	if signature ~= lastToggleLayoutSignature then
@@ -2028,6 +2187,7 @@ end, cleanupConnections)
 hideLegacyInventory()
 bindHudLayoutTracking()
 bindShipDataTracking()
+bindChestInventoryTracking()
 bindTitleTracking()
 bindRebirthSummaryTracking()
 render()
@@ -2044,6 +2204,7 @@ script.Destroying:Connect(function()
 	disconnectAll(characterConnections)
 	disconnectAll(hudLayoutConnections)
 	disconnectAll(shipDataConnections)
+	disconnectAll(chestInventoryConnections)
 	disconnectAll(rebirthSummaryConnections)
 	if stopObservingState then
 		stopObservingState()

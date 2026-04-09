@@ -6,6 +6,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RNG = Random.new()
 
+local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
+
 local Colors = {
 	Color3.fromRGB(0, 34, 255),
 	Color3.fromRGB(170, 255, 0),
@@ -520,6 +522,16 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 	playSound("Reward")
 end
 
+function PopUpModule:Local_ShowChestOpenResult(openResult)
+	local acknowledgement = ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
+	self:Local_ShowAcknowledgement(acknowledgement)
+
+	local confettiCount = ChestOpenResultFormatter.GetCelebrationCount(openResult)
+	if confettiCount > 0 then
+		self:Local_SpawnConfetti(confettiCount)
+	end
+end
+
 local isPromptActive = false
 local function playBuyAnimation(mainGui)
 	local buyAnimation = mainGui:WaitForChild("BuyAnimation")
@@ -983,6 +995,10 @@ end
 
 function PopUpModule:Server_ShowNotify(player, RewardName, Amount, Icon, Duration)
 	PopUpEvent:FireClient(player, "ShowNotify",RewardName , Amount, Icon, Duration)
+end
+
+function PopUpModule:Server_ShowChestOpenResult(player, openResult)
+	PopUpEvent:FireClient(player, "ShowChestOpenResult", openResult)
 end
 
 function PopUpModule:Server_PromptGamepass(player, id)

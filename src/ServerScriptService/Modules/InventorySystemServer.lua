@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local updateRemote = ReplicatedStorage:FindFirstChild("InventoryGearRemote")
 if not updateRemote then
 	updateRemote = Instance.new("RemoteEvent")
@@ -20,6 +21,8 @@ local Module = {}
 local chestToolServiceCache = nil
 local sliceServiceCache = nil
 local CHEST_DEBUG = true
+local EQUIPPED_ITEM_KIND_ATTRIBUTE = "EquippedInventoryItemKind"
+local EQUIPPED_ITEM_NAME_ATTRIBUTE = "EquippedInventoryItemName"
 
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
@@ -61,6 +64,70 @@ local function getHumanoid(player)
 	return char:FindFirstChildOfClass("Humanoid")
 end
 
+local function setEquippedInventoryAttributes(player, itemKind, itemName)
+	if typeof(itemKind) == "string" and itemKind ~= "" and typeof(itemName) == "string" and itemName ~= "" then
+		player:SetAttribute(EQUIPPED_ITEM_KIND_ATTRIBUTE, itemKind)
+		player:SetAttribute(EQUIPPED_ITEM_NAME_ATTRIBUTE, itemName)
+	else
+		player:SetAttribute(EQUIPPED_ITEM_KIND_ATTRIBUTE, nil)
+		player:SetAttribute(EQUIPPED_ITEM_NAME_ATTRIBUTE, nil)
+	end
+end
+
+local function resolveToolIdentity(player, tool)
+	if not tool or not tool:IsA("Tool") then
+		return nil, nil
+	end
+
+	local itemKind = tool:GetAttribute("InventoryItemKind")
+	local itemName = tool:GetAttribute("InventoryItemName") or tool:GetAttribute("InvItem") or tool.Name
+	if typeof(itemName) ~= "string" or itemName == "" then
+		return nil, nil
+	end
+
+	if typeof(itemKind) == "string" and itemKind ~= "" then
+		return itemKind, itemName
+	end
+
+	local inventory = player:FindFirstChild("Inventory")
+	local devilFruits = inventory and inventory:FindFirstChild("DevilFruits")
+	local gears = player:FindFirstChild("Gears")
+	local chestInventory = player:FindFirstChild("ChestInventory")
+
+	if inventory and inventory:FindFirstChild(itemName) then
+		return "Brainrot", itemName
+	end
+	if devilFruits and devilFruits:FindFirstChild(itemName) then
+		return "DevilFruit", itemName
+	end
+	if chestInventory and chestInventory:FindFirstChild(itemName) then
+		return "Chest", itemName
+	end
+	if gears and gears:FindFirstChild(itemName) then
+		return "Gear", itemName
+	end
+
+	return nil, itemName
+end
+
+local function syncEquippedInventoryAttributes(player)
+	local character = player.Character
+	if not character then
+		setEquippedInventoryAttributes(player, nil, nil)
+		return
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") then
+			local itemKind, itemName = resolveToolIdentity(player, child)
+			setEquippedInventoryAttributes(player, itemKind, itemName)
+			return
+		end
+	end
+
+	setEquippedInventoryAttributes(player, nil, nil)
+end
+
 local function findInventoryTool(container, kind, name)
 	if not container then return nil end
 
@@ -89,6 +156,11 @@ local function unequipIfEquipped(player, toolName, itemKind)
 	local t = findInventoryTool(char, itemKind, toolName) or char:FindFirstChild(toolName)
 	if t and t:IsA("Tool") then
 		humanoid:UnequipTools()
+		task.defer(function()
+			if player.Parent == Players then
+				syncEquippedInventoryAttributes(player)
+			end
+		end)
 	end
 end
 
@@ -128,7 +200,7 @@ local function ownsChest(player, tierName)
 		local state = sliceService.GetState(player)
 		local unopenedChests = state and state.UnopenedChests or {}
 		for _, chest in ipairs(unopenedChests) do
-			if tostring(chest.Tier) == tostring(tierName) then
+			if ChestUtils.GetInventoryName(chest) == tostring(tierName) then
 				return true
 			end
 		end
@@ -160,6 +232,11 @@ local function toggleEquip(player, kind, toolName)
 			)
 		end
 		humanoid:UnequipTools()
+		task.defer(function()
+			if player.Parent == Players then
+				syncEquippedInventoryAttributes(player)
+			end
+		end)
 		return
 	end
 
@@ -235,6 +312,7 @@ local function toggleEquip(player, kind, toolName)
 					equipped.Parent and equipped.Parent:GetFullName() or "nil"
 				)
 			end
+			setEquippedInventoryAttributes(player, kind, toolName)
 			enforceWeld(equipped)
 			return
 		end
@@ -253,6 +331,7 @@ local function toggleEquip(player, kind, toolName)
 			pcall(function()
 				fallbackTool.Parent = refreshedChar
 			end)
+			setEquippedInventoryAttributes(player, kind, toolName)
 			enforceWeld(fallbackTool)
 		elseif kind == "Chest" then
 			chestDebug(
@@ -525,6 +604,37 @@ function Module.Start()
 		local gears = player:WaitForChild("Gears")
 		watchInventory(player, inv)
 		watchGears(player, gears)
+
+		local function bindCharacter(character)
+			syncEquippedInventoryAttributes(player)
+
+			character.ChildAdded:Connect(function(child)
+				if child:IsA("Tool") then
+					task.defer(function()
+						if player.Parent == Players and character.Parent ~= nil then
+							syncEquippedInventoryAttributes(player)
+						end
+					end)
+				end
+			end)
+
+			character.ChildRemoved:Connect(function(child)
+				if child:IsA("Tool") then
+					task.defer(function()
+						if player.Parent == Players then
+							syncEquippedInventoryAttributes(player)
+						end
+					end)
+				end
+			end)
+		end
+
+		if player.Character then
+			bindCharacter(player.Character)
+		else
+			syncEquippedInventoryAttributes(player)
+		end
+		player.CharacterAdded:Connect(bindCharacter)
 
 		local chestInventory = player:FindFirstChild("ChestInventory") or player:WaitForChild("ChestInventory", 10)
 		if chestInventory and chestInventory:IsA("Folder") then

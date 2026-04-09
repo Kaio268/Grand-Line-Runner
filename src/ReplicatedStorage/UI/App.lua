@@ -280,6 +280,214 @@ local function PreviewViewport(props)
 	})
 end
 
+local function ChestIcon(props)
+	local woodColor, metalColor = ChestVisuals.GetTierColors(props.tierName)
+	local accent = props.accentColor or metalColor
+	local size = props.size or UDim2.fromOffset(40, 40)
+	local position = props.position or UDim2.fromScale(0.5, 0.5)
+	local anchorPoint = props.anchorPoint or Vector2.new(0.5, 0.5)
+	local zIndex = props.zIndex or 1
+
+	return e("Frame", {
+		AnchorPoint = anchorPoint,
+		BackgroundTransparency = 1,
+		Position = position,
+		Size = size,
+		ZIndex = zIndex,
+	}, {
+		Shadow = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundColor3 = Color3.fromRGB(6, 8, 14),
+			BackgroundTransparency = 0.48,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.96),
+			Size = UDim2.fromScale(0.68, 0.1),
+			ZIndex = zIndex,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		}),
+		Body = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundColor3 = woodColor,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.83),
+			Size = UDim2.fromScale(0.74, 0.42),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.16, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.18),
+				Transparency = 0.3,
+				Thickness = 1,
+			}),
+			Gradient = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.1)),
+					ColorSequenceKeypoint.new(1, woodColor:Lerp(Color3.fromRGB(0, 0, 0), 0.2)),
+				}),
+			}),
+		}),
+		Lid = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.08),
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.37),
+			Rotation = -6,
+			Size = UDim2.fromScale(0.8, 0.28),
+			ZIndex = zIndex + 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.2, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.22),
+				Transparency = 0.24,
+				Thickness = 1,
+			}),
+			Gradient = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.16)),
+					ColorSequenceKeypoint.new(1, woodColor:Lerp(Color3.fromRGB(0, 0, 0), 0.12)),
+				}),
+			}),
+		}),
+		Band = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = metalColor,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.52),
+			Size = UDim2.fromScale(0.14, 0.56),
+			ZIndex = zIndex + 3,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.18, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = metalColor:Lerp(Color3.fromRGB(255, 255, 255), 0.24),
+				Transparency = 0.18,
+				Thickness = 1,
+			}),
+		}),
+		TrimLeft = e("Frame", {
+			AnchorPoint = Vector2.new(0, 0.5),
+			BackgroundColor3 = metalColor,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.13, 0.6),
+			Size = UDim2.fromScale(0.09, 0.32),
+			ZIndex = zIndex + 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.18, 0),
+			}),
+		}),
+		TrimRight = e("Frame", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			BackgroundColor3 = metalColor,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.87, 0.6),
+			Size = UDim2.fromScale(0.09, 0.32),
+			ZIndex = zIndex + 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.18, 0),
+			}),
+		}),
+		Latch = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.08),
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.58),
+			Size = UDim2.fromScale(0.18, 0.16),
+			ZIndex = zIndex + 4,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.28, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = Color3.fromRGB(255, 244, 210),
+				Transparency = 0.26,
+				Thickness = 1,
+			}),
+		}),
+		Highlight = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = 0.72,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.48, 0.18),
+			Rotation = -18,
+			Size = UDim2.fromScale(0.12, 0.24),
+			ZIndex = zIndex + 5,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		}),
+	})
+end
+
+local function renderItemPreview(item, props)
+	local position = props.position
+	local size = props.size
+	local zIndex = props.zIndex
+	local fallbackFont = props.fallbackFont or Enum.Font.GothamBold
+	local fallbackTextSize = props.fallbackTextSize or 20
+	local fallbackTextColor = props.fallbackTextColor or PALETTE.Text
+	local fallbackSize = props.fallbackSize or UDim2.new(1, -12, 1, -12)
+
+	if item and item.image and item.image ~= "" then
+		return e("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Image = item.image,
+			Position = position,
+			Size = size,
+			ScaleType = Enum.ScaleType.Fit,
+			ZIndex = zIndex,
+		})
+	end
+
+	if item and (item.kind == "Chest" or item.previewKind == "Chest") then
+		return e(ChestIcon, {
+			accentColor = item.accentColor,
+			position = position,
+			size = size,
+			tierName = item.previewName or item.name,
+			zIndex = zIndex,
+		})
+	end
+
+	if item and item.previewKind then
+		return e(PreviewViewport, {
+			previewKind = item.previewKind,
+			previewName = item.previewName,
+			position = position,
+			size = size,
+			zIndex = zIndex,
+			fieldOfView = props.fieldOfView or 34,
+		})
+	end
+
+	return e("TextLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Font = fallbackFont,
+		Position = position,
+		Size = fallbackSize,
+		Text = item and (item.fallbackText or initials(item.displayName)) or "",
+		TextColor3 = fallbackTextColor,
+		TextSize = fallbackTextSize,
+		TextWrapped = props.fallbackTextWrapped == true,
+		ZIndex = zIndex,
+	})
+end
+
 local function useInteractiveState(enabled, allowPress)
 	local hovered, setHovered = React.useState(false)
 	local pressed, setPressed = React.useState(false)
@@ -707,31 +915,14 @@ local function hotbarSlot(props)
 		end
 	end
 
-	local previewChild = item and item.image and item.image ~= "" and e("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Image = item.image,
-		Position = UDim2.fromScale(0.5, 0.52),
-		Size = UDim2.fromOffset(34, 34),
-		ScaleType = Enum.ScaleType.Fit,
-		ZIndex = zIndexBase + 3,
-	}) or (item and item.previewKind and e(PreviewViewport, {
-		previewKind = item.previewKind,
-		previewName = item.previewName,
+	local previewChild = renderItemPreview(item, {
 		position = UDim2.fromScale(0.5, 0.52),
 		size = UDim2.fromOffset(40, 40),
 		zIndex = zIndexBase + 3,
-		fieldOfView = 34,
-	})) or e("TextLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamMedium,
-		Position = UDim2.fromScale(0.5, 0.55),
-		Size = UDim2.new(1, -12, 0, 18),
-		Text = "",
-		TextColor3 = PALETTE.Muted,
-		TextSize = 10,
-		ZIndex = zIndexBase + 3,
+		fallbackFont = Enum.Font.GothamMedium,
+		fallbackTextColor = PALETTE.Muted,
+		fallbackTextSize = 10,
+		fallbackSize = UDim2.new(1, -12, 0, 18),
 	})
 
 	return e(interactive and "TextButton" or "Frame", slotProps, {
@@ -821,6 +1012,7 @@ local function itemCard(props)
 	local item = props.item or {}
 	local accent = item.accentColor or PALETTE.Orange
 	local interactive = item.interactive == true
+	local isEquipped = item.isEquipped == true
 
 	local itemProps = {
 		BackgroundColor3 = PALETTE.Card,
@@ -837,32 +1029,15 @@ local function itemCard(props)
 		end
 	end
 
-	local previewChild = item.image and item.image ~= "" and e("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Image = item.image,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(66, 66),
-		ScaleType = Enum.ScaleType.Fit,
-		ZIndex = 3,
-	}) or (item.previewKind and e(PreviewViewport, {
-		previewKind = item.previewKind,
-		previewName = item.previewName,
+	local previewChild = renderItemPreview(item, {
 		position = UDim2.fromScale(0.5, 0.5),
 		size = UDim2.fromOffset(74, 74),
 		zIndex = 3,
-		fieldOfView = 34,
-	})) or e("TextLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(1, -12, 1, -12),
-		Text = item.fallbackText or initials(item.displayName),
-		TextColor3 = PALETTE.Text,
-		TextSize = 22,
-		TextWrapped = true,
-		ZIndex = 3,
+		fallbackFont = Enum.Font.GothamBold,
+		fallbackTextColor = PALETTE.Text,
+		fallbackTextSize = 22,
+		fallbackTextWrapped = true,
+		fallbackSize = UDim2.new(1, -12, 1, -12),
 	})
 
 	return e(interactive and "TextButton" or "Frame", itemProps, {
@@ -870,15 +1045,20 @@ local function itemCard(props)
 			CornerRadius = UDim.new(0, 18),
 		}),
 		Stroke = e("UIStroke", {
-			Color = item.isEquipped and accent or PALETTE.Stroke,
-			Transparency = item.isEquipped and 0.05 or 0.42,
-			Thickness = item.isEquipped and 1.6 or 1,
+			Color = isEquipped and PALETTE.Cream or PALETTE.Stroke,
+			Transparency = isEquipped and 0.02 or 0.42,
+			Thickness = isEquipped and 2.2 or 1,
+		}),
+		Glow = isEquipped and e("UIStroke", {
+			Color = accent,
+			Transparency = 0.72,
+			Thickness = 4,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, PALETTE.Card),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(48, 35, 29)),
+				ColorSequenceKeypoint.new(0, isEquipped and accent:Lerp(PALETTE.Card, 0.82) or PALETTE.Card),
+				ColorSequenceKeypoint.new(1, isEquipped and accent:Lerp(Color3.fromRGB(48, 35, 29), 0.72) or Color3.fromRGB(48, 35, 29)),
 			}),
 		}),
 		HeaderStrip = e("Frame", {
@@ -907,7 +1087,7 @@ local function itemCard(props)
 			}),
 			PreviewTint = e("Frame", {
 				BackgroundColor3 = accent,
-				BackgroundTransparency = 0.88,
+				BackgroundTransparency = isEquipped and 0.8 or 0.88,
 				BorderSizePixel = 0,
 				Size = UDim2.fromScale(1, 1),
 				ZIndex = 1,
@@ -916,6 +1096,33 @@ local function itemCard(props)
 					CornerRadius = UDim.new(0, 14),
 				}),
 			}),
+			EquippedBanner = isEquipped and e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 1),
+				BackgroundColor3 = accent,
+				BackgroundTransparency = 0.04,
+				BorderSizePixel = 0,
+				Position = UDim2.new(0.5, 0, 1, -8),
+				Size = UDim2.new(1, -16, 0, 22),
+				ZIndex = 4,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 999),
+				}),
+				Stroke = e("UIStroke", {
+					Color = PALETTE.Cream,
+					Transparency = 0.18,
+					Thickness = 1.2,
+				}),
+				Label = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Size = UDim2.fromScale(1, 1),
+					Font = Enum.Font.GothamBold,
+					Text = "IN HAND",
+					TextColor3 = PALETTE.Text,
+					TextSize = 10,
+					ZIndex = 5,
+				}),
+			}) or nil,
 			Preview = previewChild,
 		}),
 		Name = e("TextLabel", {
@@ -947,7 +1154,7 @@ local function itemCard(props)
 			Position = UDim2.fromOffset(14, 160),
 			Size = UDim2.new(1, -28, 0, 14),
 			Text = item.footer or "",
-			TextColor3 = PALETTE.Muted,
+			TextColor3 = isEquipped and PALETTE.Cream or PALETTE.Muted,
 			TextSize = 9,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
@@ -972,24 +1179,29 @@ local function itemCard(props)
 				PaddingRight = UDim.new(0, 7),
 			}),
 		}) or nil,
-		Equipped = item.isEquipped and e("TextLabel", {
+		Equipped = isEquipped and e("TextLabel", {
 			AutomaticSize = Enum.AutomaticSize.XY,
 			BackgroundColor3 = accent,
-			BackgroundTransparency = 0.08,
-			Position = UDim2.fromOffset(12, 82),
+			BackgroundTransparency = 0.02,
+			Position = UDim2.fromOffset(12, 86),
 			Font = Enum.Font.GothamBold,
 			Text = "Equipped",
 			TextColor3 = PALETTE.Text,
-			TextSize = 10,
+			TextSize = 11,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
 			}),
+			Stroke = e("UIStroke", {
+				Color = PALETTE.Cream,
+				Transparency = 0.18,
+				Thickness = 1.1,
+			}),
 			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 3),
-				PaddingBottom = UDim.new(0, 3),
-				PaddingLeft = UDim.new(0, 7),
-				PaddingRight = UDim.new(0, 7),
+				PaddingTop = UDim.new(0, 4),
+				PaddingBottom = UDim.new(0, 4),
+				PaddingLeft = UDim.new(0, 9),
+				PaddingRight = UDim.new(0, 9),
 			}),
 		}) or nil,
 	})
@@ -1344,10 +1556,11 @@ end
 local function manifestTile(props)
 	local item = props.item or {}
 	local accent = item.accentColor or PALETTE.Cyan
+	local isEquipped = item.isEquipped == true
 	local interactive = item.interactive == true
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(interactive)
 	local heldHover = hovered
-	local heldEquipped = item.isEquipped and not hovered
+	local heldEquipped = isEquipped and not hovered
 	local heldScale = heldHover and 1.034 or (heldEquipped and 1.01 or 1)
 	local tileBaseTop = accent:Lerp(Color3.fromRGB(72, 74, 87), 0.82)
 	local tileBaseBottom = accent:Lerp(Color3.fromRGB(49, 52, 61), 0.9)
@@ -1367,31 +1580,14 @@ local function manifestTile(props)
 		end or nil,
 	}, handlers)
 
-	local previewChild = item.image and item.image ~= "" and e("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Image = item.image,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(64, 64),
-		ScaleType = Enum.ScaleType.Fit,
-		ZIndex = 3,
-	}) or (item.previewKind and e(PreviewViewport, {
-		previewKind = item.previewKind,
-		previewName = item.previewName,
+	local previewChild = renderItemPreview(item, {
 		position = UDim2.fromScale(0.5, 0.5),
 		size = UDim2.fromOffset(74, 74),
 		zIndex = 3,
-		fieldOfView = 34,
-	})) or e("TextLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(1, -10, 1, -10),
-		Text = item.fallbackText or initials(item.displayName),
-		TextColor3 = PALETTE.Cream,
-		TextSize = 20,
-		ZIndex = 3,
+		fallbackFont = Enum.Font.GothamBold,
+		fallbackTextColor = PALETTE.Cream,
+		fallbackTextSize = 20,
+		fallbackSize = UDim2.new(1, -10, 1, -10),
 	})
 
 	return e("TextButton", tileProps, {
@@ -1402,20 +1598,20 @@ local function manifestTile(props)
 			CornerRadius = UDim.new(0, 10),
 		}),
 		Stroke = e("UIStroke", {
-			Color = item.isEquipped and PALETTE.Cream or accent,
-			Transparency = hovered and 0 or (item.isEquipped and 0.03 or 0.12),
-			Thickness = hovered and 2.4 or (item.isEquipped and 2.2 or 1.8),
+			Color = isEquipped and PALETTE.Cream or accent,
+			Transparency = hovered and 0 or (isEquipped and 0.02 or 0.12),
+			Thickness = hovered and 2.4 or (isEquipped and 2.5 or 1.8),
 		}),
 		Glow = e("UIStroke", {
 			Color = accent,
-			Transparency = hovered and 0.66 or (item.isEquipped and 0.82 or 0.92),
-			Thickness = hovered and 4 or 3.4,
+			Transparency = hovered and 0.66 or (isEquipped and 0.72 or 0.92),
+			Thickness = hovered and 4 or (isEquipped and 4.8 or 3.4),
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, tileBaseTop),
-				ColorSequenceKeypoint.new(1, tileBaseBottom),
+				ColorSequenceKeypoint.new(0, isEquipped and accent:Lerp(tileBaseTop, 0.7) or tileBaseTop),
+				ColorSequenceKeypoint.new(1, isEquipped and accent:Lerp(tileBaseBottom, 0.64) or tileBaseBottom),
 			}),
 		}),
 		AccentBorder = e("Frame", {
@@ -1453,12 +1649,12 @@ local function manifestTile(props)
 			}),
 			Stroke = e("UIStroke", {
 				Color = accent,
-				Transparency = hovered and 0.18 or 0.38,
-				Thickness = hovered and 1.2 or 1,
+				Transparency = hovered and 0.18 or (isEquipped and 0.08 or 0.38),
+				Thickness = hovered and 1.2 or (isEquipped and 1.6 or 1),
 			}),
 			HoverWash = e("Frame", {
 				BackgroundColor3 = accent,
-				BackgroundTransparency = hovered and 0.74 or 0.88,
+				BackgroundTransparency = hovered and 0.74 or (isEquipped and 0.78 or 0.88),
 				BorderSizePixel = 0,
 				Size = UDim2.fromScale(1, 1),
 				ZIndex = 1,
@@ -1467,21 +1663,81 @@ local function manifestTile(props)
 					CornerRadius = UDim.new(0, 7),
 				}),
 			}),
+			EquippedRibbon = isEquipped and e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 1),
+				BackgroundColor3 = accent,
+				BackgroundTransparency = 0.02,
+				BorderSizePixel = 0,
+				Position = UDim2.new(0.5, 0, 1, -6),
+				Size = UDim2.new(1, -16, 0, 18),
+				ZIndex = 4,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 999),
+				}),
+				Stroke = e("UIStroke", {
+					Color = PALETTE.Cream,
+					Transparency = 0.16,
+					Thickness = 1.1,
+				}),
+				Label = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Size = UDim2.fromScale(1, 1),
+					Font = Enum.Font.GothamBold,
+					Text = "IN HAND",
+					TextColor3 = PALETTE.Text,
+					TextSize = 9,
+					ZIndex = 5,
+				}),
+			}) or nil,
 			Preview = previewChild,
 		}),
+		EquippedCorner = isEquipped and e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			BackgroundColor3 = PALETTE.Cream,
+			BackgroundTransparency = 0.02,
+			Position = UDim2.new(1, -8, 0, 8),
+			Font = Enum.Font.GothamBold,
+			Text = "EQUIPPED",
+			TextColor3 = Color3.fromRGB(14, 21, 22),
+			TextSize = 9,
+			ZIndex = 5,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 3),
+				PaddingBottom = UDim.new(0, 3),
+				PaddingLeft = UDim.new(0, 8),
+				PaddingRight = UDim.new(0, 8),
+			}),
+		}) or nil,
 		Name = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(10, 101),
 			Size = UDim2.new(1, -20, 0, 20),
 			Text = item.displayName or "",
-			TextColor3 = PALETTE.Cream,
+			TextColor3 = isEquipped and PALETTE.Text or PALETTE.Cream,
 			TextSize = 12,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextWrapped = false,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 3,
 		}),
+		Status = isEquipped and e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(10, 118),
+			Size = UDim2.new(1, -54, 0, 12),
+			Text = "Currently in your hand",
+			TextColor3 = accent:Lerp(PALETTE.Cream, 0.35),
+			TextSize = 8,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 4,
+		}) or nil,
 		Quantity = e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			BackgroundTransparency = 1,
@@ -2303,9 +2559,7 @@ local function App(props)
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
 				{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
-				{ label = "Timber", value = formatNumber(summary.timber or 0), valueColor3 = Color3.fromRGB(112, 220, 140) },
-				{ label = "Iron", value = formatNumber(summary.iron or 0), valueColor3 = Color3.fromRGB(91, 170, 255) },
-				{ label = "Ancient Timber", value = formatNumber(summary.ancientTimber or 0), valueColor3 = Color3.fromRGB(255, 187, 74) },
+				{ label = "Mythic Keys", value = formatNumber(summary.mythicKeys or 0), valueColor3 = Color3.fromRGB(255, 101, 134) },
 			}
 		end
 

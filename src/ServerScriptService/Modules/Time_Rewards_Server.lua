@@ -544,4 +544,46 @@ InstantRewardsEvent.Event:Connect(function(player)
 	instantClaimAll(player)
 end)
 
-return {}
+local module = {}
+
+function module.ResetClaims(player: Player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	claimLocks[player] = nil
+	lastClaimRequestAt[player] = nil
+
+	if not waitForDataReady(player, DATA_READY_TIMEOUT) then
+		return false, "not_ready"
+	end
+
+	local state, currentPlayTime, reason = ensureTimeRewardState(player)
+	if not state then
+		return false, reason or "missing_state"
+	end
+
+	resetCycleState(state, currentPlayTime)
+
+	local persisted, persistReason = persistTimeRewardState(player, state)
+	if not persisted then
+		return false, persistReason or "persist_failed"
+	end
+
+	fireClientState(player, state, currentPlayTime)
+	saveProfileNow(player)
+
+	giftLog(
+		"[GIFT][DATA]",
+		string.format(
+			"player=%s action=adminReset claimed=%d currentPlayTime=%d",
+			player.Name,
+			getClaimedCount(state),
+			currentPlayTime
+		)
+	)
+
+	return true, nil
+end
+
+return module

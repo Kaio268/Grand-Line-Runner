@@ -148,16 +148,41 @@ function DevilFruitInventoryService.GetFruitQuantity(player, fruitIdentifier)
 	end
 
 	local quantityValue = getFruitQuantityValue(player, fruit.FruitKey)
-	if quantityValue then
-		return quantityValue.Value
-	end
+	local liveQuantity = if quantityValue then tonumber(quantityValue.Value) or 0 else nil
 
 	local quantity, quantityReason = DataManager:TryGetValue(player, getFruitInventoryPath(fruit.FruitKey))
 	if quantityReason ~= nil then
+		if liveQuantity ~= nil then
+			return liveQuantity
+		end
+
 		return nil, quantityReason
 	end
 
-	return tonumber(quantity) or 0
+	local persistedQuantity = tonumber(quantity) or 0
+	if liveQuantity ~= nil then
+		return math.max(liveQuantity, persistedQuantity)
+	end
+
+	return persistedQuantity
+end
+
+function DevilFruitInventoryService.IsOwned(player, fruitIdentifier)
+	local fruit, reason = resolveFruit(fruitIdentifier)
+	if not fruit then
+		return false, reason
+	end
+
+	local currentQuantity, quantityReason = DevilFruitInventoryService.GetFruitQuantity(player, fruit.FruitKey)
+	if currentQuantity == nil and quantityReason ~= nil then
+		return false, quantityReason
+	end
+
+	if math.max(0, tonumber(currentQuantity) or 0) > 0 then
+		return true, nil
+	end
+
+	return DevilFruitService.GetEquippedFruitKey(player) == fruit.FruitKey, nil
 end
 
 function DevilFruitInventoryService.GrantFruit(player, fruitIdentifier, amount)

@@ -1,3 +1,7 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+
 local ChestVisuals = {}
 
 ChestVisuals.Style = "ProceduralPlaceholder"
@@ -53,15 +57,29 @@ local function setBasePartDefaults(part)
 end
 
 function ChestVisuals.GetTierColors(tierName)
-	if tierName == "Legendary" then
+	local styleName = ChestUtils.GetVisualStyleName(tierName)
+
+	if styleName == "Mythic Devil Fruit" then
+		return Color3.fromRGB(63, 68, 78), Color3.fromRGB(116, 245, 220)
+	end
+
+	if styleName == "Legendary Devil Fruit" then
+		return Color3.fromRGB(134, 66, 29), Color3.fromRGB(255, 173, 66)
+	end
+
+	if styleName == "Rare Devil Fruit" then
+		return Color3.fromRGB(82, 74, 45), Color3.fromRGB(96, 176, 255)
+	end
+
+	if styleName == "Legendary" then
 		return Color3.fromRGB(143, 90, 28), Color3.fromRGB(228, 180, 74)
 	end
 
-	if tierName == "Gold" then
+	if styleName == "Gold" then
 		return Color3.fromRGB(132, 84, 30), Color3.fromRGB(215, 172, 71)
 	end
 
-	if tierName == "Iron" then
+	if styleName == "Iron" then
 		return Color3.fromRGB(101, 78, 57), Color3.fromRGB(161, 170, 180)
 	end
 

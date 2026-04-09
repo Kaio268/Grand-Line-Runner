@@ -3,12 +3,31 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
-local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 
 local HitEffectService = {}
 
 local activeStatesByPlayer = {}
 local started = false
+local sliceServiceCache = nil
+
+local function getSliceService()
+	if sliceServiceCache ~= nil then
+		return if sliceServiceCache == false then nil else sliceServiceCache
+	end
+
+	local ok, service = pcall(function()
+		return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
+	end)
+
+	if not ok then
+		warn(string.format("[HitEffectService] Failed to resolve GrandLineRushVerticalSliceService: %s", tostring(service)))
+		sliceServiceCache = false
+		return nil
+	end
+
+	sliceServiceCache = service
+	return service
+end
 
 local function getCharacterContext(player)
 	if not player or not player:IsA("Player") then
@@ -209,11 +228,14 @@ function HitEffectService.ApplyEffect(player, effectName, options)
 		else effectDefinition.ForcesCarryDrop == true
 
 	if forcesCarryDrop then
-		dropResponse = SliceService.DropCarriedReward(player, {
-			Reason = "HitEffect",
-			EffectName = effectName,
-			DropPosition = dropPosition,
-		})
+		local sliceService = getSliceService()
+		if sliceService and typeof(sliceService.DropCarriedReward) == "function" then
+			dropResponse = sliceService.DropCarriedReward(player, {
+				Reason = "HitEffect",
+				EffectName = effectName,
+				DropPosition = dropPosition,
+			})
+		end
 	end
 
 	applyKnockback(rootPart, options.KnockbackVector or effectDefinition.Knockback)

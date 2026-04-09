@@ -43,6 +43,10 @@ local ProfileTemplate = {
 		Order = {},
 	},
 
+	ChestRewards = {
+		MythicKeys = 0,
+	},
+
 	Bounty = {
 		LifetimeExtraction = 0,
 		Crew = 0,
