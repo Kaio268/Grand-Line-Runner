@@ -489,6 +489,28 @@ function ProfileMigrations.Apply(data)
 	materials.CommonShipMaterial = materials.Timber
 	materials.RareShipMaterial = materials.Iron
 
+	local quests = ensureTable(data, "Quests")
+	for _, categoryId in ipairs({ "Daily", "Weekly", "Special" }) do
+		local categoryState = ensureTable(quests, categoryId)
+		categoryState.Progress = ensureTable(categoryState, "Progress")
+		categoryState.Claimed = ensureTable(categoryState, "Claimed")
+		if typeof(categoryState.CycleId) ~= "string" then
+			categoryState.CycleId = if categoryId == "Special" then "Lifetime" else ""
+		end
+		if typeof(categoryState.ProfileBackfillApplied) ~= "boolean" then
+			categoryState.ProfileBackfillApplied = false
+		end
+
+		for questId, value in pairs(categoryState.Progress) do
+			categoryState.Progress[questId] = math.max(0, coerceNumber(value, 0))
+		end
+		for questId, value in pairs(categoryState.Claimed) do
+			if value ~= true then
+				categoryState.Claimed[questId] = nil
+			end
+		end
+	end
+
 	local active = ensureTable(data, "Active")
 	active.x2Money = coerceNumber(active.x2Money, 1)
 	active.x15WalkSpeed = coerceNumber(active.x15WalkSpeed, 1)

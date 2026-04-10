@@ -22,6 +22,21 @@ local function trackConnection(signal, callback, bucket)
 	return connection
 end
 
+local function isUsableUiController(controller)
+	if not controller or not controller.Main or not controller.Main.Parent then
+		return false
+	end
+
+	if typeof(controller._isActiveController) == "function" then
+		local ok, isActive = pcall(controller._isActiveController, controller)
+		if ok and isActive ~= true then
+			return false
+		end
+	end
+
+	return true
+end
+
 function ReactFrameModalAdapter.new(options)
 	local self = setmetatable({}, ReactFrameModalAdapter)
 
@@ -54,9 +69,11 @@ function ReactFrameModalAdapter:SetScheduleRender(callback)
 end
 
 function ReactFrameModalAdapter:_tryLoadUiController()
-	if self.uiController and self.uiController.Main and self.uiController.Main.Parent then
+	if isUsableUiController(self.uiController) then
 		return self.uiController
 	end
+
+	self.uiController = nil
 
 	local openUiScript = self.playerGui:FindFirstChild("OpenUI") or self.playerGui:WaitForChild("OpenUI", 1)
 	if not openUiScript then
@@ -69,7 +86,7 @@ function ReactFrameModalAdapter:_tryLoadUiController()
 	end
 
 	local ok, result = pcall(require, openUiModule)
-	if ok then
+	if ok and isUsableUiController(result) then
 		self.uiController = result
 		return result
 	end

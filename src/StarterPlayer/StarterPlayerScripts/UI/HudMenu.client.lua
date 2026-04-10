@@ -48,6 +48,7 @@ local TILE_DEFS = {
 	{ name = "Gifts", label = "Gifts", badgeText = "0", hasSummaryTimer = true },
 	{ name = "Settings", label = "Settings" },
 	{ name = "Rebirth", label = "Rebirth", badgeText = "NEW" },
+	{ name = "Quest", label = "Quest", badgeText = "" },
 }
 
 local TILE_POSITIONS = {
@@ -56,6 +57,7 @@ local TILE_POSITIONS = {
 	Gifts = Vector2.new(0, 94),
 	Settings = Vector2.new(94, 94),
 	Rebirth = Vector2.new(0, 188),
+	Quest = Vector2.new(94, 188),
 }
 
 local HUD_ICON_ASSET_OVERRIDES = {
@@ -65,6 +67,7 @@ local HUD_ICON_ASSET_OVERRIDES = {
 	Claim = "rbxassetid://131189007512696",
 	Settings = "rbxassetid://125384263224347",
 	Rebirth = "rbxassetid://116163404622119",
+	Quest = "rbxthumb://type=Asset&id=71286761272497&w=150&h=150",
 }
 
 local HUD_ICON_SIZE_OVERRIDES = {

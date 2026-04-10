@@ -109,6 +109,48 @@ local function buildMetadata(storageName, entry)
 	}
 end
 
+local function copyTableShallow(source)
+	local copy = {}
+	if typeof(source) ~= "table" then
+		return copy
+	end
+
+	for key, value in pairs(source) do
+		copy[key] = value
+	end
+
+	return copy
+end
+
+local function buildLegacyInventoryEntry(storageName, entry, metadata)
+	metadata = metadata or buildMetadata(storageName, entry)
+
+	local normalized = copyTableShallow(entry)
+	local render = tostring(normalized.Render or metadata.Render or "")
+
+	normalized.Equipped = math.max(0, math.floor(coerceNumber(normalized.Equipped, 0)))
+	normalized.Quantity = math.max(0, math.floor(coerceNumber(normalized.Quantity, 0)))
+	normalized.Variant = tostring(normalized.Variant or metadata.Variant or "Normal")
+	normalized.BaseName = tostring(normalized.BaseName or metadata.BaseName or storageName)
+	normalized.Render = render
+	normalized.GoldenRender = tostring(normalized.GoldenRender or metadata.GoldenRender or render)
+	normalized.DiamondRender = tostring(normalized.DiamondRender or metadata.DiamondRender or render)
+	normalized.Income = tonumber(normalized.Income or metadata.Income) or 0
+	normalized.Rarity = tostring(normalized.Rarity or metadata.Rarity or "Common")
+	normalized.Level = math.max(1, math.floor(coerceNumber(normalized.Level, 1)))
+	normalized.CurrentXP = math.max(0, math.floor(coerceNumber(normalized.CurrentXP, 0)))
+
+	return normalized
+end
+
+local function ensureLegacyInventoryEntry(player, storageName, metadata)
+	local dataManager = getDataManager()
+	local entry = buildLegacyInventoryEntry(storageName, getInventoryEntry(player, storageName), metadata)
+
+	dataManager:SetValue(player, "Inventory." .. tostring(storageName), entry)
+	return entry
+end
+
 local function ensureBrainrotInventoryShape(brainrotInventory)
 	if typeof(brainrotInventory) ~= "table" then
 		brainrotInventory = {}
@@ -216,6 +258,10 @@ local function setInstanceData(player, brainrotInventory, instanceId, instanceDa
 end
 
 local function syncQuantityValue(player, storageName, quantity)
+	if getInventoryEntry(player, storageName) == nil then
+		ensureLegacyInventoryEntry(player, storageName)
+	end
+
 	getDataManager():SetValue(player, "Inventory." .. tostring(storageName) .. ".Quantity", math.max(0, math.floor(coerceNumber(quantity, 0))))
 end
 
@@ -287,22 +333,7 @@ end
 
 local function ensureInventoryMetadata(player, storageName, metadata)
 	metadata = metadata or buildMetadata(storageName, getInventoryEntry(player, storageName))
-	local basePath = "Inventory." .. tostring(storageName)
-	local dataManager = getDataManager()
-	dataManager:SetValue(player, basePath .. ".Variant", metadata.Variant)
-	dataManager:SetValue(player, basePath .. ".BaseName", metadata.BaseName)
-	dataManager:SetValue(player, basePath .. ".Render", metadata.Render)
-	dataManager:SetValue(player, basePath .. ".GoldenRender", metadata.GoldenRender)
-	dataManager:SetValue(player, basePath .. ".DiamondRender", metadata.DiamondRender)
-	dataManager:SetValue(player, basePath .. ".Income", metadata.Income)
-	dataManager:SetValue(player, basePath .. ".Rarity", metadata.Rarity)
-
-	if dataManager:GetValue(player, basePath .. ".Equipped") == nil then
-		dataManager:SetValue(player, basePath .. ".Equipped", 0)
-	end
-	if dataManager:GetValue(player, basePath .. ".Quantity") == nil then
-		dataManager:SetValue(player, basePath .. ".Quantity", 0)
-	end
+	return ensureLegacyInventoryEntry(player, storageName, metadata)
 end
 
 local function createInstanceInternal(player, brainrotInventory, storageName, overrides)

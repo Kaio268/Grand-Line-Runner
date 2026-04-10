@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -49,6 +50,7 @@ end
 
 local ctx = Interaction.NewContext(map)
 local AddBrainrot = require(script.Parent.Parent.Modules.AddBrainrot)
+local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 
 local rng = Random.new()
 local DEBUG_TRACE = RunService:IsStudio()
@@ -596,6 +598,11 @@ hitBox.Touched:Connect(function(hit)
 			tostring(info.OriginData ~= nil)
 		)
 		AddBrainrot:AddBrainrot(plr, info.Name, 1)
+		QuestSignals.Record(plr, "ExtractCrew", 1, {
+			Source = "SpawnBrainrots",
+			CrewName = tostring(info.Name),
+			ActiveMap = tostring(resolvedMapRefs.ActiveMapName or ""),
+		})
 		if info.OriginData and info.SlotIndex then
 			local od = info.OriginData
 			local si = info.SlotIndex

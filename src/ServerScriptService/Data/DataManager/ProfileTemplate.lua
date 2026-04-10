@@ -116,6 +116,27 @@ local ProfileTemplate = {
 		LastClaimPlayTime = 0,
 	},
 
+	Quests = {
+		Daily = {
+			CycleId = "",
+			ProfileBackfillApplied = false,
+			Progress = {},
+			Claimed = {},
+		},
+		Weekly = {
+			CycleId = "",
+			ProfileBackfillApplied = false,
+			Progress = {},
+			Claimed = {},
+		},
+		Special = {
+			CycleId = "Lifetime",
+			ProfileBackfillApplied = false,
+			Progress = {},
+			Claimed = {},
+		},
+	},
+
 	IncomeBrainrots = {},
 	StandsLevels = {},
 	Gears = {},

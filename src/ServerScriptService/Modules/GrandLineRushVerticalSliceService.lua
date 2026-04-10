@@ -12,6 +12,7 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
+local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 
 local Service = {}
 
@@ -455,6 +456,7 @@ local function ensureStarterCrew(player)
 		CurrentXP = 0,
 		TotalXP = 0,
 		Source = "Starter",
+		DepthBand = "",
 		AcquiredAt = os.time(),
 	}
 	table.insert(crewInventory.Order, instanceId)
@@ -484,6 +486,7 @@ local function addCrewInstance(player, rewardData, source)
 		CurrentXP = 0,
 		TotalXP = 0,
 		Source = source or "RunReward",
+		DepthBand = tostring(rewardData.DepthBand or ""),
 		AcquiredAt = os.time(),
 	}
 	table.insert(crewInventory.Order, instanceId)
@@ -810,6 +813,7 @@ local function extractRun(player)
 		local instanceId = addCrewInstance(player, {
 			Name = carriedReward.CrewName,
 			Rarity = carriedReward.Rarity,
+			DepthBand = carriedReward.DepthBand,
 		}, "RunReward")
 		if instanceId == nil then
 			runTrace(
@@ -828,6 +832,18 @@ local function extractRun(player)
 			tostring(instanceId)
 		)
 		message = string.format("Extracted crew reward and recruited %s (%s) as crew #%s.", tostring(carriedReward.CrewName), tostring(carriedReward.Rarity), tostring(instanceId or "?"))
+	end
+
+	QuestSignals.Record(player, "ReachDepth", 1, {
+		DepthBand = tostring(carriedReward.DepthBand or ""),
+		RewardType = tostring(carriedReward.RewardType or ""),
+	})
+	if carriedReward.RewardType == "Crew" then
+		QuestSignals.Record(player, "ExtractCrew", 1, {
+			DepthBand = tostring(carriedReward.DepthBand or ""),
+			Rarity = tostring(carriedReward.Rarity or ""),
+			CrewName = tostring(carriedReward.CrewName or ""),
+		})
 	end
 
 	local extractionBounty, _ = BountyService.AwardExtractionBountyForReward(player, carriedReward)
@@ -1002,6 +1018,38 @@ local function openChest(player, requestedChestId)
 
 	local rewardParts = {}
 	local grantedResources = (resolution.OpenResult and resolution.OpenResult.GrantedResources) or {}
+	QuestSignals.Record(player, "OpenChest", 1, {
+		Tier = tostring(tierName or ""),
+		ChestKind = tostring(normalizedChestData.ChestKind or ""),
+		FruitRarity = tostring(normalizedChestData.FruitRarity or ""),
+	})
+	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
+		QuestSignals.Record(player, "EarnDoubloons", grantedResources.doubloons, {
+			Source = "Chest",
+			Tier = tostring(tierName or ""),
+		})
+	end
+	for foodKey, amount in pairs(grantedResources.food or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectFood", normalizedAmount, {
+				Key = tostring(foodKey),
+				FoodKey = tostring(foodKey),
+				Source = "Chest",
+			})
+		end
+	end
+	for materialKey, amount in pairs(grantedResources.materials or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectMaterial", normalizedAmount, {
+				Key = tostring(materialKey),
+				MaterialKey = tostring(materialKey),
+				Source = "Chest",
+			})
+		end
+	end
+
 	for foodKey, amount in pairs(grantedResources.food or {}) do
 		rewardParts[#rewardParts + 1] = string.format("%dx %s", amount, Economy.Food[foodKey].DisplayName)
 	end
@@ -1158,6 +1206,16 @@ local function feedCrew(player, crewInstanceId, foodKey)
 		{ Path = { "FoodInventory" }, Value = foodInventory },
 		{ Path = { "CrewInventory" }, Value = crewInventory },
 	})
+
+	if levelUps > 0 then
+		QuestSignals.Record(player, "UpgradeCrew", levelUps, {
+			CrewInstanceId = tostring(crewInstanceId or ""),
+			CrewName = tostring(crewEntry.Name or ""),
+			Rarity = tostring(rarity or ""),
+			FoodKey = tostring(foodKey or ""),
+			Level = level,
+		})
+	end
 
 	local message = string.format(
 		"Fed %s to %s. Level %d%s.",

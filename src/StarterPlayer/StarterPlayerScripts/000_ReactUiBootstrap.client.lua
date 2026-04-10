@@ -106,6 +106,7 @@ local HUD_BUTTON_LAYOUT = {
 	Gifts = UDim2.fromOffset(0, 90),
 	Settings = UDim2.fromOffset(90, 90),
 	Rebirth = UDim2.fromOffset(0, 180),
+	Quest = UDim2.fromOffset(90, 180),
 }
 
 local HUD_BUTTON_NAMES = {
@@ -114,6 +115,7 @@ local HUD_BUTTON_NAMES = {
 	Gifts = true,
 	Settings = true,
 	Rebirth = true,
+	Quest = true,
 }
 
 local function ensureScreenGui(name, displayOrder)
@@ -1104,6 +1106,7 @@ local function ensureHud()
 	ensureHudButton(lButtons, "Gifts", true)
 	ensureHudButton(lButtons, "Settings", false)
 	ensureHudButton(lButtons, "Rebirth", false)
+	ensureHudButton(lButtons, "Quest", false)
 
 	local counters = ensureFrame(hud, "Counters")
 	local legacyCounterImages = captureLegacyCounterImages(counters)
@@ -1208,6 +1211,7 @@ local function ensureFrames()
 		"Index",
 		"SpeedUpgrade",
 		"Rebirth",
+		"Quest",
 		"Settings",
 		"Gifts",
 		"GearStore",
@@ -1370,7 +1374,11 @@ local function ensureFrames()
 
 	local limitedReward = ensureFrame(frames, "LimitedReward")
 	clearChildren(limitedReward)
+	limitedReward.Visible = false
+	limitedReward.AnchorPoint = Vector2.new(0.5, 0.5)
+	limitedReward.Position = UDim2.fromScale(0.5, 0.5)
 	limitedReward.Size = UDim2.new(0.5, 0, 0.46, 0)
+	limitedReward.ClipsDescendants = true
 	ensureLimitedRewardLayout(limitedReward)
 end
 

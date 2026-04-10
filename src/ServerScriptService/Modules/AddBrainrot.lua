@@ -59,14 +59,6 @@ local function findModelFor(variantKey, baseName)
 	return nil
 end
 
-local function dmSet(DataManager, plr, path, value)
-	if DataManager.SetValue then
-		DataManager:SetValue(plr, path, value)
-		return true
-	end
-	return false
-end
-
 function Module:AddBrainrot(plr, brainrotName, amount)
 	local DataManager = require(script.Parent.Parent.Data.DataManager)
 
@@ -109,30 +101,10 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 
 	local basePath = "Inventory." .. brainrotName
 
-	DataManager:AdjustValue(plr, basePath .. ".Equipped", 0)
-	DataManager:AdjustValue(plr, basePath .. ".Quantity", n)
-
 	local baseInfo = BrainrotsCfg[baseName] or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
-
-	dmSet(DataManager, plr, basePath .. ".Variant", variantKey)
-	dmSet(DataManager, plr, basePath .. ".BaseName", baseName)
-	dmSet(DataManager, plr, basePath .. ".Render", render)
-	dmSet(DataManager, plr, basePath .. ".GoldenRender", goldenRender)
-	dmSet(DataManager, plr, basePath .. ".DiamondRender", diamondRender)
-
-	if DataManager.SetValue then
-		if DataManager:GetValue(plr, basePath .. ".Level") == nil then
-			DataManager:SetValue(plr, basePath .. ".Level", 1)
-		end
-		if DataManager:GetValue(plr, basePath .. ".CurrentXP") == nil then
-			DataManager:SetValue(plr, basePath .. ".CurrentXP", 0)
-		end
-		DataManager:SetValue(plr, basePath .. ".Income", tonumber(info.Income) or 0)
-		DataManager:SetValue(plr, basePath .. ".Rarity", tostring(info.Rarity or "Common"))
-	end
 
 	BrainrotInstanceService.EnsureInventoryMetadata(plr, brainrotName, {
 		StorageName = brainrotName,
@@ -144,6 +116,7 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 		GoldenRender = goldenRender,
 		DiamondRender = diamondRender,
 	})
+	DataManager:AdjustValue(plr, basePath .. ".Quantity", n)
 	BrainrotInstanceService.CreateInstances(plr, brainrotName, n, {
 		BaseName = baseName,
 		Variant = variantKey,
