@@ -17,6 +17,7 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local devilFruitModules = game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("DevilFruits")
+local MoguServer = require(getNamedFolder(devilFruitModules, "Mogu"):WaitForChild("Server"):WaitForChild("MoguServer"))
 local ToriPassiveService = require(getNamedFolder(devilFruitModules, "Tori"):WaitForChild("Server"):WaitForChild("ToriPassiveService"))
 
 local CONFIG = {
@@ -118,6 +119,9 @@ killMeRemote.OnServerEvent:Connect(function(player)
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
+		if MoguServer.IsProtected(player) then
+			return
+		end
 		if ToriPassiveService.TryConsumeRebirth(player, "WaveKill") then
 			return
 		end

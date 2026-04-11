@@ -45,6 +45,17 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
+	Mogu = {
+		Burrow = {
+			Phases = {
+				Start = true,
+				Resolve = true,
+			},
+			TargetScope = "all_clients",
+			Prediction = "server_only",
+			ServerAuthoritative = true,
+		},
+	},
 }
 
 local UI_OVERRIDES_BY_KEY = {
@@ -93,6 +104,10 @@ local STRUCTURED_FRUIT_ENTRY_MODULES = {
 	Hie = {
 		Client = "HieClient",
 		Server = "HieServer",
+	},
+	Mogu = {
+		Client = "MoguClient",
+		Server = "MoguServer",
 	},
 	Tori = {
 		Client = "ToriClient",

@@ -274,8 +274,62 @@ local function buildGeneratedBomuWorldModel(fruit)
 	return model
 end
 
+local function buildGeneratedMoguWorldModel(fruit)
+	local model = Instance.new("Model")
+	model.Name = WORLD_MODEL_NAME
+
+	local body = createGeneratedPart(
+		model,
+		"Body",
+		Vector3.new(2.15, 2.15, 2.15),
+		Color3.fromRGB(125, 89, 56),
+		CFrame.new(0, 0, 0),
+		Enum.PartType.Ball,
+		Enum.Material.SmoothPlastic
+	)
+	createGeneratedPart(
+		model,
+		"Underside",
+		Vector3.new(1.55, 0.7, 1.55),
+		Color3.fromRGB(228, 212, 184),
+		CFrame.new(0, -0.45, 0),
+		Enum.PartType.Ball,
+		Enum.Material.SmoothPlastic
+	)
+	local band = createGeneratedPart(
+		model,
+		"Band",
+		Vector3.new(2.25, 0.26, 2.25),
+		Color3.fromRGB(88, 61, 38),
+		CFrame.new(0, 0.18, 0),
+		Enum.PartType.Cylinder,
+		Enum.Material.SmoothPlastic
+	)
+	band.Orientation = Vector3.new(90, 0, 0)
+
+	for index, offsetX in ipairs({ -0.38, 0, 0.38 }) do
+		local claw = createGeneratedPart(
+			model,
+			string.format("Claw%d", index),
+			Vector3.new(0.18, 0.58, 0.52),
+			Color3.fromRGB(240, 231, 214),
+			CFrame.new(offsetX, 0.92, -0.7) * CFrame.Angles(math.rad(-18), 0, 0),
+			Enum.PartType.Block,
+			Enum.Material.SmoothPlastic
+		)
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.Wedge
+		mesh.Parent = claw
+	end
+
+	model.PrimaryPart = body
+	applyFruitAttributes(model, fruit)
+	return model
+end
+
 local GENERATED_WORLD_MODEL_BUILDERS = {
 	Bomu = buildGeneratedBomuWorldModel,
+	Mogu = buildGeneratedMoguWorldModel,
 }
 
 local function getGeneratedWorldModel(fruit)
