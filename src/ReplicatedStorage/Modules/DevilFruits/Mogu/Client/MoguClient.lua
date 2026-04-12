@@ -602,6 +602,7 @@ function MoguClient:HandleEffect(targetPlayer, abilityName, payload)
 	end
 
 	if phase == "Resolve" then
+		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName)
 		self:StopBurrow(targetPlayer, payload)
 		return true
 	end

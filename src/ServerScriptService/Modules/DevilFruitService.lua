@@ -14,6 +14,11 @@ local HYDRATION_READY_TIMEOUT = 30
 local SET_PERSIST_READY_TIMEOUT = 10
 local MOGU_CLAWS_MODEL_NAME = "Claws"
 local MOGU_CLAWS_INSTANCE_NAME = "MoguClaws"
+local MOGU_CLAWS_ATTACH_TIMEOUT = 1.5
+local MOGU_LEFT_CLAW_MOTOR_NAME = "MoguLeftClawMotor"
+local MOGU_RIGHT_CLAW_MOTOR_NAME = "MoguRightClawMotor"
+local MOGU_CLAWS_ATTACH_RETRIES = 8
+local MOGU_CLAWS_ATTACH_RETRY_DELAY = 0.15
 
 local cooldownsByPlayer = {}
 local pendingPersistByPlayer = {}
@@ -159,10 +164,38 @@ local function getCharacterArm(character, side)
 	return nil
 end
 
+local function waitForCharacterArm(player, character, side, timeoutSeconds)
+	local timeoutAt = os.clock() + math.max(0, tonumber(timeoutSeconds) or 0)
+	local arm = getCharacterArm(character, side)
+	while not arm and player.Character == character and os.clock() < timeoutAt do
+		task.wait()
+		arm = getCharacterArm(character, side)
+	end
+
+	return arm
+end
+
+local function destroyMoguClawMotors(character)
+	if typeof(character) ~= "Instance" then
+		return
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("Motor6D") and (
+			descendant.Name == MOGU_LEFT_CLAW_MOTOR_NAME
+			or descendant.Name == MOGU_RIGHT_CLAW_MOTOR_NAME
+		) then
+			descendant:Destroy()
+		end
+	end
+end
+
 local function destroyMoguClaws(character)
 	if typeof(character) ~= "Instance" then
 		return
 	end
+
+	destroyMoguClawMotors(character)
 
 	local existingClaws = character:FindFirstChild(MOGU_CLAWS_INSTANCE_NAME)
 	if existingClaws then
@@ -173,7 +206,7 @@ end
 local function attachMoguClaws(player)
 	local character = player.Character
 	if not character then
-		return
+		return false
 	end
 
 	destroyMoguClaws(character)
@@ -182,14 +215,14 @@ local function attachMoguClaws(player)
 	local clawsTemplate = characterModelsFolder and characterModelsFolder:FindFirstChild(MOGU_CLAWS_MODEL_NAME)
 	if not clawsTemplate then
 		warn(string.format("[DevilFruitService] Could not find model template: %s", MOGU_CLAWS_MODEL_NAME))
-		return
+		return false
 	end
 
-	local leftArm = getCharacterArm(character, "Left")
-	local rightArm = getCharacterArm(character, "Right")
+	local leftArm = waitForCharacterArm(player, character, "Left", MOGU_CLAWS_ATTACH_TIMEOUT)
+	local rightArm = waitForCharacterArm(player, character, "Right", MOGU_CLAWS_ATTACH_TIMEOUT)
 	if not leftArm or not rightArm then
 		warn(string.format("[DevilFruitService] Could not find player arms for Mogu claws: %s", player.Name))
-		return
+		return false
 	end
 
 	local clawsModel = clawsTemplate:Clone()
@@ -203,7 +236,7 @@ local function attachMoguClaws(player)
 	if not (leftPaw and leftPaw:IsA("BasePart") and rightPaw and rightPaw:IsA("BasePart")) then
 		clawsModel:Destroy()
 		warn(string.format("[DevilFruitService] Claws model is missing LeftPaw/RightPaw for %s", player.Name))
-		return
+		return false
 	end
 
 	for _, descendant in ipairs(clawsModel:GetDescendants()) do
@@ -217,18 +250,46 @@ local function attachMoguClaws(player)
 	end
 
 	local leftMotor = Instance.new("Motor6D")
-	leftMotor.Name = "MoguLeftClawMotor"
+	leftMotor.Name = MOGU_LEFT_CLAW_MOTOR_NAME
 	leftMotor.Part0 = leftArm
 	leftMotor.Part1 = leftPaw
 	leftMotor.C0 = CFrame.new(-0.026, -0.983, -0.05) * CFrame.Angles(math.rad(-1.446), math.rad(-90), 0)
 	leftMotor.Parent = leftArm
 
 	local rightMotor = Instance.new("Motor6D")
-	rightMotor.Name = "MoguRightClawMotor"
+	rightMotor.Name = MOGU_RIGHT_CLAW_MOTOR_NAME
 	rightMotor.Part0 = rightArm
 	rightMotor.Part1 = rightPaw
 	rightMotor.C0 = CFrame.new(0.042, -1.055, -0.05) * CFrame.Angles(math.rad(0.525), math.rad(90), 0)
 	rightMotor.Parent = rightArm
+
+	return true
+end
+
+local function ensureMoguClawsAttached(player)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	task.spawn(function()
+		for _ = 1, MOGU_CLAWS_ATTACH_RETRIES do
+			if player.Character ~= character then
+				return
+			end
+
+			if getEquippedFruit(player) ~= "Mogu Mogu no Mi" then
+				destroyMoguClaws(character)
+				return
+			end
+
+			if attachMoguClaws(player) then
+				return
+			end
+
+			task.wait(MOGU_CLAWS_ATTACH_RETRY_DELAY)
+		end
+	end)
 end
 
 local function getDesiredCharacterModelAsset(fruitName)
@@ -255,7 +316,7 @@ local function applyFruitCharacterModel(player, fruitName)
 	end
 
 	if fruitName == "Mogu Mogu no Mi" then
-		attachMoguClaws(player)
+		ensureMoguClawsAttached(player)
 	else
 		destroyMoguClaws(character)
 	end
@@ -465,6 +526,14 @@ local function loadEquippedFruitFromData(player)
 	local storedValue = DataManager:TryGetValue(player, "DevilFruit.Equipped")
 	if typeof(storedValue) == "string" then
 		return normalizeStoredFruitName(storedValue)
+	end
+
+	return DevilFruitConfig.None
+end
+
+local function getInitialEquippedFruit(player)
+	if DataManager:IsReady(player) then
+		return loadEquippedFruitFromData(player)
 	end
 
 	return DevilFruitConfig.None
@@ -727,11 +796,12 @@ end
 
 local function hookPlayer(player)
 	task.spawn(function()
-		applyEquippedFruitValue(player, DevilFruitConfig.None)
+		local initialFruit = getInitialEquippedFruit(player)
+		applyEquippedFruitValue(player, initialFruit)
 		if player:GetAttribute(COOLDOWN_BYPASS_ATTRIBUTE) == nil then
 			player:SetAttribute(COOLDOWN_BYPASS_ATTRIBUTE, false)
 		end
-		applyFruitCharacterModel(player, DevilFruitConfig.None)
+		applyFruitCharacterModel(player, initialFruit)
 		hookFruitValue(player)
 		hydrateFruitFromData(player)
 

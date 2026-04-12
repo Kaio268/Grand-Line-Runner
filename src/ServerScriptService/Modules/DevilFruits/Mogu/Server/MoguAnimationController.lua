@@ -73,13 +73,40 @@ local function getStageAnimationConfig(stageKey, abilityConfig)
 	return type(animationConfig) == "table" and animationConfig[stageKey] or {}
 end
 
+local function findExactAnimation(assetName)
+	if typeof(assetName) ~= "string" or assetName == "" then
+		return nil
+	end
+
+	for _, root in ipairs(getAnimationRoots()) do
+		if typeof(root) ~= "Instance" then
+			continue
+		end
+
+		local directChild = root:FindFirstChild(assetName)
+		if directChild and directChild:IsA("Animation") then
+			return directChild
+		end
+
+		for _, descendant in ipairs(root:GetDescendants()) do
+			if descendant.Name == assetName and descendant:IsA("Animation") then
+				return descendant
+			end
+		end
+	end
+
+	return nil
+end
+
 local function scoreAnimation(animation, candidateNames, keywords)
 	local tokens = MoguAssetCatalog.CollectSearchTokens(animation, 0)
 	return MoguAssetCatalog.ScoreTokens(tokens, candidateNames, keywords)
 end
 
 local function resolveAnimationAsset(stageKey, stageConfig)
-	local cachedAnimation = resolvedAnimationByStage[stageKey]
+	local configuredAssetName = type(stageConfig) == "table" and stageConfig.AssetName or nil
+	local cacheKey = string.format("%s:%s", tostring(stageKey), tostring(configuredAssetName or ""))
+	local cachedAnimation = resolvedAnimationByStage[cacheKey]
 	if cachedAnimation == false then
 		return nil
 	end
@@ -88,7 +115,13 @@ local function resolveAnimationAsset(stageKey, stageConfig)
 		return cachedAnimation
 	end
 
-	local configuredAssetName = type(stageConfig) == "table" and stageConfig.AssetName or nil
+	local exactAnimation = findExactAnimation(configuredAssetName)
+	if exactAnimation then
+		resolvedAnimationByStage[cacheKey] = exactAnimation
+		logInfo("resolved stage=%s asset=%s mode=exact", tostring(stageKey), exactAnimation:GetFullName())
+		return exactAnimation
+	end
+
 	local candidateNames = MoguAssetCatalog.GetAnimationCandidates(stageKey, configuredAssetName)
 	local keywords = MoguAssetCatalog.GetAnimationKeywords(stageKey)
 	local bestAnimation = nil
@@ -127,7 +160,7 @@ local function resolveAnimationAsset(stageKey, stageConfig)
 		bestAnimation = firstAnimation
 	end
 
-	resolvedAnimationByStage[stageKey] = bestAnimation or false
+	resolvedAnimationByStage[cacheKey] = bestAnimation or false
 	if bestAnimation then
 		logInfo(
 			"resolved stage=%s asset=%s score=%s",
