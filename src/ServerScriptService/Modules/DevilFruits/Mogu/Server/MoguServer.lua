@@ -5,6 +5,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MoguBurrowShared = require(
 	Modules:WaitForChild("DevilFruits"):WaitForChild("Mogu"):WaitForChild("Shared"):WaitForChild("MoguBurrowShared")
 )
+local MoguAnimationController = require(script.Parent:WaitForChild("MoguAnimationController"))
 
 local MoguServer = {}
 local BURROW_PROTECTED_UNTIL_ATTRIBUTE = "MoguBurrowProtectedUntil"
@@ -43,6 +44,7 @@ local function getActiveBurrow(player)
 	end
 
 	if getSharedTimestamp() > (burrowState.EndTime + MoguBurrowShared.GetSurfaceResolveGrace(burrowState.AbilityConfig)) then
+		MoguAnimationController.StopAnimation(burrowState.AnimationState, "expired")
 		activeBurrowsByPlayer[player] = nil
 		clearProtectionState(player)
 		return nil
@@ -102,6 +104,8 @@ function MoguServer.Burrow(context)
 	local abilityConfig = context.AbilityConfig or {}
 	local activeBurrow = getActiveBurrow(player)
 	if activeBurrow then
+		MoguAnimationController.StopAnimation(activeBurrow.AnimationState, "resolve")
+		MoguAnimationController.PlayBurrowResolveAnimation(context.Character, abilityConfig)
 		activeBurrowsByPlayer[player] = nil
 		clearProtectionState(player)
 
@@ -118,6 +122,7 @@ function MoguServer.Burrow(context)
 	local endsAt = startedAt + duration
 	local direction, directionSource =
 		MoguBurrowShared.ResolveDirection(context.Humanoid, context.RootPart, context.RequestPayload)
+	local animationState = MoguAnimationController.PlayBurrowStartAnimation(context.Character, abilityConfig)
 
 	activeBurrowsByPlayer[player] = {
 		StartedAt = startedAt,
@@ -127,6 +132,7 @@ function MoguServer.Burrow(context)
 		DirectionSource = directionSource,
 		StartPosition = context.RootPart.Position,
 		AbilityConfig = abilityConfig,
+		AnimationState = animationState,
 	}
 	setProtectionState(player, endsAt + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig))
 

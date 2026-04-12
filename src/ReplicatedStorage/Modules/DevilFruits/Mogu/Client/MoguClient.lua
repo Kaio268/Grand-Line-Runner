@@ -433,8 +433,10 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 	end
 
 	local burrowState = self.burrowStates[targetPlayer]
+	local abilityConfig = getAbilityConfig()
 	self.burrowStates[targetPlayer] = nil
-	self.animationController:StopAnimation(burrowState and burrowState.AnimationState, "resolve")
+	self.animationController:StopAnimation(burrowState and burrowState.AnimationState, "resolve_transition")
+	self.animationController:PlayResolve(targetPlayer, abilityConfig)
 
 	if targetPlayer == self.player then
 		local humanoid = self.getHumanoid()
@@ -449,7 +451,7 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 			local surfacePosition = typeof(payload.ActualEndPosition) == "Vector3" and payload.ActualEndPosition or rootPart.Position
 			local resolvedSurfacePosition = select(
 				1,
-				MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, surfacePosition, getAbilityConfig())
+				MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, surfacePosition, abilityConfig)
 			)
 			pivotCharacterToRootPosition(
 				character,
@@ -467,10 +469,10 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 			and payload.ActualEndPosition
 		or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
 	local resolveDirection = (burrowState and burrowState.Direction) or payload.Direction
-	if not self.vfxController:PlayResolve(resolvePosition, resolveDirection, getAbilityConfig()) then
+	if not self.vfxController:PlayResolve(resolvePosition, resolveDirection, abilityConfig) then
 		createBurst(
 			resolvePosition,
-			(burrowState and burrowState.ResolveBurstRadius) or payload.ResolveBurstRadius or MoguBurrowShared.GetResolveBurstRadius(getAbilityConfig()),
+			(burrowState and burrowState.ResolveBurstRadius) or payload.ResolveBurstRadius or MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
 			true
 		)
 	end

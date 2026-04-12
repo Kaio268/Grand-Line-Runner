@@ -12,6 +12,8 @@ local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
 local HYDRATION_READY_TIMEOUT = 30
 local SET_PERSIST_READY_TIMEOUT = 10
+local MOGU_CLAWS_MODEL_NAME = "Claws"
+local MOGU_CLAWS_INSTANCE_NAME = "MoguClaws"
 
 local cooldownsByPlayer = {}
 local pendingPersistByPlayer = {}
@@ -129,6 +131,106 @@ local function swaptoR6G(player, newModelName)
 	character:Destroy()
 end
 
+local function getCharacterModelsFolder()
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	if not assetsFolder then
+		return nil
+	end
+
+	return assetsFolder:FindFirstChild("CharacterModels")
+end
+
+local function getCharacterArm(character, side)
+	if typeof(character) ~= "Instance" then
+		return nil
+	end
+
+	local candidateNames = side == "Left"
+		and { "Left Arm", "LeftHand", "LeftLowerArm", "LeftUpperArm" }
+		or { "Right Arm", "RightHand", "RightLowerArm", "RightUpperArm" }
+
+	for _, candidateName in ipairs(candidateNames) do
+		local arm = character:FindFirstChild(candidateName)
+		if arm and arm:IsA("BasePart") then
+			return arm
+		end
+	end
+
+	return nil
+end
+
+local function destroyMoguClaws(character)
+	if typeof(character) ~= "Instance" then
+		return
+	end
+
+	local existingClaws = character:FindFirstChild(MOGU_CLAWS_INSTANCE_NAME)
+	if existingClaws then
+		existingClaws:Destroy()
+	end
+end
+
+local function attachMoguClaws(player)
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	destroyMoguClaws(character)
+
+	local characterModelsFolder = getCharacterModelsFolder()
+	local clawsTemplate = characterModelsFolder and characterModelsFolder:FindFirstChild(MOGU_CLAWS_MODEL_NAME)
+	if not clawsTemplate then
+		warn(string.format("[DevilFruitService] Could not find model template: %s", MOGU_CLAWS_MODEL_NAME))
+		return
+	end
+
+	local leftArm = getCharacterArm(character, "Left")
+	local rightArm = getCharacterArm(character, "Right")
+	if not leftArm or not rightArm then
+		warn(string.format("[DevilFruitService] Could not find player arms for Mogu claws: %s", player.Name))
+		return
+	end
+
+	local clawsModel = clawsTemplate:Clone()
+	clawsModel.Name = MOGU_CLAWS_INSTANCE_NAME
+	clawsModel.Parent = character
+
+	local leftModel = clawsModel:FindFirstChild("Left")
+	local rightModel = clawsModel:FindFirstChild("Right")
+	local leftPaw = leftModel and leftModel:FindFirstChild("LeftPaw", true)
+	local rightPaw = rightModel and rightModel:FindFirstChild("RightPaw", true)
+	if not (leftPaw and leftPaw:IsA("BasePart") and rightPaw and rightPaw:IsA("BasePart")) then
+		clawsModel:Destroy()
+		warn(string.format("[DevilFruitService] Claws model is missing LeftPaw/RightPaw for %s", player.Name))
+		return
+	end
+
+	for _, descendant in ipairs(clawsModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = false
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.Massless = true
+		end
+	end
+
+	local leftMotor = Instance.new("Motor6D")
+	leftMotor.Name = "MoguLeftClawMotor"
+	leftMotor.Part0 = leftArm
+	leftMotor.Part1 = leftPaw
+	leftMotor.C0 = CFrame.new(-0.026, -0.983, -0.05) * CFrame.Angles(math.rad(-1.446), math.rad(-90), 0)
+	leftMotor.Parent = leftArm
+
+	local rightMotor = Instance.new("Motor6D")
+	rightMotor.Name = "MoguRightClawMotor"
+	rightMotor.Part0 = rightArm
+	rightMotor.Part1 = rightPaw
+	rightMotor.C0 = CFrame.new(0.042, -1.055, -0.05) * CFrame.Angles(math.rad(0.525), math.rad(90), 0)
+	rightMotor.Parent = rightArm
+end
+
 local function getDesiredCharacterModelAsset(fruitName)
 	if fruitName == "Gomu Gomu no Mi" then
 		return "R6G"
@@ -144,11 +246,19 @@ local function applyFruitCharacterModel(player, fruitName)
 	end
 
 	local desiredModelAsset = getDesiredCharacterModelAsset(fruitName)
-	if character:GetAttribute("CurrentModelAsset") == desiredModelAsset then
-		return
+	if character:GetAttribute("CurrentModelAsset") ~= desiredModelAsset then
+		swaptoR6G(player, desiredModelAsset)
+		character = player.Character
+		if not character then
+			return
+		end
 	end
 
-	swaptoR6G(player, desiredModelAsset)
+	if fruitName == "Mogu Mogu no Mi" then
+		attachMoguClaws(player)
+	else
+		destroyMoguClaws(character)
+	end
 end
 
 local function debugPrint(...)
@@ -518,6 +628,10 @@ end
 clearFruitRuntimeState = function(player, fruitName)
 	if fruitName == DevilFruitConfig.None then
 		return
+	end
+
+	if player.Character then
+		destroyMoguClaws(player.Character)
 	end
 
 	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)

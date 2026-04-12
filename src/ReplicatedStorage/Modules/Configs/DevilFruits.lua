@@ -234,14 +234,14 @@ local DevilFruits = {
 					ConcealTransparency = 1,
 					Animation = {
 						Start = {
-							AssetName = "Dig",
+							AssetName = "Dive",
 							FadeTime = 0.05,
 							StopFadeTime = 0.08,
 							PlaybackSpeed = 1,
 							ConcealDelay = 0.18,
 						},
 						Resolve = {
-							AssetName = "Jump",
+							AssetName = "Exit",
 							FadeTime = 0.05,
 							StopFadeTime = 0.1,
 							PlaybackSpeed = 1,
