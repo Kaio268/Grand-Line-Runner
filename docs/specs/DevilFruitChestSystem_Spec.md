@@ -77,7 +77,7 @@ FruitRarityWeights = {
 }
 ```
 
-All four tiers must exist in config even if a fruit pool is temporarily empty. The Common pool currently includes Suke Suke no Mi, and the resolver handles any future empty pools safely.
+All four tiers must exist in config even if a fruit pool is temporarily empty. The Common pool currently includes Suke Suke no Mi and Horo Horo no Mi, and the resolver handles any future empty pools safely.
 
 **Empty pool fallback**
 1. Step down to the next lower rarity

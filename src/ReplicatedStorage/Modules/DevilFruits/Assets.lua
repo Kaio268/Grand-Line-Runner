@@ -391,8 +391,96 @@ local function buildGeneratedSukeWorldModel(fruit)
 	return model
 end
 
+local function buildGeneratedHoroWorldModel(fruit)
+	local model = Instance.new("Model")
+	model.Name = WORLD_MODEL_NAME
+
+	local body = createGeneratedPart(
+		model,
+		"Body",
+		Vector3.new(2.05, 2.05, 2.05),
+		Color3.fromRGB(188, 226, 255),
+		CFrame.new(0, 0, 0),
+		Enum.PartType.Ball,
+		Enum.Material.Glass
+	)
+	body.Transparency = 0.16
+
+	local core = createGeneratedPart(
+		model,
+		"GhostCore",
+		Vector3.new(1.16, 1.16, 1.16),
+		Color3.fromRGB(247, 253, 255),
+		CFrame.new(0, 0.06, 0),
+		Enum.PartType.Ball,
+		Enum.Material.Neon
+	)
+	core.Transparency = 0.48
+
+	local face = createGeneratedPart(
+		model,
+		"GhostFace",
+		Vector3.new(1.18, 0.18, 0.16),
+		Color3.fromRGB(68, 104, 136),
+		CFrame.new(0, 0.16, -1.02),
+		Enum.PartType.Block,
+		Enum.Material.SmoothPlastic
+	)
+	face.Transparency = 0.18
+
+	for index, offsetX in ipairs({ -0.32, 0.32 }) do
+		createGeneratedPart(
+			model,
+			string.format("Eye%d", index),
+			Vector3.new(0.18, 0.18, 0.18),
+			Color3.fromRGB(255, 255, 255),
+			CFrame.new(offsetX, 0.22, -1.13),
+			Enum.PartType.Ball,
+			Enum.Material.Neon
+		)
+	end
+
+	local wisp = createGeneratedPart(
+		model,
+		"WispTail",
+		Vector3.new(0.72, 1.2, 0.72),
+		Color3.fromRGB(170, 214, 255),
+		CFrame.new(0, -1.02, 0) * CFrame.Angles(0, 0, math.rad(16)),
+		Enum.PartType.Cylinder,
+		Enum.Material.Glass
+	)
+	wisp.Transparency = 0.32
+
+	local halo = createGeneratedPart(
+		model,
+		"Halo",
+		Vector3.new(2.28, 0.12, 2.28),
+		Color3.fromRGB(235, 250, 255),
+		CFrame.new(0, 0.24, 0),
+		Enum.PartType.Cylinder,
+		Enum.Material.Neon
+	)
+	halo.Orientation = Vector3.new(90, 0, 0)
+	halo.Transparency = 0.38
+
+	createGeneratedPart(
+		model,
+		"Stem",
+		Vector3.new(0.24, 0.52, 0.24),
+		Color3.fromRGB(96, 139, 169),
+		CFrame.new(0.1, 1.14, 0) * CFrame.Angles(0, 0, math.rad(-18)),
+		Enum.PartType.Cylinder,
+		Enum.Material.SmoothPlastic
+	)
+
+	model.PrimaryPart = body
+	applyFruitAttributes(model, fruit)
+	return model
+end
+
 local GENERATED_WORLD_MODEL_BUILDERS = {
 	Bomu = buildGeneratedBomuWorldModel,
+	Horo = buildGeneratedHoroWorldModel,
 	Mogu = buildGeneratedMoguWorldModel,
 	Suke = buildGeneratedSukeWorldModel,
 }

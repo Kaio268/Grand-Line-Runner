@@ -21,6 +21,38 @@ local function logMeraAudit(level, message, ...)
 	DevilFruitLogger.Info("SERVER", formattedMessage)
 end
 
+local function shouldBypassRequestThrottle(params, player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
+	local getContext = params.GetContext
+	if typeof(getContext) ~= "function" then
+		return false
+	end
+
+	local context = getContext(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, nil)
+	if type(context) ~= "table" then
+		return false
+	end
+
+	local fruitHandler = context.FruitHandler
+	local method = fruitHandler and fruitHandler.ShouldBypassRequestThrottle
+	if typeof(method) ~= "function" then
+		return false
+	end
+
+	local ok, result = pcall(method, fruitHandler, context)
+	if not ok then
+		DevilFruitLogger.Warn(
+			"SERVER",
+			"request throttle bypass check failed fruit=%s ability=%s err=%s",
+			tostring(fruitName),
+			tostring(abilityName),
+			tostring(result)
+		)
+		return false
+	end
+
+	return result == true
+end
+
 function DevilFruitValidation.ValidateRequest(params)
 	local player = params.Player
 	local abilityName = params.AbilityName
@@ -115,13 +147,25 @@ function DevilFruitValidation.ValidateRequest(params)
 	end
 	params.Security.LogValidationStage(player, equippedFruit, abilityName, "ability_config", "continue", "ok", requestPayload)
 
-	local requestAllowed, sanitizedPayload, rejectionReason, rejectionReadyAt = params.RequestGuard.ValidateAndReserve(
+	local bypassRequestThrottle = shouldBypassRequestThrottle(
+		params,
 		player,
 		equippedFruit,
 		abilityName,
 		abilityConfig,
 		requestPayload,
 		characterState
+	)
+	local requestAllowed, sanitizedPayload, rejectionReason, rejectionReadyAt = params.RequestGuard.ValidateAndReserve(
+		player,
+		equippedFruit,
+		abilityName,
+		abilityConfig,
+		requestPayload,
+		characterState,
+		{
+			BypassRequestThrottle = bypassRequestThrottle,
+		}
 	)
 	if not requestAllowed then
 		params.Security.LogValidationStage(player, equippedFruit, abilityName, "guard_validate", "reject", rejectionReason, requestPayload)

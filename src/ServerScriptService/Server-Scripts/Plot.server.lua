@@ -1116,6 +1116,16 @@ end
 
 local function handleCharacterSpawnAtPlot(player, character, source)
 	source = tostring(source or "character_added")
+	if character:GetAttribute("HoroProjectionSkipPlotSpawn") == true then
+		spawnTrace(
+			"characterSpawnSkipped player=%s userId=%s source=%s reason=horo_projection character=%s",
+			player.Name,
+			tostring(player.UserId),
+			source,
+			formatInstancePath(character)
+		)
+		return false
+	end
 
 	local hrp = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
 	local initialPosition = hrp and hrp.Position or nil

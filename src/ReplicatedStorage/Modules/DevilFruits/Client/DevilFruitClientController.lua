@@ -1780,13 +1780,29 @@ local function initializeDevilFruitClient()
 		end
 
 		if not isLocallyReady(abilityName) then
-			logDevilFruitClient(
-				"bind ignored key=%s fruit=%s ability=%s reason=local_cooldown",
-				tostring(input.KeyCode.Name),
-				tostring(fruitName),
-				tostring(abilityName)
+			local _, canActivateOnLocalCooldown = fruitModuleLoader:CallControllerMethod(
+				fruitName,
+				"CanActivateOnLocalCooldown",
+				abilityName,
+				abilityEntry,
+				input
 			)
-			return
+			if canActivateOnLocalCooldown == true then
+				logDevilFruitClient(
+					"bind bypass local cooldown key=%s fruit=%s ability=%s",
+					tostring(input.KeyCode.Name),
+					tostring(fruitName),
+					tostring(abilityName)
+				)
+			else
+				logDevilFruitClient(
+					"bind ignored key=%s fruit=%s ability=%s reason=local_cooldown",
+					tostring(input.KeyCode.Name),
+					tostring(fruitName),
+					tostring(abilityName)
+				)
+				return
+			end
 		end
 
 		local requestStartedAt = os.clock()

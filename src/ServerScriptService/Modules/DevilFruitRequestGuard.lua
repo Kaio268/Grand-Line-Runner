@@ -357,10 +357,16 @@ function DevilFruitRequestGuard.Preflight(player, abilityName, requestPayload)
 	return true, nil, 0
 end
 
-function DevilFruitRequestGuard.ValidateAndReserve(player, fruitName, abilityName, abilityConfig, requestPayload, characterState)
-	local requestAllowed, nextAllowedAt = reservePerAbilityThrottle(player, fruitName, abilityName, abilityConfig)
-	if not requestAllowed then
-		return false, nil, "Throttled", nextAllowedAt
+function DevilFruitRequestGuard.ValidateAndReserve(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, options)
+	local bypassRequestThrottle = type(options) == "table" and options.BypassRequestThrottle == true
+	local nextAllowedAt = 0
+	if not bypassRequestThrottle then
+		local requestAllowed, reservedUntil = reservePerAbilityThrottle(player, fruitName, abilityName, abilityConfig)
+		if not requestAllowed then
+			return false, nil, "Throttled", reservedUntil
+		end
+
+		nextAllowedAt = reservedUntil
 	end
 
 	local schema = type(abilityConfig) == "table" and abilityConfig.RequestPayloadSchema or nil

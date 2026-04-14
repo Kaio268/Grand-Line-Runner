@@ -8,6 +8,9 @@ local DECREASE_PART = Workspace:WaitForChild("DecreaseSpeed")
 local FORCED_SPEED = 35
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 local DEBUG_TRACE = RunService:IsStudio()
+local HORO_GHOST_ATTRIBUTE = "HoroProjectionGhost"
+local HORO_BODY_ATTRIBUTE = "HoroProjectionBody"
+local HORO_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -31,6 +34,18 @@ local function zoneTrace(message, ...)
 	end
 
 	print(string.format("[ZONE TRACE] " .. message, ...))
+end
+
+local function setAttributeIfChanged(instance, attributeName, value)
+	if not instance then
+		return
+	end
+
+	if instance:GetAttribute(attributeName) == value then
+		return
+	end
+
+	instance:SetAttribute(attributeName, value)
 end
 
 local function logZoneResolution(context)
@@ -106,12 +121,32 @@ local function hookCharacter(player, character)
 		return base + speedObj.Value
 	end
 
-	local function getDesiredSpeed()
+	local function isProjectedBody()
+		return character:GetAttribute(HORO_BODY_ATTRIBUTE) == true
+	end
+
+	local function getNonProjectionDesiredSpeed()
 		return getUnboostedSpeed() * getDevilFruitSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
+	end
+
+	local function getDesiredSpeed()
+		if character:GetAttribute(HORO_GHOST_ATTRIBUTE) == true and player:GetAttribute("HoroProjectionActive") == true then
+			local ghostSpeed = player:GetAttribute("HoroProjectionGhostSpeed")
+			local carrySpeed = player:GetAttribute("HoroProjectionCarrySpeed")
+			local carrying = player:GetAttribute("HoroProjectionCarryingReward") == true
+			local horoSpeed = if carrying then carrySpeed else ghostSpeed
+			if typeof(horoSpeed) == "number" and horoSpeed > 0 then
+				return horoSpeed
+			end
+		end
+
+		return getNonProjectionDesiredSpeed()
 	end
 
 	local function apply()
 		if updating then return end
+		setAttributeIfChanged(player, HORO_SOURCE_SPEED_ATTRIBUTE, getNonProjectionDesiredSpeed())
+		if isProjectedBody() then return end
 		updating = true
 		humanoid.WalkSpeed = getDesiredSpeed()
 		updating = false
@@ -169,8 +204,29 @@ local function hookCharacter(player, character)
 		apply()
 	end)
 
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HoroProjectionGhostSpeed"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HoroProjectionCarrySpeed"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HoroProjectionActive"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal("HoroProjectionCarryingReward"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = character:GetAttributeChangedSignal(HORO_BODY_ATTRIBUTE):Connect(function()
+		apply()
+	end)
+
 	conns[#conns + 1] = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
 		if updating then return end
+		if isProjectedBody() then return end
 
 		if inDecreaseZone then
 			apply()

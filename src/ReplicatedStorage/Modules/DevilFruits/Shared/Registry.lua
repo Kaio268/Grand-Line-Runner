@@ -66,6 +66,19 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
+	Horo = {
+		GhostProjection = {
+			Phases = {
+				Start = true,
+				Resolve = true,
+				Interrupted = true,
+				Rejected = true,
+			},
+			TargetScope = "all_clients",
+			Prediction = "server_only",
+			ServerAuthoritative = true,
+		},
+	},
 }
 
 local UI_OVERRIDES_BY_KEY = {
@@ -88,6 +101,11 @@ local UI_OVERRIDES_BY_KEY = {
 	Suke = {
 		Fade = {
 			DisplayName = "Fade",
+		},
+	},
+	Horo = {
+		GhostProjection = {
+			DisplayName = "Ghost Projection",
 		},
 	},
 }
@@ -127,6 +145,10 @@ local STRUCTURED_FRUIT_ENTRY_MODULES = {
 	Suke = {
 		Client = "SukeClient",
 		Server = "SukeServer",
+	},
+	Horo = {
+		Client = "HoroClient",
+		Server = "HoroServer",
 	},
 	Tori = {
 		Client = "ToriClient",

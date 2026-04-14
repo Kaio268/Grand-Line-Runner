@@ -442,6 +442,32 @@ local function castStep(origin, displacement, radius, params, options)
 	return Workspace:Raycast(origin, displacement, params)
 end
 
+local function getProjectedBodyPlayer(character)
+	if not character or character:GetAttribute("HoroProjectionBody") ~= true then
+		return nil
+	end
+
+	local ownerUserId = tonumber(character:GetAttribute("HoroProjectionOwnerUserId") or character:GetAttribute("OwnerUserId"))
+	if not ownerUserId then
+		return nil
+	end
+
+	local player = Players:GetPlayerByUserId(ownerUserId)
+	if not player or player:GetAttribute("HoroProjectionActive") ~= true then
+		return nil
+	end
+
+	local projectionId = character:GetAttribute("ProjectionId")
+	if typeof(projectionId) == "string"
+		and projectionId ~= ""
+		and player:GetAttribute("HoroProjectionId") ~= projectionId
+	then
+		return nil
+	end
+
+	return player
+end
+
 local function resolvePlayer(options, hitPart)
 	local diagnostics = {
 		HitInstance = hitPart,
@@ -460,11 +486,17 @@ local function resolvePlayer(options, hitPart)
 	end
 
 	local targetPlayer = Players:GetPlayerFromCharacter(targetCharacter)
+	local projectedBodyPlayer = nil
+	if not targetPlayer then
+		projectedBodyPlayer = getProjectedBodyPlayer(targetCharacter)
+		targetPlayer = projectedBodyPlayer
+	end
 	diagnostics.TargetPlayer = targetPlayer
 	if not targetPlayer then
 		diagnostics.Reason = HitResolver.Reasons.NoPlayerCharacter
 		return nil, diagnostics
 	end
+	diagnostics.ProjectedBody = projectedBodyPlayer ~= nil
 
 	diagnostics.MatchSource = getPlayerMatchSource(hitPart, targetCharacter, nil)
 	if targetPlayer == options.AttackerPlayer then
@@ -526,8 +558,9 @@ local function resolveNpc(options, hitPart)
 	end
 
 	local targetPlayer = Players:GetPlayerFromCharacter(targetCharacter)
+	local projectedBodyPlayer = getProjectedBodyPlayer(targetCharacter)
 	diagnostics.TargetPlayer = targetPlayer
-	if targetPlayer then
+	if targetPlayer or projectedBodyPlayer then
 		diagnostics.Reason = HitResolver.Reasons.PlayerCharacter
 		diagnostics.MatchSource = getPlayerMatchSource(hitPart, targetCharacter, nil)
 		return nil, diagnostics

@@ -18,6 +18,7 @@ local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("
 local AffectableRegistry = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local devilFruitModules = game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("DevilFruits")
 local MoguServer = require(getNamedFolder(devilFruitModules, "Mogu"):WaitForChild("Server"):WaitForChild("MoguServer"))
+local HoroServer = require(getNamedFolder(devilFruitModules, "Horo"):WaitForChild("Server"):WaitForChild("HoroServer"))
 local ToriPassiveService = require(getNamedFolder(devilFruitModules, "Tori"):WaitForChild("Server"):WaitForChild("ToriPassiveService"))
 
 local CONFIG = {
@@ -119,6 +120,10 @@ killMeRemote.OnServerEvent:Connect(function(player)
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
+		if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
+			HoroServer.InterruptActiveProjection(player, "wave_touch")
+			return
+		end
 		if MoguServer.IsProtected(player) then
 			return
 		end

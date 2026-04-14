@@ -30,6 +30,7 @@ local CARRY_TOOL_NAME = "GrandLineRushMajorReward"
 local CHEST_TIER_ORDER = { "Wooden", "Iron", "Gold", "Legendary" }
 local FORCED_DROP_PROTECTION_ATTRIBUTE = "GrandLineRushCarryDropProtectedUntil"
 local FORCED_DROP_PROTECTION_DURATION = 0.9
+local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
@@ -275,6 +276,7 @@ local function clearCarryTool(player)
 	player:SetAttribute("CarriedMajorRewardType", nil)
 	player:SetAttribute("CarriedMajorRewardDisplayName", nil)
 	player:SetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE, nil)
+	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 end
 
 local function getRewardToolDisplay(reward)
@@ -918,14 +920,15 @@ local function claimWorldChest(player, rewardData)
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
-local function canForceCarryDrop(player, runtime)
+local function canForceCarryDrop(player, runtime, options)
 	runtime = runtime or getRuntime(player)
 	if runtime.CarriedReward == nil then
 		return false, "no_carried_reward"
 	end
 
+	local settings = if typeof(options) == "table" then options else {}
 	local protectedUntil = player:GetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE)
-	if typeof(protectedUntil) == "number" and protectedUntil > os.clock() then
+	if settings.IgnoreProtection ~= true and typeof(protectedUntil) == "number" and protectedUntil > os.clock() then
 		return false, "carry_drop_protected"
 	end
 
@@ -934,12 +937,12 @@ end
 
 local function dropCarriedReward(player, options)
 	local runtime = getRuntime(player)
-	local canDrop, reason = canForceCarryDrop(player, runtime)
+	options = if typeof(options) == "table" then options else {}
+	local canDrop, reason = canForceCarryDrop(player, runtime, options)
 	if not canDrop then
 		return resolveActionResponse(player, false, nil, reason)
 	end
 
-	options = if typeof(options) == "table" then options else {}
 	local droppedReward = cloneRewardData(runtime.CarriedReward)
 	if not droppedReward then
 		return resolveActionResponse(player, false, nil, "missing_carried_reward")
@@ -1253,6 +1256,10 @@ local function bindCharacter(player, character)
 	if deathConnections[player] then
 		deathConnections[player]:Disconnect()
 		deathConnections[player] = nil
+	end
+
+	if character:GetAttribute("HoroProjectionGhost") == true then
+		return
 	end
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)

@@ -488,6 +488,7 @@ else
 end
 
 local active = {}
+ctx.Active = active
 
 local function expireBrainrot(model, st)
 	if active[model] ~= st then

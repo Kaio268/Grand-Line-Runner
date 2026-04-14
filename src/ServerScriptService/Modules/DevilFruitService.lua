@@ -956,6 +956,10 @@ local function fireAbilityActivated(player, fruitName, abilityName, readyAt, pay
 	replication:BroadcastEffect(player, fruitName, abilityName, payload or {})
 end
 
+local function fireAbilityActivatedStateOnly(player, fruitName, abilityName, readyAt, payload)
+	replication:FireActivated(player, fruitName, abilityName, readyAt, payload or {})
+end
+
 local function executeAbility(player, fruitName, abilityName, abilityConfig, requestPayload, characterState, requestMetadata)
 	return DevilFruitAbilityRunner.Execute({
 		Player = player,
@@ -974,6 +978,7 @@ local function executeAbility(player, fruitName, abilityName, abilityConfig, req
 		ShouldStartCooldownOnResolve = shouldStartCooldownOnResolve,
 		FireDenied = fireAbilityDenied,
 		FireActivated = fireAbilityActivated,
+		FireActivatedStateOnly = fireAbilityActivatedStateOnly,
 	})
 end
 
@@ -1031,6 +1036,7 @@ local function handleAbilityRequest(player, abilityName, requestPayload)
 		Security = DevilFruitSecurity,
 		NoneFruitName = DevilFruitConfig.None,
 		GetEquippedFruit = getEquippedFruit,
+		GetContext = getCharacterContext,
 		GetAliveCharacterState = getAliveCharacterState,
 		GetAbilityConfig = function(fruitName, resolvedAbilityName)
 			local abilityEntry = Registry.GetAbility(fruitName, resolvedAbilityName)

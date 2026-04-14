@@ -3,6 +3,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Interaction = {}
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local activeContext = nil
+local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 
 local function forEachPart(model, fn)
 	for _, d in ipairs(model:GetDescendants()) do
@@ -38,6 +40,18 @@ local function anchorAll(model)
 		p.AssemblyLinearVelocity = Vector3.zero
 		p.AssemblyAngularVelocity = Vector3.zero
 	end)
+end
+
+local function findModelPart(model)
+	if not model or not model:IsA("Model") then
+		return nil
+	end
+
+	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
+		return model.PrimaryPart
+	end
+
+	return model:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function getTextTarget(root, name)
@@ -341,10 +355,27 @@ local function computePivotBottomOnPoint(model, point, rotOnly)
 	return desiredBoxCF * offset:Inverse()
 end
 
-local function settleToGroundThenAnchor(model)
+local function settleToGroundThenAnchor(model, shouldContinue)
+	local function canContinue()
+		if typeof(shouldContinue) ~= "function" then
+			return true
+		end
+
+		local ok, result = pcall(shouldContinue)
+		return ok and result ~= false
+	end
+
+	if not canContinue() then
+		return
+	end
+
 	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
 	local t0 = os.clock()
 	while model.Parent and os.clock() - t0 < 2.5 do
+		if not canContinue() then
+			return
+		end
+
 		task.wait(0.08)
 		if not primary or not primary.Parent then
 			primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
@@ -360,7 +391,7 @@ local function settleToGroundThenAnchor(model)
 			end
 		end
 	end
-	if not model.Parent then
+	if not model.Parent or not canContinue() then
 		return
 	end
 	local rot = model:GetPivot()
@@ -376,7 +407,24 @@ local function settleToGroundThenAnchor(model)
 	local ground = getGroundPosition(model:GetPivot().Position, { model })
 	local pivotTarget = computePivotBottomOnPoint(model, ground, rotOnly)
 	model:PivotTo(pivotTarget)
+	if not canContinue() then
+		return
+	end
 	anchorAll(model)
+end
+
+local function scheduleDroppedBrainrotSettle(ctx, model, st)
+	if not ctx or not model or not st then
+		return
+	end
+
+	st.DropSettleToken = (tonumber(st.DropSettleToken) or 0) + 1
+	local settleToken = st.DropSettleToken
+	task.spawn(function()
+		settleToGroundThenAnchor(model, function()
+			return model.Parent == ctx.DroppedFolder and st.Held ~= true and st.DropSettleToken == settleToken
+		end)
+	end)
 end
 
 local function isRagdollState(state)
@@ -398,13 +446,19 @@ function Interaction.NewContext(map)
 	droppedFolder.Name = "Dropped"
 	droppedFolder.Parent = worldFolder
 
-	return {
+	local context = {
 		CarriedFolder = carriedFolder,
 		DroppedFolder = droppedFolder,
 		HeldByUserId = {},
 		DeathConnByUserId = {},
 		RagdollConnByUserId = {},
 	}
+	activeContext = context
+	return context
+end
+
+function Interaction.GetActiveContext()
+	return activeContext
 end
 
 local function disconnectDeath(ctx, userId)
@@ -427,7 +481,7 @@ local function disconnectRagdoll(ctx, userId)
 	end
 end
 
-local function dropHeldBrainrot(ctx, player, model, st)
+local function dropHeldBrainrot(ctx, player, model, st, dropPosition)
 	if not model or not model.Parent then
 		return
 	end
@@ -438,6 +492,7 @@ local function dropHeldBrainrot(ctx, player, model, st)
 	local userId = player.UserId
 	player:SetAttribute("CarriedBrainrot", nil)
 	player:SetAttribute("CarriedBrainrotImage", nil)
+	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	ctx.HeldByUserId[userId] = nil
 	disconnectDeath(ctx, userId)
@@ -454,7 +509,9 @@ local function dropHeldBrainrot(ctx, player, model, st)
 
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	local dropPos = hrp and hrp.Position or model:GetPivot().Position
+	local dropPos = if typeof(dropPosition) == "Vector3"
+		then dropPosition
+		else (hrp and hrp.Position or model:GetPivot().Position)
 
 	local rot = model:GetPivot()
 	local lv = rot.LookVector
@@ -471,14 +528,11 @@ local function dropHeldBrainrot(ctx, player, model, st)
 	local pivotStart = computePivotBottomOnPoint(model, startFallPos, rotOnly2)
 	model:PivotTo(pivotStart)
 
-	setDropPhysics(model)
-	task.spawn(function()
-		settleToGroundThenAnchor(model)
-	end)
-
 	st.Held = false
 	st.HolderUserId = nil
 	st.LastUpdate = os.clock()
+	setDropPhysics(model)
+	scheduleDroppedBrainrotSettle(ctx, model, st)
 
 	if st.Prompt then
 		st.Prompt.Enabled = true
@@ -487,7 +541,183 @@ local function dropHeldBrainrot(ctx, player, model, st)
 	Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), false)
 end
 
+local function carryBrainrotOnPart(ctx, player, model, st, carrierPart)
+	if not ctx or not player or not model or not model.Parent or not st or st.Held then
+		return false
+	end
+	if ctx.HeldByUserId[player.UserId] then
+		return false
+	end
+	if player:GetAttribute("CarriedMajorRewardType") ~= nil then
+		return false
+	end
+
+	local char = player.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local attachPart = carrierPart
+	if not attachPart or not attachPart:IsA("BasePart") then
+		attachPart = char and char:FindFirstChild("Head")
+	end
+	if not attachPart or not hum or hum.Health <= 0 then
+		return false
+	end
+
+	local primary = findModelPart(model)
+	if not primary then
+		return false
+	end
+
+	if st.Prompt then
+		st.Prompt.Enabled = false
+	end
+
+	st.DropSettleToken = (tonumber(st.DropSettleToken) or 0) + 1
+	if st.Weld then
+		pcall(function()
+			st.Weld:Destroy()
+		end)
+	end
+	st.Weld = nil
+	setCarryPhysics(model, true)
+	model.Parent = ctx.CarriedFolder
+
+	local rotOnly = computeHeadRotOnly(attachPart)
+	local top = attachPart.Position + Vector3.yAxis * (attachPart.Size.Y / 2)
+	local pivotTarget = computePivotBottomOnPoint(model, top, rotOnly)
+	model:PivotTo(pivotTarget)
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = primary
+	weld.Part1 = attachPart
+	weld.Parent = primary
+	st.Weld = weld
+
+	st.Held = true
+	st.HolderUserId = player.UserId
+	st.LastUpdate = os.clock()
+	Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
+
+	ctx.HeldByUserId[player.UserId] = model
+	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
+	player:SetAttribute("CarriedBrainrot", tostring(model.Name))
+
+	local render = ""
+	if st and st.Entry and st.Entry.Info and st.Entry.Info.Render then
+		render = tostring(st.Entry.Info.Render)
+	end
+
+	if render ~= "" then
+		player:SetAttribute("CarriedBrainrotImage", render)
+	else
+		player:SetAttribute("CarriedBrainrotImage", nil)
+	end
+
+	disconnectDeath(ctx, player.UserId)
+	disconnectRagdoll(ctx, player.UserId)
+
+	ctx.DeathConnByUserId[player.UserId] = hum.Died:Connect(function()
+		local heldModel = ctx.HeldByUserId[player.UserId]
+		if not heldModel or not heldModel.Parent then
+			return
+		end
+		if st.Model ~= heldModel then
+			return
+		end
+		dropHeldBrainrot(ctx, player, heldModel, st)
+	end)
+
+	ctx.RagdollConnByUserId[player.UserId] = hum.StateChanged:Connect(function(_, newState)
+		if not isRagdollState(newState) then
+			return
+		end
+
+		local heldModel = ctx.HeldByUserId[player.UserId]
+		if not heldModel or not heldModel.Parent then
+			return
+		end
+		if st.Model ~= heldModel then
+			return
+		end
+
+		dropHeldBrainrot(ctx, player, heldModel, st)
+	end)
+
+	return true
+end
+
+function Interaction.HasHeld(ctx, player)
+	ctx = ctx or activeContext
+	return ctx ~= nil and player ~= nil and ctx.HeldByUserId[player.UserId] ~= nil
+end
+
+function Interaction.TryCarryNearPosition(ctx, player, active, worldPosition, carrierPart, maxDistance)
+	ctx = ctx or activeContext
+	active = active or (ctx and ctx.Active)
+	if not ctx or not active or not player or typeof(worldPosition) ~= "Vector3" then
+		return false, "missing_context"
+	end
+
+	local searchRadius = math.max(0, tonumber(maxDistance) or 0)
+	if searchRadius <= 0 then
+		return false, "invalid_radius"
+	end
+
+	local bestModel = nil
+	local bestState = nil
+	local bestDistance = searchRadius
+	for model, st in pairs(active) do
+		if model and model.Parent and st and not st.Held then
+			local primary = findModelPart(model)
+			if primary then
+				local distance = (primary.Position - worldPosition).Magnitude
+				if distance <= bestDistance then
+					bestDistance = distance
+					bestModel = model
+					bestState = st
+				end
+			end
+		end
+	end
+
+	if not bestModel or not bestState then
+		return false, "no_brainrot_in_range"
+	end
+
+	if carryBrainrotOnPart(ctx, player, bestModel, bestState, carrierPart) then
+		return true, {
+			Kind = "Brainrot",
+			Name = tostring(bestModel.Name),
+			Distance = bestDistance,
+		}
+	end
+
+	return false, "carry_failed"
+end
+
+function Interaction.DropHeldAtPosition(ctx, player, active, dropPosition)
+	ctx = ctx or activeContext
+	active = active or (ctx and ctx.Active)
+	if not ctx or not active or not player then
+		return false, "missing_context"
+	end
+
+	local model = ctx.HeldByUserId[player.UserId]
+	if not model or not model.Parent then
+		ctx.HeldByUserId[player.UserId] = nil
+		return false, "no_held_brainrot"
+	end
+
+	local st = active[model]
+	if not st then
+		return false, "missing_state"
+	end
+
+	dropHeldBrainrot(ctx, player, model, st, dropPosition)
+	return true
+end
+
 function Interaction.CollectHeld(ctx, player, active)
+	active = active or (ctx and ctx.Active)
 	local userId = player.UserId
 	local model = ctx.HeldByUserId[userId]
 	if not model or not model.Parent then
@@ -498,6 +728,7 @@ function Interaction.CollectHeld(ctx, player, active)
 	end
 	player:SetAttribute("CarriedBrainrot", nil)
 	player:SetAttribute("CarriedBrainrotImage", nil)
+	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	local st = active[model]
 	local brainrotName = model.Name
@@ -564,80 +795,7 @@ function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
 			return
 		end
 
-		local char = player.Character
-		if not char then
-			return
-		end
-		local head = char:FindFirstChild("Head")
-		local hum = char:FindFirstChildOfClass("Humanoid")
-		if not head or not hum or hum.Health <= 0 then
-			return
-		end
-
-		prompt.Enabled = false
-
-		setCarryPhysics(model, true)
-		model.Parent = ctx.CarriedFolder
-
-		local rotOnly = computeHeadRotOnly(head)
-		local top = head.Position + Vector3.yAxis * (head.Size.Y / 2)
-		local pivotTarget = computePivotBottomOnPoint(model, top, rotOnly)
-		model:PivotTo(pivotTarget)
-
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = primary
-		weld.Part1 = head
-		weld.Parent = primary
-		st.Weld = weld
-
-		st.Held = true
-		st.HolderUserId = player.UserId
-		st.LastUpdate = os.clock()
-		Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
-
-		ctx.HeldByUserId[player.UserId] = model
-		player:SetAttribute("CarriedBrainrot", tostring(model.Name))
-
-		local render = ""
-		if st and st.Entry and st.Entry.Info and st.Entry.Info.Render then
-			render = tostring(st.Entry.Info.Render)
-		end
-
-		if render ~= "" then
-			player:SetAttribute("CarriedBrainrotImage", render)
-		else
-			player:SetAttribute("CarriedBrainrotImage", nil)
-		end
-
-		disconnectDeath(ctx, player.UserId)
-		disconnectRagdoll(ctx, player.UserId)
-
-		ctx.DeathConnByUserId[player.UserId] = hum.Died:Connect(function()
-			local m = ctx.HeldByUserId[player.UserId]
-			if not m or not m.Parent then
-				return
-			end
-			if st.Model ~= m then
-				return
-			end
-			dropHeldBrainrot(ctx, player, m, st)
-		end)
-
-		ctx.RagdollConnByUserId[player.UserId] = hum.StateChanged:Connect(function(_, newState)
-			if not isRagdollState(newState) then
-				return
-			end
-
-			local m = ctx.HeldByUserId[player.UserId]
-			if not m or not m.Parent then
-				return
-			end
-			if st.Model ~= m then
-				return
-			end
-
-			dropHeldBrainrot(ctx, player, m, st)
-		end)
+		carryBrainrotOnPart(ctx, player, model, st)
 	end)
 
 	return prompt
@@ -668,6 +826,7 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 	m.Parent = ctx.DroppedFolder
 	plr:SetAttribute("CarriedBrainrot", nil)
 	plr:SetAttribute("CarriedBrainrotImage", nil)
+	plr:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	local pos = m:GetPivot().Position + Vector3.new(0, 6, 0)
 	local rot = m:GetPivot()
@@ -683,14 +842,11 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 	local pivotStart = computePivotBottomOnPoint(m, pos, rotOnly)
 	m:PivotTo(pivotStart)
 
-	setDropPhysics(m)
-	task.spawn(function()
-		settleToGroundThenAnchor(m)
-	end)
-
 	st.Held = false
 	st.HolderUserId = nil
 	st.LastUpdate = os.clock()
+	setDropPhysics(m)
+	scheduleDroppedBrainrotSettle(ctx, m, st)
 
 	if st.Prompt then
 		st.Prompt.Enabled = true

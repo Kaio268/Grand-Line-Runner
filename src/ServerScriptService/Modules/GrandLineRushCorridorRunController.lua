@@ -30,6 +30,8 @@ local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)
 local ERROR_COLOR = Color3.fromRGB(255, 104, 104)
 local INFO_COLOR = Color3.fromRGB(119, 217, 255)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
+local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
+local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -77,6 +79,50 @@ local function runTrace(message, ...)
 	end
 
 	print(string.format("[RUN TRACE] " .. message, ...))
+end
+
+local function horoCarryTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[HORO CARRY TRACE] " .. tostring(message), ...))
+end
+
+local function getPlayerCarrySummary(player)
+	if not player then
+		return "player=<nil>"
+	end
+
+	return string.format(
+		"attrMajor=%s attrMajorName=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		tostring(player:GetAttribute("CarriedMajorRewardType")),
+		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
+		tostring(player:GetAttribute("CarriedBrainrot")),
+		tostring(player:GetAttribute("HoroProjectionActive")),
+		tostring(player:GetAttribute("HoroProjectionId")),
+		tostring(player:GetAttribute("HoroProjectionCarryingReward"))
+	)
+end
+
+local function getRunRewardSummary(player)
+	if not player then
+		return "runtimePlayer=<nil>"
+	end
+
+	local state = SliceService.GetState(player)
+	local runState = state and state.Run or {}
+	local carriedReward = runState.CarriedReward
+	local spawnedReward = runState.SpawnedReward
+	return string.format(
+		"inRun=%s carried=%s carriedType=%s spawned=%s spawnedType=%s spawnedDrop=%s",
+		tostring(runState.InRun),
+		tostring(carriedReward ~= nil),
+		tostring(carriedReward and carriedReward.RewardType or nil),
+		tostring(spawnedReward ~= nil),
+		tostring(spawnedReward and spawnedReward.RewardType or nil),
+		formatVector3(spawnedReward and spawnedReward.WorldDropPosition or nil)
+	)
 end
 
 local function sendPopup(player, text, color, isError)
@@ -636,14 +682,34 @@ local function getDroppedRewardPivot(rewardObject, worldPosition, ignoreInstance
 	local rotation = pivot - pivot.Position
 	local desiredBoxCF = CFrame.new(surfacePosition + Vector3.new(0, boxSize.Y / 2, 0)) * rotation
 
-	return desiredBoxCF * offset:Inverse()
+	return desiredBoxCF * offset:Inverse(), {
+		CastOrigin = castOrigin,
+		SurfacePosition = surfacePosition,
+		HitInstance = result and result.Instance or nil,
+		UsedFallback = result == nil,
+		SnapMode = if result then "raycast_surface" else "fallback_requested_position",
+	}
 end
 
 local function positionRewardObject(player, rewardObject, rewardState, startPart, endPart)
 	if rewardState and typeof(rewardState.WorldDropPosition) == "Vector3" then
 		local character = player.Character
 		local ignoreInstances = character and { character } or nil
-		setObjectCFrame(rewardObject, getDroppedRewardPivot(rewardObject, rewardState.WorldDropPosition, ignoreInstances))
+		local pivot, dropInfo = getDroppedRewardPivot(rewardObject, rewardState.WorldDropPosition, ignoreInstances)
+		setObjectCFrame(rewardObject, pivot)
+		horoCarryTrace(
+			"dropResolve player=%s reward=%s rewardType=%s requestedDrop=%s finalPivot=%s snapMode=%s fallbackGroundPlacement=%s hitInstance=%s carryAttrs={%s} runtime={%s}",
+			player and player.Name or "<nil>",
+			formatInstancePath(rewardObject),
+			tostring(rewardState and rewardState.RewardType),
+			formatVector3(rewardState.WorldDropPosition),
+			formatVector3(getObjectPivot(rewardObject).Position),
+			tostring(dropInfo and dropInfo.SnapMode),
+			tostring(dropInfo and dropInfo.UsedFallback == true),
+			formatInstancePath(dropInfo and dropInfo.HitInstance or nil),
+			getPlayerCarrySummary(player),
+			getRunRewardSummary(player)
+		)
 		return nil
 	end
 
@@ -689,6 +755,47 @@ local function clearCarryWeld(rootPart)
 	end
 end
 
+local function getActiveHoroCarrierPart(player)
+	if not player or player.Parent ~= Players then
+		return nil
+	end
+	if player:GetAttribute("HoroProjectionActive") ~= true then
+		return nil
+	end
+
+	local projectionId = player:GetAttribute("HoroProjectionId")
+	if typeof(projectionId) ~= "string" or projectionId == "" then
+		return nil
+	end
+
+	local effectsFolder = Workspace:FindFirstChild(HORO_EFFECTS_FOLDER_NAME)
+	local ghostsFolder = effectsFolder and effectsFolder:FindFirstChild(HORO_GHOSTS_FOLDER_NAME)
+	if not ghostsFolder then
+		return nil
+	end
+
+	for _, ghostModel in ipairs(ghostsFolder:GetChildren()) do
+		if ghostModel:IsA("Model")
+			and ghostModel:GetAttribute("ProjectionId") == projectionId
+			and tonumber(ghostModel:GetAttribute("OwnerUserId")) == player.UserId
+		then
+			for _, partName in ipairs({ "Head", "UpperTorso", "Torso", "HumanoidRootPart" }) do
+				local part = ghostModel:FindFirstChild(partName, true)
+				if part and part:IsA("BasePart") and part.Parent then
+					return part
+				end
+			end
+
+			local fallbackPart = ghostModel.PrimaryPart or ghostModel:FindFirstChildWhichIsA("BasePart", true)
+			if fallbackPart and fallbackPart:IsA("BasePart") and fallbackPart.Parent then
+				return fallbackPart
+			end
+		end
+	end
+
+	return nil
+end
+
 local function computeHeadRotOnly(head)
 	local lookVector = head.CFrame.LookVector
 	local direction = Vector3.new(lookVector.X, 0, lookVector.Z)
@@ -700,6 +807,14 @@ local function computeHeadRotOnly(head)
 
 	local rotation = CFrame.lookAt(Vector3.zero, direction, Vector3.yAxis)
 	return rotation - rotation.Position
+end
+
+local function computeCarrierRotOnly(carrierPart)
+	if not carrierPart or not carrierPart:IsA("BasePart") then
+		return CFrame.new()
+	end
+
+	return computeHeadRotOnly(carrierPart)
 end
 
 local function computePivotBottomOnPoint(object, point, rotOnly)
@@ -845,12 +960,41 @@ local function applySpawnedRewardState(player, rewardObject, rootPart, rewardSta
 	end
 end
 
-local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFolder)
+local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFolder, carrierPartOverride)
 	local character = player.Character
 	local head = character and character:FindFirstChild("Head")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not head or not humanoid or humanoid.Health <= 0 then
+	local requestedCarrier = carrierPartOverride
+	local carrierPart = carrierPartOverride
+	local ghostCarrierPart = nil
+	if not carrierPart or not carrierPart:IsA("BasePart") or not carrierPart.Parent then
+		ghostCarrierPart = getActiveHoroCarrierPart(player)
+		carrierPart = ghostCarrierPart
+	end
+	if not carrierPart or not carrierPart:IsA("BasePart") then
+		carrierPart = head
+	end
+	if not carrierPart or not humanoid or humanoid.Health <= 0 then
+		horoCarryTrace(
+			"attachCarry failed player=%s reward=%s reason=carrier_or_humanoid_missing requestedCarrier=%s ghostCarrier=%s head=%s carryAttrs={%s} runtime={%s}",
+			player and player.Name or "<nil>",
+			formatInstancePath(rewardObject),
+			formatInstancePath(requestedCarrier),
+			formatInstancePath(ghostCarrierPart),
+			formatInstancePath(head),
+			getPlayerCarrySummary(player),
+			getRunRewardSummary(player)
+		)
 		return false
+	end
+
+	local carrierSource = "resolved_other"
+	if requestedCarrier and carrierPart == requestedCarrier then
+		carrierSource = "override"
+	elseif ghostCarrierPart and carrierPart == ghostCarrierPart then
+		carrierSource = "horo_ghost"
+	elseif head and carrierPart == head then
+		carrierSource = "body_head"
 	end
 
 	clearCarryWeld(rootPart)
@@ -862,15 +1006,30 @@ local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFo
 		prompt.Enabled = false
 	end
 
-	local top = head.Position + Vector3.yAxis * (head.Size.Y / 2)
-	local targetPivot = computePivotBottomOnPoint(rewardObject, top, computeHeadRotOnly(head))
+	local top = carrierPart.Position + Vector3.yAxis * (carrierPart.Size.Y / 2)
+	local targetPivot = computePivotBottomOnPoint(rewardObject, top, computeCarrierRotOnly(carrierPart))
 	setObjectCFrame(rewardObject, targetPivot)
 
 	local weld = Instance.new("WeldConstraint")
 	weld.Name = "RewardCarryWeld"
 	weld.Part0 = rootPart
-	weld.Part1 = head
+	weld.Part1 = carrierPart
 	weld.Parent = rootPart
+
+	horoCarryTrace(
+		"attachCarry applied player=%s reward=%s rewardType=%s carrierSource=%s carrierPart=%s carrierPos=%s rewardPos=%s projectionActive=%s projectionId=%s carryAttrs={%s} runtime={%s}",
+		player and player.Name or "<nil>",
+		formatInstancePath(rewardObject),
+		tostring(rewardObject and rewardObject:GetAttribute("RewardType")),
+		tostring(carrierSource),
+		formatInstancePath(carrierPart),
+		formatVector3(carrierPart.Position),
+		formatVector3(getObjectPivot(rewardObject).Position),
+		tostring(player:GetAttribute("HoroProjectionActive")),
+		tostring(player:GetAttribute("HoroProjectionId")),
+		getPlayerCarrySummary(player),
+		getRunRewardSummary(player)
+	)
 
 	return true
 end
@@ -1421,6 +1580,16 @@ function Controller.Start()
 
 		local state = SliceService.GetState(player)
 		local runState = state and state.Run or {}
+		horoCarryTrace(
+			"extractTouchInspect player=%s source=%s sourcePath=%s projectionActive=%s projectionId=%s carryAttrs={%s} runtime={%s}",
+			player.Name,
+			tostring(sourceLabel),
+			formatInstancePath(sourcePart),
+			tostring(player:GetAttribute("HoroProjectionActive")),
+			tostring(player:GetAttribute("HoroProjectionId")),
+			getPlayerCarrySummary(player),
+			getRunRewardSummary(player)
+		)
 		if runState.CarriedReward == nil then
 			runTrace(
 				"extractTouchSkipped player=%s source=%s sourcePath=%s reason=no_carried_reward inRun=%s",
@@ -1664,6 +1833,250 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 	end)
 
 	return true, rewardObject
+end
+
+function Controller.AttachCarriedRewardToPart(player, carrierPart)
+	if not player or player.Parent ~= Players then
+		return false, "player_not_ready"
+	end
+	local requestedCarrier = carrierPart
+	if not carrierPart or not carrierPart:IsA("BasePart") or not carrierPart.Parent then
+		carrierPart = getActiveHoroCarrierPart(player)
+	end
+	if not carrierPart or not carrierPart:IsA("BasePart") or not carrierPart.Parent then
+		horoCarryTrace(
+			"reattachRequest failed player=%s requestedCarrier=%s reason=carrier_not_ready carryAttrs={%s} runtime={%s}",
+			player and player.Name or "<nil>",
+			formatInstancePath(requestedCarrier),
+			getPlayerCarrySummary(player),
+			getRunRewardSummary(player)
+		)
+		return false, "carrier_not_ready"
+	end
+	horoCarryTrace(
+		"reattachRequest begin player=%s requestedCarrier=%s resolvedCarrier=%s carryAttrs={%s} runtime={%s}",
+		player and player.Name or "<nil>",
+		formatInstancePath(requestedCarrier),
+		formatInstancePath(carrierPart),
+		getPlayerCarrySummary(player),
+		getRunRewardSummary(player)
+	)
+
+	local state = SliceService.GetState(player)
+	local runState = state and state.Run or {}
+	if runState.CarriedReward == nil then
+		horoCarryTrace(
+			"reattachRequest failed player=%s resolvedCarrier=%s reason=no_carried_reward runtime={%s}",
+			player and player.Name or "<nil>",
+			formatInstancePath(carrierPart),
+			getRunRewardSummary(player)
+		)
+		return false, "no_carried_reward"
+	end
+
+	local rewardObject = rewardObjectsByUserId[player.UserId]
+	local rootPart = getObjectRootPart(rewardObject)
+	if not rewardObject or not rewardObject.Parent or not rootPart then
+		horoCarryTrace(
+			"reattachRequest failed player=%s resolvedCarrier=%s reason=reward_object_not_ready reward=%s",
+			player and player.Name or "<nil>",
+			formatInstancePath(carrierPart),
+			formatInstancePath(rewardObject)
+		)
+		return false, "reward_object_not_ready"
+	end
+
+	if applyCarriedRewardState(player, rewardObject, rootPart, rewardObject.Parent, carrierPart) then
+		horoCarryTrace(
+			"reattachRequest complete player=%s resolvedCarrier=%s success=true reward=%s",
+			player and player.Name or "<nil>",
+			formatInstancePath(carrierPart),
+			formatInstancePath(rewardObject)
+		)
+		return true, rewardObject
+	end
+
+	horoCarryTrace(
+		"reattachRequest failed player=%s resolvedCarrier=%s reason=attach_failed reward=%s",
+		player and player.Name or "<nil>",
+		formatInstancePath(carrierPart),
+		formatInstancePath(rewardObject)
+	)
+	return false, "attach_failed"
+end
+
+local function attachCarriedRewardToPartSoon(player, carrierPart)
+	task.spawn(function()
+		for _ = 1, 8 do
+			local attached = Controller.AttachCarriedRewardToPart(player, carrierPart)
+			if attached then
+				return
+			end
+			task.wait(0.05)
+		end
+	end)
+end
+
+local function getRewardObjectDistance(rewardObject, worldPosition)
+	local rootPart = getObjectRootPart(rewardObject)
+	if not rootPart or typeof(worldPosition) ~= "Vector3" then
+		return math.huge, nil
+	end
+
+	return (rootPart.Position - worldPosition).Magnitude, rootPart
+end
+
+function Controller.TryClaimRewardNearPosition(player, worldPosition, carrierPart, maxDistance)
+	if not player or player.Parent ~= Players then
+		return false, "player_not_ready"
+	end
+	if typeof(worldPosition) ~= "Vector3" then
+		return false, "invalid_position"
+	end
+	local requestedCarrier = carrierPart
+	if not carrierPart or not carrierPart:IsA("BasePart") or not carrierPart.Parent then
+		carrierPart = getActiveHoroCarrierPart(player)
+	end
+	if not carrierPart or not carrierPart:IsA("BasePart") or not carrierPart.Parent then
+		horoCarryTrace(
+			"pickupBegin failed player=%s worldPos=%s requestedCarrier=%s reason=carrier_not_ready carryAttrs={%s} runtime={%s}",
+			player and player.Name or "<nil>",
+			formatVector3(worldPosition),
+			formatInstancePath(requestedCarrier),
+			getPlayerCarrySummary(player),
+			getRunRewardSummary(player)
+		)
+		return false, "carrier_not_ready"
+	end
+
+	local searchRadius = math.max(0, tonumber(maxDistance) or 0)
+	if searchRadius <= 0 then
+		return false, "invalid_radius"
+	end
+
+	local state = SliceService.GetState(player)
+	local runState = state and state.Run or {}
+	horoCarryTrace(
+		"pickupBegin player=%s worldPos=%s requestedCarrier=%s resolvedCarrier=%s radius=%s carryAttrs={%s} runtime={%s}",
+		player and player.Name or "<nil>",
+		formatVector3(worldPosition),
+		formatInstancePath(requestedCarrier),
+		formatInstancePath(carrierPart),
+		tostring(searchRadius),
+		getPlayerCarrySummary(player),
+		getRunRewardSummary(player)
+	)
+	if runState.CarriedReward ~= nil then
+		if Controller.AttachCarriedRewardToPart(player, carrierPart) then
+			horoCarryTrace(
+				"pickupResult player=%s outcome=already_carried_reattached resolvedCarrier=%s runtime={%s}",
+				player and player.Name or "<nil>",
+				formatInstancePath(carrierPart),
+				getRunRewardSummary(player)
+			)
+			return true, {
+				Kind = "MajorReward",
+				AlreadyCarried = true,
+			}
+		end
+
+		horoCarryTrace(
+			"pickupResult player=%s outcome=already_carrying_reward_attach_failed resolvedCarrier=%s runtime={%s}",
+			player and player.Name or "<nil>",
+			formatInstancePath(carrierPart),
+			getRunRewardSummary(player)
+		)
+		return false, "already_carrying_reward"
+	end
+
+	if runState.SpawnedReward ~= nil then
+		local rewardObject = rewardObjectsByUserId[player.UserId]
+		local distance = getRewardObjectDistance(rewardObject, worldPosition)
+		if distance <= searchRadius then
+			local response = SliceService.ClaimSpawnedReward(player)
+			if response and response.ok then
+				horoCarryTrace(
+					"pickupResult player=%s outcome=claim_spawned_reward reward=%s distance=%.2f carryAttrs={%s} runtimeBeforeAttach={%s}",
+					player and player.Name or "<nil>",
+					formatInstancePath(rewardObject),
+					distance,
+					getPlayerCarrySummary(player),
+					getRunRewardSummary(player)
+				)
+				attachCarriedRewardToPartSoon(player, carrierPart)
+				return true, {
+					Kind = "MajorReward",
+					RewardType = tostring(runState.SpawnedReward.RewardType or ""),
+					Distance = distance,
+				}
+			end
+
+			horoCarryTrace(
+				"pickupResult player=%s outcome=claim_spawned_reward_failed error=%s reward=%s distance=%.2f",
+				player and player.Name or "<nil>",
+				tostring(response and response.error),
+				formatInstancePath(rewardObject),
+				distance
+			)
+			return false, response and response.error or "claim_failed"
+		end
+	end
+
+	local bestNode = nil
+	local bestDistance = searchRadius
+	for _, node in pairs(sharedChestNodesById) do
+		if node and node.Object and node.Object.Parent and not node.Claimed then
+			local distance = getRewardObjectDistance(node.Object, worldPosition)
+			if distance <= bestDistance then
+				bestDistance = distance
+				bestNode = node
+			end
+		end
+	end
+
+	if not bestNode then
+		horoCarryTrace(
+			"pickupResult player=%s outcome=no_reward_in_range worldPos=%s radius=%s",
+			player and player.Name or "<nil>",
+			formatVector3(worldPosition),
+			tostring(searchRadius)
+		)
+		return false, "no_reward_in_range"
+	end
+
+	bestNode.Claimed = true
+	local response = SliceService.ClaimWorldChest(player, bestNode.RewardState)
+	if not response or not response.ok then
+		bestNode.Claimed = false
+		horoCarryTrace(
+			"pickupResult player=%s outcome=claim_shared_chest_failed chestId=%s error=%s",
+			player and player.Name or "<nil>",
+			tostring(bestNode.Id),
+			tostring(response and response.error)
+		)
+		return false, response and response.error or "claim_failed"
+	end
+
+	sharedChestNodesById[bestNode.Id] = nil
+	if bestNode.Object and bestNode.Object.Parent then
+		bestNode.Object:Destroy()
+	end
+
+	horoCarryTrace(
+		"pickupResult player=%s outcome=claim_shared_chest chestId=%s distance=%.2f carryAttrs={%s} runtimeBeforeAttach={%s}",
+		player and player.Name or "<nil>",
+		tostring(bestNode.Id),
+		bestDistance,
+		getPlayerCarrySummary(player),
+		getRunRewardSummary(player)
+	)
+	attachCarriedRewardToPartSoon(player, carrierPart)
+	return true, {
+		Kind = "MajorReward",
+		RewardType = "Chest",
+		SharedChestId = tostring(bestNode.Id or ""),
+		Distance = bestDistance,
+	}
 end
 
 return Controller
