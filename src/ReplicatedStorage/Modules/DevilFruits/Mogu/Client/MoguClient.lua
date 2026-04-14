@@ -26,6 +26,23 @@ local TRAIL_COLOR = Color3.fromRGB(122, 95, 63)
 local TRAIL_ACCENT_COLOR = Color3.fromRGB(166, 136, 97)
 local BURST_COLOR = Color3.fromRGB(214, 194, 159)
 local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
+local DEFAULT_ENTRY_CUE_FALLBACK_TIME = 0.24
+local DEFAULT_MOVEMENT_CUE_FALLBACK_TIME = 0.42
+local DEFAULT_ENTRY_CUE_MARKERS = {
+	"EnterGround",
+	"EntryVfx",
+	"EntryVFX",
+	"BurrowEntry",
+	"DigImpact",
+	"Dig",
+}
+local DEFAULT_MOVEMENT_CUE_MARKERS = {
+	"FullyUnderground",
+	"Underground",
+	"BurrowMove",
+	"MovementStart",
+	"StartMoving",
+}
 
 local function getAbilityConfig()
 	return DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME) or {}
@@ -34,6 +51,112 @@ end
 local function getAnimationStageConfig(stageKey, abilityConfig)
 	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
 	return type(animationConfig) == "table" and animationConfig[stageKey] or {}
+end
+
+local function appendMarkerName(markerNames, seenMarkers, markerName)
+	if typeof(markerName) ~= "string" or markerName == "" or seenMarkers[markerName] then
+		return
+	end
+
+	seenMarkers[markerName] = true
+	markerNames[#markerNames + 1] = markerName
+end
+
+local function appendMarkerNames(markerNames, seenMarkers, configuredMarkers)
+	if type(configuredMarkers) ~= "table" then
+		return
+	end
+
+	for _, markerName in ipairs(configuredMarkers) do
+		appendMarkerName(markerNames, seenMarkers, markerName)
+	end
+end
+
+local function getEntryCueMarkerNames(stageConfig)
+	local markerNames = {}
+	local seenMarkers = {}
+
+	appendMarkerName(markerNames, seenMarkers, stageConfig.EntryCueMarker)
+	appendMarkerName(markerNames, seenMarkers, stageConfig.EntryVfxMarker)
+	appendMarkerName(markerNames, seenMarkers, stageConfig.VfxMarker)
+	appendMarkerNames(markerNames, seenMarkers, stageConfig.EntryCueMarkers)
+	appendMarkerNames(markerNames, seenMarkers, stageConfig.EntryVfxMarkers)
+	appendMarkerNames(markerNames, seenMarkers, stageConfig.VfxMarkers)
+	appendMarkerNames(markerNames, seenMarkers, DEFAULT_ENTRY_CUE_MARKERS)
+
+	return markerNames
+end
+
+local function getMovementCueMarkerNames(stageConfig)
+	local markerNames = {}
+	local seenMarkers = {}
+
+	appendMarkerName(markerNames, seenMarkers, stageConfig.MovementCueMarker)
+	appendMarkerName(markerNames, seenMarkers, stageConfig.BurrowMoveMarker)
+	appendMarkerName(markerNames, seenMarkers, stageConfig.UndergroundMarker)
+	appendMarkerNames(markerNames, seenMarkers, stageConfig.MovementCueMarkers)
+	appendMarkerNames(markerNames, seenMarkers, stageConfig.BurrowMoveMarkers)
+	appendMarkerNames(markerNames, seenMarkers, stageConfig.UndergroundMarkers)
+	appendMarkerNames(markerNames, seenMarkers, DEFAULT_MOVEMENT_CUE_MARKERS)
+
+	return markerNames
+end
+
+local function getEntryCueFallbackTime(stageConfig)
+	return math.max(
+		0,
+		tonumber(stageConfig.EntryCueFallbackTime)
+			or tonumber(stageConfig.EntryVfxDelay)
+			or tonumber(stageConfig.ConcealDelay)
+			or DEFAULT_ENTRY_CUE_FALLBACK_TIME
+	)
+end
+
+local function getMovementCueFallbackTime(stageConfig)
+	return math.max(
+		0,
+		tonumber(stageConfig.MovementCueFallbackTime)
+			or tonumber(stageConfig.BurrowMoveDelay)
+			or tonumber(stageConfig.MovementStartDelay)
+			or DEFAULT_MOVEMENT_CUE_FALLBACK_TIME
+	)
+end
+
+local function disconnectConnections(connections)
+	if type(connections) ~= "table" then
+		return
+	end
+
+	for _, connection in ipairs(connections) do
+		if typeof(connection) == "RBXScriptConnection" then
+			connection:Disconnect()
+		end
+	end
+end
+
+local function clearEntryCueState(burrowState)
+	if type(burrowState) ~= "table" then
+		return
+	end
+
+	burrowState.EntryCueToken = nil
+	disconnectConnections(burrowState.EntryCueConnections)
+	burrowState.EntryCueConnections = nil
+end
+
+local function clearMovementCueState(burrowState)
+	if type(burrowState) ~= "table" then
+		return
+	end
+
+	burrowState.MovementCueToken = nil
+	disconnectConnections(burrowState.MovementCueConnections)
+	burrowState.MovementCueConnections = nil
+end
+
+local function clearBurrowCueState(burrowState)
+	clearEntryCueState(burrowState)
+	clearMovementCueState(burrowState)
 end
 
 local function getPlanarVector(vector)
@@ -350,6 +473,167 @@ function MoguClient:ApplyConcealWhenReady(targetPlayer, burrowState)
 	end)
 end
 
+function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	if not targetPlayer or self.burrowStates[targetPlayer] ~= burrowState then
+		return false
+	end
+
+	if burrowState.EntryCueTriggered then
+		return false
+	end
+
+	burrowState.EntryCueTriggered = true
+	clearEntryCueState(burrowState)
+
+	if not burrowState.ConcealApplied then
+		self:ApplyConceal(targetPlayer, burrowState.ConcealTransparency)
+		burrowState.ConcealApplied = true
+	end
+
+	local rootPart = getRootPart(targetPlayer)
+	local entryPosition = rootPart and rootPart.Position or startPosition
+	if not self.vfxController:PlayEntry(entryPosition, burrowState.Direction, abilityConfig) then
+		createBurst(entryPosition, burrowState.EntryBurstRadius, false)
+	end
+
+	return true
+end
+
+function MoguClient:TriggerBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	if not targetPlayer or self.burrowStates[targetPlayer] ~= burrowState then
+		return false
+	end
+
+	if burrowState.MovementCueTriggered then
+		return false
+	end
+
+	if not burrowState.EntryCueTriggered then
+		self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	end
+
+	burrowState.MovementCueTriggered = true
+	clearMovementCueState(burrowState)
+	burrowState.LastTrailAt = Workspace:GetServerTimeNow()
+	return true
+end
+
+function MoguClient:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	local stageConfig = getAnimationStageConfig("Start", abilityConfig)
+	local fallbackTime = getEntryCueFallbackTime(stageConfig)
+	local token = {}
+	local connections = {}
+
+	burrowState.EntryCueToken = token
+	burrowState.EntryCueConnections = connections
+
+	local function trigger()
+		if self.burrowStates[targetPlayer] ~= burrowState or burrowState.EntryCueToken ~= token then
+			return
+		end
+
+		self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	end
+
+	local animationState = burrowState.AnimationState
+	local track = type(animationState) == "table" and animationState.Track or nil
+	if typeof(track) == "Instance" and track:IsA("AnimationTrack") then
+		local markerNames = getEntryCueMarkerNames(stageConfig)
+		for _, markerName in ipairs(markerNames) do
+			local ok, connection = pcall(function()
+				return track:GetMarkerReachedSignal(markerName):Connect(trigger)
+			end)
+			if ok and typeof(connection) == "RBXScriptConnection" then
+				connections[#connections + 1] = connection
+			end
+		end
+
+		connections[#connections + 1] = track.KeyframeReached:Connect(function(keyframeName)
+			for _, markerName in ipairs(markerNames) do
+				if keyframeName == markerName then
+					trigger()
+					return
+				end
+			end
+		end)
+
+		connections[#connections + 1] = track.Stopped:Connect(function()
+			if fallbackTime <= 0 then
+				trigger()
+			end
+		end)
+
+		if fallbackTime > 0 then
+			task.delay(math.max(0, fallbackTime - track.TimePosition), trigger)
+		elseif not track.IsPlaying then
+			trigger()
+		end
+		return
+	end
+
+	if fallbackTime > 0 then
+		task.delay(fallbackTime, trigger)
+	else
+		trigger()
+	end
+end
+
+function MoguClient:ScheduleBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	local stageConfig = getAnimationStageConfig("Start", abilityConfig)
+	local fallbackTime = getMovementCueFallbackTime(stageConfig)
+	local token = {}
+	local connections = {}
+
+	burrowState.MovementCueToken = token
+	burrowState.MovementCueConnections = connections
+
+	local function trigger()
+		if self.burrowStates[targetPlayer] ~= burrowState or burrowState.MovementCueToken ~= token then
+			return
+		end
+
+		self:TriggerBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	end
+
+	local animationState = burrowState.AnimationState
+	local track = type(animationState) == "table" and animationState.Track or nil
+	if typeof(track) == "Instance" and track:IsA("AnimationTrack") then
+		local markerNames = getMovementCueMarkerNames(stageConfig)
+		for _, markerName in ipairs(markerNames) do
+			local ok, connection = pcall(function()
+				return track:GetMarkerReachedSignal(markerName):Connect(trigger)
+			end)
+			if ok and typeof(connection) == "RBXScriptConnection" then
+				connections[#connections + 1] = connection
+			end
+		end
+
+		connections[#connections + 1] = track.KeyframeReached:Connect(function(keyframeName)
+			for _, markerName in ipairs(markerNames) do
+				if keyframeName == markerName then
+					trigger()
+					return
+				end
+			end
+		end)
+
+		connections[#connections + 1] = track.Stopped:Connect(trigger)
+
+		if fallbackTime > 0 then
+			task.delay(math.max(0, fallbackTime - track.TimePosition), trigger)
+		elseif not track.IsPlaying then
+			trigger()
+		end
+		return
+	end
+
+	if fallbackTime > 0 then
+		task.delay(fallbackTime, trigger)
+	else
+		trigger()
+	end
+end
+
 function MoguClient:ClearConceal(targetPlayer)
 	local concealState = self.concealStates[targetPlayer]
 	if not concealState then
@@ -419,12 +703,10 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 
 	self.burrowStates[targetPlayer] = burrowState
 	burrowState.AnimationState = self.animationController:PlayStart(targetPlayer, abilityConfig)
-	self:ApplyConcealWhenReady(targetPlayer, burrowState)
 
 	local startPosition = payload.StartPosition or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
-	if not self.vfxController:PlayEntry(startPosition, burrowState.Direction, abilityConfig) then
-		createBurst(startPosition, burrowState.EntryBurstRadius, false)
-	end
+	self:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	self:ScheduleBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
 end
 
 function MoguClient:StopBurrow(targetPlayer, payload)
@@ -435,6 +717,7 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 	local burrowState = self.burrowStates[targetPlayer]
 	local abilityConfig = getAbilityConfig()
 	self.burrowStates[targetPlayer] = nil
+	clearBurrowCueState(burrowState)
 	self.animationController:StopAnimation(burrowState and burrowState.AnimationState, "resolve_transition")
 	self.animationController:PlayResolve(targetPlayer, abilityConfig)
 
@@ -553,6 +836,11 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 		return
 	end
 
+	if not burrowState.MovementCueTriggered then
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		return
+	end
+
 	local desiredDirection = self:GetCameraRelativeBurrowDirection(rootPart)
 	local currentSurfacePosition = select(
 		1,
@@ -573,7 +861,7 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 end
 
 function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
-	if not burrowState or now < burrowState.LastTrailAt + burrowState.TrailInterval then
+	if not burrowState or not burrowState.MovementCueTriggered or now < burrowState.LastTrailAt + burrowState.TrailInterval then
 		return
 	end
 
@@ -651,6 +939,7 @@ function MoguClient:HandleCharacterRemoving()
 	end
 
 	for targetPlayer in pairs(self.burrowStates) do
+		clearBurrowCueState(self.burrowStates[targetPlayer])
 		self.animationController:StopAnimation(self.burrowStates[targetPlayer].AnimationState, "character_removing")
 		self.burrowStates[targetPlayer] = nil
 		self:ClearConceal(targetPlayer)
@@ -664,6 +953,7 @@ function MoguClient:HandleCharacterRemoving()
 end
 
 function MoguClient:HandlePlayerRemoving(leavingPlayer)
+	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	self.animationController:StopAnimation(self.burrowStates[leavingPlayer] and self.burrowStates[leavingPlayer].AnimationState, "player_removing")
 	self.burrowStates[leavingPlayer] = nil
 	self:ClearConceal(leavingPlayer)

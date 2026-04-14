@@ -77,7 +77,7 @@ FruitRarityWeights = {
 }
 ```
 
-All four tiers must exist in config even if their fruit pools are currently empty (Common has no fruits yet). The resolver handles empty pools safely.
+All four tiers must exist in config even if a fruit pool is temporarily empty. The Common pool currently includes Suke Suke no Mi, and the resolver handles any future empty pools safely.
 
 **Empty pool fallback**
 1. Step down to the next lower rarity
@@ -102,7 +102,7 @@ Duplicates are resolved immediately during the same resolver execution.
 
 | Duplicate Rarity | Conversion |
 |---|---|
-| Common | Doubloons (scaled - placeholder until Common fruits exist) |
+| Common | Doubloons (scaled) |
 | Rare | Rare Devil Fruit Chest |
 | Legendary | Legendary Devil Fruit Chest |
 | Mythic | +1 Mythic Key (see Section 8) |
@@ -154,7 +154,7 @@ All chests share a unified schema, covering both regular and Devil Fruit chests.
 Chest = {
     ChestKind     = "Standard" | "DevilFruit",
     Tier          = "Wooden" | "Iron" | "Gold" | "Legendary",
-    FruitRarity   = "Rare" | "Legendary" | "Mythic" | nil,
+    FruitRarity   = "Common" | "Rare" | "Legendary" | "Mythic" | nil,
     Source        = "Run" | "Quest" | "Event" | "Purchase",
     RewardProfile = "Default" | ...,
     CreatedAt     = timestamp,
