@@ -87,7 +87,7 @@ local function PriceDisplay(props)
 	local priceLabel = props.isPriceLoading and "..." or Theme.formatPrice(props.priceText)
 	local purchaseText
 	local buttonTextColor = buttonEnabled and Theme.Palette.Ink or Theme.Palette.Text
-	local giftButtonColor = buttonEnabled and Color3.fromRGB(255, 196, 76) or Color3.fromRGB(94, 104, 122)
+	local giftButtonColor = buttonEnabled and Theme.Palette.GoldSoft or Theme.Palette.ButtonInactive
 	local giftIconColor = buttonEnabled and Theme.Palette.Ink or Theme.Palette.Text
 	local controlHeight = props.compact and 34 or 38
 	local giftSize = controlHeight
@@ -143,7 +143,7 @@ local function PriceDisplay(props)
 		}, {
 			PurchaseButton = e("TextButton", {
 				AutoButtonColor = false,
-				BackgroundColor3 = buttonEnabled and surface.accent or Color3.fromRGB(55, 73, 102),
+				BackgroundColor3 = buttonEnabled and surface.accent or Theme.Palette.ButtonInactive,
 				BorderSizePixel = 0,
 				Size = UDim2.fromOffset(purchaseWidth, controlHeight),
 				Text = "",
@@ -156,8 +156,8 @@ local function PriceDisplay(props)
 				Gradient = e("UIGradient", {
 					Rotation = 90,
 					Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, buttonEnabled and surface.accent or Color3.fromRGB(83, 95, 118)),
-						ColorSequenceKeypoint.new(1, buttonEnabled and surface.accentSoft or Color3.fromRGB(55, 69, 95)),
+						ColorSequenceKeypoint.new(0, buttonEnabled and surface.accent or Theme.Palette.PanelSoft),
+						ColorSequenceKeypoint.new(1, buttonEnabled and surface.accentSoft or Theme.Palette.ButtonInactive),
 					}),
 				}),
 				Content = e("Frame", {

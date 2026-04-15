@@ -37,7 +37,7 @@ local function SectionNav(props)
 				CornerRadius = UDim.new(0, 14),
 			}),
 			Stroke = e("UIStroke", {
-				Color = isActive and surface.stroke or Color3.fromRGB(69, 94, 132),
+				Color = isActive and surface.stroke or Theme.Palette.BorderSoft,
 				Transparency = isActive and 0.06 or 0.24,
 				Thickness = isActive and 1.4 or 1.1,
 			}),

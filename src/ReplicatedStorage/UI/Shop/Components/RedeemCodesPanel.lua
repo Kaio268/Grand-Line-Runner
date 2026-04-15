@@ -28,7 +28,7 @@ local function RedeemCodesPanel(props)
 			CornerRadius = UDim.new(0, 24),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Color3.fromRGB(90, 124, 184),
+			Color = Theme.Palette.Border,
 			Transparency = 0.08,
 			Thickness = 1.25,
 		}),
@@ -109,7 +109,7 @@ local function RedeemCodesPanel(props)
 				CornerRadius = UDim.new(0, 14),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(86, 118, 171),
+				Color = Theme.Palette.BorderSoft,
 				Transparency = 0.12,
 				Thickness = 1.1,
 			}),
@@ -121,7 +121,7 @@ local function RedeemCodesPanel(props)
 		Button = e("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
 			AutoButtonColor = false,
-			BackgroundColor3 = Theme.Palette.Cyan,
+			BackgroundColor3 = Theme.Palette.Gold,
 			BorderSizePixel = 0,
 			Position = UDim2.new(1, 0, 1, -62),
 			Size = UDim2.new(0.32, 0, 0, 48),
@@ -133,17 +133,17 @@ local function RedeemCodesPanel(props)
 				CornerRadius = UDim.new(0, 14),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(137, 246, 255),
+				Color = Theme.Palette.GoldSoft,
 				Transparency = 0.12,
 				Thickness = 1.1,
 			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Theme.Palette.Cyan),
-					ColorSequenceKeypoint.new(1, Color3.fromRGB(72, 184, 255)),
+				Gradient = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Theme.Palette.GoldSoft),
+						ColorSequenceKeypoint.new(1, Theme.Palette.Gold),
+					}),
 				}),
-			}),
 			Label = e("TextLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,

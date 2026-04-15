@@ -13,7 +13,7 @@ local e = React.createElement
 
 local function titleDivider(props)
 	return e("Frame", {
-		BackgroundColor3 = Color3.fromRGB(90, 117, 156),
+		BackgroundColor3 = Theme.Palette.GoldShadow,
 		BackgroundTransparency = 0.22,
 		BorderSizePixel = 0,
 		Position = props.position,
@@ -221,7 +221,7 @@ local function ShopShell(props)
 				CornerRadius = UDim.new(0, 26),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(79, 122, 189),
+				Color = Theme.Palette.Border,
 				Transparency = 0.12,
 				Thickness = 1.5,
 			}),
@@ -369,7 +369,7 @@ local function ShopShell(props)
 			CornerRadius = UDim.new(0, 26),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Color3.fromRGB(78, 104, 148),
+			Color = Theme.Palette.Border,
 			Transparency = 0.08,
 			Thickness = 1.6,
 		}),
@@ -392,8 +392,8 @@ local function ShopShell(props)
 				Font = Theme.Fonts.Label,
 				Position = UDim2.fromOffset(0, 0),
 				Size = UDim2.fromOffset(titleBubbleWidth, 14),
-				Text = "ROBLOX SHOP",
-				TextColor3 = Theme.Palette.Cyan,
+				Text = "GRAND LINE RUSH SHOP",
+				TextColor3 = Theme.Palette.GoldSoft,
 				TextSize = 11,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}),
@@ -403,7 +403,7 @@ local function ShopShell(props)
 				Position = UDim2.fromOffset(0, 16),
 				Size = UDim2.fromOffset(titleBubbleWidth, 46),
 				Text = props.catalog.title,
-				TextColor3 = Color3.fromRGB(217, 255, 131),
+				TextColor3 = Theme.Palette.GoldSoft,
 				TextSize = 39,
 				TextStrokeTransparency = 1,
 				TextWrapped = true,
@@ -426,14 +426,14 @@ local function ShopShell(props)
 			Close = e("TextButton", {
 				AnchorPoint = Vector2.new(1, 0),
 				AutoButtonColor = false,
-				BackgroundColor3 = Color3.fromRGB(22, 16, 24),
+				BackgroundColor3 = Theme.Palette.CloseFill or Color3.fromRGB(186, 86, 100),
 				BorderSizePixel = 0,
 				Position = UDim2.new(1, 0, 0, 8),
 				Size = UDim2.fromOffset(38, 38),
 				Text = "X",
 				TextColor3 = Theme.Palette.Text,
 				TextSize = 18,
-				Font = Enum.Font.Cartoon,
+				Font = Theme.Fonts.Display,
 				ZIndex = 11,
 				[React.Event.Activated] = props.onClose,
 			}, {
@@ -441,13 +441,13 @@ local function ShopShell(props)
 					CornerRadius = UDim.new(0, 12),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(58, 54, 74),
+					Color = Theme.Palette.GoldShadow,
 					Transparency = 0.04,
 				}),
 			}),
 		}),
 		Notice = props.noticeText and e("Frame", {
-			BackgroundColor3 = Color3.fromRGB(25, 41, 68),
+			BackgroundColor3 = Theme.Palette.PanelSoft,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(30, headerHeight),
 			Size = UDim2.new(1, -60, 0, 42),
@@ -457,7 +457,7 @@ local function ShopShell(props)
 				CornerRadius = UDim.new(0, 14),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Theme.Palette.Cyan,
+				Color = Theme.Palette.Gold,
 				Transparency = 0.12,
 			}),
 			Label = e("TextLabel", {
@@ -484,7 +484,7 @@ local function ShopShell(props)
 				CornerRadius = UDim.new(0, 20),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(75, 103, 150),
+				Color = Theme.Palette.BorderSoft,
 				Transparency = 0.1,
 				Thickness = 1.2,
 			}),
