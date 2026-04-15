@@ -12,16 +12,6 @@ local RewardsPanel = require(script.Parent:WaitForChild("Components"):WaitForChi
 
 local e = React.createElement
 
-local function findCategoryById(categories, categoryId)
-	for _, category in ipairs(categories) do
-		if category.id == categoryId then
-			return category
-		end
-	end
-
-	return categories[1]
-end
-
 local function filterUnits(units, categoryId)
 	local filtered = {}
 
@@ -40,10 +30,10 @@ local function tabButton(props)
 	local isRewardTab = tab.id == "rewards"
 	local isFruitTab = tab.id == "fruits"
 	local fillColor = active and (isRewardTab and Theme.Palette.TabRewardFill or Theme.Palette.HeaderBottom)
-		or Color3.fromRGB(19, 41, 67)
+		or Theme.Palette.TabFill
 	local strokeColor = active and (isRewardTab and Theme.Palette.TabRewardAccent or Theme.Palette.Text)
-		or Color3.fromRGB(50, 84, 120)
-	local textColor = active and Theme.Palette.Text or Color3.fromRGB(229, 237, 255)
+		or Theme.Palette.BorderSoft
+	local textColor = active and Theme.Palette.Text or Theme.Palette.Muted
 	local countText = isRewardTab and (props.claimableCount or 0) > 0 and tostring(props.claimableCount) or nil
 	local buttonWidth = isRewardTab and 120 or (isFruitTab and 116 or 104)
 
@@ -74,7 +64,7 @@ local function tabButton(props)
 			Text = tostring(tab.label or ""),
 			TextColor3 = textColor,
 			TextSize = 12,
-			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeColor3 = Theme.Palette.Shadow,
 			TextStrokeTransparency = 0.55,
 		}),
 		Count = countText and e("Frame", {
@@ -139,11 +129,11 @@ local function header(props)
 			Gradient = e("UIGradient", {
 				Rotation = 90,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
-					ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255)),
+					ColorSequenceKeypoint.new(0, Theme.Palette.GoldSoft),
+					ColorSequenceKeypoint.new(1, Theme.Palette.GoldSoft),
 				}),
 				Transparency = NumberSequence.new({
-					NumberSequenceKeypoint.new(0, 0.82),
+					NumberSequenceKeypoint.new(0, 0.9),
 					NumberSequenceKeypoint.new(0.35, 0.96),
 					NumberSequenceKeypoint.new(1, 1),
 				}),
@@ -162,7 +152,7 @@ local function header(props)
 			Position = UDim2.fromOffset(14, 9),
 			Size = UDim2.fromOffset(180, 12),
 			Text = "GRAND LINE RUSH",
-			TextColor3 = Theme.Palette.Text,
+			TextColor3 = Theme.Palette.GoldSoft,
 			TextSize = 10,
 			TextStrokeColor3 = Theme.Palette.HeaderTextStroke,
 			TextStrokeTransparency = 0.5,
@@ -175,7 +165,7 @@ local function header(props)
 			Position = UDim2.new(0.5, 0, 0, 6),
 			Size = UDim2.fromOffset(220, 24),
 			Text = "Index",
-			TextColor3 = Theme.Palette.Text,
+			TextColor3 = Theme.Palette.GoldSoft,
 			TextSize = 30,
 			TextStrokeColor3 = Theme.Palette.HeaderTextStroke,
 			TextStrokeTransparency = 0.35,
@@ -186,7 +176,7 @@ local function header(props)
 			Position = UDim2.fromOffset(14, 26),
 			Size = UDim2.fromOffset(180, 18),
 			Text = string.format("%d / %d Collected", props.collected or 0, props.total or 0),
-			TextColor3 = Theme.Palette.Text,
+			TextColor3 = Theme.Palette.Muted,
 			TextSize = 13,
 			TextStrokeColor3 = Theme.Palette.HeaderTextStroke,
 			TextStrokeTransparency = 0.45,
@@ -254,7 +244,7 @@ local function progressStrip(props)
 			Text = string.format("Collected : %d/%d", collected, total),
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 14,
-			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeColor3 = Theme.Palette.Shadow,
 			TextStrokeTransparency = 0.5,
 		}),
 		Track = e("Frame", {

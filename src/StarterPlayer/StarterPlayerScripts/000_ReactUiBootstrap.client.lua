@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local SettingsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Settings"))
 local SpeedUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpeedUpgrade"))
@@ -19,6 +20,30 @@ local ensureImageLabel
 local ensureImageButton
 local ensureTextButton
 local ensureLegacyInventoryButtonTemplate
+
+local UI_STYLE = {
+	PrimaryBg = Color3.fromRGB(30, 42, 56),
+	SecondaryBg = Color3.fromRGB(36, 52, 71),
+	PanelFill = Color3.fromRGB(44, 62, 80),
+	PanelFillDark = Color3.fromRGB(34, 49, 66),
+	GoldBase = Color3.fromRGB(212, 175, 55),
+	GoldHighlight = Color3.fromRGB(242, 209, 107),
+	GoldShadow = Color3.fromRGB(140, 107, 31),
+	TextMain = Color3.fromRGB(230, 230, 230),
+	TextSecondary = Color3.fromRGB(184, 193, 204),
+	TextDisabled = Color3.fromRGB(122, 134, 150),
+	ButtonInactive = Color3.fromRGB(42, 58, 77),
+	Success = Color3.fromRGB(125, 219, 159),
+	SuccessSoft = Color3.fromRGB(169, 240, 194),
+	Danger = Color3.fromRGB(186, 86, 100),
+	DangerSoft = Color3.fromRGB(218, 125, 138),
+}
+
+local BUTTON_FX_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local BUTTON_HOVER_SCALE = 1.03
+local BUTTON_IDLE_SCALE = 1
+local BUTTON_PRESS_SCALE = 0.97
+local BUTTON_FX_BINDINGS = setmetatable({}, { __mode = "k" })
 
 local function hudLog(tag, ...)
 	if HUD_DEBUG then
@@ -335,6 +360,150 @@ local function ensureUICorner(parent, radius)
 	return corner
 end
 
+local function setLabelStyle(label, textSize, textColor)
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = textColor or UI_STYLE.TextMain
+	label.TextSize = textSize or 14
+	label.TextStrokeColor3 = UI_STYLE.GoldShadow
+	label.TextStrokeTransparency = 0.7
+end
+
+local function stylePanel(frame, cornerRadius)
+	frame.BackgroundColor3 = UI_STYLE.PanelFill
+	frame.BackgroundTransparency = 0.06
+	frame.BorderSizePixel = 0
+	ensureUICorner(frame, cornerRadius or 12)
+	local stroke = ensureUIStroke(frame, UI_STYLE.GoldBase, 1.6)
+	stroke.Transparency = 0.18
+	local gradient = ensureUIGradient(frame, UI_STYLE.SecondaryBg, UI_STYLE.PrimaryBg)
+	gradient.Rotation = 90
+end
+
+local function styleInsetPanel(frame, cornerRadius)
+	frame.BackgroundColor3 = UI_STYLE.PanelFillDark
+	frame.BackgroundTransparency = 0.12
+	frame.BorderSizePixel = 0
+	ensureUICorner(frame, cornerRadius or 10)
+	local stroke = ensureUIStroke(frame, UI_STYLE.GoldShadow, 1.2)
+	stroke.Transparency = 0.34
+	local gradient = ensureUIGradient(frame, Color3.fromRGB(52, 72, 93), UI_STYLE.PanelFillDark)
+	gradient.Rotation = 90
+end
+
+local function playScaleTween(scale, target)
+	local tween = TweenService:Create(scale, BUTTON_FX_TWEEN, { Scale = target })
+	tween:Play()
+end
+
+local function ensureButtonFeedback(button)
+	if not button or not button:IsA("GuiButton") then
+		return
+	end
+	if BUTTON_FX_BINDINGS[button] then
+		return
+	end
+
+	local scale = button:FindFirstChild("GrandLineButtonScale")
+	if not (scale and scale:IsA("UIScale")) then
+		scale = Instance.new("UIScale")
+		scale.Name = "GrandLineButtonScale"
+		scale.Scale = BUTTON_IDLE_SCALE
+		scale.Parent = button
+	end
+
+	local state = {
+		hovered = false,
+		pressing = false,
+	}
+
+	local function refreshScale()
+		if state.pressing then
+			playScaleTween(scale, BUTTON_PRESS_SCALE)
+		elseif state.hovered then
+			playScaleTween(scale, BUTTON_HOVER_SCALE)
+		else
+			playScaleTween(scale, BUTTON_IDLE_SCALE)
+		end
+	end
+
+	local connections = {
+		button.MouseEnter:Connect(function()
+			state.hovered = true
+			refreshScale()
+		end),
+		button.MouseLeave:Connect(function()
+			state.hovered = false
+			state.pressing = false
+			refreshScale()
+		end),
+		button.MouseButton1Down:Connect(function()
+			state.pressing = true
+			refreshScale()
+		end),
+		button.MouseButton1Up:Connect(function()
+			state.pressing = false
+			refreshScale()
+		end),
+		button.Activated:Connect(function()
+			state.pressing = false
+			refreshScale()
+		end),
+		button.Destroying:Connect(function()
+			local binding = BUTTON_FX_BINDINGS[button]
+			if binding then
+				for _, connection in ipairs(binding) do
+					connection:Disconnect()
+				end
+				BUTTON_FX_BINDINGS[button] = nil
+			end
+		end),
+	}
+
+	BUTTON_FX_BINDINGS[button] = connections
+end
+
+local function stylePrimaryButton(button)
+	button.BackgroundColor3 = UI_STYLE.Success
+	button.BackgroundTransparency = 0
+	button.TextColor3 = Color3.fromRGB(18, 30, 24)
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 17
+	local gradient = ensureUIGradient(button, UI_STYLE.SuccessSoft, UI_STYLE.Success)
+	gradient.Rotation = 90
+	local stroke = ensureUIStroke(button, UI_STYLE.GoldShadow, 1.1)
+	stroke.Transparency = 0.28
+	ensureUICorner(button, 10)
+	ensureButtonFeedback(button)
+end
+
+local function styleSecondaryButton(button)
+	button.BackgroundColor3 = UI_STYLE.ButtonInactive or UI_STYLE.PanelFillDark
+	button.BackgroundTransparency = 0
+	button.TextColor3 = UI_STYLE.TextMain
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 16
+	local gradient = ensureUIGradient(button, UI_STYLE.PanelFill, UI_STYLE.PrimaryBg)
+	gradient.Rotation = 90
+	local stroke = ensureUIStroke(button, UI_STYLE.GoldShadow, 1.1)
+	stroke.Transparency = 0.2
+	ensureUICorner(button, 10)
+	ensureButtonFeedback(button)
+end
+
+local function styleCloseButton(button)
+	button.BackgroundColor3 = UI_STYLE.Danger
+	button.BackgroundTransparency = 0
+	button.TextColor3 = UI_STYLE.TextMain
+	button.Font = Enum.Font.GothamBold
+	button.TextSize = 16
+	local gradient = ensureUIGradient(button, UI_STYLE.DangerSoft, UI_STYLE.Danger)
+	gradient.Rotation = 90
+	local stroke = ensureUIStroke(button, UI_STYLE.GoldShadow, 1.1)
+	stroke.Transparency = 0.16
+	ensureUICorner(button, 8)
+	ensureButtonFeedback(button)
+end
+
 local function clearChildren(parent, preserveNames)
 	for _, child in ipairs(parent:GetChildren()) do
 		if preserveNames and preserveNames[child.Name] then
@@ -458,23 +627,23 @@ local function ensureHudButton(lButtons, name, showTimer)
 
 		summaryTimer.Visible = true
 		summaryTimer.AnchorPoint = Vector2.new(0.5, 0)
-		summaryTimer.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
-		summaryTimer.BackgroundTransparency = 0.08
+		summaryTimer.BackgroundColor3 = UI_STYLE.PanelFillDark
+		summaryTimer.BackgroundTransparency = 0.04
 		summaryTimer.BorderSizePixel = 0
 		summaryTimer.Font = Enum.Font.GothamBold
 		summaryTimer.Position = UDim2.new(0.5, 0, 0, 8)
 		summaryTimer.Size = UDim2.new(1, -20, 0, 18)
 		summaryTimer.Text = "--"
-		summaryTimer.TextColor3 = Color3.fromRGB(255, 245, 224)
+		summaryTimer.TextColor3 = UI_STYLE.TextMain
 		summaryTimer.TextScaled = true
-		summaryTimer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
-		summaryTimer.TextStrokeTransparency = 0.08
+		summaryTimer.TextStrokeColor3 = UI_STYLE.GoldShadow
+		summaryTimer.TextStrokeTransparency = 0.25
 		summaryTimer.TextXAlignment = Enum.TextXAlignment.Center
 		summaryTimer.TextYAlignment = Enum.TextYAlignment.Center
 		summaryTimer.ZIndex = math.max(button.ZIndex + 9, 11)
 		ensureUICorner(summaryTimer, 9)
-		ensureUIStroke(summaryTimer, Color3.fromRGB(255, 237, 203), 1).Transparency = 0.6
-		ensureUIGradient(summaryTimer, Color3.fromRGB(29, 39, 57), Color3.fromRGB(8, 13, 22)).Rotation = 90
+		ensureUIStroke(summaryTimer, UI_STYLE.GoldBase, 1).Transparency = 0.4
+		ensureUIGradient(summaryTimer, UI_STYLE.SecondaryBg, UI_STYLE.PrimaryBg).Rotation = 90
 
 		hudLog(
 			"[HUD][TIMER]",
@@ -503,33 +672,52 @@ local function ensureHudButton(lButtons, name, showTimer)
 end
 
 local function ensureSlotCard(slot, layoutOrder)
-	slot.BackgroundColor3 = Color3.fromRGB(20, 28, 45)
-	slot.BackgroundTransparency = 0.15
+	slot.BackgroundColor3 = UI_STYLE.PanelFill
+	slot.BackgroundTransparency = 0.08
 	slot.BorderSizePixel = 0
 	slot.AutoButtonColor = true
-	slot.Size = UDim2.new(1, -12, 0, 84)
+	slot.Size = UDim2.new(1, -12, 0, 88)
 	slot.LayoutOrder = layoutOrder
-	ensureUICorner(slot, 12)
-	ensureUIStroke(slot, Color3.fromRGB(77, 104, 142), 1)
+	styleInsetPanel(slot, 12)
+	ensureButtonFeedback(slot)
 
 	local rewName = ensureTextLabel(slot, "RewName")
-	rewName.Size = UDim2.new(1, -76, 0, 22)
-	rewName.Position = UDim2.fromOffset(62, 6)
+	rewName.Size = UDim2.new(1, -206, 0, 24)
+	rewName.Position = UDim2.fromOffset(72, 14)
 	rewName.TextXAlignment = Enum.TextXAlignment.Left
-	rewName.TextSize = 16
+	setLabelStyle(rewName, 17, UI_STYLE.TextMain)
 
 	local timer = ensureTextLabel(slot, "Timer")
-	timer.Size = UDim2.new(1, -76, 0, 22)
-	timer.Position = UDim2.fromOffset(62, 34)
+	timer.Size = UDim2.new(1, -206, 0, 22)
+	timer.Position = UDim2.fromOffset(72, 44)
 	timer.TextXAlignment = Enum.TextXAlignment.Left
-	timer.TextSize = 15
+	setLabelStyle(timer, 15, UI_STYLE.TextSecondary)
 
 	local icon = ensureImageLabel(slot, "Icon")
-	icon.Size = UDim2.fromOffset(46, 46)
-	icon.Position = UDim2.fromOffset(8, 19)
-	icon.BackgroundColor3 = Color3.fromRGB(10, 14, 24)
-	icon.BackgroundTransparency = 0.2
-	ensureUICorner(icon, 8)
+	icon.Size = UDim2.fromOffset(50, 50)
+	icon.Position = UDim2.fromOffset(12, 19)
+	styleInsetPanel(icon, 8)
+
+	local claimButton = ensureFrame(slot, "ClaimButton")
+	claimButton.AnchorPoint = Vector2.new(1, 0.5)
+	claimButton.Size = UDim2.fromOffset(108, 44)
+	claimButton.Position = UDim2.new(1, -14, 0.5, 0)
+	claimButton.BackgroundColor3 = UI_STYLE.ButtonInactive
+	claimButton.BackgroundTransparency = 0
+	claimButton.BorderSizePixel = 0
+	claimButton.Active = false
+	claimButton.ZIndex = math.max(slot.ZIndex + 1, 2)
+	ensureUICorner(claimButton, 10)
+	ensureUIStroke(claimButton, UI_STYLE.GoldBase, 1.2).Transparency = 0.1
+	ensureUIGradient(claimButton, UI_STYLE.GoldShadow, UI_STYLE.ButtonInactive).Rotation = 90
+
+	local claimText = ensureTextLabel(claimButton, "Text")
+	claimText.Size = UDim2.fromScale(1, 1)
+	claimText.Position = UDim2.fromOffset(0, 0)
+	claimText.Text = "Claim"
+	claimText.TextScaled = true
+	claimText.Font = Enum.Font.GothamBold
+	claimText.TextColor3 = UI_STYLE.TextMain
 end
 
 local function getTimeRewardCount()
@@ -570,7 +758,7 @@ local function ensureGiftsSlots(giftsMain)
 	scroll.CanvasSize = UDim2.fromOffset(0, 0)
 	scroll.ClipsDescendants = true
 	scroll.Position = UDim2.fromScale(0, 0)
-	scroll.ScrollBarImageColor3 = Color3.fromRGB(246, 204, 117)
+	scroll.ScrollBarImageColor3 = UI_STYLE.GoldHighlight
 	scroll.ScrollBarThickness = 8
 	scroll.ScrollingDirection = Enum.ScrollingDirection.Y
 	scroll.ScrollingEnabled = true
@@ -609,40 +797,41 @@ end
 
 local function ensureRebirthRequirement(parent, name, yOffset)
 	local section = ensureFrame(parent, name)
-	section.BackgroundColor3 = Color3.fromRGB(19, 26, 40)
-	section.BackgroundTransparency = 0.2
+	section.BackgroundColor3 = UI_STYLE.PanelFill
+	section.BackgroundTransparency = 0.08
 	section.Size = UDim2.new(1, -32, 0, 72)
 	section.Position = UDim2.fromOffset(16, yOffset)
-	ensureUICorner(section, 10)
-	ensureUIStroke(section, Color3.fromRGB(74, 96, 132), 1)
+	styleInsetPanel(section, 10)
 
 	local label = ensureTextLabel(section, "Label")
 	label.Size = UDim2.new(1, -20, 0, 20)
 	label.Position = UDim2.fromOffset(10, 8)
 	label.TextXAlignment = Enum.TextXAlignment.Left
-	label.TextSize = 15
+	setLabelStyle(label, 15, UI_STYLE.TextMain)
 	label.Text = name == "Money" and "Doubloons" or "Ship Level"
 
 	local value = ensureTextLabel(section, "Value")
 	value.Size = UDim2.new(1, -20, 0, 22)
 	value.Position = UDim2.fromOffset(10, 28)
 	value.TextXAlignment = Enum.TextXAlignment.Left
-	value.TextSize = 16
+	setLabelStyle(value, 16, UI_STYLE.TextMain)
 
 	local track = ensureFrame(section, "Track")
-	track.BackgroundColor3 = Color3.fromRGB(10, 14, 23)
-	track.BackgroundTransparency = 0.15
+	track.BackgroundColor3 = UI_STYLE.PrimaryBg
+	track.BackgroundTransparency = 0.05
 	track.Size = UDim2.new(1, -20, 0, 10)
 	track.Position = UDim2.fromOffset(10, 56)
 	track.ClipsDescendants = true
 	ensureUICorner(track, 999)
+	ensureUIStroke(track, UI_STYLE.GoldShadow, 1).Transparency = 0.35
 
 	local bar = ensureFrame(track, "Bar")
-	bar.BackgroundColor3 = Color3.fromRGB(102, 220, 146)
+	bar.BackgroundColor3 = UI_STYLE.Success
 	bar.BackgroundTransparency = 0
 	bar.Size = UDim2.new(0, 0, 1, 0)
 	bar.Position = UDim2.fromOffset(0, 0)
 	ensureUICorner(bar, 999)
+	ensureUIGradient(bar, UI_STYLE.SuccessSoft, UI_STYLE.Success).Rotation = 90
 
 	return section
 end
@@ -651,39 +840,38 @@ local function ensureSettingsSliderOption(scrollingFrame, optionName, layoutOrde
 	local option = ensureFrame(scrollingFrame, optionName)
 	option.Size = UDim2.new(1, -18, 0, 88)
 	option.LayoutOrder = layoutOrder
-	option.BackgroundColor3 = Color3.fromRGB(21, 29, 44)
-	option.BackgroundTransparency = 0.15
-	ensureUICorner(option, 10)
-	ensureUIStroke(option, Color3.fromRGB(74, 99, 142), 1)
+	styleInsetPanel(option, 10)
 
 	local title = ensureTextLabel(option, "Title")
 	title.Size = UDim2.new(1, -20, 0, 22)
 	title.Position = UDim2.fromOffset(10, 8)
 	title.Text = optionName
 	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextSize = 16
+	setLabelStyle(title, 16, UI_STYLE.TextMain)
 
 	local slider = ensureFrame(option, "Slider")
 	slider.Size = UDim2.new(1, -64, 0, 42)
 	slider.Position = UDim2.fromOffset(32, 38)
-	slider.BackgroundColor3 = Color3.fromRGB(9, 14, 24)
+	slider.BackgroundColor3 = UI_STYLE.PrimaryBg
 	slider.BackgroundTransparency = 0.08
 	ensureUICorner(slider, 10)
-	ensureUIStroke(slider, Color3.fromRGB(58, 78, 111), 1)
+	ensureUIStroke(slider, UI_STYLE.GoldShadow, 1).Transparency = 0.45
+	ensureUIGradient(slider, UI_STYLE.SecondaryBg, UI_STYLE.PrimaryBg).Rotation = 90
 
 	local main = ensureTextButton(slider, "Main")
 	main.Size = UDim2.fromOffset(34, 34)
 	main.AnchorPoint = Vector2.new(0.5, 0.5)
 	main.Position = UDim2.new(0.47, 0, 0.5, 0)
 	main.Text = ""
+	ensureButtonFeedback(main)
 
 	local mainFrame = ensureFrame(main, "Frame")
 	mainFrame.Size = UDim2.fromScale(1, 1)
-	mainFrame.BackgroundColor3 = Color3.fromRGB(255, 183, 90)
+	mainFrame.BackgroundColor3 = UI_STYLE.GoldBase
 	mainFrame.BackgroundTransparency = 0
 	ensureUICorner(mainFrame, 999)
-	ensureUIGradient(mainFrame, Color3.fromRGB(255, 208, 129), Color3.fromRGB(255, 144, 72))
-	ensureUIStroke(mainFrame, Color3.fromRGB(255, 240, 204), 1)
+	ensureUIGradient(mainFrame, UI_STYLE.GoldHighlight, UI_STYLE.GoldBase)
+	ensureUIStroke(mainFrame, UI_STYLE.GoldShadow, 1)
 
 	local bg = ensureFrame(mainFrame, "BG")
 	bg.Size = UDim2.fromScale(1, 1)
@@ -691,11 +879,11 @@ local function ensureSettingsSliderOption(scrollingFrame, optionName, layoutOrde
 	local bgFrame = ensureFrame(bg, "Frame")
 	bgFrame.Size = UDim2.fromScale(1, 1)
 	bgFrame.BackgroundTransparency = 1
-	ensureUIGradient(bgFrame, Color3.fromRGB(255, 200, 112), Color3.fromRGB(255, 126, 59))
+	ensureUIGradient(bgFrame, UI_STYLE.GoldHighlight, UI_STYLE.GoldBase)
 	local bgMain = ensureFrame(bg, "Main")
 	bgMain.Size = UDim2.fromScale(1, 1)
 	bgMain.BackgroundTransparency = 1
-	ensureUIGradient(bgMain, Color3.fromRGB(255, 220, 154), Color3.fromRGB(255, 142, 82))
+	ensureUIGradient(bgMain, UI_STYLE.GoldHighlight, UI_STYLE.GoldBase)
 
 	local bh = ensureFrame(mainFrame, "BH")
 	bh.Size = UDim2.fromScale(1, 1)
@@ -703,66 +891,51 @@ local function ensureSettingsSliderOption(scrollingFrame, optionName, layoutOrde
 	local bhFrame = ensureFrame(bh, "Frame")
 	bhFrame.Size = UDim2.fromScale(1, 1)
 	bhFrame.BackgroundTransparency = 1
-	ensureUIGradient(bhFrame, Color3.fromRGB(255, 206, 140), Color3.fromRGB(255, 154, 88))
+	ensureUIGradient(bhFrame, UI_STYLE.GoldHighlight, UI_STYLE.GoldBase)
 
 	local textLabel = ensureTextLabel(mainFrame, "TextLabel")
 	textLabel.Size = UDim2.fromScale(1, 1)
 	textLabel.Text = "100"
 	textLabel.TextScaled = true
-	textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-	ensureUIGradient(textLabel, Color3.fromRGB(255, 255, 255), Color3.fromRGB(255, 255, 255))
-	ensureUIStroke(textLabel, Color3.fromRGB(0, 0, 0), 1)
+	textLabel.TextColor3 = UI_STYLE.TextMain
+	ensureUIGradient(textLabel, UI_STYLE.TextMain, UI_STYLE.TextMain)
+	ensureUIStroke(textLabel, UI_STYLE.GoldShadow, 1).Transparency = 0.35
 end
 
 local function ensureSettingsSwitchOption(scrollingFrame, optionName, layoutOrder)
 	local option = ensureFrame(scrollingFrame, optionName)
 	option.Size = UDim2.new(1, -18, 0, 76)
 	option.LayoutOrder = layoutOrder
-	option.BackgroundColor3 = Color3.fromRGB(21, 29, 44)
-	option.BackgroundTransparency = 0.15
-	ensureUICorner(option, 10)
-	ensureUIStroke(option, Color3.fromRGB(74, 99, 142), 1)
+	styleInsetPanel(option, 10)
 
 	local title = ensureTextLabel(option, "Title")
 	title.Size = UDim2.new(1, -132, 0, 24)
 	title.Position = UDim2.fromOffset(10, 26)
 	title.Text = optionName
 	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextSize = 16
+	setLabelStyle(title, 16, UI_STYLE.TextMain)
 
 	local on = ensureTextButton(option, "ON")
 	on.Size = UDim2.fromOffset(92, 34)
 	on.Position = UDim2.new(1, -102, 0.5, -17)
-	on.BackgroundColor3 = Color3.fromRGB(82, 204, 131)
 	on.BackgroundTransparency = 0
 	on.Text = "ON"
-	on.TextColor3 = Color3.fromRGB(9, 20, 16)
-	on.Font = Enum.Font.GothamBlack
-	on.TextSize = 16
-	ensureUICorner(on, 8)
+	stylePrimaryButton(on)
 
 	local off = ensureTextButton(option, "OFF")
 	off.Size = on.Size
 	off.Position = on.Position
-	off.BackgroundColor3 = Color3.fromRGB(200, 85, 85)
 	off.BackgroundTransparency = 0
 	off.Text = "OFF"
-	off.TextColor3 = Color3.fromRGB(255, 239, 239)
-	off.Font = Enum.Font.GothamBlack
-	off.TextSize = 16
 	off.Visible = false
-	ensureUICorner(off, 8)
+	styleSecondaryButton(off)
 end
 
 local function ensureSpeedUpgradeCard(main, index, layoutOrder)
 	local card = ensureFrame(main, tostring(index))
 	card.Size = UDim2.new(1, -20, 0, 112)
 	card.LayoutOrder = layoutOrder
-	card.BackgroundColor3 = Color3.fromRGB(16, 26, 45)
-	card.BackgroundTransparency = 0.05
-	ensureUICorner(card, 12)
-	ensureUIStroke(card, Color3.fromRGB(78, 125, 198), 1.2)
-	ensureUIGradient(card, Color3.fromRGB(21, 35, 61), Color3.fromRGB(11, 21, 40))
+	styleInsetPanel(card, 12)
 
 	local template = ensureFrame(card, "Template")
 	template.Size = UDim2.fromScale(1, 1)
@@ -773,35 +946,29 @@ local function ensureSpeedUpgradeCard(main, index, layoutOrder)
 	addSpeed.Position = UDim2.fromOffset(12, 8)
 	addSpeed.TextXAlignment = Enum.TextXAlignment.Left
 	addSpeed.TextSize = 24
-	addSpeed.Font = Enum.Font.GothamBlack
-	addSpeed.TextColor3 = Color3.fromRGB(255, 255, 255)
+	addSpeed.Font = Enum.Font.GothamBold
+	addSpeed.TextColor3 = UI_STYLE.TextMain
 
 	local now = ensureTextLabel(template, "Now")
 	now.Size = UDim2.fromOffset(260, 22)
 	now.Position = UDim2.fromOffset(12, 44)
 	now.TextXAlignment = Enum.TextXAlignment.Left
-	now.TextSize = 16
+	setLabelStyle(now, 16, UI_STYLE.TextSecondary)
 	now.Text = "Current: 0"
-	now.TextColor3 = Color3.fromRGB(202, 226, 255)
 
 	local after = ensureTextLabel(template, "After")
 	after.Size = UDim2.fromOffset(260, 22)
 	after.Position = UDim2.fromOffset(12, 70)
 	after.TextXAlignment = Enum.TextXAlignment.Left
-	after.TextSize = 16
+	setLabelStyle(after, 16, UI_STYLE.TextSecondary)
 	after.Text = "After: 0"
-	after.TextColor3 = Color3.fromRGB(183, 255, 211)
 
 	local buy = ensureTextButton(template, "Buy")
 	buy.AnchorPoint = Vector2.new(1, 0.5)
 	buy.Size = UDim2.fromOffset(132, 40)
 	buy.Position = UDim2.new(1, -146, 0.5, 16)
-	buy.BackgroundColor3 = Color3.fromRGB(94, 220, 146)
-	buy.BackgroundTransparency = 0
 	buy.Text = ""
-	ensureUICorner(buy, 8)
-	ensureUIGradient(buy, Color3.fromRGB(131, 241, 169), Color3.fromRGB(73, 190, 124))
-	ensureUIStroke(buy, Color3.fromRGB(202, 255, 219), 1)
+	stylePrimaryButton(buy)
 	local buyMain = ensureFrame(buy, "Main")
 	buyMain.Size = UDim2.fromScale(1, 1)
 	buyMain.BackgroundTransparency = 1
@@ -809,19 +976,15 @@ local function ensureSpeedUpgradeCard(main, index, layoutOrder)
 	buyText.Size = UDim2.fromScale(1, 1)
 	buyText.TextScaled = true
 	buyText.Text = "Buy"
-	buyText.TextColor3 = Color3.fromRGB(7, 33, 18)
-	buyText.Font = Enum.Font.GothamBlack
+	buyText.TextColor3 = Color3.fromRGB(18, 30, 24)
+	buyText.Font = Enum.Font.GothamBold
 
 	local robux = ensureTextButton(template, "Robux")
 	robux.AnchorPoint = Vector2.new(1, 0.5)
 	robux.Size = UDim2.fromOffset(132, 40)
 	robux.Position = UDim2.new(1, -12, 0.5, 16)
-	robux.BackgroundColor3 = Color3.fromRGB(70, 116, 214)
-	robux.BackgroundTransparency = 0
 	robux.Text = ""
-	ensureUICorner(robux, 8)
-	ensureUIGradient(robux, Color3.fromRGB(106, 152, 255), Color3.fromRGB(70, 110, 210))
-	ensureUIStroke(robux, Color3.fromRGB(197, 219, 255), 1)
+	styleSecondaryButton(robux)
 	local robuxMain = ensureFrame(robux, "Main")
 	robuxMain.Size = UDim2.fromScale(1, 1)
 	robuxMain.BackgroundTransparency = 1
@@ -829,35 +992,30 @@ local function ensureSpeedUpgradeCard(main, index, layoutOrder)
 	robuxText.Size = UDim2.fromScale(1, 1)
 	robuxText.TextScaled = true
 	robuxText.Text = "R$"
-	robuxText.Font = Enum.Font.GothamBlack
+	robuxText.Font = Enum.Font.GothamBold
 end
 
 local function ensureFrameTopBar(frame, titleText)
 	local topBar = ensureFrame(frame, "TopBar")
 	topBar.Size = UDim2.new(1, 0, 0, 44)
-	topBar.BackgroundColor3 = Color3.fromRGB(10, 17, 32)
+	topBar.BackgroundColor3 = UI_STYLE.PanelFillDark
 	topBar.BackgroundTransparency = 0.02
-	ensureUIStroke(topBar, Color3.fromRGB(56, 74, 104), 1)
-	ensureUIGradient(topBar, Color3.fromRGB(13, 28, 58), Color3.fromRGB(8, 16, 34))
+	ensureUIStroke(topBar, UI_STYLE.GoldBase, 1.6).Transparency = 0.15
+	ensureUIGradient(topBar, UI_STYLE.SecondaryBg, UI_STYLE.PrimaryBg)
 
 	local title = ensureTextLabel(topBar, "Title")
 	title.Size = UDim2.new(1, -60, 1, 0)
 	title.Position = UDim2.fromOffset(12, 0)
 	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextSize = 18
+	setLabelStyle(title, 18, UI_STYLE.TextMain)
 	title.Text = titleText
 
 	local close = ensureTextButton(topBar, "X")
 	close.AnchorPoint = Vector2.new(1, 0.5)
 	close.Size = UDim2.fromOffset(34, 30)
 	close.Position = UDim2.new(1, -10, 0.5, 0)
-	close.BackgroundColor3 = Color3.fromRGB(160, 74, 88)
-	close.BackgroundTransparency = 0
 	close.Text = "X"
-	close.TextColor3 = Color3.fromRGB(255, 240, 240)
-	close.Font = Enum.Font.GothamBlack
-	close.TextSize = 16
-	ensureUICorner(close, 8)
+	styleCloseButton(close)
 
 	return topBar
 end
@@ -882,6 +1040,7 @@ local function ensureGearStoreLayout(frame)
 	scrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	scrollingFrame.ScrollBarThickness = 8
 	scrollingFrame.CanvasSize = UDim2.new()
+	scrollingFrame.ScrollBarImageColor3 = UI_STYLE.GoldHighlight
 
 	local list = scrollingFrame:FindFirstChildOfClass("UIListLayout")
 	if not list then
@@ -895,23 +1054,18 @@ local function ensureGearStoreLayout(frame)
 	local template = ensureFrame(scrollingFrame, "Template")
 	template.Visible = false
 	template.Size = UDim2.new(1, -6, 0, 86)
-	template.BackgroundColor3 = Color3.fromRGB(19, 28, 45)
-	template.BackgroundTransparency = 0.1
-	ensureUICorner(template, 10)
-	ensureUIStroke(template, Color3.fromRGB(66, 92, 137), 1)
+	styleInsetPanel(template, 10)
 
 	local icon = ensureImageLabel(template, "Icon")
 	icon.Size = UDim2.fromOffset(54, 54)
 	icon.Position = UDim2.fromOffset(10, 16)
-	icon.BackgroundColor3 = Color3.fromRGB(10, 14, 24)
-	icon.BackgroundTransparency = 0.15
-	ensureUICorner(icon, 8)
+	styleInsetPanel(icon, 8)
 
 	local addSpeed = ensureTextLabel(template, "AddSpeed")
 	addSpeed.Size = UDim2.new(1, -320, 0, 24)
 	addSpeed.Position = UDim2.fromOffset(72, 8)
 	addSpeed.TextXAlignment = Enum.TextXAlignment.Left
-	addSpeed.TextSize = 17
+	setLabelStyle(addSpeed, 17, UI_STYLE.TextMain)
 	addSpeed.Text = "Gear"
 	local addSpeedShadow = ensureTextLabel(addSpeed, "Shadow")
 	addSpeedShadow.Size = UDim2.fromScale(1, 1)
@@ -921,26 +1075,22 @@ local function ensureGearStoreLayout(frame)
 	buy.AnchorPoint = Vector2.new(1, 1)
 	buy.Size = UDim2.fromOffset(118, 34)
 	buy.Position = UDim2.new(1, -140, 1, -8)
-	buy.BackgroundColor3 = Color3.fromRGB(94, 210, 132)
-	buy.BackgroundTransparency = 0
 	buy.Text = ""
-	ensureUICorner(buy, 8)
+	stylePrimaryButton(buy)
 	local buyMain = ensureFrame(buy, "Main")
 	buyMain.Size = UDim2.fromScale(1, 1)
 	local buyText = ensureTextLabel(buyMain, "TextL")
 	buyText.Size = UDim2.fromScale(1, 1)
 	buyText.TextScaled = true
 	buyText.Text = "Buy"
-	buyText.TextColor3 = Color3.fromRGB(10, 24, 16)
+	buyText.TextColor3 = Color3.fromRGB(18, 30, 24)
 
 	local robux = ensureTextButton(template, "Robux")
 	robux.AnchorPoint = Vector2.new(1, 1)
 	robux.Size = UDim2.fromOffset(118, 34)
 	robux.Position = UDim2.new(1, -12, 1, -8)
-	robux.BackgroundColor3 = Color3.fromRGB(70, 116, 214)
-	robux.BackgroundTransparency = 0
 	robux.Text = ""
-	ensureUICorner(robux, 8)
+	styleSecondaryButton(robux)
 	local robuxMain = ensureFrame(robux, "Main")
 	robuxMain.Size = UDim2.fromScale(1, 1)
 	local robuxText = ensureTextLabel(robuxMain, "TextL")
@@ -970,23 +1120,19 @@ local function ensureCometMerchantLayout(frame)
 	local template = ensureFrame(main, "Template")
 	template.Visible = false
 	template.Size = UDim2.new(1, -6, 0, 104)
-	template.BackgroundColor3 = Color3.fromRGB(20, 29, 46)
-	template.BackgroundTransparency = 0.1
-	ensureUICorner(template, 10)
-	ensureUIStroke(template, Color3.fromRGB(66, 92, 137), 1)
+	styleInsetPanel(template, 10)
 
 	local icon = ensureImageLabel(template, "Icon")
 	icon.Size = UDim2.fromOffset(52, 52)
 	icon.Position = UDim2.fromOffset(10, 26)
-	icon.BackgroundColor3 = Color3.fromRGB(10, 14, 24)
-	icon.BackgroundTransparency = 0.15
-	ensureUICorner(icon, 8)
+	styleInsetPanel(icon, 8)
 
 	local tName = ensureTextLabel(template, "TName")
 	tName.Size = UDim2.new(1, -290, 0, 24)
 	tName.Position = UDim2.fromOffset(70, 8)
 	tName.TextXAlignment = Enum.TextXAlignment.Left
 	tName.Text = "+ Offer"
+	setLabelStyle(tName, 16, UI_STYLE.TextMain)
 	local tNameShadow = ensureTextLabel(tName, "Shadow")
 	tNameShadow.Size = UDim2.fromScale(1, 1)
 	tNameShadow.Text = tName.Text
@@ -996,6 +1142,7 @@ local function ensureCometMerchantLayout(frame)
 	left.Position = UDim2.fromOffset(70, 34)
 	left.TextXAlignment = Enum.TextXAlignment.Left
 	left.Text = "x0 Stock"
+	setLabelStyle(left, 14, UI_STYLE.TextSecondary)
 	local leftShadow = ensureTextLabel(left, "Shadow")
 	leftShadow.Size = UDim2.fromScale(1, 1)
 	leftShadow.Text = left.Text
@@ -1008,6 +1155,7 @@ local function ensureCometMerchantLayout(frame)
 	info.TextWrapped = true
 	info.TextSize = 13
 	info.Text = "Offer description"
+	setLabelStyle(info, 13, UI_STYLE.TextSecondary)
 	local infoShadow = ensureTextLabel(info, "Shadow")
 	infoShadow.Size = UDim2.fromScale(1, 1)
 	infoShadow.Text = info.Text
@@ -1018,6 +1166,7 @@ local function ensureCometMerchantLayout(frame)
 	textL.Position = UDim2.new(1, -12, 10 / 104, 0)
 	textL.Text = "0"
 	textL.TextScaled = true
+	setLabelStyle(textL, 16, UI_STYLE.GoldHighlight)
 	local textLShadow = ensureTextLabel(textL, "Shadow")
 	textLShadow.Size = UDim2.fromScale(1, 1)
 	textLShadow.Text = textL.Text
@@ -1026,13 +1175,8 @@ local function ensureCometMerchantLayout(frame)
 	buy.AnchorPoint = Vector2.new(1, 1)
 	buy.Size = UDim2.fromOffset(128, 36)
 	buy.Position = UDim2.new(1, -12, 1, -10)
-	buy.BackgroundColor3 = Color3.fromRGB(94, 210, 132)
-	buy.BackgroundTransparency = 0
 	buy.Text = "Buy"
-	buy.TextColor3 = Color3.fromRGB(10, 24, 16)
-	buy.TextSize = 16
-	buy.Font = Enum.Font.GothamBlack
-	ensureUICorner(buy, 8)
+	stylePrimaryButton(buy)
 end
 
 local function ensureLimitedRewardLayout(frame)
@@ -1047,13 +1191,8 @@ local function ensureLimitedRewardLayout(frame)
 	local joinEvent = ensureTextButton(main, "JoinEvent")
 	joinEvent.Size = UDim2.fromOffset(180, 42)
 	joinEvent.Position = UDim2.fromOffset(0, 0)
-	joinEvent.BackgroundColor3 = Color3.fromRGB(255, 200, 98)
-	joinEvent.BackgroundTransparency = 0
 	joinEvent.Text = "Claim"
-	joinEvent.TextColor3 = Color3.fromRGB(24, 24, 20)
-	joinEvent.Font = Enum.Font.GothamBlack
-	joinEvent.TextSize = 18
-	ensureUICorner(joinEvent, 10)
+	stylePrimaryButton(joinEvent)
 
 	local infoFrame = ensureFrame(frame, "Frame")
 	infoFrame.BackgroundTransparency = 1
@@ -1227,12 +1366,7 @@ local function ensureFrames()
 		frame.Position = UDim2.fromScale(0.5, 0.5)
 		frame.Size = UDim2.new(0.9, 0, 0.84, 0)
 		frame.ClipsDescendants = true
-		frame.BackgroundColor3 = Color3.fromRGB(7, 14, 31)
-		frame.BackgroundTransparency = 0.04
-		frame.BorderSizePixel = 0
-		ensureUICorner(frame, 12)
-		ensureUIStroke(frame, Color3.fromRGB(57, 89, 141), 1)
-		ensureUIGradient(frame, Color3.fromRGB(9, 23, 49), Color3.fromRGB(6, 14, 30))
+		stylePanel(frame, 12)
 	end
 
 	local speedUpgrade = ensureFrame(frames, "SpeedUpgrade")
@@ -1289,10 +1423,7 @@ local function ensureFrames()
 	template.Visible = false
 	template.Size = UDim2.new(1, 0, 0, 46)
 	template.LayoutOrder = 100
-	template.BackgroundColor3 = Color3.fromRGB(20, 29, 46)
-	template.BackgroundTransparency = 0.12
-	ensureUICorner(template, 8)
-	ensureUIStroke(template, Color3.fromRGB(70, 95, 132), 1)
+	styleInsetPanel(template, 8)
 	local render = ensureImageLabel(template, "Render")
 	render.Position = UDim2.fromOffset(8, 8)
 	render.Size = UDim2.fromOffset(30, 30)
@@ -1300,19 +1431,14 @@ local function ensureFrames()
 	amount.Position = UDim2.fromOffset(46, 0)
 	amount.Size = UDim2.new(1, -54, 1, 0)
 	amount.TextXAlignment = Enum.TextXAlignment.Left
-	amount.TextSize = 15
+	setLabelStyle(amount, 15, UI_STYLE.TextMain)
 
 	local rebirthButton = ensureTextButton(rebirthMain, "Rebirth")
 	rebirthButton.Size = UDim2.fromOffset(180, 38)
 	rebirthButton.AnchorPoint = Vector2.new(0.5, 1)
 	rebirthButton.Position = UDim2.new(0.5, 0, 1, -10)
-	rebirthButton.BackgroundColor3 = Color3.fromRGB(112, 218, 145)
-	rebirthButton.BackgroundTransparency = 0
 	rebirthButton.Text = "Rebirth"
-	rebirthButton.TextColor3 = Color3.fromRGB(10, 20, 16)
-	rebirthButton.Font = Enum.Font.GothamBlack
-	rebirthButton.TextSize = 18
-	ensureUICorner(rebirthButton, 10)
+	stylePrimaryButton(rebirthButton)
 
 	local settings = ensureFrame(frames, "Settings")
 	settings.Size = UDim2.new(0.56, 0, 0.66, 0)
@@ -1334,6 +1460,7 @@ local function ensureFrames()
 	scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 520)
 	scrollingFrame.ScrollBarThickness = 8
 	scrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scrollingFrame.ScrollBarImageColor3 = UI_STYLE.GoldHighlight
 
 	local settingsList = scrollingFrame:FindFirstChildOfClass("UIListLayout")
 	if not settingsList then
@@ -1379,6 +1506,7 @@ local function ensureFrames()
 	limitedReward.Position = UDim2.fromScale(0.5, 0.5)
 	limitedReward.Size = UDim2.new(0.5, 0, 0.46, 0)
 	limitedReward.ClipsDescendants = true
+	stylePanel(limitedReward, 12)
 	ensureLimitedRewardLayout(limitedReward)
 end
 

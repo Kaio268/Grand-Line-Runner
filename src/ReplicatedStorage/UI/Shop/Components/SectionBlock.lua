@@ -122,7 +122,7 @@ local function SectionBlock(props)
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}),
 			DividerLeft = e("Frame", {
-				BackgroundColor3 = Color3.fromRGB(69, 98, 143),
+				BackgroundColor3 = Theme.Palette.Gold,
 				BackgroundTransparency = 0.12,
 				BorderSizePixel = 0,
 				Position = UDim2.new(0, 0, 0, 60),
@@ -134,7 +134,7 @@ local function SectionBlock(props)
 			}),
 			DividerRight = e("Frame", {
 				AnchorPoint = Vector2.new(1, 0),
-				BackgroundColor3 = Color3.fromRGB(69, 98, 143),
+				BackgroundColor3 = Theme.Palette.Gold,
 				BackgroundTransparency = 0.12,
 				BorderSizePixel = 0,
 				Position = UDim2.new(1, 0, 0, 60),
