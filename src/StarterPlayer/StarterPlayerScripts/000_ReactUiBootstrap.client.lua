@@ -102,11 +102,11 @@ end
 
 local HUD_BUTTON_LAYOUT = {
 	Store = UDim2.fromOffset(0, 0),
-	Index = UDim2.fromOffset(90, 0),
-	Gifts = UDim2.fromOffset(0, 90),
-	Settings = UDim2.fromOffset(90, 90),
-	Rebirth = UDim2.fromOffset(0, 180),
-	Quest = UDim2.fromOffset(90, 180),
+	Index = UDim2.fromOffset(94, 0),
+	Gifts = UDim2.fromOffset(0, 94),
+	Settings = UDim2.fromOffset(94, 94),
+	Rebirth = UDim2.fromOffset(0, 188),
+	Quest = UDim2.fromOffset(94, 188),
 }
 
 local HUD_BUTTON_NAMES = {
@@ -412,7 +412,7 @@ local function ensureHudButton(lButtons, name, showTimer)
 	button.Visible = true
 	button.Active = true
 	button.AutoButtonColor = false
-	button.Size = UDim2.fromOffset(84, 84)
+	button.Size = UDim2.fromOffset(92, 92)
 	button.Position = HUD_BUTTON_LAYOUT[name] or UDim2.fromOffset(0, 0)
 	button.ClipsDescendants = false
 
@@ -1086,7 +1086,7 @@ local function ensureHud()
 	local lButtons = ensureFrame(hud, "LButtons")
 	clearChildren(lButtons, HUD_BUTTON_NAMES)
 	lButtons.Visible = true
-	lButtons.Size = UDim2.fromOffset(188, 274)
+	lButtons.Size = UDim2.fromOffset(198, 288)
 	lButtons.Position = UDim2.fromOffset(10, 250)
 	lButtons.ClipsDescendants = false
 

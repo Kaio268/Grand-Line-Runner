@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
@@ -73,6 +74,11 @@ local HUD_ICON_ASSET_OVERRIDES = {
 local HUD_ICON_SIZE_OVERRIDES = {
 	Store = Vector2.new(76, 76),
 	Settings = Vector2.new(68, 68),
+	Quest = Vector2.new(82, 50),
+}
+
+local HUD_ICON_SCALE_TYPE_OVERRIDES = {
+	Quest = Enum.ScaleType.Crop,
 }
 
 local PROTECTED_CHILDREN = {
@@ -84,6 +90,7 @@ local PROTECTED_CHILDREN = {
 local HOVER_IDLE_SCALE = 1
 local HOVER_ACTIVE_SCALE = 0.95
 local HOVER_TWEEN = TweenInfo.new(0.09, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local HUD_BUTTON_NO_ANIM_TAG = "NoAnim"
 
 local destroyed = false
 local renderQueued = false
@@ -377,10 +384,16 @@ local function ensureHoverScale(button)
 
 	local scale = button:FindFirstChild("ReactHudHoverScale")
 	if not scale or not scale:IsA("UIScale") then
-		scale = Instance.new("UIScale")
+		scale = button:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
 		scale.Name = "ReactHudHoverScale"
-		scale.Scale = HOVER_IDLE_SCALE
 		scale.Parent = button
+	end
+	scale.Scale = HOVER_IDLE_SCALE
+
+	for _, child in ipairs(button:GetChildren()) do
+		if child:IsA("UIScale") and child ~= scale then
+			child.Scale = HOVER_IDLE_SCALE
+		end
 	end
 
 	local activeTween = nil
@@ -395,13 +408,24 @@ local function ensureHoverScale(button)
 		activeTween:Play()
 	end
 
+	local function resetToIdle()
+		tweenTo(HOVER_IDLE_SCALE)
+	end
+
 	hoverBindings[button] = {
 		connections = {
 			button.MouseEnter:Connect(function()
 				tweenTo(HOVER_ACTIVE_SCALE)
 			end),
 			button.MouseLeave:Connect(function()
-				tweenTo(HOVER_IDLE_SCALE)
+				resetToIdle()
+			end),
+			button.MouseButton1Up:Connect(function()
+				resetToIdle()
+			end),
+			button.Activated:Connect(function()
+				resetToIdle()
+				task.defer(resetToIdle)
 			end),
 			button.Destroying:Connect(function()
 				clearHoverBinding(button)
@@ -419,6 +443,7 @@ local function ensureShell(container, definition, index)
 		existing.ClipsDescendants = false
 		existing.Size = UDim2.fromOffset(92, 92)
 		existing.LayoutOrder = index
+		CollectionService:AddTag(existing, HUD_BUTTON_NO_ANIM_TAG)
 		if mappedPosition then
 			existing.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
 		end
@@ -436,6 +461,7 @@ local function ensureShell(container, definition, index)
 	button.Visible = true
 	button.LayoutOrder = index
 	button.Size = UDim2.fromOffset(92, 92)
+	CollectionService:AddTag(button, HUD_BUTTON_NO_ANIM_TAG)
 	if mappedPosition then
 		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
 	else
@@ -904,7 +930,7 @@ local function buildTileStyle(button)
 		local iconSize = HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66)
 		iconStyle.position = UDim2.fromScale(0.5, 0.34)
 		iconStyle.size = UDim2.fromOffset(iconSize.X, iconSize.Y)
-		iconStyle.scaleType = Enum.ScaleType.Fit
+		iconStyle.scaleType = HUD_ICON_SCALE_TYPE_OVERRIDES[button.Name] or Enum.ScaleType.Fit
 		iconStyle.backgroundTransparency = 1
 		iconStyle.zIndex = math.max(clampNumber(iconStyle.zIndex, 14, 24), 18)
 	end

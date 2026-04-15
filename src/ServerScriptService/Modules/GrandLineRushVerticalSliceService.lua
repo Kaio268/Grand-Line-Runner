@@ -10,6 +10,7 @@ local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
+local BrainrotInteraction = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Interaction"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
@@ -935,6 +936,30 @@ local function canForceCarryDrop(player, runtime, options)
 	return true, nil
 end
 
+local function getManualDropPosition(player)
+	local character = player and player.Character
+	if not character then
+		return nil
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+		or character.PrimaryPart
+		or character:FindFirstChild("Head")
+	if not (rootPart and rootPart:IsA("BasePart")) then
+		return nil
+	end
+
+	local lookVector = rootPart.CFrame.LookVector
+	local flatDirection = Vector3.new(lookVector.X, 0, lookVector.Z)
+	if flatDirection.Magnitude < 1e-4 then
+		flatDirection = Vector3.new(0, 0, -1)
+	else
+		flatDirection = flatDirection.Unit
+	end
+
+	return rootPart.Position + (flatDirection * 5)
+end
+
 local function dropCarriedReward(player, options)
 	local runtime = getRuntime(player)
 	options = if typeof(options) == "table" then options else {}
@@ -962,6 +987,15 @@ local function dropCarriedReward(player, options)
 	clearCarryTool(player)
 
 	return resolveActionResponse(player, true, runtime.ResolutionText)
+end
+
+local function dropCarriedBrainrot(player, dropPosition)
+	local ok, result = BrainrotInteraction.DropHeldAtPosition(BrainrotInteraction.GetActiveContext(), player, nil, dropPosition)
+	if ok then
+		return resolveActionResponse(player, true, "Brainrot dropped.")
+	end
+
+	return resolveActionResponse(player, false, nil, tostring(result or "no_held_brainrot"))
 end
 
 local function openChest(player, requestedChestId)
@@ -1245,6 +1279,27 @@ local function handleRequest(player, actionName, payload)
 		return resolveActionResponse(player, true)
 	elseif actionName == "OpenChest" then
 		return openChest(player, payload and payload.ChestId)
+	elseif actionName == "DropCarriedReward" then
+		local dropPosition = getManualDropPosition(player)
+		if typeof(dropPosition) ~= "Vector3" then
+			return resolveActionResponse(player, false, nil, "missing_drop_position")
+		end
+
+		local runtime = getRuntime(player)
+		if runtime.CarriedReward ~= nil then
+			return dropCarriedReward(player, {
+				Reason = "PlayerDrop",
+				DropPosition = dropPosition,
+				IgnoreProtection = true,
+			})
+		end
+
+		local brainrotContext = BrainrotInteraction.GetActiveContext()
+		if player:GetAttribute("CarriedBrainrot") ~= nil or BrainrotInteraction.HasHeld(brainrotContext, player) then
+			return dropCarriedBrainrot(player, dropPosition)
+		end
+
+		return resolveActionResponse(player, false, nil, "no_carried_item")
 	elseif actionName == "FeedCrew" then
 		return feedCrew(player, payload and payload.CrewInstanceId, payload and payload.FoodKey)
 	end
