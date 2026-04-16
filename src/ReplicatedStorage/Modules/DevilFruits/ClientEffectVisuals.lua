@@ -431,71 +431,12 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 	end)
 end
 
-function ClientEffectVisuals:CreateRubberLaunchEffect(_targetPlayer, fruitName, abilityName, payload)
+function ClientEffectVisuals:CreateRubberLaunchEffect(_targetPlayer, fruitName, abilityName, _payload)
 	if fruitName ~= self.GomuFruitName or abilityName ~= self.RubberLaunchAbility then
 		return
 	end
 
-	payload = payload or {}
-
-	local direction = typeof(payload.Direction) == "Vector3" and payload.Direction or DEFAULT_DIRECTION
-	local distance = math.max(0, tonumber(payload.Distance) or 0)
-	local startPosition = typeof(payload.StartPosition) == "Vector3" and payload.StartPosition or nil
-	local endPosition = typeof(payload.EndPosition) == "Vector3" and payload.EndPosition or nil
-
-	if not startPosition then
-		local rootPart = self.GetLocalRootPart()
-		startPosition = rootPart and rootPart.Position or Vector3.zero
-	end
-
-	if not endPosition then
-		endPosition = startPosition + (direction * distance)
-	end
-
-	startPosition += Vector3.new(0, 1.15, 0)
-	endPosition += Vector3.new(0, 1.15, 0)
-
-	local segment = endPosition - startPosition
-	local segmentLength = segment.Magnitude
-	local color = Color3.fromRGB(255, 190, 132)
-
-	if segmentLength > 0.2 then
-		local band = Instance.new("Part")
-		band.Name = "GomuRubberBand"
-		band.Anchored = true
-		band.CanCollide = false
-		band.CanTouch = false
-		band.CanQuery = false
-		band.Material = Enum.Material.Neon
-		band.Color = color
-		band.Transparency = 0.18
-		band.Size = Vector3.new(0.38, 0.38, segmentLength)
-		band.CFrame = CFrame.lookAt(startPosition:Lerp(endPosition, 0.5), endPosition)
-		band.Parent = Workspace
-
-		local tween = TweenService:Create(band, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			Transparency = 1,
-			Size = Vector3.new(0.08, 0.08, segmentLength * 1.06),
-		})
-
-		tween:Play()
-		tween.Completed:Connect(function()
-			if band.Parent then
-				band:Destroy()
-			end
-		end)
-	end
-
-	createPulse("GomuLaunchStart", startPosition, color, 1.25, 3.4, 0.22)
-	createPulse("GomuLaunchEnd", endPosition, Color3.fromRGB(255, 232, 198), 0.95, 2.6, 0.2)
-
-	for sampleIndex = 1, 3 do
-		local alpha = sampleIndex / 4
-		local samplePosition = startPosition:Lerp(endPosition, alpha)
-		task.delay((sampleIndex - 1) * 0.03, function()
-			createPulse("GomuLaunchTrail", samplePosition, color, 0.5, 1.4, 0.14)
-		end)
-	end
+	return
 end
 
 return ClientEffectVisuals

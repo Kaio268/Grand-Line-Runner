@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -17,7 +18,22 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+local GOMU_LAUNCH_FX_NAME = "FX"
+local GOMU_LAUNCH_VFX_DEFAULT_DURATION = 0.35
+local GOMU_LAUNCH_VFX_AIRBORNE_START_GRACE = 0.65
+local GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME = 0.08
+local GOMU_LAUNCH_VFX_CLEANUP_GRACE = 0.35
+local GOMU_LAUNCH_VFX_MAX_DURATION = 6
+local GOMU_LAUNCH_FX_PART_FALLBACK_SIZE = Vector3.new(5, 5, 5)
+local GOMU_DEFAULT_SPEED_SCALE_REFERENCE = 70
 local MIN_DIRECTION_MAGNITUDE = 0.01
+
+local AIRBORNE_HUMANOID_STATES = {
+	[Enum.HumanoidStateType.Freefall] = true,
+	[Enum.HumanoidStateType.FallingDown] = true,
+	[Enum.HumanoidStateType.Flying] = true,
+	[Enum.HumanoidStateType.Jumping] = true,
+}
 
 local function getCurrentCamera()
 	return Workspace.CurrentCamera
@@ -40,9 +56,327 @@ local function getPlayerRootPart(targetPlayer)
 	return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function getPlayerHumanoid(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	return character and character:FindFirstChildOfClass("Humanoid") or nil
+end
+
 local function getPlanarDistance(a, b)
 	local delta = a - b
 	return Vector3.new(delta.X, 0, delta.Z).Magnitude
+end
+
+local function getPlanarSpeed(rootPart)
+	if not rootPart then
+		return 0
+	end
+
+	return getPlanarVector(rootPart.AssemblyLinearVelocity).Magnitude
+end
+
+local function getSpeedScaledLaunchDistance(abilityConfig, rootPart)
+	local baseDistance = math.max(0, tonumber(abilityConfig and abilityConfig.LaunchDistance) or 0)
+	local speedDistanceBonus = math.max(0, tonumber(abilityConfig and abilityConfig.SpeedLaunchDistanceBonus) or 0)
+	if speedDistanceBonus <= 0 then
+		return baseDistance
+	end
+
+	local referenceSpeed = math.max(
+		1,
+		tonumber(abilityConfig and abilityConfig.SpeedScaleReference) or GOMU_DEFAULT_SPEED_SCALE_REFERENCE
+	)
+	local speedAlpha = math.clamp(getPlanarSpeed(rootPart) / referenceSpeed, 0, 1)
+	return baseDistance + (speedDistanceBonus * speedAlpha)
+end
+
+local function getRubberLaunchFxAsset()
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
+	local gomuFolder = vfxFolder and vfxFolder:FindFirstChild("Gomu")
+	return gomuFolder and gomuFolder:FindFirstChild(GOMU_LAUNCH_FX_NAME) or nil
+end
+
+local function getLaunchVfxDuration(payload)
+	local duration = typeof(payload) == "table" and tonumber(payload.Duration) or nil
+	if not duration then
+		local abilityConfig = DevilFruitConfig.GetAbility("Gomu Gomu no Mi", "RubberLaunch")
+		duration = abilityConfig and tonumber(abilityConfig.LaunchDuration) or nil
+	end
+
+	return math.clamp(duration or GOMU_LAUNCH_VFX_DEFAULT_DURATION, 0.05, 3)
+end
+
+local function isHumanoidAirborne(humanoid)
+	if typeof(humanoid) ~= "Instance" or not humanoid:IsA("Humanoid") or humanoid.Health <= 0 then
+		return false
+	end
+
+	if AIRBORNE_HUMANOID_STATES[humanoid:GetState()] then
+		return true
+	end
+
+	return humanoid.FloorMaterial == Enum.Material.Air
+end
+
+local function getMaxParticleLifetime(container)
+	local maxLifetime = 0
+	for _, descendant in ipairs(container:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			maxLifetime = math.max(maxLifetime, descendant.Lifetime.Max)
+		end
+	end
+
+	return maxLifetime
+end
+
+local function getRotationOnly(cframe)
+	return cframe - cframe.Position
+end
+
+local function configureLaunchFxPart(part)
+	part.Anchored = false
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+end
+
+local function configureLaunchFxParts(container)
+	if container:IsA("BasePart") then
+		configureLaunchFxPart(container)
+	end
+
+	for _, descendant in ipairs(container:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			configureLaunchFxPart(descendant)
+		end
+	end
+end
+
+local function weldLaunchPartToRoot(part, rootPart)
+	part.CFrame = rootPart.CFrame * getRotationOnly(part.CFrame)
+	part.Parent = rootPart.Parent or Workspace
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "GomuLaunchFxWeld"
+	weld.Part0 = rootPart
+	weld.Part1 = part
+	weld.Parent = part
+end
+
+local function createLaunchFxPartFromChildren(sourceFx, rootPart)
+	local part = Instance.new("Part")
+	part.Name = "GomuRubberLaunchFX"
+	part.Size = GOMU_LAUNCH_FX_PART_FALLBACK_SIZE
+	part.Transparency = 1
+	configureLaunchFxPart(part)
+
+	if sourceFx:IsA("ParticleEmitter") or sourceFx:IsA("Beam") or sourceFx:IsA("Trail") then
+		sourceFx:Clone().Parent = part
+	else
+		for _, child in ipairs(sourceFx:GetChildren()) do
+			child:Clone().Parent = part
+		end
+	end
+
+	part.CFrame = rootPart.CFrame
+	part.Parent = rootPart.Parent or Workspace
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "GomuLaunchFxWeld"
+	weld.Part0 = rootPart
+	weld.Part1 = part
+	weld.Parent = part
+
+	return part
+end
+
+local function cloneLaunchFxToRoot(sourceFx, rootPart)
+	if sourceFx:IsA("BasePart") then
+		local part = sourceFx:Clone()
+		part.Name = "GomuRubberLaunchFX"
+		configureLaunchFxParts(part)
+		weldLaunchPartToRoot(part, rootPart)
+		return part
+	end
+
+	local attachment
+	if sourceFx:IsA("Attachment") then
+		attachment = sourceFx:Clone()
+		attachment.Name = "GomuRubberLaunchFX"
+	else
+		return createLaunchFxPartFromChildren(sourceFx, rootPart)
+	end
+
+	attachment.Parent = rootPart
+	return attachment
+end
+
+local function setLaunchFxEnabled(container, enabled)
+	for _, descendant in ipairs(container:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") or descendant:IsA("Beam") or descendant:IsA("Trail") then
+			descendant.Enabled = enabled
+		end
+	end
+end
+
+local function activateLaunchFx(container)
+	local activated = false
+
+	for _, descendant in ipairs(container:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			activated = true
+			descendant.Enabled = false
+
+			local emitDelay = math.max(0, tonumber(descendant:GetAttribute("EmitDelay")) or 0)
+			local emitCount = tonumber(descendant:GetAttribute("EmitCount"))
+
+			task.delay(emitDelay, function()
+				if not descendant.Parent then
+					return
+				end
+
+				if emitCount and emitCount > 0 then
+					pcall(function()
+						descendant:Emit(emitCount)
+					end)
+				end
+
+				descendant.Enabled = true
+			end)
+		elseif descendant:IsA("Beam") or descendant:IsA("Trail") then
+			activated = true
+			descendant.Enabled = true
+		end
+	end
+
+	return activated
+end
+
+local function cleanupLaunchVfxState(state, destroyDelay)
+	if type(state) ~= "table" then
+		return
+	end
+
+	if state.Connection then
+		state.Connection:Disconnect()
+		state.Connection = nil
+	end
+
+	local container = state.Container
+	if not container or not container.Parent then
+		return
+	end
+
+	destroyDelay = math.max(0, tonumber(destroyDelay) or 0)
+	if destroyDelay > 0 then
+		setLaunchFxEnabled(container, false)
+		task.delay(destroyDelay, function()
+			if container.Parent then
+				container:Destroy()
+			end
+		end)
+		return
+	end
+
+	if state.Container and state.Container.Parent then
+		state.Container:Destroy()
+	end
+end
+
+local function clearLaunchVfxForPlayer(self, targetPlayer)
+	if not self.activeLaunchVfxByPlayer then
+		return
+	end
+
+	local state = self.activeLaunchVfxByPlayer[targetPlayer]
+	if not state then
+		return
+	end
+
+	self.activeLaunchVfxByPlayer[targetPlayer] = nil
+	cleanupLaunchVfxState(state)
+end
+
+local function playRubberLaunchVfx(self, targetPlayer, payload)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return false
+	end
+
+	local humanoid = getPlayerHumanoid(targetPlayer)
+	if not humanoid then
+		return false
+	end
+
+	local sourceFx = getRubberLaunchFxAsset()
+	if not sourceFx then
+		return false
+	end
+
+	clearLaunchVfxForPlayer(self, targetPlayer)
+
+	local duration = getLaunchVfxDuration(payload)
+	local container = cloneLaunchFxToRoot(sourceFx, rootPart)
+
+	local startedAt = os.clock()
+	local state = {
+		Container = container,
+		Humanoid = humanoid,
+		StartedAt = startedAt,
+		LastAirborneAt = startedAt,
+		SeenAirborne = false,
+	}
+
+	local fadeCleanupDelay = getMaxParticleLifetime(container) + GOMU_LAUNCH_VFX_CLEANUP_GRACE
+	local function finish(destroyDelay)
+		if self.activeLaunchVfxByPlayer[targetPlayer] == state then
+			self.activeLaunchVfxByPlayer[targetPlayer] = nil
+		end
+
+		cleanupLaunchVfxState(state, destroyDelay)
+	end
+
+	state.Connection = RunService.Heartbeat:Connect(function()
+		if not container.Parent or not rootPart.Parent then
+			finish()
+			return
+		end
+
+		local now = os.clock()
+		local airborne = isHumanoidAirborne(humanoid)
+		if airborne then
+			state.SeenAirborne = true
+			state.LastAirborneAt = now
+		elseif state.SeenAirborne and (now - state.LastAirborneAt) >= GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME then
+			finish(fadeCleanupDelay)
+		elseif not state.SeenAirborne and (now - startedAt) >= math.max(GOMU_LAUNCH_VFX_AIRBORNE_START_GRACE, duration) then
+			finish(fadeCleanupDelay)
+		elseif (now - startedAt) >= GOMU_LAUNCH_VFX_MAX_DURATION then
+			finish(fadeCleanupDelay)
+		end
+	end)
+
+	local activated = activateLaunchFx(container)
+	if not activated then
+		cleanupLaunchVfxState(state)
+		return false
+	end
+
+	self.activeLaunchVfxByPlayer[targetPlayer] = state
+
+	task.delay(GOMU_LAUNCH_VFX_MAX_DURATION + fadeCleanupDelay, function()
+		if self.activeLaunchVfxByPlayer[targetPlayer] == state then
+			self.activeLaunchVfxByPlayer[targetPlayer] = nil
+			cleanupLaunchVfxState(state)
+		end
+	end)
+
+	return true
 end
 
 local function getPlayerFromDescendant(instance)
@@ -198,7 +532,7 @@ end
 local function getGomuLaunchTarget(self, abilityConfig)
 	local result, fallbackPosition, rayOrigin, rayDirection = getLookAimRaycast(self.player)
 	local aimPosition = fallbackPosition
-	local launchDistance = math.max(0, tonumber(abilityConfig and abilityConfig.LaunchDistance) or 0)
+	local launchDistance = getSpeedScaledLaunchDistance(abilityConfig, self.getLocalRootPart())
 	local targetPlayer = findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection)
 
 	if not targetPlayer and result then
@@ -240,6 +574,7 @@ function GomuClient.Create(config)
 	self.playOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or function() end
 	self.highlight = nil
 	self.targetPlayer = nil
+	self.activeLaunchVfxByPlayer = {}
 	return self
 end
 
@@ -297,8 +632,12 @@ function GomuClient:Update()
 	self.targetPlayer = targetPlayer
 end
 
-function GomuClient:HandleEffect()
-	return false
+function GomuClient:HandleEffect(targetPlayer, abilityName, payload)
+	if abilityName ~= "RubberLaunch" then
+		return false
+	end
+
+	return playRubberLaunchVfx(self, targetPlayer, payload)
 end
 
 function GomuClient:HandleStateEvent()
@@ -316,9 +655,11 @@ end
 
 function GomuClient:HandleCharacterRemoving()
 	clearGomuHighlight(self)
+	clearLaunchVfxForPlayer(self, self.player)
 end
 
-function GomuClient:HandlePlayerRemoving()
+function GomuClient:HandlePlayerRemoving(leavingPlayer)
+	clearLaunchVfxForPlayer(self, leavingPlayer)
 	return
 end
 

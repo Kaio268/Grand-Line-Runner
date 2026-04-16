@@ -7,11 +7,12 @@ local GomuServer = {}
 
 local WALL_PADDING = 1.5
 local MIN_DIRECTION_MAGNITUDE = 0.01
-local MIN_HORIZONTAL_LAUNCH_SPEED = 110
-local MIN_VERTICAL_LAUNCH_SPEED = 52
-local HORIZONTAL_SPEED_MULTIPLIER = 1.9
-local VERTICAL_SPEED_RATIO = 0.58
-local NETWORK_OWNER_RELEASE_DELAY = 0.45
+local MIN_HORIZONTAL_LAUNCH_SPEED = 145
+local MIN_VERTICAL_LAUNCH_SPEED = 60
+local HORIZONTAL_SPEED_MULTIPLIER = 2.15
+local VERTICAL_SPEED_RATIO = 0.32
+local NETWORK_OWNER_RELEASE_DELAY = 0.65
+local DEFAULT_SPEED_SCALE_REFERENCE = 70
 
 local function getPlanarVector(vector)
 	return Vector3.new(vector.X, 0, vector.Z)
@@ -28,6 +29,27 @@ end
 
 local function getFallbackDirection(rootPart)
 	return getPlanarUnitOrNil(rootPart.CFrame.LookVector) or Vector3.new(0, 0, -1)
+end
+
+local function getPlanarSpeed(rootPart)
+	if not rootPart then
+		return 0
+	end
+
+	return getPlanarVector(rootPart.AssemblyLinearVelocity).Magnitude
+end
+
+local function getSpeedScaledLaunchDistance(abilityConfig, rootPart)
+	local resolvedConfig = type(abilityConfig) == "table" and abilityConfig or {}
+	local baseDistance = math.max(0, tonumber(resolvedConfig.LaunchDistance) or 20)
+	local speedDistanceBonus = math.max(0, tonumber(resolvedConfig.SpeedLaunchDistanceBonus) or 0)
+	if speedDistanceBonus <= 0 then
+		return baseDistance
+	end
+
+	local referenceSpeed = math.max(1, tonumber(resolvedConfig.SpeedScaleReference) or DEFAULT_SPEED_SCALE_REFERENCE)
+	local speedAlpha = math.clamp(getPlanarSpeed(rootPart) / referenceSpeed, 0, 1)
+	return baseDistance + (speedDistanceBonus * speedAlpha)
 end
 
 local function getRequestedTargetPosition(context)
@@ -127,7 +149,7 @@ function GomuServer.RubberLaunch(context)
 	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
 	local animationState = GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
 
-	local maxDistance = math.max(0, tonumber(abilityConfig.LaunchDistance) or 20)
+	local maxDistance = getSpeedScaledLaunchDistance(abilityConfig, rootPart)
 	local direction, targetPosition, targetPlayer = getLaunchDirectionAndTarget(context, maxDistance)
 	local startPosition = rootPart.Position
 	local launchDistance = getLaunchDistance(character, rootPart, direction, maxDistance)
@@ -156,8 +178,6 @@ function GomuServer.RubberLaunch(context)
 			rootPart:SetNetworkOwner(nil)
 		end)
 
-		humanoid.Jump = true
-		humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
 		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 		applyLaunchVelocity(rootPart, launchVelocity)
 
