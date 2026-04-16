@@ -18,6 +18,7 @@ local ensureTextLabel
 local ensureImageLabel
 local ensureImageButton
 local ensureTextButton
+local ensureLegacyInventoryButtonTemplate
 
 local function hudLog(tag, ...)
 	if HUD_DEBUG then
@@ -68,6 +69,7 @@ local function ensureLegacyHudCompatibility(hud)
 	local hotbarTemplate = ensureTextButton(inventory, "toolButton")
 	hotbarTemplate.Visible = false
 	hotbarTemplate.Size = UDim2.fromOffset(52, 52)
+	ensureLegacyInventoryButtonTemplate(hotbarTemplate, false)
 	local inv = ensureFrame(inventory, "Inv")
 	inv.Visible = false
 	local inventoryFrame = ensureFrame(inv, "InventoryFrame")
@@ -84,6 +86,7 @@ local function ensureLegacyHudCompatibility(hud)
 	local inventoryTemplate = ensureTextButton(scrollingFrame, "toolButton")
 	inventoryTemplate.Visible = false
 	inventoryTemplate.Size = UDim2.fromOffset(80, 80)
+	ensureLegacyInventoryButtonTemplate(inventoryTemplate, true)
 
 	hudLog(
 		"[HUD][LEGACY]",
@@ -103,6 +106,7 @@ local HUD_BUTTON_LAYOUT = {
 	Gifts = UDim2.fromOffset(0, 90),
 	Settings = UDim2.fromOffset(90, 90),
 	Rebirth = UDim2.fromOffset(0, 180),
+	Quest = UDim2.fromOffset(90, 180),
 }
 
 local HUD_BUTTON_NAMES = {
@@ -111,6 +115,7 @@ local HUD_BUTTON_NAMES = {
 	Gifts = true,
 	Settings = true,
 	Rebirth = true,
+	Quest = true,
 }
 
 local function ensureScreenGui(name, displayOrder)
@@ -246,6 +251,46 @@ ensureTextButton = function(parent, name)
 	button.AutoButtonColor = false
 	button.Parent = parent
 	return button
+end
+
+ensureLegacyInventoryButtonTemplate = function(button, isLargeButton)
+	button.BackgroundTransparency = 1
+	button.BorderSizePixel = 0
+	button.Text = ""
+	button.AutoButtonColor = false
+
+	local toolIcon = ensureImageLabel(button, "ToolIcon")
+	toolIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+	toolIcon.Position = isLargeButton and UDim2.new(0.5, 0, 0.36, 0) or UDim2.new(0.5, 0, 0.5, 0)
+	toolIcon.Size = isLargeButton and UDim2.new(0.6, 0, 0.5, 0) or UDim2.new(0.68, 0, 0.68, 0)
+	toolIcon.ScaleType = Enum.ScaleType.Fit
+	toolIcon.ImageTransparency = 0
+
+	local toolName = ensureTextLabel(button, "toolName")
+	toolName.AnchorPoint = Vector2.new(0.5, 1)
+	toolName.Position = UDim2.new(0.5, 0, 1, -3)
+	toolName.Size = UDim2.new(1, -8, 0, 14)
+	toolName.TextSize = isLargeButton and 10 or 9
+	toolName.TextTruncate = Enum.TextTruncate.AtEnd
+	toolName.TextWrapped = false
+	toolName.Visible = isLargeButton
+
+	local toolAmount = ensureTextLabel(button, "toolAmount")
+	toolAmount.AnchorPoint = Vector2.new(1, 1)
+	toolAmount.Position = UDim2.new(1, -4, 1, -4)
+	toolAmount.Size = UDim2.fromOffset(42, 12)
+	toolAmount.TextSize = 10
+	toolAmount.TextXAlignment = Enum.TextXAlignment.Right
+	toolAmount.TextYAlignment = Enum.TextYAlignment.Center
+	toolAmount.Visible = false
+
+	local toolNumber = ensureTextLabel(button, "toolNumber")
+	toolNumber.Position = UDim2.fromOffset(4, 3)
+	toolNumber.Size = UDim2.fromOffset(18, 12)
+	toolNumber.TextSize = 10
+	toolNumber.TextXAlignment = Enum.TextXAlignment.Left
+	toolNumber.TextYAlignment = Enum.TextYAlignment.Top
+	toolNumber.Visible = false
 end
 
 local function ensureUIStroke(parent, color, thickness)
@@ -1061,6 +1106,7 @@ local function ensureHud()
 	ensureHudButton(lButtons, "Gifts", true)
 	ensureHudButton(lButtons, "Settings", false)
 	ensureHudButton(lButtons, "Rebirth", false)
+	ensureHudButton(lButtons, "Quest", false)
 
 	local counters = ensureFrame(hud, "Counters")
 	local legacyCounterImages = captureLegacyCounterImages(counters)
@@ -1165,6 +1211,7 @@ local function ensureFrames()
 		"Index",
 		"SpeedUpgrade",
 		"Rebirth",
+		"Quest",
 		"Settings",
 		"Gifts",
 		"GearStore",
@@ -1327,7 +1374,11 @@ local function ensureFrames()
 
 	local limitedReward = ensureFrame(frames, "LimitedReward")
 	clearChildren(limitedReward)
+	limitedReward.Visible = false
+	limitedReward.AnchorPoint = Vector2.new(0.5, 0.5)
+	limitedReward.Position = UDim2.fromScale(0.5, 0.5)
 	limitedReward.Size = UDim2.new(0.5, 0, 0.46, 0)
+	limitedReward.ClipsDescendants = true
 	ensureLimitedRewardLayout(limitedReward)
 end
 

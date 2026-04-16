@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
 -- Future UI screens should depend on this module instead of talking to
 -- GrandLineRushSliceRequest directly. That keeps the placeholder UI disposable.
@@ -135,9 +136,15 @@ function MetaClient.Refresh()
 end
 
 function MetaClient.OpenChest(chestId)
-	return MetaClient.Request("OpenChest", {
+	local response = MetaClient.Request("OpenChest", {
 		ChestId = chestId,
 	})
+
+	if typeof(response) == "table" and response.ok == true and typeof(response.openResult) == "table" then
+		PopUpModule:Local_ShowChestOpenResult(response.openResult)
+	end
+
+	return response
 end
 
 function MetaClient.FeedCrew(crewInstanceId, foodKey)

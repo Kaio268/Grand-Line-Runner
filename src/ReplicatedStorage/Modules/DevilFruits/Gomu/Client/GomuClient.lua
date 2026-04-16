@@ -5,8 +5,11 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
-local SharedFolder = DevilFruits:WaitForChild("Shared")
+local GomuFolder = DevilFruits:WaitForChild("Gomu")
+local SharedFolder = GomuFolder:WaitForChild("Shared")
+local ClientFolder = GomuFolder:WaitForChild("Client")
 local Registry = require(SharedFolder:WaitForChild("Registry"))
+local GomuVfxController = require(ClientFolder:WaitForChild("GomuVfxController"))
 
 local GomuClient = {}
 GomuClient.__index = GomuClient
@@ -240,6 +243,7 @@ function GomuClient.Create(config)
 	self.playOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or function() end
 	self.highlight = nil
 	self.targetPlayer = nil
+	self.vfxController = GomuVfxController.new()
 	return self
 end
 
@@ -297,8 +301,30 @@ function GomuClient:Update()
 	self.targetPlayer = targetPlayer
 end
 
-function GomuClient:HandleEffect()
-	return false
+function GomuClient:HandleEffect(targetPlayer, abilityName, payload)
+	print("[GomuClient] HandleEffect", abilityName, payload)
+
+	if abilityName ~= "RubberLaunch" then
+		return false
+	end
+
+	payload = payload or {}
+
+	local position = payload.AimPosition or payload.Position
+	local direction = nil
+
+	if targetPlayer and targetPlayer.Character then
+		local root = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			direction = root.CFrame.LookVector
+		end
+	end
+
+	print("[GomuClient] PlayBomb", position, direction)
+	return self.vfxController:PlayBomb(position, direction)
+end
+
+	return self.vfxController:PlayBomb(position, direction)
 end
 
 function GomuClient:HandleStateEvent()
@@ -316,10 +342,15 @@ end
 
 function GomuClient:HandleCharacterRemoving()
 	clearGomuHighlight(self)
+	if self.vfxController then
+		self.vfxController:HandleCharacterRemoving()
+	end
 end
 
-function GomuClient:HandlePlayerRemoving()
-	return
+function GomuClient:HandlePlayerRemoving(leavingPlayer)
+	if self.vfxController then
+		self.vfxController:HandlePlayerRemoving(leavingPlayer)
+	end
 end
 
 return GomuClient

@@ -9,6 +9,7 @@ local MAX_INCOME_ON_JOIN = 1e16
 
 local BrainrotFoodProgression = require(ServerScriptService.Modules:WaitForChild("BrainrotFoodProgression"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
@@ -1780,6 +1781,10 @@ local function bindZoneCollect(player, plot, standModel)
 
 		DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected)
 		DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected)
+		QuestSignals.Record(plr, "EarnDoubloons", collected, {
+			Source = "StandIncome",
+			StandName = standName,
+		})
 
 		if MoneyCollectedRE then
 			MoneyCollectedRE:FireClient(plr, standModel, collected)

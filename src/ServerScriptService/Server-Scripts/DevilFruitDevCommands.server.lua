@@ -13,12 +13,14 @@ local GrandLineRushVerticalSliceService = require(ServerScriptService.Modules:Wa
 local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:WaitForChild("GrandLineRushCorridorRunController"))
 local ShipResetService = require(ServerScriptService.Modules:WaitForChild("ShipResetService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
+local TimeRewardsService = require(ServerScriptService.Modules:WaitForChild("Time_Rewards_Server"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
 local ADMIN_USER_IDS = {
 	1103783585,
@@ -35,6 +37,41 @@ local pendingWipeConfirmations = {}
 local fruitAliases = {}
 local chestTierAliases = {}
 local resourceAliases = {}
+local BOOST_COMMAND_DEFAULT_MINUTES = 5
+local boostAliases = {
+	["x2money"] = {
+		BoostName = "x2Money",
+		DisplayName = "x2 Money",
+	},
+	["money"] = {
+		BoostName = "x2Money",
+		DisplayName = "x2 Money",
+	},
+	["x2doubloons"] = {
+		BoostName = "x2Money",
+		DisplayName = "x2 Money",
+	},
+	["doubloons"] = {
+		BoostName = "x2Money",
+		DisplayName = "x2 Money",
+	},
+	["2xmoney"] = {
+		BoostName = "x2Money",
+		DisplayName = "x2 Money",
+	},
+	["x15walkspeed"] = {
+		BoostName = "x15WalkSpeed",
+		DisplayName = "x1.5 Walkspeed",
+	},
+	["speed"] = {
+		BoostName = "x15WalkSpeed",
+		DisplayName = "x1.5 Walkspeed",
+	},
+	["walkspeed"] = {
+		BoostName = "x15WalkSpeed",
+		DisplayName = "x1.5 Walkspeed",
+	},
+}
 
 for _, userId in ipairs(ADMIN_USER_IDS) do
 	adminSet[userId] = true
@@ -330,11 +367,40 @@ local function processFruitCommand(player, argumentText)
 		return
 	end
 
-	local granted, reason = DevilFruitInventoryService.GrantFruit(player, targetFruit, 1)
-	if granted then
-		print(string.format("[DevFruitDevCommands] %s granted Devil Fruit item %s", player.Name, targetFruit))
+	local response = GrandLineRushVerticalSliceService.GrantSpecificFruitReward(player, targetFruit, {
+		Kind = "AdminFruitGrant",
+		InventoryName = "Admin Fruit Reward",
+		DisplayName = "Admin Fruit Reward",
+		Source = "AdminCommand",
+		DepthBand = GrandLineRushEconomy.VerticalSlice.DefaultDepthBand,
+	})
+	if response and response.ok then
+		if typeof(response.openResult) == "table" then
+			PopUpModule:Server_ShowChestOpenResult(player, response.openResult)
+		end
+
+		if response.openResult and response.openResult.WasDuplicate == true then
+			print(string.format(
+				"[DevFruitDevCommands] %s duplicate Devil Fruit %s converted via chest reward flow (%s)",
+				player.Name,
+				targetFruit,
+				tostring(
+					response.openResult.ConversionRewardDisplayName
+						or ((response.openResult.GrantedChest or {}).displayName)
+						or response.openResult.Message
+						or "duplicate reward"
+				)
+			))
+		else
+			print(string.format("[DevFruitDevCommands] %s granted Devil Fruit reward %s via chest reward flow", player.Name, targetFruit))
+		end
 	else
-		warn(string.format("[DevFruitDevCommands] Failed to grant %s to %s (%s)", targetFruit, player.Name, tostring(reason)))
+		warn(string.format(
+			"[DevFruitDevCommands] Failed to resolve admin fruit reward %s for %s (%s)",
+			targetFruit,
+			player.Name,
+			tostring(response and (response.error or response.message) or "unknown_error")
+		))
 	end
 end
 
@@ -471,6 +537,69 @@ local function processMoneyCommand(player, argumentText)
 		math.floor(amount),
 		appliedDelta,
 		math.floor(newMoney)
+	))
+end
+
+local function processBoostCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local trimmedArgument = trimText(argumentText)
+	if trimmedArgument == "" then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /boost usage from %s. Use /boost x2money [minutes].",
+			player.Name
+		))
+		return
+	end
+
+	local boostToken, durationText = trimmedArgument:match("^(%S+)%s*(.*)$")
+	local boostData = boostAliases[normalizeText(boostToken)]
+	if boostData == nil then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /boost type '%s' from %s. Use /boost x2money [minutes].",
+			tostring(boostToken),
+			player.Name
+		))
+		return
+	end
+
+	local durationMinutes = BOOST_COMMAND_DEFAULT_MINUTES
+	local normalizedDurationText = trimText(durationText)
+	if normalizedDurationText ~= "" then
+		durationMinutes = parseWholeAmount(normalizedDurationText)
+	end
+
+	if typeof(durationMinutes) ~= "number" or durationMinutes < 1 then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /boost duration '%s' from %s. Duration must be a whole number of minutes.",
+			tostring(durationText),
+			player.Name
+		))
+		return
+	end
+
+	durationMinutes = math.floor(durationMinutes)
+
+	local _, timePath = DataManager:_resolveBoostPaths(player, boostData.BoostName)
+	if not timePath then
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /boost %s for %s because the boost timer path is missing.",
+			tostring(boostData.BoostName),
+			player.Name
+		))
+		return
+	end
+
+	local durationSeconds = durationMinutes * 60
+	DataManager:StartBoost(player, boostData.BoostName, durationSeconds)
+
+	print(string.format(
+		"[DevFruitDevCommands] %s granted %s for %d minute(s) via /boost",
+		player.Name,
+		tostring(boostData.DisplayName),
+		durationMinutes
 	))
 end
 
@@ -1120,6 +1249,87 @@ local function processChestCommand(player, argumentText)
 	end
 end
 
+local function processGiftResetCommand(player, argumentText, commandName)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedCommand = normalizeText(commandName)
+	local trimmedArgument = trimText(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	local targetSpec = "me"
+
+	if normalizedCommand == "gifts" then
+		if normalizedArgument == "" or normalizedArgument == "reset" or normalizedArgument == "clear" then
+			targetSpec = "me"
+		else
+			local action, rest = trimmedArgument:match("^(%S+)%s*(.*)$")
+			local normalizedAction = normalizeText(action)
+			if normalizedAction ~= "reset" and normalizedAction ~= "clear" then
+				warn(string.format(
+					"[DevFruitDevCommands] Invalid /gifts usage from %s. Use /gifts reset [playerName].",
+					player.Name
+				))
+				return
+			end
+
+			local parsedTarget = trimText(rest)
+			targetSpec = parsedTarget ~= "" and parsedTarget or "me"
+		end
+	else
+		targetSpec = trimmedArgument ~= "" and trimmedArgument or "me"
+	end
+
+	local targetUserId, targetLabel, targetPlayer, resolveReason = resolveResetTarget(player, targetSpec)
+	if targetUserId == nil then
+		if resolveReason == "ambiguous_target" then
+			warn(string.format(
+				"[DevFruitDevCommands] Ambiguous /%s target '%s' from %s. Use an exact player name or userId.",
+				tostring(commandName),
+				tostring(targetSpec),
+				player.Name
+			))
+			return
+		end
+
+		warn(string.format(
+			"[DevFruitDevCommands] Unknown /%s target '%s' from %s",
+			tostring(commandName),
+			tostring(targetSpec),
+			player.Name
+		))
+		return
+	end
+
+	if targetPlayer == nil then
+		warn(string.format(
+			"[DevFruitDevCommands] /%s currently supports online players only. %s (userId=%d) is not in the server.",
+			tostring(commandName),
+			tostring(targetLabel),
+			targetUserId
+		))
+		return
+	end
+
+	local ok, reason = TimeRewardsService.ResetClaims(targetPlayer)
+	if not ok then
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /%s for %s (%s)",
+			tostring(commandName),
+			targetPlayer.Name,
+			tostring(reason)
+		))
+		return
+	end
+
+	print(string.format(
+		"[DevFruitDevCommands] %s reset Gifts claims for %s via /%s",
+		player.Name,
+		targetPlayer.Name,
+		tostring(commandName)
+	))
+end
+
 local function getCommandNameAndArguments(rawText)
 	local normalizedText = normalizeText(rawText)
 	local commandName, argumentText = normalizedText:match("^/%s*(%S+)%s*(.*)$")
@@ -1140,7 +1350,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" and commandName ~= "wipeplayer" and commandName ~= "resetprogress" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "boost" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" and commandName ~= "wipeplayer" and commandName ~= "resetprogress" and commandName ~= "gifts" and commandName ~= "giftreset" then
 		return
 	end
 
@@ -1150,6 +1360,11 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "fruit" then
 		processFruitCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "boost" then
+		processBoostCommand(player, argumentText)
 		return
 	end
 
@@ -1185,6 +1400,11 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "clear" then
 		processClearCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "gifts" or commandName == "giftreset" then
+		processGiftResetCommand(player, argumentText, commandName)
 		return
 	end
 
@@ -1267,6 +1487,37 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/money " .. normalizedText) or "/money"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local boostCommand = commandsFolder:FindFirstChild("BoostDevCommand")
+	if boostCommand and not boostCommand:IsA("TextChatCommand") then
+		boostCommand:Destroy()
+		boostCommand = nil
+	end
+
+	if not boostCommand then
+		boostCommand = Instance.new("TextChatCommand")
+		boostCommand.Name = "BoostDevCommand"
+		boostCommand.PrimaryAlias = "/boost"
+		boostCommand.SecondaryAlias = "/boost"
+		boostCommand.AutocompleteVisible = false
+		boostCommand.Parent = commandsFolder
+	end
+
+	boostCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 6) == "/boost" or normalizedText:sub(1, 7) == "/ boost" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/boost " .. normalizedText) or "/boost"
 		handleChatCommand(player, syntheticCommand)
 	end)
 
@@ -1484,6 +1735,37 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/clear " .. normalizedText) or "/clear"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local giftsCommand = commandsFolder:FindFirstChild("GiftsDevCommand")
+	if giftsCommand and not giftsCommand:IsA("TextChatCommand") then
+		giftsCommand:Destroy()
+		giftsCommand = nil
+	end
+
+	if not giftsCommand then
+		giftsCommand = Instance.new("TextChatCommand")
+		giftsCommand.Name = "GiftsDevCommand"
+		giftsCommand.PrimaryAlias = "/gifts"
+		giftsCommand.SecondaryAlias = "/giftreset"
+		giftsCommand.AutocompleteVisible = false
+		giftsCommand.Parent = commandsFolder
+	end
+
+	giftsCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 6) == "/gifts" or normalizedText:sub(1, 10) == "/giftreset" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/gifts " .. normalizedText) or "/gifts"
 		handleChatCommand(player, syntheticCommand)
 	end)
 

@@ -392,6 +392,15 @@ function MeraAnimationController.WaitForFireBurstRelease(animationState, animati
 	return waitForRelease("FireBurst", animationState, animationConfig)
 end
 
+function MeraAnimationController.WaitForFlameDashTrail(animationState, animationConfig)
+	local resolvedConfig = type(animationConfig) == "table" and animationConfig or {}
+	local overrideConfig = {
+		ReleaseMarker = "Trail",
+		ReleaseFallbackTime = resolvedConfig.ReleaseFallbackTime or 0.25,
+	}
+	return waitForRelease("FlameDash", animationState, overrideConfig)
+end
+
 function MeraAnimationController.StopAnimation(animationState, reason)
 	if type(animationState) ~= "table" then
 		return false

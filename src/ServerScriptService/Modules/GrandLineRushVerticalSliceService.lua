@@ -5,10 +5,14 @@ local RunService = game:GetService("RunService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
+local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
+local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
-local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
+local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 
 local Service = {}
 
@@ -162,6 +166,41 @@ local function syncPaths(player, replica, changedPaths)
 	DataManager:UpdateData(player)
 end
 
+local function buildRewardChangedPaths(dataRoot, changedRoots, options)
+	local changedPaths = {}
+	local settings = if typeof(options) == "table" then options else {}
+
+	if changedRoots.FoodInventory then
+		changedPaths[#changedPaths + 1] = { Path = { "FoodInventory" }, Value = dataRoot.FoodInventory }
+	end
+	if changedRoots.Materials then
+		changedPaths[#changedPaths + 1] = { Path = { "Materials" }, Value = dataRoot.Materials }
+	end
+	if changedRoots.Leaderstats then
+		changedPaths[#changedPaths + 1] = { Path = { "leaderstats", "Doubloons" }, Value = dataRoot.leaderstats.Doubloons }
+	end
+	if changedRoots.TotalStats then
+		changedPaths[#changedPaths + 1] = { Path = { "TotalStats", "TotalDoubloons" }, Value = dataRoot.TotalStats.TotalDoubloons }
+	end
+	if changedRoots.InventoryDevilFruits then
+		changedPaths[#changedPaths + 1] = { Path = { "Inventory", "DevilFruits" }, Value = ((dataRoot.Inventory or {}).DevilFruits) or {} }
+	end
+	if changedRoots.IndexCollectionDevilFruits then
+		changedPaths[#changedPaths + 1] = { Path = { "IndexCollection", "DevilFruits" }, Value = ((dataRoot.IndexCollection or {}).DevilFruits) or {} }
+	end
+	if changedRoots.ChestRewards then
+		changedPaths[#changedPaths + 1] = { Path = { "ChestRewards" }, Value = dataRoot.ChestRewards }
+	end
+	if changedRoots.UnopenedChests then
+		changedPaths[#changedPaths + 1] = {
+			Path = { "UnopenedChests" },
+			Value = settings.UnopenedChests or dataRoot.UnopenedChests,
+		}
+	end
+
+	return changedPaths
+end
+
 local function normalizeMaterialsTable(materials)
 	if typeof(materials) ~= "table" then
 		materials = {}
@@ -240,7 +279,7 @@ end
 
 local function getRewardToolDisplay(reward)
 	if reward.RewardType == "Chest" then
-		return string.format("%s Chest", tostring(reward.Tier or "Wooden"))
+		return ChestUtils.GetDisplayName(reward)
 	end
 
 	return tostring(reward.CrewName or "Crew Contract")
@@ -266,7 +305,9 @@ local function cloneRewardData(reward)
 	}
 
 	if reward.RewardType == "Chest" then
+		data.ChestKind = reward.ChestKind
 		data.Tier = reward.Tier
+		data.FruitRarity = reward.FruitRarity
 	else
 		data.Rarity = reward.Rarity
 		data.CrewName = reward.CrewName
@@ -330,21 +371,56 @@ local function chooseCrewReward(depthBand)
 	}
 end
 
-local function ensureDevilFruitEntry(dataRoot, fruitKey)
-	local inventory = dataRoot.Inventory or {}
-	dataRoot.Inventory = inventory
-
-	local devilFruits = inventory.DevilFruits or {}
-	inventory.DevilFruits = devilFruits
-
-	local entry = devilFruits[fruitKey]
-	if typeof(entry) ~= "table" then
-		entry = { Quantity = 0 }
-		devilFruits[fruitKey] = entry
+local function ensureChestRewardsState(dataRoot)
+	if typeof(dataRoot.ChestRewards) ~= "table" then
+		dataRoot.ChestRewards = {}
 	end
 
-	entry.Quantity = tonumber(entry.Quantity) or 0
-	return entry
+	dataRoot.ChestRewards.MythicKeys = math.max(0, tonumber(dataRoot.ChestRewards.MythicKeys) or 0)
+	return dataRoot.ChestRewards
+end
+
+local function buildStoredChestEntry(chestData)
+	local normalizedChest = ChestUtils.BuildChestData(chestData)
+	return {
+		ChestKind = normalizedChest.ChestKind,
+		Tier = normalizedChest.Tier,
+		FruitRarity = normalizedChest.FruitRarity,
+		DepthBand = tostring(normalizedChest.DepthBand or ""),
+		Source = tostring(normalizedChest.Source or ChestRewards.DefaultChestSource),
+		RewardProfile = tostring(normalizedChest.RewardProfile or ChestRewards.DefaultRewardProfile),
+		CreatedAt = math.max(0, tonumber(normalizedChest.CreatedAt) or os.time()),
+	}
+end
+
+local function addUnopenedChestToCollection(unopenedChests, chestData)
+	unopenedChests.Order = unopenedChests.Order or {}
+	unopenedChests.ById = unopenedChests.ById or {}
+	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+
+	local chestId = tostring(unopenedChests.NextChestId)
+	unopenedChests.NextChestId += 1
+
+	local storedChest = buildStoredChestEntry(chestData)
+	storedChest.ChestId = chestId
+	unopenedChests.ById[chestId] = storedChest
+	table.insert(unopenedChests.Order, chestId)
+
+	return chestId, storedChest
+end
+
+local function countUnopenedChestsByInventoryName(unopenedChests, chestData)
+	local inventoryName = ChestUtils.GetInventoryName(chestData)
+	local count = 0
+
+	for _, existingChestId in ipairs(unopenedChests.Order or {}) do
+		local entry = unopenedChests.ById and unopenedChests.ById[tostring(existingChestId)]
+		if entry and ChestUtils.GetInventoryName(entry) == inventoryName then
+			count += 1
+		end
+	end
+
+	return count
 end
 
 local function ensureStarterCrew(player)
@@ -380,6 +456,7 @@ local function ensureStarterCrew(player)
 		CurrentXP = 0,
 		TotalXP = 0,
 		Source = "Starter",
+		DepthBand = "",
 		AcquiredAt = os.time(),
 	}
 	table.insert(crewInventory.Order, instanceId)
@@ -409,6 +486,7 @@ local function addCrewInstance(player, rewardData, source)
 		CurrentXP = 0,
 		TotalXP = 0,
 		Source = source or "RunReward",
+		DepthBand = tostring(rewardData.DepthBand or ""),
 		AcquiredAt = os.time(),
 	}
 	table.insert(crewInventory.Order, instanceId)
@@ -420,7 +498,7 @@ local function addCrewInstance(player, rewardData, source)
 	return instanceId
 end
 
-local function addUnopenedChest(player, tierName, depthBand)
+local function addUnopenedChest(player, chestInfoOrTier, depthBand)
 	local profile, replica = getProfileAndReplica(player)
 	if not profile or not replica then
 		chestDebug("addUnopenedChest skipped for %s because profile/replica missing.", player and player.Name or "unknown")
@@ -428,35 +506,27 @@ local function addUnopenedChest(player, tierName, depthBand)
 	end
 
 	local unopenedChests = profile.Data.UnopenedChests
-	unopenedChests.Order = unopenedChests.Order or {}
-	unopenedChests.ById = unopenedChests.ById or {}
-	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+	local normalizedChest = if typeof(chestInfoOrTier) == "table"
+		then ChestUtils.BuildChestData(chestInfoOrTier)
+		else ChestUtils.BuildChestData({
+			ChestKind = ChestRewards.ChestKinds.Standard,
+			Tier = chestInfoOrTier,
+			DepthBand = depthBand,
+			Source = "Run",
+		})
 
-	local chestId = tostring(unopenedChests.NextChestId)
-	unopenedChests.NextChestId += 1
-	unopenedChests.ById[chestId] = {
-		ChestId = chestId,
-		Tier = tierName,
-		DepthBand = depthBand,
-		CreatedAt = os.time(),
-	}
-	table.insert(unopenedChests.Order, chestId)
-
-	local tierQuantity = 0
-	for _, existingChestId in ipairs(unopenedChests.Order) do
-		local entry = unopenedChests.ById[tostring(existingChestId)]
-		if entry and tostring(entry.Tier) == tostring(tierName) then
-			tierQuantity += 1
-		end
-	end
+	local chestId, storedChest = addUnopenedChestToCollection(unopenedChests, normalizedChest)
+	local inventoryQuantity = countUnopenedChestsByInventoryName(unopenedChests, storedChest)
 
 	chestDebug(
-		"addUnopenedChest player=%s tier=%s depth=%s newChestId=%s tierQuantity=%d totalOrder=%d",
+		"addUnopenedChest player=%s inventoryName=%s tier=%s fruitRarity=%s depth=%s newChestId=%s quantity=%d totalOrder=%d",
 		player.Name,
-		tostring(tierName),
-		tostring(depthBand),
+		ChestUtils.GetInventoryName(storedChest),
+		tostring(storedChest.Tier),
+		tostring(storedChest.FruitRarity),
+		tostring(storedChest.DepthBand),
 		tostring(chestId),
-		tierQuantity,
+		inventoryQuantity,
 		#unopenedChests.Order
 	)
 
@@ -485,6 +555,7 @@ local function buildState(player)
 
 	local dataRoot = profile.Data
 	local unopenedChests = dataRoot.UnopenedChests or {}
+	local chestRewardsState = ensureChestRewardsState(dataRoot)
 	local crewInventory = dataRoot.CrewInventory or {}
 	local foodInventory = dataRoot.FoodInventory or {}
 	local materials = normalizeMaterialsTable(dataRoot.Materials)
@@ -495,10 +566,18 @@ local function buildState(player)
 	for _, chestId in ipairs(unopenedChests.Order or {}) do
 		local entry = unopenedChests.ById and unopenedChests.ById[tostring(chestId)]
 		if entry then
+			local normalizedChest = ChestUtils.BuildChestData(entry)
 			chestSummaries[#chestSummaries + 1] = {
 				ChestId = tostring(chestId),
-				Tier = tostring(entry.Tier or "Wooden"),
+				ChestKind = normalizedChest.ChestKind,
+				Tier = normalizedChest.Tier,
+				FruitRarity = normalizedChest.FruitRarity,
 				DepthBand = tostring(entry.DepthBand or ""),
+				Source = tostring(entry.Source or ChestRewards.DefaultChestSource),
+				RewardProfile = tostring(entry.RewardProfile or ChestRewards.DefaultRewardProfile),
+				CreatedAt = math.max(0, tonumber(entry.CreatedAt) or 0),
+				InventoryName = ChestUtils.GetInventoryName(normalizedChest),
+				DisplayName = ChestUtils.GetDisplayName(normalizedChest),
 			}
 		end
 	end
@@ -530,6 +609,10 @@ local function buildState(player)
 		},
 		UnopenedChests = chestSummaries,
 		UnopenedChestCount = #chestSummaries,
+		MythicKeyProgress = {
+			current = chestRewardsState.MythicKeys,
+			threshold = ChestRewards.MythicKey.Threshold,
+		},
 		FoodInventory = {
 			Apple = tonumber(foodInventory.Apple) or 0,
 			Rice = tonumber(foodInventory.Rice) or 0,
@@ -715,17 +798,22 @@ local function extractRun(player)
 			return resolveActionResponse(player, false, nil, "persist_chest_failed")
 		end
 		runTrace(
-			"sliceExtractPersistedChest player=%s tier=%s chestId=%s depth=%s action=add_to_hotbar_state",
+			"sliceExtractPersistedChest player=%s tier=%s chestId=%s depth=%s action=add_to_inventory_state",
 			player.Name,
 			tostring(carriedReward.Tier),
 			tostring(chestId),
 			tostring(carriedReward.DepthBand)
 		)
-		message = string.format("Extracted %s and added it to your hotbar as chest #%s.", getRewardToolDisplay(carriedReward), tostring(chestId or "?"))
+		message = string.format(
+			"Extracted %s and stored it in Treasure as chest #%s.",
+			getRewardToolDisplay(carriedReward),
+			tostring(chestId or "?")
+		)
 	else
 		local instanceId = addCrewInstance(player, {
 			Name = carriedReward.CrewName,
 			Rarity = carriedReward.Rarity,
+			DepthBand = carriedReward.DepthBand,
 		}, "RunReward")
 		if instanceId == nil then
 			runTrace(
@@ -744,6 +832,18 @@ local function extractRun(player)
 			tostring(instanceId)
 		)
 		message = string.format("Extracted crew reward and recruited %s (%s) as crew #%s.", tostring(carriedReward.CrewName), tostring(carriedReward.Rarity), tostring(instanceId or "?"))
+	end
+
+	QuestSignals.Record(player, "ReachDepth", 1, {
+		DepthBand = tostring(carriedReward.DepthBand or ""),
+		RewardType = tostring(carriedReward.RewardType or ""),
+	})
+	if carriedReward.RewardType == "Crew" then
+		QuestSignals.Record(player, "ExtractCrew", 1, {
+			DepthBand = tostring(carriedReward.DepthBand or ""),
+			Rarity = tostring(carriedReward.Rarity or ""),
+			CrewName = tostring(carriedReward.CrewName or ""),
+		})
 	end
 
 	local extractionBounty, _ = BountyService.AwardExtractionBountyForReward(player, carriedReward)
@@ -804,6 +904,7 @@ local function claimWorldChest(player, rewardData)
 	runtime.SpawnedReward = nil
 	runtime.CarriedReward = {
 		RewardType = "Chest",
+		ChestKind = ChestRewards.ChestKinds.Standard,
 		Tier = tierName,
 		DepthBand = depthBand,
 		Source = "SharedWorld",
@@ -881,51 +982,23 @@ local function openChest(player, requestedChestId)
 		return resolveActionResponse(player, false, nil, "missing_chest")
 	end
 
-	local tierName = tostring(chestData.Tier or "Wooden")
+	local normalizedChestData = ChestUtils.BuildChestData(chestData)
+	local tierName = normalizedChestData.Tier
 	local tierConfig = Economy.Chests.Tiers[tierName]
 	if not tierConfig then
 		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
 	end
 
-	local rewards = tierConfig.Rewards or {}
-	local foodRewards = rewards.Food or {}
-	local materialRewards = rewards.Materials or {}
-	local foodInventory = dataRoot.FoodInventory
-	local materials = normalizeMaterialsTable(dataRoot.Materials)
-	dataRoot.Materials = materials
-	local leaderstats = dataRoot.leaderstats
-	local totalStats = dataRoot.TotalStats
-	local changedPaths = {}
-
-	for foodKey, amount in pairs(foodRewards) do
-		foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + math.max(0, tonumber(amount) or 0)
-	end
-	changedPaths[#changedPaths + 1] = { Path = { "FoodInventory" }, Value = foodInventory }
-
-	for materialKey, amount in pairs(materialRewards) do
-		materials[materialKey] = math.max(0, tonumber(materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
-	end
-	normalizeMaterialsTable(materials)
-	changedPaths[#changedPaths + 1] = { Path = { "Materials" }, Value = materials }
-
-	local doubloonReward = math.max(0, tonumber(rewards.Doubloons) or 0)
-	leaderstats.Doubloons = math.max(0, tonumber(leaderstats.Doubloons) or 0) + doubloonReward
-	totalStats.TotalDoubloons = math.max(0, tonumber(totalStats.TotalDoubloons) or 0) + doubloonReward
-	changedPaths[#changedPaths + 1] = { Path = { "leaderstats", "Doubloons" }, Value = leaderstats.Doubloons }
-	changedPaths[#changedPaths + 1] = { Path = { "TotalStats", "TotalDoubloons" }, Value = totalStats.TotalDoubloons }
-
-	local fruitMessage = nil
-	local devilFruitChance = tonumber(rewards.DevilFruitChance) or 0
-	if devilFruitChance > 0 and randomObject:NextNumber() <= devilFruitChance then
-		local fruits = DevilFruitConfig.GetAllFruits()
-		if #fruits > 0 then
-			local fruit = fruits[randomObject:NextInteger(1, #fruits)]
-			local entry = ensureDevilFruitEntry(dataRoot, fruit.FruitKey)
-			entry.Quantity += 1
-			fruitMessage = fruit.DisplayName
-			changedPaths[#changedPaths + 1] = { Path = { "Inventory", "DevilFruits" }, Value = dataRoot.Inventory.DevilFruits }
-		end
-	end
+	local resolution = ChestRewardResolver.Resolve({
+		Player = player,
+		DataRoot = dataRoot,
+		ChestData = normalizedChestData,
+		Random = randomObject,
+		AddChestEntry = function(grantedChestData)
+			local grantedChestId = addUnopenedChestToCollection(unopenedChests, grantedChestData)
+			return grantedChestId
+		end,
+	})
 
 	unopenedChests.ById[chestId] = nil
 	for index = #unopenedChests.Order, 1, -1 do
@@ -934,16 +1007,54 @@ local function openChest(player, requestedChestId)
 			break
 		end
 	end
-	changedPaths[#changedPaths + 1] = { Path = { "UnopenedChests" }, Value = unopenedChests }
+	local changedRoots = resolution.ChangedRoots or {}
+	changedRoots.UnopenedChests = true
+
+	local changedPaths = buildRewardChangedPaths(dataRoot, changedRoots, {
+		UnopenedChests = unopenedChests,
+	})
 
 	syncPaths(player, replica, changedPaths)
 
 	local rewardParts = {}
-	for foodKey, amount in pairs(foodRewards) do
+	local grantedResources = (resolution.OpenResult and resolution.OpenResult.GrantedResources) or {}
+	QuestSignals.Record(player, "OpenChest", 1, {
+		Tier = tostring(tierName or ""),
+		ChestKind = tostring(normalizedChestData.ChestKind or ""),
+		FruitRarity = tostring(normalizedChestData.FruitRarity or ""),
+	})
+	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
+		QuestSignals.Record(player, "EarnDoubloons", grantedResources.doubloons, {
+			Source = "Chest",
+			Tier = tostring(tierName or ""),
+		})
+	end
+	for foodKey, amount in pairs(grantedResources.food or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectFood", normalizedAmount, {
+				Key = tostring(foodKey),
+				FoodKey = tostring(foodKey),
+				Source = "Chest",
+			})
+		end
+	end
+	for materialKey, amount in pairs(grantedResources.materials or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectMaterial", normalizedAmount, {
+				Key = tostring(materialKey),
+				MaterialKey = tostring(materialKey),
+				Source = "Chest",
+			})
+		end
+	end
+
+	for foodKey, amount in pairs(grantedResources.food or {}) do
 		rewardParts[#rewardParts + 1] = string.format("%dx %s", amount, Economy.Food[foodKey].DisplayName)
 	end
 	for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder) do
-		local amount = math.max(0, tonumber(materialRewards[materialKey]) or 0)
+		local amount = math.max(0, tonumber((grantedResources.materials or {})[materialKey]) or 0)
 		if amount > 0 then
 			rewardParts[#rewardParts + 1] = string.format(
 				"%dx %s",
@@ -952,14 +1063,83 @@ local function openChest(player, requestedChestId)
 			)
 		end
 	end
-	if doubloonReward > 0 then
-		rewardParts[#rewardParts + 1] = string.format("%d Doubloons", doubloonReward)
+	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
+		rewardParts[#rewardParts + 1] = string.format("%d Doubloons", grantedResources.doubloons)
 	end
-	if fruitMessage then
-		rewardParts[#rewardParts + 1] = string.format("Devil Fruit: %s", fruitMessage)
+	if resolution.RewardText then
+		rewardParts[#rewardParts + 1] = tostring(resolution.RewardText)
 	end
 
-	return resolveActionResponse(player, true, string.format("Opened %s chest and received %s.", tierName, table.concat(rewardParts, ", ")))
+	local chestDisplayName = ChestUtils.GetDisplayName(normalizedChestData)
+	local message = if #rewardParts > 0
+		then string.format("Opened %s and received %s.", chestDisplayName, table.concat(rewardParts, ", "))
+		else string.format("Opened %s.", chestDisplayName)
+
+	local response = resolveActionResponse(player, true, message)
+	response.openResult = resolution.OpenResult
+	return response
+end
+
+local function grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
+	local profile, replica = getProfileAndReplica(player)
+	if not profile or not replica then
+		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+
+	local fruit = DevilFruitConfig.GetFruit(fruitIdentifier)
+	if not fruit then
+		return resolveActionResponse(player, false, nil, "invalid_fruit")
+	end
+
+	local dataRoot = profile.Data
+	if typeof(dataRoot.UnopenedChests) ~= "table" then
+		dataRoot.UnopenedChests = {}
+	end
+
+	local unopenedChests = dataRoot.UnopenedChests
+	unopenedChests.Order = unopenedChests.Order or {}
+	unopenedChests.ById = unopenedChests.ById or {}
+	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+
+	local options = if typeof(sourceOptions) == "table" then sourceOptions else {}
+	local resolution = ChestRewardResolver.ResolveSpecificFruit({
+		Player = player,
+		DataRoot = dataRoot,
+		FruitIdentifier = fruit.FruitKey,
+		AddChestEntry = function(grantedChestData)
+			local grantedChestId = addUnopenedChestToCollection(unopenedChests, grantedChestData)
+			return grantedChestId
+		end,
+		DepthBand = tostring(options.DepthBand or Economy.VerticalSlice.DefaultDepthBand),
+		Source = tostring(options.Source or "Admin"),
+		RewardProfile = tostring(options.RewardProfile or ChestRewards.DefaultRewardProfile),
+		SourceKind = tostring(options.Kind or "DirectFruitReward"),
+		SourceInventoryName = tostring(options.InventoryName or "Direct Fruit Reward"),
+		SourceDisplayName = tostring(options.DisplayName or "Direct Fruit Reward"),
+	})
+
+	local changedRoots = resolution.ChangedRoots or {}
+	local changedPaths = buildRewardChangedPaths(dataRoot, changedRoots, {
+		UnopenedChests = unopenedChests,
+	})
+	syncPaths(player, replica, changedPaths)
+
+	local message = if resolution.OpenResult and resolution.OpenResult.WasDuplicate
+		then string.format(
+			"Duplicate %s converted to %s.",
+			tostring(fruit.DisplayName),
+			tostring(
+				resolution.OpenResult.ConversionRewardDisplayName
+					or ((resolution.OpenResult.GrantedChest or {}).displayName)
+					or resolution.RewardText
+					or "a duplicate reward"
+			)
+		)
+		else string.format("Granted %s.", tostring(fruit.DisplayName))
+
+	local response = resolveActionResponse(player, true, message)
+	response.openResult = resolution.OpenResult
+	return response
 end
 
 local function feedCrew(player, crewInstanceId, foodKey)
@@ -1026,6 +1206,16 @@ local function feedCrew(player, crewInstanceId, foodKey)
 		{ Path = { "FoodInventory" }, Value = foodInventory },
 		{ Path = { "CrewInventory" }, Value = crewInventory },
 	})
+
+	if levelUps > 0 then
+		QuestSignals.Record(player, "UpgradeCrew", levelUps, {
+			CrewInstanceId = tostring(crewInstanceId or ""),
+			CrewName = tostring(crewEntry.Name or ""),
+			Rarity = tostring(rarity or ""),
+			FoodKey = tostring(foodKey or ""),
+			Level = level,
+		})
+	end
 
 	local message = string.format(
 		"Fed %s to %s. Level %d%s.",
@@ -1152,6 +1342,7 @@ function Service.CreateChestRewardData(depthBand)
 	local normalizedDepthBand = tostring(depthBand or Economy.VerticalSlice.DefaultDepthBand)
 	return {
 		RewardType = "Chest",
+		ChestKind = ChestRewards.ChestKinds.Standard,
 		Tier = chooseChestTier(normalizedDepthBand),
 		DepthBand = normalizedDepthBand,
 	}
@@ -1217,7 +1408,12 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 		return resolveActionResponse(player, false, nil, "grant_failed")
 	end
 
-	local message = string.format("Granted %d %s chest%s.", grantedCount, normalizedTier, grantedCount == 1 and "" or "s")
+	local message = string.format(
+		"Granted %d %s%s.",
+		grantedCount,
+		normalizedTier,
+		grantedCount == 1 and " Chest" or " Chests"
+	)
 	return resolveActionResponse(player, true, message)
 end
 
@@ -1228,6 +1424,15 @@ function Service.OpenChest(player, chestId)
 	end
 
 	return openChest(player, chestId)
+end
+
+function Service.GrantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
 end
 
 function Service.FeedCrew(player, crewInstanceId, foodKey)

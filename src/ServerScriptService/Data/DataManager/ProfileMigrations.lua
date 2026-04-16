@@ -2,10 +2,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local ProfileTemplate = require(script.Parent:WaitForChild("ProfileTemplate"))
 local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 
 local ProfileMigrations = {}
 
@@ -297,6 +299,23 @@ function ProfileMigrations.Apply(data)
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))
 	unopenedChests.ById = ensureTable(unopenedChests, "ById")
 	unopenedChests.Order = ensureTable(unopenedChests, "Order")
+	for chestId, chestEntry in pairs(unopenedChests.ById) do
+		local safeChestEntry = if typeof(chestEntry) == "table" then chestEntry else {}
+		local normalized = ChestUtils.BuildChestData(safeChestEntry)
+		local normalizedChestId = tostring(chestId)
+		normalized.ChestId = tostring(safeChestEntry.ChestId or normalizedChestId)
+		normalized.DepthBand = tostring(safeChestEntry.DepthBand or "")
+		normalized.CreatedAt = math.max(0, coerceNumber(safeChestEntry.CreatedAt, normalized.CreatedAt))
+
+		if normalized.ChestKind == ChestRewards.ChestKinds.DevilFruit and normalized.FruitRarity == nil then
+			normalized.Tier = ChestUtils.GetDefaultTierForDevilFruitChest(nil)
+		end
+
+		unopenedChests.ById[normalizedChestId] = normalized
+	end
+
+	local chestRewards = ensureTable(data, "ChestRewards")
+	chestRewards.MythicKeys = math.max(0, coerceNumber(chestRewards.MythicKeys, 0))
 
 	local foodInventory = ensureTable(data, "FoodInventory")
 	local inventory = ensureTable(data, "Inventory")
@@ -469,6 +488,28 @@ function ProfileMigrations.Apply(data)
 	materials.AncientTimber = coerceNumber(materials.AncientTimber, 0)
 	materials.CommonShipMaterial = materials.Timber
 	materials.RareShipMaterial = materials.Iron
+
+	local quests = ensureTable(data, "Quests")
+	for _, categoryId in ipairs({ "Daily", "Weekly", "Special" }) do
+		local categoryState = ensureTable(quests, categoryId)
+		categoryState.Progress = ensureTable(categoryState, "Progress")
+		categoryState.Claimed = ensureTable(categoryState, "Claimed")
+		if typeof(categoryState.CycleId) ~= "string" then
+			categoryState.CycleId = if categoryId == "Special" then "Lifetime" else ""
+		end
+		if typeof(categoryState.ProfileBackfillApplied) ~= "boolean" then
+			categoryState.ProfileBackfillApplied = false
+		end
+
+		for questId, value in pairs(categoryState.Progress) do
+			categoryState.Progress[questId] = math.max(0, coerceNumber(value, 0))
+		end
+		for questId, value in pairs(categoryState.Claimed) do
+			if value ~= true then
+				categoryState.Claimed[questId] = nil
+			end
+		end
+	end
 
 	local active = ensureTable(data, "Active")
 	active.x2Money = coerceNumber(active.x2Money, 1)

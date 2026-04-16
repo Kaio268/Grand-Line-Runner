@@ -377,13 +377,23 @@ function MeraMeraNoMi.FlameDash(context)
 				tonumber(plan.RequestedDistance) or 0
 			)
 		else
+			local animationConfig = type(context.AbilityConfig) == "table" and context.AbilityConfig.Animation or nil
+			local animationState = MeraAnimationController.PlayFlameDashAnimation(character, animationConfig)
+			local releaseReached, releaseSource = MeraAnimationController.WaitForFlameDashTrail(animationState, animationConfig)
+
 			if plan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
 				local targetRootPosition = startPosition + (plan.Direction * plan.InstantDistance)
 				pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
 			end
 
 			burstStartPosition = rootPart.Position
-			logMove(player, "move=FlameDash release source=server_authorized player=%s", player.Name)
+			logMove(
+				player,
+				"move=FlameDash release source=server_authorized player=%s reached=%s releaseSource=%s",
+				player.Name,
+				tostring(releaseReached),
+				tostring(releaseSource)
+			)
 
 			if plan.RemainingDistance > 0.1 then
 				connection = RunService.Heartbeat:Connect(function(dt)

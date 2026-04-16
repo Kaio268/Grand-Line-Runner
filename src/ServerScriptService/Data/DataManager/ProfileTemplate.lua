@@ -43,6 +43,10 @@ local ProfileTemplate = {
 		Order = {},
 	},
 
+	ChestRewards = {
+		MythicKeys = 0,
+	},
+
 	Bounty = {
 		LifetimeExtraction = 0,
 		Crew = 0,
@@ -110,6 +114,27 @@ local ProfileTemplate = {
 		CycleStartPlayTime = 0,
 		ClaimedRewards = {},
 		LastClaimPlayTime = 0,
+	},
+
+	Quests = {
+		Daily = {
+			CycleId = "",
+			ProfileBackfillApplied = false,
+			Progress = {},
+			Claimed = {},
+		},
+		Weekly = {
+			CycleId = "",
+			ProfileBackfillApplied = false,
+			Progress = {},
+			Claimed = {},
+		},
+		Special = {
+			CycleId = "Lifetime",
+			ProfileBackfillApplied = false,
+			Progress = {},
+			Claimed = {},
+		},
 	},
 
 	IncomeBrainrots = {},

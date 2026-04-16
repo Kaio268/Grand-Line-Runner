@@ -274,8 +274,127 @@ local function buildGeneratedBomuWorldModel(fruit)
 	return model
 end
 
+local function buildGeneratedMoguWorldModel(fruit)
+	local model = Instance.new("Model")
+	model.Name = WORLD_MODEL_NAME
+
+	local body = createGeneratedPart(
+		model,
+		"Body",
+		Vector3.new(2.15, 2.15, 2.15),
+		Color3.fromRGB(125, 89, 56),
+		CFrame.new(0, 0, 0),
+		Enum.PartType.Ball,
+		Enum.Material.SmoothPlastic
+	)
+	createGeneratedPart(
+		model,
+		"Underside",
+		Vector3.new(1.55, 0.7, 1.55),
+		Color3.fromRGB(228, 212, 184),
+		CFrame.new(0, -0.45, 0),
+		Enum.PartType.Ball,
+		Enum.Material.SmoothPlastic
+	)
+	local band = createGeneratedPart(
+		model,
+		"Band",
+		Vector3.new(2.25, 0.26, 2.25),
+		Color3.fromRGB(88, 61, 38),
+		CFrame.new(0, 0.18, 0),
+		Enum.PartType.Cylinder,
+		Enum.Material.SmoothPlastic
+	)
+	band.Orientation = Vector3.new(90, 0, 0)
+
+	for index, offsetX in ipairs({ -0.38, 0, 0.38 }) do
+		local claw = createGeneratedPart(
+			model,
+			string.format("Claw%d", index),
+			Vector3.new(0.18, 0.58, 0.52),
+			Color3.fromRGB(240, 231, 214),
+			CFrame.new(offsetX, 0.92, -0.7) * CFrame.Angles(math.rad(-18), 0, 0),
+			Enum.PartType.Block,
+			Enum.Material.SmoothPlastic
+		)
+		local mesh = Instance.new("SpecialMesh")
+		mesh.MeshType = Enum.MeshType.Wedge
+		mesh.Parent = claw
+	end
+
+	model.PrimaryPart = body
+	applyFruitAttributes(model, fruit)
+	return model
+end
+
+local function buildGeneratedSukeWorldModel(fruit)
+	local model = Instance.new("Model")
+	model.Name = WORLD_MODEL_NAME
+
+	local body = createGeneratedPart(
+		model,
+		"Body",
+		Vector3.new(2.1, 2.1, 2.1),
+		Color3.fromRGB(169, 238, 226),
+		CFrame.new(0, 0, 0),
+		Enum.PartType.Ball,
+		Enum.Material.Glass
+	)
+	body.Transparency = 0.18
+
+	local core = createGeneratedPart(
+		model,
+		"ShimmerCore",
+		Vector3.new(1.25, 1.25, 1.25),
+		Color3.fromRGB(234, 255, 251),
+		CFrame.new(0, 0.04, 0),
+		Enum.PartType.Ball,
+		Enum.Material.Neon
+	)
+	core.Transparency = 0.58
+
+	local band = createGeneratedPart(
+		model,
+		"MirageBand",
+		Vector3.new(2.28, 0.16, 2.28),
+		Color3.fromRGB(225, 255, 250),
+		CFrame.new(0, 0.02, 0),
+		Enum.PartType.Cylinder,
+		Enum.Material.Neon
+	)
+	band.Orientation = Vector3.new(90, 0, 0)
+	band.Transparency = 0.42
+
+	local crossBand = createGeneratedPart(
+		model,
+		"MirageCrossBand",
+		Vector3.new(0.16, 2.18, 2.18),
+		Color3.fromRGB(122, 219, 212),
+		CFrame.new(0, 0, 0) * CFrame.Angles(0, 0, math.rad(90)),
+		Enum.PartType.Cylinder,
+		Enum.Material.Neon
+	)
+	crossBand.Transparency = 0.54
+
+	createGeneratedPart(
+		model,
+		"Stem",
+		Vector3.new(0.28, 0.58, 0.28),
+		Color3.fromRGB(74, 149, 134),
+		CFrame.new(0.12, 1.2, 0) * CFrame.Angles(0, 0, math.rad(-15)),
+		Enum.PartType.Cylinder,
+		Enum.Material.SmoothPlastic
+	)
+
+	model.PrimaryPart = body
+	applyFruitAttributes(model, fruit)
+	return model
+end
+
 local GENERATED_WORLD_MODEL_BUILDERS = {
 	Bomu = buildGeneratedBomuWorldModel,
+	Mogu = buildGeneratedMoguWorldModel,
+	Suke = buildGeneratedSukeWorldModel,
 }
 
 local function getGeneratedWorldModel(fruit)

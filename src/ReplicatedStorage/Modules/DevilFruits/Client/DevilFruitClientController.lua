@@ -33,6 +33,8 @@ local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
+local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
+local MOGU_BURROW_ABILITY = "Burrow"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
@@ -41,6 +43,7 @@ local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_VERTICAL_DEADZONE = 0.12
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
+local DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS = 12
 
 local RemoteBundle = DevilFruitRemotes.GetBundle()
 local requestRemote = RemoteBundle.Request
@@ -51,6 +54,7 @@ local localCooldowns = {}
 local suppressedParts = {}
 local activeFireBursts = {}
 local activePhoenixShields = {}
+local activeMoguBurrow = nil
 local hazardSuppressionLoopRunning = false
 local spaceHeld = false
 local flightInputState = {
@@ -1323,6 +1327,32 @@ ProtectionRuntime.Register("PhoenixProtection", function(targetPlayer, position)
 	return isLocalPlayerInsidePhoenixShield(position)
 end)
 
+local function getMoguHazardProtectionRadius()
+	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	return math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS)
+end
+
+local function isLocalPlayerBurrowProtected(now)
+	if type(activeMoguBurrow) ~= "table" then
+		return false
+	end
+
+	if now >= (activeMoguBurrow.EndTime or 0) then
+		activeMoguBurrow = nil
+		return false
+	end
+
+	return true
+end
+
+ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, position)
+	if targetPlayer ~= player then
+		return false
+	end
+
+	return isLocalPlayerBurrowProtected(os.clock())
+end)
+
 local function buildLocalHazardOverlapParams()
 	local overlapParams = OverlapParams.new()
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -1353,6 +1383,10 @@ local function hasActiveHazardProtection(now)
 		if now < shield.EndTime then
 			return true
 		end
+	end
+
+	if isLocalPlayerBurrowProtected(now) then
+		return true
 	end
 
 	return false
@@ -1387,6 +1421,12 @@ local function updateHazardSuppression()
 			elseif rootPart and getPlanarDistance(ownerRootPart.Position, rootPart.Position) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
 				suppressHazardsNearPosition(ownerRootPart.Position, shield.Radius, shield.EndTime)
 			end
+		end
+	end
+
+	if isLocalPlayerBurrowProtected(now) then
+		if rootPart then
+			suppressHazardsNearPosition(rootPart.Position, activeMoguBurrow.Radius, activeMoguBurrow.EndTime)
 		end
 	end
 
@@ -1447,6 +1487,33 @@ local function startPhoenixShield(targetPlayer, payload)
 	end
 
 	ensureHazardSuppressionLoop()
+end
+
+local function startMoguBurrow(targetPlayer, payload)
+	if targetPlayer ~= player then
+		return
+	end
+
+	local resolvedPayload = payload or {}
+	local duration = math.max(0, tonumber(resolvedPayload.Duration) or 0)
+	if duration <= 0 then
+		duration = math.max(0.5, tonumber((DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}).BurrowDuration) or 5)
+	end
+
+	activeMoguBurrow = {
+		EndTime = os.clock() + duration,
+		Radius = math.max(0, tonumber(resolvedPayload.HazardProtectionRadius) or getMoguHazardProtectionRadius()),
+	}
+
+	ensureHazardSuppressionLoop()
+end
+
+local function stopMoguBurrow(targetPlayer)
+	if targetPlayer ~= player then
+		return
+	end
+
+	activeMoguBurrow = nil
 end
 
 local function getProjectileDirection(direction, rootPart)
@@ -1575,6 +1642,9 @@ fruitModuleLoader = FruitModuleLoader.new({
 	GetLocalRootPart = getRootPart,
 	GetPlayerRootPart = getPlayerRootPart,
 	PlayOptionalEffect = playOptionalEffect,
+	RequestAbility = function(abilityName, payload)
+		requestRemote:FireServer(abilityName, payload)
+	end,
 	CreateEffectVisual = function(startPosition, endPosition, direction, isPredicted)
 		clientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
 	end,
@@ -1847,6 +1917,15 @@ local function initializeDevilFruitClient()
 			return
 		end
 
+		if fruitName == MOGU_FRUIT_NAME and abilityName == MOGU_BURROW_ABILITY then
+			local phase = payload and payload.Phase
+			if phase == "Start" then
+				startMoguBurrow(targetPlayer, payload)
+			elseif phase == "Resolve" then
+				stopMoguBurrow(targetPlayer)
+			end
+		end
+
 		effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
 	end)
 
@@ -1856,6 +1935,7 @@ local function initializeDevilFruitClient()
 
 	player.CharacterRemoving:Connect(function()
 		activeFireBursts = {}
+		activeMoguBurrow = nil
 		fruitModuleLoader:ForEachLoadedController("HandleCharacterRemoving")
 		hazardSuppressionLoopRunning = false
 		restoreSuppressedParts(math.huge)

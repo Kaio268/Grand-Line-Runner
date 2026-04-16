@@ -10,17 +10,11 @@ local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local ChestVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestVisuals"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local MetaClient = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushMetaClient"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
-
-local CHEST_ORDER = {
-	Wooden = 1,
-	Iron = 2,
-	Gold = 3,
-	Legendary = 4,
-}
 
 local RESOURCE_ORDER = {
 	Apple = 1,
@@ -43,19 +37,19 @@ local CATEGORY_ORDER = {
 }
 
 local CATEGORY_LABELS = {
-	Brainrots = "Brainrots",
+	Brainrots = "Treasure",
 	DevilFruits = "Devil Fruits",
 	Resources = "Resources",
 }
 
 local CATEGORY_BUTTON_LABELS = {
-	Brainrots = "Brainrots",
+	Brainrots = "Treasure",
 	DevilFruits = "DevFruits",
 	Resources = "Resources",
 }
 
 local CATEGORY_ALIASES = {
-	Brainrots = { "brainrot", "brainrots" },
+	Brainrots = { "brainrot", "brainrots", "treasure" },
 	Resources = { "resources", "resource", "soon" },
 }
 
@@ -73,8 +67,6 @@ local scrollingFrame = inventoryFrame:WaitForChild("ScrollingFrame")
 local invTemplate = scrollingFrame:WaitForChild("toolButton")
 local invContainer = invTemplate.Parent
 
-local MAX_HOTBAR = 9
-
 local NORMAL = Color3.fromRGB(0, 0, 0)
 local SELECT = Color3.fromRGB(255, 255, 255)
 local TOOLTIP_BACKGROUND = Color3.fromRGB(20, 24, 32)
@@ -82,6 +74,7 @@ local TOOLTIP_TEXT = Color3.fromRGB(245, 247, 250)
 local TOOLTIP_SUBTEXT = Color3.fromRGB(180, 188, 200)
 
 local equippedName = nil
+local equippedKind = nil
 local activeInventoryCategory = "Brainrots"
 
 local hotbarButtons = {}
@@ -94,6 +87,9 @@ local rebuildUI
 local itemState = {}
 local acquisition = {}
 local acquisitionCounter = 0
+local chestInventoryFolderConnections = {}
+local chestInventoryQuantityConnections = {}
+local boundChestInventoryFolder = nil
 local hoverTooltip = {
 	Gui = nil,
 	Title = nil,
@@ -196,23 +192,117 @@ end
 local function updateSelection()
 	for _, b in pairs(hotbarButtons) do
 		if b and b.Parent then
-			applySelectedVisual(b, equippedName ~= nil and b:GetAttribute("ItemName") == equippedName)
+			applySelectedVisual(
+				b,
+				equippedName ~= nil
+					and b:GetAttribute("ItemName") == equippedName
+					and (equippedKind == nil or b:GetAttribute("ItemKind") == equippedKind)
+			)
 		end
 	end
 	for _, b in pairs(invButtons) do
 		if b and b.Parent then
-			applySelectedVisual(b, equippedName ~= nil and b:GetAttribute("ItemName") == equippedName)
+			applySelectedVisual(
+				b,
+				equippedName ~= nil
+					and b:GetAttribute("ItemName") == equippedName
+					and (equippedKind == nil or b:GetAttribute("ItemKind") == equippedKind)
+			)
 		end
 	end
 end
 
+local function ensureNamedGuiObject(parent, name, className)
+	local child = parent:FindFirstChild(name)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	if child then
+		child:Destroy()
+	end
+
+	child = Instance.new(className)
+	child.Name = name
+	child.Parent = parent
+	return child
+end
+
+local function ensureButtonStructure(button)
+	local isLargeButton = (button.Size.Y.Offset >= 70) or (button.AbsoluteSize.Y >= 70)
+
+	local toolIcon = ensureNamedGuiObject(button, "ToolIcon", "ImageLabel")
+	toolIcon.BackgroundTransparency = 1
+	toolIcon.BorderSizePixel = 0
+	toolIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+	toolIcon.Position = isLargeButton and UDim2.new(0.5, 0, 0.36, 0) or UDim2.new(0.5, 0, 0.5, 0)
+	toolIcon.Size = isLargeButton and UDim2.new(0.6, 0, 0.5, 0) or UDim2.new(0.68, 0, 0.68, 0)
+	toolIcon.ScaleType = Enum.ScaleType.Fit
+	toolIcon.ZIndex = math.max(button.ZIndex + 1, 2)
+
+	local toolName = ensureNamedGuiObject(button, "toolName", "TextLabel")
+	toolName.BackgroundTransparency = 1
+	toolName.BorderSizePixel = 0
+	toolName.AnchorPoint = Vector2.new(0.5, 1)
+	toolName.Position = UDim2.new(0.5, 0, 1, -3)
+	toolName.Size = UDim2.new(1, -8, 0, 14)
+	toolName.Font = Enum.Font.GothamBold
+	toolName.TextColor3 = Color3.new(1, 1, 1)
+	toolName.TextSize = isLargeButton and 10 or 9
+	toolName.TextScaled = false
+	toolName.TextTruncate = Enum.TextTruncate.AtEnd
+	toolName.TextWrapped = false
+	toolName.TextXAlignment = Enum.TextXAlignment.Center
+	toolName.TextYAlignment = Enum.TextYAlignment.Center
+	toolName.Visible = isLargeButton
+	toolName.ZIndex = math.max(button.ZIndex + 2, 3)
+
+	local toolAmount = ensureNamedGuiObject(button, "toolAmount", "TextLabel")
+	toolAmount.BackgroundTransparency = 1
+	toolAmount.BorderSizePixel = 0
+	toolAmount.AnchorPoint = Vector2.new(1, 1)
+	toolAmount.Position = UDim2.new(1, -4, 1, -4)
+	toolAmount.Size = UDim2.fromOffset(42, 12)
+	toolAmount.Font = Enum.Font.GothamBold
+	toolAmount.TextColor3 = Color3.new(1, 1, 1)
+	toolAmount.TextSize = 10
+	toolAmount.TextXAlignment = Enum.TextXAlignment.Right
+	toolAmount.TextYAlignment = Enum.TextYAlignment.Center
+	toolAmount.Visible = false
+	toolAmount.ZIndex = math.max(button.ZIndex + 3, 4)
+
+	local toolNumber = ensureNamedGuiObject(button, "toolNumber", "TextLabel")
+	toolNumber.BackgroundTransparency = 1
+	toolNumber.BorderSizePixel = 0
+	toolNumber.Position = UDim2.fromOffset(4, 3)
+	toolNumber.Size = UDim2.fromOffset(18, 12)
+	toolNumber.Font = Enum.Font.GothamBold
+	toolNumber.TextColor3 = Color3.new(1, 1, 1)
+	toolNumber.TextSize = 10
+	toolNumber.TextXAlignment = Enum.TextXAlignment.Left
+	toolNumber.TextYAlignment = Enum.TextYAlignment.Top
+	toolNumber.Visible = false
+	toolNumber.ZIndex = math.max(button.ZIndex + 3, 4)
+
+	return {
+		ToolIcon = toolIcon,
+		ToolName = toolName,
+		ToolAmount = toolAmount,
+		ToolNumber = toolNumber,
+	}
+end
+
 local function setCommon(b, icon, displayName)
-	local toolIcon = b:WaitForChild("ToolIcon")
-	local toolName = b:WaitForChild("toolName")
+	local components = ensureButtonStructure(b)
+	local toolIcon = components.ToolIcon
+	local toolName = components.ToolName
 	toolIcon.Image = icon or ""
 	toolIcon.ImageTransparency = (icon and icon ~= "") and 0 or 1
 	toolName.Text = displayName or ""
 end
+
+ensureButtonStructure(hotbarTemplate)
+ensureButtonStructure(invTemplate)
 
 local function getResourceInfo(resourceKey)
 	local foodConfig = Economy.Food[resourceKey]
@@ -240,6 +330,11 @@ local function clearChestPreview(button)
 	local viewport = button:FindFirstChild("ChestViewport")
 	if viewport then
 		viewport:Destroy()
+	end
+
+	local icon = button:FindFirstChild("ChestIcon")
+	if icon then
+		icon:Destroy()
 	end
 end
 
@@ -296,10 +391,7 @@ local function buildResourcePreviewModel(resourceKey)
 end
 
 local function ensureResourcePreview(button, resourceKey)
-	local toolIcon = button:FindFirstChild("ToolIcon")
-	if not toolIcon or not toolIcon:IsA("GuiObject") then
-		return false
-	end
+	local toolIcon = ensureButtonStructure(button).ToolIcon
 
 	local viewport = button:FindFirstChild("ResourceViewport")
 	if not viewport then
@@ -361,91 +453,105 @@ local function ensureResourcePreview(button, resourceKey)
 end
 
 local function ensureChestPreview(button, tierName)
-	local toolIcon = button:FindFirstChild("ToolIcon")
-	if not toolIcon or not toolIcon:IsA("GuiObject") then
-		return false
+	local toolIcon = ensureButtonStructure(button).ToolIcon
+	local woodColor, metalColor = ChestVisuals.GetTierColors(tierName)
+	local legacyViewport = button:FindFirstChild("ChestViewport")
+	if legacyViewport then
+		legacyViewport:Destroy()
 	end
 
-	local viewport = button:FindFirstChild("ChestViewport")
-	if not viewport then
-		viewport = Instance.new("ViewportFrame")
-		viewport.Name = "ChestViewport"
-		viewport.Active = false
-		viewport.BackgroundTransparency = 1
-		viewport.BorderSizePixel = 0
-		viewport.LightColor = Color3.fromRGB(255, 255, 255)
-		viewport.LightDirection = Vector3.new(-1, -1, -1)
-		viewport.Ambient = Color3.fromRGB(205, 205, 205)
-		viewport.Parent = button
+	local icon = button:FindFirstChild("ChestIcon")
+	if not icon then
+		icon = Instance.new("Frame")
+		icon.Name = "ChestIcon"
+		icon.BackgroundTransparency = 1
+		icon.BorderSizePixel = 0
+		icon.Parent = button
 	end
 
-	viewport.AnchorPoint = toolIcon.AnchorPoint
-	viewport.Position = toolIcon.Position
-	viewport.Size = toolIcon.Size
-	viewport.ZIndex = toolIcon.ZIndex + 1
-	viewport.Visible = true
+	icon.AnchorPoint = toolIcon.AnchorPoint
+	icon.Position = toolIcon.Position
+	icon.Size = toolIcon.Size
+	icon.ZIndex = toolIcon.ZIndex + 1
+	icon.Visible = true
 
-	for _, child in ipairs(viewport:GetChildren()) do
-		child:Destroy()
-	end
+	local body = ensureNamedGuiObject(icon, "Body", "Frame")
+	body.AnchorPoint = Vector2.new(0.5, 1)
+	body.Position = UDim2.new(0.5, 0, 0.84, 0)
+	body.Size = UDim2.new(0.72, 0, 0.36, 0)
+	body.BackgroundColor3 = woodColor
+	body.BorderSizePixel = 0
+	body.ZIndex = icon.ZIndex + 1
 
-	local worldModel = Instance.new("WorldModel")
-	worldModel.Parent = viewport
+	local bodyCorner = ensureNamedGuiObject(body, "Corner", "UICorner")
+	bodyCorner.CornerRadius = UDim.new(0.14, 0)
 
-	local modelClone = ChestVisuals.CreatePreviewModel(tierName)
-	modelClone.Parent = worldModel
+	local bodyStroke = ensureNamedGuiObject(body, "Stroke", "UIStroke")
+	bodyStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	bodyStroke.Color = metalColor:Lerp(Color3.new(0, 0, 0), 0.18)
+	bodyStroke.Thickness = 1
+	bodyStroke.Transparency = 0.1
 
-	if modelClone:IsA("BasePart") then
-		modelClone.CFrame = CFrame.new()
-	elseif modelClone:IsA("Model") then
-		pcall(function()
-			modelClone:PivotTo(CFrame.Angles(math.rad(-12), math.rad(35), 0))
-		end)
-	end
+	local lid = ensureNamedGuiObject(icon, "Lid", "Frame")
+	lid.AnchorPoint = Vector2.new(0.5, 0.5)
+	lid.Position = UDim2.new(0.5, 0, 0.34, 0)
+	lid.Size = UDim2.new(0.8, 0, 0.26, 0)
+	lid.BackgroundColor3 = woodColor:Lerp(Color3.new(1, 1, 1), 0.08)
+	lid.BorderSizePixel = 0
+	lid.Rotation = -6
+	lid.ZIndex = icon.ZIndex + 3
 
-	for _, descendant in ipairs(modelClone:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			descendant.Anchored = true
-			descendant.CanCollide = false
-			descendant.CanTouch = false
-			descendant.CanQuery = false
-		end
-	end
+	local lidCorner = ensureNamedGuiObject(lid, "Corner", "UICorner")
+	lidCorner.CornerRadius = UDim.new(0.18, 0)
 
-	local boxCF
-	local boxSize
-	if modelClone:IsA("Model") then
-		boxCF, boxSize = modelClone:GetBoundingBox()
-	elseif modelClone:IsA("BasePart") then
-		boxCF, boxSize = modelClone.CFrame, modelClone.Size
-	else
-		clearChestPreview(button)
-		toolIcon.ImageTransparency = 1
-		return false
-	end
+	local lidStroke = ensureNamedGuiObject(lid, "Stroke", "UIStroke")
+	lidStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	lidStroke.Color = metalColor:Lerp(Color3.new(0, 0, 0), 0.18)
+	lidStroke.Thickness = 1
+	lidStroke.Transparency = 0.08
 
-	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+	local centerBand = ensureNamedGuiObject(icon, "CenterBand", "Frame")
+	centerBand.AnchorPoint = Vector2.new(0.5, 0.5)
+	centerBand.Position = UDim2.new(0.5, 0, 0.5, 0)
+	centerBand.Size = UDim2.new(0.12, 0, 0.56, 0)
+	centerBand.BackgroundColor3 = metalColor
+	centerBand.BorderSizePixel = 0
+	centerBand.ZIndex = icon.ZIndex + 4
 
-	local camera = Instance.new("Camera")
-	camera.Name = "PreviewCamera"
-	camera.FieldOfView = 35
-	camera.CFrame = CFrame.lookAt(
-		boxCF.Position + Vector3.new(maxSize * 0.8, maxSize * 0.35, maxSize * 1.75),
-		boxCF.Position
-	)
-	camera.Parent = viewport
+	local leftBand = ensureNamedGuiObject(icon, "LeftBand", "Frame")
+	leftBand.AnchorPoint = Vector2.new(0.5, 0.5)
+	leftBand.Position = UDim2.new(0.24, 0, 0.58, 0)
+	leftBand.Size = UDim2.new(0.08, 0, 0.42, 0)
+	leftBand.BackgroundColor3 = metalColor
+	leftBand.BorderSizePixel = 0
+	leftBand.ZIndex = icon.ZIndex + 2
 
-	viewport.CurrentCamera = camera
+	local rightBand = ensureNamedGuiObject(icon, "RightBand", "Frame")
+	rightBand.AnchorPoint = Vector2.new(0.5, 0.5)
+	rightBand.Position = UDim2.new(0.76, 0, 0.58, 0)
+	rightBand.Size = UDim2.new(0.08, 0, 0.42, 0)
+	rightBand.BackgroundColor3 = metalColor
+	rightBand.BorderSizePixel = 0
+	rightBand.ZIndex = icon.ZIndex + 2
+
+	local latch = ensureNamedGuiObject(icon, "Latch", "Frame")
+	latch.AnchorPoint = Vector2.new(0.5, 0.5)
+	latch.Position = UDim2.new(0.5, 0, 0.58, 0)
+	latch.Size = UDim2.new(0.16, 0, 0.14, 0)
+	latch.BackgroundColor3 = metalColor:Lerp(Color3.new(1, 1, 1), 0.08)
+	latch.BorderSizePixel = 0
+	latch.ZIndex = icon.ZIndex + 5
+
+	local latchCorner = ensureNamedGuiObject(latch, "Corner", "UICorner")
+	latchCorner.CornerRadius = UDim.new(0.18, 0)
+
 	toolIcon.ImageTransparency = 1
 
 	return true
 end
 
 local function ensureDevilFruitPreview(button, fruitKey)
-	local toolIcon = button:FindFirstChild("ToolIcon")
-	if not toolIcon or not toolIcon:IsA("GuiObject") then
-		return false
-	end
+	local toolIcon = ensureButtonStructure(button).ToolIcon
 
 	local modelClone = DevilFruitAssets.ClonePreviewWorldModel(fruitKey)
 	if not modelClone then
@@ -516,7 +622,7 @@ local function ensureDevilFruitPreview(button, fruitKey)
 end
 
 local function setAmount(b, qty)
-	local amount = b:FindFirstChild("toolAmount")
+	local amount = ensureButtonStructure(b).ToolAmount
 	if not amount then return end
 
 	if qty and qty >= 2 then
@@ -529,7 +635,7 @@ local function setAmount(b, qty)
 end
 
 local function setSlotVisual(b, slotValue)
-	local slotLabel = b:FindFirstChild("toolNumber")
+	local slotLabel = ensureButtonStructure(b).ToolNumber
 	if not slotLabel then
 		return
 	end
@@ -551,6 +657,106 @@ local function ensureAcquired(key)
 	end
 end
 
+local function disconnectConnections(connectionList)
+	for index = #connectionList, 1, -1 do
+		local connection = connectionList[index]
+		connectionList[index] = nil
+		if connection then
+			connection:Disconnect()
+		end
+	end
+end
+
+local function setChestItemState(name, quantity)
+	local qty = math.max(0, tonumber(quantity) or 0)
+	local key = "Chest|" .. tostring(name)
+
+	if qty <= 0 then
+		itemState[key] = nil
+	else
+		ensureAcquired(key)
+		itemState[key] = { kind = "Chest", name = name, qty = qty }
+	end
+end
+
+local function logChestItemState()
+	local chestKeys = {}
+	for itemKey, item in pairs(itemState) do
+		if item and item.kind == "Chest" then
+			chestKeys[#chestKeys + 1] = string.format("%s=%s", itemKey, tostring(item.qty))
+		end
+	end
+	table.sort(chestKeys)
+	chestDebug("itemState chest entries after update: %s", #chestKeys > 0 and table.concat(chestKeys, ", ") or "none")
+end
+
+local function bindChestInventoryFolder(folder)
+	if folder == nil or not folder:IsA("Folder") then
+		return
+	end
+
+	if boundChestInventoryFolder ~= folder then
+		disconnectConnections(chestInventoryFolderConnections)
+		for trackedFolder, connections in pairs(chestInventoryQuantityConnections) do
+			disconnectConnections(connections)
+			chestInventoryQuantityConnections[trackedFolder] = nil
+		end
+		boundChestInventoryFolder = folder
+	end
+
+	local function hookChestFolder(chestFolder)
+		if not chestFolder:IsA("Folder") or chestInventoryQuantityConnections[chestFolder] ~= nil then
+			return
+		end
+
+		local quantityValue = chestFolder:FindFirstChild("Quantity") or chestFolder:WaitForChild("Quantity", 5)
+		if not quantityValue or not quantityValue:IsA("NumberValue") then
+			return
+		end
+
+		local connections = {}
+		chestInventoryQuantityConnections[chestFolder] = connections
+
+		local function applyQuantity()
+			local quantity = math.max(0, tonumber(quantityValue.Value) or 0)
+			chestDebug(
+				"ChestInventory local sync chest=%s qty=%s",
+				tostring(chestFolder.Name),
+				tostring(quantity)
+			)
+			setChestItemState(chestFolder.Name, quantity)
+			logChestItemState()
+			rebuildUI()
+		end
+
+		applyQuantity()
+		connections[#connections + 1] = quantityValue:GetPropertyChangedSignal("Value"):Connect(applyQuantity)
+	end
+
+	for _, child in ipairs(folder:GetChildren()) do
+		hookChestFolder(child)
+	end
+
+	chestInventoryFolderConnections[#chestInventoryFolderConnections + 1] = folder.ChildAdded:Connect(function(child)
+		hookChestFolder(child)
+	end)
+
+	chestInventoryFolderConnections[#chestInventoryFolderConnections + 1] = folder.ChildRemoved:Connect(function(child)
+		local connections = chestInventoryQuantityConnections[child]
+		if connections then
+			disconnectConnections(connections)
+			chestInventoryQuantityConnections[child] = nil
+		end
+
+		if child:IsA("Folder") then
+			chestDebug("ChestInventory local remove chest=%s", tostring(child.Name))
+			setChestItemState(child.Name, 0)
+			logChestItemState()
+			rebuildUI()
+		end
+	end)
+end
+
 local function getIcon(kind, name)
 	if kind == "Brainrot" then
 		local cfg = Brainrots[name]
@@ -568,7 +774,7 @@ end
 
 local function getDisplayName(kind, name)
 	if kind == "Chest" then
-		return string.format("%s Chest", tostring(name))
+		return ChestUtils.GetDisplayName(name)
 	end
 	if kind == "Resource" then
 		return getResourceInfo(name).DisplayName
@@ -583,7 +789,7 @@ end
 
 local function getRarity(kind, name)
 	if kind == "Chest" then
-		return tostring(name)
+		return ChestUtils.GetRarityLabel(name)
 	end
 	if kind == "Resource" then
 		return getResourceInfo(name).ResourceType
@@ -984,6 +1190,7 @@ local function createButton(template, parent, kind, name)
 	b.Name = "Tool_" .. kind .. "_" .. name
 	b.Visible = true
 	b.Parent = parent
+	ensureButtonStructure(b)
 
 	b:SetAttribute("ItemKind", kind)
 	b:SetAttribute("ItemName", name)
@@ -1147,8 +1354,8 @@ local function getLists()
 	table.sort(chestsList, function(a, b)
 		local sa = itemState[a]
 		local sb = itemState[b]
-		local oa = CHEST_ORDER[tostring(sa and sa.name or "")] or 999
-		local ob = CHEST_ORDER[tostring(sb and sb.name or "")] or 999
+		local oa = ChestUtils.GetSortRank(tostring(sa and sa.name or ""))
+		local ob = ChestUtils.GetSortRank(tostring(sb and sb.name or ""))
 		if oa ~= ob then
 			return oa < ob
 		end
@@ -1180,22 +1387,8 @@ rebuildUI = function()
 		table.insert(hotbarKeys, k)
 	end
 
-	for _, k in ipairs(chestsList) do
+	for _, k in ipairs(brainrotsList) do
 		table.insert(hotbarKeys, k)
-	end
-
-	local remaining = MAX_HOTBAR - #hotbarKeys
-	if remaining < 0 then
-		remaining = 0
-	end
-
-	for i = 1, #brainrotsList do
-		local k = brainrotsList[i]
-		if i <= remaining then
-			table.insert(hotbarKeys, k)
-		else
-			table.insert(invKeys, k)
-		end
 	end
 
 	if activeInventoryCategory == "Resources" then
@@ -1207,11 +1400,8 @@ rebuildUI = function()
 			table.insert(invKeys, k)
 		end
 	else
-		for i = 1, #brainrotsList do
-			local k = brainrotsList[i]
-			if i > remaining then
-				table.insert(invKeys, k)
-			end
+		for _, k in ipairs(chestsList) do
+			table.insert(invKeys, k)
 		end
 	end
 
@@ -1417,24 +1607,8 @@ updateRemote.OnClientEvent:Connect(function(kind, name, v)
 			itemState[key] = { kind = "DevilFruit", name = fruit.FruitKey, qty = qty }
 		end
 	elseif kind == "Chest" then
-		local qty = tonumber(v) or 0
-		local key = "Chest|" .. name
-
-		if qty <= 0 then
-			itemState[key] = nil
-		else
-			ensureAcquired(key)
-			itemState[key] = { kind = "Chest", name = name, qty = qty }
-		end
-
-		local chestKeys = {}
-		for itemKey, item in pairs(itemState) do
-			if item and item.kind == "Chest" then
-				chestKeys[#chestKeys + 1] = string.format("%s=%s", itemKey, tostring(item.qty))
-			end
-		end
-		table.sort(chestKeys)
-		chestDebug("itemState chest entries after update: %s", #chestKeys > 0 and table.concat(chestKeys, ", ") or "none")
+		setChestItemState(name, v)
+		logChestItemState()
 	end
 
 	rebuildUI()
@@ -1520,10 +1694,28 @@ UserInputService.InputChanged:Connect(function(input)
 end)
 
 local function scanEquipped(char)
+	local attributeKind = player:GetAttribute("EquippedInventoryItemKind")
+	local attributeName = player:GetAttribute("EquippedInventoryItemName")
+	if typeof(attributeName) == "string" and attributeName ~= "" then
+		equippedKind = if typeof(attributeKind) == "string" and attributeKind ~= "" then attributeKind else nil
+		equippedName = attributeName
+		updateSelection()
+		return
+	end
+
+	equippedKind = nil
 	equippedName = nil
 	for _, ch in ipairs(char:GetChildren()) do
 		if ch:IsA("Tool") then
-			equippedName = ch.Name
+			local canonicalName = ch:GetAttribute("InvItem") or ch:GetAttribute("InventoryItemName")
+			local canonicalKind = ch:GetAttribute("InventoryItemKind")
+			if typeof(canonicalName) == "string" and canonicalName ~= "" then
+				equippedKind = if typeof(canonicalKind) == "string" and canonicalKind ~= "" then canonicalKind else nil
+				equippedName = canonicalName
+			else
+				equippedKind = if typeof(canonicalKind) == "string" and canonicalKind ~= "" then canonicalKind else nil
+				equippedName = ch.Name
+			end
 			break
 		end
 	end
@@ -1542,21 +1734,27 @@ local function hookCharacter(char)
 					obj.Parent and obj.Parent:GetFullName() or "nil"
 				)
 			end
-			equippedName = obj.Name
-			updateSelection()
+			task.defer(function()
+				if char.Parent ~= nil then
+					scanEquipped(char)
+				end
+			end)
 		end
 	end)
 
 	char.ChildRemoved:Connect(function(obj)
-		if obj:IsA("Tool") and equippedName == obj.Name then
+		if obj:IsA("Tool") then
 			if obj:GetAttribute("InventoryItemKind") == "Chest" then
 				chestDebug(
 					"Character ChildRemoved chest tool name=%s",
 					tostring(obj.Name)
 				)
 			end
-			equippedName = nil
-			updateSelection()
+			task.defer(function()
+				if char.Parent ~= nil then
+					scanEquipped(char)
+				end
+			end)
 		end
 	end)
 end
@@ -1566,5 +1764,30 @@ if player.Character then
 end
 
 player.CharacterAdded:Connect(hookCharacter)
+
+player:GetAttributeChangedSignal("EquippedInventoryItemKind"):Connect(function()
+	if player.Character then
+		scanEquipped(player.Character)
+	else
+		equippedKind = nil
+		updateSelection()
+	end
+end)
+
+player:GetAttributeChangedSignal("EquippedInventoryItemName"):Connect(function()
+	if player.Character then
+		scanEquipped(player.Character)
+	else
+		equippedName = nil
+		updateSelection()
+	end
+end)
+
+bindChestInventoryFolder(player:FindFirstChild("ChestInventory") or player:WaitForChild("ChestInventory", 10))
+player.ChildAdded:Connect(function(child)
+	if child.Name == "ChestInventory" and child:IsA("Folder") then
+		bindChestInventoryFolder(child)
+	end
+end)
 
  

@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local verticalSliceConfig = Economy.VerticalSlice
 if verticalSliceConfig.Enabled ~= true then
 	return
@@ -367,7 +368,7 @@ local function render()
 	if currentState.UnopenedChests and #currentState.UnopenedChests > 0 then
 		local parts = {}
 		for index, chest in ipairs(currentState.UnopenedChests) do
-			parts[#parts + 1] = string.format("#%s %s", tostring(chest.ChestId), tostring(chest.Tier))
+			parts[#parts + 1] = string.format("#%s %s", tostring(chest.ChestId), tostring(chest.DisplayName or chest.Tier))
 			if index >= 5 then
 				break
 			end
@@ -501,6 +502,10 @@ local function request(actionName, payload)
 		setMessage(response.message)
 	elseif response.ok == false and response.error then
 		setMessage("Action blocked: " .. tostring(response.error))
+	end
+
+	if response.ok == true and typeof(response.openResult) == "table" then
+		PopUpModule:Local_ShowChestOpenResult(response.openResult)
 	end
 
 	render()

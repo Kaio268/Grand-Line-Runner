@@ -45,6 +45,27 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
+	Mogu = {
+		Burrow = {
+			Phases = {
+				Start = true,
+				Resolve = true,
+			},
+			TargetScope = "all_clients",
+			Prediction = "server_only",
+			ServerAuthoritative = true,
+		},
+	},
+	Suke = {
+		Fade = {
+			Phases = {
+				Start = true,
+			},
+			TargetScope = "all_clients",
+			Prediction = "server_only",
+			ServerAuthoritative = true,
+		},
+	},
 }
 
 local UI_OVERRIDES_BY_KEY = {
@@ -62,6 +83,11 @@ local UI_OVERRIDES_BY_KEY = {
 		},
 		FireBurst = {
 			DisplayName = "Fire Burst",
+		},
+	},
+	Suke = {
+		Fade = {
+			DisplayName = "Fade",
 		},
 	},
 }
@@ -93,6 +119,14 @@ local STRUCTURED_FRUIT_ENTRY_MODULES = {
 	Hie = {
 		Client = "HieClient",
 		Server = "HieServer",
+	},
+	Mogu = {
+		Client = "MoguClient",
+		Server = "MoguServer",
+	},
+	Suke = {
+		Client = "SukeClient",
+		Server = "SukeServer",
 	},
 	Tori = {
 		Client = "ToriClient",

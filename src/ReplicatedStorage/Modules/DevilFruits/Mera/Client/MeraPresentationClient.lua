@@ -1678,6 +1678,60 @@ function MeraPresentationClient:StopFlameDashTrail(targetPlayer, reason, finalPo
 	return true
 end
 
+function MeraPresentationClient:WaitForFlameDashTrail(targetPlayer)
+	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	if not state or typeof(state.Track) ~= "Instance" or not state.Track:IsA("AnimationTrack") then
+		return false
+	end
+
+	local animationConfig = self:GetAnimationConfig("FlameDash")
+	local fallbackTime = animationConfig and animationConfig.ReleaseFallbackTime or 0.25
+
+	local reached = false
+	local connection = nil
+	local stoppedConnection = nil
+	local signal = Instance.new("BindableEvent")
+
+	local function complete(success)
+		if reached then
+			return
+		end
+
+		reached = true
+		signal:Fire(success)
+	end
+
+	connection = state.Track:GetMarkerReachedSignal("Trail"):Connect(function()
+		complete(true)
+	end)
+
+	stoppedConnection = state.Track.Stopped:Connect(function()
+		if fallbackTime <= 0 then
+			complete(false)
+		end
+	end)
+
+	if fallbackTime > 0 then
+		task.delay(fallbackTime, function()
+			complete(false)
+		end)
+	elseif not state.Track.IsPlaying then
+		complete(false)
+	end
+
+	local success = signal.Event:Wait()
+	signal:Destroy()
+
+	if connection then
+		connection:Disconnect()
+	end
+	if stoppedConnection then
+		stoppedConnection:Disconnect()
+	end
+
+	return success
+end
+
 function MeraPresentationClient:HandleFireBurstEffect(targetPlayer, payload)
 	local phase = type(payload) == "table" and payload.Phase or nil
 	logFireBurst(
