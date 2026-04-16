@@ -6,47 +6,51 @@ local React = require(Packages:WaitForChild("React"))
 local Theme = require(script.Parent.Parent:WaitForChild("Theme"))
 
 local e = React.createElement
+local ROW_OUTER_HEIGHT = math.max(120, (Theme.Layout.RewardCardHeight or 154) - 16)
+local CHIP_HEIGHT = 52
+local ROW_INNER_TOP = 14
 
 local function rewardChip(props)
 	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.Ink,
-		BackgroundTransparency = 0.12,
+		BackgroundColor3 = Theme.Palette.Section,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1 / 3, -8, 0, 56),
+		Size = UDim2.new(1 / 3, -10, 0, CHIP_HEIGHT),
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 14),
+			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Theme.Palette.BorderSoft,
-			Transparency = 0.18,
+			Color = Theme.Palette.GoldSoft,
+			Transparency = 0,
+			Thickness = 1.1,
 		}),
 		Icon = props.icon and props.icon ~= "" and e("ImageLabel", {
 			BackgroundTransparency = 1,
 			Image = props.icon,
-			Position = UDim2.fromOffset(10, 12),
-			Size = UDim2.fromOffset(30, 30),
+			Position = UDim2.fromOffset(10, 10),
+			Size = UDim2.fromOffset(32, 32),
 			ScaleType = Enum.ScaleType.Fit,
 		}) or nil,
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(props.icon and props.icon ~= "" and 46 or 12, 10),
+			Position = UDim2.fromOffset(props.icon and props.icon ~= "" and 48 or 12, 8),
 			Size = UDim2.new(1, -(props.icon and props.icon ~= "" and 56 or 24), 0, 12),
 			Text = tostring(props.label or ""),
-			TextColor3 = Theme.Palette.MutedSoft,
-			TextSize = 10,
+			TextColor3 = Theme.Palette.Muted,
+			TextSize = 11,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Amount = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(props.icon and props.icon ~= "" and 46 or 12, 24),
-			Size = UDim2.new(1, -(props.icon and props.icon ~= "" and 56 or 24), 0, 20),
+			Position = UDim2.fromOffset(props.icon and props.icon ~= "" and 48 or 12, 24),
+			Size = UDim2.new(1, -(props.icon and props.icon ~= "" and 56 or 24), 0, 22),
 			Text = tostring(props.amount or ""),
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 12,
+			TextSize = 14,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
@@ -57,19 +61,19 @@ local function statusButton(props)
 	local reward = props.reward or {}
 	local isClaimed = reward.claimed == true
 	local isClaimable = reward.claimable == true
-	local fillColor = Theme.Palette.SectionSoft
+	local fillColor = Theme.Palette.Section
 	local textColor = Theme.Palette.Text
-	local strokeColor = Theme.Palette.BorderSoft
+	local strokeColor = Theme.Palette.GoldSoft
 	local buttonText = "Locked"
 
 	if isClaimed then
-		fillColor = Theme.Palette.Emerald
-		textColor = Theme.Palette.Ink
-		strokeColor = Theme.Palette.Emerald
+		fillColor = Theme.Palette.Section
+		textColor = Theme.Palette.Emerald
+		strokeColor = Theme.Palette.GoldSoft
 		buttonText = "Claimed"
 	elseif isClaimable then
-		fillColor = Theme.Palette.Gold
-		textColor = Theme.Palette.Ink
+		fillColor = Theme.Palette.Section
+		textColor = Theme.Palette.GoldSoft
 		strokeColor = Theme.Palette.GoldSoft
 		buttonText = "Claim"
 	end
@@ -85,13 +89,13 @@ local function statusButton(props)
 		AnchorPoint = Vector2.new(1, 1),
 		AutoButtonColor = false,
 		BackgroundColor3 = fillColor,
-		BackgroundTransparency = isClaimable and 0 or 0.15,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
-		Position = UDim2.new(1, -18, 1, -16),
-		Size = UDim2.fromOffset(132, 38),
+		Position = UDim2.new(1, -16, 1, -14),
+		Size = UDim2.fromOffset(118, 32),
 		Text = buttonText,
 		TextColor3 = textColor,
-		TextSize = 13,
+		TextSize = 12,
 		Font = Theme.Fonts.Button,
 		Selectable = isClaimable,
 		ZIndex = 3,
@@ -103,7 +107,7 @@ local function statusButton(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = strokeColor,
-			Transparency = isClaimed and 0.18 or 0.08,
+			Transparency = 0,
 			Thickness = 1.2,
 		}),
 	})
@@ -111,7 +115,7 @@ end
 
 local function rewardCard(props)
 	local reward = props.reward or {}
-	local accentColor = reward.claimed and Theme.Palette.Emerald or (reward.accentColor or Theme.Palette.Orange)
+	local hovered, setHovered = React.useState(false)
 	local remainingText = reward.claimable and "Ready to claim"
 		or reward.claimed and "Reward claimed"
 		or string.format("%d more discoveries needed", reward.remaining or 0)
@@ -134,24 +138,27 @@ local function rewardCard(props)
 	end
 
 	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.Section,
+		Active = true,
+		BackgroundColor3 = hovered and Theme.Palette.SectionSoft or Theme.Palette.Section,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, Theme.Layout.RewardCardHeight),
+		Size = UDim2.new(1, -14, 0, ROW_OUTER_HEIGHT),
+		[React.Event.MouseEnter] = function()
+			setHovered(true)
+		end,
+		[React.Event.MouseLeave] = function()
+			setHovered(false)
+		end,
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 22),
 		}),
 		Stroke = e("UIStroke", {
-			Color = accentColor,
-			Transparency = 0.08,
-			Thickness = 1.2,
-		}),
-		Glow = e("UIStroke", {
-			Color = accentColor,
-			Transparency = 0.86,
-			Thickness = 4,
+			Color = Theme.Palette.GoldSoft,
+			Transparency = 0,
+			Thickness = 1.5,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 125,
@@ -160,71 +167,63 @@ local function rewardCard(props)
 				ColorSequenceKeypoint.new(1, Theme.Palette.Section),
 			}),
 		}),
-		TopStrip = e("Frame", {
-			BackgroundColor3 = accentColor,
-			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, 4),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-		}),
 		IconShell = e("Frame", {
 			BackgroundColor3 = Theme.Palette.Ink,
-			BackgroundTransparency = 0.08,
+			BackgroundTransparency = 0.25,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(18, 18),
-			Size = UDim2.fromOffset(64, 64),
+			Position = UDim2.fromOffset(16, ROW_INNER_TOP + 2),
+			Size = UDim2.fromOffset(58, 58),
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 18),
 			}),
 			Stroke = e("UIStroke", {
-				Color = accentColor,
-				Transparency = 0.14,
+				Color = Theme.Palette.GoldSoft,
+				Transparency = 0,
 			}),
 			Icon = reward.icon and reward.icon ~= "" and e("ImageLabel", {
 				BackgroundTransparency = 1,
 				Image = reward.icon,
-				Position = UDim2.fromOffset(10, 10),
-				Size = UDim2.fromOffset(44, 44),
+				Position = UDim2.fromOffset(9, 9),
+				Size = UDim2.fromOffset(40, 40),
 				ScaleType = Enum.ScaleType.Fit,
 			}) or nil,
 		}),
 		ThresholdLabel = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(96, 18),
+			Position = UDim2.fromOffset(84, ROW_INNER_TOP),
 			Size = UDim2.new(1, -250, 0, 14),
 			Text = "MILESTONE",
 			TextColor3 = Theme.Palette.MutedSoft,
-			TextSize = 10,
+			TextSize = 11,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		ThresholdValue = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(96, 32),
-			Size = UDim2.new(1, -250, 0, 32),
+			Position = UDim2.fromOffset(84, ROW_INNER_TOP + 12),
+			Size = UDim2.new(1, -250, 0, 34),
 			Text = string.format("Collect %d Units", reward.threshold or 0),
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 26,
+			TextSize = 34,
 			TextXAlignment = Enum.TextXAlignment.Left,
+			TextScaled = true,
 		}),
 		ThresholdInfo = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(96, 66),
+			Position = UDim2.fromOffset(84, ROW_INNER_TOP + 46),
 			Size = UDim2.new(1, -250, 0, 16),
 			Text = remainingText,
-			TextColor3 = reward.claimable and Theme.Palette.Gold or Theme.Palette.Muted,
-			TextSize = 12,
+			TextColor3 = reward.claimable and Theme.Palette.GoldSoft or Theme.Palette.Muted,
+			TextSize = 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		RewardsRow = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(18, 96),
-			Size = UDim2.new(1, -168, 0, 56),
+			Position = UDim2.fromOffset(16, ROW_OUTER_HEIGHT - (CHIP_HEIGHT + 8)),
+			Size = UDim2.new(1, -162, 0, CHIP_HEIGHT),
 		}, chipChildren),
 		Button = e(statusButton, {
 			onClaimRequested = props.onClaimRequested,
@@ -237,13 +236,13 @@ local function RewardsPanel(props)
 	local rewards = props.rewards or {}
 	local children = {
 		List = e("UIListLayout", {
-			Padding = UDim.new(0, 14),
+			Padding = UDim.new(0, 10),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 		Padding = e("UIPadding", {
 			PaddingBottom = UDim.new(0, 4),
-			PaddingLeft = UDim.new(0, 4),
-			PaddingRight = UDim.new(0, 4),
+			PaddingLeft = UDim.new(0, 8),
+			PaddingRight = UDim.new(0, 8),
 			PaddingTop = UDim.new(0, 4),
 		}),
 	}
@@ -258,6 +257,7 @@ local function RewardsPanel(props)
 
 	return e("Frame", {
 		BackgroundColor3 = Theme.Palette.Section,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.new(1, 0, 1, -2),
@@ -266,9 +266,9 @@ local function RewardsPanel(props)
 			CornerRadius = UDim.new(0, 22),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Theme.Palette.BorderSoft,
-			Transparency = 0.08,
-			Thickness = 1.2,
+			Color = Theme.Palette.GoldSoft,
+			Transparency = 0,
+			Thickness = 1.5,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 125,
@@ -303,7 +303,7 @@ local function RewardsPanel(props)
 			BorderSizePixel = 0,
 			CanvasSize = UDim2.new(),
 			Position = UDim2.fromOffset(14, 68),
-			ScrollBarImageColor3 = Theme.Palette.Cyan,
+			ScrollBarImageColor3 = Theme.Palette.GoldSoft,
 			ScrollBarThickness = 8,
 			Size = UDim2.new(1, -28, 1, -82),
 		}, children) or nil,

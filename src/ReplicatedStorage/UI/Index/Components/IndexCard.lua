@@ -217,6 +217,7 @@ local function footer(rarityText, nameText, rarityColor)
 	return e("Frame", {
 		AnchorPoint = Vector2.new(0, 1),
 		BackgroundColor3 = Theme.Palette.CardFooter,
+		BackgroundTransparency = 0.2,
 		BorderSizePixel = 0,
 		Position = UDim2.new(0, 4, 1, -4),
 		Size = UDim2.new(1, -8, 0, FOOTER_HEIGHT),
@@ -253,6 +254,7 @@ local function baseCard(props)
 	return e("Frame", {
 		Active = true,
 		BackgroundColor3 = Theme.Palette.CardShell,
+		BackgroundTransparency = 0.18,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
@@ -470,6 +472,7 @@ local function IndexCard(props)
 				}),
 				ImageArea = e("Frame", {
 					BackgroundColor3 = Theme.Palette.CardBackdrop,
+					BackgroundTransparency = 0.18,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(4, 4),
 					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
@@ -499,6 +502,7 @@ local function IndexCard(props)
 		}),
 		ImageArea = e("Frame", {
 			BackgroundColor3 = cardAppearance.backdropFill,
+			BackgroundTransparency = 0.18,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),

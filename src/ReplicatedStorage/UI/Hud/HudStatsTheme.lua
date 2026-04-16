@@ -41,8 +41,8 @@ HudStatsTheme.Row = {
 }
 
 HudStatsTheme.Typography = {
-	ValueSize = 27,
-	LabelSize = 15,
+	ValueSize = 30,
+	LabelSize = 17,
 	ValueShadowOffset = Vector2.new(0, 3),
 	LabelShadowOffset = Vector2.new(0, 2),
 	ValueMainOffset = Vector2.new(0, -1),
@@ -97,13 +97,13 @@ HudStatsTheme.Palette = {
 		rowStroke = Color3.fromRGB(233, 127, 97),
 	},
 	Money = {
-		value = Color3.fromRGB(229, 255, 191),
-		label = Color3.fromRGB(174, 236, 110),
-		stroke = Color3.fromRGB(23, 79, 30),
-		shadow = Color3.fromRGB(12, 34, 15),
-		glow = Color3.fromRGB(114, 201, 74),
-		rowFill = Color3.fromRGB(77, 157, 48),
-		rowStroke = Color3.fromRGB(137, 231, 95),
+		value = Color3.fromRGB(255, 241, 176),
+		label = Color3.fromRGB(242, 209, 107),
+		stroke = Color3.fromRGB(120, 81, 22),
+		shadow = Color3.fromRGB(48, 31, 8),
+		glow = Color3.fromRGB(232, 190, 82),
+		rowFill = Color3.fromRGB(163, 121, 41),
+		rowStroke = Color3.fromRGB(242, 209, 107),
 	},
 	Default = {
 		value = Color3.fromRGB(242, 244, 250),

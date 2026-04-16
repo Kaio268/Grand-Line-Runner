@@ -23,6 +23,8 @@ Theme.Palette = {
 	BorderSoft = Color3.fromRGB(140, 107, 31),
 	ButtonInactive = Color3.fromRGB(42, 58, 77),
 	ButtonActive = Color3.fromRGB(58, 47, 18),
+	TabFill = Color3.fromRGB(42, 58, 77),
+	TabFillHover = Color3.fromRGB(55, 75, 96),
 	CloseFill = Color3.fromRGB(186, 86, 100),
 	CloseStroke = Color3.fromRGB(140, 107, 31),
 }
@@ -37,6 +39,16 @@ Theme.Fonts = {
 
 Theme.Assets = {
 	RobuxIcon = "rbxasset://textures/ui/common/robux_small.png",
+	ShopBackground = "rbxassetid://105877304453866",
+	BeliIcon = "rbxassetid://76300573750363",
+	SpeedBoostIcon = "rbxassetid://96331945137652",
+	BeliBoostIcon = "rbxassetid://112694595954613",
+	LuckBoostIcon = "rbxassetid://99305009492305",
+	StoreIcon = "rbxassetid://87636652264235",
+	IndexIcon = "rbxassetid://77322372470208",
+	SettingsIcon = "rbxassetid://125384263224347",
+	QuestIcon = "rbxassetid://78184151901761",
+	RebirthIcon = "rbxassetid://116163404622119",
 }
 
 Theme.SurfaceThemes = {
@@ -165,6 +177,52 @@ function Theme.formatPrice(value)
 	end
 
 	return tostring(value or "--")
+end
+
+function Theme.getItemIcon(item)
+	if type(item) ~= "table" then
+		return Theme.Assets.StoreIcon
+	end
+
+	local explicitIcon = tostring(item.iconImage or "")
+	if explicitIcon ~= "" then
+		return explicitIcon
+	end
+
+	local titleLower = string.lower(tostring(item.title or ""))
+	local sectionKey = string.lower(tostring(item.sectionKey or ""))
+
+	if sectionKey == "currency" then
+		return Theme.Assets.BeliIcon
+	end
+
+	if sectionKey == "boosts" then
+		if string.find(titleLower, "luck", 1, true) or string.find(titleLower, "drop", 1, true) then
+			return Theme.Assets.LuckBoostIcon
+		end
+		if string.find(titleLower, "speed", 1, true) or string.find(titleLower, "xp", 1, true) then
+			return Theme.Assets.SpeedBoostIcon
+		end
+		return Theme.Assets.BeliBoostIcon
+	end
+
+	if sectionKey == "gamepasses" then
+		return Theme.Assets.IndexIcon
+	end
+
+	if sectionKey == "products" then
+		return Theme.Assets.SettingsIcon
+	end
+
+	if sectionKey == "utility" then
+		return Theme.Assets.QuestIcon
+	end
+
+	if sectionKey == "bundles" then
+		return Theme.Assets.StoreIcon
+	end
+
+	return Theme.Assets.RebirthIcon
 end
 
 return Theme

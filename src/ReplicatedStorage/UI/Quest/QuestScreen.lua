@@ -6,8 +6,26 @@ local React = require(Packages:WaitForChild("React"))
 local Theme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
 local e = React.createElement
+local SHELL = {
+	MenuBackgroundImage = "rbxassetid://120757950442747",
+	MenuOverlay = Color3.fromRGB(15, 27, 42),
+	MenuOverlayTransparency = 0.45,
+	HeaderBackground = Color3.fromRGB(16, 35, 59),
+	HeaderTransparency = 0.25,
+	SectionBackground = Color3.fromRGB(27, 46, 68),
+	SectionHover = Color3.fromRGB(46, 74, 99),
+	GoldHighlight = Color3.fromRGB(242, 209, 107),
+	GoldShadow = Color3.fromRGB(140, 107, 31),
+	CloseFill = Color3.fromRGB(200, 0, 9),
+	CloseFillSoft = Color3.fromRGB(235, 70, 78),
+	TextMain = Color3.fromRGB(230, 230, 230),
+	TextShadow = Color3.fromRGB(9, 17, 27),
+}
 
 local DEFAULT_ORDER = { "Daily", "Weekly", "Special" }
+local TAB_WIDTH = 118
+local QUEST_CARD_HEIGHT = 132
+local QUEST_CARD_WIDTH_OFFSET = -14
 
 local function findCategory(state, categoryId)
 	for _, category in ipairs((state and state.categories) or {}) do
@@ -34,15 +52,25 @@ end
 local function tabButton(props)
 	local active = props.active == true
 	local category = props.category or {}
+	local hovered, setHovered = React.useState(false)
 	local claimableCount = math.max(0, tonumber(category.claimableCount) or 0)
+	local fillColor = active and Theme.Palette.TabRewardFill or (hovered and SHELL.SectionHover or SHELL.HeaderBackground)
+	local textColor = active and SHELL.GoldHighlight or Theme.Palette.Text
 
 	return e("TextButton", {
 		AutoButtonColor = false,
-		BackgroundColor3 = active and Theme.Palette.HeaderBottom or Theme.Palette.TabFill,
+		BackgroundColor3 = fillColor,
+		BackgroundTransparency = 0.15,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.fromOffset(116, 30),
+		Size = UDim2.fromOffset(TAB_WIDTH, 30),
 		Text = "",
+		[React.Event.MouseEnter] = function()
+			setHovered(true)
+		end,
+		[React.Event.MouseLeave] = function()
+			setHovered(false)
+		end,
 		[React.Event.Activated] = function()
 			if props.onSelect then
 				props.onSelect(category.id)
@@ -50,29 +78,45 @@ local function tabButton(props)
 		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 8),
+			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = active and Theme.Palette.Cyan or Theme.Palette.BorderSoft,
-			Transparency = active and 0.02 or 0.18,
-			Thickness = 1,
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Color = SHELL.GoldHighlight,
+			Transparency = 0,
+			Thickness = 1.35,
 		}),
-		Title = e("TextLabel", {
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, active and Theme.Palette.TabRewardFill or SHELL.SectionBackground),
+				ColorSequenceKeypoint.new(1, fillColor),
+			}),
+		}),
+		TitleWrap = e("Frame", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(12, 0),
-			Size = UDim2.new(1, claimableCount > 0 and -40 or -24, 1, 0),
-			Text = tostring(category.label or category.id or ""),
-			TextColor3 = active and Theme.Palette.Text or Color3.fromRGB(229, 237, 255),
-			TextSize = 13,
-			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.fromScale(1, 1),
+		}, {
+			Padding = e("UIPadding", {
+				PaddingLeft = UDim.new(0, 8),
+				PaddingRight = UDim.new(0, claimableCount > 0 and 28 or 8),
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Theme.Fonts.Display,
+				Size = UDim2.fromScale(1, 1),
+				Text = tostring(category.label or category.id or ""),
+				TextColor3 = textColor,
+				TextSize = 14,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			}),
 		}),
 		Badge = claimableCount > 0 and e("Frame", {
 			AnchorPoint = Vector2.new(1, 0.5),
-			BackgroundColor3 = Theme.Palette.TabRewardAccent,
+			BackgroundColor3 = SHELL.GoldHighlight,
 			BorderSizePixel = 0,
 			Position = UDim2.new(1, -7, 0.5, 0),
-			Size = UDim2.fromOffset(22, 20),
+			Size = UDim2.fromOffset(21, 19),
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
@@ -111,7 +155,7 @@ local function progressBar(props)
 		Fill = e("Frame", {
 			BackgroundColor3 = props.fillColor or Theme.Palette.ProgressFill,
 			BorderSizePixel = 0,
-			Size = UDim2.new(percent, 0, 1, 0),
+			Size = UDim2.fromScale(percent, 1),
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
@@ -128,45 +172,55 @@ end
 
 local function questCard(props)
 	local quest = props.quest or {}
+	local hovered, setHovered = React.useState(false)
 	local claimable = quest.claimable == true
 	local claimed = quest.claimed == true
-	local buttonColor = if claimed then Theme.Palette.Locked
-		elseif claimable then Theme.Palette.TabRewardAccent
-		else Theme.Palette.TabFillHover
-	local buttonTextColor = if claimable then Theme.Palette.Ink else Theme.Palette.Muted
+	local buttonColor = if claimable then Theme.Palette.TabRewardFill else SHELL.HeaderBackground
+	local buttonTextColor = if claimed then Theme.Palette.Emerald
+		elseif claimable then SHELL.GoldHighlight
+		else Theme.Palette.Text
 
 	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.Panel,
+		Active = true,
+		BackgroundColor3 = hovered and SHELL.SectionHover or SHELL.SectionBackground,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, 118),
+		Size = UDim2.new(1, QUEST_CARD_WIDTH_OFFSET, 0, QUEST_CARD_HEIGHT),
+		[React.Event.MouseEnter] = function()
+			setHovered(true)
+		end,
+		[React.Event.MouseLeave] = function()
+			setHovered(false)
+		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 8),
+			CornerRadius = UDim.new(0, 10),
 		}),
 		Stroke = e("UIStroke", {
-			Color = claimable and Theme.Palette.TabRewardAccent or Theme.Palette.BorderSoft,
-			Transparency = claimable and 0.04 or 0.18,
-			Thickness = claimable and 1.4 or 1,
+			Color = SHELL.GoldHighlight,
+			Transparency = 0,
+			Thickness = 1.5,
 		}),
 		Name = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
 			Position = UDim2.fromOffset(18, 12),
-			Size = UDim2.new(1, -170, 0, 20),
+			Size = UDim2.new(1, -196, 0, 24),
 			Text = tostring(quest.name or "Quest"),
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 18,
+			TextSize = 32,
 			TextXAlignment = Enum.TextXAlignment.Left,
+			TextScaled = true,
 		}),
 		Description = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(18, 36),
-			Size = UDim2.new(1, -176, 0, 34),
+			Position = UDim2.fromOffset(18, 38),
+			Size = UDim2.new(1, -196, 0, 34),
 			Text = tostring(quest.description or ""),
 			TextColor3 = Theme.Palette.Muted,
-			TextSize = 13,
+			TextSize = 15,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
@@ -174,27 +228,27 @@ local function questCard(props)
 		ProgressText = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 74),
+			Position = UDim2.fromOffset(18, 78),
 			Size = UDim2.fromOffset(120, 18),
 			Text = string.format("%d / %d", tonumber(quest.progress) or 0, tonumber(quest.target) or 1),
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 12,
+			TextSize = 15,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Progress = e(progressBar, {
 			progress = quest.progress,
 			target = quest.target,
-			position = UDim2.new(0, 96, 0, 78),
-			size = UDim2.new(1, -256, 0, 10),
+			position = UDim2.fromOffset(98, 82),
+			size = UDim2.new(1, -282, 0, 11),
 		}),
 		Reward = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 96),
-			Size = UDim2.new(1, -178, 0, 16),
+			Position = UDim2.fromOffset(18, 102),
+			Size = UDim2.new(1, -196, 0, 18),
 			Text = "Reward: " .. tostring(quest.rewardText or ""),
 			TextColor3 = Theme.Palette.Gold,
-			TextSize = 12,
+			TextSize = 14,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
@@ -202,9 +256,10 @@ local function questCard(props)
 			AnchorPoint = Vector2.new(1, 1),
 			AutoButtonColor = false,
 			BackgroundColor3 = buttonColor,
+			BackgroundTransparency = 0.15,
 			BorderSizePixel = 0,
-			Position = UDim2.new(1, -16, 1, -16),
-			Size = UDim2.fromOffset(128, 34),
+			Position = UDim2.new(1, -16, 1, -14),
+			Size = UDim2.fromOffset(122, 34),
 			Text = statusText(quest),
 			TextColor3 = buttonTextColor,
 			TextSize = 14,
@@ -216,12 +271,12 @@ local function questCard(props)
 			end,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 8),
+				CornerRadius = UDim.new(0, 12),
 			}),
 			Stroke = e("UIStroke", {
-				Color = claimable and Theme.Palette.Gold or Theme.Palette.BorderSoft,
-				Transparency = claimable and 0.02 or 0.28,
-				Thickness = 1,
+				Color = SHELL.GoldHighlight,
+				Transparency = 0,
+				Thickness = 1.2,
 			}),
 		}),
 	})
@@ -259,9 +314,9 @@ local function QuestScreen(props)
 		}),
 		Padding = e("UIPadding", {
 			PaddingBottom = UDim.new(0, 14),
-			PaddingLeft = UDim.new(0, 4),
-			PaddingRight = UDim.new(0, 4),
-			PaddingTop = UDim.new(0, 4),
+			PaddingLeft = UDim.new(0, 8),
+			PaddingRight = UDim.new(0, 8),
+			PaddingTop = UDim.new(0, 6),
 		}),
 	}
 	for index, quest in ipairs((activeCategory and activeCategory.quests) or {}) do
@@ -271,140 +326,209 @@ local function QuestScreen(props)
 			quest = quest,
 		})
 	end
+	local listY = props.noticeText and 150 or 118
+	local listHeightDelta = props.noticeText and -162 or -130
 
 	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.Board,
+		BackgroundColor3 = SHELL.MenuOverlay,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Size = UDim2.fromScale(1, 1),
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 8),
+			CornerRadius = UDim.new(0, 18),
 		}),
-		Stroke = e("UIStroke", {
-			Color = Theme.Palette.BorderSoft,
-			Transparency = 0.05,
-			Thickness = 1,
+		BaseTexture = e("ImageLabel", {
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Image = SHELL.MenuBackgroundImage,
+			ImageTransparency = 0,
+			ScaleType = Enum.ScaleType.Stretch,
+			Position = UDim2.fromOffset(2, 2),
+			Size = UDim2.new(1, -4, 1, -4),
+			ZIndex = 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 16),
+			}),
+		}),
+		Overlay = e("Frame", {
+			BackgroundColor3 = SHELL.MenuOverlay,
+			BackgroundTransparency = SHELL.MenuOverlayTransparency,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(2, 2),
+			Size = UDim2.new(1, -4, 1, -4),
+			ZIndex = 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 16),
+			}),
+		}),
+		OuterBorder = e("Frame", {
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(2, 2),
+			Size = UDim2.new(1, -4, 1, -4),
+			ZIndex = 10,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 16),
+			}),
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = SHELL.GoldHighlight,
+				Thickness = 3,
+				Transparency = 0,
+			}),
 		}),
 		Header = e("Frame", {
-			BackgroundColor3 = Theme.Palette.HeaderMid,
+			BackgroundColor3 = SHELL.HeaderBackground,
+			BackgroundTransparency = SHELL.HeaderTransparency,
 			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, 82),
+			Position = UDim2.fromOffset(12, 10),
+			Size = UDim2.new(1, -24, 0, 54),
+			ZIndex = 3,
 		}, {
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Theme.Palette.HeaderStart),
-					ColorSequenceKeypoint.new(0.48, Theme.Palette.HeaderMid),
-					ColorSequenceKeypoint.new(1, Theme.Palette.HeaderEnd),
-				}),
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
 			}),
-			Brand = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(16, 10),
-				Size = UDim2.fromOffset(200, 14),
-				Text = "GRAND LINE RUSH",
-				TextColor3 = Theme.Palette.Text,
-				TextSize = 10,
-				TextXAlignment = Enum.TextXAlignment.Left,
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = SHELL.GoldHighlight,
+				Thickness = 1.5,
+				Transparency = 0,
 			}),
 			Title = e("TextLabel", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
-				Position = UDim2.fromOffset(16, 25),
-				Size = UDim2.fromOffset(240, 34),
-				Text = "Quests",
-				TextColor3 = Theme.Palette.Text,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(260, 32),
+				Text = "QUESTS",
+				TextColor3 = SHELL.TextMain,
+				TextScaled = true,
 				TextSize = 30,
-				TextXAlignment = Enum.TextXAlignment.Left,
+				TextStrokeColor3 = SHELL.GoldShadow,
+				TextStrokeTransparency = 0.45,
+				ZIndex = 4,
 			}),
-			Tabs = e("Frame", {
-				AnchorPoint = Vector2.new(0.5, 0),
-				BackgroundTransparency = 1,
-				Position = UDim2.new(0.5, 0, 0, 43),
-				Size = UDim2.fromOffset(364, 30),
-			}, tabChildren),
 			Close = e("TextButton", {
-				AnchorPoint = Vector2.new(1, 0),
+				AnchorPoint = Vector2.new(1, 0.5),
 				AutoButtonColor = false,
-				BackgroundColor3 = Theme.Palette.CloseFill,
+				BackgroundColor3 = SHELL.CloseFill,
 				BorderSizePixel = 0,
-				Font = Theme.Fonts.Display,
-				Position = UDim2.new(1, -12, 0, 12),
+				Position = UDim2.new(1, -8, 0.5, 0),
 				Size = UDim2.fromOffset(34, 34),
 				Text = "X",
-				TextColor3 = Theme.Palette.Text,
-				TextSize = 16,
+				TextColor3 = Color3.new(1, 1, 1),
+				Font = Enum.Font.GothamBold,
+				TextScaled = true,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = 0.4,
+				ZIndex = 4,
 				[React.Event.Activated] = props.onClose,
 			}, {
 				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 7),
+					CornerRadius = UDim.new(0, 8),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Theme.Palette.CloseStroke,
-					Transparency = 0.02,
+					Color = SHELL.GoldShadow,
+					Thickness = 1,
+					Transparency = 0.1,
+				}),
+				Gradient = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, SHELL.CloseFillSoft),
+						ColorSequenceKeypoint.new(1, SHELL.CloseFill),
+					}),
 				}),
 			}),
 		}),
-		Summary = e("Frame", {
-			BackgroundColor3 = Theme.Palette.Section,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(18, 96),
-			Size = UDim2.new(1, -36, 0, 54),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 8),
-			}),
-			Stroke = e("UIStroke", {
-				Color = Theme.Palette.BorderSoft,
-				Transparency = 0.18,
-			}),
-			Label = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
-				Position = UDim2.fromOffset(16, 7),
-				Size = UDim2.new(1, -32, 0, 18),
-				Text = activeCategory and tostring(activeCategory.label) or "Quests",
-				TextColor3 = Theme.Palette.Text,
-				TextSize = 17,
-				TextXAlignment = Enum.TextXAlignment.Left,
-			}),
-			Copy = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Body,
-				Position = UDim2.fromOffset(16, 29),
-				Size = UDim2.new(1, -32, 0, 16),
-				Text = activeCategory and string.format("%d/%d complete - %s", activeCategory.completedCount or 0, activeCategory.totalCount or 0, activeCategory.resetText or "") or "Loading quests...",
-				TextColor3 = Theme.Palette.Muted,
-				TextSize = 13,
-				TextXAlignment = Enum.TextXAlignment.Left,
-			}),
-		}),
-		Notice = props.noticeText and e("TextLabel", {
-			BackgroundColor3 = Theme.Palette.TabRewardFill,
-			BorderSizePixel = 0,
-			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 158),
-			Size = UDim2.new(1, -36, 0, 28),
-			Text = tostring(props.noticeText),
-			TextColor3 = Theme.Palette.Gold,
-			TextSize = 13,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 8),
-			}),
-		}) or nil,
-		List = e("ScrollingFrame", {
-			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		Body = e("Frame", {
 			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			CanvasSize = UDim2.fromOffset(0, 0),
-			Position = UDim2.fromOffset(18, props.noticeText and 196 or 164),
-			ScrollBarImageColor3 = Theme.Palette.Cyan,
-			ScrollBarThickness = 6,
-			Size = UDim2.new(1, -36, 1, props.noticeText and -214 or -182),
-		}, listChildren),
+			Position = UDim2.fromOffset(18, 116),
+			Size = UDim2.new(1, -42, 1, -126),
+			ZIndex = 3,
+		}, {
+			Tabs = e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0),
+				BackgroundTransparency = 1,
+				Position = UDim2.fromScale(0.5, 0),
+				Size = UDim2.fromOffset(380, 34),
+				ZIndex = 4,
+			}, tabChildren),
+			Summary = e("Frame", {
+				BackgroundColor3 = SHELL.SectionBackground,
+				BackgroundTransparency = 0.25,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(0, 42),
+				Size = UDim2.new(1, 0, 0, 56),
+				ZIndex = 4,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 10),
+				}),
+				Stroke = e("UIStroke", {
+					Color = SHELL.GoldHighlight,
+					Transparency = 0,
+					Thickness = 1.5,
+				}),
+				Label = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Theme.Fonts.Display,
+					Position = UDim2.fromOffset(16, 7),
+					Size = UDim2.new(1, -32, 0, 18),
+					Text = activeCategory and tostring(activeCategory.label) or "Quests",
+					TextColor3 = Theme.Palette.Text,
+					TextSize = 18,
+					TextXAlignment = Enum.TextXAlignment.Left,
+				}),
+				Copy = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Theme.Fonts.Body,
+					Position = UDim2.fromOffset(16, 30),
+					Size = UDim2.new(1, -32, 0, 16),
+					Text = activeCategory and string.format("%d/%d complete - %s", activeCategory.completedCount or 0, activeCategory.totalCount or 0, activeCategory.resetText or "") or "Loading quests...",
+					TextColor3 = Theme.Palette.Muted,
+					TextSize = 13,
+					TextXAlignment = Enum.TextXAlignment.Left,
+				}),
+			}),
+			Notice = props.noticeText and e("TextLabel", {
+				BackgroundColor3 = Theme.Palette.TabRewardFill,
+				BackgroundTransparency = 0.2,
+				BorderSizePixel = 0,
+				Font = Theme.Fonts.BodyStrong,
+				Position = UDim2.fromOffset(0, 108),
+				Size = UDim2.new(1, 0, 0, 32),
+				Text = tostring(props.noticeText),
+				TextColor3 = SHELL.GoldHighlight,
+				TextSize = 13,
+				ZIndex = 4,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 10),
+				}),
+				Stroke = e("UIStroke", {
+					Color = SHELL.GoldHighlight,
+					Thickness = 1.2,
+					Transparency = 0,
+				}),
+			}),
+			List = e("ScrollingFrame", {
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				CanvasSize = UDim2.fromOffset(0, 0),
+				Position = UDim2.fromOffset(0, listY),
+				VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
+				ScrollBarImageColor3 = SHELL.GoldHighlight,
+				ScrollBarThickness = 8,
+				Size = UDim2.new(1, -8, 1, listHeightDelta),
+				ZIndex = 4,
+			}, listChildren),
+		}),
 	})
 end
 

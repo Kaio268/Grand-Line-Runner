@@ -52,13 +52,19 @@ local TILE_DEFS = {
 	{ name = "Quest", label = "Quest", badgeText = "" },
 }
 
+local TILE_SIZE = 98
+local TILE_COLUMN_GAP = 10
+local TILE_ROW_GAP = 10
+local TILE_STEP_X = TILE_SIZE + TILE_COLUMN_GAP
+local TILE_STEP_Y = TILE_SIZE + TILE_ROW_GAP
+
 local TILE_POSITIONS = {
 	Store = Vector2.new(0, 0),
-	Index = Vector2.new(94, 0),
-	Gifts = Vector2.new(0, 94),
-	Settings = Vector2.new(94, 94),
-	Rebirth = Vector2.new(0, 188),
-	Quest = Vector2.new(94, 188),
+	Index = Vector2.new(TILE_STEP_X, 0),
+	Gifts = Vector2.new(0, TILE_STEP_Y),
+	Settings = Vector2.new(TILE_STEP_X, TILE_STEP_Y),
+	Rebirth = Vector2.new(0, TILE_STEP_Y * 2),
+	Quest = Vector2.new(TILE_STEP_X, TILE_STEP_Y * 2),
 }
 
 local HUD_ICON_ASSET_OVERRIDES = {
@@ -68,17 +74,20 @@ local HUD_ICON_ASSET_OVERRIDES = {
 	Claim = "rbxassetid://131189007512696",
 	Settings = "rbxassetid://125384263224347",
 	Rebirth = "rbxassetid://116163404622119",
-	Quest = "rbxthumb://type=Asset&id=71286761272497&w=150&h=150",
+	Quest = "rbxassetid://78184151901761",
 }
 
 local HUD_ICON_SIZE_OVERRIDES = {
-	Store = Vector2.new(76, 76),
-	Settings = Vector2.new(68, 68),
-	Quest = Vector2.new(82, 50),
+	Store = Vector2.new(98, 98),
+	Index = Vector2.new(85, 85),
+	Gifts = Vector2.new(85, 85),
+	Settings = Vector2.new(88, 88),
+	Rebirth = Vector2.new(82, 82),
+	Quest = Vector2.new(94, 94),
 }
 
 local HUD_ICON_SCALE_TYPE_OVERRIDES = {
-	Quest = Enum.ScaleType.Crop,
+	Quest = Enum.ScaleType.Fit,
 }
 
 local PROTECTED_CHILDREN = {
@@ -339,10 +348,12 @@ end
 
 local function ensureContainer(hud)
 	local lButtons = hud:FindFirstChild("LButtons")
+	local containerWidth = (TILE_SIZE * 2) + TILE_COLUMN_GAP
+	local containerHeight = (TILE_SIZE * 3) + (TILE_ROW_GAP * 2)
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
-		lButtons.Size = UDim2.fromOffset(198, 288)
+		lButtons.Size = UDim2.fromOffset(containerWidth, containerHeight)
 		lButtons.Position = UDim2.fromOffset(10, 250)
 		return lButtons
 	end
@@ -354,7 +365,7 @@ local function ensureContainer(hud)
 	created.ClipsDescendants = false
 	created.Visible = true
 	created.Position = UDim2.fromOffset(10, 250)
-	created.Size = UDim2.fromOffset(198, 288)
+	created.Size = UDim2.fromOffset(containerWidth, containerHeight)
 	created.Parent = hud
 
 	return created
@@ -441,7 +452,7 @@ local function ensureShell(container, definition, index)
 		existing.Visible = true
 		existing.Active = true
 		existing.ClipsDescendants = false
-		existing.Size = UDim2.fromOffset(92, 92)
+		existing.Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE)
 		existing.LayoutOrder = index
 		CollectionService:AddTag(existing, HUD_BUTTON_NO_ANIM_TAG)
 		if mappedPosition then
@@ -460,12 +471,12 @@ local function ensureShell(container, definition, index)
 	button.ImageTransparency = 1
 	button.Visible = true
 	button.LayoutOrder = index
-	button.Size = UDim2.fromOffset(92, 92)
+	button.Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE)
 	CollectionService:AddTag(button, HUD_BUTTON_NO_ANIM_TAG)
 	if mappedPosition then
 		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
 	else
-		button.Position = UDim2.fromOffset(0, (index - 1) * 94)
+		button.Position = UDim2.fromOffset(0, (index - 1) * TILE_STEP_Y)
 	end
 
 	button.Parent = container
@@ -877,11 +888,11 @@ local function normalizeTitleStyle(titleStyle)
 		backgroundTransparency = 1,
 		font = style.font or Enum.Font.GothamBold,
 		fontFace = style.fontFace,
-		position = UDim2.new(0.5, 0, 0.65, 0),
+		position = UDim2.new(0.5, 0, 0.78, 0),
 		rotation = 0,
-		size = UDim2.new(1, -8, 0, clampNumber(style.textSize, 14, 17) + 4),
+		size = UDim2.new(1, -8, 0, clampNumber(style.textSize, 16, 20) + 4),
 		textColor3 = Color3.fromRGB(255, 250, 240),
-		textSize = clampNumber(style.textSize, 14, 17),
+		textSize = clampNumber(style.textSize, 16, 20),
 		textStrokeColor3 = Color3.fromRGB(6, 10, 18),
 		textStrokeTransparency = 0.02,
 		textTransparency = 0,

@@ -1112,7 +1112,7 @@ local function buildCaptainLogData(query)
 				brainrotName = brainrotName,
 				displayName = displayName,
 				subtitle = subtitle,
-				footer = string.format("%s  |  %s D ready", standName, formatNumber(incomeToCollect)),
+				footer = string.format("%s  |  %s Beli ready", standName, formatNumber(incomeToCollect)),
 				image = getIcon("Brainrot", brainrotName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				accentColor = getAccentColor("Brainrot", brainrotName),

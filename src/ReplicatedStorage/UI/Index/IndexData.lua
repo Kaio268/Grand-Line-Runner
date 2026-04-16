@@ -304,6 +304,8 @@ local function getSortedFruits()
 end
 
 local SORTED_FRUITS = getSortedFruits()
+local BELI_ICON = "rbxassetid://76300573750363"
+local LUCK_BOOST_ICON = "rbxassetid://99305009492305"
 
 local function formatIncome(value)
 	local numeric = math.max(0, math.floor((tonumber(value) or 0) + 0.5))
@@ -335,17 +337,20 @@ end
 local function formatRewardLabel(path)
 	local pathValue = tostring(path or "")
 	if pathValue:find("MoneyMult", 1, true) then
-		return "Ship Income"
+		return "Beli Boost"
 	end
 	if pathValue:find("x2MoneyTime", 1, true) then
-		return "x2 Money"
+		return "x2 Beli"
 	end
 	if pathValue:find("WalkSpeed", 1, true) then
 		return "Speed Boost"
 	end
 
 	local parts = string.split(pathValue, ".")
-	return humanizeToken(parts[#parts] or pathValue)
+	local label = humanizeToken(parts[#parts] or pathValue)
+	label = label:gsub("Money", "Beli")
+	label = label:gsub("Income", "Beli")
+	return label
 end
 
 local function formatRewardAmount(path, amount)
@@ -489,9 +494,17 @@ function IndexData.buildViewModel(options)
 
 		local rewardItems = {}
 		for path, reward in pairs((config and config.Rewards) or {}) do
+			local pathText = tostring(path or "")
+			local rewardIcon = reward and reward.Icon or ""
+			if pathText:find("MoneyMult", 1, true) then
+				rewardIcon = LUCK_BOOST_ICON
+			elseif pathText:find("Doubloons", 1, true) then
+				rewardIcon = BELI_ICON
+			end
+
 			rewardItems[#rewardItems + 1] = {
 				id = tostring(path),
-				icon = reward and reward.Icon or "",
+				icon = rewardIcon,
 				label = formatRewardLabel(path),
 				amount = formatRewardAmount(path, reward and reward.Amount),
 			}
@@ -574,3 +587,4 @@ function IndexData.getDefaultViewModel()
 end
 
 return IndexData
+

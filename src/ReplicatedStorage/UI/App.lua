@@ -1887,7 +1887,7 @@ local function captainsLogRow(props)
 			Position = UDim2.fromOffset(104, 58),
 			Size = UDim2.new(1, -360, 0, 16),
 			Text = string.format(
-				"Bounty: %s  |  %s D ready",
+				"Bounty: %s  |  %s Beli ready",
 				formatNumber(entry.bounty or 0),
 				formatNumber(entry.collectable or 0)
 			),
@@ -1915,7 +1915,7 @@ local function captainsLogRow(props)
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.new(1, -18, 33 / 88, 0),
 			Size = UDim2.fromOffset(180, 30),
-			Text = string.format("%s D / tick", formatNumber(entry.incomePerTick or 0)),
+			Text = string.format("%s Beli / tick", formatNumber(entry.incomePerTick or 0)),
 			TextColor3 = PALETTE.Cream,
 			TextSize = 24,
 			TextStrokeTransparency = 0.58,
@@ -2555,7 +2555,7 @@ local function App(props)
 				{ label = "Total Bounty", value = formatNumber(summary.bounty or 0), valueColor3 = PALETTE.Gold },
 				{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
 				{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
-				{ label = "Doubloons", value = formatNumber(summary.doubloons or 0) .. " D", valueColor3 = PALETTE.Gold },
+				{ label = "Beli", value = formatNumber(summary.doubloons or 0) .. " Beli", valueColor3 = PALETTE.Gold },
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
 				{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
@@ -2915,7 +2915,7 @@ local function App(props)
 								Position = UDim2.fromOffset(16, 22),
 								Size = UDim2.new(0.5, -10, 0, 26),
 								Text = string.format(
-									"%s D",
+									"%s Beli",
 									formatNumber((props.captainLog and props.captainLog.totalCollectable) or 0)
 								),
 								TextColor3 = PALETTE.Gold,
@@ -3134,3 +3134,4 @@ local function App(props)
 end
 
 return App
+

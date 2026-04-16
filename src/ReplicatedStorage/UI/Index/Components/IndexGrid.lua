@@ -60,6 +60,7 @@ local function IndexGrid(props)
 	if #units == 0 then
 		return e("Frame", {
 			BackgroundColor3 = Theme.Palette.Section,
+			BackgroundTransparency = 0.25,
 			BorderSizePixel = 0,
 			LayoutOrder = props.layoutOrder or 0,
 			Size = UDim2.fromScale(1, 1),
@@ -68,9 +69,9 @@ local function IndexGrid(props)
 				CornerRadius = UDim.new(0, 12),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Theme.Palette.BorderSoft,
-				Transparency = 0.2,
-				Thickness = 1,
+				Color = Theme.Palette.GoldSoft,
+				Transparency = 0,
+				Thickness = 1.5,
 			}),
 			Gradient = e("UIGradient", {
 				Rotation = 90,
@@ -107,6 +108,7 @@ local function IndexGrid(props)
 
 	return e("Frame", {
 		BackgroundColor3 = Theme.Palette.Section,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.fromScale(1, 1),
@@ -115,9 +117,9 @@ local function IndexGrid(props)
 			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Theme.Palette.BorderSoft,
-			Transparency = 0.18,
-			Thickness = 1,
+			Color = Theme.Palette.GoldSoft,
+			Transparency = 0,
+			Thickness = 1.5,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
@@ -131,7 +133,7 @@ local function IndexGrid(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			CanvasSize = UDim2.new(),
-			ScrollBarImageColor3 = Theme.Palette.SidebarIndicator,
+			ScrollBarImageColor3 = Theme.Palette.GoldSoft,
 			ScrollBarThickness = 5,
 			ScrollingDirection = Enum.ScrollingDirection.Y,
 			Size = UDim2.fromScale(1, 1),

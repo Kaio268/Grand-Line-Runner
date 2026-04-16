@@ -16,10 +16,10 @@ local function FeaturedOfferCard(props)
 	local surface = Theme.getSurfaceTheme(item.themeKey)
 	local hovered, setHovered = React.useState(false)
 	local isWide = props.isWide ~= false
-	local leftColumnWidth = isWide and 176 or 154
-	local iconSize = isWide and 124 or 112
-	local iconX = isWide and -8 or -6
-	local iconY = isWide and 50 or 56
+	local leftColumnWidth = isWide and 156 or 142
+	local iconSize = isWide and 92 or 86
+	local iconX = isWide and 8 or 10
+	local iconY = isWide and 66 or 68
 	local copyX = leftColumnWidth + 26
 	local copyWidthOffset = copyX + 22
 	local footerHeight = 58
@@ -44,17 +44,6 @@ local function FeaturedOfferCard(props)
 				ColorSequenceKeypoint.new(0, surface.fill),
 				ColorSequenceKeypoint.new(0.45, surface.accentSoft),
 				ColorSequenceKeypoint.new(1, surface.fillAlt),
-			}),
-		}),
-		Accent = e("Frame", {
-			BackgroundColor3 = surface.accent,
-			BackgroundTransparency = 0.18,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(-40, -30),
-			Size = UDim2.fromOffset(200, 200),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
 			}),
 		}),
 		Padding = e("UIPadding", {
@@ -89,6 +78,7 @@ local function FeaturedOfferCard(props)
 		Icon = e(MonogramIcon, {
 			position = UDim2.fromOffset(iconX, iconY),
 			size = UDim2.fromOffset(iconSize, iconSize),
+			image = Theme.getItemIcon(item),
 			label = item.iconText,
 			themeKey = item.themeKey,
 			isLarge = true,
@@ -112,7 +102,7 @@ local function FeaturedOfferCard(props)
 			Size = UDim2.new(1, -copyWidthOffset, 0, isWide and 42 or 52),
 			Text = item.title,
 			TextColor3 = Theme.Palette.Text,
-			TextSize = isWide and 30 or 28,
+			TextSize = isWide and 32 or 30,
 			TextStrokeTransparency = 1,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
@@ -126,7 +116,7 @@ local function FeaturedOfferCard(props)
 			Size = UDim2.new(1, -copyWidthOffset, 0, isWide and 54 or 62),
 			Text = item.description,
 			TextColor3 = Theme.Palette.Muted,
-			TextSize = 13,
+			TextSize = 14,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,

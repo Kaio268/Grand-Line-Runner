@@ -25,7 +25,7 @@ local STAT_ORDER = {
 local STAT_ICON_ASSET_OVERRIDES = {
 	Comet = "",
 	Speed = "rbxassetid://108512951338844",
-	Money = "rbxassetid://105592440149778",
+	Money = "rbxassetid://76300573750363",
 }
 
 local iconOverrideSources = {}
@@ -546,3 +546,4 @@ script.Destroying:Connect(function()
 	descendantRemovingConnection:Disconnect()
 	root:unmount()
 end)
+

@@ -12,7 +12,7 @@ local HUD_DEBUG = false
 local DEFAULT_COUNTER_ICONS = {
 	Comet = "",
 	Speed = "rbxassetid://108512951338844",
-	Money = "rbxassetid://105592440149778",
+	Money = "rbxassetid://76300573750363",
 }
 local ensureFrame
 local ensureTextLabel
@@ -37,6 +37,15 @@ local UI_STYLE = {
 	SuccessSoft = Color3.fromRGB(169, 240, 194),
 	Danger = Color3.fromRGB(186, 86, 100),
 	DangerSoft = Color3.fromRGB(218, 125, 138),
+	MenuOverlay = Color3.fromRGB(15, 27, 42),
+	HeaderBackground = Color3.fromRGB(16, 35, 59),
+	SectionBackground = Color3.fromRGB(27, 46, 68),
+	SectionHover = Color3.fromRGB(46, 74, 99),
+	CloseBright = Color3.fromRGB(200, 0, 9),
+	CloseBrightSoft = Color3.fromRGB(235, 70, 78),
+	MenuBackgroundImage = "rbxassetid://75192947200012",
+	GiftsBackgroundImage = "rbxassetid://114391753019319",
+	RebirthBackgroundImage = "rbxassetid://139545221830035",
 }
 
 local BUTTON_FX_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -493,7 +502,7 @@ end
 local function styleCloseButton(button)
 	button.BackgroundColor3 = UI_STYLE.Danger
 	button.BackgroundTransparency = 0
-	button.TextColor3 = UI_STYLE.TextMain
+	button.TextColor3 = Color3.new(1, 1, 1)
 	button.Font = Enum.Font.GothamBold
 	button.TextSize = 16
 	local gradient = ensureUIGradient(button, UI_STYLE.DangerSoft, UI_STYLE.Danger)
@@ -502,6 +511,22 @@ local function styleCloseButton(button)
 	stroke.Transparency = 0.16
 	ensureUICorner(button, 8)
 	ensureButtonFeedback(button)
+end
+
+local function styleMenuActionButton(frame)
+	frame.BackgroundColor3 = UI_STYLE.HeaderBackground
+	frame.BackgroundTransparency = 0.12
+	frame.BorderSizePixel = 0
+	frame.Active = true
+	if frame:IsA("GuiButton") then
+		frame.AutoButtonColor = false
+	end
+	ensureUICorner(frame, 10)
+	local stroke = ensureUIStroke(frame, UI_STYLE.GoldHighlight, 1.2)
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Transparency = 0.08
+	local gradient = ensureUIGradient(frame, UI_STYLE.SecondaryBg, UI_STYLE.PrimaryBg)
+	gradient.Rotation = 90
 end
 
 local function clearChildren(parent, preserveNames)
@@ -555,7 +580,7 @@ local function ensureCounterHost(counters, name, iconImage)
 	host.BackgroundTransparency = 1
 	host.BorderSizePixel = 0
 	host.Size = UDim2.fromOffset(220, 46)
-	host.Text = string.format("0 %s", name == "Money" and "$" or name)
+	host.Text = string.format("0 %s", name == "Money" and "Beli" or name)
 	host.TextColor3 = Color3.fromRGB(255, 255, 255)
 	host.TextStrokeTransparency = 0
 	host.TextXAlignment = Enum.TextXAlignment.Left
@@ -672,52 +697,74 @@ local function ensureHudButton(lButtons, name, showTimer)
 end
 
 local function ensureSlotCard(slot, layoutOrder)
-	slot.BackgroundColor3 = UI_STYLE.PanelFill
-	slot.BackgroundTransparency = 0.08
+	slot.BackgroundColor3 = UI_STYLE.SectionBackground
+	slot.BackgroundTransparency = 0.25
 	slot.BorderSizePixel = 0
-	slot.AutoButtonColor = true
-	slot.Size = UDim2.new(1, -12, 0, 88)
+	slot.Active = true
+	slot.Size = UDim2.new(1, -30, 0, 82)
 	slot.LayoutOrder = layoutOrder
-	styleInsetPanel(slot, 12)
-	ensureButtonFeedback(slot)
+	slot.ClipsDescendants = true
+	ensureUICorner(slot, 10)
+	local slotStroke = ensureUIStroke(slot, UI_STYLE.GoldHighlight, 1.5)
+	slotStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	slotStroke.Transparency = 0
+
+	if not slot:GetAttribute("HoverBound") then
+		slot:SetAttribute("HoverBound", true)
+		slot.MouseEnter:Connect(function()
+			slot.BackgroundColor3 = UI_STYLE.SectionHover
+		end)
+		slot.MouseLeave:Connect(function()
+			slot.BackgroundColor3 = UI_STYLE.SectionBackground
+		end)
+	end
 
 	local rewName = ensureTextLabel(slot, "RewName")
-	rewName.Size = UDim2.new(1, -206, 0, 24)
-	rewName.Position = UDim2.fromOffset(72, 14)
+	rewName.Size = UDim2.new(1, -192, 0, 22)
+	rewName.Position = UDim2.fromOffset(68, 12)
 	rewName.TextXAlignment = Enum.TextXAlignment.Left
+	rewName.ZIndex = 5
 	setLabelStyle(rewName, 17, UI_STYLE.TextMain)
 
 	local timer = ensureTextLabel(slot, "Timer")
-	timer.Size = UDim2.new(1, -206, 0, 22)
-	timer.Position = UDim2.fromOffset(72, 44)
+	timer.Size = UDim2.new(1, -192, 0, 20)
+	timer.Position = UDim2.fromOffset(68, 40)
 	timer.TextXAlignment = Enum.TextXAlignment.Left
+	timer.ZIndex = 5
 	setLabelStyle(timer, 15, UI_STYLE.TextSecondary)
 
 	local icon = ensureImageLabel(slot, "Icon")
-	icon.Size = UDim2.fromOffset(50, 50)
+	icon.Size = UDim2.fromOffset(44, 44)
 	icon.Position = UDim2.fromOffset(12, 19)
-	styleInsetPanel(icon, 8)
+	icon.BackgroundColor3 = UI_STYLE.HeaderBackground
+	icon.BackgroundTransparency = 0.25
+	icon.BorderSizePixel = 0
+	icon.ZIndex = 5
+	ensureUICorner(icon, 8)
+	local iconStroke = ensureUIStroke(icon, UI_STYLE.GoldHighlight, 1)
+	iconStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	iconStroke.Transparency = 0
 
-	local claimButton = ensureFrame(slot, "ClaimButton")
+	local claimButton = ensureTextButton(slot, "ClaimButton")
 	claimButton.AnchorPoint = Vector2.new(1, 0.5)
-	claimButton.Size = UDim2.fromOffset(108, 44)
+	claimButton.Size = UDim2.fromOffset(92, 34)
 	claimButton.Position = UDim2.new(1, -14, 0.5, 0)
-	claimButton.BackgroundColor3 = UI_STYLE.ButtonInactive
-	claimButton.BackgroundTransparency = 0
-	claimButton.BorderSizePixel = 0
-	claimButton.Active = false
-	claimButton.ZIndex = math.max(slot.ZIndex + 1, 2)
-	ensureUICorner(claimButton, 10)
-	ensureUIStroke(claimButton, UI_STYLE.GoldBase, 1.2).Transparency = 0.1
-	ensureUIGradient(claimButton, UI_STYLE.GoldShadow, UI_STYLE.ButtonInactive).Rotation = 90
+	claimButton.ZIndex = 6
+	claimButton.Text = ""
+	styleMenuActionButton(claimButton)
+	ensureButtonFeedback(claimButton)
 
 	local claimText = ensureTextLabel(claimButton, "Text")
 	claimText.Size = UDim2.fromScale(1, 1)
 	claimText.Position = UDim2.fromOffset(0, 0)
 	claimText.Text = "Claim"
-	claimText.TextScaled = true
+	claimText.TextScaled = false
+	claimText.TextSize = 18
 	claimText.Font = Enum.Font.GothamBold
 	claimText.TextColor3 = UI_STYLE.TextMain
+	claimText.TextStrokeColor3 = UI_STYLE.GoldShadow
+	claimText.TextStrokeTransparency = 0.45
+	claimText.ZIndex = 7
 end
 
 local function getTimeRewardCount()
@@ -732,9 +779,10 @@ end
 
 local function ensureGiftsSlots(giftsMain)
 	giftsMain.BackgroundTransparency = 1
-	giftsMain.Size = UDim2.new(1, -26, 1, -66)
-	giftsMain.Position = UDim2.fromOffset(13, 54)
+	giftsMain.Size = UDim2.new(1, -42, 1, -126)
+	giftsMain.Position = UDim2.fromOffset(18, 116)
 	giftsMain.ClipsDescendants = true
+	giftsMain.ZIndex = 3
 
 	local scroll = giftsMain:FindFirstChild("Scroll")
 	if scroll and not scroll:IsA("ScrollingFrame") then
@@ -764,6 +812,22 @@ local function ensureGiftsSlots(giftsMain)
 	scroll.ScrollingEnabled = true
 	scroll.Size = UDim2.fromScale(1, 1)
 	scroll.VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+	scroll.ZIndex = 4
+
+	local contentPadding = scroll:FindFirstChild("ContentPadding")
+	if contentPadding and not contentPadding:IsA("UIPadding") then
+		contentPadding:Destroy()
+		contentPadding = nil
+	end
+	if not contentPadding then
+		contentPadding = Instance.new("UIPadding")
+		contentPadding.Name = "ContentPadding"
+		contentPadding.Parent = scroll
+	end
+	contentPadding.PaddingTop = UDim.new(0, 8)
+	contentPadding.PaddingBottom = UDim.new(0, 10)
+	contentPadding.PaddingLeft = UDim.new(0, 4)
+	contentPadding.PaddingRight = UDim.new(0, 4)
 
 	local list = scroll:FindFirstChild("SlotLayout")
 	if list and not list:IsA("UIListLayout") then
@@ -778,16 +842,17 @@ local function ensureGiftsSlots(giftsMain)
 	list.FillDirection = Enum.FillDirection.Vertical
 	list.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	list.SortOrder = Enum.SortOrder.LayoutOrder
-	list.Padding = UDim.new(0, 8)
+	list.Padding = UDim.new(0, 10)
 
 	local preserveNames = {
 		SlotLayout = true,
+		ContentPadding = true,
 	}
 	local rewardCount = getTimeRewardCount()
 	for index = 1, rewardCount do
 		local slotName = "Slot" .. tostring(index)
 		preserveNames[slotName] = true
-		local slot = ensureTextButton(scroll, slotName)
+		local slot = ensureFrame(scroll, slotName)
 		slot.Visible = true
 		ensureSlotCard(slot, index)
 	end
@@ -797,39 +862,47 @@ end
 
 local function ensureRebirthRequirement(parent, name, yOffset)
 	local section = ensureFrame(parent, name)
-	section.BackgroundColor3 = UI_STYLE.PanelFill
-	section.BackgroundTransparency = 0.08
+	section.BackgroundColor3 = UI_STYLE.SectionBackground
+	section.BackgroundTransparency = 0.25
 	section.Size = UDim2.new(1, -32, 0, 72)
 	section.Position = UDim2.fromOffset(16, yOffset)
-	styleInsetPanel(section, 10)
+	section.ZIndex = 4
+	ensureUICorner(section, 10)
+	local sectionStroke = ensureUIStroke(section, UI_STYLE.GoldHighlight, 1.5)
+	sectionStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	sectionStroke.Transparency = 0
 
 	local label = ensureTextLabel(section, "Label")
 	label.Size = UDim2.new(1, -20, 0, 20)
 	label.Position = UDim2.fromOffset(10, 8)
 	label.TextXAlignment = Enum.TextXAlignment.Left
 	setLabelStyle(label, 15, UI_STYLE.TextMain)
-	label.Text = name == "Money" and "Doubloons" or "Ship Level"
+	label.Text = name == "Money" and "Beli" or "Ship Level"
+	label.ZIndex = 5
 
 	local value = ensureTextLabel(section, "Value")
 	value.Size = UDim2.new(1, -20, 0, 22)
 	value.Position = UDim2.fromOffset(10, 28)
 	value.TextXAlignment = Enum.TextXAlignment.Left
 	setLabelStyle(value, 16, UI_STYLE.TextMain)
+	value.ZIndex = 5
 
 	local track = ensureFrame(section, "Track")
 	track.BackgroundColor3 = UI_STYLE.PrimaryBg
-	track.BackgroundTransparency = 0.05
+	track.BackgroundTransparency = 0.2
 	track.Size = UDim2.new(1, -20, 0, 10)
 	track.Position = UDim2.fromOffset(10, 56)
 	track.ClipsDescendants = true
+	track.ZIndex = 5
 	ensureUICorner(track, 999)
-	ensureUIStroke(track, UI_STYLE.GoldShadow, 1).Transparency = 0.35
+	ensureUIStroke(track, UI_STYLE.GoldShadow, 1).Transparency = 0.15
 
 	local bar = ensureFrame(track, "Bar")
 	bar.BackgroundColor3 = UI_STYLE.Success
 	bar.BackgroundTransparency = 0
 	bar.Size = UDim2.new(0, 0, 1, 0)
 	bar.Position = UDim2.fromOffset(0, 0)
+	bar.ZIndex = 6
 	ensureUICorner(bar, 999)
 	ensureUIGradient(bar, UI_STYLE.SuccessSoft, UI_STYLE.Success).Rotation = 90
 
@@ -1018,6 +1091,101 @@ local function ensureFrameTopBar(frame, titleText)
 	styleCloseButton(close)
 
 	return topBar
+end
+
+local function ensureStandardMenuShell(frame, titleText, backgroundImage)
+	frame.BackgroundColor3 = UI_STYLE.MenuOverlay
+	frame.BackgroundTransparency = 0
+	frame.BorderSizePixel = 0
+	frame.ClipsDescendants = true
+	ensureUICorner(frame, 18)
+	local frameGradient = frame:FindFirstChildOfClass("UIGradient")
+	if frameGradient then
+		frameGradient.Enabled = false
+	end
+	local frameStroke = frame:FindFirstChildOfClass("UIStroke")
+	if frameStroke then
+		frameStroke.Enabled = false
+	end
+
+	local baseTexture = ensureImageLabel(frame, "BaseTexture")
+	baseTexture.BackgroundTransparency = 1
+	baseTexture.BorderSizePixel = 0
+	baseTexture.Image = backgroundImage or UI_STYLE.MenuBackgroundImage
+	baseTexture.ImageTransparency = 0
+	baseTexture.ScaleType = Enum.ScaleType.Stretch
+	baseTexture.Position = UDim2.fromOffset(2, 2)
+	baseTexture.Size = UDim2.new(1, -4, 1, -4)
+	baseTexture.ZIndex = 1
+	ensureUICorner(baseTexture, 16)
+
+	local overlay = ensureFrame(frame, "Overlay")
+	overlay.BackgroundColor3 = UI_STYLE.MenuOverlay
+	overlay.BackgroundTransparency = 0.45
+	overlay.BorderSizePixel = 0
+	overlay.Position = UDim2.fromOffset(2, 2)
+	overlay.Size = UDim2.new(1, -4, 1, -4)
+	overlay.ZIndex = 2
+	ensureUICorner(overlay, 16)
+
+	local outerBorder = ensureFrame(frame, "OuterBorder")
+	outerBorder.BackgroundTransparency = 1
+	outerBorder.BorderSizePixel = 0
+	outerBorder.Position = UDim2.fromOffset(2, 2)
+	outerBorder.Size = UDim2.new(1, -4, 1, -4)
+	outerBorder.ZIndex = 10
+	ensureUICorner(outerBorder, 16)
+	local outerStroke = ensureUIStroke(outerBorder, UI_STYLE.GoldHighlight, 3)
+	outerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	outerStroke.Transparency = 0
+
+	local topBar = ensureFrame(frame, "TopBar")
+	topBar.BackgroundColor3 = UI_STYLE.HeaderBackground
+	topBar.BackgroundTransparency = 0.25
+	topBar.BorderSizePixel = 0
+	topBar.Position = UDim2.fromOffset(12, 10)
+	topBar.Size = UDim2.new(1, -24, 0, 54)
+	topBar.ZIndex = 3
+	ensureUICorner(topBar, 10)
+	local topBarStroke = ensureUIStroke(topBar, UI_STYLE.GoldHighlight, 1.5)
+	topBarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	topBarStroke.Transparency = 0
+
+	local title = ensureTextLabel(topBar, "Title")
+	title.AnchorPoint = Vector2.new(0.5, 0.5)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.GothamBold
+	title.Position = UDim2.fromScale(0.5, 0.5)
+	title.Size = UDim2.fromOffset(260, 32)
+	title.Text = string.upper(titleText)
+	title.TextColor3 = UI_STYLE.TextMain
+	title.TextScaled = true
+	title.TextSize = 30
+	title.TextStrokeColor3 = UI_STYLE.GoldShadow
+	title.TextStrokeTransparency = 0.45
+	title.ZIndex = 4
+	title.TextXAlignment = Enum.TextXAlignment.Center
+
+	local close = ensureTextButton(topBar, "X")
+	close.AnchorPoint = Vector2.new(1, 0.5)
+	close.AutoButtonColor = false
+	close.BackgroundColor3 = UI_STYLE.CloseBright
+	close.BackgroundTransparency = 0
+	close.BorderSizePixel = 0
+	close.Position = UDim2.new(1, -8, 0.5, 0)
+	close.Size = UDim2.fromOffset(34, 34)
+	close.Text = "X"
+	close.TextColor3 = Color3.new(1, 1, 1)
+	close.Font = Enum.Font.GothamBold
+	close.TextScaled = true
+	close.TextStrokeColor3 = Color3.fromRGB(9, 17, 27)
+	close.TextStrokeTransparency = 0.4
+	close.ZIndex = 4
+	ensureUICorner(close, 8)
+	local closeStroke = ensureUIStroke(close, UI_STYLE.GoldShadow, 1)
+	closeStroke.Transparency = 0.1
+	local closeGradient = ensureUIGradient(close, UI_STYLE.CloseBrightSoft, UI_STYLE.CloseBright)
+	closeGradient.Rotation = 90
 end
 
 local function ensureGearStoreLayout(frame)
@@ -1397,11 +1565,12 @@ local function ensureFrames()
 
 	local rebirth = ensureFrame(frames, "Rebirth")
 	rebirth.Size = UDim2.new(0.54, 0, 0.62, 0)
-	ensureFrameTopBar(rebirth, "Rebirth")
+	ensureStandardMenuShell(rebirth, "Rebirth", UI_STYLE.RebirthBackgroundImage)
 	local rebirthMain = ensureFrame(rebirth, "Main")
 	rebirthMain.BackgroundTransparency = 1
-	rebirthMain.Position = UDim2.fromOffset(12, 52)
-	rebirthMain.Size = UDim2.new(1, -24, 1, -62)
+	rebirthMain.Position = UDim2.fromOffset(18, 116)
+	rebirthMain.Size = UDim2.new(1, -42, 1, -126)
+	rebirthMain.ZIndex = 3
 
 	ensureRebirthRequirement(rebirthMain, "Money", 8)
 	ensureRebirthRequirement(rebirthMain, "Speed", 88)
@@ -1410,6 +1579,7 @@ local function ensureFrames()
 	youGet.BackgroundTransparency = 1
 	youGet.Position = UDim2.fromOffset(16, 172)
 	youGet.Size = UDim2.new(1, -32, 1, -228)
+	youGet.ZIndex = 4
 	local getList = youGet:FindFirstChildOfClass("UIListLayout")
 	if not getList then
 		getList = Instance.new("UIListLayout")
@@ -1424,20 +1594,24 @@ local function ensureFrames()
 	template.Size = UDim2.new(1, 0, 0, 46)
 	template.LayoutOrder = 100
 	styleInsetPanel(template, 8)
+	template.ZIndex = 4
 	local render = ensureImageLabel(template, "Render")
 	render.Position = UDim2.fromOffset(8, 8)
 	render.Size = UDim2.fromOffset(30, 30)
+	render.ZIndex = 5
 	local amount = ensureTextLabel(template, "Amount")
 	amount.Position = UDim2.fromOffset(46, 0)
 	amount.Size = UDim2.new(1, -54, 1, 0)
 	amount.TextXAlignment = Enum.TextXAlignment.Left
 	setLabelStyle(amount, 15, UI_STYLE.TextMain)
+	amount.ZIndex = 5
 
 	local rebirthButton = ensureTextButton(rebirthMain, "Rebirth")
 	rebirthButton.Size = UDim2.fromOffset(180, 38)
 	rebirthButton.AnchorPoint = Vector2.new(0.5, 1)
 	rebirthButton.Position = UDim2.new(0.5, 0, 1, -10)
 	rebirthButton.Text = "Rebirth"
+	rebirthButton.ZIndex = 5
 	stylePrimaryButton(rebirthButton)
 
 	local settings = ensureFrame(frames, "Settings")
@@ -1487,7 +1661,7 @@ local function ensureFrames()
 
 	local gifts = ensureFrame(frames, "Gifts")
 	gifts.Size = UDim2.new(0.5, 0, 0.66, 0)
-	ensureFrameTopBar(gifts, "Gifts")
+	ensureStandardMenuShell(gifts, "Gifts", UI_STYLE.GiftsBackgroundImage)
 	local giftsMain = ensureFrame(gifts, "Main")
 	ensureGiftsSlots(giftsMain)
 
@@ -1512,3 +1686,4 @@ end
 
 ensureHud()
 ensureFrames()
+

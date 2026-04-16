@@ -137,13 +137,31 @@ local function ShopShell(props)
 	local wideHero = contentWidth >= 1160
 	local introWide = contentWidth >= 1180
 	local introHeight = introWide and 170 or 254
-	local headerHeight = 128
+	local headerHeight = 174
 	local noticeHeight = props.noticeText and 48 or 0
-	local navHeight = 66
-	local navTop = headerHeight + noticeHeight + 10
-	local contentTop = navTop + navHeight + 12
-	local titleBubbleWidth = math.floor(math.clamp(contentWidth * 0.4, 360, 480))
-	local subtitleWidth = math.floor(math.clamp(contentWidth * 0.34, 280, 420))
+	local navHeight = 68
+	local navTop = headerHeight + noticeHeight + 12
+	local contentTop = navTop + navHeight + 14
+	local titleBubbleWidth = math.floor(math.clamp(contentWidth * 0.53, 520, 760))
+	local subtitleWidth = math.floor(math.clamp(contentWidth * 0.34, 320, 500))
+	local titleTextSize = contentWidth >= 1320 and 56 or (contentWidth >= 1120 and 52 or 46)
+
+	local function scrollToSection(sectionKey)
+		local scroller = scrollerRef.current
+		if not scroller then
+			return false
+		end
+
+		local target = scroller:FindFirstChild("Section_" .. tostring(sectionKey), true)
+		if not target or not target:IsA("GuiObject") then
+			return false
+		end
+
+		local nextY = target.AbsolutePosition.Y - scroller.AbsolutePosition.Y + scroller.CanvasPosition.Y - 10
+		local maxCanvasY = math.max(0, scroller.AbsoluteCanvasSize.Y - scroller.AbsoluteWindowSize.Y)
+		scroller.CanvasPosition = Vector2.new(0, math.clamp(math.floor(nextY), 0, maxCanvasY))
+		return true
+	end
 
 	local function handleSectionSelected(sectionKey)
 		setActiveSectionKey(sectionKey)
@@ -151,16 +169,14 @@ local function ShopShell(props)
 			props.onSectionSelected(sectionKey)
 		end
 
-		local scroller = scrollerRef.current
-		if not scroller then
-			return
-		end
-
-		local target = scroller:FindFirstChild("Section_" .. tostring(sectionKey), true)
-		if target and target:IsA("GuiObject") then
-			local nextY = target.AbsolutePosition.Y - scroller.AbsolutePosition.Y + scroller.CanvasPosition.Y - 8
-			scroller.CanvasPosition = Vector2.new(0, math.max(0, math.floor(nextY)))
-		end
+		task.spawn(function()
+			for _ = 1, 8 do
+				if scrollToSection(sectionKey) then
+					return
+				end
+				task.wait()
+			end
+		end)
 	end
 
 	React.useEffect(function()
@@ -176,7 +192,7 @@ local function ShopShell(props)
 			for _, section in ipairs(props.catalog.sections or {}) do
 				local target = scroller:FindFirstChild("Section_" .. tostring(section.key), true)
 				if target and target:IsA("GuiObject") then
-					if target.AbsolutePosition.Y <= (viewportTop + 76) then
+					if target.AbsolutePosition.Y <= (viewportTop + 98) then
 						nextKey = section.key
 					else
 						break
@@ -207,7 +223,7 @@ local function ShopShell(props)
 		}),
 		Padding = e("UIPadding", {
 			PaddingLeft = UDim.new(0, 28),
-			PaddingRight = UDim.new(0, 28),
+			PaddingRight = UDim.new(0, 36),
 			PaddingTop = UDim.new(0, 26),
 			PaddingBottom = UDim.new(0, 34),
 		}),
@@ -325,7 +341,7 @@ local function ShopShell(props)
 	end
 
 	for index, section in ipairs(props.catalog.sections or {}) do
-		contentChildren["Section" .. tostring(index)] = e(SectionBlock, {
+		contentChildren["Section_" .. tostring(section.key or index)] = e(SectionBlock, {
 			section = section,
 			columns = columns,
 			layoutOrder = 10 + index,
@@ -365,6 +381,32 @@ local function ShopShell(props)
 		BorderSizePixel = 0,
 		Size = UDim2.fromScale(1, 1),
 	}, {
+		BaseTexture = e("ImageLabel", {
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Image = Theme.Assets.ShopBackground,
+			ImageTransparency = 0,
+			ScaleType = Enum.ScaleType.Stretch,
+			Position = UDim2.fromOffset(2, 2),
+			Size = UDim2.new(1, -4, 1, -4),
+			ZIndex = 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 24),
+			}),
+		}),
+		Overlay = e("Frame", {
+			BackgroundColor3 = Theme.Palette.Ink,
+			BackgroundTransparency = 0.24,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(2, 2),
+			Size = UDim2.new(1, -4, 1, -4),
+			ZIndex = 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 24),
+			}),
+		}),
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 26),
 		}),
@@ -383,42 +425,42 @@ local function ShopShell(props)
 		}),
 		Header = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(24, 8),
+			Position = UDim2.fromOffset(24, 10),
 			Size = UDim2.new(1, -56, 0, headerHeight),
 			ZIndex = 10,
 		}, {
 			ShopEyebrow = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(0, 0),
-				Size = UDim2.fromOffset(titleBubbleWidth, 14),
+				Position = UDim2.fromOffset(0, 4),
+				Size = UDim2.fromOffset(titleBubbleWidth, 16),
 				Text = "GRAND LINE RUSH SHOP",
 				TextColor3 = Theme.Palette.GoldSoft,
-				TextSize = 11,
+				TextSize = 12,
 				TextXAlignment = Enum.TextXAlignment.Left,
 			}),
 			ShopTitle = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Display,
-				Position = UDim2.fromOffset(0, 16),
-				Size = UDim2.fromOffset(titleBubbleWidth, 46),
+				Position = UDim2.fromOffset(0, 24),
+				Size = UDim2.fromOffset(titleBubbleWidth, 98),
 				Text = props.catalog.title,
 				TextColor3 = Theme.Palette.GoldSoft,
-				TextSize = 39,
+				TextSize = titleTextSize,
 				TextStrokeTransparency = 1,
 				TextWrapped = true,
-				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Top,
+				TextXAlignment = Enum.TextXAlignment.Left,
 			}),
 			Subtitle = e("TextLabel", {
 				AnchorPoint = Vector2.new(1, 0),
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Body,
-				Position = UDim2.new(1, -156, 0, 14),
-				Size = UDim2.fromOffset(subtitleWidth, 40),
+				Position = UDim2.new(1, -156, 0, 22),
+				Size = UDim2.fromOffset(subtitleWidth, 54),
 				Text = props.catalog.subtitle,
 				TextColor3 = Theme.Palette.Muted,
-				TextSize = 13,
+				TextSize = 15,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Right,
 				TextYAlignment = Enum.TextYAlignment.Top,
@@ -505,6 +547,7 @@ local function ShopShell(props)
 			BorderSizePixel = 0,
 			CanvasSize = UDim2.new(),
 			Position = UDim2.fromOffset(0, contentTop),
+			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			ScrollBarImageColor3 = Theme.Palette.Cyan,
 			ScrollBarThickness = 9,
 			Size = UDim2.new(1, 0, 1, -contentTop),

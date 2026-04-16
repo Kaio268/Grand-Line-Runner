@@ -19,8 +19,8 @@ local THEME = {
 	TextMain = Color3.fromRGB(230, 230, 230),
 	TextBright = Color3.fromRGB(247, 249, 255),
 	TextShadow = Color3.fromRGB(9, 17, 27),
-	CloseFill = Color3.fromRGB(186, 86, 100),
-	CloseFillSoft = Color3.fromRGB(216, 124, 137),
+	CloseFill = Color3.fromRGB(200, 0, 9), -- #c80009
+	CloseFillSoft = Color3.fromRGB(235, 70, 78),
 	SwitchFill = Color3.fromRGB(16, 35, 59),
 }
 
@@ -516,7 +516,7 @@ local function SettingsScreen(props)
 				Position = UDim2.new(1, -8, 0.5, 0),
 				Size = UDim2.fromOffset(34, 34),
 				Text = "X",
-				TextColor3 = THEME.TextBright,
+				TextColor3 = Color3.new(1, 1, 1),
 				Font = Enum.Font.GothamBold,
 				TextScaled = true,
 				TextStrokeColor3 = THEME.TextShadow,

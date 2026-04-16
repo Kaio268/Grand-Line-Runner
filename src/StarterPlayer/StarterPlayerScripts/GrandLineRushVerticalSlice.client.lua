@@ -410,7 +410,7 @@ local function render()
 
 	if selectedCrew then
 		selectedCrewLabel.Text = string.format(
-			"Selected Crew: %s | %s | Lv.%d | XP %d/%d | %d D/hr",
+			"Selected Crew: %s | %s | Lv.%d | XP %d/%d | %d Beli/hr",
 			selectedCrew.Name,
 			selectedCrew.Rarity,
 			selectedCrew.Level,
@@ -454,7 +454,14 @@ local function render()
 
 		local crewMeta = createLabel(
 			card,
-			string.format("%s | Lv.%d | XP %d/%d | %d D/hr", crew.Rarity, crew.Level, crew.CurrentXP, crew.NextLevelXP, crew.ShipIncomePerHour),
+			string.format(
+				"%s | Lv.%d | XP %d/%d | %d Beli/hr",
+				crew.Rarity,
+				crew.Level,
+				crew.CurrentXP,
+				crew.NextLevelXP,
+				crew.ShipIncomePerHour
+			),
 			UDim2.new(1, -16, 0, 18),
 			UDim2.fromOffset(10, 32),
 			12

@@ -7,7 +7,7 @@ local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local Rebirths = {
 	BaseShipIncomeMultiplier = 1,
 	ShipIncomeMultiplierStep = 0.15,
-	ShipIncomeIcon = "rbxassetid://134664902697800",
+	ShipIncomeIcon = "rbxassetid://99305009492305",
 }
 
 local function coerceWholeNumber(value, fallback)
@@ -104,3 +104,4 @@ return setmetatable(Rebirths, {
 		return nil
 	end,
 })
+

@@ -7,6 +7,76 @@ local Theme = require(script.Parent.Parent:WaitForChild("Theme"))
 
 local e = React.createElement
 
+local function navButton(props)
+	local section = props.section or {}
+	local surface = Theme.getSurfaceTheme(section.themeKey)
+	local isActive = props.active == true
+	local hovered, setHovered = React.useState(false)
+	local fillColor = isActive and surface.fill or (hovered and Theme.Palette.PanelSoft or Theme.Palette.ButtonInactive)
+	local textColor = isActive and Theme.Palette.GoldSoft or Theme.Palette.Text
+	local subtitleColor = isActive and surface.accentSoft or Theme.Palette.Muted
+
+	return e("TextButton", {
+		AutoButtonColor = false,
+		BackgroundColor3 = fillColor,
+		BackgroundTransparency = 0.15,
+		BorderSizePixel = 0,
+		LayoutOrder = props.layoutOrder or 0,
+		Size = UDim2.fromOffset(184, 52),
+		Text = "",
+		ZIndex = props.zIndex and (props.zIndex + 1) or nil,
+		[React.Event.MouseEnter] = function()
+			setHovered(true)
+		end,
+		[React.Event.MouseLeave] = function()
+			setHovered(false)
+		end,
+		[React.Event.Activated] = function()
+			if props.onSectionSelected then
+				props.onSectionSelected(section.key)
+			end
+		end,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 12),
+		}),
+		Stroke = e("UIStroke", {
+			Color = Theme.Palette.GoldSoft,
+			Transparency = 0,
+			Thickness = 1.35,
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, isActive and surface.fill or Theme.Palette.PanelSoft),
+				ColorSequenceKeypoint.new(1, fillColor),
+			}),
+		}),
+		Title = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Theme.Fonts.Label,
+			Position = UDim2.fromOffset(8, 8),
+			Size = UDim2.new(1, -16, 0, 15),
+			Text = section.title,
+			TextColor3 = textColor,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
+		}),
+		Subtitle = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Theme.Fonts.Body,
+			Position = UDim2.fromOffset(8, 25),
+			Size = UDim2.new(1, -16, 0, 12),
+			Text = section.eyebrow,
+			TextColor3 = subtitleColor,
+			TextSize = 10,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
+		}),
+	})
+end
+
 local function SectionNav(props)
 	local children = {
 		List = e("UIListLayout", {
@@ -17,59 +87,12 @@ local function SectionNav(props)
 	}
 
 	for index, section in ipairs(props.sections or {}) do
-		local surface = Theme.getSurfaceTheme(section.themeKey)
-		local isActive = props.activeSectionKey == section.key
-		children["Button" .. tostring(index)] = e("TextButton", {
-			AutoButtonColor = false,
-			BackgroundColor3 = isActive and surface.accent or Theme.Palette.PanelSoft,
-			BorderSizePixel = 0,
-			LayoutOrder = index,
-			Size = UDim2.fromOffset(186, 56),
-			Text = "",
-			ZIndex = props.zIndex and (props.zIndex + 1) or nil,
-			[React.Event.Activated] = function()
-				if props.onSectionSelected then
-					props.onSectionSelected(section.key)
-				end
-			end,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 14),
-			}),
-			Stroke = e("UIStroke", {
-				Color = isActive and surface.stroke or Theme.Palette.BorderSoft,
-				Transparency = isActive and 0.06 or 0.24,
-				Thickness = isActive and 1.4 or 1.1,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, isActive and surface.accent or Theme.Palette.BoardSoft),
-					ColorSequenceKeypoint.new(1, isActive and surface.accentSoft or Theme.Palette.Panel),
-				}),
-			}),
-			Title = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(16, 10),
-				Size = UDim2.new(1, -28, 0, 14),
-				Text = section.title,
-				TextColor3 = isActive and Theme.Palette.Ink or Theme.Palette.Text,
-				TextSize = 13,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = props.zIndex and (props.zIndex + 2) or nil,
-			}),
-			Subtitle = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(16, 27),
-				Size = UDim2.new(1, -32, 0, 12),
-				Text = section.eyebrow,
-				TextColor3 = isActive and Theme.Palette.Board or Theme.Palette.Muted,
-				TextSize = 9,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = props.zIndex and (props.zIndex + 2) or nil,
-			}),
+		children["Button" .. tostring(index)] = e(navButton, {
+			active = props.activeSectionKey == section.key,
+			layoutOrder = index,
+			onSectionSelected = props.onSectionSelected,
+			section = section,
+			zIndex = props.zIndex,
 		})
 	end
 

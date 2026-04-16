@@ -30,10 +30,11 @@ end
 local function SectionBlock(props)
 	local section = props.section
 	local columns = math.max(1, props.columns or 1)
-	local gap = 18
+	local gap = 16
 	local rows = buildRows(section.items or {}, columns)
 	local surface = Theme.getSurfaceTheme(section.themeKey)
-	local cellOffset = math.floor((((columns - 1) * gap) / columns) + 0.5)
+	local cardSafetyInset = columns > 1 and 14 or 6
+	local cellOffset = math.ceil((((columns - 1) * gap) + cardSafetyInset) / columns)
 	local cardHeight = columns <= 1 and 276 or 254
 
 	local rowChildren = {
@@ -76,7 +77,7 @@ local function SectionBlock(props)
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			LayoutOrder = rowIndex,
-			Size = UDim2.new(1, 0, 0, cardHeight),
+			Size = UDim2.new(1, -cardSafetyInset, 0, cardHeight),
 			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
 		}, itemChildren)
 	end
@@ -162,7 +163,7 @@ local function SectionBlock(props)
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			LayoutOrder = 2,
-			Size = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.new(1, -4, 0, 0),
 			ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		}, rowChildren),
 	})

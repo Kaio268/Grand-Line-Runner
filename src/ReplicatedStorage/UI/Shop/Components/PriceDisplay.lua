@@ -190,7 +190,7 @@ local function PriceDisplay(props)
 						Size = UDim2.new(0, 0, 1, 0),
 						Text = purchaseText,
 						TextColor3 = buttonTextColor,
-						TextSize = props.compact and 12 or 14,
+						TextSize = props.compact and 13 or 15,
 						TextXAlignment = Enum.TextXAlignment.Center,
 						ZIndex = props.zIndex and (props.zIndex + 2) or nil,
 					}),

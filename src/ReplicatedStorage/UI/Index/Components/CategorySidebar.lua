@@ -10,15 +10,27 @@ local e = React.createElement
 local function categoryButton(props)
 	local active = props.active == true
 	local category = props.category or {}
+	local hovered, setHovered = React.useState(false)
+	local fillColor = active and Theme.Palette.SidebarActive
+		or (hovered and Theme.Palette.SectionSoft or Theme.Palette.Section)
+	local textColor = active and Theme.Palette.SidebarIndicator or Theme.Palette.MutedSoft
 
 	return e("TextButton", {
 		AutoButtonColor = false,
-		BackgroundColor3 = active and Theme.Palette.SidebarActive or Theme.Palette.Section,
+		BackgroundColor3 = fillColor,
+		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, 72),
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.new(1, -2, 0, 72),
 		Text = "",
+		[React.Event.MouseEnter] = function()
+			setHovered(true)
+		end,
+		[React.Event.MouseLeave] = function()
+			setHovered(false)
+		end,
 		[React.Event.Activated] = function()
 			props.onSelect(category.id)
 		end,
@@ -27,9 +39,9 @@ local function categoryButton(props)
 			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = active and Theme.Palette.SidebarActiveStroke or Theme.Palette.BorderSoft,
-			Transparency = active and 0.18 or 0.4,
-			Thickness = active and 1.2 or 1,
+			Color = Theme.Palette.SidebarActiveStroke,
+			Transparency = 0,
+			Thickness = active and 1.5 or 1.2,
 		}),
 		Icon = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -46,7 +58,7 @@ local function categoryButton(props)
 			Position = UDim2.fromOffset(4, 42),
 			Size = UDim2.new(1, -8, 0, 16),
 			Text = tostring(category.label or ""),
-			TextColor3 = active and Theme.Palette.SidebarIndicator or Theme.Palette.Muted,
+			TextColor3 = active and Theme.Palette.SidebarIndicator or textColor,
 			TextSize = 10,
 			TextWrapped = true,
 		}),
@@ -54,7 +66,7 @@ local function categoryButton(props)
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = Theme.Palette.SidebarIndicator,
 			BorderSizePixel = 0,
-			Position = UDim2.new(0, 0, 0.5, 0),
+			Position = UDim2.fromScale(0, 0.5),
 			Size = UDim2.fromOffset(4, 28),
 		}, {
 			Corner = e("UICorner", {
@@ -83,10 +95,20 @@ local function CategorySidebar(props)
 		})
 	end
 
-	return e("Frame", {
+return e("Frame", {
 		BackgroundTransparency = 1,
+		ClipsDescendants = true,
 		Size = UDim2.new(0, Theme.Layout.SidebarWidth, 1, 0),
-	}, sidebarChildren)
+	}, {
+		Padding = e("UIPadding", {
+			PaddingLeft = UDim.new(0, 1),
+			PaddingRight = UDim.new(0, 1),
+		}),
+		Content = e("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+		}, sidebarChildren),
+	})
 end
 
 return CategorySidebar

@@ -10,14 +10,14 @@ local e = React.createElement
 
 local BOOST_METADATA = {
 	x2MoneyTime = {
-		label = "x2 Doubloons",
-		icon = "rbxassetid://102766068687661",
+		label = "x2 Beli",
+		icon = "rbxassetid://112694595954613",
 		accent = Color3.fromRGB(111, 230, 124),
 		order = 1,
 	},
 	x15WalkSpeedTime = {
 		label = "x1.5 Speed",
-		icon = "rbxassetid://89427336475199",
+		icon = "rbxassetid://96331945137652",
 		accent = Color3.fromRGB(100, 204, 255),
 		order = 2,
 	},
@@ -252,3 +252,4 @@ local function HudBoostTimer(props)
 end
 
 return HudBoostTimer
+
