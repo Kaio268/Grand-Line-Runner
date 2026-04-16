@@ -1,1 +1,1 @@
-return require(script.Parent:WaitForChild("GomuGomuNoMi"))
+return require(script.Parent:WaitForChild("Gomu"):WaitForChild("Server"):WaitForChild("GomuServer"))

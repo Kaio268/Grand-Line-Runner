@@ -6,6 +6,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local BuyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStore")
 local RobuxRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStoreRobux")
 
@@ -104,7 +105,7 @@ local function setBuyState(gearName)
 	local buyText = item.BuyText
 	local bv = gearsFolder:FindFirstChild(gearName)
 	if not bv or not bv:IsA("BoolValue") then
-		setText(buyText, shorten.roundNumber(item.Price) .. "$")
+		setText(buyText, shorten.roundNumber(item.Price) .. CurrencyUtil.getCompactSuffix())
 		return
 	end
 	if bv.Value == true then
@@ -165,15 +166,13 @@ for index, gear in ipairs(gearList) do
 	local robuxFrame = clone:WaitForChild("Robux")
 	local robuxText = robuxFrame:WaitForChild("Main"):WaitForChild("TextL")
 
-	setText(buyText, shorten.roundNumber(price) .. "$")
+	setText(buyText, shorten.roundNumber(price) .. CurrencyUtil.getCompactSuffix())
 	setText(robuxText, "" .. shorten.roundNumber(robuxPrice))
 
 	local iconObj = clone:FindFirstChild("Icon")
-	if iconObj and iconObj:IsA("ImageLabel") then
-		iconObj.Image = icon
-	elseif iconObj and iconObj:IsA("ImageButton") then
-		iconObj.Image = icon
-	end
+		if iconObj and (iconObj:IsA("ImageLabel") or iconObj:IsA("ImageButton")) then
+			iconObj.Image = icon
+		end
 
 	local addSpeed = clone:FindFirstChild("AddSpeed")
 	if addSpeed then

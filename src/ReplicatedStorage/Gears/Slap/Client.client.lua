@@ -1,20 +1,44 @@
 local tool = script.Parent
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local event = ReplicatedStorage:WaitForChild("Slap")
+local Players = game:GetService("Players")
 
 -- animacja
 local anim = Instance.new("Animation")
 anim.AnimationId = "rbxassetid://119351181413931"
 
-local player = game.Players.LocalPlayer
-local char = player.Character or player.CharacterAdded:Wait()
-local hum = char:WaitForChild("Humanoid")
-local animator = hum:WaitForChild("Animator")
+local player = Players.LocalPlayer
 
-local animTrack = animator:LoadAnimation(anim)
+local currentHumanoid = nil
+local currentTrack = nil
+
+local function getAnimationTrack()
+	local char = player.Character
+	if not char then
+		return nil, nil
+	end
+
+	local hum = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if not hum or not hrp then
+		return nil, nil
+	end
+
+	if currentHumanoid ~= hum or currentTrack == nil then
+		local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 1)
+		if not animator then
+			return nil, nil
+		end
+
+		currentHumanoid = hum
+		currentTrack = animator:LoadAnimation(anim)
+	end
+
+	return currentTrack, char
+end
 
 tool.Activated:Connect(function()
+	local animTrack, char = getAnimationTrack()
+	if not animTrack or not char then return end
+
 	local hrp = char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
 
@@ -31,8 +55,6 @@ tool.Activated:Connect(function()
 
 	local hitPart = result.Instance
 	if hitPart:IsDescendantOf(char) then return end
-
-	event:FireServer(hitPart)
 
 	animTrack:Play()
 end)

@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local DEBUG = true
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local function log(...)
 	if DEBUG then
 		print("[COMET]", ...)
@@ -18,8 +19,16 @@ end
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 local CurrentEventTime = workspace:WaitForChild("CurrentEventTime")
 
-local Map = workspace:WaitForChild("Map")
-local SpawnPartsFolder = Map:WaitForChild("SpawnPart")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot", "SpawnFolder" },
+	nil,
+	{
+		warn = true,
+		context = "CometEvent",
+	}
+)
+local Map = refs.MapRoot
+local SpawnPartsFolder = refs.SpawnFolder
 
 local CometTemplate = ReplicatedStorage:WaitForChild("Comet")
 CometTemplate.Archivable = true
@@ -58,8 +67,12 @@ local HEIGHT_MAX = 520
 local COMET_GROUP = "Comets"
 local BRAINROT_GROUP = "Brainrots"
 
-pcall(function() PhysicsService:CreateCollisionGroup(COMET_GROUP) end)
-pcall(function() PhysicsService:CreateCollisionGroup(BRAINROT_GROUP) end)
+pcall(function()
+	PhysicsService:RegisterCollisionGroup(COMET_GROUP)
+end)
+pcall(function()
+	PhysicsService:RegisterCollisionGroup(BRAINROT_GROUP)
+end)
 pcall(function()
 	PhysicsService:CollisionGroupSetCollidable(COMET_GROUP, BRAINROT_GROUP, false)
 end)
@@ -88,7 +101,9 @@ end
 
 local function formatTime(seconds)
 	seconds = tonumber(seconds) or 0
-	if seconds < 0 then seconds = 0 end
+	if seconds < 0 then
+		seconds = 0
+	end
 	seconds = math.floor(seconds + 0.5)
 
 	local h = math.floor(seconds / 3600)
@@ -103,19 +118,29 @@ end
 
 local function findCometTimeLabel()
 	local eventsFolder = workspace:FindFirstChild("Events")
-	if not eventsFolder then return nil end
+	if not eventsFolder then
+		return nil
+	end
 
 	local cometFolder = eventsFolder:FindFirstChild("Comet")
-	if not cometFolder then return nil end
+	if not cometFolder then
+		return nil
+	end
 
 	local likeCounter = cometFolder:FindFirstChild(`Walls`):FindFirstChild("LikeCounter")
-	if not likeCounter then return nil end
+	if not likeCounter then
+		return nil
+	end
 
 	local timers = likeCounter:FindFirstChild("Timers")
-	if not timers then return nil end
+	if not timers then
+		return nil
+	end
 
 	local gui = timers:FindFirstChildOfClass("SurfaceGui") or timers:FindFirstChild("SurfaceGui")
-	if not gui then return nil end
+	if not gui then
+		return nil
+	end
 
 	local lbl = gui:FindFirstChild("Time")
 	if lbl and lbl:IsA("TextLabel") then
@@ -185,7 +210,7 @@ end
 local function setCollisionGroup(inst, groupName)
 	forEachPart(inst, function(p)
 		pcall(function()
-			PhysicsService:SetPartCollisionGroup(p, groupName)
+			p.CollisionGroup = groupName
 		end)
 	end)
 end
@@ -255,8 +280,12 @@ local function shockwave(pos: Vector3)
 	TweenService:Create(flash, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = Vector3.new(55, 55, 55), Transparency = 1 }):Play()
 
 	task.delay(0.8, function()
-		if ring then ring:Destroy() end
-		if flash then flash:Destroy() end
+		if ring then
+			ring:Destroy()
+		end
+		if flash then
+			flash:Destroy()
+		end
 	end)
 end
 
@@ -334,20 +363,26 @@ local function tweenCF(inst, cf0, cf1, t)
 			if inst and inst.Parent then
 				inst:PivotTo(v.Value)
 			else
-				if conn then conn:Disconnect() end
+				if conn then
+					conn:Disconnect()
+				end
 			end
 		end)
 		inst:PivotTo(cf0)
 		local tw = TweenService:Create(v, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Value = cf1 })
 		tw:Play()
 		tw.Completed:Wait()
-		if conn then conn:Disconnect() end
+		if conn then
+			conn:Disconnect()
+		end
 		v:Destroy()
 		return
 	end
 
 	local root = getRoot(inst)
-	if not root then return end
+	if not root then
+		return
+	end
 	root.CFrame = cf0
 	local tw = TweenService:Create(root, TweenInfo.new(t, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { CFrame = cf1 })
 	tw:Play()
@@ -362,7 +397,7 @@ local function tagBrainrotsCollision()
 			brainrotsFolder.DescendantAdded:Connect(function(obj)
 				if obj:IsA("BasePart") then
 					pcall(function()
-						PhysicsService:SetPartCollisionGroup(obj, BRAINROT_GROUP)
+						obj.CollisionGroup = BRAINROT_GROUP
 					end)
 				end
 			end)
@@ -372,7 +407,9 @@ end
 
 local function destroyCometById(id: string)
 	local data = cometById[id]
-	if not data then return end
+	if not data then
+		return
+	end
 
 	local inst = data.Instance
 	local platform = data.Platform
@@ -389,29 +426,49 @@ local function destroyCometById(id: string)
 end
 
 CometCollectDone.OnServerEvent:Connect(function(plr, cometId)
-	if type(cometId) ~= "string" then return end
+	if type(cometId) ~= "string" then
+		return
+	end
 	local data = cometById[cometId]
-	if not data then return end
-	if data.CollectedBy ~= plr.UserId then return end
+	if not data then
+		return
+	end
+	if data.CollectedBy ~= plr.UserId then
+		return
+	end
 	destroyCometById(cometId)
 end)
 
 local function bindCollect(inst, cometId: string)
 	local root = getRoot(inst)
-	if not root then return end
+	if not root then
+		return
+	end
 
 	local conn
 	conn = root.Touched:Connect(function(hit)
-		if not hit then return end
+		if not hit then
+			return
+		end
 		local ch = hit.Parent
-		if not ch then return end
+		if not ch then
+			return
+		end
 		local plr = Players:GetPlayerFromCharacter(ch)
-		if not plr then return end
+		if not plr then
+			return
+		end
 
 		local data = cometById[cometId]
-		if not data then return end
-		if data.Collected then return end
-		if not data.Landed then return end
+		if not data then
+			return
+		end
+		if data.Collected then
+			return
+		end
+		if not data.Landed then
+			return
+		end
 
 		data.Collected = true
 		data.CollectedBy = plr.UserId
@@ -431,15 +488,21 @@ local function bindCollect(inst, cometId: string)
 			end
 		end)
 
-		if conn then conn:Disconnect() end
+		if conn then
+			conn:Disconnect()
+		end
 	end)
 end
 
 local function spawnCometOnPlatform(platform: BasePart, token: number)
-	if not stillValid(token) then return end
+	if not stillValid(token) then
+		return
+	end
 
 	local c = partCount[platform] or 0
-	if c >= MAX_PER_PART then return end
+	if c >= MAX_PER_PART then
+		return
+	end
 	partCount[platform] = c + 1
 
 	local inst
@@ -513,7 +576,9 @@ local function spawnCometOnPlatform(platform: BasePart, token: number)
 		local fallTime = rng:NextNumber(1.35, 2.15)
 		tweenCF(inst, cf0, cf1, fallTime)
 
-		if not cometById[cometId] then return end
+		if not cometById[cometId] then
+			return
+		end
 		if not stillValid(token) then
 			destroyCometById(cometId)
 			return
@@ -549,14 +614,18 @@ local function spawnWave(token: number)
 	log("Wave start | platforms:", #platforms, "| per platform:", COMETS_PER_PART)
 
 	for _, platform in ipairs(platforms) do
-		if not stillValid(token) then return end
+		if not stillValid(token) then
+			return
+		end
 
 		local c = partCount[platform] or 0
 		local free = MAX_PER_PART - c
 		if free > 0 then
 			local toSpawn = math.min(COMETS_PER_PART, free)
 			for _ = 1, toSpawn do
-				if not stillValid(token) then return end
+				if not stillValid(token) then
+					return
+				end
 				spawnCometOnPlatform(platform, token)
 				task.wait(0.01)
 			end
@@ -575,7 +644,9 @@ local function clearAll()
 end
 
 local function startComet()
-	if running then return end
+	if running then
+		return
+	end
 	running = true
 	runId += 1
 
@@ -595,7 +666,9 @@ local function startComet()
 				spawnWave(token)
 			end)
 
-			if not stillValid(token) then break end
+			if not stillValid(token) then
+				break
+			end
 
 			local interval = rng:NextNumber(INTERVAL_MIN, INTERVAL_MAX)
 			local t0 = os.clock()
@@ -608,7 +681,9 @@ local function startComet()
 end
 
 local function stopComet()
-	if not running then return end
+	if not running then
+		return
+	end
 
 	running = false
 	runId += 1

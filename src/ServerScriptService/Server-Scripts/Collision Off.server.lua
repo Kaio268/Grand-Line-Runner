@@ -2,20 +2,21 @@ local Players = game:GetService("Players")
 local PhysicsService = game:GetService("PhysicsService")
 local GroupName = "Players"
 
-PhysicsService:CreateCollisionGroup(GroupName)
+pcall(function()
+	PhysicsService:RegisterCollisionGroup(GroupName)
+end)
 PhysicsService:CollisionGroupSetCollidable(GroupName, GroupName, false)
 
-Players.PlayerAdded:connect(function(Player)
+Players.PlayerAdded:Connect(function(Player)
 	Player.CharacterAdded:Connect(function(Character)
-
 		local function ChangeGroup(Part)
 			if Part:IsA("BasePart") then
-				PhysicsService:SetPartCollisionGroup(Part, "Players")
+				Part.CollisionGroup = GroupName
 			end
 		end
 
 		Character.ChildAdded:Connect(ChangeGroup)
-		for _, Object in pairs(Character:GetChildren()) do
+		for _, Object in ipairs(Character:GetChildren()) do
 			ChangeGroup(Object)
 		end
 	end)

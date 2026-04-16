@@ -79,7 +79,7 @@ local function CleanupInThread(...)
 	if not FreeRunnerThread then
 		FreeRunnerThread = coroutine.create(RunEventHandlerInFreeThread)
 	end
-	task.spawn(assert(FreeRunnerThread), Cleanup, ...)
+	task.spawn(FreeRunnerThread :: thread, Cleanup, ...)
 end
 
 ----- Public -----

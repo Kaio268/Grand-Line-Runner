@@ -19,8 +19,42 @@ local CONFIG = {
 	EASING_DIR_OUT = Enum.EasingDirection.Out,
 }
 
+local FRAMES_DISPLAY_ORDER = 120
+local CONTROLLER_GENERATION_ATTRIBUTE = "OpenUIControllerGeneration"
+local OPENED_FRAME_ATTRIBUTE = "OpenUIOpened"
+local REACT_MODAL_FRAME_NAMES = {
+	Index = true,
+	Quest = true,
+	Store = true,
+}
+
+local function nextControllerGeneration(playerGui: PlayerGui): number
+	local nextGeneration = (tonumber(playerGui:GetAttribute(CONTROLLER_GENERATION_ATTRIBUTE)) or 0) + 1
+	playerGui:SetAttribute(CONTROLLER_GENERATION_ATTRIBUTE, nextGeneration)
+	return nextGeneration
+end
+
+local function isReactModalChrome(frame: Instance): boolean
+	return frame.Name:match("^React") ~= nil and frame.Name:match("Backdrop$") ~= nil
+end
+
+local function isManagedFrame(frame: Instance): boolean
+	return frame:IsA("Frame") and not isReactModalChrome(frame)
+end
+
+local function shouldPreserveVisibleFrame(frame: Frame): boolean
+	return frame:GetAttribute(OPENED_FRAME_ATTRIBUTE) == true or REACT_MODAL_FRAME_NAMES[frame.Name] == true
+end
+
 local function tween(obj: Instance, props: {[string]: any}, time: number, style, dir)
 	return TweenService:Create(obj, TweenInfo.new(time, style, dir), props)
+end
+
+function UIController:_isActiveController(): boolean
+	return self.Destroyed ~= true
+		and self.PlayerGui ~= nil
+		and self.PlayerGui.Parent ~= nil
+		and self.PlayerGui:GetAttribute(CONTROLLER_GENERATION_ATTRIBUTE) == self.ControllerGeneration
 end
 
 function UIController:_ensureBlurEffect()
@@ -57,7 +91,7 @@ end
 function UIController:_getVisibleNonPlantFrames()
 	local list = {}
 	for _, f in ipairs(self.FramesFolder:GetChildren()) do
-		if f:IsA("Frame") and f ~= self.PlantInventory and f.Visible then
+		if isManagedFrame(f) and f ~= self.PlantInventory and f.Visible then
 			table.insert(list, f)
 		end
 	end
@@ -66,7 +100,10 @@ end
 
 function UIController:_forceHide(frame: Frame)
 	local scale = frame:FindFirstChildOfClass("UIScale")
-	if scale then scale.Scale = 0 end
+	if scale then
+		scale.Scale = 0
+	end
+	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
 	frame.Visible = false
 	if self.CurrentFrame == frame then
 		self.CurrentFrame = nil
@@ -86,8 +123,11 @@ function UIController:_closeNonPlant()
 	local t1 = tween(f, { Position = UDim2.new(0.5, 0, 10, 0) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	t1:Play()
-	if t2 then t2:Play() end
+	if t2 then
+		t2:Play()
+	end
 	t1.Completed:Wait()
+	f:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
 	f.Visible = false
 	self.CurrentFrame = nil
 	if not self.PlantVisible then
@@ -99,6 +139,7 @@ end
 function UIController:_openNonPlant(frame: Frame)
 	self.IsAnimating = true
 	self.CurrentFrame = frame
+	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, true)
 	frame.Visible = true
 	frame.Position = UDim2.new(0.5, 0, 10, 0)
 	local uiScale = frame:FindFirstChildOfClass("UIScale")
@@ -130,6 +171,7 @@ function UIController:_openPlant()
 		return
 	end
 	self.PlantVisible = true
+	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, true)
 	frame.Visible = true
 	frame.Position = UDim2.new(0.5, 0, 10, 0)
 	local uiScale = frame:FindFirstChildOfClass("UIScale")
@@ -146,7 +188,9 @@ function UIController:_openPlant()
 end
 
 function UIController:_closePlant()
-	if not self.PlantVisible then return end
+	if not self.PlantVisible then
+		return
+	end
 	local frame: Frame = self.PlantInventory
 	self.IsAnimating = true
 	local scale = frame:FindFirstChildOfClass("UIScale")
@@ -157,6 +201,7 @@ function UIController:_closePlant()
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	t1:Play(); if t2 then t2:Play() end
 	t1.Completed:Wait()
+	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
 	frame.Visible = false
 	self.PlantVisible = false
 	if not (self.CurrentFrame and self.CurrentFrame.Visible) then
@@ -167,38 +212,94 @@ end
 
 function UIController:_cacheButtons()
 	self.Buttons = {}
+	self._buttonConnections = self._buttonConnections or {}
+
+	local function connectButton(btn: Instance)
+		if not (btn:IsA("TextButton") or btn:IsA("ImageButton")) then
+			return
+		end
+
+		if self._buttonConnections[btn] then
+			return
+		end
+
+		table.insert(self.Buttons, btn)
+		self._buttonConnections[btn] = btn.MouseButton1Click:Connect(function()
+			if not self:_isActiveController() or self.ActiveErrorFrame or self.IsAnimating then
+				return
+			end
+			local target = self.FramesFolder:FindFirstChild(btn.Name)
+			if target and target:IsA("Frame") then
+				self:ToggleFrame(target)
+			end
+		end)
+	end
+
+	local function disconnectButton(btn: Instance)
+		local connection = self._buttonConnections[btn]
+		if connection then
+			connection:Disconnect()
+			self._buttonConnections[btn] = nil
+		end
+
+		for index = #self.Buttons, 1, -1 do
+			if self.Buttons[index] == btn then
+				table.remove(self.Buttons, index)
+			end
+		end
+	end
+
 	for _, obj in ipairs(self.Main:GetDescendants()) do
-		if (obj:IsA("TextButton") or obj:IsA("ImageButton")) then
-			table.insert(self.Buttons, obj)
-		end
+		connectButton(obj)
 	end
-	for _, btn: Instance in ipairs(self.Buttons) do
-		if btn:IsA("TextButton") or btn:IsA("ImageButton") then
-			btn.MouseButton1Click:Connect(function()
-				if self.ActiveErrorFrame or self.IsAnimating then return end
-				local target = self.FramesFolder:FindFirstChild(btn.Name)
-				if target and target:IsA("Frame") then
-					self:ToggleFrame(target)
-				end
-			end)
-		end
+
+	if self._buttonAddedConnection then
+		self._buttonAddedConnection:Disconnect()
 	end
+	self._buttonAddedConnection = self.Main.DescendantAdded:Connect(connectButton)
+
+	if self._buttonRemovingConnection then
+		self._buttonRemovingConnection:Disconnect()
+	end
+	self._buttonRemovingConnection = self.Main.DescendantRemoving:Connect(disconnectButton)
+end
+
+function UIController:RefreshButtons()
+	if not self.Main or not self.Main.Parent then
+		return
+	end
+
+	self:_cacheButtons()
 end
 
 function UIController:_initializeFrames()
 	self.PlantInventory = self.FramesFolder:FindFirstChild("PlantInventory") :: Frame?
 	for _, frame in ipairs(self.FramesFolder:GetChildren()) do
-		if frame:IsA("Frame") then
+		if isManagedFrame(frame) then
+			local shouldPreserve = frame.Visible == true and shouldPreserveVisibleFrame(frame)
 			local uiScale = frame:FindFirstChildOfClass("UIScale")
 			if not uiScale then
 				uiScale = Instance.new("UIScale")
-				uiScale.Scale = 0
 				uiScale.Parent = frame
-			else
-				uiScale.Scale = 0
 			end
-			frame.Visible = false
-			frame.Position = UDim2.new(0.5, 0, 10, 0)
+
+			if shouldPreserve then
+				uiScale.Scale = 1
+				frame.Visible = true
+				if frame == self.PlantInventory then
+					self.PlantVisible = true
+					frame.Position = UDim2.new(0.5, 0, 0.712, 0)
+				else
+					self.CurrentFrame = frame
+					frame.Position = UDim2.new(0.5, 0, self.PlantVisible and 0.4 or 0.5, 0)
+				end
+			else
+				frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
+				uiScale.Scale = 0
+				frame.Visible = false
+				frame.Position = UDim2.new(0.5, 0, 10, 0)
+			end
+
 			for _, obj in ipairs(frame:GetDescendants()) do
 				if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Name == "X" then
 					obj.MouseButton1Click:Connect(function()
@@ -216,14 +317,22 @@ function UIController:_initializePartTriggers()
 	self._hookedParts = self._hookedParts or {}
 
 	local function hookPart(part: Instance, forcedFrameName: string?)
-		if not part:IsA("BasePart") then return end
-		if self._hookedParts[part] then return end
+		if not part:IsA("BasePart") then
+			return
+		end
+		if self._hookedParts[part] then
+			return
+		end
 		self._hookedParts[part] = true
 
 		part.Touched:Connect(function(hit)
-			if self.ActiveErrorFrame or self.IsAnimating then return end
+			if not self:_isActiveController() or self.ActiveErrorFrame or self.IsAnimating then
+				return
+			end
 			local char = self.Player.Character
-			if not char or not hit:IsDescendantOf(char) then return end
+			if not char or not hit:IsDescendantOf(char) then
+				return
+			end
 
 			local frameName = forcedFrameName
 			if not frameName then
@@ -232,7 +341,9 @@ function UIController:_initializePartTriggers()
 					frameName = attr
 				end
 			end
-			if not frameName then return end
+			if not frameName then
+				return
+			end
 
 			local frame = self.FramesFolder:FindFirstChild(frameName)
 			if frame and frame:IsA("Frame") and not frame.Visible then
@@ -263,8 +374,15 @@ function UIController:_initializePartTriggers()
 end
 
 function UIController:ToggleFrame(frame: Frame)
-	if self.ActiveErrorFrame then return end
-	if self.IsAnimating then return end
+	if not self:_isActiveController() then
+		return
+	end
+	if self.ActiveErrorFrame then
+		return
+	end
+	if self.IsAnimating then
+		return
+	end
 
 	for _, other in ipairs(self:_getVisibleNonPlantFrames()) do
 		if other ~= frame then
@@ -296,7 +414,12 @@ function UIController:ToggleFrame(frame: Frame)
 end
 
 function UIController:CloseAllFrames()
-	if self.ActiveErrorFrame or self.IsAnimating then return end
+	if not self:_isActiveController() then
+		return
+	end
+	if self.ActiveErrorFrame or self.IsAnimating then
+		return
+	end
 	self:_closeNonPlant()
 	self:_closePlant()
 	for _, f in ipairs(self:_getVisibleNonPlantFrames()) do
@@ -306,7 +429,12 @@ function UIController:CloseAllFrames()
 end
 
 function UIController:OpenFrame(frameName: string)
-	if self.ActiveErrorFrame or self.IsAnimating then return end
+	if not self:_isActiveController() then
+		return
+	end
+	if self.ActiveErrorFrame or self.IsAnimating then
+		return
+	end
 	local frame = self.FramesFolder:FindFirstChild(frameName)
 	if frame and frame:IsA("Frame") then
 		self:ToggleFrame(frame)
@@ -319,8 +447,15 @@ function UIController.new(player: Player)
 	local self = setmetatable({}, UIController)
 	self.Player = player
 	self.PlayerGui = player:WaitForChild("PlayerGui")
+	self.ControllerGeneration = nextControllerGeneration(self.PlayerGui)
+	self.Destroyed = false
 	self.Main = self.PlayerGui:WaitForChild("HUD")
 	self.FramesFolder = self.PlayerGui:WaitForChild("Frames")
+	if self.FramesFolder:IsA("ScreenGui") then
+		self.FramesFolder.DisplayOrder = math.max(self.FramesFolder.DisplayOrder, FRAMES_DISPLAY_ORDER)
+		self.FramesFolder.IgnoreGuiInset = true
+		self.FramesFolder.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	end
 	self.CurrentFrame = nil
 	self.IsAnimating = false
 	self.PlantVisible = false
@@ -333,8 +468,35 @@ function UIController.new(player: Player)
 	return self
 end
 
+function UIController:Destroy()
+	if self.Destroyed then
+		return
+	end
+
+	self.Destroyed = true
+
+	for _, connection in pairs(self._buttonConnections or {}) do
+		connection:Disconnect()
+	end
+	self._buttonConnections = {}
+	self.Buttons = {}
+
+	if self._buttonAddedConnection then
+		self._buttonAddedConnection:Disconnect()
+		self._buttonAddedConnection = nil
+	end
+	if self._buttonRemovingConnection then
+		self._buttonRemovingConnection:Disconnect()
+		self._buttonRemovingConnection = nil
+	end
+end
+
 local player = Players.LocalPlayer
 local controller = UIController.new(player)
 print("UIController initialized for player:", player and player.Name or "Unknown")
+
+script.Destroying:Connect(function()
+	controller:Destroy()
+end)
 
 return controller

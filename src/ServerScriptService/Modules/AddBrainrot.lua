@@ -8,6 +8,7 @@ local Configs = Modules:WaitForChild("Configs")
 
 local BrainrotsCfg = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local BrainrotInstanceService = require(script.Parent:WaitForChild("BrainrotInstanceService"))
 
 local function validName(name)
 	if type(name) ~= "string" then return nil end
@@ -58,14 +59,6 @@ local function findModelFor(variantKey, baseName)
 	return nil
 end
 
-local function dmSet(DataManager, plr, path, value)
-	if DataManager.SetValue then
-		DataManager:SetValue(plr, path, value)
-		return true
-	end
-	return false
-end
-
 function Module:AddBrainrot(plr, brainrotName, amount)
 	local DataManager = require(script.Parent.Parent.Data.DataManager)
 
@@ -108,24 +101,33 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 
 	local basePath = "Inventory." .. brainrotName
 
-	DataManager:AdjustValue(plr, basePath .. ".Equipped", 0)
-	DataManager:AdjustValue(plr, basePath .. ".Quantity", n)
-
 	local baseInfo = BrainrotsCfg[baseName] or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
 
-	dmSet(DataManager, plr, basePath .. ".Variant", variantKey)
-	dmSet(DataManager, plr, basePath .. ".BaseName", baseName)
-	dmSet(DataManager, plr, basePath .. ".Render", render)
-	dmSet(DataManager, plr, basePath .. ".GoldenRender", goldenRender)
-	dmSet(DataManager, plr, basePath .. ".DiamondRender", diamondRender)
-
-	if DataManager.SetValue then
-		DataManager:SetValue(plr, basePath .. ".Income", tonumber(info.Income) or 0)
-		DataManager:SetValue(plr, basePath .. ".Rarity", tostring(info.Rarity or "Common"))
-	end
+	BrainrotInstanceService.EnsureInventoryMetadata(plr, brainrotName, {
+		StorageName = brainrotName,
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = tostring(info.Rarity or "Common"),
+		Income = tonumber(info.Income) or 0,
+		Render = render,
+		GoldenRender = goldenRender,
+		DiamondRender = diamondRender,
+	})
+	DataManager:AdjustValue(plr, basePath .. ".Quantity", n)
+	BrainrotInstanceService.CreateInstances(plr, brainrotName, n, {
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = tostring(info.Rarity or "Common"),
+		Income = tonumber(info.Income) or 0,
+		Render = render,
+		GoldenRender = goldenRender,
+		DiamondRender = diamondRender,
+		Level = 1,
+		CurrentXP = 0,
+	})
 
 	return true
 end

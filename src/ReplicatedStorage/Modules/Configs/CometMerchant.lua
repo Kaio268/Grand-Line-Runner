@@ -2,7 +2,7 @@ local CometMerchant = {
 	
 	All_Things = {
 		["Potions.x2MoneyTime"] = {
-			Display_name = "x2 Money Boost",
+			Display_name = "x2 Beli Boost",
 			
 			Chance = 40,
 			Amount = math.random(120,300),
@@ -11,8 +11,8 @@ local CometMerchant = {
 			
 			Price = 125,
 			
-			Icon = "rbxassetid://102766068687661",
-			Desc = "Earn x2 Money and double your profits for a limited time!"
+			Icon = "rbxassetid://112694595954613",
+			Desc = "Earn x2 Beli and double your profits for a limited time!"
 		},
 		
 		["Potions.x15WalkSpeedTime"] = {
@@ -25,12 +25,12 @@ local CometMerchant = {
 
 			Price = 125,
 			
-			Icon = "rbxassetid://89427336475199",
+			Icon = "rbxassetid://96331945137652",
 			Desc = "Get x1.5 WalkSpeed and move faster for a limited time!"
 		},
 		
-		["leaderstats.Money"] = {
-			Display_name = "??? Money",
+		["leaderstats.Doubloons"] = {
+			Display_name = "??? Beli",
 
 			Chance = 40,
 			Amount = math.random(100,100000),
@@ -39,8 +39,8 @@ local CometMerchant = {
 
 			Price = 25,
 
-			Icon = "rbxassetid://134664902697800",
-			Desc = "Random amount of money, you can get over 100M!"
+			Icon = "rbxassetid://76300573750363",
+			Desc = "Random amount of Beli, you can get over 100M!"
 		},
 		
 		["Pot Hotspot"] = {
@@ -54,7 +54,7 @@ local CometMerchant = {
 			Price = 2500,
 
 			Icon = "rbxassetid://104255768072595",
-			Desc = "Generate insane amounts of money and skyrocket your progression!"
+			Desc = "Generate insane amounts of Beli and skyrocket your progression!"
 		},
 		
 		["Tirilikalika Tirilikalako"] = {
@@ -68,7 +68,7 @@ local CometMerchant = {
 			Price = 750,
 
 			Icon = "rbxassetid://136792506025468",
-			Desc = "Generate insane amounts of money and skyrocket your progression!"
+			Desc = "Generate insane amounts of Beli and skyrocket your progression!"
 		},
 		
 		["Rhino Toasterino"] = {
@@ -82,9 +82,10 @@ local CometMerchant = {
 			Price = 50,
 
 			Icon = "rbxassetid://92244593874593",
-			Desc = "Generate insane amounts of money and skyrocket your progression!"
+			Desc = "Generate insane amounts of Beli and skyrocket your progression!"
 		},
 	}
 }
 
 return CometMerchant
+

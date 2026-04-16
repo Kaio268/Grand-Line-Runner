@@ -1,19 +1,19 @@
 local Rewards = {
 
 	[1] = {
-		RewName = "+ 1000 Money",
-		Icon = "rbxassetid://134664902697800",
+		RewName = "+ 1000 Beli",
+		Icon = "rbxassetid://76300573750363",
 
 		Time               = 60,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards            = {
-			Money = { Chance = 100, Amount = 1000 },
+			Doubloons = { Chance = 100, Amount = 1000 },
 		},
 	},
 
 	[2] = {
-		RewName = "5 Min x2 Money",
-		Icon = "rbxassetid://102766068687661",
+		RewName = "5 Min x2 Beli",
+		Icon = "rbxassetid://112694595954613",
 
 		Time               = 120,
 		RewardTextTemplate = "You Get %d %s",
@@ -21,7 +21,7 @@ local Rewards = {
 			x2MoneyTime = { Chance = 100, Amount = 300 },
 		},
 	},
-	
+
 	[3] = {
 		RewName = "Balerina Capucina",
 		Icon = "rbxassetid://113452691198946",
@@ -34,19 +34,19 @@ local Rewards = {
 	},
 	
 	[4] = {
-		RewName = "+ 10000 Money",
-		Icon = "rbxassetid://134664902697800",
+		RewName = "+ 10000 Beli",
+		Icon = "rbxassetid://76300573750363",
 
 		Time               = 900,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards            = {
-			Money = { Chance = 100, Amount = 10000 },
+			Doubloons = { Chance = 100, Amount = 10000 },
 		},
 	},
 
 	[5] = {
 		RewName = "10 Min x1.5 Walkspeed",
-		Icon = "rbxassetid://89427336475199",
+		Icon = "rbxassetid://96331945137652",
 
 		Time               = 1800,
 		RewardTextTemplate = "You Get %d %s",
@@ -56,6 +56,17 @@ local Rewards = {
 	},
 	
 	[6] = {
+		RewName = "Bombardiro Crocodilo",
+		Icon = "rbxassetid://108324428541699",
+
+		Time               = 2100,
+		RewardTextTemplate = "You Get %d %s",
+		Rewards            = {
+			["Bombardiro Crocodilo"] = {Chance = 100, Amount  = 1, Brainrot = true},
+		},
+	},
+	
+	[7] = {
 		RewName = "Frigo Camelo",
 		Icon = "rbxassetid://84916034746691",
 
@@ -66,27 +77,18 @@ local Rewards = {
 		},
 	},
 	
-	[7] = {
-		RewName = "+ 100000 Money",
-		Icon = "rbxassetid://134664902697800",
+	[8] = {
+		RewName = "+ 100000 Beli",
+		Icon = "rbxassetid://76300573750363",
 
 		Time               = 3600,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards            = {
-			Money = { Chance = 100, Amount = 100000 },
+			Doubloons = { Chance = 100, Amount = 100000 },
 		},
 	},
 	
-	[8] = {
-		RewName = "Bombardiro Crocodilo",
-		Icon = "rbxassetid://108324428541699",
-
-		Time               = 5400,
-		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
-			["Bombardiro Crocodilo"] = {Chance = 100, Amount  = 1, Brainrot = true},
-		},
-	},
 }
 
 return Rewards
+

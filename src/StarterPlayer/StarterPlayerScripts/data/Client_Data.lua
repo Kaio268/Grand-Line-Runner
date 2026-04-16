@@ -6,7 +6,8 @@ local Player = game.Players.LocalPlayer
 
 --// Main
 local Data = {}
-Data.__index = Data; self = setmetatable({}, Data)
+Data.__index = Data
+local self = setmetatable({}, Data)
 
 Data.PlayerData = {}
 Data.IsReady = false

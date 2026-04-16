@@ -6,6 +6,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RNG = Random.new()
 
+local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
+
 local Colors = {
 	Color3.fromRGB(0, 34, 255),
 	Color3.fromRGB(170, 255, 0),
@@ -84,14 +86,14 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 	local template = popUpsFolder:WaitForChild("Template")
 
 	if activePopups[text] then
-		local data = activePopups[text]
-		local popup = data.popup
-		if data.removalInProgress then
-			if data.outTween then
-				-- Jeśli trwa tween wychodzący, anulujemy go (można ewentualnie stwierdzić, że usuniemy i utworzymy nowy)
-			end
-			popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
-			local uiScale = popup:FindFirstChildOfClass("UIScale")
+			local data = activePopups[text]
+			local popup = data.popup
+			if data.removalInProgress then
+				if data.outTween then
+					data.outTween:Cancel()
+				end
+				popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
+				local uiScale = popup:FindFirstChildOfClass("UIScale")
 			if uiScale then uiScale.Scale = 1 end
 			data.removalInProgress = false
 		end
@@ -324,6 +326,210 @@ end
 function PopUpModule:Local_ShowNotify(Name, Amount, Icon, Duration)
 	table.insert(notifyQueue, { Name = Name, Amount = Amount, Icon = Icon, Duration = Duration })
 	trySpawnNext()
+end
+
+local acknowledgeGui
+local acknowledgeOverlay
+local acknowledgePanel
+local acknowledgeAccent
+local acknowledgeTitle
+local acknowledgeBody
+local acknowledgeButton
+
+local function normalizeAcknowledgementBody(lines)
+	if typeof(lines) == "string" then
+		return tostring(lines)
+	end
+
+	if typeof(lines) ~= "table" then
+		return ""
+	end
+
+	local formatted = {}
+	for _, entry in ipairs(lines) do
+		local text = tostring(entry or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if text ~= "" then
+			formatted[#formatted + 1] = "• " .. text
+		end
+	end
+
+	return table.concat(formatted, "\n")
+end
+
+local function ensureAcknowledgeGui()
+	if acknowledgeGui and acknowledgeGui.Parent then
+		return
+	end
+
+	local player = Players.LocalPlayer
+	local playerGui = player:WaitForChild("PlayerGui")
+
+	acknowledgeGui = Instance.new("ScreenGui")
+	acknowledgeGui.Name = "PersistentPopupPrompt"
+	acknowledgeGui.ResetOnSpawn = false
+	acknowledgeGui.IgnoreGuiInset = true
+	acknowledgeGui.DisplayOrder = 75
+	acknowledgeGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	acknowledgeGui.Enabled = false
+	acknowledgeGui.Parent = playerGui
+
+	acknowledgeOverlay = Instance.new("TextButton")
+	acknowledgeOverlay.Name = "Overlay"
+	acknowledgeOverlay.AutoButtonColor = false
+	acknowledgeOverlay.Active = true
+	acknowledgeOverlay.Text = ""
+	acknowledgeOverlay.BackgroundColor3 = Color3.fromRGB(4, 7, 14)
+	acknowledgeOverlay.BackgroundTransparency = 0.38
+	acknowledgeOverlay.BorderSizePixel = 0
+	acknowledgeOverlay.Size = UDim2.fromScale(1, 1)
+	acknowledgeOverlay.ZIndex = 74
+	acknowledgeOverlay.Parent = acknowledgeGui
+
+	acknowledgePanel = Instance.new("Frame")
+	acknowledgePanel.Name = "Panel"
+	acknowledgePanel.AnchorPoint = Vector2.new(0.5, 0.5)
+	acknowledgePanel.Position = UDim2.fromScale(0.5, 0.5)
+	acknowledgePanel.Size = UDim2.fromOffset(560, 336)
+	acknowledgePanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+	acknowledgePanel.BorderSizePixel = 0
+	acknowledgePanel.ZIndex = 80
+	acknowledgePanel.Parent = acknowledgeGui
+
+	local panelCorner = Instance.new("UICorner")
+	panelCorner.CornerRadius = UDim.new(0, 16)
+	panelCorner.Parent = acknowledgePanel
+
+	local panelStroke = Instance.new("UIStroke")
+	panelStroke.Color = Color3.fromRGB(104, 214, 255)
+	panelStroke.Transparency = 0.18
+	panelStroke.Thickness = 1.5
+	panelStroke.Parent = acknowledgePanel
+
+	local panelGradient = Instance.new("UIGradient")
+	panelGradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(23, 26, 35)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(11, 14, 22)),
+	})
+	panelGradient.Rotation = 90
+	panelGradient.Parent = acknowledgePanel
+
+	local padding = Instance.new("UIPadding")
+	padding.PaddingTop = UDim.new(0, 18)
+	padding.PaddingBottom = UDim.new(0, 18)
+	padding.PaddingLeft = UDim.new(0, 20)
+	padding.PaddingRight = UDim.new(0, 20)
+	padding.Parent = acknowledgePanel
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Vertical
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 10)
+	layout.Parent = acknowledgePanel
+
+	acknowledgeAccent = Instance.new("TextLabel")
+	acknowledgeAccent.Name = "Accent"
+	acknowledgeAccent.LayoutOrder = 1
+	acknowledgeAccent.BackgroundTransparency = 1
+	acknowledgeAccent.Size = UDim2.new(1, 0, 0, 20)
+	acknowledgeAccent.Font = Enum.Font.GothamBold
+	acknowledgeAccent.Text = "UPGRADE COMPLETE"
+	acknowledgeAccent.TextColor3 = Color3.fromRGB(116, 245, 183)
+	acknowledgeAccent.TextSize = 15
+	acknowledgeAccent.TextXAlignment = Enum.TextXAlignment.Left
+	acknowledgeAccent.ZIndex = 81
+	acknowledgeAccent.Parent = acknowledgePanel
+
+	acknowledgeTitle = Instance.new("TextLabel")
+	acknowledgeTitle.Name = "Title"
+	acknowledgeTitle.LayoutOrder = 2
+	acknowledgeTitle.BackgroundTransparency = 1
+	acknowledgeTitle.Size = UDim2.new(1, 0, 0, 34)
+	acknowledgeTitle.Font = Enum.Font.GothamBold
+	acknowledgeTitle.Text = "Update"
+	acknowledgeTitle.TextColor3 = Color3.fromRGB(245, 246, 255)
+	acknowledgeTitle.TextSize = 28
+	acknowledgeTitle.TextWrapped = true
+	acknowledgeTitle.TextXAlignment = Enum.TextXAlignment.Left
+	acknowledgeTitle.ZIndex = 81
+	acknowledgeTitle.Parent = acknowledgePanel
+
+	acknowledgeBody = Instance.new("TextLabel")
+	acknowledgeBody.Name = "Body"
+	acknowledgeBody.LayoutOrder = 3
+	acknowledgeBody.BackgroundTransparency = 1
+	acknowledgeBody.Size = UDim2.new(1, 0, 0, 150)
+	acknowledgeBody.Font = Enum.Font.Gotham
+	acknowledgeBody.Text = ""
+	acknowledgeBody.TextColor3 = Color3.fromRGB(225, 230, 241)
+	acknowledgeBody.TextSize = 19
+	acknowledgeBody.TextWrapped = true
+	acknowledgeBody.TextXAlignment = Enum.TextXAlignment.Left
+	acknowledgeBody.TextYAlignment = Enum.TextYAlignment.Top
+	acknowledgeBody.ZIndex = 81
+	acknowledgeBody.Parent = acknowledgePanel
+
+	acknowledgeButton = Instance.new("TextButton")
+	acknowledgeButton.Name = "Okay"
+	acknowledgeButton.LayoutOrder = 4
+	acknowledgeButton.AnchorPoint = Vector2.new(0.5, 0)
+	acknowledgeButton.Position = UDim2.fromScale(0.5, 0)
+	acknowledgeButton.Size = UDim2.fromOffset(184, 46)
+	acknowledgeButton.BackgroundColor3 = Color3.fromRGB(90, 214, 151)
+	acknowledgeButton.BorderSizePixel = 0
+	acknowledgeButton.Font = Enum.Font.GothamBold
+	acknowledgeButton.Text = "Okay"
+	acknowledgeButton.TextColor3 = Color3.fromRGB(13, 21, 20)
+	acknowledgeButton.TextSize = 20
+	acknowledgeButton.ZIndex = 82
+	acknowledgeButton.Parent = acknowledgePanel
+
+	local buttonCorner = Instance.new("UICorner")
+	buttonCorner.CornerRadius = UDim.new(0, 12)
+	buttonCorner.Parent = acknowledgeButton
+
+	acknowledgeButton.MouseButton1Click:Connect(function()
+		if acknowledgeGui then
+			acknowledgeGui.Enabled = false
+		end
+	end)
+end
+
+function PopUpModule:Local_ShowAcknowledgement(options)
+	options = options or {}
+	ensureAcknowledgeGui()
+
+	local title = tostring(options.Title or options.title or "Notice")
+	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")
+	local buttonText = tostring(options.ButtonText or options.buttonText or "Okay")
+	local bodyText = normalizeAcknowledgementBody(options.Lines or options.lines or options.Body or options.body)
+
+	if bodyText == "" then
+		bodyText = "No details available."
+	end
+
+	acknowledgeAccent.Text = accentText
+	acknowledgeAccent.TextColor3 = options.AccentColor or Color3.fromRGB(116, 245, 183)
+	acknowledgeTitle.Text = title
+	acknowledgeTitle.TextColor3 = options.TitleColor or Color3.fromRGB(245, 246, 255)
+	acknowledgeBody.Text = bodyText
+	acknowledgeBody.TextColor3 = options.BodyColor or Color3.fromRGB(225, 230, 241)
+	acknowledgeButton.Text = buttonText
+	acknowledgeButton.BackgroundColor3 = options.ButtonColor or Color3.fromRGB(90, 214, 151)
+	acknowledgeButton.TextColor3 = options.ButtonTextColor or Color3.fromRGB(13, 21, 20)
+
+	acknowledgeGui.Enabled = true
+	playSound("Reward")
+end
+
+function PopUpModule:Local_ShowChestOpenResult(openResult)
+	local acknowledgement = ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
+	self:Local_ShowAcknowledgement(acknowledgement)
+
+	local confettiCount = ChestOpenResultFormatter.GetCelebrationCount(openResult)
+	if confettiCount > 0 then
+		self:Local_SpawnConfetti(confettiCount)
+	end
 end
 
 local isPromptActive = false
@@ -789,6 +995,10 @@ end
 
 function PopUpModule:Server_ShowNotify(player, RewardName, Amount, Icon, Duration)
 	PopUpEvent:FireClient(player, "ShowNotify",RewardName , Amount, Icon, Duration)
+end
+
+function PopUpModule:Server_ShowChestOpenResult(player, openResult)
+	PopUpEvent:FireClient(player, "ShowChestOpenResult", openResult)
 end
 
 function PopUpModule:Server_PromptGamepass(player, id)

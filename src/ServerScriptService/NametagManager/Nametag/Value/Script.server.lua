@@ -6,6 +6,7 @@ local label1 = script.Parent
 local valueTwo = label1:FindFirstChild("ValueTwo")
 
 local sh = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local character = script:FindFirstAncestorOfClass("Model")
 
@@ -16,11 +17,14 @@ while not player do
 	player = character and Players:GetPlayerFromCharacter(character)
 end
 
-local coins = player:WaitForChild("leaderstats"):WaitForChild("Money")
+local coins = CurrencyUtil.waitForPrimaryValueObject(player, 10)
+if not coins then
+	error("Primary currency value object was not found for nametag value")
+end
 
 local function setMoneyText(num)
 	num = math.floor(num)
-	local txt = "$" .. sh.roundNumber(num)
+	local txt = sh.roundNumber(num) .. CurrencyUtil.getCompactSuffix()
 
 	if label1:IsA("TextLabel") or label1:IsA("TextButton") then
 		label1.Text = txt

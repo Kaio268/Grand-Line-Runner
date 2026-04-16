@@ -3,9 +3,19 @@ local Players = game:GetService("Players")
 
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
 local player = Players.LocalPlayer
-local npc = workspace:WaitForChild("Map"):WaitForChild("MainMap"):WaitForChild("Normal")
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot" },
+	nil,
+	{
+		warn = true,
+		context = "SellNpcDialog",
+	}
+)
+local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Normal")
 local prompt = npc:WaitForChild("ProximityPrompt")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -113,7 +123,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 	if responseNum == 1 then
 		local total = getTotalInventorySellValue()
 		SellEvent:FireServer("ALL")
-		dialogObject:hideGui(("Let me count your loot... $%s"):format(moneyStr(total)))
+		dialogObject:hideGui(("Let me count your loot... %s%s"):format(moneyStr(total), CurrencyUtil.getCompactSuffix()))
 		playNpcSellEffects()
 	elseif responseNum == 2 then
 		local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
@@ -130,7 +140,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 		end
 
 		SellEvent:FireServer("SINGLE", tool.Name)
-		dialogObject:hideGui(("%s sold for $%s"):format(name, moneyStr(price)))
+		dialogObject:hideGui(("%s sold for %s%s"):format(name, moneyStr(price), CurrencyUtil.getCompactSuffix()))
 		playNpcSellEffects()
 	elseif responseNum == 3 then
 		local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
@@ -143,7 +153,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 		local price = getSellPrice(name)
 
 		if price and price > 0 then
-			dialogObject:hideGui(("%s can be sold for $%s (15 sec income)"):format(name, moneyStr(price)))
+			dialogObject:hideGui(("%s can be sold for %s%s (15 sec income)"):format(name, moneyStr(price), CurrencyUtil.getCompactSuffix()))
 		else
 			dialogObject:hideGui("This item cannot be sold.")
 		end

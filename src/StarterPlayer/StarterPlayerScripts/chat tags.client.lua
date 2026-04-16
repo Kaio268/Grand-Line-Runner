@@ -1,6 +1,9 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 local RunService = game:GetService("RunService")
+
+local Titles = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Titles"))
 
 local Config = {
 	GROUP_ID = 17179624,
@@ -154,6 +157,32 @@ function TagManager:_groupTag(player: Player, timeNow: number): (string?, boolea
 	return buildStyledTag(role, style, timeNow), animated
 end
 
+function TagManager:_equippedTitleTag(player: Player, timeNow: number): (string?, boolean)
+	local equippedTitleId = player:GetAttribute("EquippedTitleId")
+	if typeof(equippedTitleId) ~= "string" or equippedTitleId == "" then
+		return nil, false
+	end
+
+	local titleDefinition = Titles.Get(equippedTitleId)
+	if typeof(titleDefinition) ~= "table" then
+		return nil, false
+	end
+
+	local displayName = tostring(titleDefinition.DisplayName or equippedTitleId)
+	if displayName == "" then
+		return nil, false
+	end
+
+	local style = titleDefinition.ChatStyle or {
+		color = Color3.fromRGB(255, 218, 106),
+		bold = true,
+		brackets = true,
+		spaceAfter = true,
+	}
+	local animated = style and style.animated and style.gradient ~= nil
+	return buildStyledTag(displayName, style, timeNow), animated
+end
+
 function TagManager:GetPrefix(player: Player, timeNow: number): (string, boolean)
 	if not player then return "", false end
 
@@ -164,6 +193,12 @@ function TagManager:GetPrefix(player: Player, timeNow: number): (string, boolean
 	if g then
 		table.insert(parts, g)
 		if anim then hasAnimated = true end
+	end
+
+	local titleTag, titleAnimated = self:_equippedTitleTag(player, timeNow)
+	if titleTag then
+		table.insert(parts, titleTag)
+		if titleAnimated then hasAnimated = true end
 	end
 
 	for _, def in ipairs(self._defs) do

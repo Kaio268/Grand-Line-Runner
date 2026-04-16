@@ -3,7 +3,9 @@ local Players = game:GetService("Players")
 
 local Types = require(ReplicatedStorage.Modules.Types)
 local addbrairntos = require(script.Parent.Parent.Parent.Modules.AddBrainrot)
+local BrainrotInstanceService = require(script.Parent.Parent.Parent.Modules.BrainrotInstanceService)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local PlotSystem = workspace:WaitForChild("PlotSystem")
 local PlotsFolder = PlotSystem:WaitForChild("Plots")
@@ -62,12 +64,14 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 	local ownerUserId = buyer:GetAttribute("StealOwnerUserId")
 	local standName = buyer:GetAttribute("StealStandName")
 	local brainrotName = buyer:GetAttribute("StealBrainrotName")
+	local brainrotInstanceId = buyer:GetAttribute("StealBrainrotInstanceId")
 	local expectedId = buyer:GetAttribute("StealProductId")
 	local ts = buyer:GetAttribute("StealTime")
 
 	buyer:SetAttribute("StealOwnerUserId", nil)
 	buyer:SetAttribute("StealStandName", nil)
 	buyer:SetAttribute("StealBrainrotName", nil)
+	buyer:SetAttribute("StealBrainrotInstanceId", nil)
 	buyer:SetAttribute("StealProductId", nil)
 	buyer:SetAttribute("StealTime", nil)
 
@@ -96,8 +100,17 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 	if current ~= brainrotName then
 		return
 	end
+	if typeof(brainrotInstanceId) == "string" and brainrotInstanceId ~= "" then
+		local currentInstanceId = BrainrotInstanceService.GetStandInstanceId(owner, standName)
+		if currentInstanceId ~= "" and currentInstanceId ~= brainrotInstanceId then
+			return
+		end
+	end
 
-	DataManager:SetValue(owner, "IncomeBrainrots." .. standName .. ".BrainrotName", "")
+	local transferredInstanceId = BrainrotInstanceService.TransferStandInstance(owner, buyer, standName)
+	if not transferredInstanceId then
+		return
+	end
 	DataManager:SetValue(owner, "IncomeBrainrots." .. standName .. ".IncomeToCollect", 0)
 
 	local plot = findPlotForUserId(ownerUserId)
@@ -120,15 +133,14 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 	end
 
 	ensureInventorySlot(buyer, brainrotName, DataManager)
-	DataManager:AddValue(buyer, "Inventory." .. brainrotName .. ".Quantity", 1)
 end
 
 local handlers = {
 	[3509346360] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
 		addbrairntos:AddBrainrot(player, "67", 1)
 		addbrairntos:AddBrainrot(player, "Dragon Cannelloni", 1)
-		DataManager:AddValue(player, "leaderstats.Money", 1_000_000_000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 1_000_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000_000)
 		DataManager:SetValue(player, "Packs.Super OP Starter Pack", true)
 	end,
 
@@ -138,8 +150,8 @@ local handlers = {
 
 	[3509346182] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
 		addbrairntos:AddBrainrot(player, "Tralalero Tralala", 1)
-		DataManager:AddValue(player, "leaderstats.Money", 1_000_000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 1_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000)
 		if DataManager:GetValue(player, "Gears.Lava SpeedCoil") then
 			DataManager:SetValue(player, "Gears.Lava SpeedCoil", true)
 		else
@@ -158,14 +170,14 @@ local handlers = {
 			DataManager:AddValue(player, "Gears", { ["Diamond SpeedCoil"] = true })
 		end
 
-		DataManager:AddValue(player, "leaderstats.Money", 100_000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 100_000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 100_000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 100_000)
 	end,
 
 	[3509345784] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
 		addbrairntos:AddBrainrot(player, "Odin Din Din Dun", 1)
-		DataManager:AddValue(player, "leaderstats.Money", 1000)
-		DataManager:AddValue(player, "TotalStats.TotalMoney", 1000)
+		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1000)
+		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1000)
 		DataManager:SetValue(player, "Packs.Starter Pack", true)
 
 		if DataManager:GetValue(player, "Gears.SpeedCoil") then

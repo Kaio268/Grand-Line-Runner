@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+end
+
 local BrainrotVariants = {}
 
 BrainrotVariants.Order = { "Normal", "Golden", "Diamond" }

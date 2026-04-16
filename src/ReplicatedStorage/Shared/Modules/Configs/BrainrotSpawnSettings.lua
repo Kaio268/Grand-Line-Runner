@@ -1,3 +1,7 @@
+do
+	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotSpawnSettings"))
+end
+
 return {
 	MaxPerPart = 7,
 	PlayerSpawnRadius = 500,

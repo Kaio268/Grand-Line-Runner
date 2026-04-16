@@ -3,18 +3,18 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local Remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStore")
 
 local function getMoney(player)
-	local v = DataManager:GetValue(player, "leaderstats.Money")
+	local v = DataManager:GetValue(player, CurrencyUtil.getPrimaryPath())
 	if typeof(v) == "number" then
 		return v
 	end
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local money = leaderstats and leaderstats:FindFirstChild("Money")
-	if money and money:IsA("NumberValue") then
-		return money.Value
+	local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
+	if moneyValue then
+		return moneyValue.Value
 	end
 	return 0
 end
@@ -111,7 +111,7 @@ Remote.OnServerEvent:Connect(function(player, gearName)
 		if getMoney(player) < price then
 			return
 		end
-		DataManager:AdjustValue(player, "leaderstats.Money", -price)
+		DataManager:AdjustValue(player, CurrencyUtil.getPrimaryPath(), -price)
 		DataManager:AddValue(player, "Gears", { [tostring(gearName)] = false })
 		return
 	end

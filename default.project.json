@@ -9,6 +9,9 @@
     },
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
+      "Packages": {
+        "$path": "Packages"
+      },
       "$ignoreUnknownInstances": true,
       "$path": "src/ReplicatedStorage"
     },

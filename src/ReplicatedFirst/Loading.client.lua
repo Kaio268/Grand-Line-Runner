@@ -10,7 +10,9 @@ local StarterPlayer = game:GetService("StarterPlayer")
 
 local function ensureUIScale(guiObject: Instance): UIScale
 	local existing = guiObject:FindFirstChildOfClass("UIScale")
-	if existing then return existing end
+	if existing then
+		return existing
+	end
 	local s = Instance.new("UIScale")
 	s.Scale = 1
 	s.Parent = guiObject
@@ -31,7 +33,9 @@ local playerGui = player:WaitForChild("PlayerGui")
 local template = script:FindFirstChild("LoadingScreen") or ReplicatedFirst:WaitForChild("LoadingScreen")
 
 local old = playerGui:FindFirstChild("LoadingScreen")
-if old then old:Destroy() end
+if old then
+	old:Destroy()
+end
 
 local screenGui = (template :: ScreenGui):Clone()
 screenGui.Name = "LoadingScreen"
@@ -92,7 +96,9 @@ do
 end
 
 local function setBarProgress(p: number)
-	if not barMain or not barMainY or not isAlive(barMain) then return end
+	if not barMain or not barMainY or not isAlive(barMain) then
+		return
+	end
 	p = math.clamp(p, 0, 1)
 	local y = barMainY :: UDim
 	TweenService:Create(barMain :: GuiObject, TweenInfo.new(0.14, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), {
@@ -108,7 +114,9 @@ do
 		local basePos = iconGui.Position
 		local baseSize = iconGui.Size
 		RunService.RenderStepped:Connect(function()
-			if not isAlive(iconGui) then return end
+			if not isAlive(iconGui) then
+				return
+			end
 			local t = os.clock()
 			local sine = math.sin(t * math.pi * 2 * ICON_FLOAT_SPEED)
 			local n = math.noise(t * ICON_NOISE_SPEED, 0, 0)
@@ -172,7 +180,9 @@ do
 		label.TextTransparency = 0
 		local base = (label.Text ~= "" and label.Text or "Loading")
 		base = base:gsub("%.+$", "")
-		if base == "" then base = "Loading" end
+		if base == "" then
+			base = "Loading"
+		end
 		local labelScale = ensureUIScale(label)
 		local info = TweenInfo.new(LOADING_BREATHE_TIME, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true, 0)
 		labelScale.Scale = LOADING_BREATHE_MIN
@@ -183,7 +193,9 @@ do
 			while isAlive(label) do
 				label.Text = states[i]
 				i += 1
-				if i > #states then i = 1 end
+				if i > #states then
+					i = 1
+				end
 				task.wait(LOADING_TEXT_DOT_INTERVAL)
 			end
 		end)
@@ -200,9 +212,13 @@ do
 		local rng = Random.new()
 		local lastIndex = -1
 		local function pickIndex(): number
-			if #RANDOM_MESSAGES <= 1 then return 1 end
+			if #RANDOM_MESSAGES <= 1 then
+				return 1
+			end
 			local idx = rng:NextInteger(1, #RANDOM_MESSAGES)
-			if idx == lastIndex then idx = (idx % #RANDOM_MESSAGES) + 1 end
+			if idx == lastIndex then
+				idx = (idx % #RANDOM_MESSAGES) + 1
+			end
 			lastIndex = idx
 			return idx
 		end
@@ -212,14 +228,18 @@ do
 		task.spawn(function()
 			while isAlive(label) do
 				task.wait(RANDOM_LABEL_INTERVAL)
-				if not isAlive(label) then break end
+				if not isAlive(label) then
+					break
+				end
 				local outInfo = TweenInfo.new(RANDOM_LABEL_FADE_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
 				local twOut = TweenService:Create(label, outInfo, { TextTransparency = 1 })
 				local twOutScale = TweenService:Create(scale, outInfo, { Scale = 0.985 })
 				twOut:Play()
 				twOutScale:Play()
 				twOut.Completed:Wait()
-				if not isAlive(label) then break end
+				if not isAlive(label) then
+					break
+				end
 				if #RANDOM_MESSAGES > 0 then
 					label.Text = RANDOM_MESSAGES[pickIndex()]
 				end
@@ -229,7 +249,9 @@ do
 				twIn:Play()
 				twPop:Play()
 				twIn.Completed:Wait()
-				if not isAlive(label) then break end
+				if not isAlive(label) then
+					break
+				end
 				local settleInfo = TweenInfo.new(0.22, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 				TweenService:Create(scale, settleInfo, { Scale = 1 }):Play()
 			end
@@ -238,7 +260,9 @@ do
 end
 
 local function fadeOutAndDestroy()
-	if not isAlive(screenGui) then return end
+	if not isAlive(screenGui) then
+		return
+	end
 	local tweens = {}
 	local fadeInfo = TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut)
 	local shrinkInfo = TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.In)
@@ -256,7 +280,9 @@ local function fadeOutAndDestroy()
 	table.insert(tweens, TweenService:Create(rootScale, shrinkInfo, { Scale = 0.9 }))
 	for _, tw in ipairs(tweens) do tw:Play() end
 	task.wait(0.68)
-	if isAlive(screenGui) then screenGui:Destroy() end
+	if isAlive(screenGui) then
+		screenGui:Destroy()
+	end
 end
 
 task.spawn(function()
@@ -272,7 +298,9 @@ task.spawn(function()
 		for _, inst in ipairs(container:GetDescendants()) do
 			if classes[inst.ClassName] then
 				list[#list + 1] = inst
-				if #list >= cap then return end
+				if #list >= cap then
+					return
+				end
 			end
 		end
 	end
@@ -297,7 +325,9 @@ task.spawn(function()
 				preloadProgress = math.clamp(loaded / total, 0, 1)
 			end)
 		end)
-		if not ok then preloadProgress = 1 end
+		if not ok then
+			preloadProgress = 1
+		end
 		preloadDone = true
 	end)
 

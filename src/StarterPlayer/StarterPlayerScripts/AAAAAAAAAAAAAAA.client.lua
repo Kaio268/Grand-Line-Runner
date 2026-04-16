@@ -4,41 +4,190 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local DEBUG_TRACE = RunService:IsStudio()
+local seenWaveLogKeys = {}
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if not instance then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function formatCFrame(value)
+	if typeof(value) ~= "CFrame" then
+		return tostring(value)
+	end
+
+	return string.format(
+		"pos=%s look=%s",
+		formatVector3(value.Position),
+		formatVector3(value.LookVector)
+	)
+end
+
+local function mapTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[MAP TRACE] " .. message, ...))
+end
+
+local function waveTrace(message, ...)
+	if not DEBUG_TRACE then
+		return
+	end
+
+	print(string.format("[WAVE TRACE] " .. message, ...))
+end
+
+local function waveWarn(message, ...)
+	warn(string.format("[WAVE WARN] " .. message, ...))
+end
+
+local function waveError(message, ...)
+	warn(string.format("[WAVE ERROR] " .. message, ...))
+end
+
+local function waveWarnOnce(key, message, ...)
+	if seenWaveLogKeys[key] then
+		return
+	end
+
+	seenWaveLogKeys[key] = true
+	waveWarn(message, ...)
+end
+
+local function waveTry(context, callback)
+	local ok, result = xpcall(callback, function(err)
+		return debug.traceback(tostring(err), 2)
+	end)
+
+	if not ok then
+		waveError("context=%s error=%s", tostring(context), tostring(result))
+	end
+
+	return ok, result
+end
 
 local WavesConfig = require(
-	ReplicatedStorage:WaitForChild("Modules")
+	Modules
 		:WaitForChild("Configs")
 		:WaitForChild("LavaWaves")
 )
 
 local BrainrotsConfig = require(
-	ReplicatedStorage:WaitForChild("Modules")
+	Modules
 		:WaitForChild("Configs")
 		:WaitForChild("Brainrots")
 )
 local HazardRuntime = require(
-	ReplicatedStorage:WaitForChild("Modules")
+	Modules
 		:WaitForChild("DevilFruits")
 		:WaitForChild("HazardRuntime")
 )
+local ProtectionRuntime = require(
+	Modules
+		:WaitForChild("DevilFruits")
+		:WaitForChild("ProtectionRuntime")
+)
 
-local WavesFolder = ReplicatedStorage:WaitForChild("Waves")
+waveTrace("startup awaiting ReplicatedStorage.Waves")
+local WavesFolder = ReplicatedStorage:WaitForChild("Waves", 15)
+if not WavesFolder then
+	waveWarn("startup waitForChild timed out path=ReplicatedStorage.Waves; continuing to wait indefinitely")
+	WavesFolder = ReplicatedStorage:WaitForChild("Waves")
+end
+waveTrace("startup resolvedWavesFolder path=%s", formatInstancePath(WavesFolder))
 
-local map = workspace:WaitForChild("Map")
-local waveFolder = map:WaitForChild("WaveFolder")
-local startPart = waveFolder:WaitForChild("Start")
-local endPart = waveFolder:WaitForChild("End")
+waveTrace("startup awaiting map refs required=MapRoot,WaveFolder,WaveStart,WaveEnd")
+local resolvedMapRefs
+do
+	local ok, result = waveTry("startup map resolution", function()
+		return MapResolver.WaitForRefs(
+			{ "MapRoot", "WaveFolder", "WaveStart", "WaveEnd" },
+			nil,
+			{
+				warn = true,
+				context = "WaveClient",
+			}
+		)
+	end)
 
-local clientWavesFolder = waveFolder:FindFirstChild("ClientWaves")
+	if not ok then
+		error(result, 0)
+	end
+
+	resolvedMapRefs = result
+end
+local waveFolder = resolvedMapRefs.WaveFolder
+local startPart = resolvedMapRefs.WaveStart
+local endPart = resolvedMapRefs.WaveEnd
+waveTrace(
+	"startup mapResolved requestedMap=%s activeMap=%s mapPath=%s waveFolder=%s startPart=%s startPos=%s endPart=%s endPos=%s",
+	tostring(resolvedMapRefs.RequestedMapName),
+	tostring(resolvedMapRefs.ActiveMapName),
+	formatInstancePath(resolvedMapRefs.MapRoot),
+	formatInstancePath(waveFolder),
+	formatInstancePath(startPart),
+	formatVector3(startPart and startPart.Position or nil),
+	formatInstancePath(endPart),
+	formatVector3(endPart and endPart.Position or nil)
+)
+mapTrace(
+	"WaveClient requestedMap=%s activeMap=%s mapPath=%s waveFolder=%s start=%s startPos=%s end=%s endPos=%s",
+	tostring(resolvedMapRefs.RequestedMapName),
+	tostring(resolvedMapRefs.ActiveMapName),
+	formatInstancePath(resolvedMapRefs.MapRoot),
+	formatInstancePath(waveFolder),
+	formatInstancePath(startPart),
+	formatVector3(startPart and startPart.Position or nil),
+	formatInstancePath(endPart),
+	formatVector3(endPart and endPart.Position or nil)
+)
+
+local sharedHazardsFolder = waveFolder:FindFirstChild("Hazards") or waveFolder:WaitForChild("Hazards", 15)
+local useSharedHazards = sharedHazardsFolder ~= nil
+local clientWavesFolder = sharedHazardsFolder or resolvedMapRefs.ClientWaves or waveFolder:FindFirstChild("ClientWaves")
+local clientWavesFolderCreated = false
 if not clientWavesFolder then
+	waveWarn(
+		"startup hazards folder missing under waveFolder=%s; falling back to a local ClientWaves folder",
+		formatInstancePath(waveFolder)
+	)
 	clientWavesFolder = Instance.new("Folder")
 	clientWavesFolder.Name = "ClientWaves"
 	clientWavesFolder.Parent = waveFolder
+	clientWavesFolderCreated = true
 end
+waveTrace(
+	"startup trackedHazardsFolder path=%s useSharedHazards=%s created=%s",
+	formatInstancePath(clientWavesFolder),
+	tostring(useSharedHazards),
+	tostring(clientWavesFolderCreated)
+)
 
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 local KillMeEvent = Remotes and Remotes:FindFirstChild("KillMe")
 local ProgressBarSync = Remotes and Remotes:FindFirstChild("ProgressBarSync")
+waveTrace(
+	"startup remotes remotesFolder=%s killMe=%s progressBarSync=%s",
+	formatInstancePath(Remotes),
+	formatInstancePath(KillMeEvent),
+	formatInstancePath(ProgressBarSync)
+)
 
 local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 local hud = playerGui:WaitForChild("HUD")
@@ -52,6 +201,7 @@ disasterTemplate.Visible = false
 
 local pfpClones = {}
 local waveIndicators = {}
+local chestIndicators = {}
 
 local function getImageNode(obj)
 	if not obj then return nil end
@@ -227,8 +377,78 @@ local function getWaveWorldPos(obj)
 	return nil
 end
 
+local function getRewardWorldPos(obj)
+	if not obj then
+		return nil
+	end
+
+	if obj:IsA("Model") then
+		local primary = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
+		if primary then
+			return primary.Position
+		end
+		return obj:GetPivot().Position
+	end
+
+	if obj:IsA("BasePart") then
+		return obj.Position
+	end
+
+	return nil
+end
+
 local disasterYScale = disasterTemplate.Position.Y.Scale
 local disasterYOffset = disasterTemplate.Position.Y.Offset
+
+local function createChestIndicator(rewardObject)
+	local indicator = Instance.new("TextLabel")
+	indicator.Name = "ChestIndicator_" .. rewardObject.Name
+	indicator.AnchorPoint = Vector2.new(0.5, 0.5)
+	indicator.AutomaticSize = Enum.AutomaticSize.None
+	indicator.BackgroundColor3 = Color3.fromRGB(184, 126, 56)
+	indicator.BorderSizePixel = 0
+	indicator.Size = UDim2.fromOffset(74, 26)
+	indicator.Text = "CHEST"
+	indicator.TextColor3 = Color3.fromRGB(255, 247, 198)
+	indicator.TextScaled = true
+	indicator.TextStrokeTransparency = 0
+	indicator.Font = Enum.Font.GothamBlack
+	indicator.Visible = true
+	indicator.ZIndex = 30
+	indicator.Parent = progressBar
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = indicator
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(59, 34, 8)
+	stroke.Thickness = 2
+	stroke.Parent = indicator
+
+	return indicator
+end
+
+local function ensureChestIndicator(rewardObject)
+	if chestIndicators[rewardObject] and chestIndicators[rewardObject].Parent then
+		return chestIndicators[rewardObject]
+	end
+
+	local indicator = createChestIndicator(rewardObject)
+	chestIndicators[rewardObject] = indicator
+	return indicator
+end
+
+local function removeUnusedChestIndicators(validMap)
+	for rewardObject, gui in pairs(chestIndicators) do
+		if not validMap[rewardObject] then
+			if gui and gui.Parent then
+				gui:Destroy()
+			end
+			chestIndicators[rewardObject] = nil
+		end
+	end
+end
 
 local function ensureWaveIndicator(waveObj)
 	if waveIndicators[waveObj] and waveIndicators[waveObj].Parent then
@@ -252,11 +472,27 @@ local function removeWaveIndicator(waveObj)
 end
 
 clientWavesFolder.ChildAdded:Connect(function(child)
-	ensureWaveIndicator(child)
+	waveTrace(
+		"clientWavesFolder childAdded name=%s path=%s class=%s",
+		tostring(child.Name),
+		formatInstancePath(child),
+		tostring(child.ClassName)
+	)
+	waveTry("clientWavesFolder.ChildAdded", function()
+		ensureWaveIndicator(child)
+	end)
 end)
 
 clientWavesFolder.ChildRemoved:Connect(function(child)
-	removeWaveIndicator(child)
+	waveTrace(
+		"clientWavesFolder childRemoved name=%s path=%s class=%s",
+		tostring(child.Name),
+		formatInstancePath(child),
+		tostring(child.ClassName)
+	)
+	waveTry("clientWavesFolder.ChildRemoved", function()
+		removeWaveIndicator(child)
+	end)
 end)
 
 local function updateWaveIndicators()
@@ -276,18 +512,48 @@ local function updateWaveIndicators()
 	end
 end
 
+local function updateChestIndicators()
+	local valid = {}
+	local controllerFolder = waveFolder:FindFirstChild("GrandLineRush")
+	local rewardFolder = controllerFolder and controllerFolder:FindFirstChild("RunRewards")
+	if not rewardFolder then
+		removeUnusedChestIndicators(valid)
+		return
+	end
+
+	for _, rewardObject in ipairs(rewardFolder:GetChildren()) do
+		if rewardObject:GetAttribute("RewardType") == "Chest" then
+			local pos = getRewardWorldPos(rewardObject)
+			if pos then
+				local indicator = ensureChestIndicator(rewardObject)
+				local a = getAlphaOnLine(pos)
+				indicator.Position = UDim2.new(alphaToXScale(a), 0, 0.28, 0)
+				valid[rewardObject] = true
+			end
+		end
+	end
+
+	removeUnusedChestIndicators(valid)
+end
+
 if ProgressBarSync and ProgressBarSync:IsA("RemoteEvent") then
 	ProgressBarSync.OnClientEvent:Connect(function(_, payload)
-		local valid = {}
-		for _, info in ipairs(payload) do
-			local uid = info.UserId
-			valid[uid] = true
-			ensurePfp(uid)
-		end
-		removeUnusedPfps(valid)
+		waveTry("ProgressBarSync.OnClientEvent", function()
+			local valid = {}
+			for _, info in ipairs(payload) do
+				local uid = info.UserId
+				valid[uid] = true
+				ensurePfp(uid)
+			end
+			removeUnusedPfps(valid)
+		end)
 	end)
 	ProgressBarSync:FireServer("Request")
 else
+	waveWarnOnce(
+		"progress_bar_sync_missing",
+		"startup ProgressBarSync remote missing; falling back to current Players list"
+	)
 	for _, plr in ipairs(Players:GetPlayers()) do
 		ensurePfp(plr.UserId)
 	end
@@ -303,14 +569,51 @@ local function getTemplate(name)
 end
 
 local entries = {}
-for waveName, info in pairs(WavesConfig) do
-	local template = getTemplate(waveName)
-	if template then
-		table.insert(entries, {
-			Name = waveName,
-			Info = info,
-			Template = template,
-		})
+local configuredWaveCount = 0
+if useSharedHazards then
+	waveTrace(
+		"startup shared hazards detected; client-side wave spawning disabled trackedFolder=%s",
+		formatInstancePath(clientWavesFolder)
+	)
+else
+	for waveName, info in pairs(WavesConfig) do
+		configuredWaveCount += 1
+		local template = getTemplate(waveName)
+		if template then
+			table.insert(entries, {
+				Name = waveName,
+				Info = info,
+				Template = template,
+			})
+			waveTrace(
+				"startup registeredWave name=%s template=%s class=%s chance=%s speed=%s",
+				tostring(waveName),
+				formatInstancePath(template),
+				tostring(template.ClassName),
+				tostring(info and info.Chance),
+				tostring(info and info.Speed)
+			)
+		else
+			waveWarn(
+				"startup waveTemplateMissing name=%s expectedPath=%s chance=%s speed=%s",
+				tostring(waveName),
+				"ReplicatedStorage.Waves." .. tostring(waveName),
+				tostring(info and info.Chance),
+				tostring(info and info.Speed)
+			)
+		end
+	end
+	waveTrace(
+		"startup spawnEntriesReady count=%s configCount=%s",
+		tostring(#entries),
+		tostring(configuredWaveCount)
+	)
+	if #entries <= 0 then
+		waveWarn(
+			"startup no spawnable wave entries found wavesFolder=%s configCount=%s",
+			formatInstancePath(WavesFolder),
+			tostring(configuredWaveCount)
+		)
 	end
 end
 
@@ -585,10 +888,27 @@ local function killLocalPlayer()
 	if not char then return end
 
 	local hum = char:FindFirstChildOfClass("Humanoid")
+	local hrp = char:FindFirstChild("HumanoidRootPart")
+	if hrp and ProtectionRuntime.IsProtected(LocalPlayer, hrp.Position, "WaveKill") then
+		waveTrace(
+			"killLocalPlayer skipped reason=protected hrpPos=%s",
+			formatVector3(hrp.Position)
+		)
+		return
+	end
+
 	if hum and hum.Health > 0 then
 		if KillMeEvent and KillMeEvent:IsA("RemoteEvent") then
+			waveTrace(
+				"killLocalPlayer firing kill remote=%s",
+				formatInstancePath(KillMeEvent)
+			)
 			KillMeEvent:FireServer()
 		else
+			waveWarnOnce(
+				"kill_remote_missing",
+				"killLocalPlayer no KillMe remote found; applying local Humanoid.Health = 0 fallback"
+			)
 			hum.Health = 0
 		end
 	end
@@ -627,6 +947,16 @@ local function hookKillOnTouch(obj, hitPart)
 			end
 		end
 	end
+end
+
+if useSharedHazards then
+	for _, hazard in ipairs(clientWavesFolder:GetChildren()) do
+		hookKillOnTouch(hazard)
+	end
+
+	clientWavesFolder.ChildAdded:Connect(function(child)
+		hookKillOnTouch(child)
+	end)
 end
 
 local function ensureModelPrimaryPartByPart(model)
@@ -670,196 +1000,282 @@ local function getTornadoSubmodels(clone)
 end
 
 local function spawnWave(entry)
-	local clone = entry.Template:Clone()
-	clone.Name = entry.Name
-	clone.Parent = clientWavesFolder
-
-	local extraRot = getExtraRot(entry.Info)
-
-	local movePart = nil
-	if clone:IsA("Model") then
-		movePart = ensureModelPrimaryPartByPart(clone)
+	if not entry then
+		waveWarn("spawnSkipped reason=nil_entry")
+		return false
 	end
 
-	anchor(clone)
-	hookKillOnTouch(clone, movePart)
-	applyHazardMetadata(clone, entry.Template)
+	local ok = waveTry("spawnWave:" .. tostring(entry.Name), function()
+		local clone = entry.Template:Clone()
+		clone.Name = entry.Name
+		clone.Parent = clientWavesFolder
 
-	local startCF, endCF
-	if clone:IsA("Model") and movePart then
-		startCF = computeModelPivotOnTopUsingPart(clone, movePart, startPart, extraRot)
-		endCF = computeModelPivotOnTopUsingPart(clone, movePart, endPart, extraRot)
-	else
-		startCF = computePivotOnTop(clone, startPart, extraRot)
-		endCF = computePivotOnTop(clone, endPart, extraRot)
-	end
-
-	setPivot(clone, startCF)
-
-	local speed = tonumber(entry.Info.Speed) or 50
-	if speed <= 0 then speed = 50 end
-
-	local distance = (startCF.Position - endCF.Position).Magnitude
-	local duration = distance / speed
-	if duration < 0.05 then duration = 0.05 end
-
-	local isRock = (entry.Name == "Rock" or entry.Name == "FastRock")
-	local isTornado = (entry.Name == "Tornado" or entry.Name == "FastTornado")
-
-	if (not isRock and not isTornado) and clone:IsA("BasePart") then
-		local tween = TweenService:Create(
-			clone,
-			TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
-			{ CFrame = endCF }
+		waveTrace(
+			"spawnWave selected name=%s template=%s templateClass=%s chance=%s configuredSpeed=%s clientFolder=%s",
+			tostring(entry.Name),
+			formatInstancePath(entry.Template),
+			tostring(entry.Template.ClassName),
+			tostring(entry.Info and entry.Info.Chance),
+			tostring(entry.Info and entry.Info.Speed),
+			formatInstancePath(clientWavesFolder)
 		)
-		local freezeController = createFreezeController(clone, tween)
-		tween:Play()
-		tween.Completed:Connect(function()
-			freezeController:Destroy()
-			if clone.Parent then clone:Destroy() end
-		end)
-		return
-	end
 
-	local rockSpinTarget, rockSpinOffset, rockRadius
-	if isRock then
-		rockSpinTarget = getSpinTargetRock(clone)
-		local basePivot = getPivot(clone)
-		local spinPivot = getPivot(rockSpinTarget)
-		rockSpinOffset = basePivot:ToObjectSpace(spinPivot)
-		local _, s = getBox(rockSpinTarget)
-		rockRadius = math.max(2, math.max(s.Y, s.Z) * 0.5)
-	end
+		local extraRot = getExtraRot(entry.Info)
 
-	local tornadoData = nil
-	if isTornado then
-		local subs = getTornadoSubmodels(clone)
-		if #subs > 0 then
-			tornadoData = {}
-			local basePivot = getPivot(clone)
-
-			for i = 1, #subs do
-				local m = subs[i]
-				local off = basePivot:ToObjectSpace(m:GetPivot())
-
-				local dir = (rng:NextInteger(0, 1) == 0) and -1 or 1
-				local degPerSec = rng:NextNumber(55, 120)
-				local scaleAmp = rng:NextNumber(0.05, 0.09)
-				local scaleFreq = rng:NextNumber(1.5, 2)
-				local scalePhase = rng:NextNumber(0, math.pi * 2)
-				local noiseAmp = math.rad(rng:NextNumber(1.5, 3.5))
-				local noiseFreq = rng:NextNumber(2, 3)
-				local seedA = rng:NextNumber(-1000, 1000)
-				local seedB = rng:NextNumber(-1000, 1000)
-
-				tornadoData[i] = {
-					Model = m,
-					Offset = off,
-					Dir = dir,
-					DegPerSec = degPerSec,
-					ScaleAmp = scaleAmp,
-					ScaleFreq = scaleFreq,
-					ScalePhase = scalePhase,
-					NoiseAmp = noiseAmp,
-					NoiseFreq = noiseFreq,
-					SeedA = seedA,
-					SeedB = seedB,
-				}
+		local movePart = nil
+		if clone:IsA("Model") then
+			movePart = ensureModelPrimaryPartByPart(clone)
+			if not movePart then
+				waveWarn(
+					"spawnWave model has no primary move part name=%s clonePath=%s",
+					tostring(entry.Name),
+					formatInstancePath(clone)
+				)
 			end
 		end
-	end
 
-	local travelDir = (endCF.Position - startCF.Position)
-	if travelDir.Magnitude < 1e-4 then
-		travelDir = Vector3.new(0, 0, -1)
-	else
-		travelDir = travelDir.Unit
-	end
+		anchor(clone)
+		hookKillOnTouch(clone, movePart)
+		applyHazardMetadata(clone, entry.Template)
 
-	local axisWorld = travelDir:Cross(Vector3.yAxis)
-	if axisWorld.Magnitude < 1e-4 then
-		axisWorld = Vector3.xAxis
-	else
-		axisWorld = axisWorld.Unit
-	end
+		local startCF, endCF
+		if clone:IsA("Model") and movePart then
+			startCF = computeModelPivotOnTopUsingPart(clone, movePart, startPart, extraRot)
+			endCF = computeModelPivotOnTopUsingPart(clone, movePart, endPart, extraRot)
+		else
+			startCF = computePivotOnTop(clone, startPart, extraRot)
+			endCF = computePivotOnTop(clone, endPart, extraRot)
+		end
 
-	local startTime = os.clock()
+		setPivot(clone, startCF)
 
-	local alpha = Instance.new("NumberValue")
-	alpha.Value = 0
-	alpha.Parent = clone
+		local speed = tonumber(entry.Info.Speed) or 50
+		if speed <= 0 then
+			waveWarn(
+				"spawnWave invalid speed name=%s configuredSpeed=%s defaultingTo=50",
+				tostring(entry.Name),
+				tostring(entry.Info and entry.Info.Speed)
+			)
+			speed = 50
+		end
 
-	local conn
-	conn = alpha.Changed:Connect(function(v)
-		if not clone.Parent then
-			if conn then conn:Disconnect() end
+		local distance = (startCF.Position - endCF.Position).Magnitude
+		local duration = distance / speed
+		if duration < 0.05 then
+			duration = 0.05
+		end
+
+		local isRock = (entry.Name == "Rock" or entry.Name == "FastRock")
+		local isTornado = (entry.Name == "Tornado" or entry.Name == "FastTornado")
+		local movementMode = "alpha_tween"
+		if (not isRock and not isTornado) and clone:IsA("BasePart") then
+			movementMode = "basepart_cframe_tween"
+		elseif isRock then
+			movementMode = "rock_spin_alpha_tween"
+		elseif isTornado then
+			movementMode = "tornado_alpha_tween"
+		end
+
+		waveTrace(
+			"spawnWave movement name=%s startPart=%s startPos=%s endPart=%s endPos=%s spawnCFrame=%s targetCFrame=%s distance=%.2f speed=%.2f duration=%.2f mode=%s",
+			tostring(entry.Name),
+			formatInstancePath(startPart),
+			formatVector3(startPart.Position),
+			formatInstancePath(endPart),
+			formatVector3(endPart.Position),
+			formatCFrame(startCF),
+			formatCFrame(endCF),
+			distance,
+			speed,
+			duration,
+			movementMode
+		)
+
+		if movementMode == "basepart_cframe_tween" then
+			local tween = TweenService:Create(
+				clone,
+				TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
+				{ CFrame = endCF }
+			)
+			local freezeController = createFreezeController(clone, tween)
+			tween:Play()
+			tween.Completed:Connect(function()
+				waveTry("spawnWave completed:" .. tostring(entry.Name), function()
+					freezeController:Destroy()
+					if clone.Parent then
+						clone:Destroy()
+					end
+					waveTrace("spawnWave completed name=%s mode=%s", tostring(entry.Name), movementMode)
+				end)
+			end)
 			return
 		end
 
-		local a = math.clamp(tonumber(v) or 0, 0, 1)
-		local baseCF = startCF:Lerp(endCF, a)
-		setPivot(clone, baseCF)
-
-		if isRock and rockSpinTarget and rockSpinOffset and rockRadius then
-			local roll = -((a * distance) / rockRadius)
-
-			local baseSpinCF = getPivot(clone) * rockSpinOffset
-			local rotOnly = baseSpinCF - baseSpinCF.Position
-			local localAxis = rotOnly:VectorToObjectSpace(axisWorld)
-
-			local spinCF = baseSpinCF * CFrame.fromAxisAngle(localAxis, roll)
-			setPivot(rockSpinTarget, spinCF)
+		local rockSpinTarget, rockSpinOffset, rockRadius
+		if isRock then
+			rockSpinTarget = getSpinTargetRock(clone)
+			local basePivot = getPivot(clone)
+			local spinPivot = getPivot(rockSpinTarget)
+			rockSpinOffset = basePivot:ToObjectSpace(spinPivot)
+			local _, s = getBox(rockSpinTarget)
+			rockRadius = math.max(2, math.max(s.Y, s.Z) * 0.5)
 		end
 
-		if tornadoData then
-			local t = os.clock() - startTime
-			for i = 1, #tornadoData do
-				local td = tornadoData[i]
-				local m = td.Model
-				if m and m.Parent then
-					local subBase = getPivot(clone) * td.Offset
+		local tornadoData = nil
+		if isTornado then
+			local subs = getTornadoSubmodels(clone)
+			if #subs > 0 then
+				tornadoData = {}
+				local basePivot = getPivot(clone)
 
-					local yaw = math.rad(td.DegPerSec * td.Dir) * t
-					local n1 = math.noise(td.SeedA, t * td.NoiseFreq, 0)
-					local n2 = math.noise(td.SeedB, t * td.NoiseFreq, 0)
-					local pitch = td.NoiseAmp * n1
-					local roll = td.NoiseAmp * n2
+				for i = 1, #subs do
+					local m = subs[i]
+					local off = basePivot:ToObjectSpace(m:GetPivot())
 
-					local s = 1 + td.ScaleAmp * math.sin(t * td.ScaleFreq + td.ScalePhase)
-					pcall(function()
-						m:ScaleTo(s)
-					end)
+					local dir = (rng:NextInteger(0, 1) == 0) and -1 or 1
+					local degPerSec = rng:NextNumber(55, 120)
+					local scaleAmp = rng:NextNumber(0.05, 0.09)
+					local scaleFreq = rng:NextNumber(1.5, 2)
+					local scalePhase = rng:NextNumber(0, math.pi * 2)
+					local noiseAmp = math.rad(rng:NextNumber(1.5, 3.5))
+					local noiseFreq = rng:NextNumber(2, 3)
+					local seedA = rng:NextNumber(-1000, 1000)
+					local seedB = rng:NextNumber(-1000, 1000)
 
-					m:PivotTo(subBase * CFrame.Angles(pitch, yaw, roll))
+					tornadoData[i] = {
+						Model = m,
+						Offset = off,
+						Dir = dir,
+						DegPerSec = degPerSec,
+						ScaleAmp = scaleAmp,
+						ScaleFreq = scaleFreq,
+						ScalePhase = scalePhase,
+						NoiseAmp = noiseAmp,
+						NoiseFreq = noiseFreq,
+						SeedA = seedA,
+						SeedB = seedB,
+					}
 				end
 			end
 		end
+
+		local travelDir = (endCF.Position - startCF.Position)
+		if travelDir.Magnitude < 1e-4 then
+			travelDir = Vector3.new(0, 0, -1)
+		else
+			travelDir = travelDir.Unit
+		end
+
+		local axisWorld = travelDir:Cross(Vector3.yAxis)
+		if axisWorld.Magnitude < 1e-4 then
+			axisWorld = Vector3.xAxis
+		else
+			axisWorld = axisWorld.Unit
+		end
+
+		local startTime = os.clock()
+
+		local alpha = Instance.new("NumberValue")
+		alpha.Value = 0
+		alpha.Parent = clone
+
+		local conn
+		conn = alpha.Changed:Connect(function(v)
+			if not clone.Parent then
+				if conn then conn:Disconnect() end
+				return
+			end
+
+			local a = math.clamp(tonumber(v) or 0, 0, 1)
+			local baseCF = startCF:Lerp(endCF, a)
+			setPivot(clone, baseCF)
+
+			if isRock and rockSpinTarget and rockSpinOffset and rockRadius then
+				local roll = -((a * distance) / rockRadius)
+
+				local baseSpinCF = getPivot(clone) * rockSpinOffset
+				local rotOnly = baseSpinCF - baseSpinCF.Position
+				local localAxis = rotOnly:VectorToObjectSpace(axisWorld)
+
+				local spinCF = baseSpinCF * CFrame.fromAxisAngle(localAxis, roll)
+				setPivot(rockSpinTarget, spinCF)
+			end
+
+			if tornadoData then
+				local t = os.clock() - startTime
+				for i = 1, #tornadoData do
+					local td = tornadoData[i]
+					local m = td.Model
+					if m and m.Parent then
+						local subBase = getPivot(clone) * td.Offset
+
+						local yaw = math.rad(td.DegPerSec * td.Dir) * t
+						local n1 = math.noise(td.SeedA, t * td.NoiseFreq, 0)
+						local n2 = math.noise(td.SeedB, t * td.NoiseFreq, 0)
+						local pitch = td.NoiseAmp * n1
+						local roll = td.NoiseAmp * n2
+
+						local s = 1 + td.ScaleAmp * math.sin(t * td.ScaleFreq + td.ScalePhase)
+						pcall(function()
+							m:ScaleTo(s)
+						end)
+
+						m:PivotTo(subBase * CFrame.Angles(pitch, yaw, roll))
+					end
+				end
+			end
+		end)
+
+		local tween = TweenService:Create(
+			alpha,
+			TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
+			{ Value = 1 }
+		)
+		local freezeController = createFreezeController(clone, tween)
+
+		tween:Play()
+		tween.Completed:Connect(function()
+			waveTry("spawnWave completed:" .. tostring(entry.Name), function()
+				if conn then conn:Disconnect() end
+				if alpha.Parent then alpha:Destroy() end
+				freezeController:Destroy()
+				if clone.Parent then clone:Destroy() end
+				waveTrace("spawnWave completed name=%s mode=%s", tostring(entry.Name), movementMode)
+			end)
+		end)
 	end)
 
-	local tween = TweenService:Create(
-		alpha,
-		TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut),
-		{ Value = 1 }
-	)
-	local freezeController = createFreezeController(clone, tween)
-
-	tween:Play()
-	tween.Completed:Connect(function()
-		if conn then conn:Disconnect() end
-		if alpha.Parent then alpha:Destroy() end
-		freezeController:Destroy()
-		if clone.Parent then clone:Destroy() end
-	end)
+	return ok
 end
 
 local NoDisastersTimer = workspace:WaitForChild("NoDisastersTimer")
 local paused = false
+waveTrace(
+	"startup noDisastersTimer path=%s initialValue=%s",
+	formatInstancePath(NoDisastersTimer),
+	tostring(NoDisastersTimer.Value)
+)
 
 local function updatePause()
 	if NoDisastersTimer.Value > 0 then
+		if not paused then
+			waveWarn(
+				"spawnPaused reason=no_disasters_timer timerValue=%s trackedHazardsCount=%s",
+				tostring(NoDisastersTimer.Value),
+				tostring(#clientWavesFolder:GetChildren())
+			)
+		end
 		paused = true
-		clientWavesFolder:ClearAllChildren()
+		if not useSharedHazards then
+			clientWavesFolder:ClearAllChildren()
+		end
 	else
+		if paused then
+			waveTrace(
+				"spawnResumed timerValue=%s",
+				tostring(NoDisastersTimer.Value)
+			)
+		end
 		paused = false
 	end
 end
@@ -870,18 +1286,39 @@ updatePause()
 RunService.RenderStepped:Connect(function()
 	updatePfpPositions()
 	updateWaveIndicators()
+	updateChestIndicators()
 	updatePfpBrainrotAndSkull()
 end)
 
 while true do
-	if not paused then
+	if useSharedHazards then
+		task.wait(1)
+	elseif not paused then
+		local selectedEntry = nil
+		local spawned = false
 		if #entries > 0 then
-			local e = chooseByChance(entries)
-			if e then
-				spawnWave(e)
+			selectedEntry = chooseByChance(entries)
+			if selectedEntry then
+				spawned = spawnWave(selectedEntry)
+			else
+				waveWarn("spawnSkipped reason=chooseByChance_returned_nil entryCount=%s", tostring(#entries))
 			end
+		else
+			waveWarnOnce(
+				"spawn_loop_no_entries",
+				"spawnSkipped reason=no_wave_entries wavesFolder=%s configCount=%s",
+				formatInstancePath(WavesFolder),
+				tostring(configuredWaveCount)
+			)
 		end
-		task.wait(rng:NextInteger(4, 5))
+		local waitSeconds = rng:NextInteger(4, 5)
+		waveTrace(
+			"spawnLoop cycleComplete selectedWave=%s spawned=%s nextWaitSeconds=%s",
+			tostring(selectedEntry and selectedEntry.Name or "<nil>"),
+			tostring(spawned),
+			tostring(waitSeconds)
+		)
+		task.wait(waitSeconds)
 	else
 		task.wait(0.2)
 	end

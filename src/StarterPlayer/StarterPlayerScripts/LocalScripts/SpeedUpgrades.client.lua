@@ -10,6 +10,7 @@ local SpeedUpgrade = require(
 )
 
 local MoneyLib = require(ReplicatedStorage.Modules.Shorten)
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local function fmt(v)
 	if typeof(v) == "number" then
@@ -138,15 +139,15 @@ local function updateOne(frameName, frame, cfg, speedVal)
 	local addSpeedText = (addSpeed >= 0 and ("+" .. fmt(addSpeed)) or fmt(addSpeed)) .. " Speed"
 
 	setText(template:FindFirstChild("AddSpeed"), addSpeedText)
-	setText(template:FindFirstChild("Now"), fmt(speedVal))
-	setText(template:FindFirstChild("After"), fmt(speedVal + addSpeed))
+	setText(template:FindFirstChild("Now"), "Current: " .. fmt(speedVal))
+	setText(template:FindFirstChild("After"), "After: " .. fmt(speedVal + addSpeed))
 
 	local cost = computeCost(cfg, speedVal)
 
 	local buy = template:FindFirstChild("Buy")
 	local buyMain = buy and buy:FindFirstChild("Main")
 	local buyTextL = buyMain and buyMain:FindFirstChild("TextL")
-	setText(buyTextL, fmt(cost) .. "$")
+	setText(buyTextL, fmt(cost) .. CurrencyUtil.getCompactSuffix())
 
 	local productId = cfg.ProductID
 	local robux = template:FindFirstChild("Robux")

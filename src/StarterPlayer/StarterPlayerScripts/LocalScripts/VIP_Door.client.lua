@@ -1,9 +1,19 @@
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local vipValue = player:WaitForChild("Passes"):WaitForChild("VIP")
-local vipFolder = workspace:WaitForChild("Map"):WaitForChild("VipParts")
+local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
+local refs = MapResolver.WaitForRefs(
+	{ "MapRoot" },
+	nil,
+	{
+		warn = true,
+		context = "VIPDoor",
+	}
+)
+local vipFolder = refs.MapRoot:WaitForChild("Vip Refuge"):WaitForChild("VIPDoorParts")
 
 local GAMEPASS_ID = 912847213
 

@@ -314,6 +314,41 @@ local function showArrowAt(posTL, size, opts)
 	state.arrowHoverTween:Play()
 end
 
+local function placeArrowAt(posTL, size, opts)
+	ensureArrow(opts.arrowZOffset)
+
+	local sw, sh, l, t, w, h = rectPixels(posTL, size)
+	local side = bestSide(sw, sh, l, t, w, h)
+
+	local cx, cy = l + w * 0.5, t + h * 0.5
+	local ax, ay, rot
+	local halfX = math.max(1, state.arrow.AbsoluteSize.X * 0.5)
+	local halfY = math.max(1, state.arrow.AbsoluteSize.Y * 0.5)
+
+	if side == "right" then
+		ax, ay, rot = l + w + opts.arrowMargin + halfX, cy, -90
+	elseif side == "left" then
+		ax, ay, rot = l - (opts.arrowMargin + halfX), cy, 90
+	elseif side == "top" then
+		ax, ay, rot = cx, t - (opts.arrowMargin + halfY), 180
+	else
+		ax, ay, rot = cx, t + h + opts.arrowMargin + halfY, 0
+	end
+
+	if state.arrowHoverTween then
+		state.arrowHoverTween:Cancel()
+		state.arrowHoverTween = nil
+	end
+
+	state.arrow.Position = UDim2.new(ax / sw, 0, ay / sh, 0)
+	state.arrow.Rotation = rot
+	state.arrow.Visible = true
+
+	if state.arrowScale then
+		state.arrowScale.Scale = 1
+	end
+end
+
 local function hideArrowQuick()
 	if not state.arrow or not state.arrowScale then
 		return
@@ -389,6 +424,48 @@ function M.Set(sizeArg, positionArg, options)
 		f.BackgroundColor3 = opts.color
 		f.ZIndex = opts.zindex
 	end
+end
+
+function M.Update(sizeArg, positionArg, options)
+	local opts = copy(DEFAULTS)
+	options = options or {}
+	for k, v in pairs(options) do
+		opts[k] = v
+	end
+
+	local size = toUDim2(sizeArg)
+	local posIn = toUDim2(positionArg)
+	local posTL = (opts.posMode == "center") and centerToTopLeft(posIn, size) or posIn
+
+	ensureMasks(opts)
+	stopMaskTweens()
+
+	applyLayout(layoutFromRect(posTL, size), {
+		color = opts.color,
+		transparency = opts.transparency,
+		zindex = opts.zindex,
+		blockInput = opts.blockInput,
+	})
+
+	if opts.hideArrow then
+		if state.arrowHoverTween then
+			state.arrowHoverTween:Cancel()
+			state.arrowHoverTween = nil
+		end
+		if state.arrow then
+			state.arrow.Visible = false
+		end
+	else
+		placeArrowAt(posTL, size, opts)
+	end
+
+	for _, f in ipairs({ state.top, state.bottom, state.left, state.right }) do
+		f.BackgroundColor3 = opts.color
+		f.ZIndex = opts.zindex
+		f.Visible = true
+	end
+
+	state.visible = true
 end
 
 function M.Hide(options)

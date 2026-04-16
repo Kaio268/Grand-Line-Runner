@@ -1,8 +1,3 @@
-local ac = script.Parent:WaitForChild("AnimationController")
-local animator = ac:WaitForChild("Animator")
+local LegacyAmbientAnimation = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("LegacyAmbientAnimation"))
 
-local anim = Instance.new("Animation")
-anim.AnimationId = "rbxassetid://108530253041260"
-
-local track = animator:LoadAnimation(anim)
-track:Play()
+LegacyAmbientAnimation.PlayLoop(script.Parent, "rbxassetid://108530253041260", script:GetFullName())

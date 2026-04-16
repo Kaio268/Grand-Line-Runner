@@ -8,19 +8,13 @@ local SpeedUpgrade = require(
 )
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local remote = ReplicatedStorage:FindFirstChild("BuySpeedUpgrade")
 if not remote then
 	remote = Instance.new("RemoteEvent")
 	remote.Name = "BuySpeedUpgrade"
 	remote.Parent = ReplicatedStorage
-end
-
-local function getMoneyKey(player)
-	local ls = player:FindFirstChild("leaderstats")
-	if not ls then return "Moeny" end
-	local v = ls:FindFirstChild("Moeny") or ls:FindFirstChild("Money")
-	return v and v.Name or "Moeny"
 end
 
 local function getSpeedValue(player)
@@ -73,14 +67,12 @@ remote.OnServerEvent:Connect(function(player, upgradeName)
 	local speedVal = getSpeedValue(player)
 	local cost = computeCost(cfg, speedVal)
 
-	local moneyKey = getMoneyKey(player)
-	local moneyPath = "leaderstats." .. moneyKey
+	local moneyPath = CurrencyUtil.getPrimaryPath()
 	local money = DataManager:GetValue(player, moneyPath)
 
 	if typeof(money) ~= "number" then
-		local ls = player:FindFirstChild("leaderstats")
-		local mv = ls and ls:FindFirstChild(moneyKey)
-		money = (mv and mv.Value) or 0
+		local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
+		money = (moneyValue and moneyValue.Value) or 0
 	end
 
 	if money < cost then
