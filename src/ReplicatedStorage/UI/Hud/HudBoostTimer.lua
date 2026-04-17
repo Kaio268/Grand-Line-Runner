@@ -175,25 +175,40 @@ local function HudBoostTimer(props)
 	local children = {
 		Layout = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Vertical,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			Padding = UDim.new(0, 6),
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			Padding = UDim.new(0, 8),
 			SortOrder = Enum.SortOrder.LayoutOrder,
-			VerticalAlignment = Enum.VerticalAlignment.Bottom,
+			VerticalAlignment = Enum.VerticalAlignment.Top,
 		}),
 	}
 
 	for index, entry in ipairs(boostState.entries) do
 		children[string.format("Boost_%s", tostring(entry.key))] = e("Frame", {
 			AutomaticSize = Enum.AutomaticSize.X,
-			BackgroundTransparency = 1,
+			BackgroundColor3 = Color3.fromRGB(10, 18, 31),
+			BackgroundTransparency = 0.18,
 			BorderSizePixel = 0,
 			LayoutOrder = index,
-			Size = UDim2.fromOffset(0, 28),
+			Size = UDim2.fromOffset(0, 44),
 		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Stroke = e("UIStroke", {
+				Color = Color3.fromRGB(242, 209, 107),
+				Thickness = 1,
+				Transparency = 0.18,
+			}),
+			Padding = e("UIPadding", {
+				PaddingLeft = UDim.new(0, 10),
+				PaddingRight = UDim.new(0, 12),
+				PaddingTop = UDim.new(0, 5),
+				PaddingBottom = UDim.new(0, 5),
+			}),
 			Layout = e("UIListLayout", {
 				FillDirection = Enum.FillDirection.Horizontal,
-				HorizontalAlignment = Enum.HorizontalAlignment.Center,
-				Padding = UDim.new(0, 6),
+				HorizontalAlignment = Enum.HorizontalAlignment.Left,
+				Padding = UDim.new(0, 8),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				VerticalAlignment = Enum.VerticalAlignment.Center,
 			}),
@@ -201,7 +216,7 @@ local function HudBoostTimer(props)
 				BackgroundTransparency = 1,
 				Image = entry.icon,
 				LayoutOrder = 1,
-				Size = UDim2.fromOffset(24, 24),
+				Size = UDim2.fromOffset(32, 32),
 				ScaleType = Enum.ScaleType.Fit,
 			}) or nil,
 			Label = e("TextLabel", {
@@ -209,10 +224,10 @@ local function HudBoostTimer(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				LayoutOrder = 2,
-				Size = UDim2.fromOffset(0, 24),
+				Size = UDim2.fromOffset(0, 30),
 				Text = tostring(entry.label),
 				TextColor3 = Color3.fromRGB(247, 242, 230),
-				TextSize = 13,
+				TextSize = 16,
 				TextStrokeColor3 = Color3.fromRGB(4, 6, 10),
 				TextStrokeTransparency = 0.25,
 				TextTruncate = Enum.TextTruncate.AtEnd,
@@ -223,10 +238,10 @@ local function HudBoostTimer(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				LayoutOrder = 3,
-				Size = UDim2.fromOffset(0, 24),
+				Size = UDim2.fromOffset(0, 30),
 				Text = formatDuration(entry.remaining),
 				TextColor3 = entry.accent,
-				TextSize = 12,
+				TextSize = 15,
 				TextStrokeColor3 = Color3.fromRGB(4, 6, 10),
 				TextStrokeTransparency = 0.2,
 				TextXAlignment = Enum.TextXAlignment.Left,
@@ -241,11 +256,11 @@ local function HudBoostTimer(props)
 		Size = UDim2.fromScale(1, 1),
 	}, {
 		Container = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 1),
+			AnchorPoint = Vector2.new(1, 0),
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.new(0.5, 0, 1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
 			Size = UDim2.new(1, 0, 0, 0),
 		}, children),
 	})

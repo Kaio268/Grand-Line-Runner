@@ -658,31 +658,66 @@ end
 local function handleConsumeResponse(player, accepted, fruitKey)
 	local pending = pendingConsumeByPlayer[player]
 	if not pending then
+		DevilFruitLogger.Warn("SERVER", "consume ignored player=%s reason=no_pending", player.Name)
 		return
 	end
 
 	clearPendingConsume(player)
 
 	if accepted ~= true then
+		DevilFruitLogger.Info("SERVER", "consume cancelled player=%s fruit=%s", player.Name, tostring(pending.FruitKey))
 		return
 	end
 
 	if typeof(fruitKey) ~= "string" or fruitKey ~= pending.FruitKey then
+		DevilFruitLogger.Warn(
+			"SERVER",
+			"consume ignored player=%s reason=fruit_mismatch expected=%s got=%s",
+			player.Name,
+			tostring(pending.FruitKey),
+			tostring(fruitKey)
+		)
 		return
 	end
 
 	if os.clock() - pending.RequestedAt > PROMPT_TIMEOUT then
+		DevilFruitLogger.Warn("SERVER", "consume ignored player=%s reason=prompt_timeout", player.Name)
 		return
 	end
 
 	local tool = pending.Tool
-	if not isToolOwnedByPlayer(tool, player) then
+	local quantity, quantityReason = DevilFruitInventoryService.GetFruitQuantity(player, fruitKey)
+	if quantity == nil and quantityReason ~= nil then
+		DevilFruitLogger.Warn(
+			"SERVER",
+			"consume ignored player=%s reason=quantity_error fruit=%s err=%s",
+			player.Name,
+			tostring(fruitKey),
+			tostring(quantityReason)
+		)
+		return
+	end
+
+	if (tonumber(quantity) or 0) <= 0 then
+		DevilFruitLogger.Warn(
+			"SERVER",
+			"consume ignored player=%s reason=not_owned fruit=%s quantity=%s",
+			player.Name,
+			tostring(fruitKey),
+			tostring(quantity)
+		)
 		return
 	end
 
 	local currentFruitName = DevilFruitService.GetEquippedFruit(player)
 	local targetFruitName = DevilFruitConfig.ResolveFruitName(fruitKey)
 	if currentFruitName ~= DevilFruitConfig.None and currentFruitName == targetFruitName then
+		DevilFruitLogger.Info(
+			"SERVER",
+			"consume ignored player=%s reason=already_equipped fruit=%s",
+			player.Name,
+			tostring(targetFruitName)
+		)
 		return
 	end
 
@@ -717,6 +752,13 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 
 	if tool and tool.Parent then
 		tool:Destroy()
+	elseif not isToolOwnedByPlayer(tool, player) then
+		DevilFruitLogger.Info(
+			"SERVER",
+			"consume succeeded without tool-destroy player=%s fruit=%s",
+			player.Name,
+			tostring(targetFruitName)
+		)
 	end
 end
 

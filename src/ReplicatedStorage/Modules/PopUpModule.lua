@@ -7,6 +7,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RNG = Random.new()
 
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
+local DevilFruitAssets = require(
+	ReplicatedStorage
+		:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Assets")
+)
 
 local Colors = {
 	Color3.fromRGB(0, 34, 255),
@@ -335,6 +341,103 @@ local acknowledgeAccent
 local acknowledgeTitle
 local acknowledgeBody
 local acknowledgeButton
+local acknowledgeButtonLabel
+local acknowledgeBackground
+local acknowledgePreviewCard
+local acknowledgePreviewViewport
+local acknowledgePreviewFallback
+
+local DEVIL_FRUIT_ACK_THEME = {
+	FruitBackgroundImage = "rbxassetid://134053886107384",
+	MenuOverlay = Color3.fromRGB(15, 27, 42),
+	PrimaryBg = Color3.fromRGB(30, 42, 56),
+	SecondaryBg = Color3.fromRGB(36, 52, 71),
+	HeaderBg = Color3.fromRGB(16, 35, 59),
+	SectionBg = Color3.fromRGB(27, 46, 68),
+	GoldBase = Color3.fromRGB(212, 175, 55),
+	GoldHighlight = Color3.fromRGB(242, 209, 107),
+	GoldShadow = Color3.fromRGB(140, 107, 31),
+	TextMain = Color3.fromRGB(230, 230, 230),
+	TextSecondary = Color3.fromRGB(184, 193, 204),
+}
+
+local ACK_PREVIEW_WIDTH = 220
+local ACK_BODY_BOTTOM_PADDING = 62
+
+local function ensureAckCorner(instance, radius)
+	local corner = instance:FindFirstChildOfClass("UICorner")
+	if not corner then
+		corner = Instance.new("UICorner")
+		corner.Parent = instance
+	end
+	corner.CornerRadius = UDim.new(0, radius)
+	return corner
+end
+
+local function ensureAckStroke(instance, color, transparency, thickness)
+	local stroke = instance:FindFirstChildOfClass("UIStroke")
+	if not stroke then
+		stroke = Instance.new("UIStroke")
+		stroke.Parent = instance
+	end
+	stroke.Color = color
+	stroke.Transparency = transparency
+	stroke.Thickness = thickness
+	return stroke
+end
+
+local function ensureAckGradient(instance, topColor, bottomColor)
+	local gradient = instance:FindFirstChildOfClass("UIGradient")
+	if not gradient then
+		gradient = Instance.new("UIGradient")
+		gradient.Parent = instance
+	end
+	gradient.Rotation = 90
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, topColor),
+		ColorSequenceKeypoint.new(1, bottomColor),
+	})
+	return gradient
+end
+
+local function bindClaimButtonStyle(button)
+	local function apply(fill, text, top, bottom)
+		button.BackgroundColor3 = fill
+		local label = button:FindFirstChild("Label")
+		if label and label:IsA("TextLabel") then
+			label.TextColor3 = text
+		else
+			button.TextColor3 = text
+		end
+		ensureAckGradient(button, top, bottom)
+	end
+
+	button.AutoButtonColor = false
+	button.MouseEnter:Connect(function()
+		apply(
+			DEVIL_FRUIT_ACK_THEME.GoldBase,
+			DEVIL_FRUIT_ACK_THEME.PrimaryBg,
+			DEVIL_FRUIT_ACK_THEME.GoldHighlight,
+			DEVIL_FRUIT_ACK_THEME.GoldBase
+		)
+	end)
+
+	button.MouseLeave:Connect(function()
+		apply(
+			DEVIL_FRUIT_ACK_THEME.SectionBg,
+			DEVIL_FRUIT_ACK_THEME.GoldHighlight,
+			DEVIL_FRUIT_ACK_THEME.SecondaryBg,
+			DEVIL_FRUIT_ACK_THEME.PrimaryBg
+		)
+	end)
+
+	apply(
+		DEVIL_FRUIT_ACK_THEME.SectionBg,
+		DEVIL_FRUIT_ACK_THEME.GoldHighlight,
+		DEVIL_FRUIT_ACK_THEME.SecondaryBg,
+		DEVIL_FRUIT_ACK_THEME.PrimaryBg
+	)
+end
 
 local function normalizeAcknowledgementBody(lines)
 	if typeof(lines) == "string" then
@@ -356,9 +459,132 @@ local function normalizeAcknowledgementBody(lines)
 	return table.concat(formatted, "\n")
 end
 
+local function clearAcknowledgePreviewViewport()
+	if not acknowledgePreviewViewport then
+		return
+	end
+
+	for _, child in ipairs(acknowledgePreviewViewport:GetChildren()) do
+		child:Destroy()
+	end
+	acknowledgePreviewViewport.CurrentCamera = nil
+end
+
+local function setPreviewPartDefaults(part)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+end
+
+local function getPreviewBoundingInfo(previewModel)
+	if previewModel:IsA("BasePart") then
+		return previewModel.CFrame, previewModel.Size
+	end
+
+	local ok, cf, size = pcall(function()
+		return previewModel:GetBoundingBox()
+	end)
+	if ok then
+		return cf, size
+	end
+
+	local part = previewModel:FindFirstChildWhichIsA("BasePart", true)
+	if part then
+		return part.CFrame, part.Size
+	end
+
+	return CFrame.new(), Vector3.new(1, 1, 1)
+end
+
+local function showFruitPreview(fruitKey)
+	if not acknowledgePreviewCard or not acknowledgePreviewViewport then
+		return false
+	end
+
+	clearAcknowledgePreviewViewport()
+
+	if typeof(fruitKey) ~= "string" or fruitKey == "" then
+		acknowledgePreviewCard.Visible = false
+		return false
+	end
+
+	local previewModel = DevilFruitAssets.ClonePreviewWorldModel(fruitKey)
+	if not previewModel then
+		if acknowledgePreviewFallback then
+			acknowledgePreviewFallback.Visible = true
+		end
+		acknowledgePreviewCard.Visible = true
+		return true
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = acknowledgePreviewViewport
+	previewModel.Parent = worldModel
+
+	pcall(function()
+		if previewModel:IsA("Model") or previewModel:IsA("WorldModel") then
+			previewModel:PivotTo(CFrame.Angles(math.rad(-10), math.rad(24), 0))
+		elseif previewModel:IsA("BasePart") then
+			previewModel.CFrame = CFrame.Angles(math.rad(-10), math.rad(24), 0)
+		end
+	end)
+
+	for _, descendant in ipairs(previewModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			setPreviewPartDefaults(descendant)
+		end
+	end
+
+	local boxCF, boxSize = getPreviewBoundingInfo(previewModel)
+	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+
+	local camera = Instance.new("Camera")
+	camera.Name = "PreviewCamera"
+	camera.FieldOfView = 34
+	camera.CFrame = CFrame.lookAt(
+		boxCF.Position + Vector3.new(maxSize * 0.9, maxSize * 0.4, maxSize * 1.8),
+		boxCF.Position
+	)
+	camera.Parent = acknowledgePreviewViewport
+	acknowledgePreviewViewport.CurrentCamera = camera
+
+	if acknowledgePreviewFallback then
+		acknowledgePreviewFallback.Visible = false
+	end
+
+	acknowledgePreviewCard.Visible = true
+	return true
+end
+
 local function ensureAcknowledgeGui()
 	if acknowledgeGui and acknowledgeGui.Parent then
-		return
+		local panel = acknowledgeGui:FindFirstChild("Panel")
+		local topBar = panel and panel:FindFirstChild("TopBar")
+		local content = panel and panel:FindFirstChild("Content")
+		local button = content and content:FindFirstChild("Okay")
+		local buttonLabel = button and button:FindFirstChild("Label")
+		local previewCard = content and content:FindFirstChild("PreviewCard")
+		if panel and topBar and content and button and buttonLabel and previewCard then
+			return
+		end
+
+		acknowledgeGui:Destroy()
+		acknowledgeGui = nil
+		acknowledgeOverlay = nil
+		acknowledgePanel = nil
+		acknowledgeAccent = nil
+		acknowledgeTitle = nil
+		acknowledgeBody = nil
+		acknowledgeButton = nil
+		acknowledgeButtonLabel = nil
+		acknowledgeBackground = nil
+		acknowledgePreviewCard = nil
+		acknowledgePreviewViewport = nil
+		acknowledgePreviewFallback = nil
 	end
 
 	local player = Players.LocalPlayer
@@ -373,12 +599,10 @@ local function ensureAcknowledgeGui()
 	acknowledgeGui.Enabled = false
 	acknowledgeGui.Parent = playerGui
 
-	acknowledgeOverlay = Instance.new("TextButton")
+	acknowledgeOverlay = Instance.new("Frame")
 	acknowledgeOverlay.Name = "Overlay"
-	acknowledgeOverlay.AutoButtonColor = false
 	acknowledgeOverlay.Active = true
-	acknowledgeOverlay.Text = ""
-	acknowledgeOverlay.BackgroundColor3 = Color3.fromRGB(4, 7, 14)
+	acknowledgeOverlay.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.MenuOverlay
 	acknowledgeOverlay.BackgroundTransparency = 0.38
 	acknowledgeOverlay.BorderSizePixel = 0
 	acknowledgeOverlay.Size = UDim2.fromScale(1, 1)
@@ -389,104 +613,174 @@ local function ensureAcknowledgeGui()
 	acknowledgePanel.Name = "Panel"
 	acknowledgePanel.AnchorPoint = Vector2.new(0.5, 0.5)
 	acknowledgePanel.Position = UDim2.fromScale(0.5, 0.5)
-	acknowledgePanel.Size = UDim2.fromOffset(560, 336)
-	acknowledgePanel.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+	acknowledgePanel.Size = UDim2.fromOffset(620, 370)
+	acknowledgePanel.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.PrimaryBg
+	acknowledgePanel.BackgroundTransparency = 1
 	acknowledgePanel.BorderSizePixel = 0
+	acknowledgePanel.ClipsDescendants = true
 	acknowledgePanel.ZIndex = 80
 	acknowledgePanel.Parent = acknowledgeGui
 
-	local panelCorner = Instance.new("UICorner")
-	panelCorner.CornerRadius = UDim.new(0, 16)
-	panelCorner.Parent = acknowledgePanel
+	ensureAckCorner(acknowledgePanel, 16)
+	local panelStroke = ensureAckStroke(acknowledgePanel, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0, 2.2)
+	panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
-	local panelStroke = Instance.new("UIStroke")
-	panelStroke.Color = Color3.fromRGB(104, 214, 255)
-	panelStroke.Transparency = 0.18
-	panelStroke.Thickness = 1.5
-	panelStroke.Parent = acknowledgePanel
+	acknowledgeBackground = Instance.new("ImageLabel")
+	acknowledgeBackground.Name = "BackgroundImage"
+	acknowledgeBackground.BackgroundTransparency = 1
+	acknowledgeBackground.BorderSizePixel = 0
+	acknowledgeBackground.Image = DEVIL_FRUIT_ACK_THEME.FruitBackgroundImage
+	acknowledgeBackground.ScaleType = Enum.ScaleType.Stretch
+	acknowledgeBackground.Size = UDim2.fromScale(1, 1)
+	acknowledgeBackground.ZIndex = 79
+	acknowledgeBackground.Parent = acknowledgePanel
+	ensureAckCorner(acknowledgeBackground, 16)
 
-	local panelGradient = Instance.new("UIGradient")
-	panelGradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(23, 26, 35)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(11, 14, 22)),
-	})
-	panelGradient.Rotation = 90
-	panelGradient.Parent = acknowledgePanel
+	local panelOverlay = Instance.new("Frame")
+	panelOverlay.Name = "BackgroundOverlay"
+	panelOverlay.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.MenuOverlay
+	panelOverlay.BackgroundTransparency = 0.45
+	panelOverlay.BorderSizePixel = 0
+	panelOverlay.Size = UDim2.fromScale(1, 1)
+	panelOverlay.ZIndex = 79
+	panelOverlay.Parent = acknowledgePanel
+	ensureAckCorner(panelOverlay, 16)
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 18)
-	padding.PaddingBottom = UDim.new(0, 18)
-	padding.PaddingLeft = UDim.new(0, 20)
-	padding.PaddingRight = UDim.new(0, 20)
-	padding.Parent = acknowledgePanel
+	local topBar = Instance.new("Frame")
+	topBar.Name = "TopBar"
+	topBar.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.HeaderBg
+	topBar.BackgroundTransparency = 0.24
+	topBar.BorderSizePixel = 0
+	topBar.Position = UDim2.fromOffset(14, 12)
+	topBar.Size = UDim2.new(1, -28, 0, 84)
+	topBar.ZIndex = 81
+	topBar.Parent = acknowledgePanel
+	ensureAckCorner(topBar, 10)
+	local topStroke = ensureAckStroke(topBar, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0, 1.5)
+	topStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	ensureAckGradient(topBar, DEVIL_FRUIT_ACK_THEME.SecondaryBg, DEVIL_FRUIT_ACK_THEME.PrimaryBg)
 
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Vertical
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 10)
-	layout.Parent = acknowledgePanel
+	local content = Instance.new("Frame")
+	content.Name = "Content"
+	content.BackgroundTransparency = 1
+	content.Position = UDim2.fromOffset(20, 104)
+	content.Size = UDim2.new(1, -40, 1, -122)
+	content.ZIndex = 81
+	content.Parent = acknowledgePanel
 
 	acknowledgeAccent = Instance.new("TextLabel")
 	acknowledgeAccent.Name = "Accent"
-	acknowledgeAccent.LayoutOrder = 1
 	acknowledgeAccent.BackgroundTransparency = 1
-	acknowledgeAccent.Size = UDim2.new(1, 0, 0, 20)
+	acknowledgeAccent.Position = UDim2.fromOffset(16, 10)
+	acknowledgeAccent.Size = UDim2.new(1, -32, 0, 20)
 	acknowledgeAccent.Font = Enum.Font.GothamBold
 	acknowledgeAccent.Text = "UPGRADE COMPLETE"
-	acknowledgeAccent.TextColor3 = Color3.fromRGB(116, 245, 183)
-	acknowledgeAccent.TextSize = 15
+	acknowledgeAccent.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	acknowledgeAccent.TextSize = 14
 	acknowledgeAccent.TextXAlignment = Enum.TextXAlignment.Left
-	acknowledgeAccent.ZIndex = 81
-	acknowledgeAccent.Parent = acknowledgePanel
+	acknowledgeAccent.ZIndex = 82
+	acknowledgeAccent.Parent = topBar
 
 	acknowledgeTitle = Instance.new("TextLabel")
 	acknowledgeTitle.Name = "Title"
-	acknowledgeTitle.LayoutOrder = 2
 	acknowledgeTitle.BackgroundTransparency = 1
-	acknowledgeTitle.Size = UDim2.new(1, 0, 0, 34)
+	acknowledgeTitle.Position = UDim2.fromOffset(16, 28)
+	acknowledgeTitle.Size = UDim2.new(1, -32, 0, 48)
 	acknowledgeTitle.Font = Enum.Font.GothamBold
 	acknowledgeTitle.Text = "Update"
-	acknowledgeTitle.TextColor3 = Color3.fromRGB(245, 246, 255)
-	acknowledgeTitle.TextSize = 28
-	acknowledgeTitle.TextWrapped = true
+	acknowledgeTitle.TextColor3 = DEVIL_FRUIT_ACK_THEME.TextMain
+	acknowledgeTitle.TextSize = 24
+	acknowledgeTitle.TextScaled = false
+	acknowledgeTitle.TextWrapped = false
+	acknowledgeTitle.TextTruncate = Enum.TextTruncate.AtEnd
 	acknowledgeTitle.TextXAlignment = Enum.TextXAlignment.Left
-	acknowledgeTitle.ZIndex = 81
-	acknowledgeTitle.Parent = acknowledgePanel
+	acknowledgeTitle.ZIndex = 82
+	acknowledgeTitle.Parent = topBar
 
 	acknowledgeBody = Instance.new("TextLabel")
 	acknowledgeBody.Name = "Body"
-	acknowledgeBody.LayoutOrder = 3
 	acknowledgeBody.BackgroundTransparency = 1
-	acknowledgeBody.Size = UDim2.new(1, 0, 0, 150)
+	acknowledgeBody.Position = UDim2.fromOffset(0, 0)
+	acknowledgeBody.Size = UDim2.new(1, -ACK_PREVIEW_WIDTH - 16, 1, -ACK_BODY_BOTTOM_PADDING)
 	acknowledgeBody.Font = Enum.Font.Gotham
 	acknowledgeBody.Text = ""
-	acknowledgeBody.TextColor3 = Color3.fromRGB(225, 230, 241)
-	acknowledgeBody.TextSize = 19
+	acknowledgeBody.TextColor3 = DEVIL_FRUIT_ACK_THEME.TextSecondary
+	acknowledgeBody.TextSize = 18
+	acknowledgeBody.TextScaled = false
 	acknowledgeBody.TextWrapped = true
 	acknowledgeBody.TextXAlignment = Enum.TextXAlignment.Left
 	acknowledgeBody.TextYAlignment = Enum.TextYAlignment.Top
-	acknowledgeBody.ZIndex = 81
-	acknowledgeBody.Parent = acknowledgePanel
+	acknowledgeBody.ZIndex = 82
+	acknowledgeBody.Parent = content
+
+	acknowledgePreviewCard = Instance.new("Frame")
+	acknowledgePreviewCard.Name = "PreviewCard"
+	acknowledgePreviewCard.AnchorPoint = Vector2.new(1, 0)
+	acknowledgePreviewCard.Position = UDim2.fromScale(1, 0)
+	acknowledgePreviewCard.Size = UDim2.new(0, ACK_PREVIEW_WIDTH, 1, -ACK_BODY_BOTTOM_PADDING)
+	acknowledgePreviewCard.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.SectionBg
+	acknowledgePreviewCard.BackgroundTransparency = 0.25
+	acknowledgePreviewCard.BorderSizePixel = 0
+	acknowledgePreviewCard.Visible = false
+	acknowledgePreviewCard.ZIndex = 82
+	acknowledgePreviewCard.Parent = content
+	ensureAckCorner(acknowledgePreviewCard, 12)
+	local previewStroke = ensureAckStroke(acknowledgePreviewCard, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0, 1.25)
+	previewStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+	acknowledgePreviewViewport = Instance.new("ViewportFrame")
+	acknowledgePreviewViewport.Name = "Viewport"
+	acknowledgePreviewViewport.BackgroundTransparency = 1
+	acknowledgePreviewViewport.BorderSizePixel = 0
+	acknowledgePreviewViewport.Position = UDim2.fromOffset(8, 8)
+	acknowledgePreviewViewport.Size = UDim2.new(1, -16, 1, -16)
+	acknowledgePreviewViewport.Ambient = Color3.fromRGB(206, 196, 186)
+	acknowledgePreviewViewport.LightColor = Color3.fromRGB(255, 252, 246)
+	acknowledgePreviewViewport.LightDirection = Vector3.new(-1, -1, -1)
+	acknowledgePreviewViewport.ZIndex = 83
+	acknowledgePreviewViewport.Parent = acknowledgePreviewCard
+
+	acknowledgePreviewFallback = Instance.new("TextLabel")
+	acknowledgePreviewFallback.Name = "Fallback"
+	acknowledgePreviewFallback.BackgroundTransparency = 1
+	acknowledgePreviewFallback.Size = UDim2.fromScale(1, 1)
+	acknowledgePreviewFallback.Font = Enum.Font.Gotham
+	acknowledgePreviewFallback.Text = "Preview unavailable"
+	acknowledgePreviewFallback.TextColor3 = DEVIL_FRUIT_ACK_THEME.TextSecondary
+	acknowledgePreviewFallback.TextSize = 14
+	acknowledgePreviewFallback.TextWrapped = true
+	acknowledgePreviewFallback.ZIndex = 84
+	acknowledgePreviewFallback.Parent = acknowledgePreviewCard
 
 	acknowledgeButton = Instance.new("TextButton")
 	acknowledgeButton.Name = "Okay"
-	acknowledgeButton.LayoutOrder = 4
-	acknowledgeButton.AnchorPoint = Vector2.new(0.5, 0)
-	acknowledgeButton.Position = UDim2.fromScale(0.5, 0)
-	acknowledgeButton.Size = UDim2.fromOffset(184, 46)
-	acknowledgeButton.BackgroundColor3 = Color3.fromRGB(90, 214, 151)
+	acknowledgeButton.AnchorPoint = Vector2.new(0.5, 1)
+	acknowledgeButton.Position = UDim2.new(0.5, 0, 1, -2)
+	acknowledgeButton.Size = UDim2.fromOffset(190, 46)
+	acknowledgeButton.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.SectionBg
 	acknowledgeButton.BorderSizePixel = 0
 	acknowledgeButton.Font = Enum.Font.GothamBold
-	acknowledgeButton.Text = "Okay"
-	acknowledgeButton.TextColor3 = Color3.fromRGB(13, 21, 20)
-	acknowledgeButton.TextSize = 20
+	acknowledgeButton.Text = ""
+	acknowledgeButton.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	acknowledgeButton.TextSize = 18
 	acknowledgeButton.ZIndex = 82
-	acknowledgeButton.Parent = acknowledgePanel
+	acknowledgeButton.Parent = content
 
-	local buttonCorner = Instance.new("UICorner")
-	buttonCorner.CornerRadius = UDim.new(0, 12)
-	buttonCorner.Parent = acknowledgeButton
+	acknowledgeButtonLabel = Instance.new("TextLabel")
+	acknowledgeButtonLabel.Name = "Label"
+	acknowledgeButtonLabel.BackgroundTransparency = 1
+	acknowledgeButtonLabel.Size = UDim2.fromScale(1, 1)
+	acknowledgeButtonLabel.Font = Enum.Font.GothamBold
+	acknowledgeButtonLabel.Text = "Close"
+	acknowledgeButtonLabel.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	acknowledgeButtonLabel.TextSize = 28
+	acknowledgeButtonLabel.ZIndex = 84
+	acknowledgeButtonLabel.Parent = acknowledgeButton
+
+	ensureAckCorner(acknowledgeButton, 12)
+	local buttonStroke = ensureAckStroke(acknowledgeButton, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0, 1.4)
+	buttonStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	bindClaimButtonStyle(acknowledgeButton)
 
 	acknowledgeButton.MouseButton1Click:Connect(function()
 		if acknowledgeGui then
@@ -502,21 +796,53 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 	local title = tostring(options.Title or options.title or "Notice")
 	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")
 	local buttonText = tostring(options.ButtonText or options.buttonText or "Okay")
-	local bodyText = normalizeAcknowledgementBody(options.Lines or options.lines or options.Body or options.body)
+	local bodyMode = tostring(options.BodyMode or options.bodyMode or "")
+	local bodyRawText = options.BodyRawText or options.bodyRawText
+	local bodyText = if typeof(bodyRawText) == "string" and bodyRawText ~= ""
+		then tostring(bodyRawText)
+		else normalizeAcknowledgementBody(options.Lines or options.lines or options.Body or options.body)
+	local previewFruitKey = options.PreviewFruitKey or options.previewFruitKey
 
 	if bodyText == "" then
 		bodyText = "No details available."
 	end
 
 	acknowledgeAccent.Text = accentText
-	acknowledgeAccent.TextColor3 = options.AccentColor or Color3.fromRGB(116, 245, 183)
+	acknowledgeAccent.TextColor3 = options.AccentColor or DEVIL_FRUIT_ACK_THEME.GoldHighlight
 	acknowledgeTitle.Text = title
-	acknowledgeTitle.TextColor3 = options.TitleColor or Color3.fromRGB(245, 246, 255)
+	acknowledgeTitle.TextColor3 = options.TitleColor or DEVIL_FRUIT_ACK_THEME.TextMain
 	acknowledgeBody.Text = bodyText
-	acknowledgeBody.TextColor3 = options.BodyColor or Color3.fromRGB(225, 230, 241)
-	acknowledgeButton.Text = buttonText
-	acknowledgeButton.BackgroundColor3 = options.ButtonColor or Color3.fromRGB(90, 214, 151)
-	acknowledgeButton.TextColor3 = options.ButtonTextColor or Color3.fromRGB(13, 21, 20)
+	acknowledgeBody.TextColor3 = options.BodyColor or DEVIL_FRUIT_ACK_THEME.TextSecondary
+	if bodyMode == "FruitFocus" then
+		acknowledgeBody.Font = Enum.Font.GothamBold
+		acknowledgeBody.TextSize = 34
+		acknowledgeBody.TextWrapped = true
+		acknowledgeBody.TextXAlignment = Enum.TextXAlignment.Center
+		acknowledgeBody.TextYAlignment = Enum.TextYAlignment.Center
+	else
+		acknowledgeBody.Font = Enum.Font.Gotham
+		acknowledgeBody.TextSize = 18
+		acknowledgeBody.TextWrapped = true
+		acknowledgeBody.TextXAlignment = Enum.TextXAlignment.Left
+		acknowledgeBody.TextYAlignment = Enum.TextYAlignment.Top
+	end
+	acknowledgeButton.Text = ""
+	if acknowledgeButtonLabel then
+		acknowledgeButtonLabel.Text = buttonText
+		acknowledgeButtonLabel.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	end
+	acknowledgeButton.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.SectionBg
+	acknowledgeButton.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	if acknowledgeBackground then
+		acknowledgeBackground.Image = tostring(options.BackgroundImage or DEVIL_FRUIT_ACK_THEME.FruitBackgroundImage)
+	end
+	local hasPreview = showFruitPreview(previewFruitKey)
+	if hasPreview then
+		acknowledgeBody.Size = UDim2.new(1, -ACK_PREVIEW_WIDTH - 16, 1, -ACK_BODY_BOTTOM_PADDING)
+	elseif acknowledgePreviewCard then
+		acknowledgePreviewCard.Visible = false
+		acknowledgeBody.Size = UDim2.new(1, 0, 1, -ACK_BODY_BOTTOM_PADDING)
+	end
 
 	acknowledgeGui.Enabled = true
 	playSound("Reward")

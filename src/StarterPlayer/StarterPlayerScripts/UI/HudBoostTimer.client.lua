@@ -64,7 +64,12 @@ local function ensureHost()
 	sidebar.ClipsDescendants = false
 	sidebar.Visible = true
 
-	local host = sidebar:FindFirstChild("ReactHudBoostTimerHost")
+	local legacyHost = sidebar:FindFirstChild("ReactHudBoostTimerHost")
+	if legacyHost and legacyHost:IsA("Frame") then
+		legacyHost:Destroy()
+	end
+
+	local host = hud:FindFirstChild("ReactHudBoostTimerHost")
 	if host and not host:IsA("Frame") then
 		host:Destroy()
 		host = nil
@@ -73,16 +78,16 @@ local function ensureHost()
 	if not host then
 		host = Instance.new("Frame")
 		host.Name = "ReactHudBoostTimerHost"
-		host.Parent = sidebar
+		host.Parent = hud
 	end
 
-	host.AnchorPoint = Vector2.new(0, 0)
+	host.AnchorPoint = Vector2.new(1, 0)
 	host.AutomaticSize = Enum.AutomaticSize.None
 	host.BackgroundTransparency = 1
 	host.BorderSizePixel = 0
 	host.ClipsDescendants = false
-	host.Position = UDim2.fromOffset(0, -88)
-	host.Size = UDim2.new(1, 0, 0, 88)
+	host.Position = UDim2.new(1, -18, 0, 122)
+	host.Size = UDim2.fromOffset(360, 140)
 	host.Visible = true
 	host.ZIndex = 260
 
