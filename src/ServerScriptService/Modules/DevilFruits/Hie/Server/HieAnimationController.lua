@@ -60,7 +60,6 @@ local function getAnimationAsset(animationKey, character, moveName)
 	local animation, descriptor = AnimationResolver.GetRigAwareAnimation(animationKey, nil, character, humanoid, {
 		Context = string.format("Hie.%s", tostring(moveName or animationKey)),
 		FallbackVariant = "Default",
-		R6GAsDefault = true,
 	})
 	if animation then
 		return animation, descriptor

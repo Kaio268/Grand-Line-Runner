@@ -18,12 +18,18 @@ local Animations = {
 
 	Hie = {
 		IceBlast = {
-			Default = "rbxassetid://124838419575237",
 			R6 = "rbxassetid://124055413998569",
+			-- R6G rigs are modified R15; use R6-authored fruit animations as a safe fallback.
+			R6G = "rbxassetid://124055413998569",
+			-- This project uses R6 and an R6G (modified R15) rig; treat Default like R6.
+			Default = "rbxassetid://124055413998569",
 		},
 		IceBoost = {
-			Default = "rbxassetid://72106282206436",
-			R6 = "rbxassetid://117635395490867",
+			R6 = "rbxassetid://80476214763415",
+			-- R6G rigs are modified R15; use R6-authored fruit animations as a safe fallback.
+			R6G = "rbxassetid://80476214763415",
+			-- This project uses R6 and an R6G (modified R15) rig; treat Default like R6.
+			Default = "rbxassetid://80476214763415",
 		},
 	},
 
