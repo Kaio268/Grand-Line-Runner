@@ -11,6 +11,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local scrollingFrame = playerGui:WaitForChild("Frames"):WaitForChild("Settings"):WaitForChild("ScrollingFrame")
 local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Settings"))
+local SettingsAudioController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SettingsAudioController"))
 local settingsFolder = player:WaitForChild("Settings", 10)
 
 local function clamp(n, a, b)
@@ -34,7 +35,23 @@ local function getFromPath(path)
 	return current
 end
 
-local function resolveSettingInstance(path)
+local function resolveSettingInstance(path, settingName)
+	if settingsFolder and typeof(settingName) == "string" then
+		local direct = settingsFolder:FindFirstChild(settingName)
+		if direct then
+			return direct
+		end
+
+		if settingName == "SoundEffects" then
+			local sounds = settingsFolder:FindFirstChild("Sounds")
+				or settingsFolder:FindFirstChild("Souynds")
+				or settingsFolder:FindFirstChild("sounds")
+			if sounds then
+				return sounds
+			end
+		end
+	end
+
 	local inst = getFromPath(path)
 	if inst then
 		return inst
@@ -46,11 +63,10 @@ local function resolveSettingInstance(path)
 	return nil
 end
 
-local BGMUSIC = SoundService:FindFirstChild("BGMUSIC")
-local musicBase = {}
-local soundsBase = {}
 local currentMusicValue = 100
 local currentSoundsValue = 100
+SettingsAudioController.SetDebug(true)
+SettingsAudioController.Start()
 
 local uiTickTemplate = SoundService:FindFirstChild("UI_Tick")
 local function playSliderTick(value)
@@ -72,6 +88,7 @@ local function playSliderTick(value)
 	s.Looped = false
 	s.PlaybackSpeed = speed
 	s.Parent = SoundService
+	SettingsAudioController.TrackSound(s)
 	s.Ended:Connect(function()
 		if s then
 			s:Destroy()
@@ -81,97 +98,33 @@ local function playSliderTick(value)
 	s:Play()
 end
 
-local function isInBGMUSIC(inst)
-	return BGMUSIC and inst and inst:IsDescendantOf(BGMUSIC)
-end
-
-local function getBaseVolume(sound)
-	local attr = sound:GetAttribute("BaseVolume")
-	if typeof(attr) == "number" then
-		return attr
-	end
-	sound:SetAttribute("BaseVolume", sound.Volume)
-	return sound.Volume
-end
-
-local function applyMusicVolume(value)
-	value = clamp(math.floor(value + 0.5), 0, 100)
-	currentMusicValue = value
-	local mul = value / 100
-	for sound, base in pairs(musicBase) do
-		if sound and sound.Parent and sound:IsA("Sound") and isInBGMUSIC(sound) then
-			sound.Volume = base * mul
-		end
-	end
-end
-
-local function applySoundsVolume(value)
-	value = clamp(math.floor(value + 0.5), 0, 100)
-	currentSoundsValue = value
-	local mul = value / 100
-	for sound, base in pairs(soundsBase) do
-		if sound and sound.Parent and sound:IsA("Sound") and not isInBGMUSIC(sound) then
-			sound.Volume = base * mul
-		end
-	end
-end
-
 local function applyAudio(settingName, value)
 	if settingName == "Music" then
-		applyMusicVolume(value)
-	elseif settingName == "Sounds" then
-		applySoundsVolume(value)
+		currentMusicValue = clamp(math.floor((tonumber(value) or 0) + 0.5), 0, 100)
+		SettingsAudioController.Apply("Music", currentMusicValue)
+	elseif settingName == "Sounds" or settingName == "SoundEffects" then
+		currentSoundsValue = clamp(math.floor((tonumber(value) or 0) + 0.5), 0, 100)
+		SettingsAudioController.Apply("SoundEffects", currentSoundsValue)
 	end
 end
-
-local function trackSound(sound)
-	if not sound or not sound:IsA("Sound") then
-		return
-	end
-	local base = getBaseVolume(sound)
-	if isInBGMUSIC(sound) then
-		if musicBase[sound] == nil then
-			musicBase[sound] = base
-		end
-		sound.Volume = base * (currentMusicValue / 100)
-	else
-		if soundsBase[sound] == nil then
-			soundsBase[sound] = base
-		end
-		sound.Volume = base * (currentSoundsValue / 100)
-	end
-end
-
-for _, d in ipairs(SoundService:GetDescendants()) do
-	if d:IsA("Sound") then
-		trackSound(d)
-	end
-end
-
-SoundService.DescendantAdded:Connect(function(d)
-	if d:IsA("Sound") then
-		trackSound(d)
-	end
-end)
-
-SoundService.DescendantRemoving:Connect(function(d)
-	if d:IsA("Sound") then
-		musicBase[d] = nil
-		soundsBase[d] = nil
-	end
-end)
 
 do
 	local mv = settingsFolder and (settingsFolder:FindFirstChild("Music") or settingsFolder:FindFirstChild("music"))
 	if mv and (mv:IsA("NumberValue") or mv:IsA("IntValue")) then
 		currentMusicValue = clamp(mv.Value, 0, 100)
 	end
-	local sv = settingsFolder and (settingsFolder:FindFirstChild("Sounds") or settingsFolder:FindFirstChild("Souynds") or settingsFolder:FindFirstChild("sounds"))
+	local sv = settingsFolder
+		and (
+			settingsFolder:FindFirstChild("SoundEffects")
+			or settingsFolder:FindFirstChild("Sounds")
+			or settingsFolder:FindFirstChild("Souynds")
+			or settingsFolder:FindFirstChild("sounds")
+		)
 	if sv and (sv:IsA("NumberValue") or sv:IsA("IntValue")) then
 		currentSoundsValue = clamp(sv.Value, 0, 100)
 	end
-	applyMusicVolume(currentMusicValue)
-	applySoundsVolume(currentSoundsValue)
+	SettingsAudioController.Apply("Music", currentMusicValue)
+	SettingsAudioController.Apply("SoundEffects", currentSoundsValue)
 end
 
 local MIN_X = 0
@@ -309,7 +262,7 @@ local function setupSlider(optionFrame, startValue, settingName, settingPath)
 		return
 	end
 
-	local settingInst = resolveSettingInstance(settingPath)
+	local settingInst = resolveSettingInstance(settingPath, settingName)
 	if settingInst and (settingInst:IsA("NumberValue") or settingInst:IsA("IntValue")) then
 		startValue = settingInst.Value
 	end
@@ -538,7 +491,7 @@ local function setupSwitch(optionFrame, startValue, settingName, settingPath)
 		return
 	end
 
-	local settingInst = resolveSettingInstance(settingPath)
+	local settingInst = resolveSettingInstance(settingPath, settingName)
 	if settingInst and settingInst:IsA("BoolValue") then
 		startValue = settingInst.Value
 	end

@@ -26,6 +26,15 @@ local THEME = {
 
 local ROW_HEIGHT = 72
 local ROW_PADDING = 10
+local DEBUG_SETTINGS_SLIDER = false
+
+local function debugSlider(id, message, ...)
+	if not DEBUG_SETTINGS_SLIDER or id ~= "SoundEffects" then
+		return
+	end
+
+	print(string.format("[SETTINGS][SLIDER] " .. message, ...))
+end
 
 local function clamp(value, minValue, maxValue)
 	local numeric = tonumber(value) or minValue
@@ -131,6 +140,7 @@ local function SliderRow(props)
 			return
 		end
 
+		debugSlider(props.id, "preview id=%s value=%d previous=%s", tostring(props.id), clamped, tostring(displayValueRef.current))
 		displayValueRef.current = clamped
 		setDisplayValue(clamped)
 		if props.onPreview then
@@ -146,10 +156,21 @@ local function SliderRow(props)
 
 		local width = track.AbsoluteSize.X
 		if width <= 0 then
+			debugSlider(props.id, "valueFromScreenX ignored id=%s width=%d", tostring(props.id), width)
 			return displayValueRef.current
 		end
 
 		local normalized = clamp((screenX - track.AbsolutePosition.X) / width, 0, 1)
+		debugSlider(
+			props.id,
+			"valueFromScreenX id=%s screenX=%.1f trackX=%.1f width=%.1f normalized=%.3f value=%.1f",
+			tostring(props.id),
+			screenX,
+			track.AbsolutePosition.X,
+			width,
+			normalized,
+			normalized * 100
+		)
 		return normalized * 100
 	end
 
@@ -178,6 +199,7 @@ local function SliderRow(props)
 	end
 
 	local function commitCurrentValue()
+		debugSlider(props.id, "commit id=%s value=%s", tostring(props.id), tostring(displayValueRef.current))
 		if props.onCommit then
 			props.onCommit(displayValueRef.current)
 		end
@@ -199,6 +221,7 @@ local function SliderRow(props)
 		if type(screenX) ~= "number" then
 			screenX = UserInputService:GetMouseLocation().X
 		end
+		debugSlider(props.id, "startDrag id=%s screenX=%s", tostring(props.id), tostring(screenX))
 		draggingRef.current = true
 		updateFromScreenX(screenX)
 
@@ -263,6 +286,14 @@ local function SliderRow(props)
 		end
 
 		local xPosition = if input.Position then input.Position.X else UserInputService:GetMouseLocation().X
+		debugSlider(
+			props.id,
+			"inputBegan id=%s input=%s x=%s y=%s",
+			tostring(props.id),
+			tostring(userInputType),
+			tostring(xPosition),
+			tostring(input.Position and input.Position.Y or nil)
+		)
 		startDrag(xPosition)
 	end
 
@@ -284,15 +315,17 @@ local function SliderRow(props)
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 6,
 			}),
-			Track = e("Frame", {
+			Track = e("TextButton", {
 				ref = trackRef,
 				Active = true,
+				AutoButtonColor = false,
 				BackgroundColor3 = THEME.HeaderBackground,
-				BackgroundTransparency = 0.25,
+				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
 				AnchorPoint = Vector2.new(0, 0.5),
 				Position = UDim2.new(0, 266, 0.5, 6),
-				Size = UDim2.new(1, -348, 0, 10),
+				Size = UDim2.new(1, -348, 0, 64),
+				Text = "",
 				ZIndex = 5,
 				[React.Event.InputBegan] = beginDragFromInput,
 				[React.Event.InputChanged] = function(_, input)
@@ -307,29 +340,65 @@ local function SliderRow(props)
 					end
 				end,
 			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(1, 0),
-				}),
-				Stroke = e("UIStroke", {
-					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-					Color = THEME.GoldHighlight,
-					Transparency = 0,
-					Thickness = 1.5,
-				}),
-				Fill = e("Frame", {
-					BackgroundColor3 = THEME.GoldBase,
+				TrackBar = e("Frame", {
+					AnchorPoint = Vector2.new(0, 0.5),
+					Active = true,
+					BackgroundColor3 = THEME.HeaderBackground,
+					BackgroundTransparency = 0.25,
 					BorderSizePixel = 0,
-					Size = UDim2.fromScale(progress, 1),
-					ZIndex = 6,
+					Position = UDim2.fromScale(0, 0.5),
+					Size = UDim2.new(1, 0, 0, 10),
+					ZIndex = 5,
+					[React.Event.InputBegan] = beginDragFromInput,
+					[React.Event.InputChanged] = function(_, input)
+						if not draggingRef.current then
+							return
+						end
+						if
+							input.UserInputType == Enum.UserInputType.MouseMovement
+							or input.UserInputType == Enum.UserInputType.Touch
+						then
+							updateFromScreenX(input.Position.X)
+						end
+					end,
 				}, {
 					Corner = e("UICorner", {
 						CornerRadius = UDim.new(1, 0),
 					}),
-					Gradient = e("UIGradient", {
-						Rotation = 90,
-						Color = ColorSequence.new({
-							ColorSequenceKeypoint.new(0, THEME.GoldHighlight),
-							ColorSequenceKeypoint.new(1, THEME.GoldBase),
+					Stroke = e("UIStroke", {
+						ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+						Color = THEME.GoldHighlight,
+						Transparency = 0,
+						Thickness = 1.5,
+					}),
+					Fill = e("Frame", {
+						Active = true,
+						BackgroundColor3 = THEME.GoldBase,
+						BorderSizePixel = 0,
+						Size = UDim2.fromScale(progress, 1),
+						ZIndex = 6,
+						[React.Event.InputBegan] = beginDragFromInput,
+						[React.Event.InputChanged] = function(_, input)
+							if not draggingRef.current then
+								return
+							end
+							if
+								input.UserInputType == Enum.UserInputType.MouseMovement
+								or input.UserInputType == Enum.UserInputType.Touch
+							then
+								updateFromScreenX(input.Position.X)
+							end
+						end,
+					}, {
+						Corner = e("UICorner", {
+							CornerRadius = UDim.new(1, 0),
+						}),
+						Gradient = e("UIGradient", {
+							Rotation = 90,
+							Color = ColorSequence.new({
+								ColorSequenceKeypoint.new(0, THEME.GoldHighlight),
+								ColorSequenceKeypoint.new(1, THEME.GoldBase),
+							}),
 						}),
 					}),
 				}),
@@ -408,6 +477,7 @@ local function SettingsScreen(props)
 
 	for index, item in ipairs(items) do
 		rows["Slider_" .. tostring(item.id)] = e(SliderRow, {
+			id = item.id,
 			icon = item.icon,
 			label = item.label,
 			layoutOrder = index,

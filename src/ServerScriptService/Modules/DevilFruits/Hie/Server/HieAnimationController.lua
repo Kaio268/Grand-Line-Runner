@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local AnimationLoadDiagnostics = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local DevilFruitLogger = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
+local AnimationResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 
 local HieAnimationController = {}
 
@@ -14,6 +15,7 @@ local INFO_COOLDOWN = 0.35
 local WARN_COOLDOWN = 3
 
 local activeIceBoostStates = setmetatable({}, { __mode = "k" })
+local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.HieAnimationController"
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -48,30 +50,29 @@ local function logAnimPipeline(level, message, ...)
 	DevilFruitLogger.Info("ANIM", message, ...)
 end
 
-local function getHieAnimationFolder()
-	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
-	local animationsFolder = assetsFolder and assetsFolder:FindFirstChild("Animations")
-	return animationsFolder and animationsFolder:FindFirstChild("Hie") or nil
-end
-
-local function getAnimationAsset(assetName)
-	if typeof(assetName) ~= "string" or assetName == "" then
-		return nil
+local function getAnimationAsset(animationKey, character, moveName)
+	if typeof(animationKey) ~= "string" or animationKey == "" then
+		logWarn("animation key missing move=%s", tostring(moveName))
+		return nil, nil
 	end
 
-	local hieFolder = getHieAnimationFolder()
-	if not hieFolder then
-		logWarn("animation folder missing path=ReplicatedStorage/Assets/Animations/Hie")
-		return nil
+	local humanoid = typeof(character) == "Instance" and character:FindFirstChildOfClass("Humanoid") or nil
+	local animation, descriptor = AnimationResolver.GetRigAwareAnimation(animationKey, nil, character, humanoid, {
+		Context = string.format("Hie.%s", tostring(moveName or animationKey)),
+		FallbackVariant = "Default",
+		R6GAsDefault = true,
+	})
+	if animation then
+		return animation, descriptor
 	end
 
-	local animation = hieFolder:FindFirstChild(assetName)
-	if animation and animation:IsA("Animation") then
-		return animation
-	end
-
-	logWarn("animation asset missing path=ReplicatedStorage/Assets/Animations/Hie/%s", assetName)
-	return nil
+	logWarn(
+		"animation asset missing key=%s variant=%s detail=%s",
+		tostring(animationKey),
+		tostring(descriptor and descriptor.Variant or "<nil>"),
+		tostring(descriptor and descriptor.Source or "missing_registry_animation")
+	)
+	return nil, descriptor
 end
 
 local function getAnimator(character)
@@ -112,45 +113,63 @@ local function stopTrack(track, fadeTime)
 	end)
 end
 
-local function playAnimation(character, animationConfig, defaultAssetName)
+local function playAnimation(character, animationConfig, defaultAnimationKey, moveName)
 	local resolvedConfig = type(animationConfig) == "table" and animationConfig or {}
-	local assetName = resolvedConfig.AssetName or defaultAssetName
-	local animation = getAnimationAsset(assetName)
+	local animationKey = resolvedConfig.AnimationKey or defaultAnimationKey
+	local resolvedMoveName = moveName or defaultAnimationKey
+	local animation, descriptor = getAnimationAsset(animationKey, character, resolvedMoveName)
 	if not animation then
 		return nil
 	end
 
 	local animator = getAnimator(character)
 	if not animator then
-		logAnimPipeline("WARN", "server animator missing fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(defaultAssetName), tostring(assetName))
+		logAnimPipeline("WARN", "server animator missing fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(resolvedMoveName), tostring(animationKey))
 		return nil
 	end
-	logAnimPipeline("INFO", "server animator ready fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(defaultAssetName), tostring(assetName))
+	logAnimPipeline("INFO", "server animator ready fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(resolvedMoveName), tostring(animationKey))
 
 	local track, loadFailure = AnimationLoadDiagnostics.LoadTrack(
 		animator,
 		animation,
-		"ServerScriptService.Modules.DevilFruits.HieAnimationController"
+		SOURCE_LABEL
 	)
 	if not track then
-		logWarn("%s animation failed to load detail=%s", tostring(assetName), tostring(loadFailure))
-		logAnimPipeline("WARN", "server animation load failed fruit=%s move=%s asset=%s detail=%s", "Hie Hie no Mi", tostring(defaultAssetName), tostring(assetName), tostring(loadFailure))
+		logWarn("%s animation failed to load detail=%s", tostring(animationKey), tostring(loadFailure))
+		logAnimPipeline("WARN", "server animation load failed fruit=%s move=%s asset=%s detail=%s", "Hie Hie no Mi", tostring(resolvedMoveName), tostring(animationKey), tostring(loadFailure))
 		return nil
 	end
 
-	logInfo("%s animation loaded", assetName)
-	logAnimPipeline("INFO", "server animation track created fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(defaultAssetName), tostring(assetName))
+	logInfo("%s animation loaded id=%s variant=%s", tostring(animationKey), tostring(descriptor and descriptor.AnimationId), tostring(descriptor and descriptor.Variant))
+	logAnimPipeline("INFO", "server animation track created fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(resolvedMoveName), tostring(animationKey))
 
 	local fadeTime = math.max(0, tonumber(resolvedConfig.FadeTime) or DEFAULT_FADE_TIME)
 	local playbackSpeed = tonumber(resolvedConfig.PlaybackSpeed) or 1
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = resolvedConfig.Looped == true
 	track:Play(fadeTime, 1, playbackSpeed)
-	logInfo("%s play", assetName)
-	logAnimPipeline("INFO", "server animation play reached fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(defaultAssetName), tostring(assetName))
+	AnimationLoadDiagnostics.LogTrackPlay(
+		track,
+		SOURCE_LABEL,
+		string.format("Hie.%s", tostring(resolvedMoveName)),
+		descriptor and descriptor.AnimationId,
+		string.format(
+			"key=%s variant=%s fade=%.3f speed=%.3f looped=%s",
+			tostring(animationKey),
+			tostring(descriptor and descriptor.Variant or "<none>"),
+			fadeTime,
+			playbackSpeed,
+			tostring(track.Looped)
+		)
+	)
+	logInfo("%s play", animationKey)
+	logAnimPipeline("INFO", "server animation play reached fruit=%s move=%s asset=%s", "Hie Hie no Mi", tostring(resolvedMoveName), tostring(animationKey))
 
 	return {
-		AssetName = assetName,
+		AssetName = animationKey,
+		AnimationKey = animationKey,
+		AnimationId = descriptor and descriptor.AnimationId,
+		Variant = descriptor and descriptor.Variant,
 		Track = track,
 		MarkerName = resolvedConfig.ReleaseMarker,
 		ReleaseFallbackTime = math.max(0, tonumber(resolvedConfig.ReleaseFallbackTime) or 0),
@@ -159,7 +178,7 @@ local function playAnimation(character, animationConfig, defaultAssetName)
 end
 
 function HieAnimationController.PlayFreezeShotAnimation(character, animationConfig)
-	return playAnimation(character, animationConfig, "IceBlast")
+	return playAnimation(character, animationConfig, "Hie.IceBlast", "IceBlast")
 end
 
 function HieAnimationController.WaitForFreezeShotRelease(animationState)
@@ -212,7 +231,7 @@ function HieAnimationController.PlayIceBoostAnimation(player, character, animati
 
 	HieAnimationController.StopIceBoostAnimation(player, nil, "replace")
 
-	local animationState = playAnimation(character, animationConfig, "IceBoost")
+	local animationState = playAnimation(character, animationConfig, "Hie.IceBoost", "IceBoost")
 	if not animationState then
 		return nil
 	end

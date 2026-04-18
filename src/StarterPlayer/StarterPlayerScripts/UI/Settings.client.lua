@@ -13,6 +13,7 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 
 local SettingsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Settings"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local SettingsScreen = require(UiFolder:WaitForChild("Settings"):WaitForChild("SettingsScreen"))
 
 local UpdateSettingRemote = ReplicatedStorage:WaitForChild("UpdateSetting")
@@ -56,6 +57,8 @@ local SETTING_ALIASES = {
 	LowGraphic = { "LowGraphic", "Low Graphic", "LowGraphics", "Low Graphics" },
 }
 
+local DEBUG_SETTINGS_AUDIO = true
+
 local destroyed = false
 local renderQueued = false
 local sliderPreviewActive = false
@@ -65,6 +68,17 @@ local cleanupConnections = {}
 local settingConnections = {}
 
 local scheduleRender
+local syncAudioFromSettings
+
+local function debugAudio(message, ...)
+	if not DEBUG_SETTINGS_AUDIO then
+		return
+	end
+
+	print(string.format("[SETTINGS][AUDIO] " .. message, ...))
+end
+
+SettingsAudioController.SetDebug(DEBUG_SETTINGS_AUDIO)
 
 local function clampNumber(value, minimum, maximum)
 	local numeric = tonumber(value) or minimum
@@ -88,6 +102,10 @@ local function trackConnection(signal, callback, bucket)
 	local connection = signal:Connect(callback)
 	table.insert(bucket, connection)
 	return connection
+end
+
+local function applyAudioSetting(settingName, value)
+	SettingsAudioController.Apply(settingName, value)
 end
 
 local function getFromPath(startRoot, path)
@@ -153,6 +171,14 @@ local function resolveSettingInstance(settingName, config)
 	return nil
 end
 
+local function describeSettingInstance(instance)
+	if typeof(instance) ~= "Instance" then
+		return "<nil>"
+	end
+
+	return string.format("%s (%s)", instance:GetFullName(), instance.ClassName)
+end
+
 local function readSettingValue(settingName, config)
 	local instance = resolveSettingInstance(settingName, config)
 	local settingType = tostring(config and config.Type or "")
@@ -177,17 +203,37 @@ local function readSettingValue(settingName, config)
 	return config and config.Start == true
 end
 
+syncAudioFromSettings = function()
+	for _, settingName in ipairs(SETTING_ORDER) do
+		local config = SettingsConfig[settingName]
+		if typeof(config) == "table" and tostring(config.Type or "") == "Slider" then
+			local value = readSettingValue(settingName, config)
+			debugAudio("syncFromSettings name=%s value=%s", tostring(settingName), tostring(value))
+			applyAudioSetting(settingName, value)
+		end
+	end
+end
+
 local function applyLocalSetting(settingName, config, nextValue)
 	local settingType = tostring(config and config.Type or "")
 	local instance = resolveSettingInstance(settingName, config)
 
 	if settingType == "Slider" then
 		local clamped = math.floor(clampNumber(nextValue, 0, 100) + 0.5)
+		if not sliderPreviewActive then
+			debugAudio(
+				"localSetting name=%s value=%d instance=%s",
+				tostring(settingName),
+				clamped,
+				describeSettingInstance(instance)
+			)
+		end
 		if instance and (instance:IsA("NumberValue") or instance:IsA("IntValue")) then
 			instance.Value = clamped
 		else
 			settingOverrides[settingName] = clamped
 		end
+		applyAudioSetting(settingName, clamped)
 		return clamped
 	end
 
@@ -205,6 +251,12 @@ local function fireSetting(settingName, config, nextValue)
 		return
 	end
 
+	debugAudio(
+		"fireServer name=%s path=%s value=%s",
+		tostring(settingName),
+		tostring(config and config.Path or ""),
+		tostring(nextValue)
+	)
 	UpdateSettingRemote:FireServer(settingName, config and config.Path or "", nextValue)
 end
 
@@ -230,8 +282,11 @@ local function bindSettingFolder(folder)
 	settingFolder = folder
 
 	if not folder then
+		debugAudio("bindSettingFolder folder=<nil>")
 		return
 	end
+
+	debugAudio("bindSettingFolder folder=%s descendants=%d", folder:GetFullName(), #folder:GetDescendants())
 
 	local function watchInstance(instance)
 		if instance:IsA("ValueBase") then
@@ -239,7 +294,10 @@ local function bindSettingFolder(folder)
 				if sliderPreviewActive and (instance:IsA("NumberValue") or instance:IsA("IntValue")) then
 					return
 				end
-				task.defer(scheduleRender)
+				task.defer(function()
+					syncAudioFromSettings()
+					scheduleRender()
+				end)
 			end, settingConnections)
 		end
 	end
@@ -250,11 +308,17 @@ local function bindSettingFolder(folder)
 
 	trackConnection(folder.DescendantAdded, function(descendant)
 		watchInstance(descendant)
-		task.defer(scheduleRender)
+		task.defer(function()
+			syncAudioFromSettings()
+			scheduleRender()
+		end)
 	end, settingConnections)
 
 	trackConnection(folder.DescendantRemoving, function()
-		task.defer(scheduleRender)
+		task.defer(function()
+			syncAudioFromSettings()
+			scheduleRender()
+		end)
 	end, settingConnections)
 end
 
@@ -339,18 +403,26 @@ modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
 
 bindSettingFolder(player:FindFirstChild("Settings") or player:WaitForChild("Settings", 5))
+SettingsAudioController.Start()
+syncAudioFromSettings()
 
 trackConnection(player.ChildAdded, function(child)
 	if child.Name == "Settings" then
 		bindSettingFolder(child)
-		task.defer(scheduleRender)
+		task.defer(function()
+			syncAudioFromSettings()
+			scheduleRender()
+		end)
 	end
 end, cleanupConnections)
 
 trackConnection(player.ChildRemoved, function(child)
 	if child == settingFolder then
 		bindSettingFolder(nil)
-		task.defer(scheduleRender)
+		task.defer(function()
+			syncAudioFromSettings()
+			scheduleRender()
+		end)
 	end
 end, cleanupConnections)
 

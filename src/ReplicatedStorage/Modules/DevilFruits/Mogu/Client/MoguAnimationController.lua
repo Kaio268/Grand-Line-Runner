@@ -2,26 +2,23 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local AnimationLoadDiagnostics = require(Modules:WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local CommonAnimation = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("CommonAnimation"))
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
-local MoguAssetCatalog = require(
-	Modules:WaitForChild("DevilFruits"):WaitForChild("Mogu"):WaitForChild("Shared"):WaitForChild("MoguAssetCatalog")
-)
+local AnimationResolver = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 
 local MoguAnimationController = {}
 MoguAnimationController.__index = MoguAnimationController
 
-local FRUIT_NAME = "Mogu Mogu no Mi"
 local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.35
 local WARN_COOLDOWN = 4
 local DEFAULT_FADE_TIME = 0.06
 local DEFAULT_STOP_FADE_TIME = 0.1
-local MIN_SCORE_BY_STAGE = {
-	Start = 40,
-	Resolve = 40,
+local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Mogu.Client.MoguAnimationController"
+local DEFAULT_ANIMATION_KEY_BY_STAGE = {
+	Start = "Mogu.Dive",
+	Resolve = "Mogu.Exit",
 }
 
 local function logInfo(message, ...)
@@ -44,117 +41,29 @@ local function logWarn(message, ...)
 	warn(string.format("[MOGU CLIENT ANIM][WARN] " .. message, ...))
 end
 
-local function getFruitConfig()
-	return DevilFruitConfig.GetFruit(FRUIT_NAME) or {}
-end
-
 local function getStageAnimationConfig(stageKey, abilityConfig)
 	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
 	return type(animationConfig) == "table" and animationConfig[stageKey] or {}
 end
 
-local function appendUniqueInstance(target, seen, instance)
-	if typeof(instance) ~= "Instance" or seen[instance] then
-		return
-	end
-
-	seen[instance] = true
-	target[#target + 1] = instance
-end
-
-local function getAnimationRoots()
-	local roots = {}
-	local seen = {}
-	local assetFolderName = getFruitConfig().AssetFolder or "Mogu"
-
-	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
-	local assetsAnimationsFolder = assetsFolder and assetsFolder:FindFirstChild("Animations")
-	appendUniqueInstance(roots, seen, assetsAnimationsFolder and assetsAnimationsFolder:FindFirstChild(assetFolderName))
-
-	local replicatedAnimationsFolder = ReplicatedStorage:FindFirstChild("Animations")
-	appendUniqueInstance(roots, seen, replicatedAnimationsFolder and replicatedAnimationsFolder:FindFirstChild(assetFolderName))
-
-	return roots
-end
-
-local function findExactAnimation(assetName)
-	if typeof(assetName) ~= "string" or assetName == "" then
-		return nil
-	end
-
-	for _, root in ipairs(getAnimationRoots()) do
-		if typeof(root) ~= "Instance" then
-			continue
-		end
-
-		local directChild = root:FindFirstChild(assetName)
-		if directChild and directChild:IsA("Animation") then
-			return directChild
-		end
-
-		for _, descendant in ipairs(root:GetDescendants()) do
-			if descendant.Name == assetName and descendant:IsA("Animation") then
-				return descendant
-			end
-		end
-	end
-
-	return nil
-end
-
 local function resolveAnimationAsset(stageKey, stageConfig)
-	local exactAnimation = findExactAnimation(stageConfig.AssetName)
-	if exactAnimation then
-		logInfo("resolved stage=%s asset=%s mode=exact", tostring(stageKey), exactAnimation:GetFullName())
-		return exactAnimation
+	local animationKey = type(stageConfig) == "table" and stageConfig.AnimationKey or nil
+	animationKey = animationKey or DEFAULT_ANIMATION_KEY_BY_STAGE[stageKey]
+	if typeof(animationKey) ~= "string" or animationKey == "" then
+		logWarn("missing animation key stage=%s", tostring(stageKey))
+		return nil, nil, nil
 	end
 
-	local candidateNames = MoguAssetCatalog.GetAnimationCandidates(stageKey, stageConfig.AssetName)
-	local keywords = MoguAssetCatalog.GetAnimationKeywords(stageKey)
-	local bestAnimation = nil
-	local bestScore = 0
-
-	for _, root in ipairs(getAnimationRoots()) do
-		if typeof(root) ~= "Instance" then
-			continue
-		end
-
-		if root:IsA("Animation") then
-			local score = MoguAssetCatalog.ScoreTokens(
-				MoguAssetCatalog.CollectSearchTokens(root, 0),
-				candidateNames,
-				keywords
-			)
-			if score > bestScore then
-				bestAnimation = root
-				bestScore = score
-			end
-		end
-
-		for _, descendant in ipairs(root:GetDescendants()) do
-			if not descendant:IsA("Animation") then
-				continue
-			end
-
-			local score = MoguAssetCatalog.ScoreTokens(
-				MoguAssetCatalog.CollectSearchTokens(descendant, 0),
-				candidateNames,
-				keywords
-			)
-			if score > bestScore then
-				bestAnimation = descendant
-				bestScore = score
-			end
-		end
+	local animation, descriptor = AnimationResolver.GetAnimation(animationKey, {
+		Context = string.format("Mogu.Client.%s", tostring(stageKey)),
+	})
+	if animation then
+		logInfo("resolved stage=%s key=%s id=%s", tostring(stageKey), tostring(animationKey), tostring(descriptor and descriptor.AnimationId))
+		return animation, descriptor, animationKey
 	end
 
-	if bestAnimation and bestScore >= (MIN_SCORE_BY_STAGE[stageKey] or 40) then
-		logInfo("resolved stage=%s asset=%s score=%s", tostring(stageKey), bestAnimation:GetFullName(), tostring(bestScore))
-		return bestAnimation
-	end
-
-	logWarn("missing animation stage=%s bestScore=%s candidates=%s", tostring(stageKey), tostring(bestScore), table.concat(candidateNames, " | "))
-	return nil
+	logWarn("missing animation stage=%s key=%s", tostring(stageKey), tostring(animationKey))
+	return nil, descriptor, animationKey
 end
 
 local function playAnimationForPlayer(targetPlayer, stageKey, abilityConfig)
@@ -163,7 +72,7 @@ local function playAnimationForPlayer(targetPlayer, stageKey, abilityConfig)
 	end
 
 	local stageConfig = getStageAnimationConfig(stageKey, abilityConfig)
-	local animation = resolveAnimationAsset(stageKey, stageConfig)
+	local animation, descriptor, animationKey = resolveAnimationAsset(stageKey, stageConfig)
 	if not animation then
 		return nil
 	end
@@ -178,7 +87,7 @@ local function playAnimationForPlayer(targetPlayer, stageKey, abilityConfig)
 	local track, loadFailure = AnimationLoadDiagnostics.LoadTrack(
 		animator,
 		animation,
-		"ReplicatedStorage.Modules.DevilFruits.Mogu.Client.MoguAnimationController"
+		SOURCE_LABEL
 	)
 	if not track then
 		logWarn("animation failed stage=%s player=%s detail=%s", tostring(stageKey), tostring(targetPlayer.Name), tostring(loadFailure))
@@ -190,9 +99,24 @@ local function playAnimationForPlayer(targetPlayer, stageKey, abilityConfig)
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = stageConfig.Looped == true
 	track:Play(fadeTime, 1, playbackSpeed)
+	AnimationLoadDiagnostics.LogTrackPlay(
+		track,
+		SOURCE_LABEL,
+		string.format("Mogu.Client.%s", tostring(stageKey)),
+		descriptor and descriptor.AnimationId,
+		string.format(
+			"key=%s fade=%.3f speed=%.3f looped=%s",
+			tostring(animationKey),
+			fadeTime,
+			playbackSpeed,
+			tostring(track.Looped)
+		)
+	)
 
 	return {
 		Stage = stageKey,
+		AnimationKey = animationKey,
+		AnimationId = descriptor and descriptor.AnimationId,
 		Track = track,
 		StopFadeTime = math.max(0, tonumber(stageConfig.StopFadeTime) or DEFAULT_STOP_FADE_TIME),
 	}

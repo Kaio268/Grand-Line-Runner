@@ -23,8 +23,12 @@ local MODEL_VARIANT_ATTRIBUTE_PATTERNS = {
 local contextStackByTool = setmetatable({}, { __mode = "k" })
 local lastGripSignatureByTool = setmetatable({}, { __mode = "k" })
 
+local function shouldLogInfo()
+	return DEBUG_LOGS or ReplicatedStorage:GetAttribute("DebugFruitGrip") == true
+end
+
 local function logInfo(message, ...)
-	if not DEBUG_LOGS then
+	if not shouldLogInfo() then
 		return
 	end
 

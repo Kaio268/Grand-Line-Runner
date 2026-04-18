@@ -1,22 +1,40 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
+local AnimationResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 
 local DEBUG_R6_ANIM = true
 local PATCH_FLAG_ATTRIBUTE = "ReactR6AnimationPatched"
 
--- Classic Roblox R6 animation ids.
+-- R6 animate patch ids. Locomotion comes from the shared animation registry.
 local R6_IDS = {
 	idle = { "180435571", "180435792" },
-	walk = "180426354",
-	run = "180426354",
+	walk = AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "R6AnimationFix.Walk" }) or "rbxassetid://180426354",
+	run = AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "R6AnimationFix.Run" }) or "rbxassetid://180426354",
 	jump = "125750702",
 	fall = "180436148",
 	climb = "180436334",
-	swim = "180426354",
-	swimidle = "180426354",
+	swim = AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "R6AnimationFix.Swim" }) or "rbxassetid://180426354",
+	swimidle = AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "R6AnimationFix.SwimIdle" }) or "rbxassetid://180426354",
 }
+
+local R6G_IDS = {
+	walk = AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "R6AnimationFix.R6GWalk" }) or R6_IDS.walk,
+	run = AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "R6AnimationFix.R6GRun" }) or R6_IDS.run,
+	swim = AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "R6AnimationFix.R6GSwim" }) or R6_IDS.swim,
+	swimidle = AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "R6AnimationFix.R6GSwimIdle" }) or R6_IDS.swimidle,
+}
+
+local function toAnimationId(id)
+	local resolved = tostring(id or "")
+	if string.match(resolved, "^rbxassetid://") then
+		return resolved
+	end
+
+	return "rbxassetid://" .. resolved
+end
 
 local function debugLog(...)
 	if DEBUG_R6_ANIM then
@@ -48,22 +66,25 @@ local function setAnimationId(animateScript, folderName, animationName, id)
 		animation.Parent = folder
 	end
 
-	animation.AnimationId = "rbxassetid://" .. tostring(id)
+	animation.AnimationId = toAnimationId(id)
 end
 
-local function patchAnimateScript(animateScript)
-	setAnimationId(animateScript, "idle", "Animation1", R6_IDS.idle[1])
-	setAnimationId(animateScript, "idle", "Animation2", R6_IDS.idle[2])
-	setAnimationId(animateScript, "walk", "WalkAnim", R6_IDS.walk)
-	setAnimationId(animateScript, "run", "RunAnim", R6_IDS.run)
-	setAnimationId(animateScript, "jump", "JumpAnim", R6_IDS.jump)
-	setAnimationId(animateScript, "fall", "FallAnim", R6_IDS.fall)
-	setAnimationId(animateScript, "climb", "ClimbAnim", R6_IDS.climb)
-	setAnimationId(animateScript, "swim", "Swim", R6_IDS.swim)
-	setAnimationId(animateScript, "swimidle", "SwimIdle", R6_IDS.swimidle)
+local function patchAnimateScript(animateScript, movementIds, includeClassicR6States)
+	if includeClassicR6States then
+		setAnimationId(animateScript, "idle", "Animation1", R6_IDS.idle[1])
+		setAnimationId(animateScript, "idle", "Animation2", R6_IDS.idle[2])
+		setAnimationId(animateScript, "jump", "JumpAnim", R6_IDS.jump)
+		setAnimationId(animateScript, "fall", "FallAnim", R6_IDS.fall)
+		setAnimationId(animateScript, "climb", "ClimbAnim", R6_IDS.climb)
+	end
+
+	setAnimationId(animateScript, "walk", "WalkAnim", movementIds.walk)
+	setAnimationId(animateScript, "run", "RunAnim", movementIds.run)
+	setAnimationId(animateScript, "swim", "Swim", movementIds.swim)
+	setAnimationId(animateScript, "swimidle", "SwimIdle", movementIds.swimidle)
 end
 
-local function installVelocityFallback(character, humanoid)
+local function installVelocityFallback(character, humanoid, movementIds)
 	local rootPart = character:FindFirstChild("HumanoidRootPart") or character:WaitForChild("HumanoidRootPart", 10)
 	if not rootPart then
 		return
@@ -71,9 +92,9 @@ local function installVelocityFallback(character, humanoid)
 
 	local animator = ensureAnimator(humanoid)
 	local walkAnim = Instance.new("Animation")
-	walkAnim.AnimationId = "rbxassetid://" .. R6_IDS.walk
+	walkAnim.AnimationId = toAnimationId(movementIds.walk)
 	local runAnim = Instance.new("Animation")
-	runAnim.AnimationId = "rbxassetid://" .. R6_IDS.run
+	runAnim.AnimationId = toAnimationId(movementIds.run)
 
 	local walkTrack = animator:LoadAnimation(walkAnim)
 	local runTrack = animator:LoadAnimation(runAnim)
@@ -153,17 +174,30 @@ end
 
 local function patchCharacter(character)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.RigType ~= Enum.HumanoidRigType.R6 then
+	if not humanoid then
 		return
 	end
+
+	local rigVariant = AnimationResolver.ResolveRigVariant(player, character, humanoid, {
+		DefaultVariant = "Default",
+	})
+	local isClassicR6 = humanoid.RigType == Enum.HumanoidRigType.R6
+	local isR6G = rigVariant == "R6G"
+	if not isClassicR6 and not isR6G then
+		return
+	end
+
 	if character:GetAttribute(PATCH_FLAG_ATTRIBUTE) == true then
 		return
 	end
 	character:SetAttribute(PATCH_FLAG_ATTRIBUTE, true)
 
+	local movementIds = isR6G and R6G_IDS or R6_IDS
+	local patchRigName = isR6G and "R6G" or "R6"
+
 	local animateScript = character:FindFirstChild("Animate") or character:WaitForChild("Animate", 10)
 	if animateScript and animateScript:IsA("LocalScript") then
-		patchAnimateScript(animateScript)
+		patchAnimateScript(animateScript, movementIds, isClassicR6)
 		animateScript.Disabled = true
 		task.defer(function()
 			if animateScript.Parent and humanoid.Parent then
@@ -172,8 +206,8 @@ local function patchCharacter(character)
 		end)
 	end
 
-	installVelocityFallback(character, humanoid)
-	debugLog("patched R6 character", character:GetFullName())
+	installVelocityFallback(character, humanoid, movementIds)
+	debugLog("patched character", patchRigName, character:GetFullName())
 end
 
 player.CharacterAdded:Connect(function(character)

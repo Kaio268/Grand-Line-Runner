@@ -1,14 +1,25 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MeraAssetCatalog = require(script.Parent:WaitForChild("MeraAssetCatalog"))
+local AnimationResolver = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AnimationResolver")
+)
 
 local MeraAnimationResolver = {}
 
 local FLAME_DASH_CANDIDATES = { "Flame Dash", "FlameDash", "Dash" }
 local FLAME_DASH_PREFERRED_DESCENDANT_CONTAINERS = { "AnimSaves", "Flame Dash" }
+local REGISTRY_KEY_BY_MOVE = {
+	FlameDash = "Mera.FlameDash",
+	FireBurst = "Mera.FlameBurstR6",
+}
 local syntheticAnimationsById = {}
 
 function MeraAnimationResolver.BuildAnimationPath(assetName)
+	if typeof(assetName) == "string" and string.find(assetName, "%.") then
+		return AnimationResolver.BuildRegistryPath(assetName)
+	end
+
 	return string.format("ReplicatedStorage/Assets/Animations/Mera/%s", tostring(assetName or ""))
 end
 
@@ -96,6 +107,29 @@ local function appendAnimationCandidate(candidates, seenAnimations, animation, c
 		Source = tostring(sourceLabel or "candidate"),
 		SupportsReleaseMarker = supportsReleaseMarker ~= false,
 	}
+end
+
+local function appendRegistryCandidate(candidates, seenAnimations, moveName, animationKey)
+	local registryKey = animationKey or REGISTRY_KEY_BY_MOVE[tostring(moveName)]
+	if typeof(registryKey) ~= "string" or registryKey == "" then
+		return
+	end
+
+	local candidate = AnimationResolver.BuildCandidate(registryKey, {
+		Context = string.format("Mera.%s", tostring(moveName)),
+		SupportsReleaseMarker = true,
+	})
+	if not candidate then
+		return
+	end
+
+	local seenKey = tostring(candidate.AnimationId or "")
+	if seenKey == "" or seenAnimations[seenKey] then
+		return
+	end
+
+	seenAnimations[seenKey] = true
+	candidates[#candidates + 1] = candidate
 end
 
 local function getPreferredDescendantContainers(moveName, containerName)
@@ -226,10 +260,12 @@ local function collectKeywordCandidates(root, moveName, candidates, seenAnimatio
 	end
 end
 
-function MeraAnimationResolver.CollectAnimationCandidates(moveName, configuredAssetName, defaultAssetName)
+function MeraAnimationResolver.CollectAnimationCandidates(moveName, configuredAssetName, defaultAssetName, animationKey)
 	local candidateNames = getCandidateNames(moveName, configuredAssetName, defaultAssetName)
 	local candidates = {}
 	local seenAnimations = {}
+
+	appendRegistryCandidate(candidates, seenAnimations, moveName, animationKey)
 
 	for _, root in ipairs(getAnimationSearchRoots()) do
 		for _, candidateName in ipairs(candidateNames) do

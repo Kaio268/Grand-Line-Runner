@@ -1,3 +1,4 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local DiagnosticLogLimiter = require(script.Parent:WaitForChild("DiagnosticLogLimiter"))
@@ -12,8 +13,12 @@ local LOAD_FAILURE_COOLDOWN = 15
 
 local cachedFailureByAssetKey = {}
 
+local function shouldLogInfo()
+	return DEBUG_INFO or ReplicatedStorage:GetAttribute("DebugAnimationRegistry") == true
+end
+
 local function logInfo(message, ...)
-	if not DEBUG_INFO then
+	if not shouldLogInfo() then
 		return
 	end
 
@@ -104,6 +109,49 @@ function AnimationLoadDiagnostics.DescribeAnimation(animation)
 	return animation:GetFullName()
 end
 
+function AnimationLoadDiagnostics.GetTrackAnimationId(track)
+	if typeof(track) ~= "Instance" or not track:IsA("AnimationTrack") then
+		return nil
+	end
+
+	local okAnimation, animation = pcall(function()
+		return track.Animation
+	end)
+	if okAnimation and typeof(animation) == "Instance" and animation:IsA("Animation") then
+		local animationId = tostring(animation.AnimationId or "")
+		if animationId ~= "" then
+			return animationId
+		end
+	end
+
+	local okAnimationId, animationId = pcall(function()
+		return track.AnimationId
+	end)
+	if okAnimationId then
+		local resolvedAnimationId = tostring(animationId or "")
+		if resolvedAnimationId ~= "" then
+			return resolvedAnimationId
+		end
+	end
+
+	return nil
+end
+
+function AnimationLoadDiagnostics.LogTrackPlay(track, sourceLabel, contextLabel, requestedAnimationId, detail)
+	local resolvedSource = tostring(sourceLabel or "unknown")
+	local resolvedContext = tostring(contextLabel or "unknown")
+	local resolvedRequestedId = tostring(requestedAnimationId or "<unknown>")
+	local trackAnimationId = AnimationLoadDiagnostics.GetTrackAnimationId(track) or "<unavailable>"
+	logInfo(
+		"track play reached context=%s source=%s requestedId=%s trackId=%s detail=%s",
+		resolvedContext,
+		resolvedSource,
+		resolvedRequestedId,
+		trackAnimationId,
+		tostring(detail or "")
+	)
+end
+
 function AnimationLoadDiagnostics.IsPermissionError(message)
 	local loweredMessage = string.lower(tostring(message or ""))
 	return string.find(loweredMessage, "access permission", 1, true) ~= nil
@@ -142,6 +190,13 @@ function AnimationLoadDiagnostics.LoadTrack(animator, animation, sourceLabel)
 	end)
 	if ok and trackOrError then
 		AnimationLoadDiagnostics.ClearFailure(animation)
+		logInfo(
+			"track created asset=%s source=%s requestedId=%s trackId=%s",
+			assetDescription,
+			resolvedSource,
+			getAnimationId(animation),
+			tostring(AnimationLoadDiagnostics.GetTrackAnimationId(trackOrError) or "<unavailable>")
+		)
 		return trackOrError, nil
 	end
 

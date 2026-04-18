@@ -1,15 +1,47 @@
+local HELD_FRUIT_GRIP_BIAS = Vector3.new(0.96, -0.06, 0.12)
+local HELD_FRUIT_RUNTIME_GRIP = CFrame.new(0.18, -0.9, -1.35) * CFrame.Angles(math.rad(-4), math.rad(10), math.rad(-8))
+local EAT_FRUIT_RUNTIME_GRIP = CFrame.new(0.16, -0.34, -0.92) * CFrame.Angles(math.rad(-6), 0, math.rad(-8))
+local HELD_FRUIT_R6_HAND_TARGET_LOCAL = Vector3.new(0.55, -0.55, -1.68)
+local HELD_FRUIT_R6_SHOULDER_POSE = CFrame.Angles(math.rad(10), math.rad(10), math.rad(40))
+local HELD_FRUIT_R15_SHOULDER_POSE = CFrame.Angles(math.rad(-34), math.rad(-6), math.rad(18))
+local HELD_FRUIT_R15_ELBOW_POSE = CFrame.Angles(math.rad(-8), 0, 0)
+local HELD_FRUIT_R15_WRIST_POSE = CFrame.Angles(math.rad(0), math.rad(0), math.rad(-8))
+
 local DevilFruits = {
 	None = "",
 	GripDefaults = {
-		RuntimeGrip = CFrame.new(0, -0.08, -0.95),
+		RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
+		EquippedPresentation = {
+			Enabled = true,
+			DebugAttribute = "DebugFruitHoldPresentation",
+			FadeSpeed = 14,
+			DisableContexts = {
+				Eat = true,
+			},
+			R6 = {
+				Mode = "ArmTarget",
+				BlendMode = "Replace",
+				HandTargetLocal = HELD_FRUIT_R6_HAND_TARGET_LOCAL,
+				Joints = {
+					["Right Shoulder"] = HELD_FRUIT_R6_SHOULDER_POSE,
+				},
+			},
+			R15 = {
+				Joints = {
+					RightShoulder = HELD_FRUIT_R15_SHOULDER_POSE,
+					RightElbow = HELD_FRUIT_R15_ELBOW_POSE,
+					RightWrist = HELD_FRUIT_R15_WRIST_POSE,
+				},
+			},
+		},
 		Models = {
 			R6G = {
-				RuntimeGrip = CFrame.new(),
+				RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
 			},
 		},
 		Contexts = {
 			Eat = {
-				RuntimeGrip = CFrame.new(0.12, 0.42, -0.58),
+				RuntimeGrip = EAT_FRUIT_RUNTIME_GRIP,
 			},
 		},
 	},
@@ -22,7 +54,7 @@ local DevilFruits = {
 			AssetFolder = "Mera",
 			AbilityModule = "Mera",
 			Rarity = "Legendary",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = { "mera", "mera mera" },
 			Abilities = {
 				FlameDash = {
@@ -56,7 +88,7 @@ local DevilFruits = {
 						},
 					},
 					Animation = {
-						AssetName = "Flame Dash",
+						AnimationKey = "Mera.FlameDash",
 						FadeTime = 0.04,
 						StopFadeTime = 0.08,
 						PlaybackSpeed = 1.12,
@@ -69,7 +101,7 @@ local DevilFruits = {
 					Duration = 0.6,
 					VisualBaseRadius = 10,
 					Animation = {
-						AssetName = "Flame burst",
+						AnimationKey = "Mera.FlameBurstR6",
 						ReleaseMarker = "Release",
 						ReleaseFallbackTime = 0.22,
 						FadeTime = 0.06,
@@ -86,7 +118,7 @@ local DevilFruits = {
 			AssetFolder = "Hie",
 			AbilityModule = "Hie",
 			Rarity = "Legendary",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = { "hie", "hie hie" },
 			Abilities = {
 				FreezeShot = {
@@ -107,7 +139,7 @@ local DevilFruits = {
 					SpawnLeadTime = 0.08,
 					MaxSpawnLead = 8,
 					Animation = {
-						AssetName = "IceBlast",
+						AnimationKey = "Hie.IceBlast",
 						ReleaseMarker = "IceBlast",
 						ReleaseFallbackTime = 0.22,
 						FadeTime = 0.08,
@@ -127,7 +159,7 @@ local DevilFruits = {
 					Duration = 4,
 					SpeedMultiplier = 2,
 					Animation = {
-						AssetName = "IceBoost",
+						AnimationKey = "Hie.IceBoost",
 						FadeTime = 0.08,
 						StopFadeTime = 0.12,
 						Looped = true,
@@ -142,14 +174,14 @@ local DevilFruits = {
 			AssetFolder = "Gomu",
 			AbilityModule = "Gomu",
 			Rarity = "Rare",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			GripProfiles = {
 				Models = {
 					R6G = {
-						RuntimeGrip = CFrame.new(),
+						RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
 					},
 					ModelSwap = {
-						RuntimeGrip = CFrame.new(),
+						RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
 					},
 				},
 			},
@@ -163,7 +195,7 @@ local DevilFruits = {
 					SpeedScaleReference = 70,
 					SpeedLaunchDistanceBonus = 32,
 					Animation = {
-						AssetName = "Rocket",
+						AnimationKey = "Gomu.Rocket",
 						FadeTime = 0.04,
 						StopFadeTime = 0.08,
 						PlaybackSpeed = 1,
@@ -186,7 +218,7 @@ local DevilFruits = {
 			AssetFolder = "Bomu",
 			AbilityModule = "Bomu",
 			Rarity = "Rare",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = { "bomu", "bomu bomu", "bomb", "bomb fruit" },
 			Abilities = {
 				LandMine = {
@@ -213,7 +245,7 @@ local DevilFruits = {
 			AssetFolder = "Mogu",
 			AbilityModule = "Mogu",
 			Rarity = "Common",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = { "mogu", "mogu mogu", "mole", "mole fruit" },
 			Abilities = {
 				Burrow = {
@@ -236,7 +268,7 @@ local DevilFruits = {
 					ConcealTransparency = 1,
 					Animation = {
 						Start = {
-							AssetName = "Dive",
+							AnimationKey = "Mogu.Dive",
 							FadeTime = 0.05,
 							StopFadeTime = 0.08,
 							PlaybackSpeed = 1,
@@ -247,7 +279,7 @@ local DevilFruits = {
 							ConcealDelay = 0.24,
 						},
 						Resolve = {
-							AssetName = "Exit",
+							AnimationKey = "Mogu.Exit",
 							FadeTime = 0.05,
 							StopFadeTime = 0.1,
 							PlaybackSpeed = 1,
@@ -290,7 +322,7 @@ local DevilFruits = {
 			AssetFolder = "Suke",
 			AbilityModule = "Suke",
 			Rarity = "Common",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = { "suke", "suke suke", "invisible", "invisibility fruit" },
 			Abilities = {
 				Fade = {
@@ -324,7 +356,7 @@ local DevilFruits = {
 			AssetFolder = "Horo",
 			AbilityModule = "Horo",
 			Rarity = "Common",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = { "horo", "horo horo", "ghost", "ghost fruit", "projection fruit" },
 			Abilities = {
 				GhostProjection = {
@@ -366,7 +398,7 @@ local DevilFruits = {
 			AssetFolder = "Tori",
 			AbilityModule = "Tori",
 			Rarity = "Mythic",
-			ToolGripBias = Vector3.new(0.72, -0.12, 0.18),
+			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			Aliases = {
 				"tori",
 				"tori tori",

@@ -1,37 +1,5 @@
 local MoguAssetCatalog = {}
 
-MoguAssetCatalog.AnimationCandidates = {
-	Start = {
-		"Dig",
-		"Start up",
-		"Startup",
-		"Start",
-		"Burrow Start",
-		"BurrowStart",
-		"Dig Down",
-		"DigDown",
-		"Burrow Down",
-		"Burrow",
-	},
-	Resolve = {
-		"Jump",
-		"End",
-		"Resolve",
-		"Burrow Resolve",
-		"BurrowResolve",
-		"Jump Up",
-		"JumpUp",
-		"Surface",
-		"Burrow Exit",
-		"Exit",
-	},
-}
-
-MoguAssetCatalog.AnimationKeywords = {
-	Start = { "burrow", "dig", "down", "enter", "start", "startup" },
-	Resolve = { "burrow", "surface", "jump", "up", "resolve", "exit", "end", "finish" },
-}
-
 MoguAssetCatalog.VfxEffectCandidates = {
 	Entry = {
 		"Dig",
@@ -98,17 +66,6 @@ function MoguAssetCatalog.NormalizeToken(value)
 	local normalized = string.lower(tostring(value or ""))
 	normalized = normalized:gsub("[%s%p_]+", "")
 	return normalized
-end
-
-function MoguAssetCatalog.GetAnimationCandidates(stageKey, configuredAssetName)
-	return MoguAssetCatalog.BuildCandidateList(
-		configuredAssetName,
-		MoguAssetCatalog.AnimationCandidates[stageKey] or {}
-	)
-end
-
-function MoguAssetCatalog.GetAnimationKeywords(stageKey)
-	return MoguAssetCatalog.AnimationKeywords[stageKey] or {}
 end
 
 function MoguAssetCatalog.GetVfxCandidates(stageKey, configuredAssetName)

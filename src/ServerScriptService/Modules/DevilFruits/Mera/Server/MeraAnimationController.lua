@@ -16,6 +16,7 @@ local DEFAULT_STOP_FADE_TIME = 0.1
 local INFO_COOLDOWN = 0.2
 local WARN_COOLDOWN = 3
 local ANIMATION_FAILURE_RETRY_COOLDOWN = 10
+local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.MeraAnimationController"
 
 local animationFailureStateByKey = {}
 
@@ -120,10 +121,11 @@ local function stopTrack(track, fadeTime)
 	end)
 end
 
-local function playAnimation(character, moveName, animationConfig, defaultAssetName)
+local function playAnimation(character, moveName, animationConfig, defaultAssetName, defaultAnimationKey)
 	local resolvedConfig = type(animationConfig) == "table" and animationConfig or {}
-	local assetName = resolvedConfig.AssetName or defaultAssetName
-	local failureKey = buildAnimationFailureKey(moveName, assetName, defaultAssetName)
+	local legacyAssetName = resolvedConfig.AssetName or defaultAssetName
+	local animationKey = resolvedConfig.AnimationKey or defaultAnimationKey
+	local failureKey = buildAnimationFailureKey(moveName, animationKey or legacyAssetName, defaultAnimationKey or defaultAssetName)
 	local cachedFailure = getCachedAnimationFailure(failureKey)
 	if cachedFailure then
 		logInfo(
@@ -137,19 +139,19 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 
 	local animator = getAnimator(character)
 	if not animator then
-		local animationPath = MeraAnimationResolver.BuildAnimationPath(assetName)
+		local animationPath = MeraAnimationResolver.BuildAnimationPath(animationKey or legacyAssetName)
 		logWarn("animation missing or failed to load move=%s path=%s detail=animator_missing", tostring(moveName), tostring(animationPath))
 		logAnimPipeline("WARN", "server animator missing fruit=%s move=%s path=%s", "Mera Mera no Mi", tostring(moveName), tostring(animationPath))
 		return nil
 	end
-	logAnimPipeline("INFO", "server animator ready fruit=%s move=%s asset=%s", "Mera Mera no Mi", tostring(moveName), tostring(assetName))
+	logAnimPipeline("INFO", "server animator ready fruit=%s move=%s asset=%s", "Mera Mera no Mi", tostring(moveName), tostring(animationKey or legacyAssetName))
 
-	local animationCandidates, candidateNames = MeraAnimationResolver.CollectAnimationCandidates(moveName, assetName, defaultAssetName)
+	local animationCandidates, candidateNames = MeraAnimationResolver.CollectAnimationCandidates(moveName, legacyAssetName, defaultAssetName, animationKey)
 	if #animationCandidates == 0 then
 		logWarn(
 			"animation candidate catalog empty move=%s path=%s names=%s detail=no_animation_candidates",
 			tostring(moveName),
-			tostring(MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or assetName)),
+			tostring(MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or legacyAssetName or animationKey)),
 			table.concat(candidateNames or {}, "|")
 		)
 	end
@@ -163,7 +165,7 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 		local track, loadFailure = AnimationLoadDiagnostics.LoadTrack(
 			animator,
 			candidate.Animation,
-			"ServerScriptService.Modules.DevilFruits.MeraAnimationController"
+			SOURCE_LABEL
 		)
 		if track then
 			selectedTrack = track
@@ -198,7 +200,7 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 	if not selectedTrack then
 		local rejectedCandidate = rejectedPermissionCandidate or rejectedLoadCandidate
 		local animationPath = rejectedCandidate and rejectedCandidate.Path
-			or MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or assetName)
+			or MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or legacyAssetName or animationKey)
 		local detail = lastFailure
 		if rejectedPermissionCandidate then
 			detail = string.format("permission_denied:%s", tostring(rejectedPermissionCandidate.AnimationId))
@@ -254,6 +256,21 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 		)
 		return nil
 	end
+	AnimationLoadDiagnostics.LogTrackPlay(
+		selectedTrack,
+		SOURCE_LABEL,
+		string.format("Mera.%s", tostring(moveName)),
+		selectedCandidate and selectedCandidate.AnimationId,
+		string.format(
+			"key=%s path=%s source=%s fade=%.3f speed=%.3f looped=%s",
+			tostring(animationKey or "<legacy>"),
+			tostring(selectedCandidate and selectedCandidate.Path),
+			tostring(selectedCandidate and selectedCandidate.Source),
+			fadeTime,
+			playbackSpeed,
+			tostring(selectedTrack.Looped)
+		)
+	)
 	logAnimPipeline("INFO", "server animation play reached fruit=%s move=%s path=%s", "Mera Mera no Mi", tostring(moveName), tostring(selectedCandidate and selectedCandidate.Path))
 	logInfo(
 		"move=%s animation selected path=%s id=%s source=%s",
@@ -266,7 +283,8 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 
 	return {
 		MoveName = moveName,
-		AssetName = assetName,
+		AssetName = legacyAssetName,
+		AnimationKey = animationKey,
 		AnimationPath = selectedCandidate and selectedCandidate.Path,
 		AnimationId = selectedCandidate and selectedCandidate.AnimationId,
 		AnimationSource = selectedCandidate and selectedCandidate.Source,
@@ -381,11 +399,11 @@ local function waitForRelease(moveName, animationState, animationConfig)
 end
 
 function MeraAnimationController.PlayFlameDashAnimation(character, animationConfig)
-	return playAnimation(character, "FlameDash", animationConfig, "Flame Dash")
+	return playAnimation(character, "FlameDash", animationConfig, "Flame Dash", "Mera.FlameDash")
 end
 
 function MeraAnimationController.PlayFireBurstAnimation(character, animationConfig)
-	return playAnimation(character, "FireBurst", animationConfig, "Flame burst")
+	return playAnimation(character, "FireBurst", animationConfig, "Flame burst", "Mera.FlameBurstR6")
 end
 
 function MeraAnimationController.WaitForFireBurstRelease(animationState, animationConfig)

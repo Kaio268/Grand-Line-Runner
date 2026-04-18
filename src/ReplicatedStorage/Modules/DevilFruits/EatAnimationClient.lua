@@ -5,10 +5,10 @@ local RunService = game:GetService("RunService")
 local AnimationLoadDiagnostics = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local FruitGripController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("FruitGripController"))
+local AnimationResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 
 local EatAnimationClient = {}
 
-local EAT_FRUIT_FOLDER_NAME = "EatFruit"
 local RIG_FOLDER_R6 = "R6"
 local RIG_FOLDER_R6G = "R6G"
 local RIG_ATTRIBUTE_NAMES = {
@@ -24,6 +24,7 @@ local WARN_COOLDOWN = 3
 local ANIMATE_WARN_COOLDOWN = 4
 local MIN_VISIBLE_PLAY_TIME = 0.85
 local POST_PLAY_BUFFER = 0.1
+local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.EatAnimationClient"
 local OWN_DIAGNOSTIC_PREFIXES = {
 	"[ANIMATE][WARN]",
 	"[ANIMATE]",
@@ -77,12 +78,6 @@ local function formatTrackState(track)
 		tonumber(track.Speed) or 0,
 		tonumber(track.WeightCurrent) or 0
 	)
-end
-
-local function getAnimationsRoot()
-	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
-	local animationsFolder = assetsFolder and assetsFolder:FindFirstChild("Animations")
-	return animationsFolder
 end
 
 local function describeAnimationAsset(animation)
@@ -228,11 +223,6 @@ local function ensureAnimateDiagnosticsHook()
 	end)
 end
 
-local function getEatFruitFolder()
-	local animationsRoot = getAnimationsRoot()
-	return animationsRoot and animationsRoot:FindFirstChild(EAT_FRUIT_FOLDER_NAME) or nil
-end
-
 local function normalizeRigFolderName(value)
 	if typeof(value) ~= "string" then
 		return nil
@@ -292,140 +282,47 @@ local function detectRigFolderName(player, character, humanoid)
 	return nil
 end
 
-local function collectFolderAnimations(folder)
-	if not folder or not folder:IsA("Instance") then
-		return {}
-	end
-
-	local candidates = {}
-	for _, child in ipairs(folder:GetChildren()) do
-		logInfo("inspecting folder child name=%s class=%s", child.Name, child.ClassName)
-
-		if not child:IsA("Animation") then
-			logWarn("folder child is not Animation name=%s class=%s", child.Name, child.ClassName)
-			continue
-		end
-
-		local animationId = tostring(child.AnimationId or "")
-		if animationId == "" then
-			logWarn("AnimationId missing or empty name=%s path=%s", child.Name, child:GetFullName())
-			continue
-		end
-
-		candidates[#candidates + 1] = child
-	end
-
-	return candidates
-end
-
-local function getDirectAnimationOrWarn(animation, rigFolderName)
-	if not animation:IsA("Animation") then
-		logWarn("rig target is not Animation name=%s class=%s", animation.Name, animation.ClassName)
-		return nil
-	end
-
-	local animationId = tostring(animation.AnimationId or "")
-	if animationId == "" then
-		logWarn("AnimationId missing or empty name=%s path=%s", animation.Name, animation:GetFullName())
-		return nil
-	end
-
-	logInfo("found direct animation instance for %s", rigFolderName)
-	return animation
-end
-
-local function getRigTargetOrWarn(eatFruitFolder, rigFolderName)
-	if not eatFruitFolder then
-		logWarn("no valid EatFruit folder animation found path=ReplicatedStorage/Assets/Animations/%s", EAT_FRUIT_FOLDER_NAME)
-		return nil
-	end
-
-	if not rigFolderName then
-		logWarn("no valid EatFruit folder animation found reason=unsupported_rig")
-		return nil
-	end
-
-	local rigTarget = eatFruitFolder:FindFirstChild(rigFolderName)
-	if rigTarget then
-		if rigTarget:IsA("Animation") then
-			return getDirectAnimationOrWarn(rigTarget, rigFolderName)
-		end
-
-		if rigTarget:IsA("Folder") then
-			logInfo("found folder, searching children")
-			return rigTarget
-		end
-
-		logWarn("rig target is not supported name=%s class=%s", rigTarget.Name, rigTarget.ClassName)
-		return nil
-	end
-
-	local availableRigFolders = {}
-	for _, child in ipairs(eatFruitFolder:GetChildren()) do
-		if child:IsA("Folder") or child:IsA("Animation") then
-			availableRigFolders[#availableRigFolders + 1] = child.Name
-		end
-	end
-
-	if #availableRigFolders > 0 then
-		logWarn(
-			"rig mismatch for EatFruit animation requested=%s available=%s",
-			rigFolderName,
-			table.concat(availableRigFolders, ",")
-		)
-	end
-
-	logWarn("no valid EatFruit folder animation found path=%s/%s", eatFruitFolder:GetFullName(), rigFolderName)
-	return nil
-end
-
 local function loadEatAnimationTrack(player, character, humanoid, animator)
-	local eatFruitFolder = getEatFruitFolder()
 	local rigFolderName = detectRigFolderName(player, character, humanoid)
-	local rigTarget = getRigTargetOrWarn(eatFruitFolder, rigFolderName)
-	if not rigTarget then
+	if not rigFolderName then
+		logWarn("no valid EatFruit registry animation found reason=unsupported_rig")
 		return nil, nil, nil
 	end
 
-	logInfo("using folder animation only")
-
-	local candidates
-	if rigTarget:IsA("Animation") then
-		candidates = { rigTarget }
-	else
-		candidates = collectFolderAnimations(rigTarget)
-	end
-
-	if #candidates == 0 then
-		logWarn("no valid EatFruit folder animation found path=%s", rigTarget:GetFullName())
+	local animation, descriptor = AnimationResolver.GetAnimation("EatFruit", {
+		Variant = rigFolderName,
+		Context = "EatFruit",
+	})
+	if not animation then
+		logWarn(
+			"no valid EatFruit registry animation found rig=%s detail=%s",
+			tostring(rigFolderName),
+			tostring(descriptor and descriptor.Source or "missing_registry_animation")
+		)
 		return nil, nil, rigFolderName
 	end
 
-	for _, animation in ipairs(candidates) do
-		local assetDescription = describeAnimationAsset(animation)
-		logInfo("eat pose animation selected: %s", assetDescription)
-		logInfo("studio asset candidate: %s", assetDescription)
-		logInfo("asset resolved: %s", assetDescription)
+	local assetDescription = descriptor and descriptor.Path or describeAnimationAsset(animation)
+	logInfo("eat pose animation selected: %s", assetDescription)
+	logInfo("asset resolved: %s id=%s", assetDescription, tostring(descriptor and descriptor.AnimationId))
 
-		local trackOrError, loadFailure = AnimationLoadDiagnostics.LoadTrack(
-			animator,
-			animation,
-			"ReplicatedStorage.Modules.DevilFruits.EatAnimationClient"
-		)
-		if trackOrError then
-			logInfo("selected folder animation: %s", assetDescription)
-			logInfo("load success state=%s", formatTrackState(trackOrError))
-			return trackOrError, animation, rigFolderName
-		end
-
-		local errorMessage = tostring(loadFailure)
-		logWarn("load failed asset=%s detail=%s", assetDescription, errorMessage)
-		if AnimationLoadDiagnostics.IsPermissionError(errorMessage) or errorMessage == "permission_denied" then
-			logWarn("experience lacks permission for asset asset=%s", assetDescription)
-		end
+	local trackOrError, loadFailure = AnimationLoadDiagnostics.LoadTrack(
+		animator,
+		animation,
+		SOURCE_LABEL
+	)
+	if trackOrError then
+		logInfo("selected registry animation: %s", assetDescription)
+		logInfo("load success state=%s", formatTrackState(trackOrError))
+		return trackOrError, animation, rigFolderName
 	end
 
-	logWarn("no valid EatFruit folder animation found path=%s", rigTarget:GetFullName())
+	local errorMessage = tostring(loadFailure)
+	logWarn("load failed asset=%s detail=%s", assetDescription, errorMessage)
+	if AnimationLoadDiagnostics.IsPermissionError(errorMessage) or errorMessage == "permission_denied" then
+		logWarn("experience lacks permission for asset asset=%s", assetDescription)
+	end
+
 	return nil, nil, rigFolderName
 end
 
@@ -472,6 +369,13 @@ function EatAnimationClient.Play(player, fruitKey)
 		StartedAt = os.clock(),
 	}
 	track:Play(0.1, 1, 1)
+	AnimationLoadDiagnostics.LogTrackPlay(
+		track,
+		SOURCE_LABEL,
+		"EatFruit",
+		selectedAnimation and selectedAnimation.AnimationId,
+		string.format("rig=%s fade=0.100 speed=1.000 looped=%s", tostring(rigFolderName or "<unknown>"), tostring(track.Looped))
+	)
 	task.wait()
 	local playConfirmed = track.IsPlaying or (tonumber(track.TimePosition) or 0) > 0
 	if playConfirmed then

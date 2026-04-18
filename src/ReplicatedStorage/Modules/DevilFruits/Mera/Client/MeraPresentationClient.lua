@@ -52,6 +52,7 @@ local FLAME_DASH_END_HINT_DISTANCE_TOLERANCE = 2.5
 local FLAME_DASH_ACTIVE_MARKERS = { "Jump", "DashStart", "DashActive", "DashLoop", "Dash", "Swipe" }
 local FLAME_DASH_END_MARKERS = { "DashEnd", "End", "Launch", "Complete", "Stop" }
 local ANIMATION_FAILURE_RETRY_COOLDOWN = 10
+local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.MeraPresentationClient"
 
 local animationFailureStateByKey = {}
 
@@ -1003,7 +1004,7 @@ function MeraPresentationClient:EnsureFireBurstAnimation(state)
 	end
 
 	local targetPlayer = state.TargetPlayer
-	local track, animationPath, loadFailure, selectedCandidate = self:PlayAnimation(targetPlayer, "FireBurst", "Flame burst")
+	local track, animationPath, loadFailure, selectedCandidate = self:PlayAnimation(targetPlayer, "FireBurst", "Flame burst", "Mera.FlameBurstR6")
 	state.AnimationTrack = track
 	state.AnimationPath = animationPath
 	state.AnimationFailure = loadFailure
@@ -1017,11 +1018,14 @@ function MeraPresentationClient:EnsureFireBurstAnimation(state)
 			state.AnimationTrack = nil
 		end))
 		logFireBurst(
-			"animation started player=%s cast=%s path=%s source=%s",
+			"animation started player=%s cast=%s path=%s id=%s key=%s source=%s trackId=%s",
 			targetPlayer and targetPlayer.Name or "<nil>",
 			tostring(state.CastId),
 			tostring(animationPath),
-			tostring(selectedCandidate and selectedCandidate.Source or "resolved_track")
+			tostring(selectedCandidate and selectedCandidate.AnimationId),
+			tostring(selectedCandidate and selectedCandidate.LogicalKey),
+			tostring(selectedCandidate and selectedCandidate.Source or "resolved_track"),
+			tostring(AnimationLoadDiagnostics.GetTrackAnimationId(track) or "<unavailable>")
 		)
 		return track
 	end
@@ -1440,7 +1444,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 	return state
 end
 
-function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAssetName, options)
+function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAssetName, defaultAnimationKey, options)
 	if not targetPlayer or not targetPlayer:IsA("Player") then
 		return nil
 	end
@@ -1448,8 +1452,9 @@ function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAss
 	options = type(options) == "table" and options or {}
 
 	local animationConfig = self:GetAnimationConfig(moveName)
-	local assetName = (animationConfig and animationConfig.AssetName) or defaultAssetName
-	local failureKey = buildAnimationFailureKey(moveName, assetName, defaultAssetName)
+	local legacyAssetName = (animationConfig and animationConfig.AssetName) or defaultAssetName
+	local animationKey = (animationConfig and animationConfig.AnimationKey) or defaultAnimationKey
+	local failureKey = buildAnimationFailureKey(moveName, animationKey or legacyAssetName, defaultAnimationKey or defaultAssetName)
 	local cachedFailure = getCachedAnimationFailure(failureKey)
 	if cachedFailure then
 		logAnimInfo(
@@ -1463,17 +1468,17 @@ function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAss
 
 	local animator = getAnimator(targetPlayer)
 	if not animator then
-		local animationPath = MeraAnimationResolver.BuildAnimationPath(assetName)
+		local animationPath = MeraAnimationResolver.BuildAnimationPath(animationKey or legacyAssetName)
 		logAnimWarn("animation missing or failed to load move=%s path=%s detail=animator_missing", tostring(moveName), tostring(animationPath))
 		return nil, animationPath, "animator_missing", nil
 	end
 
-	local animationCandidates, candidateNames = MeraAnimationResolver.CollectAnimationCandidates(moveName, assetName, defaultAssetName)
+	local animationCandidates, candidateNames = MeraAnimationResolver.CollectAnimationCandidates(moveName, legacyAssetName, defaultAssetName, animationKey)
 	if #animationCandidates == 0 then
 		logAnimWarn(
 			"animation candidate catalog empty move=%s path=%s names=%s detail=no_animation_candidates",
 			tostring(moveName),
-			tostring(MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or assetName)),
+			tostring(MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or legacyAssetName or animationKey)),
 			table.concat(candidateNames or {}, "|")
 		)
 	end
@@ -1487,7 +1492,7 @@ function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAss
 		local track, loadFailure = AnimationLoadDiagnostics.LoadTrack(
 			animator,
 			candidate.Animation,
-			"ReplicatedStorage.Modules.DevilFruits.MeraPresentationClient"
+			SOURCE_LABEL
 		)
 		if track then
 			selectedTrack = track
@@ -1522,7 +1527,7 @@ function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAss
 	if not selectedTrack then
 		local rejectedCandidate = rejectedPermissionCandidate or rejectedLoadCandidate
 		local primaryPath = rejectedCandidate and rejectedCandidate.Path
-			or MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or assetName)
+			or MeraAnimationResolver.BuildAnimationPath((candidateNames and candidateNames[1]) or legacyAssetName or animationKey)
 		local detail = lastFailure
 		if rejectedPermissionCandidate then
 			detail = string.format("permission_denied:%s", tostring(rejectedPermissionCandidate.AnimationId))
@@ -1569,6 +1574,21 @@ function MeraPresentationClient:PlayAnimation(targetPlayer, moveName, defaultAss
 			)
 			return nil, selectedCandidate and selectedCandidate.Path, tostring(err), selectedCandidate
 		end
+		AnimationLoadDiagnostics.LogTrackPlay(
+			selectedTrack,
+			SOURCE_LABEL,
+			string.format("Mera.%s", tostring(moveName)),
+			selectedCandidate and selectedCandidate.AnimationId,
+			string.format(
+				"key=%s path=%s source=%s fade=%.3f speed=%.3f looped=%s deferred=false",
+				tostring(selectedCandidate and selectedCandidate.LogicalKey or animationKey or "<legacy>"),
+				tostring(selectedCandidate and selectedCandidate.Path),
+				tostring(selectedCandidate and selectedCandidate.Source),
+				fadeTime,
+				playbackSpeed,
+				tostring(selectedTrack.Looped)
+			)
+		)
 	end
 	selectedTrack.Stopped:Connect(function()
 		if bucket[moveName] == selectedTrack then
@@ -1595,7 +1615,7 @@ function MeraPresentationClient:PlayFlameDashStartup(targetPlayer, _payload, _is
 	end
 
 	local animationConfig = self:GetAnimationConfig("FlameDash")
-	local track, animationPath, loadFailure, selectedCandidate = self:PlayAnimation(targetPlayer, "FlameDash", "Flame Dash", {
+	local track, animationPath, loadFailure, selectedCandidate = self:PlayAnimation(targetPlayer, "FlameDash", "Flame Dash", "Mera.FlameDash", {
 		DeferPlay = true,
 	})
 	local state = self:StartFlameDashVfx(targetPlayer, _payload or {}, track)
@@ -1614,11 +1634,29 @@ function MeraPresentationClient:PlayFlameDashStartup(targetPlayer, _payload, _is
 			track:Play(fadeTime, 1, playbackSpeed)
 		end)
 		if ok then
+			AnimationLoadDiagnostics.LogTrackPlay(
+				track,
+				SOURCE_LABEL,
+				"Mera.FlameDash",
+				selectedCandidate and selectedCandidate.AnimationId,
+				string.format(
+					"key=%s path=%s source=%s fade=%.3f speed=%.3f looped=%s deferred=true",
+					tostring(selectedCandidate and selectedCandidate.LogicalKey or "Mera.FlameDash"),
+					tostring(animationPath),
+					tostring(selectedCandidate and selectedCandidate.Source),
+					fadeTime,
+					playbackSpeed,
+					tostring(track.Looped)
+				)
+			)
 			logMove(
-				"move=FlameDash animation player=%s path=%s source=%s",
+				"move=FlameDash animation player=%s path=%s id=%s key=%s source=%s trackId=%s",
 				targetPlayer.Name,
 				tostring(animationPath),
-				tostring(selectedCandidate and selectedCandidate.Source or "resolved_track")
+				tostring(selectedCandidate and selectedCandidate.AnimationId),
+				tostring(selectedCandidate and selectedCandidate.LogicalKey),
+				tostring(selectedCandidate and selectedCandidate.Source or "resolved_track"),
+				tostring(AnimationLoadDiagnostics.GetTrackAnimationId(track) or "<unavailable>")
 			)
 		else
 			logAnimWarn(

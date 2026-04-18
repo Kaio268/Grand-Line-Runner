@@ -3,6 +3,7 @@ local RunService = game:GetService("RunService")
 
 local AnimationLoadDiagnostics = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
+local AnimationResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 
 local GomuAnimationController = {}
 
@@ -11,6 +12,7 @@ local DEFAULT_FADE_TIME = 0.06
 local DEFAULT_STOP_FADE_TIME = 0.1
 local INFO_COOLDOWN = 0.2
 local WARN_COOLDOWN = 3
+local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.Gomu.Server.GomuAnimationController"
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -32,35 +34,26 @@ local function logWarn(message, ...)
 	warn(string.format("[GOMU ANIM][WARN] " .. message, ...))
 end
 
-local function getAnimationFolder()
-	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
-	local animationsFolder = assetsFolder and assetsFolder:FindFirstChild("Animations")
-	return animationsFolder and animationsFolder:FindFirstChild("Gomu") or nil
-end
-
-local function getAnimationAsset(moveName, assetName)
-	if typeof(assetName) ~= "string" or assetName == "" then
-		logWarn("animation missing or failed to load move=%s detail=invalid_asset_name", tostring(moveName))
-		return nil
+local function getAnimationAsset(moveName, animationKey)
+	if typeof(animationKey) ~= "string" or animationKey == "" then
+		logWarn("animation missing or failed to load move=%s detail=invalid_animation_key", tostring(moveName))
+		return nil, nil
 	end
 
-	local gomuFolder = getAnimationFolder()
-	if not gomuFolder then
-		logWarn("animation missing or failed to load move=%s path=ReplicatedStorage/Assets/Animations/Gomu detail=missing_folder", tostring(moveName))
-		return nil
-	end
-
-	local animation = gomuFolder:FindFirstChild(assetName)
-	if animation and animation:IsA("Animation") then
-		return animation
+	local animation, descriptor = AnimationResolver.GetAnimation(animationKey, {
+		Context = string.format("Gomu.%s", tostring(moveName)),
+	})
+	if animation then
+		return animation, descriptor
 	end
 
 	logWarn(
-		"animation missing or failed to load move=%s path=ReplicatedStorage/Assets/Animations/Gomu/%s detail=missing_animation",
+		"animation missing or failed to load move=%s key=%s detail=%s",
 		tostring(moveName),
-		tostring(assetName)
+		tostring(animationKey),
+		tostring(descriptor and descriptor.Source or "missing_registry_animation")
 	)
-	return nil
+	return nil, descriptor
 end
 
 local function getAnimator(character)
@@ -91,10 +84,10 @@ local function getAnimator(character)
 	return nil
 end
 
-local function playAnimation(character, moveName, animationConfig, defaultAssetName)
+local function playAnimation(character, moveName, animationConfig, defaultAnimationKey)
 	local resolvedConfig = type(animationConfig) == "table" and animationConfig or {}
-	local assetName = resolvedConfig.AssetName or defaultAssetName
-	local animation = getAnimationAsset(moveName, assetName)
+	local animationKey = resolvedConfig.AnimationKey or defaultAnimationKey
+	local animation, descriptor = getAnimationAsset(moveName, animationKey)
 	if not animation then
 		return nil
 	end
@@ -107,7 +100,7 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 	local track, loadFailure = AnimationLoadDiagnostics.LoadTrack(
 		animator,
 		animation,
-		"ServerScriptService.Modules.DevilFruits.Gomu.Server.GomuAnimationController"
+		SOURCE_LABEL
 	)
 	if not track then
 		logWarn(
@@ -123,19 +116,34 @@ local function playAnimation(character, moveName, animationConfig, defaultAssetN
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = resolvedConfig.Looped == true
 	track:Play(fadeTime, 1, playbackSpeed)
+	AnimationLoadDiagnostics.LogTrackPlay(
+		track,
+		SOURCE_LABEL,
+		string.format("Gomu.%s", tostring(moveName)),
+		descriptor and descriptor.AnimationId,
+		string.format(
+			"key=%s fade=%.3f speed=%.3f looped=%s",
+			tostring(animationKey),
+			fadeTime,
+			playbackSpeed,
+			tostring(track.Looped)
+		)
+	)
 
-	logInfo("move=%s animation play asset=%s", tostring(moveName), tostring(assetName))
+	logInfo("move=%s animation play asset=%s", tostring(moveName), tostring(animationKey))
 
 	return {
 		MoveName = moveName,
-		AssetName = assetName,
+		AssetName = animationKey,
+		AnimationKey = animationKey,
+		AnimationId = descriptor and descriptor.AnimationId,
 		Track = track,
 		StopFadeTime = math.max(0, tonumber(resolvedConfig.StopFadeTime) or DEFAULT_STOP_FADE_TIME),
 	}
 end
 
 function GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
-	return playAnimation(character, "RubberLaunch", animationConfig, "Rocket")
+	return playAnimation(character, "RubberLaunch", animationConfig, "Gomu.Rocket")
 end
 
 function GomuAnimationController.StopAnimation(animationState, reason)
