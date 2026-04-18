@@ -345,12 +345,12 @@ local function expandBounds(relativeCFrame, size, currentMin, currentMax)
 end
 
 local function findExplicitGripPivot(template)
-	for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
-		local attachment = template:FindFirstChild(attachmentName, true)
-		if attachment and attachment:IsA("Attachment") and attachment.Parent and attachment.Parent:IsA("BasePart") then
-			return attachment.WorldCFrame
-		end
-	end
+    for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
+        local attachment = template:FindFirstChild(attachmentName, true)
+        if attachment and attachment:IsA("Attachment") and attachment.Parent and attachment.Parent:IsA("BasePart") then
+            return attachment.WorldCFrame
+        end
+    end
 
 	for _, partName in ipairs(EXPLICIT_GRIP_PART_NAMES) do
 		local gripPart = template:FindFirstChild(partName, true)
@@ -359,14 +359,26 @@ local function findExplicitGripPivot(template)
 		end
 	end
 
-	return nil
+    return nil
+end
+
+local function findToolGripAttachmentPivot(template)
+    local templateParts = getTemplateParts(template)
+    for _, part in ipairs(templateParts) do
+        local attachment = part:FindFirstChild("ToolGripAttachment")
+        if attachment and attachment:IsA("Attachment") then
+            return attachment.WorldCFrame
+        end
+    end
+
+    return nil
 end
 
 local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
-	local templateParts = getTemplateParts(template)
-	if #templateParts == 0 then
-		return primaryPart.CFrame
-	end
+    local templateParts = getTemplateParts(template)
+    if #templateParts == 0 then
+        return primaryPart.CFrame
+    end
 
 	local localMin = Vector3.new(math.huge, math.huge, math.huge)
 	local localMax = Vector3.new(-math.huge, -math.huge, -math.huge)
@@ -393,7 +405,7 @@ local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
 end
 
 local function getGripPivot(template, primaryPart, fruit, gripOptions)
-	return findExplicitGripPivot(template) or getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
+    return findToolGripAttachmentPivot(template) or getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
 end
 
 local function buildFruitTool(player, fruitKey)

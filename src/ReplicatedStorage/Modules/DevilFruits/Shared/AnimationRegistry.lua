@@ -12,7 +12,7 @@ local Animations = {
 	},
 
 	Mera = {
-		FlameDash = "rbxassetid://100283856676414",
+		FlameDash = "rbxassetid://85227673442132",
 		FlameBurstR6 = "rbxassetid://115575898741735",
 	},
 
