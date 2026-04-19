@@ -29,7 +29,7 @@ local CONFIG = {
 	HazardClass = "major",
 	FreezeBehavior = "pause",
 	AffectablePadding = Vector3.new(2, 1, 4),
-	DriftStrengthMultiplier = 1.35,
+	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
 	DriftSpeedMinMultiplier = 1.35,
 	DriftSpeedMaxMultiplier = 1.85,
 	Variants = {
@@ -486,6 +486,8 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 			controller:Destroy()
 			return
 		end
+		
+		-- WAVE DRIFT CONFIG
 
 		local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
 		local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
@@ -505,6 +507,8 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 			end
 		end
 
+		--ZIG ZAG
+
 		while hazardRoot.Parent and not controller.Destroyed and alpha < 1 do
 			local dt = RunService.Heartbeat:Wait()
 
@@ -512,7 +516,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 				alpha = math.min(alpha + (speed * dt) / distance, 1)
 				controller.Alpha = alpha
 
-				-- ✅ ZIGZAG: offset the wave laterally using a sine wave
+				-- ✅ ZIGZAG: offset the wave 
 				local currentCF = startCF:Lerp(endCF, alpha)
 				if math.abs(lateralVelocity) > 1e-3 and maxDrift > 1e-3 then
 					lateralOffset += lateralVelocity * dt
