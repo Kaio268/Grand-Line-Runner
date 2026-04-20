@@ -29,6 +29,9 @@ local CONFIG = {
 	HazardClass = "major",
 	FreezeBehavior = "pause",
 	AffectablePadding = Vector3.new(2, 1, 4),
+	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
+	DriftSpeedMinMultiplier = 1.35,
+	DriftSpeedMaxMultiplier = 1.85,
 	Variants = {
 		{
 			Name = "Normal",
@@ -355,7 +358,8 @@ local function getWaveTemplate()
 	return template
 end
 
-local function createServerHazardController(hazardRoot, startCF, endCF, speed)
+-- Accepts the corridor direction and available sideways room for drifting hazards.
+local function createServerHazardController(hazardRoot, startCF, endCF, speed, lateralDirection, lateralDriftLimit)
 	local distance = (startCF.Position - endCF.Position).Magnitude
 	local _, hazardSize = getBox(hazardRoot)
 	local controller = {
@@ -483,13 +487,53 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed)
 			return
 		end
 
+		-- WAVE DRIFT CONFIG
+
+		local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
+		local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+		local lateralOffset = 0
+		local lateralVelocity = 0
+
+		if driftStyle == "drift" and maxDrift > 1e-3 then
+			local travelTime = distance / math.max(speed, 1e-3)
+			local bounceCount = rng:NextInteger(3, 6)
+			local minLateralSpeed = ((maxDrift * 2) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
+			local maxLateralSpeed = ((maxDrift * 2 * bounceCount) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
+
+			lateralOffset = rng:NextNumber(-maxDrift, maxDrift)
+			lateralVelocity = rng:NextNumber(minLateralSpeed, maxLateralSpeed)
+			if rng:NextInteger(0, 1) == 0 then
+				lateralVelocity = -lateralVelocity
+			end
+		end
+
+		--ZIG ZAG
+
 		while hazardRoot.Parent and not controller.Destroyed and alpha < 1 do
 			local dt = RunService.Heartbeat:Wait()
 
 			if os.clock() >= controller.FrozenUntil then
 				alpha = math.min(alpha + (speed * dt) / distance, 1)
 				controller.Alpha = alpha
+
+				-- ✅ ZIGZAG: offset the wave
 				local currentCF = startCF:Lerp(endCF, alpha)
+				if math.abs(lateralVelocity) > 1e-3 and maxDrift > 1e-3 then
+					lateralOffset += lateralVelocity * dt
+
+					while lateralOffset > maxDrift or lateralOffset < -maxDrift do
+						if lateralOffset > maxDrift then
+							lateralOffset = maxDrift - (lateralOffset - maxDrift)
+							lateralVelocity = -math.abs(lateralVelocity)
+						else
+							lateralOffset = -maxDrift + (-maxDrift - lateralOffset)
+							lateralVelocity = math.abs(lateralVelocity)
+						end
+					end
+
+					currentCF = translateCFrame(currentCF, lateralDirection * lateralOffset)
+				end
+
 				controller.CurrentCFrame = currentCF
 				controller.Position = currentCF.Position
 				setPivot(hazardRoot, currentCF)
@@ -624,7 +668,8 @@ local function spawnSharedHazard(spawnDelay)
 		formatInstancePath(clone)
 	)
 
-	createServerHazardController(clone, startCF, endCF, variant.Speed)
+	local lateralDriftLimit = math.max(0, safeHalfOffset - math.abs(chosenOffset))
+	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit)
 	return true, "spawned"
 end
 
