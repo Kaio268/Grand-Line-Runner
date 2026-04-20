@@ -125,13 +125,16 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 	local accentText, accentColor = resolveAccent(openResult)
 	local lines = {}
 	local hadResources = addGrantedResourceLines(lines, openResult.GrantedResources)
+	local bodyRawText = nil
+	local bodyMode = nil
 
 	if openResult.GrantedFruit then
 		local displayName, rarityName = fruitDisplayName(openResult.GrantedFruit)
+		bodyRawText = displayName
+		bodyMode = "FruitFocus"
 		if hadResources then
 			appendLine(lines, "")
 		end
-		appendLine(lines, "Fruit obtained:")
 		appendLine(lines, displayName)
 		appendLine(lines, string.format("Rarity: %s", tostring(openResult.GrantedFruitRarity or rarityName or "Unknown")))
 	elseif openResult.WasDuplicate then
@@ -191,7 +194,10 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 		AccentColor = accentColor,
 		ButtonText = "Close",
 		ButtonColor = accentColor,
+		BodyRawText = bodyRawText,
+		BodyMode = bodyMode,
 		Lines = lines,
+		PreviewFruitKey = if typeof(openResult.GrantedFruit) == "string" then openResult.GrantedFruit else nil,
 	}
 end
 

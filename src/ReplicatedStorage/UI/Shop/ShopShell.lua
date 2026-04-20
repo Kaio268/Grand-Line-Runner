@@ -25,52 +25,6 @@ local function titleDivider(props)
 	})
 end
 
-local function statChip(props)
-	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.Panel,
-		BorderSizePixel = 0,
-		LayoutOrder = props.layoutOrder or 0,
-		Size = props.size or UDim2.fromOffset(164, 54),
-	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 16),
-		}),
-		Stroke = e("UIStroke", {
-			Color = props.accentColor,
-			Transparency = 0.18,
-			Thickness = 1.1,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Theme.Palette.PanelSoft),
-				ColorSequenceKeypoint.new(1, Theme.Palette.Panel),
-			}),
-		}),
-		Label = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(14, 8),
-			Size = UDim2.new(1, -24, 0, 12),
-			Text = props.label,
-			TextColor3 = Theme.Palette.MutedSoft,
-			TextSize = 10,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-		Value = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(14, 22),
-			Size = UDim2.new(1, -28, 0, 20),
-			Text = props.value,
-			TextColor3 = Theme.Palette.Text,
-			TextSize = 17,
-			TextWrapped = true,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-	})
-end
-
 local function sectionBanner(props)
 	return e("Frame", {
 		BackgroundTransparency = 1,
@@ -135,15 +89,11 @@ local function ShopShell(props)
 	end
 
 	local wideHero = contentWidth >= 1160
-	local introWide = contentWidth >= 1180
-	local introHeight = introWide and 170 or 254
-	local headerHeight = 174
+	local headerHeight = 136
 	local noticeHeight = props.noticeText and 48 or 0
 	local navHeight = 68
 	local navTop = headerHeight + noticeHeight + 12
 	local contentTop = navTop + navHeight + 14
-	local titleBubbleWidth = math.floor(math.clamp(contentWidth * 0.53, 520, 760))
-	local subtitleWidth = math.floor(math.clamp(contentWidth * 0.34, 320, 500))
 	local titleTextSize = contentWidth >= 1320 and 56 or (contentWidth >= 1120 and 52 or 46)
 
 	local function scrollToSection(sectionKey)
@@ -227,103 +177,8 @@ local function ShopShell(props)
 			PaddingTop = UDim.new(0, 26),
 			PaddingBottom = UDim.new(0, 34),
 		}),
-		Intro = e("Frame", {
-			BackgroundColor3 = Theme.Palette.Panel,
-			BorderSizePixel = 0,
-			LayoutOrder = 1,
-			Size = UDim2.new(1, 0, 0, introHeight),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 26),
-			}),
-			Stroke = e("UIStroke", {
-				Color = Theme.Palette.Border,
-				Transparency = 0.12,
-				Thickness = 1.5,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 125,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Theme.Palette.BoardSoft),
-					ColorSequenceKeypoint.new(1, Theme.Palette.Panel),
-				}),
-			}),
-			Padding = e("UIPadding", {
-				PaddingLeft = UDim.new(0, 24),
-				PaddingRight = UDim.new(0, 24),
-				PaddingTop = UDim.new(0, 22),
-				PaddingBottom = UDim.new(0, 22),
-			}),
-			Eyebrow = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Size = UDim2.new(1, 0, 0, 14),
-				Text = props.catalog.heroEyebrow,
-				TextColor3 = Theme.Palette.Cyan,
-				TextSize = 12,
-				TextXAlignment = Enum.TextXAlignment.Left,
-			}),
-			Headline = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
-				Position = UDim2.fromOffset(0, 18),
-				Size = UDim2.new(introWide and 0.62 or 1, introWide and -18 or 0, 0, introWide and 56 or 78),
-				Text = props.catalog.heroHeadline,
-				TextColor3 = Theme.Palette.Text,
-				TextSize = introWide and 40 or 36,
-				TextStrokeTransparency = 1,
-				TextWrapped = true,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				TextYAlignment = Enum.TextYAlignment.Top,
-			}),
-			Copy = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Body,
-				Position = UDim2.fromOffset(0, introWide and 84 or 110),
-				Size = UDim2.new(introWide and 0.62 or 1, introWide and -18 or 0, 0, introWide and 46 or 58),
-				Text = props.catalog.heroCopy,
-				TextColor3 = Theme.Palette.Muted,
-				TextSize = 14,
-				TextWrapped = true,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				TextYAlignment = Enum.TextYAlignment.Top,
-			}),
-			Stats = e("Frame", {
-				AnchorPoint = introWide and Vector2.new(1, 0) or Vector2.new(0, 0),
-				BackgroundTransparency = 1,
-				Position = introWide and UDim2.new(1, 0, 0, 0) or UDim2.new(0, 0, 0, 176),
-				Size = introWide and UDim2.fromOffset(252, 136) or UDim2.new(1, 0, 0, 54),
-			}, {
-				List = e("UIListLayout", {
-					FillDirection = introWide and Enum.FillDirection.Vertical or Enum.FillDirection.Horizontal,
-					Padding = UDim.new(0, 8),
-					SortOrder = Enum.SortOrder.LayoutOrder,
-				}),
-				Featured = statChip({
-					layoutOrder = 1,
-					label = "Featured",
-					value = tostring(#(props.catalog.featuredOffers or {})) .. " marquee offers",
-					accentColor = Theme.Palette.Gold,
-					size = introWide and UDim2.new(1, 0, 0, 40) or UDim2.new(1 / 3, -6, 0, 54),
-				}),
-				Live = statChip({
-					layoutOrder = 2,
-					label = "Captain Picks",
-					value = "Bundles, perks, boosts",
-					accentColor = Theme.Palette.Emerald,
-					size = introWide and UDim2.new(1, 0, 0, 40) or UDim2.new(1 / 3, -6, 0, 54),
-				}),
-				Structure = statChip({
-					layoutOrder = 3,
-					label = "Limited Windows",
-					value = "Codes and timed offers",
-					accentColor = Theme.Palette.Cyan,
-					size = introWide and UDim2.new(1, 0, 0, 40) or UDim2.new(1 / 3, -6, 0, 54),
-				}),
-			}),
-		}),
 		FeaturedLabel = sectionBanner({
-			layoutOrder = 2,
+			layoutOrder = 1,
 			title = "Featured / Top Offers",
 		}),
 	}
@@ -331,7 +186,7 @@ local function ShopShell(props)
 	for index, item in ipairs(props.catalog.featuredOffers or {}) do
 		contentChildren["Featured" .. tostring(index)] = e(FeaturedOfferCard, {
 			item = item,
-			layoutOrder = 2 + index,
+			layoutOrder = 1 + index,
 			onPurchaseRequested = props.onPurchaseRequested,
 			onGiftRequested = props.onGiftRequested,
 			zIndex = 8,
@@ -412,8 +267,24 @@ local function ShopShell(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = Theme.Palette.Border,
-			Transparency = 0.08,
-			Thickness = 1.6,
+			Transparency = 0.02,
+			Thickness = 2.2,
+		}),
+		InnerBorder = e("Frame", {
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(2, 2),
+			Size = UDim2.new(1, -4, 1, -4),
+			ZIndex = 9,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 24),
+			}),
+			Stroke = e("UIStroke", {
+				Color = Theme.Palette.BorderSoft,
+				Transparency = 0.08,
+				Thickness = 1.2,
+			}),
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
@@ -425,55 +296,58 @@ local function ShopShell(props)
 		}),
 		Header = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(24, 10),
+			Position = UDim2.fromOffset(24, 8),
 			Size = UDim2.new(1, -56, 0, headerHeight),
 			ZIndex = 10,
 		}, {
-			ShopEyebrow = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(0, 4),
-				Size = UDim2.fromOffset(titleBubbleWidth, 16),
-				Text = "GRAND LINE RUSH SHOP",
-				TextColor3 = Theme.Palette.GoldSoft,
-				TextSize = 12,
-				TextXAlignment = Enum.TextXAlignment.Left,
+			Panel = e("Frame", {
+				BackgroundColor3 = Theme.Palette.InkSoft,
+				BackgroundTransparency = 0.08,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(0, 6),
+				Size = UDim2.new(1, -56, 0, 112),
+				ZIndex = 10,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 20),
+				}),
+				Stroke = e("UIStroke", {
+					Color = Theme.Palette.BorderSoft,
+					Transparency = 0.06,
+					Thickness = 1.35,
+				}),
+				Gradient = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Theme.Palette.BoardSoft),
+						ColorSequenceKeypoint.new(1, Theme.Palette.Board),
+					}),
+				}),
 			}),
 			ShopTitle = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
-				Position = UDim2.fromOffset(0, 24),
-				Size = UDim2.fromOffset(titleBubbleWidth, 98),
-				Text = props.catalog.title,
-				TextColor3 = Theme.Palette.GoldSoft,
-				TextSize = titleTextSize,
-				TextStrokeTransparency = 1,
-				TextWrapped = true,
-				TextYAlignment = Enum.TextYAlignment.Top,
-				TextXAlignment = Enum.TextXAlignment.Left,
-			}),
-			Subtitle = e("TextLabel", {
-				AnchorPoint = Vector2.new(1, 0),
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Body,
-				Position = UDim2.new(1, -156, 0, 22),
-				Size = UDim2.fromOffset(subtitleWidth, 54),
-				Text = props.catalog.subtitle,
-				TextColor3 = Theme.Palette.Muted,
-				TextSize = 15,
-				TextWrapped = true,
-				TextXAlignment = Enum.TextXAlignment.Right,
-				TextYAlignment = Enum.TextYAlignment.Top,
-			}),
-			Close = e("TextButton", {
-				AnchorPoint = Vector2.new(1, 0),
-				AutoButtonColor = false,
-				BackgroundColor3 = Theme.Palette.CloseFill or Color3.fromRGB(186, 86, 100),
-				BorderSizePixel = 0,
-				Position = UDim2.new(1, 0, 0, 8),
-				Size = UDim2.fromOffset(38, 38),
-				Text = "X",
-				TextColor3 = Theme.Palette.Text,
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					Font = Theme.Fonts.Display,
+					Position = UDim2.new(0.5, -28, 0.5, 0),
+					Size = UDim2.new(1, -148, 0, 72),
+					Text = props.catalog.title or "Grand Line Rush Store",
+					TextColor3 = Theme.Palette.GoldSoft,
+					TextSize = titleTextSize,
+					TextStrokeTransparency = 1,
+					TextWrapped = true,
+					TextYAlignment = Enum.TextYAlignment.Center,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					ZIndex = 11,
+				}),
+				Close = e("TextButton", {
+					AnchorPoint = Vector2.new(1, 0),
+					AutoButtonColor = false,
+					BackgroundColor3 = Color3.fromRGB(200, 0, 9),
+					BorderSizePixel = 0,
+					Position = UDim2.new(1, 0, 0, 14),
+					Size = UDim2.fromOffset(38, 38),
+					Text = "X",
+					TextColor3 = Theme.Palette.Text,
 				TextSize = 18,
 				Font = Theme.Fonts.Display,
 				ZIndex = 11,
@@ -535,8 +409,8 @@ local function ShopShell(props)
 				sections = props.catalog.sections,
 				activeSectionKey = activeSectionKey,
 				onSectionSelected = handleSectionSelected,
-				position = UDim2.fromOffset(12, 5),
-				size = UDim2.new(1, -24, 0, 56),
+				position = UDim2.fromOffset(12, 6),
+				size = UDim2.new(1, -24, 0, 54),
 				zIndex = 13,
 			}),
 		}),

@@ -43,6 +43,25 @@ local PALETTE = {
 	Shadow = Color3.fromRGB(10, 7, 6),
 }
 
+local INVENTORY_UI = {
+	PrimaryBg = Color3.fromRGB(30, 42, 56),
+	SecondaryBg = Color3.fromRGB(36, 52, 71),
+	HeaderBg = Color3.fromRGB(16, 35, 59),
+	SectionBg = Color3.fromRGB(27, 46, 68),
+	SectionHover = Color3.fromRGB(46, 74, 99),
+	MenuOverlay = Color3.fromRGB(15, 27, 42),
+	GoldBase = Color3.fromRGB(212, 175, 55),
+	GoldHighlight = Color3.fromRGB(242, 209, 107),
+	GoldShadow = Color3.fromRGB(140, 107, 31),
+	ButtonIdle = Color3.fromRGB(7, 22, 41),
+	ButtonIdleBottom = Color3.fromRGB(4, 16, 31),
+	ButtonActive = Color3.fromRGB(58, 47, 18),
+	ButtonActiveBottom = Color3.fromRGB(33, 25, 10),
+	TextMain = Color3.fromRGB(230, 230, 230),
+	TextMuted = Color3.fromRGB(184, 193, 204),
+}
+local INVENTORY_BACKGROUND_IMAGE = "rbxassetid://131358437063076"
+
 local function formatNumber(value)
 	local number = tonumber(value) or 0
 	local sign = number < 0 and "-" or ""
@@ -1356,10 +1375,13 @@ local function modeTab(props)
 	local heldHover = hovered
 	local heldActive = active and not hovered
 	local heldScale = heldHover and 1.02 or (heldActive and 1.008 or 1)
+	local fillTop = active and INVENTORY_UI.ButtonActive or INVENTORY_UI.ButtonIdle
+	local fillBottom = active and INVENTORY_UI.ButtonActiveBottom or INVENTORY_UI.ButtonIdleBottom
+	local textColor = active and INVENTORY_UI.GoldHighlight or INVENTORY_UI.TextMain
 
 	local buttonProps = mergeProps({
 		AutoButtonColor = false,
-		BackgroundColor3 = props.fillColor3 or PALETTE.Sea,
+		BackgroundColor3 = fillTop,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		ref = hoverRef,
@@ -1376,32 +1398,32 @@ local function modeTab(props)
 			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = active and PALETTE.Cream or Color3.fromRGB(17, 20, 32),
-			Transparency = active and 0 or 0.18,
-			Thickness = active and 2 or 1.4,
+			Color = INVENTORY_UI.GoldHighlight,
+			Transparency = active and 0.01 or (hovered and 0.02 or 0.05),
+			Thickness = active and 2 or 1.75,
 		}),
 		Glow = e("UIStroke", {
-			Color = PALETTE.Cream,
-			Transparency = active and 0.72 or (hovered and 0.84 or 1),
-			Thickness = 3,
+			Color = INVENTORY_UI.GoldBase,
+			Transparency = active and 0.82 or (hovered and 0.86 or 0.9),
+			Thickness = active and 2.6 or 2.3,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, active and props.fillColor3 or props.fillColor3:Lerp(Color3.new(0, 0, 0), 0.18)),
-				ColorSequenceKeypoint.new(1, active and props.fillColor3:Lerp(Color3.new(0, 0, 0), 0.28) or props.fillColor3:Lerp(Color3.new(0, 0, 0), 0.42)),
+				ColorSequenceKeypoint.new(0, fillTop),
+				ColorSequenceKeypoint.new(1, fillBottom),
 			}),
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Enum.Font.Cartoon,
+			Font = Enum.Font.GothamBold,
 			Size = UDim2.new(1, -16, 1, 0),
 			Position = UDim2.fromOffset(8, -1),
 			Text = props.label or "",
-			TextColor3 = PALETTE.Cream,
-			TextSize = 20,
-			TextStrokeTransparency = 0.35,
-			TextStrokeColor3 = Color3.fromRGB(18, 18, 22),
+			TextColor3 = textColor,
+			TextSize = 18,
+			TextStrokeTransparency = 0.7,
+			TextStrokeColor3 = INVENTORY_UI.MenuOverlay,
 			TextWrapped = true,
 			ZIndex = 2,
 		}),
@@ -1410,6 +1432,8 @@ end
 
 local function ledgerLine(props)
 	local multiLine = props.multiLine == true
+	local valueWidthScale = multiLine and 1 or math.clamp(props.valueWidthScale or 0.42, 0.24, 0.7)
+	local labelWidthScale = multiLine and 1 or (1 - valueWidthScale)
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
@@ -1420,7 +1444,7 @@ local function ledgerLine(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.fromOffset(0, -1),
-			Size = multiLine and UDim2.new(1, 0, 0, 16) or UDim2.new(0.58, 0, 1, 0),
+			Size = multiLine and UDim2.new(1, 0, 0, 16) or UDim2.new(labelWidthScale, 0, 1, 0),
 			Text = props.label or "",
 			TextColor3 = PALETTE.Cream,
 			TextSize = 18,
@@ -1432,12 +1456,12 @@ local function ledgerLine(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = multiLine and UDim2.fromOffset(0, 18) or UDim2.new(1, 0, 0, 3),
-			Size = multiLine and UDim2.new(1, 0, 0, 22) or UDim2.new(0.42, 0, 1, 0),
+			Size = multiLine and UDim2.new(1, 0, 0, 22) or UDim2.new(valueWidthScale, 0, 1, 0),
 			Text = props.value or "",
 			TextColor3 = props.valueColor3 or PALETTE.Cyan,
-			TextSize = multiLine and 15 or 18,
+			TextSize = props.valueTextSize or (multiLine and 15 or 18),
 			TextStrokeTransparency = 0.8,
-			TextTruncate = multiLine and Enum.TextTruncate.AtEnd or Enum.TextTruncate.None,
+			TextTruncate = props.valueTruncate or Enum.TextTruncate.AtEnd,
 			TextWrapped = multiLine,
 			TextXAlignment = multiLine and Enum.TextXAlignment.Left or Enum.TextXAlignment.Right,
 			TextYAlignment = multiLine and Enum.TextYAlignment.Top or Enum.TextYAlignment.Center,
@@ -1448,15 +1472,20 @@ end
 local function categoryMenuTab(props)
 	local active = props.active == true
 	local accent = props.accentColor or PALETTE.Orange
-	local hovered, pressed, handlers, hoverRef = useInteractiveState(props.onActivated ~= nil)
-	local heldHover = hovered
-	local heldActive = active and not hovered
-	local heldScale = heldHover and 1.018 or (heldActive and 1.006 or 1)
+	local hovered, _, handlers, hoverRef = useInteractiveState(props.onActivated ~= nil, false)
+	local fillTop = active and INVENTORY_UI.ButtonActive or INVENTORY_UI.ButtonIdle
+	local fillBottom = active and INVENTORY_UI.ButtonActiveBottom or INVENTORY_UI.ButtonIdleBottom
+
+	if hovered and not active then
+		fillTop = INVENTORY_UI.SectionHover
+		fillBottom = INVENTORY_UI.SecondaryBg
+	end
 
 	local buttonProps = mergeProps({
 		AutoButtonColor = false,
-		BackgroundColor3 = active and Color3.fromRGB(49, 49, 57) or Color3.fromRGB(37, 37, 42),
+		BackgroundColor3 = fillTop,
 		BorderSizePixel = 0,
+		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
 		ref = hoverRef,
 		Size = props.size or UDim2.fromOffset(154, 34),
@@ -1465,48 +1494,50 @@ local function categoryMenuTab(props)
 	}, handlers)
 
 	return e("TextButton", buttonProps, {
-		Scale = e("UIScale", {
-			Scale = heldScale - (pressed and 0.016 or 0),
-		}),
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 11),
 		}),
 		Stroke = e("UIStroke", {
-			Color = active and accent or Color3.fromRGB(12, 12, 16),
-			Transparency = active and 0 or 0.14,
-			Thickness = active and 1.8 or 1.2,
+			Color = INVENTORY_UI.GoldHighlight,
+			Transparency = active and 0.02 or (hovered and 0.08 or 0.18),
+			Thickness = 1.2,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, active and Color3.fromRGB(63, 63, 69) or Color3.fromRGB(48, 48, 52)),
-				ColorSequenceKeypoint.new(1, active and Color3.fromRGB(39, 39, 43) or Color3.fromRGB(27, 27, 31)),
+				ColorSequenceKeypoint.new(0, fillTop),
+				ColorSequenceKeypoint.new(1, fillBottom),
 			}),
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Enum.Font.Cartoon,
+			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(14, -1),
 			Size = UDim2.new(1, -52, 1, 0),
 			Text = props.label or "",
-			TextColor3 = active and PALETTE.Cream or Color3.fromRGB(234, 234, 234),
-			TextSize = 19,
-			TextStrokeTransparency = 0.6,
+			TextColor3 = active and INVENTORY_UI.GoldHighlight or (hovered and INVENTORY_UI.GoldBase or INVENTORY_UI.TextMain),
+			TextSize = 16,
+			TextStrokeTransparency = 0.75,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Count = e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 0.5),
 			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = Color3.fromRGB(19, 19, 23),
+			BackgroundColor3 = INVENTORY_UI.MenuOverlay,
 			BackgroundTransparency = 0.08,
 			Position = UDim2.new(1, -10, 0.5, 0),
 			Font = Enum.Font.GothamBold,
 			Text = tostring(props.count or 0),
-			TextColor3 = active and accent or PALETTE.Muted,
+			TextColor3 = active and accent or (hovered and INVENTORY_UI.GoldBase or INVENTORY_UI.TextMuted),
 			TextSize = 11,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
+			}),
+			Stroke = e("UIStroke", {
+				Color = INVENTORY_UI.GoldHighlight,
+				Transparency = 0.24,
+				Thickness = 1,
 			}),
 			Padding = e("UIPadding", {
 				PaddingTop = UDim.new(0, 4),
@@ -1531,7 +1562,7 @@ local function searchGlyph()
 			Size = UDim2.fromOffset(11, 11),
 		}, {
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(139, 146, 160),
+				Color = INVENTORY_UI.GoldHighlight,
 				Thickness = 2,
 			}),
 			Corner = e("UICorner", {
@@ -1540,7 +1571,7 @@ local function searchGlyph()
 		}),
 		Handle = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundColor3 = Color3.fromRGB(139, 146, 160),
+			BackgroundColor3 = INVENTORY_UI.GoldHighlight,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(11, 9),
 			Rotation = -45,
@@ -1758,6 +1789,7 @@ local function footerCategoryCell(props)
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
+		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = props.size or UDim2.new(0.333, -8, 1, 0),
 	}, {
@@ -1813,7 +1845,7 @@ local function captainsLogRow(props)
 		BackgroundTransparency = 0.02,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, 88),
+		Size = UDim2.new(1, -6, 0, 88),
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 12),
@@ -1940,7 +1972,7 @@ local function titleRegistryRow(props)
 		BackgroundTransparency = 0.02,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, 104),
+		Size = UDim2.new(1, -6, 0, 104),
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 12),
@@ -2548,6 +2580,8 @@ local function App(props)
 					label = "Bounty Rank",
 					value = tostring(titles.bountyRankLabel or formatLeaderboardRank(titles.bountyRank)),
 					valueColor3 = PALETTE.Cyan,
+					valueTextSize = 11,
+					valueWidthScale = 0.34,
 				},
 			}
 		else
@@ -2579,6 +2613,11 @@ local function App(props)
 				Padding = UDim.new(0, 10),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 2),
+				PaddingLeft = UDim.new(0, 4),
+				PaddingRight = UDim.new(0, 4),
+			}),
 		}
 
 		for index, entry in ipairs((props.captainLog and props.captainLog.entries) or {}) do
@@ -2593,6 +2632,11 @@ local function App(props)
 				FillDirection = Enum.FillDirection.Vertical,
 				Padding = UDim.new(0, 10),
 				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 2),
+				PaddingLeft = UDim.new(0, 4),
+				PaddingRight = UDim.new(0, 4),
 			}),
 		}
 
@@ -2610,31 +2654,55 @@ local function App(props)
 				MinSize = Vector2.new(860, 560),
 			}),
 			Shell = e("Frame", {
-				BackgroundColor3 = Color3.fromRGB(17, 27, 46),
+				BackgroundColor3 = INVENTORY_UI.PrimaryBg,
 				BorderSizePixel = 0,
 				ClipsDescendants = true,
 				Size = UDim2.fromScale(1, 1),
 				ZIndex = 6,
 			}, {
+				BackgroundImage = e("ImageLabel", {
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					Image = INVENTORY_BACKGROUND_IMAGE,
+					ImageTransparency = 0,
+					ScaleType = Enum.ScaleType.Stretch,
+					Size = UDim2.fromScale(1, 1),
+					ZIndex = 5,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 26),
+					}),
+				}),
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 26),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(75, 107, 155),
-					Transparency = 0.14,
-					Thickness = 1.7,
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = 0.04,
+					Thickness = 2.2,
 				}),
 				Gradient = e("UIGradient", {
 					Rotation = 90,
 					Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, Color3.fromRGB(24, 38, 63)),
-						ColorSequenceKeypoint.new(0.45, Color3.fromRGB(15, 24, 42)),
-						ColorSequenceKeypoint.new(1, Color3.fromRGB(9, 16, 29)),
+						ColorSequenceKeypoint.new(0, INVENTORY_UI.SecondaryBg),
+						ColorSequenceKeypoint.new(0.45, INVENTORY_UI.PrimaryBg),
+						ColorSequenceKeypoint.new(1, INVENTORY_UI.MenuOverlay),
+					}),
+				}),
+				ImageOverlay = e("Frame", {
+					BackgroundColor3 = INVENTORY_UI.MenuOverlay,
+					BackgroundTransparency = 0.48,
+					BorderSizePixel = 0,
+					Size = UDim2.fromScale(1, 1),
+					ZIndex = 6,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 26),
 					}),
 				}),
 				InnerGlow = e("Frame", {
-					BackgroundColor3 = Color3.fromRGB(56, 86, 136),
-					BackgroundTransparency = 0.95,
+					BackgroundColor3 = INVENTORY_UI.GoldBase,
+					BackgroundTransparency = 0.98,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(12, 12),
 					Size = UDim2.new(1, -24, 1, -24),
@@ -2644,8 +2712,8 @@ local function App(props)
 						CornerRadius = UDim.new(0, 22),
 					}),
 					Stroke = e("UIStroke", {
-						Color = Color3.fromRGB(88, 123, 181),
-						Transparency = 0.86,
+						Color = INVENTORY_UI.GoldBase,
+						Transparency = 0.76,
 					}),
 				}),
 				TopTabs = e("Frame", {
@@ -2658,12 +2726,12 @@ local function App(props)
 				Close = e("TextButton", {
 					AnchorPoint = Vector2.new(1, 0),
 					AutoButtonColor = false,
-					BackgroundColor3 = Color3.fromRGB(22, 16, 24),
+					BackgroundColor3 = Color3.fromRGB(200, 0, 9),
 					BorderSizePixel = 0,
 					Position = UDim2.new(1, -32, 0, 16),
 					Size = UDim2.fromOffset(38, 38),
 					Text = "X",
-					TextColor3 = PALETTE.Cream,
+					TextColor3 = Color3.fromRGB(255, 255, 255),
 					TextSize = 18,
 					Font = Enum.Font.Cartoon,
 					ZIndex = 8,
@@ -2673,13 +2741,13 @@ local function App(props)
 						CornerRadius = UDim.new(0, 12),
 					}),
 					Stroke = e("UIStroke", {
-						Color = Color3.fromRGB(58, 54, 74),
-						Transparency = 0.04,
+						Color = INVENTORY_UI.GoldHighlight,
+						Transparency = 0.16,
 					}),
 				}),
 				HeaderDivider = e("Frame", {
-					BackgroundColor3 = Color3.fromRGB(87, 121, 176),
-					BackgroundTransparency = 0.54,
+					BackgroundColor3 = INVENTORY_UI.GoldBase,
+					BackgroundTransparency = 0.26,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(24, 68),
 					Size = UDim2.new(1, -56, 0, 2),
@@ -2690,8 +2758,8 @@ local function App(props)
 					}),
 				}),
 				LeftPanel = e("Frame", {
-					BackgroundColor3 = Color3.fromRGB(20, 31, 52),
-					BackgroundTransparency = 0.03,
+					BackgroundColor3 = INVENTORY_UI.SectionBg,
+					BackgroundTransparency = 0.18,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(26, 90),
 					Size = UDim2.new(0, 240, 1, -116),
@@ -2701,15 +2769,15 @@ local function App(props)
 						CornerRadius = UDim.new(0, 10),
 					}),
 					Stroke = e("UIStroke", {
-						Color = Color3.fromRGB(89, 121, 173),
-						Transparency = 0.26,
+						Color = INVENTORY_UI.GoldHighlight,
+						Transparency = 0.2,
 						Thickness = 1.2,
 					}),
 					Gradient = e("UIGradient", {
 						Rotation = 100,
 						Color = ColorSequence.new({
-							ColorSequenceKeypoint.new(0, Color3.fromRGB(31, 45, 72)),
-							ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 28, 47)),
+							ColorSequenceKeypoint.new(0, INVENTORY_UI.SecondaryBg),
+							ColorSequenceKeypoint.new(1, INVENTORY_UI.PrimaryBg),
 						}),
 					}),
 					Title = e("TextLabel", {
@@ -2732,7 +2800,7 @@ local function App(props)
 						Text = showingTitles
 								and "Honor marks tied to your long-term feats and current bounty rank."
 							or "Current haul and ship stores at a glance.",
-						TextColor3 = Color3.fromRGB(178, 189, 211),
+						TextColor3 = INVENTORY_UI.TextMuted,
 						TextSize = 12,
 						TextWrapped = true,
 						TextXAlignment = Enum.TextXAlignment.Left,
@@ -2740,8 +2808,8 @@ local function App(props)
 						ZIndex = 8,
 					}),
 					Divider = e("Frame", {
-						BackgroundColor3 = Color3.fromRGB(67, 92, 136),
-						BackgroundTransparency = 0.2,
+						BackgroundColor3 = INVENTORY_UI.GoldBase,
+						BackgroundTransparency = 0.26,
 						BorderSizePixel = 0,
 						Position = UDim2.fromOffset(16, 84),
 						Size = UDim2.new(1, -32, 0, 2),
@@ -2759,8 +2827,8 @@ local function App(props)
 					}, ledgerChildren),
 				}),
 				MainPanel = e("Frame", {
-					BackgroundColor3 = Color3.fromRGB(18, 28, 47),
-					BackgroundTransparency = 0.02,
+					BackgroundColor3 = INVENTORY_UI.SectionBg,
+					BackgroundTransparency = 0.12,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(286, 90),
 					Size = showingInventory and UDim2.new(1, -312, 1, -186) or UDim2.new(1, -312, 1, -116),
@@ -2770,15 +2838,15 @@ local function App(props)
 						CornerRadius = UDim.new(0, 12),
 					}),
 					Stroke = e("UIStroke", {
-						Color = Color3.fromRGB(88, 121, 173),
-						Transparency = 0.2,
+						Color = INVENTORY_UI.GoldHighlight,
+						Transparency = 0.14,
 						Thickness = 1.25,
 					}),
 					Gradient = e("UIGradient", {
 						Rotation = 100,
 						Color = ColorSequence.new({
-							ColorSequenceKeypoint.new(0, Color3.fromRGB(28, 43, 70)),
-							ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 28, 47)),
+							ColorSequenceKeypoint.new(0, INVENTORY_UI.SecondaryBg),
+							ColorSequenceKeypoint.new(1, INVENTORY_UI.PrimaryBg),
 						}),
 					}),
 					Eyebrow = e("TextLabel", {
@@ -2826,14 +2894,14 @@ local function App(props)
 									(props.titles and props.titles.unlockedCount) or 0
 								)
 								or string.format("%d shown of %d items ready to manage", props.filteredCount or 0, props.totalCount or 0)),
-						TextColor3 = Color3.fromRGB(175, 187, 207),
+						TextColor3 = INVENTORY_UI.TextMuted,
 						TextSize = 12,
 						TextXAlignment = Enum.TextXAlignment.Left,
 						ZIndex = 8,
 					}),
 					SearchShell = e("Frame", {
 						AnchorPoint = Vector2.new(1, 0),
-						BackgroundColor3 = Color3.fromRGB(245, 241, 234),
+						BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 						BorderSizePixel = 0,
 						Position = UDim2.new(1, -18, 0, 16),
 						Size = UDim2.fromOffset(236, 38),
@@ -2843,8 +2911,8 @@ local function App(props)
 							CornerRadius = UDim.new(0, 8),
 						}),
 						Stroke = e("UIStroke", {
-							Color = Color3.fromRGB(150, 154, 165),
-							Transparency = 0.24,
+							Color = INVENTORY_UI.GoldHighlight,
+							Transparency = 0.2,
 						}),
 						Icon = searchGlyph(),
 						Search = e("TextBox", {
@@ -2858,7 +2926,7 @@ local function App(props)
 							Position = UDim2.fromOffset(36, 0),
 							Size = UDim2.new(1, -44, 1, 0),
 							Text = props.query or "",
-							TextColor3 = Color3.fromRGB(45, 47, 55),
+							TextColor3 = INVENTORY_UI.TextMain,
 							TextSize = 13,
 							TextXAlignment = Enum.TextXAlignment.Left,
 							ZIndex = 8,
@@ -2868,8 +2936,8 @@ local function App(props)
 						}),
 					}),
 					GridShell = e("Frame", {
-						BackgroundColor3 = Color3.fromRGB(8, 10, 16),
-						BackgroundTransparency = 0.18,
+						BackgroundColor3 = INVENTORY_UI.MenuOverlay,
+						BackgroundTransparency = showingInventory and 0.2 or 0.34,
 						BorderSizePixel = 0,
 						ClipsDescendants = true,
 						Position = UDim2.fromOffset(18, 84),
@@ -2880,8 +2948,8 @@ local function App(props)
 							CornerRadius = UDim.new(0, 10),
 						}),
 						Stroke = e("UIStroke", {
-							Color = Color3.fromRGB(63, 80, 117),
-							Transparency = 0.08,
+							Color = INVENTORY_UI.GoldHighlight,
+							Transparency = 0.18,
 						}),
 						LogSummary = showingCaptainLog and e("Frame", {
 							BackgroundColor3 = Color3.fromRGB(16, 22, 37),
@@ -3024,7 +3092,7 @@ local function App(props)
 							BorderSizePixel = 0,
 							CanvasSize = UDim2.new(),
 							Position = UDim2.fromOffset(14, 14),
-							ScrollBarImageColor3 = PALETTE.Cream,
+							ScrollBarImageColor3 = INVENTORY_UI.GoldBase,
 							ScrollBarThickness = 7,
 							Size = UDim2.new(1, -28, 1, -28),
 							ZIndex = 8,
@@ -3035,7 +3103,7 @@ local function App(props)
 							BorderSizePixel = 0,
 							CanvasSize = UDim2.new(),
 							Position = UDim2.fromOffset(14, 82),
-							ScrollBarImageColor3 = PALETTE.Cream,
+							ScrollBarImageColor3 = INVENTORY_UI.GoldBase,
 							ScrollBarThickness = 7,
 							Size = UDim2.new(1, -28, 1, -96),
 							ZIndex = 8,
@@ -3046,12 +3114,12 @@ local function App(props)
 							BorderSizePixel = 0,
 							CanvasSize = UDim2.new(),
 							Position = UDim2.fromOffset(14, 82),
-							ScrollBarImageColor3 = PALETTE.Cream,
+							ScrollBarImageColor3 = INVENTORY_UI.GoldBase,
 							ScrollBarThickness = 7,
 							Size = UDim2.new(1, -28, 1, -96),
 							ZIndex = 8,
 						}, titleChildren) or nil,
-						Empty = (showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0
+					Empty = (showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0
 								or (showingTitles and #((props.titles and props.titles.entries) or {}) == 0)
 								or (showingInventory and #(props.items or {}) == 0)) and e("TextLabel", {
 							AnchorPoint = Vector2.new(0.5, 0.5),
@@ -3070,7 +3138,7 @@ local function App(props)
 									or ((props.totalCount or 0) > 0
 										and "No inventory items match that search."
 										or "Nothing in this hold yet.")),
-							TextColor3 = Color3.fromRGB(191, 198, 212),
+							TextColor3 = INVENTORY_UI.TextMuted,
 							TextSize = 24,
 							TextStrokeTransparency = 0.6,
 							ZIndex = 8,
@@ -3078,9 +3146,10 @@ local function App(props)
 					}),
 				}),
 				FooterStrip = e("Frame", {
-					BackgroundColor3 = Color3.fromRGB(10, 13, 22),
-					BackgroundTransparency = 0.08,
+					BackgroundColor3 = INVENTORY_UI.MenuOverlay,
+					BackgroundTransparency = 0.18,
 					BorderSizePixel = 0,
+					ClipsDescendants = true,
 					Position = UDim2.new(0, 286, 1, -86),
 					Size = UDim2.new(1, -312, 0, 58),
 					Visible = showingInventory,
@@ -3090,8 +3159,8 @@ local function App(props)
 						CornerRadius = UDim.new(0, 12),
 					}),
 					Stroke = e("UIStroke", {
-						Color = Color3.fromRGB(52, 74, 117),
-						Transparency = 0.12,
+						Color = INVENTORY_UI.GoldHighlight,
+						Transparency = 0.18,
 						Thickness = 1.2,
 					}),
 					Tabs = e("Frame", {

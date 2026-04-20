@@ -92,14 +92,45 @@ local cooldownHud = {
 	CurrentFruit = nil,
 	Gui = nil,
 	Panel = nil,
+	Backdrop = nil,
+	Overlay = nil,
+	TopBar = nil,
 	FruitLabel = nil,
 	List = nil,
+	EmptyState = nil,
 	Rows = {},
 }
 local clearCooldownRows
+local refreshCooldownHudLayout
+local DEVIL_FRUIT_UI = {
+	FruitBackgroundImage = "rbxassetid://134053886107384",
+	MenuOverlay = Color3.fromRGB(15, 27, 42),
+	PrimaryBg = Color3.fromRGB(30, 42, 56),
+	SecondaryBg = Color3.fromRGB(36, 52, 71),
+	HeaderBg = Color3.fromRGB(16, 35, 59),
+	SectionBg = Color3.fromRGB(27, 46, 68),
+	SectionHover = Color3.fromRGB(46, 74, 99),
+	GoldBase = Color3.fromRGB(212, 175, 55),
+	GoldHighlight = Color3.fromRGB(242, 209, 107),
+	GoldShadow = Color3.fromRGB(140, 107, 31),
+	TextMain = Color3.fromRGB(230, 230, 230),
+	TextSecondary = Color3.fromRGB(184, 193, 204),
+	Ready = Color3.fromRGB(116, 255, 161),
+	Cooldown = Color3.fromRGB(255, 190, 116),
+	CooldownFill = Color3.fromRGB(255, 133, 44),
+}
 
 local HUD_REFRESH_INTERVAL = 0.05
 local nextHudRefreshAt = 0
+local COOLDOWN_PANEL_WIDTH = 318
+local COOLDOWN_PANEL_INSET_X = 10
+local COOLDOWN_ROW_HEIGHT = 58
+local COOLDOWN_LIST_SPACING = 6
+local COOLDOWN_LIST_VERTICAL_PADDING = 16
+local COOLDOWN_PANEL_TOP_PADDING = 10
+local COOLDOWN_PANEL_BOTTOM_PADDING = 10
+local COOLDOWN_TOPBAR_HEIGHT = 58
+local COOLDOWN_SECTION_GAP = 8
 
 local function logDevilFruitClient(message, ...)
 	print(string.format("[DEVILFRUIT CLIENT] " .. message, ...))
@@ -220,6 +251,21 @@ local function ensureCorner(instance, radius)
 	return corner
 end
 
+local function ensureGradient(instance, topColor, bottomColor)
+	local gradient = instance:FindFirstChildOfClass("UIGradient")
+	if not gradient then
+		gradient = Instance.new("UIGradient")
+		gradient.Parent = instance
+	end
+
+	gradient.Rotation = 90
+	gradient.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, topColor),
+		ColorSequenceKeypoint.new(1, bottomColor),
+	})
+	return gradient
+end
+
 local function getOrderedAbilities(fruitName)
 	return DevilFruitUiController.GetOrderedAbilities(fruitName)
 end
@@ -228,22 +274,41 @@ local function shouldShowCooldownHud(fruitName)
 	return DevilFruitUiController.ShouldShowCooldownHud(fruitName)
 end
 
-local function ensureCooldownHud()
-	if cooldownHud.Panel and cooldownHud.Panel.Parent then
-		return cooldownHud
+local function isCooldownPanelValid(panel)
+	if not (panel and panel:IsA("Frame")) then
+		return false
 	end
 
+	local backdrop = panel:FindFirstChild("Backdrop")
+	local overlay = panel:FindFirstChild("BackdropOverlay")
+	local topBar = panel:FindFirstChild("TopBar")
+	local list = panel:FindFirstChild("AbilityList")
+	local title = topBar and topBar:FindFirstChild("Title")
+	local fruitName = topBar and topBar:FindFirstChild("FruitName")
+
+	return backdrop ~= nil
+		and overlay ~= nil
+		and topBar ~= nil
+		and list ~= nil
+		and title ~= nil
+		and fruitName ~= nil
+end
+
+local function ensureCooldownHud()
 	local playerGui = getPlayerGui()
 	local screenGui = playerGui:FindFirstChild("DevilFruitHUD")
+	local panelRebuilt = false
 	if screenGui and not screenGui:IsA("ScreenGui") then
 		screenGui:Destroy()
 		screenGui = nil
+		panelRebuilt = true
 	end
 
 	if not screenGui then
 		screenGui = Instance.new("ScreenGui")
 		screenGui.Name = "DevilFruitHUD"
 		screenGui.Parent = playerGui
+		panelRebuilt = true
 	end
 
 	screenGui.ResetOnSpawn = false
@@ -254,6 +319,12 @@ local function ensureCooldownHud()
 	if panel and not panel:IsA("Frame") then
 		panel:Destroy()
 		panel = nil
+		panelRebuilt = true
+	end
+	if panel and not isCooldownPanelValid(panel) then
+		panel:Destroy()
+		panel = nil
+		panelRebuilt = true
 	end
 
 	if not panel then
@@ -261,81 +332,232 @@ local function ensureCooldownHud()
 		panel.Name = "CooldownPanel"
 		panel.AnchorPoint = Vector2.new(1, 1)
 		panel.Position = UDim2.new(1, -24, 1, -24)
-		panel.Size = UDim2.fromOffset(270, 0)
-		panel.AutomaticSize = Enum.AutomaticSize.Y
-		panel.BackgroundColor3 = Color3.fromRGB(22, 18, 15)
-		panel.BackgroundTransparency = 0.18
+		panel.Size = UDim2.fromOffset(COOLDOWN_PANEL_WIDTH, 140)
+		panel.AutomaticSize = Enum.AutomaticSize.None
+		panel.BackgroundColor3 = DEVIL_FRUIT_UI.PrimaryBg
+		panel.BackgroundTransparency = 1
 		panel.BorderSizePixel = 0
+		panel.ClipsDescendants = true
 		panel.Visible = false
 		panel.Parent = screenGui
-
-		ensureCorner(panel, 14)
-		ensureStroke(panel, Color3.fromRGB(255, 151, 53), 0.15, 1.5)
-
-		local padding = Instance.new("UIPadding")
-		padding.PaddingTop = UDim.new(0, 10)
-		padding.PaddingBottom = UDim.new(0, 10)
-		padding.PaddingLeft = UDim.new(0, 10)
-		padding.PaddingRight = UDim.new(0, 10)
-		padding.Parent = panel
-
-		local layout = Instance.new("UIListLayout")
-		layout.Padding = UDim.new(0, 8)
-		layout.SortOrder = Enum.SortOrder.LayoutOrder
-		layout.Parent = panel
-
-		local title = Instance.new("TextLabel")
-		title.Name = "Title"
-		title.BackgroundTransparency = 1
-		title.Size = UDim2.new(1, 0, 0, 16)
-		title.Font = Enum.Font.GothamBold
-		title.Text = "DEVIL FRUIT"
-		title.TextColor3 = Color3.fromRGB(255, 205, 160)
-		title.TextSize = 12
-		title.TextXAlignment = Enum.TextXAlignment.Left
-		title.LayoutOrder = 1
-		title.Parent = panel
-
-		local fruitLabel = Instance.new("TextLabel")
-		fruitLabel.Name = "FruitName"
-		fruitLabel.BackgroundTransparency = 1
-		fruitLabel.Size = UDim2.new(1, 0, 0, 22)
-		fruitLabel.Font = Enum.Font.GothamBold
-		fruitLabel.Text = ""
-		fruitLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		fruitLabel.TextSize = 18
-		fruitLabel.TextWrapped = true
-		fruitLabel.TextXAlignment = Enum.TextXAlignment.Left
-		fruitLabel.LayoutOrder = 2
-		fruitLabel.Parent = panel
-
-		local list = Instance.new("Frame")
-		list.Name = "AbilityList"
-		list.BackgroundTransparency = 1
-		list.Size = UDim2.new(1, 0, 0, 0)
-		list.AutomaticSize = Enum.AutomaticSize.Y
-		list.LayoutOrder = 3
-		list.Parent = panel
-
-		local listLayout = Instance.new("UIListLayout")
-		listLayout.Padding = UDim.new(0, 6)
-		listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-		listLayout.Parent = list
-
+		panelRebuilt = true
 	end
 
-	local fruitLabel = panel and panel:FindFirstChild("FruitName")
-	local list = panel and panel:FindFirstChild("AbilityList")
-	if not fruitLabel or not fruitLabel:IsA("TextLabel") or not list or not list:IsA("Frame") then
-		panel:Destroy()
-		cooldownHud.Panel = nil
-		return ensureCooldownHud()
+	panel.BackgroundColor3 = DEVIL_FRUIT_UI.PrimaryBg
+	panel.BackgroundTransparency = 1
+	panel.BorderSizePixel = 0
+	panel.AnchorPoint = Vector2.new(1, 1)
+	panel.Position = UDim2.new(1, -24, 1, -24)
+	panel.Size = UDim2.fromOffset(COOLDOWN_PANEL_WIDTH, 140)
+	panel.AutomaticSize = Enum.AutomaticSize.None
+	panel.ClipsDescendants = true
+	ensureCorner(panel, 14)
+	local panelStroke = ensureStroke(panel, DEVIL_FRUIT_UI.GoldHighlight, 0, 1.6)
+	panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+	local backdrop = panel:FindFirstChild("Backdrop")
+	if backdrop and not backdrop:IsA("ImageLabel") then
+		backdrop:Destroy()
+		backdrop = nil
+	end
+	if not backdrop then
+		backdrop = Instance.new("ImageLabel")
+		backdrop.Name = "Backdrop"
+		backdrop.BackgroundTransparency = 1
+		backdrop.BorderSizePixel = 0
+		backdrop.Image = DEVIL_FRUIT_UI.FruitBackgroundImage
+		backdrop.ScaleType = Enum.ScaleType.Stretch
+		backdrop.Size = UDim2.fromScale(1, 1)
+		backdrop.ZIndex = 0
+		backdrop.Parent = panel
+		ensureCorner(backdrop, 14)
+	end
+	backdrop.Image = DEVIL_FRUIT_UI.FruitBackgroundImage
+	backdrop.ScaleType = Enum.ScaleType.Stretch
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.ZIndex = 0
+
+	local overlay = panel:FindFirstChild("BackdropOverlay")
+	if overlay and not overlay:IsA("Frame") then
+		overlay:Destroy()
+		overlay = nil
+	end
+	if not overlay then
+		overlay = Instance.new("Frame")
+		overlay.Name = "BackdropOverlay"
+		overlay.BackgroundColor3 = DEVIL_FRUIT_UI.MenuOverlay
+		overlay.BackgroundTransparency = 0.42
+		overlay.BorderSizePixel = 0
+		overlay.Size = UDim2.fromScale(1, 1)
+		overlay.ZIndex = 1
+		overlay.Parent = panel
+		ensureCorner(overlay, 14)
+	end
+	overlay.BackgroundColor3 = DEVIL_FRUIT_UI.MenuOverlay
+	overlay.BackgroundTransparency = 0.42
+	overlay.BorderSizePixel = 0
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.ZIndex = 1
+	ensureCorner(overlay, 14)
+
+	for _, child in ipairs(panel:GetChildren()) do
+		if child:IsA("UIPadding") or child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+
+	local topBar = panel:FindFirstChild("TopBar")
+	if topBar and not topBar:IsA("Frame") then
+		topBar:Destroy()
+		topBar = nil
+	end
+	if not topBar then
+		topBar = Instance.new("Frame")
+		topBar.Name = "TopBar"
+		topBar.BackgroundColor3 = DEVIL_FRUIT_UI.HeaderBg
+		topBar.BackgroundTransparency = 0.24
+		topBar.BorderSizePixel = 0
+		topBar.Position = UDim2.fromOffset(COOLDOWN_PANEL_INSET_X, COOLDOWN_PANEL_TOP_PADDING)
+		topBar.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, COOLDOWN_TOPBAR_HEIGHT)
+		topBar.ZIndex = 2
+		topBar.Parent = panel
+		ensureCorner(topBar, 10)
+		local topBarStroke = ensureStroke(topBar, DEVIL_FRUIT_UI.GoldHighlight, 0, 1.2)
+		topBarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		ensureGradient(topBar, DEVIL_FRUIT_UI.SecondaryBg, DEVIL_FRUIT_UI.PrimaryBg)
+	end
+	topBar.BackgroundColor3 = DEVIL_FRUIT_UI.HeaderBg
+	topBar.BackgroundTransparency = 0.24
+	topBar.BorderSizePixel = 0
+	topBar.Position = UDim2.fromOffset(COOLDOWN_PANEL_INSET_X, COOLDOWN_PANEL_TOP_PADDING)
+	topBar.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, COOLDOWN_TOPBAR_HEIGHT)
+	topBar.ZIndex = 2
+	ensureCorner(topBar, 10)
+	local topBarStroke = ensureStroke(topBar, DEVIL_FRUIT_UI.GoldHighlight, 0, 1.2)
+	topBarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	ensureGradient(topBar, DEVIL_FRUIT_UI.SecondaryBg, DEVIL_FRUIT_UI.PrimaryBg)
+
+	local title = topBar:FindFirstChild("Title")
+	if title and not title:IsA("TextLabel") then
+		title:Destroy()
+		title = nil
+	end
+	if not title then
+		title = Instance.new("TextLabel")
+		title.Name = "Title"
+		title.BackgroundTransparency = 1
+		title.Position = UDim2.fromOffset(10, 4)
+		title.Size = UDim2.new(1, -20, 0, 16)
+		title.Font = Enum.Font.GothamBold
+		title.Text = "DEVIL FRUIT"
+		title.TextSize = 12
+		title.TextColor3 = DEVIL_FRUIT_UI.GoldHighlight
+		title.TextXAlignment = Enum.TextXAlignment.Left
+		title.ZIndex = 3
+		title.Parent = topBar
+	end
+	title.Text = "DEVIL FRUIT"
+	title.TextTransparency = 0
+	title.TextColor3 = DEVIL_FRUIT_UI.GoldHighlight
+	title.ZIndex = 3
+
+	local fruitLabel = topBar:FindFirstChild("FruitName")
+	if fruitLabel and not fruitLabel:IsA("TextLabel") then
+		fruitLabel:Destroy()
+		fruitLabel = nil
+	end
+	if not fruitLabel then
+		fruitLabel = Instance.new("TextLabel")
+		fruitLabel.Name = "FruitName"
+		fruitLabel.BackgroundTransparency = 1
+		fruitLabel.Position = UDim2.fromOffset(10, 20)
+		fruitLabel.Size = UDim2.new(1, -20, 0, 30)
+		fruitLabel.Font = Enum.Font.GothamBold
+		fruitLabel.Text = ""
+		fruitLabel.TextColor3 = DEVIL_FRUIT_UI.TextMain
+		fruitLabel.TextSize = 28
+		fruitLabel.TextScaled = true
+		fruitLabel.TextWrapped = false
+		fruitLabel.TextTruncate = Enum.TextTruncate.AtEnd
+		fruitLabel.TextXAlignment = Enum.TextXAlignment.Left
+		fruitLabel.ZIndex = 3
+		fruitLabel.Parent = topBar
+	end
+	fruitLabel.TextTransparency = 0
+	fruitLabel.TextColor3 = DEVIL_FRUIT_UI.TextMain
+	fruitLabel.ZIndex = 3
+
+	local list = panel:FindFirstChild("AbilityList")
+	if list and not list:IsA("Frame") then
+		list:Destroy()
+		list = nil
+	end
+	if not list then
+		list = Instance.new("Frame")
+		list.Name = "AbilityList"
+		list.BackgroundColor3 = DEVIL_FRUIT_UI.SectionBg
+		list.BackgroundTransparency = 0.2
+		list.BorderSizePixel = 0
+		list.Position = UDim2.fromOffset(
+			COOLDOWN_PANEL_INSET_X,
+			COOLDOWN_PANEL_TOP_PADDING + COOLDOWN_TOPBAR_HEIGHT + COOLDOWN_SECTION_GAP
+		)
+		list.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, 0)
+		list.AutomaticSize = Enum.AutomaticSize.None
+		list.ZIndex = 2
+		list.ClipsDescendants = true
+		list.Parent = panel
+		ensureCorner(list, 10)
+		local listStroke = ensureStroke(list, DEVIL_FRUIT_UI.GoldHighlight, 0.14, 1)
+		listStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	end
+	list.BackgroundColor3 = DEVIL_FRUIT_UI.SectionBg
+	list.BackgroundTransparency = 0.2
+	list.BorderSizePixel = 0
+	list.Position = UDim2.fromOffset(
+		COOLDOWN_PANEL_INSET_X,
+		COOLDOWN_PANEL_TOP_PADDING + COOLDOWN_TOPBAR_HEIGHT + COOLDOWN_SECTION_GAP
+	)
+	list.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, 0)
+	list.AutomaticSize = Enum.AutomaticSize.None
+	list.ZIndex = 2
+	list.ClipsDescendants = true
+	ensureCorner(list, 10)
+	local listStroke = ensureStroke(list, DEVIL_FRUIT_UI.GoldHighlight, 0.14, 1)
+	listStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+	local listLayout = list:FindFirstChildOfClass("UIListLayout")
+	if not listLayout then
+		listLayout = Instance.new("UIListLayout")
+		listLayout.Parent = list
+	end
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+	local listPadding = list:FindFirstChildOfClass("UIPadding")
+	if not listPadding then
+		listPadding = Instance.new("UIPadding")
+		listPadding.Parent = list
+	end
+	listPadding.PaddingTop = UDim.new(0, 8)
+	listPadding.PaddingBottom = UDim.new(0, 8)
+	listPadding.PaddingLeft = UDim.new(0, 8)
+	listPadding.PaddingRight = UDim.new(0, 8)
+
+	if panelRebuilt then
+		cooldownHud.CurrentFruit = nil
+		cooldownHud.Rows = {}
+		cooldownHud.EmptyState = nil
 	end
 
 	cooldownHud.Gui = screenGui
 	cooldownHud.Panel = panel
+	cooldownHud.Backdrop = backdrop
+	cooldownHud.Overlay = overlay
+	cooldownHud.TopBar = topBar
 	cooldownHud.FruitLabel = fruitLabel
 	cooldownHud.List = list
+	cooldownHud.EmptyState = cooldownHud.EmptyState and cooldownHud.EmptyState.Parent and cooldownHud.EmptyState or nil
 	cooldownHud.Rows = cooldownHud.Rows or {}
 
 	return cooldownHud
@@ -365,46 +587,106 @@ clearCooldownRows = function()
 		end
 	end
 
+	if cooldownHud.EmptyState and cooldownHud.EmptyState.Parent then
+		cooldownHud.EmptyState:Destroy()
+	end
+
 	cooldownHud.Rows = {}
+	cooldownHud.EmptyState = nil
+	refreshCooldownHudLayout()
+end
+
+refreshCooldownHudLayout = function()
+	ensureCooldownHud()
+
+	local rowCount = 0
+	for _ in pairs(cooldownHud.Rows) do
+		rowCount += 1
+	end
+
+	local listHeight = COOLDOWN_LIST_VERTICAL_PADDING
+	if rowCount > 0 then
+		listHeight += (rowCount * COOLDOWN_ROW_HEIGHT) + ((rowCount - 1) * COOLDOWN_LIST_SPACING)
+	else
+		listHeight = math.max(COOLDOWN_LIST_VERTICAL_PADDING + 28, 44)
+	end
+
+	local listWidthOffset = -(COOLDOWN_PANEL_INSET_X * 2)
+	if cooldownHud.List then
+		cooldownHud.List.Position = UDim2.fromOffset(
+			COOLDOWN_PANEL_INSET_X,
+			COOLDOWN_PANEL_TOP_PADDING + COOLDOWN_TOPBAR_HEIGHT + COOLDOWN_SECTION_GAP
+		)
+		cooldownHud.List.Size = UDim2.new(1, listWidthOffset, 0, listHeight)
+		cooldownHud.List.Visible = true
+	end
+
+	if cooldownHud.TopBar then
+		cooldownHud.TopBar.Position = UDim2.fromOffset(COOLDOWN_PANEL_INSET_X, COOLDOWN_PANEL_TOP_PADDING)
+		cooldownHud.TopBar.Size = UDim2.new(1, listWidthOffset, 0, COOLDOWN_TOPBAR_HEIGHT)
+		cooldownHud.TopBar.Visible = true
+	end
+
+	local totalHeight = COOLDOWN_PANEL_TOP_PADDING
+		+ COOLDOWN_TOPBAR_HEIGHT
+		+ COOLDOWN_SECTION_GAP
+		+ listHeight
+		+ COOLDOWN_PANEL_BOTTOM_PADDING
+
+	if cooldownHud.Panel then
+		cooldownHud.Panel.Size = UDim2.fromOffset(COOLDOWN_PANEL_WIDTH, totalHeight)
+	end
 end
 
 local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
+	local cooldownValue = tonumber(abilityConfig and abilityConfig.Cooldown) or 0
+	local keyCode = abilityConfig and abilityConfig.KeyCode
+	local keyCodeName = keyCode and keyCode.Name or "?"
+
 	local row = Instance.new("Frame")
 	row.Name = abilityName
-	row.Size = UDim2.new(1, 0, 0, 54)
-	row.BackgroundColor3 = Color3.fromRGB(35, 28, 24)
+	row.Size = UDim2.new(1, 0, 0, 58)
+	row.BackgroundColor3 = DEVIL_FRUIT_UI.SectionBg
+	row.BackgroundTransparency = 0.18
 	row.BorderSizePixel = 0
 	row.LayoutOrder = layoutOrder
+	row.ZIndex = 3
 	row.Parent = cooldownHud.List
 
-	ensureCorner(row, 12)
-	ensureStroke(row, Color3.fromRGB(255, 164, 82), 0.45, 1)
+	ensureCorner(row, 10)
+	local rowStroke = ensureStroke(row, DEVIL_FRUIT_UI.GoldHighlight, 0.1, 1)
+	rowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	ensureGradient(row, DEVIL_FRUIT_UI.SecondaryBg, DEVIL_FRUIT_UI.PrimaryBg)
 
 	local keyBadge = Instance.new("TextLabel")
 	keyBadge.Name = "Key"
 	keyBadge.AnchorPoint = Vector2.new(0, 0.5)
-	keyBadge.Position = UDim2.new(0, 10, 0.5, -6)
+	keyBadge.Position = UDim2.new(0, 8, 0.5, -6)
 	keyBadge.Size = UDim2.fromOffset(34, 24)
-	keyBadge.BackgroundColor3 = Color3.fromRGB(255, 124, 32)
+	keyBadge.BackgroundColor3 = DEVIL_FRUIT_UI.GoldBase
 	keyBadge.BorderSizePixel = 0
 	keyBadge.Font = Enum.Font.GothamBold
-	keyBadge.Text = abilityConfig.KeyCode.Name
-	keyBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+	keyBadge.Text = keyCodeName
+	keyBadge.TextColor3 = DEVIL_FRUIT_UI.PrimaryBg
 	keyBadge.TextSize = 14
+	keyBadge.ZIndex = 4
 	keyBadge.Parent = row
 
 	ensureCorner(keyBadge, 8)
+	ensureStroke(keyBadge, DEVIL_FRUIT_UI.GoldHighlight, 0, 1)
+	ensureGradient(keyBadge, DEVIL_FRUIT_UI.GoldHighlight, DEVIL_FRUIT_UI.GoldBase)
 
 	local nameLabel = Instance.new("TextLabel")
 	nameLabel.Name = "Name"
 	nameLabel.BackgroundTransparency = 1
-	nameLabel.Position = UDim2.new(0, 56, 0, 8)
+	nameLabel.Position = UDim2.new(0, 52, 0, 8)
 	nameLabel.Size = UDim2.new(1, -136, 0, 18)
 	nameLabel.Font = Enum.Font.GothamBold
 	nameLabel.Text = formatAbilityName(abilityName)
-	nameLabel.TextColor3 = Color3.fromRGB(255, 243, 231)
+	nameLabel.TextColor3 = DEVIL_FRUIT_UI.TextMain
 	nameLabel.TextSize = 15
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+	nameLabel.ZIndex = 4
 	nameLabel.Parent = row
 
 	local statusLabel = Instance.new("TextLabel")
@@ -415,21 +697,23 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 	statusLabel.Size = UDim2.new(0, 72, 0, 18)
 	statusLabel.Font = Enum.Font.GothamBold
 	statusLabel.Text = "READY"
-	statusLabel.TextColor3 = Color3.fromRGB(116, 255, 161)
+	statusLabel.TextColor3 = DEVIL_FRUIT_UI.Ready
 	statusLabel.TextSize = 13
 	statusLabel.TextXAlignment = Enum.TextXAlignment.Right
+	statusLabel.ZIndex = 4
 	statusLabel.Parent = row
 
 	local detailLabel = Instance.new("TextLabel")
 	detailLabel.Name = "Detail"
 	detailLabel.BackgroundTransparency = 1
-	detailLabel.Position = UDim2.new(0, 56, 0, 27)
+	detailLabel.Position = UDim2.new(0, 52, 0, 29)
 	detailLabel.Size = UDim2.new(1, -68, 0, 12)
 	detailLabel.Font = Enum.Font.Gotham
-	detailLabel.Text = string.format("Cooldown %.1fs", tonumber(abilityConfig.Cooldown) or 0)
-	detailLabel.TextColor3 = Color3.fromRGB(204, 186, 175)
+	detailLabel.Text = string.format("Cooldown %.1fs", cooldownValue)
+	detailLabel.TextColor3 = DEVIL_FRUIT_UI.TextSecondary
 	detailLabel.TextSize = 11
 	detailLabel.TextXAlignment = Enum.TextXAlignment.Left
+	detailLabel.ZIndex = 4
 	detailLabel.Parent = row
 
 	local bar = Instance.new("Frame")
@@ -437,17 +721,20 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 	bar.AnchorPoint = Vector2.new(0, 1)
 	bar.Position = UDim2.new(0, 10, 1, -8)
 	bar.Size = UDim2.new(1, -20, 0, 6)
-	bar.BackgroundColor3 = Color3.fromRGB(64, 50, 44)
+	bar.BackgroundColor3 = DEVIL_FRUIT_UI.PrimaryBg
 	bar.BorderSizePixel = 0
+	bar.ZIndex = 4
 	bar.Parent = row
 
 	ensureCorner(bar, 999)
+	ensureStroke(bar, DEVIL_FRUIT_UI.GoldShadow, 0.26, 0.8)
 
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
 	fill.Size = UDim2.new(1, 0, 1, 0)
-	fill.BackgroundColor3 = Color3.fromRGB(116, 255, 161)
+	fill.BackgroundColor3 = DEVIL_FRUIT_UI.Ready
 	fill.BorderSizePixel = 0
+	fill.ZIndex = 5
 	fill.Parent = bar
 
 	ensureCorner(fill, 999)
@@ -457,7 +744,7 @@ local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
 		Status = statusLabel,
 		Fill = fill,
 		Detail = detailLabel,
-		Cooldown = tonumber(abilityConfig.Cooldown) or 0,
+		Cooldown = cooldownValue,
 	}
 end
 
@@ -476,16 +763,55 @@ local function rebuildCooldownHud(fruitName)
 	cooldownHud.FruitLabel.Text = fruit.DisplayName or fruitName
 
 	local orderedAbilities = getOrderedAbilities(fruitName)
-	for index, entry in ipairs(orderedAbilities) do
-		cooldownHud.Rows[entry.Name] = createCooldownRow(index, entry.Name, entry.Config)
+	if #orderedAbilities == 0 then
+		local emptyLabel = Instance.new("TextLabel")
+		emptyLabel.Name = "NoAbilities"
+		emptyLabel.BackgroundTransparency = 1
+		emptyLabel.Size = UDim2.new(1, -16, 0, 24)
+		emptyLabel.Position = UDim2.fromOffset(8, 10)
+		emptyLabel.Font = Enum.Font.GothamSemibold
+		emptyLabel.Text = "No active fruit skills."
+		emptyLabel.TextColor3 = DEVIL_FRUIT_UI.TextSecondary
+		emptyLabel.TextSize = 14
+		emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
+		emptyLabel.ZIndex = 4
+		emptyLabel.Parent = cooldownHud.List
+		cooldownHud.EmptyState = emptyLabel
+	else
+		for index, entry in ipairs(orderedAbilities) do
+			cooldownHud.Rows[entry.Name] = createCooldownRow(index, entry.Name, entry.Config)
+		end
 	end
+	refreshCooldownHudLayout()
 end
 
 local function updateCooldownHud(forceRebuild)
 	ensureCooldownHud()
 
 	local fruitName = getEquippedFruit()
-	if forceRebuild or fruitName ~= cooldownHud.CurrentFruit then
+	local needsRebuild = forceRebuild or fruitName ~= cooldownHud.CurrentFruit
+	if not needsRebuild then
+		for _, row in pairs(cooldownHud.Rows) do
+			if not (row and row.Container and row.Container.Parent == cooldownHud.List and row.Status and row.Detail and row.Fill) then
+				needsRebuild = true
+				break
+			end
+		end
+	end
+
+	if not needsRebuild and cooldownHud.List and next(cooldownHud.Rows) ~= nil then
+		local rowFrames = 0
+		for _, child in ipairs(cooldownHud.List:GetChildren()) do
+			if child:IsA("Frame") then
+				rowFrames += 1
+			end
+		end
+		if rowFrames == 0 then
+			needsRebuild = true
+		end
+	end
+
+	if needsRebuild then
 		rebuildCooldownHud(fruitName)
 	end
 
@@ -504,11 +830,12 @@ local function updateCooldownHud(forceRebuild)
 		local isReady = remaining <= 0
 
 		row.Status.Text = isReady and "READY" or ("CD " .. formatCooldownTime(remaining))
-		row.Status.TextColor3 = isReady and Color3.fromRGB(116, 255, 161) or Color3.fromRGB(255, 190, 116)
+		row.Status.TextColor3 = isReady and DEVIL_FRUIT_UI.Ready or DEVIL_FRUIT_UI.Cooldown
 		row.Detail.Text = isReady and "Move ready" or ("On cooldown for " .. formatCooldownTime(remaining))
 		row.Fill.Size = UDim2.new(progress, 0, 1, 0)
-		row.Fill.BackgroundColor3 = isReady and Color3.fromRGB(116, 255, 161) or Color3.fromRGB(255, 133, 44)
+		row.Fill.BackgroundColor3 = isReady and DEVIL_FRUIT_UI.Ready or DEVIL_FRUIT_UI.CooldownFill
 	end
+	refreshCooldownHudLayout()
 end
 
 getFruitFolder = function()

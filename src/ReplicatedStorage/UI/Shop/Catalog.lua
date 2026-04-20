@@ -400,7 +400,7 @@ local items = {
 	}),
 }
 
-Catalog.title = "Grand Line Rush Shop"
+Catalog.title = "Grand Line Rush Store"
 Catalog.subtitle = "Stock your captain with premium bundles, boosts, and voyage perks before the next run."
 Catalog.heroEyebrow = "Grand Market"
 Catalog.heroHeadline = "Stock up before you sail back into the Grand Line."
