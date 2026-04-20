@@ -8,18 +8,32 @@ local TOOL_ATTR_KIND = "InventoryItemKind"
 local TOOL_ATTR_NAME = "InventoryItemName"
 local TOOL_ATTR_FRUIT_KEY = "FruitKey"
 local TOOL_ATTR_FRUIT_NAME = "FruitName"
+local TOOL_ATTR_GRIP_VERSION = "FruitToolGripVersion"
 local DEVIL_FRUITS_FOLDER_NAME = "DevilFruits"
 local PROMPT_TIMEOUT = 20
 local TOOL_HANDLE_SIZE = Vector3.new(0.35, 0.35, 0.35)
+local FRUIT_TOOL_GRIP_VERSION = "authored_tool_template_v5"
+local CONSUME_BIND_ATTRIBUTE = "__DevilFruitConsumeBound"
+local CONSUME_BIND_VERSION = "consume_bind_v2"
+local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
+local CONSUME_DEBUG = true
+local R6G_WELD_DEBUG = true
 local EXPLICIT_GRIP_ATTACHMENT_NAMES = {
 	"RightGripAttachment",
 	"GripAttachment",
 	"ToolGripAttachment",
 }
 local EXPLICIT_GRIP_PART_NAMES = {
-	"Handle",
 	"Grip",
 	"Hold",
+}
+local MODEL_VARIANT_R6G = "R6G"
+local MODEL_VARIANT_ATTRIBUTE_NAMES = {
+	"FruitHoldModelVariant",
+	"FruitGripModelVariant",
+	"FruitModelVariant",
+	"EatAnimationRig",
+	"CurrentModelAsset",
 }
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -32,8 +46,73 @@ local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChil
 
 local promptRemote
 local responseRemote
+local requestRemote
 local pendingConsumeByPlayer = {}
 local started = false
+local nextConsumeBindId = 0
+
+local function consumeDebug(message, ...)
+	if not CONSUME_DEBUG then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[FruitConsumeDebug] " .. tostring(message), ...)
+	print(ok and formatted or ("[FruitConsumeDebug] " .. tostring(message)))
+end
+
+local function debugInstancePath(instance)
+	if typeof(instance) == "Instance" then
+		return instance:GetFullName()
+	end
+
+	return "<nil>"
+end
+
+local function debugToolBindId(tool)
+	if tool and tool:IsA("Tool") then
+		return tostring(tool:GetAttribute(CONSUME_BIND_ID_ATTRIBUTE) or "?")
+	end
+
+	return "?"
+end
+
+local function r6gWeldDebug(message, ...)
+	if not R6G_WELD_DEBUG then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[R6G FRUIT WELD][SERVER][InventoryService] " .. tostring(message), ...)
+	print(ok and formatted or ("[R6G FRUIT WELD][SERVER][InventoryService] " .. tostring(message)))
+end
+
+local function formatCFrameForDebug(value)
+	if typeof(value) ~= "CFrame" then
+		return tostring(value)
+	end
+
+	local x, y, z = value:ToOrientation()
+	return string.format(
+		"pos=(%.2f, %.2f, %.2f) rot=(%.1f, %.1f, %.1f)",
+		value.Position.X,
+		value.Position.Y,
+		value.Position.Z,
+		math.deg(x),
+		math.deg(y),
+		math.deg(z)
+	)
+end
+
+local function formatJointCFrameForDebug(joint, propertyName)
+	local ok, value = pcall(function()
+		return joint[propertyName]
+	end)
+
+	if ok and typeof(value) == "CFrame" then
+		return formatCFrameForDebug(value)
+	end
+
+	return "<unavailable>"
+end
 
 local function getOrCreateRemotesFolder()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -66,6 +145,7 @@ local function ensureRemotes()
 	local remotesFolder = getOrCreateRemotesFolder()
 	promptRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumePrompt")
 	responseRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumeResponse")
+	requestRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumeRequest")
 end
 
 local function resolveFruit(fruitIdentifier)
@@ -238,6 +318,194 @@ local function isToolOwnedByPlayer(tool, player)
 	return parent == player.Backpack or parent == player.Character
 end
 
+local function getGripPart(character)
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChild("RightHand")
+		or character:FindFirstChild("RightLowerArm")
+		or character:FindFirstChild("Right Arm")
+end
+
+local function isR6GModelValue(value)
+	return typeof(value) == "string" and string.upper(value) == MODEL_VARIANT_R6G
+end
+
+local function isR6GCharacter(character)
+	if typeof(character) ~= "Instance" then
+		return false
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	for _, target in ipairs({ character, humanoid }) do
+		if typeof(target) == "Instance" then
+			for _, attributeName in ipairs(MODEL_VARIANT_ATTRIBUTE_NAMES) do
+				if isR6GModelValue(target:GetAttribute(attributeName)) then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function clearManualGrip(tool)
+	if not tool or not tool:IsA("Tool") then
+		return
+	end
+
+	local handle = tool:FindFirstChild("Handle")
+	if not handle or not handle:IsA("BasePart") then
+		return
+	end
+
+	local manualGrip = handle:FindFirstChild("ManualGrip")
+	if manualGrip then
+		manualGrip:Destroy()
+	end
+end
+
+local function resolveManualGripC0(gripPart)
+	local attachment = gripPart:FindFirstChild("RightGripAttachment")
+		or gripPart:FindFirstChild("RightGrip")
+	if not (attachment and attachment:IsA("Attachment")) then
+		return CFrame.new(), "", "PartOrigin"
+	end
+
+	return attachment.CFrame, attachment.Name, "AttachmentCFrame"
+end
+
+local function getConnectedRightGripJoints(character, handle)
+	local joints = {}
+	if typeof(character) ~= "Instance" or typeof(handle) ~= "Instance" then
+		return joints
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant.Name == "RightGrip"
+			and descendant:IsA("JointInstance")
+			and (descendant.Part0 == handle or descendant.Part1 == handle) then
+			table.insert(joints, descendant)
+		end
+	end
+
+	return joints
+end
+
+local function logR6GLiveGripState(source, tool, character)
+	if not (tool and tool:IsA("Tool") and isR6GCharacter(character)) then
+		return
+	end
+
+	local handle = tool:FindFirstChild("Handle")
+	local gripPart = getGripPart(character)
+	local attachment = gripPart and (gripPart:FindFirstChild("RightGripAttachment") or gripPart:FindFirstChild("RightGrip")) or nil
+	local attachmentIsAttachment = attachment and attachment:IsA("Attachment")
+	r6gWeldDebug(
+		"%s tool=%s parent=%s handle=%s gripPart=%s attachmentExists=%s attachment=%s attachmentClass=%s attachmentCFrame=%s toolGrip=%s manualMode=%s",
+		tostring(source),
+		tool.Name,
+		debugInstancePath(tool.Parent),
+		debugInstancePath(handle),
+		debugInstancePath(gripPart),
+		tostring(attachmentIsAttachment == true),
+		attachment and attachment.Name or "",
+		attachment and attachment.ClassName or "",
+		attachmentIsAttachment and formatCFrameForDebug(attachment.CFrame) or "<none>",
+		formatCFrameForDebug(tool.Grip),
+		tostring(tool:GetAttribute("FruitManualGripC0Mode") or "")
+	)
+
+	local foundJoint = false
+	if typeof(character) == "Instance" then
+		for _, descendant in ipairs(character:GetDescendants()) do
+			if descendant:IsA("JointInstance") and (descendant.Name == "RightGrip" or descendant.Name == "ManualGrip") then
+				foundJoint = true
+				r6gWeldDebug(
+					"%s joint name=%s class=%s parent=%s part0=%s part1=%s connectedToHandle=%s C0=%s C1=%s",
+					tostring(source),
+					descendant.Name,
+					descendant.ClassName,
+					debugInstancePath(descendant.Parent),
+					debugInstancePath(descendant.Part0),
+					debugInstancePath(descendant.Part1),
+					tostring(handle ~= nil and (descendant.Part0 == handle or descendant.Part1 == handle)),
+					formatJointCFrameForDebug(descendant, "C0"),
+					formatJointCFrameForDebug(descendant, "C1")
+				)
+			end
+		end
+	end
+
+	if not foundJoint then
+		r6gWeldDebug("%s joint name=<none>", tostring(source))
+	end
+end
+
+local function enforceManualGrip(tool, character, source)
+	if not tool or not tool:IsA("Tool") or not character then
+		return false
+	end
+
+	local handle = tool:FindFirstChild("Handle")
+	if not handle or not handle:IsA("BasePart") then
+		return false
+	end
+
+	local useR6GripFrame = isR6GCharacter(character)
+	if useR6GripFrame then
+		logR6GLiveGripState((source or "enforceManualGrip") .. ":before", tool, character)
+	end
+
+	local existingGrips = getConnectedRightGripJoints(character, handle)
+	if #existingGrips > 0 then
+		if not useR6GripFrame then
+			clearManualGrip(tool)
+			return false
+		end
+
+		for _, existingGrip in ipairs(existingGrips) do
+			r6gWeldDebug(
+				"%s replacing connected RightGrip class=%s parent=%s",
+				tostring(source or "enforceManualGrip"),
+				existingGrip.ClassName,
+				debugInstancePath(existingGrip.Parent)
+			)
+			existingGrip:Destroy()
+		end
+	end
+
+	clearManualGrip(tool)
+
+	local gripPart = getGripPart(character)
+	if not gripPart or not gripPart:IsA("BasePart") then
+		return false
+	end
+
+	local weld = Instance.new("Weld")
+	weld.Name = "ManualGrip"
+	weld.Part0 = gripPart
+	weld.Part1 = handle
+	weld.C1 = tool.Grip
+
+	if useR6GripFrame then
+		tool:SetAttribute("FruitManualGripFrame", "R6")
+	end
+
+	local gripC0, attachmentName, c0Mode = resolveManualGripC0(gripPart)
+	weld.C0 = gripC0
+	tool:SetAttribute("FruitManualGripAttachmentUsed", attachmentName)
+	tool:SetAttribute("FruitManualGripC0Mode", c0Mode)
+
+	weld.Parent = handle
+	if useR6GripFrame then
+		logR6GLiveGripState((source or "enforceManualGrip") .. ":after", tool, character)
+	end
+	return true
+end
+
 local function findFruitTools(container, fruitKey)
 	local tools = {}
 	if not container then
@@ -273,13 +541,15 @@ local function setUpPart(part)
 end
 
 local function getPrimaryPartFromTemplate(template)
-	if not template or not (template:IsA("Model") or template:IsA("WorldModel")) then
+	if not template or not (template:IsA("Model") or template:IsA("WorldModel") or template:IsA("Tool")) then
 		return nil
 	end
 
-	local primaryPart = template.PrimaryPart
-	if primaryPart and primaryPart:IsA("BasePart") then
-		return primaryPart
+	if template:IsA("Model") or template:IsA("WorldModel") then
+		local primaryPart = template.PrimaryPart
+		if primaryPart and primaryPart:IsA("BasePart") then
+			return primaryPart
+		end
 	end
 
 	local handle = template:FindFirstChild("Handle", true)
@@ -305,6 +575,22 @@ local function getTemplateParts(template)
 	end
 
 	return parts
+end
+
+local function getRenderableTemplateParts(template)
+	local renderableParts = {}
+
+	for _, part in ipairs(getTemplateParts(template)) do
+		if part.Transparency < 0.98 then
+			table.insert(renderableParts, part)
+		end
+	end
+
+	if #renderableParts > 0 then
+		return renderableParts
+	end
+
+	return getTemplateParts(template)
 end
 
 local function clampVector3(value, minValue, maxValue)
@@ -345,12 +631,12 @@ local function expandBounds(relativeCFrame, size, currentMin, currentMax)
 end
 
 local function findExplicitGripPivot(template)
-    for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
-        local attachment = template:FindFirstChild(attachmentName, true)
-        if attachment and attachment:IsA("Attachment") and attachment.Parent and attachment.Parent:IsA("BasePart") then
-            return attachment.WorldCFrame
-        end
-    end
+	for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
+		local attachment = template:FindFirstChild(attachmentName, true)
+		if attachment and attachment:IsA("Attachment") and attachment.Parent and attachment.Parent:IsA("BasePart") then
+			return attachment.WorldCFrame
+		end
+	end
 
 	for _, partName in ipairs(EXPLICIT_GRIP_PART_NAMES) do
 		local gripPart = template:FindFirstChild(partName, true)
@@ -359,26 +645,26 @@ local function findExplicitGripPivot(template)
 		end
 	end
 
-    return nil
+	return nil
 end
 
 local function findToolGripAttachmentPivot(template)
-    local templateParts = getTemplateParts(template)
-    for _, part in ipairs(templateParts) do
-        local attachment = part:FindFirstChild("ToolGripAttachment")
-        if attachment and attachment:IsA("Attachment") then
-            return attachment.WorldCFrame
-        end
-    end
+	local templateParts = getTemplateParts(template)
+	for _, part in ipairs(templateParts) do
+		local attachment = part:FindFirstChild("ToolGripAttachment")
+		if attachment and attachment:IsA("Attachment") then
+			return attachment.WorldCFrame
+		end
+	end
 
-    return nil
+	return nil
 end
 
 local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
-    local templateParts = getTemplateParts(template)
-    if #templateParts == 0 then
-        return primaryPart.CFrame
-    end
+	local templateParts = getRenderableTemplateParts(template)
+	if #templateParts == 0 then
+		return CFrame.new(primaryPart.Position)
+	end
 
 	local localMin = Vector3.new(math.huge, math.huge, math.huge)
 	local localMax = Vector3.new(-math.huge, -math.huge, -math.huge)
@@ -401,11 +687,31 @@ local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
 
 	gripLocalPosition = clampVector3(gripLocalPosition, localMin, localMax)
 
-	return primaryPart.CFrame * CFrame.new(gripLocalPosition)
+	return CFrame.new(primaryPart.CFrame:PointToWorldSpace(gripLocalPosition))
 end
 
 local function getGripPivot(template, primaryPart, fruit, gripOptions)
-    return findToolGripAttachmentPivot(template) or getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
+	-- Some imported fruit assets carry legacy grip attachments on the stem; generated tools should hold the fruit body.
+	return getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
+end
+
+local function applyFruitToolMetadata(tool, fruit)
+	tool.Name = fruit.FruitKey
+	tool.ToolTip = fruit.DisplayName
+	tool.CanBeDropped = false
+	tool:SetAttribute(TOOL_ATTR_KIND, "DevilFruit")
+	tool:SetAttribute(TOOL_ATTR_NAME, fruit.FruitKey)
+	tool:SetAttribute(TOOL_ATTR_FRUIT_KEY, fruit.FruitKey)
+	tool:SetAttribute(TOOL_ATTR_FRUIT_NAME, fruit.DisplayName)
+	tool:SetAttribute(TOOL_ATTR_GRIP_VERSION, FRUIT_TOOL_GRIP_VERSION)
+end
+
+local function setUpToolParts(tool)
+	for _, descendant in ipairs(tool:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			setUpPart(descendant)
+		end
+	end
 end
 
 local function buildFruitTool(player, fruitKey)
@@ -415,8 +721,23 @@ local function buildFruitTool(player, fruitKey)
 	end
 
 	local template = worldModelOrReason
-	if not (template:IsA("Model") or template:IsA("WorldModel")) then
+	if not (template:IsA("Model") or template:IsA("WorldModel") or template:IsA("Tool")) then
 		return nil, "unsupported_tool_template"
+	end
+
+	local character = player and player.Character or nil
+	if template:IsA("Tool") then
+		local tool = template:Clone()
+		applyFruitToolMetadata(tool, fruit)
+		setUpToolParts(tool)
+		FruitGripController.MarkAuthoredRuntimeGrip(tool, tool.Grip)
+		FruitGripController.ApplyToolGrip(tool, fruit.FruitKey, {
+			Tool = tool,
+			Player = player,
+			Character = character,
+		})
+
+		return tool
 	end
 
 	local primaryPart = getPrimaryPartFromTemplate(template)
@@ -424,7 +745,6 @@ local function buildFruitTool(player, fruitKey)
 		return nil, "missing_primary_part"
 	end
 
-	local character = player and player.Character or nil
 	local gripOptions = {
 		Player = player,
 		Character = character,
@@ -436,14 +756,8 @@ local function buildFruitTool(player, fruitKey)
 	end
 
 	local tool = Instance.new("Tool")
-	tool.Name = fruit.FruitKey
-	tool.ToolTip = fruit.DisplayName
-	tool.CanBeDropped = false
 	tool.RequiresHandle = false
-	tool:SetAttribute(TOOL_ATTR_KIND, "DevilFruit")
-	tool:SetAttribute(TOOL_ATTR_NAME, fruit.FruitKey)
-	tool:SetAttribute(TOOL_ATTR_FRUIT_KEY, fruit.FruitKey)
-	tool:SetAttribute(TOOL_ATTR_FRUIT_NAME, fruit.DisplayName)
+	applyFruitToolMetadata(tool, fruit)
 
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
@@ -455,6 +769,11 @@ local function buildFruitTool(player, fruitKey)
 
 	for _, part in ipairs(templateParts) do
 		local clone = part:Clone()
+		for _, descendant in ipairs(clone:GetDescendants()) do
+			if descendant:IsA("JointInstance") or descendant:IsA("Constraint") then
+				descendant:Destroy()
+			end
+		end
 		setUpPart(clone)
 		if clone.Name == "Handle" then
 			clone.Name = "FruitGeometryHandle"
@@ -481,14 +800,35 @@ local function clearPendingConsume(player)
 	pendingConsumeByPlayer[player] = nil
 end
 
+local function isPendingConsumeExpired(pending)
+	local requestedAt = type(pending) == "table" and tonumber(pending.RequestedAt) or nil
+	return requestedAt == nil or (os.clock() - requestedAt) > PROMPT_TIMEOUT
+end
+
 local function requestConsume(player, tool)
-	if pendingConsumeByPlayer[player] ~= nil then
-		return
+	consumeDebug(
+		"request entry player=%s tool=%s bindId=%s parent=%s",
+		player.Name,
+		tostring(tool and tool.Name or "<nil>"),
+		debugToolBindId(tool),
+		debugInstancePath(tool and tool.Parent)
+	)
+
+	local existingPending = pendingConsumeByPlayer[player]
+	if existingPending ~= nil then
+		if not isPendingConsumeExpired(existingPending) then
+			consumeDebug("request blocked player=%s reason=pending_active fruit=%s", player.Name, tostring(existingPending.FruitKey))
+			return
+		end
+
+		consumeDebug("request clearing stale pending player=%s fruit=%s", player.Name, tostring(existingPending.FruitKey))
+		clearPendingConsume(player)
 	end
 
 	local fruitKey = tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)
 	local fruitName = tool:GetAttribute(TOOL_ATTR_FRUIT_NAME)
 	if typeof(fruitKey) ~= "string" or fruitKey == "" then
+		consumeDebug("request blocked player=%s reason=missing_fruit_key tool=%s", player.Name, tostring(tool and tool.Name or "<nil>"))
 		return
 	end
 
@@ -499,27 +839,124 @@ local function requestConsume(player, tool)
 		RequestedAt = os.clock(),
 	}
 
+	consumeDebug(
+		"prompt fire player=%s fruit=%s current=%s",
+		player.Name,
+		tostring(fruitKey),
+		tostring(equippedFruitName)
+	)
 	promptRemote:FireClient(player, {
 		FruitKey = fruitKey,
 		FruitName = fruitName,
 		CurrentFruitName = equippedFruitName,
 	})
+
+	task.delay(PROMPT_TIMEOUT, function()
+		local pending = pendingConsumeByPlayer[player]
+		if pending and pending.Tool == tool and pending.FruitKey == fruitKey and isPendingConsumeExpired(pending) then
+			clearPendingConsume(player)
+		end
+	end)
 end
 
 local function hookTool(player, tool)
-	if tool:GetAttribute("__DevilFruitConsumeBound") == true then
+	if tool:GetAttribute(CONSUME_BIND_ATTRIBUTE) == CONSUME_BIND_VERSION then
+		consumeDebug(
+			"bind skipped player=%s tool=%s bindId=%s fruit=%s parent=%s",
+			player.Name,
+			tool.Name,
+			debugToolBindId(tool),
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			debugInstancePath(tool.Parent)
+		)
 		return
 	end
 
-	tool:SetAttribute("__DevilFruitConsumeBound", true)
+	nextConsumeBindId += 1
+	local bindId = nextConsumeBindId
+	tool:SetAttribute(CONSUME_BIND_ATTRIBUTE, CONSUME_BIND_VERSION)
+	tool:SetAttribute(CONSUME_BIND_ID_ATTRIBUTE, bindId)
+	consumeDebug(
+		"bind player=%s tool=%s bindId=%s fruit=%s parent=%s enabled=%s manual=%s requiresHandle=%s hasHandle=%s",
+		player.Name,
+		tool.Name,
+		tostring(bindId),
+		tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+		debugInstancePath(tool.Parent),
+		tostring(tool.Enabled),
+		tostring(tool.ManualActivationOnly),
+		tostring(tool.RequiresHandle),
+		tostring(tool:FindFirstChild("Handle") ~= nil)
+	)
+	tool:GetPropertyChangedSignal("Parent"):Connect(function()
+		consumeDebug(
+			"parent changed player=%s tool=%s bindId=%s fruit=%s parent=%s",
+			player.Name,
+			tool.Name,
+			debugToolBindId(tool),
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			debugInstancePath(tool.Parent)
+		)
+	end)
+	tool.Destroying:Connect(function()
+		consumeDebug(
+			"destroying player=%s tool=%s bindId=%s fruit=%s parent=%s",
+			player.Name,
+			tool.Name,
+			debugToolBindId(tool),
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			debugInstancePath(tool.Parent)
+		)
+	end)
 	tool.Equipped:Connect(function()
+		consumeDebug(
+			"equipped event player=%s tool=%s bindId=%s fruit=%s parent=%s",
+			player.Name,
+			tool.Name,
+			debugToolBindId(tool),
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			debugInstancePath(tool.Parent)
+		)
 		FruitGripController.ApplyToolGrip(tool, tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), {
 			Tool = tool,
 			Player = player,
 			Character = player.Character,
 		})
+		task.defer(function()
+			if player.Parent ~= Players then
+				return
+			end
+
+			local character = player.Character
+			if not character or tool.Parent ~= character then
+				return
+			end
+
+			enforceManualGrip(tool, character, "equipped.defer")
+		end)
+		task.delay(0.25, function()
+			if player.Parent ~= Players then
+				return
+			end
+
+			local character = player.Character
+			if not character or tool.Parent ~= character then
+				return
+			end
+
+			enforceManualGrip(tool, character, "equipped.delay0.25")
+		end)
 	end)
 	tool.Unequipped:Connect(function()
+		consumeDebug(
+			"unequipped event player=%s tool=%s bindId=%s fruit=%s parent=%s",
+			player.Name,
+			tool.Name,
+			debugToolBindId(tool),
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			debugInstancePath(tool.Parent)
+		)
+		clearManualGrip(tool)
 		FruitGripController.ApplyToolGrip(tool, tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), {
 			Tool = tool,
 			Player = player,
@@ -527,12 +964,79 @@ local function hookTool(player, tool)
 		})
 	end)
 	tool.Activated:Connect(function()
-		if not isToolOwnedByPlayer(tool, player) then
+		local ownedByPlayer = isToolOwnedByPlayer(tool, player)
+		consumeDebug(
+			"activated player=%s tool=%s bindId=%s fruit=%s owned=%s parent=%s",
+			player.Name,
+			tool.Name,
+			debugToolBindId(tool),
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			tostring(ownedByPlayer),
+			debugInstancePath(tool.Parent)
+		)
+		if not ownedByPlayer then
 			return
 		end
 
 		requestConsume(player, tool)
 	end)
+end
+
+local function findConsumableFruitTool(player, fruitKey)
+	local characterTools = findFruitTools(player.Character, fruitKey)
+	if #characterTools > 0 then
+		return characterTools[1]
+	end
+
+	local backpackTools = findFruitTools(player:FindFirstChildOfClass("Backpack"), fruitKey)
+	if #backpackTools > 0 then
+		return backpackTools[1]
+	end
+
+	return nil
+end
+
+function DevilFruitInventoryService.RequestConsume(player, fruitIdentifier)
+	local fruit, reason = resolveFruit(fruitIdentifier)
+	if not fruit then
+		consumeDebug(
+			"external request blocked player=%s fruit=%s reason=%s",
+			player and player.Name or "<nil>",
+			tostring(fruitIdentifier),
+			tostring(reason)
+		)
+		return false, reason
+	end
+
+	local tool = findConsumableFruitTool(player, fruit.FruitKey)
+	if not tool then
+		consumeDebug("external request blocked player=%s fruit=%s reason=no_tool", player.Name, fruit.FruitKey)
+		return false, "no_tool"
+	end
+
+	if not isToolOwnedByPlayer(tool, player) then
+		consumeDebug(
+			"external request blocked player=%s fruit=%s reason=tool_not_owned tool=%s bindId=%s parent=%s",
+			player.Name,
+			fruit.FruitKey,
+			tool.Name,
+			debugToolBindId(tool),
+			debugInstancePath(tool.Parent)
+		)
+		return false, "tool_not_owned"
+	end
+
+	hookTool(player, tool)
+	consumeDebug(
+		"external request player=%s fruit=%s tool=%s bindId=%s parent=%s",
+		player.Name,
+		fruit.FruitKey,
+		tool.Name,
+		debugToolBindId(tool),
+		debugInstancePath(tool.Parent)
+	)
+	requestConsume(player, tool)
+	return true, nil
 end
 
 local function syncFruitTool(player, fruitKey, desiredCount)
@@ -546,6 +1050,16 @@ local function syncFruitTool(player, fruitKey, desiredCount)
 
 	for _, tool in ipairs(backpackTools) do
 		table.insert(allTools, tool)
+	end
+
+	for index = #allTools, 1, -1 do
+		local tool = allTools[index]
+		if tool:GetAttribute(TOOL_ATTR_GRIP_VERSION) ~= FRUIT_TOOL_GRIP_VERSION then
+			if tool.Parent then
+				tool:Destroy()
+			end
+			table.remove(allTools, index)
+		end
 	end
 
 	local count = #allTools
@@ -571,6 +1085,14 @@ local function syncFruitTool(player, fruitKey, desiredCount)
 		if tool then
 			hookTool(player, tool)
 			tool.Parent = backpack
+			consumeDebug(
+				"sync parented player=%s tool=%s bindId=%s fruit=%s parent=%s",
+				player.Name,
+				tool.Name,
+				debugToolBindId(tool),
+				tostring(fruitKey),
+				debugInstancePath(tool.Parent)
+			)
 		else
 			warn(string.format("[DevilFruitInventoryService] Failed to build fruit tool for %s (%s)", tostring(fruitKey), tostring(reason)))
 		end
@@ -669,6 +1191,13 @@ end
 
 local function handleConsumeResponse(player, accepted, fruitKey)
 	local pending = pendingConsumeByPlayer[player]
+	consumeDebug(
+		"response entry player=%s accepted=%s fruit=%s hasPending=%s",
+		player.Name,
+		tostring(accepted),
+		tostring(fruitKey),
+		tostring(pending ~= nil)
+	)
 	if not pending then
 		return
 	end
@@ -676,25 +1205,41 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	clearPendingConsume(player)
 
 	if accepted ~= true then
+		consumeDebug("response blocked player=%s reason=not_accepted", player.Name)
 		return
 	end
 
 	if typeof(fruitKey) ~= "string" or fruitKey ~= pending.FruitKey then
+		consumeDebug(
+			"response blocked player=%s reason=fruit_mismatch expected=%s got=%s",
+			player.Name,
+			tostring(pending.FruitKey),
+			tostring(fruitKey)
+		)
 		return
 	end
 
 	if os.clock() - pending.RequestedAt > PROMPT_TIMEOUT then
+		consumeDebug("response blocked player=%s reason=timeout fruit=%s", player.Name, tostring(fruitKey))
 		return
 	end
 
 	local tool = pending.Tool
 	if not isToolOwnedByPlayer(tool, player) then
+		consumeDebug(
+			"response blocked player=%s reason=tool_not_owned fruit=%s tool=%s parent=%s",
+			player.Name,
+			tostring(fruitKey),
+			tostring(tool and tool.Name or "<nil>"),
+			debugInstancePath(tool and tool.Parent)
+		)
 		return
 	end
 
 	local currentFruitName = DevilFruitService.GetEquippedFruit(player)
 	local targetFruitName = DevilFruitConfig.ResolveFruitName(fruitKey)
 	if currentFruitName ~= DevilFruitConfig.None and currentFruitName == targetFruitName then
+		consumeDebug("response blocked player=%s reason=same_fruit fruit=%s", player.Name, tostring(fruitKey))
 		return
 	end
 
@@ -707,13 +1252,23 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 		tostring(tool and tool:GetFullName() or "<nil>")
 	)
 
+	consumeDebug("consume start player=%s fruit=%s", player.Name, tostring(fruitKey))
 	local consumed, consumeReason = DevilFruitInventoryService.ConsumeFruit(player, fruitKey, 1)
+	consumeDebug(
+		"consume result player=%s fruit=%s ok=%s reason=%s",
+		player.Name,
+		tostring(fruitKey),
+		tostring(consumed),
+		tostring(consumeReason)
+	)
 	if not consumed then
 		warn(string.format("[DevilFruitInventoryService] Failed to consume %s for %s: %s", fruitKey, player.Name, tostring(consumeReason)))
 		return
 	end
 
+	consumeDebug("equip start player=%s fruit=%s target=%s", player.Name, tostring(fruitKey), tostring(targetFruitName))
 	local equipped = DevilFruitService.SetEquippedFruit(player, fruitKey)
+	consumeDebug("equip result player=%s fruit=%s ok=%s", player.Name, tostring(fruitKey), tostring(equipped))
 	if not equipped then
 		DevilFruitInventoryService.GrantFruit(player, fruitKey, 1)
 		warn(string.format("[DevilFruitInventoryService] Failed to equip %s for %s after consuming", fruitKey, player.Name))
@@ -732,6 +1287,23 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	end
 end
 
+local function handleConsumeRequest(player, fruitIdentifier, source)
+	consumeDebug(
+		"client request entry player=%s fruit=%s source=%s",
+		player.Name,
+		tostring(fruitIdentifier),
+		tostring(source)
+	)
+	local requested, reason = DevilFruitInventoryService.RequestConsume(player, fruitIdentifier)
+	consumeDebug(
+		"client request result player=%s fruit=%s ok=%s reason=%s",
+		player.Name,
+		tostring(fruitIdentifier),
+		tostring(requested),
+		tostring(reason)
+	)
+end
+
 function DevilFruitInventoryService.Start()
 	if started then
 		return
@@ -746,6 +1318,7 @@ function DevilFruitInventoryService.Start()
 
 	Players.PlayerAdded:Connect(hookPlayer)
 	Players.PlayerRemoving:Connect(clearPendingConsume)
+	requestRemote.OnServerEvent:Connect(handleConsumeRequest)
 	responseRemote.OnServerEvent:Connect(handleConsumeResponse)
 end
 

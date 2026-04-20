@@ -1,7 +1,10 @@
 local HELD_FRUIT_GRIP_BIAS = Vector3.new(0.96, -0.06, 0.12)
 local HELD_FRUIT_RUNTIME_GRIP = CFrame.new(0.18, -0.9, -1.35) * CFrame.Angles(math.rad(-4), math.rad(10), math.rad(-8))
 local EAT_FRUIT_RUNTIME_GRIP = CFrame.new(0.16, -0.34, -0.92) * CFrame.Angles(math.rad(-6), 0, math.rad(-8))
-local HELD_FRUIT_R6_HAND_TARGET_LOCAL = Vector3.new(0.55, -0.55, -1.68)
+local DEFAULT_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, -0.5)
+local DEFAULT_EQUIPPED_HOLD_OFFSET_ROTATION = Vector3.new(0, 180, 0)
+local HELD_FRUIT_R6_HAND_TARGET_LOCAL = Vector3.new(0.55, 0.12, -1.68)
+local HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_ROTATION = Vector3.new(-90, 180, 0)
 local HELD_FRUIT_R6_SHOULDER_POSE = CFrame.Angles(math.rad(10), math.rad(10), math.rad(40))
 local HELD_FRUIT_R15_SHOULDER_POSE = CFrame.Angles(math.rad(-34), math.rad(-6), math.rad(18))
 local HELD_FRUIT_R15_ELBOW_POSE = CFrame.Angles(math.rad(-8), 0, 0)
@@ -11,6 +14,10 @@ local DevilFruits = {
 	None = "",
 	GripDefaults = {
 		RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
+		EquippedHoldOffset = {
+			Position = DEFAULT_EQUIPPED_HOLD_OFFSET_POSITION,
+			RotationDegrees = DEFAULT_EQUIPPED_HOLD_OFFSET_ROTATION,
+		},
 		EquippedPresentation = {
 			Enabled = true,
 			DebugAttribute = "DebugFruitHoldPresentation",
@@ -33,10 +40,21 @@ local DevilFruits = {
 					RightWrist = HELD_FRUIT_R15_WRIST_POSE,
 				},
 			},
+			R6G = {
+				Mode = "ArmTarget",
+				BlendMode = "Replace",
+				HandTargetLocal = HELD_FRUIT_R6_HAND_TARGET_LOCAL,
+				Joints = {
+					RightShoulder = HELD_FRUIT_R6_SHOULDER_POSE,
+					RightElbow = HELD_FRUIT_R15_ELBOW_POSE,
+				},
+			},
 		},
 		Models = {
 			R6G = {
-				RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
+				EquippedHoldOffset = {
+					RotationDegrees = HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_ROTATION,
+				},
 			},
 		},
 		Contexts = {
@@ -177,9 +195,6 @@ local DevilFruits = {
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
 			GripProfiles = {
 				Models = {
-					R6G = {
-						RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
-					},
 					ModelSwap = {
 						RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
 					},

@@ -8,10 +8,15 @@ local FruitGripController = {}
 
 local DEBUG_LOGS = RunService:IsStudio()
 local WARN_COOLDOWN = 3
+local AUTHORED_RUNTIME_GRIP_ATTRIBUTE = "FruitGripAuthoredRuntimeGrip"
 local DEFAULT_PROFILE = {
 	AssetGripBias = Vector3.new(0.72, -0.12, 0.18),
 	AssetGripOffset = Vector3.new(),
 	RuntimeGrip = CFrame.new(),
+	EquippedHoldOffset = {
+		Position = Vector3.new(),
+		RotationDegrees = Vector3.new(),
+	},
 	Contexts = {},
 }
 local MODEL_VARIANT_ATTRIBUTE_PATTERNS = {
@@ -82,6 +87,61 @@ local function formatCFrame(value)
 	)
 end
 
+local function copyEquippedHoldOffset(source)
+	return {
+		Position = source and source.Position or Vector3.new(),
+		RotationDegrees = source and source.RotationDegrees or Vector3.new(),
+		Sources = source and shallowCopy(source.Sources) or {},
+	}
+end
+
+local function mergeEquippedHoldOffset(target, overrideProfile, sourceLabel)
+	if type(overrideProfile) ~= "table" then
+		return
+	end
+
+	local holdOffset = type(overrideProfile.EquippedHoldOffset) == "table" and overrideProfile.EquippedHoldOffset or overrideProfile
+	local changed = false
+	if typeof(holdOffset.Position) == "Vector3" then
+		target.Position = holdOffset.Position
+		changed = true
+	end
+
+	if typeof(holdOffset.RotationDegrees) == "Vector3" then
+		target.RotationDegrees = holdOffset.RotationDegrees
+		changed = true
+	end
+
+	if changed and sourceLabel then
+		target.Sources[#target.Sources + 1] = sourceLabel
+	end
+end
+
+local function getEquippedHoldOffsetCFrame(offset)
+	local position = typeof(offset and offset.Position) == "Vector3" and offset.Position or Vector3.new()
+	local rotationDegrees = typeof(offset and offset.RotationDegrees) == "Vector3" and offset.RotationDegrees or Vector3.new()
+	return CFrame.new(position)
+		* CFrame.Angles(
+			math.rad(rotationDegrees.X),
+			math.rad(rotationDegrees.Y),
+			math.rad(rotationDegrees.Z)
+		)
+end
+
+local function shouldApplyEquippedHoldOffset(contextName)
+	return contextName == nil
+end
+
+function FruitGripController.MarkAuthoredRuntimeGrip(tool, runtimeGrip)
+	if not tool or not tool:IsA("Tool") then
+		return false
+	end
+
+	local grip = typeof(runtimeGrip) == "CFrame" and runtimeGrip or tool.Grip
+	tool:SetAttribute(AUTHORED_RUNTIME_GRIP_ATTRIBUTE, grip)
+	return true
+end
+
 local function resolveFruit(fruitIdentifier, tool)
 	local identifier = fruitIdentifier
 	if identifier == nil and tool and tool:IsA("Tool") then
@@ -146,10 +206,12 @@ local function getActiveContextName(tool, options)
 	return nil
 end
 
-local function mergeProfile(target, overrideProfile, sourceLabel)
+local function mergeProfile(target, overrideProfile, sourceLabel, options)
 	if type(overrideProfile) ~= "table" then
 		return
 	end
+
+	options = options or {}
 
 	if typeof(overrideProfile.AssetGripBias) == "Vector3" then
 		target.AssetGripBias = overrideProfile.AssetGripBias
@@ -159,7 +221,7 @@ local function mergeProfile(target, overrideProfile, sourceLabel)
 		target.AssetGripOffset = overrideProfile.AssetGripOffset
 	end
 
-	if typeof(overrideProfile.RuntimeGrip) == "CFrame" then
+	if not options.SkipRuntimeGrip and typeof(overrideProfile.RuntimeGrip) == "CFrame" then
 		target.RuntimeGrip = overrideProfile.RuntimeGrip
 	end
 
@@ -197,6 +259,18 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 	end
 
 	local contextName = getActiveContextName(tool, options)
+	local initialRuntimeGrip = DEFAULT_PROFILE.RuntimeGrip
+	local initialSources = { "default" }
+	local preserveToolRuntimeGrip = false
+	if tool and tool:IsA("Tool") then
+		local authoredRuntimeGrip = tool:GetAttribute(AUTHORED_RUNTIME_GRIP_ATTRIBUTE)
+		if typeof(authoredRuntimeGrip) == "CFrame" then
+			initialRuntimeGrip = authoredRuntimeGrip
+			initialSources = { "tool_authored" }
+			preserveToolRuntimeGrip = true
+		end
+	end
+
 	local profile = {
 		Fruit = fruit,
 		ModelVariant = modelVariant,
@@ -204,20 +278,28 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 		ContextName = contextName,
 		AssetGripBias = DEFAULT_PROFILE.AssetGripBias,
 		AssetGripOffset = DEFAULT_PROFILE.AssetGripOffset,
-		RuntimeGrip = DEFAULT_PROFILE.RuntimeGrip,
-		Sources = { "default" },
+		EquippedHoldOffset = copyEquippedHoldOffset(DEFAULT_PROFILE.EquippedHoldOffset),
+		EquippedHoldOffsetApplied = false,
+		RuntimeGrip = initialRuntimeGrip,
+		Sources = initialSources,
 	}
 
 	local globalGripDefaults = type(DevilFruitConfig.GripDefaults) == "table" and DevilFruitConfig.GripDefaults or nil
 	if globalGripDefaults then
-		mergeProfile(profile, globalGripDefaults, "global_default")
+		mergeProfile(profile, globalGripDefaults, "global_default", {
+			SkipRuntimeGrip = preserveToolRuntimeGrip,
+		})
+		mergeEquippedHoldOffset(profile.EquippedHoldOffset, globalGripDefaults, "global_equipped_hold_default")
 	end
 
 	local globalModelProfile = modelVariant and globalGripDefaults and type(globalGripDefaults.Models) == "table"
 		and globalGripDefaults.Models[modelVariant]
 		or nil
 	if globalModelProfile then
-		mergeProfile(profile, globalModelProfile, "global_model:" .. tostring(modelVariant))
+		mergeProfile(profile, globalModelProfile, "global_model:" .. tostring(modelVariant), {
+			SkipRuntimeGrip = preserveToolRuntimeGrip,
+		})
+		mergeEquippedHoldOffset(profile.EquippedHoldOffset, globalModelProfile, "global_model_equipped_hold:" .. tostring(modelVariant))
 	end
 
 	mergeProfile(profile, {
@@ -237,11 +319,16 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 
 	local gripProfiles = type(fruit.GripProfiles) == "table" and fruit.GripProfiles or nil
 	if gripProfiles then
-		mergeProfile(profile, gripProfiles.Default, "fruit_default")
+		mergeProfile(profile, gripProfiles.Default, "fruit_default", {
+			SkipRuntimeGrip = preserveToolRuntimeGrip,
+		})
 
 		local modelProfile = modelVariant and type(gripProfiles.Models) == "table" and gripProfiles.Models[modelVariant] or nil
 		if modelProfile then
-			mergeProfile(profile, modelProfile, "model:" .. tostring(modelVariant))
+			mergeProfile(profile, modelProfile, "model:" .. tostring(modelVariant), {
+				SkipRuntimeGrip = preserveToolRuntimeGrip,
+			})
+			mergeEquippedHoldOffset(profile.EquippedHoldOffset, modelProfile, "model_equipped_hold:" .. tostring(modelVariant))
 		end
 
 		local contextProfile = contextName and type(gripProfiles.Contexts) == "table" and gripProfiles.Contexts[contextName] or nil
@@ -256,6 +343,17 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 		if modelProfile and contextName and type(modelProfile.Contexts) == "table" then
 			mergeProfile(profile, modelProfile.Contexts[contextName], "model_context:" .. tostring(modelVariant) .. ":" .. tostring(contextName))
 		end
+	end
+
+	local fruitEquippedHoldOffsets = type(DevilFruitConfig.EquippedHoldOffsets) == "table" and DevilFruitConfig.EquippedHoldOffsets or nil
+	local fruitEquippedHoldOffset = fruitEquippedHoldOffsets and fruitEquippedHoldOffsets[fruit.FruitKey] or nil
+	if fruitEquippedHoldOffset then
+		mergeEquippedHoldOffset(profile.EquippedHoldOffset, fruitEquippedHoldOffset, "fruit_equipped_hold:" .. tostring(fruit.FruitKey))
+	end
+
+	if shouldApplyEquippedHoldOffset(contextName) then
+		profile.EquippedHoldOffsetApplied = true
+		profile.RuntimeGrip = profile.RuntimeGrip * getEquippedHoldOffsetCFrame(profile.EquippedHoldOffset)
 	end
 
 	return profile
@@ -282,6 +380,11 @@ function FruitGripController.ApplyToolGrip(tool, fruitIdentifier, options)
 		return false
 	end
 
+	if options.PreserveCurrentToolGrip == true
+		and typeof(tool:GetAttribute(AUTHORED_RUNTIME_GRIP_ATTRIBUTE)) ~= "CFrame" then
+		FruitGripController.MarkAuthoredRuntimeGrip(tool)
+	end
+
 	local profile = FruitGripController.ResolveProfile(fruitIdentifier, mergeOptions(options, { Tool = tool }))
 	if not profile then
 		logWarn("apply skipped unknown fruit=%s", tostring(fruitIdentifier))
@@ -291,23 +394,34 @@ function FruitGripController.ApplyToolGrip(tool, fruitIdentifier, options)
 	tool.Grip = profile.RuntimeGrip
 	tool:SetAttribute("FruitGripResolvedContext", profile.ContextName or "")
 	tool:SetAttribute("FruitGripResolvedModelVariant", profile.ModelVariant or "")
+	tool:SetAttribute("FruitGripEquippedHoldOffsetApplied", profile.EquippedHoldOffsetApplied)
+	tool:SetAttribute("FruitGripEquippedHoldOffsetPosition", profile.EquippedHoldOffset.Position)
+	tool:SetAttribute("FruitGripEquippedHoldOffsetRotationDegrees", profile.EquippedHoldOffset.RotationDegrees)
 
 	local signature = table.concat({
 		tostring(profile.Fruit.FruitKey),
 		tostring(profile.ModelVariant or "default"),
 		tostring(profile.ContextName or "default"),
 		formatCFrame(profile.RuntimeGrip),
+		formatVector3(profile.EquippedHoldOffset.Position),
+		formatVector3(profile.EquippedHoldOffset.RotationDegrees),
+		tostring(profile.EquippedHoldOffsetApplied),
 		table.concat(profile.Sources, " -> "),
+		table.concat(profile.EquippedHoldOffset.Sources, " -> "),
 	}, "|")
 	if lastGripSignatureByTool[tool] ~= signature then
 		lastGripSignatureByTool[tool] = signature
 		logInfo(
-			"selected fruit=%s model=%s context=%s finalRuntimeGrip=%s sources=%s",
+			"selected fruit=%s model=%s context=%s finalRuntimeGrip=%s equippedOffsetPos=%s equippedOffsetRot=%s equippedOffsetApplied=%s sources=%s equippedOffsetSources=%s",
 			profile.Fruit.FruitKey,
 			tostring(profile.ModelVariant or "default"),
 			tostring(profile.ContextName or "default"),
 			formatCFrame(profile.RuntimeGrip),
-			table.concat(profile.Sources, " -> ")
+			formatVector3(profile.EquippedHoldOffset.Position),
+			formatVector3(profile.EquippedHoldOffset.RotationDegrees),
+			tostring(profile.EquippedHoldOffsetApplied),
+			table.concat(profile.Sources, " -> "),
+			table.concat(profile.EquippedHoldOffset.Sources, " -> ")
 		)
 	end
 	return true

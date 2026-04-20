@@ -19,8 +19,22 @@ end
 
 local Module = {}
 local chestToolServiceCache = nil
+local devilFruitInventoryServiceCache = nil
 local sliceServiceCache = nil
 local CHEST_DEBUG = true
+local FRUIT_EQUIP_DEBUG = true
+local R6G_WELD_DEBUG = true
+local TOOL_KIND_DEVIL_FRUIT = "DevilFruit"
+local TOOL_ATTR_KIND = "InventoryItemKind"
+local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
+local MODEL_VARIANT_R6G = "R6G"
+local MODEL_VARIANT_ATTRIBUTE_NAMES = {
+	"FruitHoldModelVariant",
+	"FruitGripModelVariant",
+	"FruitModelVariant",
+	"EatAnimationRig",
+	"CurrentModelAsset",
+}
 local EQUIPPED_ITEM_KIND_ATTRIBUTE = "EquippedInventoryItemKind"
 local EQUIPPED_ITEM_NAME_ATTRIBUTE = "EquippedInventoryItemName"
 
@@ -30,6 +44,85 @@ local function chestDebug(message, ...)
 	end
 
 	warn(string.format("[GLR ChestDebug][InventorySystem] " .. tostring(message), ...))
+end
+
+local function fruitEquipDebug(message, ...)
+	if FRUIT_EQUIP_DEBUG ~= true then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[FruitConsumeDebug][InventoryEquip] " .. tostring(message), ...)
+	print(ok and formatted or ("[FruitConsumeDebug][InventoryEquip] " .. tostring(message)))
+end
+
+local function debugInstancePath(instance)
+	if typeof(instance) == "Instance" then
+		return instance:GetFullName()
+	end
+
+	return "<nil>"
+end
+
+local function debugToolBindId(tool)
+	if tool and tool:IsA("Tool") then
+		return tostring(tool:GetAttribute(CONSUME_BIND_ID_ATTRIBUTE) or "?")
+	end
+
+	return "?"
+end
+
+local function r6gWeldDebug(message, ...)
+	if not R6G_WELD_DEBUG then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[R6G FRUIT WELD][SERVER][InventorySystem] " .. tostring(message), ...)
+	print(ok and formatted or ("[R6G FRUIT WELD][SERVER][InventorySystem] " .. tostring(message)))
+end
+
+local function formatCFrameForDebug(value)
+	if typeof(value) ~= "CFrame" then
+		return tostring(value)
+	end
+
+	local x, y, z = value:ToOrientation()
+	return string.format(
+		"pos=(%.2f, %.2f, %.2f) rot=(%.1f, %.1f, %.1f)",
+		value.Position.X,
+		value.Position.Y,
+		value.Position.Z,
+		math.deg(x),
+		math.deg(y),
+		math.deg(z)
+	)
+end
+
+local function formatJointCFrameForDebug(joint, propertyName)
+	local ok, value = pcall(function()
+		return joint[propertyName]
+	end)
+
+	if ok and typeof(value) == "CFrame" then
+		return formatCFrameForDebug(value)
+	end
+
+	return "<unavailable>"
+end
+
+local function debugToolActivationState(tool)
+	if not tool or not tool:IsA("Tool") then
+		return "tool=<nil>"
+	end
+
+	return string.format(
+		"bindId=%s parent=%s enabled=%s manual=%s requiresHandle=%s hasHandle=%s",
+		debugToolBindId(tool),
+		debugInstancePath(tool.Parent),
+		tostring(tool.Enabled),
+		tostring(tool.ManualActivationOnly),
+		tostring(tool.RequiresHandle),
+		tostring(tool:FindFirstChild("Handle") ~= nil)
+	)
 end
 
 local function getChestToolService()
@@ -43,6 +136,19 @@ local function getChestToolService()
 
 	chestToolServiceCache = if ok then service else false
 	return if chestToolServiceCache == false then nil else chestToolServiceCache
+end
+
+local function getDevilFruitInventoryService()
+	if devilFruitInventoryServiceCache ~= nil then
+		return devilFruitInventoryServiceCache
+	end
+
+	local ok, service = pcall(function()
+		return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitInventoryService"))
+	end)
+
+	devilFruitInventoryServiceCache = if ok then service else false
+	return if devilFruitInventoryServiceCache == false then nil else devilFruitInventoryServiceCache
 end
 
 local function getSliceService()
@@ -62,6 +168,119 @@ local function getHumanoid(player)
 	local char = player.Character
 	if not char then return nil end
 	return char:FindFirstChildOfClass("Humanoid")
+end
+
+local function isR6GModelValue(value)
+	return typeof(value) == "string" and string.upper(value) == MODEL_VARIANT_R6G
+end
+
+local function isR6GCharacter(player, character)
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid") or nil
+	for _, target in ipairs({ character, humanoid, player }) do
+		if typeof(target) == "Instance" then
+			for _, attributeName in ipairs(MODEL_VARIANT_ATTRIBUTE_NAMES) do
+				if isR6GModelValue(target:GetAttribute(attributeName)) then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function shouldUseR6GripFrame(player, character, tool)
+	return tool
+		and tool:IsA("Tool")
+		and tool:GetAttribute(TOOL_ATTR_KIND) == TOOL_KIND_DEVIL_FRUIT
+		and isR6GCharacter(player, character)
+end
+
+local function getGripPart(character)
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChild("RightHand")
+		or character:FindFirstChild("RightLowerArm")
+		or character:FindFirstChild("Right Arm")
+end
+
+local function resolveManualGripC0(gripPart)
+	local attachment = gripPart:FindFirstChild("RightGripAttachment")
+		or gripPart:FindFirstChild("RightGrip")
+	if not (attachment and attachment:IsA("Attachment")) then
+		return CFrame.new(), "", "PartOrigin"
+	end
+
+	return attachment.CFrame, attachment.Name, "AttachmentCFrame"
+end
+
+local function getConnectedRightGripJoints(character, handle)
+	local joints = {}
+	if typeof(character) ~= "Instance" or typeof(handle) ~= "Instance" then
+		return joints
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant.Name == "RightGrip"
+			and descendant:IsA("JointInstance")
+			and (descendant.Part0 == handle or descendant.Part1 == handle) then
+			table.insert(joints, descendant)
+		end
+	end
+
+	return joints
+end
+
+local function logR6GLiveGripState(source, player, tool, character)
+	if not (tool and tool:IsA("Tool") and shouldUseR6GripFrame(player, character, tool)) then
+		return
+	end
+
+	local handle = tool:FindFirstChild("Handle")
+	local gripPart = getGripPart(character)
+	local attachment = gripPart and (gripPart:FindFirstChild("RightGripAttachment") or gripPart:FindFirstChild("RightGrip")) or nil
+	local attachmentIsAttachment = attachment and attachment:IsA("Attachment")
+	r6gWeldDebug(
+		"%s tool=%s parent=%s handle=%s gripPart=%s attachmentExists=%s attachment=%s attachmentClass=%s attachmentCFrame=%s toolGrip=%s manualMode=%s",
+		tostring(source),
+		tool.Name,
+		debugInstancePath(tool.Parent),
+		debugInstancePath(handle),
+		debugInstancePath(gripPart),
+		tostring(attachmentIsAttachment == true),
+		attachment and attachment.Name or "",
+		attachment and attachment.ClassName or "",
+		attachmentIsAttachment and formatCFrameForDebug(attachment.CFrame) or "<none>",
+		formatCFrameForDebug(tool.Grip),
+		tostring(tool:GetAttribute("FruitManualGripC0Mode") or "")
+	)
+
+	local foundJoint = false
+	if typeof(character) == "Instance" then
+		for _, descendant in ipairs(character:GetDescendants()) do
+			if descendant:IsA("JointInstance") and (descendant.Name == "RightGrip" or descendant.Name == "ManualGrip") then
+				foundJoint = true
+				r6gWeldDebug(
+					"%s joint name=%s class=%s parent=%s part0=%s part1=%s connectedToHandle=%s C0=%s C1=%s",
+					tostring(source),
+					descendant.Name,
+					descendant.ClassName,
+					debugInstancePath(descendant.Parent),
+					debugInstancePath(descendant.Part0),
+					debugInstancePath(descendant.Part1),
+					tostring(handle ~= nil and (descendant.Part0 == handle or descendant.Part1 == handle)),
+					formatJointCFrameForDebug(descendant, "C0"),
+					formatJointCFrameForDebug(descendant, "C1")
+				)
+			end
+		end
+	end
+
+	if not foundJoint then
+		r6gWeldDebug("%s joint name=<none>", tostring(source))
+	end
 end
 
 local function setEquippedInventoryAttributes(player, itemKind, itemName)
@@ -216,14 +435,43 @@ local function ownsChest(player, tierName)
 end
 
 local function toggleEquip(player, kind, toolName)
+	local debugDevilFruit = kind == TOOL_KIND_DEVIL_FRUIT
+	if debugDevilFruit then
+		fruitEquipDebug(
+			"toggle entry player=%s kind=%s name=%s character=%s",
+			player.Name,
+			tostring(kind),
+			tostring(toolName),
+			debugInstancePath(player.Character)
+		)
+	end
+
 	local humanoid = getHumanoid(player)
-	if not humanoid then return end
+	if not humanoid then
+		if debugDevilFruit then
+			fruitEquipDebug("toggle blocked player=%s name=%s reason=no_humanoid", player.Name, tostring(toolName))
+		end
+		return
+	end
 
 	local char = player.Character
-	if not char then return end
+	if not char then
+		if debugDevilFruit then
+			fruitEquipDebug("toggle blocked player=%s name=%s reason=no_character", player.Name, tostring(toolName))
+		end
+		return
+	end
 
 	local equipped = findInventoryTool(char, kind, toolName) or char:FindFirstChild(toolName)
 	if equipped and equipped:IsA("Tool") then
+		if debugDevilFruit then
+			fruitEquipDebug(
+				"toggle already equipped -> unequip player=%s name=%s %s",
+				player.Name,
+				tostring(toolName),
+				debugToolActivationState(equipped)
+			)
+		end
 		if kind == "Chest" then
 			chestDebug(
 				"toggleEquip chest already equipped player=%s tool=%s -> unequip",
@@ -241,9 +489,23 @@ local function toggleEquip(player, kind, toolName)
 	end
 
 	local bp = player:FindFirstChild("Backpack")
-	if not bp then return end
+	if not bp then
+		if debugDevilFruit then
+			fruitEquipDebug("toggle blocked player=%s name=%s reason=no_backpack", player.Name, tostring(toolName))
+		end
+		return
+	end
 
 	local tool = findInventoryTool(bp, kind, toolName) or bp:FindFirstChild(toolName)
+	if debugDevilFruit then
+		fruitEquipDebug(
+			"toggle backpack lookup player=%s name=%s found=%s %s",
+			player.Name,
+			tostring(toolName),
+			tostring(tool ~= nil and tool:IsA("Tool")),
+			debugToolActivationState(tool)
+		)
+	end
 	if kind == "Chest" then
 		chestDebug(
 			"toggleEquip chest pre-equip player=%s tool=%s backpackTool=%s backpack=%s",
@@ -253,11 +515,25 @@ local function toggleEquip(player, kind, toolName)
 			bp:GetFullName()
 		)
 	end
-	if not tool or not tool:IsA("Tool") then return end
+	if not tool or not tool:IsA("Tool") then
+		if debugDevilFruit then
+			fruitEquipDebug("toggle blocked player=%s name=%s reason=tool_not_found", player.Name, tostring(toolName))
+		end
+		return
+	end
 
 	humanoid:UnequipTools()
 	if kind == "Chest" then
 		chestDebug("toggleEquip chest calling Humanoid:EquipTool player=%s tool=%s", player.Name, tostring(tool.Name))
+	end
+	if debugDevilFruit then
+		fruitEquipDebug(
+			"toggle equip start player=%s name=%s tool=%s %s",
+			player.Name,
+			tostring(toolName),
+			tool.Name,
+			debugToolActivationState(tool)
+		)
 	end
 	humanoid:EquipTool(tool)
 
@@ -271,17 +547,34 @@ local function toggleEquip(player, kind, toolName)
 			return
 		end
 
-		local function enforceWeld(finalTool)
+		local function enforceWeld(finalTool, source)
 			local handle = finalTool:FindFirstChild("Handle")
 			if not handle then return end
 
-			local existingGrip = refreshedChar:FindFirstChild("RightGrip", true)
-			local isActualWeld = existingGrip and existingGrip:IsA("Weld")
+			local useR6GripFrame = shouldUseR6GripFrame(player, refreshedChar, finalTool)
+			if useR6GripFrame then
+				logR6GLiveGripState((source or "toggle.enforceWeld") .. ":before", player, finalTool, refreshedChar)
+			end
 
-			if not isActualWeld then
-				local gripPart = refreshedChar:FindFirstChild("RightHand")
-					or refreshedChar:FindFirstChild("RightLowerArm")
-					or refreshedChar:FindFirstChild("Right Arm")
+			local existingGrips = getConnectedRightGripJoints(refreshedChar, handle)
+			if #existingGrips > 0 and not useR6GripFrame then
+				return
+			end
+
+			if #existingGrips > 0 then
+				for _, existingGrip in ipairs(existingGrips) do
+					r6gWeldDebug(
+						"%s replacing connected RightGrip class=%s parent=%s",
+						tostring(source or "toggle.enforceWeld"),
+						existingGrip.ClassName,
+						debugInstancePath(existingGrip.Parent)
+					)
+					existingGrip:Destroy()
+				end
+			end
+
+			if #existingGrips == 0 or useR6GripFrame then
+				local gripPart = getGripPart(refreshedChar)
 
 				if gripPart then
 					local weld = Instance.new("Weld")
@@ -290,20 +583,44 @@ local function toggleEquip(player, kind, toolName)
 					weld.Part1 = handle
 					weld.C1 = finalTool.Grip
 
-					local attachment = gripPart:FindFirstChild("RightGripAttachment")
-						or gripPart:FindFirstChild("RightGrip")
-					if attachment and attachment:IsA("Attachment") then
-						weld.C0 = attachment.CFrame
+					if useR6GripFrame then
+						finalTool:SetAttribute("FruitManualGripFrame", "R6")
 					end
 
+					local gripC0, attachmentName, c0Mode = resolveManualGripC0(gripPart)
+					weld.C0 = gripC0
+					finalTool:SetAttribute("FruitManualGripAttachmentUsed", attachmentName)
+					finalTool:SetAttribute("FruitManualGripC0Mode", c0Mode)
+
 					weld.Parent = handle
-					print("[Inventory] Applied manual weld for R6G model compatibility.")
+					print(string.format("[Inventory] Applied manual weld for R6G model compatibility c0Mode=%s.", c0Mode))
+					if useR6GripFrame then
+						logR6GLiveGripState((source or "toggle.enforceWeld") .. ":after", player, finalTool, refreshedChar)
+					end
 				end
 			end
 		end
 
 		local equipped = findInventoryTool(refreshedChar, kind, toolName) or refreshedChar:FindFirstChild(toolName)
 		if equipped and equipped:IsA("Tool") then
+			if debugDevilFruit then
+				fruitEquipDebug(
+					"toggle equip success player=%s name=%s tool=%s %s",
+					player.Name,
+					tostring(toolName),
+					equipped.Name,
+					debugToolActivationState(equipped)
+				)
+				fruitEquipDebug(
+					"activation expected after world click player=%s name=%s bindId=%s equippedInCharacter=%s enabled=%s manual=%s",
+					player.Name,
+					tostring(toolName),
+					debugToolBindId(equipped),
+					tostring(equipped.Parent == refreshedChar),
+					tostring(equipped.Enabled),
+					tostring(equipped.ManualActivationOnly)
+				)
+			end
 			if kind == "Chest" then
 				chestDebug(
 					"toggleEquip chest success player=%s tool=%s parent=%s",
@@ -313,13 +630,29 @@ local function toggleEquip(player, kind, toolName)
 				)
 			end
 			setEquippedInventoryAttributes(player, kind, toolName)
-			enforceWeld(equipped)
+			enforceWeld(equipped, "toggle.equipped")
+			if kind == TOOL_KIND_DEVIL_FRUIT then
+				task.delay(0.25, function()
+					if player.Parent == Players and equipped.Parent == refreshedChar then
+						enforceWeld(equipped, "toggle.equipped.delay0.25")
+					end
+				end)
+			end
 			return
 		end
 
 		local backpack = player:FindFirstChildOfClass("Backpack")
 		local fallbackTool = findInventoryTool(backpack, kind, toolName) or (backpack and backpack:FindFirstChild(toolName))
 		if fallbackTool and fallbackTool:IsA("Tool") then
+			if debugDevilFruit then
+				fruitEquipDebug(
+					"toggle fallback parent->Character player=%s name=%s tool=%s %s",
+					player.Name,
+					tostring(toolName),
+					fallbackTool.Name,
+					debugToolActivationState(fallbackTool)
+				)
+			end
 			if kind == "Chest" then
 				chestDebug(
 					"toggleEquip chest fallback parent->Character player=%s tool=%s from=%s",
@@ -332,8 +665,21 @@ local function toggleEquip(player, kind, toolName)
 				fallbackTool.Parent = refreshedChar
 			end)
 			setEquippedInventoryAttributes(player, kind, toolName)
-			enforceWeld(fallbackTool)
-		elseif kind == "Chest" then
+			enforceWeld(fallbackTool, "toggle.fallback")
+			if kind == TOOL_KIND_DEVIL_FRUIT then
+				task.delay(0.25, function()
+					if player.Parent == Players and fallbackTool.Parent == refreshedChar then
+						enforceWeld(fallbackTool, "toggle.fallback.delay0.25")
+					end
+				end)
+			end
+		else
+			if debugDevilFruit then
+				fruitEquipDebug("toggle equip failed player=%s name=%s reason=no_character_tool_after_equip", player.Name, tostring(toolName))
+			end
+		end
+
+		if kind == "Chest" and not (fallbackTool and fallbackTool:IsA("Tool")) then
 			chestDebug(
 				"toggleEquip chest failed to find tool after EquipTool player=%s tool=%s",
 				player.Name,
@@ -341,6 +687,23 @@ local function toggleEquip(player, kind, toolName)
 			)
 		end
 	end)
+end
+
+local function requestDevilFruitConsume(player, fruitKey)
+	local inventoryService = getDevilFruitInventoryService()
+	if not inventoryService or not inventoryService.RequestConsume then
+		fruitEquipDebug("consume bridge blocked player=%s fruit=%s reason=missing_inventory_service", player.Name, tostring(fruitKey))
+		return
+	end
+
+	local requested, reason = inventoryService.RequestConsume(player, fruitKey)
+	fruitEquipDebug(
+		"consume bridge result player=%s fruit=%s ok=%s reason=%s",
+		player.Name,
+		tostring(fruitKey),
+		tostring(requested),
+		tostring(reason)
+	)
 end
 
 local function watchInventory(player, inventory)
@@ -549,6 +912,14 @@ end
 
 equipRemote.OnServerEvent:Connect(function(player, kind, name)
 	if typeof(kind) ~= "string" or typeof(name) ~= "string" then return end
+	if kind == TOOL_KIND_DEVIL_FRUIT then
+		fruitEquipDebug(
+			"EquipToggleRemote received player=%s payload={kind=%s,name=%s}",
+			player.Name,
+			tostring(kind),
+			tostring(name)
+		)
+	end
 	if kind == "Chest" then
 		chestDebug(
 			"EquipToggleRemote received player=%s payload={kind=%s,name=%s}",
@@ -572,7 +943,19 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 
 	if kind == "DevilFruit" then
 		if not ownsDevilFruit(player, name) then return end
+		local character = player.Character
+		local equipped = findInventoryTool(character, kind, name) or (character and character:FindFirstChild(name))
+		if equipped and equipped:IsA("Tool") then
+			requestDevilFruitConsume(player, name)
+			return
+		end
+
 		toggleEquip(player, kind, name)
+		task.defer(function()
+			if player.Parent == Players then
+				requestDevilFruitConsume(player, name)
+			end
+		end)
 		return
 	end
 

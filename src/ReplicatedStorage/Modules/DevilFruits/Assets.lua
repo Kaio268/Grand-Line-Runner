@@ -74,7 +74,7 @@ local function applyFruitAttributes(model, fruit)
 end
 
 local function isSupportedWorldModel(instance)
-	return instance and (instance:IsA("Model") or instance:IsA("WorldModel"))
+	return instance and (instance:IsA("Model") or instance:IsA("WorldModel") or instance:IsA("Tool"))
 end
 
 local function findPrimaryPartCandidate(worldModel)
@@ -82,9 +82,11 @@ local function findPrimaryPartCandidate(worldModel)
 		return nil
 	end
 
-	local primaryPart = worldModel.PrimaryPart
-	if primaryPart and primaryPart:IsA("BasePart") then
-		return primaryPart
+	if worldModel:IsA("Model") or worldModel:IsA("WorldModel") then
+		local primaryPart = worldModel.PrimaryPart
+		if primaryPart and primaryPart:IsA("BasePart") then
+			return primaryPart
+		end
 	end
 
 	local handle = worldModel:FindFirstChild("Handle", true)
@@ -506,7 +508,7 @@ local function getGeneratedWorldModel(fruit)
 	end
 
 	local primaryPart = findPrimaryPartCandidate(model)
-	if primaryPart and model.PrimaryPart ~= primaryPart then
+	if primaryPart and (model:IsA("Model") or model:IsA("WorldModel")) and model.PrimaryPart ~= primaryPart then
 		pcall(function()
 			model.PrimaryPart = primaryPart
 		end)
@@ -594,7 +596,7 @@ function DevilFruitAssets.ValidateWorldModel(fruitIdentifier)
 		return false, "missing_primary_part"
 	end
 
-	if worldModel.PrimaryPart ~= primaryPart then
+	if (worldModel:IsA("Model") or worldModel:IsA("WorldModel")) and worldModel.PrimaryPart ~= primaryPart then
 		pcall(function()
 			worldModel.PrimaryPart = primaryPart
 		end)
@@ -664,7 +666,20 @@ function DevilFruitAssets.SpawnWorldModel(fruitIdentifier, spawnTarget, parent)
 	clone.Parent = parent or Workspace
 
 	if spawnCFrame then
-		clone:PivotTo(spawnCFrame)
+		if clone:IsA("Model") or clone:IsA("WorldModel") then
+			clone:PivotTo(spawnCFrame)
+		else
+			local rootPart = findPrimaryPartCandidate(clone)
+			if not rootPart then
+				clone:Destroy()
+				return nil, "missing_primary_part"
+			end
+
+			local delta = spawnCFrame * rootPart.CFrame:Inverse()
+			for _, part in ipairs(getBaseParts(clone)) do
+				part.CFrame = delta * part.CFrame
+			end
+		end
 	end
 
 	return clone

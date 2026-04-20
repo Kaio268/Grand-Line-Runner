@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -7,6 +8,11 @@ local modules = ReplicatedStorage:WaitForChild("Modules")
 local EatAnimationClient = require(modules:WaitForChild("DevilFruits"):WaitForChild("EatAnimationClient"))
 local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
+local requestRemote = remotes:WaitForChild("DevilFruitConsumeRequest")
+
+local TOOL_ATTR_KIND = "InventoryItemKind"
+local TOOL_ATTR_FRUIT_KEY = "FruitKey"
+local REQUEST_COOLDOWN = 0.35
 
 local screenGui
 local panel
@@ -15,9 +21,69 @@ local bodyLabel
 local confirmButton
 local cancelButton
 local pendingPayload
+local lastRequestAt = 0
+local toolActivationConnections = {}
 
 local function playEatAnimation(fruitKey)
 	EatAnimationClient.Play(player, fruitKey)
+end
+
+local function isDevilFruitTool(tool)
+	return tool
+		and tool:IsA("Tool")
+		and tool:GetAttribute(TOOL_ATTR_KIND) == "DevilFruit"
+		and typeof(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)) == "string"
+end
+
+local function isPromptOpen()
+	return pendingPayload ~= nil and panel ~= nil and panel.Visible == true
+end
+
+local function findEquippedFruitTool()
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if isDevilFruitTool(child) then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function requestConsumeForTool(tool, source)
+	if not isDevilFruitTool(tool) or isPromptOpen() then
+		return
+	end
+
+	local now = os.clock()
+	if now - lastRequestAt < REQUEST_COOLDOWN then
+		return
+	end
+
+	lastRequestAt = now
+	requestRemote:FireServer(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), source)
+end
+
+local function bindFruitTool(tool)
+	if not isDevilFruitTool(tool) or toolActivationConnections[tool] then
+		return
+	end
+
+	toolActivationConnections[tool] = tool.Activated:Connect(function()
+		requestConsumeForTool(tool, "tool_activated")
+	end)
+end
+
+local function bindCharacter(character)
+	for _, child in ipairs(character:GetChildren()) do
+		bindFruitTool(child)
+	end
+
+	character.ChildAdded:Connect(bindFruitTool)
 end
 
 local function ensurePromptGui()
@@ -170,4 +236,25 @@ promptRemote.OnClientEvent:Connect(function(payload)
 	confirmButton.Text = "Eat"
 	cancelButton.Text = "Cancel"
 	panel.Visible = true
+end)
+
+if player.Character then
+	bindCharacter(player.Character)
+end
+
+player.CharacterAdded:Connect(bindCharacter)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed or UserInputService:GetFocusedTextBox() ~= nil then
+		return
+	end
+
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
+		return
+	end
+
+	local tool = findEquippedFruitTool()
+	if tool then
+		requestConsumeForTool(tool, "input_began")
+	end
 end)
