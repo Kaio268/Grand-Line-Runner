@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -14,6 +13,7 @@ local requestRemote = remotes:WaitForChild("DevilFruitConsumeRequest")
 
 local TOOL_ATTR_KIND = "InventoryItemKind"
 local TOOL_ATTR_FRUIT_KEY = "FruitKey"
+local EQUIP_TO_PROMPT_DELAY = 0.2
 local REQUEST_COOLDOWN = 0.35
 
 local screenGui
@@ -28,6 +28,7 @@ local cancelButtonLabel
 local pendingPayload
 local lastRequestAt = 0
 local toolActivationConnections = {}
+local toolEquippedAt = setmetatable({}, { __mode = "k" })
 
 local UI_THEME = {
 	PrimaryBg = Color3.fromRGB(30, 42, 56),
@@ -212,19 +213,10 @@ local function isPromptOpen()
 	return pendingPayload ~= nil and panel ~= nil and panel.Visible == true
 end
 
-local function findEquippedFruitTool()
-	local character = player.Character
-	if not character then
-		return nil
+local function markToolEquipped(tool)
+	if isDevilFruitTool(tool) then
+		toolEquippedAt[tool] = os.clock()
 	end
-
-	for _, child in ipairs(character:GetChildren()) do
-		if isDevilFruitTool(child) then
-			return child
-		end
-	end
-
-	return nil
 end
 
 local function requestConsumeForTool(tool, source)
@@ -233,6 +225,11 @@ local function requestConsumeForTool(tool, source)
 	end
 
 	local now = os.clock()
+	local equippedAt = toolEquippedAt[tool]
+	if typeof(equippedAt) == "number" and (now - equippedAt) < EQUIP_TO_PROMPT_DELAY then
+		return
+	end
+
 	if now - lastRequestAt < REQUEST_COOLDOWN then
 		return
 	end
@@ -253,10 +250,14 @@ end
 
 local function bindCharacter(character)
 	for _, child in ipairs(character:GetChildren()) do
+		markToolEquipped(child)
 		bindFruitTool(child)
 	end
 
-	character.ChildAdded:Connect(bindFruitTool)
+	character.ChildAdded:Connect(function(child)
+		markToolEquipped(child)
+		bindFruitTool(child)
+	end)
 end
 
 local function ensurePromptGui()
@@ -584,18 +585,3 @@ if player.Character then
 end
 
 player.CharacterAdded:Connect(bindCharacter)
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or UserInputService:GetFocusedTextBox() ~= nil then
-		return
-	end
-
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
-		return
-	end
-
-	local tool = findEquippedFruitTool()
-	if tool then
-		requestConsumeForTool(tool, "input_began")
-	end
-end)

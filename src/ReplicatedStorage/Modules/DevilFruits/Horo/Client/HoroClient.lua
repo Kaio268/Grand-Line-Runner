@@ -453,31 +453,13 @@ function HoroClient:HookGhostTouches(state)
 end
 
 function HoroClient:HookBodyTouches(state)
-	if not state.BodyCharacter then
+	if not state.BodyRoot then
 		return
 	end
 
-	local function hookPart(part)
-		if not part:IsA("BasePart") then
-			return
-		end
-
-		state.Connections[#state.Connections + 1] = part.Touched:Connect(function(hit)
-			if isDangerousHazardPart(hit, state) then
-				self:ReportBodyHazard("body_hazard_touch")
-			end
-		end)
-	end
-
-	for _, descendant in ipairs(state.BodyCharacter:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			hookPart(descendant)
-		end
-	end
-
-	state.Connections[#state.Connections + 1] = state.BodyCharacter.DescendantAdded:Connect(function(descendant)
-		if descendant:IsA("BasePart") then
-			hookPart(descendant)
+	state.Connections[#state.Connections + 1] = state.BodyRoot.Touched:Connect(function(hit)
+		if isDangerousHazardPart(hit, state) then
+			self:ReportBodyHazard("body_hazard_touch")
 		end
 	end)
 end
@@ -830,14 +812,10 @@ function HoroClient:ProbeBodyHazards(state, now)
 		return
 	end
 
-	local parts = Workspace:GetPartBoundsInRadius(
-		state.BodyRoot.Position,
-		state.HazardProbeRadius,
-		buildOverlapParams({
-			state.BodyCharacter,
-			state.GhostModel,
-		})
-	)
+	local parts = Workspace:GetPartsInPart(state.BodyRoot, buildOverlapParams({
+		state.BodyCharacter,
+		state.GhostModel,
+	}))
 	for _, part in ipairs(parts) do
 		if isDangerousHazardPart(part, state) then
 			self:ReportBodyHazard("body_hazard_overlap")

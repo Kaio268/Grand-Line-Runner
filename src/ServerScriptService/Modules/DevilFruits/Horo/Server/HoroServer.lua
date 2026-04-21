@@ -543,10 +543,12 @@ local function lockBody(state)
 	humanoid.JumpHeight = 0
 	humanoid.AutoRotate = false
 	if state.RootPart then
-		local currentVelocity = state.RootPart.AssemblyLinearVelocity
-		state.RootPart.AssemblyLinearVelocity = Vector3.new(0, math.min(currentVelocity.Y, 0), 0)
+		if state.BodyOriginal.RootCFrame then
+			state.RootPart.CFrame = state.BodyOriginal.RootCFrame
+		end
+		state.RootPart.AssemblyLinearVelocity = Vector3.zero
 		state.RootPart.AssemblyAngularVelocity = Vector3.zero
-		state.RootPart.Anchored = state.BodyOriginal.RootAnchored == true
+		state.RootPart.Anchored = true
 	end
 	state.BodyHighlight = createBodyHighlight(state.Character, state.AbilityConfig)
 end
@@ -564,6 +566,9 @@ local function restoreBody(state)
 	end
 
 	if state.RootPart and state.RootPart.Parent and original then
+		if original.RootCFrame then
+			state.RootPart.CFrame = original.RootCFrame
+		end
 		if original.RootAnchored ~= nil then
 			state.RootPart.Anchored = original.RootAnchored
 		end
@@ -1041,11 +1046,7 @@ local function probeBodyHazards(state)
 		return false
 	end
 
-	local parts = Workspace:GetPartBoundsInRadius(
-		state.RootPart.Position,
-		state.HazardProbeRadius,
-		buildOverlapParams(state)
-	)
+	local parts = Workspace:GetPartsInPart(state.RootPart, buildOverlapParams(state))
 	for _, part in ipairs(parts) do
 		if isDangerousHazardPart(part) then
 			return true

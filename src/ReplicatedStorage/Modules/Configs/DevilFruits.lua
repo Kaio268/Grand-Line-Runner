@@ -4,6 +4,7 @@ local EAT_FRUIT_RUNTIME_GRIP = CFrame.new(0.16, -0.34, -0.92) * CFrame.Angles(ma
 local DEFAULT_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, -0.5)
 local DEFAULT_EQUIPPED_HOLD_OFFSET_ROTATION = Vector3.new(0, 180, 0)
 local HELD_FRUIT_R6_HAND_TARGET_LOCAL = Vector3.new(0.55, 0.12, -1.68)
+local HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, 0.3)
 local HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_ROTATION = Vector3.new(-90, 180, 0)
 local HELD_FRUIT_R6_SHOULDER_POSE = CFrame.Angles(math.rad(10), math.rad(10), math.rad(40))
 local HELD_FRUIT_R15_SHOULDER_POSE = CFrame.Angles(math.rad(-34), math.rad(-6), math.rad(18))
@@ -53,6 +54,7 @@ local DevilFruits = {
 		Models = {
 			R6G = {
 				EquippedHoldOffset = {
+					Position = HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_POSITION,
 					RotationDegrees = HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_ROTATION,
 				},
 			},

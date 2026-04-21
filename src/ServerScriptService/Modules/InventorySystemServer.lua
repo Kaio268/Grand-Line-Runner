@@ -951,11 +951,6 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 		end
 
 		toggleEquip(player, kind, name)
-		task.defer(function()
-			if player.Parent == Players then
-				requestDevilFruitConsume(player, name)
-			end
-		end)
 		return
 	end
 
