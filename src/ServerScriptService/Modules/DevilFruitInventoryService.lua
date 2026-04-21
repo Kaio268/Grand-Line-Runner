@@ -805,13 +805,16 @@ local function isPendingConsumeExpired(pending)
 	return requestedAt == nil or (os.clock() - requestedAt) > PROMPT_TIMEOUT
 end
 
-local function requestConsume(player, tool)
+local function requestConsume(player, tool, source)
 	consumeDebug(
-		"request entry player=%s tool=%s bindId=%s parent=%s",
+		"request entry player=%s tool=%s bindId=%s parent=%s source=%s enabled=%s manual=%s",
 		player.Name,
 		tostring(tool and tool.Name or "<nil>"),
 		debugToolBindId(tool),
-		debugInstancePath(tool and tool.Parent)
+		debugInstancePath(tool and tool.Parent),
+		tostring(source or "unknown"),
+		tostring(tool and tool.Enabled),
+		tostring(tool and tool.ManualActivationOnly)
 	)
 
 	local existingPending = pendingConsumeByPlayer[player]
@@ -840,10 +843,13 @@ local function requestConsume(player, tool)
 	}
 
 	consumeDebug(
-		"prompt fire player=%s fruit=%s current=%s",
+		"prompt fire player=%s fruit=%s current=%s source=%s enabled=%s parent=%s",
 		player.Name,
 		tostring(fruitKey),
-		tostring(equippedFruitName)
+		tostring(equippedFruitName),
+		tostring(source or "unknown"),
+		tostring(tool and tool.Enabled),
+		debugInstancePath(tool and tool.Parent)
 	)
 	promptRemote:FireClient(player, {
 		FruitKey = fruitKey,
@@ -966,19 +972,21 @@ local function hookTool(player, tool)
 	tool.Activated:Connect(function()
 		local ownedByPlayer = isToolOwnedByPlayer(tool, player)
 		consumeDebug(
-			"activated player=%s tool=%s bindId=%s fruit=%s owned=%s parent=%s",
+			"activated player=%s tool=%s bindId=%s fruit=%s owned=%s parent=%s enabled=%s manual=%s",
 			player.Name,
 			tool.Name,
 			debugToolBindId(tool),
 			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
 			tostring(ownedByPlayer),
-			debugInstancePath(tool.Parent)
+			debugInstancePath(tool.Parent),
+			tostring(tool.Enabled),
+			tostring(tool.ManualActivationOnly)
 		)
 		if not ownedByPlayer then
 			return
 		end
 
-		requestConsume(player, tool)
+		requestConsume(player, tool, "server_tool_activated")
 	end)
 end
 
@@ -1035,7 +1043,7 @@ function DevilFruitInventoryService.RequestConsume(player, fruitIdentifier)
 		debugToolBindId(tool),
 		debugInstancePath(tool.Parent)
 	)
-	requestConsume(player, tool)
+	requestConsume(player, tool, "external_request")
 	return true, nil
 end
 

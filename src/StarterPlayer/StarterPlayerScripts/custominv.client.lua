@@ -24,6 +24,8 @@ local RESOURCE_ORDER = {
 	CommonShipMaterial = 5,
 	RareShipMaterial = 6,
 }
+local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
+local INVENTORY_MENU_DEBUG = true
 
 local RESOURCE_MATERIAL_DISPLAY = {
 	CommonShipMaterial = "Common Ship Material",
@@ -97,6 +99,15 @@ local hoverTooltip = {
 	Visible = false,
 }
 local CHEST_DEBUG = true
+
+local function inventoryMenuDebug(message, ...)
+	if INVENTORY_MENU_DEBUG ~= true then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[FruitConsumeDebug][InventoryMenu] " .. tostring(message), ...)
+	print(ok and formatted or ("[FruitConsumeDebug][InventoryMenu] " .. tostring(message)))
+end
 
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
@@ -180,6 +191,20 @@ setupLayout(invContainer)
 hotbarTemplate.Visible = false
 invTemplate.Visible = false
 inventoryFrame.Visible = false
+player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, false)
+
+local function syncInventoryOpenAttribute()
+	local isOpen = inventoryFrame.Visible == true
+	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, isOpen)
+	inventoryMenuDebug(
+		"sync open=%s frameVisible=%s",
+		tostring(isOpen),
+		tostring(inventoryFrame.Visible)
+	)
+end
+
+inventoryFrame:GetPropertyChangedSignal("Visible"):Connect(syncInventoryOpenAttribute)
+syncInventoryOpenAttribute()
 
 local function applySelectedVisual(b, selected)
 	b.BackgroundColor3 = selected and SELECT or NORMAL
@@ -1664,6 +1689,7 @@ local function activateSlot(slotKey)
 end
 
 local function toggleInventory()
+	inventoryMenuDebug("toggle requested currentOpen=%s", tostring(inventoryFrame.Visible))
 	inventoryFrame.Visible = not inventoryFrame.Visible
 	if not inventoryFrame.Visible then
 		hideTooltip()

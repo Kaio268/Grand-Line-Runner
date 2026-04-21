@@ -8,12 +8,16 @@ local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local EatAnimationClient = require(modules:WaitForChild("DevilFruits"):WaitForChild("EatAnimationClient"))
+local UiModalState = require(modules:WaitForChild("UiModalState"))
 local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
 local requestRemote = remotes:WaitForChild("DevilFruitConsumeRequest")
 
 local TOOL_ATTR_KIND = "InventoryItemKind"
 local TOOL_ATTR_FRUIT_KEY = "FruitKey"
+local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
+local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = UiModalState.GetAttributeName()
+local CONSUME_PROMPT_DEBUG = true
 local EQUIP_TO_PROMPT_DELAY = 0.2
 local REQUEST_COOLDOWN = 0.35
 
@@ -30,6 +34,16 @@ local pendingPayload
 local lastRequestAt = 0
 local toolActivationConnections = {}
 local toolEquippedAt = setmetatable({}, { __mode = "k" })
+local toolEnabledBeforeMenuBlock = setmetatable({}, { __mode = "k" })
+
+local function consumePromptDebug(message, ...)
+	if CONSUME_PROMPT_DEBUG ~= true then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[FruitConsumeDebug][PromptClient] " .. tostring(message), ...)
+	print(ok and formatted or ("[FruitConsumeDebug][PromptClient] " .. tostring(message)))
+end
 
 local UI_THEME = {
 	PrimaryBg = Color3.fromRGB(30, 42, 56),
@@ -214,6 +228,122 @@ local function isPromptOpen()
 	return pendingPayload ~= nil and panel ~= nil and panel.Visible == true
 end
 
+local function isGameplayModalOpen()
+	local playerGui = player:FindFirstChild("PlayerGui")
+	return playerGui ~= nil and playerGui:GetAttribute(GAMEPLAY_MODAL_OPEN_ATTRIBUTE) == true
+end
+
+local function getInventoryHud()
+	local playerGui = player:FindFirstChild("PlayerGui")
+	local hud = playerGui and playerGui:FindFirstChild("HUD")
+	local inventoryHud = hud and hud:FindFirstChild("Inventory")
+	return if inventoryHud and inventoryHud:IsA("GuiObject") then inventoryHud else nil
+end
+
+local function isInventoryMenuOpen()
+	if isGameplayModalOpen() then
+		return true
+	end
+
+	if player:GetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE) == true then
+		return true
+	end
+
+	local inventoryHud = getInventoryHud()
+	if not inventoryHud then
+		return false
+	end
+
+	local inv = inventoryHud:FindFirstChild("Inv")
+	local inventoryFrame = inv and inv:FindFirstChild("InventoryFrame")
+	return inventoryFrame ~= nil and inventoryFrame:IsA("GuiObject") and inventoryFrame.Visible == true
+end
+
+local function isInventoryUiInput(input)
+	local inventoryHud = getInventoryHud()
+	local playerGui = player:FindFirstChild("PlayerGui")
+	if not inventoryHud or not playerGui then
+		return false
+	end
+
+	local position = input.Position
+	if typeof(position) ~= "Vector3" and typeof(position) ~= "Vector2" then
+		return false
+	end
+
+	for _, guiObject in ipairs(playerGui:GetGuiObjectsAtPosition(position.X, position.Y)) do
+		if guiObject:IsDescendantOf(inventoryHud) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function setToolInteractionBlocked(tool, isBlocked)
+	if not isDevilFruitTool(tool) then
+		return
+	end
+
+	if isBlocked then
+		if toolEnabledBeforeMenuBlock[tool] == nil then
+			toolEnabledBeforeMenuBlock[tool] = tool.Enabled
+		end
+		tool.Enabled = false
+		consumePromptDebug(
+			"tool block tool=%s fruit=%s enabledNow=%s previousEnabled=%s parent=%s",
+			tool.Name,
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			tostring(tool.Enabled),
+			tostring(toolEnabledBeforeMenuBlock[tool]),
+			tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
+		)
+		return
+	end
+
+	local previousEnabled = toolEnabledBeforeMenuBlock[tool]
+	if previousEnabled ~= nil then
+		tool.Enabled = previousEnabled
+		toolEnabledBeforeMenuBlock[tool] = nil
+		consumePromptDebug(
+			"tool unblock tool=%s fruit=%s enabledNow=%s parent=%s",
+			tool.Name,
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			tostring(tool.Enabled),
+			tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
+		)
+	end
+end
+
+local function syncFruitToolInteractionState()
+	local isBlocked = isInventoryMenuOpen()
+	consumePromptDebug(
+		"sync interaction menuOpen=%s gameplayModalOpen=%s promptOpen=%s",
+		tostring(isBlocked),
+		tostring(isGameplayModalOpen()),
+		tostring(isPromptOpen())
+	)
+	if isBlocked and isPromptOpen() then
+		pendingPayload = nil
+		setPromptVisible(false)
+		consumePromptDebug("hide prompt because inventory menu is open")
+	end
+
+	local character = player.Character
+	if character then
+		for _, child in ipairs(character:GetChildren()) do
+			setToolInteractionBlocked(child, isBlocked)
+		end
+	end
+
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if backpack then
+		for _, child in ipairs(backpack:GetChildren()) do
+			setToolInteractionBlocked(child, isBlocked)
+		end
+	end
+end
+
 local function markToolEquipped(tool)
 	if isDevilFruitTool(tool) then
 		toolEquippedAt[tool] = os.clock()
@@ -221,20 +351,52 @@ local function markToolEquipped(tool)
 end
 
 local function requestConsumeForTool(tool, source)
-	if not isDevilFruitTool(tool) or isPromptOpen() then
+	if not isDevilFruitTool(tool) then
+		consumePromptDebug("request blocked source=%s reason=not_fruit_tool", tostring(source))
+		return
+	end
+
+	if isPromptOpen() then
+		consumePromptDebug("request blocked source=%s tool=%s reason=prompt_open", tostring(source), tool.Name)
+		return
+	end
+
+	if isInventoryMenuOpen() then
+		consumePromptDebug("request blocked source=%s tool=%s reason=inventory_open", tostring(source), tool.Name)
 		return
 	end
 
 	local now = os.clock()
 	local equippedAt = toolEquippedAt[tool]
 	if typeof(equippedAt) == "number" and (now - equippedAt) < EQUIP_TO_PROMPT_DELAY then
+		consumePromptDebug(
+			"request blocked source=%s tool=%s reason=equip_delay elapsed=%.3f",
+			tostring(source),
+			tool.Name,
+			now - equippedAt
+		)
 		return
 	end
 
 	if now - lastRequestAt < REQUEST_COOLDOWN then
+		consumePromptDebug(
+			"request blocked source=%s tool=%s reason=cooldown elapsed=%.3f",
+			tostring(source),
+			tool.Name,
+			now - lastRequestAt
+		)
 		return
 	end
 
+	consumePromptDebug(
+		"request fire source=%s tool=%s fruit=%s menuOpen=%s enabled=%s parent=%s",
+		tostring(source),
+		tool.Name,
+		tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+		tostring(isInventoryMenuOpen()),
+		tostring(tool.Enabled),
+		tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
+	)
 	lastRequestAt = now
 	requestRemote:FireServer(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), source)
 end
@@ -244,7 +406,16 @@ local function bindFruitTool(tool)
 		return
 	end
 
+	setToolInteractionBlocked(tool, isInventoryMenuOpen())
 	toolActivationConnections[tool] = tool.Activated:Connect(function()
+		consumePromptDebug(
+			"tool activated event tool=%s fruit=%s menuOpen=%s enabled=%s parent=%s",
+			tool.Name,
+			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
+			tostring(isInventoryMenuOpen()),
+			tostring(tool.Enabled),
+			tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
+		)
 		requestConsumeForTool(tool, "tool_activated")
 	end)
 end
@@ -570,9 +741,25 @@ promptRemote.OnClientEvent:Connect(function(payload)
 	end
 
 	ensurePromptGui()
+	consumePromptDebug(
+		"prompt remote show=%s hide=%s fruit=%s current=%s menuOpen=%s",
+		tostring(payload.Show),
+		tostring(payload.Hide),
+		tostring(payload.FruitKey),
+		tostring(payload.CurrentFruitName),
+		tostring(isInventoryMenuOpen())
+	)
 	if payload.Hide == true or payload.Show == false then
 		pendingPayload = nil
 		setPromptVisible(false)
+		consumePromptDebug("prompt hidden by remote")
+		return
+	end
+
+	if isInventoryMenuOpen() then
+		pendingPayload = nil
+		setPromptVisible(false)
+		consumePromptDebug("prompt dropped because inventory menu is open")
 		return
 	end
 
@@ -601,6 +788,30 @@ if player.Character then
 end
 
 player.CharacterAdded:Connect(bindCharacter)
+player:GetAttributeChangedSignal(INVENTORY_MENU_OPEN_ATTRIBUTE):Connect(function()
+	consumePromptDebug(
+		"inventory menu attribute changed open=%s",
+		tostring(player:GetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE))
+	)
+	syncFruitToolInteractionState()
+end)
+local initialPlayerGui = player:FindFirstChild("PlayerGui")
+if initialPlayerGui then
+	initialPlayerGui:GetAttributeChangedSignal(GAMEPLAY_MODAL_OPEN_ATTRIBUTE):Connect(function()
+		consumePromptDebug(
+			"gameplay modal attribute changed open=%s",
+			tostring(isGameplayModalOpen())
+		)
+		syncFruitToolInteractionState()
+	end)
+end
+player.ChildAdded:Connect(function(child)
+	if child:IsA("Backpack") then
+		syncFruitToolInteractionState()
+		child.ChildAdded:Connect(syncFruitToolInteractionState)
+	end
+end)
+syncFruitToolInteractionState()
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
@@ -610,6 +821,16 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1
 		and input.UserInputType ~= Enum.UserInputType.Touch
 	then
+		return
+	end
+
+	if isInventoryMenuOpen() or isInventoryUiInput(input) then
+		consumePromptDebug(
+			"equipped input blocked inputType=%s menuOpen=%s inventoryUiInput=%s",
+			tostring(input.UserInputType),
+			tostring(isInventoryMenuOpen()),
+			tostring(isInventoryUiInput(input))
+		)
 		return
 	end
 

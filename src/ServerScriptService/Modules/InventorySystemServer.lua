@@ -946,7 +946,7 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 		local character = player.Character
 		local equipped = findInventoryTool(character, kind, name) or (character and character:FindFirstChild(name))
 		if equipped and equipped:IsA("Tool") then
-			requestDevilFruitConsume(player, name)
+			toggleEquip(player, kind, name)
 			return
 		end
 
