@@ -320,15 +320,25 @@ local function isSlotFrame(obj: Instance)
 end
 
 local function getClaimButton(slotFrame: Instance)
+	local directButton = slotFrame:FindFirstChild("ClaimButton")
+	if directButton and directButton:IsA("GuiButton") then
+		return directButton
+	end
+
 	if slotFrame:IsA("GuiButton") then
 		return slotFrame
 	end
+
+	local firstButton = nil
 	for _, d in ipairs(slotFrame:GetDescendants()) do
-		if d:IsA("GuiButton") then
+		if d.Name == "ClaimButton" and d:IsA("GuiButton") then
 			return d
 		end
+		if not firstButton and d:IsA("GuiButton") then
+			firstButton = d
+		end
 	end
-	return nil
+	return firstButton
 end
 
 local function logHudBinding()
@@ -677,7 +687,7 @@ local function hookButton(id: number)
 
 	slotFrame:SetAttribute("Hooked", true)
 
-	claimBtn.MouseButton1Click:Connect(function()
+	claimBtn.Activated:Connect(function()
 		if slotFrame:GetAttribute("Claimed") then
 			return
 		end

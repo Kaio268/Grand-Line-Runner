@@ -5,7 +5,7 @@ local MapResolver = {}
 
 local DEFAULT_MAP_NAME = "Map"
 local ACTIVE_MAP_ATTRIBUTE = "ActiveMapName"
-local STUDIO_STARTUP_ACTIVE_MAP_NAME = "NewMap_Test"
+local STUDIO_STARTUP_ACTIVE_MAP_NAME = DEFAULT_MAP_NAME
 local warnedMessages = {}
 local tracedStates = {}
 local DEBUG_TRACE = RunService:IsStudio()

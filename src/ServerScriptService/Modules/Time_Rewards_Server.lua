@@ -7,8 +7,23 @@ local DataManager = require(script.Parent.Parent.Data.DataManager)
 local BrainrotModule = require(script.Parent.AddBrainrot)
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
-local Remote = TimeRewardsFolder:WaitForChild("TimeRewardEvent")
-local InstantRewardsEvent = TimeRewardsFolder:WaitForChild("TriggerInstantRewards")
+local function getOrCreateChild(parent: Instance, className: string, childName: string)
+	local child = parent:FindFirstChild(childName)
+	if child then
+		if child:IsA(className) then
+			return child
+		end
+		child:Destroy()
+	end
+
+	child = Instance.new(className)
+	child.Name = childName
+	child.Parent = parent
+	return child
+end
+
+local Remote = getOrCreateChild(TimeRewardsFolder, "RemoteEvent", "TimeRewardEvent")
+local InstantRewardsEvent = getOrCreateChild(TimeRewardsFolder, "BindableEvent", "TriggerInstantRewards")
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
 local CYCLE_START_PATH = TIME_REWARDS_ROOT_PATH .. ".CycleStartPlayTime"
@@ -320,6 +335,16 @@ local function grantReward(player: Player, rewardId: number)
 	return true, rewardName, amount, nil
 end
 
+local function safeGrantReward(player: Player, rewardId: number)
+	local ok, rewardGranted, rewardName, amount, reason = pcall(grantReward, player, rewardId)
+	if not ok then
+		giftError("Unhandled time reward grant error", player.Name, rewardId, rewardGranted)
+		return false, nil, nil, "grant_exception"
+	end
+
+	return rewardGranted, rewardName, amount, reason
+end
+
 local function saveProfileNow(player: Player)
 	local profile = DataManager:GetProfile(player)
 	if not profile or profile:IsActive() ~= true then
@@ -421,7 +446,7 @@ local function claimReward(player: Player, rewardId: number)
 		return
 	end
 
-	local rewardGranted, rewardName, amount, grantReason = grantReward(player, rewardId)
+	local rewardGranted, rewardName, amount, grantReason = safeGrantReward(player, rewardId)
 	if not rewardGranted then
 		state.ClaimedRewards = previousClaimedRewards
 		state.LastClaimPlayTime = previousLastClaimPlayTime
@@ -476,7 +501,7 @@ local function instantClaimAll(player: Player)
 
 	for _, rewardId in ipairs(rewardIds) do
 		if not isRewardClaimed(state, rewardId) then
-			local rewardGranted, rewardName, amount = grantReward(player, rewardId)
+			local rewardGranted, rewardName, amount = safeGrantReward(player, rewardId)
 			if rewardGranted then
 				markRewardClaimed(state, rewardId)
 				state.LastClaimPlayTime = currentPlayTime

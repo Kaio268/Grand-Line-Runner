@@ -57,7 +57,7 @@ local function Suffix(n)
 	return sign .. s .. Suffixes[tier + 1]
 end
 
-local Root = game.Workspace.Map.Leaderboards
+local Root = script.Parent.Parent
 
 local function resolveBoardFolder(primaryName, fallbackName)
 	return Root:FindFirstChild(primaryName) or Root:WaitForChild(fallbackName or primaryName)
