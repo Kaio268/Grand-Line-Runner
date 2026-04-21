@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -246,6 +247,21 @@ local function bindFruitTool(tool)
 	toolActivationConnections[tool] = tool.Activated:Connect(function()
 		requestConsumeForTool(tool, "tool_activated")
 	end)
+end
+
+local function getEquippedFruitTool()
+	local character = player.Character
+	if not character then
+		return nil
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if isDevilFruitTool(child) then
+			return child
+		end
+	end
+
+	return nil
 end
 
 local function bindCharacter(character)
@@ -585,3 +601,22 @@ if player.Character then
 end
 
 player.CharacterAdded:Connect(bindCharacter)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then
+		return
+	end
+
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1
+		and input.UserInputType ~= Enum.UserInputType.Touch
+	then
+		return
+	end
+
+	local tool = getEquippedFruitTool()
+	if not tool then
+		return
+	end
+
+	requestConsumeForTool(tool, "equipped_input")
+end)

@@ -13,6 +13,7 @@ local DEFAULT_PROFILE = {
 	AssetGripBias = Vector3.new(0.72, -0.12, 0.18),
 	AssetGripOffset = Vector3.new(),
 	RuntimeGrip = CFrame.new(),
+	ApplyEquippedHoldOffset = false,
 	EquippedHoldOffset = {
 		Position = Vector3.new(),
 		RotationDegrees = Vector3.new(),
@@ -128,8 +129,12 @@ local function getEquippedHoldOffsetCFrame(offset)
 		)
 end
 
-local function shouldApplyEquippedHoldOffset(contextName)
-	return contextName == nil
+local function shouldApplyEquippedHoldOffset(profile)
+	if type(profile) ~= "table" then
+		return false
+	end
+
+	return profile.ContextName == nil or profile.ApplyEquippedHoldOffset == true
 end
 
 function FruitGripController.MarkAuthoredRuntimeGrip(tool, runtimeGrip)
@@ -225,6 +230,10 @@ local function mergeProfile(target, overrideProfile, sourceLabel, options)
 		target.RuntimeGrip = overrideProfile.RuntimeGrip
 	end
 
+	if type(overrideProfile.ApplyEquippedHoldOffset) == "boolean" then
+		target.ApplyEquippedHoldOffset = overrideProfile.ApplyEquippedHoldOffset
+	end
+
 	if sourceLabel then
 		target.Sources[#target.Sources + 1] = sourceLabel
 	end
@@ -280,6 +289,7 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 		AssetGripOffset = DEFAULT_PROFILE.AssetGripOffset,
 		EquippedHoldOffset = copyEquippedHoldOffset(DEFAULT_PROFILE.EquippedHoldOffset),
 		EquippedHoldOffsetApplied = false,
+		ApplyEquippedHoldOffset = DEFAULT_PROFILE.ApplyEquippedHoldOffset,
 		RuntimeGrip = initialRuntimeGrip,
 		Sources = initialSources,
 	}
@@ -351,7 +361,7 @@ function FruitGripController.ResolveProfile(fruitIdentifier, options)
 		mergeEquippedHoldOffset(profile.EquippedHoldOffset, fruitEquippedHoldOffset, "fruit_equipped_hold:" .. tostring(fruit.FruitKey))
 	end
 
-	if shouldApplyEquippedHoldOffset(contextName) then
+	if shouldApplyEquippedHoldOffset(profile) then
 		profile.EquippedHoldOffsetApplied = true
 		profile.RuntimeGrip = profile.RuntimeGrip * getEquippedHoldOffsetCFrame(profile.EquippedHoldOffset)
 	end

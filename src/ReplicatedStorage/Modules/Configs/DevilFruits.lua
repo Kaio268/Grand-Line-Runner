@@ -1,12 +1,20 @@
 local HELD_FRUIT_GRIP_BIAS = Vector3.new(0.96, -0.06, 0.12)
 local HELD_FRUIT_RUNTIME_GRIP = CFrame.new(0.18, -0.9, -1.35) * CFrame.Angles(math.rad(-4), math.rad(10), math.rad(-8))
-local EAT_FRUIT_RUNTIME_GRIP = CFrame.new(0.16, -0.34, -0.92) * CFrame.Angles(math.rad(-6), 0, math.rad(-8))
-local DEFAULT_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, -0.5)
+local DEFAULT_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, 0)
 local DEFAULT_EQUIPPED_HOLD_OFFSET_ROTATION = Vector3.new(0, 180, 0)
-local HELD_FRUIT_R6_HAND_TARGET_LOCAL = Vector3.new(0.55, 0.12, -1.68)
-local HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, 0.3)
+local HELD_FRUIT_R6_HAND_TARGET_LOCAL = Vector3.new(1, 0.12, -5.5)
+local HELD_FRUIT_R6G_HAND_TARGET_LOCAL = Vector3.new(1, 0.12, -5.5)
+local HELD_FRUIT_R6_ARM_TARGET_REACH_SCALE = 1
+local HELD_FRUIT_R6_ARM_TARGET_REACH_OFFSET = 0
+local HELD_FRUIT_R6_ARM_TARGET_OFFSET_LOCAL = Vector3.zero
+local HELD_FRUIT_R6G_ARM_TARGET_REACH_SCALE = 1
+local HELD_FRUIT_R6G_ARM_TARGET_REACH_OFFSET = 0
+local HELD_FRUIT_R6G_ARM_TARGET_OFFSET_LOCAL = Vector3.new(0, -0.25, 0)
+local HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_POSITION = Vector3.new(0, 0, 0)
 local HELD_FRUIT_R6G_EQUIPPED_HOLD_OFFSET_ROTATION = Vector3.new(-90, 180, 0)
 local HELD_FRUIT_R6_SHOULDER_POSE = CFrame.Angles(math.rad(10), math.rad(10), math.rad(40))
+local HELD_FRUIT_R6G_SHOULDER_POSE = CFrame.Angles(math.rad(10), math.rad(10), math.rad(36))
+local HELD_FRUIT_R6G_ELBOW_POSE = CFrame.Angles(math.rad(-8), 0, 0)
 local HELD_FRUIT_R15_SHOULDER_POSE = CFrame.Angles(math.rad(-34), math.rad(-6), math.rad(18))
 local HELD_FRUIT_R15_ELBOW_POSE = CFrame.Angles(math.rad(-8), 0, 0)
 local HELD_FRUIT_R15_WRIST_POSE = CFrame.Angles(math.rad(0), math.rad(0), math.rad(-8))
@@ -30,6 +38,9 @@ local DevilFruits = {
 				Mode = "ArmTarget",
 				BlendMode = "Replace",
 				HandTargetLocal = HELD_FRUIT_R6_HAND_TARGET_LOCAL,
+				ArmTargetReachScale = HELD_FRUIT_R6_ARM_TARGET_REACH_SCALE,
+				ArmTargetReachOffset = HELD_FRUIT_R6_ARM_TARGET_REACH_OFFSET,
+				ArmTargetOffsetLocal = HELD_FRUIT_R6_ARM_TARGET_OFFSET_LOCAL,
 				Joints = {
 					["Right Shoulder"] = HELD_FRUIT_R6_SHOULDER_POSE,
 				},
@@ -44,10 +55,13 @@ local DevilFruits = {
 			R6G = {
 				Mode = "ArmTarget",
 				BlendMode = "Replace",
-				HandTargetLocal = HELD_FRUIT_R6_HAND_TARGET_LOCAL,
+				HandTargetLocal = HELD_FRUIT_R6G_HAND_TARGET_LOCAL,
+				ArmTargetReachScale = HELD_FRUIT_R6G_ARM_TARGET_REACH_SCALE,
+				ArmTargetReachOffset = HELD_FRUIT_R6G_ARM_TARGET_REACH_OFFSET,
+				ArmTargetOffsetLocal = HELD_FRUIT_R6G_ARM_TARGET_OFFSET_LOCAL,
 				Joints = {
-					RightShoulder = HELD_FRUIT_R6_SHOULDER_POSE,
-					RightElbow = HELD_FRUIT_R15_ELBOW_POSE,
+					RightShoulder = HELD_FRUIT_R6G_SHOULDER_POSE,
+					RightElbow = HELD_FRUIT_R6G_ELBOW_POSE,
 				},
 			},
 		},
@@ -61,7 +75,7 @@ local DevilFruits = {
 		},
 		Contexts = {
 			Eat = {
-				RuntimeGrip = EAT_FRUIT_RUNTIME_GRIP,
+				ApplyEquippedHoldOffset = true,
 			},
 		},
 	},

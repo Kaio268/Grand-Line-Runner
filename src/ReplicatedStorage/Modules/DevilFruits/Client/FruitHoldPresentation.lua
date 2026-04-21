@@ -982,9 +982,16 @@ local function getArmTargetTransform(state, joint)
 	local shoulderWorld = (part0.CFrame * motor.C0).Position
 	local desiredHandWorld = part0.CFrame:PointToWorldSpace(handTargetLocal)
 	local armLength = math.max(0.1, arm.Size.Y)
+	local reachScale = tonumber(rigConfig.ArmTargetReachScale) or 1
+	local reachOffset = tonumber(rigConfig.ArmTargetReachOffset) or 0
+	local reachDistance = math.max(0.05, armLength * reachScale + reachOffset)
+	local armTargetOffsetLocal = rigConfig.ArmTargetOffsetLocal
+	local armTargetOffsetWorld = typeof(armTargetOffsetLocal) == "Vector3"
+		and part0.CFrame:VectorToWorldSpace(armTargetOffsetLocal)
+		or Vector3.zero
 	local shoulderToHand = safeUnit(desiredHandWorld - shoulderWorld, -part0.CFrame.LookVector)
-	local solvedHandWorld = shoulderWorld + shoulderToHand * armLength
-	local armCenterWorld = shoulderWorld + shoulderToHand * (armLength * 0.5)
+	local solvedHandWorld = shoulderWorld + shoulderToHand * reachDistance + armTargetOffsetWorld
+	local armCenterWorld = shoulderWorld + shoulderToHand * (reachDistance * 0.5) + armTargetOffsetWorld
 	local yAxis = -shoulderToHand
 	local preferredXAxis = part0.CFrame.RightVector
 	if math.abs(preferredXAxis:Dot(yAxis)) > 0.94 then
