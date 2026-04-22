@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -70,19 +71,23 @@ local function resolveSettings(payload, isLocalViewer)
 	local abilityConfig = getAbilityConfig()
 	local vfxConfig = getVfxConfig()
 	payload = payload or {}
+
 	local localBodyTransparency = payload.LocalBodyTransparency
 		or abilityConfig.LocalBodyTransparency
 		or payload.BodyTransparency
 		or abilityConfig.BodyTransparency
 		or DEFAULT_LOCAL_BODY_TRANSPARENCY
+
 	local localDecalTransparency = payload.LocalDecalTransparency
 		or abilityConfig.LocalDecalTransparency
 		or payload.DecalTransparency
 		or abilityConfig.DecalTransparency
 		or DEFAULT_LOCAL_DECAL_TRANSPARENCY
+
 	local observerBodyTransparency = payload.ObserverBodyTransparency
 		or abilityConfig.ObserverBodyTransparency
 		or DEFAULT_OBSERVER_BODY_TRANSPARENCY
+
 	local observerDecalTransparency = payload.ObserverDecalTransparency
 		or abilityConfig.ObserverDecalTransparency
 		or DEFAULT_OBSERVER_DECAL_TRANSPARENCY
@@ -219,6 +224,30 @@ local function createShimmerAttachment(rootPart, settings)
 	return attachment, emitter
 end
 
+local function findSukeVfxTemplate()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	if not assets then
+		return nil
+	end
+
+	local vfxFolder = assets:FindFirstChild("VFX")
+	if not vfxFolder then
+		return nil
+	end
+
+	local sukeFolder = vfxFolder:FindFirstChild("Suke")
+	if not sukeFolder then
+		return nil
+	end
+
+	local template = sukeFolder:FindFirstChild("FadeVFX")
+	if template and template:IsA("Model") then
+		return template
+	end
+
+	return nil
+end
+
 function SukeClient.Create(config)
 	config = config or {}
 
@@ -226,6 +255,14 @@ function SukeClient.Create(config)
 	self.player = config.player or Players.LocalPlayer
 	self.playOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or function() end
 	self.fadeStates = {}
+	self.vfxTemplate = findSukeVfxTemplate()
+
+	if self.vfxTemplate then
+		print("[SukeClient] VFX template found:", self.vfxTemplate:GetFullName())
+	else
+		warn("[SukeClient] Could not find Suke VFX template at ReplicatedStorage.Assets.VFX.Suke.FadeVFX")
+	end
+
 	return self
 end
 
@@ -247,6 +284,66 @@ function SukeClient:BuildRequestPayload(abilityName, _abilityEntry, fallbackBuil
 	end
 
 	return nil
+end
+
+function SukeClient:SpawnFadeVfx(targetPlayer, settings)
+	local rootPart = getRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	if not self.vfxTemplate or not self.vfxTemplate.Parent then
+		self.vfxTemplate = findSukeVfxTemplate()
+	end
+
+	if not self.vfxTemplate then
+		warn("[SukeClient] Suke VFX template missing")
+		return nil
+	end
+
+	local fxTemplate = self.vfxTemplate:FindFirstChild("FX", true)
+	if not fxTemplate or not fxTemplate:IsA("BasePart") then
+		warn("[SukeClient] FadeVFX is missing an FX BasePart")
+		return nil
+	end
+
+	local fxClone = fxTemplate:Clone()
+	fxClone.Name = "SukeFadeBurst"
+	fxClone.Anchored = true
+	fxClone.CanCollide = false
+	fxClone.CanTouch = false
+	fxClone.CanQuery = false
+	fxClone.Massless = true
+	fxClone.Transparency = 1
+	fxClone.CFrame = rootPart.CFrame + Vector3.new(0, 0.25, 0)
+	fxClone.Parent = workspace
+
+	for _, descendant in ipairs(fxClone:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			local emitCount = descendant:GetAttribute("EmitCount")
+			if typeof(emitCount) ~= "number" then
+				emitCount = 8
+			end
+			descendant:Emit(emitCount)
+		elseif descendant:IsA("Beam") or descendant:IsA("Trail") then
+			descendant.Enabled = true
+		end
+	end
+
+	task.delay(0.08, function()
+		if fxClone and fxClone.Parent then
+			for _, descendant in ipairs(fxClone:GetDescendants()) do
+				if descendant:IsA("Beam") or descendant:IsA("Trail") then
+					descendant.Enabled = false
+				end
+			end
+		end
+	end)
+
+	Debris:AddItem(fxClone, 0.2)
+
+	print("[SukeClient] Spawned quick fade spark burst for", targetPlayer.Name)
+	return fxClone
 end
 
 function SukeClient:ClearFade(targetPlayer, immediate)
@@ -324,9 +421,11 @@ function SukeClient:StartFade(targetPlayer, payload)
 	local highlight = settings.ShowShimmer and createHighlight(character, settings) or nil
 	local attachment = nil
 	local emitter = nil
+
 	if settings.ShowShimmer then
 		attachment, emitter = createShimmerAttachment(getRootPart(targetPlayer), settings)
 	end
+
 	local state = {
 		Settings = settings,
 		PartEntries = partEntries,
@@ -340,6 +439,8 @@ function SukeClient:StartFade(targetPlayer, payload)
 		Tweens = {},
 	}
 	self.fadeStates[targetPlayer] = state
+
+	self:SpawnFadeVfx(targetPlayer, settings)
 
 	for _, entry in ipairs(partEntries) do
 		local part = entry.Instance
