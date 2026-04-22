@@ -7,14 +7,41 @@ local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local DEFAULT_MIN_END_CARRY_SPEED = 52
 local DEFAULT_END_CARRY_SPEED_FACTOR = 0.82
+local DEFAULT_END_CARRY_DURATION = 0.1
+local DEFAULT_END_CARRY_MAX_DISTANCE = 2.5
 local DEFAULT_COMPLETION_TOLERANCE = 3
 local DEFAULT_RUNTIME_GRACE = 0.24
 local DEFAULT_CORRECTION_SNAP_DISTANCE = 12
 local DEFAULT_DISTANCE_TOLERANCE = 6
 local DEFAULT_FINAL_SNAP_TOLERANCE = 4
+local DEFAULT_SPEED_SCALING_BASELINE = 16
+local DEFAULT_SIDE_WALL_NORMAL_DOT_THRESHOLD = 0.45
+local DEFAULT_WALL_SLIDE_MIN_DISTANCE_GAIN = 8
 
 local function getPlanarVector(vector)
 	return Vector3.new(vector.X, 0, vector.Z)
+end
+
+local function getPlanarUnit(vector)
+	if typeof(vector) ~= "Vector3" then
+		return nil
+	end
+
+	local planarVector = getPlanarVector(vector)
+	if planarVector.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return nil
+	end
+
+	return planarVector.Unit
+end
+
+local function getSpeedScalingAmount(currentPlanarSpeed, abilityConfig)
+	local scalingBaseline = math.max(
+		0,
+		tonumber(type(abilityConfig) == "table" and abilityConfig.SpeedScalingBaseline)
+			or DEFAULT_SPEED_SCALING_BASELINE
+	)
+	return math.max((tonumber(currentPlanarSpeed) or 0) - scalingBaseline, 0)
 end
 
 local function getDirectionFromTarget(rootPart, dashTargetPosition)
@@ -65,6 +92,30 @@ function MeraDashShared.GetRuntimeGrace(abilityConfig)
 	return math.max(tonumber(abilityConfig.RuntimeGrace) or DEFAULT_RUNTIME_GRACE, 0)
 end
 
+function MeraDashShared.GetEndCarryDuration(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.EndCarryDuration) or DEFAULT_END_CARRY_DURATION, 0)
+end
+
+function MeraDashShared.GetEndCarryMaxDistance(abilityConfig)
+	abilityConfig = abilityConfig or {}
+	return math.max(tonumber(abilityConfig.EndCarryMaxDistance) or DEFAULT_END_CARRY_MAX_DISTANCE, 0)
+end
+
+function MeraDashShared.GetMaxRequestHintDistance(abilityConfig)
+	abilityConfig = abilityConfig or {}
+
+	local schema = type(abilityConfig.RequestPayloadSchema) == "table" and abilityConfig.RequestPayloadSchema or nil
+	local configuredMaxHintDistance = math.max(tonumber(schema and schema.MaxHintDistance) or 0, 0)
+	if configuredMaxHintDistance > 0 then
+		return configuredMaxHintDistance
+	end
+
+	local baseDashDistance = math.max(tonumber(abilityConfig.DashDistance) or 0, 0)
+	local maxDistanceSpeedBonus = math.max(tonumber(abilityConfig.MaxDistanceSpeedBonus) or 0, 0)
+	return baseDashDistance + maxDistanceSpeedBonus
+end
+
 function MeraDashShared.GetCorrectionSnapDistance(abilityConfig)
 	abilityConfig = abilityConfig or {}
 	return math.max(tonumber(abilityConfig.ClientCorrectionSnapDistance) or DEFAULT_CORRECTION_SNAP_DISTANCE, 0)
@@ -78,6 +129,42 @@ end
 function MeraDashShared.GetFinalSnapTolerance(abilityConfig)
 	abilityConfig = abilityConfig or {}
 	return math.max(tonumber(abilityConfig.FinalSnapTolerance) or DEFAULT_FINAL_SNAP_TOLERANCE, 0)
+end
+
+function MeraDashShared.ShouldTreatHitAsSideWall(direction, hitNormal, abilityConfig)
+	local planarDirection = getPlanarUnit(direction)
+	local planarNormal = getPlanarUnit(hitNormal)
+	if not planarDirection or not planarNormal then
+		return false
+	end
+
+	local threshold = math.clamp(
+		tonumber(type(abilityConfig) == "table" and abilityConfig.SideWallNormalDotThreshold)
+			or DEFAULT_SIDE_WALL_NORMAL_DOT_THRESHOLD,
+		0,
+		1
+	)
+	return math.abs(planarDirection:Dot(planarNormal)) <= threshold
+end
+
+function MeraDashShared.GetWallSlideDirection(direction, hitNormal)
+	local planarDirection = getPlanarUnit(direction)
+	local planarNormal = getPlanarUnit(hitNormal)
+	if not planarDirection or not planarNormal then
+		return nil
+	end
+
+	local tangent = planarDirection - (planarNormal * planarDirection:Dot(planarNormal))
+	if tangent.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return nil
+	end
+
+	local tangentUnit = tangent.Unit
+	if tangentUnit:Dot(planarDirection) < 0 then
+		tangentUnit = -tangentUnit
+	end
+
+	return tangentUnit
 end
 
 function MeraDashShared.ResolveDirection(humanoid, rootPart, dashTargetPosition)
@@ -104,7 +191,8 @@ function MeraDashShared.GetMaxDashDistance(humanoid, rootPart, abilityConfig)
 	local distanceSpeedBonusFactor = tonumber(abilityConfig.DistanceSpeedBonusFactor) or 0
 	local maxDistanceSpeedBonus = tonumber(abilityConfig.MaxDistanceSpeedBonus) or 0
 	local currentPlanarSpeed = MeraDashShared.GetCurrentPlanarSpeed(humanoid, rootPart)
-	local bonusDistance = math.min(currentPlanarSpeed * distanceSpeedBonusFactor, maxDistanceSpeedBonus)
+	local speedScalingAmount = getSpeedScalingAmount(currentPlanarSpeed, abilityConfig)
+	local bonusDistance = math.min(speedScalingAmount * distanceSpeedBonusFactor, maxDistanceSpeedBonus)
 
 	return baseDashDistance + bonusDistance
 end
@@ -124,19 +212,24 @@ end
 
 function MeraDashShared.GetDashSpeeds(humanoid, rootPart, abilityConfig, requiredBurstSpeed)
 	local currentPlanarSpeed = MeraDashShared.GetCurrentPlanarSpeed(humanoid, rootPart)
+	local speedScalingAmount = getSpeedScalingAmount(currentPlanarSpeed, abilityConfig)
 	local baseDashSpeed = tonumber(abilityConfig.BaseDashSpeed) or 120
 	local dashSpeedMultiplier = tonumber(abilityConfig.DashSpeedMultiplier) or 2.8
+	local dashSpeedBonusFactor = tonumber(abilityConfig.DashSpeedBonusFactor) or 0
+	local maxDashSpeedBonus = tonumber(abilityConfig.MaxDashSpeedBonus) or 0
 	local endDashSpeedMultiplier = tonumber(abilityConfig.EndDashSpeedMultiplier) or 1.1
 	local requiredSpeedMultiplier = tonumber(abilityConfig.RequiredSpeedMultiplier) or 1
 	local maxDashSpeed = tonumber(abilityConfig.MaxDashSpeed)
+	local speedScaledDashSpeedBonus = math.min(speedScalingAmount * dashSpeedBonusFactor, maxDashSpeedBonus)
+	local effectiveMaxDashSpeed = maxDashSpeed and (maxDashSpeed + speedScaledDashSpeedBonus) or nil
 
 	local startDashSpeed = math.max(
-		baseDashSpeed,
+		baseDashSpeed + speedScaledDashSpeedBonus,
 		currentPlanarSpeed * dashSpeedMultiplier,
 		math.max(requiredBurstSpeed, 0) * requiredSpeedMultiplier
 	)
-	if maxDashSpeed then
-		startDashSpeed = math.min(startDashSpeed, maxDashSpeed)
+	if effectiveMaxDashSpeed then
+		startDashSpeed = math.min(startDashSpeed, effectiveMaxDashSpeed)
 	end
 
 	local endDashSpeed = math.max(
@@ -153,9 +246,17 @@ function MeraDashShared.GetDashSpeeds(humanoid, rootPart, abilityConfig, require
 	}
 end
 
-function MeraDashShared.GetInstantDashDistance(dashDistance, abilityConfig)
+function MeraDashShared.GetInstantDashDistance(dashDistance, abilityConfig, wallShortened)
 	local instantDashFraction = math.clamp(tonumber(abilityConfig.InstantDashFraction) or 0.25, 0, 1)
 	local maxInstantDashDistance = tonumber(abilityConfig.MaxInstantDashDistance)
+	local wallShortenedInstantThreshold = math.max(
+		0,
+		tonumber(abilityConfig.WallShortenedInstantThreshold) or 0
+	)
+	if wallShortened == true and wallShortenedInstantThreshold > 0 and dashDistance <= wallShortenedInstantThreshold then
+		return math.max(dashDistance, 0)
+	end
+
 	local instantDistance = dashDistance * instantDashFraction
 	if maxInstantDashDistance then
 		instantDistance = math.min(instantDistance, math.max(maxInstantDashDistance, 0))
@@ -206,8 +307,31 @@ function MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConf
 	local maxDashDistance = MeraDashShared.GetMaxDashDistance(humanoid, rootPart, abilityConfig)
 	local requestedDistance = MeraDashShared.GetRequestedDistance(rootPart, maxDashDistance, dashTargetPosition)
 	local dashDistance, wallShortened, hitResult = MeraDashShared.GetDashDistance(character, rootPart, direction, requestedDistance)
+	if wallShortened == true
+		and hitResult
+		and MeraDashShared.ShouldTreatHitAsSideWall(direction, hitResult.Normal, abilityConfig)
+	then
+		local slideDirection = MeraDashShared.GetWallSlideDirection(direction, hitResult.Normal)
+		if slideDirection then
+			local slideDistance, slideWallShortened, slideHitResult =
+				MeraDashShared.GetDashDistance(character, rootPart, slideDirection, requestedDistance)
+			local minDistanceGain = math.max(
+				0,
+				tonumber(type(abilityConfig) == "table" and abilityConfig.WallSlideMinDistanceGain)
+					or DEFAULT_WALL_SLIDE_MIN_DISTANCE_GAIN
+			)
+			if slideDistance >= dashDistance + minDistanceGain then
+				direction = slideDirection
+				directionSource = tostring(directionSource) .. "_wall_slide"
+				dashDistance = slideDistance
+				wallShortened = slideWallShortened
+				hitResult = slideHitResult
+			end
+		end
+	end
+
 	local dashDuration = tonumber(abilityConfig.DashDuration) or 0.18
-	local instantDistance = MeraDashShared.GetInstantDashDistance(dashDistance, abilityConfig)
+	local instantDistance = MeraDashShared.GetInstantDashDistance(dashDistance, abilityConfig, wallShortened)
 	local remainingDistance = math.max(dashDistance - instantDistance, 0)
 	local requiredBurstSpeed = remainingDistance / math.max(dashDuration, 0.05)
 	local speeds = MeraDashShared.GetDashSpeeds(humanoid, rootPart, abilityConfig, requiredBurstSpeed)

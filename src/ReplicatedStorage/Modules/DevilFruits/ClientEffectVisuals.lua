@@ -239,6 +239,8 @@ function ClientEffectVisuals:CreateBomuDetonationEffect(targetPlayer, fruitName,
 	end
 
 	local radius = math.max(1, tonumber(payload and payload.Radius) or 8)
+	local blastDiameter = radius * 2
+	local initialDiameter = math.max(1.5, blastDiameter * 0.2)
 
 	local flash = Instance.new("Part")
 	flash.Name = "BomuDetonationFlash"
@@ -250,7 +252,7 @@ function ClientEffectVisuals:CreateBomuDetonationEffect(targetPlayer, fruitName,
 	flash.Material = Enum.Material.Neon
 	flash.Color = Color3.fromRGB(255, 225, 153)
 	flash.Transparency = 0.12
-	flash.Size = Vector3.new(2, 2, 2)
+	flash.Size = Vector3.new(initialDiameter, initialDiameter, initialDiameter)
 	flash.CFrame = CFrame.new(originPosition)
 	flash.Parent = Workspace
 
@@ -264,17 +266,17 @@ function ClientEffectVisuals:CreateBomuDetonationEffect(targetPlayer, fruitName,
 	ring.Material = Enum.Material.Neon
 	ring.Color = Color3.fromRGB(255, 171, 82)
 	ring.Transparency = 0.25
-	ring.Size = Vector3.new(0.25, radius * 0.8, radius * 0.8)
+	ring.Size = Vector3.new(0.25, math.max(0.5, initialDiameter), math.max(0.5, initialDiameter))
 	ring.CFrame = CFrame.new(originPosition) * FLAT_RING_ROTATION
 	ring.Parent = Workspace
 
 	local flashTween = TweenService:Create(flash, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Transparency = 1,
-		Size = Vector3.new(radius * 2.2, radius * 2.2, radius * 2.2),
+		Size = Vector3.new(blastDiameter, blastDiameter, blastDiameter),
 	})
 	local ringTween = TweenService:Create(ring, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		Transparency = 1,
-		Size = Vector3.new(0.25, radius * 2.35, radius * 2.35),
+		Size = Vector3.new(0.25, blastDiameter, blastDiameter),
 	})
 
 	flashTween:Play()

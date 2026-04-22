@@ -71,6 +71,11 @@ local Config = {
 		EffectName = FlameDashEffectCandidates[1] or "Flame Dash",
 		StartupChildName = FlameDashStartupChildCandidates[1] or "Startup",
 		PrimaryChildName = FlameDashHeadAssetCandidates[1] or "Dash",
+		-- ParticleEmitter names to force off under every Flame Dash effect root (startup FX, body/head FX, trail FX2, trail bursts). Case-insensitive.
+		-- Explorer: `wind` lives on FX under `left wind` / `right wind` attachments; trail FX2 uses `shockwave`, `fire`, etc.
+		DisabledTrailEmitterNames = {
+			wind = true,
+		},
 	},
 }
 

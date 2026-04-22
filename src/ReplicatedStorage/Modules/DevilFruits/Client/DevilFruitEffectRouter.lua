@@ -47,7 +47,7 @@ function DevilFruitEffectRouter:HandleEffect(targetPlayer, fruitName, abilityNam
 		return true
 	end
 
-	self.playOptionalEffect(targetPlayer, fruitName, abilityName)
+	self.playOptionalEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreateFallbackBurstEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreateBomuDetonationEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, abilityName, resolvedPayload)

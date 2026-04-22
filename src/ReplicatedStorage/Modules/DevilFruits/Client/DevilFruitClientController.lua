@@ -15,6 +15,7 @@ local SharedFolder = DevilFruits:WaitForChild("Shared")
 local Registry = require(SharedFolder:WaitForChild("Registry"))
 local DevilFruitLogger = require(SharedFolder:WaitForChild("DevilFruitLogger"))
 local DevilFruitRemotes = require(SharedFolder:WaitForChild("DevilFruitRemotes"))
+local DevilFruitOptionalEffects = require(SharedFolder:WaitForChild("DevilFruitOptionalEffects"))
 local ClientEffectVisuals = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ClientEffectVisuals"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local ProtectionRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("ProtectionRuntime"))
@@ -1864,99 +1865,8 @@ local function getProjectileDirection(direction, rootPart)
 	return Vector3.new(0, 0, -1)
 end
 
-local function addUniqueFolderName(folderNames, seenNames, folderName)
-	if typeof(folderName) ~= "string" or folderName == "" or seenNames[folderName] then
-		return
-	end
-
-	seenNames[folderName] = true
-	table.insert(folderNames, folderName)
-end
-
-local function getFruitEffectFolderNames(fruitName)
-	local fruit = DevilFruitConfig.GetFruit(fruitName)
-	local compactFruitName = typeof(fruitName) == "string" and (fruitName:gsub("[%W_]+", "")) or nil
-	local folderNames = {}
-	local seenNames = {}
-
-	addUniqueFolderName(folderNames, seenNames, fruit and fruit.Id)
-	addUniqueFolderName(folderNames, seenNames, fruit and fruit.AssetFolder)
-	addUniqueFolderName(folderNames, seenNames, fruit and fruit.AbilityModule)
-	addUniqueFolderName(folderNames, seenNames, fruit and fruit.FruitKey)
-	addUniqueFolderName(folderNames, seenNames, compactFruitName)
-
-	return folderNames
-end
-
-local function findFruitEffectFolder(rootFolder, fruitName)
-	if not rootFolder then
-		return nil
-	end
-
-	for _, folderName in ipairs(getFruitEffectFolderNames(fruitName)) do
-		local folder = rootFolder:FindFirstChild(folderName)
-		if folder then
-			return folder
-		end
-	end
-
-	return nil
-end
-
-playOptionalEffect = function(targetPlayer, fruitName, abilityName)
-	local character = targetPlayer.Character
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then
-		return
-	end
-
-	local particlesFolder = ReplicatedStorage:FindFirstChild("Particles")
-	local devilFruitFolder = particlesFolder and particlesFolder:FindFirstChild("DevilFruits")
-	local fruitFolder = findFruitEffectFolder(devilFruitFolder, fruitName)
-	local template = fruitFolder and fruitFolder:FindFirstChild(abilityName)
-	if template then
-		local clone = template:Clone()
-		clone.Parent = rootPart
-
-		if clone:IsA("ParticleEmitter") then
-			clone:Emit(clone:GetAttribute("EmitCount") or 20)
-			task.delay(2, function()
-				if clone then
-					clone:Destroy()
-				end
-			end)
-			return
-		end
-
-		if clone:IsA("Attachment") then
-			for _, descendant in ipairs(clone:GetDescendants()) do
-				if descendant:IsA("ParticleEmitter") then
-					descendant:Emit(descendant:GetAttribute("EmitCount") or 20)
-				end
-			end
-			task.delay(2, function()
-				if clone then
-					clone:Destroy()
-				end
-			end)
-		end
-	end
-
-	local soundsFolder = ReplicatedStorage:FindFirstChild("Sounds")
-	local soundDevilFruitFolder = soundsFolder and soundsFolder:FindFirstChild("DevilFruits")
-	local soundFruitFolder = findFruitEffectFolder(soundDevilFruitFolder, fruitName)
-	local soundTemplate = soundFruitFolder and soundFruitFolder:FindFirstChild(abilityName)
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		local soundClone = soundTemplate:Clone()
-		soundClone.Parent = rootPart
-		soundClone:Play()
-
-		soundClone.Ended:Connect(function()
-			if soundClone.Parent then
-				soundClone:Destroy()
-			end
-		end)
-	end
+playOptionalEffect = function(targetPlayer, fruitName, abilityName, payload)
+	return DevilFruitOptionalEffects.Play(targetPlayer, fruitName, abilityName, payload)
 end
 
 fruitModuleLoader = FruitModuleLoader.new({

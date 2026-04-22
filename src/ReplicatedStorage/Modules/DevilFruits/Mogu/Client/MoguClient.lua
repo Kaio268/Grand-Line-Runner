@@ -884,13 +884,13 @@ function MoguClient:HandleEffect(targetPlayer, abilityName, payload)
 	payload = payload or {}
 	local phase = typeof(payload.Phase) == "string" and payload.Phase or "Start"
 	if phase == "Start" then
-		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName)
+		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName, payload)
 		self:StartBurrow(targetPlayer, payload)
 		return true
 	end
 
 	if phase == "Resolve" then
-		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName)
+		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName, payload)
 		self:StopBurrow(targetPlayer, payload)
 		return true
 	end

@@ -122,6 +122,7 @@ function MeraDashClient.new(config)
 	self.StopFlameDashTrail = type(config.StopFlameDashTrail) == "function" and config.StopFlameDashTrail or function() end
 	self.activeDash = nil
 	self.cameraTween = nil
+	self.carryConnection = nil
 	self.sequence = 0
 	return self
 end
@@ -172,6 +173,77 @@ function MeraDashClient:StopHorizontalVelocity(rootPart)
 	rootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
 end
 
+function MeraDashClient:CancelCarryRelease(stopNow)
+	if self.carryConnection then
+		self.carryConnection:Disconnect()
+		self.carryConnection = nil
+	end
+
+	if stopNow ~= true then
+		return
+	end
+
+	local rootPart = self:GetRootPart()
+	if rootPart and rootPart.Parent then
+		self:StopHorizontalVelocity(rootPart)
+	end
+end
+
+function MeraDashClient:StartCarryRelease(rootPart, direction, startSpeed, duration)
+	self:CancelCarryRelease(false)
+
+	if not rootPart or not rootPart.Parent then
+		return false
+	end
+
+	local planarDirection = typeof(direction) == "Vector3" and MeraDashShared.GetPlanarVector(direction) or nil
+	local carrySpeed = math.max(0, tonumber(startSpeed) or 0)
+	local carryDuration = math.max(0, tonumber(duration) or 0)
+	if not planarDirection or planarDirection.Magnitude <= 0.01 or carrySpeed <= 0 or carryDuration <= 0 then
+		self:StopHorizontalVelocity(rootPart)
+		return false
+	end
+
+	local carryDirection = planarDirection.Unit
+	local carryStartAt = os.clock()
+	self:SetHorizontalVelocity(rootPart, carryDirection * carrySpeed)
+
+	self.carryConnection = RunService.Heartbeat:Connect(function()
+		if not rootPart.Parent then
+			self:CancelCarryRelease(false)
+			return
+		end
+
+		local elapsed = math.max(0, os.clock() - carryStartAt)
+		local alpha = math.clamp(elapsed / carryDuration, 0, 1)
+		local speedScale = 1 - MeraDashShared.Smoothstep(alpha)
+		if alpha >= 1 or speedScale <= 0.001 then
+			self:CancelCarryRelease(true)
+			return
+		end
+
+		self:SetHorizontalVelocity(rootPart, carryDirection * (carrySpeed * speedScale))
+	end)
+
+	return true
+end
+
+function MeraDashClient:GetCarryReleaseSpeed(startSpeed, duration, maxDistance)
+	local carrySpeed = math.max(0, tonumber(startSpeed) or 0)
+	local carryDuration = math.max(0, tonumber(duration) or 0)
+	local carryMaxDistance = math.max(0, tonumber(maxDistance) or 0)
+	if carrySpeed <= 0 or carryDuration <= 0 or carryMaxDistance <= 0 then
+		return 0
+	end
+
+	-- `StartCarryRelease` uses a `1 - Smoothstep(alpha)` decay curve, whose
+	-- integral over [0, 1] is 0.5. Clamp the initial carry speed so the total
+	-- release distance stays under the configured budget and avoids reconcile
+	-- snap-backs near the end of the dash.
+	local maxCarrySpeed = (carryMaxDistance * 2) / carryDuration
+	return math.min(carrySpeed, maxCarrySpeed)
+end
+
 function MeraDashClient:KickCamera()
 	local camera = Workspace.CurrentCamera
 	if not camera then
@@ -214,8 +286,15 @@ function MeraDashClient:ClearActiveState(state)
 	end
 end
 
-function MeraDashClient:FinishLocalDash(state, reason, interrupted)
-	if not state or state.MotionFinished then
+function MeraDashClient:FinishLocalDash(state, reason, interrupted, options)
+	if not state then
+		return
+	end
+
+	if state.MotionFinished then
+		if interrupted == true then
+			self:CancelCarryRelease(true)
+		end
 		return
 	end
 
@@ -229,7 +308,21 @@ function MeraDashClient:FinishLocalDash(state, reason, interrupted)
 
 	local rootPart = self:GetRootPart()
 	if rootPart then
-		self:StopHorizontalVelocity(rootPart)
+		local carryOut = type(options) == "table" and options.CarryOut == true and interrupted ~= true
+		if carryOut then
+			self:StartCarryRelease(
+				rootPart,
+				state.Plan and state.Plan.Direction or state.Direction,
+				self:GetCarryReleaseSpeed(
+					tonumber(options.CarrySpeed) or (state.Plan and state.Plan.EndCarrySpeed) or 0,
+					tonumber(options.CarryDuration) or state.EndCarryDuration or 0,
+					tonumber(options.CarryMaxDistance) or state.EndCarryMaxDistance or 0
+				),
+				tonumber(options.CarryDuration) or state.EndCarryDuration or 0
+			)
+		else
+			self:CancelCarryRelease(true)
+		end
 	end
 	if not state.ServerResolved then
 		safeCallNonCriticalCallback(
@@ -311,8 +404,8 @@ function MeraDashClient:BeginPredictedRequest()
 		self:FinishLocalDash(self.activeDash, "superseded_prediction", true)
 	end
 
-	local localPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, nil)
-	if not localPlan then
+	local initialPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, nil)
+	if not initialPlan then
 		logRequest(
 			"predicted blocked fruit=%s ability=%s reason=build_dash_plan_nil",
 			MeraDashClient.FRUIT_NAME,
@@ -321,10 +414,24 @@ function MeraDashClient:BeginPredictedRequest()
 		return nil
 	end
 
-	local requestTargetPosition = rootPart.Position + (localPlan.Direction * localPlan.Distance)
+	local maxRequestHintDistance = MeraDashShared.GetMaxRequestHintDistance(abilityConfig)
+	local requestHintDistance = math.min(initialPlan.Distance, maxRequestHintDistance)
+	local requestTargetPosition = rootPart.Position + (initialPlan.Direction * requestHintDistance)
+	local localPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, requestTargetPosition)
+	if not localPlan then
+		logRequest(
+			"predicted blocked fruit=%s ability=%s reason=rebuild_dash_plan_nil",
+			MeraDashClient.FRUIT_NAME,
+			MeraDashClient.ABILITY_NAME
+		)
+		return nil
+	end
+
 	local visualDirection = localPlan.Direction
 	local completionTolerance = MeraDashShared.GetCompletionTolerance(abilityConfig)
 	local runtimeGrace = MeraDashShared.GetRuntimeGrace(abilityConfig)
+	local endCarryDuration = MeraDashShared.GetEndCarryDuration(abilityConfig)
+	local endCarryMaxDistance = MeraDashShared.GetEndCarryMaxDistance(abilityConfig)
 	local correctionSnapDistance = MeraDashShared.GetCorrectionSnapDistance(abilityConfig)
 	local distanceTolerance = MeraDashShared.GetDistanceTolerance(abilityConfig)
 	local state = {
@@ -350,6 +457,8 @@ function MeraDashClient:BeginPredictedRequest()
 		TraveledDistance = 0,
 		WallShortened = localPlan.WallShortened,
 		CompletionTolerance = completionTolerance,
+		EndCarryDuration = endCarryDuration,
+		EndCarryMaxDistance = endCarryMaxDistance,
 		CorrectionSnapDistance = correctionSnapDistance,
 		DistanceTolerance = distanceTolerance,
 		MotionFinished = false,
@@ -415,8 +524,12 @@ function MeraDashClient:BeginPredictedRequest()
 			state.TraveledDistance = MeraDashShared.GetTravelDistance(state.StartPosition, rootPart.Position, state.Plan.Direction)
 			local currentRemainingDistance = state.Plan.Distance - state.TraveledDistance
 			if currentRemainingDistance <= state.CompletionTolerance then
-				self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
-				self:FinishLocalDash(state, "completed", false)
+				self:FinishLocalDash(state, "completed", false, {
+					CarryOut = true,
+					CarrySpeed = state.Plan.EndCarrySpeed,
+					CarryDuration = state.EndCarryDuration,
+					CarryMaxDistance = state.EndCarryMaxDistance,
+				})
 				return
 			end
 
@@ -430,7 +543,6 @@ function MeraDashClient:BeginPredictedRequest()
 			)
 
 			if MeraDashShared.ShouldStopForWall(character, rootPart, state.Plan.Direction, lookAheadDistance) then
-				self:StopHorizontalVelocity(rootPart)
 				self:FinishLocalDash(state, "wall_blocked_mid_dash", true)
 				return
 			end
@@ -438,17 +550,17 @@ function MeraDashClient:BeginPredictedRequest()
 			self:SetHorizontalVelocity(rootPart, state.Plan.Direction * dashSpeed)
 
 			if elapsed >= maxRuntime then
-				self:SetHorizontalVelocity(rootPart, state.Plan.Direction * state.Plan.EndCarrySpeed)
 				self:FinishLocalDash(state, "max_runtime_reached", true)
 			end
 		end)
 	end
 
 	logRequest(
-		"predicted end fruit=%s ability=%s dashTarget=%s requestedDistance=%.2f finalDistance=%.2f",
+		"predicted end fruit=%s ability=%s dashTarget=%s requestHintDistance=%.2f requestedDistance=%.2f finalDistance=%.2f",
 		MeraDashClient.FRUIT_NAME,
 		MeraDashClient.ABILITY_NAME,
 		formatVector3(requestTargetPosition),
+		requestHintDistance,
 		localPlan.RequestedDistance,
 		localPlan.Distance
 	)
@@ -557,7 +669,7 @@ function MeraDashClient:HandleDenied(reason)
 
 	local rootPart = self:GetRootPart()
 	if rootPart then
-		self:StopHorizontalVelocity(rootPart)
+		self:CancelCarryRelease(true)
 	end
 
 	logRecon(
@@ -641,7 +753,7 @@ function MeraDashClient:HandleResolved(payload)
 
 	if not state.MotionFinished or payload.Interrupted == true or payload.EndedEarly == true then
 		if rootPart then
-			self:StopHorizontalVelocity(rootPart)
+			self:CancelCarryRelease(true)
 		end
 		self:FinishLocalDash(state, "server_resolve_" .. tostring(payload.ResolveReason), payload.Interrupted == true)
 	end
@@ -719,6 +831,7 @@ end
 
 function MeraDashClient:CleanupCharacterRemoving()
 	local state = self.activeDash
+	self:CancelCarryRelease(true)
 	if not state then
 		return
 	end
