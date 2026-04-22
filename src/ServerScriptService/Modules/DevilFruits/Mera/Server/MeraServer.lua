@@ -143,6 +143,20 @@ local function pivotCharacterToRootPosition(character, rootPart, targetRootPosit
 	character:PivotTo(targetPivot)
 end
 
+local function isPlayerNetworkOwner(player, rootPart)
+	if not player or not rootPart or not rootPart:IsA("BasePart") then
+		return false
+	end
+
+	local ok, owner = pcall(function()
+		return rootPart:GetNetworkOwner()
+	end)
+	return ok and owner == player
+end
+
+local function shouldServerCommitDashMotion(player, rootPart)
+	return not isPlayerNetworkOwner(player, rootPart)
+end
 
 local function getDashTargetPosition(context)
 	local requestPayload = context.RequestPayload
@@ -330,6 +344,15 @@ function MeraMeraNoMi.FlameDash(context)
 		local maxRuntime = math.max(plan.Duration + runtimeGrace, 0.08)
 		local burstStartPosition = rootPart.Position
 		local resolveTargetPosition = startPosition + (plan.Direction * plan.Distance)
+		local serverCommitsMotion = shouldServerCommitDashMotion(player, rootPart)
+
+		logDash(
+			player,
+			"motion_authority ts=%.6f player=%s serverCommitsMotion=%s",
+			dashStartAt,
+			player.Name,
+			tostring(serverCommitsMotion)
+		)
 
 		local function getCorrectionTarget(targetRootPosition)
 			if not rootPart.Parent or typeof(targetRootPosition) ~= "Vector3" then
@@ -359,7 +382,7 @@ function MeraMeraNoMi.FlameDash(context)
 
 			if rootPart.Parent then
 				local targetRootPosition = options and options.TargetRootPosition or nil
-				if typeof(targetRootPosition) == "Vector3" and character.Parent then
+				if serverCommitsMotion and typeof(targetRootPosition) == "Vector3" and character.Parent then
 					pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
 				end
 			end
@@ -377,7 +400,7 @@ function MeraMeraNoMi.FlameDash(context)
 				tonumber(plan.RequestedDistance) or 0
 			)
 		else
-			if plan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
+			if serverCommitsMotion and plan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
 				local targetRootPosition = startPosition + (plan.Direction * plan.InstantDistance)
 				pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
 			end

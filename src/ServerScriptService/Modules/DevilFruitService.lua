@@ -908,7 +908,7 @@ local function isAbilityReady(player, abilityName)
 		return true, 0
 	end
 
-	local now = os.clock()
+	local now = getSharedTimestamp()
 	if now >= readyAt then
 		return true, 0
 	end
@@ -924,7 +924,7 @@ local function setAbilityCooldown(player, abilityName, duration)
 	end
 
 	local cooldowns = getCooldownTable(player)
-	local readyAt = os.clock() + duration
+	local readyAt = getSharedTimestamp() + duration
 	cooldowns[abilityName] = readyAt
 	return readyAt
 end

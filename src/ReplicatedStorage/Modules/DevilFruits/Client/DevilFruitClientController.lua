@@ -220,6 +220,10 @@ local function isCooldownBypassEnabled()
 	return player:GetAttribute("DevilFruitCooldownBypass") == true
 end
 
+local function getCooldownNow()
+	return Workspace:GetServerTimeNow()
+end
+
 local function getPlayerGui()
 	return playerGui
 end
@@ -825,10 +829,13 @@ local function updateCooldownHud(forceRebuild)
 
 	for abilityName, row in pairs(cooldownHud.Rows) do
 		local readyAt = isCooldownBypassEnabled() and 0 or (localCooldowns[abilityName] or 0)
-		local remaining = math.max(0, readyAt - os.clock())
+		local remaining = math.max(0, readyAt - getCooldownNow())
 		local total = math.max(row.Cooldown, 0.001)
 		local progress = math.clamp(1 - (remaining / total), 0, 1)
 		local isReady = remaining <= 0
+		if isReady then
+			localCooldowns[abilityName] = nil
+		end
 
 		row.Status.Text = isReady and "READY" or ("CD " .. formatCooldownTime(remaining))
 		row.Status.TextColor3 = isReady and DEVIL_FRUIT_UI.Ready or DEVIL_FRUIT_UI.Cooldown
@@ -937,7 +944,12 @@ local function isLocallyReady(abilityName)
 		return true
 	end
 
-	return os.clock() >= readyAt
+	if getCooldownNow() >= readyAt then
+		localCooldowns[abilityName] = nil
+		return true
+	end
+
+	return false
 end
 
 local function getCharacter()
