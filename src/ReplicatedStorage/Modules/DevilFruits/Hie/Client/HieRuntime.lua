@@ -11,6 +11,7 @@ local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Ha
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local HieFolder = DevilFruits:WaitForChild("Hie")
 local HieShared = HieFolder:WaitForChild("Shared")
+local HieConfig = require(HieShared:WaitForChild("HieConfig"))
 local HieVfx = require(HieShared:WaitForChild("Vfx"))
 
 local HieClient = {}
@@ -23,21 +24,24 @@ HieClient.ICE_BOOST_ABILITY = "IceBoost"
 local DEBUG_AIM = RunService:IsStudio()
 local DEBUG_VFX = RunService:IsStudio()
 local DEBUG_VFX_VERBOSE = false
+local FREEZE_SHOT_HAND_FORWARD_OFFSET = 2.5
+local FREEZE_SHOT_MUZZLE_CACHE_TTL = 1
+local FREEZE_SHOT_LOCAL_CAST_LOCK_MIN_DURATION = 1
 local LOG_INFO_COOLDOWN = 0.2
 local LOG_WARN_COOLDOWN = 3
 local BURST_CONFIG = {
 	BurstCount = 5,
-	BurstInterval = 0.045,
-	OptionalVisualSpread = 0.12,
-	SpawnOffsetRadius = 0.85,
+	BurstInterval = 0,
+	OptionalVisualSpread = 0,
+	SpawnOffsetRadius = 0,
 	VerticalOffsetRange = {
-		Min = -0.18,
-		Max = 0.28,
+		Min = 0,
+		Max = 0,
 	},
-	InitialSpreadAngle = 8,
-	HomingStrength = 8.5,
-	HomingDelay = 0.035,
-	MaxTurnRate = 320,
+	InitialSpreadAngle = 12,
+	HomingStrength = 0,
+	HomingDelay = 0,
+	MaxTurnRate = 0,
 	OrientationCorrectionCFrame = CFrame.Angles(math.rad(-90), 0, 0),
 	Mode = "visual_only",
 }
@@ -77,9 +81,12 @@ local function describeFreezeShotPayload(payload)
 	payload = payload or {}
 
 	return string.format(
-		"phase=%s projectileId=%s start=%s impact=%s speed=%s baseSpeed=%s velocity=%s inherited=%s radius=%s maxDistance=%s startedAt=%s resolvedAt=%s hitKind=%s hitLabel=%s resolveReason=%s",
+		"phase=%s projectileId=%s shotgun=%s/%s group=%s start=%s impact=%s speed=%s baseSpeed=%s velocity=%s inherited=%s radius=%s maxDistance=%s startedAt=%s resolvedAt=%s hitKind=%s hitLabel=%s resolveReason=%s",
 		tostring(payload.Phase),
 		tostring(payload.ProjectileId),
+		tostring(payload.ShotgunIndex),
+		tostring(payload.ShotgunCount),
+		tostring(payload.ShotgunGroupId),
 		formatVector3(payload.StartPosition),
 		formatVector3(payload.ImpactPosition),
 		tostring(payload.ProjectileSpeed),
@@ -211,6 +218,87 @@ local function getPlayerRootPart(targetPlayer)
 	end
 
 	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function getPlayerHumanoid(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function getFreezeShotGripPart(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChild("RightHand")
+		or character:FindFirstChild("RightLowerArm")
+		or character:FindFirstChild("Right Arm")
+end
+
+local function getFreezeShotToolHandle(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") then
+			local handle = child:FindFirstChild("Handle")
+			if handle and handle:IsA("BasePart") then
+				return handle
+			end
+		end
+	end
+
+	return nil
+end
+
+local function getFreezeShotLaunchOriginPosition(targetPlayer)
+	local toolHandle = getFreezeShotToolHandle(targetPlayer)
+	if toolHandle then
+		local attachment = toolHandle:FindFirstChild("ToolGripAttachment")
+			or toolHandle:FindFirstChild("GripAttachment")
+		if attachment and attachment:IsA("Attachment") then
+			return attachment.WorldPosition, attachment.Name
+		end
+
+		return toolHandle.Position, toolHandle.Name
+	end
+
+	local gripPart = getFreezeShotGripPart(targetPlayer)
+	if gripPart and gripPart:IsA("BasePart") then
+		local attachment = gripPart:FindFirstChild("RightGripAttachment")
+			or gripPart:FindFirstChild("RightGrip")
+		if attachment and attachment:IsA("Attachment") then
+			return attachment.WorldPosition, "RightGripAttachment"
+		end
+
+		return gripPart.Position, gripPart.Name
+	end
+
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if rootPart then
+		return rootPart.Position + Vector3.new(0, AIM_PLANE_HEIGHT_OFFSET, 0), "RootFallback"
+	end
+
+	return nil, nil
 end
 
 local function getPlanarVector(vector)
@@ -487,6 +575,8 @@ function HieClient.new(config)
 	self.activeBurstGroups = {}
 	self.activeIceBoostEffects = {}
 	self.pendingResolutions = {}
+	self.freezeShotLaunchGroups = {}
+	self.localFreezeShotCastLock = nil
 	return self
 end
 
@@ -500,8 +590,9 @@ function HieClient:GetRootPart()
 end
 
 function HieClient:GetFreezeShotBurstSettings()
-	local burstCount = math.max(1, math.floor(tonumber(BURST_CONFIG.BurstCount) or 1))
-	local burstInterval = math.max(0, tonumber(BURST_CONFIG.BurstInterval) or 0)
+	local abilityConfig = HieConfig.GetAbilityConfig("FreezeShot") or {}
+	local burstCount = math.max(1, math.floor(tonumber(abilityConfig.VisualBurstCount) or tonumber(BURST_CONFIG.BurstCount) or 1))
+	local burstInterval = math.max(0, tonumber(abilityConfig.VisualBurstInterval) or tonumber(BURST_CONFIG.BurstInterval) or 0)
 	local optionalVisualSpread = math.max(0, tonumber(BURST_CONFIG.OptionalVisualSpread) or 0)
 	local spawnOffsetRadius = math.max(0, tonumber(BURST_CONFIG.SpawnOffsetRadius) or 0)
 	local verticalOffsetRange = type(BURST_CONFIG.VerticalOffsetRange) == "table" and BURST_CONFIG.VerticalOffsetRange or {}
@@ -510,7 +601,10 @@ function HieClient:GetFreezeShotBurstSettings()
 	if verticalOffsetMin > verticalOffsetMax then
 		verticalOffsetMin, verticalOffsetMax = verticalOffsetMax, verticalOffsetMin
 	end
-	local initialSpreadAngle = math.max(0, tonumber(BURST_CONFIG.InitialSpreadAngle) or 0)
+	local initialSpreadAngle = math.max(
+		0,
+		tonumber(abilityConfig.VisualShotgunSpreadAngle) or tonumber(BURST_CONFIG.InitialSpreadAngle) or 0
+	)
 	local homingStrength = math.max(0, tonumber(BURST_CONFIG.HomingStrength) or 0)
 	local homingDelay = math.max(0, tonumber(BURST_CONFIG.HomingDelay) or 0)
 	local maxTurnRate = math.max(0, tonumber(BURST_CONFIG.MaxTurnRate) or 0)
@@ -798,11 +892,77 @@ function HieClient:GetFreezeShotAimPosition(abilityConfig)
 	return nil
 end
 
+function HieClient:ClearLocalFreezeShotCastLock(expectedToken)
+	local state = self.localFreezeShotCastLock
+	if not state or (expectedToken ~= nil and state.Token ~= expectedToken) then
+		return
+	end
+
+	self.localFreezeShotCastLock = nil
+	local humanoid = state.Humanoid
+	if humanoid and humanoid.Parent then
+		humanoid.WalkSpeed = state.WalkSpeed
+		humanoid.AutoRotate = state.AutoRotate
+	end
+end
+
+function HieClient:ApplyLocalFreezeShotCastLock(abilityConfig, aimPosition)
+	local humanoid = getPlayerHumanoid(self.player)
+	local rootPart = self:GetRootPart()
+	if not humanoid or not rootPart then
+		return
+	end
+
+	self:ClearLocalFreezeShotCastLock()
+
+	local speedMultiplier = math.clamp(tonumber(abilityConfig and abilityConfig.CastStartupSpeedMultiplier) or 0, 0, 1)
+	local maxDuration = math.max(0, tonumber(abilityConfig and abilityConfig.CastStartupSlowMaxDuration) or 0.75)
+	local postLaunchLockDuration = math.max(0, tonumber(abilityConfig and abilityConfig.CastPostLaunchLockDuration) or 0.35)
+	if speedMultiplier >= 1 or maxDuration <= 0 then
+		return
+	end
+
+	local token = {}
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
+
+	if typeof(aimPosition) == "Vector3" then
+		local planarAim = Vector3.new(aimPosition.X - rootPart.Position.X, 0, aimPosition.Z - rootPart.Position.Z)
+		if planarAim.Magnitude > 0.01 then
+			rootPart.CFrame = CFrame.lookAt(rootPart.Position, rootPart.Position + planarAim.Unit, Vector3.yAxis)
+		end
+	end
+
+	self.localFreezeShotCastLock = {
+		Token = token,
+		Humanoid = humanoid,
+		WalkSpeed = humanoid.WalkSpeed,
+		AutoRotate = humanoid.AutoRotate,
+	}
+	humanoid.WalkSpeed = humanoid.WalkSpeed * speedMultiplier
+	humanoid.AutoRotate = false
+	humanoid:Move(Vector3.zero, false)
+
+	task.delay(math.max(maxDuration + postLaunchLockDuration, FREEZE_SHOT_LOCAL_CAST_LOCK_MIN_DURATION), function()
+		self:ClearLocalFreezeShotCastLock(token)
+	end)
+end
+
 function HieClient:BuildFreezeShotRequestPayload(abilityConfig)
 	local aimPosition = self:GetFreezeShotAimPosition(abilityConfig)
 	return aimPosition and {
 		AimPosition = aimPosition,
 	} or nil
+end
+
+function HieClient:BeginPredictedFreezeShotRequest()
+	local abilityConfig = HieConfig.GetAbilityConfig("FreezeShot") or {}
+	local payload = self:BuildFreezeShotRequestPayload(abilityConfig)
+	if payload then
+		self:ApplyLocalFreezeShotCastLock(abilityConfig, payload.AimPosition)
+	end
+
+	return payload
 end
 
 function HieClient:CleanupIceBoostEffect(targetPlayer, reason)
@@ -926,6 +1086,11 @@ end
 
 function HieClient:CreateTemporaryFreezeShotVisual(radius, startPosition, initialVelocity)
 	local ok, projectile = pcall(function()
+		local freezeShotVisualConfig = HieVfx.GetFreezeShotVisualConfig and HieVfx.GetFreezeShotVisualConfig() or {}
+		local projectileScale = math.max(0.1, tonumber(freezeShotVisualConfig.ProjectileScale) or 1)
+		local projectileLightRangeScale = math.max(0.1, tonumber(freezeShotVisualConfig.ProjectileLightRangeScale) or 1)
+		local projectileTrailWidthScale = math.max(0.1, tonumber(freezeShotVisualConfig.ProjectileTrailWidthScale) or 1)
+
 		local part = Instance.new("Part")
 		part.Name = "HieFreezeShotTemp"
 		part.Shape = Enum.PartType.Ball
@@ -937,24 +1102,24 @@ function HieClient:CreateTemporaryFreezeShotVisual(radius, startPosition, initia
 		part.Material = Enum.Material.Neon
 		part.Color = Color3.fromRGB(173, 244, 255)
 		part.Transparency = 0.08
-		part.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
+		part.Size = Vector3.new(radius * 2 * projectileScale, radius * 2 * projectileScale, radius * 2 * projectileScale)
 		setFreezeShotVisualTransform(part, startPosition, initialVelocity, nil)
 
 		local light = Instance.new("PointLight")
 		light.Name = "Glow"
 		light.Color = Color3.fromRGB(196, 248, 255)
 		light.Brightness = 1.8
-		light.Range = math.max(6, radius * 8)
+		light.Range = math.max(6, radius * 8 * projectileLightRangeScale)
 		light.Parent = part
 
 		local attachment0 = Instance.new("Attachment")
 		attachment0.Name = "TrailStart"
-		attachment0.Position = Vector3.new(0, 0, -radius * 0.55)
+		attachment0.Position = Vector3.new(0, 0, -radius * 0.55 * projectileScale)
 		attachment0.Parent = part
 
 		local attachment1 = Instance.new("Attachment")
 		attachment1.Name = "TrailEnd"
-		attachment1.Position = Vector3.new(0, 0, radius * 0.55)
+		attachment1.Position = Vector3.new(0, 0, radius * 0.55 * projectileScale)
 		attachment1.Parent = part
 
 		local trail = Instance.new("Trail")
@@ -972,6 +1137,7 @@ function HieClient:CreateTemporaryFreezeShotVisual(radius, startPosition, initia
 		trail.LightEmission = 1
 		trail.Lifetime = 0.09
 		trail.MinLength = 0.02
+		trail.WidthScale = NumberSequence.new(projectileTrailWidthScale)
 		trail.Enabled = true
 		trail.Parent = part
 
@@ -1279,16 +1445,19 @@ function HieClient:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptio
 		return
 	end
 
-	local cloneStartedAt = sharedOptions.StartedAt + spawnDelay
+	local snapshotTime = Workspace:GetServerTimeNow()
+	local cloneStartedAt = snapshotTime
+	local burstBasePosition = sharedOptions.StartPosition
+
 	if authoritativeState.ResolvedAt and authoritativeState.ResolvedAt <= cloneStartedAt then
 		logBurst("skipped gameplay hit logic for visual-only clone index=%d projectileId=%s", burstIndex, projectileId)
 		return
 	end
 
 	local spawnOffset = computeVisualBurstSpawnOffset(projectileId, burstIndex, sharedOptions, burstGroup.Settings)
-	local cloneStartPosition = sharedOptions.StartPosition + spawnOffset
+	local cloneStartPosition = burstBasePosition + spawnOffset
 	local initialDirection = computeVisualBurstInitialDirection(projectileId, burstIndex, sharedOptions.Direction, burstGroup.Settings)
-	local targetPosition = sharedOptions.TargetPosition or (sharedOptions.StartPosition + (sharedOptions.Direction * sharedOptions.MaxDistance))
+	local targetPosition = cloneStartPosition + (initialDirection * sharedOptions.MaxDistance)
 	local resolutionPayload = nil
 	if authoritativeState.ResolvedAt ~= nil then
 		resolutionPayload = {
@@ -1302,7 +1471,7 @@ function HieClient:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptio
 		initialDirection * sharedOptions.ProjectileSpeed,
 		sharedOptions.MaxDistance,
 		cloneStartedAt,
-		Workspace:GetServerTimeNow(),
+		snapshotTime,
 		resolutionPayload
 	)
 	local visualProjectileId = string.format("%s_visual_%d", projectileId, burstIndex)
@@ -1321,7 +1490,7 @@ function HieClient:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptio
 		InitialDistanceTraveled = spawnSnapshot.Distance,
 		TargetPosition = targetPosition,
 		UseCurvedVisualPath = true,
-		HomingEnabled = true,
+		HomingEnabled = burstGroup.Settings.HomingStrength > 0 and burstGroup.Settings.MaxTurnRateRadians > 0,
 		HomingDelay = burstGroup.Settings.HomingDelay,
 		HomingStrength = burstGroup.Settings.HomingStrength,
 		MaxTurnRateRadians = burstGroup.Settings.MaxTurnRateRadians,
@@ -1372,10 +1541,11 @@ function HieClient:StartVisualBurst(targetPlayer, projectileId, sharedOptions)
 
 	logBurst("Freeze Shot burst start")
 	logBurst(
-		"mode=%s count=%d interval=%.3f spread=%.3f offsetRadius=%.3f homingStrength=%.2f homingDelay=%.3f projectileId=%s",
+		"mode=%s count=%d interval=%.3f shotgunAngle=%.2f positionSpread=%.3f offsetRadius=%.3f homingStrength=%.2f homingDelay=%.3f projectileId=%s",
 		burstSettings.Mode,
 		burstSettings.BurstCount,
 		burstSettings.BurstInterval,
+		burstSettings.InitialSpreadAngle,
 		burstSettings.OptionalVisualSpread,
 		burstSettings.SpawnOffsetRadius,
 		burstSettings.HomingStrength,
@@ -1385,7 +1555,7 @@ function HieClient:StartVisualBurst(targetPlayer, projectileId, sharedOptions)
 	logBurst("authoritative projectile index=1 projectileId=%s", projectileId)
 
 	if burstSettings.BurstInterval <= 0.01 then
-		warnBurst("burstInterval=%.3f may stack visual shots too tightly", burstSettings.BurstInterval)
+		logBurst("burstInterval=%.3f using single-point shotgun burst", burstSettings.BurstInterval)
 	end
 
 	if burstSettings.OptionalVisualSpread > 0.4 then
@@ -1400,9 +1570,13 @@ function HieClient:StartVisualBurst(targetPlayer, projectileId, sharedOptions)
 
 	for burstIndex = 2, burstSettings.BurstCount do
 		local spawnDelay = burstSettings.BurstInterval * (burstIndex - 1)
-		task.delay(spawnDelay, function()
+		if spawnDelay <= 0 then
 			self:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptions, burstIndex, spawnDelay)
-		end)
+		else
+			task.delay(spawnDelay, function()
+				self:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptions, burstIndex, spawnDelay)
+			end)
+		end
 	end
 end
 
@@ -1421,6 +1595,11 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 
 	logVfx("INIT", "launch received player=%s payload={%s}", targetPlayer.Name, describeFreezeShotPayload(payload))
 
+	if targetPlayer == self.player then
+		local currentVelocity = rootPart.AssemblyLinearVelocity
+		rootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
+	end
+
 	self:CleanupFreezeShot(projectileId, "restart")
 
 	local receiptTime = Workspace:GetServerTimeNow()
@@ -1430,6 +1609,10 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 	local radius = math.max(0.25, tonumber(payload.ProjectileRadius) or 0.8)
 	local maxDistance = math.max(1, tonumber(payload.MaxDistance) or tonumber(payload.Range) or 0)
 	local lifetime = math.max(0.05, tonumber(payload.Lifetime) or (maxDistance / speed))
+	local launchForwardOffset = math.max(
+		0,
+		tonumber(payload.LaunchForwardOffset) or FREEZE_SHOT_HAND_FORWARD_OFFSET
+	)
 	local startedAt = tonumber(payload.StartedAt) or Workspace:GetServerTimeNow()
 	local startPosition = typeof(payload.StartPosition) == "Vector3"
 		and payload.StartPosition
@@ -1437,47 +1620,95 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 	local projectileVelocity = getFreezeShotVelocity(payload, direction, speed)
 	speed = math.max(1, projectileVelocity.Magnitude)
 	direction = projectileVelocity.Magnitude > 0.01 and projectileVelocity.Unit or direction
+	local launchForwardDirection = typeof(payload.ShotgunOriginDirection) == "Vector3"
+		and getProjectileDirection(payload.ShotgunOriginDirection, nil)
+		or direction
 	local burstSettings = self:GetFreezeShotBurstSettings()
-	local spawnSnapshot = getFreezeShotTravelSnapshot(
-		startPosition,
-		projectileVelocity,
-		maxDistance,
-		startedAt,
-		receiptTime,
-		pendingResolution and pendingResolution.Payload or nil
-	)
-	local visualStartPosition = spawnSnapshot.Position
-	local fastForwardDistance = (visualStartPosition - startPosition).Magnitude
+	local visualStartPosition
+	local fastForwardDistance = 0
+	local launchSource = "ServerStart"
 
-	if fastForwardDistance > 0.05 then
+	if targetPlayer == self.player then
+		local groupKey = tostring(payload.ShotgunGroupId or projectileId)
+		self.freezeShotLaunchGroups = self.freezeShotLaunchGroups or {}
+		local cachedLaunch = self.freezeShotLaunchGroups[groupKey]
+		if not cachedLaunch then
+			local localLaunchOrigin, localLaunchSource = getFreezeShotLaunchOriginPosition(targetPlayer)
+			if typeof(localLaunchOrigin) == "Vector3" then
+				cachedLaunch = {
+					Origin = localLaunchOrigin,
+					Direction = launchForwardDirection,
+					Source = localLaunchSource or "LocalHand",
+				}
+				self.freezeShotLaunchGroups[groupKey] = cachedLaunch
+				task.delay(FREEZE_SHOT_MUZZLE_CACHE_TTL, function()
+					if self.freezeShotLaunchGroups and self.freezeShotLaunchGroups[groupKey] == cachedLaunch then
+						self.freezeShotLaunchGroups[groupKey] = nil
+					end
+				end)
+			end
+		end
+
+		if cachedLaunch and typeof(cachedLaunch.Origin) == "Vector3" then
+			local cachedDirection = typeof(cachedLaunch.Direction) == "Vector3" and cachedLaunch.Direction or launchForwardDirection
+			startPosition = cachedLaunch.Origin + (cachedDirection * launchForwardOffset)
+			visualStartPosition = startPosition
+			startedAt = receiptTime
+			launchSource = cachedLaunch.Source or "LocalHand"
+			logVfx(
+				"HAND",
+				"projectileId=%s source=%s receipt=%.3f visualStart=%s velocity=%s",
+				projectileId,
+				tostring(launchSource),
+				receiptTime,
+				formatVector3(visualStartPosition),
+				formatVector3(projectileVelocity)
+			)
+		end
+	end
+
+	if typeof(visualStartPosition) ~= "Vector3" then
+		local spawnSnapshot = getFreezeShotTravelSnapshot(
+			startPosition,
+			projectileVelocity,
+			maxDistance,
+			startedAt,
+			receiptTime,
+			pendingResolution and pendingResolution.Payload or nil
+		)
+		visualStartPosition = spawnSnapshot.Position
+		fastForwardDistance = (visualStartPosition - startPosition).Magnitude
+
+		if fastForwardDistance > 0.05 then
+			logVfx(
+				"DESYNC",
+				"projectileId=%s receipt=%.3f startedAt=%.3f elapsed=%.3f rawStart=%s visualStart=%s offset=%.2f velocity=%s",
+				projectileId,
+				receiptTime,
+				startedAt,
+				spawnSnapshot.Elapsed,
+				formatVector3(startPosition),
+				formatVector3(visualStartPosition),
+				fastForwardDistance,
+				formatVector3(projectileVelocity)
+			)
+		end
+
 		logVfx(
-			"DESYNC",
-			"projectileId=%s receipt=%.3f startedAt=%.3f elapsed=%.3f rawStart=%s visualStart=%s offset=%.2f velocity=%s",
+			"FASTFORWARD",
+			"projectileId=%s receipt=%.3f startedAt=%.3f elapsed=%.3f rawStart=%s visualStart=%s velocity=%s maxDistance=%.2f clamped=%s reason=%s",
 			projectileId,
 			receiptTime,
 			startedAt,
 			spawnSnapshot.Elapsed,
 			formatVector3(startPosition),
 			formatVector3(visualStartPosition),
-			fastForwardDistance,
-			formatVector3(projectileVelocity)
+			formatVector3(projectileVelocity),
+			maxDistance,
+			tostring(spawnSnapshot.Clamped),
+			spawnSnapshot.ClampReason
 		)
 	end
-
-	logVfx(
-		"FASTFORWARD",
-		"projectileId=%s receipt=%.3f startedAt=%.3f elapsed=%.3f rawStart=%s visualStart=%s velocity=%s maxDistance=%.2f clamped=%s reason=%s",
-		projectileId,
-		receiptTime,
-		startedAt,
-		spawnSnapshot.Elapsed,
-		formatVector3(startPosition),
-		formatVector3(visualStartPosition),
-		formatVector3(projectileVelocity),
-		maxDistance,
-		tostring(spawnSnapshot.Clamped),
-		spawnSnapshot.ClampReason
-	)
 
 	local projectileState = self:CreateFreezeShotProjectileState({
 		ProjectileKey = projectileId,
@@ -1493,7 +1724,7 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 		VisualStartPosition = visualStartPosition,
 		ShouldCreateImpact = false,
 		IsVisualOnly = false,
-		BurstIndex = 1,
+		BurstIndex = math.max(1, tonumber(payload.ShotgunIndex) or 1),
 		BurstMode = burstSettings.Mode,
 		OrientationCorrectionCFrame = burstSettings.OrientationCorrectionCFrame,
 	})
@@ -1501,21 +1732,31 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 		return false
 	end
 
-	self:StartVisualBurst(targetPlayer, projectileId, {
-		StartPosition = startPosition,
-		StartedAt = startedAt,
-		Direction = direction,
-		ProjectileVelocity = projectileVelocity,
-		ProjectileSpeed = speed,
-		Radius = radius,
-		MaxDistance = maxDistance,
-		Lifetime = lifetime,
-		TargetPosition = startPosition + (direction * maxDistance),
-	})
+	if payload.DisableVisualBurst == true then
+		logBurst(
+			"server gameplay shotgun projectile index=%s/%s projectileId=%s visualBurst=false",
+			tostring(payload.ShotgunIndex),
+			tostring(payload.ShotgunCount),
+			projectileId
+		)
+	else
+		self:StartVisualBurst(targetPlayer, projectileId, {
+			StartPosition = startPosition,
+			StartedAt = startedAt,
+			Direction = direction,
+			ProjectileVelocity = projectileVelocity,
+			ProjectileSpeed = speed,
+			Radius = radius,
+			MaxDistance = maxDistance,
+			Lifetime = lifetime,
+			LaunchForwardOffset = launchForwardOffset,
+			TargetPosition = startPosition + (direction * maxDistance),
+		})
+	end
 
 	logVfx(
 		"SPAWN",
-		"projectile initialized player=%s projectileId=%s receipt=%.3f startedAt=%.3f speed=%.2f velocity=%s rawStart=%s visualStart=%s maxDistance=%.2f radius=%.2f lifetime=%.2f",
+		"projectile initialized player=%s projectileId=%s receipt=%.3f startedAt=%.3f speed=%.2f velocity=%s rawStart=%s visualStart=%s source=%s maxDistance=%.2f radius=%.2f lifetime=%.2f",
 		targetPlayer.Name,
 		projectileId,
 		receiptTime,
@@ -1524,6 +1765,7 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 		formatVector3(projectileVelocity),
 		formatVector3(startPosition),
 		formatVector3(visualStartPosition),
+		tostring(launchSource),
 		maxDistance,
 		radius,
 		lifetime
@@ -1747,12 +1989,20 @@ function HieClient:HandleEffect(targetPlayer, abilityName, payload)
 	return false
 end
 
+function HieClient:HandleStateEvent(eventName, abilityName)
+	if abilityName == HieClient.FREEZE_SHOT_ABILITY and eventName == "Denied" then
+		self:ClearLocalFreezeShotCastLock()
+	end
+end
+
 function HieClient:Update()
 	self:UpdateFreezeShots()
 	self:UpdateIceBoostEffects()
 end
 
 function HieClient:CleanupCharacterRemoving()
+	self:ClearLocalFreezeShotCastLock()
+
 	local projectileIds = {}
 	for projectileId in pairs(self.activeFreezeShots) do
 		projectileIds[#projectileIds + 1] = projectileId
@@ -1763,6 +2013,7 @@ function HieClient:CleanupCharacterRemoving()
 	end
 
 	self.activeBurstGroups = {}
+	self.freezeShotLaunchGroups = {}
 	for targetPlayer in pairs(self.activeIceBoostEffects) do
 		self:CleanupIceBoostEffect(targetPlayer, "character_removing")
 	end

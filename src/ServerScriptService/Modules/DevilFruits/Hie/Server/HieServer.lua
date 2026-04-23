@@ -14,8 +14,8 @@ local HieHieNoMi = {}
 
 local DEBUG = RunService:IsStudio()
 local VERBOSE_DEBUG = false
-local PROJECTILE_FORWARD_OFFSET = 3
 local PROJECTILE_VERTICAL_OFFSET = 1.2
+local DEFAULT_PROJECTILE_HAND_FORWARD_OFFSET = 2.5
 local PROJECTILE_LIFETIME_GRACE = 0.1
 local RESTORE_LOG_GRACE = 0.1
 local VERBOSE_STEP_INTERVAL = 0.2
@@ -27,7 +27,15 @@ local DEFAULT_MOVEMENT_INHERITANCE_FACTOR = 0.85
 local DEFAULT_MAX_INHERITED_SPEED = 140
 local DEFAULT_SPAWN_LEAD_TIME = 0.08
 local DEFAULT_MAX_SPAWN_LEAD = 8
+local DEFAULT_SHOTGUN_PROJECTILE_COUNT = 5
+local DEFAULT_SHOTGUN_SPREAD_ANGLE = 12
+local MAX_SHOTGUN_PROJECTILE_COUNT = 12
+local DEFAULT_CAST_STARTUP_SPEED_MULTIPLIER = 0
+local DEFAULT_CAST_STARTUP_SLOW_MAX_DURATION = 0.75
+local DEFAULT_CAST_POST_LAUNCH_LOCK_DURATION = 0.35
 local MIN_DIRECTION_MAGNITUDE = 0.01
+local HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE = "HieFreezeShotCastSlowUntil"
+local HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE = "HieFreezeShotCastSpeedMultiplier"
 
 local IGNORED_HELPER_NAMES = {
 	HitBox = true,
@@ -42,6 +50,7 @@ local FREEZE_SHOT_ALLOWED_ENTITY_TYPES = {
 
 local projectileSequence = 0
 local restoreTokensByPlayer = setmetatable({}, { __mode = "k" })
+local castSlowTokensByPlayer = setmetatable({}, { __mode = "k" })
 
 local function logMessage(tag, message, ...)
 	if not DEBUG then
@@ -104,6 +113,130 @@ local function getForwardDirection(rootPart)
 	end
 
 	return Vector3.new(0, 0, -1)
+end
+
+local function getFreezeShotGripPart(character)
+	if typeof(character) ~= "Instance" then
+		return nil
+	end
+
+	return character:FindFirstChild("RightHand")
+		or character:FindFirstChild("RightLowerArm")
+		or character:FindFirstChild("Right Arm")
+end
+
+local function getFreezeShotToolHandle(character)
+	if typeof(character) ~= "Instance" then
+		return nil
+	end
+
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") then
+			local handle = child:FindFirstChild("Handle")
+			if handle and handle:IsA("BasePart") then
+				return handle
+			end
+		end
+	end
+
+	return nil
+end
+
+local function getFreezeShotLaunchOrigin(context)
+	local toolHandle = getFreezeShotToolHandle(context and context.Character)
+	if toolHandle then
+		local attachment = toolHandle:FindFirstChild("ToolGripAttachment")
+			or toolHandle:FindFirstChild("GripAttachment")
+		if attachment and attachment:IsA("Attachment") then
+			return attachment.WorldPosition, attachment.Name
+		end
+
+		return toolHandle.Position, toolHandle.Name
+	end
+
+	local gripPart = getFreezeShotGripPart(context and context.Character)
+	if gripPart and gripPart:IsA("BasePart") then
+		local attachment = gripPart:FindFirstChild("RightGripAttachment")
+			or gripPart:FindFirstChild("RightGrip")
+		if attachment and attachment:IsA("Attachment") then
+			return attachment.WorldPosition, "RightGripAttachment"
+		end
+
+		return gripPart.Position, gripPart.Name
+	end
+
+	return context.RootPart.Position + Vector3.new(0, PROJECTILE_VERTICAL_OFFSET, 0), "RootFallback"
+end
+
+local function resolveLaunchDirectionFromAim(originPosition, aimPosition, fallbackDirection, abilityConfig)
+	if typeof(originPosition) ~= "Vector3" or typeof(aimPosition) ~= "Vector3" then
+		return fallbackDirection
+	end
+
+	local sanitizedAimPosition = (abilityConfig ~= nil and abilityConfig.AllowVerticalAim == true)
+		and aimPosition
+		or Vector3.new(aimPosition.X, originPosition.Y, aimPosition.Z)
+	local aimVector = sanitizedAimPosition - originPosition
+	if aimVector.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return fallbackDirection
+	end
+
+	return aimVector.Unit
+end
+
+local function getShotgunBasis(direction)
+	local forward = typeof(direction) == "Vector3" and direction.Magnitude > MIN_DIRECTION_MAGNITUDE
+		and direction.Unit
+		or Vector3.new(0, 0, -1)
+	local right = forward:Cross(Vector3.yAxis)
+	if right.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		right = Vector3.new(1, 0, 0)
+	else
+		right = right.Unit
+	end
+
+	local up = right:Cross(forward)
+	if up.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		up = Vector3.yAxis
+	else
+		up = up.Unit
+	end
+
+	return forward, right, up
+end
+
+local function rotateDirectionAroundAxis(direction, axis, angleRadians)
+	if typeof(direction) ~= "Vector3" or direction.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return Vector3.new(0, 0, -1)
+	end
+
+	if typeof(axis) ~= "Vector3" or axis.Magnitude <= MIN_DIRECTION_MAGNITUDE or math.abs(angleRadians) <= 0.0001 then
+		return direction.Unit
+	end
+
+	return CFrame.fromAxisAngle(axis.Unit, angleRadians):VectorToWorldSpace(direction.Unit).Unit
+end
+
+local function getShotgunProjectileDirection(baseDirection, projectileIndex, projectileCount, spreadAngleDegrees)
+	local forward, right = getShotgunBasis(baseDirection)
+	if projectileCount <= 1 or projectileIndex <= 1 then
+		return forward
+	end
+
+	local sideCount = math.max(1, projectileCount - 1)
+	local sideIndex = projectileIndex - 2
+	local ringAngle = (math.pi * 2) * (sideIndex / sideCount)
+	local spreadRadians = math.rad(math.max(0, tonumber(spreadAngleDegrees) or 0))
+	local yawRadians = math.cos(ringAngle) * spreadRadians
+	local pitchRadians = math.sin(ringAngle) * spreadRadians * 0.45
+	local rotatedDirection = rotateDirectionAroundAxis(forward, Vector3.yAxis, yawRadians)
+	rotatedDirection = rotateDirectionAroundAxis(rotatedDirection, right, pitchRadians)
+
+	if rotatedDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return forward
+	end
+
+	return rotatedDirection.Unit
 end
 
 local function getPlanarDirection(vector)
@@ -323,6 +456,15 @@ local function getProjectileSettings(abilityConfig)
 	local radius = math.max(0.25, tonumber(abilityConfig.ProjectileRadius) or 0.8)
 	local burstRadius = math.max(0, tonumber(abilityConfig.ImpactBurstRadius) or 0)
 	local freezeDuration = math.max(0, tonumber(abilityConfig.FreezeDuration) or 0)
+	local shotgunProjectileCount = math.clamp(
+		math.floor(
+			tonumber(abilityConfig.ShotgunProjectileCount)
+				or tonumber(abilityConfig.VisualBurstCount)
+				or DEFAULT_SHOTGUN_PROJECTILE_COUNT
+		),
+		1,
+		MAX_SHOTGUN_PROJECTILE_COUNT
+	)
 
 	return {
 		MaxDistance = maxDistance,
@@ -337,6 +479,17 @@ local function getProjectileSettings(abilityConfig)
 		MaxInheritedSpeed = math.max(0, tonumber(abilityConfig.MaxInheritedSpeed) or DEFAULT_MAX_INHERITED_SPEED),
 		SpawnLeadTime = math.max(0, tonumber(abilityConfig.SpawnLeadTime) or DEFAULT_SPAWN_LEAD_TIME),
 		MaxSpawnLead = math.max(0, tonumber(abilityConfig.MaxSpawnLead) or DEFAULT_MAX_SPAWN_LEAD),
+		LaunchForwardOffset = math.max(
+			0,
+			tonumber(abilityConfig.LaunchForwardOffset) or DEFAULT_PROJECTILE_HAND_FORWARD_OFFSET
+		),
+		ShotgunProjectileCount = shotgunProjectileCount,
+		ShotgunSpreadAngle = math.max(
+			0,
+			tonumber(abilityConfig.ShotgunSpreadAngle)
+				or tonumber(abilityConfig.VisualShotgunSpreadAngle)
+				or DEFAULT_SHOTGUN_SPREAD_ANGLE
+		),
 	}
 end
 
@@ -378,6 +531,91 @@ local function resolveFreezeShotVelocity(context, direction, settings)
 	}
 end
 
+local function clearFreezeShotCastSlow(player, expectedToken)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	if expectedToken ~= nil and castSlowTokensByPlayer[player] ~= expectedToken then
+		return
+	end
+
+	castSlowTokensByPlayer[player] = nil
+	player:SetAttribute(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE, nil)
+	player:SetAttribute(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE, nil)
+end
+
+local function stopPlanarVelocity(rootPart)
+	if typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	local velocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = Vector3.new(0, velocity.Y, 0)
+end
+
+local function applyFreezeShotCastSlow(context, abilityConfig)
+	local player = context and context.Player
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil
+	end
+
+	local speedMultiplier = math.clamp(
+		tonumber(abilityConfig and abilityConfig.CastStartupSpeedMultiplier) or DEFAULT_CAST_STARTUP_SPEED_MULTIPLIER,
+		0,
+		1
+	)
+	local maxDuration = math.max(
+		0,
+		tonumber(abilityConfig and abilityConfig.CastStartupSlowMaxDuration) or DEFAULT_CAST_STARTUP_SLOW_MAX_DURATION
+	)
+	local postLaunchLockDuration = math.max(
+		0,
+		tonumber(abilityConfig and abilityConfig.CastPostLaunchLockDuration) or DEFAULT_CAST_POST_LAUNCH_LOCK_DURATION
+	)
+
+	if speedMultiplier >= 1 or maxDuration <= 0 then
+		return nil
+	end
+
+	local token = {}
+	castSlowTokensByPlayer[player] = token
+	player:SetAttribute(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE, speedMultiplier)
+	player:SetAttribute(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE, os.clock() + maxDuration)
+	stopPlanarVelocity(context.RootPart)
+
+	logMessage(
+		"CAST",
+		"player=%s startupSlow=true multiplier=%.2f maxDuration=%.2f postLaunchLock=%.2f",
+		player.Name,
+		speedMultiplier,
+		maxDuration,
+		postLaunchLockDuration
+	)
+
+	task.delay(maxDuration + postLaunchLockDuration + 0.05, function()
+		clearFreezeShotCastSlow(player, token)
+	end)
+
+	return function(delayDuration)
+		local delaySeconds = math.max(0, tonumber(delayDuration) or 0)
+		if delaySeconds <= 0 then
+			clearFreezeShotCastSlow(player, token)
+			return
+		end
+
+		if castSlowTokensByPlayer[player] ~= token then
+			return
+		end
+
+		stopPlanarVelocity(context.RootPart)
+		player:SetAttribute(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE, os.clock() + delaySeconds)
+		task.delay(delaySeconds, function()
+			clearFreezeShotCastSlow(player, token)
+		end)
+	end, postLaunchLockDuration
+end
+
 local function playFreezeShotAnimationAndWait(context, abilityConfig)
 	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
 	DevilFruitLogger.Info(
@@ -402,7 +640,12 @@ local function playFreezeShotAnimationAndWait(context, abilityConfig)
 		return false
 	end
 
+	local clearCastSlow, postLaunchLockDuration = applyFreezeShotCastSlow(context, abilityConfig)
 	local markerReached = HieAnimationController.WaitForFreezeShotRelease(animationState)
+	if clearCastSlow then
+		clearCastSlow(postLaunchLockDuration)
+	end
+
 	DevilFruitLogger.Info(
 		"ANIM",
 		"server animation release gate fruit=%s ability=%s player=%s markerReached=%s",
@@ -750,6 +993,12 @@ local function buildLaunchPayload(state)
 		ProjectileSpeed = state.Speed,
 		ProjectileRadius = state.Radius,
 		StartPosition = state.StartPosition,
+		LaunchForwardOffset = state.LaunchForwardOffset,
+		DisableVisualBurst = true,
+		ShotgunIndex = state.ShotgunIndex,
+		ShotgunCount = state.ShotgunCount,
+		ShotgunGroupId = state.ShotgunGroupId,
+		ShotgunOriginDirection = state.ShotgunOriginDirection,
 		MaxDistance = state.MaxDistance,
 		Range = state.MaxDistance,
 		Lifetime = state.Lifetime,
@@ -1015,14 +1264,73 @@ local function simulateProjectile(context, state)
 	end
 end
 
+local function createFreezeShotProjectileState(
+	context,
+	settings,
+	originPosition,
+	startPosition,
+	originDirection,
+	projectileDirection,
+	velocityData,
+	shotgunIndex,
+	shotgunCount,
+	shotgunGroupId,
+	spawnLeadDistance
+)
+	local projectileId = nextProjectileId(context.Player)
+	local lifetime = (settings.MaxDistance / velocityData.FinalSpeed) + PROJECTILE_LIFETIME_GRACE
+
+	return {
+		Id = projectileId,
+		Player = context.Player,
+		Character = context.Character,
+		HazardsFolder = HazardRuntime.GetSharedHazardsFolder(),
+		OriginPosition = originPosition,
+		StartPosition = startPosition,
+		Position = startPosition,
+		LaunchForwardOffset = settings.LaunchForwardOffset,
+		Direction = projectileDirection,
+		ShotgunOriginDirection = originDirection,
+		Velocity = velocityData.FinalVelocity,
+		InheritedVelocity = velocityData.InheritedVelocity,
+		BaseSpeed = settings.BaseSpeed,
+		Speed = velocityData.FinalSpeed,
+		Radius = settings.Radius,
+		BurstRadius = settings.BurstRadius,
+		MaxDistance = settings.MaxDistance,
+		FreezeDuration = settings.FreezeDuration,
+		Lifetime = lifetime,
+		ServerStartedAt = Workspace:GetServerTimeNow(),
+		DistanceTraveled = 0,
+		CleanedUp = false,
+		IgnoredInstances = {},
+		IgnoredLookup = {},
+		SpawnLeadDistance = spawnLeadDistance,
+		ShotgunIndex = shotgunIndex,
+		ShotgunCount = shotgunCount,
+		ShotgunGroupId = shotgunGroupId,
+		NextVerboseLogAt = 0,
+	}
+end
+
+local function startProjectileSimulation(context, state)
+	task.defer(function()
+		local ok, err = pcall(simulateProjectile, context, state)
+		if not ok then
+			logError("projectile simulation crashed projectileId=%s player=%s detail=%s", state.Id, context.Player.Name, tostring(err))
+			emitResolution(context, state, "Expire", "Fail", "simulation_error", state.Position, "simulation_error")
+			cleanupProjectile(state, "error:simulation")
+		end
+	end)
+end
+
 function HieHieNoMi.FreezeShot(context)
 	local abilityConfig = context.AbilityConfig
 	local humanoid = context.Humanoid
 	local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid:FindFirstChild("Animator")) or nil
 	local settings = getProjectileSettings(abilityConfig)
 	local slotLabel = tostring(abilityConfig.KeyCode or "Q")
-	local originPosition = context.RootPart.Position
-	local aimOriginPosition = originPosition + Vector3.new(0, PROJECTILE_VERTICAL_OFFSET, 0)
+	local aimOriginPosition = context.RootPart.Position + Vector3.new(0, PROJECTILE_VERTICAL_OFFSET, 0)
 	local direction, aimPosition = resolveFreezeShotDirection(context, aimOriginPosition, abilityConfig)
 	local finalFacing = applyFreezeShotTurn(context, direction, abilityConfig)
 	DevilFruitLogger.Info(
@@ -1042,74 +1350,79 @@ function HieHieNoMi.FreezeShot(context)
 
 	playFreezeShotAnimationAndWait(context, abilityConfig)
 
-	originPosition = context.RootPart.Position
-	aimOriginPosition = originPosition + Vector3.new(0, PROJECTILE_VERTICAL_OFFSET, 0)
-	local velocityData = resolveFreezeShotVelocity(context, direction, settings)
-	local startPosition = aimOriginPosition + direction * (PROJECTILE_FORWARD_OFFSET + velocityData.SpawnLeadDistance)
-	local projectileId = nextProjectileId(context.Player)
-	local lifetime = (settings.MaxDistance / velocityData.FinalSpeed) + PROJECTILE_LIFETIME_GRACE
+	local originPosition, launchSource = getFreezeShotLaunchOrigin(context)
+	direction = resolveLaunchDirectionFromAim(originPosition, aimPosition, direction, abilityConfig)
+	local launchVelocityData = resolveFreezeShotVelocity(context, direction, settings)
+	local sharedStartPosition = originPosition + direction * (settings.LaunchForwardOffset + launchVelocityData.SpawnLeadDistance)
+	local shotgunGroupId = string.format("%s:shotgun:%d", tostring(context.Player.UserId), projectileSequence + 1)
+	local projectileStates = {}
 
-	logMessage(
-		"SPAWN",
-		"player=%s projectileId=%s origin=%s start=%s baseOffset=%.2f spawnLead=%.2f",
-		context.Player.Name,
-		projectileId,
-		formatVector3(aimOriginPosition),
-		formatVector3(startPosition),
-		PROJECTILE_FORWARD_OFFSET,
-		velocityData.SpawnLeadDistance
-	)
+	for shotgunIndex = 1, settings.ShotgunProjectileCount do
+		local projectileDirection = getShotgunProjectileDirection(
+			direction,
+			shotgunIndex,
+			settings.ShotgunProjectileCount,
+			settings.ShotgunSpreadAngle
+		)
+		local velocityData = shotgunIndex == 1
+			and launchVelocityData
+			or resolveFreezeShotVelocity(context, projectileDirection, settings)
+		local state = createFreezeShotProjectileState(
+			context,
+			settings,
+			originPosition,
+			sharedStartPosition,
+			direction,
+			projectileDirection,
+			velocityData,
+			shotgunIndex,
+			settings.ShotgunProjectileCount,
+			shotgunGroupId,
+			launchVelocityData.SpawnLeadDistance
+		)
+		projectileStates[#projectileStates + 1] = state
 
-	logMessage(
-		"FIRE",
-		"player=%s ability=%s slot=%s origin=%s aimPosition=%s direction=%s finalFacing=%s velocity=%s",
-		context.Player.Name,
-		context.AbilityName,
-		slotLabel,
-		formatVector3(originPosition),
-		formatVector3(aimPosition),
-		formatVector3(direction),
-		formatVector3(finalFacing),
-		formatVector3(velocityData.FinalVelocity)
-	)
+		logMessage(
+			"SPAWN",
+			"player=%s projectileId=%s shotgun=%d/%d origin=%s start=%s source=%s baseOffset=%.2f spawnLead=%.2f",
+			context.Player.Name,
+			state.Id,
+			shotgunIndex,
+			settings.ShotgunProjectileCount,
+			formatVector3(originPosition),
+			formatVector3(state.StartPosition),
+			tostring(launchSource),
+			settings.LaunchForwardOffset,
+			launchVelocityData.SpawnLeadDistance
+		)
 
-	local state = {
-		Id = projectileId,
-		Player = context.Player,
-		Character = context.Character,
-		HazardsFolder = HazardRuntime.GetSharedHazardsFolder(),
-		OriginPosition = originPosition,
-		StartPosition = startPosition,
-		Position = startPosition,
-		Direction = direction,
-		Velocity = velocityData.FinalVelocity,
-		InheritedVelocity = velocityData.InheritedVelocity,
-		BaseSpeed = settings.BaseSpeed,
-		Speed = velocityData.FinalSpeed,
-		Radius = settings.Radius,
-		BurstRadius = settings.BurstRadius,
-		MaxDistance = settings.MaxDistance,
-		FreezeDuration = settings.FreezeDuration,
-		Lifetime = lifetime,
-		ServerStartedAt = Workspace:GetServerTimeNow(),
-		DistanceTraveled = 0,
-		CleanedUp = false,
-		IgnoredInstances = {},
-		IgnoredLookup = {},
-		SpawnLeadDistance = velocityData.SpawnLeadDistance,
-		NextVerboseLogAt = 0,
-	}
+		logMessage(
+			"FIRE",
+			"player=%s ability=%s slot=%s shotgun=%d/%d origin=%s aimPosition=%s direction=%s finalFacing=%s velocity=%s",
+			context.Player.Name,
+			context.AbilityName,
+			slotLabel,
+			shotgunIndex,
+			settings.ShotgunProjectileCount,
+			formatVector3(originPosition),
+			formatVector3(aimPosition),
+			formatVector3(projectileDirection),
+			formatVector3(finalFacing),
+			formatVector3(velocityData.FinalVelocity)
+		)
+	end
 
 	task.defer(function()
-		local ok, err = pcall(simulateProjectile, context, state)
-		if not ok then
-			logError("projectile simulation crashed projectileId=%s player=%s detail=%s", state.Id, context.Player.Name, tostring(err))
-			emitResolution(context, state, "Expire", "Fail", "simulation_error", state.Position, "simulation_error")
-			cleanupProjectile(state, "error:simulation")
+		for index = 2, #projectileStates do
+			emitProjectileEffect(context, buildLaunchPayload(projectileStates[index]))
+		end
+
+		for _, state in ipairs(projectileStates) do
+			startProjectileSimulation(context, state)
 		end
 	end)
 
-	return buildLaunchPayload(state)
+	return buildLaunchPayload(projectileStates[1])
 end
 
 function HieHieNoMi.IceBoost(context)

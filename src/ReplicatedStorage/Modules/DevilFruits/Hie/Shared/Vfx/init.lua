@@ -4,6 +4,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local DiagnosticLogLimiter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
+local HieConfig = require(script.Parent:WaitForChild("HieConfig"))
 
 local HieVfx = {}
 
@@ -16,6 +17,32 @@ local FREEZE_PROJECTILE_CORE_NAME = "ice shard"
 local FREEZE_IMPACT_CHILDREN = { "explosion", "B", "smoke", "snowflake", "specs", "stars" }
 local ICE_BOOST_CHILDREN = { "FX", "A", "Attachment", "B", "smoke", "snowflake", "specs", "stars" }
 local DEFAULT_EMIT_COUNT = 20
+
+-- Freeze Shot visual defaults/fallbacks.
+-- Main projectile and impact scale should be edited in Modules/Configs/DevilFruits.lua -> Hie -> FreezeShot.
+local FREEZE_SHOT_VISUAL_DEFAULTS = {
+	ProjectileScale = 1.2,
+	ProjectileParticleScale = 1.12,
+	ProjectileTrailWidthScale = 1.16,
+	ProjectileLightRangeScale = 1.12,
+	ProjectileEmitCount = 14,
+	ImpactScale = 1.45,
+	ImpactParticleSpeedScale = 1.15,
+	ImpactLightRangeScale = 1.35,
+	ImpactEmitCount = 32,
+	ImpactBriefContinuousDuration = 0.12,
+}
+local FREEZE_SHOT_PROJECTILE_PARTICLE_RATIO = FREEZE_SHOT_VISUAL_DEFAULTS.ProjectileParticleScale
+	/ FREEZE_SHOT_VISUAL_DEFAULTS.ProjectileScale
+local FREEZE_SHOT_PROJECTILE_TRAIL_RATIO = FREEZE_SHOT_VISUAL_DEFAULTS.ProjectileTrailWidthScale
+	/ FREEZE_SHOT_VISUAL_DEFAULTS.ProjectileScale
+local FREEZE_SHOT_PROJECTILE_LIGHT_RATIO = FREEZE_SHOT_VISUAL_DEFAULTS.ProjectileLightRangeScale
+	/ FREEZE_SHOT_VISUAL_DEFAULTS.ProjectileScale
+local FREEZE_SHOT_IMPACT_PARTICLE_SPEED_RATIO = FREEZE_SHOT_VISUAL_DEFAULTS.ImpactParticleSpeedScale
+	/ FREEZE_SHOT_VISUAL_DEFAULTS.ImpactScale
+local FREEZE_SHOT_IMPACT_LIGHT_RATIO = FREEZE_SHOT_VISUAL_DEFAULTS.ImpactLightRangeScale
+	/ FREEZE_SHOT_VISUAL_DEFAULTS.ImpactScale
+
 local IMPACT_LIFETIME = 2.5
 local ICE_BOOST_ROOT_OFFSET = CFrame.new(0, -2.5, 0)
 local INFO_COOLDOWN = 0.25
@@ -47,6 +74,92 @@ local function formatVector3(value)
 	end
 
 	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function scaleNumberSequence(sequence, scale)
+	if typeof(sequence) ~= "NumberSequence" or typeof(scale) ~= "number" then
+		return sequence
+	end
+
+	local scaledKeypoints = table.create(#sequence.Keypoints)
+	for index, keypoint in ipairs(sequence.Keypoints) do
+		scaledKeypoints[index] = NumberSequenceKeypoint.new(
+			keypoint.Time,
+			math.max(0, keypoint.Value * scale),
+			math.max(0, keypoint.Envelope * scale)
+		)
+	end
+
+	return NumberSequence.new(scaledKeypoints)
+end
+
+local function scaleNumberRange(range, scale)
+	if typeof(range) ~= "NumberRange" or typeof(scale) ~= "number" then
+		return range
+	end
+
+	return NumberRange.new(
+		math.max(0, range.Min * scale),
+		math.max(0, range.Max * scale)
+	)
+end
+
+local function resolvePositiveNumber(value, fallback)
+	local numericValue = tonumber(value)
+	if numericValue and numericValue > 0 then
+		return numericValue
+	end
+
+	return fallback
+end
+
+local function getFreezeShotVisualConfig()
+	local resolvedConfig = table.clone(FREEZE_SHOT_VISUAL_DEFAULTS)
+	local abilityConfig = HieConfig.GetAbilityConfig("FreezeShot")
+	if typeof(abilityConfig) ~= "table" then
+		return resolvedConfig
+	end
+
+	local projectileScale = resolvePositiveNumber(abilityConfig.VisualProjectileScale, resolvedConfig.ProjectileScale)
+	local impactScale = resolvePositiveNumber(abilityConfig.VisualImpactScale, resolvedConfig.ImpactScale)
+
+	resolvedConfig.ProjectileScale = projectileScale
+	resolvedConfig.ProjectileParticleScale = resolvePositiveNumber(
+		abilityConfig.VisualProjectileParticleScale,
+		projectileScale * FREEZE_SHOT_PROJECTILE_PARTICLE_RATIO
+	)
+	resolvedConfig.ProjectileTrailWidthScale = resolvePositiveNumber(
+		abilityConfig.VisualProjectileTrailWidthScale,
+		projectileScale * FREEZE_SHOT_PROJECTILE_TRAIL_RATIO
+	)
+	resolvedConfig.ProjectileLightRangeScale = resolvePositiveNumber(
+		abilityConfig.VisualProjectileLightRangeScale,
+		projectileScale * FREEZE_SHOT_PROJECTILE_LIGHT_RATIO
+	)
+	resolvedConfig.ProjectileEmitCount = resolvePositiveNumber(
+		abilityConfig.VisualProjectileEmitCount,
+		resolvedConfig.ProjectileEmitCount
+	)
+
+	resolvedConfig.ImpactScale = impactScale
+	resolvedConfig.ImpactParticleSpeedScale = resolvePositiveNumber(
+		abilityConfig.VisualImpactParticleSpeedScale,
+		impactScale * FREEZE_SHOT_IMPACT_PARTICLE_SPEED_RATIO
+	)
+	resolvedConfig.ImpactLightRangeScale = resolvePositiveNumber(
+		abilityConfig.VisualImpactLightRangeScale,
+		impactScale * FREEZE_SHOT_IMPACT_LIGHT_RATIO
+	)
+	resolvedConfig.ImpactEmitCount = resolvePositiveNumber(
+		abilityConfig.VisualImpactEmitCount,
+		resolvedConfig.ImpactEmitCount
+	)
+	resolvedConfig.ImpactBriefContinuousDuration = math.max(
+		0,
+		tonumber(abilityConfig.VisualImpactBriefContinuousDuration) or resolvedConfig.ImpactBriefContinuousDuration
+	)
+
+	return resolvedConfig
 end
 
 local function buildPathLabel(effectName, childName)
@@ -361,11 +474,18 @@ local function mountChild(effectFolder, state, childName, referenceCFrame)
 	return clone
 end
 
-local function activateTree(root, stage, defaultEmitCount)
+local function activateTree(root, stage, defaultEmitCount, options)
+	options = options or {}
+
+	local leaveParticleEmittersEnabled = options.LeaveParticleEmittersEnabled ~= false
+	local enableTrailsAndBeams = options.EnableTrailsAndBeams ~= false
+	local enableContinuousClasses = options.EnableContinuousClasses ~= false
+	local continuousDuration = math.max(0, tonumber(options.ContinuousDuration) or 0)
+
 	for _, item in ipairs(iterateSelfAndDescendants(root)) do
 		if item:IsA("ParticleEmitter") then
 			local emitCount = tonumber(item:GetAttribute("EmitCount")) or defaultEmitCount or DEFAULT_EMIT_COUNT
-			item.Enabled = true
+			item.Enabled = leaveParticleEmittersEnabled
 			if emitCount > 0 then
 				local ok, err = pcall(function()
 					item:Emit(emitCount)
@@ -374,14 +494,79 @@ local function activateTree(root, stage, defaultEmitCount)
 					warnLog("%s emit failed: %s", stage, tostring(err))
 				end
 			end
+			if not leaveParticleEmittersEnabled then
+				item.Enabled = false
+			end
 		elseif item:IsA("Trail") or item:IsA("Beam") then
-			if item.Attachment0 and item.Attachment1 then
+			if enableTrailsAndBeams and item.Attachment0 and item.Attachment1 then
 				item.Enabled = true
 			else
-				warnLog("expected attachment/emitter not found: %s", stage)
+				item.Enabled = false
+				if enableTrailsAndBeams then
+					warnLog("expected attachment/emitter not found: %s", stage)
+				end
 			end
 		elseif item:IsA("Smoke") or item:IsA("Fire") or item:IsA("Sparkles") then
-			item.Enabled = true
+			item.Enabled = enableContinuousClasses
+			if enableContinuousClasses and continuousDuration > 0 then
+				local continuousItem = item
+				task.delay(continuousDuration, function()
+					if continuousItem and continuousItem.Parent then
+						continuousItem.Enabled = false
+					end
+				end)
+			end
+		end
+	end
+end
+
+local function amplifyFreezeShotProjectileTree(root, freezeShotVisualConfig)
+	freezeShotVisualConfig = freezeShotVisualConfig or getFreezeShotVisualConfig()
+
+	for _, item in ipairs(iterateSelfAndDescendants(root)) do
+		if item:IsA("Attachment") then
+			item.Position *= freezeShotVisualConfig.ProjectileScale
+		elseif item:IsA("ParticleEmitter") then
+			item.Size = scaleNumberSequence(item.Size, freezeShotVisualConfig.ProjectileParticleScale)
+		elseif item:IsA("Trail") then
+			item.WidthScale = scaleNumberSequence(item.WidthScale, freezeShotVisualConfig.ProjectileTrailWidthScale)
+		elseif item:IsA("Beam") then
+			item.Width0 = math.max(0, item.Width0 * freezeShotVisualConfig.ProjectileTrailWidthScale)
+			item.Width1 = math.max(0, item.Width1 * freezeShotVisualConfig.ProjectileTrailWidthScale)
+		elseif item:IsA("Smoke") or item:IsA("Fire") then
+			item.Size = math.max(0, (tonumber(item.Size) or 0) * freezeShotVisualConfig.ProjectileScale)
+		elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
+			item.Range = math.max(0, (tonumber(item.Range) or 0) * freezeShotVisualConfig.ProjectileLightRangeScale)
+		elseif item:IsA("BasePart") then
+			item.Size *= freezeShotVisualConfig.ProjectileScale
+		end
+	end
+end
+
+local function amplifyFreezeShotImpactTree(root, freezeShotVisualConfig)
+	freezeShotVisualConfig = freezeShotVisualConfig or getFreezeShotVisualConfig()
+
+	for _, item in ipairs(iterateSelfAndDescendants(root)) do
+		if item:IsA("Attachment") then
+			item.Position *= freezeShotVisualConfig.ImpactScale
+		elseif item:IsA("ParticleEmitter") then
+			item.Size = scaleNumberSequence(item.Size, freezeShotVisualConfig.ImpactScale)
+			item.Speed = scaleNumberRange(item.Speed, freezeShotVisualConfig.ImpactParticleSpeedScale)
+		elseif item:IsA("Trail") then
+			item.WidthScale = scaleNumberSequence(item.WidthScale, freezeShotVisualConfig.ImpactScale)
+		elseif item:IsA("Beam") then
+			item.Width0 = math.max(0, item.Width0 * freezeShotVisualConfig.ImpactScale)
+			item.Width1 = math.max(0, item.Width1 * freezeShotVisualConfig.ImpactScale)
+		elseif item:IsA("Smoke") then
+			item.Size = math.max(0, (tonumber(item.Size) or 0) * freezeShotVisualConfig.ImpactScale)
+			item.RiseVelocity = (tonumber(item.RiseVelocity) or 0) * freezeShotVisualConfig.ImpactParticleSpeedScale
+		elseif item:IsA("Fire") then
+			item.Size = math.max(0, (tonumber(item.Size) or 0) * freezeShotVisualConfig.ImpactScale)
+			item.Heat = (tonumber(item.Heat) or 0) * freezeShotVisualConfig.ImpactParticleSpeedScale
+		elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
+			item.Range = math.max(0, (tonumber(item.Range) or 0) * freezeShotVisualConfig.ImpactLightRangeScale)
+		elseif item:IsA("BasePart") then
+			item.Size *= freezeShotVisualConfig.ImpactScale
 		end
 	end
 end
@@ -454,8 +639,10 @@ function HieVfx.CreateFreezeShotProjectile(options)
 		return nil
 	end
 
+	local freezeShotVisualConfig = getFreezeShotVisualConfig()
 	for _, clone in ipairs(state.Mounted) do
-		activateTree(clone, FREEZE_SHOT_NAME .. " projectile", 14)
+		amplifyFreezeShotProjectileTree(clone, freezeShotVisualConfig)
+		activateTree(clone, FREEZE_SHOT_NAME .. " projectile", freezeShotVisualConfig.ProjectileEmitCount)
 	end
 
 	debugLog("Freeze Shot projectile spawned at: %s", formatVector3(position))
@@ -507,8 +694,13 @@ function HieVfx.TriggerFreezeShotImpact(position)
 		return false
 	end
 
+	local freezeShotVisualConfig = getFreezeShotVisualConfig()
 	for _, clone in ipairs(state.Mounted) do
-		activateTree(clone, FREEZE_SHOT_NAME .. " impact", 24)
+		amplifyFreezeShotImpactTree(clone, freezeShotVisualConfig)
+		activateTree(clone, FREEZE_SHOT_NAME .. " impact", freezeShotVisualConfig.ImpactEmitCount, {
+			LeaveParticleEmittersEnabled = false,
+			ContinuousDuration = freezeShotVisualConfig.ImpactBriefContinuousDuration,
+		})
 	end
 
 	Debris:AddItem(state.Container, IMPACT_LIFETIME)
@@ -524,6 +716,10 @@ function HieVfx.CleanupFreezeShotProjectile(state, reason)
 	if DEBUG_ENABLED then
 		debugLog("Freeze Shot cleanup complete reason=%s", tostring(reason))
 	end
+end
+
+function HieVfx.GetFreezeShotVisualConfig()
+	return getFreezeShotVisualConfig()
 end
 
 local function getIceBoostCFrame(rootPart)

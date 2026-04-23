@@ -56,8 +56,24 @@ function HieFruitClient:BuildRequestPayload(abilityName, abilityConfig, fallback
 	return nil
 end
 
+function HieFruitClient:BeginPredictedRequest(abilityName, fallbackBuilder)
+	if abilityName == HieRuntime.FREEZE_SHOT_ABILITY then
+		return self.impl:BeginPredictedFreezeShotRequest()
+	end
+
+	if typeof(fallbackBuilder) == "function" then
+		return fallbackBuilder()
+	end
+
+	return nil
+end
+
 function HieFruitClient:HandleEffect(targetPlayer, abilityName, payload)
 	return self.impl:HandleEffect(targetPlayer, abilityName, payload)
+end
+
+function HieFruitClient:HandleStateEvent(eventName, abilityName, value, payload)
+	return self.impl:HandleStateEvent(eventName, abilityName, value, payload)
 end
 
 function HieFruitClient:Update()

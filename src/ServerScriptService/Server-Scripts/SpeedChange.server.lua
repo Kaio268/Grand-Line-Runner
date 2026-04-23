@@ -11,6 +11,8 @@ local DEBUG_TRACE = RunService:IsStudio()
 local HORO_GHOST_ATTRIBUTE = "HoroProjectionGhost"
 local HORO_BODY_ATTRIBUTE = "HoroProjectionBody"
 local HORO_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
+local HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE = "HieFreezeShotCastSlowUntil"
+local HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE = "HieFreezeShotCastSpeedMultiplier"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -67,7 +69,7 @@ end
 
 logZoneResolution("SpeedChange.server")
 
-local function getDevilFruitSpeedMultiplier(player)
+local function getHieIceBoostSpeedMultiplier(player)
 	local untilTime = player:GetAttribute("HieIceBoostUntil")
 	local speedMultiplier = player:GetAttribute("HieIceBoostSpeedMultiplier")
 
@@ -80,6 +82,25 @@ local function getDevilFruitSpeedMultiplier(player)
 	end
 
 	return math.max(1, speedMultiplier)
+end
+
+local function getHieFreezeShotCastSpeedMultiplier(player)
+	local untilTime = player:GetAttribute(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE)
+	local speedMultiplier = player:GetAttribute(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE)
+
+	if typeof(untilTime) ~= "number" or typeof(speedMultiplier) ~= "number" then
+		return 1
+	end
+
+	if untilTime <= os.clock() then
+		return 1
+	end
+
+	return math.max(0, speedMultiplier)
+end
+
+local function getDevilFruitSpeedMultiplier(player)
+	return getHieIceBoostSpeedMultiplier(player) * getHieFreezeShotCastSpeedMultiplier(player)
 end
 
 local function getHitEffectSpeedMultiplier(player)
@@ -193,6 +214,14 @@ local function hookCharacter(player, character)
 	end)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal("HieIceBoostSpeedBonus"):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE):Connect(function()
 		apply()
 	end)
 

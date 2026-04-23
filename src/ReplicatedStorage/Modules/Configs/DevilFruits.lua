@@ -167,14 +167,32 @@ local DevilFruits = {
 					KeyCode = Enum.KeyCode.Q,
 					Cooldown = 8,
 					ServerRequestThrottle = 0.35,
-					Range = 180,
+					Range = 360,
 					AimRayDistance = 700,
 					MinimumAimDistance = 6,
 					AllowVerticalAim = true,
 					TurnThresholdDegrees = 28,
 					ProjectileSpeed = 240,
-					ProjectileRadius = 1.2,
-					ImpactBurstRadius = 6,
+					-- Gameplay hit radius of the traveling projectile itself, in studs.
+					ProjectileRadius = 3,
+					-- Gameplay AoE radius of the impact burst after the projectile explodes, in studs.
+					ImpactBurstRadius = 16,
+					-- Visual presentation scale of the traveling projectile.
+					VisualProjectileScale = 2.5,
+					-- Visual presentation scale of the projectile impact burst.
+					VisualImpactScale = 3,
+					-- How far in front of the held fruit/hand the projectile starts, in studs.
+					LaunchForwardOffset = 2.5,
+					-- Total real server projectiles fired from the same muzzle point.
+					ShotgunProjectileCount = 5,
+					-- Direction spread angle, in degrees, for the real shotgun projectiles.
+					ShotgunSpreadAngle = 12,
+					-- Temporarily stops the caster during the release/startup animation. Use 0.35 for a heavy slow instead.
+					CastStartupSpeedMultiplier = 0,
+					-- Safety cleanup duration in case the release marker/fallback does not clear the slow.
+					CastStartupSlowMaxDuration = 0.75,
+					-- Extra time to keep the caster stopped after launch so the opening projectile trail reads cleanly.
+					CastPostLaunchLockDuration = 0.35,
 					FreezeDuration = 3,
 					MovementInheritanceFactor = 0.85,
 					MaxInheritedSpeed = 140,
