@@ -103,6 +103,7 @@ local ProtectionRuntime = require(
 		:WaitForChild("DevilFruits")
 		:WaitForChild("ProtectionRuntime")
 )
+local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 
 waveTrace("startup awaiting ReplicatedStorage.Waves")
 local WavesFolder = ReplicatedStorage:WaitForChild("Waves", 15)
@@ -921,13 +922,13 @@ local function isLocalHRP(hit)
 	return (hit ~= nil and hrp ~= nil and hit == hrp)
 end
 
-local function hookKillOnTouchPart(p)
+local function hookKillOnTouchPart(p, shouldKill)
 	if not p or not p:IsA("BasePart") then
 		return
 	end
 	p.CanTouch = true
 	p.Touched:Connect(function(hit)
-		if isLocalHRP(hit) then
+		if isLocalHRP(hit) and (shouldKill == nil or shouldKill(p) == true) then
 			killLocalPlayer()
 		end
 	end)
@@ -949,13 +950,47 @@ local function hookKillOnTouch(obj, hitPart)
 	end
 end
 
+local function hookSharedHazardKillOnTouch(hazard)
+	local visual = hazard:FindFirstChild("WaveVisual")
+	if visual then
+		WaveHazardVisuals.ConfigureVisualRoot(visual)
+	end
+
+	local function syncFrozenHitboxState()
+		WaveHazardVisuals.SetHitboxFrozen(hazard, hazard:GetAttribute("Frozen") == true)
+	end
+
+	syncFrozenHitboxState()
+	hazard:GetAttributeChangedSignal("Frozen"):Connect(syncFrozenHitboxState)
+
+	hazard.ChildAdded:Connect(function(child)
+		if child.Name == "WaveVisual" then
+			WaveHazardVisuals.ConfigureVisualRoot(child)
+		elseif child.Name == "WaveHitbox" then
+			syncFrozenHitboxState()
+		end
+	end)
+
+	local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
+	if #hitboxParts <= 0 then
+		hookKillOnTouch(hazard)
+		return
+	end
+
+	for _, part in ipairs(hitboxParts) do
+		hookKillOnTouchPart(part, function()
+			return hazard:GetAttribute("Frozen") ~= true
+		end)
+	end
+end
+
 if useSharedHazards then
 	for _, hazard in ipairs(clientWavesFolder:GetChildren()) do
-		hookKillOnTouch(hazard)
+		hookSharedHazardKillOnTouch(hazard)
 	end
 
 	clientWavesFolder.ChildAdded:Connect(function(child)
-		hookKillOnTouch(child)
+		hookSharedHazardKillOnTouch(child)
 	end)
 end
 

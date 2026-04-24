@@ -14,6 +14,7 @@ end
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local devilFruitModules = game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("DevilFruits")
@@ -168,6 +169,88 @@ local function getBox(instance)
 	end
 
 	return instance.CFrame, instance.Size
+end
+
+local function getHazardMeasureParts(instance)
+	local parts = WaveHazardVisuals.GetHitboxParts(instance)
+	if #parts > 0 then
+		return parts
+	end
+
+	if instance:IsA("BasePart") then
+		return { instance }
+	end
+
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			parts[#parts + 1] = descendant
+		end
+	end
+
+	return parts
+end
+
+local function getFrontExtentFromPivot(instance, pivotCFrame, forwardDirection)
+	if typeof(forwardDirection) ~= "Vector3" or forwardDirection.Magnitude <= 1e-4 then
+		return 0
+	end
+
+	local forwardUnit = forwardDirection.Unit
+	local sourcePivot = getPivot(instance)
+	local frontExtent = 0
+
+	for _, part in ipairs(getHazardMeasureParts(instance)) do
+		if part.Parent then
+			local relativeCFrame = sourcePivot:ToObjectSpace(part.CFrame)
+			local partCFrame = pivotCFrame * relativeCFrame
+			local halfSize = part.Size * 0.5
+
+			for _, xSign in ipairs({ -1, 1 }) do
+				for _, ySign in ipairs({ -1, 1 }) do
+					for _, zSign in ipairs({ -1, 1 }) do
+						local cornerPosition = partCFrame:PointToWorldSpace(Vector3.new(
+							halfSize.X * xSign,
+							halfSize.Y * ySign,
+							halfSize.Z * zSign
+						))
+						local projection = (cornerPosition - pivotCFrame.Position):Dot(forwardUnit)
+						frontExtent = math.max(frontExtent, projection)
+					end
+				end
+			end
+		end
+	end
+
+	return math.max(0, frontExtent)
+end
+
+local function getHazardHitboxVolumes(hazardRoot, fallbackCFrame, fallbackSize)
+	local volumes = {}
+
+	for _, part in ipairs(WaveHazardVisuals.GetHitboxParts(hazardRoot)) do
+		if part.Parent then
+			volumes[#volumes + 1] = {
+				Type = AffectableRegistry.VolumeType.Box,
+				Label = part:GetFullName(),
+				CFrame = part.CFrame,
+				Size = part.Size,
+				Padding = CONFIG.AffectablePadding,
+			}
+		end
+	end
+
+	if #volumes > 0 then
+		return volumes
+	end
+
+	return {
+		{
+			Type = AffectableRegistry.VolumeType.Box,
+			CFrame = fallbackCFrame,
+			Size = fallbackSize,
+			Padding = CONFIG.AffectablePadding,
+		},
+	}
 end
 
 local function anchorHazard(instance)
@@ -366,6 +449,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 		HazardRoot = hazardRoot,
 		Destroyed = false,
 		FrozenUntil = 0,
+		FreezeToken = 0,
 		Alpha = 0,
 		CurrentCFrame = startCF,
 		Position = startCF.Position,
@@ -408,14 +492,11 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 				return {}
 			end
 
-			return {
-				{
-					Type = AffectableRegistry.VolumeType.Box,
-					CFrame = entity.Controller.CurrentCFrame,
-					Size = entity.Controller.VolumeSize,
-					Padding = entity.Metadata and entity.Metadata.Padding or CONFIG.AffectablePadding,
-				},
-			}
+			return getHazardHitboxVolumes(
+				hazardRoot,
+				entity.Controller.CurrentCFrame,
+				entity.Controller.VolumeSize
+			)
 		end,
 		ResolveData = function(entity, match)
 			local metadata = entity.Metadata or {}
@@ -445,11 +526,29 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 		end
 
 		self.FrozenUntil = math.max(self.FrozenUntil, os.clock() + freezeDuration)
+		self.FreezeToken += 1
+		local freezeToken = self.FreezeToken
+		WaveHazardVisuals.SetFrozen(self.HazardRoot, true)
 		hazardTrace(
 			"freeze applied hazard=%s duration=%.2f",
 			formatInstancePath(self.HazardRoot),
 			freezeDuration
 		)
+
+		task.spawn(function()
+			while not self.Destroyed and self.HazardRoot.Parent and os.clock() < self.FrozenUntil do
+				task.wait(0.05)
+			end
+
+			if self.Destroyed or self.FreezeToken ~= freezeToken then
+				return
+			end
+
+			if self.HazardRoot.Parent then
+				WaveHazardVisuals.SetFrozen(self.HazardRoot, false)
+			end
+		end)
+
 		return true
 	end
 
@@ -583,7 +682,7 @@ local function spawnSharedHazard(spawnDelay)
 	end
 
 	local variant = chooseVariant()
-	local clone = template:Clone()
+	local clone = WaveHazardVisuals.CreateHazardFromTemplate(template)
 	scaleHazardWidth(clone, variant.WidthScale)
 	anchorHazard(clone)
 	applyHazardAttributes(clone, variant)
@@ -625,6 +724,11 @@ local function spawnSharedHazard(spawnDelay)
 	endCF = translateCFrame(endCF, lateralOffset)
 	local travelDelta = endCF.Position - startCF.Position
 	local forwardDirection = travelDelta.Magnitude > 1e-4 and travelDelta.Unit or startPart.CFrame.LookVector
+	local endFrontExtent = getFrontExtentFromPivot(clone, endCF, forwardDirection)
+	if endFrontExtent > 1e-4 then
+		endCF = translateCFrame(endCF, -forwardDirection * endFrontExtent)
+		travelDelta = endCF.Position - startCF.Position
+	end
 	local nearestBlockingDistance, minimumForwardSpacing = findNearestBlockingHazardDistance(
 		startCF.Position,
 		waveWidth,
@@ -651,7 +755,7 @@ local function spawnSharedHazard(spawnDelay)
 	clone.Parent = hazardsFolder
 
 	hazardTrace(
-		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f chosenOffset=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
+		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
 		formatInstancePath(waveFolder),
 		tostring(variant.Name),
 		tonumber(variant.Speed) or 0,
@@ -663,6 +767,7 @@ local function spawnSharedHazard(spawnDelay)
 		formatVector3(rightBound.Position),
 		corridorWidth,
 		chosenOffset,
+		endFrontExtent,
 		formatVector3(startCF.Position),
 		formatVector3(endCF.Position),
 		formatInstancePath(clone)
