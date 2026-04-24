@@ -3,8 +3,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
+local HazardUtils = require(DevilFruits:WaitForChild("HazardUtils"))
 local ProtectionRuntime = require(DevilFruits:WaitForChild("ProtectionRuntime"))
 local ToriShared = require(DevilFruits:WaitForChild("Tori"):WaitForChild("Shared"):WaitForChild("ToriShared"))
 
@@ -24,6 +26,10 @@ local FLIGHT_UPDATE_LOG_INTERVAL = 0.25
 local FLIGHT_MOVE_LOG_INTERVAL = 0.2
 local FLIGHT_CORRECTION_LOG_INTERVAL = 0.2
 local FLIGHT_DRIFT_WARN_INTERVAL = 0.5
+local HAZARD_SUPPRESSION_INTERVAL = 0.05
+local HAZARD_SUPPRESSION_GRACE = 0.15
+local HAZARD_OVERLAP_MAX_PARTS = 128
+local PHOENIX_SHIELD_HIT_EFFECT_THROTTLE = 0.18
 
 local function flightLog(...)
 	if not DEBUG_FLIGHT then
@@ -98,6 +104,69 @@ local function getPlayerRootPart(targetPlayer)
 	return character:FindFirstChild("HumanoidRootPart")
 end
 
+local function getInstancePosition(instance, fallbackPart)
+	if instance and instance:IsA("Model") then
+		return instance:GetPivot().Position
+	end
+
+	if instance and instance:IsA("BasePart") then
+		return instance.Position
+	end
+
+	if fallbackPart and fallbackPart:IsA("BasePart") then
+		return fallbackPart.Position
+	end
+
+	return nil
+end
+
+local function isDescendantOfClientWave(instance, clientWavesFolder)
+	return clientWavesFolder ~= nil and instance:IsDescendantOf(clientWavesFolder)
+end
+
+local function getWaveTemplate(instance)
+	local current = instance
+	while current and current.Parent and current.Parent.Name ~= "ClientWaves" do
+		current = current.Parent
+	end
+
+	if not current then
+		return nil
+	end
+
+	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
+	if not wavesFolder then
+		return nil
+	end
+
+	return wavesFolder:FindFirstChild(current.Name)
+end
+
+local function getHazardContainer(instance, clientWavesFolder)
+	local root, hazardClass, hazardType, canFreeze, freezeBehavior = HazardUtils.GetHazardInfo(instance)
+	if root then
+		return root, hazardClass, hazardType, canFreeze, freezeBehavior
+	end
+
+	if isDescendantOfClientWave(instance, clientWavesFolder) then
+		local template = getWaveTemplate(instance)
+		if template then
+			local _, templateClass, templateType, templateCanFreeze, templateFreezeBehavior =
+				HazardUtils.GetHazardInfo(template)
+			if templateClass or templateType or templateCanFreeze or templateFreezeBehavior then
+				local current = instance
+				while current and current.Parent and current.Parent.Name ~= "ClientWaves" do
+					current = current.Parent
+				end
+
+				return current or instance, templateClass, templateType, templateCanFreeze, templateFreezeBehavior
+			end
+		end
+	end
+
+	return nil, nil, nil, false, nil
+end
+
 local function getCurrentCamera()
 	return Workspace.CurrentCamera
 end
@@ -170,6 +239,9 @@ function ToriClient.new(config)
 		Right = false,
 	}
 	self.activePhoenixShields = {}
+	self.suppressedHazardParts = {}
+	self.shieldHitEffectTimes = setmetatable({}, { __mode = "k" })
+	self.hazardSuppressionLoopRunning = false
 	self.phoenixFlightState = {
 		Active = false,
 		EndTime = 0,
@@ -641,6 +713,168 @@ function ToriClient:UpdatePhoenixFlight(dt)
 	end
 end
 
+function ToriClient:BuildHazardOverlapParams()
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+	overlapParams.FilterDescendantsInstances = self.player and self.player.Character and { self.player.Character } or {}
+	overlapParams.MaxParts = HAZARD_OVERLAP_MAX_PARTS
+	return overlapParams
+end
+
+function ToriClient:SuppressHazardPart(part, untilTime)
+	if not part or not part:IsA("BasePart") then
+		return
+	end
+
+	local state = self.suppressedHazardParts[part]
+	if state then
+		if untilTime > state.UntilTime then
+			state.UntilTime = untilTime
+		end
+		return
+	end
+
+	self.suppressedHazardParts[part] = {
+		OriginalCanTouch = part.CanTouch,
+		OriginalCanCollide = part.CanCollide,
+		UntilTime = untilTime,
+	}
+
+	part.CanTouch = false
+	part.CanCollide = false
+end
+
+function ToriClient:SuppressHazardContainer(container, untilTime)
+	if not container then
+		return
+	end
+
+	if container:IsA("BasePart") then
+		self:SuppressHazardPart(container, untilTime)
+		return
+	end
+
+	for _, descendant in ipairs(container:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			self:SuppressHazardPart(descendant, untilTime)
+		end
+	end
+end
+
+function ToriClient:RestoreSuppressedHazardParts(now)
+	for part, state in pairs(self.suppressedHazardParts) do
+		if not part or not part.Parent then
+			self.suppressedHazardParts[part] = nil
+		elseif now >= state.UntilTime then
+			part.CanTouch = state.OriginalCanTouch
+			part.CanCollide = state.OriginalCanCollide
+			self.suppressedHazardParts[part] = nil
+		end
+	end
+end
+
+function ToriClient:HasActivePhoenixShield(now)
+	for shieldOwner, shield in pairs(self.activePhoenixShields) do
+		if now < shield.EndTime then
+			return true
+		end
+
+		self.activePhoenixShields[shieldOwner] = nil
+	end
+
+	return false
+end
+
+function ToriClient:CreatePhoenixShieldHitPlaceholder(shieldOwner, shield, hazardContainer, hitPart, now)
+	if not self.clientEffectVisuals or typeof(self.clientEffectVisuals.CreatePhoenixShieldHitEffect) ~= "function" then
+		return
+	end
+
+	local nextEffectAt = self.shieldHitEffectTimes[hazardContainer] or 0
+	if now < nextEffectAt then
+		return
+	end
+
+	local hitPosition = getInstancePosition(hitPart, hitPart) or getInstancePosition(hazardContainer, hitPart)
+	if not hitPosition then
+		return
+	end
+
+	self.shieldHitEffectTimes[hazardContainer] = now + PHOENIX_SHIELD_HIT_EFFECT_THROTTLE
+	self.clientEffectVisuals:CreatePhoenixShieldHitEffect(shieldOwner, self.phoenixFruitName, self.phoenixShieldAbility, {
+		HitPosition = hitPosition,
+		Radius = shield.Radius,
+	})
+end
+
+function ToriClient:SuppressHazardsNearPhoenixShield(shieldOwner, shield, ownerRootPart, localRootPart, now)
+	local shieldRadius = shield.Radius + self.shieldPadding
+	if getPlanarDistance(ownerRootPart.Position, localRootPart.Position) > shieldRadius then
+		return
+	end
+
+	local suppressUntil = math.min(shield.EndTime, now + HAZARD_SUPPRESSION_GRACE)
+	local nearbyParts = Workspace:GetPartBoundsInRadius(
+		ownerRootPart.Position,
+		shieldRadius,
+		self:BuildHazardOverlapParams()
+	)
+	local seenContainers = {}
+	local refs = MapResolver.GetRefs()
+	local clientWavesFolder = refs and refs.ClientWaves
+
+	for _, part in ipairs(nearbyParts) do
+		local hazardContainer = getHazardContainer(part, clientWavesFolder)
+		if hazardContainer and not seenContainers[hazardContainer] then
+			seenContainers[hazardContainer] = true
+			self:SuppressHazardContainer(hazardContainer, suppressUntil)
+			self:CreatePhoenixShieldHitPlaceholder(shieldOwner, shield, hazardContainer, part, now)
+		end
+	end
+end
+
+function ToriClient:UpdatePhoenixShieldHazardSuppression()
+	local now = os.clock()
+	local localRootPart = getRootPart(self)
+
+	for shieldOwner, shield in pairs(self.activePhoenixShields) do
+		if now >= shield.EndTime then
+			self.activePhoenixShields[shieldOwner] = nil
+		else
+			local ownerRootPart = getPlayerRootPart(shieldOwner)
+			if not ownerRootPart then
+				if shieldOwner.Parent == nil then
+					self.activePhoenixShields[shieldOwner] = nil
+				end
+			elseif localRootPart then
+				self:SuppressHazardsNearPhoenixShield(shieldOwner, shield, ownerRootPart, localRootPart, now)
+			end
+		end
+	end
+
+	self:RestoreSuppressedHazardParts(now)
+
+	if self:HasActivePhoenixShield(now) then
+		task.delay(HAZARD_SUPPRESSION_INTERVAL, function()
+			if self.hazardSuppressionLoopRunning then
+				self:UpdatePhoenixShieldHazardSuppression()
+			end
+		end)
+	else
+		self:RestoreSuppressedHazardParts(math.huge)
+		self.hazardSuppressionLoopRunning = false
+	end
+end
+
+function ToriClient:EnsurePhoenixShieldHazardSuppressionLoop()
+	if self.hazardSuppressionLoopRunning then
+		return
+	end
+
+	self.hazardSuppressionLoopRunning = true
+	self:UpdatePhoenixShieldHazardSuppression()
+end
+
 function ToriClient:IsLocalPlayerInsidePhoenixShield(position)
 	local checkPosition = position
 	if typeof(checkPosition) ~= "Vector3" then
@@ -688,6 +922,8 @@ function ToriClient:StartPhoenixShield(targetPlayer, payload)
 			Radius = radius,
 		}
 	end
+
+	self:EnsurePhoenixShieldHazardSuppressionLoop()
 end
 
 function ToriClient:HandleInputBegan(input, gameProcessed)
@@ -778,6 +1014,8 @@ function ToriClient:HandleCharacterRemoving()
 	self.flightInputState.Backward = false
 	self.flightInputState.Left = false
 	self.flightInputState.Right = false
+	self.hazardSuppressionLoopRunning = false
+	self:RestoreSuppressedHazardParts(math.huge)
 end
 
 function ToriClient:HandlePlayerRemoving(leavingPlayer)

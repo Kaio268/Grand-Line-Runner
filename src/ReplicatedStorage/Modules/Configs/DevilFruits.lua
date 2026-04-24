@@ -137,7 +137,7 @@ local DevilFruits = {
 					},
 				},
 				FireBurst = {
-					KeyCode = Enum.KeyCode.E,
+					KeyCode = Enum.KeyCode.C,
 					Cooldown = 14,
 					Radius = 30,
 					Duration = 0.6,
@@ -214,7 +214,7 @@ local DevilFruits = {
 					},
 				},
 				IceBoost = {
-					KeyCode = Enum.KeyCode.E,
+					KeyCode = Enum.KeyCode.C,
 					Cooldown = 18,
 					Duration = 4,
 					SpeedMultiplier = 2,
@@ -485,7 +485,7 @@ local DevilFruits = {
 					HorizontalResponsiveness = 14,
 				},
 				PhoenixFlameShield = {
-					KeyCode = Enum.KeyCode.E,
+					KeyCode = Enum.KeyCode.C,
 					Cooldown = 20,
 					Radius = 13,
 					Duration = 2.75,

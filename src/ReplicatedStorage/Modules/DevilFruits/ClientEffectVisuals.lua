@@ -18,6 +18,8 @@ local DEFAULT_GOMU_FRUIT_NAME = "Gomu Gomu no Mi"
 local DEFAULT_RUBBER_LAUNCH_ABILITY = "RubberLaunch"
 local DEFAULT_PHOENIX_EFFECT_COLOR = Color3.fromRGB(108, 255, 214)
 local DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR = Color3.fromRGB(255, 188, 113)
+local PHOENIX_SHIELD_HIT_COLOR = Color3.fromRGB(255, 48, 72)
+local PHOENIX_SHIELD_HIT_ACCENT_COLOR = Color3.fromRGB(255, 169, 103)
 local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
 
 local function resolvePlayerRootPart(targetPlayer)
@@ -431,6 +433,83 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 			aura:Destroy()
 		end
 	end)
+end
+
+function ClientEffectVisuals:CreatePhoenixShieldHitEffect(targetPlayer, fruitName, abilityName, payload)
+	if fruitName ~= self.PhoenixFruitName or abilityName ~= self.PhoenixShieldAbility then
+		return
+	end
+
+	payload = payload or {}
+
+	local rootPart = self.GetPlayerRootPart(targetPlayer)
+	local hitPosition = typeof(payload.HitPosition) == "Vector3" and payload.HitPosition or nil
+	if not hitPosition then
+		if not rootPart then
+			return
+		end
+
+		hitPosition = rootPart.Position + Vector3.new(0, 1.5, 0)
+	end
+
+	local radius = math.max(1, tonumber(payload.Radius) or 13)
+	local rippleDiameter = math.clamp(radius * 0.55, 3.5, 8)
+
+	createPulse("PhoenixShieldHitFlash", hitPosition, PHOENIX_SHIELD_HIT_ACCENT_COLOR, 1.5, rippleDiameter, 0.2)
+
+	local ripple = Instance.new("Part")
+	ripple.Name = "PhoenixShieldHitRipple"
+	ripple.Shape = Enum.PartType.Cylinder
+	ripple.Anchored = true
+	ripple.CanCollide = false
+	ripple.CanTouch = false
+	ripple.CanQuery = false
+	ripple.Material = Enum.Material.Neon
+	ripple.Color = PHOENIX_SHIELD_HIT_COLOR
+	ripple.Transparency = 0.08
+	ripple.Size = Vector3.new(0.2, 1.8, 1.8)
+	ripple.CFrame = CFrame.new(hitPosition) * FLAT_RING_ROTATION
+	ripple.Parent = Workspace
+
+	local rippleTween = TweenService:Create(ripple, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Transparency = 1,
+		Size = Vector3.new(0.2, rippleDiameter, rippleDiameter),
+	})
+
+	rippleTween:Play()
+	rippleTween.Completed:Connect(function()
+		if ripple.Parent then
+			ripple:Destroy()
+		end
+	end)
+
+	if rootPart then
+		local shieldFlash = Instance.new("Part")
+		shieldFlash.Name = "PhoenixShieldHitShell"
+		shieldFlash.Shape = Enum.PartType.Ball
+		shieldFlash.Anchored = true
+		shieldFlash.CanCollide = false
+		shieldFlash.CanTouch = false
+		shieldFlash.CanQuery = false
+		shieldFlash.Material = Enum.Material.ForceField
+		shieldFlash.Color = PHOENIX_SHIELD_HIT_COLOR
+		shieldFlash.Transparency = 0.45
+		shieldFlash.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
+		shieldFlash.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 1.5, 0))
+		shieldFlash.Parent = Workspace
+
+		local shellTween = TweenService:Create(shieldFlash, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			Transparency = 1,
+			Size = Vector3.new(radius * 2.12, radius * 2.12, radius * 2.12),
+		})
+
+		shellTween:Play()
+		shellTween.Completed:Connect(function()
+			if shieldFlash.Parent then
+				shieldFlash:Destroy()
+			end
+		end)
+	end
 end
 
 function ClientEffectVisuals:CreateRubberLaunchEffect(_targetPlayer, fruitName, abilityName, _payload)

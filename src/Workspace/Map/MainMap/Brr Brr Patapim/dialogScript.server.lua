@@ -1,3 +1,0 @@
--- Client-only interaction logic for this NPC now lives in StarterPlayerScripts.
--- This server script is intentionally left empty so the workspace model can keep
--- its existing hierarchy without throwing LocalPlayer/PlayerGui errors.

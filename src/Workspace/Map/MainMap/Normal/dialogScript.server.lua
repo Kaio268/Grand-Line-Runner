@@ -1,2 +1,0 @@
--- Client-only interaction logic for this NPC now lives in StarterPlayerScripts.
--- This server script is intentionally left empty to avoid LocalPlayer usage on the server.

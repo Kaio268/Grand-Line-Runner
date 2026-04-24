@@ -193,7 +193,7 @@ local function describePayloadForAudit(payload)
 end
 
 local function shouldTraceAbilityInput(keyCode)
-	return keyCode == Enum.KeyCode.Q or keyCode == Enum.KeyCode.E
+	return keyCode == Enum.KeyCode.Q or keyCode == Enum.KeyCode.C
 end
 
 local function normalizeEquippedFruitName(fruitIdentifier)
@@ -2018,7 +2018,7 @@ local function initializeDevilFruitClient()
 			)
 		end
 		if not abilityName then
-			if input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.E then
+			if input.KeyCode == Enum.KeyCode.Q or input.KeyCode == Enum.KeyCode.C then
 				logDevilFruitClient(
 					"bind ignored key=%s equipped=%s reason=no_ability",
 					tostring(input.KeyCode.Name),

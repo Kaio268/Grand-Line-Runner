@@ -32,7 +32,7 @@ local function logRequest(message, ...)
 end
 
 local function shouldTraceKeyCode(keyCode)
-	return keyCode == Enum.KeyCode.Q or keyCode == Enum.KeyCode.E
+	return keyCode == Enum.KeyCode.Q or keyCode == Enum.KeyCode.C
 end
 
 function DevilFruitInputController.new(config)

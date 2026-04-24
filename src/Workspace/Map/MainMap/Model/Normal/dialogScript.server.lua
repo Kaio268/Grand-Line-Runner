@@ -1,1 +1,0 @@
--- Client-only dialog logic for this NPC lives in StarterPlayerScripts/GearShopNpcDialog.client.lua.
