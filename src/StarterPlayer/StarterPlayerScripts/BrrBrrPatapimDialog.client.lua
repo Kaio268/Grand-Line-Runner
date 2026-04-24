@@ -100,11 +100,11 @@ local lastBrainrotModelSweepResult = nil
 local remote = ReplicatedStorage:FindFirstChild("TutorialrrrrFinished")
 
 local player = Players.LocalPlayer
-local refs = MapResolver.WaitForRefs({ "MapRoot" }, nil, {
+local refs = MapResolver.WaitForRefs({ "MapRoot", "BrrBrrPatapimNpc" }, nil, {
 	warn = true,
 	context = "BrrBrrPatapimDialog",
 })
-local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Brr Brr Patapim")
+local npc = refs.BrrBrrPatapimNpc
 local npcPrompt = npc:WaitForChild("ProximityPrompt")
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, npcPrompt)

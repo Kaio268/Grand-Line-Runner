@@ -6,14 +6,14 @@ local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
 local refs = MapResolver.WaitForRefs(
-	{ "MapRoot" },
+	{ "GearShopNpc" },
 	nil,
 	{
 		warn = true,
 		context = "GearShopNpcDialog",
 	}
 )
-local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Model"):WaitForChild("Normal")
+local npc = refs.GearShopNpc
 local prompt = npc:WaitForChild("ProximityPrompt")
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, prompt)

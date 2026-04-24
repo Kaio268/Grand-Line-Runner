@@ -34,7 +34,7 @@ local resolvedMapRefs = MapResolver.WaitForRefs(
 local map = resolvedMapRefs.MapRoot
 local legacySpawnFolder = resolvedMapRefs.SpawnFolder
 local hitBox = resolvedMapRefs.HitBox
-local biomesRoot = map and map:FindFirstChild("Biomes")
+local biomesRoot = resolvedMapRefs.Biomes or (map and map:FindFirstChild("Biomes"))
 
 if STARTUP_TRACE then
 	print(string.format(
@@ -415,30 +415,39 @@ local function setupSpawnPart(spawnPart)
 	end
 end
 
+local function getBiomeScanRoot(biomeContainer)
+	if not biomeContainer then
+		return nil, nil
+	end
+
+	local innerBiome = biomeContainer:FindFirstChild(biomeContainer.Name)
+	if innerBiome then
+		return innerBiome, innerBiome
+	end
+
+	return biomeContainer, nil
+end
+
 local function processBiomeContainer(biomeContainer)
 	local ok, err = xpcall(function()
 		if not biomeContainer then
 			return
 		end
 
-		local innerBiome = biomeContainer:FindFirstChild(biomeContainer.Name)
-		if not innerBiome then
-			spawnWarnThrottled(
-				"biome_missing_inner_" .. formatInstancePath(biomeContainer),
-				"biome skipped reason=missing_inner_biome biome=%s expectedInnerName=%s",
-				formatInstancePath(biomeContainer),
-				tostring(biomeContainer.Name)
-			)
-			return
-		end
+		local scanRoot, innerBiome = getBiomeScanRoot(biomeContainer)
 
 		spawnTrace(
-			"processBiome biome=%s innerBiome=%s",
+			"processBiome biome=%s scanRoot=%s innerBiome=%s",
 			formatInstancePath(biomeContainer),
+			formatInstancePath(scanRoot),
 			formatInstancePath(innerBiome)
 		)
 
-		for _, descendant in ipairs(innerBiome:GetDescendants()) do
+		if scanRoot:IsA("BasePart") then
+			setupSpawnPart(scanRoot)
+		end
+
+		for _, descendant in ipairs(scanRoot:GetDescendants()) do
 			if descendant:IsA("BasePart") then
 				setupSpawnPart(descendant)
 			end

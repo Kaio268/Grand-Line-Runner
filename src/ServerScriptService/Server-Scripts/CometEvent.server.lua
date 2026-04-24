@@ -7,6 +7,7 @@ local RunService = game:GetService("RunService")
 
 local DEBUG = true
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
+local SpawnPartsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local function log(...)
 	if DEBUG then
 		print("[COMET]", ...)
@@ -27,8 +28,8 @@ local refs = MapResolver.WaitForRefs(
 		context = "CometEvent",
 	}
 )
-local Map = refs.MapRoot
 local SpawnPartsFolder = refs.SpawnFolder
+local VALID_SPAWN_PLATFORM_NAMES = SpawnPartsConfig.RarityTier or {}
 
 local CometTemplate = ReplicatedStorage:WaitForChild("Comet")
 CometTemplate.Archivable = true
@@ -83,6 +84,7 @@ local prevClockTime = Lighting.ClockTime
 
 local partCount = {}
 local cometById = {}
+local cachedSpawnPlatforms = nil
 
 local function norm(s)
 	s = tostring(s or "")
@@ -168,14 +170,57 @@ local function startCometTimerUI(token)
 	end)
 end
 
-local function getSpawnPlatforms()
-	local t = {}
-	for _, v in ipairs(SpawnPartsFolder:GetChildren()) do
-		if v:IsA("BasePart") then
-			t[#t + 1] = v
+local function isValidSpawnPlatform(instance)
+	return instance
+		and instance:IsA("BasePart")
+		and VALID_SPAWN_PLATFORM_NAMES[tostring(instance.Name)] ~= nil
+end
+
+local function collectSpawnPlatforms(root, platforms, seen)
+	if not root then
+		return
+	end
+
+	if isValidSpawnPlatform(root) and not seen[root] then
+		seen[root] = true
+		platforms[#platforms + 1] = root
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if isValidSpawnPlatform(descendant) and not seen[descendant] then
+			seen[descendant] = true
+			platforms[#platforms + 1] = descendant
 		end
 	end
-	return t
+end
+
+local function refreshSpawnPlatforms()
+	local latestRefs = MapResolver.GetRefs()
+	local root = latestRefs.SpawnFolder or SpawnPartsFolder
+	local platforms = {}
+	local seen = {}
+	collectSpawnPlatforms(root, platforms, seen)
+	cachedSpawnPlatforms = platforms
+	return platforms
+end
+
+local function getSpawnPlatforms()
+	local platforms = cachedSpawnPlatforms
+	if platforms and #platforms > 0 then
+		local stillValid = true
+		for _, platform in ipairs(platforms) do
+			if not platform or not platform.Parent then
+				stillValid = false
+				break
+			end
+		end
+
+		if stillValid then
+			return platforms
+		end
+	end
+
+	return refreshSpawnPlatforms()
 end
 
 local function getRoot(inst)

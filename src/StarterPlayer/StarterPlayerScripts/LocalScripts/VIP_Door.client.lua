@@ -6,14 +6,18 @@ local player = Players.LocalPlayer
 local vipValue = player:WaitForChild("Passes"):WaitForChild("VIP")
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local refs = MapResolver.WaitForRefs(
-	{ "MapRoot" },
+	{ "VipRefuge" },
 	nil,
 	{
 		warn = true,
 		context = "VIPDoor",
 	}
 )
-local vipFolder = refs.MapRoot:WaitForChild("Vip Refuge"):WaitForChild("VIPDoorParts")
+local vipFolder = refs.VipDoorParts
+
+if not vipFolder then
+	return
+end
 
 local GAMEPASS_ID = 912847213
 

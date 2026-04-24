@@ -445,10 +445,26 @@ local function isValidSpawnRarityPart(spawnPart)
 		and VALID_SPAWN_RARITY_NAMES[tostring(spawnPart.Name)] ~= nil
 end
 
+local function collectSpawnRarityParts(root, spawnParts)
+	if not root then
+		return
+	end
+
+	if isValidSpawnRarityPart(root) then
+		spawnParts[#spawnParts + 1] = root
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if isValidSpawnRarityPart(descendant) then
+			spawnParts[#spawnParts + 1] = descendant
+		end
+	end
+end
+
 local function getBiomeSpawnParts()
 	local refs = MapResolver.GetRefs()
 	local mapRoot = refs.MapRoot
-	local biomesRoot = mapRoot and mapRoot:FindFirstChild("Biomes")
+	local biomesRoot = refs.Biomes or (mapRoot and mapRoot:FindFirstChild("Biomes"))
 	local spawnParts = {}
 
 	if biomesRoot then
@@ -460,24 +476,14 @@ local function getBiomeSpawnParts()
 		)
 		for _, biomeContainer in ipairs(biomesRoot:GetChildren()) do
 			local innerBiome = biomeContainer:FindFirstChild(biomeContainer.Name)
-			if innerBiome then
-				waveTrace(
-					"chestSpawnDiscovery biome=%s innerBiome=%s",
-					formatInstancePath(biomeContainer),
-					formatInstancePath(innerBiome)
-				)
-				for _, descendant in ipairs(innerBiome:GetDescendants()) do
-					if isValidSpawnRarityPart(descendant) then
-						spawnParts[#spawnParts + 1] = descendant
-					end
-				end
-			else
-				waveTrace(
-					"chestSpawnDiscovery skippedBiome=%s reason=missing_inner_biome expected=%s",
-					formatInstancePath(biomeContainer),
-					tostring(biomeContainer.Name)
-				)
-			end
+			local scanRoot = innerBiome or biomeContainer
+			waveTrace(
+				"chestSpawnDiscovery biome=%s scanRoot=%s innerBiome=%s",
+				formatInstancePath(biomeContainer),
+				formatInstancePath(scanRoot),
+				formatInstancePath(innerBiome)
+			)
+			collectSpawnRarityParts(scanRoot, spawnParts)
 		end
 	else
 		local spawnFolder = getSpawnPartsFolder()
@@ -487,11 +493,7 @@ local function getBiomeSpawnParts()
 			formatInstancePath(spawnFolder)
 		)
 		if spawnFolder then
-			for _, spawnPart in ipairs(spawnFolder:GetChildren()) do
-				if isValidSpawnRarityPart(spawnPart) then
-					spawnParts[#spawnParts + 1] = spawnPart
-				end
-			end
+			collectSpawnRarityParts(spawnFolder, spawnParts)
 		end
 	end
 

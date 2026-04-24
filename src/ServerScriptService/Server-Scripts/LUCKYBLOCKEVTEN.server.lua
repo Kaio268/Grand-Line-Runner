@@ -3,6 +3,7 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 
 local MapResolver = require(ReplicatedStorage.Modules:WaitForChild("MapResolver"))
+local SpawnPartsConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 local refs = MapResolver.WaitForRefs(
 	{ "MapRoot", "SpawnFolder" },
@@ -12,8 +13,8 @@ local refs = MapResolver.WaitForRefs(
 		context = "LuckyBlockEvent",
 	}
 )
-local Map = refs.MapRoot
 local SpawnPartsFolder = refs.SpawnFolder
+local VALID_SPAWN_PLATFORM_NAMES = SpawnPartsConfig.RarityTier or {}
 
 local LuckyTemplate = ReplicatedStorage:WaitForChild("LuckyBlock")
 LuckyTemplate.Archivable = true
@@ -53,6 +54,7 @@ local runId = 0
 local partCount = {}
 local blockById = {}
 local hitDebounce = {}
+local cachedSpawnPlatforms = nil
 
 local DataManager
 pcall(function()
@@ -215,14 +217,57 @@ local function stillValid(token)
 	return running and token == runId and isLuckyEvent()
 end
 
-local function getSpawnPlatforms()
-	local t = {}
-	for _, v in ipairs(SpawnPartsFolder:GetChildren()) do
-		if v:IsA("BasePart") then
-			t[#t + 1] = v
+local function isValidSpawnPlatform(instance)
+	return instance
+		and instance:IsA("BasePart")
+		and VALID_SPAWN_PLATFORM_NAMES[tostring(instance.Name)] ~= nil
+end
+
+local function collectSpawnPlatforms(root, platforms, seen)
+	if not root then
+		return
+	end
+
+	if isValidSpawnPlatform(root) and not seen[root] then
+		seen[root] = true
+		platforms[#platforms + 1] = root
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if isValidSpawnPlatform(descendant) and not seen[descendant] then
+			seen[descendant] = true
+			platforms[#platforms + 1] = descendant
 		end
 	end
-	return t
+end
+
+local function refreshSpawnPlatforms()
+	local latestRefs = MapResolver.GetRefs()
+	local root = latestRefs.SpawnFolder or SpawnPartsFolder
+	local platforms = {}
+	local seen = {}
+	collectSpawnPlatforms(root, platforms, seen)
+	cachedSpawnPlatforms = platforms
+	return platforms
+end
+
+local function getSpawnPlatforms()
+	local platforms = cachedSpawnPlatforms
+	if platforms and #platforms > 0 then
+		local stillValid = true
+		for _, platform in ipairs(platforms) do
+			if not platform or not platform.Parent then
+				stillValid = false
+				break
+			end
+		end
+
+		if stillValid then
+			return platforms
+		end
+	end
+
+	return refreshSpawnPlatforms()
 end
 
 local function ensurePrimary(model: Model)

@@ -8,14 +8,14 @@ local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 
 local player = Players.LocalPlayer
 local refs = MapResolver.WaitForRefs(
-	{ "MapRoot" },
+	{ "SellNpc" },
 	nil,
 	{
 		warn = true,
 		context = "SellNpcDialog",
 	}
 )
-local npc = refs.MapRoot:WaitForChild("Lobby"):WaitForChild("Normal")
+local npc = refs.SellNpc
 local prompt = npc:WaitForChild("ProximityPrompt")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
