@@ -1,9 +1,13 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local ClientEffectVisuals = {}
 ClientEffectVisuals.__index = ClientEffectVisuals
+
+local SharedFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared")
+local AnimationResolver = require(SharedFolder:WaitForChild("AnimationResolver"))
 
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local DEFAULT_MIN_DIRECTION_MAGNITUDE = 0.01
@@ -21,6 +25,95 @@ local DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR = Color3.fromRGB(255, 188, 113)
 local PHOENIX_SHIELD_HIT_COLOR = Color3.fromRGB(255, 48, 72)
 local PHOENIX_SHIELD_HIT_ACCENT_COLOR = Color3.fromRGB(255, 169, 103)
 local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
+local PHOENIX_WING_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
+local PHOENIX_WING_ASSET_FRUIT_KEY = "Tori"
+local PHOENIX_WING_ASSET_FOLDER_NAMES = { "VFX", "Visuals", "CharacterModels" }
+local PHOENIX_WING_ASSET_NAMES = { "PhoenixMan", "Phoenix Man", "Phoenix man", "Phoenix man (1)" }
+local PHOENIX_AUTHORED_FLIGHT_FX_NAME = "FlyFX"
+local PHOENIX_AUTHORED_SHIELD_FX_NAME = "ShieldFX"
+local PHOENIX_AUTHORED_VFX_FADE_OUT = 0.35
+local PHOENIX_AUTHORED_VFX_MOVE_FOLDERS = {
+	FlyFX = { "Phoenix Flight" },
+	ShieldFX = { "Phoenix Flame Shield" },
+}
+local PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS = {
+	FlyFX = CFrame.new(0.165275574, -1.16604078, 1.30423737),
+	ShieldFX = CFrame.new(
+		-3.00717545,
+		-9.76482105,
+		-10.6410065,
+		0.999994814,
+		0.0000314084282,
+		-0.00321495766,
+		-0.0000310857758,
+		1,
+		0.000100409947,
+		0.00321496092,
+		-0.000100309488,
+		0.999994814
+	),
+}
+local PHOENIX_ANIMATION_KEYS = {
+	FlightStart = "Tori.PhoenixFlightStart",
+	FlightLoop = "Tori.PhoenixFlightLoop",
+	FlightIdle = "Tori.PhoenixFlightIdle",
+	FlightEnd = "Tori.PhoenixFlightEnd",
+	Shield = "Tori.PhoenixFlameShield",
+}
+local PHOENIX_ANIMATION_LENGTHS = {
+	["Tori.PhoenixFlightStart"] = 3.1666667,
+	["Tori.PhoenixFlightLoop"] = 5.2,
+	["Tori.PhoenixFlightIdle"] = 1,
+	["Tori.PhoenixFlightEnd"] = 1.2,
+	["Tori.PhoenixFlameShield"] = 1.6666667,
+}
+local PHOENIX_REFERENCE_PART_NAMES = { "Torso", "UpperTorso", "HumanoidRootPart" }
+local PHOENIX_FLIGHT_TRAIL_PART_NAMES = { "Tail1", "tail", "Torso", "UpperTorso", "HumanoidRootPart" }
+local PHOENIX_LEFT_LEG_REFERENCE_PART_NAMES = { "Left Leg", "LeftLowerLeg", "LeftFoot", "LeftUpperLeg" }
+local PHOENIX_RIGHT_LEG_REFERENCE_PART_NAMES = { "Right Leg", "RightLowerLeg", "RightFoot", "RightUpperLeg" }
+local PHOENIX_FEATURE_MODEL_SPECS = {
+	{
+		ModelName = "tori wings",
+		SourcePartNames = PHOENIX_REFERENCE_PART_NAMES,
+		TargetPartNames = PHOENIX_REFERENCE_PART_NAMES,
+	},
+	{
+		ModelName = "tori left leg",
+		SourcePartNames = PHOENIX_LEFT_LEG_REFERENCE_PART_NAMES,
+		TargetPartNames = PHOENIX_LEFT_LEG_REFERENCE_PART_NAMES,
+	},
+	{
+		ModelName = "tori right leg",
+		SourcePartNames = PHOENIX_RIGHT_LEG_REFERENCE_PART_NAMES,
+		TargetPartNames = PHOENIX_RIGHT_LEG_REFERENCE_PART_NAMES,
+	},
+}
+local PHOENIX_CHARACTER_CONCEALED_PART_NAMES = {
+	leftarm = true,
+	rightarm = true,
+	leftleg = true,
+	rightleg = true,
+	leftupperarm = true,
+	leftlowerarm = true,
+	lefthand = true,
+	rightupperarm = true,
+	rightlowerarm = true,
+	righthand = true,
+	leftupperleg = true,
+	leftlowerleg = true,
+	leftfoot = true,
+	rightupperleg = true,
+	rightlowerleg = true,
+	rightfoot = true,
+}
+local PHOENIX_WING_MIN_DURATION = 0.1
+local PHOENIX_WING_FALLBACK_DURATION = 0.75
+local PHOENIX_FEATURE_ROOT_PART_NAME = "RootPart"
+local PHOENIX_ANIMATION_FADE_TIME = 0.08
+local PHOENIX_ANIMATION_STOP_FADE_TIME = 0.12
+local PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY = 0.42
+local PHOENIX_FLIGHT_STARTUP_FALLBACK_DURATION = 0.85
+local PHOENIX_FLIGHT_TRAIL_DIRECTION_MIN_SPEED = 1.5
 
 local function resolvePlayerRootPart(targetPlayer)
 	if not targetPlayer or not targetPlayer:IsA("Player") then
@@ -33,6 +126,30 @@ local function resolvePlayerRootPart(targetPlayer)
 	end
 
 	return character:FindFirstChild("HumanoidRootPart")
+end
+
+local function resolvePlayerHumanoid(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	return character and character:FindFirstChildOfClass("Humanoid") or nil
+end
+
+local function resolvePlayerBodyPart(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChild("Torso")
+		or character:FindFirstChild("UpperTorso")
+		or character:FindFirstChild("HumanoidRootPart")
 end
 
 local function resolveColor(value, fallback)
@@ -71,6 +188,720 @@ local function createPulse(name, position, color, initialSize, finalSize, durati
 	end)
 end
 
+local function getOrCreateWingEffectsFolder()
+	local folder = Workspace:FindFirstChild(PHOENIX_WING_EFFECTS_FOLDER_NAME)
+	if folder then
+		return folder
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = PHOENIX_WING_EFFECTS_FOLDER_NAME
+	folder.Parent = Workspace
+	return folder
+end
+
+local function resolvePhoenixAssetInContainer(container)
+	if not container then
+		return nil
+	end
+
+	for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
+		local direct = container:FindFirstChild(assetName)
+		if direct then
+			return direct
+		end
+	end
+
+	for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
+		local descendant = container:FindFirstChild(assetName, true)
+		if descendant then
+			return descendant
+		end
+	end
+
+	for _, child in ipairs(container:GetChildren()) do
+		if string.find(string.lower(child.Name), "phoenix", 1, true) then
+			return child
+		end
+	end
+
+	local children = container:GetChildren()
+	return if #children == 1 then children[1] else nil
+end
+
+local function appendUniqueInstance(target, seen, instance)
+	if typeof(instance) ~= "Instance" or seen[instance] then
+		return
+	end
+
+	seen[instance] = true
+	target[#target + 1] = instance
+end
+
+local function appendPhoenixModelCandidatesFromContainer(target, seen, container)
+	if not container then
+		return
+	end
+
+	for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
+		appendUniqueInstance(target, seen, container:FindFirstChild(assetName))
+	end
+
+	appendUniqueInstance(target, seen, resolvePhoenixAssetInContainer(container))
+	appendUniqueInstance(target, seen, container)
+end
+
+local function getPhoenixAssetRootCandidates()
+	local roots = {}
+	local seen = {}
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	if assetsFolder then
+		local vfxFolder = assetsFolder:FindFirstChild("VFX")
+		local toriVfxFolder = vfxFolder and vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
+		appendPhoenixModelCandidatesFromContainer(roots, seen, toriVfxFolder)
+
+		local characterModelsFolder = assetsFolder:FindFirstChild("CharacterModels")
+		local toriCharacterFolder = characterModelsFolder and characterModelsFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
+		appendPhoenixModelCandidatesFromContainer(roots, seen, toriCharacterFolder)
+	end
+
+	local modulesFolder = ReplicatedStorage:FindFirstChild("Modules")
+	local devilFruitsFolder = modulesFolder and modulesFolder:FindFirstChild("DevilFruits")
+	local toriFolder = devilFruitsFolder and devilFruitsFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
+	local moduleAssetsFolder = toriFolder and toriFolder:FindFirstChild("Assets")
+	if moduleAssetsFolder then
+		for _, folderName in ipairs(PHOENIX_WING_ASSET_FOLDER_NAMES) do
+			appendPhoenixModelCandidatesFromContainer(roots, seen, moduleAssetsFolder:FindFirstChild(folderName))
+		end
+
+		appendPhoenixModelCandidatesFromContainer(roots, seen, moduleAssetsFolder)
+	end
+
+	if RunService:IsStudio() then
+		for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
+			appendUniqueInstance(roots, seen, Workspace:FindFirstChild(assetName))
+		end
+	end
+
+	return roots
+end
+
+local function getPhoenixWingAssetRoot()
+	for _, assetRoot in ipairs(getPhoenixAssetRootCandidates()) do
+		if assetRoot:FindFirstChild("tori wings", true) then
+			return assetRoot
+		end
+	end
+
+	return nil
+end
+
+local function findNamedBasePart(root, partName)
+	if root:IsA("BasePart") and root.Name == partName then
+		return root
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") and descendant.Name == partName then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function findReferencePart(assetRoot, partNames)
+	for _, partName in ipairs(partNames or PHOENIX_REFERENCE_PART_NAMES) do
+		local part = findNamedBasePart(assetRoot, partName)
+		if part then
+			return part
+		end
+	end
+
+	return nil
+end
+
+local function resolvePlayerPartByNames(targetPlayer, partNames)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return nil
+	end
+
+	for _, partName in ipairs(partNames) do
+		local part = character:FindFirstChild(partName)
+		if part and part:IsA("BasePart") then
+			return part
+		end
+	end
+
+	return nil
+end
+
+local function canUseAsFollowTarget(instance)
+	return typeof(instance) == "Instance"
+		and (
+			instance:IsA("BasePart")
+			or instance:IsA("Attachment")
+			or instance:IsA("Bone")
+			or instance:IsA("Model")
+		)
+end
+
+local function getFollowTargetCFrame(instance)
+	if not canUseAsFollowTarget(instance) then
+		return nil
+	end
+
+	if instance:IsA("BasePart") then
+		return instance.CFrame
+	end
+
+	if instance:IsA("Attachment") or instance:IsA("Bone") then
+		return instance.WorldCFrame
+	end
+
+	return instance:GetPivot()
+end
+
+local function getFollowTargetPosition(instance)
+	local cframe = getFollowTargetCFrame(instance)
+	return cframe and cframe.Position or nil
+end
+
+local function getPlanarDirectionOrNil(vector, minMagnitude)
+	if typeof(vector) ~= "Vector3" then
+		return nil
+	end
+
+	local planarVector = Vector3.new(vector.X, 0, vector.Z)
+	if planarVector.Magnitude <= (minMagnitude or DEFAULT_MIN_DIRECTION_MAGNITUDE) then
+		return nil
+	end
+
+	return planarVector.Unit
+end
+
+local function getPhoenixFlightTrailDirection(rootPart, fallbackCFrame, lastDirection)
+	if typeof(rootPart) == "Instance" and rootPart:IsA("BasePart") then
+		local velocityDirection =
+			getPlanarDirectionOrNil(rootPart.AssemblyLinearVelocity, PHOENIX_FLIGHT_TRAIL_DIRECTION_MIN_SPEED)
+		if velocityDirection then
+			return velocityDirection
+		end
+
+		local rootDirection = getPlanarDirectionOrNil(rootPart.CFrame.LookVector, DEFAULT_MIN_DIRECTION_MAGNITUDE)
+		if rootDirection then
+			return rootDirection
+		end
+	end
+
+	if typeof(fallbackCFrame) == "CFrame" then
+		local fallbackDirection = getPlanarDirectionOrNil(fallbackCFrame.LookVector, DEFAULT_MIN_DIRECTION_MAGNITUDE)
+		if fallbackDirection then
+			return fallbackDirection
+		end
+	end
+
+	if typeof(lastDirection) == "Vector3" and lastDirection.Magnitude > DEFAULT_MIN_DIRECTION_MAGNITUDE then
+		return lastDirection.Unit
+	end
+
+	return DEFAULT_DIRECTION
+end
+
+local function getMovementOrientedFollowCFrame(target, rootPart, lastDirection)
+	local targetPosition = getFollowTargetPosition(target) or getFollowTargetPosition(rootPart)
+	if not targetPosition then
+		return nil, lastDirection
+	end
+
+	local fallbackCFrame = getFollowTargetCFrame(target) or getFollowTargetCFrame(rootPart)
+	local direction = getPhoenixFlightTrailDirection(rootPart, fallbackCFrame, lastDirection)
+	return CFrame.lookAt(targetPosition, targetPosition + direction, Vector3.yAxis), direction
+end
+
+local function findFollowTargetByNames(root, targetNames)
+	if not root or type(targetNames) ~= "table" then
+		return nil
+	end
+
+	for _, targetName in ipairs(targetNames) do
+		if typeof(targetName) == "string" and targetName ~= "" then
+			if root.Name == targetName and canUseAsFollowTarget(root) then
+				return root
+			end
+
+			for _, descendant in ipairs(root:GetDescendants()) do
+				if descendant.Name == targetName and canUseAsFollowTarget(descendant) then
+					return descendant
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
+local function resolvePhoenixFollowTarget(targetPlayer, state, targetNames)
+	if type(targetNames) ~= "table" then
+		return nil
+	end
+
+	if state then
+		for _, featureState in ipairs(state.Features or {}) do
+			local target = findFollowTargetByNames(featureState.Model, targetNames)
+			if target then
+				return target
+			end
+		end
+
+		local target = findFollowTargetByNames(state.Container, targetNames)
+		if target then
+			return target
+		end
+	end
+
+	if targetPlayer and targetPlayer:IsA("Player") then
+		return findFollowTargetByNames(targetPlayer.Character, targetNames)
+	end
+
+	return nil
+end
+
+local function resolvePartNameList(value, fallback)
+	if typeof(value) == "string" and value ~= "" then
+		return { value }
+	end
+
+	if type(value) == "table" then
+		local partNames = {}
+		for _, partName in ipairs(value) do
+			if typeof(partName) == "string" and partName ~= "" then
+				partNames[#partNames + 1] = partName
+			end
+		end
+
+		if #partNames > 0 then
+			return partNames
+		end
+	end
+
+	return fallback
+end
+
+local function resolveCFrameValue(value, fallback)
+	if typeof(value) == "CFrame" then
+		return value
+	end
+
+	if typeof(value) == "Vector3" then
+		return CFrame.new(value)
+	end
+
+	return fallback
+end
+
+local function findFirstBasePart(root)
+	if root:IsA("BasePart") then
+		return root
+	end
+
+	return root:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function findNamedModel(root, modelName)
+	local direct = root:FindFirstChild(modelName, true)
+	if direct and direct:IsA("Model") then
+		return direct
+	end
+
+	local normalizedName = string.lower(modelName)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("Model") and string.lower(descendant.Name) == normalizedName then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function normalizeInstanceName(name)
+	return string.lower(string.gsub(name, "%s+", ""))
+end
+
+local function configurePhoenixDisplayClone(model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = descendant.Name == PHOENIX_FEATURE_ROOT_PART_NAME
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.Massless = true
+			descendant.CastShadow = false
+		elseif descendant:IsA("AnimationController") then
+			if not descendant:FindFirstChildOfClass("Animator") then
+				local animator = Instance.new("Animator")
+				animator.Parent = descendant
+			end
+		elseif descendant:IsA("Script") or descendant:IsA("LocalScript") or descendant:IsA("ModuleScript") then
+			descendant:Destroy()
+		elseif descendant:IsA("SurfaceAppearance") then
+			descendant.AlphaMode = Enum.AlphaMode.Transparency
+		end
+	end
+end
+
+local function applyPhoenixExtremityConceal(targetPlayer)
+	local character = targetPlayer.Character
+	if not character then
+		return {}
+	end
+
+	local entries = {}
+	for _, descendant in ipairs(character:GetDescendants()) do
+		local normalizedName = normalizeInstanceName(descendant.Name)
+		if descendant:IsA("BasePart") and PHOENIX_CHARACTER_CONCEALED_PART_NAMES[normalizedName] then
+			entries[#entries + 1] = {
+				Part = descendant,
+				OriginalLocalTransparencyModifier = descendant.LocalTransparencyModifier,
+			}
+			descendant.LocalTransparencyModifier = 1
+		end
+	end
+
+	return entries
+end
+
+local function restorePhoenixExtremityConceal(entries)
+	for _, entry in ipairs(entries or {}) do
+		local part = entry.Part
+		if part and part.Parent then
+			part.LocalTransparencyModifier = entry.OriginalLocalTransparencyModifier
+		end
+	end
+end
+
+local function resolveDisplayRigPivotCFrame(pivotToRoot, rootCFrame)
+	return rootCFrame * pivotToRoot:Inverse()
+end
+
+local function getOrCreateAnimationControllerAnimator(model)
+	if not model then
+		return nil
+	end
+
+	local animationController = model:FindFirstChildOfClass("AnimationController")
+		or model:FindFirstChildWhichIsA("AnimationController", true)
+	if not animationController then
+		animationController = Instance.new("AnimationController")
+		animationController.Name = "AnimationController"
+		animationController.Parent = model
+	end
+
+	local animator = animationController:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = animationController
+	end
+
+	return animator
+end
+
+local function getOrCreateHumanoidAnimator(humanoid)
+	if not humanoid then
+		return nil
+	end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	return animator
+end
+
+local function stopAnimationEntry(entry, fadeTime)
+	if not entry then
+		return
+	end
+
+	local track = entry.Track
+	if track then
+		pcall(function()
+			if track.IsPlaying then
+				track:Stop(fadeTime or entry.StopFadeTime or PHOENIX_ANIMATION_STOP_FADE_TIME)
+			end
+		end)
+
+		task.delay((fadeTime or entry.StopFadeTime or PHOENIX_ANIMATION_STOP_FADE_TIME) + 0.05, function()
+			pcall(function()
+				track:Destroy()
+			end)
+		end)
+	end
+
+	local animation = entry.Animation
+	if animation and animation.Parent then
+		animation:Destroy()
+	end
+end
+
+local function cleanupPhoenixWingState(state, fadeTime)
+	if not state or state.CleanedUp then
+		return
+	end
+
+	state.CleanedUp = true
+	for _, entry in ipairs(state.AnimationTracks or {}) do
+		stopAnimationEntry(entry, fadeTime)
+	end
+	state.AnimationTracks = {}
+
+	for _, instance in ipairs(state.RuntimeVfxInstances or {}) do
+		if instance and instance.Parent then
+			instance:Destroy()
+		end
+	end
+	state.RuntimeVfxInstances = {}
+
+	if state.Container and state.Container.Parent then
+		state.Container:Destroy()
+	end
+
+	restorePhoenixExtremityConceal(state.ExtremityConcealEntries)
+end
+
+local function rememberPhoenixRuntimeVfx(state, instance)
+	if not state or not instance then
+		return instance
+	end
+
+	state.RuntimeVfxInstances = state.RuntimeVfxInstances or {}
+	state.RuntimeVfxInstances[#state.RuntimeVfxInstances + 1] = instance
+	return instance
+end
+
+local function eachSelfAndDescendants(root, callback)
+	if not root then
+		return
+	end
+
+	callback(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		callback(descendant)
+	end
+end
+
+local function getPivotCFrame(instance)
+	if not instance then
+		return nil
+	end
+	if instance:IsA("Model") then
+		return instance:GetPivot()
+	end
+	if instance:IsA("BasePart") then
+		return instance.CFrame
+	end
+
+	local part = findFirstBasePart(instance)
+	return part and part.CFrame or nil
+end
+
+local function resolvePhoenixAssetRootForTemplate(template, root)
+	if root and findReferencePart(root, PHOENIX_REFERENCE_PART_NAMES) then
+		return root
+	end
+
+	local current = template and template.Parent or nil
+	while current and current ~= ReplicatedStorage and current ~= Workspace do
+		if findReferencePart(current, PHOENIX_REFERENCE_PART_NAMES) then
+			return current
+		end
+		current = current.Parent
+	end
+
+	return root
+end
+
+local function getStandardToriVfxRoot()
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
+	return vfxFolder and vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY) or nil
+end
+
+local function findPhoenixMoveFolderVfxTemplate(assetName)
+	local toriVfxRoot = getStandardToriVfxRoot()
+	if not toriVfxRoot then
+		return nil, nil
+	end
+
+	for _, moveFolderName in ipairs(PHOENIX_AUTHORED_VFX_MOVE_FOLDERS[assetName] or {}) do
+		local moveRoot = toriVfxRoot:FindFirstChild(moveFolderName)
+		if not moveRoot then
+			continue
+		end
+
+		local direct = moveRoot:FindFirstChild(assetName)
+		if direct then
+			return direct, moveRoot
+		end
+
+		local descendant = moveRoot:FindFirstChild(assetName, true)
+		if descendant then
+			return descendant, moveRoot
+		end
+	end
+
+	return nil, nil
+end
+
+local function findPhoenixAuthoredVfxTemplate(assetName)
+	if typeof(assetName) ~= "string" or assetName == "" then
+		return nil, nil
+	end
+
+	local moveTemplate, moveRoot = findPhoenixMoveFolderVfxTemplate(assetName)
+	if moveTemplate then
+		return moveTemplate, moveRoot
+	end
+
+	for _, root in ipairs(getPhoenixAssetRootCandidates()) do
+		local direct = root:FindFirstChild(assetName)
+		if direct then
+			return direct, resolvePhoenixAssetRootForTemplate(direct, root)
+		end
+
+		for _, phoenixAssetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
+			local phoenixModel = root:FindFirstChild(phoenixAssetName)
+			local child = phoenixModel and phoenixModel:FindFirstChild(assetName)
+			if child then
+				return child, resolvePhoenixAssetRootForTemplate(child, phoenixModel)
+			end
+		end
+
+		local descendant = root:FindFirstChild(assetName, true)
+		if descendant then
+			return descendant, resolvePhoenixAssetRootForTemplate(descendant, root)
+		end
+	end
+
+	return nil, nil
+end
+
+local function configurePhoenixAuthoredVfxClone(root)
+	eachSelfAndDescendants(root, function(instance)
+		if instance:IsA("BasePart") then
+			instance.Anchored = true
+			instance.CanCollide = false
+			instance.CanTouch = false
+			instance.CanQuery = false
+			instance.Massless = true
+			instance.CastShadow = false
+		elseif instance:IsA("Script") or instance:IsA("LocalScript") or instance:IsA("ModuleScript") then
+			instance:Destroy()
+		end
+	end)
+end
+
+local function createPhoenixAuthoredVfxClone(template)
+	local clone = template:Clone()
+	if clone:IsA("Model") or clone:IsA("BasePart") then
+		configurePhoenixAuthoredVfxClone(clone)
+		return clone
+	end
+
+	local wrapper = Instance.new("Model")
+	wrapper.Name = clone.Name
+
+	if clone:IsA("Attachment") or clone:IsA("ParticleEmitter") or clone:IsA("Trail") or clone:IsA("Beam") then
+		local anchor = Instance.new("Part")
+		anchor.Name = clone.Name .. "Anchor"
+		anchor.Transparency = 1
+		anchor.Size = Vector3.new(0.25, 0.25, 0.25)
+		anchor.Parent = wrapper
+		clone.Parent = anchor
+	else
+		clone.Parent = wrapper
+		if not findFirstBasePart(wrapper) then
+			local anchor = Instance.new("Part")
+			anchor.Name = clone.Name .. "Anchor"
+			anchor.Transparency = 1
+			anchor.Size = Vector3.new(0.25, 0.25, 0.25)
+			anchor.Parent = wrapper
+		end
+	end
+
+	configurePhoenixAuthoredVfxClone(wrapper)
+	return wrapper
+end
+
+local function setPhoenixAuthoredVfxEnabled(root, enabled)
+	eachSelfAndDescendants(root, function(instance)
+		if
+			instance:IsA("ParticleEmitter")
+			or instance:IsA("Trail")
+			or instance:IsA("Beam")
+			or instance:IsA("Fire")
+			or instance:IsA("Smoke")
+			or instance:IsA("Sparkles")
+			or instance:IsA("PointLight")
+			or instance:IsA("SpotLight")
+			or instance:IsA("SurfaceLight")
+		then
+			instance.Enabled = enabled
+		end
+	end)
+end
+
+local function emitPhoenixAuthoredVfx(root, defaultEmitCount)
+	eachSelfAndDescendants(root, function(instance)
+		if not instance:IsA("ParticleEmitter") then
+			return
+		end
+
+		local emitCount = tonumber(instance:GetAttribute("EmitCount"))
+			or tonumber(instance:GetAttribute("BurstCount"))
+			or defaultEmitCount
+			or math.max(1, math.floor((tonumber(instance.Rate) or 0) * 0.35))
+		emitCount = math.max(1, math.floor(tonumber(emitCount) or tonumber(defaultEmitCount) or 12))
+		pcall(function()
+			instance:Emit(emitCount)
+		end)
+	end)
+end
+
+local function pivotPhoenixAuthoredVfx(root, cframe)
+	if not root or typeof(cframe) ~= "CFrame" then
+		return
+	end
+
+	if root:IsA("Model") then
+		root:PivotTo(cframe)
+	elseif root:IsA("BasePart") then
+		root.CFrame = cframe
+	else
+		local part = findFirstBasePart(root)
+		if part then
+			part.CFrame = cframe
+		end
+	end
+end
+
+local function getPhoenixAuthoredVfxOffset(assetName, template, assetRoot)
+	local templatePivot = getPivotCFrame(template)
+	local referencePart = assetRoot and findReferencePart(assetRoot, PHOENIX_REFERENCE_PART_NAMES)
+	if templatePivot and referencePart then
+		return referencePart.CFrame:ToObjectSpace(templatePivot)
+	end
+
+	return PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS[assetName] or CFrame.identity
+end
+
 function ClientEffectVisuals.new(config)
 	config = config or {}
 
@@ -91,7 +922,406 @@ function ClientEffectVisuals.new(config)
 		PhoenixEffectAccentColor = resolveColor(config.PhoenixEffectAccentColor, DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR),
 		GomuFruitName = tostring(config.GomuFruitName or DEFAULT_GOMU_FRUIT_NAME),
 		RubberLaunchAbility = tostring(config.RubberLaunchAbility or DEFAULT_RUBBER_LAUNCH_ABILITY),
+		PhoenixWingEffects = setmetatable({}, { __mode = "k" }),
+		PhoenixAnimationDefinitions = {},
 	}, ClientEffectVisuals)
+end
+
+function ClientEffectVisuals:GetPhoenixAnimationDefinition(animationKey)
+	self.PhoenixAnimationDefinitions = self.PhoenixAnimationDefinitions or {}
+	local cachedDefinition = self.PhoenixAnimationDefinitions[animationKey]
+	if cachedDefinition ~= nil then
+		return cachedDefinition or nil
+	end
+
+	local animation, descriptor = AnimationResolver.GetAnimation(animationKey, {
+		Context = "ToriVfx",
+	})
+	if not animation then
+		self.PhoenixAnimationDefinitions[animationKey] = false
+		return nil
+	end
+
+	local definition = {
+		Animation = animation,
+		AnimationId = descriptor and descriptor.AnimationId or animation.AnimationId,
+		Length = (descriptor and descriptor.Length) or PHOENIX_ANIMATION_LENGTHS[animationKey],
+	}
+	self.PhoenixAnimationDefinitions[animationKey] = definition
+	return definition
+end
+
+function ClientEffectVisuals:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options)
+	if not state or not animator then
+		return nil
+	end
+
+	local definition = self:GetPhoenixAnimationDefinition(animationKey)
+	if not definition then
+		return nil
+	end
+
+	options = options or {}
+	local ok, track = pcall(function()
+		return animator:LoadAnimation(definition.Animation)
+	end)
+	if not ok or not track then
+		return nil
+	end
+
+	track.Priority = Enum.AnimationPriority.Action
+	track.Looped = options.Looped == true
+
+	local entry = {
+		Track = track,
+		StopFadeTime = math.max(0, tonumber(options.StopFadeTime) or PHOENIX_ANIMATION_STOP_FADE_TIME),
+	}
+	state.AnimationTracks = state.AnimationTracks or {}
+	state.AnimationTracks[#state.AnimationTracks + 1] = entry
+
+	track:Play(
+		math.max(0, tonumber(options.FadeTime) or PHOENIX_ANIMATION_FADE_TIME),
+		tonumber(options.Weight) or 1,
+		math.max(0.01, tonumber(options.PlaybackSpeed) or 1)
+	)
+
+	return entry, definition.Length
+end
+
+function ClientEffectVisuals:PlayPhoenixAnimation(state, targetPlayer, animationKey, options)
+	if not state or typeof(animationKey) ~= "string" or animationKey == "" then
+		return nil
+	end
+
+	local longestLength = nil
+	for _, featureState in ipairs(state.Features or {}) do
+		local animator = getOrCreateAnimationControllerAnimator(featureState.Model)
+		local _, length = self:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options)
+		if length then
+			longestLength = math.max(longestLength or 0, length)
+		end
+	end
+
+	if not options or options.PlayCharacter ~= false then
+		local humanoid = resolvePlayerHumanoid(targetPlayer)
+		local animator = getOrCreateHumanoidAnimator(humanoid)
+		local _, length = self:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options)
+		if length then
+			longestLength = math.max(longestLength or 0, length)
+		end
+	end
+
+	return longestLength
+end
+
+function ClientEffectVisuals:GetPhoenixWingModelTemplate()
+	if self.PhoenixWingModelTemplate then
+		return self.PhoenixWingModelTemplate
+	end
+
+	local assetRoot = getPhoenixWingAssetRoot()
+	if not assetRoot then
+		return nil
+	end
+
+	local featureModels = {}
+	for _, spec in ipairs(PHOENIX_FEATURE_MODEL_SPECS) do
+		local featureModel = findNamedModel(assetRoot, spec.ModelName)
+		local referencePart = findReferencePart(assetRoot, spec.SourcePartNames)
+		if featureModel and referencePart and findFirstBasePart(featureModel) then
+			featureModels[#featureModels + 1] = {
+				Model = featureModel,
+				ReferenceCFrame = referencePart.CFrame,
+				TargetPartNames = spec.TargetPartNames,
+			}
+		end
+	end
+
+	if #featureModels == 0 then
+		return nil
+	end
+
+	self.PhoenixWingModelTemplate = {
+		AssetRoot = assetRoot,
+		Models = featureModels,
+	}
+	return self.PhoenixWingModelTemplate
+end
+
+function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetName, duration, options)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	local rootPart = self.GetPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	duration = math.max(0.05, tonumber(duration) or PHOENIX_WING_FALLBACK_DURATION)
+	local endTime = os.clock() + duration
+	options = options or {}
+	local targetPartNames = resolvePartNameList(options.TargetPartNames, nil)
+	local orientToMovement = options.OrientToMovement == true
+
+	if state then
+		state.AuthoredVfx = state.AuthoredVfx or {}
+		local existingEntry = state.AuthoredVfx[assetName]
+		if existingEntry and existingEntry.Clone and existingEntry.Clone.Parent then
+			existingEntry.EndTime = math.max(existingEntry.EndTime or 0, endTime)
+			setPhoenixAuthoredVfxEnabled(existingEntry.Clone, true)
+			return existingEntry.Clone
+		end
+	end
+
+	local template, assetRoot = findPhoenixAuthoredVfxTemplate(assetName)
+	if not template then
+		return nil
+	end
+
+	local clone = createPhoenixAuthoredVfxClone(template)
+	clone.Name = "Phoenix" .. assetName
+	clone.Parent = getOrCreateWingEffectsFolder()
+
+	local offset = resolveCFrameValue(options.Offset, getPhoenixAuthoredVfxOffset(assetName, template, assetRoot))
+	local entry = {
+		Clone = clone,
+		EndTime = endTime,
+	}
+	if state then
+		state.AuthoredVfx[assetName] = entry
+		rememberPhoenixRuntimeVfx(state, clone)
+	end
+
+	local function updatePosition()
+		local target = targetPartNames and resolvePhoenixFollowTarget(targetPlayer, state, targetPartNames) or nil
+		local currentRootPart = self.GetPlayerRootPart(targetPlayer)
+		local followCFrame
+		if orientToMovement then
+			followCFrame, entry.LastDirection = getMovementOrientedFollowCFrame(target, currentRootPart, entry.LastDirection)
+		else
+			followCFrame = getFollowTargetCFrame(target) or getFollowTargetCFrame(currentRootPart)
+		end
+		if not followCFrame then
+			return false
+		end
+
+		pivotPhoenixAuthoredVfx(clone, followCFrame * offset)
+		return true
+	end
+
+	updatePosition()
+	setPhoenixAuthoredVfxEnabled(clone, true)
+	emitPhoenixAuthoredVfx(clone, options.EmitCount or 12)
+
+	task.spawn(function()
+		while clone.Parent and os.clock() < (entry.EndTime or endTime) do
+			if state and state.CleanedUp then
+				break
+			end
+			if options.Follow ~= false and not updatePosition() then
+				break
+			end
+
+			RunService.Heartbeat:Wait()
+		end
+
+		if state and state.AuthoredVfx and state.AuthoredVfx[assetName] == entry then
+			state.AuthoredVfx[assetName] = nil
+		end
+
+		if clone.Parent then
+			setPhoenixAuthoredVfxEnabled(clone, false)
+			task.delay(PHOENIX_AUTHORED_VFX_FADE_OUT, function()
+				if clone.Parent then
+					clone:Destroy()
+				end
+			end)
+		end
+	end)
+
+	return clone
+end
+
+function ClientEffectVisuals:PlayPhoenixFlightAnimation(state, targetPlayer, duration, options)
+	options = options or {}
+	local startupLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightStart, {
+		Looped = false,
+		FadeTime = 0.04,
+		StopFadeTime = 0.08,
+	}) or PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY
+	local requestedLoopDelay = tonumber(options.LoopDelay)
+	local defaultLoopDelay = math.max(PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY, startupLength)
+	local loopDelay = if requestedLoopDelay and requestedLoopDelay >= 0 then requestedLoopDelay else defaultLoopDelay
+	loopDelay = math.min(loopDelay, math.max(PHOENIX_WING_MIN_DURATION, duration))
+	if state then
+		state.FlightTrailDelay = loopDelay
+	end
+
+	task.delay(loopDelay, function()
+		if not self.PhoenixWingEffects or self.PhoenixWingEffects[targetPlayer] ~= state or state.CleanedUp then
+			return
+		end
+		if not state.Container or not state.Container.Parent then
+			return
+		end
+
+		self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightLoop, {
+			Looped = true,
+			FadeTime = 0.12,
+			StopFadeTime = 0.12,
+		})
+	end)
+
+	return loopDelay
+end
+
+function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, options)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return
+	end
+
+	options = options or {}
+	duration = math.max(PHOENIX_WING_MIN_DURATION, tonumber(duration) or PHOENIX_WING_FALLBACK_DURATION)
+	local endTime = os.clock() + duration
+	self.PhoenixWingEffects = self.PhoenixWingEffects or setmetatable({}, { __mode = "k" })
+	local state = self.PhoenixWingEffects and self.PhoenixWingEffects[targetPlayer]
+
+	if not state then
+		local targetBodyPart = resolvePlayerBodyPart(targetPlayer)
+		if not targetBodyPart then
+			return
+		end
+
+		local wingTemplate = self:GetPhoenixWingModelTemplate()
+		if not wingTemplate then
+			return
+		end
+
+		local container = Instance.new("Model")
+		container.Name = "PhoenixDisplay"
+		container.Parent = getOrCreateWingEffectsFolder()
+
+		local featureStates = {}
+		for _, featureTemplate in ipairs(wingTemplate.Models) do
+			local targetPart = resolvePlayerPartByNames(targetPlayer, featureTemplate.TargetPartNames) or targetBodyPart
+			local feature = featureTemplate.Model:Clone()
+			configurePhoenixDisplayClone(feature)
+			feature.Parent = container
+			local pivotToReference = feature:GetPivot():ToObjectSpace(featureTemplate.ReferenceCFrame)
+			feature:PivotTo(resolveDisplayRigPivotCFrame(pivotToReference, targetPart.CFrame))
+
+			featureStates[#featureStates + 1] = {
+				Model = feature,
+				PivotToReference = pivotToReference,
+				TargetPartNames = featureTemplate.TargetPartNames,
+			}
+		end
+
+		if #featureStates == 0 then
+			container:Destroy()
+			return
+		end
+
+		state = {
+			Container = container,
+			EndTime = endTime,
+			ExtremityConcealEntries = applyPhoenixExtremityConceal(targetPlayer),
+			Features = featureStates,
+			AnimationTracks = {},
+			PlayFlightEndOnExpire = options.Mode == "Flight",
+			FlightEndPlayed = false,
+		}
+
+		self.PhoenixWingEffects[targetPlayer] = state
+
+		task.spawn(function()
+			while container.Parent and not state.CleanedUp do
+				if os.clock() >= state.EndTime then
+					if state.PlayFlightEndOnExpire and not state.FlightEndPlayed then
+						self:StopPhoenixFlightEffect(targetPlayer)
+						if os.clock() >= (state.EndTime or 0) then
+							break
+						end
+					else
+						break
+					end
+				else
+					local hasCurrentTarget = false
+					for _, featureState in ipairs(state.Features) do
+						local currentTargetPart = resolvePlayerPartByNames(targetPlayer, featureState.TargetPartNames)
+							or resolvePlayerBodyPart(targetPlayer)
+						if currentTargetPart and featureState.Model.Parent then
+							featureState.Model:PivotTo(
+								resolveDisplayRigPivotCFrame(featureState.PivotToReference, currentTargetPart.CFrame)
+							)
+							hasCurrentTarget = true
+						end
+					end
+
+					if not hasCurrentTarget then
+						break
+					end
+				end
+
+				RunService.Heartbeat:Wait()
+			end
+
+			cleanupPhoenixWingState(state)
+			if self.PhoenixWingEffects and self.PhoenixWingEffects[targetPlayer] == state then
+				self.PhoenixWingEffects[targetPlayer] = nil
+			end
+		end)
+	end
+
+	state.EndTime = math.max(state.EndTime, endTime)
+
+	if options.Mode == "Flight" then
+		state.PlayFlightEndOnExpire = true
+		state.FlightEndPlayed = false
+		state.FlightTrailDelay = self:PlayPhoenixFlightAnimation(state, targetPlayer, duration, {
+			LoopDelay = options.FlightTrailDelay,
+		}) or 0
+	elseif typeof(options.AnimationKey) == "string" then
+		self:PlayPhoenixAnimation(state, targetPlayer, options.AnimationKey, {
+			Looped = options.Looped == true,
+			FadeTime = options.FadeTime,
+			StopFadeTime = options.StopFadeTime,
+			PlaybackSpeed = options.PlaybackSpeed,
+			PlayCharacter = options.PlayCharacter,
+		})
+	end
+
+	return state
+end
+
+function ClientEffectVisuals:StopPhoenixFlightEffect(targetPlayer)
+	if not self.PhoenixWingEffects then
+		return
+	end
+
+	local state = self.PhoenixWingEffects[targetPlayer]
+	if not state or state.CleanedUp then
+		return
+	end
+	if state.FlightEndPlayed then
+		return
+	end
+
+	state.FlightEndPlayed = true
+	state.PlayFlightEndOnExpire = false
+
+	for _, entry in ipairs(state.AnimationTracks or {}) do
+		stopAnimationEntry(entry, 0.08)
+	end
+	state.AnimationTracks = {}
+
+	local endLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightEnd, {
+		Looped = false,
+		FadeTime = 0.04,
+		StopFadeTime = 0.08,
+	}) or 0.25
+	state.EndTime = os.clock() + math.max(0.15, math.min(endLength, 1.2))
 end
 
 function ClientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
@@ -297,7 +1527,16 @@ function ClientEffectVisuals:CreateBomuDetonationEffect(targetPlayer, fruitName,
 	end)
 end
 
-function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, abilityName)
+local function estimatePhoenixFlightHeightDelay(payload)
+	payload = payload or {}
+	local initialLift = math.max(0, tonumber(payload.InitialLift) or 10)
+	local maxRiseHeight = math.max(initialLift, tonumber(payload.MaxRiseHeight) or initialLift)
+	local verticalSpeed = math.max(1, tonumber(payload.VerticalSpeed) or 52)
+	local takeoffDuration = math.max(0, tonumber(payload.TakeoffDuration) or 0)
+	return math.max(takeoffDuration, maxRiseHeight / verticalSpeed)
+end
+
+function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, abilityName, payload)
 	if fruitName ~= self.PhoenixFruitName or abilityName ~= self.PhoenixFlightAbility then
 		return
 	end
@@ -307,57 +1546,54 @@ function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, 
 		return
 	end
 
-	local burst = Instance.new("Part")
-	burst.Name = "PhoenixFlightBurst"
-	burst.Shape = Enum.PartType.Ball
-	burst.Anchored = true
-	burst.CanCollide = false
-	burst.CanTouch = false
-	burst.CanQuery = false
-	burst.Material = Enum.Material.Neon
-	burst.Color = self.PhoenixEffectColor
-	burst.Transparency = 0.18
-	burst.Size = Vector3.new(2.25, 2.25, 2.25)
-	burst.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 1.5, 0))
-	burst.Parent = Workspace
-
-	local ring = Instance.new("Part")
-	ring.Name = "PhoenixFlightRing"
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.Material = Enum.Material.Neon
-	ring.Color = self.PhoenixEffectAccentColor
-	ring.Transparency = 0.28
-	ring.Size = Vector3.new(0.22, 4.8, 4.8)
-	ring.CFrame = CFrame.new(rootPart.Position) * FLAT_RING_ROTATION
-	ring.Parent = Workspace
-
-	local burstTween = TweenService:Create(burst, TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Transparency = 1,
-		Size = Vector3.new(7, 7, 7),
+	payload = payload or {}
+	local duration = math.max(PHOENIX_WING_MIN_DURATION, tonumber(payload.Duration) or 4.5)
+	local startupDuration = math.max(
+		0,
+		tonumber(payload.StartupDuration) or PHOENIX_FLIGHT_STARTUP_FALLBACK_DURATION
+	)
+	local heightDelay = estimatePhoenixFlightHeightDelay(payload)
+	local visualDuration = duration + startupDuration + heightDelay
+	local trailPartNames = resolvePartNameList(payload.TrailPartNames, PHOENIX_FLIGHT_TRAIL_PART_NAMES)
+	local trailOffset = resolveCFrameValue(
+		payload.TrailOffset,
+		PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS[PHOENIX_AUTHORED_FLIGHT_FX_NAME]
+	)
+	local state = self:CreatePhoenixWingEffect(targetPlayer, visualDuration, {
+		Mode = "Flight",
+		FlightTrailDelay = startupDuration + heightDelay,
 	})
-	local ringTween = TweenService:Create(ring, TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Transparency = 1,
-		Size = Vector3.new(0.22, 9, 9),
-	})
+	if not state then
+		return
+	end
 
-	burstTween:Play()
-	ringTween:Play()
-
-	burstTween.Completed:Connect(function()
-		if burst.Parent then
-			burst:Destroy()
+	local function playFlightTrail()
+		if not self.PhoenixWingEffects or self.PhoenixWingEffects[targetPlayer] ~= state or state.CleanedUp then
+			return
 		end
-	end)
-
-	ringTween.Completed:Connect(function()
-		if ring.Parent then
-			ring:Destroy()
+		if not state.Container or not state.Container.Parent then
+			return
 		end
-	end)
+
+		local remainingDuration = (state.EndTime or os.clock()) - os.clock()
+		if remainingDuration <= 0 then
+			return
+		end
+
+		self:PlayPhoenixAuthoredVfx(state, targetPlayer, PHOENIX_AUTHORED_FLIGHT_FX_NAME, remainingDuration, {
+			EmitCount = 16,
+			TargetPartNames = trailPartNames,
+			Offset = trailOffset,
+			OrientToMovement = true,
+		})
+	end
+
+	local trailDelay = math.max(0, tonumber(state.FlightTrailDelay) or 0)
+	if trailDelay <= 0 then
+		playFlightTrail()
+	else
+		task.delay(trailDelay, playFlightTrail)
+	end
 end
 
 function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, abilityName, payload)
@@ -372,67 +1608,16 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 
 	payload = payload or {}
 
-	local radius = math.max(1, tonumber(payload.Radius) or 13)
 	local duration = math.max(0.1, tonumber(payload.Duration) or 2.75)
-	local endTime = os.clock() + duration
-
-	local ring = Instance.new("Part")
-	ring.Name = "PhoenixShieldRing"
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanTouch = false
-	ring.CanQuery = false
-	ring.Material = Enum.Material.Neon
-	ring.Color = self.PhoenixEffectColor
-	ring.Transparency = 0.32
-	ring.Size = Vector3.new(0.24, radius * 2, radius * 2)
-	ring.CFrame = CFrame.new(rootPart.Position - Vector3.new(0, 2.6, 0)) * FLAT_RING_ROTATION
-	ring.Parent = Workspace
-
-	local aura = Instance.new("Part")
-	aura.Name = "PhoenixShieldAura"
-	aura.Shape = Enum.PartType.Ball
-	aura.Anchored = true
-	aura.CanCollide = false
-	aura.CanTouch = false
-	aura.CanQuery = false
-	aura.Material = Enum.Material.ForceField
-	aura.Color = self.PhoenixEffectAccentColor
-	aura.Transparency = 0.72
-	aura.Size = Vector3.new(4.5, 4.5, 4.5)
-	aura.CFrame = CFrame.new(rootPart.Position + Vector3.new(0, 1.5, 0))
-	aura.Parent = Workspace
-
-	local ringTween = TweenService:Create(ring, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
-		Transparency = 0.82,
+	local state = self:CreatePhoenixWingEffect(targetPlayer, duration, {
+		AnimationKey = PHOENIX_ANIMATION_KEYS.Shield,
+		Looped = true,
+		FadeTime = 0.06,
+		StopFadeTime = 0.1,
 	})
-	local auraTween = TweenService:Create(aura, TweenInfo.new(duration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {
-		Transparency = 1,
+	self:PlayPhoenixAuthoredVfx(state, targetPlayer, PHOENIX_AUTHORED_SHIELD_FX_NAME, duration, {
+		EmitCount = 20,
 	})
-
-	ringTween:Play()
-	auraTween:Play()
-
-	task.spawn(function()
-		while ring.Parent and aura.Parent and os.clock() < endTime do
-			local currentRootPart = self.GetPlayerRootPart(targetPlayer)
-			if not currentRootPart then
-				break
-			end
-
-			ring.CFrame = CFrame.new(currentRootPart.Position - Vector3.new(0, 2.6, 0)) * FLAT_RING_ROTATION
-			aura.CFrame = CFrame.new(currentRootPart.Position + Vector3.new(0, 1.5, 0))
-			RunService.Heartbeat:Wait()
-		end
-
-		if ring.Parent then
-			ring:Destroy()
-		end
-		if aura.Parent then
-			aura:Destroy()
-		end
-	end)
 end
 
 function ClientEffectVisuals:CreatePhoenixShieldHitEffect(targetPlayer, fruitName, abilityName, payload)

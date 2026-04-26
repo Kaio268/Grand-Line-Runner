@@ -1,3 +1,43 @@
+local function toriAnimationPath(animationName)
+	return {
+		"Assets",
+		"Animations",
+		"Tori",
+		animationName,
+	}
+end
+
+local function toriAnimationFallbackPaths(animationName)
+	return {
+		{
+			"Assets",
+			"VFX",
+			"Tori",
+			"PhoenixMan",
+			"AnimSaves",
+			animationName,
+		},
+		{
+			"Modules",
+			"DevilFruits",
+			"Tori",
+			"Assets",
+			"VFX",
+			"PhoenixMan",
+			"AnimSaves",
+			animationName,
+		},
+	}
+end
+
+local function toriEmbeddedAnimation(animationName, length)
+	return {
+		KeyframeSequencePath = toriAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = toriAnimationFallbackPaths(animationName),
+		Length = length,
+	}
+end
+
 local Animations = {
 	Movement = {
 		R6Walk = "rbxassetid://87454242265342",
@@ -7,8 +47,8 @@ local Animations = {
 	},
 
 	EatFruit = {
-		R6 = "rbxassetid://73860017414112",
-		R6G = "rbxassetid://137337550041159",
+		R6 = "rbxassetid://131816863052592",
+		R6G = "rbxassetid://95090703686197",
 	},
 
 	Mera = {
@@ -40,6 +80,14 @@ local Animations = {
 	Mogu = {
 		Dive = "rbxassetid://140152497789637",
 		Exit = "rbxassetid://103374605603335",
+	},
+
+	Tori = {
+		PhoenixFlightStart = toriEmbeddedAnimation("Phoenix Flystart", 3.1666667),
+		PhoenixFlightLoop = toriEmbeddedAnimation("Phoenix Flying", 5.2),
+		PhoenixFlightIdle = toriEmbeddedAnimation("Phoenix Flyidle", 1),
+		PhoenixFlightEnd = toriEmbeddedAnimation("Phoenix FlyEnd", 1.2),
+		PhoenixFlameShield = toriEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
 	},
 }
 

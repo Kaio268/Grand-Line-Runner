@@ -1,3 +1,4 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -16,6 +17,10 @@ local GROUND_CAST_HEIGHT = 4
 local GROUND_CAST_DISTANCE = 18
 local MINE_BODY_HEIGHT = 0.34
 local OWNER_NETWORK_OWNER_RELEASE_DELAY = 0.35
+local RADIUS_MATCH_EPSILON = 0.05
+local PLAYER_RADIUS_RECONCILE_TIME = 0.16
+local MAX_PLAYER_RADIUS_RECONCILE_DISTANCE = 7
+local MAX_PLAYER_PLANAR_EXTENT = 3
 
 local function getPlanarUnitOrFallback(vector, fallback)
 	local planarVector = Vector3.new(vector.X, 0, vector.Z)
@@ -85,6 +90,132 @@ local function applyLaunchVelocity(rootPart, launchVelocity)
 	local velocityDelta = launchVelocity - currentVelocity
 	local impulse = velocityDelta * rootPart.AssemblyMass
 	rootPart:ApplyImpulse(impulse)
+end
+
+local function getPlanarDistance(firstPosition, secondPosition)
+	if typeof(firstPosition) ~= "Vector3" or typeof(secondPosition) ~= "Vector3" then
+		return math.huge
+	end
+
+	local offset = firstPosition - secondPosition
+	return Vector3.new(offset.X, 0, offset.Z).Magnitude
+end
+
+local function getClosestPlanarDistanceToSegment(centerPosition, startPosition, endPosition)
+	if typeof(centerPosition) ~= "Vector3" or typeof(startPosition) ~= "Vector3" or typeof(endPosition) ~= "Vector3" then
+		return math.huge
+	end
+
+	local center = Vector3.new(centerPosition.X, 0, centerPosition.Z)
+	local start = Vector3.new(startPosition.X, 0, startPosition.Z)
+	local finish = Vector3.new(endPosition.X, 0, endPosition.Z)
+	local segment = finish - start
+	local lengthSquared = segment:Dot(segment)
+	if lengthSquared <= 0.0001 then
+		return (center - start).Magnitude
+	end
+
+	local alpha = math.clamp((center - start):Dot(segment) / lengthSquared, 0, 1)
+	return (center - (start + (segment * alpha))).Magnitude
+end
+
+local function getCharacterPlanarBoxDistance(centerPosition, character)
+	if typeof(centerPosition) ~= "Vector3" or typeof(character) ~= "Instance" or not character:IsA("Model") then
+		return math.huge
+	end
+
+	local ok, boxCFrame, boxSize = pcall(function()
+		return character:GetBoundingBox()
+	end)
+	if not ok or typeof(boxCFrame) ~= "CFrame" or typeof(boxSize) ~= "Vector3" then
+		return math.huge
+	end
+
+	local localCenter = boxCFrame:PointToObjectSpace(centerPosition)
+	local halfSize = boxSize * 0.5
+	local clampedLocal = Vector3.new(
+		math.clamp(localCenter.X, -halfSize.X, halfSize.X),
+		localCenter.Y,
+		math.clamp(localCenter.Z, -halfSize.Z, halfSize.Z)
+	)
+	local closestPoint = boxCFrame:PointToWorldSpace(clampedLocal)
+	return getPlanarDistance(centerPosition, closestPoint)
+end
+
+local function getCharacterPlanarExtent(character)
+	if typeof(character) ~= "Instance" or not character:IsA("Model") then
+		return 0
+	end
+
+	local ok, _, boxSize = pcall(function()
+		return character:GetBoundingBox()
+	end)
+	if not ok or typeof(boxSize) ~= "Vector3" then
+		return 0
+	end
+
+	return math.min(Vector3.new(boxSize.X, 0, boxSize.Z).Magnitude * 0.5, MAX_PLAYER_PLANAR_EXTENT)
+end
+
+local function getRootMotionSweepOffset(rootPart)
+	if typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") or not rootPart.Parent then
+		return Vector3.zero
+	end
+
+	local velocity = rootPart.AssemblyLinearVelocity
+	local planarVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+	local speed = planarVelocity.Magnitude
+	if speed <= 0.01 then
+		return Vector3.zero
+	end
+
+	local distance = math.min(speed * PLAYER_RADIUS_RECONCILE_TIME, MAX_PLAYER_RADIUS_RECONCILE_DISTANCE)
+	return planarVelocity.Unit * distance
+end
+
+local function doesCharacterOverlapDisplayedRadius(centerPosition, character, rootPart, radius)
+	if typeof(centerPosition) ~= "Vector3" or radius <= 0 then
+		return false
+	end
+
+	if getCharacterPlanarBoxDistance(centerPosition, character) <= radius + RADIUS_MATCH_EPSILON then
+		return true
+	end
+
+	if typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") or not rootPart.Parent then
+		return false
+	end
+
+	local sweepOffset = getRootMotionSweepOffset(rootPart)
+	if sweepOffset.Magnitude <= RADIUS_MATCH_EPSILON then
+		return false
+	end
+
+	local characterExtent = getCharacterPlanarExtent(character)
+	return getClosestPlanarDistanceToSegment(
+		centerPosition,
+		rootPart.Position - sweepOffset,
+		rootPart.Position + sweepOffset
+	) <= radius + characterExtent + RADIUS_MATCH_EPSILON
+end
+
+local function getPlayerCharacterContext(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, nil, nil
+	end
+
+	local character = player.Character
+	if not character then
+		return nil, nil, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart or humanoid.Health <= 0 then
+		return character, nil, nil
+	end
+
+	return character, humanoid, rootPart
 end
 
 local function getActiveMineEntry(player)
@@ -252,8 +383,7 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 		QueryId = string.format("bomu:%d:%d", context.Player.UserId, math.floor(os.clock() * 1000)),
 		CenterPosition = centerPosition,
 		Radius = radius,
-		AttackerPlayer = context.Player,
-		IncludePlayers = true,
+		IncludePlayers = false,
 		IncludeHazards = true,
 		AllowedHazardClasses = {
 			minor = true,
@@ -264,18 +394,33 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 		TracePrefix = "HIT",
 	})
 
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		if targetPlayer == context.Player then
+			continue
+		end
+
+		local character, _, rootPart = getPlayerCharacterContext(targetPlayer)
+		if not character or not rootPart then
+			continue
+		end
+
+		if not doesCharacterOverlapDisplayedRadius(centerPosition, character, rootPart, radius) then
+			continue
+		end
+
+		local knockbackVector = getKnockbackVector(centerPosition, rootPart, fallbackDirection, abilityConfig)
+		local applied = HitEffectService.ApplyEffect(targetPlayer, "Knockdown", {
+			Duration = knockdownDuration,
+			DropPosition = rootPart.Position,
+			KnockbackVector = knockbackVector,
+		})
+		if applied then
+			affectedUserIds[#affectedUserIds + 1] = targetPlayer.UserId
+		end
+	end
+
 	for _, hitInfo in ipairs(resolvedHits) do
-		if hitInfo.Kind == HitResolver.ResultKind.Player and hitInfo.Player and hitInfo.RootPart then
-			local knockbackVector = getKnockbackVector(centerPosition, hitInfo.RootPart, fallbackDirection, abilityConfig)
-			local applied = HitEffectService.ApplyEffect(hitInfo.Player, "Knockdown", {
-				Duration = knockdownDuration,
-				DropPosition = hitInfo.RootPart.Position,
-				KnockbackVector = knockbackVector,
-			})
-			if applied then
-				affectedUserIds[#affectedUserIds + 1] = hitInfo.Player.UserId
-			end
-		elseif hitInfo.Kind == HitResolver.ResultKind.Hazard and hitInfo.Hazard and hitInfo.Hazard.Root then
+		if hitInfo.Kind == HitResolver.ResultKind.Hazard and hitInfo.Hazard and hitInfo.Hazard.Root then
 			if HazardRuntime.Destroy(hitInfo.Hazard.Root) then
 				destroyedHazardCount += 1
 			end
@@ -293,7 +438,7 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 end
 
 local function applyOwnerLaunch(context, centerPosition, abilityConfig)
-	local ownerLaunchRadius = math.max(0, tonumber(abilityConfig.OwnerLaunchRadius) or 0)
+	local ownerLaunchRadius = math.max(0, tonumber(abilityConfig.Radius) or tonumber(abilityConfig.OwnerLaunchRadius) or 0)
 	if ownerLaunchRadius <= 0 then
 		return false
 	end
@@ -307,11 +452,11 @@ local function applyOwnerLaunch(context, centerPosition, abilityConfig)
 	end
 
 	local launchCenter = typeof(centerPosition) == "Vector3" and centerPosition or rootPart.Position
-	local planarOffset = Vector3.new(rootPart.Position.X - launchCenter.X, 0, rootPart.Position.Z - launchCenter.Z)
-	if planarOffset.Magnitude > ownerLaunchRadius then
+	if not doesCharacterOverlapDisplayedRadius(launchCenter, character, rootPart, ownerLaunchRadius) then
 		return false
 	end
 
+	local planarOffset = Vector3.new(rootPart.Position.X - launchCenter.X, 0, rootPart.Position.Z - launchCenter.Z)
 	local direction = getPlanarUnitOrFallback(planarOffset, rootPart.CFrame.LookVector)
 	local launchHorizontal = math.max(0, tonumber(abilityConfig.OwnerLaunchHorizontal) or 0)
 	local launchVertical = math.max(0, tonumber(abilityConfig.OwnerLaunchVertical) or 0)

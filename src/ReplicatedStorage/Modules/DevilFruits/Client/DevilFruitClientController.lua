@@ -40,6 +40,8 @@ local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local HAZARD_SUPPRESSION_INTERVAL = 0.05
+local FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL = 0.16
+local LOCAL_HAZARD_OVERLAP_MAX_PARTS = 128
 local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_VERTICAL_DEADZONE = 0.12
 local MIN_DIRECTION_MAGNITUDE = 0.01
@@ -1531,8 +1533,8 @@ local function updateGomuAimAssist()
 	gomuAimState.TargetPlayer = targetPlayer
 end
 
-local function isDescendantOfClientWave(instance)
-	local clientWavesFolder = MapResolver.GetRefs().ClientWaves
+local function isDescendantOfClientWave(instance, clientWavesFolder)
+	clientWavesFolder = clientWavesFolder or MapResolver.GetRefs().ClientWaves
 	if not clientWavesFolder then
 		return false
 	end
@@ -1558,13 +1560,13 @@ local function getWaveTemplate(instance)
 	return wavesFolder:FindFirstChild(current.Name)
 end
 
-local function getHazardContainer(instance)
+local function getHazardContainer(instance, clientWavesFolder)
 	local root, hazardClass, hazardType, canFreeze, freezeBehavior = HazardUtils.GetHazardInfo(instance)
 	if root then
 		return root, hazardClass, hazardType, canFreeze, freezeBehavior
 	end
 
-	if isDescendantOfClientWave(instance) then
+	if isDescendantOfClientWave(instance, clientWavesFolder) then
 		local template = getWaveTemplate(instance)
 		if template then
 			local _, templateClass, templateType, templateCanFreeze, templateFreezeBehavior = HazardUtils.GetHazardInfo(template)
@@ -1693,21 +1695,48 @@ ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, positi
 	return isLocalPlayerBurrowProtected(os.clock())
 end)
 
-local function buildLocalHazardOverlapParams()
+local function buildLocalHazardOverlapParams(refs, restrictToHazardRoots)
 	local overlapParams = OverlapParams.new()
+	refs = refs or MapResolver.GetRefs()
+
+	if restrictToHazardRoots == true then
+		local queryRoots = {}
+		local waveFolder = refs and refs.WaveFolder
+		local sharedHazardsFolder = waveFolder and waveFolder:FindFirstChild("Hazards")
+		if sharedHazardsFolder then
+			queryRoots[#queryRoots + 1] = sharedHazardsFolder
+		end
+		if refs and refs.ClientWaves then
+			queryRoots[#queryRoots + 1] = refs.ClientWaves
+		end
+
+		if #queryRoots > 0 then
+			overlapParams.FilterType = Enum.RaycastFilterType.Include
+			overlapParams.FilterDescendantsInstances = queryRoots
+			overlapParams.MaxParts = LOCAL_HAZARD_OVERLAP_MAX_PARTS
+			return overlapParams
+		end
+	end
+
 	overlapParams.FilterType = Enum.RaycastFilterType.Exclude
 	overlapParams.FilterDescendantsInstances = player.Character and { player.Character } or {}
 	return overlapParams
 end
 
-local function suppressHazardsNearPosition(centerPosition, radius, untilTime, shouldSuppress)
+local function suppressHazardsNearPosition(centerPosition, radius, untilTime, shouldSuppress, restrictToHazardRoots)
 	if typeof(centerPosition) ~= "Vector3" or radius <= 0 then
 		return
 	end
 
-	local nearbyParts = Workspace:GetPartBoundsInRadius(centerPosition, radius, buildLocalHazardOverlapParams())
+	local refs = MapResolver.GetRefs()
+	local clientWavesFolder = refs and refs.ClientWaves
+	local nearbyParts = Workspace:GetPartBoundsInRadius(
+		centerPosition,
+		radius,
+		buildLocalHazardOverlapParams(refs, restrictToHazardRoots)
+	)
 	for _, part in ipairs(nearbyParts) do
-		local container, hazardClass, hazardType = getHazardContainer(part)
+		local container, hazardClass, hazardType = getHazardContainer(part, clientWavesFolder)
 		if container and (shouldSuppress == nil or shouldSuppress(container, hazardClass, hazardType)) then
 			suppressHazard(container, untilTime)
 		end
@@ -1743,9 +1772,12 @@ local function updateHazardSuppression()
 		else
 			-- Corridor hazards are client-created in this project, so Fire Burst
 			-- suppresses nearby minor hazards locally after the server authorizes it.
-			suppressHazardsNearPosition(rootPart.Position, burst.Radius, burst.EndTime, function(_, hazardClass)
-				return hazardClass == "minor"
-			end)
+			if now >= (burst.NextScanAt or 0) then
+				burst.NextScanAt = now + FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL
+				suppressHazardsNearPosition(rootPart.Position, burst.Radius, burst.EndTime, function(_, hazardClass)
+					return hazardClass == "minor"
+				end, true)
+			end
 		end
 	end
 
@@ -1798,6 +1830,7 @@ local function startFireBurst(payload)
 	table.insert(activeFireBursts, {
 		Radius = radius,
 		EndTime = os.clock() + duration,
+		NextScanAt = 0,
 	})
 
 	ensureHazardSuppressionLoop()

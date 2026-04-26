@@ -30,6 +30,7 @@ local FireBurstVfx = {}
 
 local DEBUG_INFO = RunService:IsStudio()
 local FLAME_BURST_CONFIG = MeraConfig.FlameBurst or {}
+local FIRE_BURST_ABILITY_CONFIG = MeraConfig.GetAbilityConfig("FireBurst") or {}
 local SHARED_CONFIG = MeraConfig.Shared or {}
 
 local ROOT_SEGMENTS = SHARED_CONFIG.RootSegments or { "Assets", "VFX", "Mera" }
@@ -55,6 +56,27 @@ local GROUND_RAYCAST_UP = 6
 local GROUND_RAYCAST_DOWN = 18
 local PHASE_FLOOR_REFERENCE_CANDIDATES = FLAME_BURST_CONFIG.PhaseFloorReferenceCandidates or { "Floo", "Ground" }
 local ROOT_ROTATION_CORRECTION = FLAME_BURST_CONFIG.RootRotationCorrection
+local MIN_VISUAL_SCALE = 0.05
+local MAX_VISUAL_SCALE = 12
+local DEFAULT_VISUAL_BASE_RADIUS = math.max(
+	0.001,
+	tonumber(FIRE_BURST_ABILITY_CONFIG.VisualBaseRadius)
+		or tonumber(FLAME_BURST_CONFIG.PreviousVisualRadius)
+		or tonumber(FLAME_BURST_CONFIG.LegacyRadius)
+		or 10
+)
+local DEFAULT_VISUAL_RADIUS_SCALE = math.max(0.001, tonumber(FIRE_BURST_ABILITY_CONFIG.VisualRadiusScale) or 1)
+local DEFAULT_AUTO_SCALE_TO_HITBOX = FIRE_BURST_ABILITY_CONFIG.AutoScaleVisualToHitbox ~= false
+local MEASUREMENT_CORNER_SIGNS = {
+	Vector3.new(-1, -1, -1),
+	Vector3.new(-1, -1, 1),
+	Vector3.new(-1, 1, -1),
+	Vector3.new(-1, 1, 1),
+	Vector3.new(1, -1, -1),
+	Vector3.new(1, -1, 1),
+	Vector3.new(1, 1, -1),
+	Vector3.new(1, 1, 1),
+}
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -260,6 +282,61 @@ local function repositionCloneFromAnchor(clone, anchorInstance, targetCFrame)
 	end)
 
 	return movedAnyPart
+end
+
+local function getPositiveNumber(value)
+	local numberValue = tonumber(value)
+	if numberValue and numberValue > 0 then
+		return numberValue
+	end
+
+	return nil
+end
+
+local function scaleNumberSequence(sequence, scale)
+	if typeof(sequence) ~= "NumberSequence" or typeof(scale) ~= "number" then
+		return sequence
+	end
+
+	local scaledKeypoints = {}
+	for index, keypoint in ipairs(sequence.Keypoints) do
+		scaledKeypoints[index] = NumberSequenceKeypoint.new(
+			keypoint.Time,
+			keypoint.Value * scale,
+			keypoint.Envelope * scale
+		)
+	end
+
+	return NumberSequence.new(scaledKeypoints)
+end
+
+local function scaleNumberRange(range, scale)
+	if typeof(range) ~= "NumberRange" or typeof(scale) ~= "number" then
+		return range
+	end
+
+	return NumberRange.new(range.Min * scale, range.Max * scale)
+end
+
+local function scaleBasePartAroundOrigin(part, scale, originPosition)
+	local rotation = part.CFrame - part.Position
+	local scaledPosition = originPosition + ((part.Position - originPosition) * scale)
+	part.Size = part.Size * scale
+	part.CFrame = CFrame.new(scaledPosition) * rotation
+end
+
+local function resolveFireBurstTargetRadius(options)
+	local visualBaseRadius = getPositiveNumber(options and options.VisualBaseRadius) or DEFAULT_VISUAL_BASE_RADIUS
+	local visualRadius = getPositiveNumber(options and options.VisualRadius)
+	if not visualRadius then
+		local hitboxRadius = getPositiveNumber(options and options.Radius)
+		if hitboxRadius then
+			local visualRadiusScale = getPositiveNumber(options and options.VisualRadiusScale) or DEFAULT_VISUAL_RADIUS_SCALE
+			visualRadius = hitboxRadius * visualRadiusScale
+		end
+	end
+
+	return visualRadius, visualBaseRadius
 end
 
 local function buildGroundRaycastParams(rootPart)
@@ -567,9 +644,11 @@ local function createRuntimeStateFromRoot(rootClone, assetPath)
 		)
 	end
 
-	local remainingBurstCandidates = collectKeywordDescendants(burstGroup, BURST_DEBUG_KEYWORDS)
-	if #remainingBurstCandidates > 0 then
-		logInfo("burst candidate descendants=%s", table.concat(remainingBurstCandidates, " | "))
+	if DEBUG_INFO then
+		local remainingBurstCandidates = collectKeywordDescendants(burstGroup, BURST_DEBUG_KEYWORDS)
+		if #remainingBurstCandidates > 0 then
+			logInfo("burst candidate descendants=%s", table.concat(remainingBurstCandidates, " | "))
+		end
 	end
 
 	local burstGroupState = captureGroupState(burstGroup)
@@ -601,6 +680,157 @@ local function findPlacementAnchor(runtimeState)
 	end
 
 	return runtimeState and runtimeState.Clone
+end
+
+local function getMeasurementRoot(runtimeState)
+	return runtimeState
+		and (
+			runtimeState.BurstGroupState and runtimeState.BurstGroupState.Group
+			or runtimeState.StartupGroupState and runtimeState.StartupGroupState.Group
+			or runtimeState.Clone
+		)
+end
+
+local function partLooksMeasurable(part, allowTransparent)
+	if not part:IsA("BasePart") then
+		return false
+	end
+
+	if part.Size.X <= 0.001 or part.Size.Y <= 0.001 or part.Size.Z <= 0.001 then
+		return false
+	end
+
+	return allowTransparent == true or part.Transparency < 0.995
+end
+
+local function measureHorizontalVisualRadius(runtimeState, allowTransparent)
+	local measurementRoot = getMeasurementRoot(runtimeState)
+	local originFrame = getInstancePivotCFrame(findPlacementAnchor(runtimeState)) or getInstancePivotCFrame(measurementRoot)
+	if not measurementRoot or not originFrame then
+		return nil
+	end
+
+	local minX, maxX = math.huge, -math.huge
+	local minZ, maxZ = math.huge, -math.huge
+	local measuredAny = false
+
+	eachSelfAndDescendants(measurementRoot, function(item)
+		if not partLooksMeasurable(item, allowTransparent) then
+			return
+		end
+
+		local halfSize = item.Size * 0.5
+		for _, cornerSign in ipairs(MEASUREMENT_CORNER_SIGNS) do
+			local corner = item.CFrame:PointToWorldSpace(Vector3.new(
+				halfSize.X * cornerSign.X,
+				halfSize.Y * cornerSign.Y,
+				halfSize.Z * cornerSign.Z
+			))
+			local localCorner = originFrame:PointToObjectSpace(corner)
+			minX = math.min(minX, localCorner.X)
+			maxX = math.max(maxX, localCorner.X)
+			minZ = math.min(minZ, localCorner.Z)
+			maxZ = math.max(maxZ, localCorner.Z)
+			measuredAny = true
+		end
+	end)
+
+	if not measuredAny then
+		return nil
+	end
+
+	return math.max(maxX - minX, maxZ - minZ) * 0.5
+end
+
+local function shouldAutoScaleVisualToHitbox(options)
+	local override = options and options.AutoScaleVisualToHitbox
+	if override ~= nil then
+		return override == true
+	end
+
+	return DEFAULT_AUTO_SCALE_TO_HITBOX
+end
+
+local function resolveFireBurstVisualScale(options, runtimeState)
+	local explicitScale = getPositiveNumber(options and options.VisualScale)
+	if explicitScale then
+		return math.clamp(explicitScale, MIN_VISUAL_SCALE, MAX_VISUAL_SCALE), nil, nil, "explicit"
+	end
+
+	local visualRadius, visualBaseRadius = resolveFireBurstTargetRadius(options)
+	if not visualRadius then
+		return 1, visualRadius, visualBaseRadius, "missing_target"
+	end
+
+	if visualBaseRadius then
+		return math.clamp(visualRadius / visualBaseRadius, MIN_VISUAL_SCALE, MAX_VISUAL_SCALE),
+			visualRadius,
+			visualBaseRadius,
+			"base_radius"
+	end
+
+	if shouldAutoScaleVisualToHitbox(options) then
+		local measuredRadius = measureHorizontalVisualRadius(runtimeState, false)
+			or measureHorizontalVisualRadius(runtimeState, true)
+		if measuredRadius and measuredRadius > 0 then
+			return math.clamp(visualRadius / measuredRadius, MIN_VISUAL_SCALE, MAX_VISUAL_SCALE),
+				visualRadius,
+				measuredRadius,
+				"measured"
+		end
+	end
+
+	return 1, visualRadius, visualBaseRadius, "missing_base"
+end
+
+local function scaleRuntimeState(runtimeState, scale)
+	if not isUsableRuntimeState(runtimeState) or typeof(scale) ~= "number" then
+		return false
+	end
+
+	if math.abs(scale - 1) <= 0.001 then
+		return true
+	end
+
+	local anchorInstance = findPlacementAnchor(runtimeState)
+	local originPivot = getInstancePivotCFrame(anchorInstance) or getInstancePivotCFrame(runtimeState.Clone)
+	if not originPivot then
+		return false
+	end
+
+	local originPosition = originPivot.Position
+	eachSelfAndDescendants(runtimeState.Clone, function(item)
+		if item:IsA("BasePart") then
+			scaleBasePartAroundOrigin(item, scale, originPosition)
+		elseif item:IsA("Attachment") then
+			item.Position = item.Position * scale
+		elseif item:IsA("ParticleEmitter") then
+			item.Size = scaleNumberSequence(item.Size, scale)
+			item.Speed = scaleNumberRange(item.Speed, scale)
+			item.Acceleration = item.Acceleration * scale
+			item.Drag = item.Drag * scale
+		elseif item:IsA("Beam") then
+			item.Width0 *= scale
+			item.Width1 *= scale
+			item.CurveSize0 *= scale
+			item.CurveSize1 *= scale
+		elseif item:IsA("Trail") then
+			item.WidthScale = scaleNumberSequence(item.WidthScale, scale)
+		elseif item:IsA("SpecialMesh") then
+			item.Scale = item.Scale * scale
+			item.Offset = item.Offset * scale
+		elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
+			item.Range *= scale
+		elseif item:IsA("Smoke") then
+			item.Size *= scale
+			item.RiseVelocity *= scale
+		elseif item:IsA("Fire") then
+			item.Size *= scale
+			item.Heat *= scale
+		end
+	end)
+
+	return true
 end
 
 local function findPhaseFloorReference(runtimeState)
@@ -684,6 +914,8 @@ local function createFireBurstRootRuntime(options)
 		return nil
 	end
 
+	local visualScale, visualRadius, visualScaleSourceRadius, visualScaleMode = resolveFireBurstVisualScale(options, runtimeState)
+	local scaled = scaleRuntimeState(runtimeState, visualScale)
 	local placement, placementDebug = buildPlacementCFrame(rootPart, options and options.Direction, runtimeState)
 	repositionCloneFromAnchor(clone, placementDebug and placementDebug.AnchorInstance, placement)
 
@@ -691,7 +923,7 @@ local function createFireBurstRootRuntime(options)
 	hideGroup(runtimeState.BurstGroupState)
 
 	logInfo(
-		"root clone placed path=%s root=%s ground=%s floorOffset=%.2f direction=%s anchor=%s startup=%s burst=%s",
+		"root clone placed path=%s root=%s ground=%s floorOffset=%.2f direction=%s anchor=%s startup=%s burst=%s visualScale=%.2f visualRadius=%s sourceRadius=%s scaleMode=%s scaled=%s",
 		tostring(assetPath),
 		formatVector3(rootPart.Position),
 		formatVector3(placementDebug and placementDebug.GroundPosition),
@@ -699,7 +931,12 @@ local function createFireBurstRootRuntime(options)
 		formatVector3(placementDebug and placementDebug.ResolvedDirection),
 		placementDebug and placementDebug.AnchorInstance and placementDebug.AnchorInstance.Name or "<none>",
 		tostring(runtimeState.StartupGroupState ~= nil),
-		tostring(runtimeState.BurstGroupState ~= nil)
+		tostring(runtimeState.BurstGroupState ~= nil),
+		visualScale,
+		tostring(visualRadius),
+		tostring(visualScaleSourceRadius),
+		tostring(visualScaleMode),
+		tostring(scaled)
 	)
 
 	return runtimeState

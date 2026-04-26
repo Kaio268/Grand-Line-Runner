@@ -15,6 +15,9 @@ local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
 local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 local DEBUG_INFO = RunService:IsStudio()
 local MOVE_LOG_COOLDOWN = 0.08
+local FIRE_BURST_MOVEMENT_LOCK_ATTRIBUTE = "MeraFireBurstMovementLocked"
+local FIRE_BURST_MOVEMENT_UNLOCK_TIMEOUT_BUFFER = 0.45
+local activeFireBurstMovementLocksByPlayer = {}
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
 end
@@ -509,6 +512,142 @@ function MeraMeraNoMi.FlameDash(context)
 	return startPayload
 end
 
+local function setFireBurstMovementLockAttribute(player, locked)
+	if player and player.Parent then
+		player:SetAttribute(FIRE_BURST_MOVEMENT_LOCK_ATTRIBUTE, locked == true and true or nil)
+	end
+end
+
+local function stopRootMotion(rootPart)
+	if typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") then
+		return
+	end
+
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function applyFireBurstMovementLock(context, abilityConfig)
+	if type(abilityConfig) == "table" and abilityConfig.MovementLockEnabled == false then
+		return nil
+	end
+
+	local player = context and context.Player
+	local humanoid = context and context.Humanoid
+	local rootPart = context and context.RootPart
+	if not player or not player:IsA("Player")
+		or typeof(humanoid) ~= "Instance" or not humanoid:IsA("Humanoid")
+		or typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart")
+	then
+		return nil
+	end
+
+	local token = {}
+	activeFireBurstMovementLocksByPlayer[player] = token
+	setFireBurstMovementLockAttribute(player, true)
+
+	local original = {
+		WalkSpeed = humanoid.WalkSpeed,
+		JumpPower = humanoid.JumpPower,
+		JumpHeight = humanoid.JumpHeight,
+		AutoRotate = humanoid.AutoRotate,
+		RootAnchored = rootPart.Anchored,
+	}
+
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.AutoRotate = false
+	pcall(function()
+		humanoid:Move(Vector3.zero, false)
+	end)
+
+	stopRootMotion(rootPart)
+	rootPart.Anchored = true
+
+	return function(reason)
+		if activeFireBurstMovementLocksByPlayer[player] ~= token then
+			return false
+		end
+
+		activeFireBurstMovementLocksByPlayer[player] = nil
+		setFireBurstMovementLockAttribute(player, false)
+
+		if humanoid.Parent and humanoid.Health > 0 then
+			humanoid.WalkSpeed = original.WalkSpeed
+			humanoid.JumpPower = original.JumpPower
+			humanoid.JumpHeight = original.JumpHeight
+			humanoid.AutoRotate = original.AutoRotate
+			pcall(function()
+				humanoid:Move(Vector3.zero, false)
+			end)
+		end
+
+		if rootPart.Parent then
+			rootPart.Anchored = original.RootAnchored == true
+			stopRootMotion(rootPart)
+		end
+
+		logFireBurst(player, "movement unlock player=%s reason=%s", player.Name, tostring(reason or "unknown"))
+		return true
+	end
+end
+
+local function scheduleFireBurstMovementUnlock(releaseMovementLock, animationState, stopDelay)
+	if type(releaseMovementLock) ~= "function" then
+		return
+	end
+
+	local unlocked = false
+	local stoppedConnection = nil
+
+	local function unlock(reason)
+		if unlocked then
+			return
+		end
+
+		unlocked = true
+		if stoppedConnection then
+			stoppedConnection:Disconnect()
+			stoppedConnection = nil
+		end
+
+		releaseMovementLock(reason)
+	end
+
+	local track = type(animationState) == "table" and animationState.Track or nil
+	if typeof(track) == "Instance" and track:IsA("AnimationTrack") then
+		stoppedConnection = track.Stopped:Connect(function()
+			unlock("animation_stopped")
+		end)
+		if not track.IsPlaying then
+			task.defer(function()
+				unlock("animation_already_stopped")
+			end)
+		end
+	end
+
+	task.delay(math.max(0.05, tonumber(stopDelay) or 0) + FIRE_BURST_MOVEMENT_UNLOCK_TIMEOUT_BUFFER, function()
+		unlock("timeout")
+	end)
+end
+
+local function getFireBurstAnimationStopDelay(animationState, fallbackDelay)
+	local resolvedFallback = math.max(0.25, tonumber(fallbackDelay) or 0)
+	local track = type(animationState) == "table" and animationState.Track or nil
+	if typeof(track) ~= "Instance" or not track:IsA("AnimationTrack") then
+		return resolvedFallback
+	end
+
+	local trackLength = tonumber(track.Length) or 0
+	local timePosition = tonumber(track.TimePosition) or 0
+	if trackLength <= 0 then
+		return resolvedFallback
+	end
+
+	return math.max(resolvedFallback, trackLength - timePosition)
+end
+
 function MeraMeraNoMi.FireBurst(context)
 	local abilityConfig = context.AbilityConfig
 	local player = context.Player
@@ -518,6 +657,7 @@ function MeraMeraNoMi.FireBurst(context)
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
 	local radius = math.max(0, tonumber(abilityConfig.Radius) or 0)
 	local startedAt = getSharedTimestamp()
+	local releaseMovementLock = applyFireBurstMovementLock(context, abilityConfig)
 	local sequence = {
 		CastId = buildFireBurstCastId(player, startedAt),
 		StartedAt = startedAt,
@@ -555,11 +695,12 @@ function MeraMeraNoMi.FireBurst(context)
 	)
 	logFireBurst(
 		player,
-		"start received player=%s cast=%s radius=%.2f duration=%.2f",
+		"start received player=%s cast=%s radius=%.2f duration=%.2f movementLock=%s",
 		player and player.Name or "<unknown>",
 		sequence.CastId,
 		radius,
-		duration
+		duration,
+		tostring(releaseMovementLock ~= nil)
 	)
 	logFireBurst(player, "startup effect begin player=%s cast=%s", player and player.Name or "<unknown>", sequence.CastId)
 	context.EmitEffect("FireBurst", buildFireBurstPhasePayload(sequence, "Start"))
@@ -608,8 +749,16 @@ function MeraMeraNoMi.FireBurst(context)
 		duration
 	)
 	if animationState then
-		task.delay(math.max(duration, 0.25), function()
+		local stopDelay = getFireBurstAnimationStopDelay(animationState, duration)
+		scheduleFireBurstMovementUnlock(releaseMovementLock, animationState, stopDelay)
+		task.delay(stopDelay, function()
 			MeraAnimationController.StopAnimation(animationState, "duration_complete")
+		end)
+	else
+		task.delay(math.max(duration, 0.25), function()
+			if releaseMovementLock then
+				releaseMovementLock("no_animation")
+			end
 		end)
 	end
 

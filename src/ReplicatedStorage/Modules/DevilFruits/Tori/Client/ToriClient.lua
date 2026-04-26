@@ -19,6 +19,7 @@ local DEFAULT_PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local PHOENIX_REBIRTH = ToriShared.Passives.PhoenixRebirth
 local DEBUG_FLIGHT = true
 local MIN_DIRECTION_MAGNITUDE = 0.01
+local DEFAULT_PHOENIX_FLIGHT_STARTUP_DURATION = 0.85
 local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_HOVER_HEIGHT_TOLERANCE = 0.75
 local PHOENIX_HOVER_CORRECTION_GAIN = 4
@@ -245,11 +246,22 @@ function ToriClient.new(config)
 	self.phoenixFlightState = {
 		Active = false,
 		EndTime = 0,
+		FlightStartTime = 0,
+		FlightDuration = 0,
+		FlightStarted = false,
+		TakeoffStarted = false,
+		StartupDuration = 0,
 		TakeoffEndTime = 0,
+		TakeoffDuration = 0,
 		TakeoffVelocity = 0,
 		ActivationHeight = 0,
 		InitialLiftTarget = 0,
+		InitialLift = 0,
 		MaxHeight = 0,
+		MaxRiseHeight = 0,
+		BaseFlightSpeed = 0,
+		FlightSpeedScaleReference = 0,
+		FlightSpeedScaleStrength = 0,
 		FlightSpeed = 0,
 		VerticalSpeed = 0,
 		MaxDescendSpeed = 0,
@@ -379,7 +391,8 @@ end
 
 function ToriClient:IsPhoenixFlightActive(now)
 	now = now or os.clock()
-	return self.phoenixFlightState.Active and now < self.phoenixFlightState.EndTime
+	return self.phoenixFlightState.Active
+		and (not self.phoenixFlightState.FlightStarted or now < self.phoenixFlightState.EndTime)
 end
 
 function ToriClient:StopPhoenixFlight()
@@ -390,11 +403,22 @@ function ToriClient:StopPhoenixFlight()
 	local rootPart = getRootPart(self)
 	self.phoenixFlightState.Active = false
 	self.phoenixFlightState.EndTime = 0
+	self.phoenixFlightState.FlightStartTime = 0
+	self.phoenixFlightState.FlightDuration = 0
+	self.phoenixFlightState.FlightStarted = false
+	self.phoenixFlightState.TakeoffStarted = false
+	self.phoenixFlightState.StartupDuration = 0
 	self.phoenixFlightState.TakeoffEndTime = 0
+	self.phoenixFlightState.TakeoffDuration = 0
 	self.phoenixFlightState.TakeoffVelocity = 0
 	self.phoenixFlightState.ActivationHeight = 0
 	self.phoenixFlightState.InitialLiftTarget = 0
+	self.phoenixFlightState.InitialLift = 0
 	self.phoenixFlightState.MaxHeight = 0
+	self.phoenixFlightState.MaxRiseHeight = 0
+	self.phoenixFlightState.BaseFlightSpeed = 0
+	self.phoenixFlightState.FlightSpeedScaleReference = 0
+	self.phoenixFlightState.FlightSpeedScaleStrength = 0
 	self.phoenixFlightState.FlightSpeed = 0
 	self.phoenixFlightState.VerticalSpeed = 0
 	self.phoenixFlightState.MaxDescendSpeed = 0
@@ -408,6 +432,133 @@ function ToriClient:StopPhoenixFlight()
 	if humanoid then
 		humanoid.AutoRotate = true
 	end
+
+	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.StopPhoenixFlightEffect) == "function" then
+		self.clientEffectVisuals:StopPhoenixFlightEffect(self.player)
+	end
+end
+
+function ToriClient:BeginPhoenixFlightTakeoff(rootPart, now)
+	if not rootPart or self.phoenixFlightState.TakeoffStarted then
+		return
+	end
+
+	now = now or os.clock()
+	self.phoenixFlightState.TakeoffStarted = true
+	self.phoenixFlightState.FlightStartTime = now
+	self.phoenixFlightState.ActivationHeight = rootPart.Position.Y
+	self.phoenixFlightState.InitialLiftTarget = rootPart.Position.Y + self.phoenixFlightState.InitialLift
+	self.phoenixFlightState.MaxHeight = rootPart.Position.Y + self.phoenixFlightState.MaxRiseHeight
+	self.phoenixFlightState.TakeoffEndTime = now + self.phoenixFlightState.TakeoffDuration
+
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	rootPart.AssemblyLinearVelocity = Vector3.new(
+		currentVelocity.X,
+		math.max(currentVelocity.Y, self.phoenixFlightState.TakeoffVelocity),
+		currentVelocity.Z
+	)
+
+	flightLog(
+		"TAKEOFF BEGIN",
+		"Y:",
+		formatFlightNumber(rootPart.Position.Y),
+		"TargetY:",
+		formatFlightNumber(self.phoenixFlightState.MaxHeight)
+	)
+end
+
+function ToriClient:BeginPhoenixFlightControl(rootPart, now)
+	if not rootPart or self.phoenixFlightState.FlightStarted then
+		return
+	end
+
+	now = now or os.clock()
+	self.phoenixFlightState.FlightStarted = true
+	self.phoenixFlightState.FlightStartTime = now
+	self.phoenixFlightState.EndTime = now + math.max(0.1, self.phoenixFlightState.FlightDuration)
+
+	flightLog(
+		"FLIGHT BEGIN",
+		"Duration:",
+		formatFlightNumber(self.phoenixFlightState.FlightDuration),
+		"EndIn:",
+		formatFlightNumber(self.phoenixFlightState.EndTime - now),
+		"Y:",
+		formatFlightNumber(rootPart.Position.Y),
+		"TargetY:",
+		formatFlightNumber(self.phoenixFlightState.MaxHeight)
+	)
+end
+
+function ToriClient:UpdatePhoenixFlightStartup(rootPart, humanoid, dt, now)
+	local flightStartTime = self.phoenixFlightState.FlightStartTime
+	if now >= flightStartTime then
+		self:BeginPhoenixFlightTakeoff(rootPart, now)
+		return true
+	end
+
+	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	local response = math.clamp(self.phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
+	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(Vector3.zero, response)
+	rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, 0, nextPlanarVelocity.Z)
+
+	if self:ShouldLogFlightDebug("Startup", now, FLIGHT_UPDATE_LOG_INTERVAL) then
+		flightLog(
+			"STARTUP",
+			"CanFlyIn:",
+			formatFlightNumber(math.max(0, flightStartTime - now)),
+			"Timer:",
+			"waiting"
+		)
+	end
+
+	return false
+end
+
+function ToriClient:HasReachedPhoenixFlightHeight(rootPart)
+	if not rootPart then
+		return false
+	end
+
+	return rootPart.Position.Y >= self.phoenixFlightState.MaxHeight - PHOENIX_HOVER_HEIGHT_TOLERANCE
+end
+
+function ToriClient:UpdatePhoenixFlightTakeoff(rootPart, humanoid, dt, now)
+	if not self.phoenixFlightState.TakeoffStarted then
+		return false
+	end
+
+	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+
+	local currentHeight = rootPart.Position.Y
+	local targetVerticalVelocity = self:GetTargetHoverVerticalVelocity(currentHeight, now)
+	local currentVelocity = rootPart.AssemblyLinearVelocity
+	local response = math.clamp(self.phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
+	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(Vector3.zero, response)
+	rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, targetVerticalVelocity, nextPlanarVelocity.Z)
+
+	if self:ShouldLogFlightDebug("Takeoff", now, FLIGHT_UPDATE_LOG_INTERVAL) then
+		flightLog(
+			"TAKEOFF",
+			"Y:",
+			formatFlightNumber(rootPart.Position.Y),
+			"TargetY:",
+			formatFlightNumber(self.phoenixFlightState.MaxHeight),
+			"VelY:",
+			formatFlightNumber(rootPart.AssemblyLinearVelocity.Y)
+		)
+	end
+
+	if not self:HasReachedPhoenixFlightHeight(rootPart) then
+		return false
+	end
+
+	self:SnapPhoenixHoverHeight(rootPart)
+	rootPart.AssemblyLinearVelocity = Vector3.new(rootPart.AssemblyLinearVelocity.X, 0, rootPart.AssemblyLinearVelocity.Z)
+	self:BeginPhoenixFlightControl(rootPart, now)
+	return true
 end
 
 function ToriClient:StartPhoenixFlight(payload)
@@ -419,20 +570,43 @@ function ToriClient:StartPhoenixFlight(payload)
 
 	self:StopPhoenixFlight()
 
+	local now = os.clock()
 	local duration = math.max(0.1, tonumber(payload and payload.Duration) or 0)
+	local startupDuration = math.max(
+		0,
+		tonumber(payload and payload.StartupDuration) or DEFAULT_PHOENIX_FLIGHT_STARTUP_DURATION
+	)
 	local takeoffDuration = math.max(0.1, tonumber(payload and payload.TakeoffDuration) or 0.4)
 	local initialLift = math.max(0, tonumber(payload and payload.InitialLift) or 10)
 	local maxRiseHeight = math.max(initialLift, tonumber(payload and payload.MaxRiseHeight) or initialLift)
 	local liftVelocity = getInitialLiftVelocity(initialLift)
+	local flightStartTime = now + startupDuration
 
 	self.phoenixFlightState.Active = true
-	self.phoenixFlightState.EndTime = os.clock() + duration
-	self.phoenixFlightState.TakeoffEndTime = os.clock() + takeoffDuration
+	self.phoenixFlightState.EndTime = 0
+	self.phoenixFlightState.FlightStartTime = flightStartTime
+	self.phoenixFlightState.FlightDuration = duration
+	self.phoenixFlightState.FlightStarted = false
+	self.phoenixFlightState.TakeoffStarted = false
+	self.phoenixFlightState.StartupDuration = startupDuration
+	self.phoenixFlightState.TakeoffEndTime = flightStartTime + takeoffDuration
+	self.phoenixFlightState.TakeoffDuration = takeoffDuration
 	self.phoenixFlightState.TakeoffVelocity = liftVelocity
 	self.phoenixFlightState.ActivationHeight = rootPart.Position.Y
 	self.phoenixFlightState.InitialLiftTarget = rootPart.Position.Y + initialLift
+	self.phoenixFlightState.InitialLift = initialLift
 	self.phoenixFlightState.MaxHeight = rootPart.Position.Y + maxRiseHeight
-	self.phoenixFlightState.FlightSpeed = math.max(0, tonumber(payload and payload.FlightSpeed) or 78)
+	self.phoenixFlightState.MaxRiseHeight = maxRiseHeight
+	self.phoenixFlightState.BaseFlightSpeed = math.max(0, tonumber(payload and payload.FlightSpeed) or 78)
+	self.phoenixFlightState.FlightSpeedScaleReference = math.max(
+		1,
+		tonumber(payload and payload.FlightSpeedScaleReference) or 17
+	)
+	self.phoenixFlightState.FlightSpeedScaleStrength = math.max(
+		0,
+		tonumber(payload and payload.FlightSpeedScaleStrength) or 0.5
+	)
+	self.phoenixFlightState.FlightSpeed = self:GetScaledPhoenixFlightSpeed(humanoid)
 	self.phoenixFlightState.VerticalSpeed = math.max(0, tonumber(payload and payload.VerticalSpeed) or 52)
 	self.phoenixFlightState.MaxDescendSpeed = math.max(0, tonumber(payload and payload.MaxDescendSpeed) or 58)
 	self.phoenixFlightState.HorizontalResponsiveness = math.max(1, tonumber(payload and payload.HorizontalResponsiveness) or 10)
@@ -445,19 +619,24 @@ function ToriClient:StartPhoenixFlight(payload)
 
 	local currentVelocity = rootPart.AssemblyLinearVelocity
 	rootPart.AssemblyLinearVelocity = Vector3.new(
-		currentVelocity.X,
-		math.max(currentVelocity.Y, liftVelocity),
-		currentVelocity.Z
+		currentVelocity.X * 0.15,
+		0,
+		currentVelocity.Z * 0.15
 	)
+	if startupDuration <= 0 then
+		self:BeginPhoenixFlightTakeoff(rootPart, now)
+	end
 
 	flightLog(
 		"START",
 		"Y:",
 		formatFlightNumber(rootPart.Position.Y),
-		"TargetY:",
-		formatFlightNumber(self.phoenixFlightState.MaxHeight),
-		"VelY:",
-		formatFlightNumber(rootPart.AssemblyLinearVelocity.Y)
+		"Startup:",
+		formatFlightNumber(startupDuration),
+		"FlightDuration:",
+		formatFlightNumber(duration),
+		"TimerStartsIn:",
+		formatFlightNumber(math.max(0, self.phoenixFlightState.FlightStartTime - now))
 	)
 end
 
@@ -531,6 +710,16 @@ function ToriClient:GetCameraRelativeFlightDirection(rootPart)
 	end
 
 	return direction.Unit * math.min(math.sqrt((forwardAxis * forwardAxis) + (rightAxis * rightAxis)), 1)
+end
+
+function ToriClient:GetScaledPhoenixFlightSpeed(humanoid)
+	local baseFlightSpeed = math.max(0, tonumber(self.phoenixFlightState.BaseFlightSpeed) or 0)
+	local referenceWalkSpeed = math.max(1, tonumber(self.phoenixFlightState.FlightSpeedScaleReference) or 17)
+	local currentWalkSpeed = (humanoid and tonumber(humanoid.WalkSpeed)) or referenceWalkSpeed
+	local rawScale = math.max(0, currentWalkSpeed) / referenceWalkSpeed
+	local scaleStrength = math.max(0, tonumber(self.phoenixFlightState.FlightSpeedScaleStrength) or 0.5)
+	local speedScale = math.max(0, 1 + ((rawScale - 1) * scaleStrength))
+	return baseFlightSpeed * speedScale
 end
 
 function ToriClient:GetTargetHoverVerticalVelocity(currentHeight, now)
@@ -636,10 +825,24 @@ function ToriClient:UpdatePhoenixFlight(dt)
 		return
 	end
 
+	if not self.phoenixFlightState.TakeoffStarted then
+		if not self:UpdatePhoenixFlightStartup(rootPart, humanoid, dt, now) then
+			return
+		end
+	end
+
+	if not self.phoenixFlightState.FlightStarted then
+		if not self:UpdatePhoenixFlightTakeoff(rootPart, humanoid, dt, now) then
+			return
+		end
+	end
+
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 
 	local desiredFlightDirection = self:GetCameraRelativeFlightDirection(rootPart)
-	local desiredPlanarVelocity = desiredFlightDirection * self.phoenixFlightState.FlightSpeed
+	local scaledFlightSpeed = self:GetScaledPhoenixFlightSpeed(humanoid)
+	self.phoenixFlightState.FlightSpeed = scaledFlightSpeed
+	local desiredPlanarVelocity = desiredFlightDirection * scaledFlightSpeed
 	local currentHeight = rootPart.Position.Y
 	local targetVerticalVelocity = self:GetTargetHoverVerticalVelocity(currentHeight, now)
 
@@ -672,6 +875,8 @@ function ToriClient:UpdatePhoenixFlight(dt)
 			"MOVE",
 			"Horizontal:",
 			formatFlightVector(Vector3.new(nextVelocity.X, 0, nextVelocity.Z)),
+			"FlightSpeed:",
+			formatFlightNumber(scaledFlightSpeed),
 			"VelY:",
 			formatFlightNumber(verticalVelocity)
 		)
@@ -943,7 +1148,7 @@ function ToriClient:HandleInputEnded(input)
 	return self:SetFlightInputKeyState(input and input.KeyCode, false)
 end
 
-function ToriClient:BuildRequestPayload(abilityName, abilityConfig, fallbackBuilder)
+function ToriClient:BuildRequestPayload(_abilityName, _abilityConfig, fallbackBuilder)
 	if typeof(fallbackBuilder) == "function" then
 		return fallbackBuilder()
 	end
@@ -951,7 +1156,7 @@ function ToriClient:BuildRequestPayload(abilityName, abilityConfig, fallbackBuil
 	return nil
 end
 
-function ToriClient:BeginPredictedRequest(abilityName, fallbackBuilder)
+function ToriClient:BeginPredictedRequest(_abilityName, fallbackBuilder)
 	if typeof(fallbackBuilder) == "function" then
 		return fallbackBuilder()
 	end

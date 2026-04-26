@@ -1098,9 +1098,16 @@ function MeraPresentationClient:PlayFireBurstStartup(targetPlayer, payload)
 	logFireBurst("start received player=%s cast=%s", targetPlayer.Name, tostring(state.CastId))
 	self:EnsureFireBurstAnimation(state)
 
+	local abilityConfig = self:GetAbilityConfig("FireBurst")
+	local payloadTable = type(payload) == "table" and payload or {}
 	state.StartupVfxState = MeraVfx.PlayFireBurstStartup({
 		RootPart = rootPart,
 		Direction = resolveFacingDirection(rootPart, nil),
+		Radius = tonumber(payloadTable.Radius) or tonumber(type(abilityConfig) == "table" and abilityConfig.Radius),
+		VisualRadius = payloadTable.VisualRadius,
+		VisualBaseRadius = payloadTable.VisualBaseRadius,
+		VisualRadiusScale = payloadTable.VisualRadiusScale,
+		AutoScaleVisualToHitbox = payloadTable.AutoScaleVisualToHitbox,
 	})
 
 	logFireBurst(
@@ -1768,14 +1775,15 @@ function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
 	state.LastPhase = "Release"
 
 	local abilityConfig = self:GetAbilityConfig("FireBurst")
+	local payloadTable = type(payload) == "table" and payload or {}
 	local duration = math.max(
 		0.05,
-		tonumber(type(payload) == "table" and payload.Duration)
+		tonumber(payloadTable.Duration)
 			or tonumber(type(abilityConfig) == "table" and abilityConfig.Duration)
 			or FIRE_BURST_DEFAULT_DURATION
 	)
-	local radius = math.max(0, tonumber(type(payload) == "table" and payload.Radius) or 0)
-	local releaseSource = type(payload) == "table" and payload.ReleaseSource or nil
+	local radius = math.max(0, tonumber(payloadTable.Radius) or tonumber(type(abilityConfig) == "table" and abilityConfig.Radius) or 0)
+	local releaseSource = payloadTable.ReleaseSource
 
 	local startupRuntimeState = state.StartupVfxState
 	state.StartupVfxState = nil
@@ -1786,6 +1794,10 @@ function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
 		Direction = resolveFacingDirection(rootPart, nil),
 		Duration = duration,
 		Radius = radius,
+		VisualRadius = payloadTable.VisualRadius,
+		VisualBaseRadius = payloadTable.VisualBaseRadius,
+		VisualRadiusScale = payloadTable.VisualRadiusScale,
+		AutoScaleVisualToHitbox = payloadTable.AutoScaleVisualToHitbox,
 	})
 
 	if not state.BurstVfxState then

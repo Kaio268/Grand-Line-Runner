@@ -56,7 +56,148 @@ if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
 end
 
-local function swaptoR6G(player, newModelName)
+local function normalizeCharacterModelConfig(value, fallbackName)
+	if type(value) == "table" then
+		local assetName = value.AssetName or value.Name or fallbackName
+		if typeof(assetName) == "string" and assetName ~= "" then
+			local aliases = {}
+			if type(value.Aliases) == "table" then
+				for _, alias in ipairs(value.Aliases) do
+					if typeof(alias) == "string" and alias ~= "" then
+						aliases[#aliases + 1] = alias
+					end
+				end
+			end
+
+			return {
+				AssetName = assetName,
+				Aliases = aliases,
+				RigVariant = value.RigVariant,
+				PreserveTemplateAppearance = value.PreserveTemplateAppearance == true,
+				IsModifiedR15 = value.IsModifiedR15,
+			}
+		end
+	end
+
+	if typeof(value) == "string" and value ~= "" then
+		return {
+			AssetName = value,
+			Aliases = {},
+		}
+	end
+
+	if typeof(fallbackName) == "string" and fallbackName ~= "" then
+		return {
+			AssetName = fallbackName,
+			Aliases = {},
+		}
+	end
+
+	return nil
+end
+
+local function isCharacterModelTemplate(instance)
+	return typeof(instance) == "Instance"
+		and instance:IsA("Model")
+		and instance:FindFirstChildOfClass("Humanoid") ~= nil
+		and instance:FindFirstChild("HumanoidRootPart", true) ~= nil
+end
+
+local function resolveCharacterModelTemplate(candidate)
+	if isCharacterModelTemplate(candidate) then
+		return candidate
+	end
+
+	if typeof(candidate) ~= "Instance" then
+		return nil
+	end
+
+	for _, descendant in ipairs(candidate:GetDescendants()) do
+		if isCharacterModelTemplate(descendant) then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function findCharacterTemplateInFolder(folder, modelConfig)
+	if typeof(folder) ~= "Instance" or type(modelConfig) ~= "table" then
+		return nil
+	end
+
+	local candidateNames = { modelConfig.AssetName }
+	for _, alias in ipairs(modelConfig.Aliases or {}) do
+		candidateNames[#candidateNames + 1] = alias
+	end
+
+	for _, candidateName in ipairs(candidateNames) do
+		if typeof(candidateName) == "string" and candidateName ~= "" then
+			local direct = folder:FindFirstChild(candidateName)
+			if direct then
+				local template = resolveCharacterModelTemplate(direct)
+				if template then
+					return template
+				end
+			end
+		end
+	end
+
+	local normalizedNames = {}
+	for _, candidateName in ipairs(candidateNames) do
+		if typeof(candidateName) == "string" and candidateName ~= "" then
+			normalizedNames[string.lower(candidateName)] = true
+		end
+	end
+
+	for _, child in ipairs(folder:GetChildren()) do
+		if normalizedNames[string.lower(child.Name)] then
+			local template = resolveCharacterModelTemplate(child)
+			if template then
+				return template
+			end
+		end
+	end
+
+	if #folder:GetChildren() == 1 then
+		return resolveCharacterModelTemplate(folder:GetChildren()[1])
+	end
+
+	return nil
+end
+
+local function getFruitScopedCharacterModelsFolder(fruitName)
+	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
+	local fruitKey = fruitConfig and fruitConfig.FruitKey
+	if typeof(fruitKey) ~= "string" or fruitKey == "" then
+		return nil
+	end
+
+	local devilFruitsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits")
+	local fruitFolder = devilFruitsFolder:FindFirstChild(fruitKey)
+	local assetsFolder = fruitFolder and fruitFolder:FindFirstChild("Assets")
+	return assetsFolder and assetsFolder:FindFirstChild("CharacterModels") or nil
+end
+
+local function getCharacterModelTemplate(modelConfig, fruitName)
+	local globalFolder = ReplicatedStorage:FindFirstChild("Assets")
+	globalFolder = globalFolder and globalFolder:FindFirstChild("CharacterModels") or nil
+
+	local template = findCharacterTemplateInFolder(globalFolder, modelConfig)
+	if template then
+		return template
+	end
+
+	return findCharacterTemplateInFolder(getFruitScopedCharacterModelsFolder(fruitName), modelConfig)
+end
+
+local function swaptoR6G(player, modelConfig, fruitName)
+	modelConfig = normalizeCharacterModelConfig(modelConfig, "R6")
+	if not modelConfig then
+		return
+	end
+
+	local newModelName = modelConfig.AssetName
 	local character = player.Character or player.CharacterAdded:Wait()
 	-- Wait a frame to ensure the character is fully in the workspace
 	task.wait()
@@ -67,7 +208,7 @@ local function swaptoR6G(player, newModelName)
 		return
 	end
 
-	local modelTemplate = ReplicatedStorage.Assets.CharacterModels:FindFirstChild(newModelName)
+	local modelTemplate = getCharacterModelTemplate(modelConfig, fruitName)
 	if not modelTemplate then
 		warn("[DevilFruitService] Could not find model template: " .. newModelName)
 		return
@@ -81,11 +222,16 @@ local function swaptoR6G(player, newModelName)
 	local newCharacter = modelTemplate:Clone()
 	newCharacter.Name = player.Name
 
+	local rigVariant = if typeof(modelConfig.RigVariant) == "string" and modelConfig.RigVariant ~= ""
+		then modelConfig.RigVariant
+		else newModelName
+	local isModifiedR15 = if modelConfig.IsModifiedR15 ~= nil then modelConfig.IsModifiedR15 == true else newModelName == "R6G"
+
 	-- Track the specific model asset so we can swap between different custom models later
 	newCharacter:SetAttribute("CurrentModelAsset", newModelName)
-	newCharacter:SetAttribute("EatAnimationRig", newModelName)
-	newCharacter:SetAttribute("FruitModelVariant", newModelName)
-	newCharacter:SetAttribute("IsModifiedR15", true)
+	newCharacter:SetAttribute("EatAnimationRig", rigVariant)
+	newCharacter:SetAttribute("FruitModelVariant", rigVariant)
+	newCharacter:SetAttribute("IsModifiedR15", isModifiedR15)
 
 	local newHumanoid = newCharacter:FindFirstChildOfClass("Humanoid")
 	if not newHumanoid then
@@ -94,39 +240,41 @@ local function swaptoR6G(player, newModelName)
 	end
 
 	-- 2. APPLY APPEARANCE
-	local success, playerDescription = pcall(function()
-		return Players:GetHumanoidDescriptionFromUserId(player.UserId)
-	end)
-
-	if success and playerDescription then
-		playerDescription.HeadScale, playerDescription.HeightScale = 1, 1
-		playerDescription.WidthScale, playerDescription.DepthScale = 1, 1
-
-		local templateDescription = newHumanoid:GetAppliedDescription()
-		playerDescription.LeftArm = templateDescription.LeftArm
-		playerDescription.RightArm = templateDescription.RightArm
-		playerDescription.LeftLeg = templateDescription.LeftLeg
-		playerDescription.RightLeg = templateDescription.RightLeg
-		playerDescription.Torso = templateDescription.Torso
-
-		pcall(function()
-			newHumanoid:ApplyDescription(playerDescription)
+	if not modelConfig.PreserveTemplateAppearance then
+		local success, playerDescription = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserId(player.UserId)
 		end)
+
+		if success and playerDescription then
+			playerDescription.HeadScale, playerDescription.HeightScale = 1, 1
+			playerDescription.WidthScale, playerDescription.DepthScale = 1, 1
+
+			local templateDescription = newHumanoid:GetAppliedDescription()
+			playerDescription.LeftArm = templateDescription.LeftArm
+			playerDescription.RightArm = templateDescription.RightArm
+			playerDescription.LeftLeg = templateDescription.LeftLeg
+			playerDescription.RightLeg = templateDescription.RightLeg
+			playerDescription.Torso = templateDescription.Torso
+
+			pcall(function()
+				newHumanoid:ApplyDescription(playerDescription)
+			end)
+		end
 	end
 
-	if newHumanoid and newModelName == "R6G" then
+	if newHumanoid and rigVariant == "R6G" then
 		-- Ensure the Humanoid recognizes the rig as R15 (since R6G is a modified R15)
 		newHumanoid.HipHeight = 2
 		newHumanoid.RigType = Enum.HumanoidRigType.R15
 	end
 
 	if newHumanoid then
-		newHumanoid:SetAttribute("EatAnimationRig", newModelName)
-		newHumanoid:SetAttribute("FruitModelVariant", newModelName)
+		newHumanoid:SetAttribute("EatAnimationRig", rigVariant)
+		newHumanoid:SetAttribute("FruitModelVariant", rigVariant)
 	end
 
-	player:SetAttribute("EatAnimationRig", newModelName)
-	player:SetAttribute("FruitModelVariant", newModelName)
+	player:SetAttribute("EatAnimationRig", rigVariant)
+	player:SetAttribute("FruitModelVariant", rigVariant)
 
 	-- 3. PERFORM THE SWAP
 	player.Character = newCharacter
@@ -293,11 +441,25 @@ local function ensureMoguClawsAttached(player)
 end
 
 local function getDesiredCharacterModelAsset(fruitName)
-	if fruitName == "Gomu Gomu no Mi" then
-		return "R6G"
+	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
+	local configuredModel = fruitConfig and normalizeCharacterModelConfig(fruitConfig.CharacterModel)
+	if configuredModel then
+		return configuredModel
 	end
 
-	return "R6"
+	if fruitName == "Gomu Gomu no Mi" then
+		return normalizeCharacterModelConfig({
+			AssetName = "R6G",
+			RigVariant = "R6G",
+			IsModifiedR15 = true,
+		})
+	end
+
+	return normalizeCharacterModelConfig({
+		AssetName = "R6",
+		RigVariant = "R6",
+		IsModifiedR15 = false,
+	})
 end
 
 local function applyFruitCharacterModel(player, fruitName)
@@ -306,9 +468,10 @@ local function applyFruitCharacterModel(player, fruitName)
 		return
 	end
 
-	local desiredModelAsset = getDesiredCharacterModelAsset(fruitName)
+	local desiredModelConfig = getDesiredCharacterModelAsset(fruitName)
+	local desiredModelAsset = desiredModelConfig and desiredModelConfig.AssetName or "R6"
 	if character:GetAttribute("CurrentModelAsset") ~= desiredModelAsset then
-		swaptoR6G(player, desiredModelAsset)
+		swaptoR6G(player, desiredModelConfig, fruitName)
 		character = player.Character
 		if not character then
 			return
@@ -1249,7 +1412,7 @@ function DevilFruitService.GetCooldownBypass(player)
 	return isCooldownBypassEnabled(player)
 end
 
-function DevilFruitService.IsHazardSuppressedForPlayer(player, instance)
+function DevilFruitService.IsHazardSuppressedForPlayer(player, _instance)
 	local untilTime = player:GetAttribute("MeraFireBurstUntil")
 	if typeof(untilTime) ~= "number" then
 		return false
