@@ -39,10 +39,10 @@ local MOGU_BURROW_ABILITY = "Burrow"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
+local PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL = 0.16
 local LOCAL_HAZARD_OVERLAP_MAX_PARTS = 128
-local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_VERTICAL_DEADZONE = 0.12
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
@@ -224,6 +224,62 @@ end
 
 local function getCooldownNow()
 	return Workspace:GetServerTimeNow()
+end
+
+local function getLocalCooldownReadyAt(cooldownState)
+	if typeof(cooldownState) == "table" then
+		return tonumber(cooldownState.ReadyAt) or 0
+	end
+
+	return tonumber(cooldownState) or 0
+end
+
+local function getLocalCooldownStartsAt(cooldownState, fallbackDuration)
+	local readyAt = getLocalCooldownReadyAt(cooldownState)
+	if typeof(cooldownState) == "table" then
+		local startsAt = tonumber(cooldownState.StartsAt)
+		if startsAt and startsAt > 0 then
+			return startsAt
+		end
+	end
+
+	return math.max(0, readyAt - math.max(0, tonumber(fallbackDuration) or 0))
+end
+
+local function getLocalCooldownDuration(cooldownState, fallbackDuration)
+	if typeof(cooldownState) == "table" then
+		local duration = tonumber(cooldownState.Duration)
+		if duration and duration > 0 then
+			return duration
+		end
+	end
+
+	return math.max(0, tonumber(fallbackDuration) or 0)
+end
+
+local function setLocalCooldown(abilityName, readyAt, payload)
+	local resolvedReadyAt = tonumber(readyAt) or 0
+	if resolvedReadyAt <= 0 then
+		localCooldowns[abilityName] = nil
+		return
+	end
+
+	local cooldownState = {
+		ReadyAt = resolvedReadyAt,
+	}
+
+	if typeof(payload) == "table" then
+		local startsAt = tonumber(payload.CooldownStartsAt)
+		local duration = tonumber(payload.CooldownDuration)
+		if startsAt and startsAt > 0 and startsAt < resolvedReadyAt then
+			cooldownState.StartsAt = startsAt
+		end
+		if duration and duration > 0 then
+			cooldownState.Duration = duration
+		end
+	end
+
+	localCooldowns[abilityName] = cooldownState
 end
 
 local function getPlayerGui()
@@ -830,20 +886,36 @@ local function updateCooldownHud(forceRebuild)
 	setCooldownHudVisible(true)
 
 	for abilityName, row in pairs(cooldownHud.Rows) do
-		local readyAt = isCooldownBypassEnabled() and 0 or (localCooldowns[abilityName] or 0)
-		local remaining = math.max(0, readyAt - getCooldownNow())
-		local total = math.max(row.Cooldown, 0.001)
-		local progress = math.clamp(1 - (remaining / total), 0, 1)
+		local cooldownState = if isCooldownBypassEnabled() then nil else localCooldowns[abilityName]
+		local readyAt = getLocalCooldownReadyAt(cooldownState)
+		local now = getCooldownNow()
+		local remaining = math.max(0, readyAt - now)
+		local startsAt = getLocalCooldownStartsAt(cooldownState, row.Cooldown)
+		local startsIn = math.max(0, startsAt - now)
+		local isWaitingForCooldownStart = remaining > 0 and startsIn > 0
+		local total = math.max(getLocalCooldownDuration(cooldownState, row.Cooldown), 0.001)
+		local progress = if isWaitingForCooldownStart then 1 else math.clamp(1 - (remaining / total), 0, 1)
 		local isReady = remaining <= 0
 		if isReady then
 			localCooldowns[abilityName] = nil
 		end
 
-		row.Status.Text = isReady and "READY" or ("CD " .. formatCooldownTime(remaining))
-		row.Status.TextColor3 = isReady and DEVIL_FRUIT_UI.Ready or DEVIL_FRUIT_UI.Cooldown
-		row.Detail.Text = isReady and "Move ready" or ("On cooldown for " .. formatCooldownTime(remaining))
+		if isReady then
+			row.Status.Text = "READY"
+			row.Status.TextColor3 = DEVIL_FRUIT_UI.Ready
+			row.Detail.Text = "Move ready"
+		elseif isWaitingForCooldownStart then
+			row.Status.Text = "ACTIVE"
+			row.Status.TextColor3 = DEVIL_FRUIT_UI.Ready
+			row.Detail.Text = "Cooldown starts in " .. formatCooldownTime(startsIn)
+		else
+			row.Status.Text = "CD " .. formatCooldownTime(remaining)
+			row.Status.TextColor3 = DEVIL_FRUIT_UI.Cooldown
+			row.Detail.Text = "On cooldown for " .. formatCooldownTime(remaining)
+		end
 		row.Fill.Size = UDim2.new(progress, 0, 1, 0)
-		row.Fill.BackgroundColor3 = isReady and DEVIL_FRUIT_UI.Ready or DEVIL_FRUIT_UI.CooldownFill
+		row.Fill.BackgroundColor3 = (isReady or isWaitingForCooldownStart) and DEVIL_FRUIT_UI.Ready
+			or DEVIL_FRUIT_UI.CooldownFill
 	end
 	refreshCooldownHudLayout()
 end
@@ -941,11 +1013,12 @@ local function isLocallyReady(abilityName)
 		return true
 	end
 
-	local readyAt = localCooldowns[abilityName]
-	if not readyAt then
+	local cooldownState = localCooldowns[abilityName]
+	if not cooldownState then
 		return true
 	end
 
+	local readyAt = getLocalCooldownReadyAt(cooldownState)
 	if getCooldownNow() >= readyAt then
 		localCooldowns[abilityName] = nil
 		return true
@@ -987,6 +1060,7 @@ local clientEffectVisuals = ClientEffectVisuals.new({
 	PhoenixFruitName = PHOENIX_FRUIT_NAME,
 	PhoenixFlightAbility = PHOENIX_FLIGHT_ABILITY,
 	PhoenixShieldAbility = PHOENIX_SHIELD_ABILITY,
+	PhoenixRebirthAbility = PHOENIX_REBIRTH_ABILITY,
 })
 
 local function getHumanoid()
@@ -1652,7 +1726,8 @@ local function isLocalPlayerInsidePhoenixShield(position)
 			activePhoenixShields[shieldOwner] = nil
 		else
 			local ownerRootPart = getPlayerRootPart(shieldOwner)
-			if ownerRootPart and getPlanarDistance(ownerRootPart.Position, checkPosition) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
+			local shieldRadius = math.max(0, tonumber(shield.Radius) or 0)
+			if ownerRootPart and shieldRadius > 0 and getPlanarDistance(ownerRootPart.Position, checkPosition) <= shieldRadius then
 				return true
 			end
 		end
@@ -1790,8 +1865,11 @@ local function updateHazardSuppression()
 				if shieldOwner.Parent == nil then
 					activePhoenixShields[shieldOwner] = nil
 				end
-			elseif rootPart and getPlanarDistance(ownerRootPart.Position, rootPart.Position) <= (shield.Radius + PHOENIX_SHIELD_PADDING) then
-				suppressHazardsNearPosition(ownerRootPart.Position, shield.Radius, shield.EndTime)
+			else
+				local shieldRadius = math.max(0, tonumber(shield.Radius) or 0)
+				if rootPart and shieldRadius > 0 and getPlanarDistance(ownerRootPart.Position, rootPart.Position) <= shieldRadius then
+					suppressHazardsNearPosition(ownerRootPart.Position, shieldRadius, shield.EndTime)
+				end
 			end
 		end
 	end
@@ -1850,8 +1928,8 @@ local function startPhoenixShield(targetPlayer, payload)
 	local shieldState = activePhoenixShields[targetPlayer]
 	local shieldEndTime = os.clock() + duration
 	if shieldState then
-		shieldState.EndTime = math.max(shieldState.EndTime, shieldEndTime)
-		shieldState.Radius = math.max(shieldState.Radius, radius)
+		shieldState.EndTime = shieldEndTime
+		shieldState.Radius = radius
 	else
 		activePhoenixShields[targetPlayer] = {
 			EndTime = shieldEndTime,
@@ -2188,7 +2266,7 @@ local function initializeDevilFruitClient()
 	stateRemote.OnClientEvent:Connect(function(eventName, fruitName, abilityName, value, payload)
 		if eventName == "Activated" then
 			local readyAt = tonumber(value) or 0
-			localCooldowns[abilityName] = readyAt
+			setLocalCooldown(abilityName, readyAt, payload)
 			updateCooldownHud()
 
 			fruitModuleLoader:CallControllerMethod(fruitName, "HandleStateEvent", eventName, abilityName, value, payload)
@@ -2204,7 +2282,7 @@ local function initializeDevilFruitClient()
 		if eventName == "Denied" and value == "Cooldown" then
 			local readyAt = tonumber(payload) or 0
 			if readyAt > 0 then
-				localCooldowns[abilityName] = readyAt
+				setLocalCooldown(abilityName, readyAt)
 				updateCooldownHud()
 			end
 		end

@@ -88,6 +88,7 @@ local Animations = {
 		PhoenixFlightIdle = toriEmbeddedAnimation("Phoenix Flyidle", 1),
 		PhoenixFlightEnd = toriEmbeddedAnimation("Phoenix FlyEnd", 1.2),
 		PhoenixFlameShield = toriEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
+		PhoenixRevive = toriEmbeddedAnimation("Phoenix Revive", 2.4),
 	},
 }
 

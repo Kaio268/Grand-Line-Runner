@@ -52,6 +52,7 @@ function DevilFruitEffectRouter:HandleEffect(targetPlayer, fruitName, abilityNam
 	self.clientEffectVisuals:CreateBomuDetonationEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
+	self.clientEffectVisuals:CreatePhoenixRebirthEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 	self.clientEffectVisuals:CreateRubberLaunchEffect(targetPlayer, fruitName, abilityName, resolvedPayload)
 
 	return true

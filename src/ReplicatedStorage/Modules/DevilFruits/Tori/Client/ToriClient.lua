@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -16,13 +17,16 @@ ToriClient.__index = ToriClient
 local DEFAULT_PHOENIX_FRUIT_NAME = ToriShared.FruitName
 local DEFAULT_PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local DEFAULT_PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
+local DEFAULT_PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
+local DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION = 1.6666667
 local PHOENIX_REBIRTH = ToriShared.Passives.PhoenixRebirth
 local DEBUG_FLIGHT = true
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_PHOENIX_FLIGHT_STARTUP_DURATION = 0.85
-local PHOENIX_SHIELD_PADDING = 2.5
 local PHOENIX_HOVER_HEIGHT_TOLERANCE = 0.75
 local PHOENIX_HOVER_CORRECTION_GAIN = 4
+local PHOENIX_TURN_MIN_RESPONSE_SCALE = 0.55
+local PHOENIX_FLIGHT_ROTATION_RESPONSIVENESS = 12
 local FLIGHT_UPDATE_LOG_INTERVAL = 0.25
 local FLIGHT_MOVE_LOG_INTERVAL = 0.2
 local FLIGHT_CORRECTION_LOG_INTERVAL = 0.2
@@ -196,6 +200,25 @@ local function getPerpendicularPlanarRightVector(forwardVector)
 	return Vector3.new(-forwardVector.Z, 0, forwardVector.X)
 end
 
+local function getExponentialResponse(responsiveness, dt)
+	return math.clamp(1 - math.exp(-math.max(0, responsiveness) * math.max(0, dt or 0)), 0, 1)
+end
+
+local function getTurnAdjustedResponse(currentPlanarVelocity, desiredPlanarVelocity, responsiveness, dt)
+	local baseResponse = getExponentialResponse(responsiveness, dt)
+	if
+		currentPlanarVelocity.Magnitude <= MIN_DIRECTION_MAGNITUDE
+		or desiredPlanarVelocity.Magnitude <= MIN_DIRECTION_MAGNITUDE
+	then
+		return baseResponse
+	end
+
+	local turnDot = math.clamp(currentPlanarVelocity.Unit:Dot(desiredPlanarVelocity.Unit), -1, 1)
+	local turnAmount = math.acos(turnDot) / math.pi
+	local responseScale = 1 - ((1 - PHOENIX_TURN_MIN_RESPONSE_SCALE) * turnAmount)
+	return baseResponse * responseScale
+end
+
 local function getCurrentLookVector(rootPart)
 	local camera = getCurrentCamera()
 	local lookVector = camera and camera.CFrame.LookVector or (rootPart and rootPart.CFrame.LookVector)
@@ -232,7 +255,7 @@ function ToriClient.new(config)
 	self.phoenixFruitName = (config and config.phoenixFruitName) or DEFAULT_PHOENIX_FRUIT_NAME
 	self.phoenixFlightAbility = (config and config.phoenixFlightAbility) or DEFAULT_PHOENIX_FLIGHT_ABILITY
 	self.phoenixShieldAbility = (config and config.phoenixShieldAbility) or DEFAULT_PHOENIX_SHIELD_ABILITY
-	self.shieldPadding = clampPositiveNumber(config and config.phoenixShieldPadding, PHOENIX_SHIELD_PADDING)
+	self.phoenixRebirthAbility = (config and config.phoenixRebirthAbility) or DEFAULT_PHOENIX_REBIRTH_ABILITY
 	self.flightInputState = {
 		Forward = false,
 		Backward = false,
@@ -243,6 +266,9 @@ function ToriClient.new(config)
 	self.suppressedHazardParts = {}
 	self.shieldHitEffectTimes = setmetatable({}, { __mode = "k" })
 	self.hazardSuppressionLoopRunning = false
+	self.phoenixShieldAnimationLock = nil
+	self.lastPhoenixRebirthVisualTriggeredAt = nil
+	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
 	self.phoenixFlightState = {
 		Active = false,
 		EndTime = 0,
@@ -336,8 +362,34 @@ function ToriClient:HandlePhoenixRebirthTriggered(triggeredAt)
 		return false
 	end
 
-	-- Placeholder hook for future phoenix rebirth animation and VFX.
-	print("[ToriClient] Phoenix Rebirth triggered at", formatFlightNumber(triggeredAt))
+	self.lastPhoenixRebirthVisualTriggeredAt = tonumber(triggeredAt) or self.lastPhoenixRebirthVisualTriggeredAt
+	return true
+end
+
+function ToriClient:PlayPhoenixRebirthVisual(targetPlayer, payload)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return false
+	end
+
+	payload = payload or {}
+	local triggeredAt = tonumber(payload.TriggeredAt) or Workspace:GetServerTimeNow()
+	self.phoenixRebirthVisualTimes = self.phoenixRebirthVisualTimes or setmetatable({}, { __mode = "k" })
+	local lastTriggeredAt = self.phoenixRebirthVisualTimes[targetPlayer]
+	if lastTriggeredAt and math.abs(lastTriggeredAt - triggeredAt) <= 0.05 then
+		return true
+	end
+
+	self.lastPhoenixRebirthVisualTriggeredAt = triggeredAt
+	self.phoenixRebirthVisualTimes[targetPlayer] = triggeredAt
+	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.CreatePhoenixRebirthEffect) == "function" then
+		self.clientEffectVisuals:CreatePhoenixRebirthEffect(
+			targetPlayer,
+			self.phoenixFruitName,
+			self.phoenixRebirthAbility,
+			payload
+		)
+	end
+
 	return true
 end
 
@@ -446,9 +498,6 @@ function ToriClient:BeginPhoenixFlightTakeoff(rootPart, now)
 	now = now or os.clock()
 	self.phoenixFlightState.TakeoffStarted = true
 	self.phoenixFlightState.FlightStartTime = now
-	self.phoenixFlightState.ActivationHeight = rootPart.Position.Y
-	self.phoenixFlightState.InitialLiftTarget = rootPart.Position.Y + self.phoenixFlightState.InitialLift
-	self.phoenixFlightState.MaxHeight = rootPart.Position.Y + self.phoenixFlightState.MaxRiseHeight
 	self.phoenixFlightState.TakeoffEndTime = now + self.phoenixFlightState.TakeoffDuration
 
 	local currentVelocity = rootPart.AssemblyLinearVelocity
@@ -491,6 +540,10 @@ function ToriClient:BeginPhoenixFlightControl(rootPart, now)
 end
 
 function ToriClient:UpdatePhoenixFlightStartup(rootPart, humanoid, dt, now)
+	if self:TryBeginPhoenixFlightControlAtHeight(rootPart, now) then
+		return true
+	end
+
 	local flightStartTime = self.phoenixFlightState.FlightStartTime
 	if now >= flightStartTime then
 		self:BeginPhoenixFlightTakeoff(rootPart, now)
@@ -525,9 +578,31 @@ function ToriClient:HasReachedPhoenixFlightHeight(rootPart)
 	return rootPart.Position.Y >= self.phoenixFlightState.MaxHeight - PHOENIX_HOVER_HEIGHT_TOLERANCE
 end
 
+function ToriClient:TryBeginPhoenixFlightControlAtHeight(rootPart, now)
+	if self.phoenixFlightState.FlightStarted or not self:HasReachedPhoenixFlightHeight(rootPart) then
+		return false
+	end
+
+	now = now or os.clock()
+	if not self.phoenixFlightState.TakeoffStarted then
+		self.phoenixFlightState.TakeoffStarted = true
+		self.phoenixFlightState.TakeoffEndTime = now
+		self.phoenixFlightState.FlightStartTime = now
+	end
+
+	self:SnapPhoenixHoverHeight(rootPart)
+	rootPart.AssemblyLinearVelocity = Vector3.new(rootPart.AssemblyLinearVelocity.X, 0, rootPart.AssemblyLinearVelocity.Z)
+	self:BeginPhoenixFlightControl(rootPart, now)
+	return true
+end
+
 function ToriClient:UpdatePhoenixFlightTakeoff(rootPart, humanoid, dt, now)
 	if not self.phoenixFlightState.TakeoffStarted then
 		return false
+	end
+
+	if self:TryBeginPhoenixFlightControlAtHeight(rootPart, now) then
+		return true
 	end
 
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
@@ -551,13 +626,10 @@ function ToriClient:UpdatePhoenixFlightTakeoff(rootPart, humanoid, dt, now)
 		)
 	end
 
-	if not self:HasReachedPhoenixFlightHeight(rootPart) then
+	if not self:TryBeginPhoenixFlightControlAtHeight(rootPart, now) then
 		return false
 	end
 
-	self:SnapPhoenixHoverHeight(rootPart)
-	rootPart.AssemblyLinearVelocity = Vector3.new(rootPart.AssemblyLinearVelocity.X, 0, rootPart.AssemblyLinearVelocity.Z)
-	self:BeginPhoenixFlightControl(rootPart, now)
 	return true
 end
 
@@ -762,7 +834,7 @@ function ToriClient:GetTargetHoverVerticalVelocity(currentHeight, now)
 	return -correctionVelocity
 end
 
-function ToriClient:FaceCharacterTowards(direction)
+function ToriClient:FaceCharacterTowards(direction, dt)
 	if typeof(direction) ~= "Vector3" or direction.Magnitude <= MIN_DIRECTION_MAGNITUDE then
 		return
 	end
@@ -779,8 +851,11 @@ function ToriClient:FaceCharacterTowards(direction)
 	end
 
 	local rootPosition = rootPart.Position
+	local currentDirection = getPlanarUnitOrFallback(rootPart.CFrame.LookVector, planarDirection)
+	local turnAlpha = getExponentialResponse(PHOENIX_FLIGHT_ROTATION_RESPONSIVENESS, dt)
+	local currentCFrame = CFrame.lookAt(rootPosition, rootPosition + currentDirection, Vector3.yAxis)
 	local targetCFrame = CFrame.lookAt(rootPosition, rootPosition + planarDirection.Unit, Vector3.yAxis)
-	pivotCharacterToRootCFrame(character, rootPart, targetCFrame)
+	pivotCharacterToRootCFrame(character, rootPart, currentCFrame:Lerp(targetCFrame, turnAlpha))
 end
 
 function ToriClient:SnapPhoenixHoverHeight(rootPart)
@@ -847,8 +922,13 @@ function ToriClient:UpdatePhoenixFlight(dt)
 	local targetVerticalVelocity = self:GetTargetHoverVerticalVelocity(currentHeight, now)
 
 	local currentVelocity = rootPart.AssemblyLinearVelocity
-	local response = math.clamp(self.phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
 	local currentPlanarVelocity = getPlanarVector(currentVelocity)
+	local response = getTurnAdjustedResponse(
+		currentPlanarVelocity,
+		desiredPlanarVelocity,
+		self.phoenixFlightState.HorizontalResponsiveness,
+		dt
+	)
 	local nextPlanarVelocity = currentPlanarVelocity:Lerp(desiredPlanarVelocity, response)
 	local nextVelocity = Vector3.new(nextPlanarVelocity.X, targetVerticalVelocity, nextPlanarVelocity.Z)
 	local positionYBeforeWrites = rootPart.Position.Y
@@ -885,8 +965,8 @@ function ToriClient:UpdatePhoenixFlight(dt)
 	local desiredPlanarDirection = desiredPlanarVelocity
 	local nextPlanarDirection = getPlanarVector(nextVelocity)
 	if desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE or nextPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
-		local facingDirection = desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and desiredPlanarDirection or nextPlanarDirection
-		self:FaceCharacterTowards(facingDirection)
+		local facingDirection = nextPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and nextPlanarDirection or desiredPlanarDirection
+		self:FaceCharacterTowards(facingDirection, dt)
 	end
 
 	if math.abs(rootPart.Position.Y - self.phoenixFlightState.MaxHeight) <= PHOENIX_HOVER_HEIGHT_TOLERANCE then
@@ -1013,7 +1093,11 @@ function ToriClient:CreatePhoenixShieldHitPlaceholder(shieldOwner, shield, hazar
 end
 
 function ToriClient:SuppressHazardsNearPhoenixShield(shieldOwner, shield, ownerRootPart, localRootPart, now)
-	local shieldRadius = shield.Radius + self.shieldPadding
+	local shieldRadius = math.max(0, tonumber(shield and shield.Radius) or 0)
+	if shieldRadius <= 0 then
+		return
+	end
+
 	if getPlanarDistance(ownerRootPart.Position, localRootPart.Position) > shieldRadius then
 		return
 	end
@@ -1096,13 +1180,134 @@ function ToriClient:IsLocalPlayerInsidePhoenixShield(position)
 			self.activePhoenixShields[shieldOwner] = nil
 		else
 			local ownerRootPart = getPlayerRootPart(shieldOwner)
-			if ownerRootPart and getPlanarDistance(ownerRootPart.Position, checkPosition) <= (shield.Radius + self.shieldPadding) then
+			local shieldRadius = math.max(0, tonumber(shield.Radius) or 0)
+			if ownerRootPart and shieldRadius > 0 and getPlanarDistance(ownerRootPart.Position, checkPosition) <= shieldRadius then
 				return true
 			end
 		end
 	end
 
 	return false
+end
+
+function ToriClient:ReleasePhoenixShieldAnimationLock(lock)
+	if self.phoenixShieldAnimationLock ~= lock then
+		return
+	end
+
+	self.phoenixShieldAnimationLock = nil
+	if lock.Connection then
+		lock.Connection:Disconnect()
+	end
+
+	local humanoid = lock.Humanoid
+	if humanoid and humanoid.Parent then
+		if lock.WalkSpeed ~= nil then
+			humanoid.WalkSpeed = lock.WalkSpeed
+		end
+		if lock.JumpPower ~= nil then
+			humanoid.JumpPower = lock.JumpPower
+		end
+		if lock.JumpHeight ~= nil then
+			humanoid.JumpHeight = lock.JumpHeight
+		end
+		if lock.AutoRotate ~= nil then
+			humanoid.AutoRotate = lock.AutoRotate
+		end
+	end
+end
+
+function ToriClient:SchedulePhoenixShieldAnimationUnlock(lock)
+	if lock.UnlockScheduled then
+		return
+	end
+
+	lock.UnlockScheduled = true
+	local function schedule()
+		local delayTime = math.max(0, (lock.EndTime or os.clock()) - os.clock())
+		task.delay(delayTime, function()
+			if self.phoenixShieldAnimationLock ~= lock then
+				return
+			end
+
+			local remaining = (lock.EndTime or 0) - os.clock()
+			if remaining > 0.02 then
+				schedule()
+				return
+			end
+
+			self:ReleasePhoenixShieldAnimationLock(lock)
+		end)
+	end
+
+	schedule()
+end
+
+function ToriClient:StartPhoenixShieldAnimationLock(payload)
+	local lockDuration = math.max(
+		0,
+		tonumber(payload and payload.AnimationLockDuration) or DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION
+	)
+	if lockDuration <= 0 then
+		return
+	end
+
+	local humanoid = getHumanoid(self)
+	local rootPart = getRootPart(self)
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	local now = os.clock()
+	local lock = self.phoenixShieldAnimationLock
+	if lock and lock.Humanoid ~= humanoid then
+		self:ReleasePhoenixShieldAnimationLock(lock)
+		lock = nil
+	end
+
+	if not lock then
+		lock = {
+			Humanoid = humanoid,
+			WalkSpeed = humanoid.WalkSpeed,
+			JumpPower = humanoid.JumpPower,
+			JumpHeight = humanoid.JumpHeight,
+			AutoRotate = humanoid.AutoRotate,
+		}
+		self.phoenixShieldAnimationLock = lock
+		lock.Connection = RunService.Heartbeat:Connect(function()
+			if self.phoenixShieldAnimationLock ~= lock then
+				return
+			end
+
+			local currentHumanoid = lock.Humanoid
+			if currentHumanoid and currentHumanoid.Parent and currentHumanoid.Health > 0 then
+				currentHumanoid.WalkSpeed = 0
+				currentHumanoid.JumpPower = 0
+				currentHumanoid.JumpHeight = 0
+				currentHumanoid.AutoRotate = false
+				currentHumanoid:Move(Vector3.zero, true)
+			end
+
+			local currentRootPart = getRootPart(self)
+			if currentRootPart then
+				local currentVelocity = currentRootPart.AssemblyLinearVelocity
+				currentRootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
+			end
+		end)
+	end
+
+	lock.EndTime = math.max(lock.EndTime or 0, now + lockDuration)
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.AutoRotate = false
+	humanoid:Move(Vector3.zero, true)
+	if rootPart then
+		local currentVelocity = rootPart.AssemblyLinearVelocity
+		rootPart.AssemblyLinearVelocity = Vector3.new(0, currentVelocity.Y, 0)
+	end
+
+	self:SchedulePhoenixShieldAnimationUnlock(lock)
 end
 
 function ToriClient:StartPhoenixShield(targetPlayer, payload)
@@ -1119,13 +1324,17 @@ function ToriClient:StartPhoenixShield(targetPlayer, payload)
 	local shieldState = self.activePhoenixShields[targetPlayer]
 	local shieldEndTime = os.clock() + duration
 	if shieldState then
-		shieldState.EndTime = math.max(shieldState.EndTime, shieldEndTime)
-		shieldState.Radius = math.max(shieldState.Radius, radius)
+		shieldState.EndTime = shieldEndTime
+		shieldState.Radius = radius
 	else
 		self.activePhoenixShields[targetPlayer] = {
 			EndTime = shieldEndTime,
 			Radius = radius,
 		}
+	end
+
+	if targetPlayer == self.player then
+		self:StartPhoenixShieldAnimationLock(payload)
 	end
 
 	self:EnsurePhoenixShieldHazardSuppressionLoop()
@@ -1193,6 +1402,10 @@ function ToriClient:HandleEffect(targetPlayer, abilityName, payload)
 		return true
 	end
 
+	if abilityName == self.phoenixRebirthAbility then
+		return self:PlayPhoenixRebirthVisual(targetPlayer, payload or {})
+	end
+
 	return false
 end
 
@@ -1214,7 +1427,11 @@ function ToriClient:Update(dt)
 end
 
 function ToriClient:HandleCharacterRemoving()
+	if self.phoenixShieldAnimationLock then
+		self:ReleasePhoenixShieldAnimationLock(self.phoenixShieldAnimationLock)
+	end
 	self:StopPhoenixFlight()
+	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
 	self.flightInputState.Forward = false
 	self.flightInputState.Backward = false
 	self.flightInputState.Left = false

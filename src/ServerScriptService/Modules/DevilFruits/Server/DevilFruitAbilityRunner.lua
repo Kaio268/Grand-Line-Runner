@@ -43,6 +43,22 @@ local function shouldBypassCooldownCheck(context)
 	return result == true
 end
 
+local function clonePayloadWithCooldownDelay(payload, cooldownStartsAt, cooldownDuration, readyAt)
+	if typeof(payload) ~= "table" then
+		return payload
+	end
+
+	local clonedPayload = {}
+	for key, value in pairs(payload) do
+		clonedPayload[key] = value
+	end
+
+	clonedPayload.CooldownStartsAt = cooldownStartsAt
+	clonedPayload.CooldownDuration = cooldownDuration
+	clonedPayload.CooldownReadyAt = readyAt
+	return clonedPayload
+end
+
 function DevilFruitAbilityRunner.Execute(params)
 	local player = params.Player
 	local fruitName = params.FruitName
@@ -185,6 +201,7 @@ function DevilFruitAbilityRunner.Execute(params)
 
 	local applyCooldown = true
 	local cooldownDuration = abilityConfig.Cooldown
+	local cooldownDelay = 0
 	local preserveExistingCooldown = bypassCooldownCheck
 	local suppressActivatedEvent = false
 	if typeof(control) == "table" then
@@ -197,6 +214,11 @@ function DevilFruitAbilityRunner.Execute(params)
 			cooldownDuration = overrideDuration
 		end
 
+		local overrideDelay = tonumber(control.CooldownDelay)
+		if overrideDelay then
+			cooldownDelay = math.max(0, overrideDelay)
+		end
+
 		if control.PreserveExistingCooldown == true then
 			preserveExistingCooldown = true
 		end
@@ -206,8 +228,23 @@ function DevilFruitAbilityRunner.Execute(params)
 		end
 	end
 
+	local activatedPayload = payload
 	if not preserveExistingCooldown then
-		if startsCooldownOnResolve then
+		if cooldownDelay > 0 then
+			if applyCooldown then
+				local resolvedCooldownDuration = math.max(0, tonumber(cooldownDuration) or 0)
+				nextReadyAt = params.SetAbilityCooldown(player, abilityName, resolvedCooldownDuration + cooldownDelay)
+				activatedPayload = clonePayloadWithCooldownDelay(
+					payload,
+					nextReadyAt - resolvedCooldownDuration,
+					resolvedCooldownDuration,
+					nextReadyAt
+				)
+			else
+				params.ClearAbilityCooldown(player, abilityName)
+				nextReadyAt = 0
+			end
+		elseif startsCooldownOnResolve then
 			if applyCooldown then
 				nextReadyAt = params.SetAbilityCooldown(player, abilityName, cooldownDuration)
 			else
@@ -225,7 +262,7 @@ function DevilFruitAbilityRunner.Execute(params)
 	end
 
 	if not suppressActivatedEvent then
-		params.FireActivated(player, fruitName, abilityName, nextReadyAt, payload)
+		params.FireActivated(player, fruitName, abilityName, nextReadyAt, activatedPayload)
 	end
 	params.RequestGuard.RecordAccepted(player, fruitName, abilityName)
 	params.Security.LogExecutionStage(

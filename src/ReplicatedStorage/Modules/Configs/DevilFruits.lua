@@ -470,14 +470,23 @@ local DevilFruits = {
 			Passives = {
 				PhoenixRebirth = {
 					RestoreDelay = 0.45,
+					-- Seconds after lethal damage before Phoenix Revive animation/VFX starts.
+					ActivationDelay = 2,
+					-- Seconds into the Phoenix Revive animation when full health is restored.
+					ReviveDelay = 0.85,
+					AnimationDuration = 2.4,
 					ImmunityDuration = 1,
+					StabilizeHealthPercent = 0.08,
 					RestoreHealthPercent = 1,
+					AnimationKey = "Tori.PhoenixRevive",
+					ReviveMarkerNames = { "Revive", "Rebirth", "PhoenixRevive", "Restore" },
 				},
 			},
 			Abilities = {
 				PhoenixFlight = {
 					KeyCode = Enum.KeyCode.Q,
 					Cooldown = 13,
+					CooldownStartsOn = "End",
 					Duration = 4.5,
 					FlightStartupDuration = 0.85,
 					TakeoffDuration = 0.4,
@@ -490,7 +499,7 @@ local DevilFruits = {
 					MaxDescendSpeed = 72,
 					HorizontalResponsiveness = 14,
 					FlightTrailPartNames = { "Tail1", "tail", "Torso", "UpperTorso", "HumanoidRootPart" },
-					FlightTrailOffset = CFrame.new(0, 0, 2.5),
+					FlightTrailOffset = CFrame.new(0, 0, 5.5),
 					Animation = {
 						StartAnimationKey = "Tori.PhoenixFlightStart",
 						LoopAnimationKey = "Tori.PhoenixFlightLoop",
@@ -503,13 +512,16 @@ local DevilFruits = {
 				PhoenixFlameShield = {
 					KeyCode = Enum.KeyCode.C,
 					Cooldown = 20,
-					Radius = 13,
-					Duration = 2.75,
+					CooldownStartsOn = "End",
+					-- Single source of truth for both the visible shield and gameplay protection radius, in studs.
+					ShieldRadius = 18,
+					Duration = 5,
+					AnimationLockDuration = 1.6666667,
 					Animation = {
 						AnimationKey = "Tori.PhoenixFlameShield",
 						FadeTime = 0.06,
 						StopFadeTime = 0.1,
-						Looped = true,
+						Looped = false,
 					},
 				},
 			},

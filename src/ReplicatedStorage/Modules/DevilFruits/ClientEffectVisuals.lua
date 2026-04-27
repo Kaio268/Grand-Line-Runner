@@ -18,6 +18,7 @@ local DEFAULT_BOMU_DETONATION_ABILITY = "LandMine"
 local DEFAULT_PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local DEFAULT_PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local DEFAULT_PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
+local DEFAULT_PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local DEFAULT_GOMU_FRUIT_NAME = "Gomu Gomu no Mi"
 local DEFAULT_RUBBER_LAUNCH_ABILITY = "RubberLaunch"
 local DEFAULT_PHOENIX_EFFECT_COLOR = Color3.fromRGB(108, 255, 214)
@@ -25,6 +26,8 @@ local DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR = Color3.fromRGB(255, 188, 113)
 local PHOENIX_SHIELD_HIT_COLOR = Color3.fromRGB(255, 48, 72)
 local PHOENIX_SHIELD_HIT_ACCENT_COLOR = Color3.fromRGB(255, 169, 103)
 local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
+local DEFAULT_PHOENIX_SHIELD_RADIUS = 18
+local PHOENIX_SHIELD_AUTHORED_REFERENCE_RADIUS = 13
 local PHOENIX_WING_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local PHOENIX_WING_ASSET_FRUIT_KEY = "Tori"
 local PHOENIX_WING_ASSET_FOLDER_NAMES = { "VFX", "Visuals", "CharacterModels" }
@@ -36,22 +39,12 @@ local PHOENIX_AUTHORED_VFX_MOVE_FOLDERS = {
 	FlyFX = { "Phoenix Flight" },
 	ShieldFX = { "Phoenix Flame Shield" },
 }
+local PHOENIX_AUTHORED_VFX_REFERENCE_FIRST = {
+	ShieldFX = true,
+}
 local PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS = {
 	FlyFX = CFrame.new(0.165275574, -1.16604078, 1.30423737),
-	ShieldFX = CFrame.new(
-		-3.00717545,
-		-9.76482105,
-		-10.6410065,
-		0.999994814,
-		0.0000314084282,
-		-0.00321495766,
-		-0.0000310857758,
-		1,
-		0.000100409947,
-		0.00321496092,
-		-0.000100309488,
-		0.999994814
-	),
+	ShieldFX = CFrame.new(0.165275574, 0.272972107, 0.601654053),
 }
 local PHOENIX_ANIMATION_KEYS = {
 	FlightStart = "Tori.PhoenixFlightStart",
@@ -59,6 +52,7 @@ local PHOENIX_ANIMATION_KEYS = {
 	FlightIdle = "Tori.PhoenixFlightIdle",
 	FlightEnd = "Tori.PhoenixFlightEnd",
 	Shield = "Tori.PhoenixFlameShield",
+	Rebirth = "Tori.PhoenixRevive",
 }
 local PHOENIX_ANIMATION_LENGTHS = {
 	["Tori.PhoenixFlightStart"] = 3.1666667,
@@ -66,7 +60,11 @@ local PHOENIX_ANIMATION_LENGTHS = {
 	["Tori.PhoenixFlightIdle"] = 1,
 	["Tori.PhoenixFlightEnd"] = 1.2,
 	["Tori.PhoenixFlameShield"] = 1.6666667,
+	["Tori.PhoenixRevive"] = 2.4,
 }
+local PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP = "PhoenixFlightSustain"
+local PHOENIX_FLIGHT_IDLE_SPEED_THRESHOLD = 2.5
+local PHOENIX_FLIGHT_MOVE_SPEED_THRESHOLD = 5
 local PHOENIX_REFERENCE_PART_NAMES = { "Torso", "UpperTorso", "HumanoidRootPart" }
 local PHOENIX_FLIGHT_TRAIL_PART_NAMES = { "Tail1", "tail", "Torso", "UpperTorso", "HumanoidRootPart" }
 local PHOENIX_LEFT_LEG_REFERENCE_PART_NAMES = { "Left Leg", "LeftLowerLeg", "LeftFoot", "LeftUpperLeg" }
@@ -576,6 +574,42 @@ local function applyPhoenixExtremityConceal(targetPlayer)
 	return entries
 end
 
+local function refreshPhoenixExtremityConceal(targetPlayer, state)
+	if not targetPlayer or not state then
+		return
+	end
+
+	local character = targetPlayer.Character
+	if not character then
+		return
+	end
+
+	state.ExtremityConcealEntries = state.ExtremityConcealEntries or {}
+	local concealedParts = {}
+	for _, entry in ipairs(state.ExtremityConcealEntries) do
+		local part = entry.Part
+		if part and part.Parent then
+			concealedParts[part] = true
+			part.LocalTransparencyModifier = 1
+		end
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		local normalizedName = normalizeInstanceName(descendant.Name)
+		if
+			descendant:IsA("BasePart")
+			and PHOENIX_CHARACTER_CONCEALED_PART_NAMES[normalizedName]
+			and not concealedParts[descendant]
+		then
+			state.ExtremityConcealEntries[#state.ExtremityConcealEntries + 1] = {
+				Part = descendant,
+				OriginalLocalTransparencyModifier = descendant.LocalTransparencyModifier,
+			}
+			descendant.LocalTransparencyModifier = 1
+		end
+	end
+end
+
 local function restorePhoenixExtremityConceal(entries)
 	for _, entry in ipairs(entries or {}) do
 		local part = entry.Part
@@ -651,6 +685,23 @@ local function stopAnimationEntry(entry, fadeTime)
 	end
 end
 
+local function stopAnimationEntriesByGroup(state, trackGroup, fadeTime)
+	if not state or typeof(trackGroup) ~= "string" or trackGroup == "" then
+		return
+	end
+
+	local remainingEntries = {}
+	for _, entry in ipairs(state.AnimationTracks or {}) do
+		if entry.TrackGroup == trackGroup then
+			stopAnimationEntry(entry, fadeTime)
+		else
+			remainingEntries[#remainingEntries + 1] = entry
+		end
+	end
+
+	state.AnimationTracks = remainingEntries
+end
+
 local function cleanupPhoenixWingState(state, fadeTime)
 	if not state or state.CleanedUp then
 		return
@@ -712,6 +763,81 @@ local function getPivotCFrame(instance)
 	return part and part.CFrame or nil
 end
 
+local function scaleNumberSequence(sequence, scale)
+	if typeof(sequence) ~= "NumberSequence" or typeof(scale) ~= "number" then
+		return sequence
+	end
+
+	local scaledKeypoints = {}
+	for index, keypoint in ipairs(sequence.Keypoints) do
+		scaledKeypoints[index] = NumberSequenceKeypoint.new(
+			keypoint.Time,
+			keypoint.Value * scale,
+			keypoint.Envelope * scale
+		)
+	end
+
+	return NumberSequence.new(scaledKeypoints)
+end
+
+local function scaleNumberRange(range, scale)
+	if typeof(range) ~= "NumberRange" or typeof(scale) ~= "number" then
+		return range
+	end
+
+	return NumberRange.new(range.Min * scale, range.Max * scale)
+end
+
+local function scaleBasePartAroundPosition(part, originPosition, scale)
+	local rotation = part.CFrame - part.Position
+	local scaledPosition = originPosition + ((part.Position - originPosition) * scale)
+	part.Size *= scale
+	part.CFrame = CFrame.new(scaledPosition) * rotation
+end
+
+local function scalePhoenixAuthoredVfxClone(root, scale)
+	local numericScale = tonumber(scale)
+	if not numericScale or numericScale <= 0 or math.abs(numericScale - 1) <= 0.001 then
+		return
+	end
+
+	local pivot = getPivotCFrame(root)
+	local originPosition = pivot and pivot.Position or nil
+	if not originPosition then
+		return
+	end
+
+	eachSelfAndDescendants(root, function(instance)
+		if instance:IsA("BasePart") then
+			scaleBasePartAroundPosition(instance, originPosition, numericScale)
+		elseif instance:IsA("Attachment") then
+			instance.Position *= numericScale
+		elseif instance:IsA("ParticleEmitter") then
+			instance.Size = scaleNumberSequence(instance.Size, numericScale)
+			instance.Speed = scaleNumberRange(instance.Speed, numericScale)
+			instance.Acceleration *= numericScale
+			instance.Drag *= numericScale
+		elseif instance:IsA("Beam") then
+			instance.Width0 *= numericScale
+			instance.Width1 *= numericScale
+			instance.CurveSize0 *= numericScale
+			instance.CurveSize1 *= numericScale
+		elseif instance:IsA("Trail") then
+			instance.WidthScale = scaleNumberSequence(instance.WidthScale, numericScale)
+		elseif instance:IsA("PointLight") or instance:IsA("SpotLight") or instance:IsA("SurfaceLight") then
+			instance.Range *= numericScale
+		elseif instance:IsA("Smoke") then
+			instance.Size *= numericScale
+			instance.RiseVelocity *= numericScale
+		elseif instance:IsA("Fire") then
+			instance.Size *= numericScale
+			instance.Heat *= numericScale
+		elseif instance:IsA("SpecialMesh") then
+			instance.Scale *= numericScale
+		end
+	end)
+end
+
 local function resolvePhoenixAssetRootForTemplate(template, root)
 	if root and findReferencePart(root, PHOENIX_REFERENCE_PART_NAMES) then
 		return root
@@ -760,16 +886,7 @@ local function findPhoenixMoveFolderVfxTemplate(assetName)
 	return nil, nil
 end
 
-local function findPhoenixAuthoredVfxTemplate(assetName)
-	if typeof(assetName) ~= "string" or assetName == "" then
-		return nil, nil
-	end
-
-	local moveTemplate, moveRoot = findPhoenixMoveFolderVfxTemplate(assetName)
-	if moveTemplate then
-		return moveTemplate, moveRoot
-	end
-
+local function findPhoenixReferenceVfxTemplate(assetName)
 	for _, root in ipairs(getPhoenixAssetRootCandidates()) do
 		local direct = root:FindFirstChild(assetName)
 		if direct then
@@ -793,10 +910,32 @@ local function findPhoenixAuthoredVfxTemplate(assetName)
 	return nil, nil
 end
 
-local function configurePhoenixAuthoredVfxClone(root)
+local function findPhoenixAuthoredVfxTemplate(assetName)
+	if typeof(assetName) ~= "string" or assetName == "" then
+		return nil, nil
+	end
+
+	if PHOENIX_AUTHORED_VFX_REFERENCE_FIRST[assetName] then
+		local referenceTemplate, referenceRoot = findPhoenixReferenceVfxTemplate(assetName)
+		if referenceTemplate then
+			return referenceTemplate, referenceRoot
+		end
+	end
+
+	local moveTemplate, moveRoot = findPhoenixMoveFolderVfxTemplate(assetName)
+	if moveTemplate then
+		return moveTemplate, moveRoot
+	end
+
+	return findPhoenixReferenceVfxTemplate(assetName)
+end
+
+local function configurePhoenixAuthoredVfxClone(root, options)
+	options = options or {}
+	local anchored = options.Anchored ~= false
 	eachSelfAndDescendants(root, function(instance)
 		if instance:IsA("BasePart") then
-			instance.Anchored = true
+			instance.Anchored = anchored
 			instance.CanCollide = false
 			instance.CanTouch = false
 			instance.CanQuery = false
@@ -808,10 +947,10 @@ local function configurePhoenixAuthoredVfxClone(root)
 	end)
 end
 
-local function createPhoenixAuthoredVfxClone(template)
+local function createPhoenixAuthoredVfxClone(template, options)
 	local clone = template:Clone()
 	if clone:IsA("Model") or clone:IsA("BasePart") then
-		configurePhoenixAuthoredVfxClone(clone)
+		configurePhoenixAuthoredVfxClone(clone, options)
 		return clone
 	end
 
@@ -836,7 +975,7 @@ local function createPhoenixAuthoredVfxClone(template)
 		end
 	end
 
-	configurePhoenixAuthoredVfxClone(wrapper)
+	configurePhoenixAuthoredVfxClone(wrapper, options)
 	return wrapper
 end
 
@@ -875,6 +1014,14 @@ local function emitPhoenixAuthoredVfx(root, defaultEmitCount)
 	end)
 end
 
+local function setPhoenixAuthoredParticlesLockedToPart(root, lockedToPart)
+	eachSelfAndDescendants(root, function(instance)
+		if instance:IsA("ParticleEmitter") then
+			instance.LockedToPart = lockedToPart == true
+		end
+	end)
+end
+
 local function pivotPhoenixAuthoredVfx(root, cframe)
 	if not root or typeof(cframe) ~= "CFrame" then
 		return
@@ -890,6 +1037,36 @@ local function pivotPhoenixAuthoredVfx(root, cframe)
 			part.CFrame = cframe
 		end
 	end
+end
+
+local function mountPhoenixAuthoredVfxClone(root, targetPart, targetCFrame)
+	if not root or not targetPart or not targetPart:IsA("BasePart") then
+		return false
+	end
+
+	pivotPhoenixAuthoredVfx(root, targetCFrame)
+
+	local mountedPartCount = 0
+	eachSelfAndDescendants(root, function(instance)
+		if not instance:IsA("BasePart") then
+			return
+		end
+
+		instance.Anchored = false
+		instance.CanCollide = false
+		instance.CanTouch = false
+		instance.CanQuery = false
+		instance.Massless = true
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Name = "PhoenixVfxMount"
+		weld.Part0 = instance
+		weld.Part1 = targetPart
+		weld.Parent = instance
+		mountedPartCount = mountedPartCount + 1
+	end)
+
+	return mountedPartCount > 0
 end
 
 local function getPhoenixAuthoredVfxOffset(assetName, template, assetRoot)
@@ -918,6 +1095,7 @@ function ClientEffectVisuals.new(config)
 		PhoenixFruitName = tostring(config.PhoenixFruitName or DEFAULT_PHOENIX_FRUIT_NAME),
 		PhoenixFlightAbility = tostring(config.PhoenixFlightAbility or DEFAULT_PHOENIX_FLIGHT_ABILITY),
 		PhoenixShieldAbility = tostring(config.PhoenixShieldAbility or DEFAULT_PHOENIX_SHIELD_ABILITY),
+		PhoenixRebirthAbility = tostring(config.PhoenixRebirthAbility or DEFAULT_PHOENIX_REBIRTH_ABILITY),
 		PhoenixEffectColor = resolveColor(config.PhoenixEffectColor, DEFAULT_PHOENIX_EFFECT_COLOR),
 		PhoenixEffectAccentColor = resolveColor(config.PhoenixEffectAccentColor, DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR),
 		GomuFruitName = tostring(config.GomuFruitName or DEFAULT_GOMU_FRUIT_NAME),
@@ -974,6 +1152,8 @@ function ClientEffectVisuals:PlayPhoenixAnimationOnAnimator(state, animator, ani
 
 	local entry = {
 		Track = track,
+		AnimationKey = animationKey,
+		TrackGroup = options.TrackGroup,
 		StopFadeTime = math.max(0, tonumber(options.StopFadeTime) or PHOENIX_ANIMATION_STOP_FADE_TIME),
 	}
 	state.AnimationTracks = state.AnimationTracks or {}
@@ -984,6 +1164,14 @@ function ClientEffectVisuals:PlayPhoenixAnimationOnAnimator(state, animator, ani
 		tonumber(options.Weight) or 1,
 		math.max(0.01, tonumber(options.PlaybackSpeed) or 1)
 	)
+
+	local timePosition = math.max(0, tonumber(options.TimePosition) or 0)
+	if timePosition > 0 then
+		pcall(function()
+			local maxTimePosition = math.max(0, (definition.Length or track.Length or timePosition) - 0.05)
+			track.TimePosition = math.min(timePosition, maxTimePosition)
+		end)
+	end
 
 	return entry, definition.Length
 end
@@ -1012,6 +1200,56 @@ function ClientEffectVisuals:PlayPhoenixAnimation(state, targetPlayer, animation
 	end
 
 	return longestLength
+end
+
+local function getPlanarSpeed(part)
+	if not part or not part:IsA("BasePart") then
+		return 0
+	end
+
+	local velocity = part.AssemblyLinearVelocity
+	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+end
+
+local function resolvePhoenixFlightSustainAnimationKey(rootPart, currentAnimationKey)
+	local planarSpeed = getPlanarSpeed(rootPart)
+	if currentAnimationKey == PHOENIX_ANIMATION_KEYS.FlightIdle then
+		if planarSpeed >= PHOENIX_FLIGHT_MOVE_SPEED_THRESHOLD then
+			return PHOENIX_ANIMATION_KEYS.FlightLoop
+		end
+
+		return PHOENIX_ANIMATION_KEYS.FlightIdle
+	end
+
+	if planarSpeed <= PHOENIX_FLIGHT_IDLE_SPEED_THRESHOLD then
+		return PHOENIX_ANIMATION_KEYS.FlightIdle
+	end
+
+	return PHOENIX_ANIMATION_KEYS.FlightLoop
+end
+
+local function isPhoenixFlightMovementActive(rootPart, wasActive)
+	local planarSpeed = getPlanarSpeed(rootPart)
+	if wasActive then
+		return planarSpeed > PHOENIX_FLIGHT_IDLE_SPEED_THRESHOLD
+	end
+
+	return planarSpeed >= PHOENIX_FLIGHT_MOVE_SPEED_THRESHOLD
+end
+
+function ClientEffectVisuals:SetPhoenixFlightSustainAnimation(state, targetPlayer, animationKey)
+	if not state or state.CleanedUp or state.PhoenixFlightSustainAnimationKey == animationKey then
+		return
+	end
+
+	stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, 0.12)
+	local length = self:PlayPhoenixAnimation(state, targetPlayer, animationKey, {
+		Looped = true,
+		FadeTime = 0.12,
+		StopFadeTime = 0.12,
+		TrackGroup = PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP,
+	})
+	state.PhoenixFlightSustainAnimationKey = if length then animationKey else nil
 end
 
 function ClientEffectVisuals:GetPhoenixWingModelTemplate()
@@ -1063,14 +1301,43 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 	options = options or {}
 	local targetPartNames = resolvePartNameList(options.TargetPartNames, nil)
 	local orientToMovement = options.OrientToMovement == true
+	local enableWhileMoving = options.EnableWhileMoving == true
+	local mountToTarget = options.MountToTarget == true
+	local lockParticlesToPart = options.LockParticlesToPart == true or mountToTarget
+	local visualScale = math.max(0.001, tonumber(options.Scale) or 1)
+	local mountedTargetPart = nil
+	if mountToTarget then
+		mountedTargetPart = resolvePlayerPartByNames(targetPlayer, targetPartNames or PHOENIX_REFERENCE_PART_NAMES) or rootPart
+		if not mountedTargetPart then
+			return nil
+		end
+	end
 
 	if state then
 		state.AuthoredVfx = state.AuthoredVfx or {}
 		local existingEntry = state.AuthoredVfx[assetName]
 		if existingEntry and existingEntry.Clone and existingEntry.Clone.Parent then
-			existingEntry.EndTime = math.max(existingEntry.EndTime or 0, endTime)
-			setPhoenixAuthoredVfxEnabled(existingEntry.Clone, true)
-			return existingEntry.Clone
+			if math.abs((tonumber(existingEntry.Scale) or 1) - visualScale) > 0.001 then
+				existingEntry.Clone:Destroy()
+				state.AuthoredVfx[assetName] = nil
+			else
+				existingEntry.EndTime = math.max(existingEntry.EndTime or 0, endTime)
+				if lockParticlesToPart then
+					setPhoenixAuthoredParticlesLockedToPart(existingEntry.Clone, true)
+				end
+				if enableWhileMoving then
+					local shouldEnable = isPhoenixFlightMovementActive(rootPart, existingEntry.VfxActive)
+					existingEntry.VfxActive = shouldEnable
+					setPhoenixAuthoredVfxEnabled(existingEntry.Clone, shouldEnable)
+					if shouldEnable then
+						emitPhoenixAuthoredVfx(existingEntry.Clone, options.EmitCount or 12)
+					end
+				else
+					existingEntry.VfxActive = true
+					setPhoenixAuthoredVfxEnabled(existingEntry.Clone, true)
+				end
+				return existingEntry.Clone
+			end
 		end
 	end
 
@@ -1079,14 +1346,34 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		return nil
 	end
 
-	local clone = createPhoenixAuthoredVfxClone(template)
+	local clone = createPhoenixAuthoredVfxClone(template, {
+		Anchored = not mountToTarget,
+	})
+	scalePhoenixAuthoredVfxClone(clone, visualScale)
 	clone.Name = "Phoenix" .. assetName
-	clone.Parent = getOrCreateWingEffectsFolder()
+	if enableWhileMoving then
+		setPhoenixAuthoredVfxEnabled(clone, false)
+	end
+	if lockParticlesToPart then
+		setPhoenixAuthoredParticlesLockedToPart(clone, true)
+	end
 
 	local offset = resolveCFrameValue(options.Offset, getPhoenixAuthoredVfxOffset(assetName, template, assetRoot))
+	if mountToTarget then
+		clone.Parent = mountedTargetPart
+		if not mountPhoenixAuthoredVfxClone(clone, mountedTargetPart, mountedTargetPart.CFrame * offset) then
+			clone:Destroy()
+			return nil
+		end
+	else
+		clone.Parent = getOrCreateWingEffectsFolder()
+	end
+
 	local entry = {
 		Clone = clone,
 		EndTime = endTime,
+		Scale = visualScale,
+		VfxActive = false,
 	}
 	if state then
 		state.AuthoredVfx[assetName] = entry
@@ -1110,18 +1397,45 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		return true
 	end
 
-	updatePosition()
-	setPhoenixAuthoredVfxEnabled(clone, true)
-	emitPhoenixAuthoredVfx(clone, options.EmitCount or 12)
+	local function setVfxActive(isActive)
+		if entry.VfxActive == isActive then
+			return
+		end
+
+		entry.VfxActive = isActive
+		setPhoenixAuthoredVfxEnabled(clone, isActive)
+		if isActive then
+			emitPhoenixAuthoredVfx(clone, options.EmitCount or 12)
+		end
+	end
+
+	local function updateMovementGate()
+		if not enableWhileMoving then
+			setVfxActive(true)
+			return
+		end
+
+		local currentRootPart = self.GetPlayerRootPart(targetPlayer)
+		setVfxActive(isPhoenixFlightMovementActive(currentRootPart, entry.VfxActive))
+	end
+
+	if not mountToTarget then
+		updatePosition()
+	end
+	updateMovementGate()
 
 	task.spawn(function()
 		while clone.Parent and os.clock() < (entry.EndTime or endTime) do
 			if state and state.CleanedUp then
 				break
 			end
-			if options.Follow ~= false and not updatePosition() then
+			if mountToTarget and not mountedTargetPart.Parent then
 				break
 			end
+			if not mountToTarget and options.Follow ~= false and not updatePosition() then
+				break
+			end
+			updateMovementGate()
 
 			RunService.Heartbeat:Wait()
 		end
@@ -1132,11 +1446,16 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 
 		if clone.Parent then
 			setPhoenixAuthoredVfxEnabled(clone, false)
-			task.delay(PHOENIX_AUTHORED_VFX_FADE_OUT, function()
-				if clone.Parent then
-					clone:Destroy()
-				end
-			end)
+			local fadeOutDuration = math.max(0, tonumber(options.FadeOutDuration) or PHOENIX_AUTHORED_VFX_FADE_OUT)
+			if fadeOutDuration <= 0 then
+				clone:Destroy()
+			else
+				task.delay(fadeOutDuration, function()
+					if clone.Parent then
+						clone:Destroy()
+					end
+				end)
+			end
 		end
 	end)
 
@@ -1145,6 +1464,11 @@ end
 
 function ClientEffectVisuals:PlayPhoenixFlightAnimation(state, targetPlayer, duration, options)
 	options = options or {}
+	if state then
+		state.PhoenixFlightSustainAnimationKey = nil
+		stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, 0.08)
+	end
+
 	local startupLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightStart, {
 		Looped = false,
 		FadeTime = 0.04,
@@ -1166,11 +1490,18 @@ function ClientEffectVisuals:PlayPhoenixFlightAnimation(state, targetPlayer, dur
 			return
 		end
 
-		self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightLoop, {
-			Looped = true,
-			FadeTime = 0.12,
-			StopFadeTime = 0.12,
-		})
+		while self.PhoenixWingEffects
+			and self.PhoenixWingEffects[targetPlayer] == state
+			and not state.CleanedUp
+			and not state.FlightEndPlayed
+			and state.Container
+			and state.Container.Parent
+		do
+			local rootPart = self.GetPlayerRootPart(targetPlayer)
+			local animationKey = resolvePhoenixFlightSustainAnimationKey(rootPart, state.PhoenixFlightSustainAnimationKey)
+			self:SetPhoenixFlightSustainAnimation(state, targetPlayer, animationKey)
+			task.wait(0.1)
+		end
 	end)
 
 	return loopDelay
@@ -1247,6 +1578,8 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 						break
 					end
 				else
+					refreshPhoenixExtremityConceal(targetPlayer, state)
+
 					local hasCurrentTarget = false
 					for _, featureState in ipairs(state.Features) do
 						local currentTargetPart = resolvePlayerPartByNames(targetPlayer, featureState.TargetPartNames)
@@ -1276,6 +1609,13 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 
 	state.EndTime = math.max(state.EndTime, endTime)
 
+	if options.Mode ~= nil and options.Mode ~= "Flight" then
+		state.PlayFlightEndOnExpire = false
+		state.FlightEndPlayed = true
+		state.PhoenixFlightSustainAnimationKey = nil
+		stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, 0.08)
+	end
+
 	if options.Mode == "Flight" then
 		state.PlayFlightEndOnExpire = true
 		state.FlightEndPlayed = false
@@ -1283,13 +1623,23 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 			LoopDelay = options.FlightTrailDelay,
 		}) or 0
 	elseif typeof(options.AnimationKey) == "string" then
-		self:PlayPhoenixAnimation(state, targetPlayer, options.AnimationKey, {
-			Looped = options.Looped == true,
-			FadeTime = options.FadeTime,
-			StopFadeTime = options.StopFadeTime,
-			PlaybackSpeed = options.PlaybackSpeed,
-			PlayCharacter = options.PlayCharacter,
-		})
+		local shouldPlayAnimation = true
+		if options.PlayAnimationOnce == true then
+			state.PlayedAnimationKeys = state.PlayedAnimationKeys or {}
+			shouldPlayAnimation = state.PlayedAnimationKeys[options.AnimationKey] ~= true
+			state.PlayedAnimationKeys[options.AnimationKey] = true
+		end
+
+		if shouldPlayAnimation then
+			self:PlayPhoenixAnimation(state, targetPlayer, options.AnimationKey, {
+				Looped = options.Looped == true,
+				FadeTime = options.FadeTime,
+				StopFadeTime = options.StopFadeTime,
+				PlaybackSpeed = options.PlaybackSpeed,
+				PlayCharacter = options.PlayCharacter,
+				TimePosition = options.TimePosition,
+			})
+		end
 	end
 
 	return state
@@ -1315,6 +1665,7 @@ function ClientEffectVisuals:StopPhoenixFlightEffect(targetPlayer)
 		stopAnimationEntry(entry, 0.08)
 	end
 	state.AnimationTracks = {}
+	state.PhoenixFlightSustainAnimationKey = nil
 
 	local endLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightEnd, {
 		Looped = false,
@@ -1536,6 +1887,76 @@ local function estimatePhoenixFlightHeightDelay(payload)
 	return math.max(takeoffDuration, maxRiseHeight / verticalSpeed)
 end
 
+function ClientEffectVisuals:CreatePhoenixRebirthEffect(targetPlayer, fruitName, abilityName, payload)
+	if fruitName ~= self.PhoenixFruitName or abilityName ~= self.PhoenixRebirthAbility then
+		return
+	end
+
+	local rootPart = self.GetPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return
+	end
+
+	payload = payload or {}
+	local animationKey = if typeof(payload.AnimationKey) == "string" and payload.AnimationKey ~= ""
+		then payload.AnimationKey
+		else PHOENIX_ANIMATION_KEYS.Rebirth
+	local duration = math.max(
+		PHOENIX_WING_MIN_DURATION,
+		tonumber(payload.Duration) or PHOENIX_ANIMATION_LENGTHS[animationKey] or PHOENIX_ANIMATION_LENGTHS[PHOENIX_ANIMATION_KEYS.Rebirth]
+	)
+	local triggeredAt = tonumber(payload.TriggeredAt)
+	local elapsed = triggeredAt and math.max(0, Workspace:GetServerTimeNow() - triggeredAt) or 0
+	if elapsed >= duration + 0.25 then
+		return
+	end
+
+	local remainingDuration = math.max(PHOENIX_WING_MIN_DURATION, duration - elapsed)
+	local reviveDelay = math.max(0, tonumber(payload.ReviveDelay) or 0)
+	if triggeredAt and tonumber(payload.ReviveAt) then
+		reviveDelay = math.max(0, tonumber(payload.ReviveAt) - triggeredAt)
+	end
+
+	local state = self:CreatePhoenixWingEffect(targetPlayer, remainingDuration + 0.2, {
+		Mode = "Rebirth",
+		AnimationKey = animationKey,
+		Looped = false,
+		FadeTime = 0.04,
+		StopFadeTime = 0.16,
+		TimePosition = elapsed,
+	})
+
+	local function getPulsePosition()
+		local currentRootPart = self.GetPlayerRootPart(targetPlayer)
+		return currentRootPart and (currentRootPart.Position + Vector3.new(0, 1.35, 0)) or nil
+	end
+
+	local function playPulse(name, color, initialSize, finalSize, pulseDuration)
+		if state and state.CleanedUp then
+			return
+		end
+
+		local position = getPulsePosition()
+		if position then
+			createPulse(name, position, color, initialSize, finalSize, pulseDuration)
+		end
+	end
+
+	if elapsed <= 0.2 then
+		playPulse("PhoenixRebirthIgnite", self.PhoenixEffectColor, 2.4, 7.5, 0.35)
+	end
+
+	local remainingReviveDelay = math.max(0, reviveDelay - elapsed)
+	if remainingReviveDelay <= remainingDuration + 0.2 then
+		task.delay(remainingReviveDelay, function()
+			playPulse("PhoenixRebirthRevive", self.PhoenixEffectAccentColor, 4, 12, 0.48)
+			task.delay(0.08, function()
+				playPulse("PhoenixRebirthAfterglow", self.PhoenixEffectColor, 2.6, 8.5, 0.42)
+			end)
+		end)
+	end
+end
+
 function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, abilityName, payload)
 	if fruitName ~= self.PhoenixFruitName or abilityName ~= self.PhoenixFlightAbility then
 		return
@@ -1585,6 +2006,7 @@ function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, 
 			TargetPartNames = trailPartNames,
 			Offset = trailOffset,
 			OrientToMovement = true,
+			EnableWhileMoving = true,
 		})
 	end
 
@@ -1608,15 +2030,22 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 
 	payload = payload or {}
 
-	local duration = math.max(0.1, tonumber(payload.Duration) or 2.75)
+	local duration = math.max(0.1, tonumber(payload.Duration) or 5)
+	local radius = math.max(1, tonumber(payload.Radius) or DEFAULT_PHOENIX_SHIELD_RADIUS)
 	local state = self:CreatePhoenixWingEffect(targetPlayer, duration, {
 		AnimationKey = PHOENIX_ANIMATION_KEYS.Shield,
-		Looped = true,
+		Looped = false,
 		FadeTime = 0.06,
 		StopFadeTime = 0.1,
+		PlayAnimationOnce = true,
 	})
 	self:PlayPhoenixAuthoredVfx(state, targetPlayer, PHOENIX_AUTHORED_SHIELD_FX_NAME, duration, {
 		EmitCount = 20,
+		TargetPartNames = PHOENIX_REFERENCE_PART_NAMES,
+		MountToTarget = true,
+		LockParticlesToPart = true,
+		FadeOutDuration = 0,
+		Scale = radius / PHOENIX_SHIELD_AUTHORED_REFERENCE_RADIUS,
 	})
 end
 
@@ -1637,7 +2066,7 @@ function ClientEffectVisuals:CreatePhoenixShieldHitEffect(targetPlayer, fruitNam
 		hitPosition = rootPart.Position + Vector3.new(0, 1.5, 0)
 	end
 
-	local radius = math.max(1, tonumber(payload.Radius) or 13)
+	local radius = math.max(1, tonumber(payload.Radius) or DEFAULT_PHOENIX_SHIELD_RADIUS)
 	local rippleDiameter = math.clamp(radius * 0.55, 3.5, 8)
 
 	createPulse("PhoenixShieldHitFlash", hitPosition, PHOENIX_SHIELD_HIT_ACCENT_COLOR, 1.5, rippleDiameter, 0.2)
