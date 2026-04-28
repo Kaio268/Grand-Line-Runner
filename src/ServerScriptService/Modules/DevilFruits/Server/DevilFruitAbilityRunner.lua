@@ -5,21 +5,6 @@ local DevilFruitLogger = require(
 )
 
 local DevilFruitAbilityRunner = {}
-local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
-
-local function shouldLogMeraAudit(fruitName, abilityName)
-	return fruitName == "Mera Mera no Mi" or abilityName == "FlameDash" or abilityName == "FireBurst"
-end
-
-local function logMeraAudit(level, message, ...)
-	local formattedMessage = string.format("[%s] " .. message, MERA_AUDIT_MARKER, ...)
-	if level == "WARN" then
-		DevilFruitLogger.Warn("MOVE", formattedMessage)
-		return
-	end
-
-	DevilFruitLogger.Info("MOVE", formattedMessage)
-end
 
 local function shouldBypassCooldownCheck(context)
 	local fruitHandler = context and context.FruitHandler
@@ -68,15 +53,6 @@ function DevilFruitAbilityRunner.Execute(params)
 
 	local context = params.GetContext(player, fruitName, abilityName, abilityConfig, params.RequestPayload, params.CharacterState, params.RequestMetadata)
 	if not context then
-		if shouldLogMeraAudit(fruitName, abilityName) then
-			logMeraAudit(
-				"WARN",
-				"Mera ability runner blocked player=%s fruit=%s ability=%s stage=context_build reason=invalid_context",
-				player and player.Name or "<nil>",
-				tostring(fruitName),
-				tostring(abilityName)
-			)
-		end
 		params.Security.LogExecutionStage(player, fruitName, abilityName, "context_build", "invalid_context", params.RequestPayload)
 		params.RequestGuard.RecordRejection(player, "InvalidContext", abilityName)
 		params.FireDenied(player, fruitName, abilityName, "InvalidContext")
@@ -107,15 +83,6 @@ function DevilFruitAbilityRunner.Execute(params)
 
 	local abilityHandler = context.FruitHandler[abilityName]
 	if typeof(abilityHandler) ~= "function" then
-		if shouldLogMeraAudit(fruitName, abilityName) then
-			logMeraAudit(
-				"WARN",
-				"Mera ability runner blocked player=%s fruit=%s ability=%s stage=handler_lookup reason=missing_handler",
-				player and player.Name or "<nil>",
-				tostring(fruitName),
-				tostring(abilityName)
-			)
-		end
 		params.Security.LogExecutionStage(player, fruitName, abilityName, "handler_lookup", "missing_handler", params.RequestPayload)
 		params.RequestGuard.RecordRejection(player, "UnknownAbility", abilityName)
 		params.FireDenied(player, fruitName, abilityName, "MissingHandler")
@@ -129,16 +96,6 @@ function DevilFruitAbilityRunner.Execute(params)
 		local isReady
 		isReady, readyAt = params.IsAbilityReady(player, abilityName)
 		if not isReady then
-			if shouldLogMeraAudit(fruitName, abilityName) then
-				logMeraAudit(
-					"WARN",
-					"Mera ability runner blocked player=%s fruit=%s ability=%s stage=cooldown_check reason=Cooldown readyAt=%s",
-					player and player.Name or "<nil>",
-					tostring(fruitName),
-					tostring(abilityName),
-					tostring(readyAt)
-				)
-			end
 			params.Security.LogExecutionStage(player, fruitName, abilityName, "cooldown_check", string.format("cooldown_until=%s", tostring(readyAt)), params.RequestPayload)
 			params.RequestGuard.RecordRejection(player, "Cooldown", abilityName)
 			params.FireDenied(player, fruitName, abilityName, "Cooldown", readyAt)
@@ -158,27 +115,8 @@ function DevilFruitAbilityRunner.Execute(params)
 	end
 
 	params.Security.LogExecutionStage(player, fruitName, abilityName, "handler_call", "begin", params.RequestPayload)
-	if shouldLogMeraAudit(fruitName, abilityName) then
-		logMeraAudit(
-			"INFO",
-			"Mera ability runner enter player=%s fruit=%s ability=%s stage=handler_call",
-			player and player.Name or "<nil>",
-			tostring(fruitName),
-			tostring(abilityName)
-		)
-	end
 	local ok, payload, control = pcall(abilityHandler, context)
 	if not ok then
-		if shouldLogMeraAudit(fruitName, abilityName) then
-			logMeraAudit(
-				"WARN",
-				"Mera ability runner fail player=%s fruit=%s ability=%s stage=handler_call detail=%s",
-				player and player.Name or "<nil>",
-				tostring(fruitName),
-				tostring(abilityName),
-				tostring(payload)
-			)
-		end
 		if reservedCooldown then
 			params.ClearAbilityCooldown(player, abilityName)
 		end
@@ -189,15 +127,6 @@ function DevilFruitAbilityRunner.Execute(params)
 		return false
 	end
 	params.Security.LogExecutionStage(player, fruitName, abilityName, "handler_call", "ok", payload)
-	if shouldLogMeraAudit(fruitName, abilityName) then
-		logMeraAudit(
-			"INFO",
-			"Mera ability runner success player=%s fruit=%s ability=%s stage=handler_call",
-			player and player.Name or "<nil>",
-			tostring(fruitName),
-			tostring(abilityName)
-		)
-	end
 
 	local applyCooldown = true
 	local cooldownDuration = abilityConfig.Cooldown
@@ -279,19 +208,6 @@ function DevilFruitAbilityRunner.Execute(params)
 		),
 		payload
 	)
-	if shouldLogMeraAudit(fruitName, abilityName) then
-		logMeraAudit(
-			"INFO",
-			"Mera ability runner activated player=%s fruit=%s ability=%s nextReadyAt=%s applyCooldown=%s preserveCooldown=%s suppressActivated=%s",
-			player and player.Name or "<nil>",
-			tostring(fruitName),
-			tostring(abilityName),
-			tostring(nextReadyAt),
-			tostring(applyCooldown),
-			tostring(preserveExistingCooldown),
-			tostring(suppressActivatedEvent)
-		)
-	end
 	return true
 end
 

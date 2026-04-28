@@ -1,6 +1,17 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RubberLaunchMath = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Gomu")
+		:WaitForChild("Shared")
+		:WaitForChild("RubberLaunchMath")
+)
 
 local DevilFruitRequestGuard = {}
+
+local RUBBER_LAUNCH_TARGET_HINT_PADDING = 12
 
 local SETTINGS = {
 	DebugEnabled = false,
@@ -263,28 +274,6 @@ local function sanitizePayloadBySchema(player, payload, schema, characterState)
 	return true, sanitized, nil, 0
 end
 
-local function getPlanarSpeed(rootPart)
-	if not rootPart then
-		return 0
-	end
-
-	local velocity = rootPart.AssemblyLinearVelocity
-	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-end
-
-local function getSpeedScaledRubberLaunchDistance(abilityConfig, rootPart)
-	local resolvedConfig = type(abilityConfig) == "table" and abilityConfig or {}
-	local baseDistance = math.max(0, tonumber(resolvedConfig.LaunchDistance) or 0)
-	local speedDistanceBonus = math.max(0, tonumber(resolvedConfig.SpeedLaunchDistanceBonus) or 0)
-	if speedDistanceBonus <= 0 then
-		return baseDistance
-	end
-
-	local referenceSpeed = math.max(1, tonumber(resolvedConfig.SpeedScaleReference) or 70)
-	local speedAlpha = math.clamp(getPlanarSpeed(rootPart) / referenceSpeed, 0, 1)
-	return baseDistance + (speedDistanceBonus * speedAlpha)
-end
-
 local function validateRubberLaunchHints(player, abilityConfig, sanitizedPayload, characterState)
 	if type(sanitizedPayload) ~= "table" then
 		return true, sanitizedPayload, nil, 0
@@ -310,7 +299,8 @@ local function validateRubberLaunchHints(player, abilityConfig, sanitizedPayload
 		return false, nil, "MalformedPayload", 0
 	end
 
-	local maxDistance = getSpeedScaledRubberLaunchDistance(abilityConfig, requesterRoot) + 12
+	local maxDistance =
+		RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, requesterRoot) + RUBBER_LAUNCH_TARGET_HINT_PADDING
 	if maxDistance > 0 and (targetRootPart.Position - requesterRoot.Position).Magnitude > maxDistance then
 		addSuspicion(player, "OutOfRangeTargetHint", targetPlayerUserId)
 		return false, nil, "OutOfRange", 0

@@ -17,6 +17,17 @@ local DEFAULT_LOCAL_BODY_TRANSPARENCY = 0.68
 local DEFAULT_LOCAL_DECAL_TRANSPARENCY = 0.72
 local DEFAULT_OBSERVER_BODY_TRANSPARENCY = 1
 local DEFAULT_OBSERVER_DECAL_TRANSPARENCY = 1
+local DEFAULT_SHIMMER_COLOR = Color3.fromRGB(193, 255, 245)
+local DEFAULT_SHIMMER_ACCENT_COLOR = Color3.fromRGB(255, 255, 255)
+local DEFAULT_HIGHLIGHT_FILL_TRANSPARENCY = 0.88
+local DEFAULT_HIGHLIGHT_OUTLINE_TRANSPARENCY = 0.36
+local DEFAULT_PARTICLE_RATE = 14
+local DEFAULT_PARTICLE_TRANSPARENCY = 0.7
+local DEFAULT_PARTICLE_LIFETIME = 0.65
+local DEFAULT_PULSE_PERIOD = 0.7
+local SHIMMER_CLEANUP_BUFFER = 0.08
+local HIGHLIGHT_FILL_PULSE_AMOUNT = 0.035
+local HIGHLIGHT_OUTLINE_PULSE_AMOUNT = 0.08
 local SHIMMER_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 
 local function clampNumber(value, fallback, minValue, maxValue)
@@ -98,14 +109,37 @@ local function resolveSettings(payload, isLocalViewer)
 			then clampNumber(localDecalTransparency, DEFAULT_LOCAL_DECAL_TRANSPARENCY, 0, 0.98)
 			else clampNumber(observerDecalTransparency, DEFAULT_OBSERVER_DECAL_TRANSPARENCY, 0, 1),
 		ShowShimmer = isLocalViewer,
-		ShimmerColor = resolveColor(payload.ShimmerColor, resolveColor(vfxConfig.ShimmerColor, Color3.fromRGB(193, 255, 245))),
-		ShimmerAccentColor = resolveColor(payload.ShimmerAccentColor, resolveColor(vfxConfig.ShimmerAccentColor, Color3.fromRGB(255, 255, 255))),
-		HighlightFillTransparency = clampNumber(payload.HighlightFillTransparency, vfxConfig.HighlightFillTransparency or 0.88, 0, 1),
-		HighlightOutlineTransparency = clampNumber(payload.HighlightOutlineTransparency, vfxConfig.HighlightOutlineTransparency or 0.36, 0, 1),
-		ParticleRate = clampNumber(payload.ParticleRate, vfxConfig.ParticleRate or 14, 0, 80),
-		ParticleTransparency = clampNumber(payload.ParticleTransparency, vfxConfig.ParticleTransparency or 0.7, 0, 1),
-		ParticleLifetime = clampNumber(payload.ParticleLifetime, vfxConfig.ParticleLifetime or 0.65, 0.1, 2),
-		PulsePeriod = clampNumber(payload.PulsePeriod, vfxConfig.PulsePeriod or 0.7, 0.2, 3),
+		ShimmerColor = resolveColor(payload.ShimmerColor, resolveColor(vfxConfig.ShimmerColor, DEFAULT_SHIMMER_COLOR)),
+		ShimmerAccentColor = resolveColor(
+			payload.ShimmerAccentColor,
+			resolveColor(vfxConfig.ShimmerAccentColor, DEFAULT_SHIMMER_ACCENT_COLOR)
+		),
+		HighlightFillTransparency = clampNumber(
+			payload.HighlightFillTransparency,
+			vfxConfig.HighlightFillTransparency or DEFAULT_HIGHLIGHT_FILL_TRANSPARENCY,
+			0,
+			1
+		),
+		HighlightOutlineTransparency = clampNumber(
+			payload.HighlightOutlineTransparency,
+			vfxConfig.HighlightOutlineTransparency or DEFAULT_HIGHLIGHT_OUTLINE_TRANSPARENCY,
+			0,
+			1
+		),
+		ParticleRate = clampNumber(payload.ParticleRate, vfxConfig.ParticleRate or DEFAULT_PARTICLE_RATE, 0, 80),
+		ParticleTransparency = clampNumber(
+			payload.ParticleTransparency,
+			vfxConfig.ParticleTransparency or DEFAULT_PARTICLE_TRANSPARENCY,
+			0,
+			1
+		),
+		ParticleLifetime = clampNumber(
+			payload.ParticleLifetime,
+			vfxConfig.ParticleLifetime or DEFAULT_PARTICLE_LIFETIME,
+			0.1,
+			2
+		),
+		PulsePeriod = clampNumber(payload.PulsePeriod, vfxConfig.PulsePeriod or DEFAULT_PULSE_PERIOD, 0.2, 3),
 	}
 end
 
@@ -161,6 +195,7 @@ local function collectFadeEntries(character, shouldHideAttachedVisuals)
 			or descendant:IsA("Trail")
 			or descendant:IsA("Highlight")
 		) then
+			-- Observer-only: attached visuals would otherwise reveal an invisible character.
 			hiddenVisualEntries[#hiddenVisualEntries + 1] = {
 				Instance = descendant,
 				Original = descendant.Enabled,
@@ -295,7 +330,7 @@ function SukeClient:ClearFade(targetPlayer, immediate)
 		}, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
 	end
 
-	task.delay(fadeInTime + 0.08, function()
+	task.delay(fadeInTime + SHIMMER_CLEANUP_BUFFER, function()
 		if state.Highlight and state.Highlight.Parent then
 			state.Highlight:Destroy()
 		end
@@ -410,8 +445,10 @@ function SukeClient:Update()
 			local settings = state.Settings
 			local pulseSpeed = (math.pi * 2) / settings.PulsePeriod
 			local pulse = (math.sin((now - state.StartedAt) * pulseSpeed) + 1) * 0.5
-			state.Highlight.FillTransparency = math.clamp(settings.HighlightFillTransparency - (pulse * 0.035), 0, 1)
-			state.Highlight.OutlineTransparency = math.clamp(settings.HighlightOutlineTransparency - (pulse * 0.08), 0, 1)
+			state.Highlight.FillTransparency =
+				math.clamp(settings.HighlightFillTransparency - (pulse * HIGHLIGHT_FILL_PULSE_AMOUNT), 0, 1)
+			state.Highlight.OutlineTransparency =
+				math.clamp(settings.HighlightOutlineTransparency - (pulse * HIGHLIGHT_OUTLINE_PULSE_AMOUNT), 0, 1)
 		end
 	end
 end

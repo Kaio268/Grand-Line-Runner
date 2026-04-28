@@ -13,6 +13,8 @@ local DEFAULT_STOP_FADE_TIME = 0.1
 local INFO_COOLDOWN = 0.2
 local WARN_COOLDOWN = 3
 local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.Gomu.Server.GomuAnimationController"
+local RUBBER_LAUNCH_MOVE_NAME = "RubberLaunch"
+local RUBBER_LAUNCH_DEFAULT_ANIMATION_KEY = "Gomu.Rocket"
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -143,7 +145,7 @@ local function playAnimation(character, moveName, animationConfig, defaultAnimat
 end
 
 function GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
-	return playAnimation(character, "RubberLaunch", animationConfig, "Gomu.Rocket")
+	return playAnimation(character, RUBBER_LAUNCH_MOVE_NAME, animationConfig, RUBBER_LAUNCH_DEFAULT_ANIMATION_KEY)
 end
 
 function GomuAnimationController.StopAnimation(animationState, reason)

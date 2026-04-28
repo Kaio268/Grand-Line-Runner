@@ -20,13 +20,28 @@ local DEFAULT_PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local DEFAULT_PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION = 1.6666667
 local PHOENIX_REBIRTH = ToriShared.Passives.PhoenixRebirth
-local DEBUG_FLIGHT = true
+local DEBUG_FLIGHT = false
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_PHOENIX_FLIGHT_STARTUP_DURATION = 0.85
+local DEFAULT_PHOENIX_TAKEOFF_DURATION = 0.4
+local DEFAULT_PHOENIX_INITIAL_LIFT = 10
+local DEFAULT_PHOENIX_FLIGHT_SPEED = 78
+local DEFAULT_PHOENIX_VERTICAL_SPEED = 52
+local DEFAULT_PHOENIX_MAX_DESCEND_SPEED = 58
+local DEFAULT_PHOENIX_HORIZONTAL_RESPONSIVENESS = 10
+local DEFAULT_PHOENIX_FLIGHT_SPEED_SCALE_REFERENCE = 17
+local DEFAULT_PHOENIX_FLIGHT_SPEED_SCALE_STRENGTH = 0.5
+local PHOENIX_MIN_FLIGHT_DURATION = 0.1
+local PHOENIX_MIN_TAKEOFF_DURATION = 0.1
 local PHOENIX_HOVER_HEIGHT_TOLERANCE = 0.75
 local PHOENIX_HOVER_CORRECTION_GAIN = 4
+local PHOENIX_HOVER_MIN_CORRECTION_SPEED = 8
+local PHOENIX_HOVER_SNAP_EPSILON = 0.01
 local PHOENIX_TURN_MIN_RESPONSE_SCALE = 0.55
 local PHOENIX_FLIGHT_ROTATION_RESPONSIVENESS = 12
+local PHOENIX_FLIGHT_START_HORIZONTAL_DAMPING = 0.15
+local PHOENIX_VERTICAL_DRIFT_WARN_SPEED = 0.5
+local PHOENIX_REBIRTH_VISUAL_DEDUPE_WINDOW = 0.05
 local FLIGHT_UPDATE_LOG_INTERVAL = 0.25
 local FLIGHT_MOVE_LOG_INTERVAL = 0.2
 local FLIGHT_CORRECTION_LOG_INTERVAL = 0.2
@@ -35,6 +50,7 @@ local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local HAZARD_SUPPRESSION_GRACE = 0.15
 local HAZARD_OVERLAP_MAX_PARTS = 128
 local PHOENIX_SHIELD_HIT_EFFECT_THROTTLE = 0.18
+local PHOENIX_SHIELD_UNLOCK_RESCHEDULE_THRESHOLD = 0.02
 
 local function flightLog(...)
 	if not DEBUG_FLIGHT then
@@ -248,28 +264,8 @@ local function getPlanarDistance(a, b)
 	return Vector3.new(delta.X, 0, delta.Z).Magnitude
 end
 
-function ToriClient.new(config)
-	local self = setmetatable({}, ToriClient)
-	self.player = config and config.player or Players.LocalPlayer
-	self.clientEffectVisuals = config and config.clientEffectVisuals or nil
-	self.phoenixFruitName = (config and config.phoenixFruitName) or DEFAULT_PHOENIX_FRUIT_NAME
-	self.phoenixFlightAbility = (config and config.phoenixFlightAbility) or DEFAULT_PHOENIX_FLIGHT_ABILITY
-	self.phoenixShieldAbility = (config and config.phoenixShieldAbility) or DEFAULT_PHOENIX_SHIELD_ABILITY
-	self.phoenixRebirthAbility = (config and config.phoenixRebirthAbility) or DEFAULT_PHOENIX_REBIRTH_ABILITY
-	self.flightInputState = {
-		Forward = false,
-		Backward = false,
-		Left = false,
-		Right = false,
-	}
-	self.activePhoenixShields = {}
-	self.suppressedHazardParts = {}
-	self.shieldHitEffectTimes = setmetatable({}, { __mode = "k" })
-	self.hazardSuppressionLoopRunning = false
-	self.phoenixShieldAnimationLock = nil
-	self.lastPhoenixRebirthVisualTriggeredAt = nil
-	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
-	self.phoenixFlightState = {
+local function createPhoenixFlightState()
+	return {
 		Active = false,
 		EndTime = 0,
 		FlightStartTime = 0,
@@ -293,6 +289,37 @@ function ToriClient.new(config)
 		MaxDescendSpeed = 0,
 		HorizontalResponsiveness = 0,
 	}
+end
+
+local function resetPhoenixFlightState(flightState)
+	local defaultState = createPhoenixFlightState()
+	for key, value in pairs(defaultState) do
+		flightState[key] = value
+	end
+end
+
+function ToriClient.new(config)
+	local self = setmetatable({}, ToriClient)
+	self.player = config and config.player or Players.LocalPlayer
+	self.clientEffectVisuals = config and config.clientEffectVisuals or nil
+	self.phoenixFruitName = (config and config.phoenixFruitName) or DEFAULT_PHOENIX_FRUIT_NAME
+	self.phoenixFlightAbility = (config and config.phoenixFlightAbility) or DEFAULT_PHOENIX_FLIGHT_ABILITY
+	self.phoenixShieldAbility = (config and config.phoenixShieldAbility) or DEFAULT_PHOENIX_SHIELD_ABILITY
+	self.phoenixRebirthAbility = (config and config.phoenixRebirthAbility) or DEFAULT_PHOENIX_REBIRTH_ABILITY
+	self.flightInputState = {
+		Forward = false,
+		Backward = false,
+		Left = false,
+		Right = false,
+	}
+	self.activePhoenixShields = {}
+	self.suppressedHazardParts = {}
+	self.shieldHitEffectTimes = setmetatable({}, { __mode = "k" })
+	self.hazardSuppressionLoopRunning = false
+	self.phoenixShieldAnimationLock = nil
+	self.lastPhoenixRebirthVisualTriggeredAt = nil
+	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
+	self.phoenixFlightState = createPhoenixFlightState()
 	self._protectionRegistered = false
 	self._rebirthHookRegistered = false
 	self.flightDebugTimers = {}
@@ -375,7 +402,7 @@ function ToriClient:PlayPhoenixRebirthVisual(targetPlayer, payload)
 	local triggeredAt = tonumber(payload.TriggeredAt) or Workspace:GetServerTimeNow()
 	self.phoenixRebirthVisualTimes = self.phoenixRebirthVisualTimes or setmetatable({}, { __mode = "k" })
 	local lastTriggeredAt = self.phoenixRebirthVisualTimes[targetPlayer]
-	if lastTriggeredAt and math.abs(lastTriggeredAt - triggeredAt) <= 0.05 then
+	if lastTriggeredAt and math.abs(lastTriggeredAt - triggeredAt) <= PHOENIX_REBIRTH_VISUAL_DEDUPE_WINDOW then
 		return true
 	end
 
@@ -453,28 +480,7 @@ function ToriClient:StopPhoenixFlight()
 	end
 
 	local rootPart = getRootPart(self)
-	self.phoenixFlightState.Active = false
-	self.phoenixFlightState.EndTime = 0
-	self.phoenixFlightState.FlightStartTime = 0
-	self.phoenixFlightState.FlightDuration = 0
-	self.phoenixFlightState.FlightStarted = false
-	self.phoenixFlightState.TakeoffStarted = false
-	self.phoenixFlightState.StartupDuration = 0
-	self.phoenixFlightState.TakeoffEndTime = 0
-	self.phoenixFlightState.TakeoffDuration = 0
-	self.phoenixFlightState.TakeoffVelocity = 0
-	self.phoenixFlightState.ActivationHeight = 0
-	self.phoenixFlightState.InitialLiftTarget = 0
-	self.phoenixFlightState.InitialLift = 0
-	self.phoenixFlightState.MaxHeight = 0
-	self.phoenixFlightState.MaxRiseHeight = 0
-	self.phoenixFlightState.BaseFlightSpeed = 0
-	self.phoenixFlightState.FlightSpeedScaleReference = 0
-	self.phoenixFlightState.FlightSpeedScaleStrength = 0
-	self.phoenixFlightState.FlightSpeed = 0
-	self.phoenixFlightState.VerticalSpeed = 0
-	self.phoenixFlightState.MaxDescendSpeed = 0
-	self.phoenixFlightState.HorizontalResponsiveness = 0
+	resetPhoenixFlightState(self.phoenixFlightState)
 
 	if rootPart then
 		flightLog("END", "Final Y:", formatFlightNumber(rootPart.Position.Y))
@@ -524,7 +530,7 @@ function ToriClient:BeginPhoenixFlightControl(rootPart, now)
 	now = now or os.clock()
 	self.phoenixFlightState.FlightStarted = true
 	self.phoenixFlightState.FlightStartTime = now
-	self.phoenixFlightState.EndTime = now + math.max(0.1, self.phoenixFlightState.FlightDuration)
+	self.phoenixFlightState.EndTime = now + math.max(PHOENIX_MIN_FLIGHT_DURATION, self.phoenixFlightState.FlightDuration)
 
 	flightLog(
 		"FLIGHT BEGIN",
@@ -643,13 +649,16 @@ function ToriClient:StartPhoenixFlight(payload)
 	self:StopPhoenixFlight()
 
 	local now = os.clock()
-	local duration = math.max(0.1, tonumber(payload and payload.Duration) or 0)
+	local duration = math.max(PHOENIX_MIN_FLIGHT_DURATION, tonumber(payload and payload.Duration) or 0)
 	local startupDuration = math.max(
 		0,
 		tonumber(payload and payload.StartupDuration) or DEFAULT_PHOENIX_FLIGHT_STARTUP_DURATION
 	)
-	local takeoffDuration = math.max(0.1, tonumber(payload and payload.TakeoffDuration) or 0.4)
-	local initialLift = math.max(0, tonumber(payload and payload.InitialLift) or 10)
+	local takeoffDuration = math.max(
+		PHOENIX_MIN_TAKEOFF_DURATION,
+		tonumber(payload and payload.TakeoffDuration) or DEFAULT_PHOENIX_TAKEOFF_DURATION
+	)
+	local initialLift = math.max(0, tonumber(payload and payload.InitialLift) or DEFAULT_PHOENIX_INITIAL_LIFT)
 	local maxRiseHeight = math.max(initialLift, tonumber(payload and payload.MaxRiseHeight) or initialLift)
 	local liftVelocity = getInitialLiftVelocity(initialLift)
 	local flightStartTime = now + startupDuration
@@ -669,19 +678,31 @@ function ToriClient:StartPhoenixFlight(payload)
 	self.phoenixFlightState.InitialLift = initialLift
 	self.phoenixFlightState.MaxHeight = rootPart.Position.Y + maxRiseHeight
 	self.phoenixFlightState.MaxRiseHeight = maxRiseHeight
-	self.phoenixFlightState.BaseFlightSpeed = math.max(0, tonumber(payload and payload.FlightSpeed) or 78)
+	self.phoenixFlightState.BaseFlightSpeed = math.max(
+		0,
+		tonumber(payload and payload.FlightSpeed) or DEFAULT_PHOENIX_FLIGHT_SPEED
+	)
 	self.phoenixFlightState.FlightSpeedScaleReference = math.max(
 		1,
-		tonumber(payload and payload.FlightSpeedScaleReference) or 17
+		tonumber(payload and payload.FlightSpeedScaleReference) or DEFAULT_PHOENIX_FLIGHT_SPEED_SCALE_REFERENCE
 	)
 	self.phoenixFlightState.FlightSpeedScaleStrength = math.max(
 		0,
-		tonumber(payload and payload.FlightSpeedScaleStrength) or 0.5
+		tonumber(payload and payload.FlightSpeedScaleStrength) or DEFAULT_PHOENIX_FLIGHT_SPEED_SCALE_STRENGTH
 	)
 	self.phoenixFlightState.FlightSpeed = self:GetScaledPhoenixFlightSpeed(humanoid)
-	self.phoenixFlightState.VerticalSpeed = math.max(0, tonumber(payload and payload.VerticalSpeed) or 52)
-	self.phoenixFlightState.MaxDescendSpeed = math.max(0, tonumber(payload and payload.MaxDescendSpeed) or 58)
-	self.phoenixFlightState.HorizontalResponsiveness = math.max(1, tonumber(payload and payload.HorizontalResponsiveness) or 10)
+	self.phoenixFlightState.VerticalSpeed = math.max(
+		0,
+		tonumber(payload and payload.VerticalSpeed) or DEFAULT_PHOENIX_VERTICAL_SPEED
+	)
+	self.phoenixFlightState.MaxDescendSpeed = math.max(
+		0,
+		tonumber(payload and payload.MaxDescendSpeed) or DEFAULT_PHOENIX_MAX_DESCEND_SPEED
+	)
+	self.phoenixFlightState.HorizontalResponsiveness = math.max(
+		1,
+		tonumber(payload and payload.HorizontalResponsiveness) or DEFAULT_PHOENIX_HORIZONTAL_RESPONSIVENESS
+	)
 	self.flightDebugTimers = {}
 
 	humanoid.AutoRotate = false
@@ -691,9 +712,9 @@ function ToriClient:StartPhoenixFlight(payload)
 
 	local currentVelocity = rootPart.AssemblyLinearVelocity
 	rootPart.AssemblyLinearVelocity = Vector3.new(
-		currentVelocity.X * 0.15,
+		currentVelocity.X * PHOENIX_FLIGHT_START_HORIZONTAL_DAMPING,
 		0,
-		currentVelocity.Z * 0.15
+		currentVelocity.Z * PHOENIX_FLIGHT_START_HORIZONTAL_DAMPING
 	)
 	if startupDuration <= 0 then
 		self:BeginPhoenixFlightTakeoff(rootPart, now)
@@ -786,10 +807,16 @@ end
 
 function ToriClient:GetScaledPhoenixFlightSpeed(humanoid)
 	local baseFlightSpeed = math.max(0, tonumber(self.phoenixFlightState.BaseFlightSpeed) or 0)
-	local referenceWalkSpeed = math.max(1, tonumber(self.phoenixFlightState.FlightSpeedScaleReference) or 17)
+	local referenceWalkSpeed = math.max(
+		1,
+		tonumber(self.phoenixFlightState.FlightSpeedScaleReference) or DEFAULT_PHOENIX_FLIGHT_SPEED_SCALE_REFERENCE
+	)
 	local currentWalkSpeed = (humanoid and tonumber(humanoid.WalkSpeed)) or referenceWalkSpeed
 	local rawScale = math.max(0, currentWalkSpeed) / referenceWalkSpeed
-	local scaleStrength = math.max(0, tonumber(self.phoenixFlightState.FlightSpeedScaleStrength) or 0.5)
+	local scaleStrength = math.max(
+		0,
+		tonumber(self.phoenixFlightState.FlightSpeedScaleStrength) or DEFAULT_PHOENIX_FLIGHT_SPEED_SCALE_STRENGTH
+	)
 	local speedScale = math.max(0, 1 + ((rawScale - 1) * scaleStrength))
 	return baseFlightSpeed * speedScale
 end
@@ -804,7 +831,7 @@ function ToriClient:GetTargetHoverVerticalVelocity(currentHeight, now)
 			self.phoenixFlightState.TakeoffVelocity,
 			math.min(
 				self.phoenixFlightState.VerticalSpeed,
-				math.max(8, heightError * PHOENIX_HOVER_CORRECTION_GAIN)
+				math.max(PHOENIX_HOVER_MIN_CORRECTION_SPEED, heightError * PHOENIX_HOVER_CORRECTION_GAIN)
 			)
 		)
 	end
@@ -816,7 +843,7 @@ function ToriClient:GetTargetHoverVerticalVelocity(currentHeight, now)
 	if heightError > 0 then
 		local correctionVelocity = math.min(
 			self.phoenixFlightState.VerticalSpeed,
-			math.max(8, heightError * PHOENIX_HOVER_CORRECTION_GAIN)
+			math.max(PHOENIX_HOVER_MIN_CORRECTION_SPEED, heightError * PHOENIX_HOVER_CORRECTION_GAIN)
 		)
 		if self:ShouldLogFlightDebug("Correction", now, FLIGHT_CORRECTION_LOG_INTERVAL) then
 			flightLog("CORRECTION", "Direction:", "UP", "Amount:", formatFlightNumber(correctionVelocity))
@@ -826,7 +853,7 @@ function ToriClient:GetTargetHoverVerticalVelocity(currentHeight, now)
 
 	local correctionVelocity = math.min(
 		self.phoenixFlightState.MaxDescendSpeed,
-		math.max(8, math.abs(heightError) * PHOENIX_HOVER_CORRECTION_GAIN)
+		math.max(PHOENIX_HOVER_MIN_CORRECTION_SPEED, math.abs(heightError) * PHOENIX_HOVER_CORRECTION_GAIN)
 	)
 	if self:ShouldLogFlightDebug("Correction", now, FLIGHT_CORRECTION_LOG_INTERVAL) then
 		flightLog("CORRECTION", "Direction:", "DOWN", "Amount:", formatFlightNumber(correctionVelocity))
@@ -870,7 +897,7 @@ function ToriClient:SnapPhoenixHoverHeight(rootPart)
 		return
 	end
 
-	if math.abs(currentPosition.Y - targetHeight) <= 0.01 then
+	if math.abs(currentPosition.Y - targetHeight) <= PHOENIX_HOVER_SNAP_EPSILON then
 		return
 	end
 
@@ -977,7 +1004,7 @@ function ToriClient:UpdatePhoenixFlight(dt)
 	local finalVerticalVelocity = rootPart.AssemblyLinearVelocity.Y
 	local finalHoverDiff = rootPart.Position.Y - self.phoenixFlightState.MaxHeight
 	if math.abs(finalHoverDiff) <= PHOENIX_HOVER_HEIGHT_TOLERANCE
-		and math.abs(finalVerticalVelocity) > 0.5
+		and math.abs(finalVerticalVelocity) > PHOENIX_VERTICAL_DRIFT_WARN_SPEED
 		and self:ShouldLogFlightDebug("DriftWarn", now, FLIGHT_DRIFT_WARN_INTERVAL)
 	then
 		warn("[FLIGHT ISSUE] Vertical drift detected:", finalVerticalVelocity)
@@ -1231,7 +1258,7 @@ function ToriClient:SchedulePhoenixShieldAnimationUnlock(lock)
 			end
 
 			local remaining = (lock.EndTime or 0) - os.clock()
-			if remaining > 0.02 then
+			if remaining > PHOENIX_SHIELD_UNLOCK_RESCHEDULE_THRESHOLD then
 				schedule()
 				return
 			end
@@ -1340,6 +1367,14 @@ function ToriClient:StartPhoenixShield(targetPlayer, payload)
 	self:EnsurePhoenixShieldHazardSuppressionLoop()
 end
 
+function ToriClient:StopPhoenixVisualsForPlayer(targetPlayer, fadeTime)
+	if not self.clientEffectVisuals or typeof(self.clientEffectVisuals.StopPhoenixWingEffect) ~= "function" then
+		return
+	end
+
+	self.clientEffectVisuals:StopPhoenixWingEffect(targetPlayer, fadeTime)
+end
+
 function ToriClient:HandleInputBegan(input, gameProcessed)
 	if gameProcessed then
 		return false
@@ -1431,13 +1466,19 @@ function ToriClient:HandleCharacterRemoving()
 		self:ReleasePhoenixShieldAnimationLock(self.phoenixShieldAnimationLock)
 	end
 	self:StopPhoenixFlight()
+	self:StopPhoenixVisualsForPlayer(self.player, 0)
 	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
 	self.flightInputState.Forward = false
 	self.flightInputState.Backward = false
 	self.flightInputState.Left = false
 	self.flightInputState.Right = false
-	self.hazardSuppressionLoopRunning = false
+	self.activePhoenixShields[self.player] = nil
 	self:RestoreSuppressedHazardParts(math.huge)
+	if self:HasActivePhoenixShield(os.clock()) then
+		self:EnsurePhoenixShieldHazardSuppressionLoop()
+	else
+		self.hazardSuppressionLoopRunning = false
+	end
 end
 
 function ToriClient:HandlePlayerRemoving(leavingPlayer)
@@ -1446,6 +1487,7 @@ function ToriClient:HandlePlayerRemoving(leavingPlayer)
 	end
 
 	self.activePhoenixShields[leavingPlayer] = nil
+	self:StopPhoenixVisualsForPlayer(leavingPlayer, 0)
 end
 
 return ToriClient

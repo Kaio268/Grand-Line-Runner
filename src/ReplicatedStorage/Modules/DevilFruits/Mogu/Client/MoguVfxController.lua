@@ -16,10 +16,12 @@ local MoguVfxController = {}
 MoguVfxController.__index = MoguVfxController
 
 local FRUIT_NAME = "Mogu Mogu no Mi"
+local ABILITY_NAME = "Burrow"
 local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.35
 local WARN_COOLDOWN = 4
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
+local MIN_DIRECTION_MAGNITUDE = 0.01
 local VFX_ANCHOR_SIZE = Vector3.new(0.25, 0.25, 0.25)
 local MIN_SCORE_BY_STAGE = {
 	Entry = 42,
@@ -52,7 +54,7 @@ local function getFruitConfig()
 end
 
 local function getAbilityConfig()
-	return DevilFruitConfig.GetAbility(FRUIT_NAME, "Burrow") or {}
+	return DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME) or {}
 end
 
 local function getVfxConfig()
@@ -322,7 +324,7 @@ local function setVisualEffectsEnabled(state, enabled)
 	end
 end
 
-local function activateOneShot(state, emitCount)
+local function activateOneShot(state)
 	setVisualVisible(state, true)
 	setVisualEffectsEnabled(state, true)
 end
@@ -410,7 +412,7 @@ end
 
 local function resolveDirection(direction)
 	local candidate = typeof(direction) == "Vector3" and Vector3.new(direction.X, 0, direction.Z) or DEFAULT_DIRECTION
-	if candidate.Magnitude <= 0.01 then
+	if candidate.Magnitude <= MIN_DIRECTION_MAGNITUDE then
 		return DEFAULT_DIRECTION
 	end
 	return candidate.Unit

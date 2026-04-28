@@ -19,10 +19,16 @@
 local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 
-print("[MERA VFX] bootstrap load begin")
+local DEBUG_INFO = RunService:IsStudio()
 
 local FlameDashVfx = nil
 local FireBurstVfx = nil
+
+local function logInfo(message)
+	if DEBUG_INFO then
+		print("[MERA VFX] " .. tostring(message))
+	end
+end
 
 -- ============================================================================
 -- Isolated Module Loading
@@ -36,7 +42,7 @@ local function loadIsolatedVfxModule(moduleName)
 	end)
 
 	if ok and result then
-		print("[MERA VFX] bootstrap load success module=" .. moduleName)
+		logInfo("bootstrap load success module=" .. moduleName)
 		return result
 	end
 
@@ -48,7 +54,7 @@ FlameDashVfx = loadIsolatedVfxModule("FlameDashVfx")
 FireBurstVfx = loadIsolatedVfxModule("FireBurstVfx")
 
 local allLoaded = FlameDashVfx ~= nil and FireBurstVfx ~= nil
-print("[MERA VFX] bootstrap load " .. (allLoaded and "success" or "partial"))
+logInfo("bootstrap load " .. (allLoaded and "success" or "partial"))
 
 -- ============================================================================
 -- Safe Delegation Helpers
@@ -58,7 +64,6 @@ print("[MERA VFX] bootstrap load " .. (allLoaded and "success" or "partial"))
 
 local function callVfxMethod(moduleRef, methodName, failureLabel, ...)
 	if not moduleRef then
-		print("[MERA VFX] " .. tostring(failureLabel) .. " skip reason=module_not_loaded")
 		return false, nil
 	end
 

@@ -15,9 +15,11 @@ local WARN_COOLDOWN = 4
 local DEFAULT_FADE_TIME = 0.06
 local DEFAULT_STOP_FADE_TIME = 0.1
 local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.Mogu.Server.MoguAnimationController"
+local STAGE_START = "Start"
+local STAGE_RESOLVE = "Resolve"
 local DEFAULT_ANIMATION_KEY_BY_STAGE = {
-	Start = "Mogu.Dive",
-	Resolve = "Mogu.Exit",
+	[STAGE_START] = "Mogu.Dive",
+	[STAGE_RESOLVE] = "Mogu.Exit",
 }
 
 local function logInfo(message, ...)
@@ -119,11 +121,11 @@ local function playAnimation(character, stageKey, abilityConfig)
 end
 
 function MoguAnimationController.PlayBurrowStartAnimation(character, abilityConfig)
-	return playAnimation(character, "Start", abilityConfig)
+	return playAnimation(character, STAGE_START, abilityConfig)
 end
 
 function MoguAnimationController.PlayBurrowResolveAnimation(character, abilityConfig)
-	return playAnimation(character, "Resolve", abilityConfig)
+	return playAnimation(character, STAGE_RESOLVE, abilityConfig)
 end
 
 function MoguAnimationController.StopAnimation(animationState, reason)

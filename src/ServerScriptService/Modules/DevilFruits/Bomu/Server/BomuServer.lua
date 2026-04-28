@@ -13,29 +13,62 @@ local activeMinesByPlayer = {}
 
 local EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local LAND_MINE_MODEL_NAME = "BomuLandMine"
+local LAND_MINE_ACTION_PLACED = "Placed"
+local LAND_MINE_ACTION_DETONATED = "Detonated"
+local LAND_MINE_SOURCE = "LandMine"
+local MIN_PLANAR_DIRECTION_MAGNITUDE = 0.01
+local DEFAULT_PLANAR_DIRECTION = Vector3.new(0, 0, -1)
 local GROUND_CAST_HEIGHT = 4
 local GROUND_CAST_DISTANCE = 18
+local GROUND_NORMAL_OFFSET = 0.02
+local DEFAULT_HUMANOID_HIP_HEIGHT = 2
+local FALLBACK_GROUND_CLEARANCE = 2.5
+local MIN_FALLBACK_GROUND_HEIGHT = 4
 local MINE_BODY_HEIGHT = 0.34
+local MINE_INDICATOR_GROUND_OFFSET = 0.03
+local MINE_CORE_GROUND_OFFSET = 0.01
+local MINE_RADIUS_INDICATOR_THICKNESS = 0.08
+local MINE_RADIUS_CORE_THICKNESS = 0.04
+local MINE_RADIUS_CORE_SCALE = 1.2
+local MINE_RADIUS_INDICATOR_TRANSPARENCY = 0.72
+local MINE_RADIUS_CORE_TRANSPARENCY = 0.82
+local MINE_BODY_SIZE = Vector3.new(1.15, 0.48, 1.15)
+local MINE_CAP_SIZE = Vector3.new(0.58, 0.2, 0.58)
+local MINE_BEACON_SIZE = Vector3.new(0.24, 0.24, 0.24)
+local MINE_CAP_HEIGHT_OFFSET = 0.18
+local MINE_BEACON_HEIGHT_OFFSET = 0.34
+local MINE_CYLINDER_ORIENTATION = Vector3.new(90, 0, 0)
+local MINE_RADIUS_DISC_ROTATION = CFrame.Angles(0, 0, math.rad(90))
+local MINE_INDICATOR_COLOR = Color3.fromRGB(255, 64, 64)
+local MINE_CORE_COLOR = Color3.fromRGB(255, 110, 92)
+local MINE_BODY_COLOR = Color3.fromRGB(38, 36, 36)
+local MINE_CAP_COLOR = Color3.fromRGB(198, 44, 44)
+local MINE_BEACON_COLOR = Color3.fromRGB(255, 82, 82)
+local MINE_BEACON_TRANSPARENCY = 0.08
 local OWNER_NETWORK_OWNER_RELEASE_DELAY = 0.35
+local OWNER_INHERITED_HORIZONTAL_VELOCITY_FACTOR = 0.18
 local RADIUS_MATCH_EPSILON = 0.05
 local PLAYER_RADIUS_RECONCILE_TIME = 0.16
 local MAX_PLAYER_RADIUS_RECONCILE_DISTANCE = 7
 local MAX_PLAYER_PLANAR_EXTENT = 3
+local SEGMENT_LENGTH_EPSILON = 0.0001
+local HAZARD_QUERY_PLAYER_DISTANCE_PADDING = 8
+local HAZARD_QUERY_MAX_TARGETS = 8
 
 local function getPlanarUnitOrFallback(vector, fallback)
 	local planarVector = Vector3.new(vector.X, 0, vector.Z)
-	if planarVector.Magnitude > 0.01 then
+	if planarVector.Magnitude > MIN_PLANAR_DIRECTION_MAGNITUDE then
 		return planarVector.Unit
 	end
 
-	if typeof(fallback) == "Vector3" and fallback.Magnitude > 0.01 then
+	if typeof(fallback) == "Vector3" and fallback.Magnitude > MIN_PLANAR_DIRECTION_MAGNITUDE then
 		local planarFallback = Vector3.new(fallback.X, 0, fallback.Z)
-		if planarFallback.Magnitude > 0.01 then
+		if planarFallback.Magnitude > MIN_PLANAR_DIRECTION_MAGNITUDE then
 			return planarFallback.Unit
 		end
 	end
 
-	return Vector3.new(0, 0, -1)
+	return DEFAULT_PLANAR_DIRECTION
 end
 
 local function buildGroundRaycastParams(character, extraExclusions)
@@ -111,7 +144,7 @@ local function getClosestPlanarDistanceToSegment(centerPosition, startPosition, 
 	local finish = Vector3.new(endPosition.X, 0, endPosition.Z)
 	local segment = finish - start
 	local lengthSquared = segment:Dot(segment)
-	if lengthSquared <= 0.0001 then
+	if lengthSquared <= SEGMENT_LENGTH_EPSILON then
 		return (center - start).Magnitude
 	end
 
@@ -165,7 +198,7 @@ local function getRootMotionSweepOffset(rootPart)
 	local velocity = rootPart.AssemblyLinearVelocity
 	local planarVelocity = Vector3.new(velocity.X, 0, velocity.Z)
 	local speed = planarVelocity.Magnitude
-	if speed <= 0.01 then
+	if speed <= MIN_PLANAR_DIRECTION_MAGNITUDE then
 		return Vector3.zero
 	end
 
@@ -280,61 +313,61 @@ local function createLandMineModel(player, groundPosition, radius)
 	model:SetAttribute("FruitKey", "Bomu")
 	model:SetAttribute("OwnerUserId", player.UserId)
 
-	local indicatorPosition = groundPosition + Vector3.new(0, 0.03, 0)
+	local indicatorPosition = groundPosition + Vector3.new(0, MINE_INDICATOR_GROUND_OFFSET, 0)
 	createDisplayPart(
 		model,
 		"RadiusIndicator",
-		Vector3.new(0.08, radius * 2, radius * 2),
-		Color3.fromRGB(255, 64, 64),
-		CFrame.new(indicatorPosition) * CFrame.Angles(0, 0, math.rad(90)),
+		Vector3.new(MINE_RADIUS_INDICATOR_THICKNESS, radius * 2, radius * 2),
+		MINE_INDICATOR_COLOR,
+		CFrame.new(indicatorPosition) * MINE_RADIUS_DISC_ROTATION,
 		Enum.PartType.Cylinder,
 		Enum.Material.Neon,
-		0.72
+		MINE_RADIUS_INDICATOR_TRANSPARENCY
 	)
 	createDisplayPart(
 		model,
 		"RadiusCore",
-		Vector3.new(0.04, radius * 1.2, radius * 1.2),
-		Color3.fromRGB(255, 110, 92),
-		CFrame.new(indicatorPosition + Vector3.new(0, 0.01, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+		Vector3.new(MINE_RADIUS_CORE_THICKNESS, radius * MINE_RADIUS_CORE_SCALE, radius * MINE_RADIUS_CORE_SCALE),
+		MINE_CORE_COLOR,
+		CFrame.new(indicatorPosition + Vector3.new(0, MINE_CORE_GROUND_OFFSET, 0)) * MINE_RADIUS_DISC_ROTATION,
 		Enum.PartType.Cylinder,
 		Enum.Material.Neon,
-		0.82
+		MINE_RADIUS_CORE_TRANSPARENCY
 	)
 
 	local bodyPosition = groundPosition + Vector3.new(0, MINE_BODY_HEIGHT, 0)
 	local body = createDisplayPart(
 		model,
 		"Body",
-		Vector3.new(1.15, 0.48, 1.15),
-		Color3.fromRGB(38, 36, 36),
+		MINE_BODY_SIZE,
+		MINE_BODY_COLOR,
 		CFrame.new(bodyPosition),
 		Enum.PartType.Cylinder,
 		Enum.Material.Metal,
 		0
 	)
-	body.Orientation = Vector3.new(90, 0, 0)
+	body.Orientation = MINE_CYLINDER_ORIENTATION
 
 	createDisplayPart(
 		model,
 		"Cap",
-		Vector3.new(0.58, 0.2, 0.58),
-		Color3.fromRGB(198, 44, 44),
-		CFrame.new(bodyPosition + Vector3.new(0, 0.18, 0)),
+		MINE_CAP_SIZE,
+		MINE_CAP_COLOR,
+		CFrame.new(bodyPosition + Vector3.new(0, MINE_CAP_HEIGHT_OFFSET, 0)),
 		Enum.PartType.Cylinder,
 		Enum.Material.SmoothPlastic,
 		0
-	).Orientation = Vector3.new(90, 0, 0)
+	).Orientation = MINE_CYLINDER_ORIENTATION
 
 	createDisplayPart(
 		model,
 		"Beacon",
-		Vector3.new(0.24, 0.24, 0.24),
-		Color3.fromRGB(255, 82, 82),
-		CFrame.new(bodyPosition + Vector3.new(0, 0.34, 0)),
+		MINE_BEACON_SIZE,
+		MINE_BEACON_COLOR,
+		CFrame.new(bodyPosition + Vector3.new(0, MINE_BEACON_HEIGHT_OFFSET, 0)),
 		Enum.PartType.Ball,
 		Enum.Material.Neon,
-		0.08
+		MINE_BEACON_TRANSPARENCY
 	)
 
 	model.PrimaryPart = body
@@ -366,10 +399,13 @@ local function getMinePlacementPosition(context)
 	local result = Workspace:Raycast(castOrigin, Vector3.new(0, -GROUND_CAST_DISTANCE, 0), raycastParams)
 
 	if result then
-		return result.Position + (result.Normal * 0.02)
+		return result.Position + (result.Normal * GROUND_NORMAL_OFFSET)
 	end
 
-	local fallbackHeight = math.max((humanoid.HipHeight or 2) + 2.5, 4)
+	local fallbackHeight = math.max(
+		(humanoid.HipHeight or DEFAULT_HUMANOID_HIP_HEIGHT) + FALLBACK_GROUND_CLEARANCE,
+		MIN_FALLBACK_GROUND_HEIGHT
+	)
 	return rootPart.Position + (placementDirection * placementDistance) - Vector3.new(0, fallbackHeight, 0)
 end
 
@@ -389,8 +425,8 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 			minor = true,
 		},
 		PlayerRootPosition = centerPosition,
-		MaxPlayerDistance = radius + 8,
-		MaxHazardTargets = 8,
+		MaxPlayerDistance = radius + HAZARD_QUERY_PLAYER_DISTANCE_PADDING,
+		MaxHazardTargets = HAZARD_QUERY_MAX_TARGETS,
 		TracePrefix = "HIT",
 	})
 
@@ -461,7 +497,8 @@ local function applyOwnerLaunch(context, centerPosition, abilityConfig)
 	local launchHorizontal = math.max(0, tonumber(abilityConfig.OwnerLaunchHorizontal) or 0)
 	local launchVertical = math.max(0, tonumber(abilityConfig.OwnerLaunchVertical) or 0)
 	local currentVelocity = rootPart.AssemblyLinearVelocity
-	local inheritedHorizontalVelocity = Vector3.new(currentVelocity.X, 0, currentVelocity.Z) * 0.18
+	local inheritedHorizontalVelocity =
+		Vector3.new(currentVelocity.X, 0, currentVelocity.Z) * OWNER_INHERITED_HORIZONTAL_VELOCITY_FACTOR
 	local launchHorizontalVelocity = (direction * launchHorizontal) + inheritedHorizontalVelocity
 	local launchVelocity = Vector3.new(
 		launchHorizontalVelocity.X,
@@ -495,26 +532,7 @@ local function applyOwnerLaunch(context, centerPosition, abilityConfig)
 	return true
 end
 
-function BomuServer.LandMine(context)
-	local activeMine = getActiveMineEntry(context.Player)
-	if activeMine then
-		clearActiveMine(context.Player)
-
-		local payload = buildExplosionPayload(context, activeMine.OriginPosition or context.RootPart.Position, context.AbilityConfig)
-		payload.Action = "Detonated"
-		payload.Source = "LandMine"
-		payload.MinePosition = activeMine.GroundPosition or activeMine.OriginPosition
-		payload.OwnerLaunched = applyOwnerLaunch(
-			context,
-			activeMine.GroundPosition or activeMine.OriginPosition or context.RootPart.Position,
-			context.AbilityConfig
-		)
-
-		return payload, {
-			ApplyCooldown = true,
-		}
-	end
-
+local function placeLandMine(context)
 	local radius = math.max(0, tonumber(context.AbilityConfig.Radius) or 0)
 	local lifetime = math.max(0, tonumber(context.AbilityConfig.MineLifetime) or 0)
 	local groundPosition = getMinePlacementPosition(context)
@@ -530,15 +548,43 @@ function BomuServer.LandMine(context)
 	scheduleMineCleanup(context.Player, mineEntry, lifetime)
 
 	return {
-		Action = "Placed",
-		Source = "LandMine",
+		Action = LAND_MINE_ACTION_PLACED,
+		Source = LAND_MINE_SOURCE,
 		Radius = radius,
 		MinePosition = groundPosition,
 		OriginPosition = originPosition,
 		MineLifetime = lifetime,
 	}, {
+		-- LandMine reserves cooldown only when the existing mine is detonated.
 		ApplyCooldown = false,
 	}
+end
+
+local function detonateLandMine(context, activeMine)
+	clearActiveMine(context.Player)
+
+	local payload = buildExplosionPayload(context, activeMine.OriginPosition or context.RootPart.Position, context.AbilityConfig)
+	payload.Action = LAND_MINE_ACTION_DETONATED
+	payload.Source = LAND_MINE_SOURCE
+	payload.MinePosition = activeMine.GroundPosition or activeMine.OriginPosition
+	payload.OwnerLaunched = applyOwnerLaunch(
+		context,
+		activeMine.GroundPosition or activeMine.OriginPosition or context.RootPart.Position,
+		context.AbilityConfig
+	)
+
+	return payload, {
+		ApplyCooldown = true,
+	}
+end
+
+function BomuServer.LandMine(context)
+	local activeMine = getActiveMineEntry(context.Player)
+	if activeMine then
+		return detonateLandMine(context, activeMine)
+	end
+
+	return placeLandMine(context)
 end
 
 function BomuServer.ClearRuntimeState(player)

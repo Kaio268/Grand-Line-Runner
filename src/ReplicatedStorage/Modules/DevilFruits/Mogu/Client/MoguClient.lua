@@ -20,6 +20,10 @@ MoguClient.__index = MoguClient
 
 local FRUIT_NAME = "Mogu Mogu no Mi"
 local ABILITY_NAME = "Burrow"
+local PHASE_START = "Start"
+local PHASE_RESOLVE = "Resolve"
+local SURFACE_REASON_MANUAL_TOGGLE = "manual_toggle"
+local SURFACE_REASON_DURATION_ELAPSED = "duration_elapsed"
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local TRAIL_COLOR = Color3.fromRGB(122, 95, 63)
@@ -652,7 +656,7 @@ function MoguClient:GetLocalBurrowState()
 	return self.burrowStates[self.player]
 end
 
-function MoguClient:RequestSurface(reason)
+function MoguClient:RequestSurface(_reason)
 	local burrowState = self:GetLocalBurrowState()
 	if not burrowState or burrowState.SurfaceRequested or typeof(self.requestAbility) ~= "function" then
 		return false
@@ -764,7 +768,7 @@ end
 function MoguClient:HandleInputBegan(input, gameProcessed)
 	local burrowState = self:GetLocalBurrowState()
 	if burrowState and input and input.KeyCode == Enum.KeyCode.Q and not gameProcessed then
-		self:RequestSurface("manual_toggle")
+		self:RequestSurface(SURFACE_REASON_MANUAL_TOGGLE)
 		return true
 	end
 
@@ -803,7 +807,7 @@ function MoguClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	}
 end
 
-function MoguClient:BuildRequestPayload(abilityName, abilityEntry, fallbackBuilder)
+function MoguClient:BuildRequestPayload(abilityName, _abilityEntry, fallbackBuilder)
 	if abilityName == ABILITY_NAME then
 		return self:BeginPredictedRequest(abilityName)
 	end
@@ -828,7 +832,7 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	humanoid.Jump = false
 
 	if now >= burrowState.EndTime and not burrowState.SurfaceRequested then
-		self:RequestSurface("duration_elapsed")
+		self:RequestSurface(SURFACE_REASON_DURATION_ELAPSED)
 	end
 
 	if burrowState.SurfaceRequested then
@@ -882,14 +886,14 @@ function MoguClient:HandleEffect(targetPlayer, abilityName, payload)
 	end
 
 	payload = payload or {}
-	local phase = typeof(payload.Phase) == "string" and payload.Phase or "Start"
-	if phase == "Start" then
+	local phase = typeof(payload.Phase) == "string" and payload.Phase or PHASE_START
+	if phase == PHASE_START then
 		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName, payload)
 		self:StartBurrow(targetPlayer, payload)
 		return true
 	end
 
-	if phase == "Resolve" then
+	if phase == PHASE_RESOLVE then
 		self.playOptionalEffect(targetPlayer, FRUIT_NAME, abilityName, payload)
 		self:StopBurrow(targetPlayer, payload)
 		return true

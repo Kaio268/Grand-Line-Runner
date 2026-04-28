@@ -17,10 +17,12 @@ local ToriShared = require(
 
 local ToriPassiveService = {}
 
-local PHOENIX_REBIRTH_KEY = "PhoenixRebirth"
+local PHOENIX_REBIRTH_PASSIVE_KEY = "PhoenixRebirth"
 local PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local PHOENIX_REBIRTH = ToriShared.Passives.PhoenixRebirth
 local MIN_STABILIZED_HEALTH = 1
+local DEFAULT_RESTORE_HEALTH_PERCENT = 0.05
+local MIN_PLANAR_LOOK_MAGNITUDE = 0.01
 local REBIRTH_GROUND_RAY_HEIGHT = 6
 local REBIRTH_GROUND_RAY_DEPTH = 40
 local REBIRTH_STABILIZED_STATES = {
@@ -159,7 +161,7 @@ end
 
 local function getPhoenixRebirthConfig()
 	local fruitConfig = DevilFruitConfig.GetFruit(ToriShared.FruitName)
-	local passiveConfig = fruitConfig and fruitConfig.Passives and fruitConfig.Passives[PHOENIX_REBIRTH_KEY] or nil
+	local passiveConfig = fruitConfig and fruitConfig.Passives and fruitConfig.Passives[PHOENIX_REBIRTH_PASSIVE_KEY] or nil
 	local animationKey = tostring(passiveConfig and passiveConfig.AnimationKey or PHOENIX_REBIRTH.AnimationKey)
 	local markerNames = copyStringArray(
 		passiveConfig and passiveConfig.ReviveMarkerNames,
@@ -196,7 +198,7 @@ local function getPhoenixRebirthConfig()
 			tonumber(passiveConfig and passiveConfig.StabilizeHealthPercent) or PHOENIX_REBIRTH.StabilizeHealthPercent
 		),
 		RestoreHealthPercent = math.max(
-			0.05,
+			DEFAULT_RESTORE_HEALTH_PERCENT,
 			tonumber(passiveConfig and passiveConfig.RestoreHealthPercent) or PHOENIX_REBIRTH.RestoreHealthPercent
 		),
 		AnimationKey = animationKey,
@@ -311,7 +313,7 @@ end
 local function getPlanarLookDirection(rootPart)
 	local lookVector = rootPart and rootPart.CFrame.LookVector or Vector3.new(0, 0, -1)
 	local planarLook = Vector3.new(lookVector.X, 0, lookVector.Z)
-	if planarLook.Magnitude <= 0.01 then
+	if planarLook.Magnitude <= MIN_PLANAR_LOOK_MAGNITUDE then
 		return Vector3.new(0, 0, -1)
 	end
 
@@ -495,10 +497,11 @@ local function getRestoredHealth(state)
 	end
 
 	local passiveConfig = state.PassiveConfig or {}
-	return math.max(
-		MIN_STABILIZED_HEALTH,
-		humanoid.MaxHealth * math.max(0.05, tonumber(passiveConfig.RestoreHealthPercent) or 1)
+	local restorePercent = math.max(
+		DEFAULT_RESTORE_HEALTH_PERCENT,
+		tonumber(passiveConfig.RestoreHealthPercent) or 1
 	)
+	return math.max(MIN_STABILIZED_HEALTH, humanoid.MaxHealth * restorePercent)
 end
 
 local function scheduleImmunityClear(player, state)
@@ -760,6 +763,30 @@ function ToriPassiveService.Start()
 	for _, player in ipairs(Players:GetPlayers()) do
 		hookPlayer(player)
 	end
+end
+
+function ToriPassiveService.ClearRuntimeState(player)
+	if not player or not player:IsA("Player") then
+		return false
+	end
+
+	cleanupState(player)
+
+	-- Keep the passive health listener ready for a same-character re-equip.
+	local character = player.Character
+	if player.Parent == Players and character and character.Parent then
+		task.defer(function()
+			local shouldRebind = player.Parent == Players
+				and player.Character == character
+				and character.Parent ~= nil
+				and not statesByPlayer[player]
+			if shouldRebind then
+				bindCharacter(player, character)
+			end
+		end)
+	end
+
+	return true
 end
 
 function ToriPassiveService.IsProtected(player)

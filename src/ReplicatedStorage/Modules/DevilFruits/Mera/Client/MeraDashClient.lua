@@ -19,12 +19,19 @@ MeraDashClient.__index = MeraDashClient
 
 MeraDashClient.FRUIT_NAME = "Mera Mera no Mi"
 MeraDashClient.ABILITY_NAME = "FlameDash"
-local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 
 local CORRECTION_SNAP_DISTANCE = 12
 local DIRECTION_TOLERANCE = 8
 local DISTANCE_TOLERANCE = 6
 local CAMERA_FOV_BOOST = 6
+local MAX_CAMERA_FOV = 95
+local CAMERA_PUNCH_OUT_TIME = 0.06
+local CAMERA_SETTLE_TIME = 0.18
+local MIN_PLANAR_DIRECTION_MAGNITUDE = 0.01
+local CARRY_RELEASE_DONE_SPEED_SCALE = 0.001
+local MIN_DASH_DISTANCE = 0.05
+local MIN_DASH_RUNTIME = 0.08
+local WALL_LOOKAHEAD_BUFFER = 2
 
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
@@ -95,8 +102,7 @@ local function safeCallNonCriticalCallback(callbackName, callback, ...)
 	local ok, result = pcall(callback, ...)
 	if not ok then
 		logRequest(
-			"[%s] MeraDashClient noncritical callback failed ability=%s callback=%s detail=%s",
-			MERA_AUDIT_MARKER,
+			"MeraDashClient noncritical callback failed ability=%s callback=%s detail=%s",
 			MeraDashClient.ABILITY_NAME,
 			tostring(callbackName),
 			tostring(result)
@@ -105,6 +111,27 @@ local function safeCallNonCriticalCallback(callbackName, callback, ...)
 	end
 
 	return true, result
+end
+
+local function refreshPredictedTravelDistance(state, rootPart, direction)
+	if type(state) ~= "table" then
+		return 0
+	end
+
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return tonumber(state.TraveledDistance) or 0
+	end
+
+	local resolvedDirection = typeof(direction) == "Vector3" and direction
+		or (state.Plan and state.Plan.Direction)
+		or state.Direction
+	if typeof(state.StartPosition) ~= "Vector3" or typeof(resolvedDirection) ~= "Vector3" then
+		return tonumber(state.TraveledDistance) or 0
+	end
+
+	local liveDistance = MeraDashShared.GetTravelDistance(state.StartPosition, rootPart.Position, resolvedDirection)
+	state.TraveledDistance = math.max(tonumber(state.TraveledDistance) or 0, liveDistance)
+	return state.TraveledDistance
 end
 
 function MeraDashClient.new(config)
@@ -199,7 +226,7 @@ function MeraDashClient:StartCarryRelease(rootPart, direction, startSpeed, durat
 	local planarDirection = typeof(direction) == "Vector3" and MeraDashShared.GetPlanarVector(direction) or nil
 	local carrySpeed = math.max(0, tonumber(startSpeed) or 0)
 	local carryDuration = math.max(0, tonumber(duration) or 0)
-	if not planarDirection or planarDirection.Magnitude <= 0.01 or carrySpeed <= 0 or carryDuration <= 0 then
+	if not planarDirection or planarDirection.Magnitude <= MIN_PLANAR_DIRECTION_MAGNITUDE or carrySpeed <= 0 or carryDuration <= 0 then
 		self:StopHorizontalVelocity(rootPart)
 		return false
 	end
@@ -217,7 +244,7 @@ function MeraDashClient:StartCarryRelease(rootPart, direction, startSpeed, durat
 		local elapsed = math.max(0, os.clock() - carryStartAt)
 		local alpha = math.clamp(elapsed / carryDuration, 0, 1)
 		local speedScale = 1 - MeraDashShared.Smoothstep(alpha)
-		if alpha >= 1 or speedScale <= 0.001 then
+		if alpha >= 1 or speedScale <= CARRY_RELEASE_DONE_SPEED_SCALE then
 			self:CancelCarryRelease(true)
 			return
 		end
@@ -251,17 +278,17 @@ function MeraDashClient:KickCamera()
 	end
 
 	local baselineFov = camera.FieldOfView
-	local boostedFov = math.min(baselineFov + CAMERA_FOV_BOOST, 95)
+	local boostedFov = math.min(baselineFov + CAMERA_FOV_BOOST, MAX_CAMERA_FOV)
 
 	if self.cameraTween then
 		self.cameraTween:Cancel()
 		self.cameraTween = nil
 	end
 
-	local punchOut = TweenService:Create(camera, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	local punchOut = TweenService:Create(camera, TweenInfo.new(CAMERA_PUNCH_OUT_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		FieldOfView = boostedFov,
 	})
-	local settle = TweenService:Create(camera, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	local settle = TweenService:Create(camera, TweenInfo.new(CAMERA_SETTLE_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		FieldOfView = baselineFov,
 	})
 
@@ -404,8 +431,8 @@ function MeraDashClient:BeginPredictedRequest()
 		self:FinishLocalDash(self.activeDash, "superseded_prediction", true)
 	end
 
-	local initialPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, nil)
-	if not initialPlan then
+	local localPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, nil)
+	if not localPlan then
 		logRequest(
 			"predicted blocked fruit=%s ability=%s reason=build_dash_plan_nil",
 			MeraDashClient.FRUIT_NAME,
@@ -415,16 +442,24 @@ function MeraDashClient:BeginPredictedRequest()
 	end
 
 	local maxRequestHintDistance = MeraDashShared.GetMaxRequestHintDistance(abilityConfig)
-	local requestHintDistance = math.min(initialPlan.Distance, maxRequestHintDistance)
-	local requestTargetPosition = rootPart.Position + (initialPlan.Direction * requestHintDistance)
-	local localPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, requestTargetPosition)
-	if not localPlan then
-		logRequest(
-			"predicted blocked fruit=%s ability=%s reason=rebuild_dash_plan_nil",
-			MeraDashClient.FRUIT_NAME,
-			MeraDashClient.ABILITY_NAME
-		)
-		return nil
+	local requestHintDistance = math.min(localPlan.MaxDistance, maxRequestHintDistance)
+	if requestHintDistance <= 0 then
+		requestHintDistance = localPlan.RequestedDistance
+	end
+
+	local requestTargetPosition = rootPart.Position + (localPlan.Direction * requestHintDistance)
+	if requestHintDistance + MIN_DASH_DISTANCE < localPlan.RequestedDistance then
+		local constrainedPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, requestTargetPosition)
+		if not constrainedPlan then
+			logRequest(
+				"predicted blocked fruit=%s ability=%s reason=rebuild_dash_plan_nil",
+				MeraDashClient.FRUIT_NAME,
+				MeraDashClient.ABILITY_NAME
+			)
+			return nil
+		end
+
+		localPlan = constrainedPlan
 	end
 
 	local visualDirection = localPlan.Direction
@@ -486,7 +521,7 @@ function MeraDashClient:BeginPredictedRequest()
 		tostring(localPlan.WallShortened)
 	)
 
-	if localPlan.Distance <= 0.05 then
+	if localPlan.Distance <= MIN_DASH_DISTANCE then
 		logRequest(
 			"predicted local state fruit=%s ability=%s reason=blocked_at_start requestedDistance=%.2f finalDistance=%.2f",
 			MeraDashClient.FRUIT_NAME,
@@ -502,14 +537,15 @@ function MeraDashClient:BeginPredictedRequest()
 			end)
 		end)
 
-		if localPlan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
+		if localPlan.InstantDistance > MIN_DASH_DISTANCE and character.Parent and rootPart.Parent then
 			local targetRootPosition = state.StartPosition + (localPlan.Direction * localPlan.InstantDistance)
 			self:PivotCharacterToRootPosition(character, rootPart, targetRootPosition)
+			refreshPredictedTravelDistance(state, rootPart, localPlan.Direction)
 		end
 
 		self:SetHorizontalVelocity(rootPart, localPlan.Direction * localPlan.StartDashSpeed)
 
-		local maxRuntime = math.max(localPlan.Duration + runtimeGrace, 0.08)
+		local maxRuntime = math.max(localPlan.Duration + runtimeGrace, MIN_DASH_RUNTIME)
 		state.MotionConnection = RunService.Heartbeat:Connect(function(dt)
 			if self.activeDash ~= state then
 				self:FinishLocalDash(state, "replaced_active_state", true)
@@ -539,7 +575,7 @@ function MeraDashClient:BeginPredictedRequest()
 				+ ((state.Plan.EndDashSpeed - state.Plan.StartDashSpeed) * MeraDashShared.Smoothstep(alpha))
 			local lookAheadDistance = math.min(
 				MeraDashShared.GetLookAheadDistance(dashSpeed, dt),
-				currentRemainingDistance + 2
+				currentRemainingDistance + WALL_LOOKAHEAD_BUFFER
 			)
 
 			if MeraDashShared.ShouldStopForWall(character, rootPart, state.Plan.Direction, lookAheadDistance) then
@@ -611,8 +647,9 @@ function MeraDashClient:HandleConfirmed(payload)
 	local correctionSnap = false
 	local rootPart = self:GetRootPart()
 	local serverStartPosition = typeof(payload.StartPosition) == "Vector3" and payload.StartPosition or state.StartPosition
-	local currentProgress = math.min(state.TraveledDistance, authoritativeDistance)
+	local currentProgress = math.min(tonumber(state.TraveledDistance) or 0, authoritativeDistance)
 	if rootPart then
+		currentProgress = math.min(refreshPredictedTravelDistance(state, rootPart, authoritativeDirection), authoritativeDistance)
 		local correctionTarget = serverStartPosition + (authoritativeDirection * currentProgress)
 		local correctionDelta = (rootPart.Position - correctionTarget).Magnitude
 		if correctionDelta > correctionSnapDistance or directionDelta > DIRECTION_TOLERANCE then

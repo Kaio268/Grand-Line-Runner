@@ -2000,6 +2000,11 @@ function HieClient:Update()
 	self:UpdateIceBoostEffects()
 end
 
+function HieClient:CleanupUnequipped()
+	self:ClearLocalFreezeShotCastLock()
+	self:CleanupIceBoostEffect(self.player, "unequipped")
+end
+
 function HieClient:CleanupCharacterRemoving()
 	self:ClearLocalFreezeShotCastLock()
 

@@ -9,6 +9,14 @@ local DEFAULT_LOCAL_BODY_TRANSPARENCY = 0.68
 local DEFAULT_LOCAL_DECAL_TRANSPARENCY = 0.72
 local DEFAULT_OBSERVER_BODY_TRANSPARENCY = 1
 local DEFAULT_OBSERVER_DECAL_TRANSPARENCY = 1
+local DEFAULT_SHIMMER_COLOR = Color3.fromRGB(193, 255, 245)
+local DEFAULT_SHIMMER_ACCENT_COLOR = Color3.fromRGB(255, 255, 255)
+local DEFAULT_HIGHLIGHT_FILL_TRANSPARENCY = 0.88
+local DEFAULT_HIGHLIGHT_OUTLINE_TRANSPARENCY = 0.36
+local DEFAULT_PARTICLE_RATE = 14
+local DEFAULT_PARTICLE_TRANSPARENCY = 0.7
+local DEFAULT_PARTICLE_LIFETIME = 0.65
+local DEFAULT_PULSE_PERIOD = 0.7
 
 local function clampNumber(value, fallback, minValue, maxValue)
 	local numericValue = tonumber(value)
@@ -64,15 +72,19 @@ function SukeServer.Fade(context)
 			0,
 			1
 		),
-		ShimmerColor = resolveColor(vfxConfig.ShimmerColor, Color3.fromRGB(193, 255, 245)),
-		ShimmerAccentColor = resolveColor(vfxConfig.ShimmerAccentColor, Color3.fromRGB(255, 255, 255)),
-		HighlightFillTransparency = clampNumber(vfxConfig.HighlightFillTransparency, 0.88, 0, 1),
-		HighlightOutlineTransparency = clampNumber(vfxConfig.HighlightOutlineTransparency, 0.36, 0, 1),
-		ParticleRate = clampNumber(vfxConfig.ParticleRate, 14, 0, 80),
-		ParticleTransparency = clampNumber(vfxConfig.ParticleTransparency, 0.7, 0, 1),
-		ParticleLifetime = clampNumber(vfxConfig.ParticleLifetime, 0.65, 0.1, 2),
-		PulsePeriod = clampNumber(vfxConfig.PulsePeriod, 0.7, 0.2, 3),
+		ShimmerColor = resolveColor(vfxConfig.ShimmerColor, DEFAULT_SHIMMER_COLOR),
+		ShimmerAccentColor = resolveColor(vfxConfig.ShimmerAccentColor, DEFAULT_SHIMMER_ACCENT_COLOR),
+		HighlightFillTransparency = clampNumber(vfxConfig.HighlightFillTransparency, DEFAULT_HIGHLIGHT_FILL_TRANSPARENCY, 0, 1),
+		HighlightOutlineTransparency = clampNumber(vfxConfig.HighlightOutlineTransparency, DEFAULT_HIGHLIGHT_OUTLINE_TRANSPARENCY, 0, 1),
+		ParticleRate = clampNumber(vfxConfig.ParticleRate, DEFAULT_PARTICLE_RATE, 0, 80),
+		ParticleTransparency = clampNumber(vfxConfig.ParticleTransparency, DEFAULT_PARTICLE_TRANSPARENCY, 0, 1),
+		ParticleLifetime = clampNumber(vfxConfig.ParticleLifetime, DEFAULT_PARTICLE_LIFETIME, 0.1, 2),
+		PulsePeriod = clampNumber(vfxConfig.PulsePeriod, DEFAULT_PULSE_PERIOD, 0.2, 3),
 	}
+end
+
+function SukeServer.ClearRuntimeState(_player)
+	-- Fade stores no server runtime state; client visuals clean themselves up.
 end
 
 function SukeServer.GetLegacyHandler()

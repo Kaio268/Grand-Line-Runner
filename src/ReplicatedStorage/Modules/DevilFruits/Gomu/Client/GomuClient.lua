@@ -8,25 +8,40 @@ local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("D
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local SharedFolder = DevilFruits:WaitForChild("Shared")
 local Registry = require(SharedFolder:WaitForChild("Registry"))
+local RubberLaunchMath = require(
+	DevilFruits:WaitForChild("Gomu"):WaitForChild("Shared"):WaitForChild("RubberLaunchMath")
+)
 
 local GomuClient = {}
 GomuClient.__index = GomuClient
 
+local FRUIT_NAME = "Gomu Gomu no Mi"
+local ABILITY_NAME = "RubberLaunch"
 local GOMU_AIM_RAY_DISTANCE = 500
 local GOMU_HIGHLIGHT_FILL_COLOR = Color3.fromRGB(255, 176, 120)
 local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
+local GOMU_HIGHLIGHT_FILL_TRANSPARENCY = 0.45
+local GOMU_HIGHLIGHT_OUTLINE_TRANSPARENCY = 0.05
 local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
 local GOMU_AUTO_LATCH_BASE_RADIUS = 4
 local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
 local GOMU_LAUNCH_FX_NAME = "FX"
+local GOMU_LAUNCH_FX_CONTAINER_NAME = "GomuRubberLaunchFX"
+local GOMU_LAUNCH_FX_WELD_NAME = "GomuLaunchFxWeld"
 local GOMU_LAUNCH_VFX_DEFAULT_DURATION = 0.35
+local GOMU_LAUNCH_VFX_MIN_PAYLOAD_DURATION = 0.05
+local GOMU_LAUNCH_VFX_MAX_PAYLOAD_DURATION = 3
 local GOMU_LAUNCH_VFX_AIRBORNE_START_GRACE = 0.65
 local GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME = 0.08
 local GOMU_LAUNCH_VFX_CLEANUP_GRACE = 0.35
 local GOMU_LAUNCH_VFX_MAX_DURATION = 6
 local GOMU_LAUNCH_FX_PART_FALLBACK_SIZE = Vector3.new(5, 5, 5)
-local GOMU_DEFAULT_SPEED_SCALE_REFERENCE = 70
 local MIN_DIRECTION_MAGNITUDE = 0.01
+local TARGET_RANGE_PADDING = 0.5
+local AUTO_LATCH_TARGET_AIM_OFFSET = Vector3.new(0, 1.5, 0)
+local AUTO_LATCH_ALIGNMENT_SCORE_WEIGHT = 100
+local AUTO_LATCH_LATERAL_SCORE_WEIGHT = 2
+local AUTO_LATCH_PLANAR_SCORE_WEIGHT = 0.1
 
 local AIRBORNE_HUMANOID_STATES = {
 	[Enum.HumanoidStateType.Freefall] = true,
@@ -37,10 +52,6 @@ local AIRBORNE_HUMANOID_STATES = {
 
 local function getCurrentCamera()
 	return Workspace.CurrentCamera
-end
-
-local function getPlanarVector(vector)
-	return Vector3.new(vector.X, 0, vector.Z)
 end
 
 local function getPlayerRootPart(targetPlayer)
@@ -70,29 +81,6 @@ local function getPlanarDistance(a, b)
 	return Vector3.new(delta.X, 0, delta.Z).Magnitude
 end
 
-local function getPlanarSpeed(rootPart)
-	if not rootPart then
-		return 0
-	end
-
-	return getPlanarVector(rootPart.AssemblyLinearVelocity).Magnitude
-end
-
-local function getSpeedScaledLaunchDistance(abilityConfig, rootPart)
-	local baseDistance = math.max(0, tonumber(abilityConfig and abilityConfig.LaunchDistance) or 0)
-	local speedDistanceBonus = math.max(0, tonumber(abilityConfig and abilityConfig.SpeedLaunchDistanceBonus) or 0)
-	if speedDistanceBonus <= 0 then
-		return baseDistance
-	end
-
-	local referenceSpeed = math.max(
-		1,
-		tonumber(abilityConfig and abilityConfig.SpeedScaleReference) or GOMU_DEFAULT_SPEED_SCALE_REFERENCE
-	)
-	local speedAlpha = math.clamp(getPlanarSpeed(rootPart) / referenceSpeed, 0, 1)
-	return baseDistance + (speedDistanceBonus * speedAlpha)
-end
-
 local function getRubberLaunchFxAsset()
 	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
@@ -103,11 +91,15 @@ end
 local function getLaunchVfxDuration(payload)
 	local duration = typeof(payload) == "table" and tonumber(payload.Duration) or nil
 	if not duration then
-		local abilityConfig = DevilFruitConfig.GetAbility("Gomu Gomu no Mi", "RubberLaunch")
+		local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
 		duration = abilityConfig and tonumber(abilityConfig.LaunchDuration) or nil
 	end
 
-	return math.clamp(duration or GOMU_LAUNCH_VFX_DEFAULT_DURATION, 0.05, 3)
+	return math.clamp(
+		duration or GOMU_LAUNCH_VFX_DEFAULT_DURATION,
+		GOMU_LAUNCH_VFX_MIN_PAYLOAD_DURATION,
+		GOMU_LAUNCH_VFX_MAX_PAYLOAD_DURATION
+	)
 end
 
 local function isHumanoidAirborne(humanoid)
@@ -162,7 +154,7 @@ local function weldLaunchPartToRoot(part, rootPart)
 	part.Parent = rootPart.Parent or Workspace
 
 	local weld = Instance.new("WeldConstraint")
-	weld.Name = "GomuLaunchFxWeld"
+	weld.Name = GOMU_LAUNCH_FX_WELD_NAME
 	weld.Part0 = rootPart
 	weld.Part1 = part
 	weld.Parent = part
@@ -170,7 +162,7 @@ end
 
 local function createLaunchFxPartFromChildren(sourceFx, rootPart)
 	local part = Instance.new("Part")
-	part.Name = "GomuRubberLaunchFX"
+	part.Name = GOMU_LAUNCH_FX_CONTAINER_NAME
 	part.Size = GOMU_LAUNCH_FX_PART_FALLBACK_SIZE
 	part.Transparency = 1
 	configureLaunchFxPart(part)
@@ -187,7 +179,7 @@ local function createLaunchFxPartFromChildren(sourceFx, rootPart)
 	part.Parent = rootPart.Parent or Workspace
 
 	local weld = Instance.new("WeldConstraint")
-	weld.Name = "GomuLaunchFxWeld"
+	weld.Name = GOMU_LAUNCH_FX_WELD_NAME
 	weld.Part0 = rootPart
 	weld.Part1 = part
 	weld.Parent = part
@@ -198,7 +190,7 @@ end
 local function cloneLaunchFxToRoot(sourceFx, rootPart)
 	if sourceFx:IsA("BasePart") then
 		local part = sourceFx:Clone()
-		part.Name = "GomuRubberLaunchFX"
+		part.Name = GOMU_LAUNCH_FX_CONTAINER_NAME
 		configureLaunchFxParts(part)
 		weldLaunchPartToRoot(part, rootPart)
 		return part
@@ -207,7 +199,7 @@ local function cloneLaunchFxToRoot(sourceFx, rootPart)
 	local attachment
 	if sourceFx:IsA("Attachment") then
 		attachment = sourceFx:Clone()
-		attachment.Name = "GomuRubberLaunchFX"
+		attachment.Name = GOMU_LAUNCH_FX_CONTAINER_NAME
 	else
 		return createLaunchFxPartFromChildren(sourceFx, rootPart)
 	end
@@ -430,9 +422,9 @@ local function ensureGomuHighlight(self)
 	highlight.Name = "GomuAimHighlight"
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
 	highlight.FillColor = GOMU_HIGHLIGHT_FILL_COLOR
-	highlight.FillTransparency = 0.45
+	highlight.FillTransparency = GOMU_HIGHLIGHT_FILL_TRANSPARENCY
 	highlight.OutlineColor = GOMU_HIGHLIGHT_OUTLINE_COLOR
-	highlight.OutlineTransparency = 0.05
+	highlight.OutlineTransparency = GOMU_HIGHLIGHT_OUTLINE_TRANSPARENCY
 	highlight.Enabled = false
 	highlight.Parent = Workspace
 
@@ -490,7 +482,7 @@ local function isTargetInRange(self, targetPlayer, maxDistance)
 		return false
 	end
 
-	return getPlanarDistance(localRootPart.Position, targetRootPart.Position) <= (maxDistance + 0.5)
+	return getPlanarDistance(localRootPart.Position, targetRootPart.Position) <= (maxDistance + TARGET_RANGE_PADDING)
 end
 
 local function findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection)
@@ -506,16 +498,18 @@ local function findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection
 		if targetPlayer ~= self.player and isTargetInRange(self, targetPlayer, launchDistance) then
 			local targetRootPart = getPlayerRootPart(targetPlayer)
 			if targetRootPart then
-				local targetPosition = targetRootPart.Position + Vector3.new(0, 1.5, 0)
+				local targetPosition = targetRootPart.Position + AUTO_LATCH_TARGET_AIM_OFFSET
 				local toTarget = targetPosition - rayOrigin
-				local toTargetUnit = toTarget.Magnitude > 0.01 and toTarget.Unit or nil
+				local toTargetUnit = toTarget.Magnitude > MIN_DIRECTION_MAGNITUDE and toTarget.Unit or nil
 				local alignment = toTargetUnit and rayDirection:Dot(toTargetUnit) or -1
 				if alignment >= GOMU_AUTO_LATCH_MAX_ALIGNMENT then
 					local lateralDistance, projectedDistance = getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
 					local allowedRadius = math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
 					if lateralDistance <= allowedRadius then
 						local planarDistance = getPlanarDistance(localRootPart.Position, targetRootPart.Position)
-						local score = (alignment * 100) - (lateralDistance * 2) - (planarDistance * 0.1)
+						local score = (alignment * AUTO_LATCH_ALIGNMENT_SCORE_WEIGHT)
+							- (lateralDistance * AUTO_LATCH_LATERAL_SCORE_WEIGHT)
+							- (planarDistance * AUTO_LATCH_PLANAR_SCORE_WEIGHT)
 						if score > bestScore then
 							bestScore = score
 							bestTargetPlayer = targetPlayer
@@ -532,7 +526,7 @@ end
 local function getGomuLaunchTarget(self, abilityConfig)
 	local result, fallbackPosition, rayOrigin, rayDirection = getLookAimRaycast(self.player)
 	local aimPosition = fallbackPosition
-	local launchDistance = getSpeedScaledLaunchDistance(abilityConfig, self.getLocalRootPart())
+	local launchDistance = RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, self.getLocalRootPart())
 	local targetPlayer = findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection)
 
 	if not targetPlayer and result then
@@ -579,7 +573,7 @@ function GomuClient.Create(config)
 end
 
 function GomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
-	if abilityName ~= "RubberLaunch" then
+	if abilityName ~= ABILITY_NAME then
 		if typeof(fallbackBuilder) == "function" then
 			return fallbackBuilder()
 		end
@@ -587,7 +581,7 @@ function GomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 		return nil
 	end
 
-	local abilityConfig = DevilFruitConfig.GetAbility("Gomu Gomu no Mi", "RubberLaunch")
+	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
 	local aimPosition, targetPlayer = getGomuLaunchTarget(self, abilityConfig)
 	return {
 		AimPosition = aimPosition,
@@ -595,8 +589,8 @@ function GomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	}
 end
 
-function GomuClient:BuildRequestPayload(abilityName, abilityEntry, fallbackBuilder)
-	if abilityName == "RubberLaunch" then
+function GomuClient:BuildRequestPayload(abilityName, _abilityEntry, fallbackBuilder)
+	if abilityName == ABILITY_NAME then
 		return self:BeginPredictedRequest(abilityName)
 	end
 
@@ -609,12 +603,12 @@ end
 
 function GomuClient:Update()
 	local fruitName = self.getEquippedFruit()
-	if fruitName ~= "Gomu Gomu no Mi" then
+	if fruitName ~= FRUIT_NAME then
 		clearGomuHighlight(self)
 		return
 	end
 
-	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, "RubberLaunch")
+	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, ABILITY_NAME)
 	if not abilityConfig then
 		clearGomuHighlight(self)
 		return
@@ -633,7 +627,7 @@ function GomuClient:Update()
 end
 
 function GomuClient:HandleEffect(targetPlayer, abilityName, payload)
-	if abilityName ~= "RubberLaunch" then
+	if abilityName ~= ABILITY_NAME then
 		return false
 	end
 
@@ -650,6 +644,7 @@ end
 
 function GomuClient:HandleUnequipped()
 	clearGomuHighlight(self)
+	clearLaunchVfxForPlayer(self, self.player)
 	return false
 end
 

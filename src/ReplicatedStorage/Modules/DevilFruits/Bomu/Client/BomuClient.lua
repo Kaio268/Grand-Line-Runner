@@ -5,7 +5,17 @@ local BomuClient = {}
 BomuClient.__index = BomuClient
 
 local LAND_MINE_ABILITY = "LandMine"
+local LAND_MINE_ACTION_PLACED = "Placed"
 local PLACEMENT_PULSE_NAME = "BomuLandMinePlacementPulse"
+local PLACEMENT_PULSE_COLOR = Color3.fromRGB(255, 89, 89)
+local PLACEMENT_PULSE_TRANSPARENCY = 0.25
+local PLACEMENT_PULSE_SIZE = Vector3.new(1.1, 1.1, 1.1)
+local PLACEMENT_PULSE_OFFSET = Vector3.new(0, 0.35, 0)
+local PLACEMENT_PULSE_SIZE_STEP = Vector3.new(0.18, 0.18, 0.18)
+local PLACEMENT_PULSE_TRANSPARENCY_STEP = 0.1
+local PLACEMENT_PULSE_STEPS = 6
+local PLACEMENT_PULSE_STEP_DELAY = 0.03
+local PLACEMENT_PULSE_LIFETIME = 0.3
 
 local function playLandMinePlacementPulse(worldPosition)
 	if typeof(worldPosition) ~= "Vector3" then
@@ -20,36 +30,38 @@ local function playLandMinePlacementPulse(worldPosition)
 	pulse.CanQuery = false
 	pulse.Shape = Enum.PartType.Ball
 	pulse.Material = Enum.Material.Neon
-	pulse.Color = Color3.fromRGB(255, 89, 89)
-	pulse.Transparency = 0.25
-	pulse.Size = Vector3.new(1.1, 1.1, 1.1)
-	pulse.CFrame = CFrame.new(worldPosition + Vector3.new(0, 0.35, 0))
+	pulse.Color = PLACEMENT_PULSE_COLOR
+	pulse.Transparency = PLACEMENT_PULSE_TRANSPARENCY
+	pulse.Size = PLACEMENT_PULSE_SIZE
+	pulse.CFrame = CFrame.new(worldPosition + PLACEMENT_PULSE_OFFSET)
 	pulse.Parent = Workspace
 
 	task.spawn(function()
-		for _ = 1, 6 do
+		for _ = 1, PLACEMENT_PULSE_STEPS do
 			if not pulse.Parent then
 				break
 			end
 
-			pulse.Size += Vector3.new(0.18, 0.18, 0.18)
-			pulse.Transparency += 0.1
-			task.wait(0.03)
+			pulse.Size += PLACEMENT_PULSE_SIZE_STEP
+			pulse.Transparency += PLACEMENT_PULSE_TRANSPARENCY_STEP
+			task.wait(PLACEMENT_PULSE_STEP_DELAY)
 		end
 	end)
 
-	Debris:AddItem(pulse, 0.3)
+	Debris:AddItem(pulse, PLACEMENT_PULSE_LIFETIME)
 	return true
 end
 
 function BomuClient.Create(config)
+	config = config or {}
+
 	local self = setmetatable({}, BomuClient)
-	self.player = config and config.player or nil
-	self.playOptionalEffect = type(config and config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or nil
+	self.player = config.player
+	self.playOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or nil
 	return self
 end
 
-function BomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
+function BomuClient:BeginPredictedRequest(_abilityName, fallbackBuilder)
 	if typeof(fallbackBuilder) == "function" then
 		return fallbackBuilder()
 	end
@@ -57,7 +69,7 @@ function BomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	return nil
 end
 
-function BomuClient:BuildRequestPayload(abilityName, abilityConfig, fallbackBuilder)
+function BomuClient:BuildRequestPayload(_abilityName, _abilityConfig, fallbackBuilder)
 	if typeof(fallbackBuilder) == "function" then
 		return fallbackBuilder()
 	end
@@ -65,12 +77,12 @@ function BomuClient:BuildRequestPayload(abilityName, abilityConfig, fallbackBuil
 	return nil
 end
 
-function BomuClient:HandleEffect(targetPlayer, abilityName, payload)
+function BomuClient:HandleEffect(_targetPlayer, abilityName, payload)
 	if abilityName ~= LAND_MINE_ABILITY or typeof(payload) ~= "table" then
 		return false
 	end
 
-	if payload.Action ~= "Placed" then
+	if payload.Action ~= LAND_MINE_ACTION_PLACED then
 		-- Detonation intentionally falls through so the current generic Bomu
 		-- explosion fallback stays in control of that path.
 		return false
@@ -84,7 +96,7 @@ function BomuClient:HandleEffect(targetPlayer, abilityName, payload)
 	return true
 end
 
-function BomuClient:HandleStateEvent(eventName, abilityName, value, payload)
+function BomuClient:HandleStateEvent(_eventName, _abilityName, _value, _payload)
 	return false
 end
 
@@ -94,7 +106,7 @@ end
 function BomuClient:HandleCharacterRemoving()
 end
 
-function BomuClient:HandlePlayerRemoving(leavingPlayer)
+function BomuClient:HandlePlayerRemoving(_leavingPlayer)
 end
 
 return BomuClient

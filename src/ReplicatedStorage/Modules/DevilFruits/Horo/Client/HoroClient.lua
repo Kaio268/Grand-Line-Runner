@@ -32,6 +32,28 @@ local DEFAULT_FLIGHT_DT = 1 / 60
 local MIN_FLIGHT_DT = 1 / 240
 local MAX_FLIGHT_DT = 1 / 15
 local HOVER_HEIGHT_SNAP_TOLERANCE = 0.2
+local REMOTE_WAIT_TIMEOUT = 2
+local GHOST_LOOKUP_TIMEOUT = 2
+local GHOST_LOOKUP_POLL_INTERVAL = 0.05
+local GAMEPAD_THUMBSTICK_DEADZONE = 0.12
+local MIN_CAMERA_AXIS_MAGNITUDE = 0.001
+local MIN_MOVE_INPUT_MAGNITUDE = 0.01
+local SERVER_RESOLVE_GRACE_DURATION = 0.45
+local MIN_PROJECTION_DURATION = 0.5
+local MAX_PROJECTION_DURATION = 12
+local MIN_GHOST_SPEED = 2
+local MIN_CARRY_SPEED = 1
+local MIN_MAX_DISTANCE_FROM_BODY = 8
+local MAX_MAX_DISTANCE_FROM_BODY = 180
+local MIN_REWARD_INTERACT_RADIUS = 3
+local MAX_REWARD_INTERACT_RADIUS = 24
+local MIN_HAZARD_PROBE_RADIUS = 1
+local MAX_HAZARD_PROBE_RADIUS = 10
+local MIN_REMOTE_THROTTLE = 0.05
+local MAX_REMOTE_THROTTLE = 1
+local ACTION_TRY_PICKUP = "TryPickup"
+local ACTION_INTERRUPT = "Interrupt"
+local ACTION_BODY_HAZARD = "BodyHazard"
 local DEBUG_TRACE = RunService:IsStudio()
 
 local function formatVector3(value)
@@ -88,12 +110,13 @@ local function getAbilityConfig()
 end
 
 local function getActionRemote()
-	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 2)
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+		or ReplicatedStorage:WaitForChild("Remotes", REMOTE_WAIT_TIMEOUT)
 	if not remotesFolder then
 		return nil
 	end
 
-	return remotesFolder:FindFirstChild(REMOTE_NAME) or remotesFolder:WaitForChild(REMOTE_NAME, 2)
+	return remotesFolder:FindFirstChild(REMOTE_NAME) or remotesFolder:WaitForChild(REMOTE_NAME, REMOTE_WAIT_TIMEOUT)
 end
 
 local function getGhostRoot(ghostModel)
@@ -111,21 +134,24 @@ end
 
 local function findGhostModel(payload)
 	local projectionId = payload and payload.ProjectionId
-	local effectsFolder = Workspace:FindFirstChild(WORLD_EFFECTS_FOLDER_NAME) or Workspace:WaitForChild(WORLD_EFFECTS_FOLDER_NAME, 2)
-	local ghostsFolder = effectsFolder and (effectsFolder:FindFirstChild(GHOSTS_FOLDER_NAME) or effectsFolder:WaitForChild(GHOSTS_FOLDER_NAME, 2))
+	local effectsFolder = Workspace:FindFirstChild(WORLD_EFFECTS_FOLDER_NAME)
+		or Workspace:WaitForChild(WORLD_EFFECTS_FOLDER_NAME, GHOST_LOOKUP_TIMEOUT)
+	local ghostsFolder = effectsFolder
+		and (effectsFolder:FindFirstChild(GHOSTS_FOLDER_NAME)
+			or effectsFolder:WaitForChild(GHOSTS_FOLDER_NAME, GHOST_LOOKUP_TIMEOUT))
 	if not ghostsFolder then
 		return nil
 	end
 
 	if typeof(projectionId) == "string" and projectionId ~= "" then
-		local deadline = os.clock() + 2
+		local deadline = os.clock() + GHOST_LOOKUP_TIMEOUT
 		while os.clock() <= deadline do
 			for _, child in ipairs(ghostsFolder:GetChildren()) do
 				if child:IsA("Model") and child:GetAttribute("ProjectionId") == projectionId then
 					return child
 				end
 			end
-			task.wait(0.05)
+			task.wait(GHOST_LOOKUP_POLL_INTERVAL)
 		end
 		return nil
 	end
@@ -135,7 +161,9 @@ local function findGhostModel(payload)
 		return nil
 	end
 
-	return ghostsFolder and (ghostsFolder:FindFirstChild(ghostName) or ghostsFolder:WaitForChild(ghostName, 2)) or nil
+	return ghostsFolder
+		and (ghostsFolder:FindFirstChild(ghostName) or ghostsFolder:WaitForChild(ghostName, REMOTE_WAIT_TIMEOUT))
+		or nil
 end
 
 local function findProjectionBody(payload)
@@ -293,8 +321,8 @@ local function getGamepadMoveVector()
 	for _, input in ipairs(UserInputService:GetGamepadState(Enum.UserInputType.Gamepad1)) do
 		if input.KeyCode == Enum.KeyCode.Thumbstick1 then
 			local position = input.Position
-			local x = if math.abs(position.X) > 0.12 then position.X else 0
-			local z = if math.abs(position.Y) > 0.12 then -position.Y else 0
+			local x = if math.abs(position.X) > GAMEPAD_THUMBSTICK_DEADZONE then position.X else 0
+			local z = if math.abs(position.Y) > GAMEPAD_THUMBSTICK_DEADZONE then -position.Y else 0
 			return normalizeMoveVector(Vector3.new(x, 0, z))
 		end
 	end
@@ -350,12 +378,12 @@ local function getWorldMoveVector(localMoveVector, camera)
 	local cameraCFrame = camera and camera.CFrame or CFrame.new()
 	local lookVector = Vector3.new(cameraCFrame.LookVector.X, 0, cameraCFrame.LookVector.Z)
 	local rightVector = Vector3.new(cameraCFrame.RightVector.X, 0, cameraCFrame.RightVector.Z)
-	if lookVector.Magnitude <= 0.001 then
+	if lookVector.Magnitude <= MIN_CAMERA_AXIS_MAGNITUDE then
 		lookVector = Vector3.new(0, 0, -1)
 	else
 		lookVector = lookVector.Unit
 	end
-	if rightVector.Magnitude <= 0.001 then
+	if rightVector.Magnitude <= MIN_CAMERA_AXIS_MAGNITUDE then
 		rightVector = Vector3.new(1, 0, 0)
 	else
 		rightVector = rightVector.Unit
@@ -493,17 +521,47 @@ function HoroClient:StartLocalProjection(payload)
 		BodyRoot = bodyRoot,
 		ProjectionId = payload and payload.ProjectionId,
 		EndTime = tonumber(payload and payload.EndTime) or (Workspace:GetServerTimeNow() + DEFAULT_DURATION),
-		Duration = clampNumber(payload and payload.Duration, DEFAULT_DURATION, 0.5, 12),
-		GhostSpeed = clampNumber(payload and payload.GhostSpeed, abilityConfig.GhostSpeed or DEFAULT_GHOST_SPEED, 2, MAX_PROJECTION_MOVE_SPEED),
-		CarrySpeed = clampNumber(payload and payload.CarrySpeed, abilityConfig.CarrySpeed or DEFAULT_CARRY_SPEED, 1, MAX_PROJECTION_MOVE_SPEED),
-		MaxDistanceFromBody = clampNumber(payload and payload.MaxDistanceFromBody, abilityConfig.MaxDistanceFromBody or DEFAULT_MAX_DISTANCE_FROM_BODY, 8, 180),
-		RewardInteractRadius = clampNumber(payload and payload.RewardInteractRadius, abilityConfig.RewardInteractRadius or DEFAULT_REWARD_INTERACT_RADIUS, 3, 24),
-		HazardProbeRadius = clampNumber(payload and payload.HazardProbeRadius, abilityConfig.HazardProbeRadius or DEFAULT_HAZARD_PROBE_RADIUS, 1, 10),
+		Duration = clampNumber(
+			payload and payload.Duration,
+			DEFAULT_DURATION,
+			MIN_PROJECTION_DURATION,
+			MAX_PROJECTION_DURATION
+		),
+		GhostSpeed = clampNumber(
+			payload and payload.GhostSpeed,
+			abilityConfig.GhostSpeed or DEFAULT_GHOST_SPEED,
+			MIN_GHOST_SPEED,
+			MAX_PROJECTION_MOVE_SPEED
+		),
+		CarrySpeed = clampNumber(
+			payload and payload.CarrySpeed,
+			abilityConfig.CarrySpeed or DEFAULT_CARRY_SPEED,
+			MIN_CARRY_SPEED,
+			MAX_PROJECTION_MOVE_SPEED
+		),
+		MaxDistanceFromBody = clampNumber(
+			payload and payload.MaxDistanceFromBody,
+			abilityConfig.MaxDistanceFromBody or DEFAULT_MAX_DISTANCE_FROM_BODY,
+			MIN_MAX_DISTANCE_FROM_BODY,
+			MAX_MAX_DISTANCE_FROM_BODY
+		),
+		RewardInteractRadius = clampNumber(
+			payload and payload.RewardInteractRadius,
+			abilityConfig.RewardInteractRadius or DEFAULT_REWARD_INTERACT_RADIUS,
+			MIN_REWARD_INTERACT_RADIUS,
+			MAX_REWARD_INTERACT_RADIUS
+		),
+		HazardProbeRadius = clampNumber(
+			payload and payload.HazardProbeRadius,
+			abilityConfig.HazardProbeRadius or DEFAULT_HAZARD_PROBE_RADIUS,
+			MIN_HAZARD_PROBE_RADIUS,
+			MAX_HAZARD_PROBE_RADIUS
+		),
 		ClientHazardReportThrottle = clampNumber(
 			abilityConfig.ClientHazardReportThrottle,
 			DEFAULT_CLIENT_HAZARD_REPORT_THROTTLE,
-			0.05,
-			1
+			MIN_REMOTE_THROTTLE,
+			MAX_REMOTE_THROTTLE
 		),
 		NextHazardProbeAt = 0,
 		NextBodyHazardProbeAt = 0,
@@ -627,7 +685,7 @@ function HoroClient:GetCurrentVerticalSpeed(state)
 	return self:GetCurrentSpeed(state)
 end
 
-function HoroClient:GetTargetVerticalVelocity(state, dt)
+function HoroClient:GetTargetVerticalVelocity(state, _dt)
 	local ghostRoot = state and state.GhostRoot
 	if not ghostRoot or not ghostRoot.Parent then
 		return 0
@@ -666,7 +724,7 @@ function HoroClient:DriveGhostMovement(state, dt)
 	local moveVector = Vector3.zero
 	if not UserInputService:GetFocusedTextBox() then
 		moveVector = getControlMoveVector(state.Controls)
-		if moveVector.Magnitude <= 0.01 then
+		if moveVector.Magnitude <= MIN_MOVE_INPUT_MAGNITUDE then
 			moveVector = getManualMoveVector()
 		end
 	end
@@ -713,7 +771,7 @@ function HoroClient:TryPickup()
 		getPlayerCarrySummary(self.player)
 	)
 
-	return self:SendAction("TryPickup", {
+	return self:SendAction(ACTION_TRY_PICKUP, {
 		ProjectionId = state.ProjectionId,
 	})
 end
@@ -748,7 +806,7 @@ function HoroClient:InterruptProjection(reason)
 	state.NextInterruptAt = now + state.ClientHazardReportThrottle
 	state.PendingInterrupt = true
 
-	self:SendAction("Interrupt", {
+	self:SendAction(ACTION_INTERRUPT, {
 		ProjectionId = state.ProjectionId,
 		Reason = reason or "client_hazard",
 	})
@@ -771,7 +829,7 @@ function HoroClient:ReportBodyHazard(reason)
 	state.NextBodyInterruptAt = now + state.ClientHazardReportThrottle
 	state.PendingBodyHazard = true
 
-	self:SendAction("BodyHazard", {
+	self:SendAction(ACTION_BODY_HAZARD, {
 		ProjectionId = state.ProjectionId,
 		Reason = reason or "body_hazard",
 	})
@@ -846,7 +904,7 @@ function HoroClient:Update(dt)
 	end
 
 	local serverNow = Workspace:GetServerTimeNow()
-	if serverNow > state.EndTime + 0.45 then
+	if serverNow > state.EndTime + SERVER_RESOLVE_GRACE_DURATION then
 		self:StopLocalProjection(nil, true)
 		return
 	end

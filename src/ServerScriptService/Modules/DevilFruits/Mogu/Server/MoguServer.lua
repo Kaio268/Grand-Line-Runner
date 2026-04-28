@@ -9,6 +9,13 @@ local MoguAnimationController = require(script.Parent:WaitForChild("MoguAnimatio
 
 local MoguServer = {}
 local BURROW_PROTECTED_UNTIL_ATTRIBUTE = "MoguBurrowProtectedUntil"
+local PHASE_START = "Start"
+local PHASE_RESOLVE = "Resolve"
+local RESOLVE_REASON_DURATION_ELAPSED = "duration_elapsed"
+local RESOLVE_REASON_MANUAL_SURFACE = "manual_surface"
+local CLEAR_REASON_EXPIRED = "expired"
+local CLEAR_REASON_RESOLVE = "resolve"
+local CLEAR_REASON_RUNTIME_RESET = "runtime_reset"
 
 local activeBurrowsByPlayer = setmetatable({}, { __mode = "k" })
 
@@ -37,6 +44,23 @@ local function setProtectionState(player, untilTimestamp)
 	player:SetAttribute(BURROW_PROTECTED_UNTIL_ATTRIBUTE, untilTimestamp)
 end
 
+local function clearActiveBurrow(player, reason)
+	if not player or not player:IsA("Player") then
+		return nil
+	end
+
+	local burrowState = activeBurrowsByPlayer[player]
+	activeBurrowsByPlayer[player] = nil
+	clearProtectionState(player)
+
+	if not burrowState then
+		return nil
+	end
+
+	MoguAnimationController.StopAnimation(burrowState.AnimationState, reason)
+	return burrowState
+end
+
 local function getActiveBurrow(player)
 	local burrowState = activeBurrowsByPlayer[player]
 	if not burrowState then
@@ -44,9 +68,7 @@ local function getActiveBurrow(player)
 	end
 
 	if getSharedTimestamp() > (burrowState.EndTime + MoguBurrowShared.GetSurfaceResolveGrace(burrowState.AbilityConfig)) then
-		MoguAnimationController.StopAnimation(burrowState.AnimationState, "expired")
-		activeBurrowsByPlayer[player] = nil
-		clearProtectionState(player)
+		clearActiveBurrow(player, CLEAR_REASON_EXPIRED)
 		return nil
 	end
 
@@ -57,7 +79,7 @@ local function buildStartPayload(context, startedAt, endsAt, direction, directio
 	local abilityConfig = context.AbilityConfig or {}
 
 	return {
-		Phase = "Start",
+		Phase = PHASE_START,
 		StartedAt = startedAt,
 		EndTime = endsAt,
 		Duration = endsAt - startedAt,
@@ -86,7 +108,7 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 	end
 
 	return {
-		Phase = "Resolve",
+		Phase = PHASE_RESOLVE,
 		StartedAt = burrowState.StartedAt,
 		EndedAt = endedAt,
 		Duration = burrowState.Duration,
@@ -95,7 +117,7 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 		ActualEndPosition = actualEndPosition,
 		ResolveReason = resolveReason,
 		ResolveBurstRadius = MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
-		EndedEarly = resolveReason ~= "duration_elapsed",
+		EndedEarly = resolveReason ~= RESOLVE_REASON_DURATION_ELAPSED,
 	}
 end
 
@@ -104,13 +126,11 @@ function MoguServer.Burrow(context)
 	local abilityConfig = context.AbilityConfig or {}
 	local activeBurrow = getActiveBurrow(player)
 	if activeBurrow then
-		MoguAnimationController.StopAnimation(activeBurrow.AnimationState, "resolve")
+		clearActiveBurrow(player, CLEAR_REASON_RESOLVE)
 		MoguAnimationController.PlayBurrowResolveAnimation(context.Character, abilityConfig)
-		activeBurrowsByPlayer[player] = nil
-		clearProtectionState(player)
 
 		local endedAt = getSharedTimestamp()
-		local resolveReason = endedAt >= activeBurrow.EndTime and "duration_elapsed" or "manual_surface"
+		local resolveReason = endedAt >= activeBurrow.EndTime and RESOLVE_REASON_DURATION_ELAPSED or RESOLVE_REASON_MANUAL_SURFACE
 		return buildResolvePayload(context, activeBurrow, endedAt, resolveReason), {
 			ApplyCooldown = true,
 			CooldownDuration = tonumber(abilityConfig.Cooldown) or 0,
@@ -162,6 +182,11 @@ function MoguServer.IsProtected(player)
 
 	clearProtectionState(player)
 	return false
+end
+
+function MoguServer.ClearRuntimeState(player)
+	-- Runtime cleanup should not emit a Resolve payload or start cooldown.
+	clearActiveBurrow(player, CLEAR_REASON_RUNTIME_RESET)
 end
 
 function MoguServer.GetLegacyHandler()

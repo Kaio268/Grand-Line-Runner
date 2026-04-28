@@ -1,25 +1,38 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local GomuAnimationController = require(script.Parent:WaitForChild("GomuAnimationController"))
+local RubberLaunchMath = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Gomu")
+		:WaitForChild("Shared")
+		:WaitForChild("RubberLaunchMath")
+)
 
 local GomuServer = {}
 
 local WALL_PADDING = 1.5
 local MIN_DIRECTION_MAGNITUDE = 0.01
+local DEFAULT_FALLBACK_DIRECTION = Vector3.new(0, 0, -1)
+local DEFAULT_LAUNCH_DISTANCE = 20
+local DEFAULT_LAUNCH_DURATION = 0.35
+local MIN_LAUNCH_DURATION = 0.05
+local MIN_EFFECTIVE_LAUNCH_DISTANCE = 0.05
 local MIN_HORIZONTAL_LAUNCH_SPEED = 145
 local MIN_VERTICAL_LAUNCH_SPEED = 60
 local HORIZONTAL_SPEED_MULTIPLIER = 2.15
 local VERTICAL_SPEED_RATIO = 0.32
+local MIN_DISTANCE_ALPHA = 0.25
 local NETWORK_OWNER_RELEASE_DELAY = 0.65
-local DEFAULT_SPEED_SCALE_REFERENCE = 70
+local LAUNCH_DISTANCE_OPTIONS = {
+	BaseDistanceFallback = DEFAULT_LAUNCH_DISTANCE,
+}
 
-local function getPlanarVector(vector)
-	return Vector3.new(vector.X, 0, vector.Z)
-end
 
 local function getPlanarUnitOrNil(vector)
-	local planarVector = getPlanarVector(vector)
+	local planarVector = RubberLaunchMath.GetPlanarVector(vector)
 	if planarVector.Magnitude > MIN_DIRECTION_MAGNITUDE then
 		return planarVector.Unit
 	end
@@ -28,28 +41,7 @@ local function getPlanarUnitOrNil(vector)
 end
 
 local function getFallbackDirection(rootPart)
-	return getPlanarUnitOrNil(rootPart.CFrame.LookVector) or Vector3.new(0, 0, -1)
-end
-
-local function getPlanarSpeed(rootPart)
-	if not rootPart then
-		return 0
-	end
-
-	return getPlanarVector(rootPart.AssemblyLinearVelocity).Magnitude
-end
-
-local function getSpeedScaledLaunchDistance(abilityConfig, rootPart)
-	local resolvedConfig = type(abilityConfig) == "table" and abilityConfig or {}
-	local baseDistance = math.max(0, tonumber(resolvedConfig.LaunchDistance) or 20)
-	local speedDistanceBonus = math.max(0, tonumber(resolvedConfig.SpeedLaunchDistanceBonus) or 0)
-	if speedDistanceBonus <= 0 then
-		return baseDistance
-	end
-
-	local referenceSpeed = math.max(1, tonumber(resolvedConfig.SpeedScaleReference) or DEFAULT_SPEED_SCALE_REFERENCE)
-	local speedAlpha = math.clamp(getPlanarSpeed(rootPart) / referenceSpeed, 0, 1)
-	return baseDistance + (speedDistanceBonus * speedAlpha)
+	return getPlanarUnitOrNil(rootPart.CFrame.LookVector) or DEFAULT_FALLBACK_DIRECTION
 end
 
 local function getRequestedTargetPosition(context)
@@ -115,7 +107,7 @@ end
 
 local function getLaunchVelocity(direction, launchDistance, maxDistance, launchDuration)
 	local averageSpeed = launchDistance / launchDuration
-	local distanceAlpha = math.clamp(maxDistance > 0 and (launchDistance / maxDistance) or 1, 0.25, 1)
+	local distanceAlpha = math.clamp(maxDistance > 0 and (launchDistance / maxDistance) or 1, MIN_DISTANCE_ALPHA, 1)
 	local horizontalLaunchSpeed = math.max(
 		averageSpeed * HORIZONTAL_SPEED_MULTIPLIER,
 		MIN_HORIZONTAL_LAUNCH_SPEED * distanceAlpha
@@ -149,15 +141,15 @@ function GomuServer.RubberLaunch(context)
 	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
 	local animationState = GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
 
-	local maxDistance = getSpeedScaledLaunchDistance(abilityConfig, rootPart)
+	local maxDistance = RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, rootPart, LAUNCH_DISTANCE_OPTIONS)
 	local direction, targetPosition, targetPlayer = getLaunchDirectionAndTarget(context, maxDistance)
 	local startPosition = rootPart.Position
 	local launchDistance = getLaunchDistance(character, rootPart, direction, maxDistance)
-	local launchDuration = math.max(0.05, tonumber(abilityConfig.LaunchDuration) or 0.35)
+	local launchDuration = math.max(MIN_LAUNCH_DURATION, tonumber(abilityConfig.LaunchDuration) or DEFAULT_LAUNCH_DURATION)
 	local launchVelocity = getLaunchVelocity(direction, launchDistance, maxDistance, launchDuration)
 	local launchOwner = context.Player
 
-	if launchDistance <= 0.05 then
+	if launchDistance <= MIN_EFFECTIVE_LAUNCH_DISTANCE then
 		if animationState then
 			GomuAnimationController.StopAnimation(animationState, "blocked_at_start")
 		end
@@ -210,6 +202,10 @@ function GomuServer.RubberLaunch(context)
 		TargetPosition = targetPosition,
 		TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
 	}
+end
+
+function GomuServer.ClearRuntimeState(_player)
+	-- RubberLaunch has no server-owned runtime state beyond short-lived launch tasks.
 end
 
 return GomuServer

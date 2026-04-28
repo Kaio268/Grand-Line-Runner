@@ -33,6 +33,7 @@ local DEFAULT_SERVER_HAZARD_PROBE_INTERVAL = 0.08
 local DEFAULT_PICKUP_THROTTLE = 0.18
 local DEFAULT_PICKUP_RANGE_GRACE_DURATION = 0.45
 local DEFAULT_PICKUP_RANGE_GRACE_DISTANCE = 10
+local DEFAULT_CLIENT_HAZARD_REPORT_THROTTLE = 0.12
 local DEFAULT_BODY_WALK_SPEED = 0
 local DEFAULT_BODY_JUMP_POWER = 0
 local DEFAULT_GHOST_TRANSPARENCY = 0.42
@@ -40,6 +41,37 @@ local DEFAULT_GHOST_JUMP_POWER = 0
 local DEFAULT_GHOST_JUMP_HEIGHT = 0
 local PROJECTION_SPEED_MULTIPLIER = 0.5
 local MAX_PROJECTION_MOVE_SPEED = 200
+local MIN_PROJECTION_DURATION = 0.5
+local MAX_PROJECTION_DURATION = 12
+local MIN_GHOST_SPEED = 2
+local MIN_CARRY_SPEED = 1
+local MIN_MAX_DISTANCE_FROM_BODY = 8
+local MAX_MAX_DISTANCE_FROM_BODY = 180
+local MIN_REWARD_INTERACT_RADIUS = 3
+local MAX_REWARD_INTERACT_RADIUS = 24
+local MIN_HAZARD_PROBE_RADIUS = 1
+local MAX_HAZARD_PROBE_RADIUS = 10
+local MIN_SERVER_HAZARD_PROBE_INTERVAL = 0.03
+local MAX_SERVER_HAZARD_PROBE_INTERVAL = 0.5
+local MIN_CLIENT_HAZARD_REPORT_THROTTLE = 0.05
+local MAX_CLIENT_HAZARD_REPORT_THROTTLE = 1
+local MIN_PICKUP_THROTTLE = 0.05
+local MAX_PICKUP_THROTTLE = 1
+local MAX_PICKUP_RANGE_GRACE_DURATION = 2
+local MAX_PICKUP_RANGE_GRACE_DISTANCE = 40
+local GHOST_SPAWN_FORWARD_OFFSET = 4
+local MAX_DISTANCE_FROM_BODY_BUFFER = 4
+local BODY_DEATH_RESPAWN_DELAY = 0.25
+local BODY_GROUND_RAY_DEPTH = 512
+local MIN_BODY_ROOT_HALF_HEIGHT = 0.5
+local OWNERSHIP_REFRESH_INTERVAL = 0.25
+local MONITOR_TICK_INTERVAL = 0.05
+local NETWORK_OWNERSHIP_REFRESH_INTERVAL = 0.05
+local EXISTING_CARRY_OWNERSHIP_REFRESH_ATTEMPTS = 10
+local PICKUP_OWNERSHIP_REFRESH_ATTEMPTS = 12
+local ACTION_TRY_PICKUP = "TryPickup"
+local ACTION_INTERRUPT = "Interrupt"
+local ACTION_BODY_HAZARD = "BodyHazard"
 
 local activeProjectionsByPlayer = setmetatable({}, { __mode = "k" })
 local actionRemote = nil
@@ -70,6 +102,10 @@ local function getHorizontalDistance(fromPosition, toPosition)
 
 	local delta = fromPosition - toPosition
 	return Vector3.new(delta.X, 0, delta.Z).Magnitude
+end
+
+local function getSharedTimestamp()
+	return Workspace:GetServerTimeNow()
 end
 
 local function horoTrace(message, ...)
@@ -141,10 +177,6 @@ local function getSliceCarrySummary(player)
 		tostring(spawnedReward and spawnedReward.RewardType or nil),
 		formatVector3(spawnedReward and spawnedReward.WorldDropPosition or nil)
 	)
-end
-
-local function getSharedTimestamp()
-	return Workspace:GetServerTimeNow()
 end
 
 local function setProjectionCarryMarker(player, projectionId)
@@ -377,12 +409,17 @@ end
 local function resolveProjectionSpeeds(state)
 	local abilityConfig = state and state.AbilityConfig or {}
 	local sourceSpeed = getProjectionSourceSpeed(state)
-	local fallbackGhostSpeed = clampNumber(abilityConfig.GhostSpeed, DEFAULT_GHOST_SPEED, 2, MAX_PROJECTION_MOVE_SPEED)
-	local fallbackCarrySpeed = clampNumber(abilityConfig.CarrySpeed, DEFAULT_CARRY_SPEED, 1, MAX_PROJECTION_MOVE_SPEED)
+	local fallbackGhostSpeed = clampNumber(
+		abilityConfig.GhostSpeed,
+		DEFAULT_GHOST_SPEED,
+		MIN_GHOST_SPEED,
+		MAX_PROJECTION_MOVE_SPEED
+	)
+	local fallbackCarrySpeed = clampNumber(abilityConfig.CarrySpeed, DEFAULT_CARRY_SPEED, MIN_CARRY_SPEED, MAX_PROJECTION_MOVE_SPEED)
 
 	if typeof(sourceSpeed) == "number" and sourceSpeed > 0 then
 		local halfSpeed = sourceSpeed * PROJECTION_SPEED_MULTIPLIER
-		return math.max(2, halfSpeed), math.max(1, halfSpeed), sourceSpeed
+		return math.max(MIN_GHOST_SPEED, halfSpeed), math.max(MIN_CARRY_SPEED, halfSpeed), sourceSpeed
 	end
 
 	return fallbackGhostSpeed, fallbackCarrySpeed, sourceSpeed
@@ -407,7 +444,7 @@ end
 
 local function getConfiguredGhostSpeed(state)
 	local abilityConfig = state and state.AbilityConfig or {}
-	return clampNumber(abilityConfig.GhostSpeed, DEFAULT_GHOST_SPEED, 2, MAX_PROJECTION_MOVE_SPEED)
+	return clampNumber(abilityConfig.GhostSpeed, DEFAULT_GHOST_SPEED, MIN_GHOST_SPEED, MAX_PROJECTION_MOVE_SPEED)
 end
 
 local function getEffectiveMaxDistanceFromBody(state, now)
@@ -416,7 +453,7 @@ local function getEffectiveMaxDistanceFromBody(state, now)
 		return 0
 	end
 
-	local effectiveMaxDistance = maxDistanceFromBody + 4
+	local effectiveMaxDistance = maxDistanceFromBody + MAX_DISTANCE_FROM_BODY_BUFFER
 	refreshProjectionSpeeds(state)
 	local currentMoveSpeed = math.max(
 		0,
@@ -523,11 +560,74 @@ local function createBodyHighlight(character, abilityConfig)
 	return highlight
 end
 
+local function buildBodyGroundRaycastParams(state)
+	local exclusions = {}
+	if state and state.Character then
+		exclusions[#exclusions + 1] = state.Character
+	end
+	if state and state.GhostModel then
+		exclusions[#exclusions + 1] = state.GhostModel
+	end
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	raycastParams.FilterDescendantsInstances = exclusions
+	raycastParams.IgnoreWater = true
+	return raycastParams
+end
+
+local function getBodyGroundClearance(state, rootPart)
+	local character = state and state.Character
+	if character and character.Parent then
+		local ok, boundingCFrame, boundingSize = pcall(function()
+			return character:GetBoundingBox()
+		end)
+		if ok and typeof(boundingCFrame) == "CFrame" and typeof(boundingSize) == "Vector3" then
+			local bottomY = boundingCFrame.Position.Y - (boundingSize.Y * 0.5)
+			local clearance = rootPart.Position.Y - bottomY
+			if clearance > 0 then
+				return math.max(MIN_BODY_ROOT_HALF_HEIGHT, clearance)
+			end
+		end
+	end
+
+	local humanoid = state and state.Humanoid
+	local rootHalfHeight = math.max(MIN_BODY_ROOT_HALF_HEIGHT, rootPart.Size.Y * 0.5)
+	local hipHeight = math.max(0, tonumber(humanoid and humanoid.HipHeight) or 0)
+	return rootHalfHeight + hipHeight
+end
+
+local function getGroundedBodyRootCFrame(state)
+	local rootPart = state and state.RootPart
+	if not rootPart or not rootPart.Parent then
+		return nil
+	end
+
+	local rootCFrame = rootPart.CFrame
+	local result = Workspace:Raycast(
+		rootPart.Position,
+		Vector3.new(0, -BODY_GROUND_RAY_DEPTH, 0),
+		buildBodyGroundRaycastParams(state)
+	)
+	if not result then
+		return rootCFrame
+	end
+
+	local groundedPosition = Vector3.new(
+		rootPart.Position.X,
+		result.Position.Y + getBodyGroundClearance(state, rootPart),
+		rootPart.Position.Z
+	)
+	return CFrame.new(groundedPosition) * rootCFrame.Rotation
+end
+
 local function lockBody(state)
 	local humanoid = state.Humanoid
 	if not humanoid then
 		return
 	end
+
+	local lockRootCFrame = getGroundedBodyRootCFrame(state)
 
 	state.BodyOriginal = {
 		WalkSpeed = humanoid.WalkSpeed,
@@ -535,7 +635,7 @@ local function lockBody(state)
 		JumpHeight = humanoid.JumpHeight,
 		AutoRotate = humanoid.AutoRotate,
 		RootAnchored = if state.RootPart then state.RootPart.Anchored else nil,
-		RootCFrame = if state.RootPart then state.RootPart.CFrame else nil,
+		RootCFrame = lockRootCFrame,
 	}
 
 	humanoid.WalkSpeed = clampNumber(state.AbilityConfig.BodyWalkSpeed, DEFAULT_BODY_WALK_SPEED, 0, 100)
@@ -584,9 +684,10 @@ end
 
 local function removeScriptsAndTools(instance)
 	for _, descendant in ipairs(instance:GetDescendants()) do
-		if descendant:IsA("Tool") or descendant:IsA("ForceField") then
-			descendant:Destroy()
-		elseif descendant:IsA("BaseScript") and descendant.Name ~= "Animate" then
+		if descendant:IsA("Tool")
+			or descendant:IsA("ForceField")
+			or (descendant:IsA("BaseScript") and descendant.Name ~= "Animate")
+		then
 			descendant:Destroy()
 		end
 	end
@@ -668,7 +769,7 @@ local function styleGhostModel(ghostModel, state)
 	end
 end
 
-local function buildFallbackGhost(state)
+local function buildFallbackGhost()
 	local model = Instance.new("Model")
 	model.Name = "HoroGhost"
 
@@ -707,7 +808,7 @@ local function createGhostModel(state)
 	end
 
 	if not ghostModel then
-		ghostModel = buildFallbackGhost(state)
+		ghostModel = buildFallbackGhost()
 	end
 
 	removeScriptsAndTools(ghostModel)
@@ -728,7 +829,7 @@ local function createGhostModel(state)
 	ghostModel.PrimaryPart = ghostRoot
 	styleGhostModel(ghostModel, state)
 
-	local startCFrame = rootPart.CFrame + (rootPart.CFrame.LookVector * 4)
+	local startCFrame = rootPart.CFrame + (rootPart.CFrame.LookVector * GHOST_SPAWN_FORWARD_OFFSET)
 	ghostModel:PivotTo(startCFrame)
 	ghostModel.Parent = getGhostsFolder()
 
@@ -788,7 +889,7 @@ local function scheduleRespawnIfBodyDead(state)
 		return
 	end
 
-	task.delay(0.25, function()
+	task.delay(BODY_DEATH_RESPAWN_DELAY, function()
 		if player.Parent == Players
 			and player.Character == character
 			and humanoid.Parent ~= nil
@@ -1121,13 +1222,13 @@ local function startProjectionMonitor(state)
 			end
 
 			if hasCarriedReward(state.Player) and now >= state.NextOwnershipRefreshAt then
-				state.NextOwnershipRefreshAt = now + 0.25
+				state.NextOwnershipRefreshAt = now + OWNERSHIP_REFRESH_INTERVAL
 				refreshGhostNetworkOwnership(state)
 			end
 
 			updateGhostMovement(state)
 
-			task.wait(0.05)
+			task.wait(MONITOR_TICK_INTERVAL)
 		end
 	end)
 end
@@ -1171,7 +1272,11 @@ local function tryPickupReward(state)
 		setProjectionCarryMarker(state.Player, state.ProjectionId)
 		CorridorController.AttachCarriedRewardToPart(state.Player, carrierPart)
 		updateCarryingAttribute(state)
-		scheduleGhostNetworkOwnershipRefresh(state, 10, 0.05)
+		scheduleGhostNetworkOwnershipRefresh(
+			state,
+			EXISTING_CARRY_OWNERSHIP_REFRESH_ATTEMPTS,
+			NETWORK_OWNERSHIP_REFRESH_INTERVAL
+		)
 		horoTrace(
 			"tryPickupReward reattachExisting player=%s projectionId=%s carrierPart=%s carryAttrs={%s} sliceState={%s}",
 			state.Player and state.Player.Name or "<nil>",
@@ -1193,7 +1298,7 @@ local function tryPickupReward(state)
 	if claimedMajor then
 		setProjectionCarryMarker(state.Player, state.ProjectionId)
 		updateCarryingAttribute(state)
-		scheduleGhostNetworkOwnershipRefresh(state, 12, 0.05)
+		scheduleGhostNetworkOwnershipRefresh(state, PICKUP_OWNERSHIP_REFRESH_ATTEMPTS, NETWORK_OWNERSHIP_REFRESH_INTERVAL)
 		beginPickupRangeGrace(state, "major_reward")
 		horoTrace(
 			"tryPickupReward claimedMajor player=%s projectionId=%s result=%s carrierPart=%s carryAttrs={%s} sliceState={%s}",
@@ -1219,7 +1324,7 @@ local function tryPickupReward(state)
 	if claimedBrainrot then
 		setProjectionCarryMarker(state.Player, state.ProjectionId)
 		updateCarryingAttribute(state)
-		scheduleGhostNetworkOwnershipRefresh(state, 12, 0.05)
+		scheduleGhostNetworkOwnershipRefresh(state, PICKUP_OWNERSHIP_REFRESH_ATTEMPTS, NETWORK_OWNERSHIP_REFRESH_INTERVAL)
 		beginPickupRangeGrace(state, "brainrot")
 		horoTrace(
 			"tryPickupReward claimedBrainrot player=%s projectionId=%s carrierPart=%s carryAttrs={%s}",
@@ -1252,12 +1357,12 @@ local function handleActionRemote(player, actionName, payload)
 		return
 	end
 
-	if actionName == "TryPickup" then
+	if actionName == ACTION_TRY_PICKUP then
 		tryPickupReward(state)
 		return
 	end
 
-	if actionName == "Interrupt" then
+	if actionName == ACTION_INTERRUPT then
 		local now = os.clock()
 		if now < state.NextClientInterruptAt then
 			return
@@ -1267,7 +1372,7 @@ local function handleActionRemote(player, actionName, payload)
 		return
 	end
 
-	if actionName == "BodyHazard" then
+	if actionName == ACTION_BODY_HAZARD then
 		local now = os.clock()
 		if now < state.NextClientInterruptAt then
 			return
@@ -1461,7 +1566,7 @@ function HoroServer.GhostProjection(context)
 
 	projectionSequence += 1
 	local startedAt = getSharedTimestamp()
-	local duration = clampNumber(abilityConfig.Duration, DEFAULT_DURATION, 0.5, 12)
+	local duration = clampNumber(abilityConfig.Duration, DEFAULT_DURATION, MIN_PROJECTION_DURATION, MAX_PROJECTION_DURATION)
 	local state = {
 		Player = player,
 		Character = context.Character,
@@ -1473,30 +1578,55 @@ function HoroServer.GhostProjection(context)
 		EndTime = startedAt + duration,
 		Duration = duration,
 		StartPosition = context.RootPart.Position,
-		GhostSpeed = clampNumber(abilityConfig.GhostSpeed, DEFAULT_GHOST_SPEED, 2, MAX_PROJECTION_MOVE_SPEED),
-		CarrySpeed = clampNumber(abilityConfig.CarrySpeed, DEFAULT_CARRY_SPEED, 1, MAX_PROJECTION_MOVE_SPEED),
-		MaxDistanceFromBody = clampNumber(abilityConfig.MaxDistanceFromBody, DEFAULT_MAX_DISTANCE_FROM_BODY, 8, 180),
-		RewardInteractRadius = clampNumber(abilityConfig.RewardInteractRadius, DEFAULT_REWARD_INTERACT_RADIUS, 3, 24),
-		HazardProbeRadius = clampNumber(abilityConfig.HazardProbeRadius, DEFAULT_HAZARD_PROBE_RADIUS, 1, 10),
+		GhostSpeed = clampNumber(abilityConfig.GhostSpeed, DEFAULT_GHOST_SPEED, MIN_GHOST_SPEED, MAX_PROJECTION_MOVE_SPEED),
+		CarrySpeed = clampNumber(abilityConfig.CarrySpeed, DEFAULT_CARRY_SPEED, MIN_CARRY_SPEED, MAX_PROJECTION_MOVE_SPEED),
+		MaxDistanceFromBody = clampNumber(
+			abilityConfig.MaxDistanceFromBody,
+			DEFAULT_MAX_DISTANCE_FROM_BODY,
+			MIN_MAX_DISTANCE_FROM_BODY,
+			MAX_MAX_DISTANCE_FROM_BODY
+		),
+		RewardInteractRadius = clampNumber(
+			abilityConfig.RewardInteractRadius,
+			DEFAULT_REWARD_INTERACT_RADIUS,
+			MIN_REWARD_INTERACT_RADIUS,
+			MAX_REWARD_INTERACT_RADIUS
+		),
+		HazardProbeRadius = clampNumber(
+			abilityConfig.HazardProbeRadius,
+			DEFAULT_HAZARD_PROBE_RADIUS,
+			MIN_HAZARD_PROBE_RADIUS,
+			MAX_HAZARD_PROBE_RADIUS
+		),
 		ServerHazardProbeInterval = clampNumber(
 			abilityConfig.ServerHazardProbeInterval,
 			DEFAULT_SERVER_HAZARD_PROBE_INTERVAL,
-			0.03,
-			0.5
+			MIN_SERVER_HAZARD_PROBE_INTERVAL,
+			MAX_SERVER_HAZARD_PROBE_INTERVAL
 		),
-		ClientHazardReportThrottle = clampNumber(abilityConfig.ClientHazardReportThrottle, 0.12, 0.05, 1),
-		PickupThrottle = clampNumber(abilityConfig.PickupThrottle, DEFAULT_PICKUP_THROTTLE, 0.05, 1),
+		ClientHazardReportThrottle = clampNumber(
+			abilityConfig.ClientHazardReportThrottle,
+			DEFAULT_CLIENT_HAZARD_REPORT_THROTTLE,
+			MIN_CLIENT_HAZARD_REPORT_THROTTLE,
+			MAX_CLIENT_HAZARD_REPORT_THROTTLE
+		),
+		PickupThrottle = clampNumber(
+			abilityConfig.PickupThrottle,
+			DEFAULT_PICKUP_THROTTLE,
+			MIN_PICKUP_THROTTLE,
+			MAX_PICKUP_THROTTLE
+		),
 		PickupRangeGraceDuration = clampNumber(
 			abilityConfig.PickupRangeGraceDuration,
 			DEFAULT_PICKUP_RANGE_GRACE_DURATION,
 			0,
-			2
+			MAX_PICKUP_RANGE_GRACE_DURATION
 		),
 		PickupRangeGraceDistance = clampNumber(
 			abilityConfig.PickupRangeGraceDistance,
 			DEFAULT_PICKUP_RANGE_GRACE_DISTANCE,
 			0,
-			40
+			MAX_PICKUP_RANGE_GRACE_DISTANCE
 		),
 		NextPickupAt = 0,
 		PickupRangeGraceUntil = 0,

@@ -1675,6 +1675,20 @@ function ClientEffectVisuals:StopPhoenixFlightEffect(targetPlayer)
 	state.EndTime = os.clock() + math.max(0.15, math.min(endLength, 1.2))
 end
 
+function ClientEffectVisuals:StopPhoenixWingEffect(targetPlayer, fadeTime)
+	if not self.PhoenixWingEffects then
+		return
+	end
+
+	local state = self.PhoenixWingEffects[targetPlayer]
+	if not state then
+		return
+	end
+
+	cleanupPhoenixWingState(state, fadeTime)
+	self.PhoenixWingEffects[targetPlayer] = nil
+end
+
 function ClientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
 	if typeof(startPosition) ~= "Vector3" then
 		return

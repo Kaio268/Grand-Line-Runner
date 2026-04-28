@@ -11,51 +11,6 @@ local MeraFruitClient = {}
 MeraFruitClient.__index = MeraFruitClient
 
 local cachedPresentationModule
-local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
-
-local function formatAuditValue(value)
-	if typeof(value) == "Vector3" then
-		return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
-	end
-
-	return tostring(value)
-end
-
-local function describePayload(payload)
-	if typeof(payload) ~= "table" then
-		return string.format("type=%s value=%s", typeof(payload), formatAuditValue(payload))
-	end
-
-	local keys = {}
-	for key in pairs(payload) do
-		keys[#keys + 1] = key
-	end
-
-	table.sort(keys, function(left, right)
-		return tostring(left) < tostring(right)
-	end)
-
-	local parts = {}
-	for _, key in ipairs(keys) do
-		parts[#parts + 1] = string.format("%s=%s", tostring(key), formatAuditValue(payload[key]))
-	end
-
-	return string.format("type=table keys=%d payload={%s}", #keys, table.concat(parts, ", "))
-end
-
-local function logMeraAudit(level, message, ...)
-	if not game:GetService("RunService"):IsStudio() then
-		return
-	end
-
-	local formattedMessage = string.format("[%s] " .. message, MERA_AUDIT_MARKER, ...)
-	if level == "WARN" then
-		DevilFruitLogger.Warn("REQUEST", formattedMessage)
-		return
-	end
-
-	DevilFruitLogger.Info("REQUEST", formattedMessage)
-end
 
 local function buildNoopPresentationClient()
 	return {
@@ -194,23 +149,11 @@ end
 
 function MeraFruitClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	logRequest("fruit module request begin fruit=Mera Mera no Mi ability=%s", tostring(abilityName))
-	logMeraAudit(
-		"INFO",
-		"MeraClient BeginPredictedRequest enter ability=%s player=%s",
-		tostring(abilityName),
-		tostring(self.player and self.player.Name or "<nil>")
-	)
 	if abilityName == MeraDashClient.ABILITY_NAME then
 		local ok, payloadOrError = pcall(function()
 			return self.impl:BeginPredictedRequest()
 		end)
 		if not ok then
-			logMeraAudit(
-				"WARN",
-				"MeraClient BeginPredictedRequest fail ability=%s source=mera_dash detail=%s",
-				tostring(abilityName),
-				tostring(payloadOrError)
-			)
 			logRequest(
 				"fruit module request end fruit=Mera Mera no Mi ability=%s source=mera_dash_error payload=nil detail=%s",
 				tostring(abilityName),
@@ -225,24 +168,12 @@ function MeraFruitClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 			tostring(abilityName),
 			tostring(typeof(payload))
 		)
-		logMeraAudit(
-			"INFO",
-			"MeraClient BeginPredictedRequest success ability=%s source=mera_dash payload=%s",
-			tostring(abilityName),
-			describePayload(payload)
-		)
 		return payload
 	end
 
 	if typeof(fallbackBuilder) == "function" then
 		local ok, payloadOrError = pcall(fallbackBuilder)
 		if not ok then
-			logMeraAudit(
-				"WARN",
-				"MeraClient BeginPredictedRequest fail ability=%s source=fallback detail=%s",
-				tostring(abilityName),
-				tostring(payloadOrError)
-			)
 			logRequest(
 				"fruit module request end fruit=Mera Mera no Mi ability=%s source=fallback_error payload=nil detail=%s",
 				tostring(abilityName),
@@ -257,21 +188,10 @@ function MeraFruitClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 			tostring(abilityName),
 			tostring(typeof(payload))
 		)
-		logMeraAudit(
-			"INFO",
-			"MeraClient BeginPredictedRequest success ability=%s source=fallback payload=%s",
-			tostring(abilityName),
-			describePayload(payload)
-		)
 		return payload
 	end
 
 	logRequest("fruit module request end fruit=Mera Mera no Mi ability=%s source=none payload=nil", tostring(abilityName))
-	logMeraAudit(
-		"WARN",
-		"MeraClient BeginPredictedRequest fail ability=%s source=none detail=no_builder",
-		tostring(abilityName)
-	)
 	return nil
 end
 

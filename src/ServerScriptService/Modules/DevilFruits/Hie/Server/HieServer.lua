@@ -36,6 +36,11 @@ local DEFAULT_CAST_POST_LAUNCH_LOCK_DURATION = 0.35
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE = "HieFreezeShotCastSlowUntil"
 local HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE = "HieFreezeShotCastSpeedMultiplier"
+local HIE_ICE_BOOST_UNTIL_ATTRIBUTE = "HieIceBoostUntil"
+local HIE_ICE_BOOST_SPEED_MULTIPLIER_ATTRIBUTE = "HieIceBoostSpeedMultiplier"
+local HIE_ICE_BOOST_SPEED_BONUS_ATTRIBUTE = "HieIceBoostSpeedBonus"
+local DEFAULT_ICE_BOOST_SPEED_MULTIPLIER = 2
+local ICE_BOOST_DURATION_CLEANUP_BUFFER = 0.05
 
 local IGNORED_HELPER_NAMES = {
 	HitBox = true,
@@ -543,6 +548,21 @@ local function clearFreezeShotCastSlow(player, expectedToken)
 	castSlowTokensByPlayer[player] = nil
 	player:SetAttribute(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE, nil)
 	player:SetAttribute(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE, nil)
+end
+
+local function clearIceBoostAttributes(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	player:SetAttribute(HIE_ICE_BOOST_UNTIL_ATTRIBUTE, nil)
+	player:SetAttribute(HIE_ICE_BOOST_SPEED_MULTIPLIER_ATTRIBUTE, nil)
+	player:SetAttribute(HIE_ICE_BOOST_SPEED_BONUS_ATTRIBUTE, nil)
+end
+
+local function clearIceBoostRuntimeState(player, reason)
+	clearIceBoostAttributes(player)
+	HieAnimationController.StopIceBoostAnimation(player, nil, reason or "runtime_clear")
 end
 
 local function stopPlanarVelocity(rootPart)
@@ -1431,7 +1451,7 @@ function HieHieNoMi.IceBoost(context)
 	local humanoid = context.Humanoid
 	local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid:FindFirstChild("Animator")) or nil
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
-	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or 2)
+	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or DEFAULT_ICE_BOOST_SPEED_MULTIPLIER)
 	local untilTime = os.clock() + duration
 	DevilFruitLogger.Info(
 		"MOVE",
@@ -1448,22 +1468,20 @@ function HieHieNoMi.IceBoost(context)
 		speedMultiplier
 	)
 
-	player:SetAttribute("HieIceBoostUntil", untilTime)
-	player:SetAttribute("HieIceBoostSpeedMultiplier", speedMultiplier)
-	player:SetAttribute("HieIceBoostSpeedBonus", nil)
+	player:SetAttribute(HIE_ICE_BOOST_UNTIL_ATTRIBUTE, untilTime)
+	player:SetAttribute(HIE_ICE_BOOST_SPEED_MULTIPLIER_ATTRIBUTE, speedMultiplier)
+	player:SetAttribute(HIE_ICE_BOOST_SPEED_BONUS_ATTRIBUTE, nil)
 	HieAnimationController.PlayIceBoostAnimation(player, context.Character, abilityConfig.Animation, untilTime)
 
-	task.delay(duration + 0.05, function()
+	task.delay(duration + ICE_BOOST_DURATION_CLEANUP_BUFFER, function()
 		if player.Parent == nil then
 			HieAnimationController.StopIceBoostAnimation(player, untilTime, "player_removed")
 			return
 		end
 
-		local currentUntil = player:GetAttribute("HieIceBoostUntil")
+		local currentUntil = player:GetAttribute(HIE_ICE_BOOST_UNTIL_ATTRIBUTE)
 		if currentUntil == untilTime then
-			player:SetAttribute("HieIceBoostUntil", nil)
-			player:SetAttribute("HieIceBoostSpeedMultiplier", nil)
-			player:SetAttribute("HieIceBoostSpeedBonus", nil)
+			clearIceBoostAttributes(player)
 			HieAnimationController.StopIceBoostAnimation(player, untilTime, "duration_complete")
 		elseif typeof(currentUntil) ~= "number" or currentUntil < untilTime then
 			HieAnimationController.StopIceBoostAnimation(player, untilTime, "interrupted")
@@ -1474,6 +1492,11 @@ function HieHieNoMi.IceBoost(context)
 		Duration = duration,
 		SpeedMultiplier = speedMultiplier,
 	}
+end
+
+function HieHieNoMi.ClearRuntimeState(player)
+	clearFreezeShotCastSlow(player)
+	clearIceBoostRuntimeState(player, "runtime_clear")
 end
 
 logMessage("INIT", "Freeze Shot runtime initialized")

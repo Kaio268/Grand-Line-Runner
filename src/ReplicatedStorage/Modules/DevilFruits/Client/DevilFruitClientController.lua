@@ -28,12 +28,6 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = "GameplayModalOpen"
 
-local GOMU_AIM_RAY_DISTANCE = 500
-local GOMU_HIGHLIGHT_FILL_COLOR = Color3.fromRGB(255, 176, 120)
-local GOMU_HIGHLIGHT_OUTLINE_COLOR = Color3.fromRGB(255, 243, 231)
-local GOMU_AUTO_LATCH_MAX_ALIGNMENT = math.cos(math.rad(18))
-local GOMU_AUTO_LATCH_BASE_RADIUS = 4
-local GOMU_AUTO_LATCH_RADIUS_FACTOR = 0.14
 local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
 local MOGU_BURROW_ABILITY = "Burrow"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
@@ -43,9 +37,7 @@ local PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL = 0.16
 local LOCAL_HAZARD_OVERLAP_MAX_PARTS = 128
-local PHOENIX_VERTICAL_DEADZONE = 0.12
 local MIN_DIRECTION_MAGNITUDE = 0.01
-local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 local DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS = 12
 
 local RemoteBundle = DevilFruitRemotes.GetBundle()
@@ -56,16 +48,8 @@ local effectRemote = RemoteBundle.Effect
 local localCooldowns = {}
 local suppressedParts = {}
 local activeFireBursts = {}
-local activePhoenixShields = {}
 local activeMoguBurrow = nil
 local hazardSuppressionLoopRunning = false
-local spaceHeld = false
-local flightInputState = {
-	Forward = false,
-	Backward = false,
-	Left = false,
-	Right = false,
-}
 local playOptionalEffect
 local getFruitFolder
 local getEquippedFruit
@@ -74,23 +58,6 @@ local inputController
 local effectRouter
 local syncDevilFruitClientState
 local lastSyncedFruitName = DevilFruitConfig.None
-local gomuAimState = {
-	Highlight = nil,
-	TargetPlayer = nil,
-}
-local phoenixFlightState = {
-	Active = false,
-	EndTime = 0,
-	TakeoffEndTime = 0,
-	TakeoffVelocity = 0,
-	ActivationHeight = 0,
-	InitialLiftTarget = 0,
-	MaxHeight = 0,
-	FlightSpeed = 0,
-	VerticalSpeed = 0,
-	MaxDescendSpeed = 0,
-	HorizontalResponsiveness = 0,
-}
 local cooldownHud = {
 	CurrentFruit = nil,
 	Gui = nil,
@@ -170,28 +137,6 @@ local function formatVector3ForLog(value)
 	end
 
 	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
-end
-
-local function describePayloadForAudit(payload)
-	if typeof(payload) ~= "table" then
-		return string.format("type=%s value=%s", typeof(payload), formatVector3ForLog(payload))
-	end
-
-	local keys = {}
-	for key in pairs(payload) do
-		keys[#keys + 1] = key
-	end
-
-	table.sort(keys, function(left, right)
-		return tostring(left) < tostring(right)
-	end)
-
-	local parts = {}
-	for _, key in ipairs(keys) do
-		parts[#parts + 1] = string.format("%s=%s", tostring(key), formatVector3ForLog(payload[key]))
-	end
-
-	return string.format("type=table keys=%d payload={%s}", #keys, table.concat(parts, ", "))
 end
 
 local function shouldTraceAbilityInput(keyCode)
@@ -1063,481 +1008,6 @@ local clientEffectVisuals = ClientEffectVisuals.new({
 	PhoenixRebirthAbility = PHOENIX_REBIRTH_ABILITY,
 })
 
-local function getHumanoid()
-	local character = getCharacter()
-	if not character then
-		return nil
-	end
-
-	return character:FindFirstChildOfClass("Humanoid")
-end
-
-local function getCurrentCamera()
-	return Workspace.CurrentCamera
-end
-
-local function getPlanarVector(vector)
-	return Vector3.new(vector.X, 0, vector.Z)
-end
-
-local function getCurrentLookVector(rootPart)
-	local camera = getCurrentCamera()
-	local lookVector = camera and camera.CFrame.LookVector or (rootPart and rootPart.CFrame.LookVector)
-	if typeof(lookVector) ~= "Vector3" or lookVector.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		return Vector3.new(0, 0, -1)
-	end
-
-	return lookVector.Unit
-end
-
-local function getInitialLiftVelocity(initialLift)
-	local gravity = math.max(Workspace.Gravity, 0.01)
-	return math.sqrt(2 * gravity * math.max(initialLift, 0))
-end
-
-local function setFlightInputKeyState(keyCode, isPressed)
-	if keyCode == Enum.KeyCode.W or keyCode == Enum.KeyCode.Up then
-		flightInputState.Forward = isPressed
-		return true
-	end
-
-	if keyCode == Enum.KeyCode.S or keyCode == Enum.KeyCode.Down then
-		flightInputState.Backward = isPressed
-		return true
-	end
-
-	if keyCode == Enum.KeyCode.A or keyCode == Enum.KeyCode.Left then
-		flightInputState.Left = isPressed
-		return true
-	end
-
-	if keyCode == Enum.KeyCode.D or keyCode == Enum.KeyCode.Right then
-		flightInputState.Right = isPressed
-		return true
-	end
-
-	return false
-end
-
-local function getFlightInputAxes()
-	local forwardAxis = 0
-	local rightAxis = 0
-
-	if flightInputState.Forward then
-		forwardAxis += 1
-	end
-	if flightInputState.Backward then
-		forwardAxis -= 1
-	end
-	if flightInputState.Right then
-		rightAxis += 1
-	end
-	if flightInputState.Left then
-		rightAxis -= 1
-	end
-
-	return forwardAxis, rightAxis
-end
-
-local function getCameraRelativeFlightDirection(rootPart)
-	local forwardAxis, rightAxis = getFlightInputAxes()
-	if forwardAxis == 0 and rightAxis == 0 then
-		return Vector3.zero
-	end
-
-	local camera = getCurrentCamera()
-	local lookVector = camera and camera.CFrame.LookVector or getCurrentLookVector(rootPart)
-	local rightVector = camera and camera.CFrame.RightVector or (rootPart and rootPart.CFrame.RightVector) or Vector3.xAxis
-	local direction = (lookVector * forwardAxis) + (rightVector * rightAxis)
-	local magnitude = direction.Magnitude
-	if magnitude <= MIN_DIRECTION_MAGNITUDE then
-		return Vector3.zero
-	end
-
-	return direction.Unit * math.min(math.sqrt((forwardAxis * forwardAxis) + (rightAxis * rightAxis)), 1)
-end
-
-local function faceCharacterTowards(direction)
-	if typeof(direction) ~= "Vector3" or direction.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		return
-	end
-
-	local character = getCharacter()
-	local rootPart = getRootPart()
-	if not character or not rootPart then
-		return
-	end
-
-	local planarDirection = getPlanarVector(direction)
-	if planarDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		return
-	end
-
-	local rootPosition = rootPart.Position
-	local targetCFrame = CFrame.lookAt(rootPosition, rootPosition + planarDirection.Unit, Vector3.yAxis)
-	character:PivotTo(targetCFrame)
-end
-
-local function getGlideConfig()
-	local fruitName = getEquippedFruit()
-	if fruitName ~= PHOENIX_FRUIT_NAME then
-		return nil
-	end
-
-	local fruit = DevilFruitConfig.GetFruit(fruitName)
-	return fruit and fruit.Passives and fruit.Passives.PhoenixGlide or nil
-end
-
-local function isPhoenixFlightActive(now)
-	now = now or os.clock()
-	return phoenixFlightState.Active and now < phoenixFlightState.EndTime
-end
-
-local function stopPhoenixFlight()
-	if not phoenixFlightState.Active then
-		return
-	end
-
-	phoenixFlightState.Active = false
-	phoenixFlightState.EndTime = 0
-	phoenixFlightState.TakeoffEndTime = 0
-	phoenixFlightState.TakeoffVelocity = 0
-	phoenixFlightState.ActivationHeight = 0
-	phoenixFlightState.InitialLiftTarget = 0
-	phoenixFlightState.MaxHeight = 0
-	phoenixFlightState.FlightSpeed = 0
-	phoenixFlightState.VerticalSpeed = 0
-	phoenixFlightState.MaxDescendSpeed = 0
-	phoenixFlightState.HorizontalResponsiveness = 0
-
-	local humanoid = getHumanoid()
-	if humanoid then
-		humanoid.AutoRotate = true
-	end
-end
-
-local function startPhoenixFlight(payload)
-	local rootPart = getRootPart()
-	local humanoid = getHumanoid()
-	if not rootPart or not humanoid or humanoid.Health <= 0 then
-		return
-	end
-
-	stopPhoenixFlight()
-
-	local duration = math.max(0.1, tonumber(payload.Duration) or 0)
-	local takeoffDuration = math.max(0.1, tonumber(payload.TakeoffDuration) or 0.4)
-	local initialLift = math.max(0, tonumber(payload.InitialLift) or 10)
-	local maxRiseHeight = math.max(initialLift, tonumber(payload.MaxRiseHeight) or initialLift)
-	local liftVelocity = getInitialLiftVelocity(initialLift)
-
-	phoenixFlightState.Active = true
-	phoenixFlightState.EndTime = os.clock() + duration
-	phoenixFlightState.TakeoffEndTime = os.clock() + takeoffDuration
-	phoenixFlightState.TakeoffVelocity = liftVelocity
-	phoenixFlightState.ActivationHeight = rootPart.Position.Y
-	phoenixFlightState.InitialLiftTarget = rootPart.Position.Y + initialLift
-	phoenixFlightState.MaxHeight = rootPart.Position.Y + maxRiseHeight
-	phoenixFlightState.FlightSpeed = math.max(0, tonumber(payload.FlightSpeed) or 78)
-	phoenixFlightState.VerticalSpeed = math.max(0, tonumber(payload.VerticalSpeed) or 52)
-	phoenixFlightState.MaxDescendSpeed = math.max(0, tonumber(payload.MaxDescendSpeed) or 58)
-	phoenixFlightState.HorizontalResponsiveness = math.max(1, tonumber(payload.HorizontalResponsiveness) or 10)
-
-	humanoid.AutoRotate = false
-	humanoid.Jump = true
-	humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
-
-	local currentVelocity = rootPart.AssemblyLinearVelocity
-	rootPart.AssemblyLinearVelocity = Vector3.new(
-		currentVelocity.X,
-		math.max(currentVelocity.Y, liftVelocity),
-		currentVelocity.Z
-	)
-end
-
-local function updatePhoenixFlight(dt)
-	local now = os.clock()
-	if getEquippedFruit() ~= PHOENIX_FRUIT_NAME then
-		stopPhoenixFlight()
-		return
-	end
-
-	if not isPhoenixFlightActive(now) then
-		if phoenixFlightState.Active then
-			stopPhoenixFlight()
-		end
-		return
-	end
-
-	local rootPart = getRootPart()
-	local humanoid = getHumanoid()
-	if not rootPart or not humanoid or humanoid.Health <= 0 then
-		stopPhoenixFlight()
-		return
-	end
-
-	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
-
-	local desiredFlightDirection = getCameraRelativeFlightDirection(rootPart)
-	local desiredVelocity = desiredFlightDirection * phoenixFlightState.FlightSpeed
-	local currentHeight = rootPart.Position.Y
-	local inTakeoffPhase = now < phoenixFlightState.TakeoffEndTime and currentHeight < phoenixFlightState.InitialLiftTarget
-	if desiredVelocity.Y > 0 and math.abs(desiredVelocity.Y) < (phoenixFlightState.VerticalSpeed * PHOENIX_VERTICAL_DEADZONE) then
-		desiredVelocity = Vector3.new(desiredVelocity.X, 0, desiredVelocity.Z)
-	end
-	if inTakeoffPhase then
-		desiredVelocity = Vector3.new(
-			desiredVelocity.X,
-			math.max(desiredVelocity.Y, phoenixFlightState.TakeoffVelocity),
-			desiredVelocity.Z
-		)
-	end
-	if currentHeight >= phoenixFlightState.MaxHeight and desiredVelocity.Y > 0 then
-		desiredVelocity = Vector3.new(desiredVelocity.X, 0, desiredVelocity.Z)
-	end
-
-	local currentVelocity = rootPart.AssemblyLinearVelocity
-	local response = math.clamp(phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
-	local nextVelocity
-	if inTakeoffPhase then
-		nextVelocity = Vector3.new(
-			currentVelocity.X + ((desiredVelocity.X - currentVelocity.X) * response),
-			math.max(currentVelocity.Y, desiredVelocity.Y),
-			currentVelocity.Z + ((desiredVelocity.Z - currentVelocity.Z) * response)
-		)
-	else
-		nextVelocity = currentVelocity:Lerp(desiredVelocity, response)
-	end
-	if desiredVelocity.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		nextVelocity = Vector3.zero
-	end
-	if currentHeight > (phoenixFlightState.MaxHeight + 0.5) then
-		nextVelocity = Vector3.new(nextVelocity.X, math.min(nextVelocity.Y, -14), nextVelocity.Z)
-	end
-
-	rootPart.AssemblyLinearVelocity = nextVelocity
-
-	local desiredPlanarDirection = getPlanarVector(desiredVelocity)
-	local nextPlanarDirection = getPlanarVector(nextVelocity)
-	if desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE or nextPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
-		local facingDirection = desiredPlanarDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and desiredPlanarDirection or nextPlanarDirection
-		faceCharacterTowards(facingDirection)
-	end
-end
-
-local function updatePhoenixGlide(dt)
-	local glideConfig = getGlideConfig()
-	if not glideConfig or not spaceHeld or isPhoenixFlightActive() then
-		return
-	end
-
-	local rootPart = getRootPart()
-	local humanoid = getHumanoid()
-	if not rootPart or not humanoid or humanoid.Health <= 0 then
-		return
-	end
-
-	local humanoidState = humanoid:GetState()
-	if humanoidState ~= Enum.HumanoidStateType.Freefall and humanoidState ~= Enum.HumanoidStateType.Jumping then
-		return
-	end
-
-	local currentVelocity = rootPart.AssemblyLinearVelocity
-	local activationThreshold = tonumber(glideConfig.ActivateMaxVerticalSpeed) or 6
-	if currentVelocity.Y > activationThreshold then
-		return
-	end
-
-	local desiredDirection = getPlanarVector(getCurrentLookVector(rootPart))
-	if desiredDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		desiredDirection = getPlanarVector(humanoid.MoveDirection)
-	end
-	if desiredDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		desiredDirection = getPlanarVector(rootPart.CFrame.LookVector)
-	end
-	if desiredDirection.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		return
-	end
-
-	local forwardSpeed = math.max(0, tonumber(glideConfig.ForwardSpeed) or 28)
-	local fallSpeed = math.max(0, tonumber(glideConfig.FallSpeed) or 18)
-	local response = math.clamp((tonumber(glideConfig.Responsiveness) or 8) * dt, 0, 1)
-	local desiredPlanarVelocity = desiredDirection.Unit * forwardSpeed
-	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(desiredPlanarVelocity, response)
-	local nextVerticalVelocity = currentVelocity.Y
-
-	if currentVelocity.Y <= 0 then
-		local desiredVerticalVelocity = -fallSpeed
-		nextVerticalVelocity = currentVelocity.Y + ((desiredVerticalVelocity - currentVelocity.Y) * response)
-	end
-
-	rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, nextVerticalVelocity, nextPlanarVelocity.Z)
-end
-
-local function getPlanarDistance(a, b)
-	local delta = a - b
-	return Vector3.new(delta.X, 0, delta.Z).Magnitude
-end
-
-local function getPlayerFromDescendant(instance)
-	local current = instance
-	while current and current ~= Workspace do
-		if current:IsA("Model") then
-			local targetPlayer = Players:GetPlayerFromCharacter(current)
-			if targetPlayer then
-				return targetPlayer
-			end
-		end
-
-		current = current.Parent
-	end
-
-	return nil
-end
-
-local function getLookAimRay()
-	local camera = getCurrentCamera()
-	if not camera then
-		return nil
-	end
-
-	local viewportSize = camera.ViewportSize
-	return camera:ViewportPointToRay(viewportSize.X * 0.5, viewportSize.Y * 0.5)
-end
-
-local function getLookAimRaycast()
-	local unitRay = getLookAimRay()
-	if not unitRay then
-		return nil, nil, nil, nil
-	end
-
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	params.FilterDescendantsInstances = player.Character and { player.Character } or {}
-	params.IgnoreWater = true
-
-	local rayVector = unitRay.Direction * GOMU_AIM_RAY_DISTANCE
-	local result = Workspace:Raycast(unitRay.Origin, rayVector, params)
-	return result, (result and result.Position) or (unitRay.Origin + rayVector), unitRay.Origin, unitRay.Direction.Unit
-end
-
-local function getDistanceFromRay(rayOrigin, rayDirection, point)
-	local toPoint = point - rayOrigin
-	local projectedDistance = math.max(0, toPoint:Dot(rayDirection))
-	local closestPoint = rayOrigin + (rayDirection * projectedDistance)
-	return (point - closestPoint).Magnitude, projectedDistance
-end
-
-local isGomuTargetInRange
-
-local function findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
-	local localRootPart = getRootPart()
-	if not localRootPart or not rayOrigin or not rayDirection then
-		return nil
-	end
-
-	local bestTargetPlayer
-	local bestScore = -math.huge
-
-	for _, targetPlayer in ipairs(Players:GetPlayers()) do
-		if targetPlayer ~= player and isGomuTargetInRange(targetPlayer, launchDistance) then
-			local targetRootPart = getPlayerRootPart(targetPlayer)
-			if targetRootPart then
-				local targetPosition = targetRootPart.Position + Vector3.new(0, 1.5, 0)
-				local toTarget = targetPosition - rayOrigin
-				local toTargetUnit = toTarget.Magnitude > 0.01 and toTarget.Unit or nil
-				local alignment = toTargetUnit and rayDirection:Dot(toTargetUnit) or -1
-				if alignment >= GOMU_AUTO_LATCH_MAX_ALIGNMENT then
-					local lateralDistance, projectedDistance = getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
-					local allowedRadius = math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
-					if lateralDistance <= allowedRadius then
-						local planarDistance = getPlanarDistance(localRootPart.Position, targetRootPart.Position)
-						local score = (alignment * 100) - (lateralDistance * 2) - (planarDistance * 0.1)
-						if score > bestScore then
-							bestScore = score
-							bestTargetPlayer = targetPlayer
-						end
-					end
-				end
-			end
-		end
-	end
-
-	return bestTargetPlayer
-end
-
-local function ensureGomuHighlight()
-	local highlight = gomuAimState.Highlight
-	if highlight and highlight.Parent then
-		return highlight
-	end
-
-	highlight = Instance.new("Highlight")
-	highlight.Name = "GomuAimHighlight"
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.FillColor = GOMU_HIGHLIGHT_FILL_COLOR
-	highlight.FillTransparency = 0.45
-	highlight.OutlineColor = GOMU_HIGHLIGHT_OUTLINE_COLOR
-	highlight.OutlineTransparency = 0.05
-	highlight.Enabled = false
-	highlight.Parent = Workspace
-
-	gomuAimState.Highlight = highlight
-	return highlight
-end
-
-local function clearGomuHighlight()
-	local highlight = gomuAimState.Highlight
-	if highlight then
-		highlight.Enabled = false
-		highlight.Adornee = nil
-	end
-
-	gomuAimState.TargetPlayer = nil
-end
-
-isGomuTargetInRange = function(targetPlayer, maxDistance)
-	local localRootPart = getRootPart()
-	local targetRootPart = getPlayerRootPart(targetPlayer)
-	if not localRootPart or not targetRootPart then
-		return false
-	end
-
-	return getPlanarDistance(localRootPart.Position, targetRootPart.Position) <= (maxDistance + 0.5)
-end
-
-local function getGomuLaunchTarget(abilityConfig)
-	local result, fallbackPosition, rayOrigin, rayDirection = getLookAimRaycast()
-	local aimPosition = fallbackPosition
-	local launchDistance = math.max(0, tonumber(abilityConfig and abilityConfig.LaunchDistance) or 0)
-	local targetPlayer = findGomuAutoLatchPlayer(launchDistance, rayOrigin, rayDirection)
-
-	if not targetPlayer and result then
-		targetPlayer = getPlayerFromDescendant(result.Instance)
-		if targetPlayer == player or not isGomuTargetInRange(targetPlayer, launchDistance) then
-			targetPlayer = nil
-		end
-	end
-
-	if targetPlayer then
-		local targetRootPart = getPlayerRootPart(targetPlayer)
-		if targetRootPart then
-			aimPosition = targetRootPart.Position
-		end
-	end
-
-	if not aimPosition then
-		local rootPart = getRootPart()
-		if rootPart then
-			local fallbackDirection = rayDirection or rootPart.CFrame.LookVector
-			aimPosition = rootPart.Position + (fallbackDirection * GOMU_AIM_RAY_DISTANCE)
-		end
-	end
-
-	return aimPosition, targetPlayer
-end
-
 local function buildDefaultAbilityRequestPayload(fruitName, abilityName)
 	return nil
 end
@@ -1580,31 +1050,6 @@ local function buildAbilityRequestPayload(fruitName, abilityName)
 		countPayloadKeys(fallbackPayload)
 	)
 	return fallbackPayload
-end
-
-local function updateGomuAimAssist()
-	local fruitName = getEquippedFruit()
-	if fruitName ~= "Gomu Gomu no Mi" then
-		clearGomuHighlight()
-		return
-	end
-
-	local abilityConfig = DevilFruitConfig.GetAbility(fruitName, "RubberLaunch")
-	if not abilityConfig then
-		clearGomuHighlight()
-		return
-	end
-
-	local _, targetPlayer = getGomuLaunchTarget(abilityConfig)
-	if not targetPlayer or not targetPlayer.Character then
-		clearGomuHighlight()
-		return
-	end
-
-	local highlight = ensureGomuHighlight()
-	highlight.Adornee = targetPlayer.Character
-	highlight.Enabled = true
-	gomuAimState.TargetPlayer = targetPlayer
 end
 
 local function isDescendantOfClientWave(instance, clientWavesFolder)
@@ -1710,40 +1155,6 @@ local function restoreSuppressedParts(now)
 	end
 end
 
-local function isLocalPlayerInsidePhoenixShield(position)
-	local checkPosition = position
-	if typeof(checkPosition) ~= "Vector3" then
-		local rootPart = getRootPart()
-		checkPosition = rootPart and rootPart.Position or nil
-	end
-	if not checkPosition then
-		return false
-	end
-
-	local now = os.clock()
-	for shieldOwner, shield in pairs(activePhoenixShields) do
-		if now >= shield.EndTime then
-			activePhoenixShields[shieldOwner] = nil
-		else
-			local ownerRootPart = getPlayerRootPart(shieldOwner)
-			local shieldRadius = math.max(0, tonumber(shield.Radius) or 0)
-			if ownerRootPart and shieldRadius > 0 and getPlanarDistance(ownerRootPart.Position, checkPosition) <= shieldRadius then
-				return true
-			end
-		end
-	end
-
-	return false
-end
-
-ProtectionRuntime.Register("PhoenixProtection", function(targetPlayer, position)
-	if targetPlayer ~= player then
-		return false
-	end
-
-	return isLocalPlayerInsidePhoenixShield(position)
-end)
-
 local function getMoguHazardProtectionRadius()
 	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
 	return math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS)
@@ -1823,12 +1234,6 @@ local function hasActiveHazardProtection(now)
 		return true
 	end
 
-	for _, shield in pairs(activePhoenixShields) do
-		if now < shield.EndTime then
-			return true
-		end
-	end
-
 	if isLocalPlayerBurrowProtected(now) then
 		return true
 	end
@@ -1852,24 +1257,6 @@ local function updateHazardSuppression()
 				suppressHazardsNearPosition(rootPart.Position, burst.Radius, burst.EndTime, function(_, hazardClass)
 					return hazardClass == "minor"
 				end, true)
-			end
-		end
-	end
-
-	for shieldOwner, shield in pairs(activePhoenixShields) do
-		if now >= shield.EndTime then
-			activePhoenixShields[shieldOwner] = nil
-		else
-			local ownerRootPart = getPlayerRootPart(shieldOwner)
-			if not ownerRootPart then
-				if shieldOwner.Parent == nil then
-					activePhoenixShields[shieldOwner] = nil
-				end
-			else
-				local shieldRadius = math.max(0, tonumber(shield.Radius) or 0)
-				if rootPart and shieldRadius > 0 and getPlanarDistance(ownerRootPart.Position, rootPart.Position) <= shieldRadius then
-					suppressHazardsNearPosition(ownerRootPart.Position, shieldRadius, shield.EndTime)
-				end
 			end
 		end
 	end
@@ -1898,46 +1285,8 @@ local function ensureHazardSuppressionLoop()
 	updateHazardSuppression()
 end
 
-local function startFireBurst(payload)
-	local duration = tonumber(payload.Duration) or 0
-	local radius = tonumber(payload.Radius) or 0
-	if duration <= 0 or radius <= 0 then
-		return
-	end
-
-	table.insert(activeFireBursts, {
-		Radius = radius,
-		EndTime = os.clock() + duration,
-		NextScanAt = 0,
-	})
-
-	ensureHazardSuppressionLoop()
-end
-
-local function startPhoenixShield(targetPlayer, payload)
-	if not targetPlayer or not targetPlayer:IsA("Player") then
-		return
-	end
-
-	local duration = tonumber(payload.Duration) or 0
-	local radius = tonumber(payload.Radius) or 0
-	if duration <= 0 or radius <= 0 then
-		return
-	end
-
-	local shieldState = activePhoenixShields[targetPlayer]
-	local shieldEndTime = os.clock() + duration
-	if shieldState then
-		shieldState.EndTime = shieldEndTime
-		shieldState.Radius = radius
-	else
-		activePhoenixShields[targetPlayer] = {
-			EndTime = shieldEndTime,
-			Radius = radius,
-		}
-	end
-
-	ensureHazardSuppressionLoop()
+local function startFireBurst(_payload)
+	-- FireBurst hazard targets are not ready yet; skip local hazard scans to avoid release stutter.
 end
 
 local function startMoguBurrow(targetPlayer, payload)
@@ -2200,34 +1549,7 @@ local function initializeDevilFruitClient()
 			tostring(requestIdentity.Object),
 			countPayloadKeys(requestPayload)
 		)
-		if fruitName == "Mera Mera no Mi" then
-			logDevilFruitRequest(
-				"[%s] Mera FireServer begin ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payload=%s",
-				MERA_AUDIT_MARKER,
-				tostring(abilityName),
-				tostring(requestIdentity.Name),
-				tostring(requestIdentity.Path),
-				tostring(requestIdentity.RuntimeId),
-				tostring(requestIdentity.DebugId),
-				tostring(requestIdentity.Object),
-				describePayloadForAudit(requestPayload)
-			)
-		end
-
 		requestRemote:FireServer(abilityName, requestPayload)
-		if fruitName == "Mera Mera no Mi" then
-			logDevilFruitRequest(
-				"[%s] Mera FireServer end ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payload=%s",
-				MERA_AUDIT_MARKER,
-				tostring(abilityName),
-				tostring(requestIdentity.Name),
-				tostring(requestIdentity.Path),
-				tostring(requestIdentity.RuntimeId),
-				tostring(requestIdentity.DebugId),
-				tostring(requestIdentity.Object),
-				describePayloadForAudit(requestPayload)
-			)
-		end
 		logDevilFruitClient(
 			"remote fire end key=%s fruit=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payloadKeys=%d",
 			tostring(input.KeyCode.Name),

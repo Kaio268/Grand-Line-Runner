@@ -14,6 +14,12 @@ local DEFAULT_CONCEAL_TRANSPARENCY = 1
 local DEFAULT_ENTRY_BURST_RADIUS = 3.2
 local DEFAULT_RESOLVE_BURST_RADIUS = 4.2
 local DEFAULT_SURFACE_RESOLVE_GRACE = 0.45
+local MIN_BURROW_DURATION = 0.5
+local MIN_TRAIL_INTERVAL = 0.05
+local MIN_BURST_RADIUS = 0.5
+local MIN_PROBE_HEIGHT = 1
+local MIN_PROBE_DEPTH = 4
+local MIN_ROOT_GROUND_CLEARANCE = 1.5
 
 local function getPlanarVector(vector)
 	return Vector3.new(vector.X, 0, vector.Z)
@@ -32,7 +38,7 @@ function MoguBurrowShared.GetPlanarVector(vector)
 end
 
 function MoguBurrowShared.GetBurrowDuration(abilityConfig)
-	return math.max(0.5, tonumber(abilityConfig and abilityConfig.BurrowDuration) or DEFAULT_BURROW_DURATION)
+	return math.max(MIN_BURROW_DURATION, tonumber(abilityConfig and abilityConfig.BurrowDuration) or DEFAULT_BURROW_DURATION)
 end
 
 function MoguBurrowShared.GetMoveSpeed(abilityConfig)
@@ -40,7 +46,7 @@ function MoguBurrowShared.GetMoveSpeed(abilityConfig)
 end
 
 function MoguBurrowShared.GetTrailInterval(abilityConfig)
-	return math.max(0.05, tonumber(abilityConfig and abilityConfig.TrailInterval) or DEFAULT_TRAIL_INTERVAL)
+	return math.max(MIN_TRAIL_INTERVAL, tonumber(abilityConfig and abilityConfig.TrailInterval) or DEFAULT_TRAIL_INTERVAL)
 end
 
 function MoguBurrowShared.GetConcealTransparency(abilityConfig)
@@ -52,11 +58,11 @@ function MoguBurrowShared.GetConcealTransparency(abilityConfig)
 end
 
 function MoguBurrowShared.GetEntryBurstRadius(abilityConfig)
-	return math.max(0.5, tonumber(abilityConfig and abilityConfig.EntryBurstRadius) or DEFAULT_ENTRY_BURST_RADIUS)
+	return math.max(MIN_BURST_RADIUS, tonumber(abilityConfig and abilityConfig.EntryBurstRadius) or DEFAULT_ENTRY_BURST_RADIUS)
 end
 
 function MoguBurrowShared.GetResolveBurstRadius(abilityConfig)
-	return math.max(0.5, tonumber(abilityConfig and abilityConfig.ResolveBurstRadius) or DEFAULT_RESOLVE_BURST_RADIUS)
+	return math.max(MIN_BURST_RADIUS, tonumber(abilityConfig and abilityConfig.ResolveBurstRadius) or DEFAULT_RESOLVE_BURST_RADIUS)
 end
 
 function MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig)
@@ -85,25 +91,25 @@ function MoguBurrowShared.ResolveDirection(humanoid, rootPart, requestPayload)
 end
 
 function MoguBurrowShared.GetRootGroundClearance(character, rootPart, abilityConfig)
-	local probeHeight = math.max(1, tonumber(abilityConfig and abilityConfig.GroundProbeHeight) or DEFAULT_GROUND_PROBE_HEIGHT)
-	local probeDepth = math.max(4, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
+	local probeHeight = math.max(MIN_PROBE_HEIGHT, tonumber(abilityConfig and abilityConfig.GroundProbeHeight) or DEFAULT_GROUND_PROBE_HEIGHT)
+	local probeDepth = math.max(MIN_PROBE_DEPTH, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
 	local origin = rootPart.Position + Vector3.new(0, probeHeight, 0)
 	local cast = Vector3.new(0, -(probeHeight + probeDepth), 0)
 	local result = Workspace:Raycast(origin, cast, createCharacterRaycastParams(character))
 	if result then
-		return math.max(rootPart.Position.Y - result.Position.Y, 1.5), result
+		return math.max(rootPart.Position.Y - result.Position.Y, MIN_ROOT_GROUND_CLEARANCE), result
 	end
 
 	return math.max(
-		1.5,
+		MIN_ROOT_GROUND_CLEARANCE,
 		tonumber(abilityConfig and abilityConfig.RootGroundClearance) or DEFAULT_ROOT_GROUND_CLEARANCE
 	), nil
 end
 
 function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planarRootPosition, abilityConfig)
 	local rootGroundClearance = MoguBurrowShared.GetRootGroundClearance(character, rootPart, abilityConfig)
-	local probeHeight = math.max(1, tonumber(abilityConfig and abilityConfig.GroundProbeHeight) or DEFAULT_GROUND_PROBE_HEIGHT)
-	local probeDepth = math.max(4, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
+	local probeHeight = math.max(MIN_PROBE_HEIGHT, tonumber(abilityConfig and abilityConfig.GroundProbeHeight) or DEFAULT_GROUND_PROBE_HEIGHT)
+	local probeDepth = math.max(MIN_PROBE_DEPTH, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
 	local origin = Vector3.new(planarRootPosition.X, rootPart.Position.Y + probeHeight, planarRootPosition.Z)
 	local cast = Vector3.new(0, -(probeHeight + probeDepth), 0)
 	local result = Workspace:Raycast(origin, cast, createCharacterRaycastParams(character))

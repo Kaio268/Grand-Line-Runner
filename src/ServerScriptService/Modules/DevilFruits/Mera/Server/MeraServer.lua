@@ -1,5 +1,7 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -12,12 +14,21 @@ local MeraAnimationController = require(script.Parent:WaitForChild("MeraAnimatio
 local MeraMeraNoMi = {}
 
 local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
-local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 local DEBUG_INFO = RunService:IsStudio()
 local MOVE_LOG_COOLDOWN = 0.08
 local FIRE_BURST_MOVEMENT_LOCK_ATTRIBUTE = "MeraFireBurstMovementLocked"
 local FIRE_BURST_MOVEMENT_UNLOCK_TIMEOUT_BUFFER = 0.45
+local MIN_DASH_DISTANCE = 0.05
+local MIN_DASH_RUNTIME = 0.08
+local DASH_TIMEOUT_BUFFER = 0.1
+local WALL_LOOKAHEAD_BUFFER = 2
+local MIN_FIRE_BURST_UNLOCK_DELAY = 0.05
+local MIN_FIRE_BURST_STOP_DELAY = 0.25
+local REQUEST_VALIDATION_DISTANCE_EPSILON = 0.05
+local REQUEST_VALIDATION_DIRECTION_DELTA_DEGREES = 1
+local MIN_REMAINING_DASH_DISTANCE = 0.1
 local activeFireBurstMovementLocksByPlayer = {}
+local hitEffectService = nil
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
 end
@@ -80,33 +91,6 @@ local function countPayloadKeys(payload)
 	return count
 end
 
-local function describePayloadForAudit(payload)
-	if typeof(payload) ~= "table" then
-		return string.format("type=%s value=%s", typeof(payload), tostring(payload))
-	end
-
-	local keys = {}
-	for key in pairs(payload) do
-		keys[#keys + 1] = key
-	end
-
-	table.sort(keys, function(left, right)
-		return tostring(left) < tostring(right)
-	end)
-
-	local parts = {}
-	for _, key in ipairs(keys) do
-		local value = payload[key]
-		if typeof(value) == "Vector3" then
-			parts[#parts + 1] = string.format("%s=(%.2f, %.2f, %.2f)", tostring(key), value.X, value.Y, value.Z)
-		else
-			parts[#parts + 1] = string.format("%s=%s", tostring(key), tostring(value))
-		end
-	end
-
-	return string.format("type=table keys=%d payload={%s}", #keys, table.concat(parts, ", "))
-end
-
 local function buildFireBurstCastId(player, startedAt)
 	return string.format("%s:%.6f", tostring(player and player.UserId or 0), tonumber(startedAt) or 0)
 end
@@ -123,19 +107,37 @@ local function buildFireBurstPhasePayload(sequence, phase)
 	}
 end
 
-local function logMeraAudit(level, message, ...)
-	local formattedMessage = string.format("[%s] " .. message, MERA_AUDIT_MARKER, ...)
-	if level == "WARN" then
-		DevilFruitLogger.Warn("MOVE", formattedMessage)
-		return
-	end
-
-	DevilFruitLogger.Info("MOVE", formattedMessage)
-end
-
 local function getCharacterPivotOffset(character, rootPart)
 	local pivot = character:GetPivot()
 	return pivot.Position - rootPart.Position
+end
+
+local function getPlayerCharacterContext(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, nil, nil
+	end
+
+	local character = player.Character
+	if not character then
+		return nil, nil, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or not rootPart or humanoid.Health <= 0 then
+		return character, nil, nil
+	end
+
+	return character, humanoid, rootPart
+end
+
+local function getPlanarDistance(firstPosition, secondPosition)
+	if typeof(firstPosition) ~= "Vector3" or typeof(secondPosition) ~= "Vector3" then
+		return math.huge
+	end
+
+	local offset = firstPosition - secondPosition
+	return Vector3.new(offset.X, 0, offset.Z).Magnitude
 end
 
 local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
@@ -208,7 +210,8 @@ local function buildStartPayload(
 	rawRequestedDistance
 )
 	local directionDeltaDegrees = requestedDirection and MeraDashShared.GetDirectionDeltaDegrees(requestedDirection, plan.Direction) or 0
-	local validationAdjusted = rawRequestedDistance > (plan.RequestedDistance + 0.05) or directionDeltaDegrees > 1
+	local validationAdjusted = rawRequestedDistance > (plan.RequestedDistance + REQUEST_VALIDATION_DISTANCE_EPSILON)
+		or directionDeltaDegrees > REQUEST_VALIDATION_DIRECTION_DELTA_DEGREES
 
 	return {
 		Phase = "Start",
@@ -287,21 +290,6 @@ function MeraMeraNoMi.FlameDash(context)
 		requestedVisualDirection,
 		rawRequestedDistance
 	)
-	logMeraAudit(
-		"INFO",
-		"Mera handler enter ability=FlameDash player=%s payload=%s",
-		player and player.Name or "<nil>",
-		describePayloadForAudit(context.RequestPayload)
-	)
-	logMeraAudit(
-		"INFO",
-		"Mera FlameDash enter player=%s requestedDir=%s dashTarget=%s plannedDistance=%.2f requestedDistance=%.2f",
-		player and player.Name or "<nil>",
-		formatVector3(requestedDirection),
-		formatVector3(dashTargetPosition),
-		tonumber(plan and plan.Distance) or 0,
-		tonumber(plan and plan.RequestedDistance) or 0
-	)
 	DevilFruitLogger.Info(
 		"MOVE",
 		"handler enter fruit=%s ability=%s player=%s character=%s humanoid=%s root=%s animator=%s payloadKeys=%d requestedDir=%s start=%s",
@@ -344,7 +332,7 @@ function MeraMeraNoMi.FlameDash(context)
 		local completionTolerance = MeraDashShared.GetCompletionTolerance(context.AbilityConfig)
 		local runtimeGrace = MeraDashShared.GetRuntimeGrace(context.AbilityConfig)
 		local finalSnapTolerance = MeraDashShared.GetFinalSnapTolerance(context.AbilityConfig)
-		local maxRuntime = math.max(plan.Duration + runtimeGrace, 0.08)
+		local maxRuntime = math.max(plan.Duration + runtimeGrace, MIN_DASH_RUNTIME)
 		local burstStartPosition = rootPart.Position
 		local resolveTargetPosition = startPosition + (plan.Direction * plan.Distance)
 		local serverCommitsMotion = shouldServerCommitDashMotion(player, rootPart)
@@ -391,19 +379,11 @@ function MeraMeraNoMi.FlameDash(context)
 			end
 		end
 
-		if plan.Distance <= 0.05 then
+		if plan.Distance <= MIN_DASH_DISTANCE then
 			resolveReason = "blocked_at_start"
 			dashFinished = true
-			logMeraAudit(
-				"WARN",
-				"Mera FlameDash early return player=%s reason=%s plannedDistance=%.2f requestedDistance=%.2f",
-				player and player.Name or "<nil>",
-				tostring(resolveReason),
-				tonumber(plan.Distance) or 0,
-				tonumber(plan.RequestedDistance) or 0
-			)
 		else
-			if serverCommitsMotion and plan.InstantDistance > 0.05 and character.Parent and rootPart.Parent then
+			if serverCommitsMotion and plan.InstantDistance > MIN_DASH_DISTANCE and character.Parent and rootPart.Parent then
 				local targetRootPosition = startPosition + (plan.Direction * plan.InstantDistance)
 				pivotCharacterToRootPosition(character, rootPart, targetRootPosition)
 			end
@@ -411,7 +391,7 @@ function MeraMeraNoMi.FlameDash(context)
 			burstStartPosition = rootPart.Position
 			logMove(player, "move=FlameDash release source=server_authorized player=%s", player.Name)
 
-			if plan.RemainingDistance > 0.1 then
+			if plan.RemainingDistance > MIN_REMAINING_DASH_DISTANCE then
 				connection = RunService.Heartbeat:Connect(function(dt)
 					if not character.Parent or not rootPart.Parent or humanoid.Health <= 0 then
 						finishDash("interrupted_invalid_state", true)
@@ -434,7 +414,7 @@ function MeraMeraNoMi.FlameDash(context)
 						+ ((plan.EndDashSpeed - plan.StartDashSpeed) * MeraDashShared.Smoothstep(alpha))
 					local lookAheadDistance = math.min(
 						MeraDashShared.GetLookAheadDistance(dashSpeed, dt),
-						currentRemainingDistance + 2
+						currentRemainingDistance + WALL_LOOKAHEAD_BUFFER
 					)
 					if MeraDashShared.ShouldStopForWall(character, rootPart, plan.Direction, lookAheadDistance) then
 						finishDash("wall_blocked_mid_dash", true)
@@ -451,7 +431,7 @@ function MeraMeraNoMi.FlameDash(context)
 					end
 				end)
 
-				local timeoutAt = os.clock() + maxRuntime + 0.1
+				local timeoutAt = os.clock() + maxRuntime + DASH_TIMEOUT_BUFFER
 				while not dashFinished and os.clock() < timeoutAt do
 					task.wait()
 				end
@@ -542,8 +522,8 @@ local function applyFireBurstMovementLock(context, abilityConfig)
 		return nil
 	end
 
-	local token = {}
-	activeFireBurstMovementLocksByPlayer[player] = token
+	local lockState = {}
+	activeFireBurstMovementLocksByPlayer[player] = lockState
 	setFireBurstMovementLockAttribute(player, true)
 
 	local original = {
@@ -565,8 +545,8 @@ local function applyFireBurstMovementLock(context, abilityConfig)
 	stopRootMotion(rootPart)
 	rootPart.Anchored = true
 
-	return function(reason)
-		if activeFireBurstMovementLocksByPlayer[player] ~= token then
+	local function releaseMovementLock(reason)
+		if activeFireBurstMovementLocksByPlayer[player] ~= lockState then
 			return false
 		end
 
@@ -591,6 +571,24 @@ local function applyFireBurstMovementLock(context, abilityConfig)
 		logFireBurst(player, "movement unlock player=%s reason=%s", player.Name, tostring(reason or "unknown"))
 		return true
 	end
+
+	lockState.Release = releaseMovementLock
+	return releaseMovementLock
+end
+
+local function clearFireBurstMovementLock(player, reason)
+	if not player then
+		return false
+	end
+
+	local lockState = activeFireBurstMovementLocksByPlayer[player]
+	if type(lockState) == "table" and type(lockState.Release) == "function" then
+		return lockState.Release(reason or "runtime_clear")
+	end
+
+	activeFireBurstMovementLocksByPlayer[player] = nil
+	setFireBurstMovementLockAttribute(player, false)
+	return false
 end
 
 local function scheduleFireBurstMovementUnlock(releaseMovementLock, animationState, stopDelay)
@@ -627,13 +625,13 @@ local function scheduleFireBurstMovementUnlock(releaseMovementLock, animationSta
 		end
 	end
 
-	task.delay(math.max(0.05, tonumber(stopDelay) or 0) + FIRE_BURST_MOVEMENT_UNLOCK_TIMEOUT_BUFFER, function()
+	task.delay(math.max(MIN_FIRE_BURST_UNLOCK_DELAY, tonumber(stopDelay) or 0) + FIRE_BURST_MOVEMENT_UNLOCK_TIMEOUT_BUFFER, function()
 		unlock("timeout")
 	end)
 end
 
 local function getFireBurstAnimationStopDelay(animationState, fallbackDelay)
-	local resolvedFallback = math.max(0.25, tonumber(fallbackDelay) or 0)
+	local resolvedFallback = math.max(MIN_FIRE_BURST_STOP_DELAY, tonumber(fallbackDelay) or 0)
 	local track = type(animationState) == "table" and animationState.Track or nil
 	if typeof(track) ~= "Instance" or not track:IsA("AnimationTrack") then
 		return resolvedFallback
@@ -646,6 +644,53 @@ local function getFireBurstAnimationStopDelay(animationState, fallbackDelay)
 	end
 
 	return math.max(resolvedFallback, trackLength - timePosition)
+end
+
+local function getHitEffectService()
+	if hitEffectService == nil then
+		hitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+	end
+
+	return hitEffectService
+end
+
+local function applyFireBurstKnockdown(context, radius)
+	if type(context) ~= "table" or radius <= 0 then
+		return 0
+	end
+
+	local originRootPart = context.RootPart
+	if typeof(originRootPart) ~= "Instance" or not originRootPart:IsA("BasePart") or not originRootPart.Parent then
+		return 0
+	end
+
+	local affectedCount = 0
+	local originPosition = originRootPart.Position
+	local resolvedHitEffectService = getHitEffectService()
+
+	for _, targetPlayer in ipairs(Players:GetPlayers()) do
+		if targetPlayer == context.Player then
+			continue
+		end
+
+		local _, _, targetRootPart = getPlayerCharacterContext(targetPlayer)
+		if not targetRootPart then
+			continue
+		end
+
+		if getPlanarDistance(originPosition, targetRootPart.Position) > radius then
+			continue
+		end
+
+		local applied = resolvedHitEffectService.ApplyEffect(targetPlayer, "Knockdown", {
+			DropPosition = targetRootPart.Position,
+		})
+		if applied then
+			affectedCount += 1
+		end
+	end
+
+	return affectedCount
 end
 
 function MeraMeraNoMi.FireBurst(context)
@@ -666,19 +711,6 @@ function MeraMeraNoMi.FireBurst(context)
 		Radius = radius,
 		Duration = duration,
 	}
-	logMeraAudit(
-		"INFO",
-		"Mera handler enter ability=FireBurst player=%s payload=%s",
-		player and player.Name or "<nil>",
-		describePayloadForAudit(context.RequestPayload)
-	)
-	logMeraAudit(
-		"INFO",
-		"Mera FireBurst enter player=%s radius=%.2f duration=%.2f",
-		player and player.Name or "<nil>",
-		radius,
-		duration
-	)
 	DevilFruitLogger.Info(
 		"MOVE",
 		"handler enter fruit=%s ability=%s player=%s character=%s humanoid=%s root=%s animator=%s payloadKeys=%d radius=%.2f duration=%.2f",
@@ -748,6 +780,15 @@ function MeraMeraNoMi.FireBurst(context)
 		radius,
 		duration
 	)
+	local affectedCount = applyFireBurstKnockdown(context, radius)
+	logFireBurst(
+		player,
+		"knockdown applied player=%s cast=%s affected=%d radius=%.2f",
+		player and player.Name or "<unknown>",
+		sequence.CastId,
+		affectedCount,
+		radius
+	)
 	if animationState then
 		local stopDelay = getFireBurstAnimationStopDelay(animationState, duration)
 		scheduleFireBurstMovementUnlock(releaseMovementLock, animationState, stopDelay)
@@ -755,7 +796,7 @@ function MeraMeraNoMi.FireBurst(context)
 			MeraAnimationController.StopAnimation(animationState, "duration_complete")
 		end)
 	else
-		task.delay(math.max(duration, 0.25), function()
+		task.delay(math.max(duration, MIN_FIRE_BURST_STOP_DELAY), function()
 			if releaseMovementLock then
 				releaseMovementLock("no_animation")
 			end
@@ -771,6 +812,14 @@ function MeraMeraNoMi.FireBurst(context)
 	end
 
 	return buildFireBurstPhasePayload(sequence, "Release")
+end
+
+function MeraMeraNoMi.ClearRuntimeState(player)
+	if player and player.Parent then
+		player:SetAttribute("MeraFireBurstUntil", nil)
+	end
+
+	clearFireBurstMovementLock(player, "runtime_clear")
 end
 
 return MeraMeraNoMi

@@ -84,6 +84,11 @@ function HieFruitClient:HandleCharacterRemoving()
 	self.impl:CleanupCharacterRemoving()
 end
 
+function HieFruitClient:HandleUnequipped()
+	self.impl:CleanupUnequipped()
+	return false
+end
+
 function HieFruitClient:HandlePlayerRemoving(leavingPlayer)
 	self.impl:CleanupPlayerRemoving(leavingPlayer)
 end

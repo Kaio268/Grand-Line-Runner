@@ -16,9 +16,11 @@ local WARN_COOLDOWN = 4
 local DEFAULT_FADE_TIME = 0.06
 local DEFAULT_STOP_FADE_TIME = 0.1
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Mogu.Client.MoguAnimationController"
+local STAGE_START = "Start"
+local STAGE_RESOLVE = "Resolve"
 local DEFAULT_ANIMATION_KEY_BY_STAGE = {
-	Start = "Mogu.Dive",
-	Resolve = "Mogu.Exit",
+	[STAGE_START] = "Mogu.Dive",
+	[STAGE_RESOLVE] = "Mogu.Exit",
 }
 
 local function logInfo(message, ...)
@@ -127,11 +129,11 @@ function MoguAnimationController.new()
 end
 
 function MoguAnimationController:PlayStart(targetPlayer, abilityConfig)
-	return playAnimationForPlayer(targetPlayer, "Start", abilityConfig)
+	return playAnimationForPlayer(targetPlayer, STAGE_START, abilityConfig)
 end
 
 function MoguAnimationController:PlayResolve(targetPlayer, abilityConfig)
-	return playAnimationForPlayer(targetPlayer, "Resolve", abilityConfig)
+	return playAnimationForPlayer(targetPlayer, STAGE_RESOLVE, abilityConfig)
 end
 
 function MoguAnimationController:StopAnimation(animationState, reason)
