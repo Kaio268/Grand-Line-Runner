@@ -77,9 +77,18 @@ local Animations = {
 		Rocket = "rbxassetid://100281752037524",
 	},
 
+	Horo = {
+		HoroProjection = "rbxassetid://125055360036938",
+		HoroProjected = "rbxassetid://126380618595818",
+	},
+
 	Mogu = {
 		Dive = "rbxassetid://140152497789637",
 		Exit = "rbxassetid://103374605603335",
+	},
+
+	Suke = {
+		Suke1 = "rbxassetid://103062282462720",
 	},
 
 	Tori = {

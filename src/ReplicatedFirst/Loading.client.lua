@@ -288,37 +288,125 @@ end
 task.spawn(function()
 	setBarProgress(0)
 
-	local classes = {
-		Decal = true, Texture = true, ImageLabel = true, ImageButton = true, Sound = true, Animation = true,
-		MeshPart = true, SpecialMesh = true, ParticleEmitter = true, Trail = true, Beam = true, Sky = true, VideoFrame = true
-	}
-
-	local list = {}
-	local function addFrom(container: Instance, cap: number)
-		for _, inst in ipairs(container:GetDescendants()) do
-			if classes[inst.ClassName] then
-				list[#list + 1] = inst
-				if #list >= cap then
-					return
-				end
-			end
-		end
-	end
-
-	addFrom(workspace, 2200)
-	addFrom(ReplicatedStorage, 3200)
-	addFrom(Lighting, 3600)
-	addFrom(StarterGui, 3900)
-	addFrom(StarterPlayer, 4200)
-	addFrom(root, 5200)
-
-	local total = math.max(#list, 1)
-	local loaded = 0
 	local preloadProgress = 0
 	local preloadDone = false
 	local startTime = os.clock()
 
 	task.spawn(function()
+		if not game:IsLoaded() then
+			preloadProgress = 0.04
+			game.Loaded:Wait()
+		end
+
+		local classes = {
+			Decal = true,
+			Texture = true,
+			ImageLabel = true,
+			ImageButton = true,
+			Sound = true,
+			Animation = true,
+			MeshPart = true,
+			SpecialMesh = true,
+			FileMesh = true,
+			SurfaceAppearance = true,
+			MaterialVariant = true,
+			ParticleEmitter = true,
+			Trail = true,
+			Beam = true,
+			Sky = true,
+			VideoFrame = true,
+			Shirt = true,
+			Pants = true,
+			ShirtGraphic = true,
+			WrapLayer = true,
+			WrapTarget = true,
+		}
+
+		local list = {}
+		local seen = {}
+
+		local function shouldPreload(inst: Instance): boolean
+			return classes[inst.ClassName] == true
+				or inst:IsA("DataModelMesh")
+				or inst:IsA("Clothing")
+		end
+
+		local function addInstance(inst: Instance): boolean
+			if seen[inst] or not shouldPreload(inst) then
+				return false
+			end
+
+			seen[inst] = true
+			list[#list + 1] = inst
+			return true
+		end
+
+		local function addFrom(container: Instance?, maxAdditional: number)
+			if not container then
+				return
+			end
+
+			local limit = math.max(0, math.floor(maxAdditional))
+			if limit <= 0 then
+				return
+			end
+
+			local added = 0
+			if addInstance(container) then
+				added += 1
+				if added >= limit then
+					return
+				end
+			end
+
+			for _, inst in ipairs(container:GetDescendants()) do
+				if addInstance(inst) then
+					added += 1
+					if added >= limit then
+						return
+					end
+				end
+			end
+		end
+
+		local function findPath(rootInstance: Instance, path)
+			local node: Instance? = rootInstance
+			for _, name in ipairs(path) do
+				node = node and node:FindFirstChild(name)
+				if not node then
+					return nil
+				end
+			end
+
+			return node
+		end
+
+		local priorityPaths = {
+			{ "Assets" },
+			{ "BrainrotFolder" },
+			{ "Waves" },
+			{ "Gears" },
+			{ "UI" },
+			{ "Particles" },
+			{ "Sounds" },
+			{ "Modules", "DevilFruits" },
+		}
+
+		for _, path in ipairs(priorityPaths) do
+			addFrom(findPath(ReplicatedStorage, path), 12000)
+		end
+
+		addFrom(workspace, 2600)
+		addFrom(ReplicatedStorage, 5000)
+		addFrom(Lighting, 800)
+		addFrom(StarterGui, 1600)
+		addFrom(StarterPlayer, 1600)
+		addFrom(root, 1200)
+
+		local total = math.max(#list, 1)
+		local loaded = 0
+		preloadProgress = math.max(preloadProgress, 0.08)
+
 		local ok = pcall(function()
 			ContentProvider:PreloadAsync(list, function()
 				loaded += 1
@@ -328,6 +416,7 @@ task.spawn(function()
 		if not ok then
 			preloadProgress = 1
 		end
+		preloadProgress = 1
 		preloadDone = true
 	end)
 

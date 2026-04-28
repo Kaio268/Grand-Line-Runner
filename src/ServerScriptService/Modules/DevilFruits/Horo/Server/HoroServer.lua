@@ -9,6 +9,7 @@ local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Ha
 local BrainrotInteraction = require(Modules:WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Interaction"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local CorridorController = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushCorridorRunController"))
+local HoroAnimationController = require(script.Parent:WaitForChild("HoroAnimationController"))
 
 local HoroServer = {}
 
@@ -621,6 +622,71 @@ local function getGroundedBodyRootCFrame(state)
 	return CFrame.new(groundedPosition) * rootCFrame.Rotation
 end
 
+local function stopBodyProjectionAnimations(state, reason)
+	if not state then
+		return
+	end
+
+	state.BodyAnimationToken = nil
+	HoroAnimationController.StopAnimation(state.BodyProjectionAnimationState, reason or "stop")
+	HoroAnimationController.StopAnimation(state.BodyProjectedIdleAnimationState, reason or "stop")
+	state.BodyProjectionAnimationState = nil
+	state.BodyProjectedIdleAnimationState = nil
+end
+
+local function startBodyProjectedIdleAnimation(state, token)
+	if not state
+		or state.Resolved
+		or state.BodyAnimationToken ~= token
+		or activeProjectionsByPlayer[state.Player] ~= state
+		or state.BodyProjectedIdleAnimationState ~= nil
+	then
+		return
+	end
+
+	HoroAnimationController.StopAnimation(state.BodyProjectionAnimationState, "projected_idle_transition")
+	state.BodyProjectionAnimationState = nil
+	state.BodyProjectedIdleAnimationState = HoroAnimationController.PlayProjectedIdleAnimation(
+		state.Player,
+		state.Character,
+		state.Humanoid,
+		state.AbilityConfig
+	)
+end
+
+local function startBodyProjectionAnimations(state)
+	stopBodyProjectionAnimations(state, "replace")
+
+	local token = {}
+	state.BodyAnimationToken = token
+	state.BodyProjectionAnimationState = HoroAnimationController.PlayProjectionAnimation(
+		state.Player,
+		state.Character,
+		state.Humanoid,
+		state.AbilityConfig
+	)
+
+	local projectionTrack = state.BodyProjectionAnimationState and state.BodyProjectionAnimationState.Track
+	if typeof(projectionTrack) == "Instance" and projectionTrack:IsA("AnimationTrack") then
+		local connection
+		connection = projectionTrack.Stopped:Connect(function()
+			if connection then
+				connection:Disconnect()
+			end
+			startBodyProjectedIdleAnimation(state, token)
+		end)
+		state.Connections[#state.Connections + 1] = connection
+
+		-- Non-looped tracks should fire Stopped naturally. The delay is a safety net for assets that report
+		-- an unreliable length during initial load, so the abandoned body still settles into its projected idle.
+		task.delay(HoroAnimationController.GetProjectedIdleDelay(state.AbilityConfig, state.BodyProjectionAnimationState), function()
+			startBodyProjectedIdleAnimation(state, token)
+		end)
+	else
+		startBodyProjectedIdleAnimation(state, token)
+	end
+end
+
 local function lockBody(state)
 	local humanoid = state.Humanoid
 	if not humanoid then
@@ -654,6 +720,8 @@ local function lockBody(state)
 end
 
 local function restoreBody(state)
+	stopBodyProjectionAnimations(state, "restore_body")
+
 	local humanoid = state.Humanoid
 	local original = state.BodyOriginal
 	if humanoid and original then
@@ -1657,6 +1725,7 @@ function HoroServer.GhostProjection(context)
 		setBodyProjectionAttributes(state, true)
 		lockBody(state)
 		activeProjectionsByPlayer[player] = state
+		startBodyProjectionAnimations(state)
 		setProjectionAttributes(state, true)
 		updateGhostMovement(state)
 		refreshGhostNetworkOwnership(state)

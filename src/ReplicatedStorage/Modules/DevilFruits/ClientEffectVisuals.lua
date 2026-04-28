@@ -34,10 +34,14 @@ local PHOENIX_WING_ASSET_FOLDER_NAMES = { "VFX", "Visuals", "CharacterModels" }
 local PHOENIX_WING_ASSET_NAMES = { "PhoenixMan", "Phoenix Man", "Phoenix man", "Phoenix man (1)" }
 local PHOENIX_AUTHORED_FLIGHT_FX_NAME = "FlyFX"
 local PHOENIX_AUTHORED_SHIELD_FX_NAME = "ShieldFX"
+local PHOENIX_AUTHORED_REVIVE_FX_NAME = "ReviveFX"
 local PHOENIX_AUTHORED_VFX_FADE_OUT = 0.35
+local PHOENIX_AUTHORED_REVIVE_FX_ACTIVE_TIME = 0.12
+local PHOENIX_AUTHORED_REVIVE_FX_CLEANUP_BUFFER = 0.45
 local PHOENIX_AUTHORED_VFX_MOVE_FOLDERS = {
 	FlyFX = { "Phoenix Flight" },
 	ShieldFX = { "Phoenix Flame Shield" },
+	ReviveFX = { "Phoenix Revive" },
 }
 local PHOENIX_AUTHORED_VFX_REFERENCE_FIRST = {
 	ShieldFX = true,
@@ -45,6 +49,8 @@ local PHOENIX_AUTHORED_VFX_REFERENCE_FIRST = {
 local PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS = {
 	FlyFX = CFrame.new(0.165275574, -1.16604078, 1.30423737),
 	ShieldFX = CFrame.new(0.165275574, 0.272972107, 0.601654053),
+	-- Workspace.Phoenix Man.ReviveFX is centered on the rig torso/root.
+	ReviveFX = CFrame.new(),
 }
 local PHOENIX_ANIMATION_KEYS = {
 	FlightStart = "Tori.PhoenixFlightStart",
@@ -1304,6 +1310,8 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 	local enableWhileMoving = options.EnableWhileMoving == true
 	local mountToTarget = options.MountToTarget == true
 	local lockParticlesToPart = options.LockParticlesToPart == true or mountToTarget
+	local burstOnly = options.BurstOnly == true
+	local burstActiveTime = math.max(0.03, tonumber(options.BurstActiveTime) or 0.1)
 	local visualScale = math.max(0.001, tonumber(options.Scale) or 1)
 	local mountedTargetPart = nil
 	if mountToTarget then
@@ -1313,7 +1321,7 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		end
 	end
 
-	if state then
+	if state and not burstOnly then
 		state.AuthoredVfx = state.AuthoredVfx or {}
 		local existingEntry = state.AuthoredVfx[assetName]
 		if existingEntry and existingEntry.Clone and existingEntry.Clone.Parent then
@@ -1374,9 +1382,13 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		EndTime = endTime,
 		Scale = visualScale,
 		VfxActive = false,
+		BurstOnly = burstOnly,
+		BurstStarted = false,
 	}
-	if state then
+	if state and not burstOnly then
 		state.AuthoredVfx[assetName] = entry
+	end
+	if state then
 		rememberPhoenixRuntimeVfx(state, clone)
 	end
 
@@ -1398,6 +1410,9 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 	end
 
 	local function setVfxActive(isActive)
+		if isActive and entry.BurstOnly and entry.BurstStarted then
+			return
+		end
 		if entry.VfxActive == isActive then
 			return
 		end
@@ -1405,7 +1420,19 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		entry.VfxActive = isActive
 		setPhoenixAuthoredVfxEnabled(clone, isActive)
 		if isActive then
+			entry.BurstStarted = true
 			emitPhoenixAuthoredVfx(clone, options.EmitCount or 12)
+			if entry.BurstOnly then
+				local burstToken = {}
+				entry.BurstToken = burstToken
+				task.delay(burstActiveTime, function()
+					if entry.BurstToken ~= burstToken or not clone.Parent then
+						return
+					end
+
+					setVfxActive(false)
+				end)
+			end
 		end
 	end
 
@@ -1963,10 +1990,32 @@ function ClientEffectVisuals:CreatePhoenixRebirthEffect(targetPlayer, fruitName,
 	local remainingReviveDelay = math.max(0, reviveDelay - elapsed)
 	if remainingReviveDelay <= remainingDuration + 0.2 then
 		task.delay(remainingReviveDelay, function()
-			playPulse("PhoenixRebirthRevive", self.PhoenixEffectAccentColor, 4, 12, 0.48)
-			task.delay(0.08, function()
-				playPulse("PhoenixRebirthAfterglow", self.PhoenixEffectColor, 2.6, 8.5, 0.42)
-			end)
+			local playedAuthoredReviveVfx = false
+			if state and not state.CleanedUp then
+				-- ReviveFX is authored as a short burst on the Phoenix rig torso in the Workspace reference.
+				playedAuthoredReviveVfx = self:PlayPhoenixAuthoredVfx(
+					state,
+					targetPlayer,
+					PHOENIX_AUTHORED_REVIVE_FX_NAME,
+					math.max(0.2, remainingDuration - remainingReviveDelay + PHOENIX_AUTHORED_REVIVE_FX_CLEANUP_BUFFER),
+					{
+						BurstOnly = true,
+						BurstActiveTime = PHOENIX_AUTHORED_REVIVE_FX_ACTIVE_TIME,
+						EmitCount = 12,
+						TargetPartNames = PHOENIX_REFERENCE_PART_NAMES,
+						MountToTarget = true,
+						LockParticlesToPart = true,
+						FadeOutDuration = 0,
+					}
+				) ~= nil
+			end
+
+			if not playedAuthoredReviveVfx then
+				playPulse("PhoenixRebirthRevive", self.PhoenixEffectAccentColor, 4, 12, 0.48)
+				task.delay(0.08, function()
+					playPulse("PhoenixRebirthAfterglow", self.PhoenixEffectColor, 2.6, 8.5, 0.42)
+				end)
+			end
 		end)
 	end
 end

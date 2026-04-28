@@ -397,6 +397,15 @@ local DevilFruits = {
 					LocalDecalTransparency = 0.72,
 					ObserverBodyTransparency = 1,
 					ObserverDecalTransparency = 1,
+					Animation = {
+						AnimationKey = "Suke.Suke1",
+						EffectDelay = 0.35,
+						EffectMarkerNames = { "Fade", "Invisible", "Invisibility", "Vanish", "Activate" },
+						FadeTime = 0.06,
+						StopFadeTime = 0.12,
+						Looped = false,
+						Priority = Enum.AnimationPriority.Action,
+					},
 					Vfx = {
 						ShimmerColor = Color3.fromRGB(193, 255, 245),
 						ShimmerAccentColor = Color3.fromRGB(255, 255, 255),
@@ -406,6 +415,11 @@ local DevilFruits = {
 						ParticleTransparency = 0.7,
 						ParticleLifetime = 0.65,
 						PulsePeriod = 0.7,
+						-- Authored vanish burst from Assets/VFX/Suke/FX, matching the workspace reference offset.
+						AuthoredEffectName = "FX",
+						AuthoredEffectOffset = CFrame.new(0, -0.305, 0),
+						AuthoredEffectLifetime = 1.35,
+						AuthoredEffectEmitCount = 100,
 					},
 				},
 			},
@@ -443,6 +457,24 @@ local DevilFruits = {
 					BodyHighlightOutlineTransparency = 0.16,
 					GhostTransparency = 0.42,
 					GhostLocalTransparency = 0.2,
+					Animation = {
+						Projection = {
+							AnimationKey = "Horo.HoroProjection",
+							FadeTime = 0.06,
+							StopFadeTime = 0.1,
+							Looped = false,
+							Priority = Enum.AnimationPriority.Action,
+							-- Safety transition into the body idle if the activation track length is unavailable.
+							ProjectedIdleDelay = 1,
+						},
+						Projected = {
+							AnimationKey = "Horo.HoroProjected",
+							FadeTime = 0.12,
+							StopFadeTime = 0.12,
+							Looped = true,
+							Priority = Enum.AnimationPriority.Action,
+						},
+					},
 					Vfx = {
 						GhostColor = Color3.fromRGB(198, 238, 255),
 						GhostAccentColor = Color3.fromRGB(255, 255, 255),
