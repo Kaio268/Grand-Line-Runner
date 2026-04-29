@@ -14,6 +14,7 @@ local activeMinesByPlayer = {}
 local EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local LAND_MINE_MODEL_NAME = "BomuLandMine"
 local LAND_MINE_ACTION_PLACED = "Placed"
+local LAND_MINE_ACTION_DETONATING = "Detonating"
 local LAND_MINE_ACTION_DETONATED = "Detonated"
 local LAND_MINE_SOURCE = "LandMine"
 local MIN_PLANAR_DIRECTION_MAGNITUDE = 0.01
@@ -54,6 +55,8 @@ local MAX_PLAYER_PLANAR_EXTENT = 3
 local SEGMENT_LENGTH_EPSILON = 0.0001
 local HAZARD_QUERY_PLAYER_DISTANCE_PADDING = 8
 local HAZARD_QUERY_MAX_TARGETS = 8
+local DEFAULT_DETONATION_EXPLOSION_DELAY = 0.35
+local DEFAULT_SPEED_SCALING_REFERENCE_SPEED = 32
 
 local function getPlanarUnitOrFallback(vector, fallback)
 	local planarVector = Vector3.new(vector.X, 0, vector.Z)
@@ -123,6 +126,109 @@ local function applyLaunchVelocity(rootPart, launchVelocity)
 	local velocityDelta = launchVelocity - currentVelocity
 	local impulse = velocityDelta * rootPart.AssemblyMass
 	rootPart:ApplyImpulse(impulse)
+end
+
+local function getRootPlanarSpeed(rootPart)
+	if typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") then
+		return 0
+	end
+
+	local velocity = rootPart.AssemblyLinearVelocity
+	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+end
+
+local function getWalkSpeedSample(humanoid, abilityConfig)
+	if typeof(humanoid) ~= "Instance" or not humanoid:IsA("Humanoid") then
+		return 0
+	end
+
+	local speedScaling = type(abilityConfig) == "table" and abilityConfig.SpeedScaling or nil
+	if
+		type(speedScaling) == "table"
+		and (speedScaling.UseWalkSpeed == false or speedScaling.UseMovementIntentSpeed == false)
+	then
+		return 0
+	end
+
+	local multiplier = if type(speedScaling) == "table"
+		then tonumber(speedScaling.WalkSpeedMultiplier) or tonumber(speedScaling.MovementIntentSpeedMultiplier)
+		else nil
+	return math.max(0, tonumber(humanoid.WalkSpeed) or 0) * math.max(0, multiplier or 1)
+end
+
+local function getEffectivePlanarSpeed(rootPart, humanoid, abilityConfig)
+	return math.max(
+		getRootPlanarSpeed(rootPart),
+		getWalkSpeedSample(humanoid, abilityConfig)
+	)
+end
+
+local function getSpeedScalingMultiplier(abilityConfig, sectionName, sourceSpeed)
+	local speedScaling = type(abilityConfig) == "table" and abilityConfig.SpeedScaling or nil
+	local section = type(speedScaling) == "table" and speedScaling[sectionName] or nil
+	if type(section) ~= "table" then
+		return 1, 0
+	end
+
+	local referenceSpeed = tonumber(section.ReferenceSpeed)
+		or tonumber(speedScaling.ReferenceSpeed)
+		or DEFAULT_SPEED_SCALING_REFERENCE_SPEED
+	if referenceSpeed <= 0 then
+		return 1, 0
+	end
+
+	local baselineSpeed = tonumber(section.BaselineSpeed) or tonumber(speedScaling.BaselineSpeed) or 0
+	local speed = math.max(0, (tonumber(sourceSpeed) or 0) - math.max(0, baselineSpeed))
+	local bonusPerReferenceSpeed = math.max(0, tonumber(section.BonusPerReferenceSpeed) or 0)
+	local bonus = (speed / referenceSpeed) * bonusPerReferenceSpeed
+	local maxBonus = tonumber(section.MaxBonus)
+	if maxBonus then
+		bonus = math.min(bonus, math.max(0, maxBonus))
+	end
+
+	return 1 + bonus, bonus
+end
+
+local function getScaledRadiusInfo(abilityConfig, rootPart, humanoid)
+	local baseRadius = math.max(0, type(abilityConfig) == "table" and tonumber(abilityConfig.Radius) or 0)
+	local sourceSpeed = getEffectivePlanarSpeed(rootPart, humanoid, abilityConfig)
+	local multiplier, bonus = getSpeedScalingMultiplier(abilityConfig, "Radius", sourceSpeed)
+
+	return {
+		BaseRadius = baseRadius,
+		Radius = baseRadius * multiplier,
+		Speed = sourceSpeed,
+		Multiplier = multiplier,
+		Bonus = bonus,
+	}
+end
+
+local function buildExplosionAbilityConfig(abilityConfig, radius, sourceSpeed)
+	local explosionAbilityConfig = {}
+	if type(abilityConfig) == "table" then
+		for key, value in pairs(abilityConfig) do
+			explosionAbilityConfig[key] = value
+		end
+	end
+
+	local multiplier, bonus = getSpeedScalingMultiplier(abilityConfig, "DirectionalBlast", sourceSpeed)
+	local baseRadius = type(abilityConfig) == "table" and tonumber(abilityConfig.Radius) or nil
+	local baseKnockbackHorizontal =
+		type(abilityConfig) == "table" and tonumber(abilityConfig.KnockbackHorizontal) or nil
+	local baseOwnerLaunchHorizontal =
+		type(abilityConfig) == "table" and tonumber(abilityConfig.OwnerLaunchHorizontal) or nil
+
+	explosionAbilityConfig.Radius = math.max(0, tonumber(radius) or baseRadius or 0)
+	explosionAbilityConfig.KnockbackHorizontal =
+		math.max(0, baseKnockbackHorizontal or 0) * multiplier
+	explosionAbilityConfig.OwnerLaunchHorizontal =
+		math.max(0, baseOwnerLaunchHorizontal or 0) * multiplier
+
+	return explosionAbilityConfig, {
+		Speed = math.max(0, tonumber(sourceSpeed) or 0),
+		Multiplier = multiplier,
+		Bonus = bonus,
+	}
 end
 
 local function getPlanarDistance(firstPosition, secondPosition)
@@ -381,10 +487,21 @@ local function scheduleMineCleanup(player, mineEntry, lifetime)
 	end
 
 	task.delay(lifetime, function()
-		if activeMinesByPlayer[player] == mineEntry then
+		if activeMinesByPlayer[player] == mineEntry and mineEntry.PendingDetonation ~= true then
 			clearActiveMine(player)
 		end
 	end)
+end
+
+local function getDetonationExplosionDelay(abilityConfig)
+	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
+	local detonateConfig = type(animationConfig) == "table" and animationConfig.Detonate or nil
+	local configuredDelay = type(detonateConfig) == "table" and tonumber(detonateConfig.ExplosionDelay) or nil
+	if configuredDelay == nil then
+		configuredDelay = type(abilityConfig) == "table" and tonumber(abilityConfig.DetonationExplosionDelay) or nil
+	end
+
+	return math.max(0, configuredDelay or DEFAULT_DETONATION_EXPLOSION_DELAY)
 end
 
 local function getMinePlacementPosition(context)
@@ -533,7 +650,8 @@ local function applyOwnerLaunch(context, centerPosition, abilityConfig)
 end
 
 local function placeLandMine(context)
-	local radius = math.max(0, tonumber(context.AbilityConfig.Radius) or 0)
+	local radiusInfo = getScaledRadiusInfo(context.AbilityConfig, context.RootPart, context.Humanoid)
+	local radius = radiusInfo.Radius
 	local lifetime = math.max(0, tonumber(context.AbilityConfig.MineLifetime) or 0)
 	local groundPosition = getMinePlacementPosition(context)
 	local mineModel, originPosition = createLandMineModel(context.Player, groundPosition, radius)
@@ -541,6 +659,10 @@ local function placeLandMine(context)
 		Model = mineModel,
 		GroundPosition = groundPosition,
 		OriginPosition = originPosition,
+		Radius = radius,
+		BaseRadius = radiusInfo.BaseRadius,
+		RadiusScaleSpeed = radiusInfo.Speed,
+		RadiusScaleMultiplier = radiusInfo.Multiplier,
 		PlacedAt = os.clock(),
 	}
 
@@ -551,6 +673,9 @@ local function placeLandMine(context)
 		Action = LAND_MINE_ACTION_PLACED,
 		Source = LAND_MINE_SOURCE,
 		Radius = radius,
+		BaseRadius = radiusInfo.BaseRadius,
+		RadiusScaleSpeed = radiusInfo.Speed,
+		RadiusScaleMultiplier = radiusInfo.Multiplier,
 		MinePosition = groundPosition,
 		OriginPosition = originPosition,
 		MineLifetime = lifetime,
@@ -561,16 +686,62 @@ local function placeLandMine(context)
 end
 
 local function detonateLandMine(context, activeMine)
-	clearActiveMine(context.Player)
+	if activeMine.PendingDetonation == true then
+		return {}, {
+			ApplyCooldown = false,
+			SuppressActivatedEvent = true,
+		}
+	end
 
-	local payload = buildExplosionPayload(context, activeMine.OriginPosition or context.RootPart.Position, context.AbilityConfig)
+	activeMine.PendingDetonation = true
+
+	local minePosition = activeMine.GroundPosition or activeMine.OriginPosition
+	local originPosition = activeMine.OriginPosition or context.RootPart.Position
+	local radius = math.max(0, tonumber(activeMine.Radius) or tonumber(context.AbilityConfig.Radius) or 0)
+	local detonationSpeed = getEffectivePlanarSpeed(context.RootPart, context.Humanoid, context.AbilityConfig)
+	local explosionAbilityConfig, directionalBlastInfo =
+		buildExplosionAbilityConfig(context.AbilityConfig, radius, detonationSpeed)
+	local explosionDelay = getDetonationExplosionDelay(context.AbilityConfig)
+	if typeof(context.EmitEffect) == "function" then
+		context.EmitEffect(LAND_MINE_SOURCE, {
+			Action = LAND_MINE_ACTION_DETONATING,
+			Source = LAND_MINE_SOURCE,
+			Radius = radius,
+			BaseRadius = activeMine.BaseRadius,
+			RadiusScaleSpeed = activeMine.RadiusScaleSpeed,
+			RadiusScaleMultiplier = activeMine.RadiusScaleMultiplier,
+			DirectionalBlastSpeed = directionalBlastInfo.Speed,
+			DirectionalBlastScaleMultiplier = directionalBlastInfo.Multiplier,
+			MinePosition = minePosition,
+			OriginPosition = originPosition,
+			ExplosionDelay = explosionDelay,
+		})
+	end
+
+	if explosionDelay > 0 then
+		task.wait(explosionDelay)
+	end
+
+	if activeMinesByPlayer[context.Player] == activeMine then
+		clearActiveMine(context.Player)
+	elseif typeof(activeMine.Model) == "Instance" and activeMine.Model.Parent then
+		activeMine.Model:Destroy()
+	end
+
+	local payload = buildExplosionPayload(context, originPosition, explosionAbilityConfig)
 	payload.Action = LAND_MINE_ACTION_DETONATED
 	payload.Source = LAND_MINE_SOURCE
-	payload.MinePosition = activeMine.GroundPosition or activeMine.OriginPosition
+	payload.MinePosition = minePosition
+	payload.ExplosionDelay = explosionDelay
+	payload.BaseRadius = activeMine.BaseRadius
+	payload.RadiusScaleSpeed = activeMine.RadiusScaleSpeed
+	payload.RadiusScaleMultiplier = activeMine.RadiusScaleMultiplier
+	payload.DirectionalBlastSpeed = directionalBlastInfo.Speed
+	payload.DirectionalBlastScaleMultiplier = directionalBlastInfo.Multiplier
 	payload.OwnerLaunched = applyOwnerLaunch(
 		context,
-		activeMine.GroundPosition or activeMine.OriginPosition or context.RootPart.Position,
-		context.AbilityConfig
+		minePosition or originPosition or context.RootPart.Position,
+		explosionAbilityConfig
 	)
 
 	return payload, {

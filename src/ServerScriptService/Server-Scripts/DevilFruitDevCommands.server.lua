@@ -30,6 +30,8 @@ local ADMIN_USER_IDS = {
 
 local RECENT_COMMAND_WINDOW = 0.4
 local WIPE_CONFIRM_WINDOW = 20
+local SPEED_STAT_PATH = "HiddenLeaderstats.Speed"
+local DEFAULT_SPEED_STAT = tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1
 
 local adminSet = {}
 local recentCommands = {}
@@ -454,6 +456,23 @@ local function getDisplayedRebirths(player)
 	return 0
 end
 
+local function getDisplayedSpeed(player)
+	local hidden = player:FindFirstChild("HiddenLeaderstats")
+	if hidden then
+		local speedValue = hidden:FindFirstChild("Speed")
+		if speedValue and speedValue:IsA("NumberValue") then
+			return tonumber(speedValue.Value) or DEFAULT_SPEED_STAT
+		end
+	end
+
+	local storedSpeed = DataManager:GetValue(player, SPEED_STAT_PATH)
+	if typeof(storedSpeed) == "number" then
+		return storedSpeed
+	end
+
+	return DEFAULT_SPEED_STAT
+end
+
 local function getDisplayedBountyBreakdown(player)
 	local breakdown = BountyService.GetBreakdown(player)
 	return {
@@ -537,6 +556,56 @@ local function processMoneyCommand(player, argumentText)
 		math.floor(amount),
 		appliedDelta,
 		math.floor(newMoney)
+	))
+end
+
+local function parseSpeedAmount(text)
+	local amount = parseSignedAmount(text)
+	if typeof(amount) ~= "number" or amount ~= amount or amount == math.huge or amount == -math.huge or amount < 0 then
+		return nil
+	end
+
+	return amount
+end
+
+local function processSpeedCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		warn(string.format("[DevFruitDevCommands] Invalid /speed usage from %s. Use /speed <amount>, /speed set <amount>, or /speed reset", player.Name))
+		return
+	end
+
+	local targetSpeed
+	if normalizedArgument == "clear" or normalizedArgument == "reset" or normalizedArgument == "default" then
+		targetSpeed = DEFAULT_SPEED_STAT
+	else
+		local setArgument = normalizedArgument:match("^set%s+(.+)$")
+		targetSpeed = parseSpeedAmount(setArgument or normalizedArgument)
+	end
+
+	if typeof(targetSpeed) ~= "number" then
+		warn(string.format("[DevFruitDevCommands] Invalid /speed amount '%s' from %s", tostring(argumentText), player.Name))
+		return
+	end
+
+	local previousSpeed = getDisplayedSpeed(player)
+	local success = DataManager:SetValue(player, SPEED_STAT_PATH, targetSpeed)
+	if success == false then
+		warn(string.format("[DevFruitDevCommands] Failed to set Speed for %s", player.Name))
+		return
+	end
+
+	local newSpeed = getDisplayedSpeed(player)
+	print(string.format(
+		"[DevFruitDevCommands] %s set Speed to %s (old=%s, new=%s)",
+		player.Name,
+		tostring(targetSpeed),
+		tostring(previousSpeed),
+		tostring(newSpeed)
 	))
 end
 
@@ -1350,7 +1419,7 @@ local function handleChatCommand(player, rawText)
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "boost" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" and commandName ~= "wipeplayer" and commandName ~= "resetprogress" and commandName ~= "gifts" and commandName ~= "giftreset" then
+	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "speed" and commandName ~= "setspeed" and commandName ~= "boost" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" and commandName ~= "wipeplayer" and commandName ~= "resetprogress" and commandName ~= "gifts" and commandName ~= "giftreset" then
 		return
 	end
 
@@ -1365,6 +1434,11 @@ local function handleChatCommand(player, rawText)
 
 	if commandName == "boost" then
 		processBoostCommand(player, argumentText)
+		return
+	end
+
+	if commandName == "speed" or commandName == "setspeed" then
+		processSpeedCommand(player, argumentText)
 		return
 	end
 
@@ -1487,6 +1561,37 @@ local function setupTextChatCommand()
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/money " .. normalizedText) or "/money"
+		handleChatCommand(player, syntheticCommand)
+	end)
+
+	local speedCommand = commandsFolder:FindFirstChild("SpeedDevCommand")
+	if speedCommand and not speedCommand:IsA("TextChatCommand") then
+		speedCommand:Destroy()
+		speedCommand = nil
+	end
+
+	if not speedCommand then
+		speedCommand = Instance.new("TextChatCommand")
+		speedCommand.Name = "SpeedDevCommand"
+		speedCommand.PrimaryAlias = "/speed"
+		speedCommand.SecondaryAlias = "/setspeed"
+		speedCommand.AutocompleteVisible = false
+		speedCommand.Parent = commandsFolder
+	end
+
+	speedCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 6) == "/speed" or normalizedText:sub(1, 7) == "/ speed" or normalizedText:sub(1, 9) == "/setspeed" or normalizedText:sub(1, 10) == "/ setspeed" then
+			handleChatCommand(player, normalizedText)
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/speed " .. normalizedText) or "/speed"
 		handleChatCommand(player, syntheticCommand)
 	end)
 

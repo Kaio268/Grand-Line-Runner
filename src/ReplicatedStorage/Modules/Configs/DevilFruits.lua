@@ -296,6 +296,45 @@ local DevilFruits = {
 					OwnerLaunchRadius = 8,
 					OwnerLaunchHorizontal = 8,
 					OwnerLaunchVertical = 62,
+					-- Existing Radius, KnockbackHorizontal, and OwnerLaunchHorizontal are the base values.
+					-- Bonuses below are percentages added from speed above BaselineSpeed.
+					SpeedScaling = {
+						ReferenceSpeed = 32,
+						BaselineSpeed = 16,
+						UseWalkSpeed = true,
+						WalkSpeedMultiplier = 1,
+						Radius = {
+							BonusPerReferenceSpeed = 0.16,
+							MaxBonus = 1,
+						},
+						DirectionalBlast = {
+							BonusPerReferenceSpeed = 0.16,
+							MaxBonus = 1,
+						},
+					},
+					Animation = {
+						Plant = {
+							AnimationKey = "Bomu.Plant",
+							FadeTime = 0.05,
+							StopFadeTime = 0.08,
+							Looped = false,
+						},
+						Detonate = {
+							AnimationKey = "Bomu.Detonate",
+							FadeTime = 0.04,
+							StopFadeTime = 0.06,
+							Looped = false,
+							-- Seconds after the detonate animation starts before the mine explodes.
+							ExplosionDelay = 0.35,
+						},
+						Jump = {
+							AnimationKey = "Bomu.Jump",
+							FadeTime = 0.04,
+							StopFadeTime = 0.08,
+							Looped = false,
+						},
+						JumpDelay = 0.12,
+					},
 				},
 			},
 		},

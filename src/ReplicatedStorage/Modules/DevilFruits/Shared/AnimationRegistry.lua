@@ -112,6 +112,12 @@ local Animations = {
 		Rocket = "rbxassetid://100281752037524",
 	},
 
+	Bomu = {
+		Plant = "rbxassetid://107390126488207",
+		Detonate = "rbxassetid://83134643665375",
+		Jump = "rbxassetid://101430450037801",
+	},
+
 	Horo = {
 		HoroProjection = "rbxassetid://125055360036938",
 		HoroProjected = "rbxassetid://126380618595818",
