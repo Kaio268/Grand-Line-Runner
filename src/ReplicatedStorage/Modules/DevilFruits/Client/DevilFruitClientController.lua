@@ -39,6 +39,10 @@ local FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL = 0.16
 local LOCAL_HAZARD_OVERLAP_MAX_PARTS = 128
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS = 12
+local DEFAULT_MOGU_RESOLVE_HAZARD_PROBE_PADDING = 0.25
+local DEFAULT_HAZARD_SUPPRESSION_SOURCE = "Default"
+local FIRE_BURST_HAZARD_SUPPRESSION_SOURCE = "FireBurst"
+local MOGU_HAZARD_SUPPRESSION_SOURCE = "MoguBurrow"
 
 local RemoteBundle = DevilFruitRemotes.GetBundle()
 local requestRemote = RemoteBundle.Request
@@ -1103,13 +1107,45 @@ local function getHazardContainer(instance, clientWavesFolder)
 	return nil, nil, nil, false, nil
 end
 
-local function suppressPart(part, untilTime)
+local function getLatestSuppressionUntilTime(sources)
+	local latestUntilTime = nil
+	for _, sourceUntilTime in pairs(sources) do
+		if typeof(sourceUntilTime) == "number" and (latestUntilTime == nil or sourceUntilTime > latestUntilTime) then
+			latestUntilTime = sourceUntilTime
+		end
+	end
+
+	return latestUntilTime
+end
+
+local function getSuppressionSources(state)
+	if type(state.Sources) ~= "table" then
+		state.Sources = {
+			[DEFAULT_HAZARD_SUPPRESSION_SOURCE] = tonumber(state.UntilTime) or 0,
+		}
+	end
+
+	return state.Sources
+end
+
+local function pruneExpiredSuppressionSources(sources, now)
+	for source, sourceUntilTime in pairs(sources) do
+		if typeof(sourceUntilTime) ~= "number" or now >= sourceUntilTime then
+			sources[source] = nil
+		end
+	end
+end
+
+local function suppressPart(part, untilTime, source)
 	if not part or not part:IsA("BasePart") then
 		return
 	end
 
+	local sourceKey = source or DEFAULT_HAZARD_SUPPRESSION_SOURCE
 	local state = suppressedParts[part]
 	if state then
+		local sources = getSuppressionSources(state)
+		sources[sourceKey] = math.max(tonumber(sources[sourceKey]) or 0, untilTime)
 		if untilTime > state.UntilTime then
 			state.UntilTime = untilTime
 		end
@@ -1120,37 +1156,51 @@ local function suppressPart(part, untilTime)
 		OriginalCanTouch = part.CanTouch,
 		OriginalCanCollide = part.CanCollide,
 		UntilTime = untilTime,
+		Sources = {
+			[sourceKey] = untilTime,
+		},
 	}
 
 	part.CanTouch = false
 	part.CanCollide = false
 end
 
-local function suppressHazard(container, untilTime)
+local function suppressHazard(container, untilTime, source)
 	if not container then
 		return
 	end
 
 	if container:IsA("BasePart") then
-		suppressPart(container, untilTime)
+		suppressPart(container, untilTime, source)
 		return
 	end
 
 	for _, descendant in ipairs(container:GetDescendants()) do
 		if descendant:IsA("BasePart") then
-			suppressPart(descendant, untilTime)
+			suppressPart(descendant, untilTime, source)
 		end
 	end
 end
 
-local function restoreSuppressedParts(now)
+local function restoreSuppressedParts(now, source)
 	for part, state in pairs(suppressedParts) do
 		if not part or not part.Parent then
 			suppressedParts[part] = nil
-		elseif now >= state.UntilTime then
-			part.CanTouch = state.OriginalCanTouch
-			part.CanCollide = state.OriginalCanCollide
-			suppressedParts[part] = nil
+		else
+			local sources = getSuppressionSources(state)
+			if source then
+				sources[source] = nil
+			end
+
+			pruneExpiredSuppressionSources(sources, now)
+			local latestUntilTime = getLatestSuppressionUntilTime(sources)
+			if latestUntilTime then
+				state.UntilTime = latestUntilTime
+			else
+				part.CanTouch = state.OriginalCanTouch
+				part.CanCollide = state.OriginalCanCollide
+				suppressedParts[part] = nil
+			end
 		end
 	end
 end
@@ -1158,6 +1208,16 @@ end
 local function getMoguHazardProtectionRadius()
 	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
 	return math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS)
+end
+
+local function getMoguResolveHazardProbePadding()
+	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	return math.max(
+		0,
+		tonumber(abilityConfig.ResolveHazardProbePadding)
+			or tonumber(abilityConfig.SurfaceHazardProbePadding)
+			or DEFAULT_MOGU_RESOLVE_HAZARD_PROBE_PADDING
+	)
 end
 
 local function isLocalPlayerBurrowProtected(now)
@@ -1209,7 +1269,7 @@ local function buildLocalHazardOverlapParams(refs, restrictToHazardRoots)
 	return overlapParams
 end
 
-local function suppressHazardsNearPosition(centerPosition, radius, untilTime, shouldSuppress, restrictToHazardRoots)
+local function suppressHazardsNearPosition(centerPosition, radius, untilTime, shouldSuppress, restrictToHazardRoots, source)
 	if typeof(centerPosition) ~= "Vector3" or radius <= 0 then
 		return
 	end
@@ -1224,9 +1284,56 @@ local function suppressHazardsNearPosition(centerPosition, radius, untilTime, sh
 	for _, part in ipairs(nearbyParts) do
 		local container, hazardClass, hazardType = getHazardContainer(part, clientWavesFolder)
 		if container and (shouldSuppress == nil or shouldSuppress(container, hazardClass, hazardType)) then
-			suppressHazard(container, untilTime)
+			suppressHazard(container, untilTime, source)
 		end
 	end
+end
+
+local function fireWaveKillFromMoguSurface(rootPosition)
+	local character = getCharacter()
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid") or nil
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+
+	if ProtectionRuntime.IsProtected(player, rootPosition, "WaveKill") then
+		return
+	end
+
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	local killMeEvent = remotesFolder and remotesFolder:FindFirstChild("KillMe")
+	if killMeEvent and killMeEvent:IsA("RemoteEvent") then
+		killMeEvent:FireServer()
+	else
+		humanoid.Health = 0
+	end
+end
+
+local function applyMoguSurfaceHazardOverlap()
+	local rootPart = getRootPart()
+	if not rootPart then
+		return false
+	end
+
+	local refs = MapResolver.GetRefs()
+	local clientWavesFolder = refs and refs.ClientWaves
+	local padding = getMoguResolveHazardProbePadding()
+	local probeSize = rootPart.Size + Vector3.new(padding * 2, padding * 2, padding * 2)
+	local nearbyParts = Workspace:GetPartBoundsInBox(
+		rootPart.CFrame,
+		probeSize,
+		buildLocalHazardOverlapParams(refs, true)
+	)
+
+	for _, part in ipairs(nearbyParts) do
+		local container, hazardClass, hazardType = getHazardContainer(part, clientWavesFolder)
+		if container and hazardClass ~= "minor" and hazardType == "wave" and container:GetAttribute("Frozen") ~= true then
+			fireWaveKillFromMoguSurface(rootPart.Position)
+			return true
+		end
+	end
+
+	return false
 end
 
 local function hasActiveHazardProtection(now)
@@ -1256,14 +1363,21 @@ local function updateHazardSuppression()
 				burst.NextScanAt = now + FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL
 				suppressHazardsNearPosition(rootPart.Position, burst.Radius, burst.EndTime, function(_, hazardClass)
 					return hazardClass == "minor"
-				end, true)
+				end, true, FIRE_BURST_HAZARD_SUPPRESSION_SOURCE)
 			end
 		end
 	end
 
 	if isLocalPlayerBurrowProtected(now) then
 		if rootPart then
-			suppressHazardsNearPosition(rootPart.Position, activeMoguBurrow.Radius, activeMoguBurrow.EndTime)
+			suppressHazardsNearPosition(
+				rootPart.Position,
+				activeMoguBurrow.Radius,
+				activeMoguBurrow.EndTime,
+				nil,
+				nil,
+				MOGU_HAZARD_SUPPRESSION_SOURCE
+			)
 		end
 	end
 
@@ -1314,6 +1428,8 @@ local function stopMoguBurrow(targetPlayer)
 	end
 
 	activeMoguBurrow = nil
+	restoreSuppressedParts(os.clock(), MOGU_HAZARD_SUPPRESSION_SOURCE)
+	applyMoguSurfaceHazardOverlap()
 end
 
 local function getProjectileDirection(direction, rootPart)
@@ -1619,8 +1735,12 @@ local function initializeDevilFruitClient()
 			local phase = payload and payload.Phase
 			if phase == "Start" then
 				startMoguBurrow(targetPlayer, payload)
+				effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
+				return
 			elseif phase == "Resolve" then
+				effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
 				stopMoguBurrow(targetPlayer)
+				return
 			end
 		end
 

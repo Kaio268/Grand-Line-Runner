@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -24,6 +25,7 @@ local PHASE_START = "Start"
 local PHASE_RESOLVE = "Resolve"
 local SURFACE_REASON_MANUAL_TOGGLE = "manual_toggle"
 local SURFACE_REASON_DURATION_ELAPSED = "duration_elapsed"
+local SURFACE_REASON_SURFACE_LOST = "surface_lost"
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local TRAIL_COLOR = Color3.fromRGB(122, 95, 63)
@@ -32,6 +34,15 @@ local BURST_COLOR = Color3.fromRGB(214, 194, 159)
 local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
 local DEFAULT_ENTRY_CUE_FALLBACK_TIME = 0.24
 local DEFAULT_MOVEMENT_CUE_FALLBACK_TIME = 0.42
+local DEFAULT_VISUAL_SINK_DURATION = 0.24
+local DEFAULT_VISUAL_RISE_DURATION = 0.18
+local DEFAULT_RESOLVE_SURFACE_LOCK_DURATION = 0.28
+local DEFAULT_ENTRY_VFX_FORWARD_OFFSET = 1.15
+local DEFAULT_RESOLVE_ANIMATION_BACK_OFFSET = 0.85
+local DEFAULT_RESOLVE_BACK_JERK_DISTANCE = 0.45
+local DEFAULT_RESOLVE_BACK_JERK_DURATION = 0.08
+local DEFAULT_RESOLVE_VFX_FORWARD_OFFSET = 0
+local DEFAULT_RESOLVE_FACING_LOCK_DURATION = 0.6
 local DEFAULT_ENTRY_CUE_MARKERS = {
 	"EnterGround",
 	"EntryVfx",
@@ -126,6 +137,124 @@ local function getMovementCueFallbackTime(stageConfig)
 	)
 end
 
+local function getVisualSinkDepth(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	return math.max(
+		0,
+		tonumber(startConfig.VisualSinkDepth)
+			or tonumber(startConfig.SinkDepth)
+			or tonumber(abilityConfig and abilityConfig.VisualSinkDepth)
+			or tonumber(abilityConfig and abilityConfig.RootGroundClearance)
+			or 3.2
+	)
+end
+
+local function getVisualSinkDuration(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	return math.max(
+		0,
+		tonumber(startConfig.VisualSinkDuration)
+			or tonumber(startConfig.SinkDuration)
+			or tonumber(abilityConfig and abilityConfig.VisualSinkDuration)
+			or DEFAULT_VISUAL_SINK_DURATION
+	)
+end
+
+local function getVisualRiseDuration(abilityConfig)
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return math.max(
+		0,
+		tonumber(resolveConfig.VisualRiseDuration)
+			or tonumber(resolveConfig.RiseDuration)
+			or tonumber(abilityConfig and abilityConfig.VisualRiseDuration)
+			or DEFAULT_VISUAL_RISE_DURATION
+	)
+end
+
+local function getResolveSurfaceLockDuration(abilityConfig)
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return math.max(
+		0,
+		tonumber(resolveConfig.SurfaceLockDuration)
+			or tonumber(abilityConfig and abilityConfig.ResolveSurfaceLockDuration)
+			or DEFAULT_RESOLVE_SURFACE_LOCK_DURATION
+	)
+end
+
+local function getResolveFacingLockDuration(abilityConfig)
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return math.max(
+		0,
+		tonumber(resolveConfig.FacingLockDuration)
+			or tonumber(resolveConfig.AutoRotateLockDuration)
+			or tonumber(abilityConfig and abilityConfig.ResolveFacingLockDuration)
+			or DEFAULT_RESOLVE_FACING_LOCK_DURATION
+	)
+end
+
+local function getEntryVfxForwardOffset(abilityConfig)
+	local vfxConfig = type(abilityConfig) == "table" and abilityConfig.Vfx or nil
+	local entryConfig = type(vfxConfig) == "table" and vfxConfig.Entry or nil
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	return math.max(
+		0,
+		tonumber(entryConfig and entryConfig.ForwardOffset)
+			or tonumber(entryConfig and entryConfig.PositionForwardOffset)
+			or tonumber(startConfig.EntryVfxForwardOffset)
+			or tonumber(startConfig.EntryForwardOffset)
+			or tonumber(abilityConfig and abilityConfig.EntryVfxForwardOffset)
+			or DEFAULT_ENTRY_VFX_FORWARD_OFFSET
+	)
+end
+
+local function getResolveAnimationBackOffset(abilityConfig)
+	local vfxConfig = type(abilityConfig) == "table" and abilityConfig.Vfx or nil
+	local resolveVfxConfig = type(vfxConfig) == "table" and vfxConfig.Resolve or nil
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return math.max(
+		0,
+		tonumber(resolveConfig.AnimationBackOffset)
+			or tonumber(resolveConfig.BackOffset)
+			or tonumber(resolveVfxConfig and resolveVfxConfig.AnimationBackOffset)
+			or tonumber(abilityConfig and abilityConfig.ResolveAnimationBackOffset)
+			or DEFAULT_RESOLVE_ANIMATION_BACK_OFFSET
+	)
+end
+
+local function getResolveVfxForwardOffset(abilityConfig)
+	local vfxConfig = type(abilityConfig) == "table" and abilityConfig.Vfx or nil
+	local resolveVfxConfig = type(vfxConfig) == "table" and vfxConfig.Resolve or nil
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return tonumber(resolveVfxConfig and resolveVfxConfig.ForwardOffset)
+		or tonumber(resolveVfxConfig and resolveVfxConfig.PositionForwardOffset)
+		or tonumber(resolveConfig.ResolveVfxForwardOffset)
+		or tonumber(resolveConfig.VfxForwardOffset)
+		or tonumber(abilityConfig and abilityConfig.ResolveVfxForwardOffset)
+		or DEFAULT_RESOLVE_VFX_FORWARD_OFFSET
+end
+
+local function getResolveBackJerkDistance(abilityConfig)
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return math.max(
+		0,
+		tonumber(resolveConfig.BackJerkDistance)
+			or tonumber(resolveConfig.ResolveBackJerkDistance)
+			or tonumber(abilityConfig and abilityConfig.ResolveBackJerkDistance)
+			or DEFAULT_RESOLVE_BACK_JERK_DISTANCE
+	)
+end
+
+local function getResolveBackJerkDuration(abilityConfig)
+	local resolveConfig = getAnimationStageConfig("Resolve", abilityConfig)
+	return math.max(
+		0,
+		tonumber(resolveConfig.BackJerkDuration)
+			or tonumber(resolveConfig.ResolveBackJerkDuration)
+			or tonumber(abilityConfig and abilityConfig.ResolveBackJerkDuration)
+			or DEFAULT_RESOLVE_BACK_JERK_DURATION
+	)
+end
+
 local function disconnectConnections(connections)
 	if type(connections) ~= "table" then
 		return
@@ -183,6 +312,55 @@ local function resolvePlanarDirection(direction, fallback)
 	end
 
 	return DEFAULT_DIRECTION
+end
+
+local function getHumanoidMoveDirection(humanoid)
+	local moveDirection = humanoid and humanoid.MoveDirection or nil
+	local planarMoveDirection = typeof(moveDirection) == "Vector3" and getPlanarVector(moveDirection) or nil
+	if planarMoveDirection and planarMoveDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
+		return planarMoveDirection.Unit
+	end
+
+	return nil
+end
+
+local function getResolveAnimationPosition(surfacePosition, direction, rootPart, abilityConfig)
+	if typeof(surfacePosition) ~= "Vector3" then
+		return surfacePosition
+	end
+
+	local backOffset = getResolveAnimationBackOffset(abilityConfig)
+	if backOffset <= 0 then
+		return surfacePosition
+	end
+
+	local resolveDirection = resolvePlanarDirection(direction, rootPart and rootPart.CFrame.LookVector or nil)
+	return surfacePosition - (resolveDirection * backOffset)
+end
+
+local function getResolveVfxPosition(resolveAnimationPosition, direction, rootPart, abilityConfig)
+	if typeof(resolveAnimationPosition) ~= "Vector3" then
+		return resolveAnimationPosition
+	end
+
+	local forwardOffset = getResolveVfxForwardOffset(abilityConfig)
+	if forwardOffset == 0 then
+		return resolveAnimationPosition
+	end
+
+	local resolveDirection = resolvePlanarDirection(direction, rootPart and rootPart.CFrame.LookVector or nil)
+	return resolveAnimationPosition + (resolveDirection * forwardOffset)
+end
+
+local function getResolveBackJerkPosition(startPosition, direction, rootPart, elapsedTime, jerkDistance, jerkDuration)
+	if typeof(startPosition) ~= "Vector3" or jerkDistance <= 0 or jerkDuration <= 0 then
+		return startPosition
+	end
+
+	local alpha = math.clamp(elapsedTime / jerkDuration, 0, 1)
+	local easedAlpha = 1 - ((1 - alpha) * (1 - alpha))
+	local resolveDirection = resolvePlanarDirection(direction, rootPart and rootPart.CFrame.LookVector or nil)
+	return startPosition - (resolveDirection * jerkDistance * easedAlpha)
 end
 
 local function getCharacter(player)
@@ -322,6 +500,141 @@ local function pivotCharacterToRootPosition(character, rootPart, targetRootPosit
 	character:PivotTo(targetRootCFrame * pivotToRoot:Inverse())
 end
 
+local function lockCharacterToSurface(
+	character,
+	rootPart,
+	targetRootPosition,
+	direction,
+	abilityConfig,
+	duration,
+	jerkDistance,
+	jerkDuration
+)
+	if not character or not rootPart or typeof(targetRootPosition) ~= "Vector3" then
+		return
+	end
+
+	local startedAt = os.clock()
+	local endsAt = startedAt + math.max(0, tonumber(duration) or 0)
+	local resolvedJerkDistance = math.max(0, tonumber(jerkDistance) or 0)
+	local resolvedJerkDuration = math.max(0, tonumber(jerkDuration) or 0)
+	task.spawn(function()
+		while true do
+			local now = os.clock()
+			if now > endsAt then
+				return
+			end
+
+			if not character.Parent or not rootPart.Parent then
+				return
+			end
+
+			local lockedRootPosition = getResolveBackJerkPosition(
+				targetRootPosition,
+				direction,
+				rootPart,
+				now - startedAt,
+				resolvedJerkDistance,
+				resolvedJerkDuration
+			)
+			local resolvedPosition = select(
+				1,
+				MoguBurrowShared.ResolveSurfaceRootPosition(
+					character,
+					rootPart,
+					lockedRootPosition,
+					abilityConfig,
+					lockedRootPosition
+				)
+			) or lockedRootPosition
+
+			pivotCharacterToRootPosition(character, rootPart, resolvedPosition, direction)
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			RunService.Heartbeat:Wait()
+		end
+	end)
+end
+
+local function restoreAutoRotateAfterResolve(humanoid, originalAutoRotate, animationState, fallbackDuration)
+	if not humanoid then
+		return
+	end
+
+	local restored = false
+	local connection = nil
+	local function restore()
+		if restored then
+			return
+		end
+
+		restored = true
+		if connection then
+			connection:Disconnect()
+			connection = nil
+		end
+
+		if humanoid.Parent then
+			humanoid.AutoRotate = originalAutoRotate ~= false
+		end
+	end
+
+	local track = type(animationState) == "table" and animationState.Track or nil
+	if track and track.Stopped then
+		connection = track.Stopped:Connect(restore)
+	end
+
+	task.delay(math.max(0.05, tonumber(fallbackDuration) or 0), restore)
+end
+
+local function keepFacingDuringResolve(character, rootPart, direction, duration)
+	if not character or not rootPart then
+		return
+	end
+
+	local endsAt = os.clock() + math.max(0, tonumber(duration) or 0)
+	task.spawn(function()
+		while os.clock() <= endsAt do
+			if not character.Parent or not rootPart.Parent then
+				return
+			end
+
+			pivotCharacterToRootPosition(character, rootPart, rootPart.Position, direction)
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+			RunService.Heartbeat:Wait()
+		end
+	end)
+end
+
+local function findRootVisualMotor(character, rootPart)
+	if not character or not rootPart then
+		return nil, nil
+	end
+
+	local fallbackMotor = nil
+	local fallbackPropertyName = nil
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("Motor6D") then
+			local propertyName = nil
+			if descendant.Part0 == rootPart and descendant.Part1 and descendant.Part1 ~= rootPart then
+				propertyName = "C0"
+			elseif descendant.Part1 == rootPart and descendant.Part0 and descendant.Part0 ~= rootPart then
+				propertyName = "C1"
+			end
+
+			if propertyName then
+				if descendant.Name == "RootJoint" or descendant.Name == "Root" then
+					return descendant, propertyName
+				end
+				fallbackMotor = fallbackMotor or descendant
+				fallbackPropertyName = fallbackPropertyName or propertyName
+			end
+		end
+	end
+
+	return fallbackMotor, fallbackPropertyName
+end
+
 function MoguClient.Create(config)
 	config = config or {}
 
@@ -347,6 +660,7 @@ function MoguClient.Create(config)
 		Right = false,
 	}
 	self.burrowStates = {}
+	self.visualBurrowStates = {}
 	self.concealStates = {}
 	return self
 end
@@ -423,6 +737,167 @@ function MoguClient:GetCameraRelativeBurrowDirection(rootPart)
 	return direction.Unit * math.min(math.sqrt((forwardAxis * forwardAxis) + (rightAxis * rightAxis)), 1)
 end
 
+function MoguClient:GetBurrowActivationDirection(rootPart)
+	local moveDirection = getHumanoidMoveDirection(self.getHumanoid())
+	if moveDirection then
+		return moveDirection
+	end
+
+	local inputDirection = self:GetCameraRelativeBurrowDirection(rootPart)
+	if inputDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
+		return inputDirection.Unit
+	end
+
+	return resolvePlanarDirection(rootPart and rootPart.CFrame.LookVector or nil, nil)
+end
+
+function MoguClient:GetBurrowSurfaceDirection(rootPart, fallbackDirection)
+	local inputDirection = self:GetCameraRelativeBurrowDirection(rootPart)
+	if inputDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
+		return inputDirection.Unit
+	end
+
+	local moveDirection = getHumanoidMoveDirection(self.getHumanoid())
+	if moveDirection then
+		return moveDirection
+	end
+
+	return resolvePlanarDirection(fallbackDirection, rootPart and rootPart.CFrame.LookVector or nil)
+end
+
+function MoguClient:ClearVisualBurrowOffset(targetPlayer, shouldTween, duration, onComplete)
+	local visualState = self.visualBurrowStates[targetPlayer]
+	if not visualState then
+		if typeof(onComplete) == "function" then
+			onComplete()
+		end
+		return
+	end
+
+	if visualState.Tween then
+		visualState.Tween:Cancel()
+		visualState.Tween = nil
+	end
+
+	local motor = visualState.Motor
+	local propertyName = visualState.PropertyName
+	if not motor or not motor.Parent or typeof(propertyName) ~= "string" then
+		self.visualBurrowStates[targetPlayer] = nil
+		if typeof(onComplete) == "function" then
+			onComplete()
+		end
+		return
+	end
+
+	local originalCFrame = visualState.OriginalCFrame
+	if typeof(originalCFrame) ~= "CFrame" then
+		self.visualBurrowStates[targetPlayer] = nil
+		if typeof(onComplete) == "function" then
+			onComplete()
+		end
+		return
+	end
+
+	local tweenDuration = math.max(0, tonumber(duration) or 0)
+	if shouldTween and tweenDuration > 0 then
+		local token = {}
+		visualState.Token = token
+		local tween = TweenService:Create(
+			motor,
+			TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ [propertyName] = originalCFrame }
+		)
+		visualState.Tween = tween
+		tween.Completed:Connect(function()
+			if self.visualBurrowStates[targetPlayer] ~= visualState or visualState.Token ~= token then
+				return
+			end
+
+			visualState.Tween = nil
+			self.visualBurrowStates[targetPlayer] = nil
+			if typeof(onComplete) == "function" then
+				onComplete()
+			end
+		end)
+		tween:Play()
+	else
+		visualState.Token = nil
+		motor[propertyName] = originalCFrame
+		self.visualBurrowStates[targetPlayer] = nil
+		if typeof(onComplete) == "function" then
+			onComplete()
+		end
+	end
+end
+
+function MoguClient:ApplyVisualBurrowOffset(targetPlayer, abilityConfig)
+	local character = getCharacter(targetPlayer)
+	local rootPart = getRootPart(targetPlayer)
+	local motor, propertyName = findRootVisualMotor(character, rootPart)
+	if not motor or typeof(propertyName) ~= "string" then
+		return false
+	end
+
+	self:ClearVisualBurrowOffset(targetPlayer, false)
+
+	local originalCFrame = motor[propertyName]
+	local depth = getVisualSinkDepth(abilityConfig)
+	if depth <= 0 then
+		return false
+	end
+
+	local targetCFrame = CFrame.new(0, -depth, 0) * originalCFrame
+	local visualState = {
+		Motor = motor,
+		PropertyName = propertyName,
+		OriginalCFrame = originalCFrame,
+		TargetCFrame = targetCFrame,
+		Token = {},
+		Tween = nil,
+	}
+	self.visualBurrowStates[targetPlayer] = visualState
+
+	local sinkDuration = getVisualSinkDuration(abilityConfig)
+	if sinkDuration > 0 then
+		local tween = TweenService:Create(
+			motor,
+			TweenInfo.new(sinkDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ [propertyName] = targetCFrame }
+		)
+		visualState.Tween = tween
+		tween:Play()
+	else
+		motor[propertyName] = targetCFrame
+	end
+
+	return true
+end
+
+function MoguClient:SnapVisualBurrowOffset(targetPlayer)
+	local visualState = self.visualBurrowStates[targetPlayer]
+	if not visualState then
+		return false
+	end
+
+	if visualState.Tween then
+		visualState.Tween:Cancel()
+		visualState.Tween = nil
+	end
+
+	local motor = visualState.Motor
+	local propertyName = visualState.PropertyName
+	if not motor or not motor.Parent or typeof(propertyName) ~= "string" then
+		return false
+	end
+
+	if typeof(visualState.TargetCFrame) == "CFrame" then
+		motor[propertyName] = visualState.TargetCFrame
+		return true
+	end
+
+	return false
+end
+
 function MoguClient:ApplyConceal(targetPlayer, transparency)
 	if not targetPlayer or not targetPlayer:IsA("Player") then
 		return
@@ -436,15 +911,34 @@ function MoguClient:ApplyConceal(targetPlayer, transparency)
 	end
 
 	local previousByPart = {}
+	local previousCanCollideByPart = {}
+	local previousBySurfaceVisual = {}
+	local previousGuiEnabled = {}
+	local previousHumanoidDisplay = {}
 	for _, descendant in ipairs(character:GetDescendants()) do
 		if descendant:IsA("BasePart") and descendant.Name ~= "HumanoidRootPart" then
 			previousByPart[descendant] = descendant.LocalTransparencyModifier
+			previousCanCollideByPart[descendant] = descendant.CanCollide
 			descendant.LocalTransparencyModifier = math.max(descendant.LocalTransparencyModifier, transparency)
+			descendant.CanCollide = false
+		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+			previousBySurfaceVisual[descendant] = descendant.Transparency
+			descendant.Transparency = math.max(descendant.Transparency, transparency)
+		elseif descendant:IsA("BillboardGui") or descendant:IsA("SurfaceGui") then
+			previousGuiEnabled[descendant] = descendant.Enabled
+			descendant.Enabled = false
+		elseif descendant:IsA("Humanoid") then
+			previousHumanoidDisplay[descendant] = descendant.DisplayDistanceType
+			descendant.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 		end
 	end
 
 	self.concealStates[targetPlayer] = {
 		PreviousByPart = previousByPart,
+		PreviousCanCollideByPart = previousCanCollideByPart,
+		PreviousBySurfaceVisual = previousBySurfaceVisual,
+		PreviousGuiEnabled = previousGuiEnabled,
+		PreviousHumanoidDisplay = previousHumanoidDisplay,
 	}
 end
 
@@ -489,13 +983,19 @@ function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPositi
 	burrowState.EntryCueTriggered = true
 	clearEntryCueState(burrowState)
 
-	if not burrowState.ConcealApplied then
-		self:ApplyConceal(targetPlayer, burrowState.ConcealTransparency)
-		burrowState.ConcealApplied = true
+	if not self.visualBurrowStates[targetPlayer] then
+		self:ApplyVisualBurrowOffset(targetPlayer, abilityConfig)
 	end
 
 	local rootPart = getRootPart(targetPlayer)
-	local entryPosition = rootPart and rootPart.Position or startPosition
+	local entryPosition = if burrowState.IsLocal and typeof(burrowState.SurfaceRootPosition) == "Vector3"
+		then burrowState.SurfaceRootPosition
+		else rootPart and rootPart.Position or startPosition
+	if typeof(entryPosition) == "Vector3" then
+		local entryDirection = resolvePlanarDirection(burrowState.Direction, rootPart and rootPart.CFrame.LookVector or nil)
+		entryPosition += entryDirection * getEntryVfxForwardOffset(abilityConfig)
+	end
+
 	if not self.vfxController:PlayEntry(entryPosition, burrowState.Direction, abilityConfig) then
 		createBurst(entryPosition, burrowState.EntryBurstRadius, false)
 	end
@@ -519,6 +1019,12 @@ function MoguClient:TriggerBurrowMovementCue(targetPlayer, burrowState, startPos
 	burrowState.MovementCueTriggered = true
 	clearMovementCueState(burrowState)
 	burrowState.LastTrailAt = Workspace:GetServerTimeNow()
+	self:SnapVisualBurrowOffset(targetPlayer)
+	if not burrowState.ConcealApplied then
+		self:ApplyConceal(targetPlayer, burrowState.ConcealTransparency)
+		burrowState.ConcealApplied = true
+	end
+
 	return true
 end
 
@@ -650,6 +1156,26 @@ function MoguClient:ClearConceal(targetPlayer)
 			part.LocalTransparencyModifier = previousTransparency
 		end
 	end
+	for part, previousCanCollide in pairs(concealState.PreviousCanCollideByPart or {}) do
+		if part and part.Parent then
+			part.CanCollide = previousCanCollide
+		end
+	end
+	for surfaceVisual, previousTransparency in pairs(concealState.PreviousBySurfaceVisual or {}) do
+		if surfaceVisual and surfaceVisual.Parent then
+			surfaceVisual.Transparency = previousTransparency
+		end
+	end
+	for gui, previousEnabled in pairs(concealState.PreviousGuiEnabled or {}) do
+		if gui and gui.Parent then
+			gui.Enabled = previousEnabled
+		end
+	end
+	for humanoid, previousDisplayDistanceType in pairs(concealState.PreviousHumanoidDisplay or {}) do
+		if humanoid and humanoid.Parent then
+			humanoid.DisplayDistanceType = previousDisplayDistanceType
+		end
+	end
 end
 
 function MoguClient:GetLocalBurrowState()
@@ -662,8 +1188,12 @@ function MoguClient:RequestSurface(_reason)
 		return false
 	end
 
+	local rootPart = self.getLocalRootPart()
+	burrowState.Direction = self:GetBurrowSurfaceDirection(rootPart, burrowState.Direction)
 	burrowState.SurfaceRequested = true
-	self.requestAbility(ABILITY_NAME, nil)
+	self.requestAbility(ABILITY_NAME, {
+		Direction = burrowState.Direction,
+	})
 	return true
 end
 
@@ -695,6 +1225,26 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 		IsLocal = targetPlayer == self.player,
 	}
 
+	local startPosition = payload.StartPosition or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
+	local shouldRequestSurfaceImmediately = false
+	if burrowState.IsLocal then
+		local character = getCharacter(self.player)
+		local rootPart = self.getLocalRootPart()
+		if character and rootPart then
+			local resolvedSurfacePosition, hasSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+				character,
+				rootPart,
+				startPosition or rootPart.Position,
+				abilityConfig,
+				typeof(startPosition) == "Vector3" and startPosition or nil
+			)
+			burrowState.SurfaceRootPosition = resolvedSurfacePosition
+			if not hasSurface and typeof(resolvedSurfacePosition) ~= "Vector3" then
+				shouldRequestSurfaceImmediately = true
+			end
+		end
+	end
+
 	if burrowState.IsLocal then
 		local humanoid = self.getHumanoid()
 		if humanoid then
@@ -706,9 +1256,25 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 	end
 
 	self.burrowStates[targetPlayer] = burrowState
+	if shouldRequestSurfaceImmediately then
+		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+	end
+
+	if burrowState.IsLocal then
+		local character = getCharacter(self.player)
+		local rootPart = self.getLocalRootPart()
+		local pivotPosition = burrowState.SurfaceRootPosition
+			or (typeof(startPosition) == "Vector3" and startPosition)
+			or (rootPart and rootPart.Position)
+		if character and rootPart and typeof(pivotPosition) == "Vector3" then
+			pivotCharacterToRootPosition(character, rootPart, pivotPosition, burrowState.Direction)
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+
 	burrowState.AnimationState = self.animationController:PlayStart(targetPlayer, abilityConfig)
 
-	local startPosition = payload.StartPosition or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
 	self:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
 	self:ScheduleBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
 end
@@ -718,48 +1284,120 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 		return
 	end
 
+	payload = payload or {}
 	local burrowState = self.burrowStates[targetPlayer]
 	local abilityConfig = getAbilityConfig()
+	local visualRiseDuration = getVisualRiseDuration(abilityConfig)
+	local backJerkDistance = getResolveBackJerkDistance(abilityConfig)
+	local backJerkDuration = if backJerkDistance > 0 then getResolveBackJerkDuration(abilityConfig) else 0
+	local surfaceLockDuration = math.max(getResolveSurfaceLockDuration(abilityConfig), visualRiseDuration, backJerkDuration)
+	local facingLockDuration = getResolveFacingLockDuration(abilityConfig)
+	local fallbackRootPart = getRootPart(targetPlayer)
+	local resolveDirection = resolvePlanarDirection(
+		payload.Direction,
+		(burrowState and burrowState.Direction) or (fallbackRootPart and fallbackRootPart.CFrame.LookVector or nil)
+	)
+	local localHumanoid = nil
+	local originalAutoRotate = nil
 	self.burrowStates[targetPlayer] = nil
 	clearBurrowCueState(burrowState)
 	self.animationController:StopAnimation(burrowState and burrowState.AnimationState, "resolve_transition")
-	self.animationController:PlayResolve(targetPlayer, abilityConfig)
 
+	local clampedResolvePosition = nil
+	local resolveVfxPosition = nil
 	if targetPlayer == self.player then
 		local humanoid = self.getHumanoid()
 		if humanoid and burrowState then
-			humanoid.AutoRotate = burrowState.OriginalAutoRotate ~= false
+			localHumanoid = humanoid
+			originalAutoRotate = burrowState.OriginalAutoRotate
+			humanoid.AutoRotate = false
 			humanoid.WalkSpeed = burrowState.OriginalWalkSpeed or humanoid.WalkSpeed
 		end
 
 		local character = getCharacter(self.player)
 		local rootPart = self.getLocalRootPart()
 		if character and rootPart then
-			local surfacePosition = typeof(payload.ActualEndPosition) == "Vector3" and payload.ActualEndPosition or rootPart.Position
+			local payloadSurfacePosition = typeof(payload.ActualEndPosition) == "Vector3" and payload.ActualEndPosition
+				or nil
+			local surfacePosition = payloadSurfacePosition or rootPart.Position
+			local fallbackSurfacePosition = (burrowState and burrowState.SurfaceRootPosition) or payloadSurfacePosition
 			local resolvedSurfacePosition = select(
 				1,
-				MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, surfacePosition, abilityConfig)
+				MoguBurrowShared.ResolveSurfaceRootPosition(
+					character,
+					rootPart,
+					surfacePosition,
+					abilityConfig,
+					fallbackSurfacePosition
+				)
 			)
-			pivotCharacterToRootPosition(
-				character,
-				rootPart,
-				resolvedSurfacePosition,
-				burrowState and burrowState.Direction or payload.Direction
-			)
+			if resolvedSurfacePosition then
+				clampedResolvePosition = resolvedSurfacePosition
+				local resolveAnimationPosition =
+					getResolveAnimationPosition(resolvedSurfacePosition, resolveDirection, rootPart, abilityConfig)
+				resolveVfxPosition =
+					getResolveVfxPosition(resolveAnimationPosition, resolveDirection, rootPart, abilityConfig)
+				pivotCharacterToRootPosition(
+					character,
+					rootPart,
+					resolveAnimationPosition,
+					resolveDirection
+				)
+				lockCharacterToSurface(
+					character,
+					rootPart,
+					resolveAnimationPosition,
+					resolveDirection,
+					abilityConfig,
+					surfaceLockDuration,
+					backJerkDistance,
+					backJerkDuration
+				)
+				keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+			else
+				resolveVfxPosition = getResolveVfxPosition(rootPart.Position, resolveDirection, rootPart, abilityConfig)
+				pivotCharacterToRootPosition(character, rootPart, rootPart.Position, resolveDirection)
+				keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+			end
 			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end
+	else
+		local character = getCharacter(targetPlayer)
+		local rootPart = fallbackRootPart
+		if character and rootPart then
+			local surfacePosition = if typeof(payload.ActualEndPosition) == "Vector3"
+				then payload.ActualEndPosition
+				else rootPart.Position
+			local resolveAnimationPosition =
+				getResolveAnimationPosition(surfacePosition, resolveDirection, rootPart, abilityConfig)
+			resolveVfxPosition = getResolveVfxPosition(resolveAnimationPosition, resolveDirection, rootPart, abilityConfig)
+			pivotCharacterToRootPosition(character, rootPart, resolveAnimationPosition, resolveDirection)
+			keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+			rootPart.AssemblyAngularVelocity = Vector3.zero
 		end
 	end
 
-	self:ClearConceal(targetPlayer)
+	local resolveAnimationState = self.animationController:PlayResolve(targetPlayer, abilityConfig)
+	if targetPlayer == self.player and localHumanoid then
+		restoreAutoRotateAfterResolve(localHumanoid, originalAutoRotate, resolveAnimationState, facingLockDuration)
+	end
 
-	local resolvePosition = typeof(payload.ActualEndPosition) == "Vector3"
-			and payload.ActualEndPosition
+	self:SnapVisualBurrowOffset(targetPlayer)
+	self:ClearVisualBurrowOffset(targetPlayer, true, visualRiseDuration, function()
+		self:ClearConceal(targetPlayer)
+	end)
+
+	local resolvePosition = resolveVfxPosition
+		or clampedResolvePosition
+		or (typeof(payload.ActualEndPosition) == "Vector3" and payload.ActualEndPosition)
 		or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
-	local resolveDirection = (burrowState and burrowState.Direction) or payload.Direction
 	if not self.vfxController:PlayResolve(resolvePosition, resolveDirection, abilityConfig) then
 		createBurst(
 			resolvePosition,
-			(burrowState and burrowState.ResolveBurstRadius) or payload.ResolveBurstRadius or MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
+			(burrowState and burrowState.ResolveBurstRadius)
+				or payload.ResolveBurstRadius
+				or MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
 			true
 		)
 	end
@@ -797,13 +1435,8 @@ function MoguClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 		return nil
 	end
 
-	local direction = self:GetCameraRelativeBurrowDirection(rootPart)
-	if direction.Magnitude <= MIN_DIRECTION_MAGNITUDE then
-		direction = resolvePlanarDirection(rootPart.CFrame.LookVector, nil)
-	end
-
 	return {
-		Direction = direction,
+		Direction = self:GetBurrowActivationDirection(rootPart),
 	}
 end
 
@@ -831,35 +1464,63 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	humanoid.WalkSpeed = 0
 	humanoid.Jump = false
 
+	local abilityConfig = getAbilityConfig()
+	local currentSurfacePosition, hasCurrentSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+		character,
+		rootPart,
+		burrowState.SurfaceRootPosition or rootPart.Position,
+		abilityConfig,
+		burrowState.SurfaceRootPosition
+	)
+	if not currentSurfacePosition then
+		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		return
+	end
+	if not hasCurrentSurface and typeof(burrowState.SurfaceRootPosition) == "Vector3" then
+		currentSurfacePosition = burrowState.SurfaceRootPosition
+	end
+	burrowState.SurfaceRootPosition = currentSurfacePosition
+
 	if now >= burrowState.EndTime and not burrowState.SurfaceRequested then
 		self:RequestSurface(SURFACE_REASON_DURATION_ELAPSED)
 	end
 
 	if burrowState.SurfaceRequested then
+		pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction)
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		return
 	end
 
 	if not burrowState.MovementCueTriggered then
+		pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction)
 		rootPart.AssemblyLinearVelocity = Vector3.zero
 		return
 	end
 
 	local desiredDirection = self:GetCameraRelativeBurrowDirection(rootPart)
-	local currentSurfacePosition = select(
-		1,
-		MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, rootPart.Position, getAbilityConfig())
-	)
 	local targetPlanarPosition = currentSurfacePosition
 	if desiredDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
 		targetPlanarPosition = currentSurfacePosition + (desiredDirection.Unit * burrowState.MoveSpeed * dt)
+	end
+
+	local resolvedSurfacePosition, hasTargetSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+		character,
+		rootPart,
+		targetPlanarPosition,
+		abilityConfig,
+		currentSurfacePosition
+	)
+	if not resolvedSurfacePosition then
+		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		return
+	end
+	if desiredDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and hasTargetSurface then
 		burrowState.Direction = desiredDirection.Unit
 	end
 
-	local resolvedSurfacePosition = select(
-		1,
-		MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, targetPlanarPosition, getAbilityConfig())
-	)
+	burrowState.SurfaceRootPosition = if hasTargetSurface then resolvedSurfacePosition else currentSurfacePosition
 	pivotCharacterToRootPosition(character, rootPart, resolvedSurfacePosition, burrowState.Direction)
 	rootPart.AssemblyLinearVelocity = Vector3.zero
 end
@@ -946,7 +1607,11 @@ function MoguClient:HandleCharacterRemoving()
 		clearBurrowCueState(self.burrowStates[targetPlayer])
 		self.animationController:StopAnimation(self.burrowStates[targetPlayer].AnimationState, "character_removing")
 		self.burrowStates[targetPlayer] = nil
+		self:ClearVisualBurrowOffset(targetPlayer, false)
 		self:ClearConceal(targetPlayer)
+	end
+	for targetPlayer in pairs(self.visualBurrowStates) do
+		self:ClearVisualBurrowOffset(targetPlayer, false)
 	end
 	self.vfxController:HandleCharacterRemoving()
 
@@ -960,6 +1625,7 @@ function MoguClient:HandlePlayerRemoving(leavingPlayer)
 	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	self.animationController:StopAnimation(self.burrowStates[leavingPlayer] and self.burrowStates[leavingPlayer].AnimationState, "player_removing")
 	self.burrowStates[leavingPlayer] = nil
+	self:ClearVisualBurrowOffset(leavingPlayer, false)
 	self:ClearConceal(leavingPlayer)
 	self.vfxController:HandlePlayerRemoving(leavingPlayer)
 end

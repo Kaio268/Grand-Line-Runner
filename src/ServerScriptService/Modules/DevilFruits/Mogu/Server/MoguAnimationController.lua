@@ -18,8 +18,8 @@ local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.Mogu.Server.MoguAn
 local STAGE_START = "Start"
 local STAGE_RESOLVE = "Resolve"
 local DEFAULT_ANIMATION_KEY_BY_STAGE = {
-	[STAGE_START] = "Mogu.Dive",
-	[STAGE_RESOLVE] = "Mogu.Exit",
+	[STAGE_START] = "Mogu.MoleDigStart",
+	[STAGE_RESOLVE] = "Mogu.MoleDigEnd",
 }
 
 local function logInfo(message, ...)
@@ -67,6 +67,31 @@ local function resolveAnimationAsset(stageKey, stageConfig)
 	return nil, descriptor, animationKey
 end
 
+local function getStageStopAfter(stageConfig)
+	local stopAfter = tonumber(stageConfig.StopAfter)
+		or tonumber(stageConfig.ReturnToMovementAfter)
+		or tonumber(stageConfig.CutShortAfter)
+		or tonumber(stageConfig.MaxDuration)
+	if not stopAfter or stopAfter <= 0 then
+		return nil
+	end
+
+	return stopAfter
+end
+
+local function scheduleStopAfter(track, stopAfter, stopFadeTime, stageKey)
+	if not track or not stopAfter then
+		return
+	end
+
+	task.delay(stopAfter, function()
+		if track.IsPlaying then
+			CommonAnimation.StopTrack(track, stopFadeTime)
+			logInfo("auto stop stage=%s after=%.3f", tostring(stageKey), stopAfter)
+		end
+	end)
+end
+
 local function playAnimation(character, stageKey, abilityConfig)
 	local stageConfig = getStageAnimationConfig(stageKey, abilityConfig)
 	local animation, descriptor, animationKey = resolveAnimationAsset(stageKey, stageConfig)
@@ -91,10 +116,13 @@ local function playAnimation(character, stageKey, abilityConfig)
 	end
 
 	local fadeTime = math.max(0, tonumber(stageConfig.FadeTime) or DEFAULT_FADE_TIME)
+	local stopFadeTime = math.max(0, tonumber(stageConfig.StopFadeTime) or DEFAULT_STOP_FADE_TIME)
+	local stopAfter = getStageStopAfter(stageConfig)
 	local playbackSpeed = tonumber(stageConfig.PlaybackSpeed) or 1
 	track.Priority = Enum.AnimationPriority.Action
 	track.Looped = stageConfig.Looped == true
 	track:Play(fadeTime, 1, playbackSpeed)
+	scheduleStopAfter(track, stopAfter, stopFadeTime, stageKey)
 	AnimationLoadDiagnostics.LogTrackPlay(
 		track,
 		SOURCE_LABEL,
@@ -116,7 +144,8 @@ local function playAnimation(character, stageKey, abilityConfig)
 		AnimationKey = animationKey,
 		AnimationId = descriptor and descriptor.AnimationId,
 		Track = track,
-		StopFadeTime = math.max(0, tonumber(stageConfig.StopFadeTime) or DEFAULT_STOP_FADE_TIME),
+		StopFadeTime = stopFadeTime,
+		StopAfter = stopAfter,
 	}
 end
 

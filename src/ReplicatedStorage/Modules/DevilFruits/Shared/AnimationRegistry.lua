@@ -38,6 +38,41 @@ local function toriEmbeddedAnimation(animationName, length)
 	}
 end
 
+local function moguAnimationPath(animationName)
+	return {
+		"Assets",
+		"Animations",
+		"Mogu",
+		"AnimSaves",
+		animationName,
+	}
+end
+
+local function moguAnimationFallbackPaths(animationName)
+	return {
+		{
+			"Assets",
+			"Animations",
+			"Mogu",
+			animationName,
+		},
+		{
+			"Workspace",
+			"Mogu",
+			"AnimSaves",
+			animationName,
+		},
+	}
+end
+
+local function moguEmbeddedAnimation(animationName, length)
+	return {
+		KeyframeSequencePath = moguAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = moguAnimationFallbackPaths(animationName),
+		Length = length,
+	}
+end
+
 local Animations = {
 	Movement = {
 		R6Walk = "rbxassetid://87454242265342",
@@ -83,12 +118,15 @@ local Animations = {
 	},
 
 	Mogu = {
-		Dive = "rbxassetid://140152497789637",
-		Exit = "rbxassetid://103374605603335",
+		MoleDigStart = moguEmbeddedAnimation("MoleDigStart", 2.6666667),
+		MoleDigEnd = moguEmbeddedAnimation("MoleDigEnd", 1.1833333),
+		-- Keep the legacy logical names alive while the Mogu config moves to the authored keyframe saves.
+		Dive = moguEmbeddedAnimation("MoleDigStart", 2.6666667),
+		Exit = moguEmbeddedAnimation("MoleDigEnd", 1.1833333),
 	},
 
 	Suke = {
-		Suke1 = "rbxassetid://103062282462720",
+		Suke1 = "rbxassetid://126435163862959",
 	},
 
 	Tori = {
