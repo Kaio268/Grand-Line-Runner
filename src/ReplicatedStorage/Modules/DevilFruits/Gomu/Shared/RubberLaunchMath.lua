@@ -12,7 +12,11 @@ function RubberLaunchMath.GetPlanarSpeed(rootPart)
 		return 0
 	end
 
-	return RubberLaunchMath.GetPlanarVector(rootPart.AssemblyLinearVelocity).Magnitude
+	local currentPlanarSpeed = RubberLaunchMath.GetPlanarVector(rootPart.AssemblyLinearVelocity).Magnitude
+	local character = rootPart.Parent
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local walkSpeed = humanoid and tonumber(humanoid.WalkSpeed) or 0
+	return math.max(currentPlanarSpeed, walkSpeed)
 end
 
 function RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, rootPart, options)
@@ -28,7 +32,7 @@ function RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, rootPart, 
 	end
 
 	local referenceSpeed = math.max(1, tonumber(resolvedConfig.SpeedScaleReference) or speedScaleReferenceFallback)
-	local speedAlpha = math.clamp(RubberLaunchMath.GetPlanarSpeed(rootPart) / referenceSpeed, 0, 1)
+	local speedAlpha = math.max(0, RubberLaunchMath.GetPlanarSpeed(rootPart) / referenceSpeed)
 	return baseDistance + (speedDistanceBonus * speedAlpha)
 end
 

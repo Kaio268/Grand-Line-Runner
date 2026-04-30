@@ -10,6 +10,7 @@ local GomuAnimationController = {}
 local DEBUG_INFO = RunService:IsStudio()
 local DEFAULT_FADE_TIME = 0.06
 local DEFAULT_STOP_FADE_TIME = 0.1
+local DEFAULT_RELEASE_FALLBACK_TIME = 0
 local INFO_COOLDOWN = 0.2
 local WARN_COOLDOWN = 3
 local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.Gomu.Server.GomuAnimationController"
@@ -139,6 +140,12 @@ local function playAnimation(character, moveName, animationConfig, defaultAnimat
 		AssetName = animationKey,
 		AnimationKey = animationKey,
 		AnimationId = descriptor and descriptor.AnimationId,
+		MarkerName = resolvedConfig.ReleaseMarker,
+		ReleaseTime = tonumber(resolvedConfig.ReleaseTime),
+		ReleaseFallbackTime = math.max(
+			0,
+			tonumber(resolvedConfig.ReleaseFallbackTime) or DEFAULT_RELEASE_FALLBACK_TIME
+		),
 		Track = track,
 		StopFadeTime = math.max(0, tonumber(resolvedConfig.StopFadeTime) or DEFAULT_STOP_FADE_TIME),
 	}
@@ -146,6 +153,68 @@ end
 
 function GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
 	return playAnimation(character, RUBBER_LAUNCH_MOVE_NAME, animationConfig, RUBBER_LAUNCH_DEFAULT_ANIMATION_KEY)
+end
+
+function GomuAnimationController.WaitForRubberLaunchRelease(animationState)
+	if type(animationState) ~= "table" or typeof(animationState.Track) ~= "Instance" then
+		return false
+	end
+
+	local track = animationState.Track
+	local releaseTime = tonumber(animationState.ReleaseTime)
+	if releaseTime then
+		local timeoutAt = os.clock() + math.max(0, releaseTime)
+		while track.IsPlaying and os.clock() < timeoutAt do
+			task.wait()
+		end
+		return false
+	end
+
+	local fallbackTime = math.max(0, tonumber(animationState.ReleaseFallbackTime) or DEFAULT_RELEASE_FALLBACK_TIME)
+	local markerName = animationState.MarkerName
+	if typeof(markerName) ~= "string" or markerName == "" then
+		local timeoutAt = os.clock() + fallbackTime
+		while track.IsPlaying and os.clock() < timeoutAt do
+			task.wait()
+		end
+		return false
+	end
+
+	local markerReached = false
+	local connection
+	local ok, err = pcall(function()
+		connection = track:GetMarkerReachedSignal(markerName):Connect(function()
+			if markerReached then
+				return
+			end
+
+			markerReached = true
+			logInfo("move=%s marker reached marker=%s", tostring(animationState.MoveName), markerName)
+		end)
+	end)
+	if not ok then
+		logWarn(
+			"marker connect failed move=%s marker=%s detail=%s",
+			tostring(animationState.MoveName),
+			tostring(markerName),
+			tostring(err)
+		)
+	end
+
+	local timeoutAt = os.clock() + fallbackTime
+	while not markerReached and track.IsPlaying and os.clock() < timeoutAt do
+		task.wait()
+	end
+
+	if connection then
+		connection:Disconnect()
+	end
+
+	if not markerReached and fallbackTime > 0 then
+		logInfo("move=%s marker fallback marker=%s delay=%.3f", tostring(animationState.MoveName), markerName, fallbackTime)
+	end
+
+	return markerReached
 end
 
 function GomuAnimationController.StopAnimation(animationState, reason)

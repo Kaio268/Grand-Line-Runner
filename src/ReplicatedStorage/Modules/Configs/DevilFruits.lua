@@ -252,19 +252,27 @@ local DevilFruits = {
 					Cooldown = 20,
 					LaunchDistance = 38,
 					LaunchDuration = 0.5,
-					SpeedScaleReference = 70,
+					-- RubberLaunch scales uncapped; 200 speed gives 38 + 32 = 70 studs.
+					SpeedScaleReference = 200,
 					SpeedLaunchDistanceBonus = 32,
 					Animation = {
 						AnimationKey = "Gomu.Rocket",
+						-- Seconds after the animation starts before the launch velocity is applied.
+						-- The authored "Launch" marker is about 0.367s, so lower this to launch earlier.
+						ReleaseTime = 0.2,
+						ReleaseMarker = "Launch",
+						ReleaseFallbackTime = 0.38,
 						FadeTime = 0.04,
 						StopFadeTime = 0.08,
 						PlaybackSpeed = 1,
 					},
 					RequestPayloadSchema = {
-						MaxKeys = 2,
-						MaxHintDistance = 600,
+						MaxKeys = 3,
+						-- Static cap disabled because launch range is validated from server-side speed.
+						MaxHintDistance = 0,
 						Fields = {
 							AimPosition = "Vector3",
+							LookDirection = "DirectionVector3",
 							TargetPlayerUserId = "UserId",
 						},
 					},

@@ -468,6 +468,20 @@ local function getLookAimRaycast(player)
 	return result, (result and result.Position) or (unitRay.Origin + rayVector), unitRay.Origin, unitRay.Direction.Unit
 end
 
+local function getActivationLookDirection(self, rayDirection)
+	if typeof(rayDirection) == "Vector3" and rayDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
+		return rayDirection.Unit
+	end
+
+	local rootPart = self.getLocalRootPart()
+	local rootDirection = rootPart and rootPart.CFrame.LookVector or nil
+	if typeof(rootDirection) == "Vector3" and rootDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
+		return rootDirection.Unit
+	end
+
+	return nil
+end
+
 local function getDistanceFromRay(rayOrigin, rayDirection, point)
 	local toPoint = point - rayOrigin
 	local projectedDistance = math.max(0, toPoint:Dot(rayDirection))
@@ -525,6 +539,7 @@ end
 
 local function getGomuLaunchTarget(self, abilityConfig)
 	local result, fallbackPosition, rayOrigin, rayDirection = getLookAimRaycast(self.player)
+	local lookDirection = getActivationLookDirection(self, rayDirection)
 	local aimPosition = fallbackPosition
 	local launchDistance = RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, self.getLocalRootPart())
 	local targetPlayer = findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection)
@@ -546,12 +561,12 @@ local function getGomuLaunchTarget(self, abilityConfig)
 	if not aimPosition then
 		local rootPart = self.getLocalRootPart()
 		if rootPart then
-			local fallbackDirection = rayDirection or rootPart.CFrame.LookVector
+			local fallbackDirection = lookDirection or rootPart.CFrame.LookVector
 			aimPosition = rootPart.Position + (fallbackDirection * GOMU_AIM_RAY_DISTANCE)
 		end
 	end
 
-	return aimPosition, targetPlayer
+	return aimPosition, targetPlayer, lookDirection
 end
 
 function GomuClient.Create(config)
@@ -582,9 +597,10 @@ function GomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	end
 
 	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
-	local aimPosition, targetPlayer = getGomuLaunchTarget(self, abilityConfig)
+	local aimPosition, targetPlayer, lookDirection = getGomuLaunchTarget(self, abilityConfig)
 	return {
 		AimPosition = aimPosition,
+		LookDirection = lookDirection,
 		TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
 	}
 end
