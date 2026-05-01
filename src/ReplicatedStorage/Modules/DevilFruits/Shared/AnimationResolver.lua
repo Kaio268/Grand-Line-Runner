@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local KeyframeSequenceProvider = game:GetService("KeyframeSequenceProvider")
 local RunService = game:GetService("RunService")
 
 local DiagnosticLogLimiter = require(script.Parent.Parent:WaitForChild("DiagnosticLogLimiter"))
@@ -19,6 +20,12 @@ local ATTRIBUTE_RIG_NAMES = {
 }
 
 local syntheticAnimationsById = {}
+local registeredKeyframeSequencesByPath = {}
+local EMBEDDED_LIVE_ANIMATION_ID_KEYS = {
+	"LiveAnimationId",
+	"PublishedAnimationId",
+	"AnimationId",
+}
 
 local function shouldLogInfo()
 	return DEBUG_INFO or ReplicatedStorage:GetAttribute("DebugAnimationRegistry") == true
@@ -144,19 +151,171 @@ local function getSyntheticAnimation(animationId, logicalKey, variant)
 	return animation
 end
 
-local function buildDescriptor(logicalKey, variant, animationId, source)
+local logResolvedAnimation
+
+local function buildDescriptor(logicalKey, variant, animationId, source, metadata)
 	local path = variant and string.format("AnimationRegistry/%s.%s", logicalKey, variant)
 		or string.format("AnimationRegistry/%s", logicalKey)
-	return {
+	local descriptor = {
 		LogicalKey = logicalKey,
 		Variant = variant,
 		AnimationId = animationId,
 		Path = path,
 		Source = source or "registry",
 	}
+
+	if type(metadata) == "table" then
+		for key, value in pairs(metadata) do
+			descriptor[key] = value
+		end
+	end
+
+	return descriptor
 end
 
-local function logResolvedAnimation(logicalKey, animationId, selectedVariant, requestedVariant, options)
+local function resolveDataModelPath(path)
+	local segments = normalizePath(path)
+	if #segments == 0 then
+		return nil, "<invalid>"
+	end
+
+	local node
+	local startIndex = 1
+	if segments[1] == "game" then
+		node = game
+		startIndex = 2
+	elseif segments[1] == "ReplicatedStorage" then
+		node = ReplicatedStorage
+		startIndex = 2
+	else
+		local serviceOk, service = pcall(function()
+			return game:GetService(segments[1])
+		end)
+		if serviceOk and service then
+			node = service
+			startIndex = 2
+		else
+			node = ReplicatedStorage
+		end
+	end
+
+	for index = startIndex, #segments do
+		if typeof(node) ~= "Instance" then
+			return nil, table.concat(segments, ".")
+		end
+
+		node = node:FindFirstChild(segments[index])
+		if not node then
+			return nil, table.concat(segments, ".")
+		end
+	end
+
+	return node, table.concat(segments, ".")
+end
+
+local function resolveEmbeddedKeyframeSequence(logicalKey, node, selectedVariant, options)
+	if type(node) ~= "table" or node.KeyframeSequencePath == nil then
+		return nil, nil, false
+	end
+
+	if not RunService:IsStudio() then
+		for _, key in ipairs(EMBEDDED_LIVE_ANIMATION_ID_KEYS) do
+			local candidateAnimationId = node[key]
+			if typeof(candidateAnimationId) == "string" and candidateAnimationId ~= "" then
+				local animationId = validateAnimationId(candidateAnimationId, logicalKey)
+				if animationId then
+					logResolvedAnimation(logicalKey, animationId, selectedVariant, selectedVariant, options or {})
+					return animationId, buildDescriptor(logicalKey, selectedVariant, animationId, "published_embedded_fallback", {
+						KeyframeSequencePath = formatPath(node.KeyframeSequencePath),
+						Length = node.Length,
+						LiveAnimationIdField = key,
+					}), true
+				end
+			end
+		end
+
+		logWarn(
+			"embedded KeyframeSequence is Studio-only key=%s variant=%s path=%s context=%s; upload it and set LiveAnimationId",
+			tostring(logicalKey),
+			tostring(selectedVariant or "<none>"),
+			formatPath(node.KeyframeSequencePath),
+			tostring(options and options.Context or "unknown")
+		)
+		return nil, buildDescriptor(logicalKey, selectedVariant, nil, "embedded_keyframe_sequence_studio_only", {
+			KeyframeSequencePath = formatPath(node.KeyframeSequencePath),
+			Length = node.Length,
+		}), true
+	end
+
+	local candidatePaths = { node.KeyframeSequencePath }
+	if type(node.FallbackKeyframeSequencePaths) == "table" then
+		for _, fallbackPath in ipairs(node.FallbackKeyframeSequencePaths) do
+			candidatePaths[#candidatePaths + 1] = fallbackPath
+		end
+	end
+
+	local sequence
+	local formattedPath
+	local attemptedPaths = {}
+	for _, candidatePath in ipairs(candidatePaths) do
+		local candidateSequence, candidateFormattedPath = resolveDataModelPath(candidatePath)
+		attemptedPaths[#attemptedPaths + 1] = candidateFormattedPath
+		if candidateSequence and candidateSequence:IsA("KeyframeSequence") then
+			sequence = candidateSequence
+			formattedPath = candidateFormattedPath
+			break
+		end
+	end
+
+	if not sequence or not sequence:IsA("KeyframeSequence") then
+		formattedPath = table.concat(attemptedPaths, ", ")
+		logWarn(
+			"missing embedded KeyframeSequence key=%s variant=%s path=%s context=%s",
+			tostring(logicalKey),
+			tostring(selectedVariant or "<none>"),
+			tostring(formattedPath),
+			tostring(options and options.Context or "unknown")
+		)
+		return nil, buildDescriptor(logicalKey, selectedVariant, nil, "missing_embedded_keyframe_sequence", {
+			KeyframeSequencePath = formattedPath,
+			KeyframeSequencePaths = attemptedPaths,
+			Length = node.Length,
+		}), true
+	end
+
+	local cacheKey = formattedPath
+	local animationId = registeredKeyframeSequencesByPath[cacheKey]
+	if not animationId then
+		local ok, result = pcall(function()
+			return KeyframeSequenceProvider:RegisterKeyframeSequence(sequence)
+		end)
+		if not ok or typeof(result) ~= "string" or result == "" then
+			logWarn(
+				"embedded KeyframeSequence register failed key=%s variant=%s path=%s detail=%s",
+				tostring(logicalKey),
+				tostring(selectedVariant or "<none>"),
+				tostring(formattedPath),
+				tostring(result)
+			)
+			return nil, buildDescriptor(logicalKey, selectedVariant, nil, "embedded_keyframe_sequence_register_failed", {
+				KeyframeSequencePath = formattedPath,
+				Length = node.Length,
+			}), true
+		end
+
+		animationId = result
+		registeredKeyframeSequencesByPath[cacheKey] = animationId
+	end
+
+	logResolvedAnimation(logicalKey, animationId, selectedVariant, selectedVariant, options or {})
+	return animationId, buildDescriptor(logicalKey, selectedVariant, animationId, "embedded_keyframe_sequence", {
+		KeyframeSequencePath = formattedPath,
+		KeyframeSequencePaths = attemptedPaths,
+		Length = node.Length,
+	}), true
+end
+
+function logResolvedAnimation(logicalKey, animationId, selectedVariant, requestedVariant, options)
 	options = type(options) == "table" and options or {}
 	logInfo(
 		"resolved context=%s key=%s requestedVariant=%s selectedVariant=%s id=%s",
@@ -217,6 +376,16 @@ function AnimationResolver.ResolveAssetId(logicalPath, options)
 		return nil, buildDescriptor(logicalKey, nil, nil, "invalid_registry_node")
 	end
 
+	local embeddedAnimationId, embeddedDescriptor, isEmbeddedNode = resolveEmbeddedKeyframeSequence(
+		logicalKey,
+		node,
+		nil,
+		options
+	)
+	if isEmbeddedNode then
+		return embeddedAnimationId, embeddedDescriptor
+	end
+
 	local variant = normalizeVariant(options.Variant)
 	local fallbackVariant = normalizeVariant(options.FallbackVariant) or "Default"
 	local animationId
@@ -225,6 +394,18 @@ function AnimationResolver.ResolveAssetId(logicalPath, options)
 	if variant and typeof(node[variant]) == "string" then
 		animationId = node[variant]
 		selectedVariant = variant
+	elseif variant and type(node[variant]) == "table" then
+		local variantAnimationId, variantDescriptor, isEmbeddedVariant = resolveEmbeddedKeyframeSequence(
+			logicalKey,
+			node[variant],
+			variant,
+			options
+		)
+		if isEmbeddedVariant then
+			return variantAnimationId, variantDescriptor
+		end
+
+		logWarn("invalid registry variant key=%s variant=%s type=%s", tostring(logicalKey), tostring(variant), typeof(node[variant]))
 	elseif variant and node[variant] ~= nil then
 		logWarn("invalid registry variant key=%s variant=%s type=%s", tostring(logicalKey), tostring(variant), typeof(node[variant]))
 	elseif variant then
@@ -234,11 +415,31 @@ function AnimationResolver.ResolveAssetId(logicalPath, options)
 	if not animationId and fallbackVariant and typeof(node[fallbackVariant]) == "string" then
 		animationId = node[fallbackVariant]
 		selectedVariant = fallbackVariant
+	elseif not animationId and fallbackVariant and type(node[fallbackVariant]) == "table" then
+		local fallbackAnimationId, fallbackDescriptor, isEmbeddedFallback = resolveEmbeddedKeyframeSequence(
+			logicalKey,
+			node[fallbackVariant],
+			fallbackVariant,
+			options
+		)
+		if isEmbeddedFallback then
+			return fallbackAnimationId, fallbackDescriptor
+		end
 	end
 
 	if not animationId and typeof(node.Default) == "string" then
 		animationId = node.Default
 		selectedVariant = "Default"
+	elseif not animationId and type(node.Default) == "table" then
+		local defaultAnimationId, defaultDescriptor, isEmbeddedDefault = resolveEmbeddedKeyframeSequence(
+			logicalKey,
+			node.Default,
+			"Default",
+			options
+		)
+		if isEmbeddedDefault then
+			return defaultAnimationId, defaultDescriptor
+		end
 	end
 
 	if not animationId then

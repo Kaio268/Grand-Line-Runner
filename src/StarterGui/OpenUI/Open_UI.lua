@@ -22,11 +22,29 @@ local CONFIG = {
 local FRAMES_DISPLAY_ORDER = 120
 local CONTROLLER_GENERATION_ATTRIBUTE = "OpenUIControllerGeneration"
 local OPENED_FRAME_ATTRIBUTE = "OpenUIOpened"
+local GIFT_OPENUI_DEBUG = true
+local GIFT_OPENUI_DEBUG_VERSION = "gifts-openui-x-debug-2026-05-01"
 local REACT_MODAL_FRAME_NAMES = {
 	Index = true,
 	Quest = true,
 	Store = true,
 }
+
+local function safeName(inst)
+	if not inst then
+		return "nil"
+	end
+	local ok, full = pcall(function()
+		return inst:GetFullName()
+	end)
+	return ok and full or tostring(inst)
+end
+
+local function giftOpenUiLog(...)
+	if GIFT_OPENUI_DEBUG then
+		print("[GIFT][OPENUI]", ...)
+	end
+end
 
 local function nextControllerGeneration(playerGui: PlayerGui): number
 	local nextGeneration = (tonumber(playerGui:GetAttribute(CONTROLLER_GENERATION_ATTRIBUTE)) or 0) + 1
@@ -302,7 +320,39 @@ function UIController:_initializeFrames()
 
 			for _, obj in ipairs(frame:GetDescendants()) do
 				if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Name == "X" then
+					if frame.Name == "Gifts" then
+						giftOpenUiLog(
+							"xConnectionMade",
+							"version",
+							GIFT_OPENUI_DEBUG_VERSION,
+							"signal",
+							"MouseButton1Click",
+							"frame",
+							safeName(frame),
+							"button",
+							safeName(obj),
+							"visible",
+							tostring(obj.Visible),
+							"active",
+							tostring(obj.Active),
+							"z",
+							obj.ZIndex
+						)
+					end
 					obj.MouseButton1Click:Connect(function()
+						if frame.Name == "Gifts" then
+							giftOpenUiLog(
+								"xClicked",
+								"version",
+								GIFT_OPENUI_DEBUG_VERSION,
+								"frame",
+								safeName(frame),
+								"button",
+								safeName(obj),
+								"frameVisible",
+								tostring(frame.Visible)
+							)
+						end
 						if frame.Visible then
 							self:ToggleFrame(frame)
 						end
@@ -461,6 +511,15 @@ function UIController.new(player: Player)
 	self.PlantVisible = false
 	self.ActiveErrorFrame = nil
 
+	giftOpenUiLog(
+		"start",
+		"version",
+		GIFT_OPENUI_DEBUG_VERSION,
+		"player",
+		player and player.Name or "nil",
+		"playerGui",
+		safeName(self.PlayerGui)
+	)
 	self:_ensureBlurEffect()
 	self:_initializeFrames()
 	self:_cacheButtons()

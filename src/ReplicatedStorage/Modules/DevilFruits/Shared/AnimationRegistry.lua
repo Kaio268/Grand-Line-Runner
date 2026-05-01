@@ -1,3 +1,94 @@
+local TORI_LIVE_ANIMATION_IDS = {
+	["Phoenix Flame Shield"] = "rbxassetid://97013962566487",
+	["Phoenix FlyEnd"] = "rbxassetid://71602814333465",
+	["Phoenix Flyidle"] = "rbxassetid://101255792958657",
+	["Phoenix Flying"] = "rbxassetid://117332907485620",
+	["Phoenix Flystart"] = "rbxassetid://73623883383126",
+	["Phoenix Revive"] = "rbxassetid://107891941161688",
+}
+
+local MOGU_LIVE_ANIMATION_IDS = {
+	MoleDigStart = "rbxassetid://108648477455184",
+	MoleDigEnd = "rbxassetid://70605245221664",
+}
+
+local function toriAnimationPath(animationName)
+	return {
+		"Assets",
+		"Animations",
+		"Tori",
+		animationName,
+	}
+end
+
+local function toriAnimationFallbackPaths(animationName)
+	return {
+		{
+			"Assets",
+			"VFX",
+			"Tori",
+			"PhoenixMan",
+			"AnimSaves",
+			animationName,
+		},
+		{
+			"Modules",
+			"DevilFruits",
+			"Tori",
+			"Assets",
+			"VFX",
+			"PhoenixMan",
+			"AnimSaves",
+			animationName,
+		},
+	}
+end
+
+local function toriEmbeddedAnimation(animationName, length)
+	return {
+		KeyframeSequencePath = toriAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = toriAnimationFallbackPaths(animationName),
+		LiveAnimationId = TORI_LIVE_ANIMATION_IDS[animationName],
+		Length = length,
+	}
+end
+
+local function moguAnimationPath(animationName)
+	return {
+		"Assets",
+		"Animations",
+		"Mogu",
+		"AnimSaves",
+		animationName,
+	}
+end
+
+local function moguAnimationFallbackPaths(animationName)
+	return {
+		{
+			"Assets",
+			"Animations",
+			"Mogu",
+			animationName,
+		},
+		{
+			"Workspace",
+			"Mogu",
+			"AnimSaves",
+			animationName,
+		},
+	}
+end
+
+local function moguEmbeddedAnimation(animationName, length)
+	return {
+		KeyframeSequencePath = moguAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = moguAnimationFallbackPaths(animationName),
+		LiveAnimationId = MOGU_LIVE_ANIMATION_IDS[animationName],
+		Length = length,
+	}
+end
+
 local Animations = {
 	Movement = {
 		R6Walk = "rbxassetid://87454242265342",
@@ -7,8 +98,8 @@ local Animations = {
 	},
 
 	EatFruit = {
-		R6 = "rbxassetid://73860017414112",
-		R6G = "rbxassetid://137337550041159",
+		R6 = "rbxassetid://131816863052592",
+		R6G = "rbxassetid://95090703686197",
 	},
 
 	Mera = {
@@ -37,9 +128,36 @@ local Animations = {
 		Rocket = "rbxassetid://100281752037524",
 	},
 
+	Bomu = {
+		Plant = "rbxassetid://107390126488207",
+		Detonate = "rbxassetid://83134643665375",
+		Jump = "rbxassetid://101430450037801",
+	},
+
+	Horo = {
+		HoroProjection = "rbxassetid://125055360036938",
+		HoroProjected = "rbxassetid://126380618595818",
+	},
+
 	Mogu = {
-		Dive = "rbxassetid://140152497789637",
-		Exit = "rbxassetid://103374605603335",
+		MoleDigStart = moguEmbeddedAnimation("MoleDigStart", 2.6666667),
+		MoleDigEnd = moguEmbeddedAnimation("MoleDigEnd", 1.1833333),
+		-- Keep the legacy logical names alive while the Mogu config moves to the authored keyframe saves.
+		Dive = moguEmbeddedAnimation("MoleDigStart", 2.6666667),
+		Exit = moguEmbeddedAnimation("MoleDigEnd", 1.1833333),
+	},
+
+	Suke = {
+		Suke1 = "rbxassetid://126435163862959",
+	},
+
+	Tori = {
+		PhoenixFlightStart = toriEmbeddedAnimation("Phoenix Flystart", 3.1666667),
+		PhoenixFlightLoop = toriEmbeddedAnimation("Phoenix Flying", 5.2),
+		PhoenixFlightIdle = toriEmbeddedAnimation("Phoenix Flyidle", 1),
+		PhoenixFlightEnd = toriEmbeddedAnimation("Phoenix FlyEnd", 1.2),
+		PhoenixFlameShield = toriEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
+		PhoenixRevive = toriEmbeddedAnimation("Phoenix Revive", 2.4),
 	},
 }
 

@@ -2,13 +2,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local Types = require(ReplicatedStorage.Modules.Types)
-local addbrairntos = require(script.Parent.Parent.Parent.Modules.AddBrainrot)
 local BrainrotInstanceService = require(script.Parent.Parent.Parent.Modules.BrainrotInstanceService)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
-local PlotSystem = workspace:WaitForChild("PlotSystem")
-local PlotsFolder = PlotSystem:WaitForChild("Plots")
+local PlotSystem = nil
+local PlotsFolder = nil
+local addbrairntos = nil
 
 local STEAL_PRODUCTS = {
 	[3512126073] = true,
@@ -19,8 +19,32 @@ local STEAL_PRODUCTS = {
 	[3512128716] = true,
 }
 
+local function getAddBrainrot()
+	addbrairntos = addbrairntos or require(script.Parent.Parent.Parent.Modules.AddBrainrot)
+	return addbrairntos
+end
+
+local function getPlotsFolder()
+	if PlotsFolder and PlotsFolder.Parent then
+		return PlotsFolder
+	end
+
+	PlotSystem = PlotSystem or workspace:FindFirstChild("PlotSystem") or workspace:WaitForChild("PlotSystem", 10)
+	if not PlotSystem then
+		return nil
+	end
+
+	PlotsFolder = PlotSystem:FindFirstChild("Plots") or PlotSystem:WaitForChild("Plots", 10)
+	return PlotsFolder
+end
+
 local function findPlotForUserId(userId)
-	for _, m in ipairs(PlotsFolder:GetChildren()) do
+	local plotsFolder = getPlotsFolder()
+	if not plotsFolder then
+		return nil
+	end
+
+	for _, m in ipairs(plotsFolder:GetChildren()) do
 		if m:IsA("Model") and m:GetAttribute("OwnerUserId") == userId then
 			return m
 		end
@@ -137,19 +161,19 @@ end
 
 local handlers = {
 	[3509346360] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		addbrairntos:AddBrainrot(player, "67", 1)
-		addbrairntos:AddBrainrot(player, "Dragon Cannelloni", 1)
+		getAddBrainrot():AddBrainrot(player, "67", 1)
+		getAddBrainrot():AddBrainrot(player, "Dragon Cannelloni", 1)
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000_000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000_000)
 		DataManager:SetValue(player, "Packs.Super OP Starter Pack", true)
 	end,
 
 	[3512059347] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		addbrairntos:AddBrainrot(player, "La Vacca Saturno Saturnita", 1)
+		getAddBrainrot():AddBrainrot(player, "La Vacca Saturno Saturnita", 1)
 	end,
 
 	[3509346182] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		addbrairntos:AddBrainrot(player, "Tralalero Tralala", 1)
+		getAddBrainrot():AddBrainrot(player, "Tralalero Tralala", 1)
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000)
 		if DataManager:GetValue(player, "Gears.Lava SpeedCoil") then
@@ -161,7 +185,7 @@ local handlers = {
 	end,
 
 	[3509346000] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		addbrairntos:AddBrainrot(player, "Elefanto Cocofanto", 1)
+		getAddBrainrot():AddBrainrot(player, "Elefanto Cocofanto", 1)
 		DataManager:SetValue(player, "Packs.Better Starter Pack", true)
 
 		if DataManager:GetValue(player, "Gears.Diamond SpeedCoil") then
@@ -175,7 +199,7 @@ local handlers = {
 	end,
 
 	[3509345784] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		addbrairntos:AddBrainrot(player, "Odin Din Din Dun", 1)
+		getAddBrainrot():AddBrainrot(player, "Odin Din Din Dun", 1)
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1000)
 		DataManager:SetValue(player, "Packs.Starter Pack", true)
