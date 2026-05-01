@@ -25,6 +25,7 @@ local ANIMATE_WARN_COOLDOWN = 4
 local MIN_VISIBLE_PLAY_TIME = 0.85
 local POST_PLAY_BUFFER = 0.1
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.EatAnimationClient"
+local HOLD_PRESENTATION_SUPPRESS_ATTRIBUTE = "FruitEatAnimationActive"
 local OWN_DIAGNOSTIC_PREFIXES = {
 	"[ANIMATE][WARN]",
 	"[ANIMATE]",
@@ -132,6 +133,14 @@ local function getActiveFruitTool(character, fruitKey)
 	end
 
 	return nil
+end
+
+local function setHoldPresentationSuppressed(tool, isSuppressed)
+	if not (tool and tool:IsA("Tool")) then
+		return
+	end
+
+	tool:SetAttribute(HOLD_PRESENTATION_SUPPRESS_ATTRIBUTE, isSuppressed == true)
 end
 
 local function getAnimateScript(character)
@@ -347,6 +356,7 @@ function EatAnimationClient.Play(player, fruitKey)
 
 	local tool = getActiveFruitTool(character, fruitKey)
 	if tool then
+		setHoldPresentationSuppressed(tool, true)
 		FruitGripController.PushContext(tool, fruitKey, "Eat", {
 			Tool = tool,
 			Player = player,
@@ -414,6 +424,7 @@ function EatAnimationClient.Play(player, fruitKey)
 			Player = player,
 			Character = character,
 		})
+		setHoldPresentationSuppressed(tool, false)
 	end
 
 	restoreAnimateGuard(animateGuardState)

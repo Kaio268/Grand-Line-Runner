@@ -32,6 +32,7 @@ local MODEL_VARIANT_ATTRIBUTE_NAMES = {
 	"EatAnimationRig",
 	"CurrentModelAsset",
 }
+local EAT_ANIMATION_ACTIVE_ATTRIBUTE = "FruitEatAnimationActive"
 local R6G_R6_MOTOR_ALIASES = {
 	["Right Shoulder"] = "RightShoulder",
 }
@@ -1260,6 +1261,10 @@ local function startState(player, character, tool, config)
 end
 
 local function shouldSuppressForContext(tool, config)
+	if tool and tool:GetAttribute(EAT_ANIMATION_ACTIVE_ATTRIBUTE) == true then
+		return true
+	end
+
 	local contextName = tool and tool:GetAttribute("FruitGripResolvedContext") or nil
 	local disabledContexts = type(config.DisableContexts) == "table" and config.DisableContexts or nil
 	return typeof(contextName) == "string" and contextName ~= "" and disabledContexts and disabledContexts[contextName] == true
@@ -1284,13 +1289,14 @@ local function updateState(player, character, dt, config)
 	end
 
 	local toolContext = state.Tool and state.Tool:GetAttribute("FruitGripResolvedContext") or ""
+	local suppressed = shouldSuppressForContext(state.Tool, config)
 	local active = tool ~= nil
 		and state.Tool == tool
 		and state.Humanoid
 		and state.Humanoid.Parent == character
 		and state.Humanoid.Health > 0
 		and config.Enabled ~= false
-		and not shouldSuppressForContext(state.Tool, config)
+		and not suppressed
 
 	if state.LastContext ~= toolContext or state.LastActive ~= active then
 		state.LastContext = toolContext
@@ -1303,6 +1309,15 @@ local function updateState(player, character, dt, config)
 			tostring(toolContext == "" and "default" or toolContext),
 			state.Weight
 		)
+	end
+
+	if suppressed then
+		if state.Weight > CLEANUP_WEIGHT then
+			resetStateTransforms(state)
+		end
+		state.Weight = 0
+		state.LastAppliedJointEntries = nil
+		return
 	end
 
 	local fadeSpeed = math.max(0.1, tonumber(config.FadeSpeed) or DEFAULT_FADE_SPEED)

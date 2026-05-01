@@ -16,6 +16,7 @@ local SETTINGS = {
 	MaxAbilityNameLength = 48,
 	MaxPayloadKeys = 4,
 	MaxPayloadKeyLength = 32,
+	MaxPayloadStringLength = 64,
 	MaxAbsVectorComponent = 100000,
 }
 
@@ -249,6 +250,13 @@ local function sanitizePayloadBySchema(player, payload, schema, characterState)
 			sanitized[key] = value
 		elseif expectedType == "UserId" then
 			if not validateUserId(value) then
+				addSuspicion(player, "PayloadInvalidValue", key)
+				return false, nil, "MalformedPayload", 0
+			end
+
+			sanitized[key] = value
+		elseif expectedType == "String" then
+			if typeof(value) ~= "string" or #value > SETTINGS.MaxPayloadStringLength then
 				addSuspicion(player, "PayloadInvalidValue", key)
 				return false, nil, "MalformedPayload", 0
 			end

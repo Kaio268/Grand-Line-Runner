@@ -3,29 +3,26 @@ local MessagingService = game:GetService("MessagingService")
 local TextService = game:GetService("TextService")
 local HttpService = game:GetService("HttpService")
 
-local EventController = require(game:GetService("ServerScriptService"):WaitForChild("EventController"))
+local ServerScriptService = game:GetService("ServerScriptService")
+local EventController = require(ServerScriptService:WaitForChild("EventController"))
+local AdminPermissions = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminPermissions"))
 
-local ADMIN_USER_IDS = {
-	1103783585,
-	2442286217,
-	780333260,
-}
-
-local adminSet = {}
-for _, id in ipairs(ADMIN_USER_IDS) do
-	adminSet[id] = true
-end
-
-local function getOrCreateRemote(name)
+local function getOrCreateRemote(name, className)
+	className = className or "RemoteEvent"
 	local r = ReplicatedStorage:FindFirstChild(name)
+	if r and not r:IsA(className) then
+		r:Destroy()
+		r = nil
+	end
 	if not r then
-		r = Instance.new("RemoteEvent")
+		r = Instance.new(className)
 		r.Name = name
 		r.Parent = ReplicatedStorage
 	end
 	return r
 end
 
+local adminStatusFunction = getOrCreateRemote("AdminStatusRequest", "RemoteFunction")
 local requestEvent = getOrCreateRemote("AdminAnnouncementRequest")
 local broadcastEvent = getOrCreateRemote("AdminAnnouncementBroadcast")
 
@@ -47,6 +44,10 @@ local function isCometEvent(name: string)
 	return string.lower(tostring(name or "")) == "comet"
 end
 
+adminStatusFunction.OnServerInvoke = function(player)
+	AdminPermissions.LogAdminStatusRequest(player, "AdminStatusRequest")
+	return AdminPermissions.IsAdmin(player)
+end
 
 local function markSeen(tbl, id)
 	tbl[id] = os.clock()
@@ -136,7 +137,9 @@ local function formatDuration(seconds)
 end
 
 requestEvent.OnServerEvent:Connect(function(player, message, duration)
-	if not adminSet[player.UserId] then
+	AdminPermissions.LogCommandAttempt(player, "announcement", "remote", string.format("duration=%s", tostring(duration)))
+	if not AdminPermissions.IsAdmin(player) then
+		AdminPermissions.LogCommandRejected(player, "announcement", "remote")
 		return
 	end
 
@@ -171,6 +174,7 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 
 	markSeen(seenAnn, payload.id)
 	fireAll(payload)
+	AdminPermissions.LogCommandExecuted(player, "announcement", "remote", string.format("duration=%d", duration))
 
 	task.spawn(function()
 		pcall(function()
@@ -180,7 +184,13 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 end)
 
 luckRequestEvent.OnServerEvent:Connect(function(player, luckValue, timeSeconds)
-	if not adminSet[player.UserId] then
+	AdminPermissions.LogCommandAttempt(player, "serverLuck", "remote", string.format(
+		"luckValue=%s timeSeconds=%s",
+		tostring(luckValue),
+		tostring(timeSeconds)
+	))
+	if not AdminPermissions.IsAdmin(player) then
+		AdminPermissions.LogCommandRejected(player, "serverLuck", "remote")
 		return
 	end
 
@@ -234,12 +244,19 @@ luckRequestEvent.OnServerEvent:Connect(function(player, luckValue, timeSeconds)
 	end)
 
 	luckAppliedEvent:FireClient(player, mult, seconds)
+	AdminPermissions.LogCommandExecuted(player, "serverLuck", "remote", string.format("multiplier=%d seconds=%d", mult, seconds))
 end)
 
 local CometMerchant = require(script.Parent.Modules.CometMerchant)
 
 mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeconds)
-	if not adminSet[player.UserId] then
+	AdminPermissions.LogCommandAttempt(player, "mainEvent", "remote", string.format(
+		"eventName=%s timeSeconds=%s",
+		tostring(eventName),
+		tostring(timeSeconds)
+	))
+	if not AdminPermissions.IsAdmin(player) then
+		AdminPermissions.LogCommandRejected(player, "mainEvent", "remote")
 		return
 	end
 
@@ -302,6 +319,7 @@ mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeco
 	end)
 
 	mainEventAppliedEvent:FireClient(player, eventName, seconds)
+	AdminPermissions.LogCommandExecuted(player, "mainEvent", "remote", string.format("event=%s seconds=%d", eventName, seconds))
 end)
 
 local function onAnnMessage(msg)

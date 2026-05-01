@@ -7,7 +7,6 @@ local DevilFruitService = {}
 
 local COOLDOWN_BYPASS_ATTRIBUTE = "DevilFruitCooldownBypass"
 local MERA_DASH_DEBUG_ATTRIBUTE = "MeraFlameDashDebug"
-local MERA_AUDIT_MARKER = "MERA_AUDIT_2026_03_30_V4"
 local PERSIST_RETRY_DELAY = 1
 local MAX_PERSIST_ATTEMPTS = 20
 local HYDRATION_READY_TIMEOUT = 30
@@ -56,7 +55,148 @@ if not DataManager._initialized and typeof(DataManager.init) == "function" then
 	DataManager.init()
 end
 
-local function swaptoR6G(player, newModelName)
+local function normalizeCharacterModelConfig(value, fallbackName)
+	if type(value) == "table" then
+		local assetName = value.AssetName or value.Name or fallbackName
+		if typeof(assetName) == "string" and assetName ~= "" then
+			local aliases = {}
+			if type(value.Aliases) == "table" then
+				for _, alias in ipairs(value.Aliases) do
+					if typeof(alias) == "string" and alias ~= "" then
+						aliases[#aliases + 1] = alias
+					end
+				end
+			end
+
+			return {
+				AssetName = assetName,
+				Aliases = aliases,
+				RigVariant = value.RigVariant,
+				PreserveTemplateAppearance = value.PreserveTemplateAppearance == true,
+				IsModifiedR15 = value.IsModifiedR15,
+			}
+		end
+	end
+
+	if typeof(value) == "string" and value ~= "" then
+		return {
+			AssetName = value,
+			Aliases = {},
+		}
+	end
+
+	if typeof(fallbackName) == "string" and fallbackName ~= "" then
+		return {
+			AssetName = fallbackName,
+			Aliases = {},
+		}
+	end
+
+	return nil
+end
+
+local function isCharacterModelTemplate(instance)
+	return typeof(instance) == "Instance"
+		and instance:IsA("Model")
+		and instance:FindFirstChildOfClass("Humanoid") ~= nil
+		and instance:FindFirstChild("HumanoidRootPart", true) ~= nil
+end
+
+local function resolveCharacterModelTemplate(candidate)
+	if isCharacterModelTemplate(candidate) then
+		return candidate
+	end
+
+	if typeof(candidate) ~= "Instance" then
+		return nil
+	end
+
+	for _, descendant in ipairs(candidate:GetDescendants()) do
+		if isCharacterModelTemplate(descendant) then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function findCharacterTemplateInFolder(folder, modelConfig)
+	if typeof(folder) ~= "Instance" or type(modelConfig) ~= "table" then
+		return nil
+	end
+
+	local candidateNames = { modelConfig.AssetName }
+	for _, alias in ipairs(modelConfig.Aliases or {}) do
+		candidateNames[#candidateNames + 1] = alias
+	end
+
+	for _, candidateName in ipairs(candidateNames) do
+		if typeof(candidateName) == "string" and candidateName ~= "" then
+			local direct = folder:FindFirstChild(candidateName)
+			if direct then
+				local template = resolveCharacterModelTemplate(direct)
+				if template then
+					return template
+				end
+			end
+		end
+	end
+
+	local normalizedNames = {}
+	for _, candidateName in ipairs(candidateNames) do
+		if typeof(candidateName) == "string" and candidateName ~= "" then
+			normalizedNames[string.lower(candidateName)] = true
+		end
+	end
+
+	for _, child in ipairs(folder:GetChildren()) do
+		if normalizedNames[string.lower(child.Name)] then
+			local template = resolveCharacterModelTemplate(child)
+			if template then
+				return template
+			end
+		end
+	end
+
+	if #folder:GetChildren() == 1 then
+		return resolveCharacterModelTemplate(folder:GetChildren()[1])
+	end
+
+	return nil
+end
+
+local function getFruitScopedCharacterModelsFolder(fruitName)
+	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
+	local fruitKey = fruitConfig and fruitConfig.FruitKey
+	if typeof(fruitKey) ~= "string" or fruitKey == "" then
+		return nil
+	end
+
+	local devilFruitsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits")
+	local fruitFolder = devilFruitsFolder:FindFirstChild(fruitKey)
+	local assetsFolder = fruitFolder and fruitFolder:FindFirstChild("Assets")
+	return assetsFolder and assetsFolder:FindFirstChild("CharacterModels") or nil
+end
+
+local function getCharacterModelTemplate(modelConfig, fruitName)
+	local globalFolder = ReplicatedStorage:FindFirstChild("Assets")
+	globalFolder = globalFolder and globalFolder:FindFirstChild("CharacterModels") or nil
+
+	local template = findCharacterTemplateInFolder(globalFolder, modelConfig)
+	if template then
+		return template
+	end
+
+	return findCharacterTemplateInFolder(getFruitScopedCharacterModelsFolder(fruitName), modelConfig)
+end
+
+local function swaptoR6G(player, modelConfig, fruitName)
+	modelConfig = normalizeCharacterModelConfig(modelConfig, "R6")
+	if not modelConfig then
+		return
+	end
+
+	local newModelName = modelConfig.AssetName
 	local character = player.Character or player.CharacterAdded:Wait()
 	-- Wait a frame to ensure the character is fully in the workspace
 	task.wait()
@@ -67,7 +207,7 @@ local function swaptoR6G(player, newModelName)
 		return
 	end
 
-	local modelTemplate = ReplicatedStorage.Assets.CharacterModels:FindFirstChild(newModelName)
+	local modelTemplate = getCharacterModelTemplate(modelConfig, fruitName)
 	if not modelTemplate then
 		warn("[DevilFruitService] Could not find model template: " .. newModelName)
 		return
@@ -81,11 +221,16 @@ local function swaptoR6G(player, newModelName)
 	local newCharacter = modelTemplate:Clone()
 	newCharacter.Name = player.Name
 
+	local rigVariant = if typeof(modelConfig.RigVariant) == "string" and modelConfig.RigVariant ~= ""
+		then modelConfig.RigVariant
+		else newModelName
+	local isModifiedR15 = if modelConfig.IsModifiedR15 ~= nil then modelConfig.IsModifiedR15 == true else newModelName == "R6G"
+
 	-- Track the specific model asset so we can swap between different custom models later
 	newCharacter:SetAttribute("CurrentModelAsset", newModelName)
-	newCharacter:SetAttribute("EatAnimationRig", newModelName)
-	newCharacter:SetAttribute("FruitModelVariant", newModelName)
-	newCharacter:SetAttribute("IsModifiedR15", true)
+	newCharacter:SetAttribute("EatAnimationRig", rigVariant)
+	newCharacter:SetAttribute("FruitModelVariant", rigVariant)
+	newCharacter:SetAttribute("IsModifiedR15", isModifiedR15)
 
 	local newHumanoid = newCharacter:FindFirstChildOfClass("Humanoid")
 	if not newHumanoid then
@@ -94,39 +239,41 @@ local function swaptoR6G(player, newModelName)
 	end
 
 	-- 2. APPLY APPEARANCE
-	local success, playerDescription = pcall(function()
-		return Players:GetHumanoidDescriptionFromUserId(player.UserId)
-	end)
-
-	if success and playerDescription then
-		playerDescription.HeadScale, playerDescription.HeightScale = 1, 1
-		playerDescription.WidthScale, playerDescription.DepthScale = 1, 1
-
-		local templateDescription = newHumanoid:GetAppliedDescription()
-		playerDescription.LeftArm = templateDescription.LeftArm
-		playerDescription.RightArm = templateDescription.RightArm
-		playerDescription.LeftLeg = templateDescription.LeftLeg
-		playerDescription.RightLeg = templateDescription.RightLeg
-		playerDescription.Torso = templateDescription.Torso
-
-		pcall(function()
-			newHumanoid:ApplyDescription(playerDescription)
+	if not modelConfig.PreserveTemplateAppearance then
+		local success, playerDescription = pcall(function()
+			return Players:GetHumanoidDescriptionFromUserId(player.UserId)
 		end)
+
+		if success and playerDescription then
+			playerDescription.HeadScale, playerDescription.HeightScale = 1, 1
+			playerDescription.WidthScale, playerDescription.DepthScale = 1, 1
+
+			local templateDescription = newHumanoid:GetAppliedDescription()
+			playerDescription.LeftArm = templateDescription.LeftArm
+			playerDescription.RightArm = templateDescription.RightArm
+			playerDescription.LeftLeg = templateDescription.LeftLeg
+			playerDescription.RightLeg = templateDescription.RightLeg
+			playerDescription.Torso = templateDescription.Torso
+
+			pcall(function()
+				newHumanoid:ApplyDescription(playerDescription)
+			end)
+		end
 	end
 
-	if newHumanoid and newModelName == "R6G" then
+	if newHumanoid and rigVariant == "R6G" then
 		-- Ensure the Humanoid recognizes the rig as R15 (since R6G is a modified R15)
 		newHumanoid.HipHeight = 2
 		newHumanoid.RigType = Enum.HumanoidRigType.R15
 	end
 
 	if newHumanoid then
-		newHumanoid:SetAttribute("EatAnimationRig", newModelName)
-		newHumanoid:SetAttribute("FruitModelVariant", newModelName)
+		newHumanoid:SetAttribute("EatAnimationRig", rigVariant)
+		newHumanoid:SetAttribute("FruitModelVariant", rigVariant)
 	end
 
-	player:SetAttribute("EatAnimationRig", newModelName)
-	player:SetAttribute("FruitModelVariant", newModelName)
+	player:SetAttribute("EatAnimationRig", rigVariant)
+	player:SetAttribute("FruitModelVariant", rigVariant)
 
 	-- 3. PERFORM THE SWAP
 	player.Character = newCharacter
@@ -293,11 +440,25 @@ local function ensureMoguClawsAttached(player)
 end
 
 local function getDesiredCharacterModelAsset(fruitName)
-	if fruitName == "Gomu Gomu no Mi" then
-		return "R6G"
+	local fruitConfig = DevilFruitConfig.GetFruit(fruitName)
+	local configuredModel = fruitConfig and normalizeCharacterModelConfig(fruitConfig.CharacterModel)
+	if configuredModel then
+		return configuredModel
 	end
 
-	return "R6"
+	if fruitName == "Gomu Gomu no Mi" then
+		return normalizeCharacterModelConfig({
+			AssetName = "R6G",
+			RigVariant = "R6G",
+			IsModifiedR15 = true,
+		})
+	end
+
+	return normalizeCharacterModelConfig({
+		AssetName = "R6",
+		RigVariant = "R6",
+		IsModifiedR15 = false,
+	})
 end
 
 local function applyFruitCharacterModel(player, fruitName)
@@ -306,9 +467,10 @@ local function applyFruitCharacterModel(player, fruitName)
 		return
 	end
 
-	local desiredModelAsset = getDesiredCharacterModelAsset(fruitName)
+	local desiredModelConfig = getDesiredCharacterModelAsset(fruitName)
+	local desiredModelAsset = desiredModelConfig and desiredModelConfig.AssetName or "R6"
 	if character:GetAttribute("CurrentModelAsset") ~= desiredModelAsset then
-		swaptoR6G(player, desiredModelAsset)
+		swaptoR6G(player, desiredModelConfig, fruitName)
 		character = player.Character
 		if not character then
 			return
@@ -353,33 +515,6 @@ local function countPayloadKeys(payload)
 	return count
 end
 
-local function describePayloadForAudit(payload)
-	if typeof(payload) ~= "table" then
-		return string.format("type=%s value=%s", typeof(payload), tostring(payload))
-	end
-
-	local keys = {}
-	for key in pairs(payload) do
-		keys[#keys + 1] = key
-	end
-
-	table.sort(keys, function(left, right)
-		return tostring(left) < tostring(right)
-	end)
-
-	local parts = {}
-	for _, key in ipairs(keys) do
-		local value = payload[key]
-		if typeof(value) == "Vector3" then
-			parts[#parts + 1] = string.format("%s=(%.2f, %.2f, %.2f)", tostring(key), value.X, value.Y, value.Z)
-		else
-			parts[#parts + 1] = string.format("%s=%s", tostring(key), tostring(value))
-		end
-	end
-
-	return string.format("type=table keys=%d payload={%s}", #keys, table.concat(parts, ", "))
-end
-
 local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
 end
@@ -391,20 +526,6 @@ end
 
 local function shouldLogMeraDashAttempt(fruitName, abilityName)
 	return abilityName == "FlameDash" or fruitName == "Mera Mera no Mi"
-end
-
-local function shouldLogMeraAudit(fruitName, abilityName)
-	return fruitName == "Mera Mera no Mi" or abilityName == "FlameDash" or abilityName == "FireBurst"
-end
-
-local function logMeraAudit(level, message, ...)
-	local formattedMessage = string.format("[%s] " .. message, MERA_AUDIT_MARKER, ...)
-	if level == "WARN" then
-		DevilFruitLogger.Warn("SERVER", formattedMessage)
-		return
-	end
-
-	DevilFruitLogger.Info("SERVER", formattedMessage)
 end
 
 local function logMeraDashServer(player, message, ...)
@@ -694,6 +815,30 @@ local function getCooldownTable(player)
 	return playerCooldowns
 end
 
+local function clearFruitHandlerRuntimeState(player, fruitName, cleanupReason)
+	if fruitName == DevilFruitConfig.None then
+		return false
+	end
+
+	local fruitHandler = getFruitHandler(fruitName)
+	if not fruitHandler or typeof(fruitHandler.ClearRuntimeState) ~= "function" then
+		return false
+	end
+
+	local ok, err = pcall(fruitHandler.ClearRuntimeState, player, fruitName, cleanupReason)
+	if not ok then
+		warn(string.format(
+			"[DevilFruitService] Failed to clear runtime state for %s during %s: %s",
+			tostring(fruitName),
+			tostring(cleanupReason or "runtime_cleanup"),
+			tostring(err)
+		))
+		return false
+	end
+
+	return true
+end
+
 clearFruitRuntimeState = function(player, fruitName)
 	if fruitName == DevilFruitConfig.None then
 		return
@@ -719,13 +864,7 @@ clearFruitRuntimeState = function(player, fruitName)
 		player:SetAttribute("HieIceBoostSpeedBonus", nil)
 	end
 
-	local fruitHandler = getFruitHandler(fruitName)
-	if fruitHandler and typeof(fruitHandler.ClearRuntimeState) == "function" then
-		local ok, err = pcall(fruitHandler.ClearRuntimeState, player, fruitName)
-		if not ok then
-			warn(string.format("[DevilFruitService] Failed to clear runtime state for %s: %s", fruitName, tostring(err)))
-		end
-	end
+	clearFruitHandlerRuntimeState(player, fruitName, "full_runtime_clear")
 end
 
 local function applyEquippedFruitRuntimeState(player, fruitValue, fruitName)
@@ -745,6 +884,16 @@ getEquippedFruit = function(player)
 	end
 
 	return DevilFruitConfig.None
+end
+
+local function cleanupCharacterRuntimeState(player)
+	local currentFruit = getEquippedFruit(player)
+	if currentFruit == DevilFruitConfig.None then
+		return
+	end
+
+	-- Character reset should stop active fruit runtime without forgiving cooldowns.
+	clearFruitHandlerRuntimeState(player, currentFruit, "character_removing")
 end
 
 syncFruitAttribute = function(player, fruitName)
@@ -821,6 +970,10 @@ local function hookPlayer(player)
 				local equippedFruit = getEquippedFruit(player)
 				applyFruitCharacterModel(player, equippedFruit)
 			end)
+		end)
+
+		player.CharacterRemoving:Connect(function()
+			cleanupCharacterRuntimeState(player)
 		end)
 	end)
 end
@@ -908,7 +1061,7 @@ local function isAbilityReady(player, abilityName)
 		return true, 0
 	end
 
-	local now = os.clock()
+	local now = getSharedTimestamp()
 	if now >= readyAt then
 		return true, 0
 	end
@@ -924,7 +1077,7 @@ local function setAbilityCooldown(player, abilityName, duration)
 	end
 
 	local cooldowns = getCooldownTable(player)
-	local readyAt = os.clock() + duration
+	local readyAt = getSharedTimestamp() + duration
 	cooldowns[abilityName] = readyAt
 	return readyAt
 end
@@ -1012,22 +1165,6 @@ local function handleAbilityRequest(player, abilityName, requestPayload)
 		tostring(abilityName),
 		countPayloadKeys(requestPayload)
 	)
-	if shouldLogMeraAudit(equippedFruitAtReceipt, abilityName) then
-		logMeraAudit(
-			"INFO",
-			"Mera server request received player=%s equipped=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s payload=%s",
-			player and player.Name or "<nil>",
-			tostring(equippedFruitAtReceipt),
-			tostring(abilityName),
-			tostring(requestIdentity.Name),
-			tostring(requestIdentity.Path),
-			tostring(requestIdentity.RuntimeId),
-			tostring(requestIdentity.DebugId),
-			tostring(requestIdentity.Object),
-			describePayloadForAudit(requestPayload)
-		)
-	end
-
 	local requestOk, validated = DevilFruitValidation.ValidateRequest({
 		Player = player,
 		AbilityName = abilityName,
@@ -1051,16 +1188,6 @@ local function handleAbilityRequest(player, abilityName, requestPayload)
 			player and player.Name or "<nil>",
 			tostring(abilityName)
 		)
-		if shouldLogMeraAudit(equippedFruitAtReceipt, abilityName) then
-			logMeraAudit(
-				"WARN",
-				"Mera server request rejected player=%s equipped=%s ability=%s stage=validation payload=%s",
-				player and player.Name or "<nil>",
-				tostring(equippedFruitAtReceipt),
-				tostring(abilityName),
-				describePayloadForAudit(requestPayload)
-			)
-		end
 		if shouldLogMeraDashAttempt(getEquippedFruit(player), abilityName) then
 			logMeraDashServer(
 				player,
@@ -1081,17 +1208,6 @@ local function handleAbilityRequest(player, abilityName, requestPayload)
 		tostring(abilityName),
 		countPayloadKeys(validated.SanitizedPayload)
 	)
-	if shouldLogMeraAudit(validated.EquippedFruit, abilityName) then
-		logMeraAudit(
-			"INFO",
-			"Mera server request validated player=%s fruit=%s ability=%s payload=%s",
-			player.Name,
-			tostring(validated.EquippedFruit),
-			tostring(abilityName),
-			describePayloadForAudit(validated.SanitizedPayload)
-		)
-	end
-
 	local executed = executeAbility(player, validated.EquippedFruit, abilityName, validated.AbilityConfig, validated.SanitizedPayload, validated.CharacterState, {
 		ReceivedAt = requestReceivedAt,
 	})
@@ -1103,16 +1219,6 @@ local function handleAbilityRequest(player, abilityName, requestPayload)
 		tostring(abilityName),
 		tostring(executed == true)
 	)
-	if shouldLogMeraAudit(validated.EquippedFruit, abilityName) then
-		logMeraAudit(
-			executed == true and "INFO" or "WARN",
-			"Mera server request execution complete player=%s fruit=%s ability=%s executed=%s",
-			player.Name,
-			tostring(validated.EquippedFruit),
-			tostring(abilityName),
-			tostring(executed == true)
-		)
-	end
 end
 
 local function ensureRequestRemoteConnection()
@@ -1249,7 +1355,7 @@ function DevilFruitService.GetCooldownBypass(player)
 	return isCooldownBypassEnabled(player)
 end
 
-function DevilFruitService.IsHazardSuppressedForPlayer(player, instance)
+function DevilFruitService.IsHazardSuppressedForPlayer(player, _instance)
 	local untilTime = player:GetAttribute("MeraFireBurstUntil")
 	if typeof(untilTime) ~= "number" then
 		return false

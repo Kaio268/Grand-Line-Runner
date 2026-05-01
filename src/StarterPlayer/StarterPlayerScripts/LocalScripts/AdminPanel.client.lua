@@ -4,19 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
-local ADMIN_USER_IDS = {
-	1103783585,
-	2442286217,
-	780333260,
-}
-
-local adminSet = {}
-for _, id in ipairs(ADMIN_USER_IDS) do
-	adminSet[id] = true
-end
-
 local player = Players.LocalPlayer
-local isAdmin = adminSet[player.UserId] == true
 
 local function safeWait(parent, name)
 	local obj = parent:WaitForChild(name, 15)
@@ -24,6 +12,15 @@ local function safeWait(parent, name)
 		error(("Brak %s w %s"):format(name, parent:GetFullName()))
 	end
 	return obj
+end
+
+local adminStatusFunction = safeWait(ReplicatedStorage, "AdminStatusRequest")
+local isAdmin = false
+if adminStatusFunction:IsA("RemoteFunction") then
+	local ok, result = pcall(function()
+		return adminStatusFunction:InvokeServer()
+	end)
+	isAdmin = ok and result == true
 end
 
 local requestEvent = safeWait(ReplicatedStorage, "AdminAnnouncementRequest")
