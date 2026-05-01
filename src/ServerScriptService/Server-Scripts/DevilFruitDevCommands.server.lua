@@ -1,9 +1,19 @@
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local function adminCommandFlowLog(message, ...)
+	print("[AdminCommandFlow] " .. string.format(message, ...))
+end
+
+local function adminCommandFlowWarn(message, ...)
+	warn("[AdminCommandFlow] " .. string.format(message, ...))
+end
+
+adminCommandFlowLog("DevilFruitDevCommands server script started")
+
+local AdminPermissions = require(ServerScriptService.Modules:WaitForChild("AdminPermissions"))
 local DevilFruitService = require(ServerScriptService.Modules:WaitForChild("DevilFruitService"))
 local DevilFruitInventoryService = require(ServerScriptService.Modules:WaitForChild("DevilFruitInventoryService"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
@@ -22,18 +32,29 @@ local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
-local ADMIN_USER_IDS = {
-	1103783585,
-	2442286217,
-	780333260,
-}
+adminCommandFlowLog("DevilFruitDevCommands dependencies loaded")
+
+local function getOrCreateRemoteEvent(name)
+	local remote = ReplicatedStorage:FindFirstChild(name)
+	if remote and not remote:IsA("RemoteEvent") then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = ReplicatedStorage
+	end
+	return remote
+end
+
+local adminCommandRequestEvent = getOrCreateRemoteEvent("AdminCommandRequest")
 
 local RECENT_COMMAND_WINDOW = 0.4
 local WIPE_CONFIRM_WINDOW = 20
 local SPEED_STAT_PATH = "HiddenLeaderstats.Speed"
 local DEFAULT_SPEED_STAT = tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1
 
-local adminSet = {}
 local recentCommands = {}
 local pendingWipeConfirmations = {}
 local fruitAliases = {}
@@ -75,9 +96,24 @@ local boostAliases = {
 	},
 }
 
-for _, userId in ipairs(ADMIN_USER_IDS) do
-	adminSet[userId] = true
-end
+local ADMIN_COMMAND_NAMES = {
+	fruit = true,
+	money = true,
+	speed = true,
+	setspeed = true,
+	boost = true,
+	rebirth = true,
+	bounty = true,
+	give = true,
+	spawn = true,
+	chest = true,
+	shipreset = true,
+	clear = true,
+	wipeplayer = true,
+	resetprogress = true,
+	gifts = true,
+	giftreset = true,
+}
 
 local function normalizeText(text)
 	return tostring(text or ""):lower():match("^%s*(.-)%s*$") or ""
@@ -223,11 +259,7 @@ for _, fruit in ipairs(DevilFruitConfig.GetAllFruits()) do
 end
 
 local function isAuthorized(player)
-	if not player then
-		return false
-	end
-
-	return RunService:IsStudio() or adminSet[player.UserId] == true
+	return AdminPermissions.IsAdmin(player)
 end
 
 local function markRecentCommand(player, commandText)
@@ -1409,98 +1441,180 @@ local function getCommandNameAndArguments(rawText)
 	return commandName, argumentText or "", normalizedText
 end
 
-local function handleChatCommand(player, rawText)
+local function handleChatCommand(player, rawText, source)
+	source = source or "chat"
 	if not player then
+		adminCommandFlowWarn("ignored command attempt source=%s reason=missing_player text=%s", tostring(source), tostring(rawText))
 		return
 	end
 
 	local commandName, argumentText, normalizedText = getCommandNameAndArguments(rawText)
 	if not commandName then
+		if normalizedText:sub(1, 1) == "/" then
+			adminCommandFlowLog(
+				"ignored slash text source=%s player=%s userId=%d reason=no_command text=%s",
+				tostring(source),
+				player.Name,
+				player.UserId,
+				normalizedText
+			)
+		end
 		return
 	end
 
-	if commandName ~= "fruit" and commandName ~= "money" and commandName ~= "speed" and commandName ~= "setspeed" and commandName ~= "boost" and commandName ~= "rebirth" and commandName ~= "bounty" and commandName ~= "give" and commandName ~= "spawn" and commandName ~= "chest" and commandName ~= "shipreset" and commandName ~= "clear" and commandName ~= "wipeplayer" and commandName ~= "resetprogress" and commandName ~= "gifts" and commandName ~= "giftreset" then
+	if not ADMIN_COMMAND_NAMES[commandName] then
+		adminCommandFlowLog(
+			"ignored slash command source=%s player=%s userId=%d command=%s reason=not_admin_command text=%s",
+			tostring(source),
+			player.Name,
+			player.UserId,
+			commandName,
+			normalizedText
+		)
+		return
+	end
+
+	AdminPermissions.LogCommandAttempt(player, commandName, source, string.format("text=%s", normalizedText))
+
+	if not isAuthorized(player) then
+		AdminPermissions.LogCommandRejected(player, commandName, source)
 		return
 	end
 
 	if not markRecentCommand(player, normalizedText) then
+		adminCommandFlowLog(
+			"ignored duplicate admin command source=%s player=%s userId=%d command=%s text=%s",
+			tostring(source),
+			player.Name,
+			player.UserId,
+			commandName,
+			normalizedText
+		)
 		return
 	end
 
+	adminCommandFlowLog(
+		"accepted admin command source=%s player=%s userId=%d command=%s args=%s",
+		tostring(source),
+		player.Name,
+		player.UserId,
+		commandName,
+		argumentText
+	)
+
 	if commandName == "fruit" then
 		processFruitCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "boost" then
 		processBoostCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "speed" or commandName == "setspeed" then
 		processSpeedCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "rebirth" then
 		processRebirthCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "bounty" then
 		processBountyCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "spawn" then
 		processSpawnCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "give" then
 		processGiveCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "chest" then
 		processChestCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "shipreset" then
 		processShipResetCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "clear" then
 		processClearCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "gifts" or commandName == "giftreset" then
 		processGiftResetCommand(player, argumentText, commandName)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	if commandName == "wipeplayer" or commandName == "resetprogress" then
 		processWipePlayerCommand(player, argumentText, commandName)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
 		return
 	end
 
 	processMoneyCommand(player, argumentText)
+	AdminPermissions.LogCommandExecuted(player, commandName, source)
 end
 
+-- Admin panel execution stays server-authoritative by reusing the exact same
+-- parser, permission checks, duplicate guard, and command handlers as chat.
+adminCommandRequestEvent.OnServerEvent:Connect(function(player, rawText)
+	if type(rawText) ~= "string" then
+		AdminPermissions.LogCommandRejected(player, "adminPanelCommand", "AdminPanelRemote", "reason=invalid_payload")
+		return
+	end
+
+	local commandText = rawText:gsub("\r", ""):gsub("\n", " ")
+	commandText = commandText:match("^%s*(.-)%s*$") or ""
+	if commandText == "" then
+		return
+	end
+	commandText = commandText:sub(1, 240)
+	if commandText:sub(1, 1) ~= "/" then
+		commandText = "/" .. commandText
+	end
+
+	handleChatCommand(player, commandText, "AdminPanelRemote")
+end)
+
 local function hookPlayer(player)
+	adminCommandFlowLog("hooking Player.Chatted player=%s userId=%d", player.Name, player.UserId)
 	player.Chatted:Connect(function(message)
-		handleChatCommand(player, message)
+		adminCommandFlowLog("Player.Chatted fired player=%s userId=%d text=%s", player.Name, player.UserId, tostring(message))
+		handleChatCommand(player, message, "Player.Chatted")
 	end)
 end
 
 local function setupTextChatCommand()
+	adminCommandFlowLog("setupTextChatCommand begin chatVersion=%s", tostring(TextChatService.ChatVersion))
 	local commandsFolder = TextChatService:FindFirstChild("TextChatCommands") or TextChatService:WaitForChild("TextChatCommands", 10)
 	if not commandsFolder then
+		adminCommandFlowWarn("setupTextChatCommand failed reason=TextChatCommands_missing")
 		return
 	end
+	adminCommandFlowLog("setupTextChatCommand found folder=%s children=%d", commandsFolder:GetFullName(), #commandsFolder:GetChildren())
 
 	local command = commandsFolder:FindFirstChild("DevilFruitDevCommand")
 	if command and not command:IsA("TextChatCommand") then
@@ -1520,17 +1634,18 @@ local function setupTextChatCommand()
 	command.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=DevilFruitDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/fruit" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:DevilFruitDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/fruit " .. normalizedText) or "/fruit"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:DevilFruitDevCommand")
 	end)
 
 	local moneyCommand = commandsFolder:FindFirstChild("MoneyDevCommand")
@@ -1551,17 +1666,18 @@ local function setupTextChatCommand()
 	moneyCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=MoneyDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/money" or normalizedText:sub(1, 7) == "/ money" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:MoneyDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/money " .. normalizedText) or "/money"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:MoneyDevCommand")
 	end)
 
 	local speedCommand = commandsFolder:FindFirstChild("SpeedDevCommand")
@@ -1582,17 +1698,18 @@ local function setupTextChatCommand()
 	speedCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=SpeedDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/speed" or normalizedText:sub(1, 7) == "/ speed" or normalizedText:sub(1, 9) == "/setspeed" or normalizedText:sub(1, 10) == "/ setspeed" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:SpeedDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/speed " .. normalizedText) or "/speed"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:SpeedDevCommand")
 	end)
 
 	local boostCommand = commandsFolder:FindFirstChild("BoostDevCommand")
@@ -1613,17 +1730,18 @@ local function setupTextChatCommand()
 	boostCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=BoostDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/boost" or normalizedText:sub(1, 7) == "/ boost" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:BoostDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/boost " .. normalizedText) or "/boost"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:BoostDevCommand")
 	end)
 
 	local rebirthCommand = commandsFolder:FindFirstChild("RebirthDevCommand")
@@ -1644,17 +1762,18 @@ local function setupTextChatCommand()
 	rebirthCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=RebirthDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 8) == "/rebirth" or normalizedText:sub(1, 9) == "/ rebirth" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:RebirthDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/rebirth " .. normalizedText) or "/rebirth"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:RebirthDevCommand")
 	end)
 
 	local bountyCommand = commandsFolder:FindFirstChild("BountyDevCommand")
@@ -1675,17 +1794,18 @@ local function setupTextChatCommand()
 	bountyCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=BountyDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 7) == "/bounty" or normalizedText:sub(1, 8) == "/ bounty" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:BountyDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/bounty " .. normalizedText) or "/bounty"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:BountyDevCommand")
 	end)
 
 	local giveCommand = commandsFolder:FindFirstChild("GiveDevCommand")
@@ -1706,17 +1826,18 @@ local function setupTextChatCommand()
 	giveCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=GiveDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 5) == "/give" or normalizedText:sub(1, 6) == "/ give" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:GiveDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/give " .. normalizedText) or "/give"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:GiveDevCommand")
 	end)
 
 	local spawnCommand = commandsFolder:FindFirstChild("SpawnDevCommand")
@@ -1737,17 +1858,18 @@ local function setupTextChatCommand()
 	spawnCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=SpawnDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/spawn" or normalizedText:sub(1, 7) == "/ spawn" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:SpawnDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/spawn " .. normalizedText) or "/spawn"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:SpawnDevCommand")
 	end)
 
 	local chestCommand = commandsFolder:FindFirstChild("ChestDevCommand")
@@ -1768,17 +1890,18 @@ local function setupTextChatCommand()
 	chestCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=ChestDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/chest" or normalizedText:sub(1, 7) == "/ chest" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:ChestDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/chest " .. normalizedText) or "/chest"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:ChestDevCommand")
 	end)
 
 	local shipResetCommand = commandsFolder:FindFirstChild("ShipResetDevCommand")
@@ -1799,17 +1922,18 @@ local function setupTextChatCommand()
 	shipResetCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=ShipResetDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 10) == "/shipreset" or normalizedText:sub(1, 11) == "/ shipreset" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:ShipResetDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/shipreset " .. normalizedText) or "/shipreset"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:ShipResetDevCommand")
 	end)
 
 	local clearCommand = commandsFolder:FindFirstChild("ClearDevCommand")
@@ -1830,17 +1954,18 @@ local function setupTextChatCommand()
 	clearCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=ClearDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/clear" or normalizedText:sub(1, 7) == "/ clear" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:ClearDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/clear " .. normalizedText) or "/clear"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:ClearDevCommand")
 	end)
 
 	local giftsCommand = commandsFolder:FindFirstChild("GiftsDevCommand")
@@ -1861,17 +1986,18 @@ local function setupTextChatCommand()
 	giftsCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=GiftsDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 6) == "/gifts" or normalizedText:sub(1, 10) == "/giftreset" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:GiftsDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/gifts " .. normalizedText) or "/gifts"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:GiftsDevCommand")
 	end)
 
 	local wipeCommand = commandsFolder:FindFirstChild("WipePlayerDevCommand")
@@ -1892,18 +2018,21 @@ local function setupTextChatCommand()
 	wipeCommand.Triggered:Connect(function(textSource, unfilteredText)
 		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
 		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=WipePlayerDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
 			return
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
 		if normalizedText:sub(1, 11) == "/wipeplayer" or normalizedText:sub(1, 14) == "/resetprogress" then
-			handleChatCommand(player, normalizedText)
+			handleChatCommand(player, normalizedText, "TextChatCommand:WipePlayerDevCommand")
 			return
 		end
 
 		local syntheticCommand = normalizedText ~= "" and ("/wipeplayer " .. normalizedText) or "/wipeplayer"
-		handleChatCommand(player, syntheticCommand)
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:WipePlayerDevCommand")
 	end)
+
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=13")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do
@@ -1911,4 +2040,5 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerAdded:Connect(hookPlayer)
+adminCommandFlowLog("PlayerAdded listener connected for admin chat commands")
 setupTextChatCommand()

@@ -9,6 +9,8 @@ local TimeRewardsConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local HUD_DEBUG = false
+local GIFT_BOOTSTRAP_DEBUG = true
+local GIFT_BOOTSTRAP_DEBUG_VERSION = "gifts-bootstrap-slots-debug-2026-05-01"
 local DEFAULT_COUNTER_ICONS = {
 	Comet = "",
 	Speed = "rbxassetid://108512951338844",
@@ -62,6 +64,22 @@ end
 
 local function hudError(...)
 	warn("[HUD][ERROR]", ...)
+end
+
+local function giftBootstrapSafeName(inst)
+	if not inst then
+		return "nil"
+	end
+	local ok, full = pcall(function()
+		return inst:GetFullName()
+	end)
+	return ok and full or tostring(inst)
+end
+
+local function giftBootstrapLog(...)
+	if GIFT_BOOTSTRAP_DEBUG then
+		print("[GIFT][BOOTSTRAP]", ...)
+	end
 end
 
 local function ensureLegacyHudCompatibility(hud)
@@ -778,6 +796,16 @@ local function getTimeRewardCount()
 end
 
 local function ensureGiftsSlots(giftsMain)
+	giftBootstrapLog(
+		"ensureGiftsSlotsStart",
+		"version",
+		GIFT_BOOTSTRAP_DEBUG_VERSION,
+		"main",
+		giftBootstrapSafeName(giftsMain),
+		"mainChildrenBefore",
+		#giftsMain:GetChildren()
+	)
+
 	giftsMain.BackgroundTransparency = 1
 	giftsMain.Size = UDim2.new(1, -42, 1, -126)
 	giftsMain.Position = UDim2.fromOffset(18, 116)
@@ -858,6 +886,22 @@ local function ensureGiftsSlots(giftsMain)
 	end
 
 	clearChildren(scroll, preserveNames)
+
+	giftBootstrapLog(
+		"ensureGiftsSlotsDone",
+		"version",
+		GIFT_BOOTSTRAP_DEBUG_VERSION,
+		"main",
+		giftBootstrapSafeName(giftsMain),
+		"scroll",
+		giftBootstrapSafeName(scroll),
+		"rewardCount",
+		rewardCount,
+		"scrollChildren",
+		#scroll:GetChildren(),
+		"scrollDescendants",
+		#scroll:GetDescendants()
+	)
 end
 
 local function ensureRebirthRequirement(parent, name, yOffset)
@@ -1684,6 +1728,13 @@ local function ensureFrames()
 	ensureLimitedRewardLayout(limitedReward)
 end
 
+giftBootstrapLog(
+	"start",
+	"version",
+	GIFT_BOOTSTRAP_DEBUG_VERSION,
+	"playerGui",
+	giftBootstrapSafeName(playerGui)
+)
 ensureHud()
 ensureFrames()
 

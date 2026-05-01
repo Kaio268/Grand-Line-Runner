@@ -825,7 +825,7 @@ local function clearFruitHandlerRuntimeState(player, fruitName, cleanupReason)
 		return false
 	end
 
-	local ok, err = pcall(fruitHandler.ClearRuntimeState, player, fruitName)
+	local ok, err = pcall(fruitHandler.ClearRuntimeState, player, fruitName, cleanupReason)
 	if not ok then
 		warn(string.format(
 			"[DevilFruitService] Failed to clear runtime state for %s during %s: %s",

@@ -1,3 +1,17 @@
+local TORI_LIVE_ANIMATION_IDS = {
+	["Phoenix Flame Shield"] = "rbxassetid://97013962566487",
+	["Phoenix FlyEnd"] = "rbxassetid://71602814333465",
+	["Phoenix Flyidle"] = "rbxassetid://101255792958657",
+	["Phoenix Flying"] = "rbxassetid://117332907485620",
+	["Phoenix Flystart"] = "rbxassetid://73623883383126",
+	["Phoenix Revive"] = "rbxassetid://107891941161688",
+}
+
+local MOGU_LIVE_ANIMATION_IDS = {
+	MoleDigStart = "rbxassetid://108648477455184",
+	MoleDigEnd = "rbxassetid://70605245221664",
+}
+
 local function toriAnimationPath(animationName)
 	return {
 		"Assets",
@@ -34,6 +48,7 @@ local function toriEmbeddedAnimation(animationName, length)
 	return {
 		KeyframeSequencePath = toriAnimationPath(animationName),
 		FallbackKeyframeSequencePaths = toriAnimationFallbackPaths(animationName),
+		LiveAnimationId = TORI_LIVE_ANIMATION_IDS[animationName],
 		Length = length,
 	}
 end
@@ -69,6 +84,7 @@ local function moguEmbeddedAnimation(animationName, length)
 	return {
 		KeyframeSequencePath = moguAnimationPath(animationName),
 		FallbackKeyframeSequencePaths = moguAnimationFallbackPaths(animationName),
+		LiveAnimationId = MOGU_LIVE_ANIMATION_IDS[animationName],
 		Length = length,
 	}
 end

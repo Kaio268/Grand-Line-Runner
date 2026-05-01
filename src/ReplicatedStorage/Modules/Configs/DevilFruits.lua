@@ -601,6 +601,13 @@ local DevilFruits = {
 					HorizontalResponsiveness = 14,
 					FlightTrailPartNames = { "Tail1", "tail", "Torso", "UpperTorso", "HumanoidRootPart" },
 					FlightTrailOffset = CFrame.new(0, 0, 5.5),
+					RequestPayloadSchema = {
+						MaxKeys = 2,
+						Fields = {
+							Action = "String",
+							EndReason = "String",
+						},
+					},
 					Animation = {
 						StartAnimationKey = "Tori.PhoenixFlightStart",
 						LoopAnimationKey = "Tori.PhoenixFlightLoop",

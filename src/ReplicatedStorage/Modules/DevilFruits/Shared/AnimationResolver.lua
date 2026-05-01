@@ -21,6 +21,11 @@ local ATTRIBUTE_RIG_NAMES = {
 
 local syntheticAnimationsById = {}
 local registeredKeyframeSequencesByPath = {}
+local EMBEDDED_LIVE_ANIMATION_ID_KEYS = {
+	"LiveAnimationId",
+	"PublishedAnimationId",
+	"AnimationId",
+}
 
 local function shouldLogInfo()
 	return DEBUG_INFO or ReplicatedStorage:GetAttribute("DebugAnimationRegistry") == true
@@ -211,6 +216,35 @@ end
 local function resolveEmbeddedKeyframeSequence(logicalKey, node, selectedVariant, options)
 	if type(node) ~= "table" or node.KeyframeSequencePath == nil then
 		return nil, nil, false
+	end
+
+	if not RunService:IsStudio() then
+		for _, key in ipairs(EMBEDDED_LIVE_ANIMATION_ID_KEYS) do
+			local candidateAnimationId = node[key]
+			if typeof(candidateAnimationId) == "string" and candidateAnimationId ~= "" then
+				local animationId = validateAnimationId(candidateAnimationId, logicalKey)
+				if animationId then
+					logResolvedAnimation(logicalKey, animationId, selectedVariant, selectedVariant, options or {})
+					return animationId, buildDescriptor(logicalKey, selectedVariant, animationId, "published_embedded_fallback", {
+						KeyframeSequencePath = formatPath(node.KeyframeSequencePath),
+						Length = node.Length,
+						LiveAnimationIdField = key,
+					}), true
+				end
+			end
+		end
+
+		logWarn(
+			"embedded KeyframeSequence is Studio-only key=%s variant=%s path=%s context=%s; upload it and set LiveAnimationId",
+			tostring(logicalKey),
+			tostring(selectedVariant or "<none>"),
+			formatPath(node.KeyframeSequencePath),
+			tostring(options and options.Context or "unknown")
+		)
+		return nil, buildDescriptor(logicalKey, selectedVariant, nil, "embedded_keyframe_sequence_studio_only", {
+			KeyframeSequencePath = formatPath(node.KeyframeSequencePath),
+			Length = node.Length,
+		}), true
 	end
 
 	local candidatePaths = { node.KeyframeSequencePath }

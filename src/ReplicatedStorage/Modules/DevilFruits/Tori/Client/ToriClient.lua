@@ -19,6 +19,7 @@ local DEFAULT_PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local DEFAULT_PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local DEFAULT_PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION = 1.6666667
+local PHOENIX_FLIGHT_END_ACTION = "End"
 local PHOENIX_REBIRTH = ToriShared.Passives.PhoenixRebirth
 local DEBUG_FLIGHT = false
 local MIN_DIRECTION_MAGNITUDE = 0.01
@@ -58,6 +59,10 @@ local function flightLog(...)
 	end
 
 	print("[FLIGHT DEBUG]", ...)
+end
+
+local function toriCooldownLog(message, ...)
+	print("[ToriCooldown] " .. string.format(message, ...))
 end
 
 local function formatFlightNumber(value)
@@ -277,6 +282,7 @@ local function createPhoenixFlightState()
 		TakeoffDuration = 0,
 		TakeoffVelocity = 0,
 		ActivationHeight = 0,
+		StartupRootCFrame = false,
 		InitialLiftTarget = 0,
 		InitialLift = 0,
 		MaxHeight = 0,
@@ -306,6 +312,7 @@ function ToriClient.new(config)
 	self.phoenixFlightAbility = (config and config.phoenixFlightAbility) or DEFAULT_PHOENIX_FLIGHT_ABILITY
 	self.phoenixShieldAbility = (config and config.phoenixShieldAbility) or DEFAULT_PHOENIX_SHIELD_ABILITY
 	self.phoenixRebirthAbility = (config and config.phoenixRebirthAbility) or DEFAULT_PHOENIX_REBIRTH_ABILITY
+	self.requestAbility = config and (config.RequestAbility or config.requestAbility) or nil
 	self.flightInputState = {
 		Forward = false,
 		Backward = false,
@@ -474,13 +481,57 @@ function ToriClient:IsPhoenixFlightActive(now)
 		and (not self.phoenixFlightState.FlightStarted or now < self.phoenixFlightState.EndTime)
 end
 
-function ToriClient:StopPhoenixFlight()
-	if not self.phoenixFlightState.Active then
+function ToriClient:ReportPhoenixFlightEnded(reason)
+	local requestAbility = self.requestAbility
+	local resolvedReason = typeof(reason) == "string" and reason ~= "" and reason or "unknown"
+	if typeof(requestAbility) ~= "function" then
+		warn(string.format(
+			"[ToriCooldown] flight end report skipped player=%s userId=%s reason=%s missingRequestAbility=true",
+			self.player and self.player.Name or "<nil>",
+			tostring(self.player and self.player.UserId),
+			resolvedReason
+		))
+		return false
+	end
+
+	toriCooldownLog(
+		"flight end report player=%s userId=%s ability=%s reason=%s",
+		self.player and self.player.Name or "<nil>",
+		tostring(self.player and self.player.UserId),
+		tostring(self.phoenixFlightAbility),
+		resolvedReason
+	)
+	local ok, err = pcall(requestAbility, self.phoenixFlightAbility, {
+		Action = PHOENIX_FLIGHT_END_ACTION,
+		EndReason = resolvedReason,
+	})
+	if not ok then
+		warn(string.format(
+			"[ToriCooldown] flight end report failed player=%s userId=%s reason=%s err=%s",
+			self.player and self.player.Name or "<nil>",
+			tostring(self.player and self.player.UserId),
+			resolvedReason,
+			tostring(err)
+		))
+		return false
+	end
+
+	return true
+end
+
+function ToriClient:StopPhoenixFlight(reason, options)
+	local flightState = self.phoenixFlightState
+	if not flightState.Active then
 		return
 	end
 
+	local resolvedReason = typeof(reason) == "string" and reason ~= "" and reason or "unknown"
+	local shouldReportEnd = not (type(options) == "table" and options.ReportEnd == false)
+	local now = os.clock()
+	local wasFlightStarted = flightState.FlightStarted
+	local remaining = wasFlightStarted and (flightState.EndTime - now) or nil
 	local rootPart = getRootPart(self)
-	resetPhoenixFlightState(self.phoenixFlightState)
+	resetPhoenixFlightState(flightState)
 
 	if rootPart then
 		flightLog("END", "Final Y:", formatFlightNumber(rootPart.Position.Y))
@@ -494,12 +545,28 @@ function ToriClient:StopPhoenixFlight()
 	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.StopPhoenixFlightEffect) == "function" then
 		self.clientEffectVisuals:StopPhoenixFlightEffect(self.player)
 	end
+
+	toriCooldownLog(
+		"flight local end player=%s userId=%s reason=%s report=%s flightStarted=%s remaining=%s",
+		self.player and self.player.Name or "<nil>",
+		tostring(self.player and self.player.UserId),
+		resolvedReason,
+		tostring(shouldReportEnd),
+		tostring(wasFlightStarted),
+		remaining ~= nil and formatFlightNumber(remaining) or "<startup>"
+	)
+
+	if shouldReportEnd then
+		self:ReportPhoenixFlightEnded(resolvedReason)
+	end
 end
 
 function ToriClient:BeginPhoenixFlightTakeoff(rootPart, now)
 	if not rootPart or self.phoenixFlightState.TakeoffStarted then
 		return
 	end
+
+	self:HoldPhoenixFlightStartupPosition(rootPart)
 
 	now = now or os.clock()
 	self.phoenixFlightState.TakeoffStarted = true
@@ -545,7 +612,31 @@ function ToriClient:BeginPhoenixFlightControl(rootPart, now)
 	)
 end
 
+function ToriClient:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
+	local startupRootCFrame = self.phoenixFlightState.StartupRootCFrame
+	if typeof(startupRootCFrame) ~= "CFrame" then
+		return
+	end
+
+	if humanoid and humanoid.Parent and humanoid.Health > 0 then
+		humanoid:Move(Vector3.zero, true)
+	end
+
+	local character = rootPart and rootPart.Parent
+	if character and character:IsA("Model") then
+		pivotCharacterToRootCFrame(character, rootPart, startupRootCFrame)
+	end
+
+	if rootPart and rootPart.Parent then
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
 function ToriClient:UpdatePhoenixFlightStartup(rootPart, humanoid, dt, now)
+	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	self:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
+
 	if self:TryBeginPhoenixFlightControlAtHeight(rootPart, now) then
 		return true
 	end
@@ -555,13 +646,6 @@ function ToriClient:UpdatePhoenixFlightStartup(rootPart, humanoid, dt, now)
 		self:BeginPhoenixFlightTakeoff(rootPart, now)
 		return true
 	end
-
-	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
-
-	local currentVelocity = rootPart.AssemblyLinearVelocity
-	local response = math.clamp(self.phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
-	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(Vector3.zero, response)
-	rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, 0, nextPlanarVelocity.Z)
 
 	if self:ShouldLogFlightDebug("Startup", now, FLIGHT_UPDATE_LOG_INTERVAL) then
 		flightLog(
@@ -646,7 +730,7 @@ function ToriClient:StartPhoenixFlight(payload)
 		return
 	end
 
-	self:StopPhoenixFlight()
+	self:StopPhoenixFlight("replaced", { ReportEnd = false })
 
 	local now = os.clock()
 	local duration = math.max(PHOENIX_MIN_FLIGHT_DURATION, tonumber(payload and payload.Duration) or 0)
@@ -674,6 +758,7 @@ function ToriClient:StartPhoenixFlight(payload)
 	self.phoenixFlightState.TakeoffDuration = takeoffDuration
 	self.phoenixFlightState.TakeoffVelocity = liftVelocity
 	self.phoenixFlightState.ActivationHeight = rootPart.Position.Y
+	self.phoenixFlightState.StartupRootCFrame = if startupDuration > 0 then rootPart.CFrame else false
 	self.phoenixFlightState.InitialLiftTarget = rootPart.Position.Y + initialLift
 	self.phoenixFlightState.InitialLift = initialLift
 	self.phoenixFlightState.MaxHeight = rootPart.Position.Y + maxRiseHeight
@@ -718,6 +803,8 @@ function ToriClient:StartPhoenixFlight(payload)
 	)
 	if startupDuration <= 0 then
 		self:BeginPhoenixFlightTakeoff(rootPart, now)
+	else
+		self:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
 	end
 
 	flightLog(
@@ -909,13 +996,13 @@ end
 function ToriClient:UpdatePhoenixFlight(dt)
 	local now = os.clock()
 	if self:ResolveEquippedFruitName() ~= self.phoenixFruitName then
-		self:StopPhoenixFlight()
+		self:StopPhoenixFlight("fruit_changed", { ReportEnd = false })
 		return
 	end
 
 	if not self:IsPhoenixFlightActive(now) then
 		if self.phoenixFlightState.Active then
-			self:StopPhoenixFlight()
+			self:StopPhoenixFlight("natural")
 		end
 		return
 	end
@@ -923,7 +1010,7 @@ function ToriClient:UpdatePhoenixFlight(dt)
 	local rootPart = getRootPart(self)
 	local humanoid = getHumanoid(self)
 	if not rootPart or not humanoid or humanoid.Health <= 0 then
-		self:StopPhoenixFlight()
+		self:StopPhoenixFlight("character_invalid", { ReportEnd = false })
 		return
 	end
 
@@ -1381,7 +1468,7 @@ function ToriClient:HandleInputBegan(input, gameProcessed)
 	end
 
 	if input and input.KeyCode == self:GetPhoenixFlightKeyCode() and self:IsPhoenixFlightActive() then
-		self:StopPhoenixFlight()
+		self:StopPhoenixFlight("early_cancel")
 		return true
 	end
 
@@ -1465,7 +1552,7 @@ function ToriClient:HandleCharacterRemoving()
 	if self.phoenixShieldAnimationLock then
 		self:ReleasePhoenixShieldAnimationLock(self.phoenixShieldAnimationLock)
 	end
-	self:StopPhoenixFlight()
+	self:StopPhoenixFlight("character_removing", { ReportEnd = false })
 	self:StopPhoenixVisualsForPlayer(self.player, 0)
 	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
 	self.flightInputState.Forward = false

@@ -4,7 +4,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TimeRewardsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TimeRewards")
 local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
 local DataManager = require(script.Parent.Parent.Data.DataManager)
-local BrainrotModule = require(script.Parent.AddBrainrot)
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local function getOrCreateChild(parent: Instance, className: string, childName: string)
@@ -36,7 +35,9 @@ local DATA_READY_TIMEOUT = 30
 
 local claimLocks = {}
 local lastClaimRequestAt = {}
+local playTimeSessions = {}
 local rewardIds = {}
+local BrainrotModule = nil
 
 local GIFT_DEBUG = false
 
@@ -95,8 +96,26 @@ local function getCurrentPlayTime(player: Player): (number?, string?)
 		return nil, reason
 	end
 
-	local numericValue = tonumber(value) or 0
-	return math.max(0, math.floor(numericValue)), nil
+	local storedPlayTime = math.max(0, math.floor(tonumber(value) or 0))
+	local now = os.clock()
+	local session = playTimeSessions[player]
+
+	if not session then
+		session = {
+			BasePlayTime = storedPlayTime,
+			StartedAt = now,
+		}
+		playTimeSessions[player] = session
+	end
+
+	local sessionPlayTime = session.BasePlayTime + math.max(0, math.floor(now - session.StartedAt))
+	if storedPlayTime > sessionPlayTime then
+		session.BasePlayTime = storedPlayTime
+		session.StartedAt = now
+		sessionPlayTime = storedPlayTime
+	end
+
+	return math.max(storedPlayTime, sessionPlayTime), nil
 end
 
 local function copyClaimedRewards(rawClaimedRewards): {[string]: boolean}
@@ -322,6 +341,7 @@ local function grantReward(player: Player, rewardId: number)
 
 	local ok, reason
 	if rewardData and rewardData.Brainrot == true then
+		BrainrotModule = BrainrotModule or require(script.Parent.AddBrainrot)
 		ok = BrainrotModule:AddBrainrot(player, rewardName, amount)
 		reason = if ok then nil else "brainrot_grant_failed"
 	else
@@ -392,7 +412,8 @@ local function claimReward(player: Player, rewardId: number)
 		return
 	end
 
-	if not DataManager:IsReady(player) then
+	if not waitForDataReady(player, DATA_READY_TIMEOUT) then
+		giftError("Timed out waiting for time rewards data during claim for", player.Name, rewardId)
 		return
 	end
 
@@ -550,6 +571,7 @@ end
 Players.PlayerRemoving:Connect(function(player)
 	claimLocks[player] = nil
 	lastClaimRequestAt[player] = nil
+	playTimeSessions[player] = nil
 end)
 
 Remote.OnServerEvent:Connect(function(player, rewardId)
