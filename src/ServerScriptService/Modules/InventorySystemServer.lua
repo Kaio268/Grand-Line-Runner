@@ -3,11 +3,23 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local updateRemote = ReplicatedStorage:FindFirstChild("InventoryGearRemote")
 if not updateRemote then
 	updateRemote = Instance.new("RemoteEvent")
 	updateRemote.Name = "InventoryGearRemote"
 	updateRemote.Parent = ReplicatedStorage
+end
+
+local snapshotRemote = ReplicatedStorage:FindFirstChild("InventorySnapshotRequest")
+if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
+	snapshotRemote:Destroy()
+	snapshotRemote = nil
+end
+if not snapshotRemote then
+	snapshotRemote = Instance.new("RemoteFunction")
+	snapshotRemote.Name = "InventorySnapshotRequest"
+	snapshotRemote.Parent = ReplicatedStorage
 end
 
 local equipRemote = ReplicatedStorage:FindFirstChild("EquipToggleRemote")
@@ -24,6 +36,8 @@ local sliceServiceCache = nil
 local CHEST_DEBUG = true
 local FRUIT_EQUIP_DEBUG = true
 local R6G_WELD_DEBUG = true
+local INVENTORY_SNAPSHOT_DEBUG = true
+local DATA_READY_TIMEOUT = 30
 local TOOL_KIND_DEVIL_FRUIT = "DevilFruit"
 local TOOL_ATTR_KIND = "InventoryItemKind"
 local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
@@ -44,6 +58,12 @@ local function chestDebug(message, ...)
 	end
 
 	warn(string.format("[GLR ChestDebug][InventorySystem] " .. tostring(message), ...))
+end
+
+local function inventorySnapshotLog(...)
+	if INVENTORY_SNAPSHOT_DEBUG then
+		print("[INV][SNAPSHOT]", ...)
+	end
 end
 
 local function fruitEquipDebug(message, ...)
@@ -432,6 +452,159 @@ local function ownsChest(player, tierName)
 	local q = folder:FindFirstChild("Quantity")
 	if not q or not q:IsA("NumberValue") then return false end
 	return q.Value > 0
+end
+
+local function waitForPlayerDataReady(player)
+	if player:GetAttribute("PlayerDataReady") == true and DataManager:IsReady(player) then
+		return true
+	end
+
+	if DataManager.WaitUntilReady and DataManager:WaitUntilReady(player, DATA_READY_TIMEOUT) then
+		local deadline = os.clock() + DATA_READY_TIMEOUT
+		while player.Parent == Players and os.clock() < deadline do
+			if player:GetAttribute("PlayerDataReady") == true then
+				return true
+			end
+			task.wait(0.1)
+		end
+	end
+
+	return player.Parent == Players and player:GetAttribute("PlayerDataReady") == true and DataManager:IsReady(player)
+end
+
+local function readPositiveQuantity(folder)
+	if not folder or not folder:IsA("Folder") then
+		return nil
+	end
+
+	local quantity = folder:FindFirstChild("Quantity")
+	if not quantity or not quantity:IsA("NumberValue") then
+		return nil
+	end
+
+	return math.max(0, math.floor(tonumber(quantity.Value) or 0))
+end
+
+local function appendQuantityEntry(list, name, quantity)
+	if quantity and quantity > 0 then
+		table.insert(list, {
+			Name = tostring(name),
+			Quantity = quantity,
+		})
+	end
+end
+
+local function buildInventorySnapshot(player)
+	local ready = waitForPlayerDataReady(player)
+	if not ready then
+		inventorySnapshotLog("notReady", "player", player.Name)
+		return {
+			Ready = false,
+			Reason = "data_not_ready",
+			Brainrots = {},
+			Gears = {},
+			DevilFruits = {},
+			Chests = {},
+			Crew = {},
+			Counts = {
+				Brainrots = 0,
+				Gears = 0,
+				DevilFruits = 0,
+				Chests = 0,
+				Crew = 0,
+			},
+		}
+	end
+
+	local brainrots = {}
+	local gears = {}
+	local devilFruits = {}
+	local chests = {}
+	local crew = {}
+
+	local inventory = player:FindFirstChild("Inventory") or player:WaitForChild("Inventory", 5)
+	if inventory and inventory:IsA("Folder") then
+		for _, child in ipairs(inventory:GetChildren()) do
+			if child:IsA("Folder") then
+				if child.Name == "DevilFruits" then
+					for _, fruitFolder in ipairs(child:GetChildren()) do
+						appendQuantityEntry(devilFruits, fruitFolder.Name, readPositiveQuantity(fruitFolder))
+					end
+				elseif child.Name ~= "Feed" then
+					appendQuantityEntry(brainrots, child.Name, readPositiveQuantity(child))
+				end
+			end
+		end
+	end
+
+	local gearsFolder = player:FindFirstChild("Gears") or player:WaitForChild("Gears", 5)
+	if gearsFolder and gearsFolder:IsA("Folder") then
+		for _, child in ipairs(gearsFolder:GetChildren()) do
+			if child:IsA("BoolValue") and child.Value == true then
+				table.insert(gears, {
+					Name = child.Name,
+					Owned = true,
+				})
+			end
+		end
+	end
+
+	local chestInventory = player:FindFirstChild("ChestInventory")
+	if chestInventory and chestInventory:IsA("Folder") then
+		for _, child in ipairs(chestInventory:GetChildren()) do
+			appendQuantityEntry(chests, child.Name, readPositiveQuantity(child))
+		end
+	end
+
+	local crewInventory = player:FindFirstChild("CrewInventory")
+	if crewInventory and crewInventory:IsA("Folder") then
+		for _, child in ipairs(crewInventory:GetChildren()) do
+			if child:IsA("Folder") then
+				local quantity = readPositiveQuantity(child)
+				if quantity then
+					appendQuantityEntry(crew, child.Name, quantity)
+				else
+					table.insert(crew, { Name = child.Name })
+				end
+			elseif child:IsA("BoolValue") and child.Value == true then
+				table.insert(crew, { Name = child.Name, Owned = true })
+			end
+		end
+	end
+
+	local snapshot = {
+		Ready = true,
+		Brainrots = brainrots,
+		Gears = gears,
+		DevilFruits = devilFruits,
+		Chests = chests,
+		Crew = crew,
+		Counts = {
+			Brainrots = #brainrots,
+			Gears = #gears,
+			DevilFruits = #devilFruits,
+			Chests = #chests,
+			Crew = #crew,
+		},
+	}
+
+	inventorySnapshotLog(
+		"sent",
+		"player",
+		player.Name,
+		"brainrots",
+		snapshot.Counts.Brainrots,
+		"crew",
+		snapshot.Counts.Crew,
+		"devilFruits",
+		snapshot.Counts.DevilFruits,
+		"gears",
+		snapshot.Counts.Gears,
+		"chests",
+		snapshot.Counts.Chests
+	)
+
+	return snapshot
 end
 
 local function toggleEquip(player, kind, toolName)
@@ -908,6 +1081,11 @@ local function watchChestInventory(player, chestInventory)
 			unequipIfEquipped(player, ch.Name, "Chest")
 		end
 	end)
+end
+
+snapshotRemote.OnServerInvoke = function(player)
+	inventorySnapshotLog("request", "player", player.Name)
+	return buildInventorySnapshot(player)
 end
 
 equipRemote.OnServerEvent:Connect(function(player, kind, name)

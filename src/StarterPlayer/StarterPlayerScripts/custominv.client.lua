@@ -5,6 +5,11 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
+local snapshotRemote = ReplicatedStorage:WaitForChild("InventorySnapshotRequest", 15)
+if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
+	warn("[INV][SNAPSHOT][CLIENT] InventorySnapshotRequest is not a RemoteFunction")
+	snapshotRemote = nil
+end
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
 
 local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
@@ -99,6 +104,7 @@ local hoverTooltip = {
 	Visible = false,
 }
 local CHEST_DEBUG = true
+local INVENTORY_SNAPSHOT_DEBUG = true
 
 local function inventoryMenuDebug(message, ...)
 	if INVENTORY_MENU_DEBUG ~= true then
@@ -115,6 +121,12 @@ local function chestDebug(message, ...)
 	end
 
 	warn(string.format("[GLR ChestDebug][HotbarClient] " .. tostring(message), ...))
+end
+
+local function inventorySnapshotDebug(...)
+	if INVENTORY_SNAPSHOT_DEBUG then
+		print("[INV][SNAPSHOT][CLIENT]", ...)
+	end
 end
 
 local RARITY_ORDER = {
@@ -702,6 +714,124 @@ local function setChestItemState(name, quantity)
 		ensureAcquired(key)
 		itemState[key] = { kind = "Chest", name = name, qty = qty }
 	end
+end
+
+local SNAPSHOT_OWNED_KINDS = {
+	Brainrot = true,
+	Gear = true,
+	DevilFruit = true,
+	Chest = true,
+}
+
+local function clearSnapshotOwnedItems()
+	for key, state in pairs(itemState) do
+		if state and SNAPSHOT_OWNED_KINDS[state.kind] then
+			itemState[key] = nil
+		end
+	end
+end
+
+local function applyQuantitySnapshotEntries(entries, kind, configLookup)
+	if typeof(entries) ~= "table" then
+		return 0
+	end
+
+	local applied = 0
+	for _, entry in ipairs(entries) do
+		if typeof(entry) == "table" then
+			local name = tostring(entry.Name or entry.name or "")
+			local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
+			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
+				local key = kind .. "|" .. name
+				ensureAcquired(key)
+				itemState[key] = {
+					kind = kind,
+					name = name,
+					qty = quantity,
+				}
+				applied += 1
+			end
+		end
+	end
+	return applied
+end
+
+local function applyInventorySnapshot(snapshot)
+	if typeof(snapshot) ~= "table" then
+		warn("[INV][SNAPSHOT][CLIENT] invalid snapshot payload")
+		return false
+	end
+
+	if snapshot.Ready == false then
+		inventorySnapshotDebug("snapshotNotReady", "reason", tostring(snapshot.Reason))
+		return false
+	end
+
+	clearSnapshotOwnedItems()
+
+	local brainrotCount = applyQuantitySnapshotEntries(snapshot.Brainrots, "Brainrot", function(name)
+		return Brainrots[name] ~= nil
+	end)
+
+	local devilFruitCount = 0
+	if typeof(snapshot.DevilFruits) == "table" then
+		for _, entry in ipairs(snapshot.DevilFruits) do
+			if typeof(entry) == "table" then
+				local rawName = tostring(entry.Name or entry.name or "")
+				local fruit = DevilFruitConfig.GetFruit(rawName)
+				local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
+				if fruit and quantity > 0 then
+					local key = "DevilFruit|" .. fruit.FruitKey
+					ensureAcquired(key)
+					itemState[key] = {
+						kind = "DevilFruit",
+						name = fruit.FruitKey,
+						qty = quantity,
+					}
+					devilFruitCount += 1
+				end
+			end
+		end
+	end
+
+	local gearCount = 0
+	if typeof(snapshot.Gears) == "table" then
+		for _, entry in ipairs(snapshot.Gears) do
+			if typeof(entry) == "table" then
+				local name = tostring(entry.Name or entry.name or "")
+				if name ~= "" and entry.Owned == true and Gears[name] ~= nil then
+					local key = "Gear|" .. name
+					ensureAcquired(key)
+					itemState[key] = {
+						kind = "Gear",
+						name = name,
+						owned = true,
+					}
+					gearCount += 1
+				end
+			end
+		end
+	end
+
+	local chestCount = applyQuantitySnapshotEntries(snapshot.Chests, "Chest", function(name)
+		return ChestUtils.GetDisplayName(name) ~= nil
+	end)
+
+	inventorySnapshotDebug(
+		"applied",
+		"brainrots",
+		brainrotCount,
+		"crew",
+		snapshot.Counts and tostring(snapshot.Counts.Crew) or "0",
+		"devilFruits",
+		devilFruitCount,
+		"gears",
+		gearCount,
+		"chests",
+		chestCount
+	)
+	rebuildUI()
+	return true
 end
 
 local function logChestItemState()
@@ -1637,6 +1767,56 @@ updateRemote.OnClientEvent:Connect(function(kind, name, v)
 	end
 
 	rebuildUI()
+end)
+
+local snapshotRequestInFlight = false
+local lastSnapshotRequestAt = 0
+
+local function requestInventorySnapshot(reason)
+	if snapshotRequestInFlight or not snapshotRemote then
+		return
+	end
+
+	local now = os.clock()
+	if (now - lastSnapshotRequestAt) < 1 then
+		return
+	end
+
+	lastSnapshotRequestAt = now
+	snapshotRequestInFlight = true
+	inventorySnapshotDebug("requested", "reason", tostring(reason))
+
+	task.spawn(function()
+		local ok, snapshot = pcall(function()
+			return snapshotRemote:InvokeServer()
+		end)
+		snapshotRequestInFlight = false
+
+		if not ok then
+			warn("[INV][SNAPSHOT][CLIENT] request failed", snapshot)
+			task.delay(2, function()
+				requestInventorySnapshot("retryAfterError")
+			end)
+			return
+		end
+
+		local applied = applyInventorySnapshot(snapshot)
+		if not applied then
+			task.delay(2, function()
+				requestInventorySnapshot("retryNotReady")
+			end)
+		end
+	end)
+end
+
+player:GetAttributeChangedSignal("PlayerDataReady"):Connect(function()
+	if player:GetAttribute("PlayerDataReady") == true then
+		requestInventorySnapshot("playerDataReady")
+	end
+end)
+
+task.defer(function()
+	requestInventorySnapshot("clientStartup")
 end)
 
 ensureCategoryTabs()

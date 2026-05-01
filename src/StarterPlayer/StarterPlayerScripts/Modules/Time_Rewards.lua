@@ -4,10 +4,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local GIFT_CLIENT_DEBUG_VERSION = "gifts-client-ui-slots-debug-2026-05-01"
-local GIFT_STARTUP_DEBUG = true
+local GIFT_STARTUP_DEBUG = false
+local GIFT_SYNC_CLIENT_DEBUG = false
 local GIFT_DEBUG = false
 local REQUIRED_WAIT_SECONDS = 15
 local OPTIONAL_WAIT_SECONDS = 5
+local SYNC_REQUEST_RETRY_SECONDS = 1
+local MAX_SYNC_REQUEST_ATTEMPTS = 10
+local HUD_UPDATE_INTERVAL = 0.5
+local COUNTDOWN_UPDATE_INTERVAL = 0.25
 
 local function safeName(inst)
 	if not inst then
@@ -25,6 +30,18 @@ local function giftStartupLog(...)
 	end
 end
 
+local function giftSyncClientLog(tag: string, ...)
+	if GIFT_SYNC_CLIENT_DEBUG then
+		print(tag, ...)
+	end
+end
+
+local function giftDebugWarn(...)
+	if GIFT_STARTUP_DEBUG then
+		warn("[GIFT][CLIENT][WARN]", ...)
+	end
+end
+
 local function giftStartupWarn(...)
 	warn("[GIFT][CLIENT][WARN]", ...)
 end
@@ -39,9 +56,13 @@ local function giftError(...)
 	warn("[GIFT][ERROR]", ...)
 end
 
-local function waitForChildLogged(parent: Instance?, childName: string, timeoutSeconds: number, label: string)
+local function waitForChildLogged(parent: Instance?, childName: string, timeoutSeconds: number, label: string, suppressMissingWarning: boolean?)
 	if not parent then
-		giftStartupWarn("missingParent", "path", label, "child", childName)
+		if suppressMissingWarning then
+			giftDebugWarn("missingParent", "path", label, "child", childName)
+		else
+			giftStartupWarn("missingParent", "path", label, "child", childName)
+		end
 		return nil
 	end
 
@@ -50,7 +71,11 @@ local function waitForChildLogged(parent: Instance?, childName: string, timeoutS
 	if child then
 		giftStartupLog("found", "path", label, "instance", safeName(child), "class", child.ClassName)
 	else
-		giftStartupWarn("missing", "path", label, "parent", safeName(parent), "timeout", timeoutSeconds)
+		if suppressMissingWarning then
+			giftDebugWarn("missing", "path", label, "parent", safeName(parent), "timeout", timeoutSeconds)
+		else
+			giftStartupWarn("missing", "path", label, "parent", safeName(parent), "timeout", timeoutSeconds)
+		end
 	end
 	return child
 end
@@ -167,6 +192,97 @@ if not (guiRoot and mainGui and giftsFrame and giftsMainFrame) then
 	return {}
 end
 
+local function countDirectChildrenNamed(parent: Instance?, childName: string): number
+	if not parent then
+		return 0
+	end
+
+	local count = 0
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.Name == childName then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function logGiftsUiBinding(context: string)
+	if not GIFT_STARTUP_DEBUG then
+		return
+	end
+
+	giftStartupLog(
+		"uiInstanceBinding",
+		"context",
+		context,
+		"frames",
+		safeName(mainGui),
+		"gifts",
+		safeName(giftsFrame),
+		"main",
+		safeName(giftsMainFrame),
+		"visibleInstanceIsWired",
+		tostring(mainGui:FindFirstChild("Gifts") == giftsFrame),
+		"sameNamedGiftsCount",
+		countDirectChildrenNamed(mainGui, "Gifts"),
+		"mainChildren",
+		#giftsMainFrame:GetChildren(),
+		"mainDescendants",
+		#giftsMainFrame:GetDescendants()
+	)
+end
+
+local function refreshGiftsUiBinding(context: string): boolean
+	local liveGifts = mainGui:FindFirstChild("Gifts")
+	if not (liveGifts and liveGifts:IsA("Frame")) then
+		giftDebugWarn("uiRebindSkipped", "context", context, "reason", "live Gifts frame missing", "current", safeName(giftsFrame))
+		return false
+	end
+
+	local liveMain = liveGifts:FindFirstChild("Main")
+	if not (liveMain and liveMain:IsA("GuiObject")) then
+		giftDebugWarn(
+			"uiRebindSkipped",
+			"context",
+			context,
+			"reason",
+			"live Gifts.Main missing",
+			"gifts",
+			safeName(liveGifts),
+			"currentMain",
+			safeName(giftsMainFrame)
+		)
+		return false
+	end
+
+	if liveGifts ~= giftsFrame or liveMain ~= giftsMainFrame then
+		giftDebugWarn(
+			"uiInstanceRebound",
+			"context",
+			context,
+			"oldGifts",
+			safeName(giftsFrame),
+			"oldMain",
+			safeName(giftsMainFrame),
+			"newGifts",
+			safeName(liveGifts),
+			"newMain",
+			safeName(liveMain),
+			"newMainChildren",
+			#liveMain:GetChildren(),
+			"newMainDescendants",
+			#liveMain:GetDescendants()
+		)
+		giftsFrame = liveGifts
+		giftsMainFrame = liveMain
+	end
+
+	return true
+end
+
+refreshGiftsUiBinding("startup")
+logGiftsUiBinding("startup")
+
 local lastCloseClickAt = 0
 
 local function hardenGiftsInputLayers()
@@ -230,7 +346,7 @@ local function closeGiftsPanel(source: string)
 		camera.FieldOfView = 70
 	end
 
-	giftStartupWarn(
+	giftDebugWarn(
 		"xForceClosed",
 		"source",
 		source,
@@ -241,12 +357,34 @@ local function closeGiftsPanel(source: string)
 		"scale",
 		tostring(scale and scale.Scale or "nil")
 	)
+
+	task.delay(0.12, function()
+		if giftsFrame.Parent and giftsFrame.Visible then
+			giftDebugWarn(
+				"xCloseOverridden",
+				"source",
+				source,
+				"frame",
+				safeName(giftsFrame),
+				"frameVisible",
+				tostring(giftsFrame.Visible),
+				"mainVisible",
+				tostring(giftsMainFrame.Visible),
+				"sameNamedGiftsCount",
+				countDirectChildrenNamed(mainGui, "Gifts")
+			)
+		end
+	end)
 end
 
 local function auditGiftsInputBlockers(context: string)
+	if not GIFT_STARTUP_DEBUG then
+		return
+	end
+
 	local closeButton = findDescendantGuiButton(giftsFrame, "X")
 	if not closeButton then
-		giftStartupWarn("xAuditSkipped", "context", context, "reason", "X button missing", "frame", safeName(giftsFrame))
+		giftDebugWarn("xAuditSkipped", "context", context, "reason", "X button missing", "frame", safeName(giftsFrame))
 		return
 	end
 
@@ -272,7 +410,7 @@ local function auditGiftsInputBlockers(context: string)
 			if capturesInput and canBeAboveClose then
 				blockerCount += 1
 				if blockerCount <= 20 then
-					giftStartupWarn(
+					giftDebugWarn(
 						"possibleInputBlocker",
 						"context",
 						context,
@@ -322,7 +460,7 @@ local function bindGiftsCloseButton()
 
 	local closeButton = findDescendantGuiButton(giftsFrame, "X")
 	if not closeButton then
-		giftStartupWarn("xButtonMissing", "frame", safeName(giftsFrame))
+		giftDebugWarn("xButtonMissing", "frame", safeName(giftsFrame))
 		return
 	end
 
@@ -352,7 +490,11 @@ local function bindGiftsCloseButton()
 		"modal",
 		tostring(getModalState(closeButton)),
 		"z",
-		closeButton.ZIndex
+		closeButton.ZIndex,
+		"sameNamedGiftsCount",
+		countDirectChildrenNamed(mainGui, "Gifts"),
+		"visibleInstanceIsWired",
+		tostring(mainGui:FindFirstChild("Gifts") == giftsFrame)
 	)
 
 	closeButton.MouseButton1Click:Connect(function()
@@ -409,11 +551,33 @@ elseif Remote then
 	giftStartupLog("remoteFound", "path", safeName(Remote), "class", Remote.ClassName)
 end
 
+local SnapshotRequest = waitForChildLogged(
+	TimeRewardsFolder,
+	"TimeRewardSnapshotRequest",
+	REQUIRED_WAIT_SECONDS,
+	"ReplicatedStorage.Modules.TimeRewards.TimeRewardSnapshotRequest"
+)
+if SnapshotRequest and not SnapshotRequest:IsA("RemoteFunction") then
+	giftStartupWarn(
+		"snapshotWrongClass",
+		"path",
+		safeName(SnapshotRequest),
+		"class",
+		SnapshotRequest.ClassName,
+		"expected",
+		"RemoteFunction"
+	)
+	SnapshotRequest = nil
+elseif SnapshotRequest then
+	giftStartupLog("snapshotFound", "path", safeName(SnapshotRequest), "class", SnapshotRequest.ClassName)
+end
+
 local InstantRewardsEvent = waitForChildLogged(
 	TimeRewardsFolder,
 	"TriggerInstantRewards",
 	OPTIONAL_WAIT_SECONDS,
-	"ReplicatedStorage.Modules.TimeRewards.TriggerInstantRewards"
+	"ReplicatedStorage.Modules.TimeRewards.TriggerInstantRewards",
+	true
 )
 if InstantRewardsEvent and not InstantRewardsEvent:IsA("BindableEvent") then
 	giftStartupWarn(
@@ -428,7 +592,7 @@ if InstantRewardsEvent and not InstantRewardsEvent:IsA("BindableEvent") then
 elseif InstantRewardsEvent then
 	giftStartupLog("instantRewardsFound", "path", safeName(InstantRewardsEvent), "class", InstantRewardsEvent.ClassName)
 else
-	giftStartupWarn(
+	giftDebugWarn(
 		"instantRewardsMissing",
 		"path",
 		"ReplicatedStorage.Modules.TimeRewards.TriggerInstantRewards",
@@ -442,7 +606,7 @@ local Shorten = requireLogged(
 	"ReplicatedStorage.Modules.Shorten"
 )
 
-if not (Modules and TimeRewardsFolder and RewardsConfig and Remote and Shorten) then
+if not (Modules and TimeRewardsFolder and RewardsConfig and Remote and SnapshotRequest and Shorten) then
 	giftStartupWarn(
 		"fatalMissingTimeRewardsDependency",
 		"version",
@@ -455,6 +619,8 @@ if not (Modules and TimeRewardsFolder and RewardsConfig and Remote and Shorten) 
 		tostring(RewardsConfig ~= nil),
 		"remote",
 		safeName(Remote),
+		"snapshot",
+		safeName(SnapshotRequest),
 		"shorten",
 		tostring(Shorten ~= nil)
 	)
@@ -485,7 +651,7 @@ end
 local function ensureHudNotificationBadge()
 	local badge = hudGifts:FindFirstChild("Not")
 	if not (badge and badge:IsA("GuiObject")) then
-		giftStartupWarn("hudBadgeMissing", "button", safeName(hudGifts), "action", "creating fallback Not")
+		giftDebugWarn("hudBadgeMissing", "button", safeName(hudGifts), "action", "creating fallback Not")
 		badge = Instance.new("Frame")
 		badge.Name = "Not"
 		badge.BackgroundColor3 = Color3.fromRGB(235, 65, 92)
@@ -498,7 +664,7 @@ local function ensureHudNotificationBadge()
 
 	local text = badge:FindFirstChild("TextLB")
 	if not isTextWidget(text) then
-		giftStartupWarn("hudBadgeTextMissing", "badge", safeName(badge), "action", "creating fallback TextLB")
+		giftDebugWarn("hudBadgeTextMissing", "badge", safeName(badge), "action", "creating fallback TextLB")
 		if text then
 			text:Destroy()
 		end
@@ -534,15 +700,19 @@ local hudNot, hudNotText = ensureHudNotificationBadge()
 
 local READY_TEXT = "Claim"
 local CLAIMED_TEXT = "Claimed"
+local LOADING_TEXT = "Loading"
 local WHITE_COLOR = Color3.new(1, 1, 1)
 local GREEN_COLOR = Color3.new(0, 1, 0)
 local endTimes = {}
 local threads = {}
 local slotsById = {}
+local claimButtonConnections = {}
+local claimButtonInstances = {}
 local orderedIds = {}
 local totalGifts = 0
 local timerLogStateByPath = {}
 local giftSlotsFoundLogState = nil
+local giftRenderDiagnosticsState = nil
 local dumpedGiftsMainTreeContexts = {}
 
 local PREFERRED_SLOT_CONTAINER_NAMES = {
@@ -604,13 +774,18 @@ local function describeTreeNode(inst: Instance): string
 end
 
 local function dumpGiftsMainTree(context: string)
+	if not GIFT_STARTUP_DEBUG then
+		return
+	end
+
+	refreshGiftsUiBinding("dumpTree:" .. context)
 	if dumpedGiftsMainTreeContexts[context] then
 		return
 	end
 	dumpedGiftsMainTreeContexts[context] = true
 
 	local descendants = giftsMainFrame:GetDescendants()
-	giftStartupWarn(
+	giftDebugWarn(
 		"mainTreeDump",
 		"context",
 		context,
@@ -630,7 +805,7 @@ local function dumpGiftsMainTree(context: string)
 
 		for _, child in ipairs(parent:GetChildren()) do
 			lineCount += 1
-			giftStartupWarn(
+			giftDebugWarn(
 				"mainTreeNode",
 				"context",
 				context,
@@ -645,7 +820,7 @@ local function dumpGiftsMainTree(context: string)
 			)
 
 			if lineCount >= 240 then
-				giftStartupWarn("mainTreeDumpTruncated", "context", context, "limit", 240, "totalDescendants", #descendants)
+				giftDebugWarn("mainTreeDumpTruncated", "context", context, "limit", 240, "totalDescendants", #descendants)
 				return
 			end
 			walk(child, depth + 1)
@@ -654,11 +829,12 @@ local function dumpGiftsMainTree(context: string)
 
 	walk(giftsMainFrame, 1)
 	if lineCount == 0 then
-		giftStartupWarn("mainTreeEmpty", "context", context, "root", safeName(giftsMainFrame))
+		giftDebugWarn("mainTreeEmpty", "context", context, "root", safeName(giftsMainFrame))
 	end
 end
 
 local function getGiftsSlotContainer()
+	refreshGiftsUiBinding("getSlotContainer")
 	local scroll = giftsMainFrame:FindFirstChild("Scroll")
 	if scroll and scroll:IsA("ScrollingFrame") then
 		return scroll
@@ -710,6 +886,10 @@ local function formatRewardIdList(ids): string
 end
 
 local function logScrollState(context: string)
+	if not (GIFT_DEBUG or GIFT_STARTUP_DEBUG) then
+		return
+	end
+
 	local container = getGiftsSlotContainer()
 	local layout = getGiftsListLayout(container)
 	local slotCount = 0
@@ -849,6 +1029,7 @@ local function styleFallbackText(label: TextLabel, textSize: number, color: Colo
 end
 
 local function ensureFallbackSlotContainer(expectedRewardCount: number)
+	refreshGiftsUiBinding("ensureFallbackSlotContainer")
 	giftsMainFrame.Visible = true
 	giftsMainFrame.BackgroundTransparency = 1
 	giftsMainFrame.BorderSizePixel = 0
@@ -887,7 +1068,7 @@ local function ensureFallbackSlotContainer(expectedRewardCount: number)
 	end
 
 	scroll.Active = true
-	scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroll.AutomaticCanvasSize = Enum.AutomaticSize.None
 	scroll.BackgroundTransparency = 1
 	scroll.BorderSizePixel = 0
 	scroll.CanvasSize = UDim2.fromOffset(0, 0)
@@ -937,7 +1118,7 @@ local function ensureFallbackSlotContainer(expectedRewardCount: number)
 		slot.BackgroundTransparency = 0.25
 		slot.BorderSizePixel = 0
 		slot.Active = true
-		slot.Size = UDim2.new(1, -30, 0, 82)
+		slot.Size = UDim2.new(1, -30, 0, 96)
 		slot.LayoutOrder = index
 		slot.ClipsDescendants = true
 		slot.Visible = true
@@ -959,6 +1140,13 @@ local function ensureFallbackSlotContainer(expectedRewardCount: number)
 		timer.TextXAlignment = Enum.TextXAlignment.Left
 		timer.ZIndex = math.max(timer.ZIndex, 5)
 		styleFallbackText(timer, 15, FALLBACK_STYLE.TextSecondary)
+
+		local description = ensureFallbackChild(slot, "TextLabel", "RewardDescription")
+		description.Size = UDim2.new(1, -192, 0, 16)
+		description.Position = UDim2.fromOffset(68, 62)
+		description.TextXAlignment = Enum.TextXAlignment.Left
+		description.ZIndex = math.max(description.ZIndex, 5)
+		styleFallbackText(description, 12, FALLBACK_STYLE.TextSecondary)
 
 		local icon = ensureFallbackChild(slot, "ImageLabel", "Icon")
 		icon.Size = UDim2.fromOffset(44, 44)
@@ -996,7 +1184,7 @@ local function ensureFallbackSlotContainer(expectedRewardCount: number)
 		styleFallbackText(claimText, 18, FALLBACK_STYLE.TextMain)
 	end
 
-	giftStartupWarn(
+	giftDebugWarn(
 		"fallbackSlotsCreated",
 		"count",
 		expectedRewardCount,
@@ -1108,6 +1296,10 @@ local function ensureGiftSummaryTimer()
 end
 
 local function auditSidebarTimers(context: string)
+	if not GIFT_STARTUP_DEBUG then
+		return
+	end
+
 	for _, child in ipairs(lButtons:GetChildren()) do
 		if child:IsA("GuiObject") then
 			local timer = child:FindFirstChild("Timer")
@@ -1225,6 +1417,111 @@ local function logHudBinding()
 	logScrollState("bind")
 end
 
+local function formatRewardDescription(cfg): string
+	if typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
+		return ""
+	end
+
+	local parts = {}
+	for rewardName, rewardData in pairs(cfg.Rewards) do
+		local amount = 1
+		if typeof(rewardData) == "table" and rewardData.Amount ~= nil then
+			amount = rewardData.Amount
+		end
+
+		parts[#parts + 1] = string.format("x%s %s", tostring(amount), tostring(rewardName))
+	end
+	table.sort(parts)
+	return table.concat(parts, ", ")
+end
+
+local function ensureVisibleText(textObj: Instance?, fallbackSize: UDim2?, fallbackPosition: UDim2?)
+	if not isTextGuiObject(textObj) then
+		return nil
+	end
+
+	local label = textObj :: TextLabel
+	label.Visible = true
+	label.TextTransparency = 0
+	label.BackgroundTransparency = 1
+	label.ZIndex = math.max(label.ZIndex, 5)
+	if label.Size.X.Offset == 0 and label.Size.X.Scale == 0 and fallbackSize then
+		label.Size = fallbackSize
+	end
+	if label.Position.X.Offset == 0 and label.Position.X.Scale == 0 and fallbackPosition then
+		label.Position = fallbackPosition
+	end
+	return label
+end
+
+local function ensureVisibleImage(imageObj: Instance?)
+	if not isImageGuiObject(imageObj) then
+		return nil
+	end
+
+	local image = imageObj :: ImageLabel
+	image.Visible = true
+	image.ImageTransparency = 0
+	image.BackgroundTransparency = math.min(image.BackgroundTransparency, 0.35)
+	image.ZIndex = math.max(image.ZIndex, 5)
+	if image.Size.X.Offset == 0 and image.Size.X.Scale == 0 then
+		image.Size = UDim2.fromOffset(44, 44)
+	end
+	return image
+end
+
+local function ensureRenderableGiftRow(slotFrame: Instance, layoutOrder: number)
+	if not slotFrame:IsA("GuiObject") then
+		return
+	end
+
+	local row = slotFrame :: GuiObject
+	row.Visible = true
+	row.Active = true
+	row.ClipsDescendants = true
+	row.LayoutOrder = layoutOrder
+	row.ZIndex = math.max(row.ZIndex, 4)
+	if row.Size.Y.Offset <= 0 and row.Size.Y.Scale == 0 then
+		row.Size = UDim2.new(1, -30, 0, 96)
+	elseif row.Size.Y.Offset < 70 and row.Size.Y.Scale == 0 then
+		row.Size = UDim2.new(row.Size.X.Scale, row.Size.X.Offset, 0, 96)
+	end
+	if row.Size.X.Offset == 0 and row.Size.X.Scale == 0 then
+		row.Size = UDim2.new(1, -30, row.Size.Y.Scale, math.max(row.Size.Y.Offset, 96))
+	end
+
+	local ancestor = row.Parent
+	while ancestor and ancestor ~= giftsMainFrame do
+		if ancestor:IsA("GuiObject") then
+			ancestor.Visible = true
+		end
+		ancestor = ancestor.Parent
+	end
+
+	ensureVisibleText(getDirectTextObj(row, "RewName"), UDim2.new(1, -192, 0, 22), UDim2.fromOffset(68, 12))
+	ensureVisibleText(getDirectTextObj(row, "Timer"), UDim2.new(1, -192, 0, 20), UDim2.fromOffset(68, 40))
+	ensureVisibleText(getDirectTextObj(row, "RewardDescription"), UDim2.new(1, -192, 0, 16), UDim2.fromOffset(68, 62))
+	ensureVisibleImage(getDirectImageObj(row, "Icon"))
+
+	local claimButton = getClaimButton(row)
+	if claimButton and claimButton:IsA("GuiObject") then
+		claimButton.Visible = true
+		claimButton.Active = true
+		claimButton.ZIndex = math.max(claimButton.ZIndex, 6)
+		if claimButton.Size.X.Offset == 0 and claimButton.Size.X.Scale == 0 then
+			claimButton.Size = UDim2.fromOffset(92, 34)
+		end
+		local claimText = ensureVisibleText(
+			claimButton:FindFirstChild("Text"),
+			UDim2.fromScale(1, 1),
+			UDim2.fromOffset(0, 0)
+		)
+		if claimText and claimText.Text == "" then
+			claimText.Text = READY_TEXT
+		end
+	end
+end
+
 local function setRewData(slotFrame: Instance, cfg)
 	if not cfg then
 		giftError("Missing reward config for slot", safeName(slotFrame))
@@ -1251,6 +1548,12 @@ local function setRewData(slotFrame: Instance, cfg)
 		end
 	else
 		giftError("Missing Icon image in", safeName(slotFrame))
+	end
+
+	local descriptionObj = getDirectTextObj(slotFrame, "RewardDescription")
+	if descriptionObj then
+		descriptionObj.Text = formatRewardDescription(cfg)
+		descriptionObj.Visible = descriptionObj.Text ~= ""
 	end
 
 	giftLog(
@@ -1318,9 +1621,58 @@ local function setTimerClaimed(slotFrame: Instance)
 	setTimerText(slotFrame, CLAIMED_TEXT, GREEN_COLOR)
 end
 
+local stopCountdown = nil
+local hasReceivedServerSync = false
+local hasAppliedServerSync = false
+local syncRequestStopLogged = false
+local syncEventConnected = false
+
+local function logSyncRequestStop(reason: string)
+	if syncRequestStopLogged then
+		return
+	end
+
+	syncRequestStopLogged = true
+	giftSyncClientLog("[GIFT][SYNC][REQUEST_STOP]", "reason", tostring(reason))
+end
+
+local function logSnapshotStatus(tag: string, ...)
+	print(tag, ...)
+end
+
+local function setTimerLoading(slotFrame: Instance)
+	setTimerText(slotFrame, LOADING_TEXT, WHITE_COLOR)
+end
+
+local function setAuthoritativeSyncPending(isPending: boolean)
+	if isPending and hasReceivedServerSync then
+		return
+	end
+
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		local slotFrame = slotsById[id]
+		if slotFrame then
+			slotFrame:SetAttribute("ServerSyncPending", isPending)
+			if isPending then
+				stopCountdown(id)
+				endTimes[id] = nil
+				setTimerLoading(slotFrame)
+			end
+
+			local claimButton = getClaimButton(slotFrame)
+			if claimButton then
+				claimButton.Active = not isPending
+				claimButton.AutoButtonColor = not isPending
+			end
+		end
+	end
+end
+
 local summaryLogState = nil
 local badgeLogState = nil
 local formatDurationText
+local requestServerSync = nil
 
 local function setSummaryTimer(text: string, nextRewardId: number?, nextRemaining: number?, readyCount: number)
 	local summary = ensureGiftSummaryTimer()
@@ -1448,6 +1800,52 @@ local function getClaimedCount(rawClaimedRewards): number
 	return count
 end
 
+local function getMappedGiftRowCount(): number
+	local count = 0
+	for i = 1, totalGifts do
+		local id = orderedIds[i]
+		local slotFrame = slotsById[id]
+		if slotFrame and slotFrame.Parent and slotFrame:IsDescendantOf(giftsMainFrame) then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function markSyncStateReceived(syncState)
+	if typeof(syncState) == "table" then
+		syncState.__ClientReceivedAt = os.clock()
+	end
+
+	return syncState
+end
+
+local function getEffectiveCurrentPlayTime(syncState)
+	if typeof(syncState) ~= "table" then
+		return nil
+	end
+
+	local currentPlayTime = tonumber(syncState.CurrentPlayTime)
+	if not currentPlayTime then
+		return nil
+	end
+
+	local receivedAt = tonumber(syncState.__ClientReceivedAt)
+	if receivedAt then
+		currentPlayTime += math.max(0, math.floor(os.clock() - receivedAt))
+	end
+
+	return currentPlayTime
+end
+
+local function getSyncStateSummary(syncState)
+	if typeof(syncState) ~= "table" then
+		return 0, nil, nil
+	end
+
+	return getClaimedCount(syncState.ClaimedRewards), getEffectiveCurrentPlayTime(syncState), tonumber(syncState.CycleStartPlayTime)
+end
+
 local function summarizeRewardEntries(cfg): string
 	if typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
 		return "none"
@@ -1462,7 +1860,7 @@ local function summarizeRewardEntries(cfg): string
 	return table.concat(rewardNames, ",")
 end
 
-local function stopCountdown(id: number)
+function stopCountdown(id: number)
 	local th = threads[id]
 	if th then
 		task.cancel(th)
@@ -1533,7 +1931,7 @@ local function startCountdown(id: number)
 			end
 
 			setTimerCountdown(slotFrame, formatDurationText(remaining))
-			RunService.Heartbeat:Wait()
+			task.wait(COUNTDOWN_UPDATE_INTERVAL)
 		end
 	end)
 end
@@ -1544,9 +1942,6 @@ local function hookButton(id: number)
 		giftError("hookButton missing slot frame for id", id)
 		return
 	end
-	if slotFrame:GetAttribute("Hooked") then
-		return
-	end
 
 	local claimBtn = getClaimButton(slotFrame)
 	if not claimBtn then
@@ -1554,7 +1949,19 @@ local function hookButton(id: number)
 		return
 	end
 
+	local existingConnection = claimButtonConnections[slotFrame]
+	if existingConnection and claimButtonInstances[slotFrame] == claimBtn and slotFrame:GetAttribute("HookedRewardId") == id then
+		return
+	end
+	if existingConnection then
+		existingConnection:Disconnect()
+		claimButtonConnections[slotFrame] = nil
+		claimButtonInstances[slotFrame] = nil
+	end
+
 	slotFrame:SetAttribute("Hooked", true)
+	slotFrame:SetAttribute("HookedRewardId", id)
+	claimButtonInstances[slotFrame] = claimBtn
 	giftStartupLog(
 		"claimConnectionMade",
 		"rewardId",
@@ -1573,7 +1980,7 @@ local function hookButton(id: number)
 		claimBtn.ZIndex
 	)
 
-	claimBtn.Activated:Connect(function()
+	claimButtonConnections[slotFrame] = claimBtn.Activated:Connect(function()
 		giftStartupLog(
 			"claimClicked",
 			"rewardId",
@@ -1588,11 +1995,28 @@ local function hookButton(id: number)
 		if slotFrame:GetAttribute("Claimed") then
 			return
 		end
+		if slotFrame:GetAttribute("ServerSyncPending") then
+			if requestServerSync then
+				requestServerSync("claimWhilePending")
+			end
+			return
+		end
+
+		local endTime = endTimes[id]
+		if endTime and endTime > os.clock() then
+			local remaining = math.max(1, math.ceil(endTime - os.clock()))
+			setTimerCountdown(slotFrame, formatDurationText(remaining))
+			startCountdown(id)
+			updateHud()
+			return
+		end
+
 		Remote:FireServer(id)
 	end)
 end
 
 local function collectSlotFrames()
+	refreshGiftsUiBinding("collectSlotFrames")
 	local candidates = {}
 
 	for _, inst in ipairs(giftsMainFrame:GetDescendants()) do
@@ -1613,10 +2037,226 @@ local function collectSlotFrames()
 	return candidates
 end
 
+local function cleanupClaimConnectionsForTemplates(templates)
+	local live = {}
+	for _, slotFrame in ipairs(templates) do
+		live[slotFrame] = true
+	end
+
+	for slotFrame, connection in pairs(claimButtonConnections) do
+		if not live[slotFrame] or slotFrame.Parent == nil then
+			if connection then
+				connection:Disconnect()
+			end
+			claimButtonConnections[slotFrame] = nil
+			claimButtonInstances[slotFrame] = nil
+		end
+	end
+end
+
+local function estimateRowsCanvasHeight(rows): number
+	local rowCount = 0
+	local height = 18
+	for _, row in ipairs(rows) do
+		if row:IsA("GuiObject") then
+			rowCount += 1
+			height += math.max(row.Size.Y.Offset, row.AbsoluteSize.Y, 82)
+		end
+	end
+
+	if rowCount > 1 then
+		height += (rowCount - 1) * 10
+	end
+	return math.max(height, rowCount * 92)
+end
+
+local function forceGiftsLayout(context: string, rows)
+	refreshGiftsUiBinding("forceLayout:" .. context)
+	giftsMainFrame.Visible = true
+	giftsMainFrame.BackgroundTransparency = 1
+	giftsMainFrame.BorderSizePixel = 0
+	giftsMainFrame.ClipsDescendants = true
+	giftsMainFrame.Size = UDim2.new(1, -42, 1, -126)
+	giftsMainFrame.Position = UDim2.fromOffset(18, 116)
+	giftsMainFrame.ZIndex = math.max(giftsMainFrame.ZIndex, 3)
+
+	local container = getGiftsSlotContainer()
+	if container:IsA("GuiObject") then
+		container.Visible = true
+		container.Active = true
+		container.ClipsDescendants = true
+		container.ZIndex = math.max(container.ZIndex, 4)
+		if container.Size.X.Offset == 0 and container.Size.X.Scale == 0 then
+			container.Size = UDim2.fromScale(1, 1)
+		end
+	end
+
+	if #rows == 0 then
+		if container:IsA("ScrollingFrame") then
+			container.AutomaticCanvasSize = Enum.AutomaticSize.None
+			container.CanvasSize = UDim2.fromOffset(0, 0)
+		end
+		return
+	end
+
+	local layout = getGiftsListLayout(container)
+	if not layout then
+		layout = Instance.new("UIListLayout")
+		layout.Name = "SlotLayout"
+		layout.Parent = container
+		layout.FillDirection = Enum.FillDirection.Vertical
+		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Padding = UDim.new(0, 10)
+	end
+
+	for index, row in ipairs(rows) do
+		ensureRenderableGiftRow(row, index)
+	end
+
+	if container:IsA("ScrollingFrame") then
+		local canvasHeight = estimateRowsCanvasHeight(rows)
+		local layoutHeight = layout.AbsoluteContentSize.Y
+		if layoutHeight > 0 then
+			canvasHeight = math.max(canvasHeight, layoutHeight + 24)
+		end
+		container.AutomaticCanvasSize = Enum.AutomaticSize.None
+		container.CanvasSize = UDim2.fromOffset(0, canvasHeight)
+		container.ScrollingEnabled = true
+		container.ScrollingDirection = Enum.ScrollingDirection.Y
+		container.ScrollBarThickness = math.max(container.ScrollBarThickness, 8)
+	end
+end
+
+local function rowIsOutsideScrollViewport(row: GuiObject, container: Instance): boolean
+	if not container:IsA("GuiObject") then
+		return false
+	end
+	if row.AbsoluteSize.Y <= 0 or container.AbsoluteSize.Y <= 0 then
+		return true
+	end
+
+	local rowTop = row.AbsolutePosition.Y
+	local rowBottom = rowTop + row.AbsoluteSize.Y
+	local viewTop = container.AbsolutePosition.Y
+	local viewBottom = viewTop + container.AbsoluteSize.Y
+	return rowBottom <= viewTop or rowTop >= viewBottom
+end
+
+local function logGiftRenderDiagnostics(context: string, rows)
+	if not GIFT_STARTUP_DEBUG then
+		return
+	end
+
+	local container = getGiftsSlotContainer()
+	local layout = getGiftsListLayout(container)
+	local rowParts = {}
+	for index, row in ipairs(rows) do
+		if row:IsA("GuiObject") then
+			rowParts[#rowParts + 1] = string.format(
+				"%d:%s:%s:%s:%s",
+				index,
+				row.Name,
+				tostring(row.Visible),
+				tostring(row.Size),
+				tostring(row.AbsoluteSize)
+			)
+		end
+	end
+
+	local stateKey = table.concat(rowParts, "|")
+		.. "|container="
+		.. safeName(container)
+		.. "|canvas="
+		.. tostring(container:IsA("ScrollingFrame") and container.CanvasSize or "n/a")
+	if giftRenderDiagnosticsState == stateKey then
+		return
+	end
+	giftRenderDiagnosticsState = stateKey
+
+	giftDebugWarn(
+		"renderDiagnostics",
+		"context",
+		context,
+		"rewardCount",
+		#orderedIds,
+		"rowCount",
+		#rows,
+		"mapped",
+		totalGifts,
+		"main",
+		safeName(giftsMainFrame),
+		"mainVisible",
+		tostring(giftsMainFrame.Visible),
+		"mainSize",
+		tostring(giftsMainFrame.Size),
+		"mainAbsoluteSize",
+		tostring(giftsMainFrame.AbsoluteSize),
+		"container",
+		safeName(container),
+		"containerVisible",
+		tostring(container:IsA("GuiObject") and container.Visible or "n/a"),
+		"containerSize",
+		tostring(container:IsA("GuiObject") and container.Size or "n/a"),
+		"containerAbsoluteSize",
+		tostring(container:IsA("GuiObject") and container.AbsoluteSize or "n/a"),
+		"canvasSize",
+		tostring(container:IsA("ScrollingFrame") and container.CanvasSize or "n/a"),
+		"automaticCanvasSize",
+		tostring(container:IsA("ScrollingFrame") and container.AutomaticCanvasSize or "n/a"),
+		"layoutContentSize",
+		tostring(layout and layout.AbsoluteContentSize or "nil")
+	)
+
+	for index, row in ipairs(rows) do
+		if row:IsA("GuiObject") then
+			local claimButton = getClaimButton(row)
+			giftDebugWarn(
+				"rowRenderState",
+				"context",
+				context,
+				"index",
+				index,
+				"rewardId",
+				tostring(row:GetAttribute("RewardId")),
+				"row",
+				safeName(row),
+				"parent",
+				safeName(row.Parent),
+				"visible",
+				tostring(row.Visible),
+				"size",
+				tostring(row.Size),
+				"absoluteSize",
+				tostring(row.AbsoluteSize),
+				"z",
+				row.ZIndex,
+				"layout",
+				row.LayoutOrder,
+				"outsideScrollViewport",
+				tostring(rowIsOutsideScrollViewport(row, container)),
+				"claim",
+				safeName(claimButton),
+				"claimVisible",
+				tostring(claimButton and claimButton:IsA("GuiObject") and claimButton.Visible or "nil"),
+				"claimSize",
+				tostring(claimButton and claimButton:IsA("GuiObject") and claimButton.Size or "nil"),
+				"claimAbsoluteSize",
+				tostring(claimButton and claimButton:IsA("GuiObject") and claimButton.AbsoluteSize or "nil"),
+				"claimZ",
+				tostring(claimButton and claimButton:IsA("GuiObject") and claimButton.ZIndex or "nil")
+			)
+		end
+	end
+end
+
 local function buildSlotsOnce()
+	refreshGiftsUiBinding("buildSlotsOnce")
 	table.clear(orderedIds)
 	for id in pairs(RewardsConfig) do
-		table.insert(orderedIds, id)
+		if typeof(id) == "number" then
+			table.insert(orderedIds, id)
+		end
 	end
 	table.sort(orderedIds, function(a, b)
 		return a < b
@@ -1625,6 +2265,7 @@ local function buildSlotsOnce()
 	logScrollState("buildSlots")
 
 	local templates = collectSlotFrames()
+	cleanupClaimConnectionsForTemplates(templates)
 	totalGifts = math.min(#orderedIds, #templates)
 	table.clear(slotsById)
 	local slotContainerPath = safeName(getGiftsSlotContainer())
@@ -1667,7 +2308,11 @@ local function buildSlotsOnce()
 		slotFrame.Visible = true
 		slotFrame:SetAttribute("RewardId", id)
 		slotFrame:SetAttribute("Claimed", false)
-		slotFrame:SetAttribute("Hooked", false)
+		if claimButtonConnections[slotFrame] == nil then
+			slotFrame:SetAttribute("Hooked", false)
+			slotFrame:SetAttribute("HookedRewardId", nil)
+		end
+		ensureRenderableGiftRow(slotFrame, i)
 
 		giftLog(
 			"[GIFT][ROWMAP]",
@@ -1688,17 +2333,19 @@ local function buildSlotsOnce()
 		hookButton(id)
 	end
 
+	if #templates > 0 then
+		forceGiftsLayout("buildSlotsOnce", templates)
+		logGiftRenderDiagnostics("buildSlotsOnce", templates)
+	end
 	updateHud()
 end
 
 local function buildSlotsWithWait()
 	local expectedRewards = 0
-	for attempt = 1, 10 do
+	for attempt = 1, 15 do
 		buildSlotsOnce()
 		expectedRewards = #orderedIds
-		-- Accept partial slot sets so countdown sync still runs even when UI exposes fewer
-		-- visible slot templates than configured rewards.
-		if totalGifts > 0 then
+		if expectedRewards > 0 and totalGifts >= expectedRewards then
 			return true
 		end
 		if attempt == 1 then
@@ -1711,7 +2358,7 @@ local function buildSlotsWithWait()
 	giftStartupWarn(
 		"slotBuildFallback",
 		"reason",
-		"no slot-shaped descendants under Gifts.Main",
+		if totalGifts <= 0 then "no slot-shaped descendants under Gifts.Main" else "incomplete slot-shaped descendants under Gifts.Main",
 		"expected",
 		expectedRewards,
 		"found",
@@ -1722,14 +2369,15 @@ local function buildSlotsWithWait()
 	ensureFallbackSlotContainer(math.max(expectedRewards, 1))
 	dumpGiftsMainTree("afterFallbackSlotCreate")
 	buildSlotsOnce()
-	if totalGifts > 0 then
+	expectedRewards = #orderedIds
+	if expectedRewards > 0 and totalGifts >= expectedRewards then
 		return true
 	end
 
 	for _ = 1, 40 do
 		buildSlotsOnce()
 		expectedRewards = #orderedIds
-		if totalGifts > 0 then
+		if expectedRewards > 0 and totalGifts >= expectedRewards then
 			return true
 		end
 		task.wait(0.2)
@@ -1767,6 +2415,7 @@ end
 
 local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 	giftLog("[GIFT][DATA]", string.format("applying legacy epoch=%d", serverStartEpoch))
+	setAuthoritativeSyncPending(false)
 
 	for i = 1, totalGifts do
 		local id = orderedIds[i]
@@ -1808,24 +2457,29 @@ local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 		end
 	end
 
+	local rows = collectSlotFrames()
+	forceGiftsLayout("legacyState", rows)
+	logGiftRenderDiagnostics("legacyState", rows)
 	updateHud()
 end
 
 local function initialiseButtonsFromState(syncState)
 	if typeof(syncState) ~= "table" then
 		giftError("syncState payload must be a table, got", typeof(syncState))
-		return
+		return false, 0
 	end
 
 	local cycleStartPlayTime = tonumber(syncState.CycleStartPlayTime)
-	local currentPlayTime = tonumber(syncState.CurrentPlayTime)
+	local currentPlayTime = getEffectiveCurrentPlayTime(syncState)
 	if not cycleStartPlayTime or not currentPlayTime then
 		giftError("syncState missing play time fields", syncState)
-		return
+		return false, 0
 	end
 
 	local claimedRewards = normalizeClaimedRewards(syncState.ClaimedRewards)
 	local elapsedPlayTime = math.max(0, currentPlayTime - cycleStartPlayTime)
+	setAuthoritativeSyncPending(false)
+	local timersUpdated = 0
 
 	giftLog(
 		"[GIFT][DATA]",
@@ -1844,6 +2498,7 @@ local function initialiseButtonsFromState(syncState)
 		local slotFrame = slotsById[id]
 
 		if slotFrame and cfg then
+			timersUpdated += 1
 			stopCountdown(id)
 			setRewData(slotFrame, cfg)
 
@@ -1887,12 +2542,68 @@ local function initialiseButtonsFromState(syncState)
 		end
 	end
 
+	local rows = collectSlotFrames()
+	forceGiftsLayout("syncState", rows)
+	logGiftRenderDiagnostics("syncState", rows)
 	updateHud()
+	return true, timersUpdated
 end
 
 local building = false
+local rebuildScheduled = false
+local suppressGiftTreeRebuilds = 0
 local pendingState = nil
-local hasReceivedServerSync = false
+local latestRewardState = nil
+local latestSyncState = nil
+
+local function withGiftTreeRebuildsSuppressed(callback)
+	suppressGiftTreeRebuilds += 1
+	local ok, result = pcall(callback)
+	suppressGiftTreeRebuilds = math.max(0, suppressGiftTreeRebuilds - 1)
+	if not ok then
+		error(result, 2)
+	end
+	return result
+end
+
+local function applySyncStateNow(syncState, context: string)
+	local claimedCount, currentPlayTime, cycleStartPlayTime = getSyncStateSummary(syncState)
+	local ok, timersUpdated = initialiseButtonsFromState(syncState)
+	giftSyncClientLog(
+		"[GIFT][SYNC][APPLY]",
+		"context",
+		tostring(context),
+		"payloadType",
+		typeof(syncState),
+		"claimed",
+		claimedCount,
+		"currentPlayTime",
+		tostring(currentPlayTime),
+		"cycleStart",
+		tostring(cycleStartPlayTime),
+		"rowCount",
+		getMappedGiftRowCount(),
+		"timersUpdated",
+		tonumber(timersUpdated) or 0,
+		"ok",
+		tostring(ok)
+	)
+	if ok == true then
+		hasAppliedServerSync = true
+		logSyncRequestStop("sync_applied")
+	end
+	return ok == true
+end
+
+local function applyRewardState(state)
+	if typeof(state) == "table" then
+		applySyncStateNow(state, "pending")
+	elseif typeof(state) == "number" then
+		initialiseButtonsFromLegacyEpoch(state)
+	else
+		giftError("Unsupported pending time reward state", typeof(state))
+	end
+end
 
 local function applyPendingState()
 	if pendingState == nil then
@@ -1901,55 +2612,504 @@ local function applyPendingState()
 
 	local state = pendingState
 	pendingState = nil
+	applyRewardState(state)
+end
 
-	if typeof(state) == "table" then
-		initialiseButtonsFromState(state)
-	elseif typeof(state) == "number" then
-		initialiseButtonsFromLegacyEpoch(state)
-	else
-		giftError("Unsupported pending time reward state", typeof(state))
+local function applyLatestStateOrFallback(context: string)
+	if latestSyncState ~= nil then
+		local claimedCount, currentPlayTime, cycleStartPlayTime = getSyncStateSummary(latestSyncState)
+		giftSyncClientLog(
+			"[GIFT][SYNC][REAPPLY_AFTER_REBUILD]",
+			"context",
+			tostring(context),
+			"claimed",
+			claimedCount,
+			"currentPlayTime",
+			tostring(currentPlayTime),
+			"cycleStart",
+			tostring(cycleStartPlayTime),
+			"rowCount",
+			getMappedGiftRowCount()
+		)
+		applySyncStateNow(latestSyncState, "rebuild:" .. tostring(context))
+	elseif latestRewardState ~= nil then
+		pendingState = latestRewardState
+		applyPendingState()
+	elseif not hasReceivedServerSync then
+		setAuthoritativeSyncPending(true)
+		updateHud()
+		if requestServerSync then
+			requestServerSync("slotsReady")
+		end
 	end
 end
 
-logHudBinding()
+local function getConfiguredRewardCount(): number
+	local count = 0
+	for id in pairs(RewardsConfig) do
+		if typeof(id) == "number" then
+			count += 1
+		end
+	end
+	return count
+end
 
-giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
-	if giftsFrame.Visible then
-		logScrollState("panelOpen")
-		giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
+local function hasCompleteLiveSlotMapping(): boolean
+	refreshGiftsUiBinding("hasCompleteLiveSlotMapping")
+	local expected = 0
+	for id in pairs(RewardsConfig) do
+		if typeof(id) == "number" then
+			expected += 1
+			local slotFrame = slotsById[id]
+			if not (slotFrame and slotFrame.Parent and slotFrame:IsDescendantOf(giftsMainFrame)) then
+				return false
+			end
+		end
+	end
+
+	return expected > 0 and totalGifts >= expected
+end
+
+local function runSlotBuild(context: string): boolean
+	if building then
+		return false
+	end
+
+	refreshGiftsUiBinding("runSlotBuild:" .. context)
+	building = true
+	giftDebugWarn(
+		"slotBuildStart",
+		"context",
+		context,
+		"expected",
+		getConfiguredRewardCount(),
+		"currentTotal",
+		totalGifts,
+		"mainChildren",
+		#giftsMainFrame:GetChildren(),
+		"mainDescendants",
+		#giftsMainFrame:GetDescendants()
+	)
+	local buildOk, buildResult = pcall(function()
+		return withGiftTreeRebuildsSuppressed(buildSlotsWithWait)
+	end)
+	building = false
+	if not buildOk then
+		giftError("slot build failed", "context", context, "error", tostring(buildResult))
+		return false
+	end
+	local ok = buildResult == true
+	giftDebugWarn(
+		"slotBuildDone",
+		"context",
+		context,
+		"ok",
+		tostring(ok),
+		"expected",
+		getConfiguredRewardCount(),
+		"total",
+		totalGifts,
+		"mainChildren",
+		#giftsMainFrame:GetChildren(),
+		"mainDescendants",
+		#giftsMainFrame:GetDescendants()
+	)
+	if ok then
+		applyLatestStateOrFallback(context)
+	end
+	return ok
+end
+
+local function scheduleSlotRebuild(context: string)
+	if suppressGiftTreeRebuilds > 0 then
+		return
+	end
+
+	if rebuildScheduled then
+		return
+	end
+
+	rebuildScheduled = true
+	task.delay(0.15, function()
+		rebuildScheduled = false
+
+		refreshGiftsUiBinding("scheduledRebuild:" .. context)
+		local expectedRewards = getConfiguredRewardCount()
+		local templates = collectSlotFrames()
+		if expectedRewards > 0 and #templates >= expectedRewards and hasCompleteLiveSlotMapping() then
+			if latestSyncState ~= nil then
+				giftSyncClientLog(
+					"[GIFT][SYNC][REAPPLY_AFTER_REBUILD]",
+					"context",
+					"scheduledRebuildReady:" .. tostring(context),
+					"rowCount",
+					getMappedGiftRowCount()
+				)
+				applySyncStateNow(latestSyncState, "scheduledRebuildReady:" .. tostring(context))
+			elseif pendingState ~= nil then
+				applyPendingState()
+			end
+			return
+		end
+
+		giftDebugWarn(
+			"slotRebuildNeeded",
+			"context",
+			context,
+			"expected",
+			expectedRewards,
+			"mapped",
+			totalGifts,
+			"templates",
+			#templates,
+			"mainChildren",
+			#giftsMainFrame:GetChildren(),
+			"mainDescendants",
+			#giftsMainFrame:GetDescendants()
+		)
+
+		if building then
+			scheduleSlotRebuild(context .. ":afterCurrentBuild")
+			return
+		end
+
+		runSlotBuild(context)
+	end)
+end
+
+local giftMainDescendantAddedConnection = nil
+local giftMainDescendantRemovingConnection = nil
+local giftFrameVisibleConnection = nil
+local watchedGiftsFrame = nil
+local watchedGiftsMainFrame = nil
+
+local function isGiftContentStructureName(name: string): boolean
+	return name == "Main"
+		or name == "Scroll"
+		or name == "ClaimButton"
+		or string.match(name, "^Slot%d+$") ~= nil
+end
+
+local function isGiftRootStructureName(name: string): boolean
+	return name == "Gifts" or name == "Main" or name == "Scroll" or string.match(name, "^Slot%d+$") ~= nil
+end
+
+local function bindGiftContentTreeWatchers(context: string)
+	if not refreshGiftsUiBinding("bindWatchers:" .. context) then
+		return
+	end
+
+	if watchedGiftsFrame == giftsFrame
+		and watchedGiftsMainFrame == giftsMainFrame
+		and giftMainDescendantAddedConnection
+		and giftMainDescendantRemovingConnection
+		and giftFrameVisibleConnection then
+		return
+	end
+
+	if giftMainDescendantAddedConnection then
+		giftMainDescendantAddedConnection:Disconnect()
+		giftMainDescendantAddedConnection = nil
+	end
+	if giftMainDescendantRemovingConnection then
+		giftMainDescendantRemovingConnection:Disconnect()
+		giftMainDescendantRemovingConnection = nil
+	end
+	if giftFrameVisibleConnection then
+		giftFrameVisibleConnection:Disconnect()
+		giftFrameVisibleConnection = nil
+	end
+	watchedGiftsFrame = giftsFrame
+	watchedGiftsMainFrame = giftsMainFrame
+
+	giftMainDescendantAddedConnection = giftsMainFrame.DescendantAdded:Connect(function(descendant)
+		if suppressGiftTreeRebuilds > 0 then
+			return
+		end
+		if isGiftContentStructureName(descendant.Name) then
+			scheduleSlotRebuild("descendantAdded:" .. descendant.Name)
+		end
+	end)
+
+	giftMainDescendantRemovingConnection = giftsMainFrame.DescendantRemoving:Connect(function(descendant)
+		if suppressGiftTreeRebuilds > 0 then
+			return
+		end
+		if isGiftContentStructureName(descendant.Name) or isSlotFrame(descendant) then
+			scheduleSlotRebuild("descendantRemoving:" .. descendant.Name)
+		end
+	end)
+
+	giftFrameVisibleConnection = giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+		if giftsFrame.Visible then
+			giftsMainFrame.Visible = true
+			logScrollState("panelOpen")
+			scheduleSlotRebuild("panelOpen")
+			if latestSyncState == nil or not hasAppliedServerSync then
+				setAuthoritativeSyncPending(true)
+				if requestServerSync then
+					requestServerSync("panelOpenMissingSync")
+				end
+			end
+			task.defer(function()
+				local rows = collectSlotFrames()
+				forceGiftsLayout("panelOpen", rows)
+				logGiftRenderDiagnostics("panelOpen", rows)
+			end)
+			giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
+		end
+	end)
+
+	giftStartupLog("contentWatchersBound", "context", context, "main", safeName(giftsMainFrame))
+end
+
+bindGiftContentTreeWatchers("startup")
+
+mainGui.DescendantAdded:Connect(function(descendant)
+	if suppressGiftTreeRebuilds > 0 then
+		return
+	end
+	if isGiftRootStructureName(descendant.Name) then
+		task.defer(function()
+			if refreshGiftsUiBinding("mainGuiDescendantAdded:" .. descendant.Name) then
+				bindGiftContentTreeWatchers("mainGuiDescendantAdded:" .. descendant.Name)
+				scheduleSlotRebuild("mainGuiDescendantAdded:" .. descendant.Name)
+			end
+		end)
 	end
 end)
 
+mainGui.DescendantRemoving:Connect(function(descendant)
+	if suppressGiftTreeRebuilds > 0 then
+		return
+	end
+	if isGiftRootStructureName(descendant.Name) then
+		task.delay(0.25, function()
+			if refreshGiftsUiBinding("mainGuiDescendantRemoving:" .. descendant.Name) then
+				bindGiftContentTreeWatchers("mainGuiDescendantRemoving:" .. descendant.Name)
+				scheduleSlotRebuild("mainGuiDescendantRemoving:" .. descendant.Name)
+			end
+		end)
+	end
+end)
+
+logHudBinding()
+
 if giftsFrame.Visible then
 	logScrollState("panelOpen")
+	scheduleSlotRebuild("initialPanelOpen")
 	giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
 end
 
 task.spawn(function()
-	building = true
-	local ok = buildSlotsWithWait()
-	building = false
-	if ok then
-		applyPendingState()
-		-- Fallback: if the server sync has not arrived yet, start local countdowns
-		-- from now so timers do not remain as "--" in UI.
-		if not hasReceivedServerSync then
-			initialiseButtonsFromLegacyEpoch(os.time())
-		end
-	end
+	runSlotBuild("initial")
 end)
 
 task.spawn(function()
 	while true do
 		updateHud()
-		RunService.Heartbeat:Wait()
+		task.wait(HUD_UPDATE_INTERVAL)
 	end
 end)
 
+local snapshotRequestLoopRunning = false
+
+local function getLatestSnapshotClaimedCount(): number
+	local claimedCount = 0
+	if latestSyncState ~= nil then
+		claimedCount = getSyncStateSummary(latestSyncState)
+	end
+	return tonumber(claimedCount) or 0
+end
+
+local function logSnapshotRequest(reason: string, attempt: number)
+	logSnapshotStatus(
+		"[GIFT][SNAPSHOT][REQUEST]",
+		"attempt",
+		attempt,
+		"reason",
+		tostring(reason),
+		"claimed",
+		getLatestSnapshotClaimedCount(),
+		"rowCount",
+		getMappedGiftRowCount(),
+		"playerDataReady",
+		tostring(player:GetAttribute("PlayerDataReady") == true)
+	)
+end
+
+local function logSnapshotFailure(reason: string, attempt: number, errorReason: string)
+	warn(
+		"[GIFT][SNAPSHOT][FAILED]",
+		"attempt",
+		attempt,
+		"reason",
+		tostring(reason),
+		"error",
+		tostring(errorReason),
+		"claimed",
+		getLatestSnapshotClaimedCount(),
+		"rowCount",
+		getMappedGiftRowCount(),
+		"playerDataReady",
+		tostring(player:GetAttribute("PlayerDataReady") == true)
+	)
+end
+
+local function requestSnapshotAttempt(reason: string, attempt: number): boolean
+	logSnapshotRequest(reason, attempt)
+
+	local ok, response = pcall(function()
+		return SnapshotRequest:InvokeServer()
+	end)
+	if not ok then
+		logSnapshotFailure(reason, attempt, tostring(response))
+		return false
+	end
+
+	if typeof(response) ~= "table" then
+		logSnapshotFailure(reason, attempt, "invalid_response_" .. typeof(response))
+		return false
+	end
+
+	if response.ok ~= true then
+		logSnapshotFailure(reason, attempt, tostring(response.error or "server_rejected"))
+		return false
+	end
+
+	local syncState = response.state
+	if typeof(syncState) ~= "table" then
+		logSnapshotFailure(reason, attempt, "invalid_state_" .. typeof(syncState))
+		return false
+	end
+
+	syncState = markSyncStateReceived(syncState)
+	latestSyncState = syncState
+	latestRewardState = syncState
+	hasReceivedServerSync = true
+
+	local claimedCount = getSyncStateSummary(syncState)
+	local applied = false
+	if hasCompleteLiveSlotMapping() then
+		applied = applySyncStateNow(syncState, "snapshot:" .. tostring(reason))
+	else
+		pendingState = syncState
+		scheduleSlotRebuild("snapshot:" .. tostring(reason))
+	end
+
+	logSnapshotStatus(
+		"[GIFT][SNAPSHOT][SUCCESS]",
+		"attempt",
+		attempt,
+		"reason",
+		tostring(reason),
+		"claimed",
+		tonumber(claimedCount) or 0,
+		"rowCount",
+		getMappedGiftRowCount(),
+		"playerDataReady",
+		tostring(player:GetAttribute("PlayerDataReady") == true),
+		"applied",
+		tostring(applied)
+	)
+
+	return applied
+end
+
+local function logSnapshotFinalFailure(reason: string)
+	warn(
+		"[GIFT][SNAPSHOT][FAILED]",
+		"no authoritative snapshot applied after retries",
+		"reason",
+		tostring(reason),
+		"claimed",
+		getLatestSnapshotClaimedCount(),
+		"rowCount",
+		getMappedGiftRowCount(),
+		"playerDataReady",
+		tostring(player:GetAttribute("PlayerDataReady") == true),
+		"remote",
+		safeName(SnapshotRequest),
+		"onClientEventConnected",
+		tostring(syncEventConnected),
+		"panelVisible",
+		tostring(giftsFrame.Visible),
+		"hasReceivedServerSync",
+		tostring(hasReceivedServerSync),
+		"hasAppliedServerSync",
+		tostring(hasAppliedServerSync)
+	)
+end
+
+requestServerSync = function(reason: string)
+	if hasAppliedServerSync then
+		logSyncRequestStop("sync_applied")
+		return
+	end
+
+	if snapshotRequestLoopRunning then
+		return
+	end
+
+	snapshotRequestLoopRunning = true
+	syncRequestStopLogged = false
+
+	task.spawn(function()
+		for attempt = 1, MAX_SYNC_REQUEST_ATTEMPTS do
+			if hasAppliedServerSync then
+				logSyncRequestStop("sync_applied")
+				snapshotRequestLoopRunning = false
+				return
+			end
+
+			if requestSnapshotAttempt(reason, attempt) then
+				snapshotRequestLoopRunning = false
+				return
+			end
+
+			local deadline = os.clock() + SYNC_REQUEST_RETRY_SECONDS
+			while os.clock() < deadline do
+				if hasAppliedServerSync then
+					logSyncRequestStop("sync_applied")
+					snapshotRequestLoopRunning = false
+					return
+				end
+				task.wait(0.1)
+			end
+		end
+
+		snapshotRequestLoopRunning = false
+		if not hasAppliedServerSync then
+			logSnapshotFinalFailure(reason)
+		end
+	end)
+end
+
 giftStartupLog("remoteClientConnectionMade", "signal", "OnClientEvent", "remote", safeName(Remote))
+syncEventConnected = true
 Remote.OnClientEvent:Connect(function(action, a, b, c)
+	local claimedCount, currentPlayTime, cycleStartPlayTime = getSyncStateSummary(a)
+	giftSyncClientLog(
+		"[GIFT][SYNC][CLIENT][RECEIVED]",
+		"action",
+		tostring(action),
+		"payloadType",
+		typeof(a),
+		"claimed",
+		claimedCount,
+		"currentPlayTime",
+		tostring(currentPlayTime),
+		"cycleStart",
+		tostring(cycleStartPlayTime),
+		"rowCount",
+		getMappedGiftRowCount()
+	)
+
 	if action == "syncState" then
+		a = markSyncStateReceived(a)
 		hasReceivedServerSync = true
+		latestSyncState = a
+		latestRewardState = a
 		local claimedPayload = if typeof(a) == "table" then a.ClaimedRewards else nil
 		giftLog(
 			"[GIFT][DATA]",
@@ -1959,45 +3119,48 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			"totalSlots",
 			totalGifts
 		)
-		if totalGifts == 0 then
+		if not hasCompleteLiveSlotMapping() then
 			pendingState = a
-			if not building then
-				task.spawn(function()
-					building = true
-					local ok = buildSlotsWithWait()
-					building = false
-					if ok then
-						applyPendingState()
-					end
-				end)
-			end
+			giftSyncClientLog(
+				"[GIFT][SYNC][DEFER_APPLY_ROWS_NOT_READY]",
+				"action",
+				tostring(action),
+				"payloadType",
+				typeof(a),
+				"claimed",
+				getClaimedCount(claimedPayload),
+				"currentPlayTime",
+				tostring(currentPlayTime),
+				"cycleStart",
+				tostring(cycleStartPlayTime),
+				"rowCount",
+				getMappedGiftRowCount(),
+				"totalGifts",
+				totalGifts
+			)
+			scheduleSlotRebuild("remote:syncState")
 			return
 		end
-		initialiseButtonsFromState(a)
+		applySyncStateNow(a, "remote:syncState")
 	elseif action == "startCycle" or action == "cycleReset" then
 		hasReceivedServerSync = true
 		if typeof(a) ~= "number" then
 			giftError("startCycle/cycleReset bad epoch", a, "typeof", typeof(a))
 			return
 		end
+		latestRewardState = a
 		giftLog("[GIFT][DATA]", "remoteAction", action, "epoch", a)
-		if totalGifts == 0 then
+		if not hasCompleteLiveSlotMapping() then
 			pendingState = a
-			if not building then
-				task.spawn(function()
-					building = true
-					local ok = buildSlotsWithWait()
-					building = false
-					if ok then
-						applyPendingState()
-					end
-				end)
-			end
+			scheduleSlotRebuild("remote:" .. action)
 			return
 		end
 		initialiseButtonsFromLegacyEpoch(a)
 	elseif action == "forceReady" then
 		giftLog("[GIFT][RENDER]", "remoteAction=forceReady", "totalSlots", totalGifts)
+		if not hasCompleteLiveSlotMapping() then
+			scheduleSlotRebuild("remote:forceReady")
+		end
 		for i = 1, totalGifts do
 			local id = orderedIds[i]
 			local slotFrame = slotsById[id]
@@ -2010,9 +3173,18 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		updateHud()
 	elseif action == "claimed" then
 		local id = a
+		if typeof(latestRewardState) == "table" and id ~= nil then
+			local claimedRewards = latestRewardState.ClaimedRewards
+			if typeof(claimedRewards) ~= "table" then
+				claimedRewards = {}
+				latestRewardState.ClaimedRewards = claimedRewards
+			end
+			claimedRewards[tostring(id)] = true
+		end
 		local slotFrame = slotsById[id]
 		if not slotFrame then
 			giftError("claimed action missing slot frame for id", id)
+			scheduleSlotRebuild("remote:claimedMissingSlot")
 			return
 		end
 		slotFrame:SetAttribute("Claimed", true)
@@ -2061,6 +3233,13 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		updateHud()
 	else
 		giftError("Unknown time reward action", action)
+	end
+end)
+
+task.defer(function()
+	if not hasReceivedServerSync then
+		setAuthoritativeSyncPending(true)
+		requestServerSync("clientConnected")
 	end
 end)
 

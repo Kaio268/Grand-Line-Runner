@@ -24,10 +24,16 @@ local CONTROLLER_GENERATION_ATTRIBUTE = "OpenUIControllerGeneration"
 local OPENED_FRAME_ATTRIBUTE = "OpenUIOpened"
 local GIFT_OPENUI_DEBUG = true
 local GIFT_OPENUI_DEBUG_VERSION = "gifts-openui-x-debug-2026-05-01"
+local CLOSE_BUTTON_DEBUG = true
+local CLOSE_BUTTON_DEBUG_VERSION = "close-buttons-live-debug-2026-05-01"
 local REACT_MODAL_FRAME_NAMES = {
 	Index = true,
 	Quest = true,
 	Store = true,
+}
+local CLOSE_DIAGNOSTIC_FRAME_NAMES = {
+	Gifts = true,
+	Rebirth = true,
 }
 
 local function safeName(inst)
@@ -44,6 +50,32 @@ local function giftOpenUiLog(...)
 	if GIFT_OPENUI_DEBUG then
 		print("[GIFT][OPENUI]", ...)
 	end
+end
+
+local function closeButtonLog(frameName: string, ...)
+	if CLOSE_BUTTON_DEBUG and CLOSE_DIAGNOSTIC_FRAME_NAMES[frameName] then
+		print("[UI][CLOSE]", ...)
+	end
+end
+
+local function closeButtonWarn(frameName: string, ...)
+	if CLOSE_DIAGNOSTIC_FRAME_NAMES[frameName] then
+		warn("[UI][CLOSE][WARN]", ...)
+	end
+end
+
+local function countFrameChildrenByName(framesFolder: Instance?, frameName: string): number
+	if not framesFolder then
+		return 0
+	end
+
+	local count = 0
+	for _, child in ipairs(framesFolder:GetChildren()) do
+		if child.Name == frameName and child:IsA("Frame") then
+			count += 1
+		end
+	end
+	return count
 end
 
 local function nextControllerGeneration(playerGui: PlayerGui): number
@@ -126,6 +158,251 @@ function UIController:_forceHide(frame: Frame)
 	if self.CurrentFrame == frame then
 		self.CurrentFrame = nil
 	end
+end
+
+function UIController:_forceCloseFromButton(frame: Frame, button: GuiButton, source: string)
+	if not self:_isActiveController() then
+		return
+	end
+
+	local now = os.clock()
+	self._lastCloseClickAtByFrame = self._lastCloseClickAtByFrame or {}
+	local lastClickAt = self._lastCloseClickAtByFrame[frame]
+	if lastClickAt and now - lastClickAt < 0.08 then
+		return
+	end
+	self._lastCloseClickAtByFrame[frame] = now
+
+	closeButtonLog(
+		frame.Name,
+		"xClicked",
+		"version",
+		CLOSE_BUTTON_DEBUG_VERSION,
+		"source",
+		source,
+		"frame",
+		safeName(frame),
+		"button",
+		safeName(button),
+		"frameVisibleBefore",
+		tostring(frame.Visible),
+		"isAnimatingBefore",
+		tostring(self.IsAnimating),
+		"currentFrame",
+		safeName(self.CurrentFrame)
+	)
+
+	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
+	local scale = frame:FindFirstChildOfClass("UIScale")
+	if scale then
+		scale.Scale = 0
+	end
+	frame.Visible = false
+	frame.Position = UDim2.new(0.5, 0, 10, 0)
+	for _, candidate in ipairs(self.FramesFolder:GetChildren()) do
+		if candidate ~= frame and candidate:IsA("Frame") and candidate.Name == frame.Name then
+			closeButtonWarn(
+				frame.Name,
+				"duplicateFrameClosed",
+				"version",
+				CLOSE_BUTTON_DEBUG_VERSION,
+				"wiredFrame",
+				safeName(frame),
+				"duplicate",
+				safeName(candidate),
+				"duplicateVisibleBefore",
+				tostring(candidate.Visible)
+			)
+			self:_forceHide(candidate)
+		end
+	end
+
+	if self.PlantInventory and frame == self.PlantInventory then
+		self.PlantVisible = false
+	end
+	if self.CurrentFrame == frame then
+		self.CurrentFrame = nil
+	end
+
+	if not (self.CurrentFrame and self.CurrentFrame.Visible) and not self.PlantVisible then
+		self:_applyBlurCam(false)
+	end
+	self.IsAnimating = false
+
+	closeButtonLog(
+		frame.Name,
+		"xClosed",
+		"version",
+		CLOSE_BUTTON_DEBUG_VERSION,
+		"source",
+		source,
+		"frame",
+		safeName(frame),
+		"frameVisibleAfter",
+		tostring(frame.Visible),
+		"scale",
+		tostring(scale and scale.Scale or "nil"),
+		"currentFrameAfter",
+		safeName(self.CurrentFrame)
+	)
+
+	task.delay(0.12, function()
+		if frame.Parent and frame.Visible then
+			closeButtonWarn(
+				frame.Name,
+				"xCloseOverridden",
+				"version",
+				CLOSE_BUTTON_DEBUG_VERSION,
+				"frame",
+				safeName(frame),
+				"button",
+				safeName(button),
+				"source",
+				source,
+				"currentFrame",
+				safeName(self.CurrentFrame),
+				"isAnimating",
+				tostring(self.IsAnimating)
+			)
+		end
+	end)
+end
+
+function UIController:_connectFrameCloseButton(frame: Frame, button: Instance)
+	if not (button:IsA("TextButton") or button:IsA("ImageButton")) then
+		return
+	end
+	if button.Name ~= "X" then
+		return
+	end
+
+	self._closeButtonConnections = self._closeButtonConnections or {}
+	if self._closeButtonConnections[button] then
+		return
+	end
+
+	if CLOSE_DIAGNOSTIC_FRAME_NAMES[frame.Name] then
+		button.Active = true
+		button.Selectable = true
+		button.ZIndex = math.max(button.ZIndex, 100)
+		pcall(function()
+			button.Modal = false
+		end)
+
+		local ancestor = button.Parent
+		while ancestor and ancestor ~= frame do
+			if ancestor:IsA("GuiObject") then
+				ancestor.ZIndex = math.max(ancestor.ZIndex, 90)
+				pcall(function()
+					ancestor.Modal = false
+				end)
+			end
+			ancestor = ancestor.Parent
+		end
+	end
+
+	local connections = {}
+	if CLOSE_DIAGNOSTIC_FRAME_NAMES[frame.Name] then
+		connections[#connections + 1] = button.MouseButton1Click:Connect(function()
+			self:_forceCloseFromButton(frame, button, "MouseButton1Click")
+		end)
+		connections[#connections + 1] = button.Activated:Connect(function()
+			self:_forceCloseFromButton(frame, button, "Activated")
+		end)
+	else
+		connections[#connections + 1] = button.MouseButton1Click:Connect(function()
+			if frame.Visible then
+				self:ToggleFrame(frame)
+			end
+		end)
+	end
+	self._closeButtonConnections[button] = connections
+
+	if frame.Name == "Gifts" then
+		giftOpenUiLog(
+			"xConnectionMade",
+			"version",
+			GIFT_OPENUI_DEBUG_VERSION,
+			"signals",
+			"MouseButton1Click,Activated",
+			"frame",
+			safeName(frame),
+			"button",
+			safeName(button),
+			"visible",
+			tostring(button.Visible),
+			"active",
+			tostring(button.Active),
+			"z",
+			button.ZIndex
+		)
+	end
+
+	closeButtonLog(
+		frame.Name,
+		"xConnectionMade",
+		"version",
+		CLOSE_BUTTON_DEBUG_VERSION,
+		"signals",
+		"MouseButton1Click,Activated",
+		"frame",
+		safeName(frame),
+		"button",
+		safeName(button),
+		"visible",
+		tostring(button.Visible),
+		"active",
+		tostring(button.Active),
+		"z",
+		button.ZIndex,
+		"sameNamedFrameCount",
+		countFrameChildrenByName(self.FramesFolder, frame.Name),
+		"visibleInstanceIsWired",
+		tostring(self.FramesFolder and self.FramesFolder:FindFirstChild(frame.Name) == frame)
+	)
+end
+
+function UIController:_initializeFrame(frame: Instance)
+	if not isManagedFrame(frame) then
+		return
+	end
+
+	local typedFrame = frame :: Frame
+	local shouldPreserve = typedFrame.Visible == true and shouldPreserveVisibleFrame(typedFrame)
+	local uiScale = typedFrame:FindFirstChildOfClass("UIScale")
+	if not uiScale then
+		uiScale = Instance.new("UIScale")
+		uiScale.Parent = typedFrame
+	end
+
+	if shouldPreserve then
+		uiScale.Scale = 1
+		typedFrame.Visible = true
+		if typedFrame == self.PlantInventory then
+			self.PlantVisible = true
+			typedFrame.Position = UDim2.new(0.5, 0, 0.712, 0)
+		else
+			self.CurrentFrame = typedFrame
+			typedFrame.Position = UDim2.new(0.5, 0, self.PlantVisible and 0.4 or 0.5, 0)
+		end
+	else
+		typedFrame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
+		uiScale.Scale = 0
+		typedFrame.Visible = false
+		typedFrame.Position = UDim2.new(0.5, 0, 10, 0)
+	end
+
+	for _, obj in ipairs(typedFrame:GetDescendants()) do
+		self:_connectFrameCloseButton(typedFrame, obj)
+	end
+
+	self._frameDescendantConnections = self._frameDescendantConnections or {}
+	if self._frameDescendantConnections[typedFrame] then
+		self._frameDescendantConnections[typedFrame]:Disconnect()
+	end
+	self._frameDescendantConnections[typedFrame] = typedFrame.DescendantAdded:Connect(function(obj)
+		self:_connectFrameCloseButton(typedFrame, obj)
+	end)
 end
 
 function UIController:_closeNonPlant()
@@ -293,74 +570,25 @@ end
 function UIController:_initializeFrames()
 	self.PlantInventory = self.FramesFolder:FindFirstChild("PlantInventory") :: Frame?
 	for _, frame in ipairs(self.FramesFolder:GetChildren()) do
-		if isManagedFrame(frame) then
-			local shouldPreserve = frame.Visible == true and shouldPreserveVisibleFrame(frame)
-			local uiScale = frame:FindFirstChildOfClass("UIScale")
-			if not uiScale then
-				uiScale = Instance.new("UIScale")
-				uiScale.Parent = frame
-			end
-
-			if shouldPreserve then
-				uiScale.Scale = 1
-				frame.Visible = true
-				if frame == self.PlantInventory then
-					self.PlantVisible = true
-					frame.Position = UDim2.new(0.5, 0, 0.712, 0)
-				else
-					self.CurrentFrame = frame
-					frame.Position = UDim2.new(0.5, 0, self.PlantVisible and 0.4 or 0.5, 0)
-				end
-			else
-				frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
-				uiScale.Scale = 0
-				frame.Visible = false
-				frame.Position = UDim2.new(0.5, 0, 10, 0)
-			end
-
-			for _, obj in ipairs(frame:GetDescendants()) do
-				if (obj:IsA("TextButton") or obj:IsA("ImageButton")) and obj.Name == "X" then
-					if frame.Name == "Gifts" then
-						giftOpenUiLog(
-							"xConnectionMade",
-							"version",
-							GIFT_OPENUI_DEBUG_VERSION,
-							"signal",
-							"MouseButton1Click",
-							"frame",
-							safeName(frame),
-							"button",
-							safeName(obj),
-							"visible",
-							tostring(obj.Visible),
-							"active",
-							tostring(obj.Active),
-							"z",
-							obj.ZIndex
-						)
-					end
-					obj.MouseButton1Click:Connect(function()
-						if frame.Name == "Gifts" then
-							giftOpenUiLog(
-								"xClicked",
-								"version",
-								GIFT_OPENUI_DEBUG_VERSION,
-								"frame",
-								safeName(frame),
-								"button",
-								safeName(obj),
-								"frameVisible",
-								tostring(frame.Visible)
-							)
-						end
-						if frame.Visible then
-							self:ToggleFrame(frame)
-						end
-					end)
-				end
-			end
-		end
+		self:_initializeFrame(frame)
 	end
+
+	if self._frameAddedConnection then
+		self._frameAddedConnection:Disconnect()
+	end
+	self._frameAddedConnection = self.FramesFolder.ChildAdded:Connect(function(frame)
+		self:_initializeFrame(frame)
+	end)
+
+	if self._frameRemovingConnection then
+		self._frameRemovingConnection:Disconnect()
+	end
+	self._frameRemovingConnection = self.FramesFolder.ChildRemoved:Connect(function(frame)
+		if self._frameDescendantConnections and self._frameDescendantConnections[frame] then
+			self._frameDescendantConnections[frame]:Disconnect()
+			self._frameDescendantConnections[frame] = nil
+		end
+	end)
 end
 
 function UIController:_initializePartTriggers()
@@ -548,6 +776,24 @@ function UIController:Destroy()
 		self._buttonRemovingConnection:Disconnect()
 		self._buttonRemovingConnection = nil
 	end
+	if self._frameAddedConnection then
+		self._frameAddedConnection:Disconnect()
+		self._frameAddedConnection = nil
+	end
+	if self._frameRemovingConnection then
+		self._frameRemovingConnection:Disconnect()
+		self._frameRemovingConnection = nil
+	end
+	for _, connection in pairs(self._frameDescendantConnections or {}) do
+		connection:Disconnect()
+	end
+	self._frameDescendantConnections = {}
+	for _, connections in pairs(self._closeButtonConnections or {}) do
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+	end
+	self._closeButtonConnections = {}
 end
 
 local player = Players.LocalPlayer

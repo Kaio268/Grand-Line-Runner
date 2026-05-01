@@ -22,6 +22,7 @@ local function getOrCreateChild(parent: Instance, className: string, childName: 
 end
 
 local Remote = getOrCreateChild(TimeRewardsFolder, "RemoteEvent", "TimeRewardEvent")
+local SnapshotRequest = getOrCreateChild(TimeRewardsFolder, "RemoteFunction", "TimeRewardSnapshotRequest")
 local InstantRewardsEvent = getOrCreateChild(TimeRewardsFolder, "BindableEvent", "TriggerInstantRewards")
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
@@ -39,11 +40,25 @@ local playTimeSessions = {}
 local rewardIds = {}
 local BrainrotModule = nil
 
+local POTION_REWARD_KEYS = {
+	x2Money = true,
+	x2MoneyTime = true,
+	x15WalkSpeed = true,
+	x15WalkSpeedTime = true,
+}
+
 local GIFT_DEBUG = false
+local GIFT_SYNC_DEBUG = false
 
 local function giftLog(tag: string, ...)
 	if GIFT_DEBUG then
 		print(tag, ...)
+	end
+end
+
+local function giftSyncLog(...)
+	if GIFT_SYNC_DEBUG then
+		print("[GIFT][SYNC]", ...)
 	end
 end
 
@@ -88,6 +103,18 @@ local function waitForDataReady(player: Player, timeoutSeconds: number): boolean
 	end
 
 	return player.Parent == Players and DataManager:IsReady(player)
+end
+
+local function waitForPlayerDataReady(player: Player, timeoutSeconds: number): boolean
+	local deadline = os.clock() + timeoutSeconds
+	while player.Parent == Players and os.clock() < deadline do
+		if DataManager:IsReady(player) and player:GetAttribute("PlayerDataReady") == true then
+			return true
+		end
+		task.wait(0.1)
+	end
+
+	return player.Parent == Players and DataManager:IsReady(player) and player:GetAttribute("PlayerDataReady") == true
 end
 
 local function getCurrentPlayTime(player: Player): (number?, string?)
@@ -303,10 +330,35 @@ local function rollReward(tbl)
 	end
 end
 
+local function tryAddPotionReward(player: Player, rewardName: string, amount: number): (boolean?, string?)
+	local potionName = rewardName
+	local prefix = "Potions."
+	if string.sub(potionName, 1, #prefix) == prefix then
+		potionName = string.sub(potionName, #prefix + 1)
+	end
+
+	if POTION_REWARD_KEYS[potionName] ~= true then
+		return nil, nil
+	end
+
+	local ok, reason = DataManager:TryAddValue(player, prefix .. potionName, amount)
+	if ok and string.sub(potionName, -4) == "Time" and typeof(DataManager.ResumeBoost) == "function" then
+		local boostName = string.sub(potionName, 1, #potionName - 4)
+		DataManager:ResumeBoost(player, boostName)
+	end
+
+	return ok, reason
+end
+
 local function addReward(player: Player, rewardName: string, amount: number)
 	local normalizedRewardName = tostring(rewardName)
 	if normalizedRewardName == "Money" or normalizedRewardName == "Doubloons" then
 		return DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), amount)
+	end
+
+	local potionOk, potionReason = tryAddPotionReward(player, normalizedRewardName, amount)
+	if potionOk ~= nil then
+		return potionOk, potionReason
 	end
 
 	local inventory = player:FindFirstChild("Inventory")
@@ -376,7 +428,7 @@ local function saveProfileNow(player: Player)
 	end)
 end
 
-local function syncPlayerState(player: Player)
+local function syncPlayerState(player: Player, source: string?)
 	if not waitForDataReady(player, DATA_READY_TIMEOUT) then
 		giftError("Timed out waiting for time rewards data for", player.Name)
 		return false
@@ -389,7 +441,47 @@ local function syncPlayerState(player: Player)
 	end
 
 	fireClientState(player, state, currentPlayTime)
+	giftSyncLog(
+		"replay",
+		"player",
+		player.Name,
+		"source",
+		tostring(source or "server"),
+		"claimed",
+		getClaimedCountFromMap(state.ClaimedRewards),
+		"currentPlayTime",
+		currentPlayTime,
+		"cycleStart",
+		state.CycleStartPlayTime
+	)
 	return true
+end
+
+local function requestSyncState(player: Player, source: string?)
+	giftSyncLog("request", "player", player.Name, "source", tostring(source or "client"))
+	task.spawn(syncPlayerState, player, "client_request:" .. tostring(source or "unknown"))
+end
+
+local function buildSnapshotResponse(player: Player)
+	if not waitForPlayerDataReady(player, DATA_READY_TIMEOUT) then
+		return {
+			ok = false,
+			error = "data_not_ready",
+		}
+	end
+
+	local state, currentPlayTime, reason = ensureTimeRewardState(player)
+	if not state then
+		return {
+			ok = false,
+			error = reason or "missing_state",
+		}
+	end
+
+	return {
+		ok = true,
+		state = buildClientState(state, currentPlayTime),
+	}
 end
 
 local function canProcessClaimRequest(player: Player): boolean
@@ -558,13 +650,13 @@ end
 
 Players.PlayerAdded:Connect(function(player)
 	task.spawn(function()
-		syncPlayerState(player)
+		syncPlayerState(player, "join")
 	end)
 end)
 
 for _, player in ipairs(Players:GetPlayers()) do
 	task.spawn(function()
-		syncPlayerState(player)
+		syncPlayerState(player, "existing_player")
 	end)
 end
 
@@ -574,7 +666,14 @@ Players.PlayerRemoving:Connect(function(player)
 	playTimeSessions[player] = nil
 end)
 
-Remote.OnServerEvent:Connect(function(player, rewardId)
+Remote.OnServerEvent:Connect(function(player, rewardId, source)
+	if typeof(rewardId) == "string" then
+		if rewardId == "requestSync" then
+			requestSyncState(player, source)
+		end
+		return
+	end
+
 	rewardId = tonumber(rewardId)
 	if not rewardId or rewardId ~= math.floor(rewardId) then
 		return
@@ -582,6 +681,19 @@ Remote.OnServerEvent:Connect(function(player, rewardId)
 
 	claimReward(player, rewardId)
 end)
+
+SnapshotRequest.OnServerInvoke = function(player)
+	local ok, response = pcall(buildSnapshotResponse, player)
+	if ok and typeof(response) == "table" then
+		return response
+	end
+
+	giftError("Failed to build time rewards snapshot for", player.Name, response)
+	return {
+		ok = false,
+		error = "snapshot_exception",
+	}
+end
 
 InstantRewardsEvent.Event:Connect(function(player)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then

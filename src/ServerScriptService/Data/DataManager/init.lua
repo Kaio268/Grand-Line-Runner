@@ -53,6 +53,9 @@ local HARD_RESET_KICK_MESSAGE = "Your data was reset. Rejoin for a fresh start."
 local HARD_RESET_FAILURE_KICK_MESSAGE = "Your data reset could not be completed cleanly. Rejoin to restore your session."
 local HARD_RESET_PROGRESS_KICK_MESSAGE = "A data reset is still being applied to your account. Rejoin in a moment."
 local HARD_RESET_SAVE_TIMEOUT = 30
+local PLAYER_DATA_READY_ATTRIBUTE = "PlayerDataReady"
+local PLAYER_DATA_READY_AT_ATTRIBUTE = "PlayerDataReadyAt"
+local DATA_READY_DEBUG = true
 
 --[[
 	Primary message functions to DataManager:MessageAsync() function
@@ -101,6 +104,12 @@ end
 
 local function dataResetError(...)
 	warn("[DATA][RESET][ERROR]", ...)
+end
+
+local function dataReadyLog(...)
+	if DATA_READY_DEBUG then
+		print("[DATA][READY]", ...)
+	end
 end
 
 local function GetPathTable(path: string): {string}
@@ -293,6 +302,23 @@ end
 
 function DataManager:IsReady(player: Player): boolean
 	return Profiles[player] ~= nil and Replicas[player] ~= nil
+end
+
+function DataManager:WaitUntilReady(player: Player, timeoutSeconds: number?): boolean
+	if self:IsReady(player) then
+		return true
+	end
+
+	local timeout = tonumber(timeoutSeconds) or 30
+	local deadline = os.clock() + timeout
+	while player.Parent == Players and os.clock() < deadline do
+		if self:IsReady(player) then
+			return true
+		end
+		task.wait(0.1)
+	end
+
+	return player.Parent == Players and self:IsReady(player)
 end
 
 function DataManager:TryGetValue(player: Player, path: string)
@@ -1003,7 +1029,55 @@ local function AddNewGlobalPlayer(player : Player)
 	GlobalData:Set("Players", FixedPlayers)
 end
 
+local function countPositiveQuantityFolders(root: Instance?): number
+	if not root then
+		return 0
+	end
+
+	local count = 0
+	for _, child in ipairs(root:GetChildren()) do
+		if child:IsA("Folder") then
+			local quantity = child:FindFirstChild("Quantity")
+			if quantity and quantity:IsA("NumberValue") and quantity.Value > 0 then
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+local function markPlayerDataReady(player: Player, startedAt: number)
+	local inventory = player:FindFirstChild("Inventory")
+	local brainrotCount = countPositiveQuantityFolders(inventory)
+	local crewInventory = player:FindFirstChild("CrewInventory")
+	local crewCount = crewInventory and #crewInventory:GetChildren() or 0
+	local elapsed = os.clock() - startedAt
+
+	player:SetAttribute(PLAYER_DATA_READY_ATTRIBUTE, true)
+	player:SetAttribute(PLAYER_DATA_READY_AT_ATTRIBUTE, os.clock())
+	dataReadyLog(
+		"player",
+		player.Name,
+		"userId",
+		player.UserId,
+		"elapsed",
+		string.format("%.2f", elapsed),
+		"profile",
+		tostring(Profiles[player] ~= nil),
+		"replica",
+		tostring(Replicas[player] ~= nil),
+		"brainrots",
+		brainrotCount,
+		"crew",
+		crewCount
+	)
+end
+
 function PlayerAdded(player: Player)
+	local dataReadyStartedAt = os.clock()
+	player:SetAttribute(PLAYER_DATA_READY_ATTRIBUTE, false)
+	player:SetAttribute(PLAYER_DATA_READY_AT_ATTRIBUTE, nil)
+
 	if PendingHardResetByUserId[player.UserId] == true then
 		dataResetLog("reject_join_during_wipe", "player", player.Name, "userId", player.UserId)
 		player:Kick(HARD_RESET_PROGRESS_KICK_MESSAGE)
@@ -1087,6 +1161,7 @@ function PlayerAdded(player: Player)
 		else
 			self:Leaderstats(player)
 		end
+		markPlayerDataReady(player, dataReadyStartedAt)
 		DataManager:SetupBoostListeners(player)
 	else
 		player:Kick("Profile load fail - Please rejoin!")

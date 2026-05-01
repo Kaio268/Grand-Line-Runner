@@ -9,7 +9,12 @@ local REGULAR_WAVE_ASSET_NAME = "Regular Wave"
 local FROZEN_WAVE_ASSET_NAME = "Frozen Wave"
 local HITBOX_NAME = "WaveHitbox"
 local VISUAL_NAME = "WaveVisual"
+local FROZEN_VISUAL_NAME = "FrozenWaveVisual"
 local USES_ASSET_VISUALS_ATTRIBUTE = "UsesWaveAssetVisuals"
+local VISUAL_ASSET_NAME_ATTRIBUTE = "WaveVisualAssetName"
+local ACTIVE_VISUAL_ASSET_ATTRIBUTE = "ActiveWaveVisualAssetName"
+local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
+local ORIGINAL_ENABLED_ATTRIBUTE = "WaveVisualOriginalEnabled"
 local MIN_PART_SIZE = 0.001
 local ASSET_TEMPLATE_ROTATION = CFrame.Angles(0, math.rad(180), 0)
 
@@ -56,6 +61,18 @@ local function forEachBasePart(root, callback)
 		if descendant:IsA("BasePart") then
 			callback(descendant)
 		end
+	end
+end
+
+local function forEachSelfAndDescendant(root, callback)
+	if not root then
+		return
+	end
+
+	callback(root)
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		callback(descendant)
 	end
 end
 
@@ -358,11 +375,114 @@ local function getVisualTargetBox(root)
 	return getTargetBox(root)
 end
 
-local function removeExistingVisual(root)
-	local existingVisual = root:FindFirstChild(VISUAL_NAME)
-	if existingVisual then
-		existingVisual:Destroy()
+local function getVisualNameForAsset(assetName)
+	if assetName == FROZEN_WAVE_ASSET_NAME then
+		return FROZEN_VISUAL_NAME
 	end
+
+	return VISUAL_NAME
+end
+
+local function rememberVisualState(visual)
+	forEachSelfAndDescendant(visual, function(item)
+		if item:IsA("BasePart") or item:IsA("Decal") or item:IsA("Texture") then
+			if item:GetAttribute(ORIGINAL_TRANSPARENCY_ATTRIBUTE) == nil then
+				item:SetAttribute(ORIGINAL_TRANSPARENCY_ATTRIBUTE, item.Transparency)
+			end
+		elseif item:IsA("ParticleEmitter")
+			or item:IsA("Trail")
+			or item:IsA("Beam")
+			or item:IsA("Smoke")
+			or item:IsA("Fire")
+			or item:IsA("Sparkles") then
+			if item:GetAttribute(ORIGINAL_ENABLED_ATTRIBUTE) == nil then
+				item:SetAttribute(ORIGINAL_ENABLED_ATTRIBUTE, item.Enabled)
+			end
+		end
+	end)
+end
+
+local function setVisualVisible(visual, isVisible)
+	if not visual then
+		return
+	end
+
+	rememberVisualState(visual)
+
+	forEachSelfAndDescendant(visual, function(item)
+		if item:IsA("BasePart") or item:IsA("Decal") or item:IsA("Texture") then
+			if isVisible then
+				local originalTransparency = item:GetAttribute(ORIGINAL_TRANSPARENCY_ATTRIBUTE)
+				item.Transparency = if typeof(originalTransparency) == "number" then originalTransparency else 0
+			else
+				item.Transparency = 1
+			end
+		elseif item:IsA("ParticleEmitter")
+			or item:IsA("Trail")
+			or item:IsA("Beam")
+			or item:IsA("Smoke")
+			or item:IsA("Fire")
+			or item:IsA("Sparkles") then
+			if isVisible then
+				local originalEnabled = item:GetAttribute(ORIGINAL_ENABLED_ATTRIBUTE)
+				item.Enabled = if typeof(originalEnabled) == "boolean" then originalEnabled else true
+			else
+				item.Enabled = false
+			end
+		end
+	end)
+end
+
+local function createVisual(root, assetName)
+	local asset = getWaveAsset(assetName)
+	if not asset then
+		return nil
+	end
+
+	local targetCFrame, targetSize = getVisualTargetBox(root)
+	if not targetCFrame or not targetSize then
+		return nil
+	end
+
+	local visual = asset:Clone()
+	visual.Name = getVisualNameForAsset(assetName)
+	visual:SetAttribute(VISUAL_ASSET_NAME_ATTRIBUTE, assetName)
+
+	if visual:IsA("BasePart") then
+		scaleBasePartToBox(visual, targetCFrame, targetSize, configureVisualPart)
+	else
+		scaleModelToBox(visual, targetCFrame, targetSize, configureVisualPart)
+	end
+
+	visual.Parent = root
+	WaveHazardVisuals.ConfigureVisualRoot(visual)
+	rememberVisualState(visual)
+	return visual
+end
+
+local function ensureVisual(root, assetName)
+	if not root then
+		return nil
+	end
+
+	local visualName = getVisualNameForAsset(assetName)
+	local visual = root:FindFirstChild(visualName)
+	if visual then
+		visual:SetAttribute(VISUAL_ASSET_NAME_ATTRIBUTE, assetName)
+		WaveHazardVisuals.ConfigureVisualRoot(visual)
+		rememberVisualState(visual)
+		return visual
+	end
+
+	return createVisual(root, assetName)
+end
+
+local function findVisual(root, assetName)
+	if not root then
+		return nil
+	end
+
+	return root:FindFirstChild(getVisualNameForAsset(assetName))
 end
 
 local function createHitboxFromAsset(asset, targetCFrame, targetSize)
@@ -432,29 +552,20 @@ function WaveHazardVisuals.ApplyVisual(root, assetName)
 		return false
 	end
 
-	local asset = getWaveAsset(assetName)
-	if not asset then
+	local activeVisual = ensureVisual(root, assetName)
+	if not activeVisual then
 		return false
 	end
 
-	local targetCFrame, targetSize = getVisualTargetBox(root)
-	if not targetCFrame or not targetSize then
-		return false
+	local inactiveAssetName = if assetName == FROZEN_WAVE_ASSET_NAME then REGULAR_WAVE_ASSET_NAME else FROZEN_WAVE_ASSET_NAME
+	local inactiveVisual = findVisual(root, inactiveAssetName)
+
+	setVisualVisible(activeVisual, true)
+	if inactiveVisual and inactiveVisual ~= activeVisual then
+		setVisualVisible(inactiveVisual, false)
 	end
 
-	removeExistingVisual(root)
-
-	local visual = asset:Clone()
-	visual.Name = VISUAL_NAME
-
-	if visual:IsA("BasePart") then
-		scaleBasePartToBox(visual, targetCFrame, targetSize, configureVisualPart)
-	else
-		scaleModelToBox(visual, targetCFrame, targetSize, configureVisualPart)
-	end
-
-	visual.Parent = root
-	WaveHazardVisuals.ConfigureVisualRoot(visual)
+	root:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, assetName)
 	return true
 end
 

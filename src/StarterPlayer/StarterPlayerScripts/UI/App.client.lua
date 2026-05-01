@@ -28,6 +28,11 @@ local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
+local snapshotRemote = ReplicatedStorage:WaitForChild("InventorySnapshotRequest", 15)
+if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
+	warn("[INV][SNAPSHOT][CLIENT] InventorySnapshotRequest is not a RemoteFunction")
+	snapshotRemote = nil
+end
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
 local titleEquipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TitleEquipRequest")
 local shipUpgradeResultRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShipUpgradeResultRemote")
@@ -152,6 +157,7 @@ local syncDevilFruitsFromInventory
 local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
 local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
+local INVENTORY_SNAPSHOT_DEBUG = true
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
@@ -228,6 +234,12 @@ local function trackConnection(signal, callback, bucket)
 	return connection
 end
 
+local function inventorySnapshotDebug(...)
+	if INVENTORY_SNAPSHOT_DEBUG then
+		print("[INV][SNAPSHOT][CLIENT][APP]", ...)
+	end
+end
+
 local function trim(text)
 	return tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
@@ -294,6 +306,127 @@ local function ensureAcquired(key)
 		acquisitionCounter += 1
 		acquisition[key] = acquisitionCounter
 	end
+end
+
+local SNAPSHOT_OWNED_KINDS = {
+	Brainrot = true,
+	Gear = true,
+	DevilFruit = true,
+	Chest = true,
+}
+
+local function clearSnapshotOwnedItems()
+	for key, state in pairs(itemState) do
+		if state and SNAPSHOT_OWNED_KINDS[state.kind] then
+			itemState[key] = nil
+		end
+	end
+end
+
+local function applyQuantitySnapshotEntries(entries, kind, configLookup)
+	if typeof(entries) ~= "table" then
+		return 0
+	end
+
+	local applied = 0
+	for _, entry in ipairs(entries) do
+		if typeof(entry) == "table" then
+			local name = tostring(entry.Name or entry.name or "")
+			local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
+			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
+				local key = kind .. "|" .. name
+				ensureAcquired(key)
+				itemState[key] = {
+					kind = kind,
+					name = name,
+					qty = quantity,
+				}
+				applied += 1
+			end
+		end
+	end
+	return applied
+end
+
+local function applyInventorySnapshot(snapshot)
+	if typeof(snapshot) ~= "table" then
+		warn("[INV][SNAPSHOT][CLIENT][APP] invalid snapshot payload")
+		return false
+	end
+
+	if snapshot.Ready == false then
+		inventorySnapshotDebug("snapshotNotReady", "reason", tostring(snapshot.Reason))
+		return false
+	end
+
+	clearSnapshotOwnedItems()
+
+	local brainrotCount = applyQuantitySnapshotEntries(snapshot.Brainrots, "Brainrot", function(name)
+		return Brainrots[name] ~= nil
+	end)
+
+	local devilFruitCount = 0
+	if typeof(snapshot.DevilFruits) == "table" then
+		for _, entry in ipairs(snapshot.DevilFruits) do
+			if typeof(entry) == "table" then
+				local rawName = tostring(entry.Name or entry.name or "")
+				local fruit = DevilFruits.GetFruit(rawName)
+				local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
+				if fruit and quantity > 0 then
+					local key = "DevilFruit|" .. fruit.FruitKey
+					ensureAcquired(key)
+					itemState[key] = {
+						kind = "DevilFruit",
+						name = fruit.FruitKey,
+						qty = quantity,
+					}
+					devilFruitCount += 1
+				end
+			end
+		end
+	end
+
+	local gearCount = 0
+	if typeof(snapshot.Gears) == "table" then
+		for _, entry in ipairs(snapshot.Gears) do
+			if typeof(entry) == "table" then
+				local name = tostring(entry.Name or entry.name or "")
+				if name ~= "" and entry.Owned == true and Gears[name] ~= nil then
+					local key = "Gear|" .. name
+					ensureAcquired(key)
+					itemState[key] = {
+						kind = "Gear",
+						name = name,
+						owned = true,
+					}
+					gearCount += 1
+				end
+			end
+		end
+	end
+
+	local chestCount = applyQuantitySnapshotEntries(snapshot.Chests, "Chest", function(name)
+		return ChestUtils.GetDisplayName(name) ~= nil
+	end)
+
+	inventorySnapshotDebug(
+		"applied",
+		"brainrots",
+		brainrotCount,
+		"crew",
+		snapshot.Counts and tostring(snapshot.Counts.Crew) or "0",
+		"devilFruits",
+		devilFruitCount,
+		"gears",
+		gearCount,
+		"chests",
+		chestCount
+	)
+
+	if scheduleRender then
+		scheduleRender()
+	end
+	return true
 end
 
 local function getResourceInfo(resourceKey)
@@ -2046,6 +2179,60 @@ trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 
 	scheduleRender()
 end, cleanupConnections)
+
+local snapshotRequestInFlight = false
+local lastSnapshotRequestAt = 0
+
+local function requestInventorySnapshot(reason)
+	if snapshotRequestInFlight or not snapshotRemote or destroyed then
+		return
+	end
+
+	local now = os.clock()
+	if (now - lastSnapshotRequestAt) < 1 then
+		return
+	end
+
+	lastSnapshotRequestAt = now
+	snapshotRequestInFlight = true
+	inventorySnapshotDebug("requested", "reason", tostring(reason))
+
+	task.spawn(function()
+		local ok, snapshot = pcall(function()
+			return snapshotRemote:InvokeServer()
+		end)
+		snapshotRequestInFlight = false
+
+		if destroyed then
+			return
+		end
+
+		if not ok then
+			warn("[INV][SNAPSHOT][CLIENT][APP] request failed", snapshot)
+			task.delay(2, function()
+				requestInventorySnapshot("retryAfterError")
+			end)
+			return
+		end
+
+		local applied = applyInventorySnapshot(snapshot)
+		if not applied then
+			task.delay(2, function()
+				requestInventorySnapshot("retryNotReady")
+			end)
+		end
+	end)
+end
+
+trackConnection(player:GetAttributeChangedSignal("PlayerDataReady"), function()
+	if player:GetAttribute("PlayerDataReady") == true then
+		requestInventorySnapshot("playerDataReady")
+	end
+end, cleanupConnections)
+
+task.defer(function()
+	requestInventorySnapshot("clientStartup")
+end)
 
 trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
 	if typeof(payload) ~= "table" then

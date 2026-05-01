@@ -950,10 +950,405 @@ local function hookKillOnTouch(obj, hitPart)
 	end
 end
 
+local LOCAL_WAVE_VISUAL_FOLDER_NAME = "_LocalWaveVisuals"
+local SMOOTHED_VISUAL_SOURCE_ATTRIBUTE = "SmoothedWaveVisualSource"
+local REGULAR_WAVE_VISUAL_ASSET_NAME = "Regular Wave"
+local FROZEN_WAVE_VISUAL_ASSET_NAME = "Frozen Wave"
+local WAVE_VISUAL_NAME = "WaveVisual"
+local FROZEN_WAVE_VISUAL_NAME = "FrozenWaveVisual"
+local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
+local ORIGINAL_ENABLED_ATTRIBUTE = "WaveVisualOriginalEnabled"
+local SHARED_WAVE_VISUAL_SMOOTHNESS = 28
+local SHARED_WAVE_VISUAL_MAX_LEAD = 0.08
+local SHARED_WAVE_VISUAL_DECAY_DELAY = 0.12
+local SHARED_WAVE_VISUAL_SNAP_DISTANCE = 90
+local SHARED_WAVE_VISUAL_REBUILD_DELAY = 0.05
+
+local localWaveVisualsFolder = nil
+local sharedHazardVisualSmoothers = {}
+
+local function isWaveVisualRoot(instance)
+	return (instance and (instance:IsA("Model") or instance:IsA("BasePart")))
+		and (instance.Name == WAVE_VISUAL_NAME or instance.Name == FROZEN_WAVE_VISUAL_NAME)
+end
+
+local function isVisualEffect(instance)
+	return instance:IsA("ParticleEmitter")
+		or instance:IsA("Trail")
+		or instance:IsA("Beam")
+		or instance:IsA("Smoke")
+		or instance:IsA("Fire")
+		or instance:IsA("Sparkles")
+end
+
+local function forEachVisualItem(root, callback)
+	if not root then
+		return
+	end
+
+	callback(root)
+	for _, descendant in ipairs(root:GetDescendants()) do
+		callback(descendant)
+	end
+end
+
+local function getDescendantCount(root)
+	if not root then
+		return 0
+	end
+
+	return #root:GetDescendants()
+end
+
+local function getLocalWaveVisualsFolder()
+	local folder = localWaveVisualsFolder
+	if folder and folder.Parent then
+		return folder
+	end
+
+	local existing = workspace:FindFirstChild(LOCAL_WAVE_VISUAL_FOLDER_NAME)
+	if existing and existing:IsA("Folder") then
+		localWaveVisualsFolder = existing
+		return existing
+	end
+
+	folder = Instance.new("Folder")
+	folder.Name = LOCAL_WAVE_VISUAL_FOLDER_NAME
+	folder.Parent = workspace
+	localWaveVisualsFolder = folder
+	return folder
+end
+
+local function hideReplicatedVisual(root)
+	forEachVisualItem(root, function(item)
+		if item:IsA("BasePart") then
+			item.LocalTransparencyModifier = 1
+		elseif item:IsA("Decal") or item:IsA("Texture") then
+			item.Transparency = 1
+		elseif isVisualEffect(item) then
+			item.Enabled = false
+		end
+	end)
+end
+
+local function setLocalVisualVisible(root, isVisible)
+	forEachVisualItem(root, function(item)
+		if item:IsA("BasePart") then
+			item.LocalTransparencyModifier = if isVisible then 0 else 1
+			if isVisible then
+				local originalTransparency = item:GetAttribute(ORIGINAL_TRANSPARENCY_ATTRIBUTE)
+				if typeof(originalTransparency) == "number" then
+					item.Transparency = originalTransparency
+				elseif item.Transparency >= 1 then
+					item.Transparency = 0
+				end
+			end
+		elseif item:IsA("Decal") or item:IsA("Texture") then
+			if isVisible then
+				local originalTransparency = item:GetAttribute(ORIGINAL_TRANSPARENCY_ATTRIBUTE)
+				item.Transparency = if typeof(originalTransparency) == "number" then originalTransparency else 0
+			else
+				item.Transparency = 1
+			end
+		elseif isVisualEffect(item) then
+			if isVisible then
+				local originalEnabled = item:GetAttribute(ORIGINAL_ENABLED_ATTRIBUTE)
+				item.Enabled = if typeof(originalEnabled) == "boolean" then originalEnabled else true
+			else
+				item.Enabled = false
+			end
+		end
+	end)
+end
+
+local function createSharedHazardVisualSmoother(hazard)
+	if not useSharedHazards or not hazard or sharedHazardVisualSmoothers[hazard] then
+		return sharedHazardVisualSmoothers[hazard]
+	end
+
+	if not (hazard:IsA("Model") or hazard:IsA("BasePart")) then
+		return nil
+	end
+
+	local now = os.clock()
+	local startingPivot = getPivot(hazard)
+	local controller = {
+		Hazard = hazard,
+		ClonesByName = {},
+		Connections = {},
+		SourceConnections = {},
+		CurrentCFrame = startingPivot,
+		TargetCFrame = startingPivot,
+		LastSampleTime = now,
+		Velocity = Vector3.zero,
+		Destroyed = false,
+		RefreshQueued = false,
+	}
+
+	sharedHazardVisualSmoothers[hazard] = controller
+
+	function controller:Destroy()
+		if self.Destroyed then
+			return
+		end
+
+		self.Destroyed = true
+		sharedHazardVisualSmoothers[self.Hazard] = nil
+
+		for _, connection in ipairs(self.Connections) do
+			connection:Disconnect()
+		end
+
+		for _, connection in pairs(self.SourceConnections) do
+			connection:Disconnect()
+		end
+
+		for _, entry in pairs(self.ClonesByName) do
+			if entry.Clone and entry.Clone.Parent then
+				entry.Clone:Destroy()
+			end
+		end
+	end
+
+	function controller:GetActiveVisualName()
+		local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
+		if activeAsset == FROZEN_WAVE_VISUAL_ASSET_NAME then
+			return FROZEN_WAVE_VISUAL_NAME
+		end
+
+		if activeAsset == REGULAR_WAVE_VISUAL_ASSET_NAME then
+			return WAVE_VISUAL_NAME
+		end
+
+		if self.Hazard:GetAttribute("Frozen") == true and self.ClonesByName[FROZEN_WAVE_VISUAL_NAME] then
+			return FROZEN_WAVE_VISUAL_NAME
+		end
+
+		return WAVE_VISUAL_NAME
+	end
+
+	function controller:HideSource(source)
+		hideReplicatedVisual(source)
+
+		if self.SourceConnections[source] then
+			return
+		end
+
+		self.SourceConnections[source] = source.DescendantAdded:Connect(function()
+			hideReplicatedVisual(source)
+			self:ScheduleRefresh()
+		end)
+	end
+
+	function controller:ScheduleRefresh()
+		if self.Destroyed or self.RefreshQueued then
+			return
+		end
+
+		self.RefreshQueued = true
+		task.delay(SHARED_WAVE_VISUAL_REBUILD_DELAY, function()
+			if self.Destroyed then
+				return
+			end
+
+			self.RefreshQueued = false
+			self:Refresh()
+		end)
+	end
+
+	function controller:EnsureClone(source)
+		if not isWaveVisualRoot(source) then
+			return nil
+		end
+
+		local entry = self.ClonesByName[source.Name]
+		local hazardPivot = getPivot(self.Hazard)
+		local sourcePivot = getPivot(source)
+		local offset = hazardPivot:ToObjectSpace(sourcePivot)
+		local sourceDescendantCount = getDescendantCount(source)
+		if entry and entry.Clone and entry.Clone.Parent then
+			if sourceDescendantCount <= (entry.DescendantCount or 0) then
+				entry.Source = source
+				entry.Offset = offset
+				self:HideSource(source)
+				return entry
+			end
+
+			entry.Clone:Destroy()
+			self.ClonesByName[source.Name] = nil
+		end
+
+		local ok, cloneOrError = pcall(function()
+			return source:Clone()
+		end)
+
+		if not ok or not cloneOrError then
+			waveWarnOnce(
+				"smooth_visual_clone_failed_" .. tostring(source.Name),
+				"shared wave visual smoothing skipped clone failed visual=%s error=%s",
+				formatInstancePath(source),
+				tostring(cloneOrError)
+			)
+			return nil
+		end
+
+		local clone = cloneOrError
+		clone.Name = tostring(self.Hazard.Name) .. "_" .. tostring(source.Name) .. "_Local"
+		clone:SetAttribute(SMOOTHED_VISUAL_SOURCE_ATTRIBUTE, source:GetFullName())
+		clone.Parent = getLocalWaveVisualsFolder()
+		WaveHazardVisuals.ConfigureVisualRoot(clone)
+		setLocalVisualVisible(clone, false)
+		self:HideSource(source)
+
+		entry = {
+			Clone = clone,
+			Name = source.Name,
+			Offset = offset,
+			Source = source,
+			DescendantCount = sourceDescendantCount,
+		}
+		self.ClonesByName[source.Name] = entry
+		return entry
+	end
+
+	function controller:Refresh()
+		if self.Destroyed then
+			return
+		end
+
+		if not self.Hazard.Parent then
+			self:Destroy()
+			return
+		end
+
+		for _, child in ipairs(self.Hazard:GetChildren()) do
+			if isWaveVisualRoot(child) then
+				self:EnsureClone(child)
+			end
+		end
+
+		for name, entry in pairs(self.ClonesByName) do
+			if not entry.Source or entry.Source.Parent ~= self.Hazard then
+				local sourceConnection = entry.Source and self.SourceConnections[entry.Source]
+				if sourceConnection then
+					sourceConnection:Disconnect()
+					self.SourceConnections[entry.Source] = nil
+				end
+
+				if entry.Clone and entry.Clone.Parent then
+					entry.Clone:Destroy()
+				end
+				self.ClonesByName[name] = nil
+			elseif entry.Source then
+				self:HideSource(entry.Source)
+			end
+		end
+
+		self:UpdateVisibility()
+	end
+
+	function controller:UpdateVisibility()
+		local activeName = self:GetActiveVisualName()
+		if activeName == FROZEN_WAVE_VISUAL_NAME and not self.ClonesByName[activeName] then
+			activeName = WAVE_VISUAL_NAME
+		end
+
+		for name, entry in pairs(self.ClonesByName) do
+			if entry.Source then
+				self:HideSource(entry.Source)
+			end
+			setLocalVisualVisible(entry.Clone, name == activeName)
+		end
+	end
+
+	function controller:Update(deltaTime)
+		if self.Destroyed then
+			return
+		end
+
+		if not self.Hazard.Parent then
+			self:Destroy()
+			return
+		end
+
+		local currentTarget = getPivot(self.Hazard)
+		local sampleNow = os.clock()
+		local previousTarget = self.TargetCFrame
+		local moved = (currentTarget.Position - previousTarget.Position).Magnitude
+
+		if moved > 0.01 then
+			local sampleDelta = math.max(sampleNow - self.LastSampleTime, 1 / 240)
+			self.Velocity = (currentTarget.Position - previousTarget.Position) / sampleDelta
+			self.LastSampleTime = sampleNow
+			self.TargetCFrame = currentTarget
+		elseif self.Hazard:GetAttribute("Frozen") == true or sampleNow - self.LastSampleTime > SHARED_WAVE_VISUAL_DECAY_DELAY then
+			local decayAlpha = math.clamp(deltaTime * 10, 0, 1)
+			self.Velocity = self.Velocity:Lerp(Vector3.zero, decayAlpha)
+			self.TargetCFrame = currentTarget
+		end
+
+		local leadTime = 0
+		if self.Hazard:GetAttribute("Frozen") ~= true then
+			leadTime = math.min(math.max(sampleNow - self.LastSampleTime, 0), SHARED_WAVE_VISUAL_MAX_LEAD)
+		end
+
+		local predictedTarget = self.TargetCFrame + self.Velocity * leadTime
+		local smoothAlpha = math.clamp(1 - math.exp(-SHARED_WAVE_VISUAL_SMOOTHNESS * deltaTime), 0, 1)
+		if (self.CurrentCFrame.Position - predictedTarget.Position).Magnitude > SHARED_WAVE_VISUAL_SNAP_DISTANCE then
+			self.CurrentCFrame = predictedTarget
+		else
+			self.CurrentCFrame = self.CurrentCFrame:Lerp(predictedTarget, smoothAlpha)
+		end
+
+		for _, entry in pairs(self.ClonesByName) do
+			if entry.Clone and entry.Clone.Parent then
+				setPivot(entry.Clone, self.CurrentCFrame * entry.Offset)
+			end
+		end
+	end
+
+	table.insert(controller.Connections, hazard.ChildAdded:Connect(function(child)
+		if isWaveVisualRoot(child) then
+			WaveHazardVisuals.ConfigureVisualRoot(child)
+			controller:ScheduleRefresh()
+		end
+	end))
+
+	table.insert(controller.Connections, hazard.ChildRemoved:Connect(function(child)
+		if isWaveVisualRoot(child) then
+			controller:ScheduleRefresh()
+		end
+	end))
+
+	table.insert(controller.Connections, hazard:GetAttributeChangedSignal("Frozen"):Connect(function()
+		controller:ScheduleRefresh()
+	end))
+
+	table.insert(controller.Connections, hazard:GetAttributeChangedSignal("ActiveWaveVisualAssetName"):Connect(function()
+		controller:ScheduleRefresh()
+	end))
+
+	table.insert(controller.Connections, hazard.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			controller:Destroy()
+		end
+	end))
+
+	controller:Refresh()
+	return controller
+end
+
+local function updateSharedHazardVisualSmoothers(deltaTime)
+	for _, controller in pairs(sharedHazardVisualSmoothers) do
+		controller:Update(deltaTime)
+	end
+end
+
 local function hookSharedHazardKillOnTouch(hazard)
-	local visual = hazard:FindFirstChild("WaveVisual")
-	if visual then
-		WaveHazardVisuals.ConfigureVisualRoot(visual)
+	for _, child in ipairs(hazard:GetChildren()) do
+		if child.Name == "WaveVisual" or child.Name == "FrozenWaveVisual" then
+			WaveHazardVisuals.ConfigureVisualRoot(child)
+		end
 	end
 
 	local function syncFrozenHitboxState()
@@ -964,7 +1359,7 @@ local function hookSharedHazardKillOnTouch(hazard)
 	hazard:GetAttributeChangedSignal("Frozen"):Connect(syncFrozenHitboxState)
 
 	hazard.ChildAdded:Connect(function(child)
-		if child.Name == "WaveVisual" then
+		if child.Name == "WaveVisual" or child.Name == "FrozenWaveVisual" then
 			WaveHazardVisuals.ConfigureVisualRoot(child)
 		elseif child.Name == "WaveHitbox" then
 			syncFrozenHitboxState()
@@ -984,13 +1379,18 @@ local function hookSharedHazardKillOnTouch(hazard)
 	end
 end
 
+local function attachSharedHazard(hazard)
+	hookSharedHazardKillOnTouch(hazard)
+	createSharedHazardVisualSmoother(hazard)
+end
+
 if useSharedHazards then
 	for _, hazard in ipairs(clientWavesFolder:GetChildren()) do
-		hookSharedHazardKillOnTouch(hazard)
+		attachSharedHazard(hazard)
 	end
 
 	clientWavesFolder.ChildAdded:Connect(function(child)
-		hookSharedHazardKillOnTouch(child)
+		attachSharedHazard(child)
 	end)
 end
 
@@ -1318,7 +1718,8 @@ end
 NoDisastersTimer:GetPropertyChangedSignal("Value"):Connect(updatePause)
 updatePause()
 
-RunService.RenderStepped:Connect(function()
+RunService.RenderStepped:Connect(function(deltaTime)
+	updateSharedHazardVisualSmoothers(deltaTime)
 	updatePfpPositions()
 	updateWaveIndicators()
 	updateChestIndicators()
