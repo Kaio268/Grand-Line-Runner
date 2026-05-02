@@ -10,6 +10,7 @@ local BrainrotInteraction = require(Modules:WaitForChild("Server"):WaitForChild(
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local CorridorController = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushCorridorRunController"))
 local HoroAnimationController = require(script.Parent:WaitForChild("HoroAnimationController"))
+local HoroGhostAnimateController = require(script.Parent:WaitForChild("HoroGhostAnimateController"))
 
 local HoroServer = {}
 
@@ -754,11 +755,20 @@ local function removeScriptsAndTools(instance)
 	for _, descendant in ipairs(instance:GetDescendants()) do
 		if descendant:IsA("Tool")
 			or descendant:IsA("ForceField")
-			or (descendant:IsA("BaseScript") and descendant.Name ~= "Animate")
+			or descendant:IsA("BaseScript")
 		then
 			descendant:Destroy()
 		end
 	end
+end
+
+local function stopGhostAnimations(state, reason)
+	if not state then
+		return
+	end
+
+	HoroGhostAnimateController.Stop(state.GhostAnimateState, reason or "stop")
+	state.GhostAnimateState = nil
 end
 
 local function styleGhostModel(ghostModel, state)
@@ -1149,6 +1159,7 @@ finishProjection = function(state, reason, dropPosition, shouldDropReward)
 	restoreBody(state)
 	setBodyProjectionAttributes(state, false)
 	setProjectionAttributes(state, false)
+	stopGhostAnimations(state, reason or "finish")
 
 	local phase = if reason == "duration_elapsed" or reason == "manual_cleanup" then "Resolve" else "Interrupted"
 	local payload = buildResolvePayload(state, reason, phase, finalPosition, droppedReward)
@@ -1564,6 +1575,7 @@ local function rejectProjectionStart(state, reason)
 		restoreBody(state)
 		setBodyProjectionAttributes(state, false)
 		setProjectionAttributes(state, false)
+		stopGhostAnimations(state, reason or "reject")
 
 		if state.GhostModel and state.GhostModel.Parent then
 			state.GhostModel:Destroy()
@@ -1728,6 +1740,7 @@ function HoroServer.GhostProjection(context)
 		startBodyProjectionAnimations(state)
 		setProjectionAttributes(state, true)
 		updateGhostMovement(state)
+		state.GhostAnimateState = HoroGhostAnimateController.Start(state.GhostModel, state.GhostHumanoid, state.GhostRoot)
 		refreshGhostNetworkOwnership(state)
 		attachGhostTouchListeners(state)
 		startProjectionMonitor(state)
