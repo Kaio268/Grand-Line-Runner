@@ -201,8 +201,8 @@ local function swaptoR6G(player, modelConfig, fruitName)
 	-- Wait a frame to ensure the character is fully in the workspace
 	task.wait()
 
-	-- NEW CHECK: Only skip if the character is ALREADY using the requested model.
-	-- This allows swapping from "R6" to "R6G" (Mera to Gomu).
+	-- Only skip if the character is already using the requested model.
+	-- This allows swapping between different custom model assets later.
 	if character:GetAttribute("CurrentModelAsset") == newModelName then
 		return
 	end
@@ -444,14 +444,6 @@ local function getDesiredCharacterModelAsset(fruitName)
 	local configuredModel = fruitConfig and normalizeCharacterModelConfig(fruitConfig.CharacterModel)
 	if configuredModel then
 		return configuredModel
-	end
-
-	if fruitName == "Gomu Gomu no Mi" then
-		return normalizeCharacterModelConfig({
-			AssetName = "R6G",
-			RigVariant = "R6G",
-			IsModifiedR15 = true,
-		})
 	end
 
 	return normalizeCharacterModelConfig({

@@ -34,6 +34,8 @@ function ValidationChecks.ValidateProfileData(data)
 		{ Path = { "Titles", "Equipped" }, ExpectedType = "string" },
 		{ Path = { "FoodInventory" }, ExpectedType = "table" },
 		{ Path = { "BrainrotInventory", "ById" }, ExpectedType = "table" },
+		{ Path = { "BrainrotQuickSlots", "UnlockedSlots" }, ExpectedType = "number" },
+		{ Path = { "BrainrotQuickSlots", "MaxSlots" }, ExpectedType = "number" },
 		{ Path = { "CrewInventory", "ById" }, ExpectedType = "table" },
 		{ Path = { "UnopenedChests", "ById" }, ExpectedType = "table" },
 		{ Path = { "ChestRewards" }, ExpectedType = "table" },

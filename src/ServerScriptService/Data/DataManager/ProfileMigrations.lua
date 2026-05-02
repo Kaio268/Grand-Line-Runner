@@ -8,6 +8,7 @@ local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local BrainrotQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
 
 local ProfileMigrations = {}
 
@@ -294,6 +295,20 @@ function ProfileMigrations.Apply(data)
 	brainrotInventory.NextInstanceId = math.max(1, coerceNumber(brainrotInventory.NextInstanceId, 1))
 	brainrotInventory.ById = ensureTable(brainrotInventory, "ById")
 	brainrotInventory.Order = ensureTable(brainrotInventory, "Order")
+
+	local brainrotQuickSlots = ensureTable(data, "BrainrotQuickSlots")
+	if typeof(data.BrainrotStorage) == "table" then
+		local legacyUnlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(data.BrainrotStorage.UnlockedSlots)
+		local currentUnlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(brainrotQuickSlots.UnlockedSlots)
+		if legacyUnlockedSlots > currentUnlockedSlots then
+			brainrotQuickSlots.UnlockedSlots = legacyUnlockedSlots
+		end
+	end
+	brainrotQuickSlots.UnlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(brainrotQuickSlots.UnlockedSlots)
+	brainrotQuickSlots.MaxSlots = BrainrotQuickSlotConfig.MaxSlots
+	if brainrotQuickSlots.UnlockedSlots > brainrotQuickSlots.MaxSlots then
+		brainrotQuickSlots.UnlockedSlots = brainrotQuickSlots.MaxSlots
+	end
 
 	local unopenedChests = ensureTable(data, "UnopenedChests")
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))

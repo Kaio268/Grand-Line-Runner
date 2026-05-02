@@ -41,6 +41,15 @@ local HIE_ICE_BOOST_SPEED_MULTIPLIER_ATTRIBUTE = "HieIceBoostSpeedMultiplier"
 local HIE_ICE_BOOST_SPEED_BONUS_ATTRIBUTE = "HieIceBoostSpeedBonus"
 local DEFAULT_ICE_BOOST_SPEED_MULTIPLIER = 2
 local ICE_BOOST_DURATION_CLEANUP_BUFFER = 0.05
+local FREEZE_VISUAL_SOURCE_MODEL_NAME = "HieFreezeBlockTemplate"
+local FREEZE_VISUAL_SOURCE_PART_NAME = "IceBlock"
+local LEGACY_FREEZE_VISUAL_SOURCE_MODEL_NAME = "Frozen Zombie"
+local LEGACY_FREEZE_VISUAL_SOURCE_PART_NAME = "Ice"
+local FREEZE_VISUAL_NAME = "HieFreezeBlock"
+local FREEZE_VISUAL_ASSET_PATH = { "Assets", "VFX", "Hie", FREEZE_VISUAL_SOURCE_MODEL_NAME }
+local FREEZE_VISUAL_TEMPLATE_SIZE = Vector3.new(4.363442897796631, 5.889999866485596, 3.4313979148864746)
+local FREEZE_VISUAL_PADDING = Vector3.new(0.35, 0.55, 0.35)
+local FREEZE_VISUAL_MIN_SCALE = 1
 
 local IGNORED_HELPER_NAMES = {
 	HitBox = true,
@@ -56,6 +65,8 @@ local FREEZE_SHOT_ALLOWED_ENTITY_TYPES = {
 local projectileSequence = 0
 local restoreTokensByPlayer = setmetatable({}, { __mode = "k" })
 local castSlowTokensByPlayer = setmetatable({}, { __mode = "k" })
+local activeFreezePresentationsByTarget = setmetatable({}, { __mode = "k" })
+local cachedFreezeVisualTemplate = nil
 
 local function logMessage(tag, message, ...)
 	if not DEBUG then
@@ -732,6 +743,7 @@ end
 local function scheduleRestoreLog(targetPlayer, duration, projectileId)
 	local token = (restoreTokensByPlayer[targetPlayer] or 0) + 1
 	restoreTokensByPlayer[targetPlayer] = token
+	local targetLabel = targetPlayer and targetPlayer.Name or "<unknown>"
 
 	task.delay(duration + RESTORE_LOG_GRACE, function()
 		if restoreTokensByPlayer[targetPlayer] ~= token then
@@ -742,7 +754,7 @@ local function scheduleRestoreLog(targetPlayer, duration, projectileId)
 			return HitEffectService.GetActiveEffect(targetPlayer)
 		end)
 		if not ok then
-			logError("restore check failed projectileId=%s target=%s detail=%s", tostring(projectileId), targetPlayer.Name, tostring(activeEffect))
+			logError("restore check failed projectileId=%s target=%s detail=%s", tostring(projectileId), targetLabel, tostring(activeEffect))
 			return
 		end
 
@@ -751,7 +763,7 @@ local function scheduleRestoreLog(targetPlayer, duration, projectileId)
 				"RESTORE",
 				"projectileId=%s target=%s restored=false activeEffect=%s until=%.2f",
 				tostring(projectileId),
-				targetPlayer.Name,
+				targetLabel,
 				tostring(activeEffect.EffectName),
 				tonumber(activeEffect.UntilTime) or 0
 			)
@@ -762,19 +774,302 @@ local function scheduleRestoreLog(targetPlayer, duration, projectileId)
 			"RESTORE",
 			"projectileId=%s target=%s restored=true duration=%.2f",
 			tostring(projectileId),
-			targetPlayer.Name,
+			targetLabel,
 			duration
 		)
 	end)
 end
 
+local function getPlayerHitTarget(hitInfo)
+	if type(hitInfo) ~= "table" then
+		return nil
+	end
+
+	return hitInfo.Player or hitInfo.Character
+end
+
+local function getPlayerHitLabel(hitInfo)
+	if type(hitInfo) ~= "table" then
+		return "<unknown>"
+	end
+
+	if hitInfo.Player then
+		return hitInfo.Player.Name
+	end
+
+	return tostring(hitInfo.Label or (hitInfo.Character and hitInfo.Character.Name) or "<unknown>")
+end
+
+local function createFallbackFreezeVisual()
+	local part = Instance.new("Part")
+	part.Name = FREEZE_VISUAL_NAME
+	part.Size = FREEZE_VISUAL_TEMPLATE_SIZE
+	part.Color = Color3.fromRGB(180, 210, 228)
+	part.Material = Enum.Material.Glass
+	part.Transparency = 0.3
+	part.Reflectance = 1
+	part.CastShadow = true
+	return part
+end
+
+local function configureFreezeVisualPart(part)
+	part.Anchored = false
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+
+	for _, descendant in ipairs(part:GetDescendants()) do
+		if descendant:IsA("Constraint") or descendant:IsA("JointInstance") or descendant:IsA("WeldConstraint") then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = false
+			descendant.CanCollide = false
+			descendant.CanTouch = false
+			descendant.CanQuery = false
+			descendant.Massless = true
+		end
+	end
+end
+
+local function findDescendantByPath(root, pathSegments)
+	local current = root
+	for _, pathSegment in ipairs(pathSegments) do
+		if not current then
+			return nil
+		end
+
+		current = current:FindFirstChild(pathSegment)
+	end
+
+	return current
+end
+
+local function getFreezeVisualTemplate()
+	if cachedFreezeVisualTemplate then
+		return cachedFreezeVisualTemplate
+	end
+
+	local sourceModel = findDescendantByPath(ReplicatedStorage, FREEZE_VISUAL_ASSET_PATH)
+		or Workspace:FindFirstChild(FREEZE_VISUAL_SOURCE_MODEL_NAME)
+		or Workspace:FindFirstChild(LEGACY_FREEZE_VISUAL_SOURCE_MODEL_NAME)
+	local sourcePart = sourceModel
+		and (sourceModel:FindFirstChild(FREEZE_VISUAL_SOURCE_PART_NAME) or sourceModel:FindFirstChild(LEGACY_FREEZE_VISUAL_SOURCE_PART_NAME))
+	if not (sourcePart and sourcePart:IsA("BasePart")) then
+		return nil
+	end
+
+	local template = sourcePart:Clone()
+	template.Name = FREEZE_VISUAL_NAME
+	configureFreezeVisualPart(template)
+	cachedFreezeVisualTemplate = template
+	return cachedFreezeVisualTemplate
+end
+
+local function getTargetBoundingBox(character, rootPart)
+	if typeof(character) == "Instance" and character:IsA("Model") then
+		local ok, boxCFrame, boxSize = pcall(function()
+			return character:GetBoundingBox()
+		end)
+		if ok and typeof(boxCFrame) == "CFrame" and typeof(boxSize) == "Vector3" then
+			return boxCFrame, boxSize
+		end
+	end
+
+	return rootPart.CFrame, FREEZE_VISUAL_TEMPLATE_SIZE
+end
+
+local function getFreezeVisualSize(boxSize)
+	local paddedSize = boxSize + FREEZE_VISUAL_PADDING
+	local scale = math.max(
+		FREEZE_VISUAL_MIN_SCALE,
+		paddedSize.X / FREEZE_VISUAL_TEMPLATE_SIZE.X,
+		paddedSize.Y / FREEZE_VISUAL_TEMPLATE_SIZE.Y,
+		paddedSize.Z / FREEZE_VISUAL_TEMPLATE_SIZE.Z
+	)
+
+	return FREEZE_VISUAL_TEMPLATE_SIZE * scale
+end
+
+local function positionFreezeVisual(visual, character, rootPart)
+	local boxCFrame, boxSize = getTargetBoundingBox(character, rootPart)
+	local _, yaw = rootPart.CFrame:ToOrientation()
+	visual.Size = getFreezeVisualSize(boxSize)
+	visual.CFrame = CFrame.new(boxCFrame.Position) * CFrame.Angles(0, yaw, 0)
+end
+
+local function createFreezeVisual(character, rootPart)
+	if not character or not rootPart then
+		return nil
+	end
+
+	local template = getFreezeVisualTemplate()
+	local visual
+	if template then
+		visual = template:Clone()
+	else
+		visual = createFallbackFreezeVisual()
+		configureFreezeVisualPart(visual)
+	end
+	visual.Name = FREEZE_VISUAL_NAME
+	positionFreezeVisual(visual, character, rootPart)
+	visual.Parent = character
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = "HieFreezeBlockWeld"
+	weld.Part0 = visual
+	weld.Part1 = rootPart
+	weld.Parent = visual
+
+	return visual
+end
+
+local function getReusableFreezeVisual(previousState, character, rootPart)
+	if type(previousState) ~= "table" then
+		return nil
+	end
+
+	if previousState.Character ~= character or previousState.RootPart ~= rootPart then
+		return nil
+	end
+
+	local visual = previousState.Visual
+	if visual and visual.Parent then
+		return visual
+	end
+
+	return nil
+end
+
+local function captureDirectFreezeMovement(hitInfo)
+	local humanoid = hitInfo and hitInfo.Humanoid
+	local rootPart = hitInfo and hitInfo.RootPart
+	if not humanoid or not rootPart then
+		return nil
+	end
+
+	return {
+		WalkSpeed = humanoid.WalkSpeed,
+		JumpPower = humanoid.JumpPower,
+		JumpHeight = humanoid.JumpHeight,
+		AutoRotate = humanoid.AutoRotate,
+		RootAnchored = rootPart.Anchored,
+	}
+end
+
+local function applyDirectFreezeMovement(hitInfo)
+	local humanoid = hitInfo and hitInfo.Humanoid
+	local rootPart = hitInfo and hitInfo.RootPart
+	if not humanoid or not rootPart then
+		return false
+	end
+
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+	humanoid.JumpHeight = 0
+	humanoid.AutoRotate = false
+	pcall(function()
+		humanoid:Move(Vector3.zero, false)
+	end)
+
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	rootPart.Anchored = true
+	return true
+end
+
+local function restoreDirectFreezeMovement(state)
+	local movement = state and state.OriginalMovement
+	local humanoid = state and state.Humanoid
+	local rootPart = state and state.RootPart
+	if type(movement) ~= "table" then
+		return
+	end
+
+	if humanoid and humanoid.Parent and humanoid.Health > 0 then
+		humanoid.WalkSpeed = movement.WalkSpeed
+		humanoid.JumpPower = movement.JumpPower
+		humanoid.JumpHeight = movement.JumpHeight
+		humanoid.AutoRotate = movement.AutoRotate
+	end
+
+	if rootPart and rootPart.Parent then
+		rootPart.Anchored = movement.RootAnchored == true
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
+local function clearFreezePresentation(target, state)
+	if activeFreezePresentationsByTarget[target] ~= state then
+		return
+	end
+
+	activeFreezePresentationsByTarget[target] = nil
+
+	if state.Visual and state.Visual.Parent then
+		state.Visual:Destroy()
+	end
+
+	if state.DirectMovementLocked == true then
+		restoreDirectFreezeMovement(state)
+	end
+end
+
+local function applyFreezePresentation(target, hitInfo, duration)
+	local character = hitInfo and hitInfo.Character
+	local humanoid = hitInfo and hitInfo.Humanoid
+	local rootPart = hitInfo and hitInfo.RootPart
+	if not target or not character or not humanoid or not rootPart then
+		return false
+	end
+
+	local previousState = activeFreezePresentationsByTarget[target]
+	local originalMovement = previousState and previousState.OriginalMovement or nil
+	local reusableVisual = getReusableFreezeVisual(previousState, character, rootPart)
+	if previousState and previousState.DirectMovementLocked == true and previousState.RootPart ~= rootPart then
+		restoreDirectFreezeMovement(previousState)
+	end
+	if previousState and previousState.Visual and previousState.Visual.Parent and previousState.Visual ~= reusableVisual then
+		previousState.Visual:Destroy()
+	end
+
+	local state = {
+		Character = character,
+		Humanoid = humanoid,
+		RootPart = rootPart,
+		OriginalMovement = originalMovement,
+		Visual = reusableVisual or createFreezeVisual(character, rootPart),
+		DirectMovementLocked = false,
+	}
+
+	if not hitInfo.Player then
+		state.OriginalMovement = state.OriginalMovement or captureDirectFreezeMovement(hitInfo)
+		state.DirectMovementLocked = applyDirectFreezeMovement(hitInfo)
+	end
+
+	activeFreezePresentationsByTarget[target] = state
+	task.delay(duration + RESTORE_LOG_GRACE, function()
+		clearFreezePresentation(target, state)
+	end)
+
+	return state.Visual ~= nil
+end
+
 local function freezePlayer(state, hitInfo)
+	local target = getPlayerHitTarget(hitInfo)
+	local targetLabel = getPlayerHitLabel(hitInfo)
+	if not target then
+		logMessage("FREEZE_PLAYER", "projectileId=%s target=%s skipped reason=invalid_target", state.Id, targetLabel)
+		return false, "invalid_target"
+	end
+
 	if state.FreezeDuration <= 0 then
-		logMessage("FREEZE_PLAYER", "projectileId=%s target=%s skipped duration=%.2f", state.Id, hitInfo.Player.Name, state.FreezeDuration)
+		logMessage("FREEZE_PLAYER", "projectileId=%s target=%s skipped duration=%.2f", state.Id, targetLabel, state.FreezeDuration)
 		return false, "invalid_duration"
 	end
 
-	local applied, result = HitEffectService.ApplyEffect(hitInfo.Player, "Freeze", {
+	local applied, result = HitEffectService.ApplyEffect(target, "Freeze", {
 		Duration = state.FreezeDuration,
 	})
 	if not applied then
@@ -782,7 +1077,7 @@ local function freezePlayer(state, hitInfo)
 			"FREEZE_PLAYER",
 			"projectileId=%s target=%s applied=false reason=%s duration=%.2f",
 			state.Id,
-			hitInfo.Player.Name,
+			targetLabel,
 			tostring(result),
 			state.FreezeDuration
 		)
@@ -794,18 +1089,20 @@ local function freezePlayer(state, hitInfo)
 		hitInfo.RootPart.AssemblyAngularVelocity = Vector3.zero
 	end)
 	if not velocityOk then
-		logError("failed to zero target velocity projectileId=%s target=%s detail=%s", state.Id, hitInfo.Player.Name, tostring(velocityError))
+		logError("failed to zero target velocity projectileId=%s target=%s detail=%s", state.Id, targetLabel, tostring(velocityError))
 	end
 
+	local visualApplied = applyFreezePresentation(target, hitInfo, state.FreezeDuration)
 	logMessage(
 		"FREEZE_PLAYER",
-		"projectileId=%s target=%s duration=%.2f",
+		"projectileId=%s target=%s duration=%.2f visual=%s",
 		state.Id,
-		hitInfo.Player.Name,
-		state.FreezeDuration
+		targetLabel,
+		state.FreezeDuration,
+		tostring(visualApplied)
 	)
 
-	scheduleRestoreLog(hitInfo.Player, state.FreezeDuration, state.Id)
+	scheduleRestoreLog(target, state.FreezeDuration, state.Id)
 	return true, "ok"
 end
 
@@ -899,8 +1196,11 @@ local function triggerImpactBurst(context, state, impactPosition, triggerKind, d
 	local handledPlayers = {}
 	local handledHazards = {}
 	if directHitInfo then
-		if directHitInfo.Kind == HitResolver.ResultKind.Player and directHitInfo.Player then
-			handledPlayers[directHitInfo.Player] = "direct_hit"
+		if directHitInfo.Kind == HitResolver.ResultKind.Player then
+			local directTarget = getPlayerHitTarget(directHitInfo)
+			if directTarget then
+				handledPlayers[directTarget] = "direct_hit"
+			end
 		elseif directHitInfo.Kind == HitResolver.ResultKind.Hazard and directHitInfo.Hazard and directHitInfo.Hazard.Root then
 			handledHazards[directHitInfo.Hazard.Root] = "direct_hit"
 		end
@@ -911,19 +1211,21 @@ local function triggerImpactBurst(context, state, impactPosition, triggerKind, d
 	local skippedTargets = 0
 
 	for _, burstHitInfo in ipairs(resolvedHits) do
-		if burstHitInfo.Kind == HitResolver.ResultKind.Player and burstHitInfo.Player then
-			local skipReason = handledPlayers[burstHitInfo.Player]
+		if burstHitInfo.Kind == HitResolver.ResultKind.Player then
+			local target = getPlayerHitTarget(burstHitInfo)
+			local targetLabel = getPlayerHitLabel(burstHitInfo)
+			local skipReason = target and handledPlayers[target] or "invalid_target"
 			if skipReason then
 				skippedTargets += 1
 				logMessage(
 					"BURST][SKIP",
 					"projectileId=%s kind=Player target=%s reason=%s",
 					state.Id,
-					burstHitInfo.Player.Name,
+					targetLabel,
 					tostring(skipReason)
 				)
 			else
-				handledPlayers[burstHitInfo.Player] = "burst"
+				handledPlayers[target] = "burst"
 				local applied, applyReason = freezePlayer(state, burstHitInfo)
 				if applied then
 					frozenPlayers += 1
@@ -933,7 +1235,7 @@ local function triggerImpactBurst(context, state, impactPosition, triggerKind, d
 						"BURST][SKIP",
 						"projectileId=%s kind=Player target=%s reason=%s",
 						state.Id,
-						burstHitInfo.Player.Name,
+						targetLabel,
 						tostring(applyReason)
 					)
 				end

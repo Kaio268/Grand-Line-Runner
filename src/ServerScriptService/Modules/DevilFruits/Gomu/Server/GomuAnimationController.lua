@@ -16,6 +16,10 @@ local WARN_COOLDOWN = 3
 local SOURCE_LABEL = "ServerScriptService.Modules.DevilFruits.Gomu.Server.GomuAnimationController"
 local RUBBER_LAUNCH_MOVE_NAME = "RubberLaunch"
 local RUBBER_LAUNCH_DEFAULT_ANIMATION_KEY = "Gomu.Rocket"
+local DEFAULT_ARM_STRETCH_MARKERS = { "Stretch", "StretchArms" }
+local DEFAULT_ARM_RESTORE_MARKERS = { "Unstretch", "RestoreArms" }
+local DEFAULT_ARM_STRETCH_SIZE = Vector3.new(1, 27.066, 1)
+local DEFAULT_ARM_RESTORE_FALLBACK_TIME = 0.85
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -87,6 +91,72 @@ local function getAnimator(character)
 	return nil
 end
 
+local function normalizeMarkerNames(value, fallback)
+	local names = {}
+	local seen = {}
+
+	local function append(markerName)
+		if typeof(markerName) ~= "string" or markerName == "" or seen[markerName] then
+			return
+		end
+
+		seen[markerName] = true
+		table.insert(names, markerName)
+	end
+
+	if typeof(value) == "string" then
+		append(value)
+	elseif type(value) == "table" then
+		for _, markerName in ipairs(value) do
+			append(markerName)
+		end
+	end
+
+	if #names == 0 and type(fallback) == "table" then
+		for _, markerName in ipairs(fallback) do
+			append(markerName)
+		end
+	end
+
+	return names
+end
+
+local function disconnectAll(connections)
+	for _, connection in ipairs(connections) do
+		if connection then
+			connection:Disconnect()
+		end
+	end
+	table.clear(connections)
+end
+
+local function connectMarkerSignals(track, markerNames, callback)
+	local connections = {}
+	if typeof(track) ~= "Instance" or type(markerNames) ~= "table" or typeof(callback) ~= "function" then
+		return connections
+	end
+
+	for _, markerName in ipairs(markerNames) do
+		local ok, connectionOrError = pcall(function()
+			return track:GetMarkerReachedSignal(markerName):Connect(function()
+				callback(markerName)
+			end)
+		end)
+		if ok and connectionOrError then
+			table.insert(connections, connectionOrError)
+		else
+			logWarn(
+				"marker connect failed move=%s marker=%s detail=%s",
+				RUBBER_LAUNCH_MOVE_NAME,
+				tostring(markerName),
+				tostring(connectionOrError)
+			)
+		end
+	end
+
+	return connections
+end
+
 local function playAnimation(character, moveName, animationConfig, defaultAnimationKey)
 	local resolvedConfig = type(animationConfig) == "table" and animationConfig or {}
 	local animationKey = resolvedConfig.AnimationKey or defaultAnimationKey
@@ -141,10 +211,18 @@ local function playAnimation(character, moveName, animationConfig, defaultAnimat
 		AnimationKey = animationKey,
 		AnimationId = descriptor and descriptor.AnimationId,
 		MarkerName = resolvedConfig.ReleaseMarker,
+		ReleaseMarkers = normalizeMarkerNames(resolvedConfig.ReleaseMarkers or resolvedConfig.ReleaseMarker),
 		ReleaseTime = tonumber(resolvedConfig.ReleaseTime),
 		ReleaseFallbackTime = math.max(
 			0,
 			tonumber(resolvedConfig.ReleaseFallbackTime) or DEFAULT_RELEASE_FALLBACK_TIME
+		),
+		ArmStretchMarkers = normalizeMarkerNames(resolvedConfig.ArmStretchMarkers, DEFAULT_ARM_STRETCH_MARKERS),
+		ArmRestoreMarkers = normalizeMarkerNames(resolvedConfig.ArmRestoreMarkers, DEFAULT_ARM_RESTORE_MARKERS),
+		ArmStretchSize = resolvedConfig.ArmStretchSize or DEFAULT_ARM_STRETCH_SIZE,
+		ArmRestoreFallbackTime = math.max(
+			0,
+			tonumber(resolvedConfig.ArmRestoreFallbackTime) or DEFAULT_ARM_RESTORE_FALLBACK_TIME
 		),
 		Track = track,
 		StopFadeTime = math.max(0, tonumber(resolvedConfig.StopFadeTime) or DEFAULT_STOP_FADE_TIME),
@@ -153,6 +231,76 @@ end
 
 function GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
 	return playAnimation(character, RUBBER_LAUNCH_MOVE_NAME, animationConfig, RUBBER_LAUNCH_DEFAULT_ANIMATION_KEY)
+end
+
+function GomuAnimationController.BindRubberLaunchArmEvents(animationState, callbacks)
+	if type(animationState) ~= "table" or typeof(animationState.Track) ~= "Instance" then
+		return function() end
+	end
+
+	callbacks = type(callbacks) == "table" and callbacks or {}
+	local track = animationState.Track
+	local connections = {}
+	local stretched = false
+	local restored = false
+
+	local function emitRestore(reason, markerName)
+		if restored then
+			return
+		end
+
+		restored = true
+		if typeof(callbacks.OnRestore) == "function" then
+			callbacks.OnRestore({
+				Reason = reason,
+				MarkerName = markerName,
+				ArmStretchSize = animationState.ArmStretchSize,
+			})
+		end
+		disconnectAll(connections)
+	end
+
+	local function emitStretch(markerName)
+		if stretched or restored then
+			return
+		end
+
+		stretched = true
+		logInfo("move=%s arm stretch marker=%s", tostring(animationState.MoveName), tostring(markerName))
+		if typeof(callbacks.OnStretch) == "function" then
+			callbacks.OnStretch({
+				MarkerName = markerName,
+				ArmStretchSize = animationState.ArmStretchSize,
+				ArmRestoreFallbackTime = animationState.ArmRestoreFallbackTime,
+			})
+		end
+
+		local fallbackTime = math.max(0, tonumber(animationState.ArmRestoreFallbackTime) or DEFAULT_ARM_RESTORE_FALLBACK_TIME)
+		if fallbackTime > 0 then
+			task.delay(fallbackTime, function()
+				if stretched and not restored then
+					emitRestore("timeout")
+				end
+			end)
+		end
+	end
+
+	for _, connection in ipairs(connectMarkerSignals(track, animationState.ArmStretchMarkers, emitStretch)) do
+		table.insert(connections, connection)
+	end
+	for _, connection in ipairs(connectMarkerSignals(track, animationState.ArmRestoreMarkers, function(markerName)
+		logInfo("move=%s arm restore marker=%s", tostring(animationState.MoveName), tostring(markerName))
+		emitRestore("marker", markerName)
+	end)) do
+		table.insert(connections, connection)
+	end
+	table.insert(connections, track.Stopped:Connect(function()
+		emitRestore("animation_stopped")
+	end))
+
+	return function()
+		emitRestore("cleanup")
+	end
 end
 
 function GomuAnimationController.WaitForRubberLaunchRelease(animationState)
@@ -171,8 +319,12 @@ function GomuAnimationController.WaitForRubberLaunchRelease(animationState)
 	end
 
 	local fallbackTime = math.max(0, tonumber(animationState.ReleaseFallbackTime) or DEFAULT_RELEASE_FALLBACK_TIME)
-	local markerName = animationState.MarkerName
-	if typeof(markerName) ~= "string" or markerName == "" then
+	local markerNames = type(animationState.ReleaseMarkers) == "table" and animationState.ReleaseMarkers or {}
+	if #markerNames == 0 and typeof(animationState.MarkerName) == "string" and animationState.MarkerName ~= "" then
+		markerNames = { animationState.MarkerName }
+	end
+
+	if #markerNames == 0 then
 		local timeoutAt = os.clock() + fallbackTime
 		while track.IsPlaying and os.clock() < timeoutAt do
 			task.wait()
@@ -181,24 +333,27 @@ function GomuAnimationController.WaitForRubberLaunchRelease(animationState)
 	end
 
 	local markerReached = false
-	local connection
-	local ok, err = pcall(function()
-		connection = track:GetMarkerReachedSignal(markerName):Connect(function()
-			if markerReached then
-				return
-			end
+	local connections = {}
+	for _, markerName in ipairs(markerNames) do
+		local ok, err = pcall(function()
+			local connection = track:GetMarkerReachedSignal(markerName):Connect(function()
+				if markerReached then
+					return
+				end
 
-			markerReached = true
-			logInfo("move=%s marker reached marker=%s", tostring(animationState.MoveName), markerName)
+				markerReached = true
+				logInfo("move=%s marker reached marker=%s", tostring(animationState.MoveName), markerName)
+			end)
+			table.insert(connections, connection)
 		end)
-	end)
-	if not ok then
-		logWarn(
-			"marker connect failed move=%s marker=%s detail=%s",
-			tostring(animationState.MoveName),
-			tostring(markerName),
-			tostring(err)
-		)
+		if not ok then
+			logWarn(
+				"marker connect failed move=%s marker=%s detail=%s",
+				tostring(animationState.MoveName),
+				tostring(markerName),
+				tostring(err)
+			)
+		end
 	end
 
 	local timeoutAt = os.clock() + fallbackTime
@@ -206,12 +361,15 @@ function GomuAnimationController.WaitForRubberLaunchRelease(animationState)
 		task.wait()
 	end
 
-	if connection then
-		connection:Disconnect()
-	end
+	disconnectAll(connections)
 
 	if not markerReached and fallbackTime > 0 then
-		logInfo("move=%s marker fallback marker=%s delay=%.3f", tostring(animationState.MoveName), markerName, fallbackTime)
+		logInfo(
+			"move=%s marker fallback markers=%s delay=%.3f",
+			tostring(animationState.MoveName),
+			table.concat(markerNames, ","),
+			fallbackTime
+		)
 	end
 
 	return markerReached

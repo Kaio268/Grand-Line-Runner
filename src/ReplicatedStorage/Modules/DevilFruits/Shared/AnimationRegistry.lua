@@ -125,7 +125,7 @@ local Animations = {
 	},
 
 	Gomu = {
-		Rocket = "rbxassetid://100281752037524",
+		Rocket = "rbxassetid://122282628828007",
 	},
 
 	Bomu = {

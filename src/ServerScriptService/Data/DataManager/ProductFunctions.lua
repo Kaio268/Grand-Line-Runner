@@ -3,7 +3,9 @@ local Players = game:GetService("Players")
 
 local Types = require(ReplicatedStorage.Modules.Types)
 local BrainrotInstanceService = require(script.Parent.Parent.Parent.Modules.BrainrotInstanceService)
+local BrainrotQuickSlotService = require(script.Parent.Parent.Parent.Modules.BrainrotQuickSlotService)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local BrainrotQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local PlotSystem = nil
@@ -337,6 +339,13 @@ local handlers = {
 	[3512128038] = StealBrainrotProduct,
 	[3512128716] = StealBrainrotProduct,
 }
+
+local brainrotQuickSlotProductId = tonumber(BrainrotQuickSlotConfig.ProductId)
+if brainrotQuickSlotProductId and brainrotQuickSlotProductId > 0 then
+	handlers[brainrotQuickSlotProductId] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
+		BrainrotQuickSlotService.ProcessUnlockReceipt(player, receiptInfo.ProductId, DataManager)
+	end
+end
 
 local productToGears = {}
 

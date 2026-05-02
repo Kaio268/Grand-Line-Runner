@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local BrainrotQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
 
 local primaryCurrency = Economy.Currency.Primary
 
@@ -76,6 +77,8 @@ local ProfileTemplate = {
 		ById = {},
 		Order = {},
 	},
+
+	BrainrotQuickSlots = BrainrotQuickSlotConfig.GetDefaults(),
 
 	Ship = {
 		MaxSlots = Economy.Rules.MaxShipSlots,

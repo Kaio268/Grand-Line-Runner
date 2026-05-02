@@ -3,6 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+local BrainrotQuickSlotService = require(script.Parent:WaitForChild("BrainrotQuickSlotService"))
 local IndexCollectionService = require(script.Parent:WaitForChild("IndexCollectionService"))
 
 local Module = {}
@@ -408,7 +409,16 @@ function Module.CreateInstances(player, storageName, count, overrides)
 		return {}
 	end
 
+	local assignedStand = tostring(overrides and overrides.AssignedStand or "")
+	local capacityReserved = overrides and overrides._QuickSlotCapacityReserved == true
+	if assignedStand == "" and not capacityReserved then
+		if not BrainrotQuickSlotService.CanGainOrNotify(player, safeCount, "CreateInstances:" .. tostring(storageName)) then
+			return {}
+		end
+	end
+
 	local brainrotInventory = getBrainrotInventory(player)
+
 	local createdIds = {}
 	for _ = 1, safeCount do
 		local instanceId = createInstanceInternal(player, brainrotInventory, storageName, overrides)
@@ -631,7 +641,12 @@ function Module.ReleaseStandInstance(player, standName)
 		return nil, nil
 	end
 
+	if not BrainrotQuickSlotService.CanGainOrNotify(player, 1, "ReleaseStandInstance:" .. tostring(standName)) then
+		return nil, nil
+	end
+
 	local _, _, brainrotInventory = Module.GetInstance(player, instanceId)
+
 	instanceData.AssignedStand = ""
 	instanceData.LastReleasedAt = os.time()
 	brainrotInventory.ById[tostring(instanceId)] = instanceData
@@ -670,6 +685,12 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 		return nil, nil
 	end
 
+	if not BrainrotQuickSlotService.CanGainOrNotify(buyerPlayer, 1, "TransferStandInstance:" .. tostring(standName)) then
+		return nil, nil
+	end
+
+	local buyerInventory = getBrainrotInventory(buyerPlayer)
+
 	local _, _, ownerInventory = Module.GetInstance(ownerPlayer, instanceId)
 	ownerInventory.ById[tostring(instanceId)] = nil
 	for index = #ownerInventory.Order, 1, -1 do
@@ -683,7 +704,6 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 	getDataManager():SetValue(ownerPlayer, "IncomeBrainrots." .. tostring(standName) .. ".BrainrotInstanceId", "")
 	syncAvailableCounts(ownerPlayer, ownerInventory)
 
-	local buyerInventory = getBrainrotInventory(buyerPlayer)
 	ensureInventoryMetadata(buyerPlayer, instanceData.StorageName, instanceData)
 	local buyerInstanceId = tostring(buyerInventory.NextInstanceId)
 	buyerInventory.NextInstanceId += 1

@@ -35,6 +35,30 @@ local function getSharedTimestamp()
 	return Workspace:GetServerTimeNow()
 end
 
+local function getPlayerRootPart(player)
+	local character = player and player.Character
+	if not character then
+		return nil
+	end
+
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart and rootPart:IsA("BasePart") then
+		return rootPart
+	end
+
+	return nil
+end
+
+local function getPlanarDistance(firstPosition, secondPosition)
+	if typeof(firstPosition) ~= "Vector3" or typeof(secondPosition) ~= "Vector3" then
+		return math.huge
+	end
+
+	local firstPlanar = Vector3.new(firstPosition.X, 0, firstPosition.Z)
+	local secondPlanar = Vector3.new(secondPosition.X, 0, secondPosition.Z)
+	return (firstPlanar - secondPlanar).Magnitude
+end
+
 local function toriCooldownLog(message, ...)
 	print("[ToriCooldown] " .. string.format(message, ...))
 end
@@ -272,6 +296,43 @@ local function resolvePhoenixShieldRadius(abilityConfig)
 	return clampPositiveNumber(configuredRadius, DEFAULT_PHOENIX_FLAME_SHIELD_RADIUS)
 end
 
+local function getActivePhoenixShieldProtection(position)
+	if typeof(position) ~= "Vector3" then
+		return nil
+	end
+
+	local bucket = getStateBucket(PHOENIX_SHIELD_ABILITY)
+	if not bucket then
+		return nil
+	end
+
+	local now = getSharedTimestamp()
+	for shieldOwner, shieldState in pairs(bucket) do
+		if shieldState
+			and shieldState.Ended ~= true
+			and (tonumber(shieldState.NaturalEndAt) or 0) > now
+			and shieldOwner
+			and shieldOwner.Parent == Players
+		then
+			local ownerRootPart = getPlayerRootPart(shieldOwner)
+			local radius = resolvePhoenixShieldRadius(shieldState.AbilityConfig or {})
+			if ownerRootPart and radius > 0 and getPlanarDistance(ownerRootPart.Position, position) <= radius then
+				return {
+					Protected = true,
+					Source = "PhoenixFlameShield",
+					Reason = "tori_phoenix_shield",
+					ShieldOwner = shieldOwner,
+					ShieldOwnerUserId = shieldOwner.UserId,
+					Radius = radius,
+					Position = position,
+				}
+			end
+		end
+	end
+
+	return nil
+end
+
 local function estimatePhoenixFlightHeightDelay(abilityConfig, initialLift, maxRiseHeight, takeoffDuration)
 	local resolvedInitialLift = math.max(0, initialLift)
 	local resolvedMaxRiseHeight = math.max(resolvedInitialLift, maxRiseHeight)
@@ -417,6 +478,53 @@ end
 
 function ToriServer.ShouldBypassRequestThrottle(selfOrContext, maybeContext)
 	return ToriServer.ShouldBypassCooldownCheck(selfOrContext, maybeContext)
+end
+
+function ToriServer.IsPhoenixFlightActive(player)
+	local activeFlight = getActiveEndCooldownState(player, PHOENIX_FLIGHT_ABILITY)
+	return activeFlight ~= nil
+		and activeFlight.Ended ~= true
+		and (tonumber(activeFlight.NaturalEndAt) or 0) > getSharedTimestamp()
+end
+
+function ToriServer.GetProtection(player, position)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil
+	end
+
+	local checkPosition = position
+	if typeof(checkPosition) ~= "Vector3" then
+		local rootPart = getPlayerRootPart(player)
+		checkPosition = rootPart and rootPart.Position or nil
+	end
+
+	local shieldProtection = getActivePhoenixShieldProtection(checkPosition)
+	if shieldProtection then
+		shieldProtection.Player = player
+		return shieldProtection
+	end
+
+	local passiveService = getToriPassiveService()
+	if passiveService and typeof(passiveService.IsProtected) == "function" and passiveService.IsProtected(player) then
+		return {
+			Protected = true,
+			Source = "PhoenixRebirth",
+			Reason = "tori_phoenix_rebirth",
+			Player = player,
+			Position = checkPosition,
+		}
+	end
+
+	return nil
+end
+
+function ToriServer.IsProtected(player, position)
+	local protection = ToriServer.GetProtection(player, position)
+	if protection then
+		return true, protection.Reason, protection
+	end
+
+	return false
 end
 
 function ToriServer.ClearRuntimeState(player, _fruitName, cleanupReason)

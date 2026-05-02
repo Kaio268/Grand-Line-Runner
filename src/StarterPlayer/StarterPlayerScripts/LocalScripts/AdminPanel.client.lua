@@ -268,6 +268,21 @@ local COMMANDS = {
 		end,
 	},
 	{
+		id = "ability_hitboxes",
+		category = "Devil Fruits",
+		marker = "HB",
+		name = "Ability Hitboxes",
+		syntax = "/hitbox on|off",
+		description = "Toggle local client-side hitbox visuals for ability effects.",
+		example = "/hitbox on",
+		inputs = {
+			{ key = "state", label = "State", placeholder = "on or off", default = "on" },
+		},
+		build = function(values)
+			return "/hitbox " .. inputValue(values, "state", "on")
+		end,
+	},
+	{
 		id = "money_delta",
 		category = "Currency",
 		marker = "$",

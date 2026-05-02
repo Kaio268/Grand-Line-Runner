@@ -4,6 +4,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local SharedFolder = Modules:WaitForChild("DevilFruits"):WaitForChild("Shared")
 local Registry = require(SharedFolder:WaitForChild("Registry"))
 local DevilFruitLogger = require(SharedFolder:WaitForChild("DevilFruitLogger"))
+local AbilityHitboxVisualizer = require(script.Parent:WaitForChild("AbilityHitboxVisualizer"))
 
 local DevilFruitEffectRouter = {}
 DevilFruitEffectRouter.__index = DevilFruitEffectRouter
@@ -23,6 +24,7 @@ function DevilFruitEffectRouter.new(config)
 	self.clientEffectVisuals = config.clientEffectVisuals
 	self.playOptionalEffect = config.playOptionalEffect
 	self.player = config.player
+	AbilityHitboxVisualizer.Start()
 	return self
 end
 
@@ -35,6 +37,17 @@ function DevilFruitEffectRouter:HandleEffect(targetPlayer, fruitName, abilityNam
 		tostring(abilityName),
 		getEffectPhase(resolvedPayload)
 	)
+
+	local hitboxOk, hitboxError = pcall(
+		AbilityHitboxVisualizer.HandleEffect,
+		targetPlayer,
+		fruitName,
+		abilityName,
+		resolvedPayload
+	)
+	if not hitboxOk then
+		warn("[AbilityHitboxVisualizer] " .. tostring(hitboxError))
+	end
 
 	local methodFound, handled = self.loader:CallControllerMethod(
 		fruitName,

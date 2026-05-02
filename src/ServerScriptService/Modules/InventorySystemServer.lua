@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local BrainrotQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("BrainrotQuickSlotService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local updateRemote = ReplicatedStorage:FindFirstChild("InventoryGearRemote")
 if not updateRemote then
@@ -1109,6 +1110,11 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 
 	if kind == "Brainrot" then
 		if not ownsBrainrot(player, name) then return end
+		local canEquip = BrainrotQuickSlotService.CanEquipBrainrot(player, name)
+		if not canEquip then
+			BrainrotQuickSlotService.PromptUnlockForBrainrot(player, name)
+			return
+		end
 		toggleEquip(player, kind, name)
 		return
 	end

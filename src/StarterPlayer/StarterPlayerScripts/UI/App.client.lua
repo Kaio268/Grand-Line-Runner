@@ -18,6 +18,7 @@ local App = require(UiFolder:WaitForChild("App"))
 local Brainrots = require(Modules:WaitForChild("Configs"):WaitForChild("Brainrots"))
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local BrainrotQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
 local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
@@ -34,8 +35,10 @@ if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
 	snapshotRemote = nil
 end
 local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
-local titleEquipRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TitleEquipRequest")
-local shipUpgradeResultRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("ShipUpgradeResultRemote")
+local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
+local titleEquipRemote = remotesFolder:WaitForChild("TitleEquipRequest")
+local shipUpgradeResultRemote = remotesFolder:WaitForChild("ShipUpgradeResultRemote")
+local brainrotQuickSlotsRequestRemote = remotesFolder:WaitForChild("BrainrotQuickSlotsRequest")
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactInventoryRoot"
@@ -65,10 +68,12 @@ local RARITY_ORDER = {
 	Omega = 9,
 }
 
+local BRAINROT_QUICK_ACCENT = Color3.fromRGB(93, 203, 200)
+
 local CATEGORY_DEFS = {
-	Brainrots = {
+	Chests = {
 		label = "Treasure",
-		accentColor = Color3.fromRGB(93, 203, 200),
+		accentColor = Color3.fromRGB(236, 190, 94),
 	},
 	DevilFruits = {
 		label = "Devil Fruits",
@@ -129,8 +134,6 @@ local KEY_TO_SLOT = {
 	[Enum.KeyCode.Six] = 6,
 	[Enum.KeyCode.Seven] = 7,
 	[Enum.KeyCode.Eight] = 8,
-	[Enum.KeyCode.Nine] = 9,
-	[Enum.KeyCode.Zero] = 0,
 }
 
 local HUD_BUTTON_NAMES = {
@@ -209,7 +212,7 @@ end
 local uiState = {
 	isOpen = false,
 	activeView = "Inventory",
-	activeCategory = "Brainrots",
+	activeCategory = "Chests",
 	query = "",
 }
 
@@ -839,6 +842,34 @@ local function readChildValue(parent, childName)
 	return nil
 end
 
+local function readBrainrotQuickSlots()
+	local slotsFolder = player:FindFirstChild("BrainrotQuickSlots") or player:FindFirstChild("BrainrotStorage")
+	local maxSlots = math.max(
+		BrainrotQuickSlotConfig.DefaultUnlockedSlots,
+		math.floor(tonumber(readChildValue(slotsFolder, "MaxSlots")) or BrainrotQuickSlotConfig.MaxSlots)
+	)
+	maxSlots = math.min(maxSlots, BrainrotQuickSlotConfig.MaxSlots)
+
+	local unlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(readChildValue(slotsFolder, "UnlockedSlots"))
+	unlockedSlots = math.min(unlockedSlots, maxSlots)
+
+	return {
+		unlockedSlots = unlockedSlots,
+		maxSlots = maxSlots,
+	}
+end
+
+local function countBrainrotItems(brainrotKeys)
+	local count = 0
+	for _, key in ipairs(brainrotKeys or {}) do
+		local state = itemState[key]
+		if state and state.kind == "Brainrot" then
+			count += math.max(0, math.floor(tonumber(state.qty) or 0))
+		end
+	end
+	return count
+end
+
 local function readPlayerDoubloons()
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local value = readChildValue(leaderstats, "Doubloons")
@@ -1384,11 +1415,40 @@ local function buildEntry(key, state)
 	}
 end
 
-local function slotLabelForIndex(index)
-	if index > 10 then
-		return nil
+local function buildBrainrotQuickSlotEntry(slotIndex, locked)
+	local product = BrainrotQuickSlotConfig.GetSlotProduct(slotIndex) or {}
+	local price = math.max(0, math.floor(tonumber(product.Price) or 0))
+	if locked then
+		return {
+			key = "BrainrotQuickSlotLocked|" .. tostring(slotIndex),
+			kind = "BrainrotQuickSlot",
+			slotIndex = slotIndex,
+			displayName = "Quick Slot " .. tostring(slotIndex) .. " Locked",
+			shortName = "Locked",
+			subtitle = "Brainrot Quick Slot",
+			footer = price > 0 and (tostring(price) .. " Robux") or "Locked",
+			fallbackText = "LOCK",
+			priceRobux = price,
+			productId = product.ProductId,
+			accentColor = Color3.fromRGB(128, 139, 156),
+			interactive = true,
+			lockedSlot = true,
+		}
 	end
-	return index % 10
+
+	return {
+		key = "BrainrotQuickSlotEmpty|" .. tostring(slotIndex),
+		kind = "BrainrotQuickSlot",
+		slotIndex = slotIndex,
+		displayName = "Empty Quick Slot " .. tostring(slotIndex),
+		shortName = "Empty",
+		subtitle = "Brainrot Quick Slot",
+		footer = "Available",
+		fallbackText = "+",
+		accentColor = BRAINROT_QUICK_ACCENT,
+		interactive = false,
+		emptySlot = true,
+	}
 end
 
 local function buildRenderData()
@@ -1396,39 +1456,51 @@ local function buildRenderData()
 	syncDevilFruitsFromInventory()
 
 	local gearsList, chestsList, brainrotsList, devilFruitList, resourceList = buildLists()
-	local hotbarKeys = {}
 	local query = trim(uiState.query)
+	local brainrotQuickSlots = readBrainrotQuickSlots()
+	local brainrotCollectionCount = countBrainrotItems(brainrotsList)
 
-	for _, key in ipairs(gearsList) do
-		hotbarKeys[#hotbarKeys + 1] = key
-	end
+	local brainrotHotbarEntries = {}
 	for _, key in ipairs(brainrotsList) do
-		hotbarKeys[#hotbarKeys + 1] = key
+		local state = itemState[key]
+		if state then
+			brainrotHotbarEntries[#brainrotHotbarEntries + 1] = buildEntry(key, state)
+		end
 	end
 
 	local hotbarSlots = {}
 	keyboardHotbar = {}
-	for index, key in ipairs(hotbarKeys) do
-		local state = itemState[key]
-		if state then
-			local entry = buildEntry(key, state)
-			local slotLabel = slotLabelForIndex(index)
-			hotbarSlots[#hotbarSlots + 1] = {
-				slotLabel = slotLabel,
-				item = entry,
-			}
-			if slotLabel ~= nil and keyboardHotbar[slotLabel] == nil then
-				keyboardHotbar[slotLabel] = entry
+	for slotIndex = 1, brainrotQuickSlots.maxSlots do
+		local entry = brainrotHotbarEntries[slotIndex]
+		if slotIndex <= brainrotQuickSlots.unlockedSlots then
+			if entry then
+				entry.quickSlotIndex = slotIndex
+			else
+				entry = buildBrainrotQuickSlotEntry(slotIndex, false)
 			end
+		else
+			entry = buildBrainrotQuickSlotEntry(slotIndex, true)
+		end
+
+		hotbarSlots[#hotbarSlots + 1] = {
+			slotLabel = slotIndex,
+			item = entry,
+		}
+
+		if entry and entry.interactive ~= false then
+			keyboardHotbar[slotIndex] = entry
 		end
 	end
 
-	local targetHotbarSlots = math.max(10, #hotbarSlots)
-	for index = #hotbarSlots + 1, targetHotbarSlots do
-		hotbarSlots[#hotbarSlots + 1] = {
-			slotLabel = slotLabelForIndex(index),
-			item = nil,
-		}
+	for _, key in ipairs(gearsList) do
+		local state = itemState[key]
+		if state then
+			local entry = buildEntry(key, state)
+			hotbarSlots[#hotbarSlots + 1] = {
+				slotLabel = nil,
+				item = entry,
+			}
+		end
 	end
 
 	local activeKeys
@@ -1450,13 +1522,12 @@ local function buildRenderData()
 			end
 		end
 	end
-
 	local categories = {
 		{
-			key = "Brainrots",
-			label = CATEGORY_DEFS.Brainrots.label,
+			key = "Chests",
+			label = CATEGORY_DEFS.Chests.label,
 			count = #chestsList,
-			accentColor = CATEGORY_DEFS.Brainrots.accentColor,
+			accentColor = CATEGORY_DEFS.Chests.accentColor,
 		},
 		{
 			key = "DevilFruits",
@@ -1526,9 +1597,13 @@ local function buildRenderData()
 			chests = chestCount,
 			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
+			brainrotCollectionCount = brainrotCollectionCount,
+			brainrotQuickSlotsUnlocked = brainrotQuickSlots.unlockedSlots,
+			brainrotQuickSlotsMax = brainrotQuickSlots.maxSlots,
 		},
 		activeView = uiState.activeView,
-		activeCategoryLabel = CATEGORY_DEFS[uiState.activeCategory].label,
+		activeCategoryLabel = (CATEGORY_DEFS[uiState.activeCategory] or CATEGORY_DEFS.Chests).label,
+		brainrotQuickSlots = brainrotQuickSlots,
 		filteredCount = #items,
 		totalCount = #activeKeys,
 		query = uiState.query,
@@ -1682,6 +1757,7 @@ local function bindShipDataTracking()
 
 	local watchedRoots = {
 		Bounty = true,
+		BrainrotQuickSlots = true,
 		ChestInventory = true,
 		IncomeBrainrots = true,
 		Inventory = true,
@@ -1899,6 +1975,10 @@ local function render()
 				if shipUpgradeModal ~= nil then
 					return
 				end
+				if entry and entry.kind == "BrainrotQuickSlot" and entry.lockedSlot == true then
+					brainrotQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
+					return
+				end
 				if entry and entry.kind ~= "Resource" then
 					equipRemote:FireServer(entry.kind, entry.name)
 				end
@@ -2053,6 +2133,10 @@ end
 local function activateSlot(slotNumber)
 	local entry = keyboardHotbar[slotNumber]
 	if entry then
+		if entry.kind == "BrainrotQuickSlot" and entry.lockedSlot == true then
+			brainrotQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
+			return
+		end
 		equipRemote:FireServer(entry.kind, entry.name)
 	end
 end

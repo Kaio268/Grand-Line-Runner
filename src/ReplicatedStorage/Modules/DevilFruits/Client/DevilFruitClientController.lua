@@ -30,6 +30,8 @@ local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = "GameplayModalOpen"
 
 local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
 local MOGU_BURROW_ABILITY = "Burrow"
+local BOMU_FRUIT_NAME = "Bomu Bomu no Mi"
+local BOMU_LAND_MINE_ABILITY = "LandMine"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
@@ -129,6 +131,27 @@ local function countPayloadKeys(payload)
 	end
 
 	return count
+end
+
+local function isBomuLandMineWorldEffect(targetPlayer, fruitName, abilityName, payload)
+	if targetPlayer ~= nil and targetPlayer ~= false then
+		return false
+	end
+
+	if fruitName ~= BOMU_FRUIT_NAME or abilityName ~= BOMU_LAND_MINE_ABILITY or typeof(payload) ~= "table" then
+		return false
+	end
+
+	local action = payload.Action
+	if action == "Placed" then
+		return typeof(payload.MinePosition) == "Vector3" or typeof(payload.OriginPosition) == "Vector3"
+	end
+
+	if action == "Detonating" or action == "Detonated" then
+		return typeof(payload.OriginPosition) == "Vector3" or typeof(payload.MinePosition) == "Vector3"
+	end
+
+	return false
 end
 
 local function describeRemote(instance)
@@ -1727,11 +1750,12 @@ local function initializeDevilFruitClient()
 	end)
 
 	effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName, payload)
-		if not targetPlayer or not targetPlayer:IsA("Player") then
+		local hasPlayerTarget = targetPlayer and targetPlayer:IsA("Player")
+		if not hasPlayerTarget and not isBomuLandMineWorldEffect(targetPlayer, fruitName, abilityName, payload) then
 			return
 		end
 
-		if fruitName == MOGU_FRUIT_NAME and abilityName == MOGU_BURROW_ABILITY then
+		if hasPlayerTarget and fruitName == MOGU_FRUIT_NAME and abilityName == MOGU_BURROW_ABILITY then
 			local phase = payload and payload.Phase
 			if phase == "Start" then
 				startMoguBurrow(targetPlayer, payload)

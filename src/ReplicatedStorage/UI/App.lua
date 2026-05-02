@@ -909,21 +909,24 @@ local function hotbarSlot(props)
 	local slot = props.slot or {}
 	local item = slot.item
 	local accent = item and item.accentColor or Color3.fromRGB(76, 96, 132)
-	local interactive = item ~= nil and props.onActivated ~= nil
+	local lockedSlot = item and item.lockedSlot == true
+	local emptySlot = item and item.emptySlot == true
+	local interactive = item ~= nil and item.interactive ~= false and props.onActivated ~= nil
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(interactive)
 	local zIndexBase = props.zIndexBase or 0
+	local hoverZIndexOffset = hovered and 12 or 0
 	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(20, 28, 44), 0.78) or Color3.fromRGB(13, 19, 31)
 	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 39, 61), 0.84) or Color3.fromRGB(18, 26, 41)
 	local slotBottomColor = item and accent:Lerp(Color3.fromRGB(12, 17, 30), 0.92) or Color3.fromRGB(10, 14, 24)
 
 	local slotProps = mergeProps({
 		BackgroundColor3 = slotBaseColor,
-		BackgroundTransparency = item and 0.3 or 0.76,
+		BackgroundTransparency = item and (emptySlot and 0.58 or 0.3) or 0.76,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		ref = hoverRef,
 		Size = UDim2.fromOffset(64, 64),
-		ZIndex = zIndexBase + 1,
+		ZIndex = zIndexBase + 1 + hoverZIndexOffset,
 	}, handlers)
 
 	if interactive then
@@ -937,7 +940,7 @@ local function hotbarSlot(props)
 	local previewChild = renderItemPreview(item, {
 		position = UDim2.fromScale(0.5, 0.52),
 		size = UDim2.fromOffset(40, 40),
-		zIndex = zIndexBase + 3,
+		zIndex = zIndexBase + 3 + hoverZIndexOffset,
 		fallbackFont = Enum.Font.GothamMedium,
 		fallbackTextColor = PALETTE.Muted,
 		fallbackTextSize = 10,
@@ -953,7 +956,7 @@ local function hotbarSlot(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = accent,
-			Transparency = item and (hovered and 0.08 or 0.18) or 0.7,
+			Transparency = item and (hovered and 0.08 or (lockedSlot and 0.28 or 0.18)) or 0.7,
 			Thickness = item and (hovered and 1.9 or 1.5) or 1.1,
 		}),
 		Glow = e("UIStroke", {
@@ -974,7 +977,7 @@ local function hotbarSlot(props)
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -8),
-			ZIndex = zIndexBase + 1,
+			ZIndex = zIndexBase + 1 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 13),
@@ -987,9 +990,9 @@ local function hotbarSlot(props)
 			Position = UDim2.fromOffset(6, 6),
 			Font = Enum.Font.GothamBold,
 			Text = tostring(slot.slotLabel),
-			TextColor3 = item and PALETTE.Cream or PALETTE.Steel,
+			TextColor3 = item and (lockedSlot and Color3.fromRGB(230, 236, 245) or PALETTE.Cream) or PALETTE.Steel,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4,
+			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -1002,7 +1005,29 @@ local function hotbarSlot(props)
 			}),
 		}) or nil,
 		Preview = previewChild,
-		Count = item and (item.quantity or 0) > 1 and e("TextLabel", {
+		Price = lockedSlot and e("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
+			BackgroundTransparency = hovered and 0.08 or 0.16,
+			Position = UDim2.new(0.5, 0, 1, -6),
+			Font = Enum.Font.GothamBold,
+			Text = item.priceRobux and item.priceRobux > 0 and (tostring(item.priceRobux) .. " R$") or "LOCK",
+			TextColor3 = PALETTE.Cream,
+			TextSize = 10,
+			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 2),
+				PaddingBottom = UDim.new(0, 2),
+				PaddingLeft = UDim.new(0, 6),
+				PaddingRight = UDim.new(0, 6),
+			}),
+		}) or nil,
+		Count = item and not lockedSlot and (item.quantity or 0) > 1 and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			AutomaticSize = Enum.AutomaticSize.XY,
 			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
@@ -1012,7 +1037,7 @@ local function hotbarSlot(props)
 			Text = tostring(item.quantity),
 			TextColor3 = PALETTE.Cream,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4,
+			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -1584,10 +1609,67 @@ local function searchGlyph()
 	})
 end
 
+local function lockGlyph(accent, zIndex)
+	accent = accent or PALETTE.Steel
+	zIndex = zIndex or 3
+
+	return e("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(44, 52),
+		ZIndex = zIndex,
+	}, {
+		Shackle = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(22, 1),
+			Size = UDim2.fromOffset(28, 30),
+			ZIndex = zIndex,
+		}, {
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Thickness = 5,
+				Transparency = 0.04,
+			}),
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 14),
+			}),
+		}),
+		Body = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundColor3 = accent,
+			BackgroundTransparency = 0.02,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0.5, 0, 1, -3),
+			Size = UDim2.fromOffset(38, 31),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 8),
+			}),
+			Keyhole = e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				BackgroundColor3 = Color3.fromRGB(22, 26, 34),
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(0.5, 0.54),
+				Size = UDim2.fromOffset(8, 15),
+				ZIndex = zIndex + 2,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 999),
+				}),
+			}),
+		}),
+	})
+end
+
 local function manifestTile(props)
 	local item = props.item or {}
 	local accent = item.accentColor or PALETTE.Cyan
 	local isEquipped = item.isEquipped == true
+	local isLockedSlot = item.lockedSlot == true
+	local isEmptySlot = item.emptySlot == true
 	local interactive = item.interactive == true
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(interactive)
 	local heldHover = hovered
@@ -1611,15 +1693,17 @@ local function manifestTile(props)
 		end or nil,
 	}, handlers)
 
-	local previewChild = renderItemPreview(item, {
-		position = UDim2.fromScale(0.5, 0.5),
-		size = UDim2.fromOffset(74, 74),
-		zIndex = 3,
-		fallbackFont = Enum.Font.GothamBold,
-		fallbackTextColor = PALETTE.Cream,
-		fallbackTextSize = 20,
-		fallbackSize = UDim2.new(1, -10, 1, -10),
-	})
+	local previewChild = if isLockedSlot
+		then lockGlyph(accent, 3)
+		else renderItemPreview(item, {
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromOffset(74, 74),
+			zIndex = 3,
+			fallbackFont = Enum.Font.GothamBold,
+			fallbackTextColor = PALETTE.Cream,
+			fallbackTextSize = isEmptySlot and 34 or 20,
+			fallbackSize = UDim2.new(1, -10, 1, -10),
+		})
 
 	return e("TextButton", tileProps, {
 		Scale = e("UIScale", {
@@ -1751,25 +1835,27 @@ local function manifestTile(props)
 			Position = UDim2.fromOffset(10, 101),
 			Size = UDim2.new(1, -20, 0, 20),
 			Text = item.displayName or "",
-			TextColor3 = isEquipped and PALETTE.Text or PALETTE.Cream,
+			TextColor3 = (isEquipped and PALETTE.Text) or (isLockedSlot and Color3.fromRGB(224, 229, 238)) or PALETTE.Cream,
 			TextSize = 12,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextWrapped = false,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 3,
 		}),
-		Status = isEquipped and e("TextLabel", {
+		Status = (isEquipped or isLockedSlot or isEmptySlot) and e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(10, 118),
 			Size = UDim2.new(1, -54, 0, 12),
-			Text = "Currently in your hand",
-			TextColor3 = accent:Lerp(PALETTE.Cream, 0.35),
+			Text = isEquipped and "Currently in your hand"
+				or (isLockedSlot and tostring(item.footer or "Locked"))
+				or "Available",
+			TextColor3 = isLockedSlot and PALETTE.Gold or accent:Lerp(PALETTE.Cream, 0.35),
 			TextSize = 8,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 4,
 		}) or nil,
-		Quantity = e("TextLabel", {
+		Quantity = (not isLockedSlot and not isEmptySlot) and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Cartoon,
@@ -1780,7 +1866,7 @@ local function manifestTile(props)
 			TextSize = 20,
 			TextStrokeTransparency = 0.35,
 			ZIndex = 4,
-		}),
+		}) or nil,
 	})
 end
 
@@ -2357,6 +2443,8 @@ end
 local function App(props)
 	local summary = props.summary or {}
 	local titles = props.titles or {}
+	local brainrotQuickSlotsUnlocked = summary.brainrotQuickSlotsUnlocked or 0
+	local brainrotQuickSlotsMax = summary.brainrotQuickSlotsMax or brainrotQuickSlotsUnlocked
 	local activeView = props.activeView or "Inventory"
 	local showingCaptainLog = activeView == "CaptainLog"
 	local showingTitles = activeView == "Titles"
@@ -2404,8 +2492,9 @@ local function App(props)
 		BottomBar = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundTransparency = 1,
+			ClipsDescendants = false,
 			Position = UDim2.new(0.5, 0, 1, -20),
-			Size = UDim2.fromOffset(bottomBarWidth, 92),
+			Size = UDim2.fromOffset(bottomBarWidth, 104),
 			ZIndex = bottomBarZIndex,
 		}, {
 			Toggle = e(inventoryToggleButton, {
@@ -2421,8 +2510,9 @@ local function App(props)
 			}),
 			Hotbar = e("Frame", {
 				BackgroundTransparency = 1,
+				ClipsDescendants = false,
 				Position = UDim2.fromOffset(hotbarOffsetX, 0),
-				Size = UDim2.fromOffset(hotbarWidth, 84),
+				Size = UDim2.fromOffset(hotbarWidth, 96),
 				ZIndex = bottomBarZIndex,
 			}, {
 				Label = e("TextLabel", {
@@ -2430,7 +2520,7 @@ local function App(props)
 					Font = Enum.Font.GothamBold,
 					Position = UDim2.fromOffset(0, 0),
 					Size = UDim2.new(1, 0, 0, 14),
-					Text = "Quick Equip",
+					Text = string.format("Quick Equip Slots: %d / %d", brainrotQuickSlotsUnlocked, brainrotQuickSlotsMax),
 					TextColor3 = PALETTE.Steel,
 					TextSize = 11,
 					TextXAlignment = Enum.TextXAlignment.Left,
@@ -2441,11 +2531,12 @@ local function App(props)
 					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
 					CanvasSize = UDim2.new(),
-					Position = UDim2.fromOffset(0, 20),
+					ClipsDescendants = false,
+					Position = UDim2.fromOffset(0, 18),
 					ScrollBarImageTransparency = 1,
 					ScrollBarThickness = 0,
 					ScrollingDirection = Enum.ScrollingDirection.X,
-					Size = UDim2.new(1, 0, 0, 64),
+					Size = UDim2.new(1, 0, 0, 78),
 					ZIndex = bottomBarZIndex + 1,
 				}, (function()
 					local slotChildren = {
@@ -2454,6 +2545,10 @@ local function App(props)
 							Padding = UDim.new(0, hotbarSlotGap),
 							SortOrder = Enum.SortOrder.LayoutOrder,
 							VerticalAlignment = Enum.VerticalAlignment.Center,
+						}),
+						Padding = e("UIPadding", {
+							PaddingBottom = UDim.new(0, 7),
+							PaddingTop = UDim.new(0, 7),
 						}),
 					}
 
@@ -2590,6 +2685,11 @@ local function App(props)
 				{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
 				{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
 				{ label = "Beli", value = formatNumber(summary.doubloons or 0) .. " Beli", valueColor3 = PALETTE.Gold },
+				{
+					label = "Quick Equip Slots",
+					value = string.format("%d / %d", brainrotQuickSlotsUnlocked, brainrotQuickSlotsMax),
+					valueColor3 = PALETTE.Sea,
+				},
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
 				{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },

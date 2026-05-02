@@ -9,6 +9,7 @@ local MAX_INCOME_ON_JOIN = 1e16
 
 local BrainrotFoodProgression = require(ServerScriptService.Modules:WaitForChild("BrainrotFoodProgression"))
 local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local BrainrotQuickSlotService = require(ServerScriptService.Modules:WaitForChild("BrainrotQuickSlotService"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
@@ -1858,7 +1859,6 @@ local function bindStandPrompt(player, plot, standModel)
 					standDebug("steal rejected actor=%s stand=%s reason=empty_stand", plr.Name, standName)
 					return
 				end
-
 				local now = os.clock()
 				local last = stealPromptDebounce[plr]
 				if last and (now - last) < 1 then
@@ -1867,6 +1867,10 @@ local function bindStandPrompt(player, plot, standModel)
 				stealPromptDebounce[plr] = now
 
 				local productId = getStealProductIdForBrainrot(brainrotToSteal)
+				if not BrainrotQuickSlotService.CanGainOrNotify(plr, 1, "StealPrompt:" .. tostring(standName)) then
+					standDebug("steal rejected actor=%s stand=%s brainrot=%s reason=quick_slots_full", plr.Name, standName, tostring(brainrotToSteal))
+					return
+				end
 
 				plr:SetAttribute("StealOwnerUserId", ownerUserId)
 				plr:SetAttribute("StealStandName", standName)
@@ -1892,6 +1896,10 @@ local function bindStandPrompt(player, plot, standModel)
 			local current = getPlayerStandBrainrotName(plr, standName)
 			if current ~= "" then
 				local releasedInstanceId, releasedInstance = BrainrotInstanceService.ReleaseStandInstance(plr, standName)
+				if not releasedInstance then
+					standDebug("pickup from stand blocked player=%s stand=%s reason=no_instance_available", plr.Name, standName)
+					return
+				end
 				local storageName = releasedInstance and releasedInstance.StorageName or current
 				standDebug("pickup from stand player=%s stand=%s savedName=%s storageName=%s instanceId=%s", plr.Name, standName, tostring(current), tostring(storageName), tostring(releasedInstanceId))
 				clearPlacedStandIncome(plr, standName)
@@ -1912,6 +1920,13 @@ local function bindStandPrompt(player, plot, standModel)
 			local qty = getInventoryQuantity(plr, toolName)
 			if qty < 1 then
 				standDebug("place rejected player=%s stand=%s tool=%s reason=no_inventory quantity=%s", plr.Name, standName, tostring(toolName), tostring(qty))
+				return
+			end
+
+			local quickSlotUnlocked = BrainrotQuickSlotService.CanEquipBrainrot(plr, toolName)
+			if not quickSlotUnlocked then
+				BrainrotQuickSlotService.PromptUnlockForBrainrot(plr, toolName)
+				standDebug("place rejected player=%s stand=%s tool=%s reason=quick_slot_locked", plr.Name, standName, tostring(toolName))
 				return
 			end
 

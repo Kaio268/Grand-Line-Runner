@@ -54,6 +54,11 @@ local RECENT_COMMAND_WINDOW = 0.4
 local WIPE_CONFIRM_WINDOW = 20
 local SPEED_STAT_PATH = "HiddenLeaderstats.Speed"
 local DEFAULT_SPEED_STAT = tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1
+local HITBOX_VISUAL_ATTRIBUTE = "ShowAbilityHitboxes"
+local HITBOX_POPUP_ON_COLOR = Color3.fromRGB(105, 225, 255)
+local HITBOX_POPUP_OFF_COLOR = Color3.fromRGB(220, 220, 220)
+local HITBOX_POPUP_ERROR_COLOR = Color3.fromRGB(255, 85, 85)
+local HITBOX_POPUP_STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 
 local recentCommands = {}
 local pendingWipeConfirmations = {}
@@ -99,6 +104,7 @@ local boostAliases = {
 local ADMIN_COMMAND_NAMES = {
 	fruit = true,
 	money = true,
+	hitbox = true,
 	speed = true,
 	setspeed = true,
 	boost = true,
@@ -436,6 +442,58 @@ local function processFruitCommand(player, argumentText)
 			tostring(response and (response.error or response.message) or "unknown_error")
 		))
 	end
+end
+
+local function sendHitboxPopup(player, text, color, isError)
+	if player and player.Parent == Players then
+		PopUpModule:Server_SendPopUp(
+			player,
+			text,
+			color or HITBOX_POPUP_OFF_COLOR,
+			HITBOX_POPUP_STROKE_COLOR,
+			3,
+			isError == true
+		)
+	end
+end
+
+local function processHitboxCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	local nextState
+
+	if normalizedArgument == "" or normalizedArgument == "toggle" then
+		nextState = player:GetAttribute(HITBOX_VISUAL_ATTRIBUTE) ~= true
+	elseif normalizedArgument == "on" or normalizedArgument == "true" or normalizedArgument == "1" then
+		nextState = true
+	elseif normalizedArgument == "off" or normalizedArgument == "false" or normalizedArgument == "0" then
+		nextState = false
+	else
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /hitbox argument '%s' from %s (expected 'on' or 'off')",
+			normalizedArgument,
+			player.Name
+		))
+		sendHitboxPopup(player, "Usage: /hitbox on or /hitbox off", HITBOX_POPUP_ERROR_COLOR, true)
+		return
+	end
+
+	player:SetAttribute(HITBOX_VISUAL_ATTRIBUTE, nextState)
+	sendHitboxPopup(
+		player,
+		nextState and "Ability hitboxes: ON" or "Ability hitboxes: OFF",
+		nextState and HITBOX_POPUP_ON_COLOR or HITBOX_POPUP_OFF_COLOR,
+		false
+	)
+
+	print(string.format(
+		"[DevFruitDevCommands] %s set client ability hitbox visuals to %s",
+		player.Name,
+		nextState and "on" or "off"
+	))
 end
 
 local function parseSignedAmount(text)
@@ -1508,6 +1566,12 @@ local function handleChatCommand(player, rawText, source)
 		return
 	end
 
+	if commandName == "hitbox" then
+		processHitboxCommand(player, argumentText)
+		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		return
+	end
+
 	if commandName == "boost" then
 		processBoostCommand(player, argumentText)
 		AdminPermissions.LogCommandExecuted(player, commandName, source)
@@ -2032,7 +2096,39 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:WipePlayerDevCommand")
 	end)
 
-	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=13")
+	local hitboxCommand = commandsFolder:FindFirstChild("HitboxDevCommand")
+	if hitboxCommand and not hitboxCommand:IsA("TextChatCommand") then
+		hitboxCommand:Destroy()
+		hitboxCommand = nil
+	end
+
+	if not hitboxCommand then
+		hitboxCommand = Instance.new("TextChatCommand")
+		hitboxCommand.Name = "HitboxDevCommand"
+		hitboxCommand.PrimaryAlias = "/hitbox"
+		hitboxCommand.SecondaryAlias = "/hitbox"
+		hitboxCommand.AutocompleteVisible = false
+		hitboxCommand.Parent = commandsFolder
+	end
+
+	hitboxCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=HitboxDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 7) == "/hitbox" or normalizedText:sub(1, 8) == "/ hitbox" then
+			handleChatCommand(player, normalizedText, "TextChatCommand:HitboxDevCommand")
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/hitbox " .. normalizedText) or "/hitbox"
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:HitboxDevCommand")
+	end)
+
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=14")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do

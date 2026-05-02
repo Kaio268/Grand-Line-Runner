@@ -9,6 +9,7 @@ local Configs = Modules:WaitForChild("Configs")
 local BrainrotsCfg = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
 local BrainrotInstanceService = require(script.Parent:WaitForChild("BrainrotInstanceService"))
+local BrainrotQuickSlotService = require(script.Parent:WaitForChild("BrainrotQuickSlotService"))
 
 local function validName(name)
 	if type(name) ~= "string" then return nil end
@@ -106,6 +107,10 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
 
+	if not BrainrotQuickSlotService.CanGainOrNotify(plr, n, "AddBrainrot:" .. brainrotName) then
+		return false
+	end
+
 	BrainrotInstanceService.EnsureInventoryMetadata(plr, brainrotName, {
 		StorageName = brainrotName,
 		BaseName = baseName,
@@ -127,6 +132,7 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 		DiamondRender = diamondRender,
 		Level = 1,
 		CurrentXP = 0,
+		_QuickSlotCapacityReserved = true,
 	})
 
 	return true

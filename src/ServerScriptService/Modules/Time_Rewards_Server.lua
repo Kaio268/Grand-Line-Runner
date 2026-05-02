@@ -2,9 +2,55 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TimeRewardsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("TimeRewards")
-local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
-local DataManager = require(script.Parent.Parent.Data.DataManager)
-local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+
+local GIFT_DEBUG = false
+local GIFT_SYNC_DEBUG = false
+local GIFT_CLAIM_DEBUG = true
+local AUTHORITATIVE_TIME_REWARD_REMOTE_ATTRIBUTE = "TimeRewardsAuthoritativeRemote"
+
+local function giftLog(tag: string, ...)
+	if GIFT_DEBUG then
+		print(tag, ...)
+	end
+end
+
+local function giftClaimLog(...)
+	if GIFT_CLAIM_DEBUG then
+		print("[GIFT][CLAIM][SERVER]", ...)
+	end
+end
+
+local function giftSyncLog(...)
+	if GIFT_SYNC_DEBUG then
+		print("[GIFT][SYNC]", ...)
+	end
+end
+
+local function giftError(...)
+	warn("[GIFT][ERROR]", ...)
+end
+
+local function describeInstance(instance: Instance?): string
+	if not instance then
+		return "nil"
+	end
+
+	return instance:GetFullName() .. " [" .. instance.ClassName .. "]"
+end
+
+local function getNamedDescendantSummary(root: Instance, childName: string): (number, string)
+	local count = 0
+	local paths = {}
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant.Name == childName then
+			count += 1
+			table.insert(paths, describeInstance(descendant))
+		end
+	end
+
+	return count, table.concat(paths, " | ")
+end
 
 local function getOrCreateChild(parent: Instance, className: string, childName: string)
 	local child = parent:FindFirstChild(childName)
@@ -21,9 +67,79 @@ local function getOrCreateChild(parent: Instance, className: string, childName: 
 	return child
 end
 
-local Remote = getOrCreateChild(TimeRewardsFolder, "RemoteEvent", "TimeRewardEvent")
+local function getAuthoritativeTimeRewardRemote(parent: Instance): RemoteEvent
+	local namedChildren = {}
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.Name == "TimeRewardEvent" then
+			table.insert(namedChildren, child)
+		end
+	end
+
+	local authoritativeRemote = nil
+	for _, child in ipairs(namedChildren) do
+		if child:IsA("RemoteEvent") and child:GetAttribute(AUTHORITATIVE_TIME_REWARD_REMOTE_ATTRIBUTE) == true then
+			authoritativeRemote = child
+			break
+		end
+	end
+
+	if not authoritativeRemote then
+		for _, child in ipairs(namedChildren) do
+			if child:IsA("RemoteEvent") then
+				authoritativeRemote = child
+				break
+			end
+		end
+	end
+
+	if not authoritativeRemote then
+		authoritativeRemote = Instance.new("RemoteEvent")
+		authoritativeRemote.Name = "TimeRewardEvent"
+		authoritativeRemote.Parent = parent
+		giftClaimLog("authoritativeRemoteCreated", "remote", describeInstance(authoritativeRemote))
+	end
+
+	authoritativeRemote:SetAttribute(AUTHORITATIVE_TIME_REWARD_REMOTE_ATTRIBUTE, true)
+
+	local removedCount = 0
+	for _, child in ipairs(namedChildren) do
+		if child ~= authoritativeRemote then
+			removedCount += 1
+			giftClaimLog(
+				"duplicateRemoteRemoved",
+				"kept",
+				describeInstance(authoritativeRemote),
+				"removed",
+				describeInstance(child)
+			)
+			child:Destroy()
+		end
+	end
+
+	local countAfterCleanup, pathsAfterCleanup = getNamedDescendantSummary(ReplicatedStorage, "TimeRewardEvent")
+	giftClaimLog(
+		"authoritativeRemoteSelected",
+		"kept",
+		describeInstance(authoritativeRemote),
+		"initialTimeRewardEventCount",
+		#namedChildren,
+		"removedCount",
+		removedCount,
+		"timeRewardEventCountAfterCleanup",
+		countAfterCleanup,
+		"timeRewardEventPathsAfterCleanup",
+		pathsAfterCleanup
+	)
+
+	return authoritativeRemote
+end
+
+local Remote = getAuthoritativeTimeRewardRemote(TimeRewardsFolder)
 local SnapshotRequest = getOrCreateChild(TimeRewardsFolder, "RemoteFunction", "TimeRewardSnapshotRequest")
 local InstantRewardsEvent = getOrCreateChild(TimeRewardsFolder, "BindableEvent", "TriggerInstantRewards")
+local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
+local DataManager = require(script.Parent.Parent.Data.DataManager)
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
 local CYCLE_START_PATH = TIME_REWARDS_ROOT_PATH .. ".CycleStartPlayTime"
@@ -47,25 +163,6 @@ local POTION_REWARD_KEYS = {
 	x15WalkSpeedTime = true,
 }
 
-local GIFT_DEBUG = false
-local GIFT_SYNC_DEBUG = false
-
-local function giftLog(tag: string, ...)
-	if GIFT_DEBUG then
-		print(tag, ...)
-	end
-end
-
-local function giftSyncLog(...)
-	if GIFT_SYNC_DEBUG then
-		print("[GIFT][SYNC]", ...)
-	end
-end
-
-local function giftError(...)
-	warn("[GIFT][ERROR]", ...)
-end
-
 for id in pairs(RewardsConfig) do
 	table.insert(rewardIds, id)
 end
@@ -73,6 +170,32 @@ end
 table.sort(rewardIds)
 
 local TOTAL_REWARDS = #rewardIds
+
+local timeRewardEventCount, timeRewardEventPaths = getNamedDescendantSummary(ReplicatedStorage, "TimeRewardEvent")
+
+giftClaimLog(
+	"serverModuleInit",
+	"module",
+	script:GetFullName(),
+	"timeRewardsFolder",
+	TimeRewardsFolder:GetFullName(),
+	"remote",
+	Remote:GetFullName(),
+	"remoteClass",
+	Remote.ClassName,
+	"snapshot",
+	SnapshotRequest:GetFullName(),
+	"snapshotClass",
+	SnapshotRequest.ClassName,
+	"instant",
+	InstantRewardsEvent:GetFullName(),
+	"instantClass",
+	InstantRewardsEvent.ClassName,
+	"timeRewardEventCount",
+	timeRewardEventCount,
+	"timeRewardEventPaths",
+	timeRewardEventPaths
+)
 
 local function getClaimedCountFromMap(rawClaimedRewards): number
 	local count = 0
@@ -484,50 +607,77 @@ local function buildSnapshotResponse(player: Player)
 	}
 end
 
-local function canProcessClaimRequest(player: Player): boolean
+local function canProcessClaimRequest(player: Player): (boolean, string?)
 	if claimLocks[player] then
-		return false
+		return false, "claim_locked"
 	end
 
 	local now = os.clock()
 	local previousRequestAt = lastClaimRequestAt[player]
 	if previousRequestAt and (now - previousRequestAt) < CLAIM_REQUEST_THROTTLE then
-		return false
+		return false, "claim_throttled"
 	end
 
 	lastClaimRequestAt[player] = now
-	return true
+	return true, nil
 end
 
 local function claimReward(player: Player, rewardId: number)
-	if not canProcessClaimRequest(player) then
+	giftClaimLog(
+		"claimRequestReceived",
+		"player",
+		player.Name,
+		"rewardId",
+		rewardId,
+		"dataReady",
+		tostring(DataManager:IsReady(player)),
+		"playerDataReady",
+		tostring(player:GetAttribute("PlayerDataReady") == true)
+	)
+
+	local canProcess, processReason = canProcessClaimRequest(player)
+	if not canProcess then
+		giftClaimLog("claimRejected", "player", player.Name, "rewardId", rewardId, "reason", processReason or "cannot_process")
 		return
 	end
 
 	if not waitForDataReady(player, DATA_READY_TIMEOUT) then
 		giftError("Timed out waiting for time rewards data during claim for", player.Name, rewardId)
+		giftClaimLog("claimRejected", "player", player.Name, "rewardId", rewardId, "reason", "data_timeout")
 		return
 	end
 
 	local config = RewardsConfig[rewardId]
 	if not config then
+		giftClaimLog("claimRejected", "player", player.Name, "rewardId", rewardId, "reason", "invalid_reward")
 		return
 	end
 
-	local state, currentPlayTime = ensureTimeRewardState(player)
+	local state, currentPlayTime, stateReason = ensureTimeRewardState(player)
 	if not state then
 		giftError("Missing time rewards state during claim for", player.Name, rewardId)
+		giftClaimLog(
+			"claimRejected",
+			"player",
+			player.Name,
+			"rewardId",
+			rewardId,
+			"reason",
+			stateReason or "missing_state"
+		)
 		return
 	end
 
 	if isRewardClaimed(state, rewardId) then
 		giftLog("[GIFT][DATA]", "player", player.Name, "action=alreadyClaimed", "rewardId", rewardId)
+		giftClaimLog("claimRejected", "player", player.Name, "rewardId", rewardId, "reason", "already_claimed")
 		Remote:FireClient(player, "alreadyClaimed", rewardId)
 		return
 	end
 
 	local elapsedPlayTime = getElapsedPlayTime(state, currentPlayTime)
 	if elapsedPlayTime < config.Time then
+		local remaining = config.Time - elapsedPlayTime
 		giftLog(
 			"[GIFT][DATA]",
 			"player",
@@ -536,9 +686,24 @@ local function claimReward(player: Player, rewardId: number)
 			"rewardId",
 			rewardId,
 			"remaining",
-			config.Time - elapsedPlayTime
+			remaining
 		)
-		Remote:FireClient(player, "notReady", rewardId, config.Time - elapsedPlayTime)
+		giftClaimLog(
+			"claimRejected",
+			"player",
+			player.Name,
+			"rewardId",
+			rewardId,
+			"reason",
+			"not_ready",
+			"remaining",
+			remaining,
+			"elapsedPlayTime",
+			elapsedPlayTime,
+			"requiredTime",
+			config.Time
+		)
+		Remote:FireClient(player, "notReady", rewardId, remaining)
 		return
 	end
 
@@ -556,6 +721,17 @@ local function claimReward(player: Player, rewardId: number)
 		state.LastClaimPlayTime = previousLastClaimPlayTime
 		claimLocks[player] = nil
 		giftError("Failed to persist claim state", player.Name, rewardId, persistReason)
+		giftClaimLog(
+			"claimRejected",
+			"player",
+			player.Name,
+			"rewardId",
+			rewardId,
+			"reason",
+			"persist_failed",
+			"detail",
+			tostring(persistReason)
+		)
 		return
 	end
 
@@ -566,6 +742,17 @@ local function claimReward(player: Player, rewardId: number)
 		persistTimeRewardState(player, state)
 		claimLocks[player] = nil
 		giftError("Failed to grant time reward", player.Name, rewardId, grantReason)
+		giftClaimLog(
+			"claimRejected",
+			"player",
+			player.Name,
+			"rewardId",
+			rewardId,
+			"reason",
+			"grant_failed",
+			"detail",
+			tostring(grantReason)
+		)
 		return
 	end
 
@@ -580,6 +767,17 @@ local function claimReward(player: Player, rewardId: number)
 		)
 	)
 	Remote:FireClient(player, "claimed", rewardId, rewardName, amount)
+	giftClaimLog(
+		"claimGranted",
+		"player",
+		player.Name,
+		"rewardId",
+		rewardId,
+		"rewardName",
+		tostring(rewardName),
+		"amount",
+		tostring(amount)
+	)
 
 	if getClaimedCount(state) >= TOTAL_REWARDS then
 		resetCycleState(state, currentPlayTime)
@@ -666,21 +864,86 @@ Players.PlayerRemoving:Connect(function(player)
 	playTimeSessions[player] = nil
 end)
 
-Remote.OnServerEvent:Connect(function(player, rewardId, source)
+local claimRemoteConnection
+
+claimRemoteConnection = Remote.OnServerEvent:Connect(function(player, rewardId, source)
+	local playerName = if player then player.Name else "nil"
+
+	giftClaimLog(
+		"rawRemoteReceived",
+		"player",
+		playerName,
+		"arg1",
+		tostring(rewardId),
+		"arg1Type",
+		typeof(rewardId),
+		"arg2",
+		tostring(source),
+		"arg2Type",
+		typeof(source),
+		"remote",
+		Remote:GetFullName()
+	)
+
+	giftClaimLog(
+		"remoteReceived",
+		"player",
+		playerName,
+		"rewardId",
+		tostring(rewardId),
+		"rewardIdType",
+		typeof(rewardId),
+		"source",
+		tostring(source),
+		"remote",
+		Remote:GetFullName()
+	)
+
 	if typeof(rewardId) == "string" then
 		if rewardId == "requestSync" then
 			requestSyncState(player, source)
+		else
+			giftClaimLog(
+				"claimRejected",
+				"player",
+				player.Name,
+				"rewardId",
+				tostring(rewardId),
+				"reason",
+				"string_payload_not_claim"
+			)
 		end
 		return
 	end
 
 	rewardId = tonumber(rewardId)
 	if not rewardId or rewardId ~= math.floor(rewardId) then
+		giftClaimLog(
+			"claimRejected",
+			"player",
+			player.Name,
+			"rewardId",
+			tostring(rewardId),
+			"reason",
+			"invalid_payload"
+		)
 		return
 	end
 
 	claimReward(player, rewardId)
 end)
+
+giftClaimLog(
+	"remoteConnectionMade",
+	"module",
+	script:GetFullName(),
+	"remote",
+	Remote:GetFullName(),
+	"remoteClass",
+	Remote.ClassName,
+	"connected",
+	tostring(claimRemoteConnection ~= nil)
+)
 
 SnapshotRequest.OnServerInvoke = function(player)
 	local ok, response = pcall(buildSnapshotResponse, player)

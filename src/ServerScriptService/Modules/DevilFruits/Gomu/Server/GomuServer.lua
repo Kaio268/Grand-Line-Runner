@@ -1,3 +1,4 @@
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -20,6 +21,7 @@ local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_FALLBACK_DIRECTION = Vector3.new(0, 0, -1)
 local DEFAULT_LAUNCH_DISTANCE = 20
 local DEFAULT_LAUNCH_DURATION = 0.35
+local DEFAULT_ARM_RESTORE_FALLBACK_TIME = 0.85
 local MIN_LAUNCH_DURATION = 0.05
 local MIN_EFFECTIVE_LAUNCH_DISTANCE = 0.05
 local MIN_HORIZONTAL_LAUNCH_SPEED = 145
@@ -308,6 +310,14 @@ local function getReleaseFallbackTime(animationConfig)
 	return math.max(0, tonumber(animationConfig.ReleaseFallbackTime) or 0)
 end
 
+local function getArmRestoreFallbackTime(animationConfig)
+	if type(animationConfig) ~= "table" then
+		return DEFAULT_ARM_RESTORE_FALLBACK_TIME
+	end
+
+	return math.max(0, tonumber(animationConfig.ArmRestoreFallbackTime) or DEFAULT_ARM_RESTORE_FALLBACK_TIME)
+end
+
 local function restoreNetworkOwner(rootPart, owner)
 	if not rootPart or not rootPart.Parent or not owner or not owner.Parent then
 		return
@@ -535,6 +545,7 @@ function GomuServer.RubberLaunch(context)
 	local facingDirection = lookDirection or direction or getFallbackDirection(rootPart)
 	local launchDuration = math.max(MIN_LAUNCH_DURATION, tonumber(abilityConfig.LaunchDuration) or DEFAULT_LAUNCH_DURATION)
 	local launchOwner = context.Player
+	local launchToken = HttpService:GenerateGUID(false)
 	if launchOwner and activeLaunchCleanupByPlayer[launchOwner] then
 		activeLaunchCleanupByPlayer[launchOwner]()
 		activeLaunchCleanupByPlayer[launchOwner] = nil
@@ -543,7 +554,47 @@ function GomuServer.RubberLaunch(context)
 	local facingLockDuration = getReleaseFallbackTime(animationConfig)
 		+ math.max(getMomentumSustainDuration(launchDuration), NETWORK_OWNER_RELEASE_DELAY)
 	local releaseFacingLock = startFacingLock(humanoid, rootPart, facingDirection, facingLockDuration)
+	local armRestoreEmitted = false
+	local function emitArmRestore(reason, markerName)
+		if armRestoreEmitted then
+			return
+		end
+
+		armRestoreEmitted = true
+		context.EmitEffect("RubberLaunch", {
+			Phase = "RestoreArms",
+			Token = launchToken,
+			MarkerName = markerName,
+			RestoreReason = reason or "unknown",
+			LookDirection = facingDirection,
+			Direction = facingDirection,
+		})
+	end
+
+	context.EmitEffect("RubberLaunch", {
+		Phase = "Start",
+		Token = launchToken,
+		ArmRestoreFallbackTime = getArmRestoreFallbackTime(animationConfig),
+		LookDirection = facingDirection,
+		Direction = facingDirection,
+	})
 	local animationState = GomuAnimationController.PlayRubberLaunchAnimation(character, animationConfig)
+	GomuAnimationController.BindRubberLaunchArmEvents(animationState, {
+		OnStretch = function(markerInfo)
+			context.EmitEffect("RubberLaunch", {
+				Phase = "StretchArms",
+				Token = launchToken,
+				MarkerName = markerInfo and markerInfo.MarkerName or nil,
+				ArmSize = markerInfo and markerInfo.ArmStretchSize or nil,
+				ArmRestoreFallbackTime = markerInfo and markerInfo.ArmRestoreFallbackTime or getArmRestoreFallbackTime(animationConfig),
+				LookDirection = facingDirection,
+				Direction = facingDirection,
+			})
+		end,
+		OnRestore = function(markerInfo)
+			emitArmRestore(markerInfo and markerInfo.Reason or "unknown", markerInfo and markerInfo.MarkerName or nil)
+		end,
+	})
 
 	pcall(function()
 		rootPart:SetNetworkOwner(nil)
@@ -552,6 +603,7 @@ function GomuServer.RubberLaunch(context)
 	local releaseWindupMovementLock = startWindupMovementLock(humanoid, rootPart)
 	GomuAnimationController.WaitForRubberLaunchRelease(animationState)
 	releaseWindupMovementLock()
+	emitArmRestore("before_launch")
 
 	local startPosition = rootPart.Position
 	if not isLaunchContextActive(character, humanoid, rootPart) then
@@ -570,6 +622,7 @@ function GomuServer.RubberLaunch(context)
 			EndPosition = startPosition,
 			TargetPosition = targetPosition,
 			TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
+			Token = launchToken,
 			Interrupted = true,
 		}
 	end
@@ -593,6 +646,7 @@ function GomuServer.RubberLaunch(context)
 			EndPosition = startPosition,
 			TargetPosition = targetPosition,
 			TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
+			Token = launchToken,
 		}
 	end
 
@@ -634,6 +688,7 @@ function GomuServer.RubberLaunch(context)
 		EndPosition = startPosition + (direction * launchDistance),
 		TargetPosition = targetPosition,
 		TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
+		Token = launchToken,
 	}
 end
 

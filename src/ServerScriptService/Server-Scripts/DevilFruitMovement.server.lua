@@ -28,7 +28,12 @@ local function getJumpHeightMultiplier(player)
 end
 
 local function getJumpPowerMultiplier(player)
-	return math.sqrt(math.max(getJumpHeightMultiplier(player), 0.01))
+	local jumpHeightMultiplier = getJumpHeightMultiplier(player)
+	if jumpHeightMultiplier <= 0 then
+		return 0
+	end
+
+	return math.sqrt(jumpHeightMultiplier)
 end
 
 local function hookCharacter(player, character)

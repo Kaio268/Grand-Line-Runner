@@ -7,6 +7,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local SharedFolder = DevilFruits:WaitForChild("Shared")
+local AbilityTargeting = require(SharedFolder:WaitForChild("AbilityTargeting"))
 local Registry = require(SharedFolder:WaitForChild("Registry"))
 local RubberLaunchMath = require(
 	DevilFruits:WaitForChild("Gomu"):WaitForChild("Shared"):WaitForChild("RubberLaunchMath")
@@ -36,18 +37,36 @@ local GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME = 0.08
 local GOMU_LAUNCH_VFX_CLEANUP_GRACE = 0.35
 local GOMU_LAUNCH_VFX_MAX_DURATION = 6
 local GOMU_LAUNCH_FX_PART_FALLBACK_SIZE = Vector3.new(5, 5, 5)
+local GOMU_ARM_STRETCH_SIZE = Vector3.new(1, 27.066, 1)
+local GOMU_ARM_RESTORE_TIMEOUT = 0.85
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local TARGET_RANGE_PADDING = 0.5
 local AUTO_LATCH_TARGET_AIM_OFFSET = Vector3.new(0, 1.5, 0)
 local AUTO_LATCH_ALIGNMENT_SCORE_WEIGHT = 100
 local AUTO_LATCH_LATERAL_SCORE_WEIGHT = 2
 local AUTO_LATCH_PLANAR_SCORE_WEIGHT = 0.1
+local WORLD_UP = Vector3.yAxis
 
 local AIRBORNE_HUMANOID_STATES = {
 	[Enum.HumanoidStateType.Freefall] = true,
 	[Enum.HumanoidStateType.FallingDown] = true,
 	[Enum.HumanoidStateType.Flying] = true,
 	[Enum.HumanoidStateType.Jumping] = true,
+}
+
+local RUBBER_LAUNCH_ARM_PART_NAMES = { "Left Arm", "Right Arm" }
+local RUBBER_LAUNCH_ARM_START_PHASES = {
+	Start = true,
+	ArmStart = true,
+}
+local RUBBER_LAUNCH_ARM_STRETCH_PHASES = {
+	Stretch = true,
+	StretchArms = true,
+}
+local RUBBER_LAUNCH_ARM_RESTORE_PHASES = {
+	Unstretch = true,
+	Restore = true,
+	RestoreArms = true,
 }
 
 local function getCurrentCamera()
@@ -76,9 +95,30 @@ local function getPlayerHumanoid(targetPlayer)
 	return character and character:FindFirstChildOfClass("Humanoid") or nil
 end
 
+local function getPlayerCharacter(targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	return targetPlayer.Character
+end
+
 local function getPlanarDistance(a, b)
 	local delta = a - b
 	return Vector3.new(delta.X, 0, delta.Z).Magnitude
+end
+
+local function getPlanarUnitOrNil(vector)
+	if typeof(vector) ~= "Vector3" then
+		return nil
+	end
+
+	local planarVector = Vector3.new(vector.X, 0, vector.Z)
+	if planarVector.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return nil
+	end
+
+	return planarVector.Unit
 end
 
 local function getRubberLaunchFxAsset()
@@ -294,6 +334,354 @@ local function clearLaunchVfxForPlayer(self, targetPlayer)
 	cleanupLaunchVfxState(state)
 end
 
+local function getRubberLaunchToken(payload)
+	if typeof(payload) ~= "table" then
+		return ""
+	end
+
+	local token = payload.Token
+	if typeof(token) == "string" and token ~= "" then
+		return token
+	end
+
+	return ""
+end
+
+local function getArmRestoreTimeout(payload)
+	if typeof(payload) ~= "table" then
+		return GOMU_ARM_RESTORE_TIMEOUT
+	end
+
+	return math.max(0.1, tonumber(payload.ArmRestoreFallbackTime) or GOMU_ARM_RESTORE_TIMEOUT)
+end
+
+local function getArmStretchSize(payload)
+	if typeof(payload) ~= "table" then
+		return GOMU_ARM_STRETCH_SIZE
+	end
+
+	local armSize = payload.ArmSize or payload.ArmStretchSize
+	if typeof(armSize) == "Vector3" then
+		return armSize
+	end
+
+	return GOMU_ARM_STRETCH_SIZE
+end
+
+local function getArmStretchDirection(character, payload)
+	if typeof(payload) == "table" then
+		local payloadDirection = getPlanarUnitOrNil(payload.LookDirection)
+			or getPlanarUnitOrNil(payload.Direction)
+			or getPlanarUnitOrNil(payload.LaunchDirection)
+		if payloadDirection then
+			return payloadDirection
+		end
+	end
+
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	return rootPart and getPlanarUnitOrNil(rootPart.CFrame.LookVector) or nil
+end
+
+local function disconnectArmStretchConnections(state)
+	for _, connection in ipairs(state.Connections or {}) do
+		if connection then
+			connection:Disconnect()
+		end
+	end
+	state.Connections = {}
+end
+
+local function disconnectArmPoseConnection(state)
+	if state.PoseConnection then
+		state.PoseConnection:Disconnect()
+		state.PoseConnection = nil
+	end
+end
+
+local function restoreArmStretchState(state)
+	if type(state) ~= "table" then
+		return
+	end
+
+	disconnectArmPoseConnection(state)
+
+	for motor, snapshot in pairs(state.OriginalMotors or {}) do
+		if motor and motor.Parent and type(snapshot) == "table" then
+			if typeof(snapshot.C0) == "CFrame" then
+				motor.C0 = snapshot.C0
+			end
+			if typeof(snapshot.C1) == "CFrame" then
+				motor.C1 = snapshot.C1
+			end
+			if typeof(snapshot.Transform) == "CFrame" then
+				motor.Transform = snapshot.Transform
+			end
+		end
+	end
+
+	for arm, originalSize in pairs(state.OriginalSizes or {}) do
+		if arm and arm.Parent and typeof(originalSize) == "Vector3" then
+			arm.Size = originalSize
+		end
+	end
+
+	disconnectArmStretchConnections(state)
+end
+
+local function restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+	if not self.activeRubberLaunchArmStretchByPlayer then
+		return false
+	end
+
+	local state = self.activeRubberLaunchArmStretchByPlayer[targetPlayer]
+	if not state then
+		return false
+	end
+
+	if typeof(token) == "string" and token ~= "" and state.Token ~= token then
+		return false
+	end
+
+	self.activeRubberLaunchArmStretchByPlayer[targetPlayer] = nil
+	restoreArmStretchState(state)
+	return true
+end
+
+local function getR6ArmParts(character)
+	local arms = {}
+	if not character then
+		return arms
+	end
+
+	for _, partName in ipairs(RUBBER_LAUNCH_ARM_PART_NAMES) do
+		local part = character:FindFirstChild(partName)
+		if part and part:IsA("BasePart") then
+			table.insert(arms, part)
+		end
+	end
+
+	return arms
+end
+
+local function getR6ArmRigRecords(character)
+	if not character then
+		return {}
+	end
+
+	local torso = character:FindFirstChild("Torso")
+	if not torso or not torso:IsA("BasePart") then
+		return {}
+	end
+
+	local records = {}
+	for _, arm in ipairs(getR6ArmParts(character)) do
+		local motorName = arm.Name == "Left Arm" and "Left Shoulder" or "Right Shoulder"
+		local motor = torso:FindFirstChild(motorName)
+		if motor and motor:IsA("Motor6D") and motor.Part0 == torso and motor.Part1 == arm then
+			table.insert(records, {
+				Arm = arm,
+				Motor = motor,
+				Torso = torso,
+			})
+		end
+	end
+
+	return records
+end
+
+local function snapshotArmRigRecord(state, record)
+	if state.OriginalSizes[record.Arm] == nil then
+		state.OriginalSizes[record.Arm] = record.Arm.Size
+	end
+
+	if state.OriginalMotors[record.Motor] == nil then
+		state.OriginalMotors[record.Motor] = {
+			C0 = record.Motor.C0,
+			C1 = record.Motor.C1,
+			Transform = record.Motor.Transform,
+		}
+	end
+end
+
+local function getStretchSizeForArm(originalSize, payload)
+	local requestedSize = getArmStretchSize(payload)
+	return Vector3.new(
+		originalSize.X,
+		math.max(originalSize.Y, math.abs(requestedSize.Y), math.abs(requestedSize.X), math.abs(requestedSize.Z)),
+		originalSize.Z
+	)
+end
+
+local function getStretchOrientation(direction)
+	local right = direction:Cross(WORLD_UP)
+	if right.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return nil
+	end
+
+	right = right.Unit
+	local up = -direction
+	local back = right:Cross(up)
+	if back.Magnitude <= MIN_DIRECTION_MAGNITUDE then
+		return nil
+	end
+
+	return CFrame.fromMatrix(Vector3.zero, right, up, back.Unit)
+end
+
+local function applyRealArmStretch(state)
+	local character = state.Character
+	if not character or not character.Parent then
+		return false
+	end
+
+	local direction = getArmStretchDirection(character, state.Payload)
+	if not direction then
+		return false
+	end
+
+	local orientation = getStretchOrientation(direction)
+	if not orientation then
+		return false
+	end
+
+	local updatedAny = false
+	for _, record in ipairs(getR6ArmRigRecords(character)) do
+		snapshotArmRigRecord(state, record)
+
+		local originalSize = state.OriginalSizes[record.Arm]
+		local motorSnapshot = state.OriginalMotors[record.Motor]
+		if typeof(originalSize) == "Vector3" and type(motorSnapshot) == "table" then
+			local stretchSize = getStretchSizeForArm(originalSize, state.Payload)
+			local c1 = motorSnapshot.C1 + Vector3.new(0, (stretchSize.Y - originalSize.Y) * 0.5, 0)
+			local shoulderWorld = record.Torso.CFrame * motorSnapshot.C0.Position
+			local centerPosition = shoulderWorld - orientation:VectorToWorldSpace(c1.Position)
+			local desiredArmCFrame = CFrame.new(centerPosition) * orientation
+			local currentTransform = record.Motor.Transform
+
+			record.Arm.Size = stretchSize
+			record.Motor.C1 = c1
+			record.Motor.C0 = record.Torso.CFrame:ToObjectSpace(desiredArmCFrame * c1) * currentTransform:Inverse()
+			updatedAny = true
+		end
+	end
+
+	return updatedAny
+end
+
+local function startArmPoseLoop(self, targetPlayer, state, token)
+	if state.PoseConnection then
+		return
+	end
+
+	state.PoseConnection = RunService.RenderStepped:Connect(function()
+		if not applyRealArmStretch(state) then
+			restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+		end
+	end)
+end
+
+local function startRubberLaunchArmStretchState(self, targetPlayer, payload)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return false
+	end
+
+	restoreRubberLaunchArmsForPlayer(self, targetPlayer)
+
+	local character = getPlayerCharacter(targetPlayer)
+	if not character then
+		return true
+	end
+
+	local token = getRubberLaunchToken(payload)
+	local state = {
+		Token = token,
+		Character = character,
+		Connections = {},
+		OriginalSizes = {},
+		OriginalMotors = {},
+		Payload = payload,
+		Stretched = false,
+	}
+
+	local humanoid = getPlayerHumanoid(targetPlayer)
+	if humanoid then
+		table.insert(state.Connections, humanoid.Died:Connect(function()
+			restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+		end))
+	end
+
+	table.insert(state.Connections, character.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+		end
+	end))
+
+	table.insert(state.Connections, targetPlayer.CharacterRemoving:Connect(function(removingCharacter)
+		if removingCharacter == character then
+			restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+		end
+	end))
+
+	self.activeRubberLaunchArmStretchByPlayer[targetPlayer] = state
+
+	task.delay(getArmRestoreTimeout(payload), function()
+		restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+	end)
+
+	return true
+end
+
+local function stretchRubberLaunchArms(self, targetPlayer, payload)
+	local token = getRubberLaunchToken(payload)
+	local character = getPlayerCharacter(targetPlayer)
+	if not character then
+		restoreRubberLaunchArmsForPlayer(self, targetPlayer, token)
+		return true
+	end
+
+	local state = self.activeRubberLaunchArmStretchByPlayer and self.activeRubberLaunchArmStretchByPlayer[targetPlayer]
+	if not state or state.Token ~= token or state.Character ~= character then
+		startRubberLaunchArmStretchState(self, targetPlayer, payload)
+		state = self.activeRubberLaunchArmStretchByPlayer[targetPlayer]
+	end
+
+	if not state then
+		return true
+	end
+
+	state.Payload = payload
+	applyRealArmStretch(state)
+	startArmPoseLoop(self, targetPlayer, state, token)
+	state.Stretched = true
+	return true
+end
+
+local function handleRubberLaunchArmEffect(self, targetPlayer, payload)
+	if typeof(payload) ~= "table" then
+		return false
+	end
+
+	local phase = payload.Phase
+	if typeof(phase) ~= "string" or phase == "" then
+		return false
+	end
+
+	if RUBBER_LAUNCH_ARM_START_PHASES[phase] then
+		return startRubberLaunchArmStretchState(self, targetPlayer, payload)
+	end
+
+	if RUBBER_LAUNCH_ARM_STRETCH_PHASES[phase] then
+		return stretchRubberLaunchArms(self, targetPlayer, payload)
+	end
+
+	if RUBBER_LAUNCH_ARM_RESTORE_PHASES[phase] then
+		restoreRubberLaunchArmsForPlayer(self, targetPlayer, getRubberLaunchToken(payload))
+		return true
+	end
+
+	return false
+end
+
 local function playRubberLaunchVfx(self, targetPlayer, payload)
 	local rootPart = getPlayerRootPart(targetPlayer)
 	if not rootPart then
@@ -344,11 +732,10 @@ local function playRubberLaunchVfx(self, targetPlayer, payload)
 		if airborne then
 			state.SeenAirborne = true
 			state.LastAirborneAt = now
-		elseif state.SeenAirborne and (now - state.LastAirborneAt) >= GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME then
-			finish(fadeCleanupDelay)
-		elseif not state.SeenAirborne and (now - startedAt) >= math.max(GOMU_LAUNCH_VFX_AIRBORNE_START_GRACE, duration) then
-			finish(fadeCleanupDelay)
-		elseif (now - startedAt) >= GOMU_LAUNCH_VFX_MAX_DURATION then
+		elseif (state.SeenAirborne and (now - state.LastAirborneAt) >= GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME)
+			or (not state.SeenAirborne and (now - startedAt) >= math.max(GOMU_LAUNCH_VFX_AIRBORNE_START_GRACE, duration))
+			or (now - startedAt) >= GOMU_LAUNCH_VFX_MAX_DURATION
+		then
 			finish(fadeCleanupDelay)
 		end
 	end)
@@ -369,22 +756,6 @@ local function playRubberLaunchVfx(self, targetPlayer, payload)
 	end)
 
 	return true
-end
-
-local function getPlayerFromDescendant(instance)
-	local current = instance
-	while current and current ~= Workspace do
-		if current:IsA("Model") then
-			local targetPlayer = Players:GetPlayerFromCharacter(current)
-			if targetPlayer then
-				return targetPlayer
-			end
-		end
-
-		current = current.Parent
-	end
-
-	return nil
 end
 
 local function getEquippedFruit(player)
@@ -489,9 +860,9 @@ local function getDistanceFromRay(rayOrigin, rayDirection, point)
 	return (point - closestPoint).Magnitude, projectedDistance
 end
 
-local function isTargetInRange(self, targetPlayer, maxDistance)
+local function isTargetInRange(self, targetContext, maxDistance)
 	local localRootPart = self.getLocalRootPart()
-	local targetRootPart = getPlayerRootPart(targetPlayer)
+	local targetRootPart = targetContext and targetContext.RootPart
 	if not localRootPart or not targetRootPart then
 		return false
 	end
@@ -505,36 +876,36 @@ local function findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection
 		return nil
 	end
 
-	local bestTargetPlayer
+	local bestTargetContext
 	local bestScore = -math.huge
 
-	for _, targetPlayer in ipairs(Players:GetPlayers()) do
-		if targetPlayer ~= self.player and isTargetInRange(self, targetPlayer, launchDistance) then
-			local targetRootPart = getPlayerRootPart(targetPlayer)
-			if targetRootPart then
-				local targetPosition = targetRootPart.Position + AUTO_LATCH_TARGET_AIM_OFFSET
-				local toTarget = targetPosition - rayOrigin
-				local toTargetUnit = toTarget.Magnitude > MIN_DIRECTION_MAGNITUDE and toTarget.Unit or nil
-				local alignment = toTargetUnit and rayDirection:Dot(toTargetUnit) or -1
-				if alignment >= GOMU_AUTO_LATCH_MAX_ALIGNMENT then
-					local lateralDistance, projectedDistance = getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
-					local allowedRadius = math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
-					if lateralDistance <= allowedRadius then
-						local planarDistance = getPlanarDistance(localRootPart.Position, targetRootPart.Position)
-						local score = (alignment * AUTO_LATCH_ALIGNMENT_SCORE_WEIGHT)
-							- (lateralDistance * AUTO_LATCH_LATERAL_SCORE_WEIGHT)
-							- (planarDistance * AUTO_LATCH_PLANAR_SCORE_WEIGHT)
-						if score > bestScore then
-							bestScore = score
-							bestTargetPlayer = targetPlayer
-						end
+	for _, targetContext in ipairs(AbilityTargeting.GetCharacterTargets({
+		ExcludePlayer = self.player,
+	})) do
+		if isTargetInRange(self, targetContext, launchDistance) then
+			local targetRootPart = targetContext.RootPart
+			local targetPosition = targetRootPart.Position + AUTO_LATCH_TARGET_AIM_OFFSET
+			local toTarget = targetPosition - rayOrigin
+			local toTargetUnit = toTarget.Magnitude > MIN_DIRECTION_MAGNITUDE and toTarget.Unit or nil
+			local alignment = toTargetUnit and rayDirection:Dot(toTargetUnit) or -1
+			if alignment >= GOMU_AUTO_LATCH_MAX_ALIGNMENT then
+				local lateralDistance, projectedDistance = getDistanceFromRay(rayOrigin, rayDirection, targetPosition)
+				local allowedRadius = math.max(GOMU_AUTO_LATCH_BASE_RADIUS, projectedDistance * GOMU_AUTO_LATCH_RADIUS_FACTOR)
+				if lateralDistance <= allowedRadius then
+					local planarDistance = getPlanarDistance(localRootPart.Position, targetRootPart.Position)
+					local score = (alignment * AUTO_LATCH_ALIGNMENT_SCORE_WEIGHT)
+						- (lateralDistance * AUTO_LATCH_LATERAL_SCORE_WEIGHT)
+						- (planarDistance * AUTO_LATCH_PLANAR_SCORE_WEIGHT)
+					if score > bestScore then
+						bestScore = score
+						bestTargetContext = targetContext
 					end
 				end
 			end
 		end
 	end
 
-	return bestTargetPlayer
+	return bestTargetContext
 end
 
 local function getGomuLaunchTarget(self, abilityConfig)
@@ -542,17 +913,21 @@ local function getGomuLaunchTarget(self, abilityConfig)
 	local lookDirection = getActivationLookDirection(self, rayDirection)
 	local aimPosition = fallbackPosition
 	local launchDistance = RubberLaunchMath.GetSpeedScaledLaunchDistance(abilityConfig, self.getLocalRootPart())
-	local targetPlayer = findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection)
+	local targetContext = findAutoLatchTarget(self, launchDistance, rayOrigin, rayDirection)
 
-	if not targetPlayer and result then
-		targetPlayer = getPlayerFromDescendant(result.Instance)
-		if targetPlayer == self.player or not isTargetInRange(self, targetPlayer, launchDistance) then
-			targetPlayer = nil
+	if not targetContext and result then
+		targetContext = AbilityTargeting.GetCharacterContextFromDescendant(result.Instance)
+		if
+			not targetContext
+			or targetContext.Player == self.player
+			or not isTargetInRange(self, targetContext, launchDistance)
+		then
+			targetContext = nil
 		end
 	end
 
-	if targetPlayer then
-		local targetRootPart = getPlayerRootPart(targetPlayer)
+	if targetContext then
+		local targetRootPart = targetContext.RootPart
 		if targetRootPart then
 			aimPosition = targetRootPart.Position
 		end
@@ -566,7 +941,7 @@ local function getGomuLaunchTarget(self, abilityConfig)
 		end
 	end
 
-	return aimPosition, targetPlayer, lookDirection
+	return aimPosition, targetContext, lookDirection
 end
 
 function GomuClient.Create(config)
@@ -584,6 +959,7 @@ function GomuClient.Create(config)
 	self.highlight = nil
 	self.targetPlayer = nil
 	self.activeLaunchVfxByPlayer = {}
+	self.activeRubberLaunchArmStretchByPlayer = {}
 	return self
 end
 
@@ -597,11 +973,11 @@ function GomuClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	end
 
 	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
-	local aimPosition, targetPlayer, lookDirection = getGomuLaunchTarget(self, abilityConfig)
+	local aimPosition, targetContext, lookDirection = getGomuLaunchTarget(self, abilityConfig)
 	return {
 		AimPosition = aimPosition,
 		LookDirection = lookDirection,
-		TargetPlayerUserId = targetPlayer and targetPlayer.UserId or nil,
+		TargetPlayerUserId = targetContext and targetContext.Player and targetContext.Player.UserId or nil,
 	}
 end
 
@@ -630,21 +1006,25 @@ function GomuClient:Update()
 		return
 	end
 
-	local _, targetPlayer = getGomuLaunchTarget(self, abilityConfig)
-	if not targetPlayer or not targetPlayer.Character then
+	local _, targetContext = getGomuLaunchTarget(self, abilityConfig)
+	if not targetContext or not targetContext.Character then
 		clearGomuHighlight(self)
 		return
 	end
 
 	local highlight = ensureGomuHighlight(self)
-	highlight.Adornee = targetPlayer.Character
+	highlight.Adornee = targetContext.Character
 	highlight.Enabled = true
-	self.targetPlayer = targetPlayer
+	self.targetPlayer = targetContext.Player
 end
 
 function GomuClient:HandleEffect(targetPlayer, abilityName, payload)
 	if abilityName ~= ABILITY_NAME then
 		return false
+	end
+
+	if handleRubberLaunchArmEffect(self, targetPlayer, payload) then
+		return true
 	end
 
 	return playRubberLaunchVfx(self, targetPlayer, payload)
@@ -661,16 +1041,19 @@ end
 function GomuClient:HandleUnequipped()
 	clearGomuHighlight(self)
 	clearLaunchVfxForPlayer(self, self.player)
+	restoreRubberLaunchArmsForPlayer(self, self.player)
 	return false
 end
 
 function GomuClient:HandleCharacterRemoving()
 	clearGomuHighlight(self)
 	clearLaunchVfxForPlayer(self, self.player)
+	restoreRubberLaunchArmsForPlayer(self, self.player)
 end
 
 function GomuClient:HandlePlayerRemoving(leavingPlayer)
 	clearLaunchVfxForPlayer(self, leavingPlayer)
+	restoreRubberLaunchArmsForPlayer(self, leavingPlayer)
 	return
 end
 

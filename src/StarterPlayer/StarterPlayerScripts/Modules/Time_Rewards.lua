@@ -7,6 +7,8 @@ local GIFT_CLIENT_DEBUG_VERSION = "gifts-client-ui-slots-debug-2026-05-01"
 local GIFT_STARTUP_DEBUG = false
 local GIFT_SYNC_CLIENT_DEBUG = false
 local GIFT_DEBUG = false
+local GIFT_CLAIM_DEBUG = true
+local GIFT_CLAIM_SYNC_STATE_DEBUG = false
 local REQUIRED_WAIT_SECONDS = 15
 local OPTIONAL_WAIT_SECONDS = 5
 local SYNC_REQUEST_RETRY_SECONDS = 1
@@ -49,6 +51,18 @@ end
 local function giftLog(tag: string, ...)
 	if GIFT_DEBUG then
 		print(tag, ...)
+	end
+end
+
+local function giftClaimLog(...)
+	if GIFT_CLAIM_DEBUG then
+		print("[GIFT][CLAIM]", ...)
+	end
+end
+
+local function giftClaimWarn(...)
+	if GIFT_CLAIM_DEBUG then
+		warn("[GIFT][CLAIM][WARN]", ...)
 	end
 end
 
@@ -157,6 +171,56 @@ local function formatGuiRect(guiObject: GuiObject): string
 	return string.format("pos=%s size=%s", tostring(guiObject.AbsolutePosition), tostring(guiObject.AbsoluteSize))
 end
 
+local function logClaimButtonState(eventName: string, context: string, rewardId: number?, slotFrame: Instance?, claimButton: Instance?)
+	if not GIFT_CLAIM_DEBUG then
+		return
+	end
+
+	if not claimButton then
+		giftClaimWarn(
+			eventName,
+			"context",
+			tostring(context),
+			"rewardId",
+			tostring(rewardId),
+			"slot",
+			safeName(slotFrame),
+			"button",
+			"nil"
+		)
+		return
+	end
+
+	local guiObject = if claimButton:IsA("GuiObject") then claimButton :: GuiObject else nil
+	giftClaimLog(
+		eventName,
+		"context",
+		tostring(context),
+		"rewardId",
+		tostring(rewardId),
+		"slot",
+		safeName(slotFrame),
+		"button",
+		safeName(claimButton),
+		"class",
+		claimButton.ClassName,
+		"isTextButton",
+		tostring(claimButton:IsA("TextButton")),
+		"isImageButton",
+		tostring(claimButton:IsA("ImageButton")),
+		"visible",
+		tostring(guiObject and guiObject.Visible or "n/a"),
+		"active",
+		tostring(guiObject and guiObject.Active or "n/a"),
+		"z",
+		tostring(guiObject and guiObject.ZIndex or "n/a"),
+		"absoluteSize",
+		tostring(guiObject and guiObject.AbsoluteSize or "n/a"),
+		"absolutePosition",
+		tostring(guiObject and guiObject.AbsolutePosition or "n/a")
+	)
+end
+
 local player = Players.LocalPlayer
 giftStartupLog(
 	"start",
@@ -206,6 +270,34 @@ local function countDirectChildrenNamed(parent: Instance?, childName: string): n
 	return count
 end
 
+local function getPreferredLiveGiftsFrame()
+	local firstGifts = nil
+	local preferredGifts = nil
+	local duplicateCount = 0
+
+	for _, child in ipairs(mainGui:GetChildren()) do
+		if child.Name == "Gifts" and child:IsA("Frame") then
+			duplicateCount += 1
+			firstGifts = firstGifts or child
+			if child:GetAttribute("OpenUIOpened") == true or child.Visible then
+				preferredGifts = child
+			end
+		end
+	end
+
+	if duplicateCount > 1 then
+		giftClaimWarn(
+			"duplicateGiftsFrames",
+			"count",
+			duplicateCount,
+			"preferred",
+			safeName(preferredGifts or firstGifts)
+		)
+	end
+
+	return preferredGifts or firstGifts
+end
+
 local function logGiftsUiBinding(context: string)
 	if not GIFT_STARTUP_DEBUG then
 		return
@@ -233,7 +325,7 @@ local function logGiftsUiBinding(context: string)
 end
 
 local function refreshGiftsUiBinding(context: string): boolean
-	local liveGifts = mainGui:FindFirstChild("Gifts")
+	local liveGifts = getPreferredLiveGiftsFrame()
 	if not (liveGifts and liveGifts:IsA("Frame")) then
 		giftDebugWarn("uiRebindSkipped", "context", context, "reason", "live Gifts frame missing", "current", safeName(giftsFrame))
 		return false
@@ -1402,6 +1494,89 @@ local function getClaimButton(slotFrame: Instance)
 	return firstButton
 end
 
+local function prepareClaimButtonForInput(claimButton: GuiButton)
+	claimButton.Active = true
+	claimButton.Selectable = true
+	claimButton.AutoButtonColor = true
+	claimButton.ZIndex = math.max(claimButton.ZIndex, 6)
+	setModalState(claimButton, false)
+end
+
+local function auditClaimButtonInputBlockers(context: string, rewardId: number?, claimButton: Instance?)
+	if not GIFT_CLAIM_DEBUG or not (claimButton and claimButton:IsA("GuiObject")) then
+		return
+	end
+
+	local button = claimButton :: GuiObject
+	local buttonDisplayOrder = getScreenGuiDisplayOrder(button)
+	local buttonZIndex = button.ZIndex
+	local blockerCount = 0
+
+	for _, descendant in ipairs(guiRoot:GetDescendants()) do
+		if descendant:IsA("GuiObject")
+			and descendant ~= button
+			and not descendant:IsDescendantOf(button)
+			and not button:IsDescendantOf(descendant)
+			and isEffectivelyVisible(descendant, guiRoot)
+			and rectsOverlap(descendant, button)
+		then
+			local active = descendant.Active
+			local modal = getModalState(descendant)
+			local capturesInput = active or modal or descendant:IsA("GuiButton")
+			local displayOrder = getScreenGuiDisplayOrder(descendant)
+			local canBeAboveButton = displayOrder > buttonDisplayOrder
+				or (displayOrder == buttonDisplayOrder and descendant.ZIndex >= buttonZIndex)
+
+			if capturesInput and canBeAboveButton then
+				blockerCount += 1
+				if blockerCount <= 20 then
+					giftClaimWarn(
+						"possibleInputBlocker",
+						"context",
+						tostring(context),
+						"rewardId",
+						tostring(rewardId),
+						"button",
+						safeName(button),
+						"blocker",
+						safeName(descendant),
+						"class",
+						descendant.ClassName,
+						"displayOrder",
+						displayOrder,
+						"z",
+						descendant.ZIndex,
+						"active",
+						tostring(active),
+						"modal",
+						tostring(modal),
+						"visible",
+						tostring(descendant.Visible),
+						"backgroundTransparency",
+						tostring(descendant.BackgroundTransparency),
+						"buttonRect",
+						formatGuiRect(button),
+						"blockerRect",
+						formatGuiRect(descendant)
+					)
+				end
+			end
+		end
+	end
+
+	giftClaimLog(
+		"inputAudit",
+		"context",
+		tostring(context),
+		"rewardId",
+		tostring(rewardId),
+		"button",
+		safeName(button),
+		"possibleBlockers",
+		blockerCount
+	)
+end
+
 local function logHudBinding()
 	giftLog(
 		"[GIFT][BIND]",
@@ -1662,8 +1837,21 @@ local function setAuthoritativeSyncPending(isPending: boolean)
 
 			local claimButton = getClaimButton(slotFrame)
 			if claimButton then
-				claimButton.Active = not isPending
-				claimButton.AutoButtonColor = not isPending
+				prepareClaimButtonForInput(claimButton)
+				claimButton.AutoButtonColor = true
+				if GIFT_CLAIM_SYNC_STATE_DEBUG then
+					giftClaimLog(
+						"claimButtonSyncPendingState",
+						"rewardId",
+						tostring(id),
+						"pending",
+						tostring(isPending),
+						"button",
+						safeName(claimButton),
+						"active",
+						tostring(claimButton.Active)
+					)
+				end
 			end
 		end
 	end
@@ -1946,11 +2134,25 @@ local function hookButton(id: number)
 	local claimBtn = getClaimButton(slotFrame)
 	if not claimBtn then
 		giftError("hookButton missing claim button in", safeName(slotFrame), "for id", id)
+		logClaimButtonState("claimButtonMissing", "hookButton", id, slotFrame, nil)
 		return
 	end
 
+	prepareClaimButtonForInput(claimBtn)
+	logClaimButtonState("claimButtonFound", "hookButton", id, slotFrame, claimBtn)
+	auditClaimButtonInputBlockers("hookButton", id, claimBtn)
+
 	local existingConnection = claimButtonConnections[slotFrame]
 	if existingConnection and claimButtonInstances[slotFrame] == claimBtn and slotFrame:GetAttribute("HookedRewardId") == id then
+		giftClaimLog(
+			"claimConnectionAlreadyPresent",
+			"rewardId",
+			id,
+			"slot",
+			safeName(slotFrame),
+			"button",
+			safeName(claimBtn)
+		)
 		return
 	end
 	if existingConnection then
@@ -1979,6 +2181,27 @@ local function hookButton(id: number)
 		"z",
 		claimBtn.ZIndex
 	)
+	giftClaimLog(
+		"claimConnectionMade",
+		"rewardId",
+		id,
+		"slot",
+		safeName(slotFrame),
+		"button",
+		safeName(claimBtn),
+		"class",
+		claimBtn.ClassName,
+		"visible",
+		tostring(claimBtn.Visible),
+		"active",
+		tostring(claimBtn.Active),
+		"z",
+		claimBtn.ZIndex,
+		"absoluteSize",
+		tostring(claimBtn.AbsoluteSize),
+		"absolutePosition",
+		tostring(claimBtn.AbsolutePosition)
+	)
 
 	claimButtonConnections[slotFrame] = claimBtn.Activated:Connect(function()
 		giftStartupLog(
@@ -1992,14 +2215,16 @@ local function hookButton(id: number)
 			"claimed",
 			tostring(slotFrame:GetAttribute("Claimed"))
 		)
+		logClaimButtonState("claimClicked", "Activated", id, slotFrame, claimBtn)
 		if slotFrame:GetAttribute("Claimed") then
+			giftClaimLog("claimClientRejected", "rewardId", id, "reason", "already_claimed", "slot", safeName(slotFrame))
 			return
 		end
 		if slotFrame:GetAttribute("ServerSyncPending") then
+			giftClaimLog("claimWhileSyncPending", "rewardId", id, "slot", safeName(slotFrame), "button", safeName(claimBtn))
 			if requestServerSync then
 				requestServerSync("claimWhilePending")
 			end
-			return
 		end
 
 		local endTime = endTimes[id]
@@ -2008,10 +2233,31 @@ local function hookButton(id: number)
 			setTimerCountdown(slotFrame, formatDurationText(remaining))
 			startCountdown(id)
 			updateHud()
-			return
+			giftClaimLog(
+				"claimClientThinksNotReady",
+				"rewardId",
+				id,
+				"remaining",
+				remaining,
+				"slot",
+				safeName(slotFrame),
+				"note",
+				"still firing server for authoritative decision"
+			)
 		end
 
-		Remote:FireServer(id)
+		giftClaimLog(
+			"fireClaimRemote",
+			"rewardId",
+			id,
+			"remote",
+			safeName(Remote),
+			"slot",
+			safeName(slotFrame),
+			"button",
+			safeName(claimBtn)
+		)
+		Remote:FireServer(id, "claimButton")
 	end)
 end
 
@@ -2035,6 +2281,39 @@ local function collectSlotFrames()
 	end)
 
 	return candidates
+end
+
+local function auditMappedClaimButtons(context: string)
+	if not GIFT_CLAIM_DEBUG then
+		return
+	end
+
+	local rows = collectSlotFrames()
+	giftClaimLog(
+		"claimButtonAuditStart",
+		"context",
+		tostring(context),
+		"rows",
+		#rows,
+		"mapped",
+		getMappedGiftRowCount(),
+		"totalGifts",
+		totalGifts,
+		"giftsFrame",
+		safeName(giftsFrame),
+		"giftsVisible",
+		tostring(giftsFrame.Visible)
+	)
+
+	for _, row in ipairs(rows) do
+		local rewardId = tonumber(row:GetAttribute("RewardId"))
+		local claimButton = getClaimButton(row)
+		if claimButton then
+			prepareClaimButtonForInput(claimButton)
+		end
+		logClaimButtonState("claimButtonFound", context, rewardId, row, claimButton)
+		auditClaimButtonInputBlockers(context, rewardId, claimButton)
+	end
 end
 
 local function cleanupClaimConnectionsForTemplates(templates)
@@ -2844,6 +3123,9 @@ local function bindGiftContentTreeWatchers(context: string)
 		if giftsFrame.Visible then
 			giftsMainFrame.Visible = true
 			logScrollState("panelOpen")
+			task.defer(function()
+				runSlotBuild("panelOpenImmediate")
+			end)
 			scheduleSlotRebuild("panelOpen")
 			if latestSyncState == nil or not hasAppliedServerSync then
 				setAuthoritativeSyncPending(true)
@@ -2855,6 +3137,7 @@ local function bindGiftContentTreeWatchers(context: string)
 				local rows = collectSlotFrames()
 				forceGiftsLayout("panelOpen", rows)
 				logGiftRenderDiagnostics("panelOpen", rows)
+				auditMappedClaimButtons("panelOpen")
 			end)
 			giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
 		end
@@ -2898,6 +3181,9 @@ logHudBinding()
 if giftsFrame.Visible then
 	logScrollState("panelOpen")
 	scheduleSlotRebuild("initialPanelOpen")
+	task.defer(function()
+		auditMappedClaimButtons("initialPanelOpen")
+	end)
 	giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
 end
 

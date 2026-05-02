@@ -1,8 +1,13 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
+local AbilityTargeting = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Shared")
+		:WaitForChild("AbilityTargeting")
+)
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
@@ -126,6 +131,22 @@ local function applyLaunchVelocity(rootPart, launchVelocity)
 	local velocityDelta = launchVelocity - currentVelocity
 	local impulse = velocityDelta * rootPart.AssemblyMass
 	rootPart:ApplyImpulse(impulse)
+end
+
+local function getMineOwnerKey(context)
+	if type(context) ~= "table" then
+		return nil
+	end
+
+	return context.Player or context.Character
+end
+
+local function getMineOwnerUserId(owner)
+	if typeof(owner) == "Instance" and owner:IsA("Player") then
+		return owner.UserId
+	end
+
+	return 0
 end
 
 local function getRootPlanarSpeed(rootPart)
@@ -338,25 +359,6 @@ local function doesCharacterOverlapDisplayedRadius(centerPosition, character, ro
 	) <= radius + characterExtent + RADIUS_MATCH_EPSILON
 end
 
-local function getPlayerCharacterContext(player)
-	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		return nil, nil, nil
-	end
-
-	local character = player.Character
-	if not character then
-		return nil, nil, nil
-	end
-
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not humanoid or not rootPart or humanoid.Health <= 0 then
-		return character, nil, nil
-	end
-
-	return character, humanoid, rootPart
-end
-
 local function getActiveMineEntry(player)
 	local mineEntry = activeMinesByPlayer[player]
 	if not mineEntry then
@@ -413,11 +415,12 @@ local function createDisplayPart(parent, name, size, color, cframe, shape, mater
 	return part
 end
 
-local function createLandMineModel(player, groundPosition, radius)
+local function createLandMineModel(owner, groundPosition, radius)
+	local ownerUserId = getMineOwnerUserId(owner)
 	local model = Instance.new("Model")
-	model.Name = string.format("%s_%d", LAND_MINE_MODEL_NAME, player.UserId)
+	model.Name = string.format("%s_%d", LAND_MINE_MODEL_NAME, ownerUserId)
 	model:SetAttribute("FruitKey", "Bomu")
-	model:SetAttribute("OwnerUserId", player.UserId)
+	model:SetAttribute("OwnerUserId", ownerUserId)
 
 	local indicatorPosition = groundPosition + Vector3.new(0, MINE_INDICATOR_GROUND_OFFSET, 0)
 	createDisplayPart(
@@ -532,8 +535,9 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 	local fallbackDirection = getPlanarUnitOrFallback(context.RootPart.CFrame.LookVector, nil)
 	local affectedUserIds = {}
 	local destroyedHazardCount = 0
+	local ownerUserId = getMineOwnerUserId(context.Player)
 	local resolvedHits = HitResolver.ResolveRadiusHits({
-		QueryId = string.format("bomu:%d:%d", context.Player.UserId, math.floor(os.clock() * 1000)),
+		QueryId = string.format("bomu:%d:%d", ownerUserId, math.floor(os.clock() * 1000)),
 		CenterPosition = centerPosition,
 		Radius = radius,
 		IncludePlayers = false,
@@ -547,12 +551,12 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 		TracePrefix = "HIT",
 	})
 
-	for _, targetPlayer in ipairs(Players:GetPlayers()) do
-		if targetPlayer == context.Player then
-			continue
-		end
-
-		local character, _, rootPart = getPlayerCharacterContext(targetPlayer)
+	for _, targetContext in ipairs(AbilityTargeting.GetCharacterTargets({
+		ExcludePlayer = context.Player,
+		ExcludeCharacter = context.Character,
+	})) do
+		local character = targetContext.Character
+		local rootPart = targetContext.RootPart
 		if not character or not rootPart then
 			continue
 		end
@@ -562,13 +566,23 @@ local function buildExplosionPayload(context, centerPosition, abilityConfig)
 		end
 
 		local knockbackVector = getKnockbackVector(centerPosition, rootPart, fallbackDirection, abilityConfig)
-		local applied = HitEffectService.ApplyEffect(targetPlayer, "Knockdown", {
+		local applied = HitEffectService.ApplyEffect(targetContext.Instance, "Knockdown", {
 			Duration = knockdownDuration,
 			DropPosition = rootPart.Position,
-			KnockbackVector = knockbackVector,
+			RagdollJoints = true,
+			RagdollImpulse = knockbackVector,
+			Movement = {
+				WalkSpeedMultiplier = 0,
+				JumpMultiplier = 0,
+				AutoRotate = false,
+				PlatformStand = true,
+				State = Enum.HumanoidStateType.Ragdoll,
+			},
 		})
 		if applied then
-			affectedUserIds[#affectedUserIds + 1] = targetPlayer.UserId
+			if targetContext.Player then
+				affectedUserIds[#affectedUserIds + 1] = targetContext.Player.UserId
+			end
 		end
 	end
 
@@ -649,12 +663,19 @@ local function applyOwnerLaunch(context, centerPosition, abilityConfig)
 	return true
 end
 
-local function placeLandMine(context)
+local function placeLandMine(context, ownerKey)
+	if ownerKey == nil then
+		return {}, {
+			ApplyCooldown = false,
+			SuppressActivatedEvent = true,
+		}
+	end
+
 	local radiusInfo = getScaledRadiusInfo(context.AbilityConfig, context.RootPart, context.Humanoid)
 	local radius = radiusInfo.Radius
 	local lifetime = math.max(0, tonumber(context.AbilityConfig.MineLifetime) or 0)
 	local groundPosition = getMinePlacementPosition(context)
-	local mineModel, originPosition = createLandMineModel(context.Player, groundPosition, radius)
+	local mineModel, originPosition = createLandMineModel(context.Player or context.Character, groundPosition, radius)
 	local mineEntry = {
 		Model = mineModel,
 		GroundPosition = groundPosition,
@@ -666,8 +687,8 @@ local function placeLandMine(context)
 		PlacedAt = os.clock(),
 	}
 
-	activeMinesByPlayer[context.Player] = mineEntry
-	scheduleMineCleanup(context.Player, mineEntry, lifetime)
+	activeMinesByPlayer[ownerKey] = mineEntry
+	scheduleMineCleanup(ownerKey, mineEntry, lifetime)
 
 	return {
 		Action = LAND_MINE_ACTION_PLACED,
@@ -685,7 +706,7 @@ local function placeLandMine(context)
 	}
 end
 
-local function detonateLandMine(context, activeMine)
+local function detonateLandMine(context, activeMine, ownerKey)
 	if activeMine.PendingDetonation == true then
 		return {}, {
 			ApplyCooldown = false,
@@ -722,8 +743,8 @@ local function detonateLandMine(context, activeMine)
 		task.wait(explosionDelay)
 	end
 
-	if activeMinesByPlayer[context.Player] == activeMine then
-		clearActiveMine(context.Player)
+	if activeMinesByPlayer[ownerKey] == activeMine then
+		clearActiveMine(ownerKey)
 	elseif typeof(activeMine.Model) == "Instance" and activeMine.Model.Parent then
 		activeMine.Model:Destroy()
 	end
@@ -750,12 +771,13 @@ local function detonateLandMine(context, activeMine)
 end
 
 function BomuServer.LandMine(context)
-	local activeMine = getActiveMineEntry(context.Player)
+	local ownerKey = getMineOwnerKey(context)
+	local activeMine = getActiveMineEntry(ownerKey)
 	if activeMine then
-		return detonateLandMine(context, activeMine)
+		return detonateLandMine(context, activeMine, ownerKey)
 	end
 
-	return placeLandMine(context)
+	return placeLandMine(context, ownerKey)
 end
 
 function BomuServer.ClearRuntimeState(player)

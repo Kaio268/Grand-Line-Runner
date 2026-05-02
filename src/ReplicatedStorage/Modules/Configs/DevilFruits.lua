@@ -140,10 +140,40 @@ local DevilFruits = {
 					KeyCode = Enum.KeyCode.C,
 					Cooldown = 14,
 					Radius = 100,
+					-- Final hitbox radius = Radius * RadiusScale * HitboxRadiusScale * SpeedRadiusScale.
+					-- Final explosion visual radius = VisualBaseRadius * RadiusScale * VisualRadiusScale * SpeedRadiusScale.
+					-- First calibrate HitboxRadiusScale/VisualRadiusScale against each other, then use RadiusScale to resize both.
+					RadiusScale = 1,
+					HitboxRadiusScale = 0.5,
+					SpeedRadiusScaling = {
+						Enabled = true,
+						UseSpeedStat = true,
+						SpeedStatFolder = "HiddenLeaderstats",
+						SpeedStatName = "Speed",
+						MinScale = 0.5,
+						MaxScale = 1.15,
+						SpeedForMaxScale = 300,
+						BaselineSpeed = 0,
+						UsePlanarVelocity = false,
+						UseWalkSpeed = false,
+					},
 					Duration = 0.6,
+					KnockdownDuration = 1.15,
+					KnockdownPushHorizontal = 500,
+					KnockdownPushVertical = 0,
 					VisualBaseRadius = 50,
 					VisualRadiusScale = 1,
 					AutoScaleVisualToHitbox = true,
+					ExplosionMeasureExcludeKeywords = {
+						"shock",
+						"shockwave",
+						"wave",
+						"wind",
+						"tornado",
+						"cres",
+						"bubble",
+					},
+					ExplosionMeasureIncludeKeywords = {},
 					MovementLockEnabled = true,
 					Animation = {
 						AnimationKey = "Mera.FlameBurstR6",
@@ -238,13 +268,6 @@ local DevilFruits = {
 			AbilityModule = "Gomu",
 			Rarity = "Rare",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			GripProfiles = {
-				Models = {
-					ModelSwap = {
-						RuntimeGrip = HELD_FRUIT_RUNTIME_GRIP,
-					},
-				},
-			},
 			Aliases = { "gomu", "gomu gomu" },
 			Abilities = {
 				RubberLaunch = {
@@ -257,11 +280,14 @@ local DevilFruits = {
 					SpeedLaunchDistanceBonus = 32,
 					Animation = {
 						AnimationKey = "Gomu.Rocket",
-						-- Seconds after the animation starts before the launch velocity is applied.
-						-- The authored "Launch" marker is about 0.367s, so lower this to launch earlier.
-						ReleaseTime = 0.2,
-						ReleaseMarker = "Launch",
-						ReleaseFallbackTime = 0.38,
+						ReleaseTime = 0.25,
+						ReleaseMarker = "Unstretch",
+						ReleaseMarkers = { "Unstretch", "RestoreArms" },
+						ReleaseFallbackTime = 0.85,
+						ArmStretchMarkers = { "Stretch", "StretchArms" },
+						ArmRestoreMarkers = { "Unstretch", "RestoreArms" },
+						ArmStretchSize = Vector3.new(1, 27.066, 1),
+						ArmRestoreFallbackTime = 0.85,
 						FadeTime = 0.04,
 						StopFadeTime = 0.08,
 						PlaybackSpeed = 1,
@@ -299,8 +325,8 @@ local DevilFruits = {
 					Radius = 10,
 					VisualBaseRadius = 25,
 					KnockdownDuration = 0.75,
-					KnockbackHorizontal = 34,
-					KnockbackVertical = 10,
+					KnockbackHorizontal = 100,
+					KnockbackVertical = 100,
 					OwnerLaunchRadius = 8,
 					OwnerLaunchHorizontal = 8,
 					OwnerLaunchVertical = 62,

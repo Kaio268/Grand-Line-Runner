@@ -16,11 +16,15 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
-local AffectableRegistry = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
-local devilFruitModules = game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("DevilFruits")
+local ServerScriptService = game:GetService("ServerScriptService")
+local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
+local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+local devilFruitModules = ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruits")
 local MoguServer = require(getNamedFolder(devilFruitModules, "Mogu"):WaitForChild("Server"):WaitForChild("MoguServer"))
 local HoroServer = require(getNamedFolder(devilFruitModules, "Horo"):WaitForChild("Server"):WaitForChild("HoroServer"))
-local ToriPassiveService = require(getNamedFolder(devilFruitModules, "Tori"):WaitForChild("Server"):WaitForChild("ToriPassiveService"))
+local toriFolder = getNamedFolder(devilFruitModules, "Tori")
+local ToriServer = require(toriFolder:WaitForChild("Server"):WaitForChild("ToriServer"))
+local ToriPassiveService = require(toriFolder:WaitForChild("Server"):WaitForChild("ToriPassiveService"))
 
 local CONFIG = {
 	SpawnDelayMin = 2,
@@ -52,6 +56,7 @@ local CONFIG = {
 	},
 }
 
+local AIRBORNE_TORI_HAZARD_KNOCKDOWN_DURATION = 1.15
 local HAZARD_ACTION_REMOTE_NAME = "SharedHazardAction"
 local rng = Random.new()
 local traceStateKey = nil
@@ -109,6 +114,43 @@ local function getOrCreateRemoteEvent(parent, name)
 	return remote
 end
 
+local function isAirbornePhoenixFlight(player, humanoid, rootPart)
+	if not ToriServer.IsPhoenixFlightActive(player) then
+		return false
+	end
+
+	if not humanoid or not rootPart then
+		return false
+	end
+
+	return humanoid.FloorMaterial == Enum.Material.Air
+end
+
+local function applyAirbornePhoenixHazardKnockdown(player, humanoid, rootPart)
+	if not isAirbornePhoenixFlight(player, humanoid, rootPart) then
+		return false
+	end
+
+	local applied = HitEffectService.ApplyEffect(player, "Knockdown", {
+		Duration = AIRBORNE_TORI_HAZARD_KNOCKDOWN_DURATION,
+		DropPosition = rootPart.Position,
+		RagdollJoints = true,
+		Movement = {
+			WalkSpeedMultiplier = 0,
+			JumpMultiplier = 0,
+			AutoRotate = false,
+			PlatformStand = true,
+			State = Enum.HumanoidStateType.Physics,
+		},
+	})
+	if not applied then
+		return false
+	end
+
+	hazardTrace("airborne Tori hazard knockdown player=%s pos=%s", player.Name, formatVector3(rootPart.Position))
+	return true
+end
+
 local remotesFolder = getOrCreateRemotesFolder()
 local killMeRemote = getOrCreateRemoteEvent(remotesFolder, "KillMe")
 local legacyHazardRemote = remotesFolder:FindFirstChild(HAZARD_ACTION_REMOTE_NAME)
@@ -129,6 +171,13 @@ killMeRemote.OnServerEvent:Connect(function(player)
 			return
 		end
 		if MoguServer.IsProtected(player) then
+			return
+		end
+		local rootPart = character:FindFirstChild("HumanoidRootPart")
+		if ToriServer.IsProtected(player, rootPart and rootPart.Position or nil) then
+			return
+		end
+		if applyAirbornePhoenixHazardKnockdown(player, humanoid, rootPart) then
 			return
 		end
 		if ToriPassiveService.TryConsumeRebirth(player, "WaveKill") then

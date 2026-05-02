@@ -40,6 +40,12 @@ local BURST_CHILD_CANDIDATES = FLAME_BURST_CONFIG.BurstChildCandidates or { "Bur
 local BURST_SUPPRESSED_DESCENDANT_NAMES = FLAME_BURST_CONFIG.SuppressBurstDescendantNames
 	or { "WindTornado", "windtwirl tech" }
 local BURST_DEBUG_KEYWORDS = { "wind", "wave", "shock", "cres", "slam", "bubble", "ring" }
+local DEFAULT_EXPLOSION_MEASURE_EXCLUDE_KEYWORDS = FIRE_BURST_ABILITY_CONFIG.ExplosionMeasureExcludeKeywords
+	or FLAME_BURST_CONFIG.ExplosionMeasureExcludeKeywords
+	or { "shock", "shockwave", "wave", "wind", "tornado", "cres", "bubble" }
+local DEFAULT_EXPLOSION_MEASURE_INCLUDE_KEYWORDS = FIRE_BURST_ABILITY_CONFIG.ExplosionMeasureIncludeKeywords
+	or FLAME_BURST_CONFIG.ExplosionMeasureIncludeKeywords
+	or {}
 
 local DEFAULT_STARTUP_EMIT_COUNT = math.max(0, tonumber(FLAME_BURST_CONFIG.StartupEmitCount) or 3)
 local DEFAULT_BURST_EMIT_COUNT = math.max(0, tonumber(FLAME_BURST_CONFIG.BurstEmitCount) or 6)
@@ -128,6 +134,17 @@ local function buildNameLookup(names)
 	return lookup
 end
 
+local function buildKeywordList(keywords)
+	local resolvedKeywords = {}
+	for _, keyword in ipairs(keywords or {}) do
+		if type(keyword) == "string" and keyword ~= "" then
+			resolvedKeywords[#resolvedKeywords + 1] = string.lower(keyword)
+		end
+	end
+
+	return resolvedKeywords
+end
+
 local function cancelTask(taskHandle)
 	if taskHandle == nil then
 		return
@@ -207,6 +224,37 @@ local function collectKeywordDescendants(root, keywords)
 
 	table.sort(matches)
 	return matches
+end
+
+local function containsAnyKeyword(text, keywords)
+	if type(text) ~= "string" or #keywords <= 0 then
+		return false
+	end
+
+	local loweredText = string.lower(text)
+	for _, keyword in ipairs(keywords) do
+		if string.find(loweredText, keyword, 1, true) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function pathContainsAnyKeyword(root, item, keywords)
+	if #keywords <= 0 then
+		return false
+	end
+
+	local current = item
+	while current and current ~= root do
+		if containsAnyKeyword(current.Name, keywords) then
+			return true
+		end
+		current = current.Parent
+	end
+
+	return false
 end
 
 local function setEffectAnchored(root, anchored)
@@ -703,7 +751,19 @@ local function partLooksMeasurable(part, allowTransparent)
 	return allowTransparent == true or part.Transparency < 0.995
 end
 
-local function measureHorizontalVisualRadius(runtimeState, allowTransparent)
+local function shouldMeasureExplosionItem(item, measurementRoot, includeKeywords, excludeKeywords)
+	if #includeKeywords > 0 and not pathContainsAnyKeyword(measurementRoot, item, includeKeywords) then
+		return false
+	end
+
+	if #excludeKeywords > 0 and pathContainsAnyKeyword(measurementRoot, item, excludeKeywords) then
+		return false
+	end
+
+	return true
+end
+
+local function measureHorizontalVisualRadius(runtimeState, allowTransparent, options)
 	local measurementRoot = getMeasurementRoot(runtimeState)
 	local originFrame = getInstancePivotCFrame(findPlacementAnchor(runtimeState)) or getInstancePivotCFrame(measurementRoot)
 	if not measurementRoot or not originFrame then
@@ -713,9 +773,18 @@ local function measureHorizontalVisualRadius(runtimeState, allowTransparent)
 	local minX, maxX = math.huge, -math.huge
 	local minZ, maxZ = math.huge, -math.huge
 	local measuredAny = false
+	local includeKeywords = buildKeywordList(
+		options and options.ExplosionMeasureIncludeKeywords or DEFAULT_EXPLOSION_MEASURE_INCLUDE_KEYWORDS
+	)
+	local excludeKeywords = buildKeywordList(
+		options and options.ExplosionMeasureExcludeKeywords or DEFAULT_EXPLOSION_MEASURE_EXCLUDE_KEYWORDS
+	)
 
 	eachSelfAndDescendants(measurementRoot, function(item)
 		if not partLooksMeasurable(item, allowTransparent) then
+			return
+		end
+		if not shouldMeasureExplosionItem(item, measurementRoot, includeKeywords, excludeKeywords) then
 			return
 		end
 
@@ -762,22 +831,22 @@ local function resolveFireBurstVisualScale(options, runtimeState)
 		return 1, visualRadius, visualBaseRadius, "missing_target"
 	end
 
-	if visualBaseRadius then
-		return math.clamp(visualRadius / visualBaseRadius, MIN_VISUAL_SCALE, MAX_VISUAL_SCALE),
-			visualRadius,
-			visualBaseRadius,
-			"base_radius"
-	end
-
 	if shouldAutoScaleVisualToHitbox(options) then
-		local measuredRadius = measureHorizontalVisualRadius(runtimeState, false)
-			or measureHorizontalVisualRadius(runtimeState, true)
+		local measuredRadius = measureHorizontalVisualRadius(runtimeState, false, options)
+			or measureHorizontalVisualRadius(runtimeState, true, options)
 		if measuredRadius and measuredRadius > 0 then
 			return math.clamp(visualRadius / measuredRadius, MIN_VISUAL_SCALE, MAX_VISUAL_SCALE),
 				visualRadius,
 				measuredRadius,
 				"measured"
 		end
+	end
+
+	if visualBaseRadius then
+		return math.clamp(visualRadius / visualBaseRadius, MIN_VISUAL_SCALE, MAX_VISUAL_SCALE),
+			visualRadius,
+			visualBaseRadius,
+			"base_radius"
 	end
 
 	return 1, visualRadius, visualBaseRadius, "missing_base"

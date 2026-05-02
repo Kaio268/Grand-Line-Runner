@@ -50,6 +50,7 @@ end
 
 local ctx = Interaction.NewContext(map)
 local AddBrainrot = require(script.Parent.Parent.Modules.AddBrainrot)
+local BrainrotQuickSlotService = require(script.Parent.Parent.Modules:WaitForChild("BrainrotQuickSlotService"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 
 local rng = Random.new()
@@ -596,6 +597,19 @@ hitBox.Touched:Connect(function(hit)
 	end
 	hitDebounce[plr.UserId] = now
 
+	if Interaction.HasHeld(ctx, plr) then
+		local canGain = BrainrotQuickSlotService.CanGainOrNotify(plr, 1, "SpawnBrainrots:TurnIn")
+		if not canGain then
+			runTrace(
+				"brainrotTurnIn blocked player=%s boundary=%s activeMap=%s reason=quick_slots_full",
+				plr.Name,
+				formatInstancePath(hitBox),
+				tostring(resolvedMapRefs.ActiveMapName)
+			)
+			return
+		end
+	end
+
 	local info = Interaction.CollectHeld(ctx, plr, active)
 	if info and info.Name then
 		runTrace(
@@ -607,7 +621,15 @@ hitBox.Touched:Connect(function(hit)
 			tostring(info.SlotIndex),
 			tostring(info.OriginData ~= nil)
 		)
-		AddBrainrot:AddBrainrot(plr, info.Name, 1)
+		local added = AddBrainrot:AddBrainrot(plr, info.Name, 1)
+		if not added then
+			runTrace(
+				"brainrotTurnIn blocked player=%s reward=%s reason=inventory_full_or_add_failed",
+				plr.Name,
+				tostring(info.Name)
+			)
+			return
+		end
 		QuestSignals.Record(plr, "ExtractCrew", 1, {
 			Source = "SpawnBrainrots",
 			CrewName = tostring(info.Name),

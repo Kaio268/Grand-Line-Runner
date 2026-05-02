@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local HitEffectConfig = require(Modules:WaitForChild("Configs"):WaitForChild("HitEffects"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local HazardUtils = require(DevilFruits:WaitForChild("HazardUtils"))
 local ProtectionRuntime = require(DevilFruits:WaitForChild("ProtectionRuntime"))
@@ -52,6 +53,9 @@ local HAZARD_SUPPRESSION_GRACE = 0.15
 local HAZARD_OVERLAP_MAX_PARTS = 128
 local PHOENIX_SHIELD_HIT_EFFECT_THROTTLE = 0.18
 local PHOENIX_SHIELD_UNLOCK_RESCHEDULE_THRESHOLD = 0.02
+local FLIGHT_INTERRUPT_HIT_EFFECTS = {
+	Knockdown = true,
+}
 
 local function flightLog(...)
 	if not DEBUG_FLIGHT then
@@ -329,9 +333,11 @@ function ToriClient.new(config)
 	self.phoenixFlightState = createPhoenixFlightState()
 	self._protectionRegistered = false
 	self._rebirthHookRegistered = false
+	self._hitEffectHookRegistered = false
 	self.flightDebugTimers = {}
 	self:EnsureProtectionRegistration()
 	self:EnsurePhoenixRebirthPlaceholderHook()
+	self:EnsureFlightHitEffectHook()
 	return self
 end
 
@@ -372,6 +378,76 @@ function ToriClient:EnsurePhoenixRebirthPlaceholderHook()
 		end
 
 		self:HandlePhoenixRebirthTriggered(triggeredAt)
+	end)
+end
+
+function ToriClient:GetActiveFlightInterruptHitEffect()
+	local player = self.player
+	if not player then
+		return nil
+	end
+
+	local effectName = player:GetAttribute(HitEffectConfig.Attributes.Type)
+	if typeof(effectName) == "string" and FLIGHT_INTERRUPT_HIT_EFFECTS[effectName] == true then
+		return effectName
+	end
+
+	return nil
+end
+
+function ToriClient:StopPhoenixFlightForHitEffect(effectName, source)
+	if typeof(effectName) ~= "string" or FLIGHT_INTERRUPT_HIT_EFFECTS[effectName] ~= true then
+		return false
+	end
+
+	if not self.phoenixFlightState.Active then
+		return false
+	end
+
+	local reason = string.format("hit_%s", string.lower(effectName))
+	toriCooldownLog(
+		"flight hit interrupt player=%s userId=%s effect=%s source=%s",
+		self.player and self.player.Name or "<nil>",
+		tostring(self.player and self.player.UserId),
+		effectName,
+		tostring(source or "unknown")
+	)
+	self:StopPhoenixFlight(reason, {
+		RestoreAutoRotate = false,
+	})
+	return true
+end
+
+function ToriClient:StopPhoenixFlightForActiveHitEffect(source)
+	local effectName = self:GetActiveFlightInterruptHitEffect()
+	if not effectName then
+		return false
+	end
+
+	return self:StopPhoenixFlightForHitEffect(effectName, source)
+end
+
+function ToriClient:EnsureFlightHitEffectHook()
+	if self._hitEffectHookRegistered then
+		return
+	end
+
+	local player = self.player
+	if not player then
+		return
+	end
+
+	self._hitEffectHookRegistered = true
+	local attributes = HitEffectConfig.Attributes
+	player:GetAttributeChangedSignal(attributes.Type):Connect(function()
+		self:StopPhoenixFlightForActiveHitEffect("hit_effect_type")
+	end)
+	player:GetAttributeChangedSignal(attributes.Until):Connect(function()
+		self:StopPhoenixFlightForActiveHitEffect("hit_effect_until")
+	end)
+
+	task.defer(function()
+		self:StopPhoenixFlightForActiveHitEffect("hit_effect_initial")
 	end)
 end
 
@@ -527,6 +603,7 @@ function ToriClient:StopPhoenixFlight(reason, options)
 
 	local resolvedReason = typeof(reason) == "string" and reason ~= "" and reason or "unknown"
 	local shouldReportEnd = not (type(options) == "table" and options.ReportEnd == false)
+	local shouldRestoreAutoRotate = not (type(options) == "table" and options.RestoreAutoRotate == false)
 	local now = os.clock()
 	local wasFlightStarted = flightState.FlightStarted
 	local remaining = wasFlightStarted and (flightState.EndTime - now) or nil
@@ -538,7 +615,7 @@ function ToriClient:StopPhoenixFlight(reason, options)
 	end
 
 	local humanoid = getHumanoid(self)
-	if humanoid then
+	if humanoid and shouldRestoreAutoRotate then
 		humanoid.AutoRotate = true
 	end
 
@@ -995,6 +1072,10 @@ end
 
 function ToriClient:UpdatePhoenixFlight(dt)
 	local now = os.clock()
+	if self:StopPhoenixFlightForActiveHitEffect("flight_update") then
+		return
+	end
+
 	if self:ResolveEquippedFruitName() ~= self.phoenixFruitName then
 		self:StopPhoenixFlight("fruit_changed", { ReportEnd = false })
 		return
