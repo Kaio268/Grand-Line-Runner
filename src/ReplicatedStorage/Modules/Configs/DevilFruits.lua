@@ -144,7 +144,7 @@ local DevilFruits = {
 					-- Final explosion visual radius = VisualBaseRadius * RadiusScale * VisualRadiusScale * SpeedRadiusScale.
 					-- First calibrate HitboxRadiusScale/VisualRadiusScale against each other, then use RadiusScale to resize both.
 					RadiusScale = 1,
-					HitboxRadiusScale = 0.5,
+					HitboxRadiusScale = 0.3,
 					SpeedRadiusScaling = {
 						Enabled = true,
 						UseSpeedStat = true,
