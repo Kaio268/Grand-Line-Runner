@@ -1,7 +1,9 @@
 local MS = game:GetService("MarketplaceService")
 local player = game:GetService("Players").LocalPlayer
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ProductId = 1667049739
+local GamepassesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+local ProductId = assert(tonumber(GamepassesConfig.VIP and GamepassesConfig.VIP.ID), "VIP gamepass ID is not configured")
 
 local priceCache = {}
 

@@ -30,6 +30,7 @@ local PATH_LABELS = {
 	Lobby = "active map Lobby",
 	Leaderboards = "active map Leaderboards",
 	VipRefuge = "active map Vip Refuge",
+	VipBarriers = "active map Vip Refuge.VIPBarriers",
 	VipDoorParts = "active map VIPDoorParts",
 	BrrBrrPatapimNpc = "Brr Brr Patapim NPC",
 	GearShopNpc = "gear shop NPC",
@@ -296,9 +297,13 @@ local function collectRefs(options)
 	local lobby = findDirectOrRecursiveInRoots(socialRoots, { "Lobby" })
 	local leaderboards = findDirectOrRecursiveInRoots(socialRoots, { "Leaderboards" })
 	local vipRefuge = findDirectOrRecursiveInRoots(socialRoots, { "Vip Refuge", "VipRefuge" })
+	local vipBarrierFolder = if vipRefuge
+		then getChildByNames(vipRefuge, { "VIPBarriers" }, nil, true)
+		else findDirectOrRecursiveInRoots(socialRoots, { "VIPBarriers" })
 	local vipDoorParts = if vipRefuge
 		then getChildByNames(vipRefuge, { "VIPDoorParts" }, nil, true)
 		else findDirectOrRecursiveInRoots(socialRoots, { "VIPDoorParts" })
+	local vipBarriers = vipBarrierFolder or vipDoorParts
 	local lobbyModel = lobby and getChildByNames(lobby, { "Model" }) or nil
 	local groupReward = if lobby
 		then getChildByNames(lobby, { "GroupReward" }, nil, true)
@@ -326,7 +331,8 @@ local function collectRefs(options)
 	refs.Lobby = lobby
 	refs.Leaderboards = leaderboards
 	refs.VipRefuge = vipRefuge
-	refs.VipDoorParts = vipDoorParts
+	refs.VipBarriers = vipBarriers
+	refs.VipDoorParts = vipDoorParts or vipBarriers
 	refs.BrrBrrPatapimNpc = getChildByNames(lobby, { "Brr Brr Patapim" }, nil, true)
 		or findDirectOrRecursiveInRoots(socialRoots, { "Brr Brr Patapim" })
 	refs.GearShopNpc = getChildByNames(lobbyModel, { "Normal" }, nil, true)

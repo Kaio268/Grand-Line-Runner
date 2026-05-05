@@ -233,7 +233,6 @@ local function DropAction(props)
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Position = UDim2.new(0.5, 0, 1, -BUTTON_BOTTOM_OFFSET),
-		Name = "CorridorDropButton",
 		ref = buttonRef,
 		Size = UDim2.new(0.45, 0, 0, BUTTON_HEIGHT),
 		Text = "",
@@ -248,11 +247,11 @@ local function DropAction(props)
 	return e("ScreenGui", {
 		DisplayOrder = 155,
 		IgnoreGuiInset = true,
-		Name = "ReactCorridorDropAction",
+		key = "ReactCorridorDropAction",
 		ResetOnSpawn = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Button = e("TextButton", buttonProps, {
+		CorridorDropButton = e("TextButton", buttonProps, {
 			Scale = e("UIScale", {
 				Scale = scale,
 			}),

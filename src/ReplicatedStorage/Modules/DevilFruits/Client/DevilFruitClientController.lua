@@ -1003,6 +1003,15 @@ local function getCharacter()
 	return player.Character
 end
 
+local function getCurrentCamera()
+	return Workspace.CurrentCamera
+end
+
+local function getHumanoid()
+	local character = getCharacter()
+	return character and character:FindFirstChildOfClass("Humanoid") or nil
+end
+
 local function getRootPart()
 	local character = getCharacter()
 	if not character then

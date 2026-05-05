@@ -40,7 +40,7 @@ local TITLE_BAND_STYLE = {
 	zIndex = 10,
 }
 
-local function renderVisualImage(name, style)
+local function renderVisualImage(style)
 	if typeof(style) ~= "table" then
 		return nil
 	end
@@ -51,7 +51,6 @@ local function renderVisualImage(name, style)
 	end
 
 	return e("ImageLabel", {
-		Name = name,
 		AnchorPoint = style.anchorPoint,
 		BackgroundColor3 = style.backgroundColor3,
 		BackgroundTransparency = style.backgroundTransparency,
@@ -77,7 +76,6 @@ end
 
 local function renderFallbackBackground()
 	return e("Frame", {
-		Name = "ReactHudMenuBackgroundFallback",
 		BackgroundColor3 = Color3.fromRGB(22, 30, 44),
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
@@ -108,7 +106,6 @@ local function renderFallbackIcon(style)
 	local iconStyle = style or FALLBACK_ICON_STYLE
 
 	return e("Frame", {
-		Name = "ReactHudMenuFallbackIcon",
 		AnchorPoint = iconStyle.anchorPoint,
 		BackgroundColor3 = Color3.fromRGB(255, 236, 191),
 		BackgroundTransparency = 0.72,
@@ -139,7 +136,6 @@ local function renderTitleBand(bandStyle)
 	local style = bandStyle or TITLE_BAND_STYLE
 
 	return e("Frame", {
-		Name = "ReactHudTitleBand",
 		AnchorPoint = style.anchorPoint or TITLE_BAND_STYLE.anchorPoint,
 		BackgroundColor3 = Color3.fromRGB(7, 12, 20),
 		BackgroundTransparency = 0.18,
@@ -171,7 +167,6 @@ local function renderTitle(label, titleStyle)
 	local style = titleStyle or FALLBACK_TITLE_STYLE
 
 	return e("TextLabel", {
-		Name = "ReactHudTitle",
 		AnchorPoint = style.anchorPoint or FALLBACK_TITLE_STYLE.anchorPoint,
 		BackgroundTransparency = style.backgroundTransparency or 1,
 		BorderSizePixel = 0,
@@ -203,31 +198,36 @@ local function HudMenuTile(props)
 	local style = props.style or {}
 	local titleStyle = style.title or FALLBACK_TITLE_STYLE
 	local children = {
-		Title = renderTitle(props.label, titleStyle),
+		ReactHudTitle = renderTitle(props.label, titleStyle),
 	}
 
 	if style.showBackground ~= false then
-		children.Background = renderVisualImage("ReactHudMenuBackground", style.background) or renderFallbackBackground()
+		local background = renderVisualImage(style.background)
+		if background then
+			children.ReactHudMenuBackground = background
+		else
+			children.ReactHudMenuBackgroundFallback = renderFallbackBackground()
+		end
 	end
 
 	if style.showTitleBand == true then
-		children.TitleBand = renderTitleBand(style.titleBand)
+		children.ReactHudTitleBand = renderTitleBand(style.titleBand)
 	end
 
-	local iconNode = renderVisualImage("ReactHudMenuIcon", style.icon or FALLBACK_ICON_STYLE)
+	local iconNode = renderVisualImage(style.icon or FALLBACK_ICON_STYLE)
 	if iconNode then
-		children.Icon = iconNode
+		children.ReactHudMenuIcon = iconNode
 	else
-		children.Icon = renderFallbackIcon(style.icon or FALLBACK_ICON_STYLE)
+		children.ReactHudMenuFallbackIcon = renderFallbackIcon(style.icon or FALLBACK_ICON_STYLE)
 	end
 
-	local accent = renderVisualImage("ReactHudMenuAccent", style.accent)
+	local accent = renderVisualImage(style.accent)
 	if accent then
-		children.Accent = accent
+		children.ReactHudMenuAccent = accent
 	end
 
 	return ReactRoblox.createPortal(e("Frame", {
-		Name = "ReactHudMenuTileRoot",
+		key = "ReactHudMenuTileRoot",
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,

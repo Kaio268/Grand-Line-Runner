@@ -601,12 +601,10 @@ local function positionClone(clone, targetCFrame)
 		clone.Parent = anchor
 	end
 
-	if clone:IsA("Attachment") then
+	if clone:IsA("Attachment") or clone:IsA("Smoke") or clone:IsA("Fire") or clone:IsA("Sparkles") then
 		clone.Parent = anchor
 	elseif clone:IsA("ParticleEmitter") or clone:IsA("Trail") or clone:IsA("Beam") then
 		clone.Parent = anchorAttachment
-	elseif clone:IsA("Smoke") or clone:IsA("Fire") or clone:IsA("Sparkles") then
-		clone.Parent = anchor
 	end
 
 	return anchor

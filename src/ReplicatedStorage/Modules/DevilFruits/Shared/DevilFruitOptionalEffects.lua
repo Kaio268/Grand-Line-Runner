@@ -270,9 +270,7 @@ end
 
 local function setTransientVisualsEnabled(root, enabled)
 	eachSelfAndDescendants(root, function(item)
-		if item:IsA("Trail") or item:IsA("Beam") then
-			item.Enabled = enabled
-		elseif item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
+		if item:IsA("Trail") or item:IsA("Beam") or item:IsA("PointLight") or item:IsA("SpotLight") or item:IsA("SurfaceLight") then
 			item.Enabled = enabled
 		end
 	end)

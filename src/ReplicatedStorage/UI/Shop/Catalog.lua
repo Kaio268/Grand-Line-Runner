@@ -1,4 +1,9 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local GamepassesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+
 local Catalog = {}
+local VIP_GAMEPASS_ID = assert(tonumber(GamepassesConfig.VIP and GamepassesConfig.VIP.ID), "VIP gamepass ID is not configured")
 
 local function item(config)
 	return config
@@ -91,7 +96,7 @@ local items = {
 		},
 		purchase = {
 			kind = "gamepass",
-			id = 1667049739,
+			id = VIP_GAMEPASS_ID,
 			ownedKey = "VIP",
 		},
 	}),

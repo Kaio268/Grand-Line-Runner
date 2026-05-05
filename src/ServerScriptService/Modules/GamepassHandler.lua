@@ -1,10 +1,14 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local DataStoreService   = game:GetService("DataStoreService")
 local Players            = game:GetService("Players")
+local ReplicatedStorage  = game:GetService("ReplicatedStorage")
 local DS = DataStoreService:GetDataStore("OwnedGamepasse7")
 local GamepassHandler = {}
 local _gamepasses = {}
 local _byId, _byName = {}, {}
+local GamepassesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+local VIP_GAMEPASS_ID = assert(tonumber(GamepassesConfig.VIP and GamepassesConfig.VIP.ID), "VIP gamepass ID is not configured")
+local X2_MONEY_GAMEPASS_ID = tonumber(GamepassesConfig["x2 Money"] and GamepassesConfig["x2 Money"].ID) or 1667343349
 
 
 local function getOrCreateFolder(plr)
@@ -209,7 +213,7 @@ end)
 ---------------------------------------------------------------------
 GamepassHandler.AddGamepass(
 	"VIP",
-	1667049739 ,
+	VIP_GAMEPASS_ID,
 	function(plr)
 		local folder = plr:FindFirstChild("Passes")
 		 
@@ -219,7 +223,7 @@ GamepassHandler.AddGamepass(
  
 GamepassHandler.AddGamepass(
 	"x2 Money",
-	1667343349 ,
+	X2_MONEY_GAMEPASS_ID,
 	function(plr)
 		local folder = plr:FindFirstChild("Passes")
 		local money = folder:FindFirstChild("x2 MoneyValue")

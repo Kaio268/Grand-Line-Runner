@@ -1,7 +1,7 @@
 local Gamepasses = {
 	["VIP"] = {
 		TYPE = "Gamepass",
-		ID = 1667049739,
+		ID = 1827239335,
 		Icon = "rbxassetid://118443250256506",
 		
 		Description = "Get x1.25 Beli, a VIP tag, plus access to shortcuts",
