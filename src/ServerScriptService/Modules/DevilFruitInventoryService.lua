@@ -284,6 +284,7 @@ function DevilFruitInventoryService.GrantFruit(player, fruitIdentifier, amount)
 
 	local success, setReason = DataManager:TrySetValue(player, getFruitInventoryPath(fruit.FruitKey), currentQuantity + increment)
 	if success then
+		-- Granting a fruit updates both current ownership and lifetime discovery.
 		IndexCollectionService.MarkDevilFruitDiscovered(player, fruit.FruitKey)
 	end
 

@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -8,6 +9,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local HieFolder = DevilFruits:WaitForChild("Hie")
 local HieShared = HieFolder:WaitForChild("Shared")
@@ -29,6 +31,16 @@ local FREEZE_SHOT_MUZZLE_CACHE_TTL = 1
 local FREEZE_SHOT_LOCAL_CAST_LOCK_MIN_DURATION = 1
 local LOG_INFO_COOLDOWN = 0.2
 local LOG_WARN_COOLDOWN = 3
+local SOUND_CLEANUP_FALLBACK_SECONDS = 8
+local DEBUG_SOUND = RunService:IsStudio()
+local SOUND_FREEZE_SHOT_FIRE = "Fire"
+local SOUND_FREEZE_SHOT_IMPACT = "Impact"
+local SOUND_ICE_BOOST_LOOP = "Loop"
+-- Gameplay calls this ability FreezeShot, but the sound assets are under Hie/IceShot.
+local SOUND_FOLDER_BY_ABILITY = {
+	[HieClient.FREEZE_SHOT_ABILITY] = "IceShot",
+	[HieClient.ICE_BOOST_ABILITY] = "IceBoost",
+}
 local BURST_CONFIG = {
 	BurstCount = 5,
 	BurstInterval = 0,
@@ -54,6 +66,8 @@ local AIM_HELPER_NAMES = {
 	RunHub = true,
 	DecreaseSpeed = true,
 }
+local hieSoundFolderCache = {}
+local hieSoundTemplateCache = {}
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -61,6 +75,18 @@ local function formatVector3(value)
 	end
 
 	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if typeof(instance) ~= "Instance" then
+		return "<nil>"
+	end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+
+	return ok and fullName or instance.Name
 end
 
 local function formatOrientationCorrection(value)
@@ -142,6 +168,343 @@ local function logVfxError(message, ...)
 	end
 
 	warn(string.format("[HIE][VFX][ERROR] " .. message, ...))
+end
+
+local function hieSoundLog(message, ...)
+	if not DEBUG_SOUND then
+		return
+	end
+
+	if not DiagnosticLogLimiter.ShouldEmit("HieClient:SOUND", DiagnosticLogLimiter.BuildKey(message, ...), LOG_INFO_COOLDOWN) then
+		return
+	end
+
+	print(string.format("[HIE SOUND] " .. tostring(message), ...))
+end
+
+local function hieSoundWarn(message, ...)
+	if not DEBUG_SOUND then
+		return
+	end
+
+	if not DiagnosticLogLimiter.ShouldEmit("HieClient:SOUND_WARN", DiagnosticLogLimiter.BuildKey(message, ...), LOG_WARN_COOLDOWN) then
+		return
+	end
+
+	warn(string.format("[HIE SOUND] " .. tostring(message), ...))
+end
+
+local function getSoundPlayingState(sound)
+	if not sound then
+		return "<nil>"
+	end
+
+	local ok, isPlaying = pcall(function()
+		return sound.IsPlaying
+	end)
+
+	return ok and tostring(isPlaying) or "<unreadable>"
+end
+
+local function logSoundDiagnostics(stage, abilityName, soundName, sound)
+	if not DEBUG_SOUND then
+		return
+	end
+
+	if not sound then
+		hieSoundWarn("%s ability=%s sound=%s issue=missing_instance", tostring(stage), tostring(abilityName), tostring(soundName))
+		return
+	end
+
+	local soundId = tostring(sound.SoundId or "")
+	local volume = tonumber(sound.Volume) or 0
+	if soundId == "" then
+		hieSoundWarn(
+			"%s ability=%s sound=%s path=%s issue=missing_sound_id",
+			tostring(stage),
+			tostring(abilityName),
+			tostring(soundName),
+			formatInstancePath(sound)
+		)
+	end
+	if volume <= 0 then
+		hieSoundWarn(
+			"%s ability=%s sound=%s path=%s issue=zero_or_negative_volume volume=%.3f",
+			tostring(stage),
+			tostring(abilityName),
+			tostring(soundName),
+			formatInstancePath(sound),
+			volume
+		)
+	end
+	if not sound.Parent then
+		hieSoundWarn(
+			"%s ability=%s sound=%s path=%s issue=nil_parent",
+			tostring(stage),
+			tostring(abilityName),
+			tostring(soundName),
+			formatInstancePath(sound)
+		)
+	end
+
+	hieSoundLog(
+		"%s ability=%s sound=%s path=%s parent=%s soundId=%s volume=%.3f looped=%s timeLength=%.3f isPlaying=%s",
+		tostring(stage),
+		tostring(abilityName),
+		tostring(soundName),
+		formatInstancePath(sound),
+		formatInstancePath(sound.Parent),
+		soundId,
+		volume,
+		tostring(sound.Looped),
+		tonumber(sound.TimeLength) or 0,
+		getSoundPlayingState(sound)
+	)
+end
+
+local function resolveHieSoundFolder(abilityName)
+	local folderName = SOUND_FOLDER_BY_ABILITY[abilityName]
+	if not folderName then
+		hieSoundWarn("resolve_folder_failed ability=%s issue=unknown_ability", tostring(abilityName))
+		return nil
+	end
+
+	local cachedFolder = hieSoundFolderCache[folderName]
+	if cachedFolder and cachedFolder.Parent then
+		return cachedFolder
+	end
+
+	local node = ReplicatedStorage
+	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Hie", folderName }) do
+		local child = node and node:FindFirstChild(segment)
+		if not child then
+			hieSoundWarn(
+				"path_segment_missing ability=%s segment=%s parent=%s",
+				tostring(abilityName),
+				tostring(segment),
+				formatInstancePath(node)
+			)
+			return nil
+		end
+
+		hieSoundLog("path_segment_found ability=%s segment=%s path=%s", tostring(abilityName), tostring(segment), formatInstancePath(child))
+		node = child
+	end
+
+	hieSoundFolderCache[folderName] = node
+	return node
+end
+
+local function getHieSoundTemplate(abilityName, soundName)
+	local folderName = SOUND_FOLDER_BY_ABILITY[abilityName]
+	if not folderName then
+		hieSoundWarn("template_missing ability=%s sound=%s issue=unknown_ability", tostring(abilityName), tostring(soundName))
+		return nil
+	end
+
+	local cacheKey = folderName .. "/" .. tostring(soundName)
+	local cachedTemplate = hieSoundTemplateCache[cacheKey]
+	if cachedTemplate and cachedTemplate.Parent then
+		return cachedTemplate
+	end
+
+	local soundFolder = resolveHieSoundFolder(abilityName)
+	hieSoundLog("resolve_folder ability=%s sound=%s folder=%s", tostring(abilityName), tostring(soundName), formatInstancePath(soundFolder))
+	if not soundFolder then
+		hieSoundWarn(
+			"resolve_folder_failed ability=%s sound=%s expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Hie.%s",
+			tostring(abilityName),
+			tostring(soundName),
+			tostring(folderName)
+		)
+		return nil
+	end
+
+	local soundTemplate = soundFolder:FindFirstChild(soundName)
+	if soundTemplate and soundTemplate:IsA("Sound") then
+		hieSoundTemplateCache[cacheKey] = soundTemplate
+		logSoundDiagnostics("template_found", abilityName, soundName, soundTemplate)
+		return soundTemplate
+	end
+
+	if soundTemplate then
+		hieSoundWarn(
+			"template_invalid ability=%s sound=%s path=%s class=%s",
+			tostring(abilityName),
+			tostring(soundName),
+			formatInstancePath(soundTemplate),
+			tostring(soundTemplate.ClassName)
+		)
+	else
+		hieSoundWarn(
+			"template_missing ability=%s sound=%s folder=%s childCount=%d",
+			tostring(abilityName),
+			tostring(soundName),
+			formatInstancePath(soundFolder),
+			#soundFolder:GetChildren()
+		)
+	end
+
+	return nil
+end
+
+local function getSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return SOUND_CLEANUP_FALLBACK_SECONDS
+end
+
+local function createSoundAnchor(position, soundName)
+	if typeof(position) ~= "Vector3" then
+		return nil
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "HieSound_" .. tostring(soundName)
+	anchor.Anchored = true
+	anchor.Transparency = 1
+	anchor.CanCollide = false
+	anchor.CanTouch = false
+	anchor.CanQuery = false
+	anchor.CastShadow = false
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.CFrame = CFrame.new(position)
+	anchor.Parent = Workspace
+	return anchor
+end
+
+local function resolveSoundParent(parentOrPosition, soundName)
+	if typeof(parentOrPosition) == "Vector3" then
+		local anchor = createSoundAnchor(parentOrPosition, soundName)
+		return anchor, anchor
+	end
+
+	if typeof(parentOrPosition) == "Instance" and parentOrPosition.Parent then
+		return parentOrPosition, nil
+	end
+
+	return nil, nil
+end
+
+local function playHieOneShot(abilityName, soundName, parentOrPosition)
+	local parent, anchor = resolveSoundParent(parentOrPosition, soundName)
+	if not parent then
+		hieSoundWarn(
+			"one_shot_skipped ability=%s sound=%s issue=invalid_parent parent=%s",
+			tostring(abilityName),
+			tostring(soundName),
+			formatInstancePath(parentOrPosition)
+		)
+		return nil
+	end
+
+	local soundTemplate = getHieSoundTemplate(abilityName, soundName)
+	if not soundTemplate then
+		if anchor and anchor.Parent then
+			anchor:Destroy()
+		end
+		hieSoundWarn("one_shot_skipped ability=%s sound=%s issue=template_missing", tostring(abilityName), tostring(soundName))
+		return nil
+	end
+
+	hieSoundLog("one_shot_clone_begin ability=%s sound=%s parent=%s", tostring(abilityName), tostring(soundName), formatInstancePath(parent))
+	local sound = soundTemplate:Clone()
+	sound.Looped = false
+	sound.Parent = parent
+	logSoundDiagnostics("one_shot_parented", abilityName, soundName, sound)
+	SettingsAudioController.TrackSound(sound)
+	logSoundDiagnostics("one_shot_tracked", abilityName, soundName, sound)
+	sound:Play()
+	logSoundDiagnostics("one_shot_play_called", abilityName, soundName, sound)
+
+	local cleanupDelay = getSoundCleanupDelay(sound)
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+		if sound.Parent then
+			sound:Destroy()
+		end
+		if anchor and anchor.Parent then
+			anchor:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, cleanupDelay)
+	if anchor then
+		Debris:AddItem(anchor, cleanupDelay + 0.25)
+	end
+
+	return sound
+end
+
+local function startIceBoostLoop(state, parent)
+	if not state then
+		hieSoundWarn("ice_boost_loop_skipped issue=missing_state")
+		return nil
+	end
+
+	if state.IceBoostLoopSound then
+		local previousSound = state.IceBoostLoopSound
+		state.IceBoostLoopSound = nil
+		if previousSound.Parent then
+			pcall(function()
+				previousSound:Stop()
+			end)
+			previousSound:Destroy()
+			hieSoundLog("ice_boost_loop_replaced previousSound=%s", formatInstancePath(previousSound))
+		end
+	end
+
+	if not (parent and parent.Parent) then
+		hieSoundWarn("ice_boost_loop_skipped issue=invalid_parent parent=%s", formatInstancePath(parent))
+		return nil
+	end
+
+	local soundTemplate = getHieSoundTemplate(HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP)
+	if not soundTemplate then
+		hieSoundWarn("ice_boost_loop_skipped issue=template_missing")
+		return nil
+	end
+
+	local sound = soundTemplate:Clone()
+	sound.Looped = true
+	sound.Parent = parent
+	logSoundDiagnostics("ice_boost_loop_parented", HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, sound)
+	SettingsAudioController.TrackSound(sound)
+	logSoundDiagnostics("ice_boost_loop_tracked", HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, sound)
+	sound:Play()
+	state.IceBoostLoopSound = sound
+	logSoundDiagnostics("ice_boost_loop_play_called", HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, sound)
+	return sound
+end
+
+local function stopIceBoostLoop(state, reason)
+	local sound = state and state.IceBoostLoopSound
+	if state then
+		state.IceBoostLoopSound = nil
+	end
+	if not sound then
+		hieSoundLog("ice_boost_loop_stop_skipped reason=%s issue=no_sound_reference", tostring(reason))
+		return
+	end
+
+	if sound.Parent then
+		logSoundDiagnostics("ice_boost_loop_stop_begin", HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, sound)
+		pcall(function()
+			sound:Stop()
+		end)
+		logSoundDiagnostics("ice_boost_loop_stopped", HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, sound)
+		sound:Destroy()
+		hieSoundLog("ice_boost_loop_destroyed reason=%s", tostring(reason))
+	else
+		hieSoundWarn("ice_boost_loop_stop_skipped reason=%s issue=sound_parent_missing", tostring(reason))
+	end
 end
 
 local function logBurst(message, ...)
@@ -972,6 +1335,7 @@ function HieClient:CleanupIceBoostEffect(targetPlayer, reason)
 	end
 
 	self.activeIceBoostEffects[targetPlayer] = nil
+	stopIceBoostLoop(state, reason or "cleanup")
 	HieVfx.CleanupIceBoostEffect(state.VisualState, reason or "cleanup")
 end
 
@@ -992,13 +1356,16 @@ function HieClient:CreateIceBoostEffect(targetPlayer, payload)
 
 	if not visualState then
 		createFallbackIceBoostEffect(targetPlayer)
-		return
 	end
 
-	self.activeIceBoostEffects[targetPlayer] = {
+	local state = {
 		VisualState = visualState,
 		EndAt = os.clock() + duration,
 	}
+	self.activeIceBoostEffects[targetPlayer] = state
+
+	local soundParent = visualState and visualState.AnchorPart and visualState.AnchorPart.Parent and visualState.AnchorPart or rootPart
+	startIceBoostLoop(state, soundParent)
 end
 
 function HieClient:DestroyFreezeShotPart(projectileState)
@@ -1732,6 +2099,11 @@ function HieClient:RegisterFreezeShotLaunch(targetPlayer, payload)
 		return false
 	end
 
+	-- FreezeShot is a real shotgun burst; keep the release sound to one muzzle sound per cast.
+	if (tonumber(payload.ShotgunIndex) or 1) <= 1 then
+		playHieOneShot(HieClient.FREEZE_SHOT_ABILITY, SOUND_FREEZE_SHOT_FIRE, visualStartPosition)
+	end
+
 	if payload.DisableVisualBurst == true then
 		logBurst(
 			"server gameplay shotgun projectile index=%s/%s projectileId=%s visualBurst=false",
@@ -1879,6 +2251,7 @@ function HieClient:UpdateFreezeShots()
 						projectileId,
 						formatVector3(resolvedPosition)
 					)
+					playHieOneShot(HieClient.FREEZE_SHOT_ABILITY, SOUND_FREEZE_SHOT_IMPACT, resolvedPosition)
 					local impactOk = projectileState.VisualState and HieVfx.TriggerFreezeShotImpact(resolvedPosition)
 					if not impactOk then
 						local fallbackOk, fallbackError = pcall(createIceImpactEffect, resolvedPosition)
@@ -1926,7 +2299,7 @@ function HieClient:UpdateIceBoostEffects()
 			continue
 		end
 
-		if not HieVfx.UpdateIceBoostEffect(state.VisualState, rootPart) then
+		if state.VisualState and not HieVfx.UpdateIceBoostEffect(state.VisualState, rootPart) then
 			self:CleanupIceBoostEffect(targetPlayer, "update_failed")
 		end
 	end

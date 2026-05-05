@@ -10,6 +10,7 @@ local AnimationLoadDiagnostics = require(DevilFruits:WaitForChild("AnimationLoad
 local DiagnosticLogLimiter = require(DevilFruits:WaitForChild("DiagnosticLogLimiter"))
 local AnimationResolver = require(DevilFruits:WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 local CommonAnimation = require(DevilFruits:WaitForChild("Shared"):WaitForChild("CommonAnimation"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 
 local SukeClient = {}
 SukeClient.__index = SukeClient
@@ -49,6 +50,11 @@ local SHIMMER_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 local AUTHORED_VFX_TEXTURE = "rbxassetid://8037777212"
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Suke.Client.SukeClient"
 local WARN_COOLDOWN = 4
+local SOUND_ABILITY_FOLDER = "Fade"
+local SOUND_ACTIVATE = "Activate"
+local SOUND_CLEANUP_FALLBACK_SECONDS = 8
+local sukeFadeSoundFolder = nil
+local sukeFadeSoundTemplates = {}
 
 local function logWarn(message, ...)
 	if not DiagnosticLogLimiter.ShouldEmit("SukeClient:WARN", DiagnosticLogLimiter.BuildKey(message, ...), WARN_COOLDOWN) then
@@ -96,6 +102,77 @@ end
 local function getRootPart(targetPlayer)
 	local character = getCharacter(targetPlayer)
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
+end
+
+local function resolveFadeSoundFolder()
+	if sukeFadeSoundFolder and sukeFadeSoundFolder.Parent then
+		return sukeFadeSoundFolder
+	end
+
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local sounds = assets and assets:FindFirstChild("Sounds")
+	local devilFruitSounds = sounds and sounds:FindFirstChild("DevilFruits")
+	local sukeSounds = devilFruitSounds and devilFruitSounds:FindFirstChild("Suke")
+	local fadeFolder = sukeSounds and sukeSounds:FindFirstChild(SOUND_ABILITY_FOLDER)
+	sukeFadeSoundFolder = fadeFolder
+	return fadeFolder
+end
+
+local function getFadeSoundTemplate(soundName)
+	local cachedTemplate = sukeFadeSoundTemplates[soundName]
+	if cachedTemplate and cachedTemplate.Parent then
+		return cachedTemplate
+	end
+
+	local soundFolder = resolveFadeSoundFolder()
+	local soundTemplate = soundFolder and soundFolder:FindFirstChild(soundName) or nil
+	if soundTemplate and soundTemplate:IsA("Sound") then
+		sukeFadeSoundTemplates[soundName] = soundTemplate
+		return soundTemplate
+	end
+
+	return nil
+end
+
+local function getSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return SOUND_CLEANUP_FALLBACK_SECONDS
+end
+
+local function playFadeActivateSound(targetPlayer)
+	local rootPart = getRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundTemplate = getFadeSoundTemplate(SOUND_ACTIVATE)
+	if not soundTemplate then
+		return nil
+	end
+
+	local sound = soundTemplate:Clone()
+	sound.Looped = false
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getSoundCleanupDelay(sound))
+	return sound
 end
 
 local function isFadePart(part)
@@ -604,7 +681,7 @@ function SukeClient:ActivateFadeFromWindup(targetPlayer, windup)
 	end
 
 	windup.Activated = true
-	return self:StartFade(targetPlayer, windup.Payload)
+	return self:StartFade(targetPlayer, windup.Payload, windup.ServerConfirmed)
 end
 
 function SukeClient:ArmFadeActivation(targetPlayer, windup, animationConfig)
@@ -641,7 +718,15 @@ function SukeClient:StartFadeWindup(targetPlayer, payload, isPredicted)
 		if payload ~= nil then
 			existingWindup.Payload = payload
 		end
+		local wasServerConfirmed = existingWindup.ServerConfirmed == true
 		existingWindup.ServerConfirmed = existingWindup.ServerConfirmed or not isPredicted
+		if existingWindup.Activated and not wasServerConfirmed and existingWindup.ServerConfirmed then
+			local fadeState = self.fadeStates[targetPlayer]
+			if fadeState and not fadeState.ActivateSoundPlayed then
+				fadeState.ActivateSoundPlayed = true
+				playFadeActivateSound(targetPlayer)
+			end
+		end
 		return true
 	end
 
@@ -770,7 +855,7 @@ function SukeClient:ClearFade(targetPlayer, immediate)
 	end)
 end
 
-function SukeClient:StartFade(targetPlayer, payload)
+function SukeClient:StartFade(targetPlayer, payload, serverConfirmed)
 	if not targetPlayer or not targetPlayer:IsA("Player") then
 		return false
 	end
@@ -803,9 +888,14 @@ function SukeClient:StartFade(targetPlayer, payload)
 		StartedAt = os.clock(),
 		PulseStartsAt = os.clock() + settings.FadeOutTime,
 		Tweens = {},
+		ActivateSoundPlayed = false,
 	}
 	self.fadeStates[targetPlayer] = state
 	state.AuthoredVfx = playAuthoredFadeVfx(character, rootPart, settings)
+	if serverConfirmed == true then
+		state.ActivateSoundPlayed = true
+		playFadeActivateSound(targetPlayer)
+	end
 
 	for _, entry in ipairs(partEntries) do
 		local part = entry.Instance

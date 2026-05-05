@@ -29,6 +29,11 @@ end)
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local LOADING_SCREEN_ACTIVE_ATTRIBUTE = "LoadingScreenActive"
+local LOADING_SCREEN_COMPLETE_ATTRIBUTE = "LoadingScreenComplete"
+
+playerGui:SetAttribute(LOADING_SCREEN_ACTIVE_ATTRIBUTE, true)
+playerGui:SetAttribute(LOADING_SCREEN_COMPLETE_ATTRIBUTE, false)
 
 local template = script:FindFirstChild("LoadingScreen") or ReplicatedFirst:WaitForChild("LoadingScreen")
 
@@ -259,8 +264,14 @@ do
 	end
 end
 
+local function markLoadingScreenFinished()
+	playerGui:SetAttribute(LOADING_SCREEN_ACTIVE_ATTRIBUTE, false)
+	playerGui:SetAttribute(LOADING_SCREEN_COMPLETE_ATTRIBUTE, true)
+end
+
 local function fadeOutAndDestroy()
 	if not isAlive(screenGui) then
+		markLoadingScreenFinished()
 		return
 	end
 	local tweens = {}
@@ -283,6 +294,7 @@ local function fadeOutAndDestroy()
 	if isAlive(screenGui) then
 		screenGui:Destroy()
 	end
+	markLoadingScreenFinished()
 end
 
 task.spawn(function()

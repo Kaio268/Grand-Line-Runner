@@ -1,11 +1,15 @@
 local Debris = game:GetService("Debris")
+local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local DevilFruits = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DevilFruits = Modules:WaitForChild("DevilFruits")
 local AnimationLoadDiagnostics = require(DevilFruits:WaitForChild("AnimationLoadDiagnostics"))
 local AnimationResolver = require(DevilFruits:WaitForChild("Shared"):WaitForChild("AnimationResolver"))
 local CommonAnimation = require(DevilFruits:WaitForChild("Shared"):WaitForChild("CommonAnimation"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 
 local BomuClient = {}
 BomuClient.__index = BomuClient
@@ -25,6 +29,10 @@ local DEFAULT_ANIMATION_KEY_BY_ACTION = {
 local DEFAULT_FADE_TIME = 0.05
 local DEFAULT_STOP_FADE_TIME = 0.08
 local DEFAULT_JUMP_DELAY = 0.12
+local DEFAULT_PLANT_MOVEMENT_LOCK_DURATION = 0.55
+local DEFAULT_DETONATE_MOVEMENT_LOCK_DURATION = 0.35
+local MOVEMENT_LOCK_INPUT_ACTION = "BomuActionMovementLock"
+local MOVEMENT_LOCK_INPUT_PRIORITY = 10000
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Bomu.Client.BomuClient"
 local PLACEMENT_PULSE_NAME = "BomuLandMinePlacementPulse"
 local PLACEMENT_PULSE_COLOR = Color3.fromRGB(255, 89, 89)
@@ -36,6 +44,280 @@ local PLACEMENT_PULSE_TRANSPARENCY_STEP = 0.1
 local PLACEMENT_PULSE_STEPS = 6
 local PLACEMENT_PULSE_STEP_DELAY = 0.03
 local PLACEMENT_PULSE_LIFETIME = 0.3
+local SOUND_DETONATE = "Detonate"
+local SOUND_CLEANUP_FALLBACK_SECONDS = 8
+local DEFAULT_DETONATE_ROLLOFF_MAX_DISTANCE = 180
+local DEBUG_SOUND = RunService:IsStudio()
+local SOUND_LOG_LIMIT = 40
+local soundLogCount = 0
+local soundWarnCount = 0
+local landMineSoundFolder = nil
+local landMineSoundTemplates = {}
+
+local function formatInstancePath(instance)
+	if typeof(instance) ~= "Instance" then
+		return "<nil>"
+	end
+
+	local ok, fullName = pcall(function()
+		return instance:GetFullName()
+	end)
+
+	return ok and fullName or instance.Name
+end
+
+local function bomuSoundLog(message, ...)
+	if not DEBUG_SOUND or soundLogCount >= SOUND_LOG_LIMIT then
+		return
+	end
+
+	soundLogCount += 1
+	print(string.format("[BOMU SOUND] " .. tostring(message), ...))
+end
+
+local function bomuSoundWarn(message, ...)
+	if not DEBUG_SOUND or soundWarnCount >= SOUND_LOG_LIMIT then
+		return
+	end
+
+	soundWarnCount += 1
+	warn(string.format("[BOMU SOUND] " .. tostring(message), ...))
+end
+
+local function getSoundPlayingState(sound)
+	if not sound then
+		return "<nil>"
+	end
+
+	local ok, isPlaying = pcall(function()
+		return sound.IsPlaying
+	end)
+
+	return ok and tostring(isPlaying) or "<unreadable>"
+end
+
+local function logSoundDiagnostics(stage, soundName, sound)
+	if not DEBUG_SOUND then
+		return
+	end
+
+	if not sound then
+		bomuSoundWarn("%s sound=%s issue=missing_instance", tostring(stage), tostring(soundName))
+		return
+	end
+
+	local soundId = tostring(sound.SoundId or "")
+	local volume = tonumber(sound.Volume) or 0
+	local rollOffMaxDistance = tonumber(sound.RollOffMaxDistance) or 0
+	if soundId == "" then
+		bomuSoundWarn("%s sound=%s path=%s issue=missing_sound_id", tostring(stage), tostring(soundName), formatInstancePath(sound))
+	end
+	if volume <= 0 then
+		bomuSoundWarn(
+			"%s sound=%s path=%s issue=zero_or_negative_volume volume=%.3f",
+			tostring(stage),
+			tostring(soundName),
+			formatInstancePath(sound),
+			volume
+		)
+	end
+	if rollOffMaxDistance <= 0 then
+		bomuSoundWarn(
+			"%s sound=%s path=%s issue=invalid_rolloff_max_distance value=%.3f",
+			tostring(stage),
+			tostring(soundName),
+			formatInstancePath(sound),
+			rollOffMaxDistance
+		)
+	end
+	if not sound.Parent then
+		bomuSoundWarn("%s sound=%s path=%s issue=nil_parent", tostring(stage), tostring(soundName), formatInstancePath(sound))
+	end
+
+	bomuSoundLog(
+		"%s sound=%s path=%s parent=%s soundId=%s volume=%.3f rollOffMaxDistance=%.3f looped=%s timeLength=%.3f isPlaying=%s",
+		tostring(stage),
+		tostring(soundName),
+		formatInstancePath(sound),
+		formatInstancePath(sound.Parent),
+		soundId,
+		volume,
+		rollOffMaxDistance,
+		tostring(sound.Looped),
+		tonumber(sound.TimeLength) or 0,
+		getSoundPlayingState(sound)
+	)
+end
+
+local function resolveLandMineSoundFolder()
+	if landMineSoundFolder and landMineSoundFolder.Parent then
+		return landMineSoundFolder
+	end
+
+	local node = ReplicatedStorage
+	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Bomu", "LandMine" }) do
+		local child = node and node:FindFirstChild(segment)
+		if not child then
+			bomuSoundWarn(
+				"path_segment_missing segment=%s parent=%s",
+				tostring(segment),
+				formatInstancePath(node)
+			)
+			return nil
+		end
+
+		bomuSoundLog("path_segment_found segment=%s path=%s", tostring(segment), formatInstancePath(child))
+		node = child
+	end
+
+	landMineSoundFolder = node
+	return node
+end
+
+local function getLandMineSoundTemplate(soundName)
+	local cachedTemplate = landMineSoundTemplates[soundName]
+	if cachedTemplate and cachedTemplate.Parent then
+		return cachedTemplate
+	end
+
+	local soundFolder = resolveLandMineSoundFolder()
+	bomuSoundLog("resolve_folder sound=%s folder=%s", tostring(soundName), formatInstancePath(soundFolder))
+	if not soundFolder then
+		bomuSoundWarn(
+			"resolve_folder_failed sound=%s expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Bomu.LandMine",
+			tostring(soundName)
+		)
+		return nil
+	end
+
+	local soundTemplate = soundFolder:FindFirstChild(soundName)
+	if soundTemplate and soundTemplate:IsA("Sound") then
+		landMineSoundTemplates[soundName] = soundTemplate
+		logSoundDiagnostics("template_found", soundName, soundTemplate)
+		return soundTemplate
+	end
+
+	if soundTemplate then
+		bomuSoundWarn(
+			"template_invalid sound=%s path=%s class=%s",
+			tostring(soundName),
+			formatInstancePath(soundTemplate),
+			tostring(soundTemplate.ClassName)
+		)
+	else
+		bomuSoundWarn(
+			"template_missing sound=%s folder=%s childCount=%d",
+			tostring(soundName),
+			formatInstancePath(soundFolder),
+			#soundFolder:GetChildren()
+		)
+	end
+
+	return nil
+end
+
+local function getSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return SOUND_CLEANUP_FALLBACK_SECONDS
+end
+
+local function getCharacterRoot(targetPlayer)
+	local character = targetPlayer and targetPlayer.Character
+	return character and character:FindFirstChild("HumanoidRootPart") or nil
+end
+
+local function createSoundAnchor(position, soundName)
+	if typeof(position) ~= "Vector3" then
+		return nil
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = "BomuSound_" .. tostring(soundName)
+	anchor.Anchored = true
+	anchor.Transparency = 1
+	anchor.CanCollide = false
+	anchor.CanTouch = false
+	anchor.CanQuery = false
+	anchor.CastShadow = false
+	anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+	anchor.CFrame = CFrame.new(position)
+	anchor.Parent = Workspace
+	return anchor
+end
+
+local function resolveDetonateSoundParent(targetPlayer, payload)
+	local explosionPosition = typeof(payload and payload.OriginPosition) == "Vector3" and payload.OriginPosition
+		or typeof(payload and payload.MinePosition) == "Vector3" and payload.MinePosition
+		or nil
+	if explosionPosition then
+		local anchor = createSoundAnchor(explosionPosition, SOUND_DETONATE)
+		return anchor, anchor
+	end
+
+	local rootPart = getCharacterRoot(targetPlayer)
+	if rootPart then
+		bomuSoundWarn("detonate_parent_fallback sound=%s parent=%s", SOUND_DETONATE, formatInstancePath(rootPart))
+		return rootPart, nil
+	end
+
+	bomuSoundWarn("detonate_parent_missing sound=%s player=%s", SOUND_DETONATE, tostring(targetPlayer and targetPlayer.Name))
+	return nil, nil
+end
+
+local function playLandMineDetonateSound(targetPlayer, payload)
+	local parent, anchor = resolveDetonateSoundParent(targetPlayer, payload)
+	if not parent then
+		return nil
+	end
+
+	local soundTemplate = getLandMineSoundTemplate(SOUND_DETONATE)
+	if not soundTemplate then
+		if anchor and anchor.Parent then
+			anchor:Destroy()
+		end
+		bomuSoundWarn("detonate_skipped sound=%s issue=template_missing", SOUND_DETONATE)
+		return nil
+	end
+
+	local sound = soundTemplate:Clone()
+	sound.Looped = false
+	if (tonumber(sound.RollOffMaxDistance) or 0) <= 0 then
+		sound.RollOffMaxDistance = DEFAULT_DETONATE_ROLLOFF_MAX_DISTANCE
+	end
+	sound.Parent = parent
+	logSoundDiagnostics("detonate_parented", SOUND_DETONATE, sound)
+	SettingsAudioController.TrackSound(sound)
+	logSoundDiagnostics("detonate_tracked", SOUND_DETONATE, sound)
+	sound:Play()
+	logSoundDiagnostics("detonate_play_called", SOUND_DETONATE, sound)
+
+	local cleanupDelay = getSoundCleanupDelay(sound)
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+		if sound.Parent then
+			sound:Destroy()
+		end
+		if anchor and anchor.Parent then
+			anchor:Destroy()
+		end
+		bomuSoundLog("detonate_cleanup sound=%s", SOUND_DETONATE)
+	end)
+
+	Debris:AddItem(sound, cleanupDelay)
+	if anchor then
+		Debris:AddItem(anchor, cleanupDelay + 0.25)
+	end
+
+	return sound
+end
 
 local function playLandMinePlacementPulse(worldPosition)
 	if typeof(worldPosition) ~= "Vector3" then
@@ -109,6 +391,17 @@ local function getJumpAnimationDelay(abilityConfig)
 	return math.max(0, configuredDelay or DEFAULT_JUMP_DELAY)
 end
 
+local function getActionMovementLockDuration(abilityConfig, actionKey, fallbackDuration)
+	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
+	local actionConfig = type(animationConfig) == "table" and animationConfig[actionKey] or nil
+	local configuredDuration = type(actionConfig) == "table" and tonumber(actionConfig.MovementLockDuration) or nil
+	if configuredDuration == nil then
+		configuredDuration = type(abilityConfig) == "table" and tonumber(abilityConfig.MovementLockDuration) or nil
+	end
+
+	return math.max(0, configuredDuration or fallbackDuration or 0)
+end
+
 local function getTrackPriority(actionConfig)
 	local priority = type(actionConfig) == "table" and actionConfig.Priority or nil
 	if typeof(priority) == "EnumItem" then
@@ -139,6 +432,103 @@ local function stopBomuAnimation(self, targetPlayer, fadeTime)
 
 	CommonAnimation.StopTrack(state.Track, fadeTime or state.StopFadeTime)
 	return true
+end
+
+local function getCharacterHumanoid(player)
+	local character = player and player.Character
+	if not character then
+		return nil
+	end
+
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
+local function sinkMovementInput()
+	return Enum.ContextActionResult.Sink
+end
+
+local function setLocalMovementInputLocked(isLocked)
+	if isLocked then
+		ContextActionService:BindActionAtPriority(
+			MOVEMENT_LOCK_INPUT_ACTION,
+			sinkMovementInput,
+			false,
+			MOVEMENT_LOCK_INPUT_PRIORITY,
+			Enum.PlayerActions.CharacterForward,
+			Enum.PlayerActions.CharacterBackward,
+			Enum.PlayerActions.CharacterLeft,
+			Enum.PlayerActions.CharacterRight,
+			Enum.PlayerActions.CharacterJump
+		)
+	else
+		ContextActionService:UnbindAction(MOVEMENT_LOCK_INPUT_ACTION)
+	end
+end
+
+local function enforceLocalMovementLock(state)
+	local humanoid = state and state.Humanoid
+	if not humanoid or not humanoid.Parent or humanoid.Health <= 0 then
+		return false
+	end
+
+	pcall(function()
+		humanoid:Move(Vector3.zero, false)
+	end)
+	return true
+end
+
+local function releaseLocalMovementLock(self, reason)
+	local state = self.localMovementLock
+	if not state then
+		return false
+	end
+
+	self.localMovementLock = nil
+	setLocalMovementInputLocked(false)
+
+	local humanoid = state.Humanoid
+	if humanoid and humanoid.Parent and humanoid.Health > 0 then
+		pcall(function()
+			humanoid:Move(Vector3.zero, false)
+		end)
+	end
+
+	return true
+end
+
+local function applyLocalMovementLock(self, targetPlayer, actionKey, duration)
+	if targetPlayer ~= self.player then
+		return nil
+	end
+
+	duration = math.max(0, tonumber(duration) or 0)
+	if duration <= 0 then
+		return nil
+	end
+
+	local humanoid = getCharacterHumanoid(targetPlayer)
+	if not humanoid then
+		return nil
+	end
+
+	releaseLocalMovementLock(self, "replaced")
+
+	local lockState = {
+		Action = actionKey,
+		Humanoid = humanoid,
+		EndAt = os.clock() + duration,
+	}
+	self.localMovementLock = lockState
+	setLocalMovementInputLocked(true)
+	enforceLocalMovementLock(lockState)
+
+	task.delay(duration, function()
+		if self.localMovementLock == lockState then
+			releaseLocalMovementLock(self, "duration_complete")
+		end
+	end)
+
+	return lockState
 end
 
 local function beginActionSequence(self, targetPlayer)
@@ -276,6 +666,7 @@ function BomuClient.Create(config, fruitEntry)
 	self.abilityConfig = getLandMineAbilityConfig(fruitEntry)
 	self.animationStatesByPlayer = {}
 	self.actionSequenceByPlayer = {}
+	self.localMovementLock = nil
 	return self
 end
 
@@ -303,14 +694,24 @@ function BomuClient:HandleEffect(targetPlayer, abilityName, payload)
 	if payload.Action == LAND_MINE_ACTION_DETONATING then
 		beginActionSequence(self, targetPlayer)
 		playActionAnimation(self, targetPlayer, BOMU_ACTION_DETONATE)
+		local detonateLockDuration = getActionMovementLockDuration(
+			self.abilityConfig,
+			BOMU_ACTION_DETONATE,
+			tonumber(payload.ExplosionDelay) or DEFAULT_DETONATE_MOVEMENT_LOCK_DURATION
+		)
+		applyLocalMovementLock(self, targetPlayer, BOMU_ACTION_DETONATE, detonateLockDuration)
 		return true
 	end
 
 	if payload.Action == LAND_MINE_ACTION_DETONATED then
 		local sequence = self.actionSequenceByPlayer[targetPlayer] or beginActionSequence(self, targetPlayer)
+		if targetPlayer == self.player then
+			releaseLocalMovementLock(self, "detonated")
+		end
 		if payload.OwnerLaunched == true then
 			queueJumpAnimation(self, targetPlayer, sequence)
 		end
+		playLandMineDetonateSound(targetPlayer, payload)
 
 		-- Detonation still falls through so the current generic Bomu explosion
 		-- fallback stays in control of that visual path.
@@ -323,6 +724,12 @@ function BomuClient:HandleEffect(targetPlayer, abilityName, payload)
 
 	beginActionSequence(self, targetPlayer)
 	local playedAnimation = playActionAnimation(self, targetPlayer, BOMU_ACTION_PLANT)
+	local plantLockDuration = getActionMovementLockDuration(
+		self.abilityConfig,
+		BOMU_ACTION_PLANT,
+		DEFAULT_PLANT_MOVEMENT_LOCK_DURATION
+	)
+	applyLocalMovementLock(self, targetPlayer, BOMU_ACTION_PLANT, plantLockDuration)
 	local minePosition = payload.MinePosition or payload.OriginPosition
 	local playedPulse = playLandMinePlacementPulse(minePosition)
 
@@ -334,6 +741,13 @@ function BomuClient:HandleStateEvent(_eventName, _abilityName, _value, _payload)
 end
 
 function BomuClient:Update()
+	local localMovementLock = self.localMovementLock
+	if localMovementLock then
+		if os.clock() >= (localMovementLock.EndAt or 0) or not enforceLocalMovementLock(localMovementLock) then
+			releaseLocalMovementLock(self, "duration_complete")
+		end
+	end
+
 	for targetPlayer in pairs(self.animationStatesByPlayer) do
 		if not targetPlayer.Parent or not targetPlayer.Character then
 			stopBomuAnimation(self, targetPlayer, 0)
@@ -343,6 +757,7 @@ function BomuClient:Update()
 end
 
 function BomuClient:HandleCharacterRemoving()
+	releaseLocalMovementLock(self, "character_removing")
 	stopBomuAnimation(self, self.player, 0)
 	if self.player ~= nil then
 		self.actionSequenceByPlayer[self.player] = nil
@@ -350,6 +765,9 @@ function BomuClient:HandleCharacterRemoving()
 end
 
 function BomuClient:HandlePlayerRemoving(leavingPlayer)
+	if leavingPlayer == self.player then
+		releaseLocalMovementLock(self, "player_removing")
+	end
 	stopBomuAnimation(self, leavingPlayer, 0)
 	if leavingPlayer ~= nil then
 		self.actionSequenceByPlayer[leavingPlayer] = nil

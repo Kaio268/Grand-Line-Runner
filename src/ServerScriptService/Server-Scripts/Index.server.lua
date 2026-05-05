@@ -13,6 +13,9 @@ local Brainrots = require(Configs:WaitForChild("Brainrots"))
 local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
+local DEVIL_FRUIT_BACKFILL_TIMEOUT = 30
+local DEVIL_FRUIT_LEGACY_BACKFILL_DELAY = 5
+
 local function findRemoteEventByName(parent, remoteName)
 	for _, child in ipairs(parent:GetChildren()) do
 		if child.Name == remoteName and child:IsA("RemoteEvent") then
@@ -274,6 +277,33 @@ end
 
 local processing = {}
 
+local function backfillDevilFruitIndex(player)
+	task.spawn(function()
+		if not DataManager:WaitUntilReady(player, DEVIL_FRUIT_BACKFILL_TIMEOUT) then
+			warn(string.format("[Index] Failed to backfill Devil Fruit Index for %s: data not ready.", player.Name))
+			return
+		end
+
+		local ok, result = pcall(IndexCollectionService.BackfillDevilFruitDiscoveries, player)
+		if not ok then
+			warn(string.format("[Index] Failed to backfill Devil Fruit Index for %s: %s", player.Name, tostring(result)))
+		end
+	end)
+end
+
+local function scheduleDevilFruitIndexBackfill(player)
+	backfillDevilFruitIndex(player)
+
+	-- Legacy safety pass: old sessions may briefly expose fruit tools before their
+	-- saved Inventory.DevilFruits shape is repaired. Do not treat tools as a
+	-- normal source of truth after this migration pass.
+	task.delay(DEVIL_FRUIT_LEGACY_BACKFILL_DELAY, function()
+		if player.Parent == Players then
+			backfillDevilFruitIndex(player)
+		end
+	end)
+end
+
 claimRemote.OnServerEvent:Connect(function(player, questId)
 	if processing[player] then
 		return
@@ -353,6 +383,14 @@ claimRemote.OnServerEvent:Connect(function(player, questId)
 
 	finish()
 end)
+
+Players.PlayerAdded:Connect(function(player)
+	scheduleDevilFruitIndexBackfill(player)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+	scheduleDevilFruitIndexBackfill(player)
+end
 
 Players.PlayerRemoving:Connect(function(player)
 	processing[player] = nil

@@ -23,6 +23,8 @@ local e = React.createElement
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactSettingsRoot"
 
+local SETTINGS_FRAME_SIZE = UDim2.fromScale(0.47, 0.66)
+
 local root = ReactRoblox.createRoot(rootContainer)
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
@@ -32,6 +34,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	modalStateKey = nil,
 	minSize = Vector2.new(760, 540),
 	maxSize = Vector2.new(1240, 760),
+	frameSize = SETTINGS_FRAME_SIZE,
 	createFrameIfMissing = true,
 })
 
@@ -57,7 +60,7 @@ local SETTING_ALIASES = {
 	LowGraphic = { "LowGraphic", "Low Graphic", "LowGraphics", "Low Graphics" },
 }
 
-local DEBUG_SETTINGS_AUDIO = true
+local DEBUG_SETTINGS_AUDIO = false
 
 local destroyed = false
 local renderQueued = false
@@ -328,7 +331,9 @@ local function prepareFrame()
 		return
 	end
 
-	frame.Size = UDim2.fromScale(0.47, 0.66)
+	if frame.Visible ~= true then
+		frame.Size = SETTINGS_FRAME_SIZE
+	end
 	frame.BackgroundTransparency = 1
 	frame.ZIndex = 120
 

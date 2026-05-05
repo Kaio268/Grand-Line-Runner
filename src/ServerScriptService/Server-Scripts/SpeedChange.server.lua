@@ -13,6 +13,8 @@ local HORO_BODY_ATTRIBUTE = "HoroProjectionBody"
 local HORO_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
 local HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE = "HieFreezeShotCastSlowUntil"
 local HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE = "HieFreezeShotCastSpeedMultiplier"
+local BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "BomuMovementLockUntil"
+local BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "BomuMovementLockSpeedMultiplier"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -99,8 +101,25 @@ local function getHieFreezeShotCastSpeedMultiplier(player)
 	return math.max(0, speedMultiplier)
 end
 
+local function getBomuMovementLockSpeedMultiplier(player)
+	local untilTime = player:GetAttribute(BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE)
+	local speedMultiplier = player:GetAttribute(BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE)
+
+	if typeof(untilTime) ~= "number" or typeof(speedMultiplier) ~= "number" then
+		return 1
+	end
+
+	if untilTime <= os.clock() then
+		return 1
+	end
+
+	return math.max(0, speedMultiplier)
+end
+
 local function getDevilFruitSpeedMultiplier(player)
-	return getHieIceBoostSpeedMultiplier(player) * getHieFreezeShotCastSpeedMultiplier(player)
+	return getHieIceBoostSpeedMultiplier(player)
+		* getHieFreezeShotCastSpeedMultiplier(player)
+		* getBomuMovementLockSpeedMultiplier(player)
 end
 
 local function getHitEffectSpeedMultiplier(player)
@@ -131,6 +150,7 @@ local function hookCharacter(player, character)
 	local touchingCount = 0
 
 	local updating = false
+	local bomuExpiryApplyToken = 0
 
 	local conns = {}
 
@@ -173,6 +193,22 @@ local function hookCharacter(player, character)
 		updating = false
 	end
 
+	local function scheduleBomuLockExpiryApply()
+		bomuExpiryApplyToken += 1
+		local token = bomuExpiryApplyToken
+		local untilTime = player:GetAttribute(BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE)
+		if typeof(untilTime) ~= "number" then
+			return
+		end
+
+		local delaySeconds = math.max(0, untilTime - os.clock()) + 0.05
+		task.delay(delaySeconds, function()
+			if token == bomuExpiryApplyToken and humanoid.Parent and humanoid.Health > 0 then
+				apply()
+			end
+		end)
+	end
+
 	local function logSpeedState(reason, oldState, newState)
 		zoneTrace(
 			"player=%s reason=%s zone=%s zonePos=%s zoneSize=%s oldState=%s newState=%s appliedSpeed=%s base=%s purchasedSpeed=%s activeMap=%s mapPath=%s",
@@ -192,6 +228,7 @@ local function hookCharacter(player, character)
 	end
 
 	apply()
+	scheduleBomuLockExpiryApply()
 	zoneTrace(
 		"player=%s hookCharacter zone=%s initialInZone=%s appliedSpeed=%s character=%s",
 		player.Name,
@@ -222,6 +259,15 @@ local function hookCharacter(player, character)
 	end)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE):Connect(function()
+		apply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE):Connect(function()
+		apply()
+		scheduleBomuLockExpiryApply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE):Connect(function()
 		apply()
 	end)
 

@@ -330,7 +330,7 @@ local DevilFruits = {
 					OwnerLaunchRadius = 8,
 					OwnerLaunchHorizontal = 8,
 					OwnerLaunchVertical = 62,
-					-- Existing Radius, KnockbackHorizontal, and OwnerLaunchHorizontal are the base values.
+					-- Existing Radius, KnockbackHorizontal, OwnerLaunchHorizontal, and OwnerLaunchVertical are the base values.
 					-- Bonuses below are percentages added from speed above BaselineSpeed.
 					SpeedScaling = {
 						ReferenceSpeed = 32,
@@ -345,6 +345,13 @@ local DevilFruits = {
 							BonusPerReferenceSpeed = 0.16,
 							MaxBonus = 1,
 						},
+						OwnerLaunchVertical = {
+							-- At 100 speed, OwnerLaunchVertical reaches 2x its base value.
+							BaselineSpeed = 0,
+							ReferenceSpeed = 100,
+							BonusPerReferenceSpeed = 1,
+							MaxBonus = 1,
+						},
 					},
 					Animation = {
 						Plant = {
@@ -352,6 +359,8 @@ local DevilFruits = {
 							FadeTime = 0.05,
 							StopFadeTime = 0.08,
 							Looped = false,
+							-- Seconds WASD movement is suppressed while planting; physics and jumping stay active.
+							MovementLockDuration = 0.55,
 						},
 						Detonate = {
 							AnimationKey = "Bomu.Detonate",
@@ -359,7 +368,8 @@ local DevilFruits = {
 							StopFadeTime = 0.06,
 							Looped = false,
 							-- Seconds after the detonate animation starts before the mine explodes.
-							ExplosionDelay = 0.35,
+							-- The detonate movement lock follows this by default so the launch is not blocked.
+							ExplosionDelay = 0.5,
 						},
 						Jump = {
 							AnimationKey = "Bomu.Jump",

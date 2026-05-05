@@ -9,7 +9,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 
-local ACTIVE_BIOME_ATTRIBUTE = BiomeAreas.ActiveBiomeAttribute
+local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 
 local UI_CONFIG = BiomeAreas.Ui
 local ANIMATION_CONFIG = BiomeAreas.Animation
@@ -22,7 +22,12 @@ local STROKE_BASE = Color3.fromRGB(86, 203, 236)
 
 local activeTweens = {}
 local sequenceId = 0
-local lastAnnouncedBiomeIndex = nil
+local lastAnnouncedAreaKey = nil
+local pendingAreaKey = nil
+local loadingWaitRunning = false
+
+local LOADING_SCREEN_NAME = "LoadingScreen"
+local LOADING_SCREEN_ACTIVE_ATTRIBUTE = "LoadingScreenActive"
 
 local function cancelActiveTweens()
 	for _, tween in ipairs(activeTweens) do
@@ -300,26 +305,91 @@ local function playBanner(entry)
 	end)
 end
 
-local function announceBiomeFromAttribute()
-	local biomeIndex = tonumber(Lighting:GetAttribute(ACTIVE_BIOME_ATTRIBUTE))
-	local entry = BiomeAreas.GetBiome(biomeIndex)
+local announceAreaFromAttribute
+
+local function isLoadingScreenVisible()
+	local loadingActive = playerGui:GetAttribute(LOADING_SCREEN_ACTIVE_ATTRIBUTE)
+	if loadingActive ~= nil then
+		return loadingActive == true
+	end
+
+	local loadingScreen = playerGui:FindFirstChild(LOADING_SCREEN_NAME)
+	if not loadingScreen then
+		return false
+	end
+
+	if loadingScreen:IsA("ScreenGui") then
+		return loadingScreen.Enabled
+	end
+
+	return loadingScreen.Parent ~= nil
+end
+
+local function playAreaWhenLoadingFinishes()
+	if loadingWaitRunning then
+		return
+	end
+
+	loadingWaitRunning = true
+	task.spawn(function()
+		while isLoadingScreenVisible() do
+			task.wait(0.05)
+		end
+		task.wait()
+
+		loadingWaitRunning = false
+
+		local areaKey = pendingAreaKey
+		pendingAreaKey = nil
+		if areaKey then
+			local entry = BiomeAreas.GetArea(areaKey)
+			if entry and areaKey ~= lastAnnouncedAreaKey then
+				lastAnnouncedAreaKey = areaKey
+				playBanner(entry)
+			end
+			return
+		end
+
+		if announceAreaFromAttribute then
+			announceAreaFromAttribute()
+		end
+	end)
+end
+
+announceAreaFromAttribute = function()
+	local areaKey = Lighting:GetAttribute(ACTIVE_AREA_ATTRIBUTE)
+	local entry = BiomeAreas.GetArea(areaKey)
 	if not entry then
+		pendingAreaKey = nil
 		return
 	end
 
-	if biomeIndex == lastAnnouncedBiomeIndex then
+	local resolvedAreaKey = entry.AreaKey or tostring(areaKey)
+	if resolvedAreaKey == lastAnnouncedAreaKey then
 		return
 	end
 
-	lastAnnouncedBiomeIndex = biomeIndex
+	if isLoadingScreenVisible() then
+		pendingAreaKey = resolvedAreaKey
+		playAreaWhenLoadingFinishes()
+		return
+	end
+
+	pendingAreaKey = nil
+	lastAnnouncedAreaKey = resolvedAreaKey
 	playBanner(entry)
 end
 
-Lighting:GetAttributeChangedSignal(ACTIVE_BIOME_ATTRIBUTE):Connect(announceBiomeFromAttribute)
-
-player.CharacterAdded:Connect(function()
-	lastAnnouncedBiomeIndex = nil
-	task.defer(announceBiomeFromAttribute)
+Lighting:GetAttributeChangedSignal(ACTIVE_AREA_ATTRIBUTE):Connect(announceAreaFromAttribute)
+playerGui:GetAttributeChangedSignal(LOADING_SCREEN_ACTIVE_ATTRIBUTE):Connect(function()
+	if not isLoadingScreenVisible() then
+		task.defer(announceAreaFromAttribute)
+	end
 end)
 
-task.defer(announceBiomeFromAttribute)
+player.CharacterAdded:Connect(function()
+	lastAnnouncedAreaKey = nil
+	task.defer(announceAreaFromAttribute)
+end)
+
+task.defer(announceAreaFromAttribute)

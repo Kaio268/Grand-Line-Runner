@@ -238,6 +238,24 @@ function ProfileMigrations.Apply(data)
 		end
 	end
 
+	local function recordDevilFruitEntryDiscovered(fruitIdentifier, entry)
+		recordDevilFruitDiscovered(fruitIdentifier)
+
+		if typeof(entry) == "table" then
+			recordDevilFruitDiscovered(entry.FruitKey)
+			recordDevilFruitDiscovered(entry.Name)
+			recordDevilFruitDiscovered(entry.DisplayName)
+		elseif typeof(entry) == "string" then
+			recordDevilFruitDiscovered(entry)
+		end
+	end
+
+	for fruitIdentifier, isDiscovered in pairs(discoveredDevilFruits) do
+		if isDiscovered == true then
+			recordDevilFruitDiscovered(fruitIdentifier)
+		end
+	end
+
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
 	local legacyHiddenLeadderstats = data.HiddenLeadderstats
 	if typeof(legacyHiddenLeadderstats) == "table" then
@@ -356,8 +374,8 @@ function ProfileMigrations.Apply(data)
 		end
 	end
 
-	for fruitKey in pairs(inventoryDevilFruits) do
-		recordDevilFruitDiscovered(fruitKey)
+	for fruitKey, fruitEntry in pairs(inventoryDevilFruits) do
+		recordDevilFruitEntryDiscovered(fruitKey, fruitEntry)
 	end
 
 	if typeof(devilFruit.Equipped) == "string" and devilFruit.Equipped ~= ProfileTemplate.DevilFruit.Equipped then

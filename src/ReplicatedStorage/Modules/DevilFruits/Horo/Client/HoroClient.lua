@@ -1,3 +1,4 @@
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -7,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 
 local HoroClient = {}
@@ -54,6 +56,11 @@ local MAX_REMOTE_THROTTLE = 1
 local ACTION_TRY_PICKUP = "TryPickup"
 local ACTION_INTERRUPT = "Interrupt"
 local ACTION_BODY_HAZARD = "BodyHazard"
+local SOUND_ACTIVATE = "Activate"
+local SOUND_MOVE_LOOP = "MoveLoop"
+local SOUND_RETURN = "Return"
+local SOUND_CLEANUP_FALLBACK_SECONDS = 8
+local DEBUG_SOUND = true
 local DEBUG_TRACE = RunService:IsStudio()
 
 local function formatVector3(value)
@@ -78,6 +85,78 @@ local function horoClientTrace(message, ...)
 	end
 
 	print(string.format("[HORO CLIENT TRACE] " .. tostring(message), ...))
+end
+
+local function horoSoundLog(message, ...)
+	if not DEBUG_SOUND then
+		return
+	end
+
+	print(string.format("[HORO SOUND] " .. tostring(message), ...))
+end
+
+local function horoSoundWarn(message, ...)
+	if not DEBUG_SOUND then
+		return
+	end
+
+	warn(string.format("[HORO SOUND] " .. tostring(message), ...))
+end
+
+local function getSoundPlayingState(sound)
+	if not sound then
+		return "<nil>"
+	end
+
+	local ok, isPlaying = pcall(function()
+		return sound.IsPlaying
+	end)
+	if ok then
+		return tostring(isPlaying)
+	end
+
+	return "<unreadable>"
+end
+
+local function logSoundDiagnostics(stage, soundName, sound)
+	if not DEBUG_SOUND then
+		return
+	end
+	if not sound then
+		horoSoundWarn("%s sound=%s missing_instance", tostring(stage), tostring(soundName))
+		return
+	end
+
+	local soundId = tostring(sound.SoundId or "")
+	local volume = tonumber(sound.Volume) or 0
+	if soundId == "" then
+		horoSoundWarn("%s sound=%s path=%s issue=missing_sound_id", tostring(stage), tostring(soundName), formatInstancePath(sound))
+	end
+	if volume <= 0 then
+		horoSoundWarn(
+			"%s sound=%s path=%s issue=zero_or_negative_volume volume=%.3f",
+			tostring(stage),
+			tostring(soundName),
+			formatInstancePath(sound),
+			volume
+		)
+	end
+	if not sound.Parent then
+		horoSoundWarn("%s sound=%s path=%s issue=nil_parent", tostring(stage), tostring(soundName), formatInstancePath(sound))
+	end
+
+	horoSoundLog(
+		"%s sound=%s path=%s parent=%s soundId=%s volume=%.3f looped=%s timeLength=%.3f isPlaying=%s",
+		tostring(stage),
+		tostring(soundName),
+		formatInstancePath(sound),
+		formatInstancePath(sound.Parent),
+		soundId,
+		volume,
+		tostring(sound.Looped),
+		tonumber(sound.TimeLength) or 0,
+		getSoundPlayingState(sound)
+	)
 end
 
 local function getPlayerCarrySummary(player)
@@ -130,6 +209,218 @@ end
 local function getCharacterHumanoid(player)
 	local character = player and player.Character
 	return character and character:FindFirstChildOfClass("Humanoid") or nil
+end
+
+local function getCharacterRoot(player)
+	local character = player and player.Character
+	return character and character:FindFirstChild("HumanoidRootPart") or nil
+end
+
+local function resolveGhostProjectionSoundFolder()
+	local node = ReplicatedStorage
+	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Horo", "GhostProjection" }) do
+		if not node then
+			horoSoundWarn("path_segment_skipped segment=%s issue=parent_nil", tostring(segment))
+			return nil
+		end
+
+		local child = node:FindFirstChild(segment)
+		if not child then
+			horoSoundWarn(
+				"path_segment_missing segment=%s parent=%s",
+				tostring(segment),
+				formatInstancePath(node)
+			)
+			return nil
+		end
+
+		horoSoundLog("path_segment_found segment=%s path=%s", tostring(segment), formatInstancePath(child))
+		node = child
+	end
+
+	return node
+end
+
+local function getGhostProjectionSoundTemplate(soundName)
+	local soundFolder = resolveGhostProjectionSoundFolder()
+	horoSoundLog("resolve_folder sound=%s folder=%s", tostring(soundName), formatInstancePath(soundFolder))
+	if not soundFolder then
+		horoSoundWarn(
+			"resolve_folder_failed sound=%s issue=ghost_projection_sound_folder_missing expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Horo.GhostProjection",
+			tostring(soundName)
+		)
+		return nil
+	end
+
+	local soundTemplate = soundFolder and soundFolder:FindFirstChild(soundName)
+	if soundTemplate and soundTemplate:IsA("Sound") then
+		logSoundDiagnostics("template_found", soundName, soundTemplate)
+		return soundTemplate
+	end
+
+	if soundTemplate then
+		horoSoundWarn(
+			"template_invalid sound=%s path=%s class=%s",
+			tostring(soundName),
+			formatInstancePath(soundTemplate),
+			tostring(soundTemplate.ClassName)
+		)
+	else
+		horoSoundWarn(
+			"template_missing sound=%s folder=%s childCount=%d",
+			tostring(soundName),
+			formatInstancePath(soundFolder),
+			#soundFolder:GetChildren()
+		)
+	end
+
+	return nil
+end
+
+local function getSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return SOUND_CLEANUP_FALLBACK_SECONDS
+end
+
+local function playProjectionOneShot(soundName, parent)
+	if not (parent and parent.Parent) then
+		horoSoundWarn(
+			"one_shot_skipped sound=%s issue=invalid_parent parent=%s",
+			tostring(soundName),
+			formatInstancePath(parent)
+		)
+		return nil
+	end
+
+	local soundTemplate = getGhostProjectionSoundTemplate(soundName)
+	if not soundTemplate then
+		horoSoundWarn("one_shot_skipped sound=%s issue=template_missing", tostring(soundName))
+		return nil
+	end
+
+	horoSoundLog("one_shot_clone_begin sound=%s parent=%s", tostring(soundName), formatInstancePath(parent))
+	local sound = soundTemplate:Clone()
+	sound.Looped = false
+	sound.Parent = parent
+	logSoundDiagnostics("one_shot_parented", soundName, sound)
+	SettingsAudioController.TrackSound(sound)
+	logSoundDiagnostics("one_shot_tracked", soundName, sound)
+	sound:Play()
+	logSoundDiagnostics("one_shot_play_called", soundName, sound)
+
+	task.delay(0.1, function()
+		if sound.Parent then
+			logSoundDiagnostics("one_shot_post_play_0_1s", soundName, sound)
+		else
+			horoSoundWarn("one_shot_post_play_0_1s sound=%s issue=sound_destroyed_or_unparented", tostring(soundName))
+		end
+	end)
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getSoundCleanupDelay(sound))
+	return sound
+end
+
+local function startProjectionMoveLoop(state)
+	if not (state and state.GhostRoot and state.GhostRoot.Parent) then
+		horoSoundWarn(
+			"move_loop_skipped issue=invalid_ghost_root projectionId=%s ghostRoot=%s",
+			tostring(state and state.ProjectionId),
+			formatInstancePath(state and state.GhostRoot)
+		)
+		return nil
+	end
+
+	local soundTemplate = getGhostProjectionSoundTemplate(SOUND_MOVE_LOOP)
+	if not soundTemplate then
+		horoSoundWarn("move_loop_skipped issue=template_missing projectionId=%s", tostring(state.ProjectionId))
+		return nil
+	end
+
+	horoSoundLog(
+		"move_loop_clone_begin projectionId=%s parent=%s",
+		tostring(state.ProjectionId),
+		formatInstancePath(state.GhostRoot)
+	)
+	local sound = soundTemplate:Clone()
+	sound.Looped = true
+	sound.Parent = state.GhostRoot
+	logSoundDiagnostics("move_loop_parented", SOUND_MOVE_LOOP, sound)
+	SettingsAudioController.TrackSound(sound)
+	logSoundDiagnostics("move_loop_tracked", SOUND_MOVE_LOOP, sound)
+	sound:Play()
+	state.MoveLoopSound = sound
+	horoSoundLog(
+		"move_loop_stored projectionId=%s sound=%s forcedLooped=%s",
+		tostring(state.ProjectionId),
+		formatInstancePath(sound),
+		tostring(sound.Looped)
+	)
+	logSoundDiagnostics("move_loop_play_called", SOUND_MOVE_LOOP, sound)
+
+	task.delay(0.1, function()
+		if state.MoveLoopSound == sound and sound.Parent then
+			logSoundDiagnostics("move_loop_post_play_0_1s", SOUND_MOVE_LOOP, sound)
+		else
+			horoSoundWarn(
+				"move_loop_post_play_0_1s projectionId=%s issue=sound_no_longer_active parent=%s stored=%s",
+				tostring(state.ProjectionId),
+				formatInstancePath(sound.Parent),
+				tostring(state.MoveLoopSound == sound)
+			)
+		end
+	end)
+	return sound
+end
+
+local function stopProjectionMoveLoop(state)
+	local sound = state and state.MoveLoopSound
+	if state then
+		state.MoveLoopSound = nil
+	end
+	if not sound then
+		horoSoundLog("move_loop_stop_skipped projectionId=%s issue=no_sound_reference", tostring(state and state.ProjectionId))
+		return
+	end
+
+	if sound.Parent then
+		logSoundDiagnostics("move_loop_stop_begin", SOUND_MOVE_LOOP, sound)
+		pcall(function()
+			sound:Stop()
+		end)
+		logSoundDiagnostics("move_loop_stopped", SOUND_MOVE_LOOP, sound)
+		sound:Destroy()
+		horoSoundLog("move_loop_destroyed projectionId=%s", tostring(state and state.ProjectionId))
+	else
+		horoSoundWarn("move_loop_stop_skipped projectionId=%s issue=sound_parent_missing", tostring(state and state.ProjectionId))
+	end
+end
+
+local function getProjectionReturnSoundParent(player, state)
+	if state and state.GhostRoot and state.GhostRoot.Parent then
+		return state.GhostRoot
+	end
+
+	return getCharacterRoot(player) or (state and state.BodyRoot and state.BodyRoot.Parent and state.BodyRoot) or nil
+end
+
+local function shouldPlayReturnSound(payload)
+	local phase = payload and payload.Phase
+	return phase == "Resolve" or phase == "Interrupted"
 end
 
 local function findGhostModel(payload)
@@ -579,6 +870,8 @@ function HoroClient:StartLocalProjection(payload)
 		Controls = getPlayerControls(self.player),
 	}
 	self.activeState = state
+	playProjectionOneShot(SOUND_ACTIVATE, ghostRoot)
+	startProjectionMoveLoop(state)
 	horoClientTrace(
 		"startLocalProjection projectionId=%s ghost=%s ghostPos=%s body=%s bodyPos=%s endTime=%s duration=%s carryAttrs={%s}",
 		tostring(state.ProjectionId),
@@ -628,6 +921,23 @@ function HoroClient:StopLocalProjection(_payload, keepServerGhost)
 	)
 
 	self.activeState = nil
+	stopProjectionMoveLoop(state)
+	if shouldPlayReturnSound(_payload) then
+		local returnParent = getProjectionReturnSoundParent(self.player, state)
+		horoSoundLog(
+			"return_attempt projectionId=%s phase=%s parent=%s",
+			tostring(state.ProjectionId),
+			tostring(_payload and _payload.Phase),
+			formatInstancePath(returnParent)
+		)
+		playProjectionOneShot(SOUND_RETURN, returnParent)
+	else
+		horoSoundLog(
+			"return_skipped projectionId=%s phase=%s",
+			tostring(state.ProjectionId),
+			tostring(_payload and _payload.Phase)
+		)
+	end
 	disconnectAll(state.Connections)
 	if state.GhostHumanoid and state.GhostHumanoid.Parent then
 		state.GhostHumanoid:Move(Vector3.zero, false)

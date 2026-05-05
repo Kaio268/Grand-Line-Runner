@@ -1296,6 +1296,8 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	)
 
 	if resolvedFruitName ~= DevilFruitConfig.None then
+		-- Equipping only records lifetime discovery/title progress. Current owned
+		-- fruit items remain sourced from Inventory.DevilFruits.
 		IndexCollectionService.MarkDevilFruitDiscovered(player, resolvedFruitName)
 		TitleService.UnlockTitle(player, "EnemyOfTheSea")
 	end

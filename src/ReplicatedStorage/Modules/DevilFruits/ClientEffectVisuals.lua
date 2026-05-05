@@ -30,8 +30,7 @@ local DEFAULT_PHOENIX_SHIELD_RADIUS = 18
 local PHOENIX_SHIELD_AUTHORED_REFERENCE_RADIUS = 13
 local PHOENIX_WING_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local PHOENIX_WING_ASSET_FRUIT_KEY = "Tori"
-local PHOENIX_WING_ASSET_FOLDER_NAMES = { "VFX", "Visuals", "CharacterModels" }
-local PHOENIX_WING_ASSET_NAMES = { "PhoenixMan", "Phoenix Man", "Phoenix man", "Phoenix man (1)" }
+local PHOENIX_BODY_TEMPLATE_FOLDER_NAME = "Phoenix Body Template"
 local PHOENIX_AUTHORED_FLIGHT_FX_NAME = "FlyFX"
 local PHOENIX_AUTHORED_SHIELD_FX_NAME = "ShieldFX"
 local PHOENIX_AUTHORED_REVIVE_FX_NAME = "ReviveFX"
@@ -43,13 +42,10 @@ local PHOENIX_AUTHORED_VFX_MOVE_FOLDERS = {
 	ShieldFX = { "Phoenix Flame Shield" },
 	ReviveFX = { "Phoenix Revive" },
 }
-local PHOENIX_AUTHORED_VFX_REFERENCE_FIRST = {
-	ShieldFX = true,
-}
 local PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS = {
 	FlyFX = CFrame.new(0.165275574, -1.16604078, 1.30423737),
 	ShieldFX = CFrame.new(0.165275574, 0.272972107, 0.601654053),
-	-- Workspace.Phoenix Man.ReviveFX is centered on the rig torso/root.
+	-- ReviveFX is centered on the phoenix torso/root reference.
 	ReviveFX = CFrame.new(),
 }
 local PHOENIX_ANIMATION_KEYS = {
@@ -204,97 +200,13 @@ local function getOrCreateWingEffectsFolder()
 	return folder
 end
 
-local function resolvePhoenixAssetInContainer(container)
-	if not container then
-		return nil
-	end
-
-	for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
-		local direct = container:FindFirstChild(assetName)
-		if direct then
-			return direct
-		end
-	end
-
-	for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
-		local descendant = container:FindFirstChild(assetName, true)
-		if descendant then
-			return descendant
-		end
-	end
-
-	for _, child in ipairs(container:GetChildren()) do
-		if string.find(string.lower(child.Name), "phoenix", 1, true) then
-			return child
-		end
-	end
-
-	local children = container:GetChildren()
-	return if #children == 1 then children[1] else nil
-end
-
-local function appendUniqueInstance(target, seen, instance)
-	if typeof(instance) ~= "Instance" or seen[instance] then
-		return
-	end
-
-	seen[instance] = true
-	target[#target + 1] = instance
-end
-
-local function appendPhoenixModelCandidatesFromContainer(target, seen, container)
-	if not container then
-		return
-	end
-
-	for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
-		appendUniqueInstance(target, seen, container:FindFirstChild(assetName))
-	end
-
-	appendUniqueInstance(target, seen, resolvePhoenixAssetInContainer(container))
-	appendUniqueInstance(target, seen, container)
-end
-
-local function getPhoenixAssetRootCandidates()
-	local roots = {}
-	local seen = {}
-	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
-	if assetsFolder then
-		local vfxFolder = assetsFolder:FindFirstChild("VFX")
-		local toriVfxFolder = vfxFolder and vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
-		appendPhoenixModelCandidatesFromContainer(roots, seen, toriVfxFolder)
-
-		local characterModelsFolder = assetsFolder:FindFirstChild("CharacterModels")
-		local toriCharacterFolder = characterModelsFolder and characterModelsFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
-		appendPhoenixModelCandidatesFromContainer(roots, seen, toriCharacterFolder)
-	end
-
-	local modulesFolder = ReplicatedStorage:FindFirstChild("Modules")
-	local devilFruitsFolder = modulesFolder and modulesFolder:FindFirstChild("DevilFruits")
-	local toriFolder = devilFruitsFolder and devilFruitsFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
-	local moduleAssetsFolder = toriFolder and toriFolder:FindFirstChild("Assets")
-	if moduleAssetsFolder then
-		for _, folderName in ipairs(PHOENIX_WING_ASSET_FOLDER_NAMES) do
-			appendPhoenixModelCandidatesFromContainer(roots, seen, moduleAssetsFolder:FindFirstChild(folderName))
-		end
-
-		appendPhoenixModelCandidatesFromContainer(roots, seen, moduleAssetsFolder)
-	end
-
-	if RunService:IsStudio() then
-		for _, assetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
-			appendUniqueInstance(roots, seen, Workspace:FindFirstChild(assetName))
-		end
-	end
-
-	return roots
-end
-
 local function getPhoenixWingAssetRoot()
-	for _, assetRoot in ipairs(getPhoenixAssetRootCandidates()) do
-		if assetRoot:FindFirstChild("tori wings", true) then
-			return assetRoot
-		end
+	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
+	local toriVfxRoot = vfxFolder and vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
+	local bodyTemplate = toriVfxRoot and toriVfxRoot:FindFirstChild(PHOENIX_BODY_TEMPLATE_FOLDER_NAME)
+	if bodyTemplate and bodyTemplate:FindFirstChild("tori wings", true) then
+		return bodyTemplate
 	end
 
 	return nil
@@ -844,22 +756,6 @@ local function scalePhoenixAuthoredVfxClone(root, scale)
 	end)
 end
 
-local function resolvePhoenixAssetRootForTemplate(template, root)
-	if root and findReferencePart(root, PHOENIX_REFERENCE_PART_NAMES) then
-		return root
-	end
-
-	local current = template and template.Parent or nil
-	while current and current ~= ReplicatedStorage and current ~= Workspace do
-		if findReferencePart(current, PHOENIX_REFERENCE_PART_NAMES) then
-			return current
-		end
-		current = current.Parent
-	end
-
-	return root
-end
-
 local function getStandardToriVfxRoot()
 	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
@@ -892,48 +788,12 @@ local function findPhoenixMoveFolderVfxTemplate(assetName)
 	return nil, nil
 end
 
-local function findPhoenixReferenceVfxTemplate(assetName)
-	for _, root in ipairs(getPhoenixAssetRootCandidates()) do
-		local direct = root:FindFirstChild(assetName)
-		if direct then
-			return direct, resolvePhoenixAssetRootForTemplate(direct, root)
-		end
-
-		for _, phoenixAssetName in ipairs(PHOENIX_WING_ASSET_NAMES) do
-			local phoenixModel = root:FindFirstChild(phoenixAssetName)
-			local child = phoenixModel and phoenixModel:FindFirstChild(assetName)
-			if child then
-				return child, resolvePhoenixAssetRootForTemplate(child, phoenixModel)
-			end
-		end
-
-		local descendant = root:FindFirstChild(assetName, true)
-		if descendant then
-			return descendant, resolvePhoenixAssetRootForTemplate(descendant, root)
-		end
-	end
-
-	return nil, nil
-end
-
 local function findPhoenixAuthoredVfxTemplate(assetName)
 	if typeof(assetName) ~= "string" or assetName == "" then
 		return nil, nil
 	end
 
-	if PHOENIX_AUTHORED_VFX_REFERENCE_FIRST[assetName] then
-		local referenceTemplate, referenceRoot = findPhoenixReferenceVfxTemplate(assetName)
-		if referenceTemplate then
-			return referenceTemplate, referenceRoot
-		end
-	end
-
-	local moveTemplate, moveRoot = findPhoenixMoveFolderVfxTemplate(assetName)
-	if moveTemplate then
-		return moveTemplate, moveRoot
-	end
-
-	return findPhoenixReferenceVfxTemplate(assetName)
+	return findPhoenixMoveFolderVfxTemplate(assetName)
 end
 
 local function configurePhoenixAuthoredVfxClone(root, options)
@@ -1992,7 +1852,7 @@ function ClientEffectVisuals:CreatePhoenixRebirthEffect(targetPlayer, fruitName,
 		task.delay(remainingReviveDelay, function()
 			local playedAuthoredReviveVfx = false
 			if state and not state.CleanedUp then
-				-- ReviveFX is authored as a short burst on the Phoenix rig torso in the Workspace reference.
+				-- ReviveFX is authored as a short burst on the phoenix body template torso.
 				playedAuthoredReviveVfx = self:PlayPhoenixAuthoredVfx(
 					state,
 					targetPlayer,

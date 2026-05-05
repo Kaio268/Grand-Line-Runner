@@ -1,6 +1,17 @@
 local BiomeAreas = {}
 
 BiomeAreas.ActiveBiomeAttribute = "ActiveBiomeLightingBiome"
+BiomeAreas.ActiveAreaAttribute = "ActiveBiomeLightingArea"
+BiomeAreas.StartingAreaKey = "StartingArea"
+
+local function getBiomeAreaKey(index)
+	local biomeIndex = tonumber(index)
+	if not biomeIndex then
+		return nil
+	end
+
+	return "Biome" .. tostring(biomeIndex)
+end
 
 BiomeAreas.Ui = {
 	DisplayOrder = 122,
@@ -53,50 +64,64 @@ BiomeAreas.RarityStyles = {
 	},
 }
 
+BiomeAreas.StartingArea = {
+	AreaKey = BiomeAreas.StartingAreaKey,
+	BiomeName = "Starting Area",
+	AreaName = "Starting Area",
+}
+
 BiomeAreas.Biomes = {
 	[1] = {
+		AreaKey = getBiomeAreaKey(1),
 		BiomeName = "Biome 1",
 		AreaName = "Foosha Village",
 		Rarity = "Common",
 		Tier = 1,
 	},
 	[2] = {
+		AreaKey = getBiomeAreaKey(2),
 		BiomeName = "Biome 2",
 		AreaName = "Arlong Park",
 		Rarity = "Uncommon",
 		Tier = 2,
 	},
 	[3] = {
+		AreaKey = getBiomeAreaKey(3),
 		BiomeName = "Biome 3",
 		AreaName = "Drum Island",
 		Rarity = "Rare",
 		Tier = 3,
 	},
 	[4] = {
+		AreaKey = getBiomeAreaKey(4),
 		BiomeName = "Biome 4",
 		AreaName = "Alabasta",
 		Rarity = "Epic",
 		Tier = 4,
 	},
 	[5] = {
+		AreaKey = getBiomeAreaKey(5),
 		BiomeName = "Biome 5",
 		AreaName = "Water 7",
 		Rarity = "Legendary",
 		Tier = 5,
 	},
 	[6] = {
+		AreaKey = getBiomeAreaKey(6),
 		BiomeName = "Biome 6",
 		AreaName = "Thriller Bark",
 		Rarity = "Mythic",
 		Tier = 6,
 	},
 	[7] = {
+		AreaKey = getBiomeAreaKey(7),
 		BiomeName = "Biome 7",
 		AreaName = "Sabaody",
 		Rarity = "Godly",
 		Tier = 7,
 	},
 	[8] = {
+		AreaKey = getBiomeAreaKey(8),
 		BiomeName = "Biome 8",
 		AreaName = "Dresserosa",
 		Rarity = "Secret",
@@ -104,8 +129,45 @@ BiomeAreas.Biomes = {
 	},
 }
 
+BiomeAreas.Areas = {
+	[BiomeAreas.StartingAreaKey] = BiomeAreas.StartingArea,
+}
+
+for index, entry in pairs(BiomeAreas.Biomes) do
+	local areaKey = entry.AreaKey or getBiomeAreaKey(index)
+	entry.AreaKey = areaKey
+	BiomeAreas.Areas[areaKey] = entry
+end
+
+function BiomeAreas.GetBiomeAreaKey(index)
+	return getBiomeAreaKey(index)
+end
+
 function BiomeAreas.GetBiome(index)
 	return BiomeAreas.Biomes[tonumber(index)]
+end
+
+function BiomeAreas.GetArea(areaKey)
+	if type(areaKey) == "number" then
+		return BiomeAreas.GetBiome(areaKey)
+	end
+
+	local key = tostring(areaKey or "")
+	if key == "" then
+		return nil
+	end
+
+	local direct = BiomeAreas.Areas[key]
+	if direct then
+		return direct
+	end
+
+	local biomeIndex = key:match("^Biome(%d+)$")
+	if biomeIndex then
+		return BiomeAreas.GetBiome(biomeIndex)
+	end
+
+	return nil
 end
 
 function BiomeAreas.GetRarityStyle(rarity)
@@ -114,6 +176,10 @@ end
 
 function BiomeAreas.GetSubtitle(entry)
 	if not entry then
+		return ""
+	end
+
+	if entry.Rarity == nil and entry.Tier == nil then
 		return ""
 	end
 

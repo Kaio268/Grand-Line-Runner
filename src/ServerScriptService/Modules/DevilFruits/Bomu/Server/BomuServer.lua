@@ -15,6 +15,7 @@ local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):Wai
 local BomuServer = {}
 
 local activeMinesByPlayer = {}
+local activeMovementLocksByOwner = {}
 
 local EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local LAND_MINE_MODEL_NAME = "BomuLandMine"
@@ -22,6 +23,11 @@ local LAND_MINE_ACTION_PLACED = "Placed"
 local LAND_MINE_ACTION_DETONATING = "Detonating"
 local LAND_MINE_ACTION_DETONATED = "Detonated"
 local LAND_MINE_SOURCE = "LandMine"
+local BOMU_ACTION_PLANT = "Plant"
+local BOMU_ACTION_DETONATE = "Detonate"
+local BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "BomuMovementLockUntil"
+local BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "BomuMovementLockSpeedMultiplier"
+local BOMU_LEGACY_MOVEMENT_LOCK_JUMP_ATTRIBUTE = "BomuMovementLockJumpMultiplier"
 local MIN_PLANAR_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_PLANAR_DIRECTION = Vector3.new(0, 0, -1)
 local GROUND_CAST_HEIGHT = 4
@@ -61,6 +67,7 @@ local SEGMENT_LENGTH_EPSILON = 0.0001
 local HAZARD_QUERY_PLAYER_DISTANCE_PADDING = 8
 local HAZARD_QUERY_MAX_TARGETS = 8
 local DEFAULT_DETONATION_EXPLOSION_DELAY = 0.35
+local DEFAULT_PLANT_MOVEMENT_LOCK_DURATION = 0.55
 local DEFAULT_SPEED_SCALING_REFERENCE_SPEED = 32
 
 local function getPlanarUnitOrFallback(vector, fallback)
@@ -238,12 +245,17 @@ local function buildExplosionAbilityConfig(abilityConfig, radius, sourceSpeed)
 		type(abilityConfig) == "table" and tonumber(abilityConfig.KnockbackHorizontal) or nil
 	local baseOwnerLaunchHorizontal =
 		type(abilityConfig) == "table" and tonumber(abilityConfig.OwnerLaunchHorizontal) or nil
+	local baseOwnerLaunchVertical =
+		type(abilityConfig) == "table" and tonumber(abilityConfig.OwnerLaunchVertical) or nil
+	local ownerLaunchVerticalMultiplier = getSpeedScalingMultiplier(abilityConfig, "OwnerLaunchVertical", sourceSpeed)
 
 	explosionAbilityConfig.Radius = math.max(0, tonumber(radius) or baseRadius or 0)
 	explosionAbilityConfig.KnockbackHorizontal =
 		math.max(0, baseKnockbackHorizontal or 0) * multiplier
 	explosionAbilityConfig.OwnerLaunchHorizontal =
 		math.max(0, baseOwnerLaunchHorizontal or 0) * multiplier
+	explosionAbilityConfig.OwnerLaunchVertical =
+		math.max(0, baseOwnerLaunchVertical or 0) * ownerLaunchVerticalMultiplier
 
 	return explosionAbilityConfig, {
 		Speed = math.max(0, tonumber(sourceSpeed) or 0),
@@ -507,6 +519,81 @@ local function getDetonationExplosionDelay(abilityConfig)
 	return math.max(0, configuredDelay or DEFAULT_DETONATION_EXPLOSION_DELAY)
 end
 
+local function releaseMovementLock(ownerKey, reason)
+	local state = activeMovementLocksByOwner[ownerKey]
+	if not state then
+		return false
+	end
+
+	activeMovementLocksByOwner[ownerKey] = nil
+
+	local player = state.Player
+
+	if player and player.Parent then
+		player:SetAttribute(BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE, nil)
+		player:SetAttribute(BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE, nil)
+		player:SetAttribute(BOMU_LEGACY_MOVEMENT_LOCK_JUMP_ATTRIBUTE, nil)
+	end
+
+	return true
+end
+
+local function getActionMovementLockDuration(abilityConfig, actionKey, fallbackDuration)
+	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
+	local actionConfig = type(animationConfig) == "table" and animationConfig[actionKey] or nil
+	local configuredDuration = type(actionConfig) == "table" and tonumber(actionConfig.MovementLockDuration) or nil
+	if configuredDuration == nil then
+		configuredDuration = type(abilityConfig) == "table" and tonumber(abilityConfig.MovementLockDuration) or nil
+	end
+
+	return math.max(0, configuredDuration or fallbackDuration or 0)
+end
+
+local function applyActionMovementLock(context, ownerKey, actionKey, duration)
+	duration = math.max(0, tonumber(duration) or 0)
+	if duration <= 0 then
+		return nil
+	end
+
+	local player = context and context.Player
+	if
+		ownerKey == nil
+		or typeof(player) ~= "Instance"
+		or not player:IsA("Player")
+	then
+		return nil
+	end
+
+	releaseMovementLock(ownerKey, "replaced")
+
+	local untilTime = os.clock() + duration
+	local lockState = {
+		Player = player,
+		Action = actionKey,
+	}
+	activeMovementLocksByOwner[ownerKey] = lockState
+
+	if player and player.Parent then
+		player:SetAttribute(BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE, untilTime)
+		player:SetAttribute(BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE, 0)
+		player:SetAttribute(BOMU_LEGACY_MOVEMENT_LOCK_JUMP_ATTRIBUTE, nil)
+	end
+
+	local function release(reason)
+		if activeMovementLocksByOwner[ownerKey] ~= lockState then
+			return false
+		end
+
+		return releaseMovementLock(ownerKey, reason or actionKey)
+	end
+
+	task.delay(duration, function()
+		release("duration_complete")
+	end)
+
+	return release
+end
+
 local function getMinePlacementPosition(context)
 	local abilityConfig = context.AbilityConfig
 	local character = context.Character
@@ -690,6 +777,13 @@ local function placeLandMine(context, ownerKey)
 	activeMinesByPlayer[ownerKey] = mineEntry
 	scheduleMineCleanup(ownerKey, mineEntry, lifetime)
 
+	local plantLockDuration = getActionMovementLockDuration(
+		context.AbilityConfig,
+		BOMU_ACTION_PLANT,
+		DEFAULT_PLANT_MOVEMENT_LOCK_DURATION
+	)
+	applyActionMovementLock(context, ownerKey, BOMU_ACTION_PLANT, plantLockDuration)
+
 	return {
 		Action = LAND_MINE_ACTION_PLACED,
 		Source = LAND_MINE_SOURCE,
@@ -723,6 +817,17 @@ local function detonateLandMine(context, activeMine, ownerKey)
 	local explosionAbilityConfig, directionalBlastInfo =
 		buildExplosionAbilityConfig(context.AbilityConfig, radius, detonationSpeed)
 	local explosionDelay = getDetonationExplosionDelay(context.AbilityConfig)
+	local detonateLockDuration = getActionMovementLockDuration(
+		context.AbilityConfig,
+		BOMU_ACTION_DETONATE,
+		explosionDelay
+	)
+	local releaseDetonateMovementLock = applyActionMovementLock(
+		context,
+		ownerKey,
+		BOMU_ACTION_DETONATE,
+		detonateLockDuration
+	)
 	if typeof(context.EmitEffect) == "function" then
 		context.EmitEffect(LAND_MINE_SOURCE, {
 			Action = LAND_MINE_ACTION_DETONATING,
@@ -741,6 +846,10 @@ local function detonateLandMine(context, activeMine, ownerKey)
 
 	if explosionDelay > 0 then
 		task.wait(explosionDelay)
+	end
+
+	if releaseDetonateMovementLock then
+		releaseDetonateMovementLock("detonated")
 	end
 
 	if activeMinesByPlayer[ownerKey] == activeMine then
@@ -782,6 +891,7 @@ end
 
 function BomuServer.ClearRuntimeState(player)
 	clearActiveMine(player)
+	releaseMovementLock(player, "runtime_clear")
 end
 
 return BomuServer

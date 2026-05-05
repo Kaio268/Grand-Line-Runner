@@ -7,7 +7,7 @@ local GIFT_CLIENT_DEBUG_VERSION = "gifts-client-ui-slots-debug-2026-05-01"
 local GIFT_STARTUP_DEBUG = false
 local GIFT_SYNC_CLIENT_DEBUG = false
 local GIFT_DEBUG = false
-local GIFT_CLAIM_DEBUG = true
+local GIFT_CLAIM_DEBUG = false
 local GIFT_CLAIM_SYNC_STATE_DEBUG = false
 local REQUIRED_WAIT_SECONDS = 15
 local OPTIONAL_WAIT_SECONDS = 5
@@ -15,6 +15,7 @@ local SYNC_REQUEST_RETRY_SECONDS = 1
 local MAX_SYNC_REQUEST_ATTEMPTS = 10
 local HUD_UPDATE_INTERVAL = 0.5
 local COUNTDOWN_UPDATE_INTERVAL = 0.25
+local GIFT_PANEL_OPEN_SETTLE_SECONDS = 0.24
 
 local function safeName(inst)
 	if not inst then
@@ -1706,7 +1707,10 @@ local function setRewData(slotFrame: Instance, cfg)
 	local rewNameObj = getDirectTextObj(slotFrame, "RewName")
 	local titleAssigned = false
 	if rewNameObj then
-		rewNameObj.Text = tostring(cfg.RewName or "")
+		local nextTitle = tostring(cfg.RewName or "")
+		if rewNameObj.Text ~= nextTitle then
+			rewNameObj.Text = nextTitle
+		end
 		titleAssigned = true
 	else
 		giftError("Missing RewName label in", safeName(slotFrame))
@@ -1716,7 +1720,10 @@ local function setRewData(slotFrame: Instance, cfg)
 	local iconAssigned = false
 	if iconObj then
 		if cfg.Icon ~= nil then
-			iconObj.Image = tostring(cfg.Icon)
+			local nextIcon = tostring(cfg.Icon)
+			if iconObj.Image ~= nextIcon then
+				iconObj.Image = nextIcon
+			end
 			iconAssigned = true
 		else
 			giftError("Reward icon is nil for id", slotFrame:GetAttribute("RewardId"))
@@ -1727,8 +1734,14 @@ local function setRewData(slotFrame: Instance, cfg)
 
 	local descriptionObj = getDirectTextObj(slotFrame, "RewardDescription")
 	if descriptionObj then
-		descriptionObj.Text = formatRewardDescription(cfg)
-		descriptionObj.Visible = descriptionObj.Text ~= ""
+		local nextDescription = formatRewardDescription(cfg)
+		if descriptionObj.Text ~= nextDescription then
+			descriptionObj.Text = nextDescription
+		end
+		local shouldShowDescription = nextDescription ~= ""
+		if descriptionObj.Visible ~= shouldShowDescription then
+			descriptionObj.Visible = shouldShowDescription
+		end
 	end
 
 	giftLog(
@@ -2834,6 +2847,18 @@ local suppressGiftTreeRebuilds = 0
 local pendingState = nil
 local latestRewardState = nil
 local latestSyncState = nil
+local giftPanelOpenSettleUntil = 0
+local giftPanelOpenToken = 0
+local deferredRewardStateToken = 0
+local hasCompleteLiveSlotMapping = nil
+local scheduleSlotRebuild = nil
+
+local function getGiftPanelOpenSettleDelay(): number
+	if giftsFrame and giftsFrame.Visible == true then
+		return math.max(0, giftPanelOpenSettleUntil - os.clock())
+	end
+	return 0
+end
 
 local function withGiftTreeRebuildsSuppressed(callback)
 	suppressGiftTreeRebuilds += 1
@@ -2882,6 +2907,40 @@ local function applyRewardState(state)
 	else
 		giftError("Unsupported pending time reward state", typeof(state))
 	end
+end
+
+local function deferRewardStateUntilGiftPanelSettled(state, context: string): boolean
+	local openSettleDelay = getGiftPanelOpenSettleDelay()
+	if openSettleDelay <= 0 then
+		return false
+	end
+
+	pendingState = state
+	deferredRewardStateToken += 1
+	local stateToken = deferredRewardStateToken
+	local openToken = giftPanelOpenToken
+
+	task.delay(openSettleDelay, function()
+		if stateToken ~= deferredRewardStateToken or openToken ~= giftPanelOpenToken then
+			return
+		end
+		if not (giftsFrame and giftsFrame.Visible == true) then
+			return
+		end
+		if pendingState == nil then
+			return
+		end
+		if not hasCompleteLiveSlotMapping() then
+			scheduleSlotRebuild(context .. ":afterPanelOpenRowsMissing")
+			return
+		end
+
+		local stateToApply = pendingState
+		pendingState = nil
+		applyRewardState(stateToApply)
+	end)
+
+	return true
 end
 
 local function applyPendingState()
@@ -2933,7 +2992,7 @@ local function getConfiguredRewardCount(): number
 	return count
 end
 
-local function hasCompleteLiveSlotMapping(): boolean
+hasCompleteLiveSlotMapping = function(): boolean
 	refreshGiftsUiBinding("hasCompleteLiveSlotMapping")
 	local expected = 0
 	for id in pairs(RewardsConfig) do
@@ -2999,12 +3058,29 @@ local function runSlotBuild(context: string): boolean
 	return ok
 end
 
-local function scheduleSlotRebuild(context: string)
+scheduleSlotRebuild = function(context: string)
 	if suppressGiftTreeRebuilds > 0 then
 		return
 	end
 
 	if rebuildScheduled then
+		return
+	end
+
+	local openSettleDelay = getGiftPanelOpenSettleDelay()
+	if openSettleDelay > 0 then
+		rebuildScheduled = true
+		local openToken = giftPanelOpenToken
+		task.delay(openSettleDelay, function()
+			rebuildScheduled = false
+			if openToken ~= giftPanelOpenToken then
+				return
+			end
+			if not (giftsFrame and giftsFrame.Visible == true) then
+				return
+			end
+			scheduleSlotRebuild(context .. ":afterPanelOpen")
+		end)
 		return
 	end
 
@@ -3121,25 +3197,49 @@ local function bindGiftContentTreeWatchers(context: string)
 
 	giftFrameVisibleConnection = giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 		if giftsFrame.Visible then
+			giftPanelOpenToken += 1
+			giftPanelOpenSettleUntil = os.clock() + GIFT_PANEL_OPEN_SETTLE_SECONDS
+			local openToken = giftPanelOpenToken
 			giftsMainFrame.Visible = true
-			logScrollState("panelOpen")
-			task.defer(function()
-				runSlotBuild("panelOpenImmediate")
-			end)
-			scheduleSlotRebuild("panelOpen")
-			if latestSyncState == nil or not hasAppliedServerSync then
-				setAuthoritativeSyncPending(true)
-				if requestServerSync then
-					requestServerSync("panelOpenMissingSync")
-				end
-			end
-			task.defer(function()
-				local rows = collectSlotFrames()
-				forceGiftsLayout("panelOpen", rows)
-				logGiftRenderDiagnostics("panelOpen", rows)
-				auditMappedClaimButtons("panelOpen")
-			end)
 			giftLog("[GIFT][OPEN]", string.format("panel=%s visible=true slots=%d", safeName(giftsFrame), totalGifts))
+
+			-- Open_UI owns the panel tween; keep heavy row/layout/sync work off that first frame.
+			task.delay(GIFT_PANEL_OPEN_SETTLE_SECONDS, function()
+				if openToken ~= giftPanelOpenToken then
+					return
+				end
+				if not (giftsFrame and giftsFrame.Visible == true) then
+					return
+				end
+
+				logScrollState("panelOpenSettled")
+
+				if not hasCompleteLiveSlotMapping() then
+					runSlotBuild("panelOpenSettled")
+				end
+
+				if pendingState ~= nil and hasCompleteLiveSlotMapping() then
+					applyPendingState()
+				elseif latestRewardState ~= nil and latestSyncState == nil and hasCompleteLiveSlotMapping() then
+					pendingState = latestRewardState
+					applyPendingState()
+				elseif latestSyncState ~= nil and hasCompleteLiveSlotMapping() then
+					applySyncStateNow(latestSyncState, "panelOpenSettled")
+				elseif latestSyncState == nil or not hasAppliedServerSync then
+					setAuthoritativeSyncPending(true)
+					if requestServerSync then
+						requestServerSync("panelOpenMissingSync")
+					end
+				else
+					local rows = collectSlotFrames()
+					forceGiftsLayout("panelOpenSettled", rows)
+					logGiftRenderDiagnostics("panelOpenSettled", rows)
+					auditMappedClaimButtons("panelOpenSettled")
+				end
+			end)
+		else
+			giftPanelOpenToken += 1
+			giftPanelOpenSettleUntil = 0
 		end
 	end)
 
@@ -3405,6 +3505,9 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 			"totalSlots",
 			totalGifts
 		)
+		if deferRewardStateUntilGiftPanelSettled(a, "remote:syncState") then
+			return
+		end
 		if not hasCompleteLiveSlotMapping() then
 			pendingState = a
 			giftSyncClientLog(
@@ -3436,6 +3539,9 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 		end
 		latestRewardState = a
 		giftLog("[GIFT][DATA]", "remoteAction", action, "epoch", a)
+		if deferRewardStateUntilGiftPanelSettled(a, "remote:" .. action) then
+			return
+		end
 		if not hasCompleteLiveSlotMapping() then
 			pendingState = a
 			scheduleSlotRebuild("remote:" .. action)

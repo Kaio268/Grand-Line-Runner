@@ -4,6 +4,7 @@ local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ContentProvider = game:GetService("ContentProvider")
 local RNG = Random.new()
 
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
@@ -30,10 +31,13 @@ PopUpModule.activeReward = nil
 
 local POPUP_TWEEN_IN_TIME = 0.5
 local POPUP_TWEEN_OUT_TIME = 0.25
-local REWARD_TWEEN_IN_TIME = 0.5
+local REWARD_TWEEN_IN_TIME = 0.24
 local REWARD_DISPLAY_TIME = 1
 local REWARD_TWEEN_OUT_TIME = 0.25
 local REWARD_ROTATION_SPEED = 60
+local REWARD_ITEM_STAGGER = 0.035
+local REWARD_ICON_FADE_TIME = 0.12
+local REWARD_POOL_TARGET_SIZE = 6
 local NOTIFY_TWEEN_IN_TIME = 0.5
 local NOTIFY_DISPLAY_TIME = 2
 local NOTIFY_TWEEN_OUT_TIME = 0.25
@@ -42,8 +46,12 @@ local EASING_STYLE_IN = Enum.EasingStyle.Back
 local EASING_DIRECTION_IN = Enum.EasingDirection.Out
 local EASING_STYLE_OUT = Enum.EasingStyle.Quad
 local EASING_DIRECTION_OUT = Enum.EasingDirection.In
+local REWARD_EASING_STYLE_IN = Enum.EasingStyle.Quad
+local REWARD_EASING_DIRECTION_IN = Enum.EasingDirection.Out
 
 local activePopups = {}
+local activeRewardTweens = setmetatable({}, { __mode = "k" })
+local rewardPoolWarmStarted = false
 
 local PopUpEvent = ReplicatedStorage:FindFirstChild("PopUpEvent")
 if not PopUpEvent then
@@ -60,6 +68,140 @@ local function playSound(name)
 		soundClone:Play()
 		soundClone.Ended:Connect(function() soundClone:Destroy() end)
 	end
+end
+
+local function getRewardContext()
+	local player = Players.LocalPlayer
+	if not player then
+		return nil, nil, nil
+	end
+
+	local playerGui = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", 3)
+	local animations = playerGui and (playerGui:FindFirstChild("Animations") or playerGui:WaitForChild("Animations", 3))
+	local rewardsContainer = animations
+		and (animations:FindFirstChild("Rewards") or animations:WaitForChild("Rewards", 3))
+	local template = rewardsContainer
+		and (rewardsContainer:FindFirstChild("Reward") or rewardsContainer:WaitForChild("Reward", 3))
+
+	return rewardsContainer, template, playerGui
+end
+
+local function getRewardPool(rewardsContainer)
+	if not rewardsContainer then
+		return nil
+	end
+
+	local pool = rewardsContainer:FindFirstChild("RewardPool")
+	if not pool then
+		pool = Instance.new("Folder")
+		pool.Name = "RewardPool"
+		pool.Parent = rewardsContainer
+	end
+
+	return pool
+end
+
+local function resetRewardFrame(frame)
+	if not frame then
+		return
+	end
+
+	local uiScale = frame:FindFirstChildOfClass("UIScale")
+	if uiScale then
+		uiScale.Scale = 0
+	end
+
+	local rewardName = frame:FindFirstChild("RewardName")
+	if rewardName and rewardName:IsA("TextLabel") then
+		rewardName.Text = ""
+	end
+
+	local icon = frame:FindFirstChild("Icon")
+	if icon and icon:IsA("ImageLabel") then
+		icon.Image = ""
+		icon.ImageTransparency = 1
+	end
+
+	local sunBurst = frame:FindFirstChild("SunBurst")
+	if sunBurst and sunBurst:IsA("ImageLabel") then
+		local rotationTween = activeRewardTweens[sunBurst]
+		if rotationTween then
+			rotationTween:Cancel()
+			activeRewardTweens[sunBurst] = nil
+		end
+		sunBurst.Rotation = 0
+	end
+
+	frame.Visible = false
+end
+
+local function acquireRewardFrame(rewardsContainer, template, layoutOrder)
+	local pool = getRewardPool(rewardsContainer)
+	local frame = pool and pool:FindFirstChildWhichIsA("Frame")
+	if frame then
+		frame.Parent = rewardsContainer
+	else
+		frame = template:Clone()
+	end
+
+	resetRewardFrame(frame)
+	frame.Name = "Reward_" .. os.time() .. "_" .. tostring(layoutOrder or 0) .. "_" .. math.random(1, 1000)
+	frame.LayoutOrder = layoutOrder or 0
+	frame.Parent = rewardsContainer
+
+	return frame
+end
+
+local function releaseRewardFrame(frame, rewardsContainer)
+	if not (frame and frame.Parent) then
+		return
+	end
+
+	resetRewardFrame(frame)
+	frame.Name = "RewardPooled"
+	frame.LayoutOrder = 0
+
+	local pool = getRewardPool(rewardsContainer)
+	if pool then
+		frame.Parent = pool
+	else
+		frame:Destroy()
+	end
+end
+
+local function warmRewardPool()
+	if rewardPoolWarmStarted or not RunService:IsClient() then
+		return
+	end
+
+	rewardPoolWarmStarted = true
+	task.defer(function()
+		local rewardsContainer, template = getRewardContext()
+		if not (rewardsContainer and template) then
+			rewardPoolWarmStarted = false
+			return
+		end
+
+		local pool = getRewardPool(rewardsContainer)
+		if not pool then
+			return
+		end
+
+		local pooledCount = 0
+		for _, child in ipairs(pool:GetChildren()) do
+			if child:IsA("Frame") then
+				pooledCount += 1
+			end
+		end
+
+		for _ = pooledCount + 1, REWARD_POOL_TARGET_SIZE do
+			local frame = template:Clone()
+			resetRewardFrame(frame)
+			frame.Name = "RewardPooled"
+			frame.Parent = pool
+			task.wait()
+		end
+	end)
 end
 
 RunService.Heartbeat:Connect(function()
@@ -135,32 +277,48 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 end
 
 function PopUpModule:Local_ShowReward(rewardTable)
-	local player = Players.LocalPlayer
-	local playerGui = player:WaitForChild("PlayerGui")
-	local animations = playerGui:WaitForChild("Animations")
-	local rewardsContainer = animations:WaitForChild("Rewards")
-	local template = rewardsContainer:WaitForChild("Reward")
+	local rewardsContainer, template = getRewardContext()
+	if not (rewardsContainer and template) then
+		return
+	end
 
 	-- Zmienne do zarządzania globalnym timerem usuwania
 	local globalRemoveTime = 0
 	local removalScheduled = false
 
-	local function updateScale()
-		local count = 0
+	local function getRewardFrames()
+		local rewards = {}
 		for _, r in ipairs(rewardsContainer:GetChildren()) do
 			if r:IsA("Frame") and r.Name:match("^Reward_") then
-				count = count + 1
+				rewards[#rewards + 1] = r
 			end
 		end
-		local targetScale = (count > 6 and 6 / count or 1)
-		for _, r in ipairs(rewardsContainer:GetChildren()) do
-			if r:IsA("Frame") and r.Name:match("^Reward_") then
+
+		return rewards
+	end
+
+	local function getTargetScale(count)
+		return if count > 6 then 6 / count else 1
+	end
+
+	local function updateScale(excludedRewards)
+		local rewards = getRewardFrames()
+		local targetScale = getTargetScale(#rewards)
+
+		for _, r in ipairs(rewards) do
+			if not (excludedRewards and excludedRewards[r]) then
 				local uiScale = r:FindFirstChildOfClass("UIScale")
 				if uiScale then
-					TweenService:Create(uiScale, TweenInfo.new(0.25, EASING_STYLE_IN, EASING_DIRECTION_IN), {Scale = targetScale}):Play()
+					TweenService:Create(
+						uiScale,
+						TweenInfo.new(0.18, EASING_STYLE_OUT, Enum.EasingDirection.Out),
+						{ Scale = targetScale }
+					):Play()
 				end
 			end
 		end
+
+		return targetScale
 	end
 
 	-- Funkcja, która czeka do momentu globalRemoveTime, a następnie usuwa wszystkie rewardy jednocześnie
@@ -173,81 +331,163 @@ function PopUpModule:Local_ShowReward(rewardTable)
 					task.wait(0.1)
 				end
 				-- Ustawiamy tween-out i usuwamy wszystkie rewardy jednocześnie
-				local rewardsToRemove = {}
-				for _, r in ipairs(rewardsContainer:GetChildren()) do
-					if r:IsA("Frame") and r.Name:match("^Reward_") then
-						table.insert(rewardsToRemove, r)
+				local rewardsToRemove = getRewardFrames()
+				local pendingRemovals = #rewardsToRemove
+				if pendingRemovals == 0 then
+					removalScheduled = false
+					return
+				end
+
+				local function finishRemoval()
+					pendingRemovals -= 1
+					if pendingRemovals <= 0 then
+						updateScale()
+						removalScheduled = false
 					end
 				end
+
 				for _, r in ipairs(rewardsToRemove) do
 					local uiScale = r:FindFirstChildOfClass("UIScale")
 					if uiScale then
 						local tweenOut = TweenService:Create(uiScale, TweenInfo.new(REWARD_TWEEN_OUT_TIME, EASING_STYLE_OUT, EASING_DIRECTION_OUT), {Scale = 0})
-						tweenOut:Play()
 						tweenOut.Completed:Connect(function()
-							r:Destroy()
-							updateScale()
+							if r.Parent then
+								releaseRewardFrame(r, rewardsContainer)
+							end
+							finishRemoval()
 						end)
+						tweenOut:Play()
 					else
-						r:Destroy()
-						updateScale()
+						if r.Parent then
+							releaseRewardFrame(r, rewardsContainer)
+						end
+						finishRemoval()
 					end
 				end
-				removalScheduled = false
 			end)()
 		end
 	end
 
-	for _, rewardData in pairs(rewardTable) do
-		local newReward = template:Clone()
-		newReward.Name = "Reward_" .. os.time() .. "_" .. math.random(1, 1000)
-		newReward.Parent = rewardsContainer
-		newReward.Visible = true
+	local orderedRewards = {}
+	if type(rewardTable) == "table" then
+		for _, rewardData in ipairs(rewardTable) do
+			orderedRewards[#orderedRewards + 1] = rewardData
+		end
+
+		if #orderedRewards == 0 then
+			for _, rewardData in pairs(rewardTable) do
+				orderedRewards[#orderedRewards + 1] = rewardData
+			end
+		end
+	end
+
+	if #orderedRewards == 0 then
+		return
+	end
+
+	local newRewardLookup = {}
+	local newRewardScales = {}
+	local rewardIconAssignments = {}
+	local sunBursts = {}
+
+	for index, rewardData in ipairs(orderedRewards) do
+		local newReward = acquireRewardFrame(rewardsContainer, template, index)
+		newRewardLookup[newReward] = true
 
 		if newReward:FindFirstChild("RewardName") then
-			newReward.RewardName.Text = rewardData[1]
+			newReward.RewardName.Text = if typeof(rewardData) == "table" then tostring(rewardData[1] or "") else ""
 		end
 		if newReward:FindFirstChild("Icon") then
-			newReward.Icon.Image = rewardData[2]
+			local iconImage = if typeof(rewardData) == "table" then tostring(rewardData[2] or "") else ""
+			newReward.Icon.Image = ""
+			newReward.Icon.ImageTransparency = 1
+			rewardIconAssignments[#rewardIconAssignments + 1] = {
+				frame = newReward,
+				frameName = newReward.Name,
+				icon = newReward.Icon,
+				image = iconImage,
+			}
 		end
 
 		local uiScale = newReward:FindFirstChildOfClass("UIScale")
 		if uiScale then
 			uiScale.Scale = 0
+			newRewardScales[#newRewardScales + 1] = uiScale
 		end
 
 		local sunBurst = newReward:FindFirstChild("SunBurst")
 		if sunBurst then
-			local lastTime = tick()
-			coroutine.wrap(function()
-				while newReward and newReward.Parent do
-					local now = tick()
-					sunBurst.Rotation = (sunBurst.Rotation + (now - lastTime) * REWARD_ROTATION_SPEED) % 360
-					lastTime = now
-					RunService.RenderStepped:Wait()
-				end
-			end)()
+			sunBurst.Rotation = 0
+			sunBursts[#sunBursts + 1] = sunBurst
 		end
 
-		-- Ustalamy skalę w zależności od liczby rewardów
-		local count = 0
-		for _, child in ipairs(rewardsContainer:GetChildren()) do
-			if child:IsA("Frame") and child.Name:match("^Reward_") then
-				count = count + 1
+		newReward.Visible = true
+		globalRemoveTime = tick() + REWARD_TWEEN_IN_TIME + REWARD_DISPLAY_TIME
+	end
+
+	local targetScale = updateScale(newRewardLookup)
+	for index, uiScale in ipairs(newRewardScales) do
+		task.delay((index - 1) * REWARD_ITEM_STAGGER, function()
+			if uiScale.Parent then
+				TweenService:Create(
+					uiScale,
+					TweenInfo.new(REWARD_TWEEN_IN_TIME, REWARD_EASING_STYLE_IN, REWARD_EASING_DIRECTION_IN),
+					{ Scale = targetScale }
+				):Play()
+			end
+		end)
+	end
+
+	playSound("Reward")
+	task.delay(math.min(0.1, REWARD_TWEEN_IN_TIME * 0.45), function()
+		for _, sunBurst in ipairs(sunBursts) do
+			if sunBurst.Parent and not activeRewardTweens[sunBurst] then
+				local tween = TweenService:Create(
+					sunBurst,
+					TweenInfo.new(360 / REWARD_ROTATION_SPEED, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1),
+					{ Rotation = 360 }
+				)
+				activeRewardTweens[sunBurst] = tween
+				tween:Play()
 			end
 		end
-		local targetScale = (count > 6 and 6 / count or 1)
-		if uiScale then
-			TweenService:Create(uiScale, TweenInfo.new(REWARD_TWEEN_IN_TIME, EASING_STYLE_IN, EASING_DIRECTION_IN), {Scale = targetScale}):Play()
+	end)
+
+	task.spawn(function()
+		local imageIds = {}
+		for _, assignment in ipairs(rewardIconAssignments) do
+			if assignment.image ~= "" then
+				imageIds[#imageIds + 1] = assignment.image
+			end
 		end
 
-		playSound("Reward")
+		if #imageIds > 0 then
+			pcall(function()
+				ContentProvider:PreloadAsync(imageIds)
+			end)
+		end
 
-		-- Aktualizacja globalnego timera: przy każdym nowym rewardzie od nowa ustalamy czas wygaśnięcia
-		globalRemoveTime = tick() + REWARD_TWEEN_IN_TIME + REWARD_DISPLAY_TIME
-		scheduleRemoval()
-		updateScale()
-	end
+		for _, assignment in ipairs(rewardIconAssignments) do
+			local icon = assignment.icon
+			if icon
+				and icon.Parent
+				and assignment.frame
+				and assignment.frame.Parent == rewardsContainer
+				and assignment.frame.Name == assignment.frameName
+				and assignment.image ~= ""
+			then
+				icon.Image = assignment.image
+				TweenService:Create(
+					icon,
+					TweenInfo.new(REWARD_ICON_FADE_TIME, EASING_STYLE_OUT, Enum.EasingDirection.Out),
+					{ ImageTransparency = 0 }
+				):Play()
+			end
+		end
+	end)
+
+	globalRemoveTime += math.max(0, #newRewardScales - 1) * REWARD_ITEM_STAGGER
+	scheduleRemoval()
 end
 
 local maxNotifications = 4
@@ -1340,6 +1580,8 @@ function PopUpModule:Server_Transition(player, time)
 end
 
 if RunService:IsClient() then
+	warmRewardPool()
+
 	PopUpEvent.OnClientEvent:Connect(function(funcName, ...)
 		local f = PopUpModule["Local_" .. funcName]
 		if f then

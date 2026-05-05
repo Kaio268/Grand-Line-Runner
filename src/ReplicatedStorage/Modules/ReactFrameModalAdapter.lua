@@ -47,6 +47,7 @@ function ReactFrameModalAdapter.new(options)
 	self.modalStateKey = options.modalStateKey
 	self.minSize = options.minSize
 	self.maxSize = options.maxSize
+	self.frameSize = options.frameSize
 	self.allowFallback = options.allowFallback == true
 	self.createFrameIfMissing = options.createFrameIfMissing == true
 	self.frameBackgroundTransparency = options.frameBackgroundTransparency
@@ -163,8 +164,13 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	frame.BackgroundTransparency = self.frameBackgroundTransparency ~= nil and self.frameBackgroundTransparency or 1
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
-	frame.Position = UDim2.fromScale(0.5, 0.5)
-	frame.Size = UDim2.new(0.9, 0, 0.84, 0)
+	if frame.Visible ~= true then
+		frame.Position = UDim2.fromScale(0.5, 0.5)
+	end
+	local desiredSize = self.frameSize or UDim2.new(0.9, 0, 0.84, 0)
+	if frame.Visible ~= true then
+		frame.Size = desiredSize
+	end
 	frame.ZIndex = self.frameZIndex
 
 	if self.minSize or self.maxSize then
@@ -280,9 +286,6 @@ function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
 
 			self:_applyFrameStyling(frame)
 			self:SyncOverlayState()
-			if self.scheduleRender then
-				self.scheduleRender()
-			end
 		end)
 	end, self.legacyConnections)
 end

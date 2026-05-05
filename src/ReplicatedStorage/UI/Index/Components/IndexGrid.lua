@@ -11,6 +11,8 @@ local e = React.createElement
 local GRID_GAP = 6
 local GRID_PADDING = 6
 local DEFAULT_COLUMNS = 5
+local MIN_LAYOUT_SCALE = 0.05
+local WIDTH_CHANGE_EPSILON = 1
 
 local function getCardMetrics(containerWidth, columns)
 	local width = math.max(containerWidth, 0)
@@ -21,6 +23,42 @@ local function getCardMetrics(containerWidth, columns)
 
 	local cardHeight = math.floor(cardWidth * Theme.Layout.CardAspectRatio)
 	return cardWidth, cardHeight
+end
+
+local function getCumulativeUiScale(instance)
+	local scale = 1
+	local current = instance
+
+	while current do
+		for _, child in ipairs(current:GetChildren()) do
+			if child:IsA("UIScale") then
+				local childScale = tonumber(child.Scale) or 1
+				if childScale <= 0 then
+					return 0
+				end
+
+				scale *= childScale
+			end
+		end
+
+		current = current.Parent
+	end
+
+	return scale
+end
+
+local function getStableLayoutWidth(guiObject)
+	local absoluteWidth = guiObject.AbsoluteSize.X
+	if absoluteWidth <= 0 then
+		return nil
+	end
+
+	local uiScale = getCumulativeUiScale(guiObject)
+	if uiScale < MIN_LAYOUT_SCALE then
+		return nil
+	end
+
+	return math.floor((absoluteWidth / uiScale) + 0.5)
 end
 
 local function emptyState()
@@ -139,8 +177,8 @@ local function IndexGrid(props)
 			Size = UDim2.fromScale(1, 1),
 			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			[React.Change.AbsoluteSize] = function(rbx)
-				local nextWidth = rbx.AbsoluteSize.X
-				if nextWidth > 0 and nextWidth ~= containerWidth then
+				local nextWidth = getStableLayoutWidth(rbx)
+				if nextWidth and math.abs(nextWidth - containerWidth) >= WIDTH_CHANGE_EPSILON then
 					setContainerWidth(nextWidth)
 				end
 			end,

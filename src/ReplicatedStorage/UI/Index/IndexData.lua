@@ -184,6 +184,13 @@ local function markDiscoveredBrainrot(discovered, storageName, baseName, variant
 	end
 end
 
+local function markDiscoveredFruit(discovered, fruitIdentifier)
+	local fruit = DevilFruits.GetFruit(fruitIdentifier)
+	if fruit then
+		discovered[fruit.FruitKey] = true
+	end
+end
+
 local function mergeDiscoveredFromBoolFolder(discovered, folder)
 	if not folder then
 		return
@@ -192,6 +199,31 @@ local function mergeDiscoveredFromBoolFolder(discovered, folder)
 	for _, child in ipairs(folder:GetChildren()) do
 		if child:IsA("BoolValue") and child.Value == true then
 			discovered[tostring(child.Name)] = true
+		end
+	end
+end
+
+local function mergeDiscoveredFruitsFromFolder(discovered, folder)
+	if not folder then
+		return
+	end
+
+	for _, child in ipairs(folder:GetChildren()) do
+		if child:IsA("BoolValue") then
+			if child.Value == true then
+				markDiscoveredFruit(discovered, child.Name)
+			end
+		elseif child:IsA("StringValue") then
+			markDiscoveredFruit(discovered, child.Value)
+		elseif child:IsA("NumberValue") or child:IsA("IntValue") then
+			if tonumber(child.Value) and child.Value > 0 then
+				markDiscoveredFruit(discovered, child.Name)
+			end
+		elseif child:IsA("Folder") then
+			markDiscoveredFruit(discovered, child.Name)
+			markDiscoveredFruit(discovered, readStringField(child, "FruitKey"))
+			markDiscoveredFruit(discovered, readStringField(child, "Name"))
+			markDiscoveredFruit(discovered, readStringField(child, "DisplayName"))
 		end
 	end
 end
@@ -232,24 +264,23 @@ end
 
 local function buildDiscoveredFruitSet(indexCollection, inventory, equippedFruitIdentifier)
 	local discovered = {}
-	mergeDiscoveredFromBoolFolder(discovered, indexCollection and indexCollection:FindFirstChild("DevilFruits"))
+	local lifetimeFolder = indexCollection and indexCollection:FindFirstChild("DevilFruits")
+	if lifetimeFolder then
+		mergeDiscoveredFruitsFromFolder(discovered, lifetimeFolder)
+		return discovered
+	end
+
+	-- Compatibility path only: the server should backfill these into IndexCollection.
 	local devilFruitsFolder = inventory and inventory:FindFirstChild("DevilFruits")
 	if devilFruitsFolder then
 		for _, child in ipairs(devilFruitsFolder:GetChildren()) do
-			if child:IsA("Folder") then
-				local identifier = readStringField(child, "FruitKey") or child.Name
-				local fruit = DevilFruits.GetFruit(identifier)
-				if fruit then
-					discovered[fruit.FruitKey] = true
-				end
-			end
+			markDiscoveredFruit(discovered, child.Name)
+			markDiscoveredFruit(discovered, readStringField(child, "FruitKey"))
+			markDiscoveredFruit(discovered, readStringField(child, "Name"))
+			markDiscoveredFruit(discovered, readStringField(child, "DisplayName"))
 		end
 	end
-
-	local equippedFruit = DevilFruits.GetFruit(equippedFruitIdentifier)
-	if equippedFruit then
-		discovered[equippedFruit.FruitKey] = true
-	end
+	markDiscoveredFruit(discovered, equippedFruitIdentifier)
 
 	return discovered
 end

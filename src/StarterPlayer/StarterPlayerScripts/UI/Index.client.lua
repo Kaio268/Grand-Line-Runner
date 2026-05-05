@@ -56,6 +56,9 @@ local lastIndexViewModelError = nil
 local claimRemoteConnection = nil
 local pendingClaimRequests = {}
 local claimedRewardOverrides = {}
+local CLAIM_REWARD_RENDER_HOLD_TIME = 0.32
+local claimRewardRenderHoldUntil = 0
+local claimRewardRenderHoldQueued = false
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Index",
@@ -176,6 +179,45 @@ local function trackConnection(signal, callback, bucket)
 	local connection = signal:Connect(callback)
 	table.insert(bucket, connection)
 	return connection
+end
+
+local function holdClaimRewardRenders()
+	claimRewardRenderHoldUntil = math.max(claimRewardRenderHoldUntil, os.clock() + CLAIM_REWARD_RENDER_HOLD_TIME)
+end
+
+local function scheduleClaimAwareRender()
+	if destroyed then
+		return
+	end
+
+	local remainingHold = claimRewardRenderHoldUntil - os.clock()
+	if remainingHold > 0 then
+		if claimRewardRenderHoldQueued then
+			return
+		end
+
+		claimRewardRenderHoldQueued = true
+		task.delay(remainingHold, function()
+			claimRewardRenderHoldQueued = false
+			if destroyed then
+				return
+			end
+
+			if claimRewardRenderHoldUntil > os.clock() then
+				scheduleClaimAwareRender()
+				return
+			end
+
+			if scheduleRender then
+				scheduleRender()
+			end
+		end)
+		return
+	end
+
+	if scheduleRender then
+		task.defer(scheduleRender)
+	end
 end
 
 local function bindLiveValueTree(folder, bucket)
@@ -302,7 +344,7 @@ local function bindIndexRewardsFolder(folder)
 	local function bindRewardValue(child)
 		if child:IsA("BoolValue") then
 			trackConnection(child:GetPropertyChangedSignal("Value"), function()
-				task.defer(scheduleRender)
+				scheduleClaimAwareRender()
 			end, rewardConnections)
 		end
 	end
@@ -313,11 +355,11 @@ local function bindIndexRewardsFolder(folder)
 
 	trackConnection(indexRewardsFolder.ChildAdded, function(child)
 		bindRewardValue(child)
-		task.defer(scheduleRender)
+		scheduleClaimAwareRender()
 	end, rewardConnections)
 
 	trackConnection(indexRewardsFolder.ChildRemoved, function()
-		task.defer(scheduleRender)
+		scheduleClaimAwareRender()
 	end, rewardConnections)
 end
 
@@ -424,10 +466,15 @@ local function bindClaimRemote(remote)
 			pendingClaimRequests[rewardKey] = nil
 			if success == true then
 				claimedRewardOverrides[rewardKey] = true
+				holdClaimRewardRenders()
 			end
 		end
 
-		task.defer(scheduleRender)
+		if success == true then
+			scheduleClaimAwareRender()
+		else
+			task.defer(scheduleRender)
+		end
 	end)
 end
 
@@ -830,14 +877,13 @@ fireClaimReward = function(rewardId)
 	local remote = getClaimRemote()
 	if remote then
 		pendingClaimRequests[rewardKey] = true
+		holdClaimRewardRenders()
 		remote:FireServer(rewardId)
 		task.delay(6, function()
 			if pendingClaimRequests[rewardKey] then
 				pendingClaimRequests[rewardKey] = nil
-				task.defer(scheduleRender)
 			end
 		end)
-		task.defer(scheduleRender)
 	else
 		warn("[IndexReact] ClaimIndexReward remote was unavailable when trying to claim a milestone reward.")
 	end

@@ -6,6 +6,7 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 
 local player = Players.LocalPlayer
 
@@ -14,13 +15,15 @@ local BIOME_FOLDER_PATTERN = "^Biome%s+(%d+)$"
 local UPDATE_INTERVAL = 0.12
 local RAYCAST_START_HEIGHT = 12
 local RAYCAST_DISTANCE = 220
+local NO_AREA_CLEAR_DELAY = 0.8
 local LOG_PREFIX = "[BIOME LIGHTING]"
 
 local RUNTIME_ATTRIBUTE = "BiomeLightingRuntime"
 local GLOBAL_ATTRIBUTE = "BiomeLightingGlobal"
 local SOURCE_ATTRIBUTE = "BiomeLightingSource"
 local SOURCE_STAGE_ATTRIBUTE = "BiomeLightingStage"
-local ACTIVE_BIOME_ATTRIBUTE = "ActiveBiomeLightingBiome"
+local ACTIVE_BIOME_ATTRIBUTE = BiomeAreas.ActiveBiomeAttribute
+local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 local ACTIVE_STAGE_ATTRIBUTE = "ActiveBiomeLightingStage"
 local SUPPRESSED_FOLDER_NAME = "_BiomeLightingSuppressed"
 
@@ -44,12 +47,15 @@ local EXCLUSIVE_LIGHTING_CLASSES = {
 }
 
 local activeBiomeIndex = nil
+local activeAreaKey = nil
 local activeStageIndex = nil
+local noAreaDetectedSince = nil
 local appliedPropertyNames = {}
 local originalLightingProperties = {}
 local warnedMissingStages = {}
 local warnedMissingBiomes = false
 local biomesRoot = nil
+local startingAreaRoot = nil
 local biomeContainersByIndex = {}
 
 local function getIndexFromName(name, pattern)
@@ -295,31 +301,48 @@ local function setActiveBiome(biomeIndex)
 	end
 end
 
+local function setActiveArea(areaKey)
+	if activeAreaKey == areaKey then
+		return
+	end
+
+	activeAreaKey = areaKey
+	Lighting:SetAttribute(ACTIVE_AREA_ATTRIBUTE, areaKey)
+end
+
 local function getLegacyBiomesRoot()
 	local legacyMap = Workspace:FindFirstChild("LegacyMap")
 	return legacyMap and legacyMap:FindFirstChild("Biomes") or nil
 end
 
-local function rebuildBiomeMap()
+local function getLegacyStartingAreaRoot()
+	local legacyMap = Workspace:FindFirstChild("LegacyMap")
+	if not legacyMap then
+		return nil
+	end
+
+	return legacyMap:FindFirstChild("Starting Area") or legacyMap:FindFirstChild("StartingArea")
+end
+
+local function rebuildAreaMap()
 	local refs = MapResolver.GetRefs({
 		context = "BiomeLighting",
 	})
 
 	biomesRoot = refs.Biomes or getLegacyBiomesRoot()
+	startingAreaRoot = refs.StartingArea or getLegacyStartingAreaRoot()
 	table.clear(biomeContainersByIndex)
 
-	if not biomesRoot then
-		return false
-	end
-
-	for _, child in ipairs(biomesRoot:GetChildren()) do
-		local biomeIndex = getIndexFromName(child.Name, BIOME_FOLDER_PATTERN)
-		if biomeIndex then
-			biomeContainersByIndex[biomeIndex] = child
+	if biomesRoot then
+		for _, child in ipairs(biomesRoot:GetChildren()) do
+			local biomeIndex = getIndexFromName(child.Name, BIOME_FOLDER_PATTERN)
+			if biomeIndex then
+				biomeContainersByIndex[biomeIndex] = child
+			end
 		end
 	end
 
-	return next(biomeContainersByIndex) ~= nil
+	return startingAreaRoot ~= nil or next(biomeContainersByIndex) ~= nil
 end
 
 local function getTopLevelBiomeContainer(instance)
@@ -345,9 +368,13 @@ local function getCharacterRoot()
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
 end
 
-local function detectCurrentBiomeIndex()
-	if not biomesRoot or not biomesRoot.Parent then
-		if not rebuildBiomeMap() then
+local function isSelfOrDescendantOf(instance, ancestor)
+	return instance == ancestor or (instance ~= nil and ancestor ~= nil and instance:IsDescendantOf(ancestor))
+end
+
+local function detectCurrentArea()
+	if not (biomesRoot and biomesRoot.Parent) or not (startingAreaRoot and startingAreaRoot.Parent) then
+		if not rebuildAreaMap() then
 			return nil
 		end
 	end
@@ -357,9 +384,20 @@ local function detectCurrentBiomeIndex()
 		return nil
 	end
 
+	local filterRoots = {}
+	if biomesRoot and biomesRoot.Parent then
+		filterRoots[#filterRoots + 1] = biomesRoot
+	end
+	if startingAreaRoot and startingAreaRoot.Parent then
+		filterRoots[#filterRoots + 1] = startingAreaRoot
+	end
+	if #filterRoots == 0 then
+		return nil
+	end
+
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Include
-	raycastParams.FilterDescendantsInstances = { biomesRoot }
+	raycastParams.FilterDescendantsInstances = filterRoots
 	raycastParams.IgnoreWater = true
 
 	local origin = rootPart.Position + Vector3.new(0, RAYCAST_START_HEIGHT, 0)
@@ -368,8 +406,48 @@ local function detectCurrentBiomeIndex()
 		return nil
 	end
 
+	if isSelfOrDescendantOf(result.Instance, startingAreaRoot) then
+		return BiomeAreas.StartingAreaKey, nil
+	end
+
 	local _, biomeIndex = getTopLevelBiomeContainer(result.Instance)
-	return biomeIndex
+	return BiomeAreas.GetBiomeAreaKey(biomeIndex), biomeIndex
+end
+
+local function updateActiveAreaFromPosition()
+	local areaKey, biomeIndex = detectCurrentArea()
+	if areaKey == nil then
+		if activeAreaKey ~= nil then
+			noAreaDetectedSince = noAreaDetectedSince or os.clock()
+			if os.clock() - noAreaDetectedSince < NO_AREA_CLEAR_DELAY then
+				return
+			end
+		end
+	else
+		noAreaDetectedSince = nil
+	end
+
+	setActiveArea(areaKey)
+	setActiveBiome(biomeIndex)
+end
+
+local function updateActiveAreaWhenCharacterReady(character)
+	task.spawn(function()
+		local currentCharacter = character or player.Character
+		if not currentCharacter then
+			currentCharacter = player.CharacterAdded:Wait()
+		end
+
+		if not currentCharacter:WaitForChild("HumanoidRootPart", 5) then
+			return
+		end
+
+		if player.Character ~= currentCharacter then
+			return
+		end
+
+		updateActiveAreaFromPosition()
+	end)
 end
 
 local function startBiomeLightingLoop()
@@ -382,18 +460,22 @@ local function startBiomeLightingLoop()
 		end
 
 		accumulated = 0
-		local biomeIndex = detectCurrentBiomeIndex()
-		setActiveBiome(biomeIndex)
+		updateActiveAreaFromPosition()
 	end)
 end
 
-if not rebuildBiomeMap() and not warnedMissingBiomes then
+if not rebuildAreaMap() and not warnedMissingBiomes then
 	warnedMissingBiomes = true
-	warn(string.format("%s Missing Workspace.LegacyMap.Biomes; lighting will wait for map refs.", LOG_PREFIX))
+	warn(string.format("%s Missing active map Biomes and Starting Area; lighting will wait for map refs.", LOG_PREFIX))
 end
 
 player.CharacterRemoving:Connect(function()
+	noAreaDetectedSince = nil
+	setActiveArea(nil)
 	setActiveBiome(nil)
 end)
 
+player.CharacterAdded:Connect(updateActiveAreaWhenCharacterReady)
+
 startBiomeLightingLoop()
+updateActiveAreaWhenCharacterReady(player.Character)
