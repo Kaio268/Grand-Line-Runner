@@ -103,6 +103,7 @@ local CATEGORIES = {
 	"Devil Fruits",
 	"Currency",
 	"Player Stats",
+	"Access",
 	"Boosts",
 	"Progression",
 	"Bounty",
@@ -280,6 +281,66 @@ local COMMANDS = {
 		},
 		build = function(values)
 			return "/hitbox " .. inputValue(values, "state", "on")
+		end,
+	},
+	{
+		id = "admin_enable",
+		category = "Access",
+		marker = "AD",
+		name = "Admin On",
+		syntax = "/admin true",
+		description = "Enable active Admin status for SuperAdmin testing.",
+		example = "/admin true",
+		build = function()
+			return "/admin true"
+		end,
+	},
+	{
+		id = "admin_disable",
+		category = "Access",
+		marker = "AD",
+		name = "Admin Off",
+		syntax = "/admin false",
+		description = "Disable active Admin status while keeping SuperAdmin command authority.",
+		example = "/admin false",
+		build = function()
+			return "/admin false"
+		end,
+	},
+	{
+		id = "vip_test_on",
+		category = "Access",
+		marker = "VIP",
+		name = "VIP Test On",
+		syntax = "/vip true",
+		description = "Force effective VIP on for this server session without changing Marketplace ownership.",
+		example = "/vip true",
+		build = function()
+			return "/vip true"
+		end,
+	},
+	{
+		id = "vip_test_off",
+		category = "Access",
+		marker = "VIP",
+		name = "VIP Test Off",
+		syntax = "/vip false",
+		description = "Force effective VIP off for this server session to test non-VIP access.",
+		example = "/vip false",
+		build = function()
+			return "/vip false"
+		end,
+	},
+	{
+		id = "vip_test_state",
+		category = "Access",
+		marker = "VIP",
+		name = "VIP Test State",
+		syntax = "/vip state",
+		description = "Show current effective VIP state, real VIP state, and override source.",
+		example = "/vip state",
+		build = function()
+			return "/vip state"
 		end,
 	},
 	{
@@ -752,6 +813,7 @@ local function buildDashboard()
 	local luckRequestEvent = safeWait(ReplicatedStorage, "AdminLuckRequest")
 	local mainEventRequestEvent = safeWait(ReplicatedStorage, "AdminMainEventRequest")
 	local adminCommandRequestEvent = safeWait(ReplicatedStorage, "AdminCommandRequest")
+	local adminCommandFeedbackEvent = safeWait(ReplicatedStorage, "AdminCommandFeedback")
 
 	local gui = create("ScreenGui", {
 		Name = "GrandLineRushAdminDashboard",
@@ -1057,6 +1119,7 @@ local function buildDashboard()
 		Text = "Press P to toggle this dashboard.",
 		TextColor3 = COLORS.Muted,
 		TextSize = 12,
+		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.new(0, 20, 1, -42),
 		Size = UDim2.new(1, -236, 0, 30),
@@ -1070,6 +1133,46 @@ local function buildDashboard()
 	local commandCards = {}
 	local pendingDanger = nil
 	local renderCommandList
+
+	local function setStatus(text, color)
+		statusLabel.Text = cleanSingleLine(text, 180)
+		statusLabel.TextColor3 = color or COLORS.Muted
+	end
+
+	local function getFeedbackColor(status)
+		if status == "error" or status == "rejected" then
+			return COLORS.Red
+		elseif status == "warning" then
+			return COLORS.Gold
+		end
+		return COLORS.Green
+	end
+
+	if adminCommandFeedbackEvent:IsA("RemoteEvent") then
+		adminCommandFeedbackEvent.OnClientEvent:Connect(function(payload)
+			if typeof(payload) ~= "table" then
+				setStatus("Server confirmed admin action.", COLORS.Green)
+				return
+			end
+
+			local status = tostring(payload.Status or payload.status or "success")
+			local message = cleanSingleLine(payload.Message or payload.message or "", 180)
+			if typeof(payload.IsAdmin) == "boolean" then
+				isAdmin = payload.IsAdmin
+				if not isAdmin then
+					gui.Enabled = false
+				end
+			end
+
+			if message == "" then
+				local commandName = cleanSingleLine(payload.DisplayName or payload.CommandName or payload.commandName or "Admin command", 60)
+				local detail = cleanSingleLine(payload.Detail or payload.detail or "", 120)
+				message = if detail ~= "" then commandName .. " confirmed: " .. detail else commandName .. " confirmed."
+			end
+
+			setStatus(message, getFeedbackColor(status))
+		end)
+	end
 
 	local function valuesFromInputs()
 		local values = {}
@@ -1460,7 +1563,7 @@ local function buildDashboard()
 		-- handler validates AdminPermissions again before doing any work.
 		if selectedCommand.panelAction then
 			if executePanelAction(selectedCommand, values) then
-				statusLabel.Text = "Panel action sent."
+				setStatus("Waiting for server confirmation...", COLORS.Muted)
 			end
 			return
 		end
@@ -1475,7 +1578,7 @@ local function buildDashboard()
 				and pendingDanger.baseCommand == preview
 				and pendingDanger.expiresAt > now then
 				adminCommandRequestEvent:FireServer(selectedCommand.build(values, true))
-				statusLabel.Text = "Confirm command sent."
+				setStatus("Confirm sent. Waiting for server confirmation...", COLORS.Muted)
 				pendingDanger = nil
 			else
 				adminCommandRequestEvent:FireServer(preview)
@@ -1484,14 +1587,14 @@ local function buildDashboard()
 					baseCommand = preview,
 					expiresAt = now + 20,
 				}
-				statusLabel.Text = "First step sent. Confirm within 20 seconds."
+				setStatus("First step sent. Confirm within 20 seconds.", COLORS.Gold)
 			end
 			updateRunButton()
 			return
 		end
 
 		adminCommandRequestEvent:FireServer(preview)
-		statusLabel.Text = selectedCommand.dangerous and "Danger command sent." or "Command sent."
+		setStatus("Waiting for server confirmation...", COLORS.Muted)
 	end
 
 	runButton.Activated:Connect(runSelected)
@@ -1534,7 +1637,7 @@ local function buildDashboard()
 			if pendingDanger and pendingDanger.expiresAt <= os.clock() then
 				pendingDanger = nil
 				if selectedCommand and selectedCommand.dangerous then
-					statusLabel.Text = "Confirmation window expired."
+					setStatus("Confirmation window expired.", COLORS.Gold)
 				end
 			end
 			if gui.Enabled then

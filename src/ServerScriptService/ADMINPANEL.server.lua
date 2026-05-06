@@ -144,12 +144,14 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 	end
 
 	if type(message) ~= "string" then
+		AdminPermissions.LogCommandFailed(player, "announcement", "remote", "message must be text")
 		return
 	end
 
 	message = message:gsub("\r", ""):gsub("\n", " ")
 	message = message:match("^%s*(.-)%s*$") or ""
 	if message == "" then
+		AdminPermissions.LogCommandFailed(player, "announcement", "remote", "message is empty")
 		return
 	end
 
@@ -160,6 +162,7 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 
 	local filtered = filterBroadcast(player, message)
 	if not filtered then
+		AdminPermissions.LogCommandFailed(player, "announcement", "remote", "message failed Roblox text filtering")
 		return
 	end
 
@@ -174,7 +177,7 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 
 	markSeen(seenAnn, payload.id)
 	fireAll(payload)
-	AdminPermissions.LogCommandExecuted(player, "announcement", "remote", string.format("duration=%d", duration))
+	AdminPermissions.LogCommandExecuted(player, "announcement", "remote", string.format("message=%s duration=%d", filtered, duration))
 
 	task.spawn(function()
 		pcall(function()
@@ -195,12 +198,21 @@ luckRequestEvent.OnServerEvent:Connect(function(player, luckValue, timeSeconds)
 	end
 
 	local mult = tonumber(luckValue)
-	if not mult then return end
+	if not mult then
+		AdminPermissions.LogCommandFailed(player, "serverLuck", "remote", "multiplier must be a number")
+		return
+	end
 	mult = math.floor(mult)
-	if mult < 1 or mult > 256 then return end
+	if mult < 1 or mult > 256 then
+		AdminPermissions.LogCommandFailed(player, "serverLuck", "remote", "multiplier must be between 1 and 256")
+		return
+	end
 
 	local seconds = tonumber(timeSeconds)
-	if not seconds then return end
+	if not seconds then
+		AdminPermissions.LogCommandFailed(player, "serverLuck", "remote", "duration must be a number")
+		return
+	end
 	seconds = math.floor(seconds)
 	seconds = math.clamp(seconds, 1, 86400)
 
@@ -244,7 +256,7 @@ luckRequestEvent.OnServerEvent:Connect(function(player, luckValue, timeSeconds)
 	end)
 
 	luckAppliedEvent:FireClient(player, mult, seconds)
-	AdminPermissions.LogCommandExecuted(player, "serverLuck", "remote", string.format("multiplier=%d seconds=%d", mult, seconds))
+	AdminPermissions.LogCommandExecuted(player, "serverLuck", "remote", string.format("x%d for %s", mult, formatDuration(seconds)))
 end)
 
 local CometMerchant = require(script.Parent.Modules.CometMerchant)
@@ -260,14 +272,23 @@ mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeco
 		return
 	end
 
-	if type(eventName) ~= "string" then return end
+	if type(eventName) ~= "string" then
+		AdminPermissions.LogCommandFailed(player, "mainEvent", "remote", "event name must be text")
+		return
+	end
 	eventName = eventName:gsub("\r", ""):gsub("\n", " ")
 	eventName = eventName:match("^%s*(.-)%s*$") or ""
-	if eventName == "" then return end
+	if eventName == "" then
+		AdminPermissions.LogCommandFailed(player, "mainEvent", "remote", "event name is empty")
+		return
+	end
 	eventName = eventName:sub(1, 60)
 
 	local seconds = tonumber(timeSeconds)
-	if not seconds then return end
+	if not seconds then
+		AdminPermissions.LogCommandFailed(player, "mainEvent", "remote", "duration must be a number")
+		return
+	end
 	seconds = math.floor(seconds)
 	seconds = math.clamp(seconds, 1, 86400)
 
@@ -319,7 +340,7 @@ mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeco
 	end)
 
 	mainEventAppliedEvent:FireClient(player, eventName, seconds)
-	AdminPermissions.LogCommandExecuted(player, "mainEvent", "remote", string.format("event=%s seconds=%d", eventName, seconds))
+	AdminPermissions.LogCommandExecuted(player, "mainEvent", "remote", string.format("%s for %s", eventName, formatDuration(seconds)))
 end)
 
 local function onAnnMessage(msg)

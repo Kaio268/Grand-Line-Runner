@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
 local PhysicsService = game:GetService("PhysicsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -21,6 +22,9 @@ local FEEDBACK_COOLDOWN_SECONDS = 8
 local POPUP_COLOR = Color3.fromRGB(255, 86, 86)
 local POPUP_STROKE = Color3.fromRGB(0, 0, 0)
 local DEBUG_LOGS = RunService:IsStudio()
+local REMOTES_FOLDER_NAME = "Remotes"
+local ACCESS_STATE_EVENT_NAME = "VIPBarrierAccessStateChanged"
+local ACCESS_STATE_REQUEST_NAME = "VIPBarrierAccessStateRequest"
 
 local started = false
 local playerStates = {}
@@ -29,6 +33,9 @@ local playerRemovingConnection = nil
 local activeMapConnection = nil
 local adminStateConnection = nil
 local vipOverrideConnection = nil
+local purchaseFinishedConnection = nil
+local accessStateEvent = nil
+local accessStateRequest = nil
 local barrierFolder = nil
 local barrierFolderConnections = {}
 local barrierTouchedConnections = setmetatable({}, { __mode = "k" })
@@ -104,6 +111,38 @@ local function setupCollisionGroups()
 	debugCollisionMatrix("setupCollisionGroups")
 end
 
+local function getOrCreateRemotesFolder()
+	local remotes = ReplicatedStorage:FindFirstChild(REMOTES_FOLDER_NAME)
+	if remotes and not remotes:IsA("Folder") then
+		remotes:Destroy()
+		remotes = nil
+	end
+
+	if not remotes then
+		remotes = Instance.new("Folder")
+		remotes.Name = REMOTES_FOLDER_NAME
+		remotes.Parent = ReplicatedStorage
+	end
+
+	return remotes
+end
+
+local function getOrCreateRemote(parent, className, remoteName)
+	local remote = parent:FindFirstChild(remoteName)
+	if remote and not remote:IsA(className) then
+		remote:Destroy()
+		remote = nil
+	end
+
+	if not remote then
+		remote = Instance.new(className)
+		remote.Name = remoteName
+		remote.Parent = parent
+	end
+
+	return remote
+end
+
 local function hasVipValue(player)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false
@@ -112,6 +151,39 @@ local function hasVipValue(player)
 	local passes = player:FindFirstChild("Passes")
 	local vip = passes and passes:FindFirstChild("VIP")
 	return vip ~= nil and vip:IsA("BoolValue") and vip.Value == true
+end
+
+local function setVipValue(player, enabled)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false
+	end
+
+	local passes = player:FindFirstChild("Passes")
+	if not passes then
+		passes = Instance.new("Folder")
+		passes.Name = "Passes"
+		passes.Parent = player
+	end
+
+	local vip = passes:FindFirstChild("VIP")
+	if vip and not vip:IsA("BoolValue") then
+		warn(string.format(
+			"[VIPBarrierService] Cannot update VIP pass value for %s: player.Passes.VIP is %s",
+			player.Name,
+			vip.ClassName
+		))
+		return false
+	end
+
+	if not vip then
+		vip = Instance.new("BoolValue")
+		vip.Name = "VIP"
+		vip.Value = false
+		vip.Parent = passes
+	end
+
+	vip.Value = enabled == true
+	return true
 end
 
 local function hasVipAccess(player)
@@ -125,6 +197,37 @@ local function hasVipAccess(player)
 
 	local effectiveVip = VIPTestOverrides.GetEffectiveVip(player)
 	return effectiveVip == true
+end
+
+local function getAccessState(player)
+	local effectiveVip, effectiveVipSource = VIPTestOverrides.GetEffectiveVip(player)
+	local isAdmin = AdminPermissions.IsAdmin(player)
+	local canBypass = isAdmin or effectiveVip == true
+
+	return {
+		CanBypassVIPBarrier = canBypass,
+		EffectiveVIP = effectiveVip == true,
+		EffectiveVIPSource = effectiveVipSource,
+		IsAdmin = isAdmin,
+		PassesVIP = hasVipValue(player),
+		ShowVIPBarrierSigns = not canBypass,
+	}
+end
+
+local function publishAccessState(player)
+	if accessStateEvent and typeof(player) == "Instance" and player:IsA("Player") then
+		accessStateEvent:FireClient(player, getAccessState(player))
+	end
+end
+
+local function setupAccessStateRemotes()
+	local remotes = getOrCreateRemotesFolder()
+	accessStateEvent = getOrCreateRemote(remotes, "RemoteEvent", ACCESS_STATE_EVENT_NAME)
+	accessStateRequest = getOrCreateRemote(remotes, "RemoteFunction", ACCESS_STATE_REQUEST_NAME)
+
+	accessStateRequest.OnServerInvoke = function(player)
+		return getAccessState(player)
+	end
 end
 
 local function getCharacterCollisionGroupSummary(player)
@@ -185,16 +288,18 @@ local function setPartCollisionGroup(part, groupName)
 end
 
 local function applyCharacterCollisionGroup(player)
+	local groupName = getPlayerCollisionGroup(player)
 	local character = player.Character
 	if not character then
+		publishAccessState(player)
 		return
 	end
 
-	local groupName = getPlayerCollisionGroup(player)
 	for _, descendant in ipairs(character:GetDescendants()) do
 		setPartCollisionGroup(descendant, groupName)
 	end
 	debugPlayerAccess(player, "applyCharacterCollisionGroup", groupName)
+	publishAccessState(player)
 end
 
 local function getPlayerFromHit(hit)
@@ -224,8 +329,30 @@ local function sendVipRequiredFeedback(player)
 
 	PopUpModule:Server_SendPopUp(player, "VIP Required", POPUP_COLOR, POPUP_STROKE, 3, true)
 	if VIP_GAMEPASS_ID and VIP_GAMEPASS_ID > 0 then
-		PopUpModule:Server_PromptGamepass(player, VIP_GAMEPASS_ID)
+		local ok, err = pcall(function()
+			MarketplaceService:PromptGamePassPurchase(player, VIP_GAMEPASS_ID)
+		end)
+		if not ok then
+			warn(string.format(
+				"[VIPBarrierService] Failed to prompt VIP gamepass purchase for %s (%s)",
+				player.Name,
+				tostring(err)
+			))
+		end
 	end
+end
+
+local function onGamePassPurchaseFinished(player, gamePassId, wasPurchased)
+	if not wasPurchased or tonumber(gamePassId) ~= VIP_GAMEPASS_ID then
+		return
+	end
+
+	if not player or not player:IsA("Player") then
+		return
+	end
+
+	setVipValue(player, true)
+	applyCharacterCollisionGroup(player)
 end
 
 local function configureBarrierPart(part)
@@ -234,7 +361,10 @@ local function configureBarrierPart(part)
 	end
 
 	part.CollisionGroup = VIP_BARRIER_GROUP
+	part.Transparency = 1
 	part.CanCollide = true
+	part.CanTouch = true
+	part.CanQuery = true
 
 	if not barrierTouchedConnections[part] then
 		barrierTouchedConnections[part] = part.Touched:Connect(function(hit)
@@ -421,6 +551,7 @@ function VIPBarrierService.Start()
 	started = true
 
 	setupCollisionGroups()
+	setupAccessStateRemotes()
 
 	playerAddedConnection = Players.PlayerAdded:Connect(watchPlayer)
 	playerRemovingConnection = Players.PlayerRemoving:Connect(unwatchPlayer)
@@ -433,6 +564,7 @@ function VIPBarrierService.Start()
 	vipOverrideConnection = VIPTestOverrides.Changed:Connect(function(player)
 		applyCharacterCollisionGroup(player)
 	end)
+	purchaseFinishedConnection = MarketplaceService.PromptGamePassPurchaseFinished:Connect(onGamePassPurchaseFinished)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		watchPlayer(player)
@@ -467,6 +599,15 @@ function VIPBarrierService.Stop()
 		vipOverrideConnection:Disconnect()
 		vipOverrideConnection = nil
 	end
+	if purchaseFinishedConnection then
+		purchaseFinishedConnection:Disconnect()
+		purchaseFinishedConnection = nil
+	end
+	if accessStateRequest then
+		accessStateRequest.OnServerInvoke = nil
+		accessStateRequest = nil
+	end
+	accessStateEvent = nil
 
 	for player in pairs(playerStates) do
 		unwatchPlayer(player)

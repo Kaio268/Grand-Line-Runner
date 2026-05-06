@@ -25,6 +25,134 @@ local adminStateChanged = Instance.new("BindableEvent")
 local POPUP_STROKE = Color3.fromRGB(0, 0, 0)
 local POPUP_INFO = Color3.fromRGB(105, 225, 255)
 local POPUP_WARNING = Color3.fromRGB(255, 205, 90)
+local POPUP_SUCCESS = Color3.fromRGB(105, 255, 172)
+local POPUP_ERROR = Color3.fromRGB(255, 92, 92)
+local POPUP_DURATION_SECONDS = 4
+local POPUP_MESSAGE_LIMIT = 140
+local ADMIN_COMMAND_FEEDBACK_EVENT_NAME = "AdminCommandFeedback"
+
+local function getOrCreateRemoteEvent(remoteName: string): RemoteEvent
+	local remote = ReplicatedStorage:FindFirstChild(remoteName)
+	if remote and not remote:IsA("RemoteEvent") then
+		remote:Destroy()
+		remote = nil
+	end
+
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = remoteName
+		remote.Parent = ReplicatedStorage
+	end
+
+	return remote
+end
+
+local adminCommandFeedbackEvent = getOrCreateRemoteEvent(ADMIN_COMMAND_FEEDBACK_EVENT_NAME)
+
+local COMMAND_DISPLAY_NAMES = {
+	admin = "Admin toggle",
+	announcement = "Announcement",
+	boost = "Boost",
+	bounty = "Bounty",
+	chest = "Chest",
+	clear = "Clear inventory",
+	fruit = "Devil Fruit",
+	giftreset = "Gift reset",
+	gifts = "Gifts",
+	give = "Resource grant",
+	hitbox = "Ability hitboxes",
+	mainEvent = "Main event",
+	money = "Doubloons",
+	rebirth = "Rebirth",
+	resetprogress = "Reset progress",
+	serverLuck = "Server luck",
+	setspeed = "Speed",
+	shipreset = "Ship reset",
+	spawn = "Spawn",
+	speed = "Speed",
+	vip = "VIP test override",
+	wipeplayer = "Wipe player",
+}
+
+local function getCommandDisplayName(commandName: string): string
+	return COMMAND_DISPLAY_NAMES[commandName] or tostring(commandName)
+end
+
+local function formatFeedbackDetail(detail: string?): string
+	local text = tostring(detail or ""):match("^%s*(.-)%s*$") or ""
+	if text:sub(1, 5) == "text=" then
+		return text:sub(6)
+	end
+	return text
+end
+
+local function truncateFeedbackText(text: string, limit: number): string
+	if #text <= limit then
+		return text
+	end
+
+	return text:sub(1, math.max(1, limit - 3)) .. "..."
+end
+
+local function getFeedbackPopupColor(status: string): Color3
+	if status == "error" or status == "rejected" then
+		return POPUP_ERROR
+	elseif status == "warning" then
+		return POPUP_WARNING
+	end
+
+	return POPUP_SUCCESS
+end
+
+local function sendCommandFeedback(player: Player?, status: string, commandName: string, source: string?, detail: string?)
+	if player == nil or player.Parent ~= Players then
+		return
+	end
+
+	local displayName = getCommandDisplayName(commandName)
+	local detailText = formatFeedbackDetail(detail)
+	local isAdmin, adminStatusReason = AdminPermissions.GetAdminStatus(player)
+	local verb
+	if status == "rejected" then
+		verb = "rejected"
+	elseif status == "error" then
+		verb = "failed"
+	elseif status == "warning" then
+		verb = "needs attention"
+	else
+		verb = "confirmed"
+	end
+	local message
+	if detailText ~= "" then
+		message = string.format("%s %s: %s", displayName, verb, detailText)
+	else
+		message = string.format("%s %s.", displayName, verb)
+	end
+
+	adminCommandFeedbackEvent:FireClient(player, {
+		Status = status,
+		CommandName = commandName,
+		DisplayName = displayName,
+		Source = source or "unknown",
+		Detail = detailText,
+		IsAdmin = isAdmin,
+		IsSuperAdmin = AdminPermissions.IsSuperAdmin(player),
+		AdminStatusReason = adminStatusReason,
+		Message = message,
+		SentAt = os.time(),
+	})
+
+	if not (commandName == "vip" and status == "success") then
+		PopUpModule:Server_SendPopUp(
+			player,
+			truncateFeedbackText(message, POPUP_MESSAGE_LIMIT),
+			getFeedbackPopupColor(status),
+			POPUP_STROKE,
+			POPUP_DURATION_SECONDS,
+			status == "error" or status == "rejected"
+		)
+	end
+end
 
 AdminPermissions.AdminStateChanged = adminStateChanged.Event
 
@@ -151,34 +279,37 @@ local function parseVipTestCommand(message: string): string?
 	return nil
 end
 
-local function handleAdminChatCommand(player: Player, message: string, source: string?)
+local function handleAdminChatCommand(player: Player, message: string, source: string?): boolean
 	local requestedState = parseAdminToggleCommand(message)
 	if requestedState == nil then
-		return
+		return false
 	end
 
 	source = source or "unknown"
 	AdminPermissions.LogCommandAttempt(player, "admin", source, string.format("enabled=%s", tostring(requestedState)))
 	if not AdminPermissions.IsSuperAdmin(player) then
 		AdminPermissions.LogCommandRejected(player, "admin", source, "reason=not_super_admin")
-		return
+		return false
 	end
 
-	AdminPermissions.SetAdmin(player, requestedState)
-	AdminPermissions.LogCommandExecuted(player, "admin", source, string.format("enabled=%s", tostring(requestedState)))
+	local didSet = AdminPermissions.SetAdmin(player, requestedState)
+	if didSet then
+		AdminPermissions.LogCommandExecuted(player, "admin", source, string.format("enabled=%s", tostring(requestedState)))
+	end
+	return didSet
 end
 
-local function handleVipTestCommand(player: Player, message: string, source: string?)
+local function handleVipTestCommand(player: Player, message: string, source: string?): boolean
 	local requestedAction = parseVipTestCommand(message)
 	if requestedAction == nil then
-		return
+		return false
 	end
 
 	source = source or "unknown"
 	AdminPermissions.LogCommandAttempt(player, "vip", source, string.format("action=%s", requestedAction))
 	if not AdminPermissions.IsSuperAdmin(player) then
 		AdminPermissions.LogCommandRejected(player, "vip", source, "reason=not_super_admin")
-		return
+		return false
 	end
 
 	if requestedAction == "true" then
@@ -215,6 +346,7 @@ local function handleVipTestCommand(player: Player, message: string, source: str
 		sourceName
 	))
 	AdminPermissions.LogCommandExecuted(player, "vip", source, string.format("action=%s", requestedAction))
+	return true
 end
 
 local function bindAdminTextChatCommand()
@@ -406,6 +538,14 @@ function AdminPermissions.IsAdmin(player: Player?): boolean
 	return isAdmin == true
 end
 
+function AdminPermissions.HandleAdminCommand(player: Player, message: string, source: string?)
+	return handleAdminChatCommand(player, message, source or "AdminPermissions.HandleAdminCommand")
+end
+
+function AdminPermissions.HandleVipTestCommand(player: Player, message: string, source: string?)
+	return handleVipTestCommand(player, message, source or "AdminPermissions.HandleVipTestCommand")
+end
+
 function AdminPermissions.LogPlayerResolved(player: Player)
 	local isAdmin, reason = AdminPermissions.GetAdminStatus(player)
 	print(string.format(
@@ -483,9 +623,64 @@ function AdminPermissions.LogCommandRejected(player: Player?, commandName: strin
 			reason,
 			detail and (" " .. detail) or ""
 		))
+		sendCommandFeedback(player, "rejected", commandName, source, detail or reason)
 	else
 		warn(string.format(
 			"[AdminPermissions] Rejected admin command command=%s source=%s player=nil isAdmin=false reason=%s%s",
+			tostring(commandName),
+			tostring(source or "unknown"),
+			reason,
+			detail and (" " .. detail) or ""
+		))
+	end
+end
+
+function AdminPermissions.LogCommandFailed(player: Player?, commandName: string, source: string?, detail: string?)
+	local isAdmin, reason = AdminPermissions.GetAdminStatus(player)
+	if player then
+		warn(string.format(
+			"[AdminPermissions] Admin command failed command=%s source=%s player=%s displayName=%s userId=%d isSuperAdmin=%s isAdmin=%s reason=%s%s",
+			tostring(commandName),
+			tostring(source or "unknown"),
+			player.Name,
+			player.DisplayName,
+			player.UserId,
+			tostring(AdminPermissions.IsSuperAdmin(player)),
+			tostring(isAdmin),
+			reason,
+			detail and (" " .. detail) or ""
+		))
+		sendCommandFeedback(player, "error", commandName, source, detail or reason)
+	else
+		warn(string.format(
+			"[AdminPermissions] Admin command failed command=%s source=%s player=nil isAdmin=false reason=%s%s",
+			tostring(commandName),
+			tostring(source or "unknown"),
+			reason,
+			detail and (" " .. detail) or ""
+		))
+	end
+end
+
+function AdminPermissions.LogCommandWarning(player: Player?, commandName: string, source: string?, detail: string?)
+	local isAdmin, reason = AdminPermissions.GetAdminStatus(player)
+	if player then
+		warn(string.format(
+			"[AdminPermissions] Admin command warning command=%s source=%s player=%s displayName=%s userId=%d isSuperAdmin=%s isAdmin=%s reason=%s%s",
+			tostring(commandName),
+			tostring(source or "unknown"),
+			player.Name,
+			player.DisplayName,
+			player.UserId,
+			tostring(AdminPermissions.IsSuperAdmin(player)),
+			tostring(isAdmin),
+			reason,
+			detail and (" " .. detail) or ""
+		))
+		sendCommandFeedback(player, "warning", commandName, source, detail or reason)
+	else
+		warn(string.format(
+			"[AdminPermissions] Admin command warning command=%s source=%s player=nil isAdmin=false reason=%s%s",
 			tostring(commandName),
 			tostring(source or "unknown"),
 			reason,
@@ -508,6 +703,7 @@ function AdminPermissions.LogCommandExecuted(player: Player, commandName: string
 		reason,
 		detail and (" " .. detail) or ""
 	))
+	sendCommandFeedback(player, "success", commandName, source, detail)
 end
 
 for _, player in ipairs(Players:GetPlayers()) do

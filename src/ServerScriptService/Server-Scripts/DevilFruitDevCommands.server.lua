@@ -3,6 +3,23 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local engineWarn = warn
+local activeCommandWarnings = nil
+
+local function warn(...)
+	engineWarn(...)
+
+	if activeCommandWarnings == nil then
+		return
+	end
+
+	local parts = {}
+	for index = 1, select("#", ...) do
+		parts[index] = tostring(select(index, ...))
+	end
+	activeCommandWarnings[#activeCommandWarnings + 1] = table.concat(parts, " ")
+end
+
 local function adminCommandFlowLog(message, ...)
 	print("[AdminCommandFlow] " .. string.format(message, ...))
 end
@@ -1499,6 +1516,76 @@ local function getCommandNameAndArguments(rawText)
 	return commandName, argumentText or "", normalizedText
 end
 
+local function cleanFeedbackText(text)
+	local value = trimText(tostring(text or ""))
+	value = value:gsub("^%[DevFruitDevCommands%]%s*", "")
+	value = value:gsub("^%[AdminCommandFlow%]%s*", "")
+	return value
+end
+
+local function getWarningFeedbackStatus(warningText)
+	if string.find(warningText, "Confirmation required", 1, true) then
+		return "warning"
+	end
+
+	return "error"
+end
+
+local function executeAdminCommandHandler(player, commandName, source, normalizedText, handler)
+	local defaultDetail = string.format("text=%s", normalizedText)
+	local warnings = {}
+	local previousWarnings = activeCommandWarnings
+	activeCommandWarnings = warnings
+
+	local ok, success, detail, status = pcall(handler)
+	activeCommandWarnings = previousWarnings
+
+	if not ok then
+		AdminPermissions.LogCommandFailed(player, commandName, source, "error=" .. tostring(success))
+		return
+	end
+
+	if typeof(success) == "table" then
+		local result = success
+		success = result.Success
+		if success == nil then
+			success = result.success
+		end
+		detail = result.Detail or result.detail or detail
+		status = result.Status or result.status or status
+	end
+
+	local feedbackDetail = cleanFeedbackText(detail or defaultDetail)
+	if success == true then
+		AdminPermissions.LogCommandExecuted(player, commandName, source, feedbackDetail)
+		return
+	elseif success == false then
+		AdminPermissions.LogCommandFailed(player, commandName, source, feedbackDetail)
+		return
+	elseif status == "warning" or success == "warning" then
+		AdminPermissions.LogCommandWarning(player, commandName, source, feedbackDetail)
+		return
+	elseif status == "error" or status == "failed" then
+		AdminPermissions.LogCommandFailed(player, commandName, source, feedbackDetail)
+		return
+	elseif status == "success" then
+		AdminPermissions.LogCommandExecuted(player, commandName, source, feedbackDetail)
+		return
+	end
+
+	if #warnings > 0 then
+		local warningText = cleanFeedbackText(warnings[#warnings])
+		if getWarningFeedbackStatus(warningText) == "warning" then
+			AdminPermissions.LogCommandWarning(player, commandName, source, warningText)
+		else
+			AdminPermissions.LogCommandFailed(player, commandName, source, warningText)
+		end
+		return
+	end
+
+	AdminPermissions.LogCommandExecuted(player, commandName, source, feedbackDetail)
+end
+
 local function handleChatCommand(player, rawText, source)
 	source = source or "chat"
 	if not player then
@@ -1561,85 +1648,99 @@ local function handleChatCommand(player, rawText, source)
 	)
 
 	if commandName == "fruit" then
-		processFruitCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processFruitCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "hitbox" then
-		processHitboxCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processHitboxCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "boost" then
-		processBoostCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processBoostCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "speed" or commandName == "setspeed" then
-		processSpeedCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processSpeedCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "rebirth" then
-		processRebirthCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processRebirthCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "bounty" then
-		processBountyCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processBountyCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "spawn" then
-		processSpawnCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processSpawnCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "give" then
-		processGiveCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processGiveCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "chest" then
-		processChestCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processChestCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "shipreset" then
-		processShipResetCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processShipResetCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "clear" then
-		processClearCommand(player, argumentText)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processClearCommand(player, argumentText)
+		end)
 		return
 	end
 
 	if commandName == "gifts" or commandName == "giftreset" then
-		processGiftResetCommand(player, argumentText, commandName)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processGiftResetCommand(player, argumentText, commandName)
+		end)
 		return
 	end
 
 	if commandName == "wipeplayer" or commandName == "resetprogress" then
-		processWipePlayerCommand(player, argumentText, commandName)
-		AdminPermissions.LogCommandExecuted(player, commandName, source)
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processWipePlayerCommand(player, argumentText, commandName)
+		end)
 		return
 	end
 
-	processMoneyCommand(player, argumentText)
-	AdminPermissions.LogCommandExecuted(player, commandName, source)
+	executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+		return processMoneyCommand(player, argumentText)
+	end)
 end
 
 -- Admin panel execution stays server-authoritative by reusing the exact same
@@ -1658,6 +1759,16 @@ adminCommandRequestEvent.OnServerEvent:Connect(function(player, rawText)
 	commandText = commandText:sub(1, 240)
 	if commandText:sub(1, 1) ~= "/" then
 		commandText = "/" .. commandText
+	end
+
+	local commandName = getCommandNameAndArguments(commandText)
+	if commandName == "admin" then
+		AdminPermissions.HandleAdminCommand(player, commandText, "AdminPanelRemote")
+		return
+	end
+	if commandName == "vip" then
+		AdminPermissions.HandleVipTestCommand(player, commandText, "AdminPanelRemote")
+		return
 	end
 
 	handleChatCommand(player, commandText, "AdminPanelRemote")
