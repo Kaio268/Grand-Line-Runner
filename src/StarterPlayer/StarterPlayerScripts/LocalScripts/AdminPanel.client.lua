@@ -625,6 +625,18 @@ local COMMANDS = {
 		end,
 	},
 	{
+		id = "tutorial_reset",
+		category = "Progression",
+		marker = "TU",
+		name = "Reset Tutorial",
+		syntax = "/tutorial reset",
+		description = "Reset your tutorial flags and tutorial-only entities so the first-time tutorial can be tested again.",
+		example = "/tutorial reset",
+		build = function()
+			return "/tutorial reset"
+		end,
+	},
+	{
 		id = "gifts_reset",
 		category = "Gifts",
 		marker = "GF",

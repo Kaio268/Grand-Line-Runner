@@ -92,6 +92,9 @@ local STAND_DEBUG = false
 local ensuredStandFolders = {}
 local standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction()
 local DEBUG_TRACE = RunService:IsStudio()
+local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
+local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
+local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -209,6 +212,43 @@ local function standDebug(message, ...)
 	end
 
 	warn(string.format("[GLR StandDebug] " .. tostring(message), ...))
+end
+
+local function isActiveTutorialPlacementStep(player)
+	return typeof(player) == "Instance"
+		and player:IsA("Player")
+		and player:GetAttribute(TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE) == true
+		and player:GetAttribute(TUTORIAL_RUNTIME_STEP_ATTRIBUTE) == "place_on_stand"
+end
+
+local function tutorialStandPlacementLog(player, standName, reason, detail)
+	if not isActiveTutorialPlacementStep(player) then
+		return
+	end
+
+	warn(string.format(
+		"[TutorialStandPlacement] player=%s stand=%s reason=%s%s",
+		player.Name,
+		tostring(standName or ""),
+		tostring(reason or "unknown"),
+		if detail and detail ~= "" then " " .. tostring(detail) else ""
+	))
+end
+
+local function findAvailableTutorialPlacementReward(player, storageName)
+	if not isActiveTutorialPlacementStep(player) then
+		return nil, nil
+	end
+
+	local filters = {
+		RequireAvailable = true,
+	}
+	storageName = tostring(storageName or "")
+	if storageName ~= "" then
+		filters.StorageName = storageName
+	end
+
+	return BrainrotInstanceService.FindTutorialRewardInstance(player, filters)
 end
 
 standDebug("script init")
@@ -1718,6 +1758,32 @@ local levelUpBound = {}
 local playerStandList = {}
 local touchDebounce = {}
 local stealPromptDebounce = {}
+local placementPickupGuardUntil = {}
+
+local function setPlacementPickupGuard(player, standName)
+	placementPickupGuardUntil[player] = placementPickupGuardUntil[player] or {}
+	placementPickupGuardUntil[player][tostring(standName or "")] = os.clock() + PLACEMENT_PICKUP_GUARD_SECONDS
+end
+
+local function getPlacementPickupGuardRemaining(player, standName)
+	local bucket = placementPickupGuardUntil[player]
+	if not bucket then
+		return 0
+	end
+
+	standName = tostring(standName or "")
+	local expiresAt = tonumber(bucket[standName]) or 0
+	local remaining = expiresAt - os.clock()
+	if remaining <= 0 then
+		bucket[standName] = nil
+		if next(bucket) == nil then
+			placementPickupGuardUntil[player] = nil
+		end
+		return 0
+	end
+
+	return remaining
+end
 
 local function bindZoneCollect(player, plot, standModel)
 	local zone = getHitBoxPart(standModel)
@@ -1871,11 +1937,17 @@ local function bindStandPrompt(player, plot, standModel)
 					standDebug("steal rejected actor=%s stand=%s brainrot=%s reason=quick_slots_full", plr.Name, standName, tostring(brainrotToSteal))
 					return
 				end
+				local brainrotInstanceId = getPlayerStandBrainrotInstanceId(player, standName)
+				local _, brainrotInstance = BrainrotInstanceService.GetInstance(player, brainrotInstanceId)
+				if BrainrotInstanceService.IsTutorialRewardProtected(player, brainrotInstance) then
+					standDebug("steal rejected actor=%s stand=%s brainrot=%s reason=tutorial_reward_protected", plr.Name, standName, tostring(brainrotToSteal))
+					return
+				end
 
 				plr:SetAttribute("StealOwnerUserId", ownerUserId)
 				plr:SetAttribute("StealStandName", standName)
 				plr:SetAttribute("StealBrainrotName", brainrotToSteal)
-				plr:SetAttribute("StealBrainrotInstanceId", getPlayerStandBrainrotInstanceId(player, standName))
+				plr:SetAttribute("StealBrainrotInstanceId", brainrotInstanceId)
 				plr:SetAttribute("StealProductId", productId)
 				plr:SetAttribute("StealTime", os.time())
 
@@ -1887,6 +1959,7 @@ local function bindStandPrompt(player, plot, standModel)
 			dmEnsureStandFolder(plr, standName)
 			local slotState = getStandSlotState(plr, standName)
 			if slotState.Visible and not slotState.Usable then
+				tutorialStandPlacementLog(plr, standName, "stand_unavailable", string.format("level=%s", tostring(slotState.Level)))
 				updateStandMoneyText(plr, standModel)
 				updateLevelUpUI(plr, standModel)
 				updateStandPromptTexts(plr, standModel)
@@ -1895,6 +1968,23 @@ local function bindStandPrompt(player, plot, standModel)
 
 			local current = getPlayerStandBrainrotName(plr, standName)
 			if current ~= "" then
+				local placementGuardRemaining = getPlacementPickupGuardRemaining(plr, standName)
+				if placementGuardRemaining > 0 then
+					if DEBUG_TRACE then
+						warn(string.format(
+							"[StandPlacementGuard] player=%s stand=%s reason=recent_place action=ignore_pickup cooldown=%.2f",
+							plr.Name,
+							standName,
+							placementGuardRemaining
+						))
+					end
+					tutorialStandPlacementLog(plr, standName, "recent_place", string.format("action=ignore_pickup cooldown=%.2f", placementGuardRemaining))
+					updateStandMoneyText(plr, standModel)
+					updateLevelUpUI(plr, standModel)
+					updateStandPromptTexts(plr, standModel)
+					return
+				end
+
 				local releasedInstanceId, releasedInstance = BrainrotInstanceService.ReleaseStandInstance(plr, standName)
 				if not releasedInstance then
 					standDebug("pickup from stand blocked player=%s stand=%s reason=no_instance_available", plr.Name, standName)
@@ -1912,32 +2002,105 @@ local function bindStandPrompt(player, plot, standModel)
 			end
 
 			local toolName = getEquippedToolName(plr)
+			local tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, toolName)
 			if not toolName or toolName == "" then
-				standDebug("place rejected player=%s stand=%s reason=no_equipped_tool", plr.Name, standName)
-				return
+				tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, nil)
+				if tutorialInstance then
+					toolName = tostring(tutorialInstance.StorageName or "")
+					tutorialStandPlacementLog(
+						plr,
+						standName,
+						"no_equipped_tool",
+						string.format("action=bypass tutorialInstanceId=%s storageName=%s", tostring(tutorialInstanceId), tostring(toolName))
+					)
+				else
+					tutorialStandPlacementLog(plr, standName, "no_equipped_tool", "action=reject")
+					standDebug("place rejected player=%s stand=%s reason=no_equipped_tool", plr.Name, standName)
+					return
+				end
 			end
 
 			local qty = getInventoryQuantity(plr, toolName)
 			if qty < 1 then
-				standDebug("place rejected player=%s stand=%s tool=%s reason=no_inventory quantity=%s", plr.Name, standName, tostring(toolName), tostring(qty))
-				return
+				if tutorialInstance then
+					tutorialStandPlacementLog(
+						plr,
+						standName,
+						"no_inventory",
+						string.format(
+							"action=bypass tool=%s quantity=%s tutorialInstanceId=%s",
+							tostring(toolName),
+							tostring(qty),
+							tostring(tutorialInstanceId)
+						)
+					)
+				else
+					tutorialStandPlacementLog(
+						plr,
+						standName,
+						"no_inventory",
+						string.format("action=reject tool=%s quantity=%s", tostring(toolName), tostring(qty))
+					)
+					standDebug("place rejected player=%s stand=%s tool=%s reason=no_inventory quantity=%s", plr.Name, standName, tostring(toolName), tostring(qty))
+					return
+				end
 			end
 
 			local quickSlotUnlocked = BrainrotQuickSlotService.CanEquipBrainrot(plr, toolName)
-			if not quickSlotUnlocked then
+			if not quickSlotUnlocked and not tutorialInstance then
 				BrainrotQuickSlotService.PromptUnlockForBrainrot(plr, toolName)
+				tutorialStandPlacementLog(plr, standName, "quick_slot_locked", string.format("action=reject tool=%s", tostring(toolName)))
 				standDebug("place rejected player=%s stand=%s tool=%s reason=quick_slot_locked", plr.Name, standName, tostring(toolName))
 				return
+			elseif not quickSlotUnlocked and tutorialInstance then
+				tutorialStandPlacementLog(
+					plr,
+					standName,
+					"quick_slot_locked",
+					string.format("action=bypass tool=%s tutorialInstanceId=%s", tostring(toolName), tostring(tutorialInstanceId))
+				)
 			end
 
-			local placedInstanceId, placedInstance = BrainrotInstanceService.AssignAvailableInstanceToStand(plr, toolName, standName)
+			local placedInstanceId, placedInstance
+			if tutorialInstance then
+				placedInstanceId, placedInstance = BrainrotInstanceService.AssignTutorialRewardInstanceToStand(plr, standName, {
+					InstanceId = tutorialInstanceId,
+					StorageName = toolName,
+					ClearTutorialMetadataAfterAssign = true,
+				})
+			else
+				placedInstanceId, placedInstance = BrainrotInstanceService.AssignAvailableInstanceToStand(plr, toolName, standName)
+			end
 			if not placedInstance then
+				tutorialStandPlacementLog(
+					plr,
+					standName,
+					"no_instance_available",
+					string.format("action=reject tool=%s tutorialReward=%s", tostring(toolName), tostring(tutorialInstance ~= nil))
+				)
 				standDebug("place rejected player=%s stand=%s tool=%s reason=no_instance_available", plr.Name, standName, tostring(toolName))
 				return
 			end
 
 			getBrainrotLevel(plr, placedInstanceId)
 			syncStandLevelFromBrainrot(plr, standName, placedInstanceId)
+			setPlacementPickupGuard(plr, standName)
+			if tutorialInstance then
+				tutorialStandPlacementLog(
+					plr,
+					standName,
+					"accepted",
+					string.format("tool=%s tutorialInstanceId=%s", tostring(toolName), tostring(placedInstanceId))
+				)
+				QuestSignals.Record(plr, "PlaceOnStand", 1, {
+					Source = "StandPlacement",
+					StandName = standName,
+					BrainrotName = tostring(placedInstance.StorageName or toolName),
+					BrainrotInstanceId = tostring(placedInstanceId),
+					TutorialPlacement = true,
+					TutorialRewardConverted = true,
+				})
+			end
 			standDebug("place accepted player=%s stand=%s tool=%s quantityBefore=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(qty), tostring(placedInstanceId))
 
 			spawnStandBrainrot(plr, standModel, handle, placedInstance.StorageName)
@@ -2229,6 +2392,7 @@ local function clearPlayerStandRuntime(player)
 	ensuredStandFolders[player] = nil
 	touchDebounce[player] = nil
 	stealPromptDebounce[player] = nil
+	placementPickupGuardUntil[player] = nil
 	clearPlotScanStateForPlayer(player)
 end
 

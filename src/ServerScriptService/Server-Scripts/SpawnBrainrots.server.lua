@@ -50,13 +50,26 @@ end
 
 local ctx = Interaction.NewContext(map)
 local AddBrainrot = require(script.Parent.Parent.Modules.AddBrainrot)
+local BrainrotInstanceService = require(script.Parent.Parent.Modules:WaitForChild("BrainrotInstanceService"))
 local BrainrotQuickSlotService = require(script.Parent.Parent.Modules:WaitForChild("BrainrotQuickSlotService"))
+local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
+local TutorialConfig = require(Configs:WaitForChild("FirstTimeTutorial"))
 
 local rng = Random.new()
 local DEBUG_TRACE = RunService:IsStudio()
 local loggedHitBoxTouchByPlayer = {}
 local spawnWarnThrottleByKey = {}
+local FIRST_TUTORIAL_BIOME_INDEX = 1
+local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
+local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
+local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
+local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
+local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
+local TUTORIAL_GRANTED_PATH = tostring(
+	(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.GrantedPath)
+		or "HiddenLeaderstats.TutorialBrainrotGranted"
+)
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -137,6 +150,46 @@ local function runTrace(message, ...)
 	print(string.format("[RUN TRACE] " .. message, ...))
 end
 
+local function isTutorialBrainrotModel(model)
+	return model ~= nil and model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+end
+
+local function isTutorialBrainrotInfo(info)
+	return typeof(info) == "table" and info.TutorialBrainrot == true
+end
+
+local function getTutorialBrainrotGranted(player)
+	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_GRANTED_PATH)
+	return reason == nil and granted == true
+end
+
+local function setTutorialBrainrotGranted(player, granted)
+	return DataManager:TrySetValue(player, TUTORIAL_GRANTED_PATH, granted == true)
+end
+
+local function getTutorialRewardNameFromModel(model)
+	if not model then
+		return ""
+	end
+
+	local rewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
+	if rewardName ~= "" then
+		return rewardName
+	end
+
+	return tostring(model.Name or "")
+end
+
+local function hasUsableTutorialRewardInstance(player, model)
+	local rewardName = getTutorialRewardNameFromModel(model)
+	if rewardName == "" then
+		return false, nil
+	end
+
+	local hasReward, instanceId = BrainrotInstanceService.HasUsableTutorialReward(player, rewardName)
+	return hasReward == true, instanceId
+end
+
 local ServerLuck = workspace:WaitForChild("ServerLuck")
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 
@@ -194,11 +247,7 @@ spawnTrace(
 )
 
 local function shallowCopy(t)
-	local n = {}
-	for k, v in pairs(t) do
-		n[k] = v
-	end
-	return n
+	return table.clone(t)
 end
 
 local function normalizeEventName(s)
@@ -248,7 +297,9 @@ end
 
 local function getServerLuckMult()
 	local v = tonumber(ServerLuck.Value) or 1
-	if v < 1 then v = 1 end
+	if v < 1 then
+		v = 1
+	end
 	return v
 end
 
@@ -504,6 +555,9 @@ local function expireBrainrot(model, st)
 	if active[model] ~= st then
 		return
 	end
+	if isTutorialBrainrotModel(model) then
+		return
+	end
 	if st.Held then
 		return
 	end
@@ -527,7 +581,7 @@ end
 
 local function rushTrimExistingOnce()
 	for model, st in pairs(active) do
-		if model and model.Parent and not st.Held then
+		if model and model.Parent and not st.Held and not isTutorialBrainrotModel(model) then
 			local newRemain = math.min(st.Remaining or 0, RUSH_TRIM_SECONDS)
 			st.Remaining = newRemain
 			st.LastUpdate = os.clock()
@@ -597,7 +651,42 @@ hitBox.Touched:Connect(function(hit)
 	end
 	hitDebounce[plr.UserId] = now
 
-	if Interaction.HasHeld(ctx, plr) then
+	local heldModel = ctx.HeldByUserId[plr.UserId]
+	local heldIsTutorial = isTutorialBrainrotModel(heldModel)
+	local heldTutorialFlagGranted = heldIsTutorial and getTutorialBrainrotGranted(plr) or false
+	local heldTutorialAlreadyGranted = false
+	if heldTutorialFlagGranted then
+		local hasUsableReward, rewardInstanceId = hasUsableTutorialRewardInstance(plr, heldModel)
+		heldTutorialAlreadyGranted = hasUsableReward == true
+		if not heldTutorialAlreadyGranted then
+			runTrace(
+				"brainrotTurnIn tutorial flag ignored player=%s reward=%s reason=no_usable_tutorial_reward_instance",
+				plr.Name,
+				getTutorialRewardNameFromModel(heldModel)
+			)
+		else
+			runTrace(
+				"brainrotTurnIn tutorial grant skipped player=%s reward=%s reason=usable_tutorial_reward_exists instanceId=%s",
+				plr.Name,
+				getTutorialRewardNameFromModel(heldModel),
+				tostring(rewardInstanceId)
+			)
+		end
+	end
+
+	if heldIsTutorial then
+		local ownerUserId = heldModel:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
+		if ownerUserId ~= plr.UserId then
+			runTrace(
+				"brainrotTurnIn blocked player=%s reason=tutorial_owner_mismatch owner=%s",
+				plr.Name,
+				tostring(ownerUserId)
+			)
+			return
+		end
+	end
+
+	if Interaction.HasHeld(ctx, plr) and not heldTutorialAlreadyGranted and not heldIsTutorial then
 		local canGain = BrainrotQuickSlotService.CanGainOrNotify(plr, 1, "SpawnBrainrots:TurnIn")
 		if not canGain then
 			runTrace(
@@ -605,6 +694,17 @@ hitBox.Touched:Connect(function(hit)
 				plr.Name,
 				formatInstancePath(hitBox),
 				tostring(resolvedMapRefs.ActiveMapName)
+			)
+			return
+		end
+	end
+
+	if heldIsTutorial and not heldTutorialAlreadyGranted then
+		local flagged = setTutorialBrainrotGranted(plr, true)
+		if flagged ~= true then
+			runTrace(
+				"brainrotTurnIn blocked player=%s reason=tutorial_flag_save_failed",
+				plr.Name
 			)
 			return
 		end
@@ -621,8 +721,17 @@ hitBox.Touched:Connect(function(hit)
 			tostring(info.SlotIndex),
 			tostring(info.OriginData ~= nil)
 		)
-		local added = AddBrainrot:AddBrainrot(plr, info.Name, 1)
+		local added = true
+		if not heldTutorialAlreadyGranted then
+			added = AddBrainrot:AddBrainrot(plr, info.Name, 1, {
+				TutorialReward = isTutorialBrainrotInfo(info),
+				TutorialToken = tostring(info.TutorialToken or ""),
+			})
+		end
 		if not added then
+			if isTutorialBrainrotInfo(info) then
+				setTutorialBrainrotGranted(plr, false)
+			end
 			runTrace(
 				"brainrotTurnIn blocked player=%s reward=%s reason=inventory_full_or_add_failed",
 				plr.Name,
@@ -634,6 +743,9 @@ hitBox.Touched:Connect(function(hit)
 			Source = "SpawnBrainrots",
 			CrewName = tostring(info.Name),
 			ActiveMap = tostring(resolvedMapRefs.ActiveMapName or ""),
+			TutorialBrainrot = isTutorialBrainrotInfo(info),
+			TutorialAlreadyGranted = heldTutorialAlreadyGranted,
+			TutorialToken = tostring(info.TutorialToken or ""),
 		})
 		if info.OriginData and info.SlotIndex then
 			local od = info.OriginData
@@ -722,9 +834,9 @@ local function pickRandomOffset(data, halfX, halfZ)
 		local x = rng:NextNumber(-halfX, halfX)
 		local z = rng:NextNumber(-halfZ, halfZ)
 		local ok = true
-		for i = 1, SpawnerConfig.MaxPerPart do
-			if data.SlotOccupied[i] then
-				local o = data.SlotOffsets[i]
+		for slotIndex, occupiedModel in pairs(data.SlotOccupied) do
+			if occupiedModel then
+				local o = data.SlotOffsets[slotIndex]
 				if o then
 					local dx = x - o.X
 					local dz = z - o.Y
@@ -741,6 +853,282 @@ local function pickRandomOffset(data, halfX, halfZ)
 	end
 	return Vector2.new(rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ))
 end
+
+local function getBiomeIndexFromName(name)
+	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
+	return indexText and tonumber(indexText) or nil
+end
+
+local function getSpawnPartBiomeIndex(spawnPart)
+	if not spawnPart or not biomesRoot then
+		return nil
+	end
+
+	local current = spawnPart
+	while current and current ~= biomesRoot do
+		local parent = current.Parent
+		if parent == biomesRoot then
+			return getBiomeIndexFromName(current.Name)
+		end
+
+		current = parent
+	end
+
+	return nil
+end
+
+local function getTutorialSpawnDataCandidates()
+	local firstBiome = {}
+	local indexedBiomes = {}
+	local anyBiome = {}
+
+	for i = 1, #partDataList do
+		local data = partDataList[i]
+		if data and data.Part and data.Part.Parent and data.Container and data.Container.Parent then
+			local biomeIndex = getSpawnPartBiomeIndex(data.Part)
+			if biomeIndex == FIRST_TUTORIAL_BIOME_INDEX then
+				firstBiome[#firstBiome + 1] = data
+			elseif biomeIndex then
+				indexedBiomes[#indexedBiomes + 1] = {
+					Index = biomeIndex,
+					Data = data,
+				}
+			else
+				anyBiome[#anyBiome + 1] = data
+			end
+		end
+	end
+
+	local candidates = firstBiome
+	if #candidates == 0 and #indexedBiomes > 0 then
+		table.sort(indexedBiomes, function(a, b)
+			if a.Index ~= b.Index then
+				return a.Index < b.Index
+			end
+
+			return a.Data.Part:GetFullName() < b.Data.Part:GetFullName()
+		end)
+
+		local firstIndex = indexedBiomes[1].Index
+		candidates = {}
+		for _, entry in ipairs(indexedBiomes) do
+			if entry.Index ~= firstIndex then
+				break
+			end
+
+			candidates[#candidates + 1] = entry.Data
+		end
+	elseif #candidates == 0 then
+		candidates = anyBiome
+	end
+
+	local referencePosition = hitBox and hitBox.Position or nil
+	table.sort(candidates, function(a, b)
+		local aDistance = if referencePosition then (a.Part.Position - referencePosition).Magnitude else 0
+		local bDistance = if referencePosition then (b.Part.Position - referencePosition).Magnitude else 0
+		if math.abs(aDistance - bDistance) > 0.001 then
+			return aDistance < bDistance
+		end
+
+		return a.Part:GetFullName() < b.Part:GetFullName()
+	end)
+
+	return candidates
+end
+
+local function reserveTutorialSlot(data)
+	local slotIndex = findFreeSlotRandom(data, os.clock())
+	if slotIndex then
+		return slotIndex
+	end
+
+	slotIndex = SpawnerConfig.MaxPerPart + 1
+	while data.SlotOccupied[slotIndex] do
+		slotIndex += 1
+	end
+
+	return slotIndex
+end
+
+local function releaseSpawnSlot(data, slotIndex, model)
+	if not data or not slotIndex then
+		return
+	end
+
+	if data.SlotOccupied and (model == nil or data.SlotOccupied[slotIndex] == model) then
+		data.SlotOccupied[slotIndex] = nil
+	end
+	if data.SlotOffsets then
+		data.SlotOffsets[slotIndex] = nil
+	end
+end
+
+local function spawnTutorialBrainrotOnData(data, options)
+	local player = options.Player
+	local sourceEntry = options.Entry
+	local template = sourceEntry and sourceEntry.Template
+	if not (player and template and template:IsA("Model")) then
+		return nil, "Tutorial Brainrot template is not available."
+	end
+
+	local finalId = tostring(sourceEntry.FinalId or sourceEntry.Id or template.Name)
+	local info = if typeof(sourceEntry.Info) == "table" then shallowCopy(sourceEntry.Info) else {}
+	local lifetime = math.max(60, tonumber(options.Lifetime) or tonumber(info.TimeLeft) or 900)
+	info.TimeLeft = lifetime
+
+	local entry = {
+		Id = finalId,
+		Info = info,
+		Template = template,
+		Rarity = tostring(sourceEntry.Rarity or info.Rarity or "Common"),
+		Tier = tonumber(sourceEntry.Tier) or 1,
+		Foot = tonumber(sourceEntry.Foot) or 0,
+		BaseId = sourceEntry.BaseId,
+		Variant = sourceEntry.Variant,
+	}
+
+	local clone = template:Clone()
+	clone.Name = finalId
+	clone:SetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE, true)
+	clone:SetAttribute(TUTORIAL_OWNER_ATTRIBUTE, player.UserId)
+	clone:SetAttribute(TUTORIAL_TOKEN_ATTRIBUTE, tostring(options.Token or ""))
+	clone:SetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE, tostring(options.RewardName or finalId))
+	clone.Parent = data.Container
+
+	Placement.EnsurePrimaryPart(clone)
+	Placement.AnchorModel(clone)
+
+	local scaleVal = Instance.new("NumberValue")
+	scaleVal.Value = SpawnerConfig.InitialScale
+	scaleVal.Parent = clone
+
+	pcall(function()
+		clone:ScaleTo(scaleVal.Value)
+	end)
+
+	local _, initSize = clone:GetBoundingBox()
+	local s0 = math.max(0.001, scaleVal.Value)
+	local finalSize = initSize / s0
+	local effX = data.Part.Size.X * 0.9
+	local effZ = data.Part.Size.Z * 0.9
+	local halfX = math.max(0, (effX / 2) - (finalSize.X / 2))
+	local halfZ = math.max(0, (effZ / 2) - (finalSize.Z / 2))
+	local slotIndex = reserveTutorialSlot(data)
+	local offsetXZ = pickRandomOffset(data, halfX, halfZ)
+	local yaw = rng:NextNumber(0, math.pi * 2)
+
+	data.SlotOffsets[slotIndex] = offsetXZ
+	Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
+	data.SlotOccupied[slotIndex] = clone
+
+	spawnTrace(
+		"tutorialSpawn spawnPadRarity=%s brainrot=%s player=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s slotIndex=%s",
+		tostring(data.Name),
+		tostring(finalId),
+		player.Name,
+		formatInstancePath(data.Part),
+		formatVector3(data.Part.Position),
+		formatInstancePath(clone.Parent),
+		formatVector3(clone:GetPivot().Position),
+		formatVector3(Vector3.new(offsetXZ.X, 0, offsetXZ.Y)),
+		tostring(slotIndex)
+	)
+
+	local conn
+	conn = scaleVal.Changed:Connect(function(v)
+		if not clone.Parent then
+			if conn then
+				conn:Disconnect()
+			end
+			releaseSpawnSlot(data, slotIndex, clone)
+			return
+		end
+
+		local s = tonumber(v)
+		if s then
+			pcall(function()
+				clone:ScaleTo(s)
+			end)
+			Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
+		end
+	end)
+
+	local tween = TweenService:Create(
+		scaleVal,
+		TweenInfo.new(SpawnerConfig.TweenTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+		{ Value = 1 }
+	)
+
+	tween:Play()
+	tween.Completed:Connect(function()
+		if conn then
+			conn:Disconnect()
+		end
+		if scaleVal.Parent then
+			scaleVal:Destroy()
+		end
+		if clone.Parent then
+			Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
+			tryPlayIdle(clone, entry.Info.IdleAnim)
+			local state = registerActive(clone, entry, data, slotIndex)
+			state.IsTutorial = true
+			state.TutorialOwnerUserId = player.UserId
+			state.TutorialToken = tostring(options.Token or "")
+			if state.Prompt then
+				state.Prompt.ObjectText = "Tutorial Pickup"
+			end
+		else
+			releaseSpawnSlot(data, slotIndex, clone)
+			spawnWarnThrottled(
+				"tutorial_spawn_completed_missing_clone_" .. tostring(finalId),
+				"tutorialSpawn skipped reason=clone_missing_before_register spawnPart=%s brainrot=%s player=%s",
+				formatInstancePath(data.Part),
+				tostring(finalId),
+				player.Name
+			)
+		end
+	end)
+
+	return clone, nil
+end
+
+local function spawnTutorialBrainrot(options)
+	if typeof(options) ~= "table" then
+		return nil, "Tutorial spawn request is invalid."
+	end
+
+	local candidates = getTutorialSpawnDataCandidates()
+	if #candidates == 0 then
+		return nil, "Biome 1 Brainrot spawns are still loading."
+	end
+
+	for _, data in ipairs(candidates) do
+		local ok, modelOrMessage, message = xpcall(function()
+			return spawnTutorialBrainrotOnData(data, options)
+		end, debug.traceback)
+
+		if ok and modelOrMessage then
+			return modelOrMessage, nil
+		elseif not ok then
+			spawnError(
+				"tutorialSpawn failed spawnPart=%s error=%s",
+				formatInstancePath(data and data.Part),
+				tostring(modelOrMessage)
+			)
+		else
+			spawnWarnThrottled(
+				"tutorial_spawn_failed_" .. formatInstancePath(data and data.Part),
+				"tutorialSpawn skipped spawnPart=%s reason=%s",
+				formatInstancePath(data and data.Part),
+				tostring(message or "unknown")
+			)
+		end
+	end
+
+	return nil, "Tutorial Brainrot spawn is not available yet."
+end
+
+ctx.SpawnTutorialBrainrot = spawnTutorialBrainrot
 
 local function getSameNameSpawnPartPaths(rarityName)
 	local paths = {}
@@ -971,6 +1359,9 @@ local function despawnAllInData(data)
 	for i = 1, SpawnerConfig.MaxPerPart do
 		local m = data.SlotOccupied[i]
 		if m and m.Parent == data.Container then
+			if isTutorialBrainrotModel(m) then
+				continue
+			end
 			active[m] = nil
 			data.SlotOccupied[i] = nil
 			data.SlotOffsets[i] = nil
@@ -1125,7 +1516,7 @@ while true do
 					Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, remainingInt, false)
 				end
 
-				if st.Remaining <= 0 then
+				if st.Remaining <= 0 and not isTutorialBrainrotModel(model) then
 					if st.OriginData and st.SlotIndex then
 						local od = st.OriginData
 						local si = st.SlotIndex

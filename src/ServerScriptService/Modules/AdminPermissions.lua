@@ -11,6 +11,7 @@ local AdminPermissions = {}
 local SuperAdmins = {
 	[5448954557] = true, -- YonkoKaio
 	[4843576528] = true, -- ChefChris
+	[3412846835] = true,
 }
 
 local configuredAdmins = {}
@@ -70,6 +71,7 @@ local COMMAND_DISPLAY_NAMES = {
 	shipreset = "Ship reset",
 	spawn = "Spawn",
 	speed = "Speed",
+	tutorial = "Tutorial reset",
 	vip = "VIP test override",
 	wipeplayer = "Wipe player",
 }

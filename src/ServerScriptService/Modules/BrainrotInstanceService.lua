@@ -9,6 +9,7 @@ local IndexCollectionService = require(script.Parent:WaitForChild("IndexCollecti
 local Module = {}
 local DataManagerModule
 local inventorySavedCallbacks = {}
+local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -29,6 +30,14 @@ local function getDataManager()
 		DataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 	end
 	return DataManagerModule
+end
+
+local function isTutorialIncomplete(player)
+	return getDataManager():GetValue(player, TUTORIAL_COMPLETION_PATH) ~= true
+end
+
+local function isProtectedTutorialReward(player, instanceData)
+	return typeof(instanceData) == "table" and instanceData.TutorialReward == true and isTutorialIncomplete(player)
 end
 
 local function notifyInventorySaved(player, brainrotInventory)
@@ -189,6 +198,8 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
 		AcquiredAt = coerceNumber(instanceData.AcquiredAt, os.time()),
 		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
+		TutorialReward = instanceData.TutorialReward == true,
+		TutorialToken = tostring(instanceData.TutorialToken or ""),
 	}
 end
 
@@ -302,6 +313,21 @@ local function moveInstanceToFront(brainrotInventory, instanceId)
 	table.insert(brainrotInventory.Order, 1, instanceId)
 end
 
+local function clearShipSlotAssignment(player, standName)
+	standName = tostring(standName or "")
+	if standName == "" then
+		return
+	end
+
+	local shipSlots = getDataManager():GetValue(player, "Ship.Slots")
+	if typeof(shipSlots) ~= "table" then
+		return
+	end
+
+	shipSlots[standName] = nil
+	getDataManager():SetValue(player, "Ship.Slots", shipSlots)
+end
+
 local function getStandData(player, standName)
 	local standData = getDataManager():GetValue(player, "IncomeBrainrots." .. tostring(standName))
 	if typeof(standData) ~= "table" then
@@ -358,8 +384,14 @@ local function createInstanceInternal(player, brainrotInventory, storageName, ov
 		AssignedStand = overrides and overrides.AssignedStand or "",
 		AcquiredAt = overrides and overrides.AcquiredAt or os.time(),
 		LastReleasedAt = overrides and overrides.LastReleasedAt or 0,
+		TutorialReward = overrides and overrides.TutorialReward == true,
+		TutorialToken = overrides and overrides.TutorialToken or "",
 	})
-	table.insert(brainrotInventory.Order, instanceId)
+	if overrides and overrides.TutorialReward == true then
+		table.insert(brainrotInventory.Order, 1, instanceId)
+	else
+		table.insert(brainrotInventory.Order, instanceId)
+	end
 	IndexCollectionService.MarkBrainrotDiscovered(
 		player,
 		storageName,
@@ -397,6 +429,110 @@ end
 
 function Module.SyncAvailableCounts(player)
 	return syncAvailableCounts(player)
+end
+
+function Module.IsTutorialRewardProtected(player, instanceData)
+	return isProtectedTutorialReward(player, instanceData)
+end
+
+local function getTutorialRewardFilters(filters)
+	if typeof(filters) == "string" then
+		return {
+			StorageName = filters,
+		}
+	end
+
+	return if typeof(filters) == "table" then filters else {}
+end
+
+local function tutorialRewardMatchesFilters(instanceData, filters)
+	if typeof(instanceData) ~= "table" or instanceData.TutorialReward ~= true then
+		return false
+	end
+
+	local storageName = tostring(filters.StorageName or "")
+	if storageName ~= "" and tostring(instanceData.StorageName or "") ~= storageName then
+		return false
+	end
+
+	local tutorialToken = tostring(filters.TutorialToken or "")
+	if tutorialToken ~= "" and tostring(instanceData.TutorialToken or "") ~= tutorialToken then
+		return false
+	end
+
+	local assignedStand = tostring(instanceData.AssignedStand or "")
+	if filters.RequireAvailable == true and assignedStand ~= "" then
+		return false
+	end
+	if filters.RequireAssigned == true and assignedStand == "" then
+		return false
+	end
+
+	return true
+end
+
+function Module.FindTutorialRewardInstance(player, filters)
+	filters = getTutorialRewardFilters(filters)
+	local brainrotInventory = getBrainrotInventory(player)
+	local requestedInstanceId = tostring(filters.InstanceId or "")
+
+	if requestedInstanceId ~= "" then
+		local instanceData = brainrotInventory.ById[requestedInstanceId]
+		if tutorialRewardMatchesFilters(instanceData, filters) then
+			return requestedInstanceId, instanceData, brainrotInventory
+		end
+	end
+
+	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
+		local instanceId = tostring(orderedInstanceId)
+		local instanceData = brainrotInventory.ById[instanceId]
+		if tutorialRewardMatchesFilters(instanceData, filters) then
+			return instanceId, instanceData, brainrotInventory
+		end
+	end
+
+	return nil, nil, brainrotInventory
+end
+
+function Module.HasUsableTutorialReward(player, storageName, tutorialToken)
+	local instanceId, instanceData = Module.FindTutorialRewardInstance(player, {
+		StorageName = tostring(storageName or ""),
+		TutorialToken = tostring(tutorialToken or ""),
+		RequireAvailable = true,
+	})
+	return instanceData ~= nil, instanceId, instanceData
+end
+
+function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
+	filters = getTutorialRewardFilters(filters)
+	filters.RequireAvailable = true
+	local clearTutorialMetadataAfterAssign = filters.ClearTutorialMetadataAfterAssign == true
+
+	local instanceId, instanceData, brainrotInventory = Module.FindTutorialRewardInstance(player, filters)
+	if not instanceData then
+		return nil, nil
+	end
+
+	instanceData.AssignedStand = tostring(standName)
+	setInstanceData(player, brainrotInventory, instanceId, instanceData)
+	getDataManager():SetValue(player, "IncomeBrainrots." .. tostring(standName) .. ".BrainrotName", instanceData.StorageName)
+	getDataManager():SetValue(player, "IncomeBrainrots." .. tostring(standName) .. ".BrainrotInstanceId", tostring(instanceId))
+
+	if clearTutorialMetadataAfterAssign then
+		local assignedInstanceData = brainrotInventory.ById[tostring(instanceId)]
+		if assignedInstanceData then
+			assignedInstanceData.TutorialReward = false
+			assignedInstanceData.TutorialToken = ""
+			assignedInstanceData.TutorialOwnerUserId = nil
+			assignedInstanceData.TutorialBrainrot = nil
+			assignedInstanceData.TutorialRewardName = nil
+			setInstanceData(player, brainrotInventory, instanceId, assignedInstanceData)
+		end
+	end
+
+	syncAvailableCounts(player, brainrotInventory)
+
+	return tostring(instanceId), brainrotInventory.ById[tostring(instanceId)]
 end
 
 function Module.EnsureInventoryMetadata(player, storageName, metadata)
@@ -661,7 +797,22 @@ function Module.ReleaseStandInstance(player, standName)
 end
 
 function Module.RemoveAvailableInstance(player, storageName)
-	local instanceId, instanceData, brainrotInventory = Module.FindAvailableInstance(player, storageName)
+	Module.EnsureAvailableInstancesForStorage(player, storageName, 1)
+	local brainrotInventory = getBrainrotInventory(player)
+	local instanceId = nil
+	local instanceData = nil
+
+	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
+		local candidate = brainrotInventory.ById[tostring(orderedInstanceId)]
+		if candidate and candidate.StorageName == tostring(storageName) and candidate.AssignedStand == "" then
+			if not isProtectedTutorialReward(player, candidate) then
+				instanceId = tostring(orderedInstanceId)
+				instanceData = candidate
+				break
+			end
+		end
+	end
+
 	if not instanceData then
 		return nil, nil
 	end
@@ -679,9 +830,154 @@ function Module.RemoveAvailableInstance(player, storageName)
 	return tostring(instanceId), instanceData
 end
 
+function Module.RemoveTutorialRewardInstances(player, options)
+	options = if typeof(options) == "table" then options else {}
+
+	local tutorialStorageNameSet = {}
+	local tutorialStorageNames = {}
+	local removedStorageNameSet = {}
+	local removedStorageNames = {}
+
+	local function addTutorialStorageName(storageName)
+		storageName = tostring(storageName or "")
+		if storageName == "" or tutorialStorageNameSet[storageName] == true then
+			return
+		end
+
+		tutorialStorageNameSet[storageName] = true
+		table.insert(tutorialStorageNames, storageName)
+	end
+
+	local function addRemovedStorageName(storageName)
+		storageName = tostring(storageName or "")
+		if storageName == "" or removedStorageNameSet[storageName] == true then
+			return
+		end
+
+		removedStorageNameSet[storageName] = true
+		table.insert(removedStorageNames, storageName)
+	end
+
+	local configuredStorageNames = options.StorageNames
+	if typeof(configuredStorageNames) == "table" then
+		for _, storageName in ipairs(configuredStorageNames) do
+			addTutorialStorageName(storageName)
+		end
+	elseif typeof(configuredStorageNames) == "string" then
+		addTutorialStorageName(configuredStorageNames)
+	end
+
+	local brainrotInventory = getBrainrotInventory(player)
+	local removedById = {}
+	local removedIds = {}
+	local clearedStandMap = {}
+
+	for instanceId, instanceData in pairs(brainrotInventory.ById) do
+		if typeof(instanceData) == "table" and instanceData.TutorialReward == true then
+			local normalizedId = tostring(instanceId)
+			local storageName = tostring(instanceData.StorageName or "")
+			addTutorialStorageName(storageName)
+			addRemovedStorageName(storageName)
+			local assignedStand = tostring(instanceData.AssignedStand or "")
+			if assignedStand ~= "" then
+				clearedStandMap[assignedStand] = true
+			end
+			removedById[normalizedId] = instanceData
+			table.insert(removedIds, normalizedId)
+			brainrotInventory.ById[normalizedId] = nil
+		end
+	end
+
+	table.sort(removedIds, function(left, right)
+		return (tonumber(left) or math.huge) < (tonumber(right) or math.huge)
+	end)
+	table.sort(removedStorageNames)
+
+	for index = #brainrotInventory.Order, 1, -1 do
+		if removedById[tostring(brainrotInventory.Order[index])] ~= nil then
+			table.remove(brainrotInventory.Order, index)
+		end
+	end
+
+	local incomeBrainrots = getDataManager():GetValue(player, "IncomeBrainrots")
+	if typeof(incomeBrainrots) == "table" then
+		local incomeChanged = false
+		for standName, standData in pairs(incomeBrainrots) do
+			if typeof(standData) == "table" then
+				local standInstanceId = tostring(standData.BrainrotInstanceId or "")
+				local standBrainrotName = tostring(standData.BrainrotName or "")
+				local clearByRemovedId = removedById[standInstanceId] ~= nil
+				local clearByRemovedAssignedStand = clearedStandMap[tostring(standName)] == true
+				local clearByStaleTutorialName = false
+				if options.ClearStaleStorageAssignments == true and tutorialStorageNameSet[standBrainrotName] == true then
+					local existingInstance = if standInstanceId ~= "" then brainrotInventory.ById[standInstanceId] else nil
+					clearByStaleTutorialName = standInstanceId == "" or existingInstance == nil or existingInstance.TutorialReward == true
+				end
+
+				if clearByRemovedId or clearByRemovedAssignedStand or clearByStaleTutorialName then
+					standData.BrainrotName = ""
+					standData.BrainrotInstanceId = ""
+					standData.IncomeToCollect = 0
+					incomeBrainrots[standName] = standData
+					clearedStandMap[tostring(standName)] = true
+					incomeChanged = true
+				end
+			end
+		end
+
+		if incomeChanged then
+			getDataManager():SetValue(player, "IncomeBrainrots", incomeBrainrots)
+		end
+	end
+
+	local clearedStands = {}
+	for standName in pairs(clearedStandMap) do
+		table.insert(clearedStands, standName)
+		clearShipSlotAssignment(player, standName)
+		getDataManager():SetValue(player, "StandsLevels." .. standName, 1)
+	end
+	table.sort(clearedStands, function(left, right)
+		return (tonumber(left) or math.huge) < (tonumber(right) or math.huge)
+	end)
+
+	if options.ClearStaleStorageAssignments == true and #removedIds <= 0 then
+		for _, storageName in ipairs(tutorialStorageNames) do
+			local availableCount = 0
+			for _, instanceData in pairs(brainrotInventory.ById) do
+				if
+					typeof(instanceData) == "table"
+					and tostring(instanceData.StorageName or "") == storageName
+					and tostring(instanceData.AssignedStand or "") == ""
+				then
+					availableCount += 1
+				end
+			end
+			if availableCount > 0 or getInventoryEntry(player, storageName) ~= nil then
+				syncQuantityValue(player, storageName, availableCount)
+			end
+		end
+	end
+
+	if #removedIds > 0 then
+		saveBrainrotInventory(player, brainrotInventory)
+		syncAvailableCounts(player, brainrotInventory)
+	end
+
+	return {
+		RemovedCount = #removedIds,
+		RemovedInstanceIds = removedIds,
+		RemovedStorageNames = removedStorageNames,
+		TutorialStorageNames = tutorialStorageNames,
+		ClearedStands = clearedStands,
+	}
+end
+
 function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 	local instanceId, instanceData = Module.EnsureStandInstance(ownerPlayer, standName)
 	if not instanceData then
+		return nil, nil
+	end
+	if isProtectedTutorialReward(ownerPlayer, instanceData) then
 		return nil, nil
 	end
 

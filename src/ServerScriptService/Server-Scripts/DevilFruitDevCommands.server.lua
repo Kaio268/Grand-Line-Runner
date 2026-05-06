@@ -41,6 +41,7 @@ local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:W
 local ShipResetService = require(ServerScriptService.Modules:WaitForChild("ShipResetService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local TimeRewardsService = require(ServerScriptService.Modules:WaitForChild("Time_Rewards_Server"))
+local FirstTimeTutorialService = require(ServerScriptService.Modules:WaitForChild("FirstTimeTutorialService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -132,6 +133,7 @@ local ADMIN_COMMAND_NAMES = {
 	chest = true,
 	shipreset = true,
 	clear = true,
+	tutorial = true,
 	wipeplayer = true,
 	resetprogress = true,
 	gifts = true,
@@ -1153,6 +1155,29 @@ local function processClearCommand(player, argumentText)
 	print(string.format("[DevFruitDevCommands] %s cleared inventory via /clear inv", player.Name))
 end
 
+local function processTutorialCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument ~= "reset" then
+		warn(string.format("[DevFruitDevCommands] Invalid /tutorial usage from %s. Use /tutorial reset", player.Name))
+		return
+	end
+
+	local result = FirstTimeTutorialService.ResetForTesting(player)
+	if typeof(result) ~= "table" or result.Success ~= true then
+		local detail = if typeof(result) == "table" then tostring(result.Detail or result.detail or "unknown_error") else "unknown_error"
+		warn(string.format("[DevFruitDevCommands] Failed /tutorial reset for %s (%s)", player.Name, detail))
+		return false, detail
+	end
+
+	local detail = tostring(result.Detail or "tutorial reset")
+	print(string.format("[DevFruitDevCommands] %s reset tutorial test data via /tutorial reset (%s)", player.Name, detail))
+	return true, detail
+end
+
 local function processWipePlayerCommand(player, argumentText, commandName)
 	if not isAuthorized(player) then
 		return
@@ -1724,6 +1749,13 @@ local function handleChatCommand(player, rawText, source)
 		return
 	end
 
+	if commandName == "tutorial" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processTutorialCommand(player, argumentText)
+		end)
+		return
+	end
+
 	if commandName == "gifts" or commandName == "giftreset" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processGiftResetCommand(player, argumentText, commandName)
@@ -2143,6 +2175,38 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:ClearDevCommand")
 	end)
 
+	local tutorialCommand = commandsFolder:FindFirstChild("TutorialDevCommand")
+	if tutorialCommand and not tutorialCommand:IsA("TextChatCommand") then
+		tutorialCommand:Destroy()
+		tutorialCommand = nil
+	end
+
+	if not tutorialCommand then
+		tutorialCommand = Instance.new("TextChatCommand")
+		tutorialCommand.Name = "TutorialDevCommand"
+		tutorialCommand.PrimaryAlias = "/tutorial"
+		tutorialCommand.SecondaryAlias = "/tutorial"
+		tutorialCommand.AutocompleteVisible = false
+		tutorialCommand.Parent = commandsFolder
+	end
+
+	tutorialCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=TutorialDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 9) == "/tutorial" or normalizedText:sub(1, 10) == "/ tutorial" then
+			handleChatCommand(player, normalizedText, "TextChatCommand:TutorialDevCommand")
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/tutorial " .. normalizedText) or "/tutorial"
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:TutorialDevCommand")
+	end)
+
 	local giftsCommand = commandsFolder:FindFirstChild("GiftsDevCommand")
 	if giftsCommand and not giftsCommand:IsA("TextChatCommand") then
 		giftsCommand:Destroy()
@@ -2239,7 +2303,7 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:HitboxDevCommand")
 	end)
 
-	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=14")
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=15")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do

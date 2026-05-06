@@ -60,7 +60,7 @@ local function findModelFor(variantKey, baseName)
 	return nil
 end
 
-function Module:AddBrainrot(plr, brainrotName, amount)
+function Module:AddBrainrot(plr, brainrotName, amount, options)
 	local DataManager = require(script.Parent.Parent.Data.DataManager)
 
 	if typeof(plr) ~= "Instance" or not plr:IsA("Player") then
@@ -100,14 +100,17 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 		baseInfo.DiamondRender = baseInfo.DiamondRender or baseInfo.Render
 	end
 
+	options = if typeof(options) == "table" then options else {}
+
 	local basePath = "Inventory." .. brainrotName
 
 	local baseInfo = BrainrotsCfg[baseName] or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
+	local bypassQuickSlotCapacity = options.TutorialReward == true
 
-	if not BrainrotQuickSlotService.CanGainOrNotify(plr, n, "AddBrainrot:" .. brainrotName) then
+	if not bypassQuickSlotCapacity and not BrainrotQuickSlotService.CanGainOrNotify(plr, n, "AddBrainrot:" .. brainrotName) then
 		return false
 	end
 
@@ -132,6 +135,8 @@ function Module:AddBrainrot(plr, brainrotName, amount)
 		DiamondRender = diamondRender,
 		Level = 1,
 		CurrentXP = 0,
+		TutorialReward = options.TutorialReward == true,
+		TutorialToken = tostring(options.TutorialToken or ""),
 		_QuickSlotCapacityReserved = true,
 	})
 

@@ -1,10 +1,31 @@
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Interaction = {}
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local activeContext = nil
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
+local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
+local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
+local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
+local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
+
+local function canPlayerCarryModel(player, model)
+	if not player or not model then
+		return false
+	end
+
+	local isTutorialBrainrot = model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+	local tutorialOwnerUserId = model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
+	if isTutorialBrainrot then
+		return typeof(tutorialOwnerUserId) == "number" and tutorialOwnerUserId == player.UserId
+	end
+
+	if typeof(tutorialOwnerUserId) == "number" and tutorialOwnerUserId ~= player.UserId then
+		return false
+	end
+
+	return true
+end
 
 local function forEachPart(model, fn)
 	for _, d in ipairs(model:GetDescendants()) do
@@ -545,6 +566,9 @@ local function carryBrainrotOnPart(ctx, player, model, st, carrierPart)
 	if not ctx or not player or not model or not model.Parent or not st or st.Held then
 		return false
 	end
+	if not canPlayerCarryModel(player, model) then
+		return false
+	end
 	if ctx.HeldByUserId[player.UserId] then
 		return false
 	end
@@ -666,7 +690,7 @@ function Interaction.TryCarryNearPosition(ctx, player, active, worldPosition, ca
 	local bestState = nil
 	local bestDistance = searchRadius
 	for model, st in pairs(active) do
-		if model and model.Parent and st and not st.Held then
+		if model and model.Parent and st and not st.Held and canPlayerCarryModel(player, model) then
 			local primary = findModelPart(model)
 			if primary then
 				local distance = (primary.Position - worldPosition).Magnitude
@@ -735,6 +759,10 @@ function Interaction.CollectHeld(ctx, player, active)
 	if st and st.Entry then
 		brainrotName = tostring(st.Entry.Id or brainrotName)
 	end
+	local isTutorialBrainrot = model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+	local tutorialOwnerUserId = model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
+	local tutorialToken = tostring(model:GetAttribute(TUTORIAL_TOKEN_ATTRIBUTE) or "")
+	local tutorialRewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
 
 	ctx.HeldByUserId[userId] = nil
 	disconnectDeath(ctx, userId)
@@ -750,10 +778,20 @@ function Interaction.CollectHeld(ctx, player, active)
 			Name = brainrotName,
 			OriginData = st.OriginData,
 			SlotIndex = st.SlotIndex,
+			TutorialBrainrot = isTutorialBrainrot,
+			TutorialOwnerUserId = tutorialOwnerUserId,
+			TutorialToken = tutorialToken,
+			TutorialRewardName = tutorialRewardName,
 		}
 	end
 
-	return { Name = brainrotName }
+	return {
+		Name = brainrotName,
+		TutorialBrainrot = isTutorialBrainrot,
+		TutorialOwnerUserId = tutorialOwnerUserId,
+		TutorialToken = tutorialToken,
+		TutorialRewardName = tutorialRewardName,
+	}
 end
 
 function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
@@ -780,6 +818,9 @@ function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
 
 	prompt.Triggered:Connect(function(player)
 		if not model.Parent then
+			return
+		end
+		if not canPlayerCarryModel(player, model) then
 			return
 		end
 		if st.Held then

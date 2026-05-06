@@ -178,6 +178,8 @@ local function normalizeBrainrotInstance(instanceId, instanceData, fallbackStora
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
 		AcquiredAt = coerceNumber(instanceData.AcquiredAt, 0),
 		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
+		TutorialReward = instanceData.TutorialReward == true,
+		TutorialToken = tostring(instanceData.TutorialToken or ""),
 	}
 end
 
@@ -277,7 +279,15 @@ function ProfileMigrations.Apply(data)
 
 	hiddenLeaderstats.PlotUpgrade = math.clamp(coerceNumber(hiddenLeaderstats.PlotUpgrade, 0), 0, PlotUpgradeConfig.MaxLevel)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
+	hiddenLeaderstats.TutorialBrainrotGranted = coerceBoolean(hiddenLeaderstats.TutorialBrainrotGranted, false)
+	hiddenLeaderstats.TutorialSpeedTopUpGranted = coerceBoolean(hiddenLeaderstats.TutorialSpeedTopUpGranted, false)
 	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
+	if hiddenLeaderstats.Tutorial == true then
+		hiddenLeaderstats.TutorialBrainrotGranted = true
+		hiddenLeaderstats.TutorialSpeedTopUpGranted = true
+	elseif coerceNumber(hiddenLeaderstats.Speed, 1) <= 1 then
+		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
+	end
 
 	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingDoubloons, 0)
 	if hiddenLeaderstats.TutorialStarterDoubloonsGranted ~= true then
@@ -433,11 +443,18 @@ function ProfileMigrations.Apply(data)
 		brainrotInventory.NextInstanceId = maxBrainrotInstanceId + 1
 	end
 
+	local hasTutorialRewardInstance = false
 	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
 		local instanceData = brainrotInventory.ById[tostring(rawInstanceId)]
 		if instanceData then
+			if instanceData.TutorialReward == true then
+				hasTutorialRewardInstance = true
+			end
 			recordBrainrotDiscovered(instanceData.StorageName, instanceData.BaseName, instanceData.Variant)
 		end
+	end
+	if hasTutorialRewardInstance then
+		hiddenLeaderstats.TutorialBrainrotGranted = true
 	end
 
 	local function createBrainrotInstance(storageName, entry, assignedStand)
