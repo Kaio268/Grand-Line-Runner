@@ -2004,20 +2004,9 @@ local function bindStandPrompt(player, plot, standModel)
 			local toolName = getEquippedToolName(plr)
 			local tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, toolName)
 			if not toolName or toolName == "" then
-				tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, nil)
-				if tutorialInstance then
-					toolName = tostring(tutorialInstance.StorageName or "")
-					tutorialStandPlacementLog(
-						plr,
-						standName,
-						"no_equipped_tool",
-						string.format("action=bypass tutorialInstanceId=%s storageName=%s", tostring(tutorialInstanceId), tostring(toolName))
-					)
-				else
-					tutorialStandPlacementLog(plr, standName, "no_equipped_tool", "action=reject")
-					standDebug("place rejected player=%s stand=%s reason=no_equipped_tool", plr.Name, standName)
-					return
-				end
+				tutorialStandPlacementLog(plr, standName, "no_equipped_tool", "action=reject requires_equipped_tutorial_reward")
+				standDebug("place rejected player=%s stand=%s reason=no_equipped_tool", plr.Name, standName)
+				return
 			end
 
 			local qty = getInventoryQuantity(plr, toolName)
