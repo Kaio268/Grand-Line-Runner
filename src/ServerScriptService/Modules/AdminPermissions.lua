@@ -18,6 +18,7 @@ local configuredAdmins = {}
 local configuredAdminIds = {}
 local superAdminIds = {}
 local activeAdmins = {}
+local userInfoCache = {}
 local chatConnections = {}
 local textChatCommandConnection = nil
 local vipTextChatCommandConnection = nil
@@ -52,6 +53,7 @@ local adminCommandFeedbackEvent = getOrCreateRemoteEvent(ADMIN_COMMAND_FEEDBACK_
 
 local COMMAND_DISPLAY_NAMES = {
 	admin = "Admin toggle",
+	adminRoster = "Admin roster",
 	announcement = "Announcement",
 	boost = "Boost",
 	bounty = "Bounty",
@@ -198,6 +200,91 @@ local function getIdsText(ids)
 		parts[#parts + 1] = tostring(userId)
 	end
 	return table.concat(parts, ",")
+end
+
+local function getCachedUserInfo(userId: number, onlinePlayer: Player?)
+	local numericUserId = math.floor(tonumber(userId) or 0)
+	if onlinePlayer then
+		local info = {
+			Username = onlinePlayer.Name,
+			DisplayName = onlinePlayer.DisplayName,
+		}
+		userInfoCache[numericUserId] = info
+		return info
+	end
+
+	local cached = userInfoCache[numericUserId]
+	if typeof(cached) == "table" then
+		return cached
+	end
+
+	local fallbackName = "User " .. tostring(numericUserId)
+	local resolved = {
+		Username = fallbackName,
+		DisplayName = fallbackName,
+	}
+
+	local userInfoOk, userInfos = pcall(function()
+		return Players:GetUserInfosByUserIdsAsync({ numericUserId })
+	end)
+	if userInfoOk and typeof(userInfos) == "table" and typeof(userInfos[1]) == "table" then
+		local userInfo = userInfos[1]
+		local username = tostring(userInfo.Username or userInfo.Name or "")
+		local displayName = tostring(userInfo.DisplayName or "")
+		if username ~= "" then
+			resolved.Username = username
+			resolved.DisplayName = if displayName ~= "" then displayName else username
+			userInfoCache[numericUserId] = resolved
+			return resolved
+		end
+	end
+
+	local nameOk, username = pcall(function()
+		return Players:GetNameFromUserIdAsync(numericUserId)
+	end)
+	if nameOk and typeof(username) == "string" and username ~= "" then
+		resolved.Username = username
+		resolved.DisplayName = username
+	end
+
+	userInfoCache[numericUserId] = resolved
+	return resolved
+end
+
+local function buildRosterEntry(userId: number, roleName: string)
+	local numericUserId = math.floor(tonumber(userId) or 0)
+	local onlinePlayer = Players:GetPlayerByUserId(numericUserId)
+	local userInfo = getCachedUserInfo(numericUserId, onlinePlayer)
+	local isActiveAdmin = false
+	local adminStatusReason = "offline"
+
+	if onlinePlayer then
+		isActiveAdmin, adminStatusReason = AdminPermissions.GetAdminStatus(onlinePlayer)
+	elseif SuperAdmins[numericUserId] == true then
+		adminStatusReason = "super_admin_offline"
+	elseif configuredAdmins[numericUserId] == true then
+		adminStatusReason = "configured_admin_offline"
+	end
+
+	return {
+		UserId = numericUserId,
+		Username = userInfo.Username,
+		DisplayName = userInfo.DisplayName,
+		Role = roleName,
+		IsSuperAdmin = SuperAdmins[numericUserId] == true,
+		IsConfiguredAdmin = configuredAdmins[numericUserId] == true,
+		IsOnline = onlinePlayer ~= nil,
+		IsActiveAdmin = isActiveAdmin == true,
+		AdminStatusReason = adminStatusReason,
+	}
+end
+
+local function buildRosterList(ids, roleName: string)
+	local entries = {}
+	for index, userId in ipairs(ids) do
+		entries[index] = buildRosterEntry(userId, roleName)
+	end
+	return entries
 end
 
 local function getUserId(player: Player?): number?
@@ -538,6 +625,37 @@ end
 function AdminPermissions.IsAdmin(player: Player?): boolean
 	local isAdmin = AdminPermissions.GetAdminStatus(player)
 	return isAdmin == true
+end
+
+function AdminPermissions.GetAdminRoster(requestingPlayer: Player?): table
+	local viewerIsAdmin, viewerReason = AdminPermissions.GetAdminStatus(requestingPlayer)
+	local viewer = {
+		UserId = requestingPlayer and requestingPlayer.UserId or 0,
+		Username = requestingPlayer and requestingPlayer.Name or "",
+		DisplayName = requestingPlayer and requestingPlayer.DisplayName or "",
+		IsAdmin = viewerIsAdmin,
+		IsSuperAdmin = AdminPermissions.IsSuperAdmin(requestingPlayer),
+		AdminStatusReason = viewerReason,
+	}
+
+	if not viewerIsAdmin then
+		return {
+			Success = false,
+			Message = "Admin access required.",
+			GeneratedAt = os.time(),
+			Viewer = viewer,
+			SuperAdmins = {},
+			Admins = {},
+		}
+	end
+
+	return {
+		Success = true,
+		GeneratedAt = os.time(),
+		Viewer = viewer,
+		SuperAdmins = buildRosterList(superAdminIds, "SuperAdmin"),
+		Admins = buildRosterList(configuredAdminIds, "Admin"),
+	}
 end
 
 function AdminPermissions.HandleAdminCommand(player: Player, message: string, source: string?)

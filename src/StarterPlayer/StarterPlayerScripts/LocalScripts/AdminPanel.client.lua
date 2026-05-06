@@ -826,6 +826,10 @@ local function buildDashboard()
 	local mainEventRequestEvent = safeWait(ReplicatedStorage, "AdminMainEventRequest")
 	local adminCommandRequestEvent = safeWait(ReplicatedStorage, "AdminCommandRequest")
 	local adminCommandFeedbackEvent = safeWait(ReplicatedStorage, "AdminCommandFeedback")
+	local adminRosterFunction = safeWait(ReplicatedStorage, "AdminRosterRequest")
+	local currentTab = "Commands"
+	local tabButtons = {}
+	local setActiveTab
 
 	local gui = create("ScreenGui", {
 		Name = "GrandLineRushAdminDashboard",
@@ -915,7 +919,7 @@ local function buildDashboard()
 		TextSize = 28,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.fromOffset(72, 8),
-		Size = UDim2.new(1, -170, 0, 32),
+		Size = UDim2.new(1, -430, 0, 32),
 		Parent = header,
 	})
 
@@ -928,7 +932,7 @@ local function buildDashboard()
 		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.fromOffset(73, 42),
-		Size = UDim2.new(1, -170, 0, 22),
+		Size = UDim2.new(1, -430, 0, 22),
 		Parent = header,
 	})
 
@@ -948,6 +952,54 @@ local function buildDashboard()
 	addCorner(closeButton, 14)
 	addStroke(closeButton, COLORS.Red, 1, 0.05)
 
+	local tabBar = create("Frame", {
+		Name = "TopTabs",
+		BackgroundColor3 = Color3.fromRGB(7, 17, 36),
+		BorderSizePixel = 0,
+		Position = UDim2.new(1, -330, 0, 18),
+		Size = UDim2.fromOffset(254, 38),
+		Parent = header,
+	})
+	addCorner(tabBar, 14)
+	addStroke(tabBar, COLORS.BorderSoft, 1, 0.2)
+	addPadding(tabBar, 4, 4, 4, 4)
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = tabBar,
+	})
+
+	tabButtons.Commands = create("TextButton", {
+		Name = "CommandsTab",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.Gold,
+		BorderSizePixel = 0,
+		Font = FONT,
+		LayoutOrder = 1,
+		Text = "Commands",
+		TextColor3 = Color3.fromRGB(31, 24, 10),
+		TextSize = 12,
+		Size = UDim2.fromOffset(118, 30),
+		Parent = tabBar,
+	})
+	addCorner(tabButtons.Commands, 10)
+
+	tabButtons.Admins = create("TextButton", {
+		Name = "AdminsTab",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		LayoutOrder = 2,
+		Text = "Admins",
+		TextColor3 = COLORS.Text,
+		TextSize = 12,
+		Size = UDim2.fromOffset(118, 30),
+		Parent = tabBar,
+	})
+	addCorner(tabButtons.Admins, 10)
+
 	local content = create("Frame", {
 		Name = "Content",
 		BackgroundTransparency = 1,
@@ -956,13 +1008,28 @@ local function buildDashboard()
 		Parent = main,
 	})
 
+	local commandView = create("Frame", {
+		Name = "CommandsView",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Parent = content,
+	})
+
+	local rosterView = create("Frame", {
+		Name = "AdminRosterView",
+		BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1),
+		Visible = false,
+		Parent = content,
+	})
+
 	local leftPane = create("Frame", {
 		Name = "CommandBrowser",
 		BackgroundColor3 = COLORS.Panel,
 		BorderSizePixel = 0,
 		Position = UDim2.fromOffset(0, 0),
 		Size = UDim2.new(0, 392, 1, 0),
-		Parent = content,
+		Parent = commandView,
 	})
 	addCorner(leftPane, 18)
 	addStroke(leftPane, COLORS.BorderSoft, 1, 0.2)
@@ -1029,9 +1096,9 @@ local function buildDashboard()
 		Name = "CommandDetails",
 		BackgroundColor3 = COLORS.Panel,
 		BorderSizePixel = 0,
-		Position = UDim2.new(0, 412, 0, 0),
+		Position = UDim2.fromOffset(412, 0),
 		Size = UDim2.new(1, -412, 1, 0),
-		Parent = content,
+		Parent = commandView,
 	})
 	addCorner(rightPane, 18)
 	addStroke(rightPane, COLORS.BorderSoft, 1, 0.2)
@@ -1138,13 +1205,146 @@ local function buildDashboard()
 		Parent = rightPane,
 	})
 
+	local rosterHeader = create("Frame", {
+		Name = "RosterHeader",
+		BackgroundColor3 = COLORS.Panel,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 54),
+		Parent = rosterView,
+	})
+	addCorner(rosterHeader, 18)
+	addStroke(rosterHeader, COLORS.BorderSoft, 1, 0.2)
+
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBlack,
+		Text = "Admin Roster",
+		TextColor3 = COLORS.Text,
+		TextSize = 22,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(18, 8),
+		Size = UDim2.fromOffset(260, 28),
+		Parent = rosterHeader,
+	})
+
+	local rosterUpdatedLabel = create("TextLabel", {
+		Name = "RosterUpdated",
+		BackgroundTransparency = 1,
+		Font = BODY_FONT,
+		Text = "Waiting for roster...",
+		TextColor3 = COLORS.Muted,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(19, 34),
+		Size = UDim2.new(1, -220, 0, 16),
+		Parent = rosterHeader,
+	})
+
+	local rosterRefreshButton = create("TextButton", {
+		Name = "RefreshRoster",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		Text = "Refresh",
+		TextColor3 = COLORS.Text,
+		TextSize = 13,
+		Position = UDim2.new(1, -126, 0, 10),
+		Size = UDim2.fromOffset(108, 34),
+		Parent = rosterHeader,
+	})
+	addCorner(rosterRefreshButton, 12)
+	addStroke(rosterRefreshButton, COLORS.BorderSoft, 1, 0.2)
+
+	local function makeRosterPanel(panelName, title, accentColor, position, size)
+		local panel = create("Frame", {
+			Name = panelName,
+			BackgroundColor3 = COLORS.Panel,
+			BorderSizePixel = 0,
+			Position = position,
+			Size = size,
+			Parent = rosterView,
+		})
+		addCorner(panel, 18)
+		addStroke(panel, accentColor, 1, 0.25)
+
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = FONT,
+			Text = title,
+			TextColor3 = accentColor,
+			TextSize = 16,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(16, 12),
+			Size = UDim2.new(1, -140, 0, 24),
+			Parent = panel,
+		})
+
+		local countLabel = create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = "0 listed",
+			TextColor3 = COLORS.Muted,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			Position = UDim2.new(1, -124, 0, 15),
+			Size = UDim2.fromOffset(108, 18),
+			Parent = panel,
+		})
+
+		local list = create("ScrollingFrame", {
+			Name = "List",
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			CanvasSize = UDim2.fromOffset(0, 0),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			ScrollBarThickness = 5,
+			ScrollBarImageColor3 = accentColor,
+			Position = UDim2.fromOffset(14, 48),
+			Size = UDim2.new(1, -28, 1, -62),
+			Parent = panel,
+		})
+		addPadding(list, 0, 0, 6, 0)
+		local layout = create("UIListLayout", {
+			Padding = UDim.new(0, 10),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = list,
+		})
+
+		return {
+			CountLabel = countLabel,
+			List = list,
+			Layout = layout,
+			AccentColor = accentColor,
+		}
+	end
+
+	local superAdminRoster = makeRosterPanel(
+		"SuperAdminRoster",
+		"SuperAdmins",
+		COLORS.Gold,
+		UDim2.fromOffset(0, 66),
+		UDim2.new(0.5, -10, 1, -66)
+	)
+	local adminRoster = makeRosterPanel(
+		"AdminRoster",
+		"Admins",
+		COLORS.Blue,
+		UDim2.new(0.5, 10, 0, 66),
+		UDim2.new(0.5, -10, 1, -66)
+	)
+
 	local currentCategory = "All"
 	local selectedCommand = COMMANDS[1]
 	local inputBoxes = {}
 	local categoryButtons = {}
 	local commandCards = {}
 	local pendingDanger = nil
+	local rosterLoading = false
+	local lastRosterRefresh = 0
 	local renderCommandList
+	local renderRoster
+	local requestRoster
 
 	local function setStatus(text, color)
 		statusLabel.Text = cleanSingleLine(text, 180)
@@ -1159,6 +1359,279 @@ local function buildDashboard()
 		end
 		return COLORS.Green
 	end
+
+	local function updateTabButtons()
+		for tabName, button in pairs(tabButtons) do
+			setButtonStyle(button, tabName == currentTab, false)
+		end
+	end
+
+	setActiveTab = function(tabName)
+		currentTab = if tabName == "Admins" then "Admins" else "Commands"
+		commandView.Visible = currentTab == "Commands"
+		rosterView.Visible = currentTab == "Admins"
+		updateTabButtons()
+
+		if currentTab == "Admins" and requestRoster and os.clock() - lastRosterRefresh > 2 then
+			requestRoster()
+		end
+	end
+
+	tabButtons.Commands.Activated:Connect(function()
+		pulseButton(tabButtons.Commands)
+		setActiveTab("Commands")
+	end)
+
+	tabButtons.Admins.Activated:Connect(function()
+		pulseButton(tabButtons.Admins)
+		setActiveTab("Admins")
+	end)
+
+	local function clearRosterList(roster)
+		for _, child in ipairs(roster.List:GetChildren()) do
+			if child ~= roster.Layout and not child:IsA("UIPadding") then
+				child:Destroy()
+			end
+		end
+	end
+
+	local function getRosterStatus(entry)
+		if entry.IsActiveAdmin == true then
+			return "Active Admin", COLORS.Green
+		elseif entry.IsOnline == true then
+			return "Online", COLORS.Blue
+		end
+		return "Offline", COLORS.Faint
+	end
+
+	local function getRosterRoleText(entry, fallbackRole)
+		local isSuper = entry.IsSuperAdmin == true
+		local isConfigured = entry.IsConfiguredAdmin == true
+		if isSuper and isConfigured then
+			return "SuperAdmin + Admin"
+		elseif isSuper then
+			return "SuperAdmin"
+		elseif isConfigured then
+			return "Admin"
+		end
+		return fallbackRole
+	end
+
+	local function makeRosterEmpty(roster, text)
+		local empty = create("Frame", {
+			BackgroundColor3 = COLORS.PanelSoft,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, -4, 0, 72),
+			Parent = roster.List,
+		})
+		addCorner(empty, 12)
+		addStroke(empty, roster.AccentColor, 1, 0.45)
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = text,
+			TextColor3 = COLORS.Muted,
+			TextSize = 13,
+			TextWrapped = true,
+			Size = UDim2.new(1, -24, 1, 0),
+			Position = UDim2.fromOffset(12, 0),
+			Parent = empty,
+		})
+	end
+
+	local function makeRosterRow(roster, entry, index, fallbackRole)
+		local userId = math.floor(tonumber(entry.UserId) or 0)
+		local username = cleanSingleLine(entry.Username, 60)
+		local displayName = cleanSingleLine(entry.DisplayName, 60)
+		if displayName == "" then
+			displayName = username ~= "" and username or ("User " .. tostring(userId))
+		end
+		if username == "" then
+			username = displayName
+		end
+
+		local statusText, statusColor = getRosterStatus(entry)
+		local roleText = getRosterRoleText(entry, fallbackRole)
+		local reason = cleanSingleLine(entry.AdminStatusReason, 80)
+
+		local row = create("Frame", {
+			BackgroundColor3 = Color3.fromRGB(8, 18, 38),
+			BorderSizePixel = 0,
+			LayoutOrder = index,
+			Size = UDim2.new(1, -4, 0, 82),
+			Parent = roster.List,
+		})
+		addCorner(row, 14)
+		addStroke(row, entry.IsActiveAdmin and COLORS.Green or roster.AccentColor, entry.IsActiveAdmin and 2 or 1, entry.IsActiveAdmin and 0.05 or 0.38)
+
+		local avatar = create("ImageLabel", {
+			BackgroundColor3 = COLORS.PanelRaised,
+			BorderSizePixel = 0,
+			Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150"):format(userId),
+			Position = UDim2.fromOffset(12, 13),
+			Size = UDim2.fromOffset(56, 56),
+			Parent = row,
+		})
+		addCorner(avatar, 14)
+
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = FONT,
+			Text = displayName,
+			TextColor3 = COLORS.Text,
+			TextSize = 15,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(80, 10),
+			Size = UDim2.new(1, -230, 0, 22),
+			Parent = row,
+		})
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = ("@%s  |  %d"):format(username, userId),
+			TextColor3 = COLORS.Muted,
+			TextSize = 12,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(80, 34),
+			Size = UDim2.new(1, -224, 0, 18),
+			Parent = row,
+		})
+		create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = BODY_FONT,
+			Text = reason,
+			TextColor3 = COLORS.Faint,
+			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Position = UDim2.fromOffset(80, 54),
+			Size = UDim2.new(1, -224, 0, 16),
+			Parent = row,
+		})
+
+		local rolePill = create("TextLabel", {
+			BackgroundColor3 = COLORS.PanelRaised,
+			BorderSizePixel = 0,
+			Font = FONT,
+			Text = roleText,
+			TextColor3 = roster.AccentColor,
+			TextSize = 10,
+			Position = UDim2.new(1, -138, 0, 13),
+			Size = UDim2.fromOffset(124, 24),
+			Parent = row,
+		})
+		addCorner(rolePill, 12)
+
+		local statusPill = create("TextLabel", {
+			BackgroundColor3 = Color3.fromRGB(6, 15, 31),
+			BorderSizePixel = 0,
+			Font = FONT,
+			Text = statusText,
+			TextColor3 = statusColor,
+			TextSize = 10,
+			Position = UDim2.new(1, -138, 0, 45),
+			Size = UDim2.fromOffset(124, 24),
+			Parent = row,
+		})
+		addCorner(statusPill, 12)
+		addStroke(statusPill, statusColor, 1, 0.35)
+	end
+
+	renderRoster = function(payload)
+		clearRosterList(superAdminRoster)
+		clearRosterList(adminRoster)
+
+		if typeof(payload) ~= "table" or payload.Success == false then
+			local message = if typeof(payload) == "table" then cleanSingleLine(payload.Message, 120) else ""
+			if message == "" then
+				message = "Roster unavailable."
+			end
+			superAdminRoster.CountLabel.Text = "0 listed"
+			adminRoster.CountLabel.Text = "0 listed"
+			makeRosterEmpty(superAdminRoster, message)
+			makeRosterEmpty(adminRoster, message)
+			return
+		end
+
+		local superAdmins = if typeof(payload.SuperAdmins) == "table" then payload.SuperAdmins else {}
+		local admins = if typeof(payload.Admins) == "table" then payload.Admins else {}
+		superAdminRoster.CountLabel.Text = ("%d listed"):format(#superAdmins)
+		adminRoster.CountLabel.Text = ("%d listed"):format(#admins)
+
+		if #superAdmins == 0 then
+			makeRosterEmpty(superAdminRoster, "No SuperAdmins listed.")
+		else
+			for index, entry in ipairs(superAdmins) do
+				makeRosterRow(superAdminRoster, entry, index, "SuperAdmin")
+			end
+		end
+
+		if #admins == 0 then
+			makeRosterEmpty(adminRoster, "No Admins listed.")
+		else
+			for index, entry in ipairs(admins) do
+				makeRosterRow(adminRoster, entry, index, "Admin")
+			end
+		end
+	end
+
+	requestRoster = function()
+		if rosterLoading then
+			return
+		end
+
+		if not adminRosterFunction:IsA("RemoteFunction") then
+			rosterUpdatedLabel.Text = "Roster remote unavailable."
+			renderRoster({
+				Success = false,
+				Message = "Roster remote unavailable.",
+			})
+			return
+		end
+
+		rosterLoading = true
+		rosterUpdatedLabel.Text = "Loading roster..."
+		setButtonStyle(rosterRefreshButton, true, false)
+
+		task.spawn(function()
+			local ok, payload = pcall(function()
+				return adminRosterFunction:InvokeServer()
+			end)
+
+			rosterLoading = false
+			if not gui.Parent then
+				return
+			end
+
+			if ok and typeof(payload) == "table" and payload.Success ~= false then
+				lastRosterRefresh = os.clock()
+				rosterUpdatedLabel.Text = "Updated now"
+				renderRoster(payload)
+			else
+				local message = "Unable to load roster."
+				if ok and typeof(payload) == "table" then
+					message = cleanSingleLine(payload.Message, 120)
+				end
+				if message == "" then
+					message = "Unable to load roster."
+				end
+				rosterUpdatedLabel.Text = message
+				renderRoster({
+					Success = false,
+					Message = message,
+				})
+			end
+
+			setButtonStyle(rosterRefreshButton, false, false)
+		end)
+	end
+
+	rosterRefreshButton.Activated:Connect(function()
+		pulseButton(rosterRefreshButton)
+		requestRoster()
+	end)
 
 	if adminCommandFeedbackEvent:IsA("RemoteEvent") then
 		adminCommandFeedbackEvent.OnClientEvent:Connect(function(payload)
@@ -1662,6 +2135,7 @@ local function buildDashboard()
 	renderCategoryButtons()
 	renderCommandList()
 	renderDetails()
+	setActiveTab("Commands")
 
 	return gui
 end

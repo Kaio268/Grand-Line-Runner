@@ -23,6 +23,7 @@ local function getOrCreateRemote(name, className)
 end
 
 local adminStatusFunction = getOrCreateRemote("AdminStatusRequest", "RemoteFunction")
+local adminRosterFunction = getOrCreateRemote("AdminRosterRequest", "RemoteFunction")
 local requestEvent = getOrCreateRemote("AdminAnnouncementRequest")
 local broadcastEvent = getOrCreateRemote("AdminAnnouncementBroadcast")
 
@@ -47,6 +48,19 @@ end
 adminStatusFunction.OnServerInvoke = function(player)
 	AdminPermissions.LogAdminStatusRequest(player, "AdminStatusRequest")
 	return AdminPermissions.IsAdmin(player)
+end
+
+adminRosterFunction.OnServerInvoke = function(player)
+	AdminPermissions.LogAdminStatusRequest(player, "AdminRosterRequest")
+	if not AdminPermissions.IsAdmin(player) then
+		AdminPermissions.LogCommandRejected(player, "adminRoster", "AdminRosterRequest", "reason=not_admin")
+		return {
+			Success = false,
+			Message = "Admin access required.",
+		}
+	end
+
+	return AdminPermissions.GetAdminRoster(player)
 end
 
 local function markSeen(tbl, id)

@@ -4,6 +4,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 
+local MIN_BASE_UPDATE_JUMP_MULTIPLIER = 0.01
+
 local function getJumpHeightMultiplier(player)
 	local fruitName = player:GetAttribute("EquippedDevilFruit")
 	if typeof(fruitName) ~= "string" or fruitName == "" then
@@ -60,6 +62,38 @@ local function hookCharacter(player, character)
 		updating = false
 	end
 
+	local function updateBaseJumpPowerFromHumanoid()
+		local jumpPowerMultiplier = getJumpPowerMultiplier(player)
+		local expected = baseJumpPower * jumpPowerMultiplier
+		if humanoid.JumpPower ~= expected then
+			-- Jump-disabling effects intentionally drive JumpPower to 0; do not let
+			-- that temporary value become the saved base jump.
+			if jumpPowerMultiplier <= MIN_BASE_UPDATE_JUMP_MULTIPLIER then
+				apply()
+				return
+			end
+
+			baseJumpPower = humanoid.JumpPower / jumpPowerMultiplier
+			apply()
+		end
+	end
+
+	local function updateBaseJumpHeightFromHumanoid()
+		local jumpHeightMultiplier = getJumpHeightMultiplier(player)
+		local expected = baseJumpHeight * jumpHeightMultiplier
+		if humanoid.JumpHeight ~= expected then
+			-- Jump-disabling effects intentionally drive JumpHeight to 0; do not let
+			-- that temporary value become the saved base jump.
+			if jumpHeightMultiplier <= MIN_BASE_UPDATE_JUMP_MULTIPLIER then
+				apply()
+				return
+			end
+
+			baseJumpHeight = humanoid.JumpHeight / jumpHeightMultiplier
+			apply()
+		end
+	end
+
 	apply()
 
 	connections[#connections + 1] = player:GetAttributeChangedSignal("EquippedDevilFruit"):Connect(function()
@@ -80,14 +114,10 @@ local function hookCharacter(player, character)
 		end
 
 		if humanoid.UseJumpPower then
-			local currentMultiplier = getJumpPowerMultiplier(player)
-			baseJumpPower = humanoid.JumpPower / math.max(currentMultiplier, 0.01)
+			updateBaseJumpPowerFromHumanoid()
 		else
-			local currentMultiplier = getJumpHeightMultiplier(player)
-			baseJumpHeight = humanoid.JumpHeight / math.max(currentMultiplier, 0.01)
+			updateBaseJumpHeightFromHumanoid()
 		end
-
-		apply()
 	end)
 
 	connections[#connections + 1] = humanoid:GetPropertyChangedSignal("JumpPower"):Connect(function()
@@ -95,9 +125,7 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		local jumpPowerMultiplier = math.max(getJumpPowerMultiplier(player), 0.01)
-		baseJumpPower = humanoid.JumpPower / jumpPowerMultiplier
-		apply()
+		updateBaseJumpPowerFromHumanoid()
 	end)
 
 	connections[#connections + 1] = humanoid:GetPropertyChangedSignal("JumpHeight"):Connect(function()
@@ -105,9 +133,7 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		local jumpHeightMultiplier = math.max(getJumpHeightMultiplier(player), 0.01)
-		baseJumpHeight = humanoid.JumpHeight / jumpHeightMultiplier
-		apply()
+		updateBaseJumpHeightFromHumanoid()
 	end)
 
 	connections[#connections + 1] = character.AncestryChanged:Connect(function(_, parent)
