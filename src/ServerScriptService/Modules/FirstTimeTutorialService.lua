@@ -7,15 +7,16 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
-local ServerBrainrotModules = Modules:WaitForChild("Server"):WaitForChild("Brainrot")
+local ServerCrewModules = Modules:WaitForChild("Server"):WaitForChild("Crew")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
-local AddBrainrot = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AddBrainrot"))
-local BrainrotInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("BrainrotInstanceService"))
+local AddCrewMember = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AddCrewMember"))
+local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
+local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
 local ShipRuntimeSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeSignals"))
-local BrainrotInteraction = require(ServerBrainrotModules:WaitForChild("Interaction"))
-local BrainrotRegistry = require(ServerBrainrotModules:WaitForChild("Registry"))
+local CrewInteraction = require(ServerCrewModules:WaitForChild("Interaction"))
+local CrewRegistry = require(ServerCrewModules:WaitForChild("Registry"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local Economy = require(Configs:WaitForChild("GrandLineRushEconomy"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
@@ -304,24 +305,8 @@ local function getTutorialBrainrotGranted(player)
 	return reason == nil and granted == true
 end
 
-local function countLegacyBrainrots(player)
-	local inventory = DataManager:GetValue(player, "Inventory")
-	if typeof(inventory) ~= "table" then
-		return 0
-	end
-
-	local count = 0
-	for storageName, entry in pairs(inventory) do
-		if BrainrotInstanceService.IsBrainrotInventoryEntry(storageName, entry) then
-			count += math.max(0, math.floor(tonumber(entry.Quantity) or 0))
-		end
-	end
-
-	return count
-end
-
 local function countBrainrotInstances(player)
-	local brainrotInventory = DataManager:GetValue(player, "BrainrotInventory")
+	local brainrotInventory = CrewInstanceService.GetCrewInventory(player)
 	if typeof(brainrotInventory) ~= "table" or typeof(brainrotInventory.ById) ~= "table" then
 		return 0
 	end
@@ -337,11 +322,11 @@ local function countBrainrotInstances(player)
 end
 
 local function getBrainrotInventoryCount(player)
-	return math.max(countLegacyBrainrots(player), countBrainrotInstances(player))
+	return countBrainrotInstances(player)
 end
 
 local function getTutorialRewardInstance(player, requireAssigned)
-	return BrainrotInstanceService.FindTutorialRewardInstance(player, {
+	return CrewInstanceService.FindTutorialRewardInstance(player, {
 		RequireAssigned = requireAssigned == true,
 	})
 end
@@ -361,12 +346,7 @@ local function getSessionPlacedTutorialStandName(player, session)
 		return ""
 	end
 
-	local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
-	if typeof(incomeBrainrots) ~= "table" then
-		return ""
-	end
-
-	local standData = incomeBrainrots[standName]
+	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 	local expectedInstanceId = tostring(session.placedTutorialInstanceId or "")
 	if typeof(standData) == "table" and tostring(standData.BrainrotName or "") ~= "" then
 		if expectedInstanceId == "" or tostring(standData.BrainrotInstanceId or "") == expectedInstanceId then
@@ -378,7 +358,7 @@ local function getSessionPlacedTutorialStandName(player, session)
 		return ""
 	end
 
-	for candidateStandName, candidateStandData in pairs(incomeBrainrots) do
+	for candidateStandName, candidateStandData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
 		if
 			typeof(candidateStandData) == "table"
 			and tostring(candidateStandData.BrainrotName or "") ~= ""
@@ -409,12 +389,8 @@ local function getPlacedTutorialStandName(player, session)
 		return standName
 	end
 
-	local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
-	if typeof(incomeBrainrots) ~= "table" then
-		return ""
-	end
-
-	for standName, standData in pairs(incomeBrainrots) do
+	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
+		standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 		if typeof(standData) == "table" then
 			local standInstanceId = tostring(standData.BrainrotInstanceId or "")
 			if standInstanceId ~= "" and instanceId ~= nil and standInstanceId == instanceId then
@@ -445,12 +421,7 @@ local function getBankedTutorialStandIncome(player, session)
 		return 0
 	end
 
-	local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
-	if typeof(incomeBrainrots) ~= "table" then
-		return 0
-	end
-
-	local standData = incomeBrainrots[standName]
+	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 	if typeof(standData) ~= "table" then
 		return 0
 	end
@@ -459,7 +430,7 @@ local function getBankedTutorialStandIncome(player, session)
 end
 
 local function getHeldBrainrotModel(player)
-	local context = BrainrotInteraction.GetActiveContext()
+	local context = CrewInteraction.GetActiveContext()
 	if not context or typeof(context.HeldByUserId) ~= "table" then
 		return nil
 	end
@@ -490,7 +461,7 @@ local function destroyTutorialTargetModel(player, model)
 
 	local removed = model.Parent ~= nil
 	local wasHeldByPlayer = false
-	local context = BrainrotInteraction.GetActiveContext()
+	local context = CrewInteraction.GetActiveContext()
 	if context then
 		local activeState = nil
 		if typeof(context.Active) == "table" then
@@ -579,24 +550,24 @@ local function cleanupTutorialWorldTargets(player, session)
 end
 
 local function ensureBrainrotRegistry()
-	if BrainrotRegistry._Built == true and registryEntries ~= nil then
+	if CrewRegistry._Built == true and registryEntries ~= nil then
 		return true
-	end
-	if not ReplicatedStorage:FindFirstChild("BrainrotFolder") then
-		return false
 	end
 
 	local success, entriesOrReason = pcall(function()
-		local entries = BrainrotRegistry.Build()
+		local entries = CrewRegistry.Build()
 		return entries
 	end)
 
 	if not success then
-		warn(string.format("[FirstTimeTutorialService] Could not build brainrot registry: %s", tostring(entriesOrReason)))
+		warn(string.format("[FirstTimeTutorialService] Could not build crew registry: %s", tostring(entriesOrReason)))
 		return false
 	end
 
 	registryEntries = entriesOrReason
+	if #registryEntries <= 0 then
+		return false
+	end
 	return true
 end
 
@@ -608,13 +579,13 @@ local function getTutorialBrainrotEntry()
 	local brainrotConfig = TutorialConfig.TutorialBrainrot or {}
 	local preferredName = tostring(brainrotConfig.Name or "")
 	if preferredName ~= "" then
-		local template, usedVariant = BrainrotRegistry.GetTemplateWithFallback(preferredName, "Normal")
+		local template, usedVariant = CrewRegistry.GetTemplateWithFallback(preferredName, "Normal")
 		usedVariant = usedVariant or "Normal"
-		local info = BrainrotRegistry.GetOrBuildVariantInfo(preferredName, usedVariant)
+		local info = CrewRegistry.GetOrBuildVariantInfo(preferredName, usedVariant)
 		if template and info then
 			return {
 				BaseId = preferredName,
-				FinalId = BrainrotRegistry.MakeVariantId(preferredName, usedVariant),
+				FinalId = CrewRegistry.MakeVariantId(preferredName, usedVariant),
 				Info = info,
 				Rarity = tostring(info.Rarity or "Common"),
 				Template = template,
@@ -693,16 +664,18 @@ local function getReplicatedInventoryQuantity(player, storageName)
 		return 0
 	end
 
-	local inventory = player:FindFirstChild("Inventory")
-	local itemFolder = inventory and inventory:FindFirstChild(storageName)
-	local quantity = itemFolder and itemFolder:FindFirstChild("Quantity")
-	if quantity and quantity:IsA("NumberValue") then
-		return math.max(0, math.floor(tonumber(quantity.Value) or 0))
-	end
-
-	local value, reason = DataManager:TryGetValue(player, "Inventory." .. storageName .. ".Quantity")
-	if reason == nil and typeof(value) == "number" then
-		return math.max(0, math.floor(value))
+	local inventory = CrewInstanceService.GetCrewInventory(player)
+	if typeof(inventory) == "table" and typeof(inventory.ById) == "table" then
+		local count = 0
+		for _, instanceData in pairs(inventory.ById) do
+			if typeof(instanceData) == "table"
+				and tostring(instanceData.StorageName or "") == storageName
+				and tostring(instanceData.AssignedStand or "") == ""
+			then
+				count += 1
+			end
+		end
+		return count
 	end
 
 	return 0
@@ -771,7 +744,7 @@ local function restoreGrantedTutorialReward(player, session)
 
 	local entry = getTutorialBrainrotEntry()
 	if not entry then
-		return false, "Tutorial Brainrot reward is not available."
+		return false, "Tutorial Crewmate reward is not available."
 	end
 
 	session.tutorialBrainrotName = entry.FinalId
@@ -779,7 +752,7 @@ local function restoreGrantedTutorialReward(player, session)
 		session.tutorialToken = HttpService:GenerateGUID(false)
 	end
 
-	local added = AddBrainrot:AddBrainrot(player, entry.FinalId, 1, {
+	local added = AddCrewMember:AddCrewMember(player, entry.FinalId, 1, {
 		TutorialReward = true,
 		TutorialRecovery = true,
 		TutorialToken = tostring(session.tutorialToken or ""),
@@ -788,7 +761,7 @@ local function restoreGrantedTutorialReward(player, session)
 		return true, nil
 	end
 
-	return false, "Tutorial Brainrot reward could not be restored yet."
+	return false, "Tutorial Crewmate reward could not be restored yet."
 end
 
 local function reconcileTutorialBrainrotGrant(player, session)
@@ -848,7 +821,7 @@ local function getTutorialExtractionPart(refs)
 end
 
 local function spawnTutorialBrainrotTarget(player, session)
-	local context = BrainrotInteraction.GetActiveContext()
+	local context = CrewInteraction.GetActiveContext()
 	if not context or typeof(context.Active) ~= "table" then
 		return false, "World rewards are still loading."
 	end
@@ -862,12 +835,12 @@ local function spawnTutorialBrainrotTarget(player, session)
 			return true, nil
 		end
 
-		return false, restoreMessage or "Tutorial Brainrot reward is being restored."
+		return false, restoreMessage or "Tutorial Crewmate reward is being restored."
 	end
 
 	local entry = getTutorialBrainrotEntry()
 	if not entry then
-		return false, "Tutorial Brainrot is not available."
+		return false, "Tutorial Crewmate is not available."
 	end
 	session.tutorialBrainrotName = entry.FinalId
 	if tostring(session.tutorialToken or "") == "" then
@@ -875,7 +848,7 @@ local function spawnTutorialBrainrotTarget(player, session)
 	end
 
 	if typeof(context.SpawnTutorialBrainrot) ~= "function" then
-		return false, "Biome 1 Brainrot spawns are still loading."
+		return false, "Biome 1 Crewmate spawns are still loading."
 	end
 
 	local lifetime = math.max(60, tonumber(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.SpawnLifetime) or 900)
@@ -897,7 +870,7 @@ local function spawnTutorialBrainrotTarget(player, session)
 		Lifetime = lifetime,
 	})
 	if not clone then
-		return false, message or "Tutorial Brainrot spawn is not available yet."
+		return false, message or "Tutorial Crewmate spawn is not available yet."
 	end
 
 	clone:SetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE, true)
@@ -914,7 +887,7 @@ local function ensureTutorialBrainrotTarget(player, session)
 		return true
 	end
 	if player:GetAttribute("CarriedBrainrot") ~= nil then
-		session.warning = "Extract or drop your current Brainrot first."
+		session.warning = "Extract or drop your current Crewmate first."
 		return false
 	end
 
@@ -1072,17 +1045,7 @@ local function getStandBrainrotName(player, standName)
 		return ""
 	end
 
-	local value, reason = DataManager:TryGetValue(player, "IncomeBrainrots." .. standName .. ".BrainrotName")
-	if reason == nil and typeof(value) == "string" then
-		return value
-	end
-
-	local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
-	if typeof(incomeBrainrots) ~= "table" then
-		return ""
-	end
-
-	local standData = incomeBrainrots[standName]
+	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 	if typeof(standData) == "table" and typeof(standData.BrainrotName) == "string" then
 		return standData.BrainrotName
 	end
@@ -1200,7 +1163,7 @@ ObjectiveTargetResolvers.pickup_brainrot = function(player, session)
 
 	local label = tostring(session.tutorialBrainrotName or "")
 	if label == "" then
-		label = "Tutorial Brainrot"
+		label = "Tutorial Crewmate"
 	end
 
 	return {
@@ -1243,7 +1206,7 @@ ObjectiveTargetResolvers.extract_brainrot = function(player, session)
 	return {
 		id = "tutorial_brainrot",
 		kind = "brainrot",
-		label = "Tutorial Brainrot",
+		label = "Tutorial Crewmate",
 		position = position,
 	}
 end
@@ -1588,7 +1551,7 @@ local function skipTutorial(player)
 	clearTutorialRuntimeAttributes(player)
 
 	local tutorialStorageNames = getTutorialRewardStorageNames(session)
-	local rewardCleanup = BrainrotInstanceService.RemoveTutorialRewardInstances(player, {
+	local rewardCleanup = CrewInstanceService.RemoveTutorialRewardInstances(player, {
 		StorageNames = tutorialStorageNames,
 		ClearStaleStorageAssignments = true,
 	})
@@ -1635,7 +1598,7 @@ function FirstTimeTutorialService.ResetForTesting(player)
 	clearTutorialRuntimeAttributes(player)
 
 	local tutorialStorageNames = getTutorialRewardStorageNames(session)
-	local rewardCleanup = BrainrotInstanceService.RemoveTutorialRewardInstances(player, {
+	local rewardCleanup = CrewInstanceService.RemoveTutorialRewardInstances(player, {
 		StorageNames = tutorialStorageNames,
 		ClearStaleStorageAssignments = true,
 	})

@@ -1,14 +1,16 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
-local BrainrotVariants = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local DevilFruits = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local IndexCollectionService = {}
 
 local DataManagerModule
-local VALID_BRAINROT_ITEM_IDS = {}
+local CrewMemberCanonicalReadGateModule
+local CrewMembers = CrewCatalog.GetLegacyConfig()
+local CrewVariants = CrewCatalog.GetVariantConfig()
+local VALID_CREW_MEMBER_ITEM_IDS = {}
 
 -- Source-of-truth rules:
 -- Inventory.DevilFruits = currently owned fruit items.
@@ -16,9 +18,9 @@ local VALID_BRAINROT_ITEM_IDS = {}
 -- DevilFruit.Equipped = currently active fruit only.
 -- Tool scans below are one-way legacy backfill inputs, not authoritative state.
 
-for itemId, info in pairs(Brainrots) do
+for itemId, info in pairs(CrewMembers) do
 	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
+		VALID_CREW_MEMBER_ITEM_IDS[tostring(itemId)] = true
 	end
 end
 
@@ -28,6 +30,16 @@ local function getDataManager()
 	end
 
 	return DataManagerModule
+end
+
+local function getCrewMemberCanonicalReadGate()
+	if not CrewMemberCanonicalReadGateModule then
+		CrewMemberCanonicalReadGateModule = require(
+			ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberCanonicalReadGate")
+		)
+	end
+
+	return CrewMemberCanonicalReadGateModule
 end
 
 local function addDevilFruitCandidate(candidates, fruitIdentifier)
@@ -155,10 +167,10 @@ end
 
 local function getVariantInfo(variantKey)
 	if variantKey == "Normal" or not variantKey then
-		return (BrainrotVariants.Versions or {}).Normal or { Prefix = "", IncomeMult = 1 }
+		return (CrewVariants.Versions or {}).Normal or { Prefix = "", IncomeMult = 1 }
 	end
 
-	return (BrainrotVariants.Versions or {})[variantKey]
+	return (CrewVariants.Versions or {})[variantKey]
 end
 
 local function getVariantItemId(variantKey, baseName)
@@ -177,7 +189,7 @@ end
 
 local function normalizeVariantKey(variantKey)
 	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+	for _, supportedVariant in ipairs(CrewVariants.Order or { "Normal", "Golden", "Diamond" }) do
 		if candidate == supportedVariant then
 			return supportedVariant
 		end
@@ -192,7 +204,7 @@ local function parseVariantAndBaseName(fullName)
 		return "Normal", ""
 	end
 
-	for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+	for _, variantKey in ipairs(CrewVariants.Order or { "Normal", "Golden", "Diamond" }) do
 		if variantKey ~= "Normal" then
 			local variantInfo = getVariantInfo(variantKey)
 			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
@@ -218,30 +230,34 @@ function IndexCollectionService.ResolveBrainrotItemId(storageName, baseName, var
 
 	if baseNameValue ~= "" then
 		local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-		if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
+		if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
 			return itemId
 		end
 	end
 
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
+	if storageNameValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[storageNameValue] then
 		return storageNameValue
 	end
 
 	return nil
 end
 
-function IndexCollectionService.MarkBrainrotDiscovered(player, storageName, baseName, variantKey)
+function IndexCollectionService.MarkBrainrotDiscovered(player, storageName, baseName, variantKey, _options)
 	local itemId = IndexCollectionService.ResolveBrainrotItemId(storageName, baseName, variantKey)
 	if not itemId then
 		return nil
 	end
 
 	local dataManager = getDataManager()
-	local path = "IndexCollection.Brainrots." .. itemId
+	local path = "IndexCollection.CrewMembers." .. itemId
 	local currentValue = dataManager:TryGetValue(player, path)
 	if currentValue ~= true then
 		dataManager:TrySetValue(player, path, true)
 	end
+
+	getCrewMemberCanonicalReadGate().CompareIndexDisplay(player, itemId, {
+		LogThrottleSeconds = 60,
+	})
 
 	return itemId
 end
@@ -261,6 +277,9 @@ function IndexCollectionService.MarkDevilFruitDiscovered(player, fruitIdentifier
 
 	return fruit.FruitKey
 end
+
+IndexCollectionService.ResolveCrewMemberItemId = IndexCollectionService.ResolveBrainrotItemId
+IndexCollectionService.MarkCrewMemberDiscovered = IndexCollectionService.MarkBrainrotDiscovered
 
 function IndexCollectionService.BackfillDevilFruitDiscoveries(player)
 	if not player then
@@ -313,13 +332,15 @@ function IndexCollectionService.GetDiscoveredDevilFruitHistory(player)
 end
 
 function IndexCollectionService.GetDiscoveredBrainrotHistory(player)
-	local history = getDataManager():GetValue(player, "IndexCollection.Brainrots")
+	local history = getDataManager():GetValue(player, "IndexCollection.CrewMembers")
 	if typeof(history) == "table" then
 		return history
 	end
 
 	return nil
 end
+
+IndexCollectionService.GetDiscoveredCrewMemberHistory = IndexCollectionService.GetDiscoveredBrainrotHistory
 
 function IndexCollectionService.CountDiscoveredBrainrots(player)
 	local history = IndexCollectionService.GetDiscoveredBrainrotHistory(player)
@@ -336,5 +357,7 @@ function IndexCollectionService.CountDiscoveredBrainrots(player)
 
 	return count
 end
+
+IndexCollectionService.CountDiscoveredCrewMembers = IndexCollectionService.CountDiscoveredBrainrots
 
 return IndexCollectionService

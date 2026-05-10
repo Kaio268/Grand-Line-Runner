@@ -4,21 +4,40 @@ local Players = game:GetService("Players")
 
 local DataManager = require(ServerScriptService.Data:WaitForChild("DataManager"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
+local CrewMemberCanonicalReadGate = require(
+	ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberCanonicalReadGate")
+)
+local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
 
-local Brainrots = require(Configs:WaitForChild("Brainrots"))
-local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local Brainrots = CrewCatalog.GetLegacyConfig()
+local VariantCfg = CrewCatalog.GetVariantConfig()
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
 local DEVIL_FRUIT_BACKFILL_TIMEOUT = 30
 local DEVIL_FRUIT_LEGACY_BACKFILL_DELAY = 5
+local INDEX_DISPLAY_METADATA_REMOTE_NAME = "IndexDisplayMetadataRequest"
+local INDEX_DISPLAY_METADATA_MAX_IDS = 300
+local INDEX_DISPLAY_METADATA_CACHE_SECONDS = 30
+local INDEX_DISPLAY_CANARY_LOG_THROTTLE_SECONDS = 60
 
 local function findRemoteEventByName(parent, remoteName)
 	for _, child in ipairs(parent:GetChildren()) do
 		if child.Name == remoteName and child:IsA("RemoteEvent") then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function findRemoteFunctionByName(parent, remoteName)
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.Name == remoteName and child:IsA("RemoteFunction") then
 			return child
 		end
 	end
@@ -33,13 +52,27 @@ if not claimRemote then
 	claimRemote.Parent = ReplicatedStorage
 end
 
+local indexDisplayMetadataRequest = findRemoteFunctionByName(ReplicatedStorage, INDEX_DISPLAY_METADATA_REMOTE_NAME)
+if not indexDisplayMetadataRequest then
+	indexDisplayMetadataRequest = Instance.new("RemoteFunction")
+	indexDisplayMetadataRequest.Name = INDEX_DISPLAY_METADATA_REMOTE_NAME
+	indexDisplayMetadataRequest.Parent = ReplicatedStorage
+end
+
 local VALID_BRAINROT_ITEM_IDS = {}
+local SORTED_BRAINROT_ITEM_IDS = {}
 
 for itemId, info in pairs(Brainrots) do
 	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
+		local safeItemId = tostring(itemId)
+		VALID_BRAINROT_ITEM_IDS[safeItemId] = true
+		SORTED_BRAINROT_ITEM_IDS[#SORTED_BRAINROT_ITEM_IDS + 1] = safeItemId
 	end
 end
+
+table.sort(SORTED_BRAINROT_ITEM_IDS)
+
+local lastIndexDisplayMetadataLogByPlayer = setmetatable({}, { __mode = "k" })
 
 local function getVariantInfo(variantKey)
 	if variantKey == "Normal" or not variantKey then
@@ -61,41 +94,6 @@ local function getVariantItemId(variantKey, baseName)
 	local variantInfo = getVariantInfo(variantKey)
 	local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
 	return prefix .. baseName
-end
-
-local function readStringValue(container, childName)
-	local child = container and container:FindFirstChild(childName)
-	if child and child:IsA("StringValue") then
-		local value = tostring(child.Value or "")
-		if value ~= "" then
-			return value
-		end
-	end
-
-	return nil
-end
-
-local function readStringField(container, childName)
-	local value = readStringValue(container, childName)
-	if value ~= nil then
-		return value
-	end
-
-	if not container then
-		return nil
-	end
-
-	local attributeValue = container:GetAttribute(childName)
-	if attributeValue == nil then
-		return nil
-	end
-
-	local text = tostring(attributeValue)
-	if text == "" then
-		return nil
-	end
-
-	return text
 end
 
 local function normalizeVariantKey(variantKey)
@@ -161,11 +159,239 @@ local function markDiscoveredBrainrot(discovered, storageName, baseName, variant
 	end
 end
 
+local function getRequestedBrainrotItemIds(requestedItemIds)
+	local itemIds = {}
+	local seen = {}
+
+	if typeof(requestedItemIds) == "table" then
+		for _, rawItemId in pairs(requestedItemIds) do
+			if #itemIds >= INDEX_DISPLAY_METADATA_MAX_IDS then
+				break
+			end
+
+			local itemId = tostring(rawItemId or "")
+			if VALID_BRAINROT_ITEM_IDS[itemId] == true and seen[itemId] ~= true then
+				seen[itemId] = true
+				itemIds[#itemIds + 1] = itemId
+			end
+		end
+	end
+
+	if #itemIds > 0 then
+		table.sort(itemIds)
+		return itemIds
+	end
+
+	for _, itemId in ipairs(SORTED_BRAINROT_ITEM_IDS) do
+		if #itemIds >= INDEX_DISPLAY_METADATA_MAX_IDS then
+			break
+		end
+
+		itemIds[#itemIds + 1] = itemId
+	end
+
+	return itemIds
+end
+
+local function summarizeIndexDisplayValidation(result)
+	local counts = result and result.BlockingCounts or {}
+	return {
+		valid = result ~= nil and result.ComparisonValid == true,
+		validationValid = result ~= nil and result.ValidationValid == true,
+		validationReason = result and result.ValidationReason or nil,
+		validationAge = result and result.ValidationAgeSeconds or nil,
+		blocking = counts.Total or 0,
+		mismatch = counts.Mismatch or 0,
+		stand = counts.Stand or 0,
+		duplicate = counts.Duplicate or 0,
+		unknown = counts.Unknown or 0,
+		income = counts.BlockingIncomeMismatch or 0,
+		compatibilityOnly = counts.CompatibilityOnly or 0,
+		brookFallback = counts.BrookFallback or 0,
+	}
+end
+
+local function summarizeModelPreviewValidation(result)
+	local counts = result and result.BlockingCounts or {}
+	return {
+		valid = result ~= nil and result.ValidationValid == true,
+		validationReason = result and result.ValidationReason or nil,
+		validationAge = result and result.ValidationAgeSeconds or nil,
+		blocking = counts.Total or 0,
+		mismatch = counts.Mismatch or 0,
+		stand = counts.Stand or 0,
+		duplicate = counts.Duplicate or 0,
+		unknown = counts.Unknown or 0,
+		income = counts.BlockingIncomeMismatch or 0,
+		compatibilityOnly = counts.CompatibilityOnly or 0,
+		brookFallback = counts.BrookFallback or 0,
+	}
+end
+
+local function buildIndexModelPreviewDescriptor(result)
+	if typeof(result) ~= "table" then
+		return nil
+	end
+
+	return {
+		ModelName = tostring(result.ModelName or ""),
+		ModelPath = tostring(result.ModelPath or ""),
+		UsedCanonical = result.UsedCanonical == true,
+		FallbackReason = result.FallbackReason,
+		IsPreviewOnly = result.IsPreviewOnly == true,
+		LegacyIdentity = tostring(result.LegacyIdentity or ""),
+		Path = tostring(result.Path or ""),
+		Source = tostring(result.Source or ""),
+		CanonicalUnavailableReason = result.CanonicalUnavailableReason,
+		LegacyUnavailableReason = result.LegacyUnavailableReason,
+		Validation = summarizeModelPreviewValidation(result),
+	}
+end
+
+local function addFallbackReason(reasonCounts, reason)
+	local key = tostring(reason or "unknown")
+	if key == "" or key == "none" then
+		return
+	end
+
+	reasonCounts[key] = (reasonCounts[key] or 0) + 1
+end
+
+local function formatReasonCounts(reasonCounts)
+	local parts = {}
+	for reason, count in pairs(reasonCounts) do
+		parts[#parts + 1] = tostring(reason) .. ":" .. tostring(count)
+	end
+	table.sort(parts)
+	return table.concat(parts, ",")
+end
+
+local function logIndexDisplayMetadataSummary(player, result)
+	if not player or not player:IsA("Player") or typeof(result) ~= "table" then
+		return
+	end
+
+	local flags = result.Flags or {}
+	if flags.CrewMemberCanaryDiagnosticsEnabled ~= true then
+		return
+	end
+
+	local reasonSummary = formatReasonCounts(result.FallbackReasonCounts or {})
+	local signature = table.concat({
+		tostring(result.RequestedCount or 0),
+		tostring(result.CanonicalDisplayUsedCount or 0),
+		tostring(result.CanonicalModelPreviewUsedCount or 0),
+		reasonSummary,
+		formatReasonCounts(result.ModelPreviewFallbackReasonCounts or {}),
+		tostring(flags.CrewMemberCanonicalReadEnabled),
+		tostring(flags.CrewMemberCanaryIndexDisplayReadEnabled),
+		tostring(flags.CrewMemberCanaryIndexModelPreviewReadEnabled),
+	}, "|")
+	local now = os.clock()
+	local last = lastIndexDisplayMetadataLogByPlayer[player]
+	if typeof(last) == "table"
+		and last.Signature == signature
+		and (now - (tonumber(last.At) or 0)) < INDEX_DISPLAY_CANARY_LOG_THROTTLE_SECONDS
+	then
+		return
+	end
+
+	lastIndexDisplayMetadataLogByPlayer[player] = {
+		At = now,
+		Signature = signature,
+	}
+
+	print(string.format(
+		"[IndexDisplayCanary] player=%s requested=%d canonicalDisplay=%d canonicalModelPreview=%d fallbackReasons={%s} modelPreviewFallbackReasons={%s} canonicalRead=%s indexDisplayRead=%s indexModelPreviewRead=%s inventoryModelPreviewRead=%s gameplayReads=%s",
+		player.Name,
+		result.RequestedCount or 0,
+		result.CanonicalDisplayUsedCount or 0,
+		result.CanonicalModelPreviewUsedCount or 0,
+		reasonSummary,
+		formatReasonCounts(result.ModelPreviewFallbackReasonCounts or {}),
+		tostring(flags.CrewMemberCanonicalReadEnabled),
+		tostring(flags.CrewMemberCanaryIndexDisplayReadEnabled),
+		tostring(flags.CrewMemberCanaryIndexModelPreviewReadEnabled),
+		tostring(flags.CrewMemberCanaryInventoryModelPreviewReadEnabled),
+		tostring(flags.CrewMemberCanaryGameplayReadsEnabled)
+	))
+end
+
+local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
+	if player.Parent ~= Players then
+		return {
+			Ready = false,
+			Reason = "player_unavailable",
+			Metadata = {},
+		}
+	end
+
+	local itemIds = getRequestedBrainrotItemIds(requestedItemIds)
+	local metadataById = {}
+	local fallbackReasonCounts = {}
+	local modelPreviewFallbackReasonCounts = {}
+	local canonicalDisplayUsedCount = 0
+	local canonicalModelPreviewUsedCount = 0
+	local responseFlags = nil
+
+	for _, itemId in ipairs(itemIds) do
+		local metadata, result = CrewMemberCanonicalReadGate.ResolveIndexDisplayMetadata(player, itemId, {
+			LogThrottleSeconds = 60,
+			SkipSelectionLog = true,
+		})
+		responseFlags = responseFlags or result.Flags
+		local modelPreviewResult = CrewMemberCanonicalReadGate.ResolveIndexModelPreviewDescriptor(player, itemId, {
+			LogThrottleSeconds = 60,
+			SkipLog = true,
+		})
+		responseFlags = responseFlags or modelPreviewResult.Flags
+
+		local fallbackReason = result.DisplayReadFallbackReason or result.FallbackReason
+		if result.DisplayReadUseCanonical == true then
+			canonicalDisplayUsedCount += 1
+		else
+			addFallbackReason(fallbackReasonCounts, fallbackReason)
+		end
+		if modelPreviewResult.UsedCanonical == true then
+			canonicalModelPreviewUsedCount += 1
+		else
+			addFallbackReason(modelPreviewFallbackReasonCounts, modelPreviewResult.FallbackReason)
+		end
+
+		metadataById[itemId] = {
+			DisplayName = metadata and metadata.DisplayName or itemId,
+			Rarity = metadata and metadata.Rarity or "",
+			Render = metadata and metadata.Render or "",
+			ModelPreview = buildIndexModelPreviewDescriptor(modelPreviewResult),
+			Source = metadata and metadata.Source or "LegacyFallbackMissing",
+			CanonicalDisplayUsed = result.DisplayReadUseCanonical == true,
+			FallbackReason = fallbackReason,
+			Validation = summarizeIndexDisplayValidation(result),
+			CanonicalReadGlobal = result.Flags and result.Flags.CrewMemberCanonicalReadEnabled == true,
+		}
+	end
+
+	local response = {
+		Ready = true,
+		Metadata = metadataById,
+		RequestedCount = #itemIds,
+		CanonicalDisplayUsedCount = canonicalDisplayUsedCount,
+		CanonicalModelPreviewUsedCount = canonicalModelPreviewUsedCount,
+		FallbackReasonCounts = fallbackReasonCounts,
+		ModelPreviewFallbackReasonCounts = modelPreviewFallbackReasonCounts,
+		ExpiresAfterSeconds = INDEX_DISPLAY_METADATA_CACHE_SECONDS,
+		Flags = responseFlags or {},
+	}
+
+	logIndexDisplayMetadataSummary(player, response)
+	return response
+end
+
+indexDisplayMetadataRequest.OnServerInvoke = buildIndexDisplayMetadataResponse
+
 local function countUnlockedBrainrots(player)
-	local inv = player:FindFirstChild("Inventory")
-	local brainrotInventory = player:FindFirstChild("BrainrotInventory")
 	local discovered = {}
-	local history = IndexCollectionService.GetDiscoveredBrainrotHistory(player)
+	local history = IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
 
 	if history then
 		for itemId, isDiscovered in pairs(history) do
@@ -175,30 +401,15 @@ local function countUnlockedBrainrots(player)
 		end
 	end
 
-	local byIdFolder = brainrotInventory and brainrotInventory:FindFirstChild("ById")
-	if byIdFolder then
-		for _, child in ipairs(byIdFolder:GetChildren()) do
-			if child:IsA("Folder") then
-				markDiscoveredBrainrot(
-					discovered,
-					readStringField(child, "StorageName"),
-					readStringField(child, "BaseName"),
-					readStringField(child, "Variant")
-				)
-			end
-		end
-	end
-
-	if inv then
-		for _, child in ipairs(inv:GetChildren()) do
-			if child:IsA("Folder") and child.Name ~= "DevilFruits" then
-				markDiscoveredBrainrot(
-					discovered,
-					child.Name,
-					readStringField(child, "BaseName"),
-					readStringField(child, "Variant")
-				)
-			end
+	local crewInventory = CrewInstanceService.GetCrewInventory(player)
+	for _, instanceData in pairs(if typeof(crewInventory) == "table" and typeof(crewInventory.ById) == "table" then crewInventory.ById else {}) do
+		if typeof(instanceData) == "table" then
+			markDiscoveredBrainrot(
+				discovered,
+				tostring(instanceData.StorageName or ""),
+				tostring(instanceData.BaseName or ""),
+				tostring(instanceData.Variant or "")
+			)
 		end
 	end
 

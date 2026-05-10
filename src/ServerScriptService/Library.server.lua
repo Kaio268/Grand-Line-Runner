@@ -15,7 +15,7 @@ local function requireModules()
 	while #modules > 0 do
 		for i = #modules, 1, -1 do
 			local module = modules[i]
-			local success, result = tryRequire(module)
+			local success = tryRequire(module)
 
 			if success then
 				print("✅Loaded module:", module.Name)

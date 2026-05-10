@@ -2,7 +2,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
-local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local LegacyCrewConfig = CrewCatalog.GetLegacyConfig()
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
@@ -20,8 +22,46 @@ local prompt = npc:WaitForChild("ProximityPrompt")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = remotes:WaitForChild("SellItemEvent")
+local SellDialogDisplayNameRequest = remotes:FindFirstChild("CrewMemberSellDialogDisplayNameRequest")
+if SellDialogDisplayNameRequest and not SellDialogDisplayNameRequest:IsA("RemoteFunction") then
+	SellDialogDisplayNameRequest = nil
+end
 
 local SELL_TIME_SECONDS = 15
+
+local function getCrewInfo(name)
+	return CrewCatalog.GetInfoById(name) or LegacyCrewConfig[name]
+end
+
+local function getCrewDisplayName(name)
+	local info = getCrewInfo(name)
+	if not info then
+		return name
+	end
+
+	return tostring(info.DisplayName or info.Name or name)
+end
+
+local function getSellDialogDisplayName(name)
+	local fallbackName = getCrewDisplayName(name)
+	if not SellDialogDisplayNameRequest then
+		local remote = remotes:FindFirstChild("CrewMemberSellDialogDisplayNameRequest")
+		if remote and remote:IsA("RemoteFunction") then
+			SellDialogDisplayNameRequest = remote
+		end
+	end
+	if not SellDialogDisplayNameRequest then
+		return fallbackName
+	end
+
+	local ok, result = pcall(function()
+		return SellDialogDisplayNameRequest:InvokeServer(name)
+	end)
+	if ok and type(result) == "string" and result ~= "" then
+		return result
+	end
+	return fallbackName
+end
 
 local function cleanName(raw)
 	raw = tostring(raw or "")
@@ -30,7 +70,7 @@ local function cleanName(raw)
 end
 
 local function getSellPrice(brainrotName)
-	local data = Brainrots[brainrotName]
+	local data = getCrewInfo(brainrotName)
 	if not data then
 		return nil
 	end
@@ -140,7 +180,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 		end
 
 		SellEvent:FireServer("SINGLE", tool.Name)
-		dialogObject:hideGui(("%s sold for %s%s"):format(name, moneyStr(price), CurrencyUtil.getCompactSuffix()))
+		dialogObject:hideGui(("%s sold for %s%s"):format(getSellDialogDisplayName(name), moneyStr(price), CurrencyUtil.getCompactSuffix()))
 		playNpcSellEffects()
 	elseif responseNum == 3 then
 		local tool = player.Character and player.Character:FindFirstChildOfClass("Tool")
@@ -153,7 +193,7 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 		local price = getSellPrice(name)
 
 		if price and price > 0 then
-			dialogObject:hideGui(("%s can be sold for %s%s (15 sec income)"):format(name, moneyStr(price), CurrencyUtil.getCompactSuffix()))
+			dialogObject:hideGui(("%s can be sold for %s%s (15 sec income)"):format(getSellDialogDisplayName(name), moneyStr(price), CurrencyUtil.getCompactSuffix()))
 		else
 			dialogObject:hideGui("This item cannot be sold.")
 		end

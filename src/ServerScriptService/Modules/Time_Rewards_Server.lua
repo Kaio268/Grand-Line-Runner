@@ -154,7 +154,7 @@ local claimLocks = {}
 local lastClaimRequestAt = {}
 local playTimeSessions = {}
 local rewardIds = {}
-local BrainrotModule = nil
+local CrewRewardModule = nil
 
 local POTION_REWARD_KEYS = {
 	x2Money = true,
@@ -516,9 +516,9 @@ local function grantReward(player: Player, rewardId: number)
 
 	local ok, reason
 	if rewardData and rewardData.Brainrot == true then
-		BrainrotModule = BrainrotModule or require(script.Parent.AddBrainrot)
-		ok = BrainrotModule:AddBrainrot(player, rewardName, amount)
-		reason = if ok then nil else "brainrot_grant_failed"
+		CrewRewardModule = CrewRewardModule or require(script.Parent.AddCrewMember)
+		ok = CrewRewardModule:AddCrewMember(player, rewardName, amount)
+		reason = if ok then nil else "crew_member_grant_failed"
 	else
 		ok, reason = addReward(player, rewardName, amount)
 	end

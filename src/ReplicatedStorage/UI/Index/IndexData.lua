@@ -1,8 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Configs = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs")
-local Brainrots = require(Configs:WaitForChild("Brainrots"))
-local BrainrotVariants = require(Configs:WaitForChild("BrainrotVariants"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Brainrots = CrewCatalog.GetLegacyConfig()
+local BrainrotVariants = CrewCatalog.GetVariantConfig()
 local DevilFruits = require(Configs:WaitForChild("DevilFruits"))
 local IndexConfig = require(Configs:WaitForChild("Index"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -184,6 +186,59 @@ local function markDiscoveredBrainrot(discovered, storageName, baseName, variant
 	end
 end
 
+local function getCrewInfo(itemId)
+	return CrewCatalog.GetInfoById(itemId) or Brainrots[itemId]
+end
+
+local function getIndexDisplayMetadata(metadataById, itemId)
+	if typeof(metadataById) ~= "table" then
+		return nil
+	end
+
+	local metadata = metadataById[tostring(itemId or "")]
+	if typeof(metadata) == "table" then
+		return metadata
+	end
+
+	return nil
+end
+
+local function readMetadataText(metadata, key)
+	if typeof(metadata) ~= "table" then
+		return nil
+	end
+
+	local value = metadata[key]
+	if value == nil then
+		return nil
+	end
+
+	local text = tostring(value)
+	if text == "" then
+		return nil
+	end
+
+	return text
+end
+
+local function getCanonicalIndexModelPreview(metadata)
+	if typeof(metadata) ~= "table" or typeof(metadata.ModelPreview) ~= "table" then
+		return nil
+	end
+
+	local descriptor = metadata.ModelPreview
+	if descriptor.IsPreviewOnly ~= true or descriptor.UsedCanonical ~= true then
+		return nil
+	end
+
+	local modelName = tostring(descriptor.ModelName or "")
+	if modelName == "" then
+		return nil
+	end
+
+	return descriptor
+end
+
 local function markDiscoveredFruit(discovered, fruitIdentifier)
 	local fruit = DevilFruits.GetFruit(fruitIdentifier)
 	if fruit then
@@ -228,11 +283,11 @@ local function mergeDiscoveredFruitsFromFolder(discovered, folder)
 	end
 end
 
-local function buildDiscoveredBrainrotSet(indexCollection, inventory, brainrotInventory)
+local function buildDiscoveredBrainrotSet(indexCollection, inventory, crewMemberInventory)
 	local discovered = {}
-	mergeDiscoveredFromBoolFolder(discovered, indexCollection and indexCollection:FindFirstChild("Brainrots"))
+	mergeDiscoveredFromBoolFolder(discovered, indexCollection and indexCollection:FindFirstChild("CrewMembers"))
 
-	local byIdFolder = brainrotInventory and brainrotInventory:FindFirstChild("ById")
+	local byIdFolder = crewMemberInventory and crewMemberInventory:FindFirstChild("ById")
 	if byIdFolder then
 		for _, child in ipairs(byIdFolder:GetChildren()) do
 			if child:IsA("Folder") then
@@ -422,17 +477,18 @@ function IndexData.buildViewModel(options)
 
 	local inventory = options.inventory
 	local indexCollection = options.indexCollection
-	local brainrotInventory = options.brainrotInventory
+	local crewMemberInventory = options.crewMemberInventory or options.brainrotInventory
 	local claimedRewardOverrides = options.claimedRewardOverrides
 	local equippedDevilFruit = options.equippedDevilFruit
 	local indexRewardsFolder = options.indexRewardsFolder
+	local indexDisplayMetadata = options.indexDisplayMetadata
 	local previewMode = options.previewMode == true
 
 	local units = {}
 	local categoryProgress = {}
-	local discoveredBrainrotIds = buildDiscoveredBrainrotSet(indexCollection, inventory, brainrotInventory)
+	local discoveredBrainrotIds = buildDiscoveredBrainrotSet(indexCollection, inventory, crewMemberInventory)
 	local discoveredFruitKeys = buildDiscoveredFruitSet(indexCollection, inventory, equippedDevilFruit)
-	local hasLiveBrainrotState = indexCollection ~= nil or inventory ~= nil or brainrotInventory ~= nil
+	local hasLiveBrainrotState = indexCollection ~= nil or inventory ~= nil or crewMemberInventory ~= nil
 	local hasLiveFruitState = indexCollection ~= nil or inventory ~= nil or DevilFruits.GetFruit(equippedDevilFruit) ~= nil
 
 	for _, template in pairs(CATEGORY_TEMPLATES) do
@@ -447,7 +503,7 @@ function IndexData.buildViewModel(options)
 			local template = CATEGORY_TEMPLATES[variantKey]
 			if template then
 				local itemId = getVariantItemId(variantKey, entry.name)
-				local itemInfo = Brainrots[itemId] or entry.info
+				local itemInfo = getCrewInfo(itemId) or entry.info
 				local discovered = false
 
 				if hasLiveBrainrotState then
@@ -461,18 +517,38 @@ function IndexData.buildViewModel(options)
 					categoryProgress[template.id].collected += 1
 				end
 
+				local displayMetadata = getIndexDisplayMetadata(indexDisplayMetadata, itemId)
+				local displayName = readMetadataText(displayMetadata, "DisplayName")
+					or tostring(itemInfo.DisplayName or itemInfo.Name or entry.name)
+				local rarity = readMetadataText(displayMetadata, "Rarity")
+					or tostring(itemInfo.Rarity or entry.info.Rarity or "Common")
+				local render = readMetadataText(displayMetadata, "Render")
+					or tostring(itemInfo.Render or entry.info.Render or "")
+				local modelPreview = getCanonicalIndexModelPreview(displayMetadata)
+
 				units[#units + 1] = {
 					id = itemId,
 					baseName = entry.name,
 					name = entry.name,
-					displayName = entry.name,
-					rarity = tostring(itemInfo.Rarity or entry.info.Rarity or "Common"),
+					displayName = displayName,
+					rarity = rarity,
 					production = formatIncome(itemInfo.Income or entry.info.Income or 0),
 					rawIncome = tonumber(itemInfo.Income or entry.info.Income) or 0,
 					discovered = discovered,
-					image = tostring(itemInfo.Render or entry.info.Render or ""),
+					image = render,
+					previewKind = if modelPreview then "CrewMember" else nil,
+					previewName = if modelPreview then tostring(modelPreview.ModelName or "") else nil,
+					previewLegacyIdentity = if modelPreview then tostring(modelPreview.LegacyIdentity or itemId) else nil,
 					category = template.id,
 					categoryLabel = template.label,
+					canonicalDisplayUsed = displayMetadata and displayMetadata.CanonicalDisplayUsed == true,
+					canonicalModelPreviewUsed = modelPreview ~= nil,
+					displayFallbackReason = displayMetadata and displayMetadata.FallbackReason or nil,
+					modelPreviewFallbackReason = displayMetadata
+						and typeof(displayMetadata.ModelPreview) == "table"
+						and displayMetadata.ModelPreview.FallbackReason
+						or nil,
+					displayMetadataSource = displayMetadata and displayMetadata.Source or "LegacyCatalog",
 					themeKey = template.themeKey,
 					order = orderIndex,
 				}

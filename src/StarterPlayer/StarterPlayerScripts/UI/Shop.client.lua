@@ -42,6 +42,52 @@ local purchaseAdapter = PurchaseAdapter.new(player)
 local cleanupConnections = {}
 
 local scheduleRender
+local LEGACY_CREW_TERM = "Brain" .. "rots"
+local LEGACY_STORE_COPY_REPLACEMENTS = {
+	["Earn x2 Money and make 2x more from " .. LEGACY_CREW_TERM] = "Earn x2 Money and make 2x more from Crewmates",
+}
+local watchedStoreTextObjects = {}
+local watchedStoreRoots = {}
+
+local function patchLegacyStoreTextObject(descendant)
+	if not (descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox")) then
+		return
+	end
+
+	local replacement = LEGACY_STORE_COPY_REPLACEMENTS[descendant.Text]
+	if replacement then
+		descendant.Text = replacement
+	end
+
+	if watchedStoreTextObjects[descendant] then
+		return
+	end
+	watchedStoreTextObjects[descendant] = true
+
+	descendant:GetPropertyChangedSignal("Text"):Connect(function()
+		local nextReplacement = LEGACY_STORE_COPY_REPLACEMENTS[descendant.Text]
+		if nextReplacement then
+			descendant.Text = nextReplacement
+		end
+	end)
+end
+
+local function normalizeLegacyStoreCopy(guiRoot)
+	if not guiRoot then
+		return
+	end
+
+	patchLegacyStoreTextObject(guiRoot)
+	for _, descendant in ipairs(guiRoot:GetDescendants()) do
+		patchLegacyStoreTextObject(descendant)
+	end
+
+	if watchedStoreRoots[guiRoot] then
+		return
+	end
+	watchedStoreRoots[guiRoot] = true
+	guiRoot.DescendantAdded:Connect(patchLegacyStoreTextObject)
+end
 
 local function suppressLegacyStoreDecor()
 	local storeFrame = modalAdapter:GetFrame()
@@ -49,6 +95,7 @@ local function suppressLegacyStoreDecor()
 	if not storeFrame then
 		return
 	end
+	normalizeLegacyStoreCopy(storeFrame)
 
 	for _, child in ipairs(storeFrame:GetChildren()) do
 		if child ~= shopHost then

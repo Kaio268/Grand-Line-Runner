@@ -57,8 +57,15 @@ local claimRemoteConnection = nil
 local pendingClaimRequests = {}
 local claimedRewardOverrides = {}
 local CLAIM_REWARD_RENDER_HOLD_TIME = 0.32
+local INDEX_DISPLAY_METADATA_REMOTE_NAME = "IndexDisplayMetadataRequest"
+local INDEX_DISPLAY_METADATA_RETRY_SECONDS = 5
+local INDEX_DISPLAY_METADATA_MAX_CACHE_SECONDS = 30
 local claimRewardRenderHoldUntil = 0
 local claimRewardRenderHoldQueued = false
+local indexDisplayMetadata = nil
+local indexDisplayMetadataExpiresAt = 0
+local indexDisplayMetadataRequestInFlight = false
+local indexDisplayMetadataNextRefreshAt = 0
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Index",
@@ -366,7 +373,7 @@ end
 local function refreshLiveFolders()
 	bindInventoryFolder(player:FindFirstChild("Inventory") or player:WaitForChild("Inventory", 1))
 	bindIndexCollectionFolder(player:FindFirstChild("IndexCollection") or player:WaitForChild("IndexCollection", 1))
-	bindBrainrotInventoryFolder(player:FindFirstChild("BrainrotInventory") or player:WaitForChild("BrainrotInventory", 1))
+	bindBrainrotInventoryFolder(player:FindFirstChild("CrewMemberInventory") or player:WaitForChild("CrewMemberInventory", 1))
 	bindDevilFruitStateFolder(player:FindFirstChild("DevilFruit"))
 	bindIndexRewardsFolder(player:FindFirstChild("IndexRewards"))
 end
@@ -389,16 +396,102 @@ local function getEquippedDevilFruit()
 	return nil
 end
 
+local function findRemoteFunctionByName(parent, remoteName)
+	for _, child in ipairs(parent:GetChildren()) do
+		if child.Name == remoteName and child:IsA("RemoteFunction") then
+			return child
+		end
+	end
+
+	return nil
+end
+
+local function waitForRemoteFunctionByName(parent, remoteName, timeoutSeconds)
+	local deadline = os.clock() + (timeoutSeconds or 2)
+
+	repeat
+		local remote = findRemoteFunctionByName(parent, remoteName)
+		if remote then
+			return remote
+		end
+
+		task.wait(0.1)
+	until os.clock() >= deadline
+
+	return findRemoteFunctionByName(parent, remoteName)
+end
+
+local function getActiveIndexDisplayMetadata()
+	if typeof(indexDisplayMetadata) == "table" and os.clock() < indexDisplayMetadataExpiresAt then
+		return indexDisplayMetadata
+	end
+
+	indexDisplayMetadata = nil
+	indexDisplayMetadataExpiresAt = 0
+	return nil
+end
+
+local function refreshIndexDisplayMetadata(reason, force)
+	if indexDisplayMetadataRequestInFlight or destroyed then
+		return
+	end
+
+	local now = os.clock()
+	if force ~= true and now < indexDisplayMetadataNextRefreshAt then
+		return
+	end
+
+	indexDisplayMetadataNextRefreshAt = now + INDEX_DISPLAY_METADATA_RETRY_SECONDS
+	indexDisplayMetadataRequestInFlight = true
+
+	task.spawn(function()
+		local remote = findRemoteFunctionByName(ReplicatedStorage, INDEX_DISPLAY_METADATA_REMOTE_NAME)
+			or waitForRemoteFunctionByName(ReplicatedStorage, INDEX_DISPLAY_METADATA_REMOTE_NAME, 2)
+		local nextMetadata = nil
+		local nextExpiresAt = 0
+
+		if remote then
+			local ok, response = pcall(function()
+				return remote:InvokeServer(reason or "index_display")
+			end)
+
+			if ok and typeof(response) == "table" and response.Ready == true and typeof(response.Metadata) == "table" then
+				nextMetadata = response.Metadata
+				local expiresAfter = math.clamp(
+					tonumber(response.ExpiresAfterSeconds) or INDEX_DISPLAY_METADATA_MAX_CACHE_SECONDS,
+					1,
+					INDEX_DISPLAY_METADATA_MAX_CACHE_SECONDS
+				)
+				nextExpiresAt = os.clock() + expiresAfter
+			end
+		end
+
+		indexDisplayMetadata = nextMetadata
+		indexDisplayMetadataExpiresAt = nextExpiresAt
+		indexDisplayMetadataRequestInFlight = false
+
+		if scheduleRender and not destroyed then
+			task.defer(scheduleRender)
+		end
+	end)
+end
+
 local function buildViewModel(previewMode)
 	local indexData = select(1, loadIndexModules())
 	if not indexData then
 		return buildEmptyViewModel()
 	end
 
+	local activeIndexDisplayMetadata = getActiveIndexDisplayMetadata()
+	if activeIndexDisplayMetadata == nil and previewMode ~= true then
+		refreshIndexDisplayMetadata("view_model")
+	end
+
 	local ok, viewModelOrError = pcall(indexData.buildViewModel, {
-		brainrotInventory = brainrotInventoryFolder,
+		crewMemberInventory = brainrotInventoryFolder,
 		claimedRewardOverrides = claimedRewardOverrides,
 		equippedDevilFruit = getEquippedDevilFruit(),
+		indexDisplayMetadata = activeIndexDisplayMetadata,
 		indexCollection = indexCollectionFolder,
 		indexRewardsFolder = indexRewardsFolder,
 		inventory = inventoryFolder,
@@ -957,16 +1050,20 @@ scheduleRender = function()
 end
 
 refreshLiveFolders()
+refreshIndexDisplayMetadata("startup", true)
 
 trackConnection(player.ChildAdded, function(child)
 	if child.Name == "Inventory" then
 		bindInventoryFolder(child)
+		refreshIndexDisplayMetadata("inventory_added")
 		task.defer(scheduleRender)
 	elseif child.Name == "IndexCollection" then
 		bindIndexCollectionFolder(child)
+		refreshIndexDisplayMetadata("index_collection_added")
 		task.defer(scheduleRender)
-	elseif child.Name == "BrainrotInventory" then
+	elseif child.Name == "CrewMemberInventory" then
 		bindBrainrotInventoryFolder(child)
+		refreshIndexDisplayMetadata("crew_member_inventory_added")
 		task.defer(scheduleRender)
 	elseif child.Name == "DevilFruit" then
 		bindDevilFruitStateFolder(child)
@@ -980,12 +1077,15 @@ end, cleanupConnections)
 trackConnection(player.ChildRemoved, function(child)
 	if child == inventoryFolder then
 		bindInventoryFolder(nil)
+		refreshIndexDisplayMetadata("inventory_removed")
 		task.defer(scheduleRender)
 	elseif child == indexCollectionFolder then
 		bindIndexCollectionFolder(nil)
+		refreshIndexDisplayMetadata("index_collection_removed")
 		task.defer(scheduleRender)
 	elseif child == brainrotInventoryFolder then
 		bindBrainrotInventoryFolder(nil)
+		refreshIndexDisplayMetadata("brainrot_inventory_removed")
 		task.defer(scheduleRender)
 	elseif child == devilFruitStateFolder then
 		bindDevilFruitStateFolder(nil)

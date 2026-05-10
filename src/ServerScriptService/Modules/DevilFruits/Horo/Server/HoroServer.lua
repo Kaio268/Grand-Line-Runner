@@ -6,7 +6,7 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
-local BrainrotInteraction = require(Modules:WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Interaction"))
+local CrewInteraction = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local CorridorController = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushCorridorRunController"))
 local HoroAnimationController = require(script.Parent:WaitForChild("HoroAnimationController"))
@@ -1020,8 +1020,8 @@ local function dropCarriedRewards(state, dropPosition)
 		formatVector3(dropPosition)
 	)
 
-	local brainrotContext = BrainrotInteraction.GetActiveContext()
-	local droppedBrainrot = BrainrotInteraction.DropHeldAtPosition(brainrotContext, player, nil, dropPosition)
+	local brainrotContext = CrewInteraction.GetActiveContext()
+	local droppedBrainrot = CrewInteraction.DropHeldAtPosition(brainrotContext, player, nil, dropPosition)
 	if droppedBrainrot then
 		droppedAny = true
 	end
@@ -1391,8 +1391,8 @@ local function tryPickupReward(state)
 		return true, "major_reward"
 	end
 
-	local brainrotContext = BrainrotInteraction.GetActiveContext()
-	local claimedBrainrot = BrainrotInteraction.TryCarryNearPosition(
+	local brainrotContext = CrewInteraction.GetActiveContext()
+	local claimedBrainrot = CrewInteraction.TryCarryNearPosition(
 		brainrotContext,
 		state.Player,
 		nil,

@@ -15,10 +15,11 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local App = require(UiFolder:WaitForChild("App"))
 
-local Brainrots = require(Modules:WaitForChild("Configs"):WaitForChild("Brainrots"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Brainrots = CrewCatalog.GetLegacyConfig()
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local BrainrotQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
+local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
@@ -29,16 +30,21 @@ local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
-local snapshotRemote = ReplicatedStorage:WaitForChild("InventorySnapshotRequest", 15)
+local snapshotRemote = ReplicatedStorage:WaitForChild("CrewMemberInventorySnapshotRequest", 15)
 if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
-	warn("[INV][SNAPSHOT][CLIENT] InventorySnapshotRequest is not a RemoteFunction")
+	warn("[INV][SNAPSHOT][CLIENT] Inventory snapshot request remote is not a RemoteFunction")
 	snapshotRemote = nil
 end
-local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
+local incomeStatusDisplayMetadataRemote = ReplicatedStorage:WaitForChild("IncomeStatusDisplayMetadataRequest", 15)
+if incomeStatusDisplayMetadataRemote and not incomeStatusDisplayMetadataRemote:IsA("RemoteFunction") then
+	warn("[INCOME][STATUS][CLIENT] IncomeStatusDisplayMetadataRequest is not a RemoteFunction")
+	incomeStatusDisplayMetadataRemote = nil
+end
+local equipRemote = ReplicatedStorage:WaitForChild("CrewMemberEquipToggleRemote", 15)
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local titleEquipRemote = remotesFolder:WaitForChild("TitleEquipRequest")
 local shipUpgradeResultRemote = remotesFolder:WaitForChild("ShipUpgradeResultRemote")
-local brainrotQuickSlotsRequestRemote = remotesFolder:WaitForChild("BrainrotQuickSlotsRequest")
+local crewQuickSlotsRequestRemote = remotesFolder:WaitForChild("CrewMemberQuickSlotsRequest", 15)
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactInventoryRoot"
@@ -68,7 +74,11 @@ local RARITY_ORDER = {
 	Omega = 9,
 }
 
-local BRAINROT_QUICK_ACCENT = Color3.fromRGB(93, 203, 200)
+local CREW_QUICK_ACCENT = Color3.fromRGB(93, 203, 200)
+
+local function getCrewInfo(name)
+	return CrewCatalog.GetInfoById(name) or Brainrots[name]
+end
 
 local CATEGORY_DEFS = {
 	Chests = {
@@ -161,6 +171,7 @@ local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
 local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
 local INVENTORY_SNAPSHOT_DEBUG = true
+local INCOME_STATUS_METADATA_RETRY_SECONDS = 3
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
@@ -326,6 +337,44 @@ local function clearSnapshotOwnedItems()
 	end
 end
 
+local function getEntryDisplayMetadata(entry)
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+
+	local metadata = {}
+	local displayName = tostring(entry.DisplayName or entry.displayName or "")
+	if displayName ~= "" then
+		metadata.displayName = displayName
+	end
+
+	local rarity = tostring(entry.Rarity or entry.rarity or entry.RarityLabel or entry.rarityLabel or "")
+	if rarity ~= "" then
+		metadata.rarity = rarity
+	end
+
+	local render = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
+	if render ~= "" then
+		metadata.render = render
+	end
+
+	if metadata.displayName ~= nil or metadata.rarity ~= nil or metadata.render ~= nil then
+		return metadata
+	end
+	return nil
+end
+
+local function applyDisplayMetadataToState(state, metadata)
+	if typeof(state) ~= "table" or typeof(metadata) ~= "table" then
+		return state
+	end
+
+	state.displayName = metadata.displayName
+	state.rarity = metadata.rarity
+	state.render = metadata.render
+	return state
+end
+
 local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 	if typeof(entries) ~= "table" then
 		return 0
@@ -339,11 +388,12 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
 				local key = kind .. "|" .. name
 				ensureAcquired(key)
-				itemState[key] = {
+				local nextState = {
 					kind = kind,
 					name = name,
 					qty = quantity,
 				}
+				itemState[key] = applyDisplayMetadataToState(nextState, getEntryDisplayMetadata(entry))
 				applied += 1
 			end
 		end
@@ -365,7 +415,7 @@ local function applyInventorySnapshot(snapshot)
 	clearSnapshotOwnedItems()
 
 	local brainrotCount = applyQuantitySnapshotEntries(snapshot.Brainrots, "Brainrot", function(name)
-		return Brainrots[name] ~= nil
+		return getCrewInfo(name) ~= nil
 	end)
 
 	local devilFruitCount = 0
@@ -450,7 +500,7 @@ local function getResourceInfo(resourceKey)
 	}
 end
 
-local function getRarityLabel(kind, name)
+local function getRarityLabel(kind, name, state)
 	if kind == "Chest" then
 		return ChestUtils.GetRarityLabel(name)
 	end
@@ -466,7 +516,10 @@ local function getRarityLabel(kind, name)
 	end
 
 	if kind == "Brainrot" then
-		local brainrot = Brainrots[name]
+		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
+			return state.rarity
+		end
+		local brainrot = getCrewInfo(name)
 		return brainrot and tostring(brainrot.Rarity or "") or ""
 	end
 
@@ -478,9 +531,9 @@ local function getRarityLabel(kind, name)
 	return ""
 end
 
-local function getItemSortRank(kind, name)
+local function getItemSortRank(kind, name, state)
 	if kind == "Brainrot" or kind == "DevilFruit" then
-		return RARITY_ORDER[getRarityLabel(kind, name)] or 0
+		return RARITY_ORDER[getRarityLabel(kind, name, state)] or 0
 	end
 
 	if kind == "Chest" then
@@ -502,8 +555,9 @@ local function getItemSortRank(kind, name)
 end
 
 local function getBrainrotLevelForStand(standName)
-	local standsLevels = player:FindFirstChild("StandsLevels")
-	local levelValue = standsLevels and standsLevels:FindFirstChild(tostring(standName))
+	local crewMemberIncome = player:FindFirstChild("CrewMemberIncome")
+	local standFolder = crewMemberIncome and crewMemberIncome:FindFirstChild(tostring(standName))
+	local levelValue = standFolder and standFolder:FindFirstChild("StandLevel")
 	return math.max(1, math.floor(tonumber(levelValue and levelValue.Value) or 1))
 end
 
@@ -520,7 +574,7 @@ local function getClientShipUpgradeLevel()
 end
 
 local function getBrainrotIncomePerTick(standName, brainrotName)
-	local info = Brainrots[brainrotName]
+	local info = getCrewInfo(brainrotName)
 	local baseIncome = tonumber(info and info.Income) or 0
 	if baseIncome <= 0 then
 		return 0
@@ -537,7 +591,77 @@ local function getBrainrotIncomePerTick(standName, brainrotName)
 	return math.max(0, baseIncome * levelMultiplier * slotMultiplier)
 end
 
-local function getItemDisplayName(kind, name)
+local incomeStatusDisplayMetadata = nil
+local incomeStatusDisplayMetadataExpiresAt = 0
+local incomeStatusDisplayMetadataRequestInFlight = false
+local incomeStatusDisplayMetadataNextRefreshAt = 0
+
+local function getIncomeStatusDisplayMetadata(standName, brainrotName)
+	if typeof(incomeStatusDisplayMetadata) ~= "table" or os.clock() >= incomeStatusDisplayMetadataExpiresAt then
+		return nil
+	end
+
+	local descriptor = incomeStatusDisplayMetadata[tostring(standName or "")]
+	if typeof(descriptor) ~= "table" then
+		return nil
+	end
+	if descriptor.UsedCanonical ~= true then
+		return nil
+	end
+	if tostring(descriptor.LegacyIdentity or "") ~= tostring(brainrotName or "") then
+		return nil
+	end
+
+	local displayName = tostring(descriptor.DisplayName or "")
+	if displayName == "" then
+		return nil
+	end
+
+	return descriptor
+end
+
+local function refreshIncomeStatusDisplayMetadata(reason, force)
+	if incomeStatusDisplayMetadataRequestInFlight or not incomeStatusDisplayMetadataRemote or destroyed then
+		return
+	end
+
+	local now = os.clock()
+	if force ~= true and now < incomeStatusDisplayMetadataNextRefreshAt then
+		return
+	end
+
+	incomeStatusDisplayMetadataNextRefreshAt = now + INCOME_STATUS_METADATA_RETRY_SECONDS
+	incomeStatusDisplayMetadataRequestInFlight = true
+
+	task.spawn(function()
+		local ok, response = pcall(function()
+			return incomeStatusDisplayMetadataRemote:InvokeServer(reason or "captain_log")
+		end)
+		incomeStatusDisplayMetadataRequestInFlight = false
+
+		if destroyed then
+			return
+		end
+
+		if not ok or typeof(response) ~= "table" or response.Ready ~= true or typeof(response.Metadata) ~= "table" then
+			incomeStatusDisplayMetadata = nil
+			incomeStatusDisplayMetadataExpiresAt = 0
+			task.delay(INCOME_STATUS_METADATA_RETRY_SECONDS, function()
+				refreshIncomeStatusDisplayMetadata("retry", true)
+			end)
+			return
+		end
+
+		incomeStatusDisplayMetadata = response.Metadata
+		local cacheSeconds = math.clamp(tonumber(response.CacheSeconds) or 15, 1, 60)
+		incomeStatusDisplayMetadataExpiresAt = os.clock() + cacheSeconds
+		if scheduleRender then
+			scheduleRender()
+		end
+	end)
+end
+
+local function getItemDisplayName(kind, name, state)
 	if kind == "Chest" then
 		return ChestUtils.GetDisplayName(name or "Chest")
 	end
@@ -556,11 +680,14 @@ local function getItemDisplayName(kind, name)
 	end
 
 	if kind == "Brainrot" then
-		local brainrot = Brainrots[name]
+		if state and typeof(state.displayName) == "string" and state.displayName ~= "" then
+			return state.displayName
+		end
+		local brainrot = getCrewInfo(name)
 		if brainrot and brainrot.DisplayName then
 			return tostring(brainrot.DisplayName)
 		end
-		return tostring(name or "Brainrot")
+		return tostring(name or "Crewmate")
 	end
 
 	if kind == "Gear" then
@@ -581,15 +708,15 @@ local function compareInventoryKeys(a, b)
 		return tostring(a) < tostring(b)
 	end
 
-	local rankA = getItemSortRank(stateA.kind, stateA.name)
-	local rankB = getItemSortRank(stateB.kind, stateB.name)
+	local rankA = getItemSortRank(stateA.kind, stateA.name, stateA)
+	local rankB = getItemSortRank(stateB.kind, stateB.name, stateB)
 	if rankA ~= rankB then
 		return rankA > rankB
 	end
 
 	if stateA.kind == stateB.kind and stateA.kind == "Brainrot" then
-		local nameA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name) or ""))
-		local nameB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name) or ""))
+		local nameA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name, stateA) or ""))
+		local nameB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name, stateB) or ""))
 		if nameA ~= nameB then
 			return nameA < nameB
 		end
@@ -617,8 +744,8 @@ local function compareInventoryKeys(a, b)
 		return quantityA > quantityB
 	end
 
-	local displayA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name) or ""))
-	local displayB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name) or ""))
+	local displayA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name, stateA) or ""))
+	local displayB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name, stateB) or ""))
 	if displayA ~= displayB then
 		return displayA < displayB
 	end
@@ -737,7 +864,7 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	return lines
 end
 
-local function getDisplayName(kind, name)
+local function getDisplayName(kind, name, state)
 	if kind == "Chest" then
 		return ChestUtils.GetDisplayName(name)
 	end
@@ -751,10 +878,14 @@ local function getDisplayName(kind, name)
 		return fruit and fruit.DisplayName or tostring(name)
 	end
 
+	if kind == "Brainrot" then
+		return getItemDisplayName(kind, name, state)
+	end
+
 	return tostring(name)
 end
 
-local function getSubtitle(kind, name)
+local function getSubtitle(kind, name, state)
 	if kind == "Chest" then
 		return tostring(name) .. " Chest"
 	end
@@ -769,8 +900,11 @@ local function getSubtitle(kind, name)
 	end
 
 	if kind == "Brainrot" then
-		local brainrot = Brainrots[name]
-		return brainrot and tostring(brainrot.Rarity or "Brainrot") or "Brainrot"
+		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
+			return state.rarity
+		end
+		local brainrot = getCrewInfo(name)
+		return brainrot and tostring(brainrot.Rarity or "Crewmate") or "Crewmate"
 	end
 
 	if kind == "Gear" then
@@ -781,9 +915,12 @@ local function getSubtitle(kind, name)
 	return ""
 end
 
-local function getIcon(kind, name)
+local function getIcon(kind, name, state)
 	if kind == "Brainrot" then
-		local brainrot = Brainrots[name]
+		if state and typeof(state.render) == "string" and state.render ~= "" then
+			return state.render
+		end
+		local brainrot = getCrewInfo(name)
 		return brainrot and brainrot.Render or ""
 	end
 
@@ -797,7 +934,7 @@ end
 
 local function getAccentColor(kind, name, state)
 	if kind == "Brainrot" or kind == "DevilFruit" then
-		return RARITY_COLORS[getSubtitle(kind, name)] or Color3.fromRGB(93, 203, 200)
+		return RARITY_COLORS[getSubtitle(kind, name, state)] or Color3.fromRGB(93, 203, 200)
 	end
 
 	if kind == "Chest" then
@@ -842,15 +979,15 @@ local function readChildValue(parent, childName)
 	return nil
 end
 
-local function readBrainrotQuickSlots()
-	local slotsFolder = player:FindFirstChild("BrainrotQuickSlots") or player:FindFirstChild("BrainrotStorage")
+local function readCrewQuickSlots()
+	local slotsFolder = player:FindFirstChild("CrewMemberQuickSlots")
 	local maxSlots = math.max(
-		BrainrotQuickSlotConfig.DefaultUnlockedSlots,
-		math.floor(tonumber(readChildValue(slotsFolder, "MaxSlots")) or BrainrotQuickSlotConfig.MaxSlots)
+		CrewQuickSlotConfig.DefaultUnlockedSlots,
+		math.floor(tonumber(readChildValue(slotsFolder, "MaxSlots")) or CrewQuickSlotConfig.MaxSlots)
 	)
-	maxSlots = math.min(maxSlots, BrainrotQuickSlotConfig.MaxSlots)
+	maxSlots = math.min(maxSlots, CrewQuickSlotConfig.MaxSlots)
 
-	local unlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(readChildValue(slotsFolder, "UnlockedSlots"))
+	local unlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(readChildValue(slotsFolder, "UnlockedSlots"))
 	unlockedSlots = math.min(unlockedSlots, maxSlots)
 
 	return {
@@ -859,7 +996,7 @@ local function readBrainrotQuickSlots()
 	}
 end
 
-local function countBrainrotItems(brainrotKeys)
+local function countCrewItems(brainrotKeys)
 	local count = 0
 	for _, key in ipairs(brainrotKeys or {}) do
 		local state = itemState[key]
@@ -929,7 +1066,7 @@ local function readPlayerShipIncomeMultiplier(rebirths)
 	return 1
 end
 
-local function readPlayerMaterials()
+local function _readPlayerMaterials()
 	local materialsFolder = player:FindFirstChild("Materials")
 	local metaMaterials = metaState and metaState.Materials or {}
 
@@ -1231,7 +1368,7 @@ local function buildCaptainLogData(query)
 
 	local shipFolder = player:FindFirstChild("Ship")
 	local slotsFolder = shipFolder and shipFolder:FindFirstChild("Slots")
-	local incomeFolder = player:FindFirstChild("IncomeBrainrots")
+	local incomeFolder = player:FindFirstChild("CrewMemberIncome")
 
 	if slotsFolder then
 		for _, child in ipairs(slotsFolder:GetChildren()) do
@@ -1244,13 +1381,18 @@ local function buildCaptainLogData(query)
 			standNames[child.Name] = true
 		end
 	end
+	refreshIncomeStatusDisplayMetadata("captain_log")
 
 	for standName in pairs(standNames) do
 		local ok, entry, collectable = pcall(function()
 			local slotFolder = slotsFolder and slotsFolder:FindFirstChild(standName)
 			local standIncomeFolder = incomeFolder and incomeFolder:FindFirstChild(standName)
 			local brainrotName = tostring(
-				readChildValue(slotFolder, "BrainrotName") or readChildValue(standIncomeFolder, "BrainrotName") or ""
+				readChildValue(standIncomeFolder, "LegacyStorageName")
+					or readChildValue(standIncomeFolder, "CrewMemberName")
+					or readChildValue(standIncomeFolder, "BrainrotName")
+					or readChildValue(slotFolder, "BrainrotName")
+					or ""
 			)
 
 			if brainrotName == "" then
@@ -1262,6 +1404,10 @@ local function buildCaptainLogData(query)
 			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
 			local subtitle = getSubtitle("Brainrot", brainrotName)
 			local displayName = getDisplayName("Brainrot", brainrotName)
+			local incomeDisplayMetadata = getIncomeStatusDisplayMetadata(standName, brainrotName)
+			if incomeDisplayMetadata ~= nil then
+				displayName = tostring(incomeDisplayMetadata.DisplayName)
+			end
 			local bounty = math.max(
 				0,
 				BountyResolver.ResolveBrainrotBounty({
@@ -1375,8 +1521,8 @@ local function buildLists()
 end
 
 local function buildEntry(key, state)
-	local displayName = getDisplayName(state.kind, state.name)
-	local subtitle = getSubtitle(state.kind, state.name)
+	local displayName = getDisplayName(state.kind, state.name, state)
+	local subtitle = getSubtitle(state.kind, state.name, state)
 	local isEquipped = tostring(state.name) == tostring(equippedName)
 		and (equippedKind == nil or tostring(state.kind) == tostring(equippedKind))
 	local kindFooter = if state.kind == "Resource"
@@ -1404,7 +1550,7 @@ local function buildEntry(key, state)
 		shortName = shortName(displayName),
 		subtitle = subtitle,
 		footer = kindFooter,
-		image = getIcon(state.kind, state.name),
+		image = getIcon(state.kind, state.name, state),
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
 		previewName = previewName,
@@ -1415,17 +1561,17 @@ local function buildEntry(key, state)
 	}
 end
 
-local function buildBrainrotQuickSlotEntry(slotIndex, locked)
-	local product = BrainrotQuickSlotConfig.GetSlotProduct(slotIndex) or {}
+local function buildCrewQuickSlotEntry(slotIndex, locked)
+	local product = CrewQuickSlotConfig.GetSlotProduct(slotIndex) or {}
 	local price = math.max(0, math.floor(tonumber(product.Price) or 0))
 	if locked then
 		return {
-			key = "BrainrotQuickSlotLocked|" .. tostring(slotIndex),
-			kind = "BrainrotQuickSlot",
+			key = "CrewQuickSlotLocked|" .. tostring(slotIndex),
+			kind = "CrewQuickSlot",
 			slotIndex = slotIndex,
 			displayName = "Quick Slot " .. tostring(slotIndex) .. " Locked",
 			shortName = "Locked",
-			subtitle = "Brainrot Quick Slot",
+			subtitle = "Crew Quick Slot",
 			footer = price > 0 and (tostring(price) .. " Robux") or "Locked",
 			fallbackText = "LOCK",
 			priceRobux = price,
@@ -1437,15 +1583,15 @@ local function buildBrainrotQuickSlotEntry(slotIndex, locked)
 	end
 
 	return {
-		key = "BrainrotQuickSlotEmpty|" .. tostring(slotIndex),
-		kind = "BrainrotQuickSlot",
+		key = "CrewQuickSlotEmpty|" .. tostring(slotIndex),
+		kind = "CrewQuickSlot",
 		slotIndex = slotIndex,
 		displayName = "Empty Quick Slot " .. tostring(slotIndex),
 		shortName = "Empty",
-		subtitle = "Brainrot Quick Slot",
+		subtitle = "Crew Quick Slot",
 		footer = "Available",
 		fallbackText = "+",
-		accentColor = BRAINROT_QUICK_ACCENT,
+		accentColor = CREW_QUICK_ACCENT,
 		interactive = false,
 		emptySlot = true,
 	}
@@ -1457,8 +1603,8 @@ local function buildRenderData()
 
 	local gearsList, chestsList, brainrotsList, devilFruitList, resourceList = buildLists()
 	local query = trim(uiState.query)
-	local brainrotQuickSlots = readBrainrotQuickSlots()
-	local brainrotCollectionCount = countBrainrotItems(brainrotsList)
+	local crewQuickSlots = readCrewQuickSlots()
+	local crewCollectionCount = countCrewItems(brainrotsList)
 
 	local brainrotHotbarEntries = {}
 	for _, key in ipairs(brainrotsList) do
@@ -1470,16 +1616,16 @@ local function buildRenderData()
 
 	local hotbarSlots = {}
 	keyboardHotbar = {}
-	for slotIndex = 1, brainrotQuickSlots.maxSlots do
+	for slotIndex = 1, crewQuickSlots.maxSlots do
 		local entry = brainrotHotbarEntries[slotIndex]
-		if slotIndex <= brainrotQuickSlots.unlockedSlots then
+		if slotIndex <= crewQuickSlots.unlockedSlots then
 			if entry then
 				entry.quickSlotIndex = slotIndex
 			else
-				entry = buildBrainrotQuickSlotEntry(slotIndex, false)
+				entry = buildCrewQuickSlotEntry(slotIndex, false)
 			end
 		else
-			entry = buildBrainrotQuickSlotEntry(slotIndex, true)
+			entry = buildCrewQuickSlotEntry(slotIndex, true)
 		end
 
 		hotbarSlots[#hotbarSlots + 1] = {
@@ -1597,13 +1743,13 @@ local function buildRenderData()
 			chests = chestCount,
 			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
-			brainrotCollectionCount = brainrotCollectionCount,
-			brainrotQuickSlotsUnlocked = brainrotQuickSlots.unlockedSlots,
-			brainrotQuickSlotsMax = brainrotQuickSlots.maxSlots,
+			brainrotCollectionCount = crewCollectionCount,
+			brainrotQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
+			brainrotQuickSlotsMax = crewQuickSlots.maxSlots,
 		},
 		activeView = uiState.activeView,
 		activeCategoryLabel = (CATEGORY_DEFS[uiState.activeCategory] or CATEGORY_DEFS.Chests).label,
-		brainrotQuickSlots = brainrotQuickSlots,
+		brainrotQuickSlots = crewQuickSlots,
 		filteredCount = #items,
 		totalCount = #activeKeys,
 		query = uiState.query,
@@ -1732,36 +1878,35 @@ end
 local function bindShipDataTracking()
 	disconnectAll(shipDataConnections)
 
-	local function watchRoot(root)
-		if not root then
+	local function watchRoot(dataRoot)
+		if not dataRoot then
 			return
 		end
 
-		for _, descendant in ipairs(root:GetDescendants()) do
+		for _, descendant in ipairs(dataRoot:GetDescendants()) do
 			if descendant:IsA("ValueBase") then
 				trackConnection(descendant:GetPropertyChangedSignal("Value"), scheduleRender, shipDataConnections)
 			end
 		end
 
-		trackConnection(root.DescendantAdded, function(descendant)
+		trackConnection(dataRoot.DescendantAdded, function(descendant)
 			if descendant:IsA("ValueBase") then
 				trackConnection(descendant:GetPropertyChangedSignal("Value"), scheduleRender, shipDataConnections)
 			end
 			scheduleRender()
 		end, shipDataConnections)
 
-		trackConnection(root.DescendantRemoving, function()
+		trackConnection(dataRoot.DescendantRemoving, function()
 			scheduleRender()
 		end, shipDataConnections)
 	end
 
 	local watchedRoots = {
 		Bounty = true,
-		BrainrotQuickSlots = true,
+		CrewMemberQuickSlots = true,
 		ChestInventory = true,
-		IncomeBrainrots = true,
+		CrewMemberIncome = true,
 		Inventory = true,
-		StandsLevels = true,
 		Ship = true,
 		Titles = true,
 		leaderstats = true,
@@ -1814,21 +1959,21 @@ local function bindChestInventoryTracking()
 		end, chestInventoryConnections)
 	end
 
-	local function watchChestInventoryRoot(root)
-		if not (root and root:IsA("Folder")) then
+	local function watchChestInventoryRoot(chestRoot)
+		if not (chestRoot and chestRoot:IsA("Folder")) then
 			return
 		end
 
-		for _, child in ipairs(root:GetChildren()) do
+		for _, child in ipairs(chestRoot:GetChildren()) do
 			watchChestFolder(child)
 		end
 
-		trackConnection(root.ChildAdded, function(child)
+		trackConnection(chestRoot.ChildAdded, function(child)
 			watchChestFolder(child)
 			scheduleRender()
 		end, chestInventoryConnections)
 
-		trackConnection(root.ChildRemoved, function()
+		trackConnection(chestRoot.ChildRemoved, function()
 			scheduleRender()
 		end, chestInventoryConnections)
 	end
@@ -1975,8 +2120,8 @@ local function render()
 				if shipUpgradeModal ~= nil then
 					return
 				end
-				if entry and entry.kind == "BrainrotQuickSlot" and entry.lockedSlot == true then
-					brainrotQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
+				if entry and entry.kind == "CrewQuickSlot" and entry.lockedSlot == true then
+					crewQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
 					return
 				end
 				if entry and entry.kind ~= "Resource" then
@@ -2133,8 +2278,8 @@ end
 local function activateSlot(slotNumber)
 	local entry = keyboardHotbar[slotNumber]
 	if entry then
-		if entry.kind == "BrainrotQuickSlot" and entry.lockedSlot == true then
-			brainrotQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
+		if entry.kind == "CrewQuickSlot" and entry.lockedSlot == true then
+			crewQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
 			return
 		end
 		equipRemote:FireServer(entry.kind, entry.name)
@@ -2208,13 +2353,14 @@ trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 	if kind == "Brainrot" then
 		local quantity = tonumber(value) or 0
 		local key = "Brainrot|" .. tostring(name)
+		local previous = itemState[key]
 		if quantity > 0 then
 			ensureAcquired(key)
-			itemState[key] = {
+			itemState[key] = applyDisplayMetadataToState({
 				kind = "Brainrot",
 				name = name,
 				qty = quantity,
-			}
+			}, previous)
 		else
 			itemState[key] = nil
 		end

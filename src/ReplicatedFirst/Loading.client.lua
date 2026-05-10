@@ -76,7 +76,7 @@ local RANDOM_LABEL_BUMP_SCALE = 1.035
 local MIN_LOADING_TIME = 10
 
 local RANDOM_MESSAGES = {
-	"[Click To Spawn Brainrot]",
+	"[Click To Spawn Crewmate]",
 	"[Generating Fun...]",
 	"[Warming Up The Server Hamsters]",
 	"[Spawning Pixels]",

@@ -21,7 +21,7 @@ local HitEffectService = {}
 local activeStatesByPlayer = {}
 local started = false
 local sliceServiceCache = nil
-local brainrotInteractionCache = nil
+local crewInteractionCache = nil
 local temporaryRagdollServiceCache = nil
 
 local function getTemporaryRagdollService()
@@ -62,27 +62,27 @@ local function getSliceService()
 	return service
 end
 
-local function getBrainrotInteraction()
-	if brainrotInteractionCache ~= nil then
-		return if brainrotInteractionCache == false then nil else brainrotInteractionCache
+local function getCrewInteraction()
+	if crewInteractionCache ~= nil then
+		return if crewInteractionCache == false then nil else crewInteractionCache
 	end
 
 	local ok, interaction = pcall(function()
 		return require(
 			ReplicatedStorage:WaitForChild("Modules")
 				:WaitForChild("Server")
-				:WaitForChild("Brainrot")
+				:WaitForChild("Crew")
 				:WaitForChild("Interaction")
 		)
 	end)
 
 	if not ok then
-		warn(string.format("[HitEffectService] Failed to resolve Brainrot Interaction: %s", tostring(interaction)))
-		brainrotInteractionCache = false
+		warn(string.format("[HitEffectService] Failed to resolve Crew Interaction: %s", tostring(interaction)))
+		crewInteractionCache = false
 		return nil
 	end
 
-	brainrotInteractionCache = interaction
+	crewInteractionCache = interaction
 	return interaction
 end
 
@@ -202,18 +202,18 @@ local function forceDropCarriedItems(player, dropPosition, effectName)
 		end
 	end
 
-	local brainrotInteraction = getBrainrotInteraction()
-	if brainrotInteraction
-		and typeof(brainrotInteraction.GetActiveContext) == "function"
-		and typeof(brainrotInteraction.DropHeldAtPosition) == "function"
+	local crewInteraction = getCrewInteraction()
+	if crewInteraction
+		and typeof(crewInteraction.GetActiveContext) == "function"
+		and typeof(crewInteraction.DropHeldAtPosition) == "function"
 	then
-		local context = brainrotInteraction.GetActiveContext()
+		local context = crewInteraction.GetActiveContext()
 		local isHoldingBrainrot = player:GetAttribute("CarriedBrainrot") ~= nil
-		if not isHoldingBrainrot and typeof(brainrotInteraction.HasHeld) == "function" then
-			isHoldingBrainrot = brainrotInteraction.HasHeld(context, player) == true
+		if not isHoldingBrainrot and typeof(crewInteraction.HasHeld) == "function" then
+			isHoldingBrainrot = crewInteraction.HasHeld(context, player) == true
 		end
 
-		if isHoldingBrainrot and brainrotInteraction.DropHeldAtPosition(context, player, nil, dropPosition) == true then
+		if isHoldingBrainrot and crewInteraction.DropHeldAtPosition(context, player, nil, dropPosition) == true then
 			droppedAny = true
 		end
 	end

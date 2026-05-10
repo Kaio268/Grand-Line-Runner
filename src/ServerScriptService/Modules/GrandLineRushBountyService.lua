@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local BountyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushBounty"))
 local Resolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushBountyResolver"))
+local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 
 local Service = {}
 
@@ -92,7 +93,7 @@ function Service.GetBreakdown(player, brainrotInventory)
 		end
 	end
 
-	local inventory = brainrotInventory or DataManager:GetValue(player, "BrainrotInventory")
+	local inventory = brainrotInventory or CrewInstanceService.GetCrewInventory(player)
 	local lifetimeExtraction = DataManager:GetValue(player, "Bounty.LifetimeExtraction")
 	return Resolver.BuildBreakdown(inventory, lifetimeExtraction)
 end
@@ -103,7 +104,7 @@ function Service.RefreshPlayerBounty(player, brainrotInventory)
 	end
 
 	local breakdown = Resolver.BuildBreakdown(
-		brainrotInventory or DataManager:GetValue(player, "BrainrotInventory"),
+		brainrotInventory or CrewInstanceService.GetCrewInventory(player),
 		DataManager:GetValue(player, "Bounty.LifetimeExtraction")
 	)
 	local leaderstatKey = tostring(BountyConfig.Display.LeaderstatKey or "Bounty")

@@ -12,6 +12,9 @@ local playerGui = player:WaitForChild("PlayerGui")
 local hud = playerGui:WaitForChild("HUD")
 local leaving = hud:WaitForChild("Leaving")
 local leavingInfo = hud:WaitForChild("LeavingInfo")
+local LEAVING_REWARD_COPY = "Play for 5 min and get a free Crewmate"
+local LEGACY_LEAVING_REWARD_COPY = "Play for 5 min and get free " .. "Brain" .. "rot"
+local watchedLeavingTextObjects = {}
 
 local gradientFolder = leaving:WaitForChild("Gradient")
 local g1 = gradientFolder:WaitForChild("1")
@@ -19,6 +22,35 @@ local uiGradient = g1:IsA("UIGradient") and g1 or g1:FindFirstChildOfClass("UIGr
 
 local letsDoIt = leaving:WaitForChild("LetsDoIt")
 local timeLabel = leavingInfo:WaitForChild("Time")
+
+local function patchLeavingTextObject(descendant)
+	if not (descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox")) then
+		return
+	end
+
+	if descendant.Text == LEGACY_LEAVING_REWARD_COPY then
+		descendant.Text = LEAVING_REWARD_COPY
+	end
+
+	if watchedLeavingTextObjects[descendant] then
+		return
+	end
+	watchedLeavingTextObjects[descendant] = true
+
+	descendant:GetPropertyChangedSignal("Text"):Connect(function()
+		if descendant.Text == LEGACY_LEAVING_REWARD_COPY then
+			descendant.Text = LEAVING_REWARD_COPY
+		end
+	end)
+end
+
+local function normalizeLeavingCopy()
+	for _, descendant in ipairs(leaving:GetDescendants()) do
+		patchLeavingTextObject(descendant)
+	end
+end
+
+leaving.DescendantAdded:Connect(patchLeavingTextObject)
 
 local menuOpen = false
 local spinning = false
@@ -167,6 +199,7 @@ UserInputService.InputBegan:Connect(function(input)
 end)
 
 task.defer(function()
+	normalizeLeavingCopy()
 	hideAll()
 	if GuiService.MenuIsOpen ~= nil then
 		setMenuState(GuiService.MenuIsOpen)

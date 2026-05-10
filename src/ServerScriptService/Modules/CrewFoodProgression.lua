@@ -1,13 +1,173 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
-local BrainrotInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("BrainrotInstanceService"))
+-- Crew progression now owns the old food/level behavior. The economy/config keys
+-- still read Brainrots until the saved-data and balance migration is validated.
+local dataManagerModule = nil
+local function getDataManager()
+	if dataManagerModule == nil then
+		dataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+	end
+	return dataManagerModule
+end
+local DataManager = setmetatable({}, {
+	__index = function(_, key)
+		local value = getDataManager()[key]
+		if typeof(value) == "function" then
+			return function(_, ...)
+				return value(getDataManager(), ...)
+			end
+		end
+		return value
+	end,
+})
+local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
+local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
-local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
-local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local BrainrotsCfg = CrewCatalog.GetLegacyConfig()
+local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local Module = {}
+local CrewStorageModule = nil
+local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
+
+local function getCrewStorage()
+	if CrewStorageModule == nil then
+		CrewStorageModule = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStorage"))
+	end
+	return CrewStorageModule
+end
+
+local function cloneValue(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, child in pairs(value) do
+		copy[key] = cloneValue(child)
+	end
+	return copy
+end
+
+local function isProgressionWriteAuthorityEnabled()
+	local flags = getCrewStorage().GetShadowFlags()
+	return flags.CrewMemberProgressionWriteAuthorityEnabled == true, flags
+end
+
+local function updateProgressionAuthorityAudit(player, updates)
+	local audit = DataManager:GetValue(player, PROGRESSION_AUTHORITY_AUDIT_PATH)
+	if typeof(audit) ~= "table" then
+		audit = {}
+	else
+		audit = cloneValue(audit)
+	end
+
+	for key, value in pairs(if typeof(updates) == "table" then updates else {}) do
+		if key ~= "ClearKeys" then
+			audit[key] = value
+		end
+	end
+	for _, key in ipairs(if typeof(updates) == "table" and typeof(updates.ClearKeys) == "table" then updates.ClearKeys else {}) do
+		audit[tostring(key)] = nil
+	end
+	audit.UpdatedAt = os.time()
+	DataManager:TrySetValue(player, PROGRESSION_AUTHORITY_AUDIT_PATH, audit)
+	return audit
+end
+
+local function buildProgressionMutationSnapshot(player, sourcePath)
+	return {
+		Kind = "progression_write_authority",
+		SourcePath = tostring(sourcePath or ""),
+		PlayerUserId = player and player.UserId or 0,
+		PlaceId = game.PlaceId,
+		GameId = game.GameId,
+		CreatedAt = os.time(),
+		FoodInventory = cloneValue(DataManager:GetValue(player, "FoodInventory")),
+		Inventory = cloneValue(DataManager:GetValue(player, "Inventory")),
+		CrewMemberInventory = cloneValue(DataManager:GetValue(player, "CrewMemberInventory")),
+		CrewMemberIncome = cloneValue(DataManager:GetValue(player, "CrewMemberIncome")),
+		Audit = cloneValue(DataManager:GetValue(player, PROGRESSION_AUTHORITY_AUDIT_PATH)),
+	}
+end
+
+local function restoreProgressionMutationSnapshot(player, snapshot, reason)
+	if typeof(snapshot) ~= "table" then
+		return false, "snapshot_missing"
+	end
+	if snapshot.Kind ~= "progression_write_authority" then
+		return false, "snapshot_kind_mismatch"
+	end
+	if tonumber(snapshot.PlayerUserId) ~= (player and player.UserId or 0) then
+		return false, "snapshot_user_mismatch"
+	end
+	if tonumber(snapshot.PlaceId) ~= game.PlaceId or tonumber(snapshot.GameId) ~= game.GameId then
+		return false, "snapshot_environment_mismatch"
+	end
+
+	local writes = {}
+	local function write(path, value)
+		local ok, writeReason = DataManager:TrySetValue(player, path, cloneValue(value) or {})
+		writes[path] = ok == true
+		if ok ~= true then
+			return false, tostring(writeReason or "")
+		end
+		return true, nil
+	end
+
+	local ok, writeReason = write("FoodInventory", snapshot.FoodInventory)
+	if ok ~= true then
+		return false, "food_inventory:" .. tostring(writeReason)
+	end
+	ok, writeReason = write("Inventory", snapshot.Inventory)
+	if ok ~= true then
+		return false, "inventory:" .. tostring(writeReason)
+	end
+	ok, writeReason = write("CrewMemberInventory", snapshot.CrewMemberInventory)
+	if ok ~= true then
+		return false, "crew_member_inventory:" .. tostring(writeReason)
+	end
+	ok, writeReason = write("CrewMemberIncome", snapshot.CrewMemberIncome)
+	if ok ~= true then
+		return false, "crew_member_income:" .. tostring(writeReason)
+	end
+
+	updateProgressionAuthorityAudit(player, {
+		LastRollback = {
+			Reason = tostring(reason or ""),
+			Writes = writes,
+			CompletedAt = os.time(),
+		},
+		LastRollbackSnapshot = snapshot,
+	})
+	return true, nil
+end
+
+local function refreshCrewMemberShadow(_player, _reason)
+	-- Progression writes CrewMemberInventory/CrewMemberIncome directly now.
+	-- Legacy projection remains available through explicit migration tools.
+	return nil
+end
+
+function Module.RefreshProgressionShadow(player, reason)
+	return refreshCrewMemberShadow(player, tostring(reason or "food_progression"))
+end
+
+local function syncAssignedStandLevel(player, instanceData, level)
+	if typeof(instanceData) ~= "table" then
+		return false
+	end
+
+	local assignedStand = tostring(instanceData.AssignedStand or "")
+	if assignedStand == "" then
+		return false
+	end
+
+	local safeLevel = math.max(1, math.floor(tonumber(level) or tonumber(instanceData.Level) or 1))
+	return CrewStandIncomeAuthority.SetStandLevel(player, assignedStand, safeLevel, "food_progression_stand_level")
+end
 
 local function normalizeRarity(rawRarity)
 	local rarity = tostring(rawRarity or "Common")
@@ -50,97 +210,28 @@ local function getXPRequiredForLevel(rarity, level)
 	return math.max(1, math.floor(40 * multiplier + 0.5))
 end
 
-local function getVariantPrefix(variantKey)
-	local variant = (VariantCfg.Versions or {})[variantKey]
-	return tostring(variant and variant.Prefix or (variantKey and variantKey ~= "Normal" and (variantKey .. " ") or ""))
-end
-
-local function resolveInventoryStorageName(player, savedName)
-	if typeof(savedName) ~= "string" or savedName == "" then
-		return nil
-	end
-
-	if DataManager:GetValue(player, "Inventory." .. savedName .. ".Level") ~= nil
-		or DataManager:GetValue(player, "Inventory." .. savedName .. ".Quantity") ~= nil then
-		return savedName
-	end
-
-	local inventory = player:FindFirstChild("Inventory")
-	if not inventory then
-		return savedName
-	end
-
-	for _, child in ipairs(inventory:GetChildren()) do
-		if child:IsA("Folder") then
-			local baseValue = child:FindFirstChild("BaseName")
-			local variantValue = child:FindFirstChild("Variant")
-			local baseName = baseValue and baseValue:IsA("StringValue") and baseValue.Value or nil
-			local variantKey = variantValue and variantValue:IsA("StringValue") and variantValue.Value or "Normal"
-			if typeof(baseName) == "string" and baseName ~= "" then
-				if getVariantPrefix(variantKey) .. baseName == savedName then
-					return child.Name
-				end
+local function getVariantAndBaseName(fullName)
+	fullName = tostring(fullName or "")
+	for _, variantKey in ipairs(VariantCfg.Order or {}) do
+		if variantKey ~= "Normal" then
+			local variant = (VariantCfg.Versions or {})[variantKey]
+			local prefix = tostring(variant and variant.Prefix or (variantKey .. " "))
+			if prefix ~= "" and fullName:sub(1, #prefix) == prefix then
+				return variantKey, fullName:sub(#prefix + 1)
 			end
 		end
 	end
-
-	return savedName
+	return "Normal", fullName
 end
 
-local function ensureInventoryFolder(player, storageName)
-	local inventory = player:FindFirstChild("Inventory")
-	if not inventory then
-		inventory = Instance.new("Folder")
-		inventory.Name = "Inventory"
-		inventory.Parent = player
-	end
-
-	local entry = inventory:FindFirstChild(storageName)
-	if not entry then
-		entry = Instance.new("Folder")
-		entry.Name = storageName
-		entry.Parent = inventory
-	end
-
-	return entry
-end
-
-local function ensureNumberValue(parent, name, value)
-	local numberValue = parent:FindFirstChild(name)
-	if not numberValue or not numberValue:IsA("NumberValue") then
-		if numberValue then
-			numberValue:Destroy()
-		end
-		numberValue = Instance.new("NumberValue")
-		numberValue.Name = name
-		numberValue.Parent = parent
-	end
-	numberValue.Value = tonumber(value) or 0
-	return numberValue
-end
-
-local function ensureInventoryProgressValues(player, storageName, level, currentXP)
-	local entry = ensureInventoryFolder(player, storageName)
-	ensureNumberValue(entry, "Level", math.max(1, tonumber(level) or 1))
-	ensureNumberValue(entry, "CurrentXP", math.max(0, tonumber(currentXP) or 0))
-end
-
-local function getStoredRarity(player, storageName)
-	local stored = DataManager:GetValue(player, "Inventory." .. storageName .. ".Rarity")
-	if typeof(stored) == "string" and stored ~= "" then
-		return normalizeRarity(stored)
-	end
-
-	local info = BrainrotsCfg[storageName]
+local function getStoredRarity(_player, storageName)
+	local info = CrewCatalog.GetInfoById(storageName) or BrainrotsCfg[storageName]
 	if type(info) == "table" then
 		return normalizeRarity(info.Rarity)
 	end
 
-	local inventory = player:FindFirstChild("Inventory")
-	local entry = inventory and inventory:FindFirstChild(storageName)
-	local baseValue = entry and entry:FindFirstChild("BaseName")
-	local baseName = baseValue and baseValue:IsA("StringValue") and baseValue.Value or nil
-	local baseInfo = baseName and BrainrotsCfg[baseName] or nil
+	local _, baseName = getVariantAndBaseName(storageName)
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[baseName]
 	return normalizeRarity(baseInfo and baseInfo.Rarity or nil)
 end
 
@@ -209,7 +300,7 @@ function Module.GetXPRequiredForLevel(rarity, level)
 end
 
 function Module.GetProgress(player, brainrotName)
-	local instanceId, instanceData = BrainrotInstanceService.ResolveProgressTarget(player, brainrotName)
+	local instanceId, instanceData = CrewInstanceService.ResolveProgressTarget(player, brainrotName)
 	if not instanceData then
 		return nil
 	end
@@ -224,9 +315,11 @@ function Module.GetProgress(player, brainrotName)
 	level, currentXP = normalizeProgress(rarity, level, currentXP)
 
 	if rawLevel ~= level or rawCurrentXP ~= currentXP or tostring(instanceData.Rarity or "") ~= rarity then
-		local updated = BrainrotInstanceService.UpdateProgress(player, instanceId, level, currentXP)
+		local updated = CrewInstanceService.UpdateProgress(player, instanceId, level, currentXP)
 		if updated then
 			instanceData = updated
+			syncAssignedStandLevel(player, instanceData, level)
+			Module.RefreshProgressionShadow(player, "data_repair_progression")
 		end
 	end
 
@@ -367,6 +460,7 @@ end
 
 function Module.ApplyAutoFeed(player, brainrotName, options)
 	options = typeof(options) == "table" and options or {}
+	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
 
 	local progress = Module.GetProgress(player, brainrotName)
 	if not progress then
@@ -392,6 +486,21 @@ function Module.ApplyAutoFeed(player, brainrotName, options)
 		}
 	end
 
+	local snapshot = if progressionAuthorityEnabled then buildProgressionMutationSnapshot(player, "apply_auto_feed") else nil
+	if progressionAuthorityEnabled then
+		updateProgressionAuthorityAudit(player, {
+			LastRollbackSnapshot = snapshot,
+			LastMutation = {
+				SourcePath = "apply_auto_feed",
+				InstanceId = tostring(progress.InstanceId),
+				FoodsConsumed = plan.FoodsConsumed,
+				TotalXPConsumed = plan.TotalXPConsumed,
+				StartedAt = os.time(),
+			},
+			LastFailClosedReason = nil,
+		})
+	end
+
 	for stepIndex, stepData in ipairs(plan.ConsumptionSteps) do
 		local foodKey = stepData.FoodKey
 		local amountUsed = tonumber(stepData.AmountUsed) or 0
@@ -409,7 +518,47 @@ function Module.ApplyAutoFeed(player, brainrotName, options)
 		end
 	end
 
-	BrainrotInstanceService.UpdateProgress(player, progress.InstanceId, plan.LevelAfter, plan.CurrentXPAfter)
+	local updated = CrewInstanceService.UpdateProgress(player, progress.InstanceId, plan.LevelAfter, plan.CurrentXPAfter)
+	if not updated then
+		if progressionAuthorityEnabled then
+			local restoreOk, restoreReason = restoreProgressionMutationSnapshot(player, snapshot, "apply_auto_feed_progression_write_failed")
+			updateProgressionAuthorityAudit(player, {
+				LastFailClosedReason = "progression_write_failed",
+				LastRollbackRestoreOk = restoreOk,
+				LastRollbackRestoreReason = restoreReason,
+			})
+		end
+		return false, {
+			Error = "progression_write_failed",
+			Progress = progress,
+			Plan = plan,
+		}
+	end
+	if updated then
+		syncAssignedStandLevel(player, updated, plan.LevelAfter)
+		if options.DeferShadowRefresh ~= true then
+			refreshCrewMemberShadow(player, "food_progression")
+		end
+	end
+	if progressionAuthorityEnabled then
+		updateProgressionAuthorityAudit(player, {
+			LastMutation = {
+				SourcePath = "apply_auto_feed",
+				InstanceId = tostring(progress.InstanceId),
+				FoodsConsumed = plan.FoodsConsumed,
+				TotalXPConsumed = plan.TotalXPConsumed,
+				LevelAfter = plan.LevelAfter,
+				CurrentXPAfter = plan.CurrentXPAfter,
+				CompletedAt = os.time(),
+			},
+			ClearKeys = {
+				"LastFailClosedReason",
+				"LastFailClosedIssues",
+				"LastRollbackRestoreOk",
+				"LastRollbackRestoreReason",
+			},
+		})
+	end
 
 	plan.Progress = {
 		InstanceId = tostring(progress.InstanceId),
@@ -424,7 +573,9 @@ function Module.ApplyAutoFeed(player, brainrotName, options)
 	return true, plan
 end
 
-function Module.ApplyAutoFeedStep(player, brainrotName, expectedFoodKey)
+function Module.ApplyAutoFeedStep(player, brainrotName, expectedFoodKey, options)
+	options = typeof(options) == "table" and options or {}
+	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
 	local progress = Module.GetProgress(player, brainrotName)
 	if not progress then
 		return false, {
@@ -459,6 +610,22 @@ function Module.ApplyAutoFeedStep(player, brainrotName, expectedFoodKey)
 		}
 	end
 
+	local snapshot = if progressionAuthorityEnabled then buildProgressionMutationSnapshot(player, "apply_auto_feed_step") else nil
+	if progressionAuthorityEnabled then
+		updateProgressionAuthorityAudit(player, {
+			LastRollbackSnapshot = snapshot,
+			LastMutation = {
+				SourcePath = "apply_auto_feed_step",
+				InstanceId = tostring(progress.InstanceId),
+				FoodKey = tostring(stepPreview.FoodKey),
+				AmountUsed = tonumber(stepPreview.AmountUsed) or 0,
+				XPGained = tonumber(stepPreview.XPGained) or 0,
+				StartedAt = os.time(),
+			},
+			LastFailClosedReason = nil,
+		})
+	end
+
 	DataManager:AddValue(player, "FoodInventory." .. stepPreview.FoodKey, -stepPreview.AmountUsed)
 	foodInventory[stepPreview.FoodKey] = math.max(0, math.floor(tonumber(foodInventory[stepPreview.FoodKey]) or 0) - stepPreview.AmountUsed)
 
@@ -468,7 +635,48 @@ function Module.ApplyAutoFeedStep(player, brainrotName, expectedFoodKey)
 		math.max(0, progress.CurrentXP) + stepPreview.XPGained
 	)
 
-	BrainrotInstanceService.UpdateProgress(player, progress.InstanceId, levelAfter, currentXPAfter)
+	local updated = CrewInstanceService.UpdateProgress(player, progress.InstanceId, levelAfter, currentXPAfter)
+	if not updated then
+		if progressionAuthorityEnabled then
+			local restoreOk, restoreReason = restoreProgressionMutationSnapshot(player, snapshot, "apply_auto_feed_step_progression_write_failed")
+			updateProgressionAuthorityAudit(player, {
+				LastFailClosedReason = "progression_write_failed",
+				LastRollbackRestoreOk = restoreOk,
+				LastRollbackRestoreReason = restoreReason,
+			})
+		end
+		return false, {
+			Error = "progression_write_failed",
+			Progress = progress,
+			Step = stepPreview,
+		}
+	end
+	if updated then
+		syncAssignedStandLevel(player, updated, levelAfter)
+		if options.DeferShadowRefresh ~= true then
+			refreshCrewMemberShadow(player, "food_progression")
+		end
+	end
+	if progressionAuthorityEnabled then
+		updateProgressionAuthorityAudit(player, {
+			LastMutation = {
+				SourcePath = "apply_auto_feed_step",
+				InstanceId = tostring(progress.InstanceId),
+				FoodKey = tostring(stepPreview.FoodKey),
+				AmountUsed = tonumber(stepPreview.AmountUsed) or 0,
+				XPGained = tonumber(stepPreview.XPGained) or 0,
+				LevelAfter = levelAfter,
+				CurrentXPAfter = currentXPAfter,
+				CompletedAt = os.time(),
+			},
+			ClearKeys = {
+				"LastFailClosedReason",
+				"LastFailClosedIssues",
+				"LastRollbackRestoreOk",
+				"LastRollbackRestoreReason",
+			},
+		})
+	end
 
 	return true, {
 		AppliedStep = stepPreview,

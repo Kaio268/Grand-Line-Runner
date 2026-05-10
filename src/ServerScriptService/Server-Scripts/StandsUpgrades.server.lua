@@ -1,34 +1,33 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local remote = remotes:WaitForChild("StandUpgradeRemote")
+local CREW_MEMBER_STAND_UPGRADE_REMOTE_NAME = "CrewMemberStandUpgradeRemote"
+local CREW_MEMBER_STAND_UPGRADE_PREVIEW_REMOTE_NAME = "CrewMemberStandUpgradePreviewRemote"
+local CREW_MEMBER_STAND_UPGRADE_RESULT_REMOTE_NAME = "CrewMemberStandUpgradeStepResultRemote"
 
-local previewRemote = remotes:FindFirstChild("StandUpgradePreviewRemote")
-if previewRemote and not previewRemote:IsA("RemoteFunction") then
-	previewRemote:Destroy()
-	previewRemote = nil
-end
-if not previewRemote then
-	previewRemote = Instance.new("RemoteFunction")
-	previewRemote.Name = "StandUpgradePreviewRemote"
-	previewRemote.Parent = remotes
-end
-
-local resultRemote = remotes:FindFirstChild("StandUpgradeStepResultRemote")
-if resultRemote and not resultRemote:IsA("RemoteEvent") then
-	resultRemote:Destroy()
-	resultRemote = nil
-end
-if not resultRemote then
-	resultRemote = Instance.new("RemoteEvent")
-	resultRemote.Name = "StandUpgradeStepResultRemote"
-	resultRemote.Parent = remotes
+local function getOrCreateRemote(remoteName, className)
+	local remote = remotes:FindFirstChild(remoteName)
+	if remote and not remote:IsA(className) then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new(className)
+		remote.Name = remoteName
+		remote.Parent = remotes
+	end
+	return remote
 end
 
-local BrainrotFoodProgression = require(game.ServerScriptService.Modules:WaitForChild("BrainrotFoodProgression"))
-local BrainrotInstanceService = require(game.ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local crewMemberRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_REMOTE_NAME, "RemoteEvent")
+local crewMemberPreviewRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_PREVIEW_REMOTE_NAME, "RemoteFunction")
+local crewMemberResultRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_RESULT_REMOTE_NAME, "RemoteEvent")
+
+local CrewFoodProgression = require(game.ServerScriptService.Modules:WaitForChild("CrewFoodProgression"))
+local CrewInstanceService = require(game.ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local CrewMemberCanonicalReadGate = require(game.ServerScriptService.Modules:WaitForChild("CrewMemberCanonicalReadGate"))
+local CrewStandIncomeAuthority = require(game.ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 local GrandLineRushVerticalSliceService = require(game.ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
-local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
 local SUCCESS_COLOR = Color3.fromRGB(92, 230, 126)
@@ -69,18 +68,76 @@ end
 
 local function getFailureMessage(errorCode)
 	if errorCode == "brainrot_max_level" then
-		return "This brainrot is already max level."
+		return "This Crewmate is already max level."
 	end
 	if errorCode == "not_enough_food" then
-		return "Not enough food to upgrade this brainrot."
+		return "Not enough food to upgrade this Crewmate."
 	end
 	if errorCode == "step_changed" then
 		return "The next food changed. Please confirm the new step."
 	end
 	if errorCode == "missing_brainrot" then
-		return "Brainrot progress could not be loaded."
+		return "Crewmate progress could not be loaded."
 	end
-	return "Unable to use food on this brainrot right now."
+	return "Unable to use food on this Crewmate right now."
+end
+
+local function getCanonicalFoodStatusDisplayNameForPopup(player, context)
+	local legacyIdentity = tostring(context and context.BrainrotName or "")
+	if legacyIdentity == "" then
+		return nil
+	end
+
+	local _, result = CrewMemberCanonicalReadGate.ResolveFoodStatusDisplayName(player, legacyIdentity, {
+		Player = player,
+	})
+	if typeof(result) ~= "table" then
+		return nil
+	end
+	if result.UsedCanonical ~= true or result.IsAuthoritative == true then
+		return nil
+	end
+	if tostring(result.Path or "") ~= CrewMemberCanonicalReadGate.Paths.GameplayHelperFoodStatusDisplayName then
+		return nil
+	end
+
+	local displayName = tostring(result.Value or "")
+	if displayName == "" then
+		return nil
+	end
+	return displayName
+end
+
+local function getFoodStatusReadAuthorityDisplayNameForPopup(player, context, progress, appliedStep)
+	local legacyIdentity = tostring(context and context.BrainrotName or "")
+	if legacyIdentity == "" then
+		return nil
+	end
+
+	local _, result = CrewMemberCanonicalReadGate.ResolveFoodStatusReadAuthority(player, {
+		StandName = tostring(context and context.StandName or ""),
+		LegacyIdentity = legacyIdentity,
+		InstanceId = tostring(context and context.BrainrotInstanceId or ""),
+		Progress = progress,
+		AppliedStep = appliedStep,
+	}, {
+		Player = player,
+	})
+	if typeof(result) ~= "table" then
+		return nil
+	end
+	if result.UsedCanonical ~= true or result.IsMutationAuthority == true then
+		return nil
+	end
+	if tostring(result.Path or "") ~= CrewMemberCanonicalReadGate.Paths.ReadAuthorityFoodStatus then
+		return nil
+	end
+
+	local displayName = tostring(result.DisplayName or "")
+	if displayName == "" then
+		return nil
+	end
+	return displayName
 end
 
 local function updateStandGui(player, standName, progress)
@@ -111,7 +168,7 @@ local function updateStandGui(player, standName, progress)
 			price.Text = "Max Level"
 		else
 			local text = string.format("XP: %d / %d", math.max(0, progress.CurrentXP), math.max(0, progress.NextLevelXP))
-			if BrainrotFoodProgression.GetTotalFoodCount(player) > 0 then
+			if CrewFoodProgression.GetTotalFoodCount(player) > 0 then
 				text ..= " | Auto-feed"
 			else
 				text ..= " | No Food"
@@ -126,20 +183,21 @@ local function resolveUpgradeContext(player, standName)
 		return false, buildFailurePayload("", "invalid_stand", "Stand could not be identified.")
 	end
 
-	local brainrotName = DataManager:GetValue(player, "IncomeBrainrots." .. standName .. ".BrainrotName")
+	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
+	local brainrotName = standData and standData.BrainrotName
 	if typeof(brainrotName) ~= "string" or brainrotName == "" then
-		return false, buildFailurePayload(standName, "missing_brainrot", "Place a brainrot on this stand first.")
+		return false, buildFailurePayload(standName, "missing_brainrot", "Place a Crewmate on this stand first.")
 	end
 
-	local brainrotInstanceId = BrainrotInstanceService.GetStandInstanceId(player, standName)
+	local brainrotInstanceId = CrewInstanceService.GetStandInstanceId(player, standName)
 	if brainrotInstanceId == "" then
-		brainrotInstanceId = BrainrotInstanceService.EnsureStandInstance(player, standName, brainrotName) or ""
+		brainrotInstanceId = CrewInstanceService.EnsureStandInstance(player, standName, brainrotName) or ""
 	end
 
 	local progressTarget = brainrotInstanceId ~= "" and brainrotInstanceId or brainrotName
-	local progress = BrainrotFoodProgression.GetProgress(player, progressTarget)
+	local progress = CrewFoodProgression.GetProgress(player, progressTarget)
 	if not progress then
-		return false, buildFailurePayload(standName, "missing_brainrot", "Brainrot progress could not be loaded.")
+		return false, buildFailurePayload(standName, "missing_brainrot", "Crewmate progress could not be loaded.")
 	end
 
 	return true, {
@@ -153,7 +211,6 @@ end
 
 local function syncStandStateForProgress(player, fallbackStandName, progress)
 	local playerGui = player:FindFirstChild("PlayerGui")
-	local standsLevels = player:FindFirstChild("StandsLevels")
 	local targetInstanceId = tostring(progress.InstanceId or "")
 	local updatedAnyStand = false
 
@@ -161,13 +218,9 @@ local function syncStandStateForProgress(player, fallbackStandName, progress)
 		for _, gui in ipairs(playerGui:GetChildren()) do
 			if gui:IsA("SurfaceGui") and tonumber(gui.Name) then
 				local guiStandName = gui.Name
-				local guiBrainrotInstanceId = BrainrotInstanceService.GetStandInstanceId(player, guiStandName)
+				local guiBrainrotInstanceId = CrewInstanceService.GetStandInstanceId(player, guiStandName)
 				if guiBrainrotInstanceId == targetInstanceId then
-					local standLevel = standsLevels and standsLevels:FindFirstChild(guiStandName)
-					if standLevel and standLevel:IsA("NumberValue") then
-						standLevel.Value = progress.Level
-					end
-					DataManager:SetValue(player, "StandsLevels." .. guiStandName, progress.Level)
+					CrewStandIncomeAuthority.SetStandLevel(player, guiStandName, progress.Level, "stand_upgrade_progress_sync")
 					updateStandGui(player, guiStandName, progress)
 					updatedAnyStand = true
 				end
@@ -176,23 +229,23 @@ local function syncStandStateForProgress(player, fallbackStandName, progress)
 	end
 
 	if not updatedAnyStand then
-		local standLevel = standsLevels and standsLevels:FindFirstChild(fallbackStandName)
-		if standLevel and standLevel:IsA("NumberValue") then
-			standLevel.Value = progress.Level
-		end
-		DataManager:SetValue(player, "StandsLevels." .. fallbackStandName, progress.Level)
+		CrewStandIncomeAuthority.SetStandLevel(player, fallbackStandName, progress.Level, "stand_upgrade_progress_sync")
 		updateStandGui(player, fallbackStandName, progress)
 	end
 end
 
-previewRemote.OnServerInvoke = function(player, standNameInput)
+local function fireStepResult(player, payload)
+	crewMemberResultRemote:FireClient(player, payload)
+end
+
+local function buildUpgradePreview(player, standNameInput)
 	local standName = getStandName(standNameInput)
 	local ok, context = resolveUpgradeContext(player, standName)
 	if not ok then
 		return context
 	end
 
-	local previewOk, preview = BrainrotFoodProgression.GetNextAutoFeedStep(player, context.ProgressTarget)
+	local previewOk, preview = CrewFoodProgression.GetNextAutoFeedStep(player, context.ProgressTarget)
 	if not previewOk then
 		local progress = preview and preview.Progress or context.Progress
 		return buildFailurePayload(
@@ -212,7 +265,11 @@ previewRemote.OnServerInvoke = function(player, standNameInput)
 	}
 end
 
-remote.OnServerEvent:Connect(function(player, payload)
+crewMemberPreviewRemote.OnServerInvoke = function(player, standNameInput)
+	return buildUpgradePreview(player, standNameInput)
+end
+
+local function handleUpgradeRequest(player, payload)
 	local standName = getStandName(payload)
 	if standName == "" then
 		return
@@ -228,17 +285,20 @@ remote.OnServerEvent:Connect(function(player, payload)
 		if context.Message then
 			sendPopup(player, context.Message, ERROR_COLOR, true)
 		end
-		resultRemote:FireClient(player, context)
+		fireStepResult(player, context)
 		return
 	end
 
-	local success, result = BrainrotFoodProgression.ApplyAutoFeedStep(
+	local success, result = CrewFoodProgression.ApplyAutoFeedStep(
 		player,
 		context.ProgressTarget,
-		expectedFoodKey ~= "" and expectedFoodKey or nil
+		expectedFoodKey ~= "" and expectedFoodKey or nil,
+		{
+			DeferShadowRefresh = true,
+		}
 	)
 
-	local progress = success and result and result.Progress or BrainrotFoodProgression.GetProgress(player, context.ProgressTarget)
+	local progress = success and result and result.Progress or CrewFoodProgression.GetProgress(player, context.ProgressTarget)
 	if not progress then
 		return
 	end
@@ -256,26 +316,33 @@ remote.OnServerEvent:Connect(function(player, payload)
 
 		sendPopup(player, failurePayload.Message, ERROR_COLOR, true)
 		updateStandGui(player, standName, progress)
-		resultRemote:FireClient(player, failurePayload)
+		fireStepResult(player, failurePayload)
 		return
 	end
 
 	local appliedStep = result.AppliedStep
-	local appliedFoodName = tostring(appliedStep.FoodDisplayName or BrainrotFoodProgression.GetFoodDisplayName(appliedStep.FoodKey))
+	local appliedFoodName = tostring(appliedStep.FoodDisplayName or CrewFoodProgression.GetFoodDisplayName(appliedStep.FoodKey))
 
 	pushResourceState(player)
-	sendPopup(
-		player,
-		string.format("Used %dx %s (+%d XP).", appliedStep.AmountUsed, appliedFoodName, appliedStep.XPGained),
-		SUCCESS_COLOR,
-		false
-	)
-
 	syncStandStateForProgress(player, standName, progress)
+	CrewFoodProgression.RefreshProgressionShadow(player, "food_progression")
+
+	local foodStatusDisplayName = getFoodStatusReadAuthorityDisplayNameForPopup(player, context, progress, appliedStep)
+		or getCanonicalFoodStatusDisplayNameForPopup(player, context)
+	local foodUsedMessage = if foodStatusDisplayName ~= nil
+		then string.format(
+			"Used %dx %s on %s (+%d XP).",
+			appliedStep.AmountUsed,
+			appliedFoodName,
+			foodStatusDisplayName,
+			appliedStep.XPGained
+		)
+		else string.format("Used %dx %s (+%d XP).", appliedStep.AmountUsed, appliedFoodName, appliedStep.XPGained)
+	sendPopup(player, foodUsedMessage, SUCCESS_COLOR, false)
 
 	local continuePreview = nil
 	if progress.Level < progress.MaxLevel then
-		local nextPreviewOk, nextPreview = BrainrotFoodProgression.GetNextAutoFeedStep(player, context.ProgressTarget)
+		local nextPreviewOk, nextPreview = CrewFoodProgression.GetNextAutoFeedStep(player, context.ProgressTarget)
 		if nextPreviewOk then
 			continuePreview = nextPreview.Step
 			if continuePreview and tostring(continuePreview.FoodKey) ~= tostring(appliedStep.FoodKey) then
@@ -314,7 +381,7 @@ remote.OnServerEvent:Connect(function(player, payload)
 		end
 	end
 
-	resultRemote:FireClient(player, {
+	fireStepResult(player, {
 		Ok = true,
 		StandName = standName,
 		AppliedStep = appliedStep,
@@ -322,4 +389,8 @@ remote.OnServerEvent:Connect(function(player, payload)
 		LevelUps = result.LevelUps,
 		ContinuePreview = continuePreview,
 	})
+end
+
+crewMemberRemote.OnServerEvent:Connect(function(player, payload)
+	handleUpgradeRequest(player, payload)
 end)

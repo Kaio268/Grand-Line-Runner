@@ -8,7 +8,7 @@ local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
-local BrainrotQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
+local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 
 local ProfileMigrations = {}
 
@@ -223,13 +223,14 @@ function ProfileMigrations.Apply(data)
 	end
 
 	local indexCollection = ensureTable(data, "IndexCollection")
-	local discoveredBrainrots = ensureTable(indexCollection, "Brainrots")
+	local legacyDiscoveredBrainrots = if typeof(indexCollection.Brainrots) == "table" then indexCollection.Brainrots else nil
+	local discoveredCrewMembers = ensureTable(indexCollection, "CrewMembers")
 	local discoveredDevilFruits = ensureTable(indexCollection, "DevilFruits")
 
 	local function recordBrainrotDiscovered(storageName, baseName, variantKey)
 		local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
 		if itemId then
-			discoveredBrainrots[itemId] = true
+			discoveredCrewMembers[itemId] = true
 		end
 	end
 
@@ -255,6 +256,14 @@ function ProfileMigrations.Apply(data)
 	for fruitIdentifier, isDiscovered in pairs(discoveredDevilFruits) do
 		if isDiscovered == true then
 			recordDevilFruitDiscovered(fruitIdentifier)
+		end
+	end
+
+	if legacyDiscoveredBrainrots then
+		for itemId, isDiscovered in pairs(legacyDiscoveredBrainrots) do
+			if isDiscovered == true then
+				recordBrainrotDiscovered(itemId)
+			end
 		end
 	end
 
@@ -324,19 +333,16 @@ function ProfileMigrations.Apply(data)
 	brainrotInventory.ById = ensureTable(brainrotInventory, "ById")
 	brainrotInventory.Order = ensureTable(brainrotInventory, "Order")
 
-	local brainrotQuickSlots = ensureTable(data, "BrainrotQuickSlots")
-	if typeof(data.BrainrotStorage) == "table" then
-		local legacyUnlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(data.BrainrotStorage.UnlockedSlots)
-		local currentUnlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(brainrotQuickSlots.UnlockedSlots)
-		if legacyUnlockedSlots > currentUnlockedSlots then
-			brainrotQuickSlots.UnlockedSlots = legacyUnlockedSlots
-		end
-	end
-	brainrotQuickSlots.UnlockedSlots = BrainrotQuickSlotConfig.ClampUnlockedSlots(brainrotQuickSlots.UnlockedSlots)
-	brainrotQuickSlots.MaxSlots = BrainrotQuickSlotConfig.MaxSlots
-	if brainrotQuickSlots.UnlockedSlots > brainrotQuickSlots.MaxSlots then
-		brainrotQuickSlots.UnlockedSlots = brainrotQuickSlots.MaxSlots
-	end
+	local legacyBrainrotQuickSlots = data.BrainrotQuickSlots
+	local legacyUnlockedSlots = if typeof(legacyBrainrotQuickSlots) == "table"
+		then CrewQuickSlotConfig.ClampUnlockedSlots(legacyBrainrotQuickSlots.UnlockedSlots)
+		else CrewQuickSlotConfig.DefaultUnlockedSlots
+	local crewMemberQuickSlots = ensureTable(data, "CrewMemberQuickSlots")
+	local canonicalUnlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(crewMemberQuickSlots.UnlockedSlots)
+	local retainedUnlockedSlots = math.max(canonicalUnlockedSlots, legacyUnlockedSlots)
+	crewMemberQuickSlots.SchemaVersion = 1
+	crewMemberQuickSlots.UnlockedSlots = retainedUnlockedSlots
+	crewMemberQuickSlots.MaxSlots = CrewQuickSlotConfig.MaxSlots
 
 	local unopenedChests = ensureTable(data, "UnopenedChests")
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))

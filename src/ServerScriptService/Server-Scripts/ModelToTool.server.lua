@@ -1,12 +1,10 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local brainrotFolder = ReplicatedStorage:WaitForChild("BrainrotFolder")
-
--- ✅ Variant config (prefixy + foldery)
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Configs = Modules:WaitForChild("Configs")
-local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local CrewModules = Modules:WaitForChild("Crew")
+local CrewCatalog = require(CrewModules:WaitForChild("CrewCatalog"))
+local CrewRegistry = require(CrewModules:WaitForChild("CrewRegistry"))
 
 local function getInventory(player)
 	return player:FindFirstChild("Invnetory") or player:FindFirstChild("Inventory")
@@ -25,58 +23,19 @@ local function getItemTools(container, itemName)
 	return out
 end
 
--- ✅ wykrywa wariant + baseName po prefixach z configu
 local function getVariantAndBaseName(itemName)
-	itemName = tostring(itemName)
-
-	for _, vKey in ipairs(VariantCfg.Order or {}) do
-		if vKey ~= "Normal" then
-			local v = (VariantCfg.Versions or {})[vKey]
-			local prefix = tostring((v and v.Prefix) or (vKey .. " "))
-			if prefix ~= "" and itemName:sub(1, #prefix) == prefix then
-				local baseName = itemName:sub(#prefix + 1)
-				return vKey, baseName, v
-			end
-		end
-	end
-
-	return "Normal", itemName, (VariantCfg.Versions or {}).Normal
+	return CrewCatalog.ParseVariantId(itemName)
 end
 
--- ✅ znajduje template modelu dla itemName (obsługa wariantów)
 local function findTemplate(itemName)
-	local variantKey, baseName, v = getVariantAndBaseName(itemName)
-
-	-- 1) jeśli to wariant -> szukaj w folderze wariantu po baseName
-	if variantKey ~= "Normal" then
-		local folderName = (v and v.Folder) or variantKey -- np. "Golden", "Diamond"
-		local variantFolder = brainrotFolder:FindFirstChild(folderName)
-
-		if variantFolder and variantFolder:IsA("Folder") then
-			local t = variantFolder:FindFirstChild(baseName)
-			if t then
-				return t, variantKey, baseName
-			end
-			-- (opcjonalnie) gdyby ktoś nazwał model pełną nazwą wariantu
-			local t2 = variantFolder:FindFirstChild(itemName)
-			if t2 then
-				return t2, variantKey, baseName
-			end
-		end
+	local variantKey, baseName = getVariantAndBaseName(itemName)
+	local template, usedVariant = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
+	if template then
+		return template, usedVariant or variantKey, baseName
 	end
 
-	-- 2) fallback: szukaj normalnie
-	local direct = brainrotFolder:FindFirstChild(itemName)
-	if direct then
-		return direct, variantKey, baseName
-	end
-
-	local base = brainrotFolder:FindFirstChild(baseName)
-	if base then
-		return base, "Normal", baseName
-	end
-
-	return nil, variantKey, baseName
+	template, usedVariant = CrewRegistry.GetTemplateWithFallback(itemName, "Normal")
+	return template, usedVariant or variantKey, baseName
 end
 
 local function makeTool(itemName)
@@ -94,13 +53,12 @@ local function makeTool(itemName)
 	tool:SetAttribute("Variant", variantKey)
 	tool:SetAttribute("BaseName", baseName)
 
-	local function setupPart(p)
-		p.Anchored = false
-		p.CanCollide = false
-		p.Massless = true
+	local function setupPart(part)
+		part.Anchored = false
+		part.CanCollide = false
+		part.Massless = true
 	end
 
-	-- jeśli template jest częścią
 	if template:IsA("BasePart") then
 		local handle = template:Clone()
 		handle.Name = "Handle"
@@ -110,7 +68,6 @@ local function makeTool(itemName)
 		return tool
 	end
 
-	-- jeśli template jest modelem
 	if not template:IsA("Model") then
 		tool:Destroy()
 		return nil
@@ -118,9 +75,9 @@ local function makeTool(itemName)
 
 	local primary = template.PrimaryPart
 	if not primary then
-		for _, d in ipairs(template:GetDescendants()) do
-			if d:IsA("BasePart") then
-				primary = d
+		for _, descendant in ipairs(template:GetDescendants()) do
+			if descendant:IsA("BasePart") then
+				primary = descendant
 				break
 			end
 		end
@@ -133,14 +90,14 @@ local function makeTool(itemName)
 	local base = CFrame.new()
 	local clones = {}
 
-	for _, d in ipairs(template:GetDescendants()) do
-		if d:IsA("BasePart") then
-			local c = d:Clone()
-			setupPart(c)
-			local rel = primary.CFrame:ToObjectSpace(d.CFrame)
-			c.CFrame = base * rel
-			c.Parent = tool
-			clones[d] = c
+	for _, descendant in ipairs(template:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local clone = descendant:Clone()
+			setupPart(clone)
+			local rel = primary.CFrame:ToObjectSpace(descendant.CFrame)
+			clone.CFrame = base * rel
+			clone.Parent = tool
+			clones[descendant] = clone
 		end
 	end
 
@@ -151,12 +108,12 @@ local function makeTool(itemName)
 	end
 	handle.Name = "Handle"
 
-	for orig, c in pairs(clones) do
-		if c ~= handle then
-			local w = Instance.new("WeldConstraint")
-			w.Part0 = handle
-			w.Part1 = c
-			w.Parent = handle
+	for _, clone in pairs(clones) do
+		if clone ~= handle then
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = handle
+			weld.Part1 = clone
+			weld.Parent = handle
 		end
 	end
 
@@ -164,11 +121,11 @@ local function makeTool(itemName)
 end
 
 local function syncItem(player, itemName, desiredCount)
-	local n = tonumber(desiredCount) or 0
-	if n < 0 then
-		n = 0
+	local count = tonumber(desiredCount) or 0
+	if count < 0 then
+		count = 0
 	end
-	n = math.floor(n + 1e-9)
+	count = math.floor(count + 1e-9)
 
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if not backpack then
@@ -176,26 +133,26 @@ local function syncItem(player, itemName, desiredCount)
 	end
 
 	local tools = {}
-	for _, t in ipairs(getItemTools(backpack, itemName)) do
-		table.insert(tools, t)
+	for _, tool in ipairs(getItemTools(backpack, itemName)) do
+		table.insert(tools, tool)
 	end
-	for _, t in ipairs(getItemTools(player.Character, itemName)) do
-		table.insert(tools, t)
+	for _, tool in ipairs(getItemTools(player.Character, itemName)) do
+		table.insert(tools, tool)
 	end
 
 	local current = #tools
-	if current > n then
-		for i = n + 1, current do
-			local t = tools[i]
-			if t and t.Parent then
-				t:Destroy()
+	if current > count then
+		for index = count + 1, current do
+			local tool = tools[index]
+			if tool and tool.Parent then
+				tool:Destroy()
 			end
 		end
-	elseif current < n then
-		for _ = 1, (n - current) do
-			local t = makeTool(itemName)
-			if t then
-				t.Parent = backpack
+	elseif current < count then
+		for _ = 1, count - current do
+			local tool = makeTool(itemName)
+			if tool then
+				tool.Parent = backpack
 			end
 		end
 	end
@@ -206,25 +163,24 @@ local function setupItemFolder(player, folder)
 		return
 	end
 
-	local function bindQuantity(q)
-		-- w twoim systemie Quantity jest NumberValue
-		if not q or not q:IsA("NumberValue") or q.Name ~= "Quantity" then
+	local function bindQuantity(quantity)
+		if not quantity or not quantity:IsA("NumberValue") or quantity.Name ~= "Quantity" then
 			return
 		end
-		if q:GetAttribute("__BoundInv") then
+		if quantity:GetAttribute("__BoundInv") then
 			return
 		end
-		q:SetAttribute("__BoundInv", true)
+		quantity:SetAttribute("__BoundInv", true)
 
-		syncItem(player, folder.Name, q.Value)
-		q.Changed:Connect(function()
-			syncItem(player, folder.Name, q.Value)
+		syncItem(player, folder.Name, quantity.Value)
+		quantity.Changed:Connect(function()
+			syncItem(player, folder.Name, quantity.Value)
 		end)
 	end
 
-	local q0 = folder:FindFirstChild("Quantity")
-	if q0 then
-		bindQuantity(q0)
+	local quantity = folder:FindFirstChild("Quantity")
+	if quantity then
+		bindQuantity(quantity)
 	end
 
 	folder.ChildAdded:Connect(function(child)
@@ -240,20 +196,20 @@ local function setupItemFolder(player, folder)
 	end)
 end
 
-local function setupInventory(player, inv)
-	for _, child in ipairs(inv:GetChildren()) do
+local function setupInventory(player, inventory)
+	for _, child in ipairs(inventory:GetChildren()) do
 		if child:IsA("Folder") then
 			setupItemFolder(player, child)
 		end
 	end
 
-	inv.ChildAdded:Connect(function(child)
+	inventory.ChildAdded:Connect(function(child)
 		if child:IsA("Folder") then
 			setupItemFolder(player, child)
 		end
 	end)
 
-	inv.ChildRemoved:Connect(function(child)
+	inventory.ChildRemoved:Connect(function(child)
 		if child:IsA("Folder") then
 			syncItem(player, child.Name, 0)
 		end
@@ -262,17 +218,17 @@ end
 
 Players.PlayerAdded:Connect(function(player)
 	local function resyncAll()
-		local inv = getInventory(player)
-		if not inv then
+		local inventory = getInventory(player)
+		if not inventory then
 			return
 		end
-		for _, f in ipairs(inv:GetChildren()) do
-			if f:IsA("Folder") then
-				local q = f:FindFirstChild("Quantity")
-				if q and q:IsA("NumberValue") then
-					syncItem(player, f.Name, q.Value)
+		for _, folder in ipairs(inventory:GetChildren()) do
+			if folder:IsA("Folder") then
+				local quantity = folder:FindFirstChild("Quantity")
+				if quantity and quantity:IsA("NumberValue") then
+					syncItem(player, folder.Name, quantity.Value)
 				else
-					syncItem(player, f.Name, 0)
+					syncItem(player, folder.Name, 0)
 				end
 			end
 		end
@@ -282,9 +238,9 @@ Players.PlayerAdded:Connect(function(player)
 		task.defer(resyncAll)
 	end)
 
-	local inv = getInventory(player)
-	if inv then
-		setupInventory(player, inv)
+	local inventory = getInventory(player)
+	if inventory then
+		setupInventory(player, inventory)
 		resyncAll()
 	else
 		player.ChildAdded:Connect(function(child)

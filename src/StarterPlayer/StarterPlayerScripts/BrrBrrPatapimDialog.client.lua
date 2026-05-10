@@ -10,18 +10,18 @@ local RunService = game:GetService("RunService")
 -- the regular NPC interaction wiring stay alive.
 local TEMPORARILY_DISABLE_TUTORIAL = true
 
+local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
-local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local Point = require(ReplicatedStorage:WaitForChild("Point"))
-local SpawnPartsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
-local BrainrotsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local LegacyCrewConfig = CrewCatalog.GetLegacyConfig()
 
 local VariantPrefixes = { "Golden ", "Diamond " }
 do
-	local ok, cfg = pcall(function()
-		return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
-	end)
-	if ok and typeof(cfg) == "table" and typeof(cfg.Versions) == "table" then
+	local cfg = CrewCatalog.GetVariantConfig()
+	if typeof(cfg) == "table" and typeof(cfg.Versions) == "table" then
 		local prefixes = {}
 		for _, variantData in pairs(cfg.Versions) do
 			if typeof(variantData) == "table" and typeof(variantData.Prefix) == "string" and variantData.Prefix ~= "" then
@@ -36,8 +36,24 @@ do
 end
 
 local KnownBrainrotNames = {}
-for brainrotName in pairs(BrainrotsConfig) do
-	KnownBrainrotNames[tostring(brainrotName)] = true
+local function addKnownCrewName(name)
+	local value = tostring(name or "")
+	if value ~= "" then
+		KnownBrainrotNames[value] = true
+	end
+end
+
+for brainrotName in pairs(LegacyCrewConfig) do
+	addKnownCrewName(brainrotName)
+end
+for _, entry in ipairs(CrewCatalog.GetBaseEntries()) do
+	local info = entry.Info
+	addKnownCrewName(entry.Id)
+	if info then
+		addKnownCrewName(info.DisplayName)
+		addKnownCrewName(info.RealCharacterName)
+		addKnownCrewName(info.ModelName)
+	end
 end
 
 local function stripVariantPrefix(name)
@@ -1158,7 +1174,7 @@ local function startPlotStandStep()
 	beamStage = "PLOT_STAND"
 	debugTutorial("STAGE", "Entered PLOT_STAND", 0)
 
-	setTutorial(5, "Go to your Stand, equip the Brainrot you collected, and place it on the Stand.")
+	setTutorial(5, "Go to your Stand, equip the Crewmate you collected, and place it on the Stand.")
 end
 
 local function resetAfterRespawn()
@@ -1174,9 +1190,9 @@ local function resetAfterRespawn()
 	if beamStage == "TO_BRR" then
 		setTutorial(1, "Follow the beam to Brr Brr Patapim and hold E to interact.")
 	elseif beamStage == "BRAINROT" or beamStage == "WAIT_FOR_FOLDER" then
-		setTutorial(4, "Follow the beam to the nearest Brainrot and hold E to collect it.")
+		setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 	elseif beamStage == "PLOT_STAND" then
-		setTutorial(5, "Go to your Stand, equip the Brainrot you collected, and place it on the Stand.")
+		setTutorial(5, "Go to your Stand, equip the Crewmate you collected, and place it on the Stand.")
 	end
 end
 
@@ -1196,7 +1212,7 @@ local function runBeamLoop(character)
 			debugTutorial("BEAM_TO_BRR", "target=" .. getInstancePath(getBrrMesh()), 1.5)
 			task.wait(0.2)
 		elseif beamStage == "BRAINROT" then
-			setTutorial(4, "Follow the beam to the nearest Brainrot and hold E to collect it.")
+			setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 
 			local model, nearestPrompt, targetPart, debugInfo = getNearestBrainrotTarget(character)
 
@@ -1415,7 +1431,7 @@ local function startSpeedUpgradeTutorial()
 			Point.Hide()
 			disconnectPoint()
 
-			setTutorial(4, "Follow the beam to the nearest Brainrot and hold E to collect it.")
+			setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 			beamActive = true
 			beamStage = "BRAINROT"
 			debugTutorial("STAGE", "Entered BRAINROT from Step 3 close", 0)

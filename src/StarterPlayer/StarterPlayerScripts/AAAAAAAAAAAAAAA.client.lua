@@ -88,10 +88,10 @@ local WavesConfig = require(
 		:WaitForChild("LavaWaves")
 )
 
-local BrainrotsConfig = require(
+local CrewCatalog = require(
 	Modules
-		:WaitForChild("Configs")
-		:WaitForChild("Brainrots")
+		:WaitForChild("Crew")
+		:WaitForChild("CrewCatalog")
 )
 local HazardRuntime = require(
 	Modules
@@ -264,7 +264,7 @@ local function applyBrainrotToPfp(pfpGui, plr)
 
 	local id = plr:GetAttribute("CarriedBrainrot")
 	if id and tostring(id) ~= "" then
-		local info = BrainrotsConfig[tostring(id)]
+		local info = CrewCatalog.GetInfoById(tostring(id)) or CrewCatalog.GetLegacyConfig()[tostring(id)]
 		local fallback = info and info.Render
 		if fallback and tostring(fallback) ~= "" then
 			img.Image = tostring(fallback)

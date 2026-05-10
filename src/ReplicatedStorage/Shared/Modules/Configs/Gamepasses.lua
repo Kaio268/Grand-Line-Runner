@@ -17,7 +17,7 @@ local Gamepasses = {
 		ID = 1667343349,
 		Icon = "rbxassetid://76300573750363",
 
-		Description = "Earn x2 Beli and make 2x more from Crew Members",
+		Description = "Earn x2 Money and make 2x more from Crewmates",
 	},
 	
 	["La Vacca Saturno Saturnita"] = {

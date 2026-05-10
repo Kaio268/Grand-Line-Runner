@@ -1,7 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
-local BountyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushBounty"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Brainrots = CrewCatalog.GetLegacyConfig()
+local BountyConfig = require(Configs:WaitForChild("GrandLineRushBounty"))
 
 local Resolver = {}
 
@@ -31,7 +34,7 @@ local function resolveBrainrotConfig(storageName)
 		return nil
 	end
 
-	return Brainrots[storageName]
+	return CrewCatalog.GetInfoById(storageName) or Brainrots[storageName]
 end
 
 local function resolveBrainrotContext(brainrotLike)

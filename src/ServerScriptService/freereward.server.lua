@@ -1,5 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local add = require(script.Parent.Modules.AddBrainrot)
+local add = require(script.Parent.Modules.AddCrewMember)
 local data = require(script.Parent.Data.DataManager)
 
 local remote = ReplicatedStorage:FindFirstChild("RewardRemote")
@@ -16,5 +16,5 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	data:SetValue(player, "HiddenLeaderstats.ClaimedTolilola", true)
-	add:AddBrainrot(player, "Fluri Flura", 1)
+	add:AddCrewMember(player, "Fluri Flura", 1)
 end)

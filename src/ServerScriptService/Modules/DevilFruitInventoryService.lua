@@ -42,7 +42,24 @@ local FruitGripController = require(ReplicatedStorage:WaitForChild("Modules"):Wa
 local DevilFruitLogger = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
-local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local dataManagerModule = nil
+local function getDataManager()
+	if dataManagerModule == nil then
+		dataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+	end
+	return dataManagerModule
+end
+local DataManager = setmetatable({}, {
+	__index = function(_, key)
+		local value = getDataManager()[key]
+		if typeof(value) == "function" then
+			return function(_, ...)
+				return value(getDataManager(), ...)
+			end
+		end
+		return value
+	end,
+})
 
 local promptRemote
 local responseRemote

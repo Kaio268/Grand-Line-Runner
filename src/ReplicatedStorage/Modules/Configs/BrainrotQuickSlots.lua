@@ -2,7 +2,7 @@ local BrainrotQuickSlots = {}
 
 BrainrotQuickSlots.DefaultUnlockedSlots = 2
 BrainrotQuickSlots.MaxSlots = 8
-BrainrotQuickSlots.ProductId = 3584712420 -- Replace with the real "+1 Brainrot Quick Slot" Developer Product ID.
+BrainrotQuickSlots.ProductId = 3584712420 -- Legacy config name; product is player-facing as "+1 Crew Quick Slot".
 BrainrotQuickSlots.PriceRobux = 49
 
 function BrainrotQuickSlots.ClampUnlockedSlots(value)

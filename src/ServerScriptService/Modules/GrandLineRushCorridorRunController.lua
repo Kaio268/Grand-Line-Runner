@@ -1222,7 +1222,7 @@ local function spawnSharedChestNode(rewardFolder, carriedFolder)
 			return
 		end
 		if triggerPlayer:GetAttribute("CarriedBrainrot") ~= nil then
-			sendPopup(triggerPlayer, "You cannot pick up a chest while carrying a brainrot.", ERROR_COLOR, true)
+			sendPopup(triggerPlayer, "You cannot pick up a chest while carrying a Crewmate.", ERROR_COLOR, true)
 			return
 		end
 
@@ -1336,7 +1336,7 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 			return
 		end
 		if triggerPlayer:GetAttribute("CarriedBrainrot") ~= nil then
-			sendPopup(triggerPlayer, "You cannot pick up a chest or crew reward while carrying a brainrot.", ERROR_COLOR, true)
+			sendPopup(triggerPlayer, "You cannot pick up a chest or crew reward while carrying a Crewmate.", ERROR_COLOR, true)
 			return
 		end
 

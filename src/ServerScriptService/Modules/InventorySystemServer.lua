@@ -3,8 +3,29 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
-local BrainrotQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("BrainrotQuickSlotService"))
-local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local CrewMemberCanonicalReadGate = require(
+	ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberCanonicalReadGate")
+)
+local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
+local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
+local dataManagerModule = nil
+local function getDataManager()
+	if dataManagerModule == nil then
+		dataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+	end
+	return dataManagerModule
+end
+local DataManager = setmetatable({}, {
+	__index = function(_, key)
+		local value = getDataManager()[key]
+		if typeof(value) == "function" then
+			return function(_, ...)
+				return value(getDataManager(), ...)
+			end
+		end
+		return value
+	end,
+})
 local updateRemote = ReplicatedStorage:FindFirstChild("InventoryGearRemote")
 if not updateRemote then
 	updateRemote = Instance.new("RemoteEvent")
@@ -12,32 +33,35 @@ if not updateRemote then
 	updateRemote.Parent = ReplicatedStorage
 end
 
-local snapshotRemote = ReplicatedStorage:FindFirstChild("InventorySnapshotRequest")
-if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
-	snapshotRemote:Destroy()
-	snapshotRemote = nil
-end
-if not snapshotRemote then
-	snapshotRemote = Instance.new("RemoteFunction")
-	snapshotRemote.Name = "InventorySnapshotRequest"
-	snapshotRemote.Parent = ReplicatedStorage
+local function getOrCreateRemote(parent, remoteName, className)
+	local remote = parent:FindFirstChild(remoteName)
+	if remote and not remote:IsA(className) then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new(className)
+		remote.Name = remoteName
+		remote.Parent = parent
+	end
+	return remote
 end
 
-local equipRemote = ReplicatedStorage:FindFirstChild("EquipToggleRemote")
-if not equipRemote then
-	equipRemote = Instance.new("RemoteEvent")
-	equipRemote.Name = "EquipToggleRemote"
-	equipRemote.Parent = ReplicatedStorage
-end
+local crewMemberSnapshotRemote = getOrCreateRemote(ReplicatedStorage, "CrewMemberInventorySnapshotRequest", "RemoteFunction")
+
+local crewMemberEquipRemote = getOrCreateRemote(ReplicatedStorage, "CrewMemberEquipToggleRemote", "RemoteEvent")
 
 local Module = {}
 local chestToolServiceCache = nil
 local devilFruitInventoryServiceCache = nil
 local sliceServiceCache = nil
+local crewInventoryCallbackRegistered = false
 local CHEST_DEBUG = true
 local FRUIT_EQUIP_DEBUG = true
 local R6G_WELD_DEBUG = true
 local INVENTORY_SNAPSHOT_DEBUG = true
+local lastCrewInventoryCounts = setmetatable({}, { __mode = "k" })
+
 local DATA_READY_TIMEOUT = 30
 local TOOL_KIND_DEVIL_FRUIT = "DevilFruit"
 local TOOL_ATTR_KIND = "InventoryItemKind"
@@ -405,13 +429,20 @@ local function unequipIfEquipped(player, toolName, itemKind)
 end
 
 local function ownsBrainrot(player, name)
-	local inv = player:FindFirstChild("Inventory")
-	if not inv then return false end
-	local f = inv:FindFirstChild(name)
-	if not f or not f:IsA("Folder") then return false end
-	local q = f:FindFirstChild("Quantity")
-	if not q or not q:IsA("NumberValue") then return false end
-	return q.Value > 0
+	local inventory = CrewInstanceService.GetCrewInventory(player)
+	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
+		return false
+	end
+
+	for _, instanceData in pairs(inventory.ById) do
+		if typeof(instanceData) == "table"
+			and tostring(instanceData.StorageName or "") == tostring(name or "")
+			and tostring(instanceData.AssignedStand or "") == ""
+		then
+			return true
+		end
+	end
+	return false
 end
 
 local function ownsGear(player, name)
@@ -486,13 +517,110 @@ local function readPositiveQuantity(folder)
 	return math.max(0, math.floor(tonumber(quantity.Value) or 0))
 end
 
-local function appendQuantityEntry(list, name, quantity)
+local function applyDisplayMetadata(entry, metadata)
+	if typeof(entry) ~= "table" or typeof(metadata) ~= "table" then
+		return
+	end
+
+	local displayName = tostring(metadata.DisplayName or "")
+	if displayName ~= "" then
+		entry.DisplayName = displayName
+	end
+
+	local rarity = tostring(metadata.Rarity or "")
+	if rarity ~= "" then
+		entry.Rarity = rarity
+	end
+
+	local render = tostring(metadata.Render or "")
+	if render ~= "" then
+		entry.Render = render
+	end
+end
+
+local function buildInventoryModelPreviewDescriptor(descriptor)
+	if typeof(descriptor) ~= "table" then
+		return nil
+	end
+
+	return {
+		ModelName = tostring(descriptor.ModelName or ""),
+		ModelPath = tostring(descriptor.ModelPath or ""),
+		UsedCanonical = descriptor.UsedCanonical == true,
+		FallbackReason = descriptor.FallbackReason,
+		IsPreviewOnly = descriptor.IsPreviewOnly == true,
+		LegacyIdentity = tostring(descriptor.LegacyIdentity or ""),
+		Path = tostring(descriptor.Path or ""),
+		Source = tostring(descriptor.Source or ""),
+		ValidationAgeSeconds = tonumber(descriptor.ValidationAgeSeconds) or -1,
+	}
+end
+
+local function applyModelPreviewMetadata(entry, descriptor)
+	if typeof(entry) ~= "table" then
+		return
+	end
+
+	local sanitized = buildInventoryModelPreviewDescriptor(descriptor)
+	if sanitized ~= nil then
+		entry.ModelPreview = sanitized
+	end
+end
+
+local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewDescriptor)
 	if quantity and quantity > 0 then
-		table.insert(list, {
+		local entry = {
 			Name = tostring(name),
 			Quantity = quantity,
-		})
+		}
+		applyDisplayMetadata(entry, metadata)
+		applyModelPreviewMetadata(entry, modelPreviewDescriptor)
+		table.insert(list, entry)
 	end
+end
+
+local function getCrewInventoryAvailableCounts(player, inventory)
+	inventory = if typeof(inventory) == "table" then inventory else CrewInstanceService.GetCrewInventory(player)
+	local counts = {}
+	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
+		return counts
+	end
+
+	for _, instanceData in pairs(inventory.ById) do
+		if typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and tostring(instanceData.StorageName or "") ~= ""
+		then
+			local storageName = tostring(instanceData.StorageName)
+			counts[storageName] = (counts[storageName] or 0) + 1
+		end
+	end
+	return counts
+end
+
+local function pushCrewInventoryCounts(player, inventory)
+	local counts = getCrewInventoryAvailableCounts(player, inventory)
+	local previous = lastCrewInventoryCounts[player] or {}
+	local seen = {}
+
+	for storageName, quantity in pairs(counts) do
+		seen[storageName] = true
+		updateRemote:FireClient(player, "Brainrot", storageName, quantity)
+		if quantity > 0 then
+			CrewMemberCanonicalReadGate.CompareInventoryDisplay(player, storageName, {
+				LogThrottleSeconds = 60,
+			})
+		end
+	end
+
+	for storageName in pairs(previous) do
+		if seen[storageName] ~= true then
+			updateRemote:FireClient(player, "Brainrot", storageName, 0)
+			unequipIfEquipped(player, storageName, "Brainrot")
+		end
+	end
+
+	lastCrewInventoryCounts[player] = counts
 end
 
 local function buildInventorySnapshot(player)
@@ -531,11 +659,24 @@ local function buildInventorySnapshot(player)
 					for _, fruitFolder in ipairs(child:GetChildren()) do
 						appendQuantityEntry(devilFruits, fruitFolder.Name, readPositiveQuantity(fruitFolder))
 					end
-				elseif child.Name ~= "Feed" then
-					appendQuantityEntry(brainrots, child.Name, readPositiveQuantity(child))
 				end
 			end
 		end
+	end
+
+	for storageName, quantity in pairs(getCrewInventoryAvailableCounts(player)) do
+		local metadata = CrewMemberCanonicalReadGate.ResolveInventoryDisplayMetadata(player, storageName, {
+			LogThrottleSeconds = 60,
+		})
+		local modelPreviewDescriptor = CrewMemberCanonicalReadGate.ResolveInventoryModelPreviewDescriptor(
+			player,
+			storageName,
+			{
+				LogThrottleSeconds = 60,
+				SkipLog = true,
+			}
+		)
+		appendQuantityEntry(brainrots, storageName, quantity, metadata, modelPreviewDescriptor)
 	end
 
 	local gearsFolder = player:FindFirstChild("Gears") or player:WaitForChild("Gears", 5)
@@ -881,35 +1022,10 @@ local function requestDevilFruitConsume(player, fruitKey)
 end
 
 local function watchInventory(player, inventory)
-	local hooked = {}
 	local devilFruitHooked = {}
-
-	local function push(name, qty)
-		updateRemote:FireClient(player, "Brainrot", name, qty)
-	end
 
 	local function pushDevilFruit(name, qty)
 		updateRemote:FireClient(player, "DevilFruit", name, qty)
-	end
-
-	local function hookFolder(folder)
-		if hooked[folder] then return end
-		hooked[folder] = true
-
-		local qty = folder:WaitForChild("Quantity", 10)
-		if not qty or not qty:IsA("NumberValue") then return end
-
-		push(folder.Name, qty.Value)
-		if qty.Value <= 0 then
-			unequipIfEquipped(player, folder.Name, "Brainrot")
-		end
-
-		qty.Changed:Connect(function()
-			push(folder.Name, qty.Value)
-			if qty.Value <= 0 then
-				unequipIfEquipped(player, folder.Name, "Brainrot")
-			end
-		end)
 	end
 
 	local function hookDevilFruitFolder(folder)
@@ -933,9 +1049,7 @@ local function watchInventory(player, inventory)
 	end
 
 	for _, ch in ipairs(inventory:GetChildren()) do
-		if ch:IsA("Folder") and ch.Name ~= "DevilFruits" then
-			hookFolder(ch)
-		elseif ch:IsA("Folder") and ch.Name == "DevilFruits" then
+		if ch:IsA("Folder") and ch.Name == "DevilFruits" then
 			for _, fruitFolder in ipairs(ch:GetChildren()) do
 				if fruitFolder:IsA("Folder") then
 					hookDevilFruitFolder(fruitFolder)
@@ -958,9 +1072,7 @@ local function watchInventory(player, inventory)
 	end
 
 	inventory.ChildAdded:Connect(function(ch)
-		if ch:IsA("Folder") and ch.Name ~= "DevilFruits" then
-			hookFolder(ch)
-		elseif ch:IsA("Folder") and ch.Name == "DevilFruits" then
+		if ch:IsA("Folder") and ch.Name == "DevilFruits" then
 			for _, fruitFolder in ipairs(ch:GetChildren()) do
 				if fruitFolder:IsA("Folder") then
 					hookDevilFruitFolder(fruitFolder)
@@ -979,13 +1091,6 @@ local function watchInventory(player, inventory)
 					unequipIfEquipped(player, fruitFolder.Name, "DevilFruit")
 				end
 			end)
-		end
-	end)
-
-	inventory.ChildRemoved:Connect(function(ch)
-		if ch:IsA("Folder") and ch.Name ~= "DevilFruits" then
-			push(ch.Name, 0)
-			unequipIfEquipped(player, ch.Name, "Brainrot")
 		end
 	end)
 end
@@ -1084,16 +1189,20 @@ local function watchChestInventory(player, chestInventory)
 	end)
 end
 
-snapshotRemote.OnServerInvoke = function(player)
+local function handleInventorySnapshotRequest(player)
 	inventorySnapshotLog("request", "player", player.Name)
 	return buildInventorySnapshot(player)
 end
 
-equipRemote.OnServerEvent:Connect(function(player, kind, name)
+crewMemberSnapshotRemote.OnServerInvoke = function(player)
+	return handleInventorySnapshotRequest(player)
+end
+
+local function handleEquipToggleRequest(player, kind, name)
 	if typeof(kind) ~= "string" or typeof(name) ~= "string" then return end
 	if kind == TOOL_KIND_DEVIL_FRUIT then
 		fruitEquipDebug(
-			"EquipToggleRemote received player=%s payload={kind=%s,name=%s}",
+			"CrewMemberEquipToggleRemote received player=%s payload={kind=%s,name=%s}",
 			player.Name,
 			tostring(kind),
 			tostring(name)
@@ -1101,7 +1210,7 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 	end
 	if kind == "Chest" then
 		chestDebug(
-			"EquipToggleRemote received player=%s payload={kind=%s,name=%s}",
+			"CrewMemberEquipToggleRemote received player=%s payload={kind=%s,name=%s}",
 			player.Name,
 			tostring(kind),
 			tostring(name)
@@ -1110,9 +1219,9 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 
 	if kind == "Brainrot" then
 		if not ownsBrainrot(player, name) then return end
-		local canEquip = BrainrotQuickSlotService.CanEquipBrainrot(player, name)
+		local canEquip = CrewQuickSlotService.CanEquipCrewMember(player, name)
 		if not canEquip then
-			BrainrotQuickSlotService.PromptUnlockForBrainrot(player, name)
+			CrewQuickSlotService.PromptUnlockForCrewMember(player, name)
 			return
 		end
 		toggleEquip(player, kind, name)
@@ -1158,14 +1267,32 @@ equipRemote.OnServerEvent:Connect(function(player, kind, name)
 		toggleEquip(player, kind, name)
 		return
 	end
+end
+
+crewMemberEquipRemote.OnServerEvent:Connect(function(player, kind, name)
+	handleEquipToggleRequest(player, kind, name)
 end)
 
 function Module.Start()
+	if crewInventoryCallbackRegistered ~= true then
+		crewInventoryCallbackRegistered = true
+		CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, crewInventory)
+			if player and player.Parent == Players then
+				pushCrewInventoryCounts(player, crewInventory)
+			end
+		end)
+	end
+
 	local function setup(player)
 		local inv = player:WaitForChild("Inventory")
 		local gears = player:WaitForChild("Gears")
 		watchInventory(player, inv)
 		watchGears(player, gears)
+		task.defer(function()
+			if waitForPlayerDataReady(player) then
+				pushCrewInventoryCounts(player)
+			end
+		end)
 
 		local function bindCharacter(character)
 			syncEquippedInventoryAttributes(player)

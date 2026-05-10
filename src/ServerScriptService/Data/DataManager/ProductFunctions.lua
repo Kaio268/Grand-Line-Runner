@@ -2,15 +2,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local Types = require(ReplicatedStorage.Modules.Types)
-local BrainrotInstanceService = require(script.Parent.Parent.Parent.Modules.BrainrotInstanceService)
-local BrainrotQuickSlotService = require(script.Parent.Parent.Parent.Modules.BrainrotQuickSlotService)
+local CrewInstanceService = require(script.Parent.Parent.Parent.Modules.CrewInstanceService)
+local CrewQuickSlotService = require(script.Parent.Parent.Parent.Modules.CrewQuickSlotService)
+local CrewStandIncomeAuthority = require(script.Parent.Parent.Parent.Modules.CrewStandIncomeAuthority)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
-local BrainrotQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotQuickSlots"))
+local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local PlotSystem = nil
 local PlotsFolder = nil
-local addbrairntos = nil
+local crewRewardService = nil
 
 local STEAL_PRODUCTS = {
 	[3512126073] = true,
@@ -21,9 +22,9 @@ local STEAL_PRODUCTS = {
 	[3512128716] = true,
 }
 
-local function getAddBrainrot()
-	addbrairntos = addbrairntos or require(script.Parent.Parent.Parent.Modules.AddBrainrot)
-	return addbrairntos
+local function getAddCrewMember()
+	crewRewardService = crewRewardService or require(script.Parent.Parent.Parent.Modules.AddCrewMember)
+	return crewRewardService
 end
 
 local function getPlotsFolder()
@@ -67,21 +68,7 @@ local function findStandModel(plot, standName)
 	return nil
 end
 
-local function ensureInventorySlot(player, brainrotName, DataManager: Types.DataManager)
-	local qPath = "Inventory." .. brainrotName .. ".Quantity"
-
-	local qVal = DataManager:GetValue(player, qPath)
-
-	if qVal == nil then
-		DataManager:AddValue(player, "Inventory", {
-			[brainrotName] = {
-				Quantity = 0,
-			},
-		})
-	end
-end
-
-local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Types.DataManager)
+local function StealBrainrotProduct(receiptInfo, buyer, _profile, _DataManager: Types.DataManager)
 	local productId = tonumber(receiptInfo.ProductId)
 	if not productId or not STEAL_PRODUCTS[productId] then
 		return
@@ -122,22 +109,23 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 		return
 	end
 
-	local current = DataManager:GetValue(owner, "IncomeBrainrots." .. standName .. ".BrainrotName")
+	local standData = CrewStandIncomeAuthority.GetStandData(owner, standName)
+	local current = standData and standData.BrainrotName
 	if current ~= brainrotName then
 		return
 	end
 	if typeof(brainrotInstanceId) == "string" and brainrotInstanceId ~= "" then
-		local currentInstanceId = BrainrotInstanceService.GetStandInstanceId(owner, standName)
+		local currentInstanceId = CrewInstanceService.GetStandInstanceId(owner, standName)
 		if currentInstanceId ~= "" and currentInstanceId ~= brainrotInstanceId then
 			return
 		end
 	end
 
-	local transferredInstanceId = BrainrotInstanceService.TransferStandInstance(owner, buyer, standName)
+	local transferredInstanceId = CrewInstanceService.TransferStandInstance(owner, buyer, standName)
 	if not transferredInstanceId then
 		return
 	end
-	DataManager:SetValue(owner, "IncomeBrainrots." .. standName .. ".IncomeToCollect", 0)
+	CrewStandIncomeAuthority.SetIncomeToCollect(owner, standName, 0, "product_reward_steal_collect_clear")
 
 	local plot = findPlotForUserId(ownerUserId)
 	if plot then
@@ -157,25 +145,23 @@ local function StealBrainrotProduct(receiptInfo, buyer, profile, DataManager: Ty
 			end
 		end
 	end
-
-	ensureInventorySlot(buyer, brainrotName, DataManager)
 end
 
 local handlers = {
 	[3509346360] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		getAddBrainrot():AddBrainrot(player, "67", 1)
-		getAddBrainrot():AddBrainrot(player, "Dragon Cannelloni", 1)
+		getAddCrewMember():AddCrewMember(player, "67", 1)
+		getAddCrewMember():AddCrewMember(player, "Dragon Cannelloni", 1)
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000_000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000_000)
 		DataManager:SetValue(player, "Packs.Super OP Starter Pack", true)
 	end,
 
 	[3512059347] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		getAddBrainrot():AddBrainrot(player, "La Vacca Saturno Saturnita", 1)
+		getAddCrewMember():AddCrewMember(player, "La Vacca Saturno Saturnita", 1)
 	end,
 
 	[3509346182] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		getAddBrainrot():AddBrainrot(player, "Tralalero Tralala", 1)
+		getAddCrewMember():AddCrewMember(player, "Tralalero Tralala", 1)
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000)
 		if DataManager:GetValue(player, "Gears.Lava SpeedCoil") then
@@ -187,7 +173,7 @@ local handlers = {
 	end,
 
 	[3509346000] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		getAddBrainrot():AddBrainrot(player, "Elefanto Cocofanto", 1)
+		getAddCrewMember():AddCrewMember(player, "Elefanto Cocofanto", 1)
 		DataManager:SetValue(player, "Packs.Better Starter Pack", true)
 
 		if DataManager:GetValue(player, "Gears.Diamond SpeedCoil") then
@@ -201,7 +187,7 @@ local handlers = {
 	end,
 
 	[3509345784] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		getAddBrainrot():AddBrainrot(player, "Odin Din Din Dun", 1)
+		getAddCrewMember():AddCrewMember(player, "Odin Din Din Dun", 1)
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1000)
 		DataManager:SetValue(player, "Packs.Starter Pack", true)
@@ -340,10 +326,13 @@ local handlers = {
 	[3512128716] = StealBrainrotProduct,
 }
 
-local brainrotQuickSlotProductId = tonumber(BrainrotQuickSlotConfig.ProductId)
+local brainrotQuickSlotProductId = tonumber(CrewQuickSlotConfig.ProductId)
 if brainrotQuickSlotProductId and brainrotQuickSlotProductId > 0 then
 	handlers[brainrotQuickSlotProductId] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
-		BrainrotQuickSlotService.ProcessUnlockReceipt(player, receiptInfo.ProductId, DataManager)
+		local ok, result = CrewQuickSlotService.ProcessUnlockReceipt(player, receiptInfo.ProductId, DataManager, receiptInfo)
+		if ok ~= true then
+			error("quick_slot_product_unlock_failed:" .. tostring(result and result.Reason or "unknown_error"))
+		end
 	end
 end
 

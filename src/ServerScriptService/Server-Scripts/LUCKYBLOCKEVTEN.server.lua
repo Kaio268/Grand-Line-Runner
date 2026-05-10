@@ -86,7 +86,7 @@ end
 
 local POPUP_COLOR = Color3.new(1, 0.972549, 0.192157)
 local POPUP_STROKE = Color3.new(0.101961, 0.101961, 0.101961)
-local addbrairntos = require(script.Parent.Parent.Modules.AddBrainrot)
+local crewRewards = require(script.Parent.Parent.Modules.AddCrewMember)
 
 local REWARDS = {
 	["Nothing"] = {
@@ -127,7 +127,7 @@ local REWARDS = {
 	["Garamararam"] = {
 		chance = 3,
 		Give = function(plr)
-			addbrairntos:AddBrainrot(plr, "Garamararam", 1)
+			crewRewards:AddCrewMember(plr, "Garamararam", 1)
 		end,
 		Popup = "You got 1 Garamararam!",
 	},
@@ -135,7 +135,7 @@ local REWARDS = {
 	["Bombombini Gusini"] = {
 		chance = 3,
 		Give = function(plr)
-			addbrairntos:AddBrainrot(plr, "Bombombini Gusini", 1)
+			crewRewards:AddCrewMember(plr, "Bombombini Gusini", 1)
 		end,
 		Popup = "You got 1 Bombombini Gusini!",
 	},
@@ -143,7 +143,7 @@ local REWARDS = {
 	["Pandaccini Bananini"] = {
 		chance = 3,
 		Give = function(plr)
-			addbrairntos:AddBrainrot(plr, "Pandaccini Bananini", 1)
+			crewRewards:AddCrewMember(plr, "Pandaccini Bananini", 1)
 		end,
 		Popup = "You got 1 Pandaccini Bananini!",
 	},
@@ -151,7 +151,7 @@ local REWARDS = {
 	["Girafa Celestre"] = {
 		chance = 3,
 		Give = function(plr)
-			addbrairntos:AddBrainrot(plr, "Girafa Celestre", 1)
+			crewRewards:AddCrewMember(plr, "Girafa Celestre", 1)
 		end,
 		Popup = "You got 1 Girafa Celestre!",
 	},
@@ -159,7 +159,7 @@ local REWARDS = {
 	["Karkerkar Kurkur"] = {
 		chance = 3,
 		Give = function(plr)
-			addbrairntos:AddBrainrot(plr, "Karkerkar Kurkur", 1)
+			crewRewards:AddCrewMember(plr, "Karkerkar Kurkur", 1)
 		end,
 		Popup = "You got 1 Karkerkar Kurkur!",
 	},
@@ -167,7 +167,7 @@ local REWARDS = {
 	["Pakrahmatmatina"] = {
 		chance = 3,
 		Give = function(plr)
-			addbrairntos:AddBrainrot(plr, "Pakrahmatmatina", 1)
+			crewRewards:AddCrewMember(plr, "Pakrahmatmatina", 1)
 		end,
 		Popup = "You got 1 Pakrahmatmatina!",
 	},

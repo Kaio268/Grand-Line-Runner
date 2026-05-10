@@ -1,3 +1,4 @@
-local BrainrotQuickSlotService = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("BrainrotQuickSlotService"))
+local CrewQuickSlotService = require(game:GetService("ServerScriptService"):WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
 
-BrainrotQuickSlotService.Init()
+-- Compatibility bootstrap. CrewQuickSlots.server.lua is the Crew-named entry point.
+CrewQuickSlotService.Init()

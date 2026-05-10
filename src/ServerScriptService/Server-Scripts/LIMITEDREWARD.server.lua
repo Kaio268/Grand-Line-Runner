@@ -6,7 +6,7 @@ local DataManager = require(ServerScriptService.Data:WaitForChild("DataManager")
 local rewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
 local PLACE_ID = 129073777843683
 
-local add = require(script.Parent.Parent.Modules.AddBrainrot)
+local add = require(script.Parent.Parent.Modules.AddCrewMember)
 
 rewardRemote.OnServerEvent:Connect(function(player, placeId, hasLike, hasFavorite)
 	if placeId ~= PLACE_ID then
@@ -25,5 +25,5 @@ rewardRemote.OnServerEvent:Connect(function(player, placeId, hasLike, hasFavorit
 	DataManager:AddValue(player, "Potions.x15WalkSpeedTime", 10 * 60)
 	DataManager:SetValue(player, "HiddenLeaderstats.LimitedReward", true)
 
-	add:AddBrainrot(player, "Tatatata Sahur", 1)
+	add:AddCrewMember(player, "Tatatata Sahur", 1)
 end)

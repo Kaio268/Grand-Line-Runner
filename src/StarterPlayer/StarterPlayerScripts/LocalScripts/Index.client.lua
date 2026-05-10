@@ -7,8 +7,9 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 
-local Brainrots = require(Configs:WaitForChild("Brainrots"))
-local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Brainrots = CrewCatalog.GetLegacyConfig()
+local VariantCfg = CrewCatalog.GetVariantConfig()
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
 local inventory = player:WaitForChild("Inventory")
@@ -302,7 +303,7 @@ end
 local function bindBrainrotInventoryFolder()
 	disconnectAll(brainrotInventoryConnections)
 
-	brainrotInventoryFolder = player:FindFirstChild("BrainrotInventory")
+	brainrotInventoryFolder = player:FindFirstChild("CrewMemberInventory")
 	if not brainrotInventoryFolder then
 		return
 	end
@@ -436,7 +437,7 @@ trackConnection(player.ChildAdded, function(child)
 	if child.Name == "IndexCollection" then
 		bindIndexCollectionFolder()
 		updateIndexBadge()
-	elseif child.Name == "BrainrotInventory" then
+	elseif child.Name == "CrewMemberInventory" then
 		bindBrainrotInventoryFolder()
 		updateIndexBadge()
 	elseif child.Name == "IndexRewards" then
@@ -449,7 +450,7 @@ trackConnection(player.ChildRemoved, function(child)
 	if child.Name == "IndexCollection" then
 		bindIndexCollectionFolder()
 		updateIndexBadge()
-	elseif child.Name == "BrainrotInventory" then
+	elseif child.Name == "CrewMemberInventory" then
 		bindBrainrotInventoryFolder()
 		updateIndexBadge()
 	elseif child.Name == "IndexRewards" then

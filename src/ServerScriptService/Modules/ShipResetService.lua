@@ -3,7 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
-local BrainrotInstanceService = require(ServerScriptService.Modules:WaitForChild("BrainrotInstanceService"))
+local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushBountyService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
@@ -13,8 +13,7 @@ local Module = {}
 
 local SHIP_UPGRADE_PATH = string.format("HiddenLeaderstats.%s", tostring(PlotUpgradeConfig.InternalStatName or "PlotUpgrade"))
 local SPEED_PATH = "HiddenLeaderstats.Speed"
-local STAND_STATE_PATH = "IncomeBrainrots"
-local STAND_LEVEL_PATH = "StandsLevels"
+local STAND_STATE_PATH = "CrewMemberIncome"
 local DEFAULT_SPEED = math.max(1, math.floor(tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1))
 local SHIP_RESET_ATTRIBUTES = {
 	"StealOwnerUserId",
@@ -48,7 +47,7 @@ local function clearPlayerResetAttributes(player)
 end
 
 local function releaseAllAssignedShipUnits(player)
-	local brainrotInventory = BrainrotInstanceService.EnsureInventory(player)
+	local brainrotInventory = CrewInstanceService.GetCrewInventory(player)
 	if typeof(brainrotInventory) ~= "table" then
 		return false, "missing_brainrot_inventory"
 	end
@@ -66,7 +65,9 @@ local function releaseAllAssignedShipUnits(player)
 	end
 
 	if changed then
-		local success = DataManager:SetValue(player, "BrainrotInventory", brainrotInventory)
+		local success = CrewInstanceService.SaveCrewInventory(player, brainrotInventory, {
+			SourcePath = "ship_reset_release_assigned",
+		})
 		if success == false then
 			return false, "failed_to_release_assigned_units"
 		end
@@ -74,7 +75,7 @@ local function releaseAllAssignedShipUnits(player)
 		BountyService.RefreshPlayerBounty(player, brainrotInventory)
 	end
 
-	BrainrotInstanceService.SyncAvailableCounts(player)
+	CrewInstanceService.SyncCrewAvailableCounts(player)
 	return true
 end
 
@@ -101,10 +102,6 @@ function Module.ResetPlayerShip(player)
 
 	if DataManager:Clear(player, STAND_STATE_PATH) == false then
 		return false, "failed_to_clear_ship_stands"
-	end
-
-	if DataManager:Clear(player, STAND_LEVEL_PATH) == false then
-		return false, "failed_to_clear_ship_stand_levels"
 	end
 
 	if DataManager:SetValue(player, "Ship", {

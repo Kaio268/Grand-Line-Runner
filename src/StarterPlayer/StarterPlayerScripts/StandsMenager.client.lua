@@ -5,9 +5,9 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 
-local remote = remotes:WaitForChild("StandUpgradeRemote")
-local previewRemote = remotes:WaitForChild("StandUpgradePreviewRemote")
-local resultRemote = remotes:WaitForChild("StandUpgradeStepResultRemote")
+local remote = remotes:WaitForChild("CrewMemberStandUpgradeRemote", 15)
+local previewRemote = remotes:WaitForChild("CrewMemberStandUpgradePreviewRemote", 15)
+local resultRemote = remotes:WaitForChild("CrewMemberStandUpgradeStepResultRemote", 15)
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
 local POPUP_ERROR = Color3.fromRGB(255, 94, 94)
@@ -116,7 +116,7 @@ local function ensurePromptGui()
 	accentLabel.BackgroundTransparency = 1
 	accentLabel.Size = UDim2.new(1, 0, 0, 18)
 	accentLabel.Font = Enum.Font.GothamBold
-	accentLabel.Text = "BRAINROT UPGRADE"
+	accentLabel.Text = "CREWMATE UPGRADE"
 	accentLabel.TextColor3 = Color3.fromRGB(255, 178, 92)
 	accentLabel.TextSize = 14
 	accentLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -241,7 +241,7 @@ local function showPreviewPrompt(standName, step, priorFoodDisplayName)
 	else
 		titleLabel.Text = string.format("Use %s?", foodDisplayName)
 		bodyLabel.Text = table.concat({
-			string.format("Are you sure you want to use %s to upgrade this brainrot?", foodDisplayName),
+			string.format("Are you sure you want to use %s to upgrade this crewmate?", foodDisplayName),
 			"",
 			string.format("%dx %s will be consumed for +%d XP.", amountUsed, foodDisplayName, xpGained),
 		}, "\n")

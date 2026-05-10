@@ -6,7 +6,7 @@ local ddata = require(script.Parent.Parent.Data.DataManager)
 local GROUP_ID = 17179624
 local REMOTE_NAME = "GroupRewardClaim"
 
-local brot = require(script.Parent.Parent.Modules.AddBrainrot)
+local crewRewards = require(script.Parent.Parent.Modules.AddCrewMember)
 local remoteEvent = ReplicatedStorage:FindFirstChild(REMOTE_NAME)
 if not remoteEvent then
 	remoteEvent = Instance.new("RemoteEvent")
@@ -31,7 +31,7 @@ remoteEvent.OnServerEvent:Connect(function(player)
 	if groupValue.Value == false then
 		print("Reward received for " .. player.Name)
 		ddata:SetValue(player, "HiddenLeaderstats.Group", true)
-		brot:AddBrainrot(player, "Cappuccino Assassino", 1)
+		crewRewards:AddCrewMember(player, "Cappuccino Assassino", 1)
 		PopUpModule:Server_SendPopUp(player, "Reward received!", Color3.fromRGB(60, 255, 60), Color3.fromRGB(0, 0, 0), 3, false)
 	else
 		print("Reward already claimed by " .. player.Name .. ". Cannot claim again.")

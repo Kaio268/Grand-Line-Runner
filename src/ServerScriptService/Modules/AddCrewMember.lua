@@ -1,15 +1,15 @@
 local Module = {}
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local brainrotsModels = ReplicatedStorage:WaitForChild("BrainrotFolder")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Configs = Modules:WaitForChild("Configs")
 
-local BrainrotsCfg = require(Configs:WaitForChild("Brainrots"))
-local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
-local BrainrotInstanceService = require(script.Parent:WaitForChild("BrainrotInstanceService"))
-local BrainrotQuickSlotService = require(script.Parent:WaitForChild("BrainrotQuickSlotService"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegistry"))
+local BrainrotsCfg = CrewCatalog.GetLegacyConfig()
+local VariantCfg = CrewCatalog.GetVariantConfig()
+local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
+local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
 
 local function validName(name)
 	if type(name) ~= "string" then return nil end
@@ -36,39 +36,17 @@ local function getVariantAndBaseName(fullName)
 end
 
 local function findModelFor(variantKey, baseName)
-	if variantKey == "Normal" then
-		local m = brainrotsModels:FindFirstChild(baseName)
-		if m and m:IsA("Model") then
-			return m
-		end
-		return nil
-	end
-
-	local folder = brainrotsModels:FindFirstChild(variantKey)
-	if folder and folder:IsA("Folder") then
-		local m = folder:FindFirstChild(baseName)
-		if m and m:IsA("Model") then
-			return m
-		end
-	end
-
-	local fallback = brainrotsModels:FindFirstChild(baseName)
-	if fallback and fallback:IsA("Model") then
-		return fallback
-	end
-
-	return nil
+	local model = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
+	return model and model:IsA("Model") and model or nil
 end
 
-function Module:AddBrainrot(plr, brainrotName, amount, options)
-	local DataManager = require(script.Parent.Parent.Data.DataManager)
-
+function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	if typeof(plr) ~= "Instance" or not plr:IsA("Player") then
 		return false
 	end
 
-	brainrotName = validName(brainrotName)
-	if not brainrotName then
+	crewMemberName = validName(crewMemberName)
+	if not crewMemberName then
 		return false
 	end
 
@@ -82,14 +60,14 @@ function Module:AddBrainrot(plr, brainrotName, amount, options)
 		return n == 0
 	end
 
-	local variantKey, baseName = getVariantAndBaseName(brainrotName)
+	local variantKey, baseName = getVariantAndBaseName(crewMemberName)
 
 	local model = findModelFor(variantKey, baseName)
 	if not model then
 		return false
 	end
 
-	local info = BrainrotsCfg[brainrotName] or BrainrotsCfg[baseName]
+	local info = CrewCatalog.GetInfoById(crewMemberName) or CrewCatalog.GetInfoById(baseName)
 	if not info then
 		return false
 	end
@@ -102,20 +80,25 @@ function Module:AddBrainrot(plr, brainrotName, amount, options)
 
 	options = if typeof(options) == "table" then options else {}
 
-	local basePath = "Inventory." .. brainrotName
-
-	local baseInfo = BrainrotsCfg[baseName] or info
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[baseName] or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
-	local bypassQuickSlotCapacity = options.TutorialReward == true
+	local bypassQuickSlotCapacity = options.TutorialReward == true or options._QuickSlotCapacityReserved == true
 
-	if not bypassQuickSlotCapacity and not BrainrotQuickSlotService.CanGainOrNotify(plr, n, "AddBrainrot:" .. brainrotName) then
+	if not bypassQuickSlotCapacity and not CrewQuickSlotService.CanGainOrNotify(plr, n, "AddCrewMember:" .. crewMemberName) then
 		return false
 	end
 
-	BrainrotInstanceService.EnsureInventoryMetadata(plr, brainrotName, {
-		StorageName = brainrotName,
+	if CrewInstanceService.IsInventoryWriteAuthorityEnabled() == true then
+		local status = CrewInstanceService.ValidateInventoryMirrors(plr)
+		if status == nil or status.Passed ~= true then
+			return false
+		end
+	end
+
+	CrewInstanceService.EnsureInventoryMetadata(plr, crewMemberName, {
+		StorageName = crewMemberName,
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = tostring(info.Rarity or "Common"),
@@ -124,8 +107,7 @@ function Module:AddBrainrot(plr, brainrotName, amount, options)
 		GoldenRender = goldenRender,
 		DiamondRender = diamondRender,
 	})
-	DataManager:AdjustValue(plr, basePath .. ".Quantity", n)
-	BrainrotInstanceService.CreateInstances(plr, brainrotName, n, {
+	local createdIds = CrewInstanceService.CreateInstances(plr, crewMemberName, n, {
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = tostring(info.Rarity or "Common"),
@@ -139,6 +121,9 @@ function Module:AddBrainrot(plr, brainrotName, amount, options)
 		TutorialToken = tostring(options.TutorialToken or ""),
 		_QuickSlotCapacityReserved = true,
 	})
+	if #createdIds ~= n then
+		return false
+	end
 
 	return true
 end

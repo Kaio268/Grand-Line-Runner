@@ -6,6 +6,7 @@ local React = require(Packages:WaitForChild("React"))
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
 
 local e = React.createElement
+local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
 
 local function clearChildren(instance)
 	for _, child in ipairs(instance:GetChildren()) do
@@ -21,6 +22,66 @@ local function setPreviewPartDefaults(part)
 	part.Massless = true
 	part.TopSurface = Enum.SurfaceType.Smooth
 	part.BottomSurface = Enum.SurfaceType.Smooth
+end
+
+local function getCrewPreviewAssetRoot()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	return assets and assets:FindFirstChild(CREW_PREVIEW_ASSET_ROOT_NAME) or nil
+end
+
+local function findCrewPreviewModel(modelName)
+	local root = getCrewPreviewAssetRoot()
+	local name = tostring(modelName or "")
+	if not root or name == "" then
+		return nil
+	end
+
+	local direct = root:FindFirstChild(name)
+	if direct and direct:IsA("Model") then
+		return direct
+	end
+
+	local descendant = root:FindFirstChild(name, true)
+	if descendant and descendant:IsA("Model") then
+		return descendant
+	end
+
+	return nil
+end
+
+local function sanitizeCrewPreviewClone(previewModel)
+	for _, descendant in ipairs(previewModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			setPreviewPartDefaults(descendant)
+		elseif descendant:IsA("BaseScript") or descendant:IsA("ModuleScript") or descendant:IsA("Sound") then
+			descendant:Destroy()
+		elseif descendant:IsA("ParticleEmitter")
+			or descendant:IsA("Trail")
+			or descendant:IsA("Beam")
+			or descendant:IsA("PointLight")
+			or descendant:IsA("SpotLight")
+			or descendant:IsA("SurfaceLight")
+		then
+			descendant.Enabled = false
+		end
+	end
+end
+
+local function cloneCrewPreviewModel(modelName)
+	local template = findCrewPreviewModel(modelName)
+	if not template then
+		return nil
+	end
+
+	local ok, clone = pcall(function()
+		return template:Clone()
+	end)
+	if not ok or typeof(clone) ~= "Instance" then
+		return nil
+	end
+
+	sanitizeCrewPreviewClone(clone)
+	return clone
 end
 
 local function positionPreviewModel(previewModel, previewKind, previewName)
@@ -99,6 +160,8 @@ local function PreviewViewport(props)
 		local previewModel
 		if props.previewKind == "DevilFruit" then
 			previewModel = DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
+		elseif props.previewKind == "CrewMember" then
+			previewModel = cloneCrewPreviewModel(props.previewName)
 		end
 
 		if not previewModel then

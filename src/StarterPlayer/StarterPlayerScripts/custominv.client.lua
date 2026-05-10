@@ -5,14 +5,16 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
-local snapshotRemote = ReplicatedStorage:WaitForChild("InventorySnapshotRequest", 15)
+local snapshotRemote = ReplicatedStorage:WaitForChild("CrewMemberInventorySnapshotRequest", 15)
 if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
-	warn("[INV][SNAPSHOT][CLIENT] InventorySnapshotRequest is not a RemoteFunction")
+	warn("[INV][SNAPSHOT][CLIENT] Inventory snapshot request remote is not a RemoteFunction")
 	snapshotRemote = nil
 end
-local equipRemote = ReplicatedStorage:WaitForChild("EquipToggleRemote")
+local equipRemote = ReplicatedStorage:WaitForChild("CrewMemberEquipToggleRemote", 15)
 
-local Brainrots = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Brainrots = CrewCatalog.GetLegacyConfig()
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
@@ -29,6 +31,11 @@ local RESOURCE_ORDER = {
 	CommonShipMaterial = 5,
 	RareShipMaterial = 6,
 }
+local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
+
+local function getCrewInfo(name)
+	return CrewCatalog.GetInfoById(name) or Brainrots[name]
+end
 local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
 local INVENTORY_MENU_DEBUG = true
 
@@ -382,6 +389,165 @@ local function clearResourcePreview(button)
 	end
 end
 
+local function clearCrewPreview(button)
+	local viewport = button:FindFirstChild("CrewViewport")
+	if viewport then
+		viewport:Destroy()
+	end
+end
+
+local function setPreviewPartDefaults(part)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+end
+
+local function getCrewPreviewAssetRoot()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	return assets and assets:FindFirstChild(CREW_PREVIEW_ASSET_ROOT_NAME) or nil
+end
+
+local function findCrewPreviewModel(modelName)
+	local root = getCrewPreviewAssetRoot()
+	local name = tostring(modelName or "")
+	if not root or name == "" then
+		return nil
+	end
+
+	local direct = root:FindFirstChild(name)
+	if direct and direct:IsA("Model") then
+		return direct
+	end
+
+	local descendant = root:FindFirstChild(name, true)
+	if descendant and descendant:IsA("Model") then
+		return descendant
+	end
+
+	return nil
+end
+
+local function sanitizeCrewPreviewClone(previewModel)
+	for _, descendant in ipairs(previewModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			setPreviewPartDefaults(descendant)
+		elseif descendant:IsA("BaseScript") or descendant:IsA("ModuleScript") or descendant:IsA("Sound") then
+			descendant:Destroy()
+		elseif descendant:IsA("ParticleEmitter")
+			or descendant:IsA("Trail")
+			or descendant:IsA("Beam")
+			or descendant:IsA("PointLight")
+			or descendant:IsA("SpotLight")
+			or descendant:IsA("SurfaceLight")
+		then
+			descendant.Enabled = false
+		end
+	end
+end
+
+local function cloneCrewPreviewModel(modelName)
+	local template = findCrewPreviewModel(modelName)
+	if not template then
+		return nil
+	end
+
+	local ok, clone = pcall(function()
+		return template:Clone()
+	end)
+	if not ok or typeof(clone) ~= "Instance" then
+		return nil
+	end
+
+	sanitizeCrewPreviewClone(clone)
+	return clone
+end
+
+local function getPreviewBoundingInfo(previewModel)
+	if previewModel:IsA("BasePart") then
+		return previewModel.CFrame, previewModel.Size
+	end
+
+	local ok, cf, size = pcall(function()
+		return previewModel:GetBoundingBox()
+	end)
+	if ok then
+		return cf, size
+	end
+
+	local part = previewModel:FindFirstChildWhichIsA("BasePart", true)
+	if part then
+		return part.CFrame, part.Size
+	end
+
+	return CFrame.new(), Vector3.new(1, 1, 1)
+end
+
+local function ensureCrewPreview(button, modelName)
+	local toolIcon = ensureButtonStructure(button).ToolIcon
+	local modelClone = cloneCrewPreviewModel(modelName)
+	if not modelClone then
+		clearCrewPreview(button)
+		return false
+	end
+
+	local viewport = button:FindFirstChild("CrewViewport")
+	if not viewport then
+		viewport = Instance.new("ViewportFrame")
+		viewport.Name = "CrewViewport"
+		viewport.Active = false
+		viewport.BackgroundTransparency = 1
+		viewport.BorderSizePixel = 0
+		viewport.LightColor = Color3.fromRGB(255, 252, 246)
+		viewport.LightDirection = Vector3.new(-1, -1, -1)
+		viewport.Ambient = Color3.fromRGB(206, 196, 186)
+		viewport.Parent = button
+	end
+
+	viewport.AnchorPoint = toolIcon.AnchorPoint
+	viewport.Position = toolIcon.Position
+	viewport.Size = toolIcon.Size
+	viewport.ZIndex = toolIcon.ZIndex + 1
+	viewport.Visible = true
+
+	for _, child in ipairs(viewport:GetChildren()) do
+		child:Destroy()
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewport
+	modelClone.Parent = worldModel
+
+	pcall(function()
+		modelClone:PivotTo(CFrame.Angles(math.rad(-12), math.rad(28), 0))
+	end)
+
+	for _, descendant in ipairs(modelClone:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			setPreviewPartDefaults(descendant)
+		end
+	end
+
+	local boxCF, boxSize = getPreviewBoundingInfo(modelClone)
+	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+
+	local camera = Instance.new("Camera")
+	camera.Name = "PreviewCamera"
+	camera.FieldOfView = 36
+	camera.CFrame = CFrame.lookAt(
+		boxCF.Position + Vector3.new(maxSize * 0.92, maxSize * 0.38, maxSize * 1.7),
+		boxCF.Position
+	)
+	camera.Parent = viewport
+	viewport.CurrentCamera = camera
+	toolIcon.ImageTransparency = 1
+
+	return true
+end
+
 local function createResourcePreviewPart(parent, size, color, cf, shape, material)
 	local part = Instance.new("Part")
 	part.Size = size
@@ -731,6 +897,94 @@ local function clearSnapshotOwnedItems()
 	end
 end
 
+local function getEntryDisplayMetadata(entry)
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+
+	local metadata = {}
+	local displayName = tostring(entry.DisplayName or entry.displayName or "")
+	if displayName ~= "" then
+		metadata.displayName = displayName
+	end
+
+	local rarity = tostring(entry.Rarity or entry.rarity or entry.RarityLabel or entry.rarityLabel or "")
+	if rarity ~= "" then
+		metadata.rarity = rarity
+	end
+
+	local render = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
+	if render ~= "" then
+		metadata.render = render
+	end
+
+	if metadata.displayName ~= nil or metadata.rarity ~= nil or metadata.render ~= nil then
+		return metadata
+	end
+	return nil
+end
+
+local function getEntryModelPreviewDescriptor(entry)
+	if typeof(entry) ~= "table" or typeof(entry.ModelPreview) ~= "table" then
+		return nil
+	end
+
+	local descriptor = entry.ModelPreview
+	return {
+		ModelName = tostring(descriptor.ModelName or ""),
+		ModelPath = tostring(descriptor.ModelPath or ""),
+		UsedCanonical = descriptor.UsedCanonical == true,
+		FallbackReason = descriptor.FallbackReason,
+		IsPreviewOnly = descriptor.IsPreviewOnly == true,
+		LegacyIdentity = tostring(descriptor.LegacyIdentity or ""),
+		Path = tostring(descriptor.Path or ""),
+		Source = tostring(descriptor.Source or ""),
+		ValidationAgeSeconds = tonumber(descriptor.ValidationAgeSeconds) or -1,
+	}
+end
+
+local function applyDisplayMetadataToState(state, metadata)
+	if typeof(state) ~= "table" or typeof(metadata) ~= "table" then
+		return state
+	end
+
+	state.displayName = metadata.displayName
+	state.rarity = metadata.rarity
+	state.render = metadata.render
+	return state
+end
+
+local function applyModelPreviewToState(state, descriptor)
+	if typeof(state) ~= "table" then
+		return state
+	end
+
+	if typeof(descriptor) == "table" then
+		state.modelPreview = descriptor
+	else
+		state.modelPreview = nil
+	end
+	return state
+end
+
+local function getCanonicalInventoryModelPreview(state)
+	if typeof(state) ~= "table" or typeof(state.modelPreview) ~= "table" then
+		return nil
+	end
+
+	local descriptor = state.modelPreview
+	if descriptor.IsPreviewOnly ~= true or descriptor.UsedCanonical ~= true then
+		return nil
+	end
+	if tostring(descriptor.LegacyIdentity or "") ~= tostring(state.name or "") then
+		return nil
+	end
+	if tostring(descriptor.ModelName or "") == "" then
+		return nil
+	end
+	return descriptor
+end
+
 local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 	if typeof(entries) ~= "table" then
 		return 0
@@ -744,11 +998,14 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
 				local key = kind .. "|" .. name
 				ensureAcquired(key)
-				itemState[key] = {
+				local nextState = {
 					kind = kind,
 					name = name,
 					qty = quantity,
 				}
+				applyDisplayMetadataToState(nextState, getEntryDisplayMetadata(entry))
+				applyModelPreviewToState(nextState, getEntryModelPreviewDescriptor(entry))
+				itemState[key] = nextState
 				applied += 1
 			end
 		end
@@ -770,7 +1027,7 @@ local function applyInventorySnapshot(snapshot)
 	clearSnapshotOwnedItems()
 
 	local brainrotCount = applyQuantitySnapshotEntries(snapshot.Brainrots, "Brainrot", function(name)
-		return Brainrots[name] ~= nil
+		return getCrewInfo(name) ~= nil
 	end)
 
 	local devilFruitCount = 0
@@ -912,9 +1169,12 @@ local function bindChestInventoryFolder(folder)
 	end)
 end
 
-local function getIcon(kind, name)
+local function getIcon(kind, name, state)
 	if kind == "Brainrot" then
-		local cfg = Brainrots[name]
+		if state and typeof(state.render) == "string" and state.render ~= "" then
+			return state.render
+		end
+		local cfg = getCrewInfo(name)
 		return cfg and cfg.Render or ""
 	end
 	if kind == "Chest" then
@@ -927,7 +1187,7 @@ local function getIcon(kind, name)
 	return cfg and cfg.Icon or ""
 end
 
-local function getDisplayName(kind, name)
+local function getDisplayName(kind, name, state)
 	if kind == "Chest" then
 		return ChestUtils.GetDisplayName(name)
 	end
@@ -938,11 +1198,18 @@ local function getDisplayName(kind, name)
 		local fruit = DevilFruitConfig.GetFruit(name)
 		return fruit and fruit.DisplayName or name
 	end
+	if kind == "Brainrot" then
+		if state and typeof(state.displayName) == "string" and state.displayName ~= "" then
+			return state.displayName
+		end
+		local info = getCrewInfo(name)
+		return info and tostring(info.DisplayName or info.Name or name) or name
+	end
 
 	return name
 end
 
-local function getRarity(kind, name)
+local function getRarity(kind, name, state)
 	if kind == "Chest" then
 		return ChestUtils.GetRarityLabel(name)
 	end
@@ -955,7 +1222,10 @@ local function getRarity(kind, name)
 	end
 
 	if kind == "Brainrot" then
-		local brainrot = Brainrots[name]
+		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
+			return state.rarity
+		end
+		local brainrot = getCrewInfo(name)
 		return brainrot and brainrot.Rarity or ""
 	end
 
@@ -1385,7 +1655,7 @@ local function createButton(template, parent, kind, name)
 		equipRemote:FireServer(b:GetAttribute("ItemKind"), b:GetAttribute("ItemName"))
 		if b:GetAttribute("ItemKind") == "Chest" then
 			chestDebug(
-				"EquipToggleRemote fired from click payload={kind=%s,name=%s}",
+				"CrewMemberEquipToggleRemote fired from click payload={kind=%s,name=%s}",
 				tostring(b:GetAttribute("ItemKind")),
 				tostring(b:GetAttribute("ItemName"))
 			)
@@ -1578,20 +1848,26 @@ rebuildUI = function()
 			end
 			local b = hotbarButtons[k]
 			b.LayoutOrder = i
-			local displayName = getDisplayName(st.kind, st.name)
-			local rarityLabel = getRarity(st.kind, st.name)
+			local displayName = getDisplayName(st.kind, st.name, st)
+			local rarityLabel = getRarity(st.kind, st.name, st)
 			b:SetAttribute("DisplayName", displayName)
 			b:SetAttribute("RarityLabel", rarityLabel)
-			setCommon(b, getIcon(st.kind, st.name), displayName)
+			setCommon(b, getIcon(st.kind, st.name, st), displayName)
 			if st.kind == "DevilFruit" then
 				ensureDevilFruitPreview(b, st.name)
 				clearChestPreview(b)
+				clearResourcePreview(b)
+				clearCrewPreview(b)
 			elseif st.kind == "Chest" then
 				clearDevilFruitPreview(b)
 				ensureChestPreview(b, st.name)
+				clearResourcePreview(b)
+				clearCrewPreview(b)
 			else
 				clearDevilFruitPreview(b)
 				clearChestPreview(b)
+				clearResourcePreview(b)
+				clearCrewPreview(b)
 			end
 			setSlotVisual(b, slotKeyForIndex(i))
 
@@ -1622,23 +1898,31 @@ rebuildUI = function()
 			end
 			local b = invButtons[k]
 			b.LayoutOrder = i
-			local displayName = getDisplayName(st.kind, st.name)
-			local rarityLabel = getRarity(st.kind, st.name)
+			local displayName = getDisplayName(st.kind, st.name, st)
+			local rarityLabel = getRarity(st.kind, st.name, st)
 			b:SetAttribute("DisplayName", displayName)
 			b:SetAttribute("RarityLabel", rarityLabel)
-			setCommon(b, getIcon(st.kind, st.name), displayName)
+			setCommon(b, getIcon(st.kind, st.name, st), displayName)
 			if st.kind == "Chest" then
 				clearDevilFruitPreview(b)
 				clearResourcePreview(b)
+				clearCrewPreview(b)
 				ensureChestPreview(b, st.name)
 			elseif st.kind == "Resource" then
 				clearDevilFruitPreview(b)
 				clearChestPreview(b)
+				clearCrewPreview(b)
 				ensureResourcePreview(b, st.name)
 			else
 				clearDevilFruitPreview(b)
 				clearChestPreview(b)
 				clearResourcePreview(b)
+				local modelPreview = getCanonicalInventoryModelPreview(st)
+				if modelPreview then
+					ensureCrewPreview(b, modelPreview.ModelName)
+				else
+					clearCrewPreview(b)
+				end
 			end
 			setSlotVisual(b, nil)
 			setAmount(b, st.qty or 0)
@@ -1648,13 +1932,14 @@ rebuildUI = function()
 			end
 			local b = invButtons[k]
 			b.LayoutOrder = i
-			local displayName = getDisplayName(st.kind, st.name)
-			local rarityLabel = getRarity(st.kind, st.name)
+			local displayName = getDisplayName(st.kind, st.name, st)
+			local rarityLabel = getRarity(st.kind, st.name, st)
 			b:SetAttribute("DisplayName", displayName)
 			b:SetAttribute("RarityLabel", rarityLabel)
-			setCommon(b, getIcon(st.kind, st.name), displayName)
+			setCommon(b, getIcon(st.kind, st.name, st), displayName)
 			clearChestPreview(b)
 			clearResourcePreview(b)
+			clearCrewPreview(b)
 			ensureDevilFruitPreview(b, st.name)
 			setSlotVisual(b, nil)
 			setAmount(b, st.qty or 0)
@@ -1723,17 +2008,20 @@ updateRemote.OnClientEvent:Connect(function(kind, name, v)
 	end
 
 	if kind == "Brainrot" then
-		local cfg = Brainrots[name]
+		local cfg = getCrewInfo(name)
 		if not cfg then return end
 
 		local qty = tonumber(v) or 0
 		local key = "Brainrot|" .. name
+		local previous = itemState[key]
 
 		if qty <= 0 then
 			itemState[key] = nil
 		else
 			ensureAcquired(key)
-			itemState[key] = { kind = "Brainrot", name = name, qty = qty }
+			local nextState = applyDisplayMetadataToState({ kind = "Brainrot", name = name, qty = qty }, previous)
+			applyModelPreviewToState(nextState, previous and previous.modelPreview)
+			itemState[key] = nextState
 		end
 
 	elseif kind == "Gear" then
@@ -1857,7 +2145,7 @@ local function activateSlot(slotKey)
 				equipRemote:FireServer(b:GetAttribute("ItemKind"), b:GetAttribute("ItemName"))
 				if b:GetAttribute("ItemKind") == "Chest" then
 					chestDebug(
-						"EquipToggleRemote fired from slot payload={kind=%s,name=%s}",
+						"CrewMemberEquipToggleRemote fired from slot payload={kind=%s,name=%s}",
 						tostring(b:GetAttribute("ItemKind")),
 						tostring(b:GetAttribute("ItemName"))
 					)

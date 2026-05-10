@@ -37,7 +37,36 @@ local SuppressSessionEndKickByUserId: {[number]: boolean} = {}
 local DataManagerInitialized = false
 
 --// GlobalStore
-local GlobalData = GlobalStore.New("__GlobalData", {Players = {}})
+local GlobalDataTemplate = {Players = {}}
+local globalDataOk, globalDataResult = pcall(function()
+	return GlobalStore.New("__GlobalData", GlobalDataTemplate)
+end)
+
+local function cloneGlobalValue(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, childValue in pairs(value) do
+		copy[key] = cloneGlobalValue(childValue)
+	end
+	return copy
+end
+
+local GlobalData = if globalDataOk then globalDataResult else (function()
+	local memoryData = cloneGlobalValue(GlobalDataTemplate)
+	warn("[DataManager]: GlobalStore unavailable; using in-memory global data for this server: ", globalDataResult)
+	return {
+		Get = function(_, key)
+			return cloneGlobalValue(memoryData[key])
+		end,
+		Set = function(_, key, value)
+			memoryData[key] = cloneGlobalValue(value)
+			return true
+		end,
+	}
+end)()
 
 --// Services 
 local Players = game:GetService("Players")
@@ -56,6 +85,8 @@ local HARD_RESET_SAVE_TIMEOUT = 30
 local PLAYER_DATA_READY_ATTRIBUTE = "PlayerDataReady"
 local PLAYER_DATA_READY_AT_ATTRIBUTE = "PlayerDataReadyAt"
 local DATA_READY_DEBUG = true
+local CREW_LEGACY_DEPRECATION_AUDIT_PATH = "CrewMemberLegacyDeprecationAudit"
+local MAX_LEGACY_DEPRECATION_RECENT_EVENTS = 20
 
 --[[
 	Primary message functions to DataManager:MessageAsync() function
@@ -88,6 +119,184 @@ local function DeepCopyTable(value)
 	end
 
 	return copy
+end
+
+local function getCrewShadowFlags()
+	local ok, flags = pcall(function()
+		local CrewStorage = require(game.ServerScriptService.Modules.CrewStorage)
+		return CrewStorage.GetShadowFlags()
+	end)
+	if ok == true and typeof(flags) == "table" then
+		return flags
+	end
+	return {
+		CrewMemberLegacyUsageTelemetryEnabled = true,
+		CrewMemberLegacyWriteFreezeEnabled = false,
+	}
+end
+
+local function getPathRootAndSegments(path: string)
+	local normalizedPath = NormalizeDataPath(path)
+	local segments = if typeof(normalizedPath) == "string" then normalizedPath:split(".") else {}
+	if segments[1] == "Data" then
+		table.remove(segments, 1)
+	end
+	return segments[1], segments
+end
+
+local function classifyLegacyPath(path: string)
+	local root, segments = getPathRootAndSegments(path)
+	local leaf = segments[#segments]
+	if root == "BrainrotInventory" then
+		return "BrainrotInventory", "legacy_inventory"
+	end
+	if root == "BrainrotQuickSlots" then
+		return "BrainrotQuickSlots", "legacy_quick_slots"
+	end
+	if root == "BrainrotStorage" then
+		return "BrainrotStorage", "legacy_quick_slots_storage"
+	end
+	if root == "IncomeBrainrots" then
+		return "IncomeBrainrots", "legacy_stand_income"
+	end
+	if root == "StandsLevels" then
+		return "StandsLevels", "legacy_stand_levels"
+	end
+	if root == "Inventory" and #segments >= 3 then
+		local storageName = tostring(segments[2] or "")
+		if storageName ~= "Feed" and storageName ~= "DevilFruits" and storageName ~= "Potions" then
+			if leaf == "Quantity" then
+				return "Inventory.*.Quantity", "legacy_inventory_quantity"
+			end
+			if leaf == "Level" or leaf == "CurrentXP" then
+				return "Inventory.*." .. tostring(leaf), "legacy_progression_mirror"
+			end
+		end
+	end
+	return nil, nil
+end
+
+local APPROVED_LEGACY_WRITE_SOURCES = {
+	CrewInstanceService = true,
+	CrewQuickSlotService = true,
+	CrewStandIncomeAuthority = true,
+	CrewFoodProgression = true,
+	CrewIncomeRuntime = true,
+	CrewMemberShadowWriter = true,
+	CrewMigrationPlanner = true,
+	IndexCollectionService = true,
+	ShipResetService = true,
+}
+
+local WRAPPER_LEGACY_USAGE_SOURCES = {
+	FirstTimeTutorialService = true,
+	DevilFruitDevCommands = true,
+	Index = true,
+}
+
+local function getLegacyWriteClassification(stack)
+	local safeStack = tostring(stack or "")
+	for sourceName in pairs(APPROVED_LEGACY_WRITE_SOURCES) do
+		if string.find(safeStack, sourceName, 1, true) ~= nil then
+			return "approved_mirror_write", sourceName
+		end
+	end
+	for sourceName in pairs(WRAPPER_LEGACY_USAGE_SOURCES) do
+		if string.find(safeStack, sourceName, 1, true) ~= nil then
+			return "wrapper_write", sourceName
+		end
+	end
+	return "unexpected_direct_write", "unknown"
+end
+
+local function getLegacyDeprecationAudit(profile)
+	if typeof(profile.Data[CREW_LEGACY_DEPRECATION_AUDIT_PATH]) ~= "table" then
+		profile.Data[CREW_LEGACY_DEPRECATION_AUDIT_PATH] = {}
+	end
+	return profile.Data[CREW_LEGACY_DEPRECATION_AUDIT_PATH]
+end
+
+local function incrementAuditCounter(audit, key)
+	audit[key] = math.max(0, math.floor(tonumber(audit[key]) or 0)) + 1
+end
+
+local function recordLegacyDeprecationEvent(_player, profile, event)
+	if typeof(profile) ~= "table" or typeof(profile.Data) ~= "table" or typeof(event) ~= "table" then
+		return nil
+	end
+
+	local audit = getLegacyDeprecationAudit(profile)
+	incrementAuditCounter(audit, "TotalEventCount")
+	if event.Kind == "legacy_write" then
+		incrementAuditCounter(audit, "DirectLegacyWriteCount")
+		if event.Classification == "approved_mirror_write" then
+			incrementAuditCounter(audit, "ApprovedMirrorWriteCount")
+		elseif event.Classification == "wrapper_write" then
+			incrementAuditCounter(audit, "WrapperUsageCount")
+		elseif event.Classification == "unexpected_direct_write" then
+			incrementAuditCounter(audit, "UnexpectedDirectWriteCount")
+			audit.LastOffendingSource = event.Source
+			audit.LastOffendingPath = event.Path
+			audit.LastOffendingRoot = event.Root
+		end
+	elseif event.Kind == "legacy_wrapper_usage" then
+		incrementAuditCounter(audit, "WrapperUsageCount")
+	elseif event.Kind == "legacy_fallback" then
+		incrementAuditCounter(audit, "FallbackCount")
+	end
+
+	audit.LastEvent = event
+	audit.UpdatedAt = os.time()
+	local recent = if typeof(audit.RecentEvents) == "table" then audit.RecentEvents else {}
+	recent[#recent + 1] = event
+	while #recent > MAX_LEGACY_DEPRECATION_RECENT_EVENTS do
+		table.remove(recent, 1)
+	end
+	audit.RecentEvents = recent
+	return audit
+end
+
+local function inspectLegacyWrite(player, profile, path: string, operation: string)
+	local root, category = classifyLegacyPath(path)
+	if root == nil then
+		return true, nil
+	end
+
+	local flags = getCrewShadowFlags()
+	if flags.CrewMemberLegacyUsageTelemetryEnabled ~= true and flags.CrewMemberLegacyWriteFreezeEnabled ~= true then
+		return true, nil
+	end
+
+	local stack = debug.traceback("", 3)
+	local classification, source = getLegacyWriteClassification(stack)
+	local event = {
+		Kind = "legacy_write",
+		Operation = tostring(operation or ""),
+		Path = tostring(path or ""),
+		Root = root,
+		Category = category,
+		Classification = classification,
+		Source = source,
+		Player = player and player.Name or "",
+		UserId = player and player.UserId or 0,
+		RecordedAt = os.time(),
+		Stack = tostring(stack):sub(1, 1600),
+		FailClosed = flags.CrewMemberLegacyWriteFreezeEnabled == true and classification == "unexpected_direct_write",
+	}
+	recordLegacyDeprecationEvent(player, profile, event)
+	if event.FailClosed == true then
+		warn(string.format(
+			"[CrewLegacyDeprecation] blocked unexpected legacy write player=%s path=%s operation=%s root=%s source=%s",
+			player and player.Name or "unknown",
+			tostring(path),
+			tostring(operation),
+			tostring(root),
+			tostring(source)
+		))
+		return false, "legacy_write_frozen"
+	end
+
+	return true, nil
 end
 
 local function CreateProfileFromTemplate()
@@ -295,6 +504,40 @@ function DataManager:TryGetReplica(player: Player)
 	return Replicas[player]
 end
 
+function DataManager:RecordLegacyDeprecationUsage(player: Player, kind: string, details: {[string]: any}?)
+	local profile = self:TryGetProfile(player)
+	if profile == nil or typeof(profile.Data) ~= "table" then
+		return nil, "no_profile"
+	end
+
+	local event = DeepCopyTable(details or {})
+	event.Kind = tostring(kind or "legacy_wrapper_usage")
+	event.Player = player and player.Name or ""
+	event.UserId = player and player.UserId or 0
+	event.RecordedAt = os.time()
+	return recordLegacyDeprecationEvent(player, profile, event), nil
+end
+
+function DataManager:GetLegacyDeprecationStatus(player: Player)
+	local profile = self:TryGetProfile(player)
+	if profile == nil or typeof(profile.Data) ~= "table" then
+		return nil, "no_profile"
+	end
+
+	local audit = profile.Data[CREW_LEGACY_DEPRECATION_AUDIT_PATH]
+	if typeof(audit) ~= "table" then
+		return {
+			DirectLegacyWriteCount = 0,
+			ApprovedMirrorWriteCount = 0,
+			WrapperUsageCount = 0,
+			FallbackCount = 0,
+			UnexpectedDirectWriteCount = 0,
+		}, nil
+	end
+
+	return DeepCopyTable(audit), nil
+end
+
 local function ReadValueFromProfile(profile, path: string)
 	local _, _, _, value = ResolveDataPath(profile, path, false)
 	return value
@@ -393,6 +636,11 @@ function DataManager:SetValue(player: Player, path: string, newValue : (string |
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
+		local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "SetValue")
+		if legacyWriteAllowed ~= true then
+			return false, legacyWriteReason
+		end
+
 		local defaultValue = if newValue == nil then true else DeepCopyTable(newValue)
 		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
@@ -489,6 +737,11 @@ function DataManager:AddValue(player, path, addValue)
 		return false, "missing_state"
 	end
 
+	local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "AddValue")
+	if legacyWriteAllowed ~= true then
+		return false, legacyWriteReason
+	end
+
 	local defaultValue = if typeof(addValue) == "number" then 0 else {}
 	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
@@ -539,6 +792,11 @@ function DataManager:SubValue(player : Player, path : string, subValue : (number
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
+		local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "SubValue")
+		if legacyWriteAllowed ~= true then
+			return false, legacyWriteReason
+		end
+
 		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, false)
 		if err then
 			warn(err)
@@ -583,6 +841,11 @@ function DataManager:Clear(player : Player, path : string)
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
+		local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "Clear")
+		if legacyWriteAllowed ~= true then
+			return false, legacyWriteReason
+		end
+
 		local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, false)
 		if err then
 			warn(err)
@@ -1073,6 +1336,43 @@ local function markPlayerDataReady(player: Player, startedAt: number)
 	)
 end
 
+local function runCrewMemberShadowWriteOnProfileReady(player: Player, profile)
+	local ok, result = pcall(function()
+		local CrewStorage = require(game.ServerScriptService.Modules.CrewStorage)
+		local flags = CrewStorage.GetShadowFlags()
+		if flags.CrewMemberShadowWriteEnabled ~= true then
+			return {
+				DidWrite = false,
+				SkippedReason = "shadow_write_disabled",
+			}
+		end
+
+		local CrewMemberShadowWriter = require(game.ServerScriptService.Modules.CrewMemberShadowWriter)
+		return CrewMemberShadowWriter.RunProfileReadyProjection(profile.Data, {
+			Player = player,
+			Flags = flags,
+		})
+	end)
+
+	if not ok then
+		warn(string.format(
+			"[DataManager]: CrewMember shadow-write hook failed for %s: %s",
+			player.Name,
+			tostring(result)
+		))
+	end
+
+	return if ok then result else nil
+end
+
+local function isCrewMemberCanonicalFirstSaveLoadEnabled()
+	local ok, flags = pcall(function()
+		local CrewStorage = require(game.ServerScriptService.Modules.CrewStorage)
+		return CrewStorage.GetShadowFlags()
+	end)
+	return ok == true and flags.CrewMemberSaveLoadCanonicalFirstEnabled == true
+end
+
 function PlayerAdded(player: Player)
 	local dataReadyStartedAt = os.clock()
 	player:SetAttribute(PLAYER_DATA_READY_ATTRIBUTE, false)
@@ -1119,6 +1419,9 @@ function PlayerAdded(player: Player)
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
 		ProfileMigrations.Apply(profile.Data)
+		if isCrewMemberCanonicalFirstSaveLoadEnabled() then
+			runCrewMemberShadowWriteOnProfileReady(player, profile)
+		end
 		ValidationChecks.WarnProfileData(player, profile.Data)
 
 		profile.OnSessionEnd:Connect(function()
@@ -1162,6 +1465,9 @@ function PlayerAdded(player: Player)
 			self:Leaderstats(player)
 		end
 		markPlayerDataReady(player, dataReadyStartedAt)
+		if not isCrewMemberCanonicalFirstSaveLoadEnabled() then
+			task.spawn(runCrewMemberShadowWriteOnProfileReady, player, profile)
+		end
 		DataManager:SetupBoostListeners(player)
 	else
 		player:Kick("Profile load fail - Please rejoin!")
@@ -1278,6 +1584,36 @@ function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()),
 	end
 
 	return Enum.ProductPurchaseDecision.NotProcessedYet
+end
+
+function DataManager.RunProductReceiptIdempotencyCanary(dataManager, player: Player, receiptInfo, grant_purchase)
+	if RunService:IsStudio() ~= true then
+		return nil, "studio_required"
+	end
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, "player_required"
+	end
+	if typeof(receiptInfo) ~= "table" then
+		return nil, "receipt_info_required"
+	end
+	if typeof(grant_purchase) ~= "function" then
+		return nil, "grant_purchase_required"
+	end
+
+	local purchaseId = tostring(receiptInfo.PurchaseId or "")
+	if purchaseId == "" then
+		return nil, "purchase_id_required"
+	end
+	if tonumber(receiptInfo.PlayerId) ~= player.UserId then
+		return nil, "receipt_player_mismatch"
+	end
+
+	local profile = dataManager:TryGetProfile(player)
+	if profile == nil or typeof(profile.Data) ~= "table" then
+		return nil, "profile_or_replica_unavailable"
+	end
+
+	return PurchaseIdCheckAsync(profile, purchaseId, grant_purchase), nil
 end
 local MessagingService = game:GetService("MessagingService") -- <--- DODANE
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -1463,6 +1799,11 @@ function DataManager:AdjustValue(player: Player, path: string, delta: number)
 	local profile = self:GetProfile(player)
 	local replica = self:GetReplica(player)
 	if not profile or not replica then return end
+
+	local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "AdjustValue")
+	if legacyWriteAllowed ~= true then
+		return nil, legacyWriteReason
+	end
 
 	-- upewnij się, że ścieżka istnieje i ma początkowo 0
 	local parent, leafKey, pathTable, current, err = ResolveDataPath(profile, path, true, 0)

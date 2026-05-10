@@ -10,7 +10,7 @@ local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
-local BrainrotInteraction = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Brainrot"):WaitForChild("Interaction"))
+local CrewInteraction = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
@@ -894,7 +894,7 @@ local function claimWorldChest(player, rewardData)
 		return resolveActionResponse(player, false, nil, "already_carrying_reward")
 	end
 	if player:GetAttribute("CarriedBrainrot") ~= nil then
-		return resolveActionResponse(player, false, "You cannot pick up a chest while carrying a brainrot.", "carrying_brainrot")
+		return resolveActionResponse(player, false, "You cannot pick up a chest while carrying a Crewmate.", "carrying_brainrot")
 	end
 
 	local tierName = tostring(rewardData and rewardData.Tier or "Wooden")
@@ -990,9 +990,9 @@ local function dropCarriedReward(player, options)
 end
 
 local function dropCarriedBrainrot(player, dropPosition)
-	local ok, result = BrainrotInteraction.DropHeldAtPosition(BrainrotInteraction.GetActiveContext(), player, nil, dropPosition)
+	local ok, result = CrewInteraction.DropHeldAtPosition(CrewInteraction.GetActiveContext(), player, nil, dropPosition)
 	if ok then
-		return resolveActionResponse(player, true, "Brainrot dropped.")
+		return resolveActionResponse(player, true, "Crewmate dropped.")
 	end
 
 	return resolveActionResponse(player, false, nil, tostring(result or "no_held_brainrot"))
@@ -1294,8 +1294,8 @@ local function handleRequest(player, actionName, payload)
 			})
 		end
 
-		local brainrotContext = BrainrotInteraction.GetActiveContext()
-		if player:GetAttribute("CarriedBrainrot") ~= nil or BrainrotInteraction.HasHeld(brainrotContext, player) then
+		local brainrotContext = CrewInteraction.GetActiveContext()
+		if player:GetAttribute("CarriedBrainrot") ~= nil or CrewInteraction.HasHeld(brainrotContext, player) then
 			return dropCarriedBrainrot(player, dropPosition)
 		end
 

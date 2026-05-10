@@ -1992,7 +1992,7 @@ local function captainsLogRow(props)
 			Font = Enum.Font.Gotham,
 			Position = UDim2.fromOffset(104, 38),
 			Size = UDim2.new(1, -360, 0, 18),
-			Text = string.format("%s  |  %s", tostring(entry.subtitle or "Brainrot"), tostring(entry.standName or "Stand")),
+			Text = string.format("%s  |  %s", tostring(entry.subtitle or "Crewmate"), tostring(entry.standName or "Stand")),
 			TextColor3 = Color3.fromRGB(181, 191, 210),
 			TextSize = 12,
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -2443,8 +2443,8 @@ end
 local function App(props)
 	local summary = props.summary or {}
 	local titles = props.titles or {}
-	local brainrotQuickSlotsUnlocked = summary.brainrotQuickSlotsUnlocked or 0
-	local brainrotQuickSlotsMax = summary.brainrotQuickSlotsMax or brainrotQuickSlotsUnlocked
+	local crewQuickSlotsUnlocked = summary.crewQuickSlotsUnlocked or summary.brainrotQuickSlotsUnlocked or 0
+	local crewQuickSlotsMax = summary.crewQuickSlotsMax or summary.brainrotQuickSlotsMax or crewQuickSlotsUnlocked
 	local activeView = props.activeView or "Inventory"
 	local showingCaptainLog = activeView == "CaptainLog"
 	local showingTitles = activeView == "Titles"
@@ -2520,7 +2520,7 @@ local function App(props)
 					Font = Enum.Font.GothamBold,
 					Position = UDim2.fromOffset(0, 0),
 					Size = UDim2.new(1, 0, 0, 14),
-					Text = string.format("Quick Equip Slots: %d / %d", brainrotQuickSlotsUnlocked, brainrotQuickSlotsMax),
+					Text = string.format("Quick Equip Slots: %d / %d", crewQuickSlotsUnlocked, crewQuickSlotsMax),
 					TextColor3 = PALETTE.Steel,
 					TextSize = 11,
 					TextXAlignment = Enum.TextXAlignment.Left,
@@ -2687,7 +2687,7 @@ local function App(props)
 				{ label = "Beli", value = formatNumber(summary.doubloons or 0) .. " Beli", valueColor3 = PALETTE.Gold },
 				{
 					label = "Quick Equip Slots",
-					value = string.format("%d / %d", brainrotQuickSlotsUnlocked, brainrotQuickSlotsMax),
+					value = string.format("%d / %d", crewQuickSlotsUnlocked, crewQuickSlotsMax),
 					valueColor3 = PALETTE.Sea,
 				},
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
@@ -2982,7 +2982,7 @@ local function App(props)
 						Size = UDim2.new(1, -320, 0, 18),
 						Text = showingCaptainLog
 							and string.format(
-								"%d of %d placed brainrots visible in the log",
+								"%d of %d placed crewmates visible in the log",
 								(props.captainLog and props.captainLog.filteredCount) or 0,
 								(props.captainLog and props.captainLog.totalCount) or 0
 							)
@@ -3021,7 +3021,7 @@ local function App(props)
 							ClearTextOnFocus = false,
 							Font = Enum.Font.GothamBold,
 							PlaceholderColor3 = Color3.fromRGB(133, 136, 144),
-							PlaceholderText = showingCaptainLog and "Search placed brainrots..."
+							PlaceholderText = showingCaptainLog and "Search placed crewmates..."
 								or (showingTitles and "Search titles..." or "Search inventory..."),
 							Position = UDim2.fromOffset(36, 0),
 							Size = UDim2.new(1, -44, 1, 0),
@@ -3098,7 +3098,7 @@ local function App(props)
 								Font = Enum.Font.GothamBold,
 								Position = UDim2.new(1, -16, 10 / 58, 0),
 								Size = UDim2.fromOffset(180, 14),
-								Text = "Placed Brainrots",
+								Text = "Placed Crewmates",
 								TextColor3 = PALETTE.Muted,
 								TextSize = 11,
 								TextXAlignment = Enum.TextXAlignment.Right,
@@ -3229,8 +3229,8 @@ local function App(props)
 							Size = UDim2.fromOffset(360, 26),
 							Text = showingCaptainLog
 									and (((props.captainLog and props.captainLog.totalCount) or 0) > 0
-										and "No placed brainrots match that search."
-										or "No brainrots are placed on your ship yet.")
+										and "No placed crewmates match that search."
+										or "No crewmates are placed on your ship yet.")
 								or (showingTitles
 									and (((props.titles and props.titles.totalCount) or 0) > 0
 										and "No titles match that search."

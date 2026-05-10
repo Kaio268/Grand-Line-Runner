@@ -1,5 +1,5 @@
 do
-	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotSpawnSettings"))
+return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewSpawnSettings"))
 end
 
 return {

@@ -68,7 +68,7 @@ local function getCarriedReward()
 		local carriedBrainrotImage = player:GetAttribute("CarriedBrainrotImage")
 		return {
 			DisplayName = carriedBrainrot,
-			RewardType = "Brainrot",
+			RewardType = "Crewmate",
 			Image = if typeof(carriedBrainrotImage) == "string" then carriedBrainrotImage else nil,
 		}
 	end

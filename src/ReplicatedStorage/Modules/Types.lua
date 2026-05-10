@@ -1,10 +1,8 @@
 local Types = {}
 
-local ProfileStore = require(game.ServerScriptService.Framework.ProfileStore)
-
 export type DataManager = {
 	AddValue : (self: any, player: Player, path: string, addValue: (number | {any?})) -> (),
-	AddBrainrot : (self: any, player: Player, BrainrotName: string, Amount: (number | {any?})) -> (),
+	AddCrewMember : (self: any, player: Player, crewMemberName: string, amount: (number | {any?})) -> (),
 	StartBoost : (self: any, player: Player, boostName: string, timePerUnit: number, amountUsed: (number | {any?})) -> (),
 
 
