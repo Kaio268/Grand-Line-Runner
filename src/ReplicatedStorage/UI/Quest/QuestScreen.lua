@@ -108,6 +108,8 @@ local function tabButton(props)
 				Text = tostring(category.label or category.id or ""),
 				TextColor3 = textColor,
 				TextSize = 14,
+				TextStrokeColor3 = SHELL.GoldShadow,
+				TextStrokeTransparency = active and 0.42 or 0.62,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}),
 		}),
@@ -408,8 +410,8 @@ local function QuestScreen(props)
 				TextColor3 = SHELL.TextMain,
 				TextScaled = true,
 				TextSize = 30,
-				TextStrokeColor3 = SHELL.GoldShadow,
-				TextStrokeTransparency = 0.45,
+				TextStrokeColor3 = SHELL.GoldHighlight,
+				TextStrokeTransparency = 0.36,
 				ZIndex = 4,
 			}),
 			Close = e("TextButton", {
@@ -482,6 +484,8 @@ local function QuestScreen(props)
 					Text = activeCategory and tostring(activeCategory.label) or "Quests",
 					TextColor3 = Theme.Palette.Text,
 					TextSize = 18,
+					TextStrokeColor3 = SHELL.GoldShadow,
+					TextStrokeTransparency = 0.58,
 					TextXAlignment = Enum.TextXAlignment.Left,
 				}),
 				Copy = e("TextLabel", {

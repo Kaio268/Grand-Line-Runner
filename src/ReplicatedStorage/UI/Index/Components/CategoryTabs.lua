@@ -51,6 +51,8 @@ local function categoryTab(props)
 			Text = tostring(category.label or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or Theme.Palette.MutedSoft,
 			TextSize = 10,
+			TextStrokeColor3 = active and Theme.Palette.GoldShadow or Theme.Palette.Gold,
+			TextStrokeTransparency = active and 0.48 or 0.7,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
 		Count = e("TextLabel", {

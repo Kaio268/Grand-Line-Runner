@@ -86,7 +86,7 @@ local function SectionBlock(props)
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, 0),
+		Size = UDim2.fromScale(1, 0),
 		ZIndex = props.zIndex,
 	}, {
 		List = e("UIListLayout", {
@@ -102,7 +102,7 @@ local function SectionBlock(props)
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Label,
 				AnchorPoint = Vector2.new(0.5, 0),
-				Position = UDim2.new(0.5, 0, 0, 0),
+				Position = UDim2.fromScale(0.5, 0),
 				Size = UDim2.new(0.52, 0, 0, 14),
 				Text = section.eyebrow or "",
 				TextColor3 = surface.accent,
@@ -118,15 +118,15 @@ local function SectionBlock(props)
 				Text = section.title,
 				TextColor3 = Theme.Palette.Text,
 				TextSize = 34,
-				TextStrokeTransparency = 0.68,
-				TextStrokeColor3 = Theme.Palette.Shadow,
+				TextStrokeTransparency = 0.54,
+				TextStrokeColor3 = Theme.Palette.GoldShadow,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}),
 			DividerLeft = e("Frame", {
 				BackgroundColor3 = Theme.Palette.Gold,
 				BackgroundTransparency = 0.12,
 				BorderSizePixel = 0,
-				Position = UDim2.new(0, 0, 0, 60),
+				Position = UDim2.fromOffset(0, 60),
 				Size = UDim2.new(0.34, -14, 0, 3),
 			}, {
 				Corner = e("UICorner", {

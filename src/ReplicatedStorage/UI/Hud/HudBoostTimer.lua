@@ -11,7 +11,7 @@ local e = React.createElement
 local BOOST_METADATA = {
 	x2MoneyTime = {
 		label = "x2 Beli",
-		icon = "rbxassetid://112694595954613",
+		icon = "rbxassetid://123727379614328",
 		accent = Color3.fromRGB(111, 230, 124),
 		order = 1,
 	},
@@ -260,11 +260,10 @@ local function HudBoostTimer(props)
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.new(1, 0, 0, 0),
-			Size = UDim2.new(1, 0, 0, 0),
+			Position = UDim2.fromScale(1, 0),
+			Size = UDim2.fromScale(1, 0),
 		}, children),
 	})
 end
 
 return HudBoostTimer
-

@@ -62,6 +62,9 @@ local SOUND_RETURN = "Return"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
 local DEBUG_SOUND = true
 local DEBUG_TRACE = RunService:IsStudio()
+local HORO_HINT_SIZE = UDim2.fromOffset(150, 30)
+local HORO_HINT_HEAD_OFFSET = Vector3.new(0, 2.25, 0)
+local HORO_HINT_ROOT_OFFSET = Vector3.new(0, 4.9, 0)
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -511,14 +514,29 @@ local function disconnectAll(connections)
 	end
 end
 
-local function createGhostHint(rootPart)
+local function getGhostHintAnchor(rootPart, ghostModel)
+	local head = ghostModel and ghostModel:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		return head, HORO_HINT_HEAD_OFFSET
+	end
+
+	return rootPart, HORO_HINT_ROOT_OFFSET
+end
+
+local function createGhostHint(rootPart, ghostModel)
+	local anchorPart, studsOffset = getGhostHintAnchor(rootPart, ghostModel)
+	if not anchorPart then
+		return nil, nil
+	end
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HoroGhostHint"
-	gui.Size = UDim2.fromOffset(150, 36)
-	gui.StudsOffset = Vector3.new(0, 3.4, 0)
+	gui.Adornee = anchorPart
+	gui.Size = HORO_HINT_SIZE
+	gui.StudsOffset = studsOffset
 	gui.AlwaysOnTop = true
 	gui.MaxDistance = 90
-	gui.Parent = rootPart
+	gui.Parent = anchorPart
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -885,7 +903,7 @@ function HoroClient:StartLocalProjection(payload)
 	)
 
 	self:StyleLocalGhost(ghostModel, clampNumber(abilityConfig.GhostLocalTransparency, 0.2, 0, 0.95))
-	state.HintGui, state.HintLabel = createGhostHint(ghostRoot)
+	state.HintGui, state.HintLabel = createGhostHint(ghostRoot, ghostModel)
 
 	if camera then
 		camera.CameraSubject = ghostHumanoid or ghostRoot

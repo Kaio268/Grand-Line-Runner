@@ -11,6 +11,15 @@ local e = React.createElement
 local FOOTER_HEIGHT = 50
 local CARD_CORNER_RADIUS = UDim.new(0, 11)
 local IMAGE_CORNER_RADIUS = UDim.new(0, 9)
+local DEFAULT_CARD_BACKGROUND_TRANSPARENCY = 0.18
+local FRUIT_CARD_BACKGROUND_TRANSPARENCY = 0.26
+local FRUIT_BACKDROP_BACKGROUND_TRANSPARENCY = 0.28
+local LOCKED_FRUIT_SILHOUETTE_COLOR = Color3.fromRGB(6, 7, 9)
+local LOCKED_FRUIT_RIM_COLOR = Color3.fromRGB(215, 175, 86)
+local LOCKED_FRUIT_AMBIENT = Color3.fromRGB(28, 30, 36)
+local LOCKED_FRUIT_LIGHT = Color3.fromRGB(58, 54, 46)
+local LOCKED_FRUIT_RIM_AMBIENT = Color3.fromRGB(16, 14, 11)
+local LOCKED_FRUIT_RIM_LIGHT = Color3.fromRGB(82, 68, 34)
 
 local function fallbackSilhouette()
 	return e("Frame", {
@@ -254,7 +263,7 @@ local function baseCard(props)
 	return e("Frame", {
 		Active = true,
 		BackgroundColor3 = Theme.Palette.CardShell,
-		BackgroundTransparency = 0.18,
+		BackgroundTransparency = props.backgroundTransparency or DEFAULT_CARD_BACKGROUND_TRANSPARENCY,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
@@ -309,12 +318,47 @@ local function createRarityChrome(rarityStyle, hovered)
 end
 
 local function createLockedPreview(unit)
+	local isFruit = unit and unit.itemKind == "DevilFruit"
+
 	if unit.previewKind and unit.previewName then
+		if isFruit then
+			return {
+				Rim = e(PreviewViewport, {
+					previewKind = unit.previewKind,
+					previewName = unit.previewName,
+					size = UDim2.fromScale(0.88, 0.88),
+					position = UDim2.fromScale(0.5, 0.54),
+					anchorPoint = Vector2.new(0.5, 0.5),
+					tintColor = LOCKED_FRUIT_RIM_COLOR,
+					tintTransparency = 0.74,
+					tintMaterial = Enum.Material.Plastic,
+					ambient = LOCKED_FRUIT_RIM_AMBIENT,
+					lightColor = LOCKED_FRUIT_RIM_LIGHT,
+					lightDirection = Vector3.new(0.15, -0.2, -1),
+					zIndex = 2,
+				}),
+				Character = e(PreviewViewport, {
+					previewKind = unit.previewKind,
+					previewName = unit.previewName,
+					size = UDim2.fromScale(0.84, 0.84),
+					position = UDim2.fromScale(0.5, 0.54),
+					anchorPoint = Vector2.new(0.5, 0.5),
+					tintColor = LOCKED_FRUIT_SILHOUETTE_COLOR,
+					tintTransparency = 0,
+					tintMaterial = Enum.Material.Plastic,
+					ambient = LOCKED_FRUIT_AMBIENT,
+					lightColor = LOCKED_FRUIT_LIGHT,
+					lightDirection = Vector3.new(0.2, -0.25, -1),
+					zIndex = 3,
+				}),
+			}
+		end
+
 		return {
 			Shadow = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
-				size = UDim2.new(0.86, 0, 0.86, 0),
+				size = UDim2.fromScale(0.86, 0.86),
 				position = UDim2.fromScale(0.5, 0.57),
 				anchorPoint = Vector2.new(0.5, 0.5),
 				tintColor = Color3.fromRGB(0, 0, 0),
@@ -324,7 +368,7 @@ local function createLockedPreview(unit)
 			Character = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
-				size = UDim2.new(0.84, 0, 0.84, 0),
+				size = UDim2.fromScale(0.84, 0.84),
 				position = UDim2.fromScale(0.5, 0.54),
 				anchorPoint = Vector2.new(0.5, 0.5),
 				tintColor = Color3.fromRGB(0, 0, 0),
@@ -335,6 +379,22 @@ local function createLockedPreview(unit)
 	end
 
 	if unit.image and unit.image ~= "" then
+		if isFruit then
+			return {
+				Character = e("ImageLabel", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					Image = unit.image,
+					ImageColor3 = Color3.fromRGB(0, 0, 0),
+					ImageTransparency = 0,
+					Position = UDim2.fromScale(0.5, 0.54),
+					ScaleType = Enum.ScaleType.Fit,
+					Size = UDim2.fromScale(0.8, 0.8),
+					ZIndex = 3,
+				}),
+			}
+		end
+
 		return {
 			Shadow = e("ImageLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
@@ -344,7 +404,7 @@ local function createLockedPreview(unit)
 				ImageTransparency = 0.3,
 				Position = UDim2.fromScale(0.5, 0.56),
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.82, 0, 0.82, 0),
+				Size = UDim2.fromScale(0.82, 0.82),
 				ZIndex = 1,
 			}),
 			Character = e("ImageLabel", {
@@ -355,7 +415,7 @@ local function createLockedPreview(unit)
 				ImageTransparency = 0,
 				Position = UDim2.fromScale(0.5, 0.54),
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.8, 0, 0.8, 0),
+				Size = UDim2.fromScale(0.8, 0.8),
 				ZIndex = 3,
 			}),
 		}
@@ -367,12 +427,27 @@ local function createLockedPreview(unit)
 end
 
 local function createDiscoveredPreview(unit)
+	local isFruit = unit and unit.itemKind == "DevilFruit"
+
 	if unit.previewKind and unit.previewName then
+		if isFruit then
+			return {
+				Character = e(PreviewViewport, {
+					previewKind = unit.previewKind,
+					previewName = unit.previewName,
+					size = UDim2.fromScale(0.82, 0.82),
+					position = UDim2.fromScale(0.5, 0.54),
+					anchorPoint = Vector2.new(0.5, 0.5),
+					zIndex = 3,
+				}),
+			}
+		end
+
 		return {
 			Shadow = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
-				size = UDim2.new(0.86, 0, 0.86, 0),
+				size = UDim2.fromScale(0.86, 0.86),
 				position = UDim2.fromScale(0.5, 0.58),
 				anchorPoint = Vector2.new(0.5, 0.5),
 				tintColor = Color3.fromRGB(0, 0, 0),
@@ -382,7 +457,7 @@ local function createDiscoveredPreview(unit)
 			Character = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
-				size = UDim2.new(0.82, 0, 0.82, 0),
+				size = UDim2.fromScale(0.82, 0.82),
 				position = UDim2.fromScale(0.5, 0.54),
 				anchorPoint = Vector2.new(0.5, 0.5),
 				zIndex = 3,
@@ -391,6 +466,21 @@ local function createDiscoveredPreview(unit)
 	end
 
 	if unit.image and unit.image ~= "" then
+		if isFruit then
+			return {
+				Character = e("ImageLabel", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					Image = unit.image,
+					ImageColor3 = Theme.Palette.Text,
+					Position = UDim2.fromScale(0.5, 0.54),
+					ScaleType = Enum.ScaleType.Fit,
+					Size = UDim2.fromScale(0.8, 0.8),
+					ZIndex = 3,
+				}),
+			}
+		end
+
 		return {
 			Character = e("ImageLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
@@ -399,7 +489,7 @@ local function createDiscoveredPreview(unit)
 				ImageColor3 = Theme.Palette.Text,
 				Position = UDim2.fromScale(0.5, 0.54),
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.8, 0, 0.8, 0),
+				Size = UDim2.fromScale(0.8, 0.8),
 				ZIndex = 3,
 			}),
 			Shadow = e("ImageLabel", {
@@ -410,7 +500,7 @@ local function createDiscoveredPreview(unit)
 				ImageTransparency = 0.7,
 				Position = UDim2.fromScale(0.5, 0.58),
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.84, 0, 0.84, 0),
+				Size = UDim2.fromScale(0.84, 0.84),
 				ZIndex = 1,
 			}),
 		}
@@ -425,6 +515,11 @@ local function IndexCard(props)
 	local unit = props.unit or {}
 	local rarity = Theme.getRarityStyle(unit.rarity)
 	local hovered, setHovered = React.useState(false)
+	local isFruit = unit.itemKind == "DevilFruit"
+	local cardBackgroundTransparency = isFruit and FRUIT_CARD_BACKGROUND_TRANSPARENCY
+		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
+	local backdropBackgroundTransparency = isFruit and FRUIT_BACKDROP_BACKGROUND_TRANSPARENCY
+		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
 
 	if not unit.discovered then
 		local lockedChildren = createLockedPreview(unit)
@@ -445,6 +540,7 @@ local function IndexCard(props)
 		})
 
 		return baseCard({
+			backgroundTransparency = cardBackgroundTransparency,
 			layoutOrder = props.layoutOrder,
 			onMouseEnter = function()
 				setHovered(true)
@@ -472,7 +568,7 @@ local function IndexCard(props)
 				}),
 				ImageArea = e("Frame", {
 					BackgroundColor3 = Theme.Palette.CardBackdrop,
-					BackgroundTransparency = 0.18,
+					BackgroundTransparency = backdropBackgroundTransparency,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(4, 4),
 					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
@@ -502,7 +598,7 @@ local function IndexCard(props)
 		}),
 		ImageArea = e("Frame", {
 			BackgroundColor3 = cardAppearance.backdropFill,
-			BackgroundTransparency = 0.18,
+			BackgroundTransparency = backdropBackgroundTransparency,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
@@ -519,6 +615,7 @@ local function IndexCard(props)
 	end
 
 	return baseCard({
+		backgroundTransparency = cardBackgroundTransparency,
 		layoutOrder = props.layoutOrder,
 		onMouseEnter = function()
 			setHovered(true)

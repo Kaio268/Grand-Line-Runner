@@ -96,8 +96,8 @@ local function tabButton(props)
 			Text = tostring(tab.label or ""),
 			TextColor3 = textColor,
 			TextSize = 12,
-			TextStrokeColor3 = Theme.Palette.Shadow,
-			TextStrokeTransparency = 0.55,
+			TextStrokeColor3 = active and Theme.Palette.GoldShadow or Theme.Palette.Gold,
+			TextStrokeTransparency = active and 0.38 or 0.58,
 			ZIndex = 9,
 		}),
 		Count = countText and e("Frame", {
@@ -169,8 +169,8 @@ local function header(props)
 			Text = "INDEX",
 			TextColor3 = SHELL.TextMain,
 			TextSize = 28,
-			TextStrokeColor3 = SHELL.GoldShadow,
-			TextStrokeTransparency = 0.45,
+			TextStrokeColor3 = SHELL.GoldHighlight,
+			TextStrokeTransparency = 0.36,
 			ZIndex = 8,
 		}),
 		Collected = e("TextLabel", {
@@ -278,8 +278,8 @@ local function progressStrip(props)
 			Text = string.format("Collected : %d/%d", collected, total),
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 14,
-			TextStrokeColor3 = Theme.Palette.Shadow,
-			TextStrokeTransparency = 0.5,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = 0.54,
 			ZIndex = 5,
 		}),
 		Track = e("Frame", {

@@ -322,10 +322,9 @@ local function buildDiscoveredFruitSet(indexCollection, inventory, equippedFruit
 	local lifetimeFolder = indexCollection and indexCollection:FindFirstChild("DevilFruits")
 	if lifetimeFolder then
 		mergeDiscoveredFruitsFromFolder(discovered, lifetimeFolder)
-		return discovered
 	end
 
-	-- Compatibility path only: the server should backfill these into IndexCollection.
+	-- Also merge live fruit ownership so recently claimed or equipped fruits reveal immediately.
 	local devilFruitsFolder = inventory and inventory:FindFirstChild("DevilFruits")
 	if devilFruitsFolder then
 		for _, child in ipairs(devilFruitsFolder:GetChildren()) do
