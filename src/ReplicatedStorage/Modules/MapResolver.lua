@@ -32,7 +32,7 @@ local PATH_LABELS = {
 	VipRefuge = "active map Vip Refuge",
 	VipBarriers = "active map Vip Refuge.VIPBarriers",
 	VipDoorParts = "active map VIPDoorParts",
-	BrrBrrPatapimNpc = "Brr Brr Patapim NPC",
+	BrrBrrPatapimNpc = "upgrade NPC",
 	GearShopNpc = "gear shop NPC",
 	SellNpc = "sell NPC",
 	GroupReward = "active map GroupReward",
@@ -222,6 +222,68 @@ local function findDirectOrRecursiveInRoots(roots, names, className)
 		or findInRoots(roots, names, className, true)
 end
 
+local function getChildPath(parent, path, className)
+	local current = parent
+	for _, name in ipairs(path or {}) do
+		current = getChildByNames(current, { name })
+		if not current then
+			return nil
+		end
+	end
+
+	if className and not current:IsA(className) then
+		return nil
+	end
+
+	return current
+end
+
+local function findChildPathInRoots(roots, path, className, recursiveFirstSegment)
+	for _, root in ipairs(roots or {}) do
+		if root then
+			local current = root
+			local startIndex = 1
+			if recursiveFirstSegment then
+				local candidates = {}
+				if root.Name == path[1] then
+					candidates[#candidates + 1] = root
+				end
+				for _, descendant in ipairs(root:GetDescendants()) do
+					if descendant.Name == path[1] then
+						candidates[#candidates + 1] = descendant
+					end
+				end
+
+				for _, candidate in ipairs(candidates) do
+					local found = getChildPath(candidate, { table.unpack(path, 2) }, className)
+					if found then
+						return found
+					end
+				end
+
+				current = nil
+			else
+				startIndex = 1
+			end
+
+			if current then
+				for index = startIndex, #path do
+					current = getChildByNames(current, { path[index] })
+					if not current then
+						break
+					end
+				end
+
+				if current and (not className or current:IsA(className)) then
+					return current
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
 local function resolvePlayableMapRoot(map)
 	if not map then
 		return nil
@@ -263,6 +325,7 @@ local function collectRefs(options)
 		else Workspace:FindFirstChild(LEGACY_MAP_NAME)
 	local gameplayRoots = buildSearchRoots(mapRoot, mapContainer)
 	local socialRoots = buildSearchRoots(mapContainer, mapRoot, legacyMap)
+	local activeMapRoots = buildSearchRoots(mapRoot, mapContainer)
 
 	refs.MapContainer = mapContainer
 	refs.ActiveMapContainer = mapContainer
@@ -333,10 +396,14 @@ local function collectRefs(options)
 	refs.VipRefuge = vipRefuge
 	refs.VipBarriers = vipBarriers
 	refs.VipDoorParts = vipDoorParts or vipBarriers
-	refs.BrrBrrPatapimNpc = getChildByNames(lobby, { "Brr Brr Patapim" }, nil, true)
+	refs.BrrBrrPatapimNpc = findChildPathInRoots(activeMapRoots, { "NPC", "Upgrades", "Franky" }, nil, false)
+		or findChildPathInRoots(activeMapRoots, { "NPC", "Upgrades", "Franky" }, nil, true)
+		or getChildByNames(lobby, { "Brr Brr Patapim" }, nil, true)
 		or findDirectOrRecursiveInRoots(socialRoots, { "Brr Brr Patapim" })
 	refs.GearShopNpc = getChildByNames(lobbyModel, { "Normal" }, nil, true)
-	refs.SellNpc = getChildByNames(lobby, { "Normal" })
+	refs.SellNpc = findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, false)
+		or findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, true)
+		or getChildPath(lobby, { "Normal" })
 	refs.GroupReward = groupReward
 	refs.GroupRewardHitBox = groupRewardHitBox
 	refs.GroupRewardPrompt = groupRewardHitBox

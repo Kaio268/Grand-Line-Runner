@@ -134,19 +134,78 @@ local function getClientInventoryFolder()
 	return player:FindFirstChild("Inventory")
 end
 
-local function getTotalInventorySellValue()
-	local inv = getClientInventoryFolder()
-	if not inv then
-		return 0
+local function readValueObject(parent, childName)
+	local valueObject = parent and parent:FindFirstChild(childName)
+	if valueObject
+		and (
+			valueObject:IsA("StringValue")
+			or valueObject:IsA("NumberValue")
+			or valueObject:IsA("IntValue")
+			or valueObject:IsA("BoolValue")
+		)
+	then
+		return valueObject.Value
+	end
+	return nil
+end
+
+local function getCrewStorageName(instanceFolder)
+	if not instanceFolder or not instanceFolder:IsA("Folder") then
+		return ""
 	end
 
+	return cleanName(
+		readValueObject(instanceFolder, "StorageName")
+			or readValueObject(instanceFolder, "LegacyStorageName")
+			or readValueObject(instanceFolder, "CrewMemberId")
+			or readValueObject(instanceFolder, "BaseName")
+			or ""
+	)
+end
+
+local function getCanonicalInventorySellCounts()
+	local crewInventory = player:FindFirstChild("CrewMemberInventory")
+	local byId = crewInventory and crewInventory:FindFirstChild("ById")
+	if not byId or not byId:IsA("Folder") then
+		return {}
+	end
+
+	local counts = {}
+	for _, instanceFolder in ipairs(byId:GetChildren()) do
+		if instanceFolder:IsA("Folder") then
+			local storageName = getCrewStorageName(instanceFolder)
+			local assignedStand = tostring(readValueObject(instanceFolder, "AssignedStand") or "")
+			if storageName ~= "" and assignedStand == "" then
+				counts[storageName] = (counts[storageName] or 0) + 1
+			end
+		end
+	end
+
+	return counts
+end
+
+local function getTotalInventorySellValue()
+	local canonicalCounts = getCanonicalInventorySellCounts()
+	local inv = getClientInventoryFolder()
+
 	local total = 0
+	local countedCanonicalNames = {}
+
+	for name, qty in pairs(canonicalCounts) do
+		local price = getSellPrice(name) or 0
+		total += price * qty
+		countedCanonicalNames[cleanName(name)] = true
+	end
+
+	if not inv then
+		return total
+	end
+
 	for _, brainrotFolder in ipairs(inv:GetChildren()) do
 		local name = brainrotFolder.Name
-		local qObj = brainrotFolder:FindFirstChild("Quantity")
-		local qty = qObj and tonumber(qObj.Value) or 0
-
-		if qty > 0 then
+		if not countedCanonicalNames[cleanName(name)] then
+			local qObj = brainrotFolder:FindFirstChild("Quantity")
+			local qty = qObj and tonumber(qObj.Value) or 0
 			local price = getSellPrice(name) or 0
 			total += price * qty
 		end

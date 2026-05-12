@@ -142,6 +142,42 @@ local npcPrompt = npc:WaitForChild("ProximityPrompt")
 local dialogObject = DialogModule.new("OpenFishingShop", npc, npcPrompt)
 dialogObject:addDialog("Do You Want To Open Speed Upgrades?", { "Yea", "Nope" })
 
+local function getFrame(playerGui, frameName)
+	local frames = playerGui:FindFirstChild("Frames")
+	local frame = frames and frames:FindFirstChild(frameName)
+	if frame and frame:IsA("Frame") then
+		return frame, frames
+	end
+	return nil, frames
+end
+
+local function forceOpenFrame(playerGui, frameName)
+	local frame, frames = getFrame(playerGui, frameName)
+	if not frame then
+		return false
+	end
+
+	if frames and frames:IsA("ScreenGui") then
+		frames.Enabled = true
+		frames.DisplayOrder = math.max(frames.DisplayOrder, 120)
+		frames.IgnoreGuiInset = true
+	end
+
+	local uiScale = frame:FindFirstChildOfClass("UIScale")
+	if uiScale then
+		uiScale.Scale = 1
+	end
+	frame:SetAttribute("OpenUIOpened", true)
+	frame.Position = UDim2.fromScale(0.5, 0.5)
+	frame.Visible = true
+	return true
+end
+
+local function isFrameOpen(playerGui, frameName)
+	local frame = getFrame(playerGui, frameName)
+	return frame ~= nil and frame.Visible == true
+end
+
 local function openFrame(frameName)
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then
@@ -154,15 +190,13 @@ local function openFrame(frameName)
 		local ok, controller = pcall(require, openModule)
 		if ok and controller and controller.OpenFrame then
 			controller:OpenFrame(frameName)
-			return
+			if isFrameOpen(playerGui, frameName) then
+				return
+			end
 		end
 	end
 
-	local frames = playerGui:FindFirstChild("Frames")
-	local frame = frames and frames:FindFirstChild(frameName)
-	if frame and frame:IsA("Frame") then
-		frame.Visible = true
-	end
+	forceOpenFrame(playerGui, frameName)
 end
 
 local FALLBACK_FIRST_POS = UDim2.fromScale(0.566, 0.431)
@@ -1161,7 +1195,7 @@ local function startInitialBeamToBrr()
 	beamStage = "TO_BRR"
 	debugTutorial("STAGE", "Entered TO_BRR", 0)
 
-	setTutorial(1, "Follow the beam to Brr Brr Patapim and hold E to interact.")
+	setTutorial(1, "Follow the beam to Franky and hold E to interact.")
 
 	local character = player.Character or player.CharacterAdded:Wait()
 	ensureBeam(character)
@@ -1191,7 +1225,7 @@ local function resetAfterRespawn()
 	end
 
 	if beamStage == "TO_BRR" then
-		setTutorial(1, "Follow the beam to Brr Brr Patapim and hold E to interact.")
+		setTutorial(1, "Follow the beam to Franky and hold E to interact.")
 	elseif beamStage == "BRAINROT" or beamStage == "WAIT_FOR_FOLDER" then
 		setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 	elseif beamStage == "PLOT_STAND" then
