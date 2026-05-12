@@ -1538,9 +1538,16 @@ local function buildCaptainLogData(query)
 			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
 			local subtitle = getSubtitle("Brainrot", brainrotName)
 			local displayName = getDisplayName("Brainrot", brainrotName)
+			local modelPreview = getCrewModelPreviewDescriptor(brainrotName)
+			local previewKind = nil
+			local previewName = nil
 			local incomeDisplayMetadata = getIncomeStatusDisplayMetadata(standName, brainrotName)
 			if incomeDisplayMetadata ~= nil then
 				displayName = tostring(incomeDisplayMetadata.DisplayName)
+			end
+			if modelPreview then
+				previewKind = CREW_ITEM_KIND
+				previewName = tostring(modelPreview.ModelName or "")
 			end
 			local bounty = math.max(
 				0,
@@ -1559,6 +1566,9 @@ local function buildCaptainLogData(query)
 				footer = string.format("%s  |  %s Beli ready", standName, formatNumber(incomeToCollect)),
 				image = getIcon("Brainrot", brainrotName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
+				previewKind = previewKind,
+				previewName = previewName,
+				modelPreview = modelPreview,
 				accentColor = getAccentColor("Brainrot", brainrotName),
 				level = standLevel,
 				bounty = bounty,
