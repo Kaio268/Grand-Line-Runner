@@ -34,24 +34,26 @@ local CONFIG = {
 	HazardClass = "major",
 	FreezeBehavior = "pause",
 	AffectablePadding = Vector3.new(2, 1, 4),
-	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
-	DriftSpeedMinMultiplier = 1.35,
-	DriftSpeedMaxMultiplier = 1.85,
+		DriftSpeedMinMultiplier = 1.35,
+		DriftSpeedMaxMultiplier = 1.85,
 	Variants = {
 		{
 			Name = "Normal",
 			Speed = 72,
 			WidthScale = 1,
+			StraightChance = 0.15,
 		},
 		{
 			Name = "Fast",
 			Speed = 128,
 			WidthScale = 1,
+			StraightChance = 0.15,
 		},
 		{
 			Name = "Wide",
 			Speed = 52,
 			WidthScale = 1.6,
+			StraightChance = 0,
 		},
 	},
 }
@@ -278,6 +280,46 @@ local function getFrontExtentFromPivot(instance, pivotCFrame, forwardDirection)
 	return math.max(0, frontExtent)
 end
 
+local function getProjectedHalfExtentAtPivot(instance, pivotCFrame, axisDirection)
+	if typeof(axisDirection) ~= "Vector3" or axisDirection.Magnitude <= 1e-4 then
+		return 0
+	end
+
+	local axisUnit = axisDirection.Unit
+	local sourcePivot = getPivot(instance)
+	local minProjection = nil
+	local maxProjection = nil
+
+	for _, part in ipairs(getHazardMeasureParts(instance)) do
+		if part.Parent then
+			local relativeCFrame = sourcePivot:ToObjectSpace(part.CFrame)
+			local partCFrame = pivotCFrame * relativeCFrame
+			local halfSize = part.Size * 0.5
+
+			for _, xSign in ipairs({ -1, 1 }) do
+				for _, ySign in ipairs({ -1, 1 }) do
+					for _, zSign in ipairs({ -1, 1 }) do
+						local cornerPosition = partCFrame:PointToWorldSpace(Vector3.new(
+							halfSize.X * xSign,
+							halfSize.Y * ySign,
+							halfSize.Z * zSign
+						))
+						local projection = (cornerPosition - pivotCFrame.Position):Dot(axisUnit)
+						minProjection = if minProjection == nil then projection else math.min(minProjection, projection)
+						maxProjection = if maxProjection == nil then projection else math.max(maxProjection, projection)
+					end
+				end
+			end
+		end
+	end
+
+	if minProjection == nil or maxProjection == nil then
+		return 0
+	end
+
+	return math.max(math.abs(minProjection), math.abs(maxProjection))
+end
+
 local function getHazardHitboxVolumes(hazardRoot, fallbackCFrame, fallbackSize)
 	local volumes = {}
 
@@ -378,6 +420,16 @@ local function chooseVariant()
 	return CONFIG.Variants[rng:NextInteger(1, #CONFIG.Variants)]
 end
 
+local function getVariantConfigByName(name)
+	for _, variant in ipairs(CONFIG.Variants) do
+		if variant.Name == name then
+			return variant
+		end
+	end
+
+	return nil
+end
+
 local function chooseSpawnDelay()
 	local minDelay = math.max(0.1, tonumber(CONFIG.SpawnDelayMin) or 2)
 	local maxDelay = math.max(minDelay, tonumber(CONFIG.SpawnDelayMax) or minDelay)
@@ -436,7 +488,14 @@ local function resolveHazardRefs()
 	)
 
 	local waveFolder = refs.WaveFolder
-	local hazardsFolder = waveFolder and (waveFolder:FindFirstChild("Hazards") or waveFolder:WaitForChild("Hazards", 15)) or nil
+	local hazardsFolder = waveFolder and waveFolder:FindFirstChild("Hazards") or nil
+	if waveFolder and not hazardsFolder then
+		hazardsFolder = Instance.new("Folder")
+		hazardsFolder.Name = "Hazards"
+		hazardsFolder.Parent = waveFolder
+		hazardTrace("created missing hazards folder path=%s", formatInstancePath(hazardsFolder))
+	end
+
 	local leftBound = waveFolder and (waveFolder:FindFirstChild("LeftBound") or waveFolder:WaitForChild("LeftBound", 15)) or nil
 	local rightBound = waveFolder and (waveFolder:FindFirstChild("RightBound") or waveFolder:WaitForChild("RightBound", 15)) or nil
 	local stateKey = table.concat({
@@ -642,8 +701,10 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 
 		-- WAVE DRIFT CONFIG
 
-		local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
-		local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+		local variantConfig = getVariantConfigByName(tostring(hazardRoot:GetAttribute("Variant") or ""))
+		local straightChance = math.clamp(tonumber(variantConfig and variantConfig.StraightChance) or 0.15, 0, 1)
+		local driftStyle = rng:NextNumber() < straightChance and "straight" or "drift"
+		local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0)
 		local lateralOffset = 0
 		local lateralVelocity = 0
 
@@ -743,8 +804,6 @@ local function spawnSharedHazard(spawnDelay)
 
 	local startCF = computePivotOnTop(clone, startPart)
 	local endCF = computePivotOnTop(clone, endPart)
-	local _, boxSize = getBox(clone)
-	local waveWidth = boxSize.X
 	local boundsDelta = rightBound.Position - leftBound.Position
 	local horizontalBoundsDelta = Vector3.new(boundsDelta.X, 0, boundsDelta.Z)
 	local corridorVector = horizontalBoundsDelta.Magnitude > 1e-4 and horizontalBoundsDelta or boundsDelta
@@ -760,10 +819,21 @@ local function spawnSharedHazard(spawnDelay)
 	end
 
 	local lateralDirection = corridorVector.Unit
-	local safeHalfOffset = math.max(corridorWidth - waveWidth, 0) * 0.5
+	local corridorCenterProjection = (leftBound.Position + rightBound.Position):Dot(lateralDirection) * 0.5
+	local leftProjection = math.min(leftBound.Position:Dot(lateralDirection), rightBound.Position:Dot(lateralDirection))
+	local rightProjection = math.max(leftBound.Position:Dot(lateralDirection), rightBound.Position:Dot(lateralDirection))
+	local startCenterProjection = startCF.Position:Dot(lateralDirection)
+	local waveHalfWidth = math.max(
+		getProjectedHalfExtentAtPivot(clone, startCF, lateralDirection),
+		getProjectedHalfExtentAtPivot(clone, endCF, lateralDirection)
+	)
+	local waveWidth = waveHalfWidth * 2
+	local minCenterProjection = leftProjection + waveHalfWidth
+	local maxCenterProjection = rightProjection - waveHalfWidth
 	local chosenOffset = 0
-	if safeHalfOffset > 1e-4 then
-		chosenOffset = rng:NextNumber(-safeHalfOffset, safeHalfOffset)
+	if minCenterProjection <= maxCenterProjection then
+		local targetCenterProjection = rng:NextNumber(minCenterProjection, maxCenterProjection)
+		chosenOffset = targetCenterProjection - startCenterProjection
 	elseif waveWidth > corridorWidth then
 		hazardTrace(
 			"offset clamped reason=wave_wider_than_corridor variant=%s waveWidth=%.2f corridorWidth=%.2f",
@@ -771,6 +841,8 @@ local function spawnSharedHazard(spawnDelay)
 			waveWidth,
 			corridorWidth
 		)
+		local clampedCenterProjection = math.clamp(corridorCenterProjection, leftProjection, rightProjection)
+		chosenOffset = clampedCenterProjection - startCenterProjection
 	end
 
 	local lateralOffset = lateralDirection * chosenOffset
@@ -827,7 +899,11 @@ local function spawnSharedHazard(spawnDelay)
 		formatInstancePath(clone)
 	)
 
-	local lateralDriftLimit = math.max(0, safeHalfOffset - math.abs(chosenOffset))
+	local finalCenterProjection = startCF.Position:Dot(lateralDirection)
+	local lateralDriftLimit = math.max(
+		0,
+		math.min(finalCenterProjection - leftProjection, rightProjection - finalCenterProjection) - waveHalfWidth
+	)
 	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit)
 	return true, "spawned"
 end
@@ -859,7 +935,12 @@ while true do
 			tostring(maxActiveHazards),
 			spawnDelay
 		)
-		spawnSharedHazard(spawnDelay)
+		local ok, err = xpcall(function()
+			spawnSharedHazard(spawnDelay)
+		end, debug.traceback)
+		if not ok then
+			hazardTrace("spawn error=%s", tostring(err))
+		end
 		task.wait(spawnDelay)
 	end
 end

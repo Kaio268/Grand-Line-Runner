@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
+local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AbilityTargeting = require(
 	Modules:WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("AbilityTargeting")
 )
@@ -12,6 +13,7 @@ local DevilFruitLogger = require(Modules:WaitForChild("DevilFruits"):WaitForChil
 local MeraShared = Modules:WaitForChild("DevilFruits"):WaitForChild("Mera"):WaitForChild("Shared")
 local MeraDashShared = require(MeraShared:WaitForChild("MeraDashShared"))
 local MeraAnimationController = require(script.Parent:WaitForChild("MeraAnimationController"))
+local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 
 local MeraMeraNoMi = {}
 
@@ -31,6 +33,8 @@ local DEFAULT_FIRE_BURST_KNOCKDOWN_DURATION = 1
 local DEFAULT_FIRE_BURST_KNOCKDOWN_PUSH_HORIZONTAL = 44
 local DEFAULT_FIRE_BURST_KNOCKDOWN_PUSH_VERTICAL = -55
 local DEFAULT_FIRE_BURST_SPEED_RADIUS_MAX_SPEED = 300
+local HAZARD_QUERY_PLAYER_DISTANCE_PADDING = 8
+local HAZARD_QUERY_MAX_TARGETS = 8
 local REQUEST_VALIDATION_DISTANCE_EPSILON = 0.05
 local REQUEST_VALIDATION_DIRECTION_DELTA_DEGREES = 1
 local MIN_REMAINING_DASH_DISTANCE = 0.1
@@ -862,6 +866,43 @@ local function applyFireBurstKnockdown(context, radius, abilityConfig)
 	return affectedCount
 end
 
+local function destroyFireBurstHazards(context, radius)
+	if type(context) ~= "table" or radius <= 0 then
+		return 0
+	end
+
+	local rootPart = context.RootPart
+	if typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") or not rootPart.Parent then
+		return 0
+	end
+
+	local destroyedHazardCount = 0
+	local resolvedHits = HitResolver.ResolveRadiusHits({
+		QueryId = string.format("mera:%d:%d", context.Player and context.Player.UserId or 0, math.floor(os.clock() * 1000)),
+		CenterPosition = rootPart.Position,
+		Radius = radius,
+		IncludePlayers = false,
+		IncludeHazards = true,
+		AllowedHazardClasses = {
+			minor = true,
+		},
+		PlayerRootPosition = rootPart.Position,
+		MaxPlayerDistance = radius + HAZARD_QUERY_PLAYER_DISTANCE_PADDING,
+		MaxHazardTargets = HAZARD_QUERY_MAX_TARGETS,
+		TracePrefix = "HIT",
+	})
+
+	for _, hitInfo in ipairs(resolvedHits) do
+		if hitInfo.Kind == HitResolver.ResultKind.Hazard and hitInfo.Hazard and hitInfo.Hazard.Root then
+			if HazardRuntime.Destroy(hitInfo.Hazard.Root) then
+				destroyedHazardCount += 1
+			end
+		end
+	end
+
+	return destroyedHazardCount
+end
+
 function MeraMeraNoMi.FireBurst(context)
 	local abilityConfig = context.AbilityConfig
 	local player = context.Player
@@ -993,12 +1034,14 @@ function MeraMeraNoMi.FireBurst(context)
 		duration
 	)
 	local affectedCount = applyFireBurstKnockdown(context, radius, abilityConfig)
+	local destroyedHazardCount = destroyFireBurstHazards(context, radius)
 	logFireBurst(
 		player,
-		"knockdown applied player=%s cast=%s affected=%d radius=%.2f knockdownDuration=%.2f",
+		"knockdown applied player=%s cast=%s affected=%d destroyedHazards=%d radius=%.2f knockdownDuration=%.2f",
 		player and player.Name or "<unknown>",
 		sequence.CastId,
 		affectedCount,
+		destroyedHazardCount,
 		radius,
 		knockdownDuration
 	)

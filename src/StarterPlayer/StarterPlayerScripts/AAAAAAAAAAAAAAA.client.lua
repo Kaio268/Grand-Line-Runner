@@ -404,6 +404,21 @@ local function getWaveWorldPos(obj)
 	return nil
 end
 
+local function isWaveHazard(obj)
+	if not obj then
+		return false
+	end
+
+	local hazardType = obj:GetAttribute("HazardType")
+	if typeof(hazardType) == "string" and string.lower(hazardType) ~= "wave" then
+		return false
+	end
+
+	return hazardType == nil
+		or string.lower(tostring(hazardType)) == "wave"
+		or obj.Name == "WaveTemplate"
+end
+
 local function getRewardWorldPos(obj)
 	if not obj then
 		return nil
@@ -478,6 +493,10 @@ local function removeUnusedChestIndicators(validMap)
 end
 
 local function ensureWaveIndicator(waveObj)
+	if not isWaveHazard(waveObj) then
+		return nil
+	end
+
 	if waveIndicators[waveObj] and waveIndicators[waveObj].Parent then
 		return waveIndicators[waveObj]
 	end
@@ -506,7 +525,9 @@ clientWavesFolder.ChildAdded:Connect(function(child)
 		tostring(child.ClassName)
 	)
 	waveTry("clientWavesFolder.ChildAdded", function()
-		ensureWaveIndicator(child)
+		if isWaveHazard(child) then
+			ensureWaveIndicator(child)
+		end
 	end)
 end)
 
@@ -1406,6 +1427,10 @@ local function hookSharedHazardKillOnTouch(hazard)
 end
 
 local function attachSharedHazard(hazard)
+	if not isWaveHazard(hazard) then
+		return
+	end
+
 	hookSharedHazardKillOnTouch(hazard)
 	createSharedHazardVisualSmoother(hazard)
 end
