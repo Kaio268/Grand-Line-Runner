@@ -61,6 +61,7 @@ local HAZARD_ACTION_REMOTE_NAME = "SharedHazardAction"
 local rng = Random.new()
 local traceStateKey = nil
 local activeHazardStates = {}
+local HAZARD_TRACE = RunService:IsStudio() and game:GetAttribute("HazardDebugTrace") == true
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -79,6 +80,10 @@ local function formatInstancePath(instance)
 end
 
 local function hazardTrace(message, ...)
+	if not HAZARD_TRACE then
+		return
+	end
+
 	print(string.format("[HAZARD TRACE] " .. message, ...))
 end
 

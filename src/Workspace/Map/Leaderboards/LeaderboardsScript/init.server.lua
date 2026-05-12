@@ -2,37 +2,38 @@ local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local UserService = game:GetService("UserService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local shorten  = require(ReplicatedStorage.Modules.Shorten)
 
 local okLB, LBChat = pcall(function()
 	return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("LeaderboardChatConfig"))
 end)
-if not okLB then LBChat = nil end
-
-local shornten = require(ReplicatedStorage.Modules.Shorten)
+if not okLB then
+	LBChat = nil
+end
 
 local REFRESH_SECONDS = 120
 local MIN_SAVE_INTERVAL = 60
 local DEBOUNCE_SECONDS = 5
 local MAX_WRITES_PER_CYCLE = 20
 local PAGE_SIZE = 100
+local BOARD_WAIT_TIMEOUT = 5
 local BOUNTY_REFRESH_AFTER_WRITE_SECONDS = 6
 local MIN_BOUNTY_REFRESH_INTERVAL = 15
-local DEBUG = false
 
-local function dbg(...)
-	if not DEBUG then return end
-	local t = {}
-	for i, v in ipairs({...}) do t[i] = tostring(v) end
-	print("[Leaderboard]", table.concat(t, " "))
+local function Round(v)
+	return math.floor((v or 0) + 0.5)
 end
 
-local function Round(v) return math.floor((v or 0) + 0.5) end
-local function Encode(v) v = (v or 0) + 1 return math.log10(v) * 1000 end
+local function Encode(v)
+	v = (v or 0) + 1
+	return math.log10(v) * 1000
+end
+
 local function Decode(v)
 	v = (v or 0) / 1000
 	local n = (10 ^ v) - 1
-	if n < 0 then n = 0 end
+	if n < 0 then
+		n = 0
+	end
 	return math.floor(n + 0.5)
 end
 
@@ -41,9 +42,13 @@ local function Suffix(n)
 	n = tonumber(n) or 0
 	local sign = n < 0 and "-" or ""
 	n = math.abs(n)
-	if n < 1000 then return sign .. tostring(math.floor(n + 0.5)) end
+	if n < 1000 then
+		return sign .. tostring(math.floor(n + 0.5))
+	end
 	local tier = math.floor(math.log10(n) / 3)
-	if tier > #Suffixes - 1 then tier = #Suffixes - 1 end
+	if tier > #Suffixes - 1 then
+		tier = #Suffixes - 1
+	end
 	local scaled = n / (10 ^ (tier * 3))
 	local fmt = (scaled < 10) and "%.2f" or ((scaled < 100) and "%.1f" or "%.0f")
 	local s = string.format(fmt, scaled)
@@ -60,7 +65,32 @@ end
 local Root = script.Parent.Parent
 
 local function resolveBoardFolder(primaryName, fallbackName)
-	return Root:FindFirstChild(primaryName) or Root:WaitForChild(fallbackName or primaryName)
+	local folder = Root:FindFirstChild(primaryName)
+	if folder then
+		return folder
+	end
+
+	if fallbackName and fallbackName ~= primaryName then
+		folder = Root:FindFirstChild(fallbackName)
+		if folder then
+			return folder
+		end
+	end
+
+	folder = Root:WaitForChild(primaryName, BOARD_WAIT_TIMEOUT)
+	if folder then
+		return folder
+	end
+
+	if fallbackName and fallbackName ~= primaryName then
+		folder = Root:WaitForChild(fallbackName, 1)
+	end
+
+	if not folder then
+		warn(("[Leaderboard] Board folder '%s' was not found under %s. Leaderboard rendering will stay disabled for that board."):format(primaryName, Root:GetFullName()))
+	end
+
+	return folder
 end
 
 local function normalizeBoardLabelText(text)
@@ -91,14 +121,14 @@ local Boards = {
 		name = "TotalMoney",
 		stat = "TotalDoubloons",
 		ds = DataStoreService:GetOrderedDataStore("TotalMonDa2ta0fbsdfb24"),
-		folder = Root:WaitForChild("TotalMoney"),
+		folder = resolveBoardFolder("TotalMoney"),
 		display = function(v) return Suffix(v) end,
 	},
 	{
 		name = "TotalSpeed",
 		stat = "TotalSpeed",
 		ds = DataStoreService:GetOrderedDataStore("TotsaddnData0fbsdfb24"),
-		folder = Root:WaitForChild("TotalSpeed"),
+		folder = resolveBoardFolder("TotalSpeed"),
 		display = function(v) return Suffix(v) end,
 	},
 	{
@@ -115,11 +145,17 @@ local Boards = {
 
 local function firstDescByName(root, name)
 	for _, d in ipairs(root:GetDescendants()) do
-		if d.Name == name then return d end
+		if d.Name == name then
+			return d
+		end
 	end
 end
 
 local function getContainers(boardFolder)
+	if not boardFolder then
+		return {}
+	end
+
 	local views = {}
 	local mains = {}
 	for _, inst in ipairs(boardFolder:GetDescendants()) do
@@ -166,12 +202,25 @@ end
 
 local uidCache, dispCache = {}, {}
 local function resolveIdentity(name)
-	if uidCache[name] then return uidCache[name], dispCache[uidCache[name]] end
-	local ok1, userId = pcall(function() return Players:GetUserIdFromNameAsync(name) end)
-	if not ok1 then return nil, nil end
+	if uidCache[name] then
+		return uidCache[name], dispCache[uidCache[name]]
+	end
+
+	local ok1, userId = pcall(function()
+		return Players:GetUserIdFromNameAsync(name)
+	end)
+	if not ok1 then
+		return nil, nil
+	end
+
 	uidCache[name] = userId
-	local ok2, infos = pcall(function() return UserService:GetUserInfosByUserIdsAsync({ userId }) end)
-	if ok2 and infos and infos[1] then dispCache[userId] = infos[1].DisplayName end
+	local ok2, infos = pcall(function()
+		return UserService:GetUserInfosByUserIdsAsync({ userId })
+	end)
+	if ok2 and infos and infos[1] then
+		dispCache[userId] = infos[1].DisplayName
+	end
+
 	return uidCache[name], dispCache[userId]
 end
 
@@ -179,9 +228,15 @@ local function setMedals(frame, rank)
 	local a = frame:FindFirstChild("1")
 	local b = frame:FindFirstChild("2")
 	local c = frame:FindFirstChild("3")
-	if a then a.Enabled = rank == 1 end
-	if b then b.Enabled = rank == 2 end
-	if c then c.Enabled = rank == 3 end
+	if a then
+		a.Enabled = rank == 1
+	end
+	if b then
+		b.Enabled = rank == 2
+	end
+	if c then
+		c.Enabled = rank == 3
+	end
 end
 
 local function DSCall(fn, retries)
@@ -189,7 +244,9 @@ local function DSCall(fn, retries)
 	local i = 0
 	while i < retries do
 		local ok, res = pcall(fn)
-		if ok then return true, res end
+		if ok then
+			return true, res
+		end
 		i += 1
 		task.wait(math.min(5, 0.4 * (2 ^ i)))
 	end
@@ -210,21 +267,6 @@ local boardVisibleCounts = {}
 local lastBoardFillAt = {}
 local pendingBoardRefreshes = {}
 local fillBoard
-
-local function publishBoardMetadata(board)
-	local readyAttr = "LB_" .. board.name .. "_Ready"
-	local visibleLimitAttr = "LB_" .. board.name .. "_VisibleLimit"
-	local visibleCountAttr = "LB_" .. board.name .. "_VisibleCount"
-	local visibleLimit = board.pageSize or PAGE_SIZE
-	local visibleCount = boardVisibleCounts[board.name] or 0
-	local ready = boardSnapshotReady[board.name] == true
-
-	for _, plr in ipairs(Players:GetPlayers()) do
-		plr:SetAttribute(readyAttr, ready)
-		plr:SetAttribute(visibleLimitAttr, visibleLimit)
-		plr:SetAttribute(visibleCountAttr, visibleCount)
-	end
-end
 
 local function updateChatTagsForBoard(board, page)
 	local included = {}
@@ -252,10 +294,14 @@ local function updateChatTagsForBoard(board, page)
 		plr:SetAttribute(visibleCountAttr, #page)
 		if r and r >= 1 and r <= visibleLimit then
 			plr:SetAttribute(attrLB, r)
-			if cfgAttr then plr:SetAttribute(cfgAttr, r) end
+			if cfgAttr then
+				plr:SetAttribute(cfgAttr, r)
+			end
 		else
 			plr:SetAttribute(attrLB, nil)
-			if cfgAttr then plr:SetAttribute(cfgAttr, nil) end
+			if cfgAttr then
+				plr:SetAttribute(cfgAttr, nil)
+			end
 		end
 	end
 end
@@ -263,13 +309,21 @@ end
 local SEARCH_ROOTS = {"TotalStats", "Stats", "leaderstats"}
 
 local function isNumericValueObject(inst)
-	if not inst then return false end
-	local ok, v = pcall(function() return inst.Value end)
+	if not inst then
+		return false
+	end
+
+	local ok, v = pcall(function()
+		return inst.Value
+	end)
 	return ok and typeof(v) == "number"
 end
 
 local function findNumericUnder(root, name)
-	if not root then return nil, nil end
+	if not root then
+		return nil, nil
+	end
+
 	local obj = root:FindFirstChild(name, true)
 	if obj and isNumericValueObject(obj) then
 		return obj.Value, obj
@@ -281,10 +335,14 @@ local function getNumericStat(plr, statName)
 	for _, rootName in ipairs(SEARCH_ROOTS) do
 		local top = plr:FindFirstChild(rootName)
 		local v, obj = findNumericUnder(top, statName)
-		if v ~= nil then return v, obj end
+		if v ~= nil then
+			return v, obj
+		end
 		if top then
 			local attr = top:GetAttribute(statName)
-			if typeof(attr) == "number" then return attr, nil end
+			if typeof(attr) == "number" then
+				return attr, nil
+			end
 		end
 	end
 	local any = plr:FindFirstChild(statName, true)
@@ -304,10 +362,18 @@ local pendingOrder = {}
 local debouncers = {}
 
 local function markPending(board, playerName, encoded)
-	if not pending[board.name] then pending[board.name] = {} end
-	if not lastSaved[board.name] then lastSaved[board.name] = {} end
+	if not pending[board.name] then
+		pending[board.name] = {}
+	end
+	if not lastSaved[board.name] then
+		lastSaved[board.name] = {}
+	end
+
 	local prev = pending[board.name][playerName]
-	if prev and prev.encoded == encoded then return end
+	if prev and prev.encoded == encoded then
+		return
+	end
+
 	pending[board.name][playerName] = {encoded = encoded, t = os.clock()}
 	pendingOrder[#pendingOrder + 1] = {b = board, key = playerName}
 end
@@ -319,10 +385,14 @@ end
 
 local function writeOne(board, playerName, encoded)
 	local ok = DSCall(function()
-		return board.ds:UpdateAsync(playerName, function() return encoded end)
+		return board.ds:UpdateAsync(playerName, function()
+			return encoded
+		end)
 	end, 3)
 	if ok then
-		if not lastSaved[board.name] then lastSaved[board.name] = {} end
+		if not lastSaved[board.name] then
+			lastSaved[board.name] = {}
+		end
 		lastSaved[board.name][playerName] = {when = os.clock(), encoded = encoded}
 	end
 	return ok
@@ -390,7 +460,10 @@ end
 local function queueSave(board, plr, value)
 	local encoded = Round(Encode((value or 0) + 1))
 	local key = plr.Name
-	if not debouncers[board.name] then debouncers[board.name] = {} end
+	if not debouncers[board.name] then
+		debouncers[board.name] = {}
+	end
+
 	local d = debouncers[board.name][key]
 	if d then
 		d.value = encoded
@@ -408,12 +481,17 @@ end
 
 local function pushOne(board, plr)
 	local val = select(1, getNumericStat(plr, board.stat))
-	if val == nil then return end
+	if val == nil then
+		return
+	end
 	queueSave(board, plr, val)
 end
 
 fillBoard = function(board)
-	if not board.views or #board.views == 0 then return end
+	if not board.views or #board.views == 0 then
+		return
+	end
+
 	lastBoardFillAt[board.name] = os.clock()
 	for _, view in ipairs(board.views) do
 		if view.container then
@@ -425,7 +503,9 @@ fillBoard = function(board)
 	while tries < 10 and not gotPage do
 		local budget = DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetSortedAsync)
 		if budget > 0 then
-			local ok, pages = DSCall(function() return board.ds:GetSortedAsync(false, board.pageSize or PAGE_SIZE) end, 5)
+			local ok, pages = DSCall(function()
+				return board.ds:GetSortedAsync(false, board.pageSize or PAGE_SIZE)
+			end, 5)
 			if ok then
 				gotPage = pages:GetCurrentPage()
 				break
@@ -434,7 +514,10 @@ fillBoard = function(board)
 		tries += 1
 		task.wait(0.5)
 	end
-	if not gotPage then return end
+	if not gotPage then
+		return
+	end
+
 	updateChatTagsForBoard(board, gotPage)
 	for rank, entry in ipairs(gotPage) do
 		if type(entry.value) == "number" then
@@ -443,12 +526,24 @@ fillBoard = function(board)
 					local clone = view.template:Clone()
 					clone.Visible = true
 					clone.Name = (entry.key or "Unknown") .. "Leaderboard"
-					local userId, displayName = resolveIdentity(entry.key or "")
-					local u = clone:FindFirstChild("Username");    if u and u:IsA("TextLabel") then u.Text = "@" .. (entry.key or "Unknown") end
- 					local a = clone:FindFirstChild("Avatar");      if a and a:IsA("ImageLabel") then a.Image = userId and ("rbxthumb://type=AvatarHeadShot&id=" .. userId .. "&w=150&h=150") or "" end
-					local r = clone:FindFirstChild("Rank");        if r and r:IsA("TextLabel") then r.Text = "#" .. tostring(rank) end
+					local userId = resolveIdentity(entry.key or "")
+					local u = clone:FindFirstChild("Username")
+					if u and u:IsA("TextLabel") then
+						u.Text = "@" .. (entry.key or "Unknown")
+					end
+					local a = clone:FindFirstChild("Avatar")
+					if a and a:IsA("ImageLabel") then
+						a.Image = userId and ("rbxthumb://type=AvatarHeadShot&id=" .. userId .. "&w=150&h=150") or ""
+					end
+					local r = clone:FindFirstChild("Rank")
+					if r and r:IsA("TextLabel") then
+						r.Text = "#" .. tostring(rank)
+					end
 					local raw = Decode(entry.value)
-					local v = clone:FindFirstChild("Value");       if v and v:IsA("TextLabel") then v.Text = board.display(raw) end
+					local v = clone:FindFirstChild("Value")
+					if v and v:IsA("TextLabel") then
+						v.Text = board.display(raw)
+					end
 					clone.LayoutOrder = rank
 					setMedals(clone, rank)
 					clone.Parent = view.container
@@ -471,7 +566,9 @@ end
 local function initRankAttributes(plr)
 	if LBChat and LBChat.Boards then
 		for _, cfg in pairs(LBChat.Boards) do
-			if cfg.attr then plr:SetAttribute(cfg.attr, nil) end
+			if cfg.attr then
+				plr:SetAttribute(cfg.attr, nil)
+			end
 		end
 	end
 
@@ -484,15 +581,22 @@ local function initRankAttributes(plr)
 end
 
 local function hookFolderForStat(folder, b, plr)
-	if not folder then return end
+	if not folder then
+		return
+	end
+
 	local obj = folder:FindFirstChild(b.stat, true)
 	if obj and isNumericValueObject(obj) then
 		obj.Changed:Connect(function()
 			local v = select(1, getNumericStat(plr, b.stat))
-			if v ~= nil then queueSave(b, plr, v) end
+			if v ~= nil then
+				queueSave(b, plr, v)
+			end
 		end)
 		local v = select(1, getNumericStat(plr, b.stat))
-		if v ~= nil then queueSave(b, plr, v) end
+		if v ~= nil then
+			queueSave(b, plr, v)
+		end
 	end
 	local attr = folder:GetAttribute(b.stat)
 	if typeof(attr) == "number" then
@@ -508,10 +612,14 @@ local function hookFolderForStat(folder, b, plr)
 		if inst.Name == b.stat and isNumericValueObject(inst) then
 			inst.Changed:Connect(function()
 				local v = select(1, getNumericStat(plr, b.stat))
-				if v ~= nil then queueSave(b, plr, v) end
+				if v ~= nil then
+					queueSave(b, plr, v)
+				end
 			end)
 			local v = select(1, getNumericStat(plr, b.stat))
-			if v ~= nil then queueSave(b, plr, v) end
+			if v ~= nil then
+				queueSave(b, plr, v)
+			end
 		end
 	end)
 end
@@ -547,10 +655,14 @@ local function bindStatChanges(plr)
 			if inst.Name == board.stat and isNumericValueObject(inst) then
 				inst.Changed:Connect(function()
 					local v = select(1, getNumericStat(plr, board.stat))
-					if v ~= nil then queueSave(board, plr, v) end
+					if v ~= nil then
+						queueSave(board, plr, v)
+					end
 				end)
 				local v = select(1, getNumericStat(plr, board.stat))
-				if v ~= nil then queueSave(board, plr, v) end
+				if v ~= nil then
+					queueSave(board, plr, v)
+				end
 			end
 		end
 	end)
@@ -574,10 +686,14 @@ Players.PlayerAdded:Connect(function(plr)
 
 				if r and r >= 1 and r <= visibleLimit then
 					plr:SetAttribute(attrLB, r)
-					if cfgAttr then plr:SetAttribute(cfgAttr, r) end
+					if cfgAttr then
+						plr:SetAttribute(cfgAttr, r)
+					end
 				else
 					plr:SetAttribute(attrLB, nil)
-					if cfgAttr then plr:SetAttribute(cfgAttr, nil) end
+					if cfgAttr then
+						plr:SetAttribute(cfgAttr, nil)
+					end
 				end
 			end
 		end
@@ -588,7 +704,9 @@ end)
 Players.PlayerRemoving:Connect(function(plr)
 	if LBChat and LBChat.Boards then
 		for _, cfg in pairs(LBChat.Boards) do
-			if cfg.attr then plr:SetAttribute(cfg.attr, nil) end
+			if cfg.attr then
+				plr:SetAttribute(cfg.attr, nil)
+			end
 		end
 	end
 end)

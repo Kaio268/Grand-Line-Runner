@@ -11,7 +11,11 @@ local function readPath(root, path)
 			return nil
 		end
 
-		current = current[segment]
+		if typeof(current) == "Instance" then
+			current = current:FindFirstChild(segment)
+		else
+			current = current[segment]
+		end
 	end
 
 	return current
@@ -38,13 +42,11 @@ function ValidationChecks.ValidateProfileData(data)
 		{ Path = { "CrewMemberQuickSlots", "SchemaVersion" }, ExpectedType = "number" },
 		{ Path = { "CrewMemberQuickSlots", "UnlockedSlots" }, ExpectedType = "number" },
 		{ Path = { "CrewMemberQuickSlots", "MaxSlots" }, ExpectedType = "number" },
-		{ Path = { "CrewInventory", "ById" }, ExpectedType = "table" },
 		{ Path = { "UnopenedChests", "ById" }, ExpectedType = "table" },
 		{ Path = { "ChestRewards" }, ExpectedType = "table" },
 		{ Path = { "Quests" }, ExpectedType = "table" },
 		{ Path = { "DevilFruit", "Equipped" }, ExpectedType = "string" },
 		{ Path = { "IndexCollection", "CrewMembers" }, ExpectedType = "table" },
-		{ Path = { "IndexCollection", "Brainrots" }, ExpectedType = "table" },
 		{ Path = { "IndexCollection", "DevilFruits" }, ExpectedType = "table" },
 	}
 
@@ -77,7 +79,7 @@ function ValidationChecks.ValidateCoreDependencies()
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.BrainrotFolder", Path = { "BrainrotFolder" } },
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.Rarities", Path = { "Rarities" } },
 		{ Root = ReplicatedStorage, Label = "ReplicatedStorage.LuckyBlock", Path = { "LuckyBlock" } },
-		{ Root = ReplicatedFirst, Label = "ReplicatedFirst.LoadingScreen", Path = { "LoadingScreen" } },
+		{ Root = ReplicatedFirst, Label = "ReplicatedFirst.Loading", Path = { "Loading" } },
 	}
 
 	for _, check in ipairs(checks) do

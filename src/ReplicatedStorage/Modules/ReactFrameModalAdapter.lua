@@ -167,7 +167,7 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	if frame.Visible ~= true then
 		frame.Position = UDim2.fromScale(0.5, 0.5)
 	end
-	local desiredSize = self.frameSize or UDim2.new(0.9, 0, 0.84, 0)
+	local desiredSize = self.frameSize or UDim2.fromScale(0.9, 0.84)
 	if frame.Visible ~= true then
 		frame.Size = desiredSize
 	end
@@ -286,6 +286,9 @@ function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
 
 			self:_applyFrameStyling(frame)
 			self:SyncOverlayState()
+			if self.scheduleRender then
+				self.scheduleRender()
+			end
 		end)
 	end, self.legacyConnections)
 end

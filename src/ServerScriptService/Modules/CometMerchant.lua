@@ -209,11 +209,11 @@ local function runReward(player, fullKey, amount)
 		return false
 	end
 
-	local ok = pcall(function()
-		handler(player, amount, DataManager, info)
+	local ok, result = pcall(function()
+		return handler(player, amount, DataManager, info)
 	end)
 
-	return ok
+	return ok and result ~= false
 end
 
 PurchaseEvent.OnServerEvent:Connect(function(player, fullKeyIncoming)
@@ -262,7 +262,7 @@ end)
 
 local function onPlayerAdded(player)
 	task.defer(function()
-		for i = 1, 5 do
+		for _ = 1, 5 do
 			ensureStocksExist(player)
 			task.wait(0.15)
 			local folder = player:FindFirstChild("CometMerchant")

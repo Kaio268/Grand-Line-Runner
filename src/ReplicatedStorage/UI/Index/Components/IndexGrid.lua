@@ -11,7 +11,10 @@ local e = React.createElement
 local GRID_GAP = 6
 local GRID_PADDING = 6
 local DEFAULT_COLUMNS = 5
+local DEFAULT_VIEWPORT_HEIGHT = 560
+local LAZY_PREVIEW_OVERSCAN_ROWS = 1
 local MIN_LAYOUT_SCALE = 0.05
+local SCROLL_CHANGE_EPSILON = 12
 local WIDTH_CHANGE_EPSILON = 1
 
 local function getCardMetrics(containerWidth, columns)
@@ -89,10 +92,23 @@ local function emptyState()
 	})
 end
 
+local function shouldRenderPreview(index, columns, cardHeight, viewportHeight, canvasY)
+	local rowHeight = math.max(1, cardHeight + GRID_GAP)
+	local row = math.floor((math.max(1, index) - 1) / columns) + 1
+	local firstVisibleRow = math.floor(math.max(0, (canvasY or 0) - GRID_PADDING) / rowHeight) + 1
+	local visibleRows = math.ceil(math.max(cardHeight, viewportHeight or DEFAULT_VIEWPORT_HEIGHT) / rowHeight)
+	local minRow = math.max(1, firstVisibleRow - LAZY_PREVIEW_OVERSCAN_ROWS)
+	local maxRow = firstVisibleRow + visibleRows + LAZY_PREVIEW_OVERSCAN_ROWS
+
+	return row >= minRow and row <= maxRow
+end
+
 local function IndexGrid(props)
 	local units = props.units or {}
 	local columns = math.max(1, props.columns or DEFAULT_COLUMNS)
 	local containerWidth, setContainerWidth = React.useState(920)
+	local viewportHeight, setViewportHeight = React.useState(DEFAULT_VIEWPORT_HEIGHT)
+	local canvasY, setCanvasY = React.useState(0)
 	local cardWidth, cardHeight = getCardMetrics(containerWidth, columns)
 
 	if #units == 0 then
@@ -140,6 +156,7 @@ local function IndexGrid(props)
 	for index, unit in ipairs(units) do
 		gridChildren["Card" .. tostring(unit.id)] = e(IndexCard, {
 			layoutOrder = index,
+			renderPreview = shouldRenderPreview(index, columns, cardHeight, viewportHeight, canvasY),
 			unit = unit,
 		})
 	end
@@ -180,6 +197,17 @@ local function IndexGrid(props)
 				local nextWidth = getStableLayoutWidth(rbx)
 				if nextWidth and math.abs(nextWidth - containerWidth) >= WIDTH_CHANGE_EPSILON then
 					setContainerWidth(nextWidth)
+				end
+
+				local nextHeight = math.floor(rbx.AbsoluteSize.Y + 0.5)
+				if nextHeight > 0 and math.abs(nextHeight - viewportHeight) >= WIDTH_CHANGE_EPSILON then
+					setViewportHeight(nextHeight)
+				end
+			end,
+			[React.Change.CanvasPosition] = function(rbx)
+				local nextY = math.max(0, math.floor(rbx.CanvasPosition.Y + 0.5))
+				if math.abs(nextY - canvasY) >= SCROLL_CHANGE_EPSILON then
+					setCanvasY(nextY)
 				end
 			end,
 		}, gridChildren),

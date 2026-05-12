@@ -44,6 +44,10 @@ local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
 local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
 local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
+local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local SAVE_FAILURE_MESSAGE = "Tutorial progress could not be saved yet. Try again in a moment."
@@ -59,6 +63,23 @@ local objectiveCheckAccumulator = 0
 local registryEntries = nil
 
 local cleanupTutorialTarget
+
+local function hasCarriedCrewMember(player)
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return true
+	end
+
+	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+	return typeof(carried) == "string" and carried ~= ""
+end
+
+local function clearCarriedCrewMemberAttributes(player)
+	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
+	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
+	player:SetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE, nil)
+	player:SetAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE, nil)
+end
 
 local function clearTutorialRuntimeAttributes(player)
 	player:SetAttribute(TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE, nil)
@@ -489,8 +510,7 @@ local function destroyTutorialTargetModel(player, model)
 	end
 
 	if wasHeldByPlayer then
-		player:SetAttribute("CarriedBrainrot", nil)
-		player:SetAttribute("CarriedBrainrotImage", nil)
+		clearCarriedCrewMemberAttributes(player)
 	end
 
 	if model and model.Parent then
@@ -886,7 +906,7 @@ local function ensureTutorialBrainrotTarget(player, session)
 	if isHoldingTutorialTarget(player, session) or hasTutorialReward(player, session) then
 		return true
 	end
-	if player:GetAttribute("CarriedBrainrot") ~= nil then
+	if hasCarriedCrewMember(player) then
 		session.warning = "Extract or drop your current Crewmate first."
 		return false
 	end
@@ -1413,7 +1433,7 @@ local function startStep(player, stepIndex)
 	setTutorialRuntimeAttributes(player, session, step)
 
 	local stepId = tostring(step.Id or "")
-	if stepId ~= "pickup_brainrot" and player:GetAttribute("CarriedBrainrot") == nil then
+	if stepId ~= "pickup_brainrot" and not hasCarriedCrewMember(player) then
 		cleanupTutorialTarget(player, session)
 	end
 
@@ -1790,7 +1810,7 @@ StepHandlers.extract_brainrot.Update = function(player, session)
 		return
 	end
 
-	if player:GetAttribute("CarriedBrainrot") == nil then
+	if not hasCarriedCrewMember(player) then
 		ensureTutorialBrainrotTarget(player, session)
 	end
 

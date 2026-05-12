@@ -24,6 +24,8 @@ local GHOST_ATTRIBUTE = "HoroProjectionGhost"
 local BODY_ATTRIBUTE = "HoroProjectionBody"
 local PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local PROJECTION_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local DEFAULT_DURATION = 5
 local DEFAULT_GHOST_SPEED = 15
@@ -118,6 +120,28 @@ local function horoTrace(message, ...)
 	print(string.format("[HORO TRACE] " .. tostring(message), ...))
 end
 
+local function getCarriedCrewMemberName(player)
+	if not player then
+		return nil
+	end
+
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	return nil
+end
+
+local function hasCarriedCrewMember(player)
+	return getCarriedCrewMemberName(player) ~= nil
+end
+
 local function beginPickupRangeGrace(state, reason)
 	local graceDuration = math.max(0, tonumber(state and state.PickupRangeGraceDuration) or 0)
 	local graceDistance = math.max(0, tonumber(state and state.PickupRangeGraceDistance) or 0)
@@ -143,10 +167,11 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrBrainrot=%s projectionCarryMarker=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s attrBrainrot=%s projectionCarryMarker=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
-		tostring(player:GetAttribute("CarriedBrainrot")),
+		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
+		tostring(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)),
 		tostring(player:GetAttribute(PROJECTION_CARRY_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
@@ -373,7 +398,7 @@ end
 
 local function hasCarriedReward(player)
 	return player:GetAttribute("CarriedMajorRewardType") ~= nil
-		or player:GetAttribute("CarriedBrainrot") ~= nil
+		or hasCarriedCrewMember(player)
 end
 
 local function numbersDiffer(left, right)
@@ -1020,16 +1045,16 @@ local function dropCarriedRewards(state, dropPosition)
 		formatVector3(dropPosition)
 	)
 
-	local brainrotContext = CrewInteraction.GetActiveContext()
-	local droppedBrainrot = CrewInteraction.DropHeldAtPosition(brainrotContext, player, nil, dropPosition)
-	if droppedBrainrot then
+	local crewMemberContext = CrewInteraction.GetActiveContext()
+	local droppedCrewMember = CrewInteraction.DropHeldAtPosition(crewMemberContext, player, nil, dropPosition)
+	if droppedCrewMember then
 		droppedAny = true
 	end
 	horoTrace(
-		"dropCarriedRewards brainrotDrop player=%s projectionId=%s dropped=%s",
+		"dropCarriedRewards crewMemberDrop player=%s projectionId=%s dropped=%s",
 		player and player.Name or "<nil>",
 		tostring(state and state.ProjectionId),
-		tostring(droppedBrainrot == true)
+		tostring(droppedCrewMember == true)
 	)
 
 	clearProjectionCarryMarker(player, state.ProjectionId)
@@ -1391,28 +1416,28 @@ local function tryPickupReward(state)
 		return true, "major_reward"
 	end
 
-	local brainrotContext = CrewInteraction.GetActiveContext()
-	local claimedBrainrot = CrewInteraction.TryCarryNearPosition(
-		brainrotContext,
+	local crewMemberContext = CrewInteraction.GetActiveContext()
+	local claimedCrewMember = CrewInteraction.TryCarryNearPosition(
+		crewMemberContext,
 		state.Player,
 		nil,
 		position,
 		carrierPart,
 		state.RewardInteractRadius
 	)
-	if claimedBrainrot then
+	if claimedCrewMember then
 		setProjectionCarryMarker(state.Player, state.ProjectionId)
 		updateCarryingAttribute(state)
 		scheduleGhostNetworkOwnershipRefresh(state, PICKUP_OWNERSHIP_REFRESH_ATTEMPTS, NETWORK_OWNERSHIP_REFRESH_INTERVAL)
-		beginPickupRangeGrace(state, "brainrot")
+		beginPickupRangeGrace(state, "crew_member")
 		horoTrace(
-			"tryPickupReward claimedBrainrot player=%s projectionId=%s carrierPart=%s carryAttrs={%s}",
+			"tryPickupReward claimedCrewMember player=%s projectionId=%s carrierPart=%s carryAttrs={%s}",
 			state.Player and state.Player.Name or "<nil>",
 			tostring(state.ProjectionId),
 			formatInstancePath(carrierPart),
 			getPlayerCarrySummary(state.Player)
 		)
-		return true, "brainrot"
+		return true, "crew_member"
 	end
 
 	horoTrace(

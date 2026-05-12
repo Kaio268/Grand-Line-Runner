@@ -25,7 +25,7 @@ local Placement = require(ServerMods:WaitForChild("Placement"))
 local Interaction = require(ServerMods:WaitForChild("Interaction"))
 
 local entries, maxTier, globalMaxFoot = Registry.Build()
-local STARTUP_TRACE = RunService:IsStudio()
+local STARTUP_TRACE = RunService:IsStudio() and game:GetAttribute("CrewSpawnDebugTrace") == true
 local VALID_RARITY_NAMES = SpawnPartsCfg.RarityTier or {}
 
 if STARTUP_TRACE then
@@ -66,7 +66,7 @@ local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLine
 local TutorialConfig = require(Configs:WaitForChild("FirstTimeTutorial"))
 
 local rng = Random.new()
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CrewSpawnDebugTrace") == true
 local loggedHitBoxTouchByPlayer = {}
 local spawnWarnThrottleByKey = {}
 local FIRST_TUTORIAL_BIOME_INDEX = 1
@@ -75,6 +75,7 @@ local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
 local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
+local CARRIED_MODEL_ATTRIBUTE = "CrewCarryHeld"
 local TUTORIAL_GRANTED_PATH = tostring(
 	(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.GrantedPath)
 		or "HiddenLeaderstats.TutorialBrainrotGranted"
@@ -165,6 +166,10 @@ end
 
 local function isTutorialBrainrotInfo(info)
 	return typeof(info) == "table" and info.TutorialBrainrot == true
+end
+
+local function isHeldBrainrotModel(model, st)
+	return (st and st.Held == true) or (model and model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true)
 end
 
 local function getTutorialBrainrotGranted(player)
@@ -567,7 +572,7 @@ local function expireBrainrot(model, st)
 	if isTutorialBrainrotModel(model) then
 		return
 	end
-	if st.Held then
+	if isHeldBrainrotModel(model, st) then
 		return
 	end
 
@@ -590,7 +595,7 @@ end
 
 local function rushTrimExistingOnce()
 	for model, st in pairs(active) do
-		if model and model.Parent and not st.Held and not isTutorialBrainrotModel(model) then
+		if model and model.Parent and not isHeldBrainrotModel(model, st) and not isTutorialBrainrotModel(model) then
 			local newRemain = math.min(st.Remaining or 0, RUSH_TRIM_SECONDS)
 			st.Remaining = newRemain
 			st.LastUpdate = os.clock()
@@ -1507,7 +1512,7 @@ while true do
 			end
 			active[model] = nil
 		else
-			if st.Held then
+			if isHeldBrainrotModel(model, st) then
 				st.LastUpdate = now
 				Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
 			else

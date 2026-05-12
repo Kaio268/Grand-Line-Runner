@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
@@ -16,7 +15,7 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local App = require(UiFolder:WaitForChild("App"))
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
+local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
@@ -74,10 +73,97 @@ local RARITY_ORDER = {
 	Omega = 9,
 }
 
+local CREW_ITEM_KIND = "CrewMember"
+local LEGACY_CREW_ITEM_KIND = "Brainrot"
 local CREW_QUICK_ACCENT = Color3.fromRGB(93, 203, 200)
 
 local function getCrewInfo(name)
-	return CrewCatalog.GetInfoById(name) or Brainrots[name]
+	return CrewCatalog.GetInfoById(name) or CrewLegacyConfig[name]
+end
+
+local function isCrewItemKind(kind)
+	return kind == CREW_ITEM_KIND or kind == LEGACY_CREW_ITEM_KIND
+end
+
+local function normalizeItemKind(kind)
+	return if kind == LEGACY_CREW_ITEM_KIND then CREW_ITEM_KIND else kind
+end
+
+local function copyModelPreviewDescriptor(descriptor)
+	if typeof(descriptor) ~= "table" then
+		return nil
+	end
+
+	local modelName = tostring(descriptor.ModelName or descriptor.modelName or "")
+	if modelName == "" then
+		return nil
+	end
+
+	local copy = {
+		ModelName = modelName,
+		UsedCanonical = descriptor.UsedCanonical == true or descriptor.usedCanonical == true,
+		IsPreviewOnly = descriptor.IsPreviewOnly ~= false and descriptor.isPreviewOnly ~= false,
+	}
+
+	local source = tostring(descriptor.Source or descriptor.source or "")
+	if source ~= "" then
+		copy.Source = source
+	end
+
+	local modelPath = tostring(descriptor.ModelPath or descriptor.modelPath or "")
+	if modelPath ~= "" then
+		copy.ModelPath = modelPath
+	end
+
+	local legacyIdentity = tostring(descriptor.LegacyIdentity or descriptor.legacyIdentity or "")
+	if legacyIdentity ~= "" then
+		copy.LegacyIdentity = legacyIdentity
+	end
+
+	local fallbackReason = tostring(descriptor.FallbackReason or descriptor.fallbackReason or "")
+	if fallbackReason ~= "" then
+		copy.FallbackReason = fallbackReason
+	end
+
+	return copy
+end
+
+local function buildCrewCatalogModelPreview(name, state)
+	local modelName = state and tostring(state.modelName or "") or ""
+	local info = getCrewInfo(name)
+
+	if modelName == "" and info then
+		modelName = tostring(info.ModelName or "")
+	end
+
+	if modelName == "" then
+		return nil
+	end
+
+	if info and info.MissingCrewModel == true then
+		return nil
+	end
+
+	if info and info.ModelNameVerified ~= true then
+		return nil
+	end
+
+	return {
+		ModelName = modelName,
+		UsedCanonical = true,
+		IsPreviewOnly = true,
+		LegacyIdentity = tostring(name or ""),
+		Source = "CrewCatalog",
+	}
+end
+
+local function getCrewModelPreviewDescriptor(name, state)
+	local descriptor = state and copyModelPreviewDescriptor(state.modelPreview) or nil
+	if descriptor and descriptor.UsedCanonical == true then
+		return descriptor
+	end
+
+	return buildCrewCatalogModelPreview(name, state)
 end
 
 local CATEGORY_DEFS = {
@@ -167,10 +253,9 @@ local stopObservingState = nil
 local scheduleRender
 local syncChestsFromInventory
 local syncDevilFruitsFromInventory
-local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
 local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
-local INVENTORY_SNAPSHOT_DEBUG = true
+local INVENTORY_SNAPSHOT_DEBUG = false
 local INCOME_STATUS_METADATA_RETRY_SECONDS = 3
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
@@ -323,7 +408,8 @@ local function ensureAcquired(key)
 end
 
 local SNAPSHOT_OWNED_KINDS = {
-	Brainrot = true,
+	[CREW_ITEM_KIND] = true,
+	[LEGACY_CREW_ITEM_KIND] = true,
 	Gear = true,
 	DevilFruit = true,
 	Chest = true,
@@ -358,7 +444,35 @@ local function getEntryDisplayMetadata(entry)
 		metadata.render = render
 	end
 
-	if metadata.displayName ~= nil or metadata.rarity ~= nil or metadata.render ~= nil then
+	local modelPreview = copyModelPreviewDescriptor(entry.ModelPreview or entry.modelPreview)
+	if modelPreview then
+		metadata.modelPreview = modelPreview
+	end
+
+	local modelName = tostring(entry.ModelName or entry.modelName or "")
+	if modelName == "" and modelPreview then
+		modelName = tostring(modelPreview.ModelName or "")
+	end
+	if modelName ~= "" then
+		metadata.modelName = modelName
+	end
+
+	local crewMemberId = tostring(entry.CrewMemberId or entry.crewMemberId or "")
+	if crewMemberId ~= "" then
+		metadata.crewMemberId = crewMemberId
+	end
+
+	local productionName = tostring(entry.ProductionName or entry.productionName or "")
+	if productionName ~= "" then
+		metadata.productionName = productionName
+	end
+
+	local realCharacterName = tostring(entry.RealCharacterName or entry.realCharacterName or "")
+	if realCharacterName ~= "" then
+		metadata.realCharacterName = realCharacterName
+	end
+
+	if next(metadata) ~= nil then
 		return metadata
 	end
 	return nil
@@ -369,9 +483,30 @@ local function applyDisplayMetadataToState(state, metadata)
 		return state
 	end
 
-	state.displayName = metadata.displayName
-	state.rarity = metadata.rarity
-	state.render = metadata.render
+	if metadata.displayName ~= nil then
+		state.displayName = metadata.displayName
+	end
+	if metadata.rarity ~= nil then
+		state.rarity = metadata.rarity
+	end
+	if metadata.render ~= nil then
+		state.render = metadata.render
+	end
+	if metadata.modelPreview ~= nil then
+		state.modelPreview = metadata.modelPreview
+	end
+	if metadata.modelName ~= nil then
+		state.modelName = metadata.modelName
+	end
+	if metadata.crewMemberId ~= nil then
+		state.crewMemberId = metadata.crewMemberId
+	end
+	if metadata.productionName ~= nil then
+		state.productionName = metadata.productionName
+	end
+	if metadata.realCharacterName ~= nil then
+		state.realCharacterName = metadata.realCharacterName
+	end
 	return state
 end
 
@@ -414,7 +549,8 @@ local function applyInventorySnapshot(snapshot)
 
 	clearSnapshotOwnedItems()
 
-	local brainrotCount = applyQuantitySnapshotEntries(snapshot.Brainrots, "Brainrot", function(name)
+	local crewSnapshotEntries = snapshot.Crew
+	local crewCount = applyQuantitySnapshotEntries(crewSnapshotEntries, CREW_ITEM_KIND, function(name)
 		return getCrewInfo(name) ~= nil
 	end)
 
@@ -464,10 +600,8 @@ local function applyInventorySnapshot(snapshot)
 
 	inventorySnapshotDebug(
 		"applied",
-		"brainrots",
-		brainrotCount,
 		"crew",
-		snapshot.Counts and tostring(snapshot.Counts.Crew) or "0",
+		crewCount,
 		"devilFruits",
 		devilFruitCount,
 		"gears",
@@ -515,7 +649,7 @@ local function getRarityLabel(kind, name, state)
 		return fruit and tostring(fruit.Rarity or "") or ""
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
 			return state.rarity
 		end
@@ -532,7 +666,7 @@ local function getRarityLabel(kind, name, state)
 end
 
 local function getItemSortRank(kind, name, state)
-	if kind == "Brainrot" or kind == "DevilFruit" then
+	if isCrewItemKind(kind) or kind == "DevilFruit" then
 		return RARITY_ORDER[getRarityLabel(kind, name, state)] or 0
 	end
 
@@ -679,7 +813,7 @@ local function getItemDisplayName(kind, name, state)
 		return tostring(name or "Devil Fruit")
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.displayName) == "string" and state.displayName ~= "" then
 			return state.displayName
 		end
@@ -714,7 +848,7 @@ local function compareInventoryKeys(a, b)
 		return rankA > rankB
 	end
 
-	if stateA.kind == stateB.kind and stateA.kind == "Brainrot" then
+	if isCrewItemKind(stateA.kind) and isCrewItemKind(stateB.kind) then
 		local nameA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name, stateA) or ""))
 		local nameB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name, stateB) or ""))
 		if nameA ~= nameB then
@@ -878,7 +1012,7 @@ local function getDisplayName(kind, name, state)
 		return fruit and fruit.DisplayName or tostring(name)
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		return getItemDisplayName(kind, name, state)
 	end
 
@@ -899,7 +1033,7 @@ local function getSubtitle(kind, name, state)
 		return fruit and tostring(fruit.Rarity or "Devil Fruit") or "Devil Fruit"
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
 			return state.rarity
 		end
@@ -916,7 +1050,7 @@ local function getSubtitle(kind, name, state)
 end
 
 local function getIcon(kind, name, state)
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.render) == "string" and state.render ~= "" then
 			return state.render
 		end
@@ -933,7 +1067,7 @@ local function getIcon(kind, name, state)
 end
 
 local function getAccentColor(kind, name, state)
-	if kind == "Brainrot" or kind == "DevilFruit" then
+	if isCrewItemKind(kind) or kind == "DevilFruit" then
 		return RARITY_COLORS[getSubtitle(kind, name, state)] or Color3.fromRGB(93, 203, 200)
 	end
 
@@ -1000,7 +1134,7 @@ local function countCrewItems(brainrotKeys)
 	local count = 0
 	for _, key in ipairs(brainrotKeys or {}) do
 		local state = itemState[key]
-		if state and state.kind == "Brainrot" then
+		if state and isCrewItemKind(state.kind) then
 			count += math.max(0, math.floor(tonumber(state.qty) or 0))
 		end
 	end
@@ -1488,7 +1622,7 @@ local function buildLists()
 			gearsList[#gearsList + 1] = key
 		elseif state.kind == "Chest" and (state.qty or 0) > 0 then
 			chestsList[#chestsList + 1] = key
-		elseif state.kind == "Brainrot" and (state.qty or 0) > 0 then
+		elseif isCrewItemKind(state.kind) and (state.qty or 0) > 0 then
 			brainrotsList[#brainrotsList + 1] = key
 		elseif state.kind == "DevilFruit" and (state.qty or 0) > 0 then
 			devilFruitList[#devilFruitList + 1] = key
@@ -1523,15 +1657,25 @@ end
 local function buildEntry(key, state)
 	local displayName = getDisplayName(state.kind, state.name, state)
 	local subtitle = getSubtitle(state.kind, state.name, state)
+	local equippedKindMatches = equippedKind == nil
+		or tostring(state.kind) == tostring(equippedKind)
+		or (isCrewItemKind(state.kind) and isCrewItemKind(equippedKind))
 	local isEquipped = tostring(state.name) == tostring(equippedName)
-		and (equippedKind == nil or tostring(state.kind) == tostring(equippedKind))
+		and equippedKindMatches
 	local kindFooter = if state.kind == "Resource"
 		then "Display only"
 		else (isEquipped and "Click to unequip" or "Click to equip")
 	local previewKind = nil
 	local previewName = nil
+	local modelPreview = nil
 
-	if state.kind == "DevilFruit" then
+	if isCrewItemKind(state.kind) then
+		modelPreview = getCrewModelPreviewDescriptor(state.name, state)
+		if modelPreview then
+			previewKind = CREW_ITEM_KIND
+			previewName = tostring(modelPreview.ModelName or "")
+		end
+	elseif state.kind == "DevilFruit" then
 		previewKind = "DevilFruit"
 		previewName = state.name
 	elseif state.kind == "Chest" then
@@ -1554,6 +1698,7 @@ local function buildEntry(key, state)
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
 		previewName = previewName,
+		modelPreview = modelPreview,
 		quantity = state.qty,
 		accentColor = getAccentColor(state.kind, state.name, state),
 		interactive = state.kind ~= "Resource",
@@ -1744,12 +1889,12 @@ local function buildRenderData()
 			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
 			brainrotCollectionCount = crewCollectionCount,
-			brainrotQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
-			brainrotQuickSlotsMax = crewQuickSlots.maxSlots,
+			crewQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
+			crewQuickSlotsMax = crewQuickSlots.maxSlots,
 		},
 		activeView = uiState.activeView,
 		activeCategoryLabel = (CATEGORY_DEFS[uiState.activeCategory] or CATEGORY_DEFS.Chests).label,
-		brainrotQuickSlots = crewQuickSlots,
+		crewQuickSlots = crewQuickSlots,
 		filteredCount = #items,
 		totalCount = #activeKeys,
 		query = uiState.query,
@@ -1843,21 +1988,6 @@ local function getLegacyInventoryIcon()
 	}
 
 	return cachedLegacyInventoryIcon
-end
-
-local function getToggleLayoutSignature()
-	local layout = getToggleLayout()
-	if not layout then
-		return "none"
-	end
-
-	return table.concat({
-		tostring(math.floor(layout.position.X.Offset + 0.5)),
-		tostring(math.floor(layout.position.Y.Offset + 0.5)),
-		tostring(math.floor(layout.size.X.Offset + 0.5)),
-		tostring(math.floor(layout.size.Y.Offset + 0.5)),
-		layout.compact and "1" or "0",
-	}, "|")
 end
 
 local function bindHudLayoutTracking()
@@ -2292,7 +2422,7 @@ local function resolveEquippedItemName(tool)
 	end
 
 	local canonicalName = tool:GetAttribute("InvItem") or tool:GetAttribute("InventoryItemName")
-	local canonicalKind = tool:GetAttribute("InventoryItemKind")
+	local canonicalKind = normalizeItemKind(tool:GetAttribute("InventoryItemKind"))
 	if typeof(canonicalName) == "string" and canonicalName ~= "" then
 		return canonicalKind, canonicalName
 	end
@@ -2304,7 +2434,10 @@ local function syncEquippedState(character)
 	local attributeKind = player:GetAttribute("EquippedInventoryItemKind")
 	local attributeName = player:GetAttribute("EquippedInventoryItemName")
 	if typeof(attributeName) == "string" and attributeName ~= "" then
-		equippedKind = if typeof(attributeKind) == "string" and attributeKind ~= "" then attributeKind else nil
+		local normalizedAttributeKind = normalizeItemKind(attributeKind)
+		equippedKind = if typeof(normalizedAttributeKind) == "string" and normalizedAttributeKind ~= ""
+			then normalizedAttributeKind
+			else nil
 		equippedName = attributeName
 		scheduleRender()
 		return
@@ -2350,19 +2483,22 @@ local function hookCharacter(character)
 end
 
 trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		local quantity = tonumber(value) or 0
-		local key = "Brainrot|" .. tostring(name)
+		local key = CREW_ITEM_KIND .. "|" .. tostring(name)
+		local legacyKey = LEGACY_CREW_ITEM_KIND .. "|" .. tostring(name)
 		local previous = itemState[key]
 		if quantity > 0 then
 			ensureAcquired(key)
 			itemState[key] = applyDisplayMetadataToState({
-				kind = "Brainrot",
+				kind = CREW_ITEM_KIND,
 				name = name,
 				qty = quantity,
-			}, previous)
+			}, previous or itemState[legacyKey])
+			itemState[legacyKey] = nil
 		else
 			itemState[key] = nil
+			itemState[legacyKey] = nil
 		end
 	elseif kind == "Gear" then
 		local key = "Gear|" .. tostring(name)
@@ -2413,6 +2549,10 @@ end, cleanupConnections)
 local snapshotRequestInFlight = false
 local lastSnapshotRequestAt = 0
 
+local function isTransientSnapshotInvokeError(err)
+	return tostring(err):find("cannot resume non%-suspended coroutine") ~= nil
+end
+
 local function requestInventorySnapshot(reason)
 	if snapshotRequestInFlight or not snapshotRemote or destroyed then
 		return
@@ -2438,6 +2578,12 @@ local function requestInventorySnapshot(reason)
 		end
 
 		if not ok then
+			if isTransientSnapshotInvokeError(snapshot) and reason ~= "retryTransientInvoke" then
+				task.delay(1.25, function()
+					requestInventorySnapshot("retryTransientInvoke")
+				end)
+				return
+			end
 			warn("[INV][SNAPSHOT][CLIENT][APP] request failed", snapshot)
 			task.delay(2, function()
 				requestInventorySnapshot("retryAfterError")
@@ -2571,14 +2717,6 @@ trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemName"), f
 		syncEquippedState(player.Character)
 	else
 		equippedName = nil
-		scheduleRender()
-	end
-end, cleanupConnections)
-
-trackConnection(RunService.Heartbeat, function()
-	local signature = getToggleLayoutSignature()
-	if signature ~= lastToggleLayoutSignature then
-		lastToggleLayoutSignature = signature
 		scheduleRender()
 	end
 end, cleanupConnections)

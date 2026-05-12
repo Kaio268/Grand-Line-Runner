@@ -49,6 +49,59 @@ local function addDevilFruitCandidate(candidates, fruitIdentifier)
 	end
 end
 
+local function addDevilFruitTableEntryCandidates(candidates, entry)
+	addDevilFruitCandidate(candidates, entry.FruitKey)
+	addDevilFruitCandidate(candidates, entry.Key)
+	addDevilFruitCandidate(candidates, entry.Id)
+	addDevilFruitCandidate(candidates, entry.Name)
+	addDevilFruitCandidate(candidates, entry.DisplayName)
+	addDevilFruitCandidate(candidates, entry.FruitName)
+
+	for _, value in pairs(entry) do
+		if typeof(value) == "string" then
+			addDevilFruitCandidate(candidates, value)
+		elseif typeof(value) == "table" then
+			addDevilFruitCandidate(candidates, value.FruitKey)
+			addDevilFruitCandidate(candidates, value.Key)
+			addDevilFruitCandidate(candidates, value.Id)
+			addDevilFruitCandidate(candidates, value.Name)
+			addDevilFruitCandidate(candidates, value.DisplayName)
+			addDevilFruitCandidate(candidates, value.FruitName)
+		end
+	end
+end
+
+local function isExplicitlyUndiscoveredDevilFruitEntry(entry)
+	if entry == false then
+		return true
+	end
+
+	if typeof(entry) ~= "table" then
+		return false
+	end
+
+	return entry.Discovered == false or entry.Unlocked == false or entry.Collected == false or entry.Value == false
+end
+
+local function shouldReadLifetimeDevilFruitEntry(entry)
+	if isExplicitlyUndiscoveredDevilFruitEntry(entry) then
+		return false
+	end
+
+	local entryType = typeof(entry)
+	if entryType == "boolean" then
+		return entry == true
+	elseif entryType == "number" then
+		return entry > 0
+	elseif entryType == "string" then
+		return entry ~= ""
+	elseif entryType == "table" then
+		return true
+	end
+
+	return false
+end
+
 local function hasLiveDiscoveredDevilFruitValue(player, fruitKey)
 	local indexCollection = player and player:FindFirstChild("IndexCollection")
 	local devilFruits = indexCollection and indexCollection:FindFirstChild("DevilFruits")
@@ -63,16 +116,14 @@ local function addDevilFruitTableCandidates(candidates, devilFruits, options)
 
 	local requireTruthy = options and options.RequireTruthy == true
 	for fruitIdentifier, entry in pairs(devilFruits) do
-		if requireTruthy and entry ~= true then
+		if requireTruthy and not shouldReadLifetimeDevilFruitEntry(entry) then
 			continue
 		end
 
 		addDevilFruitCandidate(candidates, fruitIdentifier)
 
 		if typeof(entry) == "table" then
-			addDevilFruitCandidate(candidates, entry.FruitKey)
-			addDevilFruitCandidate(candidates, entry.Name)
-			addDevilFruitCandidate(candidates, entry.DisplayName)
+			addDevilFruitTableEntryCandidates(candidates, entry)
 		elseif typeof(entry) == "string" then
 			addDevilFruitCandidate(candidates, entry)
 		end

@@ -6,7 +6,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegistry"))
-local BrainrotsCfg = CrewCatalog.GetLegacyConfig()
+local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
@@ -72,15 +72,15 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		return false
 	end
 
-	if BrainrotsCfg[baseName] then
-		local baseInfo = BrainrotsCfg[baseName]
+	if CrewLegacyConfig[baseName] then
+		local baseInfo = CrewLegacyConfig[baseName]
 		baseInfo.GoldenRender = baseInfo.GoldenRender or baseInfo.Render
 		baseInfo.DiamondRender = baseInfo.DiamondRender or baseInfo.Render
 	end
 
 	options = if typeof(options) == "table" then options else {}
 
-	local baseInfo = CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[baseName] or info
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or CrewLegacyConfig[baseName] or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
@@ -117,15 +117,19 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		DiamondRender = diamondRender,
 		Level = 1,
 		CurrentXP = 0,
+		TotalXP = math.max(0, math.floor(tonumber(options.TotalXP) or 0)),
+		Source = tostring(options.Source or ""),
+		DepthBand = tostring(options.DepthBand or ""),
 		TutorialReward = options.TutorialReward == true,
 		TutorialToken = tostring(options.TutorialToken or ""),
+		GrandLineRushStarter = options.GrandLineRushStarter == true,
 		_QuickSlotCapacityReserved = true,
 	})
 	if #createdIds ~= n then
 		return false
 	end
 
-	return true
+	return true, createdIds
 end
 
 return Module

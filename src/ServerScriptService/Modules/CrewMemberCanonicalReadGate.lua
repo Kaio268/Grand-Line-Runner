@@ -125,10 +125,6 @@ local function recordLegacyFallbackUsage(player, category, surface, source, deta
 	end
 end
 
-local function isLegacyDenyFlagEnabled(flagName, flags)
-	return CrewStorage.IsLegacyDenyFlagEnabled(flagName, flags) == true
-end
-
 local function getFallbackPolicyReason(result)
 	local reason = tostring(result.FallbackReason or "")
 	if reason == "" or reason == "none" then
@@ -187,30 +183,37 @@ local function getAllowedFallbackPolicy(result, reason)
 		end
 	end
 
-	if CrewCompatibilityQuarantine.IsAllowedBrookFallback(identity)
-		or classification == "brook_fallback"
-			and CrewCompatibilityQuarantine.IsAllowedBrookFallback(tostring(result.ItemId or ""))
-	then
-		return "allowedBrookFallback", "brook_fallback", identity
+	local brookDecision = CrewCompatibilityQuarantine.GetBrookFallbackDecision(identity)
+	if brookDecision == nil and classification == "brook_fallback" then
+		brookDecision = CrewCompatibilityQuarantine.GetBrookFallbackDecision(tostring(result.ItemId or ""))
+	end
+	if brookDecision ~= nil then
+		return "allowedBrookFallback", "brook_fallback", identity, brookDecision
 	end
 
-	if CrewCompatibilityQuarantine.IsAllowedCompatibilityOnly(identity)
-		or classification == "compatibility_only"
-			and CrewCompatibilityQuarantine.IsAllowedCompatibilityOnly(tostring(result.ItemId or ""))
-	then
-		return "allowedCompatibilityFallback", "compatibility_only", identity
+	local compatibilityDecision = CrewCompatibilityQuarantine.GetCompatibilityOnlyDecision(identity)
+	if compatibilityDecision == nil and classification == "compatibility_only" then
+		compatibilityDecision = CrewCompatibilityQuarantine.GetCompatibilityOnlyDecision(tostring(result.ItemId or ""))
+	end
+	if compatibilityDecision ~= nil then
+		return "allowedCompatibilityFallback", "compatibility_only", identity, compatibilityDecision
 	end
 
 	return nil, classification, identity
 end
 
-local function markFallbackPolicy(result, category, kind, identity)
+local function markFallbackPolicy(result, category, kind, identity, decision)
 	result.FallbackPolicyCategory = category
 	result.FallbackPolicyKind = kind
 	result.FallbackPolicyIdentity = identity
 	result.AllowedFallback = category == "allowedCompatibilityFallback" or category == "allowedBrookFallback"
-	result.DeniedUnknownFallback = category == "deniedUnknownFallback"
+	result.UnknownFallback = kind == "unknown_unapproved_fallback"
 	result.CanonicalSelected = category == "canonicalSelected"
+	if typeof(decision) == "table" then
+		result.FallbackPolicyDisposition = tostring(decision.Disposition or "")
+		result.FallbackPolicyStatusCategory = tostring(decision.StatusCategory or "")
+		result.FallbackTelemetrySuppressed = decision.SuppressRuntimeFallbackTelemetry == true
+	end
 end
 
 local function recordCanonicalSelected(result, surface, source)
@@ -221,7 +224,7 @@ local function recordCanonicalSelected(result, surface, source)
 	})
 end
 
-local function applyReadResultFallbackDeny(result, flagName, category, surface, source)
+local function applyReadResultFallbackPolicy(result, category, surface, source)
 	if typeof(result) ~= "table" then
 		return false
 	end
@@ -234,53 +237,28 @@ local function applyReadResultFallbackDeny(result, flagName, category, surface, 
 
 	if isColdReadFallback(result, reason) then
 		markFallbackPolicy(result, tostring(category or ""), "cold_read_fallback", getFallbackPolicyIdentity(result))
-		recordLegacyFallbackUsage(result.Player, category, surface, source, {
-			Denied = false,
-			Reason = reason,
-		})
+		result.FallbackTelemetrySuppressed = true
 		return false
 	end
 
-	local policyCategory, policyKind, policyIdentity = getAllowedFallbackPolicy(result, reason)
+	local policyCategory, policyKind, policyIdentity, policyDecision = getAllowedFallbackPolicy(result, reason)
 	if policyCategory ~= nil then
-		markFallbackPolicy(result, policyCategory, policyKind, policyIdentity)
-		recordLegacyFallbackUsage(result.Player, policyCategory, surface, source, {
-			Denied = false,
-			Reason = reason,
-		})
+		markFallbackPolicy(result, policyCategory, policyKind, policyIdentity, policyDecision)
+		if not (typeof(policyDecision) == "table" and policyDecision.SuppressRuntimeFallbackTelemetry == true) then
+			recordLegacyFallbackUsage(result.Player, policyCategory, surface, source, {
+				Denied = false,
+				Reason = reason,
+			})
+		end
 		return false
 	end
 
-	local denied = isLegacyDenyFlagEnabled(flagName, result.Flags)
-	local telemetryCategory = if denied then "deniedUnknownFallback" else category
-	markFallbackPolicy(result, tostring(telemetryCategory or ""), "unknown_unapproved_fallback", policyIdentity)
-	recordLegacyFallbackUsage(result.Player, telemetryCategory, surface, source, {
-		Denied = denied,
+	markFallbackPolicy(result, tostring(category or ""), "unknown_unapproved_fallback", policyIdentity)
+	recordLegacyFallbackUsage(result.Player, category, surface, source, {
+		Denied = false,
 		Reason = reason,
 	})
-	if denied ~= true then
-		return false
-	end
-
-	local previousReason = reason
-	result.LegacyFallbackDenied = true
-	result.DisplayReadFallbackDenied = true
-	result.Source = "denied"
-	result.DisplayName = ""
-	result.Value = tostring(result.ItemId or result.LegacyIdentity or "")
-	result.FallbackReason = "legacy_fallback_denied:" .. previousReason
-	if result.DisplayReadFallbackReason ~= nil and result.DisplayReadFallbackReason ~= "none" then
-		result.DisplayReadFallbackReason = "legacy_fallback_denied:" .. tostring(result.DisplayReadFallbackReason or "")
-	end
-	warn(string.format(
-		"[CrewLegacyDeny] denied legacy fallback category=%s surface=%s source=%s player=%s reason=%s",
-		tostring(category or ""),
-		tostring(surface or ""),
-		tostring(source or ""),
-		getPlayerName(result.Player),
-		previousReason
-	))
-	return true
+	return false
 end
 
 local function getRoot(source)
@@ -872,34 +850,24 @@ local function chooseCanonicalDisplayMetadata(result)
 	end
 
 	if result.DisplayReadUseCanonical ~= true then
-		local denied = applyReadResultFallbackDeny(
+		applyReadResultFallbackPolicy(
 			result,
-			"CrewMemberDisplayHelperLegacyFallbackDenyEnabled",
 			"display_helper_legacy_fallback",
 			result.Path,
 			"display_metadata"
 		)
-		if denied then
-			result.SelectedValue = {
-				DisplayName = tostring(result.ItemId or ""),
-				Rarity = "",
-				Render = "",
-				Source = "LegacyFallbackDenied",
-			}
-		else
-			result.SelectedValue = legacyMetadata or {
-				DisplayName = tostring(result.ItemId or ""),
-				Rarity = "",
-				Render = "",
-				Source = "LegacyFallbackMissing",
-			}
-		end
+		result.SelectedValue = legacyMetadata or {
+			DisplayName = tostring(result.ItemId or ""),
+			Rarity = "",
+			Render = "",
+			Source = "LegacyFallbackMissing",
+		}
 	else
 		recordCanonicalSelected(result, result.Path, "display_metadata")
 		result.SelectedValue = canonicalMetadata
 	end
 
-	if result.DisplayReadUseCanonical ~= true and result.DisplayReadFallbackDenied ~= true and result.SelectedValue == nil then
+	if result.DisplayReadUseCanonical ~= true and result.SelectedValue == nil then
 		result.SelectedValue = legacyMetadata or {
 			DisplayName = tostring(result.ItemId or ""),
 			Rarity = "",
@@ -1221,14 +1189,14 @@ local function evaluateModelPreviewRead(source, path, storageName, options)
 
 	if readAllowed ~= true then
 		fallbackReason = readGateReason or "canonical_read_not_allowed"
+	elseif canonicalDescriptor ~= nil then
+		selected = canonicalDescriptor
 	elseif validationReason ~= nil then
 		fallbackReason = validationReason
 	elseif typeof(legacyDescriptor) ~= "table" or tostring(legacyDescriptor.ModelPath or "") == "" then
-		fallbackReason = "legacy_fallback_missing"
+		fallbackReason = canonicalReason or "preview_descriptor_unavailable"
 	elseif canonicalDescriptor == nil then
 		fallbackReason = canonicalReason or "canonical_preview_unavailable"
-	else
-		selected = canonicalDescriptor
 	end
 
 	if selected == nil then
@@ -1344,14 +1312,13 @@ local function evaluateMetadataHelperRead(source, path, storageName, fieldName, 
 		result.UsedCanonical = true
 		recordCanonicalSelected(result, path, "metadata_helper")
 	else
-		local denied = applyReadResultFallbackDeny(
+		applyReadResultFallbackPolicy(
 			result,
-			"CrewMemberDisplayHelperLegacyFallbackDenyEnabled",
 			"display_helper_legacy_fallback",
 			path,
 			"metadata_helper"
 		)
-		result.Value = if denied then tostring(storageName or "") else legacyValue
+		result.Value = legacyValue
 	end
 
 	if options.SkipLog ~= true then
@@ -1591,14 +1558,13 @@ local function evaluateGameplayDisplayNameHelper(source, storageName, path, cano
 		result.UsedCanonical = true
 		recordCanonicalSelected(result, path, "gameplay_helper")
 	else
-		local denied = applyReadResultFallbackDeny(
+		applyReadResultFallbackPolicy(
 			result,
-			"CrewMemberDisplayHelperLegacyFallbackDenyEnabled",
 			"display_helper_legacy_fallback",
 			path,
 			"gameplay_helper"
 		)
-		result.Value = if denied then tostring(storageName or "") else legacyValue
+		result.Value = legacyValue
 	end
 
 	if options.SkipLog ~= true then
@@ -2030,9 +1996,8 @@ local function evaluateStandStatusReadAuthority(source, standName, options)
 		fallbackReason,
 		context
 	)
-	applyReadResultFallbackDeny(
+	applyReadResultFallbackPolicy(
 		result,
-		"CrewMemberStandIncomeLegacyFallbackReadDenyEnabled",
 		"stand_income_legacy_fallback_read",
 		path,
 		"stand_status_read_authority"
@@ -2511,9 +2476,8 @@ local function evaluateIncomeStatusReadAuthority(source, standName, options)
 		fallbackReason,
 		context
 	)
-	applyReadResultFallbackDeny(
+	applyReadResultFallbackPolicy(
 		result,
-		"CrewMemberStandIncomeLegacyFallbackReadDenyEnabled",
 		"stand_income_legacy_fallback_read",
 		path,
 		"income_status_read_authority"
@@ -3074,9 +3038,8 @@ local function evaluateFoodStatusReadAuthority(source, target, options)
 		fallbackReason,
 		context
 	)
-	applyReadResultFallbackDeny(
+	applyReadResultFallbackPolicy(
 		result,
-		"CrewMemberFoodProgressionLegacyFallbackReadDenyEnabled",
 		"food_progression_legacy_fallback_read",
 		path,
 		"food_status_read_authority"

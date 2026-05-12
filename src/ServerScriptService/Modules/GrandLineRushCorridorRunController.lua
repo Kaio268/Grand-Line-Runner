@@ -22,7 +22,7 @@ local extractionTouchDebounce = {}
 local sharedChestSequence = 0
 local nextSharedChestRespawnAt = 0
 local worldRandom = Random.new()
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebugTrace") == true
 local loggedExtractionTouchByPlayer = {}
 local VALID_SPAWN_RARITY_NAMES = SpawnPartsConfig.RarityTier or {}
 
@@ -32,6 +32,8 @@ local INFO_COLOR = Color3.fromRGB(119, 217, 255)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -89,16 +91,39 @@ local function horoCarryTrace(message, ...)
 	print(string.format("[HORO CARRY TRACE] " .. tostring(message), ...))
 end
 
+local function getCarriedCrewMemberName(player)
+	if not player then
+		return nil
+	end
+
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	return nil
+end
+
+local function hasCarriedCrewMember(player)
+	return getCarriedCrewMemberName(player) ~= nil
+end
+
 local function getPlayerCarrySummary(player)
 	if not player then
 		return "player=<nil>"
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
-		tostring(player:GetAttribute("CarriedBrainrot")),
+		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
+		tostring(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
 		tostring(player:GetAttribute("HoroProjectionCarryingReward"))
@@ -282,20 +307,6 @@ local function destroyRewardObject(userId)
 	end
 	rewardObjectsByUserId[userId] = nil
 	rewardPlacementsByUserId[userId] = nil
-end
-
-local function destroySharedChestNode(chestId)
-	local node = sharedChestNodesById[chestId]
-	if not node then
-		return
-	end
-
-	local object = node.Object
-	if object and object.Parent then
-		object:Destroy()
-	end
-
-	sharedChestNodesById[chestId] = nil
 end
 
 local function destroyCarriedSharedChest(userId)
@@ -1138,7 +1149,7 @@ local function countActiveSharedChests()
 	return count
 end
 
-local function spawnSharedChestNode(rewardFolder, carriedFolder)
+local function spawnSharedChestNode(rewardFolder, _carriedFolder)
 	local spawnContext = chooseSharedChestSpawnContext()
 	if not spawnContext or not spawnContext.SpawnPart then
 		return nil
@@ -1221,7 +1232,7 @@ local function spawnSharedChestNode(rewardFolder, carriedFolder)
 		if currentNode ~= node or node.Claimed then
 			return
 		end
-		if triggerPlayer:GetAttribute("CarriedBrainrot") ~= nil then
+		if hasCarriedCrewMember(triggerPlayer) then
 			sendPopup(triggerPlayer, "You cannot pick up a chest while carrying a Crewmate.", ERROR_COLOR, true)
 			return
 		end
@@ -1335,7 +1346,7 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 		if triggerPlayer ~= player then
 			return
 		end
-		if triggerPlayer:GetAttribute("CarriedBrainrot") ~= nil then
+		if hasCarriedCrewMember(triggerPlayer) then
 			sendPopup(triggerPlayer, "You cannot pick up a chest or crew reward while carrying a Crewmate.", ERROR_COLOR, true)
 			return
 		end
@@ -1767,7 +1778,7 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 	end
 
 	local rewardFolder = getDebugSpawnFolder()
-	local carriedFolder = getDebugCarriedFolder()
+	local _carriedFolder = getDebugCarriedFolder()
 	local rewardState = SliceService.CreateChestRewardData(Economy.VerticalSlice.WorldRun.StartDepthBand or Economy.VerticalSlice.DefaultDepthBand)
 	rewardState.DisplayName = string.format("%s Chest", tostring(rewardState.Tier or "Wooden"))
 

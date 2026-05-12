@@ -11,6 +11,12 @@ local e = React.createElement
 local FOOTER_HEIGHT = 50
 local CARD_CORNER_RADIUS = UDim.new(0, 11)
 local IMAGE_CORNER_RADIUS = UDim.new(0, 9)
+local BLACK = Color3.fromRGB(0, 0, 0)
+local PREVIEW_ANCHOR = Vector2.new(0.5, 0.5)
+local PREVIEW_POSITION = UDim2.fromScale(0.5, 0.54)
+local PREVIEW_SIZE = UDim2.fromScale(0.82, 0.82)
+local IMAGE_SHADOW_POSITION = UDim2.fromScale(0.5, 0.58)
+local IMAGE_SHADOW_SIZE = UDim2.fromScale(0.84, 0.84)
 
 local function fallbackSilhouette()
 	return e("Frame", {
@@ -39,6 +45,29 @@ local function fallbackSilhouette()
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 12),
+			}),
+		}),
+	})
+end
+
+local function previewDropShadow()
+	return e("Frame", {
+		AnchorPoint = PREVIEW_ANCHOR,
+		BackgroundColor3 = BLACK,
+		BackgroundTransparency = 0.72,
+		BorderSizePixel = 0,
+		Position = UDim2.fromScale(0.5, 0.82),
+		Size = UDim2.fromScale(0.58, 0.14),
+		ZIndex = 1,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.45),
+				NumberSequenceKeypoint.new(1, 1),
 			}),
 		}),
 	})
@@ -308,83 +337,28 @@ local function createRarityChrome(rarityStyle, hovered)
 	return chromeChildren
 end
 
-local function createLockedPreview(unit)
-	if unit.previewKind and unit.previewName then
-		return {
-			Shadow = e(PreviewViewport, {
-				previewKind = unit.previewKind,
-				previewName = unit.previewName,
-				size = UDim2.new(0.86, 0, 0.86, 0),
-				position = UDim2.fromScale(0.5, 0.57),
-				anchorPoint = Vector2.new(0.5, 0.5),
-				tintColor = Color3.fromRGB(0, 0, 0),
-				tintTransparency = 0.35,
-				zIndex = 1,
-			}),
-			Character = e(PreviewViewport, {
-				previewKind = unit.previewKind,
-				previewName = unit.previewName,
-				size = UDim2.new(0.84, 0, 0.84, 0),
-				position = UDim2.fromScale(0.5, 0.54),
-				anchorPoint = Vector2.new(0.5, 0.5),
-				tintColor = Color3.fromRGB(0, 0, 0),
-				tintTransparency = 0,
-				zIndex = 3,
-			}),
-		}
-	end
-
-	if unit.image and unit.image ~= "" then
-		return {
-			Shadow = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundTransparency = 1,
-				Image = unit.image,
-				ImageColor3 = Color3.fromRGB(0, 0, 0),
-				ImageTransparency = 0.3,
-				Position = UDim2.fromScale(0.5, 0.56),
-				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.82, 0, 0.82, 0),
-				ZIndex = 1,
-			}),
-			Character = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundTransparency = 1,
-				Image = unit.image,
-				ImageColor3 = Color3.fromRGB(0, 0, 0),
-				ImageTransparency = 0,
-				Position = UDim2.fromScale(0.5, 0.54),
-				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.8, 0, 0.8, 0),
-				ZIndex = 3,
-			}),
-		}
-	end
-
+local function createLockedPreview()
 	return {
 		Fallback = fallbackSilhouette(),
 	}
 end
 
-local function createDiscoveredPreview(unit)
+local function createDiscoveredPreview(unit, renderPreview)
 	if unit.previewKind and unit.previewName then
+		if renderPreview == false then
+			return {
+				Fallback = fallbackSilhouette(),
+			}
+		end
+
 		return {
-			Shadow = e(PreviewViewport, {
-				previewKind = unit.previewKind,
-				previewName = unit.previewName,
-				size = UDim2.new(0.86, 0, 0.86, 0),
-				position = UDim2.fromScale(0.5, 0.58),
-				anchorPoint = Vector2.new(0.5, 0.5),
-				tintColor = Color3.fromRGB(0, 0, 0),
-				tintTransparency = 0.72,
-				zIndex = 1,
-			}),
+			Shadow = previewDropShadow(),
 			Character = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
-				size = UDim2.new(0.82, 0, 0.82, 0),
-				position = UDim2.fromScale(0.5, 0.54),
-				anchorPoint = Vector2.new(0.5, 0.5),
+				size = PREVIEW_SIZE,
+				position = PREVIEW_POSITION,
+				anchorPoint = PREVIEW_ANCHOR,
 				zIndex = 3,
 			}),
 		}
@@ -393,24 +367,24 @@ local function createDiscoveredPreview(unit)
 	if unit.image and unit.image ~= "" then
 		return {
 			Character = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
+				AnchorPoint = PREVIEW_ANCHOR,
 				BackgroundTransparency = 1,
 				Image = unit.image,
 				ImageColor3 = Theme.Palette.Text,
-				Position = UDim2.fromScale(0.5, 0.54),
+				Position = PREVIEW_POSITION,
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.8, 0, 0.8, 0),
+				Size = PREVIEW_SIZE,
 				ZIndex = 3,
 			}),
 			Shadow = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
+				AnchorPoint = PREVIEW_ANCHOR,
 				BackgroundTransparency = 1,
 				Image = unit.image,
-				ImageColor3 = Color3.fromRGB(0, 0, 0),
+				ImageColor3 = BLACK,
 				ImageTransparency = 0.7,
-				Position = UDim2.fromScale(0.5, 0.58),
+				Position = IMAGE_SHADOW_POSITION,
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.new(0.84, 0, 0.84, 0),
+				Size = IMAGE_SHADOW_SIZE,
 				ZIndex = 1,
 			}),
 		}
@@ -427,7 +401,7 @@ local function IndexCard(props)
 	local hovered, setHovered = React.useState(false)
 
 	if not unit.discovered then
-		local lockedChildren = createLockedPreview(unit)
+		local lockedChildren = createLockedPreview()
 
 		lockedChildren.Question = e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 0),
@@ -482,7 +456,7 @@ local function IndexCard(props)
 		})
 	end
 
-	local discoveredChildren = createDiscoveredPreview(unit)
+	local discoveredChildren = createDiscoveredPreview(unit, props.renderPreview)
 	local cardAppearance = getDiscoveredCardAppearance(unit, rarity, hovered)
 
 	if unit.production and unit.production ~= "" then

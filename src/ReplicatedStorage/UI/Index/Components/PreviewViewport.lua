@@ -7,6 +7,7 @@ local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 
 local e = React.createElement
 local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
+local CREW_PREVIEW_ROTATION = CFrame.Angles(math.rad(-12), math.rad(208), 0)
 
 local function clearChildren(instance)
 	for _, child in ipairs(instance:GetChildren()) do
@@ -86,7 +87,9 @@ end
 
 local function positionPreviewModel(previewModel, previewKind, previewName)
 	local rotation = CFrame.Angles(math.rad(-12), math.rad(28), 0)
-	if previewKind == "DevilFruit" and previewName == "Tori" then
+	if previewKind == "CrewMember" then
+		rotation = CREW_PREVIEW_ROTATION
+	elseif previewKind == "DevilFruit" and previewName == "Tori" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
 

@@ -4,7 +4,7 @@ local Lighting = game:GetService("Lighting")
 local LogService = game:GetService("LogService")
 local RunService = game:GetService("RunService")
 
-local WATCHDOG_ENABLED = true
+local WATCHDOG_ENABLED = RunService:IsStudio() and game:GetAttribute("IdleGlitchWatchdogEnabled") == true
 local LOG_PREFIX = "[IDLE WATCH]"
 local LOG_THROTTLE_SECONDS = 2
 local ANIMATION_BURST_WINDOW_SECONDS = 5

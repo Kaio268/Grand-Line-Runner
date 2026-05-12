@@ -6,8 +6,30 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("WaveClientDebugTrace") == true
 local seenWaveLogKeys = {}
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
+local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
+
+local function getNonEmptyAttribute(instance, attributeName)
+	local value = instance:GetAttribute(attributeName)
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+	return nil
+end
+
+local function getCarriedCrewMemberImage(player)
+	return getNonEmptyAttribute(player, CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE)
+		or getNonEmptyAttribute(player, LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE)
+end
+
+local function getCarriedCrewMemberName(player)
+	return getNonEmptyAttribute(player, CARRIED_CREW_MEMBER_ATTRIBUTE)
+		or getNonEmptyAttribute(player, LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+end
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -254,17 +276,17 @@ local function applyBrainrotToPfp(pfpGui, plr)
 		return
 	end
 
-	local render = plr:GetAttribute("CarriedBrainrotImage")
-	if render and tostring(render) ~= "" then
-		img.Image = tostring(render)
+	local render = getCarriedCrewMemberImage(plr)
+	if render then
+		img.Image = render
 		setGuiVisible(container, true)
 		setGuiVisible(img, true)
 		return
 	end
 
-	local id = plr:GetAttribute("CarriedBrainrot")
-	if id and tostring(id) ~= "" then
-		local info = CrewCatalog.GetInfoById(tostring(id)) or CrewCatalog.GetLegacyConfig()[tostring(id)]
+	local id = getCarriedCrewMemberName(plr)
+	if id then
+		local info = CrewCatalog.GetInfoById(id) or CrewCatalog.GetLegacyConfig()[id]
 		local fallback = info and info.Render
 		if fallback and tostring(fallback) ~= "" then
 			img.Image = tostring(fallback)
@@ -309,9 +331,13 @@ local function ensurePfp(userId)
 		applySkullToPfp(c, plr)
 	else
 		local b = c:FindFirstChild("Brainrot", true)
-		if b then setGuiVisible(b, false) end
+		if b then
+			setGuiVisible(b, false)
+		end
 		local s = c:FindFirstChild("Skull", true)
-		if s then setGuiVisible(s, false) end
+		if s then
+			setGuiVisible(s, false)
+		end
 	end
 
 	pfpClones[userId] = c
@@ -353,7 +379,7 @@ local function updatePfpPositions()
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			if hrp then
 				local a = getAlphaOnLine(hrp.Position)
-				gui.Position = UDim2.new(alphaToXScale(a), 0, 0.823, 0)
+				gui.Position = UDim2.fromScale(alphaToXScale(a), 0.823)
 			end
 		end
 	end
@@ -528,7 +554,7 @@ local function updateChestIndicators()
 			if pos then
 				local indicator = ensureChestIndicator(rewardObject)
 				local a = getAlphaOnLine(pos)
-				indicator.Position = UDim2.new(alphaToXScale(a), 0, 0.28, 0)
+				indicator.Position = UDim2.fromScale(alphaToXScale(a), 0.28)
 				valid[rewardObject] = true
 			end
 		end
@@ -1617,7 +1643,9 @@ local function spawnWave(entry)
 		local conn
 		conn = alpha.Changed:Connect(function(v)
 			if not clone.Parent then
-				if conn then conn:Disconnect() end
+				if conn then
+					conn:Disconnect()
+				end
 				return
 			end
 
@@ -1671,10 +1699,16 @@ local function spawnWave(entry)
 		tween:Play()
 		tween.Completed:Connect(function()
 			waveTry("spawnWave completed:" .. tostring(entry.Name), function()
-				if conn then conn:Disconnect() end
-				if alpha.Parent then alpha:Destroy() end
+				if conn then
+					conn:Disconnect()
+				end
+				if alpha.Parent then
+					alpha:Destroy()
+				end
 				freezeController:Destroy()
-				if clone.Parent then clone:Destroy() end
+				if clone.Parent then
+					clone:Destroy()
+				end
 				waveTrace("spawnWave completed name=%s mode=%s", tostring(entry.Name), movementMode)
 			end)
 		end)

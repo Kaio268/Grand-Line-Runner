@@ -16,7 +16,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://106911194271422",
 		Rarity = "Common",
 		TimeLeft = 30,
-		IdleAnim = 81355594772429,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Boneca Ambalabu"] = {
@@ -27,7 +27,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://138594877929939",
 		Rarity = "Common",
 		TimeLeft = 30,
-		IdleAnim = 124667521402664,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Tun Tun Sahur"] = {
@@ -38,7 +38,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://133744920704526",
 		Rarity = "Common",
 		TimeLeft = 30,
-		IdleAnim = 90536498752484,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Tim Cheese"] = {
@@ -49,7 +49,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://111507570681189",
 		Rarity = "Common",
 		TimeLeft = 30,
-		IdleAnim = 121692489909418,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Pipi Kiwi"] = {
@@ -71,7 +71,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://140082227752846",
 		Rarity = "Uncommon",
 		TimeLeft = 30,
-		IdleAnim = 107803805940614,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Svinina Bombardino"] = {
@@ -82,7 +82,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://101161807977859",
 		Rarity = "Uncommon",
 		TimeLeft = 30,
-		IdleAnim = 88464588642501,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Gangster Footera"] = {
@@ -93,7 +93,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://116944449743705",
 		Rarity = "Uncommon",
 		TimeLeft = 30,
-		IdleAnim = 136631925337185,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Burbaloni Loliloli"] = {
@@ -104,7 +104,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://72209560185597",
 		Rarity = "Uncommon",
 		TimeLeft = 30,
-		IdleAnim = 133787706688058,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Trippi Troppi"] = {
@@ -126,7 +126,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://132307117255416",
 		Rarity = "Rare",
 		TimeLeft = 30,
-		IdleAnim = 135996778242052,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Brr Brr Patapim"] = {
@@ -137,7 +137,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://121430162160287",
 		Rarity = "Rare",
 		TimeLeft = 30,
-		IdleAnim = 108530253041260,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Trippi Troppi Troppa Trippa"] = {
@@ -148,7 +148,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://106459496438102",
 		Rarity = "Rare",
 		TimeLeft = 30,
-		IdleAnim = 109497771446379,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Tatatata Sahur"] = {
@@ -159,18 +159,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://106532370053521",
 		Rarity = "Rare",
 		TimeLeft = 30,
-		IdleAnim = 84372816639111,
-	},
-
-	["Balerina Capucina"] = {
-		Income = 100,
-		Chance = 2,
-		Render = "rbxassetid://113452691198946",
-		GoldenRender = "rbxassetid://84139465602810",
-		DiamondRender = "rbxassetid://110834200561877",
-		Rarity = "Rare",
-		TimeLeft = 30,
-		IdleAnim = 71272992279195,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Cappuccino Assassino"] = {
@@ -181,7 +170,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://120234498876005",
 		Rarity = "Epic",
 		TimeLeft = 30,
-		IdleAnim = 94395632772482,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Chimpanzini Bananini"] = {
@@ -192,7 +181,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://79454672643438",
 		Rarity = "Epic",
 		TimeLeft = 30,
-		IdleAnim = 123310159832096,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Fluri Flura"] = {
@@ -236,7 +225,7 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://110365261580512",
 		Rarity = "Legendary",
 		TimeLeft = 30,
-		IdleAnim = 74441559824851,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
 	["Rhino Toasterino"] = {
@@ -456,20 +445,9 @@ local Brainrots = {
 		DiamondRender = "rbxassetid://88041363117409",
 		Rarity = "Secret",
 		TimeLeft = 30,
-		IdleAnim = 136874323814262,
+		-- TODO(CrewAnimations): Add Chefs-owned idle animation if this CrewMember remains in production roster.
 	},
 
-	["67"] = {
-		Income = 50000,
-		Chance = 0.00001,
-		Render = "rbxassetid://105758401535541",
-		GoldenRender = "rbxassetid://106470395784924",
-		DiamondRender = "rbxassetid://83375715484261",
-		Rarity = "Secret",
-		TimeLeft = 30,
-		IdleAnim = 83385351136928,
-	},
-	
 	["Pakrahmatmatina"] = {
 		Income = 60000,
 		Chance = 0,
@@ -504,7 +482,7 @@ local Brainrots = {
 	},
 }
 
-for id, info in pairs(Brainrots) do
+for _, info in pairs(Brainrots) do
 	if type(info) == "table" and not info.IsVariant then
 		info.GoldenRender = info.GoldenRender or info.Render
 		info.DiamondRender = info.DiamondRender or info.Render
@@ -512,11 +490,7 @@ for id, info in pairs(Brainrots) do
 end
 
 local function shallowCopy(t)
-	local c = {}
-	for k, v in pairs(t) do
-		c[k] = v
-	end
-	return c
+	return table.clone(t)
 end
 
 local baseIds = {}

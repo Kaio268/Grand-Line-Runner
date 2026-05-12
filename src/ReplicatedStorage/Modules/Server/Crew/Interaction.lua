@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 -- Crew interaction owns the old pickup/carry/drop/extract behavior. Several
 -- attributes and Studio folder names remain Brainrot-named for compatibility.
@@ -11,6 +12,62 @@ local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
 local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
+local CARRIED_MODEL_ATTRIBUTE = "CrewCarryHeld"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
+local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
+local CARRY_ASSEMBLY_WELD_NAME = "CrewCarryAssemblyWeld"
+local CARRY_ATTACHMENT_WELD_NAME = "CrewCarryAttachmentWeld"
+local CARRY_ROOT_REPAIR_DISTANCE = 2
+local CARRY_PART_REPAIR_DISTANCE = 3
+
+local function normalizeCarriedAttribute(value)
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+	if value ~= nil and typeof(value) ~= "string" then
+		return tostring(value)
+	end
+	return nil
+end
+
+local function clearCarriedCrewMemberAttributes(player)
+	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
+	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
+	player:SetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE, nil)
+	player:SetAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE, nil)
+end
+
+local function setCarriedCrewMemberAttributes(player, crewMemberName, image)
+	local carriedName = normalizeCarriedAttribute(crewMemberName)
+	if not carriedName then
+		clearCarriedCrewMemberAttributes(player)
+		return
+	end
+
+	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, carriedName)
+	player:SetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE, carriedName)
+
+	local carriedImage = normalizeCarriedAttribute(image)
+	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, carriedImage)
+	player:SetAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE, carriedImage)
+end
+
+function Interaction.GetCarriedCrewMemberName(player)
+	if not player then
+		return nil
+	end
+
+	return normalizeCarriedAttribute(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE))
+		or normalizeCarriedAttribute(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE))
+end
+
+function Interaction.ClearCarriedCrewMemberAttributes(player)
+	if player then
+		clearCarriedCrewMemberAttributes(player)
+	end
+end
 
 local function canPlayerCarryModel(player, model)
 	if not player or not model then
@@ -38,13 +95,116 @@ local function forEachPart(model, fn)
 	end
 end
 
-local function setCarryPhysics(model, held)
+local function setNetworkOwner(part, owner)
+	if part.Anchored then
+		return
+	end
+
+	pcall(function()
+		part:SetNetworkOwner(owner)
+	end)
+end
+
+local function setCarryPhysics(model, held, networkOwner)
 	forEachPart(model, function(p)
 		p.Anchored = not held
 		p.CanCollide = not held
+		p.CanTouch = not held
+		p.CanQuery = not held
 		p.Massless = held
 		p.AssemblyLinearVelocity = Vector3.zero
 		p.AssemblyAngularVelocity = Vector3.zero
+		if held then
+			setNetworkOwner(p, networkOwner)
+		else
+			setNetworkOwner(p, nil)
+		end
+	end)
+end
+
+local function enforceHeldPhysics(model, networkOwner)
+	forEachPart(model, function(p)
+		p.Anchored = false
+		p.CanCollide = false
+		p.CanTouch = false
+		p.CanQuery = false
+		p.Massless = true
+		setNetworkOwner(p, networkOwner)
+	end)
+end
+
+local function setCarriedHumanoidState(model, st, held)
+	if held then
+		st.CarryHumanoidState = st.CarryHumanoidState or {}
+		for _, descendant in ipairs(model:GetDescendants()) do
+			if descendant:IsA("Humanoid") then
+				if st.CarryHumanoidState[descendant] == nil then
+					st.CarryHumanoidState[descendant] = {
+						PlatformStand = descendant.PlatformStand,
+						AutoRotate = descendant.AutoRotate,
+						Sit = descendant.Sit,
+					}
+				end
+
+				descendant.PlatformStand = true
+				descendant.AutoRotate = false
+				descendant.Sit = false
+				pcall(function()
+					descendant:ChangeState(Enum.HumanoidStateType.Physics)
+				end)
+			end
+		end
+		return
+	end
+
+	local saved = st and st.CarryHumanoidState
+	if not saved then
+		return
+	end
+
+	for humanoid, state in pairs(saved) do
+		if humanoid and humanoid.Parent and humanoid:IsA("Humanoid") then
+			humanoid.PlatformStand = state.PlatformStand == true
+			humanoid.AutoRotate = state.AutoRotate ~= false
+			humanoid.Sit = state.Sit == true
+		end
+	end
+	st.CarryHumanoidState = nil
+end
+
+local function disconnectCarryPhysics(st)
+	local conn = st and st.CarryPhysicsConn
+	if conn then
+		pcall(function()
+			conn:Disconnect()
+		end)
+	end
+	if st then
+		st.CarryPhysicsConn = nil
+	end
+end
+
+local maintainHeldCarry
+
+local function startCarryPhysicsEnforcer(st, model, networkOwner)
+	disconnectCarryPhysics(st)
+	if maintainHeldCarry then
+		maintainHeldCarry(st, model)
+	else
+		enforceHeldPhysics(model, networkOwner)
+	end
+
+	st.CarryPhysicsConn = RunService.Heartbeat:Connect(function()
+		if not model.Parent or st.Held ~= true then
+			disconnectCarryPhysics(st)
+			return
+		end
+
+		if maintainHeldCarry then
+			maintainHeldCarry(st, model)
+		else
+			enforceHeldPhysics(model, networkOwner)
+		end
 	end)
 end
 
@@ -52,9 +212,12 @@ local function setDropPhysics(model)
 	forEachPart(model, function(p)
 		p.Anchored = false
 		p.CanCollide = true
+		p.CanTouch = true
+		p.CanQuery = true
 		p.Massless = false
 		p.AssemblyLinearVelocity = Vector3.zero
 		p.AssemblyAngularVelocity = Vector3.zero
+		setNetworkOwner(p, nil)
 	end)
 end
 
@@ -71,11 +234,184 @@ local function findModelPart(model)
 		return nil
 	end
 
+	for _, partName in ipairs({ "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Head" }) do
+		local namedPart = model:FindFirstChild(partName, true)
+		if namedPart and namedPart:IsA("BasePart") then
+			return namedPart
+		end
+	end
+
 	if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
 		return model.PrimaryPart
 	end
 
 	return model:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function ensureCarryAssemblyWelds(model, rootPart)
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return false
+	end
+
+	local weldedParts = {}
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant:IsA("WeldConstraint") and descendant.Name == CARRY_ASSEMBLY_WELD_NAME then
+			local part = descendant.Part1
+			if descendant.Part0 ~= rootPart or not part or part == rootPart or not part:IsDescendantOf(model) or weldedParts[part] then
+				descendant:Destroy()
+			else
+				weldedParts[part] = true
+			end
+		end
+	end
+
+	forEachPart(model, function(part)
+		if part ~= rootPart and not weldedParts[part] then
+			local weld = Instance.new("WeldConstraint")
+			weld.Name = CARRY_ASSEMBLY_WELD_NAME
+			weld.Part0 = rootPart
+			weld.Part1 = part
+			weld.Parent = rootPart
+		end
+	end)
+
+	return true
+end
+
+local function destroyCarryAttachmentWeld(st)
+	if st and st.Weld then
+		pcall(function()
+			st.Weld:Destroy()
+		end)
+	end
+	if st then
+		st.Weld = nil
+	end
+end
+
+local function isCarryAttachmentWeldValid(st, rootPart, attachPart)
+	local weld = st and st.Weld
+	return weld ~= nil
+		and weld.Parent ~= nil
+		and weld:IsA("WeldConstraint")
+		and weld.Part0 == rootPart
+		and weld.Part1 == attachPart
+end
+
+local function createCarryAttachmentWeld(st, rootPart, attachPart)
+	destroyCarryAttachmentWeld(st)
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Name = CARRY_ATTACHMENT_WELD_NAME
+	weld.Part0 = rootPart
+	weld.Part1 = attachPart
+	weld.Parent = rootPart
+	st.Weld = weld
+	return weld
+end
+
+local function captureCarryPartOffsets(model, rootPart, st)
+	local offsets = {}
+	forEachPart(model, function(part)
+		offsets[part] = rootPart.CFrame:ToObjectSpace(part.CFrame)
+	end)
+	st.CarryPartOffsets = offsets
+end
+
+local function restoreCarryPartOffsets(model, rootPart, st, force)
+	local offsets = st.CarryPartOffsets
+	if typeof(offsets) ~= "table" then
+		captureCarryPartOffsets(model, rootPart, st)
+		offsets = st.CarryPartOffsets
+	end
+
+	forEachPart(model, function(part)
+		if part == rootPart then
+			return
+		end
+
+		local offset = offsets[part]
+		if typeof(offset) ~= "CFrame" then
+			offsets[part] = rootPart.CFrame:ToObjectSpace(part.CFrame)
+			return
+		end
+
+		local expected = rootPart.CFrame * offset
+		if force or (part.Position - expected.Position).Magnitude > CARRY_PART_REPAIR_DISTANCE then
+			part.CFrame = expected
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end)
+end
+
+local function clearCarryMaintenanceState(st)
+	if not st then
+		return
+	end
+
+	st.CarryRootPart = nil
+	st.CarryAttachPart = nil
+	st.CarryOwner = nil
+	st.CarryRootLocalCFrame = nil
+	st.CarryPartOffsets = nil
+end
+
+maintainHeldCarry = function(st, model)
+	if not st or not model or not model.Parent or st.Held ~= true then
+		return false
+	end
+
+	local rootPart = st.CarryRootPart
+	if not rootPart or not rootPart.Parent or not rootPart:IsDescendantOf(model) then
+		rootPart = findModelPart(model)
+		st.CarryRootPart = rootPart
+	end
+	if not rootPart then
+		return false
+	end
+
+	local owner = st.CarryOwner
+	local attachPart = st.CarryAttachPart
+	if not attachPart or not attachPart.Parent then
+		local char = owner and owner.Character
+		attachPart = char and char:FindFirstChild("Head")
+		st.CarryAttachPart = attachPart
+	end
+	if not attachPart or not attachPart.Parent then
+		return false
+	end
+
+	if model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) ~= true then
+		model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, true)
+	end
+
+	enforceHeldPhysics(model, owner)
+	setCarriedHumanoidState(model, st, true)
+
+	local rootDrifted = false
+	local rootLocalCFrame = st.CarryRootLocalCFrame
+	if typeof(rootLocalCFrame) == "CFrame" then
+		local expectedRootCFrame = attachPart.CFrame * rootLocalCFrame
+		rootDrifted = (rootPart.Position - expectedRootCFrame.Position).Magnitude > CARRY_ROOT_REPAIR_DISTANCE
+		if rootDrifted then
+			destroyCarryAttachmentWeld(st)
+			rootPart.CFrame = expectedRootCFrame
+			rootPart.AssemblyLinearVelocity = Vector3.zero
+			rootPart.AssemblyAngularVelocity = Vector3.zero
+		end
+	else
+		st.CarryRootLocalCFrame = attachPart.CFrame:ToObjectSpace(rootPart.CFrame)
+	end
+
+	restoreCarryPartOffsets(model, rootPart, st, rootDrifted)
+	ensureCarryAssemblyWelds(model, rootPart)
+
+	if rootDrifted or not isCarryAttachmentWeldValid(st, rootPart, attachPart) then
+		createCarryAttachmentWeld(st, rootPart, attachPart)
+	end
+
+	return true
 end
 
 local function getTextTarget(root, name)
@@ -505,7 +841,7 @@ local function disconnectRagdoll(ctx, userId)
 	end
 end
 
-local function dropHeldBrainrot(ctx, player, model, st, dropPosition)
+local function dropHeldCrewMember(ctx, player, model, st, dropPosition)
 	if not model or not model.Parent then
 		return
 	end
@@ -514,21 +850,19 @@ local function dropHeldBrainrot(ctx, player, model, st, dropPosition)
 	end
 
 	local userId = player.UserId
-	player:SetAttribute("CarriedBrainrot", nil)
-	player:SetAttribute("CarriedBrainrotImage", nil)
+	clearCarriedCrewMemberAttributes(player)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	ctx.HeldByUserId[userId] = nil
 	disconnectDeath(ctx, userId)
 	disconnectRagdoll(ctx, userId)
+	disconnectCarryPhysics(st)
+	setCarriedHumanoidState(model, st, false)
 
-	if st.Weld then
-		pcall(function()
-			st.Weld:Destroy()
-		end)
-	end
-	st.Weld = nil
+	destroyCarryAttachmentWeld(st)
+	clearCarryMaintenanceState(st)
 
+	model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, nil)
 	model.Parent = ctx.DroppedFolder
 
 	local char = player.Character
@@ -565,7 +899,7 @@ local function dropHeldBrainrot(ctx, player, model, st, dropPosition)
 	Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), false)
 end
 
-local function carryBrainrotOnPart(ctx, player, model, st, carrierPart)
+local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 	if not ctx or not player or not model or not model.Parent or not st or st.Held then
 		return false
 	end
@@ -599,45 +933,41 @@ local function carryBrainrotOnPart(ctx, player, model, st, carrierPart)
 	end
 
 	st.DropSettleToken = (tonumber(st.DropSettleToken) or 0) + 1
-	if st.Weld then
-		pcall(function()
-			st.Weld:Destroy()
-		end)
-	end
-	st.Weld = nil
-	setCarryPhysics(model, true)
-	model.Parent = ctx.CarriedFolder
+	destroyCarryAttachmentWeld(st)
+	clearCarryMaintenanceState(st)
+	st.Held = true
+	st.HolderUserId = player.UserId
+	st.CarryRootPart = primary
+	st.CarryAttachPart = attachPart
+	st.CarryOwner = player
+	model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, true)
+	setCarryPhysics(model, true, player)
+	setCarriedHumanoidState(model, st, true)
+	ensureCarryAssemblyWelds(model, primary)
 
 	local rotOnly = computeHeadRotOnly(attachPart)
 	local top = attachPart.Position + Vector3.yAxis * (attachPart.Size.Y / 2)
 	local pivotTarget = computePivotBottomOnPoint(model, top, rotOnly)
 	model:PivotTo(pivotTarget)
 
-	local weld = Instance.new("WeldConstraint")
-	weld.Part0 = primary
-	weld.Part1 = attachPart
-	weld.Parent = primary
-	st.Weld = weld
+	st.CarryRootLocalCFrame = attachPart.CFrame:ToObjectSpace(primary.CFrame)
+	captureCarryPartOffsets(model, primary, st)
+	createCarryAttachmentWeld(st, primary, attachPart)
+	startCarryPhysicsEnforcer(st, model, player)
+	model.Parent = ctx.CarriedFolder
 
-	st.Held = true
-	st.HolderUserId = player.UserId
 	st.LastUpdate = os.clock()
 	Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
 
 	ctx.HeldByUserId[player.UserId] = model
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
-	player:SetAttribute("CarriedBrainrot", tostring(model.Name))
 
 	local render = ""
 	if st and st.Entry and st.Entry.Info and st.Entry.Info.Render then
 		render = tostring(st.Entry.Info.Render)
 	end
 
-	if render ~= "" then
-		player:SetAttribute("CarriedBrainrotImage", render)
-	else
-		player:SetAttribute("CarriedBrainrotImage", nil)
-	end
+	setCarriedCrewMemberAttributes(player, tostring(model.Name), render)
 
 	disconnectDeath(ctx, player.UserId)
 	disconnectRagdoll(ctx, player.UserId)
@@ -650,7 +980,7 @@ local function carryBrainrotOnPart(ctx, player, model, st, carrierPart)
 		if st.Model ~= heldModel then
 			return
 		end
-		dropHeldBrainrot(ctx, player, heldModel, st)
+		dropHeldCrewMember(ctx, player, heldModel, st)
 	end)
 
 	ctx.RagdollConnByUserId[player.UserId] = hum.StateChanged:Connect(function(_, newState)
@@ -666,7 +996,7 @@ local function carryBrainrotOnPart(ctx, player, model, st, carrierPart)
 			return
 		end
 
-		dropHeldBrainrot(ctx, player, heldModel, st)
+		dropHeldCrewMember(ctx, player, heldModel, st)
 	end)
 
 	return true
@@ -710,9 +1040,10 @@ function Interaction.TryCarryNearPosition(ctx, player, active, worldPosition, ca
 		return false, "no_brainrot_in_range"
 	end
 
-	if carryBrainrotOnPart(ctx, player, bestModel, bestState, carrierPart) then
+	if carryCrewMemberOnPart(ctx, player, bestModel, bestState, carrierPart) then
 		return true, {
-			Kind = "Brainrot",
+			Kind = "CrewMember",
+			LegacyKind = "Brainrot",
 			Name = tostring(bestModel.Name),
 			Distance = bestDistance,
 		}
@@ -739,7 +1070,7 @@ function Interaction.DropHeldAtPosition(ctx, player, active, dropPosition)
 		return false, "missing_state"
 	end
 
-	dropHeldBrainrot(ctx, player, model, st, dropPosition)
+	dropHeldCrewMember(ctx, player, model, st, dropPosition)
 	return true
 end
 
@@ -753,8 +1084,7 @@ function Interaction.CollectHeld(ctx, player, active)
 		disconnectRagdoll(ctx, userId)  
 		return nil
 	end
-	player:SetAttribute("CarriedBrainrot", nil)
-	player:SetAttribute("CarriedBrainrotImage", nil)
+	clearCarriedCrewMemberAttributes(player)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	local st = active[model]
@@ -770,9 +1100,16 @@ function Interaction.CollectHeld(ctx, player, active)
 	ctx.HeldByUserId[userId] = nil
 	disconnectDeath(ctx, userId)
 	disconnectRagdoll(ctx, userId)
+	disconnectCarryPhysics(st)
+	if st then
+		setCarriedHumanoidState(model, st, false)
+		destroyCarryAttachmentWeld(st)
+		clearCarryMaintenanceState(st)
+	end
 
 	active[model] = nil
 	pcall(function()
+		model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, nil)
 		model:Destroy()
 	end)
 
@@ -839,7 +1176,7 @@ function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
 			return
 		end
 
-		carryBrainrotOnPart(ctx, player, model, st)
+		carryCrewMemberOnPart(ctx, player, model, st)
 	end)
 
 	return prompt
@@ -860,16 +1197,14 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 		return
 	end
 
-	if st.Weld then
-		pcall(function()
-			st.Weld:Destroy()
-		end)
-	end
-	st.Weld = nil
+	disconnectCarryPhysics(st)
+	setCarriedHumanoidState(m, st, false)
+	destroyCarryAttachmentWeld(st)
+	clearCarryMaintenanceState(st)
 
+	m:SetAttribute(CARRIED_MODEL_ATTRIBUTE, nil)
 	m.Parent = ctx.DroppedFolder
-	plr:SetAttribute("CarriedBrainrot", nil)
-	plr:SetAttribute("CarriedBrainrotImage", nil)
+	clearCarriedCrewMemberAttributes(plr)
 	plr:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	local pos = m:GetPivot().Position + Vector3.new(0, 6, 0)

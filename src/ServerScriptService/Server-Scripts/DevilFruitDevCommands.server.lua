@@ -43,10 +43,8 @@ local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("Shi
 local TimeRewardsService = require(ServerScriptService.Modules:WaitForChild("Time_Rewards_Server"))
 local FirstTimeTutorialService = require(ServerScriptService.Modules:WaitForChild("FirstTimeTutorialService"))
 local CrewMemberCanonicalReadGate = require(ServerScriptService.Modules:WaitForChild("CrewMemberCanonicalReadGate"))
-local CrewMemberLegacyStatus = require(ServerScriptService.Modules:WaitForChild("CrewMemberLegacyStatus"))
 local CrewMigrationPlanner = require(ServerScriptService.Modules:WaitForChild("CrewMigrationPlanner"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
-local CrewStorage = require(ServerScriptService.Modules:WaitForChild("CrewStorage"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
@@ -1125,7 +1123,6 @@ local function processClearCommand(player, argumentText)
 	setTemplatePath("Inventory", ProfileTemplate.Inventory)
 	setTemplatePath("UnopenedChests", ProfileTemplate.UnopenedChests)
 	setTemplatePath("FoodInventory", ProfileTemplate.FoodInventory)
-	setTemplatePath("CrewInventory", ProfileTemplate.CrewInventory)
 	setTemplatePath("CrewMemberInventory", ProfileTemplate.CrewMemberInventory)
 	setTemplatePath("CrewMemberQuickSlots", ProfileTemplate.CrewMemberQuickSlots)
 	setTemplatePath("CrewMemberIncome", ProfileTemplate.CrewMemberIncome)
@@ -1133,10 +1130,10 @@ local function processClearCommand(player, argumentText)
 	setTemplatePath("Chef", ProfileTemplate.Chef)
 	setTemplatePath("Ship", ProfileTemplate.Ship)
 
-		DevilFruitService.SetEquippedFruit(player, "")
-		if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
-			table.insert(failures, "set_DevilFruit")
-		end
+	DevilFruitService.SetEquippedFruit(player, "")
+	if DataManager:SetValue(player, "DevilFruit", cloneValue(ProfileTemplate.DevilFruit)) == false then
+		table.insert(failures, "set_DevilFruit")
+	end
 
 	CrewInstanceService.SyncCrewAvailableCounts(player)
 	BountyService.RefreshPlayerBounty(player)
@@ -1161,6 +1158,7 @@ local function processClearCommand(player, argumentText)
 	end
 
 	CrewInstanceService.RefreshCrewMemberShadowAfterDestructiveLegacyReset(player, "admin_clear_inventory")
+	CrewInstanceService.SyncCrewAvailableCounts(player)
 	print(string.format("[DevFruitDevCommands] %s cleared inventory via /clear inv", player.Name))
 end
 
@@ -1191,21 +1189,18 @@ local CREW_CANARY_HELPER_STATUS_ITEMS = {
 	"Frigo Camelo",
 	"Lirili Larila",
 	"Gangster Footera",
-	"67",
 }
 
 local CREW_CANARY_MODEL_PREVIEW_STATUS_ITEMS = {
 	"Frigo Camelo",
 	"Lirili Larila",
 	"Gangster Footera",
-	"67",
 }
 
 local CREW_CANARY_FOOD_READ_AUTHORITY_ITEMS = {
 	"Frigo Camelo",
 	"Lirili Larila",
 	"Gangster Footera",
-	"67",
 }
 
 local function getCrewCanaryStandStatusItems(player)
@@ -1225,32 +1220,36 @@ local function getCrewCanaryStandStatusItems(player)
 		append(item)
 	end
 
-	local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
-	if typeof(incomeBrainrots) == "table" then
+	local crewMemberIncome = DataManager:GetValue(player, "CrewMemberIncome")
+	if typeof(crewMemberIncome) == "table" then
 		local standNames = {}
-		for standName in pairs(incomeBrainrots) do
+		for standName in pairs(crewMemberIncome) do
 			standNames[#standNames + 1] = tostring(standName)
 		end
 		table.sort(standNames)
 
 		for _, standName in ipairs(standNames) do
-			local standData = incomeBrainrots[standName]
+			local standData = crewMemberIncome[standName]
 			if typeof(standData) == "table" then
-				append(standData.BrainrotName)
+				append(standData.LegacyStorageName)
+				append(standData.CrewMemberName)
+				append(standData.StorageName)
 			end
 		end
 	end
 
-	local incomeFolder = player:FindFirstChild("IncomeBrainrots")
+	local incomeFolder = player:FindFirstChild("CrewMemberIncome")
 	if incomeFolder then
 		local standFolders = incomeFolder:GetChildren()
 		table.sort(standFolders, function(a, b)
 			return a.Name < b.Name
 		end)
 		for _, standFolder in ipairs(standFolders) do
-			local value = standFolder:FindFirstChild("BrainrotName")
-			if value and value:IsA("StringValue") then
-				append(value.Value)
+			for _, valueName in ipairs({ "LegacyStorageName", "CrewMemberName", "StorageName" }) do
+				local value = standFolder:FindFirstChild(valueName)
+				if value and value:IsA("StringValue") then
+					append(value.Value)
+				end
 			end
 		end
 	end
@@ -1271,30 +1270,35 @@ local function getCrewCanaryStandReadAuthorityStandNames(player)
 		standNames[#standNames + 1] = value
 	end
 
-	local incomeBrainrots = DataManager:GetValue(player, "IncomeBrainrots")
-	if typeof(incomeBrainrots) == "table" then
+	local crewMemberIncome = DataManager:GetValue(player, "CrewMemberIncome")
+	if typeof(crewMemberIncome) == "table" then
 		local sortedStandNames = {}
-		for standName in pairs(incomeBrainrots) do
+		for standName in pairs(crewMemberIncome) do
 			sortedStandNames[#sortedStandNames + 1] = tostring(standName)
 		end
 		table.sort(sortedStandNames)
 
 		for _, standName in ipairs(sortedStandNames) do
-			local standData = incomeBrainrots[standName]
-			if typeof(standData) == "table" and tostring(standData.BrainrotName or "") ~= "" then
+			local standData = crewMemberIncome[standName]
+			local storageName = if typeof(standData) == "table"
+				then tostring(standData.LegacyStorageName or standData.CrewMemberName or standData.StorageName or "")
+				else ""
+			if storageName ~= "" then
 				append(standName)
 			end
 		end
 	end
 
-	local incomeFolder = player:FindFirstChild("IncomeBrainrots")
+	local incomeFolder = player:FindFirstChild("CrewMemberIncome")
 	if incomeFolder then
 		local standFolders = incomeFolder:GetChildren()
 		table.sort(standFolders, function(a, b)
 			return a.Name < b.Name
 		end)
 		for _, standFolder in ipairs(standFolders) do
-			local value = standFolder:FindFirstChild("BrainrotName")
+			local value = standFolder:FindFirstChild("LegacyStorageName")
+				or standFolder:FindFirstChild("CrewMemberName")
+				or standFolder:FindFirstChild("StorageName")
 			if value and value:IsA("StringValue") and tostring(value.Value or "") ~= "" then
 				append(standFolder.Name)
 			end
@@ -1304,46 +1308,34 @@ local function getCrewCanaryStandReadAuthorityStandNames(player)
 	return standNames
 end
 
-local function getCrewCanaryLegacyInventoryInstance(player, instanceId)
-	local inventory = DataManager:GetValue(player, "BrainrotInventory")
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return nil
+local function getCrewCanaryCanonicalInventoryInstance(player, instanceId)
+	local resolvedId, instanceData = CrewInstanceService.GetInstance(player, tostring(instanceId or ""))
+	if typeof(instanceData) == "table" then
+		return instanceData, resolvedId
 	end
 
-	local id = tostring(instanceId or "")
-	local direct = inventory.ById[id]
-	if typeof(direct) == "table" then
-		return direct
-	end
-
-	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table" and tostring(instanceData.InstanceId or "") == id then
-			return instanceData
-		end
-	end
-
-	return nil
+	return nil, nil
 end
 
 local function buildCrewCanaryFoodReadAuthorityContext(player, standName, label)
-	local standData = DataManager:GetValue(player, "IncomeBrainrots." .. tostring(standName))
+	local standData = DataManager:GetValue(player, "CrewMemberIncome." .. tostring(standName))
 	if typeof(standData) ~= "table" then
 		return nil
 	end
 
-	local legacyIdentity = tostring(standData.BrainrotName or "")
-	local instanceId = tostring(standData.BrainrotInstanceId or "")
-	if legacyIdentity == "" then
+	local storageName = tostring(standData.LegacyStorageName or standData.CrewMemberName or standData.StorageName or "")
+	local instanceId = tostring(standData.CrewMemberInstanceId or standData.InstanceId or "")
+	if storageName == "" then
 		return nil
 	end
 
-	local instanceData = getCrewCanaryLegacyInventoryInstance(player, instanceId)
+	local instanceData = getCrewCanaryCanonicalInventoryInstance(player, instanceId)
 	return {
 		Label = tostring(label or standName),
 		StandName = tostring(standName),
-		LegacyIdentity = legacyIdentity,
+		LegacyIdentity = storageName,
 		InstanceId = instanceId,
-		StorageName = tostring((instanceData and instanceData.StorageName) or legacyIdentity),
+		StorageName = tostring((instanceData and instanceData.StorageName) or storageName),
 		Level = if instanceData then tonumber(instanceData.Level) or 1 else nil,
 		CurrentXP = if instanceData then tonumber(instanceData.CurrentXP) or 0 else nil,
 	}
@@ -1356,9 +1348,9 @@ local function getCrewCanaryFoodReadAuthorityContexts(player)
 	local standNames = getCrewCanaryStandReadAuthorityStandNames(player)
 
 	for _, standName in ipairs(standNames) do
-		local standData = DataManager:GetValue(player, "IncomeBrainrots." .. tostring(standName))
+		local standData = DataManager:GetValue(player, "CrewMemberIncome." .. tostring(standName))
 		if typeof(standData) == "table" then
-			local legacyIdentity = tostring(standData.BrainrotName or "")
+			local legacyIdentity = tostring(standData.LegacyStorageName or standData.CrewMemberName or standData.StorageName or "")
 			if legacyIdentity ~= "" and occupiedByIdentity[legacyIdentity] == nil then
 				occupiedByIdentity[legacyIdentity] = standName
 			end
@@ -1402,7 +1394,7 @@ local function newCrewCanaryFallbackPolicyCounts()
 		CanonicalSelected = 0,
 		AllowedCompatibilityFallback = 0,
 		AllowedBrookFallback = 0,
-		DeniedUnknownFallback = 0,
+		UnknownFallback = 0,
 	}
 end
 
@@ -1418,19 +1410,19 @@ local function addCrewCanaryFallbackPolicyCount(counts, result)
 		counts.AllowedCompatibilityFallback += 1
 	elseif category == "allowedBrookFallback" then
 		counts.AllowedBrookFallback += 1
-	elseif category == "deniedUnknownFallback" or result.DeniedUnknownFallback == true then
-		counts.DeniedUnknownFallback += 1
+	elseif result.FallbackPolicyKind == "unknown_unapproved_fallback" then
+		counts.UnknownFallback += 1
 	end
 end
 
 local function formatCrewCanaryFallbackPolicyCounts(counts)
 	counts = if typeof(counts) == "table" then counts else newCrewCanaryFallbackPolicyCounts()
 	return string.format(
-		"canonicalSelected=%d allowedCompatibilityFallback=%d allowedBrookFallback=%d deniedUnknownFallback=%d",
+		"canonicalSelected=%d allowedCompatibilityFallback=%d allowedBrookFallback=%d unknownFallback=%d",
 		tonumber(counts.CanonicalSelected) or 0,
 		tonumber(counts.AllowedCompatibilityFallback) or 0,
 		tonumber(counts.AllowedBrookFallback) or 0,
-		tonumber(counts.DeniedUnknownFallback) or 0
+		tonumber(counts.UnknownFallback) or 0
 	)
 end
 
@@ -2041,7 +2033,7 @@ end
 local function summarizeCrewMigrationCompatibilityReview(report, flags)
 	local counts = if typeof(report) == "table" then report.Counts else {}
 	return string.format(
-		"compatibilityReview compatibilityOnly=%d allowedCompatibility=%d undecidedCompatibility=%d brookFallback=%d allowedBrook=%d undecidedBrook=%d liveAssigned=%d inventoryOnly=%d indexOnly=%d metadataOnly=%d %s",
+		"compatibilityReview compatibilityOnly=%d allowedCompatibility=%d undecidedCompatibility=%d brookFallback=%d allowedBrook=%d undecidedBrook=%d liveAssigned=%d inventoryOnly=%d indexOnly=%d metadataOnly=%d statuses=%s %s",
 		tonumber(counts.CompatibilityOnly) or 0,
 		tonumber(counts.AllowedCompatibility) or 0,
 		tonumber(counts.UndecidedCompatibility) or 0,
@@ -2052,6 +2044,7 @@ local function summarizeCrewMigrationCompatibilityReview(report, flags)
 		tonumber(counts.InventoryOnly) or 0,
 		tonumber(counts.IndexOnly) or 0,
 		tonumber(counts.MetadataOnly) or 0,
+		summarizeCrewMigrationCategories(counts.StatusCategories),
 		summarizeCrewMigrationFlags(flags)
 	)
 end
@@ -2248,19 +2241,13 @@ end
 
 local function summarizeQuickSlotsWriteAuthorityStatus(status, flags)
 	local canonical = status and status.Canonical
-	local legacyQuickSlots = status and status.LegacyQuickSlots
-	local legacyStorage = status and status.LegacyStorage
 	return string.format(
-		"quickSlotsWriteAuthority status rootsMatch=%s canonical=%s/%s legacyQuick=%s/%s legacyStorage=%s/%s config=%s..%s %s",
-		tostring(status and status.RootsMatch == true),
+		"quickSlotsWriteAuthority status canonical=%s/%s config=%s..%s inBounds=%s %s",
 		tostring(canonical and canonical.UnlockedSlots),
 		tostring(canonical and canonical.MaxSlots),
-		tostring(legacyQuickSlots and legacyQuickSlots.UnlockedSlots),
-		tostring(legacyQuickSlots and legacyQuickSlots.MaxSlots),
-		tostring(legacyStorage and legacyStorage.UnlockedSlots),
-		tostring(legacyStorage and legacyStorage.MaxSlots),
 		tostring(status and status.ConfigMinSlots),
 		tostring(status and status.ConfigMaxSlots),
+		tostring(status and status.CanonicalInBounds == true),
 		summarizeCrewMigrationFlags(flags)
 	)
 end
@@ -2289,15 +2276,10 @@ end
 
 local function summarizeInventoryAuthorityStatus(status, flags)
 	local canonical = status and status.Canonical
-	local legacy = status and status.BrainrotInventory
 	return string.format(
-		"inventoryAuthority status rootsMatch=%s mirrorMatch=%s canonicalInstances=%s legacyInstances=%s canonicalNext=%s legacyNext=%s blocking=%d unclassified=%d issues=%s %s",
-		tostring(status and status.RootsMatch == true),
-		tostring(status and status.MirrorMatch == true),
+		"inventoryAuthority status canonicalInstances=%s canonicalNext=%s blocking=%d unclassified=%d issues=%s %s",
 		tostring(canonical and canonical.InstanceCount or 0),
-		tostring(legacy and legacy.InstanceCount or 0),
 		tostring(canonical and canonical.NextInstanceId),
-		tostring(legacy and legacy.NextInstanceId),
 		tonumber(status and status.BlockingCount) or 0,
 		tonumber(status and status.UnclassifiedCount) or 0,
 		if status and typeof(status.Issues) == "table" and #status.Issues > 0
@@ -2388,115 +2370,6 @@ local function ensureCrewMigrationAuditSession(player)
 	return flags, nil
 end
 
-local function runCrewLegacyFallbackPolicyDenyTest(player)
-	local flags = {
-		CrewMemberDisplayHelperLegacyFallbackDenyEnabled = true,
-		CrewMemberStandIncomeLegacyFallbackReadDenyEnabled = true,
-		CrewMemberCanaryGameplayHelperReadsEnabled = true,
-		CrewMemberCanaryStandStatusHelperReadEnabled = true,
-		CrewMemberCanaryIncomeStatusHelperReadEnabled = true,
-		CrewMemberCanaryReadAuthorityEnabled = true,
-		CrewMemberCanaryIncomeStatusReadAuthorityEnabled = true,
-		CrewMemberCanonicalReadEnabled = false,
-		CrewMemberCanaryGameplayReadsEnabled = false,
-		CrewMemberCanaryProfileMigrationWriteEnabled = false,
-	}
-	local failures = {}
-	local summaries = {}
-	local passed = 0
-	local total = 0
-
-	local function recordResult(label, result, ok)
-		total += 1
-		summaries[#summaries + 1] = string.format(
-			"%s policy=%s fallback=%s denied=%s display=%s",
-			tostring(label),
-			tostring(result and result.FallbackPolicyCategory or ""),
-			tostring(result and result.FallbackReason or "none"),
-			tostring(result and result.LegacyFallbackDenied == true),
-			tostring(result and result.DisplayName or result and result.Value or "")
-		)
-		if ok == true then
-			passed += 1
-		else
-			failures[#failures + 1] = tostring(label)
-		end
-	end
-
-	local _, unknownHelper = CrewMemberCanonicalReadGate.ResolveStandStatusDisplayName(
-		player,
-		"__unknown_fallback_policy_probe__",
-		{
-			Player = player,
-			Flags = flags,
-			LogThrottleSeconds = 0,
-		}
-	)
-	recordResult(
-		"display_unknown",
-		unknownHelper,
-		unknownHelper
-			and unknownHelper.LegacyFallbackDenied == true
-			and unknownHelper.DeniedUnknownFallback == true
-	)
-
-	local _, allowedCompatibility = CrewMemberCanonicalReadGate.ResolveStandStatusDisplayName(player, "Balerina Capucina", {
-		Player = player,
-		Flags = flags,
-		LogThrottleSeconds = 0,
-	})
-	recordResult(
-		"display_allowed_compatibility",
-		allowedCompatibility,
-		allowedCompatibility
-			and allowedCompatibility.LegacyFallbackDenied ~= true
-			and allowedCompatibility.FallbackPolicyCategory == "allowedCompatibilityFallback"
-	)
-
-	local _, allowedBrook = CrewMemberCanonicalReadGate.ResolveStandStatusDisplayName(player, "Gangster Footera", {
-		Player = player,
-		Flags = flags,
-		LogThrottleSeconds = 0,
-	})
-	recordResult(
-		"display_allowed_brook",
-		allowedBrook,
-		allowedBrook
-			and allowedBrook.LegacyFallbackDenied ~= true
-			and allowedBrook.FallbackPolicyCategory == "allowedBrookFallback"
-	)
-
-	local unknownIncome = CrewMemberCanonicalReadGate.ResolveIncomeStatusReadAuthority(
-		player,
-		"__unknown_fallback_policy_probe__",
-		{
-			Player = player,
-			Flags = flags,
-			LogThrottleSeconds = 0,
-		}
-	)
-	recordResult(
-		"income_unknown",
-		unknownIncome,
-		unknownIncome
-			and unknownIncome.LegacyFallbackDenied == true
-			and unknownIncome.DeniedUnknownFallback == true
-	)
-
-	local success = passed == total
-	local detail = if success
-		then string.format("fallback policy deny test passed passed=%d/%d %s", passed, total, table.concat(summaries, "; "))
-		else string.format(
-			"fallback policy deny test failed passed=%d/%d failures=%s %s",
-			passed,
-			total,
-			table.concat(failures, ","),
-			table.concat(summaries, "; ")
-		)
-	print("[CrewLegacyFallbackPolicyDenyTest] " .. detail)
-	return success, detail
-end
-
 local function processCrewCanaryCommand(player, argumentText)
 	if not isAuthorized(player) then
 		return
@@ -2507,7 +2380,7 @@ local function processCrewCanaryCommand(player, argumentText)
 	local helperMode = normalizedArgument:match("^helpers%s+(.+)$")
 	local gameplayHelpersMode = normalizedArgument:match("^gameplayhelpers%s+(.+)$")
 	local modelPreviewMode = normalizedArgument:match("^modelpreviews%s+(.+)$")
-	local readAuthorityMode = normalizedArgument:match("^readauthority%s+(.+)$")
+	local readAuthorityMode = normalizedArgument:match("^readauthority%s*(.*)$")
 	local migrationMode = normalizedArgument:match("^migration%s*(.*)$")
 	local writeAuthorityMode = normalizedArgument:match("^writeauthority%s*(.*)$")
 	local inventoryAuthorityMode = normalizedArgument:match("^inventoryauthority%s*(.*)$")
@@ -2541,6 +2414,9 @@ local function processCrewCanaryCommand(player, argumentText)
 	end
 	if foodReadAuthorityMode == "" then
 		foodReadAuthorityMode = "status"
+	end
+	if readAuthorityMode == "" then
+		readAuthorityMode = "status"
 	end
 	if migrationMode == "" then
 		migrationMode = "status"
@@ -2629,99 +2505,37 @@ local function processCrewCanaryCommand(player, argumentText)
 		and foodStatusMode == nil
 	then
 		warn(string.format(
-			"[DevFruitDevCommands] Invalid /crewcanary usage from %s. Use /crewcanary status, /crewcanary legacy status|test fallbackpolicy|deny <brainrotstorage|displayhelpers|product|standincome|progression> on|off, /crewcanary migration status|on|off|snapshot|dryrun|compare|review|saveload|clear, /crewcanary migration audit before|after|status|clear, /crewcanary migration writepreview|writepreview status|writepreview clear|writepreview export, /crewcanary migration write sampled, /crewcanary migration rollback latest|status, /crewcanary writeauthority quickslots status|on|off|set <count>, /crewcanary inventoryauthority status|on|off|grant <crew> [count]|remove <crew>|reconcile, /crewcanary product quickslots status|on|off|canary|delayed|reconcile, /crewcanary helpers, /crewcanary helpers on|off|stale, /crewcanary gameplayhelpers on|off, /crewcanary readauthority on|off, /crewcanary readauthority standstatus on|off|stale, /crewcanary readauthority incomestatus on|off|stale, /crewcanary readauthority foodstatus on|off|stale, /crewcanary standincomestatus on|off|stale, /crewcanary standstatus on|off|stale, /crewcanary incomestatus on|off|stale, /crewcanary incometoast on|off|stale, /crewcanary foodstatus, /crewcanary foodstatus on, /crewcanary foodstatus off, /crewcanary foodstatus stale, /crewcanary modelpreviews, /crewcanary modelpreviews on|off|stale, /crewcanary modelpreviews index on|off|stale, or /crewcanary modelpreviews inventory on|off|stale",
+			"[DevFruitDevCommands] Invalid /crewcanary usage from %s. Use /crewcanary status, /crewcanary writeauthority quickslots status|on|off|set <count>, /crewcanary inventoryauthority status|on|off|grant <crew> [count]|remove <crew>|reconcile, /crewcanary product quickslots status|on|off|canary|delayed, /crewcanary helpers, /crewcanary helpers on|off|stale, /crewcanary gameplayhelpers on|off, /crewcanary standincomestatus on|off|stale, /crewcanary standstatus on|off|stale, /crewcanary incomestatus on|off|stale, /crewcanary incometoast on|off|stale, /crewcanary foodstatus, /crewcanary foodstatus on, /crewcanary foodstatus off, /crewcanary foodstatus stale, /crewcanary modelpreviews, /crewcanary modelpreviews on|off|stale, /crewcanary modelpreviews index on|off|stale, or /crewcanary modelpreviews inventory on|off|stale",
 			player.Name
 		))
 		return false, "invalid_usage"
 	end
 
 	if legacyMode ~= nil then
-		if legacyMode == "status" then
-			local _, summary = CrewMemberLegacyStatus.Print(player)
-			return true, summary
-		end
-
-		if legacyMode == "test fallbackpolicy" or legacyMode == "test fallback policy" then
-			if not AdminPermissions.IsSuperAdmin(player) then
-				warn(string.format(
-					"[DevFruitDevCommands] Rejected /crewcanary legacy test fallbackpolicy from %s reason=not_super_admin",
-					player.Name
-				))
-				return false, "not_super_admin"
-			end
-
-			return runCrewLegacyFallbackPolicyDenyTest(player)
-		end
-
-		local denyFlagKey, denyState = legacyMode:match("^deny%s+(%S+)%s+(%S+)$")
-		if denyFlagKey == nil then
-			warn(string.format(
-				"[DevFruitDevCommands] Invalid /crewcanary legacy argument '%s' from %s. Use status, test fallbackpolicy, or deny <brainrotstorage|displayhelpers|product|standincome|progression> on|off",
-				tostring(legacyMode),
-				player.Name
-			))
-			return false, "invalid_legacy_argument"
-		end
-
-		if not AdminPermissions.IsSuperAdmin(player) then
-			warn(string.format(
-				"[DevFruitDevCommands] Rejected /crewcanary legacy deny %s from %s reason=not_super_admin",
-				tostring(denyFlagKey),
-				player.Name
-			))
-			return false, "not_super_admin"
-		end
-
-		local flagName = CrewMemberLegacyStatus.ResolveDenyFlagName(denyFlagKey)
-		if flagName == nil then
-			warn(string.format(
-				"[DevFruitDevCommands] Invalid /crewcanary legacy deny flag '%s' from %s",
-				tostring(denyFlagKey),
-				player.Name
-			))
-			return false, "unknown_legacy_deny_flag"
-		end
-
-		local normalizedState = normalizeText(denyState)
-		local enabled
-		if normalizedState == "on" or normalizedState == "enable" or normalizedState == "true" then
-			enabled = true
-		elseif normalizedState == "off" or normalizedState == "disable" or normalizedState == "false" then
-			enabled = false
-		else
-			warn(string.format(
-				"[DevFruitDevCommands] Invalid /crewcanary legacy deny state '%s' from %s",
-				tostring(denyState),
-				player.Name
-			))
-			return false, "invalid_legacy_deny_state"
-		end
-
-		local ok, reason, state = CrewStorage.SetLegacyDenySessionOverride(flagName, enabled)
-		if ok ~= true then
-			warn(string.format(
-				"[DevFruitDevCommands] Failed /crewcanary legacy deny %s %s for %s reason=%s",
-				tostring(flagName),
-				tostring(enabled),
-				player.Name,
-				tostring(reason or "unknown_error")
-			))
-			return false, tostring(reason or "unknown_error")
-		end
-
-		local flags = state and state.Flags or CrewMemberCanonicalReadGate.GetFlags()
-		print(string.format(
-			"[DevFruitDevCommands] %s set legacy deny flag %s=%s staging=%s canonicalRead=%s gameplayReads=%s profileMigrationWrite=%s",
+		warn(string.format(
+			"[DevFruitDevCommands] Retired /crewcanary legacy from %s argument='%s' reason=canonical_only",
 			player.Name,
-			tostring(flagName),
-			tostring(flags[flagName] == true),
-			tostring((state and state.Environment and state.Environment.IsStaging) == true),
-			tostring(flags.CrewMemberCanonicalReadEnabled == true),
-			tostring(flags.CrewMemberCanaryGameplayReadsEnabled == true),
-			tostring(flags.CrewMemberCanaryProfileMigrationWriteEnabled == true)
+			tostring(legacyMode)
 		))
-		local _, summary = CrewMemberLegacyStatus.Print(player)
-		return true, summary
+		return false, "legacy_canary_retired"
+	end
+
+	if migrationMode ~= nil then
+		warn(string.format(
+			"[DevFruitDevCommands] Retired /crewcanary migration from %s argument='%s' reason=canonical_only",
+			player.Name,
+			tostring(migrationMode)
+		))
+		return false, "migration_tooling_retired"
+	end
+
+	if readAuthorityMode ~= nil then
+		warn(string.format(
+			"[DevFruitDevCommands] Retired /crewcanary readauthority from %s argument='%s' reason=legacy_roots_wiped",
+			player.Name,
+			tostring(readAuthorityMode)
+		))
+		return false, "read_authority_canary_retired"
 	end
 
 	if inventoryAuthorityMode ~= nil then
@@ -2886,7 +2700,7 @@ local function processCrewCanaryCommand(player, argumentText)
 		if productQuickSlotsMode == nil then
 			if productMode ~= "status" then
 				warn(string.format(
-					"[DevFruitDevCommands] Invalid /crewcanary product argument '%s' from %s. Use quickslots status|on|off|canary|delayed|reconcile",
+					"[DevFruitDevCommands] Invalid /crewcanary product argument '%s' from %s. Use quickslots status|on|off|canary|delayed",
 					tostring(productMode),
 					player.Name
 				))
@@ -2913,11 +2727,10 @@ local function processCrewCanaryCommand(player, argumentText)
 			and productQuickSlotsMode ~= "canary"
 			and productQuickSlotsMode ~= "simulate"
 			and productQuickSlotsMode ~= "delayed"
-			and productQuickSlotsMode ~= "reconcile"
 			and productQuickSlotsReceiptId == nil
-		then
-			warn(string.format(
-				"[DevFruitDevCommands] Invalid /crewcanary product quickslots argument '%s' from %s. Use status, on, off, canary, delayed, or reconcile",
+	then
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /crewcanary product quickslots argument '%s' from %s. Use status, on, off, canary, or delayed",
 				tostring(productQuickSlotsMode),
 				player.Name
 			))
@@ -3092,51 +2905,6 @@ local function processCrewCanaryCommand(player, argumentText)
 			end
 			return true,
 				"CrewMember delayed product quick-slot canary passed. "
-					.. tostring(canaryResult.Summary or "")
-					.. " "
-					.. summarizeCrewMigrationFlags(closedFlags)
-		end
-
-		if productQuickSlotsMode == "reconcile" then
-			local closeOk, closeReason, closeState = CrewMemberCanonicalReadGate.SetProductQuickSlotWriteAuthoritySessionOverride(false)
-			if closeOk ~= true then
-				warn(string.format(
-					"[DevFruitDevCommands] Failed to close product quick-slot authority before reconciliation canary for %s reason=%s",
-					player.Name,
-					tostring(closeReason or "unknown_error")
-				))
-			end
-			local ok, canaryResult = pcall(function()
-				return CrewQuickSlotService.RunStaleStorageReconciliationCanary(player, {})
-			end)
-			local finalCloseOk, finalCloseReason, finalCloseState = CrewMemberCanonicalReadGate.SetProductQuickSlotWriteAuthoritySessionOverride(false)
-			local closedFlags = finalCloseState and finalCloseState.Flags or closeState and closeState.Flags or CrewMemberCanonicalReadGate.GetFlags()
-			if finalCloseOk ~= true then
-				warn(string.format(
-					"[DevFruitDevCommands] Failed final product quick-slot reconciliation close for %s reason=%s",
-					player.Name,
-					tostring(finalCloseReason or "unknown_error")
-				))
-			end
-			if ok ~= true then
-				return false, "product_quickslots_reconcile_canary_error:" .. tostring(canaryResult)
-			end
-
-			print("[CrewQuickSlots] " .. tostring(canaryResult and canaryResult.Summary or "staleStorageProductQuickSlotsCanary unavailable"))
-			local status = CrewMigrationPlanner.BuildQuickSlotsWriteAuthorityStatus(player, {
-				Flags = closedFlags,
-			})
-			CrewMigrationPlanner.PrintQuickSlotsWriteAuthorityStatus(status)
-			CrewMemberCanonicalReadGate.PrintStatus(player)
-			if canaryResult.Passed ~= true then
-				return false,
-					"CrewMember product quick-slot stale-storage reconciliation canary failed. "
-						.. tostring(canaryResult.Summary or "")
-						.. " "
-						.. summarizeCrewMigrationFlags(closedFlags)
-			end
-			return true,
-				"CrewMember product quick-slot stale-storage reconciliation canary passed. "
 					.. tostring(canaryResult.Summary or "")
 					.. " "
 					.. summarizeCrewMigrationFlags(closedFlags)
@@ -3922,6 +3690,7 @@ local function processCrewCanaryCommand(player, argumentText)
 		and migrationMode ~= "dryrun"
 		and migrationMode ~= "compare"
 		and migrationMode ~= "review"
+		and migrationMode ~= "cleanupcompat"
 		and migrationMode ~= "saveload"
 		and migrationAuditMode == nil
 		and migrationWritePreviewMode == nil
@@ -3929,7 +3698,7 @@ local function processCrewCanaryCommand(player, argumentText)
 		and migrationRollbackMode == nil
 	then
 		warn(string.format(
-			"[DevFruitDevCommands] Invalid /crewcanary migration argument '%s' from %s. Use status, on, off, snapshot, dryrun, compare, review, saveload, clear, audit status, audit before, audit after, audit clear, writepreview, writepreview status, writepreview clear, writepreview export, write sampled, rollback status, or rollback latest",
+			"[DevFruitDevCommands] Invalid /crewcanary migration argument '%s' from %s. Use status, on, off, snapshot, dryrun, compare, review, cleanupcompat, saveload, clear, audit status, audit before, audit after, audit clear, writepreview, writepreview status, writepreview clear, writepreview export, write sampled, rollback status, or rollback latest",
 			tostring(migrationMode),
 			player.Name
 		))
@@ -3942,6 +3711,38 @@ local function processCrewCanaryCommand(player, argumentText)
 		return true,
 			"CrewMember migration diagnostics status printed to server output. "
 				.. summarizeCrewMigrationStatus(flags, CrewMigrationPlanner.GetDiagnosticSnapshot(player))
+	end
+
+	if migrationMode == "cleanupcompat" then
+		if not AdminPermissions.IsSuperAdmin(player) then
+			warn(string.format(
+				"[DevFruitDevCommands] Rejected /crewcanary migration cleanupcompat from %s reason=not_super_admin",
+				player.Name
+			))
+			return false, "not_super_admin"
+		end
+
+		local validationStatus = CrewMemberCanonicalReadGate.PrintStatus(player)
+		local plan = CrewMigrationPlanner.BuildCompatibilityCleanupPlan(player)
+		CrewMigrationPlanner.PrintCompatibilityCleanupPlan(plan)
+		local result = CrewMigrationPlanner.ExecuteCompatibilityCleanup(player, {
+			ValidationStatus = validationStatus,
+		})
+		CrewMigrationPlanner.PrintCompatibilityCleanupResult(result)
+		if result.PostReview then
+			CrewMigrationPlanner.PrintCompatibilityReviewReport(result.PostReview)
+		end
+		if result.PostCompare then
+			CrewMigrationPlanner.PrintMigrationCompareReport(result.PostCompare)
+		end
+		if result.Passed ~= true then
+			return false,
+				"CrewMember compatibility cleanup failed validation. "
+					.. tostring(result.Summary or "compatibilityCleanup unavailable")
+		end
+		return true,
+			"CrewMember compatibility cleanup completed. "
+				.. tostring(result.Summary or "compatibilityCleanup unavailable")
 	end
 
 	if migrationMode ~= nil then

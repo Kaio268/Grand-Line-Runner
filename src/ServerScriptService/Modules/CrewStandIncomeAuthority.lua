@@ -7,7 +7,6 @@ local CrewStorage = require(ServerScriptService:WaitForChild("Modules"):WaitForC
 
 local CrewStandIncomeAuthority = {}
 
-local LEGACY_ROOT = "IncomeBrainrots"
 local CANONICAL_ROOT = "CrewMemberIncome"
 local AUDIT_ROOT = "CrewMemberStandIncomeAuthorityAudit"
 
@@ -135,10 +134,6 @@ local function restoreSnapshot(player, snapshot, reason)
 	if canonicalOk ~= true then
 		return false, "rollback_write_failed:" .. tostring(canonicalReason)
 	end
-	local legacyOk, legacyReason = writeRoot(player, LEGACY_ROOT, cloneValue(snapshot.Legacy) or {})
-	if legacyOk ~= true then
-		return false, "rollback_write_failed:" .. tostring(legacyReason)
-	end
 
 	updateAudit(player, {
 		LastRollback = {
@@ -158,7 +153,6 @@ local function buildSnapshot(player)
 		GameId = game.GameId,
 		CreatedAt = os.time(),
 		Canonical = cloneValue(dataManager:GetValue(player, CANONICAL_ROOT)),
-		Legacy = cloneValue(dataManager:GetValue(player, LEGACY_ROOT)),
 	}
 end
 
@@ -231,9 +225,9 @@ function CrewStandIncomeAuthority.GetStandData(player, standName)
 		}
 	end
 
-	return normalizeLegacyRow(dataManager:GetValue(player, LEGACY_ROOT .. "." .. standName)), {
+	return normalizeLegacyRow(nil), {
 		UsedCanonical = false,
-		CompatibilityFallback = true,
+		MissingCanonical = true,
 	}
 end
 
@@ -334,15 +328,6 @@ function CrewStandIncomeAuthority.GetAllStandData(player)
 		end
 	end
 
-	local legacy = dataManager:GetValue(player, LEGACY_ROOT)
-	if typeof(legacy) == "table" then
-		for standName, row in pairs(legacy) do
-			local key = tostring(standName)
-			if result[key] == nil and typeof(row) == "table" then
-				result[key] = normalizeLegacyRow(row)
-			end
-		end
-	end
 	return result
 end
 

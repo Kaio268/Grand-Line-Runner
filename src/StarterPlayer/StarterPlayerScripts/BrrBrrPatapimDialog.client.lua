@@ -17,6 +17,7 @@ local Point = require(ReplicatedStorage:WaitForChild("Point"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local LegacyCrewConfig = CrewCatalog.GetLegacyConfig()
+local player = Players.LocalPlayer
 
 local VariantPrefixes = { "Golden ", "Diamond " }
 do
@@ -36,6 +37,22 @@ do
 end
 
 local KnownBrainrotNames = {}
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
+
+local function getCarriedCrewMemberName()
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	return nil
+end
 local function addKnownCrewName(name)
 	local value = tostring(name or "")
 	if value ~= "" then
@@ -115,7 +132,6 @@ local lastBrainrotModelSweepResult = nil
 
 local remote = ReplicatedStorage:FindFirstChild("TutorialrrrrFinished")
 
-local player = Players.LocalPlayer
 local refs = MapResolver.WaitForRefs({ "MapRoot", "BrrBrrPatapimNpc" }, nil, {
 	warn = true,
 	context = "BrrBrrPatapimDialog",
@@ -149,11 +165,11 @@ local function openFrame(frameName)
 	end
 end
 
-local FALLBACK_FIRST_POS = UDim2.new(0.566, 0, 0.431, 0)
-local FALLBACK_FIRST_SIZE = UDim2.new(0.164, 0, 0.093, 0)
+local FALLBACK_FIRST_POS = UDim2.fromScale(0.566, 0.431)
+local FALLBACK_FIRST_SIZE = UDim2.fromScale(0.164, 0.093)
 
-local FALLBACK_SECOND_POS = UDim2.new(0.632, 0, 0.285, 0)
-local FALLBACK_SECOND_SIZE = UDim2.new(0.056, 0, 0.093, 0)
+local FALLBACK_SECOND_POS = UDim2.fromScale(0.632, 0.285)
+local FALLBACK_SECOND_SIZE = UDim2.fromScale(0.056, 0.093)
 local STEP2_SPOTLIGHT_Y_OFFSET = 60
 local STEP3_SPOTLIGHT_Y_OFFSET = 60
 
@@ -423,8 +439,8 @@ local function makePointRect(guiObject, paddingX, paddingY, offsetX, offsetY)
 	local centerX = absolutePosition.X + (absoluteSize.X * 0.5) + offX
 	local centerY = absolutePosition.Y + (absoluteSize.Y * 0.5) + offY
 
-	local size = UDim2.new(widthPx / viewport.X, 0, heightPx / viewport.Y, 0)
-	local position = UDim2.new(centerX / viewport.X, 0, centerY / viewport.Y, 0)
+	local size = UDim2.fromScale(widthPx / viewport.X, heightPx / viewport.Y)
+	local position = UDim2.fromScale(centerX / viewport.X, centerY / viewport.Y)
 	return size, position
 end
 
@@ -451,25 +467,13 @@ local function makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
 	local centerX = absolutePosition.X + (absoluteSize.X * 0.5) + offX
 	local centerY = absolutePosition.Y + (absoluteSize.Y * 0.5) + offY
 
-	local size = UDim2.new(widthPx / viewport.X, 0, heightPx / viewport.Y, 0)
-	local position = UDim2.new(centerX / viewport.X, 0, centerY / viewport.Y, 0)
+	local size = UDim2.fromScale(widthPx / viewport.X, heightPx / viewport.Y)
+	local position = UDim2.fromScale(centerX / viewport.X, centerY / viewport.Y)
 	return size, position
 end
 
 local function pointAtGui(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
 	local size, position = makePointRect(guiObject, paddingX, paddingY, offsetX, offsetY)
-	if not size or not position then
-		size = fallbackSize
-		position = fallbackPosition
-	end
-
-	Point.Set(size, position, {
-		posMode = "center",
-	})
-end
-
-local function pointAtGuiNow(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
-	local size, position = makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
 	if not size or not position then
 		size = fallbackSize
 		position = fallbackPosition
@@ -610,9 +614,8 @@ local function modelHasPrompt(model)
 	return model and model:IsA("Model") and model:FindFirstChildWhichIsA("ProximityPrompt", true) ~= nil
 end
 
-local function hasCarriedBrainrot()
-	local carried = player:GetAttribute("CarriedBrainrot")
-	return typeof(carried) == "string" and carried ~= ""
+local function hasCarriedCrewMember()
+	return getCarriedCrewMemberName() ~= nil
 end
 
 local function hasBrainrotTool(container)
@@ -628,7 +631,7 @@ local function hasBrainrotTool(container)
 end
 
 local function hasCollectedBrainrotForTutorial()
-	if hasCarriedBrainrot() or inventoryHasAnyFolder() then
+	if hasCarriedCrewMember() or inventoryHasAnyFolder() then
 		return true
 	end
 

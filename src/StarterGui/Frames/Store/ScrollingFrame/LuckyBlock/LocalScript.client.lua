@@ -1,37 +1,36 @@
 local gui = script.Parent
 
-local function findRequiredDescendant(root, name)
+local function findDescendant(root, name, warnIfMissing)
 	local found = root:FindFirstChild(name, true)
 	if found then
 		return found
 	end
-	warn(("LuckyBlock UI is missing descendant '%s' under %s"):format(name, root:GetFullName()))
+	if warnIfMissing ~= false then
+		warn(("LuckyBlock UI is missing descendant '%s' under %s"):format(name, root:GetFullName()))
+	end
 	return nil
 end
 
 local frame = gui
-local level = findRequiredDescendant(frame, "Level")
-if not level then
-	return
-end
+local level = findDescendant(frame, "Level", false)
+local levelShadow = level and findDescendant(level, "Shadow", false)
 
-local levelShadow = findRequiredDescendant(level, "Shadow")
-if not levelShadow then
-	return
-end
-
-local timer = findRequiredDescendant(gui, "Timer")
-local buyButton = findRequiredDescendant(gui, "Button")
+local timer = findDescendant(gui, "Timer", false)
+local buyButton = findDescendant(gui, "Button", false)
 if not timer or not buyButton then
 	return
 end
 
-local buyFrame = findRequiredDescendant(buyButton, "Frame")
-local priceLabel = buyFrame and findRequiredDescendant(buyFrame, "Price")
-local priceShadow = priceLabel and findRequiredDescendant(priceLabel, "Shadow")
+local buyFrame = findDescendant(buyButton, "Frame")
+local priceLabel = buyFrame and findDescendant(buyFrame, "Price", false)
+local priceShadow = priceLabel and findDescendant(priceLabel, "Shadow", false)
 
-level.RichText = true
-levelShadow.RichText = true
+if level then
+	level.RichText = true
+end
+if levelShadow then
+	levelShadow.RichText = true
+end
 
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
@@ -72,15 +71,23 @@ local function formatTime(sec)
 end
 
 local function setLevelText(mult)
+	if not level then
+		return
+	end
+
 	if mult < 8 then
 		local nextMult = mult * 2
 		local txt = string.format('x%d -> <font color="#ff6b3a">x%d</font>', mult, nextMult)
 		level.Text = txt
-		levelShadow.Text = txt
+		if levelShadow then
+			levelShadow.Text = txt
+		end
 	else
 		local txt = string.format("x%d", mult)
 		level.Text = txt
-		levelShadow.Text = txt
+		if levelShadow then
+			levelShadow.Text = txt
+		end
 	end
 end
 

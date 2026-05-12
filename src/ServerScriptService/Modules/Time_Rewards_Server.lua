@@ -140,6 +140,7 @@ local InstantRewardsEvent = getOrCreateChild(TimeRewardsFolder, "BindableEvent",
 local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
 local DataManager = require(script.Parent.Parent.Data.DataManager)
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
 local CYCLE_START_PATH = TIME_REWARDS_ROOT_PATH .. ".CycleStartPlayTime"
@@ -161,6 +162,11 @@ local POTION_REWARD_KEYS = {
 	x2MoneyTime = true,
 	x15WalkSpeed = true,
 	x15WalkSpeedTime = true,
+}
+
+local CREW_REWARD_KIND = {
+	CrewMember = true,
+	Crew = true,
 }
 
 for id in pairs(RewardsConfig) do
@@ -473,6 +479,52 @@ local function tryAddPotionReward(player: Player, rewardName: string, amount: nu
 	return ok, reason
 end
 
+local function isCrewMemberReward(rewardData): boolean
+	if typeof(rewardData) ~= "table" then
+		return false
+	end
+
+	if rewardData.CrewMember == true or rewardData.Brainrot == true then
+		return true
+	end
+
+	local kind = tostring(rewardData.Kind or rewardData.Type or rewardData.RewardKind or "")
+	return CREW_REWARD_KIND[kind] == true
+end
+
+local function resolveCrewMemberReward(rewardName: string, rewardData)
+	local candidates = {}
+	local function pushCandidate(value)
+		if typeof(value) == "string" and value ~= "" then
+			table.insert(candidates, value)
+		end
+	end
+
+	if typeof(rewardData) == "table" then
+		pushCandidate(rewardData.CrewMemberId)
+		pushCandidate(rewardData.CrewMemberName)
+		pushCandidate(rewardData.DisplayName)
+		pushCandidate(rewardData.LegacyBrainrotName)
+		pushCandidate(rewardData.LegacyRewardName)
+		pushCandidate(rewardData.LegacyId)
+	end
+	pushCandidate(rewardName)
+
+	for _, candidate in ipairs(candidates) do
+		local info = CrewCatalog.GetInfoById(candidate)
+		if not info then
+			info = CrewCatalog.FindInfoByName(candidate)
+		end
+
+		if info then
+			return tostring(info.LegacyId or info.Id or candidate),
+				tostring(info.DisplayName or info.CrewMemberName or info.Name or candidate)
+		end
+	end
+
+	return rewardName, rewardName
+end
+
 local function addReward(player: Player, rewardName: string, amount: number)
 	local normalizedRewardName = tostring(rewardName)
 	if normalizedRewardName == "Money" or normalizedRewardName == "Doubloons" then
@@ -515,10 +567,14 @@ local function grantReward(player: Player, rewardId: number)
 	end
 
 	local ok, reason
-	if rewardData and rewardData.Brainrot == true then
+	if isCrewMemberReward(rewardData) then
+		local grantName, displayName = resolveCrewMemberReward(rewardName, rewardData)
 		CrewRewardModule = CrewRewardModule or require(script.Parent.AddCrewMember)
-		ok = CrewRewardModule:AddCrewMember(player, rewardName, amount)
+		ok = CrewRewardModule:AddCrewMember(player, grantName, amount, {
+			Source = "TimeReward",
+		})
 		reason = if ok then nil else "crew_member_grant_failed"
+		rewardName = displayName
 	else
 		ok, reason = addReward(player, rewardName, amount)
 	end

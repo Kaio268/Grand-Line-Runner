@@ -62,6 +62,8 @@ local SOUND_RETURN = "Return"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
 local DEBUG_SOUND = true
 local DEBUG_TRACE = RunService:IsStudio()
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -85,6 +87,28 @@ local function horoClientTrace(message, ...)
 	end
 
 	print(string.format("[HORO CLIENT TRACE] " .. tostring(message), ...))
+end
+
+local function getCarriedCrewMemberName(player)
+	if not player then
+		return nil
+	end
+
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	return nil
+end
+
+local function hasCarriedCrewMember(player)
+	return getCarriedCrewMemberName(player) ~= nil
 end
 
 local function horoSoundLog(message, ...)
@@ -165,10 +189,11 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
-		tostring(player:GetAttribute("CarriedBrainrot")),
+		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
+		tostring(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
 		tostring(player:GetAttribute("HoroProjectionCarryingReward"))
@@ -974,7 +999,7 @@ end
 function HoroClient:IsCarryingReward()
 	return self.player:GetAttribute("HoroProjectionCarryingReward") == true
 		or self.player:GetAttribute("CarriedMajorRewardType") ~= nil
-		or self.player:GetAttribute("CarriedBrainrot") ~= nil
+		or hasCarriedCrewMember(self.player)
 end
 
 function HoroClient:GetCurrentSpeed(state)

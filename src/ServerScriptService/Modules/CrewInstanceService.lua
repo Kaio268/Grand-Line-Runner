@@ -16,8 +16,6 @@ local CrewMemberShadowWriterModule
 local inventorySavedCallbacks = {}
 local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local CANONICAL_INVENTORY_PATH = "CrewMemberInventory"
-local LEGACY_INVENTORY_PATH = "BrainrotInventory"
-local LEGACY_QUANTITY_ROOT_PATH = "Inventory"
 local INVENTORY_AUTHORITY_AUDIT_PATH = "CrewMemberInventoryAuthorityAudit"
 local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
 local INVENTORY_AUTHORITY_SNAPSHOT_VERSION = 1
@@ -166,14 +164,6 @@ local function isBrainrotInventoryEntry(key, entry)
 		or entry.CurrentXP ~= nil
 end
 
-local function getInventoryEntry(player, storageName)
-	local entry = getDataManager():GetValue(player, "Inventory." .. tostring(storageName))
-	if typeof(entry) == "table" then
-		return entry
-	end
-	return nil
-end
-
 local function buildMetadata(storageName, entry)
 	entry = entry or {}
 
@@ -210,19 +200,6 @@ local function buildMetadata(storageName, entry)
 	}
 end
 
-local function copyTableShallow(source)
-	local copy = {}
-	if typeof(source) ~= "table" then
-		return copy
-	end
-
-	for key, value in pairs(source) do
-		copy[key] = value
-	end
-
-	return copy
-end
-
 local function cloneValue(value)
 	if typeof(value) ~= "table" then
 		return value
@@ -256,38 +233,6 @@ local function isKnownCrewStorageName(storageName)
 		or CrewCatalog.GetInfoById(baseName) ~= nil
 		or BrainrotsCfg[storageName] ~= nil
 		or BrainrotsCfg[baseName] ~= nil
-end
-
-local function buildLegacyInventoryEntry(storageName, entry, metadata)
-	metadata = metadata or buildMetadata(storageName, entry)
-
-	local normalized = copyTableShallow(entry)
-	local render = tostring(normalized.Render or metadata.Render or "")
-
-	normalized.Equipped = math.max(0, math.floor(coerceNumber(normalized.Equipped, 0)))
-	normalized.Quantity = math.max(0, math.floor(coerceNumber(normalized.Quantity, 0)))
-	normalized.Variant = tostring(normalized.Variant or metadata.Variant or "Normal")
-	normalized.BaseName = tostring(normalized.BaseName or metadata.BaseName or storageName)
-	normalized.Render = render
-	normalized.GoldenRender = tostring(normalized.GoldenRender or metadata.GoldenRender or render)
-	normalized.DiamondRender = tostring(normalized.DiamondRender or metadata.DiamondRender or render)
-	normalized.Income = tonumber(normalized.Income or metadata.Income) or 0
-	normalized.Rarity = tostring(normalized.Rarity or metadata.Rarity or "Common")
-	normalized.Level = math.max(1, math.floor(coerceNumber(normalized.Level, 1)))
-	normalized.CurrentXP = math.max(0, math.floor(coerceNumber(normalized.CurrentXP, 0)))
-
-	return normalized
-end
-
-local function ensureLegacyInventoryEntry(player, storageName, metadata, options)
-	options = if typeof(options) == "table" then options else {}
-	local sourceEntry = if options.AllowLegacyMirrorWrite == true then getInventoryEntry(player, storageName) else nil
-	local entry = buildLegacyInventoryEntry(storageName, sourceEntry, metadata)
-
-	if options.AllowLegacyMirrorWrite == true then
-		getDataManager():SetValue(player, "Inventory." .. tostring(storageName), entry)
-	end
-	return entry
 end
 
 local function ensureBrainrotInventoryShape(brainrotInventory)
@@ -331,11 +276,15 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		DiamondRender = tostring(instanceData.DiamondRender or metadata.DiamondRender or metadata.Render or ""),
 		Level = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
 		CurrentXP = math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0))),
+		TotalXP = math.max(0, math.floor(coerceNumber(instanceData.TotalXP, 0))),
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
 		AcquiredAt = coerceNumber(instanceData.AcquiredAt, os.time()),
 		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
+		Source = tostring(instanceData.Source or ""),
+		DepthBand = tostring(instanceData.DepthBand or ""),
 		TutorialReward = instanceData.TutorialReward == true,
 		TutorialToken = tostring(instanceData.TutorialToken or ""),
+		GrandLineRushStarter = instanceData.GrandLineRushStarter == true,
 	}
 	if options.Canonical == true then
 		normalized.CrewMemberId = tostring(instanceData.CrewMemberId or metadata.CrewMemberId or metadata.StorageName)
@@ -418,24 +367,6 @@ local function normalizeInventoryData(rawInventory, options)
 	return inventory, changed
 end
 
-local function buildLegacyInventoryMirror(inventory)
-	local mirror = cloneValue(inventory)
-	if typeof(mirror) ~= "table" then
-		mirror = {}
-	end
-	mirror.SchemaVersion = nil
-	for _, instanceData in pairs(if typeof(mirror.ById) == "table" then mirror.ById else {}) do
-		if typeof(instanceData) == "table" then
-			instanceData.CrewMemberId = nil
-			instanceData.DisplayName = nil
-			instanceData.LegacyStorageName = nil
-			instanceData.ProjectionSource = nil
-			instanceData.Compatibility = nil
-		end
-	end
-	return ensureBrainrotInventoryShape(mirror)
-end
-
 local function getAvailableCountsFromInventory(inventory)
 	local counts = {}
 	if typeof(inventory) ~= "table" or typeof(inventory.Order) ~= "table" or typeof(inventory.ById) ~= "table" then
@@ -454,21 +385,6 @@ local function getAvailableCountsFromInventory(inventory)
 	return counts
 end
 
-local function getLegacyInventoryEntries(player)
-	local entries = {}
-	local inventory = getDataManager():GetValue(player, LEGACY_QUANTITY_ROOT_PATH)
-	if typeof(inventory) ~= "table" then
-		return entries
-	end
-
-	for key, entry in pairs(inventory) do
-		if isBrainrotInventoryEntry(key, entry) then
-			entries[tostring(key)] = cloneValue(entry)
-		end
-	end
-	return entries
-end
-
 local function buildInventoryAuthoritySnapshot(player, sourcePath)
 	return {
 		Kind = "inventory_write_authority",
@@ -479,8 +395,6 @@ local function buildInventoryAuthoritySnapshot(player, sourcePath)
 		SourcePath = tostring(sourcePath or ""),
 		CreatedAt = os.time(),
 		Canonical = cloneValue(getDataManager():GetValue(player, CANONICAL_INVENTORY_PATH)),
-		Legacy = cloneValue(getDataManager():GetValue(player, LEGACY_INVENTORY_PATH)),
-		LegacyInventoryEntries = getLegacyInventoryEntries(player),
 	}
 end
 
@@ -545,10 +459,6 @@ local function restoreInventoryAuthoritySnapshot(player, snapshot, reason)
 	if #canonicalShape.Issues > 0 then
 		return false, "snapshot_root_invalid:CrewMemberInventory:" .. table.concat(canonicalShape.Issues, ",")
 	end
-	local legacyShape = inspectInventoryRoot("BrainrotInventory", snapshot.Legacy)
-	if #legacyShape.Issues > 0 then
-		return false, "snapshot_root_invalid:BrainrotInventory:" .. table.concat(legacyShape.Issues, ",")
-	end
 
 	local writes = {}
 	local canonicalOk, canonicalReason = writeProfileRoot(player, CANONICAL_INVENTORY_PATH, cloneValue(snapshot.Canonical) or {})
@@ -557,31 +467,11 @@ local function restoreInventoryAuthoritySnapshot(player, snapshot, reason)
 		return false, "rollback_write_failed:CrewMemberInventory:" .. canonicalReason
 	end
 
-	local legacyOk, legacyReason = writeProfileRoot(player, LEGACY_INVENTORY_PATH, cloneValue(snapshot.Legacy) or {})
-	writes.BrainrotInventory = legacyOk
-	if not legacyOk then
-		return false, "rollback_write_failed:BrainrotInventory:" .. legacyReason
-	end
-
-	local entryWrites = {}
-	for storageName, entry in pairs(if typeof(snapshot.LegacyInventoryEntries) == "table" then snapshot.LegacyInventoryEntries else {}) do
-		local entryOk, entryReason = writeProfileRoot(
-			player,
-			LEGACY_QUANTITY_ROOT_PATH .. "." .. tostring(storageName),
-			cloneValue(entry)
-		)
-		entryWrites[tostring(storageName)] = entryOk
-		if not entryOk then
-			return false, "rollback_write_failed:Inventory." .. tostring(storageName) .. ":" .. entryReason
-		end
-	end
-
 	updateInventoryAuthorityAudit(player, {
 		LastRollback = {
 			Reason = tostring(reason or ""),
 			SourcePath = tostring(snapshot.SourcePath or ""),
 			Writes = writes,
-			EntryWrites = entryWrites,
 			CompletedAt = os.time(),
 		},
 	})
@@ -666,9 +556,7 @@ end
 
 local function validateInventoryMirrors(player)
 	local canonicalRaw = getDataManager():GetValue(player, CANONICAL_INVENTORY_PATH)
-	local legacyRaw = getDataManager():GetValue(player, LEGACY_INVENTORY_PATH)
 	local canonical = inspectInventoryRoot("CrewMemberInventory", canonicalRaw)
-	local legacy = inspectInventoryRoot("BrainrotInventory", legacyRaw)
 	local issues = {}
 
 	for _, issue in ipairs(canonical.Issues) do
@@ -693,9 +581,6 @@ local function validateInventoryMirrors(player)
 			Counts = expectedCounts,
 		},
 		BrainrotInventory = {
-			NextInstanceId = if legacy.Inventory then legacy.Inventory.NextInstanceId else nil,
-			InstanceCount = legacy.InstanceCount,
-			Counts = legacy.Counts,
 			Retired = true,
 		},
 	}
@@ -807,7 +692,6 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 	local canonicalInventory = normalizeInventoryData(cloneValue(crewInventory), {
 		Canonical = true,
 	})
-	local legacyMirror = buildLegacyInventoryMirror(canonicalInventory)
 	local writes = {}
 
 	updateInventoryAuthorityAudit(player, {
@@ -831,23 +715,7 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 		return false, "inventory_write_failed:CrewMemberInventory:" .. canonicalReason
 	end
 
-	local legacyOk, legacyReason = writeProfileRoot(player, LEGACY_INVENTORY_PATH, legacyMirror)
-	writes.BrainrotInventory = legacyOk
-	if not legacyOk then
-		restoreInventoryAuthoritySnapshot(player, snapshot, "legacy_write_failed")
-		updateInventoryAuthorityAudit(player, {
-			LastFailClosedReason = "inventory_write_failed:BrainrotInventory:" .. legacyReason,
-		})
-		return false, "inventory_write_failed:BrainrotInventory:" .. legacyReason
-	end
-
-	notifyInventorySaved(player, legacyMirror)
-	if syncAvailableCounts then
-		syncAvailableCounts(player, canonicalInventory, {
-			AllowLegacyMirrorWrite = true,
-		})
-	end
-	writes.InventoryQuantities = true
+	notifyInventorySaved(player, canonicalInventory)
 
 	local status = validateInventoryMirrors(player)
 	if status.Passed ~= true then
@@ -879,20 +747,7 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 	return true, nil, status
 end
 
-local function saveBrainrotInventory(player, brainrotInventory, options)
-	options = if typeof(options) == "table" then options else {}
-	if options.LegacyOnly == true then
-		local legacyInventory = normalizeInventoryData(cloneValue(brainrotInventory), {
-			Canonical = false,
-		})
-		local ok = getDataManager():SetValue(player, LEGACY_INVENTORY_PATH, legacyInventory)
-		if ok == false then
-			return false, "legacy_inventory_write_failed"
-		end
-		notifyInventorySaved(player, legacyInventory)
-		return true, nil
-	end
-
+local function saveBrainrotInventory(player, brainrotInventory, _options)
 	local canonicalInventory = normalizeInventoryData(cloneValue(brainrotInventory), {
 		Canonical = true,
 	})
@@ -932,48 +787,10 @@ local function setInstanceData(player, brainrotInventory, instanceId, instanceDa
 	})
 end
 
-local function syncQuantityValue(player, storageName, quantity, options)
-	options = if typeof(options) == "table" then options else {}
-	if options.AllowLegacyMirrorWrite ~= true then
-		return false
-	end
-	if getInventoryEntry(player, storageName) == nil then
-		ensureLegacyInventoryEntry(player, storageName, nil, {
-			AllowLegacyMirrorWrite = true,
-		})
-	end
-
-	getDataManager():SetValue(player, "Inventory." .. tostring(storageName) .. ".Quantity", math.max(0, math.floor(coerceNumber(quantity, 0))))
-	return true
-end
-
 syncAvailableCounts = function(player, brainrotInventory, options)
-	options = if typeof(options) == "table" then options else {}
-	if options.AllowLegacyMirrorWrite ~= true then
-		return false
-	end
-	brainrotInventory = brainrotInventory or getBrainrotInventory(player)
-
-	local counts = {}
-	for _, instanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(instanceId)]
-		if instanceData and instanceData.AssignedStand == "" then
-			counts[instanceData.StorageName] = (counts[instanceData.StorageName] or 0) + 1
-		end
-	end
-
-	local inventory = getDataManager():GetValue(player, "Inventory")
-	if typeof(inventory) == "table" then
-		for key, entry in pairs(inventory) do
-			if isBrainrotInventoryEntry(key, entry) then
-				syncQuantityValue(player, key, counts[key] or 0, options)
-			end
-		end
-	end
-
-	for storageName, count in pairs(counts) do
-		syncQuantityValue(player, storageName, count, options)
-	end
+	local _ = player
+	_ = brainrotInventory
+	_ = options
 	return true
 end
 
@@ -1017,8 +834,8 @@ local function updateStandData(player, standName, updates, sourcePath)
 end
 
 local function ensureInventoryMetadata(player, storageName, metadata)
-	metadata = metadata or buildMetadata(storageName)
-	return ensureLegacyInventoryEntry(player, storageName, metadata)
+	local _ = player
+	return metadata or buildMetadata(storageName)
 end
 
 local function createInstanceInternal(player, brainrotInventory, storageName, overrides)
@@ -1037,11 +854,15 @@ local function createInstanceInternal(player, brainrotInventory, storageName, ov
 		DiamondRender = overrides and overrides.DiamondRender or metadata.DiamondRender,
 		Level = overrides and overrides.Level or 1,
 		CurrentXP = overrides and overrides.CurrentXP or 0,
+		TotalXP = overrides and overrides.TotalXP or 0,
 		AssignedStand = overrides and overrides.AssignedStand or "",
 		AcquiredAt = overrides and overrides.AcquiredAt or os.time(),
 		LastReleasedAt = overrides and overrides.LastReleasedAt or 0,
+		Source = overrides and overrides.Source or "",
+		DepthBand = overrides and overrides.DepthBand or "",
 		TutorialReward = overrides and overrides.TutorialReward == true,
 		TutorialToken = overrides and overrides.TutorialToken or "",
+		GrandLineRushStarter = overrides and overrides.GrandLineRushStarter == true,
 	})
 	if overrides and overrides.TutorialReward == true then
 		table.insert(brainrotInventory.Order, 1, instanceId)
@@ -1175,8 +996,8 @@ function Module.RegisterInventorySavedCallback(callback)
 	end
 end
 
-function Module.SyncAvailableCounts(player)
-	return syncAvailableCounts(player)
+function Module.SyncAvailableCounts(player, options)
+	return syncAvailableCounts(player, nil, options)
 end
 
 function Module.SaveCrewInventory(player, crewInventory, options)
@@ -1477,7 +1298,8 @@ function Module.ResolveProgressTarget(player, reference)
 	return nil, nil, brainrotInventory
 end
 
-function Module.UpdateProgress(player, instanceId, level, currentXP)
+function Module.UpdateProgress(player, instanceId, level, currentXP, options)
+	options = if typeof(options) == "table" then options else {}
 	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
 	if progressionAuthorityEnabled == true then
 		local ready, readyReason = ensureProgressionAuthorityReady(player, "progression_update")
@@ -1514,6 +1336,18 @@ function Module.UpdateProgress(player, instanceId, level, currentXP)
 
 	instanceData.Level = math.max(1, math.floor(coerceNumber(level, instanceData.Level or 1)))
 	instanceData.CurrentXP = math.max(0, math.floor(coerceNumber(currentXP, instanceData.CurrentXP or 0)))
+	if options.TotalXP ~= nil then
+		instanceData.TotalXP = math.max(0, math.floor(coerceNumber(options.TotalXP, instanceData.TotalXP or 0)))
+	end
+	if options.Source ~= nil then
+		instanceData.Source = tostring(options.Source or "")
+	end
+	if options.DepthBand ~= nil then
+		instanceData.DepthBand = tostring(options.DepthBand or "")
+	end
+	if options.GrandLineRushStarter ~= nil then
+		instanceData.GrandLineRushStarter = options.GrandLineRushStarter == true
+	end
 	local saveOk, saveReason = setInstanceData(player, brainrotInventory, resolvedInstanceId, instanceData)
 	if saveOk ~= true then
 		if progressionAuthorityEnabled == true then
@@ -1868,7 +1702,6 @@ function Module.RemoveTutorialRewardInstances(player, options)
 	local tutorialStorageNames = {}
 	local removedStorageNameSet = {}
 	local removedStorageNames = {}
-	local quantitySynced = false
 
 	local function addTutorialStorageName(storageName)
 		storageName = tostring(storageName or "")
@@ -1965,22 +1798,6 @@ function Module.RemoveTutorialRewardInstances(player, options)
 		return (tonumber(left) or math.huge) < (tonumber(right) or math.huge)
 	end)
 
-	if options.ClearStaleStorageAssignments == true and #removedIds <= 0 then
-		for _, storageName in ipairs(tutorialStorageNames) do
-			local availableCount = 0
-			for _, instanceData in pairs(brainrotInventory.ById) do
-				if
-					typeof(instanceData) == "table"
-					and tostring(instanceData.StorageName or "") == storageName
-					and tostring(instanceData.AssignedStand or "") == ""
-				then
-					availableCount += 1
-				end
-			end
-			quantitySynced = syncQuantityValue(player, storageName, availableCount) == true or quantitySynced
-		end
-	end
-
 	if #removedIds > 0 then
 		local saved, saveReason = saveBrainrotInventory(player, brainrotInventory, {
 			SourcePath = "tutorial_reward_cleanup",
@@ -1998,7 +1815,7 @@ function Module.RemoveTutorialRewardInstances(player, options)
 		syncAvailableCounts(player, brainrotInventory)
 	end
 
-	if #removedIds > 0 or #clearedStands > 0 or quantitySynced then
+	if #removedIds > 0 or #clearedStands > 0 then
 		refreshCrewMemberShadow(player, "tutorial_reward_cleanup")
 	end
 

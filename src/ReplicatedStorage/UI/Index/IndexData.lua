@@ -3,8 +3,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
-local BrainrotVariants = CrewCatalog.GetVariantConfig()
+local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
+local CrewVariantConfig = CrewCatalog.GetVariantConfig()
 local DevilFruits = require(Configs:WaitForChild("DevilFruits"))
 local IndexConfig = require(Configs:WaitForChild("Index"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -60,17 +60,17 @@ local RARITY_SORT_ORDER = {
 	Omega = 9,
 }
 
-local VALID_BRAINROT_ITEM_IDS = {}
+local VALID_CREW_MEMBER_ITEM_IDS = {}
 
-for itemId, info in pairs(Brainrots) do
+for itemId, info in pairs(CrewLegacyConfig) do
 	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
+		VALID_CREW_MEMBER_ITEM_IDS[tostring(itemId)] = true
 	end
 end
 
 local function getVariantInfo(variantKey)
-	return (BrainrotVariants.Versions or {})[variantKey]
-		or (BrainrotVariants.Versions or {}).Normal
+	return (CrewVariantConfig.Versions or {})[variantKey]
+		or (CrewVariantConfig.Versions or {}).Normal
 		or { Prefix = "", IncomeMult = 1 }
 end
 
@@ -125,7 +125,7 @@ end
 
 local function normalizeVariantKey(variantKey)
 	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+	for _, supportedVariant in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
 		if candidate == supportedVariant then
 			return supportedVariant
 		end
@@ -140,7 +140,7 @@ local function parseVariantAndBaseName(fullName)
 		return "Normal", ""
 	end
 
-	for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+	for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
 		if variantKey ~= "Normal" then
 			local variantInfo = getVariantInfo(variantKey)
 			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
@@ -168,11 +168,11 @@ local function resolveBrainrotItemId(storageName, baseName, variantKey)
 	end
 
 	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
+	if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
 		return itemId
 	end
 
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
+	if storageNameValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[storageNameValue] then
 		return storageNameValue
 	end
 
@@ -187,7 +187,7 @@ local function markDiscoveredBrainrot(discovered, storageName, baseName, variant
 end
 
 local function getCrewInfo(itemId)
-	return CrewCatalog.GetInfoById(itemId) or Brainrots[itemId]
+	return CrewCatalog.GetInfoById(itemId) or CrewLegacyConfig[itemId]
 end
 
 local function getIndexDisplayMetadata(metadataById, itemId)
@@ -343,7 +343,7 @@ end
 local function getSortedBaseEntries()
 	local entries = {}
 
-	for name, info in pairs(Brainrots) do
+	for name, info in pairs(CrewLegacyConfig) do
 		if type(info) == "table" and not info.IsVariant and not info.Variant then
 			entries[#entries + 1] = {
 				name = name,
@@ -477,7 +477,7 @@ function IndexData.buildViewModel(options)
 
 	local inventory = options.inventory
 	local indexCollection = options.indexCollection
-	local crewMemberInventory = options.crewMemberInventory or options.brainrotInventory
+	local crewMemberInventory = options.crewMemberInventory
 	local claimedRewardOverrides = options.claimedRewardOverrides
 	local equippedDevilFruit = options.equippedDevilFruit
 	local indexRewardsFolder = options.indexRewardsFolder
@@ -485,6 +485,7 @@ function IndexData.buildViewModel(options)
 	local previewMode = options.previewMode == true
 
 	local units = {}
+	local unitsByCategory = {}
 	local categoryProgress = {}
 	local discoveredBrainrotIds = buildDiscoveredBrainrotSet(indexCollection, inventory, crewMemberInventory)
 	local discoveredFruitKeys = buildDiscoveredFruitSet(indexCollection, inventory, equippedDevilFruit)
@@ -492,6 +493,7 @@ function IndexData.buildViewModel(options)
 	local hasLiveFruitState = indexCollection ~= nil or inventory ~= nil or DevilFruits.GetFruit(equippedDevilFruit) ~= nil
 
 	for _, template in pairs(CATEGORY_TEMPLATES) do
+		unitsByCategory[template.id] = {}
 		categoryProgress[template.id] = {
 			total = 0,
 			collected = 0,
@@ -499,7 +501,7 @@ function IndexData.buildViewModel(options)
 	end
 
 	for orderIndex, entry in ipairs(SORTED_BASE_ENTRIES) do
-		for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+		for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
 			local template = CATEGORY_TEMPLATES[variantKey]
 			if template then
 				local itemId = getVariantItemId(variantKey, entry.name)
@@ -526,7 +528,7 @@ function IndexData.buildViewModel(options)
 					or tostring(itemInfo.Render or entry.info.Render or "")
 				local modelPreview = getCanonicalIndexModelPreview(displayMetadata)
 
-				units[#units + 1] = {
+				local unit = {
 					id = itemId,
 					baseName = entry.name,
 					name = entry.name,
@@ -552,6 +554,8 @@ function IndexData.buildViewModel(options)
 					themeKey = template.themeKey,
 					order = orderIndex,
 				}
+				units[#units + 1] = unit
+				unitsByCategory[template.id][#unitsByCategory[template.id] + 1] = unit
 			end
 		end
 	end
@@ -560,7 +564,7 @@ function IndexData.buildViewModel(options)
 	local collectedTotal = 0
 	local totalCount = 0
 
-	for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+	for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
 		local template = CATEGORY_TEMPLATES[variantKey]
 		if template then
 			local progress = categoryProgress[template.id]
@@ -669,6 +673,7 @@ function IndexData.buildViewModel(options)
 		tabs = IndexData.Tabs,
 		categories = categories,
 		units = units,
+		unitsByCategory = unitsByCategory,
 		collectionStats = {
 			collected = collectedTotal,
 			total = totalCount,

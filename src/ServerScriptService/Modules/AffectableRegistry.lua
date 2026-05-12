@@ -3,7 +3,7 @@ local RunService = game:GetService("RunService")
 
 local AffectableRegistry = {}
 
-local DEBUG = RunService:IsStudio()
+local DEBUG = RunService:IsStudio() and game:GetAttribute("AffectableRegistryDebug") == true
 local EPSILON = 1e-4
 local entitiesById = {}
 local entitiesByRoot = setmetatable({}, { __mode = "k" })

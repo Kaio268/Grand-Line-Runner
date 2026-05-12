@@ -698,6 +698,16 @@ local Shorten = requireLogged(
 	waitForChildLogged(Modules, "Shorten", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.Shorten"),
 	"ReplicatedStorage.Modules.Shorten"
 )
+local CrewRewardPreview = requireLogged(
+	waitForChildLogged(
+		TimeRewardsFolder,
+		"CrewRewardPreview",
+		OPTIONAL_WAIT_SECONDS,
+		"ReplicatedStorage.Modules.TimeRewards.CrewRewardPreview",
+		true
+	),
+	"ReplicatedStorage.Modules.TimeRewards.CrewRewardPreview"
+)
 
 if not (Modules and TimeRewardsFolder and RewardsConfig and Remote and SnapshotRequest and Shorten) then
 	giftStartupWarn(
@@ -1605,7 +1615,11 @@ local function formatRewardDescription(cfg): string
 			amount = rewardData.Amount
 		end
 
-		parts[#parts + 1] = string.format("x%s %s", tostring(amount), tostring(rewardName))
+		local displayName = if CrewRewardPreview
+			then CrewRewardPreview.ResolveDisplayName(rewardName, rewardData)
+			else tostring(rewardName)
+
+		parts[#parts + 1] = string.format("x%s %s", tostring(amount), displayName)
 	end
 	table.sort(parts)
 	return table.concat(parts, ", ")
@@ -1719,7 +1733,15 @@ local function setRewData(slotFrame: Instance, cfg)
 	local iconObj = getDirectImageObj(slotFrame, "Icon")
 	local iconAssigned = false
 	if iconObj then
-		if cfg.Icon ~= nil then
+		local crewPreviewInfo = if CrewRewardPreview then CrewRewardPreview.Resolve(cfg) else nil
+		if crewPreviewInfo then
+			iconAssigned = CrewRewardPreview.Apply(iconObj, crewPreviewInfo)
+		elseif cfg.Icon ~= nil then
+			if CrewRewardPreview then
+				CrewRewardPreview.Clear(iconObj)
+			end
+			local image = iconObj :: ImageLabel
+			image.ImageTransparency = 0
 			local nextIcon = tostring(cfg.Icon)
 			if iconObj.Image ~= nextIcon then
 				iconObj.Image = nextIcon

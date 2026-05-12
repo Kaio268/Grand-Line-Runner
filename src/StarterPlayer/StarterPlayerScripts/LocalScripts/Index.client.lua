@@ -17,12 +17,12 @@ local inventory = player:WaitForChild("Inventory")
 local cleanupConnections = {}
 local rewardConnections = {}
 local indexCollectionConnections = {}
-local brainrotInventoryConnections = {}
+local crewMemberInventoryConnections = {}
 local claimRemoteConnection = nil
 
 local indexRewardsFolder = nil
 local indexCollectionFolder = nil
-local brainrotInventoryFolder = nil
+local crewMemberInventoryFolder = nil
 local claimedRewardOverrides = {}
 
 local VALID_BRAINROT_ITEM_IDS = {}
@@ -217,7 +217,7 @@ local function countCollectedGlobal()
 		end
 	end
 
-	local byIdFolder = brainrotInventoryFolder and brainrotInventoryFolder:FindFirstChild("ById")
+	local byIdFolder = crewMemberInventoryFolder and crewMemberInventoryFolder:FindFirstChild("ById")
 	if byIdFolder then
 		for _, child in ipairs(byIdFolder:GetChildren()) do
 			if child:IsA("Folder") then
@@ -300,11 +300,11 @@ local function bindIndexCollectionFolder()
 	end, indexCollectionConnections)
 end
 
-local function bindBrainrotInventoryFolder()
-	disconnectAll(brainrotInventoryConnections)
+local function bindCrewMemberInventoryFolder()
+	disconnectAll(crewMemberInventoryConnections)
 
-	brainrotInventoryFolder = player:FindFirstChild("CrewMemberInventory")
-	if not brainrotInventoryFolder then
+	crewMemberInventoryFolder = player:FindFirstChild("CrewMemberInventory")
+	if not crewMemberInventoryFolder then
 		return
 	end
 
@@ -314,38 +314,38 @@ local function bindBrainrotInventoryFolder()
 				if updateIndexBadge then
 					updateIndexBadge()
 				end
-			end, brainrotInventoryConnections)
+			end, crewMemberInventoryConnections)
 		end
 	end
 
-	for _, descendant in ipairs(brainrotInventoryFolder:GetDescendants()) do
+	for _, descendant in ipairs(crewMemberInventoryFolder:GetDescendants()) do
 		bindValueObserver(descendant)
 	end
 
-	trackConnection(brainrotInventoryFolder.ChildAdded, function()
+	trackConnection(crewMemberInventoryFolder.ChildAdded, function()
 		if updateIndexBadge then
 			updateIndexBadge()
 		end
-	end, brainrotInventoryConnections)
+	end, crewMemberInventoryConnections)
 
-	trackConnection(brainrotInventoryFolder.ChildRemoved, function()
+	trackConnection(crewMemberInventoryFolder.ChildRemoved, function()
 		if updateIndexBadge then
 			updateIndexBadge()
 		end
-	end, brainrotInventoryConnections)
+	end, crewMemberInventoryConnections)
 
-	trackConnection(brainrotInventoryFolder.DescendantAdded, function(descendant)
+	trackConnection(crewMemberInventoryFolder.DescendantAdded, function(descendant)
 		bindValueObserver(descendant)
 		if updateIndexBadge then
 			updateIndexBadge()
 		end
-	end, brainrotInventoryConnections)
+	end, crewMemberInventoryConnections)
 
-	trackConnection(brainrotInventoryFolder.DescendantRemoving, function()
+	trackConnection(crewMemberInventoryFolder.DescendantRemoving, function()
 		if updateIndexBadge then
 			updateIndexBadge()
 		end
-	end, brainrotInventoryConnections)
+	end, crewMemberInventoryConnections)
 end
 
 local function isClaimed(questId)
@@ -438,7 +438,7 @@ trackConnection(player.ChildAdded, function(child)
 		bindIndexCollectionFolder()
 		updateIndexBadge()
 	elseif child.Name == "CrewMemberInventory" then
-		bindBrainrotInventoryFolder()
+		bindCrewMemberInventoryFolder()
 		updateIndexBadge()
 	elseif child.Name == "IndexRewards" then
 		bindIndexRewardsFolder()
@@ -451,7 +451,7 @@ trackConnection(player.ChildRemoved, function(child)
 		bindIndexCollectionFolder()
 		updateIndexBadge()
 	elseif child.Name == "CrewMemberInventory" then
-		bindBrainrotInventoryFolder()
+		bindCrewMemberInventoryFolder()
 		updateIndexBadge()
 	elseif child.Name == "IndexRewards" then
 		bindIndexRewardsFolder()
@@ -472,7 +472,7 @@ trackConnection(ReplicatedStorage.ChildAdded, function(child)
 end, cleanupConnections)
 
 bindIndexCollectionFolder()
-bindBrainrotInventoryFolder()
+bindCrewMemberInventoryFolder()
 bindIndexRewardsFolder()
 bindClaimRemote(findRemoteEventByName(ReplicatedStorage, "ClaimIndexReward") or ReplicatedStorage:WaitForChild("ClaimIndexReward", 2))
 updateIndexBadge()
@@ -480,7 +480,7 @@ updateIndexBadge()
 script.Destroying:Connect(function()
 	disconnectAll(cleanupConnections)
 	disconnectAll(indexCollectionConnections)
-	disconnectAll(brainrotInventoryConnections)
+	disconnectAll(crewMemberInventoryConnections)
 	disconnectAll(rewardConnections)
 	if claimRemoteConnection then
 		claimRemoteConnection:Disconnect()

@@ -17,7 +17,6 @@ CrewProfileSchema.Keys = {
 CrewProfileSchema.LegacyKeys = {
 	Inventory = "BrainrotInventory",
 	QuickSlots = "BrainrotQuickSlots",
-	QuickSlotsLegacy = "BrainrotStorage",
 	Income = "IncomeBrainrots",
 	IndexCollection = "IndexCollection",
 	Index = "Brainrots",
@@ -42,11 +41,15 @@ CrewProfileSchema.CrewMemberInstanceFields = {
 	"DiamondRender",
 	"Level",
 	"CurrentXP",
+	"TotalXP",
 	"AssignedStand",
 	"AcquiredAt",
 	"LastReleasedAt",
+	"Source",
+	"DepthBand",
 	"TutorialReward",
 	"TutorialToken",
+	"GrandLineRushStarter",
 	"ProjectionSource",
 }
 

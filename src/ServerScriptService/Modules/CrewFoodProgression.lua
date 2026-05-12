@@ -1,8 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
--- Crew progression now owns the old food/level behavior. The economy/config keys
--- still read Brainrots until the saved-data and balance migration is validated.
+-- Crew progression owns the food/level behavior. Some economy table names still
+-- say Brainrots because those config keys are shared persisted balance data.
 local dataManagerModule = nil
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -25,7 +25,7 @@ local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):
 local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local BrainrotsCfg = CrewCatalog.GetLegacyConfig()
+local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local Module = {}
@@ -225,13 +225,13 @@ local function getVariantAndBaseName(fullName)
 end
 
 local function getStoredRarity(_player, storageName)
-	local info = CrewCatalog.GetInfoById(storageName) or BrainrotsCfg[storageName]
+	local info = CrewCatalog.GetInfoById(storageName) or CrewLegacyConfig[storageName]
 	if type(info) == "table" then
 		return normalizeRarity(info.Rarity)
 	end
 
 	local _, baseName = getVariantAndBaseName(storageName)
-	local baseInfo = CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[baseName]
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or CrewLegacyConfig[baseName]
 	return normalizeRarity(baseInfo and baseInfo.Rarity or nil)
 end
 

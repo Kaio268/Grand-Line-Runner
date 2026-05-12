@@ -1,13 +1,20 @@
 local ServerScriptService = game:GetService("ServerScriptService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local BOOTSTRAP_DEBUG = ReplicatedStorage:GetAttribute("DebugDevilFruitLogs") == true
 
 local function bootstrap()
-	print("[DEVILFRUIT SERVER] bootstrap begin")
+	if BOOTSTRAP_DEBUG then
+		print("[DEVILFRUIT SERVER] bootstrap begin")
+	end
 	local devilFruitServerController = require(
 		ServerScriptService.Modules:WaitForChild("DevilFruits"):WaitForChild("Server"):WaitForChild("DevilFruitServerController")
 	)
 
 	devilFruitServerController.Start("Server-Scripts/DevilFruit.server.lua")
-	print("[DEVILFRUIT SERVER] bootstrap success")
+	if BOOTSTRAP_DEBUG then
+		print("[DEVILFRUIT SERVER] bootstrap success")
+	end
 end
 
 local ok, err = xpcall(bootstrap, debug.traceback)

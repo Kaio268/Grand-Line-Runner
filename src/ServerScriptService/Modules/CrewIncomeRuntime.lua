@@ -113,7 +113,7 @@ local dmSet
 local STAND_DEBUG = false
 local ensuredStandFolders = {}
 local standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction()
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CrewIncomeDebugTrace") == true
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
@@ -519,19 +519,32 @@ local function getEquippedToolName(player)
 end
 
 local function getInventoryQuantity(player, itemName)
-	local inv = player:FindFirstChild("Inventory")
-	if not inv then
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return 0
 	end
-	local item = inv:FindFirstChild(itemName)
-	if not item then
+	itemName = tostring(itemName or "")
+	if itemName == "" then
 		return 0
 	end
-	local q = item:FindFirstChild("Quantity")
-	if not q or not q:IsA("NumberValue") then
+
+	local ok, crewInventory = pcall(function()
+		return CrewInstanceService.GetCrewInventory(player)
+	end)
+	if not ok or typeof(crewInventory) ~= "table" or typeof(crewInventory.ById) ~= "table" then
 		return 0
 	end
-	return q.Value
+
+	local count = 0
+	for _, instanceData in pairs(crewInventory.ById) do
+		if
+			typeof(instanceData) == "table"
+			and tostring(instanceData.StorageName or "") == itemName
+			and tostring(instanceData.AssignedStand or "") == ""
+		then
+			count += 1
+		end
+	end
+	return count
 end
 
 dmGet = function(player, path)

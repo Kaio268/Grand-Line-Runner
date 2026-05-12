@@ -6,7 +6,7 @@ local DiagnosticLogLimiter = require(script.Parent:WaitForChild("DiagnosticLogLi
 
 local FruitGripController = {}
 
-local DEBUG_LOGS = RunService:IsStudio()
+local DEBUG_LOGS = RunService:IsStudio() and ReplicatedStorage:GetAttribute("DebugFruitGrip") == true
 local WARN_COOLDOWN = 3
 local AUTHORED_RUNTIME_GRIP_ATTRIBUTE = "FruitGripAuthoredRuntimeGrip"
 local DEFAULT_PROFILE = {
@@ -50,11 +50,7 @@ local function logWarn(message, ...)
 end
 
 local function shallowCopy(source)
-	local clone = {}
-	for key, value in pairs(source or {}) do
-		clone[key] = value
-	end
-	return clone
+	return table.clone(source or {})
 end
 
 local function mergeOptions(base, extra)

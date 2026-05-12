@@ -25,7 +25,7 @@ local connsByPlayer = {}
 local characterSpawnConnsByPlayer = {}
 local plotCommandFunction = ShipRuntimeSignals.GetPlotCommandFunction()
 local getSpawnPart
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("PlotDebugTrace") == true
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then

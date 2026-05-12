@@ -69,12 +69,6 @@ local ProfileTemplate = {
 		SeaBeastMeat = 0,
 	},
 
-	CrewInventory = {
-		NextInstanceId = 1,
-		ById = {},
-		Order = {},
-	},
-
 	CrewMemberInventory = {
 		SchemaVersion = 1,
 		NextInstanceId = 1,
@@ -88,16 +82,6 @@ local ProfileTemplate = {
 		MaxSlots = CrewQuickSlotConfig.MaxSlots,
 	},
 	CrewMemberIncome = {},
-
-	-- Retired legacy roots kept during the dev repair/reset window.
-	BrainrotInventory = {
-		NextInstanceId = 1,
-		ById = {},
-		Order = {},
-	},
-
-	-- Retired quick-slot mirror kept only for migration/repair tooling.
-	BrainrotQuickSlots = CrewQuickSlotConfig.GetDefaults(),
 	CrewQuickSlotProductAuthorityAudit = {},
 
 	Ship = {
@@ -130,8 +114,6 @@ local ProfileTemplate = {
 
 	IndexCollection = {
 		CrewMembers = {},
-		-- Retired legacy collection key kept during the dev repair/reset window.
-		Brainrots = {},
 		DevilFruits = {},
 	},
 
@@ -162,9 +144,6 @@ local ProfileTemplate = {
 		},
 	},
 
-	-- Retired stand income roots kept only for migration/repair tooling.
-	IncomeBrainrots = {},
-	StandsLevels = {},
 	Gears = {},
 	Passes = {},
 	Gamepasses = {

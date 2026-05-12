@@ -16,8 +16,8 @@ local FRUIT_TOOL_GRIP_VERSION = "authored_tool_template_v5"
 local CONSUME_BIND_ATTRIBUTE = "__DevilFruitConsumeBound"
 local CONSUME_BIND_VERSION = "consume_bind_v2"
 local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
-local CONSUME_DEBUG = true
-local R6G_WELD_DEBUG = true
+local CONSUME_DEBUG = false
+local R6G_WELD_DEBUG = false
 local EXPLICIT_GRIP_ATTACHMENT_NAMES = {
 	"RightGripAttachment",
 	"GripAttachment",

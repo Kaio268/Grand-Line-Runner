@@ -17,7 +17,7 @@ local TOOL_ATTR_KIND = "InventoryItemKind"
 local TOOL_ATTR_FRUIT_KEY = "FruitKey"
 local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
 local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = UiModalState.GetAttributeName()
-local CONSUME_PROMPT_DEBUG = true
+local CONSUME_PROMPT_DEBUG = false
 local EQUIP_TO_PROMPT_DELAY = 0.2
 local REQUEST_COOLDOWN = 0.35
 
@@ -240,6 +240,25 @@ local function getInventoryHud()
 	return if inventoryHud and inventoryHud:IsA("GuiObject") then inventoryHud else nil
 end
 
+local function isGuiVisibleThroughAncestors(guiObject)
+	if not (guiObject and guiObject:IsA("GuiObject")) then
+		return false
+	end
+
+	local current = guiObject
+	while current and current ~= player do
+		if current:IsA("GuiObject") and current.Visible == false then
+			return false
+		end
+		if current:IsA("LayerCollector") and current.Enabled == false then
+			return false
+		end
+		current = current.Parent
+	end
+
+	return true
+end
+
 local function isInventoryMenuOpen()
 	if isGameplayModalOpen() then
 		return true
@@ -256,7 +275,13 @@ local function isInventoryMenuOpen()
 
 	local inv = inventoryHud:FindFirstChild("Inv")
 	local inventoryFrame = inv and inv:FindFirstChild("InventoryFrame")
-	return inventoryFrame ~= nil and inventoryFrame:IsA("GuiObject") and inventoryFrame.Visible == true
+	return isGuiVisibleThroughAncestors(inventoryHud)
+		and inv ~= nil
+		and inv:IsA("GuiObject")
+		and isGuiVisibleThroughAncestors(inv)
+		and inventoryFrame ~= nil
+		and inventoryFrame:IsA("GuiObject")
+		and isGuiVisibleThroughAncestors(inventoryFrame)
 end
 
 local function isInventoryUiInput(input)
@@ -606,7 +631,7 @@ local function ensurePromptGui()
 	buttonRow.Name = "ButtonRow"
 	buttonRow.BackgroundTransparency = 1
 	buttonRow.AnchorPoint = Vector2.new(0.5, 1)
-	buttonRow.Position = UDim2.new(0.5, 0, 1, 0)
+	buttonRow.Position = UDim2.fromScale(0.5, 1)
 	buttonRow.Size = UDim2.new(1, 0, 0, 48)
 	buttonRow.ZIndex = 82
 	buttonRow.Parent = content
@@ -614,7 +639,7 @@ local function ensurePromptGui()
 	confirmButton = Instance.new("TextButton")
 	confirmButton.Name = "Confirm"
 	confirmButton.AnchorPoint = Vector2.new(0, 0.5)
-	confirmButton.Position = UDim2.new(0, 0, 0.5, 0)
+	confirmButton.Position = UDim2.fromScale(0, 0.5)
 	confirmButton.Size = UDim2.new(0.5, -14, 0, 46)
 	confirmButton.BackgroundColor3 = UI_THEME.GoldBase
 	confirmButton.BorderSizePixel = 0
@@ -659,7 +684,7 @@ local function ensurePromptGui()
 	cancelButton = Instance.new("TextButton")
 	cancelButton.Name = "Cancel"
 	cancelButton.AnchorPoint = Vector2.new(1, 0.5)
-	cancelButton.Position = UDim2.new(1, 0, 0.5, 0)
+	cancelButton.Position = UDim2.fromScale(1, 0.5)
 	cancelButton.Size = UDim2.new(0.5, -14, 0, 46)
 	cancelButton.BackgroundColor3 = UI_THEME.SectionBackground
 	cancelButton.BorderSizePixel = 0

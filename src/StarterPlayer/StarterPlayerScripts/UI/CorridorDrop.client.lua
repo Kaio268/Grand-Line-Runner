@@ -36,11 +36,38 @@ local dropPending = false
 local renderQueued = false
 local destroyed = false
 local cleanupConnections = {}
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
+local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
+local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
 
 local function trackConnection(signal, callback)
 	local connection = signal:Connect(callback)
 	table.insert(cleanupConnections, connection)
 	return connection
+end
+
+local function getStringAttribute(attributeName)
+	local value = player:GetAttribute(attributeName)
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+	return nil
+end
+
+local function getCarriedCrewMember()
+	local carriedName = getStringAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+		or getStringAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
+	if not carriedName then
+		return nil
+	end
+
+	return {
+		DisplayName = carriedName,
+		RewardType = "Crewmate",
+		Image = getStringAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE)
+			or getStringAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE),
+	}
 end
 
 local function getRunState()
@@ -63,14 +90,9 @@ local function getCarriedReward()
 		}
 	end
 
-	local carriedBrainrot = player:GetAttribute("CarriedBrainrot")
-	if typeof(carriedBrainrot) == "string" and carriedBrainrot ~= "" then
-		local carriedBrainrotImage = player:GetAttribute("CarriedBrainrotImage")
-		return {
-			DisplayName = carriedBrainrot,
-			RewardType = "Crewmate",
-			Image = if typeof(carriedBrainrotImage) == "string" then carriedBrainrotImage else nil,
-		}
+	local carriedCrewMember = getCarriedCrewMember()
+	if carriedCrewMember ~= nil then
+		return carriedCrewMember
 	end
 
 	return nil
@@ -173,8 +195,10 @@ end)
 trackConnection(playerGui:GetAttributeChangedSignal(modalOpenAttribute), scheduleRender)
 trackConnection(player:GetAttributeChangedSignal("CarriedMajorRewardDisplayName"), scheduleRender)
 trackConnection(player:GetAttributeChangedSignal("CarriedMajorRewardType"), scheduleRender)
-trackConnection(player:GetAttributeChangedSignal("CarriedBrainrot"), scheduleRender)
-trackConnection(player:GetAttributeChangedSignal("CarriedBrainrotImage"), scheduleRender)
+trackConnection(player:GetAttributeChangedSignal(CARRIED_CREW_MEMBER_ATTRIBUTE), scheduleRender)
+trackConnection(player:GetAttributeChangedSignal(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE), scheduleRender)
+trackConnection(player:GetAttributeChangedSignal(LEGACY_CARRIED_BRAINROT_ATTRIBUTE), scheduleRender)
+trackConnection(player:GetAttributeChangedSignal(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE), scheduleRender)
 
 task.spawn(function()
 	local ok, response = pcall(function()
