@@ -56,6 +56,24 @@ local PHOENIX_ANIMATION_KEYS = {
 	Shield = "Tori.PhoenixFlameShield",
 	Rebirth = "Tori.PhoenixRevive",
 }
+local PHOENIX_FLIGHT_AUDIO_CUES = {
+	LiftOff = "LiftOff",
+	AirImpact = "AirImpact",
+	SustainAnimation = "SustainAnimation",
+	Deactivate = "Deactivate",
+}
+local PHOENIX_SHIELD_AUDIO_CUES = {
+	Activate = "Activate",
+	Deactivate = "Deactivate",
+}
+local PHOENIX_REBIRTH_AUDIO_CUES = {
+	Revive = "Revive",
+}
+local PHOENIX_FLIGHT_DEFAULT_AUDIO_MARKERS = {
+	LiftOff = { "LiftOff" },
+	AirImpact = { "AirImpact" },
+	Deactivate = { "Deactivate", "FlightEnd" },
+}
 local PHOENIX_ANIMATION_LENGTHS = {
 	["Tori.PhoenixFlightStart"] = 3.1666667,
 	["Tori.PhoenixFlightLoop"] = 5.2,
@@ -582,6 +600,13 @@ local function stopAnimationEntry(entry, fadeTime)
 		return
 	end
 
+	for _, connection in ipairs(entry.Connections or {}) do
+		if typeof(connection) == "RBXScriptConnection" then
+			connection:Disconnect()
+		end
+	end
+	entry.Connections = {}
+
 	local track = entry.Track
 	if track then
 		pcall(function()
@@ -623,6 +648,15 @@ end
 local function cleanupPhoenixWingState(state, fadeTime)
 	if not state or state.CleanedUp then
 		return
+	end
+
+	local cleanupHandler = state.OnCleanup
+	state.OnCleanup = nil
+	if typeof(cleanupHandler) == "function" then
+		local ok, err = pcall(cleanupHandler, fadeTime)
+		if not ok then
+			warn("[ClientEffectVisuals] Phoenix wing cleanup handler failed: " .. tostring(err))
+		end
 	end
 
 	state.CleanedUp = true
@@ -966,9 +1000,24 @@ function ClientEffectVisuals.new(config)
 		PhoenixEffectAccentColor = resolveColor(config.PhoenixEffectAccentColor, DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR),
 		GomuFruitName = tostring(config.GomuFruitName or DEFAULT_GOMU_FRUIT_NAME),
 		RubberLaunchAbility = tostring(config.RubberLaunchAbility or DEFAULT_RUBBER_LAUNCH_ABILITY),
+		PhoenixFlightAudioHandler = config.PhoenixFlightAudioHandler,
+		PhoenixShieldAudioHandler = config.PhoenixShieldAudioHandler,
+		PhoenixRebirthAudioHandler = config.PhoenixRebirthAudioHandler,
 		PhoenixWingEffects = setmetatable({}, { __mode = "k" }),
 		PhoenixAnimationDefinitions = {},
 	}, ClientEffectVisuals)
+end
+
+function ClientEffectVisuals:SetPhoenixFlightAudioHandler(handler)
+	self.PhoenixFlightAudioHandler = handler
+end
+
+function ClientEffectVisuals:SetPhoenixShieldAudioHandler(handler)
+	self.PhoenixShieldAudioHandler = handler
+end
+
+function ClientEffectVisuals:SetPhoenixRebirthAudioHandler(handler)
+	self.PhoenixRebirthAudioHandler = handler
 end
 
 function ClientEffectVisuals:GetPhoenixAnimationDefinition(animationKey)
@@ -995,7 +1044,203 @@ function ClientEffectVisuals:GetPhoenixAnimationDefinition(animationKey)
 	return definition
 end
 
-function ClientEffectVisuals:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options)
+local function appendPhoenixFlightAudioMarkerName(markerNames, seenMarkers, markerName)
+	if typeof(markerName) ~= "string" or markerName == "" or seenMarkers[markerName] then
+		return
+	end
+
+	seenMarkers[markerName] = true
+	markerNames[#markerNames + 1] = markerName
+end
+
+local function appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, configuredMarkers)
+	if typeof(configuredMarkers) == "string" then
+		appendPhoenixFlightAudioMarkerName(markerNames, seenMarkers, configuredMarkers)
+		return
+	end
+
+	if type(configuredMarkers) ~= "table" then
+		return
+	end
+
+	for _, markerName in ipairs(configuredMarkers) do
+		appendPhoenixFlightAudioMarkerName(markerNames, seenMarkers, markerName)
+	end
+end
+
+local function resolvePhoenixFlightAudioMarkerNames(audioMarkers, cueName)
+	local markerNames = {}
+	local seenMarkers = {}
+	if type(audioMarkers) == "table" then
+		appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, audioMarkers[cueName])
+	end
+	appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, PHOENIX_FLIGHT_DEFAULT_AUDIO_MARKERS[cueName])
+	return markerNames
+end
+
+local function addAnimationEntryConnection(entry, connection)
+	if not entry or typeof(connection) ~= "RBXScriptConnection" then
+		return
+	end
+
+	entry.Connections = entry.Connections or {}
+	entry.Connections[#entry.Connections + 1] = connection
+end
+
+local function isPhoenixWingStateCurrent(self, targetPlayer, state)
+	return self.PhoenixWingEffects
+		and self.PhoenixWingEffects[targetPlayer] == state
+		and state
+		and not state.CleanedUp
+end
+
+local function emitPhoenixFlightAudioCue(self, state, targetPlayer, cueName, details, playOnce)
+	if not isPhoenixWingStateCurrent(self, targetPlayer, state) then
+		return false
+	end
+
+	if cueName == PHOENIX_FLIGHT_AUDIO_CUES.AirImpact and state.FlightEndPlayed then
+		return false
+	end
+
+	if playOnce == true then
+		state.PhoenixFlightAudioCues = state.PhoenixFlightAudioCues or {}
+		if state.PhoenixFlightAudioCues[cueName] then
+			return false
+		end
+		state.PhoenixFlightAudioCues[cueName] = true
+	end
+
+	local handler = self.PhoenixFlightAudioHandler
+	if typeof(handler) ~= "function" then
+		return false
+	end
+
+	local cueDetails = if type(details) == "table" then table.clone(details) else {}
+	cueDetails.CueName = cueName
+
+	local ok, err = pcall(handler, targetPlayer, cueName, cueDetails)
+	if not ok then
+		warn("[ClientEffectVisuals] Phoenix flight audio cue failed: " .. tostring(err))
+		return false
+	end
+
+	return true
+end
+
+local function emitPhoenixShieldAudioCue(self, state, targetPlayer, cueName, details, playOnce)
+	if not isPhoenixWingStateCurrent(self, targetPlayer, state) or state.PhoenixShieldAudioEnabled ~= true then
+		return false
+	end
+
+	if playOnce == true then
+		state.PhoenixShieldAudioCues = state.PhoenixShieldAudioCues or {}
+		if state.PhoenixShieldAudioCues[cueName] then
+			return false
+		end
+		state.PhoenixShieldAudioCues[cueName] = true
+	end
+
+	local handler = self.PhoenixShieldAudioHandler
+	if typeof(handler) ~= "function" then
+		return false
+	end
+
+	local cueDetails = if type(details) == "table" then table.clone(details) else {}
+	cueDetails.CueName = cueName
+
+	local ok, err = pcall(handler, targetPlayer, cueName, cueDetails)
+	if not ok then
+		warn("[ClientEffectVisuals] Phoenix shield audio cue failed: " .. tostring(err))
+		return false
+	end
+
+	return true
+end
+
+local function emitPhoenixRebirthAudioCue(self, state, targetPlayer, cueName, details, playOnce)
+	if not isPhoenixWingStateCurrent(self, targetPlayer, state) or state.Mode ~= "Rebirth" then
+		return false
+	end
+
+	if playOnce == true then
+		state.PhoenixRebirthAudioCues = state.PhoenixRebirthAudioCues or {}
+		if state.PhoenixRebirthAudioCues[cueName] then
+			return false
+		end
+		state.PhoenixRebirthAudioCues[cueName] = true
+	end
+
+	local handler = self.PhoenixRebirthAudioHandler
+	if typeof(handler) ~= "function" then
+		return false
+	end
+
+	local cueDetails = if type(details) == "table" then table.clone(details) else {}
+	cueDetails.CueName = cueName
+
+	local ok, err = pcall(handler, targetPlayer, cueName, cueDetails)
+	if not ok then
+		warn("[ClientEffectVisuals] Phoenix rebirth audio cue failed: " .. tostring(err))
+		return false
+	end
+
+	return true
+end
+
+local function connectPhoenixFlightAudioMarkerCue(
+	self,
+	state,
+	targetPlayer,
+	entry,
+	trackContext,
+	cueName,
+	markerNames,
+	details
+)
+	if not entry or not entry.Track or not trackContext or trackContext.Kind ~= "Character" then
+		return
+	end
+
+	local track = entry.Track
+	local function trigger(markerName, source)
+		local cueDetails = if type(details) == "table" then table.clone(details) else {}
+		cueDetails.MarkerName = markerName
+		cueDetails.Source = source
+		emitPhoenixFlightAudioCue(self, state, targetPlayer, cueName, cueDetails, true)
+	end
+
+	for _, markerName in ipairs(markerNames or {}) do
+		local ok, connection = pcall(function()
+			return track:GetMarkerReachedSignal(markerName):Connect(function()
+				trigger(markerName, "marker")
+			end)
+		end)
+		if ok then
+			addAnimationEntryConnection(entry, connection)
+		end
+	end
+
+	addAnimationEntryConnection(entry, track.KeyframeReached:Connect(function(keyframeName)
+		for _, markerName in ipairs(markerNames or {}) do
+			if keyframeName == markerName then
+				trigger(markerName, "keyframe")
+				return
+			end
+		end
+	end))
+end
+
+local function schedulePhoenixFlightAudioFallback(self, state, targetPlayer, cueName, delaySeconds, details)
+	local delayTime = math.max(0, tonumber(delaySeconds) or 0)
+	task.delay(delayTime, function()
+		local cueDetails = if type(details) == "table" then table.clone(details) else {}
+		cueDetails.Source = "fallback"
+		emitPhoenixFlightAudioCue(self, state, targetPlayer, cueName, cueDetails, true)
+	end)
+end
+
+function ClientEffectVisuals:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options, trackContext)
 	if not state or not animator then
 		return nil
 	end
@@ -1025,6 +1270,10 @@ function ClientEffectVisuals:PlayPhoenixAnimationOnAnimator(state, animator, ani
 	state.AnimationTracks = state.AnimationTracks or {}
 	state.AnimationTracks[#state.AnimationTracks + 1] = entry
 
+	if typeof(options.OnTrackCreated) == "function" then
+		options.OnTrackCreated(entry, trackContext or {})
+	end
+
 	track:Play(
 		math.max(0, tonumber(options.FadeTime) or PHOENIX_ANIMATION_FADE_TIME),
 		tonumber(options.Weight) or 1,
@@ -1050,7 +1299,11 @@ function ClientEffectVisuals:PlayPhoenixAnimation(state, targetPlayer, animation
 	local longestLength = nil
 	for _, featureState in ipairs(state.Features or {}) do
 		local animator = getOrCreateAnimationControllerAnimator(featureState.Model)
-		local _, length = self:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options)
+		local _, length = self:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options, {
+			Kind = "Feature",
+			FeatureState = featureState,
+			TargetPlayer = targetPlayer,
+		})
 		if length then
 			longestLength = math.max(longestLength or 0, length)
 		end
@@ -1059,7 +1312,10 @@ function ClientEffectVisuals:PlayPhoenixAnimation(state, targetPlayer, animation
 	if not options or options.PlayCharacter ~= false then
 		local humanoid = resolvePlayerHumanoid(targetPlayer)
 		local animator = getOrCreateHumanoidAnimator(humanoid)
-		local _, length = self:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options)
+		local _, length = self:PlayPhoenixAnimationOnAnimator(state, animator, animationKey, options, {
+			Kind = "Character",
+			TargetPlayer = targetPlayer,
+		})
 		if length then
 			longestLength = math.max(longestLength or 0, length)
 		end
@@ -1116,6 +1372,12 @@ function ClientEffectVisuals:SetPhoenixFlightSustainAnimation(state, targetPlaye
 		TrackGroup = PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP,
 	})
 	state.PhoenixFlightSustainAnimationKey = if length then animationKey else nil
+	if length then
+		emitPhoenixFlightAudioCue(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.SustainAnimation, {
+			AnimationKey = animationKey,
+			Source = "sustain_animation",
+		}, false)
+	end
 end
 
 function ClientEffectVisuals:GetPhoenixWingModelTemplate()
@@ -1269,6 +1531,18 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		return true
 	end
 
+	local function fireTransitionHandler(handlerName, warningMessage, ...)
+		local handler = options[handlerName]
+		if typeof(handler) ~= "function" then
+			return
+		end
+
+		local ok, err = pcall(handler, ...)
+		if not ok then
+			warn(warningMessage .. tostring(err))
+		end
+	end
+
 	local function setVfxActive(isActive)
 		if isActive and entry.BurstOnly and entry.BurstStarted then
 			return
@@ -1278,8 +1552,9 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		end
 
 		entry.VfxActive = isActive
-		setPhoenixAuthoredVfxEnabled(clone, isActive)
 		if isActive then
+			fireTransitionHandler("OnStart", "[ClientEffectVisuals] Phoenix authored VFX start handler failed: ")
+			setPhoenixAuthoredVfxEnabled(clone, true)
 			entry.BurstStarted = true
 			emitPhoenixAuthoredVfx(clone, options.EmitCount or 12)
 			if entry.BurstOnly then
@@ -1293,6 +1568,13 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 					setVfxActive(false)
 				end)
 			end
+		else
+			fireTransitionHandler(
+				"OnStop",
+				"[ClientEffectVisuals] Phoenix authored VFX stop handler failed: ",
+				options.StopReason or "inactive"
+			)
+			setPhoenixAuthoredVfxEnabled(clone, false)
 		end
 	end
 
@@ -1312,14 +1594,18 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 	updateMovementGate()
 
 	task.spawn(function()
+		local stopReason = "duration"
 		while clone.Parent and os.clock() < (entry.EndTime or endTime) do
 			if state and state.CleanedUp then
+				stopReason = "state_cleanup"
 				break
 			end
 			if mountToTarget and not mountedTargetPart.Parent then
+				stopReason = "target_removed"
 				break
 			end
 			if not mountToTarget and options.Follow ~= false and not updatePosition() then
+				stopReason = "target_lost"
 				break
 			end
 			updateMovementGate()
@@ -1332,7 +1618,9 @@ function ClientEffectVisuals:PlayPhoenixAuthoredVfx(state, targetPlayer, assetNa
 		end
 
 		if clone.Parent then
-			setPhoenixAuthoredVfxEnabled(clone, false)
+			options.StopReason = stopReason
+			setVfxActive(false)
+			options.StopReason = nil
 			local fadeOutDuration = math.max(0, tonumber(options.FadeOutDuration) or PHOENIX_AUTHORED_VFX_FADE_OUT)
 			if fadeOutDuration <= 0 then
 				clone:Destroy()
@@ -1356,17 +1644,43 @@ function ClientEffectVisuals:PlayPhoenixFlightAnimation(state, targetPlayer, dur
 		stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, 0.08)
 	end
 
+	local audioMarkers = options.AudioMarkers
+	local liftOffMarkerNames = resolvePhoenixFlightAudioMarkerNames(audioMarkers, PHOENIX_FLIGHT_AUDIO_CUES.LiftOff)
+	local function connectStartupAudioCues(entry, trackContext)
+		connectPhoenixFlightAudioMarkerCue(
+			self,
+			state,
+			targetPlayer,
+			entry,
+			trackContext,
+			PHOENIX_FLIGHT_AUDIO_CUES.LiftOff,
+			liftOffMarkerNames,
+			{
+				AnimationKey = PHOENIX_ANIMATION_KEYS.FlightStart,
+			}
+		)
+	end
+
 	local startupLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightStart, {
 		Looped = false,
 		FadeTime = 0.04,
 		StopFadeTime = 0.08,
+		OnTrackCreated = connectStartupAudioCues,
 	}) or PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY
 	local requestedLoopDelay = tonumber(options.LoopDelay)
 	local defaultLoopDelay = math.max(PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY, startupLength)
 	local loopDelay = if requestedLoopDelay and requestedLoopDelay >= 0 then requestedLoopDelay else defaultLoopDelay
 	loopDelay = math.min(loopDelay, math.max(PHOENIX_WING_MIN_DURATION, duration))
+	local airImpactDelay = math.max(0, loopDelay - math.max(0, tonumber(options.AirImpactLeadTime) or 0))
 	if state then
 		state.FlightTrailDelay = loopDelay
+		schedulePhoenixFlightAudioFallback(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.LiftOff, options.LiftOffFallbackDelay, {
+			AnimationKey = PHOENIX_ANIMATION_KEYS.FlightStart,
+		})
+		schedulePhoenixFlightAudioFallback(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.AirImpact, airImpactDelay, {
+			AnimationKey = PHOENIX_ANIMATION_KEYS.FlightStart,
+			Source = "flight_sustain_transition",
+		})
 	end
 
 	task.delay(loopDelay, function()
@@ -1444,6 +1758,7 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 		state = {
 			Container = container,
 			EndTime = endTime,
+			Mode = options.Mode,
 			ExtremityConcealEntries = applyPhoenixExtremityConceal(targetPlayer),
 			Features = featureStates,
 			AnimationTracks = {},
@@ -1487,6 +1802,12 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 				RunService.Heartbeat:Wait()
 			end
 
+			if state.Mode == "Flight" then
+				emitPhoenixFlightAudioCue(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.SustainAnimation, {
+					AnimationKey = nil,
+					Source = "wing_effect_cleanup",
+				}, false)
+			end
 			cleanupPhoenixWingState(state)
 			if self.PhoenixWingEffects and self.PhoenixWingEffects[targetPlayer] == state then
 				self.PhoenixWingEffects[targetPlayer] = nil
@@ -1495,6 +1816,12 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 	end
 
 	state.EndTime = math.max(state.EndTime, endTime)
+	if options.Mode ~= nil then
+		state.Mode = options.Mode
+	end
+	if type(options.AudioMarkers) == "table" then
+		state.PhoenixFlightAudioMarkers = options.AudioMarkers
+	end
 
 	if options.Mode ~= nil and options.Mode ~= "Flight" then
 		state.PlayFlightEndOnExpire = false
@@ -1508,6 +1835,9 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 		state.FlightEndPlayed = false
 		state.FlightTrailDelay = self:PlayPhoenixFlightAnimation(state, targetPlayer, duration, {
 			LoopDelay = options.FlightTrailDelay,
+			AudioMarkers = options.AudioMarkers,
+			LiftOffFallbackDelay = options.LiftOffFallbackDelay,
+			AirImpactLeadTime = options.AirImpactLeadTime,
 		}) or 0
 	elseif typeof(options.AnimationKey) == "string" then
 		local shouldPlayAnimation = true
@@ -1534,19 +1864,23 @@ end
 
 function ClientEffectVisuals:StopPhoenixFlightEffect(targetPlayer)
 	if not self.PhoenixWingEffects then
-		return
+		return false
 	end
 
 	local state = self.PhoenixWingEffects[targetPlayer]
 	if not state or state.CleanedUp then
-		return
+		return false
 	end
 	if state.FlightEndPlayed then
-		return
+		return false
 	end
 
 	state.FlightEndPlayed = true
 	state.PlayFlightEndOnExpire = false
+	emitPhoenixFlightAudioCue(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.SustainAnimation, {
+		AnimationKey = nil,
+		Source = "flight_end",
+	}, false)
 
 	for _, entry in ipairs(state.AnimationTracks or {}) do
 		stopAnimationEntry(entry, 0.08)
@@ -1554,12 +1888,36 @@ function ClientEffectVisuals:StopPhoenixFlightEffect(targetPlayer)
 	state.AnimationTracks = {}
 	state.PhoenixFlightSustainAnimationKey = nil
 
+	local deactivateMarkerNames = resolvePhoenixFlightAudioMarkerNames(
+		state.PhoenixFlightAudioMarkers,
+		PHOENIX_FLIGHT_AUDIO_CUES.Deactivate
+	)
+	local function connectEndAudioCue(entry, trackContext)
+		connectPhoenixFlightAudioMarkerCue(
+			self,
+			state,
+			targetPlayer,
+			entry,
+			trackContext,
+			PHOENIX_FLIGHT_AUDIO_CUES.Deactivate,
+			deactivateMarkerNames,
+			{
+				AnimationKey = PHOENIX_ANIMATION_KEYS.FlightEnd,
+			}
+		)
+	end
+
 	local endLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightEnd, {
 		Looped = false,
 		FadeTime = 0.04,
 		StopFadeTime = 0.08,
+		OnTrackCreated = connectEndAudioCue,
 	}) or 0.25
+	schedulePhoenixFlightAudioFallback(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.Deactivate, 0, {
+		AnimationKey = PHOENIX_ANIMATION_KEYS.FlightEnd,
+	})
 	state.EndTime = os.clock() + math.max(0.15, math.min(endLength, 1.2))
+	return true
 end
 
 function ClientEffectVisuals:StopPhoenixWingEffect(targetPlayer, fadeTime)
@@ -1570,6 +1928,13 @@ function ClientEffectVisuals:StopPhoenixWingEffect(targetPlayer, fadeTime)
 	local state = self.PhoenixWingEffects[targetPlayer]
 	if not state then
 		return
+	end
+
+	if state.Mode == "Flight" then
+		emitPhoenixFlightAudioCue(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.SustainAnimation, {
+			AnimationKey = nil,
+			Source = "wing_effect_stop",
+		}, false)
 	end
 
 	cleanupPhoenixWingState(state, fadeTime)
@@ -1847,6 +2212,19 @@ function ClientEffectVisuals:CreatePhoenixRebirthEffect(targetPlayer, fruitName,
 		playPulse("PhoenixRebirthIgnite", self.PhoenixEffectColor, 2.4, 7.5, 0.35)
 	end
 
+	local reviveSoundOffset = tonumber(payload.AudioReviveSoundOffset) or 0
+	local reviveSoundDelay = math.max(0, reviveDelay + reviveSoundOffset)
+	local remainingReviveSoundDelay = math.max(0, reviveSoundDelay - elapsed)
+	if remainingReviveSoundDelay <= remainingDuration + 0.2 then
+		task.delay(remainingReviveSoundDelay, function()
+			emitPhoenixRebirthAudioCue(self, state, targetPlayer, PHOENIX_REBIRTH_AUDIO_CUES.Revive, {
+				AnimationKey = animationKey,
+				ReviveSoundOffset = reviveSoundOffset,
+				Source = "revive_sound_offset",
+			}, true)
+		end)
+	end
+
 	local remainingReviveDelay = math.max(0, reviveDelay - elapsed)
 	if remainingReviveDelay <= remainingDuration + 0.2 then
 		task.delay(remainingReviveDelay, function()
@@ -1906,6 +2284,9 @@ function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, 
 	local state = self:CreatePhoenixWingEffect(targetPlayer, visualDuration, {
 		Mode = "Flight",
 		FlightTrailDelay = startupDuration + heightDelay,
+		AudioMarkers = type(payload.AudioMarkers) == "table" and payload.AudioMarkers or nil,
+		LiftOffFallbackDelay = 0,
+		AirImpactLeadTime = math.max(0, tonumber(payload.AudioAirImpactLeadTime) or 0),
 	})
 	if not state then
 		return
@@ -1954,6 +2335,10 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 	payload = payload or {}
 
 	local duration = math.max(0.1, tonumber(payload.Duration) or 5)
+	local serverEndTime = tonumber(payload.EndTime)
+	if serverEndTime then
+		duration = math.max(0.1, serverEndTime - Workspace:GetServerTimeNow())
+	end
 	local radius = math.max(1, tonumber(payload.Radius) or DEFAULT_PHOENIX_SHIELD_RADIUS)
 	local state = self:CreatePhoenixWingEffect(targetPlayer, duration, {
 		AnimationKey = PHOENIX_ANIMATION_KEYS.Shield,
@@ -1962,6 +2347,22 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 		StopFadeTime = 0.1,
 		PlayAnimationOnce = true,
 	})
+	if not state then
+		return
+	end
+
+	local existingShieldVfx = state.AuthoredVfx and state.AuthoredVfx[PHOENIX_AUTHORED_SHIELD_FX_NAME]
+	if not (existingShieldVfx and existingShieldVfx.Clone and existingShieldVfx.Clone.Parent) then
+		state.PhoenixShieldAudioCues = nil
+	end
+	state.PhoenixShieldAudioEnabled = true
+	state.OnCleanup = function(cleanupFadeTime)
+		emitPhoenixShieldAudioCue(self, state, targetPlayer, PHOENIX_SHIELD_AUDIO_CUES.Deactivate, {
+			PlayDeactivate = cleanupFadeTime ~= 0,
+			Source = "shield_vfx_stop",
+		}, true)
+	end
+
 	self:PlayPhoenixAuthoredVfx(state, targetPlayer, PHOENIX_AUTHORED_SHIELD_FX_NAME, duration, {
 		EmitCount = 20,
 		TargetPartNames = PHOENIX_REFERENCE_PART_NAMES,
@@ -1969,6 +2370,18 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 		LockParticlesToPart = true,
 		FadeOutDuration = 0,
 		Scale = radius / PHOENIX_SHIELD_AUTHORED_REFERENCE_RADIUS,
+		OnStart = function()
+			emitPhoenixShieldAudioCue(self, state, targetPlayer, PHOENIX_SHIELD_AUDIO_CUES.Activate, {
+				Source = "shield_vfx_start",
+			}, true)
+		end,
+		OnStop = function(stopReason)
+			emitPhoenixShieldAudioCue(self, state, targetPlayer, PHOENIX_SHIELD_AUDIO_CUES.Deactivate, {
+				PlayDeactivate = stopReason == "duration",
+				Source = "shield_vfx_stop",
+				StopReason = stopReason,
+			}, true)
+		end,
 	})
 end
 

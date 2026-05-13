@@ -13,6 +13,7 @@
 	- raw per-asset VFX behavior (that lives in `Shared/Vfx`)
 ]]
 
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -20,6 +21,7 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local AnimationLoadDiagnostics = require(Modules:WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
@@ -38,6 +40,8 @@ local DEFAULT_FADE_TIME = 0.05
 local DEFAULT_STOP_FADE_TIME = 0.08
 local FIRE_BURST_DEFAULT_DURATION = 0.6
 local FIRE_BURST_CLEANUP_GRACE = 0.12
+local MERA_AUDIO_CLEANUP_FALLBACK_SECONDS = 5
+local MERA_AUDIO_DEDUPE_TTL = 8
 local FLAME_DASH_DEFAULT_DURATION = 0.15
 local FLAME_DASH_ACTIVE_DELAY_RATIO = 0.18
 local FLAME_DASH_MIN_ACTIVE_DELAY = 0.02
@@ -515,11 +519,206 @@ local function getFireBurstCastId(targetPlayer, payload)
 	return nil
 end
 
+local function normalizeMeraSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
+	end
+
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
+end
+
+local function getMeraAudioConfig(abilityName)
+	local abilityConfig = DevilFruitConfig.GetAbility("Mera Mera no Mi", abilityName)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getMeraSoundId(abilityName, audioKey)
+	local audioConfig = getMeraAudioConfig(abilityName)
+	if not audioConfig then
+		return nil
+	end
+
+	return normalizeMeraSoundId(audioConfig[audioKey])
+end
+
+local function getMeraAudioNumber(abilityName, fieldName, fallback, minimum)
+	local audioConfig = getMeraAudioConfig(abilityName)
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function getMeraSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return MERA_AUDIO_CLEANUP_FALLBACK_SECONDS
+end
+
+local function getMeraAudioDedupeKey(targetPlayer, abilityName, cueName, payload)
+	local userId = targetPlayer and targetPlayer:IsA("Player") and targetPlayer.UserId or 0
+	if type(payload) == "table" then
+		local localAudioToken = payload.LocalAudioToken
+		if typeof(localAudioToken) == "string" and localAudioToken ~= "" then
+			return string.format("%s:%s:%d:%s", abilityName, cueName, userId, localAudioToken)
+		end
+	end
+
+	if abilityName == "FireBurst" then
+		local castId = getFireBurstCastId(targetPlayer, payload)
+		if castId then
+			return string.format("%s:%s:%s", abilityName, cueName, castId)
+		end
+	end
+
+	if type(payload) == "table" then
+		local startedAt = tonumber(payload.StartedAt)
+		if startedAt and startedAt > 0 then
+			return string.format("%s:%s:%d:%.6f", abilityName, cueName, userId, startedAt)
+		end
+
+		return string.format(
+			"%s:%s:%d:%s:%s:%s",
+			abilityName,
+			cueName,
+			userId,
+			tostring(payload.StartPosition),
+			tostring(payload.EndPosition),
+			tostring(payload.Duration)
+		)
+	end
+
+	return nil
+end
+
+local function markMeraAudioPlayed(self, targetPlayer, abilityName, cueName, payload)
+	local dedupeKey = getMeraAudioDedupeKey(targetPlayer, abilityName, cueName, payload)
+	if not dedupeKey then
+		return true
+	end
+
+	self.playedMeraAudioKeys = self.playedMeraAudioKeys or {}
+	if self.playedMeraAudioKeys[dedupeKey] then
+		return false
+	end
+
+	self.playedMeraAudioKeys[dedupeKey] = true
+	task.delay(MERA_AUDIO_DEDUPE_TTL, function()
+		if self.playedMeraAudioKeys then
+			self.playedMeraAudioKeys[dedupeKey] = nil
+		end
+	end)
+	return true
+end
+
+local function createMeraAbilitySound(targetPlayer, abilityName, audioKey, soundName)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundId = getMeraSoundId(abilityName, audioKey)
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName or ("Mera" .. abilityName .. audioKey))
+	sound.SoundId = soundId
+	sound.Looped = false
+	sound.Volume = getMeraAudioNumber(abilityName, "Volume", 1, 0)
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	return sound
+end
+
+local function playMeraAbilitySoundNow(targetPlayer, abilityName, audioKey, soundName)
+	local sound = createMeraAbilitySound(targetPlayer, abilityName, audioKey, soundName)
+	if not sound then
+		return false
+	end
+
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getMeraSoundCleanupDelay(sound))
+	return true
+end
+
+local function playMeraAbilityAudio(self, targetPlayer, abilityName, cueName, audioKey, offsetKey, soundName, payload, isCurrent)
+	if not getMeraSoundId(abilityName, audioKey) then
+		return false
+	end
+	if not markMeraAudioPlayed(self, targetPlayer, abilityName, cueName, payload) then
+		return false
+	end
+
+	local function shouldPlay()
+		return typeof(isCurrent) ~= "function" or isCurrent()
+	end
+
+	local offsetSeconds = getMeraAudioNumber(abilityName, offsetKey, 0)
+	local delayTime = math.max(0, tonumber(offsetSeconds) or 0)
+	if delayTime <= 0 then
+		if not shouldPlay() then
+			return false
+		end
+
+		return playMeraAbilitySoundNow(targetPlayer, abilityName, audioKey, soundName)
+	end
+
+	task.delay(delayTime, function()
+		if shouldPlay() then
+			playMeraAbilitySoundNow(targetPlayer, abilityName, audioKey, soundName)
+		end
+	end)
+	return true
+end
+
 function MeraPresentationClient.new(config)
 	local self = setmetatable({}, MeraPresentationClient)
 	self.player = config and config.player or Players.LocalPlayer
 	self.createEffectVisual = config and config.createEffectVisual
 	self.activeTracksByPlayer = setmetatable({}, { __mode = "k" })
+	self.playedMeraAudioKeys = {}
+	self.predictedFlameDashAudioUntilByPlayer = setmetatable({}, { __mode = "k" })
 	-- FlameDash keeps a multi-phase runtime state because startup/body/trail are
 	-- separate visuals that must hand off smoothly.
 	self.activeFlameDashVfxByPlayer = setmetatable({}, { __mode = "k" })
@@ -638,6 +837,42 @@ function MeraPresentationClient:DisconnectFlameDashTrackPhases(state)
 	state.TrackPhaseConnections = nil
 end
 
+function MeraPresentationClient:ShouldSuppressReplicatedFlameDashAudio(targetPlayer)
+	local audioUntilByPlayer = self.predictedFlameDashAudioUntilByPlayer
+	local suppressUntil = audioUntilByPlayer and audioUntilByPlayer[targetPlayer] or nil
+	if not suppressUntil then
+		return false
+	end
+
+	if os.clock() < suppressUntil then
+		return true
+	end
+
+	audioUntilByPlayer[targetPlayer] = nil
+	return false
+end
+
+function MeraPresentationClient:PlayFlameDashDashAudio(targetPlayer, payload, isPredicted, isCurrent)
+	local played = playMeraAbilityAudio(
+		self,
+		targetPlayer,
+		"FlameDash",
+		"Dash",
+		"DashSoundId",
+		"DashSoundOffset",
+		"MeraFlameDashSound",
+		payload,
+		isCurrent
+	)
+
+	if played and isPredicted == true then
+		self.predictedFlameDashAudioUntilByPlayer = self.predictedFlameDashAudioUntilByPlayer or setmetatable({}, { __mode = "k" })
+		self.predictedFlameDashAudioUntilByPlayer[targetPlayer] = os.clock() + MERA_AUDIO_DEDUPE_TTL
+	end
+
+	return played
+end
+
 -- ============================================================================
 -- FlameDash Presentation State
 -- ============================================================================
@@ -720,6 +955,11 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 		end
 
 		state.StartupPlayed = true
+		if not self:ShouldSuppressReplicatedFlameDashAudio(targetPlayer) then
+			self:PlayFlameDashDashAudio(targetPlayer, state.StartPayload, false, function()
+				return self.activeFlameDashVfxByPlayer[targetPlayer] == state and state.Finalized ~= true
+			end)
+		end
 		local startupPosition = (typeof(state.StartPosition) == "Vector3" and state.StartPosition)
 			or (typeof(state.ServerStartPosition) == "Vector3" and state.ServerStartPosition)
 			or rootPart.Position
@@ -1773,6 +2013,19 @@ function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
 	state.ReleaseTriggered = true
 	state.ReleasePayload = type(payload) == "table" and payload or {}
 	state.LastPhase = "Release"
+	playMeraAbilityAudio(
+		self,
+		targetPlayer,
+		"FireBurst",
+		"Burst",
+		"BurstSoundId",
+		"BurstSoundOffset",
+		"MeraFireBurstSound",
+		state.ReleasePayload,
+		function()
+			return self.activeFireBurstByPlayer[targetPlayer] == state and state.Completed ~= true
+		end
+	)
 
 	local abilityConfig = self:GetAbilityConfig("FireBurst")
 	local payloadTable = type(payload) == "table" and payload or {}

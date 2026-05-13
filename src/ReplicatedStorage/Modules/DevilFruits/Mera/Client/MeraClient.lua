@@ -20,6 +20,9 @@ local function buildNoopPresentationClient()
 		PlayFlameDashComplete = function()
 			return false
 		end,
+		PlayFlameDashDashAudio = function()
+			return false
+		end,
 		MarkFlameDashTrailPredictedComplete = function()
 			return false
 		end,
@@ -131,6 +134,9 @@ function MeraFruitClient.Create(config)
 		end,
 		PlayFlameDashComplete = function(targetPlayer, payload)
 			return self:GetPresentation():PlayFlameDashComplete(targetPlayer, payload)
+		end,
+		PlayFlameDashAudioStart = function(targetPlayer, payload)
+			return self:GetPresentation():PlayFlameDashDashAudio(targetPlayer, payload, true)
 		end,
 		MarkFlameDashTrailPredictedComplete = function(targetPlayer, reason, finalPosition, direction)
 			return self:GetPresentation():MarkFlameDashTrailPredictedComplete(

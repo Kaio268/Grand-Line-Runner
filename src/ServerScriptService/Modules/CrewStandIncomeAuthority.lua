@@ -253,7 +253,8 @@ function CrewStandIncomeAuthority.SetStandData(player, standName, legacyRow, sou
 	end
 
 	local persistedCanonical = getDataManager():GetValue(player, CANONICAL_ROOT .. "." .. standName)
-	local mirrorOk, mirrorReason = compareRows(normalizedLegacy, persistedCanonical)
+	local expectedPersistedLegacy = legacyFromCanonicalRow(canonicalRow)
+	local mirrorOk, mirrorReason = compareRows(expectedPersistedLegacy, persistedCanonical)
 	if mirrorOk ~= true then
 		local restoreOk, restoreReason = restoreSnapshot(player, snapshot, "post_validation_failed")
 		updateAudit(player, {

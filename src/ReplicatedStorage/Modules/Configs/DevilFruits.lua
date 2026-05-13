@@ -121,6 +121,11 @@ local DevilFruits = {
 					ClientCorrectionSnapDistance = 12,
 					ClientDistanceTolerance = 6,
 					FinalSnapTolerance = 4,
+					Audio = {
+						DashSoundId = "rbxassetid://81398646310714",
+						DashSoundOffset = 0,
+						Volume = 1,
+					},
 					RequestPayloadSchema = {
 						MaxKeys = 2,
 						MaxHintDistance = 440,
@@ -175,6 +180,11 @@ local DevilFruits = {
 					},
 					ExplosionMeasureIncludeKeywords = {},
 					MovementLockEnabled = true,
+					Audio = {
+						BurstSoundId = "rbxassetid://118200878932499",
+						BurstSoundOffset = 0,
+						Volume = 1,
+					},
 					Animation = {
 						AnimationKey = "Mera.FlameBurstR6",
 						ReleaseMarker = "Release",
@@ -278,6 +288,11 @@ local DevilFruits = {
 					-- RubberLaunch scales uncapped; 200 speed gives 38 + 32 = 70 studs.
 					SpeedScaleReference = 200,
 					SpeedLaunchDistanceBonus = 32,
+					Audio = {
+						LaunchSoundId = "rbxassetid://127726035700622",
+						LaunchSoundOffset = 0,
+						Volume = 1,
+					},
 					Animation = {
 						AnimationKey = "Gomu.Rocket",
 						ReleaseTime = 0.25,
@@ -617,6 +632,11 @@ local DevilFruits = {
 					RestoreHealthPercent = 1,
 					AnimationKey = "Tori.PhoenixRevive",
 					ReviveMarkerNames = { "Revive", "Rebirth", "PhoenixRevive", "Restore" },
+					Audio = {
+						ReviveSoundId = "rbxassetid://137266608991780",
+						-- Seconds relative to the revive moment. Negative plays earlier; positive plays later.
+						ReviveSoundOffset = -0.15,
+					},
 				},
 			},
 			Abilities = {
@@ -637,6 +657,18 @@ local DevilFruits = {
 					HorizontalResponsiveness = 14,
 					FlightTrailPartNames = { "Tail1", "tail", "Torso", "UpperTorso", "HumanoidRootPart" },
 					FlightTrailOffset = CFrame.new(0, 0, 5.5),
+					Audio = {
+						FlightLoopSoundId = "rbxassetid://113359626475877",
+						InitialJumpOffSoundId = "rbxassetid://97732273162083",
+						DeactivationSoundId = "rbxassetid://73620560003570",
+						AirImpactSoundId = "rbxassetid://127487560753859",
+						AirImpactLeadTime = 0.08,
+						Markers = {
+							LiftOff = { "LiftOff" },
+							AirImpact = { "AirImpact" },
+							Deactivate = { "Deactivate", "FlightEnd" },
+						},
+					},
 					RequestPayloadSchema = {
 						MaxKeys = 2,
 						Fields = {
@@ -666,6 +698,13 @@ local DevilFruits = {
 						FadeTime = 0.06,
 						StopFadeTime = 0.1,
 						Looped = false,
+					},
+					Audio = {
+						ActivateSoundId = "rbxassetid://137705393576299",
+						DeactivateSoundId = "rbxassetid://79888666558923",
+						LoopSoundId = "rbxassetid://80660065535430",
+						-- Seconds before the gameplay shield end to fire the deactivate cue.
+						DeactivateLeadTime = 0.25,
 					},
 				},
 			},

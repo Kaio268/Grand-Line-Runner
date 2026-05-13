@@ -1,10 +1,12 @@
 local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local SharedFolder = DevilFruits:WaitForChild("Shared")
 local AbilityTargeting = require(SharedFolder:WaitForChild("AbilityTargeting"))
@@ -37,6 +39,8 @@ local GOMU_LAUNCH_VFX_GROUND_CONFIRM_TIME = 0.08
 local GOMU_LAUNCH_VFX_CLEANUP_GRACE = 0.35
 local GOMU_LAUNCH_VFX_MAX_DURATION = 6
 local GOMU_LAUNCH_FX_PART_FALLBACK_SIZE = Vector3.new(5, 5, 5)
+local GOMU_LAUNCH_AUDIO_CLEANUP_FALLBACK_SECONDS = 5
+local GOMU_LAUNCH_AUDIO_DEDUPE_TTL = 8
 local GOMU_ARM_STRETCH_SIZE = Vector3.new(1, 27.066, 1)
 local GOMU_ARM_RESTORE_TIMEOUT = 0.85
 local MIN_DIRECTION_MAGNITUDE = 0.01
@@ -140,6 +144,183 @@ local function getLaunchVfxDuration(payload)
 		GOMU_LAUNCH_VFX_MIN_PAYLOAD_DURATION,
 		GOMU_LAUNCH_VFX_MAX_PAYLOAD_DURATION
 	)
+end
+
+local function normalizeRubberLaunchSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
+	end
+
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
+end
+
+local function getRubberLaunchAudioConfig()
+	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getRubberLaunchSoundId()
+	local audioConfig = getRubberLaunchAudioConfig()
+	if not audioConfig then
+		return nil
+	end
+
+	return normalizeRubberLaunchSoundId(audioConfig.LaunchSoundId)
+end
+
+local function getRubberLaunchAudioNumber(fieldName, fallback, minimum)
+	local audioConfig = getRubberLaunchAudioConfig()
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function getRubberLaunchSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return GOMU_LAUNCH_AUDIO_CLEANUP_FALLBACK_SECONDS
+end
+
+local function getRubberLaunchAudioDedupeKey(targetPlayer, payload)
+	if typeof(payload) == "table" and typeof(payload.Token) == "string" and payload.Token ~= "" then
+		return "token:" .. payload.Token
+	end
+
+	if targetPlayer and targetPlayer:IsA("Player") and typeof(payload) == "table" then
+		return string.format(
+			"payload:%d:%s:%s:%s",
+			targetPlayer.UserId,
+			tostring(payload.StartPosition),
+			tostring(payload.EndPosition),
+			tostring(payload.Duration)
+		)
+	end
+
+	return nil
+end
+
+local function markRubberLaunchAudioPlayed(self, targetPlayer, payload)
+	local dedupeKey = getRubberLaunchAudioDedupeKey(targetPlayer, payload)
+	if not dedupeKey then
+		return true
+	end
+
+	self.playedRubberLaunchAudioKeys = self.playedRubberLaunchAudioKeys or {}
+	if self.playedRubberLaunchAudioKeys[dedupeKey] then
+		return false
+	end
+
+	self.playedRubberLaunchAudioKeys[dedupeKey] = true
+	task.delay(GOMU_LAUNCH_AUDIO_DEDUPE_TTL, function()
+		if self.playedRubberLaunchAudioKeys then
+			self.playedRubberLaunchAudioKeys[dedupeKey] = nil
+		end
+	end)
+	return true
+end
+
+local function createRubberLaunchSound(targetPlayer)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundId = getRubberLaunchSoundId()
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "GomuRubberLaunchSound"
+	sound.SoundId = soundId
+	sound.Volume = getRubberLaunchAudioNumber("Volume", 1, 0)
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	return sound
+end
+
+local function playRubberLaunchSoundNow(targetPlayer)
+	local sound = createRubberLaunchSound(targetPlayer)
+	if not sound then
+		return false
+	end
+
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getRubberLaunchSoundCleanupDelay(sound))
+	return true
+end
+
+local function playRubberLaunchAudio(self, targetPlayer, payload)
+	if typeof(payload) ~= "table" or payload.Interrupted == true then
+		return false
+	end
+
+	local phase = payload.Phase
+	if typeof(phase) == "string" and phase ~= "" and not RUBBER_LAUNCH_ARM_START_PHASES[phase] then
+		return false
+	end
+
+	if (typeof(phase) ~= "string" or phase == "") and (tonumber(payload.Distance) or 0) <= 0 then
+		return false
+	end
+
+	if not getRubberLaunchSoundId() then
+		return false
+	end
+	if not markRubberLaunchAudioPlayed(self, targetPlayer, payload) then
+		return false
+	end
+
+	local launchSoundOffset = getRubberLaunchAudioNumber("LaunchSoundOffset", 0)
+	local delayTime = math.max(0, tonumber(launchSoundOffset) or 0)
+	if delayTime <= 0 then
+		return playRubberLaunchSoundNow(targetPlayer)
+	end
+
+	task.delay(delayTime, function()
+		playRubberLaunchSoundNow(targetPlayer)
+	end)
+	return true
 end
 
 local function isHumanoidAirborne(humanoid)
@@ -960,6 +1141,7 @@ function GomuClient.Create(config)
 	self.targetPlayer = nil
 	self.activeLaunchVfxByPlayer = {}
 	self.activeRubberLaunchArmStretchByPlayer = {}
+	self.playedRubberLaunchAudioKeys = {}
 	return self
 end
 
@@ -1023,11 +1205,13 @@ function GomuClient:HandleEffect(targetPlayer, abilityName, payload)
 		return false
 	end
 
+	local audioPlayed = playRubberLaunchAudio(self, targetPlayer, payload)
 	if handleRubberLaunchArmEffect(self, targetPlayer, payload) then
 		return true
 	end
 
-	return playRubberLaunchVfx(self, targetPlayer, payload)
+	local vfxPlayed = playRubberLaunchVfx(self, targetPlayer, payload)
+	return audioPlayed or vfxPlayed
 end
 
 function GomuClient:HandleStateEvent()

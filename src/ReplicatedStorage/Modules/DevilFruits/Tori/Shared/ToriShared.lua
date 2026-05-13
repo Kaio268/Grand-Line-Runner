@@ -13,6 +13,10 @@ ToriShared.Passives = {
 		RestoreHealthPercent = 1,
 		AnimationKey = "Tori.PhoenixRevive",
 		ReviveMarkerNames = { "Revive", "Rebirth", "PhoenixRevive", "Restore" },
+		Audio = {
+			ReviveSoundId = "rbxassetid://137266608991780",
+			ReviveSoundOffset = 0,
+		},
 		PendingUntilAttribute = "ToriPhoenixRebirthPendingUntil",
 		ImmuneUntilAttribute = "ToriPhoenixRebirthImmuneUntil",
 		TriggeredAtAttribute = "ToriPhoenixRebirthTriggeredAt",

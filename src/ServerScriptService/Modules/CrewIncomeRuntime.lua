@@ -230,12 +230,37 @@ local function logSavedShipSnapshot(player, context)
 	)
 end
 
+local CREW_PICKUP_DEBUG = true
+
 local function standDebug(message, ...)
 	if STAND_DEBUG ~= true then
 		return
 	end
 
 	warn(string.format("[GLR StandDebug] " .. tostring(message), ...))
+end
+
+local function crewPickupDebug(message, ...)
+	if CREW_PICKUP_DEBUG ~= true then
+		return
+	end
+
+	local prefix = "[CrewPickupDebug] "
+	if select("#", ...) == 0 then
+		warn(prefix .. tostring(message))
+		return
+	end
+
+	local ok, formatted = pcall(string.format, prefix .. tostring(message), ...)
+	warn(ok and formatted or (prefix .. tostring(message)))
+end
+
+local function formatCrewPickupDebugFields(fields)
+	local parts = {}
+	for _, field in ipairs(fields or {}) do
+		parts[#parts + 1] = tostring(field[1]) .. "=" .. tostring(field[2])
+	end
+	return table.concat(parts, " ")
 end
 
 local function getCrewStorage()
@@ -653,6 +678,34 @@ local function clearPlacedStandIncome(player, standName)
 		refreshCollectedIncomeShadow(player)
 	end
 	syncShipSlotAssignment(player, standName, nil)
+end
+
+local function getPickupStandSnapshot(player, standName)
+	local standData, standMeta = CrewStandIncomeAuthority.GetStandData(player, standName)
+	local canonicalRow = if typeof(standMeta) == "table" then standMeta.CanonicalRow else nil
+	local brainrotName = tostring(standData and standData.BrainrotName or "")
+	local brainrotInstanceId = tostring(standData and standData.BrainrotInstanceId or "")
+	local crewMemberInstanceId = tostring((canonicalRow and canonicalRow.CrewMemberInstanceId) or brainrotInstanceId)
+	local legacyStorageName = tostring((canonicalRow and canonicalRow.LegacyStorageName) or brainrotName)
+	local incomeToCollect = tonumber(standData and standData.IncomeToCollect) or 0
+	local exists = typeof(standMeta) == "table" and standMeta.MissingCanonical ~= true
+
+	return {
+		Exists = exists,
+		BrainrotName = brainrotName,
+		BrainrotInstanceId = brainrotInstanceId,
+		CrewMemberInstanceId = crewMemberInstanceId,
+		LegacyStorageName = legacyStorageName,
+		IncomeToCollect = incomeToCollect,
+		HasAssignment = brainrotName ~= "" or brainrotInstanceId ~= "" or crewMemberInstanceId ~= "" or legacyStorageName ~= "",
+	}
+end
+
+local function getPickupDebugField(debugInfo, key, fallback)
+	if typeof(debugInfo) == "table" and debugInfo[key] ~= nil then
+		return debugInfo[key]
+	end
+	return fallback
 end
 
 local function dmEnsureStandFolder(player, standName)
@@ -2242,9 +2295,50 @@ local function bindStandPrompt(player, plot, standModel)
 					return
 				end
 
-				local releasedInstanceId, releasedInstance = CrewInstanceService.ReleaseStandInstance(plr, standName)
+				local pickupBefore = getPickupStandSnapshot(plr, standName)
+				local releasedInstanceId, releasedInstance, releaseReason, releaseDebug = CrewInstanceService.ReleaseStandInstance(plr, standName)
+				local pickupAfter = getPickupStandSnapshot(plr, standName)
+				crewPickupDebug(formatCrewPickupDebugFields({
+					{ "event", "prompt_release_result" },
+					{ "player", plr.Name },
+					{ "userId", plr.UserId },
+					{ "stand", standName },
+					{ "success", releasedInstance ~= nil },
+					{ "reason", releaseReason or "none" },
+					{ "releasedInstanceId", tostring(releasedInstanceId or "") },
+					{ "releasedStorage", releasedInstance and tostring(releasedInstance.StorageName or "") or "" },
+					{ "beforeAssignedName", pickupBefore.BrainrotName },
+					{ "beforeBrainrotInstanceId", pickupBefore.BrainrotInstanceId },
+					{ "beforeCrewMemberInstanceId", pickupBefore.CrewMemberInstanceId },
+					{ "beforeLegacyStorageName", pickupBefore.LegacyStorageName },
+					{ "beforeIncome", pickupBefore.IncomeToCollect },
+					{ "afterStandDataExists", pickupAfter.Exists },
+					{ "afterHasAssignment", pickupAfter.HasAssignment },
+					{ "afterAssignedName", pickupAfter.BrainrotName },
+					{ "afterBrainrotInstanceId", pickupAfter.BrainrotInstanceId },
+					{ "afterCrewMemberInstanceId", pickupAfter.CrewMemberInstanceId },
+					{ "afterLegacyStorageName", pickupAfter.LegacyStorageName },
+					{ "afterIncome", pickupAfter.IncomeToCollect },
+					{ "quickOccupied", getPickupDebugField(releaseDebug, "QuickSlotOccupied", "") },
+					{ "quickUnlocked", getPickupDebugField(releaseDebug, "QuickSlotUnlocked", "") },
+					{ "quickMax", getPickupDebugField(releaseDebug, "QuickSlotMax", "") },
+					{ "instanceExists", getPickupDebugField(releaseDebug, "InstanceExistsInCrewInventory", "") },
+					{ "playerOwnsInstance", getPickupDebugField(releaseDebug, "PlayerOwnsInstance", "") },
+					{ "placedTrackingRefs", getPickupDebugField(releaseDebug, "AssignedStandRefs", "") },
+					{ "inventorySaveOk", getPickupDebugField(releaseDebug, "InventorySaveOk", "") },
+					{ "inventorySaveReason", getPickupDebugField(releaseDebug, "InventorySaveReason", "") },
+					{ "standClearOk", getPickupDebugField(releaseDebug, "StandClearOk", "") },
+					{ "standClearReason", getPickupDebugField(releaseDebug, "StandClearReason", "") },
+					{ "inventoryRollbackOk", getPickupDebugField(releaseDebug, "InventoryRollbackOk", "") },
+					{ "inventoryRollbackReason", getPickupDebugField(releaseDebug, "InventoryRollbackReason", "") },
+				}))
 				if not releasedInstance then
-					standDebug("pickup from stand blocked player=%s stand=%s reason=no_instance_available", plr.Name, standName)
+					standDebug(
+						"pickup from stand blocked player=%s stand=%s reason=%s",
+						plr.Name,
+						standName,
+						tostring(releaseReason or "no_instance_available")
+					)
 					return
 				end
 				local storageName = releasedInstance and releasedInstance.StorageName or current

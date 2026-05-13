@@ -22,6 +22,31 @@ local INVENTORY_AUTHORITY_SNAPSHOT_VERSION = 1
 -- Function names still carry legacy terms for callers, but normal gameplay now
 -- reads and writes CrewMemberInventory. Legacy inventory roots are repair mirrors.
 
+local CREW_PICKUP_DEBUG = true
+
+local function crewPickupDebug(message, ...)
+	if CREW_PICKUP_DEBUG ~= true then
+		return
+	end
+
+	local prefix = "[CrewPickupDebug] "
+	if select("#", ...) == 0 then
+		warn(prefix .. tostring(message))
+		return
+	end
+
+	local ok, formatted = pcall(string.format, prefix .. tostring(message), ...)
+	warn(ok and formatted or (prefix .. tostring(message)))
+end
+
+local function formatCrewPickupDebugFields(fields)
+	local parts = {}
+	for _, field in ipairs(fields or {}) do
+		parts[#parts + 1] = tostring(field[1]) .. "=" .. tostring(field[2])
+	end
+	return table.concat(parts, " ")
+end
+
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
 		parent[key] = {}
@@ -821,8 +846,8 @@ local function clearShipSlotAssignment(player, standName)
 end
 
 local function getStandData(player, standName)
-	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
-	return standData
+	local standData, standMeta = CrewStandIncomeAuthority.GetStandData(player, standName)
+	return standData, standMeta
 end
 
 local function setStandData(player, standName, standData, sourcePath)
@@ -831,6 +856,10 @@ end
 
 local function updateStandData(player, standName, updates, sourcePath)
 	return CrewStandIncomeAuthority.UpdateStandData(player, standName, updates, sourcePath)
+end
+
+local function clearStandData(player, standName, sourcePath)
+	return CrewStandIncomeAuthority.ClearStandData(player, standName, sourcePath)
 end
 
 local function ensureInventoryMetadata(player, storageName, metadata)
@@ -1579,18 +1608,72 @@ end
 
 function Module.ReleaseStandInstance(player, standName, options)
 	options = if typeof(options) == "table" then options else {}
+	standName = tostring(standName or "")
+
+	local standDataBefore, standMetaBefore = getStandData(player, standName)
+	local canonicalBefore = if typeof(standMetaBefore) == "table" then standMetaBefore.CanonicalRow else nil
+	local debugInfo = {
+		PlayerName = player and player.Name or "unknown",
+		UserId = player and player.UserId or 0,
+		StandName = standName,
+		AssignedBrainrotName = tostring(standDataBefore and standDataBefore.BrainrotName or ""),
+		BrainrotInstanceId = tostring(standDataBefore and standDataBefore.BrainrotInstanceId or ""),
+		CrewMemberInstanceId = tostring((canonicalBefore and canonicalBefore.CrewMemberInstanceId) or (standDataBefore and standDataBefore.BrainrotInstanceId) or ""),
+		LegacyStorageName = tostring((canonicalBefore and canonicalBefore.LegacyStorageName) or (standDataBefore and standDataBefore.BrainrotName) or ""),
+		IncomeBefore = tonumber(standDataBefore and standDataBefore.IncomeToCollect) or 0,
+	}
+
 	local instanceId, instanceData = Module.EnsureStandInstance(player, standName)
+	debugInfo.EnsureInstanceId = tostring(instanceId or "")
+	debugInfo.InstanceExistsInCrewInventory = instanceData ~= nil
+	debugInfo.PlayerOwnsInstance = instanceData ~= nil
+	debugInfo.InstanceStorageName = instanceData and tostring(instanceData.StorageName or "") or ""
+	debugInfo.InstanceAssignedStand = instanceData and tostring(instanceData.AssignedStand or "") or ""
+
+	local brainrotInventory = getBrainrotInventory(player)
+	local assignedStandRefs = {}
+	if typeof(brainrotInventory) == "table" and typeof(brainrotInventory.ById) == "table" then
+		for ownedInstanceId, ownedInstanceData in pairs(brainrotInventory.ById) do
+			if typeof(ownedInstanceData) == "table" and tostring(ownedInstanceData.AssignedStand or "") == standName then
+				assignedStandRefs[#assignedStandRefs + 1] = string.format(
+					"%s:%s",
+					tostring(ownedInstanceId),
+					tostring(ownedInstanceData.StorageName or "")
+				)
+			end
+		end
+	end
+	table.sort(assignedStandRefs)
+	debugInfo.AssignedStandRefs = table.concat(assignedStandRefs, ",")
+	debugInfo.InstanceExistsInPlacedTracking = #assignedStandRefs > 0
+
 	if not instanceData then
-		updateStandData(player, standName, {
-			BrainrotName = "",
-			BrainrotInstanceId = "",
-			IncomeToCollect = 0,
-		}, "stand_release")
-		refreshCrewMemberShadow(player, "stand_release")
-		return nil, nil
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", "no_instance_available" },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedBrainrotName },
+			{ "brainrotInstanceId", debugInfo.BrainrotInstanceId },
+			{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+			{ "legacyStorageName", debugInfo.LegacyStorageName },
+			{ "incomeBefore", debugInfo.IncomeBefore },
+			{ "instanceExists", debugInfo.InstanceExistsInCrewInventory },
+			{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+		}))
+		return nil, nil, "no_instance_available", debugInfo
 	end
 
-	local canGain = CrewQuickSlotService.CanGainOrNotify(player, 1, "ReleaseStandInstance:" .. tostring(standName))
+	local canGain, occupiedSlots, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainOrNotify(
+		player,
+		1,
+		"ReleaseStandInstance:" .. standName
+	)
+	debugInfo.QuickSlotCanGain = canGain == true
+	debugInfo.QuickSlotOccupied = tonumber(occupiedSlots) or 0
+	debugInfo.QuickSlotUnlocked = tonumber(unlockedSlots) or 0
+	debugInfo.QuickSlotMax = tonumber(maxSlots) or 0
 	if not canGain then
 		local source = tostring(options.Source or "")
 		local expectedInstanceId = tostring(options.ExpectedInstanceId or "")
@@ -1598,28 +1681,128 @@ function Module.ReleaseStandInstance(player, standName, options)
 			and source ~= ""
 			and expectedInstanceId ~= ""
 			and expectedInstanceId == tostring(instanceId)
+		debugInfo.AllowCapacityBypass = allowCapacityBypass == true
+		debugInfo.ExpectedInstanceId = expectedInstanceId
+		debugInfo.Source = source
 		if not allowCapacityBypass then
-			return nil, nil, "quick_slot_capacity"
+			crewPickupDebug(formatCrewPickupDebugFields({
+				{ "event", "release_failed" },
+				{ "reason", "quick_slot_capacity" },
+				{ "player", debugInfo.PlayerName },
+				{ "userId", debugInfo.UserId },
+				{ "stand", standName },
+				{ "assignedName", debugInfo.AssignedBrainrotName },
+				{ "instanceId", tostring(instanceId) },
+				{ "brainrotInstanceId", debugInfo.BrainrotInstanceId },
+				{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+				{ "legacyStorageName", debugInfo.LegacyStorageName },
+				{ "incomeBefore", debugInfo.IncomeBefore },
+				{ "quickOccupied", debugInfo.QuickSlotOccupied },
+				{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+				{ "quickMax", debugInfo.QuickSlotMax },
+				{ "instanceExists", debugInfo.InstanceExistsInCrewInventory },
+				{ "playerOwnsInstance", debugInfo.PlayerOwnsInstance },
+				{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+			}))
+			return nil, nil, "quick_slot_capacity", debugInfo
 		end
 	end
 
-	local _, _, brainrotInventory = Module.GetInstance(player, instanceId)
+	local _, _, releaseInventory = Module.GetInstance(player, instanceId)
+	if releaseInventory ~= nil then
+		brainrotInventory = releaseInventory
+	end
 
 	instanceData.AssignedStand = ""
 	instanceData.LastReleasedAt = os.time()
 	brainrotInventory.ById[tostring(instanceId)] = instanceData
 	moveInstanceToFront(brainrotInventory, instanceId)
-	saveBrainrotInventory(player, brainrotInventory)
+	local saveOk, saveReason = saveBrainrotInventory(player, brainrotInventory)
+	debugInfo.InventorySaveOk = saveOk == true
+	debugInfo.InventorySaveReason = tostring(saveReason or "")
+	if saveOk ~= true then
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", "inventory_write_failed" },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedBrainrotName },
+			{ "releasedInstanceId", tostring(instanceId) },
+			{ "releasedStorage", tostring(instanceData.StorageName or "") },
+			{ "inventorySaveOk", debugInfo.InventorySaveOk },
+			{ "inventorySaveReason", debugInfo.InventorySaveReason },
+			{ "standClearOk", "" },
+			{ "standClearReason", "" },
+		}))
+		return nil, nil, "inventory_write_failed", debugInfo
+	end
 
-	updateStandData(player, standName, {
-		BrainrotName = "",
-		BrainrotInstanceId = "",
-		IncomeToCollect = 0,
-	}, "stand_release")
+	local clearOk, clearReason = clearStandData(player, standName, "stand_release")
+	debugInfo.StandClearOk = clearOk == true
+	debugInfo.StandClearReason = tostring(clearReason or "")
+	if clearOk ~= true then
+		instanceData.AssignedStand = standName
+		brainrotInventory.ById[tostring(instanceId)] = instanceData
+		local rollbackOk, rollbackReason = saveBrainrotInventory(player, brainrotInventory)
+		debugInfo.InventoryRollbackOk = rollbackOk == true
+		debugInfo.InventoryRollbackReason = tostring(rollbackReason or "")
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", "stand_clear_failed" },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedBrainrotName },
+			{ "releasedInstanceId", tostring(instanceId) },
+			{ "releasedStorage", tostring(instanceData.StorageName or "") },
+			{ "brainrotInstanceId", debugInfo.BrainrotInstanceId },
+			{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+			{ "legacyStorageName", debugInfo.LegacyStorageName },
+			{ "incomeBefore", debugInfo.IncomeBefore },
+			{ "quickOccupied", debugInfo.QuickSlotOccupied },
+			{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+			{ "quickMax", debugInfo.QuickSlotMax },
+			{ "inventorySaveOk", debugInfo.InventorySaveOk },
+			{ "inventorySaveReason", debugInfo.InventorySaveReason },
+			{ "standClearOk", debugInfo.StandClearOk },
+			{ "standClearReason", debugInfo.StandClearReason },
+			{ "inventoryRollbackOk", debugInfo.InventoryRollbackOk },
+			{ "inventoryRollbackReason", debugInfo.InventoryRollbackReason },
+			{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+		}))
+		syncAvailableCounts(player, brainrotInventory)
+		refreshCrewMemberShadow(player, "stand_release_failed")
+		return nil, nil, "stand_clear_failed", debugInfo
+	end
+
 	syncAvailableCounts(player, brainrotInventory)
 	refreshCrewMemberShadow(player, "stand_release")
 
-	return tostring(instanceId), brainrotInventory.ById[tostring(instanceId)]
+	crewPickupDebug(formatCrewPickupDebugFields({
+		{ "event", "release_success" },
+		{ "reason", "none" },
+		{ "player", debugInfo.PlayerName },
+		{ "userId", debugInfo.UserId },
+		{ "stand", standName },
+		{ "assignedName", debugInfo.AssignedBrainrotName },
+		{ "releasedInstanceId", tostring(instanceId) },
+		{ "releasedStorage", tostring(instanceData.StorageName or "") },
+		{ "brainrotInstanceId", debugInfo.BrainrotInstanceId },
+		{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+		{ "legacyStorageName", debugInfo.LegacyStorageName },
+		{ "incomeBefore", debugInfo.IncomeBefore },
+		{ "quickOccupied", debugInfo.QuickSlotOccupied },
+		{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+		{ "quickMax", debugInfo.QuickSlotMax },
+		{ "inventorySaveOk", debugInfo.InventorySaveOk },
+		{ "inventorySaveReason", debugInfo.InventorySaveReason },
+		{ "standClearOk", debugInfo.StandClearOk },
+		{ "standClearReason", debugInfo.StandClearReason },
+		{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+	}))
+
+	return tostring(instanceId), brainrotInventory.ById[tostring(instanceId)], nil, debugInfo
 end
 
 function Module.RemoveAvailableInstance(player, storageName)

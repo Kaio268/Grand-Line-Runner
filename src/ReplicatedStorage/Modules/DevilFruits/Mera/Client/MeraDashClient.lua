@@ -143,6 +143,9 @@ function MeraDashClient.new(config)
 	self.CreateEffectVisual = type(config.CreateEffectVisual) == "function" and config.CreateEffectVisual or function() end
 	self.PlayFlameDashStartup = type(config.PlayFlameDashStartup) == "function" and config.PlayFlameDashStartup or function() end
 	self.PlayFlameDashComplete = type(config.PlayFlameDashComplete) == "function" and config.PlayFlameDashComplete or function() end
+	self.PlayFlameDashAudioStart = type(config.PlayFlameDashAudioStart) == "function"
+		and config.PlayFlameDashAudioStart
+		or function() end
 	self.MarkFlameDashTrailPredictedComplete = type(config.MarkFlameDashTrailPredictedComplete) == "function"
 		and config.MarkFlameDashTrailPredictedComplete
 		or function() end
@@ -531,6 +534,17 @@ function MeraDashClient:BeginPredictedRequest()
 		)
 		self:FinishLocalDash(state, "blocked_at_start", true)
 	else
+		safeCallNonCriticalCallback("PlayFlameDashAudioStart", self.PlayFlameDashAudioStart, self.player, {
+			Phase = "PredictedStart",
+			LocalAudioToken = string.format("%d:%.6f", state.Sequence, state.LocalStartAt),
+			StartedAt = state.LocalStartAt,
+			StartPosition = state.StartPosition,
+			EndPosition = state.StartPosition + (localPlan.Direction * localPlan.Distance),
+			Direction = localPlan.Direction,
+			Distance = localPlan.Distance,
+			Duration = localPlan.Duration,
+		})
+
 		task.defer(function()
 			safeCallNonCriticalCallback("KickCamera", function()
 				self:KickCamera()
