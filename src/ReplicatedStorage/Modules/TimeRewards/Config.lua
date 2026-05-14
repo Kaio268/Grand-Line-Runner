@@ -47,17 +47,18 @@ local Rewards = {
 	},
 	
 	[6] = {
-		RewName = "Ghost Samurai",
+		RewName = "Random Rare Crewmate",
 		Icon = "rbxassetid://108324428541699",
 
 		Time               = 2100,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards            = {
-			["Ghost Samurai"] = {
+			["Random Rare Crewmate"] = {
 				Chance = 100,
 				Amount = 1,
 				CrewMember = true,
-				LegacyBrainrotName = "Bombardiro Crocodilo",
+				RandomCrewMember = true,
+				RandomCrewRarity = "Rare",
 			},
 		},
 	},

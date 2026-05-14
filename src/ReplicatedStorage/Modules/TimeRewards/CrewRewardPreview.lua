@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CrewRewardResolver = require(
 	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewRewardResolver")
 )
+local RandomCrewReward = require(script.Parent:WaitForChild("RandomCrewReward"))
 
 local CrewRewardPreview = {}
 
@@ -18,6 +19,10 @@ end
 local function isCrewRewardData(rewardData): boolean
 	if typeof(rewardData) ~= "table" then
 		return false
+	end
+
+	if RandomCrewReward.IsRandomCrewRewardData(rewardData) then
+		return true
 	end
 
 	if rewardData.CrewMember == true or rewardData.Crew == true then
@@ -140,13 +145,29 @@ local function showCrewRewardFallback(iconObj: Instance, displayName)
 	label.Parent = iconObj
 end
 
-function CrewRewardPreview.Resolve(cfg)
+local function getPreviewContextValue(context, key)
+	if typeof(context) ~= "table" then
+		return nil
+	end
+	return context[key]
+end
+
+function CrewRewardPreview.Resolve(cfg, context)
 	if typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
 		return nil
 	end
 
 	for rewardName, rewardData in pairs(cfg.Rewards) do
 		if isCrewRewardData(rewardData) then
+			if RandomCrewReward.IsRandomCrewRewardData(rewardData) then
+				return RandomCrewReward.BuildPreviewInfo(
+					getPreviewContextValue(context, "Player") or getPreviewContextValue(context, "UserId"),
+					getPreviewContextValue(context, "RewardId"),
+					getPreviewContextValue(context, "CycleStartPlayTime"),
+					rewardData
+				)
+			end
+
 			return CrewRewardResolver.Resolve(rewardName, rewardData)
 		end
 	end
@@ -154,9 +175,19 @@ function CrewRewardPreview.Resolve(cfg)
 	return nil
 end
 
-function CrewRewardPreview.ResolveDisplayName(rewardName, rewardData): string
+function CrewRewardPreview.ResolveDisplayName(rewardName, rewardData, context): string
 	if not isCrewRewardData(rewardData) then
 		return tostring(rewardName)
+	end
+
+	if RandomCrewReward.IsRandomCrewRewardData(rewardData) then
+		local previewInfo = RandomCrewReward.BuildPreviewInfo(
+			getPreviewContextValue(context, "Player") or getPreviewContextValue(context, "UserId"),
+			getPreviewContextValue(context, "RewardId"),
+			getPreviewContextValue(context, "CycleStartPlayTime"),
+			rewardData
+		)
+		return tostring(previewInfo.DisplayName or rewardName)
 	end
 
 	local resolved = CrewRewardResolver.Resolve(rewardName, rewardData)

@@ -141,6 +141,7 @@ local RewardsConfig = require(TimeRewardsFolder:WaitForChild("Config"))
 local DataManager = require(script.Parent.Parent.Data.DataManager)
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local RandomCrewReward = require(TimeRewardsFolder:WaitForChild("RandomCrewReward"))
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
 local CYCLE_START_PATH = TIME_REWARDS_ROOT_PATH .. ".CycleStartPlayTime"
@@ -484,6 +485,10 @@ local function isCrewMemberReward(rewardData): boolean
 		return false
 	end
 
+	if RandomCrewReward.IsRandomCrewRewardData(rewardData) then
+		return true
+	end
+
 	if rewardData.CrewMember == true or rewardData.Brainrot == true then
 		return true
 	end
@@ -492,7 +497,23 @@ local function isCrewMemberReward(rewardData): boolean
 	return CREW_REWARD_KIND[kind] == true
 end
 
-local function resolveCrewMemberReward(rewardName: string, rewardData)
+local function resolveCrewMemberReward(player: Player, rewardId: number, state, rewardName: string, rewardData)
+	if RandomCrewReward.IsRandomCrewRewardData(rewardData) then
+		local entry = RandomCrewReward.ChooseForPlayer(
+			player,
+			rewardId,
+			state and state.CycleStartPlayTime,
+			rewardData
+		)
+		if not entry then
+			return nil, nil, "random_crew_pool_empty"
+		end
+
+		return tostring(entry.LegacyId or entry.CrewMemberId or rewardName),
+			tostring(entry.DisplayName or entry.CrewMemberId or rewardName),
+			nil
+	end
+
 	local candidates = {}
 	local function pushCandidate(value)
 		if typeof(value) == "string" and value ~= "" then
@@ -555,7 +576,7 @@ local function addReward(player: Player, rewardName: string, amount: number)
 	return DataManager:TryAddValue(player, normalizedRewardName, amount)
 end
 
-local function grantReward(player: Player, rewardId: number)
+local function grantReward(player: Player, rewardId: number, state)
 	local config = RewardsConfig[rewardId]
 	if not config then
 		return false, nil, nil, "invalid_reward"
@@ -568,7 +589,11 @@ local function grantReward(player: Player, rewardId: number)
 
 	local ok, reason
 	if isCrewMemberReward(rewardData) then
-		local grantName, displayName = resolveCrewMemberReward(rewardName, rewardData)
+		local grantName, displayName, resolveReason = resolveCrewMemberReward(player, rewardId, state, rewardName, rewardData)
+		if not grantName then
+			return false, nil, nil, resolveReason or "crew_member_resolve_failed"
+		end
+
 		CrewRewardModule = CrewRewardModule or require(script.Parent.AddCrewMember)
 		ok = CrewRewardModule:AddCrewMember(player, grantName, amount, {
 			Source = "TimeReward",
@@ -586,8 +611,8 @@ local function grantReward(player: Player, rewardId: number)
 	return true, rewardName, amount, nil
 end
 
-local function safeGrantReward(player: Player, rewardId: number)
-	local ok, rewardGranted, rewardName, amount, reason = pcall(grantReward, player, rewardId)
+local function safeGrantReward(player: Player, rewardId: number, state)
+	local ok, rewardGranted, rewardName, amount, reason = pcall(grantReward, player, rewardId, state)
 	if not ok then
 		giftError("Unhandled time reward grant error", player.Name, rewardId, rewardGranted)
 		return false, nil, nil, "grant_exception"
@@ -791,7 +816,7 @@ local function claimReward(player: Player, rewardId: number)
 		return
 	end
 
-	local rewardGranted, rewardName, amount, grantReason = safeGrantReward(player, rewardId)
+	local rewardGranted, rewardName, amount, grantReason = safeGrantReward(player, rewardId, state)
 	if not rewardGranted then
 		state.ClaimedRewards = previousClaimedRewards
 		state.LastClaimPlayTime = previousLastClaimPlayTime
@@ -868,7 +893,7 @@ local function instantClaimAll(player: Player)
 
 	for _, rewardId in ipairs(rewardIds) do
 		if not isRewardClaimed(state, rewardId) then
-			local rewardGranted, rewardName, amount = safeGrantReward(player, rewardId)
+			local rewardGranted, rewardName, amount = safeGrantReward(player, rewardId, state)
 			if rewardGranted then
 				markRewardClaimed(state, rewardId)
 				state.LastClaimPlayTime = currentPlayTime
