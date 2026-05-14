@@ -328,7 +328,8 @@ local function buildStartPayload(
 	startPosition,
 	requestedDirection,
 	visualDirection,
-	rawRequestedDistance
+	rawRequestedDistance,
+	clientCastId
 )
 	local directionDeltaDegrees = requestedDirection and MeraDashShared.GetDirectionDeltaDegrees(requestedDirection, plan.Direction) or 0
 	local validationAdjusted = rawRequestedDistance > (plan.RequestedDistance + REQUEST_VALIDATION_DISTANCE_EPSILON)
@@ -356,6 +357,7 @@ local function buildStartPayload(
 		DirectionDeltaDegrees = directionDeltaDegrees,
 		RequestReceivedAt = requestReceivedAt,
 		StartedAt = dashStartAt,
+		ClientCastId = clientCastId,
 		ServerProcessingTimeMs = math.max(0, (dashStartAt - requestReceivedAt) * 1000),
 		StartPosition = startPosition,
 		EndPosition = startPosition + (plan.Direction * plan.Distance),
@@ -372,6 +374,7 @@ local function emitResolvePayload(context, plan, resolveState, completionToleran
 		DistanceShortfall = math.max(0, plan.Distance - resolveState.TraveledDistance),
 		StartedAt = resolveState.StartedAt,
 		EndedAt = resolveState.EndedAt,
+		ClientCastId = resolveState.ClientCastId,
 		ActualDuration = math.max(0, resolveState.EndedAt - resolveState.StartedAt),
 		ResolveReason = resolveState.ResolveReason,
 		Interrupted = resolveState.Interrupted,
@@ -396,6 +399,10 @@ function MeraMeraNoMi.FlameDash(context)
 	local dashTargetPosition = getDashTargetPosition(context)
 	local requestedDirection = getRequestedDirection(rootPart, dashTargetPosition)
 	local requestedVisualDirection = getRequestedVisualDirection(rootPart, context.RequestPayload)
+	local clientCastId = type(context.RequestPayload) == "table" and context.RequestPayload.ClientCastId or nil
+	if typeof(clientCastId) ~= "string" or clientCastId == "" then
+		clientCastId = nil
+	end
 	local rawRequestedDistance = typeof(dashTargetPosition) == "Vector3"
 			and MeraDashShared.GetPlanarMagnitude(dashTargetPosition - rootPart.Position)
 		or MeraDashShared.GetMaxDashDistance(humanoid, rootPart, context.AbilityConfig)
@@ -409,7 +416,8 @@ function MeraMeraNoMi.FlameDash(context)
 		startPosition,
 		requestedDirection,
 		requestedVisualDirection,
-		rawRequestedDistance
+		rawRequestedDistance,
+		clientCastId
 	)
 	DevilFruitLogger.Info(
 		"MOVE",
@@ -584,6 +592,7 @@ function MeraMeraNoMi.FlameDash(context)
 			TraveledDistance = traveledDistance,
 			ResolveReason = resolveReason,
 			Interrupted = interrupted,
+			ClientCastId = clientCastId,
 		}, completionTolerance)
 
 		logDash(

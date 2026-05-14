@@ -127,11 +127,12 @@ local DevilFruits = {
 						Volume = 1,
 					},
 					RequestPayloadSchema = {
-						MaxKeys = 2,
+						MaxKeys = 3,
 						MaxHintDistance = 440,
 						Fields = {
 							DashTargetPosition = "Vector3",
 							VisualDirection = "DirectionVector3",
+							ClientCastId = "String",
 						},
 					},
 					Animation = {
