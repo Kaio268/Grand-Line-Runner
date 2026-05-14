@@ -241,6 +241,10 @@ local DevilFruits = {
 					MaxInheritedSpeed = 140,
 					SpawnLeadTime = 0.08,
 					MaxSpawnLead = 8,
+					Audio = {
+						FireSoundId = "rbxassetid://95183110062426",
+						ImpactSoundId = "rbxassetid://85701354119300",
+					},
 					Animation = {
 						AnimationKey = "Hie.IceBlast",
 						ReleaseMarker = "IceBlast",
@@ -261,6 +265,9 @@ local DevilFruits = {
 					Cooldown = 18,
 					Duration = 4,
 					SpeedMultiplier = 2,
+					Audio = {
+						LoopSoundId = "rbxassetid://95916960988717",
+					},
 					Animation = {
 						AnimationKey = "Hie.IceBoost",
 						FadeTime = 0.08,
