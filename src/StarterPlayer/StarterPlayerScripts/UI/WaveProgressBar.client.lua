@@ -28,6 +28,7 @@ local DEFAULT_SECTIONS = {
 
 local PLAYER_MARKER_PADDING = 0
 local WAVE_MARKER_PADDING = 0
+local RENDER_INTERVAL = 1 / 12
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactWaveProgressRoot"
@@ -44,6 +45,8 @@ local pathAxis = Vector3.zAxis
 local pathLength = 1
 local renderQueued = false
 local destroyed = false
+local legacyProgressBarHidden = false
+local renderAccumulator = 0
 
 local function disconnectAll()
 	for _, connection in ipairs(cleanupConnections) do
@@ -150,6 +153,10 @@ local function getHazardImage(hazard)
 end
 
 local function hideLegacyProgressBar()
+	if legacyProgressBarHidden then
+		return
+	end
+
 	local hud = playerGui:FindFirstChild("HUD")
 	if not hud then
 		return
@@ -174,6 +181,9 @@ local function hideLegacyProgressBar()
 			descendant.Enabled = false
 		end
 	end
+
+	progressBar:SetAttribute("ReactWaveProgressHidden", true)
+	legacyProgressBarHidden = true
 end
 
 local function render()
@@ -273,6 +283,7 @@ track(Players.PlayerAdded, scheduleRender)
 track(Players.PlayerRemoving, scheduleRender)
 track(playerGui.DescendantAdded, function(descendant)
 	if descendant.Name == "HUD" or descendant.Name == "ProgressBar" then
+		legacyProgressBarHidden = false
 		task.defer(scheduleRender)
 	end
 end)
@@ -294,8 +305,12 @@ if waveEnd then
 	end)
 end
 
-track(RunService.RenderStepped, function()
-	scheduleRender()
+track(RunService.RenderStepped, function(deltaTime)
+	renderAccumulator += deltaTime
+	if renderAccumulator >= RENDER_INTERVAL then
+		renderAccumulator = 0
+		scheduleRender()
+	end
 end)
 
 progressBarSync:FireServer("Request")

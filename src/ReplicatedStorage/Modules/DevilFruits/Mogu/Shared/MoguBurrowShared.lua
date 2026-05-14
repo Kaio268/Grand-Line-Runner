@@ -29,6 +29,7 @@ local MIN_PROBE_HEIGHT = 1
 local MIN_PROBE_DEPTH = 4
 local MIN_ROOT_GROUND_CLEARANCE = 1.5
 local HAZARD_RAYCAST_IGNORE_CACHE_SECONDS = 0.25
+local FAST_SAMPLE_MAX_HEIGHT_DELTA = 0.45
 
 local SURFACE_SAMPLE_DIRECTIONS = {
 	Vector3.new(0, 0, 0),
@@ -56,6 +57,14 @@ end
 
 local cachedHazardRaycastIgnores = nil
 local cachedHazardRaycastIgnoresAt = 0
+local cachedHazardRaycastIgnoresVersion = 0
+local surfaceRaycastParamsByCharacter = setmetatable({}, { __mode = "k" })
+local nilCharacterSurfaceRaycastParams = nil
+local diagnostics = {
+	RaycastCount = 0,
+	SurfaceProbeCount = 0,
+	SurfaceProbeTimeMs = 0,
+}
 
 local function getHazardRaycastIgnores()
 	local now = os.clock()
@@ -72,6 +81,7 @@ local function getHazardRaycastIgnores()
 	appendRaycastIgnore(ignoreList, refs and refs.ClientWaves)
 	cachedHazardRaycastIgnores = ignoreList
 	cachedHazardRaycastIgnoresAt = now
+	cachedHazardRaycastIgnoresVersion += 1
 
 	return ignoreList
 end
@@ -82,17 +92,60 @@ local function appendHazardRaycastIgnores(ignoreList)
 	end
 end
 
-local function createSurfaceRaycastParams(character, abilityConfig)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	local ignoreList = {}
-	appendRaycastIgnore(ignoreList, character)
-	if not (abilityConfig and abilityConfig.IgnoreHazardsInSurfaceRaycasts == false) then
-		appendHazardRaycastIgnores(ignoreList)
+local function getSurfaceRaycastParamsCache(character)
+	if typeof(character) == "Instance" then
+		local cache = surfaceRaycastParamsByCharacter[character]
+		if not cache then
+			cache = {
+				Params = RaycastParams.new(),
+			}
+			surfaceRaycastParamsByCharacter[character] = cache
+		end
+		return cache
 	end
-	params.FilterDescendantsInstances = ignoreList
+
+	if not nilCharacterSurfaceRaycastParams then
+		nilCharacterSurfaceRaycastParams = {
+			Params = RaycastParams.new(),
+		}
+	end
+
+	return nilCharacterSurfaceRaycastParams
+end
+
+local function createSurfaceRaycastParams(character, abilityConfig)
+	local shouldIgnoreHazards = not (abilityConfig and abilityConfig.IgnoreHazardsInSurfaceRaycasts == false)
+	local hazardVersion = cachedHazardRaycastIgnoresVersion
+	if shouldIgnoreHazards then
+		getHazardRaycastIgnores()
+		hazardVersion = cachedHazardRaycastIgnoresVersion
+	end
+	local cache = getSurfaceRaycastParamsCache(character)
+	local params = cache.Params
+	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.IgnoreWater = false
+
+	if cache.Character ~= character
+		or cache.ShouldIgnoreHazards ~= shouldIgnoreHazards
+		or cache.HazardVersion ~= hazardVersion
+	then
+		local ignoreList = {}
+		appendRaycastIgnore(ignoreList, character)
+		if shouldIgnoreHazards then
+			appendHazardRaycastIgnores(ignoreList)
+		end
+		params.FilterDescendantsInstances = ignoreList
+		cache.Character = character
+		cache.ShouldIgnoreHazards = shouldIgnoreHazards
+		cache.HazardVersion = hazardVersion
+	end
+
 	return params
+end
+
+local function surfaceRaycast(origin, direction, raycastParams)
+	diagnostics.RaycastCount += 1
+	return Workspace:Raycast(origin, direction, raycastParams)
 end
 
 function MoguBurrowShared.GetPlanarVector(vector)
@@ -198,7 +251,7 @@ function MoguBurrowShared.GetRootGroundClearance(character, rootPart, abilityCon
 	local probeDepth = math.max(MIN_PROBE_DEPTH, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
 	local origin = rootPart.Position + Vector3.new(0, probeHeight, 0)
 	local cast = Vector3.new(0, -(probeHeight + probeDepth), 0)
-	local result = Workspace:Raycast(origin, cast, createSurfaceRaycastParams(character, abilityConfig))
+	local result = surfaceRaycast(origin, cast, createSurfaceRaycastParams(character, abilityConfig))
 	if result then
 		return math.max(rootPart.Position.Y - result.Position.Y, MIN_ROOT_GROUND_CLEARANCE), result
 	end
@@ -219,7 +272,21 @@ local function isResolvedRootHeightSafe(resolvedRootY, guardRootY, abilityConfig
 		and resolvedRootY <= guardRootY + MoguBurrowShared.GetMaxSurfaceRise(abilityConfig)
 end
 
-function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planarRootPosition, abilityConfig, lastSafeSurfaceRootPosition)
+local function isFastSampleAcceptable(resolvedRootY, guardRootY)
+	return typeof(guardRootY) ~= "number" or math.abs(resolvedRootY - guardRootY) <= FAST_SAMPLE_MAX_HEIGHT_DELTA
+end
+
+function MoguBurrowShared.ResolveSurfaceRootPosition(
+	character,
+	rootPart,
+	planarRootPosition,
+	abilityConfig,
+	lastSafeSurfaceRootPosition,
+	options
+)
+	local probeStartedAt = os.clock()
+	diagnostics.SurfaceProbeCount += 1
+
 	local rootGroundClearance = MoguBurrowShared.GetRootGroundClearance(character, rootPart, abilityConfig)
 	local probeHeight = math.max(MIN_PROBE_HEIGHT, tonumber(abilityConfig and abilityConfig.GroundProbeHeight) or DEFAULT_GROUND_PROBE_HEIGHT)
 	local probeDepth = math.max(MIN_PROBE_DEPTH, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
@@ -230,6 +297,7 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planar
 	end
 
 	if not requestedPosition then
+		diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
 		return nil, false, nil
 	end
 
@@ -247,15 +315,16 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planar
 	local sampleRadius = MoguBurrowShared.GetSurfaceProbeRadius(rootPart, abilityConfig)
 	local bestResult = nil
 	local bestResolvedRootY = nil
+	local fastSample = type(options) == "table" and options.FastSample == true
 
-	for _, sampleDirection in ipairs(SURFACE_SAMPLE_DIRECTIONS) do
+	for index, sampleDirection in ipairs(SURFACE_SAMPLE_DIRECTIONS) do
 		local sampleOffset = sampleDirection * sampleRadius
 		local origin = Vector3.new(
 			requestedPosition.X + sampleOffset.X,
 			castBaseY + probeHeight,
 			requestedPosition.Z + sampleOffset.Z
 		)
-		local result = Workspace:Raycast(origin, cast, raycastParams)
+		local result = surfaceRaycast(origin, cast, raycastParams)
 		if isSurfaceNormalValid(result, abilityConfig) then
 			local resolvedRootY = result.Position.Y + rootGroundClearance
 			if isResolvedRootHeightSafe(resolvedRootY, guardRootY, abilityConfig)
@@ -264,14 +333,33 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planar
 				bestResult = result
 				bestResolvedRootY = resolvedRootY
 			end
+
+			if index == 1 and fastSample and isFastSampleAcceptable(resolvedRootY, guardRootY) then
+				diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
+				return Vector3.new(requestedPosition.X, resolvedRootY, requestedPosition.Z), true, result
+			end
 		end
 	end
 
 	if bestResult and bestResolvedRootY then
+		diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
 		return Vector3.new(requestedPosition.X, bestResolvedRootY, requestedPosition.Z), true, bestResult
 	end
 
+	diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
 	return fallbackPosition, false, nil
+end
+
+function MoguBurrowShared.ConsumeDiagnostics()
+	local snapshot = {
+		RaycastCount = diagnostics.RaycastCount,
+		SurfaceProbeCount = diagnostics.SurfaceProbeCount,
+		SurfaceProbeTimeMs = diagnostics.SurfaceProbeTimeMs,
+	}
+	diagnostics.RaycastCount = 0
+	diagnostics.SurfaceProbeCount = 0
+	diagnostics.SurfaceProbeTimeMs = 0
+	return snapshot
 end
 
 return MoguBurrowShared

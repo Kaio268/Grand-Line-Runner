@@ -17,6 +17,7 @@ local RESOLVE_REASON_MANUAL_SURFACE = "manual_surface"
 local CLEAR_REASON_EXPIRED = "expired"
 local CLEAR_REASON_RESOLVE = "resolve"
 local CLEAR_REASON_RUNTIME_RESET = "runtime_reset"
+local RESOLVE_VALIDATION_DISTANCE_PADDING = 8
 
 local activeBurrowsByPlayer = setmetatable({}, { __mode = "k" })
 
@@ -44,6 +45,49 @@ local function faceCharacterAlongDirection(character, rootPart, direction)
 	local pivotToRoot = character:GetPivot():ToObjectSpace(rootPart.CFrame)
 	character:PivotTo(targetRootCFrame * pivotToRoot:Inverse())
 	rootPart.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function getPlanarDelta(fromPosition, toPosition)
+	if typeof(fromPosition) ~= "Vector3" or typeof(toPosition) ~= "Vector3" then
+		return nil
+	end
+
+	return Vector3.new(toPosition.X - fromPosition.X, 0, toPosition.Z - fromPosition.Z)
+end
+
+local function clampResolvePositionToAuthorizedDistance(burrowState, requestedEndPosition, endedAt)
+	local startPosition = burrowState and burrowState.StartPosition
+	if typeof(startPosition) ~= "Vector3" or typeof(requestedEndPosition) ~= "Vector3" then
+		return requestedEndPosition, 0
+	end
+
+	local planarDelta = getPlanarDelta(startPosition, requestedEndPosition)
+	if not planarDelta or planarDelta.Magnitude <= 0.01 then
+		return requestedEndPosition, 0
+	end
+
+	local elapsed = math.clamp(
+		(tonumber(endedAt) or tonumber(burrowState.StartedAt) or 0)
+			- (tonumber(burrowState.StartedAt) or tonumber(endedAt) or 0),
+		0,
+		math.max(0, tonumber(burrowState.Duration) or 0) + MoguBurrowShared.GetSurfaceResolveGrace(burrowState.AbilityConfig)
+	)
+	local maxTravelDistance = (
+		math.max(0, tonumber(burrowState.MoveSpeed) or MoguBurrowShared.GetMoveSpeed(burrowState.AbilityConfig))
+			* elapsed
+	)
+		+ RESOLVE_VALIDATION_DISTANCE_PADDING
+	local planarDistance = planarDelta.Magnitude
+	if planarDistance <= maxTravelDistance then
+		return requestedEndPosition, 0
+	end
+
+	local clampedPlanarDelta = planarDelta.Unit * maxTravelDistance
+	return Vector3.new(
+		startPosition.X + clampedPlanarDelta.X,
+		requestedEndPosition.Y,
+		startPosition.Z + clampedPlanarDelta.Z
+	), planarDistance - maxTravelDistance
 end
 
 local function hideWorkspaceAnimationRig(instance)
@@ -169,6 +213,9 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 	local rootPart = context.RootPart
 	local character = context.Character
 	local actualEndPosition = rootPart and rootPart.Position or burrowState.StartPosition
+	local resolveCorrectionDistance = 0
+	actualEndPosition, resolveCorrectionDistance =
+		clampResolvePositionToAuthorizedDistance(burrowState, actualEndPosition, endedAt)
 	if character and rootPart then
 		actualEndPosition = select(
 			1,
@@ -181,6 +228,9 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 			)
 		) or burrowState.LastSafeSurfaceRootPosition or burrowState.StartPosition or actualEndPosition
 	end
+	if context.Player then
+		context.Player:SetAttribute("MoguResolveCorrectionDistance", resolveCorrectionDistance)
+	end
 
 	return {
 		Phase = PHASE_RESOLVE,
@@ -192,6 +242,7 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 		ActualEndPosition = actualEndPosition,
 		ResolveReason = resolveReason,
 		ResolveBurstRadius = MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
+		ResolveCorrectionDistance = resolveCorrectionDistance,
 		EndedEarly = resolveReason ~= RESOLVE_REASON_DURATION_ELAPSED,
 	}
 end
@@ -248,9 +299,11 @@ function MoguServer.Burrow(context)
 		StartPosition = startSurfacePosition,
 		LastSafeSurfaceRootPosition = startSurfacePosition,
 		AbilityConfig = abilityConfig,
+		MoveSpeed = MoguBurrowShared.GetMoveSpeed(abilityConfig),
 		AnimationState = animationState,
 	}
 	activeBurrowsByPlayer[player] = burrowState
+	player:SetAttribute("MoguResolveCorrectionDistance", 0)
 	setProtectionState(player, endsAt + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig))
 
 	return buildStartPayload(context, startedAt, endsAt, direction, directionSource, startSurfacePosition), {

@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local AnimationLoadDiagnostics = require(DevilFruits:WaitForChild("AnimationLoadDiagnostics"))
 local AnimationResolver = require(DevilFruits:WaitForChild("Shared"):WaitForChild("AnimationResolver"))
@@ -14,6 +15,7 @@ local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioContr
 local BomuClient = {}
 BomuClient.__index = BomuClient
 
+local FRUIT_NAME = "Bomu Bomu no Mi"
 local LAND_MINE_ABILITY = "LandMine"
 local LAND_MINE_ACTION_PLACED = "Placed"
 local LAND_MINE_ACTION_DETONATING = "Detonating"
@@ -51,8 +53,6 @@ local DEBUG_SOUND = RunService:IsStudio()
 local SOUND_LOG_LIMIT = 40
 local soundLogCount = 0
 local soundWarnCount = 0
-local landMineSoundFolder = nil
-local landMineSoundTemplates = {}
 
 local function formatInstancePath(instance)
 	if typeof(instance) ~= "Instance" then
@@ -149,71 +149,74 @@ local function logSoundDiagnostics(stage, soundName, sound)
 	)
 end
 
-local function resolveLandMineSoundFolder()
-	if landMineSoundFolder and landMineSoundFolder.Parent then
-		return landMineSoundFolder
+local function normalizeSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
 	end
 
-	local node = ReplicatedStorage
-	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Bomu", "LandMine" }) do
-		local child = node and node:FindFirstChild(segment)
-		if not child then
-			bomuSoundWarn(
-				"path_segment_missing segment=%s parent=%s",
-				tostring(segment),
-				formatInstancePath(node)
-			)
-			return nil
-		end
-
-		bomuSoundLog("path_segment_found segment=%s path=%s", tostring(segment), formatInstancePath(child))
-		node = child
-	end
-
-	landMineSoundFolder = node
-	return node
-end
-
-local function getLandMineSoundTemplate(soundName)
-	local cachedTemplate = landMineSoundTemplates[soundName]
-	if cachedTemplate and cachedTemplate.Parent then
-		return cachedTemplate
-	end
-
-	local soundFolder = resolveLandMineSoundFolder()
-	bomuSoundLog("resolve_folder sound=%s folder=%s", tostring(soundName), formatInstancePath(soundFolder))
-	if not soundFolder then
-		bomuSoundWarn(
-			"resolve_folder_failed sound=%s expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Bomu.LandMine",
-			tostring(soundName)
-		)
+	if typeof(value) ~= "string" or value == "" then
 		return nil
 	end
 
-	local soundTemplate = soundFolder:FindFirstChild(soundName)
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		landMineSoundTemplates[soundName] = soundTemplate
-		logSoundDiagnostics("template_found", soundName, soundTemplate)
-		return soundTemplate
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
 	end
 
-	if soundTemplate then
-		bomuSoundWarn(
-			"template_invalid sound=%s path=%s class=%s",
-			tostring(soundName),
-			formatInstancePath(soundTemplate),
-			tostring(soundTemplate.ClassName)
-		)
-	else
-		bomuSoundWarn(
-			"template_missing sound=%s folder=%s childCount=%d",
-			tostring(soundName),
-			formatInstancePath(soundFolder),
-			#soundFolder:GetChildren()
-		)
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
 	end
 
-	return nil
+	return value
+end
+
+local function getLandMineAudioConfig()
+	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, LAND_MINE_ABILITY)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getLandMineAudioNumber(fieldName, fallback, minimum)
+	local audioConfig = getLandMineAudioConfig()
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function createLandMineSound(soundName, looped)
+	local audioConfig = getLandMineAudioConfig()
+	if not audioConfig then
+		bomuSoundWarn("sound_config_missing sound=%s issue=missing_audio_table", tostring(soundName))
+		return nil
+	end
+
+	local soundId = normalizeSoundId(audioConfig.DetonateSoundId)
+	if not soundId then
+		bomuSoundWarn("sound_config_missing sound=%s key=DetonateSoundId issue=missing_sound_id", tostring(soundName))
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = getLandMineAudioNumber("Volume", 1, 0)
+	sound.RollOffMaxDistance = getLandMineAudioNumber(
+		"RollOffMaxDistance",
+		DEFAULT_DETONATE_ROLLOFF_MAX_DISTANCE,
+		1
+	)
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -274,20 +277,15 @@ local function playLandMineDetonateSound(targetPlayer, payload)
 		return nil
 	end
 
-	local soundTemplate = getLandMineSoundTemplate(SOUND_DETONATE)
-	if not soundTemplate then
+	local sound = createLandMineSound(SOUND_DETONATE, false)
+	if not sound then
 		if anchor and anchor.Parent then
 			anchor:Destroy()
 		end
-		bomuSoundWarn("detonate_skipped sound=%s issue=template_missing", SOUND_DETONATE)
+		bomuSoundWarn("detonate_skipped sound=%s issue=sound_config_missing", SOUND_DETONATE)
 		return nil
 	end
 
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
-	if (tonumber(sound.RollOffMaxDistance) or 0) <= 0 then
-		sound.RollOffMaxDistance = DEFAULT_DETONATE_ROLLOFF_MAX_DISTANCE
-	end
 	sound.Parent = parent
 	logSoundDiagnostics("detonate_parented", SOUND_DETONATE, sound)
 	SettingsAudioController.TrackSound(sound)
@@ -477,7 +475,7 @@ local function enforceLocalMovementLock(state)
 	return true
 end
 
-local function releaseLocalMovementLock(self, reason)
+local function releaseLocalMovementLock(self, _reason)
 	local state = self.localMovementLock
 	if not state then
 		return false

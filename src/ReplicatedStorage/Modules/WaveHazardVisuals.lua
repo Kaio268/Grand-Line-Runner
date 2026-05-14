@@ -11,6 +11,7 @@ local HITBOX_NAME = "WaveHitbox"
 local VISUAL_NAME = "WaveVisual"
 local FROZEN_VISUAL_NAME = "FrozenWaveVisual"
 local USES_ASSET_VISUALS_ATTRIBUTE = "UsesWaveAssetVisuals"
+local CLIENT_VISUALS_ONLY_ATTRIBUTE = "ClientWaveVisualsOnly"
 local VISUAL_ASSET_NAME_ATTRIBUTE = "WaveVisualAssetName"
 local ACTIVE_VISUAL_ASSET_ATTRIBUTE = "ActiveWaveVisualAssetName"
 local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
@@ -103,6 +104,29 @@ local function getPivot(instance)
 	return instance.CFrame
 end
 
+local function translateCFrame(cframeValue, offset)
+	local rotation = cframeValue - cframeValue.Position
+	return CFrame.new(cframeValue.Position + offset) * rotation
+end
+
+local function getBouncedLateralOffset(rawOffset, maxDrift)
+	local limit = math.max(0, tonumber(maxDrift) or 0)
+	if limit <= 1e-4 then
+		return 0
+	end
+
+	local minOffset = -limit
+	local span = limit * 2
+	local cycle = span * 2
+	local shifted = (rawOffset - minOffset) % cycle
+
+	if shifted <= span then
+		return minOffset + shifted
+	end
+
+	return limit - (shifted - span)
+end
+
 local function findHitboxRoot(root)
 	if not root then
 		return nil
@@ -139,7 +163,7 @@ local function configureHitboxPart(part)
 
 	if part:IsA("MeshPart") then
 		pcall(function()
-			part.CollisionFidelity = Enum.CollisionFidelity.PreciseConvexDecomposition
+			part.CollisionFidelity = Enum.CollisionFidelity.Box
 		end)
 	end
 end
@@ -158,7 +182,7 @@ local function configureFrozenHitboxPart(part)
 
 	if part:IsA("MeshPart") then
 		pcall(function()
-			part.CollisionFidelity = Enum.CollisionFidelity.PreciseConvexDecomposition
+			part.CollisionFidelity = Enum.CollisionFidelity.Box
 		end)
 	end
 end
@@ -187,6 +211,29 @@ end
 
 local function clampSize(value)
 	return math.max(MIN_PART_SIZE, value)
+end
+
+local function getWaveShapeScale(sourceSize, targetSize)
+	local scaleY = if sourceSize.Y > MIN_PART_SIZE then targetSize.Y / sourceSize.Y else nil
+	local scaleZ = if sourceSize.Z > MIN_PART_SIZE then targetSize.Z / sourceSize.Z else nil
+
+	if scaleY and scaleZ then
+		return math.min(scaleY, scaleZ)
+	end
+
+	if scaleY then
+		return scaleY
+	end
+
+	if scaleZ then
+		return scaleZ
+	end
+
+	if sourceSize.X > MIN_PART_SIZE then
+		return targetSize.X / sourceSize.X
+	end
+
+	return 1
 end
 
 local function getBoundsSizeInFrame(root, boundsFrame)
@@ -230,30 +277,6 @@ local function getBoundsSizeInFrame(root, boundsFrame)
 	)
 end
 
-local function getWaveShapeScale(sourceSize, targetSize)
-	-- Match the old hazard's height and long span while letting the wave curl keep its natural depth.
-	local scaleY = if sourceSize.Y > MIN_PART_SIZE then targetSize.Y / sourceSize.Y else nil
-	local scaleZ = if sourceSize.Z > MIN_PART_SIZE then targetSize.Z / sourceSize.Z else nil
-
-	if scaleY and scaleZ then
-		return math.min(scaleY, scaleZ)
-	end
-
-	if scaleY then
-		return scaleY
-	end
-
-	if scaleZ then
-		return scaleZ
-	end
-
-	if sourceSize.X > MIN_PART_SIZE then
-		return targetSize.X / sourceSize.X
-	end
-
-	return 1
-end
-
 local function scaleBasePartToBox(part, targetCFrame, targetSize, configurePart)
 	configurePart(part)
 	part.Size = Vector3.new(
@@ -286,45 +309,6 @@ local function scaleModelToBox(model, targetCFrame, targetSize, configurePart)
 				relativePosition.X * scaleX,
 				relativePosition.Y * scaleY,
 				relativePosition.Z * scaleZ
-			)
-			* relativeRotation
-	end)
-
-	ensureModelPrimaryPart(model)
-end
-
-local function scaleBasePartToWaveShape(part, targetCFrame, targetSize, configurePart)
-	local scale = getWaveShapeScale(part.Size, targetSize)
-
-	configurePart(part)
-	part.Size = Vector3.new(
-		clampSize(part.Size.X * scale),
-		clampSize(part.Size.Y * scale),
-		clampSize(part.Size.Z * scale)
-	)
-	part.CFrame = targetCFrame
-end
-
-local function scaleModelToWaveShape(model, targetCFrame, targetSize, configurePart)
-	local sourceCFrame, sourceSize = model:GetBoundingBox()
-	local scale = getWaveShapeScale(sourceSize, targetSize)
-
-	forEachBasePart(model, function(part)
-		local relative = sourceCFrame:ToObjectSpace(part.CFrame)
-		local relativePosition = relative.Position
-		local relativeRotation = relative - relativePosition
-
-		configurePart(part)
-		part.Size = Vector3.new(
-			clampSize(part.Size.X * scale),
-			clampSize(part.Size.Y * scale),
-			clampSize(part.Size.Z * scale)
-		)
-		part.CFrame = targetCFrame
-			* CFrame.new(
-				relativePosition.X * scale,
-				relativePosition.Y * scale,
-				relativePosition.Z * scale
 			)
 			* relativeRotation
 	end)
@@ -485,17 +469,52 @@ local function findVisual(root, assetName)
 	return root:FindFirstChild(getVisualNameForAsset(assetName))
 end
 
-local function createHitboxFromAsset(asset, targetCFrame, targetSize)
-	local hitbox = asset:Clone()
+local function createProxyHitbox(targetCFrame, targetSize)
+	local hitbox = Instance.new("Part")
 	hitbox.Name = HITBOX_NAME
+	hitbox.Size = Vector3.new(
+		clampSize(targetSize.X),
+		clampSize(targetSize.Y),
+		clampSize(targetSize.Z)
+	)
+	hitbox.CFrame = targetCFrame
+	hitbox.CastShadow = false
+	hitbox.Material = Enum.Material.SmoothPlastic
+	hitbox.Color = Color3.fromRGB(0, 170, 255)
+	pcall(function()
+		hitbox.TopSurface = Enum.SurfaceType.Smooth
+		hitbox.BottomSurface = Enum.SurfaceType.Smooth
+	end)
+	configureHitboxPart(hitbox)
+	return hitbox
+end
 
-	if hitbox:IsA("BasePart") then
-		scaleBasePartToWaveShape(hitbox, targetCFrame, targetSize, configureHitboxPart)
-	else
-		scaleModelToWaveShape(hitbox, targetCFrame, targetSize, configureHitboxPart)
+local function getProxyHitboxBox(template)
+	local targetCFrame, targetSize = getTargetBox(template)
+	targetCFrame = targetCFrame or getPivot(template)
+	targetSize = targetSize or Vector3.new(20, 8, 8)
+
+	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME)
+	if regularAsset then
+		local _, sourceSize
+		if regularAsset:IsA("BasePart") then
+			sourceSize = regularAsset.Size
+		else
+			_, sourceSize = regularAsset:GetBoundingBox()
+		end
+
+		if sourceSize then
+			local scale = getWaveShapeScale(sourceSize, targetSize)
+			targetCFrame = targetCFrame * ASSET_TEMPLATE_ROTATION
+			targetSize = Vector3.new(
+				clampSize(sourceSize.X * scale),
+				clampSize(sourceSize.Y * scale),
+				clampSize(sourceSize.Z * scale)
+			)
+		end
 	end
 
-	return hitbox
+	return targetCFrame, targetSize
 end
 
 function WaveHazardVisuals.GetRegularWaveAsset()
@@ -504,6 +523,43 @@ end
 
 function WaveHazardVisuals.GetFrozenWaveAsset()
 	return getWaveAsset(FROZEN_WAVE_ASSET_NAME)
+end
+
+function WaveHazardVisuals.ComputeTimelineCFrame(
+	startCFrame,
+	endCFrame,
+	activeSeconds,
+	speed,
+	distance,
+	lateralDirection,
+	initialLateralOffset,
+	lateralVelocity,
+	maxDrift
+)
+	if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
+		return nil, 0
+	end
+
+	local travelDistance = tonumber(distance) or (endCFrame.Position - startCFrame.Position).Magnitude
+	travelDistance = math.max(travelDistance, 1e-4)
+
+	local moveSpeed = math.max(0, tonumber(speed) or 0)
+	local elapsed = math.max(0, tonumber(activeSeconds) or 0)
+	local alpha = math.clamp((elapsed * moveSpeed) / travelDistance, 0, 1)
+	local currentCFrame = startCFrame:Lerp(endCFrame, alpha)
+
+	local driftLimit = math.max(0, tonumber(maxDrift) or 0)
+	local driftVelocity = tonumber(lateralVelocity) or 0
+	if driftLimit > 1e-4 and math.abs(driftVelocity) > 1e-4 and typeof(lateralDirection) == "Vector3" then
+		local lateralMagnitude = lateralDirection.Magnitude
+		if lateralMagnitude > 1e-4 then
+			local rawOffset = (tonumber(initialLateralOffset) or 0) + driftVelocity * elapsed
+			local lateralOffset = getBouncedLateralOffset(rawOffset, driftLimit)
+			currentCFrame = translateCFrame(currentCFrame, lateralDirection.Unit * lateralOffset)
+		end
+	end
+
+	return currentCFrame, alpha
 end
 
 function WaveHazardVisuals.GetHitboxParts(root)
@@ -570,25 +626,17 @@ function WaveHazardVisuals.ApplyVisual(root, assetName)
 end
 
 function WaveHazardVisuals.CreateHazardFromTemplate(template)
-	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME)
-	if not regularAsset then
-		return template:Clone(), false
-	end
-
 	local model = Instance.new("Model")
 	model.Name = template.Name
 	model:SetAttribute(USES_ASSET_VISUALS_ATTRIBUTE, true)
+	model:SetAttribute(CLIENT_VISUALS_ONLY_ATTRIBUTE, true)
+	model:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, REGULAR_WAVE_ASSET_NAME)
 
-	local targetCFrame, targetSize = getTargetBox(template)
-	if not targetCFrame or not targetSize then
-		return template:Clone(), false
-	end
+	local targetCFrame, targetSize = getProxyHitboxBox(template)
 
-	local hitbox = createHitboxFromAsset(regularAsset, targetCFrame * ASSET_TEMPLATE_ROTATION, targetSize)
+	local hitbox = createProxyHitbox(targetCFrame, targetSize)
 	hitbox.Parent = model
 	model.WorldPivot = getPivot(template)
-
-	WaveHazardVisuals.ApplyVisual(model, REGULAR_WAVE_ASSET_NAME)
 	return model, true
 end
 
@@ -600,6 +648,11 @@ function WaveHazardVisuals.SetFrozen(root, isFrozen)
 	root:SetAttribute("Frozen", isFrozen == true)
 	WaveHazardVisuals.SetHitboxFrozen(root, isFrozen == true)
 	local assetName = if isFrozen then FROZEN_WAVE_ASSET_NAME else REGULAR_WAVE_ASSET_NAME
+	if root:GetAttribute(CLIENT_VISUALS_ONLY_ATTRIBUTE) == true then
+		root:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, assetName)
+		return true
+	end
+
 	return WaveHazardVisuals.ApplyVisual(root, assetName)
 end
 

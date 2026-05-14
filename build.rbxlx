@@ -8737,6 +8737,9 @@ local DevilFruits = {
 							MaxBonus = 1,
 						},
 					},
+					Audio = {
+						DetonateSoundId = "rbxassetid://80642927300013",
+					},
 					Animation = {
 						Plant = {
 							AnimationKey = "Bomu.Plant",
@@ -8884,6 +8887,9 @@ local DevilFruits = {
 					LocalDecalTransparency = 0.72,
 					ObserverBodyTransparency = 1,
 					ObserverDecalTransparency = 1,
+					Audio = {
+						ActivateSoundId = "rbxassetid://78492636125633",
+					},
 					Animation = {
 						AnimationKey = "Suke.Suke1",
 						EffectDelay = 0.35,
@@ -8944,6 +8950,11 @@ local DevilFruits = {
 					BodyHighlightOutlineTransparency = 0.16,
 					GhostTransparency = 0.42,
 					GhostLocalTransparency = 0.2,
+					Audio = {
+						ActivateSoundId = "rbxassetid://116810314478650",
+						MoveLoopSoundId = "rbxassetid://99992721489454",
+						ReturnSoundId = "rbxassetid://74101168656622",
+					},
 					Animation = {
 						Projection = {
 							AnimationKey = "Horo.HoroProjection",
@@ -15028,6 +15039,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local AnimationLoadDiagnostics = require(DevilFruits:WaitForChild("AnimationLoadDiagnostics"))
 local AnimationResolver = require(DevilFruits:WaitForChild("Shared"):WaitForChild("AnimationResolver"))
@@ -15037,6 +15049,7 @@ local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioContr
 local BomuClient = {}
 BomuClient.__index = BomuClient
 
+local FRUIT_NAME = "Bomu Bomu no Mi"
 local LAND_MINE_ABILITY = "LandMine"
 local LAND_MINE_ACTION_PLACED = "Placed"
 local LAND_MINE_ACTION_DETONATING = "Detonating"
@@ -15074,8 +15087,6 @@ local DEBUG_SOUND = RunService:IsStudio()
 local SOUND_LOG_LIMIT = 40
 local soundLogCount = 0
 local soundWarnCount = 0
-local landMineSoundFolder = nil
-local landMineSoundTemplates = {}
 
 local function formatInstancePath(instance)
 	if typeof(instance) ~= "Instance" then
@@ -15172,71 +15183,74 @@ local function logSoundDiagnostics(stage, soundName, sound)
 	)
 end
 
-local function resolveLandMineSoundFolder()
-	if landMineSoundFolder and landMineSoundFolder.Parent then
-		return landMineSoundFolder
+local function normalizeSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
 	end
 
-	local node = ReplicatedStorage
-	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Bomu", "LandMine" }) do
-		local child = node and node:FindFirstChild(segment)
-		if not child then
-			bomuSoundWarn(
-				"path_segment_missing segment=%s parent=%s",
-				tostring(segment),
-				formatInstancePath(node)
-			)
-			return nil
-		end
-
-		bomuSoundLog("path_segment_found segment=%s path=%s", tostring(segment), formatInstancePath(child))
-		node = child
-	end
-
-	landMineSoundFolder = node
-	return node
-end
-
-local function getLandMineSoundTemplate(soundName)
-	local cachedTemplate = landMineSoundTemplates[soundName]
-	if cachedTemplate and cachedTemplate.Parent then
-		return cachedTemplate
-	end
-
-	local soundFolder = resolveLandMineSoundFolder()
-	bomuSoundLog("resolve_folder sound=%s folder=%s", tostring(soundName), formatInstancePath(soundFolder))
-	if not soundFolder then
-		bomuSoundWarn(
-			"resolve_folder_failed sound=%s expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Bomu.LandMine",
-			tostring(soundName)
-		)
+	if typeof(value) ~= "string" or value == "" then
 		return nil
 	end
 
-	local soundTemplate = soundFolder:FindFirstChild(soundName)
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		landMineSoundTemplates[soundName] = soundTemplate
-		logSoundDiagnostics("template_found", soundName, soundTemplate)
-		return soundTemplate
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
 	end
 
-	if soundTemplate then
-		bomuSoundWarn(
-			"template_invalid sound=%s path=%s class=%s",
-			tostring(soundName),
-			formatInstancePath(soundTemplate),
-			tostring(soundTemplate.ClassName)
-		)
-	else
-		bomuSoundWarn(
-			"template_missing sound=%s folder=%s childCount=%d",
-			tostring(soundName),
-			formatInstancePath(soundFolder),
-			#soundFolder:GetChildren()
-		)
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
 	end
 
-	return nil
+	return value
+end
+
+local function getLandMineAudioConfig()
+	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, LAND_MINE_ABILITY)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getLandMineAudioNumber(fieldName, fallback, minimum)
+	local audioConfig = getLandMineAudioConfig()
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function createLandMineSound(soundName, looped)
+	local audioConfig = getLandMineAudioConfig()
+	if not audioConfig then
+		bomuSoundWarn("sound_config_missing sound=%s issue=missing_audio_table", tostring(soundName))
+		return nil
+	end
+
+	local soundId = normalizeSoundId(audioConfig.DetonateSoundId)
+	if not soundId then
+		bomuSoundWarn("sound_config_missing sound=%s key=DetonateSoundId issue=missing_sound_id", tostring(soundName))
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = getLandMineAudioNumber("Volume", 1, 0)
+	sound.RollOffMaxDistance = getLandMineAudioNumber(
+		"RollOffMaxDistance",
+		DEFAULT_DETONATE_ROLLOFF_MAX_DISTANCE,
+		1
+	)
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -15297,20 +15311,15 @@ local function playLandMineDetonateSound(targetPlayer, payload)
 		return nil
 	end
 
-	local soundTemplate = getLandMineSoundTemplate(SOUND_DETONATE)
-	if not soundTemplate then
+	local sound = createLandMineSound(SOUND_DETONATE, false)
+	if not sound then
 		if anchor and anchor.Parent then
 			anchor:Destroy()
 		end
-		bomuSoundWarn("detonate_skipped sound=%s issue=template_missing", SOUND_DETONATE)
+		bomuSoundWarn("detonate_skipped sound=%s issue=sound_config_missing", SOUND_DETONATE)
 		return nil
 	end
 
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
-	if (tonumber(sound.RollOffMaxDistance) or 0) <= 0 then
-		sound.RollOffMaxDistance = DEFAULT_DETONATE_ROLLOFF_MAX_DISTANCE
-	end
 	sound.Parent = parent
 	logSoundDiagnostics("detonate_parented", SOUND_DETONATE, sound)
 	SettingsAudioController.TrackSound(sound)
@@ -15500,7 +15509,7 @@ local function enforceLocalMovementLock(state)
 	return true
 end
 
-local function releaseLocalMovementLock(self, reason)
+local function releaseLocalMovementLock(self, _reason)
 	local state = self.localMovementLock
 	if not state then
 		return false
@@ -16329,6 +16338,7 @@ local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL = 0.16
+local MOGU_HAZARD_SUPPRESSION_INTERVAL = 0.12
 local LOCAL_HAZARD_OVERLAP_MAX_PARTS = 128
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS = 12
@@ -16347,6 +16357,11 @@ local suppressedParts = {}
 local activeFireBursts = {}
 local activeMoguBurrow = nil
 local hazardSuppressionLoopRunning = false
+local moguHazardDiagnostics = {
+	LastFlushAt = os.clock(),
+	OverlapTimeMs = 0,
+	OverlapCount = 0,
+}
 local playOptionalEffect
 local getFruitFolder
 local getEquippedFruit
@@ -17564,6 +17579,20 @@ ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, positi
 	return isLocalPlayerBurrowProtected(os.clock())
 end)
 
+local function publishMoguHazardDiagnostics(force)
+	local now = os.clock()
+	local elapsed = now - (moguHazardDiagnostics.LastFlushAt or now)
+	if not force and elapsed < 1 then
+		return
+	end
+
+	moguHazardDiagnostics.LastFlushAt = now
+	player:SetAttribute("MoguHazardSuppressionOverlapTimeMs", moguHazardDiagnostics.OverlapTimeMs or 0)
+	player:SetAttribute("MoguHazardSuppressionOverlapCount", moguHazardDiagnostics.OverlapCount or 0)
+	moguHazardDiagnostics.OverlapTimeMs = 0
+	moguHazardDiagnostics.OverlapCount = 0
+end
+
 local function buildLocalHazardOverlapParams(refs, restrictToHazardRoots)
 	local overlapParams = OverlapParams.new()
 	refs = refs or MapResolver.GetRefs()
@@ -17597,6 +17626,7 @@ local function suppressHazardsNearPosition(centerPosition, radius, untilTime, sh
 		return
 	end
 
+	local startedAt = os.clock()
 	local refs = MapResolver.GetRefs()
 	local clientWavesFolder = refs and refs.ClientWaves
 	local nearbyParts = Workspace:GetPartBoundsInRadius(
@@ -17609,6 +17639,10 @@ local function suppressHazardsNearPosition(centerPosition, radius, untilTime, sh
 		if container and (shouldSuppress == nil or shouldSuppress(container, hazardClass, hazardType)) then
 			suppressHazard(container, untilTime, source)
 		end
+	end
+	if source == MOGU_HAZARD_SUPPRESSION_SOURCE then
+		moguHazardDiagnostics.OverlapTimeMs += (os.clock() - startedAt) * 1000
+		moguHazardDiagnostics.OverlapCount += 1
 	end
 end
 
@@ -17692,24 +17726,27 @@ local function updateHazardSuppression()
 	end
 
 	if isLocalPlayerBurrowProtected(now) then
-		if rootPart then
+		if rootPart and now >= (activeMoguBurrow.NextScanAt or 0) then
+			activeMoguBurrow.NextScanAt = now + MOGU_HAZARD_SUPPRESSION_INTERVAL
 			suppressHazardsNearPosition(
 				rootPart.Position,
 				activeMoguBurrow.Radius,
 				activeMoguBurrow.EndTime,
 				nil,
-				nil,
+				true,
 				MOGU_HAZARD_SUPPRESSION_SOURCE
 			)
 		end
 	end
 
 	restoreSuppressedParts(now)
+	publishMoguHazardDiagnostics(false)
 
 	if hasActiveHazardProtection(now) then
 		task.delay(HAZARD_SUPPRESSION_INTERVAL, updateHazardSuppression)
 	else
 		hazardSuppressionLoopRunning = false
+		publishMoguHazardDiagnostics(true)
 	end
 end
 
@@ -17740,6 +17777,7 @@ local function startMoguBurrow(targetPlayer, payload)
 	activeMoguBurrow = {
 		EndTime = os.clock() + duration,
 		Radius = math.max(0, tonumber(resolvedPayload.HazardProtectionRadius) or getMoguHazardProtectionRadius()),
+		NextScanAt = 0,
 	}
 
 	ensureHazardSuppressionLoop()
@@ -17752,6 +17790,7 @@ local function stopMoguBurrow(targetPlayer)
 
 	activeMoguBurrow = nil
 	restoreSuppressedParts(os.clock(), MOGU_HAZARD_SUPPRESSION_SOURCE)
+	publishMoguHazardDiagnostics(true)
 	applyMoguSurfaceHazardOverlap()
 end
 
@@ -18081,6 +18120,7 @@ local function initializeDevilFruitClient()
 		fruitModuleLoader:ForEachLoadedController("HandleCharacterRemoving")
 		hazardSuppressionLoopRunning = false
 		restoreSuppressedParts(math.huge)
+		publishMoguHazardDiagnostics(true)
 	end)
 
 	Players.PlayerRemoving:Connect(function(leavingPlayer)
@@ -28599,8 +28639,13 @@ local SOUND_ACTIVATE = "Activate"
 local SOUND_MOVE_LOOP = "MoveLoop"
 local SOUND_RETURN = "Return"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
-local DEBUG_SOUND = true
+local DEBUG_SOUND = RunService:IsStudio()
 local DEBUG_TRACE = RunService:IsStudio()
+local SOUND_AUDIO_KEY_BY_NAME = {
+	[SOUND_ACTIVATE] = "ActivateSoundId",
+	[SOUND_MOVE_LOOP] = "MoveLoopSoundId",
+	[SOUND_RETURN] = "ReturnSoundId",
+}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
@@ -28780,65 +28825,71 @@ local function getCharacterRoot(player)
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
 end
 
-local function resolveGhostProjectionSoundFolder()
-	local node = ReplicatedStorage
-	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Horo", "GhostProjection" }) do
-		if not node then
-			horoSoundWarn("path_segment_skipped segment=%s issue=parent_nil", tostring(segment))
-			return nil
-		end
-
-		local child = node:FindFirstChild(segment)
-		if not child then
-			horoSoundWarn(
-				"path_segment_missing segment=%s parent=%s",
-				tostring(segment),
-				formatInstancePath(node)
-			)
-			return nil
-		end
-
-		horoSoundLog("path_segment_found segment=%s path=%s", tostring(segment), formatInstancePath(child))
-		node = child
+local function normalizeSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
 	end
 
-	return node
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
 end
 
-local function getGhostProjectionSoundTemplate(soundName)
-	local soundFolder = resolveGhostProjectionSoundFolder()
-	horoSoundLog("resolve_folder sound=%s folder=%s", tostring(soundName), formatInstancePath(soundFolder))
-	if not soundFolder then
+local function getGhostProjectionAudioConfig()
+	local abilityConfig = getAbilityConfig()
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function createGhostProjectionSound(soundName, looped)
+	local audioKey = SOUND_AUDIO_KEY_BY_NAME[soundName]
+	if not audioKey then
+		horoSoundWarn("sound_config_missing sound=%s issue=unknown_sound", tostring(soundName))
+		return nil
+	end
+
+	local audioConfig = getGhostProjectionAudioConfig()
+	if not audioConfig then
+		horoSoundWarn("sound_config_missing sound=%s issue=missing_audio_table", tostring(soundName))
+		return nil
+	end
+
+	local soundId = normalizeSoundId(audioConfig[audioKey])
+	if not soundId then
 		horoSoundWarn(
-			"resolve_folder_failed sound=%s issue=ghost_projection_sound_folder_missing expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Horo.GhostProjection",
-			tostring(soundName)
+			"sound_config_missing sound=%s key=%s issue=missing_sound_id",
+			tostring(soundName),
+			tostring(audioKey)
 		)
 		return nil
 	end
 
-	local soundTemplate = soundFolder and soundFolder:FindFirstChild(soundName)
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		logSoundDiagnostics("template_found", soundName, soundTemplate)
-		return soundTemplate
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = math.max(0, tonumber(audioConfig.Volume) or 1)
+
+	local rollOffMaxDistance = tonumber(audioConfig.RollOffMaxDistance)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = math.max(1, rollOffMaxDistance)
 	end
 
-	if soundTemplate then
-		horoSoundWarn(
-			"template_invalid sound=%s path=%s class=%s",
-			tostring(soundName),
-			formatInstancePath(soundTemplate),
-			tostring(soundTemplate.ClassName)
-		)
-	else
-		horoSoundWarn(
-			"template_missing sound=%s folder=%s childCount=%d",
-			tostring(soundName),
-			formatInstancePath(soundFolder),
-			#soundFolder:GetChildren()
-		)
-	end
-
-	return nil
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -28860,15 +28911,13 @@ local function playProjectionOneShot(soundName, parent)
 		return nil
 	end
 
-	local soundTemplate = getGhostProjectionSoundTemplate(soundName)
-	if not soundTemplate then
-		horoSoundWarn("one_shot_skipped sound=%s issue=template_missing", tostring(soundName))
+	local sound = createGhostProjectionSound(soundName, false)
+	if not sound then
+		horoSoundWarn("one_shot_skipped sound=%s issue=sound_config_missing", tostring(soundName))
 		return nil
 	end
 
-	horoSoundLog("one_shot_clone_begin sound=%s parent=%s", tostring(soundName), formatInstancePath(parent))
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
+	horoSoundLog("one_shot_create_begin sound=%s parent=%s", tostring(soundName), formatInstancePath(parent))
 	sound.Parent = parent
 	logSoundDiagnostics("one_shot_parented", soundName, sound)
 	SettingsAudioController.TrackSound(sound)
@@ -28909,19 +28958,17 @@ local function startProjectionMoveLoop(state)
 		return nil
 	end
 
-	local soundTemplate = getGhostProjectionSoundTemplate(SOUND_MOVE_LOOP)
-	if not soundTemplate then
-		horoSoundWarn("move_loop_skipped issue=template_missing projectionId=%s", tostring(state.ProjectionId))
+	local sound = createGhostProjectionSound(SOUND_MOVE_LOOP, true)
+	if not sound then
+		horoSoundWarn("move_loop_skipped issue=sound_config_missing projectionId=%s", tostring(state.ProjectionId))
 		return nil
 	end
 
 	horoSoundLog(
-		"move_loop_clone_begin projectionId=%s parent=%s",
+		"move_loop_create_begin projectionId=%s parent=%s",
 		tostring(state.ProjectionId),
 		formatInstancePath(state.GhostRoot)
 	)
-	local sound = soundTemplate:Clone()
-	sound.Looped = true
 	sound.Parent = state.GhostRoot
 	logSoundDiagnostics("move_loop_parented", SOUND_MOVE_LOOP, sound)
 	SettingsAudioController.TrackSound(sound)
@@ -37133,6 +37180,14 @@ local DEFAULT_RESOLVE_BACK_JERK_DISTANCE = 0.45
 local DEFAULT_RESOLVE_BACK_JERK_DURATION = 0.08
 local DEFAULT_RESOLVE_VFX_FORWARD_OFFSET = 0
 local DEFAULT_RESOLVE_FACING_LOCK_DURATION = 0.6
+local SURFACE_PROBE_INTERVAL = 1 / 24
+local SURFACE_REPROBE_DISTANCE = 0.75
+local MIN_TARGET_PROBE_DISTANCE = 0.035
+local MIN_PIVOT_POSITION_DELTA = 0.03
+local MIN_PIVOT_DIRECTION_DOT = 0.9995
+local ZERO_VELOCITY_EPSILON = 0.025
+local PENDING_START_FEEDBACK_TIMEOUT = 2
+local TRAIL_PULSE_POOL_LIMIT = 48
 local DEFAULT_ENTRY_CUE_MARKERS = {
 	"EnterGround",
 	"EntryVfx",
@@ -37507,6 +37562,88 @@ local function createEffectPart(name, size, color, cframe, material, transparenc
 	return part
 end
 
+local trailPulsePool = {
+	Pulse = {},
+	Accent = {},
+	Active = {},
+}
+
+local function setupEffectPart(part, name, size, color, cframe, material, transparency, shape)
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = material or Enum.Material.Ground
+	part.Transparency = transparency or 0
+	part.Color = color
+	part.Size = size
+	part.CFrame = cframe
+	part.Shape = shape or Enum.PartType.Block
+end
+
+local function acquireTrailEffectPart(poolName, name, size, color, cframe, material, transparency, shape)
+	local pool = trailPulsePool[poolName]
+	local part = pool and table.remove(pool) or nil
+	if not part then
+		part = Instance.new("Part")
+	end
+
+	setupEffectPart(part, name, size, color, cframe, material, transparency, shape)
+	trailPulsePool.Active[part] = poolName
+	part.Parent = Workspace
+	return part
+end
+
+local function releaseTrailEffectPart(part)
+	if not part then
+		return
+	end
+
+	local poolName = trailPulsePool.Active[part]
+	trailPulsePool.Active[part] = nil
+	part.Parent = nil
+	local pool = trailPulsePool[poolName]
+	if pool and #pool < TRAIL_PULSE_POOL_LIMIT then
+		pool[#pool + 1] = part
+	else
+		part:Destroy()
+	end
+end
+
+local function tweenAndReleaseTrailPart(part, duration, tweenGoals)
+	local tween = TweenService:Create(
+		part,
+		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		tweenGoals
+	)
+	tween:Play()
+	tween.Completed:Connect(function()
+		releaseTrailEffectPart(part)
+	end)
+end
+
+local function cleanupTrailPulsePool()
+	for part in pairs(trailPulsePool.Active) do
+		if part then
+			part:Destroy()
+		end
+		trailPulsePool.Active[part] = nil
+	end
+
+	for _, poolName in ipairs({ "Pulse", "Accent" }) do
+		local pool = trailPulsePool[poolName]
+		for index = #pool, 1, -1 do
+			local part = pool[index]
+			pool[index] = nil
+			if part then
+				part:Destroy()
+			end
+		end
+	end
+end
+
 local function createBurst(position, radius, isResolve)
 	local groundPosition = getGroundEffectPosition(position)
 	if not groundPosition then
@@ -37546,11 +37683,12 @@ end
 local function createTrailPulse(position, radius)
 	local groundPosition = getGroundEffectPosition(position)
 	if not groundPosition then
-		return
+		return false
 	end
 
 	local pulseRadius = math.max(0.7, tonumber(radius) or 1.3)
-	local pulse = createEffectPart(
+	local pulse = acquireTrailEffectPart(
+		"Pulse",
 		"MoguBurrowPulse",
 		Vector3.new(pulseRadius, pulseRadius * 0.42, pulseRadius),
 		TRAIL_COLOR,
@@ -37559,12 +37697,13 @@ local function createTrailPulse(position, radius)
 		0.26,
 		Enum.PartType.Ball
 	)
-	tweenAndDestroy(pulse, 0.18, {
+	tweenAndReleaseTrailPart(pulse, 0.18, {
 		Transparency = 1,
 		Size = pulse.Size * 1.35,
 	})
 
-	local accent = createEffectPart(
+	local accent = acquireTrailEffectPart(
+		"Accent",
 		"MoguBurrowPulseAccent",
 		Vector3.new(0.12, pulseRadius * 1.15, pulseRadius * 1.15),
 		TRAIL_ACCENT_COLOR,
@@ -37573,21 +37712,61 @@ local function createTrailPulse(position, radius)
 		0.36,
 		Enum.PartType.Cylinder
 	)
-	tweenAndDestroy(accent, 0.16, {
+	tweenAndReleaseTrailPart(accent, 0.16, {
 		Transparency = 1,
 		Size = Vector3.new(0.12, pulseRadius * 1.65, pulseRadius * 1.65),
 	})
+	return true
 end
 
-local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition, direction)
+local function shouldSkipPivot(pivotState, targetRootCFrame)
+	if type(pivotState) ~= "table" or typeof(targetRootCFrame) ~= "CFrame" then
+		return false
+	end
+
+	local lastRootCFrame = pivotState.LastPivotRootCFrame
+	if typeof(lastRootCFrame) ~= "CFrame" then
+		return false
+	end
+
+	return (lastRootCFrame.Position - targetRootCFrame.Position).Magnitude <= MIN_PIVOT_POSITION_DELTA
+		and lastRootCFrame.LookVector:Dot(targetRootCFrame.LookVector) >= MIN_PIVOT_DIRECTION_DOT
+end
+
+local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition, direction, pivotState)
 	if not character or not rootPart or typeof(targetRootPosition) ~= "Vector3" then
-		return
+		return false
 	end
 
 	local facingDirection = resolvePlanarDirection(direction, rootPart.CFrame.LookVector)
 	local targetRootCFrame = CFrame.lookAt(targetRootPosition, targetRootPosition + facingDirection, Vector3.yAxis)
+	if shouldSkipPivot(pivotState, targetRootCFrame) then
+		return false
+	end
+
 	local pivotToRoot = character:GetPivot():ToObjectSpace(rootPart.CFrame)
 	character:PivotTo(targetRootCFrame * pivotToRoot:Inverse())
+	if type(pivotState) == "table" then
+		pivotState.LastPivotRootCFrame = targetRootCFrame
+	end
+	return true
+end
+
+local function zeroRootVelocity(rootPart, includeAngular, includeLinear)
+	if not rootPart then
+		return false
+	end
+
+	local wrote = false
+	if includeLinear ~= false and rootPart.AssemblyLinearVelocity.Magnitude > ZERO_VELOCITY_EPSILON then
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		wrote = true
+	end
+	if includeAngular ~= false and rootPart.AssemblyAngularVelocity.Magnitude > ZERO_VELOCITY_EPSILON then
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		wrote = true
+	end
+	return wrote
 end
 
 local function lockCharacterToSurface(
@@ -37598,7 +37777,9 @@ local function lockCharacterToSurface(
 	abilityConfig,
 	duration,
 	jerkDistance,
-	jerkDuration
+	jerkDuration,
+	pivotState,
+	onPivotWrite
 )
 	if not character or not rootPart or typeof(targetRootPosition) ~= "Vector3" then
 		return
@@ -37638,9 +37819,11 @@ local function lockCharacterToSurface(
 				)
 			) or lockedRootPosition
 
-			pivotCharacterToRootPosition(character, rootPart, resolvedPosition, direction)
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			local didPivot = pivotCharacterToRootPosition(character, rootPart, resolvedPosition, direction, pivotState)
+			if didPivot and typeof(onPivotWrite) == "function" then
+				onPivotWrite()
+			end
+			zeroRootVelocity(rootPart, true)
 			RunService.Heartbeat:Wait()
 		end
 	end)
@@ -37677,20 +37860,33 @@ local function restoreAutoRotateAfterResolve(humanoid, originalAutoRotate, anima
 	task.delay(math.max(0.05, tonumber(fallbackDuration) or 0), restore)
 end
 
-local function keepFacingDuringResolve(character, rootPart, direction, duration)
+local function keepFacingDuringResolve(character, rootPart, direction, duration, startDelay, pivotState, onPivotWrite)
 	if not character or not rootPart then
 		return
 	end
 
-	local endsAt = os.clock() + math.max(0, tonumber(duration) or 0)
+	local resolvedStartDelay = math.max(0, tonumber(startDelay) or 0)
+	local resolvedDuration = math.max(0, tonumber(duration) or 0)
+	if resolvedDuration <= 0 then
+		return
+	end
+
 	task.spawn(function()
+		if resolvedStartDelay > 0 then
+			task.wait(resolvedStartDelay)
+		end
+
+		local endsAt = os.clock() + resolvedDuration
 		while os.clock() <= endsAt do
 			if not character.Parent or not rootPart.Parent then
 				return
 			end
 
-			pivotCharacterToRootPosition(character, rootPart, rootPart.Position, direction)
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			local didPivot = pivotCharacterToRootPosition(character, rootPart, rootPart.Position, direction, pivotState)
+			if didPivot and typeof(onPivotWrite) == "function" then
+				onPivotWrite()
+			end
+			zeroRootVelocity(rootPart, true, false)
 			RunService.Heartbeat:Wait()
 		end
 	end)
@@ -37752,7 +37948,75 @@ function MoguClient.Create(config)
 	self.burrowStates = {}
 	self.visualBurrowStates = {}
 	self.concealStates = {}
+	self.pendingBurrowFeedback = nil
+	self.diagnostics = {
+		LastFlushAt = os.clock(),
+		PivotWrites = 0,
+		TrailPulseCount = 0,
+		CleanupCount = 0,
+		LastSurfaceProbeTimeMs = 0,
+		LastRaycastsPerSecond = 0,
+		LastPivotWritesPerSecond = 0,
+		LastStartInputToFeedbackMs = 0,
+		LastStartInputToAuthorizedMs = 0,
+		LastResolveCorrectionDistance = 0,
+	}
 	return self
+end
+
+function MoguClient:SetDiagnosticAttribute(name, value)
+	local player = self.player
+	if not player or typeof(name) ~= "string" then
+		return
+	end
+
+	player:SetAttribute(name, value)
+end
+
+function MoguClient:RecordPivotWrite(didWrite)
+	if didWrite and self.diagnostics then
+		self.diagnostics.PivotWrites += 1
+	end
+end
+
+function MoguClient:RecordCleanup()
+	if self.diagnostics then
+		self.diagnostics.CleanupCount += 1
+	end
+end
+
+function MoguClient:PublishDiagnostics(force)
+	local diagnostics = self.diagnostics
+	if not diagnostics then
+		return
+	end
+
+	local now = os.clock()
+	local elapsed = math.max(0.001, now - (diagnostics.LastFlushAt or now))
+	if not force and elapsed < 1 then
+		return
+	end
+
+	local sharedDiagnostics = MoguBurrowShared.ConsumeDiagnostics()
+	local raycastsPerSecond = math.floor(((sharedDiagnostics.RaycastCount or 0) / elapsed) + 0.5)
+	local pivotWritesPerSecond = math.floor(((diagnostics.PivotWrites or 0) / elapsed) + 0.5)
+	local activeLocalBurrowCount = self:GetLocalBurrowState() and 1 or 0
+
+	diagnostics.LastFlushAt = now
+	diagnostics.LastRaycastsPerSecond = raycastsPerSecond
+	diagnostics.LastPivotWritesPerSecond = pivotWritesPerSecond
+	diagnostics.LastSurfaceProbeTimeMs = sharedDiagnostics.SurfaceProbeTimeMs or 0
+	diagnostics.PivotWrites = 0
+
+	self:SetDiagnosticAttribute("MoguRaycastsPerSecond", raycastsPerSecond)
+	self:SetDiagnosticAttribute("MoguSurfaceProbeTimeMs", diagnostics.LastSurfaceProbeTimeMs)
+	self:SetDiagnosticAttribute("MoguPivotToWritesPerSecond", pivotWritesPerSecond)
+	self:SetDiagnosticAttribute("MoguTrailPulseCount", diagnostics.TrailPulseCount or 0)
+	self:SetDiagnosticAttribute("MoguActiveLocalBurrowCount", activeLocalBurrowCount)
+	self:SetDiagnosticAttribute("MoguStartInputToFeedbackMs", diagnostics.LastStartInputToFeedbackMs or 0)
+	self:SetDiagnosticAttribute("MoguStartInputToAuthorizedMs", diagnostics.LastStartInputToAuthorizedMs or 0)
+	self:SetDiagnosticAttribute("MoguResolveCorrectionDistance", diagnostics.LastResolveCorrectionDistance or 0)
+	self:SetDiagnosticAttribute("MoguCleanupCount", diagnostics.CleanupCount or 0)
 end
 
 function MoguClient:SetBurrowInputKeyState(keyCode, isPressed)
@@ -38118,6 +38382,79 @@ function MoguClient:TriggerBurrowMovementCue(targetPlayer, burrowState, startPos
 	return true
 end
 
+function MoguClient:BeginLocalStartFeedback(direction)
+	if self.pendingBurrowFeedback or self:GetLocalBurrowState() then
+		return nil
+	end
+
+	local character = getCharacter(self.player)
+	local rootPart = self.getLocalRootPart()
+	if not character or not rootPart then
+		return nil
+	end
+
+	local requestedAt = os.clock()
+	local abilityConfig = getAbilityConfig()
+	local resolvedDirection = resolvePlanarDirection(direction, rootPart.CFrame.LookVector)
+	local startPosition = rootPart.Position
+	local surfacePosition = select(
+		1,
+		MoguBurrowShared.ResolveSurfaceRootPosition(
+			character,
+			rootPart,
+			startPosition,
+			abilityConfig,
+			startPosition,
+			{ FastSample = true }
+		)
+	) or startPosition
+
+	local animationState = self.animationController:PlayStart(self.player, abilityConfig)
+	self:ApplyVisualBurrowOffset(self.player, abilityConfig)
+
+	local entryPosition = surfacePosition + (resolvedDirection * getEntryVfxForwardOffset(abilityConfig))
+	if not self.vfxController:PlayEntry(entryPosition, resolvedDirection, abilityConfig) then
+		createBurst(entryPosition, MoguBurrowShared.GetEntryBurstRadius(abilityConfig), false)
+	end
+
+	local token = {}
+	local pending = {
+		Token = token,
+		RequestedAt = requestedAt,
+		Direction = resolvedDirection,
+		SurfaceRootPosition = surfacePosition,
+		AnimationState = animationState,
+		EntryCueTriggered = true,
+	}
+	self.pendingBurrowFeedback = pending
+	if self.diagnostics then
+		self.diagnostics.LastStartInputToFeedbackMs = (os.clock() - requestedAt) * 1000
+	end
+
+	task.delay(PENDING_START_FEEDBACK_TIMEOUT, function()
+		if self.pendingBurrowFeedback == pending and pending.Token == token then
+			self:CancelLocalStartFeedback("timeout")
+		end
+	end)
+
+	return pending
+end
+
+function MoguClient:CancelLocalStartFeedback(reason)
+	local pending = self.pendingBurrowFeedback
+	if not pending then
+		return false
+	end
+
+	self.pendingBurrowFeedback = nil
+	self.animationController:StopAnimation(pending.AnimationState, reason or "prediction_cancelled")
+	self:ClearVisualBurrowOffset(self.player, true, DEFAULT_VISUAL_RISE_DURATION)
+	self:ClearConceal(self.player)
+	self:RecordCleanup()
+	self:PublishDiagnostics(true)
+	return true
+end
+
 function MoguClient:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
 	local stageConfig = getAnimationStageConfig("Start", abilityConfig)
 	local fallbackTime = getEntryCueFallbackTime(stageConfig)
@@ -38293,6 +38630,14 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 	end
 
 	local abilityConfig = getAbilityConfig()
+	local pendingFeedback = if targetPlayer == self.player then self.pendingBurrowFeedback else nil
+	if pendingFeedback then
+		self.pendingBurrowFeedback = nil
+		if self.diagnostics then
+			self.diagnostics.LastStartInputToAuthorizedMs = (os.clock() - pendingFeedback.RequestedAt) * 1000
+		end
+	end
+
 	local duration = math.max(0.5, tonumber(payload.Duration) or MoguBurrowShared.GetBurrowDuration(abilityConfig))
 	local startedAt = tonumber(payload.StartedAt) or Workspace:GetServerTimeNow()
 	local burrowState = {
@@ -38313,6 +38658,7 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 		),
 		ConcealDelay = math.max(0, tonumber(getAnimationStageConfig("Start", abilityConfig).ConcealDelay) or 0),
 		IsLocal = targetPlayer == self.player,
+		EntryCueTriggered = pendingFeedback and pendingFeedback.EntryCueTriggered == true or false,
 	}
 
 	local startPosition = payload.StartPosition or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
@@ -38326,10 +38672,15 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 				rootPart,
 				startPosition or rootPart.Position,
 				abilityConfig,
-				typeof(startPosition) == "Vector3" and startPosition or nil
+				typeof(startPosition) == "Vector3" and startPosition or nil,
+				{ FastSample = true }
 			)
 			burrowState.SurfaceRootPosition = resolvedSurfacePosition
-			if not hasSurface and typeof(resolvedSurfacePosition) ~= "Vector3" then
+				or (pendingFeedback and pendingFeedback.SurfaceRootPosition)
+			burrowState.LastSurfaceProbeAt = os.clock()
+			burrowState.LastSurfaceProbePosition = burrowState.SurfaceRootPosition
+			burrowState.LastSurfaceProbeHadSurface = hasSurface
+			if not hasSurface and typeof(burrowState.SurfaceRootPosition) ~= "Vector3" then
 				shouldRequestSurfaceImmediately = true
 			end
 		end
@@ -38357,15 +38708,17 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 			or (typeof(startPosition) == "Vector3" and startPosition)
 			or (rootPart and rootPart.Position)
 		if character and rootPart and typeof(pivotPosition) == "Vector3" then
-			pivotCharacterToRootPosition(character, rootPart, pivotPosition, burrowState.Direction)
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, pivotPosition, burrowState.Direction, burrowState))
+			zeroRootVelocity(rootPart, true)
 		end
 	end
 
-	burrowState.AnimationState = self.animationController:PlayStart(targetPlayer, abilityConfig)
+	burrowState.AnimationState = pendingFeedback and pendingFeedback.AnimationState
+		or self.animationController:PlayStart(targetPlayer, abilityConfig)
 
-	self:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	if not burrowState.EntryCueTriggered then
+		self:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	end
 	self:ScheduleBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
 end
 
@@ -38389,6 +38742,9 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 	)
 	local localHumanoid = nil
 	local originalAutoRotate = nil
+	if targetPlayer == self.player and self.diagnostics then
+		self.diagnostics.LastResolveCorrectionDistance = math.max(0, tonumber(payload.ResolveCorrectionDistance) or 0)
+	end
 	self.burrowStates[targetPlayer] = nil
 	clearBurrowCueState(burrowState)
 	self.animationController:StopAnimation(burrowState and burrowState.AnimationState, "resolve_transition")
@@ -38427,11 +38783,14 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 					getResolveAnimationPosition(resolvedSurfacePosition, resolveDirection, rootPart, abilityConfig)
 				resolveVfxPosition =
 					getResolveVfxPosition(resolveAnimationPosition, resolveDirection, rootPart, abilityConfig)
-				pivotCharacterToRootPosition(
-					character,
-					rootPart,
-					resolveAnimationPosition,
-					resolveDirection
+				self:RecordPivotWrite(
+					pivotCharacterToRootPosition(
+						character,
+						rootPart,
+						resolveAnimationPosition,
+						resolveDirection,
+						burrowState
+					)
 				)
 				lockCharacterToSurface(
 					character,
@@ -38441,16 +38800,39 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 					abilityConfig,
 					surfaceLockDuration,
 					backJerkDistance,
-					backJerkDuration
+					backJerkDuration,
+					burrowState,
+					function()
+						self:RecordPivotWrite(true)
+					end
 				)
-				keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+				keepFacingDuringResolve(
+					character,
+					rootPart,
+					resolveDirection,
+					math.max(0, facingLockDuration - surfaceLockDuration),
+					surfaceLockDuration,
+					burrowState,
+					function()
+						self:RecordPivotWrite(true)
+					end
+				)
 			else
 				resolveVfxPosition = getResolveVfxPosition(rootPart.Position, resolveDirection, rootPart, abilityConfig)
-				pivotCharacterToRootPosition(character, rootPart, rootPart.Position, resolveDirection)
-				keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+				self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, rootPart.Position, resolveDirection, burrowState))
+				keepFacingDuringResolve(
+					character,
+					rootPart,
+					resolveDirection,
+					facingLockDuration,
+					0,
+					burrowState,
+					function()
+						self:RecordPivotWrite(true)
+					end
+				)
 			end
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			zeroRootVelocity(rootPart, true)
 		end
 	else
 		local character = getCharacter(targetPlayer)
@@ -38464,7 +38846,7 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 			resolveVfxPosition = getResolveVfxPosition(resolveAnimationPosition, resolveDirection, rootPart, abilityConfig)
 			pivotCharacterToRootPosition(character, rootPart, resolveAnimationPosition, resolveDirection)
 			keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			zeroRootVelocity(rootPart, true, false)
 		end
 	end
 
@@ -38525,8 +38907,10 @@ function MoguClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 		return nil
 	end
 
+	local direction = self:GetBurrowActivationDirection(rootPart)
+	self:BeginLocalStartFeedback(direction)
 	return {
-		Direction = self:GetBurrowActivationDirection(rootPart),
+		Direction = direction,
 	}
 end
 
@@ -38555,20 +38939,26 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	humanoid.Jump = false
 
 	local abilityConfig = getAbilityConfig()
-	local currentSurfacePosition, hasCurrentSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
-		character,
-		rootPart,
-		burrowState.SurfaceRootPosition or rootPart.Position,
-		abilityConfig,
-		burrowState.SurfaceRootPosition
-	)
-	if not currentSurfacePosition then
-		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		return
+	local localNow = os.clock()
+	local currentSurfacePosition = burrowState.SurfaceRootPosition
+	if typeof(currentSurfacePosition) ~= "Vector3" then
+		local resolvedSurfacePosition, hasSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+			character,
+			rootPart,
+			rootPart.Position,
+			abilityConfig,
+			rootPart.Position,
+			{ FastSample = true }
+		)
+		currentSurfacePosition = resolvedSurfacePosition
+		burrowState.LastSurfaceProbeAt = localNow
+		burrowState.LastSurfaceProbePosition = resolvedSurfacePosition or rootPart.Position
+		burrowState.LastSurfaceProbeHadSurface = hasSurface
 	end
-	if not hasCurrentSurface and typeof(burrowState.SurfaceRootPosition) == "Vector3" then
-		currentSurfacePosition = burrowState.SurfaceRootPosition
+	if typeof(currentSurfacePosition) ~= "Vector3" then
+		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+		zeroRootVelocity(rootPart, false)
+		return
 	end
 	burrowState.SurfaceRootPosition = currentSurfacePosition
 
@@ -38577,42 +38967,71 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	end
 
 	if burrowState.SurfaceRequested then
-		pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
+		self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction, burrowState))
+		zeroRootVelocity(rootPart, false)
 		return
 	end
 
 	if not burrowState.MovementCueTriggered then
-		pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
+		self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction, burrowState))
+		zeroRootVelocity(rootPart, false)
 		return
 	end
 
 	local desiredDirection = self:GetCameraRelativeBurrowDirection(rootPart)
 	local targetPlanarPosition = currentSurfacePosition
+	local movementDistance = 0
 	if desiredDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
-		targetPlanarPosition = currentSurfacePosition + (desiredDirection.Unit * burrowState.MoveSpeed * dt)
+		movementDistance = burrowState.MoveSpeed * math.max(0, dt or 0)
+		targetPlanarPosition = currentSurfacePosition + (desiredDirection.Unit * movementDistance)
 	end
 
-	local resolvedSurfacePosition, hasTargetSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
-		character,
-		rootPart,
-		targetPlanarPosition,
-		abilityConfig,
-		currentSurfacePosition
-	)
-	if not resolvedSurfacePosition then
-		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		return
+	local resolvedSurfacePosition = targetPlanarPosition
+	local hasTargetSurface = false
+	local shouldProbeTarget = movementDistance > MIN_TARGET_PROBE_DISTANCE
+	if shouldProbeTarget then
+		local lastProbePosition = burrowState.LastSurfaceProbePosition
+		local distanceFromLastProbe = if typeof(lastProbePosition) == "Vector3"
+			then (targetPlanarPosition - lastProbePosition).Magnitude
+			else math.huge
+		shouldProbeTarget = localNow >= ((burrowState.LastSurfaceProbeAt or 0) + SURFACE_PROBE_INTERVAL)
+			or distanceFromLastProbe >= SURFACE_REPROBE_DISTANCE
+			or burrowState.LastSurfaceProbeHadSurface ~= true
+	end
+
+	if shouldProbeTarget then
+		resolvedSurfacePosition, hasTargetSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+			character,
+			rootPart,
+			targetPlanarPosition,
+			abilityConfig,
+			currentSurfacePosition,
+			{ FastSample = true }
+		)
+		burrowState.LastSurfaceProbeAt = localNow
+		burrowState.LastSurfaceProbePosition = targetPlanarPosition
+		burrowState.LastSurfaceProbeHadSurface = hasTargetSurface
+		if not resolvedSurfacePosition then
+			self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+			zeroRootVelocity(rootPart, false)
+			return
+		end
+	elseif movementDistance > MIN_TARGET_PROBE_DISTANCE then
+		resolvedSurfacePosition = Vector3.new(targetPlanarPosition.X, currentSurfacePosition.Y, targetPlanarPosition.Z)
+		hasTargetSurface = true
+	else
+		resolvedSurfacePosition = currentSurfacePosition
+		hasTargetSurface = burrowState.LastSurfaceProbeHadSurface == true
 	end
 	if desiredDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and hasTargetSurface then
 		burrowState.Direction = desiredDirection.Unit
 	end
 
 	burrowState.SurfaceRootPosition = if hasTargetSurface then resolvedSurfacePosition else currentSurfacePosition
-	pivotCharacterToRootPosition(character, rootPart, resolvedSurfacePosition, burrowState.Direction)
-	rootPart.AssemblyLinearVelocity = Vector3.zero
+	self:RecordPivotWrite(
+		pivotCharacterToRootPosition(character, rootPart, burrowState.SurfaceRootPosition, burrowState.Direction, burrowState)
+	)
+	zeroRootVelocity(rootPart, false)
 end
 
 function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
@@ -38627,7 +39046,9 @@ function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
 
 	burrowState.LastTrailAt = now
 	if not self.vfxController:PlayTrail(rootPart.Position, burrowState.Direction, getAbilityConfig()) then
-		createTrailPulse(rootPart.Position, tonumber(getAbilityConfig().TrailWidth) or 2.6)
+		if createTrailPulse(rootPart.Position, tonumber(getAbilityConfig().TrailWidth) or 2.6) and self.diagnostics then
+			self.diagnostics.TrailPulseCount += 1
+		end
 	end
 end
 
@@ -38653,7 +39074,12 @@ function MoguClient:HandleEffect(targetPlayer, abilityName, payload)
 	return false
 end
 
-function MoguClient:HandleStateEvent()
+function MoguClient:HandleStateEvent(eventName, abilityName)
+	if abilityName == ABILITY_NAME and eventName == "Denied" then
+		self:CancelLocalStartFeedback("server_denied")
+		return true
+	end
+
 	return false
 end
 
@@ -38672,6 +39098,7 @@ function MoguClient:Update(dt)
 			end
 		end
 	end
+	self:PublishDiagnostics(false)
 end
 
 function MoguClient:HandleEquipped()
@@ -38684,6 +39111,7 @@ function MoguClient:HandleUnequipped()
 end
 
 function MoguClient:HandleCharacterRemoving()
+	self:CancelLocalStartFeedback("character_removing")
 	local localBurrowState = self.burrowStates[self.player]
 	if localBurrowState then
 		local humanoid = self.getHumanoid()
@@ -38704,6 +39132,9 @@ function MoguClient:HandleCharacterRemoving()
 		self:ClearVisualBurrowOffset(targetPlayer, false)
 	end
 	self.vfxController:HandleCharacterRemoving()
+	cleanupTrailPulsePool()
+	self:RecordCleanup()
+	self:PublishDiagnostics(true)
 
 	self.burrowInputState.Forward = false
 	self.burrowInputState.Backward = false
@@ -38712,12 +39143,17 @@ function MoguClient:HandleCharacterRemoving()
 end
 
 function MoguClient:HandlePlayerRemoving(leavingPlayer)
+	if leavingPlayer == self.player then
+		self:CancelLocalStartFeedback("player_removing")
+	end
 	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	self.animationController:StopAnimation(self.burrowStates[leavingPlayer] and self.burrowStates[leavingPlayer].AnimationState, "player_removing")
 	self.burrowStates[leavingPlayer] = nil
 	self:ClearVisualBurrowOffset(leavingPlayer, false)
 	self:ClearConceal(leavingPlayer)
 	self.vfxController:HandlePlayerRemoving(leavingPlayer)
+	self:RecordCleanup()
+	self:PublishDiagnostics(true)
 end
 
 return MoguClient
@@ -39617,6 +40053,7 @@ local MIN_PROBE_HEIGHT = 1
 local MIN_PROBE_DEPTH = 4
 local MIN_ROOT_GROUND_CLEARANCE = 1.5
 local HAZARD_RAYCAST_IGNORE_CACHE_SECONDS = 0.25
+local FAST_SAMPLE_MAX_HEIGHT_DELTA = 0.45
 
 local SURFACE_SAMPLE_DIRECTIONS = {
 	Vector3.new(0, 0, 0),
@@ -39644,6 +40081,14 @@ end
 
 local cachedHazardRaycastIgnores = nil
 local cachedHazardRaycastIgnoresAt = 0
+local cachedHazardRaycastIgnoresVersion = 0
+local surfaceRaycastParamsByCharacter = setmetatable({}, { __mode = "k" })
+local nilCharacterSurfaceRaycastParams = nil
+local diagnostics = {
+	RaycastCount = 0,
+	SurfaceProbeCount = 0,
+	SurfaceProbeTimeMs = 0,
+}
 
 local function getHazardRaycastIgnores()
 	local now = os.clock()
@@ -39660,6 +40105,7 @@ local function getHazardRaycastIgnores()
 	appendRaycastIgnore(ignoreList, refs and refs.ClientWaves)
 	cachedHazardRaycastIgnores = ignoreList
 	cachedHazardRaycastIgnoresAt = now
+	cachedHazardRaycastIgnoresVersion += 1
 
 	return ignoreList
 end
@@ -39670,17 +40116,60 @@ local function appendHazardRaycastIgnores(ignoreList)
 	end
 end
 
-local function createSurfaceRaycastParams(character, abilityConfig)
-	local params = RaycastParams.new()
-	params.FilterType = Enum.RaycastFilterType.Exclude
-	local ignoreList = {}
-	appendRaycastIgnore(ignoreList, character)
-	if not (abilityConfig and abilityConfig.IgnoreHazardsInSurfaceRaycasts == false) then
-		appendHazardRaycastIgnores(ignoreList)
+local function getSurfaceRaycastParamsCache(character)
+	if typeof(character) == "Instance" then
+		local cache = surfaceRaycastParamsByCharacter[character]
+		if not cache then
+			cache = {
+				Params = RaycastParams.new(),
+			}
+			surfaceRaycastParamsByCharacter[character] = cache
+		end
+		return cache
 	end
-	params.FilterDescendantsInstances = ignoreList
+
+	if not nilCharacterSurfaceRaycastParams then
+		nilCharacterSurfaceRaycastParams = {
+			Params = RaycastParams.new(),
+		}
+	end
+
+	return nilCharacterSurfaceRaycastParams
+end
+
+local function createSurfaceRaycastParams(character, abilityConfig)
+	local shouldIgnoreHazards = not (abilityConfig and abilityConfig.IgnoreHazardsInSurfaceRaycasts == false)
+	local hazardVersion = cachedHazardRaycastIgnoresVersion
+	if shouldIgnoreHazards then
+		getHazardRaycastIgnores()
+		hazardVersion = cachedHazardRaycastIgnoresVersion
+	end
+	local cache = getSurfaceRaycastParamsCache(character)
+	local params = cache.Params
+	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.IgnoreWater = false
+
+	if cache.Character ~= character
+		or cache.ShouldIgnoreHazards ~= shouldIgnoreHazards
+		or cache.HazardVersion ~= hazardVersion
+	then
+		local ignoreList = {}
+		appendRaycastIgnore(ignoreList, character)
+		if shouldIgnoreHazards then
+			appendHazardRaycastIgnores(ignoreList)
+		end
+		params.FilterDescendantsInstances = ignoreList
+		cache.Character = character
+		cache.ShouldIgnoreHazards = shouldIgnoreHazards
+		cache.HazardVersion = hazardVersion
+	end
+
 	return params
+end
+
+local function surfaceRaycast(origin, direction, raycastParams)
+	diagnostics.RaycastCount += 1
+	return Workspace:Raycast(origin, direction, raycastParams)
 end
 
 function MoguBurrowShared.GetPlanarVector(vector)
@@ -39786,7 +40275,7 @@ function MoguBurrowShared.GetRootGroundClearance(character, rootPart, abilityCon
 	local probeDepth = math.max(MIN_PROBE_DEPTH, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
 	local origin = rootPart.Position + Vector3.new(0, probeHeight, 0)
 	local cast = Vector3.new(0, -(probeHeight + probeDepth), 0)
-	local result = Workspace:Raycast(origin, cast, createSurfaceRaycastParams(character, abilityConfig))
+	local result = surfaceRaycast(origin, cast, createSurfaceRaycastParams(character, abilityConfig))
 	if result then
 		return math.max(rootPart.Position.Y - result.Position.Y, MIN_ROOT_GROUND_CLEARANCE), result
 	end
@@ -39807,7 +40296,21 @@ local function isResolvedRootHeightSafe(resolvedRootY, guardRootY, abilityConfig
 		and resolvedRootY <= guardRootY + MoguBurrowShared.GetMaxSurfaceRise(abilityConfig)
 end
 
-function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planarRootPosition, abilityConfig, lastSafeSurfaceRootPosition)
+local function isFastSampleAcceptable(resolvedRootY, guardRootY)
+	return typeof(guardRootY) ~= "number" or math.abs(resolvedRootY - guardRootY) <= FAST_SAMPLE_MAX_HEIGHT_DELTA
+end
+
+function MoguBurrowShared.ResolveSurfaceRootPosition(
+	character,
+	rootPart,
+	planarRootPosition,
+	abilityConfig,
+	lastSafeSurfaceRootPosition,
+	options
+)
+	local probeStartedAt = os.clock()
+	diagnostics.SurfaceProbeCount += 1
+
 	local rootGroundClearance = MoguBurrowShared.GetRootGroundClearance(character, rootPart, abilityConfig)
 	local probeHeight = math.max(MIN_PROBE_HEIGHT, tonumber(abilityConfig and abilityConfig.GroundProbeHeight) or DEFAULT_GROUND_PROBE_HEIGHT)
 	local probeDepth = math.max(MIN_PROBE_DEPTH, tonumber(abilityConfig and abilityConfig.GroundProbeDepth) or DEFAULT_GROUND_PROBE_DEPTH)
@@ -39818,6 +40321,7 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planar
 	end
 
 	if not requestedPosition then
+		diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
 		return nil, false, nil
 	end
 
@@ -39835,15 +40339,16 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planar
 	local sampleRadius = MoguBurrowShared.GetSurfaceProbeRadius(rootPart, abilityConfig)
 	local bestResult = nil
 	local bestResolvedRootY = nil
+	local fastSample = type(options) == "table" and options.FastSample == true
 
-	for _, sampleDirection in ipairs(SURFACE_SAMPLE_DIRECTIONS) do
+	for index, sampleDirection in ipairs(SURFACE_SAMPLE_DIRECTIONS) do
 		local sampleOffset = sampleDirection * sampleRadius
 		local origin = Vector3.new(
 			requestedPosition.X + sampleOffset.X,
 			castBaseY + probeHeight,
 			requestedPosition.Z + sampleOffset.Z
 		)
-		local result = Workspace:Raycast(origin, cast, raycastParams)
+		local result = surfaceRaycast(origin, cast, raycastParams)
 		if isSurfaceNormalValid(result, abilityConfig) then
 			local resolvedRootY = result.Position.Y + rootGroundClearance
 			if isResolvedRootHeightSafe(resolvedRootY, guardRootY, abilityConfig)
@@ -39852,14 +40357,33 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(character, rootPart, planar
 				bestResult = result
 				bestResolvedRootY = resolvedRootY
 			end
+
+			if index == 1 and fastSample and isFastSampleAcceptable(resolvedRootY, guardRootY) then
+				diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
+				return Vector3.new(requestedPosition.X, resolvedRootY, requestedPosition.Z), true, result
+			end
 		end
 	end
 
 	if bestResult and bestResolvedRootY then
+		diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
 		return Vector3.new(requestedPosition.X, bestResolvedRootY, requestedPosition.Z), true, bestResult
 	end
 
+	diagnostics.SurfaceProbeTimeMs += (os.clock() - probeStartedAt) * 1000
 	return fallbackPosition, false, nil
+end
+
+function MoguBurrowShared.ConsumeDiagnostics()
+	local snapshot = {
+		RaycastCount = diagnostics.RaycastCount,
+		SurfaceProbeCount = diagnostics.SurfaceProbeCount,
+		SurfaceProbeTimeMs = diagnostics.SurfaceProbeTimeMs,
+	}
+	diagnostics.RaycastCount = 0
+	diagnostics.SurfaceProbeCount = 0
+	diagnostics.SurfaceProbeTimeMs = 0
+	return snapshot
 end
 
 return MoguBurrowShared
@@ -41129,6 +41653,14 @@ local function resolveTemplate(rootCandidates, fruitIdentifier, abilityName)
 	return nil
 end
 
+local function shouldSkipOptionalSound(fruitIdentifier, abilityName, payload)
+	local resolvedFruitName = Registry.ResolveFruitName(fruitIdentifier) or fruitIdentifier
+	return resolvedFruitName == "Bomu Bomu no Mi"
+		and abilityName == "LandMine"
+		and type(payload) == "table"
+		and payload.Action == "Detonated"
+end
+
 local function createEffectAnchor(position, direction)
 	if typeof(position) ~= "Vector3" then
 		return nil
@@ -41475,7 +42007,10 @@ end
 function DevilFruitOptionalEffects.Play(targetPlayer, fruitIdentifier, abilityName, payload)
 	local rootPart = resolvePlayerRootPart(targetPlayer)
 	local visualTemplate = DevilFruitOptionalEffects.ResolveVisualTemplate(fruitIdentifier, abilityName)
-	local soundTemplate = DevilFruitOptionalEffects.ResolveSoundTemplate(fruitIdentifier, abilityName)
+	local soundTemplate = nil
+	if not shouldSkipOptionalSound(fruitIdentifier, abilityName, payload) then
+		soundTemplate = DevilFruitOptionalEffects.ResolveSoundTemplate(fruitIdentifier, abilityName)
+	end
 	local effectScale = resolveVisualScale(fruitIdentifier, abilityName, payload)
 
 	local visualPlayed = playVisualTemplate(rootPart, visualTemplate, payload, effectScale)
@@ -42371,11 +42906,9 @@ local SHIMMER_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 local AUTHORED_VFX_TEXTURE = "rbxassetid://8037777212"
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Suke.Client.SukeClient"
 local WARN_COOLDOWN = 4
-local SOUND_ABILITY_FOLDER = "Fade"
 local SOUND_ACTIVATE = "Activate"
+local SOUND_ACTIVATE_AUDIO_KEY = "ActivateSoundId"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
-local sukeFadeSoundFolder = nil
-local sukeFadeSoundTemplates = {}
 
 local function logWarn(message, ...)
 	if not DiagnosticLogLimiter.ShouldEmit("SukeClient:WARN", DiagnosticLogLimiter.BuildKey(message, ...), WARN_COOLDOWN) then
@@ -42425,34 +42958,59 @@ local function getRootPart(targetPlayer)
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
 end
 
-local function resolveFadeSoundFolder()
-	if sukeFadeSoundFolder and sukeFadeSoundFolder.Parent then
-		return sukeFadeSoundFolder
+local function normalizeSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
 	end
 
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local sounds = assets and assets:FindFirstChild("Sounds")
-	local devilFruitSounds = sounds and sounds:FindFirstChild("DevilFruits")
-	local sukeSounds = devilFruitSounds and devilFruitSounds:FindFirstChild("Suke")
-	local fadeFolder = sukeSounds and sukeSounds:FindFirstChild(SOUND_ABILITY_FOLDER)
-	sukeFadeSoundFolder = fadeFolder
-	return fadeFolder
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
 end
 
-local function getFadeSoundTemplate(soundName)
-	local cachedTemplate = sukeFadeSoundTemplates[soundName]
-	if cachedTemplate and cachedTemplate.Parent then
-		return cachedTemplate
+local function getFadeAudioConfig()
+	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
 	end
 
-	local soundFolder = resolveFadeSoundFolder()
-	local soundTemplate = soundFolder and soundFolder:FindFirstChild(soundName) or nil
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		sukeFadeSoundTemplates[soundName] = soundTemplate
-		return soundTemplate
+	return audioConfig
+end
+
+local function createFadeSound(soundName, audioKey, looped)
+	local audioConfig = getFadeAudioConfig()
+	if not audioConfig then
+		return nil
 	end
 
-	return nil
+	local soundId = normalizeSoundId(audioConfig[audioKey])
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = math.max(0, tonumber(audioConfig.Volume) or 1)
+
+	local rollOffMaxDistance = tonumber(audioConfig.RollOffMaxDistance)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = math.max(1, rollOffMaxDistance)
+	end
+
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -42470,13 +43028,11 @@ local function playFadeActivateSound(targetPlayer)
 		return nil
 	end
 
-	local soundTemplate = getFadeSoundTemplate(SOUND_ACTIVATE)
-	if not soundTemplate then
+	local sound = createFadeSound(SOUND_ACTIVATE, SOUND_ACTIVATE_AUDIO_KEY, false)
+	if not sound then
 		return nil
 	end
 
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
 	sound.Parent = rootPart
 	SettingsAudioController.TrackSound(sound)
 	sound:Play()
@@ -52620,6 +53176,7 @@ local HITBOX_NAME = "WaveHitbox"
 local VISUAL_NAME = "WaveVisual"
 local FROZEN_VISUAL_NAME = "FrozenWaveVisual"
 local USES_ASSET_VISUALS_ATTRIBUTE = "UsesWaveAssetVisuals"
+local CLIENT_VISUALS_ONLY_ATTRIBUTE = "ClientWaveVisualsOnly"
 local VISUAL_ASSET_NAME_ATTRIBUTE = "WaveVisualAssetName"
 local ACTIVE_VISUAL_ASSET_ATTRIBUTE = "ActiveWaveVisualAssetName"
 local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
@@ -52712,6 +53269,29 @@ local function getPivot(instance)
 	return instance.CFrame
 end
 
+local function translateCFrame(cframeValue, offset)
+	local rotation = cframeValue - cframeValue.Position
+	return CFrame.new(cframeValue.Position + offset) * rotation
+end
+
+local function getBouncedLateralOffset(rawOffset, maxDrift)
+	local limit = math.max(0, tonumber(maxDrift) or 0)
+	if limit <= 1e-4 then
+		return 0
+	end
+
+	local minOffset = -limit
+	local span = limit * 2
+	local cycle = span * 2
+	local shifted = (rawOffset - minOffset) % cycle
+
+	if shifted <= span then
+		return minOffset + shifted
+	end
+
+	return limit - (shifted - span)
+end
+
 local function findHitboxRoot(root)
 	if not root then
 		return nil
@@ -52748,7 +53328,7 @@ local function configureHitboxPart(part)
 
 	if part:IsA("MeshPart") then
 		pcall(function()
-			part.CollisionFidelity = Enum.CollisionFidelity.PreciseConvexDecomposition
+			part.CollisionFidelity = Enum.CollisionFidelity.Box
 		end)
 	end
 end
@@ -52767,7 +53347,7 @@ local function configureFrozenHitboxPart(part)
 
 	if part:IsA("MeshPart") then
 		pcall(function()
-			part.CollisionFidelity = Enum.CollisionFidelity.PreciseConvexDecomposition
+			part.CollisionFidelity = Enum.CollisionFidelity.Box
 		end)
 	end
 end
@@ -52796,6 +53376,29 @@ end
 
 local function clampSize(value)
 	return math.max(MIN_PART_SIZE, value)
+end
+
+local function getWaveShapeScale(sourceSize, targetSize)
+	local scaleY = if sourceSize.Y > MIN_PART_SIZE then targetSize.Y / sourceSize.Y else nil
+	local scaleZ = if sourceSize.Z > MIN_PART_SIZE then targetSize.Z / sourceSize.Z else nil
+
+	if scaleY and scaleZ then
+		return math.min(scaleY, scaleZ)
+	end
+
+	if scaleY then
+		return scaleY
+	end
+
+	if scaleZ then
+		return scaleZ
+	end
+
+	if sourceSize.X > MIN_PART_SIZE then
+		return targetSize.X / sourceSize.X
+	end
+
+	return 1
 end
 
 local function getBoundsSizeInFrame(root, boundsFrame)
@@ -52839,30 +53442,6 @@ local function getBoundsSizeInFrame(root, boundsFrame)
 	)
 end
 
-local function getWaveShapeScale(sourceSize, targetSize)
-	-- Match the old hazard's height and long span while letting the wave curl keep its natural depth.
-	local scaleY = if sourceSize.Y > MIN_PART_SIZE then targetSize.Y / sourceSize.Y else nil
-	local scaleZ = if sourceSize.Z > MIN_PART_SIZE then targetSize.Z / sourceSize.Z else nil
-
-	if scaleY and scaleZ then
-		return math.min(scaleY, scaleZ)
-	end
-
-	if scaleY then
-		return scaleY
-	end
-
-	if scaleZ then
-		return scaleZ
-	end
-
-	if sourceSize.X > MIN_PART_SIZE then
-		return targetSize.X / sourceSize.X
-	end
-
-	return 1
-end
-
 local function scaleBasePartToBox(part, targetCFrame, targetSize, configurePart)
 	configurePart(part)
 	part.Size = Vector3.new(
@@ -52895,45 +53474,6 @@ local function scaleModelToBox(model, targetCFrame, targetSize, configurePart)
 				relativePosition.X * scaleX,
 				relativePosition.Y * scaleY,
 				relativePosition.Z * scaleZ
-			)
-			* relativeRotation
-	end)
-
-	ensureModelPrimaryPart(model)
-end
-
-local function scaleBasePartToWaveShape(part, targetCFrame, targetSize, configurePart)
-	local scale = getWaveShapeScale(part.Size, targetSize)
-
-	configurePart(part)
-	part.Size = Vector3.new(
-		clampSize(part.Size.X * scale),
-		clampSize(part.Size.Y * scale),
-		clampSize(part.Size.Z * scale)
-	)
-	part.CFrame = targetCFrame
-end
-
-local function scaleModelToWaveShape(model, targetCFrame, targetSize, configurePart)
-	local sourceCFrame, sourceSize = model:GetBoundingBox()
-	local scale = getWaveShapeScale(sourceSize, targetSize)
-
-	forEachBasePart(model, function(part)
-		local relative = sourceCFrame:ToObjectSpace(part.CFrame)
-		local relativePosition = relative.Position
-		local relativeRotation = relative - relativePosition
-
-		configurePart(part)
-		part.Size = Vector3.new(
-			clampSize(part.Size.X * scale),
-			clampSize(part.Size.Y * scale),
-			clampSize(part.Size.Z * scale)
-		)
-		part.CFrame = targetCFrame
-			* CFrame.new(
-				relativePosition.X * scale,
-				relativePosition.Y * scale,
-				relativePosition.Z * scale
 			)
 			* relativeRotation
 	end)
@@ -53094,17 +53634,52 @@ local function findVisual(root, assetName)
 	return root:FindFirstChild(getVisualNameForAsset(assetName))
 end
 
-local function createHitboxFromAsset(asset, targetCFrame, targetSize)
-	local hitbox = asset:Clone()
+local function createProxyHitbox(targetCFrame, targetSize)
+	local hitbox = Instance.new("Part")
 	hitbox.Name = HITBOX_NAME
+	hitbox.Size = Vector3.new(
+		clampSize(targetSize.X),
+		clampSize(targetSize.Y),
+		clampSize(targetSize.Z)
+	)
+	hitbox.CFrame = targetCFrame
+	hitbox.CastShadow = false
+	hitbox.Material = Enum.Material.SmoothPlastic
+	hitbox.Color = Color3.fromRGB(0, 170, 255)
+	pcall(function()
+		hitbox.TopSurface = Enum.SurfaceType.Smooth
+		hitbox.BottomSurface = Enum.SurfaceType.Smooth
+	end)
+	configureHitboxPart(hitbox)
+	return hitbox
+end
 
-	if hitbox:IsA("BasePart") then
-		scaleBasePartToWaveShape(hitbox, targetCFrame, targetSize, configureHitboxPart)
-	else
-		scaleModelToWaveShape(hitbox, targetCFrame, targetSize, configureHitboxPart)
+local function getProxyHitboxBox(template)
+	local targetCFrame, targetSize = getTargetBox(template)
+	targetCFrame = targetCFrame or getPivot(template)
+	targetSize = targetSize or Vector3.new(20, 8, 8)
+
+	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME)
+	if regularAsset then
+		local _, sourceSize
+		if regularAsset:IsA("BasePart") then
+			sourceSize = regularAsset.Size
+		else
+			_, sourceSize = regularAsset:GetBoundingBox()
+		end
+
+		if sourceSize then
+			local scale = getWaveShapeScale(sourceSize, targetSize)
+			targetCFrame = targetCFrame * ASSET_TEMPLATE_ROTATION
+			targetSize = Vector3.new(
+				clampSize(sourceSize.X * scale),
+				clampSize(sourceSize.Y * scale),
+				clampSize(sourceSize.Z * scale)
+			)
+		end
 	end
 
-	return hitbox
+	return targetCFrame, targetSize
 end
 
 function WaveHazardVisuals.GetRegularWaveAsset()
@@ -53113,6 +53688,43 @@ end
 
 function WaveHazardVisuals.GetFrozenWaveAsset()
 	return getWaveAsset(FROZEN_WAVE_ASSET_NAME)
+end
+
+function WaveHazardVisuals.ComputeTimelineCFrame(
+	startCFrame,
+	endCFrame,
+	activeSeconds,
+	speed,
+	distance,
+	lateralDirection,
+	initialLateralOffset,
+	lateralVelocity,
+	maxDrift
+)
+	if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
+		return nil, 0
+	end
+
+	local travelDistance = tonumber(distance) or (endCFrame.Position - startCFrame.Position).Magnitude
+	travelDistance = math.max(travelDistance, 1e-4)
+
+	local moveSpeed = math.max(0, tonumber(speed) or 0)
+	local elapsed = math.max(0, tonumber(activeSeconds) or 0)
+	local alpha = math.clamp((elapsed * moveSpeed) / travelDistance, 0, 1)
+	local currentCFrame = startCFrame:Lerp(endCFrame, alpha)
+
+	local driftLimit = math.max(0, tonumber(maxDrift) or 0)
+	local driftVelocity = tonumber(lateralVelocity) or 0
+	if driftLimit > 1e-4 and math.abs(driftVelocity) > 1e-4 and typeof(lateralDirection) == "Vector3" then
+		local lateralMagnitude = lateralDirection.Magnitude
+		if lateralMagnitude > 1e-4 then
+			local rawOffset = (tonumber(initialLateralOffset) or 0) + driftVelocity * elapsed
+			local lateralOffset = getBouncedLateralOffset(rawOffset, driftLimit)
+			currentCFrame = translateCFrame(currentCFrame, lateralDirection.Unit * lateralOffset)
+		end
+	end
+
+	return currentCFrame, alpha
 end
 
 function WaveHazardVisuals.GetHitboxParts(root)
@@ -53179,25 +53791,17 @@ function WaveHazardVisuals.ApplyVisual(root, assetName)
 end
 
 function WaveHazardVisuals.CreateHazardFromTemplate(template)
-	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME)
-	if not regularAsset then
-		return template:Clone(), false
-	end
-
 	local model = Instance.new("Model")
 	model.Name = template.Name
 	model:SetAttribute(USES_ASSET_VISUALS_ATTRIBUTE, true)
+	model:SetAttribute(CLIENT_VISUALS_ONLY_ATTRIBUTE, true)
+	model:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, REGULAR_WAVE_ASSET_NAME)
 
-	local targetCFrame, targetSize = getTargetBox(template)
-	if not targetCFrame or not targetSize then
-		return template:Clone(), false
-	end
+	local targetCFrame, targetSize = getProxyHitboxBox(template)
 
-	local hitbox = createHitboxFromAsset(regularAsset, targetCFrame * ASSET_TEMPLATE_ROTATION, targetSize)
+	local hitbox = createProxyHitbox(targetCFrame, targetSize)
 	hitbox.Parent = model
 	model.WorldPivot = getPivot(template)
-
-	WaveHazardVisuals.ApplyVisual(model, REGULAR_WAVE_ASSET_NAME)
 	return model, true
 end
 
@@ -53209,6 +53813,11 @@ function WaveHazardVisuals.SetFrozen(root, isFrozen)
 	root:SetAttribute("Frozen", isFrozen == true)
 	WaveHazardVisuals.SetHitboxFrozen(root, isFrozen == true)
 	local assetName = if isFrozen then FROZEN_WAVE_ASSET_NAME else REGULAR_WAVE_ASSET_NAME
+	if root:GetAttribute(CLIENT_VISUALS_ONLY_ATTRIBUTE) == true then
+		root:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, assetName)
+		return true
+	end
+
 	return WaveHazardVisuals.ApplyVisual(root, assetName)
 end
 
@@ -157153,6 +157762,7 @@ local RESOLVE_REASON_MANUAL_SURFACE = "manual_surface"
 local CLEAR_REASON_EXPIRED = "expired"
 local CLEAR_REASON_RESOLVE = "resolve"
 local CLEAR_REASON_RUNTIME_RESET = "runtime_reset"
+local RESOLVE_VALIDATION_DISTANCE_PADDING = 8
 
 local activeBurrowsByPlayer = setmetatable({}, { __mode = "k" })
 
@@ -157180,6 +157790,49 @@ local function faceCharacterAlongDirection(character, rootPart, direction)
 	local pivotToRoot = character:GetPivot():ToObjectSpace(rootPart.CFrame)
 	character:PivotTo(targetRootCFrame * pivotToRoot:Inverse())
 	rootPart.AssemblyAngularVelocity = Vector3.zero
+end
+
+local function getPlanarDelta(fromPosition, toPosition)
+	if typeof(fromPosition) ~= "Vector3" or typeof(toPosition) ~= "Vector3" then
+		return nil
+	end
+
+	return Vector3.new(toPosition.X - fromPosition.X, 0, toPosition.Z - fromPosition.Z)
+end
+
+local function clampResolvePositionToAuthorizedDistance(burrowState, requestedEndPosition, endedAt)
+	local startPosition = burrowState and burrowState.StartPosition
+	if typeof(startPosition) ~= "Vector3" or typeof(requestedEndPosition) ~= "Vector3" then
+		return requestedEndPosition, 0
+	end
+
+	local planarDelta = getPlanarDelta(startPosition, requestedEndPosition)
+	if not planarDelta or planarDelta.Magnitude <= 0.01 then
+		return requestedEndPosition, 0
+	end
+
+	local elapsed = math.clamp(
+		(tonumber(endedAt) or tonumber(burrowState.StartedAt) or 0)
+			- (tonumber(burrowState.StartedAt) or tonumber(endedAt) or 0),
+		0,
+		math.max(0, tonumber(burrowState.Duration) or 0) + MoguBurrowShared.GetSurfaceResolveGrace(burrowState.AbilityConfig)
+	)
+	local maxTravelDistance = (
+		math.max(0, tonumber(burrowState.MoveSpeed) or MoguBurrowShared.GetMoveSpeed(burrowState.AbilityConfig))
+			* elapsed
+	)
+		+ RESOLVE_VALIDATION_DISTANCE_PADDING
+	local planarDistance = planarDelta.Magnitude
+	if planarDistance <= maxTravelDistance then
+		return requestedEndPosition, 0
+	end
+
+	local clampedPlanarDelta = planarDelta.Unit * maxTravelDistance
+	return Vector3.new(
+		startPosition.X + clampedPlanarDelta.X,
+		requestedEndPosition.Y,
+		startPosition.Z + clampedPlanarDelta.Z
+	), planarDistance - maxTravelDistance
 end
 
 local function hideWorkspaceAnimationRig(instance)
@@ -157305,6 +157958,9 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 	local rootPart = context.RootPart
 	local character = context.Character
 	local actualEndPosition = rootPart and rootPart.Position or burrowState.StartPosition
+	local resolveCorrectionDistance = 0
+	actualEndPosition, resolveCorrectionDistance =
+		clampResolvePositionToAuthorizedDistance(burrowState, actualEndPosition, endedAt)
 	if character and rootPart then
 		actualEndPosition = select(
 			1,
@@ -157317,6 +157973,9 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 			)
 		) or burrowState.LastSafeSurfaceRootPosition or burrowState.StartPosition or actualEndPosition
 	end
+	if context.Player then
+		context.Player:SetAttribute("MoguResolveCorrectionDistance", resolveCorrectionDistance)
+	end
 
 	return {
 		Phase = PHASE_RESOLVE,
@@ -157328,6 +157987,7 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 		ActualEndPosition = actualEndPosition,
 		ResolveReason = resolveReason,
 		ResolveBurstRadius = MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
+		ResolveCorrectionDistance = resolveCorrectionDistance,
 		EndedEarly = resolveReason ~= RESOLVE_REASON_DURATION_ELAPSED,
 	}
 end
@@ -157384,9 +158044,11 @@ function MoguServer.Burrow(context)
 		StartPosition = startSurfacePosition,
 		LastSafeSurfaceRootPosition = startSurfacePosition,
 		AbilityConfig = abilityConfig,
+		MoveSpeed = MoguBurrowShared.GetMoveSpeed(abilityConfig),
 		AnimationState = animationState,
 	}
 	activeBurrowsByPlayer[player] = burrowState
+	player:SetAttribute("MoguResolveCorrectionDistance", 0)
 	setProtectionState(player, endsAt + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig))
 
 	return buildStartPayload(context, startedAt, endsAt, direction, directionSource, startSurfacePosition), {
@@ -175853,6 +176515,17 @@ if not ProgressBarSync then
 end
 
 local joinOrder = {}
+local diagnostics = {
+	RequestCount = 0,
+	BroadcastCount = 0,
+	FireClientCount = 0,
+}
+
+local function publishDiagnostics()
+	ProgressBarSync:SetAttribute("RequestCount", diagnostics.RequestCount)
+	ProgressBarSync:SetAttribute("BroadcastCount", diagnostics.BroadcastCount)
+	ProgressBarSync:SetAttribute("FireClientCount", diagnostics.FireClientCount)
+end
 
 local function removeFromJoinOrder(userId)
 	for i = #joinOrder, 1, -1 do
@@ -175875,16 +176548,21 @@ end
 
 local function broadcastAll()
 	local payload = buildPayload()
+	diagnostics.BroadcastCount += 1
 	ProgressBarSync:FireAllClients(#payload, payload)
+	publishDiagnostics()
 end
 
 local function sendToPlayer(plr)
 	local payload = buildPayload()
+	diagnostics.FireClientCount += 1
 	ProgressBarSync:FireClient(plr, #payload, payload)
+	publishDiagnostics()
 end
 
 ProgressBarSync.OnServerEvent:Connect(function(plr, action)
 	if action == "Request" then
+		diagnostics.RequestCount += 1
 		sendToPlayer(plr)
 	end
 end)
@@ -175907,6 +176585,7 @@ end)
 for _, p in ipairs(Players:GetPlayers()) do
 	joinOrder[#joinOrder + 1] = p.UserId
 end
+publishDiagnostics()
 broadcastAll()
 ]]></string>
       </Properties>
@@ -188295,6 +188974,8 @@ local CONFIG = {
 	HazardClass = "major",
 	FreezeBehavior = "pause",
 	AffectablePadding = Vector3.new(2, 1, 4),
+	KillValidationPadding = Vector3.new(12, 8, 24),
+	DiagnosticsInterval = 2,
 	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
 	DriftSpeedMinMultiplier = 1.35,
 	DriftSpeedMaxMultiplier = 1.85,
@@ -188322,7 +189003,20 @@ local HAZARD_ACTION_REMOTE_NAME = "SharedHazardAction"
 local rng = Random.new()
 local traceStateKey = nil
 local activeHazardStates = {}
+local diagnosticsHazardsFolder = nil
+local waveDiagnostics = {
+	KillRemoteCount = 0,
+	CleanupCount = 0,
+	LastCleanupServerTime = 0,
+	LastUpdateTimeMs = 0,
+	UpdateTimeSum = 0,
+	UpdateTimeSamples = 0,
+	LastPublishedAt = 0,
+}
 local HAZARD_TRACE = RunService:IsStudio() and game:GetAttribute("HazardDebugTrace") == true
+local isCharacterTouchingActiveWave = nil
+local isValidActiveHazardState = nil
+local publishWaveDiagnostics = nil
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -188425,6 +189119,9 @@ if legacyHazardRemote then
 end
 
 killMeRemote.OnServerEvent:Connect(function(player)
+	waveDiagnostics.KillRemoteCount += 1
+	publishWaveDiagnostics()
+
 	local character = player.Character
 	if not character then
 		return
@@ -188432,6 +189129,12 @@ killMeRemote.OnServerEvent:Connect(function(player)
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
+		local rootPart = character:FindFirstChild("HumanoidRootPart")
+		if not rootPart or not isCharacterTouchingActiveWave or not isCharacterTouchingActiveWave(character, rootPart) then
+			hazardTrace("kill remote ignored reason=no_active_wave_overlap player=%s", player.Name)
+			return
+		end
+
 		if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
 			HoroServer.InterruptActiveProjection(player, "wave_touch")
 			return
@@ -188439,7 +189142,6 @@ killMeRemote.OnServerEvent:Connect(function(player)
 		if MoguServer.IsProtected(player) then
 			return
 		end
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
 		if ToriServer.IsProtected(player, rootPart and rootPart.Position or nil) then
 			return
 		end
@@ -188568,6 +189270,91 @@ local function getHazardHitboxVolumes(hazardRoot, fallbackCFrame, fallbackSize)
 	}
 end
 
+local function countActiveProxyParts()
+	local activeCount = 0
+	local proxyPartCount = 0
+
+	for hazardRoot, state in pairs(activeHazardStates) do
+		if isValidActiveHazardState(hazardRoot, state) then
+			activeCount += 1
+			proxyPartCount += #WaveHazardVisuals.GetHitboxParts(hazardRoot)
+		end
+	end
+
+	return activeCount, proxyPartCount
+end
+
+publishWaveDiagnostics = function(hazardsFolder)
+	local folder = hazardsFolder or diagnosticsHazardsFolder
+	if not folder or not folder.Parent then
+		return
+	end
+
+	local activeCount, proxyPartCount = countActiveProxyParts()
+	folder:SetAttribute("WaveActiveCount", activeCount)
+	folder:SetAttribute("WaveServerProxyPartCount", proxyPartCount)
+	folder:SetAttribute("WaveServerUpdateTimeMs", waveDiagnostics.LastUpdateTimeMs)
+	folder:SetAttribute("WaveKillRemoteCount", waveDiagnostics.KillRemoteCount)
+	folder:SetAttribute("WaveCleanupCount", waveDiagnostics.CleanupCount)
+	folder:SetAttribute("WaveLastCleanupServerTime", waveDiagnostics.LastCleanupServerTime)
+end
+
+local function recordWaveUpdateTime(elapsedSeconds)
+	waveDiagnostics.UpdateTimeSum += math.max(0, tonumber(elapsedSeconds) or 0)
+	waveDiagnostics.UpdateTimeSamples += 1
+
+	local now = os.clock()
+	if now - waveDiagnostics.LastPublishedAt < CONFIG.DiagnosticsInterval then
+		return
+	end
+
+	if waveDiagnostics.UpdateTimeSamples > 0 then
+		waveDiagnostics.LastUpdateTimeMs =
+			(waveDiagnostics.UpdateTimeSum / waveDiagnostics.UpdateTimeSamples) * 1000
+	end
+	waveDiagnostics.UpdateTimeSum = 0
+	waveDiagnostics.UpdateTimeSamples = 0
+	waveDiagnostics.LastPublishedAt = now
+	publishWaveDiagnostics()
+end
+
+local function isPointInsideBox(point, boxCFrame, boxSize, padding)
+	if typeof(point) ~= "Vector3" or typeof(boxCFrame) ~= "CFrame" or typeof(boxSize) ~= "Vector3" then
+		return false
+	end
+
+	local safePadding = if typeof(padding) == "Vector3" then padding else Vector3.zero
+	local halfSize = (boxSize + safePadding) * 0.5
+	local localPoint = boxCFrame:PointToObjectSpace(point)
+
+	return math.abs(localPoint.X) <= halfSize.X
+		and math.abs(localPoint.Y) <= halfSize.Y
+		and math.abs(localPoint.Z) <= halfSize.Z
+end
+
+isCharacterTouchingActiveWave = function(_, rootPart)
+	if not rootPart or not rootPart.Parent then
+		return false
+	end
+
+	local validationPadding = CONFIG.KillValidationPadding + rootPart.Size
+	local rootPosition = rootPart.Position
+
+	for hazardRoot, state in pairs(activeHazardStates) do
+		if isValidActiveHazardState(hazardRoot, state) and os.clock() >= state.FrozenUntil then
+			local volumes = getHazardHitboxVolumes(hazardRoot, state.CurrentCFrame, state.VolumeSize)
+			for _, volume in ipairs(volumes) do
+				local volumePadding = if typeof(volume.Padding) == "Vector3" then volume.Padding else Vector3.zero
+				if isPointInsideBox(rootPosition, volume.CFrame, volume.Size, validationPadding + volumePadding) then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
 local function anchorHazard(instance)
 	if instance:IsA("BasePart") then
 		instance.Anchored = true
@@ -188633,6 +189420,8 @@ local function applyHazardAttributes(instance, variant)
 	instance:SetAttribute("Speed", variant.Speed)
 	instance:SetAttribute("CanFreeze", true)
 	instance:SetAttribute("FreezeBehavior", CONFIG.FreezeBehavior)
+	instance:SetAttribute("WaveVisualMode", "ClientTimeline")
+	instance:SetAttribute("ActiveWaveVisualAssetName", "Regular Wave")
 end
 
 local function chooseVariant()
@@ -188645,7 +189434,7 @@ local function chooseSpawnDelay()
 	return rng:NextNumber(minDelay, maxDelay)
 end
 
-local function isValidActiveHazardState(hazardRoot, state)
+isValidActiveHazardState = function(hazardRoot, state)
 	return typeof(hazardRoot) == "Instance" and type(state) == "table" and not state.Destroyed and hazardRoot.Parent ~= nil
 end
 
@@ -188760,17 +189549,67 @@ end
 local function createServerHazardController(hazardRoot, startCF, endCF, speed, lateralDirection, lateralDriftLimit)
 	local distance = (startCF.Position - endCF.Position).Magnitude
 	local _, hazardSize = getBox(hazardRoot)
+	local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
+	local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+	local initialLateralOffset = 0
+	local lateralVelocity = 0
+
+	if driftStyle == "drift" and maxDrift > 1e-3 and distance > 1e-4 then
+		local travelTime = distance / math.max(speed, 1e-3)
+		local bounceCount = rng:NextInteger(3, 6)
+		local minLateralSpeed = ((maxDrift * 2) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
+		local maxLateralSpeed = ((maxDrift * 2 * bounceCount) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
+
+		initialLateralOffset = rng:NextNumber(-maxDrift, maxDrift)
+		lateralVelocity = rng:NextNumber(minLateralSpeed, maxLateralSpeed)
+		if rng:NextInteger(0, 1) == 0 then
+			lateralVelocity = -lateralVelocity
+		end
+	end
+
 	local controller = {
 		HazardRoot = hazardRoot,
 		Destroyed = false,
 		FrozenUntil = 0,
 		FreezeToken = 0,
 		Alpha = 0,
+		ActiveSeconds = 0,
 		CurrentCFrame = startCF,
 		Position = startCF.Position,
 		VolumeSize = hazardSize,
 		Width = hazardSize.X,
+		StartCFrame = startCF,
+		EndCFrame = endCF,
+		Distance = distance,
+		Speed = speed,
+		LateralDirection = lateralDirection,
+		InitialLateralOffset = initialLateralOffset,
+		LateralVelocity = lateralVelocity,
+		MaxDrift = maxDrift,
 	}
+
+	hazardRoot:SetAttribute("WaveStartCFrame", startCF)
+	hazardRoot:SetAttribute("WaveEndCFrame", endCF)
+	hazardRoot:SetAttribute("WaveDistance", distance)
+	hazardRoot:SetAttribute("WaveServerSpeed", speed)
+	hazardRoot:SetAttribute("WaveLateralDirection", lateralDirection)
+	hazardRoot:SetAttribute("WaveInitialLateralOffset", initialLateralOffset)
+	hazardRoot:SetAttribute("WaveLateralVelocity", lateralVelocity)
+	hazardRoot:SetAttribute("WaveMaxDrift", maxDrift)
+	hazardRoot:SetAttribute("WaveMovementMode", "timeline_proxy")
+	hazardRoot:SetAttribute("WaveSpawnServerTime", Workspace:GetServerTimeNow())
+
+	function controller:SyncTimelineState()
+		if not self.HazardRoot.Parent then
+			return
+		end
+
+		self.HazardRoot:SetAttribute("WaveActiveSeconds", self.ActiveSeconds)
+		self.HazardRoot:SetAttribute("WaveStateServerTime", Workspace:GetServerTimeNow())
+		self.HazardRoot:SetAttribute("WaveUpdateSerial", (self.HazardRoot:GetAttribute("WaveUpdateSerial") or 0) + 1)
+	end
+
+	controller:SyncTimelineState()
 
 	controller.AffectableEntityId = AffectableRegistry.RegisterEntity({
 		EntityType = AffectableRegistry.EntityType.Hazard,
@@ -188843,6 +189682,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 		self.FrozenUntil = math.max(self.FrozenUntil, os.clock() + freezeDuration)
 		self.FreezeToken += 1
 		local freezeToken = self.FreezeToken
+		self:SyncTimelineState()
 		WaveHazardVisuals.SetFrozen(self.HazardRoot, true)
 		hazardTrace(
 			"freeze applied hazard=%s duration=%.2f",
@@ -188860,6 +189700,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 			end
 
 			if self.HazardRoot.Parent then
+				self:SyncTimelineState()
 				WaveHazardVisuals.SetFrozen(self.HazardRoot, false)
 			end
 		end)
@@ -188874,11 +189715,14 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 
 		self.Destroyed = true
 		activeHazardStates[self.HazardRoot] = nil
+		waveDiagnostics.CleanupCount += 1
+		waveDiagnostics.LastCleanupServerTime = Workspace:GetServerTimeNow()
 		AffectableRegistry.UnregisterEntity(self.AffectableEntityId)
 		HazardRuntime.Unregister(self.HazardRoot)
 		if self.HazardRoot.Parent then
 			self.HazardRoot:Destroy()
 		end
+		publishWaveDiagnostics()
 	end
 
 	HazardRuntime.Register(hazardRoot, controller)
@@ -188890,8 +189734,6 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 	end)
 
 	task.spawn(function()
-		local alpha = 0
-
 		if distance <= 1e-4 then
 			controller.Alpha = 1
 			controller.CurrentCFrame = endCF
@@ -188901,60 +189743,37 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 			return
 		end
 
-		-- WAVE DRIFT CONFIG
-
-		local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
-		local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
-		local lateralOffset = 0
-		local lateralVelocity = 0
-
-		if driftStyle == "drift" and maxDrift > 1e-3 then
-			local travelTime = distance / math.max(speed, 1e-3)
-			local bounceCount = rng:NextInteger(3, 6)
-			local minLateralSpeed = ((maxDrift * 2) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
-			local maxLateralSpeed = ((maxDrift * 2 * bounceCount) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
-
-			lateralOffset = rng:NextNumber(-maxDrift, maxDrift)
-			lateralVelocity = rng:NextNumber(minLateralSpeed, maxLateralSpeed)
-			if rng:NextInteger(0, 1) == 0 then
-				lateralVelocity = -lateralVelocity
-			end
-		end
-
 		--ZIG ZAG
 
-		while hazardRoot.Parent and not controller.Destroyed and alpha < 1 do
+		while hazardRoot.Parent and not controller.Destroyed and controller.Alpha < 1 do
 			local dt = RunService.Heartbeat:Wait()
 
 			if os.clock() >= controller.FrozenUntil then
-				alpha = math.min(alpha + (speed * dt) / distance, 1)
+				local updateStartedAt = os.clock()
+				controller.ActiveSeconds += dt
+				local currentCF, alpha = WaveHazardVisuals.ComputeTimelineCFrame(
+					startCF,
+					endCF,
+					controller.ActiveSeconds,
+					speed,
+					distance,
+					lateralDirection,
+					initialLateralOffset,
+					lateralVelocity,
+					maxDrift
+				)
+
 				controller.Alpha = alpha
-
-				-- ✅ ZIGZAG: offset the wave
-				local currentCF = startCF:Lerp(endCF, alpha)
-				if math.abs(lateralVelocity) > 1e-3 and maxDrift > 1e-3 then
-					lateralOffset += lateralVelocity * dt
-
-					while lateralOffset > maxDrift or lateralOffset < -maxDrift do
-						if lateralOffset > maxDrift then
-							lateralOffset = maxDrift - (lateralOffset - maxDrift)
-							lateralVelocity = -math.abs(lateralVelocity)
-						else
-							lateralOffset = -maxDrift + (-maxDrift - lateralOffset)
-							lateralVelocity = math.abs(lateralVelocity)
-						end
-					end
-
-					currentCF = translateCFrame(currentCF, lateralDirection * lateralOffset)
-				end
 
 				controller.CurrentCFrame = currentCF
 				controller.Position = currentCF.Position
 				setPivot(hazardRoot, currentCF)
+				recordWaveUpdateTime(os.clock() - updateStartedAt)
 			end
 		end
 
 		controller.Alpha = 1
+		controller.ActiveSeconds = distance / math.max(speed, 1e-3)
 		controller.CurrentCFrame = endCF
 		controller.Position = endCF.Position
 		controller:Destroy()
@@ -188978,6 +189797,7 @@ local function spawnSharedHazard(spawnDelay)
 		)
 		return false, "missing_refs"
 	end
+	diagnosticsHazardsFolder = hazardsFolder
 
 	local template = getWaveTemplate()
 	if not template then
@@ -189068,6 +189888,7 @@ local function spawnSharedHazard(spawnDelay)
 
 	setPivot(clone, startCF)
 	clone.Parent = hazardsFolder
+	publishWaveDiagnostics(hazardsFolder)
 
 	hazardTrace(
 		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
@@ -189090,6 +189911,7 @@ local function spawnSharedHazard(spawnDelay)
 
 	local lateralDriftLimit = math.max(0, safeHalfOffset - math.abs(chosenOffset))
 	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit)
+	publishWaveDiagnostics(hazardsFolder)
 	return true, "spawned"
 end
 
@@ -194139,6 +194961,7 @@ ensureFrames()
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -194362,6 +195185,8 @@ disasterTemplate.Visible = false
 local pfpClones = {}
 local waveIndicators = {}
 local chestIndicators = {}
+local LEGACY_SHARED_PROGRESS_UPDATE_INTERVAL = 0.2
+local legacySharedProgressAccumulator = 0
 
 local function getImageNode(obj)
 	if not obj then return nil end
@@ -195126,9 +195951,17 @@ local SHARED_WAVE_VISUAL_MAX_LEAD = 0.08
 local SHARED_WAVE_VISUAL_DECAY_DELAY = 0.12
 local SHARED_WAVE_VISUAL_SNAP_DISTANCE = 90
 local SHARED_WAVE_VISUAL_REBUILD_DELAY = 0.05
+local SHARED_WAVE_DIAGNOSTICS_INTERVAL = 2
 
 local localWaveVisualsFolder = nil
 local sharedHazardVisualSmoothers = {}
+local waveClientDiagnostics = {
+	CleanupCount = 0,
+	LastUpdateTimeMs = 0,
+	UpdateTimeSum = 0,
+	UpdateTimeSamples = 0,
+	LastPublishedAt = 0,
+}
 
 local function isWaveVisualRoot(instance)
 	return (instance and (instance:IsA("Model") or instance:IsA("BasePart")))
@@ -195180,6 +196013,97 @@ local function getLocalWaveVisualsFolder()
 	folder.Parent = workspace
 	localWaveVisualsFolder = folder
 	return folder
+end
+
+local function getSharedHazardHitboxPart(hazard)
+	local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
+	for _, part in ipairs(hitboxParts) do
+		if part and part.Parent then
+			return part
+		end
+	end
+
+	if hazard and hazard:IsA("BasePart") then
+		return hazard
+	end
+
+	return nil
+end
+
+local function configureLocalVisualTargetPart(part)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Transparency = 1
+	part.LocalTransparencyModifier = 1
+	part.CastShadow = false
+	part.AssemblyLinearVelocity = Vector3.zero
+	part.AssemblyAngularVelocity = Vector3.zero
+	pcall(function()
+		part.Massless = true
+	end)
+end
+
+local function countLocalVisualParts(root)
+	local count = 0
+	if not root then
+		return count
+	end
+
+	if root:IsA("BasePart") then
+		return 1
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function publishClientWaveDiagnostics()
+	local folder = getLocalWaveVisualsFolder()
+	local controllerCount = 0
+	local visualRootCount = 0
+	local visualPartCount = 0
+
+	for _, controller in pairs(sharedHazardVisualSmoothers) do
+		if controller.Destroyed ~= true then
+			controllerCount += 1
+			if controller.VisualRoot and controller.VisualRoot.Parent then
+				visualRootCount += 1
+				visualPartCount += countLocalVisualParts(controller.VisualRoot)
+			end
+		end
+	end
+
+	folder:SetAttribute("WaveClientVisualControllerCount", controllerCount)
+	folder:SetAttribute("WaveClientVisualRootCount", visualRootCount)
+	folder:SetAttribute("WaveClientVisualPartCount", visualPartCount)
+	folder:SetAttribute("WaveClientUpdateTimeMs", waveClientDiagnostics.LastUpdateTimeMs)
+	folder:SetAttribute("WaveClientCleanupCount", waveClientDiagnostics.CleanupCount)
+end
+
+local function recordClientWaveUpdateTime(elapsedSeconds)
+	waveClientDiagnostics.UpdateTimeSum += math.max(0, tonumber(elapsedSeconds) or 0)
+	waveClientDiagnostics.UpdateTimeSamples += 1
+
+	local now = os.clock()
+	if now - waveClientDiagnostics.LastPublishedAt < SHARED_WAVE_DIAGNOSTICS_INTERVAL then
+		return
+	end
+
+	if waveClientDiagnostics.UpdateTimeSamples > 0 then
+		waveClientDiagnostics.LastUpdateTimeMs =
+			(waveClientDiagnostics.UpdateTimeSum / waveClientDiagnostics.UpdateTimeSamples) * 1000
+	end
+	waveClientDiagnostics.UpdateTimeSum = 0
+	waveClientDiagnostics.UpdateTimeSamples = 0
+	waveClientDiagnostics.LastPublishedAt = now
+	publishClientWaveDiagnostics()
 end
 
 local function hideReplicatedVisual(root)
@@ -195237,6 +196161,8 @@ local function createSharedHazardVisualSmoother(hazard)
 	local startingPivot = getPivot(hazard)
 	local controller = {
 		Hazard = hazard,
+		VisualRoot = nil,
+		VisualTargetPart = nil,
 		ClonesByName = {},
 		Connections = {},
 		SourceConnections = {},
@@ -195270,6 +196196,104 @@ local function createSharedHazardVisualSmoother(hazard)
 			if entry.Clone and entry.Clone.Parent then
 				entry.Clone:Destroy()
 			end
+		end
+
+		if self.VisualRoot and self.VisualRoot.Parent then
+			self.VisualRoot:Destroy()
+		end
+		waveClientDiagnostics.CleanupCount += 1
+		publishClientWaveDiagnostics()
+	end
+
+	function controller:IsTimelineProxy()
+		return self.Hazard:GetAttribute("WaveMovementMode") == "timeline_proxy"
+			or self.Hazard:GetAttribute("ClientWaveVisualsOnly") == true
+			or self.Hazard:GetAttribute("WaveVisualMode") == "ClientTimeline"
+	end
+
+	function controller:GetTimelineTargetCFrame()
+		local startCFrame = self.Hazard:GetAttribute("WaveStartCFrame")
+		local endCFrame = self.Hazard:GetAttribute("WaveEndCFrame")
+		if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
+			return getPivot(self.Hazard)
+		end
+
+		local activeSeconds = tonumber(self.Hazard:GetAttribute("WaveActiveSeconds")) or 0
+		local stateServerTime = tonumber(self.Hazard:GetAttribute("WaveStateServerTime"))
+		if self.Hazard:GetAttribute("Frozen") ~= true and stateServerTime then
+			activeSeconds += math.max(0, Workspace:GetServerTimeNow() - stateServerTime)
+		end
+
+		local currentCFrame = WaveHazardVisuals.ComputeTimelineCFrame(
+			startCFrame,
+			endCFrame,
+			activeSeconds,
+			self.Hazard:GetAttribute("WaveServerSpeed") or self.Hazard:GetAttribute("Speed"),
+			self.Hazard:GetAttribute("WaveDistance"),
+			self.Hazard:GetAttribute("WaveLateralDirection"),
+			self.Hazard:GetAttribute("WaveInitialLateralOffset"),
+			self.Hazard:GetAttribute("WaveLateralVelocity"),
+			self.Hazard:GetAttribute("WaveMaxDrift")
+		)
+
+		return currentCFrame or getPivot(self.Hazard)
+	end
+
+	function controller:EnsureClientVisualRoot()
+		if self.VisualRoot and self.VisualRoot.Parent then
+			return self.VisualRoot
+		end
+
+		local hitboxPart = getSharedHazardHitboxPart(self.Hazard)
+		if not hitboxPart then
+			return nil
+		end
+
+		local root = Instance.new("Model")
+		root.Name = tostring(self.Hazard.Name) .. "_LocalVisualRoot"
+		root:SetAttribute(SMOOTHED_VISUAL_SOURCE_ATTRIBUTE, self.Hazard:GetFullName())
+		root:SetAttribute("UsesWaveAssetVisuals", true)
+
+		local targetPart = Instance.new("Part")
+		targetPart.Name = "WaveHitbox"
+		targetPart.Size = hitboxPart.Size
+		targetPart.CFrame = hitboxPart.CFrame
+		configureLocalVisualTargetPart(targetPart)
+		targetPart.Parent = root
+
+		root.WorldPivot = getPivot(self.Hazard)
+		root.Parent = getLocalWaveVisualsFolder()
+
+		self.VisualRoot = root
+		self.VisualTargetPart = targetPart
+		return root
+	end
+
+	function controller:RefreshClientVisualRoot()
+		local root = self:EnsureClientVisualRoot()
+		if not root then
+			waveWarnOnce(
+				"timeline_visual_root_missing_" .. tostring(self.Hazard.Name),
+				"shared wave local visual skipped missing hitbox hazard=%s",
+				formatInstancePath(self.Hazard)
+			)
+			return
+		end
+
+		local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
+		if self.Hazard:GetAttribute("Frozen") == true then
+			activeAsset = FROZEN_WAVE_VISUAL_ASSET_NAME
+		elseif activeAsset ~= FROZEN_WAVE_VISUAL_ASSET_NAME then
+			activeAsset = REGULAR_WAVE_VISUAL_ASSET_NAME
+		end
+
+		if not WaveHazardVisuals.ApplyVisual(root, activeAsset) then
+			waveWarnOnce(
+				"timeline_visual_asset_missing_" .. tostring(activeAsset),
+				"shared wave local visual skipped missing asset=%s hazard=%s",
+				tostring(activeAsset),
+				formatInstancePath(self.Hazard)
+			)
 		end
 	end
 
@@ -195384,6 +196408,12 @@ local function createSharedHazardVisualSmoother(hazard)
 			return
 		end
 
+		if self:IsTimelineProxy() then
+			self:RefreshClientVisualRoot()
+			self:UpdateVisibility()
+			return
+		end
+
 		for _, child in ipairs(self.Hazard:GetChildren()) do
 			if isWaveVisualRoot(child) then
 				self:EnsureClone(child)
@@ -195411,6 +196441,17 @@ local function createSharedHazardVisualSmoother(hazard)
 	end
 
 	function controller:UpdateVisibility()
+		if self.VisualRoot and self.VisualRoot.Parent then
+			local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
+			if self.Hazard:GetAttribute("Frozen") == true then
+				activeAsset = FROZEN_WAVE_VISUAL_ASSET_NAME
+			elseif activeAsset ~= FROZEN_WAVE_VISUAL_ASSET_NAME then
+				activeAsset = REGULAR_WAVE_VISUAL_ASSET_NAME
+			end
+			WaveHazardVisuals.ApplyVisual(self.VisualRoot, activeAsset)
+			return
+		end
+
 		local activeName = self:GetActiveVisualName()
 		if activeName == FROZEN_WAVE_VISUAL_NAME and not self.ClonesByName[activeName] then
 			activeName = WAVE_VISUAL_NAME
@@ -195431,6 +196472,23 @@ local function createSharedHazardVisualSmoother(hazard)
 
 		if not self.Hazard.Parent then
 			self:Destroy()
+			return
+		end
+
+		if self:IsTimelineProxy() then
+			local targetCFrame = self:GetTimelineTargetCFrame()
+			local smoothAlpha = math.clamp(1 - math.exp(-SHARED_WAVE_VISUAL_SMOOTHNESS * deltaTime), 0, 1)
+			if (self.CurrentCFrame.Position - targetCFrame.Position).Magnitude > SHARED_WAVE_VISUAL_SNAP_DISTANCE then
+				self.CurrentCFrame = targetCFrame
+			else
+				self.CurrentCFrame = self.CurrentCFrame:Lerp(targetCFrame, smoothAlpha)
+			end
+
+			if self.VisualRoot and self.VisualRoot.Parent then
+				setPivot(self.VisualRoot, self.CurrentCFrame)
+			else
+				self:RefreshClientVisualRoot()
+			end
 			return
 		end
 
@@ -195474,6 +196532,8 @@ local function createSharedHazardVisualSmoother(hazard)
 		if isWaveVisualRoot(child) then
 			WaveHazardVisuals.ConfigureVisualRoot(child)
 			controller:ScheduleRefresh()
+		elseif child.Name == "WaveHitbox" then
+			controller:ScheduleRefresh()
 		end
 	end))
 
@@ -195498,13 +196558,21 @@ local function createSharedHazardVisualSmoother(hazard)
 	end))
 
 	controller:Refresh()
+	if controller:IsTimelineProxy() then
+		controller.CurrentCFrame = controller:GetTimelineTargetCFrame()
+		if controller.VisualRoot and controller.VisualRoot.Parent then
+			setPivot(controller.VisualRoot, controller.CurrentCFrame)
+		end
+	end
 	return controller
 end
 
 local function updateSharedHazardVisualSmoothers(deltaTime)
+	local updateStartedAt = os.clock()
 	for _, controller in pairs(sharedHazardVisualSmoothers) do
 		controller:Update(deltaTime)
 	end
+	recordClientWaveUpdateTime(os.clock() - updateStartedAt)
 end
 
 local function hookSharedHazardKillOnTouch(hazard)
@@ -195518,6 +196586,25 @@ local function hookSharedHazardKillOnTouch(hazard)
 		WaveHazardVisuals.SetHitboxFrozen(hazard, hazard:GetAttribute("Frozen") == true)
 	end
 
+	local hookedHitboxParts = {}
+	local function hookHitboxParts()
+		local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
+		if #hitboxParts <= 0 then
+			return false
+		end
+
+		for _, part in ipairs(hitboxParts) do
+			if not hookedHitboxParts[part] then
+				hookedHitboxParts[part] = true
+				hookKillOnTouchPart(part, function()
+					return hazard:GetAttribute("Frozen") ~= true
+				end)
+			end
+		end
+
+		return true
+	end
+
 	syncFrozenHitboxState()
 	hazard:GetAttributeChangedSignal("Frozen"):Connect(syncFrozenHitboxState)
 
@@ -195526,19 +196613,12 @@ local function hookSharedHazardKillOnTouch(hazard)
 			WaveHazardVisuals.ConfigureVisualRoot(child)
 		elseif child.Name == "WaveHitbox" then
 			syncFrozenHitboxState()
+			hookHitboxParts()
 		end
 	end)
 
-	local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
-	if #hitboxParts <= 0 then
+	if not hookHitboxParts() then
 		hookKillOnTouch(hazard)
-		return
-	end
-
-	for _, part in ipairs(hitboxParts) do
-		hookKillOnTouchPart(part, function()
-			return hazard:GetAttribute("Frozen") ~= true
-		end)
 	end
 end
 
@@ -195891,10 +196971,21 @@ updatePause()
 
 RunService.RenderStepped:Connect(function(deltaTime)
 	updateSharedHazardVisualSmoothers(deltaTime)
-	updatePfpPositions()
-	updateWaveIndicators()
-	updateChestIndicators()
-	updatePfpBrainrotAndSkull()
+	if useSharedHazards then
+		legacySharedProgressAccumulator += deltaTime
+		if legacySharedProgressAccumulator >= LEGACY_SHARED_PROGRESS_UPDATE_INTERVAL then
+			legacySharedProgressAccumulator = 0
+			updatePfpPositions()
+			updateWaveIndicators()
+			updateChestIndicators()
+			updatePfpBrainrotAndSkull()
+		end
+	else
+		updatePfpPositions()
+		updateWaveIndicators()
+		updateChestIndicators()
+		updatePfpBrainrotAndSkull()
+	end
 end)
 
 while true do
@@ -222897,6 +223988,7 @@ local DEFAULT_SECTIONS = {
 
 local PLAYER_MARKER_PADDING = 0
 local WAVE_MARKER_PADDING = 0
+local RENDER_INTERVAL = 1 / 12
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactWaveProgressRoot"
@@ -222913,6 +224005,8 @@ local pathAxis = Vector3.zAxis
 local pathLength = 1
 local renderQueued = false
 local destroyed = false
+local legacyProgressBarHidden = false
+local renderAccumulator = 0
 
 local function disconnectAll()
 	for _, connection in ipairs(cleanupConnections) do
@@ -223019,6 +224113,10 @@ local function getHazardImage(hazard)
 end
 
 local function hideLegacyProgressBar()
+	if legacyProgressBarHidden then
+		return
+	end
+
 	local hud = playerGui:FindFirstChild("HUD")
 	if not hud then
 		return
@@ -223043,6 +224141,9 @@ local function hideLegacyProgressBar()
 			descendant.Enabled = false
 		end
 	end
+
+	progressBar:SetAttribute("ReactWaveProgressHidden", true)
+	legacyProgressBarHidden = true
 end
 
 local function render()
@@ -223142,6 +224243,7 @@ track(Players.PlayerAdded, scheduleRender)
 track(Players.PlayerRemoving, scheduleRender)
 track(playerGui.DescendantAdded, function(descendant)
 	if descendant.Name == "HUD" or descendant.Name == "ProgressBar" then
+		legacyProgressBarHidden = false
 		task.defer(scheduleRender)
 	end
 end)
@@ -223163,8 +224265,12 @@ if waveEnd then
 	end)
 end
 
-track(RunService.RenderStepped, function()
-	scheduleRender()
+track(RunService.RenderStepped, function(deltaTime)
+	renderAccumulator += deltaTime
+	if renderAccumulator >= RENDER_INTERVAL then
+		renderAccumulator = 0
+		scheduleRender()
+	end
 end)
 
 progressBarSync:FireServer("Request")

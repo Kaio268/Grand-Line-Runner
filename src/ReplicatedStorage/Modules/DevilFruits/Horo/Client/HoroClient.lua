@@ -60,8 +60,13 @@ local SOUND_ACTIVATE = "Activate"
 local SOUND_MOVE_LOOP = "MoveLoop"
 local SOUND_RETURN = "Return"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
-local DEBUG_SOUND = true
+local DEBUG_SOUND = RunService:IsStudio()
 local DEBUG_TRACE = RunService:IsStudio()
+local SOUND_AUDIO_KEY_BY_NAME = {
+	[SOUND_ACTIVATE] = "ActivateSoundId",
+	[SOUND_MOVE_LOOP] = "MoveLoopSoundId",
+	[SOUND_RETURN] = "ReturnSoundId",
+}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
@@ -241,65 +246,71 @@ local function getCharacterRoot(player)
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
 end
 
-local function resolveGhostProjectionSoundFolder()
-	local node = ReplicatedStorage
-	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Horo", "GhostProjection" }) do
-		if not node then
-			horoSoundWarn("path_segment_skipped segment=%s issue=parent_nil", tostring(segment))
-			return nil
-		end
-
-		local child = node:FindFirstChild(segment)
-		if not child then
-			horoSoundWarn(
-				"path_segment_missing segment=%s parent=%s",
-				tostring(segment),
-				formatInstancePath(node)
-			)
-			return nil
-		end
-
-		horoSoundLog("path_segment_found segment=%s path=%s", tostring(segment), formatInstancePath(child))
-		node = child
+local function normalizeSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
 	end
 
-	return node
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
 end
 
-local function getGhostProjectionSoundTemplate(soundName)
-	local soundFolder = resolveGhostProjectionSoundFolder()
-	horoSoundLog("resolve_folder sound=%s folder=%s", tostring(soundName), formatInstancePath(soundFolder))
-	if not soundFolder then
+local function getGhostProjectionAudioConfig()
+	local abilityConfig = getAbilityConfig()
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function createGhostProjectionSound(soundName, looped)
+	local audioKey = SOUND_AUDIO_KEY_BY_NAME[soundName]
+	if not audioKey then
+		horoSoundWarn("sound_config_missing sound=%s issue=unknown_sound", tostring(soundName))
+		return nil
+	end
+
+	local audioConfig = getGhostProjectionAudioConfig()
+	if not audioConfig then
+		horoSoundWarn("sound_config_missing sound=%s issue=missing_audio_table", tostring(soundName))
+		return nil
+	end
+
+	local soundId = normalizeSoundId(audioConfig[audioKey])
+	if not soundId then
 		horoSoundWarn(
-			"resolve_folder_failed sound=%s issue=ghost_projection_sound_folder_missing expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Horo.GhostProjection",
-			tostring(soundName)
+			"sound_config_missing sound=%s key=%s issue=missing_sound_id",
+			tostring(soundName),
+			tostring(audioKey)
 		)
 		return nil
 	end
 
-	local soundTemplate = soundFolder and soundFolder:FindFirstChild(soundName)
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		logSoundDiagnostics("template_found", soundName, soundTemplate)
-		return soundTemplate
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = math.max(0, tonumber(audioConfig.Volume) or 1)
+
+	local rollOffMaxDistance = tonumber(audioConfig.RollOffMaxDistance)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = math.max(1, rollOffMaxDistance)
 	end
 
-	if soundTemplate then
-		horoSoundWarn(
-			"template_invalid sound=%s path=%s class=%s",
-			tostring(soundName),
-			formatInstancePath(soundTemplate),
-			tostring(soundTemplate.ClassName)
-		)
-	else
-		horoSoundWarn(
-			"template_missing sound=%s folder=%s childCount=%d",
-			tostring(soundName),
-			formatInstancePath(soundFolder),
-			#soundFolder:GetChildren()
-		)
-	end
-
-	return nil
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -321,15 +332,13 @@ local function playProjectionOneShot(soundName, parent)
 		return nil
 	end
 
-	local soundTemplate = getGhostProjectionSoundTemplate(soundName)
-	if not soundTemplate then
-		horoSoundWarn("one_shot_skipped sound=%s issue=template_missing", tostring(soundName))
+	local sound = createGhostProjectionSound(soundName, false)
+	if not sound then
+		horoSoundWarn("one_shot_skipped sound=%s issue=sound_config_missing", tostring(soundName))
 		return nil
 	end
 
-	horoSoundLog("one_shot_clone_begin sound=%s parent=%s", tostring(soundName), formatInstancePath(parent))
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
+	horoSoundLog("one_shot_create_begin sound=%s parent=%s", tostring(soundName), formatInstancePath(parent))
 	sound.Parent = parent
 	logSoundDiagnostics("one_shot_parented", soundName, sound)
 	SettingsAudioController.TrackSound(sound)
@@ -370,19 +379,17 @@ local function startProjectionMoveLoop(state)
 		return nil
 	end
 
-	local soundTemplate = getGhostProjectionSoundTemplate(SOUND_MOVE_LOOP)
-	if not soundTemplate then
-		horoSoundWarn("move_loop_skipped issue=template_missing projectionId=%s", tostring(state.ProjectionId))
+	local sound = createGhostProjectionSound(SOUND_MOVE_LOOP, true)
+	if not sound then
+		horoSoundWarn("move_loop_skipped issue=sound_config_missing projectionId=%s", tostring(state.ProjectionId))
 		return nil
 	end
 
 	horoSoundLog(
-		"move_loop_clone_begin projectionId=%s parent=%s",
+		"move_loop_create_begin projectionId=%s parent=%s",
 		tostring(state.ProjectionId),
 		formatInstancePath(state.GhostRoot)
 	)
-	local sound = soundTemplate:Clone()
-	sound.Looped = true
 	sound.Parent = state.GhostRoot
 	logSoundDiagnostics("move_loop_parented", SOUND_MOVE_LOOP, sound)
 	SettingsAudioController.TrackSound(sound)

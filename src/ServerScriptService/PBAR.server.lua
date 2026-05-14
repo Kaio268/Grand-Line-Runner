@@ -16,6 +16,17 @@ if not ProgressBarSync then
 end
 
 local joinOrder = {}
+local diagnostics = {
+	RequestCount = 0,
+	BroadcastCount = 0,
+	FireClientCount = 0,
+}
+
+local function publishDiagnostics()
+	ProgressBarSync:SetAttribute("RequestCount", diagnostics.RequestCount)
+	ProgressBarSync:SetAttribute("BroadcastCount", diagnostics.BroadcastCount)
+	ProgressBarSync:SetAttribute("FireClientCount", diagnostics.FireClientCount)
+end
 
 local function removeFromJoinOrder(userId)
 	for i = #joinOrder, 1, -1 do
@@ -38,16 +49,21 @@ end
 
 local function broadcastAll()
 	local payload = buildPayload()
+	diagnostics.BroadcastCount += 1
 	ProgressBarSync:FireAllClients(#payload, payload)
+	publishDiagnostics()
 end
 
 local function sendToPlayer(plr)
 	local payload = buildPayload()
+	diagnostics.FireClientCount += 1
 	ProgressBarSync:FireClient(plr, #payload, payload)
+	publishDiagnostics()
 end
 
 ProgressBarSync.OnServerEvent:Connect(function(plr, action)
 	if action == "Request" then
+		diagnostics.RequestCount += 1
 		sendToPlayer(plr)
 	end
 end)
@@ -70,4 +86,5 @@ end)
 for _, p in ipairs(Players:GetPlayers()) do
 	joinOrder[#joinOrder + 1] = p.UserId
 end
+publishDiagnostics()
 broadcastAll()

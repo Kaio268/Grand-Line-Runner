@@ -43,6 +43,14 @@ local DEFAULT_RESOLVE_BACK_JERK_DISTANCE = 0.45
 local DEFAULT_RESOLVE_BACK_JERK_DURATION = 0.08
 local DEFAULT_RESOLVE_VFX_FORWARD_OFFSET = 0
 local DEFAULT_RESOLVE_FACING_LOCK_DURATION = 0.6
+local SURFACE_PROBE_INTERVAL = 1 / 24
+local SURFACE_REPROBE_DISTANCE = 0.75
+local MIN_TARGET_PROBE_DISTANCE = 0.035
+local MIN_PIVOT_POSITION_DELTA = 0.03
+local MIN_PIVOT_DIRECTION_DOT = 0.9995
+local ZERO_VELOCITY_EPSILON = 0.025
+local PENDING_START_FEEDBACK_TIMEOUT = 2
+local TRAIL_PULSE_POOL_LIMIT = 48
 local DEFAULT_ENTRY_CUE_MARKERS = {
 	"EnterGround",
 	"EntryVfx",
@@ -417,6 +425,88 @@ local function createEffectPart(name, size, color, cframe, material, transparenc
 	return part
 end
 
+local trailPulsePool = {
+	Pulse = {},
+	Accent = {},
+	Active = {},
+}
+
+local function setupEffectPart(part, name, size, color, cframe, material, transparency, shape)
+	part.Name = name
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.CastShadow = false
+	part.Material = material or Enum.Material.Ground
+	part.Transparency = transparency or 0
+	part.Color = color
+	part.Size = size
+	part.CFrame = cframe
+	part.Shape = shape or Enum.PartType.Block
+end
+
+local function acquireTrailEffectPart(poolName, name, size, color, cframe, material, transparency, shape)
+	local pool = trailPulsePool[poolName]
+	local part = pool and table.remove(pool) or nil
+	if not part then
+		part = Instance.new("Part")
+	end
+
+	setupEffectPart(part, name, size, color, cframe, material, transparency, shape)
+	trailPulsePool.Active[part] = poolName
+	part.Parent = Workspace
+	return part
+end
+
+local function releaseTrailEffectPart(part)
+	if not part then
+		return
+	end
+
+	local poolName = trailPulsePool.Active[part]
+	trailPulsePool.Active[part] = nil
+	part.Parent = nil
+	local pool = trailPulsePool[poolName]
+	if pool and #pool < TRAIL_PULSE_POOL_LIMIT then
+		pool[#pool + 1] = part
+	else
+		part:Destroy()
+	end
+end
+
+local function tweenAndReleaseTrailPart(part, duration, tweenGoals)
+	local tween = TweenService:Create(
+		part,
+		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		tweenGoals
+	)
+	tween:Play()
+	tween.Completed:Connect(function()
+		releaseTrailEffectPart(part)
+	end)
+end
+
+local function cleanupTrailPulsePool()
+	for part in pairs(trailPulsePool.Active) do
+		if part then
+			part:Destroy()
+		end
+		trailPulsePool.Active[part] = nil
+	end
+
+	for _, poolName in ipairs({ "Pulse", "Accent" }) do
+		local pool = trailPulsePool[poolName]
+		for index = #pool, 1, -1 do
+			local part = pool[index]
+			pool[index] = nil
+			if part then
+				part:Destroy()
+			end
+		end
+	end
+end
+
 local function createBurst(position, radius, isResolve)
 	local groundPosition = getGroundEffectPosition(position)
 	if not groundPosition then
@@ -456,11 +546,12 @@ end
 local function createTrailPulse(position, radius)
 	local groundPosition = getGroundEffectPosition(position)
 	if not groundPosition then
-		return
+		return false
 	end
 
 	local pulseRadius = math.max(0.7, tonumber(radius) or 1.3)
-	local pulse = createEffectPart(
+	local pulse = acquireTrailEffectPart(
+		"Pulse",
 		"MoguBurrowPulse",
 		Vector3.new(pulseRadius, pulseRadius * 0.42, pulseRadius),
 		TRAIL_COLOR,
@@ -469,12 +560,13 @@ local function createTrailPulse(position, radius)
 		0.26,
 		Enum.PartType.Ball
 	)
-	tweenAndDestroy(pulse, 0.18, {
+	tweenAndReleaseTrailPart(pulse, 0.18, {
 		Transparency = 1,
 		Size = pulse.Size * 1.35,
 	})
 
-	local accent = createEffectPart(
+	local accent = acquireTrailEffectPart(
+		"Accent",
 		"MoguBurrowPulseAccent",
 		Vector3.new(0.12, pulseRadius * 1.15, pulseRadius * 1.15),
 		TRAIL_ACCENT_COLOR,
@@ -483,21 +575,61 @@ local function createTrailPulse(position, radius)
 		0.36,
 		Enum.PartType.Cylinder
 	)
-	tweenAndDestroy(accent, 0.16, {
+	tweenAndReleaseTrailPart(accent, 0.16, {
 		Transparency = 1,
 		Size = Vector3.new(0.12, pulseRadius * 1.65, pulseRadius * 1.65),
 	})
+	return true
 end
 
-local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition, direction)
+local function shouldSkipPivot(pivotState, targetRootCFrame)
+	if type(pivotState) ~= "table" or typeof(targetRootCFrame) ~= "CFrame" then
+		return false
+	end
+
+	local lastRootCFrame = pivotState.LastPivotRootCFrame
+	if typeof(lastRootCFrame) ~= "CFrame" then
+		return false
+	end
+
+	return (lastRootCFrame.Position - targetRootCFrame.Position).Magnitude <= MIN_PIVOT_POSITION_DELTA
+		and lastRootCFrame.LookVector:Dot(targetRootCFrame.LookVector) >= MIN_PIVOT_DIRECTION_DOT
+end
+
+local function pivotCharacterToRootPosition(character, rootPart, targetRootPosition, direction, pivotState)
 	if not character or not rootPart or typeof(targetRootPosition) ~= "Vector3" then
-		return
+		return false
 	end
 
 	local facingDirection = resolvePlanarDirection(direction, rootPart.CFrame.LookVector)
 	local targetRootCFrame = CFrame.lookAt(targetRootPosition, targetRootPosition + facingDirection, Vector3.yAxis)
+	if shouldSkipPivot(pivotState, targetRootCFrame) then
+		return false
+	end
+
 	local pivotToRoot = character:GetPivot():ToObjectSpace(rootPart.CFrame)
 	character:PivotTo(targetRootCFrame * pivotToRoot:Inverse())
+	if type(pivotState) == "table" then
+		pivotState.LastPivotRootCFrame = targetRootCFrame
+	end
+	return true
+end
+
+local function zeroRootVelocity(rootPart, includeAngular, includeLinear)
+	if not rootPart then
+		return false
+	end
+
+	local wrote = false
+	if includeLinear ~= false and rootPart.AssemblyLinearVelocity.Magnitude > ZERO_VELOCITY_EPSILON then
+		rootPart.AssemblyLinearVelocity = Vector3.zero
+		wrote = true
+	end
+	if includeAngular ~= false and rootPart.AssemblyAngularVelocity.Magnitude > ZERO_VELOCITY_EPSILON then
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+		wrote = true
+	end
+	return wrote
 end
 
 local function lockCharacterToSurface(
@@ -508,7 +640,9 @@ local function lockCharacterToSurface(
 	abilityConfig,
 	duration,
 	jerkDistance,
-	jerkDuration
+	jerkDuration,
+	pivotState,
+	onPivotWrite
 )
 	if not character or not rootPart or typeof(targetRootPosition) ~= "Vector3" then
 		return
@@ -548,9 +682,11 @@ local function lockCharacterToSurface(
 				)
 			) or lockedRootPosition
 
-			pivotCharacterToRootPosition(character, rootPart, resolvedPosition, direction)
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			local didPivot = pivotCharacterToRootPosition(character, rootPart, resolvedPosition, direction, pivotState)
+			if didPivot and typeof(onPivotWrite) == "function" then
+				onPivotWrite()
+			end
+			zeroRootVelocity(rootPart, true)
 			RunService.Heartbeat:Wait()
 		end
 	end)
@@ -587,20 +723,33 @@ local function restoreAutoRotateAfterResolve(humanoid, originalAutoRotate, anima
 	task.delay(math.max(0.05, tonumber(fallbackDuration) or 0), restore)
 end
 
-local function keepFacingDuringResolve(character, rootPart, direction, duration)
+local function keepFacingDuringResolve(character, rootPart, direction, duration, startDelay, pivotState, onPivotWrite)
 	if not character or not rootPart then
 		return
 	end
 
-	local endsAt = os.clock() + math.max(0, tonumber(duration) or 0)
+	local resolvedStartDelay = math.max(0, tonumber(startDelay) or 0)
+	local resolvedDuration = math.max(0, tonumber(duration) or 0)
+	if resolvedDuration <= 0 then
+		return
+	end
+
 	task.spawn(function()
+		if resolvedStartDelay > 0 then
+			task.wait(resolvedStartDelay)
+		end
+
+		local endsAt = os.clock() + resolvedDuration
 		while os.clock() <= endsAt do
 			if not character.Parent or not rootPart.Parent then
 				return
 			end
 
-			pivotCharacterToRootPosition(character, rootPart, rootPart.Position, direction)
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			local didPivot = pivotCharacterToRootPosition(character, rootPart, rootPart.Position, direction, pivotState)
+			if didPivot and typeof(onPivotWrite) == "function" then
+				onPivotWrite()
+			end
+			zeroRootVelocity(rootPart, true, false)
 			RunService.Heartbeat:Wait()
 		end
 	end)
@@ -662,7 +811,75 @@ function MoguClient.Create(config)
 	self.burrowStates = {}
 	self.visualBurrowStates = {}
 	self.concealStates = {}
+	self.pendingBurrowFeedback = nil
+	self.diagnostics = {
+		LastFlushAt = os.clock(),
+		PivotWrites = 0,
+		TrailPulseCount = 0,
+		CleanupCount = 0,
+		LastSurfaceProbeTimeMs = 0,
+		LastRaycastsPerSecond = 0,
+		LastPivotWritesPerSecond = 0,
+		LastStartInputToFeedbackMs = 0,
+		LastStartInputToAuthorizedMs = 0,
+		LastResolveCorrectionDistance = 0,
+	}
 	return self
+end
+
+function MoguClient:SetDiagnosticAttribute(name, value)
+	local player = self.player
+	if not player or typeof(name) ~= "string" then
+		return
+	end
+
+	player:SetAttribute(name, value)
+end
+
+function MoguClient:RecordPivotWrite(didWrite)
+	if didWrite and self.diagnostics then
+		self.diagnostics.PivotWrites += 1
+	end
+end
+
+function MoguClient:RecordCleanup()
+	if self.diagnostics then
+		self.diagnostics.CleanupCount += 1
+	end
+end
+
+function MoguClient:PublishDiagnostics(force)
+	local diagnostics = self.diagnostics
+	if not diagnostics then
+		return
+	end
+
+	local now = os.clock()
+	local elapsed = math.max(0.001, now - (diagnostics.LastFlushAt or now))
+	if not force and elapsed < 1 then
+		return
+	end
+
+	local sharedDiagnostics = MoguBurrowShared.ConsumeDiagnostics()
+	local raycastsPerSecond = math.floor(((sharedDiagnostics.RaycastCount or 0) / elapsed) + 0.5)
+	local pivotWritesPerSecond = math.floor(((diagnostics.PivotWrites or 0) / elapsed) + 0.5)
+	local activeLocalBurrowCount = self:GetLocalBurrowState() and 1 or 0
+
+	diagnostics.LastFlushAt = now
+	diagnostics.LastRaycastsPerSecond = raycastsPerSecond
+	diagnostics.LastPivotWritesPerSecond = pivotWritesPerSecond
+	diagnostics.LastSurfaceProbeTimeMs = sharedDiagnostics.SurfaceProbeTimeMs or 0
+	diagnostics.PivotWrites = 0
+
+	self:SetDiagnosticAttribute("MoguRaycastsPerSecond", raycastsPerSecond)
+	self:SetDiagnosticAttribute("MoguSurfaceProbeTimeMs", diagnostics.LastSurfaceProbeTimeMs)
+	self:SetDiagnosticAttribute("MoguPivotToWritesPerSecond", pivotWritesPerSecond)
+	self:SetDiagnosticAttribute("MoguTrailPulseCount", diagnostics.TrailPulseCount or 0)
+	self:SetDiagnosticAttribute("MoguActiveLocalBurrowCount", activeLocalBurrowCount)
+	self:SetDiagnosticAttribute("MoguStartInputToFeedbackMs", diagnostics.LastStartInputToFeedbackMs or 0)
+	self:SetDiagnosticAttribute("MoguStartInputToAuthorizedMs", diagnostics.LastStartInputToAuthorizedMs or 0)
+	self:SetDiagnosticAttribute("MoguResolveCorrectionDistance", diagnostics.LastResolveCorrectionDistance or 0)
+	self:SetDiagnosticAttribute("MoguCleanupCount", diagnostics.CleanupCount or 0)
 end
 
 function MoguClient:SetBurrowInputKeyState(keyCode, isPressed)
@@ -1028,6 +1245,79 @@ function MoguClient:TriggerBurrowMovementCue(targetPlayer, burrowState, startPos
 	return true
 end
 
+function MoguClient:BeginLocalStartFeedback(direction)
+	if self.pendingBurrowFeedback or self:GetLocalBurrowState() then
+		return nil
+	end
+
+	local character = getCharacter(self.player)
+	local rootPart = self.getLocalRootPart()
+	if not character or not rootPart then
+		return nil
+	end
+
+	local requestedAt = os.clock()
+	local abilityConfig = getAbilityConfig()
+	local resolvedDirection = resolvePlanarDirection(direction, rootPart.CFrame.LookVector)
+	local startPosition = rootPart.Position
+	local surfacePosition = select(
+		1,
+		MoguBurrowShared.ResolveSurfaceRootPosition(
+			character,
+			rootPart,
+			startPosition,
+			abilityConfig,
+			startPosition,
+			{ FastSample = true }
+		)
+	) or startPosition
+
+	local animationState = self.animationController:PlayStart(self.player, abilityConfig)
+	self:ApplyVisualBurrowOffset(self.player, abilityConfig)
+
+	local entryPosition = surfacePosition + (resolvedDirection * getEntryVfxForwardOffset(abilityConfig))
+	if not self.vfxController:PlayEntry(entryPosition, resolvedDirection, abilityConfig) then
+		createBurst(entryPosition, MoguBurrowShared.GetEntryBurstRadius(abilityConfig), false)
+	end
+
+	local token = {}
+	local pending = {
+		Token = token,
+		RequestedAt = requestedAt,
+		Direction = resolvedDirection,
+		SurfaceRootPosition = surfacePosition,
+		AnimationState = animationState,
+		EntryCueTriggered = true,
+	}
+	self.pendingBurrowFeedback = pending
+	if self.diagnostics then
+		self.diagnostics.LastStartInputToFeedbackMs = (os.clock() - requestedAt) * 1000
+	end
+
+	task.delay(PENDING_START_FEEDBACK_TIMEOUT, function()
+		if self.pendingBurrowFeedback == pending and pending.Token == token then
+			self:CancelLocalStartFeedback("timeout")
+		end
+	end)
+
+	return pending
+end
+
+function MoguClient:CancelLocalStartFeedback(reason)
+	local pending = self.pendingBurrowFeedback
+	if not pending then
+		return false
+	end
+
+	self.pendingBurrowFeedback = nil
+	self.animationController:StopAnimation(pending.AnimationState, reason or "prediction_cancelled")
+	self:ClearVisualBurrowOffset(self.player, true, DEFAULT_VISUAL_RISE_DURATION)
+	self:ClearConceal(self.player)
+	self:RecordCleanup()
+	self:PublishDiagnostics(true)
+	return true
+end
+
 function MoguClient:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
 	local stageConfig = getAnimationStageConfig("Start", abilityConfig)
 	local fallbackTime = getEntryCueFallbackTime(stageConfig)
@@ -1203,6 +1493,14 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 	end
 
 	local abilityConfig = getAbilityConfig()
+	local pendingFeedback = if targetPlayer == self.player then self.pendingBurrowFeedback else nil
+	if pendingFeedback then
+		self.pendingBurrowFeedback = nil
+		if self.diagnostics then
+			self.diagnostics.LastStartInputToAuthorizedMs = (os.clock() - pendingFeedback.RequestedAt) * 1000
+		end
+	end
+
 	local duration = math.max(0.5, tonumber(payload.Duration) or MoguBurrowShared.GetBurrowDuration(abilityConfig))
 	local startedAt = tonumber(payload.StartedAt) or Workspace:GetServerTimeNow()
 	local burrowState = {
@@ -1223,6 +1521,7 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 		),
 		ConcealDelay = math.max(0, tonumber(getAnimationStageConfig("Start", abilityConfig).ConcealDelay) or 0),
 		IsLocal = targetPlayer == self.player,
+		EntryCueTriggered = pendingFeedback and pendingFeedback.EntryCueTriggered == true or false,
 	}
 
 	local startPosition = payload.StartPosition or (getRootPart(targetPlayer) and getRootPart(targetPlayer).Position)
@@ -1236,10 +1535,15 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 				rootPart,
 				startPosition or rootPart.Position,
 				abilityConfig,
-				typeof(startPosition) == "Vector3" and startPosition or nil
+				typeof(startPosition) == "Vector3" and startPosition or nil,
+				{ FastSample = true }
 			)
 			burrowState.SurfaceRootPosition = resolvedSurfacePosition
-			if not hasSurface and typeof(resolvedSurfacePosition) ~= "Vector3" then
+				or (pendingFeedback and pendingFeedback.SurfaceRootPosition)
+			burrowState.LastSurfaceProbeAt = os.clock()
+			burrowState.LastSurfaceProbePosition = burrowState.SurfaceRootPosition
+			burrowState.LastSurfaceProbeHadSurface = hasSurface
+			if not hasSurface and typeof(burrowState.SurfaceRootPosition) ~= "Vector3" then
 				shouldRequestSurfaceImmediately = true
 			end
 		end
@@ -1267,15 +1571,17 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 			or (typeof(startPosition) == "Vector3" and startPosition)
 			or (rootPart and rootPart.Position)
 		if character and rootPart and typeof(pivotPosition) == "Vector3" then
-			pivotCharacterToRootPosition(character, rootPart, pivotPosition, burrowState.Direction)
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, pivotPosition, burrowState.Direction, burrowState))
+			zeroRootVelocity(rootPart, true)
 		end
 	end
 
-	burrowState.AnimationState = self.animationController:PlayStart(targetPlayer, abilityConfig)
+	burrowState.AnimationState = pendingFeedback and pendingFeedback.AnimationState
+		or self.animationController:PlayStart(targetPlayer, abilityConfig)
 
-	self:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	if not burrowState.EntryCueTriggered then
+		self:ScheduleBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+	end
 	self:ScheduleBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
 end
 
@@ -1299,6 +1605,9 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 	)
 	local localHumanoid = nil
 	local originalAutoRotate = nil
+	if targetPlayer == self.player and self.diagnostics then
+		self.diagnostics.LastResolveCorrectionDistance = math.max(0, tonumber(payload.ResolveCorrectionDistance) or 0)
+	end
 	self.burrowStates[targetPlayer] = nil
 	clearBurrowCueState(burrowState)
 	self.animationController:StopAnimation(burrowState and burrowState.AnimationState, "resolve_transition")
@@ -1337,11 +1646,14 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 					getResolveAnimationPosition(resolvedSurfacePosition, resolveDirection, rootPart, abilityConfig)
 				resolveVfxPosition =
 					getResolveVfxPosition(resolveAnimationPosition, resolveDirection, rootPart, abilityConfig)
-				pivotCharacterToRootPosition(
-					character,
-					rootPart,
-					resolveAnimationPosition,
-					resolveDirection
+				self:RecordPivotWrite(
+					pivotCharacterToRootPosition(
+						character,
+						rootPart,
+						resolveAnimationPosition,
+						resolveDirection,
+						burrowState
+					)
 				)
 				lockCharacterToSurface(
 					character,
@@ -1351,16 +1663,39 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 					abilityConfig,
 					surfaceLockDuration,
 					backJerkDistance,
-					backJerkDuration
+					backJerkDuration,
+					burrowState,
+					function()
+						self:RecordPivotWrite(true)
+					end
 				)
-				keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+				keepFacingDuringResolve(
+					character,
+					rootPart,
+					resolveDirection,
+					math.max(0, facingLockDuration - surfaceLockDuration),
+					surfaceLockDuration,
+					burrowState,
+					function()
+						self:RecordPivotWrite(true)
+					end
+				)
 			else
 				resolveVfxPosition = getResolveVfxPosition(rootPart.Position, resolveDirection, rootPart, abilityConfig)
-				pivotCharacterToRootPosition(character, rootPart, rootPart.Position, resolveDirection)
-				keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
+				self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, rootPart.Position, resolveDirection, burrowState))
+				keepFacingDuringResolve(
+					character,
+					rootPart,
+					resolveDirection,
+					facingLockDuration,
+					0,
+					burrowState,
+					function()
+						self:RecordPivotWrite(true)
+					end
+				)
 			end
-			rootPart.AssemblyLinearVelocity = Vector3.zero
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			zeroRootVelocity(rootPart, true)
 		end
 	else
 		local character = getCharacter(targetPlayer)
@@ -1374,7 +1709,7 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 			resolveVfxPosition = getResolveVfxPosition(resolveAnimationPosition, resolveDirection, rootPart, abilityConfig)
 			pivotCharacterToRootPosition(character, rootPart, resolveAnimationPosition, resolveDirection)
 			keepFacingDuringResolve(character, rootPart, resolveDirection, facingLockDuration)
-			rootPart.AssemblyAngularVelocity = Vector3.zero
+			zeroRootVelocity(rootPart, true, false)
 		end
 	end
 
@@ -1435,8 +1770,10 @@ function MoguClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 		return nil
 	end
 
+	local direction = self:GetBurrowActivationDirection(rootPart)
+	self:BeginLocalStartFeedback(direction)
 	return {
-		Direction = self:GetBurrowActivationDirection(rootPart),
+		Direction = direction,
 	}
 end
 
@@ -1465,20 +1802,26 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	humanoid.Jump = false
 
 	local abilityConfig = getAbilityConfig()
-	local currentSurfacePosition, hasCurrentSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
-		character,
-		rootPart,
-		burrowState.SurfaceRootPosition or rootPart.Position,
-		abilityConfig,
-		burrowState.SurfaceRootPosition
-	)
-	if not currentSurfacePosition then
-		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		return
+	local localNow = os.clock()
+	local currentSurfacePosition = burrowState.SurfaceRootPosition
+	if typeof(currentSurfacePosition) ~= "Vector3" then
+		local resolvedSurfacePosition, hasSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+			character,
+			rootPart,
+			rootPart.Position,
+			abilityConfig,
+			rootPart.Position,
+			{ FastSample = true }
+		)
+		currentSurfacePosition = resolvedSurfacePosition
+		burrowState.LastSurfaceProbeAt = localNow
+		burrowState.LastSurfaceProbePosition = resolvedSurfacePosition or rootPart.Position
+		burrowState.LastSurfaceProbeHadSurface = hasSurface
 	end
-	if not hasCurrentSurface and typeof(burrowState.SurfaceRootPosition) == "Vector3" then
-		currentSurfacePosition = burrowState.SurfaceRootPosition
+	if typeof(currentSurfacePosition) ~= "Vector3" then
+		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+		zeroRootVelocity(rootPart, false)
+		return
 	end
 	burrowState.SurfaceRootPosition = currentSurfacePosition
 
@@ -1487,42 +1830,71 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	end
 
 	if burrowState.SurfaceRequested then
-		pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
+		self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction, burrowState))
+		zeroRootVelocity(rootPart, false)
 		return
 	end
 
 	if not burrowState.MovementCueTriggered then
-		pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
+		self:RecordPivotWrite(pivotCharacterToRootPosition(character, rootPart, currentSurfacePosition, burrowState.Direction, burrowState))
+		zeroRootVelocity(rootPart, false)
 		return
 	end
 
 	local desiredDirection = self:GetCameraRelativeBurrowDirection(rootPart)
 	local targetPlanarPosition = currentSurfacePosition
+	local movementDistance = 0
 	if desiredDirection.Magnitude > MIN_DIRECTION_MAGNITUDE then
-		targetPlanarPosition = currentSurfacePosition + (desiredDirection.Unit * burrowState.MoveSpeed * dt)
+		movementDistance = burrowState.MoveSpeed * math.max(0, dt or 0)
+		targetPlanarPosition = currentSurfacePosition + (desiredDirection.Unit * movementDistance)
 	end
 
-	local resolvedSurfacePosition, hasTargetSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
-		character,
-		rootPart,
-		targetPlanarPosition,
-		abilityConfig,
-		currentSurfacePosition
-	)
-	if not resolvedSurfacePosition then
-		self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
-		rootPart.AssemblyLinearVelocity = Vector3.zero
-		return
+	local resolvedSurfacePosition = targetPlanarPosition
+	local hasTargetSurface = false
+	local shouldProbeTarget = movementDistance > MIN_TARGET_PROBE_DISTANCE
+	if shouldProbeTarget then
+		local lastProbePosition = burrowState.LastSurfaceProbePosition
+		local distanceFromLastProbe = if typeof(lastProbePosition) == "Vector3"
+			then (targetPlanarPosition - lastProbePosition).Magnitude
+			else math.huge
+		shouldProbeTarget = localNow >= ((burrowState.LastSurfaceProbeAt or 0) + SURFACE_PROBE_INTERVAL)
+			or distanceFromLastProbe >= SURFACE_REPROBE_DISTANCE
+			or burrowState.LastSurfaceProbeHadSurface ~= true
+	end
+
+	if shouldProbeTarget then
+		resolvedSurfacePosition, hasTargetSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+			character,
+			rootPart,
+			targetPlanarPosition,
+			abilityConfig,
+			currentSurfacePosition,
+			{ FastSample = true }
+		)
+		burrowState.LastSurfaceProbeAt = localNow
+		burrowState.LastSurfaceProbePosition = targetPlanarPosition
+		burrowState.LastSurfaceProbeHadSurface = hasTargetSurface
+		if not resolvedSurfacePosition then
+			self:RequestSurface(SURFACE_REASON_SURFACE_LOST)
+			zeroRootVelocity(rootPart, false)
+			return
+		end
+	elseif movementDistance > MIN_TARGET_PROBE_DISTANCE then
+		resolvedSurfacePosition = Vector3.new(targetPlanarPosition.X, currentSurfacePosition.Y, targetPlanarPosition.Z)
+		hasTargetSurface = true
+	else
+		resolvedSurfacePosition = currentSurfacePosition
+		hasTargetSurface = burrowState.LastSurfaceProbeHadSurface == true
 	end
 	if desiredDirection.Magnitude > MIN_DIRECTION_MAGNITUDE and hasTargetSurface then
 		burrowState.Direction = desiredDirection.Unit
 	end
 
 	burrowState.SurfaceRootPosition = if hasTargetSurface then resolvedSurfacePosition else currentSurfacePosition
-	pivotCharacterToRootPosition(character, rootPart, resolvedSurfacePosition, burrowState.Direction)
-	rootPart.AssemblyLinearVelocity = Vector3.zero
+	self:RecordPivotWrite(
+		pivotCharacterToRootPosition(character, rootPart, burrowState.SurfaceRootPosition, burrowState.Direction, burrowState)
+	)
+	zeroRootVelocity(rootPart, false)
 end
 
 function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
@@ -1537,7 +1909,9 @@ function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
 
 	burrowState.LastTrailAt = now
 	if not self.vfxController:PlayTrail(rootPart.Position, burrowState.Direction, getAbilityConfig()) then
-		createTrailPulse(rootPart.Position, tonumber(getAbilityConfig().TrailWidth) or 2.6)
+		if createTrailPulse(rootPart.Position, tonumber(getAbilityConfig().TrailWidth) or 2.6) and self.diagnostics then
+			self.diagnostics.TrailPulseCount += 1
+		end
 	end
 end
 
@@ -1563,7 +1937,12 @@ function MoguClient:HandleEffect(targetPlayer, abilityName, payload)
 	return false
 end
 
-function MoguClient:HandleStateEvent()
+function MoguClient:HandleStateEvent(eventName, abilityName)
+	if abilityName == ABILITY_NAME and eventName == "Denied" then
+		self:CancelLocalStartFeedback("server_denied")
+		return true
+	end
+
 	return false
 end
 
@@ -1582,6 +1961,7 @@ function MoguClient:Update(dt)
 			end
 		end
 	end
+	self:PublishDiagnostics(false)
 end
 
 function MoguClient:HandleEquipped()
@@ -1594,6 +1974,7 @@ function MoguClient:HandleUnequipped()
 end
 
 function MoguClient:HandleCharacterRemoving()
+	self:CancelLocalStartFeedback("character_removing")
 	local localBurrowState = self.burrowStates[self.player]
 	if localBurrowState then
 		local humanoid = self.getHumanoid()
@@ -1614,6 +1995,9 @@ function MoguClient:HandleCharacterRemoving()
 		self:ClearVisualBurrowOffset(targetPlayer, false)
 	end
 	self.vfxController:HandleCharacterRemoving()
+	cleanupTrailPulsePool()
+	self:RecordCleanup()
+	self:PublishDiagnostics(true)
 
 	self.burrowInputState.Forward = false
 	self.burrowInputState.Backward = false
@@ -1622,12 +2006,17 @@ function MoguClient:HandleCharacterRemoving()
 end
 
 function MoguClient:HandlePlayerRemoving(leavingPlayer)
+	if leavingPlayer == self.player then
+		self:CancelLocalStartFeedback("player_removing")
+	end
 	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	self.animationController:StopAnimation(self.burrowStates[leavingPlayer] and self.burrowStates[leavingPlayer].AnimationState, "player_removing")
 	self.burrowStates[leavingPlayer] = nil
 	self:ClearVisualBurrowOffset(leavingPlayer, false)
 	self:ClearConceal(leavingPlayer)
 	self.vfxController:HandlePlayerRemoving(leavingPlayer)
+	self:RecordCleanup()
+	self:PublishDiagnostics(true)
 end
 
 return MoguClient

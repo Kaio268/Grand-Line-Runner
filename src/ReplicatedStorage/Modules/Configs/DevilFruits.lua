@@ -375,6 +375,9 @@ local DevilFruits = {
 							MaxBonus = 1,
 						},
 					},
+					Audio = {
+						DetonateSoundId = "rbxassetid://80642927300013",
+					},
 					Animation = {
 						Plant = {
 							AnimationKey = "Bomu.Plant",
@@ -522,6 +525,9 @@ local DevilFruits = {
 					LocalDecalTransparency = 0.72,
 					ObserverBodyTransparency = 1,
 					ObserverDecalTransparency = 1,
+					Audio = {
+						ActivateSoundId = "rbxassetid://78492636125633",
+					},
 					Animation = {
 						AnimationKey = "Suke.Suke1",
 						EffectDelay = 0.35,
@@ -582,6 +588,11 @@ local DevilFruits = {
 					BodyHighlightOutlineTransparency = 0.16,
 					GhostTransparency = 0.42,
 					GhostLocalTransparency = 0.2,
+					Audio = {
+						ActivateSoundId = "rbxassetid://116810314478650",
+						MoveLoopSoundId = "rbxassetid://99992721489454",
+						ReturnSoundId = "rbxassetid://74101168656622",
+					},
 					Animation = {
 						Projection = {
 							AnimationKey = "Horo.HoroProjection",
