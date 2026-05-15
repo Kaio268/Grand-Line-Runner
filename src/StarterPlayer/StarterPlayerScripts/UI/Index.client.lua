@@ -74,10 +74,16 @@ local modalAdapter = ReactFrameModalAdapter.new({
 local unregisterModal = ReactModalRegistry.Register("Index", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
 	end,
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
 		end
 	end,
 	close = function()

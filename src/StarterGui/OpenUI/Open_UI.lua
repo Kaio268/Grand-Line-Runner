@@ -31,6 +31,7 @@ local CLOSE_BUTTON_DEBUG = true
 local CLOSE_BUTTON_DEBUG_VERSION = "close-buttons-live-debug-2026-05-01"
 local REACT_MODAL_FRAME_NAMES = {
 	CometMerchant = true,
+	Gifts = true,
 	GearStore = true,
 	Index = true,
 	LimitedReward = true,

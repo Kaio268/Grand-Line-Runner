@@ -71,13 +71,22 @@ local settingFolder = nil
 local settingOverrides = {}
 local cleanupConnections = {}
 local settingConnections = {}
+local scheduleRender
+local syncAudioFromSettings
+
 local unregisterModal = ReactModalRegistry.Register("Settings", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
 	end,
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
 		end
 	end,
 	close = function()
@@ -87,9 +96,6 @@ local unregisterModal = ReactModalRegistry.Register("Settings", {
 		return modalAdapter:IsVisible()
 	end,
 })
-
-local scheduleRender
-local syncAudioFromSettings
 
 local function debugAudio(message, ...)
 	if not DEBUG_SETTINGS_AUDIO then

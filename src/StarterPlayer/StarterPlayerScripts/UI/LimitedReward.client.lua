@@ -50,14 +50,21 @@ local rewardAlreadyClaimedLocal = false
 local favoriteText = "0/1"
 local likeText = "0/1"
 local lastClick = 0
+local scheduleRender
 
 local unregisterModal = ReactModalRegistry.Register("LimitedReward", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
 	end,
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
 		end
 	end,
 	close = function()
@@ -108,7 +115,7 @@ local function syncFavoriteState()
 	return isFavorited
 end
 
-local function scheduleRender()
+scheduleRender = function()
 	if renderQueued or destroyed then
 		return
 	end

@@ -5,6 +5,7 @@ local pendingOperations = {}
 local changedEvent = Instance.new("BindableEvent")
 local REACT_MODAL_NAMES = {
 	CometMerchant = true,
+	Gifts = true,
 	GearStore = true,
 	Index = true,
 	LimitedReward = true,

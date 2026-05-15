@@ -4,60 +4,13 @@ DialogModule.__index = DialogModule
 
 local tweenService = game:GetService("TweenService")
 local runService = game:GetService("RunService")
-local userInputService = game:GetService("UserInputService")
 local collectionService = game:GetService("CollectionService")
-local players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ReactNpcDialogService = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ReactNpcDialogService"))
 
 local TICK_SOUND = script.sounds.tick
-
-local SHOW_TWEEN = TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local HOVER_TWEEN = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local TEXT_TWEEN = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-
-local LIST_HEIGHT_SCALE = 0.35
-
-local function getDialogResponsesUI(player)
-	local resolvedPlayer = player
-	if runService:IsClient() then
-		resolvedPlayer = players.LocalPlayer
-	end
-	if not resolvedPlayer then
-		return nil
-	end
-
-	local playerGui = resolvedPlayer:FindFirstChild("PlayerGui") or resolvedPlayer:WaitForChild("PlayerGui", 5)
-	if not playerGui then
-		return nil
-	end
-
-	local dialogGui = playerGui:FindFirstChild("dialog") or playerGui:WaitForChild("dialog", 5)
-	if not dialogGui then
-		return nil
-	end
-
-	return dialogGui:FindFirstChild("dialogResponses") or dialogGui:WaitForChild("dialogResponses", 5)
-end
-
-local function ensureResponseButtons(player)
-	local responsesUi = getDialogResponsesUI(player)
-	if not responsesUi then
-		return nil
-	end
-
-	local template = responsesUi:FindFirstChild("template")
-	if template then
-		for i = 1, 9 do
-			local newResponseButton = template:Clone()
-			newResponseButton.Parent = responsesUi
-			newResponseButton.Name = tostring(i)
-			newResponseButton.Visible = false
-			newResponseButton.Size = UDim2.new(1, 0, 1, 0)
-		end
-		template:Destroy()
-	end
-
-	return responsesUi
-end
+local turnProximityPromptsOn
 
 function DialogModule.new(npcName, npc, prompt, animation)
 	local self = setmetatable({}, DialogModule)
@@ -70,8 +23,6 @@ function DialogModule.new(npcName, npc, prompt, animation)
 	self.active = false
 	self.talking = false
 	self.prompt = prompt
-
-	ensureResponseButtons()
 
 	local eventSignal = Instance.new("BindableEvent")
 	self.responded = eventSignal.Event
@@ -186,110 +137,20 @@ function DialogModule:triggerDialog(player, questionNumber)
 		dialogObject.Text = dialog.text
 		self.talking = false
 
-		local keyboardInputs = {
-			Enum.KeyCode.One,
-			Enum.KeyCode.Two,
-			Enum.KeyCode.Three,
-			Enum.KeyCode.Four,
-			Enum.KeyCode.Five,
-			Enum.KeyCode.Six,
-			Enum.KeyCode.Seven,
-			Enum.KeyCode.Eight,
-			Enum.KeyCode.Nine,
-		}
-
-		local uiResponses = ensureResponseButtons(player)
-		if not uiResponses then
-			warn(("Dialog responses UI is unavailable for NPC: %s"):format(tostring(self.npcName)))
-			self:hideGui("...")
-			return
-		end
-
-		local responseNum = nil
-
-		local function setPlainText(guiObj, txt)
-			if guiObj and (guiObj:IsA("TextLabel") or guiObj:IsA("TextButton")) then
-				guiObj.RichText = false
-				guiObj.Text = txt
-			end
-		end
-
-		for i, response in ipairs(dialog.responses) do
-			local option = uiResponses:FindFirstChild(tostring(i))
-			if not option then
-				warn(("Missing response button '%d' in dialogResponses"):format(i))
-				continue
-			end
-
-			local slot1 = option:FindFirstChild("Slot")
-			local slot2 = slot1 and slot1:FindFirstChild("2")
-			local textLabel = option:FindFirstChild("text") or option:FindFirstChild("Text") or option:FindFirstChild("Response")
-
-			setPlainText(slot1, tostring(i))
-			setPlainText(slot2, tostring(i))
-			setPlainText(textLabel, tostring(response))
-
-			option.Size = UDim2.new(1, 0, 1, 0)
-			option.Visible = true
-			option.Size = UDim2.new(1, 0, 0, 0)
-			tweenService:Create(option, SHOW_TWEEN, { Size = UDim2.new(1, 0, 1, 0) }):Play()
-
-			local enterCon = option.MouseEnter:Connect(function()
-				tweenService:Create(option, HOVER_TWEEN, { Size = UDim2.new(1, 0, 1, 0) }):Play()
-			end)
-
-			local leaveCon = option.MouseLeave:Connect(function()
-				tweenService:Create(option, HOVER_TWEEN, { Size = UDim2.new(1, 0, 1, 0) }):Play()
-			end)
-
-			local chooseCon = option.MouseButton1Down:Connect(function()
+		self.active = true
+		ReactNpcDialogService.Open({
+			title = self.npcName,
+			message = dialog.text,
+			responses = dialog.responses,
+			onRespond = function(responseNum)
 				if not self.active then
 					return
 				end
 				self.active = false
-				responseNum = i
-				self.fireResponded:Fire(i, dialogNum)
+				self.fireResponded:Fire(responseNum, dialogNum)
 				TICK_SOUND:Play()
-			end)
-
-			local numberpressCon = userInputService.InputBegan:Connect(function(input, gameProcessed)
-				if gameProcessed then
-					return
-				end
-				if input.UserInputType ~= Enum.UserInputType.Keyboard then
-					return
-				end
-
-				local numberinput = table.find(keyboardInputs, input.KeyCode)
-				if numberinput ~= nil and numberinput == i then
-					if not self.active then
-						return
-					end
-					self.active = false
-					responseNum = i
-					self.fireResponded:Fire(i, dialogNum)
-					TICK_SOUND:Play()
-				end
-			end)
-
-			coroutine.wrap(function()
-				repeat
-					task.wait()
-				until responseNum ~= nil
-				enterCon:Disconnect()
-				leaveCon:Disconnect()
-				chooseCon:Disconnect()
-				numberpressCon:Disconnect()
-				if option then
-					option.Visible = false
-					option.Size = UDim2.new(1, 0, LIST_HEIGHT_SCALE, 0)
-				end
-			end)()
-
-			task.wait(0.2)
-		end
-
-		self.active = true
+			end,
+		})
 
 		local range = 10
 		while self.active do
@@ -304,7 +165,6 @@ function DialogModule:triggerDialog(player, questionNumber)
 			local distance = (char.PrimaryPart.Position - self.npc.UpperTorso.Position).Magnitude
 			if distance > range then
 				self:hideGui()
-				responseNum = 0
 				break
 			end
 			task.wait()
@@ -350,15 +210,7 @@ function DialogModule:hideGui(exitQuip, notActuallyAnExitQuip)
 		):Play()
 	end
 
-	local responsesUi = getDialogResponsesUI()
-	if responsesUi then
-		for _, option in responsesUi:GetChildren() do
-			if option:IsA("GuiButton") then
-				option.Visible = false
-				option.Size = UDim2.new(1, 0, 1, 0)
-			end
-		end
-	end
+	ReactNpcDialogService.Close()
 
 	local dialogObject = self.npcGui.dialog
 	if exitQuip then
@@ -434,7 +286,7 @@ function DialogModule:nextOption()
 	return self.dialogOption
 end
 
-function turnProximityPromptsOn(yes)
+turnProximityPromptsOn = function(yes)
 	for _, prompt in collectionService:GetTagged("NPCprompt") do
 		if prompt:IsA("ProximityPrompt") then
 			prompt.Enabled = yes

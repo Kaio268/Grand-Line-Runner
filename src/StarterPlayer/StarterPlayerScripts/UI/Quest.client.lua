@@ -42,13 +42,22 @@ local noticeToken = 0
 local watchedFrame = nil
 local watchedFrameConnection = nil
 local cleanupConnections = {}
+local scheduleRender
+local requestQuestState
+
 local unregisterModal = ReactModalRegistry.Register("Quest", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
 	end,
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
 		end
 	end,
 	close = function()
@@ -58,9 +67,6 @@ local unregisterModal = ReactModalRegistry.Register("Quest", {
 		return modalAdapter:IsVisible()
 	end,
 })
-
-local scheduleRender
-local requestQuestState
 
 local function disconnectAll()
 	for _, connection in ipairs(cleanupConnections) do
@@ -199,6 +205,9 @@ local function prepareQuestFrame()
 			modalAdapter:SyncOverlayState()
 			if frame.Visible then
 				requestQuestState()
+				if scheduleRender then
+					scheduleRender()
+				end
 			end
 		end)
 	end

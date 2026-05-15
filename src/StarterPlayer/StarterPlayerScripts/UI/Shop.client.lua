@@ -42,13 +42,21 @@ local modalAdapter = ReactFrameModalAdapter.new({
 
 local purchaseAdapter = PurchaseAdapter.new(player)
 local cleanupConnections = {}
+local scheduleRender
+
 local unregisterModal = ReactModalRegistry.Register("Store", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
 	end,
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
 		end
 	end,
 	close = function()
@@ -59,7 +67,6 @@ local unregisterModal = ReactModalRegistry.Register("Store", {
 	end,
 })
 
-local scheduleRender
 local LEGACY_CREW_TERM = "Brain" .. "rots"
 local LEGACY_STORE_COPY_REPLACEMENTS = {
 	["Earn x2 Money and make 2x more from " .. LEGACY_CREW_TERM] = "Earn x2 Money and make 2x more from Crewmates",

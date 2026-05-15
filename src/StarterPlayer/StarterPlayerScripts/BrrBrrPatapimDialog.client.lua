@@ -129,30 +129,7 @@ local dialogObject = DialogModule.new("OpenFishingShop", npc, npcPrompt)
 dialogObject:addDialog("Do You Want To Open Speed Upgrades?", { "Yea", "Nope" })
 
 local function openFrame(frameName)
-	if ReactModalRegistry.Open(frameName) then
-		return
-	end
-
-	local playerGui = player:FindFirstChild("PlayerGui")
-	if not playerGui then
-		return
-	end
-
-	local openUi = playerGui:FindFirstChild("OpenUI")
-	local openModule = openUi and openUi:FindFirstChild("Open_UI")
-	if openModule then
-		local ok, controller = pcall(require, openModule)
-		if ok and controller and controller.OpenFrame then
-			controller:OpenFrame(frameName)
-			return
-		end
-	end
-
-	local frames = playerGui:FindFirstChild("Frames")
-	local frame = frames and frames:FindFirstChild(frameName)
-	if frame and frame:IsA("Frame") then
-		frame.Visible = true
-	end
+	ReactModalRegistry.Open(frameName)
 end
 
 local FALLBACK_FIRST_POS = UDim2.fromScale(0.566, 0.431)

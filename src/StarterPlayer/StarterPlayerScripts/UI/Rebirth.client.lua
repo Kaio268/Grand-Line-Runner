@@ -39,14 +39,21 @@ local destroyed = false
 local renderQueued = false
 local connections = {}
 local clickDebounce = false
+local scheduleRender
 
 local unregisterModal = ReactModalRegistry.Register("Rebirth", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
 	end,
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
 		end
 	end,
 	close = function()
@@ -158,7 +165,7 @@ local function render()
 	modalAdapter:SyncOverlayState()
 end
 
-local function scheduleRender()
+scheduleRender = function()
 	if renderQueued or destroyed then
 		return
 	end
