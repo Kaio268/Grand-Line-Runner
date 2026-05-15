@@ -140,7 +140,7 @@ local Economy = {
 		},
 	},
 
-	Brainrots = {
+	CrewMembers = {
 		MaxLevel = 50,
 		FoodAutoFeedPriority = {
 			"Apple",

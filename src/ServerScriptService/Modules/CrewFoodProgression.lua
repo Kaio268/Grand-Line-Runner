@@ -1,8 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
--- Crew progression owns the food/level behavior. Some economy table names still
--- say Brainrots because those config keys are shared persisted balance data.
 local dataManagerModule = nil
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -25,7 +23,6 @@ local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):
 local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local Module = {}
@@ -171,18 +168,18 @@ end
 
 local function normalizeRarity(rawRarity)
 	local rarity = tostring(rawRarity or "Common")
-	if Economy.Brainrots.TotalXPMultiplierByRarity[rarity] then
+	if Economy.CrewMembers.TotalXPMultiplierByRarity[rarity] then
 		return rarity
 	end
 	return "Common"
 end
 
 local function getMaxLevel()
-	return math.max(1, tonumber(Economy.Brainrots.MaxLevel) or 50)
+	return math.max(1, tonumber(Economy.CrewMembers.MaxLevel) or 50)
 end
 
 local function getFoodPriority()
-	return Economy.Brainrots.FoodAutoFeedPriority
+	return Economy.CrewMembers.FoodAutoFeedPriority
 end
 
 local function getFoodDisplayName(foodKey)
@@ -200,8 +197,8 @@ local function getXPRequiredForLevel(rarity, level)
 		return 0
 	end
 
-	local multiplier = tonumber(Economy.Brainrots.TotalXPMultiplierByRarity[normalizeRarity(rarity)]) or 1
-	for _, band in ipairs(Economy.Brainrots.BaseXPPerLevelBand) do
+	local multiplier = tonumber(Economy.CrewMembers.TotalXPMultiplierByRarity[normalizeRarity(rarity)]) or 1
+	for _, band in ipairs(Economy.CrewMembers.BaseXPPerLevelBand) do
 		if level >= band.MinLevel and level <= band.MaxLevel then
 			return math.max(1, math.floor((tonumber(band.XPPerLevel) or 0) * multiplier + 0.5))
 		end
@@ -225,13 +222,13 @@ local function getVariantAndBaseName(fullName)
 end
 
 local function getStoredRarity(_player, storageName)
-	local info = CrewCatalog.GetInfoById(storageName) or CrewLegacyConfig[storageName]
+	local info = CrewCatalog.GetInfoById(storageName)
 	if type(info) == "table" then
 		return normalizeRarity(info.Rarity)
 	end
 
 	local _, baseName = getVariantAndBaseName(storageName)
-	local baseInfo = CrewCatalog.GetInfoById(baseName) or CrewLegacyConfig[baseName]
+	local baseInfo = CrewCatalog.GetInfoById(baseName)
 	return normalizeRarity(baseInfo and baseInfo.Rarity or nil)
 end
 
@@ -299,8 +296,8 @@ function Module.GetXPRequiredForLevel(rarity, level)
 	return getXPRequiredForLevel(rarity, level)
 end
 
-function Module.GetProgress(player, brainrotName)
-	local instanceId, instanceData = CrewInstanceService.ResolveProgressTarget(player, brainrotName)
+function Module.GetProgress(player, crewMemberId)
+	local instanceId, instanceData = CrewInstanceService.ResolveProgressTarget(player, crewMemberId)
 	if not instanceData then
 		return nil
 	end
@@ -334,17 +331,17 @@ function Module.GetProgress(player, brainrotName)
 	}
 end
 
-function Module.GetNextAutoFeedStep(player, brainrotName)
-	local progress = Module.GetProgress(player, brainrotName)
+function Module.GetNextAutoFeedStep(player, crewMemberId)
+	local progress = Module.GetProgress(player, crewMemberId)
 	if not progress then
 		return false, {
-			Error = "missing_brainrot",
+			Error = "missing_crew_member",
 		}
 	end
 
 	if progress.Level >= progress.MaxLevel then
 		return false, {
-			Error = "brainrot_max_level",
+			Error = "crew_member_max_level",
 			Progress = progress,
 		}
 	end
@@ -458,20 +455,20 @@ function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP)
 	return result
 end
 
-function Module.ApplyAutoFeed(player, brainrotName, options)
+function Module.ApplyAutoFeed(player, crewMemberId, options)
 	options = typeof(options) == "table" and options or {}
 	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
 
-	local progress = Module.GetProgress(player, brainrotName)
+	local progress = Module.GetProgress(player, crewMemberId)
 	if not progress then
 		return false, {
-			Error = "missing_brainrot",
+			Error = "missing_crew_member",
 		}
 	end
 
 	if progress.Level >= progress.MaxLevel then
 		return false, {
-			Error = "brainrot_max_level",
+			Error = "crew_member_max_level",
 			Progress = progress,
 		}
 	end
@@ -573,19 +570,19 @@ function Module.ApplyAutoFeed(player, brainrotName, options)
 	return true, plan
 end
 
-function Module.ApplyAutoFeedStep(player, brainrotName, expectedFoodKey, options)
+function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options)
 	options = typeof(options) == "table" and options or {}
 	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
-	local progress = Module.GetProgress(player, brainrotName)
+	local progress = Module.GetProgress(player, crewMemberId)
 	if not progress then
 		return false, {
-			Error = "missing_brainrot",
+			Error = "missing_crew_member",
 		}
 	end
 
 	if progress.Level >= progress.MaxLevel then
 		return false, {
-			Error = "brainrot_max_level",
+			Error = "crew_member_max_level",
 			Progress = progress,
 		}
 	end

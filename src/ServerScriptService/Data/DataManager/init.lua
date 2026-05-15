@@ -1286,7 +1286,7 @@ end
 
 local function markPlayerDataReady(player: Player, startedAt: number)
 	local inventory = player:FindFirstChild("Inventory")
-	local brainrotCount = countPositiveQuantityFolders(inventory)
+	local inventoryFolderCount = countPositiveQuantityFolders(inventory)
 	local crewMemberInventory = player:FindFirstChild("CrewMemberInventory")
 	local crewById = crewMemberInventory and crewMemberInventory:FindFirstChild("ById")
 	local crewCount = crewById and #crewById:GetChildren() or 0
@@ -1305,8 +1305,8 @@ local function markPlayerDataReady(player: Player, startedAt: number)
 		tostring(Profiles[player] ~= nil),
 		"replica",
 		tostring(Replicas[player] ~= nil),
-		"brainrots",
-		brainrotCount,
+		"inventoryFolders",
+		inventoryFolderCount,
 		"crew",
 		crewCount
 	)

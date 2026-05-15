@@ -4,8 +4,8 @@ local Modules = ServerScriptService:WaitForChild("Modules")
 local CrewInstanceService = require(Modules:WaitForChild("CrewInstanceService"))
 local service = require(Modules:WaitForChild("GrandLineRushBountyService"))
 
-CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, brainrotInventory)
-	service.RefreshPlayerBounty(player, brainrotInventory)
+CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, crewInventory)
+	service.RefreshPlayerBounty(player, crewInventory)
 end)
 
 service.Start()

@@ -6,7 +6,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegistry"))
-local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
@@ -60,6 +59,11 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		return n == 0
 	end
 
+	local canonicalCrewMemberName, resolvedInfo, legacyStorageName = CrewCatalog.ResolveCrewMemberId(crewMemberName)
+	if resolvedInfo then
+		crewMemberName = canonicalCrewMemberName
+	end
+
 	local variantKey, baseName = getVariantAndBaseName(crewMemberName)
 
 	local model = findModelFor(variantKey, baseName)
@@ -67,20 +71,19 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		return false
 	end
 
-	local info = CrewCatalog.GetInfoById(crewMemberName) or CrewCatalog.GetInfoById(baseName)
+	local info = resolvedInfo or CrewCatalog.GetInfoById(crewMemberName) or CrewCatalog.GetInfoById(baseName)
 	if not info then
 		return false
 	end
 
-	if CrewLegacyConfig[baseName] then
-		local baseInfo = CrewLegacyConfig[baseName]
-		baseInfo.GoldenRender = baseInfo.GoldenRender or baseInfo.Render
-		baseInfo.DiamondRender = baseInfo.DiamondRender or baseInfo.Render
+	options = if typeof(options) == "table" then options else {}
+	if tostring(options.LegacyStorageName or "") ~= "" then
+		legacyStorageName = tostring(options.LegacyStorageName)
+	elseif legacyStorageName == "" and tostring(info.LegacyId or "") ~= "" then
+		legacyStorageName = tostring(info.LegacyId)
 	end
 
-	options = if typeof(options) == "table" then options else {}
-
-	local baseInfo = CrewCatalog.GetInfoById(baseName) or CrewLegacyConfig[baseName] or info
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
@@ -99,6 +102,10 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 
 	CrewInstanceService.EnsureInventoryMetadata(plr, crewMemberName, {
 		StorageName = crewMemberName,
+		LegacyStorageName = legacyStorageName,
+		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
+		DisplayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or crewMemberName),
+		ModelName = tostring(info.ModelName or baseName),
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = tostring(info.Rarity or "Common"),
@@ -108,6 +115,11 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		DiamondRender = diamondRender,
 	})
 	local createdIds = CrewInstanceService.CreateInstances(plr, crewMemberName, n, {
+		StorageName = crewMemberName,
+		LegacyStorageName = legacyStorageName,
+		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
+		DisplayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or crewMemberName),
+		ModelName = tostring(info.ModelName or baseName),
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = tostring(info.Rarity or "Common"),

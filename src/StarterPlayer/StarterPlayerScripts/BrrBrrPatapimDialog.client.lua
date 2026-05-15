@@ -16,7 +16,6 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local Point = require(ReplicatedStorage:WaitForChild("Point"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local LegacyCrewConfig = CrewCatalog.GetLegacyConfig()
 local player = Players.LocalPlayer
 
 local VariantPrefixes = { "Golden ", "Diamond " }
@@ -36,17 +35,11 @@ do
 	end
 end
 
-local KnownBrainrotNames = {}
+local KnownCrewMemberNames = {}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local function getCarriedCrewMemberName()
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
-	if typeof(carried) == "string" and carried ~= "" then
-		return carried
-	end
-
-	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
 	if typeof(carried) == "string" and carried ~= "" then
 		return carried
 	end
@@ -56,13 +49,10 @@ end
 local function addKnownCrewName(name)
 	local value = tostring(name or "")
 	if value ~= "" then
-		KnownBrainrotNames[value] = true
+		KnownCrewMemberNames[value] = true
 	end
 end
 
-for brainrotName in pairs(LegacyCrewConfig) do
-	addKnownCrewName(brainrotName)
-end
 for _, entry in ipairs(CrewCatalog.GetBaseEntries()) do
 	local info = entry.Info
 	addKnownCrewName(entry.Id)
@@ -83,16 +73,16 @@ local function stripVariantPrefix(name)
 	return raw
 end
 
-local function isLikelyBrainrotModelName(name)
+local function isLikelyCrewMemberModelName(name)
 	local raw = tostring(name or "")
 	if raw == "" then
 		return false
 	end
-	if KnownBrainrotNames[raw] then
+	if KnownCrewMemberNames[raw] then
 		return true
 	end
 	local stripped = stripVariantPrefix(raw)
-	return KnownBrainrotNames[stripped] == true
+	return KnownCrewMemberNames[stripped] == true
 end
 
 local TUTORIAL_DEBUG = true
@@ -127,8 +117,8 @@ local function debugTutorial(key, message, throttleSeconds)
 	print(string.format("[TUTORIAL][%s][%.2f] %s", keyName, now, tostring(message)))
 end
 
-local lastBrainrotModelSweepAt = 0
-local lastBrainrotModelSweepResult = nil
+local lastCrewMemberModelSweepAt = 0
+local lastCrewMemberModelSweepResult = nil
 
 local remote = ReplicatedStorage:FindFirstChild("TutorialrrrrFinished")
 
@@ -652,30 +642,30 @@ local function hasCarriedCrewMember()
 	return getCarriedCrewMemberName() ~= nil
 end
 
-local function hasBrainrotTool(container)
+local function hasCrewMemberTool(container)
 	if not container then
 		return false
 	end
 	for _, child in ipairs(container:GetChildren()) do
-		if child:IsA("Tool") and isLikelyBrainrotModelName(child.Name) then
+		if child:IsA("Tool") and isLikelyCrewMemberModelName(child.Name) then
 			return true
 		end
 	end
 	return false
 end
 
-local function hasCollectedBrainrotForTutorial()
+local function hasCollectedCrewMemberForTutorial()
 	if hasCarriedCrewMember() or inventoryHasAnyFolder() then
 		return true
 	end
 
 	local backpack = player:FindFirstChildOfClass("Backpack")
-	if hasBrainrotTool(backpack) then
+	if hasCrewMemberTool(backpack) then
 		return true
 	end
 
 	local character = player.Character
-	if hasBrainrotTool(character) then
+	if hasCrewMemberTool(character) then
 		return true
 	end
 
@@ -712,7 +702,7 @@ local function getModelTargetPart(model)
 	return model:FindFirstChildWhichIsA("BasePart", true)
 end
 
-local function getNearestBrainrotTarget(character)
+local function getNearestCrewMemberTarget(character)
 	local hrp = character:FindFirstChild("HumanoidRootPart")
 	if not hrp then
 		return nil, nil, nil
@@ -741,33 +731,33 @@ local function getNearestBrainrotTarget(character)
 		validRarityParts[tostring(rarityName)] = true
 	end
 
-	local brainrotsWorld = mapRoot and mapRoot:FindFirstChild("BrainrotsWorld")
-	local droppedFolder = brainrotsWorld and brainrotsWorld:FindFirstChild("Dropped")
+	local crewMembersWorld = mapRoot and mapRoot:FindFirstChild("CrewMembersWorld")
+	local droppedFolder = crewMembersWorld and crewMembersWorld:FindFirstChild("Dropped")
 	if droppedFolder then
 		table.insert(roots, droppedFolder)
 	end
 
 	if container and container:IsDescendantOf(workspace) then
-		local spawnBrainrotsFolder = container:FindFirstChild("Brainrots")
-		if spawnBrainrotsFolder then
-			table.insert(roots, spawnBrainrotsFolder)
+		local spawnCrewMembersFolder = container:FindFirstChild("CrewMembers")
+		if spawnCrewMembersFolder then
+			table.insert(roots, spawnCrewMembersFolder)
 		end
 		for _, child in ipairs(container:GetChildren()) do
 			if child:IsA("Instance") then
-				local brainrots = child:FindFirstChild("Brainrots")
-				if brainrots then
-					table.insert(roots, brainrots)
+				local crewMembers = child:FindFirstChild("CrewMembers")
+				if crewMembers then
+					table.insert(roots, crewMembers)
 				end
 			end
 		end
 	end
 
-	-- Newer biome layouts can store active brainrots under Biomes/*/*/Brainrots.
+	-- Newer biome layouts can store active crew members under Biomes/*/*/CrewMembers.
 	local biomesRoot = mapRoot and mapRoot:FindFirstChild("Biomes")
 	if biomesRoot then
 		for _, descendant in ipairs(biomesRoot:GetDescendants()) do
 			if
-				(descendant:IsA("Folder") and descendant.Name == "Brainrots")
+				(descendant:IsA("Folder") and descendant.Name == "CrewMembers")
 				or (descendant:IsA("BasePart") and validRarityParts[descendant.Name])
 			then
 				table.insert(roots, descendant)
@@ -848,13 +838,13 @@ local function getNearestBrainrotTarget(character)
 		end
 	end
 
-	local function considerVisualBrainrotModel(model, source)
+	local function considerVisualCrewMemberModel(model, source)
 		if not (model and model:IsA("Model") and model:IsDescendantOf(workspace)) then
 			return
 		end
 		debugInfo.hoverCandidates += 1
 
-		local hover = model:FindFirstChild("BrainrotHover", true) or model:FindFirstChild("BrainortHover", true)
+		local hover = model:FindFirstChild("CrewMemberHover", true)
 		if not hover then
 			return
 		end
@@ -884,7 +874,7 @@ local function getNearestBrainrotTarget(character)
 		end
 	end
 
-	-- Fallback 1: some brainrots may be present without usable prompt filters.
+	-- Fallback 1: some crew members may be present without usable prompt filters.
 	if not bestModel then
 		for _, root in ipairs(roots) do
 			if root and root:IsDescendantOf(workspace) then
@@ -916,24 +906,24 @@ local function getNearestBrainrotTarget(character)
 		end
 	end
 
-	-- Fallback 3: nearest visible brainrot model marker.
+	-- Fallback 3: nearest visible crew member model marker.
 	if not bestModel then
 		local now = os.clock()
-		if now - lastBrainrotModelSweepAt >= 0.45 then
-			lastBrainrotModelSweepAt = now
-			lastBrainrotModelSweepResult = nil
+		if now - lastCrewMemberModelSweepAt >= 0.45 then
+			lastCrewMemberModelSweepAt = now
+			lastCrewMemberModelSweepResult = nil
 			if mapRoot then
 				for _, candidate in ipairs(mapRoot:GetDescendants()) do
 					if candidate:IsA("Model") then
-						if isLikelyBrainrotModelName(candidate.Name) then
+						if isLikelyCrewMemberModelName(candidate.Name) then
 							considerModel(candidate, "map_name_match")
 						end
 						if not bestModel then
-							considerVisualBrainrotModel(candidate, "map_visual_hover")
+							considerVisualCrewMemberModel(candidate, "map_visual_hover")
 						end
 					end
 					if bestModel then
-						lastBrainrotModelSweepResult = {
+						lastCrewMemberModelSweepResult = {
 							model = bestModel,
 							prompt = bestPrompt,
 							part = bestPart,
@@ -941,8 +931,8 @@ local function getNearestBrainrotTarget(character)
 					end
 				end
 			end
-		elseif lastBrainrotModelSweepResult then
-			local cached = lastBrainrotModelSweepResult
+		elseif lastCrewMemberModelSweepResult then
+			local cached = lastCrewMemberModelSweepResult
 			if
 				cached.model
 				and cached.part
@@ -975,28 +965,28 @@ local function getNearestBrainrotTarget(character)
 		end
 	end
 
-	-- Fallback 5: scan every "Brainrots" folder in workspace directly.
+	-- Fallback 5: scan every "CrewMembers" folder in workspace directly.
 	if not bestModel then
 		for _, folder in ipairs(workspace:GetDescendants()) do
-			if folder:IsA("Folder") and folder.Name == "Brainrots" then
+			if folder:IsA("Folder") and folder.Name == "CrewMembers" then
 				for _, candidate in ipairs(folder:GetChildren()) do
 					if candidate:IsA("Model") then
-						considerModel(candidate, "workspace_brainrots_folder_model")
+						considerModel(candidate, "workspace_crew_members_folder_model")
 					elseif candidate:IsA("BasePart") then
-						considerPart(candidate, "workspace_brainrots_folder_part")
+						considerPart(candidate, "workspace_crew_members_folder_part")
 					end
 				end
 			end
 		end
 	end
 
-	-- Fallback 6: nearest visible brainrot hover adornee.
+	-- Fallback 6: nearest visible crew member hover adornee.
 	if not bestModel then
 		for _, gui in ipairs(workspace:GetDescendants()) do
-			if gui:IsA("BillboardGui") and (gui.Name == "BrainrotHover" or gui.Name == "BrainortHover") then
+			if gui:IsA("BillboardGui") and gui.Name == "CrewMemberHover" then
 				local adornee = gui.Adornee
 				if adornee and adornee:IsA("BasePart") then
-					considerPart(adornee, "brainrot_hover_adornee")
+					considerPart(adornee, "crew_member_hover_adornee")
 				end
 			end
 		end
@@ -1141,14 +1131,14 @@ end
 
 local beamActive = false
 local beamStage = "OFF"
-local currentBrainrotModel
-local currentBrainrotPrompt
+local currentCrewMemberModel
+local currentCrewMemberPrompt
 
 local function stopAllTutorialSystems()
 	beamActive = false
 	beamStage = "OFF"
-	currentBrainrotModel = nil
-	currentBrainrotPrompt = nil
+	currentCrewMemberModel = nil
+	currentCrewMemberPrompt = nil
 
 	clearPromptQueue()
 
@@ -1226,7 +1216,7 @@ local function resetAfterRespawn()
 
 	if beamStage == "TO_BRR" then
 		setTutorial(1, "Follow the beam to Franky and hold E to interact.")
-	elseif beamStage == "BRAINROT" or beamStage == "WAIT_FOR_FOLDER" then
+	elseif beamStage == "CREW_MEMBER" or beamStage == "WAIT_FOR_FOLDER" then
 		setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 	elseif beamStage == "PLOT_STAND" then
 		setTutorial(5, "Go to your Stand, equip the Crewmate you collected, and place it on the Stand.")
@@ -1248,15 +1238,15 @@ local function runBeamLoop(character)
 			setTargetPart(getBrrMesh())
 			debugTutorial("BEAM_TO_BRR", "target=" .. getInstancePath(getBrrMesh()), 1.5)
 			task.wait(0.2)
-		elseif beamStage == "BRAINROT" then
+		elseif beamStage == "CREW_MEMBER" then
 			setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 
-			local model, nearestPrompt, targetPart, debugInfo = getNearestBrainrotTarget(character)
+			local model, nearestPrompt, targetPart, debugInfo = getNearestCrewMemberTarget(character)
 
-			-- Keep aiming at whichever brainrot is currently closest and active.
+			-- Keep aiming at whichever crew member is currently closest and active.
 			if model and targetPart then
-				currentBrainrotModel = model
-				currentBrainrotPrompt = nearestPrompt or getModelPrompt(model)
+				currentCrewMemberModel = model
+				currentCrewMemberPrompt = nearestPrompt or getModelPrompt(model)
 				setTargetPart(targetPart)
 				debugTutorial(
 					"STEP4_TARGET",
@@ -1265,13 +1255,13 @@ local function runBeamLoop(character)
 						tostring(debugInfo and debugInfo.source or "unknown"),
 						getInstancePath(model),
 						getInstancePath(targetPart),
-						getInstancePath(currentBrainrotPrompt),
+						getInstancePath(currentCrewMemberPrompt),
 						tonumber(debugInfo and debugInfo.bestDist) or -1
 					),
 					0.4
 				)
-			elseif currentBrainrotModel and aliveInWorkspace(currentBrainrotModel) then
-				local fallbackPart = getModelTargetPart(currentBrainrotModel)
+			elseif currentCrewMemberModel and aliveInWorkspace(currentCrewMemberModel) then
+				local fallbackPart = getModelTargetPart(currentCrewMemberModel)
 				if fallbackPart then
 					setTargetPart(fallbackPart)
 					debugTutorial(
@@ -1284,8 +1274,8 @@ local function runBeamLoop(character)
 					debugTutorial("STEP4_HIDE", "cached model had no valid part; hiding beam", 0.8)
 				end
 			else
-				currentBrainrotModel = nil
-				currentBrainrotPrompt = nil
+				currentCrewMemberModel = nil
+				currentCrewMemberPrompt = nil
 				local fallbackPart = getFallbackSpawnTargetPart(character)
 				if fallbackPart then
 					setTargetPart(fallbackPart)
@@ -1299,7 +1289,7 @@ local function runBeamLoop(character)
 					debugTutorial(
 						"STEP4_NOT_FOUND",
 						string.format(
-							"no brainrot target found (roots=%s prompts=%s models=%s parts=%s hovers=%s)",
+							"no crew member target found (roots=%s prompts=%s models=%s parts=%s hovers=%s)",
 							tostring(debugInfo and debugInfo.roots or 0),
 							tostring(debugInfo and debugInfo.promptCandidates or 0),
 							tostring(debugInfo and debugInfo.modelCandidates or 0),
@@ -1315,10 +1305,10 @@ local function runBeamLoop(character)
 			local prompt = popPrompt()
 			if prompt then
 				if
-					(currentBrainrotPrompt and prompt == currentBrainrotPrompt)
-					or (currentBrainrotModel and prompt:IsDescendantOf(currentBrainrotModel))
+					(currentCrewMemberPrompt and prompt == currentCrewMemberPrompt)
+					or (currentCrewMemberModel and prompt:IsDescendantOf(currentCrewMemberModel))
 				then
-					debugTutorial("STEP4_PROGRESS", "brainrot prompt triggered, advancing to stand step", 0)
+					debugTutorial("STEP4_PROGRESS", "crew member prompt triggered, advancing to stand step", 0)
 					clearPromptQueue()
 					startPlotStandStep()
 					task.wait(0.08)
@@ -1326,14 +1316,14 @@ local function runBeamLoop(character)
 				end
 			end
 
-			if hasCollectedBrainrotForTutorial() then
+			if hasCollectedCrewMemberForTutorial() then
 				debugTutorial("STEP4_PROGRESS", "carried/inventory detected, advancing to stand step", 0)
 				clearPromptQueue()
 				startPlotStandStep()
 				task.wait(0.08)
 				continue
 			end
-			debugTutorial("STEP4_WAIT", "no collected brainrot detected yet", 1.2)
+			debugTutorial("STEP4_WAIT", "no collected crew member detected yet", 1.2)
 
 			task.wait(0.08)
 		elseif beamStage == "WAIT_FOR_FOLDER" then
@@ -1470,8 +1460,8 @@ local function startSpeedUpgradeTutorial()
 
 			setTutorial(4, "Follow the beam to the nearest Crewmate and hold E to collect it.")
 			beamActive = true
-			beamStage = "BRAINROT"
-			debugTutorial("STAGE", "Entered BRAINROT from Step 3 close", 0)
+			beamStage = "CREW_MEMBER"
+			debugTutorial("STAGE", "Entered CREW_MEMBER from Step 3 close", 0)
 
 			local character = player.Character
 			if character then

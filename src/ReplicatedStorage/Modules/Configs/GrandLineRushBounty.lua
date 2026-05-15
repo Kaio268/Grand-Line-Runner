@@ -24,7 +24,7 @@ local Config = {
 			Godly = 88,
 			Secret = 110,
 		},
-		TypeBaseByStorageName = {},
+		TypeBaseByCrewMemberId = {},
 	},
 	Extraction = {
 		ChestBountyByTier = {

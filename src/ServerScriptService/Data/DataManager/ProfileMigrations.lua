@@ -4,23 +4,15 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local ProfileTemplate = require(script.Parent:WaitForChild("ProfileTemplate"))
-local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
-local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local ProfileMigrations = {}
 
 local primaryCurrency = Economy.Currency.Primary
-local VALID_BRAINROT_ITEM_IDS = {}
-
-for itemId, info in pairs(BrainrotsCfg) do
-	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
-	end
-end
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -47,6 +39,16 @@ local function coerceNumber(value, fallback)
 		return value
 	end
 	return fallback
+end
+
+local function firstNonEmpty(...)
+	for index = 1, select("#", ...) do
+		local value = tostring(select(index, ...) or "")
+		if value ~= "" then
+			return value
+		end
+	end
+	return ""
 end
 
 local function coerceBoolean(value, fallback)
@@ -105,7 +107,7 @@ local function normalizeVariantKey(variantKey)
 	return "Normal"
 end
 
-local function resolveBrainrotItemId(storageName, baseName, variantKey)
+local function resolveCrewMemberItemId(storageName, baseName, variantKey)
 	local storageNameValue = tostring(storageName or "")
 	local baseNameValue = tostring(baseName or "")
 	local normalizedVariant = normalizeVariantKey(variantKey)
@@ -118,24 +120,30 @@ local function resolveBrainrotItemId(storageName, baseName, variantKey)
 
 	if baseNameValue ~= "" then
 		local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-		if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
-			return itemId
+		if itemId then
+			local crewMemberId, info = CrewCatalog.ResolveCrewMemberId(itemId)
+			if info then
+				return crewMemberId
+			end
 		end
 	end
 
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
-		return storageNameValue
+	if storageNameValue ~= "" then
+		local crewMemberId, info = CrewCatalog.ResolveCrewMemberId(storageNameValue)
+		if info then
+			return crewMemberId
+		end
 	end
 
 	return nil
 end
 
-local function normalizeBrainrotInstance(instanceId, instanceData, fallbackStorageName)
+local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallbackStorageName)
 	if typeof(instanceData) ~= "table" then
 		instanceData = {}
 	end
 
-	local storageName = tostring(instanceData.StorageName or fallbackStorageName or instanceData.BrainrotName or "")
+	local storageName = tostring(instanceData.CrewMemberId or instanceData.StorageName or fallbackStorageName or "")
 	if storageName == "" then
 		return nil
 	end
@@ -170,7 +178,7 @@ local function normalizeBrainrotInstance(instanceId, instanceData, fallbackStora
 end
 
 local function resolveLegacyCrewStorageName(storageName, baseName, variantKey)
-	local resolved = resolveBrainrotItemId(storageName, baseName, variantKey)
+	local resolved = resolveCrewMemberItemId(storageName, baseName, variantKey)
 	if resolved then
 		return resolved
 	end
@@ -183,7 +191,7 @@ local function resolveLegacyCrewStorageName(storageName, baseName, variantKey)
 	if tostring(baseName or "") ~= "" then
 		info = CrewCatalog.GetInfoById(baseName)
 		if info and tostring(info.LegacyId or "") ~= "" then
-			local resolvedFromBase = resolveBrainrotItemId(info.LegacyId, info.LegacyId, variantKey)
+			local resolvedFromBase = resolveCrewMemberItemId(info.LegacyId, info.LegacyId, variantKey)
 			return resolvedFromBase or tostring(info.LegacyId)
 		end
 	end
@@ -196,30 +204,39 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		instanceData = {}
 	end
 
-	local rawStorageName = tostring(
-		instanceData.LegacyStorageName
-			or instanceData.StorageName
-			or instanceData.BrainrotName
-			or instanceData.Name
-			or fallbackStorageName
-			or ""
+	local rawStorageName = firstNonEmpty(
+		instanceData.CrewMemberId,
+		instanceData.StorageName,
+		instanceData.Name,
+		fallbackStorageName
 	)
 	local rawBaseName = tostring(instanceData.BaseName or rawStorageName)
 	local rawVariant = tostring(instanceData.Variant or "")
-	local legacyStorageName = resolveLegacyCrewStorageName(rawStorageName, rawBaseName, rawVariant)
-	if legacyStorageName == "" then
+	local crewMemberId, info, resolvedLegacyStorageName = CrewCatalog.ResolveCrewMemberId(rawStorageName)
+	if not info and rawBaseName ~= rawStorageName then
+		crewMemberId, info, resolvedLegacyStorageName = CrewCatalog.ResolveCrewMemberId(rawBaseName)
+	end
+	if crewMemberId == "" then
 		return nil
 	end
+	local legacyStorageName = firstNonEmpty(instanceData.LegacyStorageName, resolvedLegacyStorageName)
+	if legacyStorageName == "" and rawStorageName ~= crewMemberId then
+		legacyStorageName = resolveLegacyCrewStorageName(rawStorageName, rawBaseName, rawVariant)
+	end
+	if legacyStorageName == crewMemberId then
+		legacyStorageName = ""
+	end
+	local variantKey, baseName = getVariantAndBaseName(crewMemberId)
 
-	local legacyInstance = normalizeBrainrotInstance(instanceId, {
-		StorageName = legacyStorageName,
-		BaseName = instanceData.BaseName,
-		Variant = instanceData.Variant,
-		Rarity = instanceData.Rarity,
-		Income = instanceData.Income,
-		Render = instanceData.Render,
-		GoldenRender = instanceData.GoldenRender,
-		DiamondRender = instanceData.DiamondRender,
+	local legacyInstance = normalizeCrewMemberSourceInstance(instanceId, {
+		StorageName = crewMemberId,
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = info and info.Rarity or instanceData.Rarity,
+		Income = info and info.Income or instanceData.Income,
+		Render = info and info.Render or instanceData.Render,
+		GoldenRender = info and info.GoldenRender or instanceData.GoldenRender,
+		DiamondRender = info and info.DiamondRender or instanceData.DiamondRender,
 		Level = instanceData.Level,
 		CurrentXP = instanceData.CurrentXP,
 		TotalXP = instanceData.TotalXP,
@@ -231,16 +248,14 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		TutorialReward = instanceData.TutorialReward,
 		TutorialToken = instanceData.TutorialToken,
 		GrandLineRushStarter = instanceData.GrandLineRushStarter,
-	}, legacyStorageName)
+	}, crewMemberId)
 	if not legacyInstance then
 		return nil
 	end
 
-	local info = CrewCatalog.GetInfoById(legacyInstance.StorageName) or CrewCatalog.GetInfoById(legacyInstance.BaseName)
-	local crewMemberId = tostring(instanceData.CrewMemberId or (info and info.CrewMemberId) or legacyInstance.StorageName)
 	local displayName = tostring(
-		instanceData.DisplayName
-			or (info and (info.DisplayName or info.CrewMemberName or info.Name))
+		(info and (info.DisplayName or info.CrewMemberName or info.Name))
+			or instanceData.DisplayName
 			or legacyInstance.StorageName
 	)
 
@@ -248,8 +263,8 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		InstanceId = legacyInstance.InstanceId,
 		CrewMemberId = crewMemberId,
 		DisplayName = displayName,
-		LegacyStorageName = legacyInstance.StorageName,
-		StorageName = legacyInstance.StorageName,
+		LegacyStorageName = legacyStorageName,
+		StorageName = crewMemberId,
 		BaseName = legacyInstance.BaseName,
 		Variant = legacyInstance.Variant,
 		Rarity = legacyInstance.Rarity,
@@ -257,6 +272,7 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		Render = legacyInstance.Render,
 		GoldenRender = legacyInstance.GoldenRender,
 		DiamondRender = legacyInstance.DiamondRender,
+		ModelName = tostring(info and info.ModelName or instanceData.ModelName or legacyInstance.BaseName),
 		Level = legacyInstance.Level,
 		CurrentXP = legacyInstance.CurrentXP,
 		TotalXP = math.max(0, coerceNumber(instanceData.TotalXP or legacyInstance.TotalXP, 0)),
@@ -488,11 +504,15 @@ function ProfileMigrations.Apply(data)
 
 	hiddenLeaderstats.PlotUpgrade = math.clamp(coerceNumber(hiddenLeaderstats.PlotUpgrade, 0), 0, PlotUpgradeConfig.MaxLevel)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
-	hiddenLeaderstats.TutorialBrainrotGranted = coerceBoolean(hiddenLeaderstats.TutorialBrainrotGranted, false)
+	hiddenLeaderstats.TutorialCrewMemberGranted = coerceBoolean(
+		hiddenLeaderstats.TutorialCrewMemberGranted or hiddenLeaderstats.TutorialBrainrotGranted,
+		false
+	)
+	hiddenLeaderstats.TutorialBrainrotGranted = nil
 	hiddenLeaderstats.TutorialSpeedTopUpGranted = coerceBoolean(hiddenLeaderstats.TutorialSpeedTopUpGranted, false)
 	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
 	if hiddenLeaderstats.Tutorial == true then
-		hiddenLeaderstats.TutorialBrainrotGranted = true
+		hiddenLeaderstats.TutorialCrewMemberGranted = true
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = true
 	elseif coerceNumber(hiddenLeaderstats.Speed, 1) <= 1 then
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
@@ -570,11 +590,11 @@ function ProfileMigrations.Apply(data)
 
 	for inventoryKey, inventoryEntry in pairs(inventory) do
 		if inventoryKey ~= "Feed" and inventoryKey ~= "DevilFruits" and typeof(inventoryEntry) == "table" then
-			local hasBrainrotFields = inventoryEntry.Quantity ~= nil
+			local hasRetiredCrewFields = inventoryEntry.Quantity ~= nil
 				or inventoryEntry.Rarity ~= nil
 				or inventoryEntry.Level ~= nil
 				or inventoryEntry.BaseName ~= nil
-			if hasBrainrotFields then
+			if hasRetiredCrewFields then
 				inventory[inventoryKey] = nil
 			end
 		end

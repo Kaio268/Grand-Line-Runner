@@ -2,19 +2,15 @@ local Players = game:GetService("Players")
 
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
-local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
 
 local function clearCarriedCrewMemberAttributes(plr)
 	plr:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
 	plr:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
-	plr:SetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE, nil)
-	plr:SetAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE, nil)
 end
 
 local function hook(plr)
 	plr:SetAttribute("IsDead", false)
-	if plr:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE) == nil and plr:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE) == nil then
+	if plr:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE) == nil then
 		clearCarriedCrewMemberAttributes(plr)
 	end
 

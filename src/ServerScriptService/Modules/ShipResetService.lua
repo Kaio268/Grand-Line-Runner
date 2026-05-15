@@ -18,8 +18,8 @@ local DEFAULT_SPEED = math.max(1, math.floor(tonumber(ProfileTemplate.HiddenLead
 local SHIP_RESET_ATTRIBUTES = {
 	"StealOwnerUserId",
 	"StealStandName",
-	"StealBrainrotName",
-	"StealBrainrotInstanceId",
+	"StealCrewMemberName",
+	"StealCrewMemberInstanceId",
 	"StealProductId",
 	"StealTime",
 }
@@ -47,12 +47,12 @@ local function clearPlayerResetAttributes(player)
 end
 
 local function releaseAllAssignedShipUnits(player)
-	local brainrotInventory = CrewInstanceService.GetCrewInventory(player)
-	if typeof(brainrotInventory) ~= "table" then
-		return false, "missing_brainrot_inventory"
+	local crewInventory = CrewInstanceService.GetCrewInventory(player)
+	if typeof(crewInventory) ~= "table" then
+		return false, "missing_crew_inventory"
 	end
 
-	local byId = typeof(brainrotInventory.ById) == "table" and brainrotInventory.ById or {}
+	local byId = typeof(crewInventory.ById) == "table" and crewInventory.ById or {}
 	local changed = false
 	local now = os.time()
 
@@ -65,14 +65,14 @@ local function releaseAllAssignedShipUnits(player)
 	end
 
 	if changed then
-		local success = CrewInstanceService.SaveCrewInventory(player, brainrotInventory, {
+		local success = CrewInstanceService.SaveCrewInventory(player, crewInventory, {
 			SourcePath = "ship_reset_release_assigned",
 		})
 		if success == false then
 			return false, "failed_to_release_assigned_units"
 		end
 
-		BountyService.RefreshPlayerBounty(player, brainrotInventory)
+		BountyService.RefreshPlayerBounty(player, crewInventory)
 	end
 
 	CrewInstanceService.SyncCrewAvailableCounts(player)

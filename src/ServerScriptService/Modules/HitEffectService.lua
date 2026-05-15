@@ -24,15 +24,9 @@ local sliceServiceCache = nil
 local crewInteractionCache = nil
 local temporaryRagdollServiceCache = nil
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local function hasCarriedCrewMember(player)
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
-	if typeof(carried) == "string" and carried ~= "" then
-		return true
-	end
-
-	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
 	return typeof(carried) == "string" and carried ~= ""
 end
 

@@ -8,7 +8,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
+local CrewMembers = require(Modules:WaitForChild("Crew"):WaitForChild("CrewMembers"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
@@ -25,11 +25,16 @@ local indexCollectionFolder = nil
 local crewMemberInventoryFolder = nil
 local claimedRewardOverrides = {}
 
-local VALID_BRAINROT_ITEM_IDS = {}
+local VALID_CREW_MEMBER_ITEM_IDS = {}
 
-for itemId, info in pairs(Brainrots) do
-	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
+for _, entry in ipairs(CrewMembers.GetEntries()) do
+	if type(entry) == "table" then
+		local crewMemberId = tostring(entry.CrewMemberId or "")
+		if crewMemberId ~= "" then
+			for _, variantKey in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
+				VALID_CREW_MEMBER_ITEM_IDS[CrewCatalog.MakeVariantId(crewMemberId, variantKey)] = true
+			end
+		end
 	end
 end
 
@@ -154,14 +159,19 @@ local function parseVariantAndBaseName(fullName)
 	return "Normal", value
 end
 
-local function resolveBrainrotItemId(storageName, baseName, variantKey)
-	local storageNameValue = tostring(storageName or "")
+local function resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
+	local crewMemberIdValue = tostring(crewMemberId or "")
 	local baseNameValue = tostring(baseName or "")
 	local normalizedVariant = normalizeVariantKey(variantKey)
-	if baseNameValue == "" and storageNameValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(storageNameValue)
+	if baseNameValue == "" and crewMemberIdValue ~= "" then
+		local parsedVariant, parsedBaseName = parseVariantAndBaseName(crewMemberIdValue)
 		normalizedVariant = normalizeVariantKey(parsedVariant)
 		baseNameValue = parsedBaseName
+	end
+
+	local resolvedCrewMemberId, info = CrewCatalog.ResolveCrewMemberId(baseNameValue)
+	if info then
+		baseNameValue = tostring(info.CrewMemberId or resolvedCrewMemberId)
 	end
 
 	if baseNameValue == "" then
@@ -169,19 +179,19 @@ local function resolveBrainrotItemId(storageName, baseName, variantKey)
 	end
 
 	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
+	if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
 		return itemId
 	end
 
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
-		return storageNameValue
+	if crewMemberIdValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[crewMemberIdValue] then
+		return crewMemberIdValue
 	end
 
 	return nil
 end
 
-local function markDiscoveredBrainrot(discovered, storageName, baseName, variantKey)
-	local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
+local function markDiscoveredCrewMember(discovered, crewMemberId, baseName, variantKey)
+	local itemId = resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
 	if itemId then
 		discovered[itemId] = true
 	end
@@ -207,7 +217,7 @@ local QUEST_KEYS = buildQuestKeys()
 
 local function countCollectedGlobal()
 	local discovered = {}
-	local discoveredFolder = indexCollectionFolder and indexCollectionFolder:FindFirstChild("Brainrots")
+	local discoveredFolder = indexCollectionFolder and indexCollectionFolder:FindFirstChild("CrewMembers")
 
 	if discoveredFolder then
 		for _, child in ipairs(discoveredFolder:GetChildren()) do
@@ -221,24 +231,13 @@ local function countCollectedGlobal()
 	if byIdFolder then
 		for _, child in ipairs(byIdFolder:GetChildren()) do
 			if child:IsA("Folder") then
-				markDiscoveredBrainrot(
+				markDiscoveredCrewMember(
 					discovered,
-					readStringField(child, "StorageName"),
+					readStringField(child, "CrewMemberId"),
 					readStringField(child, "BaseName"),
 					readStringField(child, "Variant")
 				)
 			end
-		end
-	end
-
-	for _, child in ipairs(inventory:GetChildren()) do
-		if child:IsA("Folder") and child.Name ~= "DevilFruits" then
-			markDiscoveredBrainrot(
-				discovered,
-				child.Name,
-				readStringField(child, "BaseName"),
-				readStringField(child, "Variant")
-			)
 		end
 	end
 

@@ -3,20 +3,6 @@ local CrewStorage = {}
 local CrewMemberShadowConfig = require(script.Parent:WaitForChild("CrewMemberShadowConfig"))
 
 CrewStorage.Keys = {
-	Inventory = "BrainrotInventory",
-	QuickSlots = "BrainrotQuickSlots",
-	Income = "IncomeBrainrots",
-	IndexCollection = "IndexCollection",
-	Index = "Brainrots",
-	CarriedAttribute = "CarriedBrainrot",
-	CarriedImageAttribute = "CarriedBrainrotImage",
-	StandName = "BrainrotName",
-	StandInstanceId = "BrainrotInstanceId",
-}
-
--- Canonical CrewMember save keys. Retired legacy roots may still be compared
--- by dev tools while saved-data cleanup finishes.
-CrewStorage.FutureKeys = {
 	Inventory = "CrewMemberInventory",
 	QuickSlots = "CrewMemberQuickSlots",
 	Income = "CrewMemberIncome",
@@ -27,6 +13,20 @@ CrewStorage.FutureKeys = {
 	StandName = "CrewMemberName",
 	StandInstanceId = "CrewMemberInstanceId",
 }
+
+CrewStorage.LegacyKeys = {
+	Inventory = "CrewMemberInventory",
+	QuickSlots = "CrewMemberQuickSlots",
+	Income = "CrewMemberIncome",
+	IndexCollection = "IndexCollection",
+	Index = "CrewMembers",
+	CarriedAttribute = "CarriedCrewMember",
+	CarriedImageAttribute = "CarriedCrewMemberImage",
+	StandName = "CrewMemberName",
+	StandInstanceId = "CrewMemberInstanceId",
+}
+
+CrewStorage.FutureKeys = CrewStorage.Keys
 
 CrewStorage.ShadowFlags = table.clone(CrewMemberShadowConfig.ProductionFlags)
 CrewStorage.SessionShadowFlagOverrides = {}

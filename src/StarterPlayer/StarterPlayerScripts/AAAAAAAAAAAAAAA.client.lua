@@ -10,9 +10,6 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("WaveClientDebugTrace") == true
 local seenWaveLogKeys = {}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
-local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
 
 local function getNonEmptyAttribute(instance, attributeName)
 	local value = instance:GetAttribute(attributeName)
@@ -22,14 +19,8 @@ local function getNonEmptyAttribute(instance, attributeName)
 	return nil
 end
 
-local function getCarriedCrewMemberImage(player)
-	return getNonEmptyAttribute(player, CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE)
-		or getNonEmptyAttribute(player, LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE)
-end
-
 local function getCarriedCrewMemberName(player)
 	return getNonEmptyAttribute(player, CARRIED_CREW_MEMBER_ATTRIBUTE)
-		or getNonEmptyAttribute(player, LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
 end
 
 local function formatVector3(value)
@@ -268,8 +259,8 @@ local function setDisasterImage(guiObj, waveName)
 	end
 end
 
-local function applyBrainrotToPfp(pfpGui, plr)
-	local container = pfpGui:FindFirstChild("Brainrot", true)
+local function applyCrewMemberToPfp(pfpGui, plr)
+	local container = pfpGui:FindFirstChild("CrewMember", true)
 	if not container then
 		return
 	end
@@ -279,17 +270,9 @@ local function applyBrainrotToPfp(pfpGui, plr)
 		return
 	end
 
-	local render = getCarriedCrewMemberImage(plr)
-	if render then
-		img.Image = render
-		setGuiVisible(container, true)
-		setGuiVisible(img, true)
-		return
-	end
-
 	local id = getCarriedCrewMemberName(plr)
 	if id then
-		local info = CrewCatalog.GetInfoById(id) or CrewCatalog.GetLegacyConfig()[id]
+		local info = CrewCatalog.GetInfoByAnyId(id)
 		local fallback = info and info.Render
 		if fallback and tostring(fallback) ~= "" then
 			img.Image = tostring(fallback)
@@ -330,10 +313,10 @@ local function ensurePfp(userId)
 
 	local plr = Players:GetPlayerByUserId(userId)
 	if plr then
-		applyBrainrotToPfp(c, plr)
+		applyCrewMemberToPfp(c, plr)
 		applySkullToPfp(c, plr)
 	else
-		local b = c:FindFirstChild("Brainrot", true)
+		local b = c:FindFirstChild("CrewMember", true)
 		if b then
 			setGuiVisible(b, false)
 		end
@@ -388,11 +371,11 @@ local function updatePfpPositions()
 	end
 end
 
-local function updatePfpBrainrotAndSkull()
+local function updatePfpCrewMemberAndSkull()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local gui = pfpClones[plr.UserId]
 		if gui and gui.Parent then
-			applyBrainrotToPfp(gui, plr)
+			applyCrewMemberToPfp(gui, plr)
 			applySkullToPfp(gui, plr)
 		end
 	end
@@ -2019,13 +2002,13 @@ RunService.RenderStepped:Connect(function(deltaTime)
 			updatePfpPositions()
 			updateWaveIndicators()
 			updateChestIndicators()
-			updatePfpBrainrotAndSkull()
+			updatePfpCrewMemberAndSkull()
 		end
 	else
 		updatePfpPositions()
 		updateWaveIndicators()
 		updateChestIndicators()
-		updatePfpBrainrotAndSkull()
+		updatePfpCrewMemberAndSkull()
 	end
 end)
 

@@ -7,7 +7,6 @@ local HttpService = game:GetService("HttpService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
-local CrewLegacyConfig = CrewCatalog.GetLegacyConfig()
 local CrewVariantConfig = CrewCatalog.GetVariantConfig()
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local CrewProfileSchema = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewProfileSchema"))
@@ -460,37 +459,33 @@ local function writeQuickSlotRoots(dataManager, player, slotData)
 	return canonicalOk == true, writes, canonicalDidWrite == true
 end
 
-local function getCrewDisplayName(storageName)
-	local info = CrewCatalog.GetInfoById(storageName) or CrewLegacyConfig[storageName]
-	return tostring((info and info.DisplayName) or storageName or "Crewmate")
+local function getCrewDisplayName(crewMemberId)
+	local info = CrewCatalog.GetInfoById(crewMemberId)
+	return tostring((info and info.DisplayName) or crewMemberId or "Crewmate")
 end
 
-local function getBaseStorageName(storageName)
-	storageName = tostring(storageName or "")
+local function getBaseCrewMemberId(crewMemberId)
+	crewMemberId = tostring(crewMemberId or "")
 	for _, variantKey in ipairs(CrewVariantConfig.Order or {}) do
 		if variantKey ~= "Normal" then
 			local variantData = (CrewVariantConfig.Versions or {})[variantKey]
 			local prefix = tostring((variantData and variantData.Prefix) or (variantKey .. " "))
-			if prefix ~= "" and storageName:sub(1, #prefix) == prefix then
-				return storageName:sub(#prefix + 1)
+			if prefix ~= "" and crewMemberId:sub(1, #prefix) == prefix then
+				return crewMemberId:sub(#prefix + 1)
 			end
 		end
 	end
-	return storageName
+	return crewMemberId
 end
 
-local function isCrewStorageName(storageName)
-	storageName = tostring(storageName or "")
-	return CrewCatalog.GetInfoById(storageName) ~= nil
-		or CrewCatalog.GetInfoById(getBaseStorageName(storageName)) ~= nil
-		or CrewLegacyConfig[storageName] ~= nil
-		or CrewLegacyConfig[getBaseStorageName(storageName)] ~= nil
+local function isCrewMemberId(crewMemberId)
+	crewMemberId = tostring(crewMemberId or "")
+	return select(2, CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)) ~= nil
+		or CrewCatalog.GetInfoById(getBaseCrewMemberId(crewMemberId)) ~= nil
 end
 
-local function getCrewRank(storageName)
-	local info = CrewCatalog.GetInfoById(storageName) or CrewCatalog.GetInfoById(getBaseStorageName(storageName))
-		or CrewLegacyConfig[storageName]
-		or CrewLegacyConfig[getBaseStorageName(storageName)]
+local function getCrewRank(crewMemberId)
+	local info = CrewCatalog.GetInfoById(crewMemberId) or CrewCatalog.GetInfoById(getBaseCrewMemberId(crewMemberId))
 	return RARITY_ORDER[tostring(info and info.Rarity or "")] or 0
 end
 
@@ -525,20 +520,20 @@ local function collectCrewEntriesFromProfile(player)
 
 	local counts = {}
 	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.AssignedStand or "") == ""
-			and isCrewStorageName(instanceData.StorageName)
-		then
-			local storageName = tostring(instanceData.StorageName)
-			counts[storageName] = (counts[storageName] or 0) + 1
+		if typeof(instanceData) == "table" then
+			local crewMemberId = tostring(instanceData.CrewMemberId or instanceData.StorageName or "")
+			local canonicalCrewMemberId, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+			if tostring(instanceData.AssignedStand or "") == "" and info then
+				counts[canonicalCrewMemberId] = (counts[canonicalCrewMemberId] or 0) + 1
+			end
 		end
 	end
 
 	local entries = {}
-	for storageName, quantity in pairs(counts) do
+	for crewMemberId, quantity in pairs(counts) do
 		if quantity > 0 then
 			table.insert(entries, {
-				Name = tostring(storageName),
+				Name = tostring(crewMemberId),
 				Quantity = quantity,
 			})
 		end
@@ -552,10 +547,10 @@ local function getCrewQuickEntries(player)
 	return collectCrewEntriesFromProfile(player) or {}
 end
 
-local function addOccupiedSlotName(slotNames, storageName)
-	storageName = tostring(storageName or "")
-	if storageName ~= "" and isCrewStorageName(storageName) then
-		slotNames[storageName] = true
+local function addOccupiedSlotName(slotNames, crewMemberId)
+	crewMemberId = tostring(crewMemberId or "")
+	if crewMemberId ~= "" and isCrewMemberId(crewMemberId) then
+		slotNames[crewMemberId] = true
 	end
 end
 
@@ -575,10 +570,12 @@ local function addAvailableInstanceSlotNamesFromProfile(player, slotNames)
 	end
 
 	for _, instanceData in pairs(crewInventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.AssignedStand or "") == ""
-			and isCrewStorageName(instanceData.StorageName) then
-			addOccupiedSlotName(slotNames, instanceData.StorageName)
+		if typeof(instanceData) == "table" then
+			local crewMemberId = tostring(instanceData.CrewMemberId or instanceData.StorageName or "")
+			local canonicalCrewMemberId, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+			if tostring(instanceData.AssignedStand or "") == "" and info then
+				addOccupiedSlotName(slotNames, canonicalCrewMemberId)
+			end
 		end
 	end
 end
@@ -636,7 +633,7 @@ function CrewQuickSlotService.CountOccupiedSlots(player)
 	return countOccupiedSlotNames(player)
 end
 
-function CrewQuickSlotService.CanGainBrainrots(player, amount, context)
+function CrewQuickSlotService.CanGainCrewMembers(player, amount, context)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false, 0, 0, 0
 	end
@@ -666,30 +663,26 @@ function CrewQuickSlotService.CanGainBrainrots(player, amount, context)
 	return allowed, occupied, slots.UnlockedSlots, slots.MaxSlots
 end
 
-function CrewQuickSlotService.CanGainCrewMembers(player, amount, context)
-	return CrewQuickSlotService.CanGainBrainrots(player, amount, context)
-end
-
 function CrewQuickSlotService.NotifyFull(player)
 	sendPopup(player, FULL_MESSAGE, ERROR_COLOR, true)
 end
 
 function CrewQuickSlotService.CanGainOrNotify(player, amount, context)
-	local allowed, occupied, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainBrainrots(player, amount, context)
+	local allowed, occupied, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainCrewMembers(player, amount, context)
 	if not allowed then
 		CrewQuickSlotService.NotifyFull(player)
 	end
 	return allowed, occupied, unlockedSlots, maxSlots
 end
 
-function CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
-	storageName = tostring(storageName or "")
-	if storageName == "" then
+function CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
+	local canonicalCrewMemberId, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+	if not info then
 		return nil
 	end
 
 	for index, entry in ipairs(getCrewQuickEntries(player)) do
-		if tostring(entry.Name) == storageName then
+		if tostring(entry.Name) == canonicalCrewMemberId then
 			return index
 		end
 	end
@@ -697,22 +690,14 @@ function CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
 	return nil
 end
 
-function CrewQuickSlotService.GetCrewSlotIndex(player, storageName)
-	return CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
-end
-
-function CrewQuickSlotService.CanEquipBrainrot(player, storageName)
-	local slotIndex = CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
+function CrewQuickSlotService.CanEquipCrewMember(player, crewMemberId)
+	local slotIndex = CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
 	if not slotIndex then
 		return false, nil, CrewQuickSlotService.GetUnlockedSlots(player)
 	end
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	return slotIndex <= slots.UnlockedSlots, slotIndex, slots.UnlockedSlots
-end
-
-function CrewQuickSlotService.CanEquipCrewMember(player, storageName)
-	return CrewQuickSlotService.CanEquipBrainrot(player, storageName)
 end
 
 function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
@@ -754,7 +739,7 @@ function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
 		return false
 	end
 
-	player:SetAttribute("PendingBrainrotQuickSlot", nextSlot)
+	player:SetAttribute("PendingCrewQuickSlot", nextSlot)
 	local flags = getCrewStorage().GetShadowFlags()
 	if flags.CrewMemberProductQuickSlotWriteAuthorityEnabled == true then
 		local token, tokenReason = createProductAuthorityToken(player, productId, {
@@ -785,8 +770,8 @@ function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
 	return true
 end
 
-function CrewQuickSlotService.PromptUnlockForBrainrot(player, storageName)
-	local slotIndex = CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
+function CrewQuickSlotService.PromptUnlockForCrewMember(player, crewMemberId)
+	local slotIndex = CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	if not slotIndex or slotIndex <= slots.UnlockedSlots then
 		return false
@@ -794,10 +779,6 @@ function CrewQuickSlotService.PromptUnlockForBrainrot(player, storageName)
 
 	sendPopup(player, string.format("Crew Quick Slot %d is locked.", slotIndex), INFO_COLOR, false)
 	return CrewQuickSlotService.RequestUnlock(player, slotIndex)
-end
-
-function CrewQuickSlotService.PromptUnlockForCrewMember(player, storageName)
-	return CrewQuickSlotService.PromptUnlockForBrainrot(player, storageName)
 end
 
 local function cloneValue(value)
@@ -1002,7 +983,7 @@ local function processCanonicalUnlockReceipt(player, productId, dataManager)
 			tostring(productId),
 			slots.UnlockedSlots
 		))
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		return true, {
 			AuthorityEnabled = false,
 			AlreadyMax = true,
@@ -1019,7 +1000,7 @@ local function processCanonicalUnlockReceipt(player, productId, dataManager)
 		MaxSlots = slots.MaxSlots,
 	}
 	local rootsUpdated, writes, didWrite = writeQuickSlotRoots(dataManager, player, targetSlotData)
-	player:SetAttribute("PendingBrainrotQuickSlot", nil)
+	player:SetAttribute("PendingCrewQuickSlot", nil)
 	if rootsUpdated ~= true then
 		return false, {
 			AuthorityEnabled = false,
@@ -1119,7 +1100,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 		and latestAudit.EntitlementAlreadyGranted == true
 		and status.RootsMatch == true
 	then
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		if token ~= nil then
 			markProductAuthorityToken(token, "granted", {
 				GrantedAt = os.time(),
@@ -1153,7 +1134,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 			Reason = "pending_audit_roots_already_at_target",
 		}, tokenAuditFields))
 		writeProductAudit(dataManager, player, recoveredAudit)
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		if token ~= nil then
 			markProductAuthorityToken(token, "granted", {
 				GrantedAt = os.time(),
@@ -1192,7 +1173,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 			Reason = "already_max",
 		}, tokenAuditFields))
 		writeProductAudit(dataManager, player, alreadyMaxAudit)
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		if token ~= nil then
 			markProductAuthorityToken(token, "granted", {
 				GrantedAt = os.time(),
@@ -1294,7 +1275,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 		}
 	end
 
-	player:SetAttribute("PendingBrainrotQuickSlot", nil)
+	player:SetAttribute("PendingCrewQuickSlot", nil)
 	if token ~= nil then
 		markProductAuthorityToken(token, "granted", {
 			GrantedAt = os.time(),

@@ -47,7 +47,6 @@ local function findProductionEntry(rawName)
 
 	local direct = CrewMembers.GetByCrewMemberId(name)
 		or CrewMembers.GetByDisplayName(name)
-		or CrewMembers.GetByLegacyId(name)
 		or CrewMembers.GetByRealCharacterName(name)
 
 	if direct then
@@ -58,7 +57,6 @@ local function findProductionEntry(rawName)
 	if variantKey ~= "Normal" then
 		local baseEntry = CrewMembers.GetByCrewMemberId(baseName)
 			or CrewMembers.GetByDisplayName(baseName)
-			or CrewMembers.GetByLegacyId(baseName)
 			or CrewMembers.GetByRealCharacterName(baseName)
 
 		if baseEntry then
@@ -85,9 +83,6 @@ local function getCandidates(input, config)
 		pushCandidate(candidates, config.Display_name)
 		pushCandidate(candidates, config.RewardName)
 		pushCandidate(candidates, config.Name)
-		pushCandidate(candidates, config.LegacyBrainrotName)
-		pushCandidate(candidates, config.LegacyRewardName)
-		pushCandidate(candidates, config.LegacyId)
 	end
 
 	return candidates
@@ -97,11 +92,11 @@ local function buildResolved(entry, variantKey, inputName, sourceName)
 	local displayName = tostring(entry.DisplayName or entry.CrewMemberId or inputName)
 	local legacyId = tostring(entry.LegacyId or "")
 	local crewMemberId = tostring(entry.CrewMemberId or displayName)
-	local grantName = legacyId
+	local grantName = crewMemberId
 	local resolvedDisplayName = displayName
 
 	if variantKey ~= "Normal" then
-		grantName = CrewCatalog.MakeVariantId(legacyId, variantKey)
+		grantName = CrewCatalog.MakeVariantId(crewMemberId, variantKey)
 		resolvedDisplayName = CrewCatalog.MakeVariantId(displayName, variantKey)
 	end
 

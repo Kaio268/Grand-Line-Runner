@@ -74,7 +74,7 @@ local Rewards = {
 				Chance = 100,
 				Amount = 1,
 				CrewMember = true,
-				LegacyBrainrotName = "Frigo Camelo",
+				CrewMemberId = "Ember Fist",
 			},
 		},
 	},

@@ -11,8 +11,6 @@ local CrewMemberShadowConfig = require(script.Parent:WaitForChild("CrewMemberSha
 local CrewMemberShadowWriter = require(script.Parent:WaitForChild("CrewMemberShadowWriter"))
 local CrewMemberLegacyFallbackTelemetry = require(script.Parent:WaitForChild("CrewMemberLegacyFallbackTelemetry"))
 
-local LegacyBrainrots = CrewCatalog.GetLegacyConfig()
-
 local CrewMemberCanonicalReadGate = {}
 
 CrewMemberCanonicalReadGate.Paths = {
@@ -546,7 +544,7 @@ end
 
 local function buildLegacyDisplayMetadata(storageName)
 	local id = tostring(storageName or "")
-	local legacyInfo = CrewCatalog.GetInfoById(id) or LegacyBrainrots[id]
+	local legacyInfo = CrewCatalog.GetInfoById(id)
 	local metadata = normalizeDisplayMetadata(legacyInfo, id, "LegacyDisplayAdapter")
 	if metadata then
 		return applyCompatibilityClassification(metadata, id, legacyInfo), nil
@@ -558,17 +556,18 @@ local function buildLegacyDisplayMetadata(storageName)
 		RealCharacterName = "",
 		Arc = "",
 		CompatibilityClassification = "unknown_legacy_id",
-		Source = "BrainrotsMissing",
+		Source = "CrewCatalogMissing",
 	}, "legacy_config_missing"
 end
 
 local function getCanonicalCrewMemberId(storageName, info)
 	local fallback = tostring(storageName or "")
-	if typeof(info) ~= "table" then
-		return fallback
+	local canonicalId, resolvedInfo = CrewCatalog.ResolveCrewMemberId(fallback)
+	if resolvedInfo then
+		return canonicalId
 	end
-	if info.RealCharacterName ~= nil then
-		return tostring(info.DisplayName or info.CrewMemberName or info.CrewMemberId or fallback)
+	if typeof(info) == "table" and tostring(info.CrewMemberId or "") ~= "" then
+		return tostring(info.CrewMemberId)
 	end
 	return fallback
 end
@@ -1007,10 +1006,6 @@ local function getApprovedModelPreviewRoot()
 	return assets and assets:FindFirstChild("One Piece Characters") or nil
 end
 
-local function getLegacyModelPreviewRoot()
-	return ReplicatedStorage:FindFirstChild("BrainrotFolder")
-end
-
 local function findPreviewModel(root, modelName)
 	if not root then
 		return nil
@@ -1067,32 +1062,6 @@ local function buildModelPreviewDescriptor(storageName, modelName, model, usedCa
 		Path = tostring(path or ""),
 		Source = tostring(sourceName or ""),
 	}
-end
-
-local function buildLegacyModelPreviewDescriptor(storageName, path)
-	local modelName = tostring(storageName or "")
-	if modelName == "" then
-		return nil, "legacy_identity_missing"
-	end
-
-	local root = getLegacyModelPreviewRoot()
-	if not root then
-		return buildModelPreviewDescriptor(storageName, modelName, nil, false, "legacy_preview_root_missing", "BrainrotFolder", path),
-			"legacy_preview_root_missing"
-	end
-
-	local model = findPreviewModel(root, modelName)
-	if not model then
-		return buildModelPreviewDescriptor(storageName, modelName, nil, false, "legacy_preview_model_missing", "BrainrotFolder", path),
-			"legacy_preview_model_missing"
-	end
-
-	local safe, reason = modelPassesPreviewSafeChecks(model)
-	if safe ~= true then
-		return buildModelPreviewDescriptor(storageName, modelName, model, false, reason, "BrainrotFolder", path), reason
-	end
-
-	return buildModelPreviewDescriptor(storageName, modelName, model, false, nil, "BrainrotFolder", path), nil
 end
 
 local function buildCanonicalModelPreviewDescriptor(storageName, path)
@@ -1182,10 +1151,9 @@ local function evaluateModelPreviewRead(source, path, storageName, options)
 		validationReason = rootReason or "invalid_source"
 	end
 
-	local legacyDescriptor, legacyReason = buildLegacyModelPreviewDescriptor(storageName, path)
 	local canonicalDescriptor, canonicalReason = buildCanonicalModelPreviewDescriptor(storageName, path)
 	local fallbackReason = nil
-	local selected = legacyDescriptor
+	local selected = canonicalDescriptor
 
 	if readAllowed ~= true then
 		fallbackReason = readGateReason or "canonical_read_not_allowed"
@@ -1193,8 +1161,6 @@ local function evaluateModelPreviewRead(source, path, storageName, options)
 		selected = canonicalDescriptor
 	elseif validationReason ~= nil then
 		fallbackReason = validationReason
-	elseif typeof(legacyDescriptor) ~= "table" or tostring(legacyDescriptor.ModelPath or "") == "" then
-		fallbackReason = canonicalReason or "preview_descriptor_unavailable"
 	elseif canonicalDescriptor == nil then
 		fallbackReason = canonicalReason or "canonical_preview_unavailable"
 	end
@@ -1205,7 +1171,7 @@ local function evaluateModelPreviewRead(source, path, storageName, options)
 			storageName,
 			nil,
 			false,
-			fallbackReason or legacyReason or "preview_descriptor_unavailable",
+			fallbackReason or "preview_descriptor_unavailable",
 			"Unavailable",
 			path
 		)
@@ -1224,10 +1190,8 @@ local function evaluateModelPreviewRead(source, path, storageName, options)
 	result.ValidationAge = if validationStatus then validationStatus.ValidationAgeSeconds else -1
 	result.ValidationAgeSeconds = if validationStatus then validationStatus.ValidationAgeSeconds else -1
 	result.BlockingCounts = counts
-	result.LegacyDescriptor = legacyDescriptor
 	result.CanonicalDescriptor = canonicalDescriptor
 	result.CanonicalUnavailableReason = canonicalReason
-	result.LegacyUnavailableReason = legacyReason
 
 	if fallbackReason ~= nil then
 		result.UsedCanonical = false
@@ -1629,9 +1593,9 @@ local function readLegacyStandOccupant(root, standName)
 		return nil, "legacy_stand_missing"
 	end
 
-	local legacyIdentity = tostring(standData[CrewProfileSchema.LegacyKeys.StandName] or standData.BrainrotName or "")
+	local legacyIdentity = tostring(standData[CrewProfileSchema.LegacyKeys.StandName] or standData.CrewMemberName or "")
 	local instanceId = tostring(
-		standData[CrewProfileSchema.LegacyKeys.StandInstanceId] or standData.BrainrotInstanceId or ""
+		standData[CrewProfileSchema.LegacyKeys.StandInstanceId] or standData.CrewMemberInstanceId or ""
 	)
 	return {
 		StandName = tostring(standName or ""),
@@ -1646,7 +1610,7 @@ local function getCanonicalStandLegacyIdentity(instanceData)
 		return ""
 	end
 
-	local legacyIdentity = tostring(instanceData.LegacyStorageName or instanceData.BrainrotName or "")
+	local legacyIdentity = tostring(instanceData.LegacyStorageName or instanceData.CrewMemberName or "")
 	if legacyIdentity ~= "" then
 		return legacyIdentity
 	end
@@ -2042,7 +2006,7 @@ local function getCanonicalIncomeLegacyIdentity(row)
 
 	local legacy = row.Legacy
 	if typeof(legacy) == "table" then
-		return tostring(legacy.BrainrotName or "")
+		return tostring(legacy.CrewMemberName or "")
 	end
 	return ""
 end
@@ -2059,7 +2023,7 @@ local function getCanonicalIncomeInstanceId(row)
 
 	local legacy = row.Legacy
 	if typeof(legacy) == "table" then
-		return tostring(legacy.BrainrotInstanceId or "")
+		return tostring(legacy.CrewMemberInstanceId or "")
 	end
 	return ""
 end
@@ -2528,22 +2492,13 @@ local function readLegacyInventoryInstanceById(root, instanceId)
 	return nil, "legacy_inventory_instance_missing"
 end
 
-local function readLegacyStandLevel(root, standName)
+local function readLegacyStandLevel(_root, standName)
 	local normalizedStandName = tostring(standName or "")
 	if normalizedStandName == "" then
 		return nil, nil
 	end
 
-	local standsLevels = if typeof(root) == "table" then root.StandsLevels else nil
-	if typeof(standsLevels) ~= "table" then
-		return nil, "legacy_stand_levels_missing"
-	end
-
-	local rawLevel = standsLevels[normalizedStandName]
-	if rawLevel == nil then
-		return nil, "legacy_stand_level_missing"
-	end
-	return math.max(1, floorOptionalNumber(rawLevel) or 1), nil
+	return nil, "legacy_stand_level_retired"
 end
 
 local function normalizeFoodStatusContext(target, options)
@@ -2565,9 +2520,9 @@ local function normalizeFoodStatusContext(target, options)
 		for _, key in ipairs({
 			"StandName",
 			"LegacyIdentity",
-			"BrainrotName",
+			"CrewMemberName",
 			"InstanceId",
-			"BrainrotInstanceId",
+			"CrewMemberInstanceId",
 			"Progress",
 			"AppliedStep",
 			"StorageName",
@@ -2595,14 +2550,14 @@ local function readLegacyFoodStatusRow(root, target, options)
 
 	local legacyIdentity = tostring(
 		context.LegacyIdentity
-			or context.BrainrotName
+			or context.CrewMemberName
 			or (legacyOccupant and legacyOccupant.LegacyIdentity)
 			or progress.StorageName
 			or ""
 	)
 	local instanceId = tostring(
 		context.InstanceId
-			or context.BrainrotInstanceId
+			or context.CrewMemberInstanceId
 			or progress.InstanceId
 			or (legacyOccupant and legacyOccupant.InstanceId)
 			or ""

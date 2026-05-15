@@ -68,7 +68,6 @@ local SOUND_AUDIO_KEY_BY_NAME = {
 	[SOUND_RETURN] = "ReturnSoundId",
 }
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -100,11 +99,6 @@ local function getCarriedCrewMemberName(player)
 	end
 
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
-	if typeof(carried) == "string" and carried ~= "" then
-		return carried
-	end
-
-	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
 	if typeof(carried) == "string" and carried ~= "" then
 		return carried
 	end
@@ -194,11 +188,10 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrCrewMember=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
 		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
-		tostring(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
 		tostring(player:GetAttribute("HoroProjectionCarryingReward"))

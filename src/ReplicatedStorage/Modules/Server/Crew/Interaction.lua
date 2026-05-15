@@ -1,26 +1,24 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
--- Crew interaction owns the old pickup/carry/drop/extract behavior. Several
--- attributes and Studio folder names remain Brainrot-named for compatibility.
 local Interaction = {}
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local activeContext = nil
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
-local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
+local TUTORIAL_CREW_MEMBER_ATTRIBUTE = "TutorialCrewMember"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
 local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
 local CARRIED_MODEL_ATTRIBUTE = "CrewCarryHeld"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
-local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
+local CREW_MEMBERS_WORLD_FOLDER_NAME = "CrewMembersWorld"
 local CARRY_ASSEMBLY_WELD_NAME = "CrewCarryAssemblyWeld"
 local CARRY_ATTACHMENT_WELD_NAME = "CrewCarryAttachmentWeld"
 local CARRY_ROOT_REPAIR_DISTANCE = 2
 local CARRY_PART_REPAIR_DISTANCE = 3
+local warnedMissingHoverTemplate = false
 
 local function normalizeCarriedAttribute(value)
 	if typeof(value) == "string" and value ~= "" then
@@ -35,23 +33,65 @@ end
 local function clearCarriedCrewMemberAttributes(player)
 	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
 	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
-	player:SetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE, nil)
-	player:SetAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE, nil)
 end
 
-local function setCarriedCrewMemberAttributes(player, crewMemberName, image)
-	local carriedName = normalizeCarriedAttribute(crewMemberName)
+local function setCarriedCrewMemberAttributes(player, crewMemberData)
+	local carriedName = normalizeCarriedAttribute(crewMemberData and (crewMemberData.DisplayName or crewMemberData.CrewMemberId))
 	if not carriedName then
 		clearCarriedCrewMemberAttributes(player)
 		return
 	end
 
 	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, carriedName)
-	player:SetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE, carriedName)
 
-	local carriedImage = normalizeCarriedAttribute(image)
+	local carriedImage = normalizeCarriedAttribute(crewMemberData and crewMemberData.Image)
 	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, carriedImage)
-	player:SetAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE, carriedImage)
+end
+
+local function getCrewMemberInfoFromState(st)
+	local entry = st and st.Entry
+	local info = entry and entry.Info
+	if typeof(info) == "table" then
+		return info
+	end
+	if entry and entry.Id then
+		return CrewCatalog.GetInfoById(entry.Id)
+	end
+	return nil
+end
+
+local function resolveCanonicalCrewMemberData(model, st)
+	local info = getCrewMemberInfoFromState(st)
+	if not info and model then
+		local modelCrewMemberId = normalizeCarriedAttribute(model:GetAttribute("CrewMemberId"))
+		if modelCrewMemberId then
+			info = CrewCatalog.GetInfoById(modelCrewMemberId)
+		end
+	end
+
+	local crewMemberId = normalizeCarriedAttribute(info and info.CrewMemberId)
+		or normalizeCarriedAttribute(model and model:GetAttribute("CrewMemberId"))
+	local displayName = normalizeCarriedAttribute(info and (info.DisplayName or info.CrewMemberName or info.Name))
+		or normalizeCarriedAttribute(model and model:GetAttribute("CrewMemberDisplayName"))
+		or crewMemberId
+
+	if not displayName then
+		return nil
+	end
+
+	return {
+		CrewMemberId = crewMemberId or displayName,
+		DisplayName = displayName,
+		Image = normalizeCarriedAttribute(info and info.Render)
+			or normalizeCarriedAttribute(model and model:GetAttribute("CrewMemberImage")),
+	}
+end
+
+local function resolveCrewMemberStorageName(model, st, crewMemberData)
+	return normalizeCarriedAttribute(crewMemberData and crewMemberData.CrewMemberId)
+		or normalizeCarriedAttribute(st and st.Entry and st.Entry.Id)
+		or normalizeCarriedAttribute(model and model:GetAttribute("CrewMemberId"))
+		or normalizeCarriedAttribute(model and model.Name)
 end
 
 function Interaction.GetCarriedCrewMemberName(player)
@@ -60,7 +100,6 @@ function Interaction.GetCarriedCrewMemberName(player)
 	end
 
 	return normalizeCarriedAttribute(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE))
-		or normalizeCarriedAttribute(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE))
 end
 
 function Interaction.ClearCarriedCrewMemberAttributes(player)
@@ -74,9 +113,9 @@ local function canPlayerCarryModel(player, model)
 		return false
 	end
 
-	local isTutorialBrainrot = model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+	local isTutorialCrewMember = model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
 	local tutorialOwnerUserId = model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
-	if isTutorialBrainrot then
+	if isTutorialCrewMember then
 		return typeof(tutorialOwnerUserId) == "number" and tutorialOwnerUserId == player.UserId
 	end
 
@@ -426,11 +465,7 @@ local function getTextTarget(root, name)
 end
 
 local function findHoverGui(primaryPart)
-	local h = primaryPart:FindFirstChild("BrainrotHover", true)
-	if h and h:IsA("BillboardGui") then
-		return h
-	end
-	h = primaryPart:FindFirstChild("BrainortHover", true)
+	local h = primaryPart:FindFirstChild("CrewMemberHover", true)
 	if h and h:IsA("BillboardGui") then
 		return h
 	end
@@ -444,13 +479,17 @@ local function ensureHoverGui(primaryPart)
 	end
 
 	local rarities = ReplicatedStorage:FindFirstChild("Rarities")
-	local template = rarities and rarities:FindFirstChild("BrainrotHover")
+	local template = rarities and rarities:FindFirstChild("CrewMemberHover")
 	if not template or not template:IsA("BillboardGui") then
+		if not warnedMissingHoverTemplate then
+			warn("[CrewInteraction] Missing ReplicatedStorage.Rarities.CrewMemberHover canonical hover template.")
+			warnedMissingHoverTemplate = true
+		end
 		return nil
 	end
 
 	local clone = template:Clone()
-	clone.Name = "BrainrotHover"
+	clone.Name = "CrewMemberHover"
 	clone.Adornee = primaryPart
 	clone.Parent = primaryPart
 	clone.Enabled = true
@@ -773,7 +812,7 @@ local function settleToGroundThenAnchor(model, shouldContinue)
 	anchorAll(model)
 end
 
-local function scheduleDroppedBrainrotSettle(ctx, model, st)
+local function scheduleDroppedCrewMemberSettle(ctx, model, st)
 	if not ctx or not model or not st then
 		return
 	end
@@ -794,8 +833,8 @@ local function isRagdollState(state)
 end
 
 function Interaction.NewContext(map)
-	local worldFolder = map:FindFirstChild("BrainrotsWorld") or Instance.new("Folder")
-	worldFolder.Name = "BrainrotsWorld"
+	local worldFolder = map:FindFirstChild(CREW_MEMBERS_WORLD_FOLDER_NAME) or Instance.new("Folder")
+	worldFolder.Name = CREW_MEMBERS_WORLD_FOLDER_NAME
 	worldFolder.Parent = map
 
 	local carriedFolder = worldFolder:FindFirstChild("Carried") or Instance.new("Folder")
@@ -890,7 +929,7 @@ local function dropHeldCrewMember(ctx, player, model, st, dropPosition)
 	st.HolderUserId = nil
 	st.LastUpdate = os.clock()
 	setDropPhysics(model)
-	scheduleDroppedBrainrotSettle(ctx, model, st)
+	scheduleDroppedCrewMemberSettle(ctx, model, st)
 
 	if st.Prompt then
 		st.Prompt.Enabled = true
@@ -962,12 +1001,7 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 	ctx.HeldByUserId[player.UserId] = model
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
-	local render = ""
-	if st and st.Entry and st.Entry.Info and st.Entry.Info.Render then
-		render = tostring(st.Entry.Info.Render)
-	end
-
-	setCarriedCrewMemberAttributes(player, tostring(model.Name), render)
+	setCarriedCrewMemberAttributes(player, resolveCanonicalCrewMemberData(model, st))
 
 	disconnectDeath(ctx, player.UserId)
 	disconnectRagdoll(ctx, player.UserId)
@@ -1037,14 +1071,16 @@ function Interaction.TryCarryNearPosition(ctx, player, active, worldPosition, ca
 	end
 
 	if not bestModel or not bestState then
-		return false, "no_brainrot_in_range"
+		return false, "no_crew_member_in_range"
 	end
 
 	if carryCrewMemberOnPart(ctx, player, bestModel, bestState, carrierPart) then
+		local crewMemberData = resolveCanonicalCrewMemberData(bestModel, bestState)
 		return true, {
 			Kind = "CrewMember",
-			LegacyKind = "Brainrot",
-			Name = tostring(bestModel.Name),
+			Name = tostring((crewMemberData and crewMemberData.DisplayName) or ""),
+			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
+			LegacyId = crewMemberData and crewMemberData.LegacyId or nil,
 			Distance = bestDistance,
 		}
 	end
@@ -1062,7 +1098,7 @@ function Interaction.DropHeldAtPosition(ctx, player, active, dropPosition)
 	local model = ctx.HeldByUserId[player.UserId]
 	if not model or not model.Parent then
 		ctx.HeldByUserId[player.UserId] = nil
-		return false, "no_held_brainrot"
+		return false, "no_held_crew_member"
 	end
 
 	local st = active[model]
@@ -1088,11 +1124,9 @@ function Interaction.CollectHeld(ctx, player, active)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
 	local st = active[model]
-	local brainrotName = model.Name
-	if st and st.Entry then
-		brainrotName = tostring(st.Entry.Id or brainrotName)
-	end
-	local isTutorialBrainrot = model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+	local crewMemberData = resolveCanonicalCrewMemberData(model, st)
+	local storageName = resolveCrewMemberStorageName(model, st, crewMemberData)
+	local isTutorialCrewMember = model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
 	local tutorialOwnerUserId = model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
 	local tutorialToken = tostring(model:GetAttribute(TUTORIAL_TOKEN_ATTRIBUTE) or "")
 	local tutorialRewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
@@ -1115,10 +1149,13 @@ function Interaction.CollectHeld(ctx, player, active)
 
 	if st then
 		return {
-			Name = brainrotName,
+			Name = storageName,
+			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
+			DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
+			Image = crewMemberData and crewMemberData.Image or nil,
 			OriginData = st.OriginData,
 			SlotIndex = st.SlotIndex,
-			TutorialBrainrot = isTutorialBrainrot,
+			TutorialCrewMember = isTutorialCrewMember,
 			TutorialOwnerUserId = tutorialOwnerUserId,
 			TutorialToken = tutorialToken,
 			TutorialRewardName = tutorialRewardName,
@@ -1126,8 +1163,11 @@ function Interaction.CollectHeld(ctx, player, active)
 	end
 
 	return {
-		Name = brainrotName,
-		TutorialBrainrot = isTutorialBrainrot,
+		Name = storageName,
+		CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
+		DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
+		Image = crewMemberData and crewMemberData.Image or nil,
+		TutorialCrewMember = isTutorialCrewMember,
 		TutorialOwnerUserId = tutorialOwnerUserId,
 		TutorialToken = tutorialToken,
 		TutorialRewardName = tutorialRewardName,
@@ -1225,7 +1265,7 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 	st.HolderUserId = nil
 	st.LastUpdate = os.clock()
 	setDropPhysics(m)
-	scheduleDroppedBrainrotSettle(ctx, m, st)
+	scheduleDroppedCrewMemberSettle(ctx, m, st)
 
 	if st.Prompt then
 		st.Prompt.Enabled = true

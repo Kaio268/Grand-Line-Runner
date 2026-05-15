@@ -44,65 +44,94 @@ end
 
 local function getCanonicalCrewMemberId(storageName, info)
 	local fallback = tostring(storageName or "")
-	if typeof(info) ~= "table" then
-		return fallback
+	local canonicalId, resolvedInfo = CrewCatalog.ResolveCanonicalCrewMemberId(fallback)
+	if resolvedInfo then
+		return canonicalId
 	end
-	if info.RealCharacterName ~= nil then
-		return tostring(info.DisplayName or info.CrewMemberName or info.CrewMemberId or fallback)
+	if typeof(info) == "table" and tostring(info.CrewMemberId or "") ~= "" then
+		return tostring(info.CrewMemberId)
 	end
-	return fallback
+
+	return ""
 end
 
 local function getDisplayName(storageName, info)
+	local _, resolvedInfo = CrewCatalog.ResolveCanonicalCrewMemberId(storageName)
+	if resolvedInfo then
+		info = resolvedInfo
+	end
 	if typeof(info) == "table" then
 		return tostring(info.DisplayName or info.CrewMemberName or info.Name or storageName)
 	end
 	return tostring(storageName or "")
 end
 
-local function normalizeLegacyRow(row)
+local function firstNonEmpty(...)
+	for index = 1, select("#", ...) do
+		local value = tostring(select(index, ...) or "")
+		if value ~= "" then
+			return value
+		end
+	end
+	return ""
+end
+
+local function normalizeStandRow(row)
 	row = if typeof(row) == "table" then row else {}
+	local rawCrewMemberName = firstNonEmpty(row.CrewMemberName)
+	local explicitLegacyStorageName = tostring(row.LegacyStorageName or "")
+	local crewMemberName, info, legacyStorageName = CrewCatalog.ResolveCanonicalCrewMemberId(rawCrewMemberName)
+	legacyStorageName = firstNonEmpty(legacyStorageName, if explicitLegacyStorageName ~= crewMemberName then explicitLegacyStorageName else "")
+	local legacyOnly = rawCrewMemberName == "" and explicitLegacyStorageName ~= ""
+	local hasInvalidCrewMember = (rawCrewMemberName ~= "" and info == nil) or legacyOnly
+	if hasInvalidCrewMember then
+		crewMemberName = ""
+	end
+	local crewMemberInstanceId = if hasInvalidCrewMember then "" else firstNonEmpty(row.CrewMemberInstanceId)
 	return {
-		BrainrotName = tostring(row.BrainrotName or row.LegacyStorageName or row.CrewMemberName or ""),
-		BrainrotInstanceId = tostring(row.BrainrotInstanceId or row.CrewMemberInstanceId or ""),
+		CrewMemberName = crewMemberName,
+		CrewMemberInstanceId = crewMemberInstanceId,
 		IncomeToCollect = tonumber(row.IncomeToCollect) or 0,
 		StandLevel = math.max(1, math.floor(tonumber(row.StandLevel) or 1)),
+		LegacyStorageName = legacyStorageName,
+		NeedsCanonicalRepair = rawCrewMemberName ~= "" and crewMemberName ~= "" and rawCrewMemberName ~= crewMemberName,
+		HasInvalidCrewMember = hasInvalidCrewMember,
+		QuarantinedCrewMemberName = if hasInvalidCrewMember then firstNonEmpty(rawCrewMemberName, explicitLegacyStorageName) else "",
 	}
 end
 
-local function legacyFromCanonicalRow(row)
+local function standRowFromCanonicalRow(row)
 	row = if typeof(row) == "table" then row else {}
-	local legacy = if typeof(row.Legacy) == "table" then row.Legacy else {}
-	return normalizeLegacyRow({
-		BrainrotName = row.LegacyStorageName or legacy.BrainrotName or row.CrewMemberName,
-		BrainrotInstanceId = row.CrewMemberInstanceId or legacy.BrainrotInstanceId,
+	return normalizeStandRow({
+		CrewMemberName = firstNonEmpty(row.CrewMemberName),
+		LegacyStorageName = row.LegacyStorageName,
+		CrewMemberInstanceId = firstNonEmpty(row.CrewMemberInstanceId),
 		IncomeToCollect = row.IncomeToCollect,
 		StandLevel = row.StandLevel,
 	})
 end
 
-local function canonicalFromLegacyRow(player, standName, legacyRow)
-	legacyRow = normalizeLegacyRow(legacyRow)
-	local storageName = tostring(legacyRow.BrainrotName or "")
-	local info = CrewCatalog.GetInfoById(storageName)
+local function canonicalFromStandRow(player, standName, standRow)
+	standRow = normalizeStandRow(standRow)
+	local storageName = tostring(standRow.CrewMemberName or "")
+	local _, info = CrewCatalog.ResolveCanonicalCrewMemberId(storageName)
+	local legacyStorageName = tostring(standRow.LegacyStorageName or "")
 	local existing = getDataManager():GetValue(player, CANONICAL_ROOT .. "." .. tostring(standName or ""))
 	local existingLevel = if typeof(existing) == "table" then tonumber(existing.StandLevel) else nil
-	local standLevel = math.max(1, math.floor(tonumber(legacyRow.StandLevel) or existingLevel or 1))
-	if storageName == "" and tostring(legacyRow.BrainrotInstanceId or "") == "" then
+	local standLevel = math.max(1, math.floor(tonumber(standRow.StandLevel) or existingLevel or 1))
+	if storageName == "" and tostring(standRow.CrewMemberInstanceId or "") == "" then
 		standLevel = 1
 	end
 
 	return {
 		CrewMemberName = if storageName ~= "" then getCanonicalCrewMemberId(storageName, info) else "",
 		CrewMemberDisplayName = if storageName ~= "" then getDisplayName(storageName, info) else "",
-		CrewMemberInstanceId = tostring(legacyRow.BrainrotInstanceId or ""),
-		LegacyStorageName = storageName,
-		IncomeToCollect = tonumber(legacyRow.IncomeToCollect) or 0,
+		CrewMemberInstanceId = tostring(standRow.CrewMemberInstanceId or ""),
+		LegacyStorageName = legacyStorageName,
+		IncomeToCollect = if standRow.HasInvalidCrewMember == true then 0 else tonumber(standRow.IncomeToCollect) or 0,
 		StandLevel = standLevel,
-		Legacy = {
-			BrainrotName = storageName,
-			BrainrotInstanceId = tostring(legacyRow.BrainrotInstanceId or ""),
-		},
+		QuarantinedCrewMemberName = tostring(standRow.QuarantinedCrewMemberName or ""),
+		QuarantineReason = if standRow.HasInvalidCrewMember == true then "unknown_crew_member_id" else nil,
 	}
 end
 
@@ -156,16 +185,17 @@ local function buildSnapshot(player)
 	}
 end
 
-local function compareRows(legacyRow, canonicalRow)
-	local expected = normalizeLegacyRow(legacyRow)
+local function compareRows(standRow, canonicalRow)
+	local expected = normalizeStandRow(standRow)
 
 	if typeof(canonicalRow) ~= "table" then
 		return false, "canonical_missing"
 	end
-	if tostring(canonicalRow.LegacyStorageName or "") ~= tostring(expected.BrainrotName or "") then
+	local expectedCrewMemberName = tostring((CrewCatalog.ResolveCanonicalCrewMemberId(expected.CrewMemberName)))
+	if tostring(canonicalRow.CrewMemberName or "") ~= expectedCrewMemberName then
 		return false, "storage_mismatch"
 	end
-	if tostring(canonicalRow.CrewMemberInstanceId or "") ~= tostring(expected.BrainrotInstanceId or "") then
+	if tostring(canonicalRow.CrewMemberInstanceId or "") ~= tostring(expected.CrewMemberInstanceId or "") then
 		return false, "instance_mismatch"
 	end
 	if math.floor(tonumber(canonicalRow.IncomeToCollect) or 0) ~= math.floor(tonumber(expected.IncomeToCollect) or 0) then
@@ -219,23 +249,23 @@ function CrewStandIncomeAuthority.GetStandData(player, standName)
 	local dataManager = getDataManager()
 	local canonicalRow = dataManager:GetValue(player, CANONICAL_ROOT .. "." .. standName)
 	if typeof(canonicalRow) == "table" then
-		return legacyFromCanonicalRow(canonicalRow), {
+		return standRowFromCanonicalRow(canonicalRow), {
 			UsedCanonical = true,
 			CanonicalRow = canonicalRow,
 		}
 	end
 
-	return normalizeLegacyRow(nil), {
+	return normalizeStandRow(nil), {
 		UsedCanonical = false,
 		MissingCanonical = true,
 	}
 end
 
-function CrewStandIncomeAuthority.SetStandData(player, standName, legacyRow, sourcePath)
+function CrewStandIncomeAuthority.SetStandData(player, standName, standRow, sourcePath)
 	standName = tostring(standName or "")
-	local normalizedLegacy = normalizeLegacyRow(legacyRow)
+	local normalizedStandRow = normalizeStandRow(standRow)
 	local snapshot = buildSnapshot(player)
-	local canonicalRow = canonicalFromLegacyRow(player, standName, normalizedLegacy)
+	local canonicalRow = canonicalFromStandRow(player, standName, normalizedStandRow)
 	updateAudit(player, {
 		LastRollbackSnapshot = snapshot,
 		LastMutation = {
@@ -253,8 +283,8 @@ function CrewStandIncomeAuthority.SetStandData(player, standName, legacyRow, sou
 	end
 
 	local persistedCanonical = getDataManager():GetValue(player, CANONICAL_ROOT .. "." .. standName)
-	local expectedPersistedLegacy = legacyFromCanonicalRow(canonicalRow)
-	local mirrorOk, mirrorReason = compareRows(expectedPersistedLegacy, persistedCanonical)
+	local expectedPersistedStandRow = standRowFromCanonicalRow(canonicalRow)
+	local mirrorOk, mirrorReason = compareRows(expectedPersistedStandRow, persistedCanonical)
 	if mirrorOk ~= true then
 		local restoreOk, restoreReason = restoreSnapshot(player, snapshot, "post_validation_failed")
 		updateAudit(player, {
@@ -310,8 +340,8 @@ end
 
 function CrewStandIncomeAuthority.ClearStandData(player, standName, sourcePath)
 	return CrewStandIncomeAuthority.SetStandData(player, standName, {
-		BrainrotName = "",
-		BrainrotInstanceId = "",
+		CrewMemberName = "",
+		CrewMemberInstanceId = "",
 		IncomeToCollect = 0,
 		StandLevel = 1,
 	}, sourcePath or "stand_clear")
@@ -324,7 +354,7 @@ function CrewStandIncomeAuthority.GetAllStandData(player)
 	if typeof(canonical) == "table" then
 		for standName, row in pairs(canonical) do
 			if typeof(row) == "table" then
-				result[tostring(standName)] = legacyFromCanonicalRow(row)
+				result[tostring(standName)] = standRowFromCanonicalRow(row)
 			end
 		end
 	end

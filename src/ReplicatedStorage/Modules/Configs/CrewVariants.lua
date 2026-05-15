@@ -1,15 +1,15 @@
-local BrainrotVariants = {}
+local CrewVariants = {}
 
-BrainrotVariants.Order = { "Normal", "Golden", "Diamond" }
+CrewVariants.Order = { "Normal", "Golden", "Diamond" }
 
-BrainrotVariants.Versions = {
+CrewVariants.Versions = {
 	Normal = {
 		Chance = 90,
 		Folder = nil,
 		Prefix = "",
 		IncomeMult = 1,
-		
-		BgColor = Color3.new(0, 0, 0)
+
+		BgColor = Color3.new(0, 0, 0),
 	},
 
 	Golden = {
@@ -17,9 +17,8 @@ BrainrotVariants.Versions = {
 		Folder = "Golden",
 		Prefix = "Golden ",
 		IncomeMult = 2,
-		
-		BgColor = Color3.new(1, 0.909804, 0.227451)
 
+		BgColor = Color3.new(1, 0.909804, 0.227451),
 	},
 
 	Diamond = {
@@ -27,10 +26,9 @@ BrainrotVariants.Versions = {
 		Folder = "Diamond",
 		Prefix = "Diamond ",
 		IncomeMult = 5,
-		
-		BgColor = Color3.new(0.290196, 0.870588, 1)
 
+		BgColor = Color3.new(0.290196, 0.870588, 1),
 	},
 }
 
-return BrainrotVariants
+return CrewVariants

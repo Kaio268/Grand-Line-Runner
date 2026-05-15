@@ -490,7 +490,7 @@ local function isCrewMemberReward(rewardData): boolean
 		return true
 	end
 
-	if rewardData.CrewMember == true or rewardData.Brainrot == true then
+	if rewardData.CrewMember == true then
 		return true
 	end
 
@@ -510,7 +510,7 @@ local function resolveCrewMemberReward(player: Player, rewardId: number, state, 
 			return nil, nil, "random_crew_pool_empty"
 		end
 
-		return tostring(entry.LegacyId or entry.CrewMemberId or rewardName),
+		return tostring(entry.CrewMemberId or rewardName),
 			tostring(entry.DisplayName or entry.CrewMemberId or rewardName),
 			nil
 	end
@@ -526,9 +526,6 @@ local function resolveCrewMemberReward(player: Player, rewardId: number, state, 
 		pushCandidate(rewardData.CrewMemberId)
 		pushCandidate(rewardData.CrewMemberName)
 		pushCandidate(rewardData.DisplayName)
-		pushCandidate(rewardData.LegacyBrainrotName)
-		pushCandidate(rewardData.LegacyRewardName)
-		pushCandidate(rewardData.LegacyId)
 	end
 	pushCandidate(rewardName)
 
@@ -539,7 +536,7 @@ local function resolveCrewMemberReward(player: Player, rewardId: number, state, 
 		end
 
 		if info then
-			return tostring(info.LegacyId or info.Id or candidate),
+			return tostring(info.CrewMemberId or info.Id or candidate),
 				tostring(info.DisplayName or info.CrewMemberName or info.Name or candidate)
 		end
 	end

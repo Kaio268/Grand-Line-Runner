@@ -25,7 +25,6 @@ local BODY_ATTRIBUTE = "HoroProjectionBody"
 local PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local PROJECTION_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local DEFAULT_DURATION = 5
 local DEFAULT_GHOST_SPEED = 15
@@ -130,11 +129,6 @@ local function getCarriedCrewMemberName(player)
 		return carried
 	end
 
-	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
-	if typeof(carried) == "string" and carried ~= "" then
-		return carried
-	end
-
 	return nil
 end
 
@@ -167,11 +161,10 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrCrewMember=%s attrBrainrot=%s projectionCarryMarker=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s projectionCarryMarker=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
 		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
-		tostring(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)),
 		tostring(player:GetAttribute(PROJECTION_CARRY_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),

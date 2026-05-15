@@ -44,7 +44,6 @@ local FORCED_DROP_PROTECTION_ATTRIBUTE = "GrandLineRushCarryDropProtectedUntil"
 local FORCED_DROP_PROTECTION_DURATION = 0.9
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local STARTER_CREW_SOURCE = "GrandLineRushStarter"
@@ -73,11 +72,6 @@ end
 
 local function hasCarriedCrewMember(player)
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
-	if typeof(carried) == "string" and carried ~= "" then
-		return true
-	end
-
-	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
 	return typeof(carried) == "string" and carried ~= ""
 end
 
@@ -262,12 +256,8 @@ local function getCrewSummaryStorageName(crewData, mirrorData)
 
 	return firstNonEmpty(
 		crewData.StorageName,
-		crewData.LegacyStorageName,
-		crewData.BrainrotName,
-		mirrorData.StorageName,
-		mirrorData.LegacyStorageName,
-		mirrorData.BrainrotName,
 		crewData.CrewMemberId,
+		mirrorData.StorageName,
 		mirrorData.CrewMemberId,
 		crewData.Name,
 		mirrorData.Name
@@ -648,23 +638,42 @@ local function resolveCanonicalCrewGrantData(rewardData, options)
 	rewardData = if typeof(rewardData) == "table" then rewardData else {}
 	options = if typeof(options) == "table" then options else {}
 
-	local storageName = tostring(rewardData.StorageName or rewardData.CrewStorageName or "")
-	local displayName = tostring(rewardData.CrewDisplayName or rewardData.DisplayName or rewardData.Name or storageName)
+	local storageName = tostring(rewardData.StorageName or "")
+	if storageName == "" then
+		storageName = tostring(rewardData.CrewStorageName or "")
+	end
+	local displayName = tostring(rewardData.CrewDisplayName or "")
+	if displayName == "" then
+		displayName = tostring(rewardData.DisplayName or rewardData.Name or storageName)
+	end
 	local crewMemberId = tostring(rewardData.CrewMemberId or "")
 	local info = nil
 
 	if storageName ~= "" then
-		info = CanonicalCrewCatalog.GetInfoById(storageName)
+		local resolvedStorageName
+		resolvedStorageName, info = CanonicalCrewCatalog.ResolveCrewMemberId(storageName)
+		if info then
+			storageName = resolvedStorageName
+		end
 	end
 	if not info and crewMemberId ~= "" then
-		info = CanonicalCrewCatalog.GetInfoById(crewMemberId)
+		local resolvedCrewMemberId
+		resolvedCrewMemberId, info = CanonicalCrewCatalog.ResolveCrewMemberId(crewMemberId)
+		if info then
+			storageName = resolvedCrewMemberId
+			crewMemberId = resolvedCrewMemberId
+		end
 	end
 	if not info and displayName ~= "" then
-		info = CanonicalCrewCatalog.GetInfoById(displayName)
+		local resolvedDisplayName
+		resolvedDisplayName, info = CanonicalCrewCatalog.ResolveCrewMemberId(displayName)
+		if info then
+			storageName = resolvedDisplayName
+		end
 	end
 
 	if info then
-		storageName = tostring(info.LegacyId or storageName)
+		storageName = tostring(info.CrewMemberId or storageName)
 	elseif options.AllowFallback ~= false then
 		local fallback = chooseCanonicalCrewRewardForRarity(rewardData.Rarity)
 		if fallback then
@@ -686,10 +695,20 @@ local function resolveCanonicalCrewGrantData(rewardData, options)
 		crewMemberId = tostring(info.CrewMemberId or storageName)
 	end
 
+	local legacyStorageName = tostring(info.LegacyId or rewardData.LegacyStorageName or "")
+	if legacyStorageName == storageName then
+		legacyStorageName = ""
+	end
+
 	return {
 		StorageName = storageName,
+		LegacyStorageName = legacyStorageName,
 		DisplayName = displayName,
 		CrewMemberId = crewMemberId,
+		ModelName = tostring(info.ModelName or ""),
+		Render = tostring(info.Render or ""),
+		Rarity = tostring(info.Rarity or "Common"),
+		Income = tonumber(info.Income) or 0,
 		CanonicalRarity = tostring(info.Rarity or "Common"),
 	}
 end
@@ -797,7 +816,10 @@ local function buildGrantDataFromCanonical(instanceData)
 		return nil
 	end
 
-	local storageName = tostring(instanceData.StorageName or instanceData.LegacyStorageName or "")
+	local storageName = tostring(instanceData.CrewMemberId or "")
+	if storageName == "" then
+		storageName = tostring(instanceData.StorageName or "")
+	end
 	if storageName == "" then
 		return nil
 	end
@@ -826,6 +848,7 @@ local function grantCanonicalCrewMember(player, rewardData, source, options)
 	end
 
 	local ok, createdIds = AddCrewMember:AddCrewMember(player, grantData.StorageName, 1, {
+		LegacyStorageName = grantData.LegacyStorageName,
 		Source = source or tostring(rewardData.Source or "GrandLineRush"),
 		DepthBand = tostring(rewardData.DepthBand or ""),
 		TotalXP = math.max(0, math.floor(tonumber(rewardData.TotalXP) or 0)),
@@ -1291,7 +1314,7 @@ local function claimWorldChest(player, rewardData)
 		return resolveActionResponse(player, false, nil, "already_carrying_reward")
 	end
 	if hasCarriedCrewMember(player) then
-		return resolveActionResponse(player, false, "You cannot pick up a chest while carrying a Crewmate.", "carrying_brainrot")
+		return resolveActionResponse(player, false, "You cannot pick up a chest while carrying a Crewmate.", "carrying_crew_member")
 	end
 
 	local tierName = tostring(rewardData and rewardData.Tier or "Wooden")
@@ -1435,7 +1458,7 @@ local function dropCarriedCrewMember(player, dropPosition)
 		return resolveActionResponse(player, true, "Crewmate dropped.")
 	end
 
-	return resolveActionResponse(player, false, nil, tostring(result or "no_held_brainrot"))
+	return resolveActionResponse(player, false, nil, tostring(result or "no_held_crew_member"))
 end
 
 local function openChest(player, requestedChestId)

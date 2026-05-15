@@ -33,7 +33,6 @@ local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -101,11 +100,6 @@ local function getCarriedCrewMemberName(player)
 		return carried
 	end
 
-	carried = player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
-	if typeof(carried) == "string" and carried ~= "" then
-		return carried
-	end
-
 	return nil
 end
 
@@ -119,11 +113,10 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrCrewMember=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
 		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
-		tostring(player:GetAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
 		tostring(player:GetAttribute("HoroProjectionCarryingReward"))
@@ -512,28 +505,28 @@ local function getBiomeSpawnParts()
 	return spawnParts
 end
 
-local function getAllBrainrotSpawnContexts()
+local function getAllCrewMemberSpawnContexts()
 	local contexts = {}
 
 	for _, spawnPart in ipairs(getBiomeSpawnParts()) do
-		local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
-		local hadBrainrot = false
-		if brainrotsFolder then
-			for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
+		local crewMembersFolder = spawnPart:FindFirstChild("CrewMembers")
+		local hadCrewMember = false
+		if crewMembersFolder then
+			for _, candidate in ipairs(crewMembersFolder:GetChildren()) do
 				if getObjectRootPart(candidate) then
-					hadBrainrot = true
+					hadCrewMember = true
 					contexts[#contexts + 1] = {
 						SpawnPart = spawnPart,
-						Brainrot = candidate,
+						CrewMember = candidate,
 					}
 				end
 			end
 		end
 
-		if not hadBrainrot then
+		if not hadCrewMember then
 			contexts[#contexts + 1] = {
 				SpawnPart = spawnPart,
-				Brainrot = nil,
+				CrewMember = nil,
 			}
 		end
 	end
@@ -541,21 +534,21 @@ local function getAllBrainrotSpawnContexts()
 	return contexts
 end
 
-local function chooseRandomBrainrotSpawnContext()
-	local contexts = getAllBrainrotSpawnContexts()
+local function chooseRandomCrewMemberSpawnContext()
+	local contexts = getAllCrewMemberSpawnContexts()
 	if #contexts == 0 then
 		return nil
 	end
 
 	local chosen = contexts[worldRandom:NextInteger(1, #contexts)]
-	local chosenBrainrotRoot = getObjectRootPart(chosen.Brainrot)
+	local chosenCrewMemberRoot = getObjectRootPart(chosen.CrewMember)
 	waveTrace(
-		"chestSpawnContext chosenCount=%s chosenSpawnPart=%s chosenSpawnPartPos=%s sourceBrainrot=%s sourceBrainrotPos=%s",
+		"chestSpawnContext chosenCount=%s chosenSpawnPart=%s chosenSpawnPartPos=%s sourceCrewMember=%s sourceCrewMemberPos=%s",
 		tostring(#contexts),
 		formatInstancePath(chosen.SpawnPart),
 		formatVector3(chosen.SpawnPart and chosen.SpawnPart.Position or nil),
-		formatInstancePath(chosen.Brainrot),
-		formatVector3(chosenBrainrotRoot and chosenBrainrotRoot.Position or nil)
+		formatInstancePath(chosen.CrewMember),
+		formatVector3(chosenCrewMemberRoot and chosenCrewMemberRoot.Position or nil)
 	)
 	return chosen
 end
@@ -566,12 +559,12 @@ local function getOccupiedSpawnOffsets(spawnPart, ignoreInstance)
 		return offsets
 	end
 
-	local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
-	if not brainrotsFolder then
+	local crewMembersFolder = spawnPart:FindFirstChild("CrewMembers")
+	if not crewMembersFolder then
 		return offsets
 	end
 
-	for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
+	for _, candidate in ipairs(crewMembersFolder:GetChildren()) do
 		if candidate ~= ignoreInstance then
 			local rootPart = getObjectRootPart(candidate)
 			if rootPart then
@@ -599,7 +592,7 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		return existing
 	end
 
-	local spawnContext = chooseRandomBrainrotSpawnContext()
+	local spawnContext = chooseRandomCrewMemberSpawnContext()
 	if not spawnContext or not spawnContext.SpawnPart then
 		waveTrace("chestPlacement skipped player=%s reason=no_spawn_context", player.Name)
 		return nil
@@ -607,10 +600,10 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 
 	local spawnPart = spawnContext.SpawnPart
 	local baseOffset = Vector2.zero
-	if spawnContext.Brainrot then
-		local brainrotRoot = getObjectRootPart(spawnContext.Brainrot)
-		if brainrotRoot then
-			baseOffset = worldToSpawnLocalXZ(spawnPart, brainrotRoot.Position)
+	if spawnContext.CrewMember then
+		local crewMemberRoot = getObjectRootPart(spawnContext.CrewMember)
+		if crewMemberRoot then
+			baseOffset = worldToSpawnLocalXZ(spawnPart, crewMemberRoot.Position)
 		end
 	end
 
@@ -626,11 +619,11 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		baseOffset + Vector2.new(spacing * 0.7, -spacing * 0.7),
 		baseOffset + Vector2.new(-spacing * 0.7, -spacing * 0.7),
 	}
-	if not spawnContext.Brainrot then
+	if not spawnContext.CrewMember then
 		candidateOffsets[#candidateOffsets + 1] = Vector2.zero
 	end
 
-	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.Brainrot)
+	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.CrewMember)
 	local chosenOffset = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffsets[#candidateOffsets] or Vector2.zero)
 	for _, candidateOffset in ipairs(candidateOffsets) do
 		local clamped = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffset)
@@ -644,15 +637,15 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		SpawnPart = spawnPart,
 		LocalXZ = chosenOffset,
 		Yaw = 0,
-		SourceBrainrotName = spawnContext.Brainrot and spawnContext.Brainrot.Name or nil,
+		SourceCrewMemberName = spawnContext.CrewMember and spawnContext.CrewMember.Name or nil,
 	}
 	rewardPlacementsByUserId[player.UserId] = placement
 	waveTrace(
-		"chestPlacement player=%s spawnPart=%s spawnPartPos=%s sourceBrainrot=%s localXZ=%s",
+		"chestPlacement player=%s spawnPart=%s spawnPartPos=%s sourceCrewMember=%s localXZ=%s",
 		player.Name,
 		formatInstancePath(spawnPart),
 		formatVector3(spawnPart.Position),
-		tostring(placement.SourceBrainrotName),
+		tostring(placement.SourceCrewMemberName),
 		formatVector3(Vector3.new(chosenOffset.X, 0, chosenOffset.Y))
 	)
 	return placement
@@ -663,11 +656,11 @@ local function buildChestPlacementHint(placement)
 		return nil
 	end
 
-	if placement.SourceBrainrotName and placement.SourceBrainrotName ~= "" then
+	if placement.SourceCrewMemberName and placement.SourceCrewMemberName ~= "" then
 		return string.format(
 			"Chest spawned on %s near %s.",
 			tostring(placement.SpawnPart.Name),
-			tostring(placement.SourceBrainrotName)
+			tostring(placement.SourceCrewMemberName)
 		)
 	end
 
@@ -1049,7 +1042,7 @@ end
 
 local function getAllSharedChestSpawnContexts()
 	local contexts = {}
-	for _, context in ipairs(getAllBrainrotSpawnContexts()) do
+	for _, context in ipairs(getAllCrewMemberSpawnContexts()) do
 		contexts[#contexts + 1] = context
 	end
 
@@ -1086,10 +1079,10 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 
 	local spawnPart = spawnContext.SpawnPart
 	local baseOffset = Vector2.zero
-	if spawnContext.Brainrot then
-		local brainrotRoot = getObjectRootPart(spawnContext.Brainrot)
-		if brainrotRoot then
-			baseOffset = worldToSpawnLocalXZ(spawnPart, brainrotRoot.Position)
+	if spawnContext.CrewMember then
+		local crewMemberRoot = getObjectRootPart(spawnContext.CrewMember)
+		if crewMemberRoot then
+			baseOffset = worldToSpawnLocalXZ(spawnPart, crewMemberRoot.Position)
 		end
 	end
 
@@ -1105,11 +1098,11 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 		baseOffset + Vector2.new(spacing * 0.7, -spacing * 0.7),
 		baseOffset + Vector2.new(-spacing * 0.7, -spacing * 0.7),
 	}
-	if not spawnContext.Brainrot then
+	if not spawnContext.CrewMember then
 		candidateOffsets[#candidateOffsets + 1] = Vector2.zero
 	end
 
-	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.Brainrot)
+	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.CrewMember)
 	for _, offset in ipairs(getOccupiedSharedChestOffsets(spawnPart)) do
 		occupiedOffsets[#occupiedOffsets + 1] = offset
 	end
@@ -1127,7 +1120,7 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 		SpawnPart = spawnPart,
 		LocalXZ = chosenOffset,
 		Yaw = 0,
-		SourceBrainrotName = spawnContext.Brainrot and spawnContext.Brainrot.Name or nil,
+		SourceCrewMemberName = spawnContext.CrewMember and spawnContext.CrewMember.Name or nil,
 	}
 end
 
@@ -1183,11 +1176,11 @@ local function spawnSharedChestNode(rewardFolder, _carriedFolder)
 	local placement = buildSharedChestPlacement(rewardObject, spawnContext)
 	if placement then
 		waveTrace(
-			"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceBrainrot=%s localXZ=%s",
+			"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceCrewMember=%s localXZ=%s",
 			tostring(chestId),
 			formatInstancePath(placement.SpawnPart),
 			formatVector3(placement.SpawnPart and placement.SpawnPart.Position or nil),
-			tostring(placement.SourceBrainrotName),
+			tostring(placement.SourceCrewMemberName),
 			formatVector3(Vector3.new(placement.LocalXZ.X, 0, placement.LocalXZ.Y))
 		)
 		setObjectCFrame(

@@ -15,15 +15,15 @@ CrewProfileSchema.Keys = {
 }
 
 CrewProfileSchema.LegacyKeys = {
-	Inventory = "BrainrotInventory",
-	QuickSlots = "BrainrotQuickSlots",
-	Income = "IncomeBrainrots",
+	Inventory = "CrewMemberInventory",
+	QuickSlots = "CrewMemberQuickSlots",
+	Income = "CrewMemberIncome",
 	IndexCollection = "IndexCollection",
-	Index = "Brainrots",
-	CarriedAttribute = "CarriedBrainrot",
-	CarriedImageAttribute = "CarriedBrainrotImage",
-	StandName = "BrainrotName",
-	StandInstanceId = "BrainrotInstanceId",
+	Index = "CrewMembers",
+	CarriedAttribute = "CarriedCrewMember",
+	CarriedImageAttribute = "CarriedCrewMemberImage",
+	StandName = "CrewMemberName",
+	StandInstanceId = "CrewMemberInstanceId",
 }
 
 CrewProfileSchema.CrewMemberInstanceFields = {

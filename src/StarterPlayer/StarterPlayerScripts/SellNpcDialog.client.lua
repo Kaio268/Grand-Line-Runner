@@ -4,7 +4,6 @@ local Players = game:GetService("Players")
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local LegacyCrewConfig = CrewCatalog.GetLegacyConfig()
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
@@ -30,7 +29,7 @@ end
 local SELL_TIME_SECONDS = 15
 
 local function getCrewInfo(name)
-	return CrewCatalog.GetInfoById(name) or LegacyCrewConfig[name]
+	return CrewCatalog.GetInfoById(name)
 end
 
 local function getCrewDisplayName(name)
@@ -69,8 +68,8 @@ local function cleanName(raw)
 	return raw:gsub("^%s+", ""):gsub("%s+$", "")
 end
 
-local function getSellPrice(brainrotName)
-	local data = getCrewInfo(brainrotName)
+local function getSellPrice(crewMemberName)
+	local data = getCrewInfo(crewMemberName)
 	if not data then
 		return nil
 	end
@@ -155,9 +154,9 @@ local function getCrewStorageName(instanceFolder)
 	end
 
 	return cleanName(
-		readValueObject(instanceFolder, "StorageName")
+		readValueObject(instanceFolder, "CrewMemberId")
+			or readValueObject(instanceFolder, "StorageName")
 			or readValueObject(instanceFolder, "LegacyStorageName")
-			or readValueObject(instanceFolder, "CrewMemberId")
 			or readValueObject(instanceFolder, "BaseName")
 			or ""
 	)
@@ -201,10 +200,10 @@ local function getTotalInventorySellValue()
 		return total
 	end
 
-	for _, brainrotFolder in ipairs(inv:GetChildren()) do
-		local name = brainrotFolder.Name
+	for _, itemFolder in ipairs(inv:GetChildren()) do
+		local name = itemFolder.Name
 		if not countedCanonicalNames[cleanName(name)] then
-			local qObj = brainrotFolder:FindFirstChild("Quantity")
+			local qObj = itemFolder:FindFirstChild("Quantity")
 			local qty = qObj and tonumber(qObj.Value) or 0
 			local price = getSellPrice(name) or 0
 			total += price * qty

@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
@@ -10,6 +11,8 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
+local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
@@ -37,9 +40,8 @@ local renderQueued = false
 local destroyed = false
 local cleanupConnections = {}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
-local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
-local LEGACY_CARRIED_BRAINROT_ATTRIBUTE = "CarriedBrainrot"
-local LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE = "CarriedBrainrotImage"
+local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
+local STARTING_AREA_KEY = BiomeAreas.StartingAreaKey
 
 local function trackConnection(signal, callback)
 	local connection = signal:Connect(callback)
@@ -57,17 +59,33 @@ end
 
 local function getCarriedCrewMember()
 	local carriedName = getStringAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
-		or getStringAttribute(LEGACY_CARRIED_BRAINROT_ATTRIBUTE)
 	if not carriedName then
 		return nil
 	end
 
+	local canonicalCrewMemberId, crewInfo = CrewCatalog.ResolveCanonicalCrewMemberId(carriedName)
+	local modelName = if crewInfo then tostring(crewInfo.ModelName or "") else ""
+	local modelPreview = if modelName ~= ""
+		then {
+			ModelName = modelName,
+			UsedCanonical = true,
+			IsPreviewOnly = true,
+			Source = "CrewCatalog",
+		}
+		else nil
+
 	return {
-		DisplayName = carriedName,
+		CrewMemberId = if crewInfo then canonicalCrewMemberId else carriedName,
+		DisplayName = if crewInfo then crewInfo.DisplayName else carriedName,
+		ModelName = if modelName ~= "" then modelName else nil,
+		ModelPreview = modelPreview,
 		RewardType = "Crewmate",
-		Image = getStringAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE)
-			or getStringAttribute(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE),
 	}
+end
+
+local function isInCorridorArea()
+	local activeArea = Lighting:GetAttribute(ACTIVE_AREA_ATTRIBUTE)
+	return typeof(activeArea) == "string" and activeArea ~= "" and activeArea ~= STARTING_AREA_KEY
 end
 
 local function getRunState()
@@ -111,7 +129,11 @@ end
 
 local function getFallbackError(response)
 	local errorCode = response and response.error
-	if errorCode == "no_carried_reward" or errorCode == "no_held_brainrot" or errorCode == "no_carried_item" then
+	if
+		errorCode == "no_carried_reward"
+		or errorCode == "no_held_crew_member"
+		or errorCode == "no_carried_item"
+	then
 		return "No carried item to drop."
 	elseif errorCode == "missing_drop_position" then
 		return "Move a little before dropping that."
@@ -126,13 +148,17 @@ end
 
 local function render()
 	local modalOpen = playerGui:GetAttribute(modalOpenAttribute) == true
+	local carriedCrewMember = getCarriedCrewMember()
 	local carriedReward = getCarriedReward()
 	local visible = carriedReward ~= nil and modalOpen ~= true
+	local showInHandHud = carriedCrewMember ~= nil and isInCorridorArea() and modalOpen ~= true
 
 	root:render(ReactRoblox.createPortal(React.createElement(DropAction, {
 		visible = visible,
 		isPending = dropPending,
 		reward = carriedReward,
+		carriedCrewMember = carriedCrewMember,
+		showInHandHud = showInHandHud,
 		onDrop = function()
 			if dropPending or getCarriedReward() == nil then
 				return
@@ -196,9 +222,7 @@ trackConnection(playerGui:GetAttributeChangedSignal(modalOpenAttribute), schedul
 trackConnection(player:GetAttributeChangedSignal("CarriedMajorRewardDisplayName"), scheduleRender)
 trackConnection(player:GetAttributeChangedSignal("CarriedMajorRewardType"), scheduleRender)
 trackConnection(player:GetAttributeChangedSignal(CARRIED_CREW_MEMBER_ATTRIBUTE), scheduleRender)
-trackConnection(player:GetAttributeChangedSignal(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE), scheduleRender)
-trackConnection(player:GetAttributeChangedSignal(LEGACY_CARRIED_BRAINROT_ATTRIBUTE), scheduleRender)
-trackConnection(player:GetAttributeChangedSignal(LEGACY_CARRIED_BRAINROT_IMAGE_ATTRIBUTE), scheduleRender)
+trackConnection(Lighting:GetAttributeChangedSignal(ACTIVE_AREA_ATTRIBUTE), scheduleRender)
 
 task.spawn(function()
 	local ok, response = pcall(function()

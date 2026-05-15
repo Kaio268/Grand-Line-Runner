@@ -9,13 +9,13 @@ local CrewRegistry = require(CrewModules:WaitForChild("CrewRegistry"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 
 local CREW_ITEM_KIND = "CrewMember"
-local LEGACY_CREW_ITEM_KIND = "Brainrot"
 local CANONICAL_INVENTORY_NAME = "CrewMemberInventory"
 local CANONICAL_BY_ID_NAME = "ById"
 
 local playerConnections = {}
 local playerBoundRoots = {}
 local playerSyncQueued = {}
+local invalidCrewToolWarnings = {}
 
 local function addConnection(player, connection)
 	playerConnections[player] = playerConnections[player] or {}
@@ -39,20 +39,50 @@ local function getVariantAndBaseName(itemName)
 	return CrewCatalog.ParseVariantId(itemName)
 end
 
+local function resolveCrewItemName(itemName)
+	local canonicalItemName, info, legacyStorageName = CrewCatalog.ResolveCanonicalCrewMemberId(itemName)
+	if info then
+		return canonicalItemName, info, legacyStorageName
+	end
+	return "", nil, ""
+end
+
+local function warnInvalidCrewToolIdentity(source, player, identity)
+	local key = tostring(source or "unknown") .. ":" .. (player and tostring(player.UserId) or "unknown") .. ":" .. tostring(identity or "")
+	if invalidCrewToolWarnings[key] then
+		return
+	end
+	invalidCrewToolWarnings[key] = true
+	warn(string.format(
+		"[ModelToTool] Rejected unknown CrewMember identity source=%s player=%s identity=%s",
+		tostring(source or "unknown"),
+		player and player.Name or "unknown",
+		tostring(identity or "")
+	))
+end
+
 local function getCrewInfo(itemName)
-	local _, baseName = getVariantAndBaseName(itemName)
-	return CrewCatalog.GetInfoById(itemName) or CrewCatalog.GetInfoById(baseName)
+	local canonicalItemName, info = resolveCrewItemName(itemName)
+	if info then
+		return info
+	end
+	local _, baseName = getVariantAndBaseName(canonicalItemName)
+	return CrewCatalog.GetInfoById(canonicalItemName) or CrewCatalog.GetInfoById(baseName)
 end
 
 local function findTemplate(itemName)
-	local variantKey, baseName = getVariantAndBaseName(itemName)
+	local canonicalItemName = resolveCrewItemName(itemName)
+	if canonicalItemName == "" then
+		return nil
+	end
+	local variantKey, baseName = getVariantAndBaseName(canonicalItemName)
 	local template, usedVariant = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 	if template then
-		return template, usedVariant or variantKey, baseName
+		return template, usedVariant or variantKey, baseName, canonicalItemName
 	end
 
-	template, usedVariant = CrewRegistry.GetTemplateWithFallback(itemName, "Normal")
-	return template, usedVariant or variantKey, baseName
+	template, usedVariant = CrewRegistry.GetTemplateWithFallback(canonicalItemName, "Normal")
+	return template, usedVariant or variantKey, baseName, canonicalItemName
 end
 
 local function isKnownCrewItem(itemName)
@@ -68,7 +98,7 @@ local function isKnownCrewItem(itemName)
 end
 
 local function normalizeItemKind(kind)
-	return if kind == LEGACY_CREW_ITEM_KIND then CREW_ITEM_KIND else kind
+	return kind
 end
 
 local function getToolItemName(tool)
@@ -96,11 +126,13 @@ local function isCrewTool(tool)
 end
 
 local function applyToolMetadata(tool, itemName, variantKey, baseName)
+	local canonicalItemName, resolvedInfo, legacyStorageName = resolveCrewItemName(itemName)
+	itemName = canonicalItemName
 	local parsedVariant, parsedBaseName = getVariantAndBaseName(itemName)
 	variantKey = variantKey or parsedVariant
 	baseName = baseName or parsedBaseName
 
-	local info = CrewCatalog.GetInfoById(itemName) or CrewCatalog.GetInfoById(baseName)
+	local info = resolvedInfo or CrewCatalog.GetInfoById(itemName) or CrewCatalog.GetInfoById(baseName)
 	local displayName = tostring((info and (info.DisplayName or info.Name)) or itemName)
 	local productionName = tostring((info and (info.RealCharacterName or info.ModelName or info.CrewMemberId)) or "")
 	local realCharacterName = tostring((info and info.RealCharacterName) or "")
@@ -118,6 +150,7 @@ local function applyToolMetadata(tool, itemName, variantKey, baseName)
 	tool:SetAttribute("BaseName", baseName)
 	tool:SetAttribute("ModelName", modelName)
 	tool:SetAttribute("CrewMemberId", crewMemberId)
+	_ = legacyStorageName
 
 	if productionName ~= "" then
 		tool:SetAttribute("ProductionName", productionName)
@@ -125,10 +158,11 @@ local function applyToolMetadata(tool, itemName, variantKey, baseName)
 	if realCharacterName ~= "" then
 		tool:SetAttribute("RealCharacterName", realCharacterName)
 	end
+	return itemName
 end
 
 local function makeTool(itemName)
-	local template, variantKey, baseName = findTemplate(itemName)
+	local template, variantKey, baseName, canonicalItemName = findTemplate(itemName)
 	if not template then
 		return nil
 	end
@@ -136,7 +170,7 @@ local function makeTool(itemName)
 	local tool = Instance.new("Tool")
 	tool.RequiresHandle = true
 	tool.CanBeDropped = false
-	applyToolMetadata(tool, itemName, variantKey, baseName)
+	applyToolMetadata(tool, canonicalItemName or itemName, variantKey, baseName)
 
 	local function setupPart(part)
 		part.Anchored = false
@@ -222,7 +256,7 @@ local function normalizeCount(value)
 end
 
 local function addDesiredCount(counts, itemName, amount)
-	itemName = tostring(itemName or "")
+	itemName = resolveCrewItemName(itemName)
 	if itemName == "" or not isKnownCrewItem(itemName) then
 		return
 	end
@@ -230,7 +264,7 @@ local function addDesiredCount(counts, itemName, amount)
 	counts[itemName] = normalizeCount((counts[itemName] or 0) + amount)
 end
 
-local function readCanonicalCountsFromData(inventory)
+local function readCanonicalCountsFromData(player, inventory)
 	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
 		return nil, false
 	end
@@ -240,16 +274,18 @@ local function readCanonicalCountsFromData(inventory)
 	for _, instanceData in pairs(inventory.ById) do
 		if typeof(instanceData) == "table" then
 			local storageName = tostring(
-				instanceData.StorageName
-					or instanceData.LegacyStorageName
-					or instanceData.BrainrotName
+				instanceData.CrewMemberId
+					or instanceData.StorageName
 					or ""
 			)
-			if storageName ~= "" and isKnownCrewItem(storageName) then
+			local canonicalStorageName = resolveCrewItemName(storageName)
+			if canonicalStorageName ~= "" and isKnownCrewItem(canonicalStorageName) then
 				hasCanonicalData = true
 				if tostring(instanceData.AssignedStand or "") == "" then
-					addDesiredCount(counts, storageName, 1)
+					addDesiredCount(counts, canonicalStorageName, 1)
 				end
+			elseif storageName ~= "" then
+				warnInvalidCrewToolIdentity("inventory_data", player, storageName)
 			end
 		end
 	end
@@ -269,7 +305,7 @@ local function readCanonicalCountsFromService(player)
 		return nil, false
 	end
 
-	return readCanonicalCountsFromData(inventory)
+	return readCanonicalCountsFromData(player, inventory)
 end
 
 local function readCanonicalCountsFromFolder(player)
@@ -288,16 +324,18 @@ local function readCanonicalCountsFromFolder(player)
 	for _, instanceFolder in ipairs(byId:GetChildren()) do
 		if instanceFolder:IsA("Folder") then
 			local storageName = tostring(
-				readValue(instanceFolder, "StorageName")
-					or readValue(instanceFolder, "LegacyStorageName")
-					or readValue(instanceFolder, "BrainrotName")
+				readValue(instanceFolder, "CrewMemberId")
+					or readValue(instanceFolder, "StorageName")
 					or ""
 			)
-			if storageName ~= "" and isKnownCrewItem(storageName) then
+			local canonicalStorageName = resolveCrewItemName(storageName)
+			if canonicalStorageName ~= "" and isKnownCrewItem(canonicalStorageName) then
 				hasCanonicalData = true
 				if tostring(readValue(instanceFolder, "AssignedStand") or "") == "" then
-					addDesiredCount(counts, storageName, 1)
+					addDesiredCount(counts, canonicalStorageName, 1)
 				end
+			elseif storageName ~= "" then
+				warnInvalidCrewToolIdentity("inventory_folder", player, storageName)
 			end
 		end
 	end
@@ -319,7 +357,7 @@ local function getDesiredCrewCounts(player)
 	return {}
 end
 
-local function collectCrewTools(container, toolsByName)
+local function collectCrewTools(player, container, toolsByName)
 	if not container then
 		return
 	end
@@ -328,9 +366,16 @@ local function collectCrewTools(container, toolsByName)
 		if child:IsA("Tool") and isCrewTool(child) then
 			local itemName = getToolItemName(child)
 			if itemName ~= "" then
-				applyToolMetadata(child, itemName)
-				toolsByName[itemName] = toolsByName[itemName] or {}
-				table.insert(toolsByName[itemName], child)
+				local canonicalItemName = resolveCrewItemName(itemName)
+				if canonicalItemName ~= "" then
+					itemName = applyToolMetadata(child, canonicalItemName) or canonicalItemName
+					toolsByName[itemName] = toolsByName[itemName] or {}
+					table.insert(toolsByName[itemName], child)
+				else
+					warnInvalidCrewToolIdentity("existing_tool", player, itemName)
+					toolsByName[itemName] = toolsByName[itemName] or {}
+					table.insert(toolsByName[itemName], child)
+				end
 			end
 		end
 	end
@@ -343,8 +388,8 @@ local function syncDesiredTools(player, desiredCounts)
 	end
 
 	local toolsByName = {}
-	collectCrewTools(backpack, toolsByName)
-	collectCrewTools(player.Character, toolsByName)
+	collectCrewTools(player, backpack, toolsByName)
+	collectCrewTools(player, player.Character, toolsByName)
 
 	for itemName, tools in pairs(toolsByName) do
 		local desiredCount = normalizeCount(desiredCounts[itemName] or 0)

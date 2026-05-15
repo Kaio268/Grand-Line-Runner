@@ -110,7 +110,7 @@ MoneyCollectedRE.OnClientEvent:Connect(function(standModel, amount, displayPaylo
 		return
 	end
 
-	local placed = standModel:FindFirstChild("PlacedBrainrot")
+	local placed = standModel:FindFirstChild("PlacedCrewMember")
 	if not placed then
 		return
 	end

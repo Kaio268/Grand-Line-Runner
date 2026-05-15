@@ -394,8 +394,8 @@ task.spawn(function()
 		end
 
 		local priorityPaths = {
+			{ "Assets", "One Piece Characters" },
 			{ "Assets" },
-			{ "BrainrotFolder" },
 			{ "Waves" },
 			{ "Gears" },
 			{ "UI" },

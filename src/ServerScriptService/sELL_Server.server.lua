@@ -10,7 +10,6 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = Remotes:WaitForChild("SellItemEvent")
 
 local CrewCatalog = require(ReplicatedStorage.Modules.Crew:WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
 local SELL_TIME_SECONDS = 15
@@ -34,11 +33,11 @@ local function sanitizeKey(str)
 end
 
 local function getCrewInfo(crewName)
-	return CrewCatalog.GetInfoById(crewName) or Brainrots[crewName]
+	return CrewCatalog.GetInfoById(crewName)
 end
 
-local function getSellPrice(brainrotName)
-	local data = getCrewInfo(brainrotName)
+local function getSellPrice(crewMemberName)
+	local data = getCrewInfo(crewMemberName)
 	if not data then return 0 end
 
 	if data.SellPrice then

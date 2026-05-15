@@ -16,8 +16,7 @@ local ProfileTemplate = {
 	HiddenLeaderstats = {
 		Speed = 1,
 		Tutorial = false,
-		-- Legacy storage key; Crew-facing tutorial code should migrate after saved data is validated.
-		TutorialBrainrotGranted = false,
+		TutorialCrewMemberGranted = false,
 		TutorialSpeedTopUpGranted = false,
 		TutorialStarterDoubloonsGranted = false,
 		ClaimedTolilola = false,

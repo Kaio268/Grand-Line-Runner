@@ -11,10 +11,10 @@ local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewMembers = require(Modules:WaitForChild("Crew"):WaitForChild("CrewMembers"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
 
-local Brainrots = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
@@ -59,18 +59,23 @@ if not indexDisplayMetadataRequest then
 	indexDisplayMetadataRequest.Parent = ReplicatedStorage
 end
 
-local VALID_BRAINROT_ITEM_IDS = {}
-local SORTED_BRAINROT_ITEM_IDS = {}
+local VALID_CREW_MEMBER_ITEM_IDS = {}
+local SORTED_CREW_MEMBER_ITEM_IDS = {}
 
-for itemId, info in pairs(Brainrots) do
-	if type(info) == "table" then
-		local safeItemId = tostring(itemId)
-		VALID_BRAINROT_ITEM_IDS[safeItemId] = true
-		SORTED_BRAINROT_ITEM_IDS[#SORTED_BRAINROT_ITEM_IDS + 1] = safeItemId
+for _, entry in ipairs(CrewMembers.GetEntries()) do
+	if type(entry) == "table" then
+		local crewMemberId = tostring(entry.CrewMemberId or "")
+		if crewMemberId ~= "" then
+			for _, variantKey in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
+				local itemId = CrewCatalog.MakeVariantId(crewMemberId, variantKey)
+				VALID_CREW_MEMBER_ITEM_IDS[itemId] = true
+				SORTED_CREW_MEMBER_ITEM_IDS[#SORTED_CREW_MEMBER_ITEM_IDS + 1] = itemId
+			end
+		end
 	end
 end
 
-table.sort(SORTED_BRAINROT_ITEM_IDS)
+table.sort(SORTED_CREW_MEMBER_ITEM_IDS)
 
 local lastIndexDisplayMetadataLogByPlayer = setmetatable({}, { __mode = "k" })
 
@@ -126,14 +131,19 @@ local function parseVariantAndBaseName(fullName)
 	return "Normal", value
 end
 
-local function resolveBrainrotItemId(storageName, baseName, variantKey)
-	local storageNameValue = tostring(storageName or "")
+local function resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
+	local crewMemberIdValue = tostring(crewMemberId or "")
 	local baseNameValue = tostring(baseName or "")
 	local normalizedVariant = normalizeVariantKey(variantKey)
-	if baseNameValue == "" and storageNameValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(storageNameValue)
+	if baseNameValue == "" and crewMemberIdValue ~= "" then
+		local parsedVariant, parsedBaseName = parseVariantAndBaseName(crewMemberIdValue)
 		normalizedVariant = normalizeVariantKey(parsedVariant)
 		baseNameValue = parsedBaseName
+	end
+
+	local resolvedCrewMemberId, info = CrewCatalog.ResolveCrewMemberId(baseNameValue)
+	if info then
+		baseNameValue = tostring(info.CrewMemberId or resolvedCrewMemberId)
 	end
 
 	if baseNameValue == "" then
@@ -141,25 +151,25 @@ local function resolveBrainrotItemId(storageName, baseName, variantKey)
 	end
 
 	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
+	if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
 		return itemId
 	end
 
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
-		return storageNameValue
+	if crewMemberIdValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[crewMemberIdValue] then
+		return crewMemberIdValue
 	end
 
 	return nil
 end
 
-local function markDiscoveredBrainrot(discovered, storageName, baseName, variantKey)
-	local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
+local function markDiscoveredCrewMember(discovered, crewMemberId, baseName, variantKey)
+	local itemId = resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
 	if itemId then
 		discovered[itemId] = true
 	end
 end
 
-local function getRequestedBrainrotItemIds(requestedItemIds)
+local function getRequestedCrewMemberItemIds(requestedItemIds)
 	local itemIds = {}
 	local seen = {}
 
@@ -170,7 +180,7 @@ local function getRequestedBrainrotItemIds(requestedItemIds)
 			end
 
 			local itemId = tostring(rawItemId or "")
-			if VALID_BRAINROT_ITEM_IDS[itemId] == true and seen[itemId] ~= true then
+			if VALID_CREW_MEMBER_ITEM_IDS[itemId] == true and seen[itemId] ~= true then
 				seen[itemId] = true
 				itemIds[#itemIds + 1] = itemId
 			end
@@ -182,7 +192,7 @@ local function getRequestedBrainrotItemIds(requestedItemIds)
 		return itemIds
 	end
 
-	for _, itemId in ipairs(SORTED_BRAINROT_ITEM_IDS) do
+	for _, itemId in ipairs(SORTED_CREW_MEMBER_ITEM_IDS) do
 		if #itemIds >= INDEX_DISPLAY_METADATA_MAX_IDS then
 			break
 		end
@@ -326,7 +336,7 @@ local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
 		}
 	end
 
-	local itemIds = getRequestedBrainrotItemIds(requestedItemIds)
+	local itemIds = getRequestedCrewMemberItemIds(requestedItemIds)
 	local metadataById = {}
 	local fallbackReasonCounts = {}
 	local modelPreviewFallbackReasonCounts = {}
@@ -389,7 +399,7 @@ end
 
 indexDisplayMetadataRequest.OnServerInvoke = buildIndexDisplayMetadataResponse
 
-local function countUnlockedBrainrots(player)
+local function countUnlockedCrewMembers(player)
 	local discovered = {}
 	local history = IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
 
@@ -404,9 +414,9 @@ local function countUnlockedBrainrots(player)
 	local crewInventory = CrewInstanceService.GetCrewInventory(player)
 	for _, instanceData in pairs(if typeof(crewInventory) == "table" and typeof(crewInventory.ById) == "table" then crewInventory.ById else {}) do
 		if typeof(instanceData) == "table" then
-			markDiscoveredBrainrot(
+			markDiscoveredCrewMember(
 				discovered,
-				tostring(instanceData.StorageName or ""),
+				tostring(instanceData.CrewMemberId or ""),
 				tostring(instanceData.BaseName or ""),
 				tostring(instanceData.Variant or "")
 			)
@@ -553,7 +563,7 @@ claimRemote.OnServerEvent:Connect(function(player, questId)
 			return
 		end
 
-		local unlocked = countUnlockedBrainrots(player)
+		local unlocked = countUnlockedCrewMembers(player)
 		if unlocked < q then
 			sendClaimPopup(player, "Discover more entries before claiming this reward.", true)
 			sendClientClaimResult(false)

@@ -86,7 +86,7 @@ local function findStandModel(plot, standName)
 	return nil
 end
 
-local function StealBrainrotProduct(receiptInfo, buyer, _profile, _DataManager: Types.DataManager)
+local function StealCrewMemberProduct(receiptInfo, buyer, _profile, _DataManager: Types.DataManager)
 	local productId = tonumber(receiptInfo.ProductId)
 	if not productId or not STEAL_PRODUCTS[productId] then
 		return
@@ -94,15 +94,15 @@ local function StealBrainrotProduct(receiptInfo, buyer, _profile, _DataManager: 
 
 	local ownerUserId = buyer:GetAttribute("StealOwnerUserId")
 	local standName = buyer:GetAttribute("StealStandName")
-	local brainrotName = buyer:GetAttribute("StealBrainrotName")
-	local brainrotInstanceId = buyer:GetAttribute("StealBrainrotInstanceId")
+	local crewMemberName = buyer:GetAttribute("StealCrewMemberName")
+	local crewMemberInstanceId = buyer:GetAttribute("StealCrewMemberInstanceId")
 	local expectedId = buyer:GetAttribute("StealProductId")
 	local ts = buyer:GetAttribute("StealTime")
 
 	buyer:SetAttribute("StealOwnerUserId", nil)
 	buyer:SetAttribute("StealStandName", nil)
-	buyer:SetAttribute("StealBrainrotName", nil)
-	buyer:SetAttribute("StealBrainrotInstanceId", nil)
+	buyer:SetAttribute("StealCrewMemberName", nil)
+	buyer:SetAttribute("StealCrewMemberInstanceId", nil)
 	buyer:SetAttribute("StealProductId", nil)
 	buyer:SetAttribute("StealTime", nil)
 
@@ -115,7 +115,7 @@ local function StealBrainrotProduct(receiptInfo, buyer, _profile, _DataManager: 
 	if typeof(standName) ~= "string" or standName == "" then
 		return
 	end
-	if typeof(brainrotName) ~= "string" or brainrotName == "" then
+	if typeof(crewMemberName) ~= "string" or crewMemberName == "" then
 		return
 	end
 	if typeof(ts) == "number" and (os.time() - ts) > 120 then
@@ -128,13 +128,13 @@ local function StealBrainrotProduct(receiptInfo, buyer, _profile, _DataManager: 
 	end
 
 	local standData = CrewStandIncomeAuthority.GetStandData(owner, standName)
-	local current = standData and standData.BrainrotName
-	if current ~= brainrotName then
+	local current = standData and standData.CrewMemberName
+	if current ~= crewMemberName then
 		return
 	end
-	if typeof(brainrotInstanceId) == "string" and brainrotInstanceId ~= "" then
+	if typeof(crewMemberInstanceId) == "string" and crewMemberInstanceId ~= "" then
 		local currentInstanceId = CrewInstanceService.GetStandInstanceId(owner, standName)
-		if currentInstanceId ~= "" and currentInstanceId ~= brainrotInstanceId then
+		if currentInstanceId ~= "" and currentInstanceId ~= crewMemberInstanceId then
 			return
 		end
 	end
@@ -149,7 +149,7 @@ local function StealBrainrotProduct(receiptInfo, buyer, _profile, _DataManager: 
 	if plot then
 		local standModel = findStandModel(plot, standName)
 		if standModel then
-			local placed = standModel:FindFirstChild("PlacedBrainrot")
+			local placed = standModel:FindFirstChild("PlacedCrewMember")
 			if placed and placed:IsA("Model") then
 				placed:Destroy()
 			end
@@ -167,19 +167,18 @@ end
 
 local handlers = {
 	[3509346360] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		-- TODO(ProductRewards): Add an Omega/high-tier CrewMember replacement for this retired legacy reward.
-		grantCrewReward(player, "Dragon Cannelloni", "ProductFunctions:SuperOPStarterPack")
+		grantCrewReward(player, "Plague Engineer", "ProductFunctions:SuperOPStarterPack")
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000_000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000_000)
 		DataManager:SetValue(player, "Packs.Super OP Starter Pack", true)
 	end,
 
 	[3512059347] = function(_receiptInfo, player, _profile, _DataManager: Types.DataManager)
-		grantCrewReward(player, "La Vacca Saturno Saturnita", "ProductFunctions:JuiceDuchess")
+		grantCrewReward(player, "Juice Duchess", "ProductFunctions:JuiceDuchess")
 	end,
 
 	[3509346182] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		grantCrewReward(player, "Tralalero Tralala", "ProductFunctions:BestStarterPack")
+		grantCrewReward(player, "Candy Duke", "ProductFunctions:BestStarterPack")
 		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), 1_000_000)
 		DataManager:AddValue(player, CurrencyUtil.getTotalPath(), 1_000_000)
 		if DataManager:GetValue(player, "Gears.Lava SpeedCoil") then
@@ -191,7 +190,7 @@ local handlers = {
 	end,
 
 	[3509346000] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		grantCrewReward(player, "Elefanto Cocofanto", "ProductFunctions:BetterStarterPack")
+		grantCrewReward(player, "Venom Warden", "ProductFunctions:BetterStarterPack")
 		DataManager:SetValue(player, "Packs.Better Starter Pack", true)
 
 		if DataManager:GetValue(player, "Gears.Diamond SpeedCoil") then
@@ -333,12 +332,12 @@ local handlers = {
 		end
 	end,
 
-	[3512126073] = StealBrainrotProduct,
-	[3512126373] = StealBrainrotProduct,
-	[3512127278] = StealBrainrotProduct,
-	[3512127790] = StealBrainrotProduct,
-	[3512128038] = StealBrainrotProduct,
-	[3512128716] = StealBrainrotProduct,
+	[3512126073] = StealCrewMemberProduct,
+	[3512126373] = StealCrewMemberProduct,
+	[3512127278] = StealCrewMemberProduct,
+	[3512127790] = StealCrewMemberProduct,
+	[3512128038] = StealCrewMemberProduct,
+	[3512128716] = StealCrewMemberProduct,
 }
 
 local crewQuickSlotProductId = tonumber(CrewQuickSlotConfig.ProductId)

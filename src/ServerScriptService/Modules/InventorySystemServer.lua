@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewMemberCanonicalReadGate = require(
 	ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberCanonicalReadGate")
 )
@@ -60,6 +61,7 @@ local FRUIT_EQUIP_DEBUG = false
 local R6G_WELD_DEBUG = false
 local INVENTORY_SNAPSHOT_DEBUG = false
 local lastCrewInventoryCounts = setmetatable({}, { __mode = "k" })
+local invalidCrewEquipWarnings = {}
 
 local DATA_READY_TIMEOUT = 30
 local TOOL_KIND_CREW_MEMBER = "CrewMember"
@@ -97,6 +99,24 @@ local function inventorySnapshotLog(...)
 	if INVENTORY_SNAPSHOT_DEBUG then
 		print("[INV][SNAPSHOT]", ...)
 	end
+end
+
+local function warnInvalidCrewIdentity(source, player, identity)
+	local key = tostring(source or "unknown") .. ":" .. (player and tostring(player.UserId) or "unknown") .. ":" .. tostring(identity or "")
+	if invalidCrewEquipWarnings[key] then
+		return
+	end
+	invalidCrewEquipWarnings[key] = true
+	warn(string.format(
+		"[InventorySystem] Rejected unknown CrewMember identity source=%s player=%s identity=%s",
+		tostring(source or "unknown"),
+		player and player.Name or "unknown",
+		tostring(identity or "")
+	))
+end
+
+local function resolveCanonicalCrewMemberId(identity)
+	return CrewCatalog.ResolveCanonicalCrewMemberId(identity)
 end
 
 local function fruitEquipDebug(message, ...)
@@ -423,7 +443,12 @@ local function unequipIfEquipped(player, toolName, itemKind)
 	end
 end
 
-local function ownsBrainrot(player, name)
+local function ownsCrewMember(player, name)
+	local requestedName, info = resolveCanonicalCrewMemberId(name)
+	if not info then
+		warnInvalidCrewIdentity("owns_check", player, name)
+		return false
+	end
 	local inventory = CrewInstanceService.GetCrewInventory(player)
 	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
 		return false
@@ -431,7 +456,7 @@ local function ownsBrainrot(player, name)
 
 	for _, instanceData in pairs(inventory.ById) do
 		if typeof(instanceData) == "table"
-			and tostring(instanceData.StorageName or "") == tostring(name or "")
+			and tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == requestedName
 			and tostring(instanceData.AssignedStand or "") == ""
 		then
 			return true
@@ -543,6 +568,26 @@ local function applyDisplayMetadata(entry, metadata)
 		return
 	end
 
+	local crewMemberId = tostring(metadata.CrewMemberId or "")
+	if crewMemberId ~= "" then
+		entry.CrewMemberId = crewMemberId
+	end
+
+	local instanceId = tostring(metadata.InstanceId or "")
+	if instanceId ~= "" then
+		entry.InstanceId = instanceId
+	end
+
+	local modelName = tostring(metadata.ModelName or "")
+	if modelName ~= "" then
+		entry.ModelName = modelName
+	end
+
+	local legacyStorageName = tostring(metadata.LegacyStorageName or "")
+	if legacyStorageName ~= "" then
+		entry.LegacyStorageName = legacyStorageName
+	end
+
 	local displayName = tostring(metadata.DisplayName or "")
 	if displayName ~= "" then
 		entry.DisplayName = displayName
@@ -557,6 +602,14 @@ local function applyDisplayMetadata(entry, metadata)
 	if render ~= "" then
 		entry.Render = render
 	end
+end
+
+local function firstNonEmptyText(primary, fallback)
+	local value = tostring(primary or "")
+	if value ~= "" then
+		return value
+	end
+	return tostring(fallback or "")
 end
 
 local function buildInventoryModelPreviewDescriptor(descriptor)
@@ -603,20 +656,31 @@ end
 local function getCrewInventoryAvailableCounts(player, inventory)
 	inventory = if typeof(inventory) == "table" then inventory else CrewInstanceService.GetCrewInventory(player)
 	local counts = {}
+	local representatives = {}
 	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return counts
+		return counts, representatives
 	end
 
-	for _, instanceData in pairs(inventory.ById) do
+	for instanceId, instanceData in pairs(inventory.ById) do
 		if typeof(instanceData) == "table"
 			and tostring(instanceData.AssignedStand or "") == ""
-			and tostring(instanceData.StorageName or "") ~= ""
 		then
-			local storageName = tostring(instanceData.StorageName)
-			counts[storageName] = (counts[storageName] or 0) + 1
+			local storageName = tostring(instanceData.CrewMemberId or instanceData.StorageName or "")
+			local resolvedStorageName, info = resolveCanonicalCrewMemberId(storageName)
+			if info then
+				storageName = resolvedStorageName
+				counts[storageName] = (counts[storageName] or 0) + 1
+				if representatives[storageName] == nil then
+					local representative = table.clone(instanceData)
+					representative.InstanceId = tostring(instanceData.InstanceId or instanceId)
+					representatives[storageName] = representative
+				end
+			elseif storageName ~= "" then
+				warnInvalidCrewIdentity("inventory_count_skip", player, storageName)
+			end
 		end
 	end
-	return counts
+	return counts, representatives
 end
 
 local function pushCrewInventoryCounts(player, inventory)
@@ -653,13 +717,11 @@ local function buildInventorySnapshot(player)
 		return {
 			Ready = false,
 			Reason = "data_not_ready",
-			Brainrots = {},
 			Gears = {},
 			DevilFruits = {},
 			Chests = {},
 			Crew = {},
 			Counts = {
-				Brainrots = 0,
 				Gears = 0,
 				DevilFruits = 0,
 				Chests = 0,
@@ -668,7 +730,6 @@ local function buildInventorySnapshot(player)
 		}
 	end
 
-	local brainrots = {}
 	local gears = {}
 	local devilFruits = {}
 	local chests = {}
@@ -687,10 +748,25 @@ local function buildInventorySnapshot(player)
 		end
 	end
 
-	for storageName, quantity in pairs(getCrewInventoryAvailableCounts(player)) do
+	local crewCounts, crewRepresentatives = getCrewInventoryAvailableCounts(player)
+	for storageName, quantity in pairs(crewCounts) do
+		local representative = crewRepresentatives[storageName]
 		local metadata = CrewMemberCanonicalReadGate.ResolveInventoryDisplayMetadata(player, storageName, {
 			LogThrottleSeconds = 60,
 		})
+		if typeof(representative) == "table" then
+			metadata = if typeof(metadata) == "table" then table.clone(metadata) else {}
+			metadata.CrewMemberId = storageName
+			metadata.InstanceId = tostring(representative.InstanceId or "")
+			metadata.DisplayName = firstNonEmptyText(metadata.DisplayName, representative.DisplayName)
+			if metadata.DisplayName == "" then
+				metadata.DisplayName = storageName
+			end
+			metadata.Rarity = firstNonEmptyText(metadata.Rarity, representative.Rarity)
+			metadata.Render = firstNonEmptyText(metadata.Render, representative.Render)
+			metadata.ModelName = firstNonEmptyText(metadata.ModelName, representative.ModelName)
+			metadata.LegacyStorageName = tostring(representative.LegacyStorageName or "")
+		end
 		local modelPreviewDescriptor = CrewMemberCanonicalReadGate.ResolveInventoryModelPreviewDescriptor(
 			player,
 			storageName,
@@ -723,13 +799,11 @@ local function buildInventorySnapshot(player)
 
 	local snapshot = {
 		Ready = true,
-		Brainrots = brainrots,
 		Gears = gears,
 		DevilFruits = devilFruits,
 		Chests = chests,
 		Crew = crew,
 		Counts = {
-			Brainrots = #brainrots,
 			Gears = #gears,
 			DevilFruits = #devilFruits,
 			Chests = #chests,
@@ -741,8 +815,6 @@ local function buildInventorySnapshot(player)
 		"sent",
 		"player",
 		player.Name,
-		"brainrots",
-		snapshot.Counts.Brainrots,
 		"crew",
 		snapshot.Counts.Crew,
 		"devilFruits",
@@ -1209,13 +1281,18 @@ local function handleEquipToggleRequest(player, kind, name)
 	end
 
 	if isCrewMemberKind(kind) then
-		if not ownsBrainrot(player, name) then return end
-		local canEquip = CrewQuickSlotService.CanEquipCrewMember(player, name)
-		if not canEquip then
-			CrewQuickSlotService.PromptUnlockForCrewMember(player, name)
+		local canonicalName, info = resolveCanonicalCrewMemberId(name)
+		if not info then
+			warnInvalidCrewIdentity("equip_request", player, name)
 			return
 		end
-		toggleEquip(player, TOOL_KIND_CREW_MEMBER, name)
+		if not ownsCrewMember(player, canonicalName) then return end
+		local canEquip = CrewQuickSlotService.CanEquipCrewMember(player, canonicalName)
+		if not canEquip then
+			CrewQuickSlotService.PromptUnlockForCrewMember(player, canonicalName)
+			return
+		end
+		toggleEquip(player, TOOL_KIND_CREW_MEMBER, canonicalName)
 		return
 	end
 
@@ -1281,6 +1358,7 @@ function Module.Start()
 		watchGears(player, gears)
 		task.defer(function()
 			if waitForPlayerDataReady(player) then
+				CrewInstanceService.RepairCanonicalCrewState(player)
 				CrewInstanceService.SyncAvailableCounts(player, {
 					AllowLegacyMirrorWrite = true,
 				})

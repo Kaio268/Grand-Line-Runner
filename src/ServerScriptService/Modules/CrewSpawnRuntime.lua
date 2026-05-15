@@ -37,7 +37,7 @@ local resolvedMapRefs = MapResolver.WaitForRefs(
 	nil,
 	{
 		warn = true,
-		context = "SpawnBrainrots",
+		context = "SpawnCrewMembers",
 	}
 )
 local map = resolvedMapRefs.MapRoot
@@ -71,15 +71,21 @@ local loggedHitBoxTouchByPlayer = {}
 local spawnWarnThrottleByKey = {}
 local FIRST_TUTORIAL_BIOME_INDEX = 1
 local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
-local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
+local TUTORIAL_CREW_MEMBER_ATTRIBUTE = "TutorialCrewMember"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
 local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
 local CARRIED_MODEL_ATTRIBUTE = "CrewCarryHeld"
+local CREW_MEMBER_ID_ATTRIBUTE = "CrewMemberId"
+local CREW_MEMBER_DISPLAY_NAME_ATTRIBUTE = "CrewMemberDisplayName"
+local CREW_MEMBER_IMAGE_ATTRIBUTE = "CrewMemberImage"
+local CREW_MEMBER_LEGACY_ID_ATTRIBUTE = "CrewMemberLegacyId"
 local TUTORIAL_GRANTED_PATH = tostring(
-	(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.GrantedPath)
-		or "HiddenLeaderstats.TutorialBrainrotGranted"
+	(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.GrantedPath)
+		or "HiddenLeaderstats.TutorialCrewMemberGranted"
 )
+local CREW_MEMBERS_WORLD_FOLDER_NAME = "CrewMembersWorld"
+local CREW_MEMBERS_SPAWN_FOLDER_NAME = "CrewMembers"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -160,24 +166,24 @@ local function runTrace(message, ...)
 	print(string.format("[RUN TRACE] " .. message, ...))
 end
 
-local function isTutorialBrainrotModel(model)
-	return model ~= nil and model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+local function isTutorialCrewMemberModel(model)
+	return model ~= nil and model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
 end
 
-local function isTutorialBrainrotInfo(info)
-	return typeof(info) == "table" and info.TutorialBrainrot == true
+local function isTutorialCrewMemberInfo(info)
+	return typeof(info) == "table" and info.TutorialCrewMember == true
 end
 
-local function isHeldBrainrotModel(model, st)
+local function isHeldCrewMemberModel(model, st)
 	return (st and st.Held == true) or (model and model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true)
 end
 
-local function getTutorialBrainrotGranted(player)
+local function getTutorialCrewMemberGranted(player)
 	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_GRANTED_PATH)
 	return reason == nil and granted == true
 end
 
-local function setTutorialBrainrotGranted(player, granted)
+local function setTutorialCrewMemberGranted(player, granted)
 	return DataManager:TrySetValue(player, TUTORIAL_GRANTED_PATH, granted == true)
 end
 
@@ -224,7 +230,7 @@ if not LikeGoalSpawnSecret then
 end
 
 mapTrace(
-	"SpawnBrainrots requestedMap=%s activeMap=%s mapPath=%s biomesRoot=%s legacySpawnFolder=%s hitBox=%s hitBoxPos=%s",
+	"SpawnCrewMembers requestedMap=%s activeMap=%s mapPath=%s biomesRoot=%s legacySpawnFolder=%s hitBox=%s hitBoxPos=%s",
 	tostring(resolvedMapRefs.RequestedMapName),
 	tostring(resolvedMapRefs.ActiveMapName),
 	formatInstancePath(map),
@@ -234,7 +240,7 @@ mapTrace(
 	formatVector3(hitBox and hitBox.Position or nil)
 )
 zoneTrace(
-	"brainrotHitBox activeMap=%s mapPath=%s boundary=%s boundaryPos=%s boundarySize=%s",
+	"crewHitBox activeMap=%s mapPath=%s boundary=%s boundaryPos=%s boundarySize=%s",
 	tostring(resolvedMapRefs.ActiveMapName),
 	formatInstancePath(map),
 	formatInstancePath(hitBox),
@@ -242,7 +248,7 @@ zoneTrace(
 	formatVector3(hitBox and hitBox.Size or nil)
 )
 spawnTrace(
-	"startup map=%s biomesRoot=%s usingBiomePads=%s legacySpawnFolder=%s acceptedRarities=%s brainrotsWorld=%s carried=%s dropped=%s",
+	"startup map=%s biomesRoot=%s usingBiomePads=%s legacySpawnFolder=%s acceptedRarities=%s crewMembersWorld=%s carried=%s dropped=%s",
 	formatInstancePath(map),
 	formatInstancePath(biomesRoot),
 	tostring(biomesRoot ~= nil),
@@ -255,13 +261,44 @@ spawnTrace(
 		table.sort(names)
 		return names
 	end)(), ", "),
-	formatInstancePath(map:FindFirstChild("BrainrotsWorld")),
+	formatInstancePath(map:FindFirstChild(CREW_MEMBERS_WORLD_FOLDER_NAME)),
 	formatInstancePath(ctx and ctx.CarriedFolder),
 	formatInstancePath(ctx and ctx.DroppedFolder)
 )
 
 local function shallowCopy(t)
 	return table.clone(t)
+end
+
+local function normalizeCrewAttribute(value)
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+	if value ~= nil and typeof(value) ~= "string" then
+		return tostring(value)
+	end
+	return nil
+end
+
+local function stampCrewMemberAttributes(model, entry)
+	if not model then
+		return
+	end
+
+	local info = entry and entry.Info
+	local crewMemberId = normalizeCrewAttribute(info and info.CrewMemberId)
+		or normalizeCrewAttribute(info and info.DisplayName)
+		or normalizeCrewAttribute(info and info.CrewMemberName)
+	local displayName = normalizeCrewAttribute(info and (info.DisplayName or info.CrewMemberName or info.Name))
+		or crewMemberId
+	local image = normalizeCrewAttribute(info and info.Render)
+	local legacyId = normalizeCrewAttribute(info and info.LegacyId)
+		or normalizeCrewAttribute(entry and entry.Id)
+
+	model:SetAttribute(CREW_MEMBER_ID_ATTRIBUTE, crewMemberId)
+	model:SetAttribute(CREW_MEMBER_DISPLAY_NAME_ATTRIBUTE, displayName)
+	model:SetAttribute(CREW_MEMBER_IMAGE_ATTRIBUTE, image)
+	model:SetAttribute(CREW_MEMBER_LEGACY_ID_ATTRIBUTE, legacyId)
 end
 
 local function normalizeEventName(s)
@@ -438,10 +475,10 @@ local function setupSpawnPart(spawnPart)
 			or tonumber(SpawnPartsCfg.DefaultLuckMult)
 			or 100
 
-		local container = spawnPart:FindFirstChild("Brainrots")
+		local container = spawnPart:FindFirstChild(CREW_MEMBERS_SPAWN_FOLDER_NAME)
 		if not container then
 			container = Instance.new("Folder")
-			container.Name = "Brainrots"
+			container.Name = CREW_MEMBERS_SPAWN_FOLDER_NAME
 			container.Parent = spawnPart
 		end
 
@@ -565,14 +602,14 @@ end
 local active = {}
 ctx.Active = active
 
-local function expireBrainrot(model, st)
+local function expireCrewMember(model, st)
 	if active[model] ~= st then
 		return
 	end
-	if isTutorialBrainrotModel(model) then
+	if isTutorialCrewMemberModel(model) then
 		return
 	end
-	if isHeldBrainrotModel(model, st) then
+	if isHeldCrewMemberModel(model, st) then
 		return
 	end
 
@@ -595,14 +632,14 @@ end
 
 local function rushTrimExistingOnce()
 	for model, st in pairs(active) do
-		if model and model.Parent and not isHeldBrainrotModel(model, st) and not isTutorialBrainrotModel(model) then
+		if model and model.Parent and not isHeldCrewMemberModel(model, st) and not isTutorialCrewMemberModel(model) then
 			local newRemain = math.min(st.Remaining or 0, RUSH_TRIM_SECONDS)
 			st.Remaining = newRemain
 			st.LastUpdate = os.clock()
 			st.LastShown = -1
 
 			task.delay(RUSH_TRIM_SECONDS, function()
-				expireBrainrot(model, st)
+				expireCrewMember(model, st)
 			end)
 		end
 	end
@@ -640,7 +677,7 @@ hitBox.Touched:Connect(function(hit)
 	end
 
 	zoneTrace(
-		"brainrotBoundaryTouched player=%s boundary=%s boundaryPos=%s activeMap=%s mapPath=%s",
+		"crewBoundaryTouched player=%s boundary=%s boundaryPos=%s activeMap=%s mapPath=%s",
 		plr.Name,
 		formatInstancePath(hitBox),
 		formatVector3(hitBox.Position),
@@ -666,21 +703,21 @@ hitBox.Touched:Connect(function(hit)
 	hitDebounce[plr.UserId] = now
 
 	local heldModel = ctx.HeldByUserId[plr.UserId]
-	local heldIsTutorial = isTutorialBrainrotModel(heldModel)
-	local heldTutorialFlagGranted = heldIsTutorial and getTutorialBrainrotGranted(plr) or false
+	local heldIsTutorial = isTutorialCrewMemberModel(heldModel)
+	local heldTutorialFlagGranted = heldIsTutorial and getTutorialCrewMemberGranted(plr) or false
 	local heldTutorialAlreadyGranted = false
 	if heldTutorialFlagGranted then
 		local hasUsableReward, rewardInstanceId = hasUsableTutorialRewardInstance(plr, heldModel)
 		heldTutorialAlreadyGranted = hasUsableReward == true
 		if not heldTutorialAlreadyGranted then
 			runTrace(
-				"brainrotTurnIn tutorial flag ignored player=%s reward=%s reason=no_usable_tutorial_reward_instance",
+				"crewTurnIn tutorial flag ignored player=%s reward=%s reason=no_usable_tutorial_reward_instance",
 				plr.Name,
 				getTutorialRewardNameFromModel(heldModel)
 			)
 		else
 			runTrace(
-				"brainrotTurnIn tutorial grant skipped player=%s reward=%s reason=usable_tutorial_reward_exists instanceId=%s",
+				"crewTurnIn tutorial grant skipped player=%s reward=%s reason=usable_tutorial_reward_exists instanceId=%s",
 				plr.Name,
 				getTutorialRewardNameFromModel(heldModel),
 				tostring(rewardInstanceId)
@@ -692,7 +729,7 @@ hitBox.Touched:Connect(function(hit)
 		local ownerUserId = heldModel:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
 		if ownerUserId ~= plr.UserId then
 			runTrace(
-				"brainrotTurnIn blocked player=%s reason=tutorial_owner_mismatch owner=%s",
+				"crewTurnIn blocked player=%s reason=tutorial_owner_mismatch owner=%s",
 				plr.Name,
 				tostring(ownerUserId)
 			)
@@ -701,10 +738,10 @@ hitBox.Touched:Connect(function(hit)
 	end
 
 	if Interaction.HasHeld(ctx, plr) and not heldTutorialAlreadyGranted and not heldIsTutorial then
-		local canGain = CrewQuickSlotService.CanGainOrNotify(plr, 1, "SpawnBrainrots:TurnIn")
+		local canGain = CrewQuickSlotService.CanGainOrNotify(plr, 1, "SpawnCrewMembers:TurnIn")
 		if not canGain then
 			runTrace(
-				"brainrotTurnIn blocked player=%s boundary=%s activeMap=%s reason=quick_slots_full",
+				"crewTurnIn blocked player=%s boundary=%s activeMap=%s reason=quick_slots_full",
 				plr.Name,
 				formatInstancePath(hitBox),
 				tostring(resolvedMapRefs.ActiveMapName)
@@ -714,10 +751,10 @@ hitBox.Touched:Connect(function(hit)
 	end
 
 	if heldIsTutorial and not heldTutorialAlreadyGranted then
-		local flagged = setTutorialBrainrotGranted(plr, true)
+		local flagged = setTutorialCrewMemberGranted(plr, true)
 		if flagged ~= true then
 			runTrace(
-				"brainrotTurnIn blocked player=%s reason=tutorial_flag_save_failed",
+				"crewTurnIn blocked player=%s reason=tutorial_flag_save_failed",
 				plr.Name
 			)
 			return
@@ -726,38 +763,39 @@ hitBox.Touched:Connect(function(hit)
 
 	local info = Interaction.CollectHeld(ctx, plr, active)
 	if info and info.Name then
+		local displayName = tostring(info.DisplayName or info.CrewMemberId or info.Name)
 		runTrace(
 			"crewTurnIn player=%s boundary=%s activeMap=%s reward=%s slotIndex=%s origin=%s action=AddCrewMember",
 			plr.Name,
 			formatInstancePath(hitBox),
 			tostring(resolvedMapRefs.ActiveMapName),
-			tostring(info.Name),
+			displayName,
 			tostring(info.SlotIndex),
 			tostring(info.OriginData ~= nil)
 		)
 		local added = true
 		if not heldTutorialAlreadyGranted then
 			added = AddCrewMember:AddCrewMember(plr, info.Name, 1, {
-				TutorialReward = isTutorialBrainrotInfo(info),
+				TutorialReward = isTutorialCrewMemberInfo(info),
 				TutorialToken = tostring(info.TutorialToken or ""),
 			})
 		end
 		if not added then
-			if isTutorialBrainrotInfo(info) then
-				setTutorialBrainrotGranted(plr, false)
+			if isTutorialCrewMemberInfo(info) then
+				setTutorialCrewMemberGranted(plr, false)
 			end
 			runTrace(
-				"brainrotTurnIn blocked player=%s reward=%s reason=inventory_full_or_add_failed",
+				"crewTurnIn blocked player=%s reward=%s reason=inventory_full_or_add_failed",
 				plr.Name,
 				tostring(info.Name)
 			)
 			return
 		end
 		QuestSignals.Record(plr, "ExtractCrew", 1, {
-			Source = "SpawnBrainrots",
-			CrewName = tostring(info.Name),
+			Source = "SpawnCrewMembers",
+			CrewName = displayName,
 			ActiveMap = tostring(resolvedMapRefs.ActiveMapName or ""),
-			TutorialBrainrot = isTutorialBrainrotInfo(info),
+			TutorialCrewMember = isTutorialCrewMemberInfo(info),
 			TutorialAlreadyGranted = heldTutorialAlreadyGranted,
 			TutorialToken = tostring(info.TutorialToken or ""),
 		})
@@ -776,7 +814,7 @@ hitBox.Touched:Connect(function(hit)
 		end
 	else
 		runTrace(
-			"brainrotTurnInSkipped player=%s boundary=%s activeMap=%s reason=no_held_brainrot",
+			"crewTurnInSkipped player=%s boundary=%s activeMap=%s reason=no_held_crew_member",
 			plr.Name,
 			formatInstancePath(hitBox),
 			tostring(resolvedMapRefs.ActiveMapName)
@@ -785,6 +823,8 @@ hitBox.Touched:Connect(function(hit)
 end)
 
 local function registerActive(model, entry, originData, slotIndex)
+	stampCrewMemberAttributes(model, entry)
+
 	local tl = tonumber(entry.Info.TimeLeft) or 0
 	if tl <= 0 then
 		tl = 30
@@ -977,7 +1017,7 @@ local function releaseSpawnSlot(data, slotIndex, model)
 	end
 end
 
-local function spawnTutorialBrainrotOnData(data, options)
+local function spawnTutorialCrewMemberOnData(data, options)
 	local player = options.Player
 	local sourceEntry = options.Entry
 	local template = sourceEntry and sourceEntry.Template
@@ -985,7 +1025,7 @@ local function spawnTutorialBrainrotOnData(data, options)
 		return nil, "Tutorial Crewmate template is not available."
 	end
 
-	local finalId = tostring(sourceEntry.FinalId or sourceEntry.Id or template.Name)
+	local finalId = tostring((sourceEntry.Info and sourceEntry.Info.CrewMemberId) or sourceEntry.FinalId or sourceEntry.Id or template.Name)
 	local info = if typeof(sourceEntry.Info) == "table" then shallowCopy(sourceEntry.Info) else {}
 	local lifetime = math.max(60, tonumber(options.Lifetime) or tonumber(info.TimeLeft) or 900)
 	info.TimeLeft = lifetime
@@ -1003,7 +1043,7 @@ local function spawnTutorialBrainrotOnData(data, options)
 
 	local clone = template:Clone()
 	clone.Name = finalId
-	clone:SetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE, true)
+	clone:SetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE, true)
 	clone:SetAttribute(TUTORIAL_OWNER_ATTRIBUTE, player.UserId)
 	clone:SetAttribute(TUTORIAL_TOKEN_ATTRIBUTE, tostring(options.Token or ""))
 	clone:SetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE, tostring(options.RewardName or finalId))
@@ -1036,7 +1076,7 @@ local function spawnTutorialBrainrotOnData(data, options)
 	data.SlotOccupied[slotIndex] = clone
 
 	spawnTrace(
-		"tutorialSpawn spawnPadRarity=%s brainrot=%s player=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s slotIndex=%s",
+		"tutorialSpawn spawnPadRarity=%s crewMember=%s player=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s slotIndex=%s",
 		tostring(data.Name),
 		tostring(finalId),
 		player.Name,
@@ -1095,7 +1135,7 @@ local function spawnTutorialBrainrotOnData(data, options)
 			releaseSpawnSlot(data, slotIndex, clone)
 			spawnWarnThrottled(
 				"tutorial_spawn_completed_missing_clone_" .. tostring(finalId),
-				"tutorialSpawn skipped reason=clone_missing_before_register spawnPart=%s brainrot=%s player=%s",
+				"tutorialSpawn skipped reason=clone_missing_before_register spawnPart=%s crewMember=%s player=%s",
 				formatInstancePath(data.Part),
 				tostring(finalId),
 				player.Name
@@ -1106,19 +1146,19 @@ local function spawnTutorialBrainrotOnData(data, options)
 	return clone, nil
 end
 
-local function spawnTutorialBrainrot(options)
+local function spawnTutorialCrewMember(options)
 	if typeof(options) ~= "table" then
 		return nil, "Tutorial spawn request is invalid."
 	end
 
 	local candidates = getTutorialSpawnDataCandidates()
 	if #candidates == 0 then
-		return nil, "Biome 1 Brainrot spawns are still loading."
+		return nil, "Biome 1 CrewMember spawns are still loading."
 	end
 
 	for _, data in ipairs(candidates) do
 		local ok, modelOrMessage, message = xpcall(function()
-			return spawnTutorialBrainrotOnData(data, options)
+			return spawnTutorialCrewMemberOnData(data, options)
 		end, debug.traceback)
 
 		if ok and modelOrMessage then
@@ -1142,7 +1182,7 @@ local function spawnTutorialBrainrot(options)
 	return nil, "Tutorial Crewmate spawn is not available yet."
 end
 
-ctx.SpawnTutorialBrainrot = spawnTutorialBrainrot
+ctx.SpawnTutorialCrewMember = spawnTutorialCrewMember
 
 local function getSameNameSpawnPartPaths(rarityName)
 	local paths = {}
@@ -1204,7 +1244,7 @@ local function spawnOne(data)
 		if not template then
 			spawnWarnThrottled(
 				"spawn_skip_no_template_" .. tostring(baseEntry.Id) .. "_" .. tostring(variantKey),
-				"spawnOne skipped reason=no_template spawnPart=%s rarity=%s brainrot=%s requestedVariant=%s",
+				"spawnOne skipped reason=no_template spawnPart=%s rarity=%s crewMember=%s requestedVariant=%s",
 				formatInstancePath(data.Part),
 				tostring(baseEntry.Rarity),
 				tostring(baseEntry.Id),
@@ -1219,7 +1259,7 @@ local function spawnOne(data)
 		if not finalInfo then
 			spawnWarnThrottled(
 				"spawn_skip_no_info_" .. tostring(finalId),
-				"spawnOne skipped reason=no_final_info spawnPart=%s rarity=%s brainrot=%s variant=%s",
+				"spawnOne skipped reason=no_final_info spawnPart=%s rarity=%s crewMember=%s variant=%s",
 				formatInstancePath(data.Part),
 				tostring(baseEntry.Rarity),
 				tostring(baseEntry.Id),
@@ -1284,7 +1324,7 @@ local function spawnOne(data)
 		local pivotPosition = clone:GetPivot().Position
 		local matchingCandidatePaths = getSameNameSpawnPartPaths(data.Name)
 		spawnTrace(
-			"spawnOne spawnPadRarity=%s chosenRarity=%s brainrot=%s variant=%s candidateCount=%s candidates=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s",
+			"spawnOne spawnPadRarity=%s chosenRarity=%s crewMember=%s variant=%s candidateCount=%s candidates=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s",
 			tostring(data.Name),
 			tostring(rarityLabel),
 			tostring(baseEntry.Id),
@@ -1334,7 +1374,7 @@ local function spawnOne(data)
 				Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
 				local settledPosition = clone:GetPivot().Position
 				spawnTrace(
-					"spawnOne completed rarity=%s brainrot=%s finalParent=%s finalPosition=%s",
+					"spawnOne completed rarity=%s crewMember=%s finalParent=%s finalPosition=%s",
 					tostring(rarityLabel),
 					tostring(clone.Name),
 					formatInstancePath(clone.Parent),
@@ -1347,7 +1387,7 @@ local function spawnOne(data)
 				data.SlotOffsets[freeIndex] = nil
 				spawnWarnThrottled(
 					"spawn_completed_missing_clone_" .. tostring(finalId),
-					"spawnOne skipped reason=clone_missing_before_register spawnPart=%s brainrot=%s",
+					"spawnOne skipped reason=clone_missing_before_register spawnPart=%s crewMember=%s",
 					formatInstancePath(data.Part),
 					tostring(finalId)
 				)
@@ -1373,7 +1413,7 @@ local function despawnAllInData(data)
 	for i = 1, SpawnerConfig.MaxPerPart do
 		local m = data.SlotOccupied[i]
 		if m and m.Parent == data.Container then
-			if isTutorialBrainrotModel(m) then
+			if isTutorialCrewMemberModel(m) then
 				continue
 			end
 			active[m] = nil
@@ -1428,7 +1468,7 @@ local function spawnRandomSecretIgnoreLimits()
 
 	local template, usedVariant = Registry.GetTemplateWithFallback(baseEntry.Id, variantKey)
 	if not template then
-		spawnWarn("likeGoal skipped reason=missing_template brainrot=%s", tostring(baseEntry.Id))
+		spawnWarn("likeGoal skipped reason=missing_template crewMember=%s", tostring(baseEntry.Id))
 		return
 	end
 	variantKey = usedVariant or variantKey
@@ -1437,7 +1477,7 @@ local function spawnRandomSecretIgnoreLimits()
 	local finalInfo = Registry.GetOrBuildVariantInfo(baseEntry.Id, variantKey) or baseEntry.Info
 	if not finalInfo then
 		spawnWarn(
-			"likeGoal skipped reason=missing_variant_info brainrot=%s variant=%s",
+			"likeGoal skipped reason=missing_variant_info crewMember=%s variant=%s",
 			tostring(baseEntry.Id),
 			tostring(variantKey)
 		)
@@ -1481,7 +1521,7 @@ local function spawnRandomSecretIgnoreLimits()
 	registerActive(clone, entry, nil, nil)
 
 	spawnTrace(
-		"likeGoalSpawn rarity=%s brainrot=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPosition=%s",
+		"likeGoalSpawn rarity=%s crewMember=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPosition=%s",
 		"Secret",
 		tostring(finalId),
 		formatInstancePath(data.Part),
@@ -1512,7 +1552,7 @@ while true do
 			end
 			active[model] = nil
 		else
-			if isHeldBrainrotModel(model, st) then
+			if isHeldCrewMemberModel(model, st) then
 				st.LastUpdate = now
 				Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
 			else
@@ -1530,7 +1570,7 @@ while true do
 					Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, remainingInt, false)
 				end
 
-				if st.Remaining <= 0 and not isTutorialBrainrotModel(model) then
+				if st.Remaining <= 0 and not isTutorialCrewMemberModel(model) then
 					if st.OriginData and st.SlotIndex then
 						local od = st.OriginData
 						local si = st.SlotIndex
