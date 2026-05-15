@@ -1,9 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(script.Parent.Data.DataManager)
 local CrewMemberCanonicalReadGate = require(script.Parent.Modules.CrewMemberCanonicalReadGate)
 local CrewInstanceService = require(script.Parent.Modules.CrewInstanceService)
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = Remotes:WaitForChild("SellItemEvent")
 
@@ -315,6 +317,17 @@ displayNameRequest.OnServerInvoke = function(player, rawName)
 end
 
 SellEvent.OnServerEvent:Connect(function(player, mode, fullName)
+	-- Security: selling mutates currency/inventory, so reject malformed or spammed sell requests first.
+	if not RemoteGuard.Check(player, "SellItemEvent", { mode, fullName }, {
+		Cooldown = 0.2,
+		Args = {
+			{ Type = "string", MaxLength = 16, Allowlist = { SINGLE = true, ALL = true } },
+			{ Type = "string", MaxLength = 128, AllowNil = true },
+		},
+	}) then
+		return
+	end
+
 	if player.Parent ~= Players then return end
 
 	if mode == "SINGLE" and fullName then

@@ -1,8 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local MapResolver = require(ReplicatedStorage.Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 local refs = MapResolver.WaitForRefs(
 	{ "MapRoot", "SpawnFolder" },
@@ -496,6 +498,16 @@ local function clearAll()
 end
 
 LuckyBlockHit.OnServerEvent:Connect(function(plr: Player, blockId: string)
+	-- Security: block damage is server validated; guard malformed/spammed hit reports first.
+	if not RemoteGuard.Check(plr, "LuckyBlockHit", { blockId }, {
+		Cooldown = 0.04,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return
+	end
+
 	if type(blockId) ~= "string" then return end
 	local data = blockById[blockId]
 	if not data then return end

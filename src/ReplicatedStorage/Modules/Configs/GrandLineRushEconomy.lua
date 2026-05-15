@@ -172,58 +172,78 @@ local Economy = {
 		Tiers = {
 			Wooden = {
 				DepthBand = "Early",
-				AverageFoodXP = 35,
+				AverageFoodXP = 53,
 				Rewards = {
 					Food = {
-						Apple = 4,
-						Rice = 1,
+						Apple = { Min = 3, Max = 6 },
+						Rice = { Min = 1, Max = 3 },
 					},
-					Doubloons = 15,
+					Doubloons = { Min = 250, Max = 600 },
+					FruitConversionDoubloons = 15,
 					Materials = {
-						CommonShipMaterial = 1,
+						Timber = { Min = 12, Max = 20 },
+					},
+					BonusRoll = {
+						Chance = 0.25,
+						Rolls = 1,
+						Pool = {
+							{ Materials = { Iron = 1 } },
+							{ Food = { Apple = 3 } },
+							{ Food = { Rice = 2 } },
+							{ Doubloons = 300 },
+						},
 					},
 				},
 			},
 			Iron = {
 				DepthBand = "EarlyMid",
-				AverageFoodXP = 60,
+				AverageFoodXP = 135,
 				Rewards = {
 					Food = {
-						Apple = 6,
-						Rice = 2,
+						Rice = { Min = 3, Max = 5 },
+						Meat = { Min = 1, Max = 2 },
 					},
-					Doubloons = 30,
+					Doubloons = { Min = 1000, Max = 2500 },
+					FruitConversionDoubloons = 30,
 					Materials = {
-						CommonShipMaterial = 2,
+						Timber = { Min = 35, Max = 55 },
+						Iron = { Min = 4, Max = 8 },
+					},
+					BonusRoll = {
+						Chance = 0.35,
+						Rolls = 1,
+						Pool = {
+							{ Materials = { Iron = 3 } },
+							{ Materials = { AncientTimber = 1 } },
+							{ Food = { Meat = 2 } },
+							{ Doubloons = 1500 },
+						},
 					},
 				},
 			},
 			Gold = {
-				DepthBand = "MidDeep",
-				AverageFoodXP = 130,
-				Rewards = {
-					Food = {
-						Rice = 2,
-						Meat = 2,
-					},
-					Doubloons = 60,
-					Materials = {
-						RareShipMaterial = 1,
-						CommonShipMaterial = 1,
-					},
-				},
-			},
-			Legendary = {
 				DepthBand = "Deep",
-				AverageFoodXP = 275,
+				AverageFoodXP = 463,
 				Rewards = {
 					Food = {
-						Meat = 2,
-						SeaBeastMeat = 1,
+						Meat = { Min = 3, Max = 5 },
+						SeaBeastMeat = { Min = 1, Max = 2 },
 					},
-					Doubloons = 120,
+					Doubloons = { Min = 4000, Max = 8000 },
+					FruitConversionDoubloons = 120,
 					Materials = {
-						RareShipMaterial = 2,
+						Timber = { Min = 80, Max = 140 },
+						Iron = { Min = 12, Max = 20 },
+						AncientTimber = { Min = 1, Max = 3 },
+					},
+					BonusRoll = {
+						Chance = 0.50,
+						Rolls = 1,
+						Pool = {
+							{ Materials = { AncientTimber = 2 } },
+							{ Food = { SeaBeastMeat = 2 } },
+							{ Doubloons = 5000 },
+						},
 					},
 					DevilFruitChance = 0.10,
 				},
@@ -235,25 +255,21 @@ local Economy = {
 				Wooden = 60,
 				Iron = 30,
 				Gold = 10,
-				Legendary = 0,
 			},
 			Mid = {
 				Wooden = 25,
 				Iron = 45,
-				Gold = 25,
-				Legendary = 5,
+				Gold = 30,
 			},
 			Strong = {
 				Wooden = 10,
 				Iron = 30,
-				Gold = 40,
-				Legendary = 20,
+				Gold = 60,
 			},
 			Elite = {
 				Wooden = 5,
 				Iron = 15,
-				Gold = 35,
-				Legendary = 45,
+				Gold = 80,
 			},
 		},
 	},

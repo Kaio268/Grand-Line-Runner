@@ -1,8 +1,10 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
 local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CometMerchant"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local PurchaseEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CometMerchantPurchase")
 
@@ -217,6 +219,16 @@ local function runReward(player, fullKey, amount)
 end
 
 PurchaseEvent.OnServerEvent:Connect(function(player, fullKeyIncoming)
+	-- Security: merchant purchases spend server currency, so guard the client-selected item key.
+	if not RemoteGuard.Check(player, "CometMerchantPurchase", { fullKeyIncoming }, {
+		Cooldown = 0.2,
+		Args = {
+			{ Type = "string", MaxLength = 128 },
+		},
+	}) then
+		return
+	end
+
 	local incoming = tostring(fullKeyIncoming or "")
 	if incoming == "" then return end
 

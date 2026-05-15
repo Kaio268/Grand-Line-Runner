@@ -4,6 +4,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local Brainrots = CrewCatalog.GetLegacyConfig()
+local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local BountyConfig = require(Configs:WaitForChild("GrandLineRushBounty"))
 
 local Resolver = {}
@@ -103,7 +104,12 @@ function Resolver.ResolveExtractionBountyForReward(rewardData)
 
 	local rewardType = tostring(rewardData.RewardType or "")
 	if rewardType == "Chest" then
-		return math.max(0, round(BountyConfig.Extraction.ChestBountyByTier[tostring(rewardData.Tier or "")] or 0))
+		local tierName = ChestUtils.ResolveStandardTier(rewardData.Tier)
+		if tierName == nil then
+			return 0
+		end
+
+		return math.max(0, round(BountyConfig.Extraction.ChestBountyByTier[tierName] or 0))
 	end
 
 	if rewardType == "Crew" then

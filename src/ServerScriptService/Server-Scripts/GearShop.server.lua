@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local Remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStore")
 
@@ -91,6 +92,16 @@ local function equipGearWithTypeRule(player, gearName)
 end
 
 Remote.OnServerEvent:Connect(function(player, gearName)
+	-- Security: guard client-selected gear names before spending currency or changing equipment.
+	if not RemoteGuard.Check(player, "GearStore", { gearName }, {
+		Cooldown = 0.15,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return
+	end
+
 	if typeof(gearName) ~= "string" then
 		return
 	end

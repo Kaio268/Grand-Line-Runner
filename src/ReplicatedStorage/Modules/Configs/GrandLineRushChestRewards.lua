@@ -12,7 +12,10 @@ local ChestRewards = {
 		"Wooden",
 		"Iron",
 		"Gold",
-		"Legendary",
+	},
+
+	DeprecatedStandardTierAliases = {
+		Legendary = "Gold",
 	},
 
 	FruitRarityOrder = {
@@ -33,8 +36,8 @@ local ChestRewards = {
 
 	DevilFruitChestBaseTierByRarity = {
 		Rare = "Gold",
-		Legendary = "Legendary",
-		Mythic = "Legendary",
+		Legendary = "Gold",
+		Mythic = "Gold",
 	},
 
 	DevilFruitChestGrantsBaseRewards = false,

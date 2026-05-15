@@ -48,6 +48,7 @@ local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("C
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
+local SpeedUpgradeLimits = require(ServerScriptService.Modules:WaitForChild("SpeedUpgradeLimits"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -706,6 +707,8 @@ local function processSpeedCommand(player, argumentText)
 		warn(string.format("[DevFruitDevCommands] Invalid /speed amount '%s' from %s", tostring(argumentText), player.Name))
 		return
 	end
+
+	targetSpeed = SpeedUpgradeLimits.SanitizeSpeedValue(targetSpeed)
 
 	local previousSpeed = getDisplayedSpeed(player)
 	local success = DataManager:SetValue(player, SPEED_STAT_PATH, targetSpeed)
@@ -5562,8 +5565,8 @@ registerChestAlias("wood", "Wooden")
 registerChestAlias("wooden", "Wooden")
 registerChestAlias("iron", "Iron")
 registerChestAlias("gold", "Gold")
-registerChestAlias("legend", "Legendary")
-registerChestAlias("legendary", "Legendary")
+registerChestAlias("legend", "Gold")
+registerChestAlias("legendary", "Gold")
 
 local function processChestCommand(player, argumentText)
 	if not isAuthorized(player) then

@@ -9,6 +9,7 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local QuestService = {}
 
@@ -25,6 +26,10 @@ local stateRemote
 local claimLocks = {}
 local progressLocks = {}
 local cachedChestToolService
+local REQUEST_ACTION_ALLOWLIST = {
+	GetState = true,
+	ClaimQuest = true,
+}
 
 local MATERIAL_ALIASES = {
 	CommonShipMaterial = "Timber",
@@ -878,6 +883,19 @@ local function recordObjective(player, eventData)
 end
 
 local function handleRequest(player, actionName, payload)
+	-- Security: quest progress is server-owned; guard only permits known actions and sane payload shapes.
+	if not RemoteGuard.Check(player, "GrandLineRushQuestRequest", { actionName, payload }, {
+		Cooldown = 0.1,
+		ActionIndex = 1,
+		ActionAllowlist = REQUEST_ACTION_ALLOWLIST,
+		Args = {
+			{ Type = "string", MaxLength = 40 },
+			{ Type = "table", AllowNil = true },
+		},
+	}) then
+		return makeResponse(player, false, "Invalid quest request.", "remote_guard_rejected")
+	end
+
 	if actionName == "GetState" then
 		return makeResponse(player, true, nil, nil)
 	elseif actionName == "ClaimQuest" then

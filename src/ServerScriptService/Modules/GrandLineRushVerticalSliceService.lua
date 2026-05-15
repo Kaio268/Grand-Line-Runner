@@ -18,6 +18,7 @@ local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("Gr
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 
 local Service = {}
 
@@ -28,11 +29,17 @@ local stateChangedEvent = Instance.new("BindableEvent")
 local started = false
 local runtimeByPlayer = {}
 local deathConnections = {}
+local REQUEST_ACTION_ALLOWLIST = {
+	GetState = true,
+	OpenChest = true,
+	DropCarriedReward = true,
+	FeedCrew = true,
+}
 local CHEST_DEBUG = false
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("VerticalSliceDebugTrace") == true
 
 local CARRY_TOOL_NAME = "GrandLineRushMajorReward"
-local CHEST_TIER_ORDER = { "Wooden", "Iron", "Gold", "Legendary" }
+local CHEST_TIER_ORDER = ChestRewards.StandardTierOrder
 local FORCED_DROP_PROTECTION_ATTRIBUTE = "GrandLineRushCarryDropProtectedUntil"
 local FORCED_DROP_PROTECTION_DURATION = 0.9
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
@@ -1723,6 +1730,19 @@ local function feedCrew(player, crewInstanceId, foodKey)
 end
 
 local function handleRequest(player, actionName, payload)
+	-- Security: shared guard rejects malformed/spammed action calls before run/chest state can mutate.
+	if not RemoteGuard.Check(player, "GrandLineRushSliceRequest", { actionName, payload }, {
+		Cooldown = 0.05,
+		ActionIndex = 1,
+		ActionAllowlist = REQUEST_ACTION_ALLOWLIST,
+		Args = {
+			{ Type = "string", MaxLength = 40 },
+			{ Type = "table", AllowNil = true },
+		},
+	}) then
+		return resolveActionResponse(player, false, nil, "remote_guard_rejected")
+	end
+
 	if typeof(actionName) ~= "string" then
 		return resolveActionResponse(player, false, nil, "invalid_action")
 	end
@@ -1907,8 +1927,8 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
 	end
 
-	local normalizedTier = tostring(tierName or "")
-	if Economy.Chests.Tiers[normalizedTier] == nil then
+	local normalizedTier = ChestUtils.ResolveStandardTier(tierName)
+	if normalizedTier == nil or Economy.Chests.Tiers[normalizedTier] == nil then
 		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
 	end
 

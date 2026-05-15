@@ -3,8 +3,19 @@ local DataManager = {}
 DataManager.__index = DataManager
 local self = setmetatable({}, DataManager)
 
+local RunService = game:GetService("RunService")
+
 --// Other 
-local Key: string = script:GetAttribute("Data_Key") or "DefaultKey_123"
+local keyAttribute = script:GetAttribute("Data_Key")
+local Key: string
+if typeof(keyAttribute) == "string" and keyAttribute ~= "" and keyAttribute ~= "DefaultKey_123" then
+	Key = keyAttribute
+elseif RunService:IsStudio() then
+	warn("[DataManager]: Data_Key attribute is missing or default; Studio is using an isolated fallback key. Set Data_Key before publishing.")
+	Key = "StudioMissingDataKey"
+else
+	error("[DataManager]: Data_Key attribute must be set to a non-default value outside Studio.")
+end
 if script:GetAttribute("Custom_Studio_Data") then
 	Key = "S__"..Key..tostring(script:GetAttribute("Studio_Version"))
 end
@@ -72,7 +83,6 @@ end)()
 local Players = game:GetService("Players")
 local MarketPlaceService = game:GetService("MarketplaceService")
 local HttpService = game:GetService("HttpService")
-local RunService = game:GetService(`RunService`)
 --// Variables
 local CLASS_NAMES = {["string"] = "StringValue", ["number"] = "NumberValue", ["boolean"] = "BoolValue"}
 local PURCHASE_ID_CACHE_SIZE = 100
@@ -1989,11 +1999,11 @@ function DataManager:Version()
 end
 
 function CheckVersion()
-	if RunService:IsStudio() then
+	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
+	-- Security: external version polling is diagnostic-only and must not run in production servers.
+	if not RunService:IsStudio() then
 		return
 	end
-
-	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
 
 	local AllVersions = GetVersion()
 	if typeof(AllVersions) == "table" then

@@ -585,10 +585,10 @@ local COMMANDS = {
 		marker = "CH",
 		name = "Grant Chest",
 		syntax = "/chest <tier> [amount]",
-		description = "Grant chest tools. Known aliases include wood, wooden, iron, gold, legend, legendary, plus configured tier names.",
-		example = "/chest legendary 2",
+		description = "Grant standard extraction chest tools. Known tiers are wood, wooden, iron, and gold.",
+		example = "/chest gold 2",
 		inputs = {
-			{ key = "tier", label = "Chest tier", placeholder = "wood, iron, gold, legendary" },
+			{ key = "tier", label = "Chest tier", placeholder = "wood, iron, gold" },
 			{ key = "amount", label = "Amount", placeholder = "1", default = "1" },
 		},
 		build = function(values)

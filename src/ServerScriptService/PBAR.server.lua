@@ -1,5 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -62,6 +64,16 @@ local function sendToPlayer(plr)
 end
 
 ProgressBarSync.OnServerEvent:Connect(function(plr, action)
+	-- Security: this is visual-only, but still rate limit client sync requests.
+	if not RemoteGuard.Check(plr, "ProgressBarSync", { action }, {
+		Cooldown = 0.25,
+		Args = {
+			{ Type = "string", MaxLength = 32, Allowlist = { Request = true } },
+		},
+	}) then
+		return
+	end
+
 	if action == "Request" then
 		diagnostics.RequestCount += 1
 		sendToPlayer(plr)

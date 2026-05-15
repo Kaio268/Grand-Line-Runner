@@ -34,6 +34,10 @@ local function normalizeRewardProfile(rewardProfile)
 	return ChestRewards.DefaultRewardProfile
 end
 
+local function getTopStandardTier()
+	return ChestRewards.StandardTierOrder[#ChestRewards.StandardTierOrder] or ChestRewards.StandardTierOrder[1] or "Wooden"
+end
+
 function ChestUtils.NormalizeChestKind(chestKind)
 	if tostring(chestKind) == ChestRewards.ChestKinds.DevilFruit then
 		return ChestRewards.ChestKinds.DevilFruit
@@ -43,12 +47,21 @@ function ChestUtils.NormalizeChestKind(chestKind)
 end
 
 function ChestUtils.NormalizeTier(tierName)
+	return ChestUtils.ResolveStandardTier(tierName) or ChestRewards.StandardTierOrder[1]
+end
+
+function ChestUtils.ResolveStandardTier(tierName)
 	local candidate = tostring(tierName or "")
 	if STANDARD_TIER_SET[candidate] then
 		return candidate
 	end
 
-	return ChestRewards.StandardTierOrder[1]
+	local aliasedTier = (ChestRewards.DeprecatedStandardTierAliases or {})[candidate]
+	if aliasedTier ~= nil and STANDARD_TIER_SET[aliasedTier] then
+		return aliasedTier
+	end
+
+	return nil
 end
 
 function ChestUtils.NormalizeFruitRarity(rarityName)
@@ -64,11 +77,10 @@ function ChestUtils.GetDefaultTierForDevilFruitChest(fruitRarity)
 	local normalizedRarity = ChestUtils.NormalizeFruitRarity(fruitRarity)
 	if normalizedRarity then
 		return ChestRewards.DevilFruitChestBaseTierByRarity[normalizedRarity]
-			or ChestRewards.DevilFruitChestBaseTierByRarity.Legendary
-			or "Legendary"
+			or getTopStandardTier()
 	end
 
-	return "Legendary"
+	return getTopStandardTier()
 end
 
 function ChestUtils.BuildChestData(options)

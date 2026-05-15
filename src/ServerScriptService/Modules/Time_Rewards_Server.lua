@@ -142,6 +142,7 @@ local DataManager = require(script.Parent.Parent.Data.DataManager)
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local RandomCrewReward = require(TimeRewardsFolder:WaitForChild("RandomCrewReward"))
+local RemoteGuard = require(script.Parent:WaitForChild("RemoteGuard"))
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
 local CYCLE_START_PATH = TIME_REWARDS_ROOT_PATH .. ".CycleStartPlayTime"
@@ -1027,6 +1028,16 @@ giftClaimLog(
 )
 
 SnapshotRequest.OnServerInvoke = function(player)
+	-- Security: snapshot data is read-only, but RemoteFunction spam can still pressure the server.
+	if not RemoteGuard.Check(player, "TimeRewardSnapshotRequest", {}, {
+		Cooldown = 0.5,
+	}) then
+		return {
+			ok = false,
+			error = "remote_guard_rejected",
+		}
+	end
+
 	local ok, response = pcall(buildSnapshotResponse, player)
 	if ok and typeof(response) == "table" then
 		return response

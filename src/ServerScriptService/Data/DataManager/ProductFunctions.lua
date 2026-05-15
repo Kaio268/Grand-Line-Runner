@@ -5,6 +5,7 @@ local Types = require(ReplicatedStorage.Modules.Types)
 local CrewInstanceService = require(script.Parent.Parent.Parent.Modules.CrewInstanceService)
 local CrewQuickSlotService = require(script.Parent.Parent.Parent.Modules.CrewQuickSlotService)
 local CrewStandIncomeAuthority = require(script.Parent.Parent.Parent.Modules.CrewStandIncomeAuthority)
+local SpeedUpgradeLimits = require(script.Parent.Parent.Parent.Modules.SpeedUpgradeLimits)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -257,18 +258,15 @@ local handlers = {
 	end,
 
 	[3516522193] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		DataManager:AddValue(player, "HiddenLeaderstats.Speed", 1)
-		DataManager:AddValue(player, "TotalStats.TotalSpeed", 1)
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, 1)
 	end,
 
 	[3516522992] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		DataManager:AddValue(player, "HiddenLeaderstats.Speed", 5)
-		DataManager:AddValue(player, "TotalStats.TotalSpeed", 5)
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, 5)
 	end,
 
 	[3516522609] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		DataManager:AddValue(player, "HiddenLeaderstats.Speed", 10)
-		DataManager:AddValue(player, "TotalStats.TotalSpeed", 10)
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, 10)
 	end,
 
 	[3516539588] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)

@@ -9472,8 +9472,7 @@ return Gears
 		ChestBountyByTier = {
 			Wooden = 250,
 			Iron = 650,
-			Gold = 1600,
-			Legendary = 4200,
+			Gold = 4200,
 		},
 		CrewBountyByRarity = {
 			Common = 180,
@@ -9514,7 +9513,10 @@ local ChestRewards = {
 		"Wooden",
 		"Iron",
 		"Gold",
-		"Legendary",
+	},
+
+	DeprecatedStandardTierAliases = {
+		Legendary = "Gold",
 	},
 
 	FruitRarityOrder = {
@@ -9535,8 +9537,8 @@ local ChestRewards = {
 
 	DevilFruitChestBaseTierByRarity = {
 		Rare = "Gold",
-		Legendary = "Legendary",
-		Mythic = "Legendary",
+		Legendary = "Gold",
+		Mythic = "Gold",
 	},
 
 	DevilFruitChestGrantsBaseRewards = false,
@@ -9821,58 +9823,78 @@ return CrewCatalog
 		Tiers = {
 			Wooden = {
 				DepthBand = "Early",
-				AverageFoodXP = 35,
+				AverageFoodXP = 53,
 				Rewards = {
 					Food = {
-						Apple = 4,
-						Rice = 1,
+						Apple = { Min = 3, Max = 6 },
+						Rice = { Min = 1, Max = 3 },
 					},
-					Doubloons = 15,
+					Doubloons = { Min = 250, Max = 600 },
+					FruitConversionDoubloons = 15,
 					Materials = {
-						CommonShipMaterial = 1,
+						Timber = { Min = 12, Max = 20 },
+					},
+					BonusRoll = {
+						Chance = 0.25,
+						Rolls = 1,
+						Pool = {
+							{ Materials = { Iron = 1 } },
+							{ Food = { Apple = 3 } },
+							{ Food = { Rice = 2 } },
+							{ Doubloons = 300 },
+						},
 					},
 				},
 			},
 			Iron = {
 				DepthBand = "EarlyMid",
-				AverageFoodXP = 60,
+				AverageFoodXP = 135,
 				Rewards = {
 					Food = {
-						Apple = 6,
-						Rice = 2,
+						Rice = { Min = 3, Max = 5 },
+						Meat = { Min = 1, Max = 2 },
 					},
-					Doubloons = 30,
+					Doubloons = { Min = 1000, Max = 2500 },
+					FruitConversionDoubloons = 30,
 					Materials = {
-						CommonShipMaterial = 2,
+						Timber = { Min = 35, Max = 55 },
+						Iron = { Min = 4, Max = 8 },
+					},
+					BonusRoll = {
+						Chance = 0.35,
+						Rolls = 1,
+						Pool = {
+							{ Materials = { Iron = 3 } },
+							{ Materials = { AncientTimber = 1 } },
+							{ Food = { Meat = 2 } },
+							{ Doubloons = 1500 },
+						},
 					},
 				},
 			},
 			Gold = {
-				DepthBand = "MidDeep",
-				AverageFoodXP = 130,
-				Rewards = {
-					Food = {
-						Rice = 2,
-						Meat = 2,
-					},
-					Doubloons = 60,
-					Materials = {
-						RareShipMaterial = 1,
-						CommonShipMaterial = 1,
-					},
-				},
-			},
-			Legendary = {
 				DepthBand = "Deep",
-				AverageFoodXP = 275,
+				AverageFoodXP = 463,
 				Rewards = {
 					Food = {
-						Meat = 2,
-						SeaBeastMeat = 1,
+						Meat = { Min = 3, Max = 5 },
+						SeaBeastMeat = { Min = 1, Max = 2 },
 					},
-					Doubloons = 120,
+					Doubloons = { Min = 4000, Max = 8000 },
+					FruitConversionDoubloons = 120,
 					Materials = {
-						RareShipMaterial = 2,
+						Timber = { Min = 80, Max = 140 },
+						Iron = { Min = 12, Max = 20 },
+						AncientTimber = { Min = 1, Max = 3 },
+					},
+					BonusRoll = {
+						Chance = 0.50,
+						Rolls = 1,
+						Pool = {
+							{ Materials = { AncientTimber = 2 } },
+							{ Food = { SeaBeastMeat = 2 } },
+							{ Doubloons = 5000 },
+						},
 					},
 					DevilFruitChance = 0.10,
 				},
@@ -9884,25 +9906,21 @@ return CrewCatalog
 				Wooden = 60,
 				Iron = 30,
 				Gold = 10,
-				Legendary = 0,
 			},
 			Mid = {
 				Wooden = 25,
 				Iron = 45,
-				Gold = 25,
-				Legendary = 5,
+				Gold = 30,
 			},
 			Strong = {
 				Wooden = 10,
 				Iron = 30,
-				Gold = 40,
-				Legendary = 20,
+				Gold = 60,
 			},
 			Elite = {
 				Wooden = 5,
 				Iron = 15,
-				Gold = 35,
-				Legendary = 45,
+				Gold = 80,
 			},
 		},
 	},
@@ -47224,6 +47242,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local Brainrots = CrewCatalog.GetLegacyConfig()
+local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local BountyConfig = require(Configs:WaitForChild("GrandLineRushBounty"))
 
 local Resolver = {}
@@ -47323,7 +47342,12 @@ function Resolver.ResolveExtractionBountyForReward(rewardData)
 
 	local rewardType = tostring(rewardData.RewardType or "")
 	if rewardType == "Chest" then
-		return math.max(0, round(BountyConfig.Extraction.ChestBountyByTier[tostring(rewardData.Tier or "")] or 0))
+		local tierName = ChestUtils.ResolveStandardTier(rewardData.Tier)
+		if tierName == nil then
+			return 0
+		end
+
+		return math.max(0, round(BountyConfig.Extraction.ChestBountyByTier[tierName] or 0))
 	end
 
 	if rewardType == "Crew" then
@@ -47620,6 +47644,10 @@ local function normalizeRewardProfile(rewardProfile)
 	return ChestRewards.DefaultRewardProfile
 end
 
+local function getTopStandardTier()
+	return ChestRewards.StandardTierOrder[#ChestRewards.StandardTierOrder] or ChestRewards.StandardTierOrder[1] or "Wooden"
+end
+
 function ChestUtils.NormalizeChestKind(chestKind)
 	if tostring(chestKind) == ChestRewards.ChestKinds.DevilFruit then
 		return ChestRewards.ChestKinds.DevilFruit
@@ -47629,12 +47657,21 @@ function ChestUtils.NormalizeChestKind(chestKind)
 end
 
 function ChestUtils.NormalizeTier(tierName)
+	return ChestUtils.ResolveStandardTier(tierName) or ChestRewards.StandardTierOrder[1]
+end
+
+function ChestUtils.ResolveStandardTier(tierName)
 	local candidate = tostring(tierName or "")
 	if STANDARD_TIER_SET[candidate] then
 		return candidate
 	end
 
-	return ChestRewards.StandardTierOrder[1]
+	local aliasedTier = (ChestRewards.DeprecatedStandardTierAliases or {})[candidate]
+	if aliasedTier ~= nil and STANDARD_TIER_SET[aliasedTier] then
+		return aliasedTier
+	end
+
+	return nil
 end
 
 function ChestUtils.NormalizeFruitRarity(rarityName)
@@ -47650,11 +47687,10 @@ function ChestUtils.GetDefaultTierForDevilFruitChest(fruitRarity)
 	local normalizedRarity = ChestUtils.NormalizeFruitRarity(fruitRarity)
 	if normalizedRarity then
 		return ChestRewards.DevilFruitChestBaseTierByRarity[normalizedRarity]
-			or ChestRewards.DevilFruitChestBaseTierByRarity.Legendary
-			or "Legendary"
+			or getTopStandardTier()
 	end
 
-	return "Legendary"
+	return getTopStandardTier()
 end
 
 function ChestUtils.BuildChestData(options)
@@ -47854,10 +47890,6 @@ function ChestVisuals.GetTierColors(tierName)
 
 	if styleName == "Rare Devil Fruit" then
 		return Color3.fromRGB(82, 74, 45), Color3.fromRGB(96, 176, 255)
-	end
-
-	if styleName == "Legendary" then
-		return Color3.fromRGB(143, 90, 28), Color3.fromRGB(228, 180, 74)
 	end
 
 	if styleName == "Gold" then
@@ -120801,6 +120833,7 @@ local HttpService = game:GetService("HttpService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local EventController = require(ServerScriptService:WaitForChild("EventController"))
 local AdminPermissions = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminPermissions"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local function getOrCreateRemote(name, className)
 	className = className or "RemoteEvent"
@@ -120836,8 +120869,22 @@ local seenAnn = {}
 local seenLuck = {}
 local seenMain = {}
 
+local MAIN_EVENT_ALLOWLIST = {
+	none = "none",
+	comet = "Comet",
+	luckyblock = "LuckyBlock",
+	luckyblocks = "LuckyBlock",
+}
+
+local function getAllowedMainEventName(eventName)
+	local trimmed = tostring(eventName or ""):gsub("\r", ""):gsub("\n", " ")
+	trimmed = trimmed:match("^%s*(.-)%s*$") or ""
+	local key = string.lower(trimmed):gsub("%s+", "")
+	return MAIN_EVENT_ALLOWLIST[key]
+end
+
 local function isCometEvent(name: string)
-	return string.lower(tostring(name or "")) == "comet"
+	return getAllowedMainEventName(name) == "Comet"
 end
 
 adminStatusFunction.OnServerInvoke = function(player)
@@ -120946,6 +120993,17 @@ local function formatDuration(seconds)
 end
 
 requestEvent.OnServerEvent:Connect(function(player, message, duration)
+	-- Security: admin remotes still require admin status, but RemoteGuard rejects malformed or spammed payloads first.
+	if not RemoteGuard.Check(player, "AdminAnnouncementRequest", { message, duration }, {
+		Cooldown = 1,
+		Args = {
+			{ Type = "string", MaxLength = 240 },
+			{ Type = "finiteNumber", AllowNil = true, Min = 1, Max = 86400 },
+		},
+	}) then
+		return
+	end
+
 	AdminPermissions.LogCommandAttempt(player, "announcement", "remote", string.format("duration=%s", tostring(duration)))
 	if not AdminPermissions.IsAdmin(player) then
 		AdminPermissions.LogCommandRejected(player, "announcement", "remote")
@@ -120996,6 +121054,17 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 end)
 
 luckRequestEvent.OnServerEvent:Connect(function(player, luckValue, timeSeconds)
+	-- Security: reject invalid numbers before mutating server-wide luck state.
+	if not RemoteGuard.Check(player, "AdminLuckRequest", { luckValue, timeSeconds }, {
+		Cooldown = 1,
+		Args = {
+			{ Type = "finiteNumber", Min = 1, Max = 256 },
+			{ Type = "finiteNumber", Min = 1, Max = 86400 },
+		},
+	}) then
+		return
+	end
+
 	AdminPermissions.LogCommandAttempt(player, "serverLuck", "remote", string.format(
 		"luckValue=%s timeSeconds=%s",
 		tostring(luckValue),
@@ -121071,6 +121140,17 @@ end)
 local CometMerchant = require(script.Parent.Modules.CometMerchant)
 
 mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeconds)
+	-- Security: only known event names can reach EventController or cross-server MessagingService.
+	if not RemoteGuard.Check(player, "AdminMainEventRequest", { eventName, timeSeconds }, {
+		Cooldown = 1,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+			{ Type = "finiteNumber", Min = 1, Max = 86400 },
+		},
+	}) then
+		return
+	end
+
 	AdminPermissions.LogCommandAttempt(player, "mainEvent", "remote", string.format(
 		"eventName=%s timeSeconds=%s",
 		tostring(eventName),
@@ -121092,6 +121172,12 @@ mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeco
 		return
 	end
 	eventName = eventName:sub(1, 60)
+	local allowedEventName = getAllowedMainEventName(eventName)
+	if not allowedEventName then
+		AdminPermissions.LogCommandRejected(player, "mainEvent", "remote", "reason=event_not_allowlisted")
+		return
+	end
+	eventName = allowedEventName
 
 	local seconds = tonumber(timeSeconds)
 	if not seconds then
@@ -121189,9 +121275,9 @@ local function onMainEventMessage(msg)
 	if seenMain[id] then return end
 	markSeen(seenMain, id)
 
-	local eventName = tostring(data.eventName or "")
+	local eventName = getAllowedMainEventName(data.eventName)
 	local seconds = tonumber(data.seconds)
-	if eventName == "" then return end
+	if eventName == nil then return end
 	if not seconds then return end
 	seconds = math.floor(seconds)
 	seconds = math.clamp(seconds, 1, 86400)
@@ -121455,8 +121541,19 @@ local DataManager = {}
 DataManager.__index = DataManager
 local self = setmetatable({}, DataManager)
 
+local RunService = game:GetService("RunService")
+
 --// Other 
-local Key: string = script:GetAttribute("Data_Key") or "DefaultKey_123"
+local keyAttribute = script:GetAttribute("Data_Key")
+local Key: string
+if typeof(keyAttribute) == "string" and keyAttribute ~= "" and keyAttribute ~= "DefaultKey_123" then
+	Key = keyAttribute
+elseif RunService:IsStudio() then
+	warn("[DataManager]: Data_Key attribute is missing or default; Studio is using an isolated fallback key. Set Data_Key before publishing.")
+	Key = "StudioMissingDataKey"
+else
+	error("[DataManager]: Data_Key attribute must be set to a non-default value outside Studio.")
+end
 if script:GetAttribute("Custom_Studio_Data") then
 	Key = "S__"..Key..tostring(script:GetAttribute("Studio_Version"))
 end
@@ -121524,7 +121621,6 @@ end)()
 local Players = game:GetService("Players")
 local MarketPlaceService = game:GetService("MarketplaceService")
 local HttpService = game:GetService("HttpService")
-local RunService = game:GetService(`RunService`)
 --// Variables
 local CLASS_NAMES = {["string"] = "StringValue", ["number"] = "NumberValue", ["boolean"] = "BoolValue"}
 local PURCHASE_ID_CACHE_SIZE = 100
@@ -123441,11 +123537,11 @@ function DataManager:Version()
 end
 
 function CheckVersion()
-	if RunService:IsStudio() then
+	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
+	-- Security: external version polling is diagnostic-only and must not run in production servers.
+	if not RunService:IsStudio() then
 		return
 	end
-
-	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
 
 	local AllVersions = GetVersion()
 	if typeof(AllVersions) == "table" then
@@ -123639,6 +123735,7 @@ local Types = require(ReplicatedStorage.Modules.Types)
 local CrewInstanceService = require(script.Parent.Parent.Parent.Modules.CrewInstanceService)
 local CrewQuickSlotService = require(script.Parent.Parent.Parent.Modules.CrewQuickSlotService)
 local CrewStandIncomeAuthority = require(script.Parent.Parent.Parent.Modules.CrewStandIncomeAuthority)
+local SpeedUpgradeLimits = require(script.Parent.Parent.Parent.Modules.SpeedUpgradeLimits)
 local GearConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -123891,18 +123988,15 @@ local handlers = {
 	end,
 
 	[3516522193] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		DataManager:AddValue(player, "HiddenLeaderstats.Speed", 1)
-		DataManager:AddValue(player, "TotalStats.TotalSpeed", 1)
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, 1)
 	end,
 
 	[3516522992] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		DataManager:AddValue(player, "HiddenLeaderstats.Speed", 5)
-		DataManager:AddValue(player, "TotalStats.TotalSpeed", 5)
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, 5)
 	end,
 
 	[3516522609] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
-		DataManager:AddValue(player, "HiddenLeaderstats.Speed", 10)
-		DataManager:AddValue(player, "TotalStats.TotalSpeed", 10)
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, 10)
 	end,
 
 	[3516539588] = function(_receiptInfo, player, _profile, DataManager: Types.DataManager)
@@ -130398,9 +130492,11 @@ return AffectableRegistry
           <string name="Name">CometMerchant</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
 local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CometMerchant"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local PurchaseEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CometMerchantPurchase")
 
@@ -130615,6 +130711,16 @@ local function runReward(player, fullKey, amount)
 end
 
 PurchaseEvent.OnServerEvent:Connect(function(player, fullKeyIncoming)
+	-- Security: merchant purchases spend server currency, so guard the client-selected item key.
+	if not RemoteGuard.Check(player, "CometMerchantPurchase", { fullKeyIncoming }, {
+		Cooldown = 0.2,
+		Args = {
+			{ Type = "string", MaxLength = 128 },
+		},
+	}) then
+		return
+	end
+
 	local incoming = tostring(fullKeyIncoming or "")
 	if incoming == "" then return end
 
@@ -163666,12 +163772,85 @@ local function chooseWeightedKey(randomObject, weightTable, orderedKeys)
 	return orderedKeys[#orderedKeys]
 end
 
-local function cloneShallow(source)
-	local copy = {}
-	for key, value in pairs(source or {}) do
-		copy[key] = value
+local function normalizeMaterialKey(materialKey)
+	local key = tostring(materialKey or "")
+	if key == "CommonShipMaterial" then
+		return "Timber"
+	elseif key == "RareShipMaterial" then
+		return "Iron"
 	end
-	return copy
+
+	return key
+end
+
+local function clampRewardAmount(value)
+	return math.max(0, math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function getStaticRewardAmount(amountSpec)
+	if typeof(amountSpec) == "number" then
+		return clampRewardAmount(amountSpec)
+	end
+
+	if typeof(amountSpec) ~= "table" then
+		return 0
+	end
+
+	if amountSpec.Amount ~= nil then
+		return getStaticRewardAmount(amountSpec.Amount)
+	end
+	if amountSpec.Value ~= nil then
+		return getStaticRewardAmount(amountSpec.Value)
+	end
+
+	local minAmount = tonumber(amountSpec.Min or amountSpec.min)
+	local maxAmount = tonumber(amountSpec.Max or amountSpec.max)
+	if minAmount ~= nil and maxAmount ~= nil then
+		return clampRewardAmount(math.min(minAmount, maxAmount))
+	end
+	if minAmount ~= nil then
+		return clampRewardAmount(minAmount)
+	end
+	if maxAmount ~= nil then
+		return clampRewardAmount(maxAmount)
+	end
+
+	return 0
+end
+
+local function rollRewardAmount(randomObject, amountSpec)
+	if typeof(amountSpec) == "number" then
+		return clampRewardAmount(amountSpec)
+	end
+
+	if typeof(amountSpec) ~= "table" then
+		return 0
+	end
+
+	if amountSpec.Amount ~= nil then
+		return rollRewardAmount(randomObject, amountSpec.Amount)
+	end
+	if amountSpec.Value ~= nil then
+		return rollRewardAmount(randomObject, amountSpec.Value)
+	end
+
+	local minAmount = tonumber(amountSpec.Min or amountSpec.min)
+	local maxAmount = tonumber(amountSpec.Max or amountSpec.max)
+	if minAmount == nil and maxAmount == nil then
+		return 0
+	end
+
+	minAmount = clampRewardAmount(minAmount or maxAmount)
+	maxAmount = clampRewardAmount(maxAmount or minAmount)
+	if maxAmount < minAmount then
+		minAmount, maxAmount = maxAmount, minAmount
+	end
+
+	if maxAmount == minAmount then
+		return minAmount
+	end
+
+	return randomObject:NextInteger(minAmount, maxAmount)
 end
 
 local function getTierRewards(tierName)
@@ -163681,7 +163860,7 @@ end
 
 local function getScaledDoubloonReward(tierName)
 	local rewards = getTierRewards(tierName)
-	return math.max(0, tonumber(rewards.Doubloons) or 0)
+	return getStaticRewardAmount(rewards.FruitConversionDoubloons or rewards.Doubloons)
 end
 
 local function shouldGrantBaseRewards(chestData)
@@ -163818,38 +163997,101 @@ local function addDoubloons(dataRoot, amount)
 	return increment
 end
 
-local function grantBaseRewards(dataRoot, chestData, changedRoots)
-	local rewards = getTierRewards(chestData.Tier)
-	local foodRewards = cloneShallow(rewards.Food or {})
-	local materialRewards = cloneShallow(rewards.Materials or {})
+local function addGrantedAmount(target, key, amount)
+	local increment = clampRewardAmount(amount)
+	if increment <= 0 then
+		return 0
+	end
+
+	target[key] = math.max(0, tonumber(target[key]) or 0) + increment
+	return increment
+end
+
+local function grantFoodRewards(randomObject, foodInventory, grantedFood, foodRewards)
+	for foodKey, amountSpec in pairs(foodRewards or {}) do
+		local increment = rollRewardAmount(randomObject, amountSpec)
+		if increment > 0 then
+			foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + increment
+			addGrantedAmount(grantedFood, foodKey, increment)
+		end
+	end
+end
+
+local function grantMaterialRewards(randomObject, materials, grantedMaterials, materialRewards)
+	for materialKey, amountSpec in pairs(materialRewards or {}) do
+		local normalizedMaterialKey = normalizeMaterialKey(materialKey)
+		local increment = rollRewardAmount(randomObject, amountSpec)
+		if increment > 0 then
+			materials[normalizedMaterialKey] = math.max(0, tonumber(materials[normalizedMaterialKey]) or 0) + increment
+			addGrantedAmount(grantedMaterials, normalizedMaterialKey, increment)
+		end
+	end
+end
+
+local function grantRewardBundle(randomObject, dataRoot, grantedResources, rewardBundle)
+	rewardBundle = if typeof(rewardBundle) == "table" then rewardBundle else {}
+
 	local foodInventory = ensureFoodInventory(dataRoot)
 	local materials = ensureMaterials(dataRoot)
 
-	for foodKey, amount in pairs(foodRewards) do
-		foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + math.max(0, tonumber(amount) or 0)
-	end
-
-	for materialKey, amount in pairs(materialRewards) do
-		materials[materialKey] = math.max(0, tonumber(materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
-	end
+	grantFoodRewards(randomObject, foodInventory, grantedResources.food, rewardBundle.Food)
+	grantMaterialRewards(randomObject, materials, grantedResources.materials, rewardBundle.Materials)
 
 	materials.Timber = math.max(0, tonumber(materials.Timber) or tonumber(materials.CommonShipMaterial) or 0)
 	materials.Iron = math.max(0, tonumber(materials.Iron) or tonumber(materials.RareShipMaterial) or 0)
 	materials.CommonShipMaterial = materials.Timber
 	materials.RareShipMaterial = materials.Iron
 
-	local doubloonReward = addDoubloons(dataRoot, rewards.Doubloons)
+	local doubloonReward = addDoubloons(dataRoot, rollRewardAmount(randomObject, rewardBundle.Doubloons))
+	grantedResources.doubloons += doubloonReward
+end
+
+local function normalizeChance(rawChance)
+	local chance = tonumber(rawChance) or 0
+	if chance > 1 then
+		chance /= 100
+	end
+
+	return math.clamp(chance, 0, 1)
+end
+
+local function grantBonusRewards(randomObject, dataRoot, grantedResources, bonusRollConfig)
+	if typeof(bonusRollConfig) ~= "table" then
+		return
+	end
+
+	local chance = normalizeChance(bonusRollConfig.Chance)
+	local pool = if typeof(bonusRollConfig.Pool) == "table" then bonusRollConfig.Pool else {}
+	if chance <= 0 or #pool <= 0 then
+		return
+	end
+
+	local rolls = math.max(1, math.floor(tonumber(bonusRollConfig.Rolls) or 1))
+	for _ = 1, rolls do
+		if randomObject:NextNumber() <= chance then
+			local selectedReward = pool[randomObject:NextInteger(1, #pool)]
+			grantRewardBundle(randomObject, dataRoot, grantedResources, selectedReward)
+		end
+	end
+end
+
+local function grantBaseRewards(randomObject, dataRoot, chestData, changedRoots)
+	local rewards = getTierRewards(chestData.Tier)
+	local grantedResources = {
+		food = {},
+		materials = {},
+		doubloons = 0,
+	}
+
+	grantRewardBundle(randomObject, dataRoot, grantedResources, rewards)
+	grantBonusRewards(randomObject, dataRoot, grantedResources, rewards.BonusRoll)
 
 	changedRoots.FoodInventory = true
 	changedRoots.Materials = true
 	changedRoots.Leaderstats = true
 	changedRoots.TotalStats = true
 
-	return {
-		food = foodRewards,
-		materials = materialRewards,
-		doubloons = doubloonReward,
-	}
+	return grantedResources
 end
 
 local function getFruitPoolsByRarity()
@@ -164063,7 +164305,7 @@ function ChestRewardResolver.Resolve(params)
 	})
 
 	if shouldGrantBaseRewards(chestData) then
-		openResult.GrantedResources = grantBaseRewards(params.DataRoot, chestData, changedRoots)
+		openResult.GrantedResources = grantBaseRewards(randomObject, params.DataRoot, chestData, changedRoots)
 	end
 
 	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
@@ -166805,6 +167047,7 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local QuestService = {}
 
@@ -166821,6 +167064,10 @@ local stateRemote
 local claimLocks = {}
 local progressLocks = {}
 local cachedChestToolService
+local REQUEST_ACTION_ALLOWLIST = {
+	GetState = true,
+	ClaimQuest = true,
+}
 
 local MATERIAL_ALIASES = {
 	CommonShipMaterial = "Timber",
@@ -167674,6 +167921,19 @@ local function recordObjective(player, eventData)
 end
 
 local function handleRequest(player, actionName, payload)
+	-- Security: quest progress is server-owned; guard only permits known actions and sane payload shapes.
+	if not RemoteGuard.Check(player, "GrandLineRushQuestRequest", { actionName, payload }, {
+		Cooldown = 0.1,
+		ActionIndex = 1,
+		ActionAllowlist = REQUEST_ACTION_ALLOWLIST,
+		Args = {
+			{ Type = "string", MaxLength = 40 },
+			{ Type = "table", AllowNil = true },
+		},
+	}) then
+		return makeResponse(player, false, "Invalid quest request.", "remote_guard_rejected")
+	end
+
 	if actionName == "GetState" then
 		return makeResponse(player, true, nil, nil)
 	elseif actionName == "ClaimQuest" then
@@ -167774,6 +168034,7 @@ local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("Gr
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 
 local Service = {}
 
@@ -167784,11 +168045,17 @@ local stateChangedEvent = Instance.new("BindableEvent")
 local started = false
 local runtimeByPlayer = {}
 local deathConnections = {}
+local REQUEST_ACTION_ALLOWLIST = {
+	GetState = true,
+	OpenChest = true,
+	DropCarriedReward = true,
+	FeedCrew = true,
+}
 local CHEST_DEBUG = false
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("VerticalSliceDebugTrace") == true
 
 local CARRY_TOOL_NAME = "GrandLineRushMajorReward"
-local CHEST_TIER_ORDER = { "Wooden", "Iron", "Gold", "Legendary" }
+local CHEST_TIER_ORDER = ChestRewards.StandardTierOrder
 local FORCED_DROP_PROTECTION_ATTRIBUTE = "GrandLineRushCarryDropProtectedUntil"
 local FORCED_DROP_PROTECTION_DURATION = 0.9
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
@@ -169479,6 +169746,19 @@ local function feedCrew(player, crewInstanceId, foodKey)
 end
 
 local function handleRequest(player, actionName, payload)
+	-- Security: shared guard rejects malformed/spammed action calls before run/chest state can mutate.
+	if not RemoteGuard.Check(player, "GrandLineRushSliceRequest", { actionName, payload }, {
+		Cooldown = 0.05,
+		ActionIndex = 1,
+		ActionAllowlist = REQUEST_ACTION_ALLOWLIST,
+		Args = {
+			{ Type = "string", MaxLength = 40 },
+			{ Type = "table", AllowNil = true },
+		},
+	}) then
+		return resolveActionResponse(player, false, nil, "remote_guard_rejected")
+	end
+
 	if typeof(actionName) ~= "string" then
 		return resolveActionResponse(player, false, nil, "invalid_action")
 	end
@@ -169663,8 +169943,8 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
 	end
 
-	local normalizedTier = tostring(tierName or "")
-	if Economy.Chests.Tiers[normalizedTier] == nil then
+	local normalizedTier = ChestUtils.ResolveStandardTier(tierName)
+	if normalizedTier == nil or Economy.Chests.Tiers[normalizedTier] == nil then
 		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
 	end
 
@@ -173838,6 +174118,172 @@ return MeleeAttackService
       </Item>
       <Item class="ModuleScript" referent="745">
         <Properties>
+          <string name="Name">RemoteGuard</string>
+          <string name="Source"><![CDATA[local Players = game:GetService("Players")
+
+local RemoteGuard = {}
+
+local DEFAULT_COOLDOWN_SECONDS = 0.1
+local REJECT_LOG_THROTTLE_SECONDS = 5
+local playerStates = setmetatable({}, { __mode = "k" })
+
+local function isFiniteNumber(value)
+	return typeof(value) == "number" and value == value and value > -math.huge and value < math.huge
+end
+
+local function getState(player)
+	local state = playerStates[player]
+	if state == nil then
+		state = {
+			LastCallByRemote = {},
+			RejectLogs = {},
+		}
+		playerStates[player] = state
+	end
+	return state
+end
+
+local function shouldLogReject(player, remoteName, reason)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return true
+	end
+
+	local state = getState(player)
+	state.RejectLogs = state.RejectLogs or {}
+	local key = string.format("%s:%s", tostring(remoteName), tostring(reason))
+	local now = os.clock()
+	local last = state.RejectLogs[key]
+	if typeof(last) == "number" and (now - last) < REJECT_LOG_THROTTLE_SECONDS then
+		return false
+	end
+
+	state.RejectLogs[key] = now
+	return true
+end
+
+local function reject(player, remoteName, reason, detail)
+	if shouldLogReject(player, remoteName, reason) then
+		warn(string.format(
+			"[RemoteGuard] rejected remote=%s player=%s userId=%s reason=%s detail=%s",
+			tostring(remoteName),
+			player and player.Name or "<nil>",
+			player and tostring(player.UserId) or "<nil>",
+			tostring(reason),
+			tostring(detail or "")
+		))
+	end
+	return false, reason
+end
+
+local function validateType(value, expectedType)
+	if expectedType == nil or expectedType == "any" then
+		return true
+	end
+	if expectedType == "finiteNumber" then
+		return isFiniteNumber(value)
+	end
+	return typeof(value) == expectedType
+end
+
+local function validateArg(player, remoteName, index, value, spec)
+	if spec == nil then
+		return true
+	end
+
+	if value == nil and spec.AllowNil == true then
+		return true
+	end
+
+	local expectedType = spec.Type
+	if not validateType(value, expectedType) then
+		return reject(player, remoteName, "bad_type", string.format("arg=%d expected=%s actual=%s", index, tostring(expectedType), typeof(value)))
+	end
+
+	if expectedType == "string" then
+		local maxLength = tonumber(spec.MaxLength)
+		if maxLength and #value > maxLength then
+			return reject(player, remoteName, "string_too_long", string.format("arg=%d max=%d actual=%d", index, maxLength, #value))
+		end
+	end
+
+	if expectedType == "number" or expectedType == "finiteNumber" then
+		if not isFiniteNumber(value) then
+			return reject(player, remoteName, "non_finite_number", string.format("arg=%d", index))
+		end
+		if spec.Integer == true and value ~= math.floor(value) then
+			return reject(player, remoteName, "non_integer_number", string.format("arg=%d value=%s", index, tostring(value)))
+		end
+		local minValue = tonumber(spec.Min)
+		if minValue and value < minValue then
+			return reject(player, remoteName, "number_too_small", string.format("arg=%d min=%s value=%s", index, tostring(minValue), tostring(value)))
+		end
+		local maxValue = tonumber(spec.Max)
+		if maxValue and value > maxValue then
+			return reject(player, remoteName, "number_too_large", string.format("arg=%d max=%s value=%s", index, tostring(maxValue), tostring(value)))
+		end
+	end
+
+	if spec.Allowlist ~= nil and spec.Allowlist[value] ~= true then
+		return reject(player, remoteName, "not_allowlisted", string.format("arg=%d value=%s", index, tostring(value)))
+	end
+
+	return true
+end
+
+function RemoteGuard.Check(player, remoteName, args, options)
+	options = if type(options) == "table" then options else {}
+	args = if type(args) == "table" then args else {}
+	remoteName = tostring(remoteName or "UnknownRemote")
+
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent ~= Players then
+		return reject(player, remoteName, "invalid_player")
+	end
+
+	local cooldown = tonumber(options.Cooldown)
+	if cooldown == nil then
+		cooldown = DEFAULT_COOLDOWN_SECONDS
+	end
+	if cooldown > 0 then
+		local state = getState(player)
+		local now = os.clock()
+		local last = state.LastCallByRemote[remoteName]
+		if typeof(last) == "number" and (now - last) < cooldown then
+			return reject(player, remoteName, "cooldown", string.format("remaining=%.3f", cooldown - (now - last)))
+		end
+		state.LastCallByRemote[remoteName] = now
+	end
+
+	local argSpecs = if type(options.Args) == "table" then options.Args else {}
+	for index, spec in ipairs(argSpecs) do
+		local ok, reason = validateArg(player, remoteName, index, args[index], spec)
+		if not ok then
+			return false, reason
+		end
+	end
+
+	local actionIndex = tonumber(options.ActionIndex)
+	if actionIndex and type(options.ActionAllowlist) == "table" then
+		local action = args[actionIndex]
+		if options.ActionAllowlist[action] ~= true then
+			return reject(player, remoteName, "action_not_allowlisted", string.format("arg=%d action=%s", actionIndex, tostring(action)))
+		end
+	end
+
+	return true, nil
+end
+
+function RemoteGuard.CleanupPlayer(player)
+	playerStates[player] = nil
+end
+
+Players.PlayerRemoving:Connect(RemoteGuard.CleanupPlayer)
+
+return RemoteGuard
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="746">
+        <Properties>
           <string name="Name">ShipResetService</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -173979,7 +174425,7 @@ return Module
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="746">
+      <Item class="ModuleScript" referent="747">
         <Properties>
           <string name="Name">ShipRuntimeSignals</string>
           <string name="Source"><![CDATA[local ServerScriptService = game:GetService("ServerScriptService")
@@ -174033,7 +174479,75 @@ return Module
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="747">
+      <Item class="ModuleScript" referent="748">
+        <Properties>
+          <string name="Name">SpeedUpgradeLimits</string>
+          <string name="Source"><![CDATA[local SpeedUpgradeLimits = {}
+
+local SPEED_PATH = "HiddenLeaderstats.Speed"
+local TOTAL_SPEED_PATH = "TotalStats.TotalSpeed"
+
+local function getRuntimeSpeedValue(player)
+	local hidden = player and player:FindFirstChild("HiddenLeaderstats")
+	local speed = hidden and hidden:FindFirstChild("Speed")
+	if speed and typeof(speed.Value) == "number" then
+		return speed.Value
+	end
+	return nil
+end
+
+function SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player)
+	local runtime = getRuntimeSpeedValue(player)
+	if typeof(runtime) == "number" then
+		return runtime
+	end
+
+	local stored = dataManager:GetValue(player, SPEED_PATH)
+	if typeof(stored) == "number" then
+		return stored
+	end
+
+	return 1
+end
+
+function SpeedUpgradeLimits.SanitizeSpeedValue(speed)
+	local numeric = tonumber(speed)
+	if numeric == nil or numeric ~= numeric or numeric == math.huge or numeric == -math.huge then
+		return 1
+	end
+
+	return math.max(1, numeric)
+end
+
+function SpeedUpgradeLimits.SanitizeSpeedIncrease(requestedIncrease)
+	local requested = tonumber(requestedIncrease)
+	if requested == nil or requested ~= requested or requested == math.huge or requested == -math.huge then
+		return 0
+	end
+
+	return math.max(0, math.floor(requested))
+end
+
+function SpeedUpgradeLimits.ApplySpeedIncrease(dataManager, player, requestedIncrease)
+	local increase = SpeedUpgradeLimits.SanitizeSpeedIncrease(requestedIncrease)
+	if increase <= 0 then
+		return 0, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player)
+	end
+
+	dataManager:AdjustValue(player, TOTAL_SPEED_PATH, increase)
+	local newSpeed = dataManager:AdjustValue(player, SPEED_PATH, increase)
+	if typeof(newSpeed) == "number" then
+		return increase, newSpeed
+	end
+
+	return increase, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player)
+end
+
+return SpeedUpgradeLimits
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="749">
         <Properties>
           <string name="Name">StandsMultiply</string>
           <string name="Source"><![CDATA[return {
@@ -174095,7 +174609,7 @@ return Module
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="748">
+      <Item class="ModuleScript" referent="750">
         <Properties>
           <string name="Name">StandsUpgrades</string>
           <string name="Source">return {
@@ -174152,7 +174666,7 @@ return Module
 }</string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="749">
+      <Item class="ModuleScript" referent="751">
         <Properties>
           <string name="Name">TemporaryRagdollService</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -174426,7 +174940,7 @@ return TemporaryRagdollService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="750">
+      <Item class="ModuleScript" referent="752">
         <Properties>
           <string name="Name">Time_Rewards_Server</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -174573,6 +175087,7 @@ local DataManager = require(script.Parent.Parent.Data.DataManager)
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local RandomCrewReward = require(TimeRewardsFolder:WaitForChild("RandomCrewReward"))
+local RemoteGuard = require(script.Parent:WaitForChild("RemoteGuard"))
 
 local TIME_REWARDS_ROOT_PATH = "TimeRewards"
 local CYCLE_START_PATH = TIME_REWARDS_ROOT_PATH .. ".CycleStartPlayTime"
@@ -175458,6 +175973,16 @@ giftClaimLog(
 )
 
 SnapshotRequest.OnServerInvoke = function(player)
+	-- Security: snapshot data is read-only, but RemoteFunction spam can still pressure the server.
+	if not RemoteGuard.Check(player, "TimeRewardSnapshotRequest", {}, {
+		Cooldown = 0.5,
+	}) then
+		return {
+			ok = false,
+			error = "remote_guard_rejected",
+		}
+	end
+
 	local ok, response = pcall(buildSnapshotResponse, player)
 	if ok and typeof(response) == "table" then
 		return response
@@ -175524,7 +176049,7 @@ return module
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="751">
+      <Item class="ModuleScript" referent="753">
         <Properties>
           <string name="Name">TitleService</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -176093,7 +176618,7 @@ return TitleService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="752">
+      <Item class="ModuleScript" referent="754">
         <Properties>
           <string name="Name">VIPBarrierService</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -176718,7 +177243,7 @@ return VIPBarrierService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="753">
+      <Item class="ModuleScript" referent="755">
         <Properties>
           <string name="Name">VIPTestOverrides</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -176810,7 +177335,7 @@ return VIPTestOverrides
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="754">
+      <Item class="ModuleScript" referent="756">
         <Properties>
           <string name="Name">ValidationChecks</string>
           <string name="Source"><![CDATA[local ReplicatedFirst = game:GetService("ReplicatedFirst")
@@ -176920,7 +177445,7 @@ return ValidationChecks
         </Properties>
       </Item>
     </Item>
-    <Item class="Script" referent="755">
+    <Item class="Script" referent="757">
       <Properties>
         <string name="Name">NametagManager</string>
         <token name="RunContext">0</token>
@@ -177025,15 +177550,15 @@ Players.PlayerAdded:Connect(function(Player)
 end)
 ]]></string>
       </Properties>
-      <Item class="BillboardGui" referent="756">
+      <Item class="BillboardGui" referent="758">
         <Properties>
           <string name="Name">Nametag</string>
         </Properties>
-        <Item class="TextLabel" referent="757">
+        <Item class="TextLabel" referent="759">
           <Properties>
             <string name="Name">Value</string>
           </Properties>
-          <Item class="Script" referent="758">
+          <Item class="Script" referent="760">
             <Properties>
               <string name="Name">Script</string>
               <token name="RunContext">0</token>
@@ -177114,12 +177639,14 @@ setMoneyText(coins.Value)
         </Item>
       </Item>
     </Item>
-    <Item class="Script" referent="759">
+    <Item class="Script" referent="761">
       <Properties>
         <string name="Name">PBAR</string>
         <token name="RunContext">0</token>
         <string name="Source"><![CDATA[local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not remotes then
@@ -177182,6 +177709,16 @@ local function sendToPlayer(plr)
 end
 
 ProgressBarSync.OnServerEvent:Connect(function(plr, action)
+	-- Security: this is visual-only, but still rate limit client sync requests.
+	if not RemoteGuard.Check(plr, "ProgressBarSync", { action }, {
+		Cooldown = 0.25,
+		Args = {
+			{ Type = "string", MaxLength = 32, Allowlist = { Request = true } },
+		},
+	}) then
+		return
+	end
+
 	if action == "Request" then
 		diagnostics.RequestCount += 1
 		sendToPlayer(plr)
@@ -177211,7 +177748,7 @@ broadcastAll()
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="760">
+    <Item class="Script" referent="762">
       <Properties>
         <string name="Name">Script</string>
         <token name="RunContext">0</token>
@@ -177329,11 +177866,11 @@ end
  ]]></string>
       </Properties>
     </Item>
-    <Item class="Folder" referent="761">
+    <Item class="Folder" referent="763">
       <Properties>
         <string name="Name">Server-Scripts</string>
       </Properties>
-      <Item class="Script" referent="762">
+      <Item class="Script" referent="764">
         <Properties>
           <string name="Name">BrainrotQuickSlots</string>
           <token name="RunContext">0</token>
@@ -177344,7 +177881,7 @@ CrewQuickSlotService.Init()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="763">
+      <Item class="Script" referent="765">
         <Properties>
           <string name="Name">BuyPlotUpghrade</string>
           <token name="RunContext">0</token>
@@ -177650,7 +178187,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="764">
+      <Item class="Script" referent="766">
         <Properties>
           <string name="Name">CarriedCrewMemberDebugProbe</string>
           <token name="RunContext">0</token>
@@ -177842,7 +178379,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="765">
+      <Item class="Script" referent="767">
         <Properties>
           <string name="Name">Collision Off</string>
           <token name="RunContext">0</token>
@@ -177854,7 +178391,7 @@ VIPBarrierService.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="766">
+      <Item class="Script" referent="768">
         <Properties>
           <string name="Name">CometEvent</string>
           <token name="RunContext">0</token>
@@ -178618,7 +179155,7 @@ sync()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="767">
+      <Item class="Script" referent="769">
         <Properties>
           <string name="Name">CrewIncome</string>
           <token name="RunContext">0</token>
@@ -178630,7 +179167,7 @@ CrewIncomeRuntime.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="768">
+      <Item class="Script" referent="770">
         <Properties>
           <string name="Name">CrewQuickSlots</string>
           <token name="RunContext">0</token>
@@ -178640,7 +179177,7 @@ CrewQuickSlotService.Init()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="769">
+      <Item class="Script" referent="771">
         <Properties>
           <string name="Name">DevilFruit</string>
           <token name="RunContext">0</token>
@@ -178671,7 +179208,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="770">
+      <Item class="Script" referent="772">
         <Properties>
           <string name="Name">DevilFruitDevCommands</string>
           <token name="RunContext">0</token>
@@ -178725,6 +179262,7 @@ local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("C
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
+local SpeedUpgradeLimits = require(ServerScriptService.Modules:WaitForChild("SpeedUpgradeLimits"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -179383,6 +179921,8 @@ local function processSpeedCommand(player, argumentText)
 		warn(string.format("[DevFruitDevCommands] Invalid /speed amount '%s' from %s", tostring(argumentText), player.Name))
 		return
 	end
+
+	targetSpeed = SpeedUpgradeLimits.SanitizeSpeedValue(targetSpeed)
 
 	local previousSpeed = getDisplayedSpeed(player)
 	local success = DataManager:SetValue(player, SPEED_STAT_PATH, targetSpeed)
@@ -184239,8 +184779,8 @@ registerChestAlias("wood", "Wooden")
 registerChestAlias("wooden", "Wooden")
 registerChestAlias("iron", "Iron")
 registerChestAlias("gold", "Gold")
-registerChestAlias("legend", "Legendary")
-registerChestAlias("legendary", "Legendary")
+registerChestAlias("legend", "Gold")
+registerChestAlias("legendary", "Gold")
 
 local function processChestCommand(player, argumentText)
 	if not isAuthorized(player) then
@@ -185179,7 +185719,7 @@ setupTextChatCommand()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="771">
+      <Item class="Script" referent="773">
         <Properties>
           <string name="Name">DevilFruitMovement</string>
           <token name="RunContext">0</token>
@@ -185350,7 +185890,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="772">
+      <Item class="Script" referent="774">
         <Properties>
           <string name="Name">EquipGear</string>
           <token name="RunContext">0</token>
@@ -185454,7 +185994,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="773">
+      <Item class="Script" referent="775">
         <Properties>
           <string name="Name">FirstTimeTutorial</string>
           <token name="RunContext">0</token>
@@ -185464,14 +186004,16 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="774">
+      <Item class="Script" referent="776">
         <Properties>
           <string name="Name">GROUP</string>
           <token name="RunContext">0</token>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local ddata = require(script.Parent.Parent.Data.DataManager)
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local GROUP_ID = 17179624
 local REMOTE_NAME = "GroupRewardClaim"
 
@@ -185485,6 +186027,13 @@ end
 
 
 remoteEvent.OnServerEvent:Connect(function(player)
+	-- Security: group reward is server-verified with IsInGroup and guarded against spammed claims.
+	if not RemoteGuard.Check(player, "GroupRewardClaim", {}, {
+		Cooldown = 2,
+	}) then
+		return
+	end
+
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return
 	end
@@ -185518,7 +186067,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="775">
+      <Item class="Script" referent="777">
         <Properties>
           <string name="Name">GearShop</string>
           <token name="RunContext">0</token>
@@ -185528,6 +186077,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local Remote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStore")
 
@@ -185615,6 +186165,16 @@ local function equipGearWithTypeRule(player, gearName)
 end
 
 Remote.OnServerEvent:Connect(function(player, gearName)
+	-- Security: guard client-selected gear names before spending currency or changing equipment.
+	if not RemoteGuard.Check(player, "GearStore", { gearName }, {
+		Cooldown = 0.15,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return
+	end
+
 	if typeof(gearName) ~= "string" then
 		return
 	end
@@ -185647,7 +186207,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="776">
+      <Item class="Script" referent="778">
         <Properties>
           <string name="Name">GearShopRobux</string>
           <token name="RunContext">0</token>
@@ -185656,10 +186216,21 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local Gears = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gears"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local RobuxRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStoreRobux")
 
 RobuxRemote.OnServerEvent:Connect(function(player, gearName)
+	-- Security: only valid string gear keys can request a server-owned product prompt.
+	if not RemoteGuard.Check(player, "GearStoreRobux", { gearName }, {
+		Cooldown = 0.5,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return
+	end
+
 	if typeof(gearName) ~= "string" then
 		return
 	end
@@ -185679,7 +186250,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="777">
+      <Item class="Script" referent="779">
         <Properties>
           <string name="Name">GrandLineRushBounty</string>
           <token name="RunContext">0</token>
@@ -185697,7 +186268,7 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="778">
+      <Item class="Script" referent="780">
         <Properties>
           <string name="Name">GrandLineRushChestToolService</string>
           <token name="RunContext">0</token>
@@ -185707,7 +186278,7 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="779">
+      <Item class="Script" referent="781">
         <Properties>
           <string name="Name">GrandLineRushCorridorRunController</string>
           <token name="RunContext">0</token>
@@ -185717,7 +186288,7 @@ controller.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="780">
+      <Item class="Script" referent="782">
         <Properties>
           <string name="Name">GrandLineRushQuests</string>
           <token name="RunContext">0</token>
@@ -185727,7 +186298,7 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="781">
+      <Item class="Script" referent="783">
         <Properties>
           <string name="Name">GrandLineRushVerticalSlice</string>
           <token name="RunContext">0</token>
@@ -185737,7 +186308,7 @@ service.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="782">
+      <Item class="Script" referent="784">
         <Properties>
           <string name="Name">IncomeBrainrots</string>
           <token name="RunContext">0</token>
@@ -185751,7 +186322,7 @@ CrewIncomeRuntime.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="783">
+      <Item class="Script" referent="785">
         <Properties>
           <string name="Name">Index</string>
           <token name="RunContext">0</token>
@@ -186366,7 +186937,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="784">
+      <Item class="Script" referent="786">
         <Properties>
           <string name="Name">LIMITEDREWARD</string>
           <token name="RunContext">0</token>
@@ -186374,22 +186945,41 @@ end)
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService.Data:WaitForChild("DataManager"))
- 
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+
 local rewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
 local PLACE_ID = 129073777843683
+local GROUP_ID = 17179624
 
 local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
 
-rewardRemote.OnServerEvent:Connect(function(player, placeId, hasLike, hasFavorite)
-	if placeId ~= PLACE_ID then
+local function sendClaimStatus(player, status)
+	rewardRemote:FireClient(player, status)
+end
+
+rewardRemote.OnServerEvent:Connect(function(player, placeId)
+	-- Security: never trust client-reported like/favorite state; gate on Roblox's server-verifiable group membership instead.
+	if not RemoteGuard.Check(player, "LimitedRewardClaim", { placeId }, {
+		Cooldown = 2,
+		Args = {
+			{ Type = "finiteNumber", Integer = true },
+		},
+	}) then
 		return
 	end
-	if not hasLike or not hasFavorite then
+
+	if placeId ~= PLACE_ID then
 		return
 	end
 
 	local already = DataManager:GetValue(player, "HiddenLeaderstats.LimitedReward")
 	if already == true then
+		sendClaimStatus(player, "AlreadyClaimed")
+		return
+	end
+
+	if not player:IsInGroup(GROUP_ID) then
+		sendClaimStatus(player, "NotInGroup")
 		return
 	end
 
@@ -186398,25 +186988,29 @@ rewardRemote.OnServerEvent:Connect(function(player, placeId, hasLike, hasFavorit
 		Context = "LimitedReward",
 	})
 	if not ok then
+		sendClaimStatus(player, "Unavailable")
 		return
 	end
 
 	DataManager:AddValue(player, "Potions.x2MoneyTime", 10 * 60)
 	DataManager:AddValue(player, "Potions.x15WalkSpeedTime", 10 * 60)
 	DataManager:SetValue(player, "HiddenLeaderstats.LimitedReward", true)
+	sendClaimStatus(player, "Granted")
 end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="785">
+      <Item class="Script" referent="787">
         <Properties>
           <string name="Name">LUCKYBLOCKEVTEN</string>
           <token name="RunContext">0</token>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local MapResolver = require(ReplicatedStorage.Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 local refs = MapResolver.WaitForRefs(
 	{ "MapRoot", "SpawnFolder" },
@@ -186910,6 +187504,16 @@ local function clearAll()
 end
 
 LuckyBlockHit.OnServerEvent:Connect(function(plr: Player, blockId: string)
+	-- Security: block damage is server validated; guard malformed/spammed hit reports first.
+	if not RemoteGuard.Check(plr, "LuckyBlockHit", { blockId }, {
+		Cooldown = 0.04,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return
+	end
+
 	if type(blockId) ~= "string" then return end
 	local data = blockById[blockId]
 	if not data then return end
@@ -186993,7 +187597,7 @@ sync()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="786">
+      <Item class="Script" referent="788">
         <Properties>
           <string name="Name">ModelToTool</string>
           <token name="RunContext">0</token>
@@ -187473,7 +188077,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="787">
+      <Item class="Script" referent="789">
         <Properties>
           <string name="Name">NoDisasters</string>
           <token name="RunContext">0</token>
@@ -187509,7 +188113,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="788">
+      <Item class="Script" referent="790">
         <Properties>
           <string name="Name">PlayerDeathAttributes</string>
           <token name="RunContext">0</token>
@@ -187559,7 +188163,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="789">
+      <Item class="Script" referent="791">
         <Properties>
           <string name="Name">Plot</string>
           <token name="RunContext">0</token>
@@ -188957,7 +189561,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="790">
+      <Item class="Script" referent="792">
         <Properties>
           <string name="Name">PlotUpgrades</string>
           <token name="RunContext">0</token>
@@ -189301,7 +189905,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="791">
+      <Item class="Script" referent="793">
         <Properties>
           <string name="Name">Rebirth</string>
           <token name="RunContext">0</token>
@@ -189383,7 +189987,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="792">
+      <Item class="Script" referent="794">
         <Properties>
           <string name="Name">ServerLuck</string>
           <token name="RunContext">0</token>
@@ -189417,7 +190021,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="793">
+      <Item class="Script" referent="795">
         <Properties>
           <string name="Name">Service</string>
           <token name="RunContext">0</token>
@@ -189446,12 +190050,13 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="794">
+      <Item class="Script" referent="796">
         <Properties>
           <string name="Name">Settings</string>
           <token name="RunContext">0</token>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Remote = ReplicatedStorage:FindFirstChild("UpdateSetting")
 if not Remote then
@@ -189468,6 +190073,7 @@ local SettingsConfig = require(
 )
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local DEBUG_SETTINGS_SERVER = true
 
 local function debugSettings(message, ...)
@@ -189483,6 +190089,17 @@ local function isValidNumber(n)
 end
 
 Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
+	-- Security: setting path/name must match config before any persisted write can happen.
+	if not RemoteGuard.Check(player, "UpdateSetting", { settingName, settingPath }, {
+		Cooldown = 0.1,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+			{ Type = "string", MaxLength = 160 },
+		},
+	}) then
+		return
+	end
+
 	debugSettings(
 		"received player=%s name=%s path=%s value=%s",
 		player and player.Name or "<nil>",
@@ -189511,8 +190128,12 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 			return
 		end
 		value = math.floor(value + 0.5)
-		if value < 0 then value = 0 end
-		if value > 100 then value = 100 end
+		if value < 0 then
+			value = 0
+		end
+		if value > 100 then
+			value = 100
+		end
 		DataManager:SetValue(player, entry.Path, value)
 		debugSettings("saved slider player=%s path=%s value=%d", player.Name, entry.Path, value)
 	elseif entry.Type == "Switch" then
@@ -189525,11 +190146,11 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 	end
 end)
 
-Players.PlayerRemoving:Connect(function(player) end)
+Players.PlayerRemoving:Connect(function() end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="795">
+      <Item class="Script" referent="797">
         <Properties>
           <string name="Name">SpawnBrainrots</string>
           <token name="RunContext">0</token>
@@ -189543,7 +190164,7 @@ CrewSpawnRuntime.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="796">
+      <Item class="Script" referent="798">
         <Properties>
           <string name="Name">SpawnCrewMembers</string>
           <token name="RunContext">0</token>
@@ -189555,7 +190176,7 @@ CrewSpawnRuntime.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="797">
+      <Item class="Script" referent="799">
         <Properties>
           <string name="Name">SpawnWaves</string>
           <token name="RunContext">0</token>
@@ -190570,7 +191191,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="798">
+      <Item class="Script" referent="800">
         <Properties>
           <string name="Name">SpeedChange</string>
           <token name="RunContext">0</token>
@@ -190975,12 +191596,13 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="799">
+      <Item class="Script" referent="801">
         <Properties>
           <string name="Name">SpeedUpgrade</string>
           <token name="RunContext">0</token>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local SpeedUpgrade = require(
 	ReplicatedStorage:WaitForChild("Modules")
@@ -190990,8 +191612,11 @@ local SpeedUpgrade = require(
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+local SpeedUpgradeLimits = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("SpeedUpgradeLimits"))
 local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local TUTORIAL_SPEED_TOP_UP_GRANTED_PATH = "HiddenLeaderstats.TutorialSpeedTopUpGranted"
+local purchaseLocks = {}
 
 local remote = ReplicatedStorage:FindFirstChild("BuySpeedUpgrade")
 if not remote then
@@ -191000,23 +191625,13 @@ if not remote then
 	remote.Parent = ReplicatedStorage
 end
 
-local function getSpeedValue(player)
-	local hidden = player:FindFirstChild("HiddenLeaderstats")
-	local sp = hidden and hidden:FindFirstChild("Speed")
-	if sp and typeof(sp.Value) == "number" then
-		return sp.Value
-	end
-	local v = DataManager:GetValue(player, "HiddenLeaderstats.Speed")
-	if typeof(v) == "number" then
-		return v
-	end
-	return 1
-end
-
-local function computeCost(cfg, speedVal)
+local function computeCost(cfg, speedVal, stepCount)
 	local starter = cfg.Starter_Price or 0
 	local mult = cfg.Price_Mult or 1
 	local addSpeed = cfg.AddSpeed or 1
+	if typeof(stepCount) == "number" then
+		addSpeed = stepCount
+	end
 
 	local s = tonumber(speedVal) or 1
 	if s < 1 then
@@ -191080,7 +191695,7 @@ local function applyTutorialSpeedRecovery(player, upgradeIndex, moneyPath, money
 	return true, shortfall
 end
 
-remote.OnServerEvent:Connect(function(player, upgradeName)
+local function handleSpeedUpgrade(player, upgradeName)
 	if typeof(upgradeName) ~= "string" then
 		return
 	end
@@ -191099,8 +191714,12 @@ remote.OnServerEvent:Connect(function(player, upgradeName)
 		return
 	end
 
-	local speedVal = getSpeedValue(player)
-	local cost = computeCost(cfg, speedVal)
+	local speedVal = SpeedUpgradeLimits.GetCurrentSpeed(DataManager, player)
+	local effectiveAddSpeed = SpeedUpgradeLimits.SanitizeSpeedIncrease(addSpeed)
+	if effectiveAddSpeed <= 0 then
+		return
+	end
+	local cost = computeCost(cfg, speedVal, effectiveAddSpeed)
 
 	local moneyPath = CurrencyUtil.getPrimaryPath()
 	local money = DataManager:GetValue(player, moneyPath)
@@ -191131,14 +191750,39 @@ remote.OnServerEvent:Connect(function(player, upgradeName)
 		end
 		return
 	end
-	DataManager:AdjustValue(player, "TotalStats.TotalSpeed", addSpeed)
-	DataManager:AdjustValue(player, "HiddenLeaderstats.Speed", addSpeed)
+	SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, effectiveAddSpeed)
+end
 
+remote.OnServerEvent:Connect(function(player, upgradeName)
+	-- Security: shared guard and local lock stop malformed/spammed upgrade requests before currency mutation.
+	if not RemoteGuard.Check(player, "BuySpeedUpgrade", { upgradeName }, {
+		Cooldown = 0.2,
+		Args = {
+			{ Type = "string", MaxLength = 8 },
+		},
+	}) then
+		return
+	end
+
+	if purchaseLocks[player] then
+		return
+	end
+	purchaseLocks[player] = true
+
+	local ok, err = pcall(handleSpeedUpgrade, player, upgradeName)
+	purchaseLocks[player] = nil
+	if not ok then
+		warn(string.format("[BuySpeedUpgrade] failed player=%s error=%s", player.Name, tostring(err)))
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	purchaseLocks[player] = nil
 end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="800">
+      <Item class="Script" referent="802">
         <Properties>
           <string name="Name">StandsUpgrades</string>
           <token name="RunContext">0</token>
@@ -191541,7 +192185,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="801">
+      <Item class="Script" referent="803">
         <Properties>
           <string name="Name">TimeRewardsBootstrap</string>
           <token name="RunContext">0</token>
@@ -191572,7 +192216,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="802">
+      <Item class="Script" referent="804">
         <Properties>
           <string name="Name">Titles</string>
           <token name="RunContext">0</token>
@@ -191582,7 +192226,7 @@ TitleService.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="803">
+      <Item class="Script" referent="805">
         <Properties>
           <string name="Name">gearwathced</string>
           <token name="RunContext">0</token>
@@ -191595,7 +192239,7 @@ devilFruitInventory.Start()
         </Properties>
       </Item>
     </Item>
-    <Item class="Script" referent="804">
+    <Item class="Script" referent="806">
       <Properties>
         <string name="Name">Server</string>
         <token name="RunContext">0</token>
@@ -191621,13 +192265,15 @@ end
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="805">
+    <Item class="Script" referent="807">
       <Properties>
         <string name="Name">freereward</string>
         <token name="RunContext">0</token>
         <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local CrewRewardService = require(script.Parent.Modules.CrewRewardService)
 local data = require(script.Parent.Data.DataManager)
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local remote = ReplicatedStorage:FindFirstChild("RewardRemote")
 if not remote then
@@ -191637,6 +192283,13 @@ if not remote then
 end
 
 remote.OnServerEvent:Connect(function(player)
+	-- Security: free reward is server-calculated and guarded against spammed claims.
+	if not RemoteGuard.Check(player, "RewardRemote", {}, {
+		Cooldown = 2,
+	}) then
+		return
+	end
+
 	local claimed = data:GetValue(player, "HiddenLeaderstats.ClaimedTolilola")
 	if claimed == true then
 		return
@@ -191655,16 +192308,18 @@ end)
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="806">
+    <Item class="Script" referent="808">
       <Properties>
         <string name="Name">sELL_Server</string>
         <token name="RunContext">0</token>
         <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(script.Parent.Data.DataManager)
 local CrewMemberCanonicalReadGate = require(script.Parent.Modules.CrewMemberCanonicalReadGate)
 local CrewInstanceService = require(script.Parent.Modules.CrewInstanceService)
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = Remotes:WaitForChild("SellItemEvent")
 
@@ -191976,6 +192631,17 @@ displayNameRequest.OnServerInvoke = function(player, rawName)
 end
 
 SellEvent.OnServerEvent:Connect(function(player, mode, fullName)
+	-- Security: selling mutates currency/inventory, so reject malformed or spammed sell requests first.
+	if not RemoteGuard.Check(player, "SellItemEvent", { mode, fullName }, {
+		Cooldown = 0.2,
+		Args = {
+			{ Type = "string", MaxLength = 16, Allowlist = { SINGLE = true, ALL = true } },
+			{ Type = "string", MaxLength = 128, AllowNil = true },
+		},
+	}) then
+		return
+	end
+
 	if player.Parent ~= Players then return end
 
 	if mode == "SINGLE" and fullName then
@@ -191987,7 +192653,7 @@ end)
 ]]></string>
       </Properties>
     </Item>
-    <Item class="Script" referent="807">
+    <Item class="Script" referent="809">
       <Properties>
         <string name="Name">tut</string>
         <token name="RunContext">0</token>
@@ -192021,35 +192687,35 @@ end)
       </Properties>
     </Item>
   </Item>
-  <Item class="StarterGui" referent="808">
+  <Item class="StarterGui" referent="810">
     <Properties>
       <string name="Name">StarterGui</string>
     </Properties>
-    <Item class="ScreenGui" referent="809">
+    <Item class="ScreenGui" referent="811">
       <Properties>
         <string name="Name">Frames</string>
       </Properties>
-      <Item class="Frame" referent="810">
+      <Item class="Frame" referent="812">
         <Properties>
           <string name="Name">Store</string>
         </Properties>
-        <Item class="ScrollingFrame" referent="811">
+        <Item class="ScrollingFrame" referent="813">
           <Properties>
             <string name="Name">ScrollingFrame</string>
           </Properties>
-          <Item class="Frame" referent="812">
+          <Item class="Frame" referent="814">
             <Properties>
               <string name="Name">Gamepasses</string>
             </Properties>
-            <Item class="Frame" referent="813">
+            <Item class="Frame" referent="815">
               <Properties>
                 <string name="Name">Vip</string>
               </Properties>
-              <Item class="TextButton" referent="814">
+              <Item class="TextButton" referent="816">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="815">
+                <Item class="LocalScript" referent="817">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192104,15 +192770,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="816">
+            <Item class="Frame" referent="818">
               <Properties>
                 <string name="Name">x2Money</string>
               </Properties>
-              <Item class="TextButton" referent="817">
+              <Item class="TextButton" referent="819">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="818">
+                <Item class="LocalScript" referent="820">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192167,11 +192833,11 @@ refreshPrice()
               </Item>
             </Item>
           </Item>
-          <Item class="Frame" referent="819">
+          <Item class="Frame" referent="821">
             <Properties>
               <string name="Name">LuckyBlock</string>
             </Properties>
-            <Item class="LocalScript" referent="820">
+            <Item class="LocalScript" referent="822">
               <Properties>
                 <string name="Name">LocalScript</string>
                 <string name="Source"><![CDATA[local gui = script.Parent
@@ -192316,19 +192982,19 @@ refresh()
               </Properties>
             </Item>
           </Item>
-          <Item class="Frame" referent="821">
+          <Item class="Frame" referent="823">
             <Properties>
               <string name="Name">Packs</string>
             </Properties>
-            <Item class="Frame" referent="822">
+            <Item class="Frame" referent="824">
               <Properties>
                 <string name="Name">StarterPack1</string>
               </Properties>
-              <Item class="TextButton" referent="823">
+              <Item class="TextButton" referent="825">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="824">
+                <Item class="LocalScript" referent="826">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192373,15 +193039,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="825">
+            <Item class="Frame" referent="827">
               <Properties>
                 <string name="Name">StarterPack2</string>
               </Properties>
-              <Item class="TextButton" referent="826">
+              <Item class="TextButton" referent="828">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="827">
+                <Item class="LocalScript" referent="829">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192426,15 +193092,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="828">
+            <Item class="Frame" referent="830">
               <Properties>
                 <string name="Name">StarterPack3</string>
               </Properties>
-              <Item class="TextButton" referent="829">
+              <Item class="TextButton" referent="831">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="830">
+                <Item class="LocalScript" referent="832">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService(`MarketplaceService`)
@@ -192481,19 +193147,19 @@ refreshPrice()
               </Item>
             </Item>
           </Item>
-          <Item class="Frame" referent="831">
+          <Item class="Frame" referent="833">
             <Properties>
               <string name="Name">Potions</string>
             </Properties>
-            <Item class="Frame" referent="832">
+            <Item class="Frame" referent="834">
               <Properties>
                 <string name="Name">Money</string>
               </Properties>
-              <Item class="TextButton" referent="833">
+              <Item class="TextButton" referent="835">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="834">
+                <Item class="LocalScript" referent="836">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192537,15 +193203,15 @@ refreshPrice()
                 </Item>
               </Item>
             </Item>
-            <Item class="Frame" referent="835">
+            <Item class="Frame" referent="837">
               <Properties>
                 <string name="Name">Walkspeed</string>
               </Properties>
-              <Item class="TextButton" referent="836">
+              <Item class="TextButton" referent="838">
                 <Properties>
                   <string name="Name">Buy</string>
                 </Properties>
-                <Item class="LocalScript" referent="837">
+                <Item class="LocalScript" referent="839">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192588,11 +193254,11 @@ refreshPrice()
                   </Properties>
                 </Item>
               </Item>
-              <Item class="TextButton" referent="838">
+              <Item class="TextButton" referent="840">
                 <Properties>
                   <string name="Name">Buy2</string>
                 </Properties>
-                <Item class="LocalScript" referent="839">
+                <Item class="LocalScript" referent="841">
                   <Properties>
                     <string name="Name">LocalScript</string>
                     <string name="Source"><![CDATA[local MS = game:GetService("MarketplaceService")
@@ -192637,11 +193303,11 @@ refreshPrice()
               </Item>
             </Item>
           </Item>
-          <Item class="Frame" referent="840">
+          <Item class="Frame" referent="842">
             <Properties>
               <string name="Name">ServerLuck</string>
             </Properties>
-            <Item class="LocalScript" referent="841">
+            <Item class="LocalScript" referent="843">
               <Properties>
                 <string name="Name">LocalScript</string>
                 <string name="Source"><![CDATA[local gui = script.Parent
@@ -192752,19 +193418,19 @@ refresh()
         </Item>
       </Item>
     </Item>
-    <Item class="ScreenGui" referent="842">
+    <Item class="ScreenGui" referent="844">
       <Properties>
         <string name="Name">HUD</string>
       </Properties>
-      <Item class="Frame" referent="843">
+      <Item class="Frame" referent="845">
         <Properties>
           <string name="Name">Boosts</string>
         </Properties>
-        <Item class="ImageLabel" referent="844">
+        <Item class="ImageLabel" referent="846">
           <Properties>
             <string name="Name">ServerLuck</string>
           </Properties>
-          <Item class="LocalScript" referent="845">
+          <Item class="LocalScript" referent="847">
             <Properties>
               <string name="Name">LocalScript</string>
               <string name="Source"><![CDATA[
@@ -192795,11 +193461,11 @@ serverLuck:GetPropertyChangedSignal("Value"):Connect(updateImage)
           </Item>
         </Item>
       </Item>
-      <Item class="ImageButton" referent="846">
+      <Item class="ImageButton" referent="848">
         <Properties>
           <string name="Name">StopDisasters</string>
         </Properties>
-        <Item class="LocalScript" referent="847">
+        <Item class="LocalScript" referent="849">
           <Properties>
             <string name="Name">LocalScript</string>
             <string name="Source">script.Parent.MouseButton1Click:Connect(function()
@@ -192809,14 +193475,14 @@ end)</string>
         </Item>
       </Item>
     </Item>
-    <Item class="LocalScript" referent="848">
+    <Item class="LocalScript" referent="850">
       <Properties>
         <string name="Name">OpenUI</string>
         <string name="Source"><![CDATA[require(script.Open_UI)
  
  ]]></string>
       </Properties>
-      <Item class="ModuleScript" referent="849">
+      <Item class="ModuleScript" referent="851">
         <Properties>
           <string name="Name">Open_UI</string>
           <string name="Source"><![CDATA[local UIController = {}
@@ -193630,11 +194296,11 @@ return controller
         </Properties>
       </Item>
     </Item>
-    <Item class="SurfaceGui" referent="850">
+    <Item class="SurfaceGui" referent="852">
       <Properties>
         <string name="Name">SurfaceGui</string>
       </Properties>
-      <Item class="LocalScript" referent="851">
+      <Item class="LocalScript" referent="853">
         <Properties>
           <string name="Name">LocalScript</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -193821,15 +194487,15 @@ end
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="852">
+  <Item class="StarterPlayer" referent="854">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterPlayerScripts" referent="853">
+    <Item class="StarterPlayerScripts" referent="855">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="LocalScript" referent="854">
+      <Item class="LocalScript" referent="856">
         <Properties>
           <string name="Name">000_ReactUiBootstrap</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -195575,7 +196241,7 @@ ensureFrames()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="855">
+      <Item class="LocalScript" referent="857">
         <Properties>
           <string name="Name">AAAAAAAAAAAAAAA</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -197645,7 +198311,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="856">
+      <Item class="LocalScript" referent="858">
         <Properties>
           <string name="Name">AnimateRuntimeGuard</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -198463,7 +199129,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="857">
+      <Item class="LocalScript" referent="859">
         <Properties>
           <string name="Name">BOOSTS_CLIENT</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -198511,7 +199177,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="858">
+      <Item class="LocalScript" referent="860">
         <Properties>
           <string name="Name">BiomeLighting</string>
           <string name="Source"><![CDATA[local Lighting = game:GetService("Lighting")
@@ -198998,7 +199664,7 @@ updateActiveAreaWhenCharacterReady(player.Character)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="859">
+      <Item class="LocalScript" referent="861">
         <Properties>
           <string name="Name">BrrBrrPatapimDialog</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -200550,14 +201216,14 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="860">
+      <Item class="LocalScript" referent="862">
         <Properties>
           <string name="Name">Client</string>
           <string name="Source"><![CDATA[print("Hello world, from client!")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="861">
+      <Item class="LocalScript" referent="863">
         <Properties>
           <string name="Name">CometEvent</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -200974,7 +201640,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="862">
+      <Item class="LocalScript" referent="864">
         <Properties>
           <string name="Name">CoreGui</string>
           <string name="Source"><![CDATA[local StarterGui = game:GetService("StarterGui")
@@ -200992,7 +201658,7 @@ disableCoreGui(Enum.CoreGuiType.EmotesMenu)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="863">
+      <Item class="LocalScript" referent="865">
         <Properties>
           <string name="Name">DevilFruit</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -201009,7 +201675,7 @@ controller.Start()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="864">
+      <Item class="LocalScript" referent="866">
         <Properties>
           <string name="Name">DevilFruitConsumePrompt</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -201883,7 +202549,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="865">
+      <Item class="LocalScript" referent="867">
         <Properties>
           <string name="Name">EVENTS</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -201952,7 +202618,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="866">
+      <Item class="LocalScript" referent="868">
         <Properties>
           <string name="Name">FavPormpt</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -201977,7 +202643,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="867">
+      <Item class="LocalScript" referent="869">
         <Properties>
           <string name="Name">GearShopNpcDialog</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -202043,7 +202709,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="868">
+      <Item class="LocalScript" referent="870">
         <Properties>
           <string name="Name">GrandLineRushVerticalSlice</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -202628,7 +203294,7 @@ request("GetState")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="869">
+      <Item class="LocalScript" referent="871">
         <Properties>
           <string name="Name">Group</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -202800,7 +203466,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="870">
+      <Item class="LocalScript" referent="872">
         <Properties>
           <string name="Name">IdleGlitchWatchdog</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -203291,7 +203957,7 @@ emit("watchdogStarted", "watchdogStarted")
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="871">
+      <Item class="LocalScript" referent="873">
         <Properties>
           <string name="Name">InviteFriendTopBar</string>
           <string name="Source"><![CDATA[local Icon = require(game:GetService("ReplicatedStorage").Icon)
@@ -203320,7 +203986,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="872">
+      <Item class="LocalScript" referent="874">
         <Properties>
           <string name="Name">Library</string>
           <string name="Source"><![CDATA[if not game:IsLoaded() then game.Loaded:Wait() end
@@ -203362,7 +204028,7 @@ local UIStrokeAdjuster = require(script.UIStrokeAdjuster)
 print("✅ Client {RP} took " .. (tick() - Start) .. "s to load!")
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="873">
+        <Item class="ModuleScript" referent="875">
           <Properties>
             <string name="Name">UIStrokeAdjuster</string>
             <string name="Source"><![CDATA[--[=[
@@ -203701,7 +204367,7 @@ return UIStrokeAdjuster :: UIStrokeAdjuster
           </Properties>
         </Item>
       </Item>
-      <Item class="LocalScript" referent="874">
+      <Item class="LocalScript" referent="876">
         <Properties>
           <string name="Name">LocalScript</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -203722,11 +204388,11 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="875">
+      <Item class="Folder" referent="877">
         <Properties>
           <string name="Name">LocalScripts</string>
         </Properties>
-        <Item class="LocalScript" referent="876">
+        <Item class="LocalScript" referent="878">
           <Properties>
             <string name="Name">AdminPanel</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -204316,10 +204982,10 @@ local COMMANDS = {
 		marker = "CH",
 		name = "Grant Chest",
 		syntax = "/chest <tier> [amount]",
-		description = "Grant chest tools. Known aliases include wood, wooden, iron, gold, legend, legendary, plus configured tier names.",
-		example = "/chest legendary 2",
+		description = "Grant standard extraction chest tools. Known tiers are wood, wooden, iron, and gold.",
+		example = "/chest gold 2",
 		inputs = {
-			{ key = "tier", label = "Chest tier", placeholder = "wood, iron, gold, legendary" },
+			{ key = "tier", label = "Chest tier", placeholder = "wood, iron, gold" },
 			{ key = "amount", label = "Amount", placeholder = "1", default = "1" },
 		},
 		build = function(values)
@@ -206036,7 +206702,7 @@ broadcastEvent.OnClientEvent:Connect(showAnnouncement)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="877">
+        <Item class="LocalScript" referent="879">
           <Properties>
             <string name="Name">ButtonEffect</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -206179,7 +206845,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="878">
+        <Item class="LocalScript" referent="880">
           <Properties>
             <string name="Name">Button_Handler</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -206579,7 +207245,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="879">
+        <Item class="LocalScript" referent="881">
           <Properties>
             <string name="Name">CometMerchant</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -206730,7 +207396,7 @@ buildUI()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="880">
+        <Item class="LocalScript" referent="882">
           <Properties>
             <string name="Name">CounterComet</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -207106,7 +207772,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="881">
+        <Item class="LocalScript" referent="883">
           <Properties>
             <string name="Name">CounterMoney</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -207709,7 +208375,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="882">
+        <Item class="LocalScript" referent="884">
           <Properties>
             <string name="Name">CounterSpeed</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -208085,7 +208751,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="883">
+        <Item class="ModuleScript" referent="885">
           <Properties>
             <string name="Name">CounterVisibilityUtil</string>
             <string name="Source"><![CDATA[local function hideGuiObject(guiObject, preserveImageData)
@@ -208131,7 +208797,7 @@ return {
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="884">
+        <Item class="LocalScript" referent="886">
           <Properties>
             <string name="Name">GamepassAd</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -208374,7 +209040,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="885">
+        <Item class="LocalScript" referent="887">
           <Properties>
             <string name="Name">GearShop</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -208637,7 +209303,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="886">
+        <Item class="LocalScript" referent="888">
           <Properties>
             <string name="Name">GlobalAnno</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -208702,7 +209368,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="887">
+        <Item class="LocalScript" referent="889">
           <Properties>
             <string name="Name">Index</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -209197,12 +209863,11 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="888">
+        <Item class="LocalScript" referent="890">
           <Properties>
             <string name="Name">LIMITEDREWARD</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local AvatarEditorService = game:GetService("AvatarEditorService")
 
 local player = Players.LocalPlayer
 local playerGui = player.PlayerGui
@@ -209211,8 +209876,7 @@ local ModulesFolder = ReplicatedStorage:WaitForChild("Modules")
 local PopUpModule = require(ModulesFolder:WaitForChild("PopUpModule"))
 
 local PLACE_ID = 129073777843683
-local ITEM_TYPE = Enum.AvatarItemType.Asset
-local COOLDOWN_TIME = 5
+local CLAIM_TIMEOUT = 6
 
 local rewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
 
@@ -209220,42 +209884,9 @@ local mainGui = playerGui:WaitForChild("Frames")
 local limitedRewardFrame = mainGui:WaitForChild("LimitedReward")
 local mainFrame = limitedRewardFrame:WaitForChild("Main")
 local claimButton = mainFrame:WaitForChild("JoinEvent")
-local innerFrame = limitedRewardFrame:WaitForChild("Frame")
-local likeTextLabel = innerFrame:WaitForChild("Like"):WaitForChild("TextL")
-local favoriteTextLabel = innerFrame:WaitForChild("Favorite"):WaitForChild("TextL")
 
-local hasInventoryAccess = false
-local cooldownStarted = false
-local cooldownFinished = false
 local rewardAlreadyClaimedLocal = false
-
-AvatarEditorService.PromptAllowInventoryReadAccessCompleted:Connect(function(result)
-	if result == Enum.AvatarPromptResult.Success then
-		hasInventoryAccess = true
-	else
-		hasInventoryAccess = false
-	end
-end)
-
-local function showLikePopup()
-	PopUpModule:Local_SendPopUp(
-		"You must leave a like on the game.",
-		Color3.new(1, 1, 1),
-		Color3.new(0, 0, 0),
-		2,
-		true
-	)
-end
-
-local function showFavoritePopup()
-	PopUpModule:Local_SendPopUp(
-		"Please leave a favorite on the game.",
-		Color3.new(1, 1, 1),
-		Color3.new(0, 0, 0),
-		2,
-		true
-	)
-end
+local claimPending = false
 
 local function showRewardPopup()
 	PopUpModule:Local_SendPopUp(
@@ -209264,6 +209895,26 @@ local function showRewardPopup()
 		Color3.new(0, 0.8, 0),
 		2,
 		false
+	)
+end
+
+local function showJoinGroupPopup()
+	PopUpModule:Local_SendPopUp(
+		"Join the group first.",
+		Color3.new(1, 1, 1),
+		Color3.new(0, 0, 0),
+		2,
+		true
+	)
+end
+
+local function showUnavailablePopup()
+	PopUpModule:Local_SendPopUp(
+		"Reward unavailable right now.",
+		Color3.new(1, 1, 1),
+		Color3.new(0, 0, 0),
+		2,
+		true
 	)
 end
 
@@ -209293,98 +209944,49 @@ local function hasRewardAlready()
 	return false
 end
 
-local function getFavoriteState()
-	if not hasInventoryAccess then
-		return false
-	end
-	local ok, result = pcall(function()
-		return AvatarEditorService:GetFavorite(PLACE_ID, ITEM_TYPE)
-	end)
-	if not ok then
-		return false
-	end
-	return result
-end
-
-local function getLikeAndFavorite()
-	local hasLike = likeTextLabel.Text == "1/1"
-	local isFavorited = getFavoriteState()
-	if isFavorited then
-		favoriteTextLabel.Text = "1/1"
-	else
-		favoriteTextLabel.Text = "0/1"
-	end
-	return hasLike, isFavorited
-end
-
-local function startCooldown()
-	if cooldownStarted then
-		return
-	end
-	cooldownStarted = true
-	task.delay(COOLDOWN_TIME, function()
-		cooldownFinished = true
-		if hasInventoryAccess then
-			local isFavorited = getFavoriteState()
-			if isFavorited then
-				likeTextLabel.Text = "1/1"
-			end
-		end
-	end)
-end
 local CLICK_COOLDOWN = 0.2
 local lastClick = 0
+
+rewardRemote.OnClientEvent:Connect(function(status)
+	claimPending = false
+
+	if status == "Granted" then
+		rewardAlreadyClaimedLocal = true
+		showRewardPopup()
+	elseif status == "AlreadyClaimed" then
+		rewardAlreadyClaimedLocal = true
+		showAlreadyClaimedPopup()
+	elseif status == "NotInGroup" then
+		showJoinGroupPopup()
+	elseif status == "Unavailable" then
+		showUnavailablePopup()
+	end
+end)
+
 local function onClaimClicked()
 	local now = os.clock()
 	if (now - lastClick) < CLICK_COOLDOWN then
 		return
 	end
 	lastClick = now
-	
+
 	if hasRewardAlready() then
 		showAlreadyClaimedPopup()
 		return
 	end
 
-	if not hasInventoryAccess then
-		AvatarEditorService:PromptAllowInventoryReadAccess()
-	end
-
-	if not cooldownStarted then
-		startCooldown()
-	end
-
-	if not cooldownFinished then
-		local hasLike, isFavorited = false, false
-		if hasInventoryAccess then
-			hasLike, isFavorited = getLikeAndFavorite()
-		end
-		if not hasInventoryAccess or not isFavorited then
-			showFavoritePopup()
-		else
-			showLikePopup()
-		end
+	if claimPending then
 		return
 	end
 
-	local hasLike, isFavorited = getLikeAndFavorite()
-
-	if isFavorited and likeTextLabel.Text ~= "1/1" then
-		likeTextLabel.Text = "1/1"
-		hasLike = true
-	end
-
-	if hasLike and isFavorited then
-		rewardRemote:FireServer(PLACE_ID, hasLike, isFavorited)
-		showRewardPopup()
-		rewardAlreadyClaimedLocal = true
-	else
-		if not isFavorited then
-			showFavoritePopup()
-		elseif not hasLike then
-			showLikePopup()
+	claimPending = true
+	rewardRemote:FireServer(PLACE_ID)
+	task.delay(CLAIM_TIMEOUT, function()
+		if claimPending then
+			claimPending = false
+			showUnavailablePopup()
 		end
-	end
+	end)
 end
 
 if claimButton:IsA("TextButton") or claimButton:IsA("ImageButton") then
@@ -209395,7 +209997,7 @@ end
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="889">
+        <Item class="LocalScript" referent="891">
           <Properties>
             <string name="Name">LUCKYBLOCKEVENT</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -209541,7 +210143,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="890">
+        <Item class="LocalScript" referent="892">
           <Properties>
             <string name="Name">Rebirths</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -209754,7 +210356,7 @@ update()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="891">
+        <Item class="LocalScript" referent="893">
           <Properties>
             <string name="Name">Settings</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -210297,7 +210899,7 @@ end
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="892">
+        <Item class="LocalScript" referent="894">
           <Properties>
             <string name="Name">SpeedUpgrades</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -210478,14 +211080,14 @@ speedValueObj.Changed:Connect(updateAll)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="893">
+        <Item class="LocalScript" referent="895">
           <Properties>
             <string name="Name">VIP_Door</string>
             <string name="Source"><![CDATA[-- VIP refuge access is controlled server-side by VIPBarrierService.
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="894">
+        <Item class="LocalScript" referent="896">
           <Properties>
             <string name="Name">aaaaaaaa</string>
             <string name="Source"><![CDATA[
@@ -210561,7 +211163,7 @@ task.defer(updateAllPlots)
           </Properties>
         </Item>
       </Item>
-      <Item class="LocalScript" referent="895">
+      <Item class="LocalScript" referent="897">
         <Properties>
           <string name="Name">Modules</string>
           <string name="Source"><![CDATA[local GIFT_BOOT_DEBUG = true
@@ -210603,7 +211205,7 @@ else
 end
 ]]></string>
         </Properties>
-        <Item class="ModuleScript" referent="896">
+        <Item class="ModuleScript" referent="898">
           <Properties>
             <string name="Name">Time_Rewards</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -214333,7 +214935,7 @@ return {}
           </Properties>
         </Item>
       </Item>
-      <Item class="LocalScript" referent="897">
+      <Item class="LocalScript" referent="899">
         <Properties>
           <string name="Name">ProximityPromptScript</string>
           <string name="Source"><![CDATA[local UserInputService = game:GetService("UserInputService")
@@ -214826,7 +215428,7 @@ onLoad()
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="898">
+      <Item class="LocalScript" referent="900">
         <Properties>
           <string name="Name">R6AnimationFix</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -215061,7 +215663,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="899">
+      <Item class="ModuleScript" referent="901">
         <Properties>
           <string name="Name">ReplicaClient</string>
           <string name="Source"><![CDATA[--[[
@@ -216026,7 +216628,7 @@ return Replica
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="900">
+      <Item class="LocalScript" referent="902">
         <Properties>
           <string name="Name">SellNpcDialog</string>
           <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -216292,7 +216894,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="901">
+      <Item class="LocalScript" referent="903">
         <Properties>
           <string name="Name">StandsMenager</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -216698,11 +217300,11 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="902">
+      <Item class="Folder" referent="904">
         <Properties>
           <string name="Name">UI</string>
         </Properties>
-        <Item class="LocalScript" referent="903">
+        <Item class="LocalScript" referent="905">
           <Properties>
             <string name="Name">App</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -217779,13 +218381,20 @@ local function getAccentColor(kind, name, state)
 	end
 
 	if kind == "Chest" then
-		if name == "Legendary" then
+		local styleName = ChestUtils.GetVisualStyleName(name)
+		if styleName == "Mythic Devil Fruit" then
+			return Color3.fromRGB(118, 244, 214)
+		end
+		if styleName == "Legendary Devil Fruit" then
 			return Color3.fromRGB(255, 187, 74)
 		end
-		if name == "Gold" then
+		if styleName == "Rare Devil Fruit" then
+			return Color3.fromRGB(91, 170, 255)
+		end
+		if styleName == "Gold" then
 			return Color3.fromRGB(222, 189, 74)
 		end
-		if name == "Iron" then
+		if styleName == "Iron" then
 			return Color3.fromRGB(162, 175, 194)
 		end
 		return Color3.fromRGB(191, 143, 86)
@@ -219487,7 +220096,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="904">
+        <Item class="LocalScript" referent="906">
           <Properties>
             <string name="Name">AreaEnteredBanner</string>
             <string name="Source"><![CDATA[local Lighting = game:GetService("Lighting")
@@ -219888,7 +220497,7 @@ task.defer(announceAreaFromAttribute)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="905">
+        <Item class="LocalScript" referent="907">
           <Properties>
             <string name="Name">CorridorDrop</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -220118,7 +220727,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="906">
+        <Item class="LocalScript" referent="908">
           <Properties>
             <string name="Name">FirstTimeTutorial</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -220369,7 +220978,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="907">
+        <Item class="LocalScript" referent="909">
           <Properties>
             <string name="Name">HudBoostTimer</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -220516,7 +221125,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="908">
+        <Item class="LocalScript" referent="910">
           <Properties>
             <string name="Name">HudCounters</string>
             <string name="Source"><![CDATA[local GuiService = game:GetService("GuiService")
@@ -221071,7 +221680,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="909">
+        <Item class="LocalScript" referent="911">
           <Properties>
             <string name="Name">HudMenu</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -222157,7 +222766,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="910">
+        <Item class="LocalScript" referent="912">
           <Properties>
             <string name="Name">Index</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -223108,7 +223717,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="911">
+        <Item class="LocalScript" referent="913">
           <Properties>
             <string name="Name">Quest</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -223373,7 +223982,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="912">
+        <Item class="LocalScript" referent="914">
           <Properties>
             <string name="Name">Settings</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -223835,7 +224444,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="913">
+        <Item class="LocalScript" referent="915">
           <Properties>
             <string name="Name">Shop</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -224145,7 +224754,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="914">
+        <Item class="LocalScript" referent="916">
           <Properties>
             <string name="Name">VIPBarrierSigns</string>
             <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -224576,7 +225185,7 @@ end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="915">
+        <Item class="LocalScript" referent="917">
           <Properties>
             <string name="Name">WaveProgressBar</string>
             <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -224906,7 +225515,7 @@ end)
           </Properties>
         </Item>
       </Item>
-      <Item class="LocalScript" referent="916">
+      <Item class="LocalScript" referent="918">
         <Properties>
           <string name="Name">Unequipool'</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -224971,7 +225580,7 @@ rebirthFrame:GetPropertyChangedSignal("Visible"):Connect(onVisibleChanged)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="917">
+      <Item class="LocalScript" referent="919">
         <Properties>
           <string name="Name">abccc</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -225207,7 +225816,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="918">
+      <Item class="LocalScript" referent="920">
         <Properties>
           <string name="Name">chat tags</string>
           <string name="Source"><![CDATA[local Players = game:GetService("Players")
@@ -225550,7 +226159,7 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="LocalScript" referent="919">
+      <Item class="LocalScript" referent="921">
         <Properties>
           <string name="Name">custominv</string>
           <string name="Source"><![CDATA[-- Deprecated no-op.
@@ -225558,11 +226167,11 @@ end
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Folder" referent="920">
+      <Item class="Folder" referent="922">
         <Properties>
           <string name="Name">data</string>
         </Properties>
-        <Item class="ModuleScript" referent="921">
+        <Item class="ModuleScript" referent="923">
           <Properties>
             <string name="Name">Client_Data</string>
             <string name="Source"><![CDATA[--// Requires
@@ -225632,7 +226241,7 @@ return Data
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="922">
+        <Item class="LocalScript" referent="924">
           <Properties>
             <string name="Name">Initialization</string>
             <string name="Source"><![CDATA[if not game:IsLoaded() then game.Loaded:Wait() end
@@ -225654,20 +226263,20 @@ print("✅ Client {RP} took " .. (tick() - Start) .. "s to load!")
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="923">
+  <Item class="Workspace" referent="925">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>
     </Properties>
-    <Item class="Folder" referent="924">
+    <Item class="Folder" referent="926">
       <Properties>
         <string name="Name">Map</string>
       </Properties>
-      <Item class="Folder" referent="925">
+      <Item class="Folder" referent="927">
         <Properties>
           <string name="Name">Leaderboards</string>
         </Properties>
-        <Item class="Script" referent="926">
+        <Item class="Script" referent="928">
           <Properties>
             <string name="Name">LeaderboardsScript</string>
             <token name="RunContext">0</token>
@@ -226400,7 +227009,7 @@ task.spawn(function()
 end)
 ]]></string>
           </Properties>
-          <Item class="Script" referent="927">
+          <Item class="Script" referent="929">
             <Properties>
               <string name="Name">Script</string>
               <token name="RunContext">0</token>
@@ -226410,26 +227019,26 @@ end)
           </Item>
         </Item>
       </Item>
-      <Item class="Folder" referent="928">
+      <Item class="Folder" referent="930">
         <Properties>
           <string name="Name">MainMap</string>
         </Properties>
-        <Item class="Folder" referent="929">
+        <Item class="Folder" referent="931">
           <Properties>
             <string name="Name">Brr Brr Patapim</string>
           </Properties>
         </Item>
-        <Item class="Folder" referent="930">
+        <Item class="Folder" referent="932">
           <Properties>
             <string name="Name">Model</string>
           </Properties>
-          <Item class="Folder" referent="931">
+          <Item class="Folder" referent="933">
             <Properties>
               <string name="Name">Normal</string>
             </Properties>
           </Item>
         </Item>
-        <Item class="Folder" referent="932">
+        <Item class="Folder" referent="934">
           <Properties>
             <string name="Name">Normal</string>
           </Properties>

@@ -30,8 +30,7 @@ local Config = {
 		ChestBountyByTier = {
 			Wooden = 250,
 			Iron = 650,
-			Gold = 1600,
-			Legendary = 4200,
+			Gold = 4200,
 		},
 		CrewBountyByRarity = {
 			Common = 180,

@@ -1072,13 +1072,20 @@ local function getAccentColor(kind, name, state)
 	end
 
 	if kind == "Chest" then
-		if name == "Legendary" then
+		local styleName = ChestUtils.GetVisualStyleName(name)
+		if styleName == "Mythic Devil Fruit" then
+			return Color3.fromRGB(118, 244, 214)
+		end
+		if styleName == "Legendary Devil Fruit" then
 			return Color3.fromRGB(255, 187, 74)
 		end
-		if name == "Gold" then
+		if styleName == "Rare Devil Fruit" then
+			return Color3.fromRGB(91, 170, 255)
+		end
+		if styleName == "Gold" then
 			return Color3.fromRGB(222, 189, 74)
 		end
-		if name == "Iron" then
+		if styleName == "Iron" then
 			return Color3.fromRGB(162, 175, 194)
 		end
 		return Color3.fromRGB(191, 143, 86)

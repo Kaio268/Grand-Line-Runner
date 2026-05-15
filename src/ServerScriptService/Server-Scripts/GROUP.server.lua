@@ -1,7 +1,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local ddata = require(script.Parent.Parent.Data.DataManager)
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local GROUP_ID = 17179624
 local REMOTE_NAME = "GroupRewardClaim"
 
@@ -15,6 +17,13 @@ end
 
 
 remoteEvent.OnServerEvent:Connect(function(player)
+	-- Security: group reward is server-verified with IsInGroup and guarded against spammed claims.
+	if not RemoteGuard.Check(player, "GroupRewardClaim", {}, {
+		Cooldown = 2,
+	}) then
+		return
+	end
+
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return
 	end
