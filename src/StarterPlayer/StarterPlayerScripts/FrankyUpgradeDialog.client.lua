@@ -1,11 +1,10 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 
+local player = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
-
-local player = Players.LocalPlayer
 
 local function promptTextContains(prompt, needle)
 	local haystack = string.lower(table.concat({
@@ -21,9 +20,7 @@ ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeringPlayer
 		return
 	end
 
-	if not promptTextContains(prompt, "nami") then
-		return
+	if promptTextContains(prompt, "franky") then
+		ReactModalRegistry.Open("SpeedUpgrade")
 	end
-
-	ReactModalRegistry.Open("NamiShop")
 end)

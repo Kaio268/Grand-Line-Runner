@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local SettingsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Settings"))
 local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
@@ -36,6 +37,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	maxSize = Vector2.new(1240, 760),
 	frameSize = SETTINGS_FRAME_SIZE,
 	createFrameIfMissing = true,
+	standalone = true,
 })
 
 local SETTING_ORDER = {
@@ -69,6 +71,22 @@ local settingFolder = nil
 local settingOverrides = {}
 local cleanupConnections = {}
 local settingConnections = {}
+local unregisterModal = ReactModalRegistry.Register("Settings", {
+	toggle = function()
+		modalAdapter:Toggle()
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
+})
 
 local scheduleRender
 local syncAudioFromSettings
@@ -451,6 +469,7 @@ script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll(cleanupConnections)
 	disconnectAll(settingConnections)
+	unregisterModal()
 	modalAdapter:Destroy()
 	root:unmount()
 end)

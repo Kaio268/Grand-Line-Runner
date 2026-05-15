@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local ShopFolder = UiFolder:WaitForChild("Shop")
 local ShopShell = require(ShopFolder:WaitForChild("ShopShell"))
@@ -36,10 +37,27 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	minSize = Vector2.new(980, 680),
 	maxSize = Vector2.new(1340, 860),
 	createFrameIfMissing = true,
+	standalone = true,
 })
 
 local purchaseAdapter = PurchaseAdapter.new(player)
 local cleanupConnections = {}
+local unregisterModal = ReactModalRegistry.Register("Store", {
+	toggle = function()
+		modalAdapter:Toggle()
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
+})
 
 local scheduleRender
 local LEGACY_CREW_TERM = "Brain" .. "rots"
@@ -117,7 +135,7 @@ local function ensureStoreFrameLayout()
 
 	storeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	storeFrame.Position = UDim2.fromScale(0.5, 0.5)
-	storeFrame.Size = UDim2.new(0.9, 0, 0.84, 0)
+	storeFrame.Size = UDim2.fromScale(0.9, 0.84)
 	storeFrame.ClipsDescendants = true
 	storeFrame.Active = true
 	storeFrame.ZIndex = 120
@@ -298,6 +316,7 @@ render()
 script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll()
+	unregisterModal()
 	purchaseAdapter:destroy()
 	modalAdapter:Destroy()
 	root:unmount()

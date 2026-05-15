@@ -96,8 +96,8 @@ local function tabButton(props)
 			Text = tostring(tab.label or ""),
 			TextColor3 = textColor,
 			TextSize = 12,
-			TextStrokeColor3 = active and Theme.Palette.GoldShadow or Theme.Palette.Gold,
-			TextStrokeTransparency = active and 0.38 or 0.58,
+			TextStrokeColor3 = SHELL.GoldHighlight,
+			TextStrokeTransparency = active and 0.38 or 0.54,
 			ZIndex = 9,
 		}),
 		Count = countText and e("Frame", {

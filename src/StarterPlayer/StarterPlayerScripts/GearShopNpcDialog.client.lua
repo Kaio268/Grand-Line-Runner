@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
+local ReactModalRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ReactModalRegistry"))
 
 local refs = MapResolver.WaitForRefs(
 	{ "GearShopNpc" },
@@ -14,12 +15,39 @@ local refs = MapResolver.WaitForRefs(
 	}
 )
 local npc = refs.GearShopNpc
-local prompt = npc:WaitForChild("ProximityPrompt")
+if not npc then
+	return
+end
+
+local function waitForNpcPrompt(model)
+	local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if prompt then
+		return prompt
+	end
+
+	while model.Parent do
+		local descendant = model.DescendantAdded:Wait()
+		if descendant:IsA("ProximityPrompt") then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local prompt = waitForNpcPrompt(npc)
+if not prompt then
+	return
+end
 
 local dialogObject = DialogModule.new("OpenFishingShop", npc, prompt)
 dialogObject:addDialog("Do You Want To Open Gears Store?", {"Yea", "Nope"})
 
 local function openFrame(frameName)
+	if ReactModalRegistry.Open(frameName) then
+		return
+	end
+
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then
 		return

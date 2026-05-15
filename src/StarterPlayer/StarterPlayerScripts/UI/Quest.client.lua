@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local QuestScreen = require(UiFolder:WaitForChild("Quest"):WaitForChild("QuestScreen"))
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
@@ -30,6 +31,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	minSize = Vector2.new(760, 520),
 	maxSize = Vector2.new(1080, 720),
 	createFrameIfMissing = true,
+	standalone = true,
 })
 
 local destroyed = false
@@ -40,6 +42,22 @@ local noticeToken = 0
 local watchedFrame = nil
 local watchedFrameConnection = nil
 local cleanupConnections = {}
+local unregisterModal = ReactModalRegistry.Register("Quest", {
+	toggle = function()
+		modalAdapter:Toggle()
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
+})
 
 local scheduleRender
 local requestQuestState
@@ -166,7 +184,7 @@ local function prepareQuestFrame()
 	frame.BackgroundTransparency = 1
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
-	frame.Size = UDim2.new(0.86, 0, 0.8, 0)
+	frame.Size = UDim2.fromScale(0.86, 0.8)
 	frame.ZIndex = 120
 	if host then
 		host.ZIndex = 140
@@ -254,6 +272,7 @@ render()
 script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll()
+	unregisterModal()
 	modalAdapter:Destroy()
 	root:unmount()
 end)

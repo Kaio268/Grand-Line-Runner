@@ -48,8 +48,8 @@ local function sectionBanner(props)
 			Text = props.title,
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 30,
-			TextStrokeColor3 = Theme.Palette.GoldShadow,
-			TextStrokeTransparency = 0.58,
+			TextStrokeColor3 = Theme.Palette.GoldSoft,
+			TextStrokeTransparency = 0.48,
 			TextXAlignment = Enum.TextXAlignment.Center,
 		}),
 	})

@@ -12,6 +12,7 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local IndexFolder = UiFolder:WaitForChild("Index")
 
@@ -20,17 +21,11 @@ local e = React.createElement
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactIndexRoot"
 
-local FRAMES_DISPLAY_ORDER = 120
-
 local root = ReactRoblox.createRoot(rootContainer)
 local destroyed = false
 local renderQueued = false
 local moduleRetryQueued = false
 
-local fallbackGui
-local indexBackdrop
-local legacyFrame = nil
-local uiController = nil
 local inventoryFolder = nil
 local indexCollectionFolder = nil
 local brainrotInventoryFolder = nil
@@ -39,8 +34,6 @@ local indexRewardsFolder = nil
 local claimRemote = nil
 
 local cleanupConnections = {}
-local legacyConnections = {}
-local framesFolderConnections = {}
 local inventoryConnections = {}
 local indexCollectionConnections = {}
 local brainrotInventoryConnections = {}
@@ -75,6 +68,24 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	minSize = Vector2.new(1080, 680),
 	maxSize = Vector2.new(1360, 860),
 	allowFallback = true,
+	createFrameIfMissing = true,
+	standalone = true,
+})
+local unregisterModal = ReactModalRegistry.Register("Index", {
+	toggle = function()
+		modalAdapter:Toggle()
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
 })
 
 local function buildEmptyViewModel()
@@ -262,62 +273,6 @@ local function bindLiveValueTree(folder, bucket)
 	trackConnection(folder.DescendantRemoving, function()
 		task.defer(scheduleRender)
 	end, bucket)
-end
-
-local function ensureIndexBackdrop()
-	local framesGui = playerGui:FindFirstChild("Frames")
-	if not framesGui then
-		return nil
-	end
-
-	if indexBackdrop and indexBackdrop.Parent == framesGui then
-		return indexBackdrop
-	end
-
-	indexBackdrop = framesGui:FindFirstChild("ReactIndexBackdrop")
-	if not indexBackdrop then
-		indexBackdrop = Instance.new("Frame")
-		indexBackdrop.Name = "ReactIndexBackdrop"
-		indexBackdrop.BackgroundColor3 = Color3.fromRGB(3, 8, 18)
-		indexBackdrop.BackgroundTransparency = 0.42
-		indexBackdrop.BorderSizePixel = 0
-		indexBackdrop.Size = UDim2.fromScale(1, 1)
-		indexBackdrop.Visible = false
-		indexBackdrop.ZIndex = 80
-		indexBackdrop.Active = true
-		indexBackdrop.Parent = framesGui
-	end
-
-	return indexBackdrop
-end
-
-local function syncOverlayState()
-	local isVisible = legacyFrame ~= nil and legacyFrame.Parent ~= nil and legacyFrame.Visible == true
-	local backdrop = ensureIndexBackdrop()
-	if backdrop then
-		backdrop.Visible = isVisible
-	end
-
-	UiModalState.SetOpen("IndexModal", isVisible)
-end
-
-local function tryLoadUiController()
-	local openUiScript = playerGui:FindFirstChild("OpenUI") or playerGui:WaitForChild("OpenUI", 1)
-	if not openUiScript then
-		return nil
-	end
-
-	local openUiModule = openUiScript:FindFirstChild("Open_UI")
-	if not openUiModule then
-		return nil
-	end
-
-	local ok, result = pcall(require, openUiModule)
-	if ok then
-		return result
-	end
-
-	return nil
 end
 
 local function bindInventoryFolder(folder)
@@ -514,6 +469,24 @@ local function buildViewModel(previewMode)
 	return buildEmptyViewModel()
 end
 
+local function syncHudIndexBadge(viewModel)
+	local hud = playerGui:FindFirstChild("HUD")
+	local lButtons = hud and hud:FindFirstChild("LButtons")
+	local indexButton = lButtons and lButtons:FindFirstChild("Index")
+	local badge = indexButton and indexButton:FindFirstChild("Not", true)
+	if not badge then
+		return
+	end
+
+	local claimableCount = math.max(0, tonumber(viewModel and viewModel.claimableCount) or 0)
+	badge.Visible = claimableCount > 0
+
+	local textLabel = badge:FindFirstChild("TextLB", true)
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = tostring(math.min(99, claimableCount))
+	end
+end
+
 local function findRemoteEventByName(parent, remoteName)
 	for _, child in ipairs(parent:GetChildren()) do
 		if child.Name == remoteName and child:IsA("RemoteEvent") then
@@ -588,231 +561,6 @@ local function getClaimRemote()
 	end
 
 	return nil
-end
-
-local function findLegacyIndexFrame()
-	if legacyFrame and legacyFrame.Parent ~= nil then
-		return legacyFrame
-	end
-
-	legacyFrame = nil
-
-	local framesGui = playerGui:FindFirstChild("Frames") or playerGui:WaitForChild("Frames", 2)
-	if not framesGui then
-		return nil
-	end
-
-	local frame = framesGui:FindFirstChild("Index") or framesGui:WaitForChild("Index", 1)
-	if frame and frame:IsA("Frame") then
-		return frame
-	end
-
-	return nil
-end
-
-local function bindFramesFolderTracking()
-	disconnectAll(framesFolderConnections)
-
-	local framesGui = playerGui:FindFirstChild("Frames")
-	if not framesGui then
-		return
-	end
-
-	trackConnection(framesGui.ChildAdded, function(child)
-		if child.Name == "Index" then
-			legacyFrame = nil
-			task.defer(scheduleRender)
-		end
-	end, framesFolderConnections)
-
-	trackConnection(framesGui.ChildRemoved, function(child)
-		if child.Name == "Index" then
-			legacyFrame = nil
-			task.defer(scheduleRender)
-		end
-	end, framesFolderConnections)
-end
-
-local function applyLegacyFrameStyling(frame)
-	local framesGui = frame.Parent
-	if framesGui and framesGui:IsA("ScreenGui") then
-		framesGui.DisplayOrder = math.max(framesGui.DisplayOrder, FRAMES_DISPLAY_ORDER)
-		framesGui.IgnoreGuiInset = true
-		framesGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	end
-
-	frame.Active = true
-	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.BackgroundTransparency = 1
-	frame.BorderSizePixel = 0
-	frame.ClipsDescendants = true
-	frame.Position = UDim2.fromScale(0.5, 0.5)
-	frame.Size = UDim2.new(0.9, 0, 0.84, 0)
-	frame.ZIndex = 120
-
-	local sizeConstraint = frame:FindFirstChild("ReactIndexSizeConstraint")
-	if not sizeConstraint then
-		sizeConstraint = Instance.new("UISizeConstraint")
-		sizeConstraint.Name = "ReactIndexSizeConstraint"
-		sizeConstraint.Parent = frame
-	end
-
-	sizeConstraint.MinSize = Vector2.new(1080, 680)
-	sizeConstraint.MaxSize = Vector2.new(1360, 860)
-end
-
-local function suppressLegacyChild(child, host)
-	if child == nil or child == host or (host and child:IsDescendantOf(host)) then
-		return
-	end
-
-	if child:IsA("GuiObject") then
-		child.Visible = false
-	elseif child:IsA("UIStroke") or child:IsA("UIGradient") then
-		child.Enabled = false
-	end
-
-	for _, descendant in ipairs(child:GetDescendants()) do
-		if descendant ~= host and not (host and descendant:IsDescendantOf(host)) then
-			if descendant:IsA("GuiObject") then
-				descendant.Visible = false
-			elseif descendant:IsA("UIStroke") or descendant:IsA("UIGradient") then
-				descendant.Enabled = false
-			end
-		end
-	end
-end
-
-local function guardSuppressedInstance(instance, frame, host)
-	if instance == nil or instance == host or (host and instance:IsDescendantOf(host)) then
-		return
-	end
-
-	if instance:IsA("GuiObject") then
-		trackConnection(instance:GetPropertyChangedSignal("Visible"), function()
-			if instance.Parent and instance:IsDescendantOf(frame) and (not host or not instance:IsDescendantOf(host)) and instance.Visible then
-				instance.Visible = false
-			end
-		end, legacyConnections)
-	elseif instance:IsA("UIStroke") or instance:IsA("UIGradient") then
-		trackConnection(instance:GetPropertyChangedSignal("Enabled"), function()
-			if instance.Parent and instance:IsDescendantOf(frame) and (not host or not instance:IsDescendantOf(host)) and instance.Enabled then
-				instance.Enabled = false
-			end
-		end, legacyConnections)
-	end
-end
-
-local function bindLegacySuppression(frame, host)
-	disconnectAll(legacyConnections)
-
-	if not frame then
-		return
-	end
-
-	applyLegacyFrameStyling(frame)
-
-	for _, child in ipairs(frame:GetChildren()) do
-		suppressLegacyChild(child, host)
-		guardSuppressedInstance(child, frame, host)
-
-		for _, descendant in ipairs(child:GetDescendants()) do
-			guardSuppressedInstance(descendant, frame, host)
-		end
-	end
-
-	trackConnection(frame.ChildAdded, function(child)
-		task.defer(function()
-			if destroyed then
-				return
-			end
-
-			suppressLegacyChild(child, host)
-			bindLegacySuppression(frame, host)
-		end)
-	end, legacyConnections)
-
-	trackConnection(frame.DescendantAdded, function(descendant)
-		task.defer(function()
-			if destroyed or descendant == host or (host and descendant:IsDescendantOf(host)) then
-				return
-			end
-
-			suppressLegacyChild(descendant, host)
-			guardSuppressedInstance(descendant, frame, host)
-		end)
-	end, legacyConnections)
-
-	trackConnection(frame.ChildRemoved, function(child)
-		if child == host then
-			task.defer(scheduleRender)
-		end
-	end, legacyConnections)
-
-	trackConnection(frame:GetPropertyChangedSignal("Visible"), function()
-		task.defer(function()
-			if destroyed then
-				return
-			end
-
-			applyLegacyFrameStyling(frame)
-			syncOverlayState()
-		end)
-	end, legacyConnections)
-end
-
-local function ensureLegacyHost()
-	legacyFrame = findLegacyIndexFrame()
-
-	if not legacyFrame then
-		disconnectAll(legacyConnections)
-		return nil
-	end
-
-	applyLegacyFrameStyling(legacyFrame)
-
-	local host = legacyFrame:FindFirstChild("ReactIndexHost")
-	if not host then
-		host = Instance.new("Frame")
-		host.Name = "ReactIndexHost"
-		host.Active = true
-		host.BackgroundTransparency = 1
-		host.BorderSizePixel = 0
-		host.Size = UDim2.fromScale(1, 1)
-		host.ZIndex = 140
-		host.Parent = legacyFrame
-	end
-
-	host.Visible = true
-	host.ClipsDescendants = true
-	bindLegacySuppression(legacyFrame, host)
-	syncOverlayState()
-
-	return host
-end
-
-local function ensureFallbackHost()
-	if fallbackGui then
-		return fallbackGui:WaitForChild("ReactIndexHost")
-	end
-
-	fallbackGui = Instance.new("ScreenGui")
-	fallbackGui.Name = "ReactIndexGui"
-	fallbackGui.DisplayOrder = 160
-	fallbackGui.IgnoreGuiInset = true
-	fallbackGui.ResetOnSpawn = false
-	fallbackGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	fallbackGui.Parent = playerGui
-
-	local host = Instance.new("Frame")
-	host.Name = "ReactIndexHost"
-	host.Active = true
-	host.BackgroundTransparency = 1
-	host.BorderSizePixel = 0
-	host.Size = UDim2.fromScale(1, 1)
-	host.Parent = fallbackGui
-
-	return host
 end
 
 local function statusShell(titleText, bodyText, onClose)
@@ -938,7 +686,7 @@ local function StandaloneIndexApp()
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.new(0.9, 0, 0.84, 0),
+			Size = UDim2.fromScale(0.9, 0.84),
 		}, {
 			Constraint = e("UISizeConstraint", {
 				MaxSize = Vector2.new(1360, 860),
@@ -987,13 +735,11 @@ local function render()
 		return
 	end
 
-	uiController = modalAdapter:GetUiController()
-
 	local host = modalAdapter:EnsureHost()
 	if host then
-		legacyFrame = modalAdapter:GetFrame()
 		local _, indexScreen = loadIndexModules()
 		local viewModel = buildViewModel(false)
+		syncHudIndexBadge(viewModel)
 
 		modalAdapter:SetFallbackEnabled(false)
 
@@ -1101,25 +847,7 @@ trackConnection(player:GetAttributeChangedSignal("EquippedDevilFruit"), function
 end, cleanupConnections)
 
 trackConnection(playerGui.ChildAdded, function(child)
-	if child.Name == "Frames" or child.Name == "OpenUI" or child.Name == "HUD" then
-		if child.Name == "Frames" then
-			legacyFrame = nil
-			indexBackdrop = nil
-		end
-		modalAdapter:HandlePlayerGuiChildAdded(child)
-
-		task.defer(scheduleRender)
-	end
-end, cleanupConnections)
-
-trackConnection(playerGui.ChildRemoved, function(child)
-	if child.Name == "Frames" or child.Name == "OpenUI" then
-		if child.Name == "Frames" then
-			legacyFrame = nil
-			indexBackdrop = nil
-		end
-		modalAdapter:HandlePlayerGuiChildRemoved(child)
-
+	if child.Name == "HUD" then
 		task.defer(scheduleRender)
 	end
 end, cleanupConnections)
@@ -1131,8 +859,6 @@ render()
 script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll(cleanupConnections)
-	disconnectAll(legacyConnections)
-	disconnectAll(framesFolderConnections)
 	disconnectAll(inventoryConnections)
 	disconnectAll(indexCollectionConnections)
 	disconnectAll(brainrotInventoryConnections)
@@ -1142,11 +868,7 @@ script.Destroying:Connect(function()
 		claimRemoteConnection:Disconnect()
 		claimRemoteConnection = nil
 	end
+	unregisterModal()
 	modalAdapter:Destroy()
 	root:unmount()
-
-	if fallbackGui then
-		fallbackGui:Destroy()
-		fallbackGui = nil
-	end
 end)

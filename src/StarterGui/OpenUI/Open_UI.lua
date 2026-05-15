@@ -5,6 +5,9 @@ local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local ReactModalRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ReactModalRegistry"))
 
 local CONFIG = {
 	OPEN_TIME = 0.16,
@@ -27,8 +30,14 @@ local GIFT_OPENUI_DEBUG_VERSION = "gifts-openui-x-debug-2026-05-01"
 local CLOSE_BUTTON_DEBUG = true
 local CLOSE_BUTTON_DEBUG_VERSION = "close-buttons-live-debug-2026-05-01"
 local REACT_MODAL_FRAME_NAMES = {
+	CometMerchant = true,
+	GearStore = true,
 	Index = true,
+	LimitedReward = true,
 	Quest = true,
+	Rebirth = true,
+	Settings = true,
+	SpeedUpgrade = true,
 	Store = true,
 }
 local CLOSE_DIAGNOSTIC_FRAME_NAMES = {
@@ -135,7 +144,7 @@ function UIController:_applyBlurCam(opening: boolean)
 end
 
 function UIController:_moveFrame(frame: Frame, y: number, time: number?)
-	tween(frame, { Position = UDim2.new(0.5, 0, y, 0) }, time or CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, y < 0.5 and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN):Play()
+	tween(frame, { Position = UDim2.fromScale(0.5, y) }, time or CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, y < 0.5 and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN):Play()
 end
 
 function UIController:_getVisibleNonPlantFrames()
@@ -198,7 +207,7 @@ function UIController:_forceCloseFromButton(frame: Frame, button: GuiButton, sou
 		scale.Scale = 0
 	end
 	frame.Visible = false
-	frame.Position = UDim2.new(0.5, 0, 10, 0)
+	frame.Position = UDim2.fromScale(0.5, 10)
 	for _, candidate in ipairs(self.FramesFolder:GetChildren()) do
 		if candidate ~= frame and candidate:IsA("Frame") and candidate.Name == frame.Name then
 			closeButtonWarn(
@@ -380,16 +389,16 @@ function UIController:_initializeFrame(frame: Instance)
 		typedFrame.Visible = true
 		if typedFrame == self.PlantInventory then
 			self.PlantVisible = true
-			typedFrame.Position = UDim2.new(0.5, 0, 0.712, 0)
+			typedFrame.Position = UDim2.fromScale(0.5, 0.712)
 		else
 			self.CurrentFrame = typedFrame
-			typedFrame.Position = UDim2.new(0.5, 0, self.PlantVisible and 0.4 or 0.5, 0)
+			typedFrame.Position = UDim2.fromScale(0.5, self.PlantVisible and 0.4 or 0.5)
 		end
 	else
 		typedFrame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
 		uiScale.Scale = 0
 		typedFrame.Visible = false
-		typedFrame.Position = UDim2.new(0.5, 0, 10, 0)
+		typedFrame.Position = UDim2.fromScale(0.5, 10)
 	end
 
 	for _, obj in ipairs(typedFrame:GetDescendants()) do
@@ -415,7 +424,7 @@ function UIController:_closeNonPlant()
 	if scale then
 		self:_playAndWait(tween(scale, { Scale = 1.15 }, CONFIG.POPUP_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT))
 	end
-	local t1 = tween(f, { Position = UDim2.new(0.5, 0, 10, 0) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
+	local t1 = tween(f, { Position = UDim2.fromScale(0.5, 10) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	t1:Play()
 	if t2 then
@@ -436,14 +445,14 @@ function UIController:_openNonPlant(frame: Frame)
 	self.CurrentFrame = frame
 	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, true)
 	frame.Visible = true
-	frame.Position = UDim2.new(0.5, 0, 10, 0)
+	frame.Position = UDim2.fromScale(0.5, 10)
 	local uiScale = frame:FindFirstChildOfClass("UIScale")
 	if not uiScale then
 		uiScale = Instance.new("UIScale")
 		uiScale.Parent = frame
 	end
 	uiScale.Scale = 0
-	local t1 = tween(frame, { Position = UDim2.new(0.5, 0, self.PlantVisible and 0.4 or 0.5, 0) }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
+	local t1 = tween(frame, { Position = UDim2.fromScale(0.5, self.PlantVisible and 0.4 or 0.5) }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
 	local t2 = tween(uiScale, { Scale = 1 }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
 	t1:Play()
 	t2:Play()
@@ -468,16 +477,17 @@ function UIController:_openPlant()
 	self.PlantVisible = true
 	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, true)
 	frame.Visible = true
-	frame.Position = UDim2.new(0.5, 0, 10, 0)
+	frame.Position = UDim2.fromScale(0.5, 10)
 	local uiScale = frame:FindFirstChildOfClass("UIScale")
 	if not uiScale then
 		uiScale = Instance.new("UIScale")
 		uiScale.Parent = frame
 	end
 	uiScale.Scale = 0
-	local t1 = tween(frame, { Position = UDim2.new(0.5, 0, 0.712, 0) }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
+	local t1 = tween(frame, { Position = UDim2.fromScale(0.5, 0.712) }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
 	local t2 = tween(uiScale, { Scale = 1 }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
-	t1:Play(); t2:Play()
+	t1:Play()
+	t2:Play()
 	t1.Completed:Wait()
 	self:_repositionForDual()
 end
@@ -492,9 +502,12 @@ function UIController:_closePlant()
 	if scale then
 		self:_playAndWait(tween(scale, { Scale = 1.15 }, CONFIG.POPUP_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT))
 	end
-	local t1 = tween(frame, { Position = UDim2.new(0.5, 0, 10, 0) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
+	local t1 = tween(frame, { Position = UDim2.fromScale(0.5, 10) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
-	t1:Play(); if t2 then t2:Play() end
+	t1:Play()
+	if t2 then
+		t2:Play()
+	end
 	t1.Completed:Wait()
 	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
 	frame.Visible = false
@@ -521,6 +534,9 @@ function UIController:_cacheButtons()
 		table.insert(self.Buttons, btn)
 		self._buttonConnections[btn] = btn.MouseButton1Click:Connect(function()
 			if not self:_isActiveController() or self.ActiveErrorFrame or self.IsAnimating then
+				return
+			end
+			if ReactModalRegistry.Toggle(btn.Name) then
 				return
 			end
 			local target = self.FramesFolder:FindFirstChild(btn.Name)
@@ -623,6 +639,10 @@ function UIController:_initializePartTriggers()
 				return
 			end
 
+			if ReactModalRegistry.Open(frameName) then
+				return
+			end
+
 			local frame = self.FramesFolder:FindFirstChild(frameName)
 			if frame and frame:IsA("Frame") and not frame.Visible then
 				self:ToggleFrame(frame)
@@ -711,6 +731,9 @@ function UIController:OpenFrame(frameName: string)
 		return
 	end
 	if self.ActiveErrorFrame or self.IsAnimating then
+		return
+	end
+	if ReactModalRegistry.Open(frameName) then
 		return
 	end
 	local frame = self.FramesFolder:FindFirstChild(frameName)

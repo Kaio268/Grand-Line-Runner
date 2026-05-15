@@ -7,6 +7,7 @@ local ReactFrameModalAdapter = {}
 ReactFrameModalAdapter.__index = ReactFrameModalAdapter
 
 local FRAMES_DISPLAY_ORDER = 120
+local STANDALONE_LAYER_NAME = "ReactModalLayer"
 
 local function disconnectAll(bucket)
 	for _, connection in ipairs(bucket) do
@@ -53,6 +54,7 @@ function ReactFrameModalAdapter.new(options)
 	self.frameBackgroundTransparency = options.frameBackgroundTransparency
 	self.frameZIndex = options.frameZIndex or 120
 	self.hostZIndex = options.hostZIndex or 140
+	self.standalone = options.standalone == true
 	self.scheduleRender = nil
 	self.destroyed = false
 	self.uiController = nil
@@ -70,6 +72,10 @@ function ReactFrameModalAdapter:SetScheduleRender(callback)
 end
 
 function ReactFrameModalAdapter:_tryLoadUiController()
+	if self.standalone then
+		return nil
+	end
+
 	if isUsableUiController(self.uiController) then
 		return self.uiController
 	end
@@ -104,6 +110,26 @@ function ReactFrameModalAdapter:GetUiController()
 end
 
 function ReactFrameModalAdapter:_getFramesGui(waitTimeout)
+	if self.standalone then
+		local existing = self.playerGui:FindFirstChild(STANDALONE_LAYER_NAME)
+		if existing and existing:IsA("ScreenGui") then
+			return existing
+		end
+
+		if existing then
+			existing:Destroy()
+		end
+
+		local layer = Instance.new("ScreenGui")
+		layer.Name = STANDALONE_LAYER_NAME
+		layer.DisplayOrder = FRAMES_DISPLAY_ORDER
+		layer.IgnoreGuiInset = true
+		layer.ResetOnSpawn = false
+		layer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		layer.Parent = self.playerGui
+		return layer
+	end
+
 	return self.playerGui:FindFirstChild("Frames") or self.playerGui:WaitForChild("Frames", waitTimeout or 2)
 end
 
@@ -167,7 +193,7 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	if frame.Visible ~= true then
 		frame.Position = UDim2.fromScale(0.5, 0.5)
 	end
-	local desiredSize = self.frameSize or UDim2.new(0.9, 0, 0.84, 0)
+	local desiredSize = self.frameSize or UDim2.fromScale(0.9, 0.84)
 	if frame.Visible ~= true then
 		frame.Size = desiredSize
 	end
@@ -395,6 +421,10 @@ end
 function ReactFrameModalAdapter:BindFramesFolderTracking()
 	disconnectAll(self.framesFolderConnections)
 
+	if self.standalone then
+		return
+	end
+
 	local framesGui = self.playerGui:FindFirstChild("Frames")
 	if not framesGui then
 		return
@@ -420,6 +450,10 @@ function ReactFrameModalAdapter:BindFramesFolderTracking()
 end
 
 function ReactFrameModalAdapter:HandlePlayerGuiChildAdded(child)
+	if self.standalone then
+		return
+	end
+
 	if child.Name == "Frames" then
 		self.legacyFrame = nil
 		self.backdrop = nil
@@ -436,6 +470,10 @@ function ReactFrameModalAdapter:HandlePlayerGuiChildAdded(child)
 end
 
 function ReactFrameModalAdapter:HandlePlayerGuiChildRemoved(child)
+	if self.standalone then
+		return
+	end
+
 	if child.Name == "Frames" then
 		self.legacyFrame = nil
 		self.backdrop = nil

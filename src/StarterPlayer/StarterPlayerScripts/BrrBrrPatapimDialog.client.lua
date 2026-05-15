@@ -13,6 +13,8 @@ local TEMPORARILY_DISABLE_TUTORIAL = true
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
+local SpeedUpgradeTutorialBridge = require(Modules:WaitForChild("SpeedUpgradeTutorialBridge"))
 local Point = require(ReplicatedStorage:WaitForChild("Point"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
@@ -127,6 +129,10 @@ local dialogObject = DialogModule.new("OpenFishingShop", npc, npcPrompt)
 dialogObject:addDialog("Do You Want To Open Speed Upgrades?", { "Yea", "Nope" })
 
 local function openFrame(frameName)
+	if ReactModalRegistry.Open(frameName) then
+		return
+	end
+
 	local playerGui = player:FindFirstChild("PlayerGui")
 	if not playerGui then
 		return
@@ -149,11 +155,11 @@ local function openFrame(frameName)
 	end
 end
 
-local FALLBACK_FIRST_POS = UDim2.new(0.566, 0, 0.431, 0)
-local FALLBACK_FIRST_SIZE = UDim2.new(0.164, 0, 0.093, 0)
+local FALLBACK_FIRST_POS = UDim2.fromScale(0.566, 0.431)
+local FALLBACK_FIRST_SIZE = UDim2.fromScale(0.164, 0.093)
 
-local FALLBACK_SECOND_POS = UDim2.new(0.632, 0, 0.285, 0)
-local FALLBACK_SECOND_SIZE = UDim2.new(0.056, 0, 0.093, 0)
+local FALLBACK_SECOND_POS = UDim2.fromScale(0.632, 0.285)
+local FALLBACK_SECOND_SIZE = UDim2.fromScale(0.056, 0.093)
 local STEP2_SPOTLIGHT_Y_OFFSET = 60
 local STEP3_SPOTLIGHT_Y_OFFSET = 60
 
@@ -296,65 +302,7 @@ local function disconnectPoint()
 end
 
 local function getButtons()
-	local pg = player:WaitForChild("PlayerGui")
-	local frames = pg:WaitForChild("Frames")
-	local speedUpgrade = frames:WaitForChild("SpeedUpgrade")
-	local main = speedUpgrade:WaitForChild("Main")
-	local topBar = speedUpgrade:WaitForChild("TopBar")
-	local x = topBar:WaitForChild("X")
-
-	local function isGuiActuallyVisible(guiObject)
-		if not (guiObject and guiObject:IsA("GuiObject")) then
-			return false
-		end
-		local current = guiObject
-		while current and current ~= speedUpgrade do
-			if current:IsA("GuiObject") and current.Visible == false then
-				return false
-			end
-			current = current.Parent
-		end
-		return speedUpgrade.Visible == true
-	end
-
-	local preferredSlot = main:FindFirstChild("1")
-	if preferredSlot and preferredSlot:IsA("GuiObject") then
-		local preferredBuy = preferredSlot:FindFirstChild("Buy", true)
-		if preferredBuy and preferredBuy:IsA("GuiButton") and isGuiActuallyVisible(preferredBuy) then
-			return preferredBuy, x, speedUpgrade
-		end
-	end
-
-	local bestBuy = nil
-	local bestOrder = math.huge
-
-	for _, child in ipairs(main:GetChildren()) do
-		if child:IsA("GuiObject") then
-			local buy = child:FindFirstChild("Buy", true)
-			if buy and buy:IsA("GuiButton") and isGuiActuallyVisible(buy) then
-				local order = child.LayoutOrder
-				if typeof(order) ~= "number" then
-					order = tonumber(child.Name) or math.huge
-				end
-				if order < bestOrder then
-					bestOrder = order
-					bestBuy = buy
-				end
-			end
-		end
-	end
-
-	if not bestBuy then
-		local slot1 = main:FindFirstChild("1")
-		if slot1 then
-			local fallbackBuy = slot1:FindFirstChild("Buy", true)
-			if fallbackBuy and fallbackBuy:IsA("GuiButton") then
-				bestBuy = fallbackBuy
-			end
-		end
-	end
-
-	return bestBuy, x, speedUpgrade
+	return SpeedUpgradeTutorialBridge.WaitForRefs(2.5)
 end
 
 local function getViewportSize()
@@ -423,8 +371,8 @@ local function makePointRect(guiObject, paddingX, paddingY, offsetX, offsetY)
 	local centerX = absolutePosition.X + (absoluteSize.X * 0.5) + offX
 	local centerY = absolutePosition.Y + (absoluteSize.Y * 0.5) + offY
 
-	local size = UDim2.new(widthPx / viewport.X, 0, heightPx / viewport.Y, 0)
-	local position = UDim2.new(centerX / viewport.X, 0, centerY / viewport.Y, 0)
+	local size = UDim2.fromScale(widthPx / viewport.X, heightPx / viewport.Y)
+	local position = UDim2.fromScale(centerX / viewport.X, centerY / viewport.Y)
 	return size, position
 end
 
@@ -451,25 +399,13 @@ local function makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
 	local centerX = absolutePosition.X + (absoluteSize.X * 0.5) + offX
 	local centerY = absolutePosition.Y + (absoluteSize.Y * 0.5) + offY
 
-	local size = UDim2.new(widthPx / viewport.X, 0, heightPx / viewport.Y, 0)
-	local position = UDim2.new(centerX / viewport.X, 0, centerY / viewport.Y, 0)
+	local size = UDim2.fromScale(widthPx / viewport.X, heightPx / viewport.Y)
+	local position = UDim2.fromScale(centerX / viewport.X, centerY / viewport.Y)
 	return size, position
 end
 
 local function pointAtGui(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
 	local size, position = makePointRect(guiObject, paddingX, paddingY, offsetX, offsetY)
-	if not size or not position then
-		size = fallbackSize
-		position = fallbackPosition
-	end
-
-	Point.Set(size, position, {
-		posMode = "center",
-	})
-end
-
-local function pointAtGuiNow(guiObject, paddingX, paddingY, fallbackSize, fallbackPosition, offsetX, offsetY)
-	local size, position = makePointRectNow(guiObject, paddingX, paddingY, offsetX, offsetY)
 	if not size or not position then
 		size = fallbackSize
 		position = fallbackPosition

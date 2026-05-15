@@ -33,6 +33,9 @@ local PATH_LABELS = {
 	VipBarriers = "active map Vip Refuge.VIPBarriers",
 	VipDoorParts = "active map VIPDoorParts",
 	BrrBrrPatapimNpc = "Brr Brr Patapim NPC",
+	CometMerchantNpc = "Comet Merchant NPC",
+	NamiNpc = "Nami sell NPC",
+	FrankyNpc = "Franky upgrade NPC",
 	GearShopNpc = "gear shop NPC",
 	SellNpc = "sell NPC",
 	GroupReward = "active map GroupReward",
@@ -222,6 +225,35 @@ local function findDirectOrRecursiveInRoots(roots, names, className)
 		or findInRoots(roots, names, className, true)
 end
 
+local function findNpcByPromptText(root, searchText)
+	if not root then
+		return nil
+	end
+
+	local needle = string.lower(tostring(searchText or ""))
+	if needle == "" then
+		return nil
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			local haystack = string.lower(table.concat({
+				tostring(descendant.Name or ""),
+				tostring(descendant.ActionText or ""),
+				tostring(descendant.ObjectText or ""),
+			}, " "))
+			if string.find(haystack, needle, 1, true) then
+				local model = descendant:FindFirstAncestorOfClass("Model")
+				if model then
+					return model
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
 local function resolvePlayableMapRoot(map)
 	if not map then
 		return nil
@@ -335,8 +367,17 @@ local function collectRefs(options)
 	refs.VipDoorParts = vipDoorParts or vipBarriers
 	refs.BrrBrrPatapimNpc = getChildByNames(lobby, { "Brr Brr Patapim" }, nil, true)
 		or findDirectOrRecursiveInRoots(socialRoots, { "Brr Brr Patapim" })
-	refs.GearShopNpc = getChildByNames(lobbyModel, { "Normal" }, nil, true)
-	refs.SellNpc = getChildByNames(lobby, { "Normal" })
+	refs.NamiNpc = getChildByNames(lobbyModel, { "Nami" }, nil, true)
+		or findNpcByPromptText(lobby, "nami")
+		or findNpcByPromptText(lobby, "sell")
+	refs.FrankyNpc = getChildByNames(lobbyModel, { "Franky" }, nil, true)
+		or findNpcByPromptText(lobby, "franky")
+		or findNpcByPromptText(lobby, "upgrade")
+	refs.GearShopNpc = getChildByNames(lobbyModel, { "GearShop", "Gear Shop" }, nil, true)
+		or findNpcByPromptText(lobby, "gear")
+	refs.CometMerchantNpc = getChildByNames(lobbyModel, { "CometMerchant", "Comet Merchant" }, nil, true)
+		or findNpcByPromptText(lobby, "comet")
+	refs.SellNpc = refs.NamiNpc
 	refs.GroupReward = groupReward
 	refs.GroupRewardHitBox = groupRewardHitBox
 	refs.GroupRewardPrompt = groupRewardHitBox
