@@ -101,6 +101,15 @@ local function getWorldPosition(instance)
 	return nil
 end
 
+local function isWaveHazard(hazard)
+	if not hazard then
+		return false
+	end
+
+	local hazardType = hazard:GetAttribute("HazardType")
+	return typeof(hazardType) == "string" and string.lower(hazardType) == "wave"
+end
+
 local function updatePath()
 	local startPos = waveStart and getWorldPosition(waveStart)
 	local endPos = waveEnd and getWorldPosition(waveEnd)
@@ -211,7 +220,7 @@ local function render()
 	local waveMarkers = {}
 	if hazardFolder and hazardFolder.Parent then
 		for _, hazard in ipairs(hazardFolder:GetChildren()) do
-			local worldPos = getWorldPosition(hazard)
+			local worldPos = isWaveHazard(hazard) and getWorldPosition(hazard)
 			if worldPos then
 				waveMarkers[#waveMarkers + 1] = {
 					alpha = alphaFromWorldPos(worldPos, WAVE_MARKER_PADDING),

@@ -390,6 +390,15 @@ local function getWaveWorldPos(obj)
 	return nil
 end
 
+local function isWaveHazard(obj)
+	local hazardType = obj:GetAttribute("HazardType")
+	if typeof(hazardType) == "string" then
+		return string.lower(hazardType) == "wave"
+	end
+
+	return not useSharedHazards
+end
+
 local function getRewardWorldPos(obj)
 	if not obj then
 		return nil
@@ -464,6 +473,10 @@ local function removeUnusedChestIndicators(validMap)
 end
 
 local function ensureWaveIndicator(waveObj)
+	if not isWaveHazard(waveObj) then
+		return nil
+	end
+
 	if waveIndicators[waveObj] and waveIndicators[waveObj].Parent then
 		return waveIndicators[waveObj]
 	end
@@ -516,6 +529,11 @@ local function updateWaveIndicators()
 			end
 			waveIndicators[waveObj] = nil
 		else
+			if not isWaveHazard(waveObj) then
+				removeWaveIndicator(waveObj)
+				continue
+			end
+
 			local pos = getWaveWorldPos(waveObj)
 			if pos then
 				local a = getAlphaOnLine(pos)
