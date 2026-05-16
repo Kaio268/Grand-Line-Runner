@@ -1,9 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local GamepassesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+local GamepassesConfig =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
 
 local Catalog = {}
-local VIP_GAMEPASS_ID = assert(tonumber(GamepassesConfig.VIP and GamepassesConfig.VIP.ID), "VIP gamepass ID is not configured")
+local VIP_GAMEPASS_ID =
+	assert(tonumber(GamepassesConfig.VIP and GamepassesConfig.VIP.ID), "VIP gamepass ID is not configured")
 
 local function item(config)
 	return config
@@ -405,11 +407,12 @@ local items = {
 	}),
 }
 
-Catalog.title = "Grand Line Rush Store"
+Catalog.title = "Grand Tide Rush Store"
 Catalog.subtitle = "Stock your captain with premium bundles, boosts, and voyage perks before the next run."
 Catalog.heroEyebrow = "Grand Market"
 Catalog.heroHeadline = "Stock up before you sail back into the Grand Line."
-Catalog.heroCopy = "Grab featured bundles, permanent captain perks, and limited boosts built for faster routes, stronger hauls, and smoother progression."
+Catalog.heroCopy =
+	"Grab featured bundles, permanent captain perks, and limited boosts built for faster routes, stronger hauls, and smoother progression."
 Catalog.codesPanel = {
 	title = "Redeem Codes",
 	eyebrow = "Signal Snail Drops",

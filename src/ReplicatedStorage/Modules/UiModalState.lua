@@ -6,9 +6,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local UiModalState = {}
 
 local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = "GameplayModalOpen"
-local SUPPRESSED_GUI_NAMES = {
-	HUD = true,
-}
+local SUPPRESSED_GUI_NAMES = {}
 
 local openKeys = {}
 local initialized = false

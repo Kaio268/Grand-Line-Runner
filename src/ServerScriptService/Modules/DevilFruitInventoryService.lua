@@ -18,15 +18,9 @@ local CONSUME_BIND_VERSION = "consume_bind_v2"
 local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
 local CONSUME_DEBUG = true
 local R6G_WELD_DEBUG = true
-local EXPLICIT_GRIP_ATTACHMENT_NAMES = {
-	"RightGripAttachment",
-	"GripAttachment",
-	"ToolGripAttachment",
-}
-local EXPLICIT_GRIP_PART_NAMES = {
-	"Grip",
-	"Hold",
-}
+local CONSUME_SUCCESS_COLOR = Color3.fromRGB(242, 209, 107)
+local CONSUME_FAILURE_COLOR = Color3.fromRGB(255, 130, 130)
+local CONSUME_POPUP_STROKE = Color3.fromRGB(10, 18, 28)
 local MODEL_VARIANT_R6G = "R6G"
 local MODEL_VARIANT_ATTRIBUTE_NAMES = {
 	"FruitHoldModelVariant",
@@ -40,6 +34,7 @@ local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local FruitGripController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("FruitGripController"))
 local DevilFruitLogger = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
+local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local dataManagerModule = nil
@@ -64,6 +59,7 @@ local DataManager = setmetatable({}, {
 local promptRemote
 local responseRemote
 local requestRemote
+local resultRemote
 local pendingConsumeByPlayer = {}
 local started = false
 local nextConsumeBindId = 0
@@ -163,6 +159,33 @@ local function ensureRemotes()
 	promptRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumePrompt")
 	responseRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumeResponse")
 	requestRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumeRequest")
+	resultRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", "DevilFruitConsumeResult")
+end
+
+local function publishConsumeResult(player, payload)
+	local success = typeof(payload) == "table" and payload.Success == true
+	local reason = typeof(payload) == "table" and tostring(payload.Reason or "") or ""
+	local fruitKey = typeof(payload) == "table" and tostring(payload.FruitKey or "") or ""
+	local equippedFruitName = typeof(payload) == "table" and tostring(payload.EquippedFruitName or "") or ""
+
+	player:SetAttribute("LastDevilFruitConsumeSuccess", success)
+	player:SetAttribute("LastDevilFruitConsumeReason", if reason ~= "" then reason else nil)
+	player:SetAttribute("LastDevilFruitConsumeFruitKey", if fruitKey ~= "" then fruitKey else nil)
+	player:SetAttribute("LastDevilFruitConsumeEquippedFruit", if equippedFruitName ~= "" then equippedFruitName else nil)
+	player:SetAttribute("LastDevilFruitConsumeAt", os.clock())
+
+	resultRemote:FireClient(player, payload)
+end
+
+local function showConsumeResultPopup(player, success, text)
+	PopUpModule:Server_SendPopUp(
+		player,
+		text,
+		if success then CONSUME_SUCCESS_COLOR else CONSUME_FAILURE_COLOR,
+		CONSUME_POPUP_STROKE,
+		3,
+		not success
+	)
 end
 
 local function resolveFruit(fruitIdentifier)
@@ -646,36 +669,6 @@ local function expandBounds(relativeCFrame, size, currentMin, currentMax)
 	end
 
 	return currentMin, currentMax
-end
-
-local function findExplicitGripPivot(template)
-	for _, attachmentName in ipairs(EXPLICIT_GRIP_ATTACHMENT_NAMES) do
-		local attachment = template:FindFirstChild(attachmentName, true)
-		if attachment and attachment:IsA("Attachment") and attachment.Parent and attachment.Parent:IsA("BasePart") then
-			return attachment.WorldCFrame
-		end
-	end
-
-	for _, partName in ipairs(EXPLICIT_GRIP_PART_NAMES) do
-		local gripPart = template:FindFirstChild(partName, true)
-		if gripPart and gripPart:IsA("BasePart") then
-			return gripPart.CFrame
-		end
-	end
-
-	return nil
-end
-
-local function findToolGripAttachmentPivot(template)
-	local templateParts = getTemplateParts(template)
-	for _, part in ipairs(templateParts) do
-		local attachment = part:FindFirstChild("ToolGripAttachment")
-		if attachment and attachment:IsA("Attachment") then
-			return attachment.WorldCFrame
-		end
-	end
-
-	return nil
 end
 
 local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
@@ -1234,6 +1227,10 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	if accepted ~= true then
 		consumeDebug("response blocked player=%s reason=not_accepted", player.Name)
 		DevilFruitLogger.Info("SERVER", "consume cancelled player=%s fruit=%s", player.Name, tostring(pending.FruitKey))
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "cancelled",
+		})
 		return
 	end
 
@@ -1251,12 +1248,22 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 			tostring(pending.FruitKey),
 			tostring(fruitKey)
 		)
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "fruit_mismatch",
+		})
+		showConsumeResultPopup(player, false, "Fruit consume failed: fruit mismatch")
 		return
 	end
 
 	if os.clock() - pending.RequestedAt > PROMPT_TIMEOUT then
 		consumeDebug("response blocked player=%s reason=timeout fruit=%s", player.Name, tostring(fruitKey))
 		DevilFruitLogger.Warn("SERVER", "consume ignored player=%s reason=prompt_timeout", player.Name)
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "prompt_timeout",
+		})
+		showConsumeResultPopup(player, false, "Fruit consume timed out")
 		return
 	end
 
@@ -1269,6 +1276,11 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 			tostring(tool and tool.Name or "<nil>"),
 			debugInstancePath(tool and tool.Parent)
 		)
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "tool_not_owned",
+		})
+		showConsumeResultPopup(player, false, "Fruit consume failed: item missing")
 		return
 	end
 
@@ -1281,6 +1293,11 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 			tostring(fruitKey),
 			tostring(quantityReason)
 		)
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = tostring(quantityReason),
+		})
+		showConsumeResultPopup(player, false, "Fruit consume failed: inventory unavailable")
 		return
 	end
 
@@ -1292,6 +1309,11 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 			tostring(fruitKey),
 			tostring(quantity)
 		)
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "not_owned",
+		})
+		showConsumeResultPopup(player, false, "Fruit consume failed: not owned")
 		return
 	end
 
@@ -1305,6 +1327,11 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 			player.Name,
 			tostring(targetFruitName)
 		)
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "already_equipped",
+		})
+		showConsumeResultPopup(player, false, "That fruit is already equipped")
 		return
 	end
 
@@ -1328,6 +1355,11 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	)
 	if not consumed then
 		warn(string.format("[DevilFruitInventoryService] Failed to consume %s for %s: %s", fruitKey, player.Name, tostring(consumeReason)))
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = tostring(consumeReason),
+		})
+		showConsumeResultPopup(player, false, "Fruit consume failed")
 		return
 	end
 
@@ -1337,15 +1369,43 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	if not equipped then
 		DevilFruitInventoryService.GrantFruit(player, fruitKey, 1)
 		warn(string.format("[DevilFruitInventoryService] Failed to equip %s for %s after consuming", fruitKey, player.Name))
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "equip_failed",
+		})
+		showConsumeResultPopup(player, false, "Fruit equip failed")
 		return
 	end
+
+	local appliedFruitName = DevilFruitService.GetEquippedFruit(player)
+	if appliedFruitName ~= targetFruitName then
+		DevilFruitInventoryService.GrantFruit(player, fruitKey, 1)
+		warn(string.format(
+			"[DevilFruitInventoryService] Rolled back consumed %s for %s because equipped fruit resolved to %s",
+			fruitKey,
+			player.Name,
+			tostring(appliedFruitName)
+		))
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "equip_mismatch",
+		})
+		showConsumeResultPopup(player, false, "Fruit equip did not stick")
+		return
+	end
+
 	DevilFruitLogger.Info(
 		"SERVER",
 		"consume equip applied player=%s equippedFruit=%s targetFruit=%s",
 		player.Name,
-		tostring(DevilFruitService.GetEquippedFruit(player)),
+		tostring(appliedFruitName),
 		tostring(targetFruitName)
 	)
+	publishConsumeResult(player, {
+		Success = true,
+		FruitKey = fruitKey,
+		EquippedFruitName = appliedFruitName,
+	})
 
 	if tool and tool.Parent then
 		tool:Destroy()
@@ -1382,6 +1442,7 @@ function DevilFruitInventoryService.Start()
 	end
 
 	started = true
+	DevilFruitService.Start("DevilFruitInventoryService")
 	ensureRemotes()
 
 	for _, player in ipairs(Players:GetPlayers()) do

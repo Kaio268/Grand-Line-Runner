@@ -59,9 +59,8 @@ local function ShopShell(props)
 	local shellRef = React.useRef(nil)
 	local scrollerRef = React.useRef(nil)
 	local contentWidth, setContentWidth = React.useState(1220)
-	local activeSectionKey, setActiveSectionKey = React.useState(
-		props.catalog.sections[1] and props.catalog.sections[1].key or ""
-	)
+	local activeSectionKey, setActiveSectionKey =
+		React.useState(props.catalog.sections[1] and props.catalog.sections[1].key or "")
 
 	React.useEffect(function()
 		local shell = shellRef.current
@@ -326,30 +325,30 @@ local function ShopShell(props)
 				}),
 			}),
 			ShopTitle = e("TextLabel", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					BackgroundTransparency = 1,
-					Font = Theme.Fonts.Display,
-					Position = UDim2.new(0.5, -28, 0.5, 0),
-					Size = UDim2.new(1, -148, 0, 72),
-					Text = props.catalog.title or "Grand Line Rush Store",
-					TextColor3 = Theme.Palette.GoldSoft,
-					TextSize = titleTextSize,
-					TextStrokeColor3 = Theme.Palette.GoldShadow,
-					TextStrokeTransparency = 0.44,
-					TextWrapped = true,
-					TextYAlignment = Enum.TextYAlignment.Center,
-					TextXAlignment = Enum.TextXAlignment.Center,
-					ZIndex = 11,
-				}),
-				Close = e("TextButton", {
-					AnchorPoint = Vector2.new(1, 0),
-					AutoButtonColor = false,
-					BackgroundColor3 = Color3.fromRGB(200, 0, 9),
-					BorderSizePixel = 0,
-					Position = UDim2.new(1, 0, 0, 14),
-					Size = UDim2.fromOffset(38, 38),
-					Text = "X",
-					TextColor3 = Theme.Palette.Text,
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				BackgroundTransparency = 1,
+				Font = Theme.Fonts.Display,
+				Position = UDim2.new(0.5, -28, 0.5, 0),
+				Size = UDim2.new(1, -148, 0, 72),
+				Text = props.catalog.title or "Grand Tide Rush Store",
+				TextColor3 = Theme.Palette.GoldSoft,
+				TextSize = titleTextSize,
+				TextStrokeColor3 = Theme.Palette.GoldShadow,
+				TextStrokeTransparency = 0.44,
+				TextWrapped = true,
+				TextYAlignment = Enum.TextYAlignment.Center,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 11,
+			}),
+			Close = e("TextButton", {
+				AnchorPoint = Vector2.new(1, 0),
+				AutoButtonColor = false,
+				BackgroundColor3 = Color3.fromRGB(200, 0, 9),
+				BorderSizePixel = 0,
+				Position = UDim2.new(1, 0, 0, 14),
+				Size = UDim2.fromOffset(38, 38),
+				Text = "X",
+				TextColor3 = Theme.Palette.Text,
 				TextSize = 18,
 				Font = Theme.Fonts.Display,
 				ZIndex = 11,

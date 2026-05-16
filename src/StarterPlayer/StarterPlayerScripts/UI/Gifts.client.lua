@@ -25,6 +25,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	frameName = "Gifts",
 	hostName = "ReactGiftsHost",
 	backdropName = "ReactGiftsBackdrop",
+	backdropActive = false,
 	modalStateKey = "GiftsModal",
 	minSize = Vector2.new(520, 480),
 	maxSize = Vector2.new(760, 720),

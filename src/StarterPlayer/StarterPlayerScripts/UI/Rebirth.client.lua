@@ -27,6 +27,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	frameName = "Rebirth",
 	hostName = "ReactRebirthHost",
 	backdropName = "ReactRebirthBackdrop",
+	backdropActive = false,
 	modalStateKey = "RebirthModal",
 	minSize = Vector2.new(620, 520),
 	maxSize = Vector2.new(840, 700),

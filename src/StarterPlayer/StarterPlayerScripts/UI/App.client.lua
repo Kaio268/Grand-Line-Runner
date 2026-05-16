@@ -6,6 +6,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -2056,6 +2057,7 @@ end
 local function render()
 	local data = buildRenderData()
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
+	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, uiState.isOpen == true)
 
 	root:render(ReactRoblox.createPortal(
 		React.createElement(App, {
@@ -2613,6 +2615,7 @@ task.defer(scheduleRender)
 script.Destroying:Connect(function()
 	destroyed = true
 	UiModalState.SetOpen("InventoryModal", false)
+	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, false)
 	if modalInputSinkBound then
 		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)
 		modalInputSinkBound = false

@@ -1,11 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local fruitHoldPresentation = require(
-	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("FruitHoldPresentation")
-)
-local controller = require(
-	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitClientController")
-)
+local clientFolder = ReplicatedStorage
+	:WaitForChild("Modules")
+	:WaitForChild("DevilFruits")
+	:WaitForChild("Client")
 
-fruitHoldPresentation.Start()
-controller.Start()
+local runtimeBootstrap = require(clientFolder:WaitForChild("DevilFruitRuntimeBootstrap"))
+
+runtimeBootstrap.Start()

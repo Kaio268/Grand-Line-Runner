@@ -64,6 +64,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	frameName = "Index",
 	hostName = "ReactIndexHost",
 	backdropName = "ReactIndexBackdrop",
+	backdropActive = false,
 	modalStateKey = "IndexModal",
 	minSize = Vector2.new(1080, 680),
 	maxSize = Vector2.new(1360, 860),

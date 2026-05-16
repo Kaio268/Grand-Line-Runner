@@ -63278,7 +63278,7 @@ local items = {
 	}),
 }
 
-Catalog.title = "Grand Line Rush Store"
+Catalog.title = "Grand Tide Rush Store"
 Catalog.subtitle = "Stock your captain with premium bundles, boosts, and voyage perks before the next run."
 Catalog.heroEyebrow = "Grand Market"
 Catalog.heroHeadline = "Stock up before you sail back into the Grand Line."
@@ -65255,7 +65255,7 @@ local function ShopShell(props)
 					Font = Theme.Fonts.Display,
 					Position = UDim2.new(0.5, -28, 0.5, 0),
 					Size = UDim2.new(1, -148, 0, 72),
-					Text = props.catalog.title or "Grand Line Rush Store",
+					Text = props.catalog.title or "Grand Tide Rush Store",
 					TextColor3 = Theme.Palette.GoldSoft,
 					TextSize = titleTextSize,
 					TextStrokeColor3 = Theme.Palette.GoldShadow,

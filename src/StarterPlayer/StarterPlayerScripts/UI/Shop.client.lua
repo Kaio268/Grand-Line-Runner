@@ -33,6 +33,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	frameName = "Store",
 	hostName = "ReactStoreHost",
 	backdropName = "ReactStoreBackdrop",
+	backdropActive = false,
 	modalStateKey = "ShopModal",
 	minSize = Vector2.new(980, 680),
 	maxSize = Vector2.new(1340, 860),

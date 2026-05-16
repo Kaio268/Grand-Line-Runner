@@ -16,9 +16,31 @@ local REACT_MODAL_NAMES = {
 	SpeedUpgrade = true,
 	Store = true,
 }
+local SIDE_MENU_MODAL_NAMES = {
+	Gifts = true,
+	Index = true,
+	Quest = true,
+	Rebirth = true,
+	Settings = true,
+	Store = true,
+}
 
 local function fireChanged(name)
 	changedEvent:Fire(name)
+end
+
+local function closeVisibleSideMenusExcept(exceptName)
+	for name, handlers in pairs(entries) do
+		if name ~= exceptName
+			and SIDE_MENU_MODAL_NAMES[name] == true
+			and typeof(handlers.isVisible) == "function"
+			and handlers.isVisible() == true
+			and typeof(handlers.close) == "function"
+		then
+			handlers.close()
+			fireChanged(name)
+		end
+	end
 end
 
 function ReactModalRegistry.Register(name, handlers)
@@ -67,6 +89,9 @@ function ReactModalRegistry.Toggle(name)
 	local key = tostring(name or "")
 	local entry = entries[key]
 	if entry and typeof(entry.toggle) == "function" then
+		if SIDE_MENU_MODAL_NAMES[key] == true and ReactModalRegistry.IsVisible(key) ~= true then
+			closeVisibleSideMenusExcept(key)
+		end
 		entry.toggle()
 		fireChanged(key)
 		return true
@@ -84,6 +109,9 @@ function ReactModalRegistry.Open(name)
 	local key = tostring(name or "")
 	local entry = entries[key]
 	if entry and typeof(entry.open) == "function" then
+		if SIDE_MENU_MODAL_NAMES[key] == true then
+			closeVisibleSideMenusExcept(key)
+		end
 		entry.open()
 		fireChanged(key)
 		return true

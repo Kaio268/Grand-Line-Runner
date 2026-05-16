@@ -46,6 +46,7 @@ function ReactFrameModalAdapter.new(options)
 	self.hostName = options.hostName or ("React" .. self.frameName .. "Host")
 	self.backdropName = options.backdropName
 	self.modalStateKey = options.modalStateKey
+	self.backdropActive = options.backdropActive ~= false
 	self.minSize = options.minSize
 	self.maxSize = options.maxSize
 	self.frameSize = options.frameSize
@@ -157,10 +158,11 @@ function ReactFrameModalAdapter:_ensureBackdrop()
 		backdrop.Size = UDim2.fromScale(1, 1)
 		backdrop.Visible = false
 		backdrop.ZIndex = 80
-		backdrop.Active = true
+		backdrop.Active = self.backdropActive
 		backdrop.Parent = framesGui
 	end
 
+	backdrop.Active = self.backdropActive
 	self.backdrop = backdrop
 	return backdrop
 end

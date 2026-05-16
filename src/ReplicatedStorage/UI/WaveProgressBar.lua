@@ -153,15 +153,18 @@ local function segmentRow(props)
 	}
 
 	for index, section in ipairs(sections) do
-		local color = if section.isImpact
-			then Color3.fromRGB(104, 56, 54)
-			else SEGMENT_COLORS[((index - 1) % #SEGMENT_COLORS) + 1]
+		local color = section.color
+			or if section.isImpact
+				then Color3.fromRGB(104, 56, 54)
+				else SEGMENT_COLORS[((index - 1) % #SEGMENT_COLORS) + 1]
 		local widthScale = section.widthScale or (1 / #sections)
 		children["Segment" .. tostring(index)] = e("Frame", {
 			BackgroundColor3 = color,
+			BackgroundTransparency = 0.08,
 			BorderSizePixel = 0,
 			LayoutOrder = index,
 			Size = UDim2.new(widthScale, -SEGMENT_GAP_PX, 1, 0),
+			ZIndex = 6,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
@@ -169,8 +172,8 @@ local function segmentRow(props)
 			Gradient = e("UIGradient", {
 				Rotation = 90,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, color:Lerp(Color3.new(1, 1, 1), 0.06)),
-					ColorSequenceKeypoint.new(1, color:Lerp(Color3.new(0, 0, 0), 0.22)),
+					ColorSequenceKeypoint.new(0, color:Lerp(Color3.new(1, 1, 1), 0.14)),
+					ColorSequenceKeypoint.new(1, color:Lerp(Color3.new(0, 0, 0), 0.08)),
 				}),
 			}),
 			Stroke = e("UIStroke", {
@@ -194,7 +197,7 @@ local function segmentRow(props)
 				TextTransparency = if section.isImpact then 0.05 else 0.16,
 				TextWrapped = true,
 				TextYAlignment = Enum.TextYAlignment.Bottom,
-				ZIndex = 6,
+				ZIndex = 7,
 			}),
 		})
 	end
@@ -202,6 +205,7 @@ local function segmentRow(props)
 	return e("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
+		ZIndex = 6,
 	}, children)
 end
 

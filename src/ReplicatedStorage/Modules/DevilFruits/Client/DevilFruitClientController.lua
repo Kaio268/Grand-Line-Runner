@@ -26,7 +26,6 @@ local DevilFruitUiController = require(Modules:WaitForChild("DevilFruits"):WaitF
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = "GameplayModalOpen"
 
 local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
 local MOGU_BURROW_ABILITY = "Burrow"
@@ -46,10 +45,10 @@ local DEFAULT_HAZARD_SUPPRESSION_SOURCE = "Default"
 local FIRE_BURST_HAZARD_SUPPRESSION_SOURCE = "FireBurst"
 local MOGU_HAZARD_SUPPRESSION_SOURCE = "MoguBurrow"
 
-local RemoteBundle = DevilFruitRemotes.GetBundle()
-local requestRemote = RemoteBundle.Request
-local stateRemote = RemoteBundle.State
-local effectRemote = RemoteBundle.Effect
+local remoteBundle
+local requestRemote
+local stateRemote
+local effectRemote
 
 local localCooldowns = {}
 local suppressedParts = {}
@@ -66,31 +65,16 @@ local syncDevilFruitClientState
 local lastSyncedFruitName = DevilFruitConfig.None
 local cooldownHud = {
 	CurrentFruit = nil,
-	Gui = nil,
-	Panel = nil,
-	Backdrop = nil,
-	Overlay = nil,
-	TopBar = nil,
-	FruitLabel = nil,
-	List = nil,
-	EmptyState = nil,
-	Rows = {},
+	Abilities = {},
+	Visible = false,
 }
-local clearCooldownRows
-local refreshCooldownHudLayout
+local cooldownHudRoot
+local cooldownHudRootContainer
+local cooldownHudComponent
+local react
+local reactRoblox
+local cooldownHudLastError
 local DEVIL_FRUIT_UI = {
-	FruitBackgroundImage = "rbxassetid://134053886107384",
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	PrimaryBg = Color3.fromRGB(30, 42, 56),
-	SecondaryBg = Color3.fromRGB(36, 52, 71),
-	HeaderBg = Color3.fromRGB(16, 35, 59),
-	SectionBg = Color3.fromRGB(27, 46, 68),
-	SectionHover = Color3.fromRGB(46, 74, 99),
-	GoldBase = Color3.fromRGB(212, 175, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
-	TextMain = Color3.fromRGB(230, 230, 230),
-	TextSecondary = Color3.fromRGB(184, 193, 204),
 	Ready = Color3.fromRGB(116, 255, 161),
 	Cooldown = Color3.fromRGB(255, 190, 116),
 	CooldownFill = Color3.fromRGB(255, 133, 44),
@@ -98,15 +82,8 @@ local DEVIL_FRUIT_UI = {
 
 local HUD_REFRESH_INTERVAL = 0.05
 local nextHudRefreshAt = 0
-local COOLDOWN_PANEL_WIDTH = 318
-local COOLDOWN_PANEL_INSET_X = 10
-local COOLDOWN_ROW_HEIGHT = 58
-local COOLDOWN_LIST_SPACING = 6
-local COOLDOWN_LIST_VERTICAL_PADDING = 16
-local COOLDOWN_PANEL_TOP_PADDING = 10
-local COOLDOWN_PANEL_BOTTOM_PADDING = 10
-local COOLDOWN_TOPBAR_HEIGHT = 58
-local COOLDOWN_SECTION_GAP = 8
+local STATE_RECONCILE_INTERVAL = 0.25
+local nextStateReconcileAt = 0
 
 local function logDevilFruitClient(message, ...)
 	print(string.format("[DEVILFRUIT CLIENT] " .. message, ...))
@@ -254,642 +231,162 @@ local function setLocalCooldown(abilityName, readyAt, payload)
 	localCooldowns[abilityName] = cooldownState
 end
 
-local function getPlayerGui()
-	return playerGui
-end
-
-local function isGameplayModalOpen()
-	return playerGui:GetAttribute(GAMEPLAY_MODAL_OPEN_ATTRIBUTE) == true
-end
-
-local function ensureStroke(instance, color, transparency, thickness)
-	local stroke = instance:FindFirstChildOfClass("UIStroke")
-	if not stroke then
-		stroke = Instance.new("UIStroke")
-		stroke.Parent = instance
-	end
-
-	stroke.Color = color
-	stroke.Transparency = transparency
-	stroke.Thickness = thickness
-	return stroke
-end
-
-local function ensureCorner(instance, radius)
-	local corner = instance:FindFirstChildOfClass("UICorner")
-	if not corner then
-		corner = Instance.new("UICorner")
-		corner.Parent = instance
-	end
-
-	corner.CornerRadius = UDim.new(0, radius)
-	return corner
-end
-
-local function ensureGradient(instance, topColor, bottomColor)
-	local gradient = instance:FindFirstChildOfClass("UIGradient")
-	if not gradient then
-		gradient = Instance.new("UIGradient")
-		gradient.Parent = instance
-	end
-
-	gradient.Rotation = 90
-	gradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, topColor),
-		ColorSequenceKeypoint.new(1, bottomColor),
-	})
-	return gradient
-end
-
 local function getOrderedAbilities(fruitName)
 	return DevilFruitUiController.GetOrderedAbilities(fruitName)
+end
+
+local function setRuntimeAttribute(name, value)
+	player:SetAttribute(name, value)
 end
 
 local function shouldShowCooldownHud(fruitName)
 	return DevilFruitUiController.ShouldShowCooldownHud(fruitName)
 end
 
-local function isCooldownPanelValid(panel)
-	if not (panel and panel:IsA("Frame")) then
-		return false
+local function loadCooldownHudComponent()
+	if cooldownHudComponent and react and reactRoblox then
+		return true
 	end
 
-	local backdrop = panel:FindFirstChild("Backdrop")
-	local overlay = panel:FindFirstChild("BackdropOverlay")
-	local topBar = panel:FindFirstChild("TopBar")
-	local list = panel:FindFirstChild("AbilityList")
-	local title = topBar and topBar:FindFirstChild("Title")
-	local fruitName = topBar and topBar:FindFirstChild("FruitName")
+	local packages = ReplicatedStorage:WaitForChild("Packages")
+	local uiFolder = ReplicatedStorage:WaitForChild("UI")
+	local devilFruitUiFolder = uiFolder:WaitForChild("DevilFruit")
 
-	return backdrop ~= nil
-		and overlay ~= nil
-		and topBar ~= nil
-		and list ~= nil
-		and title ~= nil
-		and fruitName ~= nil
+	react = require(packages:WaitForChild("React"))
+	reactRoblox = require(packages:WaitForChild("ReactRoblox"))
+	cooldownHudComponent = require(devilFruitUiFolder:WaitForChild("CooldownHud"))
+
+	return true
 end
 
-local function ensureCooldownHud()
-	local playerGui = getPlayerGui()
-	local screenGui = playerGui:FindFirstChild("DevilFruitHUD")
-	local panelRebuilt = false
-	if screenGui and not screenGui:IsA("ScreenGui") then
-		screenGui:Destroy()
-		screenGui = nil
-		panelRebuilt = true
-	end
+local function ensureCooldownHudRoot()
+	loadCooldownHudComponent()
 
-	if not screenGui then
-		screenGui = Instance.new("ScreenGui")
-		screenGui.Name = "DevilFruitHUD"
-		screenGui.Parent = playerGui
-		panelRebuilt = true
-	end
-
-	screenGui.ResetOnSpawn = false
-	screenGui.DisplayOrder = 25
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-	local panel = screenGui:FindFirstChild("CooldownPanel")
-	if panel and not panel:IsA("Frame") then
-		panel:Destroy()
-		panel = nil
-		panelRebuilt = true
-	end
-	if panel and not isCooldownPanelValid(panel) then
-		panel:Destroy()
-		panel = nil
-		panelRebuilt = true
-	end
-
-	if not panel then
-		panel = Instance.new("Frame")
-		panel.Name = "CooldownPanel"
-		panel.AnchorPoint = Vector2.new(1, 1)
-		panel.Position = UDim2.new(1, -24, 1, -24)
-		panel.Size = UDim2.fromOffset(COOLDOWN_PANEL_WIDTH, 140)
-		panel.AutomaticSize = Enum.AutomaticSize.None
-		panel.BackgroundColor3 = DEVIL_FRUIT_UI.PrimaryBg
-		panel.BackgroundTransparency = 1
-		panel.BorderSizePixel = 0
-		panel.ClipsDescendants = true
-		panel.Visible = false
-		panel.Parent = screenGui
-		panelRebuilt = true
-	end
-
-	panel.BackgroundColor3 = DEVIL_FRUIT_UI.PrimaryBg
-	panel.BackgroundTransparency = 1
-	panel.BorderSizePixel = 0
-	panel.AnchorPoint = Vector2.new(1, 1)
-	panel.Position = UDim2.new(1, -24, 1, -24)
-	panel.Size = UDim2.fromOffset(COOLDOWN_PANEL_WIDTH, 140)
-	panel.AutomaticSize = Enum.AutomaticSize.None
-	panel.ClipsDescendants = true
-	ensureCorner(panel, 14)
-	local panelStroke = ensureStroke(panel, DEVIL_FRUIT_UI.GoldHighlight, 0, 1.6)
-	panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-
-	local backdrop = panel:FindFirstChild("Backdrop")
-	if backdrop and not backdrop:IsA("ImageLabel") then
-		backdrop:Destroy()
-		backdrop = nil
-	end
-	if not backdrop then
-		backdrop = Instance.new("ImageLabel")
-		backdrop.Name = "Backdrop"
-		backdrop.BackgroundTransparency = 1
-		backdrop.BorderSizePixel = 0
-		backdrop.Image = DEVIL_FRUIT_UI.FruitBackgroundImage
-		backdrop.ScaleType = Enum.ScaleType.Stretch
-		backdrop.Size = UDim2.fromScale(1, 1)
-		backdrop.ZIndex = 0
-		backdrop.Parent = panel
-		ensureCorner(backdrop, 14)
-	end
-	backdrop.Image = DEVIL_FRUIT_UI.FruitBackgroundImage
-	backdrop.ScaleType = Enum.ScaleType.Stretch
-	backdrop.Size = UDim2.fromScale(1, 1)
-	backdrop.ZIndex = 0
-
-	local overlay = panel:FindFirstChild("BackdropOverlay")
-	if overlay and not overlay:IsA("Frame") then
-		overlay:Destroy()
-		overlay = nil
-	end
-	if not overlay then
-		overlay = Instance.new("Frame")
-		overlay.Name = "BackdropOverlay"
-		overlay.BackgroundColor3 = DEVIL_FRUIT_UI.MenuOverlay
-		overlay.BackgroundTransparency = 0.42
-		overlay.BorderSizePixel = 0
-		overlay.Size = UDim2.fromScale(1, 1)
-		overlay.ZIndex = 1
-		overlay.Parent = panel
-		ensureCorner(overlay, 14)
-	end
-	overlay.BackgroundColor3 = DEVIL_FRUIT_UI.MenuOverlay
-	overlay.BackgroundTransparency = 0.42
-	overlay.BorderSizePixel = 0
-	overlay.Size = UDim2.fromScale(1, 1)
-	overlay.ZIndex = 1
-	ensureCorner(overlay, 14)
-
-	for _, child in ipairs(panel:GetChildren()) do
-		if child:IsA("UIPadding") or child:IsA("UIListLayout") then
-			child:Destroy()
-		end
-	end
-
-	local topBar = panel:FindFirstChild("TopBar")
-	if topBar and not topBar:IsA("Frame") then
-		topBar:Destroy()
-		topBar = nil
-	end
-	if not topBar then
-		topBar = Instance.new("Frame")
-		topBar.Name = "TopBar"
-		topBar.BackgroundColor3 = DEVIL_FRUIT_UI.HeaderBg
-		topBar.BackgroundTransparency = 0.24
-		topBar.BorderSizePixel = 0
-		topBar.Position = UDim2.fromOffset(COOLDOWN_PANEL_INSET_X, COOLDOWN_PANEL_TOP_PADDING)
-		topBar.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, COOLDOWN_TOPBAR_HEIGHT)
-		topBar.ZIndex = 2
-		topBar.Parent = panel
-		ensureCorner(topBar, 10)
-		local topBarStroke = ensureStroke(topBar, DEVIL_FRUIT_UI.GoldHighlight, 0, 1.2)
-		topBarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		ensureGradient(topBar, DEVIL_FRUIT_UI.SecondaryBg, DEVIL_FRUIT_UI.PrimaryBg)
-	end
-	topBar.BackgroundColor3 = DEVIL_FRUIT_UI.HeaderBg
-	topBar.BackgroundTransparency = 0.24
-	topBar.BorderSizePixel = 0
-	topBar.Position = UDim2.fromOffset(COOLDOWN_PANEL_INSET_X, COOLDOWN_PANEL_TOP_PADDING)
-	topBar.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, COOLDOWN_TOPBAR_HEIGHT)
-	topBar.ZIndex = 2
-	ensureCorner(topBar, 10)
-	local topBarStroke = ensureStroke(topBar, DEVIL_FRUIT_UI.GoldHighlight, 0, 1.2)
-	topBarStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	ensureGradient(topBar, DEVIL_FRUIT_UI.SecondaryBg, DEVIL_FRUIT_UI.PrimaryBg)
-
-	local title = topBar:FindFirstChild("Title")
-	if title and not title:IsA("TextLabel") then
-		title:Destroy()
-		title = nil
-	end
-	if not title then
-		title = Instance.new("TextLabel")
-		title.Name = "Title"
-		title.BackgroundTransparency = 1
-		title.Position = UDim2.fromOffset(10, 4)
-		title.Size = UDim2.new(1, -20, 0, 16)
-		title.Font = Enum.Font.GothamBold
-		title.Text = "DEVIL FRUIT"
-		title.TextSize = 12
-		title.TextColor3 = DEVIL_FRUIT_UI.GoldHighlight
-		title.TextXAlignment = Enum.TextXAlignment.Left
-		title.ZIndex = 3
-		title.Parent = topBar
-	end
-	title.Text = "DEVIL FRUIT"
-	title.TextTransparency = 0
-	title.TextColor3 = DEVIL_FRUIT_UI.GoldHighlight
-	title.ZIndex = 3
-
-	local fruitLabel = topBar:FindFirstChild("FruitName")
-	if fruitLabel and not fruitLabel:IsA("TextLabel") then
-		fruitLabel:Destroy()
-		fruitLabel = nil
-	end
-	if not fruitLabel then
-		fruitLabel = Instance.new("TextLabel")
-		fruitLabel.Name = "FruitName"
-		fruitLabel.BackgroundTransparency = 1
-		fruitLabel.Position = UDim2.fromOffset(10, 20)
-		fruitLabel.Size = UDim2.new(1, -20, 0, 30)
-		fruitLabel.Font = Enum.Font.GothamBold
-		fruitLabel.Text = ""
-		fruitLabel.TextColor3 = DEVIL_FRUIT_UI.TextMain
-		fruitLabel.TextSize = 28
-		fruitLabel.TextScaled = true
-		fruitLabel.TextWrapped = false
-		fruitLabel.TextTruncate = Enum.TextTruncate.AtEnd
-		fruitLabel.TextXAlignment = Enum.TextXAlignment.Left
-		fruitLabel.ZIndex = 3
-		fruitLabel.Parent = topBar
-	end
-	fruitLabel.TextTransparency = 0
-	fruitLabel.TextColor3 = DEVIL_FRUIT_UI.TextMain
-	fruitLabel.ZIndex = 3
-
-	local list = panel:FindFirstChild("AbilityList")
-	if list and not list:IsA("Frame") then
-		list:Destroy()
-		list = nil
-	end
-	if not list then
-		list = Instance.new("Frame")
-		list.Name = "AbilityList"
-		list.BackgroundColor3 = DEVIL_FRUIT_UI.SectionBg
-		list.BackgroundTransparency = 0.2
-		list.BorderSizePixel = 0
-		list.Position = UDim2.fromOffset(
-			COOLDOWN_PANEL_INSET_X,
-			COOLDOWN_PANEL_TOP_PADDING + COOLDOWN_TOPBAR_HEIGHT + COOLDOWN_SECTION_GAP
-		)
-		list.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, 0)
-		list.AutomaticSize = Enum.AutomaticSize.None
-		list.ZIndex = 2
-		list.ClipsDescendants = true
-		list.Parent = panel
-		ensureCorner(list, 10)
-		local listStroke = ensureStroke(list, DEVIL_FRUIT_UI.GoldHighlight, 0.14, 1)
-		listStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	end
-	list.BackgroundColor3 = DEVIL_FRUIT_UI.SectionBg
-	list.BackgroundTransparency = 0.2
-	list.BorderSizePixel = 0
-	list.Position = UDim2.fromOffset(
-		COOLDOWN_PANEL_INSET_X,
-		COOLDOWN_PANEL_TOP_PADDING + COOLDOWN_TOPBAR_HEIGHT + COOLDOWN_SECTION_GAP
-	)
-	list.Size = UDim2.new(1, -(COOLDOWN_PANEL_INSET_X * 2), 0, 0)
-	list.AutomaticSize = Enum.AutomaticSize.None
-	list.ZIndex = 2
-	list.ClipsDescendants = true
-	ensureCorner(list, 10)
-	local listStroke = ensureStroke(list, DEVIL_FRUIT_UI.GoldHighlight, 0.14, 1)
-	listStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-
-	local listLayout = list:FindFirstChildOfClass("UIListLayout")
-	if not listLayout then
-		listLayout = Instance.new("UIListLayout")
-		listLayout.Parent = list
-	end
-	listLayout.Padding = UDim.new(0, 6)
-	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-	local listPadding = list:FindFirstChildOfClass("UIPadding")
-	if not listPadding then
-		listPadding = Instance.new("UIPadding")
-		listPadding.Parent = list
-	end
-	listPadding.PaddingTop = UDim.new(0, 8)
-	listPadding.PaddingBottom = UDim.new(0, 8)
-	listPadding.PaddingLeft = UDim.new(0, 8)
-	listPadding.PaddingRight = UDim.new(0, 8)
-
-	if panelRebuilt then
-		cooldownHud.CurrentFruit = nil
-		cooldownHud.Rows = {}
-		cooldownHud.EmptyState = nil
-	end
-
-	cooldownHud.Gui = screenGui
-	cooldownHud.Panel = panel
-	cooldownHud.Backdrop = backdrop
-	cooldownHud.Overlay = overlay
-	cooldownHud.TopBar = topBar
-	cooldownHud.FruitLabel = fruitLabel
-	cooldownHud.List = list
-	cooldownHud.EmptyState = cooldownHud.EmptyState and cooldownHud.EmptyState.Parent and cooldownHud.EmptyState or nil
-	cooldownHud.Rows = cooldownHud.Rows or {}
-
-	return cooldownHud
-end
-
-local function setCooldownHudVisible(isVisible)
-	ensureCooldownHud()
-	local shouldShow = isVisible and not isGameplayModalOpen()
-	cooldownHud.Gui.Enabled = shouldShow
-	cooldownHud.Panel.Visible = shouldShow
-end
-
-local function hideCooldownHud()
-	setCooldownHudVisible(false)
-	cooldownHud.CurrentFruit = nil
-	clearCooldownRows()
-
-	if cooldownHud.FruitLabel then
-		cooldownHud.FruitLabel.Text = ""
-	end
-end
-
-clearCooldownRows = function()
-	for _, row in pairs(cooldownHud.Rows) do
-		if row.Container and row.Container.Parent then
-			row.Container:Destroy()
-		end
-	end
-
-	if cooldownHud.EmptyState and cooldownHud.EmptyState.Parent then
-		cooldownHud.EmptyState:Destroy()
-	end
-
-	cooldownHud.Rows = {}
-	cooldownHud.EmptyState = nil
-	refreshCooldownHudLayout()
-end
-
-refreshCooldownHudLayout = function()
-	ensureCooldownHud()
-
-	local rowCount = 0
-	for _ in pairs(cooldownHud.Rows) do
-		rowCount += 1
-	end
-
-	local listHeight = COOLDOWN_LIST_VERTICAL_PADDING
-	if rowCount > 0 then
-		listHeight += (rowCount * COOLDOWN_ROW_HEIGHT) + ((rowCount - 1) * COOLDOWN_LIST_SPACING)
-	else
-		listHeight = math.max(COOLDOWN_LIST_VERTICAL_PADDING + 28, 44)
-	end
-
-	local listWidthOffset = -(COOLDOWN_PANEL_INSET_X * 2)
-	if cooldownHud.List then
-		cooldownHud.List.Position = UDim2.fromOffset(
-			COOLDOWN_PANEL_INSET_X,
-			COOLDOWN_PANEL_TOP_PADDING + COOLDOWN_TOPBAR_HEIGHT + COOLDOWN_SECTION_GAP
-		)
-		cooldownHud.List.Size = UDim2.new(1, listWidthOffset, 0, listHeight)
-		cooldownHud.List.Visible = true
-	end
-
-	if cooldownHud.TopBar then
-		cooldownHud.TopBar.Position = UDim2.fromOffset(COOLDOWN_PANEL_INSET_X, COOLDOWN_PANEL_TOP_PADDING)
-		cooldownHud.TopBar.Size = UDim2.new(1, listWidthOffset, 0, COOLDOWN_TOPBAR_HEIGHT)
-		cooldownHud.TopBar.Visible = true
-	end
-
-	local totalHeight = COOLDOWN_PANEL_TOP_PADDING
-		+ COOLDOWN_TOPBAR_HEIGHT
-		+ COOLDOWN_SECTION_GAP
-		+ listHeight
-		+ COOLDOWN_PANEL_BOTTOM_PADDING
-
-	if cooldownHud.Panel then
-		cooldownHud.Panel.Size = UDim2.fromOffset(COOLDOWN_PANEL_WIDTH, totalHeight)
-	end
-end
-
-local function createCooldownRow(layoutOrder, abilityName, abilityConfig)
-	local cooldownValue = tonumber(abilityConfig and abilityConfig.Cooldown) or 0
-	local keyCode = abilityConfig and abilityConfig.KeyCode
-	local keyCodeName = keyCode and keyCode.Name or "?"
-
-	local row = Instance.new("Frame")
-	row.Name = abilityName
-	row.Size = UDim2.new(1, 0, 0, 58)
-	row.BackgroundColor3 = DEVIL_FRUIT_UI.SectionBg
-	row.BackgroundTransparency = 0.18
-	row.BorderSizePixel = 0
-	row.LayoutOrder = layoutOrder
-	row.ZIndex = 3
-	row.Parent = cooldownHud.List
-
-	ensureCorner(row, 10)
-	local rowStroke = ensureStroke(row, DEVIL_FRUIT_UI.GoldHighlight, 0.1, 1)
-	rowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	ensureGradient(row, DEVIL_FRUIT_UI.SecondaryBg, DEVIL_FRUIT_UI.PrimaryBg)
-
-	local keyBadge = Instance.new("TextLabel")
-	keyBadge.Name = "Key"
-	keyBadge.AnchorPoint = Vector2.new(0, 0.5)
-	keyBadge.Position = UDim2.new(0, 8, 0.5, -6)
-	keyBadge.Size = UDim2.fromOffset(34, 24)
-	keyBadge.BackgroundColor3 = DEVIL_FRUIT_UI.GoldBase
-	keyBadge.BorderSizePixel = 0
-	keyBadge.Font = Enum.Font.GothamBold
-	keyBadge.Text = keyCodeName
-	keyBadge.TextColor3 = DEVIL_FRUIT_UI.PrimaryBg
-	keyBadge.TextSize = 14
-	keyBadge.ZIndex = 4
-	keyBadge.Parent = row
-
-	ensureCorner(keyBadge, 8)
-	ensureStroke(keyBadge, DEVIL_FRUIT_UI.GoldHighlight, 0, 1)
-	ensureGradient(keyBadge, DEVIL_FRUIT_UI.GoldHighlight, DEVIL_FRUIT_UI.GoldBase)
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Name = "Name"
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Position = UDim2.new(0, 52, 0, 8)
-	nameLabel.Size = UDim2.new(1, -136, 0, 18)
-	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.Text = formatAbilityName(abilityName)
-	nameLabel.TextColor3 = DEVIL_FRUIT_UI.TextMain
-	nameLabel.TextSize = 15
-	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-	nameLabel.ZIndex = 4
-	nameLabel.Parent = row
-
-	local statusLabel = Instance.new("TextLabel")
-	statusLabel.Name = "Status"
-	statusLabel.BackgroundTransparency = 1
-	statusLabel.AnchorPoint = Vector2.new(1, 0)
-	statusLabel.Position = UDim2.new(1, -10, 0, 8)
-	statusLabel.Size = UDim2.new(0, 72, 0, 18)
-	statusLabel.Font = Enum.Font.GothamBold
-	statusLabel.Text = "READY"
-	statusLabel.TextColor3 = DEVIL_FRUIT_UI.Ready
-	statusLabel.TextSize = 13
-	statusLabel.TextXAlignment = Enum.TextXAlignment.Right
-	statusLabel.ZIndex = 4
-	statusLabel.Parent = row
-
-	local detailLabel = Instance.new("TextLabel")
-	detailLabel.Name = "Detail"
-	detailLabel.BackgroundTransparency = 1
-	detailLabel.Position = UDim2.new(0, 52, 0, 29)
-	detailLabel.Size = UDim2.new(1, -68, 0, 12)
-	detailLabel.Font = Enum.Font.Gotham
-	detailLabel.Text = string.format("Cooldown %.1fs", cooldownValue)
-	detailLabel.TextColor3 = DEVIL_FRUIT_UI.TextSecondary
-	detailLabel.TextSize = 11
-	detailLabel.TextXAlignment = Enum.TextXAlignment.Left
-	detailLabel.ZIndex = 4
-	detailLabel.Parent = row
-
-	local bar = Instance.new("Frame")
-	bar.Name = "Bar"
-	bar.AnchorPoint = Vector2.new(0, 1)
-	bar.Position = UDim2.new(0, 10, 1, -8)
-	bar.Size = UDim2.new(1, -20, 0, 6)
-	bar.BackgroundColor3 = DEVIL_FRUIT_UI.PrimaryBg
-	bar.BorderSizePixel = 0
-	bar.ZIndex = 4
-	bar.Parent = row
-
-	ensureCorner(bar, 999)
-	ensureStroke(bar, DEVIL_FRUIT_UI.GoldShadow, 0.26, 0.8)
-
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.new(1, 0, 1, 0)
-	fill.BackgroundColor3 = DEVIL_FRUIT_UI.Ready
-	fill.BorderSizePixel = 0
-	fill.ZIndex = 5
-	fill.Parent = bar
-
-	ensureCorner(fill, 999)
-
-	return {
-		Container = row,
-		Status = statusLabel,
-		Fill = fill,
-		Detail = detailLabel,
-		Cooldown = cooldownValue,
-	}
-end
-
-local function rebuildCooldownHud(fruitName)
-	ensureCooldownHud()
-	clearCooldownRows()
-
-	cooldownHud.CurrentFruit = fruitName
-	local fruit = DevilFruitConfig.GetFruit(fruitName)
-	if not fruit then
-		hideCooldownHud()
+	if cooldownHudRoot then
 		return
 	end
 
-	setCooldownHudVisible(true)
-	cooldownHud.FruitLabel.Text = fruit.DisplayName or fruitName
-
-	local orderedAbilities = getOrderedAbilities(fruitName)
-	if #orderedAbilities == 0 then
-		local emptyLabel = Instance.new("TextLabel")
-		emptyLabel.Name = "NoAbilities"
-		emptyLabel.BackgroundTransparency = 1
-		emptyLabel.Size = UDim2.new(1, -16, 0, 24)
-		emptyLabel.Position = UDim2.fromOffset(8, 10)
-		emptyLabel.Font = Enum.Font.GothamSemibold
-		emptyLabel.Text = "No active fruit skills."
-		emptyLabel.TextColor3 = DEVIL_FRUIT_UI.TextSecondary
-		emptyLabel.TextSize = 14
-		emptyLabel.TextXAlignment = Enum.TextXAlignment.Left
-		emptyLabel.ZIndex = 4
-		emptyLabel.Parent = cooldownHud.List
-		cooldownHud.EmptyState = emptyLabel
-	else
-		for index, entry in ipairs(orderedAbilities) do
-			cooldownHud.Rows[entry.Name] = createCooldownRow(index, entry.Name, entry.Config)
-		end
-	end
-	refreshCooldownHudLayout()
+	cooldownHudRootContainer = Instance.new("Folder")
+	cooldownHudRootContainer.Name = "ReactDevilFruitHudRoot"
+	cooldownHudRoot = reactRoblox.createRoot(cooldownHudRootContainer)
 end
 
-local function updateCooldownHud(forceRebuild)
-	ensureCooldownHud()
+local function getCooldownHudHost()
+	local hud = playerGui:FindFirstChild("HUD")
+	if hud and hud:IsA("ScreenGui") then
+		return hud
+	end
 
+	local fallback = playerGui:FindFirstChild("DevilFruitHUDHost")
+	if fallback and fallback:IsA("ScreenGui") then
+		return fallback
+	end
+
+	if fallback then
+		fallback:Destroy()
+	end
+
+	fallback = Instance.new("ScreenGui")
+	fallback.Name = "DevilFruitHUDHost"
+	fallback.DisplayOrder = 118
+	fallback.IgnoreGuiInset = true
+	fallback.ResetOnSpawn = false
+	fallback.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	fallback.Parent = playerGui
+	return fallback
+end
+
+local function buildCooldownAbilities(fruitName)
+	local abilities = {}
+	for _, entry in ipairs(getOrderedAbilities(fruitName)) do
+		local abilityName = entry.Name
+		local abilityConfig = entry.Config or {}
+		local cooldownValue = tonumber(abilityConfig.Cooldown) or 0
+		local cooldownState = if isCooldownBypassEnabled() then nil else localCooldowns[abilityName]
+		local readyAt = getLocalCooldownReadyAt(cooldownState)
+		local now = getCooldownNow()
+		local remaining = math.max(0, readyAt - now)
+		local startsAt = getLocalCooldownStartsAt(cooldownState, cooldownValue)
+		local startsIn = math.max(0, startsAt - now)
+		local isWaitingForCooldownStart = remaining > 0 and startsIn > 0
+		local total = math.max(getLocalCooldownDuration(cooldownState, cooldownValue), 0.001)
+		local progress = if isWaitingForCooldownStart then 1 else math.clamp(1 - (remaining / total), 0, 1)
+		local isReady = remaining <= 0
+
+		if isReady then
+			localCooldowns[abilityName] = nil
+		end
+
+		local status = "READY"
+		local statusColor3 = DEVIL_FRUIT_UI.Ready
+		local detail = "Move ready"
+		if isWaitingForCooldownStart then
+			status = "ACTIVE"
+			detail = "Cooldown starts in " .. formatCooldownTime(startsIn)
+		elseif not isReady then
+			status = "CD " .. formatCooldownTime(remaining)
+			statusColor3 = DEVIL_FRUIT_UI.Cooldown
+			detail = "On cooldown for " .. formatCooldownTime(remaining)
+		end
+
+		local keyCode = abilityConfig.KeyCode
+		abilities[#abilities + 1] = {
+			detail = detail,
+			fillColor3 = (isReady or isWaitingForCooldownStart) and DEVIL_FRUIT_UI.Ready
+				or DEVIL_FRUIT_UI.CooldownFill,
+			keyCodeName = keyCode and keyCode.Name or "?",
+			name = formatAbilityName(abilityName),
+			progress = progress,
+			status = status,
+			statusColor3 = statusColor3,
+		}
+	end
+
+	return abilities
+end
+
+local function renderCooldownHud()
+	local ok, err = xpcall(function()
+		ensureCooldownHudRoot()
+		local fruitName = cooldownHud.CurrentFruit
+		local fruit = fruitName and DevilFruitConfig.GetFruit(fruitName)
+		cooldownHudRoot:render(reactRoblox.createPortal(react.createElement(cooldownHudComponent, {
+			abilities = cooldownHud.Abilities,
+			fruitName = fruit and tostring(fruit.DisplayName or fruitName) or "",
+			visible = cooldownHud.Visible == true,
+		}), getCooldownHudHost()))
+	end, debug.traceback)
+	if ok then
+		cooldownHudLastError = nil
+		return true
+	end
+
+	if cooldownHudLastError ~= tostring(err) then
+		cooldownHudLastError = tostring(err)
+		warn(string.format("[DEVILFRUIT CLIENT][HUD] React cooldown HUD failed: %s", cooldownHudLastError))
+	end
+
+	return false
+end
+
+local function hideCooldownHud()
+	cooldownHud.Visible = false
+	cooldownHud.CurrentFruit = nil
+	cooldownHud.Abilities = {}
+	renderCooldownHud()
+end
+
+local function updateCooldownHud(_forceRebuild)
 	local fruitName = getEquippedFruit()
-	local needsRebuild = forceRebuild or fruitName ~= cooldownHud.CurrentFruit
-	if not needsRebuild then
-		for _, row in pairs(cooldownHud.Rows) do
-			if not (row and row.Container and row.Container.Parent == cooldownHud.List and row.Status and row.Detail and row.Fill) then
-				needsRebuild = true
-				break
-			end
-		end
-	end
-
-	if not needsRebuild and cooldownHud.List and next(cooldownHud.Rows) ~= nil then
-		local rowFrames = 0
-		for _, child in ipairs(cooldownHud.List:GetChildren()) do
-			if child:IsA("Frame") then
-				rowFrames += 1
-			end
-		end
-		if rowFrames == 0 then
-			needsRebuild = true
-		end
-	end
-
-	if needsRebuild then
-		rebuildCooldownHud(fruitName)
-	end
-
 	if not shouldShowCooldownHud(fruitName) then
 		hideCooldownHud()
 		return
 	end
 
-	setCooldownHudVisible(true)
-
-	for abilityName, row in pairs(cooldownHud.Rows) do
-		local cooldownState = if isCooldownBypassEnabled() then nil else localCooldowns[abilityName]
-		local readyAt = getLocalCooldownReadyAt(cooldownState)
-		local now = getCooldownNow()
-		local remaining = math.max(0, readyAt - now)
-		local startsAt = getLocalCooldownStartsAt(cooldownState, row.Cooldown)
-		local startsIn = math.max(0, startsAt - now)
-		local isWaitingForCooldownStart = remaining > 0 and startsIn > 0
-		local total = math.max(getLocalCooldownDuration(cooldownState, row.Cooldown), 0.001)
-		local progress = if isWaitingForCooldownStart then 1 else math.clamp(1 - (remaining / total), 0, 1)
-		local isReady = remaining <= 0
-		if isReady then
-			localCooldowns[abilityName] = nil
-		end
-
-		if isReady then
-			row.Status.Text = "READY"
-			row.Status.TextColor3 = DEVIL_FRUIT_UI.Ready
-			row.Detail.Text = "Move ready"
-		elseif isWaitingForCooldownStart then
-			row.Status.Text = "ACTIVE"
-			row.Status.TextColor3 = DEVIL_FRUIT_UI.Ready
-			row.Detail.Text = "Cooldown starts in " .. formatCooldownTime(startsIn)
-		else
-			row.Status.Text = "CD " .. formatCooldownTime(remaining)
-			row.Status.TextColor3 = DEVIL_FRUIT_UI.Cooldown
-			row.Detail.Text = "On cooldown for " .. formatCooldownTime(remaining)
-		end
-		row.Fill.Size = UDim2.new(progress, 0, 1, 0)
-		row.Fill.BackgroundColor3 = (isReady or isWaitingForCooldownStart) and DEVIL_FRUIT_UI.Ready
-			or DEVIL_FRUIT_UI.CooldownFill
-	end
-	refreshCooldownHudLayout()
+	cooldownHud.Visible = true
+	cooldownHud.CurrentFruit = fruitName
+	cooldownHud.Abilities = buildCooldownAbilities(fruitName)
+	renderCooldownHud()
 end
 
 getFruitFolder = function()
@@ -897,20 +394,27 @@ getFruitFolder = function()
 end
 
 getEquippedFruit = function()
+	local equippedValueFruitName
 	local fruitFolder = getFruitFolder()
 	if fruitFolder then
 		local equipped = fruitFolder:FindFirstChild("Equipped")
 		if equipped and equipped:IsA("StringValue") then
-			return normalizeEquippedFruitName(equipped.Value)
+			equippedValueFruitName = normalizeEquippedFruitName(equipped.Value)
+			if equippedValueFruitName ~= DevilFruitConfig.None then
+				return equippedValueFruitName
+			end
 		end
 	end
 
 	local fruitAttribute = player:GetAttribute("EquippedDevilFruit")
 	if typeof(fruitAttribute) == "string" then
-		return normalizeEquippedFruitName(fruitAttribute)
+		local attributeFruitName = normalizeEquippedFruitName(fruitAttribute)
+		if attributeFruitName ~= DevilFruitConfig.None then
+			return attributeFruitName
+		end
 	end
 
-	return DevilFruitConfig.None
+	return equippedValueFruitName or DevilFruitConfig.None
 end
 
 local function hookEquippedFruitValue(equippedValue)
@@ -925,7 +429,7 @@ local function hookEquippedFruitValue(equippedValue)
 	equippedValue:SetAttribute("__DevilFruitHudHooked", true)
 	equippedValue:GetPropertyChangedSignal("Value"):Connect(function()
 		if typeof(syncDevilFruitClientState) == "function" then
-			task.defer(syncDevilFruitClientState)
+			task.defer(syncDevilFruitClientState, "equipped_value_changed")
 			return
 		end
 
@@ -952,6 +456,11 @@ local function hookFruitFolderSignals()
 	fruitFolder.ChildAdded:Connect(function(child)
 		if child.Name == "Equipped" then
 			hookEquippedFruitValue(child)
+			if typeof(syncDevilFruitClientState) == "function" then
+				task.defer(syncDevilFruitClientState, "equipped_value_added")
+				return
+			end
+
 			updateCooldownHud(true)
 		end
 	end)
@@ -1044,7 +553,7 @@ local clientEffectVisuals = ClientEffectVisuals.new({
 	PhoenixRebirthAbility = PHOENIX_REBIRTH_ABILITY,
 })
 
-local function buildDefaultAbilityRequestPayload(fruitName, abilityName)
+local function buildDefaultAbilityRequestPayload(_fruitName, _abilityName)
 	return nil
 end
 
@@ -1265,7 +774,7 @@ local function isLocalPlayerBurrowProtected(now)
 	return true
 end
 
-ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, position)
+ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, _position)
 	if targetPlayer ~= player then
 		return false
 	end
@@ -1464,7 +973,7 @@ local function stopMoguBurrow(targetPlayer)
 	applyMoguSurfaceHazardOverlap()
 end
 
-local function getProjectileDirection(direction, rootPart)
+local function _getProjectileDirection(direction, rootPart)
 	if typeof(direction) ~= "Vector3" or direction.Magnitude <= 0.01 then
 		if not rootPart then
 			return Vector3.new(0, 0, -1)
@@ -1501,6 +1010,7 @@ fruitModuleLoader = FruitModuleLoader.new({
 	PlayOptionalEffect = playOptionalEffect,
 	RequestAbility = function(abilityName, payload)
 		requestRemote:FireServer(abilityName, payload)
+		return true
 	end,
 	CreateEffectVisual = function(startPosition, endPosition, direction, isPredicted)
 		clientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
@@ -1519,6 +1029,11 @@ effectRouter = DevilFruitEffectRouter.new({
 
 local function initializeDevilFruitClient()
 	logDevilFruitClient("init begin")
+	setRuntimeAttribute("DevilFruitClientRuntimeStarted", true)
+	remoteBundle = DevilFruitRemotes.GetBundle()
+	requestRemote = remoteBundle.Request
+	stateRemote = remoteBundle.State
+	effectRemote = remoteBundle.Effect
 	local requestIdentity = describeRemote(requestRemote)
 	logDevilFruitClient(
 		"remote bundle resolved request=%s path=%s runtimeId=%s debugId=%s object=%s state=%s effect=%s folder=%s",
@@ -1529,10 +1044,12 @@ local function initializeDevilFruitClient()
 		tostring(requestIdentity.Object),
 		tostring(describeRemote(stateRemote).Path),
 		tostring(describeRemote(effectRemote).Path),
-		tostring(RemoteBundle.Folder:GetFullName())
+		tostring(remoteBundle.Folder:GetFullName())
 	)
+	setRuntimeAttribute("DevilFruitClientRemotesReady", true)
+	setRuntimeAttribute("DevilFruitClientLastRemoteError", nil)
 
-	syncDevilFruitClientState = function()
+	local function performSyncDevilFruitClientState(reason)
 		local currentFruitName = getEquippedFruit()
 		local previousFruitName = lastSyncedFruitName
 		if currentFruitName ~= lastSyncedFruitName then
@@ -1552,18 +1069,35 @@ local function initializeDevilFruitClient()
 
 		hookFruitFolderSignals()
 		updateCooldownHud(true)
+		setRuntimeAttribute("DevilFruitClientEquippedFruit", currentFruitName)
+		setRuntimeAttribute("DevilFruitClientHudVisible", cooldownHud.Visible == true)
+		setRuntimeAttribute("DevilFruitClientAbilityCount", #cooldownHud.Abilities)
 		local fruitFolder = getFruitFolder()
 		local equippedValue = fruitFolder and fruitFolder:FindFirstChild("Equipped")
 		local equippedValueText = equippedValue and equippedValue:IsA("StringValue") and equippedValue.Value or "<nil>"
 		logDevilFruitClient(
-			"fruit state synced equipped=%s attr=%s value=%s",
+			"fruit state synced reason=%s equipped=%s attr=%s value=%s",
+			tostring(reason or "unknown"),
 			tostring(currentFruitName),
 			tostring(player:GetAttribute("EquippedDevilFruit")),
 			tostring(equippedValueText)
 		)
 	end
 
-	ensureCooldownHud()
+	syncDevilFruitClientState = function(reason)
+		local ok, err = xpcall(function()
+			performSyncDevilFruitClientState(reason)
+		end, debug.traceback)
+		if ok then
+			setRuntimeAttribute("DevilFruitClientLastSyncError", nil)
+			return true
+		end
+
+		setRuntimeAttribute("DevilFruitClientLastSyncError", tostring(err))
+		warn(string.format("[DEVILFRUIT CLIENT][SYNC] failed reason=%s detail=%s", tostring(reason or "unknown"), tostring(err)))
+		return false
+	end
+
 	logDevilFruitClient("UI bind success")
 
 	UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -1576,7 +1110,7 @@ local function initializeDevilFruitClient()
 				tostring(input.KeyCode.Name),
 				tostring(gameProcessed),
 				tostring(focusedTextBox ~= nil),
-				tostring(isGameplayModalOpen()),
+				"false",
 				tostring(equippedFruitName)
 			)
 		end
@@ -1663,17 +1197,17 @@ local function initializeDevilFruitClient()
 		end
 
 		local requestStartedAt = os.clock()
-		local requestIdentity = describeRemote(requestRemote)
+		local dispatchRequestIdentity = describeRemote(requestRemote)
 		logDevilFruitRequest(
 			"client dispatch begin key=%s fruit=%s ability=%s remote=%s path=%s runtimeId=%s debugId=%s object=%s",
 			tostring(input.KeyCode.Name),
 			tostring(fruitName),
 			tostring(abilityName),
-			tostring(requestIdentity.Name),
-			tostring(requestIdentity.Path),
-			tostring(requestIdentity.RuntimeId),
-			tostring(requestIdentity.DebugId),
-			tostring(requestIdentity.Object)
+			tostring(dispatchRequestIdentity.Name),
+			tostring(dispatchRequestIdentity.Path),
+			tostring(dispatchRequestIdentity.RuntimeId),
+			tostring(dispatchRequestIdentity.DebugId),
+			tostring(dispatchRequestIdentity.Object)
 		)
 		local requestPayload = inputController:BuildPredictedRequest(fruitName, abilityName, function()
 			return buildAbilityRequestPayload(fruitName, abilityName)
@@ -1690,11 +1224,11 @@ local function initializeDevilFruitClient()
 			tostring(input.KeyCode.Name),
 			tostring(fruitName),
 			tostring(abilityName),
-			tostring(requestIdentity.Name),
-			tostring(requestIdentity.Path),
-			tostring(requestIdentity.RuntimeId),
-			tostring(requestIdentity.DebugId),
-			tostring(requestIdentity.Object),
+			tostring(dispatchRequestIdentity.Name),
+			tostring(dispatchRequestIdentity.Path),
+			tostring(dispatchRequestIdentity.RuntimeId),
+			tostring(dispatchRequestIdentity.DebugId),
+			tostring(dispatchRequestIdentity.Object),
 			countPayloadKeys(requestPayload)
 		)
 		requestRemote:FireServer(abilityName, requestPayload)
@@ -1703,11 +1237,11 @@ local function initializeDevilFruitClient()
 			tostring(input.KeyCode.Name),
 			tostring(fruitName),
 			tostring(abilityName),
-			tostring(requestIdentity.Name),
-			tostring(requestIdentity.Path),
-			tostring(requestIdentity.RuntimeId),
-			tostring(requestIdentity.DebugId),
-			tostring(requestIdentity.Object),
+			tostring(dispatchRequestIdentity.Name),
+			tostring(dispatchRequestIdentity.Path),
+			tostring(dispatchRequestIdentity.RuntimeId),
+			tostring(dispatchRequestIdentity.DebugId),
+			tostring(dispatchRequestIdentity.Object),
 			countPayloadKeys(requestPayload)
 		)
 		logDevilFruitRequest(
@@ -1733,7 +1267,7 @@ local function initializeDevilFruitClient()
 	end)
 	logDevilFruitClient("keybind connect success")
 
-	stateRemote.OnClientEvent:Connect(function(eventName, fruitName, abilityName, value, payload)
+	local function handleStateEvent(eventName, fruitName, abilityName, value, payload)
 		if eventName == "Activated" then
 			local readyAt = tonumber(value) or 0
 			setLocalCooldown(abilityName, readyAt, payload)
@@ -1756,9 +1290,9 @@ local function initializeDevilFruitClient()
 				updateCooldownHud()
 			end
 		end
-	end)
+	end
 
-	effectRemote.OnClientEvent:Connect(function(targetPlayer, fruitName, abilityName, payload)
+	local function handleEffectEvent(targetPlayer, fruitName, abilityName, payload)
 		local hasPlayerTarget = targetPlayer and targetPlayer:IsA("Player")
 		if not hasPlayerTarget and not isBomuLandMineWorldEffect(targetPlayer, fruitName, abilityName, payload) then
 			return
@@ -1778,7 +1312,10 @@ local function initializeDevilFruitClient()
 		end
 
 		effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
-	end)
+	end
+
+	stateRemote.OnClientEvent:Connect(handleStateEvent)
+	effectRemote.OnClientEvent:Connect(handleEffectEvent)
 
 	RunService.Heartbeat:Connect(function(dt)
 		fruitModuleLoader:ForEachLoadedController("Update", dt)
@@ -1803,20 +1340,16 @@ local function initializeDevilFruitClient()
 	end)
 
 	player:GetAttributeChangedSignal("EquippedDevilFruit"):Connect(function()
-		syncDevilFruitClientState()
+		syncDevilFruitClientState("equipped_attribute_changed")
 	end)
 
 	player:GetAttributeChangedSignal("DevilFruitCooldownBypass"):Connect(function()
 		updateCooldownHud(false)
 	end)
 
-	playerGui:GetAttributeChangedSignal(GAMEPLAY_MODAL_OPEN_ATTRIBUTE):Connect(function()
-		updateCooldownHud(false)
-	end)
-
 	player.ChildAdded:Connect(function(child)
 		if child.Name == "DevilFruit" then
-			syncDevilFruitClientState()
+			syncDevilFruitClientState("fruit_folder_added")
 		end
 	end)
 
@@ -1824,6 +1357,25 @@ local function initializeDevilFruitClient()
 		fruitModuleLoader:ForEachLoadedController("RenderUpdate")
 
 		local now = os.clock()
+		if now >= nextStateReconcileAt then
+			nextStateReconcileAt = now + STATE_RECONCILE_INTERVAL
+
+			local currentFruitName = getEquippedFruit()
+			local expectedAbilityCount = #getOrderedAbilities(currentFruitName)
+			local hasValidFruit = shouldShowCooldownHud(currentFruitName)
+			local needsFruitSync = currentFruitName ~= lastSyncedFruitName
+			local needsHudRepair = hasValidFruit
+				and (
+					cooldownHud.CurrentFruit ~= currentFruitName
+					or cooldownHud.Visible ~= true
+					or #cooldownHud.Abilities ~= expectedAbilityCount
+				)
+
+			if needsFruitSync or needsHudRepair then
+				syncDevilFruitClientState("render_reconcile")
+			end
+		end
+
 		if now < nextHudRefreshAt then
 			return
 		end
@@ -1833,10 +1385,7 @@ local function initializeDevilFruitClient()
 	end)
 
 	task.defer(function()
-		local ok, err = xpcall(syncDevilFruitClientState, debug.traceback)
-		if not ok then
-			warn(string.format("[DEVILFRUIT CLIENT][ERROR] startup failed: %s", tostring(err)))
-		end
+		syncDevilFruitClientState("startup")
 	end)
 
 	logDevilFruitClient("init success")
@@ -1851,6 +1400,7 @@ function DevilFruitClientController.Start()
 
 	local initOk, initError = xpcall(initializeDevilFruitClient, debug.traceback)
 	if not initOk then
+		started = false
 		warn(string.format("[DEVILFRUIT CLIENT][ERROR] startup failed: %s", tostring(initError)))
 		error(initError)
 	end

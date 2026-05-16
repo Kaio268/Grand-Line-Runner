@@ -15,7 +15,6 @@ local ensureTextLabel
 local ensureImageLabel
 local ensureImageButton
 local ensureTextButton
-local ensureLegacyInventoryButtonTemplate
 
 local UI_STYLE = {
 	PrimaryBg = Color3.fromRGB(30, 42, 56),
@@ -103,39 +102,7 @@ local function ensureLegacyHudCompatibility(hud)
 	ensureFrame(gamepassesAd, "Time").Size = UDim2.new(1, 0, 0, 6)
 	ensureTextButton(gamepassesAd, "TextButton").Size = UDim2.fromScale(1, 1)
 
-	local inventory = ensureFrame(hud, "Inventory")
-	local hotbarTemplate = ensureTextButton(inventory, "toolButton")
-	hotbarTemplate.Visible = false
-	hotbarTemplate.Size = UDim2.fromOffset(52, 52)
-	ensureLegacyInventoryButtonTemplate(hotbarTemplate, false)
-	local inv = ensureFrame(inventory, "Inv")
-	inv.Visible = false
-	local inventoryFrame = ensureFrame(inv, "InventoryFrame")
-	local scrollingFrame = inventoryFrame:FindFirstChild("ScrollingFrame")
-	if not (scrollingFrame and scrollingFrame:IsA("ScrollingFrame")) then
-		scrollingFrame = Instance.new("ScrollingFrame")
-		scrollingFrame.Name = "ScrollingFrame"
-		scrollingFrame.BackgroundTransparency = 1
-		scrollingFrame.BorderSizePixel = 0
-		scrollingFrame.CanvasSize = UDim2.fromOffset(0, 0)
-		scrollingFrame.Parent = inventoryFrame
-	end
-	scrollingFrame.Size = UDim2.fromScale(1, 1)
-	local inventoryTemplate = ensureTextButton(scrollingFrame, "toolButton")
-	inventoryTemplate.Visible = false
-	inventoryTemplate.Size = UDim2.fromOffset(80, 80)
-	ensureLegacyInventoryButtonTemplate(inventoryTemplate, true)
-
-	hudLog(
-		"[HUD][LEGACY]",
-		string.format(
-			"gamepassesAd=%s inventory=%s hotbarTemplate=%s inventoryTemplate=%s",
-			gamepassesAd:GetFullName(),
-			inventory:GetFullName(),
-			hotbarTemplate:GetFullName(),
-			inventoryTemplate:GetFullName()
-		)
-	)
+	hudLog("[HUD][LEGACY]", string.format("gamepassesAd=%s", gamepassesAd:GetFullName()))
 end
 
 local HUD_BUTTON_LAYOUT = {
@@ -289,46 +256,6 @@ ensureTextButton = function(parent, name)
 	button.AutoButtonColor = false
 	button.Parent = parent
 	return button
-end
-
-ensureLegacyInventoryButtonTemplate = function(button, isLargeButton)
-	button.BackgroundTransparency = 1
-	button.BorderSizePixel = 0
-	button.Text = ""
-	button.AutoButtonColor = false
-
-	local toolIcon = ensureImageLabel(button, "ToolIcon")
-	toolIcon.AnchorPoint = Vector2.new(0.5, 0.5)
-	toolIcon.Position = isLargeButton and UDim2.fromScale(0.5, 0.36) or UDim2.fromScale(0.5, 0.5)
-	toolIcon.Size = isLargeButton and UDim2.fromScale(0.6, 0.5) or UDim2.fromScale(0.68, 0.68)
-	toolIcon.ScaleType = Enum.ScaleType.Fit
-	toolIcon.ImageTransparency = 0
-
-	local toolName = ensureTextLabel(button, "toolName")
-	toolName.AnchorPoint = Vector2.new(0.5, 1)
-	toolName.Position = UDim2.new(0.5, 0, 1, -3)
-	toolName.Size = UDim2.new(1, -8, 0, 14)
-	toolName.TextSize = isLargeButton and 10 or 9
-	toolName.TextTruncate = Enum.TextTruncate.AtEnd
-	toolName.TextWrapped = false
-	toolName.Visible = isLargeButton
-
-	local toolAmount = ensureTextLabel(button, "toolAmount")
-	toolAmount.AnchorPoint = Vector2.new(1, 1)
-	toolAmount.Position = UDim2.new(1, -4, 1, -4)
-	toolAmount.Size = UDim2.fromOffset(42, 12)
-	toolAmount.TextSize = 10
-	toolAmount.TextXAlignment = Enum.TextXAlignment.Right
-	toolAmount.TextYAlignment = Enum.TextYAlignment.Center
-	toolAmount.Visible = false
-
-	local toolNumber = ensureTextLabel(button, "toolNumber")
-	toolNumber.Position = UDim2.fromOffset(4, 3)
-	toolNumber.Size = UDim2.fromOffset(18, 12)
-	toolNumber.TextSize = 10
-	toolNumber.TextXAlignment = Enum.TextXAlignment.Left
-	toolNumber.TextYAlignment = Enum.TextYAlignment.Top
-	toolNumber.Visible = false
 end
 
 local function ensureUIStroke(parent, color, thickness)
@@ -621,15 +548,6 @@ local function ensureHud()
 	info.Position = UDim2.fromOffset(0, 34)
 	local infoWave = ensureTextLabel(info, "Wave")
 	infoWave.Size = UDim2.fromScale(1, 1)
-
-	local inventory = ensureFrame(hud, "Inventory")
-	inventory.Visible = false
-	inventory.Size = UDim2.fromOffset(200, 200)
-	local inventoryBtn = ensureImageButton(inventory, "InventoryBtn")
-	inventoryBtn.Size = UDim2.fromOffset(64, 64)
-	inventoryBtn.Image = "rbxassetid://129583821766521"
-	inventoryBtn.ImageTransparency = 0
-	inventoryBtn.ScaleType = Enum.ScaleType.Fit
 
 	local leaving = ensureFrame(hud, "Leaving")
 	leaving.Visible = false
