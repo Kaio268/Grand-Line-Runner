@@ -128,7 +128,7 @@ registerStaticPreview("rbxassetid://123836331828429", {
 	"Mihawk",
 })
 
-registerStaticPreview("rbxassetid://80552766243297", {
+registerStaticPreview("rbxthumb://type=Asset&id=87585297816571&w=420&h=420", {
 	"Dino Marine",
 	"XDrake",
 	"X Drake",
