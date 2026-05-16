@@ -107,6 +107,11 @@ local CrewCatalog = require(
 		:WaitForChild("Crew")
 		:WaitForChild("CrewCatalog")
 )
+local CrewPreviewImages = require(
+	Modules
+		:WaitForChild("Crew")
+		:WaitForChild("CrewPreviewImages")
+)
 local HazardRuntime = require(
 	Modules
 		:WaitForChild("DevilFruits")
@@ -273,9 +278,18 @@ local function applyCrewMemberToPfp(pfpGui, plr)
 	local id = getCarriedCrewMemberName(plr)
 	if id then
 		local info = CrewCatalog.GetInfoByAnyId(id)
-		local fallback = info and info.Render
+		local fallback = CrewPreviewImages.Resolve({
+			CrewMemberId = id,
+			DisplayName = info and info.DisplayName,
+			ModelName = info and info.ModelName,
+			RealCharacterName = info and info.RealCharacterName,
+		})
+		if fallback == "" then
+			fallback = info and info.Render
+		end
 		if fallback and tostring(fallback) ~= "" then
 			img.Image = tostring(fallback)
+			img.ScaleType = Enum.ScaleType.Crop
 			setGuiVisible(container, true)
 			setGuiVisible(img, true)
 			return

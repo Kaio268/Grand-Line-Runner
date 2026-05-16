@@ -8,6 +8,7 @@ local React = require(Packages:WaitForChild("React"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
+local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 
 local e = React.createElement
 local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
@@ -517,6 +518,89 @@ local function ChestIcon(props)
 	})
 end
 
+local function isCrewPreviewItem(item)
+	return item
+		and (
+			tostring(item.kind or "") == "CrewMember"
+			or tostring(item.previewKind or "") == "CrewMember"
+			or tostring(item.crewMemberName or "") ~= ""
+		)
+end
+
+local function getStaticCrewPreviewImage(item)
+	if not item then
+		return ""
+	end
+
+	if isCrewPreviewItem(item) then
+		local staticPreviewImage = CrewPreviewImages.Resolve(item)
+		if staticPreviewImage ~= "" then
+			return staticPreviewImage
+		end
+	end
+
+	return CrewPreviewImages.ResolveStaticImage(item.image)
+end
+
+local function staticCrewPreviewImage(image, props)
+	props = props or {}
+	return e("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Image = image,
+		Position = props.position or UDim2.fromScale(0.5, 0.5),
+		ScaleType = props.scaleType or Enum.ScaleType.Crop,
+		Size = props.size or UDim2.fromScale(1, 1),
+		ZIndex = props.zIndex,
+	})
+end
+
+local function staticPreviewSlotContent(image, props)
+	props = props or {}
+	local hovered = props.hovered == true
+	local shadowColor = Color3.fromRGB(4, 8, 14)
+	local overlayTransparency = if hovered then 0.78 else 0.84
+	local zIndex = props.zIndex or 1
+
+	return e("Frame", {
+		Active = false,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Position = UDim2.fromScale(0, 0),
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = zIndex,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, props.cornerRadius or 13),
+		}),
+		Image = e("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Image = image,
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = props.scaleType or Enum.ScaleType.Crop,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = zIndex,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, props.cornerRadius or 13),
+			}),
+		}),
+		Wash = e("Frame", {
+			BackgroundColor3 = shadowColor,
+			BackgroundTransparency = overlayTransparency,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, props.cornerRadius or 13),
+			}),
+		}),
+	})
+end
+
 local function renderItemPreview(item, props)
 	local position = props.position
 	local size = props.size
@@ -530,6 +614,13 @@ local function renderItemPreview(item, props)
 		and tostring(item.previewKind) ~= ""
 		and item.previewName ~= nil
 		and tostring(item.previewName) ~= ""
+
+	local staticPreviewImage = getStaticCrewPreviewImage(item)
+	if staticPreviewImage ~= "" then
+		return staticCrewPreviewImage(staticPreviewImage, {
+			zIndex = zIndex,
+		})
+	end
 
 	if hasViewportPreview and item.previewKind == "CrewMember" then
 		return e(PreviewViewport, {
@@ -845,11 +936,14 @@ local function hotbarSlot(props)
 	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(20, 28, 44), 0.78) or Color3.fromRGB(13, 19, 31)
 	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 39, 61), 0.84) or Color3.fromRGB(18, 26, 41)
 	local slotBottomColor = item and accent:Lerp(Color3.fromRGB(12, 17, 30), 0.92) or Color3.fromRGB(10, 14, 24)
+	local staticPreviewImage = getStaticCrewPreviewImage(item)
+	local hasStaticPreview = staticPreviewImage ~= ""
 
 	local slotProps = mergeProps({
 		BackgroundColor3 = slotBaseColor,
 		BackgroundTransparency = item and (emptySlot and 0.58 or 0.3) or 0.76,
 		BorderSizePixel = 0,
+		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
 		ref = hoverRef,
 		Size = UDim2.fromOffset(64, 64),
@@ -864,15 +958,18 @@ local function hotbarSlot(props)
 		end
 	end
 
-	local previewChild = renderItemPreview(item, {
-		position = UDim2.fromScale(0.5, 0.52),
-		size = UDim2.fromOffset(40, 40),
-		zIndex = zIndexBase + 3 + hoverZIndexOffset,
-		fallbackFont = Enum.Font.GothamMedium,
-		fallbackTextColor = PALETTE.Muted,
-		fallbackTextSize = 10,
-		fallbackSize = UDim2.new(1, -12, 0, 18),
-	})
+	local previewChild = nil
+	if not hasStaticPreview then
+		previewChild = renderItemPreview(item, {
+			position = UDim2.fromScale(0.5, 0.52),
+			size = UDim2.fromOffset(40, 40),
+			zIndex = zIndexBase + 3 + hoverZIndexOffset,
+			fallbackFont = Enum.Font.GothamMedium,
+			fallbackTextColor = PALETTE.Muted,
+			fallbackTextSize = 10,
+			fallbackSize = UDim2.new(1, -12, 0, 18),
+		})
+	end
 
 	return e(interactive and "TextButton" or "Frame", slotProps, {
 		Scale = e("UIScale", {
@@ -902,6 +999,7 @@ local function hotbarSlot(props)
 			BackgroundColor3 = Color3.fromRGB(7, 11, 20),
 			BackgroundTransparency = item and (hovered and 0.5 or 0.58) or 0.86,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -8),
 			ZIndex = zIndexBase + 1 + hoverZIndexOffset,
@@ -909,6 +1007,11 @@ local function hotbarSlot(props)
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 13),
 			}),
+			StaticPreview = hasStaticPreview and staticPreviewSlotContent(staticPreviewImage, {
+				cornerRadius = 13,
+				hovered = hovered,
+				zIndex = zIndexBase + 2 + hoverZIndexOffset,
+			}) or nil,
 		}),
 		KeyLabel = slot.slotLabel ~= nil and e("TextLabel", {
 			AutomaticSize = Enum.AutomaticSize.XY,
@@ -919,7 +1022,7 @@ local function hotbarSlot(props)
 			Text = tostring(slot.slotLabel),
 			TextColor3 = item and (lockedSlot and Color3.fromRGB(230, 236, 245) or PALETTE.Cream) or PALETTE.Steel,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -942,7 +1045,7 @@ local function hotbarSlot(props)
 			Text = item.priceRobux and item.priceRobux > 0 and (tostring(item.priceRobux) .. " R$") or "LOCK",
 			TextColor3 = PALETTE.Cream,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -964,7 +1067,7 @@ local function hotbarSlot(props)
 			Text = tostring(item.quantity),
 			TextColor3 = PALETTE.Cream,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -1483,6 +1586,7 @@ local function manifestTile(props)
 		PreviewPlate = e("Frame", {
 			BackgroundColor3 = previewPlateColor,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(10, 12),
 			Size = UDim2.new(1, -20, 0, 84),
 			ZIndex = 2,
@@ -1637,9 +1741,16 @@ local function captainsLogRow(props)
 		and tostring(entry.previewKind) ~= ""
 		and entry.previewName ~= nil
 		and tostring(entry.previewName) ~= ""
+	local staticPreviewImage = getStaticCrewPreviewImage(entry)
 
 	local previewChild
-	if hasViewportPreview then
+	if staticPreviewImage ~= "" then
+		previewChild = staticCrewPreviewImage(staticPreviewImage, {
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromScale(1, 1),
+			zIndex = 3,
+		})
+	elseif hasViewportPreview then
 		previewChild = e(PreviewViewport, {
 			previewKind = entry.previewKind,
 			previewName = entry.previewName,
@@ -1706,6 +1817,7 @@ local function captainsLogRow(props)
 		PreviewPlate = e("Frame", {
 			BackgroundColor3 = accent:Lerp(Color3.fromRGB(59, 63, 78), 0.9),
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(16, 12),
 			Size = UDim2.fromOffset(72, 64),
 			ZIndex = 2,

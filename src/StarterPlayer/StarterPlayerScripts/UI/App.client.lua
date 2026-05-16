@@ -15,6 +15,7 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local App = require(UiFolder:WaitForChild("App"))
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
@@ -162,6 +163,20 @@ local function getCrewModelPreviewDescriptor(name, state)
 	end
 
 	return buildCrewCatalogModelPreview(name, state)
+end
+
+local function getStaticCrewPreviewImage(name, state, modelPreview, displayName)
+	local crewInfo = getCrewInfo(name)
+	return CrewPreviewImages.Resolve({
+		CrewMemberId = (state and (state.crewMemberId or state.CrewMemberId)) or name,
+		BaseCrewMemberId = crewInfo and (crewInfo.CrewMemberBaseId or crewInfo.BaseId),
+		DisplayName = displayName or (state and state.displayName) or (crewInfo and crewInfo.DisplayName),
+		ModelName = (state and state.modelName) or (crewInfo and crewInfo.ModelName),
+		ModelPreview = modelPreview or (state and state.modelPreview),
+		Metadata = state,
+		Name = name,
+		RealCharacterName = (state and state.realCharacterName) or (crewInfo and crewInfo.RealCharacterName),
+	})
 end
 
 local CATEGORY_DEFS = {
@@ -441,6 +456,21 @@ local function getEntryDisplayMetadata(entry)
 		metadata.render = render
 	end
 
+	local staticPreviewImage = tostring(
+		entry.StaticPreviewImage
+			or entry.staticPreviewImage
+			or entry.PreviewImage
+			or entry.previewImage
+			or entry.PreviewImageAsset
+			or entry.previewImageAsset
+			or entry.PreviewImageId
+			or entry.previewImageId
+			or ""
+	)
+	if staticPreviewImage ~= "" then
+		metadata.staticPreviewImage = staticPreviewImage
+	end
+
 	local modelPreview = copyModelPreviewDescriptor(entry.ModelPreview or entry.modelPreview)
 	if modelPreview then
 		metadata.modelPreview = modelPreview
@@ -488,6 +518,9 @@ local function applyDisplayMetadataToState(state, metadata)
 	end
 	if metadata.render ~= nil then
 		state.render = metadata.render
+	end
+	if metadata.staticPreviewImage ~= nil then
+		state.staticPreviewImage = metadata.staticPreviewImage
 	end
 	if metadata.modelPreview ~= nil then
 		state.modelPreview = metadata.modelPreview
@@ -1048,6 +1081,11 @@ end
 
 local function getIcon(kind, name, state)
 	if isCrewItemKind(kind) then
+		local staticPreviewImage = getStaticCrewPreviewImage(name, state)
+		if staticPreviewImage ~= "" then
+			return staticPreviewImage
+		end
+
 		if state and typeof(state.render) == "string" and state.render ~= "" then
 			return state.render
 		end
@@ -1551,6 +1589,7 @@ local function buildCaptainLogData(query)
 				previewKind = CREW_ITEM_KIND
 				previewName = tostring(modelPreview.ModelName or "")
 			end
+			local staticPreviewImage = getStaticCrewPreviewImage(crewMemberName, nil, modelPreview, displayName)
 			local bounty = math.max(
 				0,
 				BountyResolver.ResolveCrewMemberBounty({
@@ -1570,6 +1609,7 @@ local function buildCaptainLogData(query)
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				previewKind = previewKind,
 				previewName = previewName,
+				staticPreviewImage = staticPreviewImage,
 				modelPreview = modelPreview,
 				accentColor = getAccentColor(CREW_ITEM_KIND, crewMemberName),
 				level = standLevel,
@@ -1680,6 +1720,7 @@ local function buildEntry(key, state)
 	local previewKind = nil
 	local previewName = nil
 	local modelPreview = nil
+	local staticPreviewImage = ""
 
 	if isCrewItemKind(state.kind) then
 		modelPreview = getCrewModelPreviewDescriptor(state.name, state)
@@ -1687,6 +1728,7 @@ local function buildEntry(key, state)
 			previewKind = CREW_ITEM_KIND
 			previewName = tostring(modelPreview.ModelName or "")
 		end
+		staticPreviewImage = getStaticCrewPreviewImage(state.name, state, modelPreview, displayName)
 	elseif state.kind == "DevilFruit" then
 		previewKind = "DevilFruit"
 		previewName = state.name
@@ -1710,6 +1752,7 @@ local function buildEntry(key, state)
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
 		previewName = previewName,
+		staticPreviewImage = staticPreviewImage,
 		modelPreview = modelPreview,
 		quantity = state.qty,
 		accentColor = getAccentColor(state.kind, state.name, state),

@@ -4,6 +4,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 local PreviewViewport = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport"))
+local CrewPreviewImages = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewPreviewImages")
+)
 
 local e = React.createElement
 local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
@@ -110,6 +113,16 @@ local function getCrewmateId(crewmate)
 	end
 
 	return getDisplayName(crewmate)
+end
+
+local function getStaticCrewPreviewImage(crewmate, modelName)
+	return CrewPreviewImages.Resolve({
+		CrewMemberId = getCrewmateId(crewmate),
+		DisplayName = getDisplayName(crewmate),
+		ModelName = modelName,
+		Metadata = crewmate,
+		RealCharacterName = crewmate and (crewmate.RealCharacterName or crewmate.realCharacterName),
+	})
 end
 
 local function findCrewPreviewModel(modelName)
@@ -347,7 +360,9 @@ local function inHandSlot(props)
 	local crewmate = props.crewmate
 	local displayName = getDisplayName(crewmate)
 	local modelName = getCrewmateModelName(crewmate)
-	local hasPreviewModel = modelName ~= nil and findCrewPreviewModel(modelName) ~= nil
+	local staticPreviewImage = getStaticCrewPreviewImage(crewmate, modelName)
+	local hasStaticPreview = staticPreviewImage ~= ""
+	local hasPreviewModel = hasStaticPreview or (modelName ~= nil and findCrewPreviewModel(modelName) ~= nil)
 
 	if not locked and not hasPreviewModel then
 		warnMissingCrewPreview(crewmate, modelName)
@@ -414,7 +429,7 @@ local function inHandSlot(props)
 					fieldOfView = 34,
 					position = UDim2.new(0.5, 0, 0, 5),
 					previewKind = "CrewMember",
-					previewName = modelName,
+					previewName = modelName or getCrewmateId(crewmate) or displayName,
 					size = UDim2.new(1, -14, 1, -24),
 					zIndex = zIndex + 2,
 				})

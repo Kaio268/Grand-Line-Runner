@@ -8,6 +8,7 @@ local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local ProfileMigrations = {}
@@ -401,7 +402,8 @@ function ProfileMigrations.Apply(data)
 
 	local indexCollection = ensureTable(data, "IndexCollection")
 	indexCollection.Brainrots = nil
-	ensureTable(indexCollection, "CrewMembers")
+	local repairedCrewMembers = IndexDiscovery.CanonicalizeIndexCollectionMap(ensureTable(indexCollection, "CrewMembers"))
+	indexCollection.CrewMembers = repairedCrewMembers
 	local legacyDiscoveredDevilFruits = ensureTable(indexCollection, "DevilFruits")
 	local discoveredDevilFruits = {}
 

@@ -17,6 +17,27 @@ local PREVIEW_POSITION = UDim2.fromScale(0.5, 0.54)
 local PREVIEW_SIZE = UDim2.fromScale(0.82, 0.82)
 local IMAGE_SHADOW_POSITION = UDim2.fromScale(0.5, 0.58)
 local IMAGE_SHADOW_SIZE = UDim2.fromScale(0.84, 0.84)
+local INDEX_STATIC_PREVIEW_SCALE = 1.18
+local INDEX_STATIC_PREVIEW_SIZE = UDim2.fromScale(INDEX_STATIC_PREVIEW_SCALE, INDEX_STATIC_PREVIEW_SCALE)
+local INDEX_STATIC_PREVIEW_SCALE_OVERRIDES = {}
+local INDEX_STATIC_PREVIEW_OVERRIDE_KEYS = {
+	"displayName",
+	"id",
+	"baseName",
+	"name",
+	"previewName",
+}
+
+local function getIndexStaticPreviewSize(unit)
+	for _, key in ipairs(INDEX_STATIC_PREVIEW_OVERRIDE_KEYS) do
+		local scale = INDEX_STATIC_PREVIEW_SCALE_OVERRIDES[tostring(unit[key] or "")]
+		if scale then
+			return UDim2.fromScale(scale, scale)
+		end
+	end
+
+	return INDEX_STATIC_PREVIEW_SIZE
+end
 
 local function fallbackSilhouette()
 	return e("Frame", {
@@ -343,7 +364,40 @@ local function createLockedPreview()
 	}
 end
 
+local function createStaticImagePreview(image, unit)
+	local previewSize = getIndexStaticPreviewSize(unit)
+
+	return {
+		StaticPreviewImage = e("ImageLabel", {
+			AnchorPoint = PREVIEW_ANCHOR,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageColor3 = Color3.new(1, 1, 1),
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = previewSize,
+			ZIndex = 3,
+		}),
+		StaticPreviewShadow = e("ImageLabel", {
+			AnchorPoint = PREVIEW_ANCHOR,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageColor3 = BLACK,
+			ImageTransparency = 0.7,
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = previewSize,
+			ZIndex = 1,
+		}),
+	}
+end
+
 local function createDiscoveredPreview(unit, renderPreview)
+	local staticPreviewImage = tostring(unit.staticPreviewImage or "")
+	if staticPreviewImage ~= "" then
+		return createStaticImagePreview(staticPreviewImage, unit)
+	end
+
 	if unit.previewKind and unit.previewName then
 		if renderPreview == false then
 			return {
@@ -448,6 +502,7 @@ local function IndexCard(props)
 					BackgroundColor3 = Theme.Palette.CardBackdrop,
 					BackgroundTransparency = 0.18,
 					BorderSizePixel = 0,
+					ClipsDescendants = true,
 					Position = UDim2.fromOffset(4, 4),
 					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
 				}, imageAreaShell(lockedChildren)),
@@ -478,6 +533,7 @@ local function IndexCard(props)
 			BackgroundColor3 = cardAppearance.backdropFill,
 			BackgroundTransparency = 0.18,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
 		}, imageAreaShell(discoveredChildren, rarity, hovered, cardAppearance)),

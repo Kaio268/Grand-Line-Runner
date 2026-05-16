@@ -3,6 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CrewRewardResolver = require(
 	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewRewardResolver")
 )
+local CrewPreviewImages = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewPreviewImages")
+)
 local RandomCrewReward = require(script.Parent:WaitForChild("RandomCrewReward"))
 
 local CrewRewardPreview = {}
@@ -216,6 +219,15 @@ function CrewRewardPreview.Apply(iconObj: Instance, previewInfo): boolean
 	local image = iconObj :: ImageLabel
 	image.Image = ""
 	image.ImageTransparency = 1
+
+	local staticPreviewImage = CrewPreviewImages.Resolve(previewInfo)
+	if staticPreviewImage ~= "" then
+		image.BackgroundTransparency = 1
+		image.Image = staticPreviewImage
+		image.ImageTransparency = 0
+		image.ScaleType = Enum.ScaleType.Crop
+		return true
+	end
 
 	local previewModel = cloneCrewPreviewModel(previewInfo.ModelName)
 	if not previewModel then

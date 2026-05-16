@@ -10,12 +10,10 @@ local CrewMemberCanonicalReadGate = require(
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
-local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local CrewMembers = require(Modules:WaitForChild("Crew"):WaitForChild("CrewMembers"))
+local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
 
-local VariantCfg = CrewCatalog.GetVariantConfig()
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
 local DEVIL_FRUIT_BACKFILL_TIMEOUT = 30
@@ -59,115 +57,7 @@ if not indexDisplayMetadataRequest then
 	indexDisplayMetadataRequest.Parent = ReplicatedStorage
 end
 
-local VALID_CREW_MEMBER_ITEM_IDS = {}
-local SORTED_CREW_MEMBER_ITEM_IDS = {}
-
-for _, entry in ipairs(CrewMembers.GetEntries()) do
-	if type(entry) == "table" then
-		local crewMemberId = tostring(entry.CrewMemberId or "")
-		if crewMemberId ~= "" then
-			for _, variantKey in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
-				local itemId = CrewCatalog.MakeVariantId(crewMemberId, variantKey)
-				VALID_CREW_MEMBER_ITEM_IDS[itemId] = true
-				SORTED_CREW_MEMBER_ITEM_IDS[#SORTED_CREW_MEMBER_ITEM_IDS + 1] = itemId
-			end
-		end
-	end
-end
-
-table.sort(SORTED_CREW_MEMBER_ITEM_IDS)
-
 local lastIndexDisplayMetadataLogByPlayer = setmetatable({}, { __mode = "k" })
-
-local function getVariantInfo(variantKey)
-	if variantKey == "Normal" or not variantKey then
-		return (VariantCfg.Versions or {}).Normal or { Prefix = "", IncomeMult = 1 }
-	end
-
-	return (VariantCfg.Versions or {})[variantKey]
-end
-
-local function getVariantItemId(variantKey, baseName)
-	if typeof(baseName) ~= "string" or baseName == "" then
-		return nil
-	end
-
-	if variantKey == "Normal" or not variantKey then
-		return baseName
-	end
-
-	local variantInfo = getVariantInfo(variantKey)
-	local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-	return prefix .. baseName
-end
-
-local function normalizeVariantKey(variantKey)
-	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
-		if candidate == supportedVariant then
-			return supportedVariant
-		end
-	end
-
-	return "Normal"
-end
-
-local function parseVariantAndBaseName(fullName)
-	local value = tostring(fullName or "")
-	if value == "" then
-		return "Normal", ""
-	end
-
-	for _, variantKey in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
-		if variantKey ~= "Normal" then
-			local variantInfo = getVariantInfo(variantKey)
-			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-			if value:sub(1, #prefix) == prefix then
-				return variantKey, value:sub(#prefix + 1)
-			end
-		end
-	end
-
-	return "Normal", value
-end
-
-local function resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
-	local crewMemberIdValue = tostring(crewMemberId or "")
-	local baseNameValue = tostring(baseName or "")
-	local normalizedVariant = normalizeVariantKey(variantKey)
-	if baseNameValue == "" and crewMemberIdValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(crewMemberIdValue)
-		normalizedVariant = normalizeVariantKey(parsedVariant)
-		baseNameValue = parsedBaseName
-	end
-
-	local resolvedCrewMemberId, info = CrewCatalog.ResolveCrewMemberId(baseNameValue)
-	if info then
-		baseNameValue = tostring(info.CrewMemberId or resolvedCrewMemberId)
-	end
-
-	if baseNameValue == "" then
-		return nil
-	end
-
-	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
-		return itemId
-	end
-
-	if crewMemberIdValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[crewMemberIdValue] then
-		return crewMemberIdValue
-	end
-
-	return nil
-end
-
-local function markDiscoveredCrewMember(discovered, crewMemberId, baseName, variantKey)
-	local itemId = resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
-	if itemId then
-		discovered[itemId] = true
-	end
-end
 
 local function getRequestedCrewMemberItemIds(requestedItemIds)
 	local itemIds = {}
@@ -180,7 +70,7 @@ local function getRequestedCrewMemberItemIds(requestedItemIds)
 			end
 
 			local itemId = tostring(rawItemId or "")
-			if VALID_CREW_MEMBER_ITEM_IDS[itemId] == true and seen[itemId] ~= true then
+			if IndexDiscovery.IsValidCrewMemberItemId(itemId) and seen[itemId] ~= true then
 				seen[itemId] = true
 				itemIds[#itemIds + 1] = itemId
 			end
@@ -192,7 +82,7 @@ local function getRequestedCrewMemberItemIds(requestedItemIds)
 		return itemIds
 	end
 
-	for _, itemId in ipairs(SORTED_CREW_MEMBER_ITEM_IDS) do
+	for _, itemId in ipairs(IndexDiscovery.GetSortedCrewMemberItemIds()) do
 		if #itemIds >= INDEX_DISPLAY_METADATA_MAX_IDS then
 			break
 		end
@@ -400,35 +290,11 @@ end
 indexDisplayMetadataRequest.OnServerInvoke = buildIndexDisplayMetadataResponse
 
 local function countUnlockedCrewMembers(player)
-	local discovered = {}
 	local history = IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
-
-	if history then
-		for itemId, isDiscovered in pairs(history) do
-			if isDiscovered == true then
-				discovered[tostring(itemId)] = true
-			end
-		end
-	end
-
 	local crewInventory = CrewInstanceService.GetCrewInventory(player)
-	for _, instanceData in pairs(if typeof(crewInventory) == "table" and typeof(crewInventory.ById) == "table" then crewInventory.ById else {}) do
-		if typeof(instanceData) == "table" then
-			markDiscoveredCrewMember(
-				discovered,
-				tostring(instanceData.CrewMemberId or ""),
-				tostring(instanceData.BaseName or ""),
-				tostring(instanceData.Variant or "")
-			)
-		end
-	end
 
-	local count = 0
-	for _ in pairs(discovered) do
-		count += 1
-	end
-
-	return count
+	local discovered = IndexDiscovery.BuildDiscoveredSetFromData(history, crewInventory)
+	return IndexDiscovery.CountDiscoveredSet(discovered)
 end
 
 local function humanizeToken(token)
@@ -503,6 +369,11 @@ local function backfillDevilFruitIndex(player)
 		if not DataManager:WaitUntilReady(player, DEVIL_FRUIT_BACKFILL_TIMEOUT) then
 			warn(string.format("[Index] Failed to backfill Devil Fruit Index for %s: data not ready.", player.Name))
 			return
+		end
+
+		local repairOk, repairResult = pcall(IndexCollectionService.RepairCrewMemberDiscoveries, player)
+		if not repairOk then
+			warn(string.format("[Index] Failed to repair CrewMember Index for %s: %s", player.Name, tostring(repairResult)))
 		end
 
 		local ok, result = pcall(IndexCollectionService.BackfillDevilFruitDiscoveries, player)

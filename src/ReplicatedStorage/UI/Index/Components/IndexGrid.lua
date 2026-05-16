@@ -12,9 +12,10 @@ local GRID_GAP = 6
 local GRID_PADDING = 6
 local DEFAULT_COLUMNS = 5
 local DEFAULT_VIEWPORT_HEIGHT = 560
-local LAZY_PREVIEW_OVERSCAN_ROWS = 1
+local LAZY_PREVIEW_OVERSCAN_ROWS = 3
 local MIN_LAYOUT_SCALE = 0.05
-local SCROLL_CHANGE_EPSILON = 12
+local SCROLL_CHANGE_EPSILON = 48
+local SCROLL_UPDATE_DEBOUNCE_SECONDS = 0.08
 local WIDTH_CHANGE_EPSILON = 1
 
 local function getCardMetrics(containerWidth, columns)
@@ -107,9 +108,64 @@ local function IndexGrid(props)
 	local units = props.units or {}
 	local columns = math.max(1, props.columns or DEFAULT_COLUMNS)
 	local containerWidth, setContainerWidth = React.useState(920)
-	local viewportHeight, setViewportHeight = React.useState(DEFAULT_VIEWPORT_HEIGHT)
-	local canvasY, setCanvasY = React.useState(0)
+	local previewScrollState, setPreviewScrollState = React.useState({
+		canvasY = 0,
+		viewportHeight = DEFAULT_VIEWPORT_HEIGHT,
+	})
+	local pendingPreviewScrollStateRef = React.useRef(nil)
+	local previewScrollUpdateThreadRef = React.useRef(nil)
 	local cardWidth, cardHeight = getCardMetrics(containerWidth, columns)
+
+	React.useEffect(function()
+		return function()
+			local thread = previewScrollUpdateThreadRef.current
+			if thread then
+				task.cancel(thread)
+				previewScrollUpdateThreadRef.current = nil
+			end
+			pendingPreviewScrollStateRef.current = nil
+		end
+	end, {})
+
+	local function setPreviewScrollStateIfChanged(nextState)
+		if math.abs((nextState.canvasY or 0) - (previewScrollState.canvasY or 0)) < SCROLL_CHANGE_EPSILON
+			and math.abs((nextState.viewportHeight or 0) - (previewScrollState.viewportHeight or 0)) < WIDTH_CHANGE_EPSILON
+		then
+			return
+		end
+
+		setPreviewScrollState(nextState)
+	end
+
+	local function schedulePreviewScrollState(nextState, immediate)
+		pendingPreviewScrollStateRef.current = nextState
+
+		if immediate then
+			local thread = previewScrollUpdateThreadRef.current
+			if thread then
+				task.cancel(thread)
+				previewScrollUpdateThreadRef.current = nil
+			end
+
+			pendingPreviewScrollStateRef.current = nil
+			setPreviewScrollStateIfChanged(nextState)
+			return
+		end
+
+		if previewScrollUpdateThreadRef.current then
+			return
+		end
+
+		previewScrollUpdateThreadRef.current = task.delay(SCROLL_UPDATE_DEBOUNCE_SECONDS, function()
+			local pending = pendingPreviewScrollStateRef.current
+			pendingPreviewScrollStateRef.current = nil
+			previewScrollUpdateThreadRef.current = nil
+
+			if pending then
+				setPreviewScrollState(pending)
+			end
+		end)
+	end
 
 	if #units == 0 then
 		return e("Frame", {
@@ -156,7 +212,13 @@ local function IndexGrid(props)
 	for index, unit in ipairs(units) do
 		gridChildren["Card" .. tostring(unit.id)] = e(IndexCard, {
 			layoutOrder = index,
-			renderPreview = shouldRenderPreview(index, columns, cardHeight, viewportHeight, canvasY),
+			renderPreview = shouldRenderPreview(
+				index,
+				columns,
+				cardHeight,
+				previewScrollState.viewportHeight,
+				previewScrollState.canvasY
+			),
 			unit = unit,
 		})
 	end
@@ -200,14 +262,22 @@ local function IndexGrid(props)
 				end
 
 				local nextHeight = math.floor(rbx.AbsoluteSize.Y + 0.5)
-				if nextHeight > 0 and math.abs(nextHeight - viewportHeight) >= WIDTH_CHANGE_EPSILON then
-					setViewportHeight(nextHeight)
+				if nextHeight > 0
+					and math.abs(nextHeight - (previewScrollState.viewportHeight or 0)) >= WIDTH_CHANGE_EPSILON
+				then
+					schedulePreviewScrollState({
+						canvasY = previewScrollState.canvasY or 0,
+						viewportHeight = nextHeight,
+					}, true)
 				end
 			end,
 			[React.Change.CanvasPosition] = function(rbx)
 				local nextY = math.max(0, math.floor(rbx.CanvasPosition.Y + 0.5))
-				if math.abs(nextY - canvasY) >= SCROLL_CHANGE_EPSILON then
-					setCanvasY(nextY)
+				if math.abs(nextY - (previewScrollState.canvasY or 0)) >= SCROLL_CHANGE_EPSILON then
+					schedulePreviewScrollState({
+						canvasY = nextY,
+						viewportHeight = previewScrollState.viewportHeight or DEFAULT_VIEWPORT_HEIGHT,
+					}, false)
 				end
 			end,
 		}, gridChildren),

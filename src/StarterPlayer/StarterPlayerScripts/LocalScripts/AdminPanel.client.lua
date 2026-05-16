@@ -580,6 +580,21 @@ local COMMANDS = {
 		end,
 	},
 	{
+		id = "hazards_toggle",
+		category = "Spawning",
+		marker = "HZ",
+		name = "Hazards",
+		syntax = "/hazards true|false",
+		description = "Enable or disable corridor hazard spawning and clear active hazards when disabled.",
+		example = "/hazards false",
+		inputs = {
+			{ key = "state", label = "State", placeholder = "true or false", default = "false" },
+		},
+		build = function(values)
+			return "/hazards " .. inputValue(values, "state", "false")
+		end,
+	},
+	{
 		id = "chest_grant",
 		category = "Chests",
 		marker = "CH",

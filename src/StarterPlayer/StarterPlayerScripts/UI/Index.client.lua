@@ -68,6 +68,7 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	minSize = Vector2.new(1080, 680),
 	maxSize = Vector2.new(1360, 860),
 	allowFallback = true,
+	bypassLegacyScaleAnimation = true,
 })
 
 local function buildEmptyViewModel()
@@ -790,44 +791,35 @@ local function render()
 
 	local host = modalAdapter:EnsureHost()
 	if host then
-		local isVisible = modalAdapter:IsVisible()
-
 		modalAdapter:SetFallbackEnabled(false)
 
 		local content
-		if not isVisible then
-			content = e("Frame", {
-				BackgroundTransparency = 1,
-				Size = UDim2.fromScale(1, 1),
+		local _, indexScreen = loadIndexModules()
+		if indexScreen then
+			local viewModel = buildViewModel(false)
+
+			content = e(indexScreen, {
+				categories = viewModel.categories,
+				claimableCount = viewModel.claimableCount,
+				collectionStats = viewModel.collectionStats,
+				devilFruitCollection = viewModel.devilFruitCollection,
+				onClaimRewardRequested = fireClaimReward,
+				onClose = function()
+					modalAdapter:Close()
+				end,
+				rewards = viewModel.rewards,
+				tabs = viewModel.tabs,
+				units = viewModel.units,
+				unitsByCategory = viewModel.unitsByCategory,
 			})
 		else
-			local _, indexScreen = loadIndexModules()
-			if indexScreen then
-				local viewModel = buildViewModel(false)
-
-				content = e(indexScreen, {
-					categories = viewModel.categories,
-					claimableCount = viewModel.claimableCount,
-					collectionStats = viewModel.collectionStats,
-					devilFruitCollection = viewModel.devilFruitCollection,
-					onClaimRewardRequested = fireClaimReward,
-					onClose = function()
-						modalAdapter:Close()
-					end,
-					rewards = viewModel.rewards,
-					tabs = viewModel.tabs,
-					units = viewModel.units,
-					unitsByCategory = viewModel.unitsByCategory,
-				})
-			else
-				content = statusShell(
-					"Loading Index",
-					"Preparing the new Index view. This should only take a moment.",
-					function()
-						modalAdapter:Close()
-					end
-				)
-			end
+			content = statusShell(
+				"Loading Index",
+				"Preparing the new Index view. This should only take a moment.",
+				function()
+					modalAdapter:Close()
+				end
+			)
 		end
 
 		root:render(ReactRoblox.createPortal(content, host))

@@ -3,7 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local CrewMembers = require(Modules:WaitForChild("Crew"):WaitForChild("CrewMembers"))
+local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 local CrewVariantConfig = CrewCatalog.GetVariantConfig()
 local DevilFruits = require(Configs:WaitForChild("DevilFruits"))
 local IndexConfig = require(Configs:WaitForChild("Index"))
@@ -60,19 +62,6 @@ local RARITY_SORT_ORDER = {
 	Omega = 9,
 }
 
-local VALID_CREW_MEMBER_ITEM_IDS = {}
-
-for _, entry in ipairs(CrewMembers.GetEntries()) do
-	if type(entry) == "table" then
-		local crewMemberId = tostring(entry.CrewMemberId or "")
-		if crewMemberId ~= "" then
-			for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
-				VALID_CREW_MEMBER_ITEM_IDS[CrewCatalog.MakeVariantId(crewMemberId, variantKey)] = true
-			end
-		end
-	end
-end
-
 local function getVariantInfo(variantKey)
 	return (CrewVariantConfig.Versions or {})[variantKey]
 		or (CrewVariantConfig.Versions or {}).Normal
@@ -128,74 +117,6 @@ local function readStringField(container, childName)
 	return text
 end
 
-local function normalizeVariantKey(variantKey)
-	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
-		if candidate == supportedVariant then
-			return supportedVariant
-		end
-	end
-
-	return "Normal"
-end
-
-local function parseVariantAndBaseName(fullName)
-	local value = tostring(fullName or "")
-	if value == "" then
-		return "Normal", ""
-	end
-
-	for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
-		if variantKey ~= "Normal" then
-			local variantInfo = getVariantInfo(variantKey)
-			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-			if value:sub(1, #prefix) == prefix then
-				return variantKey, value:sub(#prefix + 1)
-			end
-		end
-	end
-
-	return "Normal", value
-end
-
-local function resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
-	local crewMemberIdValue = tostring(crewMemberId or "")
-	local baseNameValue = tostring(baseName or "")
-	local normalizedVariant = normalizeVariantKey(variantKey)
-	if baseNameValue == "" and crewMemberIdValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(crewMemberIdValue)
-		normalizedVariant = normalizeVariantKey(parsedVariant)
-		baseNameValue = parsedBaseName
-	end
-
-	local resolvedCrewMemberId, info = CrewCatalog.ResolveCrewMemberId(baseNameValue)
-	if info then
-		baseNameValue = tostring(info.CrewMemberId or resolvedCrewMemberId)
-	end
-
-	if baseNameValue == "" then
-		return nil
-	end
-
-	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
-		return itemId
-	end
-
-	if crewMemberIdValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[crewMemberIdValue] then
-		return crewMemberIdValue
-	end
-
-	return nil
-end
-
-local function markDiscoveredCrewMember(discovered, crewMemberId, baseName, variantKey)
-	local itemId = resolveCrewMemberItemId(crewMemberId, baseName, variantKey)
-	if itemId then
-		discovered[itemId] = true
-	end
-end
-
 local function getCrewInfo(itemId)
 	return CrewCatalog.GetInfoById(itemId)
 end
@@ -249,22 +170,39 @@ local function getCanonicalIndexModelPreview(metadata)
 	return descriptor
 end
 
+local function getCatalogCrewModelPreview(info)
+	if type(info) ~= "table" then
+		return nil
+	end
+	if info.MissingModel == true then
+		return nil
+	end
+
+	local modelName = tostring(info.ModelName or "")
+	if modelName == "" then
+		return nil
+	end
+
+	return {
+		ModelName = modelName,
+		IsPreviewOnly = true,
+		UsedCanonical = true,
+		Source = "CrewCatalog",
+	}
+end
+
+local function getCrewRenderImage(render, renderStatus)
+	if tostring(renderStatus or "") == "NeedsCanonicalPortrait" then
+		return ""
+	end
+
+	return tostring(render or "")
+end
+
 local function markDiscoveredFruit(discovered, fruitIdentifier)
 	local fruit = DevilFruits.GetFruit(fruitIdentifier)
 	if fruit then
 		discovered[fruit.FruitKey] = true
-	end
-end
-
-local function mergeDiscoveredFromBoolFolder(discovered, folder)
-	if not folder then
-		return
-	end
-
-	for _, child in ipairs(folder:GetChildren()) do
-		if child:IsA("BoolValue") and child.Value == true then
-			discovered[tostring(child.Name)] = true
-		end
 	end
 end
 
@@ -294,24 +232,7 @@ local function mergeDiscoveredFruitsFromFolder(discovered, folder)
 end
 
 local function buildDiscoveredCrewMemberSet(indexCollection, crewMemberInventory)
-	local discovered = {}
-	mergeDiscoveredFromBoolFolder(discovered, indexCollection and indexCollection:FindFirstChild("CrewMembers"))
-
-	local byIdFolder = crewMemberInventory and crewMemberInventory:FindFirstChild("ById")
-	if byIdFolder then
-		for _, child in ipairs(byIdFolder:GetChildren()) do
-			if child:IsA("Folder") then
-				markDiscoveredCrewMember(
-					discovered,
-					readStringField(child, "CrewMemberId"),
-					readStringField(child, "BaseName"),
-					readStringField(child, "Variant")
-				)
-			end
-		end
-	end
-
-	return discovered
+	return IndexDiscovery.BuildDiscoveredSetFromFolders(indexCollection, crewMemberInventory)
 end
 
 local function buildDiscoveredFruitSet(indexCollection, inventory, equippedFruitIdentifier)
@@ -525,7 +446,20 @@ function IndexData.buildViewModel(options)
 					or tostring(itemInfo.Rarity or entry.info.Rarity or "Common")
 				local render = readMetadataText(displayMetadata, "Render")
 					or tostring(itemInfo.Render or entry.info.Render or "")
+				local renderStatus = readMetadataText(displayMetadata, "RenderStatus")
+					or tostring(itemInfo.RenderStatus or entry.info.RenderStatus or "")
 				local modelPreview = getCanonicalIndexModelPreview(displayMetadata)
+					or getCatalogCrewModelPreview(itemInfo)
+					or getCatalogCrewModelPreview(entry.info)
+				local staticPreviewImage = CrewPreviewImages.Resolve({
+					CrewMemberId = itemId,
+					BaseCrewMemberId = entry.name,
+					DisplayName = displayName,
+					ModelPreview = modelPreview,
+					Metadata = displayMetadata,
+					RealCharacterName = itemInfo.RealCharacterName or entry.info.RealCharacterName,
+					ModelName = itemInfo.ModelName or entry.info.ModelName,
+				})
 
 				local unit = {
 					id = itemId,
@@ -536,7 +470,8 @@ function IndexData.buildViewModel(options)
 					production = formatIncome(itemInfo.Income or entry.info.Income or 0),
 					rawIncome = tonumber(itemInfo.Income or entry.info.Income) or 0,
 					discovered = discovered,
-					image = render,
+					image = if modelPreview then "" else getCrewRenderImage(render, renderStatus),
+					staticPreviewImage = staticPreviewImage,
 					previewKind = if modelPreview then "CrewMember" else nil,
 					previewName = if modelPreview then tostring(modelPreview.ModelName or "") else nil,
 					previewCrewMemberId = if modelPreview then itemId else nil,

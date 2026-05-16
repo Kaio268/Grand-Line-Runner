@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ServerScriptService = game:GetService("ServerScriptService")
 local TextChatService = game:GetService("TextChatService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local engineWarn = warn
 local activeCommandWarnings = nil
@@ -49,6 +50,7 @@ local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewM
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
 local SpeedUpgradeLimits = require(ServerScriptService.Modules:WaitForChild("SpeedUpgradeLimits"))
+local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -82,6 +84,7 @@ local HITBOX_POPUP_ON_COLOR = Color3.fromRGB(105, 225, 255)
 local HITBOX_POPUP_OFF_COLOR = Color3.fromRGB(220, 220, 220)
 local HITBOX_POPUP_ERROR_COLOR = Color3.fromRGB(255, 85, 85)
 local HITBOX_POPUP_STROKE_COLOR = Color3.fromRGB(0, 0, 0)
+local HAZARDS_DISABLED_TIMER_SECONDS = 10 * 365 * 24 * 60 * 60
 
 local recentCommands = {}
 local pendingWipeConfirmations = {}
@@ -127,6 +130,8 @@ local boostAliases = {
 local ADMIN_COMMAND_NAMES = {
 	fruit = true,
 	money = true,
+	hazard = true,
+	hazards = true,
 	hitbox = true,
 	speed = true,
 	setspeed = true,
@@ -520,6 +525,146 @@ local function processHitboxCommand(player, argumentText)
 		player.Name,
 		nextState and "on" or "off"
 	))
+end
+
+local function parseHazardsEnabledArgument(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "on"
+		or normalizedArgument == "true"
+		or normalizedArgument == "1"
+		or normalizedArgument == "enable"
+		or normalizedArgument == "enabled"
+	then
+		return true
+	elseif normalizedArgument == "off"
+		or normalizedArgument == "false"
+		or normalizedArgument == "0"
+		or normalizedArgument == "disable"
+		or normalizedArgument == "disabled"
+	then
+		return false
+	end
+
+	return nil
+end
+
+local function getNoDisastersTimer()
+	local timer = Workspace:FindFirstChild("NoDisastersTimer")
+	if not timer then
+		return nil, "missing_no_disasters_timer"
+	end
+
+	local ok, value = pcall(function()
+		return timer.Value
+	end)
+	if not ok or typeof(value) ~= "number" then
+		return nil, "invalid_no_disasters_timer"
+	end
+
+	return timer, nil
+end
+
+local function clearActiveSharedHazards()
+	local hazardsFolder = HazardRuntime.GetSharedHazardsFolder()
+	if not hazardsFolder then
+		return 0, 0, "missing_hazards_folder"
+	end
+
+	local clearedCount = 0
+	local failedCount = 0
+	for _, hazardRoot in ipairs(hazardsFolder:GetChildren()) do
+		local runtimeOk, runtimeDestroyed = pcall(function()
+			return HazardRuntime.Destroy(hazardRoot)
+		end)
+
+		if runtimeOk and runtimeDestroyed == true then
+			clearedCount += 1
+		else
+			local destroyOk = pcall(function()
+				hazardRoot:Destroy()
+			end)
+			if destroyOk then
+				clearedCount += 1
+			else
+				failedCount += 1
+			end
+		end
+	end
+
+	return clearedCount, failedCount, nil
+end
+
+local function processHazardsCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local nextEnabled = parseHazardsEnabledArgument(argumentText)
+	if nextEnabled == nil then
+		local normalizedArgument = normalizeText(argumentText)
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /hazards argument '%s' from %s. Use /hazards true or /hazards false",
+			normalizedArgument,
+			player.Name
+		))
+		return
+	end
+
+	local timer, timerReason = getNoDisastersTimer()
+	if not timer then
+		warn(string.format(
+			"[DevFruitDevCommands] Failed /hazards %s for %s (%s)",
+			tostring(nextEnabled),
+			player.Name,
+			tostring(timerReason)
+		))
+		return false, tostring(timerReason)
+	end
+
+	local previousTimerValue = timer.Value
+	local nextTimerValue = if nextEnabled then 0 else math.max(previousTimerValue, HAZARDS_DISABLED_TIMER_SECONDS)
+	timer.Value = nextTimerValue
+
+	local clearedCount = 0
+	local failedCount = 0
+	local clearReason = nil
+	if not nextEnabled then
+		clearedCount, failedCount, clearReason = clearActiveSharedHazards()
+	end
+
+	local detail = string.format(
+		"hazards=%s oldTimer=%d newTimer=%d cleared=%d",
+		nextEnabled and "on" or "off",
+		math.floor(previousTimerValue),
+		math.floor(nextTimerValue),
+		clearedCount
+	)
+
+	if clearReason then
+		detail ..= " clearReason=" .. tostring(clearReason)
+	end
+
+	if failedCount > 0 then
+		detail ..= " failed=" .. tostring(failedCount)
+		warn(string.format(
+			"[DevFruitDevCommands] Failed to clear %d active hazard(s) for %s via /hazards %s",
+			failedCount,
+			player.Name,
+			nextEnabled and "true" or "false"
+		))
+		return false, detail
+	end
+
+	print(string.format(
+		"[DevFruitDevCommands] %s set hazards to %s via /hazards (old timer=%d, new timer=%d, cleared=%d%s)",
+		player.Name,
+		nextEnabled and "on" or "off",
+		math.floor(previousTimerValue),
+		math.floor(nextTimerValue),
+		clearedCount,
+		clearReason and (", " .. tostring(clearReason)) or ""
+	))
+	return true, detail
 end
 
 local function parseSignedAmount(text)
@@ -5868,6 +6013,13 @@ local function handleChatCommand(player, rawText, source)
 		return
 	end
 
+	if commandName == "hazards" or commandName == "hazard" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processHazardsCommand(player, argumentText)
+		end)
+		return
+	end
+
 	if commandName == "boost" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processBoostCommand(player, argumentText)
@@ -6492,7 +6644,39 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:HitboxDevCommand")
 	end)
 
-	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=15")
+	local hazardsCommand = commandsFolder:FindFirstChild("HazardsDevCommand")
+	if hazardsCommand and not hazardsCommand:IsA("TextChatCommand") then
+		hazardsCommand:Destroy()
+		hazardsCommand = nil
+	end
+
+	if not hazardsCommand then
+		hazardsCommand = Instance.new("TextChatCommand")
+		hazardsCommand.Name = "HazardsDevCommand"
+		hazardsCommand.PrimaryAlias = "/hazards"
+		hazardsCommand.SecondaryAlias = "/hazard"
+		hazardsCommand.AutocompleteVisible = false
+		hazardsCommand.Parent = commandsFolder
+	end
+
+	hazardsCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=HazardsDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 8) == "/hazards" or normalizedText:sub(1, 9) == "/ hazards" or normalizedText:sub(1, 7) == "/hazard" or normalizedText:sub(1, 8) == "/ hazard" then
+			handleChatCommand(player, normalizedText, "TextChatCommand:HazardsDevCommand")
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/hazards " .. normalizedText) or "/hazards"
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:HazardsDevCommand")
+	end)
+
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=16")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do
