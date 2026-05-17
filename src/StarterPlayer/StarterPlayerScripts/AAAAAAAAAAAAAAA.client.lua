@@ -404,6 +404,23 @@ local function getWaveWorldPos(obj)
 	return nil
 end
 
+local function isWaveMinimapHazard(obj)
+	if not obj then
+		return false
+	end
+
+	if WavesConfig[obj.Name] then
+		return true
+	end
+
+	local hazardType = obj:GetAttribute("HazardType")
+	if typeof(hazardType) == "string" then
+		return string.lower(hazardType) == "wave"
+	end
+
+	return false
+end
+
 local function getRewardWorldPos(obj)
 	if not obj then
 		return nil
@@ -478,6 +495,15 @@ local function removeUnusedChestIndicators(validMap)
 end
 
 local function ensureWaveIndicator(waveObj)
+	if not isWaveMinimapHazard(waveObj) then
+		local existing = waveIndicators[waveObj]
+		if existing and existing.Parent then
+			existing:Destroy()
+		end
+		waveIndicators[waveObj] = nil
+		return nil
+	end
+
 	if waveIndicators[waveObj] and waveIndicators[waveObj].Parent then
 		return waveIndicators[waveObj]
 	end
@@ -530,10 +556,12 @@ local function updateWaveIndicators()
 			end
 			waveIndicators[waveObj] = nil
 		else
-			local pos = getWaveWorldPos(waveObj)
+			local pos = isWaveMinimapHazard(waveObj) and getWaveWorldPos(waveObj) or nil
 			if pos then
 				local a = getAlphaOnLine(pos)
 				gui.Position = UDim2.new(alphaToXScale(a), 0, disasterYScale, disasterYOffset)
+			else
+				removeWaveIndicator(waveObj)
 			end
 		end
 	end

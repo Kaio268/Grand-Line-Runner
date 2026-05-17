@@ -152,6 +152,23 @@ local function getHazardImage(hazard)
 	return DEFAULT_WAVE_ICON
 end
 
+local function isWaveHazard(hazard)
+	if not hazard then
+		return false
+	end
+
+	if LavaWaves[hazard.Name] then
+		return true
+	end
+
+	local hazardType = hazard:GetAttribute("HazardType")
+	if typeof(hazardType) == "string" then
+		return string.lower(hazardType) == "wave"
+	end
+
+	return false
+end
+
 local function hideLegacyProgressBar()
 	if legacyProgressBarHidden then
 		return
@@ -211,7 +228,7 @@ local function render()
 	local waveMarkers = {}
 	if hazardFolder and hazardFolder.Parent then
 		for _, hazard in ipairs(hazardFolder:GetChildren()) do
-			local worldPos = getWorldPosition(hazard)
+			local worldPos = isWaveHazard(hazard) and getWorldPosition(hazard) or nil
 			if worldPos then
 				waveMarkers[#waveMarkers + 1] = {
 					alpha = alphaFromWorldPos(worldPos, WAVE_MARKER_PADDING),
