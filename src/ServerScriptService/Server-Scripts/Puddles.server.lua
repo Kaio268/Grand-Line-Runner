@@ -14,6 +14,7 @@ local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):W
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
 local CONFIG = {
+	Enabled = true,
 	CycleDelay = 3,
 	InitialSpawnDelay = 1,
 	ActiveLifetime = 35,
@@ -23,8 +24,18 @@ local CONFIG = {
 	MinSpawnStaggerDelay = 0.25,
 	MaxSpawnStaggerDelay = 0.9,
 	SlowRefreshDelay = 0.35,
-	SlowDuration = 0.75,
-	WalkSpeedMultiplier = 0.50,
+	SlowDuration = 3,
+	FallbackSlowMultiplier = 0.50,
+	SlowMultiplierByBiome = {
+		[1] = 0.10,
+		[2] = 0.20,
+		[3] = 0.30,
+		[4] = 0.40,
+		[5] = 0.60,
+		[6] = 0.65,
+		[7] = 0.70,
+		[8] = 0.75,
+	},
 	BiomeCount = 8,
 	MaxActivePuddles = 50,
 	MinimumForwardAlpha = 0.04,
@@ -43,24 +54,24 @@ local CONFIG = {
 	AffectablePadding = Vector3.new(0.5, 1, 0.5),
 	ReverseBiomeTemplates = true,
 	SpawnCountsByBiome = {
-		[1] = 2,
-		[2] = 2,
-		[3] = 3,
-		[4] = 3,
-		[5] = 3,
-		[6] = 4,
-		[7] = 5,
+		[1] = 10,
+		[2] = 9,
+		[3] = 8,
+		[4] = 8,
+		[5] = 7,
+		[6] = 7,
+		[7] = 6,
 		[8] = 6,
 	},
-	GlobalScaleMultiplier = .8,
+	GlobalScaleMultiplier = .5,
 	ScaleByBiome = {
-		[1] = 0.23,
-		[2] = 0.19,
-		[3] = 0.16,
-		[4] = 0.14,
-		[5] = 0.11,
-		[6] = 0.10,
-		[7] = 0.09,
+		[1] = 0.25,
+		[2] = 0.20,
+		[3] = 0.18,
+		[4] = 0.16,
+		[5] = 0.14,
+		[6] = 0.12,
+		[7] = 0.10,
 		[8] = 0.08,
 	},
 	SafeGapBuffer = 12,
@@ -75,6 +86,10 @@ local CONFIG = {
 		"no puddle",
 	},
 }
+
+if not CONFIG.Enabled then
+	return
+end
 
 local PUDDLE_TEMPLATE_NAMES_BY_AREA = {
 	["foosha village"] = "Foosha Puddle",
@@ -319,17 +334,27 @@ local function raycastGround(position, refs, raycastParams)
 	return nil
 end
 
-local function isNearSafePuddleGap(position, refs, forward, raycastParams)
+local function isNearSafePuddleGap(position, refs, forward, lateral, footprintSize, raycastParams)
 	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
+	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
 	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
 	if buffer <= 0 then
 		return false
 	end
 
+	local size = typeof(footprintSize) == "Vector3" and footprintSize or Vector3.new(8, 1, 8)
+	local sampleX = math.max(buffer, size.X * 0.5 + buffer)
+	local sampleZ = math.max(buffer, size.Z * 0.5 + buffer)
 	for _, offset in ipairs({
-		forwardUnit * buffer,
-		-forwardUnit * buffer,
 		Vector3.zero,
+		forwardUnit * sampleZ,
+		-forwardUnit * sampleZ,
+		lateralUnit * sampleX,
+		-lateralUnit * sampleX,
+		lateralUnit * sampleX + forwardUnit * sampleZ,
+		lateralUnit * -sampleX + forwardUnit * sampleZ,
+		lateralUnit * sampleX + forwardUnit * -sampleZ,
+		lateralUnit * -sampleX + forwardUnit * -sampleZ,
 	}) do
 		if not raycastGround(position + offset, refs, raycastParams) then
 			return true
@@ -346,7 +371,7 @@ local function resolveSafeGroundPosition(position, refs, lateral, forward, footp
 		return nil
 	end
 
-	if isNearSafePuddleGap(centerPosition, refs, forward, raycastParams) then
+	if isNearSafePuddleGap(centerPosition, refs, forward, lateral, footprintSize, raycastParams) then
 		return nil
 	end
 
@@ -706,7 +731,7 @@ local function buildHazardVolumes(controller)
 	}
 end
 
-local function createController(model, hitbox, visualModel)
+local function createController(model, hitbox, visualModel, biomeIndex)
 	local visualDefaults = {}
 	for _, part in ipairs(getBaseParts(visualModel)) do
 		visualDefaults[part] = {
@@ -727,6 +752,7 @@ local function createController(model, hitbox, visualModel)
 		FrozenUntil = 0,
 		FreezeToken = 0,
 		LastSlowByPlayer = {},
+		BiomeIndex = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, math.max(1, CONFIG.BiomeCount)),
 	}
 
 	setPuddleVisualFade(controller, 1)
@@ -779,6 +805,10 @@ local function createController(model, hitbox, visualModel)
 
 		self.Destroyed = true
 		self.FadingOut = true
+		if self.TouchConnection then
+			self.TouchConnection:Disconnect()
+			self.TouchConnection = nil
+		end
 		setPuddleHitboxActive(self, false)
 		unregisterController(self)
 		local immediate = typeof(options) == "table" and options.Immediate == true
@@ -848,12 +878,65 @@ local function isPointInsidePart(part, worldPosition)
 		and math.abs(localPosition.Z) <= halfSize.Z
 end
 
-local function applySlowToPlayersInside(controller)
+local function canApplyPuddleSlow(controller)
 	if controller.FadingIn or controller.FadingOut then
-		return
+		return false
 	end
 
 	if os.clock() < controller.FrozenUntil then
+		return false
+	end
+
+	return true
+end
+
+local function applyPuddleSlow(controller, player)
+	if not canApplyPuddleSlow(controller) then
+		return
+	end
+
+	local slowMultiplier = CONFIG.SlowMultiplierByBiome[controller.BiomeIndex] or CONFIG.FallbackSlowMultiplier
+	HitEffectService.ApplyEffect(player, "Slow", {
+		Duration = CONFIG.SlowDuration,
+		Priority = 10,
+		Movement = {
+			WalkSpeedMultiplier = slowMultiplier,
+			JumpMultiplier = 1,
+		},
+	})
+end
+
+local function getPlayerFromTouchedPart(part)
+	local character = part and part:FindFirstAncestorOfClass("Model")
+	if not character then
+		return nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return nil
+	end
+
+	return Players:GetPlayerFromCharacter(character)
+end
+
+local function bindPuddleTouchedSlow(controller)
+	if not controller.Hitbox then
+		return
+	end
+
+	controller.TouchConnection = controller.Hitbox.Touched:Connect(function(part)
+		local player = getPlayerFromTouchedPart(part)
+		if not player then
+			return
+		end
+
+		applyPuddleSlow(controller, player)
+	end)
+end
+
+local function applySlowToPlayersInside(controller)
+	if not canApplyPuddleSlow(controller) then
 		return
 	end
 
@@ -866,14 +949,7 @@ local function applySlowToPlayersInside(controller)
 			local lastSlow = controller.LastSlowByPlayer[player] or 0
 			if now - lastSlow >= CONFIG.SlowRefreshDelay then
 				controller.LastSlowByPlayer[player] = now
-				HitEffectService.ApplyEffect(player, "Slow", {
-					Duration = CONFIG.SlowDuration,
-					Priority = 10,
-					Movement = {
-						WalkSpeedMultiplier = CONFIG.WalkSpeedMultiplier,
-						JumpMultiplier = 1,
-					},
-				})
+				applyPuddleSlow(controller, player)
 			end
 		end
 	end
@@ -1019,7 +1095,8 @@ local function spawnPuddle(refs, hazardsFolder, startPart, endPart, leftBound, r
 		return false
 	end
 
-	local controller = createController(model, hitbox, visualModel)
+	local controller = createController(model, hitbox, visualModel, placement.BiomeIndex)
+	bindPuddleTouchedSlow(controller)
 	task.spawn(function()
 		waitActiveLifetime(controller)
 		controller:Destroy()

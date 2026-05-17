@@ -385,17 +385,28 @@ local function raycastGround(position, refs)
 	return nil
 end
 
-local function isNearSafeSpikeGap(position, refs, forward)
+local function isNearSafeSpikeGap(position, refs, forward, lateral, size)
 	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
+	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
 	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
 	if buffer <= 0 then
 		return false
 	end
 
+	local footprintX = math.max(2, typeof(size) == "Vector3" and size.X or 0)
+	local footprintZ = math.max(2, typeof(size) == "Vector3" and size.Z or 0)
+	local sampleX = math.max(buffer, (footprintX * 0.5) + buffer)
+	local sampleZ = math.max(buffer, (footprintZ * 0.5) + buffer)
 	for _, offset in ipairs({
-		forwardUnit * buffer,
-		-forwardUnit * buffer,
 		Vector3.zero,
+		forwardUnit * sampleZ,
+		-forwardUnit * sampleZ,
+		lateralUnit * sampleX,
+		-lateralUnit * sampleX,
+		lateralUnit * sampleX + forwardUnit * sampleZ,
+		lateralUnit * -sampleX + forwardUnit * sampleZ,
+		lateralUnit * sampleX + forwardUnit * -sampleZ,
+		lateralUnit * -sampleX + forwardUnit * -sampleZ,
 	}) do
 		if not raycastGround(position + offset, refs) then
 			return true
@@ -411,7 +422,7 @@ local function resolveSafeSpikeGroundPosition(position, refs, lateral, forward, 
 		return nil
 	end
 
-	if isNearSafeSpikeGap(centerPosition, refs, forward) then
+	if isNearSafeSpikeGap(centerPosition, refs, forward, lateral, size) then
 		return nil
 	end
 
