@@ -33,7 +33,7 @@ local CONFIG = {
 	GroundProbeHeight = 120,
 	GroundProbeDepth = 260,
 	MaxGroundHeightDelta = 3,
-	SafeGapBuffer = 12,
+	SafeGapBuffer = 24,
 	SafeFloorNameKeywords = {
 		"gap",
 		"safe",
@@ -50,7 +50,7 @@ local CONFIG = {
 	LaneWidthScale = 0.82,
 	SpikeHeight = 7,
 	SpikeLength = 18,
-	SpikeVisualScale = 5,
+	SpikeVisualScale = 3.2,
 	PreviewHeight = 0.45,
 	WarningGroundOffset = 0.25,
 
@@ -464,8 +464,9 @@ local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound
 	local pathLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
 	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
 	local laneWidth = math.max(4, corridorWidth / laneCount)
-	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (laneWidth * 0.5))
 	local size = getSpikeSize(corridorWidth)
+	local edgeBuffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
+	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (size.X * 0.5) - edgeBuffer)
 
 	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
 	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
@@ -478,9 +479,7 @@ local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound
 
 	for _ = 1, attempts do
 		local forwardAlpha = rng:NextNumber(startAlpha, math.max(startAlpha, endAlpha))
-		local laneIndex = rng:NextInteger(1, laneCount)
-		local laneOffset = ((laneIndex - 0.5) / laneCount - 0.5) * corridorWidth
-		laneOffset = math.clamp(laneOffset, -safeHalfWidth, safeHalfWidth)
+		local laneOffset = if safeHalfWidth > 0 then rng:NextNumber(-safeHalfWidth, safeHalfWidth) else 0
 
 		local centerOnPath = startPart.Position + (forward * pathLength * forwardAlpha)
 		local centerProjection = corridorCenter:Dot(lateral)
@@ -547,6 +546,14 @@ local function createTemplateSpike(model, placement, areaName)
 
 	local orientedPivot = CFrame.fromMatrix(placement.GroundPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
 	visual:PivotTo(orientedPivot)
+
+	local hitboxCenterDelta = Vector3.new(
+		placement.GroundPosition.X - hitbox.Position.X,
+		0,
+		placement.GroundPosition.Z - hitbox.Position.Z
+	)
+	visual:PivotTo(visual:GetPivot() + hitboxCenterDelta)
+
 	local boundsCFrame, boundsSize = visual:GetBoundingBox()
 	local visualBottomY = boundsCFrame.Position.Y - (boundsSize.Y * 0.5)
 	local groundDeltaY = placement.GroundPosition.Y - visualBottomY
