@@ -118,6 +118,7 @@ local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 local INCOME_SHADOW_BANK_THROTTLE_SECONDS = 3
 local INCOME_STATUS_DISPLAY_METADATA_CACHE_SECONDS = 15
+local crewRecordCache = setmetatable({}, { __mode = "k" })
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -900,10 +901,56 @@ local function getInventoryCrewMemberMetadata(player, itemName)
 	return nil, nil
 end
 
+local function clearCrewRecordCache(player)
+	if player ~= nil then
+		crewRecordCache[player] = nil
+		return
+	end
+
+	for cachedPlayer in pairs(crewRecordCache) do
+		crewRecordCache[cachedPlayer] = nil
+	end
+end
+
+local function readCachedCrewRecord(player, rawName)
+	local playerCache = crewRecordCache[player]
+	if playerCache == nil then
+		return nil, false
+	end
+
+	local cached = playerCache[rawName]
+	if cached == nil then
+		return nil, false
+	end
+	if cached == false then
+		return nil, true
+	end
+	return cached, true
+end
+
+local function writeCachedCrewRecord(player, rawName, record)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return record
+	end
+
+	local playerCache = crewRecordCache[player]
+	if playerCache == nil then
+		playerCache = {}
+		crewRecordCache[player] = playerCache
+	end
+	playerCache[rawName] = record or false
+	return record
+end
+
 local function resolveCrewMemberRecord(player, crewMemberName)
 	local rawName = tostring(crewMemberName or "")
 	if rawName == "" then
 		return nil
+	end
+
+	local cachedRecord, foundCachedRecord = readCachedCrewRecord(player, rawName)
+	if foundCachedRecord then
+		return cachedRecord
 	end
 
 	local candidates = {}
@@ -954,7 +1001,7 @@ local function resolveCrewMemberRecord(player, crewMemberName)
 					storageName = canonicalName
 				end
 
-			return {
+			return writeCachedCrewRecord(player, rawName, {
 				RawName = rawName,
 				CanonicalName = canonicalName,
 				StorageName = storageName,
@@ -962,12 +1009,12 @@ local function resolveCrewMemberRecord(player, crewMemberName)
 				VariantKey = finalVariant,
 				Template = template,
 				Info = info or legacyInfo,
-			}
+			})
 		end
 	end
 
 	if legacyInfo then
-		return {
+		return writeCachedCrewRecord(player, rawName, {
 			RawName = rawName,
 			CanonicalName = tostring(legacyId or rawName),
 			StorageName = hasInventoryCrewMemberEntry(player, rawName) and rawName or tostring(legacyId or rawName),
@@ -975,10 +1022,10 @@ local function resolveCrewMemberRecord(player, crewMemberName)
 			VariantKey = parsedVariant,
 			Template = findTemplateForName(tostring(legacyId or rawName)),
 			Info = legacyInfo,
-		}
+		})
 	end
 
-	return nil
+	return writeCachedCrewRecord(player, rawName, nil)
 end
 
 local function findCrewMemberInfoByName(crewMemberName, player)
@@ -2265,7 +2312,7 @@ local function bindStandPrompt(player, plot, standModel)
 				stealPromptDebounce[plr] = now
 
 				local productId = getStealProductIdForCrewMember(crewMemberToSteal)
-				if not CrewQuickSlotService.CanGainOrNotify(plr, 1, "StealPrompt:" .. tostring(standName)) then
+				if not CrewQuickSlotService.CanGainOrNotify(plr, crewMemberToSteal, 1, "StealPrompt:" .. tostring(standName)) then
 					standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=quick_slots_full", plr.Name, standName, tostring(crewMemberToSteal))
 					return
 				end
@@ -2319,6 +2366,7 @@ local function bindStandPrompt(player, plot, standModel)
 
 				local pickupBefore = getPickupStandSnapshot(plr, standName)
 				local releasedInstanceId, releasedInstance, releaseReason, releaseDebug = CrewInstanceService.ReleaseStandInstance(plr, standName)
+				clearCrewRecordCache(plr)
 				local pickupAfter = getPickupStandSnapshot(plr, standName)
 				crewPickupDebug(formatCrewPickupDebugFields({
 					{ "event", "prompt_release_result" },
@@ -2444,6 +2492,7 @@ local function bindStandPrompt(player, plot, standModel)
 				return
 			end
 
+			clearCrewRecordCache(plr)
 			getCrewMemberLevel(plr, placedInstanceId)
 			syncStandLevelFromCrewMember(plr, standName, placedInstanceId)
 			setPlacementPickupGuard(plr, standName)
@@ -2742,6 +2791,8 @@ local function clearPlotScanStateForPlayer(player)
 	end
 end
 
+local reconcilePlayerStandAssignments
+
 local function clearPlayerStandRuntime(player)
 	local stands = playerStandList[player]
 	if stands then
@@ -2755,6 +2806,7 @@ local function clearPlayerStandRuntime(player)
 	touchDebounce[player] = nil
 	stealPromptDebounce[player] = nil
 	placementPickupGuardUntil[player] = nil
+	clearCrewRecordCache(player)
 	clearPlotScanStateForPlayer(player)
 end
 
@@ -2767,8 +2819,34 @@ local function refreshPlayerStandRuntime(player)
 	end
 
 	scanAndBindPlot(player, plot)
+	reconcilePlayerStandAssignments(player)
 	return true, plot
 end
+
+reconcilePlayerStandAssignments = function(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	clearCrewRecordCache(player)
+	local stands = playerStandList[player]
+	if typeof(stands) ~= "table" then
+		return
+	end
+
+	for i = 1, #stands do
+		local standModel = stands[i]
+		if standModel and standModel.Parent then
+			CrewInstanceService.ReconcileStandAssignment(player, standModel.Name)
+		end
+	end
+end
+
+CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
+	if player and player.Parent == Players then
+		task.defer(reconcilePlayerStandAssignments, player)
+	end
+end)
 
 
 Players.PlayerAdded:Connect(function(player)
@@ -2794,6 +2872,7 @@ Players.PlayerAdded:Connect(function(player)
 			tostring(plot:GetAttribute("OwnerName"))
 		)
 		scanAndBindPlot(player, plot)
+		reconcilePlayerStandAssignments(player)
 	end)
 end)
 
@@ -2826,6 +2905,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 		local plot = waitForPlot(p, 5)
 		if plot then
 			scanAndBindPlot(p, plot)
+			reconcilePlayerStandAssignments(p)
 			resetHugeIncomeOnJoin(p)
 		else
 			standDebug("bootstrap existing_player=%s reason=no_plot", p.Name)
@@ -2848,7 +2928,6 @@ task.spawn(function()
 					if standModel and standModel.Parent then
 						local standName = standModel.Name
 						dmEnsureStandFolder(plr, standName)
-						CrewInstanceService.ReconcileStandAssignment(plr, standName)
 
 						local crewMemberName = getPlayerStandCrewMemberName(plr, standName)
 						if crewMemberName ~= "" then

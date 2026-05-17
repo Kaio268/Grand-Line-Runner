@@ -2,9 +2,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Interaction = {}
-local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
-local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local activeContext = nil
+local carrySlotAdapter = nil
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local TUTORIAL_CREW_MEMBER_ATTRIBUTE = "TutorialCrewMember"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
@@ -18,7 +21,12 @@ local CARRY_ASSEMBLY_WELD_NAME = "CrewCarryAssemblyWeld"
 local CARRY_ATTACHMENT_WELD_NAME = "CrewCarryAttachmentWeld"
 local CARRY_ROOT_REPAIR_DISTANCE = 2
 local CARRY_PART_REPAIR_DISTANCE = 3
+local CARRY_MAINTENANCE_INTERVAL = 0.2
+local CARRY_VISUAL_SPACING = CarriedRewardVisuals.DefaultSpacing
 local warnedMissingHoverTemplate = false
+local carryMaintenanceEntries = {}
+local carryMaintenanceConnection = nil
+local carryMaintenanceElapsed = 0
 
 local function normalizeCarriedAttribute(value)
 	if typeof(value) == "string" and value ~= "" then
@@ -46,6 +54,10 @@ local function setCarriedCrewMemberAttributes(player, crewMemberData)
 
 	local carriedImage = normalizeCarriedAttribute(crewMemberData and crewMemberData.Image)
 	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, carriedImage)
+end
+
+function Interaction.SetCarrySlotAdapter(adapter)
+	carrySlotAdapter = if typeof(adapter) == "table" then adapter else nil
 end
 
 local function getCrewMemberInfoFromState(st)
@@ -212,18 +224,70 @@ local function setCarriedHumanoidState(model, st, held)
 end
 
 local function disconnectCarryPhysics(st)
-	local conn = st and st.CarryPhysicsConn
-	if conn then
+	if st then
+		carryMaintenanceEntries[st] = nil
+		st.CarryPhysicsRegistered = nil
+	end
+
+	local legacyConn = st and st.CarryPhysicsConn
+	if legacyConn then
 		pcall(function()
-			conn:Disconnect()
+			legacyConn:Disconnect()
 		end)
 	end
 	if st then
 		st.CarryPhysicsConn = nil
 	end
+
+	if next(carryMaintenanceEntries) == nil and carryMaintenanceConnection ~= nil then
+		pcall(function()
+			carryMaintenanceConnection:Disconnect()
+		end)
+		carryMaintenanceConnection = nil
+		carryMaintenanceElapsed = 0
+	end
 end
 
 local maintainHeldCarry
+
+local function stepCarryMaintenance()
+	for st, entry in pairs(carryMaintenanceEntries) do
+		local model = entry.Model
+		if not model or not model.Parent or st.Held ~= true then
+			carryMaintenanceEntries[st] = nil
+			st.CarryPhysicsRegistered = nil
+		elseif maintainHeldCarry then
+			maintainHeldCarry(st, model)
+		else
+			enforceHeldPhysics(model, entry.NetworkOwner)
+		end
+	end
+
+	if next(carryMaintenanceEntries) == nil and carryMaintenanceConnection ~= nil then
+		pcall(function()
+			carryMaintenanceConnection:Disconnect()
+		end)
+		carryMaintenanceConnection = nil
+		carryMaintenanceElapsed = 0
+	end
+end
+
+local function ensureCarryMaintenanceLoop()
+	if carryMaintenanceConnection ~= nil then
+		return
+	end
+
+	carryMaintenanceElapsed = 0
+	carryMaintenanceConnection = RunService.Heartbeat:Connect(function(deltaTime)
+		carryMaintenanceElapsed += tonumber(deltaTime) or 0
+		if carryMaintenanceElapsed < CARRY_MAINTENANCE_INTERVAL then
+			return
+		end
+
+		carryMaintenanceElapsed = 0
+		stepCarryMaintenance()
+	end)
+end
 
 local function startCarryPhysicsEnforcer(st, model, networkOwner)
 	disconnectCarryPhysics(st)
@@ -233,18 +297,12 @@ local function startCarryPhysicsEnforcer(st, model, networkOwner)
 		enforceHeldPhysics(model, networkOwner)
 	end
 
-	st.CarryPhysicsConn = RunService.Heartbeat:Connect(function()
-		if not model.Parent or st.Held ~= true then
-			disconnectCarryPhysics(st)
-			return
-		end
-
-		if maintainHeldCarry then
-			maintainHeldCarry(st, model)
-		else
-			enforceHeldPhysics(model, networkOwner)
-		end
-	end)
+	carryMaintenanceEntries[st] = {
+		Model = model,
+		NetworkOwner = networkOwner,
+	}
+	st.CarryPhysicsRegistered = true
+	ensureCarryMaintenanceLoop()
 end
 
 local function setDropPhysics(model)
@@ -849,6 +907,8 @@ function Interaction.NewContext(map)
 		CarriedFolder = carriedFolder,
 		DroppedFolder = droppedFolder,
 		HeldByUserId = {},
+		HeldByCarryId = {},
+		HeldCarryIdsByUserId = {},
 		DeathConnByUserId = {},
 		RagdollConnByUserId = {},
 	}
@@ -880,7 +940,228 @@ local function disconnectRagdoll(ctx, userId)
 	end
 end
 
-local function dropHeldCrewMember(ctx, player, model, st, dropPosition)
+local function getHeldCarryIdList(ctx, userId)
+	local list = ctx.HeldCarryIdsByUserId[userId]
+	if typeof(list) ~= "table" then
+		list = {}
+		ctx.HeldCarryIdsByUserId[userId] = list
+	end
+	return list
+end
+
+local function setFirstHeldModel(ctx, userId)
+	local list = getHeldCarryIdList(ctx, userId)
+	ctx.HeldByUserId[userId] = nil
+	for _, carryId in ipairs(list) do
+		local model = ctx.HeldByCarryId[carryId]
+		if model and model.Parent then
+			ctx.HeldByUserId[userId] = model
+			return model
+		end
+	end
+	return nil
+end
+
+local function addHeldModel(ctx, userId, carryId, model)
+	if typeof(carryId) ~= "string" or carryId == "" then
+		return
+	end
+
+	local list = getHeldCarryIdList(ctx, userId)
+	for _, existingCarryId in ipairs(list) do
+		if existingCarryId == carryId then
+			ctx.HeldByCarryId[carryId] = model
+			setFirstHeldModel(ctx, userId)
+			return
+		end
+	end
+
+	list[#list + 1] = carryId
+	ctx.HeldByCarryId[carryId] = model
+	if not ctx.HeldByUserId[userId] then
+		ctx.HeldByUserId[userId] = model
+	end
+end
+
+local function removeHeldModel(ctx, userId, carryId, model)
+	if typeof(carryId) == "string" and carryId ~= "" then
+		ctx.HeldByCarryId[carryId] = nil
+		local list = getHeldCarryIdList(ctx, userId)
+		for index = #list, 1, -1 do
+			if list[index] == carryId then
+				table.remove(list, index)
+			end
+		end
+	end
+
+	if ctx.HeldByUserId[userId] == model then
+		setFirstHeldModel(ctx, userId)
+	end
+end
+
+local function findHeldModel(ctx, player, active, slotIndexOrCarryId)
+	local userId = player.UserId
+	active = active or (ctx and ctx.Active)
+	if typeof(slotIndexOrCarryId) == "string" and slotIndexOrCarryId ~= "" then
+		local model = ctx.HeldByCarryId[slotIndexOrCarryId]
+		if model and model.Parent then
+			return model, active and active[model]
+		end
+	end
+
+	for _, carryId in ipairs(getHeldCarryIdList(ctx, userId)) do
+		local model = ctx.HeldByCarryId[carryId]
+		local st = active and active[model]
+		if model and model.Parent and st then
+			if slotIndexOrCarryId == nil or st.CarrySlotIndex == slotIndexOrCarryId or tostring(st.CarrySlotIndex) == tostring(slotIndexOrCarryId) then
+				return model, st
+			end
+		end
+	end
+
+	local model = ctx.HeldByUserId[userId]
+	if model and model.Parent then
+		return model, active and active[model]
+	end
+
+	return nil, nil
+end
+
+local function canReserveCarrySlot(player)
+	if carrySlotAdapter and typeof(carrySlotAdapter.CanCarryMore) == "function" then
+		return carrySlotAdapter.CanCarryMore(player) == true
+	end
+
+	return player:GetAttribute("CarriedMajorRewardType") == nil
+end
+
+local function reserveCrewCarrySlot(player, model, st, crewMemberData)
+	if carrySlotAdapter and typeof(carrySlotAdapter.AddCrewMember) == "function" then
+		return carrySlotAdapter.AddCrewMember(player, {
+			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
+			DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
+			Image = crewMemberData and crewMemberData.Image or nil,
+			CrewName = resolveCrewMemberStorageName(model, st, crewMemberData),
+			CrewStorageName = resolveCrewMemberStorageName(model, st, crewMemberData),
+			Rarity = st and st.Rarity or nil,
+			Physical = true,
+		})
+	end
+
+	return {
+		SlotIndex = 1,
+		CarryId = tostring(player.UserId) .. ":legacy_crew",
+	}, nil
+end
+
+local function removeCrewCarrySlot(player, slotIndexOrCarryId)
+	if carrySlotAdapter and typeof(carrySlotAdapter.RemoveCarryItem) == "function" then
+		carrySlotAdapter.RemoveCarryItem(player, slotIndexOrCarryId)
+	end
+end
+
+local function getCarryVisualItems(ctx, player, active)
+	if carrySlotAdapter and typeof(carrySlotAdapter.GetCarrySlots) == "function" then
+		local slots = carrySlotAdapter.GetCarrySlots(player)
+		if typeof(slots) == "table" then
+			return slots
+		end
+	end
+
+	local items = {}
+	active = active or (ctx and ctx.Active)
+	if not ctx or not player then
+		return items
+	end
+
+	for _, carryId in ipairs(getHeldCarryIdList(ctx, player.UserId)) do
+		local model = ctx.HeldByCarryId[carryId]
+		local st = active and active[model]
+		if model and model.Parent and st and st.Held == true then
+			items[#items + 1] = {
+				SlotIndex = st.CarrySlotIndex,
+				CarryId = st.CarryId,
+				CarryOrder = st.CarryOrder,
+				Occupied = true,
+			}
+		end
+	end
+
+	return items
+end
+
+local function getCarryVisualOffset(ctx, player, active, st)
+	local items = getCarryVisualItems(ctx, player, active)
+	return CarriedRewardVisuals.GetOffsetForItem(items, {
+		SlotIndex = st and st.CarrySlotIndex,
+		CarryId = st and st.CarryId,
+		CarryOrder = st and st.CarryOrder,
+		Occupied = true,
+	}, CARRY_VISUAL_SPACING)
+end
+
+local function positionHeldCrewMember(ctx, player, active, model, st, attachPart)
+	if not model or not model.Parent or not st or st.Held ~= true then
+		return false
+	end
+
+	local rootPart = st.CarryRootPart
+	if not rootPart or not rootPart.Parent or not rootPart:IsDescendantOf(model) then
+		rootPart = findModelPart(model)
+		st.CarryRootPart = rootPart
+	end
+	if not rootPart then
+		return false
+	end
+
+	if not attachPart or not attachPart:IsA("BasePart") or not attachPart.Parent then
+		local char = player and player.Character
+		attachPart = char and char:FindFirstChild("Head")
+	end
+	if not attachPart or not attachPart:IsA("BasePart") then
+		return false
+	end
+
+	st.CarryAttachPart = attachPart
+
+	local rotOnly = computeHeadRotOnly(attachPart)
+	local lateralOffset = attachPart.CFrame.RightVector * getCarryVisualOffset(ctx, player, active, st)
+	local top = attachPart.Position + Vector3.yAxis * (attachPart.Size.Y / 2) + lateralOffset
+	local pivotTarget = computePivotBottomOnPoint(model, top, rotOnly)
+
+	destroyCarryAttachmentWeld(st)
+	model:PivotTo(pivotTarget)
+	rootPart.AssemblyLinearVelocity = Vector3.zero
+	rootPart.AssemblyAngularVelocity = Vector3.zero
+	st.CarryRootLocalCFrame = attachPart.CFrame:ToObjectSpace(rootPart.CFrame)
+	captureCarryPartOffsets(model, rootPart, st)
+	createCarryAttachmentWeld(st, rootPart, attachPart)
+	return true
+end
+
+local function refreshHeldCarryLayout(ctx, player, active)
+	ctx = ctx or activeContext
+	active = active or (ctx and ctx.Active)
+	if not ctx or not active or not player then
+		return false
+	end
+
+	local refreshedAny = false
+	for _, carryId in ipairs(getHeldCarryIdList(ctx, player.UserId)) do
+		local model = ctx.HeldByCarryId[carryId]
+		local st = active[model]
+		if model and model.Parent and st and st.Held == true then
+			local attachPart = st.CarryAttachPart
+			if positionHeldCrewMember(ctx, player, active, model, st, attachPart) then
+				refreshedAny = true
+			end
+		end
+	end
+
+	return refreshedAny
+end
+
+local function dropHeldCrewMember(ctx, player, model, st, dropPosition, options)
 	if not model or not model.Parent then
 		return
 	end
@@ -888,13 +1169,20 @@ local function dropHeldCrewMember(ctx, player, model, st, dropPosition)
 		return
 	end
 
+	options = if typeof(options) == "table" then options else {}
 	local userId = player.UserId
+	if options.SkipCarrySlotRemove ~= true then
+		removeCrewCarrySlot(player, st.CarryId or st.CarrySlotIndex)
+	end
 	clearCarriedCrewMemberAttributes(player)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
-	ctx.HeldByUserId[userId] = nil
-	disconnectDeath(ctx, userId)
-	disconnectRagdoll(ctx, userId)
+	removeHeldModel(ctx, userId, st.CarryId, model)
+	refreshHeldCarryLayout(ctx, player)
+	if not ctx.HeldByUserId[userId] then
+		disconnectDeath(ctx, userId)
+		disconnectRagdoll(ctx, userId)
+	end
 	disconnectCarryPhysics(st)
 	setCarriedHumanoidState(model, st, false)
 
@@ -927,6 +1215,9 @@ local function dropHeldCrewMember(ctx, player, model, st, dropPosition)
 
 	st.Held = false
 	st.HolderUserId = nil
+	st.CarryId = nil
+	st.CarrySlotIndex = nil
+	st.CarryOrder = nil
 	st.LastUpdate = os.clock()
 	setDropPhysics(model)
 	scheduleDroppedCrewMemberSettle(ctx, model, st)
@@ -945,10 +1236,7 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 	if not canPlayerCarryModel(player, model) then
 		return false
 	end
-	if ctx.HeldByUserId[player.UserId] then
-		return false
-	end
-	if player:GetAttribute("CarriedMajorRewardType") ~= nil then
+	if not canReserveCarrySlot(player) then
 		return false
 	end
 
@@ -967,6 +1255,17 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 		return false
 	end
 
+	local crewMemberData = resolveCanonicalCrewMemberData(model, st)
+	local carrySlot, reserveReason = reserveCrewCarrySlot(player, model, st, crewMemberData)
+	if not carrySlot then
+		return false, reserveReason
+	end
+	local carryId = tostring(carrySlot.CarryId or "")
+	if carryId == "" then
+		removeCrewCarrySlot(player, carrySlot.SlotIndex)
+		return false
+	end
+
 	if st.Prompt then
 		st.Prompt.Enabled = false
 	end
@@ -979,42 +1278,39 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 	st.CarryRootPart = primary
 	st.CarryAttachPart = attachPart
 	st.CarryOwner = player
+	st.CarryId = carryId
+	st.CarrySlotIndex = carrySlot.SlotIndex
+	st.CarryOrder = carrySlot.CarryOrder
 	model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, true)
 	setCarryPhysics(model, true, player)
 	setCarriedHumanoidState(model, st, true)
 	ensureCarryAssemblyWelds(model, primary)
 
-	local rotOnly = computeHeadRotOnly(attachPart)
-	local top = attachPart.Position + Vector3.yAxis * (attachPart.Size.Y / 2)
-	local pivotTarget = computePivotBottomOnPoint(model, top, rotOnly)
-	model:PivotTo(pivotTarget)
-
-	st.CarryRootLocalCFrame = attachPart.CFrame:ToObjectSpace(primary.CFrame)
-	captureCarryPartOffsets(model, primary, st)
-	createCarryAttachmentWeld(st, primary, attachPart)
+	positionHeldCrewMember(ctx, player, ctx.Active, model, st, attachPart)
 	startCarryPhysicsEnforcer(st, model, player)
 	model.Parent = ctx.CarriedFolder
 
 	st.LastUpdate = os.clock()
 	Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
 
-	ctx.HeldByUserId[player.UserId] = model
+	addHeldModel(ctx, player.UserId, carryId, model)
+	refreshHeldCarryLayout(ctx, player)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
-	setCarriedCrewMemberAttributes(player, resolveCanonicalCrewMemberData(model, st))
+	setCarriedCrewMemberAttributes(player, crewMemberData)
 
 	disconnectDeath(ctx, player.UserId)
 	disconnectRagdoll(ctx, player.UserId)
 
 	ctx.DeathConnByUserId[player.UserId] = hum.Died:Connect(function()
-		local heldModel = ctx.HeldByUserId[player.UserId]
-		if not heldModel or not heldModel.Parent then
-			return
+		local heldCarryIds = table.clone(getHeldCarryIdList(ctx, player.UserId))
+		for _, heldCarryId in ipairs(heldCarryIds) do
+			local heldModel = ctx.HeldByCarryId[heldCarryId]
+			local heldState = ctx.Active and ctx.Active[heldModel]
+			if heldModel and heldModel.Parent and heldState then
+				dropHeldCrewMember(ctx, player, heldModel, heldState)
+			end
 		end
-		if st.Model ~= heldModel then
-			return
-		end
-		dropHeldCrewMember(ctx, player, heldModel, st)
 	end)
 
 	ctx.RagdollConnByUserId[player.UserId] = hum.StateChanged:Connect(function(_, newState)
@@ -1022,15 +1318,14 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 			return
 		end
 
-		local heldModel = ctx.HeldByUserId[player.UserId]
-		if not heldModel or not heldModel.Parent then
-			return
+		local heldCarryIds = table.clone(getHeldCarryIdList(ctx, player.UserId))
+		for _, heldCarryId in ipairs(heldCarryIds) do
+			local heldModel = ctx.HeldByCarryId[heldCarryId]
+			local heldState = ctx.Active and ctx.Active[heldModel]
+			if heldModel and heldModel.Parent and heldState then
+				dropHeldCrewMember(ctx, player, heldModel, heldState)
+			end
 		end
-		if st.Model ~= heldModel then
-			return
-		end
-
-		dropHeldCrewMember(ctx, player, heldModel, st)
 	end)
 
 	return true
@@ -1038,7 +1333,31 @@ end
 
 function Interaction.HasHeld(ctx, player)
 	ctx = ctx or activeContext
-	return ctx ~= nil and player ~= nil and ctx.HeldByUserId[player.UserId] ~= nil
+	return ctx ~= nil
+		and player ~= nil
+		and (
+			ctx.HeldByUserId[player.UserId] ~= nil
+			or #getHeldCarryIdList(ctx, player.UserId) > 0
+		)
+end
+
+function Interaction.GetHeldCount(ctx, player)
+	ctx = ctx or activeContext
+	if not ctx or not player then
+		return 0
+	end
+
+	local count = 0
+	for _, carryId in ipairs(getHeldCarryIdList(ctx, player.UserId)) do
+		local model = ctx.HeldByCarryId[carryId]
+		if model and model.Parent then
+			count += 1
+		end
+	end
+	if count == 0 and ctx.HeldByUserId[player.UserId] then
+		count = 1
+	end
+	return count
 end
 
 function Interaction.TryCarryNearPosition(ctx, player, active, worldPosition, carrierPart, maxDistance)
@@ -1088,42 +1407,28 @@ function Interaction.TryCarryNearPosition(ctx, player, active, worldPosition, ca
 	return false, "carry_failed"
 end
 
-function Interaction.DropHeldAtPosition(ctx, player, active, dropPosition)
+function Interaction.DropHeldAtPosition(ctx, player, active, dropPosition, slotIndexOrCarryId, options)
 	ctx = ctx or activeContext
 	active = active or (ctx and ctx.Active)
 	if not ctx or not active or not player then
 		return false, "missing_context"
 	end
 
-	local model = ctx.HeldByUserId[player.UserId]
+	local model, st = findHeldModel(ctx, player, active, slotIndexOrCarryId)
 	if not model or not model.Parent then
-		ctx.HeldByUserId[player.UserId] = nil
+		setFirstHeldModel(ctx, player.UserId)
 		return false, "no_held_crew_member"
 	end
 
-	local st = active[model]
 	if not st then
 		return false, "missing_state"
 	end
 
-	dropHeldCrewMember(ctx, player, model, st, dropPosition)
+	dropHeldCrewMember(ctx, player, model, st, dropPosition, options)
 	return true
 end
 
-function Interaction.CollectHeld(ctx, player, active)
-	active = active or (ctx and ctx.Active)
-	local userId = player.UserId
-	local model = ctx.HeldByUserId[userId]
-	if not model or not model.Parent then
-		ctx.HeldByUserId[userId] = nil
-		disconnectDeath(ctx, userId)
-		disconnectRagdoll(ctx, userId)  
-		return nil
-	end
-	clearCarriedCrewMemberAttributes(player)
-	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
-
-	local st = active[model]
+local function buildHeldInfo(model, st)
 	local crewMemberData = resolveCanonicalCrewMemberData(model, st)
 	local storageName = resolveCrewMemberStorageName(model, st, crewMemberData)
 	local isTutorialCrewMember = model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
@@ -1131,9 +1436,52 @@ function Interaction.CollectHeld(ctx, player, active)
 	local tutorialToken = tostring(model:GetAttribute(TUTORIAL_TOKEN_ATTRIBUTE) or "")
 	local tutorialRewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
 
-	ctx.HeldByUserId[userId] = nil
-	disconnectDeath(ctx, userId)
-	disconnectRagdoll(ctx, userId)
+	local info = {
+		Name = storageName,
+		CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
+		DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
+		Image = crewMemberData and crewMemberData.Image or nil,
+		TutorialCrewMember = isTutorialCrewMember,
+		TutorialOwnerUserId = tutorialOwnerUserId,
+		TutorialToken = tutorialToken,
+		TutorialRewardName = tutorialRewardName,
+	}
+
+	if st then
+		info.OriginData = st.OriginData
+		info.SlotIndex = st.SlotIndex
+		info.CarrySlotIndex = st.CarrySlotIndex
+		info.CarryId = st.CarryId
+		info.CarryOrder = st.CarryOrder
+	end
+
+	return info
+end
+
+function Interaction.CollectHeld(ctx, player, active, slotIndexOrCarryId, options)
+	active = active or (ctx and ctx.Active)
+	local userId = player.UserId
+	local model, st = findHeldModel(ctx, player, active, slotIndexOrCarryId)
+	if not model or not model.Parent then
+		setFirstHeldModel(ctx, userId)
+		disconnectDeath(ctx, userId)
+		disconnectRagdoll(ctx, userId)  
+		return nil
+	end
+	options = if typeof(options) == "table" then options else {}
+	local collectedInfo = buildHeldInfo(model, st)
+	if options.SkipCarrySlotRemove ~= true then
+		removeCrewCarrySlot(player, st and (st.CarryId or st.CarrySlotIndex) or slotIndexOrCarryId)
+	end
+	clearCarriedCrewMemberAttributes(player)
+	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
+
+	removeHeldModel(ctx, userId, st and st.CarryId or nil, model)
+	refreshHeldCarryLayout(ctx, player, active)
+	if not ctx.HeldByUserId[userId] then
+		disconnectDeath(ctx, userId)
+		disconnectRagdoll(ctx, userId)
+	end
 	disconnectCarryPhysics(st)
 	if st then
 		setCarriedHumanoidState(model, st, false)
@@ -1147,31 +1495,71 @@ function Interaction.CollectHeld(ctx, player, active)
 		model:Destroy()
 	end)
 
-	if st then
-		return {
-			Name = storageName,
-			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
-			DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
-			Image = crewMemberData and crewMemberData.Image or nil,
-			OriginData = st.OriginData,
-			SlotIndex = st.SlotIndex,
-			TutorialCrewMember = isTutorialCrewMember,
-			TutorialOwnerUserId = tutorialOwnerUserId,
-			TutorialToken = tutorialToken,
-			TutorialRewardName = tutorialRewardName,
-		}
+	return collectedInfo
+end
+
+function Interaction.RefreshHeldCarryLayout(ctx, player, active)
+	return refreshHeldCarryLayout(ctx, player, active)
+end
+
+function Interaction.PeekAllHeld(ctx, player, active)
+	ctx = ctx or activeContext
+	active = active or (ctx and ctx.Active)
+	if not ctx or not active or not player then
+		return {}
 	end
 
-	return {
-		Name = storageName,
-		CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
-		DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
-		Image = crewMemberData and crewMemberData.Image or nil,
-		TutorialCrewMember = isTutorialCrewMember,
-		TutorialOwnerUserId = tutorialOwnerUserId,
-		TutorialToken = tutorialToken,
-		TutorialRewardName = tutorialRewardName,
-	}
+	local results = {}
+	local carryIds = table.clone(getHeldCarryIdList(ctx, player.UserId))
+	if #carryIds == 0 and ctx.HeldByUserId[player.UserId] then
+		local model, st = findHeldModel(ctx, player, active, nil)
+		if model and model.Parent then
+			results[#results + 1] = buildHeldInfo(model, st)
+		end
+		return results
+	end
+
+	for _, carryId in ipairs(carryIds) do
+		local model, st = findHeldModel(ctx, player, active, carryId)
+		if model and model.Parent then
+			results[#results + 1] = buildHeldInfo(model, st)
+		end
+	end
+
+	return results
+end
+
+function Interaction.CollectAllHeld(ctx, player, active, options)
+	ctx = ctx or activeContext
+	active = active or (ctx and ctx.Active)
+	if not ctx or not active or not player then
+		return {}
+	end
+
+	local results = {}
+	local carryIds = table.clone(getHeldCarryIdList(ctx, player.UserId))
+	if #carryIds == 0 and ctx.HeldByUserId[player.UserId] then
+		local info = Interaction.CollectHeld(ctx, player, active, nil, options)
+		if info then
+			results[#results + 1] = info
+		end
+		return results
+	end
+
+	for _, carryId in ipairs(carryIds) do
+		local info = Interaction.CollectHeld(ctx, player, active, carryId, options)
+		if info then
+			results[#results + 1] = info
+		end
+	end
+
+	return results
+end
+
+function Interaction.ForgetHeldCarryItem(ctx, player, active, slotIndexOrCarryId)
+	return Interaction.CollectHeld(ctx, player, active, slotIndexOrCarryId, {
+		SkipCarrySlotRemove = true,
+	})
 end
 
 function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
@@ -1209,10 +1597,7 @@ function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
 		if not prompt.Enabled then
 			return
 		end
-		if ctx.HeldByUserId[player.UserId] then
-			return
-		end
-		if player:GetAttribute("CarriedMajorRewardType") ~= nil then
+		if not canReserveCarrySlot(player) then
 			return
 		end
 
@@ -1224,52 +1609,64 @@ end
 
 function Interaction.OnPlayerRemoving(ctx, plr, active)
 	local userId = plr.UserId
-	local m = ctx.HeldByUserId[userId]
+	local legacyFirst = ctx.HeldByUserId[userId]
+	local carryIds = table.clone(getHeldCarryIdList(ctx, userId))
+	if #carryIds == 0 and legacyFirst then
+		carryIds = { "__legacy_first" }
+	end
 	ctx.HeldByUserId[userId] = nil
 	disconnectDeath(ctx, userId)
 	disconnectRagdoll(ctx, userId) 
 
-	if not m or not m.Parent then
-		return
+	for _, carryId in ipairs(carryIds) do
+		local m = if carryId == "__legacy_first" then legacyFirst else ctx.HeldByCarryId[carryId]
+		if carryId ~= "__legacy_first" then
+			ctx.HeldByCarryId[carryId] = nil
+		end
+		if m and m.Parent then
+			local st = active[m]
+			if st then
+				disconnectCarryPhysics(st)
+				setCarriedHumanoidState(m, st, false)
+				destroyCarryAttachmentWeld(st)
+				clearCarryMaintenanceState(st)
+
+				m:SetAttribute(CARRIED_MODEL_ATTRIBUTE, nil)
+				m.Parent = ctx.DroppedFolder
+				clearCarriedCrewMemberAttributes(plr)
+				plr:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
+
+				local pos = m:GetPivot().Position + Vector3.new(0, 6, 0)
+				local rot = m:GetPivot()
+				local lv = rot.LookVector
+				local dir = Vector3.new(lv.X, 0, lv.Z)
+				if dir.Magnitude < 1e-4 then
+					dir = Vector3.new(0, 0, -1)
+				else
+					dir = dir.Unit
+				end
+				local rotOnly = CFrame.lookAt(Vector3.zero, dir, Vector3.yAxis)
+				rotOnly = rotOnly - rotOnly.Position
+				local pivotStart = computePivotBottomOnPoint(m, pos, rotOnly)
+				m:PivotTo(pivotStart)
+
+				st.Held = false
+				st.HolderUserId = nil
+				st.CarryId = nil
+				st.CarrySlotIndex = nil
+				st.CarryOrder = nil
+				st.LastUpdate = os.clock()
+				setDropPhysics(m)
+				scheduleDroppedCrewMemberSettle(ctx, m, st)
+
+				if st.Prompt then
+					st.Prompt.Enabled = true
+				end
+			end
+		end
 	end
-	local st = active[m]
-	if not st then
-		return
-	end
 
-	disconnectCarryPhysics(st)
-	setCarriedHumanoidState(m, st, false)
-	destroyCarryAttachmentWeld(st)
-	clearCarryMaintenanceState(st)
-
-	m:SetAttribute(CARRIED_MODEL_ATTRIBUTE, nil)
-	m.Parent = ctx.DroppedFolder
-	clearCarriedCrewMemberAttributes(plr)
-	plr:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
-
-	local pos = m:GetPivot().Position + Vector3.new(0, 6, 0)
-	local rot = m:GetPivot()
-	local lv = rot.LookVector
-	local dir = Vector3.new(lv.X, 0, lv.Z)
-	if dir.Magnitude < 1e-4 then
-		dir = Vector3.new(0, 0, -1)
-	else
-		dir = dir.Unit
-	end
-	local rotOnly = CFrame.lookAt(Vector3.zero, dir, Vector3.yAxis)
-	rotOnly = rotOnly - rotOnly.Position
-	local pivotStart = computePivotBottomOnPoint(m, pos, rotOnly)
-	m:PivotTo(pivotStart)
-
-	st.Held = false
-	st.HolderUserId = nil
-	st.LastUpdate = os.clock()
-	setDropPhysics(m)
-	scheduleDroppedCrewMemberSettle(ctx, m, st)
-
-	if st.Prompt then
-		st.Prompt.Enabled = true
-	end
+	ctx.HeldCarryIdsByUserId[userId] = nil
 end
 
 return Interaction

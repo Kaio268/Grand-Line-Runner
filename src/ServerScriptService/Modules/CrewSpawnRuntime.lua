@@ -737,8 +737,22 @@ hitBox.Touched:Connect(function(hit)
 		end
 	end
 
+	local heldCount = if typeof(Interaction.GetHeldCount) == "function" then Interaction.GetHeldCount(ctx, plr) else 1
+	local heldGrants = {}
+	if typeof(Interaction.PeekAllHeld) == "function" then
+		for _, info in ipairs(Interaction.PeekAllHeld(ctx, plr, active)) do
+			if info and info.Name then
+				table.insert(heldGrants, {
+					CrewMemberId = info.Name,
+					Amount = 1,
+				})
+			end
+		end
+	end
 	if Interaction.HasHeld(ctx, plr) and not heldTutorialAlreadyGranted and not heldIsTutorial then
-		local canGain = CrewQuickSlotService.CanGainOrNotify(plr, 1, "SpawnCrewMembers:TurnIn")
+		local canGain = if #heldGrants > 0 and typeof(CrewQuickSlotService.CanGainCrewMemberBatchOrNotify) == "function"
+			then CrewQuickSlotService.CanGainCrewMemberBatchOrNotify(plr, heldGrants, "SpawnCrewMembers:TurnIn")
+			else CrewQuickSlotService.CanGainOrNotify(plr, math.max(1, heldCount), "SpawnCrewMembers:TurnIn")
 		if not canGain then
 			runTrace(
 				"crewTurnIn blocked player=%s boundary=%s activeMap=%s reason=quick_slots_full",
@@ -761,8 +775,15 @@ hitBox.Touched:Connect(function(hit)
 		end
 	end
 
-	local info = Interaction.CollectHeld(ctx, plr, active)
-	if info and info.Name then
+	local heldInfos = if typeof(Interaction.CollectAllHeld) == "function"
+		then Interaction.CollectAllHeld(ctx, plr, active)
+		else { Interaction.CollectHeld(ctx, plr, active) }
+	local collectedAny = false
+	for _, info in ipairs(heldInfos) do
+		if not (info and info.Name) then
+			continue
+		end
+		collectedAny = true
 		local displayName = tostring(info.DisplayName or info.CrewMemberId or info.Name)
 		runTrace(
 			"crewTurnIn player=%s boundary=%s activeMap=%s reward=%s slotIndex=%s origin=%s action=AddCrewMember",
@@ -812,7 +833,8 @@ hitBox.Touched:Connect(function(hit)
 				od.SlotCooldown[si] = os.clock() + rng:NextNumber(4, 6)
 			end
 		end
-	else
+	end
+	if not collectedAny then
 		runTrace(
 			"crewTurnInSkipped player=%s boundary=%s activeMap=%s reason=no_held_crew_member",
 			plr.Name,

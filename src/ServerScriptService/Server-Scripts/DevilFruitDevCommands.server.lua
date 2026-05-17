@@ -2805,14 +2805,27 @@ local function processCrewCanaryCommand(player, argumentText)
 			if flags.CrewMemberInventoryWriteAuthorityEnabled ~= true then
 				return false, "inventory_write_authority_disabled"
 			end
-			local ok = AddCrewMember:AddCrewMember(player, storageName, count, {
+			local ok, grantResult = AddCrewMember:AddCrewMember(player, storageName, count, {
 				_QuickSlotCapacityReserved = true,
 			})
 			local status = CrewInstanceService.BuildInventoryAuthorityStatus(player)
 			CrewInstanceService.PrintInventoryAuthorityStatus(status)
 			if ok ~= true or status.Passed ~= true then
+				local grantReason = if ok ~= true
+					then tostring(grantResult or "unknown_error")
+					else "post_grant_inventory_authority_validation_failed"
+				warn(string.format(
+					"[DevFruitDevCommands] Failed /crewcanary inventoryauthority grant for %s storage=%s count=%d reason=%s statusPassed=%s",
+					player.Name,
+					tostring(storageName),
+					count,
+					grantReason,
+					tostring(status.Passed == true)
+				))
 				return false,
-					"CrewMember inventory authority grant failed. "
+					"CrewMember inventory authority grant failed reason="
+						.. grantReason
+						.. ". "
 						.. summarizeInventoryAuthorityStatus(status, flags)
 			end
 			return true,

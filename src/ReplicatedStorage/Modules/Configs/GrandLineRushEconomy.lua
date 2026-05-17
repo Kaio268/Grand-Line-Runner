@@ -79,6 +79,12 @@ local Economy = {
 			RequestName = "GrandLineRushSliceRequest",
 			StateEventName = "GrandLineRushSliceState",
 		},
+		CarrySlots = {
+			MaxSlots = 3,
+			DefaultUnlocked = 1,
+			TemporaryUnlockedForTesting = 3,
+			TestUnlockedAttribute = "GrandLineRushUnlockedCarrySlots",
+		},
 		WorldRun = {
 			Enabled = true,
 			StartDepthBand = "Deep",

@@ -197,8 +197,13 @@ local function forceDropCarriedItems(player, dropPosition, effectName)
 	local dropResponse = nil
 
 	local sliceService = getSliceService()
-	if sliceService and typeof(sliceService.DropCarriedReward) == "function" then
-		dropResponse = sliceService.DropCarriedReward(player, {
+	local dropFunction = if sliceService and typeof(sliceService.DropAllCarriedRewards) == "function"
+		then sliceService.DropAllCarriedRewards
+		elseif sliceService and typeof(sliceService.DropCarriedReward) == "function"
+			then sliceService.DropCarriedReward
+			else nil
+	if dropFunction then
+		dropResponse = dropFunction(player, {
 			Reason = "HitEffect",
 			EffectName = effectName,
 			DropPosition = dropPosition,

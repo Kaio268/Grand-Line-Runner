@@ -450,6 +450,18 @@ local function getHeldCrewMemberModel(player)
 	return context.HeldByUserId[player.UserId]
 end
 
+local function isModelHeldByPlayer(player, model)
+	if not model then
+		return false
+	end
+
+	local context = CrewInteraction.GetActiveContext()
+	local activeState = context and context.Active and context.Active[model]
+	return typeof(activeState) == "table"
+		and activeState.Held == true
+		and activeState.HolderUserId == player.UserId
+end
+
 local function isTutorialTargetModelForSession(player, session, model)
 	if not model or not model.Parent then
 		return false
@@ -478,9 +490,27 @@ local function destroyTutorialTargetModel(player, model)
 		local activeState = nil
 		if typeof(context.Active) == "table" then
 			activeState = context.Active[model]
-			context.Active[model] = nil
-			if activeState ~= nil then
-				removed = true
+			if
+				activeState
+				and activeState.Held == true
+				and activeState.HolderUserId == player.UserId
+				and typeof(CrewInteraction.CollectHeld) == "function"
+			then
+				local collectedInfo = CrewInteraction.CollectHeld(
+					context,
+					player,
+					context.Active,
+					activeState.CarryId or activeState.CarrySlotIndex
+				)
+				if collectedInfo ~= nil then
+					wasHeldByPlayer = true
+					removed = true
+				end
+			else
+				context.Active[model] = nil
+				if activeState ~= nil then
+					removed = true
+				end
 			end
 		end
 		if typeof(context.HeldByUserId) == "table" and context.HeldByUserId[player.UserId] == model then
@@ -514,6 +544,11 @@ local function destroyTutorialTargetModel(player, model)
 end
 
 local function isHoldingTutorialTarget(player, session)
+	local targetModel = session and session.tutorialCrewMemberModel
+	if isTutorialTargetModelForSession(player, session, targetModel) and isModelHeldByPlayer(player, targetModel) then
+		return true
+	end
+
 	return isTutorialTargetModelForSession(player, session, getHeldCrewMemberModel(player))
 end
 

@@ -489,6 +489,45 @@ local function getEntryDisplayMetadata(entry)
 		metadata.crewMemberId = crewMemberId
 	end
 
+	local stackId = tostring(entry.StackId or entry.stackId or "")
+	if stackId ~= "" then
+		metadata.stackId = stackId
+	end
+
+	local maxQuantity = tonumber(entry.MaxQuantity or entry.maxQuantity)
+	if maxQuantity ~= nil then
+		metadata.maxQuantity = math.max(1, math.floor(maxQuantity))
+	end
+
+	local stackNumber = tonumber(entry.StackNumber or entry.stackNumber)
+	if stackNumber ~= nil then
+		metadata.stackNumber = math.max(1, math.floor(stackNumber))
+	end
+
+	local stackOrder = tonumber(entry.StackOrder or entry.stackOrder)
+	if stackOrder ~= nil then
+		metadata.stackOrder = math.max(1, math.floor(stackOrder))
+	end
+
+	local representativeInstanceId = tostring(entry.RepresentativeInstanceId or entry.representativeInstanceId or "")
+	if representativeInstanceId ~= "" then
+		metadata.representativeInstanceId = representativeInstanceId
+	end
+
+	local instanceIds = entry.InstanceIds or entry.instanceIds
+	if typeof(instanceIds) == "table" then
+		local copy = {}
+		for _, instanceId in ipairs(instanceIds) do
+			local normalizedInstanceId = tostring(instanceId or "")
+			if normalizedInstanceId ~= "" then
+				table.insert(copy, normalizedInstanceId)
+			end
+		end
+		if #copy > 0 then
+			metadata.instanceIds = copy
+		end
+	end
+
 	local productionName = tostring(entry.ProductionName or entry.productionName or "")
 	if productionName ~= "" then
 		metadata.productionName = productionName
@@ -531,6 +570,24 @@ local function applyDisplayMetadataToState(state, metadata)
 	if metadata.crewMemberId ~= nil then
 		state.crewMemberId = metadata.crewMemberId
 	end
+	if metadata.stackId ~= nil then
+		state.stackId = metadata.stackId
+	end
+	if metadata.maxQuantity ~= nil then
+		state.maxQuantity = metadata.maxQuantity
+	end
+	if metadata.stackNumber ~= nil then
+		state.stackNumber = metadata.stackNumber
+	end
+	if metadata.stackOrder ~= nil then
+		state.stackOrder = metadata.stackOrder
+	end
+	if metadata.representativeInstanceId ~= nil then
+		state.representativeInstanceId = metadata.representativeInstanceId
+	end
+	if metadata.instanceIds ~= nil then
+		state.instanceIds = metadata.instanceIds
+	end
 	if metadata.productionName ~= nil then
 		state.productionName = metadata.productionName
 	end
@@ -551,7 +608,8 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 			local name = tostring(entry.Name or entry.name or "")
 			local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
 			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
-				local key = kind .. "|" .. name
+				local stackId = tostring(entry.StackId or entry.stackId or "")
+				local key = if isCrewItemKind(kind) and stackId ~= "" then stackId else kind .. "|" .. name
 				ensureAcquired(key)
 				local nextState = {
 					kind = kind,
@@ -870,6 +928,14 @@ local function compareInventoryKeys(a, b)
 	local stateB = itemState[b]
 	if not stateA or not stateB then
 		return tostring(a) < tostring(b)
+	end
+
+	if isCrewItemKind(stateA.kind) and isCrewItemKind(stateB.kind) then
+		local stackOrderA = tonumber(stateA.stackOrder)
+		local stackOrderB = tonumber(stateB.stackOrder)
+		if stackOrderA ~= nil and stackOrderB ~= nil and stackOrderA ~= stackOrderB then
+			return stackOrderA < stackOrderB
+		end
 	end
 
 	local rankA = getItemSortRank(stateA.kind, stateA.name, stateA)
@@ -1755,6 +1821,12 @@ local function buildEntry(key, state)
 		staticPreviewImage = staticPreviewImage,
 		modelPreview = modelPreview,
 		quantity = state.qty,
+		maxQuantity = state.maxQuantity,
+		stackId = state.stackId,
+		stackNumber = state.stackNumber,
+		stackOrder = state.stackOrder,
+		instanceIds = state.instanceIds,
+		representativeInstanceId = state.representativeInstanceId,
 		accentColor = getAccentColor(state.kind, state.name, state),
 		interactive = state.kind ~= "Resource",
 		isEquipped = isEquipped,
@@ -1806,18 +1878,15 @@ local function buildRenderData()
 	local crewQuickSlots = readCrewQuickSlots()
 	local crewCollectionCount = countCrewItems(crewList)
 
-	local crewHotbarEntries = {}
-	for _, key in ipairs(crewList) do
-		local state = itemState[key]
-		if state then
-			crewHotbarEntries[#crewHotbarEntries + 1] = buildEntry(key, state)
-		end
-	end
-
 	local hotbarSlots = {}
 	keyboardHotbar = {}
 	for slotIndex = 1, crewQuickSlots.maxSlots do
-		local entry = crewHotbarEntries[slotIndex]
+		local entry = nil
+		local key = crewList[slotIndex]
+		local state = key and itemState[key] or nil
+		if state then
+			entry = buildEntry(key, state)
+		end
 		if slotIndex <= crewQuickSlots.unlockedSlots then
 			if entry then
 				entry.quickSlotIndex = slotIndex
@@ -1902,29 +1971,35 @@ local function buildRenderData()
 		end
 	end
 
-	local captainLogOk, captainLog = pcall(buildCaptainLogData, query)
-	if not captainLogOk or typeof(captainLog) ~= "table" then
-		captainLog = {
-			entries = {},
-			filteredCount = 0,
-			placedCount = 0,
-			totalCollectable = 0,
-			totalCount = 0,
-		}
+	local captainLog = {
+		entries = {},
+		filteredCount = 0,
+		placedCount = 0,
+		totalCollectable = 0,
+		totalCount = 0,
+	}
+	if uiState.activeView == "CaptainLog" then
+		local captainLogOk, result = pcall(buildCaptainLogData, query)
+		if captainLogOk and typeof(result) == "table" then
+			captainLog = result
+		end
 	end
 
-	local titlesOk, titles = pcall(buildTitlesData, query)
-	if not titlesOk or typeof(titles) ~= "table" then
-		titles = {
-			entries = {},
-			filteredCount = 0,
-			totalCount = 0,
-			unlockedCount = 0,
-			lockedCount = 0,
-			persistentUnlockedCount = 0,
-			dynamicUnlockedCount = 0,
-			bountyRank = nil,
-		}
+	local titles = {
+		entries = {},
+		filteredCount = 0,
+		totalCount = 0,
+		unlockedCount = 0,
+		lockedCount = 0,
+		persistentUnlockedCount = 0,
+		dynamicUnlockedCount = 0,
+		bountyRank = nil,
+	}
+	if uiState.activeView == "Titles" then
+		local titlesOk, result = pcall(buildTitlesData, query)
+		if titlesOk and typeof(result) == "table" then
+			titles = result
+		end
 	end
 
 	return {
@@ -2537,8 +2612,16 @@ local function hookCharacter(character)
 	end, characterConnections)
 end
 
+local requestInventorySnapshot = nil
+local scheduleInventorySnapshotRequest = nil
+
 trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 	if isCrewItemKind(kind) then
+		if snapshotRemote ~= nil and scheduleInventorySnapshotRequest ~= nil then
+			scheduleInventorySnapshotRequest("crewUpdateRemote")
+			return
+		end
+
 		local quantity = tonumber(value) or 0
 		local key = CREW_ITEM_KIND .. "|" .. tostring(name)
 		local previous = itemState[key]
@@ -2600,12 +2683,15 @@ end, cleanupConnections)
 
 local snapshotRequestInFlight = false
 local lastSnapshotRequestAt = 0
+local snapshotRequestQueued = false
+local queuedSnapshotReason = nil
+local SNAPSHOT_UPDATE_DEBOUNCE_SECONDS = 0.15
 
 local function isTransientSnapshotInvokeError(err)
 	return tostring(err):find("cannot resume non%-suspended coroutine") ~= nil
 end
 
-local function requestInventorySnapshot(reason)
+requestInventorySnapshot = function(reason)
 	if snapshotRequestInFlight or not snapshotRemote or destroyed then
 		return
 	end
@@ -2652,9 +2738,29 @@ local function requestInventorySnapshot(reason)
 	end)
 end
 
+scheduleInventorySnapshotRequest = function(reason)
+	if snapshotRemote == nil or destroyed then
+		return
+	end
+
+	queuedSnapshotReason = tostring(reason or "queued")
+	if snapshotRequestQueued then
+		return
+	end
+
+	snapshotRequestQueued = true
+	task.delay(SNAPSHOT_UPDATE_DEBOUNCE_SECONDS, function()
+		snapshotRequestQueued = false
+		if destroyed then
+			return
+		end
+		requestInventorySnapshot(queuedSnapshotReason or reason)
+	end)
+end
+
 trackConnection(player:GetAttributeChangedSignal("PlayerDataReady"), function()
 	if player:GetAttribute("PlayerDataReady") == true then
-		requestInventorySnapshot("playerDataReady")
+		scheduleInventorySnapshotRequest("playerDataReady")
 	end
 end, cleanupConnections)
 
