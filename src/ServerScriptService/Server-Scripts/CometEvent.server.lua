@@ -6,17 +6,42 @@ local Workspace = game:GetService("Workspace")
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
 local CONFIG = {
-	WarningTime = 1.15,
-	RetargetDelay = 0.15,
+	Enabled = true,
+	WarningTime = 0.65,
+	RetargetDelay = 0.1,
 	DropHeight = 180,
 	FallTime = 0.65,
+	FallTimeByZone = {
+		[1] = 0.25,
+		[2] = 0.30,
+		[3] = 0.35,
+		[4] = 0.40,
+		[5] = 0.45,
+		[6] = 0.50,
+		[7] = 0.55,
+		[8] = 0.60,
+	},
 	ImpactRadius = 18,
 	Damage = 100,
 	BombSize = 6,
 	CircleHeight = 0.18,
+	ZoneCount = 8,
 	GroundRayHeight = 6,
 	GroundRayDepth = 14,
 	TargetCheckDelay = 0.2,
+	ImpactVfxLifetime = 3,
+	ImpactVfxScale = 3,
+	DefaultVfxEmitCount = 30,
+	ZoneVfxNames = {
+		[1] = "canon explosion",
+		[2] = "water explosion",
+		[3] = "ice",
+		[4] = "water explosion",
+		[5] = "canon explosion",
+		[6] = "ice",
+		[7] = "water explosion",
+		[8] = "canon explosion",
+	},
 	SafeGapBuffer = 12,
 	SafeFloorNameKeywords = {
 		"gap",
@@ -28,6 +53,10 @@ local CONFIG = {
 	},
 }
 
+if not CONFIG.Enabled then
+	return
+end
+
 local hazardsFolder = Workspace:FindFirstChild("CannonBarrages")
 if not hazardsFolder then
 	hazardsFolder = Instance.new("Folder")
@@ -36,6 +65,7 @@ if not hazardsFolder then
 end
 
 local activeLoopsByPlayer = {}
+local cachedCannonVfxRoot = false
 
 local function getCharacterParts(player)
 	local character = player.Character
@@ -95,6 +125,31 @@ local function isInsideRunZone(position)
 	end
 
 	return true
+end
+
+local function getRunAlpha(position)
+	local refs = MapResolver.GetRefs()
+	local startPart = refs.WaveStart
+	local endPart = refs.WaveEnd
+	if not startPart or not endPart then
+		return 0
+	end
+
+	local forward = getPlanarUnit(endPart.Position - startPart.Position, startPart.CFrame.LookVector)
+	local runLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
+	local forwardDistance = (position - startPart.Position):Dot(forward)
+
+	return math.clamp(forwardDistance / runLength, 0, 0.999)
+end
+
+local function getZoneIndex(position)
+	local zoneCount = math.max(1, math.floor(tonumber(CONFIG.ZoneCount) or 8))
+	return math.clamp(math.floor(getRunAlpha(position) * zoneCount) + 1, 1, zoneCount)
+end
+
+local function getZoneFallTime(position)
+	local zoneIndex = getZoneIndex(position)
+	return CONFIG.FallTimeByZone[zoneIndex] or CONFIG.FallTime
 end
 
 local function hasKeywordInAncestry(instance, keywords)
@@ -237,14 +292,188 @@ local function makeBomb(position)
 	return bomb
 end
 
-local function makeExplosion(position)
-	local explosion = Instance.new("Explosion")
-	explosion.Position = position
-	explosion.BlastRadius = 0
-	explosion.BlastPressure = 0
-	explosion.DestroyJointRadiusPercent = 0
-	explosion.Parent = Workspace
+local function getCannonVfxRoot()
+	if cachedCannonVfxRoot ~= false then
+		return cachedCannonVfxRoot
+	end
 
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local directFolder = assets and assets:FindFirstChild("cannonVFX")
+	local directAsset = directFolder
+		and (directFolder:FindFirstChild("canonballVFX") or directFolder:FindFirstChild("canonballVFX (1)"))
+	if directAsset then
+		cachedCannonVfxRoot = directAsset
+		return directAsset
+	end
+
+	local vfxFolder = assets and assets:FindFirstChild("VFX")
+	local cannonFolder = vfxFolder and vfxFolder:FindFirstChild("canonball_vfx")
+	local cannonAsset = cannonFolder and cannonFolder:FindFirstChild("canonballVFX")
+	cachedCannonVfxRoot = cannonAsset
+	return cannonAsset
+end
+
+local function findDescendantByLowerName(root, lowerName)
+	if not root then
+		return nil
+	end
+
+	if string.lower(root.Name) == lowerName then
+		return root
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if string.lower(descendant.Name) == lowerName then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function getImpactVfxTemplate(position)
+	local root = getCannonVfxRoot()
+	if not root then
+		return nil
+	end
+
+	local zoneIndex = getZoneIndex(position)
+	local configuredName = CONFIG.ZoneVfxNames[zoneIndex] or CONFIG.ZoneVfxNames[1]
+	local template = configuredName and findDescendantByLowerName(root, string.lower(configuredName))
+	if template then
+		return template
+	end
+
+	return findDescendantByLowerName(root, "canon explosion")
+		or findDescendantByLowerName(root, "water explosion")
+		or findDescendantByLowerName(root, "ice")
+		or root
+end
+
+local function configureVfxInstance(instance)
+	if instance:IsA("BasePart") then
+		instance.Anchored = true
+		instance.CanCollide = false
+		instance.CanTouch = false
+		instance.CanQuery = false
+		instance.AssemblyLinearVelocity = Vector3.zero
+		instance.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
+local function scaleNumberSequence(sequence, scale)
+	local keypoints = {}
+	for _, keypoint in ipairs(sequence.Keypoints) do
+		table.insert(keypoints, NumberSequenceKeypoint.new(keypoint.Time, keypoint.Value * scale, keypoint.Envelope * scale))
+	end
+
+	return NumberSequence.new(keypoints)
+end
+
+local function scaleVfxItem(item, scale)
+	if scale == 1 then
+		return
+	end
+
+	if item:IsA("ParticleEmitter") then
+		item.Size = scaleNumberSequence(item.Size, scale)
+	elseif item:IsA("Beam") then
+		item.Width0 *= scale
+		item.Width1 *= scale
+	elseif item:IsA("Trail") then
+		item.WidthScale = scaleNumberSequence(item.WidthScale, scale)
+	end
+end
+
+local function scaleVfxClone(clone, scale)
+	if scale == 1 then
+		return
+	end
+
+	if clone:IsA("Model") then
+		clone:ScaleTo(scale)
+	elseif clone:IsA("BasePart") then
+		clone.Size *= scale
+	end
+
+	scaleVfxItem(clone, scale)
+	for _, item in ipairs(clone:GetDescendants()) do
+		if not clone:IsA("Model") and item:IsA("BasePart") then
+			item.Size *= scale
+		end
+		scaleVfxItem(item, scale)
+	end
+end
+
+local function placeVfxClone(clone, position)
+	if clone:IsA("Model") then
+		clone:PivotTo(CFrame.new(position))
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = CFrame.new(position)
+	elseif clone:IsA("Attachment") then
+		local anchor = Instance.new("Part")
+		anchor.Name = "CannonImpactVfxAnchor"
+		anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+		anchor.CFrame = CFrame.new(position)
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanTouch = false
+		anchor.CanQuery = false
+		anchor.Transparency = 1
+		clone.Parent = anchor
+		anchor.Parent = hazardsFolder
+		return anchor
+	elseif clone:IsA("ParticleEmitter") or clone:IsA("Beam") or clone:IsA("Trail") or clone:IsA("Sound") then
+		local anchor = Instance.new("Part")
+		anchor.Name = "CannonImpactVfxAnchor"
+		anchor.Size = Vector3.new(0.2, 0.2, 0.2)
+		anchor.CFrame = CFrame.new(position)
+		anchor.Anchored = true
+		anchor.CanCollide = false
+		anchor.CanTouch = false
+		anchor.CanQuery = false
+		anchor.Transparency = 1
+
+		local attachment = Instance.new("Attachment")
+		attachment.Name = "CannonImpactVfxAttachment"
+		attachment.Parent = anchor
+
+		clone.Parent = attachment
+		anchor.Parent = hazardsFolder
+		return anchor
+	end
+
+	return clone
+end
+
+local function getVfxItems(root)
+	local items = { root }
+	for _, item in ipairs(root:GetDescendants()) do
+		table.insert(items, item)
+	end
+
+	return items
+end
+
+local function emitVfx(root)
+	for _, item in ipairs(getVfxItems(root)) do
+		configureVfxInstance(item)
+
+		if item:IsA("ParticleEmitter") then
+			local emitCount = tonumber(item:GetAttribute("EmitCount")) or tonumber(item:GetAttribute("BurstCount"))
+			if not emitCount then
+				emitCount = math.floor((tonumber(item.Rate) or 0) * math.max(item.Lifetime.Max, 0.25))
+			end
+			item:Emit(math.max(1, math.floor(emitCount > 0 and emitCount or CONFIG.DefaultVfxEmitCount)))
+		elseif item:IsA("Beam") or item:IsA("Trail") then
+			item.Enabled = true
+		elseif item:IsA("Sound") then
+			item:Play()
+		end
+	end
+end
+
+local function makeFallbackImpactFlash(position)
 	local flash = Instance.new("Part")
 	flash.Name = "BombImpactFlash"
 	flash.Shape = Enum.PartType.Ball
@@ -266,6 +495,38 @@ local function makeExplosion(position)
 	end)
 end
 
+local function playImpactVfx(position)
+	local template = getImpactVfxTemplate(position)
+	if not template then
+		makeFallbackImpactFlash(position)
+		return
+	end
+
+	local clone = template:Clone()
+	clone.Name = "CannonImpactVfx"
+	scaleVfxClone(clone, CONFIG.ImpactVfxScale)
+	for _, item in ipairs(clone:GetDescendants()) do
+		configureVfxInstance(item)
+	end
+	configureVfxInstance(clone)
+
+	local root = placeVfxClone(clone, position)
+	if not root.Parent then
+		root.Parent = hazardsFolder
+	end
+	emitVfx(root)
+
+	task.delay(CONFIG.ImpactVfxLifetime, function()
+		if root.Parent then
+			root:Destroy()
+		end
+	end)
+end
+
+local function makeExplosion(position)
+	playImpactVfx(position)
+end
+
 local function damagePlayersAt(position)
 	for _, player in ipairs(Players:GetPlayers()) do
 		local targetPosition = getPlayerBombTarget(player)
@@ -279,14 +540,15 @@ end
 local function dropBombAt(position)
 	local startPosition = position + Vector3.new(0, CONFIG.DropHeight, 0)
 	local endPosition = position + Vector3.new(0, CONFIG.BombSize / 2, 0)
+	local fallTime = getZoneFallTime(position)
 	local bomb = makeBomb(startPosition)
 
 	local elapsed = 0
-	while elapsed < CONFIG.FallTime and bomb.Parent do
+	while elapsed < fallTime and bomb.Parent do
 		local dt = RunService.Heartbeat:Wait()
 		elapsed += dt
 
-		local alpha = math.clamp(elapsed / CONFIG.FallTime, 0, 1)
+		local alpha = math.clamp(elapsed / fallTime, 0, 1)
 		local easedAlpha = alpha * alpha
 		bomb.CFrame = CFrame.new(startPosition:Lerp(endPosition, easedAlpha))
 	end

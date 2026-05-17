@@ -63,6 +63,17 @@ local CONFIG = {
 		[7] = 0.09,
 		[8] = 0.08,
 	},
+	SafeGapBuffer = 12,
+	SafeFloorNameKeywords = {
+		"gap",
+		"safe",
+		"safezone",
+		"refuge",
+		"hub",
+		"lobby",
+		"nopuddle",
+		"no puddle",
+	},
 }
 
 local PUDDLE_TEMPLATE_NAMES_BY_AREA = {
@@ -260,18 +271,29 @@ local function buildGroundRaycastParams(refs)
 end
 
 local function isUnsafePuddleSurface(instance)
+	if not instance then
+		return true
+	end
+
 	local current = instance
 	while current do
-		local name = string.lower(current.Name)
-		if name:find("gap", 1, true)
-			or name:find("safe", 1, true)
-			or name:find("nopuddle", 1, true)
-			or name:find("no puddle", 1, true)
-			or name:find("refuge", 1, true)
-			or name:find("spawn", 1, true)
-			or name:find("barrier", 1, true)
-			or name:find("vip", 1, true)
+		if current:GetAttribute("BombSafe") == true
+			or current:GetAttribute("SafeZone") == true
+			or current:GetAttribute("IsSafeZone") == true
+			or current:GetAttribute("NoPuddles") == true
+			or current:GetAttribute("NoPuddle") == true
 		then
+			return true
+		end
+
+		local name = string.lower(current.Name)
+		for _, keyword in ipairs(CONFIG.SafeFloorNameKeywords or {}) do
+			if name:find(keyword, 1, true) then
+				return true
+			end
+		end
+
+		if name:find("spawn", 1, true) or name:find("barrier", 1, true) or name:find("vip", 1, true) then
 			return true
 		end
 
@@ -297,10 +319,34 @@ local function raycastGround(position, refs, raycastParams)
 	return nil
 end
 
+local function isNearSafePuddleGap(position, refs, forward, raycastParams)
+	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
+	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
+	if buffer <= 0 then
+		return false
+	end
+
+	for _, offset in ipairs({
+		forwardUnit * buffer,
+		-forwardUnit * buffer,
+		Vector3.zero,
+	}) do
+		if not raycastGround(position + offset, refs, raycastParams) then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function resolveSafeGroundPosition(position, refs, lateral, forward, footprintSize)
 	local raycastParams = buildGroundRaycastParams(refs)
 	local centerPosition = raycastGround(position, refs, raycastParams)
 	if not centerPosition then
+		return nil
+	end
+
+	if isNearSafePuddleGap(centerPosition, refs, forward, raycastParams) then
 		return nil
 	end
 

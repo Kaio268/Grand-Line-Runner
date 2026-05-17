@@ -65,6 +65,18 @@ local CONFIG = {
 	FixedSpikeSpotFolderNames = { "DeckSpikeSpots", "SpikeSpots", "SpikeAttackSpots" },
 	DefaultFixedSpikeSpotSize = Vector3.new(18, 7, 18),
 	FixedSpikePositions = {},
+	SafeGapBuffer = 12,
+	SafeFloorNameKeywords = {
+		"gap",
+		"safe",
+		"safezone",
+		"refuge",
+		"hub",
+		"lobby",
+		"no spike",
+		"nospike",
+		"no_spike",
+	},
 }
 
 local rng = Random.new()
@@ -325,19 +337,29 @@ local function buildGroundRaycastParams(refs)
 end
 
 local function isUnsafeSpikeSurface(instance)
+	if not instance then
+		return true
+	end
+
 	local current = instance
 	while current do
-		local name = string.lower(current.Name)
-		if name:find("gap", 1, true)
-			or name:find("safe", 1, true)
-			or name:find("no spike", 1, true)
-			or name:find("nospike", 1, true)
-			or name:find("no_spike", 1, true)
-			or name:find("refuge", 1, true)
-			or name:find("spawn", 1, true)
-			or name:find("barrier", 1, true)
-			or name:find("vip", 1, true)
+		if current:GetAttribute("BombSafe") == true
+			or current:GetAttribute("SafeZone") == true
+			or current:GetAttribute("IsSafeZone") == true
+			or current:GetAttribute("NoSpikes") == true
+			or current:GetAttribute("NoSpike") == true
 		then
+			return true
+		end
+
+		local name = string.lower(current.Name)
+		for _, keyword in ipairs(CONFIG.SafeFloorNameKeywords or {}) do
+			if name:find(keyword, 1, true) then
+				return true
+			end
+		end
+
+		if name:find("spawn", 1, true) or name:find("barrier", 1, true) or name:find("vip", 1, true) then
 			return true
 		end
 
@@ -363,9 +385,33 @@ local function raycastGround(position, refs)
 	return nil
 end
 
+local function isNearSafeSpikeGap(position, refs, forward)
+	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
+	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
+	if buffer <= 0 then
+		return false
+	end
+
+	for _, offset in ipairs({
+		forwardUnit * buffer,
+		-forwardUnit * buffer,
+		Vector3.zero,
+	}) do
+		if not raycastGround(position + offset, refs) then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function resolveSafeSpikeGroundPosition(position, refs, lateral, forward, size)
 	local centerPosition = raycastGround(position, refs)
 	if not centerPosition then
+		return nil
+	end
+
+	if isNearSafeSpikeGap(centerPosition, refs, forward) then
 		return nil
 	end
 
@@ -827,19 +873,20 @@ local function chooseSpikePlacement(refs, startPart, endPart, leftBound, rightBo
 		laneOffset = math.clamp(laneOffset, -safeHalfWidth, safeHalfWidth)
 	end
 
+	local width = laneWidth * math.clamp(tonumber(CONFIG.LaneWidthScale) or 0.82, 0.25, 1)
+	local length = math.max(4, tonumber(CONFIG.SpikeLength) or 18)
+	local size = Vector3.new(width, CONFIG.SpikeHeight, length)
 	local planarPosition = startPart.Position + (forward * forwardDistance) + (lateral * laneOffset)
-	local groundPosition = raycastGround(planarPosition, refs)
+	local groundPosition = resolveSafeSpikeGroundPosition(planarPosition, refs, lateral, forward, size)
 	if not groundPosition then
 		return nil
 	end
 
-	local width = laneWidth * math.clamp(tonumber(CONFIG.LaneWidthScale) or 0.82, 0.25, 1)
-	local length = math.max(4, tonumber(CONFIG.SpikeLength) or 18)
 	return {
 		GroundPosition = groundPosition,
 		Forward = forward,
 		Lateral = lateral,
-		Size = Vector3.new(width, CONFIG.SpikeHeight, length),
+		Size = size,
 	}
 end
 
