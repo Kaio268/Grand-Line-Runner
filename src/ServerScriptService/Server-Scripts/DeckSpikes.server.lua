@@ -9,62 +9,30 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
-local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
-local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
-local HazardProtection = require(
-	ServerScriptService:WaitForChild("Modules")
-		:WaitForChild("DevilFruits")
-		:WaitForChild("Server")
-		:WaitForChild("HazardProtection")
-)
 
 local CONFIG = {
-	ActivationCycleDelay = 7,
-	ActivationWaveDuration = 2.5,
-	SpotLayoutSeed = 7351,
-	ActivationShuffleSeed = 9137,
-	MaxActiveSpikes = 180,
-	LaneCount = 20,
-	MinimumForwardAlpha = 0.14,
-	MaximumForwardAlpha = 0.94,
-	PlayerTargetChance = 0.55,
-	PlayerTargetForwardJitter = 22,
-	GroundProbeHeight = 120,
-	GroundProbeDepth = 260,
+	Enabled = true,
+	InitialSpawnDelay = 3,
+	SpawnDelayMin = 0.08,
+	SpawnDelayMax = 0.18,
+	SpikesPerPop = 2,
+
 	WarningTime = 3,
 	ThrustTime = 0.12,
 	HoldTime = 2.5,
 	RetractTime = 0.16,
-	PreviewHeight = 0.45,
-	SpikeHeight = 7,
-	SpikeLength = 18,
-	LaneWidthScale = 0.82,
-	WarningGroundOffset = 0.25,
-	HazardClass = "minor",
-	HazardType = "deck_spikes",
-	FreezeBehavior = "pause",
-	FreezeDurationFallback = 1.25,
-	Damage = 65,
-	KnockdownDuration = 0.8,
-	AffectablePadding = Vector3.new(0.8, 0.8, 0.8),
-	SpikeTrapFolderName = "Spike Traps",
-	UseSpikeTrapTemplates = true,
-	UseFixedSpikeSpots = true,
-	RequireFixedSpikeSpots = true,
-	InitialSpawnDelay = 3,
-	IgnoreNoDisastersTimerInStudio = true,
-	ShowFixedSpikeSpotMarkersInStudio = false,
-	FixedSpikeSpotMarkerSize = Vector3.new(1.2, 0.12, 1.2),
+
 	BiomeCount = 8,
-	GeneratedFixedSpotsPerBiome = 40,
-	ActiveSpotsPerBiome = 20,
-	GeneratedFixedSpotBiomePadding = 0.08,
-	GeneratedSpotMinDistance = 12,
-	GeneratedSpotMaxAttemptsPerSpot = 80,
-	FixedSpikeSpotFolderNames = { "DeckSpikeSpots", "SpikeSpots", "SpikeAttackSpots" },
-	DefaultFixedSpikeSpotSize = Vector3.new(18, 7, 18),
-	FixedSpikePositions = {},
+	MaxActiveSpikes = 180,
+	SpawnAttempts = 30,
+	MinimumForwardAlpha = 0.14,
+	MaximumForwardAlpha = 0.94,
+	BiomePaddingAlpha = 0.08,
+
+	GroundProbeHeight = 120,
+	GroundProbeDepth = 260,
+	MaxGroundHeightDelta = 3,
 	SafeGapBuffer = 12,
 	SafeFloorNameKeywords = {
 		"gap",
@@ -77,54 +45,62 @@ local CONFIG = {
 		"nospike",
 		"no_spike",
 	},
+
+	LaneCount = 20,
+	LaneWidthScale = 0.82,
+	SpikeHeight = 7,
+	SpikeLength = 18,
+	SpikeVisualScale = 5,
+	PreviewHeight = 0.45,
+	WarningGroundOffset = 0.25,
+
+	Damage = 65,
+	KnockdownDuration = 0.8,
+	SpikeTrapFolderName = "Spike Traps",
+	UseSpikeTrapTemplates = true,
+	ReverseBiomeTemplates = true,
+	IgnoreNoDisastersTimerInStudio = true,
+}
+
+if not CONFIG.Enabled then
+	return
+end
+
+local SPIKE_TEMPLATE_NAMES_BY_AREA = {
+	["foosha village"] = "(FOOSHA) WOODEN SPIKE TRAP",
+	["arlong park"] = "(ARLONG PARK) BONE SPIKE TRAP",
+	["drum island"] = "(DRUM ISLAND) ICE SPIKE TRAP",
+	["alabasta"] = "(ALABASTA) SAND SPIKE TRAP",
+	["water 7"] = "(WATER 7) STEEL SPIKE TRAP",
+	["thriller bark"] = "(THRILLER BARK) SHADOW SPIKE TRAP",
+	["sabaody"] = "(SABAODY) MANGROVE SPIKE TRAP",
+	["dressrosa"] = "DRESSROSA SPIKE TRAP",
+	["dresserosa"] = "DRESSROSA SPIKE TRAP",
+}
+
+local SPIKE_TEMPLATE_TOKENS_BY_AREA = {
+	["foosha village"] = { "foosha", "wooden" },
+	["arlong park"] = { "arlong", "bone" },
+	["drum island"] = { "drum", "ice" },
+	["alabasta"] = { "alabasta", "sand" },
+	["water 7"] = { "water 7", "steel" },
+	["thriller bark"] = { "thriller", "shadow" },
+	["sabaody"] = { "sabaody", "mangrove" },
+	["dressrosa"] = { "dressrosa", "dresserosa" },
+	["dresserosa"] = { "dresserosa", "dressrosa" },
 }
 
 local rng = Random.new()
 local activeControllers = {}
-local fixedSpotCursor = 0
-local fixedSpotMarkerSignature = nil
-local fixedSpotCacheKey = nil
-local fixedSpotCache = nil
-local lastTraceStateKey = nil
-local warnedSpikeTemplateMessages = {}
-local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("DeckSpikesDebugTrace") == true
-local spawnAttemptSerial = 0
+local warnedMessages = {}
 
-local function trace(message, ...)
-	if DEBUG_TRACE then
-		print(string.format("[DECK SPIKES] " .. message, ...))
-	end
-end
-
-local function studioInfo(message, ...)
-	if RunService:IsStudio() then
-		print(string.format("[DECK SPIKES] " .. message, ...))
-	end
-end
-
-local function warnSpikeTemplateOnce(key, message, ...)
-	if warnedSpikeTemplateMessages[key] then
+local function warnOnce(key, message, ...)
+	if warnedMessages[key] then
 		return
 	end
 
-	warnedSpikeTemplateMessages[key] = true
+	warnedMessages[key] = true
 	warn(string.format("[DECK SPIKES] " .. message, ...))
-end
-
-local function formatVector3(value)
-	if typeof(value) ~= "Vector3" then
-		return tostring(value)
-	end
-
-	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
-end
-
-local function formatInstancePath(instance)
-	if not instance then
-		return "<nil>"
-	end
-
-	return instance:GetFullName()
 end
 
 local function getNoDisastersTimer()
@@ -144,45 +120,18 @@ local function isNoDisastersPaused(timer)
 	return timer and timer.Value > 0
 end
 
-local function configurePart(part, canTouch, canQuery)
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanTouch = canTouch == true
-	part.CanQuery = canQuery == true
-	part.CastShadow = false
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
-	part.AssemblyLinearVelocity = Vector3.zero
-	part.AssemblyAngularVelocity = Vector3.zero
-	pcall(function()
-		part.Massless = true
-	end)
-end
+local function getPlanarUnit(vector, fallback)
+	local planar = typeof(vector) == "Vector3" and Vector3.new(vector.X, 0, vector.Z) or Vector3.zero
+	if planar.Magnitude > 0.001 then
+		return planar.Unit
+	end
 
-local function createPart(parent, name, size, cframeValue, color, material, transparency)
-	local part = Instance.new("Part")
-	part.Name = name
-	part.Size = size
-	part.CFrame = cframeValue
-	part.Color = color
-	part.Material = material or Enum.Material.SmoothPlastic
-	part.Transparency = transparency or 0
-	configurePart(part, false, false)
-	part.Parent = parent
-	return part
-end
+	local fallbackPlanar = typeof(fallback) == "Vector3" and Vector3.new(fallback.X, 0, fallback.Z) or Vector3.zero
+	if fallbackPlanar.Magnitude > 0.001 then
+		return fallbackPlanar.Unit
+	end
 
-local function createWedgePart(parent, name, size, cframeValue, color, material, transparency)
-	local part = Instance.new("WedgePart")
-	part.Name = name
-	part.Size = size
-	part.CFrame = cframeValue
-	part.Color = color
-	part.Material = material or Enum.Material.Metal
-	part.Transparency = transparency or 0
-	configurePart(part, false, false)
-	part.Parent = parent
-	return part
+	return Vector3.zAxis
 end
 
 local function getBaseParts(instance)
@@ -204,67 +153,27 @@ local function getBaseParts(instance)
 	return parts
 end
 
-local function getPlanarUnit(vector, fallback)
-	local planar = typeof(vector) == "Vector3" and Vector3.new(vector.X, 0, vector.Z) or Vector3.zero
-	if planar.Magnitude > 1e-4 then
-		return planar.Unit
-	end
-
-	local fallbackPlanar = typeof(fallback) == "Vector3" and Vector3.new(fallback.X, 0, fallback.Z) or Vector3.zero
-	if fallbackPlanar.Magnitude > 1e-4 then
-		return fallbackPlanar.Unit
-	end
-
-	return Vector3.new(0, 0, -1)
+local function configurePart(part, canTouch, canQuery)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = canTouch == true
+	part.CanQuery = canQuery == true
+	part.CastShadow = false
+	part.AssemblyLinearVelocity = Vector3.zero
+	part.AssemblyAngularVelocity = Vector3.zero
 end
 
-local function getCorridorBasis(startPart, endPart, leftBound, rightBound)
-	local forward = getPlanarUnit(endPart.Position - startPart.Position, startPart.CFrame.LookVector)
-	local lateral = getPlanarUnit(forward:Cross(Vector3.yAxis), Vector3.xAxis)
-	local corridorCenter = (startPart.Position + endPart.Position) * 0.5
-	local corridorWidth = 36
-
-	if leftBound and rightBound then
-		lateral = getPlanarUnit(rightBound.Position - leftBound.Position, lateral)
-		corridorCenter = (leftBound.Position + rightBound.Position) * 0.5
-		corridorWidth = math.max(6, (rightBound.Position - leftBound.Position).Magnitude)
-	end
-
-	return forward, lateral, corridorCenter, corridorWidth
-end
-
-local function buildFixedSpotCacheKey(refs, startPart, endPart, leftBound, rightBound)
-	return table.concat({
-		tostring(refs and refs.ActiveMapName),
-		formatInstancePath(refs and refs.MapRoot),
-		formatInstancePath(refs and refs.WaveFolder),
-		formatVector3(startPart and startPart.Position or nil),
-		formatVector3(endPart and endPart.Position or nil),
-		formatVector3(leftBound and leftBound.Position or nil),
-		formatVector3(rightBound and rightBound.Position or nil),
-		tostring(CONFIG.BiomeCount),
-		tostring(CONFIG.GeneratedFixedSpotsPerBiome),
-		tostring(CONFIG.ActiveSpotsPerBiome),
-		tostring(CONFIG.SpotLayoutSeed),
-		tostring(CONFIG.GeneratedSpotMinDistance),
-		tostring(CONFIG.GeneratedSpotMaxAttemptsPerSpot),
-	}, "|")
-end
-
-local function planarDistance(a, b)
-	if typeof(a) ~= "Vector3" or typeof(b) ~= "Vector3" then
-		return math.huge
-	end
-
-	local delta = Vector3.new(a.X - b.X, 0, a.Z - b.Z)
-	return delta.Magnitude
-end
-
-local function shuffleArray(values, randomSource)
-	for index = #values, 2, -1 do
-		local swapIndex = randomSource:NextInteger(1, index)
-		values[index], values[swapIndex] = values[swapIndex], values[index]
-	end
+local function createPart(parent, name, size, cframeValue, color, material, transparency)
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = size
+	part.CFrame = cframeValue
+	part.Color = color
+	part.Material = material or Enum.Material.SmoothPlastic
+	part.Transparency = transparency or 0
+	configurePart(part, false, false)
+	part.Parent = parent
+	return part
 end
 
 local function resolveRefs()
@@ -278,49 +187,37 @@ local function resolveRefs()
 	)
 
 	local waveFolder = refs.WaveFolder
-	local hazardsFolder = waveFolder and waveFolder:FindFirstChild("Hazards") or nil
+	local hazardsFolder = waveFolder and waveFolder:FindFirstChild("Hazards")
 	if waveFolder and not hazardsFolder then
 		hazardsFolder = Instance.new("Folder")
 		hazardsFolder.Name = "Hazards"
 		hazardsFolder.Parent = waveFolder
 	end
 
-	local leftBound = waveFolder and waveFolder:FindFirstChild("LeftBound") or nil
-	local rightBound = waveFolder and waveFolder:FindFirstChild("RightBound") or nil
-	local stateKey = table.concat({
-		tostring(refs.RequestedMapName),
-		tostring(refs.ActiveMapName),
-		formatInstancePath(waveFolder),
-		formatInstancePath(hazardsFolder),
-		formatInstancePath(refs.WaveStart),
-		formatInstancePath(refs.WaveEnd),
-		formatInstancePath(leftBound),
-		formatInstancePath(rightBound),
-	}, "|")
-
-	if lastTraceStateKey ~= stateKey then
-		lastTraceStateKey = stateKey
-		trace(
-			"resolved waveFolder=%s hazardsFolder=%s start=%s end=%s left=%s right=%s",
-			formatInstancePath(waveFolder),
-			formatInstancePath(hazardsFolder),
-			formatInstancePath(refs.WaveStart),
-			formatInstancePath(refs.WaveEnd),
-			formatInstancePath(leftBound),
-			formatInstancePath(rightBound)
-		)
-	end
-
-	return refs, waveFolder, hazardsFolder, refs.WaveStart, refs.WaveEnd, leftBound, rightBound
+	local leftBound = waveFolder and waveFolder:FindFirstChild("LeftBound")
+	local rightBound = waveFolder and waveFolder:FindFirstChild("RightBound")
+	return refs, hazardsFolder, refs.WaveStart, refs.WaveEnd, leftBound, rightBound
 end
 
-local function buildGroundRaycastParams(refs)
+local function getCorridorBasis(startPart, endPart, leftBound, rightBound)
+	local forward = getPlanarUnit(endPart.Position - startPart.Position, startPart.CFrame.LookVector)
+	local lateral = getPlanarUnit(forward:Cross(Vector3.yAxis), startPart.CFrame.RightVector)
+	local center = (startPart.Position + endPart.Position) * 0.5
+	local width = 36
+
+	if leftBound and rightBound then
+		lateral = getPlanarUnit(rightBound.Position - leftBound.Position, lateral)
+		center = (leftBound.Position + rightBound.Position) * 0.5
+		width = math.max(6, math.abs((rightBound.Position - leftBound.Position):Dot(lateral)))
+	end
+
+	return forward, lateral, center, width
+end
+
+local function buildGroundRaycastParams(hazardsFolder)
 	local exclusions = {}
-	if refs and refs.WaveFolder then
-		local hazardsFolder = refs.WaveFolder:FindFirstChild("Hazards")
-		if hazardsFolder then
-			exclusions[#exclusions + 1] = hazardsFolder
-		end
+	if hazardsFolder then
+		exclusions[#exclusions + 1] = hazardsFolder
 	end
 
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -353,7 +250,7 @@ local function isUnsafeSpikeSurface(instance)
 		end
 
 		local name = string.lower(current.Name)
-		for _, keyword in ipairs(CONFIG.SafeFloorNameKeywords or {}) do
+		for _, keyword in ipairs(CONFIG.SafeFloorNameKeywords) do
 			if name:find(keyword, 1, true) then
 				return true
 			end
@@ -369,36 +266,51 @@ local function isUnsafeSpikeSurface(instance)
 	return false
 end
 
-local function raycastGround(position, refs)
+local function raycastGround(position, hazardsFolder)
 	local height = math.max(10, tonumber(CONFIG.GroundProbeHeight) or 120)
 	local depth = math.max(height + 10, tonumber(CONFIG.GroundProbeDepth) or 260)
 	local result = Workspace:Raycast(
 		position + Vector3.new(0, height, 0),
 		Vector3.new(0, -depth, 0),
-		buildGroundRaycastParams(refs)
+		buildGroundRaycastParams(hazardsFolder)
 	)
 
-	if result and not isUnsafeSpikeSurface(result.Instance) then
+	if result and result.Instance and result.Instance:IsA("BasePart") and not isUnsafeSpikeSurface(result.Instance) then
 		return result.Position
 	end
 
 	return nil
 end
 
-local function isNearSafeSpikeGap(position, refs, forward, lateral, size)
+local function getSpikeSize(corridorWidth)
+	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
+	local laneWidth = math.max(4, corridorWidth / laneCount)
+	local width = laneWidth * math.clamp(tonumber(CONFIG.LaneWidthScale) or 0.82, 0.25, 1)
+	local length = math.max(4, tonumber(CONFIG.SpikeLength) or 18)
+	local visualScale = math.max(0.01, tonumber(CONFIG.SpikeVisualScale) or 1)
+	return Vector3.new(width * visualScale, CONFIG.SpikeHeight * visualScale, length * visualScale)
+end
+
+local function hasSafeGroundForFootprint(position, hazardsFolder, forward, lateral, size)
+	local centerPosition = raycastGround(position, hazardsFolder)
+	if not centerPosition then
+		return nil
+	end
+
 	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
 	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
 	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
-	if buffer <= 0 then
-		return false
-	end
-
-	local footprintX = math.max(2, typeof(size) == "Vector3" and size.X or 0)
-	local footprintZ = math.max(2, typeof(size) == "Vector3" and size.Z or 0)
-	local sampleX = math.max(buffer, (footprintX * 0.5) + buffer)
-	local sampleZ = math.max(buffer, (footprintZ * 0.5) + buffer)
-	for _, offset in ipairs({
+	local sampleX = math.max(1, (size.X * 0.5) + buffer)
+	local sampleZ = math.max(1, (size.Z * 0.5) + buffer)
+	local innerSampleX = math.max(1, size.X * 0.35)
+	local innerSampleZ = math.max(1, size.Z * 0.35)
+	local maxHeightDelta = math.max(0.5, tonumber(CONFIG.MaxGroundHeightDelta) or 3)
+	local sampleOffsets = {
 		Vector3.zero,
+		forwardUnit * innerSampleZ,
+		-forwardUnit * innerSampleZ,
+		lateralUnit * innerSampleX,
+		-lateralUnit * innerSampleX,
 		forwardUnit * sampleZ,
 		-forwardUnit * sampleZ,
 		lateralUnit * sampleX,
@@ -407,41 +319,10 @@ local function isNearSafeSpikeGap(position, refs, forward, lateral, size)
 		lateralUnit * -sampleX + forwardUnit * sampleZ,
 		lateralUnit * sampleX + forwardUnit * -sampleZ,
 		lateralUnit * -sampleX + forwardUnit * -sampleZ,
-	}) do
-		if not raycastGround(position + offset, refs) then
-			return true
-		end
-	end
-
-	return false
-end
-
-local function resolveSafeSpikeGroundPosition(position, refs, lateral, forward, size)
-	local centerPosition = raycastGround(position, refs)
-	if not centerPosition then
-		return nil
-	end
-
-	if isNearSafeSpikeGap(centerPosition, refs, forward, lateral, size) then
-		return nil
-	end
-
-	local footprintX = math.max(2, typeof(size) == "Vector3" and size.X or 0)
-	local footprintZ = math.max(2, typeof(size) == "Vector3" and size.Z or 0)
-	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
-	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
-	local sampleX = math.max(1, footprintX * 0.42)
-	local sampleZ = math.max(1, footprintZ * 0.42)
-	local maxHeightDelta = math.max(2, (typeof(size) == "Vector3" and size.Y or CONFIG.SpikeHeight) * 0.5)
-	local sampleOffsets = {
-		lateralUnit * sampleX + forwardUnit * sampleZ,
-		lateralUnit * -sampleX + forwardUnit * sampleZ,
-		lateralUnit * sampleX + forwardUnit * -sampleZ,
-		lateralUnit * -sampleX + forwardUnit * -sampleZ,
 	}
 
 	for _, offset in ipairs(sampleOffsets) do
-		local samplePosition = raycastGround(position + offset, refs)
+		local samplePosition = raycastGround(position + offset, hazardsFolder)
 		if not samplePosition or math.abs(samplePosition.Y - centerPosition.Y) > maxHeightDelta then
 			return nil
 		end
@@ -450,488 +331,13 @@ local function resolveSafeSpikeGroundPosition(position, refs, lateral, forward, 
 	return centerPosition
 end
 
-local function getCharacterContext(player)
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-	if not character or not humanoid or humanoid.Health <= 0 or not rootPart then
-		return nil
-	end
-
-	return character, humanoid, rootPart
-end
-
-local function chooseAlivePlayer()
-	local candidates = {}
-	for _, player in ipairs(Players:GetPlayers()) do
-		if getCharacterContext(player) then
-			candidates[#candidates + 1] = player
-		end
-	end
-
-	if #candidates == 0 then
-		return nil
-	end
-
-	return candidates[rng:NextInteger(1, #candidates)]
-end
-
-local function findFixedSpikeSpotFolder(refs)
-	if CONFIG.UseFixedSpikeSpots ~= true then
-		return nil
-	end
-
-	local folderNames = CONFIG.FixedSpikeSpotFolderNames
-	if type(folderNames) ~= "table" then
-		folderNames = { "DeckSpikeSpots" }
-	end
-
-	local roots = {
-		refs and refs.WaveFolder,
-		refs and refs.ActiveMapRoot,
-		refs and refs.MapRoot,
-		refs and refs.ActiveMapContainer,
-		Workspace,
-	}
-
-	for _, root in ipairs(roots) do
-		if root then
-			for _, folderName in ipairs(folderNames) do
-				local folder = root:FindFirstChild(tostring(folderName), true)
-				if folder then
-					return folder
-				end
-			end
-		end
-	end
-
-	return nil
-end
-
-local function addConfiguredFixedSpikeSpots(spots)
-	for index, spotConfig in ipairs(CONFIG.FixedSpikePositions or {}) do
-		local position
-		local cframeValue
-		local size
-		local biomeIndex
-		local snapToGround = false
-
-		if typeof(spotConfig) == "Vector3" then
-			position = spotConfig
-			cframeValue = CFrame.new(spotConfig)
-		elseif typeof(spotConfig) == "CFrame" then
-			position = spotConfig.Position
-			cframeValue = spotConfig
-		elseif type(spotConfig) == "table" then
-			position = spotConfig.Position
-			cframeValue = spotConfig.CFrame or (position and CFrame.new(position))
-			size = spotConfig.Size
-			biomeIndex = tonumber(spotConfig.BiomeIndex)
-			snapToGround = spotConfig.SnapToGround == true
-		end
-
-		if typeof(position) == "Vector3" then
-			spots[#spots + 1] = {
-				Position = position,
-				CFrame = cframeValue or CFrame.new(position),
-				Size = if typeof(size) == "Vector3" then size else CONFIG.DefaultFixedSpikeSpotSize,
-				BiomeIndex = biomeIndex,
-				SourceName = string.format("CONFIG.FixedSpikePositions[%d]", index),
-				SnapToGround = snapToGround,
-			}
-		end
-	end
-end
-
-local function addFolderFixedSpikeSpots(spots, refs)
-	local folder = findFixedSpikeSpotFolder(refs)
-	if not folder then
-		return
-	end
-
-	for _, descendant in ipairs(folder:GetDescendants()) do
-		if descendant:IsA("BasePart") and descendant:GetAttribute("Disabled") ~= true then
-			spots[#spots + 1] = {
-				Position = descendant.Position,
-				CFrame = descendant.CFrame,
-				Size = descendant.Size,
-				BiomeIndex = tonumber(descendant:GetAttribute("BiomeIndex")),
-				Source = descendant,
-				SnapToGround = descendant:GetAttribute("SnapToGround") ~= false,
-			}
-		end
-	end
-end
-
-local function addGeneratedBiomeFixedSpikeSpots(spots, refs, startPart, endPart, leftBound, rightBound)
+local function getAreaNameForBiome(biomeIndex)
 	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
-	local spotsPerBiome = math.max(0, math.floor(tonumber(CONFIG.GeneratedFixedSpotsPerBiome) or 10))
-	if spotsPerBiome <= 0 then
-		return
-	end
-
-	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
-	local pathDelta = endPart.Position - startPart.Position
-	local pathLength = pathDelta:Dot(forward)
-	if pathLength < 0 then
-		forward = -forward
-		pathLength = -pathLength
-	end
-	pathLength = math.max(1, pathLength)
-
-	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
-	local laneWidth = math.max(4, corridorWidth / laneCount)
-	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (laneWidth * 0.5))
-	local width = laneWidth * math.clamp(tonumber(CONFIG.LaneWidthScale) or 0.82, 0.25, 1)
-	local length = math.max(4, tonumber(CONFIG.SpikeLength) or 18)
-	local spotSize = Vector3.new(width, CONFIG.SpikeHeight, length)
-	local biomePadding = math.clamp(tonumber(CONFIG.GeneratedFixedSpotBiomePadding) or 0.08, 0, 0.35)
-	local minDistance = math.max(0, tonumber(CONFIG.GeneratedSpotMinDistance) or 12)
-	local maxAttemptsPerSpot = math.max(5, math.floor(tonumber(CONFIG.GeneratedSpotMaxAttemptsPerSpot) or 80))
-	local layoutSeed = math.floor(tonumber(CONFIG.SpotLayoutSeed) or 7351)
-
-	for biomeIndex = 1, biomeCount do
-		local biomeSpots = {}
-		local randomSource = Random.new(layoutSeed + (biomeIndex * 104729))
-		local biomeStartAlpha = (biomeIndex - 1) / biomeCount
-		local biomeEndAlpha = biomeIndex / biomeCount
-		local usableStartAlpha = biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * biomePadding)
-		local usableEndAlpha = biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * biomePadding)
-
-		for spotIndex = 1, spotsPerBiome do
-			local chosenPosition = nil
-			local chosenCFrame = nil
-
-			for attempt = 1, maxAttemptsPerSpot do
-				local forwardAlpha = randomSource:NextNumber(usableStartAlpha, usableEndAlpha)
-				local laneOffset = randomSource:NextNumber(-safeHalfWidth, safeHalfWidth)
-				local centerOnPath = startPart.Position + (forward * pathLength * forwardAlpha)
-				local centerProjection = corridorCenter:Dot(lateral)
-				local pathProjection = centerOnPath:Dot(lateral)
-				local planarPosition = centerOnPath + (lateral * (centerProjection - pathProjection + laneOffset))
-				local groundPosition = resolveSafeSpikeGroundPosition(planarPosition, refs, lateral, forward, spotSize)
-				if not groundPosition then
-					continue
-				end
-				local tooClose = false
-
-				for _, existingSpot in ipairs(biomeSpots) do
-					if planarDistance(existingSpot.Position, groundPosition) < minDistance then
-						tooClose = true
-						break
-					end
-				end
-
-				if not tooClose or attempt == maxAttemptsPerSpot then
-					chosenPosition = groundPosition
-					chosenCFrame = CFrame.fromMatrix(groundPosition, lateral, Vector3.yAxis, -forward)
-					break
-				end
-			end
-
-			if not chosenPosition or not chosenCFrame then
-				warnSpikeTemplateOnce(
-					string.format("missing_safe_spike_spot_%d_%d", biomeIndex, spotIndex),
-					"Could not find safe non-gap spike spot for biome=%d spot=%d; reducing generated spots for this biome.",
-					biomeIndex,
-					spotIndex
-				)
-				break
-			end
-
-			local spot = {
-				Position = chosenPosition,
-				CFrame = chosenCFrame,
-				Size = spotSize,
-				BiomeIndex = biomeIndex,
-				SpotInBiome = spotIndex,
-				SourceName = string.format("generated biome %d spot %d", biomeIndex, spotIndex),
-				SnapToGround = false,
-			}
-			biomeSpots[#biomeSpots + 1] = spot
-		end
-
-		shuffleArray(biomeSpots, randomSource)
-		for spotIndex, spot in ipairs(biomeSpots) do
-			spot.SpotInBiome = spotIndex
-			spot.SourceName = string.format("generated biome %d spot %d", biomeIndex, spotIndex)
-			spots[#spots + 1] = spot
-		end
-	end
-end
-
-local function ensureFixedSpikeSpotMarkers(spots)
-	if not (RunService:IsStudio() and CONFIG.ShowFixedSpikeSpotMarkersInStudio == true) then
-		local existingFolder = Workspace:FindFirstChild("DeckSpikeSpotMarkers")
-		if existingFolder then
-			existingFolder:Destroy()
-		end
-		return
-	end
-
-	local signature = tostring(#spots)
-	for index, spot in ipairs(spots) do
-		signature ..= string.format("|%.1f,%.1f,%.1f", spot.Position.X, spot.Position.Y, spot.Position.Z)
-		if index >= 8 then
-			break
-		end
-	end
-
-	if fixedSpotMarkerSignature == signature then
-		return
-	end
-	fixedSpotMarkerSignature = signature
-
-	local folder = Workspace:FindFirstChild("DeckSpikeSpotMarkers")
-	if not folder then
-		folder = Instance.new("Folder")
-		folder.Name = "DeckSpikeSpotMarkers"
-		folder.Parent = Workspace
-	else
-		folder:ClearAllChildren()
-	end
-
-	for index, spot in ipairs(spots) do
-		local marker = Instance.new("Part")
-		marker.Name = string.format("SpikeSpot_%03d_Biome_%s", index, tostring(spot.BiomeIndex or "?"))
-		marker.Anchored = true
-		marker.CanCollide = false
-		marker.CanTouch = false
-		marker.CanQuery = false
-		marker.CastShadow = false
-		marker.Material = Enum.Material.Neon
-		marker.Transparency = 0.65
-		marker.Color = if (spot.BiomeIndex or 1) == 1 then Color3.fromRGB(255, 235, 80) else Color3.fromRGB(60, 190, 255)
-		marker.Size = CONFIG.FixedSpikeSpotMarkerSize
-		marker.CFrame = CFrame.fromMatrix(
-			spot.Position + Vector3.new(0, 0.35, 0),
-			getPlanarUnit(spot.CFrame.RightVector, Vector3.xAxis),
-			Vector3.yAxis,
-			-getPlanarUnit(spot.CFrame.LookVector, Vector3.zAxis)
-		)
-		marker.Parent = folder
-	end
-
-	studioInfo("created %d visible fixed spike spot markers in Workspace.DeckSpikeSpotMarkers", #spots)
-end
-
-local function createGeneratedSpikeVisual(placement, hitboxCFrame)
-	local visualModel = Instance.new("Model")
-	visualModel.Name = "GeneratedSpikeTrapVisual"
-
-	local hitbox = createPart(
-		visualModel,
-		"Hitbox",
-		placement.Size,
-		hitboxCFrame,
-		Color3.fromRGB(255, 0, 0),
-		Enum.Material.SmoothPlastic,
-		1
-	)
-	configurePart(hitbox, true, true)
-	hitbox:SetAttribute("HazardClass", CONFIG.HazardClass)
-	hitbox:SetAttribute("HazardType", CONFIG.HazardType)
-	hitbox:SetAttribute("CanFreeze", true)
-	hitbox:SetAttribute("FreezeBehavior", CONFIG.FreezeBehavior)
-
-	local footprintX = math.max(2, placement.Size.X)
-	local footprintZ = math.max(2, placement.Size.Z)
-	local spikeHeight = math.max(2, placement.Size.Y)
-	local spikeCount = 5
-	local step = footprintX / spikeCount
-
-	for index = 1, spikeCount do
-		local xOffset = ((index - 0.5) / spikeCount - 0.5) * footprintX
-		local spikeWidth = math.max(1.2, step * 0.62)
-		local spikeDepth = math.max(2, footprintZ * 0.82)
-		local spikeCFrame = hitboxCFrame
-			* CFrame.new(xOffset, 0, 0)
-			* CFrame.Angles(0, math.rad(90), 0)
-		createWedgePart(
-			visualModel,
-			string.format("Spike_%02d", index),
-			Vector3.new(spikeDepth, spikeHeight, spikeWidth),
-			spikeCFrame,
-			Color3.fromRGB(75, 76, 82),
-			Enum.Material.Metal,
-			0
-		)
-	end
-
-	return visualModel, hitbox
-end
-
-local function getFixedSpikeSpots(refs, startPart, endPart, leftBound, rightBound)
-	local cacheKey = buildFixedSpotCacheKey(refs, startPart, endPart, leftBound, rightBound)
-	if fixedSpotCacheKey == cacheKey and fixedSpotCache then
-		return fixedSpotCache
-	end
-
-	local spots = {}
-
-	addFolderFixedSpikeSpots(spots, refs)
-	addConfiguredFixedSpikeSpots(spots)
-	addGeneratedBiomeFixedSpikeSpots(spots, refs, startPart, endPart, leftBound, rightBound)
-	ensureFixedSpikeSpotMarkers(spots)
-
-	fixedSpotCacheKey = cacheKey
-	fixedSpotCache = spots
-	return spots
-end
-
-local function chooseFixedSpikePlacement(refs, startPart, endPart, leftBound, rightBound, options)
-	local spots = getFixedSpikeSpots(refs, startPart, endPart, leftBound, rightBound)
-	if #spots == 0 then
-		return nil
-	end
-
-	local spot
-	if options and options.BiomeIndex and options.SpotInBiome then
-		local requestedBiomeIndex = tonumber(options.BiomeIndex)
-		local requestedSpotInBiome = tonumber(options.SpotInBiome)
-		for _, candidate in ipairs(spots) do
-			if candidate.BiomeIndex == requestedBiomeIndex and candidate.SpotInBiome == requestedSpotInBiome then
-				spot = candidate
-				break
-			end
-		end
-		if not spot then
-			return nil
-		end
-	elseif options and options.SpotIndex then
-		spot = spots[((options.SpotIndex - 1) % #spots) + 1]
-	else
-		fixedSpotCursor = (fixedSpotCursor % #spots) + 1
-		spot = spots[fixedSpotCursor]
-	end
-	local forward = getPlanarUnit(spot.CFrame.LookVector, endPart.Position - startPart.Position)
-	local lateral = getPlanarUnit(spot.CFrame.RightVector, forward:Cross(Vector3.yAxis))
-	local size = spot.Size
-	local safeGroundPosition = resolveSafeSpikeGroundPosition(spot.Position, refs, lateral, forward, size)
-	if not safeGroundPosition then
-		return nil
-	end
-	local groundPosition = if spot.SnapToGround then safeGroundPosition else spot.Position
-
-	studioInfo(
-		"fixed spot selected spot=%s pos=%s",
-		spot.Source and formatInstancePath(spot.Source) or tostring(spot.SourceName or "<configured>"),
-		formatVector3(groundPosition)
-	)
-
-	return {
-		GroundPosition = groundPosition,
-		Forward = forward,
-		Lateral = lateral,
-		Size = Vector3.new(math.max(1, size.X), math.max(1, size.Y), math.max(1, size.Z)),
-		Spot = spot.Source,
-		SourceName = spot.SourceName,
-		BiomeIndex = spot.BiomeIndex,
-		SpotInBiome = spot.SpotInBiome,
-		IsFixedSpot = true,
-	}
-end
-
-local function chooseSpikePlacement(refs, startPart, endPart, leftBound, rightBound, options)
-	local fixedPlacement = chooseFixedSpikePlacement(refs, startPart, endPart, leftBound, rightBound, options)
-	if fixedPlacement then
-		return fixedPlacement
-	end
-
-	if CONFIG.UseFixedSpikeSpots == true and CONFIG.RequireFixedSpikeSpots == true then
-		warnSpikeTemplateOnce(
-			"missing_fixed_spots",
-			"No fixed deck spike spots were found. Add parts under a DeckSpikeSpots/SpikeSpots folder, or add Vector3 entries to CONFIG.FixedSpikePositions."
-		)
-		return nil
-	end
-
-	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
-	local pathDelta = endPart.Position - startPart.Position
-	local pathLength = math.max(1, pathDelta.Magnitude)
-	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
-	local laneWidth = math.max(4, corridorWidth / laneCount)
-	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (laneWidth * 0.5))
-	local targetPlayer = rng:NextNumber() < CONFIG.PlayerTargetChance and chooseAlivePlayer() or nil
-	local forwardDistance
-	local laneOffset
-
-	if targetPlayer then
-		local _, _, rootPart = getCharacterContext(targetPlayer)
-		if rootPart then
-			local startProjection = startPart.Position:Dot(forward)
-			forwardDistance = math.clamp(
-				rootPart.Position:Dot(forward) - startProjection + rng:NextNumber(-CONFIG.PlayerTargetForwardJitter, CONFIG.PlayerTargetForwardJitter),
-				pathLength * CONFIG.MinimumForwardAlpha,
-				pathLength * CONFIG.MaximumForwardAlpha
-			)
-
-			local centerProjection = corridorCenter:Dot(lateral)
-			local rawOffset = rootPart.Position:Dot(lateral) - centerProjection
-			local laneIndex = math.clamp(math.floor((rawOffset + corridorWidth * 0.5) / laneWidth) + 1, 1, laneCount)
-			laneOffset = ((laneIndex - 0.5) / laneCount - 0.5) * corridorWidth
-			laneOffset = math.clamp(laneOffset, -safeHalfWidth, safeHalfWidth)
-		end
-	end
-
-	if not forwardDistance then
-		forwardDistance = pathLength * rng:NextNumber(CONFIG.MinimumForwardAlpha, CONFIG.MaximumForwardAlpha)
-	end
-
-	if not laneOffset then
-		local laneIndex = rng:NextInteger(1, laneCount)
-		laneOffset = ((laneIndex - 0.5) / laneCount - 0.5) * corridorWidth
-		laneOffset = math.clamp(laneOffset, -safeHalfWidth, safeHalfWidth)
-	end
-
-	local width = laneWidth * math.clamp(tonumber(CONFIG.LaneWidthScale) or 0.82, 0.25, 1)
-	local length = math.max(4, tonumber(CONFIG.SpikeLength) or 18)
-	local size = Vector3.new(width, CONFIG.SpikeHeight, length)
-	local planarPosition = startPart.Position + (forward * forwardDistance) + (lateral * laneOffset)
-	local groundPosition = resolveSafeSpikeGroundPosition(planarPosition, refs, lateral, forward, size)
-	if not groundPosition then
-		return nil
-	end
-
-	return {
-		GroundPosition = groundPosition,
-		Forward = forward,
-		Lateral = lateral,
-		Size = size,
-	}
-end
-
-local SPIKE_TEMPLATE_NAMES_BY_AREA = {
-	["foosha village"] = "(FOOSHA) WOODEN SPIKE TRAP",
-	["arlong park"] = "(ARLONG PARK) BONE SPIKE TRAP",
-	["drum island"] = "(DRUM ISLAND) ICE SPIKE TRAP",
-	["alabasta"] = "(ALABASTA) SAND SPIKE TRAP",
-	["water 7"] = "(WATER 7) STEEL SPIKE TRAP",
-	["thriller bark"] = "(THRILLER BARK) SHADOW SPIKE TRAP",
-	["sabaody"] = "(SABAODY) MANGROVE SPIKE TRAP",
-	["dressrosa"] = "DRESSROSA SPIKE TRAP",
-	["dresserosa"] = "DRESSROSA SPIKE TRAP",
-}
-
-local SPIKE_TEMPLATE_TOKENS_BY_AREA = {
-	["foosha village"] = { "foosha", "wooden" },
-	["arlong park"] = { "arlong", "bone" },
-	["drum island"] = { "drum", "ice" },
-	["alabasta"] = { "alabasta", "sand" },
-	["water 7"] = { "water 7", "steel" },
-	["thriller bark"] = { "thriller", "shadow" },
-	["sabaody"] = { "sabaody", "mangrove" },
-	["dressrosa"] = { "dressrosa", "dresserosa" },
-	["dresserosa"] = { "dresserosa", "dressrosa" },
-}
-
-local function getAreaNameForPosition(startPart, endPart, position)
-	local forward = getPlanarUnit(endPart.Position - startPart.Position, startPart.CFrame.LookVector)
-	local total = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
-	local alpha = math.clamp(math.abs((position - startPart.Position):Dot(forward)) / total, 0, 0.999)
-	local biomeIndex = math.clamp(math.floor(alpha * 8) + 1, 1, 8)
-	local entry = BiomeAreas.GetBiome and BiomeAreas.GetBiome(biomeIndex)
-
+	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
+	local templateBiomeIndex = if CONFIG.ReverseBiomeTemplates == true
+		then (biomeCount - normalizedBiome + 1)
+		else normalizedBiome
+	local entry = BiomeAreas.GetBiome and BiomeAreas.GetBiome(templateBiomeIndex)
 	return entry and entry.AreaName or nil
 end
 
@@ -947,32 +353,13 @@ local function findSpikeTrapFolder()
 		for _, folderName in ipairs(folderNames) do
 			local folder = root:FindFirstChild(folderName, true)
 			if folder then
-				studioInfo("template folder found path=%s", formatInstancePath(folder))
 				return folder
 			end
 		end
 	end
 
-	warnSpikeTemplateOnce(
-		"missing_folder",
-		"Could not find a spike template folder named %s in ServerStorage, ReplicatedStorage, or Workspace.",
-		tostring(CONFIG.SpikeTrapFolderName)
-	)
+	warnOnce("missing_spike_folder", "Could not find spike trap template folder.")
 	return nil
-end
-
-local function publishSpawnStatus(hazardsFolder, result, detail, activeCount, spotCount)
-	if not hazardsFolder then
-		return
-	end
-
-	hazardsFolder:SetAttribute("DeckSpikesEnabled", true)
-	hazardsFolder:SetAttribute("DeckSpikesLastAttempt", spawnAttemptSerial)
-	hazardsFolder:SetAttribute("DeckSpikesLastResult", tostring(result or "unknown"))
-	hazardsFolder:SetAttribute("DeckSpikesLastDetail", tostring(detail or ""))
-	hazardsFolder:SetAttribute("DeckSpikesActiveCount", tonumber(activeCount) or 0)
-	hazardsFolder:SetAttribute("DeckSpikesSpotCount", tonumber(spotCount) or 0)
-	hazardsFolder:SetAttribute("DeckSpikesLastServerTime", Workspace:GetServerTimeNow())
 end
 
 local function findHitbox(model)
@@ -985,20 +372,6 @@ local function findHitbox(model)
 	return nil
 end
 
-local function hasBasePart(instance)
-	if instance:IsA("BasePart") then
-		return true
-	end
-
-	for _, descendant in ipairs(instance:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			return true
-		end
-	end
-
-	return false
-end
-
 local function findSpikeTrapTemplate(areaName)
 	local folder = findSpikeTrapFolder()
 	if not folder then
@@ -1006,195 +379,142 @@ local function findSpikeTrapTemplate(areaName)
 	end
 
 	local key = string.lower(tostring(areaName or ""))
-	local modelCandidates = {}
-	for _, descendant in ipairs(folder:GetDescendants()) do
-		if descendant:IsA("Model") then
-			modelCandidates[#modelCandidates + 1] = descendant
-		end
-	end
-
-	local templateName = SPIKE_TEMPLATE_NAMES_BY_AREA[key]
-	if templateName then
-		local template = folder:FindFirstChild(templateName, true)
+	local namedTemplate = SPIKE_TEMPLATE_NAMES_BY_AREA[key]
+	if namedTemplate then
+		local template = folder:FindFirstChild(namedTemplate, true)
 		if template and template:IsA("Model") then
-			studioInfo("template matched exact area=%s template=%s", tostring(areaName), formatInstancePath(template))
 			return template
 		end
 	end
 
-	if key ~= "" then
-		for _, candidate in ipairs(modelCandidates) do
-			local childName = string.lower(candidate.Name)
-			if string.find(childName, key, 1, true) then
-				studioInfo("template matched area name area=%s template=%s", tostring(areaName), formatInstancePath(candidate))
+	local candidates = {}
+	for _, descendant in ipairs(folder:GetDescendants()) do
+		if descendant:IsA("Model") then
+			candidates[#candidates + 1] = descendant
+		end
+	end
+
+	for _, candidate in ipairs(candidates) do
+		local candidateName = string.lower(candidate.Name)
+		for _, token in ipairs(SPIKE_TEMPLATE_TOKENS_BY_AREA[key] or {}) do
+			if candidateName:find(token, 1, true) then
 				return candidate
 			end
-
-			for _, token in ipairs(SPIKE_TEMPLATE_TOKENS_BY_AREA[key] or {}) do
-				if string.find(childName, token, 1, true) then
-					studioInfo("template matched token=%s area=%s template=%s", token, tostring(areaName), formatInstancePath(candidate))
-					return candidate
-				end
-			end
 		end
 	end
 
-	for _, candidate in ipairs(modelCandidates) do
-		if findHitbox(candidate) then
-			studioInfo("template matched fallback hitbox area=%s template=%s", tostring(areaName), formatInstancePath(candidate))
+	for _, candidate in ipairs(candidates) do
+		if findHitbox(candidate) or #getBaseParts(candidate) > 0 then
 			return candidate
 		end
 	end
 
-	for _, candidate in ipairs(modelCandidates) do
-		if hasBasePart(candidate) then
-			studioInfo("template matched fallback model area=%s template=%s", tostring(areaName), formatInstancePath(candidate))
-			return candidate
-		end
-	end
-
-	warnSpikeTemplateOnce(
-		"missing_template_" .. key,
-		"Could not find a spike template for area=%s inside %s.",
-		tostring(areaName),
-		formatInstancePath(folder)
-	)
 	return nil
 end
 
-local function getOrCreateTemplateHitbox(model)
+local function getOrCreateHitbox(model)
 	local hitbox = findHitbox(model)
 	if hitbox then
-		return hitbox, false
+		return hitbox
 	end
 
 	local boundsCFrame, boundsSize = model:GetBoundingBox()
 	hitbox = Instance.new("Part")
 	hitbox.Name = "Hitbox"
-	hitbox.Size = Vector3.new(
-		math.max(1, boundsSize.X),
-		math.max(1, boundsSize.Y),
-		math.max(1, boundsSize.Z)
-	)
+	hitbox.Size = Vector3.new(math.max(1, boundsSize.X), math.max(1, boundsSize.Y), math.max(1, boundsSize.Z))
 	hitbox.CFrame = boundsCFrame
+	hitbox.Transparency = 1
 	hitbox.Parent = model
-
-	return hitbox, true
+	return hitbox
 end
 
-local function configureSpikeTrapModel(model, hitbox)
+local function configureSpikeVisual(model, hitbox)
 	for _, part in ipairs(getBaseParts(model)) do
 		configurePart(part, part == hitbox, part == hitbox)
 		if part == hitbox then
 			part.Transparency = 1
-			part:SetAttribute("HazardClass", CONFIG.HazardClass)
-			part:SetAttribute("HazardType", CONFIG.HazardType)
-			part:SetAttribute("CanFreeze", true)
-			part:SetAttribute("FreezeBehavior", CONFIG.FreezeBehavior)
-		elseif part.Transparency >= 0.98 then
-			part.Transparency = 0
+			part:SetAttribute("HazardType", "deck_spikes")
 		end
 	end
 end
 
-local function setSpikeVisualFrozen(controller, isFrozen)
-	local color = if isFrozen then Color3.fromRGB(178, 235, 255) else Color3.fromRGB(72, 72, 78)
-	local material = if isFrozen then Enum.Material.Ice else Enum.Material.Metal
-	if controller.VisualModel and controller.VisualModel.Parent then
-		for _, part in ipairs(getBaseParts(controller.VisualModel)) do
-			if part ~= controller.Spike then
-				local original = controller.VisualDefaults and controller.VisualDefaults[part]
-				part.Color = if isFrozen then color else (original and original.Color or part.Color)
-				part.Material = if isFrozen then material else (original and original.Material or part.Material)
-			end
+local function isPointInsidePart(part, worldPosition)
+	local localPosition = part.CFrame:PointToObjectSpace(worldPosition)
+	local halfSize = part.Size * 0.5
+	return math.abs(localPosition.X) <= halfSize.X
+		and math.abs(localPosition.Y) <= halfSize.Y + 4
+		and math.abs(localPosition.Z) <= halfSize.Z
+end
+
+local function cleanupActiveControllers()
+	local count = 0
+	for model, controller in pairs(activeControllers) do
+		if not controller or controller.Destroyed or not model.Parent then
+			activeControllers[model] = nil
+		else
+			count += 1
 		end
-	elseif controller.Spike and controller.Spike.Parent then
-		controller.Spike.Color = color
-		controller.Spike.Material = material
 	end
-	if controller.Warning and controller.Warning.Parent then
-		controller.Warning.Color = if isFrozen then Color3.fromRGB(196, 240, 255) else Color3.fromRGB(255, 45, 35)
-	end
+
+	return count
 end
 
-local function unregisterController(controller)
-	activeControllers[controller.Model] = nil
-	if controller.AffectableEntity then
-		AffectableRegistry.UnregisterEntity(controller.AffectableEntity)
-		controller.AffectableEntity = nil
-	end
-	HazardRuntime.Unregister(controller.Model)
-end
+local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
+	local pathLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
+	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
+	local laneWidth = math.max(4, corridorWidth / laneCount)
+	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (laneWidth * 0.5))
+	local size = getSpikeSize(corridorWidth)
 
-local function buildHazardVolumes(controller)
-	if controller.Destroyed or not controller.Active or not controller.Spike.Parent then
-		return {}
-	end
+	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
+	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
+	local biomeStartAlpha = (normalizedBiome - 1) / biomeCount
+	local biomeEndAlpha = normalizedBiome / biomeCount
+	local padding = math.clamp(tonumber(CONFIG.BiomePaddingAlpha) or 0.08, 0, 0.35)
+	local startAlpha = math.max(CONFIG.MinimumForwardAlpha, biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * padding))
+	local endAlpha = math.min(CONFIG.MaximumForwardAlpha, biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * padding))
+	local attempts = math.max(1, math.floor(tonumber(CONFIG.SpawnAttempts) or 30))
 
-	return {
-		{
-			Type = AffectableRegistry.VolumeType.Box,
-			Label = "DeckSpikes",
-			CFrame = controller.Spike.CFrame,
-			Size = controller.Spike.Size,
-			Padding = CONFIG.AffectablePadding,
-		},
-	}
-end
+	for _ = 1, attempts do
+		local forwardAlpha = rng:NextNumber(startAlpha, math.max(startAlpha, endAlpha))
+		local laneIndex = rng:NextInteger(1, laneCount)
+		local laneOffset = ((laneIndex - 0.5) / laneCount - 0.5) * corridorWidth
+		laneOffset = math.clamp(laneOffset, -safeHalfWidth, safeHalfWidth)
 
-local function createController(model, spike, warning, visualModel)
-	local visualDefaults = {}
-	if visualModel then
-		for _, part in ipairs(getBaseParts(visualModel)) do
-			visualDefaults[part] = {
-				Color = part.Color,
-				Material = part.Material,
+		local centerOnPath = startPart.Position + (forward * pathLength * forwardAlpha)
+		local centerProjection = corridorCenter:Dot(lateral)
+		local pathProjection = centerOnPath:Dot(lateral)
+		local planarPosition = centerOnPath + (lateral * (centerProjection - pathProjection + laneOffset))
+		local groundPosition = hasSafeGroundForFootprint(planarPosition, hazardsFolder, forward, lateral, size)
+		if groundPosition then
+			return {
+				GroundPosition = groundPosition,
+				Forward = forward,
+				Lateral = lateral,
+				Size = size,
+				BiomeIndex = normalizedBiome,
 			}
 		end
 	end
 
+	return nil
+end
+
+local function makeController(model, hitbox, warning, visual, hiddenCFrame, extendedCFrame)
 	local controller = {
 		Model = model,
-		Spike = spike,
+		Hitbox = hitbox,
 		Warning = warning,
-		VisualModel = visualModel,
-		VisualDefaults = visualDefaults,
-		Destroyed = false,
+		Visual = visual,
+		HiddenCFrame = hiddenCFrame,
+		ExtendedCFrame = extendedCFrame,
 		Active = false,
-		FrozenUntil = 0,
-		FreezeToken = 0,
+		Destroyed = false,
 		DamagedPlayers = {},
 	}
 
-	function controller:Freeze(duration)
-		if self.Destroyed or not self.Model.Parent then
-			return false
-		end
-
-		local freezeDuration = math.max(0, tonumber(duration) or CONFIG.FreezeDurationFallback)
-		if freezeDuration <= 0 then
-			return false
-		end
-
-		self.FrozenUntil = math.max(self.FrozenUntil, os.clock() + freezeDuration)
-		self.FreezeToken += 1
-		local freezeToken = self.FreezeToken
-		setSpikeVisualFrozen(self, true)
-
-		task.spawn(function()
-			while not self.Destroyed and self.Model.Parent and os.clock() < self.FrozenUntil do
-				task.wait(0.05)
-			end
-
-			if self.Destroyed or self.FreezeToken ~= freezeToken then
-				return
-			end
-
-			setSpikeVisualFrozen(self, false)
-		end)
-
-		return true
-	end
+	activeControllers[model] = controller
 
 	function controller:Destroy()
 		if self.Destroyed then
@@ -1202,147 +522,119 @@ local function createController(model, spike, warning, visualModel)
 		end
 
 		self.Destroyed = true
-		unregisterController(self)
+		activeControllers[self.Model] = nil
 		if self.Model.Parent then
 			self.Model:Destroy()
 		end
 	end
 
-	controller.AffectableEntity = AffectableRegistry.RegisterEntity({
-		EntityType = AffectableRegistry.EntityType.Hazard,
-		RootInstance = model,
-		Controller = controller,
-		Metadata = {
-			HazardClass = CONFIG.HazardClass,
-			HazardType = CONFIG.HazardType,
-			CanFreeze = true,
-			FreezeBehavior = CONFIG.FreezeBehavior,
-		},
-		IsActive = function(entity)
-			return entity.Controller.Destroyed ~= true and model.Parent ~= nil
-		end,
-		CanBeAffectedBy = function()
-			return true, "ok"
-		end,
-		GetVolumes = function(entity)
-			return buildHazardVolumes(entity.Controller)
-		end,
-		ResolveData = function(entity, match)
-			return {
-				Label = formatInstancePath(model),
-				Root = model,
-				Controller = entity.Controller,
-				HazardClass = CONFIG.HazardClass,
-				HazardType = CONFIG.HazardType,
-				CanFreeze = true,
-				FreezeBehavior = CONFIG.FreezeBehavior,
-				Position = spike.Position,
-				HitPosition = match and match.HitPosition or nil,
-				MatchSource = "volume",
-			}
-		end,
-	})
-
-	HazardRuntime.Register(model, controller)
-	activeControllers[model] = controller
-	model.AncestryChanged:Connect(function(_, parent)
-		if parent == nil then
-			controller:Destroy()
-		end
-	end)
-
 	return controller
 end
 
-local function waitWhileFrozen(controller, duration)
-	local elapsed = 0
-	while elapsed < duration do
-		if controller.Destroyed or not controller.Model.Parent then
-			return false
-		end
-
-		if os.clock() < controller.FrozenUntil then
-			task.wait(0.05)
-		else
-			local dt = math.min(0.05, duration - elapsed)
-			task.wait(dt)
-			elapsed += dt
-		end
+local function createTemplateSpike(model, placement, areaName)
+	local template = CONFIG.UseSpikeTrapTemplates and findSpikeTrapTemplate(areaName) or nil
+	if not template then
+		return nil
 	end
 
-	return true
+	local visual = template:Clone()
+	visual.Name = "SpikeTrapVisual"
+	visual.Parent = model
+	visual:ScaleTo(math.max(0.01, tonumber(CONFIG.SpikeVisualScale) or 1))
+
+	local hitbox = getOrCreateHitbox(visual)
+	configureSpikeVisual(visual, hitbox)
+
+	local orientedPivot = CFrame.fromMatrix(placement.GroundPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
+	visual:PivotTo(orientedPivot)
+	local boundsCFrame, boundsSize = visual:GetBoundingBox()
+	local visualBottomY = boundsCFrame.Position.Y - (boundsSize.Y * 0.5)
+	local groundDeltaY = placement.GroundPosition.Y - visualBottomY
+	local extendedPivot = visual:GetPivot() + Vector3.new(0, groundDeltaY, 0)
+	local riseHeight = math.max(0.1, boundsSize.Y, hitbox.Size.Y)
+	local hiddenPivot = extendedPivot + Vector3.new(0, -(riseHeight - CONFIG.PreviewHeight), 0)
+	visual:PivotTo(hiddenPivot)
+
+	return visual, hitbox, hiddenPivot, extendedPivot
 end
 
-local function tweenPart(controller, part, tweenInfo, goals)
-	if part:IsA("Model") then
+local function createGeneratedSpike(model, placement)
+	local hiddenPosition = placement.GroundPosition - Vector3.new(0, (placement.Size.Y * 0.5) - CONFIG.PreviewHeight, 0)
+	local extendedPosition = placement.GroundPosition + Vector3.new(0, placement.Size.Y * 0.5, 0)
+	local hiddenCFrame = CFrame.fromMatrix(hiddenPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
+	local extendedCFrame = CFrame.fromMatrix(extendedPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
+
+	local spike = createPart(
+		model,
+		"SpikeHitbox",
+		placement.Size,
+		hiddenCFrame,
+		Color3.fromRGB(45, 45, 50),
+		Enum.Material.Metal,
+		0.05
+	)
+	configurePart(spike, true, true)
+	spike:SetAttribute("HazardType", "deck_spikes")
+
+	return spike, spike, hiddenCFrame, extendedCFrame
+end
+
+local function createDeckSpike(hazardsFolder, placement)
+	local model = Instance.new("Model")
+	model.Name = "DeckSpikes"
+	model:SetAttribute("HazardType", "deck_spikes")
+
+	local warningPosition = placement.GroundPosition + Vector3.new(0, CONFIG.WarningGroundOffset, 0)
+	local warningCFrame = CFrame.fromMatrix(warningPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
+	local warning = createPart(
+		model,
+		"WarningFlash",
+		Vector3.new(placement.Size.X, 0.12, placement.Size.Z),
+		warningCFrame,
+		Color3.fromRGB(255, 0, 0),
+		Enum.Material.Neon,
+		0.12
+	)
+
+	local areaName = getAreaNameForBiome(placement.BiomeIndex)
+	local visual, hitbox, hiddenCFrame, extendedCFrame = createTemplateSpike(model, placement, areaName)
+	if not visual then
+		visual, hitbox, hiddenCFrame, extendedCFrame = createGeneratedSpike(model, placement)
+	end
+
+	if hitbox then
+		warning.Size = Vector3.new(math.max(1, hitbox.Size.X), 0.12, math.max(1, hitbox.Size.Z))
+		warning.CFrame = warningCFrame
+	end
+
+	model.Parent = hazardsFolder
+	return makeController(model, hitbox, warning, visual, hiddenCFrame, extendedCFrame)
+end
+
+local function tweenVisual(controller, targetCFrame, duration, easingDirection)
+	if controller.Destroyed or not controller.Model.Parent then
+		return
+	end
+
+	local tweenInfo = TweenInfo.new(math.max(0, duration), Enum.EasingStyle.Quad, easingDirection)
+	if controller.Visual:IsA("Model") then
 		local cframeValue = Instance.new("CFrameValue")
-		cframeValue.Value = part:GetPivot()
-		local connection = cframeValue.Changed:Connect(function(value)
-			if part.Parent then
-				part:PivotTo(value)
+		cframeValue.Value = controller.Visual:GetPivot()
+		local connection = cframeValue:GetPropertyChangedSignal("Value"):Connect(function()
+			if controller.Visual.Parent then
+				controller.Visual:PivotTo(cframeValue.Value)
 			end
 		end)
-		local tween = TweenService:Create(cframeValue, tweenInfo, goals)
+		local tween = TweenService:Create(cframeValue, tweenInfo, { Value = targetCFrame })
 		tween:Play()
-
-		local elapsed = 0
-		while elapsed < tweenInfo.Time do
-			if controller.Destroyed or not controller.Model.Parent then
-				tween:Cancel()
-				connection:Disconnect()
-				cframeValue:Destroy()
-				return false
-			end
-
-			if os.clock() < controller.FrozenUntil then
-				tween:Pause()
-				task.wait(0.05)
-			else
-				tween:Play()
-				local dt = math.min(0.03, tweenInfo.Time - elapsed)
-				task.wait(dt)
-				elapsed += dt
-			end
-		end
-
-		if part.Parent and goals.Value then
-			part:PivotTo(goals.Value)
-		end
+		tween.Completed:Wait()
 		connection:Disconnect()
 		cframeValue:Destroy()
-		return true
+	else
+		local tween = TweenService:Create(controller.Visual, tweenInfo, { CFrame = targetCFrame })
+		tween:Play()
+		tween.Completed:Wait()
 	end
-
-	local tween = TweenService:Create(part, tweenInfo, goals)
-	tween:Play()
-
-	local elapsed = 0
-	while elapsed < tweenInfo.Time do
-		if controller.Destroyed or not controller.Model.Parent then
-			tween:Cancel()
-			return false
-		end
-
-		if os.clock() < controller.FrozenUntil then
-			tween:Pause()
-			task.wait(0.05)
-		else
-			tween:Play()
-			local dt = math.min(0.03, tweenInfo.Time - elapsed)
-			task.wait(dt)
-			elapsed += dt
-		end
-	end
-
-	return true
-end
-
-local function isPointInsideSpike(spike, worldPosition)
-	local localPosition = spike.CFrame:PointToObjectSpace(worldPosition)
-	local halfSize = spike.Size * 0.5
-	return math.abs(localPosition.X) <= halfSize.X
-		and math.abs(localPosition.Y) <= halfSize.Y + 2
-		and math.abs(localPosition.Z) <= halfSize.Z
 end
 
 local function damagePlayer(controller, player)
@@ -1350,146 +642,47 @@ local function damagePlayer(controller, player)
 		return false
 	end
 
-	local _, humanoid, rootPart = getCharacterContext(player)
-	if not humanoid then
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not rootPart then
 		return false
 	end
 
-	if not isPointInsideSpike(controller.Spike, rootPart.Position) then
+	if not isPointInsidePart(controller.Hitbox, rootPart.Position) then
 		return false
 	end
 
-	local protected = HazardProtection.IsProtected(player, {
-		Position = rootPart.Position,
-		Context = "DeckSpikes",
-	})
-	if protected then
-		controller.DamagedPlayers[player] = true
-		return true
+	if not raycastGround(rootPart.Position, controller.Model.Parent) then
+		return false
 	end
 
-	local knockback = Vector3.new(0, 34, 0)
-		+ (getPlanarUnit(rootPart.Position - controller.Spike.Position, Vector3.zAxis) * 18)
-	local applied = HitEffectService.ApplyEffect(player, "Knockdown", {
+	HitEffectService.ApplyEffect(player, "Knockdown", {
 		Duration = CONFIG.KnockdownDuration,
-		DropPosition = rootPart.Position,
-		RagdollJoints = true,
-		RagdollImpulse = knockback,
+		Priority = 30,
 		Movement = {
 			WalkSpeedMultiplier = 0,
 			JumpMultiplier = 0,
 			AutoRotate = false,
 			PlatformStand = true,
-			State = Enum.HumanoidStateType.Ragdoll,
+			State = Enum.HumanoidStateType.Physics,
 		},
 	})
 
-	if applied then
-		humanoid:TakeDamage(CONFIG.Damage)
-	end
-
+	humanoid:TakeDamage(CONFIG.Damage)
 	controller.DamagedPlayers[player] = true
 	return true
 end
 
 local function damagePlayersInside(controller)
-	local affectedCount = 0
 	for _, player in ipairs(Players:GetPlayers()) do
-		if damagePlayer(controller, player) then
-			affectedCount += 1
-		end
+		damagePlayer(controller, player)
 	end
-
-	return affectedCount
 end
 
-local function createDeckSpikeModel(hazardsFolder, refs, startPart, endPart, placement)
-	local model = Instance.new("Model")
-	model.Name = "DeckSpikes"
-	model:SetAttribute("HazardClass", CONFIG.HazardClass)
-	model:SetAttribute("HazardType", CONFIG.HazardType)
-	model:SetAttribute("CanFreeze", true)
-	model:SetAttribute("FreezeBehavior", CONFIG.FreezeBehavior)
-
-	local warningPosition = placement.GroundPosition + Vector3.new(0, CONFIG.WarningGroundOffset, 0)
-	local warning = createPart(
-		model,
-		"WarningFlash",
-		Vector3.new(placement.Size.X, 0.12, placement.Size.Z),
-		CFrame.fromMatrix(warningPosition, placement.Lateral, Vector3.yAxis, -placement.Forward),
-		Color3.fromRGB(255, 0, 0),
-		Enum.Material.Neon,
-		0.12
-	)
-
-	local previewHeight = math.max(0, tonumber(CONFIG.PreviewHeight) or 0)
-	local hiddenPosition = placement.GroundPosition - Vector3.new(0, (placement.Size.Y * 0.5) - previewHeight, 0)
-	local extendedPosition = placement.GroundPosition + Vector3.new(0, placement.Size.Y * 0.5, 0)
-	local hiddenCFrame = CFrame.fromMatrix(hiddenPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
-	local extendedCFrame = CFrame.fromMatrix(extendedPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
-
-	local areaName = getAreaNameForPosition(startPart, endPart, placement.GroundPosition)
-	local template = if CONFIG.UseSpikeTrapTemplates == true then findSpikeTrapTemplate(areaName or refs.ActiveMapName) else nil
-	if template then
-		local visualModel = template:Clone()
-		visualModel.Name = "SpikeTrapVisual"
-		local hitbox, createdHitbox = getOrCreateTemplateHitbox(visualModel)
-		if hitbox and hitbox:IsA("BasePart") then
-			configureSpikeTrapModel(visualModel, hitbox)
-			visualModel.Parent = model
-
-			local warningWidth = if placement.Spot then placement.Spot.Size.X else hitbox.Size.X
-			local warningLength = if placement.Spot then placement.Spot.Size.Z else hitbox.Size.Z
-			warning.Size = Vector3.new(warningWidth, 0.12, warningLength)
-			warning.CFrame = CFrame.fromMatrix(warningPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
-
-			local orientedPivot = CFrame.fromMatrix(placement.GroundPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
-			visualModel:PivotTo(orientedPivot)
-			local boundsCFrame, visualSize = visualModel:GetBoundingBox()
-			local riseHeight = math.max(0.1, visualSize.Y, hitbox.Size.Y)
-			local visualBottomY = boundsCFrame.Position.Y - (visualSize.Y * 0.5)
-			local groundDeltaY = placement.GroundPosition.Y - visualBottomY
-			local extendedPivot = visualModel:GetPivot() + Vector3.new(0, groundDeltaY, 0)
-			local hiddenPivot = extendedPivot + Vector3.new(0, -(riseHeight - previewHeight), 0)
-			visualModel:PivotTo(hiddenPivot)
-
-			model.WorldPivot = extendedPivot
-			model.Parent = hazardsFolder
-			studioInfo(
-				"using template=%s area=%s hitbox=%s createdHitbox=%s warningSize=%.2f,%.2f visualHeight=%.2f groundDelta=%.2f",
-				formatInstancePath(template),
-				tostring(areaName),
-				formatInstancePath(hitbox),
-				tostring(createdHitbox == true),
-				warningWidth,
-				warningLength,
-				riseHeight,
-				groundDeltaY
-			)
-
-			return model, hitbox, warning, hiddenPivot, extendedPivot, visualModel
-		end
-
-		warnSpikeTemplateOnce(
-			"missing_hitbox_" .. template.Name,
-			"Template %s has no BasePart named Hitbox; using generated fallback.",
-			formatInstancePath(template)
-		)
-	end
-
-	local visualModel, spike = createGeneratedSpikeVisual(placement, extendedCFrame)
-	visualModel:PivotTo(hiddenCFrame)
-	visualModel.Parent = model
-
-	model.WorldPivot = extendedCFrame
-	model.Parent = hazardsFolder
-	studioInfo("using generated fallback area=%s pos=%s", tostring(areaName), formatVector3(placement.GroundPosition))
-
-	return model, spike, warning, hiddenCFrame, extendedCFrame, visualModel
-end
-
-local function runDeckSpikes(controller, hiddenCFrame, extendedCFrame)
-	if not waitWhileFrozen(controller, CONFIG.WarningTime) then
+local function runDeckSpike(controller)
+	task.wait(CONFIG.WarningTime)
+	if controller.Destroyed then
 		return
 	end
 
@@ -1498,14 +691,7 @@ local function runDeckSpikes(controller, hiddenCFrame, extendedCFrame)
 	end
 
 	controller.Active = true
-	local tweenTarget = controller.VisualModel or controller.Spike
-	local cframeGoalName = if controller.VisualModel then "Value" else "CFrame"
-	tweenPart(
-		controller,
-		tweenTarget,
-		TweenInfo.new(CONFIG.ThrustTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{ [cframeGoalName] = extendedCFrame }
-	)
+	tweenVisual(controller, controller.ExtendedCFrame, CONFIG.ThrustTime, Enum.EasingDirection.Out)
 	damagePlayersInside(controller)
 
 	local elapsed = 0
@@ -1514,161 +700,71 @@ local function runDeckSpikes(controller, hiddenCFrame, extendedCFrame)
 			return
 		end
 
-		if os.clock() < controller.FrozenUntil then
-			task.wait(0.05)
-		else
-			local dt = RunService.Heartbeat:Wait()
-			elapsed += dt
-			damagePlayersInside(controller)
-		end
+		local dt = RunService.Heartbeat:Wait()
+		elapsed += dt
+		damagePlayersInside(controller)
 	end
 
 	controller.Active = false
-	tweenPart(
-		controller,
-		tweenTarget,
-		TweenInfo.new(CONFIG.RetractTime, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{ [cframeGoalName] = hiddenCFrame }
-	)
+	tweenVisual(controller, controller.HiddenCFrame, CONFIG.RetractTime, Enum.EasingDirection.In)
 	controller:Destroy()
 end
 
-local function cleanupActiveControllers()
-	local activeCount = 0
-	for model, controller in pairs(activeControllers) do
-		if not controller or controller.Destroyed or not model.Parent then
-			activeControllers[model] = nil
-		else
-			activeCount += 1
-		end
-	end
-
-	return activeCount
-end
-
-local function spawnDeckSpikes(options)
-	spawnAttemptSerial += 1
-	local refs, _, hazardsFolder, startPart, endPart, leftBound, rightBound = resolveRefs()
-	if not (hazardsFolder and startPart and endPart) then
-		publishSpawnStatus(hazardsFolder, "skipped", "missing_refs", cleanupActiveControllers(), 0)
-		trace(
-			"spawn skipped reason=missing_refs hazards=%s start=%s end=%s",
-			formatInstancePath(hazardsFolder),
-			formatInstancePath(startPart),
-			formatInstancePath(endPart)
-		)
+local function spawnDeckSpike(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	if cleanupActiveControllers() >= CONFIG.MaxActiveSpikes then
 		return false
 	end
 
-	local activeCount = cleanupActiveControllers()
-	local maxActive = math.max(1, math.floor(tonumber(CONFIG.MaxActiveSpikes) or 10))
-	local spotCount = #getFixedSpikeSpots(refs, startPart, endPart, leftBound, rightBound)
-	if activeCount >= maxActive then
-		publishSpawnStatus(hazardsFolder, "skipped", "max_active", activeCount, spotCount)
-		return false
-	end
-
-	local placement = chooseSpikePlacement(refs, startPart, endPart, leftBound, rightBound, options)
+	local placement = chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 	if not placement then
-		publishSpawnStatus(hazardsFolder, "skipped", "no_placement", activeCount, spotCount)
-		trace("spawn skipped reason=no_ground")
 		return false
 	end
 
-	local model, spike, warning, hiddenCFrame, extendedCFrame, visualModel = createDeckSpikeModel(
-		hazardsFolder,
-		refs,
-		startPart,
-		endPart,
-		placement
-	)
-	local controller = createController(model, spike, warning, visualModel)
-	publishSpawnStatus(hazardsFolder, "spawned", placement.SourceName or "ok", activeCount + 1, spotCount)
-	trace(
-		"spawned pos=%s size=%s",
-		formatVector3(placement.GroundPosition),
-		formatVector3(placement.Size)
-	)
+	local controller = createDeckSpike(hazardsFolder, placement)
+	if not controller then
+		return false
+	end
 
 	task.spawn(function()
-		runDeckSpikes(controller, hiddenCFrame, extendedCFrame)
+		runDeckSpike(controller)
 	end)
 
 	return true
 end
 
-local noDisastersTimer = getNoDisastersTimer()
-local didInitialDelay = false
-local activePhase = 1
-local activationSerial = 0
-
-local function spawnSpikePhase(phaseIndex)
-	activationSerial += 1
-	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
-	local activeSpotsPerBiome = math.max(1, math.floor(tonumber(CONFIG.ActiveSpotsPerBiome) or 20))
-	local spotsPerBiome = math.max(activeSpotsPerBiome, math.floor(tonumber(CONFIG.GeneratedFixedSpotsPerBiome) or 40))
-	local phaseCount = math.max(1, math.floor(spotsPerBiome / activeSpotsPerBiome))
-	local normalizedPhase = ((math.floor(tonumber(phaseIndex) or 1) - 1) % phaseCount) + 1
-	local firstSpotInBiome = ((normalizedPhase - 1) * activeSpotsPerBiome) + 1
-	local lastSpotInBiome = math.min(firstSpotInBiome + activeSpotsPerBiome - 1, spotsPerBiome)
-	local jobs = {}
-
-	for spotInBiome = firstSpotInBiome, lastSpotInBiome do
-		for biomeIndex = 1, biomeCount do
-			jobs[#jobs + 1] = {
-				BiomeIndex = biomeIndex,
-				SpotInBiome = spotInBiome,
-			}
-		end
+local function spawnSpikePop()
+	local _, hazardsFolder, startPart, endPart, leftBound, rightBound = resolveRefs()
+	if not hazardsFolder or not startPart or not endPart then
+		return
 	end
 
-	shuffleArray(
-		jobs,
-		Random.new(
-			(math.floor(tonumber(CONFIG.ActivationShuffleSeed) or 9137) + (activationSerial * 4099) + (normalizedPhase * 131))
-		)
-	)
-
-	local waveDuration = math.max(0, tonumber(CONFIG.ActivationWaveDuration) or 0)
-	local spawnSpacing = if #jobs > 1 then waveDuration / (#jobs - 1) else 0
-
-	for _, job in ipairs(jobs) do
+	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
+	local spikesPerPop = math.max(1, math.floor(tonumber(CONFIG.SpikesPerPop) or 1))
+	for _ = 1, spikesPerPop do
+		local biomeIndex = rng:NextInteger(1, biomeCount)
 		local ok, err = xpcall(function()
-			spawnDeckSpikes({
-				BiomeIndex = job.BiomeIndex,
-				SpotInBiome = job.SpotInBiome,
-			})
+			spawnDeckSpike(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 		end, debug.traceback)
 		if not ok then
-			warn(string.format("[DECK SPIKES] phase spawn error=%s", tostring(err)))
-		end
-		if spawnSpacing > 0 then
-			task.wait(spawnSpacing)
+			warn(string.format("[DECK SPIKES] spawn error=%s", tostring(err)))
 		end
 	end
-
-	studioInfo(
-		"phase spawned phase=%d spots=%d-%d biomes=%d total=%d",
-		normalizedPhase,
-		firstSpotInBiome,
-		lastSpotInBiome,
-		biomeCount,
-		(lastSpotInBiome - firstSpotInBiome + 1) * biomeCount
-	)
-
-	return normalizedPhase + 1
 end
+
+local function getSpawnDelay()
+	local minDelay = math.max(0.03, tonumber(CONFIG.SpawnDelayMin) or 0.1)
+	local maxDelay = math.max(minDelay, tonumber(CONFIG.SpawnDelayMax) or minDelay)
+	return rng:NextNumber(minDelay, maxDelay)
+end
+
+local noDisastersTimer = getNoDisastersTimer()
+task.wait(math.max(0, tonumber(CONFIG.InitialSpawnDelay) or 0))
 
 while true do
 	if isNoDisastersPaused(noDisastersTimer) then
 		task.wait(1)
 	else
-		if not didInitialDelay then
-			didInitialDelay = true
-			task.wait(math.max(0, tonumber(CONFIG.InitialSpawnDelay) or 0))
-		end
-
-		activePhase = spawnSpikePhase(activePhase)
-		task.wait(math.max(0.1, tonumber(CONFIG.ActivationCycleDelay) or 6))
+		spawnSpikePop()
+		task.wait(getSpawnDelay())
 	end
 end
