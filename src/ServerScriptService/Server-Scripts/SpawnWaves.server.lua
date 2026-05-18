@@ -34,6 +34,8 @@ local CONFIG = {
 	HazardClass = "major",
 	FreezeBehavior = "pause",
 	AffectablePadding = Vector3.new(2, 1, 4),
+	KillValidationPadding = Vector3.new(12, 8, 24),
+	DiagnosticsInterval = 2,
 	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
 	DriftSpeedMinMultiplier = 1.35,
 	DriftSpeedMaxMultiplier = 1.85,
@@ -61,6 +63,20 @@ local HAZARD_ACTION_REMOTE_NAME = "SharedHazardAction"
 local rng = Random.new()
 local traceStateKey = nil
 local activeHazardStates = {}
+local diagnosticsHazardsFolder = nil
+local waveDiagnostics = {
+	KillRemoteCount = 0,
+	CleanupCount = 0,
+	LastCleanupServerTime = 0,
+	LastUpdateTimeMs = 0,
+	UpdateTimeSum = 0,
+	UpdateTimeSamples = 0,
+	LastPublishedAt = 0,
+}
+local HAZARD_TRACE = RunService:IsStudio() and game:GetAttribute("HazardDebugTrace") == true
+local isCharacterTouchingActiveWave = nil
+local isValidActiveHazardState = nil
+local publishWaveDiagnostics = nil
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -79,6 +95,10 @@ local function formatInstancePath(instance)
 end
 
 local function hazardTrace(message, ...)
+	if not HAZARD_TRACE then
+		return
+	end
+
 	print(string.format("[HAZARD TRACE] " .. message, ...))
 end
 
@@ -159,6 +179,9 @@ if legacyHazardRemote then
 end
 
 killMeRemote.OnServerEvent:Connect(function(player)
+	waveDiagnostics.KillRemoteCount += 1
+	publishWaveDiagnostics()
+
 	local character = player.Character
 	if not character then
 		return
@@ -166,6 +189,12 @@ killMeRemote.OnServerEvent:Connect(function(player)
 
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
+		local rootPart = character:FindFirstChild("HumanoidRootPart")
+		if not rootPart or not isCharacterTouchingActiveWave or not isCharacterTouchingActiveWave(character, rootPart) then
+			hazardTrace("kill remote ignored reason=no_active_wave_overlap player=%s", player.Name)
+			return
+		end
+
 		if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
 			HoroServer.InterruptActiveProjection(player, "wave_touch")
 			return
@@ -173,7 +202,6 @@ killMeRemote.OnServerEvent:Connect(function(player)
 		if MoguServer.IsProtected(player) then
 			return
 		end
-		local rootPart = character:FindFirstChild("HumanoidRootPart")
 		if ToriServer.IsProtected(player, rootPart and rootPart.Position or nil) then
 			return
 		end
@@ -302,6 +330,91 @@ local function getHazardHitboxVolumes(hazardRoot, fallbackCFrame, fallbackSize)
 	}
 end
 
+local function countActiveProxyParts()
+	local activeCount = 0
+	local proxyPartCount = 0
+
+	for hazardRoot, state in pairs(activeHazardStates) do
+		if isValidActiveHazardState(hazardRoot, state) then
+			activeCount += 1
+			proxyPartCount += #WaveHazardVisuals.GetHitboxParts(hazardRoot)
+		end
+	end
+
+	return activeCount, proxyPartCount
+end
+
+publishWaveDiagnostics = function(hazardsFolder)
+	local folder = hazardsFolder or diagnosticsHazardsFolder
+	if not folder or not folder.Parent then
+		return
+	end
+
+	local activeCount, proxyPartCount = countActiveProxyParts()
+	folder:SetAttribute("WaveActiveCount", activeCount)
+	folder:SetAttribute("WaveServerProxyPartCount", proxyPartCount)
+	folder:SetAttribute("WaveServerUpdateTimeMs", waveDiagnostics.LastUpdateTimeMs)
+	folder:SetAttribute("WaveKillRemoteCount", waveDiagnostics.KillRemoteCount)
+	folder:SetAttribute("WaveCleanupCount", waveDiagnostics.CleanupCount)
+	folder:SetAttribute("WaveLastCleanupServerTime", waveDiagnostics.LastCleanupServerTime)
+end
+
+local function recordWaveUpdateTime(elapsedSeconds)
+	waveDiagnostics.UpdateTimeSum += math.max(0, tonumber(elapsedSeconds) or 0)
+	waveDiagnostics.UpdateTimeSamples += 1
+
+	local now = os.clock()
+	if now - waveDiagnostics.LastPublishedAt < CONFIG.DiagnosticsInterval then
+		return
+	end
+
+	if waveDiagnostics.UpdateTimeSamples > 0 then
+		waveDiagnostics.LastUpdateTimeMs =
+			(waveDiagnostics.UpdateTimeSum / waveDiagnostics.UpdateTimeSamples) * 1000
+	end
+	waveDiagnostics.UpdateTimeSum = 0
+	waveDiagnostics.UpdateTimeSamples = 0
+	waveDiagnostics.LastPublishedAt = now
+	publishWaveDiagnostics()
+end
+
+local function isPointInsideBox(point, boxCFrame, boxSize, padding)
+	if typeof(point) ~= "Vector3" or typeof(boxCFrame) ~= "CFrame" or typeof(boxSize) ~= "Vector3" then
+		return false
+	end
+
+	local safePadding = if typeof(padding) == "Vector3" then padding else Vector3.zero
+	local halfSize = (boxSize + safePadding) * 0.5
+	local localPoint = boxCFrame:PointToObjectSpace(point)
+
+	return math.abs(localPoint.X) <= halfSize.X
+		and math.abs(localPoint.Y) <= halfSize.Y
+		and math.abs(localPoint.Z) <= halfSize.Z
+end
+
+isCharacterTouchingActiveWave = function(_, rootPart)
+	if not rootPart or not rootPart.Parent then
+		return false
+	end
+
+	local validationPadding = CONFIG.KillValidationPadding + rootPart.Size
+	local rootPosition = rootPart.Position
+
+	for hazardRoot, state in pairs(activeHazardStates) do
+		if isValidActiveHazardState(hazardRoot, state) and os.clock() >= state.FrozenUntil then
+			local volumes = getHazardHitboxVolumes(hazardRoot, state.CurrentCFrame, state.VolumeSize)
+			for _, volume in ipairs(volumes) do
+				local volumePadding = if typeof(volume.Padding) == "Vector3" then volume.Padding else Vector3.zero
+				if isPointInsideBox(rootPosition, volume.CFrame, volume.Size, validationPadding + volumePadding) then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
 local function anchorHazard(instance)
 	if instance:IsA("BasePart") then
 		instance.Anchored = true
@@ -367,6 +480,8 @@ local function applyHazardAttributes(instance, variant)
 	instance:SetAttribute("Speed", variant.Speed)
 	instance:SetAttribute("CanFreeze", true)
 	instance:SetAttribute("FreezeBehavior", CONFIG.FreezeBehavior)
+	instance:SetAttribute("WaveVisualMode", "ClientTimeline")
+	instance:SetAttribute("ActiveWaveVisualAssetName", "Regular Wave")
 end
 
 local function chooseVariant()
@@ -379,7 +494,7 @@ local function chooseSpawnDelay()
 	return rng:NextNumber(minDelay, maxDelay)
 end
 
-local function isValidActiveHazardState(hazardRoot, state)
+isValidActiveHazardState = function(hazardRoot, state)
 	return typeof(hazardRoot) == "Instance" and type(state) == "table" and not state.Destroyed and hazardRoot.Parent ~= nil
 end
 
@@ -494,17 +609,67 @@ end
 local function createServerHazardController(hazardRoot, startCF, endCF, speed, lateralDirection, lateralDriftLimit)
 	local distance = (startCF.Position - endCF.Position).Magnitude
 	local _, hazardSize = getBox(hazardRoot)
+	local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
+	local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+	local initialLateralOffset = 0
+	local lateralVelocity = 0
+
+	if driftStyle == "drift" and maxDrift > 1e-3 and distance > 1e-4 then
+		local travelTime = distance / math.max(speed, 1e-3)
+		local bounceCount = rng:NextInteger(3, 6)
+		local minLateralSpeed = ((maxDrift * 2) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
+		local maxLateralSpeed = ((maxDrift * 2 * bounceCount) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
+
+		initialLateralOffset = rng:NextNumber(-maxDrift, maxDrift)
+		lateralVelocity = rng:NextNumber(minLateralSpeed, maxLateralSpeed)
+		if rng:NextInteger(0, 1) == 0 then
+			lateralVelocity = -lateralVelocity
+		end
+	end
+
 	local controller = {
 		HazardRoot = hazardRoot,
 		Destroyed = false,
 		FrozenUntil = 0,
 		FreezeToken = 0,
 		Alpha = 0,
+		ActiveSeconds = 0,
 		CurrentCFrame = startCF,
 		Position = startCF.Position,
 		VolumeSize = hazardSize,
 		Width = hazardSize.X,
+		StartCFrame = startCF,
+		EndCFrame = endCF,
+		Distance = distance,
+		Speed = speed,
+		LateralDirection = lateralDirection,
+		InitialLateralOffset = initialLateralOffset,
+		LateralVelocity = lateralVelocity,
+		MaxDrift = maxDrift,
 	}
+
+	hazardRoot:SetAttribute("WaveStartCFrame", startCF)
+	hazardRoot:SetAttribute("WaveEndCFrame", endCF)
+	hazardRoot:SetAttribute("WaveDistance", distance)
+	hazardRoot:SetAttribute("WaveServerSpeed", speed)
+	hazardRoot:SetAttribute("WaveLateralDirection", lateralDirection)
+	hazardRoot:SetAttribute("WaveInitialLateralOffset", initialLateralOffset)
+	hazardRoot:SetAttribute("WaveLateralVelocity", lateralVelocity)
+	hazardRoot:SetAttribute("WaveMaxDrift", maxDrift)
+	hazardRoot:SetAttribute("WaveMovementMode", "timeline_proxy")
+	hazardRoot:SetAttribute("WaveSpawnServerTime", Workspace:GetServerTimeNow())
+
+	function controller:SyncTimelineState()
+		if not self.HazardRoot.Parent then
+			return
+		end
+
+		self.HazardRoot:SetAttribute("WaveActiveSeconds", self.ActiveSeconds)
+		self.HazardRoot:SetAttribute("WaveStateServerTime", Workspace:GetServerTimeNow())
+		self.HazardRoot:SetAttribute("WaveUpdateSerial", (self.HazardRoot:GetAttribute("WaveUpdateSerial") or 0) + 1)
+	end
+
+	controller:SyncTimelineState()
 
 	controller.AffectableEntityId = AffectableRegistry.RegisterEntity({
 		EntityType = AffectableRegistry.EntityType.Hazard,
@@ -577,6 +742,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 		self.FrozenUntil = math.max(self.FrozenUntil, os.clock() + freezeDuration)
 		self.FreezeToken += 1
 		local freezeToken = self.FreezeToken
+		self:SyncTimelineState()
 		WaveHazardVisuals.SetFrozen(self.HazardRoot, true)
 		hazardTrace(
 			"freeze applied hazard=%s duration=%.2f",
@@ -594,6 +760,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 			end
 
 			if self.HazardRoot.Parent then
+				self:SyncTimelineState()
 				WaveHazardVisuals.SetFrozen(self.HazardRoot, false)
 			end
 		end)
@@ -608,11 +775,14 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 
 		self.Destroyed = true
 		activeHazardStates[self.HazardRoot] = nil
+		waveDiagnostics.CleanupCount += 1
+		waveDiagnostics.LastCleanupServerTime = Workspace:GetServerTimeNow()
 		AffectableRegistry.UnregisterEntity(self.AffectableEntityId)
 		HazardRuntime.Unregister(self.HazardRoot)
 		if self.HazardRoot.Parent then
 			self.HazardRoot:Destroy()
 		end
+		publishWaveDiagnostics()
 	end
 
 	HazardRuntime.Register(hazardRoot, controller)
@@ -624,8 +794,6 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 	end)
 
 	task.spawn(function()
-		local alpha = 0
-
 		if distance <= 1e-4 then
 			controller.Alpha = 1
 			controller.CurrentCFrame = endCF
@@ -635,60 +803,37 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 			return
 		end
 
-		-- WAVE DRIFT CONFIG
-
-		local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
-		local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
-		local lateralOffset = 0
-		local lateralVelocity = 0
-
-		if driftStyle == "drift" and maxDrift > 1e-3 then
-			local travelTime = distance / math.max(speed, 1e-3)
-			local bounceCount = rng:NextInteger(3, 6)
-			local minLateralSpeed = ((maxDrift * 2) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
-			local maxLateralSpeed = ((maxDrift * 2 * bounceCount) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
-
-			lateralOffset = rng:NextNumber(-maxDrift, maxDrift)
-			lateralVelocity = rng:NextNumber(minLateralSpeed, maxLateralSpeed)
-			if rng:NextInteger(0, 1) == 0 then
-				lateralVelocity = -lateralVelocity
-			end
-		end
-
 		--ZIG ZAG
 
-		while hazardRoot.Parent and not controller.Destroyed and alpha < 1 do
+		while hazardRoot.Parent and not controller.Destroyed and controller.Alpha < 1 do
 			local dt = RunService.Heartbeat:Wait()
 
 			if os.clock() >= controller.FrozenUntil then
-				alpha = math.min(alpha + (speed * dt) / distance, 1)
+				local updateStartedAt = os.clock()
+				controller.ActiveSeconds += dt
+				local currentCF, alpha = WaveHazardVisuals.ComputeTimelineCFrame(
+					startCF,
+					endCF,
+					controller.ActiveSeconds,
+					speed,
+					distance,
+					lateralDirection,
+					initialLateralOffset,
+					lateralVelocity,
+					maxDrift
+				)
+
 				controller.Alpha = alpha
-
-				-- ✅ ZIGZAG: offset the wave
-				local currentCF = startCF:Lerp(endCF, alpha)
-				if math.abs(lateralVelocity) > 1e-3 and maxDrift > 1e-3 then
-					lateralOffset += lateralVelocity * dt
-
-					while lateralOffset > maxDrift or lateralOffset < -maxDrift do
-						if lateralOffset > maxDrift then
-							lateralOffset = maxDrift - (lateralOffset - maxDrift)
-							lateralVelocity = -math.abs(lateralVelocity)
-						else
-							lateralOffset = -maxDrift + (-maxDrift - lateralOffset)
-							lateralVelocity = math.abs(lateralVelocity)
-						end
-					end
-
-					currentCF = translateCFrame(currentCF, lateralDirection * lateralOffset)
-				end
 
 				controller.CurrentCFrame = currentCF
 				controller.Position = currentCF.Position
 				setPivot(hazardRoot, currentCF)
+				recordWaveUpdateTime(os.clock() - updateStartedAt)
 			end
 		end
 
 		controller.Alpha = 1
+		controller.ActiveSeconds = distance / math.max(speed, 1e-3)
 		controller.CurrentCFrame = endCF
 		controller.Position = endCF.Position
 		controller:Destroy()
@@ -712,6 +857,7 @@ local function spawnSharedHazard(spawnDelay)
 		)
 		return false, "missing_refs"
 	end
+	diagnosticsHazardsFolder = hazardsFolder
 
 	local template = getWaveTemplate()
 	if not template then
@@ -802,6 +948,7 @@ local function spawnSharedHazard(spawnDelay)
 
 	setPivot(clone, startCF)
 	clone.Parent = hazardsFolder
+	publishWaveDiagnostics(hazardsFolder)
 
 	hazardTrace(
 		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
@@ -824,6 +971,7 @@ local function spawnSharedHazard(spawnDelay)
 
 	local lateralDriftLimit = math.max(0, safeHalfOffset - math.abs(chosenOffset))
 	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit)
+	publishWaveDiagnostics(hazardsFolder)
 	return true, "spawned"
 end
 

@@ -3,8 +3,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
-local BrainrotVariants = CrewCatalog.GetVariantConfig()
+local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
+local CrewMembers = require(Modules:WaitForChild("Crew"):WaitForChild("CrewMembers"))
+local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
+local CrewVariantConfig = CrewCatalog.GetVariantConfig()
 local DevilFruits = require(Configs:WaitForChild("DevilFruits"))
 local IndexConfig = require(Configs:WaitForChild("Index"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -60,17 +62,9 @@ local RARITY_SORT_ORDER = {
 	Omega = 9,
 }
 
-local VALID_BRAINROT_ITEM_IDS = {}
-
-for itemId, info in pairs(Brainrots) do
-	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
-	end
-end
-
 local function getVariantInfo(variantKey)
-	return (BrainrotVariants.Versions or {})[variantKey]
-		or (BrainrotVariants.Versions or {}).Normal
+	return (CrewVariantConfig.Versions or {})[variantKey]
+		or (CrewVariantConfig.Versions or {}).Normal
 		or { Prefix = "", IncomeMult = 1 }
 end
 
@@ -123,71 +117,8 @@ local function readStringField(container, childName)
 	return text
 end
 
-local function normalizeVariantKey(variantKey)
-	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
-		if candidate == supportedVariant then
-			return supportedVariant
-		end
-	end
-
-	return "Normal"
-end
-
-local function parseVariantAndBaseName(fullName)
-	local value = tostring(fullName or "")
-	if value == "" then
-		return "Normal", ""
-	end
-
-	for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
-		if variantKey ~= "Normal" then
-			local variantInfo = getVariantInfo(variantKey)
-			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-			if value:sub(1, #prefix) == prefix then
-				return variantKey, value:sub(#prefix + 1)
-			end
-		end
-	end
-
-	return "Normal", value
-end
-
-local function resolveBrainrotItemId(storageName, baseName, variantKey)
-	local storageNameValue = tostring(storageName or "")
-	local baseNameValue = tostring(baseName or "")
-	local normalizedVariant = normalizeVariantKey(variantKey)
-	if baseNameValue == "" and storageNameValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(storageNameValue)
-		normalizedVariant = normalizeVariantKey(parsedVariant)
-		baseNameValue = parsedBaseName
-	end
-
-	if baseNameValue == "" then
-		return nil
-	end
-
-	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
-		return itemId
-	end
-
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
-		return storageNameValue
-	end
-
-	return nil
-end
-
-local function markDiscoveredBrainrot(discovered, storageName, baseName, variantKey)
-	local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
-	if itemId then
-		discovered[itemId] = true
-	end
-end
-
 local function getCrewInfo(itemId)
-	return CrewCatalog.GetInfoById(itemId) or Brainrots[itemId]
+	return CrewCatalog.GetInfoById(itemId)
 end
 
 local function getIndexDisplayMetadata(metadataById, itemId)
@@ -239,22 +170,36 @@ local function getCanonicalIndexModelPreview(metadata)
 	return descriptor
 end
 
+local function getCatalogCrewModelPreview(info)
+	if type(info) ~= "table" then
+		return nil
+	end
+
+	local modelName = tostring(info.ModelName or "")
+	if modelName == "" then
+		return nil
+	end
+
+	return {
+		ModelName = modelName,
+		IsPreviewOnly = true,
+		UsedCanonical = true,
+		Source = "CrewCatalog",
+	}
+end
+
+local function getCrewRenderImage(render, renderStatus)
+	if tostring(renderStatus or "") == "NeedsCanonicalPortrait" then
+		return ""
+	end
+
+	return tostring(render or "")
+end
+
 local function markDiscoveredFruit(discovered, fruitIdentifier)
 	local fruit = DevilFruits.GetFruit(fruitIdentifier)
 	if fruit then
 		discovered[fruit.FruitKey] = true
-	end
-end
-
-local function mergeDiscoveredFromBoolFolder(discovered, folder)
-	if not folder then
-		return
-	end
-
-	for _, child in ipairs(folder:GetChildren()) do
-		if child:IsA("BoolValue") and child.Value == true then
-			discovered[tostring(child.Name)] = true
-		end
 	end
 end
 
@@ -283,38 +228,8 @@ local function mergeDiscoveredFruitsFromFolder(discovered, folder)
 	end
 end
 
-local function buildDiscoveredBrainrotSet(indexCollection, inventory, crewMemberInventory)
-	local discovered = {}
-	mergeDiscoveredFromBoolFolder(discovered, indexCollection and indexCollection:FindFirstChild("CrewMembers"))
-
-	local byIdFolder = crewMemberInventory and crewMemberInventory:FindFirstChild("ById")
-	if byIdFolder then
-		for _, child in ipairs(byIdFolder:GetChildren()) do
-			if child:IsA("Folder") then
-				markDiscoveredBrainrot(
-					discovered,
-					readStringField(child, "StorageName"),
-					readStringField(child, "BaseName"),
-					readStringField(child, "Variant")
-				)
-			end
-		end
-	end
-
-	if inventory then
-		for _, child in ipairs(inventory:GetChildren()) do
-			if child:IsA("Folder") and child.Name ~= "DevilFruits" then
-				markDiscoveredBrainrot(
-					discovered,
-					child.Name,
-					readStringField(child, "BaseName"),
-					readStringField(child, "Variant")
-				)
-			end
-		end
-	end
-
-	return discovered
+local function buildDiscoveredCrewMemberSet(indexCollection, crewMemberInventory)
+	return IndexDiscovery.BuildDiscoveredSetFromFolders(indexCollection, crewMemberInventory)
 end
 
 local function buildDiscoveredFruitSet(indexCollection, inventory, equippedFruitIdentifier)
@@ -342,10 +257,12 @@ end
 local function getSortedBaseEntries()
 	local entries = {}
 
-	for name, info in pairs(Brainrots) do
-		if type(info) == "table" and not info.IsVariant and not info.Variant then
+	for _, entry in ipairs(CrewMembers.GetEntries()) do
+		if type(entry) == "table" then
+			local crewMemberId = tostring(entry.CrewMemberId or "")
+			local info = CrewCatalog.GetInfoById(crewMemberId) or entry
 			entries[#entries + 1] = {
-				name = name,
+				name = crewMemberId,
 				info = info,
 			}
 		end
@@ -476,7 +393,7 @@ function IndexData.buildViewModel(options)
 
 	local inventory = options.inventory
 	local indexCollection = options.indexCollection
-	local crewMemberInventory = options.crewMemberInventory or options.brainrotInventory
+	local crewMemberInventory = options.crewMemberInventory
 	local claimedRewardOverrides = options.claimedRewardOverrides
 	local equippedDevilFruit = options.equippedDevilFruit
 	local indexRewardsFolder = options.indexRewardsFolder
@@ -484,13 +401,15 @@ function IndexData.buildViewModel(options)
 	local previewMode = options.previewMode == true
 
 	local units = {}
+	local unitsByCategory = {}
 	local categoryProgress = {}
-	local discoveredBrainrotIds = buildDiscoveredBrainrotSet(indexCollection, inventory, crewMemberInventory)
+	local discoveredCrewMemberIds = buildDiscoveredCrewMemberSet(indexCollection, crewMemberInventory)
 	local discoveredFruitKeys = buildDiscoveredFruitSet(indexCollection, inventory, equippedDevilFruit)
-	local hasLiveBrainrotState = indexCollection ~= nil or inventory ~= nil or crewMemberInventory ~= nil
+	local hasLiveCrewMemberState = indexCollection ~= nil or crewMemberInventory ~= nil
 	local hasLiveFruitState = indexCollection ~= nil or inventory ~= nil or DevilFruits.GetFruit(equippedDevilFruit) ~= nil
 
 	for _, template in pairs(CATEGORY_TEMPLATES) do
+		unitsByCategory[template.id] = {}
 		categoryProgress[template.id] = {
 			total = 0,
 			collected = 0,
@@ -498,15 +417,15 @@ function IndexData.buildViewModel(options)
 	end
 
 	for orderIndex, entry in ipairs(SORTED_BASE_ENTRIES) do
-		for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+		for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
 			local template = CATEGORY_TEMPLATES[variantKey]
 			if template then
 				local itemId = getVariantItemId(variantKey, entry.name)
 				local itemInfo = getCrewInfo(itemId) or entry.info
 				local discovered = false
 
-				if hasLiveBrainrotState then
-					discovered = discoveredBrainrotIds[itemId] == true
+				if hasLiveCrewMemberState then
+					discovered = discoveredCrewMemberIds[itemId] == true
 				else
 					discovered = isPreviewDiscovered(previewMode, template.id, orderIndex)
 				end
@@ -523,9 +442,23 @@ function IndexData.buildViewModel(options)
 					or tostring(itemInfo.Rarity or entry.info.Rarity or "Common")
 				local render = readMetadataText(displayMetadata, "Render")
 					or tostring(itemInfo.Render or entry.info.Render or "")
+				local renderStatus = readMetadataText(displayMetadata, "RenderStatus")
+					or tostring(itemInfo.RenderStatus or entry.info.RenderStatus or "")
+				local crewModelName = tostring(itemInfo.ModelName or entry.info.ModelName or "")
 				local modelPreview = getCanonicalIndexModelPreview(displayMetadata)
+					or getCatalogCrewModelPreview(itemInfo)
+					or getCatalogCrewModelPreview(entry.info)
+				local staticPreviewImage = CrewPreviewImages.Resolve({
+					CrewMemberId = itemId,
+					BaseCrewMemberId = entry.name,
+					DisplayName = displayName,
+					ModelPreview = modelPreview,
+					Metadata = displayMetadata,
+					RealCharacterName = itemInfo.RealCharacterName or entry.info.RealCharacterName,
+					ModelName = itemInfo.ModelName or entry.info.ModelName,
+				})
 
-				units[#units + 1] = {
+				local unit = {
 					id = itemId,
 					baseName = entry.name,
 					name = entry.name,
@@ -534,10 +467,12 @@ function IndexData.buildViewModel(options)
 					production = formatIncome(itemInfo.Income or entry.info.Income or 0),
 					rawIncome = tonumber(itemInfo.Income or entry.info.Income) or 0,
 					discovered = discovered,
-					image = render,
+					image = if modelPreview then "" else getCrewRenderImage(render, renderStatus),
+					staticPreviewImage = staticPreviewImage,
 					previewKind = if modelPreview then "CrewMember" else nil,
 					previewName = if modelPreview then tostring(modelPreview.ModelName or "") else nil,
-					previewLegacyIdentity = if modelPreview then tostring(modelPreview.LegacyIdentity or itemId) else nil,
+					crewModelName = if crewModelName ~= "" then crewModelName else nil,
+					previewCrewMemberId = if modelPreview then itemId else nil,
 					category = template.id,
 					categoryLabel = template.label,
 					canonicalDisplayUsed = displayMetadata and displayMetadata.CanonicalDisplayUsed == true,
@@ -547,10 +482,12 @@ function IndexData.buildViewModel(options)
 						and typeof(displayMetadata.ModelPreview) == "table"
 						and displayMetadata.ModelPreview.FallbackReason
 						or nil,
-					displayMetadataSource = displayMetadata and displayMetadata.Source or "LegacyCatalog",
+					displayMetadataSource = displayMetadata and displayMetadata.Source or "CrewCatalog",
 					themeKey = template.themeKey,
 					order = orderIndex,
 				}
+				units[#units + 1] = unit
+				unitsByCategory[template.id][#unitsByCategory[template.id] + 1] = unit
 			end
 		end
 	end
@@ -559,7 +496,7 @@ function IndexData.buildViewModel(options)
 	local collectedTotal = 0
 	local totalCount = 0
 
-	for _, variantKey in ipairs(BrainrotVariants.Order or { "Normal", "Golden", "Diamond" }) do
+	for _, variantKey in ipairs(CrewVariantConfig.Order or { "Normal", "Golden", "Diamond" }) do
 		local template = CATEGORY_TEMPLATES[variantKey]
 		if template then
 			local progress = categoryProgress[template.id]
@@ -668,6 +605,7 @@ function IndexData.buildViewModel(options)
 		tabs = IndexData.Tabs,
 		categories = categories,
 		units = units,
+		unitsByCategory = unitsByCategory,
 		collectionStats = {
 			collected = collectedTotal,
 			total = totalCount,

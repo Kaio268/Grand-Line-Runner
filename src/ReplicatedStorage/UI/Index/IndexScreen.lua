@@ -324,6 +324,7 @@ local function IndexScreen(props)
 		or nil
 	local categories = props.categories or (fallbackViewModel and fallbackViewModel.categories) or {}
 	local units = props.units or (fallbackViewModel and fallbackViewModel.units) or {}
+	local unitsByCategory = props.unitsByCategory or (fallbackViewModel and fallbackViewModel.unitsByCategory) or nil
 	local stats = props.collectionStats or (fallbackViewModel and fallbackViewModel.collectionStats) or {
 		collected = 0,
 		total = 0,
@@ -337,7 +338,13 @@ local function IndexScreen(props)
 	local activeTab, setActiveTab = React.useState("index")
 	local activeCategory, setActiveCategory = React.useState(defaultCategoryId)
 
-	local filteredUnits = filterUnits(units, activeCategory)
+	local filteredUnits = React.useMemo(function()
+		if unitsByCategory and unitsByCategory[activeCategory] then
+			return unitsByCategory[activeCategory]
+		end
+
+		return filterUnits(units, activeCategory)
+	end, { units, unitsByCategory, activeCategory })
 	local fruitUnits = devilFruitCollection.units or {}
 	local fruitStats = devilFruitCollection.collectionStats or {
 		collected = 0,

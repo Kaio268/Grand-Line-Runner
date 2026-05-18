@@ -113,6 +113,29 @@ local function safeCallNonCriticalCallback(callbackName, callback, ...)
 	return true, result
 end
 
+local function buildLocalCastToken(player, sequence, startedAt)
+	local userId = player and player:IsA("Player") and player.UserId or 0
+	return string.format("client:%d:%d:%.6f", userId, tonumber(sequence) or 0, tonumber(startedAt) or 0)
+end
+
+local function getPayloadCastToken(payload, player)
+	if type(payload) ~= "table" then
+		return nil
+	end
+
+	if typeof(payload.ClientCastId) == "string" and payload.ClientCastId ~= "" then
+		return payload.ClientCastId
+	end
+
+	local startedAt = tonumber(payload.StartedAt)
+	if startedAt and startedAt > 0 then
+		local userId = player and player:IsA("Player") and player.UserId or 0
+		return string.format("server:%d:%.6f", userId, startedAt)
+	end
+
+	return nil
+end
+
 local function refreshPredictedTravelDistance(state, rootPart, direction)
 	if type(state) ~= "table" then
 		return 0
@@ -143,10 +166,16 @@ function MeraDashClient.new(config)
 	self.CreateEffectVisual = type(config.CreateEffectVisual) == "function" and config.CreateEffectVisual or function() end
 	self.PlayFlameDashStartup = type(config.PlayFlameDashStartup) == "function" and config.PlayFlameDashStartup or function() end
 	self.PlayFlameDashComplete = type(config.PlayFlameDashComplete) == "function" and config.PlayFlameDashComplete or function() end
+	self.PlayFlameDashAudioStart = type(config.PlayFlameDashAudioStart) == "function"
+		and config.PlayFlameDashAudioStart
+		or function() end
 	self.MarkFlameDashTrailPredictedComplete = type(config.MarkFlameDashTrailPredictedComplete) == "function"
 		and config.MarkFlameDashTrailPredictedComplete
 		or function() end
 	self.StopFlameDashTrail = type(config.StopFlameDashTrail) == "function" and config.StopFlameDashTrail or function() end
+	self.StopFlameDashTrailSampling = type(config.StopFlameDashTrailSampling) == "function"
+		and config.StopFlameDashTrailSampling
+		or function() end
 	self.activeDash = nil
 	self.cameraTween = nil
 	self.carryConnection = nil
@@ -313,6 +342,44 @@ function MeraDashClient:ClearActiveState(state)
 	end
 end
 
+function MeraDashClient:SignalTrailSamplingStopped(state, reason, finalPosition, direction)
+	if type(state) ~= "table" then
+		return
+	end
+
+	if state.TrailSamplingStopSignaled == true then
+		return
+	end
+
+	state.TrailSamplingStopSignaled = true
+	safeCallNonCriticalCallback(
+		"StopFlameDashTrailSampling",
+		self.StopFlameDashTrailSampling,
+		self.player,
+		reason,
+		finalPosition,
+		direction,
+		state.CastToken
+	)
+end
+
+function MeraDashClient:RequestFullTrailStop(state, reason, finalPosition, direction)
+	if type(state) ~= "table" then
+		return
+	end
+
+	self:SignalTrailSamplingStopped(state, reason, finalPosition, direction)
+	safeCallNonCriticalCallback(
+		"StopFlameDashTrail",
+		self.StopFlameDashTrail,
+		self.player,
+		reason,
+		finalPosition,
+		direction,
+		state.CastToken
+	)
+end
+
 function MeraDashClient:FinishLocalDash(state, reason, interrupted, options)
 	if not state then
 		return
@@ -334,6 +401,8 @@ function MeraDashClient:FinishLocalDash(state, reason, interrupted, options)
 	end
 
 	local rootPart = self:GetRootPart()
+	local finalDirection = state.Plan and state.Plan.Direction or state.Direction
+	self:SignalTrailSamplingStopped(state, reason, rootPart and rootPart.Position or nil, finalDirection)
 	if rootPart then
 		local carryOut = type(options) == "table" and options.CarryOut == true and interrupted ~= true
 		if carryOut then
@@ -358,7 +427,8 @@ function MeraDashClient:FinishLocalDash(state, reason, interrupted, options)
 			self.player,
 			reason,
 			rootPart and rootPart.Position or nil,
-			state.Plan and state.Plan.Direction or state.Direction
+			finalDirection,
+			state.CastToken
 		)
 	end
 
@@ -426,9 +496,16 @@ function MeraDashClient:BeginPredictedRequest()
 	end
 
 	if self.activeDash and not self.activeDash.MotionFinished then
-		self.activeDash.Canceled = true
-		self.activeDash.ServerResolved = true
-		self:FinishLocalDash(self.activeDash, "superseded_prediction", true)
+		local supersededState = self.activeDash
+		supersededState.Canceled = true
+		supersededState.ServerResolved = true
+		self:FinishLocalDash(supersededState, "superseded_prediction", true)
+		self:RequestFullTrailStop(
+			supersededState,
+			"superseded_prediction",
+			rootPart.Position,
+			supersededState.Plan and supersededState.Plan.Direction or supersededState.Direction
+		)
 	end
 
 	local localPlan = MeraDashShared.BuildDashPlan(character, humanoid, rootPart, abilityConfig, nil)
@@ -503,6 +580,7 @@ function MeraDashClient:BeginPredictedRequest()
 		Reconciled = false,
 		ServerResolved = false,
 	}
+	state.CastToken = buildLocalCastToken(self.player, state.Sequence, state.LocalStartAt)
 
 	self.sequence = state.Sequence
 	self.activeDash = state
@@ -531,6 +609,18 @@ function MeraDashClient:BeginPredictedRequest()
 		)
 		self:FinishLocalDash(state, "blocked_at_start", true)
 	else
+		safeCallNonCriticalCallback("PlayFlameDashAudioStart", self.PlayFlameDashAudioStart, self.player, {
+			Phase = "PredictedStart",
+			LocalAudioToken = string.format("%d:%.6f", state.Sequence, state.LocalStartAt),
+			ClientCastId = state.CastToken,
+			StartedAt = state.LocalStartAt,
+			StartPosition = state.StartPosition,
+			EndPosition = state.StartPosition + (localPlan.Direction * localPlan.Distance),
+			Direction = localPlan.Direction,
+			Distance = localPlan.Distance,
+			Duration = localPlan.Duration,
+		})
+
 		task.defer(function()
 			safeCallNonCriticalCallback("KickCamera", function()
 				self:KickCamera()
@@ -603,6 +693,7 @@ function MeraDashClient:BeginPredictedRequest()
 	return {
 		DashTargetPosition = requestTargetPosition,
 		VisualDirection = visualDirection,
+		ClientCastId = state.CastToken,
 	}
 end
 
@@ -631,6 +722,7 @@ function MeraDashClient:HandleConfirmed(payload)
 	local startDeltaMs = math.max(0, ((tonumber(payload.StartedAt) or getSharedTimestamp()) - state.LocalStartAt) * 1000)
 
 	state.Reconciled = true
+	state.CastToken = getPayloadCastToken(payload, self.player) or state.CastToken
 	state.ConfirmedDirection = authoritativeDirection
 	state.ConfirmedDistance = authoritativeDistance
 	state.Plan.Direction = authoritativeDirection
@@ -722,14 +814,7 @@ function MeraDashClient:HandleDenied(reason)
 	local finalPosition = rootPart and rootPart.Position or nil
 	local finalDirection = state.Plan and state.Plan.Direction or state.Direction
 	self:FinishLocalDash(state, "server_denied_" .. tostring(reason), true)
-	safeCallNonCriticalCallback(
-		"StopFlameDashTrail",
-		self.StopFlameDashTrail,
-		self.player,
-		"server_denied_" .. tostring(reason),
-		finalPosition,
-		finalDirection
-	)
+	self:RequestFullTrailStop(state, "server_denied_" .. tostring(reason), finalPosition, finalDirection)
 	self:ClearActiveState(state)
 end
 
@@ -752,6 +837,7 @@ function MeraDashClient:HandleResolved(payload)
 	end
 
 	state.ServerResolved = true
+	state.CastToken = getPayloadCastToken(payload, self.player) or state.CastToken
 
 	local actualDistance = tonumber(payload.TraveledDistance) or 0
 	local distanceDelta = actualDistance - state.OriginalPredictedDistance
@@ -772,6 +858,12 @@ function MeraDashClient:HandleResolved(payload)
 	end
 
 	state.CorrectionSnap = state.CorrectionSnap or correctionSnap
+	self:SignalTrailSamplingStopped(
+		state,
+		"server_resolve_" .. tostring(payload.ResolveReason),
+		typeof(payload.ActualEndPosition) == "Vector3" and payload.ActualEndPosition or (rootPart and rootPart.Position or nil),
+		authoritativeDirection
+	)
 
 	logRecon(
 		self.player,
@@ -866,7 +958,7 @@ function MeraDashClient:HandleStateEvent(eventName, fruitName, abilityName, valu
 	return false
 end
 
-function MeraDashClient:CleanupCharacterRemoving()
+function MeraDashClient:CleanupLocalDash(reason)
 	local state = self.activeDash
 	self:CancelCarryRelease(true)
 	if not state then
@@ -875,8 +967,20 @@ function MeraDashClient:CleanupCharacterRemoving()
 
 	state.Canceled = true
 	state.ServerResolved = true
-	self:FinishLocalDash(state, "character_removing", true)
+	local rootPart = self:GetRootPart()
+	local finalDirection = state.Plan and state.Plan.Direction or state.Direction
+	local cleanupReason = tostring(reason or "character_removing")
+	self:FinishLocalDash(state, cleanupReason, true)
+	self:RequestFullTrailStop(state, cleanupReason, rootPart and rootPart.Position or nil, finalDirection)
 	self:ClearActiveState(state)
+end
+
+function MeraDashClient:CleanupCharacterRemoving()
+	self:CleanupLocalDash("character_removing")
+end
+
+function MeraDashClient:CleanupUnequipped()
+	self:CleanupLocalDash("unequipped")
 end
 
 return MeraDashClient

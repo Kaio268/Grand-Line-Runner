@@ -1,3 +1,5 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
 local DevilFruitLogger = {}
 
 local function buildPrefix(scope, level)
@@ -13,6 +15,10 @@ local function buildPrefix(scope, level)
 end
 
 function DevilFruitLogger.Info(scope, message, ...)
+	if ReplicatedStorage:GetAttribute("DebugDevilFruitLogs") ~= true then
+		return
+	end
+
 	print(string.format(buildPrefix(scope, "INFO") .. " " .. message, ...))
 end
 

@@ -2,9 +2,9 @@ local FirstTimeTutorial = {
 	Version = 1,
 	CompletionPath = "HiddenLeaderstats.Tutorial",
 
-	TutorialBrainrot = {
-		Name = "Lirili Larila",
-		GrantedPath = "HiddenLeaderstats.TutorialBrainrotGranted",
+	TutorialCrewMember = {
+		Name = "Mask Dancer",
+		GrantedPath = "HiddenLeaderstats.TutorialCrewMemberGranted",
 		SpawnDistance = 10,
 		SpawnLifetime = 900,
 	},
@@ -33,20 +33,20 @@ local FirstTimeTutorial = {
 			RequiredDistance = 18,
 		},
 		{
-			Id = "pickup_brainrot",
+			Id = "pickup_crew_member",
 			Title = "Grab a Crewmate",
 			Body = "A tutorial Crewmate has appeared nearby.",
 			Instruction = "Hold E to pick up the Crewmate.",
 			WaitText = "Pick up a Crewmate",
-			CompletionMode = "CarryBrainrot",
+			CompletionMode = "CarryCrewMember",
 		},
 		{
-			Id = "extract_brainrot",
+			Id = "extract_crew_member",
 			Title = "Bring it home",
 			Body = "Carry the Crewmate back through the extraction boundary to add it to your crew.",
 			Instruction = "Reach the extraction zone while carrying it.",
 			WaitText = "Extract the Crewmate",
-			CompletionMode = "ExtractBrainrot",
+			CompletionMode = "ExtractCrewMember",
 		},
 		{
 			Id = "place_on_stand",

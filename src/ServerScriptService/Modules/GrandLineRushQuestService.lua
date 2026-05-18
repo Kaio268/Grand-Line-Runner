@@ -9,6 +9,7 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local QuestService = {}
 
@@ -25,6 +26,10 @@ local stateRemote
 local claimLocks = {}
 local progressLocks = {}
 local cachedChestToolService
+local REQUEST_ACTION_ALLOWLIST = {
+	GetState = true,
+	ClaimQuest = true,
+}
 
 local MATERIAL_ALIASES = {
 	CommonShipMaterial = "Timber",
@@ -32,6 +37,7 @@ local MATERIAL_ALIASES = {
 }
 
 local BACKFILL_APPLIED_KEY = "ProfileBackfillApplied"
+local CANONICAL_STARTER_CREW_SOURCE = "GrandLineRushStarter"
 
 local function getOrCreateRemotesFolder()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -164,10 +170,10 @@ local function getChestEntries(unopenedChests)
 	return entries
 end
 
-local function getCrewEntries(crewInventory)
-	local entries = {}
+local function getCrewEntryRecords(crewInventory)
+	local records = {}
 	if typeof(crewInventory) ~= "table" or typeof(crewInventory.ById) ~= "table" then
-		return entries
+		return records
 	end
 
 	local seen = {}
@@ -176,25 +182,64 @@ local function getCrewEntries(crewInventory)
 			local key = tostring(instanceId)
 			local entry = crewInventory.ById[key]
 			if typeof(entry) == "table" then
-				entries[#entries + 1] = entry
+				records[#records + 1] = {
+					InstanceId = key,
+					Entry = entry,
+				}
 				seen[key] = true
 			end
 		end
 	end
 
 	for instanceId, entry in pairs(crewInventory.ById) do
-		if not seen[tostring(instanceId)] and typeof(entry) == "table" then
-			entries[#entries + 1] = entry
+		local key = tostring(instanceId)
+		if not seen[key] and typeof(entry) == "table" then
+			records[#records + 1] = {
+				InstanceId = key,
+				Entry = entry,
+			}
 		end
 	end
 
+	return records
+end
+
+local function isStarterQuestCrewEntry(crewEntry)
+	if typeof(crewEntry) ~= "table" then
+		return false
+	end
+
+	return crewEntry.GrandLineRushStarter == true
+		or tostring(crewEntry.Source or "") == CANONICAL_STARTER_CREW_SOURCE
+end
+
+local function normalizeCanonicalQuestCrewEntry(record)
+	local canonicalEntry = record.Entry
+	local canonicalSource = tostring(canonicalEntry.Source or "")
+
+	return {
+		InstanceId = tostring(record.InstanceId or ""),
+		Source = canonicalSource,
+		DepthBand = tostring(canonicalEntry.DepthBand or ""),
+		Rarity = tostring(canonicalEntry.Rarity or ""),
+		Level = math.max(1, math.floor(tonumber(canonicalEntry.Level) or 1)),
+		GrandLineRushStarter = canonicalEntry.GrandLineRushStarter == true,
+	}
+end
+
+local function getQuestCrewEntries(dataRoot)
+	local canonicalRecords = getCrewEntryRecords(dataRoot.CrewMemberInventory)
+	local entries = {}
+	for _, record in ipairs(canonicalRecords) do
+		entries[#entries + 1] = normalizeCanonicalQuestCrewEntry(record)
+	end
 	return entries
 end
 
 local function countExtractedCrew(dataRoot)
 	local count = 0
-	for _, crewEntry in ipairs(getCrewEntries(dataRoot.CrewInventory)) do
-		if tostring(crewEntry.Source or "") ~= "Starter" then
+	for _, crewEntry in ipairs(getQuestCrewEntries(dataRoot)) do
+		if not isStarterQuestCrewEntry(crewEntry) then
 			count += 1
 		end
 	end
@@ -232,8 +277,8 @@ local function countExtractedRewardsAtDepth(dataRoot, minimumDepthBand)
 		end
 	end
 
-	for _, crewEntry in ipairs(getCrewEntries(dataRoot.CrewInventory)) do
-		if tostring(crewEntry.Source or "") ~= "Starter" and QuestConfig.GetDepthRank(crewEntry.DepthBand) >= minimumRank then
+	for _, crewEntry in ipairs(getQuestCrewEntries(dataRoot)) do
+		if not isStarterQuestCrewEntry(crewEntry) and QuestConfig.GetDepthRank(crewEntry.DepthBand) >= minimumRank then
 			count += 1
 		end
 	end
@@ -251,8 +296,8 @@ end
 
 local function countCrewLevelsGained(dataRoot)
 	local count = 0
-	for _, crewEntry in ipairs(getCrewEntries(dataRoot.CrewInventory)) do
-		if tostring(crewEntry.Source or "") ~= "Starter" then
+	for _, crewEntry in ipairs(getQuestCrewEntries(dataRoot)) do
+		if not isStarterQuestCrewEntry(crewEntry) then
 			count += math.max(0, math.floor(tonumber(crewEntry.Level) or 1) - 1)
 		end
 	end
@@ -838,6 +883,19 @@ local function recordObjective(player, eventData)
 end
 
 local function handleRequest(player, actionName, payload)
+	-- Security: quest progress is server-owned; guard only permits known actions and sane payload shapes.
+	if not RemoteGuard.Check(player, "GrandLineRushQuestRequest", { actionName, payload }, {
+		Cooldown = 0.1,
+		ActionIndex = 1,
+		ActionAllowlist = REQUEST_ACTION_ALLOWLIST,
+		Args = {
+			{ Type = "string", MaxLength = 40 },
+			{ Type = "table", AllowNil = true },
+		},
+	}) then
+		return makeResponse(player, false, "Invalid quest request.", "remote_guard_rejected")
+	end
+
 	if actionName == "GetState" then
 		return makeResponse(player, true, nil, nil)
 	elseif actionName == "ClaimQuest" then

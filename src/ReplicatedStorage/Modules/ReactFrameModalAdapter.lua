@@ -8,6 +8,7 @@ ReactFrameModalAdapter.__index = ReactFrameModalAdapter
 
 local FRAMES_DISPLAY_ORDER = 120
 local STANDALONE_LAYER_NAME = "ReactModalLayer"
+local BYPASS_OPEN_UI_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
 
 local function disconnectAll(bucket)
 	for _, connection in ipairs(bucket) do
@@ -52,10 +53,11 @@ function ReactFrameModalAdapter.new(options)
 	self.frameSize = options.frameSize
 	self.allowFallback = options.allowFallback == true
 	self.createFrameIfMissing = options.createFrameIfMissing == true
+	self.standalone = options.standalone == true
 	self.frameBackgroundTransparency = options.frameBackgroundTransparency
 	self.frameZIndex = options.frameZIndex or 120
 	self.hostZIndex = options.hostZIndex or 140
-	self.standalone = options.standalone == true
+	self.bypassLegacyScaleAnimation = options.bypassLegacyScaleAnimation == true
 	self.scheduleRender = nil
 	self.destroyed = false
 	self.uiController = nil
@@ -64,6 +66,8 @@ function ReactFrameModalAdapter.new(options)
 	self.fallbackGui = nil
 	self.legacyConnections = {}
 	self.framesFolderConnections = {}
+	self.boundLegacySuppressionFrame = nil
+	self.boundLegacySuppressionHost = nil
 
 	return self
 end
@@ -192,11 +196,18 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	frame.BackgroundTransparency = self.frameBackgroundTransparency ~= nil and self.frameBackgroundTransparency or 1
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
-	if frame.Visible ~= true then
+	if self.bypassLegacyScaleAnimation then
+		frame:SetAttribute(BYPASS_OPEN_UI_SCALE_ANIMATION_ATTRIBUTE, true)
+		local scale = frame:FindFirstChildOfClass("UIScale")
+		if scale then
+			scale.Scale = 1
+		end
+	end
+	if self.standalone or frame.Visible ~= true then
 		frame.Position = UDim2.fromScale(0.5, 0.5)
 	end
 	local desiredSize = self.frameSize or UDim2.fromScale(0.9, 0.84)
-	if frame.Visible ~= true then
+	if self.standalone or frame.Visible ~= true then
 		frame.Size = desiredSize
 	end
 	frame.ZIndex = self.frameZIndex
@@ -247,35 +258,77 @@ function ReactFrameModalAdapter:_guardSuppressedInstance(instance, frame, host)
 
 	if instance:IsA("GuiObject") then
 		trackConnection(instance:GetPropertyChangedSignal("Visible"), function()
-			if instance.Parent and instance:IsDescendantOf(frame) and (not host or not instance:IsDescendantOf(host)) and instance.Visible then
+			if
+				instance.Parent
+				and instance:IsDescendantOf(frame)
+				and (not host or not instance:IsDescendantOf(host))
+				and instance.Visible
+			then
 				instance.Visible = false
 			end
 		end, self.legacyConnections)
 	elseif instance:IsA("UIStroke") or instance:IsA("UIGradient") then
 		trackConnection(instance:GetPropertyChangedSignal("Enabled"), function()
-			if instance.Parent and instance:IsDescendantOf(frame) and (not host or not instance:IsDescendantOf(host)) and instance.Enabled then
+			if
+				instance.Parent
+				and instance:IsDescendantOf(frame)
+				and (not host or not instance:IsDescendantOf(host))
+				and instance.Enabled
+			then
 				instance.Enabled = false
 			end
 		end, self.legacyConnections)
 	end
 end
 
-function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
+function ReactFrameModalAdapter:_disconnectLegacySuppression()
 	disconnectAll(self.legacyConnections)
+	self.boundLegacySuppressionFrame = nil
+	self.boundLegacySuppressionHost = nil
+end
 
-	if not frame then
+function ReactFrameModalAdapter:_bindLegacyChildSuppression(frame, host, child)
+	if child == nil or child == host or (host and child:IsDescendantOf(host)) then
 		return
 	end
+
+	self:_suppressLegacyChild(child, host)
+	self:_guardSuppressedInstance(child, frame, host)
+
+	for _, descendant in ipairs(child:GetDescendants()) do
+		self:_guardSuppressedInstance(descendant, frame, host)
+	end
+
+	trackConnection(child.DescendantAdded, function(descendant)
+		task.defer(function()
+			if self.destroyed then
+				return
+			end
+
+			self:_suppressLegacyChild(descendant, host)
+			self:_guardSuppressedInstance(descendant, frame, host)
+		end)
+	end, self.legacyConnections)
+end
+
+function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
+	if not frame then
+		self:_disconnectLegacySuppression()
+		return
+	end
+
+	if self.boundLegacySuppressionFrame == frame and self.boundLegacySuppressionHost == host then
+		return
+	end
+
+	self:_disconnectLegacySuppression()
+	self.boundLegacySuppressionFrame = frame
+	self.boundLegacySuppressionHost = host
 
 	self:_applyFrameStyling(frame)
 
 	for _, child in ipairs(frame:GetChildren()) do
-		self:_suppressLegacyChild(child, host)
-		self:_guardSuppressedInstance(child, frame, host)
-
-		for _, descendant in ipairs(child:GetDescendants()) do
-			self:_guardSuppressedInstance(descendant, frame, host)
-		end
+		self:_bindLegacyChildSuppression(frame, host, child)
 	end
 
 	trackConnection(frame.ChildAdded, function(child)
@@ -284,24 +337,13 @@ function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
 				return
 			end
 
-			self:_suppressLegacyChild(child, host)
-			self:_bindLegacySuppression(frame, host)
-		end)
-	end, self.legacyConnections)
-
-	trackConnection(frame.DescendantAdded, function(descendant)
-		task.defer(function()
-			if self.destroyed or descendant == host or (host and descendant:IsDescendantOf(host)) then
-				return
-			end
-
-			self:_suppressLegacyChild(descendant, host)
-			self:_guardSuppressedInstance(descendant, frame, host)
+			self:_bindLegacyChildSuppression(frame, host, child)
 		end)
 	end, self.legacyConnections)
 
 	trackConnection(frame.ChildRemoved, function(child)
 		if child == host and self.scheduleRender then
+			self.boundLegacySuppressionHost = nil
 			task.defer(self.scheduleRender)
 		end
 	end, self.legacyConnections)
@@ -314,6 +356,9 @@ function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
 
 			self:_applyFrameStyling(frame)
 			self:SyncOverlayState()
+			if self.scheduleRender then
+				self.scheduleRender()
+			end
 		end)
 	end, self.legacyConnections)
 end
@@ -352,7 +397,7 @@ end
 function ReactFrameModalAdapter:EnsureHost()
 	local frame = self:_findOrCreateFrame()
 	if not frame then
-		disconnectAll(self.legacyConnections)
+		self:_disconnectLegacySuppression()
 		return nil
 	end
 
@@ -444,6 +489,7 @@ function ReactFrameModalAdapter:BindFramesFolderTracking()
 	trackConnection(framesGui.ChildRemoved, function(child)
 		if child.Name == self.frameName then
 			self.legacyFrame = nil
+			self:_disconnectLegacySuppression()
 			if self.scheduleRender then
 				task.defer(self.scheduleRender)
 			end
@@ -459,6 +505,7 @@ function ReactFrameModalAdapter:HandlePlayerGuiChildAdded(child)
 	if child.Name == "Frames" then
 		self.legacyFrame = nil
 		self.backdrop = nil
+		self:_disconnectLegacySuppression()
 		self:BindFramesFolderTracking()
 		if self.scheduleRender then
 			task.defer(self.scheduleRender)
@@ -479,6 +526,7 @@ function ReactFrameModalAdapter:HandlePlayerGuiChildRemoved(child)
 	if child.Name == "Frames" then
 		self.legacyFrame = nil
 		self.backdrop = nil
+		self:_disconnectLegacySuppression()
 		disconnectAll(self.framesFolderConnections)
 		if self.scheduleRender then
 			task.defer(self.scheduleRender)
@@ -534,7 +582,7 @@ end
 
 function ReactFrameModalAdapter:Destroy()
 	self.destroyed = true
-	disconnectAll(self.legacyConnections)
+	self:_disconnectLegacySuppression()
 	disconnectAll(self.framesFolderConnections)
 	if self.modalStateKey then
 		UiModalState.SetOpen(self.modalStateKey, false)

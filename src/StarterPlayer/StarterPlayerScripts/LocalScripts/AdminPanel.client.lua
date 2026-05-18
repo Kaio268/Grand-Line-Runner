@@ -580,15 +580,30 @@ local COMMANDS = {
 		end,
 	},
 	{
+		id = "hazards_toggle",
+		category = "Spawning",
+		marker = "HZ",
+		name = "Hazards",
+		syntax = "/hazards true|false",
+		description = "Enable or disable corridor hazard spawning and clear active hazards when disabled.",
+		example = "/hazards false",
+		inputs = {
+			{ key = "state", label = "State", placeholder = "true or false", default = "false" },
+		},
+		build = function(values)
+			return "/hazards " .. inputValue(values, "state", "false")
+		end,
+	},
+	{
 		id = "chest_grant",
 		category = "Chests",
 		marker = "CH",
 		name = "Grant Chest",
 		syntax = "/chest <tier> [amount]",
-		description = "Grant chest tools. Known aliases include wood, wooden, iron, gold, legend, legendary, plus configured tier names.",
-		example = "/chest legendary 2",
+		description = "Grant standard extraction chest tools. Known tiers are wood, wooden, iron, and gold.",
+		example = "/chest gold 2",
 		inputs = {
-			{ key = "tier", label = "Chest tier", placeholder = "wood, iron, gold, legendary" },
+			{ key = "tier", label = "Chest tier", placeholder = "wood, iron, gold" },
 			{ key = "amount", label = "Amount", placeholder = "1", default = "1" },
 		},
 		build = function(values)

@@ -4,11 +4,13 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 
-local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
-local ChestVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestVisuals"))
-local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
-local SpawnPartsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SpawnParts"))
-local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
+local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 
 local Controller = {}
@@ -22,7 +24,7 @@ local extractionTouchDebounce = {}
 local sharedChestSequence = 0
 local nextSharedChestRespawnAt = 0
 local worldRandom = Random.new()
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebugTrace") == true
 local loggedExtractionTouchByPlayer = {}
 local VALID_SPAWN_RARITY_NAMES = SpawnPartsConfig.RarityTier or {}
 
@@ -32,6 +34,8 @@ local INFO_COLOR = Color3.fromRGB(119, 217, 255)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRY_VISUAL_SPACING = CarriedRewardVisuals.DefaultSpacing
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -95,10 +99,10 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrBrainrot=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
-		tostring(player:GetAttribute("CarriedBrainrot")),
+		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
 		tostring(player:GetAttribute("HoroProjectionCarryingReward"))
@@ -114,15 +118,32 @@ local function getRunRewardSummary(player)
 	local runState = state and state.Run or {}
 	local carriedReward = runState.CarriedReward
 	local spawnedReward = runState.SpawnedReward
+	local carriedCount = 0
+	for _, slot in ipairs(runState.CarrySlots or {}) do
+		if slot.Occupied == true then
+			carriedCount += 1
+		end
+	end
 	return string.format(
-		"inRun=%s carried=%s carriedType=%s spawned=%s spawnedType=%s spawnedDrop=%s",
+		"inRun=%s carried=%s carriedCount=%d carriedType=%s spawned=%s spawnedType=%s spawnedDrop=%s",
 		tostring(runState.InRun),
-		tostring(carriedReward ~= nil),
+		tostring(carriedCount > 0 or carriedReward ~= nil),
+		carriedCount,
 		tostring(carriedReward and carriedReward.RewardType or nil),
 		tostring(spawnedReward ~= nil),
 		tostring(spawnedReward and spawnedReward.RewardType or nil),
 		formatVector3(spawnedReward and spawnedReward.WorldDropPosition or nil)
 	)
+end
+
+local function hasOccupiedCarrySlots(runState)
+	for _, slot in ipairs((runState and runState.CarrySlots) or {}) do
+		if slot.Occupied == true then
+			return true
+		end
+	end
+
+	return false
 end
 
 local function sendPopup(player, text, color, isError)
@@ -275,27 +296,60 @@ local function buildRewardKey(rewardState)
 	return string.format("Crew:%s:%s:%s", tostring(rewardState.Rarity), tostring(rewardState.CrewName), tostring(rewardState.DepthBand))
 end
 
-local function destroyRewardObject(userId)
-	local object = rewardObjectsByUserId[userId]
-	if object and object.Parent then
-		object:Destroy()
+local function getRewardObjectMap(userId)
+	local current = rewardObjectsByUserId[userId]
+	if typeof(current) == "table" and current.__MultiCarryObjects == true then
+		return current
 	end
-	rewardObjectsByUserId[userId] = nil
-	rewardPlacementsByUserId[userId] = nil
+
+	local map = {
+		__MultiCarryObjects = true,
+	}
+	if typeof(current) == "Instance" then
+		map.spawned = current
+	end
+	rewardObjectsByUserId[userId] = map
+	return map
 end
 
-local function destroySharedChestNode(chestId)
-	local node = sharedChestNodesById[chestId]
-	if not node then
+local function getRewardObject(userId, objectKey)
+	local map = getRewardObjectMap(userId)
+	return map[tostring(objectKey or "spawned")]
+end
+
+local function setRewardObject(userId, objectKey, object)
+	local map = getRewardObjectMap(userId)
+	map[tostring(objectKey or "spawned")] = object
+end
+
+local function destroyRewardObject(userId, objectKey)
+	local map = rewardObjectsByUserId[userId]
+	if typeof(map) ~= "table" or map.__MultiCarryObjects ~= true then
+		if map and map.Parent then
+			map:Destroy()
+		end
+		rewardObjectsByUserId[userId] = nil
+		rewardPlacementsByUserId[userId] = nil
 		return
 	end
 
-	local object = node.Object
-	if object and object.Parent then
-		object:Destroy()
+	if objectKey ~= nil then
+		local key = tostring(objectKey)
+		local object = map[key]
+		if object and object.Parent then
+			object:Destroy()
+		end
+		map[key] = nil
+		return
 	end
 
-	sharedChestNodesById[chestId] = nil
+	for key, object in pairs(map) do
+		if key ~= "__MultiCarryObjects" and object and object.Parent then
+			object:Destroy()
+		end
+	end
+	rewardObjectsByUserId[userId] = nil
+	rewardPlacementsByUserId[userId] = nil
 end
 
 local function destroyCarriedSharedChest(userId)
@@ -501,28 +555,28 @@ local function getBiomeSpawnParts()
 	return spawnParts
 end
 
-local function getAllBrainrotSpawnContexts()
+local function getAllCrewMemberSpawnContexts()
 	local contexts = {}
 
 	for _, spawnPart in ipairs(getBiomeSpawnParts()) do
-		local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
-		local hadBrainrot = false
-		if brainrotsFolder then
-			for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
+		local crewMembersFolder = spawnPart:FindFirstChild("CrewMembers")
+		local hadCrewMember = false
+		if crewMembersFolder then
+			for _, candidate in ipairs(crewMembersFolder:GetChildren()) do
 				if getObjectRootPart(candidate) then
-					hadBrainrot = true
+					hadCrewMember = true
 					contexts[#contexts + 1] = {
 						SpawnPart = spawnPart,
-						Brainrot = candidate,
+						CrewMember = candidate,
 					}
 				end
 			end
 		end
 
-		if not hadBrainrot then
+		if not hadCrewMember then
 			contexts[#contexts + 1] = {
 				SpawnPart = spawnPart,
-				Brainrot = nil,
+				CrewMember = nil,
 			}
 		end
 	end
@@ -530,21 +584,21 @@ local function getAllBrainrotSpawnContexts()
 	return contexts
 end
 
-local function chooseRandomBrainrotSpawnContext()
-	local contexts = getAllBrainrotSpawnContexts()
+local function chooseRandomCrewMemberSpawnContext()
+	local contexts = getAllCrewMemberSpawnContexts()
 	if #contexts == 0 then
 		return nil
 	end
 
 	local chosen = contexts[worldRandom:NextInteger(1, #contexts)]
-	local chosenBrainrotRoot = getObjectRootPart(chosen.Brainrot)
+	local chosenCrewMemberRoot = getObjectRootPart(chosen.CrewMember)
 	waveTrace(
-		"chestSpawnContext chosenCount=%s chosenSpawnPart=%s chosenSpawnPartPos=%s sourceBrainrot=%s sourceBrainrotPos=%s",
+		"chestSpawnContext chosenCount=%s chosenSpawnPart=%s chosenSpawnPartPos=%s sourceCrewMember=%s sourceCrewMemberPos=%s",
 		tostring(#contexts),
 		formatInstancePath(chosen.SpawnPart),
 		formatVector3(chosen.SpawnPart and chosen.SpawnPart.Position or nil),
-		formatInstancePath(chosen.Brainrot),
-		formatVector3(chosenBrainrotRoot and chosenBrainrotRoot.Position or nil)
+		formatInstancePath(chosen.CrewMember),
+		formatVector3(chosenCrewMemberRoot and chosenCrewMemberRoot.Position or nil)
 	)
 	return chosen
 end
@@ -555,12 +609,12 @@ local function getOccupiedSpawnOffsets(spawnPart, ignoreInstance)
 		return offsets
 	end
 
-	local brainrotsFolder = spawnPart:FindFirstChild("Brainrots")
-	if not brainrotsFolder then
+	local crewMembersFolder = spawnPart:FindFirstChild("CrewMembers")
+	if not crewMembersFolder then
 		return offsets
 	end
 
-	for _, candidate in ipairs(brainrotsFolder:GetChildren()) do
+	for _, candidate in ipairs(crewMembersFolder:GetChildren()) do
 		if candidate ~= ignoreInstance then
 			local rootPart = getObjectRootPart(candidate)
 			if rootPart then
@@ -588,7 +642,7 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		return existing
 	end
 
-	local spawnContext = chooseRandomBrainrotSpawnContext()
+	local spawnContext = chooseRandomCrewMemberSpawnContext()
 	if not spawnContext or not spawnContext.SpawnPart then
 		waveTrace("chestPlacement skipped player=%s reason=no_spawn_context", player.Name)
 		return nil
@@ -596,10 +650,10 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 
 	local spawnPart = spawnContext.SpawnPart
 	local baseOffset = Vector2.zero
-	if spawnContext.Brainrot then
-		local brainrotRoot = getObjectRootPart(spawnContext.Brainrot)
-		if brainrotRoot then
-			baseOffset = worldToSpawnLocalXZ(spawnPart, brainrotRoot.Position)
+	if spawnContext.CrewMember then
+		local crewMemberRoot = getObjectRootPart(spawnContext.CrewMember)
+		if crewMemberRoot then
+			baseOffset = worldToSpawnLocalXZ(spawnPart, crewMemberRoot.Position)
 		end
 	end
 
@@ -615,11 +669,11 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		baseOffset + Vector2.new(spacing * 0.7, -spacing * 0.7),
 		baseOffset + Vector2.new(-spacing * 0.7, -spacing * 0.7),
 	}
-	if not spawnContext.Brainrot then
+	if not spawnContext.CrewMember then
 		candidateOffsets[#candidateOffsets + 1] = Vector2.zero
 	end
 
-	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.Brainrot)
+	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.CrewMember)
 	local chosenOffset = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffsets[#candidateOffsets] or Vector2.zero)
 	for _, candidateOffset in ipairs(candidateOffsets) do
 		local clamped = clampLocalXZToSpawnPart(spawnPart, rewardObject, candidateOffset)
@@ -633,15 +687,15 @@ local function getOrCreateChestSpawnPlacement(player, rewardObject)
 		SpawnPart = spawnPart,
 		LocalXZ = chosenOffset,
 		Yaw = 0,
-		SourceBrainrotName = spawnContext.Brainrot and spawnContext.Brainrot.Name or nil,
+		SourceCrewMemberName = spawnContext.CrewMember and spawnContext.CrewMember.Name or nil,
 	}
 	rewardPlacementsByUserId[player.UserId] = placement
 	waveTrace(
-		"chestPlacement player=%s spawnPart=%s spawnPartPos=%s sourceBrainrot=%s localXZ=%s",
+		"chestPlacement player=%s spawnPart=%s spawnPartPos=%s sourceCrewMember=%s localXZ=%s",
 		player.Name,
 		formatInstancePath(spawnPart),
 		formatVector3(spawnPart.Position),
-		tostring(placement.SourceBrainrotName),
+		tostring(placement.SourceCrewMemberName),
 		formatVector3(Vector3.new(chosenOffset.X, 0, chosenOffset.Y))
 	)
 	return placement
@@ -652,11 +706,11 @@ local function buildChestPlacementHint(placement)
 		return nil
 	end
 
-	if placement.SourceBrainrotName and placement.SourceBrainrotName ~= "" then
+	if placement.SourceCrewMemberName and placement.SourceCrewMemberName ~= "" then
 		return string.format(
 			"Chest spawned on %s near %s.",
 			tostring(placement.SpawnPart.Name),
-			tostring(placement.SourceBrainrotName)
+			tostring(placement.SourceCrewMemberName)
 		)
 	end
 
@@ -962,7 +1016,7 @@ local function applySpawnedRewardState(player, rewardObject, rootPart, rewardSta
 	end
 end
 
-local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFolder, carrierPartOverride)
+local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFolder, carrierPartOverride, rewardState)
 	local character = player.Character
 	local head = character and character:FindFirstChild("Head")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -1009,6 +1063,11 @@ local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFo
 	end
 
 	local top = carrierPart.Position + Vector3.yAxis * (carrierPart.Size.Y / 2)
+	local carryVisualOffset = tonumber(rewardState and rewardState.CarryVisualOffset) or 0
+	if rewardObject then
+		rewardObject:SetAttribute("CarryVisualOffset", carryVisualOffset)
+	end
+	top += carrierPart.CFrame.RightVector * carryVisualOffset
 	local targetPivot = computePivotBottomOnPoint(rewardObject, top, computeCarrierRotOnly(carrierPart))
 	setObjectCFrame(rewardObject, targetPivot)
 
@@ -1038,7 +1097,7 @@ end
 
 local function getAllSharedChestSpawnContexts()
 	local contexts = {}
-	for _, context in ipairs(getAllBrainrotSpawnContexts()) do
+	for _, context in ipairs(getAllCrewMemberSpawnContexts()) do
 		contexts[#contexts + 1] = context
 	end
 
@@ -1075,10 +1134,10 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 
 	local spawnPart = spawnContext.SpawnPart
 	local baseOffset = Vector2.zero
-	if spawnContext.Brainrot then
-		local brainrotRoot = getObjectRootPart(spawnContext.Brainrot)
-		if brainrotRoot then
-			baseOffset = worldToSpawnLocalXZ(spawnPart, brainrotRoot.Position)
+	if spawnContext.CrewMember then
+		local crewMemberRoot = getObjectRootPart(spawnContext.CrewMember)
+		if crewMemberRoot then
+			baseOffset = worldToSpawnLocalXZ(spawnPart, crewMemberRoot.Position)
 		end
 	end
 
@@ -1094,11 +1153,11 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 		baseOffset + Vector2.new(spacing * 0.7, -spacing * 0.7),
 		baseOffset + Vector2.new(-spacing * 0.7, -spacing * 0.7),
 	}
-	if not spawnContext.Brainrot then
+	if not spawnContext.CrewMember then
 		candidateOffsets[#candidateOffsets + 1] = Vector2.zero
 	end
 
-	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.Brainrot)
+	local occupiedOffsets = getOccupiedSpawnOffsets(spawnPart, spawnContext.CrewMember)
 	for _, offset in ipairs(getOccupiedSharedChestOffsets(spawnPart)) do
 		occupiedOffsets[#occupiedOffsets + 1] = offset
 	end
@@ -1116,7 +1175,7 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 		SpawnPart = spawnPart,
 		LocalXZ = chosenOffset,
 		Yaw = 0,
-		SourceBrainrotName = spawnContext.Brainrot and spawnContext.Brainrot.Name or nil,
+		SourceCrewMemberName = spawnContext.CrewMember and spawnContext.CrewMember.Name or nil,
 	}
 end
 
@@ -1138,7 +1197,7 @@ local function countActiveSharedChests()
 	return count
 end
 
-local function spawnSharedChestNode(rewardFolder, carriedFolder)
+local function spawnSharedChestNode(rewardFolder, _carriedFolder)
 	local spawnContext = chooseSharedChestSpawnContext()
 	if not spawnContext or not spawnContext.SpawnPart then
 		return nil
@@ -1172,11 +1231,11 @@ local function spawnSharedChestNode(rewardFolder, carriedFolder)
 	local placement = buildSharedChestPlacement(rewardObject, spawnContext)
 	if placement then
 		waveTrace(
-			"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceBrainrot=%s localXZ=%s",
+			"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceCrewMember=%s localXZ=%s",
 			tostring(chestId),
 			formatInstancePath(placement.SpawnPart),
 			formatVector3(placement.SpawnPart and placement.SpawnPart.Position or nil),
-			tostring(placement.SourceBrainrotName),
+			tostring(placement.SourceCrewMemberName),
 			formatVector3(Vector3.new(placement.LocalXZ.X, 0, placement.LocalXZ.Y))
 		)
 		setObjectCFrame(
@@ -1221,11 +1280,6 @@ local function spawnSharedChestNode(rewardFolder, carriedFolder)
 		if currentNode ~= node or node.Claimed then
 			return
 		end
-		if triggerPlayer:GetAttribute("CarriedBrainrot") ~= nil then
-			sendPopup(triggerPlayer, "You cannot pick up a chest while carrying a Crewmate.", ERROR_COLOR, true)
-			return
-		end
-
 		node.Claimed = true
 		local response = SliceService.ClaimWorldChest(triggerPlayer, node.RewardState)
 		if not response or not response.ok then
@@ -1275,14 +1329,15 @@ local function ensureSharedChestNodes(rewardFolder, carriedFolder)
 	end
 end
 
-local function createRewardObject(player, rewardState, rewardFolder, carriedFolder, startPart, endPart, isCarried)
+local function createRewardObject(player, rewardState, rewardFolder, carriedFolder, startPart, endPart, isCarried, objectKey)
+	objectKey = tostring(objectKey or "spawned")
 	local rewardKey = buildRewardKey(rewardState)
-	local existing = rewardObjectsByUserId[player.UserId]
+	local existing = getRewardObject(player.UserId, objectKey)
 	if existing and existing.Parent and existing:GetAttribute("RewardKey") == rewardKey then
 		local existingRoot = getObjectRootPart(existing)
 		if existingRoot then
 			if isCarried then
-				applyCarriedRewardState(player, existing, existingRoot, carriedFolder)
+				applyCarriedRewardState(player, existing, existingRoot, carriedFolder, nil, rewardState)
 			else
 				applySpawnedRewardState(player, existing, existingRoot, rewardState, rewardFolder, startPart, endPart)
 			end
@@ -1290,10 +1345,10 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 		return
 	end
 
-	destroyRewardObject(player.UserId)
+	destroyRewardObject(player.UserId, objectKey)
 
 	local rewardObject = createRewardInstance(rewardState)
-	rewardObject.Name = string.format("RunReward_%d", player.UserId)
+	rewardObject.Name = string.format("RunReward_%d_%s", player.UserId, objectKey)
 	rewardObject:SetAttribute("OwnerUserId", player.UserId)
 	rewardObject:SetAttribute("RewardKey", rewardKey)
 	rewardObject:SetAttribute("RewardType", rewardState.RewardType)
@@ -1303,7 +1358,7 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 	if not rootPart then
 		rewardObject:Destroy()
 		rewardObject = createDefaultRewardPart(rewardState)
-		rewardObject.Name = string.format("RunReward_%d", player.UserId)
+		rewardObject.Name = string.format("RunReward_%d_%s", player.UserId, objectKey)
 		rewardObject:SetAttribute("OwnerUserId", player.UserId)
 		rewardObject:SetAttribute("RewardKey", rewardKey)
 		rewardObject:SetAttribute("RewardType", rewardState.RewardType)
@@ -1335,11 +1390,6 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 		if triggerPlayer ~= player then
 			return
 		end
-		if triggerPlayer:GetAttribute("CarriedBrainrot") ~= nil then
-			sendPopup(triggerPlayer, "You cannot pick up a chest or crew reward while carrying a Crewmate.", ERROR_COLOR, true)
-			return
-		end
-
 		local response = SliceService.ClaimSpawnedReward(player)
 		if response.ok then
 			sendPopup(player, buildResponseMessage(response, "Reward picked up. Bring it back to extract."), SUCCESS_COLOR, false)
@@ -1349,31 +1399,81 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 	end)
 
 	if isCarried then
-		if not applyCarriedRewardState(player, rewardObject, rootPart, carriedFolder) then
+		if not applyCarriedRewardState(player, rewardObject, rootPart, carriedFolder, nil, rewardState) then
 			applySpawnedRewardState(player, rewardObject, rootPart, rewardState, rewardFolder, startPart, endPart)
 		end
 	else
 		applySpawnedRewardState(player, rewardObject, rootPart, rewardState, rewardFolder, startPart, endPart)
 	end
 
-	rewardObjectsByUserId[player.UserId] = rewardObject
+	setRewardObject(player.UserId, objectKey, rewardObject)
+end
+
+local function buildRewardStateFromCarrySlot(slot)
+	if typeof(slot) ~= "table" or slot.Occupied ~= true then
+		return nil
+	end
+
+	local data = if typeof(slot.Data) == "table" then table.clone(slot.Data) else {}
+	if slot.ItemType == "Chest" then
+		data.RewardType = "Chest"
+		data.DisplayName = slot.DisplayName
+		data.CarryId = slot.CarryId
+		data.CarryOrder = slot.CarryOrder
+		data.SlotIndex = slot.SlotIndex
+		return data
+	end
+
+	if data.Physical == true then
+		return nil
+	end
+
+	data.RewardType = data.RewardType or "Crew"
+	data.DisplayName = slot.DisplayName
+	data.CarryId = slot.CarryId
+	data.CarryOrder = slot.CarryOrder
+	data.SlotIndex = slot.SlotIndex
+	return data
+end
+
+local function getCarryObjectKey(slot)
+	return "carry_" .. tostring(slot.CarryId or slot.SlotIndex or "unknown")
 end
 
 local function syncPlayerRewardObject(player, state, rewardFolder, carriedFolder, startPart, endPart)
 	local runState = state and state.Run or {}
 	local spawnedReward = runState.SpawnedReward
-	local carriedReward = runState.CarriedReward
+	local carrySlots = runState.CarrySlots or {}
+	local carryOffsetMap = CarriedRewardVisuals.BuildOffsetMap(carrySlots, CARRY_VISUAL_SPACING)
+	local wantedKeys = {}
+
 	if spawnedReward ~= nil then
-		createRewardObject(player, spawnedReward, rewardFolder, carriedFolder, startPart, endPart, false)
-		return
+		wantedKeys.spawned = true
+		createRewardObject(player, spawnedReward, rewardFolder, carriedFolder, startPart, endPart, false, "spawned")
+	else
+		destroyRewardObject(player.UserId, "spawned")
 	end
 
-	if carriedReward ~= nil then
-		createRewardObject(player, carriedReward, rewardFolder, carriedFolder, startPart, endPart, true)
-		return
+	for _, slot in ipairs(carrySlots) do
+		local rewardState = buildRewardStateFromCarrySlot(slot)
+		if rewardState then
+			local objectKey = getCarryObjectKey(slot)
+			rewardState.CarryVisualOffset = carryOffsetMap[tostring(slot.CarryId or "")] or 0
+			wantedKeys[objectKey] = true
+			createRewardObject(player, rewardState, rewardFolder, carriedFolder, startPart, endPart, true, objectKey)
+		end
 	end
 
-	destroyRewardObject(player.UserId)
+	local map = rewardObjectsByUserId[player.UserId]
+	if typeof(map) == "table" and map.__MultiCarryObjects == true then
+		for key, _ in pairs(map) do
+			if key ~= "__MultiCarryObjects" and wantedKeys[key] ~= true then
+				destroyRewardObject(player.UserId, key)
+			end
+		end
+	elseif not spawnedReward then
+		destroyRewardObject(player.UserId)
+	end
 end
 
 local function findPlayerFromHit(hit)
@@ -1592,7 +1692,14 @@ function Controller.Start()
 			getPlayerCarrySummary(player),
 			getRunRewardSummary(player)
 		)
-		if runState.CarriedReward == nil then
+		local hasCarrySlots = false
+		for _, slot in ipairs(runState.CarrySlots or {}) do
+			if slot.Occupied == true then
+				hasCarrySlots = true
+				break
+			end
+		end
+		if not hasCarrySlots then
 			runTrace(
 				"extractTouchSkipped player=%s source=%s sourcePath=%s reason=no_carried_reward inRun=%s",
 				player.Name,
@@ -1650,7 +1757,7 @@ function Controller.Start()
 	SliceService.StateChanged:Connect(function(player, state)
 		if player and player.Parent == Players then
 			syncPlayerRewardObject(player, state, rewardFolder, carriedFolder, startPart, endPart)
-			if carriedSharedChestByUserId[player.UserId] and not (state and state.Run and state.Run.CarriedReward) then
+			if carriedSharedChestByUserId[player.UserId] and not hasOccupiedCarrySlots(state and state.Run) then
 				destroyCarriedSharedChest(player.UserId)
 				nextSharedChestRespawnAt = math.min(nextSharedChestRespawnAt, os.clock())
 			end
@@ -1767,7 +1874,7 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 	end
 
 	local rewardFolder = getDebugSpawnFolder()
-	local carriedFolder = getDebugCarriedFolder()
+	local _carriedFolder = getDebugCarriedFolder()
 	local rewardState = SliceService.CreateChestRewardData(Economy.VerticalSlice.WorldRun.StartDepthBand or Economy.VerticalSlice.DefaultDepthBand)
 	rewardState.DisplayName = string.format("%s Chest", tostring(rewardState.Tier or "Wooden"))
 
@@ -1866,7 +1973,15 @@ function Controller.AttachCarriedRewardToPart(player, carrierPart)
 
 	local state = SliceService.GetState(player)
 	local runState = state and state.Run or {}
-	if runState.CarriedReward == nil then
+	local carrySlots = runState.CarrySlots or {}
+	local hasCarriedSlot = false
+	for _, slot in ipairs(carrySlots) do
+		if slot.Occupied == true then
+			hasCarriedSlot = true
+			break
+		end
+	end
+	if not hasCarriedSlot then
 		horoCarryTrace(
 			"reattachRequest failed player=%s resolvedCarrier=%s reason=no_carried_reward runtime={%s}",
 			player and player.Name or "<nil>",
@@ -1876,35 +1991,32 @@ function Controller.AttachCarriedRewardToPart(player, carrierPart)
 		return false, "no_carried_reward"
 	end
 
-	local rewardObject = rewardObjectsByUserId[player.UserId]
-	local rootPart = getObjectRootPart(rewardObject)
-	if not rewardObject or not rewardObject.Parent or not rootPart then
-		horoCarryTrace(
-			"reattachRequest failed player=%s resolvedCarrier=%s reason=reward_object_not_ready reward=%s",
-			player and player.Name or "<nil>",
-			formatInstancePath(carrierPart),
-			formatInstancePath(rewardObject)
-		)
-		return false, "reward_object_not_ready"
+	local attachedAny = false
+	local carryOffsetMap = CarriedRewardVisuals.BuildOffsetMap(carrySlots, CARRY_VISUAL_SPACING)
+	for _, slot in ipairs(carrySlots) do
+		local rewardState = buildRewardStateFromCarrySlot(slot)
+		if rewardState then
+			rewardState.CarryVisualOffset = carryOffsetMap[tostring(slot.CarryId or "")] or 0
+			local rewardObject = getRewardObject(player.UserId, getCarryObjectKey(slot))
+			local rootPart = getObjectRootPart(rewardObject)
+			if rewardObject and rewardObject.Parent and rootPart then
+				if applyCarriedRewardState(player, rewardObject, rootPart, rewardObject.Parent, carrierPart, rewardState) then
+					attachedAny = true
+				end
+			end
+		end
 	end
 
-	if applyCarriedRewardState(player, rewardObject, rootPart, rewardObject.Parent, carrierPart) then
+	if attachedAny then
 		horoCarryTrace(
-			"reattachRequest complete player=%s resolvedCarrier=%s success=true reward=%s",
+			"reattachRequest complete player=%s resolvedCarrier=%s success=true",
 			player and player.Name or "<nil>",
-			formatInstancePath(carrierPart),
-			formatInstancePath(rewardObject)
+			formatInstancePath(carrierPart)
 		)
-		return true, rewardObject
+		return true
 	end
 
-	horoCarryTrace(
-		"reattachRequest failed player=%s resolvedCarrier=%s reason=attach_failed reward=%s",
-		player and player.Name or "<nil>",
-		formatInstancePath(carrierPart),
-		formatInstancePath(rewardObject)
-	)
-	return false, "attach_failed"
+	return false, "reward_object_not_ready"
 end
 
 local function attachCarriedRewardToPartSoon(player, carrierPart)
@@ -1968,10 +2080,11 @@ function Controller.TryClaimRewardNearPosition(player, worldPosition, carrierPar
 		getPlayerCarrySummary(player),
 		getRunRewardSummary(player)
 	)
-	if runState.CarriedReward ~= nil then
-		if Controller.AttachCarriedRewardToPart(player, carrierPart) then
+	if SliceService.HasCarryItems and SliceService.HasCarryItems(player) then
+		Controller.AttachCarriedRewardToPart(player, carrierPart)
+		if not (SliceService.CanCarryMore and SliceService.CanCarryMore(player)) then
 			horoCarryTrace(
-				"pickupResult player=%s outcome=already_carried_reattached resolvedCarrier=%s runtime={%s}",
+				"pickupResult player=%s outcome=carry_slots_full resolvedCarrier=%s runtime={%s}",
 				player and player.Name or "<nil>",
 				formatInstancePath(carrierPart),
 				getRunRewardSummary(player)
@@ -1981,18 +2094,10 @@ function Controller.TryClaimRewardNearPosition(player, worldPosition, carrierPar
 				AlreadyCarried = true,
 			}
 		end
-
-		horoCarryTrace(
-			"pickupResult player=%s outcome=already_carrying_reward_attach_failed resolvedCarrier=%s runtime={%s}",
-			player and player.Name or "<nil>",
-			formatInstancePath(carrierPart),
-			getRunRewardSummary(player)
-		)
-		return false, "already_carrying_reward"
 	end
 
 	if runState.SpawnedReward ~= nil then
-		local rewardObject = rewardObjectsByUserId[player.UserId]
+		local rewardObject = getRewardObject(player.UserId, "spawned")
 		local distance = getRewardObjectDistance(rewardObject, worldPosition)
 		if distance <= searchRadius then
 			local response = SliceService.ClaimSpawnedReward(player)

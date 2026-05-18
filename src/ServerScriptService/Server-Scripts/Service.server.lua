@@ -1,14 +1,22 @@
 local service = require(game.ServerScriptService.Modules:WaitForChild("CometMerchant"))
-local add = require(script.Parent.Parent.Modules.AddCrewMember)
+local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
 
-service:SetRewardHandler("Pot Hotspot", function(player, amount, DataManager, info)
-	add:AddCrewMember(player, "Pot Hotspot", 1)
+local function grantCometCrewReward(player, rewardName, amount)
+	local ok = CrewRewardService.Grant(player, rewardName, amount or 1, {
+		Source = "CometMerchant",
+		Context = "CometMerchant:" .. tostring(rewardName),
+	})
+	return ok
+end
+
+service:SetRewardHandler("Pot Hotspot", function(player, amount, _DataManager, _info)
+	return grantCometCrewReward(player, "Pot Hotspot", amount)
 end)
 
-service:SetRewardHandler("Tirilikalika Tirilikalako", function(player, amount, DataManager, info)
-	add:AddCrewMember(player, "Tirilikalika Tirilikalako", 1)
+service:SetRewardHandler("Tide Monk", function(player, amount, _DataManager, _info)
+	return grantCometCrewReward(player, "Tide Monk", amount)
 end)
 
-service:SetRewardHandler("Rhino Toasterino", function(player, amount, DataManager, info)
-	add:AddCrewMember(player, "Rhino Toasterino", 1)
+service:SetRewardHandler("Rhino Toasterino", function(player, amount, _DataManager, _info)
+	return grantCometCrewReward(player, "Rhino Toasterino", amount)
 end)

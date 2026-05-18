@@ -8,10 +8,13 @@ local React = require(Packages:WaitForChild("React"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
+local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 
 local e = React.createElement
+local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
+local CREW_PREVIEW_ROTATION = CFrame.Angles(math.rad(-12), math.rad(208), 0)
 local INVENTORY_MODAL_OPEN_POSITION = UDim2.fromScale(0.5, 0.49)
-local INVENTORY_MODAL_CLOSED_POSITION = UDim2.new(0.5, 0, 10, 0)
+local INVENTORY_MODAL_CLOSED_POSITION = UDim2.fromScale(0.5, 10)
 local INVENTORY_MODAL_OPEN_TIME = 0.16
 local INVENTORY_MODAL_CLOSE_TIME = 0.16
 local INVENTORY_MODAL_BACKDROP_TRANSPARENCY = 0.28
@@ -185,12 +188,74 @@ local function buildInventoryIconModel()
 	return model
 end
 
+local function getCrewPreviewAssetRoot()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	return assets and assets:FindFirstChild(CREW_PREVIEW_ASSET_ROOT_NAME) or nil
+end
+
+local function findCrewPreviewModel(modelName)
+	local root = getCrewPreviewAssetRoot()
+	local name = tostring(modelName or "")
+	if not root or name == "" then
+		return nil
+	end
+
+	local direct = root:FindFirstChild(name)
+	if direct and direct:IsA("Model") then
+		return direct
+	end
+
+	local descendant = root:FindFirstChild(name, true)
+	if descendant and descendant:IsA("Model") then
+		return descendant
+	end
+
+	return nil
+end
+
+local function sanitizeCrewPreviewClone(previewModel)
+	for _, descendant in ipairs(previewModel:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			setPreviewPartDefaults(descendant)
+		elseif descendant:IsA("BaseScript") or descendant:IsA("ModuleScript") or descendant:IsA("Sound") then
+			descendant:Destroy()
+		elseif descendant:IsA("ParticleEmitter")
+			or descendant:IsA("Trail")
+			or descendant:IsA("Beam")
+			or descendant:IsA("PointLight")
+			or descendant:IsA("SpotLight")
+			or descendant:IsA("SurfaceLight")
+		then
+			descendant.Enabled = false
+		end
+	end
+end
+
+local function cloneCrewPreviewModel(modelName)
+	local template = findCrewPreviewModel(modelName)
+	if not template then
+		return nil
+	end
+
+	local ok, clone = pcall(function()
+		return template:Clone()
+	end)
+	if not ok or typeof(clone) ~= "Instance" then
+		return nil
+	end
+
+	sanitizeCrewPreviewClone(clone)
+	return clone
+end
+
 local function positionPreviewModel(previewModel, previewKind, previewName)
 	local rotation = CFrame.Angles(math.rad(-12), math.rad(28), 0)
 	if previewKind == "Resource" then
 		rotation = CFrame.Angles(math.rad(-8), math.rad(26), 0)
 	elseif previewKind == "Inventory" then
 		rotation = CFrame.Angles(math.rad(-14), math.rad(-26), 0)
+	elseif previewKind == "CrewMember" then
+		rotation = CREW_PREVIEW_ROTATION
 	elseif previewKind == "DevilFruit" and previewName == "Tori" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
@@ -244,6 +309,8 @@ local function PreviewViewport(props)
 		local previewModel
 		if props.previewKind == "DevilFruit" then
 			previewModel = DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
+		elseif props.previewKind == "CrewMember" then
+			previewModel = cloneCrewPreviewModel(props.previewName)
 		elseif props.previewKind == "Chest" then
 			previewModel = ChestVisuals.CreatePreviewModel(props.previewName)
 		elseif props.previewKind == "Resource" then
@@ -451,6 +518,89 @@ local function ChestIcon(props)
 	})
 end
 
+local function isCrewPreviewItem(item)
+	return item
+		and (
+			tostring(item.kind or "") == "CrewMember"
+			or tostring(item.previewKind or "") == "CrewMember"
+			or tostring(item.crewMemberName or "") ~= ""
+		)
+end
+
+local function getStaticCrewPreviewImage(item)
+	if not item then
+		return ""
+	end
+
+	if isCrewPreviewItem(item) then
+		local staticPreviewImage = CrewPreviewImages.Resolve(item)
+		if staticPreviewImage ~= "" then
+			return staticPreviewImage
+		end
+	end
+
+	return CrewPreviewImages.ResolveStaticImage(item.image)
+end
+
+local function staticCrewPreviewImage(image, props)
+	props = props or {}
+	return e("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundTransparency = 1,
+		Image = image,
+		Position = props.position or UDim2.fromScale(0.5, 0.5),
+		ScaleType = props.scaleType or Enum.ScaleType.Crop,
+		Size = props.size or UDim2.fromScale(1, 1),
+		ZIndex = props.zIndex,
+	})
+end
+
+local function staticPreviewSlotContent(image, props)
+	props = props or {}
+	local hovered = props.hovered == true
+	local shadowColor = Color3.fromRGB(4, 8, 14)
+	local overlayTransparency = if hovered then 0.78 else 0.84
+	local zIndex = props.zIndex or 1
+
+	return e("Frame", {
+		Active = false,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Position = UDim2.fromScale(0, 0),
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = zIndex,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, props.cornerRadius or 13),
+		}),
+		Image = e("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Image = image,
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = props.scaleType or Enum.ScaleType.Crop,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = zIndex,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, props.cornerRadius or 13),
+			}),
+		}),
+		Wash = e("Frame", {
+			BackgroundColor3 = shadowColor,
+			BackgroundTransparency = overlayTransparency,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, props.cornerRadius or 13),
+			}),
+		}),
+	})
+end
+
 local function renderItemPreview(item, props)
 	local position = props.position
 	local size = props.size
@@ -459,6 +609,29 @@ local function renderItemPreview(item, props)
 	local fallbackTextSize = props.fallbackTextSize or 20
 	local fallbackTextColor = props.fallbackTextColor or PALETTE.Text
 	local fallbackSize = props.fallbackSize or UDim2.new(1, -12, 1, -12)
+	local hasViewportPreview = item
+		and item.previewKind ~= nil
+		and tostring(item.previewKind) ~= ""
+		and item.previewName ~= nil
+		and tostring(item.previewName) ~= ""
+
+	local staticPreviewImage = getStaticCrewPreviewImage(item)
+	if staticPreviewImage ~= "" then
+		return staticCrewPreviewImage(staticPreviewImage, {
+			zIndex = zIndex,
+		})
+	end
+
+	if hasViewportPreview and item.previewKind == "CrewMember" then
+		return e(PreviewViewport, {
+			previewKind = item.previewKind,
+			previewName = item.previewName,
+			position = position,
+			size = size,
+			zIndex = zIndex,
+			fieldOfView = props.fieldOfView or 34,
+		})
+	end
 
 	if item and item.image and item.image ~= "" then
 		return e("ImageLabel", {
@@ -482,7 +655,7 @@ local function renderItemPreview(item, props)
 		})
 	end
 
-	if item and item.previewKind then
+	if hasViewportPreview then
 		return e(PreviewViewport, {
 			previewKind = item.previewKind,
 			previewName = item.previewName,
@@ -573,10 +746,7 @@ local function useInteractiveState(enabled, allowPress)
 end
 
 local function mergeProps(baseProps, extraProps)
-	local merged = {}
-	for key, value in pairs(baseProps) do
-		merged[key] = value
-	end
+	local merged = table.clone(baseProps)
 	for key, value in pairs(extraProps) do
 		merged[key] = value
 	end
@@ -747,161 +917,9 @@ local function AnimatedInventoryModal(props)
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
 			Position = props.isOpen and (props.openPosition or INVENTORY_MODAL_OPEN_POSITION) or (props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION),
-			Size = props.panelSize or UDim2.new(0.82, 0, 0.76, 0),
+			Size = props.panelSize or UDim2.fromScale(0.82, 0.76),
 			ZIndex = 5,
 		}, panelChildren),
-	})
-end
-
-local function statChip(props)
-	local accent = props.accentColor or PALETTE.Orange
-	local size = props.size or UDim2.fromOffset(176, 58)
-	local height = size.Y.Scale == 0 and size.Y.Offset or 58
-	local compact = props.compact == true or height <= 40
-	local showAccent = props.showAccent ~= false
-	local backgroundColor = props.backgroundColor3 or PALETTE.Card
-	local gradientStart = props.gradientStartColor3 or backgroundColor
-	local gradientEnd = props.gradientEndColor3 or PALETTE.CardSoft
-	local strokeTransparency = props.strokeTransparency or 0.38
-	local labelColor = props.labelColor3 or PALETTE.MutedSoft
-	local cornerRadius = compact and 13 or 16
-	local accentHeight = compact and 2 or 3
-	local labelHeight = compact and 10 or 12
-	local valueY = compact and 12 or 20
-	local valueHeight = compact and 14 or 16
-	local paddingTop = compact and 8 or 12
-	if not showAccent then
-		paddingTop += compact and 1 or 2
-	end
-
-	return e("Frame", {
-		BackgroundColor3 = backgroundColor,
-		BorderSizePixel = 0,
-		LayoutOrder = props.layoutOrder or 0,
-		Size = size,
-	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, cornerRadius),
-		}),
-		Stroke = e("UIStroke", {
-			Color = accent,
-			Transparency = strokeTransparency,
-			Thickness = 1.1,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, gradientStart),
-				ColorSequenceKeypoint.new(1, gradientEnd),
-			}),
-		}),
-		Accent = showAccent and e("Frame", {
-			BackgroundColor3 = accent,
-			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, accentHeight),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, cornerRadius),
-			}),
-		}) or nil,
-		Padding = e("UIPadding", {
-			PaddingTop = UDim.new(0, paddingTop),
-			PaddingBottom = UDim.new(0, compact and 6 or 10),
-			PaddingLeft = UDim.new(0, compact and 10 or 14),
-			PaddingRight = UDim.new(0, compact and 10 or 14),
-		}),
-		Label = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
-			Size = UDim2.new(1, 0, 0, labelHeight),
-			Text = props.label or "",
-			TextColor3 = labelColor,
-			TextSize = compact and 9 or 10,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-		Value = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(0, valueY),
-			Size = UDim2.new(1, 0, 0, valueHeight),
-			Text = props.value or "",
-			TextColor3 = PALETTE.Text,
-			TextSize = props.valueTextSize or (compact and 14 or 17),
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-	})
-end
-
-local function tabButton(props)
-	local active = props.active == true
-	local accent = props.accentColor or PALETTE.Orange
-
-	return e("TextButton", {
-		AutoButtonColor = false,
-		BackgroundColor3 = active and PALETTE.Card or PALETTE.CardSoft,
-		BackgroundTransparency = 0.02,
-		BorderSizePixel = 0,
-		LayoutOrder = props.layoutOrder or 0,
-		Size = props.size or UDim2.new(1, 0, 0, 48),
-		Text = "",
-		[React.Event.Activated] = props.onActivated,
-	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 14),
-		}),
-		Stroke = e("UIStroke", {
-			Color = active and accent or PALETTE.StrokeSoft,
-			Transparency = active and 0.12 or 0.26,
-			Thickness = active and 1.4 or 1,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, active and Color3.fromRGB(70, 49, 37) or PALETTE.Card),
-				ColorSequenceKeypoint.new(1, active and Color3.fromRGB(54, 39, 31) or PALETTE.CardSoft),
-			}),
-		}),
-		AccentRail = e("Frame", {
-			BackgroundColor3 = active and accent or PALETTE.StrokeSoft,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(0, 7),
-			Size = UDim2.fromOffset(active and 6 or 3, 34),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-		}),
-		Label = e("TextLabel", {
-			BackgroundTransparency = 1,
-				Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromOffset(16, 0),
-			Size = UDim2.new(1, -54, 1, 0),
-			Text = props.label or "",
-			TextColor3 = PALETTE.Text,
-			TextSize = 12,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-		Count = e("TextLabel", {
-			AnchorPoint = Vector2.new(1, 0.5),
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = PALETTE.Background,
-			BackgroundTransparency = active and 0 or 0.08,
-			Position = UDim2.new(1, -10, 0.5, 0),
-			Font = Enum.Font.GothamBold,
-			Text = tostring(props.count or 0),
-			TextColor3 = active and accent or PALETTE.Muted,
-			TextSize = 11,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 4),
-				PaddingBottom = UDim.new(0, 4),
-				PaddingLeft = UDim.new(0, 8),
-				PaddingRight = UDim.new(0, 8),
-			}),
-		}),
 	})
 end
 
@@ -918,11 +936,14 @@ local function hotbarSlot(props)
 	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(20, 28, 44), 0.78) or Color3.fromRGB(13, 19, 31)
 	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 39, 61), 0.84) or Color3.fromRGB(18, 26, 41)
 	local slotBottomColor = item and accent:Lerp(Color3.fromRGB(12, 17, 30), 0.92) or Color3.fromRGB(10, 14, 24)
+	local staticPreviewImage = getStaticCrewPreviewImage(item)
+	local hasStaticPreview = staticPreviewImage ~= ""
 
 	local slotProps = mergeProps({
 		BackgroundColor3 = slotBaseColor,
 		BackgroundTransparency = item and (emptySlot and 0.58 or 0.3) or 0.76,
 		BorderSizePixel = 0,
+		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
 		ref = hoverRef,
 		Size = UDim2.fromOffset(64, 64),
@@ -937,15 +958,18 @@ local function hotbarSlot(props)
 		end
 	end
 
-	local previewChild = renderItemPreview(item, {
-		position = UDim2.fromScale(0.5, 0.52),
-		size = UDim2.fromOffset(40, 40),
-		zIndex = zIndexBase + 3 + hoverZIndexOffset,
-		fallbackFont = Enum.Font.GothamMedium,
-		fallbackTextColor = PALETTE.Muted,
-		fallbackTextSize = 10,
-		fallbackSize = UDim2.new(1, -12, 0, 18),
-	})
+	local previewChild = nil
+	if not hasStaticPreview then
+		previewChild = renderItemPreview(item, {
+			position = UDim2.fromScale(0.5, 0.52),
+			size = UDim2.fromOffset(40, 40),
+			zIndex = zIndexBase + 3 + hoverZIndexOffset,
+			fallbackFont = Enum.Font.GothamMedium,
+			fallbackTextColor = PALETTE.Muted,
+			fallbackTextSize = 10,
+			fallbackSize = UDim2.new(1, -12, 0, 18),
+		})
+	end
 
 	return e(interactive and "TextButton" or "Frame", slotProps, {
 		Scale = e("UIScale", {
@@ -975,6 +999,7 @@ local function hotbarSlot(props)
 			BackgroundColor3 = Color3.fromRGB(7, 11, 20),
 			BackgroundTransparency = item and (hovered and 0.5 or 0.58) or 0.86,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -8),
 			ZIndex = zIndexBase + 1 + hoverZIndexOffset,
@@ -982,6 +1007,11 @@ local function hotbarSlot(props)
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 13),
 			}),
+			StaticPreview = hasStaticPreview and staticPreviewSlotContent(staticPreviewImage, {
+				cornerRadius = 13,
+				hovered = hovered,
+				zIndex = zIndexBase + 2 + hoverZIndexOffset,
+			}) or nil,
 		}),
 		KeyLabel = slot.slotLabel ~= nil and e("TextLabel", {
 			AutomaticSize = Enum.AutomaticSize.XY,
@@ -992,7 +1022,7 @@ local function hotbarSlot(props)
 			Text = tostring(slot.slotLabel),
 			TextColor3 = item and (lockedSlot and Color3.fromRGB(230, 236, 245) or PALETTE.Cream) or PALETTE.Steel,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -1015,7 +1045,7 @@ local function hotbarSlot(props)
 			Text = item.priceRobux and item.priceRobux > 0 and (tostring(item.priceRobux) .. " R$") or "LOCK",
 			TextColor3 = PALETTE.Cream,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -1037,7 +1067,7 @@ local function hotbarSlot(props)
 			Text = tostring(item.quantity),
 			TextColor3 = PALETTE.Cream,
 			TextSize = 10,
-			ZIndex = zIndexBase + 4 + hoverZIndexOffset,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -1052,205 +1082,6 @@ local function hotbarSlot(props)
 	})
 end
 
-local function itemCard(props)
-	local item = props.item or {}
-	local accent = item.accentColor or PALETTE.Orange
-	local interactive = item.interactive == true
-	local isEquipped = item.isEquipped == true
-
-	local itemProps = {
-		BackgroundColor3 = PALETTE.Card,
-		BorderSizePixel = 0,
-		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.fromOffset(156, 190),
-	}
-
-	if interactive then
-		itemProps.AutoButtonColor = false
-		itemProps.Text = ""
-		itemProps[React.Event.Activated] = function()
-			props.onActivated(item)
-		end
-	end
-
-	local previewChild = renderItemPreview(item, {
-		position = UDim2.fromScale(0.5, 0.5),
-		size = UDim2.fromOffset(74, 74),
-		zIndex = 3,
-		fallbackFont = Enum.Font.GothamBold,
-		fallbackTextColor = PALETTE.Text,
-		fallbackTextSize = 22,
-		fallbackTextWrapped = true,
-		fallbackSize = UDim2.new(1, -12, 1, -12),
-	})
-
-	return e(interactive and "TextButton" or "Frame", itemProps, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 18),
-		}),
-		Stroke = e("UIStroke", {
-			Color = isEquipped and PALETTE.Cream or PALETTE.Stroke,
-			Transparency = isEquipped and 0.02 or 0.42,
-			Thickness = isEquipped and 2.2 or 1,
-		}),
-		Glow = isEquipped and e("UIStroke", {
-			Color = accent,
-			Transparency = 0.72,
-			Thickness = 4,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, isEquipped and accent:Lerp(PALETTE.Card, 0.82) or PALETTE.Card),
-				ColorSequenceKeypoint.new(1, isEquipped and accent:Lerp(Color3.fromRGB(48, 35, 29), 0.72) or Color3.fromRGB(48, 35, 29)),
-			}),
-		}),
-		HeaderStrip = e("Frame", {
-			BackgroundColor3 = accent,
-			BackgroundTransparency = 0.18,
-			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, 4),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 18),
-			}),
-		}),
-		PreviewShell = e("Frame", {
-			BackgroundColor3 = PALETTE.PanelAlt,
-			BackgroundTransparency = 0.02,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(12, 12),
-			Size = UDim2.new(1, -24, 0, 86),
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 14),
-			}),
-			Stroke = e("UIStroke", {
-				Color = accent,
-				Transparency = 0.55,
-			}),
-			PreviewTint = e("Frame", {
-				BackgroundColor3 = accent,
-				BackgroundTransparency = isEquipped and 0.8 or 0.88,
-				BorderSizePixel = 0,
-				Size = UDim2.fromScale(1, 1),
-				ZIndex = 1,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 14),
-				}),
-			}),
-			EquippedBanner = isEquipped and e("Frame", {
-				AnchorPoint = Vector2.new(0.5, 1),
-				BackgroundColor3 = accent,
-				BackgroundTransparency = 0.04,
-				BorderSizePixel = 0,
-				Position = UDim2.new(0.5, 0, 1, -8),
-				Size = UDim2.new(1, -16, 0, 22),
-				ZIndex = 4,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 999),
-				}),
-				Stroke = e("UIStroke", {
-					Color = PALETTE.Cream,
-					Transparency = 0.18,
-					Thickness = 1.2,
-				}),
-				Label = e("TextLabel", {
-					BackgroundTransparency = 1,
-					Size = UDim2.fromScale(1, 1),
-					Font = Enum.Font.GothamBold,
-					Text = "IN HAND",
-					TextColor3 = PALETTE.Text,
-					TextSize = 10,
-					ZIndex = 5,
-				}),
-			}) or nil,
-			Preview = previewChild,
-		}),
-		Name = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(14, 106),
-			Size = UDim2.new(1, -28, 0, 34),
-			Text = item.displayName or "",
-			TextColor3 = PALETTE.Text,
-			TextSize = 13,
-			TextWrapped = true,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextYAlignment = Enum.TextYAlignment.Top,
-		}),
-		Subtitle = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromOffset(14, 144),
-			Size = UDim2.new(1, -28, 0, 14),
-			Text = item.subtitle or "",
-			TextColor3 = accent,
-			TextSize = 10,
-			TextWrapped = true,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-		Footer = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.Gotham,
-			Position = UDim2.fromOffset(14, 160),
-			Size = UDim2.new(1, -28, 0, 14),
-			Text = item.footer or "",
-			TextColor3 = isEquipped and PALETTE.Cream or PALETTE.Muted,
-			TextSize = 9,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
-		Count = (item.quantity or 0) > 1 and e("TextLabel", {
-			AnchorPoint = Vector2.new(1, 0),
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = PALETTE.Background,
-			BackgroundTransparency = 0.08,
-			Position = UDim2.new(1, -12, 0, 12),
-			Font = Enum.Font.GothamBold,
-			Text = "x" .. tostring(item.quantity),
-			TextColor3 = PALETTE.Text,
-			TextSize = 10,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 3),
-				PaddingBottom = UDim.new(0, 3),
-				PaddingLeft = UDim.new(0, 7),
-				PaddingRight = UDim.new(0, 7),
-			}),
-		}) or nil,
-		Equipped = isEquipped and e("TextLabel", {
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = accent,
-			BackgroundTransparency = 0.02,
-			Position = UDim2.fromOffset(12, 86),
-			Font = Enum.Font.GothamBold,
-			Text = "Equipped",
-			TextColor3 = PALETTE.Text,
-			TextSize = 11,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-			Stroke = e("UIStroke", {
-				Color = PALETTE.Cream,
-				Transparency = 0.18,
-				Thickness = 1.1,
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 4),
-				PaddingBottom = UDim.new(0, 4),
-				PaddingLeft = UDim.new(0, 9),
-				PaddingRight = UDim.new(0, 9),
-			}),
-		}) or nil,
-	})
-end
-
 local function inventoryToggleButton(props)
 	local layout = props.toggleLayout or {}
 	local position = layout.position or UDim2.new(1, -26, 1, -24)
@@ -1258,7 +1089,7 @@ local function inventoryToggleButton(props)
 	local compact = layout.compact == true
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(props.onToggle ~= nil)
 	local zIndexBase = props.zIndexBase or 0
-	local iconPosition = compact and UDim2.new(0.5, 0, 0, 38) or UDim2.new(0.5, 0, 0.44, 0)
+	local iconPosition = compact and UDim2.new(0.5, 0, 0, 38) or UDim2.fromScale(0.5, 0.44)
 	local iconSize = compact and UDim2.fromOffset(56, 56) or UDim2.fromOffset(34, 34)
 	local toggleIcon = props.toggleIcon or {}
 	local hasLegacyIcon = typeof(toggleIcon.image) == "string" and toggleIcon.image ~= ""
@@ -1469,7 +1300,7 @@ local function ledgerLine(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.fromOffset(0, -1),
-			Size = multiLine and UDim2.new(1, 0, 0, 16) or UDim2.new(labelWidthScale, 0, 1, 0),
+			Size = multiLine and UDim2.new(1, 0, 0, 16) or UDim2.fromScale(labelWidthScale, 1),
 			Text = props.label or "",
 			TextColor3 = PALETTE.Cream,
 			TextSize = 18,
@@ -1481,7 +1312,7 @@ local function ledgerLine(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = multiLine and UDim2.fromOffset(0, 18) or UDim2.new(1, 0, 0, 3),
-			Size = multiLine and UDim2.new(1, 0, 0, 22) or UDim2.new(valueWidthScale, 0, 1, 0),
+			Size = multiLine and UDim2.new(1, 0, 0, 22) or UDim2.fromScale(valueWidthScale, 1),
 			Text = props.value or "",
 			TextColor3 = props.valueColor3 or PALETTE.Cyan,
 			TextSize = props.valueTextSize or (multiLine and 15 or 18),
@@ -1755,6 +1586,7 @@ local function manifestTile(props)
 		PreviewPlate = e("Frame", {
 			BackgroundColor3 = previewPlateColor,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(10, 12),
 			Size = UDim2.new(1, -20, 0, 84),
 			ZIndex = 2,
@@ -1905,26 +1737,51 @@ end
 local function captainsLogRow(props)
 	local entry = props.entry or {}
 	local accent = entry.accentColor or PALETTE.Sea
+	local hasViewportPreview = entry.previewKind ~= nil
+		and tostring(entry.previewKind) ~= ""
+		and entry.previewName ~= nil
+		and tostring(entry.previewName) ~= ""
+	local staticPreviewImage = getStaticCrewPreviewImage(entry)
 
-	local previewChild = entry.image and entry.image ~= "" and e("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Image = entry.image,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(64, 64),
-		ScaleType = Enum.ScaleType.Fit,
-		ZIndex = 3,
-	}) or e("TextLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBold,
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(1, -10, 1, -10),
-		Text = entry.fallbackText or initials(entry.displayName),
-		TextColor3 = PALETTE.Cream,
-		TextSize = 20,
-		ZIndex = 3,
-	})
+	local previewChild
+	if staticPreviewImage ~= "" then
+		previewChild = staticCrewPreviewImage(staticPreviewImage, {
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromScale(1, 1),
+			zIndex = 3,
+		})
+	elseif hasViewportPreview then
+		previewChild = e(PreviewViewport, {
+			previewKind = entry.previewKind,
+			previewName = entry.previewName,
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromOffset(70, 70),
+			zIndex = 3,
+			fieldOfView = 34,
+		})
+	elseif entry.image and entry.image ~= "" then
+		previewChild = e("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Image = entry.image,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(64, 64),
+			ScaleType = Enum.ScaleType.Fit,
+			ZIndex = 3,
+		})
+	else
+		previewChild = e("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.new(1, -10, 1, -10),
+			Text = entry.fallbackText or initials(entry.displayName),
+			TextColor3 = PALETTE.Cream,
+			TextSize = 20,
+			ZIndex = 3,
+		})
+	end
 
 	return e("Frame", {
 		BackgroundColor3 = Color3.fromRGB(16, 22, 35),
@@ -1960,6 +1817,7 @@ local function captainsLogRow(props)
 		PreviewPlate = e("Frame", {
 			BackgroundColor3 = accent:Lerp(Color3.fromRGB(59, 63, 78), 0.9),
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(16, 12),
 			Size = UDim2.fromOffset(72, 64),
 			ZIndex = 2,
@@ -2257,7 +2115,7 @@ local function shipUpgradeModal(props)
 			BackgroundTransparency = 0.04,
 			BorderSizePixel = 0,
 			LayoutOrder = index,
-			Size = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.fromScale(1, 0),
 			ZIndex = 84,
 		}, {
 			Corner = e("UICorner", {
@@ -2389,7 +2247,7 @@ local function shipUpgradeModal(props)
 					BackgroundTransparency = 1,
 					Font = Enum.Font.Cartoon,
 					LayoutOrder = 2,
-					Size = UDim2.new(1, 0, 0, 0),
+					Size = UDim2.fromScale(1, 0),
 					Text = tostring(modal.Title or "Ship upgraded"),
 					TextColor3 = PALETTE.Cream,
 					TextSize = 34,
@@ -2403,7 +2261,7 @@ local function shipUpgradeModal(props)
 					AutomaticSize = Enum.AutomaticSize.Y,
 					BackgroundTransparency = 1,
 					LayoutOrder = 3,
-					Size = UDim2.new(1, 0, 0, 0),
+					Size = UDim2.fromScale(1, 0),
 					ZIndex = 81,
 				}, listChildren),
 				ActionRow = e("Frame", {
@@ -2417,7 +2275,7 @@ local function shipUpgradeModal(props)
 						AutoButtonColor = false,
 						BackgroundColor3 = accent,
 						BorderSizePixel = 0,
-						Position = UDim2.new(1, 0, 0, 0),
+						Position = UDim2.fromScale(1, 0),
 						Size = UDim2.fromOffset(136, 42),
 						Text = "Okay",
 						TextColor3 = Color3.fromRGB(14, 21, 22),
@@ -2443,8 +2301,8 @@ end
 local function App(props)
 	local summary = props.summary or {}
 	local titles = props.titles or {}
-	local crewQuickSlotsUnlocked = summary.crewQuickSlotsUnlocked or summary.brainrotQuickSlotsUnlocked or 0
-	local crewQuickSlotsMax = summary.crewQuickSlotsMax or summary.brainrotQuickSlotsMax or crewQuickSlotsUnlocked
+	local crewQuickSlotsUnlocked = summary.crewQuickSlotsUnlocked or 0
+	local crewQuickSlotsMax = summary.crewQuickSlotsMax or crewQuickSlotsUnlocked
 	local activeView = props.activeView or "Inventory"
 	local showingCaptainLog = activeView == "CaptainLog"
 	local showingTitles = activeView == "Titles"
@@ -3225,7 +3083,7 @@ local function App(props)
 							AnchorPoint = Vector2.new(0.5, 0.5),
 							BackgroundTransparency = 1,
 							Font = Enum.Font.Cartoon,
-							Position = UDim2.new(0.5, 0, 0.52, 0),
+							Position = UDim2.fromScale(0.5, 0.52),
 							Size = UDim2.fromOffset(360, 26),
 							Text = showingCaptainLog
 									and (((props.captainLog and props.captainLog.totalCount) or 0) > 0
@@ -3277,7 +3135,7 @@ local function App(props)
 	children.InventoryModal = e(AnimatedInventoryModal, {
 		isOpen = props.isOpen,
 		panelChildren = modalPanelChildren,
-		panelSize = UDim2.new(0.82, 0, 0.76, 0),
+		panelSize = UDim2.fromScale(0.82, 0.76),
 		openPosition = INVENTORY_MODAL_OPEN_POSITION,
 		closedPosition = INVENTORY_MODAL_CLOSED_POSITION,
 		backdropTransparency = INVENTORY_MODAL_BACKDROP_TRANSPARENCY,

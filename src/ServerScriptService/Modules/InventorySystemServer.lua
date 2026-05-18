@@ -3,9 +3,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
-local CrewMemberCanonicalReadGate = require(
-	ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberCanonicalReadGate")
-)
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
 local dataManagerModule = nil
@@ -53,16 +52,18 @@ local crewMemberEquipRemote = getOrCreateRemote(ReplicatedStorage, "CrewMemberEq
 
 local Module = {}
 local chestToolServiceCache = nil
-local devilFruitInventoryServiceCache = nil
 local sliceServiceCache = nil
 local crewInventoryCallbackRegistered = false
-local CHEST_DEBUG = true
-local FRUIT_EQUIP_DEBUG = true
-local R6G_WELD_DEBUG = true
-local INVENTORY_SNAPSHOT_DEBUG = true
+local CHEST_DEBUG = false
+local FRUIT_EQUIP_DEBUG = false
+local R6G_WELD_DEBUG = false
+local INVENTORY_SNAPSHOT_DEBUG = false
 local lastCrewInventoryCounts = setmetatable({}, { __mode = "k" })
+local pendingCrewInventoryCountPushes = setmetatable({}, { __mode = "k" })
+local invalidCrewEquipWarnings = {}
 
 local DATA_READY_TIMEOUT = 30
+local TOOL_KIND_CREW_MEMBER = "CrewMember"
 local TOOL_KIND_DEVIL_FRUIT = "DevilFruit"
 local TOOL_ATTR_KIND = "InventoryItemKind"
 local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
@@ -77,6 +78,14 @@ local MODEL_VARIANT_ATTRIBUTE_NAMES = {
 local EQUIPPED_ITEM_KIND_ATTRIBUTE = "EquippedInventoryItemKind"
 local EQUIPPED_ITEM_NAME_ATTRIBUTE = "EquippedInventoryItemName"
 
+local function isCrewMemberKind(kind)
+	return kind == TOOL_KIND_CREW_MEMBER
+end
+
+local function normalizeItemKind(kind)
+	return kind
+end
+
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
 		return
@@ -89,6 +98,24 @@ local function inventorySnapshotLog(...)
 	if INVENTORY_SNAPSHOT_DEBUG then
 		print("[INV][SNAPSHOT]", ...)
 	end
+end
+
+local function warnInvalidCrewIdentity(source, player, identity)
+	local key = tostring(source or "unknown") .. ":" .. (player and tostring(player.UserId) or "unknown") .. ":" .. tostring(identity or "")
+	if invalidCrewEquipWarnings[key] then
+		return
+	end
+	invalidCrewEquipWarnings[key] = true
+	warn(string.format(
+		"[InventorySystem] Rejected unknown CrewMember identity source=%s player=%s identity=%s",
+		tostring(source or "unknown"),
+		player and player.Name or "unknown",
+		tostring(identity or "")
+	))
+end
+
+local function resolveCanonicalCrewMemberId(identity)
+	return CrewCatalog.ResolveCanonicalCrewMemberId(identity)
 end
 
 local function fruitEquipDebug(message, ...)
@@ -181,19 +208,6 @@ local function getChestToolService()
 
 	chestToolServiceCache = if ok then service else false
 	return if chestToolServiceCache == false then nil else chestToolServiceCache
-end
-
-local function getDevilFruitInventoryService()
-	if devilFruitInventoryServiceCache ~= nil then
-		return devilFruitInventoryServiceCache
-	end
-
-	local ok, service = pcall(function()
-		return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitInventoryService"))
-	end)
-
-	devilFruitInventoryServiceCache = if ok then service else false
-	return if devilFruitInventoryServiceCache == false then nil else devilFruitInventoryServiceCache
 end
 
 local function getSliceService()
@@ -343,7 +357,7 @@ local function resolveToolIdentity(player, tool)
 		return nil, nil
 	end
 
-	local itemKind = tool:GetAttribute("InventoryItemKind")
+	local itemKind = normalizeItemKind(tool:GetAttribute("InventoryItemKind"))
 	local itemName = tool:GetAttribute("InventoryItemName") or tool:GetAttribute("InvItem") or tool.Name
 	if typeof(itemName) ~= "string" or itemName == "" then
 		return nil, nil
@@ -359,7 +373,7 @@ local function resolveToolIdentity(player, tool)
 	local chestInventory = player:FindFirstChild("ChestInventory")
 
 	if inventory and inventory:FindFirstChild(itemName) then
-		return "Brainrot", itemName
+		return TOOL_KIND_CREW_MEMBER, itemName
 	end
 	if devilFruits and devilFruits:FindFirstChild(itemName) then
 		return "DevilFruit", itemName
@@ -397,7 +411,7 @@ local function findInventoryTool(container, kind, name)
 
 	for _, child in ipairs(container:GetChildren()) do
 		if child:IsA("Tool") then
-			local itemKind = child:GetAttribute("InventoryItemKind")
+			local itemKind = normalizeItemKind(child:GetAttribute("InventoryItemKind"))
 			local itemName = child:GetAttribute("InventoryItemName")
 			if itemKind == kind and itemName == name then
 				return child
@@ -428,21 +442,14 @@ local function unequipIfEquipped(player, toolName, itemKind)
 	end
 end
 
-local function ownsBrainrot(player, name)
-	local inventory = CrewInstanceService.GetCrewInventory(player)
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
+local function ownsCrewMember(player, name)
+	local requestedName, info = resolveCanonicalCrewMemberId(name)
+	if not info then
+		warnInvalidCrewIdentity("owns_check", player, name)
 		return false
 	end
-
-	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.StorageName or "") == tostring(name or "")
-			and tostring(instanceData.AssignedStand or "") == ""
-		then
-			return true
-		end
-	end
-	return false
+	local counts = CrewInventoryDerivedCache.GetCounts(player)
+	return (tonumber(counts[requestedName]) or 0) > 0
 end
 
 local function ownsGear(player, name)
@@ -487,11 +494,20 @@ local function ownsChest(player, tierName)
 end
 
 local function waitForPlayerDataReady(player)
-	if player:GetAttribute("PlayerDataReady") == true and DataManager:IsReady(player) then
+	local readyOk, isReady = pcall(function()
+		return DataManager:IsReady(player)
+	end)
+	if player:GetAttribute("PlayerDataReady") == true and readyOk == true and isReady == true then
 		return true
 	end
 
-	if DataManager.WaitUntilReady and DataManager:WaitUntilReady(player, DATA_READY_TIMEOUT) then
+	local waitOk, waitResult = pcall(function()
+		if DataManager.WaitUntilReady then
+			return DataManager:WaitUntilReady(player, DATA_READY_TIMEOUT)
+		end
+		return false
+	end)
+	if waitOk == true and waitResult == true then
 		local deadline = os.clock() + DATA_READY_TIMEOUT
 		while player.Parent == Players and os.clock() < deadline do
 			if player:GetAttribute("PlayerDataReady") == true then
@@ -501,7 +517,24 @@ local function waitForPlayerDataReady(player)
 		end
 	end
 
-	return player.Parent == Players and player:GetAttribute("PlayerDataReady") == true and DataManager:IsReady(player)
+	local finalOk, finalReady = pcall(function()
+		return DataManager:IsReady(player)
+	end)
+	return player.Parent == Players
+		and player:GetAttribute("PlayerDataReady") == true
+		and finalOk == true
+		and finalReady == true
+end
+
+local function isPlayerDataReadyNow(player)
+	if player.Parent ~= Players or player:GetAttribute("PlayerDataReady") ~= true then
+		return false
+	end
+
+	local readyOk, isReady = pcall(function()
+		return DataManager:IsReady(player)
+	end)
+	return readyOk == true and isReady == true
 end
 
 local function readPositiveQuantity(folder)
@@ -520,6 +553,26 @@ end
 local function applyDisplayMetadata(entry, metadata)
 	if typeof(entry) ~= "table" or typeof(metadata) ~= "table" then
 		return
+	end
+
+	local crewMemberId = tostring(metadata.CrewMemberId or "")
+	if crewMemberId ~= "" then
+		entry.CrewMemberId = crewMemberId
+	end
+
+	local instanceId = tostring(metadata.InstanceId or "")
+	if instanceId ~= "" then
+		entry.InstanceId = instanceId
+	end
+
+	local modelName = tostring(metadata.ModelName or "")
+	if modelName ~= "" then
+		entry.ModelName = modelName
+	end
+
+	local legacyStorageName = tostring(metadata.LegacyStorageName or "")
+	if legacyStorageName ~= "" then
+		entry.LegacyStorageName = legacyStorageName
 	end
 
 	local displayName = tostring(metadata.DisplayName or "")
@@ -567,7 +620,7 @@ local function applyModelPreviewMetadata(entry, descriptor)
 	end
 end
 
-local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewDescriptor)
+local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewDescriptor, extraFields)
 	if quantity and quantity > 0 then
 		local entry = {
 			Name = tostring(name),
@@ -575,27 +628,21 @@ local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewD
 		}
 		applyDisplayMetadata(entry, metadata)
 		applyModelPreviewMetadata(entry, modelPreviewDescriptor)
+		if typeof(extraFields) == "table" then
+			for key, value in pairs(extraFields) do
+				if value ~= nil then
+					entry[key] = value
+				end
+			end
+		end
 		table.insert(list, entry)
 	end
 end
 
 local function getCrewInventoryAvailableCounts(player, inventory)
-	inventory = if typeof(inventory) == "table" then inventory else CrewInstanceService.GetCrewInventory(player)
-	local counts = {}
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return counts
-	end
-
-	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.AssignedStand or "") == ""
-			and tostring(instanceData.StorageName or "") ~= ""
-		then
-			local storageName = tostring(instanceData.StorageName)
-			counts[storageName] = (counts[storageName] or 0) + 1
-		end
-	end
-	return counts
+	return CrewInventoryDerivedCache.GetCounts(player, {
+		Inventory = inventory,
+	})
 end
 
 local function pushCrewInventoryCounts(player, inventory)
@@ -605,38 +652,60 @@ local function pushCrewInventoryCounts(player, inventory)
 
 	for storageName, quantity in pairs(counts) do
 		seen[storageName] = true
-		updateRemote:FireClient(player, "Brainrot", storageName, quantity)
-		if quantity > 0 then
-			CrewMemberCanonicalReadGate.CompareInventoryDisplay(player, storageName, {
-				LogThrottleSeconds = 60,
-			})
+		if previous[storageName] ~= quantity then
+			updateRemote:FireClient(player, TOOL_KIND_CREW_MEMBER, storageName, quantity)
 		end
 	end
 
 	for storageName in pairs(previous) do
 		if seen[storageName] ~= true then
-			updateRemote:FireClient(player, "Brainrot", storageName, 0)
-			unequipIfEquipped(player, storageName, "Brainrot")
+			updateRemote:FireClient(player, TOOL_KIND_CREW_MEMBER, storageName, 0)
+			unequipIfEquipped(player, storageName, TOOL_KIND_CREW_MEMBER)
 		end
 	end
 
 	lastCrewInventoryCounts[player] = counts
 end
 
+local function scheduleCrewInventoryCountsPush(player, inventory)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	local pending = pendingCrewInventoryCountPushes[player]
+	if pending ~= nil then
+		pending.Inventory = inventory or pending.Inventory
+		return
+	end
+
+	pending = {
+		Inventory = inventory,
+	}
+	pendingCrewInventoryCountPushes[player] = pending
+
+	task.delay(0.1, function()
+		if pendingCrewInventoryCountPushes[player] ~= pending then
+			return
+		end
+		pendingCrewInventoryCountPushes[player] = nil
+		if player.Parent == Players then
+			pushCrewInventoryCounts(player, pending.Inventory)
+		end
+	end)
+end
+
 local function buildInventorySnapshot(player)
-	local ready = waitForPlayerDataReady(player)
+	local ready = isPlayerDataReadyNow(player)
 	if not ready then
 		inventorySnapshotLog("notReady", "player", player.Name)
 		return {
 			Ready = false,
 			Reason = "data_not_ready",
-			Brainrots = {},
 			Gears = {},
 			DevilFruits = {},
 			Chests = {},
 			Crew = {},
 			Counts = {
-				Brainrots = 0,
 				Gears = 0,
 				DevilFruits = 0,
 				Chests = 0,
@@ -645,13 +714,12 @@ local function buildInventorySnapshot(player)
 		}
 	end
 
-	local brainrots = {}
 	local gears = {}
 	local devilFruits = {}
 	local chests = {}
 	local crew = {}
 
-	local inventory = player:FindFirstChild("Inventory") or player:WaitForChild("Inventory", 5)
+	local inventory = player:FindFirstChild("Inventory")
 	if inventory and inventory:IsA("Folder") then
 		for _, child in ipairs(inventory:GetChildren()) do
 			if child:IsA("Folder") then
@@ -664,22 +732,23 @@ local function buildInventorySnapshot(player)
 		end
 	end
 
-	for storageName, quantity in pairs(getCrewInventoryAvailableCounts(player)) do
-		local metadata = CrewMemberCanonicalReadGate.ResolveInventoryDisplayMetadata(player, storageName, {
-			LogThrottleSeconds = 60,
+	local derivedCrewInventory = CrewInventoryDerivedCache.Get(player)
+	for _, stack in ipairs(derivedCrewInventory.Stacks) do
+		local storageName = stack.CrewMemberId
+		local quantity = stack.Quantity
+		appendQuantityEntry(crew, storageName, quantity, stack.Metadata, stack.ModelPreview, {
+			StackId = stack.StackId,
+			StackNumber = stack.StackNumber,
+			StackOrder = stack.StackOrder,
+			MaxQuantity = stack.MaxQuantity,
+			InstanceIds = table.clone(stack.InstanceIds),
+			RepresentativeInstanceId = stack.RepresentativeInstanceId,
+			CrewMemberId = storageName,
+			Rarity = stack.Rarity,
 		})
-		local modelPreviewDescriptor = CrewMemberCanonicalReadGate.ResolveInventoryModelPreviewDescriptor(
-			player,
-			storageName,
-			{
-				LogThrottleSeconds = 60,
-				SkipLog = true,
-			}
-		)
-		appendQuantityEntry(brainrots, storageName, quantity, metadata, modelPreviewDescriptor)
 	end
 
-	local gearsFolder = player:FindFirstChild("Gears") or player:WaitForChild("Gears", 5)
+	local gearsFolder = player:FindFirstChild("Gears")
 	if gearsFolder and gearsFolder:IsA("Folder") then
 		for _, child in ipairs(gearsFolder:GetChildren()) do
 			if child:IsA("BoolValue") and child.Value == true then
@@ -698,31 +767,13 @@ local function buildInventorySnapshot(player)
 		end
 	end
 
-	local crewInventory = player:FindFirstChild("CrewInventory")
-	if crewInventory and crewInventory:IsA("Folder") then
-		for _, child in ipairs(crewInventory:GetChildren()) do
-			if child:IsA("Folder") then
-				local quantity = readPositiveQuantity(child)
-				if quantity then
-					appendQuantityEntry(crew, child.Name, quantity)
-				else
-					table.insert(crew, { Name = child.Name })
-				end
-			elseif child:IsA("BoolValue") and child.Value == true then
-				table.insert(crew, { Name = child.Name, Owned = true })
-			end
-		end
-	end
-
 	local snapshot = {
 		Ready = true,
-		Brainrots = brainrots,
 		Gears = gears,
 		DevilFruits = devilFruits,
 		Chests = chests,
 		Crew = crew,
 		Counts = {
-			Brainrots = #brainrots,
 			Gears = #gears,
 			DevilFruits = #devilFruits,
 			Chests = #chests,
@@ -734,8 +785,6 @@ local function buildInventorySnapshot(player)
 		"sent",
 		"player",
 		player.Name,
-		"brainrots",
-		snapshot.Counts.Brainrots,
 		"crew",
 		snapshot.Counts.Crew,
 		"devilFruits",
@@ -908,7 +957,7 @@ local function toggleEquip(player, kind, toolName)
 					finalTool:SetAttribute("FruitManualGripC0Mode", c0Mode)
 
 					weld.Parent = handle
-					print(string.format("[Inventory] Applied manual weld for R6G model compatibility c0Mode=%s.", c0Mode))
+					r6gWeldDebug("applied manual weld c0Mode=%s", c0Mode)
 					if useR6GripFrame then
 						logR6GLiveGripState((source or "toggle.enforceWeld") .. ":after", player, finalTool, refreshedChar)
 					end
@@ -916,40 +965,40 @@ local function toggleEquip(player, kind, toolName)
 			end
 		end
 
-		local equipped = findInventoryTool(refreshedChar, kind, toolName) or refreshedChar:FindFirstChild(toolName)
-		if equipped and equipped:IsA("Tool") then
+		local equippedAfterRefresh = findInventoryTool(refreshedChar, kind, toolName) or refreshedChar:FindFirstChild(toolName)
+		if equippedAfterRefresh and equippedAfterRefresh:IsA("Tool") then
 			if debugDevilFruit then
 				fruitEquipDebug(
 					"toggle equip success player=%s name=%s tool=%s %s",
 					player.Name,
 					tostring(toolName),
-					equipped.Name,
-					debugToolActivationState(equipped)
+					equippedAfterRefresh.Name,
+					debugToolActivationState(equippedAfterRefresh)
 				)
 				fruitEquipDebug(
 					"activation expected after world click player=%s name=%s bindId=%s equippedInCharacter=%s enabled=%s manual=%s",
 					player.Name,
 					tostring(toolName),
-					debugToolBindId(equipped),
-					tostring(equipped.Parent == refreshedChar),
-					tostring(equipped.Enabled),
-					tostring(equipped.ManualActivationOnly)
+					debugToolBindId(equippedAfterRefresh),
+					tostring(equippedAfterRefresh.Parent == refreshedChar),
+					tostring(equippedAfterRefresh.Enabled),
+					tostring(equippedAfterRefresh.ManualActivationOnly)
 				)
 			end
 			if kind == "Chest" then
 				chestDebug(
 					"toggleEquip chest success player=%s tool=%s parent=%s",
 					player.Name,
-					tostring(equipped.Name),
-					equipped.Parent and equipped.Parent:GetFullName() or "nil"
+					tostring(equippedAfterRefresh.Name),
+					equippedAfterRefresh.Parent and equippedAfterRefresh.Parent:GetFullName() or "nil"
 				)
 			end
 			setEquippedInventoryAttributes(player, kind, toolName)
-			enforceWeld(equipped, "toggle.equipped")
+			enforceWeld(equippedAfterRefresh, "toggle.equipped")
 			if kind == TOOL_KIND_DEVIL_FRUIT then
 				task.delay(0.25, function()
-					if player.Parent == Players and equipped.Parent == refreshedChar then
-						enforceWeld(equipped, "toggle.equipped.delay0.25")
+					if player.Parent == Players and equippedAfterRefresh.Parent == refreshedChar then
+						enforceWeld(equippedAfterRefresh, "toggle.equipped.delay0.25")
 					end
 				end)
 			end
@@ -1002,23 +1051,6 @@ local function toggleEquip(player, kind, toolName)
 			)
 		end
 	end)
-end
-
-local function requestDevilFruitConsume(player, fruitKey)
-	local inventoryService = getDevilFruitInventoryService()
-	if not inventoryService or not inventoryService.RequestConsume then
-		fruitEquipDebug("consume bridge blocked player=%s fruit=%s reason=missing_inventory_service", player.Name, tostring(fruitKey))
-		return
-	end
-
-	local requested, reason = inventoryService.RequestConsume(player, fruitKey)
-	fruitEquipDebug(
-		"consume bridge result player=%s fruit=%s ok=%s reason=%s",
-		player.Name,
-		tostring(fruitKey),
-		tostring(requested),
-		tostring(reason)
-	)
 end
 
 local function watchInventory(player, inventory)
@@ -1200,6 +1232,7 @@ end
 
 local function handleEquipToggleRequest(player, kind, name)
 	if typeof(kind) ~= "string" or typeof(name) ~= "string" then return end
+	kind = normalizeItemKind(kind)
 	if kind == TOOL_KIND_DEVIL_FRUIT then
 		fruitEquipDebug(
 			"CrewMemberEquipToggleRemote received player=%s payload={kind=%s,name=%s}",
@@ -1217,14 +1250,19 @@ local function handleEquipToggleRequest(player, kind, name)
 		)
 	end
 
-	if kind == "Brainrot" then
-		if not ownsBrainrot(player, name) then return end
-		local canEquip = CrewQuickSlotService.CanEquipCrewMember(player, name)
-		if not canEquip then
-			CrewQuickSlotService.PromptUnlockForCrewMember(player, name)
+	if isCrewMemberKind(kind) then
+		local canonicalName, info = resolveCanonicalCrewMemberId(name)
+		if not info then
+			warnInvalidCrewIdentity("equip_request", player, name)
 			return
 		end
-		toggleEquip(player, kind, name)
+		if not ownsCrewMember(player, canonicalName) then return end
+		local canEquip = CrewQuickSlotService.CanEquipCrewMember(player, canonicalName)
+		if not canEquip then
+			CrewQuickSlotService.PromptUnlockForCrewMember(player, canonicalName)
+			return
+		end
+		toggleEquip(player, TOOL_KIND_CREW_MEMBER, canonicalName)
 		return
 	end
 
@@ -1278,7 +1316,7 @@ function Module.Start()
 		crewInventoryCallbackRegistered = true
 		CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, crewInventory)
 			if player and player.Parent == Players then
-				pushCrewInventoryCounts(player, crewInventory)
+				scheduleCrewInventoryCountsPush(player, crewInventory)
 			end
 		end)
 	end
@@ -1290,6 +1328,11 @@ function Module.Start()
 		watchGears(player, gears)
 		task.defer(function()
 			if waitForPlayerDataReady(player) then
+				CrewInventoryDerivedCache.MarkDirty(player, "player_data_ready")
+				CrewInstanceService.RepairCanonicalCrewState(player)
+				CrewInstanceService.SyncAvailableCounts(player, {
+					AllowLegacyMirrorWrite = true,
+				})
 				pushCrewInventoryCounts(player)
 			end
 		end)
@@ -1338,6 +1381,9 @@ function Module.Start()
 	end
 
 	Players.PlayerAdded:Connect(setup)
+	Players.PlayerRemoving:Connect(function(player)
+		lastCrewInventoryCounts[player] = nil
+	end)
 	for _, p in ipairs(Players:GetPlayers()) do
 		task.spawn(setup, p)
 	end

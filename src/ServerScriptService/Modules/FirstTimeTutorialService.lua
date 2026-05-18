@@ -35,15 +35,17 @@ local PUSH_PROGRESS_DELTA = 0.05
 local HIDDEN_LEADERSTATS_NAME = "HiddenLeaderstats"
 local TUTORIAL_VALUE_NAME = "Tutorial"
 local TUTORIAL_STARTER_GRANTED_PATH = "HiddenLeaderstats.TutorialStarterDoubloonsGranted"
-local TUTORIAL_BRAINROT_GRANTED_PATH = tostring(
-	(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.GrantedPath)
-		or "HiddenLeaderstats.TutorialBrainrotGranted"
+local TUTORIAL_CREW_MEMBER_GRANTED_PATH = tostring(
+	(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.GrantedPath)
+		or "HiddenLeaderstats.TutorialCrewMemberGranted"
 )
 local TUTORIAL_SPEED_TOP_UP_GRANTED_PATH = "HiddenLeaderstats.TutorialSpeedTopUpGranted"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
-local TUTORIAL_BRAINROT_ATTRIBUTE = "TutorialBrainrot"
+local TUTORIAL_CREW_MEMBER_ATTRIBUTE = "TutorialCrewMember"
 local TUTORIAL_TOKEN_ATTRIBUTE = "TutorialToken"
 local TUTORIAL_REWARD_NAME_ATTRIBUTE = "TutorialRewardName"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local SAVE_FAILURE_MESSAGE = "Tutorial progress could not be saved yet. Try again in a moment."
@@ -59,6 +61,16 @@ local objectiveCheckAccumulator = 0
 local registryEntries = nil
 
 local cleanupTutorialTarget
+
+local function hasCarriedCrewMember(player)
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	return typeof(carried) == "string" and carried ~= ""
+end
+
+local function clearCarriedCrewMemberAttributes(player)
+	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
+	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
+end
 
 local function clearTutorialRuntimeAttributes(player)
 	player:SetAttribute(TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE, nil)
@@ -83,10 +95,10 @@ local StepHandlers = {
 	move = {
 		AllowClientAdvance = false,
 	},
-	pickup_brainrot = {
+	pickup_crew_member = {
 		AllowClientAdvance = false,
 	},
-	extract_brainrot = {
+	extract_crew_member = {
 		AllowClientAdvance = false,
 	},
 	place_on_stand = {
@@ -300,19 +312,19 @@ local function canRecoverSpeedUpgradePurchase(player)
 	return reason == nil and granted ~= true
 end
 
-local function getTutorialBrainrotGranted(player)
-	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_BRAINROT_GRANTED_PATH)
+local function getTutorialCrewMemberGranted(player)
+	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH)
 	return reason == nil and granted == true
 end
 
-local function countBrainrotInstances(player)
-	local brainrotInventory = CrewInstanceService.GetCrewInventory(player)
-	if typeof(brainrotInventory) ~= "table" or typeof(brainrotInventory.ById) ~= "table" then
+local function countCrewMemberInstances(player)
+	local crewInventory = CrewInstanceService.GetCrewInventory(player)
+	if typeof(crewInventory) ~= "table" or typeof(crewInventory.ById) ~= "table" then
 		return 0
 	end
 
 	local count = 0
-	for _, instanceData in pairs(brainrotInventory.ById) do
+	for _, instanceData in pairs(crewInventory.ById) do
 		if typeof(instanceData) == "table" and tostring(instanceData.StorageName or "") ~= "" then
 			count += 1
 		end
@@ -321,8 +333,8 @@ local function countBrainrotInstances(player)
 	return count
 end
 
-local function getBrainrotInventoryCount(player)
-	return countBrainrotInstances(player)
+local function getCrewInventoryCount(player)
+	return countCrewMemberInstances(player)
 end
 
 local function getTutorialRewardInstance(player, requireAssigned)
@@ -348,8 +360,8 @@ local function getSessionPlacedTutorialStandName(player, session)
 
 	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 	local expectedInstanceId = tostring(session.placedTutorialInstanceId or "")
-	if typeof(standData) == "table" and tostring(standData.BrainrotName or "") ~= "" then
-		if expectedInstanceId == "" or tostring(standData.BrainrotInstanceId or "") == expectedInstanceId then
+	if typeof(standData) == "table" and tostring(standData.CrewMemberName or "") ~= "" then
+		if expectedInstanceId == "" or tostring(standData.CrewMemberInstanceId or "") == expectedInstanceId then
 			return standName
 		end
 	end
@@ -361,8 +373,8 @@ local function getSessionPlacedTutorialStandName(player, session)
 	for candidateStandName, candidateStandData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
 		if
 			typeof(candidateStandData) == "table"
-			and tostring(candidateStandData.BrainrotName or "") ~= ""
-			and tostring(candidateStandData.BrainrotInstanceId or "") == expectedInstanceId
+			and tostring(candidateStandData.CrewMemberName or "") ~= ""
+			and tostring(candidateStandData.CrewMemberInstanceId or "") == expectedInstanceId
 		then
 			local resolvedStandName = tostring(candidateStandName)
 			session.placedTutorialStandName = resolvedStandName
@@ -392,7 +404,7 @@ local function getPlacedTutorialStandName(player, session)
 	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
 		standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 		if typeof(standData) == "table" then
-			local standInstanceId = tostring(standData.BrainrotInstanceId or "")
+			local standInstanceId = tostring(standData.CrewMemberInstanceId or "")
 			if standInstanceId ~= "" and instanceId ~= nil and standInstanceId == instanceId then
 				return tostring(standName)
 			end
@@ -402,11 +414,11 @@ local function getPlacedTutorialStandName(player, session)
 	return ""
 end
 
-local function hasPlacedTutorialBrainrot(player, session)
+local function hasPlacedTutorialCrewMember(player, session)
 	return getPlacedTutorialStandName(player, session) ~= ""
 end
 
-local function isTutorialBrainrotOnStand(player, session, standName)
+local function isTutorialCrewMemberOnStand(player, session, standName)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return false
@@ -429,7 +441,7 @@ local function getBankedTutorialStandIncome(player, session)
 	return math.max(0, tonumber(standData.IncomeToCollect) or 0)
 end
 
-local function getHeldBrainrotModel(player)
+local function getHeldCrewMemberModel(player)
 	local context = CrewInteraction.GetActiveContext()
 	if not context or typeof(context.HeldByUserId) ~= "table" then
 		return nil
@@ -438,11 +450,23 @@ local function getHeldBrainrotModel(player)
 	return context.HeldByUserId[player.UserId]
 end
 
+local function isModelHeldByPlayer(player, model)
+	if not model then
+		return false
+	end
+
+	local context = CrewInteraction.GetActiveContext()
+	local activeState = context and context.Active and context.Active[model]
+	return typeof(activeState) == "table"
+		and activeState.Held == true
+		and activeState.HolderUserId == player.UserId
+end
+
 local function isTutorialTargetModelForSession(player, session, model)
 	if not model or not model.Parent then
 		return false
 	end
-	if model:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) ~= true then
+	if model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) ~= true then
 		return false
 	end
 	if model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE) ~= player.UserId then
@@ -466,9 +490,27 @@ local function destroyTutorialTargetModel(player, model)
 		local activeState = nil
 		if typeof(context.Active) == "table" then
 			activeState = context.Active[model]
-			context.Active[model] = nil
-			if activeState ~= nil then
-				removed = true
+			if
+				activeState
+				and activeState.Held == true
+				and activeState.HolderUserId == player.UserId
+				and typeof(CrewInteraction.CollectHeld) == "function"
+			then
+				local collectedInfo = CrewInteraction.CollectHeld(
+					context,
+					player,
+					context.Active,
+					activeState.CarryId or activeState.CarrySlotIndex
+				)
+				if collectedInfo ~= nil then
+					wasHeldByPlayer = true
+					removed = true
+				end
+			else
+				context.Active[model] = nil
+				if activeState ~= nil then
+					removed = true
+				end
 			end
 		end
 		if typeof(context.HeldByUserId) == "table" and context.HeldByUserId[player.UserId] == model then
@@ -489,8 +531,7 @@ local function destroyTutorialTargetModel(player, model)
 	end
 
 	if wasHeldByPlayer then
-		player:SetAttribute("CarriedBrainrot", nil)
-		player:SetAttribute("CarriedBrainrotImage", nil)
+		clearCarriedCrewMemberAttributes(player)
 	end
 
 	if model and model.Parent then
@@ -503,17 +544,22 @@ local function destroyTutorialTargetModel(player, model)
 end
 
 local function isHoldingTutorialTarget(player, session)
-	return isTutorialTargetModelForSession(player, session, getHeldBrainrotModel(player))
+	local targetModel = session and session.tutorialCrewMemberModel
+	if isTutorialTargetModelForSession(player, session, targetModel) and isModelHeldByPlayer(player, targetModel) then
+		return true
+	end
+
+	return isTutorialTargetModelForSession(player, session, getHeldCrewMemberModel(player))
 end
 
 cleanupTutorialTarget = function(player, session)
 	session = session or sessions[player]
-	if not session or not session.tutorialBrainrotModel then
+	if not session or not session.tutorialCrewMemberModel then
 		return false
 	end
 
-	local model = session.tutorialBrainrotModel
-	session.tutorialBrainrotModel = nil
+	local model = session.tutorialCrewMemberModel
+	session.tutorialCrewMemberModel = nil
 	return destroyTutorialTargetModel(player, model)
 end
 
@@ -523,10 +569,10 @@ local function cleanupTutorialWorldTargets(player, session)
 		removedCount += 1
 	end
 
-	local heldModel = getHeldBrainrotModel(player)
+	local heldModel = getHeldCrewMemberModel(player)
 	if
 		heldModel
-		and heldModel:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+		and heldModel:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
 		and heldModel:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE) == player.UserId
 	then
 		if destroyTutorialTargetModel(player, heldModel) then
@@ -537,7 +583,7 @@ local function cleanupTutorialWorldTargets(player, session)
 	for _, instance in ipairs(Workspace:GetDescendants()) do
 		if
 			instance:IsA("Model")
-			and instance:GetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE) == true
+			and instance:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true
 			and instance:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE) == player.UserId
 		then
 			if destroyTutorialTargetModel(player, instance) then
@@ -549,7 +595,7 @@ local function cleanupTutorialWorldTargets(player, session)
 	return removedCount
 end
 
-local function ensureBrainrotRegistry()
+local function ensureCrewRegistry()
 	if CrewRegistry._Built == true and registryEntries ~= nil then
 		return true
 	end
@@ -571,13 +617,13 @@ local function ensureBrainrotRegistry()
 	return true
 end
 
-local function getTutorialBrainrotEntry()
-	if not ensureBrainrotRegistry() then
+local function getTutorialCrewMemberEntry()
+	if not ensureCrewRegistry() then
 		return nil
 	end
 
-	local brainrotConfig = TutorialConfig.TutorialBrainrot or {}
-	local preferredName = tostring(brainrotConfig.Name or "")
+	local crewConfig = TutorialConfig.TutorialCrewMember or {}
+	local preferredName = tostring(crewConfig.Name or "")
 	if preferredName ~= "" then
 		local template, usedVariant = CrewRegistry.GetTemplateWithFallback(preferredName, "Normal")
 		usedVariant = usedVariant or "Normal"
@@ -623,14 +669,14 @@ end
 local function getTutorialRewardStorageNames(session, extraNames)
 	local names = {}
 	local seen = {}
-	local brainrotConfig = TutorialConfig.TutorialBrainrot or {}
-	addUniqueName(names, seen, brainrotConfig.Name)
+	local crewConfig = TutorialConfig.TutorialCrewMember or {}
+	addUniqueName(names, seen, crewConfig.Name)
 
 	if session then
-		addUniqueName(names, seen, session.tutorialBrainrotName)
+		addUniqueName(names, seen, session.tutorialCrewMemberName)
 	end
 
-	local entry = getTutorialBrainrotEntry()
+	local entry = getTutorialCrewMemberEntry()
 	if entry then
 		addUniqueName(names, seen, entry.BaseId)
 		addUniqueName(names, seen, entry.FinalId)
@@ -738,16 +784,16 @@ local function restoreGrantedTutorialReward(player, session)
 	if isTutorialCompleted(player) or hasTutorialReward(player, session) then
 		return true, nil
 	end
-	if not getTutorialBrainrotGranted(player) then
+	if not getTutorialCrewMemberGranted(player) then
 		return false, nil
 	end
 
-	local entry = getTutorialBrainrotEntry()
+	local entry = getTutorialCrewMemberEntry()
 	if not entry then
 		return false, "Tutorial Crewmate reward is not available."
 	end
 
-	session.tutorialBrainrotName = entry.FinalId
+	session.tutorialCrewMemberName = entry.FinalId
 	if tostring(session.tutorialToken or "") == "" then
 		session.tutorialToken = HttpService:GenerateGUID(false)
 	end
@@ -764,9 +810,9 @@ local function restoreGrantedTutorialReward(player, session)
 	return false, "Tutorial Crewmate reward could not be restored yet."
 end
 
-local function reconcileTutorialBrainrotGrant(player, session)
-	if hasTutorialReward(player, session) and not getTutorialBrainrotGranted(player) then
-		DataManager:TrySetValue(player, TUTORIAL_BRAINROT_GRANTED_PATH, true)
+local function reconcileTutorialCrewMemberGrant(player, session)
+	if hasTutorialReward(player, session) and not getTutorialCrewMemberGranted(player) then
+		DataManager:TrySetValue(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH, true)
 	end
 end
 
@@ -820,16 +866,16 @@ local function getTutorialExtractionPart(refs)
 		or refs.WaveEnd
 end
 
-local function spawnTutorialBrainrotTarget(player, session)
+local function spawnTutorialCrewMemberTarget(player, session)
 	local context = CrewInteraction.GetActiveContext()
 	if not context or typeof(context.Active) ~= "table" then
 		return false, "World rewards are still loading."
 	end
 	if hasTutorialReward(player, session) then
-		reconcileTutorialBrainrotGrant(player, session)
+		reconcileTutorialCrewMemberGrant(player, session)
 		return true, nil
 	end
-	if getTutorialBrainrotGranted(player) then
+	if getTutorialCrewMemberGranted(player) then
 		local restored, restoreMessage = restoreGrantedTutorialReward(player, session)
 		if restored then
 			return true, nil
@@ -838,21 +884,21 @@ local function spawnTutorialBrainrotTarget(player, session)
 		return false, restoreMessage or "Tutorial Crewmate reward is being restored."
 	end
 
-	local entry = getTutorialBrainrotEntry()
+	local entry = getTutorialCrewMemberEntry()
 	if not entry then
 		return false, "Tutorial Crewmate is not available."
 	end
-	session.tutorialBrainrotName = entry.FinalId
+	session.tutorialCrewMemberName = entry.FinalId
 	if tostring(session.tutorialToken or "") == "" then
 		session.tutorialToken = HttpService:GenerateGUID(false)
 	end
 
-	if typeof(context.SpawnTutorialBrainrot) ~= "function" then
+	if typeof(context.SpawnTutorialCrewMember) ~= "function" then
 		return false, "Biome 1 Crewmate spawns are still loading."
 	end
 
-	local lifetime = math.max(60, tonumber(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.SpawnLifetime) or 900)
-	local clone, message = context.SpawnTutorialBrainrot({
+	local lifetime = math.max(60, tonumber(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.SpawnLifetime) or 900)
+	local clone, message = context.SpawnTutorialCrewMember({
 		Player = player,
 		Entry = {
 			FinalId = entry.FinalId,
@@ -873,31 +919,31 @@ local function spawnTutorialBrainrotTarget(player, session)
 		return false, message or "Tutorial Crewmate spawn is not available yet."
 	end
 
-	clone:SetAttribute(TUTORIAL_BRAINROT_ATTRIBUTE, true)
+	clone:SetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE, true)
 	clone:SetAttribute(TUTORIAL_OWNER_ATTRIBUTE, player.UserId)
 	clone:SetAttribute(TUTORIAL_TOKEN_ATTRIBUTE, session.tutorialToken)
 	clone:SetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE, entry.FinalId)
 
-	session.tutorialBrainrotModel = clone
+	session.tutorialCrewMemberModel = clone
 	return true, nil
 end
 
-local function ensureTutorialBrainrotTarget(player, session)
+local function ensureTutorialCrewMemberTarget(player, session)
 	if isHoldingTutorialTarget(player, session) or hasTutorialReward(player, session) then
 		return true
 	end
-	if player:GetAttribute("CarriedBrainrot") ~= nil then
+	if hasCarriedCrewMember(player) then
 		session.warning = "Extract or drop your current Crewmate first."
 		return false
 	end
 
-	local existing = session.tutorialBrainrotModel
+	local existing = session.tutorialCrewMemberModel
 	if isTutorialTargetModelForSession(player, session, existing) then
 		return true
 	end
 
 	cleanupTutorialTarget(player, session)
-	local success, message = spawnTutorialBrainrotTarget(player, session)
+	local success, message = spawnTutorialCrewMemberTarget(player, session)
 	if success then
 		session.warning = nil
 		return true
@@ -1039,15 +1085,15 @@ local function findOwnedStandModel(player, standName)
 	return nil
 end
 
-local function getStandBrainrotName(player, standName)
+local function getStandCrewMemberName(player, standName)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return ""
 	end
 
 	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
-	if typeof(standData) == "table" and typeof(standData.BrainrotName) == "string" then
-		return standData.BrainrotName
+	if typeof(standData) == "table" and typeof(standData.CrewMemberName) == "string" then
+		return standData.CrewMemberName
 	end
 
 	return ""
@@ -1073,11 +1119,11 @@ local function isStandUsableForPlacement(player, standModel)
 end
 
 local function isStandEmptyForPlacement(player, standModel)
-	if getStandBrainrotName(player, standModel.Name) ~= "" then
+	if getStandCrewMemberName(player, standModel.Name) ~= "" then
 		return false
 	end
 
-	return standModel:FindFirstChild("PlacedBrainrot") == nil
+	return standModel:FindFirstChild("PlacedCrewMember") == nil
 end
 
 local function buildStandObjectiveTarget(player, standModel)
@@ -1150,8 +1196,8 @@ local function selectNearestStandObjectiveTarget(player)
 	return chosen and chosen.Target or nil
 end
 
-ObjectiveTargetResolvers.pickup_brainrot = function(player, session)
-	local model = session.tutorialBrainrotModel
+ObjectiveTargetResolvers.pickup_crew_member = function(player, session)
+	local model = session.tutorialCrewMemberModel
 	if not isTutorialTargetModelForSession(player, session, model) then
 		return nil
 	end
@@ -1161,20 +1207,20 @@ ObjectiveTargetResolvers.pickup_brainrot = function(player, session)
 		return nil
 	end
 
-	local label = tostring(session.tutorialBrainrotName or "")
+	local label = tostring(session.tutorialCrewMemberName or "")
 	if label == "" then
 		label = "Tutorial Crewmate"
 	end
 
 	return {
-		id = "tutorial_brainrot",
-		kind = "brainrot",
+		id = "tutorial_crew_member",
+		kind = "crew_member",
 		label = label,
 		position = position,
 	}
 end
 
-ObjectiveTargetResolvers.extract_brainrot = function(player, session)
+ObjectiveTargetResolvers.extract_crew_member = function(player, session)
 	if isHoldingTutorialTarget(player, session) then
 		local refs = MapResolver.GetRefs({
 			context = "FirstTimeTutorialService",
@@ -1193,7 +1239,7 @@ ObjectiveTargetResolvers.extract_brainrot = function(player, session)
 		}
 	end
 
-	local model = session.tutorialBrainrotModel
+	local model = session.tutorialCrewMemberModel
 	if not isTutorialTargetModelForSession(player, session, model) then
 		return nil
 	end
@@ -1204,15 +1250,15 @@ ObjectiveTargetResolvers.extract_brainrot = function(player, session)
 	end
 
 	return {
-		id = "tutorial_brainrot",
-		kind = "brainrot",
+		id = "tutorial_crew_member",
+		kind = "crew_member",
 		label = "Tutorial Crewmate",
 		position = position,
 	}
 end
 
 ObjectiveTargetResolvers.place_on_stand = function(player, session)
-	if hasPlacedTutorialBrainrot(player, session) or not hasTutorialReward(player, session) then
+	if hasPlacedTutorialCrewMember(player, session) or not hasTutorialReward(player, session) then
 		setObjectiveTargetCache(session, "place_on_stand", nil)
 		return nil
 	end
@@ -1413,7 +1459,7 @@ local function startStep(player, stepIndex)
 	setTutorialRuntimeAttributes(player, session, step)
 
 	local stepId = tostring(step.Id or "")
-	if stepId ~= "pickup_brainrot" and player:GetAttribute("CarriedBrainrot") == nil then
+	if stepId ~= "pickup_crew_member" and not hasCarriedCrewMember(player) then
 		cleanupTutorialTarget(player, session)
 	end
 
@@ -1466,14 +1512,14 @@ local function createSession(player)
 		progress = 0,
 		lastPushedProgress = -1,
 		moveStartPosition = nil,
-		tutorialBrainrotName = tostring(TutorialConfig.TutorialBrainrot and TutorialConfig.TutorialBrainrot.Name or ""),
+		tutorialCrewMemberName = tostring(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.Name or ""),
 		tutorialToken = HttpService:GenerateGUID(false),
-		extractStartInventoryCount = getBrainrotInventoryCount(player),
+		extractStartInventoryCount = getCrewInventoryCount(player),
 		collectStartBalance = getPrimaryBalance(player),
 		buySpeedStartValue = getSpeedValue(player),
 	}
 	sessions[player] = session
-	reconcileTutorialBrainrotGrant(player, session)
+	reconcileTutorialCrewMemberGrant(player, session)
 	reconcileTutorialSpeedRecovery(player)
 	restoreGrantedTutorialReward(player, session)
 	startStep(player, 1)
@@ -1607,7 +1653,7 @@ function FirstTimeTutorialService.ResetForTesting(player)
 
 	local flagFailures = {}
 	trySetTutorialResetFlag(player, TutorialConfig.CompletionPath, flagFailures)
-	trySetTutorialResetFlag(player, TUTORIAL_BRAINROT_GRANTED_PATH, flagFailures)
+	trySetTutorialResetFlag(player, TUTORIAL_CREW_MEMBER_GRANTED_PATH, flagFailures)
 	trySetTutorialResetFlag(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, flagFailures)
 
 	if #flagFailures > 0 then
@@ -1756,14 +1802,14 @@ end
 
 StepHandlers.move.Update = updateMoveDistanceStep
 
-StepHandlers.pickup_brainrot.OnStart = function(player, session)
+StepHandlers.pickup_crew_member.OnStart = function(player, session)
 	if hasTutorialReward(player, session) then
 		return
 	end
-	ensureTutorialBrainrotTarget(player, session)
+	ensureTutorialCrewMemberTarget(player, session)
 end
 
-StepHandlers.pickup_brainrot.Update = function(player, session)
+StepHandlers.pickup_crew_member.Update = function(player, session)
 	if isHoldingTutorialTarget(player, session) then
 		advanceTutorial(player)
 		return
@@ -1773,32 +1819,32 @@ StepHandlers.pickup_brainrot.Update = function(player, session)
 		return
 	end
 
-	ensureTutorialBrainrotTarget(player, session)
+	ensureTutorialCrewMemberTarget(player, session)
 	setProgress(player, session, 0)
 end
 
-StepHandlers.extract_brainrot.OnStart = function(player, session)
-	session.extractStartInventoryCount = getBrainrotInventoryCount(player)
+StepHandlers.extract_crew_member.OnStart = function(player, session)
+	session.extractStartInventoryCount = getCrewInventoryCount(player)
 	if isHoldingTutorialTarget(player, session) then
 		session.progress = 0.5
 	end
 end
 
-StepHandlers.extract_brainrot.Update = function(player, session)
+StepHandlers.extract_crew_member.Update = function(player, session)
 	if hasTutorialReward(player, session) then
 		advanceTutorial(player)
 		return
 	end
 
-	if player:GetAttribute("CarriedBrainrot") == nil then
-		ensureTutorialBrainrotTarget(player, session)
+	if not hasCarriedCrewMember(player) then
+		ensureTutorialCrewMemberTarget(player, session)
 	end
 
 	setProgress(player, session, if isHoldingTutorialTarget(player, session) then 0.5 else 0)
 end
 
 StepHandlers.place_on_stand.Update = function(player, session)
-	if hasPlacedTutorialBrainrot(player, session) then
+	if hasPlacedTutorialCrewMember(player, session) then
 		advanceTutorial(player)
 		return
 	end
@@ -1871,24 +1917,24 @@ local function onObjectiveRecorded(player, eventData)
 	local context = if typeof(eventData.Context) == "table" then eventData.Context else {}
 	local source = tostring(context.Source or "")
 
-	if objectiveType == "ExtractCrew" and source == "SpawnBrainrots" and context.TutorialBrainrot == true then
+	if objectiveType == "ExtractCrew" and source == "SpawnCrewMembers" and context.TutorialCrewMember == true then
 		local session = sessions[player]
 		local eventToken = tostring(context.TutorialToken or "")
 		if session and (eventToken == tostring(session.tutorialToken or "") or hasTutorialReward(player, session)) then
-			advanceIfCurrentStep(player, "extract_brainrot")
+			advanceIfCurrentStep(player, "extract_crew_member")
 		end
 	elseif objectiveType == "PlaceOnStand" and source == "StandPlacement" and context.TutorialPlacement == true then
 		local session = sessions[player]
 		local standName = tostring(context.StandName or "")
 		if session and standName ~= "" then
 			session.placedTutorialStandName = standName
-			session.placedTutorialInstanceId = tostring(context.BrainrotInstanceId or "")
-			session.placedTutorialBrainrotName = tostring(context.BrainrotName or "")
+			session.placedTutorialInstanceId = tostring(context.CrewMemberInstanceId or "")
+			session.placedTutorialCrewMemberName = tostring(context.CrewMemberName or "")
 			advanceIfCurrentStep(player, "place_on_stand")
 		end
 	elseif objectiveType == "EarnDoubloons" and source == "StandIncome" then
 		local session = sessions[player]
-		if session and isTutorialBrainrotOnStand(player, session, context.StandName) then
+		if session and isTutorialCrewMemberOnStand(player, session, context.StandName) then
 			session.collectedTutorialBeli = true
 			advanceIfCurrentStep(player, "collect_beli")
 		end

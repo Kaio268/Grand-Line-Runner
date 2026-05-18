@@ -10,12 +10,10 @@ local CrewMemberCanonicalReadGate = require(
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
-local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
 
-local Brainrots = CrewCatalog.GetLegacyConfig()
-local VariantCfg = CrewCatalog.GetVariantConfig()
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
 local DEVIL_FRUIT_BACKFILL_TIMEOUT = 30
@@ -59,107 +57,9 @@ if not indexDisplayMetadataRequest then
 	indexDisplayMetadataRequest.Parent = ReplicatedStorage
 end
 
-local VALID_BRAINROT_ITEM_IDS = {}
-local SORTED_BRAINROT_ITEM_IDS = {}
-
-for itemId, info in pairs(Brainrots) do
-	if type(info) == "table" then
-		local safeItemId = tostring(itemId)
-		VALID_BRAINROT_ITEM_IDS[safeItemId] = true
-		SORTED_BRAINROT_ITEM_IDS[#SORTED_BRAINROT_ITEM_IDS + 1] = safeItemId
-	end
-end
-
-table.sort(SORTED_BRAINROT_ITEM_IDS)
-
 local lastIndexDisplayMetadataLogByPlayer = setmetatable({}, { __mode = "k" })
 
-local function getVariantInfo(variantKey)
-	if variantKey == "Normal" or not variantKey then
-		return (VariantCfg.Versions or {}).Normal or { Prefix = "", IncomeMult = 1 }
-	end
-
-	return (VariantCfg.Versions or {})[variantKey]
-end
-
-local function getVariantItemId(variantKey, baseName)
-	if typeof(baseName) ~= "string" or baseName == "" then
-		return nil
-	end
-
-	if variantKey == "Normal" or not variantKey then
-		return baseName
-	end
-
-	local variantInfo = getVariantInfo(variantKey)
-	local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-	return prefix .. baseName
-end
-
-local function normalizeVariantKey(variantKey)
-	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
-		if candidate == supportedVariant then
-			return supportedVariant
-		end
-	end
-
-	return "Normal"
-end
-
-local function parseVariantAndBaseName(fullName)
-	local value = tostring(fullName or "")
-	if value == "" then
-		return "Normal", ""
-	end
-
-	for _, variantKey in ipairs(VariantCfg.Order or { "Normal", "Golden", "Diamond" }) do
-		if variantKey ~= "Normal" then
-			local variantInfo = getVariantInfo(variantKey)
-			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-			if value:sub(1, #prefix) == prefix then
-				return variantKey, value:sub(#prefix + 1)
-			end
-		end
-	end
-
-	return "Normal", value
-end
-
-local function resolveBrainrotItemId(storageName, baseName, variantKey)
-	local storageNameValue = tostring(storageName or "")
-	local baseNameValue = tostring(baseName or "")
-	local normalizedVariant = normalizeVariantKey(variantKey)
-	if baseNameValue == "" and storageNameValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(storageNameValue)
-		normalizedVariant = normalizeVariantKey(parsedVariant)
-		baseNameValue = parsedBaseName
-	end
-
-	if baseNameValue == "" then
-		return nil
-	end
-
-	local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-	if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
-		return itemId
-	end
-
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
-		return storageNameValue
-	end
-
-	return nil
-end
-
-local function markDiscoveredBrainrot(discovered, storageName, baseName, variantKey)
-	local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
-	if itemId then
-		discovered[itemId] = true
-	end
-end
-
-local function getRequestedBrainrotItemIds(requestedItemIds)
+local function getRequestedCrewMemberItemIds(requestedItemIds)
 	local itemIds = {}
 	local seen = {}
 
@@ -170,7 +70,7 @@ local function getRequestedBrainrotItemIds(requestedItemIds)
 			end
 
 			local itemId = tostring(rawItemId or "")
-			if VALID_BRAINROT_ITEM_IDS[itemId] == true and seen[itemId] ~= true then
+			if IndexDiscovery.IsValidCrewMemberItemId(itemId) and seen[itemId] ~= true then
 				seen[itemId] = true
 				itemIds[#itemIds + 1] = itemId
 			end
@@ -182,7 +82,7 @@ local function getRequestedBrainrotItemIds(requestedItemIds)
 		return itemIds
 	end
 
-	for _, itemId in ipairs(SORTED_BRAINROT_ITEM_IDS) do
+	for _, itemId in ipairs(IndexDiscovery.GetSortedCrewMemberItemIds()) do
 		if #itemIds >= INDEX_DISPLAY_METADATA_MAX_IDS then
 			break
 		end
@@ -326,7 +226,7 @@ local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
 		}
 	end
 
-	local itemIds = getRequestedBrainrotItemIds(requestedItemIds)
+	local itemIds = getRequestedCrewMemberItemIds(requestedItemIds)
 	local metadataById = {}
 	local fallbackReasonCounts = {}
 	local modelPreviewFallbackReasonCounts = {}
@@ -389,36 +289,12 @@ end
 
 indexDisplayMetadataRequest.OnServerInvoke = buildIndexDisplayMetadataResponse
 
-local function countUnlockedBrainrots(player)
-	local discovered = {}
+local function countUnlockedCrewMembers(player)
 	local history = IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
-
-	if history then
-		for itemId, isDiscovered in pairs(history) do
-			if isDiscovered == true then
-				discovered[tostring(itemId)] = true
-			end
-		end
-	end
-
 	local crewInventory = CrewInstanceService.GetCrewInventory(player)
-	for _, instanceData in pairs(if typeof(crewInventory) == "table" and typeof(crewInventory.ById) == "table" then crewInventory.ById else {}) do
-		if typeof(instanceData) == "table" then
-			markDiscoveredBrainrot(
-				discovered,
-				tostring(instanceData.StorageName or ""),
-				tostring(instanceData.BaseName or ""),
-				tostring(instanceData.Variant or "")
-			)
-		end
-	end
 
-	local count = 0
-	for _ in pairs(discovered) do
-		count += 1
-	end
-
-	return count
+	local discovered = IndexDiscovery.BuildDiscoveredSetFromData(history, crewInventory)
+	return IndexDiscovery.CountDiscoveredSet(discovered)
 end
 
 local function humanizeToken(token)
@@ -495,6 +371,11 @@ local function backfillDevilFruitIndex(player)
 			return
 		end
 
+		local repairOk, repairResult = pcall(IndexCollectionService.RepairCrewMemberDiscoveries, player)
+		if not repairOk then
+			warn(string.format("[Index] Failed to repair CrewMember Index for %s: %s", player.Name, tostring(repairResult)))
+		end
+
 		local ok, result = pcall(IndexCollectionService.BackfillDevilFruitDiscoveries, player)
 		if not ok then
 			warn(string.format("[Index] Failed to backfill Devil Fruit Index for %s: %s", player.Name, tostring(result)))
@@ -553,7 +434,7 @@ claimRemote.OnServerEvent:Connect(function(player, questId)
 			return
 		end
 
-		local unlocked = countUnlockedBrainrots(player)
+		local unlocked = countUnlockedCrewMembers(player)
 		if unlocked < q then
 			sendClaimPopup(player, "Discover more entries before claiming this reward.", true)
 			sendClientClaimResult(false)

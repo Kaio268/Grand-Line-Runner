@@ -66,16 +66,16 @@ local HEIGHT_MIN = 380
 local HEIGHT_MAX = 520
 
 local COMET_GROUP = "Comets"
-local BRAINROT_GROUP = "Brainrots"
+local CREW_MEMBER_GROUP = "CrewMembers"
 
 pcall(function()
 	PhysicsService:RegisterCollisionGroup(COMET_GROUP)
 end)
 pcall(function()
-	PhysicsService:RegisterCollisionGroup(BRAINROT_GROUP)
+	PhysicsService:RegisterCollisionGroup(CREW_MEMBER_GROUP)
 end)
 pcall(function()
-	PhysicsService:CollisionGroupSetCollidable(COMET_GROUP, BRAINROT_GROUP, false)
+	PhysicsService:CollisionGroupSetCollidable(COMET_GROUP, CREW_MEMBER_GROUP, false)
 end)
 
 local running = false
@@ -434,15 +434,15 @@ local function tweenCF(inst, cf0, cf1, t)
 	tw.Completed:Wait()
 end
 
-local function tagBrainrotsCollision()
+local function tagCrewMembersCollision()
 	for _, platform in ipairs(getSpawnPlatforms()) do
-		local brainrotsFolder = platform:FindFirstChild("Brainrots")
-		if brainrotsFolder then
-			setCollisionGroup(brainrotsFolder, BRAINROT_GROUP)
-			brainrotsFolder.DescendantAdded:Connect(function(obj)
+		local crewMembersFolder = platform:FindFirstChild("CrewMembers")
+		if crewMembersFolder then
+			setCollisionGroup(crewMembersFolder, CREW_MEMBER_GROUP)
+			crewMembersFolder.DescendantAdded:Connect(function(obj)
 				if obj:IsA("BasePart") then
 					pcall(function()
-						obj.CollisionGroup = BRAINROT_GROUP
+						obj.CollisionGroup = CREW_MEMBER_GROUP
 					end)
 				end
 			end)
@@ -700,7 +700,7 @@ local function startComet()
 	prevClockTime = Lighting.ClockTime
 	Lighting.ClockTime = 0
 
-	tagBrainrotsCollision()
+	tagCrewMembersCollision()
 	startCometTimerUI(token)
 
 	log("START Comet | platforms:", #getSpawnPlatforms())

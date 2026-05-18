@@ -2,28 +2,55 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService.Data:WaitForChild("DataManager"))
- 
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+
 local rewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
 local PLACE_ID = 129073777843683
+local GROUP_ID = 17179624
 
-local add = require(script.Parent.Parent.Modules.AddCrewMember)
+local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
 
-rewardRemote.OnServerEvent:Connect(function(player, placeId, hasLike, hasFavorite)
-	if placeId ~= PLACE_ID then
+local function sendClaimStatus(player, status)
+	rewardRemote:FireClient(player, status)
+end
+
+rewardRemote.OnServerEvent:Connect(function(player, placeId)
+	-- Security: never trust client-reported like/favorite state; gate on Roblox's server-verifiable group membership instead.
+	if not RemoteGuard.Check(player, "LimitedRewardClaim", { placeId }, {
+		Cooldown = 2,
+		Args = {
+			{ Type = "finiteNumber", Integer = true },
+		},
+	}) then
 		return
 	end
-	if not hasLike or not hasFavorite then
+
+	if placeId ~= PLACE_ID then
 		return
 	end
 
 	local already = DataManager:GetValue(player, "HiddenLeaderstats.LimitedReward")
 	if already == true then
+		sendClaimStatus(player, "AlreadyClaimed")
+		return
+	end
+
+	if not player:IsInGroup(GROUP_ID) then
+		sendClaimStatus(player, "NotInGroup")
+		return
+	end
+
+	local ok = CrewRewardService.Grant(player, "Tatatata Sahur", 1, {
+		Source = "LimitedReward",
+		Context = "LimitedReward",
+	})
+	if not ok then
+		sendClaimStatus(player, "Unavailable")
 		return
 	end
 
 	DataManager:AddValue(player, "Potions.x2MoneyTime", 10 * 60)
 	DataManager:AddValue(player, "Potions.x15WalkSpeedTime", 10 * 60)
 	DataManager:SetValue(player, "HiddenLeaderstats.LimitedReward", true)
-
-	add:AddCrewMember(player, "Tatatata Sahur", 1)
+	sendClaimStatus(player, "Granted")
 end)

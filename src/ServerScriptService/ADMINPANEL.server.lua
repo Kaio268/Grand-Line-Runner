@@ -6,6 +6,7 @@ local HttpService = game:GetService("HttpService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local EventController = require(ServerScriptService:WaitForChild("EventController"))
 local AdminPermissions = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminPermissions"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local function getOrCreateRemote(name, className)
 	className = className or "RemoteEvent"
@@ -41,8 +42,22 @@ local seenAnn = {}
 local seenLuck = {}
 local seenMain = {}
 
+local MAIN_EVENT_ALLOWLIST = {
+	none = "none",
+	comet = "Comet",
+	luckyblock = "LuckyBlock",
+	luckyblocks = "LuckyBlock",
+}
+
+local function getAllowedMainEventName(eventName)
+	local trimmed = tostring(eventName or ""):gsub("\r", ""):gsub("\n", " ")
+	trimmed = trimmed:match("^%s*(.-)%s*$") or ""
+	local key = string.lower(trimmed):gsub("%s+", "")
+	return MAIN_EVENT_ALLOWLIST[key]
+end
+
 local function isCometEvent(name: string)
-	return string.lower(tostring(name or "")) == "comet"
+	return getAllowedMainEventName(name) == "Comet"
 end
 
 adminStatusFunction.OnServerInvoke = function(player)
@@ -151,6 +166,17 @@ local function formatDuration(seconds)
 end
 
 requestEvent.OnServerEvent:Connect(function(player, message, duration)
+	-- Security: admin remotes still require admin status, but RemoteGuard rejects malformed or spammed payloads first.
+	if not RemoteGuard.Check(player, "AdminAnnouncementRequest", { message, duration }, {
+		Cooldown = 1,
+		Args = {
+			{ Type = "string", MaxLength = 240 },
+			{ Type = "finiteNumber", AllowNil = true, Min = 1, Max = 86400 },
+		},
+	}) then
+		return
+	end
+
 	AdminPermissions.LogCommandAttempt(player, "announcement", "remote", string.format("duration=%s", tostring(duration)))
 	if not AdminPermissions.IsAdmin(player) then
 		AdminPermissions.LogCommandRejected(player, "announcement", "remote")
@@ -201,6 +227,17 @@ requestEvent.OnServerEvent:Connect(function(player, message, duration)
 end)
 
 luckRequestEvent.OnServerEvent:Connect(function(player, luckValue, timeSeconds)
+	-- Security: reject invalid numbers before mutating server-wide luck state.
+	if not RemoteGuard.Check(player, "AdminLuckRequest", { luckValue, timeSeconds }, {
+		Cooldown = 1,
+		Args = {
+			{ Type = "finiteNumber", Min = 1, Max = 256 },
+			{ Type = "finiteNumber", Min = 1, Max = 86400 },
+		},
+	}) then
+		return
+	end
+
 	AdminPermissions.LogCommandAttempt(player, "serverLuck", "remote", string.format(
 		"luckValue=%s timeSeconds=%s",
 		tostring(luckValue),
@@ -276,6 +313,17 @@ end)
 local CometMerchant = require(script.Parent.Modules.CometMerchant)
 
 mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeconds)
+	-- Security: only known event names can reach EventController or cross-server MessagingService.
+	if not RemoteGuard.Check(player, "AdminMainEventRequest", { eventName, timeSeconds }, {
+		Cooldown = 1,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+			{ Type = "finiteNumber", Min = 1, Max = 86400 },
+		},
+	}) then
+		return
+	end
+
 	AdminPermissions.LogCommandAttempt(player, "mainEvent", "remote", string.format(
 		"eventName=%s timeSeconds=%s",
 		tostring(eventName),
@@ -297,6 +345,12 @@ mainEventRequestEvent.OnServerEvent:Connect(function(player, eventName, timeSeco
 		return
 	end
 	eventName = eventName:sub(1, 60)
+	local allowedEventName = getAllowedMainEventName(eventName)
+	if not allowedEventName then
+		AdminPermissions.LogCommandRejected(player, "mainEvent", "remote", "reason=event_not_allowlisted")
+		return
+	end
+	eventName = allowedEventName
 
 	local seconds = tonumber(timeSeconds)
 	if not seconds then
@@ -394,9 +448,9 @@ local function onMainEventMessage(msg)
 	if seenMain[id] then return end
 	markSeen(seenMain, id)
 
-	local eventName = tostring(data.eventName or "")
+	local eventName = getAllowedMainEventName(data.eventName)
 	local seconds = tonumber(data.seconds)
-	if eventName == "" then return end
+	if eventName == nil then return end
 	if not seconds then return end
 	seconds = math.floor(seconds)
 	seconds = math.clamp(seconds, 1, 86400)

@@ -14,7 +14,7 @@ local started = false
 local busyTools = {}
 local syncRetryStateByPlayer = {}
 local updateRemote = ReplicatedStorage:FindFirstChild("InventoryGearRemote")
-local CHEST_DEBUG = true
+local CHEST_DEBUG = false
 local getChestSummaryName
 
 local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)

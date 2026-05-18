@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
@@ -17,7 +16,7 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local App = require(UiFolder:WaitForChild("App"))
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
+local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
@@ -75,10 +74,110 @@ local RARITY_ORDER = {
 	Omega = 9,
 }
 
+local CREW_ITEM_KIND = "CrewMember"
 local CREW_QUICK_ACCENT = Color3.fromRGB(93, 203, 200)
 
 local function getCrewInfo(name)
-	return CrewCatalog.GetInfoById(name) or Brainrots[name]
+	return CrewCatalog.GetInfoById(name)
+end
+
+local function isCrewItemKind(kind)
+	return kind == CREW_ITEM_KIND
+end
+
+local function normalizeItemKind(kind)
+	return kind
+end
+
+local function copyModelPreviewDescriptor(descriptor)
+	if typeof(descriptor) ~= "table" then
+		return nil
+	end
+
+	local modelName = tostring(descriptor.ModelName or descriptor.modelName or "")
+	if modelName == "" then
+		return nil
+	end
+
+	local copy = {
+		ModelName = modelName,
+		UsedCanonical = descriptor.UsedCanonical == true or descriptor.usedCanonical == true,
+		IsPreviewOnly = descriptor.IsPreviewOnly ~= false and descriptor.isPreviewOnly ~= false,
+	}
+
+	local source = tostring(descriptor.Source or descriptor.source or "")
+	if source ~= "" then
+		copy.Source = source
+	end
+
+	local modelPath = tostring(descriptor.ModelPath or descriptor.modelPath or "")
+	if modelPath ~= "" then
+		copy.ModelPath = modelPath
+	end
+
+	local legacyIdentity = tostring(descriptor.LegacyIdentity or descriptor.legacyIdentity or "")
+	if legacyIdentity ~= "" then
+		copy.LegacyIdentity = legacyIdentity
+	end
+
+	local fallbackReason = tostring(descriptor.FallbackReason or descriptor.fallbackReason or "")
+	if fallbackReason ~= "" then
+		copy.FallbackReason = fallbackReason
+	end
+
+	return copy
+end
+
+local function buildCrewCatalogModelPreview(name, state)
+	local modelName = state and tostring(state.modelName or "") or ""
+	local info = getCrewInfo(name)
+
+	if modelName == "" and info then
+		modelName = tostring(info.ModelName or "")
+	end
+
+	if modelName == "" then
+		return nil
+	end
+
+	if info and info.MissingCrewModel == true then
+		return nil
+	end
+
+	if info and info.ModelNameVerified ~= true then
+		return nil
+	end
+
+	return {
+		ModelName = modelName,
+		UsedCanonical = true,
+		IsPreviewOnly = true,
+		LegacyIdentity = tostring(name or ""),
+		Source = "CrewCatalog",
+	}
+end
+
+local function getCrewModelPreviewDescriptor(name, state)
+	local descriptor = state and copyModelPreviewDescriptor(state.modelPreview) or nil
+	if descriptor and descriptor.UsedCanonical == true then
+		return descriptor
+	end
+
+	return buildCrewCatalogModelPreview(name, state)
+end
+
+local function getStaticCrewPreviewImage(name, state, modelPreview, displayName)
+	local crewInfo = getCrewInfo(name)
+	return CrewPreviewImages.Resolve({
+		CrewMemberId = (state and (state.crewMemberId or state.CrewMemberId)) or name,
+		BaseCrewMemberId = crewInfo and (crewInfo.CrewMemberBaseId or crewInfo.BaseId),
+		DisplayName = displayName or (state and state.displayName) or (crewInfo and crewInfo.DisplayName),
+		ModelName = (state and state.modelName) or (crewInfo and crewInfo.ModelName),
+		ModelPreview = modelPreview or (state and state.modelPreview),
+		Metadata = state,
+		Name = name,
+		RealCharacterName = (state and state.realCharacterName) or (crewInfo and crewInfo.RealCharacterName),
+	})
 end
 
 local CATEGORY_DEFS = {
@@ -168,10 +267,9 @@ local stopObservingState = nil
 local scheduleRender
 local syncChestsFromInventory
 local syncDevilFruitsFromInventory
-local lastToggleLayoutSignature = nil
 local cachedLegacyInventoryIcon = nil
 local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
-local INVENTORY_SNAPSHOT_DEBUG = true
+local INVENTORY_SNAPSHOT_DEBUG = false
 local INCOME_STATUS_METADATA_RETRY_SECONDS = 3
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
@@ -324,7 +422,7 @@ local function ensureAcquired(key)
 end
 
 local SNAPSHOT_OWNED_KINDS = {
-	Brainrot = true,
+	[CREW_ITEM_KIND] = true,
 	Gear = true,
 	DevilFruit = true,
 	Chest = true,
@@ -359,7 +457,89 @@ local function getEntryDisplayMetadata(entry)
 		metadata.render = render
 	end
 
-	if metadata.displayName ~= nil or metadata.rarity ~= nil or metadata.render ~= nil then
+	local staticPreviewImage = tostring(
+		entry.StaticPreviewImage
+			or entry.staticPreviewImage
+			or entry.PreviewImage
+			or entry.previewImage
+			or entry.PreviewImageAsset
+			or entry.previewImageAsset
+			or entry.PreviewImageId
+			or entry.previewImageId
+			or ""
+	)
+	if staticPreviewImage ~= "" then
+		metadata.staticPreviewImage = staticPreviewImage
+	end
+
+	local modelPreview = copyModelPreviewDescriptor(entry.ModelPreview or entry.modelPreview)
+	if modelPreview then
+		metadata.modelPreview = modelPreview
+	end
+
+	local modelName = tostring(entry.ModelName or entry.modelName or "")
+	if modelName == "" and modelPreview then
+		modelName = tostring(modelPreview.ModelName or "")
+	end
+	if modelName ~= "" then
+		metadata.modelName = modelName
+	end
+
+	local crewMemberId = tostring(entry.CrewMemberId or entry.crewMemberId or "")
+	if crewMemberId ~= "" then
+		metadata.crewMemberId = crewMemberId
+	end
+
+	local stackId = tostring(entry.StackId or entry.stackId or "")
+	if stackId ~= "" then
+		metadata.stackId = stackId
+	end
+
+	local maxQuantity = tonumber(entry.MaxQuantity or entry.maxQuantity)
+	if maxQuantity ~= nil then
+		metadata.maxQuantity = math.max(1, math.floor(maxQuantity))
+	end
+
+	local stackNumber = tonumber(entry.StackNumber or entry.stackNumber)
+	if stackNumber ~= nil then
+		metadata.stackNumber = math.max(1, math.floor(stackNumber))
+	end
+
+	local stackOrder = tonumber(entry.StackOrder or entry.stackOrder)
+	if stackOrder ~= nil then
+		metadata.stackOrder = math.max(1, math.floor(stackOrder))
+	end
+
+	local representativeInstanceId = tostring(entry.RepresentativeInstanceId or entry.representativeInstanceId or "")
+	if representativeInstanceId ~= "" then
+		metadata.representativeInstanceId = representativeInstanceId
+	end
+
+	local instanceIds = entry.InstanceIds or entry.instanceIds
+	if typeof(instanceIds) == "table" then
+		local copy = {}
+		for _, instanceId in ipairs(instanceIds) do
+			local normalizedInstanceId = tostring(instanceId or "")
+			if normalizedInstanceId ~= "" then
+				table.insert(copy, normalizedInstanceId)
+			end
+		end
+		if #copy > 0 then
+			metadata.instanceIds = copy
+		end
+	end
+
+	local productionName = tostring(entry.ProductionName or entry.productionName or "")
+	if productionName ~= "" then
+		metadata.productionName = productionName
+	end
+
+	local realCharacterName = tostring(entry.RealCharacterName or entry.realCharacterName or "")
+	if realCharacterName ~= "" then
+		metadata.realCharacterName = realCharacterName
+	end
+
+	if next(metadata) ~= nil then
 		return metadata
 	end
 	return nil
@@ -370,9 +550,51 @@ local function applyDisplayMetadataToState(state, metadata)
 		return state
 	end
 
-	state.displayName = metadata.displayName
-	state.rarity = metadata.rarity
-	state.render = metadata.render
+	if metadata.displayName ~= nil then
+		state.displayName = metadata.displayName
+	end
+	if metadata.rarity ~= nil then
+		state.rarity = metadata.rarity
+	end
+	if metadata.render ~= nil then
+		state.render = metadata.render
+	end
+	if metadata.staticPreviewImage ~= nil then
+		state.staticPreviewImage = metadata.staticPreviewImage
+	end
+	if metadata.modelPreview ~= nil then
+		state.modelPreview = metadata.modelPreview
+	end
+	if metadata.modelName ~= nil then
+		state.modelName = metadata.modelName
+	end
+	if metadata.crewMemberId ~= nil then
+		state.crewMemberId = metadata.crewMemberId
+	end
+	if metadata.stackId ~= nil then
+		state.stackId = metadata.stackId
+	end
+	if metadata.maxQuantity ~= nil then
+		state.maxQuantity = metadata.maxQuantity
+	end
+	if metadata.stackNumber ~= nil then
+		state.stackNumber = metadata.stackNumber
+	end
+	if metadata.stackOrder ~= nil then
+		state.stackOrder = metadata.stackOrder
+	end
+	if metadata.representativeInstanceId ~= nil then
+		state.representativeInstanceId = metadata.representativeInstanceId
+	end
+	if metadata.instanceIds ~= nil then
+		state.instanceIds = metadata.instanceIds
+	end
+	if metadata.productionName ~= nil then
+		state.productionName = metadata.productionName
+	end
+	if metadata.realCharacterName ~= nil then
+		state.realCharacterName = metadata.realCharacterName
+	end
 	return state
 end
 
@@ -387,7 +609,8 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 			local name = tostring(entry.Name or entry.name or "")
 			local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
 			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
-				local key = kind .. "|" .. name
+				local stackId = tostring(entry.StackId or entry.stackId or "")
+				local key = if isCrewItemKind(kind) and stackId ~= "" then stackId else kind .. "|" .. name
 				ensureAcquired(key)
 				local nextState = {
 					kind = kind,
@@ -415,7 +638,8 @@ local function applyInventorySnapshot(snapshot)
 
 	clearSnapshotOwnedItems()
 
-	local brainrotCount = applyQuantitySnapshotEntries(snapshot.Brainrots, "Brainrot", function(name)
+	local crewSnapshotEntries = snapshot.Crew
+	local crewCount = applyQuantitySnapshotEntries(crewSnapshotEntries, CREW_ITEM_KIND, function(name)
 		return getCrewInfo(name) ~= nil
 	end)
 
@@ -465,10 +689,8 @@ local function applyInventorySnapshot(snapshot)
 
 	inventorySnapshotDebug(
 		"applied",
-		"brainrots",
-		brainrotCount,
 		"crew",
-		snapshot.Counts and tostring(snapshot.Counts.Crew) or "0",
+		crewCount,
 		"devilFruits",
 		devilFruitCount,
 		"gears",
@@ -516,12 +738,12 @@ local function getRarityLabel(kind, name, state)
 		return fruit and tostring(fruit.Rarity or "") or ""
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
 			return state.rarity
 		end
-		local brainrot = getCrewInfo(name)
-		return brainrot and tostring(brainrot.Rarity or "") or ""
+		local crewInfo = getCrewInfo(name)
+		return crewInfo and tostring(crewInfo.Rarity or "") or ""
 	end
 
 	if kind == "Gear" then
@@ -533,7 +755,7 @@ local function getRarityLabel(kind, name, state)
 end
 
 local function getItemSortRank(kind, name, state)
-	if kind == "Brainrot" or kind == "DevilFruit" then
+	if isCrewItemKind(kind) or kind == "DevilFruit" then
 		return RARITY_ORDER[getRarityLabel(kind, name, state)] or 0
 	end
 
@@ -555,7 +777,7 @@ local function getItemSortRank(kind, name, state)
 	return 0
 end
 
-local function getBrainrotLevelForStand(standName)
+local function getCrewMemberLevelForStand(standName)
 	local crewMemberIncome = player:FindFirstChild("CrewMemberIncome")
 	local standFolder = crewMemberIncome and crewMemberIncome:FindFirstChild(tostring(standName))
 	local levelValue = standFolder and standFolder:FindFirstChild("StandLevel")
@@ -574,14 +796,14 @@ local function getClientShipUpgradeLevel()
 	return math.max(0, math.floor(tonumber(rawLevel) or 0))
 end
 
-local function getBrainrotIncomePerTick(standName, brainrotName)
-	local info = getCrewInfo(brainrotName)
+local function getCrewMemberIncomePerTick(standName, crewMemberName)
+	local info = getCrewInfo(crewMemberName)
 	local baseIncome = tonumber(info and info.Income) or 0
 	if baseIncome <= 0 then
 		return 0
 	end
 
-	local level = getBrainrotLevelForStand(standName)
+	local level = getCrewMemberLevelForStand(standName)
 	local levelMultiplier = getStandLevelMultiplier(level)
 	local shipUpgradeLevel = getClientShipUpgradeLevel()
 	local slotMultiplier = 1
@@ -597,7 +819,7 @@ local incomeStatusDisplayMetadataExpiresAt = 0
 local incomeStatusDisplayMetadataRequestInFlight = false
 local incomeStatusDisplayMetadataNextRefreshAt = 0
 
-local function getIncomeStatusDisplayMetadata(standName, brainrotName)
+local function getIncomeStatusDisplayMetadata(standName, crewMemberName)
 	if typeof(incomeStatusDisplayMetadata) ~= "table" or os.clock() >= incomeStatusDisplayMetadataExpiresAt then
 		return nil
 	end
@@ -609,7 +831,7 @@ local function getIncomeStatusDisplayMetadata(standName, brainrotName)
 	if descriptor.UsedCanonical ~= true then
 		return nil
 	end
-	if tostring(descriptor.LegacyIdentity or "") ~= tostring(brainrotName or "") then
+	if tostring(descriptor.LegacyIdentity or "") ~= tostring(crewMemberName or "") then
 		return nil
 	end
 
@@ -680,13 +902,13 @@ local function getItemDisplayName(kind, name, state)
 		return tostring(name or "Devil Fruit")
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.displayName) == "string" and state.displayName ~= "" then
 			return state.displayName
 		end
-		local brainrot = getCrewInfo(name)
-		if brainrot and brainrot.DisplayName then
-			return tostring(brainrot.DisplayName)
+		local crewInfo = getCrewInfo(name)
+		if crewInfo and crewInfo.DisplayName then
+			return tostring(crewInfo.DisplayName)
 		end
 		return tostring(name or "Crewmate")
 	end
@@ -709,13 +931,21 @@ local function compareInventoryKeys(a, b)
 		return tostring(a) < tostring(b)
 	end
 
+	if isCrewItemKind(stateA.kind) and isCrewItemKind(stateB.kind) then
+		local stackOrderA = tonumber(stateA.stackOrder)
+		local stackOrderB = tonumber(stateB.stackOrder)
+		if stackOrderA ~= nil and stackOrderB ~= nil and stackOrderA ~= stackOrderB then
+			return stackOrderA < stackOrderB
+		end
+	end
+
 	local rankA = getItemSortRank(stateA.kind, stateA.name, stateA)
 	local rankB = getItemSortRank(stateB.kind, stateB.name, stateB)
 	if rankA ~= rankB then
 		return rankA > rankB
 	end
 
-	if stateA.kind == stateB.kind and stateA.kind == "Brainrot" then
+	if isCrewItemKind(stateA.kind) and isCrewItemKind(stateB.kind) then
 		local nameA = string.lower(tostring(getItemDisplayName(stateA.kind, stateA.name, stateA) or ""))
 		local nameB = string.lower(tostring(getItemDisplayName(stateB.kind, stateB.name, stateB) or ""))
 		if nameA ~= nameB then
@@ -879,7 +1109,7 @@ local function getDisplayName(kind, name, state)
 		return fruit and fruit.DisplayName or tostring(name)
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		return getItemDisplayName(kind, name, state)
 	end
 
@@ -900,12 +1130,12 @@ local function getSubtitle(kind, name, state)
 		return fruit and tostring(fruit.Rarity or "Devil Fruit") or "Devil Fruit"
 	end
 
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
 		if state and typeof(state.rarity) == "string" and state.rarity ~= "" then
 			return state.rarity
 		end
-		local brainrot = getCrewInfo(name)
-		return brainrot and tostring(brainrot.Rarity or "Crewmate") or "Crewmate"
+		local crewInfo = getCrewInfo(name)
+		return crewInfo and tostring(crewInfo.Rarity or "Crewmate") or "Crewmate"
 	end
 
 	if kind == "Gear" then
@@ -917,12 +1147,17 @@ local function getSubtitle(kind, name, state)
 end
 
 local function getIcon(kind, name, state)
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
+		local staticPreviewImage = getStaticCrewPreviewImage(name, state)
+		if staticPreviewImage ~= "" then
+			return staticPreviewImage
+		end
+
 		if state and typeof(state.render) == "string" and state.render ~= "" then
 			return state.render
 		end
-		local brainrot = getCrewInfo(name)
-		return brainrot and brainrot.Render or ""
+		local crewInfo = getCrewInfo(name)
+		return crewInfo and crewInfo.Render or ""
 	end
 
 	if kind == "Gear" then
@@ -934,18 +1169,25 @@ local function getIcon(kind, name, state)
 end
 
 local function getAccentColor(kind, name, state)
-	if kind == "Brainrot" or kind == "DevilFruit" then
+	if isCrewItemKind(kind) or kind == "DevilFruit" then
 		return RARITY_COLORS[getSubtitle(kind, name, state)] or Color3.fromRGB(93, 203, 200)
 	end
 
 	if kind == "Chest" then
-		if name == "Legendary" then
+		local styleName = ChestUtils.GetVisualStyleName(name)
+		if styleName == "Mythic Devil Fruit" then
+			return Color3.fromRGB(118, 244, 214)
+		end
+		if styleName == "Legendary Devil Fruit" then
 			return Color3.fromRGB(255, 187, 74)
 		end
-		if name == "Gold" then
+		if styleName == "Rare Devil Fruit" then
+			return Color3.fromRGB(91, 170, 255)
+		end
+		if styleName == "Gold" then
 			return Color3.fromRGB(222, 189, 74)
 		end
-		if name == "Iron" then
+		if styleName == "Iron" then
 			return Color3.fromRGB(162, 175, 194)
 		end
 		return Color3.fromRGB(191, 143, 86)
@@ -997,11 +1239,11 @@ local function readCrewQuickSlots()
 	}
 end
 
-local function countCrewItems(brainrotKeys)
+local function countCrewItems(crewKeys)
 	local count = 0
-	for _, key in ipairs(brainrotKeys or {}) do
+	for _, key in ipairs(crewKeys or {}) do
 		local state = itemState[key]
-		if state and state.kind == "Brainrot" then
+		if state and isCrewItemKind(state.kind) then
 			count += math.max(0, math.floor(tonumber(state.qty) or 0))
 		end
 	end
@@ -1388,31 +1630,37 @@ local function buildCaptainLogData(query)
 		local ok, entry, collectable = pcall(function()
 			local slotFolder = slotsFolder and slotsFolder:FindFirstChild(standName)
 			local standIncomeFolder = incomeFolder and incomeFolder:FindFirstChild(standName)
-			local brainrotName = tostring(
-				readChildValue(standIncomeFolder, "LegacyStorageName")
-					or readChildValue(standIncomeFolder, "CrewMemberName")
-					or readChildValue(standIncomeFolder, "BrainrotName")
-					or readChildValue(slotFolder, "BrainrotName")
+			local crewMemberName = tostring(
+				readChildValue(standIncomeFolder, "CrewMemberName")
+					or readChildValue(slotFolder, "CrewMemberName")
 					or ""
 			)
 
-			if brainrotName == "" then
+			if crewMemberName == "" then
 				return nil, 0
 			end
 
-			local standLevel = getBrainrotLevelForStand(standName)
-			local incomePerTick = getBrainrotIncomePerTick(standName, brainrotName)
+			local standLevel = getCrewMemberLevelForStand(standName)
+			local incomePerTick = getCrewMemberIncomePerTick(standName, crewMemberName)
 			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
-			local subtitle = getSubtitle("Brainrot", brainrotName)
-			local displayName = getDisplayName("Brainrot", brainrotName)
-			local incomeDisplayMetadata = getIncomeStatusDisplayMetadata(standName, brainrotName)
+			local subtitle = getSubtitle(CREW_ITEM_KIND, crewMemberName)
+			local displayName = getDisplayName(CREW_ITEM_KIND, crewMemberName)
+			local modelPreview = getCrewModelPreviewDescriptor(crewMemberName)
+			local previewKind = nil
+			local previewName = nil
+			local incomeDisplayMetadata = getIncomeStatusDisplayMetadata(standName, crewMemberName)
 			if incomeDisplayMetadata ~= nil then
 				displayName = tostring(incomeDisplayMetadata.DisplayName)
 			end
+			if modelPreview then
+				previewKind = CREW_ITEM_KIND
+				previewName = tostring(modelPreview.ModelName or "")
+			end
+			local staticPreviewImage = getStaticCrewPreviewImage(crewMemberName, nil, modelPreview, displayName)
 			local bounty = math.max(
 				0,
-				BountyResolver.ResolveBrainrotBounty({
-					StorageName = brainrotName,
+				BountyResolver.ResolveCrewMemberBounty({
+					StorageName = crewMemberName,
 					Level = standLevel,
 				})
 			)
@@ -1420,13 +1668,17 @@ local function buildCaptainLogData(query)
 			local nextEntry = {
 				key = standName,
 				standName = standName,
-				brainrotName = brainrotName,
+				crewMemberName = crewMemberName,
 				displayName = displayName,
 				subtitle = subtitle,
 				footer = string.format("%s  |  %s Beli ready", standName, formatNumber(incomeToCollect)),
-				image = getIcon("Brainrot", brainrotName),
+				image = getIcon(CREW_ITEM_KIND, crewMemberName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
-				accentColor = getAccentColor("Brainrot", brainrotName),
+				previewKind = previewKind,
+				previewName = previewName,
+				staticPreviewImage = staticPreviewImage,
+				modelPreview = modelPreview,
+				accentColor = getAccentColor(CREW_ITEM_KIND, crewMemberName),
 				level = standLevel,
 				bounty = bounty,
 				incomePerTick = incomePerTick,
@@ -1480,7 +1732,7 @@ end
 local function buildLists()
 	local gearsList = {}
 	local chestsList = {}
-	local brainrotsList = {}
+	local crewList = {}
 	local devilFruitList = {}
 	local resourceList = {}
 
@@ -1489,8 +1741,8 @@ local function buildLists()
 			gearsList[#gearsList + 1] = key
 		elseif state.kind == "Chest" and (state.qty or 0) > 0 then
 			chestsList[#chestsList + 1] = key
-		elseif state.kind == "Brainrot" and (state.qty or 0) > 0 then
-			brainrotsList[#brainrotsList + 1] = key
+		elseif isCrewItemKind(state.kind) and (state.qty or 0) > 0 then
+			crewList[#crewList + 1] = key
 		elseif state.kind == "DevilFruit" and (state.qty or 0) > 0 then
 			devilFruitList[#devilFruitList + 1] = key
 		elseif state.kind == "Resource" and (state.qty or 0) > 0 then
@@ -1506,7 +1758,7 @@ local function buildLists()
 		return compareInventoryKeys(a, b)
 	end)
 
-	table.sort(brainrotsList, function(a, b)
+	table.sort(crewList, function(a, b)
 		return compareInventoryKeys(a, b)
 	end)
 
@@ -1518,21 +1770,33 @@ local function buildLists()
 		return compareInventoryKeys(a, b)
 	end)
 
-	return gearsList, chestsList, brainrotsList, devilFruitList, resourceList
+	return gearsList, chestsList, crewList, devilFruitList, resourceList
 end
 
 local function buildEntry(key, state)
 	local displayName = getDisplayName(state.kind, state.name, state)
 	local subtitle = getSubtitle(state.kind, state.name, state)
+	local equippedKindMatches = equippedKind == nil
+		or tostring(state.kind) == tostring(equippedKind)
+		or (isCrewItemKind(state.kind) and isCrewItemKind(equippedKind))
 	local isEquipped = tostring(state.name) == tostring(equippedName)
-		and (equippedKind == nil or tostring(state.kind) == tostring(equippedKind))
+		and equippedKindMatches
 	local kindFooter = if state.kind == "Resource"
 		then "Display only"
 		else (isEquipped and "Click to unequip" or "Click to equip")
 	local previewKind = nil
 	local previewName = nil
+	local modelPreview = nil
+	local staticPreviewImage = ""
 
-	if state.kind == "DevilFruit" then
+	if isCrewItemKind(state.kind) then
+		modelPreview = getCrewModelPreviewDescriptor(state.name, state)
+		if modelPreview then
+			previewKind = CREW_ITEM_KIND
+			previewName = tostring(modelPreview.ModelName or "")
+		end
+		staticPreviewImage = getStaticCrewPreviewImage(state.name, state, modelPreview, displayName)
+	elseif state.kind == "DevilFruit" then
 		previewKind = "DevilFruit"
 		previewName = state.name
 	elseif state.kind == "Chest" then
@@ -1555,7 +1819,15 @@ local function buildEntry(key, state)
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
 		previewName = previewName,
+		staticPreviewImage = staticPreviewImage,
+		modelPreview = modelPreview,
 		quantity = state.qty,
+		maxQuantity = state.maxQuantity,
+		stackId = state.stackId,
+		stackNumber = state.stackNumber,
+		stackOrder = state.stackOrder,
+		instanceIds = state.instanceIds,
+		representativeInstanceId = state.representativeInstanceId,
 		accentColor = getAccentColor(state.kind, state.name, state),
 		interactive = state.kind ~= "Resource",
 		isEquipped = isEquipped,
@@ -1602,23 +1874,20 @@ local function buildRenderData()
 	syncChestsFromInventory()
 	syncDevilFruitsFromInventory()
 
-	local gearsList, chestsList, brainrotsList, devilFruitList, resourceList = buildLists()
+	local gearsList, chestsList, crewList, devilFruitList, resourceList = buildLists()
 	local query = trim(uiState.query)
 	local crewQuickSlots = readCrewQuickSlots()
-	local crewCollectionCount = countCrewItems(brainrotsList)
-
-	local brainrotHotbarEntries = {}
-	for _, key in ipairs(brainrotsList) do
-		local state = itemState[key]
-		if state then
-			brainrotHotbarEntries[#brainrotHotbarEntries + 1] = buildEntry(key, state)
-		end
-	end
+	local crewCollectionCount = countCrewItems(crewList)
 
 	local hotbarSlots = {}
 	keyboardHotbar = {}
 	for slotIndex = 1, crewQuickSlots.maxSlots do
-		local entry = brainrotHotbarEntries[slotIndex]
+		local entry = nil
+		local key = crewList[slotIndex]
+		local state = key and itemState[key] or nil
+		if state then
+			entry = buildEntry(key, state)
+		end
 		if slotIndex <= crewQuickSlots.unlockedSlots then
 			if entry then
 				entry.quickSlotIndex = slotIndex
@@ -1703,29 +1972,35 @@ local function buildRenderData()
 		end
 	end
 
-	local captainLogOk, captainLog = pcall(buildCaptainLogData, query)
-	if not captainLogOk or typeof(captainLog) ~= "table" then
-		captainLog = {
-			entries = {},
-			filteredCount = 0,
-			placedCount = 0,
-			totalCollectable = 0,
-			totalCount = 0,
-		}
+	local captainLog = {
+		entries = {},
+		filteredCount = 0,
+		placedCount = 0,
+		totalCollectable = 0,
+		totalCount = 0,
+	}
+	if uiState.activeView == "CaptainLog" then
+		local captainLogOk, result = pcall(buildCaptainLogData, query)
+		if captainLogOk and typeof(result) == "table" then
+			captainLog = result
+		end
 	end
 
-	local titlesOk, titles = pcall(buildTitlesData, query)
-	if not titlesOk or typeof(titles) ~= "table" then
-		titles = {
-			entries = {},
-			filteredCount = 0,
-			totalCount = 0,
-			unlockedCount = 0,
-			lockedCount = 0,
-			persistentUnlockedCount = 0,
-			dynamicUnlockedCount = 0,
-			bountyRank = nil,
-		}
+	local titles = {
+		entries = {},
+		filteredCount = 0,
+		totalCount = 0,
+		unlockedCount = 0,
+		lockedCount = 0,
+		persistentUnlockedCount = 0,
+		dynamicUnlockedCount = 0,
+		bountyRank = nil,
+	}
+	if uiState.activeView == "Titles" then
+		local titlesOk, result = pcall(buildTitlesData, query)
+		if titlesOk and typeof(result) == "table" then
+			titles = result
+		end
 	end
 
 	return {
@@ -1744,13 +2019,13 @@ local function buildRenderData()
 			chests = chestCount,
 			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
-			brainrotCollectionCount = crewCollectionCount,
-			brainrotQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
-			brainrotQuickSlotsMax = crewQuickSlots.maxSlots,
+			crewCollectionCount = crewCollectionCount,
+			crewQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
+			crewQuickSlotsMax = crewQuickSlots.maxSlots,
 		},
 		activeView = uiState.activeView,
 		activeCategoryLabel = (CATEGORY_DEFS[uiState.activeCategory] or CATEGORY_DEFS.Chests).label,
-		brainrotQuickSlots = crewQuickSlots,
+		crewQuickSlots = crewQuickSlots,
 		filteredCount = #items,
 		totalCount = #activeKeys,
 		query = uiState.query,
@@ -1844,21 +2119,6 @@ local function getLegacyInventoryIcon()
 	}
 
 	return cachedLegacyInventoryIcon
-end
-
-local function getToggleLayoutSignature()
-	local layout = getToggleLayout()
-	if not layout then
-		return "none"
-	end
-
-	return table.concat({
-		tostring(math.floor(layout.position.X.Offset + 0.5)),
-		tostring(math.floor(layout.position.Y.Offset + 0.5)),
-		tostring(math.floor(layout.size.X.Offset + 0.5)),
-		tostring(math.floor(layout.size.Y.Offset + 0.5)),
-		layout.compact and "1" or "0",
-	}, "|")
 end
 
 local function bindHudLayoutTracking()
@@ -2294,7 +2554,7 @@ local function resolveEquippedItemName(tool)
 	end
 
 	local canonicalName = tool:GetAttribute("InvItem") or tool:GetAttribute("InventoryItemName")
-	local canonicalKind = tool:GetAttribute("InventoryItemKind")
+	local canonicalKind = normalizeItemKind(tool:GetAttribute("InventoryItemKind"))
 	if typeof(canonicalName) == "string" and canonicalName ~= "" then
 		return canonicalKind, canonicalName
 	end
@@ -2306,7 +2566,10 @@ local function syncEquippedState(character)
 	local attributeKind = player:GetAttribute("EquippedInventoryItemKind")
 	local attributeName = player:GetAttribute("EquippedInventoryItemName")
 	if typeof(attributeName) == "string" and attributeName ~= "" then
-		equippedKind = if typeof(attributeKind) == "string" and attributeKind ~= "" then attributeKind else nil
+		local normalizedAttributeKind = normalizeItemKind(attributeKind)
+		equippedKind = if typeof(normalizedAttributeKind) == "string" and normalizedAttributeKind ~= ""
+			then normalizedAttributeKind
+			else nil
 		equippedName = attributeName
 		scheduleRender()
 		return
@@ -2351,15 +2614,23 @@ local function hookCharacter(character)
 	end, characterConnections)
 end
 
+local requestInventorySnapshot = nil
+local scheduleInventorySnapshotRequest = nil
+
 trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
-	if kind == "Brainrot" then
+	if isCrewItemKind(kind) then
+		if snapshotRemote ~= nil and scheduleInventorySnapshotRequest ~= nil then
+			scheduleInventorySnapshotRequest("crewUpdateRemote")
+			return
+		end
+
 		local quantity = tonumber(value) or 0
-		local key = "Brainrot|" .. tostring(name)
+		local key = CREW_ITEM_KIND .. "|" .. tostring(name)
 		local previous = itemState[key]
 		if quantity > 0 then
 			ensureAcquired(key)
 			itemState[key] = applyDisplayMetadataToState({
-				kind = "Brainrot",
+				kind = CREW_ITEM_KIND,
 				name = name,
 				qty = quantity,
 			}, previous)
@@ -2414,8 +2685,15 @@ end, cleanupConnections)
 
 local snapshotRequestInFlight = false
 local lastSnapshotRequestAt = 0
+local snapshotRequestQueued = false
+local queuedSnapshotReason = nil
+local SNAPSHOT_UPDATE_DEBOUNCE_SECONDS = 0.15
 
-local function requestInventorySnapshot(reason)
+local function isTransientSnapshotInvokeError(err)
+	return tostring(err):find("cannot resume non%-suspended coroutine") ~= nil
+end
+
+requestInventorySnapshot = function(reason)
 	if snapshotRequestInFlight or not snapshotRemote or destroyed then
 		return
 	end
@@ -2440,6 +2718,12 @@ local function requestInventorySnapshot(reason)
 		end
 
 		if not ok then
+			if isTransientSnapshotInvokeError(snapshot) and reason ~= "retryTransientInvoke" then
+				task.delay(1.25, function()
+					requestInventorySnapshot("retryTransientInvoke")
+				end)
+				return
+			end
 			warn("[INV][SNAPSHOT][CLIENT][APP] request failed", snapshot)
 			task.delay(2, function()
 				requestInventorySnapshot("retryAfterError")
@@ -2456,9 +2740,29 @@ local function requestInventorySnapshot(reason)
 	end)
 end
 
+scheduleInventorySnapshotRequest = function(reason)
+	if snapshotRemote == nil or destroyed then
+		return
+	end
+
+	queuedSnapshotReason = tostring(reason or "queued")
+	if snapshotRequestQueued then
+		return
+	end
+
+	snapshotRequestQueued = true
+	task.delay(SNAPSHOT_UPDATE_DEBOUNCE_SECONDS, function()
+		snapshotRequestQueued = false
+		if destroyed then
+			return
+		end
+		requestInventorySnapshot(queuedSnapshotReason or reason)
+	end)
+end
+
 trackConnection(player:GetAttributeChangedSignal("PlayerDataReady"), function()
 	if player:GetAttribute("PlayerDataReady") == true then
-		requestInventorySnapshot("playerDataReady")
+		scheduleInventorySnapshotRequest("playerDataReady")
 	end
 end, cleanupConnections)
 
@@ -2573,14 +2877,6 @@ trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemName"), f
 		syncEquippedState(player.Character)
 	else
 		equippedName = nil
-		scheduleRender()
-	end
-end, cleanupConnections)
-
-trackConnection(RunService.Heartbeat, function()
-	local signature = getToggleLayoutSignature()
-	if signature ~= lastToggleLayoutSignature then
-		lastToggleLayoutSignature = signature
 		scheduleRender()
 	end
 end, cleanupConnections)

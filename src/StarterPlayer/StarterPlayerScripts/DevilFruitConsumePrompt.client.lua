@@ -13,9 +13,8 @@ local React = require(packages:WaitForChild("React"))
 local ReactRoblox = require(packages:WaitForChild("ReactRoblox"))
 local DevilFruitConfig = require(modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local EatAnimationClient = require(modules:WaitForChild("DevilFruits"):WaitForChild("EatAnimationClient"))
-local DevilFruitRuntimeBootstrap = require(
-	modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitRuntimeBootstrap")
-)
+local DevilFruitRuntimeBootstrap =
+	require(modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitRuntimeBootstrap"))
 local PopUpModule = require(modules:WaitForChild("PopUpModule"))
 local UiModalState = require(modules:WaitForChild("UiModalState"))
 local ConsumePromptScreen = require(uiFolder:WaitForChild("DevilFruit"):WaitForChild("ConsumePromptScreen"))
@@ -29,10 +28,10 @@ local TOOL_ATTR_KIND = "InventoryItemKind"
 local TOOL_ATTR_FRUIT_KEY = "FruitKey"
 local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
 local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = UiModalState.GetAttributeName()
-local MODAL_STATE_KEY = "DevilFruitConsumePrompt"
-local CONSUME_PROMPT_DEBUG = true
+local CONSUME_PROMPT_DEBUG = false
 local EQUIP_TO_PROMPT_DELAY = 0.2
 local REQUEST_COOLDOWN = 0.35
+local MODAL_STATE_KEY = "DevilFruitConsumePrompt"
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactDevilFruitConsumePromptRoot"
@@ -142,37 +141,40 @@ local function getConfirmText()
 end
 
 local function render()
-	root:render(ReactRoblox.createPortal(React.createElement(ConsumePromptScreen, {
-		body = getPromptBody(),
-		cancelText = "Cancel",
-		confirmText = getConfirmText(),
-		onCancel = function()
-			if pendingPayload then
-				responseRemote:FireServer(false, pendingPayload.FruitKey)
-			end
-			setPromptPayload(nil)
-			render()
-		end,
-		onConfirm = function()
-			if not pendingPayload then
-				return
-			end
-
-			if pendingPayload.Step == 1 and pendingPayload.RequiresReplaceWarning then
-				pendingPayload.Step = 2
+	root:render(ReactRoblox.createPortal(
+		React.createElement(ConsumePromptScreen, {
+			body = getPromptBody(),
+			cancelText = "Cancel",
+			confirmText = getConfirmText(),
+			onCancel = function()
+				if pendingPayload then
+					responseRemote:FireServer(false, pendingPayload.FruitKey)
+				end
+				setPromptPayload(nil)
 				render()
-				return
-			end
+			end,
+			onConfirm = function()
+				if not pendingPayload then
+					return
+				end
 
-			local confirmedPayload = pendingPayload
-			setPromptPayload(nil)
-			render()
-			responseRemote:FireServer(true, confirmedPayload.FruitKey)
-			task.spawn(playEatAnimation, confirmedPayload.FruitKey)
-		end,
-		title = pendingPayload and pendingPayload.DisplayName or "Devil Fruit",
-		visible = pendingPayload ~= nil,
-	}), playerGui))
+				if pendingPayload.Step == 1 and pendingPayload.RequiresReplaceWarning then
+					pendingPayload.Step = 2
+					render()
+					return
+				end
+
+				local confirmedPayload = pendingPayload
+				setPromptPayload(nil)
+				render()
+				responseRemote:FireServer(true, confirmedPayload.FruitKey)
+				task.spawn(playEatAnimation, confirmedPayload.FruitKey)
+			end,
+			title = pendingPayload and pendingPayload.DisplayName or "Devil Fruit",
+			visible = pendingPayload ~= nil,
+		}),
+		playerGui
+	))
 end
 
 local function scheduleRender()
@@ -428,9 +430,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1
-		and input.UserInputType ~= Enum.UserInputType.Touch
-	then
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
 		return
 	end
 

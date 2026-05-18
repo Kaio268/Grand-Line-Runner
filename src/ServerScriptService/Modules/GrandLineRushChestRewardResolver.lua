@@ -31,12 +31,85 @@ local function chooseWeightedKey(randomObject, weightTable, orderedKeys)
 	return orderedKeys[#orderedKeys]
 end
 
-local function cloneShallow(source)
-	local copy = {}
-	for key, value in pairs(source or {}) do
-		copy[key] = value
+local function normalizeMaterialKey(materialKey)
+	local key = tostring(materialKey or "")
+	if key == "CommonShipMaterial" then
+		return "Timber"
+	elseif key == "RareShipMaterial" then
+		return "Iron"
 	end
-	return copy
+
+	return key
+end
+
+local function clampRewardAmount(value)
+	return math.max(0, math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function getStaticRewardAmount(amountSpec)
+	if typeof(amountSpec) == "number" then
+		return clampRewardAmount(amountSpec)
+	end
+
+	if typeof(amountSpec) ~= "table" then
+		return 0
+	end
+
+	if amountSpec.Amount ~= nil then
+		return getStaticRewardAmount(amountSpec.Amount)
+	end
+	if amountSpec.Value ~= nil then
+		return getStaticRewardAmount(amountSpec.Value)
+	end
+
+	local minAmount = tonumber(amountSpec.Min or amountSpec.min)
+	local maxAmount = tonumber(amountSpec.Max or amountSpec.max)
+	if minAmount ~= nil and maxAmount ~= nil then
+		return clampRewardAmount(math.min(minAmount, maxAmount))
+	end
+	if minAmount ~= nil then
+		return clampRewardAmount(minAmount)
+	end
+	if maxAmount ~= nil then
+		return clampRewardAmount(maxAmount)
+	end
+
+	return 0
+end
+
+local function rollRewardAmount(randomObject, amountSpec)
+	if typeof(amountSpec) == "number" then
+		return clampRewardAmount(amountSpec)
+	end
+
+	if typeof(amountSpec) ~= "table" then
+		return 0
+	end
+
+	if amountSpec.Amount ~= nil then
+		return rollRewardAmount(randomObject, amountSpec.Amount)
+	end
+	if amountSpec.Value ~= nil then
+		return rollRewardAmount(randomObject, amountSpec.Value)
+	end
+
+	local minAmount = tonumber(amountSpec.Min or amountSpec.min)
+	local maxAmount = tonumber(amountSpec.Max or amountSpec.max)
+	if minAmount == nil and maxAmount == nil then
+		return 0
+	end
+
+	minAmount = clampRewardAmount(minAmount or maxAmount)
+	maxAmount = clampRewardAmount(maxAmount or minAmount)
+	if maxAmount < minAmount then
+		minAmount, maxAmount = maxAmount, minAmount
+	end
+
+	if maxAmount == minAmount then
+		return minAmount
+	end
+
+	return randomObject:NextInteger(minAmount, maxAmount)
 end
 
 local function getTierRewards(tierName)
@@ -46,7 +119,7 @@ end
 
 local function getScaledDoubloonReward(tierName)
 	local rewards = getTierRewards(tierName)
-	return math.max(0, tonumber(rewards.Doubloons) or 0)
+	return getStaticRewardAmount(rewards.FruitConversionDoubloons or rewards.Doubloons)
 end
 
 local function shouldGrantBaseRewards(chestData)
@@ -183,38 +256,101 @@ local function addDoubloons(dataRoot, amount)
 	return increment
 end
 
-local function grantBaseRewards(dataRoot, chestData, changedRoots)
-	local rewards = getTierRewards(chestData.Tier)
-	local foodRewards = cloneShallow(rewards.Food or {})
-	local materialRewards = cloneShallow(rewards.Materials or {})
+local function addGrantedAmount(target, key, amount)
+	local increment = clampRewardAmount(amount)
+	if increment <= 0 then
+		return 0
+	end
+
+	target[key] = math.max(0, tonumber(target[key]) or 0) + increment
+	return increment
+end
+
+local function grantFoodRewards(randomObject, foodInventory, grantedFood, foodRewards)
+	for foodKey, amountSpec in pairs(foodRewards or {}) do
+		local increment = rollRewardAmount(randomObject, amountSpec)
+		if increment > 0 then
+			foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + increment
+			addGrantedAmount(grantedFood, foodKey, increment)
+		end
+	end
+end
+
+local function grantMaterialRewards(randomObject, materials, grantedMaterials, materialRewards)
+	for materialKey, amountSpec in pairs(materialRewards or {}) do
+		local normalizedMaterialKey = normalizeMaterialKey(materialKey)
+		local increment = rollRewardAmount(randomObject, amountSpec)
+		if increment > 0 then
+			materials[normalizedMaterialKey] = math.max(0, tonumber(materials[normalizedMaterialKey]) or 0) + increment
+			addGrantedAmount(grantedMaterials, normalizedMaterialKey, increment)
+		end
+	end
+end
+
+local function grantRewardBundle(randomObject, dataRoot, grantedResources, rewardBundle)
+	rewardBundle = if typeof(rewardBundle) == "table" then rewardBundle else {}
+
 	local foodInventory = ensureFoodInventory(dataRoot)
 	local materials = ensureMaterials(dataRoot)
 
-	for foodKey, amount in pairs(foodRewards) do
-		foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + math.max(0, tonumber(amount) or 0)
-	end
-
-	for materialKey, amount in pairs(materialRewards) do
-		materials[materialKey] = math.max(0, tonumber(materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
-	end
+	grantFoodRewards(randomObject, foodInventory, grantedResources.food, rewardBundle.Food)
+	grantMaterialRewards(randomObject, materials, grantedResources.materials, rewardBundle.Materials)
 
 	materials.Timber = math.max(0, tonumber(materials.Timber) or tonumber(materials.CommonShipMaterial) or 0)
 	materials.Iron = math.max(0, tonumber(materials.Iron) or tonumber(materials.RareShipMaterial) or 0)
 	materials.CommonShipMaterial = materials.Timber
 	materials.RareShipMaterial = materials.Iron
 
-	local doubloonReward = addDoubloons(dataRoot, rewards.Doubloons)
+	local doubloonReward = addDoubloons(dataRoot, rollRewardAmount(randomObject, rewardBundle.Doubloons))
+	grantedResources.doubloons += doubloonReward
+end
+
+local function normalizeChance(rawChance)
+	local chance = tonumber(rawChance) or 0
+	if chance > 1 then
+		chance /= 100
+	end
+
+	return math.clamp(chance, 0, 1)
+end
+
+local function grantBonusRewards(randomObject, dataRoot, grantedResources, bonusRollConfig)
+	if typeof(bonusRollConfig) ~= "table" then
+		return
+	end
+
+	local chance = normalizeChance(bonusRollConfig.Chance)
+	local pool = if typeof(bonusRollConfig.Pool) == "table" then bonusRollConfig.Pool else {}
+	if chance <= 0 or #pool <= 0 then
+		return
+	end
+
+	local rolls = math.max(1, math.floor(tonumber(bonusRollConfig.Rolls) or 1))
+	for _ = 1, rolls do
+		if randomObject:NextNumber() <= chance then
+			local selectedReward = pool[randomObject:NextInteger(1, #pool)]
+			grantRewardBundle(randomObject, dataRoot, grantedResources, selectedReward)
+		end
+	end
+end
+
+local function grantBaseRewards(randomObject, dataRoot, chestData, changedRoots)
+	local rewards = getTierRewards(chestData.Tier)
+	local grantedResources = {
+		food = {},
+		materials = {},
+		doubloons = 0,
+	}
+
+	grantRewardBundle(randomObject, dataRoot, grantedResources, rewards)
+	grantBonusRewards(randomObject, dataRoot, grantedResources, rewards.BonusRoll)
 
 	changedRoots.FoodInventory = true
 	changedRoots.Materials = true
 	changedRoots.Leaderstats = true
 	changedRoots.TotalStats = true
 
-	return {
-		food = foodRewards,
-		materials = materialRewards,
-		doubloons = doubloonReward,
-	}
+	return grantedResources
 end
 
 local function getFruitPoolsByRarity()
@@ -428,7 +564,7 @@ function ChestRewardResolver.Resolve(params)
 	})
 
 	if shouldGrantBaseRewards(chestData) then
-		openResult.GrantedResources = grantBaseRewards(params.DataRoot, chestData, changedRoots)
+		openResult.GrantedResources = grantBaseRewards(randomObject, params.DataRoot, chestData, changedRoots)
 	end
 
 	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit

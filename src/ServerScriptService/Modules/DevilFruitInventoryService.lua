@@ -16,11 +16,20 @@ local FRUIT_TOOL_GRIP_VERSION = "authored_tool_template_v5"
 local CONSUME_BIND_ATTRIBUTE = "__DevilFruitConsumeBound"
 local CONSUME_BIND_VERSION = "consume_bind_v2"
 local CONSUME_BIND_ID_ATTRIBUTE = "__DevilFruitConsumeBindId"
-local CONSUME_DEBUG = true
-local R6G_WELD_DEBUG = true
 local CONSUME_SUCCESS_COLOR = Color3.fromRGB(242, 209, 107)
 local CONSUME_FAILURE_COLOR = Color3.fromRGB(255, 130, 130)
 local CONSUME_POPUP_STROKE = Color3.fromRGB(10, 18, 28)
+local CONSUME_DEBUG = false
+local R6G_WELD_DEBUG = false
+local EXPLICIT_GRIP_ATTACHMENT_NAMES = {
+	"RightGripAttachment",
+	"GripAttachment",
+	"ToolGripAttachment",
+}
+local EXPLICIT_GRIP_PART_NAMES = {
+	"Grip",
+	"Hold",
+}
 local MODEL_VARIANT_R6G = "R6G"
 local MODEL_VARIANT_ATTRIBUTE_NAMES = {
 	"FruitHoldModelVariant",
@@ -30,13 +39,22 @@ local MODEL_VARIANT_ATTRIBUTE_NAMES = {
 	"CurrentModelAsset",
 }
 
-local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local DevilFruitAssets = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
-local FruitGripController = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("FruitGripController"))
-local DevilFruitLogger = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
+local DevilFruitConfig =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local DevilFruitAssets =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Assets"))
+local FruitGripController =
+	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("FruitGripController"))
+local DevilFruitLogger = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Shared")
+		:WaitForChild("DevilFruitLogger")
+)
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
-local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
+local IndexCollectionService =
+	require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local dataManagerModule = nil
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -171,7 +189,10 @@ local function publishConsumeResult(player, payload)
 	player:SetAttribute("LastDevilFruitConsumeSuccess", success)
 	player:SetAttribute("LastDevilFruitConsumeReason", if reason ~= "" then reason else nil)
 	player:SetAttribute("LastDevilFruitConsumeFruitKey", if fruitKey ~= "" then fruitKey else nil)
-	player:SetAttribute("LastDevilFruitConsumeEquippedFruit", if equippedFruitName ~= "" then equippedFruitName else nil)
+	player:SetAttribute(
+		"LastDevilFruitConsumeEquippedFruit",
+		if equippedFruitName ~= "" then equippedFruitName else nil
+	)
 	player:SetAttribute("LastDevilFruitConsumeAt", os.clock())
 
 	resultRemote:FireClient(player, payload)
@@ -322,7 +343,8 @@ function DevilFruitInventoryService.GrantFruit(player, fruitIdentifier, amount)
 		return false, "missing_quantity"
 	end
 
-	local success, setReason = DataManager:TrySetValue(player, getFruitInventoryPath(fruit.FruitKey), currentQuantity + increment)
+	local success, setReason =
+		DataManager:TrySetValue(player, getFruitInventoryPath(fruit.FruitKey), currentQuantity + increment)
 	if success then
 		-- Granting a fruit updates both current ownership and lifetime discovery.
 		IndexCollectionService.MarkDevilFruitDiscovered(player, fruit.FruitKey)
@@ -409,8 +431,7 @@ local function clearManualGrip(tool)
 end
 
 local function resolveManualGripC0(gripPart)
-	local attachment = gripPart:FindFirstChild("RightGripAttachment")
-		or gripPart:FindFirstChild("RightGrip")
+	local attachment = gripPart:FindFirstChild("RightGripAttachment") or gripPart:FindFirstChild("RightGrip")
 	if not (attachment and attachment:IsA("Attachment")) then
 		return CFrame.new(), "", "PartOrigin"
 	end
@@ -425,9 +446,11 @@ local function getConnectedRightGripJoints(character, handle)
 	end
 
 	for _, descendant in ipairs(character:GetDescendants()) do
-		if descendant.Name == "RightGrip"
+		if
+			descendant.Name == "RightGrip"
 			and descendant:IsA("JointInstance")
-			and (descendant.Part0 == handle or descendant.Part1 == handle) then
+			and (descendant.Part0 == handle or descendant.Part1 == handle)
+		then
 			table.insert(joints, descendant)
 		end
 	end
@@ -442,7 +465,9 @@ local function logR6GLiveGripState(source, tool, character)
 
 	local handle = tool:FindFirstChild("Handle")
 	local gripPart = getGripPart(character)
-	local attachment = gripPart and (gripPart:FindFirstChild("RightGripAttachment") or gripPart:FindFirstChild("RightGrip")) or nil
+	local attachment = gripPart
+			and (gripPart:FindFirstChild("RightGripAttachment") or gripPart:FindFirstChild("RightGrip"))
+		or nil
 	local attachmentIsAttachment = attachment and attachment:IsA("Attachment")
 	r6gWeldDebug(
 		"%s tool=%s parent=%s handle=%s gripPart=%s attachmentExists=%s attachment=%s attachmentClass=%s attachmentCFrame=%s toolGrip=%s manualMode=%s",
@@ -462,7 +487,9 @@ local function logR6GLiveGripState(source, tool, character)
 	local foundJoint = false
 	if typeof(character) == "Instance" then
 		for _, descendant in ipairs(character:GetDescendants()) do
-			if descendant:IsA("JointInstance") and (descendant.Name == "RightGrip" or descendant.Name == "ManualGrip") then
+			if
+				descendant:IsA("JointInstance") and (descendant.Name == "RightGrip" or descendant.Name == "ManualGrip")
+			then
 				foundJoint = true
 				r6gWeldDebug(
 					"%s joint name=%s class=%s parent=%s part0=%s part1=%s connectedToHandle=%s C0=%s C1=%s",
@@ -554,9 +581,11 @@ local function findFruitTools(container, fruitKey)
 	end
 
 	for _, child in ipairs(container:GetChildren()) do
-		if child:IsA("Tool")
+		if
+			child:IsA("Tool")
 			and child:GetAttribute(TOOL_ATTR_KIND) == "DevilFruit"
-			and child:GetAttribute(TOOL_ATTR_NAME) == fruitKey then
+			and child:GetAttribute(TOOL_ATTR_NAME) == fruitKey
+		then
 			table.insert(tools, child)
 		end
 	end
@@ -648,11 +677,9 @@ local function expandBounds(relativeCFrame, size, currentMin, currentMax)
 	for xSign = -1, 1, 2 do
 		for ySign = -1, 1, 2 do
 			for zSign = -1, 1, 2 do
-				local corner = relativeCFrame:PointToWorldSpace(Vector3.new(
-					halfSize.X * xSign,
-					halfSize.Y * ySign,
-					halfSize.Z * zSign
-				))
+				local corner = relativeCFrame:PointToWorldSpace(
+					Vector3.new(halfSize.X * xSign, halfSize.Y * ySign, halfSize.Z * zSign)
+				)
 
 				currentMin = Vector3.new(
 					math.min(currentMin.X, corner.X),
@@ -690,11 +717,9 @@ local function getAutomaticGripPivot(template, primaryPart, fruit, gripOptions)
 	local gripProfile = FruitGripController.GetBuildGripSettings(fruit and fruit.FruitKey or nil, gripOptions)
 	local gripBias = gripProfile.AssetGripBias
 	local gripOffset = gripProfile.AssetGripOffset
-	local gripLocalPosition = boundsCenter + Vector3.new(
-		halfExtents.X * gripBias.X,
-		halfExtents.Y * gripBias.Y,
-		halfExtents.Z * gripBias.Z
-	) + gripOffset
+	local gripLocalPosition = boundsCenter
+		+ Vector3.new(halfExtents.X * gripBias.X, halfExtents.Y * gripBias.Y, halfExtents.Z * gripBias.Z)
+		+ gripOffset
 
 	gripLocalPosition = clampVector3(gripLocalPosition, localMin, localMax)
 
@@ -831,18 +856,30 @@ local function requestConsume(player, tool, source)
 	local existingPending = pendingConsumeByPlayer[player]
 	if existingPending ~= nil then
 		if not isPendingConsumeExpired(existingPending) then
-			consumeDebug("request blocked player=%s reason=pending_active fruit=%s", player.Name, tostring(existingPending.FruitKey))
+			consumeDebug(
+				"request blocked player=%s reason=pending_active fruit=%s",
+				player.Name,
+				tostring(existingPending.FruitKey)
+			)
 			return
 		end
 
-		consumeDebug("request clearing stale pending player=%s fruit=%s", player.Name, tostring(existingPending.FruitKey))
+		consumeDebug(
+			"request clearing stale pending player=%s fruit=%s",
+			player.Name,
+			tostring(existingPending.FruitKey)
+		)
 		clearPendingConsume(player)
 	end
 
 	local fruitKey = tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)
 	local fruitName = tool:GetAttribute(TOOL_ATTR_FRUIT_NAME)
 	if typeof(fruitKey) ~= "string" or fruitKey == "" then
-		consumeDebug("request blocked player=%s reason=missing_fruit_key tool=%s", player.Name, tostring(tool and tool.Name or "<nil>"))
+		consumeDebug(
+			"request blocked player=%s reason=missing_fruit_key tool=%s",
+			player.Name,
+			tostring(tool and tool.Name or "<nil>")
+		)
 		return
 	end
 
@@ -1113,7 +1150,13 @@ local function syncFruitTool(player, fruitKey, desiredCount)
 				debugInstancePath(tool.Parent)
 			)
 		else
-			warn(string.format("[DevilFruitInventoryService] Failed to build fruit tool for %s (%s)", tostring(fruitKey), tostring(reason)))
+			warn(
+				string.format(
+					"[DevilFruitInventoryService] Failed to build fruit tool for %s (%s)",
+					tostring(fruitKey),
+					tostring(reason)
+				)
+			)
 		end
 	end
 end
@@ -1354,7 +1397,14 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 		tostring(consumeReason)
 	)
 	if not consumed then
-		warn(string.format("[DevilFruitInventoryService] Failed to consume %s for %s: %s", fruitKey, player.Name, tostring(consumeReason)))
+		warn(
+			string.format(
+				"[DevilFruitInventoryService] Failed to consume %s for %s: %s",
+				fruitKey,
+				player.Name,
+				tostring(consumeReason)
+			)
+		)
 		publishConsumeResult(player, {
 			Success = false,
 			Reason = tostring(consumeReason),
@@ -1368,7 +1418,13 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	consumeDebug("equip result player=%s fruit=%s ok=%s", player.Name, tostring(fruitKey), tostring(equipped))
 	if not equipped then
 		DevilFruitInventoryService.GrantFruit(player, fruitKey, 1)
-		warn(string.format("[DevilFruitInventoryService] Failed to equip %s for %s after consuming", fruitKey, player.Name))
+		warn(
+			string.format(
+				"[DevilFruitInventoryService] Failed to equip %s for %s after consuming",
+				fruitKey,
+				player.Name
+			)
+		)
 		publishConsumeResult(player, {
 			Success = false,
 			Reason = "equip_failed",
@@ -1380,12 +1436,14 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 	local appliedFruitName = DevilFruitService.GetEquippedFruit(player)
 	if appliedFruitName ~= targetFruitName then
 		DevilFruitInventoryService.GrantFruit(player, fruitKey, 1)
-		warn(string.format(
-			"[DevilFruitInventoryService] Rolled back consumed %s for %s because equipped fruit resolved to %s",
-			fruitKey,
-			player.Name,
-			tostring(appliedFruitName)
-		))
+		warn(
+			string.format(
+				"[DevilFruitInventoryService] Rolled back consumed %s for %s because equipped fruit resolved to %s",
+				fruitKey,
+				player.Name,
+				tostring(appliedFruitName)
+			)
+		)
 		publishConsumeResult(player, {
 			Success = false,
 			Reason = "equip_mismatch",

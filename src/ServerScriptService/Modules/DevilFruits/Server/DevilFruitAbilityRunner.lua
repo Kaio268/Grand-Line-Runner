@@ -133,6 +133,8 @@ function DevilFruitAbilityRunner.Execute(params)
 	local cooldownDelay = 0
 	local preserveExistingCooldown = bypassCooldownCheck
 	local suppressActivatedEvent = false
+	local denyReason = nil
+	local denyReadyAt = nil
 	if typeof(control) == "table" then
 		if control.ApplyCooldown == false then
 			applyCooldown = false
@@ -155,6 +157,22 @@ function DevilFruitAbilityRunner.Execute(params)
 		if control.SuppressActivatedEvent == true then
 			suppressActivatedEvent = true
 		end
+
+		if typeof(control.DenyReason) == "string" and control.DenyReason ~= "" then
+			denyReason = control.DenyReason
+			denyReadyAt = tonumber(control.DenyReadyAt)
+		end
+	end
+
+	if denyReason then
+		if reservedCooldown then
+			params.ClearAbilityCooldown(player, abilityName)
+		end
+
+		params.Security.LogExecutionStage(player, fruitName, abilityName, "handler_call", "denied:" .. denyReason, payload)
+		params.RequestGuard.RecordRejection(player, denyReason, abilityName)
+		params.FireDenied(player, fruitName, abilityName, denyReason, denyReadyAt)
+		return false
 	end
 
 	local activatedPayload = payload

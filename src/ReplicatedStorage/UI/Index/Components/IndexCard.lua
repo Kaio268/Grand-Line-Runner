@@ -20,6 +20,36 @@ local LOCKED_FRUIT_AMBIENT = Color3.fromRGB(28, 30, 36)
 local LOCKED_FRUIT_LIGHT = Color3.fromRGB(58, 54, 46)
 local LOCKED_FRUIT_RIM_AMBIENT = Color3.fromRGB(16, 14, 11)
 local LOCKED_FRUIT_RIM_LIGHT = Color3.fromRGB(82, 68, 34)
+local LOCKED_CREW_SILHOUETTE_COLOR = Color3.fromRGB(0, 0, 0)
+local LOCKED_CREW_AMBIENT = Color3.fromRGB(4, 4, 5)
+local LOCKED_CREW_LIGHT = Color3.fromRGB(10, 10, 12)
+local BLACK = Color3.fromRGB(0, 0, 0)
+local PREVIEW_ANCHOR = Vector2.new(0.5, 0.5)
+local PREVIEW_POSITION = UDim2.fromScale(0.5, 0.54)
+local PREVIEW_SIZE = UDim2.fromScale(0.82, 0.82)
+local IMAGE_SHADOW_POSITION = UDim2.fromScale(0.5, 0.58)
+local IMAGE_SHADOW_SIZE = UDim2.fromScale(0.84, 0.84)
+local INDEX_STATIC_PREVIEW_SCALE = 1.18
+local INDEX_STATIC_PREVIEW_SIZE = UDim2.fromScale(INDEX_STATIC_PREVIEW_SCALE, INDEX_STATIC_PREVIEW_SCALE)
+local INDEX_STATIC_PREVIEW_SCALE_OVERRIDES = {}
+local INDEX_STATIC_PREVIEW_OVERRIDE_KEYS = {
+	"displayName",
+	"id",
+	"baseName",
+	"name",
+	"previewName",
+}
+
+local function getIndexStaticPreviewSize(unit)
+	for _, key in ipairs(INDEX_STATIC_PREVIEW_OVERRIDE_KEYS) do
+		local scale = INDEX_STATIC_PREVIEW_SCALE_OVERRIDES[tostring(unit[key] or "")]
+		if scale then
+			return UDim2.fromScale(scale, scale)
+		end
+	end
+
+	return INDEX_STATIC_PREVIEW_SIZE
+end
 
 local function fallbackSilhouette()
 	return e("Frame", {
@@ -48,6 +78,29 @@ local function fallbackSilhouette()
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 12),
+			}),
+		}),
+	})
+end
+
+local function previewDropShadow()
+	return e("Frame", {
+		AnchorPoint = PREVIEW_ANCHOR,
+		BackgroundColor3 = BLACK,
+		BackgroundTransparency = 0.72,
+		BorderSizePixel = 0,
+		Position = UDim2.fromScale(0.5, 0.82),
+		Size = UDim2.fromScale(0.58, 0.14),
+		ZIndex = 1,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.45),
+				NumberSequenceKeypoint.new(1, 1),
 			}),
 		}),
 	})
@@ -317,18 +370,109 @@ local function createRarityChrome(rarityStyle, hovered)
 	return chromeChildren
 end
 
-local function createLockedPreview(unit)
+local function createLockedImagePreview(image, unit, isFruit)
+	if isFruit then
+		return {
+			Character = e("ImageLabel", {
+				AnchorPoint = PREVIEW_ANCHOR,
+				BackgroundTransparency = 1,
+				Image = image,
+				ImageColor3 = BLACK,
+				ImageTransparency = 0,
+				Position = PREVIEW_POSITION,
+				ScaleType = Enum.ScaleType.Fit,
+				Size = UDim2.fromScale(0.8, 0.8),
+				ZIndex = 3,
+			}),
+		}
+	end
+
+	local previewSize = getIndexStaticPreviewSize(unit)
+	return {
+		Shadow = e("ImageLabel", {
+			AnchorPoint = PREVIEW_ANCHOR,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageColor3 = BLACK,
+			ImageTransparency = 0.3,
+			Position = UDim2.fromScale(0.5, 0.56),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = previewSize,
+			ZIndex = 1,
+		}),
+		Character = e("ImageLabel", {
+			AnchorPoint = PREVIEW_ANCHOR,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageColor3 = BLACK,
+			ImageTransparency = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = previewSize,
+			ZIndex = 3,
+		}),
+	}
+end
+
+local function createLockedCrewModelPreview(previewName, includeFallback)
+	local previewChildren = {
+		Shadow = e(PreviewViewport, {
+			previewKind = "CrewMember",
+			previewName = previewName,
+			preferModel = true,
+			size = UDim2.fromScale(0.86, 0.86),
+			position = UDim2.fromScale(0.5, 0.57),
+			anchorPoint = PREVIEW_ANCHOR,
+			tintColor = BLACK,
+			tintTransparency = 0.35,
+			tintMaterial = Enum.Material.Plastic,
+			ambient = LOCKED_CREW_AMBIENT,
+			lightColor = LOCKED_CREW_LIGHT,
+			lightDirection = Vector3.new(0.2, -0.2, -1),
+			zIndex = 1,
+		}),
+		Character = e(PreviewViewport, {
+			previewKind = "CrewMember",
+			previewName = previewName,
+			preferModel = true,
+			size = UDim2.fromScale(0.84, 0.84),
+			position = PREVIEW_POSITION,
+			anchorPoint = PREVIEW_ANCHOR,
+			tintColor = LOCKED_CREW_SILHOUETTE_COLOR,
+			tintTransparency = 0,
+			tintMaterial = Enum.Material.Plastic,
+			ambient = LOCKED_CREW_AMBIENT,
+			lightColor = LOCKED_CREW_LIGHT,
+			lightDirection = Vector3.new(0.2, -0.2, -1),
+			zIndex = 3,
+		}),
+	}
+
+	if includeFallback then
+		previewChildren.Fallback = fallbackSilhouette()
+	end
+
+	return previewChildren
+end
+
+local function createLockedPreview(unit, renderPreview)
 	local isFruit = unit and unit.itemKind == "DevilFruit"
 
 	if unit.previewKind and unit.previewName then
+		if renderPreview == false then
+			return {
+				Fallback = fallbackSilhouette(),
+			}
+		end
+
 		if isFruit then
 			return {
 				Rim = e(PreviewViewport, {
 					previewKind = unit.previewKind,
 					previewName = unit.previewName,
 					size = UDim2.fromScale(0.88, 0.88),
-					position = UDim2.fromScale(0.5, 0.54),
-					anchorPoint = Vector2.new(0.5, 0.5),
+					position = PREVIEW_POSITION,
+					anchorPoint = PREVIEW_ANCHOR,
 					tintColor = LOCKED_FRUIT_RIM_COLOR,
 					tintTransparency = 0.74,
 					tintMaterial = Enum.Material.Plastic,
@@ -341,8 +485,8 @@ local function createLockedPreview(unit)
 					previewKind = unit.previewKind,
 					previewName = unit.previewName,
 					size = UDim2.fromScale(0.84, 0.84),
-					position = UDim2.fromScale(0.5, 0.54),
-					anchorPoint = Vector2.new(0.5, 0.5),
+					position = PREVIEW_POSITION,
+					anchorPoint = PREVIEW_ANCHOR,
 					tintColor = LOCKED_FRUIT_SILHOUETTE_COLOR,
 					tintTransparency = 0,
 					tintMaterial = Enum.Material.Plastic,
@@ -354,70 +498,32 @@ local function createLockedPreview(unit)
 			}
 		end
 
+		return createLockedCrewModelPreview(unit.previewName, true)
+	end
+
+	local crewModelName = tostring(unit.crewModelName or "")
+	if not isFruit and crewModelName ~= "" and renderPreview ~= false then
+		return createLockedCrewModelPreview(crewModelName, true)
+	end
+
+	local staticPreviewImage = tostring(unit.staticPreviewImage or "")
+	if staticPreviewImage ~= "" then
+		if isFruit then
+			return createLockedImagePreview(staticPreviewImage, unit, isFruit)
+		end
+
 		return {
-			Shadow = e(PreviewViewport, {
-				previewKind = unit.previewKind,
-				previewName = unit.previewName,
-				size = UDim2.fromScale(0.86, 0.86),
-				position = UDim2.fromScale(0.5, 0.57),
-				anchorPoint = Vector2.new(0.5, 0.5),
-				tintColor = Color3.fromRGB(0, 0, 0),
-				tintTransparency = 0.35,
-				zIndex = 1,
-			}),
-			Character = e(PreviewViewport, {
-				previewKind = unit.previewKind,
-				previewName = unit.previewName,
-				size = UDim2.fromScale(0.84, 0.84),
-				position = UDim2.fromScale(0.5, 0.54),
-				anchorPoint = Vector2.new(0.5, 0.5),
-				tintColor = Color3.fromRGB(0, 0, 0),
-				tintTransparency = 0,
-				zIndex = 3,
-			}),
+			Fallback = fallbackSilhouette(),
 		}
 	end
 
 	if unit.image and unit.image ~= "" then
 		if isFruit then
-			return {
-				Character = e("ImageLabel", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
-					BackgroundTransparency = 1,
-					Image = unit.image,
-					ImageColor3 = Color3.fromRGB(0, 0, 0),
-					ImageTransparency = 0,
-					Position = UDim2.fromScale(0.5, 0.54),
-					ScaleType = Enum.ScaleType.Fit,
-					Size = UDim2.fromScale(0.8, 0.8),
-					ZIndex = 3,
-				}),
-			}
+			return createLockedImagePreview(unit.image, unit, isFruit)
 		end
 
 		return {
-			Shadow = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundTransparency = 1,
-				Image = unit.image,
-				ImageColor3 = Color3.fromRGB(0, 0, 0),
-				ImageTransparency = 0.3,
-				Position = UDim2.fromScale(0.5, 0.56),
-				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.fromScale(0.82, 0.82),
-				ZIndex = 1,
-			}),
-			Character = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundTransparency = 1,
-				Image = unit.image,
-				ImageColor3 = Color3.fromRGB(0, 0, 0),
-				ImageTransparency = 0,
-				Position = UDim2.fromScale(0.5, 0.54),
-				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.fromScale(0.8, 0.8),
-				ZIndex = 3,
-			}),
+			Fallback = fallbackSilhouette(),
 		}
 	end
 
@@ -426,40 +532,72 @@ local function createLockedPreview(unit)
 	}
 end
 
-local function createDiscoveredPreview(unit)
-	local isFruit = unit and unit.itemKind == "DevilFruit"
+local function createStaticImagePreview(image, unit)
+	local previewSize = getIndexStaticPreviewSize(unit)
+
+	return {
+		StaticPreviewImage = e("ImageLabel", {
+			AnchorPoint = PREVIEW_ANCHOR,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageColor3 = Color3.new(1, 1, 1),
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = previewSize,
+			ZIndex = 3,
+		}),
+		StaticPreviewShadow = e("ImageLabel", {
+			AnchorPoint = PREVIEW_ANCHOR,
+			BackgroundTransparency = 1,
+			Image = image,
+			ImageColor3 = BLACK,
+			ImageTransparency = 0.7,
+			Position = UDim2.fromScale(0.5, 0.5),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = previewSize,
+			ZIndex = 1,
+		}),
+	}
+end
+
+local function createDiscoveredPreview(unit, renderPreview, isFruit)
+	local staticPreviewImage = tostring(unit.staticPreviewImage or "")
+	if staticPreviewImage ~= "" then
+		return createStaticImagePreview(staticPreviewImage, unit)
+	end
 
 	if unit.previewKind and unit.previewName then
-		if isFruit then
+		if renderPreview == false then
 			return {
-				Character = e(PreviewViewport, {
-					previewKind = unit.previewKind,
-					previewName = unit.previewName,
-					size = UDim2.fromScale(0.82, 0.82),
-					position = UDim2.fromScale(0.5, 0.54),
-					anchorPoint = Vector2.new(0.5, 0.5),
-					zIndex = 3,
-				}),
+				Fallback = fallbackSilhouette(),
 			}
 		end
 
 		return {
-			Shadow = e(PreviewViewport, {
-				previewKind = unit.previewKind,
-				previewName = unit.previewName,
-				size = UDim2.fromScale(0.86, 0.86),
-				position = UDim2.fromScale(0.5, 0.58),
-				anchorPoint = Vector2.new(0.5, 0.5),
-				tintColor = Color3.fromRGB(0, 0, 0),
-				tintTransparency = 0.72,
-				zIndex = 1,
-			}),
+			Shadow = previewDropShadow(),
 			Character = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
-				size = UDim2.fromScale(0.82, 0.82),
-				position = UDim2.fromScale(0.5, 0.54),
-				anchorPoint = Vector2.new(0.5, 0.5),
+				size = PREVIEW_SIZE,
+				position = PREVIEW_POSITION,
+				anchorPoint = PREVIEW_ANCHOR,
+				zIndex = 3,
+			}),
+		}
+	end
+
+	local crewModelName = tostring(unit.crewModelName or "")
+	if not isFruit and crewModelName ~= "" and renderPreview ~= false then
+		return {
+			Fallback = fallbackSilhouette(),
+			Shadow = previewDropShadow(),
+			Character = e(PreviewViewport, {
+				previewKind = "CrewMember",
+				previewName = crewModelName,
+				preferModel = true,
+				size = PREVIEW_SIZE,
+				position = PREVIEW_POSITION,
+				anchorPoint = PREVIEW_ANCHOR,
 				zIndex = 3,
 			}),
 		}
@@ -483,24 +621,24 @@ local function createDiscoveredPreview(unit)
 
 		return {
 			Character = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
+				AnchorPoint = PREVIEW_ANCHOR,
 				BackgroundTransparency = 1,
 				Image = unit.image,
 				ImageColor3 = Theme.Palette.Text,
-				Position = UDim2.fromScale(0.5, 0.54),
+				Position = PREVIEW_POSITION,
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.fromScale(0.8, 0.8),
+				Size = PREVIEW_SIZE,
 				ZIndex = 3,
 			}),
 			Shadow = e("ImageLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
+				AnchorPoint = PREVIEW_ANCHOR,
 				BackgroundTransparency = 1,
 				Image = unit.image,
-				ImageColor3 = Color3.fromRGB(0, 0, 0),
+				ImageColor3 = BLACK,
 				ImageTransparency = 0.7,
-				Position = UDim2.fromScale(0.5, 0.58),
+				Position = IMAGE_SHADOW_POSITION,
 				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.fromScale(0.84, 0.84),
+				Size = IMAGE_SHADOW_SIZE,
 				ZIndex = 1,
 			}),
 		}
@@ -522,7 +660,7 @@ local function IndexCard(props)
 		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
 
 	if not unit.discovered then
-		local lockedChildren = createLockedPreview(unit)
+		local lockedChildren = createLockedPreview(unit, props.renderPreview)
 
 		lockedChildren.Question = e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 0),
@@ -570,6 +708,7 @@ local function IndexCard(props)
 					BackgroundColor3 = Theme.Palette.CardBackdrop,
 					BackgroundTransparency = backdropBackgroundTransparency,
 					BorderSizePixel = 0,
+					ClipsDescendants = true,
 					Position = UDim2.fromOffset(4, 4),
 					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
 				}, imageAreaShell(lockedChildren)),
@@ -578,7 +717,7 @@ local function IndexCard(props)
 		})
 	end
 
-	local discoveredChildren = createDiscoveredPreview(unit)
+	local discoveredChildren = createDiscoveredPreview(unit, props.renderPreview, isFruit)
 	local cardAppearance = getDiscoveredCardAppearance(unit, rarity, hovered)
 
 	if unit.production and unit.production ~= "" then
@@ -600,6 +739,7 @@ local function IndexCard(props)
 			BackgroundColor3 = cardAppearance.backdropFill,
 			BackgroundTransparency = backdropBackgroundTransparency,
 			BorderSizePixel = 0,
+			ClipsDescendants = true,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
 		}, imageAreaShell(discoveredChildren, rarity, hovered, cardAppearance)),

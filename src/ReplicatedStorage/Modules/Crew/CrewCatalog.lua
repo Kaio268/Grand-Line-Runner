@@ -3,25 +3,31 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 
-local LegacyBrainrots = require(Configs:WaitForChild("Brainrots"))
-local VariantCfg = require(Configs:WaitForChild("BrainrotVariants"))
+local VariantCfg = require(Configs:WaitForChild("CrewVariants"))
 local CrewMembers = require(script.Parent:WaitForChild("CrewMembers"))
-local CrewMemberMappings = require(script.Parent:WaitForChild("CrewMemberMappings"))
 
 local CrewCatalog = {}
 
-local legacyIdToCrewMember = CrewMemberMappings.LegacyIdToCrewMember or {}
+local warned = {}
+local emptyLegacyConfig = table.freeze({})
+local retiredAliases = table.freeze({
+	Bruiser = "Diamond Bruiser",
+})
+
+local function warnOnce(key, message)
+	if warned[key] then
+		return
+	end
+	warned[key] = true
+	warn(message)
+end
 
 local function cloneShallow(value)
 	return table.clone(value or {})
 end
 
-local function getMapping(legacyId)
-	local mapping = legacyIdToCrewMember[tostring(legacyId)]
-	if typeof(mapping) == "table" then
-		return mapping
-	end
-	return nil
+local function getVariantConfig(variantKey)
+	return (VariantCfg.Versions or {})[variantKey]
 end
 
 local function getProductionEntry(id)
@@ -30,8 +36,62 @@ local function getProductionEntry(id)
 		or CrewMembers.GetByRealCharacterName(id)
 end
 
-local function getVariantConfig(variantKey)
-	return (VariantCfg.Versions or {})[variantKey]
+local function getLegacyProductionEntry(id)
+	return CrewMembers.GetByLegacyId(id)
+end
+
+local function getRetiredAlias(id)
+	return retiredAliases[tostring(id or "")]
+end
+
+local function infoFromProductionEntry(entry)
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+
+	local crewMemberId = tostring(entry.CrewMemberId or "")
+	if crewMemberId == "" then
+		warnOnce("missing_crew_member_id", "[CrewCatalog] Canonical CrewMember entry is missing CrewMemberId.")
+		return nil
+	end
+
+	local displayName = tostring(entry.DisplayName or crewMemberId)
+	local render = tostring(entry.Render or "")
+	local renderStatus = tostring(entry.RenderStatus or "")
+	if render == "" then
+		warnOnce(
+			"missing_render:" .. crewMemberId,
+			string.format("[CrewCatalog] CrewMember '%s' is missing canonical Render metadata.", crewMemberId)
+		)
+	elseif renderStatus == "NeedsCanonicalPortrait" then
+		warnOnce(
+			"placeholder_render_assets",
+			"[CrewCatalog] CrewMember portrait renders are neutral placeholders until final canonical portraits are added."
+		)
+	end
+
+	local info = cloneShallow(entry)
+	info.Id = crewMemberId
+	info.CrewMemberId = crewMemberId
+	info.CrewMemberName = displayName
+	info.DisplayName = displayName
+	info.Name = displayName
+	info.ModelName = tostring(entry.ModelName or entry.RealCharacterName or crewMemberId)
+	info.RealCharacterName = tostring(entry.RealCharacterName or "")
+	info.Arc = tostring(entry.Arc or "")
+	info.CrewArc = info.Arc
+	info.Rarity = tostring(entry.Rarity or "Common")
+	info.Render = render
+	info.GoldenRender = tostring(entry.GoldenRender or render)
+	info.DiamondRender = tostring(entry.DiamondRender or render)
+	info.RenderStatus = renderStatus
+	info.Income = tonumber(entry.Income) or 0
+	info.Chance = tonumber(entry.Chance) or 0
+	info.TimeLeft = tonumber(entry.TimeLeft) or 30
+	info.ModelNameVerified = entry.ModelNameVerified == true
+	info.MissingCrewModel = entry.MissingModel == true
+
+	return info
 end
 
 function CrewCatalog.GetVariantConfig()
@@ -39,7 +99,11 @@ function CrewCatalog.GetVariantConfig()
 end
 
 function CrewCatalog.GetLegacyConfig()
-	return LegacyBrainrots
+	warnOnce(
+		"legacy_config_requested",
+		"[CrewCatalog] GetLegacyConfig is deprecated. Active systems must use canonical CrewMember data."
+	)
+	return emptyLegacyConfig
 end
 
 function CrewCatalog.MakeVariantId(baseId, variantKey)
@@ -69,45 +133,24 @@ function CrewCatalog.ParseVariantId(crewMemberId)
 end
 
 function CrewCatalog.GetBaseInfo(baseId)
-	local id = tostring(baseId)
-	local legacyInfo = LegacyBrainrots[id]
-	if typeof(legacyInfo) ~= "table" or legacyInfo.IsVariant or legacyInfo.Variant then
-		return nil
+	local entry = getProductionEntry(tostring(baseId or ""))
+	return infoFromProductionEntry(entry)
+end
+
+function CrewCatalog.GetInfoByLegacyId(legacyId)
+	local entry = getLegacyProductionEntry(tostring(legacyId or ""))
+	local info = infoFromProductionEntry(entry)
+	if info then
+		info.LegacyId = tostring(legacyId or "")
 	end
-
-	local mapping = getMapping(id)
-	local info = cloneShallow(legacyInfo)
-	local displayName = tostring((mapping and mapping.DisplayName) or info.DisplayName or info.Name or id)
-
-	info.Id = id
-	info.LegacyId = id
-	info.CrewMemberId = tostring((mapping and mapping.CrewMemberId) or id)
-	info.CrewMemberName = displayName
-	info.DisplayName = displayName
-	info.Name = displayName
-	info.ModelName = tostring((mapping and mapping.ModelName) or (mapping and mapping.CrewMemberName) or id)
-	info.RealCharacterName = mapping and mapping.RealCharacterName or info.RealCharacterName
-	info.Arc = mapping and mapping.Arc or info.Arc
-	info.CrewArc = info.Arc
-	info.ModelNameVerified = mapping and mapping.ModelNameVerified == true or nil
-	info.MissingCrewModel = mapping and mapping.MissingModel == true or nil
-	if mapping and mapping.Rarity then
-		info.Rarity = tostring(mapping.Rarity)
-	end
-
 	return info
 end
 
 function CrewCatalog.GetInfoById(crewMemberId)
-	local id = tostring(crewMemberId)
+	local id = tostring(crewMemberId or "")
 	local direct = CrewCatalog.GetBaseInfo(id)
 	if direct then
 		return direct
-	end
-
-	local productionEntry = getProductionEntry(id)
-	if productionEntry and productionEntry.LegacyId then
-		return CrewCatalog.GetBaseInfo(productionEntry.LegacyId)
 	end
 
 	local variantKey, baseId = CrewCatalog.ParseVariantId(id)
@@ -118,46 +161,99 @@ function CrewCatalog.GetInfoById(crewMemberId)
 	return nil
 end
 
+function CrewCatalog.ResolveCrewMemberId(crewMemberId)
+	local id = tostring(crewMemberId or "")
+	if id == "" then
+		return "", nil, ""
+	end
+
+	local variantKey, baseId = CrewCatalog.ParseVariantId(id)
+	local aliasTarget = getRetiredAlias(baseId)
+	if aliasTarget then
+		baseId = aliasTarget
+	end
+	local info = CrewCatalog.GetBaseInfo(baseId)
+	local legacyStorageName = ""
+
+	if not info then
+		info = CrewCatalog.GetInfoByLegacyId(baseId)
+		if info then
+			legacyStorageName = id
+		end
+	end
+
+	if not info then
+		return id, nil, ""
+	end
+
+	local canonicalBaseId = tostring(info.CrewMemberId or baseId)
+	if variantKey ~= "Normal" then
+		local variantInfo = CrewCatalog.GetOrBuildVariantInfo(canonicalBaseId, variantKey)
+		if variantInfo then
+			local canonicalVariantId = tostring(variantInfo.CrewMemberId or CrewCatalog.MakeVariantId(canonicalBaseId, variantKey))
+			if (canonicalVariantId ~= id or aliasTarget ~= nil) and legacyStorageName == "" then
+				legacyStorageName = id
+			end
+			return canonicalVariantId, variantInfo, legacyStorageName
+		end
+	end
+
+	if (canonicalBaseId ~= id or aliasTarget ~= nil) and legacyStorageName == "" then
+		legacyStorageName = id
+	end
+
+	return canonicalBaseId, info, legacyStorageName
+end
+
+function CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+	local canonicalId, info, legacyStorageName = CrewCatalog.ResolveCrewMemberId(crewMemberId)
+	if not info then
+		return "", nil, ""
+	end
+	return canonicalId, info, legacyStorageName
+end
+
+function CrewCatalog.GetInfoByAnyId(crewMemberId)
+	local _, info = CrewCatalog.ResolveCrewMemberId(crewMemberId)
+	return info
+end
+
 function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
-	local baseIdStr = tostring(baseId)
+	local baseIdStr = tostring(baseId or "")
 	if variantKey == "Normal" or variantKey == nil then
 		return CrewCatalog.GetBaseInfo(baseIdStr)
 	end
 
 	local baseInfo = CrewCatalog.GetBaseInfo(baseIdStr)
 	if not baseInfo then
-		local productionEntry = getProductionEntry(baseIdStr)
-		if productionEntry and productionEntry.LegacyId then
-			baseInfo = CrewCatalog.GetBaseInfo(productionEntry.LegacyId)
-		end
-	end
-	if not baseInfo then
 		return nil
 	end
 
-	local finalId = CrewCatalog.MakeVariantId(baseIdStr, variantKey)
-	local legacyVariantInfo = LegacyBrainrots[finalId]
 	local variantInfo = getVariantConfig(variantKey)
 	local mult = tonumber(variantInfo and variantInfo.IncomeMult) or 1
-	local info = cloneShallow(if typeof(legacyVariantInfo) == "table" then legacyVariantInfo else baseInfo)
-	local variantDisplay = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " ")) .. tostring(baseInfo.DisplayName or baseIdStr)
+	local variantPrefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
+	local variantCrewMemberId = variantPrefix .. tostring(baseInfo.CrewMemberId or baseIdStr)
+	local info = cloneShallow(baseInfo)
 
-	info.Id = finalId
-	info.LegacyId = finalId
-	info.CrewMemberId = finalId
-	info.CrewMemberName = variantDisplay
-	info.DisplayName = variantDisplay
-	info.Name = variantDisplay
-	info.ModelName = baseInfo.ModelName
+	info.Id = variantCrewMemberId
+	info.CrewMemberId = variantCrewMemberId
+	info.CrewMemberName = variantCrewMemberId
+	info.DisplayName = variantCrewMemberId
+	info.Name = variantCrewMemberId
 	info.IsVariant = true
-	info.BaseId = baseIdStr
+	info.BaseId = tostring(baseInfo.CrewMemberId or baseIdStr)
+	info.CrewMemberBaseId = tostring(baseInfo.CrewMemberId or baseIdStr)
 	info.Variant = variantKey
-	info.RealCharacterName = baseInfo.RealCharacterName
-	info.Arc = baseInfo.Arc
-	info.CrewArc = baseInfo.CrewArc
-	info.ModelNameVerified = baseInfo.ModelNameVerified
-	info.MissingCrewModel = baseInfo.MissingCrewModel
-	info.Income = tonumber(info.Income) or math.floor((tonumber(baseInfo.Income) or 0) * mult + 0.5)
+	info.GoldenRender = baseInfo.GoldenRender
+	info.DiamondRender = baseInfo.DiamondRender
+	if variantKey == "Golden" then
+		info.Render = tostring(baseInfo.GoldenRender or baseInfo.Render or "")
+	elseif variantKey == "Diamond" then
+		info.Render = tostring(baseInfo.DiamondRender or baseInfo.Render or "")
+	else
+		info.Render = tostring(baseInfo.Render or "")
+	end
+	info.Income = math.floor((tonumber(baseInfo.Income) or 0) * mult + 0.5)
 
 	return info
 end
@@ -168,24 +264,26 @@ function CrewCatalog.FindInfoByName(name)
 		return nil, nil
 	end
 
+	local canonicalId, resolved = CrewCatalog.ResolveCrewMemberId(rawName)
+	if resolved then
+		return resolved, canonicalId
+	end
+
 	local direct = CrewCatalog.GetInfoById(rawName)
 	if direct then
 		return direct, rawName
 	end
 
-	for id, legacyInfo in pairs(LegacyBrainrots) do
-		if typeof(legacyInfo) == "table" then
-			local crewInfo = CrewCatalog.GetBaseInfo(id)
-			if crewInfo then
-				if tostring(crewInfo.Render or "") == rawName
-					or tostring(crewInfo.Name or "") == rawName
-					or tostring(crewInfo.DisplayName or "") == rawName
-					or tostring(crewInfo.CrewMemberName or "") == rawName
-					or tostring(crewInfo.RealCharacterName or "") == rawName
-					or tostring(crewInfo.ModelName or "") == rawName
-				then
-					return crewInfo, tostring(id)
-				end
+	for _, entry in ipairs(CrewMembers.GetEntries()) do
+		local crewInfo = infoFromProductionEntry(entry)
+		if crewInfo then
+			if tostring(crewInfo.Name or "") == rawName
+				or tostring(crewInfo.DisplayName or "") == rawName
+				or tostring(crewInfo.CrewMemberName or "") == rawName
+				or tostring(crewInfo.RealCharacterName or "") == rawName
+				or tostring(crewInfo.ModelName or "") == rawName
+			then
+				return crewInfo, tostring(crewInfo.CrewMemberId)
 			end
 		end
 	end
@@ -195,14 +293,12 @@ end
 
 function CrewCatalog.GetBaseEntries()
 	local entries = {}
-	local productionEntries = CrewMembers.GetEntries()
 
-	for _, entry in ipairs(productionEntries) do
-		local legacyId = tostring(entry.LegacyId or "")
-		local crewInfo = CrewCatalog.GetBaseInfo(legacyId)
+	for _, entry in ipairs(CrewMembers.GetEntries()) do
+		local crewInfo = infoFromProductionEntry(entry)
 		if crewInfo then
 			entries[#entries + 1] = {
-				Id = legacyId,
+				Id = tostring(crewInfo.CrewMemberId),
 				Info = crewInfo,
 			}
 		end

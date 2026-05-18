@@ -1,49 +1,8 @@
 local CrewCompatibilityQuarantine = {}
 
-local COMPATIBILITY_ONLY = {
-	["67"] = {
-		Disposition = "quarantine_dev_canary",
-		Reason = "Legacy canary/sample id with no production CrewMember mapping; keep explicit until dev profiles are reset or reward config is retargeted.",
-		RetirementAction = "clean_dev_index_or_retarget_reward",
-	},
-	["Balerina Capucina"] = {
-		Disposition = "quarantine_reward_legacy",
-		Reason = "Legacy time reward crew with no confirmed production CrewMember identity or model mapping.",
-		RetirementAction = "choose_reward_mapping_or_rebuild_dev_profiles",
-	},
-	["Mateo"] = {
-		Disposition = "quarantine_legacy_inventory",
-		Reason = "Legacy-only inventory/catalog row with no confirmed production CrewMember identity.",
-		RetirementAction = "clean_dev_inventory_or_choose_mapping",
-	},
-	["Pipi Kiwi"] = {
-		Disposition = "quarantine_legacy_inventory",
-		Reason = "Legacy-only inventory/catalog row with no confirmed production CrewMember identity.",
-		RetirementAction = "clean_dev_inventory_or_choose_mapping",
-	},
-	["Trippi Troppi"] = {
-		Disposition = "quarantine_legacy_inventory",
-		Reason = "Legacy-only inventory/catalog row with no confirmed production CrewMember identity.",
-		RetirementAction = "clean_dev_inventory_or_choose_mapping",
-	},
-}
+local COMPATIBILITY_ONLY = {}
 
-local BROOK_FALLBACK = {
-	["Gangster Footera"] = {
-		Disposition = "quarantine_missing_model",
-		CrewMemberId = "Soul Fiddler",
-		ModelName = "Brook",
-		Reason = "Production CrewMember mapping exists, but the approved Crew model asset named Brook is not present.",
-		RetirementAction = "add_verified_brook_model_or_retarget_model",
-	},
-	["Soul Fiddler"] = {
-		Disposition = "quarantine_missing_model",
-		CrewMemberId = "Soul Fiddler",
-		ModelName = "Brook",
-		Reason = "CrewMember identity exists, but the approved Crew model asset named Brook is not present.",
-		RetirementAction = "add_verified_brook_model_or_retarget_model",
-	},
-}
+local BROOK_FALLBACK = {}
 
 local function copyDecision(decision, kind, identity)
 	if typeof(decision) ~= "table" then
@@ -76,6 +35,25 @@ function CrewCompatibilityQuarantine.GetDecision(identity, kind)
 		return CrewCompatibilityQuarantine.GetCompatibilityOnlyDecision(identity)
 	end
 	return nil
+end
+
+function CrewCompatibilityQuarantine.ShouldSuppressRuntimeFallbackTelemetry(identity, kind)
+	local decision = CrewCompatibilityQuarantine.GetDecision(identity, kind)
+	if decision ~= nil then
+		return decision.SuppressRuntimeFallbackTelemetry == true, decision
+	end
+
+	local compatibilityDecision = CrewCompatibilityQuarantine.GetCompatibilityOnlyDecision(identity)
+	if compatibilityDecision ~= nil then
+		return compatibilityDecision.SuppressRuntimeFallbackTelemetry == true, compatibilityDecision
+	end
+
+	local brookDecision = CrewCompatibilityQuarantine.GetBrookFallbackDecision(identity)
+	if brookDecision ~= nil then
+		return brookDecision.SuppressRuntimeFallbackTelemetry == true, brookDecision
+	end
+
+	return false, nil
 end
 
 function CrewCompatibilityQuarantine.IsAllowedCompatibilityOnly(identity)

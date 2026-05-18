@@ -36,10 +36,14 @@ local DEBUG_SOUND = RunService:IsStudio()
 local SOUND_FREEZE_SHOT_FIRE = "Fire"
 local SOUND_FREEZE_SHOT_IMPACT = "Impact"
 local SOUND_ICE_BOOST_LOOP = "Loop"
--- Gameplay calls this ability FreezeShot, but the sound assets are under Hie/IceShot.
-local SOUND_FOLDER_BY_ABILITY = {
-	[HieClient.FREEZE_SHOT_ABILITY] = "IceShot",
-	[HieClient.ICE_BOOST_ABILITY] = "IceBoost",
+local SOUND_AUDIO_KEY_BY_ABILITY = {
+	[HieClient.FREEZE_SHOT_ABILITY] = {
+		[SOUND_FREEZE_SHOT_FIRE] = "FireSoundId",
+		[SOUND_FREEZE_SHOT_IMPACT] = "ImpactSoundId",
+	},
+	[HieClient.ICE_BOOST_ABILITY] = {
+		[SOUND_ICE_BOOST_LOOP] = "LoopSoundId",
+	},
 }
 local BURST_CONFIG = {
 	BurstCount = 5,
@@ -66,8 +70,6 @@ local AIM_HELPER_NAMES = {
 	RunHub = true,
 	DecreaseSpeed = true,
 }
-local hieSoundFolderCache = {}
-local hieSoundTemplateCache = {}
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -262,90 +264,98 @@ local function logSoundDiagnostics(stage, abilityName, soundName, sound)
 	)
 end
 
-local function resolveHieSoundFolder(abilityName)
-	local folderName = SOUND_FOLDER_BY_ABILITY[abilityName]
-	if not folderName then
-		hieSoundWarn("resolve_folder_failed ability=%s issue=unknown_ability", tostring(abilityName))
+local function normalizeHieSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
+	end
+
+	if typeof(value) ~= "string" or value == "" then
 		return nil
 	end
 
-	local cachedFolder = hieSoundFolderCache[folderName]
-	if cachedFolder and cachedFolder.Parent then
-		return cachedFolder
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
 	end
 
-	local node = ReplicatedStorage
-	for _, segment in ipairs({ "Assets", "Sounds", "DevilFruits", "Hie", folderName }) do
-		local child = node and node:FindFirstChild(segment)
-		if not child then
-			hieSoundWarn(
-				"path_segment_missing ability=%s segment=%s parent=%s",
-				tostring(abilityName),
-				tostring(segment),
-				formatInstancePath(node)
-			)
-			return nil
-		end
-
-		hieSoundLog("path_segment_found ability=%s segment=%s path=%s", tostring(abilityName), tostring(segment), formatInstancePath(child))
-		node = child
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
 	end
 
-	hieSoundFolderCache[folderName] = node
-	return node
+	return value
 end
 
-local function getHieSoundTemplate(abilityName, soundName)
-	local folderName = SOUND_FOLDER_BY_ABILITY[abilityName]
-	if not folderName then
-		hieSoundWarn("template_missing ability=%s sound=%s issue=unknown_ability", tostring(abilityName), tostring(soundName))
+local function getHieSoundAudioKey(abilityName, soundName)
+	local soundKeys = SOUND_AUDIO_KEY_BY_ABILITY[abilityName]
+	if not soundKeys then
+		hieSoundWarn("sound_config_missing ability=%s sound=%s issue=unknown_ability", tostring(abilityName), tostring(soundName))
 		return nil
 	end
 
-	local cacheKey = folderName .. "/" .. tostring(soundName)
-	local cachedTemplate = hieSoundTemplateCache[cacheKey]
-	if cachedTemplate and cachedTemplate.Parent then
-		return cachedTemplate
+	local audioKey = soundKeys[soundName]
+	if not audioKey then
+		hieSoundWarn("sound_config_missing ability=%s sound=%s issue=unknown_sound", tostring(abilityName), tostring(soundName))
+		return nil
 	end
 
-	local soundFolder = resolveHieSoundFolder(abilityName)
-	hieSoundLog("resolve_folder ability=%s sound=%s folder=%s", tostring(abilityName), tostring(soundName), formatInstancePath(soundFolder))
-	if not soundFolder then
+	return audioKey
+end
+
+local function getHieAudioConfig(abilityName)
+	local abilityConfig = HieConfig.GetAbilityConfig(abilityName)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function applyHieAudioProperties(sound, audioConfig)
+	if not sound or type(audioConfig) ~= "table" then
+		return
+	end
+
+	local volume = tonumber(audioConfig.Volume)
+	if volume then
+		sound.Volume = math.max(0, volume)
+	end
+
+	local rollOffMaxDistance = tonumber(audioConfig.RollOffMaxDistance)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = math.max(1, rollOffMaxDistance)
+	end
+end
+
+local function createHieSound(abilityName, soundName, looped)
+	local audioKey = getHieSoundAudioKey(abilityName, soundName)
+	if not audioKey then
+		return nil
+	end
+
+	local audioConfig = getHieAudioConfig(abilityName)
+	if not audioConfig then
+		hieSoundWarn("sound_config_missing ability=%s sound=%s issue=missing_audio_table", tostring(abilityName), tostring(soundName))
+		return nil
+	end
+
+	local soundId = normalizeHieSoundId(audioConfig[audioKey])
+	if not soundId then
 		hieSoundWarn(
-			"resolve_folder_failed ability=%s sound=%s expected=ReplicatedStorage.Assets.Sounds.DevilFruits.Hie.%s",
+			"sound_config_missing ability=%s sound=%s key=%s issue=missing_sound_id",
 			tostring(abilityName),
 			tostring(soundName),
-			tostring(folderName)
+			tostring(audioKey)
 		)
 		return nil
 	end
 
-	local soundTemplate = soundFolder:FindFirstChild(soundName)
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		hieSoundTemplateCache[cacheKey] = soundTemplate
-		logSoundDiagnostics("template_found", abilityName, soundName, soundTemplate)
-		return soundTemplate
-	end
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	applyHieAudioProperties(sound, audioConfig)
 
-	if soundTemplate then
-		hieSoundWarn(
-			"template_invalid ability=%s sound=%s path=%s class=%s",
-			tostring(abilityName),
-			tostring(soundName),
-			formatInstancePath(soundTemplate),
-			tostring(soundTemplate.ClassName)
-		)
-	else
-		hieSoundWarn(
-			"template_missing ability=%s sound=%s folder=%s childCount=%d",
-			tostring(abilityName),
-			tostring(soundName),
-			formatInstancePath(soundFolder),
-			#soundFolder:GetChildren()
-		)
-	end
-
-	return nil
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -401,18 +411,16 @@ local function playHieOneShot(abilityName, soundName, parentOrPosition)
 		return nil
 	end
 
-	local soundTemplate = getHieSoundTemplate(abilityName, soundName)
-	if not soundTemplate then
+	hieSoundLog("one_shot_create_begin ability=%s sound=%s parent=%s", tostring(abilityName), tostring(soundName), formatInstancePath(parent))
+	local sound = createHieSound(abilityName, soundName, false)
+	if not sound then
 		if anchor and anchor.Parent then
 			anchor:Destroy()
 		end
-		hieSoundWarn("one_shot_skipped ability=%s sound=%s issue=template_missing", tostring(abilityName), tostring(soundName))
+		hieSoundWarn("one_shot_skipped ability=%s sound=%s issue=sound_config_missing", tostring(abilityName), tostring(soundName))
 		return nil
 	end
 
-	hieSoundLog("one_shot_clone_begin ability=%s sound=%s parent=%s", tostring(abilityName), tostring(soundName), formatInstancePath(parent))
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
 	sound.Parent = parent
 	logSoundDiagnostics("one_shot_parented", abilityName, soundName, sound)
 	SettingsAudioController.TrackSound(sound)
@@ -466,14 +474,12 @@ local function startIceBoostLoop(state, parent)
 		return nil
 	end
 
-	local soundTemplate = getHieSoundTemplate(HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP)
-	if not soundTemplate then
-		hieSoundWarn("ice_boost_loop_skipped issue=template_missing")
+	local sound = createHieSound(HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, true)
+	if not sound then
+		hieSoundWarn("ice_boost_loop_skipped issue=sound_config_missing")
 		return nil
 	end
 
-	local sound = soundTemplate:Clone()
-	sound.Looped = true
 	sound.Parent = parent
 	logSoundDiagnostics("ice_boost_loop_parented", HieClient.ICE_BOOST_ABILITY, SOUND_ICE_BOOST_LOOP, sound)
 	SettingsAudioController.TrackSound(sound)

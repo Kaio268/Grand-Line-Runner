@@ -20,10 +20,16 @@ local function buildNoopPresentationClient()
 		PlayFlameDashComplete = function()
 			return false
 		end,
+		PlayFlameDashDashAudio = function()
+			return false
+		end,
 		MarkFlameDashTrailPredictedComplete = function()
 			return false
 		end,
 		StopFlameDashTrail = function()
+			return false
+		end,
+		StopFlameDashTrailSampling = function()
 			return false
 		end,
 		HandleFireBurstEffect = function()
@@ -34,6 +40,7 @@ local function buildNoopPresentationClient()
 		end,
 		HandleCharacterRemoving = function() end,
 		HandlePlayerRemoving = function() end,
+		HandleUnequipped = function() end,
 		StopFireBurstStartup = function()
 			return false
 		end,
@@ -132,16 +139,23 @@ function MeraFruitClient.Create(config)
 		PlayFlameDashComplete = function(targetPlayer, payload)
 			return self:GetPresentation():PlayFlameDashComplete(targetPlayer, payload)
 		end,
-		MarkFlameDashTrailPredictedComplete = function(targetPlayer, reason, finalPosition, direction)
+		PlayFlameDashAudioStart = function(targetPlayer, payload)
+			return self:GetPresentation():PlayFlameDashDashAudio(targetPlayer, payload, true)
+		end,
+		MarkFlameDashTrailPredictedComplete = function(targetPlayer, reason, finalPosition, direction, castToken)
 			return self:GetPresentation():MarkFlameDashTrailPredictedComplete(
 				targetPlayer,
 				reason,
 				finalPosition,
-				direction
+				direction,
+				castToken
 			)
 		end,
-		StopFlameDashTrail = function(targetPlayer, reason, finalPosition, direction)
-			return self:GetPresentation():StopFlameDashTrail(targetPlayer, reason, finalPosition, direction)
+		StopFlameDashTrailSampling = function(targetPlayer, reason, finalPosition, direction, castToken)
+			return self:GetPresentation():StopFlameDashTrailSampling(targetPlayer, reason, finalPosition, direction, castToken)
+		end,
+		StopFlameDashTrail = function(targetPlayer, reason, finalPosition, direction, castToken)
+			return self:GetPresentation():StopFlameDashTrail(targetPlayer, reason, finalPosition, direction, castToken)
 		end,
 	})
 	return self
@@ -220,6 +234,13 @@ function MeraFruitClient:HandleCharacterRemoving()
 		self.presentation:HandleCharacterRemoving()
 	end
 	self.impl:CleanupCharacterRemoving()
+end
+
+function MeraFruitClient:HandleUnequipped()
+	if self.presentation then
+		self.presentation:HandleUnequipped()
+	end
+	self.impl:CleanupUnequipped()
 end
 
 function MeraFruitClient:HandlePlayerRemoving(leavingPlayer)

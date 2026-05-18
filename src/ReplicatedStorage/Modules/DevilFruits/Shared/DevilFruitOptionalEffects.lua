@@ -232,6 +232,14 @@ local function resolveTemplate(rootCandidates, fruitIdentifier, abilityName)
 	return nil
 end
 
+local function shouldSkipOptionalSound(fruitIdentifier, abilityName, payload)
+	local resolvedFruitName = Registry.ResolveFruitName(fruitIdentifier) or fruitIdentifier
+	return resolvedFruitName == "Bomu Bomu no Mi"
+		and abilityName == "LandMine"
+		and type(payload) == "table"
+		and payload.Action == "Detonated"
+end
+
 local function createEffectAnchor(position, direction)
 	if typeof(position) ~= "Vector3" then
 		return nil
@@ -578,7 +586,10 @@ end
 function DevilFruitOptionalEffects.Play(targetPlayer, fruitIdentifier, abilityName, payload)
 	local rootPart = resolvePlayerRootPart(targetPlayer)
 	local visualTemplate = DevilFruitOptionalEffects.ResolveVisualTemplate(fruitIdentifier, abilityName)
-	local soundTemplate = DevilFruitOptionalEffects.ResolveSoundTemplate(fruitIdentifier, abilityName)
+	local soundTemplate = nil
+	if not shouldSkipOptionalSound(fruitIdentifier, abilityName, payload) then
+		soundTemplate = DevilFruitOptionalEffects.ResolveSoundTemplate(fruitIdentifier, abilityName)
+	end
 	local effectScale = resolveVisualScale(fruitIdentifier, abilityName, payload)
 
 	local visualPlayed = playVisualTemplate(rootPart, visualTemplate, payload, effectScale)

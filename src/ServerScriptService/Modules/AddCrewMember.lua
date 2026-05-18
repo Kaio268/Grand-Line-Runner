@@ -6,7 +6,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegistry"))
-local BrainrotsCfg = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
@@ -40,65 +39,109 @@ local function findModelFor(variantKey, baseName)
 	return model and model:IsA("Model") and model or nil
 end
 
+local function getPlayerName(plr)
+	return if typeof(plr) == "Instance" and plr:IsA("Player") then plr.Name else "unknown"
+end
+
+local function rejectGrant(plr, reason, detail)
+	warn(string.format(
+		"[AddCrewMember] grant rejected player=%s reason=%s%s",
+		getPlayerName(plr),
+		tostring(reason or "unknown"),
+		if tostring(detail or "") ~= "" then " " .. tostring(detail) else ""
+	))
+	return false, tostring(reason or "unknown")
+end
+
 function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	if typeof(plr) ~= "Instance" or not plr:IsA("Player") then
-		return false
+		return rejectGrant(plr, "invalid_player")
 	end
 
+	local requestedCrewMemberName = crewMemberName
 	crewMemberName = validName(crewMemberName)
 	if not crewMemberName then
-		return false
+		return rejectGrant(plr, "invalid_crew_member_name", "requested=" .. tostring(requestedCrewMemberName))
 	end
 
 	local n = tonumber(amount)
 	if not n then
-		return false
+		return rejectGrant(plr, "invalid_amount", "amount=" .. tostring(amount))
 	end
 
 	n = math.floor(n)
 	if n <= 0 then
-		return n == 0
+		if n == 0 then
+			return true
+		end
+		return rejectGrant(plr, "non_positive_amount", "amount=" .. tostring(amount))
+	end
+
+	local canonicalCrewMemberName, resolvedInfo, legacyStorageName = CrewCatalog.ResolveCrewMemberId(crewMemberName)
+	if resolvedInfo then
+		crewMemberName = canonicalCrewMemberName
 	end
 
 	local variantKey, baseName = getVariantAndBaseName(crewMemberName)
 
 	local model = findModelFor(variantKey, baseName)
 	if not model then
-		return false
+		return rejectGrant(plr, "crew_model_unavailable", string.format(
+			"requested=%s canonical=%s base=%s variant=%s",
+			tostring(requestedCrewMemberName),
+			tostring(crewMemberName),
+			tostring(baseName),
+			tostring(variantKey)
+		))
 	end
 
-	local info = CrewCatalog.GetInfoById(crewMemberName) or CrewCatalog.GetInfoById(baseName)
+	local info = resolvedInfo or CrewCatalog.GetInfoById(crewMemberName) or CrewCatalog.GetInfoById(baseName)
 	if not info then
-		return false
-	end
-
-	if BrainrotsCfg[baseName] then
-		local baseInfo = BrainrotsCfg[baseName]
-		baseInfo.GoldenRender = baseInfo.GoldenRender or baseInfo.Render
-		baseInfo.DiamondRender = baseInfo.DiamondRender or baseInfo.Render
+		return rejectGrant(plr, "crew_info_missing", string.format(
+			"requested=%s canonical=%s base=%s variant=%s",
+			tostring(requestedCrewMemberName),
+			tostring(crewMemberName),
+			tostring(baseName),
+			tostring(variantKey)
+		))
 	end
 
 	options = if typeof(options) == "table" then options else {}
+	if tostring(options.LegacyStorageName or "") ~= "" then
+		legacyStorageName = tostring(options.LegacyStorageName)
+	elseif legacyStorageName == "" and tostring(info.LegacyId or "") ~= "" then
+		legacyStorageName = tostring(info.LegacyId)
+	end
 
-	local baseInfo = CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[baseName] or info
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or info
 	local render = info.Render or ""
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
 	local bypassQuickSlotCapacity = options.TutorialReward == true or options._QuickSlotCapacityReserved == true
 
-	if not bypassQuickSlotCapacity and not CrewQuickSlotService.CanGainOrNotify(plr, n, "AddCrewMember:" .. crewMemberName) then
-		return false
+	if not bypassQuickSlotCapacity then
+		local canGain, _, _, _, capacityReason = CrewQuickSlotService.CanGainOrNotify(plr, crewMemberName, n, "AddCrewMember:" .. crewMemberName)
+		if not canGain then
+			return false, tostring(capacityReason or "crew_stack_capacity_full")
+		end
 	end
 
 	if CrewInstanceService.IsInventoryWriteAuthorityEnabled() == true then
 		local status = CrewInstanceService.ValidateInventoryMirrors(plr)
 		if status == nil or status.Passed ~= true then
-			return false
+			local issues = if typeof(status) == "table" and typeof(status.Issues) == "table"
+				then table.concat(status.Issues, ",")
+				else "none"
+			return rejectGrant(plr, "inventory_mirror_validation_failed", "issues=" .. issues)
 		end
 	end
 
 	CrewInstanceService.EnsureInventoryMetadata(plr, crewMemberName, {
 		StorageName = crewMemberName,
+		LegacyStorageName = legacyStorageName,
+		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
+		DisplayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or crewMemberName),
+		ModelName = tostring(info.ModelName or baseName),
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = tostring(info.Rarity or "Common"),
@@ -107,7 +150,12 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		GoldenRender = goldenRender,
 		DiamondRender = diamondRender,
 	})
-	local createdIds = CrewInstanceService.CreateInstances(plr, crewMemberName, n, {
+	local createdIds, createReason = CrewInstanceService.CreateInstances(plr, crewMemberName, n, {
+		StorageName = crewMemberName,
+		LegacyStorageName = legacyStorageName,
+		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
+		DisplayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or crewMemberName),
+		ModelName = tostring(info.ModelName or baseName),
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = tostring(info.Rarity or "Common"),
@@ -117,15 +165,25 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		DiamondRender = diamondRender,
 		Level = 1,
 		CurrentXP = 0,
+		TotalXP = math.max(0, math.floor(tonumber(options.TotalXP) or 0)),
+		Source = tostring(options.Source or ""),
+		DepthBand = tostring(options.DepthBand or ""),
 		TutorialReward = options.TutorialReward == true,
 		TutorialToken = tostring(options.TutorialToken or ""),
+		GrandLineRushStarter = options.GrandLineRushStarter == true,
 		_QuickSlotCapacityReserved = true,
 	})
 	if #createdIds ~= n then
-		return false
+		return rejectGrant(plr, tostring(createReason or "crew_instance_create_count_mismatch"), string.format(
+			"requested=%s canonical=%s expected=%d created=%d",
+			tostring(requestedCrewMemberName),
+			tostring(crewMemberName),
+			n,
+			#createdIds
+		))
 	end
 
-	return true
+	return true, createdIds
 end
 
 return Module

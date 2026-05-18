@@ -3,8 +3,19 @@ local DataManager = {}
 DataManager.__index = DataManager
 local self = setmetatable({}, DataManager)
 
+local RunService = game:GetService("RunService")
+
 --// Other 
-local Key: string = script:GetAttribute("Data_Key") or "DefaultKey_123"
+local keyAttribute = script:GetAttribute("Data_Key")
+local Key: string
+if typeof(keyAttribute) == "string" and keyAttribute ~= "" and keyAttribute ~= "DefaultKey_123" then
+	Key = keyAttribute
+elseif RunService:IsStudio() then
+	warn("[DataManager]: Data_Key attribute is missing or default; Studio is using an isolated fallback key. Set Data_Key before publishing.")
+	Key = "StudioMissingDataKey"
+else
+	error("[DataManager]: Data_Key attribute must be set to a non-default value outside Studio.")
+end
 if script:GetAttribute("Custom_Studio_Data") then
 	Key = "S__"..Key..tostring(script:GetAttribute("Studio_Version"))
 end
@@ -72,7 +83,6 @@ end)()
 local Players = game:GetService("Players")
 local MarketPlaceService = game:GetService("MarketplaceService")
 local HttpService = game:GetService("HttpService")
-local RunService = game:GetService(`RunService`)
 --// Variables
 local CLASS_NAMES = {["string"] = "StringValue", ["number"] = "NumberValue", ["boolean"] = "BoolValue"}
 local PURCHASE_ID_CACHE_SIZE = 100
@@ -147,21 +157,6 @@ end
 local function classifyLegacyPath(path: string)
 	local root, segments = getPathRootAndSegments(path)
 	local leaf = segments[#segments]
-	if root == "BrainrotInventory" then
-		return "BrainrotInventory", "legacy_inventory"
-	end
-	if root == "BrainrotQuickSlots" then
-		return "BrainrotQuickSlots", "legacy_quick_slots"
-	end
-	if root == "BrainrotStorage" then
-		return "BrainrotStorage", "legacy_quick_slots_storage"
-	end
-	if root == "IncomeBrainrots" then
-		return "IncomeBrainrots", "legacy_stand_income"
-	end
-	if root == "StandsLevels" then
-		return "StandsLevels", "legacy_stand_levels"
-	end
 	if root == "Inventory" and #segments >= 3 then
 		local storageName = tostring(segments[2] or "")
 		if storageName ~= "Feed" and storageName ~= "DevilFruits" and storageName ~= "Potions" then
@@ -516,26 +511,6 @@ function DataManager:RecordLegacyDeprecationUsage(player: Player, kind: string, 
 	event.UserId = player and player.UserId or 0
 	event.RecordedAt = os.time()
 	return recordLegacyDeprecationEvent(player, profile, event), nil
-end
-
-function DataManager:GetLegacyDeprecationStatus(player: Player)
-	local profile = self:TryGetProfile(player)
-	if profile == nil or typeof(profile.Data) ~= "table" then
-		return nil, "no_profile"
-	end
-
-	local audit = profile.Data[CREW_LEGACY_DEPRECATION_AUDIT_PATH]
-	if typeof(audit) ~= "table" then
-		return {
-			DirectLegacyWriteCount = 0,
-			ApprovedMirrorWriteCount = 0,
-			WrapperUsageCount = 0,
-			FallbackCount = 0,
-			UnexpectedDirectWriteCount = 0,
-		}, nil
-	end
-
-	return DeepCopyTable(audit), nil
 end
 
 local function ReadValueFromProfile(profile, path: string)
@@ -1311,9 +1286,10 @@ end
 
 local function markPlayerDataReady(player: Player, startedAt: number)
 	local inventory = player:FindFirstChild("Inventory")
-	local brainrotCount = countPositiveQuantityFolders(inventory)
-	local crewInventory = player:FindFirstChild("CrewInventory")
-	local crewCount = crewInventory and #crewInventory:GetChildren() or 0
+	local inventoryFolderCount = countPositiveQuantityFolders(inventory)
+	local crewMemberInventory = player:FindFirstChild("CrewMemberInventory")
+	local crewById = crewMemberInventory and crewMemberInventory:FindFirstChild("ById")
+	local crewCount = crewById and #crewById:GetChildren() or 0
 	local elapsed = os.clock() - startedAt
 
 	player:SetAttribute(PLAYER_DATA_READY_ATTRIBUTE, true)
@@ -1329,8 +1305,8 @@ local function markPlayerDataReady(player: Player, startedAt: number)
 		tostring(Profiles[player] ~= nil),
 		"replica",
 		tostring(Replicas[player] ~= nil),
-		"brainrots",
-		brainrotCount,
+		"inventoryFolders",
+		inventoryFolderCount,
 		"crew",
 		crewCount
 	)
@@ -1363,14 +1339,6 @@ local function runCrewMemberShadowWriteOnProfileReady(player: Player, profile)
 	end
 
 	return if ok then result else nil
-end
-
-local function isCrewMemberCanonicalFirstSaveLoadEnabled()
-	local ok, flags = pcall(function()
-		local CrewStorage = require(game.ServerScriptService.Modules.CrewStorage)
-		return CrewStorage.GetShadowFlags()
-	end)
-	return ok == true and flags.CrewMemberSaveLoadCanonicalFirstEnabled == true
 end
 
 function PlayerAdded(player: Player)
@@ -1419,9 +1387,7 @@ function PlayerAdded(player: Player)
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
 		ProfileMigrations.Apply(profile.Data)
-		if isCrewMemberCanonicalFirstSaveLoadEnabled() then
-			runCrewMemberShadowWriteOnProfileReady(player, profile)
-		end
+		runCrewMemberShadowWriteOnProfileReady(player, profile)
 		ValidationChecks.WarnProfileData(player, profile.Data)
 
 		profile.OnSessionEnd:Connect(function()
@@ -1465,9 +1431,6 @@ function PlayerAdded(player: Player)
 			self:Leaderstats(player)
 		end
 		markPlayerDataReady(player, dataReadyStartedAt)
-		if not isCrewMemberCanonicalFirstSaveLoadEnabled() then
-			task.spawn(runCrewMemberShadowWriteOnProfileReady, player, profile)
-		end
 		DataManager:SetupBoostListeners(player)
 	else
 		player:Kick("Profile load fail - Please rejoin!")
@@ -2036,11 +1999,11 @@ function DataManager:Version()
 end
 
 function CheckVersion()
-	if RunService:IsStudio() then
+	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
+	-- Security: external version polling is diagnostic-only and must not run in production servers.
+	if not RunService:IsStudio() then
 		return
 	end
-
-	workspace:SetAttribute("DataManager_Version", SCRIPT_VERSION)
 
 	local AllVersions = GetVersion()
 	if typeof(AllVersions) == "table" then

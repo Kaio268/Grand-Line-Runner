@@ -122,15 +122,29 @@ function MeraVfx.UpdateFlameDashPart(state, options)
 end
 
 function MeraVfx.StopFlameDashHead(state, options)
-	callVfxMethod(FlameDashVfx, "StopBody", "FlameDash body stop", state, options)
+	return callVfxMethod(FlameDashVfx, "StopBody", "FlameDash body stop", state, options)
 end
 
 function MeraVfx.StopFlameDashPart(state, options)
-	callVfxMethod(FlameDashVfx, "StopTrail", "FlameDash trail stop", state, options)
+	return callVfxMethod(FlameDashVfx, "StopTrail", "FlameDash trail stop", state, options)
 end
 
 function MeraVfx.StopFlameDashStartup(state, options)
-	callVfxMethod(FlameDashVfx, "StopStartup", "FlameDash startup stop", state, options)
+	return callVfxMethod(FlameDashVfx, "StopStartup", "FlameDash startup stop", state, options)
+end
+
+function MeraVfx.StopFlameDashTrailSampling(state)
+	return callVfxMethod(FlameDashVfx, "StopTrailSampling", "FlameDash trail sampling stop", state)
+end
+
+function MeraVfx.IsFlameDashTrailSampling(state)
+	local ok, result = callVfxMethod(FlameDashVfx, "IsTrailSampling", "FlameDash trail sampling status", state)
+	return ok and result == true
+end
+
+function MeraVfx.GetFlameDashDiagnostics()
+	local ok, result = callVfxMethod(FlameDashVfx, "GetDiagnostics", "FlameDash diagnostics")
+	return ok and type(result) == "table" and result or {}
 end
 
 -- Some older state shapes still need a generic cleanup path. This is kept as a
@@ -138,6 +152,10 @@ end
 function MeraVfx.StopRuntimeState(state, options)
 	if type(state) ~= "table" then
 		return
+	end
+
+	if state.Kind == "FlameDash" or state.TrailConnection ~= nil then
+		callVfxMethod(FlameDashVfx, "StopTrailSampling", "FlameDash runtime fallback trail sampling stop", state)
 	end
 
 	if typeof(state.FollowConnection) == "RBXScriptConnection" then
@@ -148,8 +166,21 @@ function MeraVfx.StopRuntimeState(state, options)
 		state.Connection:Disconnect()
 		state.Connection = nil
 	end
+	if typeof(state.TrailConnection) == "RBXScriptConnection" then
+		state.TrailConnection:Disconnect()
+		state.TrailConnection = nil
+	end
+	if state.FollowWeld and state.FollowWeld.Parent then
+		pcall(function()
+			state.FollowWeld:Destroy()
+		end)
+	end
+	state.FollowWeld = nil
 
 	state.Active = false
+	state.Stopped = true
+	state.Destroyed = true
+	state.TrailSamplingStopped = true
 	local clone = state.Clone
 	state.Clone = nil
 	if clone and clone.Parent then

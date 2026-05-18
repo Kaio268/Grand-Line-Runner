@@ -1,10 +1,5 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Configs = Modules:WaitForChild("Configs")
-
-local LegacyCrewConfig = require(Configs:WaitForChild("Brainrots"))
 local CrewAssetAudit = require(script.Parent:WaitForChild("CrewAssetAudit"))
+local CrewMembers = require(script.Parent:WaitForChild("CrewMembers"))
 local CrewMemberMappings = require(script.Parent:WaitForChild("CrewMemberMappings"))
 
 local CrewMappingValidator = {}
@@ -40,9 +35,9 @@ end
 local function getLegacyBaseIds()
 	local ids = {}
 
-	for id, info in pairs(LegacyCrewConfig) do
-		if typeof(info) == "table" and not info.IsVariant and not info.Variant then
-			append(ids, tostring(id))
+	for _, entry in ipairs(CrewMembers.GetEntries()) do
+		if typeof(entry) == "table" and tostring(entry.LegacyId or "") ~= "" then
+			append(ids, tostring(entry.LegacyId))
 		end
 	end
 

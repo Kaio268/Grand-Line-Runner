@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local Remote = ReplicatedStorage:FindFirstChild("UpdateSetting")
 if not Remote then
@@ -16,6 +17,7 @@ local SettingsConfig = require(
 )
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local DEBUG_SETTINGS_SERVER = true
 
 local function debugSettings(message, ...)
@@ -31,6 +33,17 @@ local function isValidNumber(n)
 end
 
 Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
+	-- Security: setting path/name must match config before any persisted write can happen.
+	if not RemoteGuard.Check(player, "UpdateSetting", { settingName, settingPath }, {
+		Cooldown = 0.1,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+			{ Type = "string", MaxLength = 160 },
+		},
+	}) then
+		return
+	end
+
 	debugSettings(
 		"received player=%s name=%s path=%s value=%s",
 		player and player.Name or "<nil>",
@@ -59,8 +72,12 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 			return
 		end
 		value = math.floor(value + 0.5)
-		if value < 0 then value = 0 end
-		if value > 100 then value = 100 end
+		if value < 0 then
+			value = 0
+		end
+		if value > 100 then
+			value = 100
+		end
 		DataManager:SetValue(player, entry.Path, value)
 		debugSettings("saved slider player=%s path=%s value=%d", player.Name, entry.Path, value)
 	elseif entry.Type == "Switch" then
@@ -73,4 +90,4 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 	end
 end)
 
-Players.PlayerRemoving:Connect(function(player) end)
+Players.PlayerRemoving:Connect(function() end)

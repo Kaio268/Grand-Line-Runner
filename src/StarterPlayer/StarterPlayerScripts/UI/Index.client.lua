@@ -28,7 +28,7 @@ local moduleRetryQueued = false
 
 local inventoryFolder = nil
 local indexCollectionFolder = nil
-local brainrotInventoryFolder = nil
+local crewMemberInventoryFolder = nil
 local devilFruitStateFolder = nil
 local indexRewardsFolder = nil
 local claimRemote = nil
@@ -36,7 +36,7 @@ local claimRemote = nil
 local cleanupConnections = {}
 local inventoryConnections = {}
 local indexCollectionConnections = {}
-local brainrotInventoryConnections = {}
+local crewMemberInventoryConnections = {}
 local devilFruitStateConnections = {}
 local rewardConnections = {}
 
@@ -59,6 +59,7 @@ local indexDisplayMetadata = nil
 local indexDisplayMetadataExpiresAt = 0
 local indexDisplayMetadataRequestInFlight = false
 local indexDisplayMetadataNextRefreshAt = 0
+local lastFruitLifetimeMismatchWarning = nil
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Index",
@@ -71,7 +72,9 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	allowFallback = true,
 	createFrameIfMissing = true,
 	standalone = true,
+	bypassLegacyScaleAnimation = true,
 })
+
 local unregisterModal = ReactModalRegistry.Register("Index", {
 	toggle = function()
 		modalAdapter:Toggle()
@@ -104,6 +107,7 @@ local function buildEmptyViewModel()
 		},
 		categories = {},
 		units = {},
+		unitsByCategory = {},
 		collectionStats = {
 			collected = 0,
 			total = 0,
@@ -283,31 +287,55 @@ local function bindLiveValueTree(folder, bucket)
 end
 
 local function bindInventoryFolder(folder)
+	if inventoryFolder == folder then
+		return false
+	end
+
 	inventoryFolder = folder
 	bindLiveValueTree(folder, inventoryConnections)
+	return true
 end
 
 local function bindIndexCollectionFolder(folder)
+	if indexCollectionFolder == folder then
+		return false
+	end
+
 	indexCollectionFolder = folder
 	bindLiveValueTree(folder, indexCollectionConnections)
+	return true
 end
 
-local function bindBrainrotInventoryFolder(folder)
-	brainrotInventoryFolder = folder
-	bindLiveValueTree(folder, brainrotInventoryConnections)
+local function bindCrewMemberInventoryFolder(folder)
+	if crewMemberInventoryFolder == folder then
+		return false
+	end
+
+	crewMemberInventoryFolder = folder
+	bindLiveValueTree(folder, crewMemberInventoryConnections)
+	return true
 end
 
 local function bindDevilFruitStateFolder(folder)
+	if devilFruitStateFolder == folder then
+		return false
+	end
+
 	devilFruitStateFolder = folder
 	bindLiveValueTree(folder, devilFruitStateConnections)
+	return true
 end
 
 local function bindIndexRewardsFolder(folder)
+	if indexRewardsFolder == folder then
+		return false
+	end
+
 	disconnectAll(rewardConnections)
 	indexRewardsFolder = folder
 
 	if not indexRewardsFolder then
-		return
+		return true
 	end
 
 	local function bindRewardValue(child)
@@ -330,14 +358,29 @@ local function bindIndexRewardsFolder(folder)
 	trackConnection(indexRewardsFolder.ChildRemoved, function()
 		scheduleClaimAwareRender()
 	end, rewardConnections)
+
+	return true
 end
 
-local function refreshLiveFolders()
-	bindInventoryFolder(player:FindFirstChild("Inventory") or player:WaitForChild("Inventory", 1))
-	bindIndexCollectionFolder(player:FindFirstChild("IndexCollection") or player:WaitForChild("IndexCollection", 1))
-	bindBrainrotInventoryFolder(player:FindFirstChild("CrewMemberInventory") or player:WaitForChild("CrewMemberInventory", 1))
-	bindDevilFruitStateFolder(player:FindFirstChild("DevilFruit"))
-	bindIndexRewardsFolder(player:FindFirstChild("IndexRewards"))
+local function getLivePlayerChild(childName, shouldWait)
+	local child = player:FindFirstChild(childName)
+	if not child and shouldWait == true then
+		child = player:WaitForChild(childName, 1)
+	end
+
+	return child
+end
+
+local function refreshLiveFolders(shouldWait)
+	local changed = false
+
+	changed = bindInventoryFolder(getLivePlayerChild("Inventory", shouldWait)) or changed
+	changed = bindIndexCollectionFolder(getLivePlayerChild("IndexCollection", shouldWait)) or changed
+	changed = bindCrewMemberInventoryFolder(getLivePlayerChild("CrewMemberInventory", shouldWait)) or changed
+	changed = bindDevilFruitStateFolder(player:FindFirstChild("DevilFruit")) or changed
+	changed = bindIndexRewardsFolder(player:FindFirstChild("IndexRewards")) or changed
+
+	return changed
 end
 
 local function getEquippedDevilFruit()
@@ -356,6 +399,51 @@ local function getEquippedDevilFruit()
 	end
 
 	return nil
+end
+
+local function countReplicatedLifetimeDevilFruits()
+	local liveIndexCollection = player:FindFirstChild("IndexCollection")
+	local devilFruits = liveIndexCollection and liveIndexCollection:FindFirstChild("DevilFruits")
+	if not devilFruits then
+		return 0, false
+	end
+
+	local count = 0
+	for _, child in ipairs(devilFruits:GetChildren()) do
+		if child:IsA("BoolValue") and child.Value == true then
+			count += 1
+		end
+	end
+
+	return count, true
+end
+
+local function warnIfFruitCollectionTrailsLifetime(viewModel)
+	local lifetimeCount, hasLifetimeFolder = countReplicatedLifetimeDevilFruits()
+	if not hasLifetimeFolder then
+		return
+	end
+
+	local devilFruitCollection = viewModel and viewModel.devilFruitCollection
+	local stats = devilFruitCollection and devilFruitCollection.collectionStats
+	local renderedCount = if typeof(stats) == "table" then tonumber(stats.collected) or 0 else 0
+	if renderedCount >= lifetimeCount then
+		return
+	end
+
+	local signature = tostring(renderedCount) .. "/" .. tostring(lifetimeCount)
+	if lastFruitLifetimeMismatchWarning == signature then
+		return
+	end
+
+	lastFruitLifetimeMismatchWarning = signature
+	warn(
+		string.format(
+			"[IndexReact] Fruits view model is behind replicated lifetime data: rendered=%d lifetime=%d",
+			renderedCount,
+			lifetimeCount
+		)
+	)
 end
 
 local function findRemoteFunctionByName(parent, remoteName)
@@ -417,7 +505,12 @@ local function refreshIndexDisplayMetadata(reason, force)
 				return remote:InvokeServer(reason or "index_display")
 			end)
 
-			if ok and typeof(response) == "table" and response.Ready == true and typeof(response.Metadata) == "table" then
+			if
+				ok
+				and typeof(response) == "table"
+				and response.Ready == true
+				and typeof(response.Metadata) == "table"
+			then
 				nextMetadata = response.Metadata
 				local expiresAfter = math.clamp(
 					tonumber(response.ExpiresAfterSeconds) or INDEX_DISPLAY_METADATA_MAX_CACHE_SECONDS,
@@ -439,6 +532,8 @@ local function refreshIndexDisplayMetadata(reason, force)
 end
 
 local function buildViewModel(previewMode)
+	refreshLiveFolders(false)
+
 	local indexData = select(1, loadIndexModules())
 	if not indexData then
 		return buildEmptyViewModel()
@@ -450,7 +545,7 @@ local function buildViewModel(previewMode)
 	end
 
 	local ok, viewModelOrError = pcall(indexData.buildViewModel, {
-		crewMemberInventory = brainrotInventoryFolder,
+		crewMemberInventory = crewMemberInventoryFolder,
 		claimedRewardOverrides = claimedRewardOverrides,
 		equippedDevilFruit = getEquippedDevilFruit(),
 		indexDisplayMetadata = activeIndexDisplayMetadata,
@@ -461,6 +556,9 @@ local function buildViewModel(previewMode)
 	})
 	if ok and typeof(viewModelOrError) == "table" then
 		lastIndexViewModelError = nil
+		if previewMode ~= true then
+			warnIfFruitCollectionTrailsLifetime(viewModelOrError)
+		end
 		return viewModelOrError
 	end
 
@@ -638,7 +736,7 @@ local function StandaloneIndexApp()
 	local _, indexScreen = loadIndexModules()
 	local hasLiveState = inventoryFolder ~= nil
 		or indexCollectionFolder ~= nil
-		or brainrotInventoryFolder ~= nil
+		or crewMemberInventoryFolder ~= nil
 		or devilFruitStateFolder ~= nil
 		or indexRewardsFolder ~= nil
 	local viewModel = buildViewModel(not hasLiveState)
@@ -711,6 +809,7 @@ local function StandaloneIndexApp()
 				rewards = viewModel.rewards,
 				tabs = viewModel.tabs,
 				units = viewModel.units,
+				unitsByCategory = viewModel.unitsByCategory,
 			}),
 		}),
 	})
@@ -744,14 +843,13 @@ local function render()
 
 	local host = modalAdapter:EnsureHost()
 	if host then
-		local _, indexScreen = loadIndexModules()
-		local viewModel = buildViewModel(false)
-		syncHudIndexBadge(viewModel)
-
 		modalAdapter:SetFallbackEnabled(false)
 
 		local content
+		local _, indexScreen = loadIndexModules()
 		if indexScreen then
+			local viewModel = buildViewModel(false)
+
 			content = e(indexScreen, {
 				categories = viewModel.categories,
 				claimableCount = viewModel.claimableCount,
@@ -764,6 +862,7 @@ local function render()
 				rewards = viewModel.rewards,
 				tabs = viewModel.tabs,
 				units = viewModel.units,
+				unitsByCategory = viewModel.unitsByCategory,
 			})
 		else
 			content = statusShell(
@@ -802,7 +901,7 @@ scheduleRender = function()
 	end)
 end
 
-refreshLiveFolders()
+refreshLiveFolders(true)
 refreshIndexDisplayMetadata("startup", true)
 
 trackConnection(player.ChildAdded, function(child)
@@ -815,7 +914,7 @@ trackConnection(player.ChildAdded, function(child)
 		refreshIndexDisplayMetadata("index_collection_added")
 		task.defer(scheduleRender)
 	elseif child.Name == "CrewMemberInventory" then
-		bindBrainrotInventoryFolder(child)
+		bindCrewMemberInventoryFolder(child)
 		refreshIndexDisplayMetadata("crew_member_inventory_added")
 		task.defer(scheduleRender)
 	elseif child.Name == "DevilFruit" then
@@ -836,9 +935,9 @@ trackConnection(player.ChildRemoved, function(child)
 		bindIndexCollectionFolder(nil)
 		refreshIndexDisplayMetadata("index_collection_removed")
 		task.defer(scheduleRender)
-	elseif child == brainrotInventoryFolder then
-		bindBrainrotInventoryFolder(nil)
-		refreshIndexDisplayMetadata("brainrot_inventory_removed")
+	elseif child == crewMemberInventoryFolder then
+		bindCrewMemberInventoryFolder(nil)
+		refreshIndexDisplayMetadata("crew_member_inventory_removed")
 		task.defer(scheduleRender)
 	elseif child == devilFruitStateFolder then
 		bindDevilFruitStateFolder(nil)
@@ -854,7 +953,17 @@ trackConnection(player:GetAttributeChangedSignal("EquippedDevilFruit"), function
 end, cleanupConnections)
 
 trackConnection(playerGui.ChildAdded, function(child)
-	if child.Name == "HUD" then
+	if child.Name == "Frames" or child.Name == "OpenUI" or child.Name == "HUD" then
+		modalAdapter:HandlePlayerGuiChildAdded(child)
+
+		task.defer(scheduleRender)
+	end
+end, cleanupConnections)
+
+trackConnection(playerGui.ChildRemoved, function(child)
+	if child.Name == "Frames" or child.Name == "OpenUI" then
+		modalAdapter:HandlePlayerGuiChildRemoved(child)
+
 		task.defer(scheduleRender)
 	end
 end, cleanupConnections)
@@ -868,7 +977,7 @@ script.Destroying:Connect(function()
 	disconnectAll(cleanupConnections)
 	disconnectAll(inventoryConnections)
 	disconnectAll(indexCollectionConnections)
-	disconnectAll(brainrotInventoryConnections)
+	disconnectAll(crewMemberInventoryConnections)
 	disconnectAll(devilFruitStateConnections)
 	disconnectAll(rewardConnections)
 	if claimRemoteConnection then

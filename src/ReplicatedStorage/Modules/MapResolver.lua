@@ -32,10 +32,6 @@ local PATH_LABELS = {
 	VipRefuge = "active map Vip Refuge",
 	VipBarriers = "active map Vip Refuge.VIPBarriers",
 	VipDoorParts = "active map VIPDoorParts",
-	BrrBrrPatapimNpc = "Brr Brr Patapim NPC",
-	CometMerchantNpc = "Comet Merchant NPC",
-	NamiNpc = "Nami sell NPC",
-	FrankyNpc = "Franky upgrade NPC",
 	GearShopNpc = "gear shop NPC",
 	SellNpc = "sell NPC",
 	GroupReward = "active map GroupReward",
@@ -126,14 +122,13 @@ local function ensureStartupActiveMapAttribute()
 		return attributeValue
 	end
 
-	if DEBUG_TRACE
+	if
+		DEBUG_TRACE
 		and isNonEmptyString(STUDIO_STARTUP_ACTIVE_MAP_NAME)
-		and Workspace:FindFirstChild(STUDIO_STARTUP_ACTIVE_MAP_NAME) then
+		and Workspace:FindFirstChild(STUDIO_STARTUP_ACTIVE_MAP_NAME)
+	then
 		Workspace:SetAttribute(ACTIVE_MAP_ATTRIBUTE, STUDIO_STARTUP_ACTIVE_MAP_NAME)
-		mapTrace(
-			"Seeded ActiveMapName=%s before startup map resolution",
-			STUDIO_STARTUP_ACTIVE_MAP_NAME
-		)
+		mapTrace("Seeded ActiveMapName=%s before startup map resolution", STUDIO_STARTUP_ACTIVE_MAP_NAME)
 		return STUDIO_STARTUP_ACTIVE_MAP_NAME
 	end
 
@@ -221,31 +216,63 @@ local function findInRoots(roots, names, className, recursive)
 end
 
 local function findDirectOrRecursiveInRoots(roots, names, className)
-	return findInRoots(roots, names, className, false)
-		or findInRoots(roots, names, className, true)
+	return findInRoots(roots, names, className, false) or findInRoots(roots, names, className, true)
 end
 
-local function findNpcByPromptText(root, searchText)
-	if not root then
+local function getChildPath(parent, path, className)
+	local current = parent
+	for _, name in ipairs(path or {}) do
+		current = getChildByNames(current, { name })
+		if not current then
+			return nil
+		end
+	end
+
+	if className and not current:IsA(className) then
 		return nil
 	end
 
-	local needle = string.lower(tostring(searchText or ""))
-	if needle == "" then
-		return nil
-	end
+	return current
+end
 
-	for _, descendant in ipairs(root:GetDescendants()) do
-		if descendant:IsA("ProximityPrompt") then
-			local haystack = string.lower(table.concat({
-				tostring(descendant.Name or ""),
-				tostring(descendant.ActionText or ""),
-				tostring(descendant.ObjectText or ""),
-			}, " "))
-			if string.find(haystack, needle, 1, true) then
-				local model = descendant:FindFirstAncestorOfClass("Model")
-				if model then
-					return model
+local function findChildPathInRoots(roots, path, className, recursiveFirstSegment)
+	for _, root in ipairs(roots or {}) do
+		if root then
+			local current = root
+			local startIndex = 1
+			if recursiveFirstSegment then
+				local candidates = {}
+				if root.Name == path[1] then
+					candidates[#candidates + 1] = root
+				end
+				for _, descendant in ipairs(root:GetDescendants()) do
+					if descendant.Name == path[1] then
+						candidates[#candidates + 1] = descendant
+					end
+				end
+
+				for _, candidate in ipairs(candidates) do
+					local found = getChildPath(candidate, { table.unpack(path, 2) }, className)
+					if found then
+						return found
+					end
+				end
+
+				current = nil
+			else
+				startIndex = 1
+			end
+
+			if current then
+				for index = startIndex, #path do
+					current = getChildByNames(current, { path[index] })
+					if not current then
+						break
+					end
+				end
+
+				if current and (not className or current:IsA(className)) then
+					return current
 				end
 			end
 		end
@@ -295,6 +322,7 @@ local function collectRefs(options)
 		else Workspace:FindFirstChild(LEGACY_MAP_NAME)
 	local gameplayRoots = buildSearchRoots(mapRoot, mapContainer)
 	local socialRoots = buildSearchRoots(mapContainer, mapRoot, legacyMap)
+	local activeMapRoots = buildSearchRoots(mapRoot, mapContainer)
 
 	refs.MapContainer = mapContainer
 	refs.ActiveMapContainer = mapContainer
@@ -365,19 +393,10 @@ local function collectRefs(options)
 	refs.VipRefuge = vipRefuge
 	refs.VipBarriers = vipBarriers
 	refs.VipDoorParts = vipDoorParts or vipBarriers
-	refs.BrrBrrPatapimNpc = getChildByNames(lobby, { "Brr Brr Patapim" }, nil, true)
-		or findDirectOrRecursiveInRoots(socialRoots, { "Brr Brr Patapim" })
-	refs.NamiNpc = getChildByNames(lobbyModel, { "Nami" }, nil, true)
-		or findNpcByPromptText(lobby, "nami")
-		or findNpcByPromptText(lobby, "sell")
-	refs.FrankyNpc = getChildByNames(lobbyModel, { "Franky" }, nil, true)
-		or findNpcByPromptText(lobby, "franky")
-		or findNpcByPromptText(lobby, "upgrade")
-	refs.GearShopNpc = getChildByNames(lobbyModel, { "GearShop", "Gear Shop" }, nil, true)
-		or findNpcByPromptText(lobby, "gear")
-	refs.CometMerchantNpc = getChildByNames(lobbyModel, { "CometMerchant", "Comet Merchant" }, nil, true)
-		or findNpcByPromptText(lobby, "comet")
-	refs.SellNpc = refs.NamiNpc
+	refs.GearShopNpc = getChildByNames(lobbyModel, { "Normal" }, nil, true)
+	refs.SellNpc = findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, false)
+		or findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, true)
+		or getChildPath(lobby, { "Normal" })
 	refs.GroupReward = groupReward
 	refs.GroupRewardHitBox = groupRewardHitBox
 	refs.GroupRewardPrompt = groupRewardHitBox

@@ -6,10 +6,10 @@ local HttpService = game:GetService("HttpService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
-local BrainrotVariants = CrewCatalog.GetVariantConfig()
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewProfileSchema = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewProfileSchema"))
 
 local CrewQuickSlotService = {}
@@ -25,19 +25,6 @@ local ERROR_COLOR = Color3.fromRGB(255, 86, 86)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 local FULL_MESSAGE = "Crew quick slots full. Unlock another slot to carry more."
 
-local RARITY_ORDER = {
-	Common = 1,
-	Uncommon = 2,
-	Rare = 3,
-	Epic = 4,
-	Legendary = 5,
-	Mythic = 6,
-	Mythical = 6,
-	Godly = 7,
-	Secret = 8,
-	Omega = 9,
-}
-
 local dataManagerModule = nil
 local crewStorageModule = nil
 local crewMemberShadowWriterModule = nil
@@ -45,6 +32,16 @@ local crewMigrationPlannerModule = nil
 local initialized = false
 local productAuthorityTokensByUserId = {}
 local productAuthorityTokenSequence = 0
+local QUICK_SLOT_DEBUG = false
+
+local function quickSlotDebug(message, ...)
+	if QUICK_SLOT_DEBUG ~= true then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, "[CrewQuickSlots] " .. tostring(message), ...)
+	print(ok and formatted or ("[CrewQuickSlots] " .. tostring(message)))
+end
 
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -117,11 +114,11 @@ local function sendPopup(player, text, color, isError)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return
 	end
-	print(string.format(
-		"[CrewQuickSlots] popup sent player=%s text=%s",
+	quickSlotDebug(
+		"popup sent player=%s text=%s",
 		player.Name,
 		tostring(text)
-	))
+	)
 	PopUpModule:Server_SendPopUp(player, text, color or INFO_COLOR, STROKE_COLOR, 3, isError == true)
 end
 
@@ -311,168 +308,177 @@ local function normalizeSlotData(slotData, options)
 	return normalized
 end
 
-local function getBrainrotDisplayName(storageName)
-	local info = CrewCatalog.GetInfoById(storageName) or Brainrots[storageName]
-	return tostring((info and info.DisplayName) or storageName or "Crewmate")
-end
-
-local function getBaseStorageName(storageName)
-	storageName = tostring(storageName or "")
-	for _, variantKey in ipairs(BrainrotVariants.Order or {}) do
-		if variantKey ~= "Normal" then
-			local variantData = (BrainrotVariants.Versions or {})[variantKey]
-			local prefix = tostring((variantData and variantData.Prefix) or (variantKey .. " "))
-			if prefix ~= "" and storageName:sub(1, #prefix) == prefix then
-				return storageName:sub(#prefix + 1)
-			end
-		end
-	end
-	return storageName
-end
-
-local function isBrainrotStorageName(storageName)
-	storageName = tostring(storageName or "")
-	return CrewCatalog.GetInfoById(storageName) ~= nil
-		or CrewCatalog.GetInfoById(getBaseStorageName(storageName)) ~= nil
-		or Brainrots[storageName] ~= nil
-		or Brainrots[getBaseStorageName(storageName)] ~= nil
-end
-
-local function getBrainrotRank(storageName)
-	local info = CrewCatalog.GetInfoById(storageName) or CrewCatalog.GetInfoById(getBaseStorageName(storageName))
-		or Brainrots[storageName]
-		or Brainrots[getBaseStorageName(storageName)]
-	return RARITY_ORDER[tostring(info and info.Rarity or "")] or 0
-end
-
-local function sortBrainrotEntries(entries)
-	table.sort(entries, function(a, b)
-		local rankA = getBrainrotRank(a.Name)
-		local rankB = getBrainrotRank(b.Name)
-		if rankA ~= rankB then
-			return rankA > rankB
-		end
-
-		local displayA = string.lower(getBrainrotDisplayName(a.Name))
-		local displayB = string.lower(getBrainrotDisplayName(b.Name))
-		if displayA ~= displayB then
-			return displayA < displayB
-		end
-
-		if a.Quantity ~= b.Quantity then
-			return a.Quantity > b.Quantity
-		end
-
-		return tostring(a.Name) < tostring(b.Name)
-	end)
-end
-
-local function collectBrainrotEntriesFromProfile(player)
-	local dataManager = getDataManager()
-	local inventory = dataManager:GetValue(player, "CrewMemberInventory")
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
+local function readReplicatedQuickSlotData(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return nil
 	end
 
-	local counts = {}
-	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.AssignedStand or "") == ""
-			and isBrainrotStorageName(instanceData.StorageName)
-		then
-			local storageName = tostring(instanceData.StorageName)
-			counts[storageName] = (counts[storageName] or 0) + 1
+	local slotsFolder = player:FindFirstChild(QUICK_SLOT_PATH)
+	if slotsFolder == nil then
+		return nil
+	end
+
+	local function readValue(name)
+		local child = slotsFolder:FindFirstChild(name)
+		if child and child:IsA("ValueBase") then
+			return child.Value
+		end
+		return nil
+	end
+
+	return {
+		SchemaVersion = readValue("SchemaVersion"),
+		UnlockedSlots = readValue("UnlockedSlots"),
+		MaxSlots = readValue("MaxSlots"),
+	}
+end
+
+local function normalizeRetainedSlotData(candidates, options)
+	options = if typeof(options) == "table" then options else {}
+	local retained = normalizeSlotData(nil)
+	for _, candidate in ipairs(candidates or {}) do
+		if candidate ~= nil then
+			local normalized = normalizeSlotData(candidate)
+			retained.MaxSlots = math.min(
+				CrewQuickSlotConfig.MaxSlots,
+				math.max(retained.MaxSlots, normalized.MaxSlots)
+			)
+			retained.UnlockedSlots = math.min(
+				retained.MaxSlots,
+				math.max(retained.UnlockedSlots, normalized.UnlockedSlots)
+			)
 		end
 	end
 
-	local entries = {}
-	for storageName, quantity in pairs(counts) do
-		if quantity > 0 then
-			table.insert(entries, {
-				Name = tostring(storageName),
-				Quantity = quantity,
-			})
+	if options.IncludeSchemaVersion == true then
+		retained.SchemaVersion = CrewProfileSchema.SchemaVersion
+	end
+	return retained
+end
+
+local function toLegacySlotData(slotData)
+	return {
+		UnlockedSlots = slotData.UnlockedSlots,
+		MaxSlots = slotData.MaxSlots,
+	}
+end
+
+local function quickSlotRootNeedsRewrite(root, includeSchemaVersion)
+	if typeof(root) ~= "table" then
+		return true
+	end
+	if root.UnlockedSlots ~= nil and typeof(root.UnlockedSlots) ~= "number" then
+		return true
+	end
+	if root.MaxSlots ~= nil and typeof(root.MaxSlots) ~= "number" then
+		return true
+	end
+	if includeSchemaVersion == true and root.SchemaVersion ~= nil and typeof(root.SchemaVersion) ~= "number" then
+		return true
+	end
+	return false
+end
+
+local function quickSlotRootMatches(root, slotData, includeSchemaVersion)
+	if typeof(root) ~= "table" then
+		return false
+	end
+	if tonumber(root.UnlockedSlots) ~= slotData.UnlockedSlots then
+		return false
+	end
+	if tonumber(root.MaxSlots) ~= slotData.MaxSlots then
+		return false
+	end
+	if includeSchemaVersion == true and tonumber(root.SchemaVersion) ~= slotData.SchemaVersion then
+		return false
+	end
+	return true
+end
+
+local function writeQuickSlotRoot(dataManager, player, path, slotData, includeSchemaVersion)
+	local target = if includeSchemaVersion == true then slotData else toLegacySlotData(slotData)
+	local current = dataManager:GetValue(player, path)
+	local writes = {}
+	local didWrite = false
+
+	if quickSlotRootMatches(current, target, includeSchemaVersion) then
+		return true, writes, didWrite
+	end
+
+	if quickSlotRootNeedsRewrite(current, includeSchemaVersion) then
+		local ok, reason = dataManager:SetValue(player, path, target)
+		writes[#writes + 1] = {
+			Root = path,
+			Ok = ok == true,
+			Reason = reason,
+		}
+		return ok == true, writes, ok == true
+	end
+
+	local function writeField(fieldName)
+		if current[fieldName] == target[fieldName] then
+			return true
 		end
-	end
 
-	sortBrainrotEntries(entries)
-	return entries
-end
-
-local function getBrainrotQuickEntries(player)
-	return collectBrainrotEntriesFromProfile(player) or {}
-end
-
-local function addOccupiedSlotName(slotNames, storageName)
-	storageName = tostring(storageName or "")
-	if storageName ~= "" and isBrainrotStorageName(storageName) then
-		slotNames[storageName] = true
-	end
-end
-
-local function addEntrySlotNames(slotNames, entries)
-	for _, entry in ipairs(entries or {}) do
-		if math.max(0, math.floor(tonumber(entry.Quantity) or 0)) > 0 then
-			addOccupiedSlotName(slotNames, entry.Name)
+		local ok, reason = dataManager:SetValue(player, path .. "." .. fieldName, target[fieldName])
+		writes[#writes + 1] = {
+			Root = path .. "." .. fieldName,
+			Ok = ok == true,
+			Reason = reason,
+		}
+		if ok == true then
+			didWrite = true
 		end
+		return ok == true
 	end
+
+	local ok = writeField("UnlockedSlots")
+		and writeField("MaxSlots")
+		and (includeSchemaVersion ~= true or writeField("SchemaVersion"))
+	return ok == true, writes, didWrite
 end
 
-local function addAvailableInstanceSlotNamesFromProfile(player, slotNames)
-	local dataManager = getDataManager()
-	local brainrotInventory = dataManager:GetValue(player, "CrewMemberInventory")
-	if typeof(brainrotInventory) ~= "table" or typeof(brainrotInventory.ById) ~= "table" then
-		return
+local function writeQuickSlotRoots(dataManager, player, slotData)
+	local canonicalOk, canonicalWrites, canonicalDidWrite = writeQuickSlotRoot(dataManager, player, QUICK_SLOT_PATH, slotData, true)
+	local writes = {}
+	for _, write in ipairs(canonicalWrites) do
+		writes[#writes + 1] = write
 	end
-
-	for _, instanceData in pairs(brainrotInventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.AssignedStand or "") == ""
-			and isBrainrotStorageName(instanceData.StorageName) then
-			addOccupiedSlotName(slotNames, instanceData.StorageName)
-		end
-	end
+	return canonicalOk == true, writes, canonicalDidWrite == true
 end
 
-local function countSlotNames(slotNames)
-	local count = 0
-	for _ in pairs(slotNames) do
-		count += 1
-	end
-	return count
+local function getCrewQuickEntries(player)
+	return CrewInventoryDerivedCache.GetStacks(player)
 end
 
-local function countOccupiedSlotNames(player)
-	local slotNames = {}
-	addEntrySlotNames(slotNames, collectBrainrotEntriesFromProfile(player))
-	addAvailableInstanceSlotNamesFromProfile(player, slotNames)
-	return countSlotNames(slotNames)
+local function countOccupiedStacks(player)
+	return #getCrewQuickEntries(player)
+end
+
+local function parseCanGainArguments(crewMemberIdOrAmount, amountOrContext, context)
+	if typeof(crewMemberIdOrAmount) == "string" and tonumber(crewMemberIdOrAmount) == nil then
+		return crewMemberIdOrAmount, amountOrContext, context
+	end
+	return nil, crewMemberIdOrAmount, amountOrContext
 end
 
 function CrewQuickSlotService.EnsureSlots(player)
 	local dataManager = getDataManager()
 	local current = dataManager:GetValue(player, QUICK_SLOT_PATH)
-	local normalized = normalizeSlotData(current, {
+	local replicatedCurrent = readReplicatedQuickSlotData(player)
+	local normalized = normalizeRetainedSlotData({
+		current,
+		replicatedCurrent,
+	}, {
 		IncludeSchemaVersion = true,
 	})
-	local didWrite = false
-	if typeof(current) ~= "table" then
-		didWrite = dataManager:SetValue(player, QUICK_SLOT_PATH, normalized) == true or didWrite
-	else
-		if current.SchemaVersion ~= normalized.SchemaVersion then
-			didWrite = dataManager:SetValue(player, QUICK_SLOT_PATH .. ".SchemaVersion", normalized.SchemaVersion)
-				== true
-				or didWrite
-		end
-		if current.UnlockedSlots ~= normalized.UnlockedSlots then
-			didWrite = dataManager:SetValue(player, QUICK_SLOT_PATH .. ".UnlockedSlots", normalized.UnlockedSlots)
-				== true
-				or didWrite
-		end
-		if current.MaxSlots ~= normalized.MaxSlots then
-			didWrite = dataManager:SetValue(player, QUICK_SLOT_PATH .. ".MaxSlots", normalized.MaxSlots) == true
-				or didWrite
-		end
+	local writeOk, writes, didWrite = writeQuickSlotRoots(dataManager, player, normalized)
+	if writeOk ~= true then
+		warn(string.format(
+			"[CrewQuickSlots] slot root repair failed player=%s writes=%d",
+			player and player.Name or "unknown",
+			#writes
+		))
 	end
 
 	if didWrite then
@@ -491,63 +497,115 @@ function CrewQuickSlotService.GetMaxSlots(player)
 end
 
 function CrewQuickSlotService.CountOccupiedSlots(player)
-	return countOccupiedSlotNames(player)
+	return countOccupiedStacks(player)
 end
 
-function CrewQuickSlotService.CanGainBrainrots(player, amount, context)
+function CrewQuickSlotService.CanGainCrewMembers(player, crewMemberIdOrAmount, amountOrContext, context)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false, 0, 0, 0
 	end
 
+	local crewMemberId, amount, resolvedContext = parseCanGainArguments(crewMemberIdOrAmount, amountOrContext, context)
 	local requested = math.max(0, math.floor(tonumber(amount) or 0))
 	if requested <= 0 then
 		return true, CrewQuickSlotService.CountOccupiedSlots(player), CrewQuickSlotService.GetUnlockedSlots(player), CrewQuickSlotService.GetMaxSlots(player)
 	end
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
-	local occupied = CrewQuickSlotService.CountOccupiedSlots(player)
+	local stacks = getCrewQuickEntries(player)
+	local occupied = 0
 	local requiredSlots = 1
-	local allowed = (occupied + requiredSlots) <= slots.UnlockedSlots
+	local allowed = false
+	local reason = "legacy_capacity_check"
+	local targetCrewMemberId = tostring(crewMemberId or "")
 
-	print(string.format(
-		"[CrewQuickSlots] gain %s player=%s context=%s occupied=%d unlocked=%d amount=%d requiredSlots=%d max=%d",
+	if targetCrewMemberId ~= "" then
+		local fit = CrewInventoryStacks.CalculateIncomingFitFromStacks(stacks, targetCrewMemberId, requested, slots.UnlockedSlots)
+		occupied = fit.OccupiedStacks
+		requiredSlots = fit.RequiredNewStacks
+		allowed = fit.Allowed == true
+		reason = tostring(fit.Reason or "unknown")
+		targetCrewMemberId = tostring(fit.CrewMemberId or targetCrewMemberId)
+	else
+		occupied = #stacks
+		allowed = (occupied + requiredSlots) <= slots.UnlockedSlots
+	end
+
+	quickSlotDebug(
+		"gain %s player=%s context=%s target=%s occupied=%d unlocked=%d amount=%d requiredSlots=%d max=%d reason=%s",
 		allowed and "allow" or "block",
 		player.Name,
-		tostring(context or "unknown"),
+		tostring(resolvedContext or "unknown"),
+		targetCrewMemberId,
 		occupied,
 		slots.UnlockedSlots,
 		requested,
 		requiredSlots,
-		slots.MaxSlots
-	))
+		slots.MaxSlots,
+		reason
+	)
 
-	return allowed, occupied, slots.UnlockedSlots, slots.MaxSlots
+	return allowed, occupied, slots.UnlockedSlots, slots.MaxSlots, reason
 end
 
-function CrewQuickSlotService.CanGainCrewMembers(player, amount, context)
-	return CrewQuickSlotService.CanGainBrainrots(player, amount, context)
+function CrewQuickSlotService.CanGainCrewMemberBatch(player, grants, context)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, 0, 0, 0
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local fit = CrewInventoryStacks.CalculateBatchFitFromStacks(getCrewQuickEntries(player), grants, slots.UnlockedSlots)
+	local allowed = fit.Allowed == true
+
+	quickSlotDebug(
+		"batchGain %s player=%s context=%s occupied=%d unlocked=%d requested=%d requiredSlots=%d max=%d reason=%s",
+		allowed and "allow" or "block",
+		player.Name,
+		tostring(context or "unknown"),
+		tonumber(fit.OccupiedStacks) or 0,
+		slots.UnlockedSlots,
+		tonumber(fit.Requested) or 0,
+		tonumber(fit.RequiredNewStacks) or 0,
+		slots.MaxSlots,
+		tostring(fit.Reason or "unknown")
+	)
+
+	return allowed, tonumber(fit.OccupiedStacks) or 0, slots.UnlockedSlots, slots.MaxSlots, tostring(fit.Reason or "unknown")
 end
 
 function CrewQuickSlotService.NotifyFull(player)
 	sendPopup(player, FULL_MESSAGE, ERROR_COLOR, true)
 end
 
-function CrewQuickSlotService.CanGainOrNotify(player, amount, context)
-	local allowed, occupied, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainBrainrots(player, amount, context)
+function CrewQuickSlotService.CanGainOrNotify(player, crewMemberIdOrAmount, amountOrContext, context)
+	local allowed, occupied, unlockedSlots, maxSlots, reason = CrewQuickSlotService.CanGainCrewMembers(
+		player,
+		crewMemberIdOrAmount,
+		amountOrContext,
+		context
+	)
 	if not allowed then
 		CrewQuickSlotService.NotifyFull(player)
 	end
-	return allowed, occupied, unlockedSlots, maxSlots
+	return allowed, occupied, unlockedSlots, maxSlots, reason
 end
 
-function CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
-	storageName = tostring(storageName or "")
-	if storageName == "" then
+function CrewQuickSlotService.CanGainCrewMemberBatchOrNotify(player, grants, context)
+	local allowed, occupied, unlockedSlots, maxSlots, reason = CrewQuickSlotService.CanGainCrewMemberBatch(player, grants, context)
+	if not allowed then
+		CrewQuickSlotService.NotifyFull(player)
+	end
+	return allowed, occupied, unlockedSlots, maxSlots, reason
+end
+
+function CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
+	local canonicalCrewMemberId, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+	if not info then
 		return nil
 	end
 
-	for index, entry in ipairs(getBrainrotQuickEntries(player)) do
-		if tostring(entry.Name) == storageName then
+	for index, entry in ipairs(getCrewQuickEntries(player)) do
+		if tostring(entry.Name) == canonicalCrewMemberId then
 			return index
 		end
 	end
@@ -555,22 +613,14 @@ function CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
 	return nil
 end
 
-function CrewQuickSlotService.GetCrewSlotIndex(player, storageName)
-	return CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
-end
-
-function CrewQuickSlotService.CanEquipBrainrot(player, storageName)
-	local slotIndex = CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
+function CrewQuickSlotService.CanEquipCrewMember(player, crewMemberId)
+	local slotIndex = CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
 	if not slotIndex then
 		return false, nil, CrewQuickSlotService.GetUnlockedSlots(player)
 	end
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	return slotIndex <= slots.UnlockedSlots, slotIndex, slots.UnlockedSlots
-end
-
-function CrewQuickSlotService.CanEquipCrewMember(player, storageName)
-	return CrewQuickSlotService.CanEquipBrainrot(player, storageName)
 end
 
 function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
@@ -612,7 +662,7 @@ function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
 		return false
 	end
 
-	player:SetAttribute("PendingBrainrotQuickSlot", nextSlot)
+	player:SetAttribute("PendingCrewQuickSlot", nextSlot)
 	local flags = getCrewStorage().GetShadowFlags()
 	if flags.CrewMemberProductQuickSlotWriteAuthorityEnabled == true then
 		local token, tokenReason = createProductAuthorityToken(player, productId, {
@@ -643,8 +693,8 @@ function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
 	return true
 end
 
-function CrewQuickSlotService.PromptUnlockForBrainrot(player, storageName)
-	local slotIndex = CrewQuickSlotService.GetBrainrotSlotIndex(player, storageName)
+function CrewQuickSlotService.PromptUnlockForCrewMember(player, crewMemberId)
+	local slotIndex = CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	if not slotIndex or slotIndex <= slots.UnlockedSlots then
 		return false
@@ -652,10 +702,6 @@ function CrewQuickSlotService.PromptUnlockForBrainrot(player, storageName)
 
 	sendPopup(player, string.format("Crew Quick Slot %d is locked.", slotIndex), INFO_COLOR, false)
 	return CrewQuickSlotService.RequestUnlock(player, slotIndex)
-end
-
-function CrewQuickSlotService.PromptUnlockForCrewMember(player, storageName)
-	return CrewQuickSlotService.PromptUnlockForBrainrot(player, storageName)
 end
 
 local function cloneValue(value)
@@ -686,7 +732,6 @@ local function buildProductAuditRecord(status, receiptInfo, phase, extra)
 	extra = if typeof(extra) == "table" then extra else {}
 	local canonical = status and status.Canonical
 	local legacyQuickSlots = status and status.LegacyQuickSlots
-	local legacyStorage = status and status.LegacyStorage
 	return {
 		SchemaVersion = 1,
 		Kind = "product_quick_slot_write_authority",
@@ -714,10 +759,7 @@ local function buildProductAuditRecord(status, receiptInfo, phase, extra)
 		CanonicalMaxSlots = canonical and canonical.MaxSlots,
 		LegacyQuickSlotsUnlockedSlots = legacyQuickSlots and legacyQuickSlots.UnlockedSlots,
 		LegacyQuickSlotsMaxSlots = legacyQuickSlots and legacyQuickSlots.MaxSlots,
-		LegacyStorageUnlockedSlots = legacyStorage and legacyStorage.UnlockedSlots,
-		LegacyStorageMaxSlots = legacyStorage and legacyStorage.MaxSlots,
 		RootsMatch = status and status.RootsMatch == true,
-		StorageClassification = status and status.StorageClassification or "unknown",
 		BlockingCount = tonumber(extra.BlockingCount) or 0,
 		UnclassifiedCount = tonumber(extra.UnclassifiedCount) or 0,
 		RootWrites = cloneValue(extra.RootWrites or {}),
@@ -864,7 +906,7 @@ local function processCanonicalUnlockReceipt(player, productId, dataManager)
 			tostring(productId),
 			slots.UnlockedSlots
 		))
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		return true, {
 			AuthorityEnabled = false,
 			AlreadyMax = true,
@@ -875,34 +917,24 @@ local function processCanonicalUnlockReceipt(player, productId, dataManager)
 	end
 
 	local grantedSlots = math.min(slots.UnlockedSlots + 1, slots.MaxSlots)
-	local schemaUpdated = dataManager:SetValue(player, QUICK_SLOT_PATH .. ".SchemaVersion", CrewProfileSchema.SchemaVersion)
-	local unlockedUpdated = dataManager:SetValue(player, QUICK_SLOT_PATH .. ".UnlockedSlots", grantedSlots)
-	local maxUpdated = dataManager:SetValue(player, QUICK_SLOT_PATH .. ".MaxSlots", slots.MaxSlots)
-	player:SetAttribute("PendingBrainrotQuickSlot", nil)
-	if schemaUpdated ~= true or unlockedUpdated ~= true or maxUpdated ~= true then
+	local targetSlotData = {
+		SchemaVersion = CrewProfileSchema.SchemaVersion,
+		UnlockedSlots = grantedSlots,
+		MaxSlots = slots.MaxSlots,
+	}
+	local rootsUpdated, writes, didWrite = writeQuickSlotRoots(dataManager, player, targetSlotData)
+	player:SetAttribute("PendingCrewQuickSlot", nil)
+	if rootsUpdated ~= true then
 		return false, {
 			AuthorityEnabled = false,
 			UnlockedSlots = slots.UnlockedSlots,
 			MaxSlots = slots.MaxSlots,
 			TargetUnlockedSlots = grantedSlots,
 			Reason = "canonical_quick_slot_write_failed",
-			Writes = {
-				{
-					Root = "CrewMemberQuickSlots.SchemaVersion",
-					Ok = schemaUpdated == true,
-				},
-				{
-					Root = "CrewMemberQuickSlots.UnlockedSlots",
-					Ok = unlockedUpdated == true,
-				},
-				{
-					Root = "CrewMemberQuickSlots.MaxSlots",
-					Ok = maxUpdated == true,
-				},
-			},
+			Writes = writes,
 		}
 	end
-	if schemaUpdated == true or unlockedUpdated == true or maxUpdated == true then
+	if didWrite == true then
 		refreshCrewMemberShadow(player, "quick_slot_unlock")
 	end
 
@@ -918,20 +950,7 @@ local function processCanonicalUnlockReceipt(player, productId, dataManager)
 		UnlockedSlots = grantedSlots,
 		MaxSlots = slots.MaxSlots,
 		Reason = "canonical_granted",
-		Writes = {
-			{
-				Root = "CrewMemberQuickSlots.SchemaVersion",
-				Ok = schemaUpdated == true,
-			},
-			{
-				Root = "CrewMemberQuickSlots.UnlockedSlots",
-				Ok = unlockedUpdated == true,
-			},
-			{
-				Root = "CrewMemberQuickSlots.MaxSlots",
-				Ok = maxUpdated == true,
-			},
-		},
+		Writes = writes,
 	}
 end
 
@@ -1004,7 +1023,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 		and latestAudit.EntitlementAlreadyGranted == true
 		and status.RootsMatch == true
 	then
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		if token ~= nil then
 			markProductAuthorityToken(token, "granted", {
 				GrantedAt = os.time(),
@@ -1038,7 +1057,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 			Reason = "pending_audit_roots_already_at_target",
 		}, tokenAuditFields))
 		writeProductAudit(dataManager, player, recoveredAudit)
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		if token ~= nil then
 			markProductAuthorityToken(token, "granted", {
 				GrantedAt = os.time(),
@@ -1077,7 +1096,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 			Reason = "already_max",
 		}, tokenAuditFields))
 		writeProductAudit(dataManager, player, alreadyMaxAudit)
-		player:SetAttribute("PendingBrainrotQuickSlot", nil)
+		player:SetAttribute("PendingCrewQuickSlot", nil)
 		if token ~= nil then
 			markProductAuthorityToken(token, "granted", {
 				GrantedAt = os.time(),
@@ -1179,7 +1198,7 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 		}
 	end
 
-	player:SetAttribute("PendingBrainrotQuickSlot", nil)
+	player:SetAttribute("PendingCrewQuickSlot", nil)
 	if token ~= nil then
 		markProductAuthorityToken(token, "granted", {
 			GrantedAt = os.time(),
@@ -1215,35 +1234,11 @@ local function processProductAuthorityUnlockReceipt(player, productId, dataManag
 	}
 end
 
-function CrewQuickSlotService.ProcessUnlockReceipt(player, productId, dataManager, receiptInfo)
+function CrewQuickSlotService.ProcessUnlockReceipt(player, productId, dataManager, _receiptInfo)
 	dataManager = dataManager or getDataManager()
 	if not CrewQuickSlotConfig.IsUnlockProduct(productId) then
 		return false, {
 			Reason = "invalid_product_id",
-		}
-	end
-
-	local flags = getCrewStorage().GetShadowFlags()
-	local token, anyToken, tokenReason = getProductAuthorityToken(player, productId)
-	if flags.CrewMemberProductQuickSlotWriteAuthorityEnabled == true then
-		local receiptToken = token or anyToken
-		return processProductAuthorityUnlockReceipt(player, productId, dataManager, receiptInfo, {
-			Token = receiptToken,
-			TokenAuthority = token ~= nil,
-		})
-	end
-	if token ~= nil then
-		return processProductAuthorityUnlockReceipt(player, productId, dataManager, receiptInfo, {
-			Token = token,
-			TokenAuthority = true,
-		})
-	end
-	if anyToken ~= nil then
-		return false, {
-			AuthorityEnabled = false,
-			TokenAuthority = false,
-			Token = copyProductAuthorityToken(anyToken),
-			Reason = tostring(tokenReason or "product_quick_slot_authority_token_unusable"),
 		}
 	end
 
@@ -1337,7 +1332,7 @@ function CrewQuickSlotService.BuildProductQuickSlotReceiptStatus(player, receipt
 		and result.AuditTokenUsed == true
 		and result.AuditGlobalFlagAtReceipt == false
 		and result.AuditEntitlementAlreadyGranted == true
-		and result.AuditRootWriteCount >= 2
+		and result.AuditRootWriteCount >= 1
 		and status.RootsMatch == true
 		and status.Canonical
 		and status.Canonical.UnlockedSlots == CrewQuickSlotConfig.MaxSlots
@@ -1377,8 +1372,8 @@ function CrewQuickSlotService.BuildProductQuickSlotReceiptStatus(player, receipt
 		if result.AuditEntitlementAlreadyGranted ~= true then
 			result.NoGoReasons[#result.NoGoReasons + 1] = "audit_entitlement_not_granted"
 		end
-		if result.AuditRootWriteCount < 2 then
-			result.NoGoReasons[#result.NoGoReasons + 1] = "audit_root_write_count_less_than_two"
+		if result.AuditRootWriteCount < 1 then
+			result.NoGoReasons[#result.NoGoReasons + 1] = "audit_root_write_count_less_than_one"
 		end
 		if status.RootsMatch ~= true then
 			result.NoGoReasons[#result.NoGoReasons + 1] = "quick_slot_roots_mismatch"
@@ -1392,7 +1387,7 @@ function CrewQuickSlotService.BuildProductQuickSlotReceiptStatus(player, receipt
 	end
 
 	result.Summary = string.format(
-		"productQuickSlotsReceiptStatus passed=%s receipt=%s productId=%s profileCached=%s lastSavedCached=%s cacheCount=%d lastSavedCacheCount=%d auditReceiptMatches=%s auditPhase=%s tokenUsed=%s globalFlagAtReceipt=%s rootWrites=%d roots=%s/%s,%s/%s,%s/%s rootsMatch=%s blocking=%d unclassified=%d writeAuthority=%s quickSlotsWriteAuthority=%s productQuickSlotWriteAuthority=%s canonicalRead=%s gameplayReads=%s profileMigrationWrite=%s noGo=%s",
+		"productQuickSlotsReceiptStatus passed=%s receipt=%s productId=%s profileCached=%s lastSavedCached=%s cacheCount=%d lastSavedCacheCount=%d auditReceiptMatches=%s auditPhase=%s tokenUsed=%s globalFlagAtReceipt=%s rootWrites=%d roots=%s/%s,%s/%s rootsMatch=%s blocking=%d unclassified=%d writeAuthority=%s quickSlotsWriteAuthority=%s productQuickSlotWriteAuthority=%s canonicalRead=%s gameplayReads=%s profileMigrationWrite=%s noGo=%s",
 		tostring(result.Passed),
 		tostring(result.ReceiptId),
 		tostring(result.ProductId),
@@ -1409,8 +1404,6 @@ function CrewQuickSlotService.BuildProductQuickSlotReceiptStatus(player, receipt
 		tostring(status.Canonical and status.Canonical.MaxSlots),
 		tostring(status.LegacyQuickSlots and status.LegacyQuickSlots.UnlockedSlots),
 		tostring(status.LegacyQuickSlots and status.LegacyQuickSlots.MaxSlots),
-		tostring(status.LegacyStorage and status.LegacyStorage.UnlockedSlots),
-		tostring(status.LegacyStorage and status.LegacyStorage.MaxSlots),
 		tostring(status.RootsMatch == true),
 		compareReport.BlockingCount or 0,
 		compareReport.UnclassifiedCount or 0,
@@ -1562,9 +1555,7 @@ function CrewQuickSlotService.RunProductQuickSlotAuthorityCanary(player, options
 		and postDuplicateStatus.Canonical
 		and postDuplicateStatus.Canonical.UnlockedSlots == expectedUnlocked
 		and postReceiptStatus.PrimaryContentsMatch == true
-		and postReceiptStatus.LegacyStorageContentsMatch == true
 		and postDuplicateStatus.PrimaryContentsMatch == true
-		and postDuplicateStatus.LegacyStorageContentsMatch == true
 		and (postReceiptCompare.BlockingCount or 0) == 0
 		and (postReceiptCompare.UnclassifiedCount or 0) == 0
 		and (postDuplicateCompare.BlockingCount or 0) == 0
@@ -1771,39 +1762,6 @@ function CrewQuickSlotService.RunDelayedProductQuickSlotAuthorityCanary(player, 
 	return result
 end
 
-function CrewQuickSlotService.RunStaleStorageReconciliationCanary(player, options)
-	options = if typeof(options) == "table" then options else {}
-	local productId = tonumber(options.ProductId or CrewQuickSlotConfig.ProductId)
-	local result = {
-		Passed = true,
-		Skipped = true,
-		ProductId = productId,
-		NoGoReasons = {},
-		Reason = "brainrot_storage_retired",
-	}
-
-	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		result.Passed = false
-		result.Skipped = false
-		result.NoGoReasons = { "player_required" }
-		result.Summary = "staleStorageProductQuickSlotsCanary passed=false noGo=player_required"
-		return result
-	end
-	if not getDataManager():IsReady(player) then
-		result.Passed = false
-		result.Skipped = false
-		result.NoGoReasons = { "profile_or_replica_unavailable" }
-		result.Summary = "staleStorageProductQuickSlotsCanary passed=false noGo=profile_or_replica_unavailable"
-		return result
-	end
-
-	result.Summary = string.format(
-		"staleStorageProductQuickSlotsCanary passed=true skipped=true productId=%s reason=brainrot_storage_retired",
-		tostring(productId)
-	)
-	return result
-end
-
 function CrewQuickSlotService.Init()
 	if initialized then
 		return
@@ -1851,12 +1809,12 @@ function CrewQuickSlotService.Init()
 		task.spawn(function()
 			if waitForReady(player) then
 				local slots = CrewQuickSlotService.EnsureSlots(player)
-				print(string.format(
-					"[CrewQuickSlots] player=%s unlockedSlots=%d maxSlots=%d",
+				quickSlotDebug(
+					"player=%s unlockedSlots=%d maxSlots=%d",
 					player.Name,
 					slots.UnlockedSlots,
 					slots.MaxSlots
-				))
+				)
 			end
 		end)
 	end

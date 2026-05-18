@@ -71,10 +71,6 @@ function ChestVisuals.GetTierColors(tierName)
 		return Color3.fromRGB(82, 74, 45), Color3.fromRGB(96, 176, 255)
 	end
 
-	if styleName == "Legendary" then
-		return Color3.fromRGB(143, 90, 28), Color3.fromRGB(228, 180, 74)
-	end
-
 	if styleName == "Gold" then
 		return Color3.fromRGB(132, 84, 30), Color3.fromRGB(215, 172, 71)
 	end

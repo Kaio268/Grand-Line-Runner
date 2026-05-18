@@ -3,21 +3,6 @@ local CrewStorage = {}
 local CrewMemberShadowConfig = require(script.Parent:WaitForChild("CrewMemberShadowConfig"))
 
 CrewStorage.Keys = {
-	Inventory = "BrainrotInventory",
-	QuickSlots = "BrainrotQuickSlots",
-	QuickSlotsLegacy = "BrainrotStorage",
-	Income = "IncomeBrainrots",
-	IndexCollection = "IndexCollection",
-	Index = "Brainrots",
-	CarriedAttribute = "CarriedBrainrot",
-	CarriedImageAttribute = "CarriedBrainrotImage",
-	StandName = "BrainrotName",
-	StandInstanceId = "BrainrotInstanceId",
-}
-
--- Canonical CrewMember save keys. Retired legacy roots may still be mirrored for
--- reporting and rollback while the saved-data cleanup finishes.
-CrewStorage.FutureKeys = {
 	Inventory = "CrewMemberInventory",
 	QuickSlots = "CrewMemberQuickSlots",
 	Income = "CrewMemberIncome",
@@ -28,6 +13,20 @@ CrewStorage.FutureKeys = {
 	StandName = "CrewMemberName",
 	StandInstanceId = "CrewMemberInstanceId",
 }
+
+CrewStorage.LegacyKeys = {
+	Inventory = "CrewMemberInventory",
+	QuickSlots = "CrewMemberQuickSlots",
+	Income = "CrewMemberIncome",
+	IndexCollection = "IndexCollection",
+	Index = "CrewMembers",
+	CarriedAttribute = "CarriedCrewMember",
+	CarriedImageAttribute = "CarriedCrewMemberImage",
+	StandName = "CrewMemberName",
+	StandInstanceId = "CrewMemberInstanceId",
+}
+
+CrewStorage.FutureKeys = CrewStorage.Keys
 
 CrewStorage.ShadowFlags = table.clone(CrewMemberShadowConfig.ProductionFlags)
 CrewStorage.SessionShadowFlagOverrides = {}
@@ -52,14 +51,11 @@ local function cloneSessionOverrides()
 	return overrides
 end
 
-CrewStorage.ProductionShadowFlags = table.clone(CrewMemberShadowConfig.ProductionFlags)
-CrewStorage.StagingShadowFlags = table.clone(CrewMemberShadowConfig.StagingFlags)
-
 CrewStorage.ShadowFlagDefaults = {
 	CrewMemberShadowWriteEnabled = false,
 	CrewMemberShadowValidateEnabled = false,
 	CrewMemberShadowReportEnabled = true,
-	CrewMemberDualReadEnabled = false,
+	CrewMemberDualReadEnabled = true,
 	CrewMemberCanonicalReadEnabled = false,
 	CrewMemberCanaryDisplayReadsEnabled = false,
 	CrewMemberCanaryInventoryDisplayReadEnabled = false,
@@ -77,7 +73,6 @@ CrewStorage.ShadowFlagDefaults = {
 	CrewMemberInventoryWriteAuthorityEnabled = false,
 	CrewMemberStandIncomeWriteAuthorityEnabled = false,
 	CrewMemberProgressionWriteAuthorityEnabled = false,
-	CrewMemberSaveLoadCanonicalFirstEnabled = false,
 	CrewMemberLegacyUsageTelemetryEnabled = true,
 	CrewMemberLegacyWriteFreezeEnabled = false,
 	CrewMemberCanaryProfileMigrationDryRunEnabled = false,
@@ -90,26 +85,17 @@ CrewStorage.ShadowFlagDefaults = {
 	CrewMemberCanaryIncomeStatusHelperReadEnabled = false,
 	CrewMemberCanaryIncomeToastHelperReadEnabled = false,
 	CrewMemberCanaryFoodStatusHelperReadEnabled = false,
-	CrewMemberCanaryModelPreviewReadsEnabled = false,
+	CrewMemberCanaryModelPreviewReadsEnabled = true,
 	CrewMemberCanaryAdminModelPreviewReadEnabled = false,
-	CrewMemberCanaryIndexModelPreviewReadEnabled = false,
-	CrewMemberCanaryInventoryModelPreviewReadEnabled = false,
+	CrewMemberCanaryIndexModelPreviewReadEnabled = true,
+	CrewMemberCanaryInventoryModelPreviewReadEnabled = true,
 	CrewMemberCanonicalReadStrictValidation = true,
 	CrewMemberCanonicalReadFallbackToLegacy = true,
 	CrewMemberCanonicalReadDisableOnMismatch = true,
 	CrewMemberShadowWriteStrictMode = false,
-	CrewMemberDisplayHelperLegacyFallbackDenyEnabled = false,
-	CrewMemberStandIncomeLegacyFallbackReadDenyEnabled = false,
-	CrewMemberFoodProgressionLegacyFallbackReadDenyEnabled = false,
 }
 
 local incomeShadowSyncStateByPlayer = setmetatable({}, { __mode = "k" })
-
-CrewStorage.LegacyDenyFlags = {
-	CrewMemberDisplayHelperLegacyFallbackDenyEnabled = true,
-	CrewMemberStandIncomeLegacyFallbackReadDenyEnabled = true,
-	CrewMemberFoodProgressionLegacyFallbackReadDenyEnabled = true,
-}
 
 function CrewStorage.GetShadowFlags(overrides)
 	local flags, environment = CrewMemberShadowConfig.GetEnvironmentFlags()
@@ -185,23 +171,6 @@ function CrewStorage.GetShadowFlags(overrides)
 	then
 		flags.CrewMemberProgressionWriteAuthorityEnabled = false
 	end
-	if flags.CrewMemberSaveLoadCanonicalFirstEnabled == true
-		and (
-			flags.CrewMemberCanaryWriteAuthorityEnabled == true
-			or flags.CrewMemberCanaryQuickSlotsWriteAuthorityEnabled == true
-			or flags.CrewMemberProductQuickSlotWriteAuthorityEnabled == true
-			or flags.CrewMemberInventoryWriteAuthorityEnabled == true
-			or flags.CrewMemberStandIncomeWriteAuthorityEnabled == true
-			or flags.CrewMemberProgressionWriteAuthorityEnabled == true
-			or flags.CrewMemberCanaryProfileMigrationDryRunEnabled == true
-			or flags.CrewMemberCanaryProfileMigrationWriteEnabled == true
-			or flags.CrewMemberCanaryReadAuthorityEnabled == true
-			or flags.CrewMemberCanonicalReadEnabled == true
-			or flags.CrewMemberCanaryGameplayReadsEnabled == true
-		)
-	then
-		flags.CrewMemberSaveLoadCanonicalFirstEnabled = false
-	end
 	if flags.CrewMemberLegacyWriteFreezeEnabled == true
 		and (
 			flags.CrewMemberCanaryProfileMigrationWriteEnabled == true
@@ -221,36 +190,6 @@ function CrewStorage.SetSessionShadowFlagOverride(flagName, enabled)
 
 	CrewStorage.SessionShadowFlagOverrides[tostring(flagName)] = enabled == true
 	return true, nil
-end
-
-function CrewStorage.SetLegacyDenySessionOverride(flagName, enabled)
-	local normalizedFlagName = tostring(flagName or "")
-	if CrewStorage.LegacyDenyFlags[normalizedFlagName] ~= true then
-		return false, "unknown_legacy_deny_flag"
-	end
-
-	local environment = CrewMemberShadowConfig.ResolveEnvironment()
-	if enabled == true and environment.IsStaging ~= true then
-		return false, "staging_environment_required", environment
-	end
-
-	CrewStorage.SetSessionShadowFlagOverride(normalizedFlagName, enabled == true)
-	local flags = CrewStorage.GetShadowFlags()
-	return true, nil, {
-		Environment = environment,
-		Overrides = cloneSessionOverrides(),
-		Flags = flags,
-	}
-end
-
-function CrewStorage.IsLegacyDenyFlagEnabled(flagName, flags)
-	local normalizedFlagName = tostring(flagName or "")
-	if CrewStorage.LegacyDenyFlags[normalizedFlagName] ~= true then
-		return false
-	end
-
-	flags = if typeof(flags) == "table" then flags else CrewStorage.GetShadowFlags()
-	return flags[normalizedFlagName] == true
 end
 
 function CrewStorage.SetMetadataHelperReadSessionOverride(enabled)
@@ -854,41 +793,6 @@ function CrewStorage.ClearIncomeShadowSyncState(player)
 	if typeof(player) == "Instance" and player:IsA("Player") then
 		incomeShadowSyncStateByPlayer[player] = nil
 	end
-end
-
-local function getRoot(profile)
-	if typeof(profile) == "table" and typeof(profile.Data) == "table" then
-		return profile.Data
-	end
-	return profile
-end
-
-local function ensureTable(parent, key)
-	if typeof(parent) ~= "table" then
-		return nil
-	end
-	if typeof(parent[key]) ~= "table" then
-		parent[key] = {}
-	end
-	return parent[key]
-end
-
-function CrewStorage.GetCrewInventory(profile)
-	return ensureTable(getRoot(profile), CrewStorage.Keys.Inventory)
-end
-
-function CrewStorage.GetCrewQuickSlots(profile)
-	return ensureTable(getRoot(profile), CrewStorage.Keys.QuickSlots)
-end
-
-function CrewStorage.GetCrewIncomeData(profile)
-	return ensureTable(getRoot(profile), CrewStorage.Keys.Income)
-end
-
-function CrewStorage.GetCrewIndex(profile)
-	local root = getRoot(profile)
-	local indexCollection = ensureTable(root, CrewStorage.Keys.IndexCollection)
-	return ensureTable(indexCollection, CrewStorage.Keys.Index)
 end
 
 return CrewStorage

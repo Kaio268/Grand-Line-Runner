@@ -121,12 +121,18 @@ local DevilFruits = {
 					ClientCorrectionSnapDistance = 12,
 					ClientDistanceTolerance = 6,
 					FinalSnapTolerance = 4,
+					Audio = {
+						DashSoundId = "rbxassetid://81398646310714",
+						DashSoundOffset = 0,
+						Volume = 1,
+					},
 					RequestPayloadSchema = {
-						MaxKeys = 2,
+						MaxKeys = 3,
 						MaxHintDistance = 440,
 						Fields = {
 							DashTargetPosition = "Vector3",
 							VisualDirection = "DirectionVector3",
+							ClientCastId = "String",
 						},
 					},
 					Animation = {
@@ -175,6 +181,11 @@ local DevilFruits = {
 					},
 					ExplosionMeasureIncludeKeywords = {},
 					MovementLockEnabled = true,
+					Audio = {
+						BurstSoundId = "rbxassetid://118200878932499",
+						BurstSoundOffset = 0,
+						Volume = 1,
+					},
 					Animation = {
 						AnimationKey = "Mera.FlameBurstR6",
 						ReleaseMarker = "Release",
@@ -231,6 +242,10 @@ local DevilFruits = {
 					MaxInheritedSpeed = 140,
 					SpawnLeadTime = 0.08,
 					MaxSpawnLead = 8,
+					Audio = {
+						FireSoundId = "rbxassetid://95183110062426",
+						ImpactSoundId = "rbxassetid://85701354119300",
+					},
 					Animation = {
 						AnimationKey = "Hie.IceBlast",
 						ReleaseMarker = "IceBlast",
@@ -251,6 +266,9 @@ local DevilFruits = {
 					Cooldown = 18,
 					Duration = 4,
 					SpeedMultiplier = 2,
+					Audio = {
+						LoopSoundId = "rbxassetid://95916960988717",
+					},
 					Animation = {
 						AnimationKey = "Hie.IceBoost",
 						FadeTime = 0.08,
@@ -278,6 +296,11 @@ local DevilFruits = {
 					-- RubberLaunch scales uncapped; 200 speed gives 38 + 32 = 70 studs.
 					SpeedScaleReference = 200,
 					SpeedLaunchDistanceBonus = 32,
+					Audio = {
+						LaunchSoundId = "rbxassetid://127726035700622",
+						LaunchSoundOffset = 0,
+						Volume = 1,
+					},
 					Animation = {
 						AnimationKey = "Gomu.Rocket",
 						ReleaseTime = 0.25,
@@ -353,6 +376,9 @@ local DevilFruits = {
 							MaxBonus = 1,
 						},
 					},
+					Audio = {
+						DetonateSoundId = "rbxassetid://80642927300013",
+					},
 					Animation = {
 						Plant = {
 							AnimationKey = "Bomu.Plant",
@@ -403,10 +429,16 @@ local DevilFruits = {
 					ResolveHazardProbePadding = 0.25,
 					GroundProbeHeight = 6,
 					GroundProbeDepth = 18,
+					ActivationGroundProbeDepth = 48,
+					ActivationMaxSurfaceDrop = 48,
 					RootGroundClearance = 3.2,
+					BuriedRootDepth = 4.8,
 					UseConfiguredRootGroundClearance = true,
 					MaxSurfaceDrop = 1.25,
 					MaxSurfaceRise = 3.5,
+					ActiveMaxUntrustedSurfaceRise = 0.65,
+					WallProbeRadius = 1.35,
+					WallBlockerSkin = 0.35,
 					MinSurfaceNormalY = 0.55,
 					SurfaceProbeRadius = 1.8,
 					SurfaceResolveGrace = 0.45,
@@ -421,14 +453,16 @@ local DevilFruits = {
 							AnimationKey = "Mogu.MoleDigStart",
 							FadeTime = 0.05,
 							StopFadeTime = 0.08,
-							PlaybackSpeed = 0.82,
+							PlaybackSpeed = 1,
 							Looped = false,
 							-- The Mogu keyframe saves do not include named cue markers yet, so these fallbacks drive entry VFX and movement start.
 							EntryCueMarkers = { "EnterGround", "EntryVfx", "DigImpact", "Dig" },
-							EntryCueFallbackTime = 0.42,
+							EntryCueFallbackTime = 0.28,
 							MovementCueMarkers = { "FullyUnderground", "Underground", "BurrowMove", "MovementStart" },
 							MovementCueFallbackTime = 0.82,
-							ConcealDelay = 0.42,
+							ConcealDelay = 0,
+							PreEntryVisualSinkDepth = 0.8,
+							PreEntryVisualSinkDuration = 0.14,
 							VisualSinkDepth = 3.2,
 							VisualSinkDuration = 0.42,
 						},
@@ -439,6 +473,7 @@ local DevilFruits = {
 							StopAfter = 0.6,
 							PlaybackSpeed = 1,
 							Looped = false,
+							RevealDelay = 0.08,
 							VisualRiseDuration = 0.18,
 							SurfaceLockDuration = 0.3,
 							FacingLockDuration = 0.6,
@@ -471,9 +506,10 @@ local DevilFruits = {
 						},
 					},
 					RequestPayloadSchema = {
-						MaxKeys = 1,
+						MaxKeys = 2,
 						Fields = {
 							Direction = "DirectionVector3",
+							PredictedStartPosition = "Vector3",
 						},
 					},
 				},
@@ -500,6 +536,9 @@ local DevilFruits = {
 					LocalDecalTransparency = 0.72,
 					ObserverBodyTransparency = 1,
 					ObserverDecalTransparency = 1,
+					Audio = {
+						ActivateSoundId = "rbxassetid://78492636125633",
+					},
 					Animation = {
 						AnimationKey = "Suke.Suke1",
 						EffectDelay = 0.35,
@@ -560,6 +599,11 @@ local DevilFruits = {
 					BodyHighlightOutlineTransparency = 0.16,
 					GhostTransparency = 0.42,
 					GhostLocalTransparency = 0.2,
+					Audio = {
+						ActivateSoundId = "rbxassetid://116810314478650",
+						MoveLoopSoundId = "rbxassetid://99992721489454",
+						ReturnSoundId = "rbxassetid://74101168656622",
+					},
 					Animation = {
 						Projection = {
 							AnimationKey = "Horo.HoroProjection",
@@ -617,6 +661,11 @@ local DevilFruits = {
 					RestoreHealthPercent = 1,
 					AnimationKey = "Tori.PhoenixRevive",
 					ReviveMarkerNames = { "Revive", "Rebirth", "PhoenixRevive", "Restore" },
+					Audio = {
+						ReviveSoundId = "rbxassetid://137266608991780",
+						-- Seconds relative to the revive moment. Negative plays earlier; positive plays later.
+						ReviveSoundOffset = -0.15,
+					},
 				},
 			},
 			Abilities = {
@@ -637,6 +686,18 @@ local DevilFruits = {
 					HorizontalResponsiveness = 14,
 					FlightTrailPartNames = { "Tail1", "tail", "Torso", "UpperTorso", "HumanoidRootPart" },
 					FlightTrailOffset = CFrame.new(0, 0, 5.5),
+					Audio = {
+						FlightLoopSoundId = "rbxassetid://113359626475877",
+						InitialJumpOffSoundId = "rbxassetid://97732273162083",
+						DeactivationSoundId = "rbxassetid://73620560003570",
+						AirImpactSoundId = "rbxassetid://127487560753859",
+						AirImpactLeadTime = 0.08,
+						Markers = {
+							LiftOff = { "LiftOff" },
+							AirImpact = { "AirImpact" },
+							Deactivate = { "Deactivate", "FlightEnd" },
+						},
+					},
 					RequestPayloadSchema = {
 						MaxKeys = 2,
 						Fields = {
@@ -666,6 +727,13 @@ local DevilFruits = {
 						FadeTime = 0.06,
 						StopFadeTime = 0.1,
 						Looped = false,
+					},
+					Audio = {
+						ActivateSoundId = "rbxassetid://137705393576299",
+						DeactivateSoundId = "rbxassetid://79888666558923",
+						LoopSoundId = "rbxassetid://80660065535430",
+						-- Seconds before the gameplay shield end to fire the deactivate cue.
+						DeactivateLeadTime = 0.25,
 					},
 				},
 			},

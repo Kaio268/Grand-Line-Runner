@@ -34,7 +34,7 @@ CrewMembers.ArcRarity = {
 }
 
 -- LegacyId is the current saved-data/reward key. Keep it until the profile
--- migration replaces Brainrot-backed storage with canonical Crew storage.
+-- Migration keeps old storage isolated while active systems use canonical Crew data.
 CrewMembers.Entries = {
 	{
 		CrewMemberId = "Mask Dancer",
@@ -366,6 +366,53 @@ CrewMembers.Entries = {
 	},
 }
 
+local CREW_MEMBER_RENDER_PLACEHOLDER = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+
+-- TODO(CrewVisuals): Replace this placeholder with final CrewMember portrait assets.
+-- The retired portrait table was copied from legacy storage entries and must not
+-- be used as active CrewMember UI identity.
+local function applyPlaceholderRenderAssets(entry)
+	entry.Render = CREW_MEMBER_RENDER_PLACEHOLDER
+	entry.GoldenRender = CREW_MEMBER_RENDER_PLACEHOLDER
+	entry.DiamondRender = CREW_MEMBER_RENDER_PLACEHOLDER
+	entry.RenderStatus = "NeedsCanonicalPortrait"
+end
+
+local balanceByCrewMemberId = {
+	["Mask Dancer"] = { Income = 3, Chance = 90, TimeLeft = 30 },
+	["Clown Captain"] = { Income = 5, Chance = 80, TimeLeft = 30 },
+	["Metal Glutton"] = { Income = 7, Chance = 70, TimeLeft = 30 },
+	["Pink Marine"] = { Income = 10, Chance = 60, TimeLeft = 30 },
+	["Storm Cartographer"] = { Income = 15, Chance = 50, TimeLeft = 30 },
+	["Iron Shipwright"] = { Income = 20, Chance = 40, TimeLeft = 30 },
+	["Soul Fiddler"] = { Income = 25, Chance = 35, TimeLeft = 30 },
+	["Sawtooth Captain"] = { Income = 30, Chance = 30, TimeLeft = 30 },
+	["Straw Prophet"] = { Income = 50, Chance = 20, TimeLeft = 30 },
+	["Dino Marine"] = { Income = 65, Chance = 10, TimeLeft = 30 },
+	["Fortress Don"] = { Income = 75, Chance = 6, TimeLeft = 30 },
+	["Bloom Scholar"] = { Income = 90, Chance = 4, TimeLeft = 30 },
+	["Barrier Punk"] = { Income = 115, Chance = 1, TimeLeft = 30 },
+	["Flint Kicker"] = { Income = 135, Chance = 0.5, TimeLeft = 30 },
+	["Blade Ronin"] = { Income = 150, Chance = 0.3, TimeLeft = 30, IdleAnim = 118039584385174 },
+	["Sand Tyrant"] = { Income = 175, Chance = 0.2, TimeLeft = 30, IdleAnim = 117547701048403 },
+	["Ember Fist"] = { Income = 250, Chance = 0.08, TimeLeft = 30 },
+	["Leopard Agent"] = { Income = 275, Chance = 0, TimeLeft = 30, IdleAnim = 127346267024570 },
+	["Surgeon Rogue"] = { Income = 300, Chance = 0.06, TimeLeft = 30, IdleAnim = 94961421589870 },
+	["Rubber Captain"] = { Income = 375, Chance = 0.04, TimeLeft = 30, IdleAnim = 133580320249648 },
+	["Shadow Baron"] = { Income = 700, Chance = 0.008, TimeLeft = 30, IdleAnim = 107083179404237 },
+	["Ghost Samurai"] = { Income = 850, Chance = 0.006, TimeLeft = 30, IdleAnim = 87293090021637 },
+	["Venom Warden"] = { Income = 1000, Chance = 0.004, TimeLeft = 30, IdleAnim = 74472556819311 },
+	["Tide Monk"] = { Income = 1250, Chance = 0.002, TimeLeft = 30, IdleAnim = 118452385523676 },
+	["Puppet King"] = { Income = 2000, Chance = 0.0008, TimeLeft = 30, IdleAnim = 136583127735891 },
+	["Candy Duke"] = { Income = 3000, Chance = 0.0006, TimeLeft = 30, IdleAnim = 101871119253345 },
+	["Juice Duchess"] = { Income = 4500, Chance = 0.0004, TimeLeft = 30, IdleAnim = 122355075926841 },
+	["Diamond Bruiser"] = { Income = 6000, Chance = 0.0002, TimeLeft = 30, IdleAnim = 137649236058689 },
+	["Azure Phoenix"] = { Income = 10000, Chance = 0.00008, TimeLeft = 30, IdleAnim = 92396455480331 },
+	["Frost Admiral"] = { Income = 17500, Chance = 0.00006, TimeLeft = 30, IdleAnim = 133443053475641 },
+	["Hawkblade Lord"] = { Income = 25000, Chance = 0.00004, TimeLeft = 30, IdleAnim = 127160575917998 },
+	["Plague Engineer"] = { Income = 35000, Chance = 0.00002, TimeLeft = 30 },
+}
+
 local byCrewMemberId = {}
 local byDisplayName = {}
 local byLegacyId = {}
@@ -373,6 +420,14 @@ local byRealCharacterName = {}
 
 for index, entry in ipairs(CrewMembers.Entries) do
 	entry.Order = index
+	applyPlaceholderRenderAssets(entry)
+	local balance = balanceByCrewMemberId[tostring(entry.CrewMemberId)]
+	if balance then
+		entry.Income = balance.Income
+		entry.Chance = balance.Chance
+		entry.TimeLeft = balance.TimeLeft
+		entry.IdleAnim = balance.IdleAnim
+	end
 	byCrewMemberId[tostring(entry.CrewMemberId)] = entry
 	byDisplayName[tostring(entry.DisplayName)] = entry
 	byLegacyId[tostring(entry.LegacyId)] = entry
@@ -420,6 +475,14 @@ function CrewMembers.GetLegacyIdMappings()
 			ModelName = entry.ModelName,
 			ModelNameVerified = entry.ModelNameVerified == true,
 			MissingModel = entry.MissingModel == true,
+			Render = entry.Render,
+			GoldenRender = entry.GoldenRender,
+			DiamondRender = entry.DiamondRender,
+			RenderStatus = entry.RenderStatus,
+			Income = entry.Income,
+			Chance = entry.Chance,
+			TimeLeft = entry.TimeLeft,
+			IdleAnim = entry.IdleAnim,
 			Order = entry.Order,
 		}
 	end

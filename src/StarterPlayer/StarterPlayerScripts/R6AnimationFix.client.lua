@@ -7,6 +7,7 @@ local AnimationResolver = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 
 local DEBUG_R6_ANIM = true
 local PATCH_FLAG_ATTRIBUTE = "ReactR6AnimationPatched"
+local SAFE_ANIMATE_RUNTIME_ATTRIBUTE = "UseSafeAnimateRuntime"
 
 -- R6 animate patch ids. Locomotion comes from the shared animation registry.
 local R6_IDS = {
@@ -40,6 +41,11 @@ local function debugLog(...)
 	if DEBUG_R6_ANIM then
 		print("[R6AnimFix]", ...)
 	end
+end
+
+local function isSafeAnimateRuntimeEnabled()
+	local configuredValue = ReplicatedStorage:GetAttribute(SAFE_ANIMATE_RUNTIME_ATTRIBUTE)
+	return configuredValue ~= false
 end
 
 local function ensureAnimator(humanoid)
@@ -173,6 +179,10 @@ local function installVelocityFallback(character, humanoid, movementIds)
 end
 
 local function patchCharacter(character)
+	if isSafeAnimateRuntimeEnabled() then
+		return
+	end
+
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
 		return

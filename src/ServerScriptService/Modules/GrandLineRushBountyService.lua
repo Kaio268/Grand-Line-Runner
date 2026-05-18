@@ -77,7 +77,7 @@ function Service.FormatNumber(value)
 	return formatted
 end
 
-function Service.GetBreakdown(player, brainrotInventory)
+function Service.GetBreakdown(player, crewInventory)
 	if not DataManager:IsReady(player) then
 		return {
 			Crew = 0,
@@ -87,24 +87,24 @@ function Service.GetBreakdown(player, brainrotInventory)
 	end
 
 	local cached = readCachedBreakdown(player)
-	if brainrotInventory == nil and cached ~= nil then
+	if crewInventory == nil and cached ~= nil then
 		if cached.Crew > 0 or cached.LifetimeExtraction > 0 or cached.Total > 0 then
 			return cached
 		end
 	end
 
-	local inventory = brainrotInventory or CrewInstanceService.GetCrewInventory(player)
+	local inventory = crewInventory or CrewInstanceService.GetCrewInventory(player)
 	local lifetimeExtraction = DataManager:GetValue(player, "Bounty.LifetimeExtraction")
 	return Resolver.BuildBreakdown(inventory, lifetimeExtraction)
 end
 
-function Service.RefreshPlayerBounty(player, brainrotInventory)
+function Service.RefreshPlayerBounty(player, crewInventory)
 	if not DataManager:IsReady(player) then
 		return nil, "not_ready"
 	end
 
 	local breakdown = Resolver.BuildBreakdown(
-		brainrotInventory or CrewInstanceService.GetCrewInventory(player),
+		crewInventory or CrewInstanceService.GetCrewInventory(player),
 		DataManager:GetValue(player, "Bounty.LifetimeExtraction")
 	)
 	local leaderstatKey = tostring(BountyConfig.Display.LeaderstatKey or "Bounty")

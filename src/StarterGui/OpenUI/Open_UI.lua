@@ -25,6 +25,7 @@ local CONFIG = {
 local FRAMES_DISPLAY_ORDER = 120
 local CONTROLLER_GENERATION_ATTRIBUTE = "OpenUIControllerGeneration"
 local OPENED_FRAME_ATTRIBUTE = "OpenUIOpened"
+local BYPASS_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
 local GIFT_OPENUI_DEBUG = true
 local GIFT_OPENUI_DEBUG_VERSION = "gifts-openui-x-debug-2026-05-01"
 local CLOSE_BUTTON_DEBUG = true
@@ -106,7 +107,21 @@ local function shouldPreserveVisibleFrame(frame: Frame): boolean
 	return frame:GetAttribute(OPENED_FRAME_ATTRIBUTE) == true or REACT_MODAL_FRAME_NAMES[frame.Name] == true
 end
 
-local function tween(obj: Instance, props: {[string]: any}, time: number, style, dir)
+local function shouldBypassScaleAnimation(frame: Frame): boolean
+	return frame:GetAttribute(BYPASS_SCALE_ANIMATION_ATTRIBUTE) == true
+end
+
+local function setFrameScale(frame: Frame, scaleValue: number): UIScale
+	local scale = frame:FindFirstChildOfClass("UIScale")
+	if not scale then
+		scale = Instance.new("UIScale")
+		scale.Parent = frame
+	end
+	scale.Scale = scaleValue
+	return scale
+end
+
+local function tween(obj: Instance, props: { [string]: any }, time: number, style, dir)
 	return TweenService:Create(obj, TweenInfo.new(time, style, dir), props)
 end
 
@@ -138,14 +153,32 @@ function UIController:_applyBlurCam(opening: boolean)
 	local cam = workspace.CurrentCamera
 	local toSize = opening and CONFIG.BLUR_OPEN or CONFIG.BLUR_CLOSED
 	local toFov = opening and CONFIG.OPEN_FOV or CONFIG.DEFAULT_FOV
-	local t1 = tween(blur, { Size = toSize }, opening and CONFIG.OPEN_TIME or CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, opening and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN)
-	local t2 = tween(cam, { FieldOfView = toFov }, opening and CONFIG.OPEN_TIME or CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, opening and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN)
+	local t1 = tween(
+		blur,
+		{ Size = toSize },
+		opening and CONFIG.OPEN_TIME or CONFIG.CLOSE_TIME,
+		CONFIG.EASING_STYLE,
+		opening and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN
+	)
+	local t2 = tween(
+		cam,
+		{ FieldOfView = toFov },
+		opening and CONFIG.OPEN_TIME or CONFIG.CLOSE_TIME,
+		CONFIG.EASING_STYLE,
+		opening and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN
+	)
 	t1:Play()
 	t2:Play()
 end
 
 function UIController:_moveFrame(frame: Frame, y: number, time: number?)
-	tween(frame, { Position = UDim2.fromScale(0.5, y) }, time or CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, y < 0.5 and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN):Play()
+	tween(
+		frame,
+		{ Position = UDim2.fromScale(0.5, y) },
+		time or CONFIG.OPEN_TIME,
+		CONFIG.EASING_STYLE,
+		y < 0.5 and CONFIG.EASING_DIR_OUT or CONFIG.EASING_DIR_IN
+	):Play()
 end
 
 function UIController:_getVisibleNonPlantFrames()
@@ -159,9 +192,14 @@ function UIController:_getVisibleNonPlantFrames()
 end
 
 function UIController:_forceHide(frame: Frame)
-	local scale = frame:FindFirstChildOfClass("UIScale")
-	if scale then
-		scale.Scale = 0
+	if shouldBypassScaleAnimation(frame) then
+		setFrameScale(frame, 1)
+		frame.Position = UDim2.fromScale(0.5, self.PlantVisible and 0.4 or 0.5)
+	else
+		local scale = frame:FindFirstChildOfClass("UIScale")
+		if scale then
+			scale.Scale = 0
+		end
 	end
 	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, false)
 	frame.Visible = false
@@ -415,9 +453,33 @@ function UIController:_initializeFrame(frame: Instance)
 	end)
 end
 
+function UIController:_setNonPlantVisibleInstant(frame: Frame, visible: boolean)
+	self.IsAnimating = false
+	setFrameScale(frame, 1)
+	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, visible)
+	frame.Position = UDim2.fromScale(0.5, self.PlantVisible and 0.4 or 0.5)
+	frame.Visible = visible
+
+	if visible then
+		self.CurrentFrame = frame
+		self:_applyBlurCam(true)
+	else
+		if self.CurrentFrame == frame then
+			self.CurrentFrame = nil
+		end
+		if not self.PlantVisible then
+			self:_applyBlurCam(false)
+		end
+	end
+end
+
 function UIController:_closeNonPlant()
 	local f: Frame? = self.CurrentFrame
 	if not f or not f.Visible then
+		return
+	end
+	if shouldBypassScaleAnimation(f) then
+		self:_setNonPlantVisibleInstant(f, false)
 		return
 	end
 	self.IsAnimating = true
@@ -425,7 +487,8 @@ function UIController:_closeNonPlant()
 	if scale then
 		self:_playAndWait(tween(scale, { Scale = 1.15 }, CONFIG.POPUP_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT))
 	end
-	local t1 = tween(f, { Position = UDim2.fromScale(0.5, 10) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
+	local t1 =
+		tween(f, { Position = UDim2.fromScale(0.5, 10) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	t1:Play()
 	if t2 then
@@ -442,6 +505,10 @@ function UIController:_closeNonPlant()
 end
 
 function UIController:_openNonPlant(frame: Frame)
+	if shouldBypassScaleAnimation(frame) then
+		self:_setNonPlantVisibleInstant(frame, true)
+		return
+	end
 	self.IsAnimating = true
 	self.CurrentFrame = frame
 	frame:SetAttribute(OPENED_FRAME_ATTRIBUTE, true)
@@ -453,7 +520,13 @@ function UIController:_openNonPlant(frame: Frame)
 		uiScale.Parent = frame
 	end
 	uiScale.Scale = 0
-	local t1 = tween(frame, { Position = UDim2.fromScale(0.5, self.PlantVisible and 0.4 or 0.5) }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
+	local t1 = tween(
+		frame,
+		{ Position = UDim2.fromScale(0.5, self.PlantVisible and 0.4 or 0.5) },
+		CONFIG.OPEN_TIME,
+		CONFIG.EASING_STYLE,
+		CONFIG.EASING_DIR_OUT
+	)
 	local t2 = tween(uiScale, { Scale = 1 }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
 	t1:Play()
 	t2:Play()
@@ -485,7 +558,13 @@ function UIController:_openPlant()
 		uiScale.Parent = frame
 	end
 	uiScale.Scale = 0
-	local t1 = tween(frame, { Position = UDim2.fromScale(0.5, 0.712) }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
+	local t1 = tween(
+		frame,
+		{ Position = UDim2.fromScale(0.5, 0.712) },
+		CONFIG.OPEN_TIME,
+		CONFIG.EASING_STYLE,
+		CONFIG.EASING_DIR_OUT
+	)
 	local t2 = tween(uiScale, { Scale = 1 }, CONFIG.OPEN_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT)
 	t1:Play()
 	t2:Play()
@@ -503,7 +582,13 @@ function UIController:_closePlant()
 	if scale then
 		self:_playAndWait(tween(scale, { Scale = 1.15 }, CONFIG.POPUP_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_OUT))
 	end
-	local t1 = tween(frame, { Position = UDim2.fromScale(0.5, 10) }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
+	local t1 = tween(
+		frame,
+		{ Position = UDim2.fromScale(0.5, 10) },
+		CONFIG.CLOSE_TIME,
+		CONFIG.EASING_STYLE,
+		CONFIG.EASING_DIR_IN
+	)
 	local t2 = scale and tween(scale, { Scale = 0 }, CONFIG.CLOSE_TIME, CONFIG.EASING_STYLE, CONFIG.EASING_DIR_IN)
 	t1:Play()
 	if t2 then
@@ -694,6 +779,19 @@ function UIController:ToggleFrame(frame: Frame)
 			self:_closePlant()
 		else
 			self:_openPlant()
+			self:_repositionForDual()
+		end
+		return
+	end
+
+	if shouldBypassScaleAnimation(frame) then
+		if frame.Visible then
+			self:_setNonPlantVisibleInstant(frame, false)
+		else
+			if self.CurrentFrame and self.CurrentFrame.Visible and self.CurrentFrame ~= frame then
+				self:_closeNonPlant()
+			end
+			self:_setNonPlantVisibleInstant(frame, true)
 			self:_repositionForDual()
 		end
 		return

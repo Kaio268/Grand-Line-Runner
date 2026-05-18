@@ -1,9 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local MapResolver = require(ReplicatedStorage.Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 local refs = MapResolver.WaitForRefs(
 	{ "MapRoot", "SpawnFolder" },
@@ -61,38 +62,37 @@ pcall(function()
 	DataManager = require(script.Parent.Parent.Data.DataManager)
 end)
 
-local function addValuePath(plr, path, amount)
-	amount = tonumber(amount) or 0
-	if amount == 0 then return end
-
-	if DataManager and DataManager.AddValue then
-		pcall(function()
-			DataManager:AddValue(plr, path, amount)
-		end)
-		return
-	end
-
-	pcall(function()
-		local cur = plr
-		for seg in string.gmatch(path, "[^%.]+") do
-			cur = cur:FindFirstChild(seg)
-			if not cur then return end
-		end
-		if cur and cur:IsA("ValueBase") then
-			cur.Value += amount
-		end
-	end)
-end
-
 local POPUP_COLOR = Color3.new(1, 0.972549, 0.192157)
 local POPUP_STROKE = Color3.new(0.101961, 0.101961, 0.101961)
-local crewRewards = require(script.Parent.Parent.Modules.AddCrewMember)
+local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
+
+local function crewReward(legacyName, chance)
+	local displayName = CrewRewardService.GetDisplayName(legacyName)
+	return {
+		chance = chance,
+		amount = 1,
+		CrewRewardName = legacyName,
+		DisplayName = displayName,
+		Give = function(plr, amount)
+			return CrewRewardService.Grant(plr, legacyName, amount or 1, {
+				Source = "LuckyBlock",
+				Context = "LuckyBlock:" .. tostring(legacyName),
+			})
+		end,
+		Popup = function(_plr, _rewardName, amount, grantSucceeded)
+			if grantSucceeded == false then
+				return "Crew reward is unavailable right now."
+			end
+			return "You got " .. tostring(math.max(1, tonumber(amount) or 1)) .. " " .. tostring(displayName) .. "!"
+		end,
+	}
+end
 
 local REWARDS = {
 	["Nothing"] = {
 		chance = 40, -- NAJWIĘKSZA SZANSA
 		amount = 0,
-		Give = function(plr, amount) end,
+		Give = function(_plr, _amount) end,
 		Popup = "LuckyBlock didn't give anything 😭",
 	},
 
@@ -123,54 +123,14 @@ local REWARDS = {
 		Popup = "You got 2 Minutes x1.5 Speed Boost!",
 	},
 
-	-- RARE BRAINROTS
-	["Garamararam"] = {
-		chance = 3,
-		Give = function(plr)
-			crewRewards:AddCrewMember(plr, "Garamararam", 1)
-		end,
-		Popup = "You got 1 Garamararam!",
-	},
-
-	["Bombombini Gusini"] = {
-		chance = 3,
-		Give = function(plr)
-			crewRewards:AddCrewMember(plr, "Bombombini Gusini", 1)
-		end,
-		Popup = "You got 1 Bombombini Gusini!",
-	},
-
-	["Pandaccini Bananini"] = {
-		chance = 3,
-		Give = function(plr)
-			crewRewards:AddCrewMember(plr, "Pandaccini Bananini", 1)
-		end,
-		Popup = "You got 1 Pandaccini Bananini!",
-	},
-
-	["Girafa Celestre"] = {
-		chance = 3,
-		Give = function(plr)
-			crewRewards:AddCrewMember(plr, "Girafa Celestre", 1)
-		end,
-		Popup = "You got 1 Girafa Celestre!",
-	},
-
-	["Karkerkar Kurkur"] = {
-		chance = 3,
-		Give = function(plr)
-			crewRewards:AddCrewMember(plr, "Karkerkar Kurkur", 1)
-		end,
-		Popup = "You got 1 Karkerkar Kurkur!",
-	},
-
-	["Pakrahmatmatina"] = {
-		chance = 3,
-		Give = function(plr)
-			crewRewards:AddCrewMember(plr, "Pakrahmatmatina", 1)
-		end,
-		Popup = "You got 1 Pakrahmatmatina!",
-	},
+	-- Crew rewards can still use legacy config keys internally, but player-facing names resolve through CrewRewardService.
+	["Garamararam"] = crewReward("Garamararam", 3),
+	["Bombombini Gusini"] = crewReward("Bombombini Gusini", 3),
+	["Tide Monk"] = crewReward("Tide Monk", 3),
+	["Girafa Celestre"] = crewReward("Girafa Celestre", 3),
+	["Karkerkar Kurkur"] = crewReward("Karkerkar Kurkur", 3),
+	-- TODO(Rewards): Add a high-tier CrewMember replacement before re-enabling this retired Secret reward.
+	["Pakrahmatmatina"] = crewReward("Pakrahmatmatina", 0),
 }
 
 
@@ -254,15 +214,15 @@ end
 local function getSpawnPlatforms()
 	local platforms = cachedSpawnPlatforms
 	if platforms and #platforms > 0 then
-		local stillValid = true
+		local allStillValid = true
 		for _, platform in ipairs(platforms) do
 			if not platform or not platform.Parent then
-				stillValid = false
+				allStillValid = false
 				break
 			end
 		end
 
-		if stillValid then
+		if allStillValid then
 			return platforms
 		end
 	end
@@ -303,7 +263,9 @@ local function randomEvenHealth()
 	if v % 2 == 1 then
 		v += 1
 	end
-	if v > 50 then v = 50 end
+	if v > 50 then
+		v = 50
+	end
 	return v
 end
 
@@ -338,7 +300,9 @@ local function destroyFX(pos: Vector3)
 	TweenService:Create(ring, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Transparency = 1 }):Play()
 
 	task.delay(0.7, function()
-		if ring then ring:Destroy() end
+		if ring then
+			ring:Destroy()
+		end
 	end)
 end
 
@@ -360,14 +324,14 @@ local function destroyBlockById(id: string)
 	end
 end
 
-local function sendRewardPopup(plr: Player, rewardName: string, rewardDef: table)
+local function sendRewardPopup(plr: Player, rewardName: string, rewardDef: table, grantSucceeded: boolean?)
 	if not rewardDef then return end
 
 	local amount = tonumber(rewardDef.amount) or 0
 	local msg = nil
 
 	if typeof(rewardDef.Popup) == "function" then
-		msg = rewardDef.Popup(plr, rewardName, amount)
+		msg = rewardDef.Popup(plr, rewardName, amount, grantSucceeded)
 	elseif type(rewardDef.Popup) == "string" then
 		msg = rewardDef.Popup
 		msg = msg:gsub("{reward}", tostring(rewardName))
@@ -384,14 +348,16 @@ local function giveReward(plr: Player)
 	if not rewardDef then return end
 
 	local amount = tonumber(rewardDef.amount) or 0
+	local grantSucceeded = true
 
 	if rewardDef.Give then
-		pcall(function()
-			rewardDef.Give(plr, amount)
+		local ok, giveOk = pcall(function()
+			return rewardDef.Give(plr, amount)
 		end)
+		grantSucceeded = ok and giveOk ~= false
 	end
 
-	sendRewardPopup(plr, rewardName, rewardDef)
+	sendRewardPopup(plr, rewardName, rewardDef, grantSucceeded)
 end
 
 local function spawnOne(platform: BasePart, token: number)
@@ -471,10 +437,18 @@ local function spawnOne(platform: BasePart, token: number)
 	TweenService:Create(rotVal, TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Value = math.pi * 2 }):Play()
 
 	task.delay(0.55, function()
-		if connA then connA:Disconnect() end
-		if connB then connB:Disconnect() end
-		if scaleVal.Parent then scaleVal:Destroy() end
-		if rotVal.Parent then rotVal:Destroy() end
+		if connA then
+			connA:Disconnect()
+		end
+		if connB then
+			connB:Disconnect()
+		end
+		if scaleVal.Parent then
+			scaleVal:Destroy()
+		end
+		if rotVal.Parent then
+			rotVal:Destroy()
+		end
 		if inst and inst.Parent then
 			safeScaleTo(inst, 1)
 			inst:PivotTo(baseCF)
@@ -524,6 +498,16 @@ local function clearAll()
 end
 
 LuckyBlockHit.OnServerEvent:Connect(function(plr: Player, blockId: string)
+	-- Security: block damage is server validated; guard malformed/spammed hit reports first.
+	if not RemoteGuard.Check(plr, "LuckyBlockHit", { blockId }, {
+		Cooldown = 0.04,
+		Args = {
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return
+	end
+
 	if type(blockId) ~= "string" then return end
 	local data = blockById[blockId]
 	if not data then return end

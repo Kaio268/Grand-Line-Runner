@@ -1,28 +1,19 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local DevilFruits = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local IndexCollectionService = {}
 
 local DataManagerModule
 local CrewMemberCanonicalReadGateModule
-local CrewMembers = CrewCatalog.GetLegacyConfig()
-local CrewVariants = CrewCatalog.GetVariantConfig()
-local VALID_CREW_MEMBER_ITEM_IDS = {}
 
 -- Source-of-truth rules:
 -- Inventory.DevilFruits = currently owned fruit items.
 -- IndexCollection.DevilFruits = lifetime discovery/unlock history.
 -- DevilFruit.Equipped = currently active fruit only.
 -- Tool scans below are one-way legacy backfill inputs, not authoritative state.
-
-for itemId, info in pairs(CrewMembers) do
-	if type(info) == "table" then
-		VALID_CREW_MEMBER_ITEM_IDS[tostring(itemId)] = true
-	end
-end
 
 local function getDataManager()
 	if not DataManagerModule then
@@ -49,6 +40,59 @@ local function addDevilFruitCandidate(candidates, fruitIdentifier)
 	end
 end
 
+local function addDevilFruitTableEntryCandidates(candidates, entry)
+	addDevilFruitCandidate(candidates, entry.FruitKey)
+	addDevilFruitCandidate(candidates, entry.Key)
+	addDevilFruitCandidate(candidates, entry.Id)
+	addDevilFruitCandidate(candidates, entry.Name)
+	addDevilFruitCandidate(candidates, entry.DisplayName)
+	addDevilFruitCandidate(candidates, entry.FruitName)
+
+	for _, value in pairs(entry) do
+		if typeof(value) == "string" then
+			addDevilFruitCandidate(candidates, value)
+		elseif typeof(value) == "table" then
+			addDevilFruitCandidate(candidates, value.FruitKey)
+			addDevilFruitCandidate(candidates, value.Key)
+			addDevilFruitCandidate(candidates, value.Id)
+			addDevilFruitCandidate(candidates, value.Name)
+			addDevilFruitCandidate(candidates, value.DisplayName)
+			addDevilFruitCandidate(candidates, value.FruitName)
+		end
+	end
+end
+
+local function isExplicitlyUndiscoveredDevilFruitEntry(entry)
+	if entry == false then
+		return true
+	end
+
+	if typeof(entry) ~= "table" then
+		return false
+	end
+
+	return entry.Discovered == false or entry.Unlocked == false or entry.Collected == false or entry.Value == false
+end
+
+local function shouldReadLifetimeDevilFruitEntry(entry)
+	if isExplicitlyUndiscoveredDevilFruitEntry(entry) then
+		return false
+	end
+
+	local entryType = typeof(entry)
+	if entryType == "boolean" then
+		return entry == true
+	elseif entryType == "number" then
+		return entry > 0
+	elseif entryType == "string" then
+		return entry ~= ""
+	elseif entryType == "table" then
+		return true
+	end
+
+	return false
+end
+
 local function hasLiveDiscoveredDevilFruitValue(player, fruitKey)
 	local indexCollection = player and player:FindFirstChild("IndexCollection")
 	local devilFruits = indexCollection and indexCollection:FindFirstChild("DevilFruits")
@@ -63,16 +107,14 @@ local function addDevilFruitTableCandidates(candidates, devilFruits, options)
 
 	local requireTruthy = options and options.RequireTruthy == true
 	for fruitIdentifier, entry in pairs(devilFruits) do
-		if requireTruthy and entry ~= true then
+		if requireTruthy and not shouldReadLifetimeDevilFruitEntry(entry) then
 			continue
 		end
 
 		addDevilFruitCandidate(candidates, fruitIdentifier)
 
 		if typeof(entry) == "table" then
-			addDevilFruitCandidate(candidates, entry.FruitKey)
-			addDevilFruitCandidate(candidates, entry.Name)
-			addDevilFruitCandidate(candidates, entry.DisplayName)
+			addDevilFruitTableEntryCandidates(candidates, entry)
 		elseif typeof(entry) == "string" then
 			addDevilFruitCandidate(candidates, entry)
 		end
@@ -165,85 +207,12 @@ local function addEquippedDevilFruitCandidates(candidates, player, dataManager)
 	addDevilFruitCandidate(candidates, player:GetAttribute("EquippedDevilFruit"))
 end
 
-local function getVariantInfo(variantKey)
-	if variantKey == "Normal" or not variantKey then
-		return (CrewVariants.Versions or {}).Normal or { Prefix = "", IncomeMult = 1 }
-	end
-
-	return (CrewVariants.Versions or {})[variantKey]
+function IndexCollectionService.ResolveCrewMemberItemId(crewMemberId, baseName, variantKey)
+	return IndexDiscovery.ResolveCrewMemberItemId(crewMemberId, baseName, variantKey)
 end
 
-local function getVariantItemId(variantKey, baseName)
-	if typeof(baseName) ~= "string" or baseName == "" then
-		return nil
-	end
-
-	if variantKey == "Normal" or not variantKey then
-		return baseName
-	end
-
-	local variantInfo = getVariantInfo(variantKey)
-	local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-	return prefix .. baseName
-end
-
-local function normalizeVariantKey(variantKey)
-	local candidate = tostring(variantKey or "")
-	for _, supportedVariant in ipairs(CrewVariants.Order or { "Normal", "Golden", "Diamond" }) do
-		if candidate == supportedVariant then
-			return supportedVariant
-		end
-	end
-
-	return "Normal"
-end
-
-local function parseVariantAndBaseName(fullName)
-	local value = tostring(fullName or "")
-	if value == "" then
-		return "Normal", ""
-	end
-
-	for _, variantKey in ipairs(CrewVariants.Order or { "Normal", "Golden", "Diamond" }) do
-		if variantKey ~= "Normal" then
-			local variantInfo = getVariantInfo(variantKey)
-			local prefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
-			if value:sub(1, #prefix) == prefix then
-				return variantKey, value:sub(#prefix + 1)
-			end
-		end
-	end
-
-	return "Normal", value
-end
-
-function IndexCollectionService.ResolveBrainrotItemId(storageName, baseName, variantKey)
-	local storageNameValue = tostring(storageName or "")
-	local baseNameValue = tostring(baseName or "")
-	local normalizedVariant = normalizeVariantKey(variantKey)
-
-	if baseNameValue == "" and storageNameValue ~= "" then
-		local parsedVariant, parsedBaseName = parseVariantAndBaseName(storageNameValue)
-		normalizedVariant = normalizeVariantKey(parsedVariant)
-		baseNameValue = parsedBaseName
-	end
-
-	if baseNameValue ~= "" then
-		local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-		if itemId and VALID_CREW_MEMBER_ITEM_IDS[itemId] then
-			return itemId
-		end
-	end
-
-	if storageNameValue ~= "" and VALID_CREW_MEMBER_ITEM_IDS[storageNameValue] then
-		return storageNameValue
-	end
-
-	return nil
-end
-
-function IndexCollectionService.MarkBrainrotDiscovered(player, storageName, baseName, variantKey, _options)
-	local itemId = IndexCollectionService.ResolveBrainrotItemId(storageName, baseName, variantKey)
+function IndexCollectionService.MarkCrewMemberDiscovered(player, crewMemberId, baseName, variantKey, _options)
+	local itemId = IndexCollectionService.ResolveCrewMemberItemId(crewMemberId, baseName, variantKey)
 	if not itemId then
 		return nil
 	end
@@ -277,9 +246,6 @@ function IndexCollectionService.MarkDevilFruitDiscovered(player, fruitIdentifier
 
 	return fruit.FruitKey
 end
-
-IndexCollectionService.ResolveCrewMemberItemId = IndexCollectionService.ResolveBrainrotItemId
-IndexCollectionService.MarkCrewMemberDiscovered = IndexCollectionService.MarkBrainrotDiscovered
 
 function IndexCollectionService.BackfillDevilFruitDiscoveries(player)
 	if not player then
@@ -331,7 +297,7 @@ function IndexCollectionService.GetDiscoveredDevilFruitHistory(player)
 	return nil
 end
 
-function IndexCollectionService.GetDiscoveredBrainrotHistory(player)
+function IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
 	local history = getDataManager():GetValue(player, "IndexCollection.CrewMembers")
 	if typeof(history) == "table" then
 		return history
@@ -340,24 +306,47 @@ function IndexCollectionService.GetDiscoveredBrainrotHistory(player)
 	return nil
 end
 
-IndexCollectionService.GetDiscoveredCrewMemberHistory = IndexCollectionService.GetDiscoveredBrainrotHistory
+function IndexCollectionService.RepairCrewMemberDiscoveries(player)
+	if not player then
+		return {
+			Changed = false,
+			Kept = 0,
+			Mapped = 0,
+			Removed = 0,
+			WriteFailed = true,
+			Reason = "missing_player",
+		}
+	end
 
-function IndexCollectionService.CountDiscoveredBrainrots(player)
-	local history = IndexCollectionService.GetDiscoveredBrainrotHistory(player)
+	local history = IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
+	local repaired, stats = IndexDiscovery.CanonicalizeIndexCollectionMap(history or {})
+	if stats.Changed ~= true then
+		return stats
+	end
+
+	local success, reason = getDataManager():TrySetValue(player, "IndexCollection.CrewMembers", repaired)
+	if success == false then
+		stats.WriteFailed = true
+		stats.Reason = reason or "set_failed"
+		warn(string.format(
+			"[IndexCollection] Failed to repair CrewMember discoveries for %s: %s",
+			player.Name,
+			tostring(stats.Reason)
+		))
+	end
+
+	return stats
+end
+
+function IndexCollectionService.CountDiscoveredCrewMembers(player)
+	local history = IndexCollectionService.GetDiscoveredCrewMemberHistory(player)
 	if history == nil then
 		return nil
 	end
 
-	local count = 0
-	for _, discovered in pairs(history) do
-		if discovered == true then
-			count += 1
-		end
-	end
-
-	return count
+	local discovered = {}
+	IndexDiscovery.AddDiscoveredFromIndexMap(discovered, history)
+	return IndexDiscovery.CountDiscoveredSet(discovered)
 end
-
-IndexCollectionService.CountDiscoveredCrewMembers = IndexCollectionService.CountDiscoveredBrainrots
 
 return IndexCollectionService

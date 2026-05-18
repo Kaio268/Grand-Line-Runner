@@ -15,16 +15,15 @@ CrewProfileSchema.Keys = {
 }
 
 CrewProfileSchema.LegacyKeys = {
-	Inventory = "BrainrotInventory",
-	QuickSlots = "BrainrotQuickSlots",
-	QuickSlotsLegacy = "BrainrotStorage",
-	Income = "IncomeBrainrots",
+	Inventory = "CrewMemberInventory",
+	QuickSlots = "CrewMemberQuickSlots",
+	Income = "CrewMemberIncome",
 	IndexCollection = "IndexCollection",
-	Index = "Brainrots",
-	CarriedAttribute = "CarriedBrainrot",
-	CarriedImageAttribute = "CarriedBrainrotImage",
-	StandName = "BrainrotName",
-	StandInstanceId = "BrainrotInstanceId",
+	Index = "CrewMembers",
+	CarriedAttribute = "CarriedCrewMember",
+	CarriedImageAttribute = "CarriedCrewMemberImage",
+	StandName = "CrewMemberName",
+	StandInstanceId = "CrewMemberInstanceId",
 }
 
 CrewProfileSchema.CrewMemberInstanceFields = {
@@ -42,11 +41,15 @@ CrewProfileSchema.CrewMemberInstanceFields = {
 	"DiamondRender",
 	"Level",
 	"CurrentXP",
+	"TotalXP",
 	"AssignedStand",
 	"AcquiredAt",
 	"LastReleasedAt",
+	"Source",
+	"DepthBand",
 	"TutorialReward",
 	"TutorialToken",
+	"GrandLineRushStarter",
 	"ProjectionSource",
 }
 

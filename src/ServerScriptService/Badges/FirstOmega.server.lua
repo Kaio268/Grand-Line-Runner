@@ -4,33 +4,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local BADGE_ID = 4099644549108442
 
-local brainrotsModule = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots")
-
-local brainrots
-do
-	local ok, result = pcall(function()
-		return require(brainrotsModule)
-	end)
-
-	if not ok then
-		warn("[OmegaBadge] Failed to require Brainrots config | Error: " .. tostring(result))
-		return
-	end
-
-	brainrots = result
-end
+local CrewMembers = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewMembers"))
 
 local omegaSet = {}
 local omegaList = {}
 
-for id, info in pairs(brainrots) do
+for _, info in ipairs(CrewMembers.Entries or {}) do
 	if type(info) == "table" and tostring(info.Rarity) == "Omega" then
-		omegaSet[tostring(id)] = true
-		table.insert(omegaList, tostring(id))
+		local id = tostring(info.CrewMemberId or info.DisplayName or "")
+		if id ~= "" then
+			omegaSet[id] = true
+			table.insert(omegaList, id)
+		end
 	end
 end
 
-print("[OmegaBadge] Omega brainrots found: " .. tostring(#omegaList))
+print("[OmegaBadge] Omega crew members found: " .. tostring(#omegaList))
 
 local function awardBadgeIfNeeded(player)
 	local ok, hasBadge = pcall(function()
@@ -63,7 +52,7 @@ end
 local function checkInventoryForOmega(player, inventory)
 	for omegaName in pairs(omegaSet) do
 		if inventory:FindFirstChild(omegaName) then
-			print("[OmegaBadge] Omega brainrot detected for player: " .. player.Name .. " | Item: " .. omegaName)
+			print("[OmegaBadge] Omega crew member detected for player: " .. player.Name .. " | Item: " .. omegaName)
 			awardBadgeIfNeeded(player)
 			return
 		end
@@ -84,7 +73,7 @@ Players.PlayerAdded:Connect(function(player)
 
 		inventory.ChildAdded:Connect(function(child)
 			if omegaSet[child.Name] then
-				print("[OmegaBadge] Omega brainrot added to inventory: " .. player.Name .. " | Item: " .. child.Name)
+				print("[OmegaBadge] Omega crew member added to inventory: " .. player.Name .. " | Item: " .. child.Name)
 				awardBadgeIfNeeded(player)
 			end
 		end)

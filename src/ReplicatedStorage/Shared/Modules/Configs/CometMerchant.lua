@@ -53,9 +53,9 @@ local CometMerchant = {
 		},
 
 		["Pot Hotspot"] = {
-			Display_name = "Pot Hotspot",
+			Display_name = "Crew Reward Pending",
 
-			Chance = 1,
+			Chance = 0,
 			Amount = math.random(1, 1),
 
 			Stock = math.random(1, 1),
@@ -63,11 +63,11 @@ local CometMerchant = {
 			Price = 2500,
 
 			Icon = "rbxassetid://104255768072595",
-			Desc = "Generate insane amounts of Beli and skyrocket your progression!",
+			Desc = "This crew reward is being updated before launch.",
 		},
 
-		["Tirilikalika Tirilikalako"] = {
-			Display_name = "Tirilikalika Tirilikalako",
+		["Tide Monk"] = {
+			Display_name = "Tide Monk",
 
 			Chance = 20,
 			Amount = math.random(1, 1),
@@ -76,12 +76,12 @@ local CometMerchant = {
 
 			Price = 750,
 
-			Icon = "rbxassetid://136792506025468",
-			Desc = "Generate insane amounts of Beli and skyrocket your progression!",
+			Icon = "rbxassetid://112159737210505",
+			Desc = "Recruit a Mythic crewmate to boost your Beli production.",
 		},
 
 		["Rhino Toasterino"] = {
-			Display_name = "Rhino Toasterino",
+			Display_name = "Leopard Agent",
 
 			Chance = 50,
 			Amount = math.random(1, 1),

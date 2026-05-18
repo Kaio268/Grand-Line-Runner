@@ -16,11 +16,12 @@ local Gamepasses = {
 		Description = "Earn x2 Money and make 2x more from Crewmates",
 	},
 	
-	["La Vacca Saturno Saturnita"] = {
+	["Juice Duchess"] = {
 		TYPE = "Product",
 
 		ID = 3512059347,
 		Icon = "rbxassetid://89671349580383",
+		LegacyRewardName = "La Vacca Saturno Saturnita",
 
 		Description = "Earn lots of Beli and progress much faster in the game",
 	},

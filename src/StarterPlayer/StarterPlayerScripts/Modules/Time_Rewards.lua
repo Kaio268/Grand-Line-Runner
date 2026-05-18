@@ -703,6 +703,16 @@ local Shorten = requireLogged(
 	waitForChildLogged(Modules, "Shorten", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.Shorten"),
 	"ReplicatedStorage.Modules.Shorten"
 )
+local CrewRewardPreview = requireLogged(
+	waitForChildLogged(
+		TimeRewardsFolder,
+		"CrewRewardPreview",
+		OPTIONAL_WAIT_SECONDS,
+		"ReplicatedStorage.Modules.TimeRewards.CrewRewardPreview",
+		true
+	),
+	"ReplicatedStorage.Modules.TimeRewards.CrewRewardPreview"
+)
 
 if not (Modules and TimeRewardsFolder and RewardsConfig and Remote and SnapshotRequest and Shorten) then
 	giftStartupWarn(
@@ -1598,7 +1608,66 @@ local function logHudBinding()
 	logScrollState("bind")
 end
 
-local function formatRewardDescription(cfg): string
+local activeTimeRewardSyncState = nil
+
+local function isRandomCrewRewardData(rewardData): boolean
+	return typeof(rewardData) == "table"
+		and (
+			rewardData.RandomCrewMember == true
+			or rewardData.RandomCrew == true
+			or rewardData.RandomCrewRarity ~= nil
+			or rewardData.CrewRarity ~= nil
+		)
+end
+
+local function getRewardPreviewContext(rewardId: number?)
+	if typeof(activeTimeRewardSyncState) ~= "table" then
+		return nil
+	end
+
+	local cycleStartPlayTime = tonumber(activeTimeRewardSyncState.CycleStartPlayTime)
+	if not cycleStartPlayTime then
+		return nil
+	end
+
+	return {
+		Player = player,
+		UserId = player and player.UserId or 0,
+		RewardId = rewardId,
+		CycleStartPlayTime = cycleStartPlayTime,
+	}
+end
+
+local function getRewardDisplayTitle(cfg, previewContext): string
+	local title = tostring(cfg and cfg.RewName or "")
+	if not CrewRewardPreview or typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
+		return title
+	end
+
+	local randomRewardName = nil
+	local randomRewardData = nil
+	local randomRewardCount = 0
+	for rewardName, rewardData in pairs(cfg.Rewards) do
+		if isRandomCrewRewardData(rewardData) then
+			randomRewardName = rewardName
+			randomRewardData = rewardData
+			randomRewardCount += 1
+		end
+	end
+
+	if randomRewardCount ~= 1 then
+		return title
+	end
+
+	local displayName = CrewRewardPreview.ResolveDisplayName(randomRewardName, randomRewardData, previewContext)
+	if displayName ~= "" then
+		return displayName
+	end
+
+	return title
+end
+
+local function formatRewardDescription(cfg, previewContext): string
 	if typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
 		return ""
 	end
@@ -1610,7 +1679,11 @@ local function formatRewardDescription(cfg): string
 			amount = rewardData.Amount
 		end
 
-		parts[#parts + 1] = string.format("x%s %s", tostring(amount), tostring(rewardName))
+		local displayName = if CrewRewardPreview
+			then CrewRewardPreview.ResolveDisplayName(rewardName, rewardData, previewContext)
+			else tostring(rewardName)
+
+		parts[#parts + 1] = string.format("x%s %s", tostring(amount), displayName)
 	end
 	table.sort(parts)
 	return table.concat(parts, ", ")
@@ -1709,10 +1782,12 @@ local function setRewData(slotFrame: Instance, cfg)
 		return
 	end
 
+	local rewardId = tonumber(slotFrame:GetAttribute("RewardId"))
+	local previewContext = getRewardPreviewContext(rewardId)
 	local rewNameObj = getDirectTextObj(slotFrame, "RewName")
 	local titleAssigned = false
 	if rewNameObj then
-		local nextTitle = tostring(cfg.RewName or "")
+		local nextTitle = getRewardDisplayTitle(cfg, previewContext)
 		if rewNameObj.Text ~= nextTitle then
 			rewNameObj.Text = nextTitle
 		end
@@ -1724,7 +1799,15 @@ local function setRewData(slotFrame: Instance, cfg)
 	local iconObj = getDirectImageObj(slotFrame, "Icon")
 	local iconAssigned = false
 	if iconObj then
-		if cfg.Icon ~= nil then
+		local crewPreviewInfo = if CrewRewardPreview then CrewRewardPreview.Resolve(cfg, previewContext) else nil
+		if crewPreviewInfo then
+			iconAssigned = CrewRewardPreview.Apply(iconObj, crewPreviewInfo)
+		elseif cfg.Icon ~= nil then
+			if CrewRewardPreview then
+				CrewRewardPreview.Clear(iconObj)
+			end
+			local image = iconObj :: ImageLabel
+			image.ImageTransparency = 0
 			local nextIcon = tostring(cfg.Icon)
 			if iconObj.Image ~= nextIcon then
 				iconObj.Image = nextIcon
@@ -1739,7 +1822,7 @@ local function setRewData(slotFrame: Instance, cfg)
 
 	local descriptionObj = getDirectTextObj(slotFrame, "RewardDescription")
 	if descriptionObj then
-		local nextDescription = formatRewardDescription(cfg)
+		local nextDescription = formatRewardDescription(cfg, previewContext)
 		if descriptionObj.Text ~= nextDescription then
 			descriptionObj.Text = nextDescription
 		end
@@ -2712,6 +2795,7 @@ end
 
 local function initialiseButtonsFromLegacyEpoch(serverStartEpoch: number)
 	giftLog("[GIFT][DATA]", string.format("applying legacy epoch=%d", serverStartEpoch))
+	activeTimeRewardSyncState = nil
 	setAuthoritativeSyncPending(false)
 
 	for i = 1, totalGifts do
@@ -2775,6 +2859,7 @@ local function initialiseButtonsFromState(syncState)
 
 	local claimedRewards = normalizeClaimedRewards(syncState.ClaimedRewards)
 	local elapsedPlayTime = math.max(0, currentPlayTime - cycleStartPlayTime)
+	activeTimeRewardSyncState = syncState
 	setAuthoritativeSyncPending(false)
 	local timersUpdated = 0
 

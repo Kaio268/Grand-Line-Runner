@@ -50,11 +50,9 @@ local SHIMMER_TEXTURE = "rbxasset://textures/particles/sparkles_main.dds"
 local AUTHORED_VFX_TEXTURE = "rbxassetid://8037777212"
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Suke.Client.SukeClient"
 local WARN_COOLDOWN = 4
-local SOUND_ABILITY_FOLDER = "Fade"
 local SOUND_ACTIVATE = "Activate"
+local SOUND_ACTIVATE_AUDIO_KEY = "ActivateSoundId"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
-local sukeFadeSoundFolder = nil
-local sukeFadeSoundTemplates = {}
 
 local function logWarn(message, ...)
 	if not DiagnosticLogLimiter.ShouldEmit("SukeClient:WARN", DiagnosticLogLimiter.BuildKey(message, ...), WARN_COOLDOWN) then
@@ -104,34 +102,59 @@ local function getRootPart(targetPlayer)
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
 end
 
-local function resolveFadeSoundFolder()
-	if sukeFadeSoundFolder and sukeFadeSoundFolder.Parent then
-		return sukeFadeSoundFolder
+local function normalizeSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
 	end
 
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local sounds = assets and assets:FindFirstChild("Sounds")
-	local devilFruitSounds = sounds and sounds:FindFirstChild("DevilFruits")
-	local sukeSounds = devilFruitSounds and devilFruitSounds:FindFirstChild("Suke")
-	local fadeFolder = sukeSounds and sukeSounds:FindFirstChild(SOUND_ABILITY_FOLDER)
-	sukeFadeSoundFolder = fadeFolder
-	return fadeFolder
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
 end
 
-local function getFadeSoundTemplate(soundName)
-	local cachedTemplate = sukeFadeSoundTemplates[soundName]
-	if cachedTemplate and cachedTemplate.Parent then
-		return cachedTemplate
+local function getFadeAudioConfig()
+	local abilityConfig = DevilFruitConfig.GetAbility(FRUIT_NAME, ABILITY_NAME)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
 	end
 
-	local soundFolder = resolveFadeSoundFolder()
-	local soundTemplate = soundFolder and soundFolder:FindFirstChild(soundName) or nil
-	if soundTemplate and soundTemplate:IsA("Sound") then
-		sukeFadeSoundTemplates[soundName] = soundTemplate
-		return soundTemplate
+	return audioConfig
+end
+
+local function createFadeSound(soundName, audioKey, looped)
+	local audioConfig = getFadeAudioConfig()
+	if not audioConfig then
+		return nil
 	end
 
-	return nil
+	local soundId = normalizeSoundId(audioConfig[audioKey])
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = math.max(0, tonumber(audioConfig.Volume) or 1)
+
+	local rollOffMaxDistance = tonumber(audioConfig.RollOffMaxDistance)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = math.max(1, rollOffMaxDistance)
+	end
+
+	return sound
 end
 
 local function getSoundCleanupDelay(sound)
@@ -149,13 +172,11 @@ local function playFadeActivateSound(targetPlayer)
 		return nil
 	end
 
-	local soundTemplate = getFadeSoundTemplate(SOUND_ACTIVATE)
-	if not soundTemplate then
+	local sound = createFadeSound(SOUND_ACTIVATE, SOUND_ACTIVATE_AUDIO_KEY, false)
+	if not sound then
 		return nil
 	end
 
-	local sound = soundTemplate:Clone()
-	sound.Looped = false
 	sound.Parent = rootPart
 	SettingsAudioController.TrackSound(sound)
 	sound:Play()

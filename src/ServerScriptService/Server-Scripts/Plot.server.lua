@@ -25,7 +25,7 @@ local connsByPlayer = {}
 local characterSpawnConnsByPlayer = {}
 local plotCommandFunction = ShipRuntimeSignals.GetPlotCommandFunction()
 local getSpawnPart
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("PlotDebugTrace") == true
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -586,8 +586,8 @@ local function teleportToPlot(player, plot, context, targetCharacter)
 	return teleportToPart(player, spawnPart, context or "teleportToPlot", targetCharacter)
 end
 
-local function standHasPlacedBrainrot(stand)
-	return stand and stand:FindFirstChild("PlacedBrainrot") ~= nil
+local function standHasPlacedCrewMember(stand)
+	return stand and stand:FindFirstChild("PlacedCrewMember") ~= nil
 end
 
 local function syncStandButtonGuiParent(player, stand, button, surfaceGui)
@@ -596,7 +596,7 @@ local function syncStandButtonGuiParent(player, stand, button, surfaceGui)
 	end
 
 	local playerGui = player:FindFirstChild("PlayerGui")
-	if playerGui and standHasPlacedBrainrot(stand) then
+	if playerGui and standHasPlacedCrewMember(stand) then
 		surfaceGui.Parent = playerGui
 		return
 	end

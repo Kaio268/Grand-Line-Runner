@@ -13,6 +13,7 @@
 	- raw per-asset VFX behavior (that lives in `Shared/Vfx`)
 ]]
 
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -20,6 +21,7 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local AnimationLoadDiagnostics = require(Modules:WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
@@ -38,6 +40,8 @@ local DEFAULT_FADE_TIME = 0.05
 local DEFAULT_STOP_FADE_TIME = 0.08
 local FIRE_BURST_DEFAULT_DURATION = 0.6
 local FIRE_BURST_CLEANUP_GRACE = 0.12
+local MERA_AUDIO_CLEANUP_FALLBACK_SECONDS = 5
+local MERA_AUDIO_DEDUPE_TTL = 8
 local FLAME_DASH_DEFAULT_DURATION = 0.15
 local FLAME_DASH_ACTIVE_DELAY_RATIO = 0.18
 local FLAME_DASH_MIN_ACTIVE_DELAY = 0.02
@@ -338,6 +342,41 @@ local function getFlameDashStartToken(payload)
 	return startedAt
 end
 
+local function getFlameDashCastToken(targetPlayer, payload, fallbackToken)
+	if type(payload) == "table" then
+		if typeof(payload.ClientCastId) == "string" and payload.ClientCastId ~= "" then
+			return payload.ClientCastId
+		end
+
+		if typeof(payload.CastId) == "string" and payload.CastId ~= "" then
+			return payload.CastId
+		end
+
+		local startedAt = tonumber(payload.StartedAt)
+		if startedAt and startedAt > 0 then
+			local userId = targetPlayer and targetPlayer:IsA("Player") and targetPlayer.UserId or 0
+			return string.format("server:%d:%.6f", userId, startedAt)
+		end
+	end
+
+	if typeof(fallbackToken) == "string" and fallbackToken ~= "" then
+		return fallbackToken
+	end
+
+	return nil
+end
+
+local function flameDashTokensMatch(stateToken, eventToken)
+	if typeof(eventToken) ~= "string" or eventToken == "" then
+		return true
+	end
+	if typeof(stateToken) ~= "string" or stateToken == "" then
+		return true
+	end
+
+	return stateToken == eventToken
+end
+
 local function getFlameDashPathStartPosition(state)
 	if type(state) ~= "table" then
 		return nil
@@ -515,18 +554,349 @@ local function getFireBurstCastId(targetPlayer, payload)
 	return nil
 end
 
+local function normalizeMeraSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
+	end
+
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
+end
+
+local function getMeraAudioConfig(abilityName)
+	local abilityConfig = DevilFruitConfig.GetAbility("Mera Mera no Mi", abilityName)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getMeraSoundId(abilityName, audioKey)
+	local audioConfig = getMeraAudioConfig(abilityName)
+	if not audioConfig then
+		return nil
+	end
+
+	return normalizeMeraSoundId(audioConfig[audioKey])
+end
+
+local function getMeraAudioNumber(abilityName, fieldName, fallback, minimum)
+	local audioConfig = getMeraAudioConfig(abilityName)
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function getMeraSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return MERA_AUDIO_CLEANUP_FALLBACK_SECONDS
+end
+
+local function getMeraAudioDedupeKey(targetPlayer, abilityName, cueName, payload)
+	local userId = targetPlayer and targetPlayer:IsA("Player") and targetPlayer.UserId or 0
+	if type(payload) == "table" then
+		local localAudioToken = payload.LocalAudioToken
+		if typeof(localAudioToken) == "string" and localAudioToken ~= "" then
+			return string.format("%s:%s:%d:%s", abilityName, cueName, userId, localAudioToken)
+		end
+	end
+
+	if abilityName == "FireBurst" then
+		local castId = getFireBurstCastId(targetPlayer, payload)
+		if castId then
+			return string.format("%s:%s:%s", abilityName, cueName, castId)
+		end
+	end
+
+	if type(payload) == "table" then
+		local startedAt = tonumber(payload.StartedAt)
+		if startedAt and startedAt > 0 then
+			return string.format("%s:%s:%d:%.6f", abilityName, cueName, userId, startedAt)
+		end
+
+		return string.format(
+			"%s:%s:%d:%s:%s:%s",
+			abilityName,
+			cueName,
+			userId,
+			tostring(payload.StartPosition),
+			tostring(payload.EndPosition),
+			tostring(payload.Duration)
+		)
+	end
+
+	return nil
+end
+
+local function markMeraAudioPlayed(self, targetPlayer, abilityName, cueName, payload)
+	local dedupeKey = getMeraAudioDedupeKey(targetPlayer, abilityName, cueName, payload)
+	if not dedupeKey then
+		return true
+	end
+
+	self.playedMeraAudioKeys = self.playedMeraAudioKeys or {}
+	if self.playedMeraAudioKeys[dedupeKey] then
+		return false
+	end
+
+	self.playedMeraAudioKeys[dedupeKey] = true
+	task.delay(MERA_AUDIO_DEDUPE_TTL, function()
+		if self.playedMeraAudioKeys then
+			self.playedMeraAudioKeys[dedupeKey] = nil
+		end
+	end)
+	return true
+end
+
+local function createMeraAbilitySound(targetPlayer, abilityName, audioKey, soundName)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundId = getMeraSoundId(abilityName, audioKey)
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = tostring(soundName or ("Mera" .. abilityName .. audioKey))
+	sound.SoundId = soundId
+	sound.Looped = false
+	sound.Volume = getMeraAudioNumber(abilityName, "Volume", 1, 0)
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	return sound
+end
+
+local function playMeraAbilitySoundNow(targetPlayer, abilityName, audioKey, soundName)
+	local sound = createMeraAbilitySound(targetPlayer, abilityName, audioKey, soundName)
+	if not sound then
+		return false
+	end
+
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getMeraSoundCleanupDelay(sound))
+	return true
+end
+
+local function playMeraAbilityAudio(self, targetPlayer, abilityName, cueName, audioKey, offsetKey, soundName, payload, isCurrent)
+	if not getMeraSoundId(abilityName, audioKey) then
+		return false
+	end
+	if not markMeraAudioPlayed(self, targetPlayer, abilityName, cueName, payload) then
+		return false
+	end
+
+	local function shouldPlay()
+		return typeof(isCurrent) ~= "function" or isCurrent()
+	end
+
+	local offsetSeconds = getMeraAudioNumber(abilityName, offsetKey, 0)
+	local delayTime = math.max(0, tonumber(offsetSeconds) or 0)
+	if delayTime <= 0 then
+		if not shouldPlay() then
+			return false
+		end
+
+		return playMeraAbilitySoundNow(targetPlayer, abilityName, audioKey, soundName)
+	end
+
+	task.delay(delayTime, function()
+		if shouldPlay() then
+			playMeraAbilitySoundNow(targetPlayer, abilityName, audioKey, soundName)
+		end
+	end)
+	return true
+end
+
 function MeraPresentationClient.new(config)
 	local self = setmetatable({}, MeraPresentationClient)
 	self.player = config and config.player or Players.LocalPlayer
 	self.createEffectVisual = config and config.createEffectVisual
 	self.activeTracksByPlayer = setmetatable({}, { __mode = "k" })
+	self.playedMeraAudioKeys = {}
+	self.predictedFlameDashAudioUntilByPlayer = setmetatable({}, { __mode = "k" })
 	-- FlameDash keeps a multi-phase runtime state because startup/body/trail are
 	-- separate visuals that must hand off smoothly.
 	self.activeFlameDashVfxByPlayer = setmetatable({}, { __mode = "k" })
+	self.pendingFlameDashCleanupByPlayer = setmetatable({}, { __mode = "k" })
+	self.flameDashLatestCastTokenByPlayer = setmetatable({}, { __mode = "k" })
+	self.flameDashDiagnostics = {
+		TrailStopCount = 0,
+		FullStopCount = 0,
+		StaleEventCount = 0,
+		FallbackCleanupCount = 0,
+		PendingCleanupCount = 0,
+	}
 	-- FireBurst keeps one runtime state per player/cast so startup and burst stay in
 	-- one exactly-once presentation sequence.
 	self.activeFireBurstByPlayer = setmetatable({}, { __mode = "k" })
 	return self
+end
+
+function MeraPresentationClient:CountActiveFlameDashVfx()
+	local count = 0
+	for _, state in pairs(self.activeFlameDashVfxByPlayer) do
+		if type(state) == "table" and state.Finalized ~= true then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+function MeraPresentationClient:CountActiveFlameDashTrailLoops()
+	local count = 0
+	for _, state in pairs(self.activeFlameDashVfxByPlayer) do
+		if type(state) == "table" and MeraVfx.IsFlameDashTrailSampling(state.PartState or state.RuntimeState) then
+			count += 1
+		end
+	end
+
+	local vfxDiagnostics = MeraVfx.GetFlameDashDiagnostics()
+	local moduleCount = tonumber(vfxDiagnostics.ActiveTrailLoopCount)
+	if moduleCount and moduleCount > count then
+		count = moduleCount
+	end
+
+	return count
+end
+
+function MeraPresentationClient:PublishFlameDashDiagnostics()
+	local player = self.player
+	if not player or not player.Parent then
+		return
+	end
+
+	local diagnostics = self.flameDashDiagnostics or {}
+	local attributes = {
+		FlameDashActiveVfxCount = self:CountActiveFlameDashVfx(),
+		FlameDashTrailLoopCount = self:CountActiveFlameDashTrailLoops(),
+		FlameDashTrailStopCount = tonumber(diagnostics.TrailStopCount) or 0,
+		FlameDashFullStopCount = tonumber(diagnostics.FullStopCount) or 0,
+		FlameDashStaleEventCount = tonumber(diagnostics.StaleEventCount) or 0,
+		FlameDashFallbackCleanupCount = tonumber(diagnostics.FallbackCleanupCount) or 0,
+		FlameDashPendingCleanupCount = tonumber(diagnostics.PendingCleanupCount) or 0,
+	}
+
+	for name, value in pairs(attributes) do
+		pcall(function()
+			player:SetAttribute(name, value)
+		end)
+	end
+end
+
+function MeraPresentationClient:IncrementFlameDashDiagnostic(counterName, amount)
+	self.flameDashDiagnostics = self.flameDashDiagnostics or {}
+	self.flameDashDiagnostics[counterName] = (tonumber(self.flameDashDiagnostics[counterName]) or 0)
+		+ (tonumber(amount) or 1)
+	self:PublishFlameDashDiagnostics()
+end
+
+function MeraPresentationClient:RecordStaleFlameDashEvent(targetPlayer, reason, castToken, activeToken)
+	self:IncrementFlameDashDiagnostic("StaleEventCount", 1)
+	logMove(
+		"move=FlameDash stale event player=%s reason=%s eventCast=%s activeCast=%s",
+		targetPlayer and targetPlayer.Name or "<nil>",
+		tostring(reason),
+		tostring(castToken),
+		tostring(activeToken)
+	)
+end
+
+function MeraPresentationClient:StorePendingFlameDashCleanup(targetPlayer, request)
+	if not targetPlayer or not targetPlayer:IsA("Player") or type(request) ~= "table" then
+		return false
+	end
+
+	request.CreatedAt = request.CreatedAt or os.clock()
+	self.pendingFlameDashCleanupByPlayer[targetPlayer] = request
+	self:IncrementFlameDashDiagnostic("PendingCleanupCount", 1)
+	return true
+end
+
+function MeraPresentationClient:TakePendingFlameDashCleanup(targetPlayer, castToken)
+	local pending = targetPlayer and self.pendingFlameDashCleanupByPlayer[targetPlayer] or nil
+	if not pending then
+		return nil
+	end
+
+	local pendingToken = pending.CastToken
+	if pending.AllowAnyToken ~= true
+		and typeof(pendingToken) == "string"
+		and pendingToken ~= ""
+		and typeof(castToken) == "string"
+		and castToken ~= ""
+		and pendingToken ~= castToken
+	then
+		return nil
+	end
+
+	self.pendingFlameDashCleanupByPlayer[targetPlayer] = nil
+	return pending
+end
+
+function MeraPresentationClient:ShouldSuppressFlameDashStart(targetPlayer, payload)
+	local castToken = getFlameDashCastToken(targetPlayer, payload)
+	local pending = targetPlayer and self.pendingFlameDashCleanupByPlayer[targetPlayer] or nil
+	if not pending then
+		return false
+	end
+
+	local pendingToken = pending.CastToken
+	local tokenMatches = pending.AllowAnyToken == true
+		or flameDashTokensMatch(pendingToken, castToken)
+		or flameDashTokensMatch(castToken, pendingToken)
+	if not tokenMatches then
+		return false
+	end
+
+	if pending.FullStop == true or pending.Source == "authoritative" then
+		self.pendingFlameDashCleanupByPlayer[targetPlayer] = nil
+		self:RecordStaleFlameDashEvent(targetPlayer, tostring(pending.Reason or "pending_cleanup_start_suppressed"), castToken, pendingToken)
+		self:PublishFlameDashDiagnostics()
+		return true
+	end
+
+	return false
 end
 
 function MeraPresentationClient:EmitFallbackFlameDashVisual(state, payload, isPredicted)
@@ -638,6 +1008,42 @@ function MeraPresentationClient:DisconnectFlameDashTrackPhases(state)
 	state.TrackPhaseConnections = nil
 end
 
+function MeraPresentationClient:ShouldSuppressReplicatedFlameDashAudio(targetPlayer)
+	local audioUntilByPlayer = self.predictedFlameDashAudioUntilByPlayer
+	local suppressUntil = audioUntilByPlayer and audioUntilByPlayer[targetPlayer] or nil
+	if not suppressUntil then
+		return false
+	end
+
+	if os.clock() < suppressUntil then
+		return true
+	end
+
+	audioUntilByPlayer[targetPlayer] = nil
+	return false
+end
+
+function MeraPresentationClient:PlayFlameDashDashAudio(targetPlayer, payload, isPredicted, isCurrent)
+	local played = playMeraAbilityAudio(
+		self,
+		targetPlayer,
+		"FlameDash",
+		"Dash",
+		"DashSoundId",
+		"DashSoundOffset",
+		"MeraFlameDashSound",
+		payload,
+		isCurrent
+	)
+
+	if played and isPredicted == true then
+		self.predictedFlameDashAudioUntilByPlayer = self.predictedFlameDashAudioUntilByPlayer or setmetatable({}, { __mode = "k" })
+		self.predictedFlameDashAudioUntilByPlayer[targetPlayer] = os.clock() + MERA_AUDIO_DEDUPE_TTL
+	end
+
+	return played
+end
+
 -- ============================================================================
 -- FlameDash Presentation State
 -- ============================================================================
@@ -669,6 +1075,10 @@ function MeraPresentationClient:RefreshFlameDashState(state, payload, rootPart)
 	local startToken = getFlameDashStartToken(payload)
 	if startToken then
 		state.ServerStartedAt = startToken
+	end
+	local castToken = getFlameDashCastToken(nil, payload, state.CastToken)
+	if castToken then
+		state.CastToken = castToken
 	end
 
 	if typeof(payload) == "table" then
@@ -720,6 +1130,11 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 		end
 
 		state.StartupPlayed = true
+		if not self:ShouldSuppressReplicatedFlameDashAudio(targetPlayer) then
+			self:PlayFlameDashDashAudio(targetPlayer, state.StartPayload, false, function()
+				return self.activeFlameDashVfxByPlayer[targetPlayer] == state and state.Finalized ~= true
+			end)
+		end
 		local startupPosition = (typeof(state.StartPosition) == "Vector3" and state.StartPosition)
 			or (typeof(state.ServerStartPosition) == "Vector3" and state.ServerStartPosition)
 			or rootPart.Position
@@ -759,12 +1174,14 @@ function MeraPresentationClient:PlayFlameDashStage(targetPlayer, state, stageNam
 		local activeDirection = rootPart.CFrame.LookVector
 		local activeProgressDistance = getLiveFlameDashVfxProgressDistance(state, activePosition, activeDirection)
 		logMove("move=FlameDash phase=DashActive received player=%s source=%s", targetPlayer.Name, stageSource)
-		state.PartState = MeraVfx.StartFlameDashPart({
-			RootPart = rootPart,
-			Direction = activeDirection or getLatchedFlameDashVfxDirection(state, rootPart, nil),
-			Position = activePosition,
-			RuntimeState = state.RuntimeState or state.StartupState or state.HeadState or state.PartState,
-		})
+		if state.TrailSamplingStopped ~= true then
+			state.PartState = MeraVfx.StartFlameDashPart({
+				RootPart = rootPart,
+				Direction = activeDirection or getLatchedFlameDashVfxDirection(state, rootPart, nil),
+				Position = activePosition,
+				RuntimeState = state.RuntimeState or state.StartupState or state.HeadState or state.PartState,
+			})
+		end
 
 		state.HeadState = MeraVfx.StartFlameDashHead({
 			RootPart = rootPart,
@@ -1119,11 +1536,118 @@ function MeraPresentationClient:PlayFireBurstStartup(targetPlayer, payload)
 	return true
 end
 
-function MeraPresentationClient:RequestFlameDashFinalization(targetPlayer, reason, finalPosition, direction, source)
-	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
-	if not state then
+function MeraPresentationClient:FallbackCleanupFlameDashRuntime(runtimeState, reason)
+	if type(runtimeState) ~= "table" then
 		return false
 	end
+
+	self:IncrementFlameDashDiagnostic("FallbackCleanupCount", 1)
+	logMove("move=FlameDash fallback cleanup reason=%s runtime=%s", tostring(reason), tostring(runtimeState.RuntimeId))
+	MeraVfx.StopRuntimeState(runtimeState, {
+		ImmediateCleanup = true,
+	})
+	return true
+end
+
+function MeraPresentationClient:StopFlameDashRuntimeStage(stageName, runtimeState, options)
+	if type(runtimeState) ~= "table" then
+		return true
+	end
+
+	local ok
+	if stageName == "Part" then
+		ok = MeraVfx.StopFlameDashPart(runtimeState, options)
+	elseif stageName == "Head" then
+		ok = MeraVfx.StopFlameDashHead(runtimeState, options)
+	else
+		ok = MeraVfx.StopFlameDashStartup(runtimeState, options)
+	end
+
+	if ok == false then
+		self:FallbackCleanupFlameDashRuntime(runtimeState, tostring(stageName) .. "_stop_failed")
+		return false
+	end
+
+	return true
+end
+
+function MeraPresentationClient:StopFlameDashTrailSampling(targetPlayer, reason, finalPosition, direction, castToken)
+	local state = targetPlayer and self.activeFlameDashVfxByPlayer[targetPlayer] or nil
+	local resolvedCastToken = typeof(castToken) == "string" and castToken or nil
+	if state and not flameDashTokensMatch(state.CastToken, resolvedCastToken) then
+		self:RecordStaleFlameDashEvent(targetPlayer, reason or "trail_stop", resolvedCastToken, state.CastToken)
+		return false
+	end
+
+	if not state then
+		self:StorePendingFlameDashCleanup(targetPlayer, {
+			CastToken = resolvedCastToken,
+			TrailStop = true,
+			Reason = reason,
+			FinalPosition = finalPosition,
+			Direction = direction,
+			Source = "trail_stop",
+		})
+		return true
+	end
+
+	if typeof(finalPosition) == "Vector3" then
+		state.LastRootPosition = finalPosition
+		state.LastVfxPosition = finalPosition
+	end
+
+	if state.TrailSamplingStopped ~= true then
+		state.TrailSamplingStopped = true
+		state.TrailStopReason = tostring(reason or "trail_stop")
+		state.TrailStoppedAt = os.clock()
+		self:IncrementFlameDashDiagnostic("TrailStopCount", 1)
+	end
+
+	local runtimeState = state.PartState or state.RuntimeState
+	if type(runtimeState) == "table" then
+		local ok = MeraVfx.StopFlameDashTrailSampling(runtimeState)
+		if ok == false then
+			self:FallbackCleanupFlameDashRuntime(runtimeState, "trail_sampling_stop_failed")
+			state.PartState = nil
+			if state.HeadState == runtimeState then
+				state.HeadState = nil
+			end
+			if state.RuntimeState == runtimeState then
+				state.RuntimeState = nil
+			end
+		end
+	end
+
+	state.PredictedDirection = getLatchedFlameDashDirection(state, state.RootPart, direction or state.Direction)
+	self:PublishFlameDashDiagnostics()
+	return true
+end
+
+function MeraPresentationClient:RequestFlameDashFinalization(targetPlayer, reason, finalPosition, direction, source, castToken)
+	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	local resolvedCastToken = typeof(castToken) == "string" and castToken or nil
+	if not state then
+		if reason == "restart" or reason == "invalid_state" or reason == "character_removing" or reason == "player_removing" then
+			return false
+		end
+
+		self:StorePendingFlameDashCleanup(targetPlayer, {
+			CastToken = resolvedCastToken,
+			TrailStop = true,
+			Finalize = true,
+			Reason = reason,
+			FinalPosition = finalPosition,
+			Direction = direction,
+			Source = tostring(source or "authoritative"),
+		})
+		return false
+	end
+	if not flameDashTokensMatch(state.CastToken, resolvedCastToken) then
+		self:RecordStaleFlameDashEvent(targetPlayer, reason or "finalize", resolvedCastToken, state.CastToken)
+		return false
+	end
+
+	self:StopFlameDashTrailSampling(targetPlayer, reason, finalPosition, direction, resolvedCastToken)
 
 	local now = os.clock()
 	local requestSource = tostring(source or "authoritative")
@@ -1137,6 +1661,45 @@ function MeraPresentationClient:RequestFlameDashFinalization(targetPlayer, reaso
 	end
 
 	state.PendingFinalize = request
+	return true
+end
+
+function MeraPresentationClient:ApplyPendingFlameDashCleanup(targetPlayer, state)
+	if type(state) ~= "table" then
+		return false
+	end
+
+	local pending = self:TakePendingFlameDashCleanup(targetPlayer, state.CastToken)
+	if not pending then
+		return false
+	end
+
+	if pending.TrailStop == true or pending.Finalize == true then
+		self:StopFlameDashTrailSampling(
+			targetPlayer,
+			pending.Reason,
+			pending.FinalPosition,
+			pending.Direction,
+			state.CastToken
+		)
+	end
+
+	if pending.Finalize == true then
+		self:RequestFlameDashFinalization(
+			targetPlayer,
+			pending.Reason,
+			pending.FinalPosition,
+			pending.Direction,
+			pending.Source,
+			state.CastToken
+		)
+	elseif pending.TrailStop == true then
+		state.PredictedCompleteAt = tonumber(pending.PredictedCompleteAt) or os.clock()
+		state.PredictedCompleteReason = pending.Reason
+		state.PredictedFinalPosition = typeof(pending.FinalPosition) == "Vector3" and pending.FinalPosition or state.LastRootPosition
+		state.PredictedDirection = getLatchedFlameDashDirection(state, state.RootPart, pending.Direction or state.Direction)
+	end
+
 	return true
 end
 
@@ -1208,15 +1771,16 @@ function MeraPresentationClient:FinalizeFlameDashVfx(targetPlayer, state, finali
 	stopTrack(state.Track, self:GetAnimationConfig("FlameDash") and self:GetAnimationConfig("FlameDash").StopFadeTime)
 	state.Track = nil
 
-	MeraVfx.StopFlameDashPart(state.PartState, {
+	self:IncrementFlameDashDiagnostic("FullStopCount", 1)
+	self:StopFlameDashRuntimeStage("Part", state.PartState, {
 		FadeTime = 0.12,
 		FinalPosition = resolvedFinalPosition,
 		Direction = resolvedVfxDirection,
 	})
-	MeraVfx.StopFlameDashHead(state.HeadState, {
+	self:StopFlameDashRuntimeStage("Head", state.HeadState, {
 		FadeTime = 0.12,
 	})
-	MeraVfx.StopFlameDashStartup(state.StartupState, {
+	self:StopFlameDashRuntimeStage("Startup", state.StartupState, {
 		FadeTime = 0.08,
 	})
 	MeraVfx.LogFlameDashCleanup({
@@ -1225,6 +1789,7 @@ function MeraPresentationClient:FinalizeFlameDashVfx(targetPlayer, state, finali
 		Dash = state.HeadState ~= nil,
 	})
 
+	self:PublishFlameDashDiagnostics()
 	return true
 end
 
@@ -1268,9 +1833,28 @@ function MeraPresentationClient:TryFinalizeFlameDashVfx(targetPlayer, state, cur
 	return self:FinalizeFlameDashVfx(targetPlayer, state, finalizeData, currentPosition, currentDirection)
 end
 
-function MeraPresentationClient:StopFlameDashVfx(targetPlayer, reason, finalPosition, direction)
+function MeraPresentationClient:StopFlameDashVfx(targetPlayer, reason, finalPosition, direction, castToken)
 	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
+	local resolvedCastToken = typeof(castToken) == "string" and castToken or nil
 	if not state then
+		if reason == "restart" or reason == "invalid_state" or reason == "character_removing" or reason == "player_removing" then
+			return false
+		end
+
+		self:StorePendingFlameDashCleanup(targetPlayer, {
+			CastToken = resolvedCastToken,
+			FullStop = true,
+			TrailStop = true,
+			Reason = reason,
+			FinalPosition = finalPosition,
+			Direction = direction,
+			Source = "full_stop",
+			AllowAnyToken = resolvedCastToken == nil,
+		})
+		return false
+	end
+	if not flameDashTokensMatch(state.CastToken, resolvedCastToken) then
+		self:RecordStaleFlameDashEvent(targetPlayer, reason or "full_stop", resolvedCastToken, state.CastToken)
 		return false
 	end
 
@@ -1284,13 +1868,15 @@ function MeraPresentationClient:StopFlameDashVfx(targetPlayer, reason, finalPosi
 
 	local resolvedDirection = getLatchedFlameDashDirection(state, state.RootPart, direction or state.Direction)
 	stopTrack(state.Track, self:GetAnimationConfig("FlameDash") and self:GetAnimationConfig("FlameDash").StopFadeTime)
-	MeraVfx.StopFlameDashPart(state.PartState, {
+	self:IncrementFlameDashDiagnostic("FullStopCount", 1)
+	state.TrailSamplingStopped = true
+	self:StopFlameDashRuntimeStage("Part", state.PartState, {
 		ImmediateCleanup = true,
 	})
-	MeraVfx.StopFlameDashHead(state.HeadState, {
+	self:StopFlameDashRuntimeStage("Head", state.HeadState, {
 		ImmediateCleanup = true,
 	})
-	MeraVfx.StopFlameDashStartup(state.StartupState, {
+	self:StopFlameDashRuntimeStage("Startup", state.StartupState, {
 		ImmediateCleanup = true,
 	})
 	logMove(
@@ -1306,17 +1892,25 @@ function MeraPresentationClient:StopFlameDashVfx(targetPlayer, reason, finalPosi
 		Dash = state.HeadState ~= nil,
 	})
 
+	self:PublishFlameDashDiagnostics()
 	return true
 end
 
 function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 	local rootPart = getPlayerRootPart(targetPlayer)
 	local character = targetPlayer and targetPlayer.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid") or nil
 	if not rootPart or not character then
 		return false
 	end
+	if self:ShouldSuppressFlameDashStart(targetPlayer, payload) then
+		return "suppressed"
+	end
+
+	local castToken = getFlameDashCastToken(targetPlayer, payload)
 
 	self:StopFlameDashVfx(targetPlayer, "restart", rootPart.Position, rootPart.CFrame.LookVector)
+	self.flameDashLatestCastTokenByPlayer[targetPlayer] = castToken
 
 	local startPosition = typeof(payload) == "table" and payload.StartPosition or nil
 	if typeof(startPosition) ~= "Vector3" then
@@ -1330,6 +1924,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 	local state = {
 		RootPart = rootPart,
 		Character = character,
+		Humanoid = humanoid,
 		StartPosition = startPosition,
 		ServerStartPosition = startPosition,
 		Direction = resolvedDirection,
@@ -1340,6 +1935,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 		ResolveDirection = nil,
 		LastRootPosition = rootPart.Position,
 		StartedAt = os.clock(),
+		CastToken = castToken,
 		ServerStartedAt = getFlameDashStartToken(payload),
 		ExpectedEndPosition = typeof(payload) == "table" and payload.EndPosition or nil,
 		ActualEndPosition = nil,
@@ -1367,6 +1963,8 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 		LastVfxProgressDistance = 0,
 	}
 	self.activeFlameDashVfxByPlayer[targetPlayer] = state
+	self:ApplyPendingFlameDashCleanup(targetPlayer, state)
+	self:PublishFlameDashDiagnostics()
 
 	logMove(
 		"move=FlameDash start player=%s direction=%s startPosition=%s",
@@ -1377,11 +1975,20 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 
 	state.UpdateConnection = RunService.Heartbeat:Connect(function()
 		if self.activeFlameDashVfxByPlayer[targetPlayer] ~= state then
+			if typeof(state.UpdateConnection) == "RBXScriptConnection" then
+				state.UpdateConnection:Disconnect()
+				state.UpdateConnection = nil
+			end
+			return
+		end
+		local latestCastToken = self.flameDashLatestCastTokenByPlayer[targetPlayer]
+		if latestCastToken and state.CastToken and latestCastToken ~= state.CastToken then
+			self:StopFlameDashVfx(targetPlayer, "stale_cast_token", state.LastRootPosition, state.Direction, state.CastToken)
 			return
 		end
 
-		if not rootPart.Parent or not character.Parent then
-			self:StopFlameDashVfx(targetPlayer, "invalid_state", state.LastRootPosition, state.Direction)
+		if not rootPart.Parent or not character.Parent or (state.Humanoid and state.Humanoid.Health <= 0) then
+			self:StopFlameDashVfx(targetPlayer, "invalid_state", state.LastRootPosition, state.Direction, state.CastToken)
 			return
 		end
 
@@ -1414,7 +2021,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 			Direction = currentVfxDirection or getLatchedFlameDashVfxDirection(state, rootPart, currentDirection),
 			Position = currentVfxPosition,
 		}) then
-			MeraVfx.StopFlameDashHead(state.HeadState, {
+			self:StopFlameDashRuntimeStage("Head", state.HeadState, {
 				ImmediateCleanup = true,
 			})
 			state.HeadState = nil
@@ -1424,7 +2031,7 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 			Direction = currentVfxDirection or getLatchedFlameDashVfxDirection(state, rootPart, currentDirection),
 			Position = currentVfxPosition,
 		}) then
-			MeraVfx.StopFlameDashPart(state.PartState, {
+			self:StopFlameDashRuntimeStage("Part", state.PartState, {
 				ImmediateCleanup = true,
 			})
 			state.PartState = nil
@@ -1438,7 +2045,8 @@ function MeraPresentationClient:StartFlameDashVfx(targetPlayer, payload, _track)
 					"predicted_timeout_" .. tostring(state.PredictedCompleteReason or "complete"),
 					state.PredictedFinalPosition,
 					state.PredictedDirection,
-					"predicted_fallback"
+					"predicted_fallback",
+					state.CastToken
 				)
 			end
 		end
@@ -1620,12 +2228,19 @@ function MeraPresentationClient:PlayFlameDashStartup(targetPlayer, _payload, _is
 	if not rootPart then
 		return false
 	end
+	if self:ShouldSuppressFlameDashStart(targetPlayer, _payload) then
+		return true
+	end
 
 	local animationConfig = self:GetAnimationConfig("FlameDash")
 	local track, animationPath, loadFailure, selectedCandidate = self:PlayAnimation(targetPlayer, "FlameDash", "Flame Dash", "Mera.FlameDash", {
 		DeferPlay = true,
 	})
 	local state = self:StartFlameDashVfx(targetPlayer, _payload or {}, track)
+	if state == "suppressed" then
+		stopTrack(track, self:GetAnimationConfig("FlameDash") and self:GetAnimationConfig("FlameDash").StopFadeTime)
+		return true
+	end
 	if not state then
 		return false
 	end
@@ -1696,21 +2311,40 @@ function MeraPresentationClient:PlayFlameDashComplete(targetPlayer, payload)
 	local finalPosition = type(payload) == "table" and (payload.ActualEndPosition or payload.EndPosition) or nil
 	local finalDirection = type(payload) == "table" and payload.Direction or nil
 	local reason = type(payload) == "table" and payload.ResolveReason or "server_resolve"
+	local castToken = getFlameDashCastToken(targetPlayer, payload)
 	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
 	if state then
+		if not flameDashTokensMatch(state.CastToken, castToken) then
+			self:RecordStaleFlameDashEvent(targetPlayer, reason, castToken, state.CastToken)
+			return true
+		end
 		self:RefreshFlameDashState(state, payload, state.RootPart)
 		self:PlayFlameDashStage(targetPlayer, state, "DashEnd", "server_resolve")
 	end
-	self:RequestFlameDashFinalization(targetPlayer, reason, finalPosition, finalDirection, "authoritative")
+	self:RequestFlameDashFinalization(targetPlayer, reason, finalPosition, finalDirection, "authoritative", castToken)
 	return true
 end
 
-function MeraPresentationClient:MarkFlameDashTrailPredictedComplete(targetPlayer, reason, finalPosition, direction)
+function MeraPresentationClient:MarkFlameDashTrailPredictedComplete(targetPlayer, reason, finalPosition, direction, castToken)
 	local state = self.activeFlameDashVfxByPlayer[targetPlayer]
 	if not state then
+		self:StorePendingFlameDashCleanup(targetPlayer, {
+			CastToken = castToken,
+			TrailStop = true,
+			Reason = reason,
+			FinalPosition = finalPosition,
+			Direction = direction,
+			PredictedCompleteAt = os.clock(),
+			Source = "predicted_complete",
+		})
+		return false
+	end
+	if not flameDashTokensMatch(state.CastToken, castToken) then
+		self:RecordStaleFlameDashEvent(targetPlayer, reason or "predicted_complete", castToken, state.CastToken)
 		return false
 	end
 
+	self:StopFlameDashTrailSampling(targetPlayer, reason, finalPosition, direction, castToken or state.CastToken)
 	state.PredictedCompleteAt = os.clock()
 	state.PredictedCompleteReason = reason
 	state.PredictedFinalPosition = typeof(finalPosition) == "Vector3" and finalPosition or state.LastRootPosition
@@ -1718,8 +2352,8 @@ function MeraPresentationClient:MarkFlameDashTrailPredictedComplete(targetPlayer
 	return true
 end
 
-function MeraPresentationClient:StopFlameDashTrail(targetPlayer, reason, finalPosition, direction)
-	self:StopFlameDashVfx(targetPlayer, reason, finalPosition, direction)
+function MeraPresentationClient:StopFlameDashTrail(targetPlayer, reason, finalPosition, direction, castToken)
+	self:StopFlameDashVfx(targetPlayer, reason, finalPosition, direction, castToken)
 	return true
 end
 
@@ -1773,6 +2407,19 @@ function MeraPresentationClient:PlayFireBurstRelease(targetPlayer, payload)
 	state.ReleaseTriggered = true
 	state.ReleasePayload = type(payload) == "table" and payload or {}
 	state.LastPhase = "Release"
+	playMeraAbilityAudio(
+		self,
+		targetPlayer,
+		"FireBurst",
+		"Burst",
+		"BurstSoundId",
+		"BurstSoundOffset",
+		"MeraFireBurstSound",
+		state.ReleasePayload,
+		function()
+			return self.activeFireBurstByPlayer[targetPlayer] == state and state.Completed ~= true
+		end
+	)
 
 	local abilityConfig = self:GetAbilityConfig("FireBurst")
 	local payloadTable = type(payload) == "table" and payload or {}
@@ -1835,7 +2482,37 @@ function MeraPresentationClient:HandleCharacterRemoving(targetPlayer)
 			ImmediateCleanup = true,
 		})
 	end
-	self:StopFlameDashVfx(player)
+	if player then
+		self.pendingFlameDashCleanupByPlayer[player] = nil
+		self:StopFlameDashVfx(player, "character_removing", nil, nil)
+	end
+	self:PublishFlameDashDiagnostics()
+end
+
+function MeraPresentationClient:HandleUnequipped()
+	local player = self.player
+	if not player or not player:IsA("Player") then
+		return
+	end
+
+	local state = self.activeFlameDashVfxByPlayer[player]
+	local finalPosition = state and state.LastRootPosition or nil
+	local direction = state and state.Direction or nil
+	local castToken = state and state.CastToken or nil
+	if state then
+		self.pendingFlameDashCleanupByPlayer[player] = {
+			FullStop = true,
+			TrailStop = true,
+			Reason = "unequipped",
+			FinalPosition = finalPosition,
+			Direction = direction,
+			CastToken = castToken,
+			Source = "unequipped",
+			AllowAnyToken = false,
+		}
+		self:StopFlameDashVfx(player, "unequipped", finalPosition, direction, castToken)
+	end
+	self:PublishFlameDashDiagnostics()
 end
 
 function MeraPresentationClient:HandlePlayerRemoving(leavingPlayer)

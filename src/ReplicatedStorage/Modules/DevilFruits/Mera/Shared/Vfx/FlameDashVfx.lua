@@ -118,6 +118,7 @@ local ALWAYS_DISABLED_HEAD_EMITTER_NAMES = {
 }
 
 local runtimeSequence = 0
+local activeTrailLoopCount = 0
 
 local function logInfo(message, ...)
 	if not DEBUG_INFO then
@@ -669,7 +670,23 @@ local function disconnectTrailLoop(state)
 	if state.TrailConnection then
 		state.TrailConnection:Disconnect()
 		state.TrailConnection = nil
+		if state.TrailLoopCounted == true then
+			activeTrailLoopCount = math.max(0, activeTrailLoopCount - 1)
+			state.TrailLoopCounted = false
+		end
 	end
+end
+
+local function stopTrailSampling(state)
+	if type(state) ~= "table" then
+		return false
+	end
+
+	local wasActive = state.TrailConnection ~= nil or state.TrailSamplingStopped ~= true
+	state.TrailSamplingStopped = true
+	state.DistanceSinceLastClone = 0
+	disconnectTrailLoop(state)
+	return wasActive
 end
 
 local function detachFollow(state)
@@ -689,6 +706,7 @@ local function destroyRuntimeState(state)
 	end
 
 	state.Destroyed = true
+	state.TrailSamplingStopped = true
 	disconnectTrailLoop(state)
 	detachFollow(state)
 
@@ -980,7 +998,7 @@ end
 -- ============================================================================
 
 local function spawnTrailCloneAt(state, samplePosition, direction)
-	if not isLiveState(state) or not state.TrailTemplateRoot then
+	if not isLiveState(state) or not state.TrailTemplateRoot or state.TrailSamplingStopped == true then
 		return nil
 	end
 
@@ -1031,12 +1049,16 @@ local function ensureTrailLoop(state)
 		return false
 	end
 
+	if state.TrailSamplingStopped == true then
+		return false
+	end
+
 	if state.TrailConnection then
 		return true
 	end
 
 	state.TrailConnection = RunService.Heartbeat:Connect(function(_dt)
-		if not isLiveState(state) or state.Stopped == true then
+		if not isLiveState(state) or state.Stopped == true or state.TrailSamplingStopped == true then
 			disconnectTrailLoop(state)
 			return
 		end
@@ -1076,6 +1098,8 @@ local function ensureTrailLoop(state)
 
 		state.LastSamplePosition = currentPosition
 	end)
+	state.TrailLoopCounted = true
+	activeTrailLoopCount += 1
 
 	return true
 end
@@ -1240,6 +1264,8 @@ local function createRuntimeState(options)
 		DashPlayed = false,
 		Stopped = false,
 		Destroyed = false,
+		TrailSamplingStopped = false,
+		TrailLoopCounted = false,
 		SuppressAttachedBodyFlame = shouldSuppressAttachedBodyLayer(
 			attachedActiveBodyRoot,
 			trailTemplateSourceRoot
@@ -1302,7 +1328,7 @@ local function stopRuntimeState(state, options, defaults)
 	end
 
 	state.Stopped = true
-	disconnectTrailLoop(state)
+	stopTrailSampling(state)
 
 	if type(options) == "table" and options.ImmediateCleanup == true then
 		destroyRuntimeState(state)
@@ -1361,6 +1387,10 @@ function FlameDashVfx.StartFlameDashPart(options)
 	suppressStartupWindAndOffFlamePaths(state)
 	enableActiveHeadLayer(state)
 
+	if state.TrailSamplingStopped == true then
+		return state
+	end
+
 	if not state.DashPlayed then
 		state.DashPlayed = true
 		state.LastSamplePosition = state.RootPart.Position
@@ -1399,6 +1429,23 @@ function FlameDashVfx.StopFlameDashPart(state, options)
 		FadeTime = DEFAULT_ACTIVE_FADE_TIME,
 		HoldTime = DEFAULT_ACTIVE_HOLD_TIME,
 	})
+end
+
+function FlameDashVfx.StopFlameDashTrailSampling(state)
+	return stopTrailSampling(state)
+end
+
+function FlameDashVfx.IsTrailSampling(state)
+	return type(state) == "table"
+		and state.TrailSamplingStopped ~= true
+		and state.TrailConnection ~= nil
+		and state.Destroyed ~= true
+end
+
+function FlameDashVfx.GetDiagnostics()
+	return {
+		ActiveTrailLoopCount = activeTrailLoopCount,
+	}
 end
 
 function FlameDashVfx.StopFlameDashStartup(state, options)
@@ -1442,6 +1489,10 @@ end
 
 function FlameDashVfx.StopTrail(state, options)
 	return FlameDashVfx.StopFlameDashPart(state, options)
+end
+
+function FlameDashVfx.StopTrailSampling(state)
+	return FlameDashVfx.StopFlameDashTrailSampling(state)
 end
 
 return FlameDashVfx

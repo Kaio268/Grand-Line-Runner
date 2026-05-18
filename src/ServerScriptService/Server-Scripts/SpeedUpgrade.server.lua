@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
+local Players = game:GetService("Players")
 
 local SpeedUpgrade = require(
 	ReplicatedStorage:WaitForChild("Modules")
@@ -9,8 +10,11 @@ local SpeedUpgrade = require(
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+local SpeedUpgradeLimits = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("SpeedUpgradeLimits"))
 local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local TUTORIAL_SPEED_TOP_UP_GRANTED_PATH = "HiddenLeaderstats.TutorialSpeedTopUpGranted"
+local purchaseLocks = {}
 
 local remote = ReplicatedStorage:FindFirstChild("BuySpeedUpgrade")
 if not remote then
@@ -19,23 +23,13 @@ if not remote then
 	remote.Parent = ReplicatedStorage
 end
 
-local function getSpeedValue(player)
-	local hidden = player:FindFirstChild("HiddenLeaderstats")
-	local sp = hidden and hidden:FindFirstChild("Speed")
-	if sp and typeof(sp.Value) == "number" then
-		return sp.Value
-	end
-	local v = DataManager:GetValue(player, "HiddenLeaderstats.Speed")
-	if typeof(v) == "number" then
-		return v
-	end
-	return 1
-end
-
-local function computeCost(cfg, speedVal)
+local function computeCost(cfg, speedVal, stepCount)
 	local starter = cfg.Starter_Price or 0
 	local mult = cfg.Price_Mult or 1
 	local addSpeed = cfg.AddSpeed or 1
+	if typeof(stepCount) == "number" then
+		addSpeed = stepCount
+	end
 
 	local s = tonumber(speedVal) or 1
 	if s < 1 then
@@ -99,7 +93,7 @@ local function applyTutorialSpeedRecovery(player, upgradeIndex, moneyPath, money
 	return true, shortfall
 end
 
-remote.OnServerEvent:Connect(function(player, upgradeName)
+local function handleSpeedUpgrade(player, upgradeName)
 	if typeof(upgradeName) ~= "string" then
 		return
 	end
@@ -118,8 +112,12 @@ remote.OnServerEvent:Connect(function(player, upgradeName)
 		return
 	end
 
-	local speedVal = getSpeedValue(player)
-	local cost = computeCost(cfg, speedVal)
+	local speedVal = SpeedUpgradeLimits.GetCurrentSpeed(DataManager, player)
+	local effectiveAddSpeed = SpeedUpgradeLimits.SanitizeSpeedIncrease(addSpeed)
+	if effectiveAddSpeed <= 0 then
+		return
+	end
+	local cost = computeCost(cfg, speedVal, effectiveAddSpeed)
 
 	local moneyPath = CurrencyUtil.getPrimaryPath()
 	local money = DataManager:GetValue(player, moneyPath)
@@ -150,7 +148,32 @@ remote.OnServerEvent:Connect(function(player, upgradeName)
 		end
 		return
 	end
-	DataManager:AdjustValue(player, "TotalStats.TotalSpeed", addSpeed)
-	DataManager:AdjustValue(player, "HiddenLeaderstats.Speed", addSpeed)
+	SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, effectiveAddSpeed)
+end
 
+remote.OnServerEvent:Connect(function(player, upgradeName)
+	-- Security: shared guard and local lock stop malformed/spammed upgrade requests before currency mutation.
+	if not RemoteGuard.Check(player, "BuySpeedUpgrade", { upgradeName }, {
+		Cooldown = 0.2,
+		Args = {
+			{ Type = "string", MaxLength = 8 },
+		},
+	}) then
+		return
+	end
+
+	if purchaseLocks[player] then
+		return
+	end
+	purchaseLocks[player] = true
+
+	local ok, err = pcall(handleSpeedUpgrade, player, upgradeName)
+	purchaseLocks[player] = nil
+	if not ok then
+		warn(string.format("[BuySpeedUpgrade] failed player=%s error=%s", player.Name, tostring(err)))
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	purchaseLocks[player] = nil
 end)

@@ -24,6 +24,7 @@ local GHOST_ATTRIBUTE = "HoroProjectionGhost"
 local BODY_ATTRIBUTE = "HoroProjectionBody"
 local PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local PROJECTION_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 
 local DEFAULT_DURATION = 5
 local DEFAULT_GHOST_SPEED = 15
@@ -118,6 +119,23 @@ local function horoTrace(message, ...)
 	print(string.format("[HORO TRACE] " .. tostring(message), ...))
 end
 
+local function getCarriedCrewMemberName(player)
+	if not player then
+		return nil
+	end
+
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	if typeof(carried) == "string" and carried ~= "" then
+		return carried
+	end
+
+	return nil
+end
+
+local function hasCarriedCrewMember(player)
+	return getCarriedCrewMemberName(player) ~= nil
+end
+
 local function beginPickupRangeGrace(state, reason)
 	local graceDuration = math.max(0, tonumber(state and state.PickupRangeGraceDuration) or 0)
 	local graceDistance = math.max(0, tonumber(state and state.PickupRangeGraceDistance) or 0)
@@ -143,10 +161,10 @@ local function getPlayerCarrySummary(player)
 	end
 
 	return string.format(
-		"attrMajor=%s attrMajorName=%s attrBrainrot=%s projectionCarryMarker=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
+		"attrMajor=%s attrMajorName=%s attrCrewMember=%s projectionCarryMarker=%s horoActive=%s horoProjectionId=%s horoCarrying=%s",
 		tostring(player:GetAttribute("CarriedMajorRewardType")),
 		tostring(player:GetAttribute("CarriedMajorRewardDisplayName")),
-		tostring(player:GetAttribute("CarriedBrainrot")),
+		tostring(player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)),
 		tostring(player:GetAttribute(PROJECTION_CARRY_ATTRIBUTE)),
 		tostring(player:GetAttribute("HoroProjectionActive")),
 		tostring(player:GetAttribute("HoroProjectionId")),
@@ -372,8 +390,19 @@ local function scheduleGhostNetworkOwnershipRefresh(state, attempts, interval)
 end
 
 local function hasCarriedReward(player)
-	return player:GetAttribute("CarriedMajorRewardType") ~= nil
-		or player:GetAttribute("CarriedBrainrot") ~= nil
+	if SliceService and typeof(SliceService.HasCarryItems) == "function" and SliceService.HasCarryItems(player) == true then
+		return true
+	end
+
+	return player:GetAttribute("CarriedMajorRewardType") ~= nil or hasCarriedCrewMember(player)
+end
+
+local function canCarryMoreRewards(player)
+	if SliceService and typeof(SliceService.CanCarryMore) == "function" then
+		return SliceService.CanCarryMore(player) == true
+	end
+
+	return not hasCarriedReward(player)
 end
 
 local function numbersDiffer(left, right)
@@ -1002,7 +1031,10 @@ local function dropCarriedRewards(state, dropPosition)
 		return false
 	end
 
-	local response = SliceService.DropCarriedReward(player, {
+	local dropFunction = if typeof(SliceService.DropAllCarriedRewards) == "function"
+		then SliceService.DropAllCarriedRewards
+		else SliceService.DropCarriedReward
+	local response = dropFunction(player, {
 		Reason = "HoroProjection",
 		DropPosition = dropPosition,
 		IgnoreProtection = true,
@@ -1020,19 +1052,24 @@ local function dropCarriedRewards(state, dropPosition)
 		formatVector3(dropPosition)
 	)
 
-	local brainrotContext = CrewInteraction.GetActiveContext()
-	local droppedBrainrot = CrewInteraction.DropHeldAtPosition(brainrotContext, player, nil, dropPosition)
-	if droppedBrainrot then
-		droppedAny = true
+	local crewMemberContext = CrewInteraction.GetActiveContext()
+	local droppedCrewMember = false
+	if not droppedAny then
+		droppedCrewMember = CrewInteraction.DropHeldAtPosition(crewMemberContext, player, nil, dropPosition)
+		if droppedCrewMember then
+			droppedAny = true
+		end
 	end
 	horoTrace(
-		"dropCarriedRewards brainrotDrop player=%s projectionId=%s dropped=%s",
+		"dropCarriedRewards crewMemberDrop player=%s projectionId=%s dropped=%s",
 		player and player.Name or "<nil>",
 		tostring(state and state.ProjectionId),
-		tostring(droppedBrainrot == true)
+		tostring(droppedCrewMember == true)
 	)
 
-	clearProjectionCarryMarker(player, state.ProjectionId)
+	if not hasCarriedReward(player) then
+		clearProjectionCarryMarker(player, state.ProjectionId)
+	end
 	updateCarryingAttribute(state)
 	horoTrace(
 		"dropCarriedRewards end player=%s projectionId=%s droppedAny=%s carryAttrs={%s} sliceState={%s}",
@@ -1143,6 +1180,8 @@ finishProjection = function(state, reason, dropPosition, shouldDropReward)
 	end
 	if not hasCarriedReward(state.Player) then
 		clearProjectionCarryMarker(state.Player, state.ProjectionId)
+	elseif state.RootPart and state.RootPart.Parent then
+		CorridorController.AttachCarriedRewardToPart(state.Player, state.RootPart)
 	end
 	horoTrace(
 		"finishProjection postDrop player=%s projectionId=%s reason=%s wasCarrying=%s droppedReward=%s finalDrop=%s carryAttrs={%s} sliceState={%s}",
@@ -1364,7 +1403,9 @@ local function tryPickupReward(state)
 			getPlayerCarrySummary(state.Player),
 			getSliceCarrySummary(state.Player)
 		)
-		return true, "already_carrying"
+		if not canCarryMoreRewards(state.Player) then
+			return true, "already_carrying"
+		end
 	end
 
 	local position = state.GhostRoot.Position
@@ -1391,28 +1432,28 @@ local function tryPickupReward(state)
 		return true, "major_reward"
 	end
 
-	local brainrotContext = CrewInteraction.GetActiveContext()
-	local claimedBrainrot = CrewInteraction.TryCarryNearPosition(
-		brainrotContext,
+	local crewMemberContext = CrewInteraction.GetActiveContext()
+	local claimedCrewMember = CrewInteraction.TryCarryNearPosition(
+		crewMemberContext,
 		state.Player,
 		nil,
 		position,
 		carrierPart,
 		state.RewardInteractRadius
 	)
-	if claimedBrainrot then
+	if claimedCrewMember then
 		setProjectionCarryMarker(state.Player, state.ProjectionId)
 		updateCarryingAttribute(state)
 		scheduleGhostNetworkOwnershipRefresh(state, PICKUP_OWNERSHIP_REFRESH_ATTEMPTS, NETWORK_OWNERSHIP_REFRESH_INTERVAL)
-		beginPickupRangeGrace(state, "brainrot")
+		beginPickupRangeGrace(state, "crew_member")
 		horoTrace(
-			"tryPickupReward claimedBrainrot player=%s projectionId=%s carrierPart=%s carryAttrs={%s}",
+			"tryPickupReward claimedCrewMember player=%s projectionId=%s carrierPart=%s carryAttrs={%s}",
 			state.Player and state.Player.Name or "<nil>",
 			tostring(state.ProjectionId),
 			formatInstancePath(carrierPart),
 			getPlayerCarrySummary(state.Player)
 		)
-		return true, "brainrot"
+		return true, "crew_member"
 	end
 
 	horoTrace(
@@ -1632,14 +1673,14 @@ function HoroServer.GhostProjection(context)
 		getSliceCarrySummary(player)
 	)
 
-	if hasCarriedReward(player) then
+	if hasCarriedReward(player) and not canCarryMoreRewards(player) then
 		horoTrace(
-			"ghostProjection rejected player=%s reason=already_carrying_reward carryAttrs={%s} sliceState={%s}",
+			"ghostProjection rejected player=%s reason=carry_slots_full carryAttrs={%s} sliceState={%s}",
 			player and player.Name or "<nil>",
 			getPlayerCarrySummary(player),
 			getSliceCarrySummary(player)
 		)
-		return buildRejectedPayload("already_carrying_reward"), {
+		return buildRejectedPayload("carry_slots_full"), {
 			ApplyCooldown = false,
 		}
 	end

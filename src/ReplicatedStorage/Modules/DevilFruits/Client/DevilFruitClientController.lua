@@ -37,6 +37,7 @@ local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
 local HAZARD_SUPPRESSION_INTERVAL = 0.05
 local FIRE_BURST_HAZARD_SUPPRESSION_INTERVAL = 0.16
+local MOGU_HAZARD_SUPPRESSION_INTERVAL = 0.12
 local LOCAL_HAZARD_OVERLAP_MAX_PARTS = 128
 local MIN_DIRECTION_MAGNITUDE = 0.01
 local DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS = 12
@@ -55,6 +56,11 @@ local suppressedParts = {}
 local activeFireBursts = {}
 local activeMoguBurrow = nil
 local hazardSuppressionLoopRunning = false
+local moguHazardDiagnostics = {
+	LastFlushAt = os.clock(),
+	OverlapTimeMs = 0,
+	OverlapCount = 0,
+}
 local playOptionalEffect
 local getFruitFolder
 local getEquippedFruit
@@ -782,6 +788,20 @@ ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, _posit
 	return isLocalPlayerBurrowProtected(os.clock())
 end)
 
+local function publishMoguHazardDiagnostics(force)
+	local now = os.clock()
+	local elapsed = now - (moguHazardDiagnostics.LastFlushAt or now)
+	if not force and elapsed < 1 then
+		return
+	end
+
+	moguHazardDiagnostics.LastFlushAt = now
+	player:SetAttribute("MoguHazardSuppressionOverlapTimeMs", moguHazardDiagnostics.OverlapTimeMs or 0)
+	player:SetAttribute("MoguHazardSuppressionOverlapCount", moguHazardDiagnostics.OverlapCount or 0)
+	moguHazardDiagnostics.OverlapTimeMs = 0
+	moguHazardDiagnostics.OverlapCount = 0
+end
+
 local function buildLocalHazardOverlapParams(refs, restrictToHazardRoots)
 	local overlapParams = OverlapParams.new()
 	refs = refs or MapResolver.GetRefs()
@@ -815,6 +835,7 @@ local function suppressHazardsNearPosition(centerPosition, radius, untilTime, sh
 		return
 	end
 
+	local startedAt = os.clock()
 	local refs = MapResolver.GetRefs()
 	local clientWavesFolder = refs and refs.ClientWaves
 	local nearbyParts = Workspace:GetPartBoundsInRadius(
@@ -827,6 +848,10 @@ local function suppressHazardsNearPosition(centerPosition, radius, untilTime, sh
 		if container and (shouldSuppress == nil or shouldSuppress(container, hazardClass, hazardType)) then
 			suppressHazard(container, untilTime, source)
 		end
+	end
+	if source == MOGU_HAZARD_SUPPRESSION_SOURCE then
+		moguHazardDiagnostics.OverlapTimeMs += (os.clock() - startedAt) * 1000
+		moguHazardDiagnostics.OverlapCount += 1
 	end
 end
 
@@ -910,24 +935,27 @@ local function updateHazardSuppression()
 	end
 
 	if isLocalPlayerBurrowProtected(now) then
-		if rootPart then
+		if rootPart and now >= (activeMoguBurrow.NextScanAt or 0) then
+			activeMoguBurrow.NextScanAt = now + MOGU_HAZARD_SUPPRESSION_INTERVAL
 			suppressHazardsNearPosition(
 				rootPart.Position,
 				activeMoguBurrow.Radius,
 				activeMoguBurrow.EndTime,
 				nil,
-				nil,
+				true,
 				MOGU_HAZARD_SUPPRESSION_SOURCE
 			)
 		end
 	end
 
 	restoreSuppressedParts(now)
+	publishMoguHazardDiagnostics(false)
 
 	if hasActiveHazardProtection(now) then
 		task.delay(HAZARD_SUPPRESSION_INTERVAL, updateHazardSuppression)
 	else
 		hazardSuppressionLoopRunning = false
+		publishMoguHazardDiagnostics(true)
 	end
 end
 
@@ -958,6 +986,7 @@ local function startMoguBurrow(targetPlayer, payload)
 	activeMoguBurrow = {
 		EndTime = os.clock() + duration,
 		Radius = math.max(0, tonumber(resolvedPayload.HazardProtectionRadius) or getMoguHazardProtectionRadius()),
+		NextScanAt = 0,
 	}
 
 	ensureHazardSuppressionLoop()
@@ -970,6 +999,7 @@ local function stopMoguBurrow(targetPlayer)
 
 	activeMoguBurrow = nil
 	restoreSuppressedParts(os.clock(), MOGU_HAZARD_SUPPRESSION_SOURCE)
+	publishMoguHazardDiagnostics(true)
 	applyMoguSurfaceHazardOverlap()
 end
 
@@ -1327,6 +1357,7 @@ local function initializeDevilFruitClient()
 		fruitModuleLoader:ForEachLoadedController("HandleCharacterRemoving")
 		hazardSuppressionLoopRunning = false
 		restoreSuppressedParts(math.huge)
+		publishMoguHazardDiagnostics(true)
 	end)
 
 	Players.PlayerRemoving:Connect(function(leavingPlayer)

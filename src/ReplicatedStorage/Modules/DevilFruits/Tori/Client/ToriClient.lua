@@ -1,4 +1,6 @@
 local Players = game:GetService("Players")
+local ContentProvider = game:GetService("ContentProvider")
+local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -7,6 +9,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HitEffectConfig = require(Modules:WaitForChild("Configs"):WaitForChild("HitEffects"))
+local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local HazardUtils = require(DevilFruits:WaitForChild("HazardUtils"))
 local ProtectionRuntime = require(DevilFruits:WaitForChild("ProtectionRuntime"))
@@ -53,9 +56,48 @@ local HAZARD_SUPPRESSION_GRACE = 0.15
 local HAZARD_OVERLAP_MAX_PARTS = 128
 local PHOENIX_SHIELD_HIT_EFFECT_THROTTLE = 0.18
 local PHOENIX_SHIELD_UNLOCK_RESCHEDULE_THRESHOLD = 0.02
+local PHOENIX_FLIGHT_SOUND_CLEANUP_FALLBACK_SECONDS = 5
+local PHOENIX_FLIGHT_AUDIO_KEYS = {
+	FlightLoop = "FlightLoopSoundId",
+	InitialJumpOff = "InitialJumpOffSoundId",
+	Deactivation = "DeactivationSoundId",
+	AirImpact = "AirImpactSoundId",
+}
+local PHOENIX_SHIELD_AUDIO_KEYS = {
+	Activate = "ActivateSoundId",
+	Deactivate = "DeactivateSoundId",
+	Loop = "LoopSoundId",
+}
+local PHOENIX_SHIELD_AUDIO_CUES = {
+	Activate = "Activate",
+	Deactivate = "Deactivate",
+}
+local PHOENIX_REBIRTH_AUDIO_KEYS = {
+	Revive = "ReviveSoundId",
+}
+local PHOENIX_REBIRTH_AUDIO_CUES = {
+	Revive = "Revive",
+}
+local PHOENIX_SHIELD_AUDIO_DEACTIVATE_LEAD_TIME = 0.05
+local PHOENIX_FLIGHT_AUDIO_CUES = {
+	LiftOff = "LiftOff",
+	AirImpact = "AirImpact",
+	Deactivate = "Deactivate",
+	SustainAnimation = "SustainAnimation",
+}
+local PHOENIX_FLIGHT_DEFAULT_AUDIO_MARKERS = {
+	LiftOff = { "LiftOff" },
+	AirImpact = { "AirImpact" },
+	Deactivate = { "Deactivate", "FlightEnd" },
+}
+local PHOENIX_FLIGHT_ANIMATION_KEYS = {
+	Loop = "Tori.PhoenixFlightLoop",
+	Idle = "Tori.PhoenixFlightIdle",
+}
 local FLIGHT_INTERRUPT_HIT_EFFECTS = {
 	Knockdown = true,
 }
+local PHOENIX_SHIELD_AUDIO_EXPIRY_RESCHEDULE_THRESHOLD = 0.02
 
 local function flightLog(...)
 	if not DEBUG_FLIGHT then
@@ -308,6 +350,416 @@ local function resetPhoenixFlightState(flightState)
 	end
 end
 
+local function normalizePhoenixFlightSoundId(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
+	end
+
+	if typeof(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	if string.find(value, "rbxassetid://", 1, true) == 1 then
+		return value
+	end
+
+	if tonumber(value) ~= nil then
+		return "rbxassetid://" .. value
+	end
+
+	return value
+end
+
+local function getPhoenixFlightSoundCleanupDelay(sound)
+	local timeLength = tonumber(sound and sound.TimeLength) or 0
+	if timeLength > 0 then
+		return timeLength + 1
+	end
+
+	return PHOENIX_FLIGHT_SOUND_CLEANUP_FALLBACK_SECONDS
+end
+
+local function getPhoenixFlightAudioConfig(self)
+	local abilityConfig = DevilFruitConfig.GetAbility(self.phoenixFruitName, self.phoenixFlightAbility)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getPhoenixFlightSoundId(self, audioKey)
+	local audioConfig = getPhoenixFlightAudioConfig(self)
+	if not audioConfig then
+		return nil
+	end
+
+	return normalizePhoenixFlightSoundId(audioConfig[audioKey])
+end
+
+local function getPhoenixFlightAudioNumber(self, fieldName, fallback, minimum)
+	local audioConfig = getPhoenixFlightAudioConfig(self)
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function appendPhoenixFlightAudioMarkerName(markerNames, seenMarkers, markerName)
+	if typeof(markerName) ~= "string" or markerName == "" or seenMarkers[markerName] then
+		return
+	end
+
+	seenMarkers[markerName] = true
+	markerNames[#markerNames + 1] = markerName
+end
+
+local function appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, configuredMarkers)
+	if typeof(configuredMarkers) == "string" then
+		appendPhoenixFlightAudioMarkerName(markerNames, seenMarkers, configuredMarkers)
+		return
+	end
+
+	if type(configuredMarkers) ~= "table" then
+		return
+	end
+
+	for _, markerName in ipairs(configuredMarkers) do
+		appendPhoenixFlightAudioMarkerName(markerNames, seenMarkers, markerName)
+	end
+end
+
+local function getPhoenixFlightAudioMarkerNames(self, cueName)
+	local audioConfig = getPhoenixFlightAudioConfig(self)
+	local markerConfig = type(audioConfig) == "table" and audioConfig.Markers or nil
+	local markerNames = {}
+	local seenMarkers = {}
+
+	if type(markerConfig) == "table" then
+		appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, markerConfig[cueName])
+	end
+	if type(audioConfig) == "table" then
+		appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, audioConfig[cueName .. "MarkerName"])
+		appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, audioConfig[cueName .. "MarkerNames"])
+	end
+	appendPhoenixFlightAudioMarkerNames(markerNames, seenMarkers, PHOENIX_FLIGHT_DEFAULT_AUDIO_MARKERS[cueName])
+
+	return markerNames
+end
+
+local function copyPhoenixFlightPayload(payload)
+	if type(payload) ~= "table" then
+		return {}
+	end
+
+	return table.clone(payload)
+end
+
+local function getOrCreatePhoenixFlightAudioState(self, targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	self.phoenixFlightAudioStates = self.phoenixFlightAudioStates or setmetatable({}, { __mode = "k" })
+	local state = self.phoenixFlightAudioStates[targetPlayer]
+	if not state or state.CleanedUp then
+		state = {
+			TargetPlayer = targetPlayer,
+			OneShotSounds = {},
+		}
+		self.phoenixFlightAudioStates[targetPlayer] = state
+	end
+
+	return state
+end
+
+local function forgetPhoenixFlightOneShot(state, sound)
+	local oneShotSounds = state and state.OneShotSounds
+	if not oneShotSounds then
+		return
+	end
+
+	for index = #oneShotSounds, 1, -1 do
+		if oneShotSounds[index] == sound then
+			table.remove(oneShotSounds, index)
+			return
+		end
+	end
+end
+
+local function stopPhoenixFlightLoopSoundState(state)
+	local sound = state and state.LoopSound
+	if state then
+		state.LoopSound = nil
+	end
+	if not sound then
+		return
+	end
+
+	if sound.Parent then
+		pcall(function()
+			sound:Stop()
+		end)
+		sound:Destroy()
+	end
+end
+
+local function cleanupPhoenixFlightAudioState(state)
+	if not state or state.CleanedUp then
+		return
+	end
+
+	state.CleanedUp = true
+	stopPhoenixFlightLoopSoundState(state)
+	for _, sound in ipairs(state.OneShotSounds or {}) do
+		if sound and sound.Parent then
+			sound:Destroy()
+		end
+	end
+	state.OneShotSounds = {}
+end
+
+local function getPhoenixShieldAudioConfig(self)
+	local abilityConfig = DevilFruitConfig.GetAbility(self.phoenixFruitName, self.phoenixShieldAbility)
+	local audioConfig = abilityConfig and abilityConfig.Audio
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getPhoenixShieldSoundId(self, audioKey)
+	local audioConfig = getPhoenixShieldAudioConfig(self)
+	if not audioConfig then
+		return nil
+	end
+
+	return normalizePhoenixFlightSoundId(audioConfig[audioKey])
+end
+
+local function getPhoenixShieldAudioNumber(self, fieldName, fallback, minimum)
+	local audioConfig = getPhoenixShieldAudioConfig(self)
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function getPhoenixRebirthAudioConfig(self)
+	local fruitConfig = DevilFruitConfig.GetFruit(self.phoenixFruitName)
+	local passiveConfig = fruitConfig and fruitConfig.Passives and fruitConfig.Passives[self.phoenixRebirthAbility] or nil
+	local audioConfig = passiveConfig and passiveConfig.Audio
+	if type(audioConfig) ~= "table" then
+		audioConfig = PHOENIX_REBIRTH and PHOENIX_REBIRTH.Audio or nil
+	end
+	if type(audioConfig) ~= "table" then
+		return nil
+	end
+
+	return audioConfig
+end
+
+local function getPhoenixRebirthSoundId(self, audioKey)
+	local audioConfig = getPhoenixRebirthAudioConfig(self)
+	if not audioConfig then
+		return nil
+	end
+
+	return normalizePhoenixFlightSoundId(audioConfig[audioKey])
+end
+
+local function getPhoenixRebirthAudioNumber(self, fieldName, fallback, minimum)
+	local audioConfig = getPhoenixRebirthAudioConfig(self)
+	local numericValue = audioConfig and tonumber(audioConfig[fieldName]) or nil
+	if not numericValue then
+		return fallback
+	end
+
+	if typeof(minimum) == "number" then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function getOrCreatePhoenixShieldAudioState(self, targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	self.phoenixShieldAudioStates = self.phoenixShieldAudioStates or setmetatable({}, { __mode = "k" })
+	local state = self.phoenixShieldAudioStates[targetPlayer]
+	if not state or state.CleanedUp then
+		state = {
+			TargetPlayer = targetPlayer,
+			OneShotSounds = {},
+		}
+		self.phoenixShieldAudioStates[targetPlayer] = state
+	end
+
+	return state
+end
+
+local function getOrCreatePhoenixRebirthAudioState(self, targetPlayer)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return nil
+	end
+
+	self.phoenixRebirthAudioStates = self.phoenixRebirthAudioStates or setmetatable({}, { __mode = "k" })
+	local state = self.phoenixRebirthAudioStates[targetPlayer]
+	if not state or state.CleanedUp then
+		state = {
+			TargetPlayer = targetPlayer,
+			OneShotSounds = {},
+		}
+		self.phoenixRebirthAudioStates[targetPlayer] = state
+	end
+
+	return state
+end
+
+local function forgetPhoenixShieldOneShot(state, sound)
+	local oneShotSounds = state and state.OneShotSounds
+	if not oneShotSounds then
+		return
+	end
+
+	for index = #oneShotSounds, 1, -1 do
+		if oneShotSounds[index] == sound then
+			table.remove(oneShotSounds, index)
+			return
+		end
+	end
+end
+
+local function forgetPhoenixRebirthOneShot(state, sound)
+	local oneShotSounds = state and state.OneShotSounds
+	if not oneShotSounds then
+		return
+	end
+
+	for index = #oneShotSounds, 1, -1 do
+		if oneShotSounds[index] == sound then
+			table.remove(oneShotSounds, index)
+			return
+		end
+	end
+end
+
+local function stopPhoenixShieldLoopSoundState(state)
+	local sound = state and state.LoopSound
+	if state then
+		state.LoopSound = nil
+	end
+	if not sound then
+		return
+	end
+
+	if sound.Parent then
+		pcall(function()
+			sound:Stop()
+		end)
+		sound:Destroy()
+	end
+end
+
+local function cleanupPhoenixShieldAudioState(state)
+	if not state or state.CleanedUp then
+		return
+	end
+
+	state.CleanedUp = true
+	stopPhoenixShieldLoopSoundState(state)
+	for _, sound in ipairs(state.OneShotSounds or {}) do
+		if sound and sound.Parent then
+			sound:Destroy()
+		end
+	end
+	state.OneShotSounds = {}
+end
+
+local function cleanupPhoenixRebirthAudioState(state)
+	if not state or state.CleanedUp then
+		return
+	end
+
+	state.CleanedUp = true
+	for _, sound in ipairs(state.OneShotSounds or {}) do
+		if sound and sound.Parent then
+			sound:Destroy()
+		end
+	end
+	state.OneShotSounds = {}
+end
+
+local function preloadPhoenixShieldAudio(self)
+	if self.phoenixShieldAudioPreloadStarted then
+		return
+	end
+
+	self.phoenixShieldAudioPreloadStarted = true
+	task.spawn(function()
+		local sounds = {}
+		local seenSoundIds = {}
+		for _, audioKey in pairs(PHOENIX_SHIELD_AUDIO_KEYS) do
+			local soundId = getPhoenixShieldSoundId(self, audioKey)
+			if soundId and not seenSoundIds[soundId] then
+				seenSoundIds[soundId] = true
+				local sound = Instance.new("Sound")
+				sound.Name = "ToriPhoenixFlameShieldPreload"
+				sound.SoundId = soundId
+				sounds[#sounds + 1] = sound
+			end
+		end
+
+		if #sounds > 0 then
+			pcall(function()
+				ContentProvider:PreloadAsync(sounds)
+			end)
+		end
+
+		for _, sound in ipairs(sounds) do
+			sound:Destroy()
+		end
+	end)
+end
+
+local function preloadPhoenixRebirthAudio(self)
+	if self.phoenixRebirthAudioPreloadStarted then
+		return
+	end
+
+	self.phoenixRebirthAudioPreloadStarted = true
+	task.spawn(function()
+		local soundId = getPhoenixRebirthSoundId(self, PHOENIX_REBIRTH_AUDIO_KEYS.Revive)
+		if not soundId then
+			return
+		end
+
+		local sound = Instance.new("Sound")
+		sound.Name = "ToriPhoenixRebirthPreload"
+		sound.SoundId = soundId
+		pcall(function()
+			ContentProvider:PreloadAsync({ sound })
+		end)
+		sound:Destroy()
+	end)
+end
+
 function ToriClient.new(config)
 	local self = setmetatable({}, ToriClient)
 	self.player = config and config.player or Players.LocalPlayer
@@ -331,6 +783,26 @@ function ToriClient.new(config)
 	self.lastPhoenixRebirthVisualTriggeredAt = nil
 	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
 	self.phoenixFlightState = createPhoenixFlightState()
+	self.phoenixFlightAudioStates = setmetatable({}, { __mode = "k" })
+	self.phoenixShieldAudioStates = setmetatable({}, { __mode = "k" })
+	self.phoenixRebirthAudioStates = setmetatable({}, { __mode = "k" })
+	preloadPhoenixShieldAudio(self)
+	preloadPhoenixRebirthAudio(self)
+	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.SetPhoenixFlightAudioHandler) == "function" then
+		self.clientEffectVisuals:SetPhoenixFlightAudioHandler(function(targetPlayer, cueName, cuePayload)
+			return self:HandlePhoenixFlightAudioCue(targetPlayer, cueName, cuePayload)
+		end)
+	end
+	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.SetPhoenixShieldAudioHandler) == "function" then
+		self.clientEffectVisuals:SetPhoenixShieldAudioHandler(function(targetPlayer, cueName, cuePayload)
+			return self:HandlePhoenixShieldAudioCue(targetPlayer, cueName, cuePayload)
+		end)
+	end
+	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.SetPhoenixRebirthAudioHandler) == "function" then
+		self.clientEffectVisuals:SetPhoenixRebirthAudioHandler(function(targetPlayer, cueName, cuePayload)
+			return self:HandlePhoenixRebirthAudioCue(targetPlayer, cueName, cuePayload)
+		end)
+	end
 	self._protectionRegistered = false
 	self._rebirthHookRegistered = false
 	self._hitEffectHookRegistered = false
@@ -496,7 +968,7 @@ function ToriClient:PlayPhoenixRebirthVisual(targetPlayer, payload)
 			targetPlayer,
 			self.phoenixFruitName,
 			self.phoenixRebirthAbility,
-			payload
+			self:BuildPhoenixRebirthPresentationPayload(payload)
 		)
 	end
 
@@ -557,6 +1029,421 @@ function ToriClient:IsPhoenixFlightActive(now)
 		and (not self.phoenixFlightState.FlightStarted or now < self.phoenixFlightState.EndTime)
 end
 
+function ToriClient:CreatePhoenixFlightSound(targetPlayer, audioKey, looped)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundId = getPhoenixFlightSoundId(self, audioKey)
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "ToriPhoenixFlight" .. tostring(audioKey)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = getPhoenixFlightAudioNumber(self, "Volume", 1, 0)
+
+	local rollOffMaxDistance = getPhoenixFlightAudioNumber(self, "RollOffMaxDistance", nil, 1)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = rollOffMaxDistance
+	end
+
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	return sound
+end
+
+function ToriClient:PlayPhoenixFlightOneShot(targetPlayer, audioKey)
+	local sound = self:CreatePhoenixFlightSound(targetPlayer, audioKey, false)
+	if not sound then
+		return nil
+	end
+
+	local state = getOrCreatePhoenixFlightAudioState(self, targetPlayer)
+	if state and not state.CleanedUp then
+		state.OneShotSounds = state.OneShotSounds or {}
+		state.OneShotSounds[#state.OneShotSounds + 1] = sound
+	end
+
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+
+		forgetPhoenixFlightOneShot(state, sound)
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getPhoenixFlightSoundCleanupDelay(sound))
+	return sound
+end
+
+function ToriClient:PlayPhoenixFlightCueOnce(targetPlayer, cueName, audioKey)
+	local state = getOrCreatePhoenixFlightAudioState(self, targetPlayer)
+	if not state then
+		return nil
+	end
+
+	state.PlayedCues = state.PlayedCues or {}
+	if state.PlayedCues[cueName] then
+		return nil
+	end
+	state.PlayedCues[cueName] = true
+
+	local sound = self:PlayPhoenixFlightOneShot(targetPlayer, audioKey)
+	if not sound then
+		state.PlayedCues[cueName] = nil
+	end
+	return sound
+end
+
+function ToriClient:StartPhoenixFlightLoopSound(targetPlayer)
+	local state = getOrCreatePhoenixFlightAudioState(self, targetPlayer)
+	if not state then
+		return nil
+	end
+
+	stopPhoenixFlightLoopSoundState(state)
+	local sound = self:CreatePhoenixFlightSound(targetPlayer, PHOENIX_FLIGHT_AUDIO_KEYS.FlightLoop, true)
+	if not sound then
+		return nil
+	end
+
+	state.LoopSound = sound
+	sound:Play()
+	return sound
+end
+
+function ToriClient:StopPhoenixFlightLoopSound(targetPlayer)
+	local audioStates = self.phoenixFlightAudioStates
+	local state = audioStates and audioStates[targetPlayer] or nil
+	stopPhoenixFlightLoopSoundState(state)
+end
+
+function ToriClient:StopPhoenixFlightAudioForPlayer(targetPlayer, options)
+	if not targetPlayer then
+		return
+	end
+
+	local audioStates = self.phoenixFlightAudioStates
+	local state = audioStates and audioStates[targetPlayer] or nil
+	if state then
+		cleanupPhoenixFlightAudioState(state)
+		audioStates[targetPlayer] = nil
+	end
+
+	if type(options) == "table" and options.PlayDeactivation == true then
+		self:PlayPhoenixFlightCueOnce(
+			targetPlayer,
+			PHOENIX_FLIGHT_AUDIO_CUES.Deactivate,
+			PHOENIX_FLIGHT_AUDIO_KEYS.Deactivation
+		)
+	end
+end
+
+function ToriClient:CreatePhoenixShieldSound(targetPlayer, audioKey, looped)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundId = getPhoenixShieldSoundId(self, audioKey)
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "ToriPhoenixFlameShield" .. tostring(audioKey)
+	sound.SoundId = soundId
+	sound.Looped = looped == true
+	sound.Volume = getPhoenixShieldAudioNumber(self, "Volume", 1, 0)
+
+	local rollOffMaxDistance = getPhoenixShieldAudioNumber(self, "RollOffMaxDistance", nil, 1)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = rollOffMaxDistance
+	end
+
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	return sound
+end
+
+function ToriClient:PlayPhoenixShieldOneShot(targetPlayer, audioKey)
+	local sound = self:CreatePhoenixShieldSound(targetPlayer, audioKey, false)
+	if not sound then
+		return nil
+	end
+
+	local state = getOrCreatePhoenixShieldAudioState(self, targetPlayer)
+	if state and not state.CleanedUp then
+		state.OneShotSounds = state.OneShotSounds or {}
+		state.OneShotSounds[#state.OneShotSounds + 1] = sound
+	end
+
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+
+		forgetPhoenixShieldOneShot(state, sound)
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getPhoenixFlightSoundCleanupDelay(sound))
+	return sound
+end
+
+function ToriClient:CreatePhoenixRebirthSound(targetPlayer, audioKey)
+	local rootPart = getPlayerRootPart(targetPlayer)
+	if not rootPart then
+		return nil
+	end
+
+	local soundId = getPhoenixRebirthSoundId(self, audioKey)
+	if not soundId then
+		return nil
+	end
+
+	local sound = Instance.new("Sound")
+	sound.Name = "ToriPhoenixRebirth" .. tostring(audioKey)
+	sound.SoundId = soundId
+	sound.Looped = false
+	sound.Volume = getPhoenixRebirthAudioNumber(self, "Volume", 1, 0)
+
+	local rollOffMaxDistance = getPhoenixRebirthAudioNumber(self, "RollOffMaxDistance", nil, 1)
+	if rollOffMaxDistance then
+		sound.RollOffMaxDistance = rollOffMaxDistance
+	end
+
+	sound.Parent = rootPart
+	SettingsAudioController.TrackSound(sound)
+	return sound
+end
+
+function ToriClient:PlayPhoenixRebirthOneShot(targetPlayer, audioKey)
+	local sound = self:CreatePhoenixRebirthSound(targetPlayer, audioKey)
+	if not sound then
+		return nil
+	end
+
+	local state = getOrCreatePhoenixRebirthAudioState(self, targetPlayer)
+	if state and not state.CleanedUp then
+		state.OneShotSounds = state.OneShotSounds or {}
+		state.OneShotSounds[#state.OneShotSounds + 1] = sound
+	end
+
+	sound:Play()
+
+	local endedConnection
+	endedConnection = sound.Ended:Connect(function()
+		if endedConnection then
+			endedConnection:Disconnect()
+			endedConnection = nil
+		end
+
+		forgetPhoenixRebirthOneShot(state, sound)
+		if sound.Parent then
+			sound:Destroy()
+		end
+	end)
+
+	Debris:AddItem(sound, getPhoenixFlightSoundCleanupDelay(sound))
+	return sound
+end
+
+function ToriClient:PlayPhoenixShieldCueOnce(targetPlayer, cueName, audioKey)
+	local state = getOrCreatePhoenixShieldAudioState(self, targetPlayer)
+	if not state then
+		return nil
+	end
+
+	state.PlayedCues = state.PlayedCues or {}
+	if state.PlayedCues[cueName] then
+		return nil
+	end
+	state.PlayedCues[cueName] = true
+
+	local sound = self:PlayPhoenixShieldOneShot(targetPlayer, audioKey)
+	if not sound then
+		state.PlayedCues[cueName] = nil
+	end
+	return sound
+end
+
+function ToriClient:StartPhoenixShieldLoopSound(targetPlayer)
+	local state = getOrCreatePhoenixShieldAudioState(self, targetPlayer)
+	if not state then
+		return nil
+	end
+
+	stopPhoenixShieldLoopSoundState(state)
+	local sound = self:CreatePhoenixShieldSound(targetPlayer, PHOENIX_SHIELD_AUDIO_KEYS.Loop, true)
+	if not sound then
+		return nil
+	end
+
+	state.LoopSound = sound
+	sound:Play()
+	return sound
+end
+
+function ToriClient:StopPhoenixShieldLoopSound(targetPlayer)
+	local audioStates = self.phoenixShieldAudioStates
+	local state = audioStates and audioStates[targetPlayer] or nil
+	stopPhoenixShieldLoopSoundState(state)
+end
+
+function ToriClient:StopPhoenixShieldAudioForPlayer(targetPlayer, options)
+	if not targetPlayer then
+		return
+	end
+
+	local audioStates = self.phoenixShieldAudioStates
+	local state = audioStates and audioStates[targetPlayer] or nil
+	local playDeactivate = type(options) == "table" and options.PlayDeactivate == true
+	if state then
+		stopPhoenixShieldLoopSoundState(state)
+		if not playDeactivate then
+			cleanupPhoenixShieldAudioState(state)
+			audioStates[targetPlayer] = nil
+		end
+	end
+
+	if playDeactivate then
+		self:PlayPhoenixShieldCueOnce(
+			targetPlayer,
+			PHOENIX_SHIELD_AUDIO_CUES.Deactivate,
+			PHOENIX_SHIELD_AUDIO_KEYS.Deactivate
+		)
+	end
+end
+
+function ToriClient:GetPhoenixFlightAudioMarkers()
+	return {
+		LiftOff = getPhoenixFlightAudioMarkerNames(self, PHOENIX_FLIGHT_AUDIO_CUES.LiftOff),
+		AirImpact = getPhoenixFlightAudioMarkerNames(self, PHOENIX_FLIGHT_AUDIO_CUES.AirImpact),
+		Deactivate = getPhoenixFlightAudioMarkerNames(self, PHOENIX_FLIGHT_AUDIO_CUES.Deactivate),
+	}
+end
+
+function ToriClient:BuildPhoenixFlightPresentationPayload(payload)
+	local presentationPayload = copyPhoenixFlightPayload(payload)
+	presentationPayload.AudioMarkers = self:GetPhoenixFlightAudioMarkers()
+	presentationPayload.AudioAirImpactLeadTime = getPhoenixFlightAudioNumber(self, "AirImpactLeadTime", 0.08, 0)
+	return presentationPayload
+end
+
+function ToriClient:BuildPhoenixRebirthPresentationPayload(payload)
+	local presentationPayload = copyPhoenixFlightPayload(payload)
+	presentationPayload.AudioReviveSoundOffset = getPhoenixRebirthAudioNumber(self, "ReviveSoundOffset", 0)
+	return presentationPayload
+end
+
+function ToriClient:HandlePhoenixFlightAudioCue(targetPlayer, cueName, cuePayload)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return false
+	end
+
+	cuePayload = cuePayload or {}
+	if cueName == PHOENIX_FLIGHT_AUDIO_CUES.LiftOff then
+		self:PlayPhoenixFlightCueOnce(
+			targetPlayer,
+			PHOENIX_FLIGHT_AUDIO_CUES.LiftOff,
+			PHOENIX_FLIGHT_AUDIO_KEYS.InitialJumpOff
+		)
+		return true
+	end
+
+	if cueName == PHOENIX_FLIGHT_AUDIO_CUES.AirImpact then
+		self:PlayPhoenixFlightCueOnce(
+			targetPlayer,
+			PHOENIX_FLIGHT_AUDIO_CUES.AirImpact,
+			PHOENIX_FLIGHT_AUDIO_KEYS.AirImpact
+		)
+		return true
+	end
+
+	if cueName == PHOENIX_FLIGHT_AUDIO_CUES.SustainAnimation then
+		if cuePayload.AnimationKey == PHOENIX_FLIGHT_ANIMATION_KEYS.Loop then
+			self:StartPhoenixFlightLoopSound(targetPlayer)
+		else
+			self:StopPhoenixFlightLoopSound(targetPlayer)
+		end
+		return true
+	end
+
+	if cueName == PHOENIX_FLIGHT_AUDIO_CUES.Deactivate then
+		self:StopPhoenixFlightLoopSound(targetPlayer)
+		self:PlayPhoenixFlightCueOnce(
+			targetPlayer,
+			PHOENIX_FLIGHT_AUDIO_CUES.Deactivate,
+			PHOENIX_FLIGHT_AUDIO_KEYS.Deactivation
+		)
+		return true
+	end
+
+	return false
+end
+
+function ToriClient:HandlePhoenixShieldAudioCue(targetPlayer, cueName, cuePayload)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return false
+	end
+
+	cuePayload = cuePayload or {}
+	if cueName == PHOENIX_SHIELD_AUDIO_CUES.Activate then
+		local state = getOrCreatePhoenixShieldAudioState(self, targetPlayer)
+		if state then
+			state.PlayedCues = {}
+		end
+		self:PlayPhoenixShieldCueOnce(
+			targetPlayer,
+			PHOENIX_SHIELD_AUDIO_CUES.Activate,
+			PHOENIX_SHIELD_AUDIO_KEYS.Activate
+		)
+		self:StartPhoenixShieldLoopSound(targetPlayer)
+		return true
+	end
+
+	if cueName == PHOENIX_SHIELD_AUDIO_CUES.Deactivate then
+		self.activePhoenixShields[targetPlayer] = nil
+		self:StopPhoenixShieldAudioForPlayer(targetPlayer, {
+			PlayDeactivate = cuePayload.PlayDeactivate ~= false,
+		})
+		return true
+	end
+
+	return false
+end
+
+function ToriClient:HandlePhoenixRebirthAudioCue(targetPlayer, cueName, _cuePayload)
+	if not targetPlayer or not targetPlayer:IsA("Player") then
+		return false
+	end
+
+	if cueName == PHOENIX_REBIRTH_AUDIO_CUES.Revive then
+		self:PlayPhoenixRebirthOneShot(targetPlayer, PHOENIX_REBIRTH_AUDIO_KEYS.Revive)
+		return true
+	end
+
+	return false
+end
+
 function ToriClient:ReportPhoenixFlightEnded(reason)
 	local requestAbility = self.requestAbility
 	local resolvedReason = typeof(reason) == "string" and reason ~= "" and reason or "unknown"
@@ -598,6 +1485,7 @@ end
 function ToriClient:StopPhoenixFlight(reason, options)
 	local flightState = self.phoenixFlightState
 	if not flightState.Active then
+		self:StopPhoenixFlightAudioForPlayer(self.player, { PlayDeactivation = false })
 		return
 	end
 
@@ -619,8 +1507,18 @@ function ToriClient:StopPhoenixFlight(reason, options)
 		humanoid.AutoRotate = true
 	end
 
+	self:StopPhoenixFlightLoopSound(self.player)
+	local playedEndAnimation = false
 	if self.clientEffectVisuals and typeof(self.clientEffectVisuals.StopPhoenixFlightEffect) == "function" then
-		self.clientEffectVisuals:StopPhoenixFlightEffect(self.player)
+		playedEndAnimation = self.clientEffectVisuals:StopPhoenixFlightEffect(self.player) == true
+	end
+
+	if not playedEndAnimation then
+		self:PlayPhoenixFlightCueOnce(
+			self.player,
+			PHOENIX_FLIGHT_AUDIO_CUES.Deactivate,
+			PHOENIX_FLIGHT_AUDIO_KEYS.Deactivation
+		)
 	end
 
 	toriCooldownLog(
@@ -1253,13 +2151,89 @@ function ToriClient:RestoreSuppressedHazardParts(now)
 	end
 end
 
+function ToriClient:ClearPhoenixShieldState(targetPlayer, options)
+	if not targetPlayer then
+		return
+	end
+
+	self.activePhoenixShields[targetPlayer] = nil
+	if not (type(options) == "table" and options.StopAudio == false) then
+		self:StopPhoenixShieldAudioForPlayer(targetPlayer, {
+			PlayDeactivate = type(options) == "table" and options.PlayDeactivate == true,
+		})
+	end
+end
+
+function ToriClient:StopPhoenixRebirthAudioForPlayer(targetPlayer)
+	if not targetPlayer then
+		return
+	end
+
+	local audioStates = self.phoenixRebirthAudioStates
+	local state = audioStates and audioStates[targetPlayer] or nil
+	if state then
+		cleanupPhoenixRebirthAudioState(state)
+		audioStates[targetPlayer] = nil
+	end
+end
+
+function ToriClient:PlayPhoenixShieldGameplayEndAudio(targetPlayer, shieldState)
+	if not targetPlayer or self.activePhoenixShields[targetPlayer] ~= shieldState then
+		return false
+	end
+
+	self.activePhoenixShields[targetPlayer] = nil
+	self:StopPhoenixShieldLoopSound(targetPlayer)
+	self:PlayPhoenixShieldCueOnce(
+		targetPlayer,
+		PHOENIX_SHIELD_AUDIO_CUES.Deactivate,
+		PHOENIX_SHIELD_AUDIO_KEYS.Deactivate
+	)
+	return true
+end
+
+function ToriClient:SchedulePhoenixShieldAudioExpiration(targetPlayer, shieldState)
+	if not targetPlayer or not shieldState then
+		return
+	end
+
+	shieldState.AudioToken = (tonumber(shieldState.AudioToken) or 0) + 1
+	local audioToken = shieldState.AudioToken
+
+	local function schedule()
+		local leadTime = getPhoenixShieldAudioNumber(
+			self,
+			"DeactivateLeadTime",
+			PHOENIX_SHIELD_AUDIO_DEACTIVATE_LEAD_TIME,
+			0
+		)
+		local cueTime = (shieldState.EndTime or os.clock()) - leadTime
+		local delayTime = math.max(0, cueTime - os.clock())
+		task.delay(delayTime, function()
+			if self.activePhoenixShields[targetPlayer] ~= shieldState or shieldState.AudioToken ~= audioToken then
+				return
+			end
+
+			local remaining = ((shieldState.EndTime or 0) - leadTime) - os.clock()
+			if remaining > PHOENIX_SHIELD_AUDIO_EXPIRY_RESCHEDULE_THRESHOLD then
+				schedule()
+				return
+			end
+
+			self:PlayPhoenixShieldGameplayEndAudio(targetPlayer, shieldState)
+		end)
+	end
+
+	schedule()
+end
+
 function ToriClient:HasActivePhoenixShield(now)
 	for shieldOwner, shield in pairs(self.activePhoenixShields) do
 		if now < shield.EndTime then
 			return true
 		end
 
-		self.activePhoenixShields[shieldOwner] = nil
+		self:PlayPhoenixShieldGameplayEndAudio(shieldOwner, shield)
 	end
 
 	return false
@@ -1323,13 +2297,11 @@ function ToriClient:UpdatePhoenixShieldHazardSuppression()
 
 	for shieldOwner, shield in pairs(self.activePhoenixShields) do
 		if now >= shield.EndTime then
-			self.activePhoenixShields[shieldOwner] = nil
+			self:PlayPhoenixShieldGameplayEndAudio(shieldOwner, shield)
 		else
 			local ownerRootPart = getPlayerRootPart(shieldOwner)
 			if not ownerRootPart then
-				if shieldOwner.Parent == nil then
-					self.activePhoenixShields[shieldOwner] = nil
-				end
+				self:ClearPhoenixShieldState(shieldOwner, { PlayDeactivate = false })
 			elseif localRootPart then
 				self:SuppressHazardsNearPhoenixShield(shieldOwner, shield, ownerRootPart, localRootPart, now)
 			end
@@ -1372,12 +2344,14 @@ function ToriClient:IsLocalPlayerInsidePhoenixShield(position)
 	local now = os.clock()
 	for shieldOwner, shield in pairs(self.activePhoenixShields) do
 		if now >= shield.EndTime then
-			self.activePhoenixShields[shieldOwner] = nil
+			self:PlayPhoenixShieldGameplayEndAudio(shieldOwner, shield)
 		else
 			local ownerRootPart = getPlayerRootPart(shieldOwner)
 			local shieldRadius = math.max(0, tonumber(shield.Radius) or 0)
 			if ownerRootPart and shieldRadius > 0 and getPlanarDistance(ownerRootPart.Position, checkPosition) <= shieldRadius then
 				return true
+			elseif not ownerRootPart then
+				self:ClearPhoenixShieldState(shieldOwner, { PlayDeactivate = false })
 			end
 		end
 	end
@@ -1516,17 +2490,23 @@ function ToriClient:StartPhoenixShield(targetPlayer, payload)
 		return
 	end
 
+	local now = os.clock()
+	local serverEndTime = tonumber(payload and payload.EndTime)
+	local remainingDuration = serverEndTime and (serverEndTime - Workspace:GetServerTimeNow()) or duration
 	local shieldState = self.activePhoenixShields[targetPlayer]
-	local shieldEndTime = os.clock() + duration
+	local shieldEndTime = now + math.max(0, remainingDuration)
 	if shieldState then
 		shieldState.EndTime = shieldEndTime
 		shieldState.Radius = radius
 	else
-		self.activePhoenixShields[targetPlayer] = {
+		shieldState = {
 			EndTime = shieldEndTime,
 			Radius = radius,
 		}
+		self.activePhoenixShields[targetPlayer] = shieldState
 	end
+
+	self:SchedulePhoenixShieldAudioExpiration(targetPlayer, shieldState)
 
 	if targetPlayer == self.player then
 		self:StartPhoenixShieldAnimationLock(payload)
@@ -1578,16 +2558,20 @@ end
 
 function ToriClient:HandleEffect(targetPlayer, abilityName, payload)
 	if abilityName == self.phoenixFlightAbility then
+		local resolvedPayload = payload or {}
+		if targetPlayer == self.player then
+			self:StartPhoenixFlight(resolvedPayload)
+		else
+			self:StopPhoenixFlightAudioForPlayer(targetPlayer, { PlayDeactivation = false })
+		end
+
 		if self.clientEffectVisuals and typeof(self.clientEffectVisuals.CreatePhoenixFlightEffect) == "function" then
 			self.clientEffectVisuals:CreatePhoenixFlightEffect(
 				targetPlayer,
 				self.phoenixFruitName,
 				abilityName,
-				payload or {}
+				self:BuildPhoenixFlightPresentationPayload(resolvedPayload)
 			)
-		end
-		if targetPlayer == self.player then
-			self:StartPhoenixFlight(payload or {})
 		end
 		return true
 	end
@@ -1634,13 +2618,14 @@ function ToriClient:HandleCharacterRemoving()
 		self:ReleasePhoenixShieldAnimationLock(self.phoenixShieldAnimationLock)
 	end
 	self:StopPhoenixFlight("character_removing", { ReportEnd = false })
+	self:StopPhoenixRebirthAudioForPlayer(self.player)
 	self:StopPhoenixVisualsForPlayer(self.player, 0)
 	self.phoenixRebirthVisualTimes = setmetatable({}, { __mode = "k" })
 	self.flightInputState.Forward = false
 	self.flightInputState.Backward = false
 	self.flightInputState.Left = false
 	self.flightInputState.Right = false
-	self.activePhoenixShields[self.player] = nil
+	self:ClearPhoenixShieldState(self.player, { PlayDeactivate = false })
 	self:RestoreSuppressedHazardParts(math.huge)
 	if self:HasActivePhoenixShield(os.clock()) then
 		self:EnsurePhoenixShieldHazardSuppressionLoop()
@@ -1654,7 +2639,9 @@ function ToriClient:HandlePlayerRemoving(leavingPlayer)
 		self:HandleCharacterRemoving()
 	end
 
-	self.activePhoenixShields[leavingPlayer] = nil
+	self:StopPhoenixFlightAudioForPlayer(leavingPlayer, { PlayDeactivation = false })
+	self:StopPhoenixRebirthAudioForPlayer(leavingPlayer)
+	self:ClearPhoenixShieldState(leavingPlayer, { PlayDeactivate = false })
 	self:StopPhoenixVisualsForPlayer(leavingPlayer, 0)
 end
 

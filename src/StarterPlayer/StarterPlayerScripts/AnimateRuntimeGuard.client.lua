@@ -6,6 +6,12 @@ local AnimationLoadDiagnostics =
 	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("AnimationLoadDiagnostics"))
 local DiagnosticLogLimiter =
 	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
+local AnimationResolver = require(
+	ReplicatedStorage:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Shared")
+		:WaitForChild("AnimationResolver")
+)
 
 local player = Players.LocalPlayer
 
@@ -13,6 +19,7 @@ local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 1
 local WARN_COOLDOWN = 4
 local ENABLE_ATTRIBUTE = "UseSafeAnimateRuntime"
+local DEFAULT_ENABLED = true
 local TRANSITION_FADE_TIME = 0.12
 local CATALOG_DISCOVERY_TIMEOUT = 4
 local CATALOG_RETRY_INTERVAL = 0.2
@@ -28,6 +35,33 @@ local CATALOG_FOLDER_NAMES = {
 	Swim = "swim",
 	SwimIdle = "swimidle",
 	Sit = "sit",
+}
+
+local DEFAULT_CLASSIC_R6_CATALOG = {
+	Idle = { "rbxassetid://180435571", "rbxassetid://180435792" },
+	Walk = { AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "AnimateRuntimeGuard.R6Walk" })
+		or "rbxassetid://180426354" },
+	Run = { AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "AnimateRuntimeGuard.R6Run" })
+		or "rbxassetid://180426354" },
+	Jump = { "rbxassetid://125750702" },
+	Fall = { "rbxassetid://180436148" },
+	Climb = { "rbxassetid://180436334" },
+	Swim = { AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "AnimateRuntimeGuard.R6Swim" })
+		or "rbxassetid://180426354" },
+	SwimIdle = { AnimationResolver.GetAssetId("Movement.R6Walk", { Context = "AnimateRuntimeGuard.R6SwimIdle" })
+		or "rbxassetid://180426354" },
+	Sit = { "rbxassetid://178130996" },
+}
+
+local DEFAULT_R6G_CATALOG = {
+	Walk = { AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "AnimateRuntimeGuard.R6GWalk" })
+		or DEFAULT_CLASSIC_R6_CATALOG.Walk[1] },
+	Run = { AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "AnimateRuntimeGuard.R6GRun" })
+		or DEFAULT_CLASSIC_R6_CATALOG.Run[1] },
+	Swim = { AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "AnimateRuntimeGuard.R6GSwim" })
+		or DEFAULT_CLASSIC_R6_CATALOG.Swim[1] },
+	SwimIdle = { AnimationResolver.GetAssetId("Movement.R6GWalk", { Context = "AnimateRuntimeGuard.R6GSwimIdle" })
+		or DEFAULT_CLASSIC_R6_CATALOG.SwimIdle[1] },
 }
 
 local syntheticAnimationsById = {}
@@ -54,7 +88,12 @@ local function logWarn(message, ...)
 end
 
 local function isEnabled()
-	return ReplicatedStorage:GetAttribute(ENABLE_ATTRIBUTE) == true
+	local configuredValue = ReplicatedStorage:GetAttribute(ENABLE_ATTRIBUTE)
+	if configuredValue == nil then
+		return DEFAULT_ENABLED
+	end
+
+	return configuredValue == true
 end
 
 local function isRequiredState(key)
@@ -158,6 +197,51 @@ local function collectAnimationIds(folder)
 	return animationIds
 end
 
+local function copyAnimationIds(source)
+	local copy = {}
+	if type(source) ~= "table" then
+		return copy
+	end
+
+	for _, animationId in ipairs(source) do
+		copy[#copy + 1] = animationId
+	end
+	return copy
+end
+
+local function getFallbackAnimationIds(character, key)
+	local fallbackCatalog = DEFAULT_CLASSIC_R6_CATALOG
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local rigVariant = AnimationResolver.ResolveRigVariant(player, character, humanoid, {
+			DefaultVariant = "Default",
+		})
+		if rigVariant == "R6G" then
+			return copyAnimationIds(DEFAULT_R6G_CATALOG[key] or DEFAULT_CLASSIC_R6_CATALOG[key])
+		end
+	end
+
+	return copyAnimationIds(fallbackCatalog[key])
+end
+
+local function fillMissingCatalogDefaults(animationCatalog, character)
+	local filled = false
+	for _, key in ipairs(CATALOG_STATE_ORDER) do
+		local animationIds = animationCatalog[key]
+		if type(animationIds) ~= "table" or #animationIds == 0 then
+			local fallbackIds = getFallbackAnimationIds(character, key)
+			if #fallbackIds > 0 then
+				animationCatalog[key] = fallbackIds
+				filled = true
+			end
+		end
+	end
+
+	if filled then
+		animationCatalog.Source = tostring(animationCatalog.Source) .. "+default_catalog"
+	end
+end
+
 local function buildAnimationCatalog(character)
 	local animate = getAnimateScript(character)
 	local animationCatalog = {
@@ -168,6 +252,8 @@ local function buildAnimationCatalog(character)
 	for _, key in ipairs(CATALOG_STATE_ORDER) do
 		animationCatalog[key] = collectAnimationIds(animate and animate:FindFirstChild(CATALOG_FOLDER_NAMES[key]))
 	end
+
+	fillMissingCatalogDefaults(animationCatalog, character)
 
 	return animationCatalog
 end

@@ -7,15 +7,14 @@ local CrewResolver = {}
 local warned = {}
 local diagnostics = {
 	MissingOnePieceCharactersFolder = false,
-	MissingLegacyBrainrotFolder = false,
 	MissingCrewMemberIds = {},
 	MissingCrewModels = {},
-	LegacyFallbackModelIds = {},
+	AttemptedLegacyModelFallbacks = {},
 }
 local diagnosticSets = {
 	MissingCrewMemberIds = {},
 	MissingCrewModels = {},
-	LegacyFallbackModelIds = {},
+	AttemptedLegacyModelFallbacks = {},
 }
 local missingCrewModelWarningCount = 0
 local MAX_MISSING_CREW_MODEL_WARNINGS = 5
@@ -72,19 +71,7 @@ local function getOnePieceCharactersFolder()
 		diagnostics.MissingOnePieceCharactersFolder = true
 		warnOnce(
 			"missing_one_piece_characters",
-			"[CrewResolver] ReplicatedStorage.Assets.One Piece Characters is missing; temporarily using legacy BrainrotFolder models where available."
-		)
-	end
-	return folder
-end
-
-local function getLegacyBrainrotFolder()
-	local folder = ReplicatedStorage:FindFirstChild("BrainrotFolder")
-	if not folder then
-		diagnostics.MissingLegacyBrainrotFolder = true
-		warnOnce(
-			"missing_brainrot_folder",
-			"[CrewResolver] Legacy ReplicatedStorage.BrainrotFolder fallback is missing."
+			"[CrewResolver] ReplicatedStorage.Assets.One Piece Characters is missing. CrewMember physical models cannot spawn."
 		)
 	end
 	return folder
@@ -164,16 +151,15 @@ function CrewResolver.GetTemplateStrict(crewMemberId, variantKey)
 		warnMissingCrewModel(modelName)
 	end
 
-	local legacyFolder = getLegacyBrainrotFolder()
-	local legacyModel = findVariantModel(legacyFolder, resolved.BaseId, resolved.Variant)
-	if legacyModel then
-		appendDiagnostic("LegacyFallbackModelIds", resolved.BaseId)
-		warnOnce(
-			"legacy_fallback",
-			string.format("[CrewResolver] Temporarily using BrainrotFolder fallback models for crewmates. First fallback: '%s'.", resolved.BaseId)
+	appendDiagnostic("AttemptedLegacyModelFallbacks", resolved.BaseId)
+	warnOnce(
+		"canonical_model_required:" .. tostring(resolved.BaseId),
+		string.format(
+			"[CrewResolver] Missing canonical CrewMember model '%s' for '%s'. Legacy model fallback is disabled.",
+			tostring(modelName),
+			tostring(resolved.DisplayName)
 		)
-		return legacyModel, resolved.Variant, resolved
-	end
+	)
 
 	return nil
 end
@@ -191,10 +177,9 @@ end
 function CrewResolver.GetDiagnostics()
 	return {
 		MissingOnePieceCharactersFolder = diagnostics.MissingOnePieceCharactersFolder,
-		MissingLegacyBrainrotFolder = diagnostics.MissingLegacyBrainrotFolder,
 		MissingCrewMemberIds = copyArray(diagnostics.MissingCrewMemberIds),
 		MissingCrewModels = copyArray(diagnostics.MissingCrewModels),
-		LegacyFallbackModelIds = copyArray(diagnostics.LegacyFallbackModelIds),
+		AttemptedLegacyModelFallbacks = copyArray(diagnostics.AttemptedLegacyModelFallbacks),
 	}
 end
 

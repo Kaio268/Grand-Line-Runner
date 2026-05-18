@@ -211,9 +211,8 @@ local function questCard(props)
 			Size = UDim2.new(1, -196, 0, 24),
 			Text = tostring(quest.name or "Quest"),
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 32,
+			TextSize = 20,
 			TextXAlignment = Enum.TextXAlignment.Left,
-			TextScaled = true,
 		}),
 		Description = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -222,7 +221,7 @@ local function questCard(props)
 			Size = UDim2.new(1, -196, 0, 34),
 			Text = tostring(quest.description or ""),
 			TextColor3 = Theme.Palette.Muted,
-			TextSize = 15,
+			TextSize = 16,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
@@ -250,7 +249,7 @@ local function questCard(props)
 			Size = UDim2.new(1, -196, 0, 18),
 			Text = "Reward: " .. tostring(quest.rewardText or ""),
 			TextColor3 = Theme.Palette.Gold,
-			TextSize = 14,
+			TextSize = 15,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
@@ -328,8 +327,8 @@ local function QuestScreen(props)
 			quest = quest,
 		})
 	end
-	local listY = props.noticeText and 150 or 118
-	local listHeightDelta = props.noticeText and -162 or -130
+	local listY = props.noticeText and 154 or 118
+	local listHeightDelta = props.noticeText and -166 or -130
 
 	return e("Frame", {
 		BackgroundColor3 = SHELL.MenuOverlay,
@@ -495,7 +494,7 @@ local function QuestScreen(props)
 					Size = UDim2.new(1, -32, 0, 16),
 					Text = activeCategory and string.format("%d/%d complete - %s", activeCategory.completedCount or 0, activeCategory.totalCount or 0, activeCategory.resetText or "") or "Loading quests...",
 					TextColor3 = Theme.Palette.Muted,
-					TextSize = 13,
+					TextSize = 14,
 					TextXAlignment = Enum.TextXAlignment.Left,
 				}),
 			}),
@@ -503,12 +502,12 @@ local function QuestScreen(props)
 				BackgroundColor3 = Theme.Palette.TabRewardFill,
 				BackgroundTransparency = 0.2,
 				BorderSizePixel = 0,
-				Font = Theme.Fonts.BodyStrong,
+				Font = Theme.Fonts.Body,
 				Position = UDim2.fromOffset(0, 108),
-				Size = UDim2.new(1, 0, 0, 32),
+				Size = UDim2.new(1, 0, 0, 36),
 				Text = tostring(props.noticeText),
 				TextColor3 = SHELL.GoldHighlight,
-				TextSize = 13,
+				TextSize = 15,
 				ZIndex = 4,
 			}, {
 				Corner = e("UICorner", {

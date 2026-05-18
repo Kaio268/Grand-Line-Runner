@@ -67,7 +67,7 @@ local function buildFailurePayload(standName, errorCode, message, progress, step
 end
 
 local function getFailureMessage(errorCode)
-	if errorCode == "brainrot_max_level" then
+	if errorCode == "crew_member_max_level" then
 		return "This Crewmate is already max level."
 	end
 	if errorCode == "not_enough_food" then
@@ -76,19 +76,19 @@ local function getFailureMessage(errorCode)
 	if errorCode == "step_changed" then
 		return "The next food changed. Please confirm the new step."
 	end
-	if errorCode == "missing_brainrot" then
+	if errorCode == "missing_crew_member" then
 		return "Crewmate progress could not be loaded."
 	end
 	return "Unable to use food on this Crewmate right now."
 end
 
 local function getCanonicalFoodStatusDisplayNameForPopup(player, context)
-	local legacyIdentity = tostring(context and context.BrainrotName or "")
-	if legacyIdentity == "" then
+	local crewMemberId = tostring(context and context.CrewMemberId or "")
+	if crewMemberId == "" then
 		return nil
 	end
 
-	local _, result = CrewMemberCanonicalReadGate.ResolveFoodStatusDisplayName(player, legacyIdentity, {
+	local _, result = CrewMemberCanonicalReadGate.ResolveFoodStatusDisplayName(player, crewMemberId, {
 		Player = player,
 	})
 	if typeof(result) ~= "table" then
@@ -109,15 +109,15 @@ local function getCanonicalFoodStatusDisplayNameForPopup(player, context)
 end
 
 local function getFoodStatusReadAuthorityDisplayNameForPopup(player, context, progress, appliedStep)
-	local legacyIdentity = tostring(context and context.BrainrotName or "")
-	if legacyIdentity == "" then
+	local crewMemberId = tostring(context and context.CrewMemberId or "")
+	if crewMemberId == "" then
 		return nil
 	end
 
 	local _, result = CrewMemberCanonicalReadGate.ResolveFoodStatusReadAuthority(player, {
 		StandName = tostring(context and context.StandName or ""),
-		LegacyIdentity = legacyIdentity,
-		InstanceId = tostring(context and context.BrainrotInstanceId or ""),
+		LegacyIdentity = crewMemberId,
+		InstanceId = tostring(context and context.CrewMemberInstanceId or ""),
 		Progress = progress,
 		AppliedStep = appliedStep,
 	}, {
@@ -184,26 +184,26 @@ local function resolveUpgradeContext(player, standName)
 	end
 
 	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
-	local brainrotName = standData and standData.BrainrotName
-	if typeof(brainrotName) ~= "string" or brainrotName == "" then
-		return false, buildFailurePayload(standName, "missing_brainrot", "Place a Crewmate on this stand first.")
+	local crewMemberId = standData and standData.CrewMemberName
+	if typeof(crewMemberId) ~= "string" or crewMemberId == "" then
+		return false, buildFailurePayload(standName, "missing_crew_member", "Place a Crewmate on this stand first.")
 	end
 
-	local brainrotInstanceId = CrewInstanceService.GetStandInstanceId(player, standName)
-	if brainrotInstanceId == "" then
-		brainrotInstanceId = CrewInstanceService.EnsureStandInstance(player, standName, brainrotName) or ""
+	local crewMemberInstanceId = CrewInstanceService.GetStandInstanceId(player, standName)
+	if crewMemberInstanceId == "" then
+		crewMemberInstanceId = CrewInstanceService.EnsureStandInstance(player, standName, crewMemberId) or ""
 	end
 
-	local progressTarget = brainrotInstanceId ~= "" and brainrotInstanceId or brainrotName
+	local progressTarget = crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberId
 	local progress = CrewFoodProgression.GetProgress(player, progressTarget)
 	if not progress then
-		return false, buildFailurePayload(standName, "missing_brainrot", "Crewmate progress could not be loaded.")
+		return false, buildFailurePayload(standName, "missing_crew_member", "Crewmate progress could not be loaded.")
 	end
 
 	return true, {
 		StandName = standName,
-		BrainrotName = brainrotName,
-		BrainrotInstanceId = brainrotInstanceId,
+		CrewMemberId = crewMemberId,
+		CrewMemberInstanceId = crewMemberInstanceId,
 		ProgressTarget = progressTarget,
 		Progress = progress,
 	}
@@ -218,8 +218,8 @@ local function syncStandStateForProgress(player, fallbackStandName, progress)
 		for _, gui in ipairs(playerGui:GetChildren()) do
 			if gui:IsA("SurfaceGui") and tonumber(gui.Name) then
 				local guiStandName = gui.Name
-				local guiBrainrotInstanceId = CrewInstanceService.GetStandInstanceId(player, guiStandName)
-				if guiBrainrotInstanceId == targetInstanceId then
+				local guiCrewMemberInstanceId = CrewInstanceService.GetStandInstanceId(player, guiStandName)
+				if guiCrewMemberInstanceId == targetInstanceId then
 					CrewStandIncomeAuthority.SetStandLevel(player, guiStandName, progress.Level, "stand_upgrade_progress_sync")
 					updateStandGui(player, guiStandName, progress)
 					updatedAnyStand = true

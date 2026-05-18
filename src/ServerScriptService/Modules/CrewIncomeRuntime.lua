@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 
 local _STEAL_PRODUCT_ID = 3512126073
 local MAX_INCOME_ON_JOIN = 1e16
@@ -92,7 +93,7 @@ local CrewMemberCanonicalReadGateModule = nil
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local BrainrotsConfig = CrewCatalog.GetLegacyConfig()
+local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
@@ -106,19 +107,21 @@ pcall(function()
 	CrewRegistry.Build()
 end)
 
-local getPlayerStandBrainrotName
-local getPlayerStandBrainrotInstanceId
-local getBrainrotLevel
+local getPlayerStandCrewMemberName
+local getPlayerStandCrewMemberInstanceId
+local getCrewMemberLevel
 local dmSet
 local STAND_DEBUG = false
 local ensuredStandFolders = {}
 local standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction()
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CrewIncomeDebugTrace") == true
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 local INCOME_SHADOW_BANK_THROTTLE_SECONDS = 3
 local INCOME_STATUS_DISPLAY_METADATA_CACHE_SECONDS = 15
+local crewRecordCache = setmetatable({}, { __mode = "k" })
+local OVERHEAD_ATTRIBUTES = CrewOverhead.Attribute
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -160,16 +163,16 @@ local function saveTrace(message, ...)
 	print(string.format("[SAVE TRACE] t=%.3f " .. message, os.clock(), ...))
 end
 
-local function countSavedStandEntries(incomeBrainrots)
-	if typeof(incomeBrainrots) ~= "table" then
+local function countSavedStandEntries(incomeCrewMembers)
+	if typeof(incomeCrewMembers) ~= "table" then
 		return 0
 	end
 
 	local count = 0
-	for _, standData in pairs(incomeBrainrots) do
+	for _, standData in pairs(incomeCrewMembers) do
 		if
 			typeof(standData) == "table"
-			and tostring(standData.BrainrotName or standData.LegacyStorageName or standData.CrewMemberName or "") ~= ""
+			and tostring(standData.CrewMemberName or standData.LegacyStorageName or "") ~= ""
 		then
 			count += 1
 		end
@@ -230,12 +233,37 @@ local function logSavedShipSnapshot(player, context)
 	)
 end
 
+local CREW_PICKUP_DEBUG = true
+
 local function standDebug(message, ...)
 	if STAND_DEBUG ~= true then
 		return
 	end
 
 	warn(string.format("[GLR StandDebug] " .. tostring(message), ...))
+end
+
+local function crewPickupDebug(message, ...)
+	if CREW_PICKUP_DEBUG ~= true then
+		return
+	end
+
+	local prefix = "[CrewPickupDebug] "
+	if select("#", ...) == 0 then
+		warn(prefix .. tostring(message))
+		return
+	end
+
+	local ok, formatted = pcall(string.format, prefix .. tostring(message), ...)
+	warn(ok and formatted or (prefix .. tostring(message)))
+end
+
+local function formatCrewPickupDebugFields(fields)
+	local parts = {}
+	for _, field in ipairs(fields or {}) do
+		parts[#parts + 1] = tostring(field[1]) .. "=" .. tostring(field[2])
+	end
+	return table.concat(parts, " ")
 end
 
 local function getCrewStorage()
@@ -365,15 +393,27 @@ local function getVariantAndBaseName(fullName)
 	return "Normal", fullName, (VariantCfg.Versions or {}).Normal
 end
 
-local function findTemplateForName(brainrotName)
-	local variantKey, baseName = getVariantAndBaseName(brainrotName)
+local function resolveCanonicalCrewMemberId(itemName)
+	local canonicalItemName, info = CrewCatalog.ResolveCanonicalCrewMemberId(itemName)
+	if info then
+		return canonicalItemName
+	end
+	return ""
+end
+
+local function findTemplateForName(crewMemberName)
+	local canonicalName = resolveCanonicalCrewMemberId(crewMemberName)
+	if canonicalName == "" then
+		return nil
+	end
+	local variantKey, baseName = getVariantAndBaseName(canonicalName)
 
 	local registryTemplate = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 	if registryTemplate and registryTemplate:IsA("Model") then
 		return registryTemplate
 	end
 
-	registryTemplate = CrewRegistry.GetTemplateWithFallback(brainrotName, "Normal")
+	registryTemplate = CrewRegistry.GetTemplateWithFallback(canonicalName, "Normal")
 	if registryTemplate and registryTemplate:IsA("Model") then
 		return registryTemplate
 	end
@@ -437,11 +477,11 @@ local function tryPlayIdle(model, animId)
 end
 
 local function getStandCollectMultiplier(player, standName)
-	local brainrotName = getPlayerStandBrainrotName(player, standName)
-	local brainrotInstanceId = getPlayerStandBrainrotInstanceId(player, standName)
+	local crewMemberName = getPlayerStandCrewMemberName(player, standName)
+	local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
 	local lvl
-	if brainrotName ~= "" then
-		lvl = getBrainrotLevel(player, brainrotInstanceId ~= "" and brainrotInstanceId or brainrotName)
+	if crewMemberName ~= "" then
+		lvl = getCrewMemberLevel(player, crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberName)
 		if CrewStandIncomeAuthority.GetStandLevel(player, standName) ~= lvl then
 			CrewStandIncomeAuthority.SetStandLevel(player, standName, lvl, "stand_collect_multiplier_level_sync")
 		end
@@ -519,19 +559,36 @@ local function getEquippedToolName(player)
 end
 
 local function getInventoryQuantity(player, itemName)
-	local inv = player:FindFirstChild("Inventory")
-	if not inv then
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return 0
 	end
-	local item = inv:FindFirstChild(itemName)
-	if not item then
+	itemName = tostring(itemName or "")
+	if itemName == "" then
 		return 0
 	end
-	local q = item:FindFirstChild("Quantity")
-	if not q or not q:IsA("NumberValue") then
+	itemName = resolveCanonicalCrewMemberId(itemName)
+	if itemName == "" then
 		return 0
 	end
-	return q.Value
+
+	local ok, crewInventory = pcall(function()
+		return CrewInstanceService.GetCrewInventory(player)
+	end)
+	if not ok or typeof(crewInventory) ~= "table" or typeof(crewInventory.ById) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _, instanceData in pairs(crewInventory.ById) do
+		if
+			typeof(instanceData) == "table"
+			and tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == itemName
+			and tostring(instanceData.AssignedStand or "") == ""
+		then
+			count += 1
+		end
+	end
+	return count
 end
 
 dmGet = function(player, path)
@@ -642,6 +699,33 @@ local function clearPlacedStandIncome(player, standName)
 	syncShipSlotAssignment(player, standName, nil)
 end
 
+local function getPickupStandSnapshot(player, standName)
+	local standData, standMeta = CrewStandIncomeAuthority.GetStandData(player, standName)
+	local canonicalRow = if typeof(standMeta) == "table" then standMeta.CanonicalRow else nil
+	local crewMemberName = tostring(standData and standData.CrewMemberName or "")
+	local standCrewMemberInstanceId = tostring(standData and standData.CrewMemberInstanceId or "")
+	local crewMemberInstanceId = tostring((canonicalRow and canonicalRow.CrewMemberInstanceId) or standCrewMemberInstanceId)
+	local legacyStorageName = tostring((canonicalRow and canonicalRow.LegacyStorageName) or crewMemberName)
+	local incomeToCollect = tonumber(standData and standData.IncomeToCollect) or 0
+	local exists = typeof(standMeta) == "table" and standMeta.MissingCanonical ~= true
+
+	return {
+		Exists = exists,
+		CrewMemberName = crewMemberName,
+		CrewMemberInstanceId = crewMemberInstanceId,
+		LegacyStorageName = legacyStorageName,
+		IncomeToCollect = incomeToCollect,
+		HasAssignment = crewMemberName ~= "" or crewMemberInstanceId ~= "" or legacyStorageName ~= "",
+	}
+end
+
+local function getPickupDebugField(debugInfo, key, fallback)
+	if typeof(debugInfo) == "table" and debugInfo[key] ~= nil then
+		return debugInfo[key]
+	end
+	return fallback
+end
+
 local function dmEnsureStandFolder(player, standName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false
@@ -673,21 +757,21 @@ local function dmEnsureStandFolder(player, standName)
 end
 
 
-getPlayerStandBrainrotName = function(player, standName)
+getPlayerStandCrewMemberName = function(player, standName)
 	dmEnsureStandFolder(player, standName)
 	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
-	local v = standData and standData.BrainrotName
+	local v = standData and standData.CrewMemberName
 	if typeof(v) ~= "string" then
 		return ""
 	end
 	return v
 end
 
-getPlayerStandBrainrotInstanceId = function(player, standName)
+getPlayerStandCrewMemberInstanceId = function(player, standName)
 	dmEnsureStandFolder(player, standName)
 
-	local standBrainrotName = getPlayerStandBrainrotName(player, standName)
-	if standBrainrotName == "" then
+	local standCrewMemberName = getPlayerStandCrewMemberName(player, standName)
+	if standCrewMemberName == "" then
 		return ""
 	end
 
@@ -696,7 +780,7 @@ getPlayerStandBrainrotInstanceId = function(player, standName)
 		return instanceId
 	end
 
-	local ensuredInstanceId = CrewInstanceService.EnsureStandInstance(player, standName, standBrainrotName)
+	local ensuredInstanceId = CrewInstanceService.EnsureStandInstance(player, standName, standCrewMemberName)
 	return tostring(ensuredInstanceId or "")
 end
 
@@ -710,7 +794,7 @@ local function getPlayerStandIncome(player, standName)
 	return v
 end
 
-local function _ensureInventoryLevelValue(player, brainrotName, level)
+local function _ensureInventoryLevelValue(player, crewMemberName, level)
 	local inv = player:FindFirstChild("Inventory")
 	if not inv then
 		inv = Instance.new("Folder")
@@ -718,10 +802,10 @@ local function _ensureInventoryLevelValue(player, brainrotName, level)
 		inv.Parent = player
 	end
 
-	local item = inv:FindFirstChild(brainrotName)
+	local item = inv:FindFirstChild(crewMemberName)
 	if not item then
 		item = Instance.new("Folder")
-		item.Name = brainrotName
+		item.Name = crewMemberName
 		item.Parent = inv
 	end
 
@@ -744,30 +828,16 @@ local function _ensureInventoryLevelValue(player, brainrotName, level)
 	end
 end
 
-local function legacyFindBrainrotInfoByName(brainrotName)
-	local crewInfo, crewId = CrewCatalog.FindInfoByName(brainrotName)
+local function findCatalogInfoByName(crewMemberName)
+	local crewInfo, crewId = CrewCatalog.FindInfoByName(crewMemberName)
 	if crewInfo then
 		return crewInfo, crewId
 	end
 
-	if BrainrotsConfig[brainrotName] then
-		return BrainrotsConfig[brainrotName], brainrotName
-	end
-	for id, info in pairs(BrainrotsConfig) do
-		if tostring(info.Render or "") == tostring(brainrotName) then
-			return info, tostring(id)
-		end
-	end
-	for id, info in pairs(BrainrotsConfig) do
-		local n = tostring(info.Name or info.DisplayName or "")
-		if n ~= "" and n == tostring(brainrotName) then
-			return info, tostring(id)
-		end
-	end
 	return nil, nil
 end
 
-local function hasInventoryBrainrotEntry(player, itemName)
+local function hasInventoryCrewMemberEntry(player, itemName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false
 	end
@@ -775,11 +845,20 @@ local function hasInventoryBrainrotEntry(player, itemName)
 	if typeof(itemName) ~= "string" or itemName == "" then
 		return false
 	end
+	local canonicalItemName = resolveCanonicalCrewMemberId(itemName)
+	if canonicalItemName == "" then
+		return false
+	end
 
 	local crewInventory = CrewInstanceService.GetCrewInventory(player)
 	if typeof(crewInventory) == "table" and typeof(crewInventory.ById) == "table" then
 		for _, instanceData in pairs(crewInventory.ById) do
-			if typeof(instanceData) == "table" and tostring(instanceData.StorageName or "") == itemName then
+			if typeof(instanceData) == "table"
+				and (
+					tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == canonicalItemName
+					or tostring(instanceData.LegacyStorageName or "") == itemName
+				)
+			then
 				return true
 			end
 		end
@@ -788,7 +867,7 @@ local function hasInventoryBrainrotEntry(player, itemName)
 	return false
 end
 
-local function getInventoryBrainrotMetadata(player, itemName)
+local function getInventoryCrewMemberMetadata(player, itemName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return nil, nil
 	end
@@ -796,11 +875,20 @@ local function getInventoryBrainrotMetadata(player, itemName)
 	if typeof(itemName) ~= "string" or itemName == "" then
 		return nil, nil
 	end
+	local canonicalItemName = resolveCanonicalCrewMemberId(itemName)
+	if canonicalItemName == "" then
+		return nil, nil
+	end
 
 	local crewInventory = CrewInstanceService.GetCrewInventory(player)
 	if typeof(crewInventory) == "table" and typeof(crewInventory.ById) == "table" then
 		for _, instanceData in pairs(crewInventory.ById) do
-			if typeof(instanceData) == "table" and tostring(instanceData.StorageName or "") == itemName then
+			if typeof(instanceData) == "table"
+				and (
+					tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == canonicalItemName
+					or tostring(instanceData.LegacyStorageName or "") == itemName
+				)
+			then
 				local baseName = tostring(instanceData.BaseName or "")
 				local variantKey = tostring(instanceData.Variant or "")
 				if baseName ~= "" then
@@ -816,10 +904,56 @@ local function getInventoryBrainrotMetadata(player, itemName)
 	return nil, nil
 end
 
-local function resolveBrainrotRecord(player, brainrotName)
-	local rawName = tostring(brainrotName or "")
+local function clearCrewRecordCache(player)
+	if player ~= nil then
+		crewRecordCache[player] = nil
+		return
+	end
+
+	for cachedPlayer in pairs(crewRecordCache) do
+		crewRecordCache[cachedPlayer] = nil
+	end
+end
+
+local function readCachedCrewRecord(player, rawName)
+	local playerCache = crewRecordCache[player]
+	if playerCache == nil then
+		return nil, false
+	end
+
+	local cached = playerCache[rawName]
+	if cached == nil then
+		return nil, false
+	end
+	if cached == false then
+		return nil, true
+	end
+	return cached, true
+end
+
+local function writeCachedCrewRecord(player, rawName, record)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return record
+	end
+
+	local playerCache = crewRecordCache[player]
+	if playerCache == nil then
+		playerCache = {}
+		crewRecordCache[player] = playerCache
+	end
+	playerCache[rawName] = record or false
+	return record
+end
+
+local function resolveCrewMemberRecord(player, crewMemberName)
+	local rawName = tostring(crewMemberName or "")
 	if rawName == "" then
 		return nil
+	end
+
+	local cachedRecord, foundCachedRecord = readCachedCrewRecord(player, rawName)
+	if foundCachedRecord then
+		return cachedRecord
 	end
 
 	local candidates = {}
@@ -834,8 +968,9 @@ local function resolveBrainrotRecord(player, brainrotName)
 	end
 
 	pushCandidate(rawName)
+	pushCandidate(resolveCanonicalCrewMemberId(rawName))
 
-	local invVariant, invBase = getInventoryBrainrotMetadata(player, rawName)
+	local invVariant, invBase = getInventoryCrewMemberMetadata(player, rawName)
 	if invBase then
 		pushCandidate(CrewRegistry.MakeVariantId(invBase, invVariant))
 	end
@@ -844,12 +979,16 @@ local function resolveBrainrotRecord(player, brainrotName)
 	pushCandidate(CrewRegistry.MakeVariantId(parsedBase, parsedVariant))
 	pushCandidate(parsedBase)
 
-	local legacyInfo, legacyId = legacyFindBrainrotInfoByName(rawName)
+	local legacyInfo, legacyId = findCatalogInfoByName(rawName)
 	if legacyId then
 		pushCandidate(legacyId)
 	end
 
 	for _, candidateName in ipairs(candidates) do
+		candidateName = resolveCanonicalCrewMemberId(candidateName)
+		if candidateName == "" then
+			continue
+		end
 		local variantKey, baseName = getVariantAndBaseName(candidateName)
 		local template, usedVariant = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 		local finalVariant = usedVariant or variantKey or "Normal"
@@ -859,13 +998,13 @@ local function resolveBrainrotRecord(player, brainrotName)
 			local canonicalName = CrewRegistry.MakeVariantId(baseName, finalVariant)
 			local storageName = rawName
 
-				if hasInventoryBrainrotEntry(player, candidateName) then
+				if hasInventoryCrewMemberEntry(player, candidateName) then
 					storageName = candidateName
-				elseif hasInventoryBrainrotEntry(player, canonicalName) or not hasInventoryBrainrotEntry(player, rawName) then
+				elseif hasInventoryCrewMemberEntry(player, canonicalName) or not hasInventoryCrewMemberEntry(player, rawName) then
 					storageName = canonicalName
 				end
 
-			return {
+			return writeCachedCrewRecord(player, rawName, {
 				RawName = rawName,
 				CanonicalName = canonicalName,
 				StorageName = storageName,
@@ -873,43 +1012,43 @@ local function resolveBrainrotRecord(player, brainrotName)
 				VariantKey = finalVariant,
 				Template = template,
 				Info = info or legacyInfo,
-			}
+			})
 		end
 	end
 
 	if legacyInfo then
-		return {
+		return writeCachedCrewRecord(player, rawName, {
 			RawName = rawName,
 			CanonicalName = tostring(legacyId or rawName),
-			StorageName = hasInventoryBrainrotEntry(player, rawName) and rawName or tostring(legacyId or rawName),
+			StorageName = hasInventoryCrewMemberEntry(player, rawName) and rawName or tostring(legacyId or rawName),
 			BaseName = tostring(legacyId or rawName),
 			VariantKey = parsedVariant,
 			Template = findTemplateForName(tostring(legacyId or rawName)),
 			Info = legacyInfo,
-		}
+		})
 	end
 
-	return nil
+	return writeCachedCrewRecord(player, rawName, nil)
 end
 
-local function findBrainrotInfoByName(brainrotName, player)
-	local resolved = resolveBrainrotRecord(player, brainrotName)
+local function findCrewMemberInfoByName(crewMemberName, player)
+	local resolved = resolveCrewMemberRecord(player, crewMemberName)
 	if resolved and resolved.Info then
 		return resolved.Info, resolved.CanonicalName
 	end
 
-	return legacyFindBrainrotInfoByName(brainrotName)
+	return findCatalogInfoByName(crewMemberName)
 end
 
-local function getLegacyStandStatusDisplayName(player, brainrotName)
-	local resolved = resolveBrainrotRecord(player, brainrotName)
-	local info = resolved and resolved.Info or findBrainrotInfoByName(brainrotName, player)
-	return info and tostring(info.Name or info.DisplayName or resolved and resolved.CanonicalName or brainrotName)
-		or tostring(brainrotName)
+local function getLegacyStandStatusDisplayName(player, crewMemberName)
+	local resolved = resolveCrewMemberRecord(player, crewMemberName)
+	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
+	return info and tostring(info.Name or info.DisplayName or resolved and resolved.CanonicalName or crewMemberName)
+		or tostring(crewMemberName)
 end
 
-local function resolveStandStatusDisplayName(player, brainrotName)
-	local fallbackDisplayName = getLegacyStandStatusDisplayName(player, brainrotName)
+local function resolveStandStatusDisplayName(player, crewMemberName)
+	local fallbackDisplayName = getLegacyStandStatusDisplayName(player, crewMemberName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return fallbackDisplayName, nil
 	end
@@ -920,7 +1059,7 @@ local function resolveStandStatusDisplayName(player, brainrotName)
 	end
 
 	local ok, value, result = pcall(function()
-		return gate.ResolveStandStatusDisplayName(player, brainrotName, {
+		return gate.ResolveStandStatusDisplayName(player, crewMemberName, {
 			Player = player,
 			SkipLog = true,
 		})
@@ -930,7 +1069,7 @@ local function resolveStandStatusDisplayName(player, brainrotName)
 			warn(string.format(
 				"[CrewMemberStandStatusHelper] fallback player=%s item=%s reason=%s",
 				player.Name,
-				tostring(brainrotName),
+				tostring(crewMemberName),
 				tostring(value)
 			))
 		end
@@ -990,8 +1129,8 @@ local function resolveIncomeStatusReadAuthorityDisplayName(player, standName)
 	return displayName, result
 end
 
-local function resolveIncomeStatusDisplayName(player, standName, brainrotName)
-	local fallbackDisplayName = getLegacyStandStatusDisplayName(player, brainrotName)
+local function resolveIncomeStatusDisplayName(player, standName, crewMemberName)
+	local fallbackDisplayName = getLegacyStandStatusDisplayName(player, crewMemberName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return fallbackDisplayName, nil
 	end
@@ -1009,7 +1148,7 @@ local function resolveIncomeStatusDisplayName(player, standName, brainrotName)
 	end
 
 	local ok, value, result = pcall(function()
-		return gate.ResolveIncomeStatusDisplayName(player, brainrotName, {
+		return gate.ResolveIncomeStatusDisplayName(player, crewMemberName, {
 			Player = player,
 			SkipLog = true,
 		})
@@ -1019,7 +1158,7 @@ local function resolveIncomeStatusDisplayName(player, standName, brainrotName)
 			warn(string.format(
 				"[CrewMemberIncomeStatusHelper] fallback player=%s item=%s reason=%s",
 				player.Name,
-				tostring(brainrotName),
+				tostring(crewMemberName),
 				tostring(value)
 			))
 		end
@@ -1034,8 +1173,8 @@ local function resolveIncomeStatusDisplayName(player, standName, brainrotName)
 	return displayName, result
 end
 
-local function resolveIncomeToastDisplayName(player, brainrotName)
-	local fallbackDisplayName = getLegacyStandStatusDisplayName(player, brainrotName)
+local function resolveIncomeToastDisplayName(player, crewMemberName)
+	local fallbackDisplayName = getLegacyStandStatusDisplayName(player, crewMemberName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return fallbackDisplayName, nil
 	end
@@ -1046,7 +1185,7 @@ local function resolveIncomeToastDisplayName(player, brainrotName)
 	end
 
 	local ok, value, result = pcall(function()
-		return gate.ResolveIncomeToastDisplayName(player, brainrotName, {
+		return gate.ResolveIncomeToastDisplayName(player, crewMemberName, {
 			Player = player,
 			SkipLog = true,
 		})
@@ -1056,7 +1195,7 @@ local function resolveIncomeToastDisplayName(player, brainrotName)
 			warn(string.format(
 				"[CrewMemberIncomeToastHelper] fallback player=%s item=%s reason=%s",
 				player.Name,
-				tostring(brainrotName),
+				tostring(crewMemberName),
 				tostring(value)
 			))
 		end
@@ -1071,12 +1210,12 @@ local function resolveIncomeToastDisplayName(player, brainrotName)
 	return displayName, result
 end
 
-local function buildIncomeToastDisplayPayload(player, brainrotName)
+local function buildIncomeToastDisplayPayload(player, crewMemberName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return nil
 	end
 
-	local legacyIdentity = tostring(brainrotName or "")
+	local legacyIdentity = tostring(crewMemberName or "")
 	if legacyIdentity == "" then
 		return nil
 	end
@@ -1118,25 +1257,25 @@ local function buildIncomeToastDisplayPayload(player, brainrotName)
 	}
 end
 
-local function buildIncomeStatusDisplayDescriptor(result, fallbackDisplayName, brainrotName)
+local function buildIncomeStatusDisplayDescriptor(result, fallbackDisplayName, crewMemberName)
 	if typeof(result) ~= "table" then
 		return {
-			DisplayName = tostring(fallbackDisplayName or brainrotName or ""),
+			DisplayName = tostring(fallbackDisplayName or crewMemberName or ""),
 			UsedCanonical = false,
 			FallbackReason = "helper_result_missing",
-			LegacyIdentity = tostring(brainrotName or ""),
+			LegacyIdentity = tostring(crewMemberName or ""),
 			IsAuthoritative = false,
 			Path = "gameplay.helper.income_status_display_name",
 		}
 	end
 
 	return {
-		DisplayName = tostring(result.DisplayName or result.Value or fallbackDisplayName or brainrotName or ""),
+		DisplayName = tostring(result.DisplayName or result.Value or fallbackDisplayName or crewMemberName or ""),
 		UsedCanonical = result.UsedCanonical == true,
 		FallbackReason = result.FallbackReason,
 		LegacyValue = result.LegacyValue,
 		CanonicalValue = result.CanonicalValue,
-		LegacyIdentity = tostring(result.LegacyIdentity or brainrotName or ""),
+		LegacyIdentity = tostring(result.LegacyIdentity or crewMemberName or ""),
 		Path = tostring(result.Path or "gameplay.helper.income_status_display_name"),
 		IsAuthoritative = result.IsAuthoritative == true,
 		IsAuthoritativeRead = result.IsAuthoritativeRead == true,
@@ -1185,12 +1324,12 @@ local function buildIncomeStatusDisplayMetadataResponse(player)
 	local fallbackReasons = {}
 	for _, standName in ipairs(standNames) do
 		local standData = crewMemberIncome[standName]
-		local brainrotName = if typeof(standData) == "table"
+		local crewMemberName = if typeof(standData) == "table"
 			then tostring(standData.LegacyStorageName or standData.CrewMemberName or "")
 			else ""
-		if brainrotName ~= "" then
-			local displayName, result = resolveIncomeStatusDisplayName(player, standName, brainrotName)
-			local descriptor = buildIncomeStatusDisplayDescriptor(result, displayName, brainrotName)
+		if crewMemberName ~= "" then
+			local displayName, result = resolveIncomeStatusDisplayName(player, standName, crewMemberName)
+			local descriptor = buildIncomeStatusDisplayDescriptor(result, displayName, crewMemberName)
 			metadataByStand[standName] = descriptor
 			if descriptor.UsedCanonical == true then
 				canonicalCount += 1
@@ -1214,8 +1353,8 @@ incomeStatusDisplayMetadataRequest.OnServerInvoke = function(player)
 	return buildIncomeStatusDisplayMetadataResponse(player)
 end
 
-local function getStealProductIdForBrainrot(brainrotName)
-	local info = findBrainrotInfoByName(brainrotName)
+local function getStealProductIdForCrewMember(crewMemberName)
+	local info = findCrewMemberInfoByName(crewMemberName)
 	local rarity = info and info.Rarity or "Common"
 	local fixed = normalizeRarity(rarity)
 	return stealProductByRarity[fixed] or 3512126073
@@ -1239,10 +1378,10 @@ local function updateStandPromptTexts(player, standModel)
 
 	local standName = standModel.Name
 	local slotState = player and player:IsA("Player") and getStandSlotState(player, standName) or nil
-	local brainrotName = ""
+	local crewMemberName = ""
 
 	if player and player:IsA("Player") then
-		brainrotName = getPlayerStandBrainrotName(player, standName)
+		crewMemberName = getPlayerStandCrewMemberName(player, standName)
 	end
 
 	if slotState and slotState.Visible and not slotState.Usable then
@@ -1251,8 +1390,8 @@ local function updateStandPromptTexts(player, standModel)
 		return
 	end
 
-	if brainrotName ~= "" then
-		local displayName = resolveStandStatusDisplayName(player, brainrotName)
+	if crewMemberName ~= "" then
+		local displayName = resolveStandStatusDisplayName(player, crewMemberName)
 		if slotState and slotState.BonusInfo then
 			prompt.ObjectText = string.format(
 				"%s (%s +%d%%)",
@@ -1275,35 +1414,23 @@ local function updateStandPromptTexts(player, standModel)
 	end
 end
 
-local function findHoverGui(primaryPart)
-	local h = primaryPart:FindFirstChild("BrainrotHover", true)
-	if h and h:IsA("BillboardGui") then
-		return h
-	end
-	h = primaryPart:FindFirstChild("BrainortHover", true)
-	if h and h:IsA("BillboardGui") then
-		return h
-	end
-	return nil
-end
-
-getBrainrotLevel = function(player, brainrotName)
-	local progress = CrewFoodProgression.GetProgress(player, brainrotName)
+getCrewMemberLevel = function(player, crewMemberName)
+	local progress = CrewFoodProgression.GetProgress(player, crewMemberName)
 	if not progress then
 		return 1
 	end
 	return progress.Level
 end
 
-local function getBaseIncome(player, brainrotName)
-	local resolved = resolveBrainrotRecord(player, brainrotName)
-	local info = resolved and resolved.Info or findBrainrotInfoByName(brainrotName, player)
+local function getBaseIncome(player, crewMemberName)
+	local resolved = resolveCrewMemberRecord(player, crewMemberName)
+	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
 	local base = info and (tonumber(info.Income) or 0) or 0
 	return base
 end
 
-local function getIncomeWithLevel(player, brainrotName)
-	local base = getBaseIncome(player, brainrotName)
+local function getIncomeWithLevel(player, crewMemberName)
+	local base = getBaseIncome(player, crewMemberName)
 	if base <= 0 then
 		return 0
 	end
@@ -1323,31 +1450,8 @@ local function getStandIncomeDisplay(player, standName)
 	return display
 end
 
-local RaritiesFolder = ReplicatedStorage:WaitForChild("Rarities")
-local BrainrotHoverTemplate = RaritiesFolder:WaitForChild("BrainrotHover")
-
-local function ensureBrainrotHover(model)
-	local primary = ensurePrimaryPart(model)
-	if not primary then
-		return nil
-	end
-
-	local existing = findHoverGui(primary)
-	if existing then
-		existing.Enabled = true
-		return existing
-	end
-
-	if not BrainrotHoverTemplate or not BrainrotHoverTemplate:IsA("BillboardGui") then
-		return nil
-	end
-
-	local clone = BrainrotHoverTemplate:Clone()
-	clone.Name = "BrainrotHover"
-	clone.Enabled = true
-	clone.Adornee = primary
-	clone.Parent = primary
-	return clone
+local function getStandIncomePerSecond(player, standName, crewMemberName)
+	return getIncomeWithLevel(player, crewMemberName) * getStandCollectMultiplier(player, standName)
 end
 
 local function getTextTarget(root, name)
@@ -1359,61 +1463,6 @@ local function getTextTarget(root, name)
 		return obj
 	end
 	return obj:FindFirstChildWhichIsA("TextLabel", true) or obj:FindFirstChildWhichIsA("TextButton", true) or obj:FindFirstChildWhichIsA("TextBox", true)
-end
-
-local function buildHoverRefsNoTime(model)
-	local primary = ensurePrimaryPart(model)
-	if not primary then
-		return nil
-	end
-	local hover = findHoverGui(primary)
-	if not hover then
-		return nil
-	end
-	hover.Enabled = true
-	local income = getTextTarget(hover, "Income")
-	local nameT = getTextTarget(hover, "Name")
-	local rarityT = getTextTarget(hover, "Rarity")
-
-	local timeLeftContainer = hover:FindFirstChild("TimeLeft", true)
-	local timeT
-	local timeImg
-	if timeLeftContainer then
-		timeT = getTextTarget(timeLeftContainer, "TextL")
-		if not timeT then
-			timeT = timeLeftContainer:FindFirstChildWhichIsA("TextLabel", true) or timeLeftContainer:FindFirstChildWhichIsA("TextButton", true) or timeLeftContainer:FindFirstChildWhichIsA("TextBox", true)
-		end
-		timeImg = timeLeftContainer:FindFirstChild("ImageLabel", true) or timeLeftContainer:FindFirstChildWhichIsA("ImageLabel", true)
-	end
-	if not timeT then
-		timeT = getTextTarget(hover, "TextL") or getTextTarget(hover, "TimeLeft")
-	end
-
-	if timeT then
-		timeT.Visible = false
-	end
-	if timeImg then
-		timeImg.Visible = false
-	end
-
-	return {
-		Income = income,
-		Name = nameT,
-		Rarity = rarityT,
-		Gui = hover,
-	}
-end
-
-local ReplicatedStorage2 = game:GetService("ReplicatedStorage")
-local RarityTexts = ReplicatedStorage2:WaitForChild("Rarities"):WaitForChild("Texts")
-
-local function clearRarityLabel(label)
-	if label:IsA("TextLabel") then
-		label.Text = ""
-	end
-	for _, child in ipairs(label:GetChildren()) do
-		child:Destroy()
-	end
 end
 
 local VariantOrder = { "Normal", "Golden", "Diamond" }
@@ -1466,63 +1515,31 @@ local function stripVariantPrefix(text, variantKey)
 	return text
 end
 
-local function applyVariantLabel(hoverGui, variantKey, enabled)
-	if not hoverGui then
-		return
+local function setAttributeIfChanged(instance, attributeName, value)
+	if instance:GetAttribute(attributeName) ~= value then
+		instance:SetAttribute(attributeName, value)
 	end
-	for _, d in ipairs(hoverGui:GetDescendants()) do
-		if d:IsA("GuiObject") then
-			for _, v in ipairs(VariantOrder) do
-				if d.Name == v then
-					d.Visible = enabled and (v == variantKey)
-				end
-			end
+end
+
+local function removeLegacyCrewHover(model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant.Name == "CrewMemberHover" and descendant:IsA("BillboardGui") then
+			descendant:Destroy()
 		end
 	end
 end
 
-local function applyRarityFromStorage(rarityLabel, rarityName)
-	if not rarityLabel or rarityName == "" then
+local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, placedModel)
+	if not placedModel or not placedModel:IsA("Model") then
 		return
 	end
 
-	clearRarityLabel(rarityLabel)
-
-	local template = RarityTexts:FindFirstChild(rarityName)
-	if not template then
-		for _, obj in ipairs(RarityTexts:GetChildren()) do
-			if obj:IsA("TextLabel") and obj.Name == rarityName then
-				template = obj
-				break
-			end
-		end
-	end
-
-	if not template or not template:IsA("TextLabel") then
-		if rarityLabel:IsA("TextLabel") then
-			rarityLabel.Text = rarityName
-		end
-		return
-	end
-	rarityLabel.Text = tostring(rarityName)
-
-	for _, child in ipairs(template:GetChildren()) do
-		child:Clone().Parent = rarityLabel
-	end
-end
-
-local function setHoverTextsNoTime(refs, player, brainrotName)
-	if not refs then
-		return
-	end
-
-	local resolved = resolveBrainrotRecord(player, brainrotName)
-	local info = resolved and resolved.Info or findBrainrotInfoByName(brainrotName, player)
-	local canonicalName = resolved and resolved.CanonicalName or tostring(brainrotName)
-	local rawName = info and tostring(info.Name or info.DisplayName or canonicalName) or tostring(brainrotName)
-	local rawRarity = info and tostring(info.Rarity or "") or ""
-
-	local variantKey = resolved and resolved.VariantKey or detectVariant(brainrotName)
+	local resolved = resolveCrewMemberRecord(player, crewMemberName)
+	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
+	local canonicalName = resolved and resolved.CanonicalName or tostring(crewMemberName)
+	local rawName = info and tostring(info.Name or info.DisplayName or canonicalName) or tostring(crewMemberName)
+	local rawRarity = info and tostring(info.Rarity or "") or "Common"
+	local variantKey = resolved and resolved.VariantKey or detectVariant(crewMemberName)
 	if variantKey == "Normal" then
 		variantKey = detectVariant(rawName)
 	end
@@ -1531,36 +1548,26 @@ local function setHoverTextsNoTime(refs, player, brainrotName)
 	end
 
 	local displayName = stripVariantPrefix(rawName, variantKey)
-	local helperDisplayName = resolveStandStatusDisplayName(player, brainrotName)
+	local helperDisplayName = resolveStandStatusDisplayName(player, crewMemberName)
 	if helperDisplayName ~= "" then
 		displayName = stripVariantPrefix(helperDisplayName, variantKey)
 	end
+
 	local displayRarity = stripVariantPrefix(rawRarity, variantKey)
+	local incomePerSecond = getStandIncomePerSecond(player, standModel.Name, canonicalName)
 
-	local income = 0
-	if player and player:IsA("Player") then
-		income = getIncomeWithLevel(player, canonicalName)
-	else
-		income = info and (tonumber(info.Income) or 0) or 0
-	end
-
-	if refs.Income then
-		refs.Income.Text = shorten.roundNumber(math.floor(income)) .. CurrencyUtil.getPerSecondSuffix()
-	end
-	if refs.Name then
-		refs.Name.Text = displayName
-	end
-	if refs.Rarity then
-		applyRarityFromStorage(refs.Rarity, displayRarity)
-	end
-	if refs.Gui then
-		refs.Gui.Enabled = true
-		applyVariantLabel(refs.Gui, variantKey, true)
-	end
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Placed)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.DisplayName, displayName)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Rarity, if displayRarity ~= "" then displayRarity else "Common")
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Variant, variantKey)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.IncomePerSecond, math.max(0, incomePerSecond))
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ExpiresAt, nil)
+	removeLegacyCrewHover(placedModel)
+	CollectionService:AddTag(placedModel, CrewOverhead.Tag)
 end
 
 local function clearStandVisual(standModel)
-	local existing = standModel:FindFirstChild("PlacedBrainrot")
+	local existing = standModel:FindFirstChild("PlacedCrewMember")
 	if existing and existing:IsA("Model") then
 		existing:Destroy()
 	end
@@ -1577,23 +1584,23 @@ local function placeModelBottomOnHandleLeft(model, handle)
 	model:PivotTo(pivotTarget)
 end
 
-local function spawnStandBrainrot(player, standModel, handle, brainrotName)
+local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
 	clearStandVisual(standModel)
 
-	local resolved = resolveBrainrotRecord(player, brainrotName)
-	local template = resolved and resolved.Template or findTemplateForName(brainrotName)
+	local resolved = resolveCrewMemberRecord(player, crewMemberName)
+	local template = resolved and resolved.Template or findTemplateForName(crewMemberName)
 	standDebug(
-		"spawnStandBrainrot begin player=%s stand=%s savedName=%s canonical=%s template=%s",
+		"spawnStandCrewMember begin player=%s stand=%s savedName=%s canonical=%s template=%s",
 		player and player.Name or "?",
 		standModel and standModel.Name or "?",
-		tostring(brainrotName),
-		tostring(resolved and resolved.CanonicalName or brainrotName),
+		tostring(crewMemberName),
+		tostring(resolved and resolved.CanonicalName or crewMemberName),
 		tostring(template and template:GetFullName() or "nil")
 	)
 	if not template or not template:IsA("Model") then
-		warn(string.format("[CrewMemberIncome] Failed to restore stand crew template player=%s stand=%s savedName=%s", player and player.Name or "?", standModel.Name, tostring(brainrotName)))
+		warn(string.format("[CrewMemberIncome] Failed to restore stand crew template player=%s stand=%s savedName=%s", player and player.Name or "?", standModel.Name, tostring(crewMemberName)))
 		standDebug(
-			"spawnStandBrainrot failed player=%s stand=%s reason=no_template",
+			"spawnStandCrewMember failed player=%s stand=%s reason=no_template",
 			player and player.Name or "?",
 			standModel and standModel.Name or "?"
 		)
@@ -1601,7 +1608,7 @@ local function spawnStandBrainrot(player, standModel, handle, brainrotName)
 	end
 
 	local clone = template:Clone()
-	clone.Name = "PlacedBrainrot"
+	clone.Name = "PlacedCrewMember"
 	clone.Parent = standModel
 
 	ensurePrimaryPart(clone)
@@ -1609,17 +1616,14 @@ local function spawnStandBrainrot(player, standModel, handle, brainrotName)
 	makeStandVisualNonBlocking(clone)
 	placeModelBottomOnHandleLeft(clone, handle)
 
-	ensureBrainrotHover(clone)
-
-	local info = resolved and resolved.Info or findBrainrotInfoByName(brainrotName, player)
+	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
 	if info then
 		tryPlayIdle(clone, info.IdleAnim)
 	end
 
-	local refs = buildHoverRefsNoTime(clone)
-	setHoverTextsNoTime(refs, player, brainrotName)
+	syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
 	standDebug(
-		"spawnStandBrainrot success player=%s stand=%s model=%s incomeBase=%s",
+		"spawnStandCrewMember success player=%s stand=%s model=%s incomeBase=%s",
 		player and player.Name or "?",
 		standModel and standModel.Name or "?",
 		clone:GetFullName(),
@@ -1671,9 +1675,9 @@ local function updateStandMoneyText(player, standModel)
 		return
 	end
 
-	local brainrotName = getPlayerStandBrainrotName(player, standName)
+	local crewMemberName = getPlayerStandCrewMemberName(player, standName)
 	local incomeText = shorten.roundNumber(math.floor(getStandIncomeDisplay(player, standName))) .. CurrencyUtil.getCompactSuffix()
-	if brainrotName == "" and slotState.BonusInfo then
+	if crewMemberName == "" and slotState.BonusInfo then
 		setMoneyLabelText(
 			standModel,
 			string.format("%s +%d%%", tostring(slotState.BonusInfo.Label or "Bonus"), slotState.BonusPercent)
@@ -1681,7 +1685,7 @@ local function updateStandMoneyText(player, standModel)
 		return
 	end
 
-	if brainrotName ~= "" and slotState.BonusInfo then
+	if crewMemberName ~= "" and slotState.BonusInfo then
 		setMoneyLabelText(
 			standModel,
 			string.format("%s +%d%%\n%s", tostring(slotState.BonusInfo.Label or "Bonus"), slotState.BonusPercent, incomeText)
@@ -1881,12 +1885,10 @@ local function ensureLevelUpClickDetector(standModel)
 	return cd
 end
 
-local function updateStandHover(player, standModel, brainrotName)
-	local placed = standModel:FindFirstChild("PlacedBrainrot")
+local function updateStandHover(player, standModel, crewMemberName)
+	local placed = standModel:FindFirstChild("PlacedCrewMember")
 	if placed and placed:IsA("Model") then
-		ensureBrainrotHover(placed)
-		local refs = buildHoverRefsNoTime(placed)
-		setHoverTextsNoTime(refs, player, brainrotName)
+		syncPlacedOverheadMetadata(player, standModel, crewMemberName, placed)
 	end
 end
 
@@ -1896,12 +1898,12 @@ local function setStandLevel(player, standName, level)
 	return safeLevel
 end
 
-local function syncStandLevelFromBrainrot(player, standName, brainrotName)
-	if brainrotName == nil or brainrotName == "" then
+local function syncStandLevelFromCrewMember(player, standName, crewMemberName)
+	if crewMemberName == nil or crewMemberName == "" then
 		return setStandLevel(player, standName, 1)
 	end
 
-	local lvl = getBrainrotLevel(player, brainrotName)
+	local lvl = getCrewMemberLevel(player, crewMemberName)
 	return setStandLevel(player, standName, lvl)
 end
 
@@ -1924,10 +1926,10 @@ local function updateLevelUpUI(player, standModel)
 		return
 	end
 
-	local brainrotName = getPlayerStandBrainrotName(player, standName)
-	local brainrotInstanceId = getPlayerStandBrainrotInstanceId(player, standName)
+	local crewMemberName = getPlayerStandCrewMemberName(player, standName)
+	local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
 
-	if brainrotName == "" then
+	if crewMemberName == "" then
 		setLevelUpVisible(standModel, false, player)
 		if refs.Price then
 			refs.Price.Text = ""
@@ -1935,11 +1937,11 @@ local function updateLevelUpUI(player, standModel)
 		if refs.Upgrade then
 			refs.Upgrade.Text = ""
 		end
-		standDebug("updateLevelUpUI hidden player=%s stand=%s reason=no_brainrot", player.Name, standName)
+		standDebug("updateLevelUpUI hidden player=%s stand=%s reason=no_crew_member", player.Name, standName)
 		return
 	end
 
-	local progress = CrewFoodProgression.GetProgress(player, brainrotInstanceId ~= "" and brainrotInstanceId or brainrotName)
+	local progress = CrewFoodProgression.GetProgress(player, crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberName)
 	if not progress then
 		setLevelUpVisible(standModel, false, player)
 		if refs.Price then
@@ -2064,7 +2066,7 @@ local function bindZoneCollect(player, plot, standModel)
 		if not dmEnsureStandFolder(plr, standName) then
 			return
 		end
-		local collectedBrainrotName = getPlayerStandBrainrotName(plr, standName)
+		local collectedCrewMemberName = getPlayerStandCrewMemberName(plr, standName)
 
 		local slotState = getStandSlotState(plr, standName)
 		if slotState.Visible and not slotState.Usable then
@@ -2092,7 +2094,7 @@ local function bindZoneCollect(player, plot, standModel)
 			StandName = standName,
 		})
 
-		local incomeToastDisplayPayload = buildIncomeToastDisplayPayload(plr, collectedBrainrotName)
+		local incomeToastDisplayPayload = buildIncomeToastDisplayPayload(plr, collectedCrewMemberName)
 		if MoneyCollectedRE then
 			if incomeToastDisplayPayload ~= nil then
 				MoneyCollectedRE:FireClient(plr, standModel, collected, incomeToastDisplayPayload)
@@ -2141,7 +2143,7 @@ local function bindStandPrompt(player, plot, standModel)
 	promptBound[prompt] = true
 
 	dmEnsureStandFolder(player, standModel.Name)
-	standDebug("bindStandPrompt ready player=%s stand=%s savedBrainrot=%s", player.Name, standModel.Name, tostring(getPlayerStandBrainrotName(player, standModel.Name)))
+	standDebug("bindStandPrompt ready player=%s stand=%s savedCrewMember=%s", player.Name, standModel.Name, tostring(getPlayerStandCrewMemberName(player, standModel.Name)))
 	updateStandMoneyText(player, standModel)
 	bindZoneCollect(player, plot, standModel)
 	bindLevelUp(player, plot, standModel)
@@ -2164,8 +2166,8 @@ local function bindStandPrompt(player, plot, standModel)
 			local standName = standModel.Name
 
 			if plr.UserId ~= ownerUserId then
-				local brainrotToSteal = getPlayerStandBrainrotName(player, standName)
-				if brainrotToSteal == "" then
+				local crewMemberToSteal = getPlayerStandCrewMemberName(player, standName)
+				if crewMemberToSteal == "" then
 					standDebug("steal rejected actor=%s stand=%s reason=empty_stand", plr.Name, standName)
 					return
 				end
@@ -2176,27 +2178,27 @@ local function bindStandPrompt(player, plot, standModel)
 				end
 				stealPromptDebounce[plr] = now
 
-				local productId = getStealProductIdForBrainrot(brainrotToSteal)
-				if not CrewQuickSlotService.CanGainOrNotify(plr, 1, "StealPrompt:" .. tostring(standName)) then
-					standDebug("steal rejected actor=%s stand=%s brainrot=%s reason=quick_slots_full", plr.Name, standName, tostring(brainrotToSteal))
+				local productId = getStealProductIdForCrewMember(crewMemberToSteal)
+				if not CrewQuickSlotService.CanGainOrNotify(plr, crewMemberToSteal, 1, "StealPrompt:" .. tostring(standName)) then
+					standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=quick_slots_full", plr.Name, standName, tostring(crewMemberToSteal))
 					return
 				end
-				local brainrotInstanceId = getPlayerStandBrainrotInstanceId(player, standName)
-				local _, brainrotInstance = CrewInstanceService.GetInstance(player, brainrotInstanceId)
-				if CrewInstanceService.IsTutorialRewardProtected(player, brainrotInstance) then
-					standDebug("steal rejected actor=%s stand=%s brainrot=%s reason=tutorial_reward_protected", plr.Name, standName, tostring(brainrotToSteal))
+				local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
+				local _, crewMemberInstance = CrewInstanceService.GetInstance(player, crewMemberInstanceId)
+				if CrewInstanceService.IsTutorialRewardProtected(player, crewMemberInstance) then
+					standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=tutorial_reward_protected", plr.Name, standName, tostring(crewMemberToSteal))
 					return
 				end
 
 				plr:SetAttribute("StealOwnerUserId", ownerUserId)
 				plr:SetAttribute("StealStandName", standName)
-				plr:SetAttribute("StealBrainrotName", brainrotToSteal)
-				plr:SetAttribute("StealBrainrotInstanceId", brainrotInstanceId)
+				plr:SetAttribute("StealCrewMemberName", crewMemberToSteal)
+				plr:SetAttribute("StealCrewMemberInstanceId", crewMemberInstanceId)
 				plr:SetAttribute("StealProductId", productId)
 				plr:SetAttribute("StealTime", os.time())
 
 				MarketplaceService:PromptProductPurchase(plr, productId)
-				standDebug("steal prompt actor=%s stand=%s brainrot=%s productId=%s", plr.Name, standName, tostring(brainrotToSteal), tostring(productId))
+				standDebug("steal prompt actor=%s stand=%s crewMember=%s productId=%s", plr.Name, standName, tostring(crewMemberToSteal), tostring(productId))
 				return
 			end
 
@@ -2210,7 +2212,7 @@ local function bindStandPrompt(player, plot, standModel)
 				return
 			end
 
-			local current = getPlayerStandBrainrotName(plr, standName)
+			local current = getPlayerStandCrewMemberName(plr, standName)
 			if current ~= "" then
 				local placementGuardRemaining = getPlacementPickupGuardRemaining(plr, standName)
 				if placementGuardRemaining > 0 then
@@ -2229,9 +2231,51 @@ local function bindStandPrompt(player, plot, standModel)
 					return
 				end
 
-				local releasedInstanceId, releasedInstance = CrewInstanceService.ReleaseStandInstance(plr, standName)
+				local pickupBefore = getPickupStandSnapshot(plr, standName)
+				local releasedInstanceId, releasedInstance, releaseReason, releaseDebug = CrewInstanceService.ReleaseStandInstance(plr, standName)
+				clearCrewRecordCache(plr)
+				local pickupAfter = getPickupStandSnapshot(plr, standName)
+				crewPickupDebug(formatCrewPickupDebugFields({
+					{ "event", "prompt_release_result" },
+					{ "player", plr.Name },
+					{ "userId", plr.UserId },
+					{ "stand", standName },
+					{ "success", releasedInstance ~= nil },
+					{ "reason", releaseReason or "none" },
+					{ "releasedInstanceId", tostring(releasedInstanceId or "") },
+					{ "releasedStorage", releasedInstance and tostring(releasedInstance.StorageName or "") or "" },
+					{ "beforeAssignedName", pickupBefore.CrewMemberName },
+					{ "beforeCrewMemberInstanceId", pickupBefore.CrewMemberInstanceId },
+					{ "beforeCrewMemberInstanceId", pickupBefore.CrewMemberInstanceId },
+					{ "beforeLegacyStorageName", pickupBefore.LegacyStorageName },
+					{ "beforeIncome", pickupBefore.IncomeToCollect },
+					{ "afterStandDataExists", pickupAfter.Exists },
+					{ "afterHasAssignment", pickupAfter.HasAssignment },
+					{ "afterAssignedName", pickupAfter.CrewMemberName },
+					{ "afterCrewMemberInstanceId", pickupAfter.CrewMemberInstanceId },
+					{ "afterCrewMemberInstanceId", pickupAfter.CrewMemberInstanceId },
+					{ "afterLegacyStorageName", pickupAfter.LegacyStorageName },
+					{ "afterIncome", pickupAfter.IncomeToCollect },
+					{ "quickOccupied", getPickupDebugField(releaseDebug, "QuickSlotOccupied", "") },
+					{ "quickUnlocked", getPickupDebugField(releaseDebug, "QuickSlotUnlocked", "") },
+					{ "quickMax", getPickupDebugField(releaseDebug, "QuickSlotMax", "") },
+					{ "instanceExists", getPickupDebugField(releaseDebug, "InstanceExistsInCrewInventory", "") },
+					{ "playerOwnsInstance", getPickupDebugField(releaseDebug, "PlayerOwnsInstance", "") },
+					{ "placedTrackingRefs", getPickupDebugField(releaseDebug, "AssignedStandRefs", "") },
+					{ "inventorySaveOk", getPickupDebugField(releaseDebug, "InventorySaveOk", "") },
+					{ "inventorySaveReason", getPickupDebugField(releaseDebug, "InventorySaveReason", "") },
+					{ "standClearOk", getPickupDebugField(releaseDebug, "StandClearOk", "") },
+					{ "standClearReason", getPickupDebugField(releaseDebug, "StandClearReason", "") },
+					{ "inventoryRollbackOk", getPickupDebugField(releaseDebug, "InventoryRollbackOk", "") },
+					{ "inventoryRollbackReason", getPickupDebugField(releaseDebug, "InventoryRollbackReason", "") },
+				}))
 				if not releasedInstance then
-					standDebug("pickup from stand blocked player=%s stand=%s reason=no_instance_available", plr.Name, standName)
+					standDebug(
+						"pickup from stand blocked player=%s stand=%s reason=%s",
+						plr.Name,
+						standName,
+						tostring(releaseReason or "no_instance_available")
+					)
 					return
 				end
 				local storageName = releasedInstance and releasedInstance.StorageName or current
@@ -2315,8 +2359,9 @@ local function bindStandPrompt(player, plot, standModel)
 				return
 			end
 
-			getBrainrotLevel(plr, placedInstanceId)
-			syncStandLevelFromBrainrot(plr, standName, placedInstanceId)
+			clearCrewRecordCache(plr)
+			getCrewMemberLevel(plr, placedInstanceId)
+			syncStandLevelFromCrewMember(plr, standName, placedInstanceId)
 			setPlacementPickupGuard(plr, standName)
 			if tutorialInstance then
 				tutorialStandPlacementLog(
@@ -2328,16 +2373,16 @@ local function bindStandPrompt(player, plot, standModel)
 				QuestSignals.Record(plr, "PlaceOnStand", 1, {
 					Source = "StandPlacement",
 					StandName = standName,
-					BrainrotName = tostring(placedInstance.StorageName or toolName),
-					BrainrotInstanceId = tostring(placedInstanceId),
+					CrewMemberName = tostring(placedInstance.StorageName or toolName),
+					CrewMemberInstanceId = tostring(placedInstanceId),
 					TutorialPlacement = true,
 					TutorialRewardConverted = true,
 				})
 			end
 			standDebug("place accepted player=%s stand=%s tool=%s quantityBefore=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(qty), tostring(placedInstanceId))
 
-			spawnStandBrainrot(plr, standModel, handle, placedInstance.StorageName)
-			local placedModel = standModel:FindFirstChild("PlacedBrainrot")
+			spawnStandCrewMember(plr, standModel, handle, placedInstance.StorageName)
+			local placedModel = standModel:FindFirstChild("PlacedCrewMember")
 			standDebug(
 				"place post-spawn player=%s stand=%s tool=%s placedModel=%s incomePerTick=%s instanceId=%s",
 				plr.Name,
@@ -2397,8 +2442,8 @@ local function registerStand(player, plot, standModel)
 			standDebug("registerStand after handle lookup player=%s stand=%s handle=%s", player.Name, standModel.Name, tostring(handle ~= nil))
 			if handle and handle:IsA("BasePart") then
 				standDebug("registerStand before savedName lookup player=%s stand=%s", player.Name, standModel.Name)
-				local name = getPlayerStandBrainrotName(player, standModel.Name)
-				local savedInstanceId = getPlayerStandBrainrotInstanceId(player, standModel.Name)
+				local name = getPlayerStandCrewMemberName(player, standModel.Name)
+				local savedInstanceId = getPlayerStandCrewMemberInstanceId(player, standModel.Name)
 				saveTrace(
 					"restoreCheck player=%s userId=%s plot=%s stand=%s savedName=%s savedInstanceId=%s handle=%s",
 					player.Name,
@@ -2411,7 +2456,7 @@ local function registerStand(player, plot, standModel)
 				)
 				standDebug("registerStand after savedName lookup player=%s stand=%s savedName=%s", player.Name, standModel.Name, tostring(name))
 				if name ~= "" then
-					standDebug("registerStand savedBrainrot branch entered player=%s stand=%s", player.Name, standModel.Name)
+					standDebug("registerStand savedCrewMember branch entered player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand restore-begin player=%s stand=%s savedName=%s", player.Name, standModel.Name, tostring(name))
 					standDebug("registerStand before ensureStandInstance player=%s stand=%s", player.Name, standModel.Name)
 					local restoredInstanceId, restoredInstance = CrewInstanceService.EnsureStandInstance(player, standModel.Name, name)
@@ -2427,15 +2472,15 @@ local function registerStand(player, plot, standModel)
 					)
 					standDebug("registerStand after ensureStandInstance player=%s stand=%s instanceId=%s persisted=%s", player.Name, standModel.Name, tostring(restoredInstanceId), tostring(persistedName))
 					name = persistedName
-					standDebug("registerStand before getBrainrotLevel player=%s stand=%s", player.Name, standModel.Name)
-					getBrainrotLevel(player, restoredInstanceId ~= nil and tostring(restoredInstanceId) ~= "" and restoredInstanceId or name)
-					standDebug("registerStand after getBrainrotLevel player=%s stand=%s", player.Name, standModel.Name)
-					standDebug("registerStand before syncStandLevelFromBrainrot player=%s stand=%s", player.Name, standModel.Name)
-					syncStandLevelFromBrainrot(player, standModel.Name, restoredInstanceId ~= nil and tostring(restoredInstanceId) ~= "" and restoredInstanceId or name)
-					standDebug("registerStand after syncStandLevelFromBrainrot player=%s stand=%s", player.Name, standModel.Name)
-					standDebug("registerStand before spawnStandBrainrot player=%s stand=%s", player.Name, standModel.Name)
-					spawnStandBrainrot(player, standModel, handle, name)
-					local placedModel = standModel:FindFirstChild("PlacedBrainrot")
+					standDebug("registerStand before getCrewMemberLevel player=%s stand=%s", player.Name, standModel.Name)
+					getCrewMemberLevel(player, restoredInstanceId ~= nil and tostring(restoredInstanceId) ~= "" and restoredInstanceId or name)
+					standDebug("registerStand after getCrewMemberLevel player=%s stand=%s", player.Name, standModel.Name)
+					standDebug("registerStand before syncStandLevelFromCrewMember player=%s stand=%s", player.Name, standModel.Name)
+					syncStandLevelFromCrewMember(player, standModel.Name, restoredInstanceId ~= nil and tostring(restoredInstanceId) ~= "" and restoredInstanceId or name)
+					standDebug("registerStand after syncStandLevelFromCrewMember player=%s stand=%s", player.Name, standModel.Name)
+					standDebug("registerStand before spawnStandCrewMember player=%s stand=%s", player.Name, standModel.Name)
+					spawnStandCrewMember(player, standModel, handle, name)
+					local placedModel = standModel:FindFirstChild("PlacedCrewMember")
 					saveTrace(
 						"restoreApplied player=%s userId=%s stand=%s savedName=%s restoredInstanceId=%s placedModel=%s placedPivot=%s",
 						player.Name,
@@ -2446,7 +2491,7 @@ local function registerStand(player, plot, standModel)
 						formatInstancePath(placedModel),
 						formatVector3(placedModel and placedModel:IsA("Model") and placedModel:GetPivot().Position or nil)
 					)
-					standDebug("registerStand after spawnStandBrainrot player=%s stand=%s", player.Name, standModel.Name)
+					standDebug("registerStand after spawnStandCrewMember player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand before updateStandHover player=%s stand=%s", player.Name, standModel.Name)
 					updateStandHover(player, standModel, name)
 					standDebug("registerStand after updateStandHover player=%s stand=%s", player.Name, standModel.Name)
@@ -2613,6 +2658,8 @@ local function clearPlotScanStateForPlayer(player)
 	end
 end
 
+local reconcilePlayerStandAssignments
+
 local function clearPlayerStandRuntime(player)
 	local stands = playerStandList[player]
 	if stands then
@@ -2626,6 +2673,7 @@ local function clearPlayerStandRuntime(player)
 	touchDebounce[player] = nil
 	stealPromptDebounce[player] = nil
 	placementPickupGuardUntil[player] = nil
+	clearCrewRecordCache(player)
 	clearPlotScanStateForPlayer(player)
 end
 
@@ -2638,8 +2686,34 @@ local function refreshPlayerStandRuntime(player)
 	end
 
 	scanAndBindPlot(player, plot)
+	reconcilePlayerStandAssignments(player)
 	return true, plot
 end
+
+reconcilePlayerStandAssignments = function(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	clearCrewRecordCache(player)
+	local stands = playerStandList[player]
+	if typeof(stands) ~= "table" then
+		return
+	end
+
+	for i = 1, #stands do
+		local standModel = stands[i]
+		if standModel and standModel.Parent then
+			CrewInstanceService.ReconcileStandAssignment(player, standModel.Name)
+		end
+	end
+end
+
+CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
+	if player and player.Parent == Players then
+		task.defer(reconcilePlayerStandAssignments, player)
+	end
+end)
 
 
 Players.PlayerAdded:Connect(function(player)
@@ -2665,6 +2739,7 @@ Players.PlayerAdded:Connect(function(player)
 			tostring(plot:GetAttribute("OwnerName"))
 		)
 		scanAndBindPlot(player, plot)
+		reconcilePlayerStandAssignments(player)
 	end)
 end)
 
@@ -2697,6 +2772,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 		local plot = waitForPlot(p, 5)
 		if plot then
 			scanAndBindPlot(p, plot)
+			reconcilePlayerStandAssignments(p)
 			resetHugeIncomeOnJoin(p)
 		else
 			standDebug("bootstrap existing_player=%s reason=no_plot", p.Name)
@@ -2720,9 +2796,15 @@ task.spawn(function()
 						local standName = standModel.Name
 						dmEnsureStandFolder(plr, standName)
 
-						local brainrotName = getPlayerStandBrainrotName(plr, standName)
-						if brainrotName ~= "" then
-							local inc = getIncomeWithLevel(plr, brainrotName)
+						local crewMemberName = getPlayerStandCrewMemberName(plr, standName)
+						if crewMemberName ~= "" then
+							if not standModel:FindFirstChild("PlacedCrewMember") then
+								local handle = standModel:FindFirstChild("Handle", true)
+								if handle and handle:IsA("BasePart") then
+									spawnStandCrewMember(plr, standModel, handle, crewMemberName)
+								end
+							end
+							local inc = getIncomeWithLevel(plr, crewMemberName)
 							if inc ~= 0 then
 								zeroIncomeLogged[plr] = zeroIncomeLogged[plr] or {}
 								zeroIncomeLogged[plr][standName] = nil
@@ -2733,9 +2815,10 @@ task.spawn(function()
 								zeroIncomeLogged[plr] = zeroIncomeLogged[plr] or {}
 								if zeroIncomeLogged[plr][standName] ~= true then
 									zeroIncomeLogged[plr][standName] = true
-									standDebug("income zero player=%s stand=%s brainrot=%s", plr.Name, standName, tostring(brainrotName))
+									standDebug("income zero player=%s stand=%s crewMember=%s", plr.Name, standName, tostring(crewMemberName))
 								end
 							end
+							updateStandHover(plr, standModel, crewMemberName)
 						end
 
 						updateStandMoneyText(plr, standModel)

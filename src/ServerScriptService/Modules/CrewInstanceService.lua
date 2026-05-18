@@ -3,8 +3,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local BrainrotsCfg = CrewCatalog.GetLegacyConfig()
 local VariantCfg = CrewCatalog.GetVariantConfig()
+local CrewInventoryDerivedCache = require(script.Parent:WaitForChild("CrewInventoryDerivedCache"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(script.Parent:WaitForChild("CrewStandIncomeAuthority"))
 local IndexCollectionService = require(script.Parent:WaitForChild("IndexCollectionService"))
@@ -16,13 +16,37 @@ local CrewMemberShadowWriterModule
 local inventorySavedCallbacks = {}
 local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local CANONICAL_INVENTORY_PATH = "CrewMemberInventory"
-local LEGACY_INVENTORY_PATH = "BrainrotInventory"
-local LEGACY_QUANTITY_ROOT_PATH = "Inventory"
 local INVENTORY_AUTHORITY_AUDIT_PATH = "CrewMemberInventoryAuthorityAudit"
 local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
 local INVENTORY_AUTHORITY_SNAPSHOT_VERSION = 1
 -- Function names still carry legacy terms for callers, but normal gameplay now
 -- reads and writes CrewMemberInventory. Legacy inventory roots are repair mirrors.
+
+local CREW_PICKUP_DEBUG = true
+local invalidCrewIdentityWarnings = {}
+
+local function crewPickupDebug(message, ...)
+	if CREW_PICKUP_DEBUG ~= true then
+		return
+	end
+
+	local prefix = "[CrewPickupDebug] "
+	if select("#", ...) == 0 then
+		warn(prefix .. tostring(message))
+		return
+	end
+
+	local ok, formatted = pcall(string.format, prefix .. tostring(message), ...)
+	warn(ok and formatted or (prefix .. tostring(message)))
+end
+
+local function formatCrewPickupDebugFields(fields)
+	local parts = {}
+	for _, field in ipairs(fields or {}) do
+		parts[#parts + 1] = tostring(field[1]) .. "=" .. tostring(field[2])
+	end
+	return table.concat(parts, " ")
+end
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -36,6 +60,16 @@ local function coerceNumber(value, fallback)
 		return value
 	end
 	return fallback
+end
+
+local function firstNonEmpty(...)
+	for index = 1, select("#", ...) do
+		local value = tostring(select(index, ...) or "")
+		if value ~= "" then
+			return value
+		end
+	end
+	return ""
 end
 
 local function getDataManager()
@@ -126,9 +160,10 @@ local function isProtectedTutorialReward(player, instanceData)
 	return typeof(instanceData) == "table" and instanceData.TutorialReward == true and isTutorialIncomplete(player)
 end
 
-local function notifyInventorySaved(player, brainrotInventory)
+local function notifyInventorySaved(player, crewInventory)
+	CrewInventoryDerivedCache.MarkSaved(player, crewInventory, "inventory_saved")
 	for callback in pairs(inventorySavedCallbacks) do
-		local ok, err = pcall(callback, player, brainrotInventory)
+		local ok, err = pcall(callback, player, crewInventory)
 		if not ok then
 			warn(string.format("[CrewInstanceService] Inventory save callback failed: %s", tostring(err)))
 		end
@@ -151,7 +186,25 @@ local function getVariantAndBaseName(fullName)
 	return "Normal", fullName
 end
 
-local function isBrainrotInventoryEntry(key, entry)
+local function warnInvalidCrewIdentity(source, identity, player)
+	local key = tostring(source or "unknown") .. ":" .. tostring(identity or "")
+	if invalidCrewIdentityWarnings[key] then
+		return
+	end
+	invalidCrewIdentityWarnings[key] = true
+	warn(string.format(
+		"[CrewInstanceService] Rejected unknown CrewMember identity source=%s player=%s identity=%s",
+		tostring(source or "unknown"),
+		player and player.Name or "unknown",
+		tostring(identity or "")
+	))
+end
+
+local function resolveCanonicalCrewMemberId(identity)
+	return CrewCatalog.ResolveCanonicalCrewMemberId(identity)
+end
+
+local function isCrewInventoryEntry(key, entry)
 	if key == "Feed" or key == "DevilFruits" then
 		return false
 	end
@@ -166,61 +219,67 @@ local function isBrainrotInventoryEntry(key, entry)
 		or entry.CurrentXP ~= nil
 end
 
-local function getInventoryEntry(player, storageName)
-	local entry = getDataManager():GetValue(player, "Inventory." .. tostring(storageName))
-	if typeof(entry) == "table" then
-		return entry
-	end
-	return nil
-end
-
 local function buildMetadata(storageName, entry)
 	entry = entry or {}
 
-	local variantKey = tostring(entry.Variant or "")
-	local baseName = tostring(entry.BaseName or "")
-	if baseName == "" then
-		variantKey, baseName = getVariantAndBaseName(storageName)
+	local requestedStorageName = tostring(storageName or "")
+	local requestedCrewMemberId = tostring(entry.CrewMemberId or "")
+	local lookupName = if requestedCrewMemberId ~= "" then requestedCrewMemberId else requestedStorageName
+	local canonicalId, info, resolvedLegacyStorageName = resolveCanonicalCrewMemberId(lookupName)
+	if not info and requestedStorageName ~= "" and requestedStorageName ~= lookupName then
+		canonicalId, info, resolvedLegacyStorageName = resolveCanonicalCrewMemberId(requestedStorageName)
 	end
+
+	if not info then
+		return nil
+	end
+
+	local variantKey, baseName = getVariantAndBaseName(canonicalId)
 	if variantKey == "" then
 		variantKey = "Normal"
 	end
 
-	local info = CrewCatalog.GetInfoById(storageName) or CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[storageName] or BrainrotsCfg[baseName] or {}
-	local baseInfo = CrewCatalog.GetInfoById(baseName) or BrainrotsCfg[baseName] or info
+	if baseName == "" then
+		baseName = tostring(entry.BaseName or requestedStorageName)
+	end
 
-	local render = tostring(entry.Render or info.Render or "")
-	local goldenRender = tostring(entry.GoldenRender or baseInfo.GoldenRender or baseInfo.Render or render)
-	local diamondRender = tostring(entry.DiamondRender or baseInfo.DiamondRender or baseInfo.Render or render)
+	local baseInfo = CrewCatalog.GetInfoById(baseName) or info
+	local entryStorageName = tostring(entry.StorageName or "")
+	local legacyStorageName = firstNonEmpty(entry.LegacyStorageName, resolvedLegacyStorageName)
+	if legacyStorageName == "" and entryStorageName ~= "" and entryStorageName ~= tostring(canonicalId or "") then
+		legacyStorageName = entryStorageName
+	end
+	if legacyStorageName == "" and requestedStorageName ~= "" and requestedStorageName ~= tostring(canonicalId or "") then
+		legacyStorageName = requestedStorageName
+	end
+
+	local render = firstNonEmpty(info.Render, entry.Render)
+	local goldenRender = firstNonEmpty(baseInfo.GoldenRender, baseInfo.Render, entry.GoldenRender, render)
+	local diamondRender = firstNonEmpty(baseInfo.DiamondRender, baseInfo.Render, entry.DiamondRender, render)
 
 	return {
-		StorageName = tostring(storageName),
+		StorageName = tostring(canonicalId or requestedStorageName),
+		LegacyStorageName = legacyStorageName,
 		BaseName = baseName,
 		Variant = variantKey,
-		Rarity = tostring(entry.Rarity or info.Rarity or "Common"),
-		Income = tonumber(entry.Income or info.Income) or 0,
+		Rarity = tostring(info.Rarity or entry.Rarity or "Common"),
+		Income = tonumber(info.Income or entry.Income) or 0,
 		Render = render,
 		GoldenRender = goldenRender,
 		DiamondRender = diamondRender,
-		DisplayName = tostring(info.DisplayName or info.Name or storageName),
-		CrewMemberId = tostring(info.CrewMemberId or storageName),
-		RealCharacterName = tostring(info.RealCharacterName or ""),
-		Arc = tostring(info.Arc or ""),
-		ModelName = tostring(info.ModelName or baseName),
+		DisplayName = firstNonEmpty(info.DisplayName, info.Name, entry.DisplayName, canonicalId, requestedStorageName),
+		CrewMemberId = firstNonEmpty(info.CrewMemberId, canonicalId, requestedStorageName),
+		RealCharacterName = firstNonEmpty(info.RealCharacterName),
+		Arc = firstNonEmpty(info.Arc),
+		ModelName = firstNonEmpty(info.ModelName, entry.ModelName, baseName),
 	}
 end
 
-local function copyTableShallow(source)
-	local copy = {}
-	if typeof(source) ~= "table" then
-		return copy
+local function getInstanceCrewKey(instanceData)
+	if typeof(instanceData) ~= "table" then
+		return ""
 	end
-
-	for key, value in pairs(source) do
-		copy[key] = value
-	end
-
-	return copy
+	return firstNonEmpty(instanceData.CrewMemberId, instanceData.StorageName)
 end
 
 local function cloneValue(value)
@@ -233,6 +292,27 @@ local function cloneValue(value)
 		copy[key] = cloneValue(child)
 	end
 	return copy
+end
+
+local function valuesEqual(left, right)
+	if typeof(left) ~= typeof(right) then
+		return false
+	end
+	if typeof(left) ~= "table" then
+		return left == right
+	end
+
+	for key, leftValue in pairs(left) do
+		if not valuesEqual(leftValue, right[key]) then
+			return false
+		end
+	end
+	for key in pairs(right) do
+		if left[key] == nil then
+			return false
+		end
+	end
+	return true
 end
 
 local function isInventoryWriteAuthorityEnabled(flags)
@@ -254,93 +334,64 @@ local function isKnownCrewStorageName(storageName)
 	local _, baseName = getVariantAndBaseName(storageName)
 	return CrewCatalog.GetInfoById(storageName) ~= nil
 		or CrewCatalog.GetInfoById(baseName) ~= nil
-		or BrainrotsCfg[storageName] ~= nil
-		or BrainrotsCfg[baseName] ~= nil
+		or select(2, resolveCanonicalCrewMemberId(storageName)) ~= nil
 end
 
-local function buildLegacyInventoryEntry(storageName, entry, metadata)
-	metadata = metadata or buildMetadata(storageName, entry)
-
-	local normalized = copyTableShallow(entry)
-	local render = tostring(normalized.Render or metadata.Render or "")
-
-	normalized.Equipped = math.max(0, math.floor(coerceNumber(normalized.Equipped, 0)))
-	normalized.Quantity = math.max(0, math.floor(coerceNumber(normalized.Quantity, 0)))
-	normalized.Variant = tostring(normalized.Variant or metadata.Variant or "Normal")
-	normalized.BaseName = tostring(normalized.BaseName or metadata.BaseName or storageName)
-	normalized.Render = render
-	normalized.GoldenRender = tostring(normalized.GoldenRender or metadata.GoldenRender or render)
-	normalized.DiamondRender = tostring(normalized.DiamondRender or metadata.DiamondRender or render)
-	normalized.Income = tonumber(normalized.Income or metadata.Income) or 0
-	normalized.Rarity = tostring(normalized.Rarity or metadata.Rarity or "Common")
-	normalized.Level = math.max(1, math.floor(coerceNumber(normalized.Level, 1)))
-	normalized.CurrentXP = math.max(0, math.floor(coerceNumber(normalized.CurrentXP, 0)))
-
-	return normalized
-end
-
-local function ensureLegacyInventoryEntry(player, storageName, metadata, options)
-	options = if typeof(options) == "table" then options else {}
-	local sourceEntry = if options.AllowLegacyMirrorWrite == true then getInventoryEntry(player, storageName) else nil
-	local entry = buildLegacyInventoryEntry(storageName, sourceEntry, metadata)
-
-	if options.AllowLegacyMirrorWrite == true then
-		getDataManager():SetValue(player, "Inventory." .. tostring(storageName), entry)
-	end
-	return entry
-end
-
-local function ensureBrainrotInventoryShape(brainrotInventory)
-	if typeof(brainrotInventory) ~= "table" then
-		brainrotInventory = {}
+local function ensureCrewInventoryShape(crewInventory)
+	if typeof(crewInventory) ~= "table" then
+		crewInventory = {}
 	end
 
-	brainrotInventory.NextInstanceId = math.max(1, coerceNumber(brainrotInventory.NextInstanceId, 1))
-	brainrotInventory.ById = ensureTable(brainrotInventory, "ById")
-	brainrotInventory.Order = ensureTable(brainrotInventory, "Order")
+	crewInventory.NextInstanceId = math.max(1, coerceNumber(crewInventory.NextInstanceId, 1))
+	crewInventory.ById = ensureTable(crewInventory, "ById")
+	crewInventory.Order = ensureTable(crewInventory, "Order")
 
-	return brainrotInventory
+	return crewInventory
 end
 
 local function normalizeInstanceData(instanceId, instanceData, fallbackStorageName, options)
 	instanceData = typeof(instanceData) == "table" and instanceData or {}
 	options = if typeof(options) == "table" then options else {}
 
-	local storageName = tostring(
-		instanceData.LegacyStorageName
-			or instanceData.StorageName
-			or fallbackStorageName
-			or instanceData.BrainrotName
-			or ""
-	)
+	local storageName = firstNonEmpty(instanceData.CrewMemberId, instanceData.StorageName, fallbackStorageName)
 	if storageName == "" then
 		return nil
 	end
 
 	local metadata = buildMetadata(storageName, instanceData)
+	if metadata == nil then
+		return nil
+	end
 
 	local normalized = {
 		InstanceId = tostring(instanceId),
 		StorageName = metadata.StorageName,
+		LegacyStorageName = metadata.LegacyStorageName,
 		BaseName = metadata.BaseName,
 		Variant = metadata.Variant,
-		Rarity = tostring(instanceData.Rarity or metadata.Rarity or "Common"),
-		Income = tonumber(instanceData.Income or metadata.Income) or 0,
-		Render = tostring(instanceData.Render or metadata.Render or ""),
-		GoldenRender = tostring(instanceData.GoldenRender or metadata.GoldenRender or metadata.Render or ""),
-		DiamondRender = tostring(instanceData.DiamondRender or metadata.DiamondRender or metadata.Render or ""),
+		Rarity = tostring(metadata.Rarity or instanceData.Rarity or "Common"),
+		Income = tonumber(metadata.Income or instanceData.Income) or 0,
+		Render = firstNonEmpty(metadata.Render, instanceData.Render),
+		GoldenRender = firstNonEmpty(metadata.GoldenRender, instanceData.GoldenRender, metadata.Render),
+		DiamondRender = firstNonEmpty(metadata.DiamondRender, instanceData.DiamondRender, metadata.Render),
 		Level = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
 		CurrentXP = math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0))),
+		TotalXP = math.max(0, math.floor(coerceNumber(instanceData.TotalXP, 0))),
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
 		AcquiredAt = coerceNumber(instanceData.AcquiredAt, os.time()),
 		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
+		Source = tostring(instanceData.Source or ""),
+		DepthBand = tostring(instanceData.DepthBand or ""),
 		TutorialReward = instanceData.TutorialReward == true,
 		TutorialToken = tostring(instanceData.TutorialToken or ""),
+		GrandLineRushStarter = instanceData.GrandLineRushStarter == true,
+		CrewMemberId = metadata.CrewMemberId,
+		DisplayName = metadata.DisplayName,
+		ModelName = metadata.ModelName,
+		RealCharacterName = metadata.RealCharacterName,
+		Arc = metadata.Arc,
 	}
 	if options.Canonical == true then
-		normalized.CrewMemberId = tostring(instanceData.CrewMemberId or metadata.CrewMemberId or metadata.StorageName)
-		normalized.DisplayName = tostring(instanceData.DisplayName or metadata.DisplayName or metadata.StorageName)
-		normalized.LegacyStorageName = metadata.StorageName
 		normalized.ProjectionSource = tostring(instanceData.ProjectionSource or "CrewInstanceService")
 	end
 	return normalized
@@ -348,11 +399,33 @@ end
 
 local syncAvailableCounts
 local inspectInventoryRoot
+local clearShipSlotAssignment
+local clearStandData
 
 local function normalizeInventoryData(rawInventory, options)
 	options = if typeof(options) == "table" then options else {}
-	local inventory = ensureBrainrotInventoryShape(rawInventory)
+	local inventory = ensureCrewInventoryShape(rawInventory)
 	local changed = false
+	local quarantine = {
+		RemovedInstances = {},
+		ClearedStands = {},
+	}
+	local function recordQuarantinedInstance(instanceId, instanceData)
+		local rawIdentity = firstNonEmpty(
+			typeof(instanceData) == "table" and instanceData.CrewMemberId or "",
+			typeof(instanceData) == "table" and instanceData.StorageName or "",
+			typeof(instanceData) == "table" and instanceData.LegacyStorageName or ""
+		)
+		quarantine.RemovedInstances[#quarantine.RemovedInstances + 1] = {
+			InstanceId = tostring(instanceId or ""),
+			Identity = rawIdentity,
+			AssignedStand = typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") or "",
+		}
+		local assignedStand = typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") or ""
+		if assignedStand ~= "" then
+			quarantine.ClearedStands[assignedStand] = true
+		end
+	end
 	if options.Canonical == true then
 		local schemaVersion = math.max(1, math.floor(coerceNumber(inventory.SchemaVersion, 1)))
 		if inventory.SchemaVersion ~= schemaVersion then
@@ -370,10 +443,14 @@ local function normalizeInventoryData(rawInventory, options)
 	for _, rawInstanceId in ipairs(inventory.Order) do
 		local instanceId = tostring(rawInstanceId)
 		maxInstanceNumber = math.max(maxInstanceNumber, tonumber(instanceId) or 0)
-		local normalized = normalizeInstanceData(instanceId, inventory.ById[instanceId], nil, {
+		local existing = inventory.ById[instanceId]
+		local normalized = normalizeInstanceData(instanceId, existing, nil, {
 			Canonical = options.Canonical == true,
 		})
 		if normalized then
+			if not valuesEqual(existing, normalized) then
+				changed = true
+			end
 			inventory.ById[instanceId] = normalized
 			if not seen[instanceId] then
 				seen[instanceId] = true
@@ -382,6 +459,7 @@ local function normalizeInventoryData(rawInventory, options)
 				changed = true
 			end
 		else
+			recordQuarantinedInstance(instanceId, existing)
 			inventory.ById[instanceId] = nil
 			changed = true
 		end
@@ -395,11 +473,15 @@ local function normalizeInventoryData(rawInventory, options)
 				Canonical = options.Canonical == true,
 			})
 			if normalized then
+				if not valuesEqual(instanceData, normalized) then
+					changed = true
+				end
 				inventory.ById[instanceId] = normalized
 				table.insert(normalizedOrder, instanceId)
 				seen[instanceId] = true
 				changed = true
 			else
+				recordQuarantinedInstance(instanceId, instanceData)
 				inventory.ById[instanceId] = nil
 				changed = true
 			end
@@ -415,25 +497,7 @@ local function normalizeInventoryData(rawInventory, options)
 		changed = true
 	end
 
-	return inventory, changed
-end
-
-local function buildLegacyInventoryMirror(inventory)
-	local mirror = cloneValue(inventory)
-	if typeof(mirror) ~= "table" then
-		mirror = {}
-	end
-	mirror.SchemaVersion = nil
-	for _, instanceData in pairs(if typeof(mirror.ById) == "table" then mirror.ById else {}) do
-		if typeof(instanceData) == "table" then
-			instanceData.CrewMemberId = nil
-			instanceData.DisplayName = nil
-			instanceData.LegacyStorageName = nil
-			instanceData.ProjectionSource = nil
-			instanceData.Compatibility = nil
-		end
-	end
-	return ensureBrainrotInventoryShape(mirror)
+	return inventory, changed, quarantine
 end
 
 local function getAvailableCountsFromInventory(inventory)
@@ -445,28 +509,13 @@ local function getAvailableCountsFromInventory(inventory)
 	for _, instanceId in ipairs(inventory.Order) do
 		local instanceData = inventory.ById[tostring(instanceId)]
 		if typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") == "" then
-			local storageName = tostring(instanceData.StorageName or "")
+			local storageName = getInstanceCrewKey(instanceData)
 			if storageName ~= "" then
 				counts[storageName] = (counts[storageName] or 0) + 1
 			end
 		end
 	end
 	return counts
-end
-
-local function getLegacyInventoryEntries(player)
-	local entries = {}
-	local inventory = getDataManager():GetValue(player, LEGACY_QUANTITY_ROOT_PATH)
-	if typeof(inventory) ~= "table" then
-		return entries
-	end
-
-	for key, entry in pairs(inventory) do
-		if isBrainrotInventoryEntry(key, entry) then
-			entries[tostring(key)] = cloneValue(entry)
-		end
-	end
-	return entries
 end
 
 local function buildInventoryAuthoritySnapshot(player, sourcePath)
@@ -479,8 +528,6 @@ local function buildInventoryAuthoritySnapshot(player, sourcePath)
 		SourcePath = tostring(sourcePath or ""),
 		CreatedAt = os.time(),
 		Canonical = cloneValue(getDataManager():GetValue(player, CANONICAL_INVENTORY_PATH)),
-		Legacy = cloneValue(getDataManager():GetValue(player, LEGACY_INVENTORY_PATH)),
-		LegacyInventoryEntries = getLegacyInventoryEntries(player),
 	}
 end
 
@@ -545,10 +592,6 @@ local function restoreInventoryAuthoritySnapshot(player, snapshot, reason)
 	if #canonicalShape.Issues > 0 then
 		return false, "snapshot_root_invalid:CrewMemberInventory:" .. table.concat(canonicalShape.Issues, ",")
 	end
-	local legacyShape = inspectInventoryRoot("BrainrotInventory", snapshot.Legacy)
-	if #legacyShape.Issues > 0 then
-		return false, "snapshot_root_invalid:BrainrotInventory:" .. table.concat(legacyShape.Issues, ",")
-	end
 
 	local writes = {}
 	local canonicalOk, canonicalReason = writeProfileRoot(player, CANONICAL_INVENTORY_PATH, cloneValue(snapshot.Canonical) or {})
@@ -557,31 +600,11 @@ local function restoreInventoryAuthoritySnapshot(player, snapshot, reason)
 		return false, "rollback_write_failed:CrewMemberInventory:" .. canonicalReason
 	end
 
-	local legacyOk, legacyReason = writeProfileRoot(player, LEGACY_INVENTORY_PATH, cloneValue(snapshot.Legacy) or {})
-	writes.BrainrotInventory = legacyOk
-	if not legacyOk then
-		return false, "rollback_write_failed:BrainrotInventory:" .. legacyReason
-	end
-
-	local entryWrites = {}
-	for storageName, entry in pairs(if typeof(snapshot.LegacyInventoryEntries) == "table" then snapshot.LegacyInventoryEntries else {}) do
-		local entryOk, entryReason = writeProfileRoot(
-			player,
-			LEGACY_QUANTITY_ROOT_PATH .. "." .. tostring(storageName),
-			cloneValue(entry)
-		)
-		entryWrites[tostring(storageName)] = entryOk
-		if not entryOk then
-			return false, "rollback_write_failed:Inventory." .. tostring(storageName) .. ":" .. entryReason
-		end
-	end
-
 	updateInventoryAuthorityAudit(player, {
 		LastRollback = {
 			Reason = tostring(reason or ""),
 			SourcePath = tostring(snapshot.SourcePath or ""),
 			Writes = writes,
-			EntryWrites = entryWrites,
 			CompletedAt = os.time(),
 		},
 	})
@@ -666,9 +689,7 @@ end
 
 local function validateInventoryMirrors(player)
 	local canonicalRaw = getDataManager():GetValue(player, CANONICAL_INVENTORY_PATH)
-	local legacyRaw = getDataManager():GetValue(player, LEGACY_INVENTORY_PATH)
 	local canonical = inspectInventoryRoot("CrewMemberInventory", canonicalRaw)
-	local legacy = inspectInventoryRoot("BrainrotInventory", legacyRaw)
 	local issues = {}
 
 	for _, issue in ipairs(canonical.Issues) do
@@ -682,7 +703,7 @@ local function validateInventoryMirrors(player)
 		Passed = #issues == 0,
 		MirrorMatch = #issues == 0,
 		RootsMatch = #issues == 0,
-		BrainrotInventoryRetired = true,
+		CrewMemberInventoryRetired = true,
 		InventoryCrewMirrorsRetired = true,
 		BlockingCount = #issues,
 		UnclassifiedCount = 0,
@@ -692,10 +713,7 @@ local function validateInventoryMirrors(player)
 			InstanceCount = canonical.InstanceCount,
 			Counts = expectedCounts,
 		},
-		BrainrotInventory = {
-			NextInstanceId = if legacy.Inventory then legacy.Inventory.NextInstanceId else nil,
-			InstanceCount = legacy.InstanceCount,
-			Counts = legacy.Counts,
+		CrewMemberInventory = {
 			Retired = true,
 		},
 	}
@@ -807,7 +825,6 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 	local canonicalInventory = normalizeInventoryData(cloneValue(crewInventory), {
 		Canonical = true,
 	})
-	local legacyMirror = buildLegacyInventoryMirror(canonicalInventory)
 	local writes = {}
 
 	updateInventoryAuthorityAudit(player, {
@@ -831,23 +848,7 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 		return false, "inventory_write_failed:CrewMemberInventory:" .. canonicalReason
 	end
 
-	local legacyOk, legacyReason = writeProfileRoot(player, LEGACY_INVENTORY_PATH, legacyMirror)
-	writes.BrainrotInventory = legacyOk
-	if not legacyOk then
-		restoreInventoryAuthoritySnapshot(player, snapshot, "legacy_write_failed")
-		updateInventoryAuthorityAudit(player, {
-			LastFailClosedReason = "inventory_write_failed:BrainrotInventory:" .. legacyReason,
-		})
-		return false, "inventory_write_failed:BrainrotInventory:" .. legacyReason
-	end
-
-	notifyInventorySaved(player, legacyMirror)
-	if syncAvailableCounts then
-		syncAvailableCounts(player, canonicalInventory, {
-			AllowLegacyMirrorWrite = true,
-		})
-	end
-	writes.InventoryQuantities = true
+	notifyInventorySaved(player, canonicalInventory)
 
 	local status = validateInventoryMirrors(player)
 	if status.Passed ~= true then
@@ -879,21 +880,8 @@ local function saveCrewInventoryAndMirrors(player, crewInventory, options)
 	return true, nil, status
 end
 
-local function saveBrainrotInventory(player, brainrotInventory, options)
-	options = if typeof(options) == "table" then options else {}
-	if options.LegacyOnly == true then
-		local legacyInventory = normalizeInventoryData(cloneValue(brainrotInventory), {
-			Canonical = false,
-		})
-		local ok = getDataManager():SetValue(player, LEGACY_INVENTORY_PATH, legacyInventory)
-		if ok == false then
-			return false, "legacy_inventory_write_failed"
-		end
-		notifyInventorySaved(player, legacyInventory)
-		return true, nil
-	end
-
-	local canonicalInventory = normalizeInventoryData(cloneValue(brainrotInventory), {
+local function saveCrewMemberInventory(player, crewMemberInventory, _options)
+	local canonicalInventory = normalizeInventoryData(cloneValue(crewMemberInventory), {
 		Canonical = true,
 	})
 	local ok, reason = writeProfileRoot(player, CANONICAL_INVENTORY_PATH, canonicalInventory)
@@ -904,17 +892,28 @@ local function saveBrainrotInventory(player, brainrotInventory, options)
 	return true, nil
 end
 
-local function getBrainrotInventory(player)
+local function getCrewMemberInventory(player)
 	local rawInventory = getDataManager():GetValue(player, CANONICAL_INVENTORY_PATH)
 	local missingCanonical = typeof(rawInventory) ~= "table"
-	local inventory, changed = normalizeInventoryData(rawInventory, {
+	local inventory, changed, quarantine = normalizeInventoryData(rawInventory, {
 		Canonical = true,
 	})
 
 	if changed and not missingCanonical then
-		saveBrainrotInventory(player, inventory, {
+		saveCrewMemberInventory(player, inventory, {
 			SourcePath = "inventory_normalize",
 		})
+		if typeof(quarantine) == "table" then
+			for _, entry in ipairs(quarantine.RemovedInstances or {}) do
+				warnInvalidCrewIdentity("inventory_normalize", entry.Identity, player)
+			end
+			for standName in pairs(quarantine.ClearedStands or {}) do
+				clearStandData(player, standName, "invalid_inventory_identity_quarantine")
+				if clearShipSlotAssignment ~= nil then
+					clearShipSlotAssignment(player, standName)
+				end
+			end
+		end
 	elseif missingCanonical then
 		updateInventoryAuthorityAudit(player, {
 			LastFailClosedReason = "canonical_inventory_missing",
@@ -925,70 +924,47 @@ local function getBrainrotInventory(player)
 	return inventory
 end
 
-local function setInstanceData(player, brainrotInventory, instanceId, instanceData)
-	brainrotInventory.ById[tostring(instanceId)] = normalizeInstanceData(instanceId, instanceData)
-	return saveBrainrotInventory(player, brainrotInventory, {
+local function setInstanceData(player, crewMemberInventory, instanceId, instanceData)
+	local normalized = normalizeInstanceData(instanceId, instanceData, nil, {
+		Canonical = true,
+	})
+	if normalized == nil then
+		local rawIdentity = ""
+		if typeof(instanceData) == "table" then
+			rawIdentity = firstNonEmpty(instanceData.CrewMemberId, instanceData.StorageName, instanceData.LegacyStorageName)
+		end
+		warnInvalidCrewIdentity(
+			"inventory_set_instance_data",
+			rawIdentity,
+			player
+		)
+		return false, "unknown_crew_member_id"
+	end
+	crewMemberInventory.ById[tostring(instanceId)] = normalized
+	return saveCrewMemberInventory(player, crewMemberInventory, {
 		SourcePath = "inventory_set_instance_data",
 	})
 end
 
-local function syncQuantityValue(player, storageName, quantity, options)
-	options = if typeof(options) == "table" then options else {}
-	if options.AllowLegacyMirrorWrite ~= true then
-		return false
-	end
-	if getInventoryEntry(player, storageName) == nil then
-		ensureLegacyInventoryEntry(player, storageName, nil, {
-			AllowLegacyMirrorWrite = true,
-		})
-	end
-
-	getDataManager():SetValue(player, "Inventory." .. tostring(storageName) .. ".Quantity", math.max(0, math.floor(coerceNumber(quantity, 0))))
+syncAvailableCounts = function(player, crewMemberInventory, options)
+	local _ = player
+	_ = crewMemberInventory
+	_ = options
 	return true
 end
 
-syncAvailableCounts = function(player, brainrotInventory, options)
-	options = if typeof(options) == "table" then options else {}
-	if options.AllowLegacyMirrorWrite ~= true then
-		return false
-	end
-	brainrotInventory = brainrotInventory or getBrainrotInventory(player)
-
-	local counts = {}
-	for _, instanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(instanceId)]
-		if instanceData and instanceData.AssignedStand == "" then
-			counts[instanceData.StorageName] = (counts[instanceData.StorageName] or 0) + 1
-		end
-	end
-
-	local inventory = getDataManager():GetValue(player, "Inventory")
-	if typeof(inventory) == "table" then
-		for key, entry in pairs(inventory) do
-			if isBrainrotInventoryEntry(key, entry) then
-				syncQuantityValue(player, key, counts[key] or 0, options)
-			end
-		end
-	end
-
-	for storageName, count in pairs(counts) do
-		syncQuantityValue(player, storageName, count, options)
-	end
-	return true
-end
-
-local function moveInstanceToFront(brainrotInventory, instanceId)
+local function moveInstanceToFront(crewMemberInventory, instanceId)
 	instanceId = tostring(instanceId)
-	for index = #brainrotInventory.Order, 1, -1 do
-		if tostring(brainrotInventory.Order[index]) == instanceId then
-			table.remove(brainrotInventory.Order, index)
+	for index = #crewMemberInventory.Order, 1, -1 do
+		if tostring(crewMemberInventory.Order[index]) == instanceId then
+			table.remove(crewMemberInventory.Order, index)
 			break
 		end
 	end
-	table.insert(brainrotInventory.Order, 1, instanceId)
+	table.insert(crewMemberInventory.Order, 1, instanceId)
 end
 
-local function clearShipSlotAssignment(player, standName)
+clearShipSlotAssignment = function(player, standName)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return
@@ -1004,8 +980,8 @@ local function clearShipSlotAssignment(player, standName)
 end
 
 local function getStandData(player, standName)
-	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
-	return standData
+	local standData, standMeta = CrewStandIncomeAuthority.GetStandData(player, standName)
+	return standData, standMeta
 end
 
 local function setStandData(player, standName, standData, sourcePath)
@@ -1016,18 +992,30 @@ local function updateStandData(player, standName, updates, sourcePath)
 	return CrewStandIncomeAuthority.UpdateStandData(player, standName, updates, sourcePath)
 end
 
-local function ensureInventoryMetadata(player, storageName, metadata)
-	metadata = metadata or buildMetadata(storageName)
-	return ensureLegacyInventoryEntry(player, storageName, metadata)
+clearStandData = function(player, standName, sourcePath)
+	return CrewStandIncomeAuthority.ClearStandData(player, standName, sourcePath)
 end
 
-local function createInstanceInternal(player, brainrotInventory, storageName, overrides)
-	local metadata = buildMetadata(storageName, overrides)
+local function ensureInventoryMetadata(player, storageName, metadata)
+	local _ = player
+	return metadata or buildMetadata(storageName)
+end
 
-	local instanceId = tostring(brainrotInventory.NextInstanceId)
-	brainrotInventory.NextInstanceId += 1
-	brainrotInventory.ById[instanceId] = normalizeInstanceData(instanceId, {
-		StorageName = storageName,
+local function createInstanceInternal(player, crewMemberInventory, storageName, overrides)
+	local metadata = buildMetadata(storageName, overrides)
+	if metadata == nil then
+		warnInvalidCrewIdentity("inventory_create_instance", storageName, player)
+		return nil, nil, "unknown_crew_member_id"
+	end
+
+	local instanceId = tostring(crewMemberInventory.NextInstanceId)
+	crewMemberInventory.NextInstanceId += 1
+	crewMemberInventory.ById[instanceId] = normalizeInstanceData(instanceId, {
+		StorageName = metadata.StorageName,
+		LegacyStorageName = metadata.LegacyStorageName,
+		CrewMemberId = metadata.CrewMemberId,
+		DisplayName = metadata.DisplayName,
+		ModelName = metadata.ModelName,
 		BaseName = overrides and overrides.BaseName or metadata.BaseName,
 		Variant = overrides and overrides.Variant or metadata.Variant,
 		Rarity = overrides and overrides.Rarity or metadata.Rarity,
@@ -1037,20 +1025,28 @@ local function createInstanceInternal(player, brainrotInventory, storageName, ov
 		DiamondRender = overrides and overrides.DiamondRender or metadata.DiamondRender,
 		Level = overrides and overrides.Level or 1,
 		CurrentXP = overrides and overrides.CurrentXP or 0,
+		TotalXP = overrides and overrides.TotalXP or 0,
 		AssignedStand = overrides and overrides.AssignedStand or "",
 		AcquiredAt = overrides and overrides.AcquiredAt or os.time(),
 		LastReleasedAt = overrides and overrides.LastReleasedAt or 0,
+		Source = overrides and overrides.Source or "",
+		DepthBand = overrides and overrides.DepthBand or "",
 		TutorialReward = overrides and overrides.TutorialReward == true,
 		TutorialToken = overrides and overrides.TutorialToken or "",
+		GrandLineRushStarter = overrides and overrides.GrandLineRushStarter == true,
+		RealCharacterName = metadata.RealCharacterName,
+		Arc = metadata.Arc,
+	}, nil, {
+		Canonical = true,
 	})
 	if overrides and overrides.TutorialReward == true then
-		table.insert(brainrotInventory.Order, 1, instanceId)
+		table.insert(crewMemberInventory.Order, 1, instanceId)
 	else
-		table.insert(brainrotInventory.Order, instanceId)
+		table.insert(crewMemberInventory.Order, instanceId)
 	end
 	IndexCollectionService.MarkCrewMemberDiscovered(
 		player,
-		storageName,
+		metadata.CrewMemberId,
 		overrides and overrides.BaseName or metadata.BaseName,
 		overrides and overrides.Variant or metadata.Variant,
 		{
@@ -1058,14 +1054,20 @@ local function createInstanceInternal(player, brainrotInventory, storageName, ov
 		}
 	)
 
-	return instanceId, brainrotInventory.ById[instanceId]
+	return instanceId, crewMemberInventory.ById[instanceId]
 end
 
 local function getStoredLegacyProgress(player, storageName)
-	local brainrotInventory = getBrainrotInventory(player)
-	for _, instanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(instanceId)]
-		if typeof(instanceData) == "table" and tostring(instanceData.StorageName or "") == tostring(storageName or "") then
+	local crewMemberInventory = getCrewMemberInventory(player)
+	local requestedId = tostring((resolveCanonicalCrewMemberId(storageName)))
+	for _, instanceId in ipairs(crewMemberInventory.Order) do
+		local instanceData = crewMemberInventory.ById[tostring(instanceId)]
+		if typeof(instanceData) == "table"
+			and (
+				getInstanceCrewKey(instanceData) == requestedId
+				or tostring(instanceData.LegacyStorageName or "") == tostring(storageName or "")
+			)
+		then
 			return math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
 				math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0)))
 		end
@@ -1073,12 +1075,16 @@ local function getStoredLegacyProgress(player, storageName)
 	return 1, 0
 end
 
-function Module.IsBrainrotInventoryEntry(key, entry)
-	return isBrainrotInventoryEntry(key, entry)
+function Module.IsCrewMemberInventoryEntry(key, entry)
+	return isCrewInventoryEntry(key, entry)
+end
+
+function Module.IsCrewInventoryEntry(key, entry)
+	return isCrewInventoryEntry(key, entry)
 end
 
 function Module.EnsureInventory(player)
-	return getBrainrotInventory(player)
+	return getCrewMemberInventory(player)
 end
 
 function Module.IsInventoryWriteAuthorityEnabled()
@@ -1113,7 +1119,7 @@ end
 function Module.PrintInventoryAuthorityStatus(status)
 	status = if typeof(status) == "table" then status else {}
 	local canonical = status.Canonical or {}
-	local legacy = status.BrainrotInventory or {}
+	local legacy = status.CrewMemberInventory or {}
 	local flags = status.Flags or {}
 	print(string.format(
 		"[CrewInventoryAuthority] status rootsMatch=%s mirrorMatch=%s canonicalInstances=%s legacyInstances=%s canonicalNext=%s legacyNext=%s blocking=%d unclassified=%d inventoryAuthority=%s writeAuthority=%s quickSlotsWriteAuthority=%s productQuickSlotWriteAuthority=%s canonicalRead=%s gameplayReads=%s profileMigrationWrite=%s dryRun=%s migrationKillSwitch=%s issues=%s",
@@ -1175,12 +1181,12 @@ function Module.RegisterInventorySavedCallback(callback)
 	end
 end
 
-function Module.SyncAvailableCounts(player)
-	return syncAvailableCounts(player)
+function Module.SyncAvailableCounts(player, options)
+	return syncAvailableCounts(player, nil, options)
 end
 
 function Module.SaveCrewInventory(player, crewInventory, options)
-	return saveBrainrotInventory(player, crewInventory, options)
+	return saveCrewMemberInventory(player, crewInventory, options)
 end
 
 function Module.IsTutorialRewardProtected(player, instanceData)
@@ -1203,7 +1209,15 @@ local function tutorialRewardMatchesFilters(instanceData, filters)
 	end
 
 	local storageName = tostring(filters.StorageName or "")
-	if storageName ~= "" and tostring(instanceData.StorageName or "") ~= storageName then
+	local canonicalStorageName = tostring((resolveCanonicalCrewMemberId(storageName)))
+	if storageName ~= "" and canonicalStorageName == "" then
+		return false
+	end
+	if storageName ~= ""
+		and canonicalStorageName ~= ""
+		and getInstanceCrewKey(instanceData) ~= canonicalStorageName
+		and tostring(instanceData.LegacyStorageName or "") ~= storageName
+	then
 		return false
 	end
 
@@ -1225,25 +1239,25 @@ end
 
 function Module.FindTutorialRewardInstance(player, filters)
 	filters = getTutorialRewardFilters(filters)
-	local brainrotInventory = getBrainrotInventory(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
 	local requestedInstanceId = tostring(filters.InstanceId or "")
 
 	if requestedInstanceId ~= "" then
-		local instanceData = brainrotInventory.ById[requestedInstanceId]
+		local instanceData = crewMemberInventory.ById[requestedInstanceId]
 		if tutorialRewardMatchesFilters(instanceData, filters) then
-			return requestedInstanceId, instanceData, brainrotInventory
+			return requestedInstanceId, instanceData, crewMemberInventory
 		end
 	end
 
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
 		local instanceId = tostring(orderedInstanceId)
-		local instanceData = brainrotInventory.ById[instanceId]
+		local instanceData = crewMemberInventory.ById[instanceId]
 		if tutorialRewardMatchesFilters(instanceData, filters) then
-			return instanceId, instanceData, brainrotInventory
+			return instanceId, instanceData, crewMemberInventory
 		end
 	end
 
-	return nil, nil, brainrotInventory
+	return nil, nil, crewMemberInventory
 end
 
 function Module.HasUsableTutorialReward(player, storageName, tutorialToken)
@@ -1255,21 +1269,21 @@ function Module.HasUsableTutorialReward(player, storageName, tutorialToken)
 	return instanceData ~= nil, instanceId, instanceData
 end
 
-local function getStandOccupancy(player, standName, brainrotInventory)
+local function getStandOccupancy(player, standName, crewMemberInventory)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return true, "invalid_stand"
 	end
 
 	local standData = getStandData(player, standName)
-	if tostring(standData.BrainrotName or "") ~= "" or tostring(standData.BrainrotInstanceId or "") ~= "" then
-		return true, "stand_occupied", tostring(standData.BrainrotInstanceId or ""), tostring(standData.BrainrotName or "")
+	if tostring(standData.CrewMemberName or "") ~= "" or tostring(standData.CrewMemberInstanceId or "") ~= "" then
+		return true, "stand_occupied", tostring(standData.CrewMemberInstanceId or ""), tostring(standData.CrewMemberName or "")
 	end
 
-	brainrotInventory = brainrotInventory or getBrainrotInventory(player)
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
+	crewMemberInventory = crewMemberInventory or getCrewMemberInventory(player)
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
 		local instanceId = tostring(orderedInstanceId)
-		local instanceData = brainrotInventory.ById[instanceId]
+		local instanceData = crewMemberInventory.ById[instanceId]
 		if instanceData and tostring(instanceData.AssignedStand or "") == standName then
 			return true, "stand_assigned_elsewhere", instanceId, tostring(instanceData.StorageName or "")
 		end
@@ -1283,39 +1297,49 @@ function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
 	filters.RequireAvailable = true
 	local clearTutorialMetadataAfterAssign = filters.ClearTutorialMetadataAfterAssign == true
 
-	local instanceId, instanceData, brainrotInventory = Module.FindTutorialRewardInstance(player, filters)
+	local instanceId, instanceData, crewMemberInventory = Module.FindTutorialRewardInstance(player, filters)
 	if not instanceData then
 		return nil, nil, "instance_unavailable"
 	end
 
-	local occupied, occupancyReason = getStandOccupancy(player, standName, brainrotInventory)
+	local occupied, occupancyReason = getStandOccupancy(player, standName, crewMemberInventory)
 	if occupied then
 		return nil, nil, occupancyReason
 	end
 
 	instanceData.AssignedStand = tostring(standName)
-	setInstanceData(player, brainrotInventory, instanceId, instanceData)
-	updateStandData(player, standName, {
-		BrainrotName = instanceData.StorageName,
-		BrainrotInstanceId = tostring(instanceId),
+	local saveOk, saveReason = setInstanceData(player, crewMemberInventory, instanceId, instanceData)
+	if saveOk ~= true then
+		return nil, nil, tostring(saveReason or "assignment_save_failed")
+	end
+
+	local standOk, standReason = updateStandData(player, standName, {
+		CrewMemberName = getInstanceCrewKey(instanceData),
+		CrewMemberInstanceId = tostring(instanceId),
+		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
 	}, "stand_place_tutorial_reward")
+	if standOk ~= true then
+		instanceData.AssignedStand = ""
+		setInstanceData(player, crewMemberInventory, instanceId, instanceData)
+		return nil, nil, tostring(standReason or "stand_income_write_failed")
+	end
 
 	if clearTutorialMetadataAfterAssign then
-		local assignedInstanceData = brainrotInventory.ById[tostring(instanceId)]
+		local assignedInstanceData = crewMemberInventory.ById[tostring(instanceId)]
 		if assignedInstanceData then
 			assignedInstanceData.TutorialReward = false
 			assignedInstanceData.TutorialToken = ""
 			assignedInstanceData.TutorialOwnerUserId = nil
-			assignedInstanceData.TutorialBrainrot = nil
+			assignedInstanceData.TutorialCrewMember = nil
 			assignedInstanceData.TutorialRewardName = nil
-			setInstanceData(player, brainrotInventory, instanceId, assignedInstanceData)
+			setInstanceData(player, crewMemberInventory, instanceId, assignedInstanceData)
 		end
 	end
 
-	syncAvailableCounts(player, brainrotInventory)
+	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "stand_place")
 
-	return tostring(instanceId), brainrotInventory.ById[tostring(instanceId)]
+	return tostring(instanceId), crewMemberInventory.ById[tostring(instanceId)]
 end
 
 function Module.EnsureInventoryMetadata(player, storageName, metadata)
@@ -1325,14 +1349,21 @@ end
 function Module.CreateInstances(player, storageName, count, overrides)
 	local safeCount = math.max(0, math.floor(coerceNumber(count, 0)))
 	if safeCount <= 0 then
-		return {}
+		return {}, "non_positive_count"
+	end
+	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
+	if not info then
+		warnInvalidCrewIdentity("inventory_grant", storageName, player)
+		return {}, "unknown_crew_member_id"
 	end
 
 	local assignedStand = tostring(overrides and overrides.AssignedStand or "")
 	local capacityReserved = overrides and overrides._QuickSlotCapacityReserved == true
 	if assignedStand == "" and not capacityReserved then
-		if not CrewQuickSlotService.CanGainOrNotify(player, safeCount, "CreateInstances:" .. tostring(storageName)) then
-			return {}
+		local canGain, _, _, _, capacityReason =
+			CrewQuickSlotService.CanGainOrNotify(player, canonicalStorageName, safeCount, "CreateInstances:" .. tostring(canonicalStorageName))
+		if not canGain then
+			return {}, tostring(capacityReason or "crew_stack_capacity_full")
 		end
 	end
 
@@ -1344,20 +1375,23 @@ function Module.CreateInstances(player, storageName, count, overrides)
 			tostring(storageName),
 			tostring(readyReason or "unknown")
 		))
-		return {}
+		return {}, tostring(readyReason or "inventory_authority_not_ready")
 	end
 
-	local brainrotInventory = getBrainrotInventory(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
 
 	local createdIds = {}
 	for _ = 1, safeCount do
 		local instanceOverrides = if typeof(overrides) == "table" then table.clone(overrides) else {}
 		instanceOverrides.DeferIndexShadowRefresh = true
-		local instanceId = createInstanceInternal(player, brainrotInventory, storageName, instanceOverrides)
+		local instanceId, _, createReason = createInstanceInternal(player, crewMemberInventory, canonicalStorageName, instanceOverrides)
+		if instanceId == nil then
+			return {}, tostring(createReason or "create_instance_failed")
+		end
 		table.insert(createdIds, instanceId)
 	end
 
-	local saved, saveReason = saveBrainrotInventory(player, brainrotInventory, {
+	local saved, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
 		SourcePath = "inventory_grant",
 	})
 	if saved ~= true then
@@ -1367,30 +1401,37 @@ function Module.CreateInstances(player, storageName, count, overrides)
 			tostring(storageName),
 			tostring(saveReason or "unknown")
 		))
-		return {}
+		return {}, tostring(saveReason or "inventory_save_failed")
 	end
-	syncAvailableCounts(player, brainrotInventory)
+	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "inventory_grant")
 	return createdIds
 end
 
 function Module.EnsureAvailableInstancesForStorage(player, storageName, minimumAvailable, options)
+	local requestedStorageName = tostring(storageName or "")
+	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
+	if not info then
+		warnInvalidCrewIdentity("inventory_ensure_available", storageName, player)
+		return 0
+	end
+
 	local ready, readyReason = ensureInventoryAuthorityReady(player, "inventory_ensure_available")
 	if ready ~= true then
 		warn(string.format(
 			"[CrewInstanceService] CrewMember inventory authority ensure available failed closed player=%s storage=%s reason=%s",
 			player and player.Name or "unknown",
-			tostring(storageName),
+			tostring(canonicalStorageName),
 			tostring(readyReason or "unknown")
 		))
 		return 0
 	end
 
-	local brainrotInventory = getBrainrotInventory(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
 	local availableCount = 0
-	for _, instanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(instanceId)]
-		if instanceData and instanceData.StorageName == storageName and instanceData.AssignedStand == "" then
+	for _, instanceId in ipairs(crewMemberInventory.Order) do
+		local instanceData = crewMemberInventory.ById[tostring(instanceId)]
+		if instanceData and getInstanceCrewKey(instanceData) == canonicalStorageName and instanceData.AssignedStand == "" then
 			availableCount += 1
 		end
 	end
@@ -1401,27 +1442,30 @@ function Module.EnsureAvailableInstancesForStorage(player, storageName, minimumA
 		return availableCount
 	end
 
-	local level, currentXP = getStoredLegacyProgress(player, storageName)
+	local level, currentXP = getStoredLegacyProgress(player, canonicalStorageName)
 	for _ = 1, (targetCount - availableCount) do
-		createInstanceInternal(player, brainrotInventory, storageName, {
+		local createdId = createInstanceInternal(player, crewMemberInventory, if requestedStorageName ~= "" then requestedStorageName else canonicalStorageName, {
 			Level = level,
 			CurrentXP = currentXP,
 		})
+		if createdId == nil then
+			return availableCount
+		end
 	end
 
-	local saved, saveReason = saveBrainrotInventory(player, brainrotInventory, {
+	local saved, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
 		SourcePath = "inventory_ensure_available",
 	})
 	if saved ~= true then
 		warn(string.format(
 			"[CrewInstanceService] CrewMember inventory authority ensure available save failed player=%s storage=%s reason=%s",
 			player and player.Name or "unknown",
-			tostring(storageName),
+			tostring(canonicalStorageName),
 			tostring(saveReason or "unknown")
 		))
 		return availableCount
 	end
-	syncAvailableCounts(player, brainrotInventory)
+	syncAvailableCounts(player, crewMemberInventory)
 	if not (typeof(options) == "table" and options.DeferShadowRefresh == true) then
 		refreshCrewMemberShadow(player, "data_repair_available_instances")
 	end
@@ -1429,7 +1473,7 @@ function Module.EnsureAvailableInstancesForStorage(player, storageName, minimumA
 end
 
 function Module.GetInstance(player, instanceRef)
-	local brainrotInventory = getBrainrotInventory(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
 	local instanceId = nil
 
 	if typeof(instanceRef) == "table" then
@@ -1438,46 +1482,52 @@ function Module.GetInstance(player, instanceRef)
 		instanceId = tostring(instanceRef or "")
 	end
 
-	local instanceData = brainrotInventory.ById[instanceId]
+	local instanceData = crewMemberInventory.ById[instanceId]
 	if instanceData then
-		return instanceId, instanceData, brainrotInventory
+		return instanceId, instanceData, crewMemberInventory
 	end
 
-	return nil, nil, brainrotInventory
+	return nil, nil, crewMemberInventory
 end
 
 function Module.ResolveProgressTarget(player, reference)
-	local instanceId, instanceData, brainrotInventory = Module.GetInstance(player, reference)
+	local instanceId, instanceData, crewMemberInventory = Module.GetInstance(player, reference)
 	if instanceData then
-		return instanceId, instanceData, brainrotInventory
+		return instanceId, instanceData, crewMemberInventory
 	end
 
 	local storageName = tostring(reference or "")
 	if storageName == "" then
-		return nil, nil, brainrotInventory
+		return nil, nil, crewMemberInventory
+	end
+	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
+	if not info then
+		warnInvalidCrewIdentity("progress_target", storageName, player)
+		return nil, nil, crewMemberInventory
 	end
 
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
-		local candidate = brainrotInventory.ById[tostring(orderedInstanceId)]
-		if candidate and candidate.StorageName == storageName then
-			return tostring(orderedInstanceId), candidate, brainrotInventory
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+		local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
+		if candidate and getInstanceCrewKey(candidate) == canonicalStorageName then
+			return tostring(orderedInstanceId), candidate, crewMemberInventory
 		end
 	end
 
-	Module.EnsureAvailableInstancesForStorage(player, storageName, 1)
-	brainrotInventory = getBrainrotInventory(player)
+	Module.EnsureAvailableInstancesForStorage(player, canonicalStorageName, 1)
+	crewMemberInventory = getCrewMemberInventory(player)
 
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
-		local candidate = brainrotInventory.ById[tostring(orderedInstanceId)]
-		if candidate and candidate.StorageName == storageName then
-			return tostring(orderedInstanceId), candidate, brainrotInventory
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+		local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
+		if candidate and getInstanceCrewKey(candidate) == canonicalStorageName then
+			return tostring(orderedInstanceId), candidate, crewMemberInventory
 		end
 	end
 
-	return nil, nil, brainrotInventory
+	return nil, nil, crewMemberInventory
 end
 
-function Module.UpdateProgress(player, instanceId, level, currentXP)
+function Module.UpdateProgress(player, instanceId, level, currentXP, options)
+	options = if typeof(options) == "table" then options else {}
 	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
 	if progressionAuthorityEnabled == true then
 		local ready, readyReason = ensureProgressionAuthorityReady(player, "progression_update")
@@ -1492,7 +1542,7 @@ function Module.UpdateProgress(player, instanceId, level, currentXP)
 		end
 	end
 
-	local resolvedInstanceId, instanceData, brainrotInventory = Module.GetInstance(player, instanceId)
+	local resolvedInstanceId, instanceData, crewMemberInventory = Module.GetInstance(player, instanceId)
 	if not instanceData then
 		return nil
 	end
@@ -1514,7 +1564,19 @@ function Module.UpdateProgress(player, instanceId, level, currentXP)
 
 	instanceData.Level = math.max(1, math.floor(coerceNumber(level, instanceData.Level or 1)))
 	instanceData.CurrentXP = math.max(0, math.floor(coerceNumber(currentXP, instanceData.CurrentXP or 0)))
-	local saveOk, saveReason = setInstanceData(player, brainrotInventory, resolvedInstanceId, instanceData)
+	if options.TotalXP ~= nil then
+		instanceData.TotalXP = math.max(0, math.floor(coerceNumber(options.TotalXP, instanceData.TotalXP or 0)))
+	end
+	if options.Source ~= nil then
+		instanceData.Source = tostring(options.Source or "")
+	end
+	if options.DepthBand ~= nil then
+		instanceData.DepthBand = tostring(options.DepthBand or "")
+	end
+	if options.GrandLineRushStarter ~= nil then
+		instanceData.GrandLineRushStarter = options.GrandLineRushStarter == true
+	end
+	local saveOk, saveReason = setInstanceData(player, crewMemberInventory, resolvedInstanceId, instanceData)
 	if saveOk ~= true then
 		if progressionAuthorityEnabled == true then
 			local restoreOk, restoreReason = restoreInventoryAuthoritySnapshot(player, snapshot, "progression_save_failed")
@@ -1527,7 +1589,7 @@ function Module.UpdateProgress(player, instanceId, level, currentXP)
 		return nil
 	end
 
-	local updated = brainrotInventory.ById[resolvedInstanceId]
+	local updated = crewMemberInventory.ById[resolvedInstanceId]
 
 	if progressionAuthorityEnabled == true then
 		local shadowResult = refreshCrewMemberShadow(player, "progression_update")
@@ -1593,7 +1655,7 @@ end
 
 function Module.GetStandInstanceId(player, standName)
 	local standData = getStandData(player, standName)
-	local rawInstanceId = tostring(standData.BrainrotInstanceId or "")
+	local rawInstanceId = tostring(standData.CrewMemberInstanceId or "")
 	if rawInstanceId == "" then
 		return ""
 	end
@@ -1605,8 +1667,8 @@ function Module.GetStandInstanceId(player, standName)
 
 	if instanceData.AssignedStand ~= tostring(standName) then
 		instanceData.AssignedStand = tostring(standName)
-		local _, _, brainrotInventory = Module.GetInstance(player, instanceId)
-		setInstanceData(player, brainrotInventory, instanceId, instanceData)
+		local _, _, crewMemberInventory = Module.GetInstance(player, instanceId)
+		setInstanceData(player, crewMemberInventory, instanceId, instanceData)
 		refreshCrewMemberShadow(player, "data_repair_stand_assignment")
 	end
 
@@ -1615,30 +1677,46 @@ end
 
 function Module.EnsureStandInstance(player, standName, fallbackStorageName)
 	local standData = getStandData(player, standName)
-	local standStorageName = tostring(standData.BrainrotName or fallbackStorageName or "")
+	local standStorageName = firstNonEmpty(standData.CrewMemberName, fallbackStorageName)
 	if standStorageName == "" then
-		if standData.BrainrotInstanceId ~= "" then
+		if standData.CrewMemberInstanceId ~= "" then
 			updateStandData(player, standName, {
-				BrainrotInstanceId = "",
+				CrewMemberInstanceId = "",
 			}, "data_repair_stand_instance")
 			refreshCrewMemberShadow(player, "data_repair_stand_instance")
 		end
 		return nil, nil
 	end
+	local canonicalStandStorageName, standInfo = resolveCanonicalCrewMemberId(standStorageName)
+	if not standInfo then
+		warnInvalidCrewIdentity("stand_instance", standStorageName, player)
+		clearStandData(player, standName, "invalid_stand_identity_quarantine")
+		clearShipSlotAssignment(player, standName)
+		return nil, nil
+	end
+	standStorageName = canonicalStandStorageName
+	if standData.NeedsCanonicalRepair == true or standData.CrewMemberName ~= standStorageName then
+		updateStandData(player, standName, {
+			CrewMemberName = standStorageName,
+			CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
+			StandLevel = math.max(1, math.floor(coerceNumber(standData.StandLevel, 1))),
+		}, "stand_identity_repair")
+	end
 
-	local instanceId = tostring(standData.BrainrotInstanceId or "")
-	local brainrotInventory = getBrainrotInventory(player)
-	local instanceData = brainrotInventory.ById[instanceId]
+	local instanceId = tostring(standData.CrewMemberInstanceId or "")
+	local crewMemberInventory = getCrewMemberInventory(player)
+	local instanceData = crewMemberInventory.ById[instanceId]
 	if instanceData then
 		local repaired = false
 		if instanceData.AssignedStand ~= tostring(standName) then
 			instanceData.AssignedStand = tostring(standName)
-			setInstanceData(player, brainrotInventory, instanceId, instanceData)
+			setInstanceData(player, crewMemberInventory, instanceId, instanceData)
 			repaired = true
 		end
-		if standData.BrainrotName ~= instanceData.StorageName then
+		if standData.CrewMemberName ~= getInstanceCrewKey(instanceData) then
 			updateStandData(player, standName, {
-				BrainrotName = instanceData.StorageName,
+				CrewMemberName = getInstanceCrewKey(instanceData),
+				CrewMemberInstanceId = tostring(instanceId),
 			}, "data_repair_stand_instance")
 			repaired = true
 		end
@@ -1648,17 +1726,17 @@ function Module.EnsureStandInstance(player, standName, fallbackStorageName)
 		return instanceId, instanceData
 	end
 
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
-		local candidate = brainrotInventory.ById[tostring(orderedInstanceId)]
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+		local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
 		if candidate and candidate.AssignedStand == tostring(standName) then
 			local repaired = false
 			updateStandData(player, standName, {
-				BrainrotInstanceId = tostring(orderedInstanceId),
+				CrewMemberInstanceId = tostring(orderedInstanceId),
 			}, "data_repair_stand_instance")
 			repaired = true
-			if standData.BrainrotName ~= candidate.StorageName then
+			if standData.CrewMemberName ~= getInstanceCrewKey(candidate) then
 				updateStandData(player, standName, {
-					BrainrotName = candidate.StorageName,
+					CrewMemberName = getInstanceCrewKey(candidate),
 				}, "data_repair_stand_instance")
 				repaired = true
 			end
@@ -1672,18 +1750,18 @@ function Module.EnsureStandInstance(player, standName, fallbackStorageName)
 	Module.EnsureAvailableInstancesForStorage(player, standStorageName, 1, {
 		DeferShadowRefresh = true,
 	})
-	brainrotInventory = getBrainrotInventory(player)
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
-		local candidate = brainrotInventory.ById[tostring(orderedInstanceId)]
-		if candidate and candidate.StorageName == standStorageName and candidate.AssignedStand == "" then
+	crewMemberInventory = getCrewMemberInventory(player)
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+		local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
+		if candidate and getInstanceCrewKey(candidate) == standStorageName and candidate.AssignedStand == "" then
 			candidate.AssignedStand = tostring(standName)
-			setInstanceData(player, brainrotInventory, orderedInstanceId, candidate)
+			setInstanceData(player, crewMemberInventory, orderedInstanceId, candidate)
 			updateStandData(player, standName, {
-				BrainrotInstanceId = tostring(orderedInstanceId),
+				CrewMemberInstanceId = tostring(orderedInstanceId),
 			}, "data_repair_stand_instance")
-			if standData.BrainrotName ~= candidate.StorageName then
+			if standData.CrewMemberName ~= getInstanceCrewKey(candidate) then
 				updateStandData(player, standName, {
-					BrainrotName = candidate.StorageName,
+					CrewMemberName = getInstanceCrewKey(candidate),
 				}, "data_repair_stand_instance")
 			end
 			syncAvailableCounts(player)
@@ -1693,70 +1771,258 @@ function Module.EnsureStandInstance(player, standName, fallbackStorageName)
 	end
 
 	local level, currentXP = getStoredLegacyProgress(player, standStorageName)
-	local createdId = createInstanceInternal(player, brainrotInventory, standStorageName, {
+	local createdId = createInstanceInternal(player, crewMemberInventory, standStorageName, {
 		AssignedStand = tostring(standName),
 		Level = level,
 		CurrentXP = currentXP,
 	})
-	saveBrainrotInventory(player, brainrotInventory)
+	if createdId == nil then
+		clearStandData(player, standName, "invalid_stand_identity_quarantine")
+		clearShipSlotAssignment(player, standName)
+		return nil, nil
+	end
+	saveCrewMemberInventory(player, crewMemberInventory)
 	updateStandData(player, standName, {
-		BrainrotName = standStorageName,
-		BrainrotInstanceId = tostring(createdId),
+		CrewMemberName = getInstanceCrewKey(crewMemberInventory.ById[tostring(createdId)]) or standStorageName,
+		CrewMemberInstanceId = tostring(createdId),
 	}, "data_repair_stand_instance")
-	syncAvailableCounts(player, brainrotInventory)
+	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "data_repair_stand_instance")
-	return tostring(createdId), brainrotInventory.ById[tostring(createdId)]
+	return tostring(createdId), crewMemberInventory.ById[tostring(createdId)]
+end
+
+function Module.ReconcileStandAssignment(player, standName)
+	standName = tostring(standName or "")
+	if standName == "" then
+		return false, "invalid_stand"
+	end
+
+	local standData = getStandData(player, standName)
+	local standCrewMemberName = tostring(standData.CrewMemberName or "")
+	local standInstanceId = tostring(standData.CrewMemberInstanceId or "")
+	if standData.HasInvalidCrewMember == true then
+		warnInvalidCrewIdentity("stand_assignment_reconcile", standData.QuarantinedCrewMemberName, player)
+		clearStandData(player, standName, "invalid_stand_identity_quarantine")
+		clearShipSlotAssignment(player, standName)
+		return true, "invalid_stand_identity_quarantined"
+	end
+	local crewMemberInventory = getCrewMemberInventory(player)
+	local assignedInstanceId = ""
+	local assignedInstanceData = nil
+
+	if standInstanceId ~= "" and typeof(crewMemberInventory.ById[standInstanceId]) == "table" then
+		assignedInstanceId = standInstanceId
+		assignedInstanceData = crewMemberInventory.ById[standInstanceId]
+	end
+
+	if assignedInstanceData == nil then
+		for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+			local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
+			if typeof(candidate) == "table" and tostring(candidate.AssignedStand or "") == standName then
+				assignedInstanceId = tostring(orderedInstanceId)
+				assignedInstanceData = candidate
+				break
+			end
+		end
+	end
+
+	if assignedInstanceData == nil then
+		if standCrewMemberName ~= "" or standInstanceId ~= "" then
+			local ensuredInstanceId, ensuredInstanceData = Module.EnsureStandInstance(player, standName, standCrewMemberName)
+			if ensuredInstanceData then
+				return true, "ensured_from_stand_income", ensuredInstanceId, ensuredInstanceData
+			end
+		end
+		return true, "no_assignment"
+	end
+
+	local canonicalCrewMemberId = getInstanceCrewKey(assignedInstanceData)
+	if canonicalCrewMemberId == "" then
+		assignedInstanceData.AssignedStand = ""
+		setInstanceData(player, crewMemberInventory, assignedInstanceId, assignedInstanceData)
+		return false, "missing_canonical_crew_member_id"
+	end
+
+	if tostring(assignedInstanceData.AssignedStand or "") ~= standName then
+		assignedInstanceData.AssignedStand = standName
+		setInstanceData(player, crewMemberInventory, assignedInstanceId, assignedInstanceData)
+	end
+
+	if standData.NeedsCanonicalRepair == true then
+		updateStandData(player, standName, {
+			CrewMemberName = canonicalCrewMemberId,
+			CrewMemberInstanceId = assignedInstanceId,
+			StandLevel = math.max(1, math.floor(coerceNumber(assignedInstanceData.Level, 1))),
+		}, "stand_identity_repair")
+		refreshCrewMemberShadow(player, "stand_identity_repair")
+	end
+
+	if standCrewMemberName == canonicalCrewMemberId and standInstanceId == assignedInstanceId then
+		return true, "in_sync", assignedInstanceId, assignedInstanceData
+	end
+
+	local standOk, standReason = updateStandData(player, standName, {
+		CrewMemberName = canonicalCrewMemberId,
+		CrewMemberInstanceId = assignedInstanceId,
+		StandLevel = math.max(1, math.floor(coerceNumber(assignedInstanceData.Level, 1))),
+	}, "stand_assignment_reconcile")
+	if standOk ~= true then
+		assignedInstanceData.AssignedStand = ""
+		setInstanceData(player, crewMemberInventory, assignedInstanceId, assignedInstanceData)
+		return false, tostring(standReason or "stand_income_write_failed")
+	end
+
+	refreshCrewMemberShadow(player, "stand_assignment_reconcile")
+	return true, "rebuilt_income_row", assignedInstanceId, assignedInstanceData
+end
+
+function Module.RepairCanonicalCrewState(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
+	local standNames = {}
+
+	for _, instanceData in pairs(crewMemberInventory.ById) do
+		if typeof(instanceData) == "table" then
+			local assignedStand = tostring(instanceData.AssignedStand or "")
+			if assignedStand ~= "" then
+				standNames[assignedStand] = true
+			end
+		end
+	end
+
+	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
+		standNames[tostring(standName)] = true
+		if typeof(standData) == "table" and standData.HasInvalidCrewMember == true then
+			warnInvalidCrewIdentity("stand_income_repair", standData.QuarantinedCrewMemberName, player)
+			clearStandData(player, standName, "invalid_stand_identity_quarantine")
+			clearShipSlotAssignment(player, standName)
+			standNames[tostring(standName)] = nil
+		end
+	end
+
+	for standName in pairs(standNames) do
+		Module.ReconcileStandAssignment(player, standName)
+	end
+
+	return true
 end
 
 function Module.FindAvailableInstance(player, storageName)
+	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
+	if not info then
+		warnInvalidCrewIdentity("find_available_instance", storageName, player)
+		return nil, nil, getCrewMemberInventory(player)
+	end
 	Module.EnsureAvailableInstancesForStorage(player, storageName, 1)
-	local brainrotInventory = getBrainrotInventory(player)
-	for _, instanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(instanceId)]
-		if instanceData and instanceData.StorageName == tostring(storageName) and instanceData.AssignedStand == "" then
-			return tostring(instanceId), instanceData, brainrotInventory
+	local crewMemberInventory = getCrewMemberInventory(player)
+	for _, instanceId in ipairs(crewMemberInventory.Order) do
+		local instanceData = crewMemberInventory.ById[tostring(instanceId)]
+		if instanceData and getInstanceCrewKey(instanceData) == canonicalStorageName and instanceData.AssignedStand == "" then
+			return tostring(instanceId), instanceData, crewMemberInventory
 		end
 	end
-	return nil, nil, brainrotInventory
+	return nil, nil, crewMemberInventory
 end
 
 function Module.AssignAvailableInstanceToStand(player, storageName, standName)
-	local instanceId, instanceData, brainrotInventory = Module.FindAvailableInstance(player, storageName)
+	local instanceId, instanceData, crewMemberInventory = Module.FindAvailableInstance(player, storageName)
 	if not instanceData then
 		return nil, nil, "instance_unavailable"
 	end
 
-	local occupied, occupancyReason = getStandOccupancy(player, standName, brainrotInventory)
+	local occupied, occupancyReason = getStandOccupancy(player, standName, crewMemberInventory)
 	if occupied then
 		return nil, nil, occupancyReason
 	end
 
 	instanceData.AssignedStand = tostring(standName)
-	setInstanceData(player, brainrotInventory, instanceId, instanceData)
-	updateStandData(player, standName, {
-		BrainrotName = instanceData.StorageName,
-		BrainrotInstanceId = tostring(instanceId),
+	local saveOk, saveReason = setInstanceData(player, crewMemberInventory, instanceId, instanceData)
+	if saveOk ~= true then
+		return nil, nil, tostring(saveReason or "assignment_save_failed")
+	end
+
+	local standOk, standReason = updateStandData(player, standName, {
+		CrewMemberName = getInstanceCrewKey(instanceData),
+		CrewMemberInstanceId = tostring(instanceId),
+		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
 	}, "stand_place")
-	syncAvailableCounts(player, brainrotInventory)
+	if standOk ~= true then
+		instanceData.AssignedStand = ""
+		setInstanceData(player, crewMemberInventory, instanceId, instanceData)
+		return nil, nil, tostring(standReason or "stand_income_write_failed")
+	end
+	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "stand_place")
 
-	return tostring(instanceId), brainrotInventory.ById[tostring(instanceId)]
+	return tostring(instanceId), crewMemberInventory.ById[tostring(instanceId)]
 end
 
 function Module.ReleaseStandInstance(player, standName, options)
 	options = if typeof(options) == "table" then options else {}
+	standName = tostring(standName or "")
+
+	local standDataBefore, standMetaBefore = getStandData(player, standName)
+	local canonicalBefore = if typeof(standMetaBefore) == "table" then standMetaBefore.CanonicalRow else nil
+	local debugInfo = {
+		PlayerName = player and player.Name or "unknown",
+		UserId = player and player.UserId or 0,
+		StandName = standName,
+		AssignedCrewMemberName = tostring(standDataBefore and standDataBefore.CrewMemberName or ""),
+		CrewMemberInstanceId = tostring((canonicalBefore and canonicalBefore.CrewMemberInstanceId) or (standDataBefore and standDataBefore.CrewMemberInstanceId) or ""),
+		LegacyStorageName = tostring((canonicalBefore and canonicalBefore.LegacyStorageName) or (standDataBefore and standDataBefore.CrewMemberName) or ""),
+		IncomeBefore = tonumber(standDataBefore and standDataBefore.IncomeToCollect) or 0,
+	}
+
 	local instanceId, instanceData = Module.EnsureStandInstance(player, standName)
+	debugInfo.EnsureInstanceId = tostring(instanceId or "")
+	debugInfo.InstanceExistsInCrewInventory = instanceData ~= nil
+	debugInfo.PlayerOwnsInstance = instanceData ~= nil
+	debugInfo.InstanceStorageName = instanceData and tostring(instanceData.StorageName or "") or ""
+	debugInfo.InstanceAssignedStand = instanceData and tostring(instanceData.AssignedStand or "") or ""
+
+	local crewMemberInventory = getCrewMemberInventory(player)
+	local assignedStandRefs = {}
+	if typeof(crewMemberInventory) == "table" and typeof(crewMemberInventory.ById) == "table" then
+		for ownedInstanceId, ownedInstanceData in pairs(crewMemberInventory.ById) do
+			if typeof(ownedInstanceData) == "table" and tostring(ownedInstanceData.AssignedStand or "") == standName then
+				assignedStandRefs[#assignedStandRefs + 1] = string.format(
+					"%s:%s",
+					tostring(ownedInstanceId),
+					tostring(ownedInstanceData.StorageName or "")
+				)
+			end
+		end
+	end
+	table.sort(assignedStandRefs)
+	debugInfo.AssignedStandRefs = table.concat(assignedStandRefs, ",")
+	debugInfo.InstanceExistsInPlacedTracking = #assignedStandRefs > 0
+
 	if not instanceData then
-		updateStandData(player, standName, {
-			BrainrotName = "",
-			BrainrotInstanceId = "",
-			IncomeToCollect = 0,
-		}, "stand_release")
-		refreshCrewMemberShadow(player, "stand_release")
-		return nil, nil
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", "no_instance_available" },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedCrewMemberName },
+			{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+			{ "legacyStorageName", debugInfo.LegacyStorageName },
+			{ "incomeBefore", debugInfo.IncomeBefore },
+			{ "instanceExists", debugInfo.InstanceExistsInCrewInventory },
+			{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+		}))
+		return nil, nil, "no_instance_available", debugInfo
 	end
 
-	local canGain = CrewQuickSlotService.CanGainOrNotify(player, 1, "ReleaseStandInstance:" .. tostring(standName))
+	local canGain, occupiedSlots, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainOrNotify(
+		player,
+		getInstanceCrewKey(instanceData),
+		1,
+		"ReleaseStandInstance:" .. standName
+	)
+	debugInfo.QuickSlotCanGain = canGain == true
+	debugInfo.QuickSlotOccupied = tonumber(occupiedSlots) or 0
+	debugInfo.QuickSlotUnlocked = tonumber(unlockedSlots) or 0
+	debugInfo.QuickSlotMax = tonumber(maxSlots) or 0
 	if not canGain then
 		local source = tostring(options.Source or "")
 		local expectedInstanceId = tostring(options.ExpectedInstanceId or "")
@@ -1764,31 +2030,133 @@ function Module.ReleaseStandInstance(player, standName, options)
 			and source ~= ""
 			and expectedInstanceId ~= ""
 			and expectedInstanceId == tostring(instanceId)
+		debugInfo.AllowCapacityBypass = allowCapacityBypass == true
+		debugInfo.ExpectedInstanceId = expectedInstanceId
+		debugInfo.Source = source
 		if not allowCapacityBypass then
-			return nil, nil, "quick_slot_capacity"
+			crewPickupDebug(formatCrewPickupDebugFields({
+				{ "event", "release_failed" },
+				{ "reason", "quick_slot_capacity" },
+				{ "player", debugInfo.PlayerName },
+				{ "userId", debugInfo.UserId },
+				{ "stand", standName },
+				{ "assignedName", debugInfo.AssignedCrewMemberName },
+				{ "instanceId", tostring(instanceId) },
+				{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+				{ "legacyStorageName", debugInfo.LegacyStorageName },
+				{ "incomeBefore", debugInfo.IncomeBefore },
+				{ "quickOccupied", debugInfo.QuickSlotOccupied },
+				{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+				{ "quickMax", debugInfo.QuickSlotMax },
+				{ "instanceExists", debugInfo.InstanceExistsInCrewInventory },
+				{ "playerOwnsInstance", debugInfo.PlayerOwnsInstance },
+				{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+			}))
+			return nil, nil, "quick_slot_capacity", debugInfo
 		end
 	end
 
-	local _, _, brainrotInventory = Module.GetInstance(player, instanceId)
+	local _, _, releaseInventory = Module.GetInstance(player, instanceId)
+	if releaseInventory ~= nil then
+		crewMemberInventory = releaseInventory
+	end
 
 	instanceData.AssignedStand = ""
 	instanceData.LastReleasedAt = os.time()
-	brainrotInventory.ById[tostring(instanceId)] = instanceData
-	moveInstanceToFront(brainrotInventory, instanceId)
-	saveBrainrotInventory(player, brainrotInventory)
+	crewMemberInventory.ById[tostring(instanceId)] = instanceData
+	moveInstanceToFront(crewMemberInventory, instanceId)
+	local saveOk, saveReason = saveCrewMemberInventory(player, crewMemberInventory)
+	debugInfo.InventorySaveOk = saveOk == true
+	debugInfo.InventorySaveReason = tostring(saveReason or "")
+	if saveOk ~= true then
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", "inventory_write_failed" },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedCrewMemberName },
+			{ "releasedInstanceId", tostring(instanceId) },
+			{ "releasedStorage", tostring(instanceData.StorageName or "") },
+			{ "inventorySaveOk", debugInfo.InventorySaveOk },
+			{ "inventorySaveReason", debugInfo.InventorySaveReason },
+			{ "standClearOk", "" },
+			{ "standClearReason", "" },
+		}))
+		return nil, nil, "inventory_write_failed", debugInfo
+	end
 
-	updateStandData(player, standName, {
-		BrainrotName = "",
-		BrainrotInstanceId = "",
-		IncomeToCollect = 0,
-	}, "stand_release")
-	syncAvailableCounts(player, brainrotInventory)
+	local clearOk, clearReason = clearStandData(player, standName, "stand_release")
+	debugInfo.StandClearOk = clearOk == true
+	debugInfo.StandClearReason = tostring(clearReason or "")
+	if clearOk ~= true then
+		instanceData.AssignedStand = standName
+		crewMemberInventory.ById[tostring(instanceId)] = instanceData
+		local rollbackOk, rollbackReason = saveCrewMemberInventory(player, crewMemberInventory)
+		debugInfo.InventoryRollbackOk = rollbackOk == true
+		debugInfo.InventoryRollbackReason = tostring(rollbackReason or "")
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", "stand_clear_failed" },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedCrewMemberName },
+			{ "releasedInstanceId", tostring(instanceId) },
+			{ "releasedStorage", tostring(instanceData.StorageName or "") },
+			{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+			{ "legacyStorageName", debugInfo.LegacyStorageName },
+			{ "incomeBefore", debugInfo.IncomeBefore },
+			{ "quickOccupied", debugInfo.QuickSlotOccupied },
+			{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+			{ "quickMax", debugInfo.QuickSlotMax },
+			{ "inventorySaveOk", debugInfo.InventorySaveOk },
+			{ "inventorySaveReason", debugInfo.InventorySaveReason },
+			{ "standClearOk", debugInfo.StandClearOk },
+			{ "standClearReason", debugInfo.StandClearReason },
+			{ "inventoryRollbackOk", debugInfo.InventoryRollbackOk },
+			{ "inventoryRollbackReason", debugInfo.InventoryRollbackReason },
+			{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+		}))
+		syncAvailableCounts(player, crewMemberInventory)
+		refreshCrewMemberShadow(player, "stand_release_failed")
+		return nil, nil, "stand_clear_failed", debugInfo
+	end
+
+	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "stand_release")
 
-	return tostring(instanceId), brainrotInventory.ById[tostring(instanceId)]
+	crewPickupDebug(formatCrewPickupDebugFields({
+		{ "event", "release_success" },
+		{ "reason", "none" },
+		{ "player", debugInfo.PlayerName },
+		{ "userId", debugInfo.UserId },
+		{ "stand", standName },
+		{ "assignedName", debugInfo.AssignedCrewMemberName },
+		{ "releasedInstanceId", tostring(instanceId) },
+		{ "releasedStorage", tostring(instanceData.StorageName or "") },
+		{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+		{ "legacyStorageName", debugInfo.LegacyStorageName },
+		{ "incomeBefore", debugInfo.IncomeBefore },
+		{ "quickOccupied", debugInfo.QuickSlotOccupied },
+		{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+		{ "quickMax", debugInfo.QuickSlotMax },
+		{ "inventorySaveOk", debugInfo.InventorySaveOk },
+		{ "inventorySaveReason", debugInfo.InventorySaveReason },
+		{ "standClearOk", debugInfo.StandClearOk },
+		{ "standClearReason", debugInfo.StandClearReason },
+		{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+	}))
+
+	return tostring(instanceId), crewMemberInventory.ById[tostring(instanceId)], nil, debugInfo
 end
 
 function Module.RemoveAvailableInstance(player, storageName)
+	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
+	if not info then
+		warnInvalidCrewIdentity("inventory_remove", storageName, player)
+		return nil, nil, "unknown_crew_member_id"
+	end
 	local ready, readyReason = ensureInventoryAuthorityReady(player, "inventory_remove")
 	if ready ~= true then
 		warn(string.format(
@@ -1801,13 +2169,13 @@ function Module.RemoveAvailableInstance(player, storageName)
 	end
 
 	Module.EnsureAvailableInstancesForStorage(player, storageName, 1)
-	local brainrotInventory = getBrainrotInventory(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
 	local instanceId = nil
 	local instanceData = nil
 
-	for _, orderedInstanceId in ipairs(brainrotInventory.Order) do
-		local candidate = brainrotInventory.ById[tostring(orderedInstanceId)]
-		if candidate and candidate.StorageName == tostring(storageName) and candidate.AssignedStand == "" then
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+		local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
+		if candidate and getInstanceCrewKey(candidate) == canonicalStorageName and candidate.AssignedStand == "" then
 			if not isProtectedTutorialReward(player, candidate) then
 				instanceId = tostring(orderedInstanceId)
 				instanceData = candidate
@@ -1820,15 +2188,15 @@ function Module.RemoveAvailableInstance(player, storageName)
 		return nil, nil
 	end
 
-	brainrotInventory.ById[tostring(instanceId)] = nil
-	for index = #brainrotInventory.Order, 1, -1 do
-		if tostring(brainrotInventory.Order[index]) == tostring(instanceId) then
-			table.remove(brainrotInventory.Order, index)
+	crewMemberInventory.ById[tostring(instanceId)] = nil
+	for index = #crewMemberInventory.Order, 1, -1 do
+		if tostring(crewMemberInventory.Order[index]) == tostring(instanceId) then
+			table.remove(crewMemberInventory.Order, index)
 			break
 		end
 	end
 
-	local saved, saveReason = saveBrainrotInventory(player, brainrotInventory, {
+	local saved, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
 		SourcePath = "inventory_remove",
 	})
 	if saved ~= true then
@@ -1840,7 +2208,7 @@ function Module.RemoveAvailableInstance(player, storageName)
 		))
 		return nil, nil, tostring(saveReason or "inventory_authority_save_failed")
 	end
-	syncAvailableCounts(player, brainrotInventory)
+	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "inventory_remove")
 	return tostring(instanceId), instanceData
 end
@@ -1868,7 +2236,6 @@ function Module.RemoveTutorialRewardInstances(player, options)
 	local tutorialStorageNames = {}
 	local removedStorageNameSet = {}
 	local removedStorageNames = {}
-	local quantitySynced = false
 
 	local function addTutorialStorageName(storageName)
 		storageName = tostring(storageName or "")
@@ -1899,12 +2266,12 @@ function Module.RemoveTutorialRewardInstances(player, options)
 		addTutorialStorageName(configuredStorageNames)
 	end
 
-	local brainrotInventory = getBrainrotInventory(player)
+	local crewMemberInventory = getCrewMemberInventory(player)
 	local removedById = {}
 	local removedIds = {}
 	local clearedStandMap = {}
 
-	for instanceId, instanceData in pairs(brainrotInventory.ById) do
+	for instanceId, instanceData in pairs(crewMemberInventory.ById) do
 		if typeof(instanceData) == "table" and instanceData.TutorialReward == true then
 			local normalizedId = tostring(instanceId)
 			local storageName = tostring(instanceData.StorageName or "")
@@ -1916,7 +2283,7 @@ function Module.RemoveTutorialRewardInstances(player, options)
 			end
 			removedById[normalizedId] = instanceData
 			table.insert(removedIds, normalizedId)
-			brainrotInventory.ById[normalizedId] = nil
+			crewMemberInventory.ById[normalizedId] = nil
 		end
 	end
 
@@ -1925,28 +2292,28 @@ function Module.RemoveTutorialRewardInstances(player, options)
 	end)
 	table.sort(removedStorageNames)
 
-	for index = #brainrotInventory.Order, 1, -1 do
-		if removedById[tostring(brainrotInventory.Order[index])] ~= nil then
-			table.remove(brainrotInventory.Order, index)
+	for index = #crewMemberInventory.Order, 1, -1 do
+		if removedById[tostring(crewMemberInventory.Order[index])] ~= nil then
+			table.remove(crewMemberInventory.Order, index)
 		end
 	end
 
 	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
 		if typeof(standData) == "table" then
-			local standInstanceId = tostring(standData.BrainrotInstanceId or "")
-			local standBrainrotName = tostring(standData.BrainrotName or "")
+			local standInstanceId = tostring(standData.CrewMemberInstanceId or "")
+			local standCrewMemberName = tostring(standData.CrewMemberName or "")
 			local clearByRemovedId = removedById[standInstanceId] ~= nil
 			local clearByRemovedAssignedStand = clearedStandMap[tostring(standName)] == true
 			local clearByStaleTutorialName = false
-			if options.ClearStaleStorageAssignments == true and tutorialStorageNameSet[standBrainrotName] == true then
-				local existingInstance = if standInstanceId ~= "" then brainrotInventory.ById[standInstanceId] else nil
+			if options.ClearStaleStorageAssignments == true and tutorialStorageNameSet[standCrewMemberName] == true then
+				local existingInstance = if standInstanceId ~= "" then crewMemberInventory.ById[standInstanceId] else nil
 				clearByStaleTutorialName = standInstanceId == "" or existingInstance == nil or existingInstance.TutorialReward == true
 			end
 
 			if clearByRemovedId or clearByRemovedAssignedStand or clearByStaleTutorialName then
 				setStandData(player, standName, {
-					BrainrotName = "",
-					BrainrotInstanceId = "",
+					CrewMemberName = "",
+					CrewMemberInstanceId = "",
 					IncomeToCollect = 0,
 					StandLevel = 1,
 				}, "tutorial_reward_cleanup")
@@ -1965,24 +2332,8 @@ function Module.RemoveTutorialRewardInstances(player, options)
 		return (tonumber(left) or math.huge) < (tonumber(right) or math.huge)
 	end)
 
-	if options.ClearStaleStorageAssignments == true and #removedIds <= 0 then
-		for _, storageName in ipairs(tutorialStorageNames) do
-			local availableCount = 0
-			for _, instanceData in pairs(brainrotInventory.ById) do
-				if
-					typeof(instanceData) == "table"
-					and tostring(instanceData.StorageName or "") == storageName
-					and tostring(instanceData.AssignedStand or "") == ""
-				then
-					availableCount += 1
-				end
-			end
-			quantitySynced = syncQuantityValue(player, storageName, availableCount) == true or quantitySynced
-		end
-	end
-
 	if #removedIds > 0 then
-		local saved, saveReason = saveBrainrotInventory(player, brainrotInventory, {
+		local saved, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
 			SourcePath = "tutorial_reward_cleanup",
 		})
 		if saved ~= true then
@@ -1995,10 +2346,10 @@ function Module.RemoveTutorialRewardInstances(player, options)
 				FailedReason = tostring(saveReason or "inventory_authority_save_failed"),
 			}
 		end
-		syncAvailableCounts(player, brainrotInventory)
+		syncAvailableCounts(player, crewMemberInventory)
 	end
 
-	if #removedIds > 0 or #clearedStands > 0 or quantitySynced then
+	if #removedIds > 0 or #clearedStands > 0 then
 		refreshCrewMemberShadow(player, "tutorial_reward_cleanup")
 	end
 
@@ -2020,11 +2371,16 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 		return nil, nil
 	end
 
-	if not CrewQuickSlotService.CanGainOrNotify(buyerPlayer, 1, "TransferStandInstance:" .. tostring(standName)) then
+	if not CrewQuickSlotService.CanGainOrNotify(
+		buyerPlayer,
+		getInstanceCrewKey(instanceData),
+		1,
+		"TransferStandInstance:" .. tostring(standName)
+	) then
 		return nil, nil
 	end
 
-	local buyerInventory = getBrainrotInventory(buyerPlayer)
+	local buyerInventory = getCrewMemberInventory(buyerPlayer)
 
 	local _, _, ownerInventory = Module.GetInstance(ownerPlayer, instanceId)
 	ownerInventory.ById[tostring(instanceId)] = nil
@@ -2034,10 +2390,10 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 			break
 		end
 	end
-	saveBrainrotInventory(ownerPlayer, ownerInventory)
+	saveCrewMemberInventory(ownerPlayer, ownerInventory)
 	updateStandData(ownerPlayer, standName, {
-		BrainrotName = "",
-		BrainrotInstanceId = "",
+		CrewMemberName = "",
+		CrewMemberInstanceId = "",
 		IncomeToCollect = 0,
 	}, "product_reward_transfer_out")
 	syncAvailableCounts(ownerPlayer, ownerInventory)
@@ -2071,14 +2427,14 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 			DeferShadowRefresh = true,
 		}
 	)
-	saveBrainrotInventory(buyerPlayer, buyerInventory)
+	saveCrewMemberInventory(buyerPlayer, buyerInventory)
 	syncAvailableCounts(buyerPlayer, buyerInventory)
 	refreshCrewMemberShadow(buyerPlayer, "product_reward_transfer_in")
 
 	return buyerInstanceId, buyerInventory.ById[buyerInstanceId]
 end
 
-Module.IsCrewInventoryEntry = Module.IsBrainrotInventoryEntry
+Module.IsCrewInventoryEntry = Module.IsCrewMemberInventoryEntry
 Module.EnsureCrewInventory = Module.EnsureInventory
 Module.GetCrewInventory = Module.EnsureInventory
 Module.RegisterCrewInventorySavedCallback = Module.RegisterInventorySavedCallback
@@ -2094,5 +2450,6 @@ Module.AssignAvailableCrewMemberToStand = Module.AssignAvailableInstanceToStand
 Module.ReleaseStandCrewMember = Module.ReleaseStandInstance
 Module.RemoveAvailableCrewMember = Module.RemoveAvailableInstance
 Module.TransferStandCrewMember = Module.TransferStandInstance
+Module.RepairCanonicalCrewMemberState = Module.RepairCanonicalCrewState
 
 return Module

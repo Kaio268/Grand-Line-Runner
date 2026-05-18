@@ -2,12 +2,26 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("WaveClientDebugTrace") == true
 local seenWaveLogKeys = {}
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+
+local function getNonEmptyAttribute(instance, attributeName)
+	local value = instance:GetAttribute(attributeName)
+	if typeof(value) == "string" and value ~= "" then
+		return value
+	end
+	return nil
+end
+
+local function getCarriedCrewMemberName(player)
+	return getNonEmptyAttribute(player, CARRIED_CREW_MEMBER_ATTRIBUTE)
+end
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -92,6 +106,11 @@ local CrewCatalog = require(
 	Modules
 		:WaitForChild("Crew")
 		:WaitForChild("CrewCatalog")
+)
+local CrewPreviewImages = require(
+	Modules
+		:WaitForChild("Crew")
+		:WaitForChild("CrewPreviewImages")
 )
 local HazardRuntime = require(
 	Modules
@@ -203,6 +222,8 @@ disasterTemplate.Visible = false
 local pfpClones = {}
 local waveIndicators = {}
 local chestIndicators = {}
+local LEGACY_SHARED_PROGRESS_UPDATE_INTERVAL = 0.2
+local legacySharedProgressAccumulator = 0
 
 local function getImageNode(obj)
 	if not obj then return nil end
@@ -243,8 +264,8 @@ local function setDisasterImage(guiObj, waveName)
 	end
 end
 
-local function applyBrainrotToPfp(pfpGui, plr)
-	local container = pfpGui:FindFirstChild("Brainrot", true)
+local function applyCrewMemberToPfp(pfpGui, plr)
+	local container = pfpGui:FindFirstChild("CrewMember", true)
 	if not container then
 		return
 	end
@@ -254,20 +275,21 @@ local function applyBrainrotToPfp(pfpGui, plr)
 		return
 	end
 
-	local render = plr:GetAttribute("CarriedBrainrotImage")
-	if render and tostring(render) ~= "" then
-		img.Image = tostring(render)
-		setGuiVisible(container, true)
-		setGuiVisible(img, true)
-		return
-	end
-
-	local id = plr:GetAttribute("CarriedBrainrot")
-	if id and tostring(id) ~= "" then
-		local info = CrewCatalog.GetInfoById(tostring(id)) or CrewCatalog.GetLegacyConfig()[tostring(id)]
-		local fallback = info and info.Render
+	local id = getCarriedCrewMemberName(plr)
+	if id then
+		local info = CrewCatalog.GetInfoByAnyId(id)
+		local fallback = CrewPreviewImages.Resolve({
+			CrewMemberId = id,
+			DisplayName = info and info.DisplayName,
+			ModelName = info and info.ModelName,
+			RealCharacterName = info and info.RealCharacterName,
+		})
+		if fallback == "" then
+			fallback = info and info.Render
+		end
 		if fallback and tostring(fallback) ~= "" then
 			img.Image = tostring(fallback)
+			img.ScaleType = Enum.ScaleType.Crop
 			setGuiVisible(container, true)
 			setGuiVisible(img, true)
 			return
@@ -305,13 +327,17 @@ local function ensurePfp(userId)
 
 	local plr = Players:GetPlayerByUserId(userId)
 	if plr then
-		applyBrainrotToPfp(c, plr)
+		applyCrewMemberToPfp(c, plr)
 		applySkullToPfp(c, plr)
 	else
-		local b = c:FindFirstChild("Brainrot", true)
-		if b then setGuiVisible(b, false) end
+		local b = c:FindFirstChild("CrewMember", true)
+		if b then
+			setGuiVisible(b, false)
+		end
 		local s = c:FindFirstChild("Skull", true)
-		if s then setGuiVisible(s, false) end
+		if s then
+			setGuiVisible(s, false)
+		end
 	end
 
 	pfpClones[userId] = c
@@ -353,17 +379,17 @@ local function updatePfpPositions()
 			local hrp = char and char:FindFirstChild("HumanoidRootPart")
 			if hrp then
 				local a = getAlphaOnLine(hrp.Position)
-				gui.Position = UDim2.new(alphaToXScale(a), 0, 0.823, 0)
+				gui.Position = UDim2.fromScale(alphaToXScale(a), 0.823)
 			end
 		end
 	end
 end
 
-local function updatePfpBrainrotAndSkull()
+local function updatePfpCrewMemberAndSkull()
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local gui = pfpClones[plr.UserId]
 		if gui and gui.Parent then
-			applyBrainrotToPfp(gui, plr)
+			applyCrewMemberToPfp(gui, plr)
 			applySkullToPfp(gui, plr)
 		end
 	end
@@ -528,7 +554,7 @@ local function updateChestIndicators()
 			if pos then
 				local indicator = ensureChestIndicator(rewardObject)
 				local a = getAlphaOnLine(pos)
-				indicator.Position = UDim2.new(alphaToXScale(a), 0, 0.28, 0)
+				indicator.Position = UDim2.fromScale(alphaToXScale(a), 0.28)
 				valid[rewardObject] = true
 			end
 		end
@@ -963,9 +989,17 @@ local SHARED_WAVE_VISUAL_MAX_LEAD = 0.08
 local SHARED_WAVE_VISUAL_DECAY_DELAY = 0.12
 local SHARED_WAVE_VISUAL_SNAP_DISTANCE = 90
 local SHARED_WAVE_VISUAL_REBUILD_DELAY = 0.05
+local SHARED_WAVE_DIAGNOSTICS_INTERVAL = 2
 
 local localWaveVisualsFolder = nil
 local sharedHazardVisualSmoothers = {}
+local waveClientDiagnostics = {
+	CleanupCount = 0,
+	LastUpdateTimeMs = 0,
+	UpdateTimeSum = 0,
+	UpdateTimeSamples = 0,
+	LastPublishedAt = 0,
+}
 
 local function isWaveVisualRoot(instance)
 	return (instance and (instance:IsA("Model") or instance:IsA("BasePart")))
@@ -1017,6 +1051,97 @@ local function getLocalWaveVisualsFolder()
 	folder.Parent = workspace
 	localWaveVisualsFolder = folder
 	return folder
+end
+
+local function getSharedHazardHitboxPart(hazard)
+	local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
+	for _, part in ipairs(hitboxParts) do
+		if part and part.Parent then
+			return part
+		end
+	end
+
+	if hazard and hazard:IsA("BasePart") then
+		return hazard
+	end
+
+	return nil
+end
+
+local function configureLocalVisualTargetPart(part)
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Transparency = 1
+	part.LocalTransparencyModifier = 1
+	part.CastShadow = false
+	part.AssemblyLinearVelocity = Vector3.zero
+	part.AssemblyAngularVelocity = Vector3.zero
+	pcall(function()
+		part.Massless = true
+	end)
+end
+
+local function countLocalVisualParts(root)
+	local count = 0
+	if not root then
+		return count
+	end
+
+	if root:IsA("BasePart") then
+		return 1
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function publishClientWaveDiagnostics()
+	local folder = getLocalWaveVisualsFolder()
+	local controllerCount = 0
+	local visualRootCount = 0
+	local visualPartCount = 0
+
+	for _, controller in pairs(sharedHazardVisualSmoothers) do
+		if controller.Destroyed ~= true then
+			controllerCount += 1
+			if controller.VisualRoot and controller.VisualRoot.Parent then
+				visualRootCount += 1
+				visualPartCount += countLocalVisualParts(controller.VisualRoot)
+			end
+		end
+	end
+
+	folder:SetAttribute("WaveClientVisualControllerCount", controllerCount)
+	folder:SetAttribute("WaveClientVisualRootCount", visualRootCount)
+	folder:SetAttribute("WaveClientVisualPartCount", visualPartCount)
+	folder:SetAttribute("WaveClientUpdateTimeMs", waveClientDiagnostics.LastUpdateTimeMs)
+	folder:SetAttribute("WaveClientCleanupCount", waveClientDiagnostics.CleanupCount)
+end
+
+local function recordClientWaveUpdateTime(elapsedSeconds)
+	waveClientDiagnostics.UpdateTimeSum += math.max(0, tonumber(elapsedSeconds) or 0)
+	waveClientDiagnostics.UpdateTimeSamples += 1
+
+	local now = os.clock()
+	if now - waveClientDiagnostics.LastPublishedAt < SHARED_WAVE_DIAGNOSTICS_INTERVAL then
+		return
+	end
+
+	if waveClientDiagnostics.UpdateTimeSamples > 0 then
+		waveClientDiagnostics.LastUpdateTimeMs =
+			(waveClientDiagnostics.UpdateTimeSum / waveClientDiagnostics.UpdateTimeSamples) * 1000
+	end
+	waveClientDiagnostics.UpdateTimeSum = 0
+	waveClientDiagnostics.UpdateTimeSamples = 0
+	waveClientDiagnostics.LastPublishedAt = now
+	publishClientWaveDiagnostics()
 end
 
 local function hideReplicatedVisual(root)
@@ -1074,6 +1199,8 @@ local function createSharedHazardVisualSmoother(hazard)
 	local startingPivot = getPivot(hazard)
 	local controller = {
 		Hazard = hazard,
+		VisualRoot = nil,
+		VisualTargetPart = nil,
 		ClonesByName = {},
 		Connections = {},
 		SourceConnections = {},
@@ -1107,6 +1234,104 @@ local function createSharedHazardVisualSmoother(hazard)
 			if entry.Clone and entry.Clone.Parent then
 				entry.Clone:Destroy()
 			end
+		end
+
+		if self.VisualRoot and self.VisualRoot.Parent then
+			self.VisualRoot:Destroy()
+		end
+		waveClientDiagnostics.CleanupCount += 1
+		publishClientWaveDiagnostics()
+	end
+
+	function controller:IsTimelineProxy()
+		return self.Hazard:GetAttribute("WaveMovementMode") == "timeline_proxy"
+			or self.Hazard:GetAttribute("ClientWaveVisualsOnly") == true
+			or self.Hazard:GetAttribute("WaveVisualMode") == "ClientTimeline"
+	end
+
+	function controller:GetTimelineTargetCFrame()
+		local startCFrame = self.Hazard:GetAttribute("WaveStartCFrame")
+		local endCFrame = self.Hazard:GetAttribute("WaveEndCFrame")
+		if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
+			return getPivot(self.Hazard)
+		end
+
+		local activeSeconds = tonumber(self.Hazard:GetAttribute("WaveActiveSeconds")) or 0
+		local stateServerTime = tonumber(self.Hazard:GetAttribute("WaveStateServerTime"))
+		if self.Hazard:GetAttribute("Frozen") ~= true and stateServerTime then
+			activeSeconds += math.max(0, Workspace:GetServerTimeNow() - stateServerTime)
+		end
+
+		local currentCFrame = WaveHazardVisuals.ComputeTimelineCFrame(
+			startCFrame,
+			endCFrame,
+			activeSeconds,
+			self.Hazard:GetAttribute("WaveServerSpeed") or self.Hazard:GetAttribute("Speed"),
+			self.Hazard:GetAttribute("WaveDistance"),
+			self.Hazard:GetAttribute("WaveLateralDirection"),
+			self.Hazard:GetAttribute("WaveInitialLateralOffset"),
+			self.Hazard:GetAttribute("WaveLateralVelocity"),
+			self.Hazard:GetAttribute("WaveMaxDrift")
+		)
+
+		return currentCFrame or getPivot(self.Hazard)
+	end
+
+	function controller:EnsureClientVisualRoot()
+		if self.VisualRoot and self.VisualRoot.Parent then
+			return self.VisualRoot
+		end
+
+		local hitboxPart = getSharedHazardHitboxPart(self.Hazard)
+		if not hitboxPart then
+			return nil
+		end
+
+		local root = Instance.new("Model")
+		root.Name = tostring(self.Hazard.Name) .. "_LocalVisualRoot"
+		root:SetAttribute(SMOOTHED_VISUAL_SOURCE_ATTRIBUTE, self.Hazard:GetFullName())
+		root:SetAttribute("UsesWaveAssetVisuals", true)
+
+		local targetPart = Instance.new("Part")
+		targetPart.Name = "WaveHitbox"
+		targetPart.Size = hitboxPart.Size
+		targetPart.CFrame = hitboxPart.CFrame
+		configureLocalVisualTargetPart(targetPart)
+		targetPart.Parent = root
+
+		root.WorldPivot = getPivot(self.Hazard)
+		root.Parent = getLocalWaveVisualsFolder()
+
+		self.VisualRoot = root
+		self.VisualTargetPart = targetPart
+		return root
+	end
+
+	function controller:RefreshClientVisualRoot()
+		local root = self:EnsureClientVisualRoot()
+		if not root then
+			waveWarnOnce(
+				"timeline_visual_root_missing_" .. tostring(self.Hazard.Name),
+				"shared wave local visual skipped missing hitbox hazard=%s",
+				formatInstancePath(self.Hazard)
+			)
+			return
+		end
+
+		local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
+		if self.Hazard:GetAttribute("Frozen") == true then
+			activeAsset = FROZEN_WAVE_VISUAL_ASSET_NAME
+		elseif activeAsset ~= FROZEN_WAVE_VISUAL_ASSET_NAME then
+			activeAsset = REGULAR_WAVE_VISUAL_ASSET_NAME
+		end
+
+		if not WaveHazardVisuals.ApplyVisual(root, activeAsset) then
+			waveWarnOnce(
+				"timeline_visual_asset_missing_" .. tostring(activeAsset),
+				"shared wave local visual skipped missing asset=%s hazard=%s",
+				tostring(activeAsset),
+				formatInstancePath(self.Hazard)
+			)
 		end
 	end
 
@@ -1221,6 +1446,12 @@ local function createSharedHazardVisualSmoother(hazard)
 			return
 		end
 
+		if self:IsTimelineProxy() then
+			self:RefreshClientVisualRoot()
+			self:UpdateVisibility()
+			return
+		end
+
 		for _, child in ipairs(self.Hazard:GetChildren()) do
 			if isWaveVisualRoot(child) then
 				self:EnsureClone(child)
@@ -1248,6 +1479,17 @@ local function createSharedHazardVisualSmoother(hazard)
 	end
 
 	function controller:UpdateVisibility()
+		if self.VisualRoot and self.VisualRoot.Parent then
+			local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
+			if self.Hazard:GetAttribute("Frozen") == true then
+				activeAsset = FROZEN_WAVE_VISUAL_ASSET_NAME
+			elseif activeAsset ~= FROZEN_WAVE_VISUAL_ASSET_NAME then
+				activeAsset = REGULAR_WAVE_VISUAL_ASSET_NAME
+			end
+			WaveHazardVisuals.ApplyVisual(self.VisualRoot, activeAsset)
+			return
+		end
+
 		local activeName = self:GetActiveVisualName()
 		if activeName == FROZEN_WAVE_VISUAL_NAME and not self.ClonesByName[activeName] then
 			activeName = WAVE_VISUAL_NAME
@@ -1268,6 +1510,26 @@ local function createSharedHazardVisualSmoother(hazard)
 
 		if not self.Hazard.Parent then
 			self:Destroy()
+			return
+		end
+
+		if self:IsTimelineProxy() then
+			local targetCFrame = self:GetTimelineTargetCFrame()
+			local smoothAlpha = math.clamp(1 - math.exp(-SHARED_WAVE_VISUAL_SMOOTHNESS * deltaTime), 0, 1)
+			if (self.CurrentCFrame.Position - targetCFrame.Position).Magnitude > SHARED_WAVE_VISUAL_SNAP_DISTANCE then
+				self.CurrentCFrame = targetCFrame
+			else
+				self.CurrentCFrame = self.CurrentCFrame:Lerp(targetCFrame, smoothAlpha)
+			end
+
+			if self.VisualRoot and self.VisualRoot.Parent then
+				setPivot(self.VisualRoot, self.CurrentCFrame)
+			else
+				self:RefreshClientVisualRoot()
+				if self.VisualRoot and self.VisualRoot.Parent then
+					setPivot(self.VisualRoot, self.CurrentCFrame)
+				end
+			end
 			return
 		end
 
@@ -1311,6 +1573,8 @@ local function createSharedHazardVisualSmoother(hazard)
 		if isWaveVisualRoot(child) then
 			WaveHazardVisuals.ConfigureVisualRoot(child)
 			controller:ScheduleRefresh()
+		elseif child.Name == "WaveHitbox" then
+			controller:ScheduleRefresh()
 		end
 	end))
 
@@ -1335,13 +1599,21 @@ local function createSharedHazardVisualSmoother(hazard)
 	end))
 
 	controller:Refresh()
+	if controller:IsTimelineProxy() then
+		controller.CurrentCFrame = controller:GetTimelineTargetCFrame()
+		if controller.VisualRoot and controller.VisualRoot.Parent then
+			setPivot(controller.VisualRoot, controller.CurrentCFrame)
+		end
+	end
 	return controller
 end
 
 local function updateSharedHazardVisualSmoothers(deltaTime)
+	local updateStartedAt = os.clock()
 	for _, controller in pairs(sharedHazardVisualSmoothers) do
 		controller:Update(deltaTime)
 	end
+	recordClientWaveUpdateTime(os.clock() - updateStartedAt)
 end
 
 local function hookSharedHazardKillOnTouch(hazard)
@@ -1355,6 +1627,25 @@ local function hookSharedHazardKillOnTouch(hazard)
 		WaveHazardVisuals.SetHitboxFrozen(hazard, hazard:GetAttribute("Frozen") == true)
 	end
 
+	local hookedHitboxParts = {}
+	local function hookHitboxParts()
+		local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
+		if #hitboxParts <= 0 then
+			return false
+		end
+
+		for _, part in ipairs(hitboxParts) do
+			if not hookedHitboxParts[part] then
+				hookedHitboxParts[part] = true
+				hookKillOnTouchPart(part, function()
+					return hazard:GetAttribute("Frozen") ~= true
+				end)
+			end
+		end
+
+		return true
+	end
+
 	syncFrozenHitboxState()
 	hazard:GetAttributeChangedSignal("Frozen"):Connect(syncFrozenHitboxState)
 
@@ -1363,19 +1654,12 @@ local function hookSharedHazardKillOnTouch(hazard)
 			WaveHazardVisuals.ConfigureVisualRoot(child)
 		elseif child.Name == "WaveHitbox" then
 			syncFrozenHitboxState()
+			hookHitboxParts()
 		end
 	end)
 
-	local hitboxParts = WaveHazardVisuals.GetHitboxParts(hazard)
-	if #hitboxParts <= 0 then
+	if not hookHitboxParts() then
 		hookKillOnTouch(hazard)
-		return
-	end
-
-	for _, part in ipairs(hitboxParts) do
-		hookKillOnTouchPart(part, function()
-			return hazard:GetAttribute("Frozen") ~= true
-		end)
 	end
 end
 
@@ -1617,7 +1901,9 @@ local function spawnWave(entry)
 		local conn
 		conn = alpha.Changed:Connect(function(v)
 			if not clone.Parent then
-				if conn then conn:Disconnect() end
+				if conn then
+					conn:Disconnect()
+				end
 				return
 			end
 
@@ -1671,10 +1957,16 @@ local function spawnWave(entry)
 		tween:Play()
 		tween.Completed:Connect(function()
 			waveTry("spawnWave completed:" .. tostring(entry.Name), function()
-				if conn then conn:Disconnect() end
-				if alpha.Parent then alpha:Destroy() end
+				if conn then
+					conn:Disconnect()
+				end
+				if alpha.Parent then
+					alpha:Destroy()
+				end
 				freezeController:Destroy()
-				if clone.Parent then clone:Destroy() end
+				if clone.Parent then
+					clone:Destroy()
+				end
 				waveTrace("spawnWave completed name=%s mode=%s", tostring(entry.Name), movementMode)
 			end)
 		end)
@@ -1720,10 +2012,21 @@ updatePause()
 
 RunService.RenderStepped:Connect(function(deltaTime)
 	updateSharedHazardVisualSmoothers(deltaTime)
-	updatePfpPositions()
-	updateWaveIndicators()
-	updateChestIndicators()
-	updatePfpBrainrotAndSkull()
+	if useSharedHazards then
+		legacySharedProgressAccumulator += deltaTime
+		if legacySharedProgressAccumulator >= LEGACY_SHARED_PROGRESS_UPDATE_INTERVAL then
+			legacySharedProgressAccumulator = 0
+			updatePfpPositions()
+			updateWaveIndicators()
+			updateChestIndicators()
+			updatePfpCrewMemberAndSkull()
+		end
+	else
+		updatePfpPositions()
+		updateWaveIndicators()
+		updateChestIndicators()
+		updatePfpCrewMemberAndSkull()
+	end
 end)
 
 while true do

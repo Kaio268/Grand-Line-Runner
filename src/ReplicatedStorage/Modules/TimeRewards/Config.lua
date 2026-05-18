@@ -22,16 +22,7 @@ local Rewards = {
 		},
 	},
 
-	[3] = {
-		RewName = "Balerina Capucina",
-		Icon = "rbxassetid://113452691198946",
-
-		Time = 300,
-		RewardTextTemplate = "You Get %d %s",
-		Rewards = {
-			["Balerina Capucina"] = { Chance = 100, Amount = 1, Brainrot = true },
-		},
-	},
+	-- TODO(TimeRewards): Slot 3 was retired with legacy template content; choose a new production reward before reusing it.
 
 	[4] = {
 		RewName = "+ 10000 Beli",
@@ -56,24 +47,35 @@ local Rewards = {
 	},
 
 	[6] = {
-		RewName = "Bombardiro Crocodilo",
+		RewName = "Random Rare Crewmate",
 		Icon = "rbxassetid://108324428541699",
 
 		Time = 2100,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards = {
-			["Bombardiro Crocodilo"] = { Chance = 100, Amount = 1, Brainrot = true },
+			["Random Rare Crewmate"] = {
+				Chance = 100,
+				Amount = 1,
+				CrewMember = true,
+				RandomCrewMember = true,
+				RandomCrewRarity = "Rare",
+			},
 		},
 	},
 
 	[7] = {
-		RewName = "Frigo Camelo",
+		RewName = "Ember Fist",
 		Icon = "rbxassetid://84916034746691",
 
 		Time = 2400,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards = {
-			["Frigo Camelo"] = { Chance = 100, Amount = 1, Brainrot = true },
+			["Ember Fist"] = {
+				Chance = 100,
+				Amount = 1,
+				CrewMember = true,
+				CrewMemberId = "Ember Fist",
+			},
 		},
 	},
 

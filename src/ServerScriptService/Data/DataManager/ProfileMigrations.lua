@@ -4,22 +4,16 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local ProfileTemplate = require(script.Parent:WaitForChild("ProfileTemplate"))
-local BrainrotsCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Brainrots"))
-local VariantCfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("BrainrotVariants"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
+local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local ProfileMigrations = {}
 
 local primaryCurrency = Economy.Currency.Primary
-local VALID_BRAINROT_ITEM_IDS = {}
-
-for itemId, info in pairs(BrainrotsCfg) do
-	if type(info) == "table" then
-		VALID_BRAINROT_ITEM_IDS[tostring(itemId)] = true
-	end
-end
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -46,6 +40,16 @@ local function coerceNumber(value, fallback)
 		return value
 	end
 	return fallback
+end
+
+local function firstNonEmpty(...)
+	for index = 1, select("#", ...) do
+		local value = tostring(select(index, ...) or "")
+		if value ~= "" then
+			return value
+		end
+	end
+	return ""
 end
 
 local function coerceBoolean(value, fallback)
@@ -104,7 +108,7 @@ local function normalizeVariantKey(variantKey)
 	return "Normal"
 end
 
-local function resolveBrainrotItemId(storageName, baseName, variantKey)
+local function resolveCrewMemberItemId(storageName, baseName, variantKey)
 	local storageNameValue = tostring(storageName or "")
 	local baseNameValue = tostring(baseName or "")
 	local normalizedVariant = normalizeVariantKey(variantKey)
@@ -117,39 +121,30 @@ local function resolveBrainrotItemId(storageName, baseName, variantKey)
 
 	if baseNameValue ~= "" then
 		local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-		if itemId and VALID_BRAINROT_ITEM_IDS[itemId] then
-			return itemId
+		if itemId then
+			local crewMemberId, info = CrewCatalog.ResolveCrewMemberId(itemId)
+			if info then
+				return crewMemberId
+			end
 		end
 	end
 
-	if storageNameValue ~= "" and VALID_BRAINROT_ITEM_IDS[storageNameValue] then
-		return storageNameValue
+	if storageNameValue ~= "" then
+		local crewMemberId, info = CrewCatalog.ResolveCrewMemberId(storageNameValue)
+		if info then
+			return crewMemberId
+		end
 	end
 
 	return nil
 end
 
-local function isBrainrotInventoryEntry(key, entry)
-	if key == "Feed" or key == "DevilFruits" then
-		return false
-	end
-	if typeof(entry) ~= "table" then
-		return false
-	end
-	return entry.Quantity ~= nil
-		or entry.BaseName ~= nil
-		or entry.Variant ~= nil
-		or entry.Rarity ~= nil
-		or entry.Level ~= nil
-		or entry.CurrentXP ~= nil
-end
-
-local function normalizeBrainrotInstance(instanceId, instanceData, fallbackStorageName)
+local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallbackStorageName)
 	if typeof(instanceData) ~= "table" then
 		instanceData = {}
 	end
 
-	local storageName = tostring(instanceData.StorageName or fallbackStorageName or instanceData.BrainrotName or "")
+	local storageName = tostring(instanceData.CrewMemberId or instanceData.StorageName or fallbackStorageName or "")
 	if storageName == "" then
 		return nil
 	end
@@ -181,6 +176,189 @@ local function normalizeBrainrotInstance(instanceId, instanceData, fallbackStora
 		TutorialReward = instanceData.TutorialReward == true,
 		TutorialToken = tostring(instanceData.TutorialToken or ""),
 	}
+end
+
+local function resolveLegacyCrewStorageName(storageName, baseName, variantKey)
+	local resolved = resolveCrewMemberItemId(storageName, baseName, variantKey)
+	if resolved then
+		return resolved
+	end
+
+	local info = CrewCatalog.GetInfoById(storageName)
+	if info and tostring(info.LegacyId or "") ~= "" then
+		return tostring(info.LegacyId)
+	end
+
+	if tostring(baseName or "") ~= "" then
+		info = CrewCatalog.GetInfoById(baseName)
+		if info and tostring(info.LegacyId or "") ~= "" then
+			local resolvedFromBase = resolveCrewMemberItemId(info.LegacyId, info.LegacyId, variantKey)
+			return resolvedFromBase or tostring(info.LegacyId)
+		end
+	end
+
+	return tostring(storageName or "")
+end
+
+local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackStorageName, projectionSource)
+	if typeof(instanceData) ~= "table" then
+		instanceData = {}
+	end
+
+	local rawStorageName = firstNonEmpty(
+		instanceData.CrewMemberId,
+		instanceData.StorageName,
+		instanceData.Name,
+		fallbackStorageName
+	)
+	local rawBaseName = tostring(instanceData.BaseName or rawStorageName)
+	local rawVariant = tostring(instanceData.Variant or "")
+	local crewMemberId, info, resolvedLegacyStorageName = CrewCatalog.ResolveCrewMemberId(rawStorageName)
+	if not info and rawBaseName ~= rawStorageName then
+		crewMemberId, info, resolvedLegacyStorageName = CrewCatalog.ResolveCrewMemberId(rawBaseName)
+	end
+	if crewMemberId == "" then
+		return nil
+	end
+	local legacyStorageName = firstNonEmpty(instanceData.LegacyStorageName, resolvedLegacyStorageName)
+	if legacyStorageName == "" and rawStorageName ~= crewMemberId then
+		legacyStorageName = resolveLegacyCrewStorageName(rawStorageName, rawBaseName, rawVariant)
+	end
+	if legacyStorageName == crewMemberId then
+		legacyStorageName = ""
+	end
+	local variantKey, baseName = getVariantAndBaseName(crewMemberId)
+
+	local legacyInstance = normalizeCrewMemberSourceInstance(instanceId, {
+		StorageName = crewMemberId,
+		BaseName = baseName,
+		Variant = variantKey,
+		Rarity = info and info.Rarity or instanceData.Rarity,
+		Income = info and info.Income or instanceData.Income,
+		Render = info and info.Render or instanceData.Render,
+		GoldenRender = info and info.GoldenRender or instanceData.GoldenRender,
+		DiamondRender = info and info.DiamondRender or instanceData.DiamondRender,
+		Level = instanceData.Level,
+		CurrentXP = instanceData.CurrentXP,
+		TotalXP = instanceData.TotalXP,
+		AssignedStand = instanceData.AssignedStand,
+		AcquiredAt = instanceData.AcquiredAt,
+		LastReleasedAt = instanceData.LastReleasedAt,
+		Source = instanceData.Source,
+		DepthBand = instanceData.DepthBand,
+		TutorialReward = instanceData.TutorialReward,
+		TutorialToken = instanceData.TutorialToken,
+		GrandLineRushStarter = instanceData.GrandLineRushStarter,
+	}, crewMemberId)
+	if not legacyInstance then
+		return nil
+	end
+
+	local displayName = tostring(
+		(info and (info.DisplayName or info.CrewMemberName or info.Name))
+			or instanceData.DisplayName
+			or legacyInstance.StorageName
+	)
+
+	return {
+		InstanceId = legacyInstance.InstanceId,
+		CrewMemberId = crewMemberId,
+		DisplayName = displayName,
+		LegacyStorageName = legacyStorageName,
+		StorageName = crewMemberId,
+		BaseName = legacyInstance.BaseName,
+		Variant = legacyInstance.Variant,
+		Rarity = legacyInstance.Rarity,
+		Income = legacyInstance.Income,
+		Render = legacyInstance.Render,
+		GoldenRender = legacyInstance.GoldenRender,
+		DiamondRender = legacyInstance.DiamondRender,
+		ModelName = tostring(info and info.ModelName or instanceData.ModelName or legacyInstance.BaseName),
+		Level = legacyInstance.Level,
+		CurrentXP = legacyInstance.CurrentXP,
+		TotalXP = math.max(0, coerceNumber(instanceData.TotalXP or legacyInstance.TotalXP, 0)),
+		AssignedStand = legacyInstance.AssignedStand,
+		AcquiredAt = legacyInstance.AcquiredAt,
+		LastReleasedAt = legacyInstance.LastReleasedAt,
+		Source = tostring(instanceData.Source or legacyInstance.Source or ""),
+		DepthBand = tostring(instanceData.DepthBand or legacyInstance.DepthBand or ""),
+		TutorialReward = legacyInstance.TutorialReward,
+		TutorialToken = legacyInstance.TutorialToken,
+		GrandLineRushStarter = instanceData.GrandLineRushStarter == true or legacyInstance.GrandLineRushStarter == true,
+		ProjectionSource = tostring(instanceData.ProjectionSource or projectionSource or "ProfileMigrations"),
+	}
+end
+
+local function ensureCrewMemberInventoryShape(crewMemberInventory)
+	if typeof(crewMemberInventory) ~= "table" then
+		crewMemberInventory = {}
+	end
+
+	crewMemberInventory.SchemaVersion = 1
+	crewMemberInventory.NextInstanceId = math.max(1, coerceNumber(crewMemberInventory.NextInstanceId, 1))
+	crewMemberInventory.ById = ensureTable(crewMemberInventory, "ById")
+	crewMemberInventory.Order = ensureTable(crewMemberInventory, "Order")
+
+	return crewMemberInventory
+end
+
+local function normalizeCrewMemberInventory(crewMemberInventory)
+	crewMemberInventory = ensureCrewMemberInventoryShape(crewMemberInventory)
+
+	local originalById = crewMemberInventory.ById
+	local originalOrder = crewMemberInventory.Order
+	local normalizedById = {}
+	local normalizedOrder = {}
+	local seenInstanceIds = {}
+	local maxInstanceId = crewMemberInventory.NextInstanceId - 1
+
+	local function appendInstance(rawInstanceId, instanceData, source)
+		local instanceId = tostring(rawInstanceId or "")
+		if instanceId == "" or seenInstanceIds[instanceId] then
+			return
+		end
+
+		maxInstanceId = math.max(maxInstanceId, coerceNumber(tonumber(instanceId), 0))
+		local normalized = normalizeCrewMemberInstance(instanceId, instanceData, nil, source)
+		if normalized then
+			normalizedById[instanceId] = normalized
+			table.insert(normalizedOrder, instanceId)
+			seenInstanceIds[instanceId] = true
+		end
+	end
+
+	for _, rawInstanceId in ipairs(originalOrder) do
+		local instanceId = tostring(rawInstanceId)
+		appendInstance(instanceId, originalById[instanceId], "ProfileMigrations:CrewMemberInventory")
+	end
+
+	local unorderedIds = {}
+	for rawInstanceId in pairs(originalById) do
+		local instanceId = tostring(rawInstanceId)
+		if not seenInstanceIds[instanceId] then
+			table.insert(unorderedIds, instanceId)
+		end
+	end
+	table.sort(unorderedIds, function(left, right)
+		local leftNumber = tonumber(left)
+		local rightNumber = tonumber(right)
+		if leftNumber and rightNumber then
+			return leftNumber < rightNumber
+		end
+		return left < right
+	end)
+
+	for _, instanceId in ipairs(unorderedIds) do
+		appendInstance(instanceId, originalById[instanceId], "ProfileMigrations:CrewMemberInventoryUnordered")
+	end
+
+	crewMemberInventory.ById = normalizedById
+	crewMemberInventory.Order = normalizedOrder
+	if crewMemberInventory.NextInstanceId <= maxInstanceId then
+		crewMemberInventory.NextInstanceId = maxInstanceId + 1
+	end
+
+	return #normalizedOrder
 end
 
 function ProfileMigrations.Apply(data)
@@ -223,16 +401,11 @@ function ProfileMigrations.Apply(data)
 	end
 
 	local indexCollection = ensureTable(data, "IndexCollection")
-	local legacyDiscoveredBrainrots = if typeof(indexCollection.Brainrots) == "table" then indexCollection.Brainrots else nil
-	local discoveredCrewMembers = ensureTable(indexCollection, "CrewMembers")
-	local discoveredDevilFruits = ensureTable(indexCollection, "DevilFruits")
-
-	local function recordBrainrotDiscovered(storageName, baseName, variantKey)
-		local itemId = resolveBrainrotItemId(storageName, baseName, variantKey)
-		if itemId then
-			discoveredCrewMembers[itemId] = true
-		end
-	end
+	indexCollection.Brainrots = nil
+	local repairedCrewMembers = IndexDiscovery.CanonicalizeIndexCollectionMap(ensureTable(indexCollection, "CrewMembers"))
+	indexCollection.CrewMembers = repairedCrewMembers
+	local legacyDiscoveredDevilFruits = ensureTable(indexCollection, "DevilFruits")
+	local discoveredDevilFruits = {}
 
 	local function recordDevilFruitDiscovered(fruitIdentifier)
 		local fruit = DevilFruitConfig.GetFruit(fruitIdentifier)
@@ -241,30 +414,75 @@ function ProfileMigrations.Apply(data)
 		end
 	end
 
-	local function recordDevilFruitEntryDiscovered(fruitIdentifier, entry)
+	local function recordDevilFruitTableCandidates(entry)
+		recordDevilFruitDiscovered(entry.FruitKey)
+		recordDevilFruitDiscovered(entry.Key)
+		recordDevilFruitDiscovered(entry.Id)
+		recordDevilFruitDiscovered(entry.Name)
+		recordDevilFruitDiscovered(entry.DisplayName)
+		recordDevilFruitDiscovered(entry.FruitName)
+
+		for _, value in pairs(entry) do
+			if typeof(value) == "string" then
+				recordDevilFruitDiscovered(value)
+			elseif typeof(value) == "table" then
+				recordDevilFruitDiscovered(value.FruitKey)
+				recordDevilFruitDiscovered(value.Key)
+				recordDevilFruitDiscovered(value.Id)
+				recordDevilFruitDiscovered(value.Name)
+				recordDevilFruitDiscovered(value.DisplayName)
+				recordDevilFruitDiscovered(value.FruitName)
+			end
+		end
+	end
+
+	local function isExplicitlyUndiscovered(entry)
+		if entry == false then
+			return true
+		end
+
+		if typeof(entry) ~= "table" then
+			return false
+		end
+
+		return entry.Discovered == false or entry.Unlocked == false or entry.Collected == false or entry.Value == false
+	end
+
+	local function shouldRecordLifetimeDevilFruitEntry(entry)
+		if isExplicitlyUndiscovered(entry) then
+			return false
+		end
+
+		local entryType = typeof(entry)
+		if entryType == "boolean" then
+			return entry == true
+		elseif entryType == "number" then
+			return entry > 0
+		elseif entryType == "string" then
+			return entry ~= ""
+		elseif entryType == "table" then
+			return true
+		end
+
+		return false
+	end
+
+	local function recordDevilFruitEntryDiscovered(fruitIdentifier, entry, requireLifetimeMarker)
+		if requireLifetimeMarker == true and not shouldRecordLifetimeDevilFruitEntry(entry) then
+			return
+		end
+
 		recordDevilFruitDiscovered(fruitIdentifier)
 
 		if typeof(entry) == "table" then
-			recordDevilFruitDiscovered(entry.FruitKey)
-			recordDevilFruitDiscovered(entry.Name)
-			recordDevilFruitDiscovered(entry.DisplayName)
+			recordDevilFruitTableCandidates(entry)
 		elseif typeof(entry) == "string" then
 			recordDevilFruitDiscovered(entry)
 		end
 	end
 
-	for fruitIdentifier, isDiscovered in pairs(discoveredDevilFruits) do
-		if isDiscovered == true then
-			recordDevilFruitDiscovered(fruitIdentifier)
-		end
-	end
-
-	if legacyDiscoveredBrainrots then
-		for itemId, isDiscovered in pairs(legacyDiscoveredBrainrots) do
-			if isDiscovered == true then
-				recordBrainrotDiscovered(itemId)
-			end
-		end
+	for fruitIdentifier, entry in pairs(legacyDiscoveredDevilFruits) do
+		recordDevilFruitEntryDiscovered(fruitIdentifier, entry, true)
 	end
 
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
@@ -288,11 +506,15 @@ function ProfileMigrations.Apply(data)
 
 	hiddenLeaderstats.PlotUpgrade = math.clamp(coerceNumber(hiddenLeaderstats.PlotUpgrade, 0), 0, PlotUpgradeConfig.MaxLevel)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
-	hiddenLeaderstats.TutorialBrainrotGranted = coerceBoolean(hiddenLeaderstats.TutorialBrainrotGranted, false)
+	hiddenLeaderstats.TutorialCrewMemberGranted = coerceBoolean(
+		hiddenLeaderstats.TutorialCrewMemberGranted or hiddenLeaderstats.TutorialBrainrotGranted,
+		false
+	)
+	hiddenLeaderstats.TutorialBrainrotGranted = nil
 	hiddenLeaderstats.TutorialSpeedTopUpGranted = coerceBoolean(hiddenLeaderstats.TutorialSpeedTopUpGranted, false)
 	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
 	if hiddenLeaderstats.Tutorial == true then
-		hiddenLeaderstats.TutorialBrainrotGranted = true
+		hiddenLeaderstats.TutorialCrewMemberGranted = true
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = true
 	elseif coerceNumber(hiddenLeaderstats.Speed, 1) <= 1 then
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
@@ -323,25 +545,17 @@ function ProfileMigrations.Apply(data)
 	bank.LastClaimedAt = coerceNumber(bank.LastClaimedAt, 0)
 	bank.StoredFood = ensureTable(bank, "StoredFood")
 
-	local crewInventory = ensureTable(data, "CrewInventory")
-	crewInventory.NextInstanceId = math.max(1, coerceNumber(crewInventory.NextInstanceId, 1))
-	crewInventory.ById = ensureTable(crewInventory, "ById")
-	crewInventory.Order = ensureTable(crewInventory, "Order")
+	local crewMemberInventory = ensureCrewMemberInventoryShape(ensureTable(data, "CrewMemberInventory"))
+	data.CrewInventory = nil
+	data.BrainrotInventory = nil
+	data.BrainrotQuickSlots = nil
+	data.IncomeBrainrots = nil
+	data.StandsLevels = nil
 
-	local brainrotInventory = ensureTable(data, "BrainrotInventory")
-	brainrotInventory.NextInstanceId = math.max(1, coerceNumber(brainrotInventory.NextInstanceId, 1))
-	brainrotInventory.ById = ensureTable(brainrotInventory, "ById")
-	brainrotInventory.Order = ensureTable(brainrotInventory, "Order")
-
-	local legacyBrainrotQuickSlots = data.BrainrotQuickSlots
-	local legacyUnlockedSlots = if typeof(legacyBrainrotQuickSlots) == "table"
-		then CrewQuickSlotConfig.ClampUnlockedSlots(legacyBrainrotQuickSlots.UnlockedSlots)
-		else CrewQuickSlotConfig.DefaultUnlockedSlots
 	local crewMemberQuickSlots = ensureTable(data, "CrewMemberQuickSlots")
 	local canonicalUnlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(crewMemberQuickSlots.UnlockedSlots)
-	local retainedUnlockedSlots = math.max(canonicalUnlockedSlots, legacyUnlockedSlots)
 	crewMemberQuickSlots.SchemaVersion = 1
-	crewMemberQuickSlots.UnlockedSlots = retainedUnlockedSlots
+	crewMemberQuickSlots.UnlockedSlots = canonicalUnlockedSlots
 	crewMemberQuickSlots.MaxSlots = CrewQuickSlotConfig.MaxSlots
 
 	local unopenedChests = ensureTable(data, "UnopenedChests")
@@ -378,14 +592,12 @@ function ProfileMigrations.Apply(data)
 
 	for inventoryKey, inventoryEntry in pairs(inventory) do
 		if inventoryKey ~= "Feed" and inventoryKey ~= "DevilFruits" and typeof(inventoryEntry) == "table" then
-			local hasBrainrotFields = inventoryEntry.Quantity ~= nil
+			local hasRetiredCrewFields = inventoryEntry.Quantity ~= nil
 				or inventoryEntry.Rarity ~= nil
 				or inventoryEntry.Level ~= nil
 				or inventoryEntry.BaseName ~= nil
-			if hasBrainrotFields then
-				inventoryEntry.Level = math.max(1, coerceNumber(inventoryEntry.Level, 1))
-				inventoryEntry.CurrentXP = math.max(0, coerceNumber(inventoryEntry.CurrentXP, 0))
-				recordBrainrotDiscovered(inventoryKey, inventoryEntry.BaseName, inventoryEntry.Variant)
+			if hasRetiredCrewFields then
+				inventory[inventoryKey] = nil
 			end
 		end
 	end
@@ -397,145 +609,9 @@ function ProfileMigrations.Apply(data)
 	if typeof(devilFruit.Equipped) == "string" and devilFruit.Equipped ~= ProfileTemplate.DevilFruit.Equipped then
 		recordDevilFruitDiscovered(devilFruit.Equipped)
 	end
+	indexCollection.DevilFruits = discoveredDevilFruits
 
-	local incomeBrainrots = ensureTable(data, "IncomeBrainrots")
-	for standName, standData in pairs(incomeBrainrots) do
-		if typeof(standData) == "table" then
-			if typeof(standData.BrainrotName) ~= "string" then
-				standData.BrainrotName = ""
-			end
-			if typeof(standData.BrainrotInstanceId) ~= "string" then
-				standData.BrainrotInstanceId = ""
-			end
-			if typeof(standData.IncomeToCollect) ~= "number" then
-				standData.IncomeToCollect = 0
-			end
-			incomeBrainrots[standName] = standData
-		end
-	end
-
-	local normalizedOrder = {}
-	local seenInstanceIds = {}
-	local maxBrainrotInstanceId = brainrotInventory.NextInstanceId - 1
-	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
-		local instanceId = tostring(rawInstanceId)
-		maxBrainrotInstanceId = math.max(maxBrainrotInstanceId, coerceNumber(tonumber(instanceId), 0))
-		local normalized = normalizeBrainrotInstance(instanceId, brainrotInventory.ById[instanceId])
-		if normalized and not seenInstanceIds[instanceId] then
-			brainrotInventory.ById[instanceId] = normalized
-			table.insert(normalizedOrder, instanceId)
-			seenInstanceIds[instanceId] = true
-		else
-			brainrotInventory.ById[instanceId] = nil
-		end
-	end
-
-	for rawInstanceId, instanceData in pairs(brainrotInventory.ById) do
-		local instanceId = tostring(rawInstanceId)
-		maxBrainrotInstanceId = math.max(maxBrainrotInstanceId, coerceNumber(tonumber(instanceId), 0))
-		if not seenInstanceIds[instanceId] then
-			local normalized = normalizeBrainrotInstance(instanceId, instanceData)
-			if normalized then
-				brainrotInventory.ById[instanceId] = normalized
-				table.insert(normalizedOrder, instanceId)
-				seenInstanceIds[instanceId] = true
-			else
-				brainrotInventory.ById[instanceId] = nil
-			end
-		end
-	end
-	brainrotInventory.Order = normalizedOrder
-	if brainrotInventory.NextInstanceId <= maxBrainrotInstanceId then
-		brainrotInventory.NextInstanceId = maxBrainrotInstanceId + 1
-	end
-
-	local hasTutorialRewardInstance = false
-	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(rawInstanceId)]
-		if instanceData then
-			if instanceData.TutorialReward == true then
-				hasTutorialRewardInstance = true
-			end
-			recordBrainrotDiscovered(instanceData.StorageName, instanceData.BaseName, instanceData.Variant)
-		end
-	end
-	if hasTutorialRewardInstance then
-		hiddenLeaderstats.TutorialBrainrotGranted = true
-	end
-
-	local function createBrainrotInstance(storageName, entry, assignedStand)
-		local instanceId = tostring(brainrotInventory.NextInstanceId)
-		brainrotInventory.NextInstanceId += 1
-
-		local normalized = normalizeBrainrotInstance(instanceId, {
-			StorageName = storageName,
-			BaseName = entry and entry.BaseName or nil,
-			Variant = entry and entry.Variant or nil,
-			Rarity = entry and entry.Rarity or nil,
-			Income = entry and entry.Income or nil,
-			Render = entry and entry.Render or nil,
-			GoldenRender = entry and entry.GoldenRender or nil,
-			DiamondRender = entry and entry.DiamondRender or nil,
-			Level = entry and entry.Level or 1,
-			CurrentXP = entry and entry.CurrentXP or 0,
-			AssignedStand = assignedStand or "",
-		}, storageName)
-
-		brainrotInventory.ById[instanceId] = normalized
-		table.insert(brainrotInventory.Order, instanceId)
-		return instanceId
-	end
-
-	if #brainrotInventory.Order == 0 then
-		local placedByStorage = {}
-		local standNamesByStorage = {}
-		for standName, standData in pairs(incomeBrainrots) do
-			local storageName = tostring(standData.BrainrotName or "")
-			if storageName ~= "" then
-				placedByStorage[storageName] = (placedByStorage[storageName] or 0) + 1
-				standNamesByStorage[storageName] = standNamesByStorage[storageName] or {}
-				table.insert(standNamesByStorage[storageName], tostring(standName))
-			end
-		end
-
-		for inventoryKey, inventoryEntry in pairs(inventory) do
-			if isBrainrotInventoryEntry(inventoryKey, inventoryEntry) then
-				local availableQuantity = math.max(0, coerceNumber(inventoryEntry.Quantity, 0))
-				local standNames = standNamesByStorage[inventoryKey] or {}
-				local totalInstances = availableQuantity + #standNames
-
-				for index = 1, totalInstances do
-					local assignedStand = standNames[index]
-					local instanceId = createBrainrotInstance(inventoryKey, inventoryEntry, assignedStand)
-					if assignedStand then
-						incomeBrainrots[assignedStand] = incomeBrainrots[assignedStand] or {}
-						incomeBrainrots[assignedStand].BrainrotName = inventoryKey
-						incomeBrainrots[assignedStand].BrainrotInstanceId = instanceId
-					end
-				end
-			end
-		end
-	end
-
-	local availableCounts = {}
-	for _, rawInstanceId in ipairs(brainrotInventory.Order) do
-		local instanceData = brainrotInventory.ById[tostring(rawInstanceId)]
-		if instanceData then
-			if instanceData.AssignedStand ~= "" then
-				incomeBrainrots[instanceData.AssignedStand] = incomeBrainrots[instanceData.AssignedStand] or {}
-				incomeBrainrots[instanceData.AssignedStand].BrainrotName = instanceData.StorageName
-				incomeBrainrots[instanceData.AssignedStand].BrainrotInstanceId = tostring(rawInstanceId)
-			else
-				availableCounts[instanceData.StorageName] = (availableCounts[instanceData.StorageName] or 0) + 1
-			end
-		end
-	end
-
-	for inventoryKey, inventoryEntry in pairs(inventory) do
-		if isBrainrotInventoryEntry(inventoryKey, inventoryEntry) then
-			inventoryEntry.Quantity = availableCounts[inventoryKey] or 0
-		end
-	end
+	normalizeCrewMemberInventory(crewMemberInventory)
 
 	local materials = ensureTable(data, "Materials")
 	materials.Inventory = ensureTable(materials, "Inventory")

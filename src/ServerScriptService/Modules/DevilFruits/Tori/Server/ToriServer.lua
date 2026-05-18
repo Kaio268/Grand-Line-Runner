@@ -452,11 +452,14 @@ function ToriServer.PhoenixFlameShield(context)
 	end
 
 	local duration = clampPositiveNumber(abilityConfig.Duration, DEFAULT_PHOENIX_SHIELD_DURATION)
-	startEndCooldownState(context, PHOENIX_SHIELD_ABILITY, duration, tonumber(abilityConfig.Cooldown) or 0)
+	local shieldState = startEndCooldownState(context, PHOENIX_SHIELD_ABILITY, duration, tonumber(abilityConfig.Cooldown) or 0)
+	local serverStartTime = shieldState and shieldState.StartedAt or getSharedTimestamp()
 
 	return {
 		Radius = resolvePhoenixShieldRadius(abilityConfig),
 		Duration = duration,
+		StartedAt = serverStartTime,
+		EndTime = serverStartTime + duration,
 		AnimationLockDuration = clampPositiveNumber(
 			abilityConfig.AnimationLockDuration,
 			DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION

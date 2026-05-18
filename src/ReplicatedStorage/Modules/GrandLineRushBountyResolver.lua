@@ -3,7 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local Brainrots = CrewCatalog.GetLegacyConfig()
+local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local BountyConfig = require(Configs:WaitForChild("GrandLineRushBounty"))
 
 local Resolver = {}
@@ -29,34 +29,38 @@ local function normalizeRarity(rawRarity)
 	return "Common"
 end
 
-local function resolveBrainrotConfig(storageName)
-	if storageName == "" then
+local function resolveCrewConfig(crewMemberId)
+	if crewMemberId == "" then
 		return nil
 	end
 
-	return CrewCatalog.GetInfoById(storageName) or Brainrots[storageName]
+	return CrewCatalog.GetInfoById(crewMemberId)
 end
 
-local function resolveBrainrotContext(brainrotLike)
-	local context = typeof(brainrotLike) == "table" and brainrotLike or {}
-	local fallbackStorageName = if typeof(brainrotLike) == "string" then brainrotLike else ""
-	local storageName = tostring(context.StorageName or context.BrainrotName or fallbackStorageName or "")
-	local config = resolveBrainrotConfig(storageName)
+local function resolveCrewContext(crewLike)
+	local context = typeof(crewLike) == "table" and crewLike or {}
+	local fallbackCrewMemberId = if typeof(crewLike) == "string" then crewLike else ""
+	local crewMemberId = tostring(context.CrewMemberId or context.StorageName or context.CrewMemberName or fallbackCrewMemberId or "")
+	local resolvedCrewMemberId, resolvedConfig = CrewCatalog.ResolveCrewMemberId(crewMemberId)
+	if resolvedConfig then
+		crewMemberId = resolvedCrewMemberId
+	end
+	local config = resolvedConfig or resolveCrewConfig(crewMemberId)
 	local rarity = normalizeRarity(context.Rarity or (config and config.Rarity) or "Common")
 	local level = math.max(1, math.floor(coerceNumber(context.Level, 1)))
 	local income = math.max(0, coerceNumber(config and tonumber(config.Income), coerceNumber(context.Income, 0)))
 
 	return {
-		StorageName = storageName,
+		CrewMemberId = crewMemberId,
 		Rarity = rarity,
 		Level = level,
 		Income = income,
 	}
 end
 
-function Resolver.ResolveBrainrotBaseBounty(brainrotLike)
-	local context = resolveBrainrotContext(brainrotLike)
-	local override = BountyConfig.Crew.TypeBaseByStorageName[context.StorageName]
+function Resolver.ResolveCrewMemberBaseBounty(crewLike)
+	local context = resolveCrewContext(crewLike)
+	local override = BountyConfig.Crew.TypeBaseByCrewMemberId[context.CrewMemberId]
 	if typeof(override) == "number" then
 		return math.max(1, round(override))
 	end
@@ -67,25 +71,25 @@ function Resolver.ResolveBrainrotBaseBounty(brainrotLike)
 	return math.max(tonumber(BountyConfig.Crew.MinimumBaseBounty) or 1, round(computed))
 end
 
-function Resolver.ResolveBrainrotBounty(brainrotLike)
-	local context = resolveBrainrotContext(brainrotLike)
-	local baseBounty = Resolver.ResolveBrainrotBaseBounty(context)
+function Resolver.ResolveCrewMemberBounty(crewLike)
+	local context = resolveCrewContext(crewLike)
+	local baseBounty = Resolver.ResolveCrewMemberBaseBounty(context)
 	local levelMultiplier = 1 + ((context.Level - 1) * (tonumber(BountyConfig.Crew.LevelMultiplierPerLevel) or 0))
 	return math.max(0, round(baseBounty * levelMultiplier))
 end
 
-function Resolver.ResolveCrewBounty(brainrotInventory)
-	if typeof(brainrotInventory) ~= "table" then
+function Resolver.ResolveCrewBounty(crewInventory)
+	if typeof(crewInventory) ~= "table" then
 		return 0
 	end
 
 	local total = 0
-	local byId = typeof(brainrotInventory.ById) == "table" and brainrotInventory.ById or {}
+	local byId = typeof(crewInventory.ById) == "table" and crewInventory.ById or {}
 
-	for _, instanceId in ipairs(typeof(brainrotInventory.Order) == "table" and brainrotInventory.Order or {}) do
+	for _, instanceId in ipairs(typeof(crewInventory.Order) == "table" and crewInventory.Order or {}) do
 		local instanceData = byId[tostring(instanceId)]
 		if typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") ~= "" then
-			total += Resolver.ResolveBrainrotBounty(instanceData)
+			total += Resolver.ResolveCrewMemberBounty(instanceData)
 		end
 	end
 
@@ -103,7 +107,12 @@ function Resolver.ResolveExtractionBountyForReward(rewardData)
 
 	local rewardType = tostring(rewardData.RewardType or "")
 	if rewardType == "Chest" then
-		return math.max(0, round(BountyConfig.Extraction.ChestBountyByTier[tostring(rewardData.Tier or "")] or 0))
+		local tierName = ChestUtils.ResolveStandardTier(rewardData.Tier)
+		if tierName == nil then
+			return 0
+		end
+
+		return math.max(0, round(BountyConfig.Extraction.ChestBountyByTier[tierName] or 0))
 	end
 
 	if rewardType == "Crew" then
@@ -114,8 +123,8 @@ function Resolver.ResolveExtractionBountyForReward(rewardData)
 	return 0
 end
 
-function Resolver.BuildBreakdown(brainrotInventory, lifetimeExtractionBounty)
-	local crewBounty = Resolver.ResolveCrewBounty(brainrotInventory)
+function Resolver.BuildBreakdown(crewInventory, lifetimeExtractionBounty)
+	local crewBounty = Resolver.ResolveCrewBounty(crewInventory)
 	local lifetimeExtraction = math.max(0, math.floor(coerceNumber(lifetimeExtractionBounty, 0)))
 
 	return {

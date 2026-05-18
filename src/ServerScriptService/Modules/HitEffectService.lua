@@ -23,6 +23,12 @@ local started = false
 local sliceServiceCache = nil
 local crewInteractionCache = nil
 local temporaryRagdollServiceCache = nil
+local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+
+local function hasCarriedCrewMember(player)
+	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
+	return typeof(carried) == "string" and carried ~= ""
+end
 
 local function getTemporaryRagdollService()
 	if temporaryRagdollServiceCache ~= nil then
@@ -191,8 +197,13 @@ local function forceDropCarriedItems(player, dropPosition, effectName)
 	local dropResponse = nil
 
 	local sliceService = getSliceService()
-	if sliceService and typeof(sliceService.DropCarriedReward) == "function" then
-		dropResponse = sliceService.DropCarriedReward(player, {
+	local dropFunction = if sliceService and typeof(sliceService.DropAllCarriedRewards) == "function"
+		then sliceService.DropAllCarriedRewards
+		elseif sliceService and typeof(sliceService.DropCarriedReward) == "function"
+			then sliceService.DropCarriedReward
+			else nil
+	if dropFunction then
+		dropResponse = dropFunction(player, {
 			Reason = "HitEffect",
 			EffectName = effectName,
 			DropPosition = dropPosition,
@@ -208,12 +219,12 @@ local function forceDropCarriedItems(player, dropPosition, effectName)
 		and typeof(crewInteraction.DropHeldAtPosition) == "function"
 	then
 		local context = crewInteraction.GetActiveContext()
-		local isHoldingBrainrot = player:GetAttribute("CarriedBrainrot") ~= nil
-		if not isHoldingBrainrot and typeof(crewInteraction.HasHeld) == "function" then
-			isHoldingBrainrot = crewInteraction.HasHeld(context, player) == true
+		local isHoldingCrewMember = hasCarriedCrewMember(player)
+		if not isHoldingCrewMember and typeof(crewInteraction.HasHeld) == "function" then
+			isHoldingCrewMember = crewInteraction.HasHeld(context, player) == true
 		end
 
-		if isHoldingBrainrot and crewInteraction.DropHeldAtPosition(context, player, nil, dropPosition) == true then
+		if isHoldingCrewMember and crewInteraction.DropHeldAtPosition(context, player, nil, dropPosition) == true then
 			droppedAny = true
 		end
 	end
