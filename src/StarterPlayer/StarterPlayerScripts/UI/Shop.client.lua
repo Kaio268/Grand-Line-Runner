@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -156,8 +157,12 @@ local function ensureStoreFrameLayout()
 		sizeConstraint.Parent = storeFrame
 	end
 
-	sizeConstraint.MinSize = Vector2.new(980, 680)
-	sizeConstraint.MaxSize = Vector2.new(1340, 860)
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local availableSize = Vector2.new(math.max(1, viewport.X - 24), math.max(1, viewport.Y - 24))
+	local maxSize = Vector2.new(math.min(1340, availableSize.X), math.min(860, availableSize.Y))
+	sizeConstraint.MinSize = Vector2.new(math.min(980, maxSize.X), math.min(680, maxSize.Y))
+	sizeConstraint.MaxSize = maxSize
 end
 
 local function syncOverlayState()

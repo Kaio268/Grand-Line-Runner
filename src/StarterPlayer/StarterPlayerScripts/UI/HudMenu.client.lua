@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -52,20 +53,33 @@ local TILE_DEFS = {
 	{ name = "Quest", label = "Quest", badgeText = "" },
 }
 
-local TILE_SIZE = 98
-local TILE_COLUMN_GAP = 10
-local TILE_ROW_GAP = 10
-local TILE_STEP_X = TILE_SIZE + TILE_COLUMN_GAP
-local TILE_STEP_Y = TILE_SIZE + TILE_ROW_GAP
+local function getHudLayout()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local compact = viewport.X < 700 or viewport.Y < 500
+	local tileSize = compact and 78 or 98
+	local columnGap = compact and 6 or 10
+	local rowGap = compact and 6 or 10
+	local stepX = tileSize + columnGap
+	local stepY = tileSize + rowGap
 
-local TILE_POSITIONS = {
-	Store = Vector2.new(0, 0),
-	Index = Vector2.new(TILE_STEP_X, 0),
-	Gifts = Vector2.new(0, TILE_STEP_Y),
-	Quest = Vector2.new(TILE_STEP_X, TILE_STEP_Y),
-	Rebirth = Vector2.new(0, TILE_STEP_Y * 2),
-	Settings = Vector2.new(TILE_STEP_X, TILE_STEP_Y * 2),
-}
+	return {
+		tileSize = tileSize,
+		columnGap = columnGap,
+		rowGap = rowGap,
+		stepX = stepX,
+		stepY = stepY,
+		containerPosition = compact and UDim2.fromOffset(8, 160) or UDim2.fromOffset(10, 250),
+		positions = {
+			Store = Vector2.new(0, 0),
+			Index = Vector2.new(stepX, 0),
+			Gifts = Vector2.new(0, stepY),
+			Quest = Vector2.new(stepX, stepY),
+			Rebirth = Vector2.new(0, stepY * 2),
+			Settings = Vector2.new(stepX, stepY * 2),
+		},
+	}
+end
 
 local HUD_ICON_ASSET_OVERRIDES = {
 	Store = "rbxassetid://87636652264235",
@@ -310,14 +324,15 @@ local function pickTitleStyle(button)
 end
 
 local function ensureContainer(hud)
+	local layout = getHudLayout()
 	local lButtons = hud:FindFirstChild("LButtons")
-	local containerWidth = (TILE_SIZE * 2) + TILE_COLUMN_GAP
-	local containerHeight = (TILE_SIZE * 3) + (TILE_ROW_GAP * 2)
+	local containerWidth = (layout.tileSize * 2) + layout.columnGap
+	local containerHeight = (layout.tileSize * 3) + (layout.rowGap * 2)
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
 		lButtons.Size = UDim2.fromOffset(containerWidth, containerHeight)
-		lButtons.Position = UDim2.fromOffset(10, 250)
+		lButtons.Position = layout.containerPosition
 		return lButtons
 	end
 
@@ -327,7 +342,7 @@ local function ensureContainer(hud)
 	created.BorderSizePixel = 0
 	created.ClipsDescendants = false
 	created.Visible = true
-	created.Position = UDim2.fromOffset(10, 250)
+	created.Position = layout.containerPosition
 	created.Size = UDim2.fromOffset(containerWidth, containerHeight)
 	created.Parent = hud
 
@@ -409,13 +424,14 @@ local function ensureHoverScale(button)
 end
 
 local function ensureShell(container, definition, index)
-	local mappedPosition = TILE_POSITIONS[definition.name]
+	local layout = getHudLayout()
+	local mappedPosition = layout.positions[definition.name]
 	local existing = container:FindFirstChild(definition.name)
 	if existing and existing:IsA("GuiButton") then
 		existing.Visible = true
 		existing.Active = true
 		existing.ClipsDescendants = false
-		existing.Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE)
+		existing.Size = UDim2.fromOffset(layout.tileSize, layout.tileSize)
 		existing.LayoutOrder = index
 		CollectionService:AddTag(existing, HUD_BUTTON_NO_ANIM_TAG)
 		if mappedPosition then
@@ -434,12 +450,12 @@ local function ensureShell(container, definition, index)
 	button.ImageTransparency = 1
 	button.Visible = true
 	button.LayoutOrder = index
-	button.Size = UDim2.fromOffset(TILE_SIZE, TILE_SIZE)
+	button.Size = UDim2.fromOffset(layout.tileSize, layout.tileSize)
 	CollectionService:AddTag(button, HUD_BUTTON_NO_ANIM_TAG)
 	if mappedPosition then
 		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
 	else
-		button.Position = UDim2.fromOffset(0, (index - 1) * TILE_STEP_Y)
+		button.Position = UDim2.fromOffset(0, (index - 1) * layout.stepY)
 	end
 
 	button.Parent = container
@@ -974,7 +990,25 @@ local childRemovedConnection = playerGui.ChildRemoved:Connect(function(child)
 	end
 end)
 
+local viewportConnections = {}
+local function bindViewportConnections()
+	for _, connection in ipairs(viewportConnections) do
+		connection:Disconnect()
+	end
+	table.clear(viewportConnections)
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportConnections[#viewportConnections + 1] = camera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
+	end
+	viewportConnections[#viewportConnections + 1] = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindViewportConnections()
+		scheduleRender()
+	end)
+end
+
 bindHudConnections()
+bindViewportConnections()
 scheduleRender()
 
 script.Destroying:Connect(function()
@@ -982,6 +1016,9 @@ script.Destroying:Connect(function()
 	childAddedConnection:Disconnect()
 	childRemovedConnection:Disconnect()
 	disconnectHudConnections()
+	for _, connection in ipairs(viewportConnections) do
+		connection:Disconnect()
+	end
 	for button in pairs(hoverBindings) do
 		clearHoverBinding(button)
 	end

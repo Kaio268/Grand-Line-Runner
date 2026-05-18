@@ -73,13 +73,13 @@ local function PlayerOverheadBillboard(props)
 		AlwaysOnTop = true,
 		LightInfluence = 0,
 		MaxDistance = 120,
-		Size = UDim2.fromOffset(300, 84),
-		StudsOffsetWorldSpace = Vector3.new(0, 3.25, 0),
+		Size = UDim2.fromOffset(330, 96),
+		StudsOffsetWorldSpace = Vector3.new(0, 3.05, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Name = textRow(tostring(entry.playerName or "Player"), TEXT, 0, 30),
-		Beli = textRow(formatBeli(entry.balance), GOLD, 27, 21),
-		Status = textRow(statusText, statusColor, 51, 16),
+		Name = textRow(tostring(entry.playerName or "Player"), TEXT, 0, 34),
+		Beli = textRow(formatBeli(entry.balance), GOLD, 31, 24),
+		Status = textRow(statusText, statusColor, 59, 18),
 	})
 end
 

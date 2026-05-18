@@ -574,24 +574,6 @@ local function buildViewModel(previewMode)
 	return buildEmptyViewModel()
 end
 
-local function syncHudIndexBadge(viewModel)
-	local hud = playerGui:FindFirstChild("HUD")
-	local lButtons = hud and hud:FindFirstChild("LButtons")
-	local indexButton = lButtons and lButtons:FindFirstChild("Index")
-	local badge = indexButton and indexButton:FindFirstChild("Not", true)
-	if not badge then
-		return
-	end
-
-	local claimableCount = math.max(0, tonumber(viewModel and viewModel.claimableCount) or 0)
-	badge.Visible = claimableCount > 0
-
-	local textLabel = badge:FindFirstChild("TextLB", true)
-	if textLabel and textLabel:IsA("TextLabel") then
-		textLabel.Text = tostring(math.min(99, claimableCount))
-	end
-end
-
 local function findRemoteEventByName(parent, remoteName)
 	for _, child in ipairs(parent:GetChildren()) do
 		if child.Name == remoteName and child:IsA("RemoteEvent") then
@@ -795,7 +777,7 @@ local function StandaloneIndexApp()
 		}, {
 			Constraint = e("UISizeConstraint", {
 				MaxSize = Vector2.new(1360, 860),
-				MinSize = Vector2.new(1080, 680),
+				MinSize = Vector2.new(0, 0),
 			}),
 			Screen = e(indexScreen, {
 				categories = viewModel.categories,
