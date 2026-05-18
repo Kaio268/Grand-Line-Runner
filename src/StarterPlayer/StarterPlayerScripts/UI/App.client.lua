@@ -22,6 +22,7 @@ local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
+local ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -329,6 +330,7 @@ local uiState = {
 	query = "",
 }
 local chestOpenPrompt = nil
+local chestDropRatesPrompt = nil
 
 local cleanupConnections = {}
 local characterConnections = {}
@@ -2326,6 +2328,7 @@ local function setInventoryOpen(isOpen)
 	uiState.isOpen = isOpen == true
 	if uiState.isOpen ~= true then
 		chestOpenPrompt = nil
+		chestDropRatesPrompt = nil
 	end
 	render()
 end
@@ -2370,6 +2373,7 @@ render = function()
 			query = data.query,
 			shipUpgradeModal = data.shipUpgradeModal,
 			chestOpenPrompt = chestOpenPrompt,
+			chestDropRatesPrompt = chestDropRatesPrompt,
 			toggleLayout = getToggleLayout(),
 			toggleIcon = getLegacyInventoryIcon(),
 			onToggle = function()
@@ -2457,6 +2461,17 @@ render = function()
 			end,
 			onDismissChestOpen = function()
 				chestOpenPrompt = nil
+				render()
+			end,
+			onShowChestDropRates = function()
+				if not chestOpenPrompt then
+					return
+				end
+				chestDropRatesPrompt = ChestDropRates.GetPreview(chestOpenPrompt.name)
+				render()
+			end,
+			onDismissChestDropRates = function()
+				chestDropRatesPrompt = nil
 				render()
 			end,
 			onDismissShipUpgradeModal = function()

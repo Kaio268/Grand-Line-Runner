@@ -1711,6 +1711,7 @@ local function chestOpenQuantityPrompt(props)
 	local changedConnectionRef = React.useRef(nil)
 	local endedConnectionRef = React.useRef(nil)
 	local knobHovered, setKnobHovered = React.useState(false)
+	local dropRatesHovered, setDropRatesHovered = React.useState(false)
 
 	local function disconnectDragConnections()
 		if changedConnectionRef.current then
@@ -1871,13 +1872,63 @@ local function chestOpenQuantityPrompt(props)
 					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
 				}),
 			}),
+			DropRates = e("TextButton", {
+				AutoButtonColor = false,
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(24, 174),
+				Size = UDim2.new(0.3, -18, 0, 42),
+				Text = "Drop Rates",
+				TextColor3 = INVENTORY_UI.GoldHighlight,
+				TextSize = 15,
+				ZIndex = 32,
+				[React.Event.MouseEnter] = function()
+					setDropRatesHovered(true)
+				end,
+				[React.Event.MouseLeave] = function()
+					setDropRatesHovered(false)
+				end,
+				[React.Event.Activated] = props.onShowDropRates,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+				Stroke = e("UIStroke", {
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = 0.18,
+					Thickness = 1,
+				}),
+			}),
+			DropRatesTooltip = dropRatesHovered and e("Frame", {
+				AnchorPoint = Vector2.new(0, 1),
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(24, 166),
+				Size = UDim2.fromOffset(210, 34),
+				ZIndex = 36,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 8) }),
+				Stroke = e("UIStroke", {
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = 0.28,
+					Thickness = 1,
+				}),
+				Text = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Enum.Font.Gotham,
+					Size = UDim2.fromScale(1, 1),
+					Text = "View rewards and rarity chances",
+					TextColor3 = INVENTORY_UI.TextMain,
+					TextSize = 12,
+					ZIndex = 37,
+				}),
+			}) or nil,
 			Open = e("TextButton", {
 				AutoButtonColor = false,
 				BackgroundColor3 = INVENTORY_UI.GoldBase,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(24, 174),
-				Size = UDim2.new(0.5, -30, 0, 42),
+				Position = UDim2.new(0.3, 18, 0, 174),
+				Size = UDim2.new(0.35, -21, 0, 42),
 				Text = string.format("Open %d", amount),
 				TextColor3 = PALETTE.Ink,
 				TextSize = 16,
@@ -1891,8 +1942,8 @@ local function chestOpenQuantityPrompt(props)
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.new(0.5, 6, 0, 174),
-				Size = UDim2.new(0.5, -30, 0, 42),
+				Position = UDim2.new(0.65, 3, 0, 174),
+				Size = UDim2.new(0.35, -27, 0, 42),
 				Text = "Cancel",
 				TextColor3 = INVENTORY_UI.TextMain,
 				TextSize = 16,
@@ -1906,6 +1957,200 @@ local function chestOpenQuantityPrompt(props)
 					Thickness = 1,
 				}),
 			}),
+		}),
+	})
+end
+
+local DROP_RATE_COLORS = {
+	Common = Color3.fromRGB(194, 204, 220),
+	Rare = Color3.fromRGB(112, 189, 255),
+	Legendary = INVENTORY_UI.GoldHighlight,
+	Mythic = Color3.fromRGB(240, 130, 255),
+}
+
+local function formatDropChance(chance)
+	if chance == nil then
+		return ""
+	end
+
+	local percent = math.max(0, tonumber(chance) or 0) * 100
+	if percent >= 10 or percent % 1 == 0 then
+		return string.format("%d%%", math.floor(percent + 0.5))
+	elseif percent >= 1 then
+		return string.format("%.1f%%", percent)
+	end
+
+	return string.format("%.2f%%", percent)
+end
+
+local function dropRateRow(row, order)
+	local amountSuffix = if row.amountText and row.amountText ~= "" then string.format(" x%s", row.amountText) else ""
+	local nameColor = DROP_RATE_COLORS[row.rarity] or INVENTORY_UI.TextMain
+	return e("Frame", {
+		BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+		BackgroundTransparency = 0.16,
+		BorderSizePixel = 0,
+		LayoutOrder = order,
+		Size = UDim2.new(1, 0, 0, 34),
+		ZIndex = 43,
+	}, {
+		Corner = e("UICorner", { CornerRadius = UDim.new(0, 8) }),
+		Name = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -108, 1, 0),
+			Text = tostring(row.name or "Unknown") .. amountSuffix,
+			TextColor3 = nameColor,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 44,
+		}),
+		Chance = e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(1, -12, 0, 0),
+			Size = UDim2.fromOffset(88, 34),
+			Text = formatDropChance(row.chance),
+			TextColor3 = INVENTORY_UI.GoldHighlight,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 44,
+		}),
+	})
+end
+
+local function chestDropRatesPrompt(props)
+	local sections = props.sections or {}
+	local children = {
+		ListLayout = e("UIListLayout", {
+			Padding = UDim.new(0, 12),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+	local layoutOrder = 0
+	for sectionIndex, section in ipairs(sections) do
+		layoutOrder += 1
+		local sectionChildren = {
+			ListLayout = e("UIListLayout", {
+				Padding = UDim.new(0, 6),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = 1,
+				Size = UDim2.new(1, 0, 0, 22),
+				Text = tostring(section.title or "Drops"),
+				TextColor3 = INVENTORY_UI.GoldHighlight,
+				TextSize = 16,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 43,
+			}),
+			Note = section.note and e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Gotham,
+				LayoutOrder = 2,
+				Size = UDim2.new(1, 0, 0, 30),
+				Text = tostring(section.note),
+				TextColor3 = INVENTORY_UI.TextMuted,
+				TextSize = 12,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Top,
+				ZIndex = 43,
+			}) or nil,
+		}
+		for rowIndex, row in ipairs(section.rows or {}) do
+			sectionChildren["Row" .. tostring(rowIndex)] = dropRateRow(row, rowIndex + 2)
+		end
+		children["Section" .. tostring(sectionIndex)] = e("Frame", {
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			LayoutOrder = layoutOrder,
+			Size = UDim2.new(1, -8, 0, 0),
+			ZIndex = 42,
+		}, sectionChildren)
+	end
+
+	return e("Frame", {
+		BackgroundColor3 = INVENTORY_UI.MenuOverlay,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 40,
+	}, {
+		Shade = e("Frame", {
+			BackgroundColor3 = PALETTE.Ink,
+			BackgroundTransparency = 0.2,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 40,
+		}),
+		Panel = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = INVENTORY_UI.SectionBg,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(520, 430),
+			ZIndex = 41,
+		}, {
+			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
+			Stroke = e("UIStroke", {
+				Color = INVENTORY_UI.GoldHighlight,
+				Thickness = 1.5,
+				Transparency = 0.08,
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(22, 18),
+				Size = UDim2.new(1, -74, 0, 28),
+				Text = string.format("%s Drop Rates", tostring(props.chestName or "Chest")),
+				TextColor3 = INVENTORY_UI.TextMain,
+				TextSize = 24,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 42,
+			}),
+			Subtitle = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Gotham,
+				Position = UDim2.fromOffset(22, 48),
+				Size = UDim2.new(1, -44, 0, 20),
+				Text = "Possible rewards and their chances",
+				TextColor3 = INVENTORY_UI.TextMuted,
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 42,
+			}),
+			Close = e("TextButton", {
+				AnchorPoint = Vector2.new(1, 0),
+				AutoButtonColor = false,
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.new(1, -18, 0, 18),
+				Size = UDim2.fromOffset(34, 34),
+				Text = "X",
+				TextColor3 = INVENTORY_UI.GoldHighlight,
+				TextSize = 16,
+				ZIndex = 42,
+				[React.Event.Activated] = props.onDismiss,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 9) }),
+			}),
+			Scroll = e("ScrollingFrame", {
+				AutomaticCanvasSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				CanvasSize = UDim2.new(),
+				Position = UDim2.fromOffset(22, 84),
+				ScrollBarImageColor3 = INVENTORY_UI.GoldHighlight,
+				ScrollBarThickness = 5,
+				Size = UDim2.new(1, -44, 1, -106),
+				ZIndex = 42,
+			}, children),
 		}),
 	})
 end
@@ -3387,6 +3632,22 @@ local function App(props)
 				onAmountChanged = props.onChestOpenAmountChanged,
 				onConfirm = props.onConfirmChestOpen,
 				onDismiss = props.onDismissChestOpen,
+				onShowDropRates = props.onShowChestDropRates,
+			}),
+		})
+	end
+
+	if props.chestDropRatesPrompt then
+		appChildren.ChestDropRatesPrompt = e("ScreenGui", {
+			DisplayOrder = 530,
+			IgnoreGuiInset = true,
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		}, {
+			Prompt = e(chestDropRatesPrompt, {
+				chestName = props.chestDropRatesPrompt.chestName,
+				sections = props.chestDropRatesPrompt.sections,
+				onDismiss = props.onDismissChestDropRates,
 			}),
 		})
 	end
