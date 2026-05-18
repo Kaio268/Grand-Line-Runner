@@ -119,13 +119,15 @@ local function CrewOverheadBillboard(props)
 	local rarityPillWidth = if showTimer then 74 else 92
 	local variantPillWidth = if hasVariant then 70 else 0
 	local rarityPillX = if hasVariant then 86 else 10
+	local billboardWidth = if hasVariant then 252 else 228
+	local incomeWidth = if hasVariant then 84 else 112
 
 	return e("BillboardGui", {
 		Adornee = entry.adornee,
 		AlwaysOnTop = true,
 		LightInfluence = 0,
-		MaxDistance = 120,
-		Size = UDim2.fromOffset(228, panelHeight),
+		MaxDistance = if isSpawned then 60 else 120,
+		Size = UDim2.fromOffset(billboardWidth, panelHeight),
 		StudsOffsetWorldSpace = Vector3.new(0, if isSpawned then 4.8 else 4.35, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
@@ -200,7 +202,7 @@ local function CrewOverheadBillboard(props)
 				BackgroundTransparency = 1,
 				Font = IndexTheme.Fonts.Display,
 				Position = UDim2.new(1, -10, 0, 40),
-				Size = UDim2.fromOffset(112, 22),
+				Size = UDim2.fromOffset(incomeWidth, 22),
 				Text = formatIncome(entry.incomePerSecond),
 				TextColor3 = variantStyle.variantAccent or GOLD,
 				TextSize = 14,

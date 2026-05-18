@@ -62,9 +62,9 @@ local TILE_POSITIONS = {
 	Store = Vector2.new(0, 0),
 	Index = Vector2.new(TILE_STEP_X, 0),
 	Gifts = Vector2.new(0, TILE_STEP_Y),
-	Settings = Vector2.new(TILE_STEP_X, TILE_STEP_Y),
+	Quest = Vector2.new(TILE_STEP_X, TILE_STEP_Y),
 	Rebirth = Vector2.new(0, TILE_STEP_Y * 2),
-	Quest = Vector2.new(TILE_STEP_X, TILE_STEP_Y * 2),
+	Settings = Vector2.new(TILE_STEP_X, TILE_STEP_Y * 2),
 }
 
 local HUD_ICON_ASSET_OVERRIDES = {

@@ -3132,7 +3132,7 @@ local function App(props)
 		}
 	end
 
-	children.InventoryModal = e(AnimatedInventoryModal, {
+	local inventoryModal = e(AnimatedInventoryModal, {
 		isOpen = props.isOpen,
 		panelChildren = modalPanelChildren,
 		panelSize = UDim2.fromScale(0.82, 0.76),
@@ -3148,6 +3148,14 @@ local function App(props)
 			ResetOnSpawn = false,
 			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		}, children),
+		InventoryModal = e("ScreenGui", {
+			DisplayOrder = 500,
+			IgnoreGuiInset = true,
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		}, {
+			Modal = inventoryModal,
+		}),
 	}
 
 	if props.shipUpgradeModal then

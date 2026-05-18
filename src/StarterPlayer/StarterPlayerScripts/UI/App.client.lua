@@ -28,6 +28,7 @@ local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebi
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
 local snapshotRemote = ReplicatedStorage:WaitForChild("CrewMemberInventorySnapshotRequest", 15)
@@ -264,6 +265,7 @@ local keyboardHotbar = {}
 local renderQueued = false
 local destroyed = false
 local stopObservingState = nil
+local render
 local scheduleRender
 local syncChestsFromInventory
 local syncDevilFruitsFromInventory
@@ -452,9 +454,9 @@ local function getEntryDisplayMetadata(entry)
 		metadata.rarity = rarity
 	end
 
-	local render = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
-	if render ~= "" then
-		metadata.render = render
+	local renderImage = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
+	if renderImage ~= "" then
+		metadata.render = renderImage
 	end
 
 	local staticPreviewImage = tostring(
@@ -2314,7 +2316,34 @@ local function bindRebirthSummaryTracking()
 	end, rebirthSummaryConnections)
 end
 
-local function render()
+local function setInventoryOpen(isOpen)
+	if shipUpgradeModal ~= nil and isOpen ~= true then
+		return
+	end
+
+	uiState.isOpen = isOpen == true
+	render()
+end
+
+local unregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
+	toggle = function()
+		if shipUpgradeModal ~= nil then
+			return
+		end
+		setInventoryOpen(not uiState.isOpen)
+	end,
+	open = function()
+		setInventoryOpen(true)
+	end,
+	close = function()
+		setInventoryOpen(false)
+	end,
+	isVisible = function()
+		return uiState.isOpen == true
+	end,
+})
+
+render = function()
 	local data = buildRenderData()
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
 	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, uiState.isOpen == true)
@@ -2341,8 +2370,7 @@ local function render()
 				if shipUpgradeModal ~= nil then
 					return
 				end
-				uiState.isOpen = not uiState.isOpen
-				render()
+				ReactModalRegistry.Toggle("Inventory")
 			end,
 			onSelectView = function(viewKey)
 				if shipUpgradeModal ~= nil then
@@ -2911,6 +2939,7 @@ task.defer(scheduleRender)
 script.Destroying:Connect(function()
 	destroyed = true
 	UiModalState.SetOpen("InventoryModal", false)
+	unregisterInventoryModal()
 	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, false)
 	if modalInputSinkBound then
 		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)
