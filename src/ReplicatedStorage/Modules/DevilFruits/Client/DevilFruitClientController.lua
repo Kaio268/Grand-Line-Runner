@@ -29,6 +29,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 
 local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
 local MOGU_BURROW_ABILITY = "Burrow"
+local MOGU_BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
+local MOGU_BURROW_SESSION_STATE_ATTRIBUTE = "MoguBurrowSessionState"
 local BOMU_FRUIT_NAME = "Bomu Bomu no Mi"
 local BOMU_LAND_MINE_ABILITY = "LandMine"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
@@ -45,6 +47,11 @@ local DEFAULT_MOGU_RESOLVE_HAZARD_PROBE_PADDING = 0.25
 local DEFAULT_HAZARD_SUPPRESSION_SOURCE = "Default"
 local FIRE_BURST_HAZARD_SUPPRESSION_SOURCE = "FireBurst"
 local MOGU_HAZARD_SUPPRESSION_SOURCE = "MoguBurrow"
+local MOGU_IMMUNE_ELIGIBLE_SESSION_STATES = {
+	Startup = true,
+	Underground = true,
+	Resolving = true,
+}
 
 local remoteBundle
 local requestRemote
@@ -777,6 +784,23 @@ local function isLocalPlayerBurrowProtected(now)
 		return false
 	end
 
+	local sessionId = activeMoguBurrow.SessionId
+	if typeof(sessionId) ~= "string" or sessionId == "" then
+		activeMoguBurrow = nil
+		return false
+	end
+
+	if player:GetAttribute(MOGU_BURROW_SESSION_ID_ATTRIBUTE) ~= sessionId then
+		activeMoguBurrow = nil
+		return false
+	end
+
+	local serverState = player:GetAttribute(MOGU_BURROW_SESSION_STATE_ATTRIBUTE)
+	if MOGU_IMMUNE_ELIGIBLE_SESSION_STATES[serverState] ~= true then
+		activeMoguBurrow = nil
+		return false
+	end
+
 	return true
 end
 
@@ -984,6 +1008,7 @@ local function startMoguBurrow(targetPlayer, payload)
 	end
 
 	activeMoguBurrow = {
+		SessionId = typeof(resolvedPayload.SessionId) == "string" and resolvedPayload.SessionId or nil,
 		EndTime = os.clock() + duration,
 		Radius = math.max(0, tonumber(resolvedPayload.HazardProtectionRadius) or getMoguHazardProtectionRadius()),
 		NextScanAt = 0,
@@ -992,8 +1017,17 @@ local function startMoguBurrow(targetPlayer, payload)
 	ensureHazardSuppressionLoop()
 end
 
-local function stopMoguBurrow(targetPlayer)
+local function stopMoguBurrow(targetPlayer, payload)
 	if targetPlayer ~= player then
+		return
+	end
+	payload = payload or {}
+	if
+		type(activeMoguBurrow) == "table"
+		and typeof(activeMoguBurrow.SessionId) == "string"
+		and typeof(payload.SessionId) == "string"
+		and payload.SessionId ~= activeMoguBurrow.SessionId
+	then
 		return
 	end
 
@@ -1041,6 +1075,9 @@ fruitModuleLoader = FruitModuleLoader.new({
 	RequestAbility = function(abilityName, payload)
 		requestRemote:FireServer(abilityName, payload)
 		return true
+	end,
+	IsAbilityLocallyReady = function(abilityName)
+		return isLocallyReady(abilityName)
 	end,
 	CreateEffectVisual = function(startPosition, endPosition, direction, isPredicted)
 		clientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
@@ -1242,6 +1279,15 @@ local function initializeDevilFruitClient()
 		local requestPayload = inputController:BuildPredictedRequest(fruitName, abilityName, function()
 			return buildAbilityRequestPayload(fruitName, abilityName)
 		end)
+		if requestPayload == false then
+			logDevilFruitClient(
+				"bind dispatch cancelled key=%s fruit=%s ability=%s reason=controller",
+				tostring(input.KeyCode.Name),
+				tostring(fruitName),
+				tostring(abilityName)
+			)
+			return
+		end
 		logDevilFruitClient(
 			"bind dispatch key=%s fruit=%s ability=%s payloadKeys=%d",
 			tostring(input.KeyCode.Name),
@@ -1336,7 +1382,7 @@ local function initializeDevilFruitClient()
 				return
 			elseif phase == "Resolve" then
 				effectRouter:HandleEffect(targetPlayer, fruitName, abilityName, payload)
-				stopMoguBurrow(targetPlayer)
+				stopMoguBurrow(targetPlayer, payload)
 				return
 			end
 		end

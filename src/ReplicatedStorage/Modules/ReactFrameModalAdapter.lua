@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
@@ -9,6 +10,7 @@ ReactFrameModalAdapter.__index = ReactFrameModalAdapter
 local FRAMES_DISPLAY_ORDER = 120
 local STANDALONE_LAYER_NAME = "ReactModalLayer"
 local BYPASS_OPEN_UI_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
+local VIEWPORT_MARGIN = Vector2.new(24, 24)
 
 local function disconnectAll(bucket)
 	for _, connection in ipairs(bucket) do
@@ -66,10 +68,44 @@ function ReactFrameModalAdapter.new(options)
 	self.fallbackGui = nil
 	self.legacyConnections = {}
 	self.framesFolderConnections = {}
+	self.viewportConnections = {}
 	self.boundLegacySuppressionFrame = nil
 	self.boundLegacySuppressionHost = nil
+	self:_bindViewportTracking()
 
 	return self
+end
+
+function ReactFrameModalAdapter:_getAvailableViewportSize()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return Vector2.new(
+		math.max(1, viewport.X - VIEWPORT_MARGIN.X),
+		math.max(1, viewport.Y - VIEWPORT_MARGIN.Y)
+	)
+end
+
+function ReactFrameModalAdapter:_bindViewportTracking()
+	disconnectAll(self.viewportConnections)
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		trackConnection(camera:GetPropertyChangedSignal("ViewportSize"), function()
+			if self.legacyFrame and self.legacyFrame.Parent then
+				self:_applyFrameStyling(self.legacyFrame)
+			end
+			if self.scheduleRender then
+				task.defer(self.scheduleRender)
+			end
+		end, self.viewportConnections)
+	end
+
+	trackConnection(Workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+		self:_bindViewportTracking()
+		if self.legacyFrame and self.legacyFrame.Parent then
+			self:_applyFrameStyling(self.legacyFrame)
+		end
+	end, self.viewportConnections)
 end
 
 function ReactFrameModalAdapter:SetScheduleRender(callback)
@@ -220,12 +256,18 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 			sizeConstraint.Parent = frame
 		end
 
-		if self.minSize then
-			sizeConstraint.MinSize = self.minSize
-		end
-		if self.maxSize then
-			sizeConstraint.MaxSize = self.maxSize
-		end
+		local availableSize = self:_getAvailableViewportSize()
+		local maxSize = self.maxSize and Vector2.new(
+			math.min(self.maxSize.X, availableSize.X),
+			math.min(self.maxSize.Y, availableSize.Y)
+		) or availableSize
+		local minSize = self.minSize and Vector2.new(
+			math.min(self.minSize.X, maxSize.X),
+			math.min(self.minSize.Y, maxSize.Y)
+		) or Vector2.zero
+
+		sizeConstraint.MinSize = minSize
+		sizeConstraint.MaxSize = maxSize
 	end
 end
 
@@ -584,6 +626,7 @@ function ReactFrameModalAdapter:Destroy()
 	self.destroyed = true
 	self:_disconnectLegacySuppression()
 	disconnectAll(self.framesFolderConnections)
+	disconnectAll(self.viewportConnections)
 	if self.modalStateKey then
 		UiModalState.SetOpen(self.modalStateKey, false)
 	end

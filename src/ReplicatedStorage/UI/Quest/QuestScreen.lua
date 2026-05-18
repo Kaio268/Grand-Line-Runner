@@ -181,6 +181,7 @@ local function questCard(props)
 	local buttonTextColor = if claimed then Theme.Palette.Emerald
 		elseif claimable then SHELL.GoldHighlight
 		else Theme.Palette.Text
+	local compact = props.compact == true
 
 	return e("Frame", {
 		Active = true,
@@ -188,7 +189,7 @@ local function questCard(props)
 		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, QUEST_CARD_WIDTH_OFFSET, 0, QUEST_CARD_HEIGHT),
+		Size = UDim2.new(1, QUEST_CARD_WIDTH_OFFSET, 0, compact and 164 or QUEST_CARD_HEIGHT),
 		[React.Event.MouseEnter] = function()
 			setHovered(true)
 		end,
@@ -208,7 +209,7 @@ local function questCard(props)
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
 			Position = UDim2.fromOffset(18, 12),
-			Size = UDim2.new(1, -196, 0, 24),
+			Size = UDim2.new(1, compact and -36 or -196, 0, 24),
 			Text = tostring(quest.name or "Quest"),
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 20,
@@ -218,7 +219,7 @@ local function questCard(props)
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Body,
 			Position = UDim2.fromOffset(18, 38),
-			Size = UDim2.new(1, -196, 0, 34),
+			Size = UDim2.new(1, compact and -36 or -196, 0, compact and 44 or 34),
 			Text = tostring(quest.description or ""),
 			TextColor3 = Theme.Palette.Muted,
 			TextSize = 16,
@@ -229,7 +230,7 @@ local function questCard(props)
 		ProgressText = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 78),
+			Position = UDim2.fromOffset(18, compact and 88 or 78),
 			Size = UDim2.fromOffset(120, 18),
 			Text = string.format("%d / %d", tonumber(quest.progress) or 0, tonumber(quest.target) or 1),
 			TextColor3 = Theme.Palette.Text,
@@ -239,14 +240,14 @@ local function questCard(props)
 		Progress = e(progressBar, {
 			progress = quest.progress,
 			target = quest.target,
-			position = UDim2.fromOffset(98, 82),
-			size = UDim2.new(1, -282, 0, 11),
+			position = UDim2.fromOffset(98, compact and 92 or 82),
+			size = UDim2.new(1, compact and -116 or -282, 0, 11),
 		}),
 		Reward = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 102),
-			Size = UDim2.new(1, -196, 0, 18),
+			Position = UDim2.fromOffset(18, compact and 116 or 102),
+			Size = UDim2.new(1, compact and -36 or -196, 0, 18),
 			Text = "Reward: " .. tostring(quest.rewardText or ""),
 			TextColor3 = Theme.Palette.Gold,
 			TextSize = 15,
@@ -254,13 +255,13 @@ local function questCard(props)
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Status = e("TextButton", {
-			AnchorPoint = Vector2.new(1, 1),
+			AnchorPoint = compact and Vector2.new(0, 0.5) or Vector2.new(1, 1),
 			AutoButtonColor = false,
 			BackgroundColor3 = buttonColor,
 			BackgroundTransparency = 0.15,
 			BorderSizePixel = 0,
-			Position = UDim2.new(1, -16, 1, -14),
-			Size = UDim2.fromOffset(122, 34),
+			Position = compact and UDim2.fromOffset(18, 144) or UDim2.new(1, -16, 1, -14),
+			Size = compact and UDim2.new(1, -36, 0, 34) or UDim2.fromOffset(122, 34),
 			Text = statusText(quest),
 			TextColor3 = buttonTextColor,
 			TextSize = 14,
@@ -284,10 +285,30 @@ local function questCard(props)
 end
 
 local function QuestScreen(props)
+	local rootRef = React.useRef(nil)
+	local contentWidth, setContentWidth = React.useState(900)
 	local state = props.state or {}
 	local activeTab, setActiveTab = React.useState((state.categoryOrder and state.categoryOrder[1]) or "Daily")
 	local activeCategory = findCategory(state, activeTab) or findCategory(state, "Daily")
 	local categoryOrder = state.categoryOrder or DEFAULT_ORDER
+	local compact = contentWidth < 640
+
+	React.useEffect(function()
+		local root = rootRef.current
+		if not root then
+			return nil
+		end
+
+		local function updateWidth()
+			setContentWidth(root.AbsoluteSize.X)
+		end
+
+		updateWidth()
+		local connection = root:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateWidth)
+		return function()
+			connection:Disconnect()
+		end
+	end, {})
 
 	local tabChildren = {
 		List = e("UIListLayout", {
@@ -322,6 +343,7 @@ local function QuestScreen(props)
 	}
 	for index, quest in ipairs((activeCategory and activeCategory.quests) or {}) do
 		listChildren["Quest" .. tostring(quest.id)] = e(questCard, {
+			compact = compact,
 			layoutOrder = index,
 			onClaim = props.onClaimQuest,
 			quest = quest,
@@ -331,6 +353,7 @@ local function QuestScreen(props)
 	local listHeightDelta = props.noticeText and -166 or -130
 
 	return e("Frame", {
+		ref = rootRef,
 		BackgroundColor3 = SHELL.MenuOverlay,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
@@ -456,7 +479,7 @@ local function QuestScreen(props)
 				AnchorPoint = Vector2.new(0.5, 0),
 				BackgroundTransparency = 1,
 				Position = UDim2.fromScale(0.5, 0),
-				Size = UDim2.fromOffset(380, 34),
+				Size = compact and UDim2.new(1, 0, 0, 34) or UDim2.fromOffset(380, 34),
 				ZIndex = 4,
 			}, tabChildren),
 			Summary = e("Frame", {

@@ -66,6 +66,34 @@ local function hideDefaultDisplay(character)
 	end
 end
 
+local function hasLegacyNametagText(instance, playerName)
+	for _, descendant in ipairs(instance:GetDescendants()) do
+		if descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+			local text = tostring(descendant.Text or "")
+			if text == playerName or string.find(text, " Beli", 1, true) then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+local function removeLegacyOverheads(character, playerName)
+	if not character then
+		return
+	end
+
+	for _, descendant in ipairs(character:GetDescendants()) do
+		if descendant:IsA("BillboardGui") then
+			local lowerName = string.lower(descendant.Name)
+			if lowerName == "nametag" or hasLegacyNametagText(descendant, playerName) then
+				descendant:Destroy()
+			end
+		end
+	end
+end
+
 local function disconnectCharacter(player)
 	disconnectConnections(characterConnections[player])
 	characterConnections[player] = nil
@@ -79,12 +107,22 @@ local function connectCharacter(player, character)
 	end
 
 	hideDefaultDisplay(character)
+	removeLegacyOverheads(character, player.Name)
 	characterConnections[player] = {
 		character.ChildAdded:Connect(function(child)
 			if child:IsA("Humanoid") then
 				hideDefaultDisplay(character)
 			end
 			fireChanged()
+		end),
+		character.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("BillboardGui") then
+				task.defer(function()
+					if descendant.Parent and descendant:IsDescendantOf(character) then
+						removeLegacyOverheads(character, player.Name)
+					end
+				end)
+			end
 		end),
 		character.ChildRemoved:Connect(fireChanged),
 		character.AncestryChanged:Connect(function(_, parent)

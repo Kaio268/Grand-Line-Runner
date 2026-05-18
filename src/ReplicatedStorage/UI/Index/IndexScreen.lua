@@ -319,6 +319,8 @@ local function progressStrip(props)
 end
 
 local function IndexScreen(props)
+	local rootRef = React.useRef(nil)
+	local contentWidth, setContentWidth = React.useState(1200)
 	local fallbackViewModel = (not props.categories or not props.units or not props.collectionStats or not props.devilFruitCollection)
 		and IndexData.getDefaultViewModel()
 		or nil
@@ -338,6 +340,23 @@ local function IndexScreen(props)
 	local activeTab, setActiveTab = React.useState("index")
 	local activeCategory, setActiveCategory = React.useState(defaultCategoryId)
 
+	React.useEffect(function()
+		local root = rootRef.current
+		if not root then
+			return nil
+		end
+
+		local function updateWidth()
+			setContentWidth(root.AbsoluteSize.X)
+		end
+
+		updateWidth()
+		local connection = root:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateWidth)
+		return function()
+			connection:Disconnect()
+		end
+	end, {})
+
 	local filteredUnits = React.useMemo(function()
 		if unitsByCategory and unitsByCategory[activeCategory] then
 			return unitsByCategory[activeCategory]
@@ -353,13 +372,15 @@ local function IndexScreen(props)
 	local contentTop = Theme.Layout.HeroHeight + Theme.Layout.ContentGap
 	local footerHeight = activeTab == "index" and (Theme.Layout.FooterTabsHeight + Theme.Layout.ContentGap) or 0
 	local claimableCount = props.claimableCount or stats.claimableCount or 0
-	local showCategoryNavigation = activeTab == "index"
+	local isCompact = contentWidth < 720
+	local showCategoryNavigation = activeTab == "index" and not isCompact
 	local activeStats = activeTab == "fruits" and fruitStats or stats
 	local mainX = showCategoryNavigation and (Theme.Layout.SidebarWidth + Theme.Layout.ContentGap) or 0
 	local mainWidth = showCategoryNavigation and -(Theme.Layout.SidebarWidth + Theme.Layout.ContentGap) or 0
 	local backgroundImage = getBackgroundImageForTab(activeTab)
 
 	return e("Frame", {
+		ref = rootRef,
 		BackgroundColor3 = SHELL.MenuOverlay,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
@@ -468,6 +489,7 @@ local function IndexScreen(props)
 					Size = UDim2.new(1, 0, 1, -(contentTop + footerHeight)),
 				}, {
 					Content = e(IndexGrid, {
+						columns = isCompact and 2 or 5,
 						units = filteredUnits,
 					}),
 				}) or activeTab == "fruits" and e("Frame", {
@@ -476,6 +498,7 @@ local function IndexScreen(props)
 					Size = UDim2.new(1, 0, 1, -contentTop),
 				}, {
 					Content = e(IndexGrid, {
+						columns = isCompact and 2 or 5,
 						units = fruitUnits,
 					}),
 				}) or nil,

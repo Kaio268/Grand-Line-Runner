@@ -1,3 +1,4 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -33,8 +34,19 @@ local CONFIG = {
 	MinimumForwardSpacing = 15,
 	HazardClass = "major",
 	FreezeBehavior = "pause",
+	-- Used for ability/hazard affectable queries; wave damage ignores this so the kill area matches WaveHitbox.
 	AffectablePadding = Vector3.new(2, 1, 4),
-	KillValidationPadding = Vector3.new(12, 8, 24),
+	-- Extra damage padding stays at zero: high-speed reliability comes from swept detection, not oversized damage boxes.
+	KillValidationPadding = Vector3.zero,
+	SweptKillEnabled = true,
+	SweptKillPadding = Vector3.zero,
+	SweptKillTeleportResetDistance = 512,
+	-- WaveWidthScale controls left-to-right wave size. Variant WidthScale still applies on top of this.
+	WaveWidthScale = 0.65,
+	-- WaveHeightScale controls vertical wave size.
+	WaveHeightScale = 1,
+	-- WaveThicknessScale controls front-to-back wave depth.
+	WaveThicknessScale = 1,
 	DiagnosticsInterval = 2,
 	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
 	DriftSpeedMinMultiplier = 1.35,
@@ -63,9 +75,17 @@ local HAZARD_ACTION_REMOTE_NAME = "SharedHazardAction"
 local rng = Random.new()
 local traceStateKey = nil
 local activeHazardStates = {}
+local playerWaveSweepStates = {}
 local diagnosticsHazardsFolder = nil
 local waveDiagnostics = {
 	KillRemoteCount = 0,
+	ServerSweepHitCount = 0,
+	ServerSweepCurrentHitCount = 0,
+	ServerSweepSegmentHitCount = 0,
+	ServerSweepRemoteRecoveryCount = 0,
+	LastSweepPlayerCount = 0,
+	LastSweepTimeMs = 0,
+	LastSweepPublishedAt = 0,
 	CleanupCount = 0,
 	LastCleanupServerTime = 0,
 	LastUpdateTimeMs = 0,
@@ -74,7 +94,9 @@ local waveDiagnostics = {
 	LastPublishedAt = 0,
 }
 local HAZARD_TRACE = RunService:IsStudio() and game:GetAttribute("HazardDebugTrace") == true
-local isCharacterTouchingActiveWave = nil
+local findCurrentWaveHit = nil
+local findSweptWaveHit = nil
+local applyConfirmedWaveHit = nil
 local isValidActiveHazardState = nil
 local publishWaveDiagnostics = nil
 
@@ -190,28 +212,31 @@ killMeRemote.OnServerEvent:Connect(function(player)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if humanoid and humanoid.Health > 0 then
 		local rootPart = character:FindFirstChild("HumanoidRootPart")
-		if not rootPart or not isCharacterTouchingActiveWave or not isCharacterTouchingActiveWave(character, rootPart) then
+		local hit = nil
+		if rootPart and findCurrentWaveHit then
+			hit = findCurrentWaveHit(rootPart)
+			local sweepState = playerWaveSweepStates[player]
+			if not hit
+				and findSweptWaveHit
+				and sweepState
+				and sweepState.Character == character
+				and typeof(sweepState.PreviousPosition or sweepState.LastPosition) == "Vector3"
+			then
+				hit = findSweptWaveHit(rootPart, sweepState.PreviousPosition or sweepState.LastPosition, rootPart.Position)
+				if hit then
+					waveDiagnostics.ServerSweepRemoteRecoveryCount += 1
+				end
+			end
+		end
+
+		if not rootPart or not hit then
 			hazardTrace("kill remote ignored reason=no_active_wave_overlap player=%s", player.Name)
 			return
 		end
 
-		if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
-			HoroServer.InterruptActiveProjection(player, "wave_touch")
-			return
+		if applyConfirmedWaveHit then
+			applyConfirmedWaveHit(player, character, humanoid, rootPart, hit, "client_touch")
 		end
-		if MoguServer.IsProtected(player) then
-			return
-		end
-		if ToriServer.IsProtected(player, rootPart and rootPart.Position or nil) then
-			return
-		end
-		if applyAirbornePhoenixHazardKnockdown(player, humanoid, rootPart) then
-			return
-		end
-		if ToriPassiveService.TryConsumeRebirth(player, "WaveKill") then
-			return
-		end
-		humanoid.Health = 0
 	end
 end)
 
@@ -355,6 +380,12 @@ publishWaveDiagnostics = function(hazardsFolder)
 	folder:SetAttribute("WaveServerProxyPartCount", proxyPartCount)
 	folder:SetAttribute("WaveServerUpdateTimeMs", waveDiagnostics.LastUpdateTimeMs)
 	folder:SetAttribute("WaveKillRemoteCount", waveDiagnostics.KillRemoteCount)
+	folder:SetAttribute("WaveServerSweepHitCount", waveDiagnostics.ServerSweepHitCount)
+	folder:SetAttribute("WaveServerSweepCurrentHitCount", waveDiagnostics.ServerSweepCurrentHitCount)
+	folder:SetAttribute("WaveServerSweepSegmentHitCount", waveDiagnostics.ServerSweepSegmentHitCount)
+	folder:SetAttribute("WaveServerSweepRemoteRecoveryCount", waveDiagnostics.ServerSweepRemoteRecoveryCount)
+	folder:SetAttribute("WaveServerSweepPlayerCount", waveDiagnostics.LastSweepPlayerCount)
+	folder:SetAttribute("WaveServerSweepTimeMs", waveDiagnostics.LastSweepTimeMs)
 	folder:SetAttribute("WaveCleanupCount", waveDiagnostics.CleanupCount)
 	folder:SetAttribute("WaveLastCleanupServerTime", waveDiagnostics.LastCleanupServerTime)
 end
@@ -392,27 +423,129 @@ local function isPointInsideBox(point, boxCFrame, boxSize, padding)
 		and math.abs(localPoint.Z) <= halfSize.Z
 end
 
-isCharacterTouchingActiveWave = function(_, rootPart)
-	if not rootPart or not rootPart.Parent then
-		return false
+local function getWaveValidationPadding(rootPart, configuredPadding)
+	local basePadding = if typeof(configuredPadding) == "Vector3" then configuredPadding else CONFIG.KillValidationPadding
+	if not rootPart or not rootPart:IsA("BasePart") then
+		return basePadding
 	end
 
-	local validationPadding = CONFIG.KillValidationPadding + rootPart.Size
+	return basePadding + rootPart.Size
+end
+
+findCurrentWaveHit = function(rootPart, validationPaddingOverride)
+	if not rootPart or not rootPart.Parent then
+		return nil
+	end
+
+	local validationPadding = getWaveValidationPadding(rootPart, validationPaddingOverride)
 	local rootPosition = rootPart.Position
 
 	for hazardRoot, state in pairs(activeHazardStates) do
 		if isValidActiveHazardState(hazardRoot, state) and os.clock() >= state.FrozenUntil then
 			local volumes = getHazardHitboxVolumes(hazardRoot, state.CurrentCFrame, state.VolumeSize)
 			for _, volume in ipairs(volumes) do
-				local volumePadding = if typeof(volume.Padding) == "Vector3" then volume.Padding else Vector3.zero
-				if isPointInsideBox(rootPosition, volume.CFrame, volume.Size, validationPadding + volumePadding) then
-					return true
+				if isPointInsideBox(rootPosition, volume.CFrame, volume.Size, validationPadding) then
+					return {
+						Source = "current",
+						HazardRoot = hazardRoot,
+						HazardLabel = formatInstancePath(hazardRoot),
+						HitPosition = rootPosition,
+					}
 				end
 			end
 		end
 	end
 
-	return false
+	return nil
+end
+
+findSweptWaveHit = function(rootPart, previousPosition, currentPosition, validationPaddingOverride)
+	if CONFIG.SweptKillEnabled ~= true or not rootPart or not rootPart.Parent then
+		return nil
+	end
+
+	if typeof(previousPosition) ~= "Vector3" or typeof(currentPosition) ~= "Vector3" then
+		return nil
+	end
+
+	local delta = currentPosition - previousPosition
+	local distance = delta.Magnitude
+	if distance <= 0.01 then
+		return nil
+	end
+
+	local teleportResetDistance = math.max(0, tonumber(CONFIG.SweptKillTeleportResetDistance) or 0)
+	if teleportResetDistance > 0 and distance > teleportResetDistance then
+		hazardTrace(
+			"sweep skipped reason=teleport_delta distance=%.2f pos=%s",
+			distance,
+			formatVector3(currentPosition)
+		)
+		return nil
+	end
+
+	local validationPadding = getWaveValidationPadding(rootPart, validationPaddingOverride)
+
+	for hazardRoot, state in pairs(activeHazardStates) do
+		if isValidActiveHazardState(hazardRoot, state) and os.clock() >= state.FrozenUntil then
+			local volumes = getHazardHitboxVolumes(hazardRoot, state.CurrentCFrame, state.VolumeSize)
+			for _, volume in ipairs(volumes) do
+				local intersects, hitPosition, hitAlpha = HazardRuntime.SegmentIntersectsBox(
+					previousPosition,
+					currentPosition,
+					volume.CFrame,
+					volume.Size,
+					validationPadding
+				)
+				if intersects then
+					return {
+						Source = "segment",
+						HazardRoot = hazardRoot,
+						HazardLabel = formatInstancePath(hazardRoot),
+						HitPosition = hitPosition or currentPosition,
+						Alpha = hitAlpha,
+						Distance = distance,
+					}
+				end
+			end
+		end
+	end
+
+	return nil
+end
+
+applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hitSource)
+	if not player or not character or not humanoid or humanoid.Health <= 0 or not rootPart then
+		return false
+	end
+
+	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
+		HoroServer.InterruptActiveProjection(player, "wave_touch")
+		return true
+	end
+	if MoguServer.IsProtected(player) then
+		return true
+	end
+	if ToriServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then
+		return true
+	end
+	if applyAirbornePhoenixHazardKnockdown(player, humanoid, rootPart) then
+		return true
+	end
+	if ToriPassiveService.TryConsumeRebirth(player, "WaveKill") then
+		return true
+	end
+
+	hazardTrace(
+		"wave hit applied source=%s match=%s player=%s hit=%s hazard=%s",
+		tostring(hitSource or "unknown"),
+		tostring(hit and hit.Source or "unknown"),
+		player.Name,
+		formatVector3(hit and hit.HitPosition or rootPart.Position),
+		tostring(hit and hit.HazardLabel or "<unknown>")
+	)
+	humanoid.Health = 0
+	return true
 end
 
 local function anchorHazard(instance)
@@ -432,13 +565,23 @@ local function anchorHazard(instance)
 	end
 end
 
-local function scaleHazardWidth(instance, widthScale)
-	if math.abs(widthScale - 1) < 1e-3 then
+local function scaleHazardByVector(instance, scaleVector)
+	if typeof(scaleVector) ~= "Vector3"
+		or (
+			math.abs(scaleVector.X - 1) < 1e-3
+			and math.abs(scaleVector.Y - 1) < 1e-3
+			and math.abs(scaleVector.Z - 1) < 1e-3
+		)
+	then
 		return
 	end
 
 	if instance:IsA("BasePart") then
-		instance.Size = Vector3.new(instance.Size.X * widthScale, instance.Size.Y, instance.Size.Z)
+		instance.Size = Vector3.new(
+			instance.Size.X * scaleVector.X,
+			instance.Size.Y * scaleVector.Y,
+			instance.Size.Z * scaleVector.Z
+		)
 		return
 	end
 
@@ -449,10 +592,33 @@ local function scaleHazardWidth(instance, widthScale)
 			local relativePosition = relative.Position
 			local relativeRotation = relative - relativePosition
 
-			descendant.Size = Vector3.new(descendant.Size.X * widthScale, descendant.Size.Y, descendant.Size.Z)
-			descendant.CFrame = rootPivot * CFrame.new(relativePosition.X * widthScale, relativePosition.Y, relativePosition.Z) * relativeRotation
+			descendant.Size = Vector3.new(
+				descendant.Size.X * scaleVector.X,
+				descendant.Size.Y * scaleVector.Y,
+				descendant.Size.Z * scaleVector.Z
+			)
+			descendant.CFrame = rootPivot
+				* CFrame.new(
+					relativePosition.X * scaleVector.X,
+					relativePosition.Y * scaleVector.Y,
+					relativePosition.Z * scaleVector.Z
+				)
+				* relativeRotation
 		end
 	end
+end
+
+local function scaleHazardWidth(instance, widthScale)
+	local safeWidthScale = math.max(0.05, tonumber(widthScale) or 1)
+	scaleHazardByVector(instance, Vector3.new(safeWidthScale, 1, 1))
+end
+
+local function scaleHazardDimensions(instance, widthScale, heightScale, thicknessScale)
+	scaleHazardByVector(instance, Vector3.new(
+		math.max(0.05, tonumber(widthScale) or 1),
+		math.max(0.05, tonumber(heightScale) or 1),
+		math.max(0.05, tonumber(thicknessScale) or 1)
+	))
 end
 
 local function computePivotOnTop(instance, referencePart)
@@ -478,6 +644,10 @@ local function applyHazardAttributes(instance, variant)
 	instance:SetAttribute("HazardType", "Wave")
 	instance:SetAttribute("Variant", variant.Name)
 	instance:SetAttribute("Speed", variant.Speed)
+	instance:SetAttribute("WaveWidthScale", CONFIG.WaveWidthScale)
+	instance:SetAttribute("WaveHeightScale", CONFIG.WaveHeightScale)
+	instance:SetAttribute("WaveThicknessScale", CONFIG.WaveThicknessScale)
+	instance:SetAttribute("WaveVariantWidthScale", variant.WidthScale)
 	instance:SetAttribute("CanFreeze", true)
 	instance:SetAttribute("FreezeBehavior", CONFIG.FreezeBehavior)
 	instance:SetAttribute("WaveVisualMode", "ClientTimeline")
@@ -840,6 +1010,113 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 	end)
 end
 
+local function resetPlayerWaveSweepState(player)
+	playerWaveSweepStates[player] = nil
+end
+
+local function updatePlayerWaveSweep(player)
+	local character = player.Character
+	if not character then
+		resetPlayerWaveSweepState(player)
+		return 0
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not rootPart or not rootPart:IsA("BasePart") then
+		resetPlayerWaveSweepState(player)
+		return 0
+	end
+
+	local currentPosition = rootPart.Position
+	local state = playerWaveSweepStates[player]
+	if not state or state.Character ~= character or state.RootPart ~= rootPart then
+		playerWaveSweepStates[player] = {
+			Character = character,
+			RootPart = rootPart,
+			LastPosition = currentPosition,
+			PreviousPosition = nil,
+			LastUpdateClock = os.clock(),
+		}
+		return 1
+	end
+
+	local previousPosition = state.LastPosition
+	state.PreviousPosition = previousPosition
+	state.LastPosition = currentPosition
+	state.LastUpdateClock = os.clock()
+
+	local hit = findCurrentWaveHit and findCurrentWaveHit(rootPart, CONFIG.SweptKillPadding) or nil
+	if hit then
+		waveDiagnostics.ServerSweepHitCount += 1
+		waveDiagnostics.ServerSweepCurrentHitCount += 1
+		applyConfirmedWaveHit(player, character, humanoid, rootPart, hit, "server_sweep_current")
+		return 1
+	end
+
+	hit = findSweptWaveHit
+		and findSweptWaveHit(rootPart, previousPosition, currentPosition, CONFIG.SweptKillPadding)
+		or nil
+	if hit then
+		waveDiagnostics.ServerSweepHitCount += 1
+		waveDiagnostics.ServerSweepSegmentHitCount += 1
+		applyConfirmedWaveHit(player, character, humanoid, rootPart, hit, "server_sweep_segment")
+	end
+
+	return 1
+end
+
+local function scanPlayersForWaveHits()
+	local startedAt = os.clock()
+	local scannedPlayers = 0
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		scannedPlayers += updatePlayerWaveSweep(player)
+	end
+
+	waveDiagnostics.LastSweepPlayerCount = scannedPlayers
+	waveDiagnostics.LastSweepTimeMs = (os.clock() - startedAt) * 1000
+	local now = os.clock()
+	if now - waveDiagnostics.LastSweepPublishedAt >= CONFIG.DiagnosticsInterval then
+		waveDiagnostics.LastSweepPublishedAt = now
+		publishWaveDiagnostics()
+	end
+end
+
+local sweepScanQueued = false
+RunService.Heartbeat:Connect(function()
+	if sweepScanQueued then
+		return
+	end
+
+	sweepScanQueued = true
+	task.defer(function()
+		sweepScanQueued = false
+		scanPlayersForWaveHits()
+	end)
+end)
+
+Players.PlayerAdded:Connect(function(player)
+	player.CharacterAdded:Connect(function()
+		resetPlayerWaveSweepState(player)
+	end)
+	player.CharacterRemoving:Connect(function()
+		resetPlayerWaveSweepState(player)
+	end)
+end)
+
+Players.PlayerRemoving:Connect(resetPlayerWaveSweepState)
+
+for _, player in ipairs(Players:GetPlayers()) do
+	resetPlayerWaveSweepState(player)
+	player.CharacterAdded:Connect(function()
+		resetPlayerWaveSweepState(player)
+	end)
+	player.CharacterRemoving:Connect(function()
+		resetPlayerWaveSweepState(player)
+	end)
+end
+
 local noDisastersTimer = Workspace:FindFirstChild("NoDisastersTimer") or Workspace:WaitForChild("NoDisastersTimer", 15)
 local spawnPaused = nil
 
@@ -879,6 +1156,7 @@ local function spawnSharedHazard(spawnDelay)
 	local variant = chooseVariant()
 	local clone = WaveHazardVisuals.CreateHazardFromTemplate(template)
 	scaleHazardWidth(clone, variant.WidthScale)
+	scaleHazardDimensions(clone, CONFIG.WaveWidthScale, CONFIG.WaveHeightScale, CONFIG.WaveThicknessScale)
 	anchorHazard(clone)
 	applyHazardAttributes(clone, variant)
 

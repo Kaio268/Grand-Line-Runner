@@ -1794,9 +1794,12 @@ local function chestOpenQuantityPrompt(props)
 			BackgroundColor3 = INVENTORY_UI.SectionBg,
 			BorderSizePixel = 0,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(430, 248),
+			Size = UDim2.new(1, -24, 0, 248),
 			ZIndex = 31,
 		}, {
+			SizeConstraint = e("UISizeConstraint", {
+				MaxSize = Vector2.new(430, 248),
+			}),
 			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
 			Stroke = e("UIStroke", {
 				Color = INVENTORY_UI.GoldHighlight,
@@ -2093,9 +2096,12 @@ local function chestDropRatesPrompt(props)
 			BackgroundColor3 = INVENTORY_UI.SectionBg,
 			BorderSizePixel = 0,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(520, 430),
+			Size = UDim2.new(1, -24, 1, -24),
 			ZIndex = 41,
 		}, {
+			SizeConstraint = e("UISizeConstraint", {
+				MaxSize = Vector2.new(520, 430),
+			}),
 			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
 			Stroke = e("UIStroke", {
 				Color = INVENTORY_UI.GoldHighlight,
@@ -3062,7 +3068,7 @@ local function App(props)
 		modalPanelChildren = {
 			SizeConstraint = e("UISizeConstraint", {
 				MaxSize = Vector2.new(1180, 760),
-				MinSize = Vector2.new(860, 560),
+				MinSize = Vector2.new(0, 0),
 			}),
 			Shell = e("Frame", {
 				BackgroundColor3 = INVENTORY_UI.PrimaryBg,
