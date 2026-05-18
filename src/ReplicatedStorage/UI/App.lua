@@ -1702,6 +1702,214 @@ local function manifestTile(props)
 	})
 end
 
+local function chestOpenQuantityPrompt(props)
+	local maxAmount = math.max(1, math.floor(tonumber(props.maxAmount) or 1))
+	local amount = math.clamp(math.floor(tonumber(props.amount) or 1), 1, maxAmount)
+	local progress = if maxAmount <= 1 then 1 else (amount - 1) / (maxAmount - 1)
+	local trackRef = React.useRef(nil)
+	local draggingRef = React.useRef(false)
+	local changedConnectionRef = React.useRef(nil)
+	local endedConnectionRef = React.useRef(nil)
+	local knobHovered, setKnobHovered = React.useState(false)
+
+	local function disconnectDragConnections()
+		if changedConnectionRef.current then
+			changedConnectionRef.current:Disconnect()
+			changedConnectionRef.current = nil
+		end
+		if endedConnectionRef.current then
+			endedConnectionRef.current:Disconnect()
+			endedConnectionRef.current = nil
+		end
+	end
+
+	local function setAmountFromScreenX(screenX)
+		local track = trackRef.current
+		if not track or maxAmount <= 1 then
+			return
+		end
+		local width = track.AbsoluteSize.X
+		if width <= 0 then
+			return
+		end
+		local normalized = math.clamp((screenX - track.AbsolutePosition.X) / width, 0, 1)
+		local nextAmount = math.clamp(math.floor((normalized * (maxAmount - 1)) + 1.5), 1, maxAmount)
+		if props.onAmountChanged then
+			props.onAmountChanged(nextAmount)
+		end
+	end
+
+	local function endDrag()
+		draggingRef.current = false
+		disconnectDragConnections()
+	end
+
+	local function beginDrag(_, input)
+		local inputType = input and input.UserInputType
+		if inputType ~= Enum.UserInputType.MouseButton1 and inputType ~= Enum.UserInputType.Touch then
+			return
+		end
+
+		draggingRef.current = true
+		setAmountFromScreenX(input.Position.X)
+		disconnectDragConnections()
+		changedConnectionRef.current = UserInputService.InputChanged:Connect(function(changedInput)
+			if not draggingRef.current then
+				return
+			end
+			if changedInput.UserInputType == Enum.UserInputType.MouseMovement or changedInput.UserInputType == Enum.UserInputType.Touch then
+				setAmountFromScreenX(changedInput.Position.X)
+			end
+		end)
+		endedConnectionRef.current = UserInputService.InputEnded:Connect(function(endedInput)
+			if endedInput.UserInputType == Enum.UserInputType.MouseButton1 or endedInput.UserInputType == Enum.UserInputType.Touch then
+				endDrag()
+			end
+		end)
+	end
+
+	React.useEffect(function()
+		return function()
+			endDrag()
+		end
+	end, {})
+
+	return e("Frame", {
+		BackgroundColor3 = INVENTORY_UI.MenuOverlay,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 30,
+	}, {
+		Shade = e("Frame", {
+			BackgroundColor3 = PALETTE.Ink,
+			BackgroundTransparency = 0.26,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 30,
+		}),
+		Panel = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = INVENTORY_UI.SectionBg,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(430, 248),
+			ZIndex = 31,
+		}, {
+			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
+			Stroke = e("UIStroke", {
+				Color = INVENTORY_UI.GoldHighlight,
+				Thickness = 1.5,
+				Transparency = 0.08,
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(24, 24),
+				Size = UDim2.new(1, -48, 0, 34),
+				Text = string.format("Open %s", tostring(props.displayName or "Chests")),
+				TextColor3 = INVENTORY_UI.TextMain,
+				TextSize = 26,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 32,
+			}),
+			Amount = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(24, 82),
+				Size = UDim2.new(1, -48, 0, 30),
+				Text = string.format("%d / %d", amount, maxAmount),
+				TextColor3 = INVENTORY_UI.GoldHighlight,
+				TextSize = 24,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 32,
+			}),
+			Track = e("Frame", {
+				ref = trackRef,
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(36, 126),
+				Size = UDim2.new(1, -72, 0, 18),
+				ZIndex = 32,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+				Fill = e("Frame", {
+					BackgroundColor3 = INVENTORY_UI.GoldHighlight,
+					BorderSizePixel = 0,
+					Size = UDim2.fromScale(progress, 1),
+					ZIndex = 33,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+				}),
+				Hitbox = e("TextButton", {
+					AutoButtonColor = false,
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(0, -10),
+					Size = UDim2.new(1, 0, 1, 20),
+					Text = "",
+					ZIndex = 34,
+					[React.Event.InputBegan] = beginDrag,
+				}),
+				Knob = e("TextButton", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					AutoButtonColor = false,
+					BackgroundColor3 = INVENTORY_UI.GoldHighlight,
+					BorderSizePixel = 0,
+					Position = UDim2.fromScale(progress, 0.5),
+					Size = UDim2.fromOffset(if knobHovered then 28 else 24, if knobHovered then 28 else 24),
+					Text = "",
+					ZIndex = 35,
+					[React.Event.MouseEnter] = function()
+						setKnobHovered(true)
+					end,
+					[React.Event.MouseLeave] = function()
+						setKnobHovered(false)
+					end,
+					[React.Event.InputBegan] = beginDrag,
+				}, {
+					Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
+				}),
+			}),
+			Open = e("TextButton", {
+				AutoButtonColor = false,
+				BackgroundColor3 = INVENTORY_UI.GoldBase,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(24, 174),
+				Size = UDim2.new(0.5, -30, 0, 42),
+				Text = string.format("Open %d", amount),
+				TextColor3 = PALETTE.Ink,
+				TextSize = 16,
+				ZIndex = 32,
+				[React.Event.Activated] = props.onConfirm,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+			}),
+			Cancel = e("TextButton", {
+				AutoButtonColor = false,
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.new(0.5, 6, 0, 174),
+				Size = UDim2.new(0.5, -30, 0, 42),
+				Text = "Cancel",
+				TextColor3 = INVENTORY_UI.TextMain,
+				TextSize = 16,
+				ZIndex = 32,
+				[React.Event.Activated] = props.onDismiss,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+				Stroke = e("UIStroke", {
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = 0.35,
+					Thickness = 1,
+				}),
+			}),
+		}),
+	})
+end
+
 local function footerCategoryCell(props)
 	local accent = props.accentColor or PALETTE.Sea
 
@@ -3162,6 +3370,24 @@ local function App(props)
 		appChildren.ShipUpgradeModal = e(shipUpgradeModal, {
 			modal = props.shipUpgradeModal,
 			onDismiss = props.onDismissShipUpgradeModal,
+		})
+	end
+
+	if props.chestOpenPrompt then
+		appChildren.ChestOpenPrompt = e("ScreenGui", {
+			DisplayOrder = 520,
+			IgnoreGuiInset = true,
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		}, {
+			Prompt = e(chestOpenQuantityPrompt, {
+				displayName = props.chestOpenPrompt.displayName,
+				amount = props.chestOpenPrompt.amount,
+				maxAmount = props.chestOpenPrompt.maxAmount,
+				onAmountChanged = props.onChestOpenAmountChanged,
+				onConfirm = props.onConfirmChestOpen,
+				onDismiss = props.onDismissChestOpen,
+			}),
 		})
 	end
 

@@ -32,9 +32,11 @@ local deathConnections = {}
 local REQUEST_ACTION_ALLOWLIST = {
 	GetState = true,
 	OpenChest = true,
+	OpenChests = true,
 	DropCarriedReward = true,
 	FeedCrew = true,
 }
+local MAX_BATCH_CHEST_OPEN_COUNT = 50
 local CHEST_DEBUG = false
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("VerticalSliceDebugTrace") == true
 
@@ -2083,6 +2085,197 @@ local function openChest(player, requestedChestId)
 	return response
 end
 
+local function mergeGrantedResources(target, source)
+	target = if typeof(target) == "table" then target else {}
+	source = if typeof(source) == "table" then source else {}
+	target.food = if typeof(target.food) == "table" then target.food else {}
+	target.materials = if typeof(target.materials) == "table" then target.materials else {}
+
+	for foodKey, amount in pairs(source.food or {}) do
+		target.food[foodKey] = math.max(0, tonumber(target.food[foodKey]) or 0) + math.max(0, tonumber(amount) or 0)
+	end
+	for materialKey, amount in pairs(source.materials or {}) do
+		target.materials[materialKey] = math.max(0, tonumber(target.materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
+	end
+	target.doubloons = math.max(0, tonumber(target.doubloons) or 0) + math.max(0, tonumber(source.doubloons) or 0)
+
+	return target
+end
+
+local function mergeChangedRoots(target, source)
+	for key, value in pairs(source or {}) do
+		if value == true then
+			target[key] = true
+		end
+	end
+end
+
+local function recordChestRewardQuestSignals(player, normalizedChestData, grantedResources)
+	local tierName = normalizedChestData.Tier
+	QuestSignals.Record(player, "OpenChest", 1, {
+		Tier = tostring(tierName or ""),
+		ChestKind = tostring(normalizedChestData.ChestKind or ""),
+		FruitRarity = tostring(normalizedChestData.FruitRarity or ""),
+	})
+	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
+		QuestSignals.Record(player, "EarnDoubloons", grantedResources.doubloons, {
+			Source = "Chest",
+			Tier = tostring(tierName or ""),
+		})
+	end
+	for foodKey, amount in pairs(grantedResources.food or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectFood", normalizedAmount, {
+				Key = tostring(foodKey),
+				FoodKey = tostring(foodKey),
+				Source = "Chest",
+			})
+		end
+	end
+	for materialKey, amount in pairs(grantedResources.materials or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectMaterial", normalizedAmount, {
+				Key = tostring(materialKey),
+				MaterialKey = tostring(materialKey),
+				Source = "Chest",
+			})
+		end
+	end
+end
+
+local function buildBatchOpenResult(openedChestName, openedCount, aggregateResources, batchResults)
+	local grantedFruits = {}
+	local duplicateCount = 0
+	local convertedChestCount = 0
+	local conversionDoubloons = 0
+	local mythicKeyCount = 0
+
+	for _, result in ipairs(batchResults) do
+		if result.GrantedFruit then
+			grantedFruits[#grantedFruits + 1] = {
+				FruitKey = result.GrantedFruit,
+				Rarity = result.GrantedFruitRarity,
+			}
+		end
+		if result.WasDuplicate == true then
+			duplicateCount += 1
+		end
+		if result.ConversionRewardType == "Chest" then
+			convertedChestCount += 1
+		elseif result.ConversionRewardType == "Doubloons" then
+			conversionDoubloons += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
+		elseif result.ConversionRewardType == "MythicKey" then
+			mythicKeyCount += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
+		end
+	end
+
+	return {
+		IsBatch = true,
+		OpenedCount = openedCount,
+		OpenedChest = {
+			displayName = ChestUtils.GetDisplayName(openedChestName),
+		},
+		GrantedResources = aggregateResources,
+		GrantedFruits = grantedFruits,
+		DuplicateCount = duplicateCount,
+		ConvertedChestCount = convertedChestCount,
+		ConversionDoubloons = conversionDoubloons,
+		MythicKeyCount = mythicKeyCount,
+	}
+end
+
+local function openChests(player, inventoryName, requestedAmount)
+	local profile, replica = getProfileAndReplica(player)
+	if not profile or not replica then
+		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+
+	local targetInventoryName = tostring(inventoryName or "")
+	if targetInventoryName == "" then
+		return resolveActionResponse(player, false, nil, "invalid_chest_name")
+	end
+
+	local requestedCount = math.clamp(math.floor(tonumber(requestedAmount) or 1), 1, MAX_BATCH_CHEST_OPEN_COUNT)
+	local dataRoot = profile.Data
+	local unopenedChests = dataRoot.UnopenedChests
+	unopenedChests.Order = unopenedChests.Order or {}
+	unopenedChests.ById = unopenedChests.ById or {}
+
+	local chestIds = {}
+	for _, chestId in ipairs(unopenedChests.Order) do
+		local chestData = unopenedChests.ById[tostring(chestId)]
+		if chestData and ChestUtils.GetInventoryName(chestData) == targetInventoryName then
+			chestIds[#chestIds + 1] = tostring(chestId)
+			if #chestIds >= requestedCount then
+				break
+			end
+		end
+	end
+
+	if #chestIds <= 0 then
+		return resolveActionResponse(player, false, nil, "no_chests_available")
+	end
+
+	local changedRoots = { UnopenedChests = true }
+	local aggregateResources = {
+		food = {},
+		materials = {},
+		doubloons = 0,
+	}
+	local batchResults = {}
+	local openedCount = 0
+
+	for _, chestId in ipairs(chestIds) do
+		local chestData = unopenedChests.ById[chestId]
+		if typeof(chestData) == "table" then
+			local normalizedChestData = ChestUtils.BuildChestData(chestData)
+			local resolution = ChestRewardResolver.Resolve({
+				Player = player,
+				DataRoot = dataRoot,
+				ChestData = normalizedChestData,
+				Random = randomObject,
+				AddChestEntry = function(grantedChestData)
+					local grantedChestId = addUnopenedChestToCollection(unopenedChests, grantedChestData)
+					return grantedChestId
+				end,
+			})
+
+			unopenedChests.ById[chestId] = nil
+			openedCount += 1
+			local openResult = resolution.OpenResult or {}
+			batchResults[#batchResults + 1] = openResult
+			mergeChangedRoots(changedRoots, resolution.ChangedRoots)
+			mergeGrantedResources(aggregateResources, openResult.GrantedResources)
+			recordChestRewardQuestSignals(player, normalizedChestData, openResult.GrantedResources or {})
+		end
+	end
+
+	if openedCount <= 0 then
+		return resolveActionResponse(player, false, nil, "no_chests_available")
+	end
+
+	local removedChestIds = {}
+	for _, chestId in ipairs(chestIds) do
+		removedChestIds[tostring(chestId)] = true
+	end
+	for index = #unopenedChests.Order, 1, -1 do
+		if removedChestIds[tostring(unopenedChests.Order[index])] == true then
+			table.remove(unopenedChests.Order, index)
+		end
+	end
+
+	local changedPaths = buildRewardChangedPaths(dataRoot, changedRoots, {
+		UnopenedChests = unopenedChests,
+	})
+	syncPaths(player, replica, changedPaths)
+
+	local response = resolveActionResponse(player, true, string.format("Opened %d chests.", openedCount))
+	response.openResult = buildBatchOpenResult(targetInventoryName, openedCount, aggregateResources, batchResults)
+	return response
+end
+
 local function grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
 	local profile, replica = getProfileAndReplica(player)
 	if not profile or not replica then
@@ -2284,6 +2477,8 @@ local function handleRequest(player, actionName, payload)
 		})
 	elseif actionName == "OpenChest" then
 		return openChest(player, payload and payload.ChestId)
+	elseif actionName == "OpenChests" then
+		return openChests(player, payload and payload.InventoryName, payload and payload.Amount)
 	elseif actionName == "DropCarriedReward" then
 		local dropPosition = getManualDropPosition(player)
 		if typeof(dropPosition) ~= "Vector3" then
@@ -2524,6 +2719,15 @@ function Service.OpenChest(player, chestId)
 	end
 
 	return openChest(player, chestId)
+end
+
+function Service.OpenChests(player, inventoryName, amount)
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return openChests(player, inventoryName, amount)
 end
 
 function Service.GrantSpecificFruitReward(player, fruitIdentifier, sourceOptions)

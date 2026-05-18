@@ -100,6 +100,8 @@ local function buildEntries(now)
 				rarity = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.Rarity) or "Common"),
 				variant = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.Variant) or "Normal"),
 				incomePerSecond = tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.IncomePerSecond)) or 0,
+				slotBonusLabel = tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.SlotBonusLabel) or ""),
+				slotBonusPercent = tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.SlotBonusPercent)) or 0,
 				held = model:GetAttribute(CARRIED_MODEL_ATTRIBUTE) == true,
 				remaining = if expiresAt then math.max(0, expiresAt - now) else nil,
 			}

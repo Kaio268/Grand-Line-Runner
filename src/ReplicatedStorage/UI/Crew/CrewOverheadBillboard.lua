@@ -114,7 +114,8 @@ local function CrewOverheadBillboard(props)
 	local isSpawned = entry.kind == CrewOverhead.Kind.Spawned
 	local remaining = tonumber(entry.remaining)
 	local showTimer = isSpawned and remaining ~= nil and entry.held ~= true
-	local panelHeight = if showTimer then 78 else 58
+	local hasSlotBonus = not isSpawned and tostring(entry.slotBonusLabel or "") ~= "" and (tonumber(entry.slotBonusPercent) or 0) > 0
+	local panelHeight = if showTimer then 78 elseif hasSlotBonus then 82 else 58
 	local hasVariant = variantStyle.variantLabel ~= nil
 	local rarityPillWidth = if showTimer then 74 else 92
 	local variantPillWidth = if hasVariant then 70 else 0
@@ -210,6 +211,29 @@ local function CrewOverheadBillboard(props)
 				TextStrokeTransparency = 0.3,
 				TextXAlignment = Enum.TextXAlignment.Right,
 			}),
+			SlotBonus = if hasSlotBonus
+				then e("Frame", {
+					BackgroundColor3 = blendColor(PANEL_FILL_SOFT, GOLD, 0.22),
+					BackgroundTransparency = 0.02,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(10, 58),
+					Size = UDim2.new(1, -20, 0, 16),
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(1, 0),
+					}),
+					Label = e("TextLabel", {
+						BackgroundTransparency = 1,
+						Font = IndexTheme.Fonts.Label,
+						Size = UDim2.fromScale(1, 1),
+						Text = string.format("%s +%d%%", tostring(entry.slotBonusLabel), math.floor((tonumber(entry.slotBonusPercent) or 0) + 0.5)),
+						TextColor3 = GOLD,
+						TextSize = 11,
+						TextStrokeColor3 = SHADOW,
+						TextStrokeTransparency = 0.4,
+					}),
+				})
+				else nil,
 			Timer = if showTimer
 				then e("Frame", {
 					BackgroundColor3 = Color3.fromRGB(13, 20, 31),

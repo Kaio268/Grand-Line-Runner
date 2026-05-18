@@ -125,7 +125,7 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	layer.AnchorPoint = Vector2.new(0, 1)
 	layer.Position = UDim2.new(0, COUNTERS_LEFT_PADDING, 1, -(COUNTERS_BOTTOM_PADDING + bottomRightInset.Y))
-	layer.Size = UDim2.new(0, COUNTERS_WIDTH, 0, totalHeight)
+	layer.Size = UDim2.fromOffset(COUNTERS_WIDTH, totalHeight)
 	layer.BackgroundTransparency = 1
 	layer.BorderSizePixel = 0
 	layer.ClipsDescendants = false
@@ -133,8 +133,8 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	local moneyAnchor = layer:FindFirstChild("ReactHudMoneyRowAnchor")
 	if moneyAnchor and moneyAnchor:IsA("Frame") then
-		moneyAnchor.Position = UDim2.new(0, HudCounterConfig.getContentLeft(), 0, moneyRowY)
-		moneyAnchor.Size = UDim2.new(0, HudCounterConfig.getContentWidth(), 0, TARGET_ROW_HEIGHT)
+		moneyAnchor.Position = UDim2.fromOffset(HudCounterConfig.getContentLeft(), moneyRowY)
+		moneyAnchor.Size = UDim2.fromOffset(HudCounterConfig.getContentWidth(), TARGET_ROW_HEIGHT)
 		moneyAnchor.ZIndex = DISPLAY_LAYER_ZINDEX + 10
 	end
 
@@ -147,7 +147,7 @@ local function layoutDisplayLayer(layer, rowCount)
 			0,
 			math.max(0, moneyRowY - notificationHeight + 6)
 		)
-		notifications.Size = UDim2.new(0, HudCounterConfig.NotificationWidth, 0, notificationHeight)
+		notifications.Size = UDim2.fromOffset(HudCounterConfig.NotificationWidth, notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
 end
@@ -526,24 +526,56 @@ local relevantNames = {
 	Not = true,
 }
 
-local descendantAddedConnection = playerGui.DescendantAdded:Connect(function(descendant)
-	if relevantNames[descendant.Name] then
+local hudConnections = {}
+
+local function disconnectHudConnections()
+	for _, connection in ipairs(hudConnections) do
+		connection:Disconnect()
+	end
+	table.clear(hudConnections)
+end
+
+local function bindHudConnections()
+	disconnectHudConnections()
+	local hud = playerGui:FindFirstChild("HUD")
+	if not hud then
+		return
+	end
+
+	hudConnections[#hudConnections + 1] = hud.DescendantAdded:Connect(function(descendant)
+		if relevantNames[descendant.Name] then
+			scheduleRender()
+		end
+	end)
+	hudConnections[#hudConnections + 1] = hud.DescendantRemoving:Connect(function(descendant)
+		if relevantNames[descendant.Name] then
+			scheduleRender()
+		end
+	end)
+end
+
+local childAddedConnection = playerGui.ChildAdded:Connect(function(child)
+	if child.Name == "HUD" then
+		bindHudConnections()
 		scheduleRender()
 	end
 end)
 
-local descendantRemovingConnection = playerGui.DescendantRemoving:Connect(function(descendant)
-	if relevantNames[descendant.Name] then
+local childRemovedConnection = playerGui.ChildRemoved:Connect(function(child)
+	if child.Name == "HUD" then
+		disconnectHudConnections()
 		scheduleRender()
 	end
 end)
 
+bindHudConnections()
 render()
 
 script.Destroying:Connect(function()
 	destroyed = true
-	descendantAddedConnection:Disconnect()
-	descendantRemovingConnection:Disconnect()
+	childAddedConnection:Disconnect()
+	childRemovedConnection:Disconnect()
+	disconnectHudConnections()
 	root:unmount()
 end)
 

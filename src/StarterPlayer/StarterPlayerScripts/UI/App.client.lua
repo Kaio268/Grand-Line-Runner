@@ -6,6 +6,7 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
+local MAX_BATCH_CHEST_OPEN_COUNT = 50
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -327,6 +328,7 @@ local uiState = {
 	activeCategory = "Chests",
 	query = "",
 }
+local chestOpenPrompt = nil
 
 local cleanupConnections = {}
 local characterConnections = {}
@@ -2322,6 +2324,9 @@ local function setInventoryOpen(isOpen)
 	end
 
 	uiState.isOpen = isOpen == true
+	if uiState.isOpen ~= true then
+		chestOpenPrompt = nil
+	end
 	render()
 end
 
@@ -2364,6 +2369,7 @@ render = function()
 			totalCount = data.totalCount,
 			query = data.query,
 			shipUpgradeModal = data.shipUpgradeModal,
+			chestOpenPrompt = chestOpenPrompt,
 			toggleLayout = getToggleLayout(),
 			toggleIcon = getLegacyInventoryIcon(),
 			onToggle = function()
@@ -2414,9 +2420,44 @@ render = function()
 					crewQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
 					return
 				end
+				if entry and entry.kind == "Chest" then
+					local availableAmount = math.max(1, tonumber(entry.quantity) or 1)
+					chestOpenPrompt = {
+						name = tostring(entry.name or ""),
+						displayName = string.format("%s Chests", tostring(entry.name or "Treasure")),
+						amount = 1,
+						maxAmount = math.min(MAX_BATCH_CHEST_OPEN_COUNT, availableAmount),
+					}
+					render()
+					return
+				end
 				if entry and entry.kind ~= "Resource" then
 					equipRemote:FireServer(entry.kind, entry.name)
 				end
+			end,
+			onChestOpenAmountChanged = function(nextAmount)
+				if not chestOpenPrompt then
+					return
+				end
+				chestOpenPrompt.amount = math.clamp(
+					math.floor(tonumber(nextAmount) or 1),
+					1,
+					math.max(1, tonumber(chestOpenPrompt.maxAmount) or 1)
+				)
+				render()
+			end,
+			onConfirmChestOpen = function()
+				if not chestOpenPrompt then
+					return
+				end
+				local prompt = chestOpenPrompt
+				chestOpenPrompt = nil
+				render()
+				MetaClient.OpenChests(prompt.name, prompt.amount)
+			end,
+			onDismissChestOpen = function()
+				chestOpenPrompt = nil
+				render()
 			end,
 			onDismissShipUpgradeModal = function()
 				shipUpgradeModal = nil

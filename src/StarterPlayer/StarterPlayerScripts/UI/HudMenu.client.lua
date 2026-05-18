@@ -920,38 +920,68 @@ local function scheduleRender()
 	end)
 end
 
-playerGui.DescendantAdded:Connect(function(descendant)
-	if descendant.Name == "HUD" or descendant.Name == "LButtons" then
-		task.defer(scheduleRender)
+local hudConnections = {}
+
+local function disconnectHudConnections()
+	for _, connection in ipairs(hudConnections) do
+		connection:Disconnect()
+	end
+	table.clear(hudConnections)
+end
+
+local function shouldRefreshForHudDescendant(descendant)
+	if descendant.Name == "LButtons" then
+		return true
+	end
+	for _, definition in ipairs(TILE_DEFS) do
+		if descendant.Name == definition.name then
+			return true
+		end
+	end
+	return false
+end
+
+local function bindHudConnections()
+	disconnectHudConnections()
+	local hud = playerGui:FindFirstChild("HUD")
+	if not hud then
 		return
 	end
 
-	for _, definition in ipairs(TILE_DEFS) do
-		if descendant.Name == definition.name then
+	hudConnections[#hudConnections + 1] = hud.DescendantAdded:Connect(function(descendant)
+		if shouldRefreshForHudDescendant(descendant) then
 			task.defer(scheduleRender)
-			return
 		end
-	end
-end)
+	end)
+	hudConnections[#hudConnections + 1] = hud.DescendantRemoving:Connect(function(descendant)
+		if shouldRefreshForHudDescendant(descendant) then
+			task.defer(scheduleRender)
+		end
+	end)
+end
 
-playerGui.DescendantRemoving:Connect(function(descendant)
-	if descendant.Name == "HUD" or descendant.Name == "LButtons" then
+local childAddedConnection = playerGui.ChildAdded:Connect(function(child)
+	if child.Name == "HUD" then
+		bindHudConnections()
 		task.defer(scheduleRender)
-		return
-	end
-
-	for _, definition in ipairs(TILE_DEFS) do
-		if descendant.Name == definition.name then
-			task.defer(scheduleRender)
-			return
-		end
 	end
 end)
 
+local childRemovedConnection = playerGui.ChildRemoved:Connect(function(child)
+	if child.Name == "HUD" then
+		disconnectHudConnections()
+		task.defer(scheduleRender)
+	end
+end)
+
+bindHudConnections()
 scheduleRender()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	childAddedConnection:Disconnect()
+	childRemovedConnection:Disconnect()
+	disconnectHudConnections()
 	for button in pairs(hoverBindings) do
 		clearHoverBinding(button)
 	end

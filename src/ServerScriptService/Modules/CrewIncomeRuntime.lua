@@ -1555,12 +1555,24 @@ local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, pl
 
 	local displayRarity = stripVariantPrefix(rawRarity, variantKey)
 	local incomePerSecond = getStandIncomePerSecond(player, standModel.Name, canonicalName)
+	local slotState = getStandSlotState(player, standModel.Name)
+	local slotBonusInfo = slotState and slotState.BonusInfo or nil
 
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Placed)
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.DisplayName, displayName)
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Rarity, if displayRarity ~= "" then displayRarity else "Common")
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Variant, variantKey)
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.IncomePerSecond, math.max(0, incomePerSecond))
+	setAttributeIfChanged(
+		placedModel,
+		OVERHEAD_ATTRIBUTES.SlotBonusLabel,
+		if slotBonusInfo then tostring(slotBonusInfo.Label or "Bonus") else nil
+	)
+	setAttributeIfChanged(
+		placedModel,
+		OVERHEAD_ATTRIBUTES.SlotBonusPercent,
+		if slotBonusInfo then math.max(0, slotState.BonusPercent or 0) else nil
+	)
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ExpiresAt, nil)
 	removeLegacyCrewHover(placedModel)
 	CollectionService:AddTag(placedModel, CrewOverhead.Tag)

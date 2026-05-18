@@ -1,6 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local DevilFruits = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -24,6 +23,19 @@ local function appendLine(lines, text)
 	end
 
 	lines[#lines + 1] = text
+end
+
+local function appendRewardRow(rows, name, amount, icon)
+	local normalizedAmount = math.max(0, tonumber(amount) or 0)
+	if tostring(name or "") == "" or normalizedAmount <= 0 then
+		return
+	end
+
+	rows[#rows + 1] = {
+		Name = tostring(name),
+		Amount = normalizedAmount,
+		Icon = if typeof(icon) == "string" then icon else "",
+	}
 end
 
 local function fruitDisplayName(fruitKey)
@@ -81,6 +93,33 @@ local function addGrantedResourceLines(lines, grantedResources)
 	return addedAny
 end
 
+local function addGrantedResourceRows(rows, grantedResources)
+	grantedResources = if typeof(grantedResources) == "table" then grantedResources else {}
+	local foodRewards = if typeof(grantedResources.food) == "table" then grantedResources.food else {}
+	local materialRewards = if typeof(grantedResources.materials) == "table" then grantedResources.materials else {}
+
+	for _, foodKey in ipairs(FOOD_ORDER) do
+		local displayName = tostring(((Economy.Food or {})[foodKey] or {}).DisplayName or foodKey)
+		appendRewardRow(rows, displayName, foodRewards[foodKey])
+	end
+
+	local seenMaterials = {}
+	for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder or {}) do
+		seenMaterials[materialKey] = true
+		local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
+		appendRewardRow(rows, displayName, materialRewards[materialKey])
+	end
+
+	for materialKey, amount in pairs(materialRewards) do
+		if seenMaterials[materialKey] ~= true then
+			local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
+			appendRewardRow(rows, displayName, amount)
+		end
+	end
+
+	appendRewardRow(rows, "Doubloons", grantedResources.doubloons)
+end
+
 local function resolveAccent(openResult)
 	if openResult.GrantedFruitRarity and RARITY_COLORS[openResult.GrantedFruitRarity] then
 		return tostring(openResult.GrantedFruitRarity):upper(), RARITY_COLORS[openResult.GrantedFruitRarity]
@@ -119,8 +158,67 @@ local function buildTitle(openResult)
 	return string.format("Opened %s", openedChestDisplay)
 end
 
+local function buildBatchAcknowledgement(openResult)
+	local openedCount = math.max(1, tonumber(openResult.OpenedCount) or 1)
+	local openedChestDisplay = tostring(((openResult.OpenedChest or {}).displayName) or "Chests")
+	local lines = {}
+	local rewardRows = {}
+	addGrantedResourceLines(lines, openResult.GrantedResources)
+	addGrantedResourceRows(rewardRows, openResult.GrantedResources)
+
+	local fruitCounts = {}
+	for _, fruitEntry in ipairs(openResult.GrantedFruits or {}) do
+		local fruitKey = tostring(fruitEntry.FruitKey or "")
+		if fruitKey ~= "" then
+			local displayName = fruitDisplayName(fruitKey)
+			fruitCounts[displayName] = math.max(0, tonumber(fruitCounts[displayName]) or 0) + 1
+		end
+	end
+	for displayName, amount in pairs(fruitCounts) do
+		appendLine(lines, string.format("+%d %s", amount, displayName))
+		appendRewardRow(rewardRows, displayName, amount)
+	end
+
+	local duplicateCount = math.max(0, tonumber(openResult.DuplicateCount) or 0)
+	if duplicateCount > 0 then
+		appendLine(lines, string.format("%d duplicate%s converted", duplicateCount, duplicateCount == 1 and "" or "s"))
+	end
+
+	local convertedChestCount = math.max(0, tonumber(openResult.ConvertedChestCount) or 0)
+	if convertedChestCount > 0 then
+		appendLine(lines, string.format("+%d converted Devil Fruit Chest%s", convertedChestCount, convertedChestCount == 1 and "" or "s"))
+	end
+
+	local conversionDoubloons = math.max(0, tonumber(openResult.ConversionDoubloons) or 0)
+	if conversionDoubloons > 0 then
+		appendLine(lines, string.format("+%d duplicate-conversion Doubloons", conversionDoubloons))
+	end
+
+	local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
+	if mythicKeyCount > 0 then
+		appendLine(lines, string.format("+%d Mythic Key%s", mythicKeyCount, mythicKeyCount == 1 and "" or "s"))
+	end
+
+	if #lines == 0 then
+		appendLine(lines, "No rewards were granted.")
+	end
+
+	return {
+		Title = string.format("Opened %d %s%s", openedCount, openedChestDisplay, openedCount == 1 and "" or "s"),
+		AccentText = "BATCH OPEN",
+		AccentColor = RARITY_COLORS.Reward,
+		ButtonText = "Close",
+		ButtonColor = RARITY_COLORS.Reward,
+		Lines = lines,
+		RewardRows = rewardRows,
+	}
+end
+
 function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 	openResult = if typeof(openResult) == "table" then openResult else {}
+	if openResult.IsBatch == true then
+		return buildBatchAcknowledgement(openResult)
+	end
 
 	local accentText, accentColor = resolveAccent(openResult)
 	local lines = {}
@@ -203,6 +301,9 @@ end
 
 function ChestOpenResultFormatter.GetCelebrationCount(openResult)
 	openResult = if typeof(openResult) == "table" then openResult else {}
+	if openResult.IsBatch == true then
+		return math.min(36, math.max(0, #(openResult.GrantedFruits or {}) * 6))
+	end
 
 	if openResult.AutoConvertedMythicChest == true then
 		return 36
