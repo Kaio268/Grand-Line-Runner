@@ -2008,7 +2008,7 @@ function Icon.new()
 	-- dropdowns being open (not just this one) but this will work
 	-- fine for almost every use case for now.
 	self.selected:Connect(function()
-		local isDropdown = #self.dropdownIcons > 0
+		local isDropdown = #self.dropdownIcons &gt; 0
 		if isDropdown then
 			if StarterGui:GetCore("ChatActive") and self.alignment ~= "Right" then
 				self.chatWasPreviouslyActive = true
@@ -2749,7 +2749,7 @@ function Icon:convertLabelToNumberSpinner(numberSpinner, callback)
 
 			while totalDigitXSize &lt; NumberSpinnerXSize and self.isDestroyed ~= true do
 				task.wait(0.05)
-				if numOfDigits > minDigits and numOfDigits &lt; maxDigits then
+				if numOfDigits &gt; minDigits and numOfDigits &lt; maxDigits then
 					numberSpinner.TextSize = label.TextSize
 					break
 				else
@@ -2761,9 +2761,9 @@ function Icon:convertLabelToNumberSpinner(numberSpinner, callback)
 			end
 
 			local labelParentContainerXSize = getLabelParentContainerXSize()
-			while totalDigitXSize > labelParentContainerXSize and self.isDestroyed ~= true do
+			while totalDigitXSize &gt; labelParentContainerXSize and self.isDestroyed ~= true do
 				task.wait(0.05)
-				if numOfDigits &lt; maxDigits and numOfDigits > minDigits then
+				if numOfDigits &lt; maxDigits and numOfDigits &gt; minDigits then
 					numberSpinner.TextSize = label.TextSize
 					break
 				else
@@ -3877,7 +3877,7 @@ end</string>
 		
 		-- Listen for changes
 		menuJanitor:add(icon.toggled:Connect(function()
-			if #icon.menuIcons > 0 then
+			if #icon.menuIcons &gt; 0 then
 				icon.updateSize:Fire()
 			end
 		end))
@@ -4431,7 +4431,7 @@ return function(icon, Icon)
 			local widgetWidth = math.clamp(initialWidgetWidth, widgetMinimumWidth, viewportX)
 			local menuIcons = icon.menuIcons
 			local additionalWidth = 0
-			local hasMenu = #menuIcons > 0
+			local hasMenu = #menuIcons &gt; 0
 			local showMenu = hasMenu and icon.isSelected
 			if showMenu then
 				for _, frame in pairs(menu:GetChildren()) do
@@ -4950,7 +4950,7 @@ function Overflow.updateAvailableIcons(alignment)
 			if orderA &lt; orderB then
 				return true
 			end
-			if orderA > orderB then
+			if orderA &gt; orderB then
 				return false
 			end
 			return iconA.widget.AbsolutePosition.X &lt; iconB.widget.AbsolutePosition.X
@@ -5024,7 +5024,7 @@ function Overflow.updateBoundary(alignment)
 	local isLeft = alignment == "Left"
 	local isRight = not isLeft
 	local overflowIcon = overflowIcons[alignment]
-	if not overflowIcon and not isCentral and #ourOrderedIcons > 0 then
+	if not overflowIcon and not isCentral and #ourOrderedIcons &gt; 0 then
 		local order = (isLeft and -9999999) or 9999999
 		overflowIcon = Icon.new()--:setLabel(`{alignment}`)
 		overflowIcon:setImage(6069276526, "Deselected")
@@ -5093,7 +5093,7 @@ function Overflow.updateBoundary(alignment)
 					hasShifted = true
 				end
 			elseif isRight then
-				if centerBoundary > removeBoundary then
+				if centerBoundary &gt; removeBoundary then
 					if not beginCheckingCenterIcons or removeBoundary &lt; 0 then
 						secondaryCheck()
 						return
@@ -5132,7 +5132,7 @@ function Overflow.updateBoundary(alignment)
 			local oppositeXSize = Overflow.getWidth(oppositeOverflowIcon)
 			local oppositeBoundary = (isLeft and oppositeXPos - BOUNDARY_GAP) or oppositeXPos + oppositeXSize + BOUNDARY_GAP
 			local oppositeMenu = oppositeOverflowIcon:getInstance("Menu")
-			local isDominant = menu.AbsoluteCanvasSize.X >= oppositeMenu.AbsoluteCanvasSize.X
+			local isDominant = menu.AbsoluteCanvasSize.X &gt;= oppositeMenu.AbsoluteCanvasSize.X
 			if not usingNearestCenter then
 				local halfwayXPos = holderXPos + holderXSize/2
 				local halfwayBoundary = (isLeft and halfwayXPos - BOUNDARY_GAP/2) or halfwayXPos + BOUNDARY_GAP/2
@@ -5160,7 +5160,7 @@ function Overflow.updateBoundary(alignment)
 		local icon = ourOrderedIcons[i]
 		local widgetX = Overflow.getWidth(icon)
 		local xPos = realXPositions[icon.UID]
-		if (isLeft and xPos + widgetX >= boundary) or (isRight and xPos &lt;= boundary) then
+		if (isLeft and xPos + widgetX &gt;= boundary) or (isRight and xPos &lt;= boundary) then
 			joinOverflow = true
 		end
 	end
@@ -6120,7 +6120,7 @@ function Disconnect:Disconnect()
 end
 
 function Disconnect:__tostring()
-	return "Disconnect&lt;" .. tostring(self.Connected) .. ">"
+	return "Disconnect&lt;" .. tostring(self.Connected) .. "&gt;"
 end
 
 function Janitor.__index:LinkToInstance(Object, AllowMultiple)
@@ -6785,7 +6785,7 @@ function Utility.copyTable(t)
 	return tCopy
 end
 
-local validCharacters = {"a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","1","2","3","4","5","6","7","8","9","0","&lt;",">","?","@","{","}","[","]","!","(",")","=","+","~","#"}
+local validCharacters = {"a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z","1","2","3","4","5","6","7","8","9","0","&lt;","&gt;","?","@","{","}","[","]","!","(",")","=","+","~","#"}
 function Utility.generateUID(length)
 	length = length or 8
 	local UID = ""
@@ -6932,7 +6932,7 @@ function Utility.clipOutside(icon, instance)
 			local nextIconUID = ourUID
 			local shouldClipToParent = instance:GetAttribute("ClipToJoinedParent")
 			if shouldClipToParent then
-				for i = 1, 10 do -- This is safer than while true do and should never be > 4 parents
+				for i = 1, 10 do -- This is safer than while true do and should never be &gt; 4 parents
 					local nextIcon = Icon.getIconByUID(nextIconUID)
 					if not nextIcon then
 						break
@@ -6959,9 +6959,9 @@ function Utility.clipOutside(icon, instance)
 			local parentSize = parentInstance.AbsoluteSize
 			local posHalf = (pos + halfSize)
 			local exceededLeft = posHalf.X &lt; parentPos.X
-			local exceededRight = posHalf.X > (parentPos.X + parentSize.X)
+			local exceededRight = posHalf.X &gt; (parentPos.X + parentSize.X)
 			local exceededTop = posHalf.Y &lt; parentPos.Y
-			local exceededBottom = posHalf.Y > (parentPos.Y + parentSize.Y)
+			local exceededBottom = posHalf.Y &gt; (parentPos.Y + parentSize.Y)
 			local hasExceeded = exceededLeft or exceededRight or exceededTop or exceededBottom
 			if hasExceeded ~= isOutsideParent then
 				isOutsideParent = hasExceeded
@@ -6992,7 +6992,7 @@ function Utility.clipOutside(icon, instance)
 				local inputX = absoluteValue.X.Offset
 				if inputX &lt; SIDE_PADDING then
 					inputX = SIDE_PADDING
-				elseif inputX > limitX then
+				elseif inputX &gt; limitX then
 					inputX = limitX
 				end
 				absoluteValue = UDim2.fromOffset(inputX, absoluteValue.Y.Offset)
@@ -7274,7 +7274,7 @@ end
 
 	for _, d in ipairs(player:GetDescendants()) do
 		if d:IsA("NumberValue") then
- 			if #d.Name > #TIME_SUFFIX and d.Name:sub(-#TIME_SUFFIX) == TIME_SUFFIX then
+ 			if #d.Name &gt; #TIME_SUFFIX and d.Name:sub(-#TIME_SUFFIX) == TIME_SUFFIX then
 				bucket.timeRefs[d.Name] = d
 			end
 		elseif d:IsA("BoolValue") then
@@ -7289,7 +7289,7 @@ local function getTimeValue(player: Player, timeName: string): NumberValue?
 	local bucket = ensureBucket(player.UserId)
  	local ref = bucket.timeRefs[timeName]
 	if not isAlive(ref) then
- 		if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
+ 		if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
 			rescanPlayerTree(player)
 			ref = bucket.timeRefs[timeName]
 		else
@@ -7303,7 +7303,7 @@ local function getBoolValue(player: Player, name: string): BoolValue?
 	local bucket = ensureBucket(player.UserId)
 	local ref = bucket.boolRefs[name]
 	if not isAlive(ref) then
-		if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
+		if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
 			rescanPlayerTree(player)
 			ref = bucket.boolRefs[name]
 		else
@@ -7319,7 +7319,7 @@ function BoostReader:IsActive(boostName: string, player: Player?)
 	if not plr then return false end
 
  	local timeRef = getTimeValue(plr, boostName .. TIME_SUFFIX)
-	if timeRef and timeRef.Value and timeRef.Value > 0 then
+	if timeRef and timeRef.Value and timeRef.Value &gt; 0 then
 		return true
 	end
 
@@ -7328,10 +7328,10 @@ function BoostReader:IsActive(boostName: string, player: Player?)
 		return true
 	end
 
- 	if os.clock() - ensureBucket(plr.UserId).lastScan >= SCAN_COOLDOWN then
+ 	if os.clock() - ensureBucket(plr.UserId).lastScan &gt;= SCAN_COOLDOWN then
 		rescanPlayerTree(plr)
 		timeRef = getTimeValue(plr, boostName .. TIME_SUFFIX)
-		if timeRef and timeRef.Value > 0 then return true end
+		if timeRef and timeRef.Value &gt; 0 then return true end
 		boolRef = getBoolValue(plr, boostName)
 		if boolRef and boolRef.Value == true then return true end
 	end
@@ -7364,13 +7364,13 @@ end
 
  		lp.DescendantAdded:Connect(function()
 			local bucket = ensureBucket(lp.UserId)
-			if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
+			if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
 				rescanPlayerTree(lp)
 			end
 		end)
 		lp.DescendantRemoving:Connect(function()
 			local bucket = ensureBucket(lp.UserId)
-			if os.clock() - bucket.lastScan >= SCAN_COOLDOWN then
+			if os.clock() - bucket.lastScan &gt;= SCAN_COOLDOWN then
 				rescanPlayerTree(lp)
 			end
 		end)
@@ -7587,61 +7587,61 @@ return BiomeAreas
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="94">
+        <Item class="ModuleScript" referent="96">
           <Properties>
             <string name="Name">CometMerchant</string>
             <string name="Source"><![CDATA[local CometMerchant = {
-	
+
 	All_Things = {
 		["Potions.x2MoneyTime"] = {
 			Display_name = "x2 Beli Boost",
-			
+
 			Chance = 40,
-			Amount = math.random(120,300),
-			
-			Stock = math.random(1,3),
-			
+			Amount = math.random(120, 300),
+
+			Stock = math.random(1, 3),
+
 			Price = 125,
-			
-			Icon = "rbxassetid://112694595954613",
-			Desc = "Earn x2 Beli and double your profits for a limited time!"
+
+			Icon = "rbxassetid://123727379614328",
+			Desc = "Earn x2 Beli and double your profits for a limited time!",
 		},
-		
+
 		["Potions.x15WalkSpeedTime"] = {
 			Display_name = "x1.5 Walk Speed Boost",
 
 			Chance = 40,
-			Amount = math.random(120,300),
+			Amount = math.random(120, 300),
 
-			Stock = math.random(1,3),
+			Stock = math.random(1, 3),
 
 			Price = 125,
-			
+
 			Icon = "rbxassetid://96331945137652",
-			Desc = "Get x1.5 WalkSpeed and move faster for a limited time!"
+			Desc = "Get x1.5 WalkSpeed and move faster for a limited time!",
 		},
-		
+
 		["leaderstats.Doubloons"] = {
 			Display_name = "??? Beli",
 
 			Chance = 40,
-			Amount = math.random(100,100000),
+			Amount = math.random(100, 100000),
 
-			Stock = math.random(1,5),
+			Stock = math.random(1, 5),
 
 			Price = 25,
 
 			Icon = "rbxassetid://76300573750363",
-			Desc = "Random amount of Beli, you can get over 100M!"
+			Desc = "Random amount of Beli, you can get over 100M!",
 		},
-		
+
 		["Pot Hotspot"] = {
 			Display_name = "Crew Reward Pending",
 
 			Chance = 0,
 			Amount = math.random(1,1),
 
-			Stock = math.random(1,1),
+			Stock = math.random(1, 1),
 
 			Price = 2500,
 
@@ -7653,38 +7653,54 @@ return BiomeAreas
 			Display_name = "Tide Monk",
 
 			Chance = 20,
-			Amount = math.random(1,1),
+			Amount = math.random(1, 1),
 
-			Stock = math.random(1,1),
+			Stock = math.random(1, 1),
 
 			Price = 750,
 
 			Icon = "rbxassetid://112159737210505",
 			Desc = "Recruit a Mythic crewmate to boost your Beli production."
 		},
-		
+
 		["Rhino Toasterino"] = {
 			Display_name = "Leopard Agent",
 
 			Chance = 50,
-			Amount = math.random(1,1),
+			Amount = math.random(1, 1),
 
-			Stock = math.random(1,3),
+			Stock = math.random(1, 3),
 
 			Price = 50,
 
 			Icon = "rbxassetid://92244593874593",
-			Desc = "Generate insane amounts of Beli and skyrocket your progression!"
+			Desc = "Generate insane amounts of Beli and skyrocket your progression!",
 		},
-	}
+	},
 }
 
 return CometMerchant
-
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="95">
+        <Item class="ModuleScript" referent="97">
+          <Properties>
+            <string name="Name">CrewQuickSlots</string>
+            <string name="Source"><![CDATA[-- Crew-facing alias to the quick-slot product config.
+return require(script.Parent:WaitForChild("BrainrotQuickSlots"))
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="98">
+          <Properties>
+            <string name="Name">CrewSpawnSettings</string>
+            <string name="Source"><![CDATA[-- Crew-named config alias. Spawn tuning remains in BrainrotSpawnSettings until
+-- the model rollout and save-data migration are validated.
+return require(script.Parent:WaitForChild("BrainrotSpawnSettings"))
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="99">
           <Properties>
             <string name="Name">CrewQuickSlots</string>
             <string name="Source"><![CDATA[-- Crew-facing alias to the quick-slot product config.
@@ -9955,60 +9971,55 @@ return HitEffects
 	[10] = {
 		Icon = "rbxassetid://109366282204505",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
-		
-		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .15, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 600, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 300, Icon = "rbxassetid://96331945137652"},
 
+		Rewards = {
+			["Multipliers.MoneyMult"] = { Amount = 0.15, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 600, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 300, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[25] = {
 		Icon = "rbxassetid://78084794507225",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .2, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 1200, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 600, Icon = "rbxassetid://96331945137652"},
-
+			["Multipliers.MoneyMult"] = { Amount = 0.2, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 1200, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 600, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[50] = {
 		Icon = "rbxassetid://138961339593392",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .25, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 1800, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 900, Icon = "rbxassetid://96331945137652"},
-
+			["Multipliers.MoneyMult"] = { Amount = 0.25, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 1800, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 900, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[100] = {
 		Icon = "rbxassetid://89791077688062",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .3, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 2700, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 1500, Icon = "rbxassetid://96331945137652"},
-			
+			["Multipliers.MoneyMult"] = { Amount = 0.3, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 2700, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 1500, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[150] = {
 		Icon = "rbxassetid://97561891716291",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .35, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 3600, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 1800, Icon = "rbxassetid://96331945137652"},
-
+			["Multipliers.MoneyMult"] = { Amount = 0.35, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 3600, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 1800, Icon = "rbxassetid://96331945137652" },
 		},
 	},
 }
@@ -13172,13 +13183,13 @@ MAD STUDIO
 	
 	Functions:
 	
-		RateLimit.New(rate, is_full_wait) --> [RateLimit]
+		RateLimit.New(rate, is_full_wait) --&gt; [RateLimit]
 			rate           [number] -- Events per second allowed; Excessive events are dropped
 			is_full_wait   [bool] -- (Optional) If set to true, allows the next event to happen after the full rate period has passed
 			
 	Methods [RateLimit]:
 	
-		RateLimit:CheckRate(source) --> is_to_be_processed [bool] -- Whether event should be processed
+		RateLimit:CheckRate(source) --&gt; is_to_be_processed [bool] -- Whether event should be processed
 			source   [any]
 			
 		RateLimit:CleanSource(source) -- Forgets about the source - must be called for any object that
@@ -13203,7 +13214,7 @@ local RateLimits = {} -- {rate_limit = true, ...}
 local RateLimit = {}
 RateLimit.__index = RateLimit
 
-function RateLimit.New(rate : number, is_full_wait : boolean?) --> [RateLimit]
+function RateLimit.New(rate : number, is_full_wait : boolean?) --&gt; [RateLimit]
 	if rate &lt;= 0 then
 		error("[RateLimit]: Invalid rate")
 	end
@@ -13220,7 +13231,7 @@ function RateLimit.New(rate : number, is_full_wait : boolean?) --> [RateLimit]
 	return self
 end
 
-function RateLimit:CheckRate(source) : boolean --> is_to_be_processed [bool] -- Whether event should be processed
+function RateLimit:CheckRate(source) : boolean --&gt; is_to_be_processed [bool] -- Whether event should be processed
 	
 	local sources = self.sources
 	local os_clock = os.clock()
@@ -13304,7 +13315,7 @@ MAD STUDIO
 
 	Functions:
 			
-		Remote.New(name [string], is_unreliable [bool]) --> [RemoteEvent]
+		Remote.New(name [string], is_unreliable [bool]) --&gt; [RemoteEvent]
 			-- Calling this with the same name server-side twice will throw an error
 	
 --]]
@@ -13443,7 +13454,7 @@ function Remote.New(name: string, is_unreliable: boolean): RemoteEvent
 			while true do
 				remote = Container:FindFirstChild(name)
 				if remote == nil then
-					if missing_start ~= nil and os.clock() - missing_start > REMOTE_MISSING_TIME then
+					if missing_start ~= nil and os.clock() - missing_start &gt; REMOTE_MISSING_TIME then
 						missing_start = nil
 						warn(`[{script.Name}]: RemoteEvent "{name}" hasn't been defined server-side`)
 					end
@@ -13510,21 +13521,21 @@ MAD STUDIO
 
 	Functions:
 			
-		Signal.New() --> [Signal]
+		Signal.New() --&gt; [Signal]
 		
 	Methods [Signal]:
 	
-		Signal:Connect(listener) --> [Connection] listener(...)
+		Signal:Connect(listener) --&gt; [Connection] listener(...)
 			listener              [function]
 			
-		Signal:GetListenerCount() --> [number]
+		Signal:GetListenerCount() --&gt; [number]
 			
 		Signal:Fire(...)
 		
 		Signal:Wait()
 		
 		Signal:FireUntil(continue_callback, ...)
-			continue_callback   [function] () --> continue [bool] (Stops firing if "true" is not returned)
+			continue_callback   [function] () --&gt; continue [bool] (Stops firing if "true" is not returned)
 		
 	Methods [Connection]:
 	
@@ -13562,14 +13573,14 @@ end
 
 --[[
 export type Connection = {
-	Disconnect: (self: Connection) -> (),
+	Disconnect: (self: Connection) -&gt; (),
 }
 
 export type Signal = {
-	Connect: (self: Signal, listener: (...any) -> ()) -> (Connection),
-	GetListenerCount: (self: Signal) -> (number),
-	Fire: (self: Signal, ...any) -> (),
-	FireUntil: (self: Signal, continue_callback: () -> boolean, ...any) -> (),
+	Connect: (self: Signal, listener: (...any) -&gt; ()) -&gt; (Connection),
+	GetListenerCount: (self: Signal) -&gt; (number),
+	Fire: (self: Signal, ...any) -&gt; (),
+	FireUntil: (self: Signal, continue_callback: () -&gt; boolean, ...any) -&gt; (),
 }
 --]]
 
@@ -13615,7 +13626,7 @@ function Signal.New()
 
 end
 
-function Signal:Connect(listener: (...any) -> ())
+function Signal:Connect(listener: (...any) -&gt; ())
 	
 	if type(listener) ~= "function" then
 		error(`[{script.Name}]: \"listener\" must be a function; Received {typeof(listener)}`)
@@ -13663,7 +13674,7 @@ function Signal:Wait()
 	return coroutine.yield()
 end
 
-function Signal:FireUntil(continue_callback: () -> boolean, ...)
+function Signal:FireUntil(continue_callback: () -&gt; boolean, ...)
 	
 	if type(continue_callback) ~= "function" then
 		error(`[{script.Name}]: \"continue_callback\" must be a function; Received {typeof(continue_callback)}`)
@@ -24976,6 +24987,8 @@ local AIM_HELPER_NAMES = {
 	RunHub = true,
 	DecreaseSpeed = true,
 }
+local hieSoundFolderCache = {}
+local hieSoundTemplateCache = {}
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -28711,14 +28724,29 @@ local function disconnectAll(connections)
 	end
 end
 
-local function createGhostHint(rootPart)
+local function getGhostHintAnchor(rootPart, ghostModel)
+	local head = ghostModel and ghostModel:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		return head, HORO_HINT_HEAD_OFFSET
+	end
+
+	return rootPart, HORO_HINT_ROOT_OFFSET
+end
+
+local function createGhostHint(rootPart, ghostModel)
+	local anchorPart, studsOffset = getGhostHintAnchor(rootPart, ghostModel)
+	if not anchorPart then
+		return nil, nil
+	end
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HoroGhostHint"
-	gui.Size = UDim2.fromOffset(150, 36)
-	gui.StudsOffset = Vector3.new(0, 3.4, 0)
+	gui.Adornee = anchorPart
+	gui.Size = HORO_HINT_SIZE
+	gui.StudsOffset = studsOffset
 	gui.AlwaysOnTop = true
 	gui.MaxDistance = 90
-	gui.Parent = rootPart
+	gui.Parent = anchorPart
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -29085,7 +29113,7 @@ function HoroClient:StartLocalProjection(payload)
 	)
 
 	self:StyleLocalGhost(ghostModel, clampNumber(abilityConfig.GhostLocalTransparency, 0.2, 0, 0.95))
-	state.HintGui, state.HintLabel = createGhostHint(ghostRoot)
+	state.HintGui, state.HintLabel = createGhostHint(ghostRoot, ghostModel)
 
 	if camera then
 		camera.CameraSubject = ghostHumanoid or ghostRoot
@@ -50580,9 +50608,6 @@ function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
 
 			self:_applyFrameStyling(frame)
 			self:SyncOverlayState()
-			if self.scheduleRender then
-				self.scheduleRender()
-			end
 		end)
 	end, self.legacyConnections)
 end
@@ -50848,6 +50873,44 @@ return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):
               <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
+-- Compatibility module. New code should require Modules.Server.Crew.Interaction.
+return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="239">
+            <Properties>
+              <string name="Name">Placement</string>
+              <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Compatibility path. New server code should require Modules.Server.Crew.Placement.
+return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Placement"))
+]]></string>
+            </Properties>
+          </Item>
+          <Item class="ModuleScript" referent="240">
+            <Properties>
+              <string name="Name">Registry</string>
+              <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Legacy module path kept while saved data and callers still use Brainrot keys.
+-- New runtime model/config resolution should flow through CrewRegistry.
+return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewRegistry"))
+]]></string>
+            </Properties>
+          </Item>
+        </Item>
+        <Item class="Folder" referent="241">
+          <Properties>
+            <string name="Name">Crew</string>
+          </Properties>
+          <Item class="ModuleScript" referent="242">
+            <Properties>
+              <string name="Name">Interaction</string>
+              <string name="Source"><![CDATA[local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Crew interaction owns the old pickup/carry/drop/extract behavior. Several
+-- attributes and Studio folder names remain Brainrot-named for compatibility.
 local Interaction = {}
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
@@ -52752,20 +52815,20 @@ return MoneyLib
 		RewName = "+ 1000 Beli",
 		Icon = "rbxassetid://76300573750363",
 
-		Time               = 60,
+		Time = 60,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			Doubloons = { Chance = 100, Amount = 1000 },
 		},
 	},
 
 	[2] = {
 		RewName = "5 Min x2 Beli",
-		Icon = "rbxassetid://112694595954613",
+		Icon = "rbxassetid://123727379614328",
 
-		Time               = 120,
+		Time = 120,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			x2MoneyTime = { Chance = 100, Amount = 300 },
 		},
 	},
@@ -52776,9 +52839,9 @@ return MoneyLib
 		RewName = "+ 10000 Beli",
 		Icon = "rbxassetid://76300573750363",
 
-		Time               = 900,
+		Time = 900,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			Doubloons = { Chance = 100, Amount = 10000 },
 		},
 	},
@@ -52787,18 +52850,18 @@ return MoneyLib
 		RewName = "10 Min x1.5 Walkspeed",
 		Icon = "rbxassetid://96331945137652",
 
-		Time               = 1800,
+		Time = 1800,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			x15WalkSpeedTime = { Chance = 100, Amount = 600 },
 		},
 	},
-	
+
 	[6] = {
 		RewName = "Random Rare Crewmate",
 		Icon = "rbxassetid://108324428541699",
 
-		Time               = 2100,
+		Time = 2100,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards            = {
 			["Random Rare Crewmate"] = {
@@ -52810,12 +52873,12 @@ return MoneyLib
 			},
 		},
 	},
-	
+
 	[7] = {
 		RewName = "Ember Fist",
 		Icon = "rbxassetid://84916034746691",
 
-		Time               = 2400,
+		Time = 2400,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards            = {
 			["Ember Fist"] = {
@@ -52826,22 +52889,20 @@ return MoneyLib
 			},
 		},
 	},
-	
+
 	[8] = {
 		RewName = "+ 100000 Beli",
 		Icon = "rbxassetid://76300573750363",
 
-		Time               = 3600,
+		Time = 3600,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			Doubloons = { Chance = 100, Amount = 100000 },
 		},
 	},
-	
 }
 
 return Rewards
-
 ]]></string>
           </Properties>
         </Item>
@@ -55413,61 +55474,66 @@ return {
             <Properties>
               <string name="Name">CometMerchant</string>
               <string name="Source"><![CDATA[do
-	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CometMerchant"))
+	return require(
+		game:GetService("ReplicatedStorage")
+			:WaitForChild("Modules")
+			:WaitForChild("Configs")
+			:WaitForChild("CometMerchant")
+	)
 end
 
 local CometMerchant = {
-	
+
 	All_Things = {
 		["Potions.x2MoneyTime"] = {
 			Display_name = "x2 Beli Boost",
-			
+
 			Chance = 40,
-			Amount = math.random(120,300),
-			
-			Stock = math.random(1,3),
-			
+			Amount = math.random(120, 300),
+
+			Stock = math.random(1, 3),
+
 			Price = 125,
-			
-			Icon = "rbxassetid://112694595954613",
-			Desc = "Earn x2 Beli and double your profits for a limited time!"
+
+			Icon = "rbxassetid://123727379614328",
+			Desc = "Earn x2 Beli and double your profits for a limited time!",
 		},
-		
+
 		["Potions.x15WalkSpeedTime"] = {
 			Display_name = "x1.5 Walk Speed Boost",
 
 			Chance = 40,
-			Amount = math.random(120,300),
+			Amount = math.random(120, 300),
 
-			Stock = math.random(1,3),
+			Stock = math.random(1, 3),
 
 			Price = 125,
-			
+
 			Icon = "rbxassetid://96331945137652",
-			Desc = "Get x1.5 WalkSpeed and move faster for a limited time!"
+			Desc = "Get x1.5 WalkSpeed and move faster for a limited time!",
 		},
-		
+
 		["leaderstats.Doubloons"] = {
 			Display_name = "??? Beli",
 
 			Chance = 40,
-			Amount = math.random(100,100000),
+			Amount = math.random(100, 100000),
 
-			Stock = math.random(1,5),
+			Stock = math.random(1, 5),
 
 			Price = 25,
 
 			Icon = "rbxassetid://76300573750363",
-			Desc = "Random amount of Beli, you can get over 100M!"
+			Desc = "Random amount of Beli, you can get over 100M!",
 		},
-		
+
 		["Pot Hotspot"] = {
 			Display_name = "Crew Reward Pending",
 
 			Chance = 0,
 			Amount = math.random(1,1),
 
-			Stock = math.random(1,1),
+			Stock = math.random(1, 1),
 
 			Price = 2500,
 
@@ -55479,34 +55545,33 @@ local CometMerchant = {
 			Display_name = "Tide Monk",
 
 			Chance = 20,
-			Amount = math.random(1,1),
+			Amount = math.random(1, 1),
 
-			Stock = math.random(1,1),
+			Stock = math.random(1, 1),
 
 			Price = 750,
 
 			Icon = "rbxassetid://112159737210505",
 			Desc = "Recruit a Mythic crewmate to boost your Beli production."
 		},
-		
+
 		["Rhino Toasterino"] = {
 			Display_name = "Leopard Agent",
 
 			Chance = 50,
-			Amount = math.random(1,1),
+			Amount = math.random(1, 1),
 
-			Stock = math.random(1,3),
+			Stock = math.random(1, 3),
 
 			Price = 50,
 
 			Icon = "rbxassetid://92244593874593",
-			Desc = "Generate insane amounts of Beli and skyrocket your progression!"
+			Desc = "Generate insane amounts of Beli and skyrocket your progression!",
 		},
-	}
+	},
 }
 
 return CometMerchant
-
 ]]></string>
             </Properties>
           </Item>
@@ -55688,73 +55753,69 @@ return Gears
             <Properties>
               <string name="Name">Index</string>
               <string name="Source"><![CDATA[do
-	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Index"))
+	return require(
+		game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Index")
+	)
 end
 
 local Index = {
 	[10] = {
 		Icon = "rbxassetid://109366282204505",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
-		
-		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .15, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 600, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 300, Icon = "rbxassetid://96331945137652"},
 
+		Rewards = {
+			["Multipliers.MoneyMult"] = { Amount = 0.15, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 600, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 300, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[25] = {
 		Icon = "rbxassetid://78084794507225",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .2, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 1200, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 600, Icon = "rbxassetid://96331945137652"},
-
+			["Multipliers.MoneyMult"] = { Amount = 0.2, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 1200, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 600, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[50] = {
 		Icon = "rbxassetid://138961339593392",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .25, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 1800, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 900, Icon = "rbxassetid://96331945137652"},
-
+			["Multipliers.MoneyMult"] = { Amount = 0.25, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 1800, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 900, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[100] = {
 		Icon = "rbxassetid://89791077688062",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .3, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 2700, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 1500, Icon = "rbxassetid://96331945137652"},
-			
+			["Multipliers.MoneyMult"] = { Amount = 0.3, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 2700, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 1500, Icon = "rbxassetid://96331945137652" },
 		},
 	},
-	
+
 	[150] = {
 		Icon = "rbxassetid://97561891716291",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
-			["Multipliers.MoneyMult"] = {Amount = .35, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 3600, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 1800, Icon = "rbxassetid://96331945137652"},
-
+			["Multipliers.MoneyMult"] = { Amount = 0.35, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 3600, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 1800, Icon = "rbxassetid://96331945137652" },
 		},
 	},
 }
 
 return Index
-
 ]]></string>
             </Properties>
           </Item>
@@ -55838,96 +55899,97 @@ end
             <Properties>
               <string name="Name">Rebirths</string>
               <string name="Source"><![CDATA[do
-	return require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
+	return require(
+		game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths")
+	)
 end
 
 local Rebirths = {
 	[1] = {
 		Price = 1000,
 		SpeedNeeded = 15,
-		
+
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =1.5, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 150, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 150, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 1.5, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 150, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 150, Icon = "rbxassetid://96331945137652" },
+		},
 	},
-	
+
 	[2] = {
 		Price = 25000,
 		SpeedNeeded = 30,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =2, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 300, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 300, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 2, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 300, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 300, Icon = "rbxassetid://96331945137652" },
+		},
 	},
-	
+
 	[3] = {
 		Price = 300000,
 		SpeedNeeded = 45,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =2.5, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 450, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 450, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 2.5, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 450, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 450, Icon = "rbxassetid://96331945137652" },
+		},
 	},
 	[4] = {
 		Price = 2500000,
 		SpeedNeeded = 60,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =3, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 600, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 600, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 3, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 600, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 600, Icon = "rbxassetid://96331945137652" },
+		},
 	},
 	[5] = {
 		Price = 50000000,
 		SpeedNeeded = 75,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =3.5, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 750, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 750, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 3.5, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 750, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 750, Icon = "rbxassetid://96331945137652" },
+		},
 	},
 	[6] = {
 		Price = 250000000,
 		SpeedNeeded = 90,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =4, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 900, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 900, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 4, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 900, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 900, Icon = "rbxassetid://96331945137652" },
+		},
 	},
 	[7] = {
 		Price = 2500000000,
 		SpeedNeeded = 105,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =4.5, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 1200, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 1200, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 4.5, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 1200, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 1200, Icon = "rbxassetid://96331945137652" },
+		},
 	},
 	[8] = {
 		Price = 10000000000,
 		SpeedNeeded = 120,
 
 		Getting = {
-			["Multipliers.MoneyMult"] = {Amount =5, Icon = "rbxassetid://99305009492305"},
-			["Potions.x2MoneyTime"] = {Amount = 1500, Icon = "rbxassetid://112694595954613"},
-			["Potions.x15WalkSpeedTime"] = {Amount = 1500, Icon = "rbxassetid://96331945137652"},
-		}
+			["Multipliers.MoneyMult"] = { Amount = 5, Icon = "rbxassetid://99305009492305" },
+			["Potions.x2MoneyTime"] = { Amount = 1500, Icon = "rbxassetid://123727379614328" },
+			["Potions.x15WalkSpeedTime"] = { Amount = 1500, Icon = "rbxassetid://96331945137652" },
+		},
 	},
 }
 
 return Rebirths
-
 ]]></string>
             </Properties>
           </Item>
@@ -59968,7 +60030,7 @@ local e = React.createElement
 local BOOST_METADATA = {
 	x2MoneyTime = {
 		label = "x2 Beli",
-		icon = "rbxassetid://112694595954613",
+		icon = "rbxassetid://123727379614328",
 		accent = Color3.fromRGB(111, 230, 124),
 		order = 1,
 	},
@@ -60224,7 +60286,6 @@ local function HudBoostTimer(props)
 end
 
 return HudBoostTimer
-
 ]]></string>
           </Properties>
         </Item>
@@ -61728,6 +61789,8 @@ local function categoryButton(props)
 			Text = tostring(category.iconText or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or (category.fillColor or Theme.Palette.Text),
 			TextSize = 24,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = active and 0.46 or 0.68,
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -61737,6 +61800,8 @@ local function categoryButton(props)
 			Text = tostring(category.label or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or textColor,
 			TextSize = 10,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = active and 0.5 or 0.72,
 			TextWrapped = true,
 		}),
 		Indicator = active and e("Frame", {
@@ -61848,6 +61913,8 @@ local function categoryTab(props)
 			Text = tostring(category.label or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or Theme.Palette.MutedSoft,
 			TextSize = 10,
+			TextStrokeColor3 = active and Theme.Palette.GoldShadow or Theme.Palette.Gold,
+			TextStrokeTransparency = active and 0.48 or 0.7,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
 		Count = e("TextLabel", {
@@ -62212,7 +62279,7 @@ local function baseCard(props)
 	return e("Frame", {
 		Active = true,
 		BackgroundColor3 = Theme.Palette.CardShell,
-		BackgroundTransparency = 0.18,
+		BackgroundTransparency = props.backgroundTransparency or DEFAULT_CARD_BACKGROUND_TRANSPARENCY,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
@@ -62294,6 +62361,21 @@ local function createDiscoveredPreview(unit, renderPreview)
 	end
 
 	if unit.image and unit.image ~= "" then
+		if isFruit then
+			return {
+				Character = e("ImageLabel", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					Image = unit.image,
+					ImageColor3 = Theme.Palette.Text,
+					Position = UDim2.fromScale(0.5, 0.54),
+					ScaleType = Enum.ScaleType.Fit,
+					Size = UDim2.fromScale(0.8, 0.8),
+					ZIndex = 3,
+				}),
+			}
+		end
+
 		return {
 			Character = e("ImageLabel", {
 				AnchorPoint = PREVIEW_ANCHOR,
@@ -62328,6 +62410,11 @@ local function IndexCard(props)
 	local unit = props.unit or {}
 	local rarity = Theme.getRarityStyle(unit.rarity)
 	local hovered, setHovered = React.useState(false)
+	local isFruit = unit.itemKind == "DevilFruit"
+	local cardBackgroundTransparency = isFruit and FRUIT_CARD_BACKGROUND_TRANSPARENCY
+		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
+	local backdropBackgroundTransparency = isFruit and FRUIT_BACKDROP_BACKGROUND_TRANSPARENCY
+		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
 
 	if not unit.discovered then
 		local lockedChildren = createLockedPreview()
@@ -62348,6 +62435,7 @@ local function IndexCard(props)
 		})
 
 		return baseCard({
+			backgroundTransparency = cardBackgroundTransparency,
 			layoutOrder = props.layoutOrder,
 			onMouseEnter = function()
 				setHovered(true)
@@ -62375,7 +62463,7 @@ local function IndexCard(props)
 				}),
 				ImageArea = e("Frame", {
 					BackgroundColor3 = Theme.Palette.CardBackdrop,
-					BackgroundTransparency = 0.18,
+					BackgroundTransparency = backdropBackgroundTransparency,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(4, 4),
 					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
@@ -62405,7 +62493,7 @@ local function IndexCard(props)
 		}),
 		ImageArea = e("Frame", {
 			BackgroundColor3 = cardAppearance.backdropFill,
-			BackgroundTransparency = 0.18,
+			BackgroundTransparency = backdropBackgroundTransparency,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(4, 4),
 			Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
@@ -62422,6 +62510,7 @@ local function IndexCard(props)
 	end
 
 	return baseCard({
+		backgroundTransparency = cardBackgroundTransparency,
 		layoutOrder = props.layoutOrder,
 		onMouseEnter = function()
 			setHovered(true)
@@ -62793,15 +62882,22 @@ local function getBoundingInfo(previewModel)
 	return CFrame.new(), Vector3.new(1, 1, 1)
 end
 
-local function applyTint(previewModel, tintColor, tintTransparency)
+local function applyTint(previewModel, tintColor, tintTransparency, tintMaterial)
 	for _, descendant in ipairs(previewModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.Color = tintColor
-			descendant.Material = Enum.Material.SmoothPlastic
+			descendant.Material = tintMaterial or Enum.Material.SmoothPlastic
 			descendant.Transparency = tintTransparency or 0
 			descendant.Reflectance = 0
+			if descendant:IsA("MeshPart") then
+				descendant.TextureID = ""
+			end
+		elseif descendant:IsA("SpecialMesh") then
+			descendant.TextureId = ""
 		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
 			descendant.Transparency = 1
+		elseif descendant:IsA("SurfaceAppearance") then
+			descendant:Destroy()
 		elseif descendant:IsA("ParticleEmitter")
 			or descendant:IsA("Trail")
 			or descendant:IsA("Beam")
@@ -62841,7 +62937,7 @@ local function PreviewViewport(props)
 		end
 
 		if props.tintColor then
-			applyTint(previewModel, props.tintColor, props.tintTransparency)
+			applyTint(previewModel, props.tintColor, props.tintTransparency, props.tintMaterial)
 		end
 
 		local worldModel = Instance.new("WorldModel")
@@ -62867,7 +62963,7 @@ local function PreviewViewport(props)
 				clearChildren(viewport)
 			end
 		end
-	end, { props.previewKind, props.previewName, props.tintColor, props.tintTransparency, props.fieldOfView })
+	end, { props.previewKind, props.previewName, props.tintColor, props.tintTransparency, props.tintMaterial, props.fieldOfView })
 
 	return e("ViewportFrame", {
 		ref = viewportRef,
@@ -62876,14 +62972,15 @@ local function PreviewViewport(props)
 		BorderSizePixel = 0,
 		Position = props.position,
 		Size = props.size or UDim2.fromScale(1, 1),
-		Ambient = Color3.fromRGB(206, 196, 186),
-		LightColor = Color3.fromRGB(255, 252, 246),
-		LightDirection = Vector3.new(-1, -1, -1),
+		Ambient = props.ambient or Color3.fromRGB(206, 196, 186),
+		LightColor = props.lightColor or Color3.fromRGB(255, 252, 246),
+		LightDirection = props.lightDirection or Vector3.new(-1, -1, -1),
 		ZIndex = props.zIndex,
 	})
 end
 
 return PreviewViewport
+
 ]]></string>
             </Properties>
           </Item>
@@ -64025,8 +64122,8 @@ local function tabButton(props)
 			Text = tostring(tab.label or ""),
 			TextColor3 = textColor,
 			TextSize = 12,
-			TextStrokeColor3 = Theme.Palette.Shadow,
-			TextStrokeTransparency = 0.55,
+			TextStrokeColor3 = active and Theme.Palette.GoldShadow or Theme.Palette.Gold,
+			TextStrokeTransparency = active and 0.38 or 0.58,
 			ZIndex = 9,
 		}),
 		Count = countText and e("Frame", {
@@ -64098,8 +64195,8 @@ local function header(props)
 			Text = "INDEX",
 			TextColor3 = SHELL.TextMain,
 			TextSize = 28,
-			TextStrokeColor3 = SHELL.GoldShadow,
-			TextStrokeTransparency = 0.45,
+			TextStrokeColor3 = SHELL.GoldHighlight,
+			TextStrokeTransparency = 0.36,
 			ZIndex = 8,
 		}),
 		Collected = e("TextLabel", {
@@ -64207,8 +64304,8 @@ local function progressStrip(props)
 			Text = string.format("Collected : %d/%d", collected, total),
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 14,
-			TextStrokeColor3 = Theme.Palette.Shadow,
-			TextStrokeTransparency = 0.5,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = 0.54,
 			ZIndex = 5,
 		}),
 		Track = e("Frame", {
@@ -64871,6 +64968,8 @@ local function tabButton(props)
 				Text = tostring(category.label or category.id or ""),
 				TextColor3 = textColor,
 				TextSize = 14,
+				TextStrokeColor3 = SHELL.GoldShadow,
+				TextStrokeTransparency = active and 0.42 or 0.62,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}),
 		}),
@@ -65171,8 +65270,8 @@ local function QuestScreen(props)
 				TextColor3 = SHELL.TextMain,
 				TextScaled = true,
 				TextSize = 30,
-				TextStrokeColor3 = SHELL.GoldShadow,
-				TextStrokeTransparency = 0.45,
+				TextStrokeColor3 = SHELL.GoldHighlight,
+				TextStrokeTransparency = 0.36,
 				ZIndex = 4,
 			}),
 			Close = e("TextButton", {
@@ -65245,6 +65344,8 @@ local function QuestScreen(props)
 					Text = activeCategory and tostring(activeCategory.label) or "Quests",
 					TextColor3 = Theme.Palette.Text,
 					TextSize = 18,
+					TextStrokeColor3 = SHELL.GoldShadow,
+					TextStrokeTransparency = 0.58,
 					TextXAlignment = Enum.TextXAlignment.Left,
 				}),
 				Copy = e("TextLabel", {
@@ -65883,8 +65984,8 @@ local function SettingsScreen(props)
 				TextColor3 = THEME.TextMain,
 				TextSize = 30,
 				TextScaled = true,
-				TextStrokeColor3 = THEME.GoldShadow,
-				TextStrokeTransparency = 0.45,
+				TextStrokeColor3 = THEME.GoldHighlight,
+				TextStrokeTransparency = 0.36,
 				ZIndex = 4,
 			}),
 			Close = e("TextButton", {
@@ -66376,7 +66477,7 @@ local items = {
 	}),
 }
 
-Catalog.title = "Grand Line Rush Store"
+Catalog.title = "Grand Tide Rush Store"
 Catalog.subtitle = "Stock your captain with premium bundles, boosts, and voyage perks before the next run."
 Catalog.heroEyebrow = "Grand Market"
 Catalog.heroHeadline = "Stock up before you sail back into the Grand Line."
@@ -67280,8 +67381,8 @@ local function RedeemCodesPanel(props)
 			Text = props.title or "Redeem Codes",
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 30,
-			TextStrokeTransparency = 0.68,
-			TextStrokeColor3 = Theme.Palette.Shadow,
+			TextStrokeTransparency = 0.54,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		}),
@@ -67524,8 +67625,8 @@ local function SectionBlock(props)
 				Text = section.title,
 				TextColor3 = Theme.Palette.Text,
 				TextSize = 34,
-				TextStrokeTransparency = 0.68,
-				TextStrokeColor3 = Theme.Palette.Shadow,
+				TextStrokeTransparency = 0.54,
+				TextStrokeColor3 = Theme.Palette.GoldShadow,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}),
 			DividerLeft = e("Frame", {
@@ -67644,6 +67745,8 @@ local function navButton(props)
 			Text = section.title,
 			TextColor3 = textColor,
 			TextSize = 12,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = isActive and 0.42 or 0.62,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
 		}),
@@ -68068,7 +68171,8 @@ local function sectionBanner(props)
 			Text = props.title,
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 30,
-			TextStrokeTransparency = 1,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = 0.58,
 			TextXAlignment = Enum.TextXAlignment.Center,
 		}),
 	})
@@ -68350,10 +68454,11 @@ local function ShopShell(props)
 					Font = Theme.Fonts.Display,
 					Position = UDim2.new(0.5, -28, 0.5, 0),
 					Size = UDim2.new(1, -148, 0, 72),
-					Text = props.catalog.title or "Grand Line Rush Store",
+					Text = props.catalog.title or "Grand Tide Rush Store",
 					TextColor3 = Theme.Palette.GoldSoft,
 					TextSize = titleTextSize,
-					TextStrokeTransparency = 1,
+					TextStrokeColor3 = Theme.Palette.GoldShadow,
+					TextStrokeTransparency = 0.44,
 					TextWrapped = true,
 					TextYAlignment = Enum.TextYAlignment.Center,
 					TextXAlignment = Enum.TextXAlignment.Center,
@@ -68501,7 +68606,7 @@ Theme.Assets = {
 	ShopBackground = "rbxassetid://105877304453866",
 	BeliIcon = "rbxassetid://76300573750363",
 	SpeedBoostIcon = "rbxassetid://96331945137652",
-	BeliBoostIcon = "rbxassetid://112694595954613",
+	BeliBoostIcon = "rbxassetid://123727379614328",
 	LuckBoostIcon = "rbxassetid://99305009492305",
 	StoreIcon = "rbxassetid://87636652264235",
 	IndexIcon = "rbxassetid://77322372470208",
@@ -123990,6 +124095,17 @@ function ProfileMigrations.Apply(data)
 	crewMemberQuickSlots.UnlockedSlots = canonicalUnlockedSlots
 	crewMemberQuickSlots.MaxSlots = CrewQuickSlotConfig.MaxSlots
 
+	local legacyBrainrotQuickSlots = data.BrainrotQuickSlots
+	local legacyUnlockedSlots = if typeof(legacyBrainrotQuickSlots) == "table"
+		then CrewQuickSlotConfig.ClampUnlockedSlots(legacyBrainrotQuickSlots.UnlockedSlots)
+		else CrewQuickSlotConfig.DefaultUnlockedSlots
+	local crewMemberQuickSlots = ensureTable(data, "CrewMemberQuickSlots")
+	local canonicalUnlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(crewMemberQuickSlots.UnlockedSlots)
+	local retainedUnlockedSlots = math.max(canonicalUnlockedSlots, legacyUnlockedSlots)
+	crewMemberQuickSlots.SchemaVersion = 1
+	crewMemberQuickSlots.UnlockedSlots = retainedUnlockedSlots
+	crewMemberQuickSlots.MaxSlots = CrewQuickSlotConfig.MaxSlots
+
 	local unopenedChests = ensureTable(data, "UnopenedChests")
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))
 	unopenedChests.ById = ensureTable(unopenedChests, "ById")
@@ -124173,6 +124289,10 @@ local ProfileTemplate = {
 		MaxSlots = CrewQuickSlotConfig.MaxSlots,
 	},
 	CrewMemberIncome = {},
+	CrewQuickSlotProductAuthorityAudit = {},
+
+	-- Retired quick-slot mirror kept only for migration/repair tooling.
+	BrainrotQuickSlots = CrewQuickSlotConfig.GetDefaults(),
 	CrewQuickSlotProductAuthorityAudit = {},
 
 	Ship = {
@@ -172012,6 +172132,8 @@ function IndexCollectionService.CountDiscoveredCrewMembers(player)
 	return count
 end
 
+IndexCollectionService.CountDiscoveredCrewMembers = IndexCollectionService.CountDiscoveredBrainrots
+
 return IndexCollectionService
 ]]></string>
         </Properties>
@@ -197540,6 +197662,11 @@ local function hookSharedHazardKillOnTouch(hazard)
 	if not hookHitboxParts() then
 		hookKillOnTouch(hazard)
 	end
+end
+
+local function attachSharedHazard(hazard)
+	hookSharedHazardKillOnTouch(hazard)
+	createSharedHazardVisualSmoother(hazard)
 end
 
 local function attachSharedHazard(hazard)

@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local ShopFolder = UiFolder:WaitForChild("Shop")
 local ShopShell = require(ShopFolder:WaitForChild("ShopShell"))
@@ -32,16 +33,41 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	frameName = "Store",
 	hostName = "ReactStoreHost",
 	backdropName = "ReactStoreBackdrop",
+	backdropActive = false,
 	modalStateKey = "ShopModal",
 	minSize = Vector2.new(980, 680),
 	maxSize = Vector2.new(1340, 860),
 	createFrameIfMissing = true,
+	standalone = true,
 })
 
 local purchaseAdapter = PurchaseAdapter.new(player)
 local cleanupConnections = {}
-
 local scheduleRender
+
+local unregisterModal = ReactModalRegistry.Register("Store", {
+	toggle = function()
+		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
+})
+
 local LEGACY_CREW_TERM = "Brain" .. "rots"
 local LEGACY_STORE_COPY_REPLACEMENTS = {
 	["Earn x2 Money and make 2x more from " .. LEGACY_CREW_TERM] = "Earn x2 Money and make 2x more from Crewmates",
@@ -117,7 +143,7 @@ local function ensureStoreFrameLayout()
 
 	storeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	storeFrame.Position = UDim2.fromScale(0.5, 0.5)
-	storeFrame.Size = UDim2.new(0.9, 0, 0.84, 0)
+	storeFrame.Size = UDim2.fromScale(0.9, 0.84)
 	storeFrame.ClipsDescendants = true
 	storeFrame.Active = true
 	storeFrame.ZIndex = 120
@@ -298,6 +324,7 @@ render()
 script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll()
+	unregisterModal()
 	purchaseAdapter:destroy()
 	modalAdapter:Destroy()
 	root:unmount()

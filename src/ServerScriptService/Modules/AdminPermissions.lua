@@ -12,6 +12,7 @@ local SuperAdmins = {
 	[5448954557] = true, -- YonkoKaio
 	[4843576528] = true, -- ChefChris
 	[3412846835] = true,
+	[4844244696] = true,
 }
 
 local configuredAdmins = {}

@@ -1,0 +1,272 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local ChestRewards = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
+local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
+
+local ChestDropRates = {}
+
+local FOOD_DISPLAY_NAMES = {}
+for foodKey, config in pairs(Economy.Food or {}) do
+	FOOD_DISPLAY_NAMES[foodKey] = tostring(config.DisplayName or foodKey)
+end
+
+local MATERIAL_DISPLAY_NAMES = {
+	Timber = "Timber",
+	Iron = "Iron",
+	AncientTimber = "Ancient Timber",
+	CommonShipMaterial = "Timber",
+	RareShipMaterial = "Iron",
+}
+
+local function normalizeChance(rawChance)
+	local chance = tonumber(rawChance) or 0
+	if chance > 1 then
+		chance /= 100
+	end
+
+	return math.clamp(chance, 0, 1)
+end
+
+local function getRangeText(amountSpec)
+	if typeof(amountSpec) == "number" then
+		return tostring(math.max(0, math.floor(amountSpec + 0.5)))
+	end
+	if typeof(amountSpec) ~= "table" then
+		return nil
+	end
+
+	if amountSpec.Amount ~= nil then
+		return getRangeText(amountSpec.Amount)
+	end
+	if amountSpec.Value ~= nil then
+		return getRangeText(amountSpec.Value)
+	end
+
+	local minAmount = tonumber(amountSpec.Min or amountSpec.min)
+	local maxAmount = tonumber(amountSpec.Max or amountSpec.max)
+	if minAmount == nil and maxAmount == nil then
+		return nil
+	end
+
+	minAmount = math.max(0, math.floor((minAmount or maxAmount or 0) + 0.5))
+	maxAmount = math.max(0, math.floor((maxAmount or minAmount) + 0.5))
+	if maxAmount < minAmount then
+		minAmount, maxAmount = maxAmount, minAmount
+	end
+	if minAmount == maxAmount then
+		return tostring(minAmount)
+	end
+
+	return string.format("%d-%d", minAmount, maxAmount)
+end
+
+local function appendBundleRows(rows, rewardBundle, chance, sourceLabel)
+	for foodKey, amountSpec in pairs((rewardBundle and rewardBundle.Food) or {}) do
+		rows[#rows + 1] = {
+			name = FOOD_DISPLAY_NAMES[foodKey] or tostring(foodKey),
+			amountText = getRangeText(amountSpec),
+			chance = chance,
+			sourceLabel = sourceLabel,
+		}
+	end
+	for materialKey, amountSpec in pairs((rewardBundle and rewardBundle.Materials) or {}) do
+		rows[#rows + 1] = {
+			name = MATERIAL_DISPLAY_NAMES[materialKey] or tostring(materialKey),
+			amountText = getRangeText(amountSpec),
+			chance = chance,
+			sourceLabel = sourceLabel,
+		}
+	end
+	if rewardBundle and rewardBundle.Doubloons ~= nil then
+		rows[#rows + 1] = {
+			name = "Beli",
+			amountText = getRangeText(rewardBundle.Doubloons),
+			chance = chance,
+			sourceLabel = sourceLabel,
+		}
+	end
+end
+
+local function sortByName(rows)
+	table.sort(rows, function(a, b)
+		return tostring(a.name) < tostring(b.name)
+	end)
+end
+
+local function getFruitPools()
+	local pools = {}
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		pools[rarityName] = {}
+	end
+
+	for _, fruit in ipairs(DevilFruits.GetAllFruits()) do
+		local rarityName = tostring(fruit.Rarity or "Common")
+		if pools[rarityName] then
+			pools[rarityName][#pools[rarityName] + 1] = fruit
+		end
+	end
+
+	return pools
+end
+
+local function buildGuaranteedRewardsSection(chestData)
+	if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
+		and ChestRewards.DevilFruitChestGrantsBaseRewards ~= true
+	then
+		return nil
+	end
+
+	local tierConfig = (Economy.Chests.Tiers or {})[chestData.Tier]
+	local rewards = tierConfig and tierConfig.Rewards
+	if typeof(rewards) ~= "table" then
+		return nil
+	end
+
+	local rows = {}
+	appendBundleRows(rows, rewards, 1, "Guaranteed")
+	sortByName(rows)
+	if #rows <= 0 then
+		return nil
+	end
+
+	return {
+		title = "Guaranteed Rewards",
+		note = "Every chest grants these rewards. Amounts show the possible range.",
+		rows = rows,
+	}
+end
+
+local function buildBonusRewardsSection(chestData)
+	local tierConfig = (Economy.Chests.Tiers or {})[chestData.Tier]
+	local bonusRoll = tierConfig and tierConfig.Rewards and tierConfig.Rewards.BonusRoll
+	if typeof(bonusRoll) ~= "table" then
+		return nil
+	end
+
+	local pool = if typeof(bonusRoll.Pool) == "table" then bonusRoll.Pool else {}
+	local chance = normalizeChance(bonusRoll.Chance)
+	if chance <= 0 or #pool <= 0 then
+		return nil
+	end
+
+	local rows = {}
+	for _, rewardBundle in ipairs(pool) do
+		appendBundleRows(rows, rewardBundle, chance / #pool, "Bonus roll")
+	end
+	sortByName(rows)
+
+	return {
+		title = "Bonus Rewards",
+		note = "One bonus reward may roll. Percentages are the final chance per chest.",
+		rows = rows,
+	}
+end
+
+local function buildFruitRaritySection(chestData)
+	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
+		then 1
+		else normalizeChance(ChestRewards.FruitGateChanceByTier[chestData.Tier])
+	if gateChance <= 0 then
+		return nil
+	end
+
+	local rows = {}
+	if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit and chestData.FruitRarity then
+		rows[1] = {
+			name = chestData.FruitRarity,
+			chance = 1,
+			rarity = chestData.FruitRarity,
+		}
+	else
+		local totalWeight = 0
+		for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+			totalWeight += math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
+		end
+		for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+			local rarityWeight = math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
+			if rarityWeight > 0 and totalWeight > 0 then
+				rows[#rows + 1] = {
+					name = rarityName,
+					chance = gateChance * (rarityWeight / totalWeight),
+					rarity = rarityName,
+				}
+			end
+		end
+	end
+
+	return {
+		title = "Devil Fruit Rates",
+		note = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
+			then "Rates are shown by rarity. Owned fruits are skipped first when possible, so exact fruit odds can change by player."
+			else "Percentages include this chest's devil-fruit roll chance.",
+		rows = rows,
+	}
+end
+
+local function buildPossibleFruitsSection(chestData)
+	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
+		then 1
+		else normalizeChance(ChestRewards.FruitGateChanceByTier[chestData.Tier])
+	if gateChance <= 0 then
+		return nil
+	end
+
+	local pools = getFruitPools()
+	local rows = {}
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		if chestData.FruitRarity == nil or chestData.FruitRarity == rarityName then
+			for _, fruit in ipairs(pools[rarityName] or {}) do
+				rows[#rows + 1] = {
+					name = tostring(fruit.DisplayName or fruit.FruitKey),
+					rarity = rarityName,
+				}
+			end
+		end
+	end
+	if #rows <= 0 then
+		return nil
+	end
+
+	return {
+		title = "Possible Devil Fruits",
+		note = "Fruit names show the eligible pool. Exact per-fruit odds are not fixed because unowned fruits are preferred.",
+		rows = rows,
+	}
+end
+
+function ChestDropRates.GetPreview(chestDataOrName)
+	local chestData = if typeof(chestDataOrName) == "string"
+		then ChestUtils.ParseInventoryName(chestDataOrName)
+		else ChestUtils.BuildChestData(chestDataOrName)
+	local sections = {}
+
+	local guaranteedSection = buildGuaranteedRewardsSection(chestData)
+	if guaranteedSection then
+		sections[#sections + 1] = guaranteedSection
+	end
+
+	local bonusSection = buildBonusRewardsSection(chestData)
+	if bonusSection then
+		sections[#sections + 1] = bonusSection
+	end
+
+	local fruitRateSection = buildFruitRaritySection(chestData)
+	if fruitRateSection then
+		sections[#sections + 1] = fruitRateSection
+	end
+
+	local possibleFruitsSection = buildPossibleFruitsSection(chestData)
+	if possibleFruitsSection then
+		sections[#sections + 1] = possibleFruitsSection
+	end
+
+	return {
+		chestName = ChestUtils.GetDisplayName(chestData),
+		sections = sections,
+	}
+end
+
+return ChestDropRates

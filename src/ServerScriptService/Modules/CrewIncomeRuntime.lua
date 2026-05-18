@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 
 local _STEAL_PRODUCT_ID = 3512126073
 local MAX_INCOME_ON_JOIN = 1e16
@@ -92,6 +93,7 @@ local CrewMemberCanonicalReadGateModule = nil
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
@@ -118,6 +120,8 @@ local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 local INCOME_SHADOW_BANK_THROTTLE_SECONDS = 3
 local INCOME_STATUS_DISPLAY_METADATA_CACHE_SECONDS = 15
+local crewRecordCache = setmetatable({}, { __mode = "k" })
+local OVERHEAD_ATTRIBUTES = CrewOverhead.Attribute
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -900,10 +904,56 @@ local function getInventoryCrewMemberMetadata(player, itemName)
 	return nil, nil
 end
 
+local function clearCrewRecordCache(player)
+	if player ~= nil then
+		crewRecordCache[player] = nil
+		return
+	end
+
+	for cachedPlayer in pairs(crewRecordCache) do
+		crewRecordCache[cachedPlayer] = nil
+	end
+end
+
+local function readCachedCrewRecord(player, rawName)
+	local playerCache = crewRecordCache[player]
+	if playerCache == nil then
+		return nil, false
+	end
+
+	local cached = playerCache[rawName]
+	if cached == nil then
+		return nil, false
+	end
+	if cached == false then
+		return nil, true
+	end
+	return cached, true
+end
+
+local function writeCachedCrewRecord(player, rawName, record)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return record
+	end
+
+	local playerCache = crewRecordCache[player]
+	if playerCache == nil then
+		playerCache = {}
+		crewRecordCache[player] = playerCache
+	end
+	playerCache[rawName] = record or false
+	return record
+end
+
 local function resolveCrewMemberRecord(player, crewMemberName)
 	local rawName = tostring(crewMemberName or "")
 	if rawName == "" then
 		return nil
+	end
+
+	local cachedRecord, foundCachedRecord = readCachedCrewRecord(player, rawName)
+	if foundCachedRecord then
+		return cachedRecord
 	end
 
 	local candidates = {}
@@ -954,7 +1004,7 @@ local function resolveCrewMemberRecord(player, crewMemberName)
 					storageName = canonicalName
 				end
 
-			return {
+			return writeCachedCrewRecord(player, rawName, {
 				RawName = rawName,
 				CanonicalName = canonicalName,
 				StorageName = storageName,
@@ -962,12 +1012,12 @@ local function resolveCrewMemberRecord(player, crewMemberName)
 				VariantKey = finalVariant,
 				Template = template,
 				Info = info or legacyInfo,
-			}
+			})
 		end
 	end
 
 	if legacyInfo then
-		return {
+		return writeCachedCrewRecord(player, rawName, {
 			RawName = rawName,
 			CanonicalName = tostring(legacyId or rawName),
 			StorageName = hasInventoryCrewMemberEntry(player, rawName) and rawName or tostring(legacyId or rawName),
@@ -975,10 +1025,10 @@ local function resolveCrewMemberRecord(player, crewMemberName)
 			VariantKey = parsedVariant,
 			Template = findTemplateForName(tostring(legacyId or rawName)),
 			Info = legacyInfo,
-		}
+		})
 	end
 
-	return nil
+	return writeCachedCrewRecord(player, rawName, nil)
 end
 
 local function findCrewMemberInfoByName(crewMemberName, player)
@@ -1364,14 +1414,6 @@ local function updateStandPromptTexts(player, standModel)
 	end
 end
 
-local function findHoverGui(primaryPart)
-	local h = primaryPart:FindFirstChild("CrewMemberHover", true)
-	if h and h:IsA("BillboardGui") then
-		return h
-	end
-	return nil
-end
-
 getCrewMemberLevel = function(player, crewMemberName)
 	local progress = CrewFoodProgression.GetProgress(player, crewMemberName)
 	if not progress then
@@ -1408,34 +1450,8 @@ local function getStandIncomeDisplay(player, standName)
 	return display
 end
 
-local RaritiesFolder = ReplicatedStorage:WaitForChild("Rarities")
-local CrewMemberHoverTemplate = RaritiesFolder:FindFirstChild("CrewMemberHover")
-if not CrewMemberHoverTemplate then
-	warn("[CrewMemberIncome] Missing ReplicatedStorage.Rarities.CrewMemberHover canonical hover template.")
-end
-
-local function ensureCrewMemberHover(model)
-	local primary = ensurePrimaryPart(model)
-	if not primary then
-		return nil
-	end
-
-	local existing = findHoverGui(primary)
-	if existing then
-		existing.Enabled = true
-		return existing
-	end
-
-	if not CrewMemberHoverTemplate or not CrewMemberHoverTemplate:IsA("BillboardGui") then
-		return nil
-	end
-
-	local clone = CrewMemberHoverTemplate:Clone()
-	clone.Name = "CrewMemberHover"
-	clone.Enabled = true
-	clone.Adornee = primary
-	clone.Parent = primary
-	return clone
+local function getStandIncomePerSecond(player, standName, crewMemberName)
+	return getIncomeWithLevel(player, crewMemberName) * getStandCollectMultiplier(player, standName)
 end
 
 local function getTextTarget(root, name)
@@ -1447,61 +1463,6 @@ local function getTextTarget(root, name)
 		return obj
 	end
 	return obj:FindFirstChildWhichIsA("TextLabel", true) or obj:FindFirstChildWhichIsA("TextButton", true) or obj:FindFirstChildWhichIsA("TextBox", true)
-end
-
-local function buildHoverRefsNoTime(model)
-	local primary = ensurePrimaryPart(model)
-	if not primary then
-		return nil
-	end
-	local hover = findHoverGui(primary)
-	if not hover then
-		return nil
-	end
-	hover.Enabled = true
-	local income = getTextTarget(hover, "Income")
-	local nameT = getTextTarget(hover, "Name")
-	local rarityT = getTextTarget(hover, "Rarity")
-
-	local timeLeftContainer = hover:FindFirstChild("TimeLeft", true)
-	local timeT
-	local timeImg
-	if timeLeftContainer then
-		timeT = getTextTarget(timeLeftContainer, "TextL")
-		if not timeT then
-			timeT = timeLeftContainer:FindFirstChildWhichIsA("TextLabel", true) or timeLeftContainer:FindFirstChildWhichIsA("TextButton", true) or timeLeftContainer:FindFirstChildWhichIsA("TextBox", true)
-		end
-		timeImg = timeLeftContainer:FindFirstChild("ImageLabel", true) or timeLeftContainer:FindFirstChildWhichIsA("ImageLabel", true)
-	end
-	if not timeT then
-		timeT = getTextTarget(hover, "TextL") or getTextTarget(hover, "TimeLeft")
-	end
-
-	if timeT then
-		timeT.Visible = false
-	end
-	if timeImg then
-		timeImg.Visible = false
-	end
-
-	return {
-		Income = income,
-		Name = nameT,
-		Rarity = rarityT,
-		Gui = hover,
-	}
-end
-
-local ReplicatedStorage2 = game:GetService("ReplicatedStorage")
-local RarityTexts = ReplicatedStorage2:WaitForChild("Rarities"):WaitForChild("Texts")
-
-local function clearRarityLabel(label)
-	if label:IsA("TextLabel") then
-		label.Text = ""
-	end
-	for _, child in ipairs(label:GetChildren()) do
-		child:Destroy()
-	end
 end
 
 local VariantOrder = { "Normal", "Golden", "Diamond" }
@@ -1554,53 +1515,22 @@ local function stripVariantPrefix(text, variantKey)
 	return text
 end
 
-local function applyVariantLabel(hoverGui, variantKey, enabled)
-	if not hoverGui then
-		return
+local function setAttributeIfChanged(instance, attributeName, value)
+	if instance:GetAttribute(attributeName) ~= value then
+		instance:SetAttribute(attributeName, value)
 	end
-	for _, d in ipairs(hoverGui:GetDescendants()) do
-		if d:IsA("GuiObject") then
-			for _, v in ipairs(VariantOrder) do
-				if d.Name == v then
-					d.Visible = enabled and (v == variantKey)
-				end
-			end
+end
+
+local function removeLegacyCrewHover(model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant.Name == "CrewMemberHover" and descendant:IsA("BillboardGui") then
+			descendant:Destroy()
 		end
 	end
 end
 
-local function applyRarityFromStorage(rarityLabel, rarityName)
-	if not rarityLabel or rarityName == "" then
-		return
-	end
-
-	clearRarityLabel(rarityLabel)
-
-	local template = RarityTexts:FindFirstChild(rarityName)
-	if not template then
-		for _, obj in ipairs(RarityTexts:GetChildren()) do
-			if obj:IsA("TextLabel") and obj.Name == rarityName then
-				template = obj
-				break
-			end
-		end
-	end
-
-	if not template or not template:IsA("TextLabel") then
-		if rarityLabel:IsA("TextLabel") then
-			rarityLabel.Text = rarityName
-		end
-		return
-	end
-	rarityLabel.Text = tostring(rarityName)
-
-	for _, child in ipairs(template:GetChildren()) do
-		child:Clone().Parent = rarityLabel
-	end
-end
-
-local function setHoverTextsNoTime(refs, player, crewMemberName)
-	if not refs then
+local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, placedModel)
+	if not placedModel or not placedModel:IsA("Model") then
 		return
 	end
 
@@ -1608,8 +1538,7 @@ local function setHoverTextsNoTime(refs, player, crewMemberName)
 	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
 	local canonicalName = resolved and resolved.CanonicalName or tostring(crewMemberName)
 	local rawName = info and tostring(info.Name or info.DisplayName or canonicalName) or tostring(crewMemberName)
-	local rawRarity = info and tostring(info.Rarity or "") or ""
-
+	local rawRarity = info and tostring(info.Rarity or "") or "Common"
 	local variantKey = resolved and resolved.VariantKey or detectVariant(crewMemberName)
 	if variantKey == "Normal" then
 		variantKey = detectVariant(rawName)
@@ -1623,28 +1552,30 @@ local function setHoverTextsNoTime(refs, player, crewMemberName)
 	if helperDisplayName ~= "" then
 		displayName = stripVariantPrefix(helperDisplayName, variantKey)
 	end
+
 	local displayRarity = stripVariantPrefix(rawRarity, variantKey)
+	local incomePerSecond = getStandIncomePerSecond(player, standModel.Name, canonicalName)
+	local slotState = getStandSlotState(player, standModel.Name)
+	local slotBonusInfo = slotState and slotState.BonusInfo or nil
 
-	local income = 0
-	if player and player:IsA("Player") then
-		income = getIncomeWithLevel(player, canonicalName)
-	else
-		income = info and (tonumber(info.Income) or 0) or 0
-	end
-
-	if refs.Income then
-		refs.Income.Text = shorten.roundNumber(math.floor(income)) .. CurrencyUtil.getPerSecondSuffix()
-	end
-	if refs.Name then
-		refs.Name.Text = displayName
-	end
-	if refs.Rarity then
-		applyRarityFromStorage(refs.Rarity, displayRarity)
-	end
-	if refs.Gui then
-		refs.Gui.Enabled = true
-		applyVariantLabel(refs.Gui, variantKey, true)
-	end
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Placed)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.DisplayName, displayName)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Rarity, if displayRarity ~= "" then displayRarity else "Common")
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Variant, variantKey)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.IncomePerSecond, math.max(0, incomePerSecond))
+	setAttributeIfChanged(
+		placedModel,
+		OVERHEAD_ATTRIBUTES.SlotBonusLabel,
+		if slotBonusInfo then tostring(slotBonusInfo.Label or "Bonus") else nil
+	)
+	setAttributeIfChanged(
+		placedModel,
+		OVERHEAD_ATTRIBUTES.SlotBonusPercent,
+		if slotBonusInfo then math.max(0, slotState.BonusPercent or 0) else nil
+	)
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ExpiresAt, nil)
+	removeLegacyCrewHover(placedModel)
+	CollectionService:AddTag(placedModel, CrewOverhead.Tag)
 end
 
 local function clearStandVisual(standModel)
@@ -1697,15 +1628,12 @@ local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
 	makeStandVisualNonBlocking(clone)
 	placeModelBottomOnHandleLeft(clone, handle)
 
-	ensureCrewMemberHover(clone)
-
 	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
 	if info then
 		tryPlayIdle(clone, info.IdleAnim)
 	end
 
-	local refs = buildHoverRefsNoTime(clone)
-	setHoverTextsNoTime(refs, player, crewMemberName)
+	syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
 	standDebug(
 		"spawnStandCrewMember success player=%s stand=%s model=%s incomeBase=%s",
 		player and player.Name or "?",
@@ -1972,9 +1900,7 @@ end
 local function updateStandHover(player, standModel, crewMemberName)
 	local placed = standModel:FindFirstChild("PlacedCrewMember")
 	if placed and placed:IsA("Model") then
-		ensureCrewMemberHover(placed)
-		local refs = buildHoverRefsNoTime(placed)
-		setHoverTextsNoTime(refs, player, crewMemberName)
+		syncPlacedOverheadMetadata(player, standModel, crewMemberName, placed)
 	end
 end
 
@@ -2265,7 +2191,7 @@ local function bindStandPrompt(player, plot, standModel)
 				stealPromptDebounce[plr] = now
 
 				local productId = getStealProductIdForCrewMember(crewMemberToSteal)
-				if not CrewQuickSlotService.CanGainOrNotify(plr, 1, "StealPrompt:" .. tostring(standName)) then
+				if not CrewQuickSlotService.CanGainOrNotify(plr, crewMemberToSteal, 1, "StealPrompt:" .. tostring(standName)) then
 					standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=quick_slots_full", plr.Name, standName, tostring(crewMemberToSteal))
 					return
 				end
@@ -2319,6 +2245,7 @@ local function bindStandPrompt(player, plot, standModel)
 
 				local pickupBefore = getPickupStandSnapshot(plr, standName)
 				local releasedInstanceId, releasedInstance, releaseReason, releaseDebug = CrewInstanceService.ReleaseStandInstance(plr, standName)
+				clearCrewRecordCache(plr)
 				local pickupAfter = getPickupStandSnapshot(plr, standName)
 				crewPickupDebug(formatCrewPickupDebugFields({
 					{ "event", "prompt_release_result" },
@@ -2444,6 +2371,7 @@ local function bindStandPrompt(player, plot, standModel)
 				return
 			end
 
+			clearCrewRecordCache(plr)
 			getCrewMemberLevel(plr, placedInstanceId)
 			syncStandLevelFromCrewMember(plr, standName, placedInstanceId)
 			setPlacementPickupGuard(plr, standName)
@@ -2742,6 +2670,8 @@ local function clearPlotScanStateForPlayer(player)
 	end
 end
 
+local reconcilePlayerStandAssignments
+
 local function clearPlayerStandRuntime(player)
 	local stands = playerStandList[player]
 	if stands then
@@ -2755,6 +2685,7 @@ local function clearPlayerStandRuntime(player)
 	touchDebounce[player] = nil
 	stealPromptDebounce[player] = nil
 	placementPickupGuardUntil[player] = nil
+	clearCrewRecordCache(player)
 	clearPlotScanStateForPlayer(player)
 end
 
@@ -2767,8 +2698,34 @@ local function refreshPlayerStandRuntime(player)
 	end
 
 	scanAndBindPlot(player, plot)
+	reconcilePlayerStandAssignments(player)
 	return true, plot
 end
+
+reconcilePlayerStandAssignments = function(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	clearCrewRecordCache(player)
+	local stands = playerStandList[player]
+	if typeof(stands) ~= "table" then
+		return
+	end
+
+	for i = 1, #stands do
+		local standModel = stands[i]
+		if standModel and standModel.Parent then
+			CrewInstanceService.ReconcileStandAssignment(player, standModel.Name)
+		end
+	end
+end
+
+CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
+	if player and player.Parent == Players then
+		task.defer(reconcilePlayerStandAssignments, player)
+	end
+end)
 
 
 Players.PlayerAdded:Connect(function(player)
@@ -2794,6 +2751,7 @@ Players.PlayerAdded:Connect(function(player)
 			tostring(plot:GetAttribute("OwnerName"))
 		)
 		scanAndBindPlot(player, plot)
+		reconcilePlayerStandAssignments(player)
 	end)
 end)
 
@@ -2826,6 +2784,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 		local plot = waitForPlot(p, 5)
 		if plot then
 			scanAndBindPlot(p, plot)
+			reconcilePlayerStandAssignments(p)
 			resetHugeIncomeOnJoin(p)
 		else
 			standDebug("bootstrap existing_player=%s reason=no_plot", p.Name)
@@ -2848,7 +2807,6 @@ task.spawn(function()
 					if standModel and standModel.Parent then
 						local standName = standModel.Name
 						dmEnsureStandFolder(plr, standName)
-						CrewInstanceService.ReconcileStandAssignment(plr, standName)
 
 						local crewMemberName = getPlayerStandCrewMemberName(plr, standName)
 						if crewMemberName ~= "" then
@@ -2872,6 +2830,7 @@ task.spawn(function()
 									standDebug("income zero player=%s stand=%s crewMember=%s", plr.Name, standName, tostring(crewMemberName))
 								end
 							end
+							updateStandHover(plr, standModel, crewMemberName)
 						end
 
 						updateStandMoneyText(plr, standModel)

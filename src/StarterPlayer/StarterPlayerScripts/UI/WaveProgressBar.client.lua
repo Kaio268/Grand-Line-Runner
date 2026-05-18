@@ -12,19 +12,28 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local LavaWaves = require(Modules:WaitForChild("Configs"):WaitForChild("LavaWaves"))
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
 
-local DEFAULT_SECTIONS = {
-	{ label = "Biome 1", widthScale = 1 / 8 },
-	{ label = "Biome 2", widthScale = 1 / 8 },
-	{ label = "Biome 3", widthScale = 1 / 8 },
-	{ label = "Biome 4", widthScale = 1 / 8 },
-	{ label = "Biome 5", widthScale = 1 / 8 },
-	{ label = "Biome 6", widthScale = 1 / 8 },
-	{ label = "Biome 7", widthScale = 1 / 8 },
-	{ label = "Biome 8", widthScale = 1 / 8, isImpact = true },
-}
+local function buildDefaultSections()
+	local sections = {}
+	local biomeCount = #BiomeAreas.Biomes
+	local widthScale = if biomeCount > 0 then 1 / biomeCount else 1
+
+	for index, biome in ipairs(BiomeAreas.Biomes) do
+		sections[index] = {
+			color = biome.ProgressColor,
+			label = biome.AreaName or biome.BiomeName or ("Biome " .. tostring(index)),
+			widthScale = widthScale,
+			isImpact = index == biomeCount,
+		}
+	end
+
+	return sections
+end
+
+local DEFAULT_SECTIONS = buildDefaultSections()
 
 local PLAYER_MARKER_PADDING = 0
 local WAVE_MARKER_PADDING = 0

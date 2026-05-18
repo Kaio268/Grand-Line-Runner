@@ -61,11 +61,11 @@ local function ensureVisibleFxHosts()
 
 	displayLayer.AnchorPoint = Vector2.new(0, 1)
 	displayLayer.Position = UDim2.new(0, HudCounterConfig.LeftPadding, 1, -(HudCounterConfig.BottomPadding + bottomRightInset.Y))
-	displayLayer.Size = UDim2.new(0, HudCounterConfig.Width, 0, totalHeight)
+	displayLayer.Size = UDim2.fromOffset(HudCounterConfig.Width, totalHeight)
 
 	moneyAnchor.AnchorPoint = Vector2.new(0, 0)
-	moneyAnchor.Position = UDim2.new(0, HudCounterConfig.getContentLeft(), 0, moneyRowY)
-	moneyAnchor.Size = UDim2.new(0, HudCounterConfig.getContentWidth(), 0, HudCounterConfig.RowHeight)
+	moneyAnchor.Position = UDim2.fromOffset(HudCounterConfig.getContentLeft(), moneyRowY)
+	moneyAnchor.Size = UDim2.fromOffset(HudCounterConfig.getContentWidth(), HudCounterConfig.RowHeight)
 
 	particles.AnchorPoint = Vector2.new(0, 0)
 	particles.Position = UDim2.fromOffset(0, 0)
@@ -78,7 +78,7 @@ local function ensureVisibleFxHosts()
 		0,
 		math.max(0, moneyRowY - HudCounterConfig.NotificationHeight + 6)
 	)
-	notifications.Size = UDim2.new(0, HudCounterConfig.NotificationWidth, 0, HudCounterConfig.NotificationHeight)
+	notifications.Size = UDim2.fromOffset(HudCounterConfig.NotificationWidth, HudCounterConfig.NotificationHeight)
 
 	return moneyAnchor, notifications, particles
 end
@@ -149,7 +149,12 @@ local function setStroke(c)
 end
 
 local function formatNumber(n)
-	return Shorten.withCommas(math.floor((tonumber(n) or 0) + 0.5))
+	local rounded = math.floor((tonumber(n) or 0) + 0.5)
+	if math.abs(rounded) >= 1_000_000 then
+		return Shorten.roundNumber(rounded)
+	end
+
+	return Shorten.withCommas(rounded)
 end
 
 local function moneyText(n)
@@ -453,9 +458,9 @@ end
 
 local function pxToScaleUdim2(px, absSize)
 	if absSize.X <= 0 or absSize.Y <= 0 then
-		return UDim2.new(0.5, 0, 0.5, 0)
+		return UDim2.fromScale(0.5, 0.5)
 	end
-	return UDim2.new(px.X / absSize.X, 0, px.Y / absSize.Y, 0)
+	return UDim2.fromScale(px.X / absSize.X, px.Y / absSize.Y)
 end
 
 local function ensureParticleLoop()
@@ -518,7 +523,7 @@ local function spawnDollarBurst()
 		lbl.BackgroundTransparency = 1
 		lbl.BorderSizePixel = 0
 		lbl.AnchorPoint = Vector2.new(0.5, 0.5)
-		lbl.Size = UDim2.new(sizeScaleX, 0, sizeScaleY, 0)
+		lbl.Size = UDim2.fromScale(sizeScaleX, sizeScaleY)
 		lbl.Position = pxToScaleUdim2(originPx, absSize)
 		lbl.ZIndex = particleLayer.ZIndex + 1
 		lbl.Font = Enum.Font.FredokaOne

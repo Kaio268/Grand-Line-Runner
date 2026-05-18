@@ -5,6 +5,8 @@ local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
+local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
+local MAX_BATCH_CHEST_OPEN_COUNT = 50
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -20,6 +22,7 @@ local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
+local ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -27,6 +30,7 @@ local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebi
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
 local snapshotRemote = ReplicatedStorage:WaitForChild("CrewMemberInventorySnapshotRequest", 15)
@@ -263,6 +267,7 @@ local keyboardHotbar = {}
 local renderQueued = false
 local destroyed = false
 local stopObservingState = nil
+local render
 local scheduleRender
 local syncChestsFromInventory
 local syncDevilFruitsFromInventory
@@ -324,6 +329,8 @@ local uiState = {
 	activeCategory = "Chests",
 	query = "",
 }
+local chestOpenPrompt = nil
+local chestDropRatesPrompt = nil
 
 local cleanupConnections = {}
 local characterConnections = {}
@@ -451,9 +458,9 @@ local function getEntryDisplayMetadata(entry)
 		metadata.rarity = rarity
 	end
 
-	local render = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
-	if render ~= "" then
-		metadata.render = render
+	local renderImage = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
+	if renderImage ~= "" then
+		metadata.render = renderImage
 	end
 
 	local staticPreviewImage = tostring(
@@ -487,6 +494,45 @@ local function getEntryDisplayMetadata(entry)
 	local crewMemberId = tostring(entry.CrewMemberId or entry.crewMemberId or "")
 	if crewMemberId ~= "" then
 		metadata.crewMemberId = crewMemberId
+	end
+
+	local stackId = tostring(entry.StackId or entry.stackId or "")
+	if stackId ~= "" then
+		metadata.stackId = stackId
+	end
+
+	local maxQuantity = tonumber(entry.MaxQuantity or entry.maxQuantity)
+	if maxQuantity ~= nil then
+		metadata.maxQuantity = math.max(1, math.floor(maxQuantity))
+	end
+
+	local stackNumber = tonumber(entry.StackNumber or entry.stackNumber)
+	if stackNumber ~= nil then
+		metadata.stackNumber = math.max(1, math.floor(stackNumber))
+	end
+
+	local stackOrder = tonumber(entry.StackOrder or entry.stackOrder)
+	if stackOrder ~= nil then
+		metadata.stackOrder = math.max(1, math.floor(stackOrder))
+	end
+
+	local representativeInstanceId = tostring(entry.RepresentativeInstanceId or entry.representativeInstanceId or "")
+	if representativeInstanceId ~= "" then
+		metadata.representativeInstanceId = representativeInstanceId
+	end
+
+	local instanceIds = entry.InstanceIds or entry.instanceIds
+	if typeof(instanceIds) == "table" then
+		local copy = {}
+		for _, instanceId in ipairs(instanceIds) do
+			local normalizedInstanceId = tostring(instanceId or "")
+			if normalizedInstanceId ~= "" then
+				table.insert(copy, normalizedInstanceId)
+			end
+		end
+		if #copy > 0 then
+			metadata.instanceIds = copy
+		end
 	end
 
 	local productionName = tostring(entry.ProductionName or entry.productionName or "")
@@ -531,6 +577,24 @@ local function applyDisplayMetadataToState(state, metadata)
 	if metadata.crewMemberId ~= nil then
 		state.crewMemberId = metadata.crewMemberId
 	end
+	if metadata.stackId ~= nil then
+		state.stackId = metadata.stackId
+	end
+	if metadata.maxQuantity ~= nil then
+		state.maxQuantity = metadata.maxQuantity
+	end
+	if metadata.stackNumber ~= nil then
+		state.stackNumber = metadata.stackNumber
+	end
+	if metadata.stackOrder ~= nil then
+		state.stackOrder = metadata.stackOrder
+	end
+	if metadata.representativeInstanceId ~= nil then
+		state.representativeInstanceId = metadata.representativeInstanceId
+	end
+	if metadata.instanceIds ~= nil then
+		state.instanceIds = metadata.instanceIds
+	end
 	if metadata.productionName ~= nil then
 		state.productionName = metadata.productionName
 	end
@@ -551,7 +615,8 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 			local name = tostring(entry.Name or entry.name or "")
 			local quantity = math.max(0, tonumber(entry.Quantity or entry.quantity or entry.Qty or entry.qty) or 0)
 			if name ~= "" and quantity > 0 and (configLookup == nil or configLookup(name)) then
-				local key = kind .. "|" .. name
+				local stackId = tostring(entry.StackId or entry.stackId or "")
+				local key = if isCrewItemKind(kind) and stackId ~= "" then stackId else kind .. "|" .. name
 				ensureAcquired(key)
 				local nextState = {
 					kind = kind,
@@ -870,6 +935,14 @@ local function compareInventoryKeys(a, b)
 	local stateB = itemState[b]
 	if not stateA or not stateB then
 		return tostring(a) < tostring(b)
+	end
+
+	if isCrewItemKind(stateA.kind) and isCrewItemKind(stateB.kind) then
+		local stackOrderA = tonumber(stateA.stackOrder)
+		local stackOrderB = tonumber(stateB.stackOrder)
+		if stackOrderA ~= nil and stackOrderB ~= nil and stackOrderA ~= stackOrderB then
+			return stackOrderA < stackOrderB
+		end
 	end
 
 	local rankA = getItemSortRank(stateA.kind, stateA.name, stateA)
@@ -1755,6 +1828,12 @@ local function buildEntry(key, state)
 		staticPreviewImage = staticPreviewImage,
 		modelPreview = modelPreview,
 		quantity = state.qty,
+		maxQuantity = state.maxQuantity,
+		stackId = state.stackId,
+		stackNumber = state.stackNumber,
+		stackOrder = state.stackOrder,
+		instanceIds = state.instanceIds,
+		representativeInstanceId = state.representativeInstanceId,
 		accentColor = getAccentColor(state.kind, state.name, state),
 		interactive = state.kind ~= "Resource",
 		isEquipped = isEquipped,
@@ -1806,18 +1885,15 @@ local function buildRenderData()
 	local crewQuickSlots = readCrewQuickSlots()
 	local crewCollectionCount = countCrewItems(crewList)
 
-	local crewHotbarEntries = {}
-	for _, key in ipairs(crewList) do
-		local state = itemState[key]
-		if state then
-			crewHotbarEntries[#crewHotbarEntries + 1] = buildEntry(key, state)
-		end
-	end
-
 	local hotbarSlots = {}
 	keyboardHotbar = {}
 	for slotIndex = 1, crewQuickSlots.maxSlots do
-		local entry = crewHotbarEntries[slotIndex]
+		local entry = nil
+		local key = crewList[slotIndex]
+		local state = key and itemState[key] or nil
+		if state then
+			entry = buildEntry(key, state)
+		end
 		if slotIndex <= crewQuickSlots.unlockedSlots then
 			if entry then
 				entry.quickSlotIndex = slotIndex
@@ -1902,29 +1978,35 @@ local function buildRenderData()
 		end
 	end
 
-	local captainLogOk, captainLog = pcall(buildCaptainLogData, query)
-	if not captainLogOk or typeof(captainLog) ~= "table" then
-		captainLog = {
-			entries = {},
-			filteredCount = 0,
-			placedCount = 0,
-			totalCollectable = 0,
-			totalCount = 0,
-		}
+	local captainLog = {
+		entries = {},
+		filteredCount = 0,
+		placedCount = 0,
+		totalCollectable = 0,
+		totalCount = 0,
+	}
+	if uiState.activeView == "CaptainLog" then
+		local captainLogOk, result = pcall(buildCaptainLogData, query)
+		if captainLogOk and typeof(result) == "table" then
+			captainLog = result
+		end
 	end
 
-	local titlesOk, titles = pcall(buildTitlesData, query)
-	if not titlesOk or typeof(titles) ~= "table" then
-		titles = {
-			entries = {},
-			filteredCount = 0,
-			totalCount = 0,
-			unlockedCount = 0,
-			lockedCount = 0,
-			persistentUnlockedCount = 0,
-			dynamicUnlockedCount = 0,
-			bountyRank = nil,
-		}
+	local titles = {
+		entries = {},
+		filteredCount = 0,
+		totalCount = 0,
+		unlockedCount = 0,
+		lockedCount = 0,
+		persistentUnlockedCount = 0,
+		dynamicUnlockedCount = 0,
+		bountyRank = nil,
+	}
+	if uiState.activeView == "Titles" then
+		local titlesOk, result = pcall(buildTitlesData, query)
+		if titlesOk and typeof(result) == "table" then
+			titles = result
+		end
 	end
 
 	return {
@@ -2238,9 +2320,41 @@ local function bindRebirthSummaryTracking()
 	end, rebirthSummaryConnections)
 end
 
-local function render()
+local function setInventoryOpen(isOpen)
+	if shipUpgradeModal ~= nil and isOpen ~= true then
+		return
+	end
+
+	uiState.isOpen = isOpen == true
+	if uiState.isOpen ~= true then
+		chestOpenPrompt = nil
+		chestDropRatesPrompt = nil
+	end
+	render()
+end
+
+local unregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
+	toggle = function()
+		if shipUpgradeModal ~= nil then
+			return
+		end
+		setInventoryOpen(not uiState.isOpen)
+	end,
+	open = function()
+		setInventoryOpen(true)
+	end,
+	close = function()
+		setInventoryOpen(false)
+	end,
+	isVisible = function()
+		return uiState.isOpen == true
+	end,
+})
+
+render = function()
 	local data = buildRenderData()
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
+	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, uiState.isOpen == true)
 
 	root:render(ReactRoblox.createPortal(
 		React.createElement(App, {
@@ -2258,14 +2372,15 @@ local function render()
 			totalCount = data.totalCount,
 			query = data.query,
 			shipUpgradeModal = data.shipUpgradeModal,
+			chestOpenPrompt = chestOpenPrompt,
+			chestDropRatesPrompt = chestDropRatesPrompt,
 			toggleLayout = getToggleLayout(),
 			toggleIcon = getLegacyInventoryIcon(),
 			onToggle = function()
 				if shipUpgradeModal ~= nil then
 					return
 				end
-				uiState.isOpen = not uiState.isOpen
-				render()
+				ReactModalRegistry.Toggle("Inventory")
 			end,
 			onSelectView = function(viewKey)
 				if shipUpgradeModal ~= nil then
@@ -2309,9 +2424,55 @@ local function render()
 					crewQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
 					return
 				end
+				if entry and entry.kind == "Chest" then
+					local availableAmount = math.max(1, tonumber(entry.quantity) or 1)
+					chestOpenPrompt = {
+						name = tostring(entry.name or ""),
+						displayName = string.format("%s Chests", tostring(entry.name or "Treasure")),
+						amount = 1,
+						maxAmount = math.min(MAX_BATCH_CHEST_OPEN_COUNT, availableAmount),
+					}
+					render()
+					return
+				end
 				if entry and entry.kind ~= "Resource" then
 					equipRemote:FireServer(entry.kind, entry.name)
 				end
+			end,
+			onChestOpenAmountChanged = function(nextAmount)
+				if not chestOpenPrompt then
+					return
+				end
+				chestOpenPrompt.amount = math.clamp(
+					math.floor(tonumber(nextAmount) or 1),
+					1,
+					math.max(1, tonumber(chestOpenPrompt.maxAmount) or 1)
+				)
+				render()
+			end,
+			onConfirmChestOpen = function()
+				if not chestOpenPrompt then
+					return
+				end
+				local prompt = chestOpenPrompt
+				chestOpenPrompt = nil
+				render()
+				MetaClient.OpenChests(prompt.name, prompt.amount)
+			end,
+			onDismissChestOpen = function()
+				chestOpenPrompt = nil
+				render()
+			end,
+			onShowChestDropRates = function()
+				if not chestOpenPrompt then
+					return
+				end
+				chestDropRatesPrompt = ChestDropRates.GetPreview(chestOpenPrompt.name)
+				render()
+			end,
+			onDismissChestDropRates = function()
+				chestDropRatesPrompt = nil
+				render()
 			end,
 			onDismissShipUpgradeModal = function()
 				shipUpgradeModal = nil
@@ -2537,8 +2698,16 @@ local function hookCharacter(character)
 	end, characterConnections)
 end
 
+local requestInventorySnapshot = nil
+local scheduleInventorySnapshotRequest = nil
+
 trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 	if isCrewItemKind(kind) then
+		if snapshotRemote ~= nil and scheduleInventorySnapshotRequest ~= nil then
+			scheduleInventorySnapshotRequest("crewUpdateRemote")
+			return
+		end
+
 		local quantity = tonumber(value) or 0
 		local key = CREW_ITEM_KIND .. "|" .. tostring(name)
 		local previous = itemState[key]
@@ -2600,12 +2769,15 @@ end, cleanupConnections)
 
 local snapshotRequestInFlight = false
 local lastSnapshotRequestAt = 0
+local snapshotRequestQueued = false
+local queuedSnapshotReason = nil
+local SNAPSHOT_UPDATE_DEBOUNCE_SECONDS = 0.15
 
 local function isTransientSnapshotInvokeError(err)
 	return tostring(err):find("cannot resume non%-suspended coroutine") ~= nil
 end
 
-local function requestInventorySnapshot(reason)
+requestInventorySnapshot = function(reason)
 	if snapshotRequestInFlight or not snapshotRemote or destroyed then
 		return
 	end
@@ -2652,9 +2824,29 @@ local function requestInventorySnapshot(reason)
 	end)
 end
 
+scheduleInventorySnapshotRequest = function(reason)
+	if snapshotRemote == nil or destroyed then
+		return
+	end
+
+	queuedSnapshotReason = tostring(reason or "queued")
+	if snapshotRequestQueued then
+		return
+	end
+
+	snapshotRequestQueued = true
+	task.delay(SNAPSHOT_UPDATE_DEBOUNCE_SECONDS, function()
+		snapshotRequestQueued = false
+		if destroyed then
+			return
+		end
+		requestInventorySnapshot(queuedSnapshotReason or reason)
+	end)
+end
+
 trackConnection(player:GetAttributeChangedSignal("PlayerDataReady"), function()
 	if player:GetAttribute("PlayerDataReady") == true then
-		requestInventorySnapshot("playerDataReady")
+		scheduleInventorySnapshotRequest("playerDataReady")
 	end
 end, cleanupConnections)
 
@@ -2803,6 +2995,8 @@ task.defer(scheduleRender)
 script.Destroying:Connect(function()
 	destroyed = true
 	UiModalState.SetOpen("InventoryModal", false)
+	unregisterInventoryModal()
+	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, false)
 	if modalInputSinkBound then
 		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)
 		modalInputSinkBound = false

@@ -174,9 +174,6 @@ local function getCatalogCrewModelPreview(info)
 	if type(info) ~= "table" then
 		return nil
 	end
-	if info.MissingModel == true then
-		return nil
-	end
 
 	local modelName = tostring(info.ModelName or "")
 	if modelName == "" then
@@ -240,10 +237,9 @@ local function buildDiscoveredFruitSet(indexCollection, inventory, equippedFruit
 	local lifetimeFolder = indexCollection and indexCollection:FindFirstChild("DevilFruits")
 	if lifetimeFolder then
 		mergeDiscoveredFruitsFromFolder(discovered, lifetimeFolder)
-		return discovered
 	end
 
-	-- Compatibility path only: the server should backfill these into IndexCollection.
+	-- Also merge live fruit ownership so recently claimed or equipped fruits reveal immediately.
 	local devilFruitsFolder = inventory and inventory:FindFirstChild("DevilFruits")
 	if devilFruitsFolder then
 		for _, child in ipairs(devilFruitsFolder:GetChildren()) do
@@ -448,6 +444,7 @@ function IndexData.buildViewModel(options)
 					or tostring(itemInfo.Render or entry.info.Render or "")
 				local renderStatus = readMetadataText(displayMetadata, "RenderStatus")
 					or tostring(itemInfo.RenderStatus or entry.info.RenderStatus or "")
+				local crewModelName = tostring(itemInfo.ModelName or entry.info.ModelName or "")
 				local modelPreview = getCanonicalIndexModelPreview(displayMetadata)
 					or getCatalogCrewModelPreview(itemInfo)
 					or getCatalogCrewModelPreview(entry.info)
@@ -474,6 +471,7 @@ function IndexData.buildViewModel(options)
 					staticPreviewImage = staticPreviewImage,
 					previewKind = if modelPreview then "CrewMember" else nil,
 					previewName = if modelPreview then tostring(modelPreview.ModelName or "") else nil,
+					crewModelName = if crewModelName ~= "" then crewModelName else nil,
 					previewCrewMemberId = if modelPreview then itemId else nil,
 					category = template.id,
 					categoryLabel = template.label,

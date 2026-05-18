@@ -504,7 +504,13 @@ local function request(actionName, payload)
 		return
 	end
 
-	currentState = response.state or currentState
+	local responseState = response.state
+	if typeof(responseState) == "table" then
+		if responseState.Crews == nil and currentState and currentState.Crews ~= nil then
+			responseState.Crews = currentState.Crews
+		end
+		currentState = responseState
+	end
 	if response.message then
 		setMessage(response.message)
 	elseif response.ok == false and response.error then
@@ -572,8 +578,13 @@ stateRemote.OnClientEvent:Connect(function(newState)
 		return
 	end
 
+	if newState.Crews == nil and currentState and currentState.Crews ~= nil then
+		newState.Crews = currentState.Crews
+	end
 	currentState = newState
 	render()
 end)
 
-request("GetState")
+request("GetState", {
+	IncludeCrews = true,
+})

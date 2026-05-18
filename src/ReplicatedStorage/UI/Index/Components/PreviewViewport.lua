@@ -369,15 +369,22 @@ local function getBoundingInfo(previewModel)
 	return CFrame.new(), Vector3.new(1, 1, 1)
 end
 
-local function applyTint(previewModel, tintColor, tintTransparency)
+local function applyTint(previewModel, tintColor, tintTransparency, tintMaterial)
 	for _, descendant in ipairs(previewModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			descendant.Color = tintColor
-			descendant.Material = Enum.Material.SmoothPlastic
+			descendant.Material = tintMaterial or Enum.Material.SmoothPlastic
 			descendant.Transparency = tintTransparency or 0
 			descendant.Reflectance = 0
+			if descendant:IsA("MeshPart") then
+				descendant.TextureID = ""
+			end
+		elseif descendant:IsA("SpecialMesh") then
+			descendant.TextureId = ""
 		elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
 			descendant.Transparency = 1
+		elseif descendant:IsA("SurfaceAppearance") then
+			descendant:Destroy()
 		elseif descendant:IsA("ParticleEmitter")
 			or descendant:IsA("Trail")
 			or descendant:IsA("Beam")
@@ -448,7 +455,7 @@ local function ViewportPreviewModel(props)
 		end
 
 		if props.tintColor then
-			applyTint(previewModel, props.tintColor, props.tintTransparency)
+			applyTint(previewModel, props.tintColor, props.tintTransparency, props.tintMaterial)
 		end
 
 		local worldModel = Instance.new("WorldModel")
@@ -510,7 +517,7 @@ local function ViewportPreviewModel(props)
 				clearChildren(viewport)
 			end
 		end
-	end, { props.previewKind, props.previewName, props.tintColor, props.tintTransparency, props.fieldOfView })
+	end, { props.previewKind, props.previewName, props.tintColor, props.tintTransparency, props.tintMaterial, props.fieldOfView })
 
 	return e("ViewportFrame", {
 		ref = viewportRef,
@@ -519,9 +526,9 @@ local function ViewportPreviewModel(props)
 		BorderSizePixel = 0,
 		Position = props.position,
 		Size = props.size or UDim2.fromScale(1, 1),
-		Ambient = Color3.fromRGB(206, 196, 186),
-		LightColor = Color3.fromRGB(255, 252, 246),
-		LightDirection = Vector3.new(-1, -1, -1),
+		Ambient = props.ambient or Color3.fromRGB(206, 196, 186),
+		LightColor = props.lightColor or Color3.fromRGB(255, 252, 246),
+		LightDirection = props.lightDirection or Vector3.new(-1, -1, -1),
 		ZIndex = props.zIndex,
 	})
 end
@@ -543,7 +550,7 @@ local function staticCrewPreviewImage(image, props)
 end
 
 local function PreviewViewport(props)
-	if tostring(props.previewKind or "") == "CrewMember" then
+	if tostring(props.previewKind or "") == "CrewMember" and props.preferModel ~= true then
 		local staticPreviewImage = CrewPreviewImages.Resolve(props.previewName)
 		if staticPreviewImage ~= "" then
 			return staticCrewPreviewImage(staticPreviewImage, props)

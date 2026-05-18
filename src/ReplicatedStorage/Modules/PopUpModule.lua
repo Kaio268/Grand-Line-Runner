@@ -30,7 +30,6 @@ local PopUpModule = {}
 PopUpModule.activeReward = nil
 
 local POPUP_TWEEN_IN_TIME = 0.5
-local POPUP_TWEEN_OUT_TIME = 0.25
 local REWARD_TWEEN_IN_TIME = 0.24
 local REWARD_DISPLAY_TIME = 1
 local REWARD_TWEEN_OUT_TIME = 0.25
@@ -39,7 +38,6 @@ local REWARD_ITEM_STAGGER = 0.035
 local REWARD_ICON_FADE_TIME = 0.12
 local REWARD_POOL_TARGET_SIZE = 6
 local NOTIFY_TWEEN_IN_TIME = 0.5
-local NOTIFY_DISPLAY_TIME = 2
 local NOTIFY_TWEEN_OUT_TIME = 0.25
 
 local EASING_STYLE_IN = Enum.EasingStyle.Back
@@ -66,7 +64,9 @@ local function playSound(name)
 		local soundClone = soundTemplate:Clone()
 		soundClone.Parent = SoundService
 		soundClone:Play()
-		soundClone.Ended:Connect(function() soundClone:Destroy() end)
+		soundClone.Ended:Connect(function()
+			soundClone:Destroy()
+		end)
 	end
 end
 
@@ -218,7 +218,9 @@ RunService.Heartbeat:Connect(function()
 			TweenService:Create(popup, tweenInfo, {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
 			data.outTween = true
 			task.delay(0.25, function()
-				if popup and popup.Parent then popup:Destroy() end
+				if popup and popup.Parent then
+					popup:Destroy()
+				end
 				activePopups[baseText] = nil
 			end)
 		end
@@ -242,7 +244,9 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 				end
 				popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
 				local uiScale = popup:FindFirstChildOfClass("UIScale")
-			if uiScale then uiScale.Scale = 1 end
+			if uiScale then
+				uiScale.Scale = 1
+			end
 			data.removalInProgress = false
 		end
 		data.count = data.count + 1
@@ -261,7 +265,9 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 	newPopup.TextColor3, newPopup.TextStrokeColor3 = textColor, strokeColor
 	newPopup.TextTransparency, newPopup.TextStrokeTransparency = 0, 0
 	local uiScale = newPopup:FindFirstChildOfClass("UIScale")
-	if uiScale then uiScale.Scale = 0 end
+	if uiScale then
+		uiScale.Scale = 0
+	end
 	playSound(isError and "Error" or "Success")
 	if uiScale then
 		TweenService:Create(uiScale, TweenInfo.new(POPUP_TWEEN_IN_TIME, EASING_STYLE_IN, EASING_DIRECTION_IN), {Scale = 1}):Play()
@@ -586,6 +592,7 @@ local acknowledgeBackground
 local acknowledgePreviewCard
 local acknowledgePreviewViewport
 local acknowledgePreviewFallback
+local acknowledgeRewardsContainer
 
 local DEVIL_FRUIT_ACK_THEME = {
 	FruitBackgroundImage = "rbxassetid://134053886107384",
@@ -808,7 +815,8 @@ local function ensureAcknowledgeGui()
 		local button = content and content:FindFirstChild("Okay")
 		local buttonLabel = button and button:FindFirstChild("Label")
 		local previewCard = content and content:FindFirstChild("PreviewCard")
-		if panel and topBar and content and button and buttonLabel and previewCard then
+		local rewards = content and content:FindFirstChild("Rewards")
+		if panel and topBar and content and button and buttonLabel and previewCard and rewards then
 			return
 		end
 
@@ -825,6 +833,7 @@ local function ensureAcknowledgeGui()
 		acknowledgePreviewCard = nil
 		acknowledgePreviewViewport = nil
 		acknowledgePreviewFallback = nil
+		acknowledgeRewardsContainer = nil
 	end
 
 	local player = Players.LocalPlayer
@@ -953,6 +962,26 @@ local function ensureAcknowledgeGui()
 	acknowledgeBody.ZIndex = 82
 	acknowledgeBody.Parent = content
 
+	acknowledgeRewardsContainer = Instance.new("ScrollingFrame")
+	acknowledgeRewardsContainer.Name = "Rewards"
+	acknowledgeRewardsContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	acknowledgeRewardsContainer.BackgroundTransparency = 1
+	acknowledgeRewardsContainer.BorderSizePixel = 0
+	acknowledgeRewardsContainer.CanvasSize = UDim2.new()
+	acknowledgeRewardsContainer.Position = UDim2.fromOffset(0, 0)
+	acknowledgeRewardsContainer.ScrollBarImageColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	acknowledgeRewardsContainer.ScrollBarThickness = 4
+	acknowledgeRewardsContainer.Size = UDim2.new(1, 0, 1, -ACK_BODY_BOTTOM_PADDING)
+	acknowledgeRewardsContainer.Visible = false
+	acknowledgeRewardsContainer.ZIndex = 82
+	acknowledgeRewardsContainer.Parent = content
+
+	local rewardsLayout = Instance.new("UIListLayout")
+	rewardsLayout.Name = "Layout"
+	rewardsLayout.Padding = UDim.new(0, 7)
+	rewardsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rewardsLayout.Parent = acknowledgeRewardsContainer
+
 	acknowledgePreviewCard = Instance.new("Frame")
 	acknowledgePreviewCard.Name = "PreviewCard"
 	acknowledgePreviewCard.AnchorPoint = Vector2.new(1, 0)
@@ -1029,9 +1058,94 @@ local function ensureAcknowledgeGui()
 	end)
 end
 
+local function formatRewardAmount(amount)
+	return string.format("%d", math.max(0, math.floor(tonumber(amount) or 0)))
+		:reverse()
+		:gsub("(%d%d%d)", "%1,")
+		:reverse()
+		:gsub("^,", "")
+end
+
+local function renderRewardRows(rewardRows)
+	if not acknowledgeRewardsContainer then
+		return false
+	end
+
+	for _, child in ipairs(acknowledgeRewardsContainer:GetChildren()) do
+		if child.Name ~= "Layout" then
+			child:Destroy()
+		end
+	end
+
+	if typeof(rewardRows) ~= "table" or #rewardRows <= 0 then
+		acknowledgeRewardsContainer.Visible = false
+		return false
+	end
+
+	acknowledgeRewardsContainer.Visible = true
+	for index, row in ipairs(rewardRows) do
+		local rewardFrame = Instance.new("Frame")
+		rewardFrame.Name = "Reward_" .. tostring(index)
+		rewardFrame.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.SectionBg
+		rewardFrame.BackgroundTransparency = 0.18
+		rewardFrame.BorderSizePixel = 0
+		rewardFrame.LayoutOrder = index
+		rewardFrame.Size = UDim2.new(1, -8, 0, 34)
+		rewardFrame.ZIndex = 83
+		rewardFrame.Parent = acknowledgeRewardsContainer
+		ensureAckCorner(rewardFrame, 8)
+		local rowStroke = ensureAckStroke(rewardFrame, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0.72, 1)
+		rowStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+		local icon = tostring(row.Icon or "")
+		local nameLeft = if icon ~= "" then 42 else 12
+		if icon ~= "" then
+			local image = Instance.new("ImageLabel")
+			image.Name = "Icon"
+			image.BackgroundTransparency = 1
+			image.Image = icon
+			image.Position = UDim2.fromOffset(8, 5)
+			image.Size = UDim2.fromOffset(24, 24)
+			image.ScaleType = Enum.ScaleType.Fit
+			image.ZIndex = 84
+			image.Parent = rewardFrame
+		end
+
+		local itemName = Instance.new("TextLabel")
+		itemName.Name = "Name"
+		itemName.BackgroundTransparency = 1
+		itemName.Font = Enum.Font.Gotham
+		itemName.Position = UDim2.fromOffset(nameLeft, 0)
+		itemName.Size = UDim2.new(1, -nameLeft - 96, 1, 0)
+		itemName.Text = tostring(row.Name or "Reward")
+		itemName.TextColor3 = DEVIL_FRUIT_ACK_THEME.TextMain
+		itemName.TextSize = 16
+		itemName.TextTruncate = Enum.TextTruncate.AtEnd
+		itemName.TextXAlignment = Enum.TextXAlignment.Left
+		itemName.ZIndex = 84
+		itemName.Parent = rewardFrame
+
+		local quantity = Instance.new("TextLabel")
+		quantity.Name = "Amount"
+		quantity.BackgroundTransparency = 1
+		quantity.Font = Enum.Font.GothamBold
+		quantity.Position = UDim2.new(1, -88, 0, 0)
+		quantity.Size = UDim2.fromOffset(76, 34)
+		quantity.Text = "+" .. formatRewardAmount(row.Amount)
+		quantity.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+		quantity.TextSize = 16
+		quantity.TextXAlignment = Enum.TextXAlignment.Right
+		quantity.ZIndex = 84
+		quantity.Parent = rewardFrame
+	end
+
+	return true
+end
+
 function PopUpModule:Local_ShowAcknowledgement(options)
 	options = options or {}
 	ensureAcknowledgeGui()
+	acknowledgeGui.DisplayOrder = math.max(0, math.floor(tonumber(options.DisplayOrder or options.displayOrder) or 75))
 
 	local title = tostring(options.Title or options.title or "Notice")
 	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")
@@ -1042,6 +1156,7 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 		then tostring(bodyRawText)
 		else normalizeAcknowledgementBody(options.Lines or options.lines or options.Body or options.body)
 	local previewFruitKey = options.PreviewFruitKey or options.previewFruitKey
+	local hasRewardRows = renderRewardRows(options.RewardRows or options.rewardRows)
 
 	if bodyText == "" then
 		bodyText = "No details available."
@@ -1083,6 +1198,7 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 		acknowledgePreviewCard.Visible = false
 		acknowledgeBody.Size = UDim2.new(1, 0, 1, -ACK_BODY_BOTTOM_PADDING)
 	end
+	acknowledgeBody.Visible = not hasRewardRows
 
 	acknowledgeGui.Enabled = true
 	playSound("Reward")
@@ -1090,6 +1206,7 @@ end
 
 function PopUpModule:Local_ShowChestOpenResult(openResult)
 	local acknowledgement = ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
+	acknowledgement.DisplayOrder = 650
 	self:Local_ShowAcknowledgement(acknowledgement)
 
 	local confettiCount = ChestOpenResultFormatter.GetCelebrationCount(openResult)
@@ -1239,7 +1356,7 @@ function PopUpModule:Local_PromptGamepass(player, id)
 
 				-- Pobieramy informacje o gamepassie
 				local gamepassInfo
-				local success, err = pcall(function()
+				local success = pcall(function()
 					gamepassInfo = MarketplaceService:GetProductInfo(id, Enum.InfoType.GamePass)
 				end)
 
@@ -1512,7 +1629,7 @@ function PopUpModule:Local_SpawnConfetti(count)
 	local sizesFolder = animations:WaitForChild("Sizes")
 	local container = animations:WaitForChild("Container")
 
-	for i = 1, count do
+	for _ = 1, count do
 		-- Wybieramy losowy szablon z folderu Sizes
 		local sizes = sizesFolder:GetChildren()
 		local template = sizes[RNG:NextInteger(1, #sizes)]
@@ -1521,7 +1638,7 @@ function PopUpModule:Local_SpawnConfetti(count)
 		confetti.BackgroundColor3 = Colors[RNG:NextInteger(1, #Colors)]
 		local startX = RNG:NextNumber(0, 1)
 		local startY = RNG:NextNumber(-0.5, -0.1)
-		confetti.Position = UDim2.new(startX, 0, startY, 0)
+		confetti.Position = UDim2.fromScale(startX, startY)
 		confetti.Rotation = RNG:NextNumber(0, 360)
 		confetti.Visible = true
 		confetti.Parent = container
@@ -1534,7 +1651,7 @@ function PopUpModule:Local_SpawnConfetti(count)
 			confetti,
 			TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
 			{
-				Position = UDim2.new(endX, 0, endY, 0),
+				Position = UDim2.fromScale(endX, endY),
 				Rotation = confetti.Rotation + RNG:NextNumber(90, 360)
 			}
 		)

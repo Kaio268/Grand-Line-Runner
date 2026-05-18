@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local SettingsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Settings"))
 local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
@@ -30,12 +31,14 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Settings",
 	hostName = "ReactSettingsHost",
-	backdropName = nil,
-	modalStateKey = nil,
+	backdropName = "ReactSettingsBackdrop",
+	backdropActive = false,
+	modalStateKey = "SettingsModal",
 	minSize = Vector2.new(760, 540),
 	maxSize = Vector2.new(1240, 760),
 	frameSize = SETTINGS_FRAME_SIZE,
 	createFrameIfMissing = true,
+	standalone = true,
 })
 
 local SETTING_ORDER = {
@@ -69,9 +72,31 @@ local settingFolder = nil
 local settingOverrides = {}
 local cleanupConnections = {}
 local settingConnections = {}
-
 local scheduleRender
 local syncAudioFromSettings
+
+local unregisterModal = ReactModalRegistry.Register("Settings", {
+	toggle = function()
+		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
+})
 
 local function debugAudio(message, ...)
 	if not DEBUG_SETTINGS_AUDIO then
@@ -451,6 +476,7 @@ script.Destroying:Connect(function()
 	destroyed = true
 	disconnectAll(cleanupConnections)
 	disconnectAll(settingConnections)
+	unregisterModal()
 	modalAdapter:Destroy()
 	root:unmount()
 end)

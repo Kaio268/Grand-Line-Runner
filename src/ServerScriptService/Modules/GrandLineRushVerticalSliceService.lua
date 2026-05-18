@@ -32,9 +32,11 @@ local deathConnections = {}
 local REQUEST_ACTION_ALLOWLIST = {
 	GetState = true,
 	OpenChest = true,
+	OpenChests = true,
 	DropCarriedReward = true,
 	FeedCrew = true,
 }
+local MAX_BATCH_CHEST_OPEN_COUNT = 50
 local CHEST_DEBUG = false
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("VerticalSliceDebugTrace") == true
 
@@ -44,6 +46,9 @@ local FORCED_DROP_PROTECTION_ATTRIBUTE = "GrandLineRushCarryDropProtectedUntil"
 local FORCED_DROP_PROTECTION_DURATION = 0.9
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
+local DEFAULT_MAX_CARRY_SLOTS = 3
+local DEFAULT_UNLOCKED_CARRY_SLOTS = 1
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local STARTER_CREW_SOURCE = "GrandLineRushStarter"
@@ -121,6 +126,8 @@ local function getRuntime(player)
 		DepthBand = Economy.VerticalSlice.DefaultDepthBand,
 		SpawnedReward = nil,
 		CarriedReward = nil,
+		CarrySlots = nil,
+		CarrySequence = 0,
 		ResolutionText = "Start a corridor run and bring a reward back to extract it.",
 		RunSequence = 0,
 	}
@@ -412,6 +419,8 @@ local function clearCarryTool(player)
 
 	player:SetAttribute("CarriedMajorRewardType", nil)
 	player:SetAttribute("CarriedMajorRewardDisplayName", nil)
+	player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
+	player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
 	player:SetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE, nil)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 end
@@ -422,13 +431,6 @@ local function getRewardToolDisplay(reward)
 	end
 
 	return tostring(reward.CrewDisplayName or reward.DisplayName or reward.CrewName or "Crew Contract")
-end
-
-local function createCarryTool(player, reward)
-	clearCarryTool(player)
-	player:SetAttribute("CarriedMajorRewardType", reward.RewardType)
-	player:SetAttribute("CarriedMajorRewardDisplayName", getRewardToolDisplay(reward))
-	player:SetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE, os.clock() + FORCED_DROP_PROTECTION_DURATION)
 end
 
 local function cloneRewardData(reward)
@@ -471,6 +473,353 @@ local function sanitizeReward(reward)
 
 	data.DisplayName = getRewardToolDisplay(reward)
 	return data
+end
+
+local function getCarrySlotConfig()
+	local config = Economy.VerticalSlice.CarrySlots
+	return if typeof(config) == "table" then config else {}
+end
+
+local function getMaxCarrySlots()
+	local configuredMax = math.floor(tonumber(getCarrySlotConfig().MaxSlots) or DEFAULT_MAX_CARRY_SLOTS)
+	return math.clamp(configuredMax, 1, DEFAULT_MAX_CARRY_SLOTS)
+end
+
+local function getUnlockedCarrySlotCount(player, runtime)
+	local maxSlots = getMaxCarrySlots()
+	local config = getCarrySlotConfig()
+	local unlocked = math.floor(tonumber(config.DefaultUnlocked) or DEFAULT_UNLOCKED_CARRY_SLOTS)
+	local temporaryUnlocked = tonumber(config.TemporaryUnlockedForTesting)
+	if temporaryUnlocked ~= nil then
+		unlocked = math.floor(temporaryUnlocked)
+	end
+	local testAttribute = tostring(config.TestUnlockedAttribute or "")
+	if player and testAttribute ~= "" then
+		local override = player:GetAttribute(testAttribute)
+		if typeof(override) == "number" then
+			unlocked = math.floor(override)
+		end
+	end
+	if runtime and typeof(runtime.UnlockedCarrySlotCount) == "number" then
+		unlocked = math.floor(runtime.UnlockedCarrySlotCount)
+	end
+
+	return math.clamp(unlocked, 1, maxSlots)
+end
+
+local function ensureCarrySlots(runtime)
+	if not runtime then
+		return {}
+	end
+
+	local maxSlots = getMaxCarrySlots()
+	if typeof(runtime.CarrySlots) ~= "table" then
+		runtime.CarrySlots = {}
+	end
+
+	for slotIndex = 1, maxSlots do
+		local slot = runtime.CarrySlots[slotIndex]
+		if typeof(slot) ~= "table" then
+			slot = {}
+			runtime.CarrySlots[slotIndex] = slot
+		end
+		slot.SlotIndex = slotIndex
+	end
+
+	for slotIndex = maxSlots + 1, #runtime.CarrySlots do
+		runtime.CarrySlots[slotIndex] = nil
+	end
+
+	return runtime.CarrySlots
+end
+
+local function getCarrySlots(runtime)
+	return ensureCarrySlots(runtime)
+end
+
+local function getCarryItemDisplayName(itemData)
+	if typeof(itemData) ~= "table" then
+		return "Carried Item"
+	end
+
+	local data = if typeof(itemData.Data) == "table" then itemData.Data else itemData
+	if itemData.ItemType == "Chest" or data.RewardType == "Chest" then
+		return ChestUtils.GetDisplayName(data)
+	end
+
+	local displayName = itemData.DisplayName
+		or data.DisplayName
+		or data.CrewDisplayName
+		or data.CrewName
+		or data.CrewMemberId
+	if typeof(displayName) == "string" and displayName ~= "" then
+		return displayName
+	end
+
+	return "Crewmate"
+end
+
+local function cloneCarryData(data)
+	local cloned = {}
+	if typeof(data) ~= "table" then
+		return cloned
+	end
+
+	for key, value in pairs(data) do
+		if typeof(value) ~= "Instance" and typeof(value) ~= "function" then
+			cloned[key] = value
+		end
+	end
+
+	return cloned
+end
+
+local function buildLegacyRewardFromCarrySlot(slot)
+	if typeof(slot) ~= "table" or typeof(slot.CarryId) ~= "string" or slot.CarryId == "" then
+		return nil
+	end
+
+	local data = cloneCarryData(slot.Data)
+	data.CarryId = slot.CarryId
+	data.CarryOrder = slot.CarryOrder
+	data.SlotIndex = slot.SlotIndex
+	data.DisplayName = slot.DisplayName
+
+	if slot.ItemType == "Chest" then
+		data.RewardType = "Chest"
+		data.ChestKind = data.ChestKind or ChestRewards.ChestKinds.Standard
+		data.Tier = ChestUtils.NormalizeTier(data.Tier)
+		return data
+	end
+
+	data.RewardType = data.RewardType or "Crew"
+	data.CrewName = data.CrewName or data.DisplayName or data.CrewDisplayName or data.CrewMemberId
+	data.CrewDisplayName = data.CrewDisplayName or data.DisplayName or data.CrewName
+	data.CrewStorageName = data.CrewStorageName or data.CrewMemberId or data.CrewName
+	return data
+end
+
+local function getFirstOccupiedCarrySlot(runtime)
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+			return slot
+		end
+	end
+
+	return nil
+end
+
+local function findCarrySlot(runtime, slotIndexOrCarryId)
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+			if typeof(slotIndexOrCarryId) == "number" and slot.SlotIndex == slotIndexOrCarryId then
+				return slot
+			end
+			if typeof(slotIndexOrCarryId) == "string"
+				and (slot.CarryId == slotIndexOrCarryId or tostring(slot.SlotIndex) == slotIndexOrCarryId)
+			then
+				return slot
+			end
+		end
+	end
+
+	if slotIndexOrCarryId == nil then
+		return getFirstOccupiedCarrySlot(runtime)
+	end
+
+	return nil
+end
+
+local function mirrorLegacyCarryState(player, runtime)
+	local slot = getCarrySlots(runtime)[1]
+	local legacyReward = buildLegacyRewardFromCarrySlot(slot)
+	runtime.CarriedReward = legacyReward
+
+	if not player then
+		return legacyReward
+	end
+
+	if legacyReward == nil then
+		player:SetAttribute("CarriedMajorRewardType", nil)
+		player:SetAttribute("CarriedMajorRewardDisplayName", nil)
+		player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
+		player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
+		return nil
+	end
+
+	player:SetAttribute("CarriedMajorRewardType", legacyReward.RewardType)
+	player:SetAttribute("CarriedMajorRewardDisplayName", getRewardToolDisplay(legacyReward))
+
+	if slot.ItemType == "CrewMember" then
+		player:SetAttribute(
+			CARRIED_CREW_MEMBER_ATTRIBUTE,
+			tostring(legacyReward.CrewDisplayName or legacyReward.DisplayName or legacyReward.CrewMemberId or legacyReward.CrewName)
+		)
+		local image = legacyReward.Image or legacyReward.CrewMemberImage
+		player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, if typeof(image) == "string" and image ~= "" then image else nil)
+	else
+		player:SetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE, nil)
+		player:SetAttribute(CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE, nil)
+	end
+
+	return legacyReward
+end
+
+local function syncCarrySlotsToClient(player, runtime)
+	mirrorLegacyCarryState(player, runtime)
+end
+
+local function findFirstEmptyUnlockedCarrySlot(player, runtime)
+	local unlockedSlots = getUnlockedCarrySlotCount(player, runtime)
+	for slotIndex, slot in ipairs(getCarrySlots(runtime)) do
+		if slotIndex <= unlockedSlots and (typeof(slot.CarryId) ~= "string" or slot.CarryId == "") then
+			return slot
+		end
+	end
+
+	return nil
+end
+
+local function canCarryMore(player, runtime)
+	return findFirstEmptyUnlockedCarrySlot(player, runtime) ~= nil
+end
+
+local function nextCarryId(player, runtime)
+	runtime.CarrySequence = math.max(0, math.floor(tonumber(runtime.CarrySequence) or 0)) + 1
+	return string.format("%d:%d:%d", player.UserId, math.max(0, tonumber(runtime.RunSequence) or 0), runtime.CarrySequence)
+end
+
+local function refreshHeldCarryVisualLayout(player)
+	if CrewInteraction and typeof(CrewInteraction.RefreshHeldCarryLayout) == "function" then
+		CrewInteraction.RefreshHeldCarryLayout(CrewInteraction.GetActiveContext(), player)
+	end
+end
+
+local function addCarryItem(player, runtime, itemData)
+	if typeof(itemData) ~= "table" then
+		return nil, "invalid_carry_item"
+	end
+
+	local slot = findFirstEmptyUnlockedCarrySlot(player, runtime)
+	if not slot then
+		return nil, "carry_slots_full"
+	end
+
+	local itemType = tostring(itemData.ItemType or itemData.RewardType or "")
+	if itemType == "Crew" or itemType == "Crewmate" then
+		itemType = "CrewMember"
+	elseif itemType ~= "Chest" and itemType ~= "CrewMember" then
+		return nil, "invalid_carry_item_type"
+	end
+
+	local data = cloneCarryData(if typeof(itemData.Data) == "table" then itemData.Data else itemData)
+	local carryOrder = tonumber(itemData.CarryOrder)
+	local carryId = itemData.CarryId
+	if carryId ~= nil then
+		carryId = tostring(carryId)
+		if carryOrder == nil then
+			runtime.CarrySequence = math.max(0, math.floor(tonumber(runtime.CarrySequence) or 0)) + 1
+			carryOrder = runtime.CarrySequence
+		else
+			runtime.CarrySequence = math.max(math.max(0, math.floor(tonumber(runtime.CarrySequence) or 0)), math.floor(carryOrder))
+		end
+	else
+		carryId = nextCarryId(player, runtime)
+		carryOrder = runtime.CarrySequence
+	end
+	slot.CarryId = carryId
+	slot.CarryOrder = carryOrder
+	slot.ItemType = itemType
+	slot.DisplayName = getCarryItemDisplayName({
+		ItemType = itemType,
+		DisplayName = itemData.DisplayName,
+		Data = data,
+	})
+	slot.Data = data
+
+	player:SetAttribute(FORCED_DROP_PROTECTION_ATTRIBUTE, os.clock() + FORCED_DROP_PROTECTION_DURATION)
+	syncCarrySlotsToClient(player, runtime)
+	refreshHeldCarryVisualLayout(player)
+	return slot, nil
+end
+
+local function removeCarryItem(player, runtime, slotIndexOrCarryId)
+	local slot = findCarrySlot(runtime, slotIndexOrCarryId)
+	if not slot then
+		return nil, "no_carried_reward"
+	end
+
+	local removed = {
+		SlotIndex = slot.SlotIndex,
+		CarryId = slot.CarryId,
+		CarryOrder = slot.CarryOrder,
+		ItemType = slot.ItemType,
+		DisplayName = slot.DisplayName,
+		Data = cloneCarryData(slot.Data),
+	}
+
+	slot.CarryId = nil
+	slot.CarryOrder = nil
+	slot.ItemType = nil
+	slot.DisplayName = nil
+	slot.Data = nil
+
+	syncCarrySlotsToClient(player, runtime)
+	refreshHeldCarryVisualLayout(player)
+	return removed, nil
+end
+
+local function clearAllCarryItems(player, runtime, _reason)
+	if player and CrewInteraction and typeof(CrewInteraction.CollectAllHeld) == "function" then
+		CrewInteraction.CollectAllHeld(CrewInteraction.GetActiveContext(), player, nil, {
+			SkipCarrySlotRemove = true,
+		})
+	end
+
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		slot.CarryId = nil
+		slot.CarryOrder = nil
+		slot.ItemType = nil
+		slot.DisplayName = nil
+		slot.Data = nil
+	end
+
+	runtime.CarriedReward = nil
+	clearCarryTool(player)
+	syncCarrySlotsToClient(player, runtime)
+end
+
+local function hasCarryItems(runtime)
+	return getFirstOccupiedCarrySlot(runtime) ~= nil
+end
+
+local function sanitizeCarrySlot(player, runtime, slot)
+	local unlockedSlots = getUnlockedCarrySlotCount(player, runtime)
+	local occupied = typeof(slot.CarryId) == "string" and slot.CarryId ~= ""
+	local output = {
+		SlotIndex = slot.SlotIndex,
+		Locked = slot.SlotIndex > unlockedSlots,
+		Unlocked = slot.SlotIndex <= unlockedSlots,
+		Occupied = occupied,
+	}
+
+	if occupied then
+		output.CarryId = slot.CarryId
+		output.CarryOrder = slot.CarryOrder
+		output.ItemType = slot.ItemType
+		output.DisplayName = slot.DisplayName
+		output.Data = cloneCarryData(slot.Data)
+	end
+
+	return output
+end
+
+local function sanitizeCarrySlots(player, runtime)
+	local slots = {}
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		slots[#slots + 1] = sanitizeCarrySlot(player, runtime, slot)
+	end
+	return slots
 end
 
 local function getBountyBreakdown(player)
@@ -965,9 +1314,11 @@ local function addUnopenedChest(player, chestInfoOrTier, depthBand)
 	return chestId
 end
 
-local function buildState(player)
+local function buildState(player, options)
+	options = if typeof(options) == "table" then options else {}
 	local profile, _ = getProfileAndReplica(player)
 	local runtime = getRuntime(player)
+	syncCarrySlotsToClient(player, runtime)
 
 	if not profile then
 		return {
@@ -976,6 +1327,9 @@ local function buildState(player)
 				DepthBand = runtime.DepthBand,
 				SpawnedReward = sanitizeReward(runtime.SpawnedReward),
 				CarriedReward = sanitizeReward(runtime.CarriedReward),
+				CarrySlots = sanitizeCarrySlots(player, runtime),
+				UnlockedCarrySlotCount = getUnlockedCarrySlotCount(player, runtime),
+				MaxCarrySlots = getMaxCarrySlots(),
 				ResolutionText = runtime.ResolutionText,
 			},
 		}
@@ -1009,7 +1363,7 @@ local function buildState(player)
 		end
 	end
 
-	local crewSummaries = buildCrewStateSummaries(dataRoot)
+	local crewSummaries = if options.IncludeCrews == true then buildCrewStateSummaries(dataRoot) else nil
 
 	local devilFruitCount = 0
 	for _, fruitEntry in pairs(devilFruits) do
@@ -1026,6 +1380,9 @@ local function buildState(player)
 			DepthBand = runtime.DepthBand,
 			SpawnedReward = sanitizeReward(runtime.SpawnedReward),
 			CarriedReward = sanitizeReward(runtime.CarriedReward),
+			CarrySlots = sanitizeCarrySlots(player, runtime),
+			UnlockedCarrySlotCount = getUnlockedCarrySlotCount(player, runtime),
+			MaxCarrySlots = getMaxCarrySlots(),
 			ResolutionText = runtime.ResolutionText,
 		},
 		UnopenedChests = chestSummaries,
@@ -1052,16 +1409,16 @@ local function buildState(player)
 	}
 end
 
-local function pushState(player)
-	local state = buildState(player)
+local function pushState(player, options)
+	local state = buildState(player, options)
 	if stateRemote and player.Parent == Players then
 		stateRemote:FireClient(player, state)
 	end
 	stateChangedEvent:Fire(player, state)
 end
 
-local function resolveActionResponse(player, ok, message, errorCode)
-	local state = buildState(player)
+local function resolveActionResponse(player, ok, message, errorCode, stateOptions)
+	local state = buildState(player, stateOptions)
 	if stateRemote and player.Parent == Players then
 		stateRemote:FireClient(player, state)
 	end
@@ -1075,6 +1432,67 @@ local function resolveActionResponse(player, ok, message, errorCode)
 	}
 end
 
+local carrySlotAdapterInstalled = false
+local function installCarrySlotAdapter()
+	if carrySlotAdapterInstalled then
+		return
+	end
+	carrySlotAdapterInstalled = true
+
+	if typeof(CrewInteraction.SetCarrySlotAdapter) ~= "function" then
+		return
+	end
+
+	CrewInteraction.SetCarrySlotAdapter({
+		CanCarryMore = function(player)
+			return canCarryMore(player, getRuntime(player))
+		end,
+		GetCarrySlots = function(player)
+			local slots = {}
+			for _, slot in ipairs(getCarrySlots(getRuntime(player))) do
+				if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+					slots[#slots + 1] = {
+						SlotIndex = slot.SlotIndex,
+						CarryId = slot.CarryId,
+						CarryOrder = slot.CarryOrder,
+						Occupied = true,
+					}
+				end
+			end
+			return slots
+		end,
+		AddCrewMember = function(player, crewData)
+			crewData = if typeof(crewData) == "table" then crewData else {}
+			local slot, reason = addCarryItem(player, getRuntime(player), {
+				ItemType = "CrewMember",
+				DisplayName = crewData.DisplayName or crewData.CrewName or crewData.CrewMemberId,
+				Data = {
+					RewardType = "Crew",
+					CrewName = crewData.CrewName or crewData.DisplayName or crewData.CrewMemberId,
+					CrewDisplayName = crewData.DisplayName or crewData.CrewName or crewData.CrewMemberId,
+					CrewStorageName = crewData.CrewStorageName or crewData.CrewName or crewData.CrewMemberId,
+					CrewMemberId = crewData.CrewMemberId,
+					Rarity = crewData.Rarity,
+					CanonicalRarity = crewData.CanonicalRarity,
+					Image = crewData.Image,
+					Physical = crewData.Physical == true,
+				},
+			})
+			if slot then
+				pushState(player)
+			end
+			return slot, reason
+		end,
+		RemoveCarryItem = function(player, slotIndexOrCarryId)
+			local removed = removeCarryItem(player, getRuntime(player), slotIndexOrCarryId)
+			if removed then
+				pushState(player)
+			end
+			return removed
+		end,
+	})
+end
+
 local function preparePlayerState(player)
 	if not waitForDataReady(player, 10) then
 		return false, resolveActionResponse(player, false, nil, "profile_not_ready")
@@ -1086,15 +1504,14 @@ end
 
 function Service.FailRun(player, reason)
 	local runtime = getRuntime(player)
-	if runtime.InRun ~= true and runtime.CarriedReward == nil and runtime.SpawnedReward == nil then
+	if runtime.InRun ~= true and not hasCarryItems(runtime) and runtime.SpawnedReward == nil then
 		return resolveActionResponse(player, false, nil, "not_in_run")
 	end
 
 	runtime.InRun = false
 	runtime.SpawnedReward = nil
-	runtime.CarriedReward = nil
+	clearAllCarryItems(player, runtime, "fail_run")
 	runtime.ResolutionText = reason or "Run failed. Unextracted rewards were lost."
-	clearCarryTool(player)
 
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
@@ -1104,8 +1521,8 @@ local function startRun(player, rewardType, depthBand)
 	if runtime.InRun then
 		return resolveActionResponse(player, false, nil, "run_already_active")
 	end
-	if runtime.CarriedReward ~= nil then
-		return resolveActionResponse(player, false, "Extract or lose your carried reward before starting a new run.", "already_carrying_reward")
+	if not canCarryMore(player, runtime) then
+		return resolveActionResponse(player, false, "Extract or drop a carried reward before starting another run.", "carry_slots_full")
 	end
 	if runtime.SpawnedReward ~= nil then
 		return resolveActionResponse(player, false, "Recover or lose your dropped reward before starting a new run.", "unresolved_spawned_reward")
@@ -1117,7 +1534,6 @@ local function startRun(player, rewardType, depthBand)
 
 	runtime.InRun = true
 	runtime.DepthBand = depthBand or Economy.VerticalSlice.DefaultDepthBand
-	runtime.CarriedReward = nil
 	runtime.RunSequence += 1
 
 	if rewardType == "Crew" then
@@ -1144,7 +1560,7 @@ local function startRun(player, rewardType, depthBand)
 		"%s reward spawned for the run. Pick it up, then extract it at base.",
 		getRewardToolDisplay(runtime.SpawnedReward)
 	)
-	clearCarryTool(player)
+	syncCarrySlotsToClient(player, runtime)
 
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
@@ -1157,72 +1573,43 @@ local function claimSpawnedReward(player)
 		end
 		return resolveActionResponse(player, false, nil, "no_spawned_reward")
 	end
-	if runtime.CarriedReward ~= nil then
-		return resolveActionResponse(player, false, nil, "already_carrying_reward")
+	if not canCarryMore(player, runtime) then
+		return resolveActionResponse(player, false, nil, "carry_slots_full")
 	end
 
-	runtime.CarriedReward = cloneRewardData(runtime.SpawnedReward)
-	runtime.CarriedReward.WorldDropPosition = nil
+	local rewardData = cloneRewardData(runtime.SpawnedReward)
+	rewardData.WorldDropPosition = nil
+	local slot, addReason = addCarryItem(player, runtime, {
+		ItemType = if rewardData.RewardType == "Chest" then "Chest" else "CrewMember",
+		DisplayName = getRewardToolDisplay(rewardData),
+		Data = rewardData,
+	})
+	if not slot then
+		return resolveActionResponse(player, false, nil, addReason or "carry_slots_full")
+	end
+
 	runtime.SpawnedReward = nil
 	runtime.ResolutionText = string.format(
-		"Carrying %s. Extract successfully to secure it.",
-		getRewardToolDisplay(runtime.CarriedReward)
+		"Carrying %s in slot %d. Extract successfully to secure it.",
+		slot.DisplayName,
+		slot.SlotIndex
 	)
 
-	createCarryTool(player, runtime.CarriedReward)
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
-local function extractRun(player)
-	local runtime = getRuntime(player)
-	if runtime.CarriedReward == nil then
-		if runtime.InRun ~= true then
-			return resolveActionResponse(player, false, nil, "not_in_run")
-		end
-		return resolveActionResponse(player, false, nil, "no_carried_reward")
+local function grantCarrySlotReward(player, slot)
+	local carriedReward = buildLegacyRewardFromCarrySlot(slot)
+	if carriedReward == nil then
+		return false, nil, "missing_carried_reward"
 	end
 
-	local carriedReward = runtime.CarriedReward
 	local message
-	runTrace(
-		"sliceExtractBegin player=%s carriedType=%s tier=%s crew=%s inRun=%s",
-		player.Name,
-		tostring(carriedReward and carriedReward.RewardType),
-		tostring(carriedReward and carriedReward.Tier),
-		tostring(carriedReward and carriedReward.CrewName),
-		tostring(runtime.InRun)
-	)
-	chestDebug(
-		"extractRun success path player=%s carriedType=%s inRun=%s",
-		player.Name,
-		tostring(carriedReward and carriedReward.RewardType),
-		tostring(runtime.InRun)
-	)
-
 	if carriedReward.RewardType == "Chest" then
-		chestDebug(
-			"extractRun calling addUnopenedChest player=%s tier=%s depth=%s",
-			player.Name,
-			tostring(carriedReward.Tier),
-			tostring(carriedReward.DepthBand)
-		)
-		local chestId = addUnopenedChest(player, carriedReward.Tier, carriedReward.DepthBand)
+		local chestId = addUnopenedChest(player, carriedReward, carriedReward.DepthBand)
 		if chestId == nil then
-			runTrace(
-				"sliceExtractFailed player=%s reason=persist_chest_failed carriedType=%s tier=%s",
-				player.Name,
-				tostring(carriedReward.RewardType),
-				tostring(carriedReward.Tier)
-			)
-			return resolveActionResponse(player, false, nil, "persist_chest_failed")
+			return false, nil, "persist_chest_failed"
 		end
-		runTrace(
-			"sliceExtractPersistedChest player=%s tier=%s chestId=%s depth=%s action=add_to_inventory_state",
-			player.Name,
-			tostring(carriedReward.Tier),
-			tostring(chestId),
-			tostring(carriedReward.DepthBand)
-		)
 		message = string.format(
 			"Extracted %s and stored it in Treasure as chest #%s.",
 			getRewardToolDisplay(carriedReward),
@@ -1231,7 +1618,7 @@ local function extractRun(player)
 	else
 		local instanceId = addCrewInstance(player, {
 			Name = carriedReward.CrewName,
-			DisplayName = carriedReward.CrewDisplayName or carriedReward.CrewName,
+			DisplayName = carriedReward.CrewDisplayName or carriedReward.DisplayName or carriedReward.CrewName,
 			StorageName = carriedReward.CrewStorageName,
 			CrewMemberId = carriedReward.CrewMemberId,
 			Rarity = carriedReward.Rarity,
@@ -1239,22 +1626,14 @@ local function extractRun(player)
 			DepthBand = carriedReward.DepthBand,
 		}, "GrandLineRush")
 		if instanceId == nil then
-			runTrace(
-				"sliceExtractFailed player=%s reason=persist_crew_failed carriedType=%s crew=%s",
-				player.Name,
-				tostring(carriedReward.RewardType),
-				tostring(carriedReward.CrewName)
-			)
-			return resolveActionResponse(player, false, nil, "persist_crew_failed")
+			return false, nil, "persist_crew_failed"
 		end
-		runTrace(
-			"sliceExtractPersistedCrew player=%s crew=%s rarity=%s instanceId=%s",
-			player.Name,
-			tostring(carriedReward.CrewName),
-			tostring(carriedReward.Rarity),
-			tostring(instanceId)
+		message = string.format(
+			"Recruited %s (%s) as crew #%s.",
+			tostring(carriedReward.CrewDisplayName or carriedReward.CrewName or carriedReward.DisplayName),
+			tostring(carriedReward.Rarity or "Common"),
+			tostring(instanceId or "?")
 		)
-		message = string.format("Extracted crew reward and recruited %s (%s) as crew #%s.", tostring(carriedReward.CrewName), tostring(carriedReward.Rarity), tostring(instanceId or "?"))
 	end
 
 	QuestSignals.Record(player, "ReachDepth", 1, {
@@ -1265,7 +1644,7 @@ local function extractRun(player)
 		QuestSignals.Record(player, "ExtractCrew", 1, {
 			DepthBand = tostring(carriedReward.DepthBand or ""),
 			Rarity = tostring(carriedReward.Rarity or ""),
-			CrewName = tostring(carriedReward.CrewName or ""),
+			CrewName = tostring(carriedReward.CrewName or carriedReward.DisplayName or ""),
 		})
 	end
 
@@ -1286,17 +1665,70 @@ local function extractRun(player)
 		))
 	end
 
+	return true, message, nil
+end
+
+local function extractRun(player)
+	local runtime = getRuntime(player)
+	if not hasCarryItems(runtime) then
+		if runtime.InRun ~= true then
+			return resolveActionResponse(player, false, nil, "not_in_run")
+		end
+		return resolveActionResponse(player, false, nil, "no_carried_reward")
+	end
+
+	local messages = {}
+	local extractedCount = 0
+	local failedReason = nil
+	local slotsToExtract = {}
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+			slotsToExtract[#slotsToExtract + 1] = slot
+		end
+	end
+
+	runTrace(
+		"sliceExtractBegin player=%s carriedCount=%d inRun=%s",
+		player.Name,
+		#slotsToExtract,
+		tostring(runtime.InRun)
+	)
+
+	for _, slot in ipairs(slotsToExtract) do
+		local ok, message, reason = grantCarrySlotReward(player, slot)
+		if not ok then
+			failedReason = reason or "extract_failed"
+			break
+		end
+
+		extractedCount += 1
+		messages[#messages + 1] = message
+		if slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
+			CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, slot.CarryId)
+		end
+		removeCarryItem(player, runtime, slot.CarryId)
+	end
+
+	if extractedCount <= 0 then
+		return resolveActionResponse(player, false, nil, failedReason or "extract_failed")
+	end
+
+	local message = table.concat(messages, " ")
+	if failedReason ~= nil then
+		runtime.ResolutionText = string.format("%s Some carried rewards could not be extracted yet.", message)
+		return resolveActionResponse(player, true, runtime.ResolutionText, failedReason)
+	end
+
 	runtime.InRun = false
 	runtime.SpawnedReward = nil
-	runtime.CarriedReward = nil
 	runtime.ResolutionText = message
-	clearCarryTool(player)
+	syncCarrySlotsToClient(player, runtime)
 	runTrace(
 		"sliceExtractComplete player=%s message=%s inRun=%s carriedAfter=%s",
 		player.Name,
 		tostring(message),
 		tostring(runtime.InRun),
-		tostring(runtime.CarriedReward ~= nil)
+		tostring(hasCarryItems(runtime))
 	)
 
 	return resolveActionResponse(player, true, message)
@@ -1310,40 +1742,48 @@ local function claimWorldChest(player, rewardData)
 	if runtime.SpawnedReward ~= nil then
 		return resolveActionResponse(player, false, "Recover or lose your dropped reward before claiming another chest.", "unresolved_spawned_reward")
 	end
-	if runtime.CarriedReward ~= nil then
-		return resolveActionResponse(player, false, nil, "already_carrying_reward")
-	end
-	if hasCarriedCrewMember(player) then
-		return resolveActionResponse(player, false, "You cannot pick up a chest while carrying a Crewmate.", "carrying_crew_member")
+	if not canCarryMore(player, runtime) then
+		return resolveActionResponse(player, false, nil, "carry_slots_full")
 	end
 
-	local tierName = tostring(rewardData and rewardData.Tier or "Wooden")
+	local reward = ChestUtils.BuildChestData(if typeof(rewardData) == "table" then rewardData else {
+		ChestKind = ChestRewards.ChestKinds.Standard,
+		Tier = "Wooden",
+		DepthBand = Economy.VerticalSlice.DefaultDepthBand,
+		Source = "SharedWorld",
+	})
+	local tierName = tostring(reward.Tier or "Wooden")
 	if Economy.Chests.Tiers[tierName] == nil then
 		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
 	end
 
-	local depthBand = tostring(rewardData and rewardData.DepthBand or Economy.VerticalSlice.DefaultDepthBand)
+	local depthBand = tostring(reward.DepthBand or Economy.VerticalSlice.DefaultDepthBand)
 	runtime.DepthBand = depthBand
 	runtime.SpawnedReward = nil
-	runtime.CarriedReward = {
-		RewardType = "Chest",
-		ChestKind = ChestRewards.ChestKinds.Standard,
-		Tier = tierName,
-		DepthBand = depthBand,
-		Source = "SharedWorld",
-	}
+	reward.RewardType = "Chest"
+	reward.DepthBand = depthBand
+	reward.Source = reward.Source or "SharedWorld"
+	local slot, addReason = addCarryItem(player, runtime, {
+		ItemType = "Chest",
+		DisplayName = getRewardToolDisplay(reward),
+		Data = reward,
+	})
+	if not slot then
+		return resolveActionResponse(player, false, nil, addReason or "carry_slots_full")
+	end
+
 	runtime.ResolutionText = string.format(
-		"Carrying %s. Extract successfully to secure it.",
-		getRewardToolDisplay(runtime.CarriedReward)
+		"Carrying %s in slot %d. Extract successfully to secure it.",
+		slot.DisplayName,
+		slot.SlotIndex
 	)
 
-	createCarryTool(player, runtime.CarriedReward)
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
 local function canForceCarryDrop(player, runtime, options)
 	runtime = runtime or getRuntime(player)
-	if runtime.CarriedReward == nil then
+	if not hasCarryItems(runtime) then
 		return false, "no_carried_reward"
 	end
 
@@ -1431,7 +1871,9 @@ local function dropCarriedReward(player, options)
 		return resolveActionResponse(player, false, nil, reason)
 	end
 
-	local droppedReward = cloneRewardData(runtime.CarriedReward)
+	local slotKey = options.CarryId or options.SlotIndex
+	local slot = findCarrySlot(runtime, slotKey)
+	local droppedReward = buildLegacyRewardFromCarrySlot(slot)
 	if not droppedReward then
 		return resolveActionResponse(player, false, nil, "missing_carried_reward")
 	end
@@ -1441,15 +1883,78 @@ local function dropCarriedReward(player, options)
 		droppedReward.WorldDropPosition = dropPosition
 	end
 
-	runtime.SpawnedReward = droppedReward
-	runtime.CarriedReward = nil
+	if slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
+		local droppedPhysical, dropReason = CrewInteraction.DropHeldAtPosition(CrewInteraction.GetActiveContext(), player, nil, dropPosition, droppedReward.CarryId, {
+			SkipCarrySlotRemove = true,
+		})
+		if not droppedPhysical then
+			return resolveActionResponse(player, false, nil, tostring(dropReason or "no_held_crew_member"))
+		end
+		removeCarryItem(player, runtime, slotKey)
+	else
+		if runtime.SpawnedReward ~= nil then
+			return resolveActionResponse(player, false, nil, "unresolved_spawned_reward")
+		end
+		runtime.SpawnedReward = droppedReward
+		removeCarryItem(player, runtime, slotKey)
+	end
+
 	runtime.ResolutionText = string.format(
 		"%s was dropped. Recover it before extracting.",
 		getRewardToolDisplay(droppedReward)
 	)
-	clearCarryTool(player)
+	syncCarrySlotsToClient(player, runtime)
 
 	return resolveActionResponse(player, true, runtime.ResolutionText)
+end
+
+local function dropAllCarriedRewards(player, options)
+	local runtime = getRuntime(player)
+	options = if typeof(options) == "table" then options else {}
+	local canDrop, reason = canForceCarryDrop(player, runtime, options)
+	if not canDrop then
+		return resolveActionResponse(player, false, nil, reason)
+	end
+
+	local occupiedSlots = {}
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+			occupiedSlots[#occupiedSlots + 1] = {
+				SlotIndex = slot.SlotIndex,
+				CarryId = slot.CarryId,
+			}
+		end
+	end
+
+	if #occupiedSlots <= 0 then
+		return resolveActionResponse(player, false, nil, "no_carried_reward")
+	end
+
+	local droppedCount = 0
+	local firstError = nil
+	for _, slotRef in ipairs(occupiedSlots) do
+		local dropOptions = table.clone(options)
+		dropOptions.SlotIndex = slotRef.SlotIndex
+		dropOptions.CarryId = slotRef.CarryId
+		local response = dropCarriedReward(player, dropOptions)
+		if response and response.ok == true then
+			droppedCount += 1
+		else
+			firstError = firstError or (response and response.error) or "drop_failed"
+			if firstError == "unresolved_spawned_reward" then
+				break
+			end
+		end
+	end
+
+	if droppedCount <= 0 then
+		return resolveActionResponse(player, false, nil, firstError or "drop_failed")
+	end
+
+	local message = if droppedCount == 1
+		then "Dropped carried item."
+		else string.format("Dropped %d carried items.", droppedCount)
+	return resolveActionResponse(player, true, message, firstError)
 end
 
 local function dropCarriedCrewMember(player, dropPosition)
@@ -1577,6 +2082,197 @@ local function openChest(player, requestedChestId)
 
 	local response = resolveActionResponse(player, true, message)
 	response.openResult = resolution.OpenResult
+	return response
+end
+
+local function mergeGrantedResources(target, source)
+	target = if typeof(target) == "table" then target else {}
+	source = if typeof(source) == "table" then source else {}
+	target.food = if typeof(target.food) == "table" then target.food else {}
+	target.materials = if typeof(target.materials) == "table" then target.materials else {}
+
+	for foodKey, amount in pairs(source.food or {}) do
+		target.food[foodKey] = math.max(0, tonumber(target.food[foodKey]) or 0) + math.max(0, tonumber(amount) or 0)
+	end
+	for materialKey, amount in pairs(source.materials or {}) do
+		target.materials[materialKey] = math.max(0, tonumber(target.materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
+	end
+	target.doubloons = math.max(0, tonumber(target.doubloons) or 0) + math.max(0, tonumber(source.doubloons) or 0)
+
+	return target
+end
+
+local function mergeChangedRoots(target, source)
+	for key, value in pairs(source or {}) do
+		if value == true then
+			target[key] = true
+		end
+	end
+end
+
+local function recordChestRewardQuestSignals(player, normalizedChestData, grantedResources)
+	local tierName = normalizedChestData.Tier
+	QuestSignals.Record(player, "OpenChest", 1, {
+		Tier = tostring(tierName or ""),
+		ChestKind = tostring(normalizedChestData.ChestKind or ""),
+		FruitRarity = tostring(normalizedChestData.FruitRarity or ""),
+	})
+	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
+		QuestSignals.Record(player, "EarnDoubloons", grantedResources.doubloons, {
+			Source = "Chest",
+			Tier = tostring(tierName or ""),
+		})
+	end
+	for foodKey, amount in pairs(grantedResources.food or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectFood", normalizedAmount, {
+				Key = tostring(foodKey),
+				FoodKey = tostring(foodKey),
+				Source = "Chest",
+			})
+		end
+	end
+	for materialKey, amount in pairs(grantedResources.materials or {}) do
+		local normalizedAmount = math.max(0, tonumber(amount) or 0)
+		if normalizedAmount > 0 then
+			QuestSignals.Record(player, "CollectMaterial", normalizedAmount, {
+				Key = tostring(materialKey),
+				MaterialKey = tostring(materialKey),
+				Source = "Chest",
+			})
+		end
+	end
+end
+
+local function buildBatchOpenResult(openedChestName, openedCount, aggregateResources, batchResults)
+	local grantedFruits = {}
+	local duplicateCount = 0
+	local convertedChestCount = 0
+	local conversionDoubloons = 0
+	local mythicKeyCount = 0
+
+	for _, result in ipairs(batchResults) do
+		if result.GrantedFruit then
+			grantedFruits[#grantedFruits + 1] = {
+				FruitKey = result.GrantedFruit,
+				Rarity = result.GrantedFruitRarity,
+			}
+		end
+		if result.WasDuplicate == true then
+			duplicateCount += 1
+		end
+		if result.ConversionRewardType == "Chest" then
+			convertedChestCount += 1
+		elseif result.ConversionRewardType == "Doubloons" then
+			conversionDoubloons += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
+		elseif result.ConversionRewardType == "MythicKey" then
+			mythicKeyCount += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
+		end
+	end
+
+	return {
+		IsBatch = true,
+		OpenedCount = openedCount,
+		OpenedChest = {
+			displayName = ChestUtils.GetDisplayName(openedChestName),
+		},
+		GrantedResources = aggregateResources,
+		GrantedFruits = grantedFruits,
+		DuplicateCount = duplicateCount,
+		ConvertedChestCount = convertedChestCount,
+		ConversionDoubloons = conversionDoubloons,
+		MythicKeyCount = mythicKeyCount,
+	}
+end
+
+local function openChests(player, inventoryName, requestedAmount)
+	local profile, replica = getProfileAndReplica(player)
+	if not profile or not replica then
+		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+
+	local targetInventoryName = tostring(inventoryName or "")
+	if targetInventoryName == "" then
+		return resolveActionResponse(player, false, nil, "invalid_chest_name")
+	end
+
+	local requestedCount = math.clamp(math.floor(tonumber(requestedAmount) or 1), 1, MAX_BATCH_CHEST_OPEN_COUNT)
+	local dataRoot = profile.Data
+	local unopenedChests = dataRoot.UnopenedChests
+	unopenedChests.Order = unopenedChests.Order or {}
+	unopenedChests.ById = unopenedChests.ById or {}
+
+	local chestIds = {}
+	for _, chestId in ipairs(unopenedChests.Order) do
+		local chestData = unopenedChests.ById[tostring(chestId)]
+		if chestData and ChestUtils.GetInventoryName(chestData) == targetInventoryName then
+			chestIds[#chestIds + 1] = tostring(chestId)
+			if #chestIds >= requestedCount then
+				break
+			end
+		end
+	end
+
+	if #chestIds <= 0 then
+		return resolveActionResponse(player, false, nil, "no_chests_available")
+	end
+
+	local changedRoots = { UnopenedChests = true }
+	local aggregateResources = {
+		food = {},
+		materials = {},
+		doubloons = 0,
+	}
+	local batchResults = {}
+	local openedCount = 0
+
+	for _, chestId in ipairs(chestIds) do
+		local chestData = unopenedChests.ById[chestId]
+		if typeof(chestData) == "table" then
+			local normalizedChestData = ChestUtils.BuildChestData(chestData)
+			local resolution = ChestRewardResolver.Resolve({
+				Player = player,
+				DataRoot = dataRoot,
+				ChestData = normalizedChestData,
+				Random = randomObject,
+				AddChestEntry = function(grantedChestData)
+					local grantedChestId = addUnopenedChestToCollection(unopenedChests, grantedChestData)
+					return grantedChestId
+				end,
+			})
+
+			unopenedChests.ById[chestId] = nil
+			openedCount += 1
+			local openResult = resolution.OpenResult or {}
+			batchResults[#batchResults + 1] = openResult
+			mergeChangedRoots(changedRoots, resolution.ChangedRoots)
+			mergeGrantedResources(aggregateResources, openResult.GrantedResources)
+			recordChestRewardQuestSignals(player, normalizedChestData, openResult.GrantedResources or {})
+		end
+	end
+
+	if openedCount <= 0 then
+		return resolveActionResponse(player, false, nil, "no_chests_available")
+	end
+
+	local removedChestIds = {}
+	for _, chestId in ipairs(chestIds) do
+		removedChestIds[tostring(chestId)] = true
+	end
+	for index = #unopenedChests.Order, 1, -1 do
+		if removedChestIds[tostring(unopenedChests.Order[index])] == true then
+			table.remove(unopenedChests.Order, index)
+		end
+	end
+
+	local changedPaths = buildRewardChangedPaths(dataRoot, changedRoots, {
+		UnopenedChests = unopenedChests,
+	})
+	syncPaths(player, replica, changedPaths)
+
+	local response = resolveActionResponse(player, true, string.format("Opened %d chests.", openedCount))
+	response.openResult = buildBatchOpenResult(targetInventoryName, openedCount, aggregateResources, batchResults)
 	return response
 end
 
@@ -1776,9 +2472,13 @@ local function handleRequest(player, actionName, payload)
 	end
 
 	if actionName == "GetState" then
-		return resolveActionResponse(player, true)
+		return resolveActionResponse(player, true, nil, nil, {
+			IncludeCrews = typeof(payload) == "table" and payload.IncludeCrews == true,
+		})
 	elseif actionName == "OpenChest" then
 		return openChest(player, payload and payload.ChestId)
+	elseif actionName == "OpenChests" then
+		return openChests(player, payload and payload.InventoryName, payload and payload.Amount)
 	elseif actionName == "DropCarriedReward" then
 		local dropPosition = getManualDropPosition(player)
 		if typeof(dropPosition) ~= "Vector3" then
@@ -1786,11 +2486,13 @@ local function handleRequest(player, actionName, payload)
 		end
 
 		local runtime = getRuntime(player)
-		if runtime.CarriedReward ~= nil then
+		if hasCarryItems(runtime) then
 			return dropCarriedReward(player, {
 				Reason = "PlayerDrop",
 				DropPosition = dropPosition,
 				IgnoreProtection = true,
+				SlotIndex = payload and payload.SlotIndex,
+				CarryId = payload and payload.CarryId,
 			})
 		end
 
@@ -1824,7 +2526,7 @@ local function bindCharacter(player, character)
 
 	deathConnections[player] = humanoid.Died:Connect(function()
 		local runtime = getRuntime(player)
-		if runtime.InRun or runtime.CarriedReward ~= nil or runtime.SpawnedReward ~= nil then
+		if runtime.InRun or hasCarryItems(runtime) or runtime.SpawnedReward ~= nil then
 			Service.FailRun(player, "Defeated before securing the reward. Unextracted rewards were lost.")
 		end
 	end)
@@ -1868,6 +2570,7 @@ function Service.Start()
 
 	started = true
 	ensureRemotes()
+	installCarrySlotAdapter()
 
 	requestRemote.OnServerInvoke = function(player, actionName, payload)
 		return handleRequest(player, actionName, payload)
@@ -1883,12 +2586,12 @@ end
 
 Service.StateChanged = stateChangedEvent.Event
 
-function Service.GetState(player)
-	return buildState(player)
+function Service.GetState(player, options)
+	return buildState(player, options)
 end
 
-function Service.PushState(player)
-	pushState(player)
+function Service.PushState(player, options)
+	pushState(player, options)
 end
 
 function Service.StartRun(player, rewardType, depthBand)
@@ -1932,8 +2635,38 @@ function Service.CanForceCarryDrop(player)
 	return canForceCarryDrop(player)
 end
 
+function Service.CanCarryMore(player)
+	return canCarryMore(player, getRuntime(player))
+end
+
+function Service.HasCarryItems(player)
+	return hasCarryItems(getRuntime(player))
+end
+
+function Service.AddCarryItem(player, itemData)
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return nil, errorResponse and errorResponse.error or "profile_not_ready"
+	end
+
+	return addCarryItem(player, getRuntime(player), itemData)
+end
+
+function Service.RemoveCarryItem(player, slotIndexOrCarryId)
+	return removeCarryItem(player, getRuntime(player), slotIndexOrCarryId)
+end
+
+function Service.ClearAllCarryItems(player, reason)
+	clearAllCarryItems(player, getRuntime(player), reason)
+	return resolveActionResponse(player, true)
+end
+
 function Service.DropCarriedReward(player, options)
 	return dropCarriedReward(player, options)
+end
+
+function Service.DropAllCarriedRewards(player, options)
+	return dropAllCarriedRewards(player, options)
 end
 
 function Service.ExtractRun(player)
@@ -1986,6 +2719,15 @@ function Service.OpenChest(player, chestId)
 	end
 
 	return openChest(player, chestId)
+end
+
+function Service.OpenChests(player, inventoryName, amount)
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return errorResponse
+	end
+
+	return openChests(player, inventoryName, amount)
 end
 
 function Service.GrantSpecificFruitReward(player, fruitIdentifier, sourceOptions)

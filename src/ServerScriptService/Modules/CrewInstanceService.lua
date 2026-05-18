@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
+local CrewInventoryDerivedCache = require(script.Parent:WaitForChild("CrewInventoryDerivedCache"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(script.Parent:WaitForChild("CrewStandIncomeAuthority"))
 local IndexCollectionService = require(script.Parent:WaitForChild("IndexCollectionService"))
@@ -160,6 +161,7 @@ local function isProtectedTutorialReward(player, instanceData)
 end
 
 local function notifyInventorySaved(player, crewInventory)
+	CrewInventoryDerivedCache.MarkSaved(player, crewInventory, "inventory_saved")
 	for callback in pairs(inventorySavedCallbacks) do
 		local ok, err = pcall(callback, player, crewInventory)
 		if not ok then
@@ -1347,19 +1349,21 @@ end
 function Module.CreateInstances(player, storageName, count, overrides)
 	local safeCount = math.max(0, math.floor(coerceNumber(count, 0)))
 	if safeCount <= 0 then
-		return {}
+		return {}, "non_positive_count"
 	end
 	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
 	if not info then
 		warnInvalidCrewIdentity("inventory_grant", storageName, player)
-		return {}
+		return {}, "unknown_crew_member_id"
 	end
 
 	local assignedStand = tostring(overrides and overrides.AssignedStand or "")
 	local capacityReserved = overrides and overrides._QuickSlotCapacityReserved == true
 	if assignedStand == "" and not capacityReserved then
-		if not CrewQuickSlotService.CanGainOrNotify(player, safeCount, "CreateInstances:" .. tostring(canonicalStorageName)) then
-			return {}
+		local canGain, _, _, _, capacityReason =
+			CrewQuickSlotService.CanGainOrNotify(player, canonicalStorageName, safeCount, "CreateInstances:" .. tostring(canonicalStorageName))
+		if not canGain then
+			return {}, tostring(capacityReason or "crew_stack_capacity_full")
 		end
 	end
 
@@ -1371,7 +1375,7 @@ function Module.CreateInstances(player, storageName, count, overrides)
 			tostring(storageName),
 			tostring(readyReason or "unknown")
 		))
-		return {}
+		return {}, tostring(readyReason or "inventory_authority_not_ready")
 	end
 
 	local crewMemberInventory = getCrewMemberInventory(player)
@@ -1380,9 +1384,9 @@ function Module.CreateInstances(player, storageName, count, overrides)
 	for _ = 1, safeCount do
 		local instanceOverrides = if typeof(overrides) == "table" then table.clone(overrides) else {}
 		instanceOverrides.DeferIndexShadowRefresh = true
-		local instanceId = createInstanceInternal(player, crewMemberInventory, canonicalStorageName, instanceOverrides)
+		local instanceId, _, createReason = createInstanceInternal(player, crewMemberInventory, canonicalStorageName, instanceOverrides)
 		if instanceId == nil then
-			return {}
+			return {}, tostring(createReason or "create_instance_failed")
 		end
 		table.insert(createdIds, instanceId)
 	end
@@ -1397,7 +1401,7 @@ function Module.CreateInstances(player, storageName, count, overrides)
 			tostring(storageName),
 			tostring(saveReason or "unknown")
 		))
-		return {}
+		return {}, tostring(saveReason or "inventory_save_failed")
 	end
 	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "inventory_grant")
@@ -2011,6 +2015,7 @@ function Module.ReleaseStandInstance(player, standName, options)
 
 	local canGain, occupiedSlots, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainOrNotify(
 		player,
+		getInstanceCrewKey(instanceData),
 		1,
 		"ReleaseStandInstance:" .. standName
 	)
@@ -2366,7 +2371,12 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 		return nil, nil
 	end
 
-	if not CrewQuickSlotService.CanGainOrNotify(buyerPlayer, 1, "TransferStandInstance:" .. tostring(standName)) then
+	if not CrewQuickSlotService.CanGainOrNotify(
+		buyerPlayer,
+		getInstanceCrewKey(instanceData),
+		1,
+		"TransferStandInstance:" .. tostring(standName)
+	) then
 		return nil, nil
 	end
 

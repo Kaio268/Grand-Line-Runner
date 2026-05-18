@@ -223,6 +223,11 @@ local function logClaimButtonState(eventName: string, context: string, rewardId:
 end
 
 local player = Players.LocalPlayer
+local Modules = waitForChildLogged(ReplicatedStorage, "Modules", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules")
+local GiftsViewBridge = requireLogged(
+	waitForChildLogged(Modules, "GiftsViewBridge", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.GiftsViewBridge"),
+	"ReplicatedStorage.Modules.GiftsViewBridge"
+)
 giftStartupLog(
 	"start",
 	"version",
@@ -236,9 +241,10 @@ giftStartupLog(
 )
 
 local guiRoot = waitForChildLogged(player, "PlayerGui", REQUIRED_WAIT_SECONDS, "Players.LocalPlayer.PlayerGui")
-local mainGui = waitForChildLogged(guiRoot, "Frames", REQUIRED_WAIT_SECONDS, "PlayerGui.Frames")
-local giftsFrame = waitForChildLogged(mainGui, "Gifts", REQUIRED_WAIT_SECONDS, "PlayerGui.Frames.Gifts")
-local giftsMainFrame = waitForChildLogged(giftsFrame, "Main", REQUIRED_WAIT_SECONDS, "PlayerGui.Frames.Gifts.Main")
+local giftRefs = GiftsViewBridge and GiftsViewBridge.WaitForRefs(REQUIRED_WAIT_SECONDS) or nil
+local giftsFrame = giftRefs and giftRefs.frame
+local giftsMainFrame = giftRefs and giftRefs.main
+local mainGui = giftsFrame and giftsFrame.Parent
 
 if not (guiRoot and mainGui and giftsFrame and giftsMainFrame) then
 	giftStartupWarn(
@@ -625,7 +631,6 @@ giftsFrame:GetPropertyChangedSignal("Visible"):Connect(function()
 	end
 end)
 
-local Modules = waitForChildLogged(ReplicatedStorage, "Modules", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules")
 local TimeRewardsFolder = waitForChildLogged(Modules, "TimeRewards", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.TimeRewards")
 local RewardsConfig = requireLogged(
 	waitForChildLogged(TimeRewardsFolder, "Config", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.TimeRewards.Config"),

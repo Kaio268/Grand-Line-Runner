@@ -45,12 +45,14 @@ local function categoryTab(props)
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(4, 7),
-			Size = UDim2.new(1, -8, 0, 12),
+			Font = Theme.Fonts.BodyStrong,
+			Position = UDim2.fromOffset(4, 5),
+			Size = UDim2.new(1, -8, 0, 16),
 			Text = tostring(category.label or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or Theme.Palette.MutedSoft,
-			TextSize = 10,
+			TextSize = 13,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = active and 0.66 or 0.78,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
 		Count = e("TextLabel", {

@@ -15,6 +15,7 @@ local MetaClient = {
 local SAFE_CLIENT_ACTIONS = {
 	GetState = true,
 	OpenChest = true,
+	OpenChests = true,
 	FeedCrew = true,
 }
 
@@ -138,6 +139,19 @@ end
 function MetaClient.OpenChest(chestId)
 	local response = MetaClient.Request("OpenChest", {
 		ChestId = chestId,
+	})
+
+	if typeof(response) == "table" and response.ok == true and typeof(response.openResult) == "table" then
+		PopUpModule:Local_ShowChestOpenResult(response.openResult)
+	end
+
+	return response
+end
+
+function MetaClient.OpenChests(inventoryName, amount)
+	local response = MetaClient.Request("OpenChests", {
+		InventoryName = inventoryName,
+		Amount = amount,
 	})
 
 	if typeof(response) == "table" and response.ok == true and typeof(response.openResult) == "table" then

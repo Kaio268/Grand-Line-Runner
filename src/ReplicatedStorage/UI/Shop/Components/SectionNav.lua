@@ -60,6 +60,8 @@ local function navButton(props)
 			Text = section.title,
 			TextColor3 = textColor,
 			TextSize = 12,
+			TextStrokeColor3 = Theme.Palette.GoldSoft,
+			TextStrokeTransparency = isActive and 0.4 or 0.56,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
 		}),

@@ -60,6 +60,9 @@ local SOUND_ACTIVATE = "Activate"
 local SOUND_MOVE_LOOP = "MoveLoop"
 local SOUND_RETURN = "Return"
 local SOUND_CLEANUP_FALLBACK_SECONDS = 8
+local HORO_HINT_SIZE = UDim2.fromOffset(150, 30)
+local HORO_HINT_HEAD_OFFSET = Vector3.new(0, 2.25, 0)
+local HORO_HINT_ROOT_OFFSET = Vector3.new(0, 4.9, 0)
 local DEBUG_SOUND = RunService:IsStudio()
 local DEBUG_TRACE = RunService:IsStudio()
 local SOUND_AUDIO_KEY_BY_NAME = {
@@ -153,7 +156,12 @@ local function logSoundDiagnostics(stage, soundName, sound)
 	local soundId = tostring(sound.SoundId or "")
 	local volume = tonumber(sound.Volume) or 0
 	if soundId == "" then
-		horoSoundWarn("%s sound=%s path=%s issue=missing_sound_id", tostring(stage), tostring(soundName), formatInstancePath(sound))
+		horoSoundWarn(
+			"%s sound=%s path=%s issue=missing_sound_id",
+			tostring(stage),
+			tostring(soundName),
+			formatInstancePath(sound)
+		)
 	end
 	if volume <= 0 then
 		horoSoundWarn(
@@ -165,7 +173,12 @@ local function logSoundDiagnostics(stage, soundName, sound)
 		)
 	end
 	if not sound.Parent then
-		horoSoundWarn("%s sound=%s path=%s issue=nil_parent", tostring(stage), tostring(soundName), formatInstancePath(sound))
+		horoSoundWarn(
+			"%s sound=%s path=%s issue=nil_parent",
+			tostring(stage),
+			tostring(soundName),
+			formatInstancePath(sound)
+		)
 	end
 
 	horoSoundLog(
@@ -226,7 +239,9 @@ local function getGhostRoot(ghostModel)
 		return nil
 	end
 
-	return ghostModel:FindFirstChild("HumanoidRootPart") or ghostModel.PrimaryPart or ghostModel:FindFirstChildWhichIsA("BasePart", true)
+	return ghostModel:FindFirstChild("HumanoidRootPart")
+		or ghostModel.PrimaryPart
+		or ghostModel:FindFirstChildWhichIsA("BasePart", true)
 end
 
 local function getCharacterHumanoid(player)
@@ -418,7 +433,10 @@ local function stopProjectionMoveLoop(state)
 		state.MoveLoopSound = nil
 	end
 	if not sound then
-		horoSoundLog("move_loop_stop_skipped projectionId=%s issue=no_sound_reference", tostring(state and state.ProjectionId))
+		horoSoundLog(
+			"move_loop_stop_skipped projectionId=%s issue=no_sound_reference",
+			tostring(state and state.ProjectionId)
+		)
 		return
 	end
 
@@ -431,7 +449,10 @@ local function stopProjectionMoveLoop(state)
 		sound:Destroy()
 		horoSoundLog("move_loop_destroyed projectionId=%s", tostring(state and state.ProjectionId))
 	else
-		horoSoundWarn("move_loop_stop_skipped projectionId=%s issue=sound_parent_missing", tostring(state and state.ProjectionId))
+		horoSoundWarn(
+			"move_loop_stop_skipped projectionId=%s issue=sound_parent_missing",
+			tostring(state and state.ProjectionId)
+		)
 	end
 end
 
@@ -453,8 +474,10 @@ local function findGhostModel(payload)
 	local effectsFolder = Workspace:FindFirstChild(WORLD_EFFECTS_FOLDER_NAME)
 		or Workspace:WaitForChild(WORLD_EFFECTS_FOLDER_NAME, GHOST_LOOKUP_TIMEOUT)
 	local ghostsFolder = effectsFolder
-		and (effectsFolder:FindFirstChild(GHOSTS_FOLDER_NAME)
-			or effectsFolder:WaitForChild(GHOSTS_FOLDER_NAME, GHOST_LOOKUP_TIMEOUT))
+		and (
+			effectsFolder:FindFirstChild(GHOSTS_FOLDER_NAME)
+			or effectsFolder:WaitForChild(GHOSTS_FOLDER_NAME, GHOST_LOOKUP_TIMEOUT)
+		)
 	if not ghostsFolder then
 		return nil
 	end
@@ -478,7 +501,7 @@ local function findGhostModel(payload)
 	end
 
 	return ghostsFolder
-		and (ghostsFolder:FindFirstChild(ghostName) or ghostsFolder:WaitForChild(ghostName, REMOTE_WAIT_TIMEOUT))
+			and (ghostsFolder:FindFirstChild(ghostName) or ghostsFolder:WaitForChild(ghostName, REMOTE_WAIT_TIMEOUT))
 		or nil
 end
 
@@ -489,7 +512,8 @@ local function findProjectionBody(payload)
 	end
 
 	for _, descendant in ipairs(Workspace:GetDescendants()) do
-		if descendant:IsA("Model")
+		if
+			descendant:IsA("Model")
 			and descendant:GetAttribute("HoroProjectionBody") == true
 			and descendant:GetAttribute("ProjectionId") == projectionId
 		then
@@ -536,14 +560,29 @@ local function disconnectAll(connections)
 	end
 end
 
-local function createGhostHint(rootPart)
+local function getGhostHintAnchor(rootPart, ghostModel)
+	local head = ghostModel and ghostModel:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		return head, HORO_HINT_HEAD_OFFSET
+	end
+
+	return rootPart, HORO_HINT_ROOT_OFFSET
+end
+
+local function createGhostHint(rootPart, ghostModel)
+	local anchorPart, studsOffset = getGhostHintAnchor(rootPart, ghostModel)
+	if not anchorPart then
+		return nil, nil
+	end
+
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "HoroGhostHint"
-	gui.Size = UDim2.fromOffset(150, 36)
-	gui.StudsOffset = Vector3.new(0, 3.4, 0)
+	gui.Adornee = anchorPart
+	gui.Size = HORO_HINT_SIZE
+	gui.StudsOffset = studsOffset
 	gui.AlwaysOnTop = true
 	gui.MaxDistance = 90
-	gui.Parent = rootPart
+	gui.Parent = anchorPart
 
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
@@ -659,8 +698,8 @@ local function getVerticalInputAxis()
 	if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
 		verticalAxis += 1
 	end
-	if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
-		or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+	if
+		UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
 	then
 		verticalAxis -= 1
 	end
@@ -910,7 +949,7 @@ function HoroClient:StartLocalProjection(payload)
 	)
 
 	self:StyleLocalGhost(ghostModel, clampNumber(abilityConfig.GhostLocalTransparency, 0.2, 0, 0.95))
-	state.HintGui, state.HintLabel = createGhostHint(ghostRoot)
+	state.HintGui, state.HintLabel = createGhostHint(ghostRoot, ghostModel)
 
 	if camera then
 		camera.CameraSubject = ghostHumanoid or ghostRoot
@@ -975,7 +1014,8 @@ function HoroClient:StopLocalProjection(_payload, keepServerGhost)
 		local currentHumanoid = getCharacterHumanoid(self.player)
 		if currentHumanoid and currentHumanoid ~= state.GhostHumanoid then
 			state.Camera.CameraSubject = currentHumanoid
-		elseif state.PreviousCameraSubject
+		elseif
+			state.PreviousCameraSubject
 			and state.PreviousCameraSubject.Parent
 			and state.PreviousCameraSubject ~= state.GhostHumanoid
 		then
@@ -1042,14 +1082,20 @@ function HoroClient:GetTargetVerticalVelocity(state, _dt)
 		return 0
 	end
 
-	local holdResponse = math.max(1, tonumber(state.FlightVerticalHoldResponse) or DEFAULT_FLIGHT_VERTICAL_HOLD_RESPONSE)
+	local holdResponse =
+		math.max(1, tonumber(state.FlightVerticalHoldResponse) or DEFAULT_FLIGHT_VERTICAL_HOLD_RESPONSE)
 	local correctionVelocity = heightDelta * holdResponse
 	local maxCorrectionSpeed = math.max(1, verticalSpeed)
 	return math.clamp(correctionVelocity, -maxCorrectionSpeed, maxCorrectionSpeed)
 end
 
 function HoroClient:DriveGhostMovement(state, dt)
-	if not state.GhostHumanoid or not state.GhostHumanoid.Parent or not state.GhostRoot or not state.GhostRoot.Parent then
+	if
+		not state.GhostHumanoid
+		or not state.GhostHumanoid.Parent
+		or not state.GhostRoot
+		or not state.GhostRoot.Parent
+	then
 		return
 	end
 
@@ -1068,7 +1114,8 @@ function HoroClient:DriveGhostMovement(state, dt)
 	local desiredPlanarVelocity = desiredPlanarDirection * currentSpeed
 	local currentVelocity = state.GhostRoot.AssemblyLinearVelocity
 	local currentPlanarVelocity = getPlanarVector(currentVelocity)
-	local horizontalResponse = math.max(1, tonumber(state.FlightHorizontalResponse) or DEFAULT_FLIGHT_HORIZONTAL_RESPONSE)
+	local horizontalResponse =
+		math.max(1, tonumber(state.FlightHorizontalResponse) or DEFAULT_FLIGHT_HORIZONTAL_RESPONSE)
 	local blendAlpha = math.clamp(horizontalResponse * flightDt, 0, 1)
 	local nextPlanarVelocity = currentPlanarVelocity:Lerp(desiredPlanarVelocity, blendAlpha)
 	local nextVerticalVelocity = self:GetTargetVerticalVelocity(state, flightDt)
@@ -1076,11 +1123,8 @@ function HoroClient:DriveGhostMovement(state, dt)
 	state.GhostHumanoid.WalkSpeed = currentSpeed
 	state.GhostHumanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 	state.GhostHumanoid:Move(desiredPlanarDirection, false)
-	state.GhostRoot.AssemblyLinearVelocity = Vector3.new(
-		nextPlanarVelocity.X,
-		nextVerticalVelocity,
-		nextPlanarVelocity.Z
-	)
+	state.GhostRoot.AssemblyLinearVelocity =
+		Vector3.new(nextPlanarVelocity.X, nextVerticalVelocity, nextPlanarVelocity.Z)
 end
 
 function HoroClient:TryPickup()
@@ -1205,10 +1249,13 @@ function HoroClient:ProbeBodyHazards(state, now)
 		return
 	end
 
-	local parts = Workspace:GetPartsInPart(state.BodyRoot, buildOverlapParams({
-		state.BodyCharacter,
-		state.GhostModel,
-	}))
+	local parts = Workspace:GetPartsInPart(
+		state.BodyRoot,
+		buildOverlapParams({
+			state.BodyCharacter,
+			state.GhostModel,
+		})
+	)
 	for _, part in ipairs(parts) do
 		if isDangerousHazardPart(part, state) then
 			self:ReportBodyHazard("body_hazard_overlap")
@@ -1267,7 +1314,11 @@ function HoroClient:HandleEffect(targetPlayer, abilityName, payload)
 		getPlayerCarrySummary(self.player)
 	)
 	if targetPlayer ~= self.player then
-		return phase == "Start" or phase == "Resolve" or phase == "Interrupted" or phase == "Rejected" or phase == "Ignored"
+		return phase == "Start"
+			or phase == "Resolve"
+			or phase == "Interrupted"
+			or phase == "Rejected"
+			or phase == "Ignored"
 	end
 
 	if phase == "Start" then

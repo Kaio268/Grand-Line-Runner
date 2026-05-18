@@ -1,2 +1,0 @@
--- Deprecated no-op.
--- UI/App.client.lua is the sole active inventory and hotbar client owner.

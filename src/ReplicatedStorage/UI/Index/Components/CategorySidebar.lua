@@ -51,6 +51,8 @@ local function categoryButton(props)
 			Text = tostring(category.iconText or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or (category.fillColor or Theme.Palette.Text),
 			TextSize = 24,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = active and 0.46 or 0.68,
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -60,6 +62,8 @@ local function categoryButton(props)
 			Text = tostring(category.label or ""),
 			TextColor3 = active and Theme.Palette.SidebarIndicator or textColor,
 			TextSize = 10,
+			TextStrokeColor3 = Theme.Palette.GoldShadow,
+			TextStrokeTransparency = active and 0.5 or 0.72,
 			TextWrapped = true,
 		}),
 		Indicator = active and e("Frame", {

@@ -4,9 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local CrewMemberCanonicalReadGate = require(
-	ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberCanonicalReadGate")
-)
+local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
 local dataManagerModule = nil
@@ -61,6 +59,7 @@ local FRUIT_EQUIP_DEBUG = false
 local R6G_WELD_DEBUG = false
 local INVENTORY_SNAPSHOT_DEBUG = false
 local lastCrewInventoryCounts = setmetatable({}, { __mode = "k" })
+local pendingCrewInventoryCountPushes = setmetatable({}, { __mode = "k" })
 local invalidCrewEquipWarnings = {}
 
 local DATA_READY_TIMEOUT = 30
@@ -449,20 +448,8 @@ local function ownsCrewMember(player, name)
 		warnInvalidCrewIdentity("owns_check", player, name)
 		return false
 	end
-	local inventory = CrewInstanceService.GetCrewInventory(player)
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return false
-	end
-
-	for _, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == requestedName
-			and tostring(instanceData.AssignedStand or "") == ""
-		then
-			return true
-		end
-	end
-	return false
+	local counts = CrewInventoryDerivedCache.GetCounts(player)
+	return (tonumber(counts[requestedName]) or 0) > 0
 end
 
 local function ownsGear(player, name)
@@ -604,14 +591,6 @@ local function applyDisplayMetadata(entry, metadata)
 	end
 end
 
-local function firstNonEmptyText(primary, fallback)
-	local value = tostring(primary or "")
-	if value ~= "" then
-		return value
-	end
-	return tostring(fallback or "")
-end
-
 local function buildInventoryModelPreviewDescriptor(descriptor)
 	if typeof(descriptor) ~= "table" then
 		return nil
@@ -641,7 +620,7 @@ local function applyModelPreviewMetadata(entry, descriptor)
 	end
 end
 
-local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewDescriptor)
+local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewDescriptor, extraFields)
 	if quantity and quantity > 0 then
 		local entry = {
 			Name = tostring(name),
@@ -649,38 +628,21 @@ local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewD
 		}
 		applyDisplayMetadata(entry, metadata)
 		applyModelPreviewMetadata(entry, modelPreviewDescriptor)
+		if typeof(extraFields) == "table" then
+			for key, value in pairs(extraFields) do
+				if value ~= nil then
+					entry[key] = value
+				end
+			end
+		end
 		table.insert(list, entry)
 	end
 end
 
 local function getCrewInventoryAvailableCounts(player, inventory)
-	inventory = if typeof(inventory) == "table" then inventory else CrewInstanceService.GetCrewInventory(player)
-	local counts = {}
-	local representatives = {}
-	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
-		return counts, representatives
-	end
-
-	for instanceId, instanceData in pairs(inventory.ById) do
-		if typeof(instanceData) == "table"
-			and tostring(instanceData.AssignedStand or "") == ""
-		then
-			local storageName = tostring(instanceData.CrewMemberId or instanceData.StorageName or "")
-			local resolvedStorageName, info = resolveCanonicalCrewMemberId(storageName)
-			if info then
-				storageName = resolvedStorageName
-				counts[storageName] = (counts[storageName] or 0) + 1
-				if representatives[storageName] == nil then
-					local representative = table.clone(instanceData)
-					representative.InstanceId = tostring(instanceData.InstanceId or instanceId)
-					representatives[storageName] = representative
-				end
-			elseif storageName ~= "" then
-				warnInvalidCrewIdentity("inventory_count_skip", player, storageName)
-			end
-		end
-	end
-	return counts, representatives
+	return CrewInventoryDerivedCache.GetCounts(player, {
+		Inventory = inventory,
+	})
 end
 
 local function pushCrewInventoryCounts(player, inventory)
@@ -692,11 +654,6 @@ local function pushCrewInventoryCounts(player, inventory)
 		seen[storageName] = true
 		if previous[storageName] ~= quantity then
 			updateRemote:FireClient(player, TOOL_KIND_CREW_MEMBER, storageName, quantity)
-			if quantity > 0 then
-				CrewMemberCanonicalReadGate.CompareInventoryDisplay(player, storageName, {
-					LogThrottleSeconds = 60,
-				})
-			end
 		end
 	end
 
@@ -708,6 +665,33 @@ local function pushCrewInventoryCounts(player, inventory)
 	end
 
 	lastCrewInventoryCounts[player] = counts
+end
+
+local function scheduleCrewInventoryCountsPush(player, inventory)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	local pending = pendingCrewInventoryCountPushes[player]
+	if pending ~= nil then
+		pending.Inventory = inventory or pending.Inventory
+		return
+	end
+
+	pending = {
+		Inventory = inventory,
+	}
+	pendingCrewInventoryCountPushes[player] = pending
+
+	task.delay(0.1, function()
+		if pendingCrewInventoryCountPushes[player] ~= pending then
+			return
+		end
+		pendingCrewInventoryCountPushes[player] = nil
+		if player.Parent == Players then
+			pushCrewInventoryCounts(player, pending.Inventory)
+		end
+	end)
 end
 
 local function buildInventorySnapshot(player)
@@ -748,34 +732,20 @@ local function buildInventorySnapshot(player)
 		end
 	end
 
-	local crewCounts, crewRepresentatives = getCrewInventoryAvailableCounts(player)
-	for storageName, quantity in pairs(crewCounts) do
-		local representative = crewRepresentatives[storageName]
-		local metadata = CrewMemberCanonicalReadGate.ResolveInventoryDisplayMetadata(player, storageName, {
-			LogThrottleSeconds = 60,
+	local derivedCrewInventory = CrewInventoryDerivedCache.Get(player)
+	for _, stack in ipairs(derivedCrewInventory.Stacks) do
+		local storageName = stack.CrewMemberId
+		local quantity = stack.Quantity
+		appendQuantityEntry(crew, storageName, quantity, stack.Metadata, stack.ModelPreview, {
+			StackId = stack.StackId,
+			StackNumber = stack.StackNumber,
+			StackOrder = stack.StackOrder,
+			MaxQuantity = stack.MaxQuantity,
+			InstanceIds = table.clone(stack.InstanceIds),
+			RepresentativeInstanceId = stack.RepresentativeInstanceId,
+			CrewMemberId = storageName,
+			Rarity = stack.Rarity,
 		})
-		if typeof(representative) == "table" then
-			metadata = if typeof(metadata) == "table" then table.clone(metadata) else {}
-			metadata.CrewMemberId = storageName
-			metadata.InstanceId = tostring(representative.InstanceId or "")
-			metadata.DisplayName = firstNonEmptyText(metadata.DisplayName, representative.DisplayName)
-			if metadata.DisplayName == "" then
-				metadata.DisplayName = storageName
-			end
-			metadata.Rarity = firstNonEmptyText(metadata.Rarity, representative.Rarity)
-			metadata.Render = firstNonEmptyText(metadata.Render, representative.Render)
-			metadata.ModelName = firstNonEmptyText(metadata.ModelName, representative.ModelName)
-			metadata.LegacyStorageName = tostring(representative.LegacyStorageName or "")
-		end
-		local modelPreviewDescriptor = CrewMemberCanonicalReadGate.ResolveInventoryModelPreviewDescriptor(
-			player,
-			storageName,
-			{
-				LogThrottleSeconds = 60,
-				SkipLog = true,
-			}
-		)
-		appendQuantityEntry(crew, storageName, quantity, metadata, modelPreviewDescriptor)
 	end
 
 	local gearsFolder = player:FindFirstChild("Gears")
@@ -1346,7 +1316,7 @@ function Module.Start()
 		crewInventoryCallbackRegistered = true
 		CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, crewInventory)
 			if player and player.Parent == Players then
-				pushCrewInventoryCounts(player, crewInventory)
+				scheduleCrewInventoryCountsPush(player, crewInventory)
 			end
 		end)
 	end
@@ -1358,6 +1328,7 @@ function Module.Start()
 		watchGears(player, gears)
 		task.defer(function()
 			if waitForPlayerDataReady(player) then
+				CrewInventoryDerivedCache.MarkDirty(player, "player_data_ready")
 				CrewInstanceService.RepairCanonicalCrewState(player)
 				CrewInstanceService.SyncAvailableCounts(player, {
 					AllowLegacyMirrorWrite = true,

@@ -62,9 +62,9 @@ local TILE_POSITIONS = {
 	Store = Vector2.new(0, 0),
 	Index = Vector2.new(TILE_STEP_X, 0),
 	Gifts = Vector2.new(0, TILE_STEP_Y),
-	Settings = Vector2.new(TILE_STEP_X, TILE_STEP_Y),
+	Quest = Vector2.new(TILE_STEP_X, TILE_STEP_Y),
 	Rebirth = Vector2.new(0, TILE_STEP_Y * 2),
-	Quest = Vector2.new(TILE_STEP_X, TILE_STEP_Y * 2),
+	Settings = Vector2.new(TILE_STEP_X, TILE_STEP_Y * 2),
 }
 
 local HUD_ICON_ASSET_OVERRIDES = {
@@ -307,43 +307,6 @@ local function pickTitleStyle(button)
 		textYAlignment = bestCandidate.TextYAlignment,
 		zIndex = math.max(bestCandidate.ZIndex, 8),
 	}
-end
-
-local function findAccentStyle(button, backgroundCandidate, iconStyle)
-	local bestCandidate = nil
-	local bestScore = -math.huge
-	local buttonArea = math.max(estimateArea(button), 1)
-	local iconImage = iconStyle and iconStyle.image or nil
-
-	local function consider(candidate)
-		local style = extractImageStyle(candidate, button)
-		if not style then
-			return
-		end
-
-		local area = estimateArea(candidate)
-		if candidate == backgroundCandidate or style.image == iconImage or area <= 0 then
-			return
-		end
-
-		local score = area
-		if area >= buttonArea * 0.82 then
-			score -= buttonArea
-		end
-
-		if score > bestScore then
-			bestScore = score
-			bestCandidate = candidate
-		end
-	end
-
-	for _, descendant in ipairs(button:GetDescendants()) do
-		if not isProtectedDescendant(button, descendant) then
-			consider(descendant)
-		end
-	end
-
-	return extractImageStyle(bestCandidate, button)
 end
 
 local function ensureContainer(hud)
@@ -599,90 +562,6 @@ local function ensureBadge(button, defaultText)
 	return badge
 end
 
-local function ensureTimer(button, defaultText)
-	local timer = button:FindFirstChild("Timer")
-	if not timer then
-		timer = Instance.new("TextLabel")
-		timer.Name = "Timer"
-		timer.AnchorPoint = Vector2.new(0.5, 0)
-		timer.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
-		timer.BackgroundTransparency = 0.08
-		timer.BorderSizePixel = 0
-		timer.Font = Enum.Font.GothamBold
-		timer.Position = UDim2.new(0.12, 0, 0, 0.1)
-		timer.Size = UDim2.new(1, -20, 0, 18)
-		timer.Text = tostring(defaultText or "--")
-		timer.TextColor3 = Color3.fromRGB(255, 245, 224)
-		timer.TextScaled = true
-		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
-		timer.TextStrokeTransparency = 0.08
-		timer.TextXAlignment = Enum.TextXAlignment.Center
-		timer.TextYAlignment = Enum.TextYAlignment.Center
-		timer.ZIndex = math.max(button.ZIndex + 9, 11)
-		timer.Parent = button
-
-		local corner = Instance.new("UICorner")
-		corner.CornerRadius = UDim.new(0, 9)
-		corner.Parent = timer
-
-		local stroke = Instance.new("UIStroke")
-		stroke.Name = "ReactHudTimerStroke"
-		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		stroke.Color = Color3.fromRGB(255, 237, 203)
-		stroke.Transparency = 0.6
-		stroke.Thickness = 1
-		stroke.Parent = timer
-
-		local gradient = Instance.new("UIGradient")
-		gradient.Name = "ReactHudTimerGradient"
-		gradient.Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(29, 39, 57)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 22)),
-		})
-		gradient.Rotation = 90
-		gradient.Parent = timer
-	end
-
-	if isTextGuiObject(timer) then
-		timer.BackgroundTransparency = 0.08
-		timer.Position = UDim2.new(0.12, 0, 0, 0.1)
-		timer.Size = UDim2.new(1, -20, 0, 18)
-		timer.TextStrokeColor3 = Color3.fromRGB(5, 8, 15)
-		timer.TextStrokeTransparency = 0.08
-		timer.TextXAlignment = Enum.TextXAlignment.Center
-		timer.TextYAlignment = Enum.TextYAlignment.Center
-		timer.ZIndex = math.max(timer.ZIndex, button.ZIndex + 9, 11)
-	end
-
-	local timer2 = timer:FindFirstChild("Timer2")
-	if not timer2 then
-		timer2 = Instance.new("TextLabel")
-		timer2.Name = "Timer2"
-		timer2.AnchorPoint = Vector2.new(0.5, 0.5)
-		timer2.BackgroundTransparency = 1
-		timer2.BorderSizePixel = 0
-		timer2.Font = Enum.Font.GothamBold
-		timer2.Position = UDim2.fromScale(0.5, 0.5)
-		timer2.Size = UDim2.new(1, 0, 1, 0)
-		timer2.Text = tostring(defaultText or "--")
-		timer2.TextColor3 = timer.TextColor3
-		timer2.TextScaled = true
-		timer2.TextStrokeColor3 = timer.TextStrokeColor3
-		timer2.TextStrokeTransparency = timer.TextStrokeTransparency
-		timer2.ZIndex = math.max(timer.ZIndex + 1, 12)
-		timer2.Parent = timer
-	end
-
-	if isTextGuiObject(timer2) then
-		timer2.TextStrokeColor3 = timer.TextStrokeColor3
-		timer2.TextStrokeTransparency = timer.TextStrokeTransparency
-		timer2.ZIndex = math.max(timer2.ZIndex, timer.ZIndex + 1, 12)
-		timer2.Visible = false
-	end
-
-	return timer
-end
-
 local function removeSidebarTimers(button, context, keepGiftSummary)
 	local timers = {}
 	for _, descendant in ipairs(button:GetDescendants()) do
@@ -888,7 +767,7 @@ local function normalizeTitleStyle(titleStyle)
 		backgroundTransparency = 1,
 		font = style.font or Enum.Font.GothamBold,
 		fontFace = style.fontFace,
-		position = UDim2.new(0.5, 0, 0.78, 0),
+		position = UDim2.fromScale(0.5, 0.78),
 		rotation = 0,
 		size = UDim2.new(1, -8, 0, clampNumber(style.textSize, 16, 20) + 4),
 		textColor3 = Color3.fromRGB(255, 250, 240),
@@ -1041,38 +920,68 @@ local function scheduleRender()
 	end)
 end
 
-playerGui.DescendantAdded:Connect(function(descendant)
-	if descendant.Name == "HUD" or descendant.Name == "LButtons" then
-		task.defer(scheduleRender)
+local hudConnections = {}
+
+local function disconnectHudConnections()
+	for _, connection in ipairs(hudConnections) do
+		connection:Disconnect()
+	end
+	table.clear(hudConnections)
+end
+
+local function shouldRefreshForHudDescendant(descendant)
+	if descendant.Name == "LButtons" then
+		return true
+	end
+	for _, definition in ipairs(TILE_DEFS) do
+		if descendant.Name == definition.name then
+			return true
+		end
+	end
+	return false
+end
+
+local function bindHudConnections()
+	disconnectHudConnections()
+	local hud = playerGui:FindFirstChild("HUD")
+	if not hud then
 		return
 	end
 
-	for _, definition in ipairs(TILE_DEFS) do
-		if descendant.Name == definition.name then
+	hudConnections[#hudConnections + 1] = hud.DescendantAdded:Connect(function(descendant)
+		if shouldRefreshForHudDescendant(descendant) then
 			task.defer(scheduleRender)
-			return
 		end
-	end
-end)
+	end)
+	hudConnections[#hudConnections + 1] = hud.DescendantRemoving:Connect(function(descendant)
+		if shouldRefreshForHudDescendant(descendant) then
+			task.defer(scheduleRender)
+		end
+	end)
+end
 
-playerGui.DescendantRemoving:Connect(function(descendant)
-	if descendant.Name == "HUD" or descendant.Name == "LButtons" then
+local childAddedConnection = playerGui.ChildAdded:Connect(function(child)
+	if child.Name == "HUD" then
+		bindHudConnections()
 		task.defer(scheduleRender)
-		return
-	end
-
-	for _, definition in ipairs(TILE_DEFS) do
-		if descendant.Name == definition.name then
-			task.defer(scheduleRender)
-			return
-		end
 	end
 end)
 
+local childRemovedConnection = playerGui.ChildRemoved:Connect(function(child)
+	if child.Name == "HUD" then
+		disconnectHudConnections()
+		task.defer(scheduleRender)
+	end
+end)
+
+bindHudConnections()
 scheduleRender()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	childAddedConnection:Disconnect()
+	childRemovedConnection:Disconnect()
+	disconnectHudConnections()
 	for button in pairs(hoverBindings) do
 		clearHoverBinding(button)
 	end

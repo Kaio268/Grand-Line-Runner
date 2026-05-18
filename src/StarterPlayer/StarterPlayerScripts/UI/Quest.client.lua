@@ -11,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local QuestScreen = require(UiFolder:WaitForChild("Quest"):WaitForChild("QuestScreen"))
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
@@ -25,11 +26,13 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Quest",
 	hostName = "ReactQuestHost",
-	backdropName = nil,
-	modalStateKey = nil,
+	backdropName = "ReactQuestBackdrop",
+	backdropActive = false,
+	modalStateKey = "QuestModal",
 	minSize = Vector2.new(760, 520),
 	maxSize = Vector2.new(1080, 720),
 	createFrameIfMissing = true,
+	standalone = true,
 })
 
 local destroyed = false
@@ -39,10 +42,33 @@ local noticeText = nil
 local noticeToken = 0
 local watchedFrame = nil
 local watchedFrameConnection = nil
+local hudDescendantConnection = nil
 local cleanupConnections = {}
-
 local scheduleRender
 local requestQuestState
+
+local unregisterModal = ReactModalRegistry.Register("Quest", {
+	toggle = function()
+		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
+})
 
 local function disconnectAll()
 	for _, connection in ipairs(cleanupConnections) do
@@ -166,7 +192,7 @@ local function prepareQuestFrame()
 	frame.BackgroundTransparency = 1
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
-	frame.Size = UDim2.new(0.86, 0, 0.8, 0)
+	frame.Size = UDim2.fromScale(0.86, 0.8)
 	frame.ZIndex = 120
 	if host then
 		host.ZIndex = 140
@@ -181,6 +207,9 @@ local function prepareQuestFrame()
 			modalAdapter:SyncOverlayState()
 			if frame.Visible then
 				requestQuestState()
+				if scheduleRender then
+					scheduleRender()
+				end
 			end
 		end)
 	end
@@ -232,6 +261,14 @@ table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
 	if child.Name == "Frames" or child.Name == "OpenUI" then
 		modalAdapter:HandlePlayerGuiChildAdded(child)
 	elseif child.Name == "HUD" then
+		if hudDescendantConnection then
+			hudDescendantConnection:Disconnect()
+		end
+		hudDescendantConnection = child.DescendantAdded:Connect(function(descendant)
+			if descendant.Name == "Quest" or descendant.Name == "Not" or descendant.Name == "TextLB" then
+				task.defer(syncHudQuestBadge)
+			end
+		end)
 		task.defer(syncHudQuestBadge)
 	end
 end))
@@ -239,21 +276,31 @@ end))
 table.insert(cleanupConnections, playerGui.ChildRemoved:Connect(function(child)
 	if child.Name == "Frames" or child.Name == "OpenUI" then
 		modalAdapter:HandlePlayerGuiChildRemoved(child)
+	elseif child.Name == "HUD" and hudDescendantConnection then
+		hudDescendantConnection:Disconnect()
+		hudDescendantConnection = nil
 	end
 end))
 
-table.insert(cleanupConnections, playerGui.DescendantAdded:Connect(function(descendant)
-	if descendant.Name == "Quest" or descendant.Name == "Not" or descendant.Name == "TextLB" then
-		task.defer(syncHudQuestBadge)
-	end
-end))
+local initialHud = playerGui:FindFirstChild("HUD")
+if initialHud then
+	hudDescendantConnection = initialHud.DescendantAdded:Connect(function(descendant)
+		if descendant.Name == "Quest" or descendant.Name == "Not" or descendant.Name == "TextLB" then
+			task.defer(syncHudQuestBadge)
+		end
+	end)
+end
 
 requestQuestState()
 render()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	if hudDescendantConnection then
+		hudDescendantConnection:Disconnect()
+	end
 	disconnectAll()
+	unregisterModal()
 	modalAdapter:Destroy()
 	root:unmount()
 end)

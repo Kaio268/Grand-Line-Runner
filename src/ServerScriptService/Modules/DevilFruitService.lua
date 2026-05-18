@@ -23,6 +23,7 @@ local cooldownsByPlayer = {}
 local pendingPersistByPlayer = {}
 local persistTaskByPlayer = {}
 local hydrationTaskByPlayer = {}
+local runtimeEquipVersionByPlayer = {}
 local started = false
 local getEquippedFruit
 local clearFruitRuntimeState
@@ -729,7 +730,17 @@ local function hydrateFruitFromData(player)
 	end
 
 	hydrationTaskByPlayer[player] = task.spawn(function()
+		local hydrationStartVersion = runtimeEquipVersionByPlayer[player] or 0
+		local function hydrationWasSuperseded()
+			return (runtimeEquipVersionByPlayer[player] or 0) ~= hydrationStartVersion
+		end
+
 		if not waitForDataReady(player, HYDRATION_READY_TIMEOUT) then
+			hydrationTaskByPlayer[player] = nil
+			return
+		end
+
+		if hydrationWasSuperseded() then
 			hydrationTaskByPlayer[player] = nil
 			return
 		end
@@ -743,6 +754,11 @@ local function hydrateFruitFromData(player)
 				queuePersist(player, pendingFruit)
 			end
 
+			if hydrationWasSuperseded() then
+				hydrationTaskByPlayer[player] = nil
+				return
+			end
+
 			applyEquippedFruitValue(player, pendingFruit)
 
 			if player.Character then
@@ -754,6 +770,11 @@ local function hydrateFruitFromData(player)
 		end
 
 		local hydratedFruit = loadEquippedFruitFromData(player)
+		if hydrationWasSuperseded() then
+			hydrationTaskByPlayer[player] = nil
+			return
+		end
+
 		applyEquippedFruitValue(player, hydratedFruit)
 
 		if player.Character then
@@ -790,6 +811,7 @@ local function cleanupPlayerState(player)
 	pendingPersistByPlayer[player] = nil
 	persistTaskByPlayer[player] = nil
 	hydrationTaskByPlayer[player] = nil
+	runtimeEquipVersionByPlayer[player] = nil
 	DevilFruitRequestGuard.CleanupPlayer(player)
 end
 
@@ -1131,7 +1153,6 @@ local function handleAbilityRequest(player, abilityName, requestPayload)
 	local requestRemote = getRemoteBundle().Request
 	local requestIdentity = describeRemote(requestRemote)
 	local requestReceivedAt = getSharedTimestamp()
-	local equippedFruitAtReceipt = getEquippedFruit(player)
 	DevilFruitLogger.Info(
 		"SERVER",
 		"request received remote=%s path=%s runtimeId=%s debugId=%s object=%s player=%s ability=%s payloadKeys=%d ts=%.6f",
@@ -1273,6 +1294,7 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 	end
 
 	debugPrint("SetEquippedFruit STEP 3 - Ensuring runtime DevilFruit folder/value")
+	runtimeEquipVersionByPlayer[player] = (runtimeEquipVersionByPlayer[player] or 0) + 1
 	local _, fruitValue = ensurePlayerFruitInstances(player)
 	local currentFruit = getEquippedFruit(player)
 	serverFruitModuleLoader:ResetHandler(currentFruit)

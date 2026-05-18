@@ -12,6 +12,7 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local IndexFolder = UiFolder:WaitForChild("Index")
 
@@ -64,11 +65,37 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	frameName = "Index",
 	hostName = "ReactIndexHost",
 	backdropName = "ReactIndexBackdrop",
+	backdropActive = false,
 	modalStateKey = "IndexModal",
 	minSize = Vector2.new(1080, 680),
 	maxSize = Vector2.new(1360, 860),
 	allowFallback = true,
+	createFrameIfMissing = true,
+	standalone = true,
 	bypassLegacyScaleAnimation = true,
+})
+
+local unregisterModal = ReactModalRegistry.Register("Index", {
+	toggle = function()
+		modalAdapter:Toggle()
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	open = function()
+		if not modalAdapter:IsVisible() then
+			modalAdapter:Toggle()
+		end
+		if scheduleRender then
+			scheduleRender()
+		end
+	end,
+	close = function()
+		modalAdapter:Close()
+	end,
+	isVisible = function()
+		return modalAdapter:IsVisible()
+	end,
 })
 
 local function buildEmptyViewModel()
@@ -410,11 +437,13 @@ local function warnIfFruitCollectionTrailsLifetime(viewModel)
 	end
 
 	lastFruitLifetimeMismatchWarning = signature
-	warn(string.format(
-		"[IndexReact] Fruits view model is behind replicated lifetime data: rendered=%d lifetime=%d",
-		renderedCount,
-		lifetimeCount
-	))
+	warn(
+		string.format(
+			"[IndexReact] Fruits view model is behind replicated lifetime data: rendered=%d lifetime=%d",
+			renderedCount,
+			lifetimeCount
+		)
+	)
 end
 
 local function findRemoteFunctionByName(parent, remoteName)
@@ -476,7 +505,12 @@ local function refreshIndexDisplayMetadata(reason, force)
 				return remote:InvokeServer(reason or "index_display")
 			end)
 
-			if ok and typeof(response) == "table" and response.Ready == true and typeof(response.Metadata) == "table" then
+			if
+				ok
+				and typeof(response) == "table"
+				and response.Ready == true
+				and typeof(response.Metadata) == "table"
+			then
 				nextMetadata = response.Metadata
 				local expiresAfter = math.clamp(
 					tonumber(response.ExpiresAfterSeconds) or INDEX_DISPLAY_METADATA_MAX_CACHE_SECONDS,
@@ -538,6 +572,24 @@ local function buildViewModel(previewMode)
 	end
 
 	return buildEmptyViewModel()
+end
+
+local function syncHudIndexBadge(viewModel)
+	local hud = playerGui:FindFirstChild("HUD")
+	local lButtons = hud and hud:FindFirstChild("LButtons")
+	local indexButton = lButtons and lButtons:FindFirstChild("Index")
+	local badge = indexButton and indexButton:FindFirstChild("Not", true)
+	if not badge then
+		return
+	end
+
+	local claimableCount = math.max(0, tonumber(viewModel and viewModel.claimableCount) or 0)
+	badge.Visible = claimableCount > 0
+
+	local textLabel = badge:FindFirstChild("TextLB", true)
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = tostring(math.min(99, claimableCount))
+	end
 end
 
 local function findRemoteEventByName(parent, remoteName)
@@ -932,6 +984,7 @@ script.Destroying:Connect(function()
 		claimRemoteConnection:Disconnect()
 		claimRemoteConnection = nil
 	end
+	unregisterModal()
 	modalAdapter:Destroy()
 	root:unmount()
 end)

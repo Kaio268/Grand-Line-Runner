@@ -191,6 +191,7 @@ registerStaticPreview("rbxassetid://102634396468524", {
 
 registerStaticPreview("rbxassetid://111666514759594", {
 	"Pink Marine",
+	"Coby",
 	"Koby",
 	"Kobe",
 })

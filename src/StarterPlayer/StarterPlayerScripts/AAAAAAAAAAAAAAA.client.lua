@@ -1554,6 +1554,9 @@ local function createSharedHazardVisualSmoother(hazard)
 				setPivot(self.VisualRoot, self.CurrentCFrame)
 			else
 				self:RefreshClientVisualRoot()
+				if self.VisualRoot and self.VisualRoot.Parent then
+					setPivot(self.VisualRoot, self.CurrentCFrame)
+				end
 			end
 			return
 		end

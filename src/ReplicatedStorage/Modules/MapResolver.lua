@@ -32,7 +32,6 @@ local PATH_LABELS = {
 	VipRefuge = "active map Vip Refuge",
 	VipBarriers = "active map Vip Refuge.VIPBarriers",
 	VipDoorParts = "active map VIPDoorParts",
-	BrrBrrPatapimNpc = "upgrade NPC",
 	GearShopNpc = "gear shop NPC",
 	SellNpc = "sell NPC",
 	GroupReward = "active map GroupReward",
@@ -123,14 +122,13 @@ local function ensureStartupActiveMapAttribute()
 		return attributeValue
 	end
 
-	if DEBUG_TRACE
+	if
+		DEBUG_TRACE
 		and isNonEmptyString(STUDIO_STARTUP_ACTIVE_MAP_NAME)
-		and Workspace:FindFirstChild(STUDIO_STARTUP_ACTIVE_MAP_NAME) then
+		and Workspace:FindFirstChild(STUDIO_STARTUP_ACTIVE_MAP_NAME)
+	then
 		Workspace:SetAttribute(ACTIVE_MAP_ATTRIBUTE, STUDIO_STARTUP_ACTIVE_MAP_NAME)
-		mapTrace(
-			"Seeded ActiveMapName=%s before startup map resolution",
-			STUDIO_STARTUP_ACTIVE_MAP_NAME
-		)
+		mapTrace("Seeded ActiveMapName=%s before startup map resolution", STUDIO_STARTUP_ACTIVE_MAP_NAME)
 		return STUDIO_STARTUP_ACTIVE_MAP_NAME
 	end
 
@@ -218,8 +216,7 @@ local function findInRoots(roots, names, className, recursive)
 end
 
 local function findDirectOrRecursiveInRoots(roots, names, className)
-	return findInRoots(roots, names, className, false)
-		or findInRoots(roots, names, className, true)
+	return findInRoots(roots, names, className, false) or findInRoots(roots, names, className, true)
 end
 
 local function getChildPath(parent, path, className)
@@ -396,10 +393,6 @@ local function collectRefs(options)
 	refs.VipRefuge = vipRefuge
 	refs.VipBarriers = vipBarriers
 	refs.VipDoorParts = vipDoorParts or vipBarriers
-	refs.BrrBrrPatapimNpc = findChildPathInRoots(activeMapRoots, { "NPC", "Upgrades", "Franky" }, nil, false)
-		or findChildPathInRoots(activeMapRoots, { "NPC", "Upgrades", "Franky" }, nil, true)
-		or getChildByNames(lobby, { "Brr Brr Patapim" }, nil, true)
-		or findDirectOrRecursiveInRoots(socialRoots, { "Brr Brr Patapim" })
 	refs.GearShopNpc = getChildByNames(lobbyModel, { "Normal" }, nil, true)
 	refs.SellNpc = findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, false)
 		or findChildPathInRoots(activeMapRoots, { "NPC", "Sell", "Nami" }, nil, true)

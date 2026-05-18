@@ -12,10 +12,12 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local ServerMods = Modules:WaitForChild("Server"):WaitForChild("Crew")
 
 local SpawnerConfig = require(Configs:WaitForChild("CrewSpawnSettings"))
@@ -80,6 +82,7 @@ local CREW_MEMBER_ID_ATTRIBUTE = "CrewMemberId"
 local CREW_MEMBER_DISPLAY_NAME_ATTRIBUTE = "CrewMemberDisplayName"
 local CREW_MEMBER_IMAGE_ATTRIBUTE = "CrewMemberImage"
 local CREW_MEMBER_LEGACY_ID_ATTRIBUTE = "CrewMemberLegacyId"
+local OVERHEAD_ATTRIBUTES = CrewOverhead.Attribute
 local TUTORIAL_GRANTED_PATH = tostring(
 	(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.GrantedPath)
 		or "HiddenLeaderstats.TutorialCrewMemberGranted"
@@ -299,6 +302,38 @@ local function stampCrewMemberAttributes(model, entry)
 	model:SetAttribute(CREW_MEMBER_DISPLAY_NAME_ATTRIBUTE, displayName)
 	model:SetAttribute(CREW_MEMBER_IMAGE_ATTRIBUTE, image)
 	model:SetAttribute(CREW_MEMBER_LEGACY_ID_ATTRIBUTE, legacyId)
+end
+
+local function removeLegacyCrewHover(model)
+	for _, descendant in ipairs(model:GetDescendants()) do
+		if descendant.Name == "CrewMemberHover" and descendant:IsA("BillboardGui") then
+			descendant:Destroy()
+		end
+	end
+end
+
+local function syncSpawnOverhead(model, entry, remaining)
+	if not model then
+		return
+	end
+
+	local info = entry and entry.Info or {}
+	local displayName = normalizeCrewAttribute(info.DisplayName or info.CrewMemberName or info.Name)
+		or normalizeCrewAttribute(entry and entry.Id)
+		or "Crewmate"
+	local rarity = normalizeCrewAttribute(info.Rarity or entry and entry.Rarity) or "Common"
+	local variant = normalizeCrewAttribute(info.Variant or entry and entry.Variant) or "Normal"
+	local income = math.max(0, tonumber(info.Income) or 0)
+	local safeRemaining = math.max(0, tonumber(remaining) or 0)
+
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Spawned)
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.DisplayName, displayName)
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.Rarity, rarity)
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.Variant, variant)
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.IncomePerSecond, income)
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.ExpiresAt, workspace:GetServerTimeNow() + safeRemaining)
+	removeLegacyCrewHover(model)
+	CollectionService:AddTag(model, CrewOverhead.Tag)
 end
 
 local function normalizeEventName(s)
@@ -637,6 +672,7 @@ local function rushTrimExistingOnce()
 			st.Remaining = newRemain
 			st.LastUpdate = os.clock()
 			st.LastShown = -1
+			syncSpawnOverhead(model, st.Entry, newRemain)
 
 			task.delay(RUSH_TRIM_SECONDS, function()
 				expireCrewMember(model, st)
@@ -737,8 +773,22 @@ hitBox.Touched:Connect(function(hit)
 		end
 	end
 
+	local heldCount = if typeof(Interaction.GetHeldCount) == "function" then Interaction.GetHeldCount(ctx, plr) else 1
+	local heldGrants = {}
+	if typeof(Interaction.PeekAllHeld) == "function" then
+		for _, info in ipairs(Interaction.PeekAllHeld(ctx, plr, active)) do
+			if info and info.Name then
+				table.insert(heldGrants, {
+					CrewMemberId = info.Name,
+					Amount = 1,
+				})
+			end
+		end
+	end
 	if Interaction.HasHeld(ctx, plr) and not heldTutorialAlreadyGranted and not heldIsTutorial then
-		local canGain = CrewQuickSlotService.CanGainOrNotify(plr, 1, "SpawnCrewMembers:TurnIn")
+		local canGain = if #heldGrants > 0 and typeof(CrewQuickSlotService.CanGainCrewMemberBatchOrNotify) == "function"
+			then CrewQuickSlotService.CanGainCrewMemberBatchOrNotify(plr, heldGrants, "SpawnCrewMembers:TurnIn")
+			else CrewQuickSlotService.CanGainOrNotify(plr, math.max(1, heldCount), "SpawnCrewMembers:TurnIn")
 		if not canGain then
 			runTrace(
 				"crewTurnIn blocked player=%s boundary=%s activeMap=%s reason=quick_slots_full",
@@ -761,8 +811,15 @@ hitBox.Touched:Connect(function(hit)
 		end
 	end
 
-	local info = Interaction.CollectHeld(ctx, plr, active)
-	if info and info.Name then
+	local heldInfos = if typeof(Interaction.CollectAllHeld) == "function"
+		then Interaction.CollectAllHeld(ctx, plr, active)
+		else { Interaction.CollectHeld(ctx, plr, active) }
+	local collectedAny = false
+	for _, info in ipairs(heldInfos) do
+		if not (info and info.Name) then
+			continue
+		end
+		collectedAny = true
 		local displayName = tostring(info.DisplayName or info.CrewMemberId or info.Name)
 		runTrace(
 			"crewTurnIn player=%s boundary=%s activeMap=%s reward=%s slotIndex=%s origin=%s action=AddCrewMember",
@@ -812,7 +869,8 @@ hitBox.Touched:Connect(function(hit)
 				od.SlotCooldown[si] = os.clock() + rng:NextNumber(4, 6)
 			end
 		end
-	else
+	end
+	if not collectedAny then
 		runTrace(
 			"crewTurnInSkipped player=%s boundary=%s activeMap=%s reason=no_held_crew_member",
 			plr.Name,
@@ -830,8 +888,6 @@ local function registerActive(model, entry, originData, slotIndex)
 		tl = 30
 	end
 
-	local hoverRefs = Interaction.BuildHoverRefs(model, Placement.EnsurePrimaryPart)
-
 	local st = {
 		Model = model,
 		Entry = entry,
@@ -839,7 +895,6 @@ local function registerActive(model, entry, originData, slotIndex)
 		Remaining = tl,
 		LastUpdate = os.clock(),
 		LastShown = -1,
-		HoverRefs = hoverRefs,
 		Held = false,
 		HolderUserId = nil,
 		Prompt = nil,
@@ -849,7 +904,7 @@ local function registerActive(model, entry, originData, slotIndex)
 	}
 
 	active[model] = st
-	Interaction.SetHoverText(hoverRefs, entry, entry.Rarity, tl, false)
+	syncSpawnOverhead(model, entry, tl)
 	st.Prompt = Interaction.BindPrompt(ctx, model, st, Placement.EnsurePrimaryPart)
 
 	return st
@@ -1554,7 +1609,6 @@ while true do
 		else
 			if isHeldCrewMemberModel(model, st) then
 				st.LastUpdate = now
-				Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, math.ceil(st.Remaining), true)
 			else
 				local dt = now - (st.LastUpdate or now)
 				st.LastUpdate = now
@@ -1567,7 +1621,6 @@ while true do
 
 				if remainingInt ~= st.LastShown then
 					st.LastShown = remainingInt
-					Interaction.SetHoverText(st.HoverRefs, st.Entry, st.Rarity, remainingInt, false)
 				end
 
 				if st.Remaining <= 0 and not isTutorialCrewMemberModel(model) then

@@ -1,11 +1,8 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 
-local playerGui = player:WaitForChild("PlayerGui")
-local framesFolder = playerGui:WaitForChild("Frames")
-
-local speedUpgradeFrame = framesFolder:WaitForChild("SpeedUpgrade")
-local rebirthFrame = framesFolder:WaitForChild("Rebirth")
+local ReactModalRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ReactModalRegistry"))
 
 local backpack = player:WaitForChild("Backpack")
 
@@ -14,7 +11,7 @@ local character
 local charConn
 
 local function shouldMove()
-	return speedUpgradeFrame.Visible or rebirthFrame.Visible
+	return ReactModalRegistry.IsVisible("SpeedUpgrade") or ReactModalRegistry.IsVisible("Rebirth")
 end
 
 local function isSpeedCoilTool(inst)
@@ -55,5 +52,8 @@ local function onVisibleChanged()
 	moveExisting()
 end
 
-speedUpgradeFrame:GetPropertyChangedSignal("Visible"):Connect(onVisibleChanged)
-rebirthFrame:GetPropertyChangedSignal("Visible"):Connect(onVisibleChanged)
+ReactModalRegistry.GetChangedSignal():Connect(function(name)
+	if name == "SpeedUpgrade" or name == "Rebirth" then
+		onVisibleChanged()
+	end
+end)

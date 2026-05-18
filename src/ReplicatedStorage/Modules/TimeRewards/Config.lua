@@ -4,33 +4,33 @@ local Rewards = {
 		RewName = "+ 1000 Beli",
 		Icon = "rbxassetid://76300573750363",
 
-		Time               = 60,
+		Time = 60,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			Doubloons = { Chance = 100, Amount = 1000 },
 		},
 	},
 
 	[2] = {
 		RewName = "5 Min x2 Beli",
-		Icon = "rbxassetid://112694595954613",
+		Icon = "rbxassetid://123727379614328",
 
-		Time               = 120,
+		Time = 120,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			x2MoneyTime = { Chance = 100, Amount = 300 },
 		},
 	},
 
 	-- TODO(TimeRewards): Slot 3 was retired with legacy template content; choose a new production reward before reusing it.
-	
+
 	[4] = {
 		RewName = "+ 10000 Beli",
 		Icon = "rbxassetid://76300573750363",
 
-		Time               = 900,
+		Time = 900,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			Doubloons = { Chance = 100, Amount = 10000 },
 		},
 	},
@@ -39,20 +39,20 @@ local Rewards = {
 		RewName = "10 Min x1.5 Walkspeed",
 		Icon = "rbxassetid://96331945137652",
 
-		Time               = 1800,
+		Time = 1800,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			x15WalkSpeedTime = { Chance = 100, Amount = 600 },
 		},
 	},
-	
+
 	[6] = {
 		RewName = "Random Rare Crewmate",
 		Icon = "rbxassetid://108324428541699",
 
-		Time               = 2100,
+		Time = 2100,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			["Random Rare Crewmate"] = {
 				Chance = 100,
 				Amount = 1,
@@ -62,14 +62,14 @@ local Rewards = {
 			},
 		},
 	},
-	
+
 	[7] = {
 		RewName = "Ember Fist",
 		Icon = "rbxassetid://84916034746691",
 
-		Time               = 2400,
+		Time = 2400,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			["Ember Fist"] = {
 				Chance = 100,
 				Amount = 1,
@@ -78,19 +78,17 @@ local Rewards = {
 			},
 		},
 	},
-	
+
 	[8] = {
 		RewName = "+ 100000 Beli",
 		Icon = "rbxassetid://76300573750363",
 
-		Time               = 3600,
+		Time = 3600,
 		RewardTextTemplate = "You Get %d %s",
-		Rewards            = {
+		Rewards = {
 			Doubloons = { Chance = 100, Amount = 100000 },
 		},
 	},
-	
 }
 
 return Rewards
-

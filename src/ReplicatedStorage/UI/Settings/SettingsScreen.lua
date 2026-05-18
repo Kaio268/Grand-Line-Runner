@@ -574,8 +574,8 @@ local function SettingsScreen(props)
 				TextColor3 = THEME.TextMain,
 				TextSize = 30,
 				TextScaled = true,
-				TextStrokeColor3 = THEME.GoldShadow,
-				TextStrokeTransparency = 0.45,
+				TextStrokeColor3 = THEME.GoldHighlight,
+				TextStrokeTransparency = 0.36,
 				ZIndex = 4,
 			}),
 			Close = e("TextButton", {

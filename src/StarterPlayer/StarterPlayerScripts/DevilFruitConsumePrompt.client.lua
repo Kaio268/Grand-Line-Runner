@@ -1,17 +1,28 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
+local packages = ReplicatedStorage:WaitForChild("Packages")
 local modules = ReplicatedStorage:WaitForChild("Modules")
+local uiFolder = ReplicatedStorage:WaitForChild("UI")
+
+local React = require(packages:WaitForChild("React"))
+local ReactRoblox = require(packages:WaitForChild("ReactRoblox"))
 local DevilFruitConfig = require(modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local EatAnimationClient = require(modules:WaitForChild("DevilFruits"):WaitForChild("EatAnimationClient"))
+local DevilFruitRuntimeBootstrap =
+	require(modules:WaitForChild("DevilFruits"):WaitForChild("Client"):WaitForChild("DevilFruitRuntimeBootstrap"))
+local PopUpModule = require(modules:WaitForChild("PopUpModule"))
 local UiModalState = require(modules:WaitForChild("UiModalState"))
+local ConsumePromptScreen = require(uiFolder:WaitForChild("DevilFruit"):WaitForChild("ConsumePromptScreen"))
+
 local promptRemote = remotes:WaitForChild("DevilFruitConsumePrompt")
 local responseRemote = remotes:WaitForChild("DevilFruitConsumeResponse")
 local requestRemote = remotes:WaitForChild("DevilFruitConsumeRequest")
+local resultRemote = remotes:WaitForChild("DevilFruitConsumeResult")
 
 local TOOL_ATTR_KIND = "InventoryItemKind"
 local TOOL_ATTR_FRUIT_KEY = "FruitKey"
@@ -20,18 +31,16 @@ local GAMEPLAY_MODAL_OPEN_ATTRIBUTE = UiModalState.GetAttributeName()
 local CONSUME_PROMPT_DEBUG = false
 local EQUIP_TO_PROMPT_DELAY = 0.2
 local REQUEST_COOLDOWN = 0.35
+local MODAL_STATE_KEY = "DevilFruitConsumePrompt"
 
-local screenGui
-local dimmer
-local panel
-local titleLabel
-local bodyLabel
-local confirmButton
-local cancelButton
-local confirmButtonLabel
-local cancelButtonLabel
+local rootContainer = Instance.new("Folder")
+rootContainer.Name = "ReactDevilFruitConsumePromptRoot"
+
+local root = ReactRoblox.createRoot(rootContainer)
 local pendingPayload
 local lastRequestAt = 0
+local destroyed = false
+local renderQueued = false
 local toolActivationConnections = {}
 local toolEquippedAt = setmetatable({}, { __mode = "k" })
 local toolEnabledBeforeMenuBlock = setmetatable({}, { __mode = "k" })
@@ -45,23 +54,27 @@ local function consumePromptDebug(message, ...)
 	print(ok and formatted or ("[FruitConsumeDebug][PromptClient] " .. tostring(message)))
 end
 
-local UI_THEME = {
-	PrimaryBg = Color3.fromRGB(30, 42, 56),
-	SecondaryBg = Color3.fromRGB(36, 52, 71),
-	PanelFill = Color3.fromRGB(44, 62, 80),
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	HeaderBackground = Color3.fromRGB(16, 35, 59),
-	SectionBackground = Color3.fromRGB(27, 46, 68),
-	SectionHover = Color3.fromRGB(46, 74, 99),
-	GoldBase = Color3.fromRGB(212, 175, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
-	TextMain = Color3.fromRGB(230, 230, 230),
-	TextSecondary = Color3.fromRGB(184, 193, 204),
-	FruitBackgroundImage = "rbxassetid://134053886107384",
-}
+local function logPostConsumeRuntimeState(expectedFruitName)
+	task.delay(0.75, function()
+		local fruitFolder = player:FindFirstChild("DevilFruit")
+		local equippedValue = fruitFolder and fruitFolder:FindFirstChild("Equipped")
+		local equippedValueText = equippedValue and equippedValue:IsA("StringValue") and equippedValue.Value or "<nil>"
 
-local BUTTON_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		consumePromptDebug(
+			"post consume runtime expected=%s attr=%s value=%s bootstrapStarted=%s runtimeStarted=%s hudVisible=%s abilityCount=%s remotesReady=%s gameplayModalOpen=%s lastRemoteError=%s",
+			tostring(expectedFruitName),
+			tostring(player:GetAttribute("EquippedDevilFruit")),
+			tostring(equippedValueText),
+			tostring(DevilFruitRuntimeBootstrap.IsStarted()),
+			tostring(player:GetAttribute("DevilFruitClientRuntimeStarted")),
+			tostring(player:GetAttribute("DevilFruitClientHudVisible")),
+			tostring(player:GetAttribute("DevilFruitClientAbilityCount")),
+			tostring(player:GetAttribute("DevilFruitClientRemotesReady")),
+			tostring(playerGui:GetAttribute(GAMEPLAY_MODAL_OPEN_ATTRIBUTE)),
+			tostring(player:GetAttribute("DevilFruitClientLastRemoteError"))
+		)
+	end)
+end
 
 local function shouldRequireReplaceWarning(currentFruitName, nextFruitKey)
 	local currentName = tostring(currentFruitName or "")
@@ -78,141 +91,6 @@ local function shouldRequireReplaceWarning(currentFruitName, nextFruitKey)
 	return resolvedCurrent ~= nil
 end
 
-local function ensureCorner(instance, radius)
-	local corner = instance:FindFirstChildOfClass("UICorner")
-	if not corner then
-		corner = Instance.new("UICorner")
-		corner.Parent = instance
-	end
-	corner.CornerRadius = UDim.new(0, radius)
-	return corner
-end
-
-local function ensureStroke(instance, color, transparency, thickness)
-	local stroke = instance:FindFirstChildOfClass("UIStroke")
-	if not stroke then
-		stroke = Instance.new("UIStroke")
-		stroke.Parent = instance
-	end
-	stroke.Color = color
-	stroke.Transparency = transparency
-	stroke.Thickness = thickness
-	return stroke
-end
-
-local function ensureGradient(instance, topColor, bottomColor)
-	local gradient = instance:FindFirstChildOfClass("UIGradient")
-	if not gradient then
-		gradient = Instance.new("UIGradient")
-		gradient.Parent = instance
-	end
-	gradient.Rotation = 90
-	gradient.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, topColor),
-		ColorSequenceKeypoint.new(1, bottomColor),
-	})
-	return gradient
-end
-
-local function bindThemedButton(button, style)
-	local isHovering = false
-	local hoverScale = tonumber(style and style.hoverScale) or 1.01
-	local clickScale = tonumber(style and style.clickScale) or 0.99
-	local uiScale = button:FindFirstChild("PromptButtonScale")
-	if not (uiScale and uiScale:IsA("UIScale")) then
-		uiScale = Instance.new("UIScale")
-		uiScale.Name = "PromptButtonScale"
-		uiScale.Scale = 1
-		uiScale.Parent = button
-	end
-
-	local function applyVisual(isHovered)
-		local fill = isHovered and style.hoverFill or style.fill
-		local text = isHovered and style.hoverText or style.text
-		local gradientTop = isHovered and style.hoverTop or style.top
-		local gradientBottom = isHovered and style.hoverBottom or style.bottom
-		local transparency = if isHovered
-			then (tonumber(style and style.hoverTransparency) or tonumber(style and style.transparency) or 0)
-			else (tonumber(style and style.transparency) or 0)
-
-		button.BackgroundColor3 = fill
-		button.BackgroundTransparency = transparency
-		local label = button:FindFirstChild("Label")
-		if label and label:IsA("TextLabel") then
-			label.TextColor3 = text
-		else
-			button.TextColor3 = text
-		end
-		ensureGradient(button, gradientTop, gradientBottom)
-	end
-
-	button.MouseEnter:Connect(function()
-		isHovering = true
-		applyVisual(true)
-		TweenService:Create(uiScale, BUTTON_TWEEN, { Scale = hoverScale }):Play()
-	end)
-
-	button.MouseLeave:Connect(function()
-		isHovering = false
-		applyVisual(false)
-		TweenService:Create(uiScale, BUTTON_TWEEN, { Scale = 1 }):Play()
-	end)
-
-	button.MouseButton1Down:Connect(function()
-		TweenService:Create(uiScale, BUTTON_TWEEN, { Scale = clickScale }):Play()
-	end)
-
-	button.MouseButton1Up:Connect(function()
-		TweenService:Create(uiScale, BUTTON_TWEEN, { Scale = if isHovering then hoverScale else 1 }):Play()
-	end)
-
-	applyVisual(false)
-end
-
-local function setPromptVisible(isVisible)
-	if not screenGui then
-		return
-	end
-
-	screenGui.Enabled = isVisible
-	if dimmer then
-		dimmer.Visible = isVisible
-	end
-	if panel then
-		panel.Visible = isVisible
-	end
-end
-
-local function isPromptGuiValid(gui)
-	if not (gui and gui:IsA("ScreenGui")) then
-		return false
-	end
-
-	local guiDimmer = gui:FindFirstChild("Dimmer")
-	local guiPanel = gui:FindFirstChild("Panel")
-	if not (guiDimmer and guiDimmer:IsA("Frame") and guiPanel and guiPanel:IsA("Frame")) then
-		return false
-	end
-
-	local topBar = guiPanel:FindFirstChild("TopBar")
-	local content = guiPanel:FindFirstChild("Content")
-	local bodyCard = content and content:FindFirstChild("BodyCard")
-	local buttonRow = content and content:FindFirstChild("ButtonRow")
-	local confirm = buttonRow and buttonRow:FindFirstChild("Confirm")
-	local cancel = buttonRow and buttonRow:FindFirstChild("Cancel")
-	local confirmLabel = confirm and confirm:FindFirstChild("Label")
-	local cancelLabel = cancel and cancel:FindFirstChild("Label")
-
-	return topBar ~= nil
-		and content ~= nil
-		and bodyCard ~= nil
-		and buttonRow ~= nil
-		and confirm ~= nil
-		and cancel ~= nil
-		and confirmLabel ~= nil
-		and cancelLabel ~= nil
-end
-
 local function playEatAnimation(fruitKey)
 	EatAnimationClient.Play(player, fruitKey)
 end
@@ -225,84 +103,92 @@ local function isDevilFruitTool(tool)
 end
 
 local function isPromptOpen()
-	return pendingPayload ~= nil and panel ~= nil and panel.Visible == true
+	return pendingPayload ~= nil
 end
 
 local function isGameplayModalOpen()
-	local playerGui = player:FindFirstChild("PlayerGui")
-	return playerGui ~= nil and playerGui:GetAttribute(GAMEPLAY_MODAL_OPEN_ATTRIBUTE) == true
-end
-
-local function getInventoryHud()
-	local playerGui = player:FindFirstChild("PlayerGui")
-	local hud = playerGui and playerGui:FindFirstChild("HUD")
-	local inventoryHud = hud and hud:FindFirstChild("Inventory")
-	return if inventoryHud and inventoryHud:IsA("GuiObject") then inventoryHud else nil
-end
-
-local function isGuiVisibleThroughAncestors(guiObject)
-	if not (guiObject and guiObject:IsA("GuiObject")) then
-		return false
-	end
-
-	local current = guiObject
-	while current and current ~= player do
-		if current:IsA("GuiObject") and current.Visible == false then
-			return false
-		end
-		if current:IsA("LayerCollector") and current.Enabled == false then
-			return false
-		end
-		current = current.Parent
-	end
-
-	return true
+	return playerGui:GetAttribute(GAMEPLAY_MODAL_OPEN_ATTRIBUTE) == true
 end
 
 local function isInventoryMenuOpen()
-	if isGameplayModalOpen() then
-		return true
-	end
-
-	if player:GetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE) == true then
-		return true
-	end
-
-	local inventoryHud = getInventoryHud()
-	if not inventoryHud then
-		return false
-	end
-
-	local inv = inventoryHud:FindFirstChild("Inv")
-	local inventoryFrame = inv and inv:FindFirstChild("InventoryFrame")
-	return isGuiVisibleThroughAncestors(inventoryHud)
-		and inv ~= nil
-		and inv:IsA("GuiObject")
-		and isGuiVisibleThroughAncestors(inv)
-		and inventoryFrame ~= nil
-		and inventoryFrame:IsA("GuiObject")
-		and isGuiVisibleThroughAncestors(inventoryFrame)
+	local isOtherGameplayModalOpen = isGameplayModalOpen() and not isPromptOpen()
+	return isOtherGameplayModalOpen or player:GetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE) == true
 end
 
-local function isInventoryUiInput(input)
-	local inventoryHud = getInventoryHud()
-	local playerGui = player:FindFirstChild("PlayerGui")
-	if not inventoryHud or not playerGui then
-		return false
+local function setPromptPayload(payload)
+	pendingPayload = payload
+	UiModalState.SetOpen(MODAL_STATE_KEY, payload ~= nil)
+end
+
+local function getPromptBody()
+	if not pendingPayload then
+		return ""
 	end
 
-	local position = input.Position
-	if typeof(position) ~= "Vector3" and typeof(position) ~= "Vector2" then
-		return false
+	if pendingPayload.Step == 2 and pendingPayload.RequiresReplaceWarning then
+		return string.format("This will replace your %s.", pendingPayload.CurrentFruitName)
 	end
 
-	for _, guiObject in ipairs(playerGui:GetGuiObjectsAtPosition(position.X, position.Y)) do
-		if guiObject:IsDescendantOf(inventoryHud) then
-			return true
+	return "Are you sure you want to eat this fruit?"
+end
+
+local function getConfirmText()
+	if pendingPayload and pendingPayload.Step == 2 and pendingPayload.RequiresReplaceWarning then
+		return "Replace"
+	end
+
+	return "Eat"
+end
+
+local function render()
+	root:render(ReactRoblox.createPortal(
+		React.createElement(ConsumePromptScreen, {
+			body = getPromptBody(),
+			cancelText = "Cancel",
+			confirmText = getConfirmText(),
+			onCancel = function()
+				if pendingPayload then
+					responseRemote:FireServer(false, pendingPayload.FruitKey)
+				end
+				setPromptPayload(nil)
+				render()
+			end,
+			onConfirm = function()
+				if not pendingPayload then
+					return
+				end
+
+				if pendingPayload.Step == 1 and pendingPayload.RequiresReplaceWarning then
+					pendingPayload.Step = 2
+					render()
+					return
+				end
+
+				local confirmedPayload = pendingPayload
+				setPromptPayload(nil)
+				render()
+				responseRemote:FireServer(true, confirmedPayload.FruitKey)
+				task.spawn(playEatAnimation, confirmedPayload.FruitKey)
+			end,
+			title = pendingPayload and pendingPayload.DisplayName or "Devil Fruit",
+			visible = pendingPayload ~= nil,
+		}),
+		playerGui
+	))
+end
+
+local function scheduleRender()
+	if renderQueued or destroyed then
+		return
+	end
+
+	renderQueued = true
+	task.defer(function()
+		renderQueued = false
+		if not destroyed then
+			render()
 		end
-	end
-
-	return false
+	end)
 end
 
 local function setToolInteractionBlocked(tool, isBlocked)
@@ -349,8 +235,8 @@ local function syncFruitToolInteractionState()
 		tostring(isPromptOpen())
 	)
 	if isBlocked and isPromptOpen() then
-		pendingPayload = nil
-		setPromptVisible(false)
+		setPromptPayload(nil)
+		scheduleRender()
 		consumePromptDebug("hide prompt because inventory menu is open")
 	end
 
@@ -413,15 +299,6 @@ local function requestConsumeForTool(tool, source)
 		return
 	end
 
-	consumePromptDebug(
-		"request fire source=%s tool=%s fruit=%s menuOpen=%s enabled=%s parent=%s",
-		tostring(source),
-		tool.Name,
-		tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
-		tostring(isInventoryMenuOpen()),
-		tostring(tool.Enabled),
-		tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
-	)
 	lastRequestAt = now
 	requestRemote:FireServer(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY), source)
 end
@@ -433,14 +310,6 @@ local function bindFruitTool(tool)
 
 	setToolInteractionBlocked(tool, isInventoryMenuOpen())
 	toolActivationConnections[tool] = tool.Activated:Connect(function()
-		consumePromptDebug(
-			"tool activated event tool=%s fruit=%s menuOpen=%s enabled=%s parent=%s",
-			tool.Name,
-			tostring(tool:GetAttribute(TOOL_ATTR_FRUIT_KEY)),
-			tostring(isInventoryMenuOpen()),
-			tostring(tool.Enabled),
-			tostring(tool.Parent and tool.Parent:GetFullName() or "nil")
-		)
 		requestConsumeForTool(tool, "tool_activated")
 	end)
 end
@@ -472,340 +341,70 @@ local function bindCharacter(character)
 	end)
 end
 
-local function ensurePromptGui()
-	if screenGui and screenGui.Parent and isPromptGuiValid(screenGui) then
-		return
-	end
-
-	local playerGui = player:WaitForChild("PlayerGui")
-	local existingGui = playerGui:FindFirstChild("DevilFruitConsumePrompt")
-	if existingGui and existingGui ~= screenGui then
-		existingGui:Destroy()
-	end
-	if screenGui and screenGui.Parent then
-		screenGui:Destroy()
-	end
-
-	screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "DevilFruitConsumePrompt"
-	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
-	screenGui.DisplayOrder = 120
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.Enabled = false
-	screenGui.Parent = playerGui
-
-	dimmer = Instance.new("Frame")
-	dimmer.Name = "Dimmer"
-	dimmer.BackgroundColor3 = UI_THEME.MenuOverlay
-	dimmer.BackgroundTransparency = 0.4
-	dimmer.BorderSizePixel = 0
-	dimmer.Size = UDim2.fromScale(1, 1)
-	dimmer.ZIndex = 60
-	dimmer.Parent = screenGui
-
-	panel = Instance.new("Frame")
-	panel.Name = "Panel"
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.fromOffset(620, 360)
-	panel.BackgroundColor3 = UI_THEME.PrimaryBg
-	panel.BackgroundTransparency = 1
-	panel.BorderSizePixel = 0
-	panel.ClipsDescendants = true
-	panel.Visible = false
-	panel.ZIndex = 80
-	panel.Parent = screenGui
-
-	ensureCorner(panel, 16)
-	ensureStroke(panel, UI_THEME.GoldHighlight, 0, 2.2)
-
-	local bgImage = Instance.new("ImageLabel")
-	bgImage.Name = "BackgroundImage"
-	bgImage.BackgroundTransparency = 1
-	bgImage.BorderSizePixel = 0
-	bgImage.Image = UI_THEME.FruitBackgroundImage
-	bgImage.ScaleType = Enum.ScaleType.Stretch
-	bgImage.Size = UDim2.fromScale(1, 1)
-	bgImage.ZIndex = 79
-	bgImage.Parent = panel
-	ensureCorner(bgImage, 16)
-
-	local imageOverlay = Instance.new("Frame")
-	imageOverlay.Name = "BackgroundOverlay"
-	imageOverlay.BackgroundColor3 = UI_THEME.MenuOverlay
-	imageOverlay.BackgroundTransparency = 0.45
-	imageOverlay.BorderSizePixel = 0
-	imageOverlay.Size = UDim2.fromScale(1, 1)
-	imageOverlay.ZIndex = 79
-	imageOverlay.Parent = panel
-	ensureCorner(imageOverlay, 16)
-
-	local topBar = Instance.new("Frame")
-	topBar.Name = "TopBar"
-	topBar.BackgroundColor3 = UI_THEME.HeaderBackground
-	topBar.BackgroundTransparency = 0.25
-	topBar.BorderSizePixel = 0
-	topBar.Position = UDim2.fromOffset(14, 12)
-	topBar.Size = UDim2.new(1, -28, 0, 88)
-	topBar.ZIndex = 81
-	topBar.Parent = panel
-	ensureCorner(topBar, 10)
-	ensureStroke(topBar, UI_THEME.GoldHighlight, 0, 1.4)
-	ensureGradient(topBar, UI_THEME.SecondaryBg, UI_THEME.PrimaryBg)
-
-	local accentLabel = Instance.new("TextLabel")
-	accentLabel.Name = "Accent"
-	accentLabel.BackgroundTransparency = 1
-	accentLabel.Position = UDim2.fromOffset(16, 8)
-	accentLabel.Size = UDim2.new(1, -32, 0, 20)
-	accentLabel.Font = Enum.Font.GothamBold
-	accentLabel.Text = "DEVIL FRUIT"
-	accentLabel.TextColor3 = UI_THEME.GoldHighlight
-	accentLabel.TextSize = 16
-	accentLabel.TextXAlignment = Enum.TextXAlignment.Left
-	accentLabel.ZIndex = 82
-	accentLabel.Parent = topBar
-
-	titleLabel = Instance.new("TextLabel")
-	titleLabel.Name = "Title"
-	titleLabel.BackgroundTransparency = 1
-	titleLabel.Position = UDim2.fromOffset(16, 30)
-	titleLabel.Size = UDim2.new(1, -32, 0, 48)
-	titleLabel.Font = Enum.Font.GothamBold
-	titleLabel.Text = "Eat Devil Fruit"
-	titleLabel.TextColor3 = UI_THEME.TextMain
-	titleLabel.TextSize = 22
-	titleLabel.TextScaled = false
-	titleLabel.TextWrapped = false
-	titleLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-	titleLabel.ZIndex = 82
-	titleLabel.Parent = topBar
-
-	local content = Instance.new("Frame")
-	content.Name = "Content"
-	content.BackgroundTransparency = 1
-	content.Position = UDim2.fromOffset(20, 114)
-	content.Size = UDim2.new(1, -40, 1, -136)
-	content.ZIndex = 81
-	content.Parent = panel
-
-	local bodyCard = Instance.new("Frame")
-	bodyCard.Name = "BodyCard"
-	bodyCard.BackgroundColor3 = UI_THEME.SectionBackground
-	bodyCard.BackgroundTransparency = 0.22
-	bodyCard.BorderSizePixel = 0
-	bodyCard.Position = UDim2.fromOffset(0, 0)
-	bodyCard.Size = UDim2.new(1, 0, 1, -64)
-	bodyCard.ZIndex = 81
-	bodyCard.Parent = content
-	ensureCorner(bodyCard, 12)
-	ensureStroke(bodyCard, UI_THEME.GoldHighlight, 0, 1.2)
-	ensureGradient(bodyCard, UI_THEME.SecondaryBg, UI_THEME.PrimaryBg)
-
-	local bodyPadding = Instance.new("UIPadding")
-	bodyPadding.PaddingTop = UDim.new(0, 14)
-	bodyPadding.PaddingBottom = UDim.new(0, 14)
-	bodyPadding.PaddingLeft = UDim.new(0, 16)
-	bodyPadding.PaddingRight = UDim.new(0, 16)
-	bodyPadding.Parent = bodyCard
-
-	bodyLabel = Instance.new("TextLabel")
-	bodyLabel.Name = "Body"
-	bodyLabel.BackgroundTransparency = 1
-	bodyLabel.Position = UDim2.fromOffset(0, 0)
-	bodyLabel.Size = UDim2.fromScale(1, 1)
-	bodyLabel.Font = Enum.Font.GothamBold
-	bodyLabel.Text = ""
-	bodyLabel.TextColor3 = UI_THEME.TextSecondary
-	bodyLabel.TextSize = 24
-	bodyLabel.TextScaled = false
-	bodyLabel.TextWrapped = true
-	bodyLabel.TextXAlignment = Enum.TextXAlignment.Left
-	bodyLabel.TextYAlignment = Enum.TextYAlignment.Top
-	bodyLabel.ZIndex = 82
-	bodyLabel.Parent = bodyCard
-
-	local buttonRow = Instance.new("Frame")
-	buttonRow.Name = "ButtonRow"
-	buttonRow.BackgroundTransparency = 1
-	buttonRow.AnchorPoint = Vector2.new(0.5, 1)
-	buttonRow.Position = UDim2.fromScale(0.5, 1)
-	buttonRow.Size = UDim2.new(1, 0, 0, 48)
-	buttonRow.ZIndex = 82
-	buttonRow.Parent = content
-
-	confirmButton = Instance.new("TextButton")
-	confirmButton.Name = "Confirm"
-	confirmButton.AnchorPoint = Vector2.new(0, 0.5)
-	confirmButton.Position = UDim2.fromScale(0, 0.5)
-	confirmButton.Size = UDim2.new(0.5, -14, 0, 46)
-	confirmButton.BackgroundColor3 = UI_THEME.GoldBase
-	confirmButton.BorderSizePixel = 0
-	confirmButton.Font = Enum.Font.GothamBold
-	confirmButton.Text = ""
-	confirmButton.TextColor3 = UI_THEME.PrimaryBg
-	confirmButton.TextSize = 22
-	confirmButton.TextScaled = false
-	confirmButton.AutoButtonColor = false
-	confirmButton.ZIndex = 82
-	confirmButton.Parent = buttonRow
-
-	confirmButtonLabel = Instance.new("TextLabel")
-	confirmButtonLabel.Name = "Label"
-	confirmButtonLabel.BackgroundTransparency = 1
-	confirmButtonLabel.Size = UDim2.fromScale(1, 1)
-	confirmButtonLabel.Font = Enum.Font.GothamBold
-	confirmButtonLabel.Text = "Eat"
-	confirmButtonLabel.TextColor3 = UI_THEME.PrimaryBg
-	confirmButtonLabel.TextSize = 22
-	confirmButtonLabel.ZIndex = 84
-	confirmButtonLabel.Parent = confirmButton
-
-	ensureCorner(confirmButton, 10)
-	local confirmStroke = ensureStroke(confirmButton, UI_THEME.GoldHighlight, 0.08, 1.2)
-	confirmStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	bindThemedButton(confirmButton, {
-		fill = UI_THEME.GoldBase,
-		text = UI_THEME.PrimaryBg,
-		top = UI_THEME.GoldHighlight,
-		bottom = UI_THEME.GoldBase,
-		hoverFill = UI_THEME.GoldHighlight,
-		hoverText = UI_THEME.PrimaryBg,
-		hoverTop = UI_THEME.GoldHighlight,
-		hoverBottom = UI_THEME.GoldBase,
-		transparency = 0.12,
-		hoverTransparency = 0.12,
-		hoverScale = 1.0,
-		clickScale = 0.99,
-	})
-
-	cancelButton = Instance.new("TextButton")
-	cancelButton.Name = "Cancel"
-	cancelButton.AnchorPoint = Vector2.new(1, 0.5)
-	cancelButton.Position = UDim2.fromScale(1, 0.5)
-	cancelButton.Size = UDim2.new(0.5, -14, 0, 46)
-	cancelButton.BackgroundColor3 = UI_THEME.SectionBackground
-	cancelButton.BorderSizePixel = 0
-	cancelButton.Font = Enum.Font.GothamBold
-	cancelButton.Text = ""
-	cancelButton.TextColor3 = UI_THEME.TextMain
-	cancelButton.TextSize = 22
-	cancelButton.TextScaled = false
-	cancelButton.AutoButtonColor = false
-	cancelButton.ZIndex = 82
-	cancelButton.Parent = buttonRow
-
-	cancelButtonLabel = Instance.new("TextLabel")
-	cancelButtonLabel.Name = "Label"
-	cancelButtonLabel.BackgroundTransparency = 1
-	cancelButtonLabel.Size = UDim2.fromScale(1, 1)
-	cancelButtonLabel.Font = Enum.Font.GothamBold
-	cancelButtonLabel.Text = "Cancel"
-	cancelButtonLabel.TextColor3 = UI_THEME.TextMain
-	cancelButtonLabel.TextSize = 22
-	cancelButtonLabel.ZIndex = 84
-	cancelButtonLabel.Parent = cancelButton
-
-	ensureCorner(cancelButton, 10)
-	local cancelStroke = ensureStroke(cancelButton, UI_THEME.GoldHighlight, 0.08, 1.2)
-	cancelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	bindThemedButton(cancelButton, {
-		fill = UI_THEME.SectionBackground,
-		text = UI_THEME.TextMain,
-		top = UI_THEME.SecondaryBg,
-		bottom = UI_THEME.PrimaryBg,
-		hoverFill = Color3.fromRGB(200, 0, 9),
-		hoverText = Color3.fromRGB(255, 241, 230),
-		hoverTop = Color3.fromRGB(216, 34, 44),
-		hoverBottom = Color3.fromRGB(147, 0, 0),
-		transparency = 0.12,
-		hoverTransparency = 0.12,
-		hoverScale = 1.0,
-		clickScale = 0.99,
-	})
-
-	cancelButton.MouseButton1Click:Connect(function()
-		setPromptVisible(false)
-		if pendingPayload then
-			responseRemote:FireServer(false, pendingPayload.FruitKey)
-		end
-		pendingPayload = nil
-	end)
-
-	confirmButton.MouseButton1Click:Connect(function()
-		if not pendingPayload then
-			return
-		end
-
-		if pendingPayload.Step == 1 and pendingPayload.RequiresReplaceWarning then
-			pendingPayload.Step = 2
-			bodyLabel.Text = string.format("This will replace your %s.", pendingPayload.CurrentFruitName)
-			if confirmButtonLabel then
-				confirmButtonLabel.Text = "Replace"
-			end
-			if cancelButtonLabel then
-				cancelButtonLabel.Text = "Cancel"
-			end
-			return
-		end
-
-		setPromptVisible(false)
-		local confirmedPayload = pendingPayload
-		pendingPayload = nil
-
-		playEatAnimation(confirmedPayload.FruitKey)
-		responseRemote:FireServer(true, confirmedPayload.FruitKey)
-	end)
-end
-
 promptRemote.OnClientEvent:Connect(function(payload)
 	if typeof(payload) ~= "table" then
 		return
 	end
 
-	ensurePromptGui()
-	consumePromptDebug(
-		"prompt remote show=%s hide=%s fruit=%s current=%s menuOpen=%s",
-		tostring(payload.Show),
-		tostring(payload.Hide),
-		tostring(payload.FruitKey),
-		tostring(payload.CurrentFruitName),
-		tostring(isInventoryMenuOpen())
-	)
 	if payload.Hide == true or payload.Show == false then
-		pendingPayload = nil
-		setPromptVisible(false)
-		consumePromptDebug("prompt hidden by remote")
+		setPromptPayload(nil)
+		scheduleRender()
 		return
 	end
 
 	if isInventoryMenuOpen() then
-		pendingPayload = nil
-		setPromptVisible(false)
-		consumePromptDebug("prompt dropped because inventory menu is open")
+		setPromptPayload(nil)
+		scheduleRender()
 		return
 	end
 
 	local currentFruitName = tostring(payload.CurrentFruitName or "")
 	local nextFruitKey = tostring(payload.FruitKey or "")
-	pendingPayload = {
-		FruitKey = payload.FruitKey,
+	setPromptPayload({
 		CurrentFruitName = currentFruitName,
+		DisplayName = tostring(payload.FruitName or payload.FruitKey or "Devil Fruit"),
+		FruitKey = payload.FruitKey,
 		RequiresReplaceWarning = shouldRequireReplaceWarning(currentFruitName, nextFruitKey),
 		Step = 1,
-	}
+	})
+	scheduleRender()
+end)
 
-	titleLabel.Text = tostring(payload.FruitName or payload.FruitKey or "Devil Fruit")
-	bodyLabel.Text = "Are you sure you want to eat this fruit?"
-	if confirmButtonLabel then
-		confirmButtonLabel.Text = "Eat"
+resultRemote.OnClientEvent:Connect(function(payload)
+	if typeof(payload) ~= "table" then
+		return
 	end
-	if cancelButtonLabel then
-		cancelButtonLabel.Text = "Cancel"
+
+	if payload.Success ~= true then
+		consumePromptDebug("consume result success=false reason=%s", tostring(payload.Reason or "unknown"))
+		return
 	end
-	setPromptVisible(true)
+
+	local equippedFruitName = tostring(payload.EquippedFruitName or "")
+	if equippedFruitName == "" or equippedFruitName == DevilFruitConfig.None then
+		return
+	end
+
+	-- The server is authoritative; these local mirrors let every fruit-side consumer
+	-- react immediately even if replicated instances arrive a frame later.
+	player:SetAttribute("EquippedDevilFruit", equippedFruitName)
+
+	local fruitFolder = player:FindFirstChild("DevilFruit")
+	local equippedValue = fruitFolder and fruitFolder:FindFirstChild("Equipped")
+	if equippedValue and equippedValue:IsA("StringValue") then
+		equippedValue.Value = equippedFruitName
+	end
+
+	DevilFruitRuntimeBootstrap.Start()
+	consumePromptDebug("consume result success=true equipped=%s", equippedFruitName)
+	logPostConsumeRuntimeState(equippedFruitName)
+	PopUpModule:Local_SendPopUp(
+		"Fruit ready: " .. equippedFruitName,
+		Color3.fromRGB(242, 209, 107),
+		Color3.fromRGB(10, 18, 28),
+		3,
+		false
+	)
 end)
 
 if player.Character then
@@ -813,56 +412,44 @@ if player.Character then
 end
 
 player.CharacterAdded:Connect(bindCharacter)
-player:GetAttributeChangedSignal(INVENTORY_MENU_OPEN_ATTRIBUTE):Connect(function()
-	consumePromptDebug(
-		"inventory menu attribute changed open=%s",
-		tostring(player:GetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE))
-	)
-	syncFruitToolInteractionState()
-end)
-local initialPlayerGui = player:FindFirstChild("PlayerGui")
-if initialPlayerGui then
-	initialPlayerGui:GetAttributeChangedSignal(GAMEPLAY_MODAL_OPEN_ATTRIBUTE):Connect(function()
-		consumePromptDebug(
-			"gameplay modal attribute changed open=%s",
-			tostring(isGameplayModalOpen())
-		)
-		syncFruitToolInteractionState()
-	end)
-end
+player:GetAttributeChangedSignal(INVENTORY_MENU_OPEN_ATTRIBUTE):Connect(syncFruitToolInteractionState)
+playerGui:GetAttributeChangedSignal(GAMEPLAY_MODAL_OPEN_ATTRIBUTE):Connect(syncFruitToolInteractionState)
 player.ChildAdded:Connect(function(child)
 	if child:IsA("Backpack") then
 		syncFruitToolInteractionState()
 		child.ChildAdded:Connect(syncFruitToolInteractionState)
 	end
 end)
+
 syncFruitToolInteractionState()
+render()
+DevilFruitRuntimeBootstrap.Start()
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then
 		return
 	end
 
-	if input.UserInputType ~= Enum.UserInputType.MouseButton1
-		and input.UserInputType ~= Enum.UserInputType.Touch
-	then
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
 		return
 	end
 
-	if isInventoryMenuOpen() or isInventoryUiInput(input) then
-		consumePromptDebug(
-			"equipped input blocked inputType=%s menuOpen=%s inventoryUiInput=%s",
-			tostring(input.UserInputType),
-			tostring(isInventoryMenuOpen()),
-			tostring(isInventoryUiInput(input))
-		)
+	if isInventoryMenuOpen() then
 		return
 	end
 
 	local tool = getEquippedFruitTool()
-	if not tool then
-		return
+	if tool then
+		requestConsumeForTool(tool, "equipped_input")
 	end
+end)
 
-	requestConsumeForTool(tool, "equipped_input")
+script.Destroying:Connect(function()
+	destroyed = true
+	UiModalState.SetOpen(MODAL_STATE_KEY, false)
+	for _, connection in pairs(toolActivationConnections) do
+		connection:Disconnect()
+	end
+	table.clear(toolActivationConnections)
+	root:unmount()
 end)
