@@ -899,6 +899,9 @@ local function applyPuddleSlow(controller, player)
 	HitEffectService.ApplyEffect(player, "Slow", {
 		Duration = CONFIG.SlowDuration,
 		Priority = 10,
+		HazardClass = CONFIG.HazardClass,
+		HazardType = CONFIG.HazardType,
+		Source = "Puddles",
 		Movement = {
 			WalkSpeedMultiplier = slowMultiplier,
 			JumpMultiplier = 1,

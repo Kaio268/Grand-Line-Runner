@@ -30,6 +30,20 @@ local SHELL = {
 	TextShadow = Color3.fromRGB(9, 17, 27),
 }
 
+local DEBUG_INDEX_UI_PERF = false
+
+local function debugUiLog(message)
+	if DEBUG_INDEX_UI_PERF then
+		print("[IndexUIPerf] " .. message)
+	end
+end
+
+local function copySetWith(source, key)
+	local result = table.clone(source or {})
+	result[key] = true
+	return result
+end
+
 local function filterUnits(units, categoryId)
 	local filtered = {}
 
@@ -339,6 +353,14 @@ local function IndexScreen(props)
 
 	local activeTab, setActiveTab = React.useState("index")
 	local activeCategory, setActiveCategory = React.useState(defaultCategoryId)
+	local mountedTabs, setMountedTabs = React.useState({
+		index = true,
+	})
+	local mountedCategories, setMountedCategories = React.useState({
+		[defaultCategoryId] = true,
+	})
+	local tabSwitchStartedAtRef = React.useRef(nil)
+	local categorySwitchStartedAtRef = React.useRef(nil)
 
 	React.useEffect(function()
 		local root = rootRef.current
@@ -357,6 +379,54 @@ local function IndexScreen(props)
 		end
 	end, {})
 
+	React.useEffect(function()
+		if DEBUG_INDEX_UI_PERF and tabSwitchStartedAtRef.current then
+			debugUiLog(string.format("tab=%s duration=%.4fs", tostring(activeTab), os.clock() - tabSwitchStartedAtRef.current))
+			tabSwitchStartedAtRef.current = nil
+		end
+	end, { activeTab })
+
+	React.useEffect(function()
+		if DEBUG_INDEX_UI_PERF and categorySwitchStartedAtRef.current then
+			debugUiLog(string.format(
+				"category=%s duration=%.4fs",
+				tostring(activeCategory),
+				os.clock() - categorySwitchStartedAtRef.current
+			))
+			categorySwitchStartedAtRef.current = nil
+		end
+	end, { activeCategory })
+
+	local function handleTabChange(tabId)
+		tabId = tostring(tabId or "")
+		if tabId == "" or tabId == activeTab then
+			return
+		end
+
+		if DEBUG_INDEX_UI_PERF then
+			tabSwitchStartedAtRef.current = os.clock()
+		end
+		if mountedTabs[tabId] ~= true then
+			setMountedTabs(copySetWith(mountedTabs, tabId))
+		end
+		setActiveTab(tabId)
+	end
+
+	local function handleCategorySelect(categoryId)
+		categoryId = tostring(categoryId or "")
+		if categoryId == "" or categoryId == activeCategory then
+			return
+		end
+
+		if DEBUG_INDEX_UI_PERF then
+			categorySwitchStartedAtRef.current = os.clock()
+		end
+		if mountedCategories[categoryId] ~= true then
+			setMountedCategories(copySetWith(mountedCategories, categoryId))
+		end
+		setActiveCategory(categoryId)
+	end
+
 	local filteredUnits = React.useMemo(function()
 		if unitsByCategory and unitsByCategory[activeCategory] then
 			return unitsByCategory[activeCategory]
@@ -370,7 +440,7 @@ local function IndexScreen(props)
 		total = #fruitUnits,
 	}
 	local contentTop = Theme.Layout.HeroHeight + Theme.Layout.ContentGap
-	local footerHeight = activeTab == "index" and (Theme.Layout.FooterTabsHeight + Theme.Layout.ContentGap) or 0
+	local indexFooterHeight = Theme.Layout.FooterTabsHeight + Theme.Layout.ContentGap
 	local claimableCount = props.claimableCount or stats.claimableCount or 0
 	local isCompact = contentWidth < 720
 	local showCategoryNavigation = activeTab == "index" and not isCompact
@@ -378,6 +448,44 @@ local function IndexScreen(props)
 	local mainX = showCategoryNavigation and (Theme.Layout.SidebarWidth + Theme.Layout.ContentGap) or 0
 	local mainWidth = showCategoryNavigation and -(Theme.Layout.SidebarWidth + Theme.Layout.ContentGap) or 0
 	local backgroundImage = getBackgroundImageForTab(activeTab)
+	local indexGridHeight = UDim2.new(1, 0, 1, -(contentTop + indexFooterHeight))
+	local fullPanelHeight = UDim2.new(1, 0, 1, -contentTop)
+	local indexCategoryPanels = {}
+
+	for _, category in ipairs(categories) do
+		local categoryId = tostring(category.id or "")
+		if categoryId ~= "" and (mountedCategories[categoryId] == true or categoryId == activeCategory) then
+			local categoryUnits = if unitsByCategory and unitsByCategory[categoryId]
+				then unitsByCategory[categoryId]
+				else filterUnits(units, categoryId)
+
+			indexCategoryPanels["Category" .. categoryId] = e("Frame", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(0, 0),
+				Size = UDim2.fromScale(1, 1),
+				Visible = activeTab == "index" and activeCategory == categoryId,
+			}, {
+				Content = e(IndexGrid, {
+					columns = isCompact and 2 or 5,
+					units = categoryUnits,
+				}),
+			})
+		end
+	end
+
+	if next(indexCategoryPanels) == nil then
+		indexCategoryPanels.ActiveCategory = e("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.fromScale(1, 1),
+			Visible = activeTab == "index",
+		}, {
+			Content = e(IndexGrid, {
+				columns = isCompact and 2 or 5,
+				units = filteredUnits,
+			}),
+		})
+	end
 
 	return e("Frame", {
 		ref = rootRef,
@@ -437,7 +545,7 @@ local function IndexScreen(props)
 			claimableCount = claimableCount,
 			collected = activeStats.collected,
 			onClose = props.onClose,
-			onTabChange = setActiveTab,
+			onTabChange = handleTabChange,
 			tabs = tabs,
 			total = activeStats.total,
 		}),
@@ -470,7 +578,7 @@ local function IndexScreen(props)
 				Sidebar = e(CategorySidebar, {
 					activeCategory = activeCategory,
 					categories = categories,
-					onSelect = setActiveCategory,
+					onSelect = handleCategorySelect,
 				}),
 			}) or nil,
 			Main = e("Frame", {
@@ -483,47 +591,47 @@ local function IndexScreen(props)
 					collected = activeStats.collected,
 					total = activeStats.total,
 				}),
-				Grid = activeTab == "index" and e("Frame", {
+				Index = mountedTabs.index and e("Frame", {
 					BackgroundTransparency = 1,
 					Position = UDim2.fromOffset(0, contentTop),
-					Size = UDim2.new(1, 0, 1, -(contentTop + footerHeight)),
-				}, {
-					Content = e(IndexGrid, {
-						columns = isCompact and 2 or 5,
-						units = filteredUnits,
-					}),
-				}) or activeTab == "fruits" and e("Frame", {
+					Size = indexGridHeight,
+					Visible = activeTab == "index",
+				}, indexCategoryPanels) or nil,
+				Fruits = mountedTabs.fruits and e("Frame", {
 					BackgroundTransparency = 1,
 					Position = UDim2.fromOffset(0, contentTop),
-					Size = UDim2.new(1, 0, 1, -contentTop),
+					Size = fullPanelHeight,
+					Visible = activeTab == "fruits",
 				}, {
 					Content = e(IndexGrid, {
 						columns = isCompact and 2 or 5,
 						units = fruitUnits,
 					}),
 				}) or nil,
-				Rewards = activeTab == "rewards" and e("Frame", {
+				Rewards = mountedTabs.rewards and e("Frame", {
 					BackgroundTransparency = 1,
 					Position = UDim2.fromOffset(0, contentTop),
-					Size = UDim2.new(1, 0, 1, -contentTop),
+					Size = fullPanelHeight,
+					Visible = activeTab == "rewards",
 				}, {
 					Content = e(RewardsPanel, {
 						onClaimRequested = props.onClaimRewardRequested,
 						rewards = rewards,
 					}),
 				}) or nil,
-				FooterTabs = activeTab == "index" and e("Frame", {
+				FooterTabs = e("Frame", {
 					AnchorPoint = Vector2.new(0, 1),
 					BackgroundTransparency = 1,
 					Position = UDim2.fromScale(0, 1),
 					Size = UDim2.new(1, 0, 0, Theme.Layout.FooterTabsHeight),
+					Visible = activeTab == "index",
 				}, {
 					Tabs = e(CategoryTabs, {
 						activeCategory = activeCategory,
 						categories = categories,
-						onSelect = setActiveCategory,
+						onSelect = handleCategorySelect,
 					}),
-				}) or nil,
+				}),
 			}),
 		}),
 	})

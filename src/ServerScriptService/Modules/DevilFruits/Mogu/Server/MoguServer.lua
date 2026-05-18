@@ -132,9 +132,9 @@ local function getBurrowGroundContactTolerance(abilityConfig)
 	)
 end
 
-local function isHumanoidAirborne(humanoid)
+local function getHumanoidGroundState(humanoid)
 	if not humanoid then
-		return true
+		return true, true, nil, nil
 	end
 
 	local state = humanoid:GetState()
@@ -142,10 +142,11 @@ local function isHumanoidAirborne(humanoid)
 		or state == Enum.HumanoidStateType.Freefall
 		or state == Enum.HumanoidStateType.FallingDown
 	then
-		return true
+		return true, true, state, humanoid.FloorMaterial
 	end
 
-	return humanoid.FloorMaterial == Enum.Material.Air
+	local floorMaterial = humanoid.FloorMaterial
+	return false, floorMaterial == Enum.Material.Air, state, floorMaterial
 end
 
 local function setGroundedStartDiagnostics(player, state, reason, dropDistance)
@@ -315,6 +316,41 @@ local function clampResolvePositionToAuthorizedDistance(burrowState, requestedEn
 		requestedEndPosition.Y,
 		startPosition.Z + clampedPlanarDelta.Z
 	), planarDistance - maxTravelDistance
+end
+
+local function clampResolvePositionToWallSafeSide(context, burrowState, requestedEndPosition)
+	if type(context) ~= "table" or type(burrowState) ~= "table" then
+		return requestedEndPosition, false, nil, nil, 0
+	end
+	if typeof(requestedEndPosition) ~= "Vector3" then
+		return requestedEndPosition, false, nil, nil, 0
+	end
+
+	local character = context.Character
+	local rootPart = context.RootPart
+	if not character or not rootPart then
+		return requestedEndPosition, false, nil, nil, 0
+	end
+
+	local lastSafePosition = burrowState.LastSafeSurfaceRootPosition or burrowState.StartPosition
+	if typeof(lastSafePosition) ~= "Vector3" then
+		return requestedEndPosition, false, nil, nil, 0
+	end
+
+	local wallSafePosition, blocked, blockResult, blockInfo = MoguBurrowShared.ResolvePlanarMovement(
+		character,
+		rootPart,
+		lastSafePosition,
+		requestedEndPosition,
+		context.AbilityConfig or burrowState.AbilityConfig
+	)
+	if not blocked or typeof(wallSafePosition) ~= "Vector3" then
+		return requestedEndPosition, false, blockResult, blockInfo, 0
+	end
+
+	local correctionDelta = getPlanarDelta(wallSafePosition, requestedEndPosition)
+	local correctionDistance = correctionDelta and correctionDelta.Magnitude or 0
+	return wallSafePosition, true, blockResult, blockInfo, correctionDistance
 end
 
 local function hideWorkspaceAnimationRig(instance)
@@ -755,6 +791,25 @@ local function getActiveBurrow(player)
 	return burrowState
 end
 
+local function isBurrowStateUnderground(burrowState)
+	if type(burrowState) ~= "table" or burrowState.State ~= SESSION_STATE_UNDERGROUND then
+		return false
+	end
+
+	local now = getSharedTimestamp()
+	local undergroundAt = tonumber(burrowState.UndergroundAt)
+	if undergroundAt and now < undergroundAt then
+		return false
+	end
+
+	local endTime = tonumber(burrowState.EndTime)
+	if endTime and now >= endTime then
+		return false
+	end
+
+	return true
+end
+
 local function buildStartPayload(context, burrowState, startedAt, endsAt, direction, directionSource, startPosition)
 	local abilityConfig = context.AbilityConfig or {}
 	local resolvedStartPosition = startPosition or context.RootPart.Position
@@ -798,6 +853,29 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 	end
 	actualEndPosition, resolveCorrectionDistance =
 		clampResolvePositionToAuthorizedDistance(burrowState, actualEndPosition, endedAt)
+	local wallBlocked = false
+	local wallBlockInfo = nil
+	if character and rootPart and typeof(actualEndPosition) == "Vector3" then
+		local wallSafePosition, didWallBlock, blockResult, blockInfo, wallCorrectionDistance =
+			clampResolvePositionToWallSafeSide(context, burrowState, actualEndPosition)
+		if didWallBlock and typeof(wallSafePosition) == "Vector3" then
+			wallBlocked = true
+			wallBlockInfo = blockInfo
+			resolveCorrectionDistance += wallCorrectionDistance
+			logWarn(
+				"resolve wall clamp player=%s requested=%s accepted=%s hit=%s reason=%s distance=%.2f acceptedDistance=%.2f correction=%.2f",
+				context.Player and context.Player.Name or "<nil>",
+				tostring(actualEndPosition),
+				tostring(wallSafePosition),
+				tostring(blockResult and blockResult.Instance),
+				tostring(blockInfo and blockInfo.Reason),
+				tonumber(blockInfo and blockInfo.Distance) or 0,
+				tonumber(blockInfo and blockInfo.AcceptedDistance) or 0,
+				wallCorrectionDistance
+			)
+			actualEndPosition = wallSafePosition
+		end
+	end
 	if character and rootPart then
 		local resolveSurfaceOptions = if requestedEndPosition and typeof(actualEndPosition) == "Vector3"
 			then {
@@ -822,6 +900,8 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 	end
 	if context.Player then
 		context.Player:SetAttribute("MoguResolveCorrectionDistance", resolveCorrectionDistance)
+		context.Player:SetAttribute("MoguResolveWallBlocked", wallBlocked)
+		context.Player:SetAttribute("MoguResolveWallBlockReason", wallBlocked and wallBlockInfo and wallBlockInfo.Reason or nil)
 	end
 
 	return {
@@ -837,6 +917,7 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 		ResolveReason = resolveReason,
 		ResolveBurstRadius = MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
 		ResolveCorrectionDistance = resolveCorrectionDistance,
+		ResolveWallBlocked = wallBlocked,
 		EndedEarly = resolveReason ~= RESOLVE_REASON_DURATION_ELAPSED,
 	}
 end
@@ -1079,12 +1160,10 @@ function MoguServer.Burrow(context)
 			then math.max(0, rootPosition.Y - startSurfacePosition.Y)
 			else 0
 		activationDropDistance = dropDistance
-		local humanoidAirborne = isHumanoidAirborne(context.Humanoid)
+		local hardAirborne, floorMaterialAir, humanoidState, floorMaterial = getHumanoidGroundState(context.Humanoid)
 		local contactTolerance = getBurrowGroundContactTolerance(abilityConfig)
-		if humanoidAirborne or dropDistance > contactTolerance then
-			local humanoidState = context.Humanoid and context.Humanoid:GetState()
-			local floorMaterial = context.Humanoid and context.Humanoid.FloorMaterial
-			local denyReason = if humanoidAirborne then "Airborne" else "NotGrounded"
+		if hardAirborne or dropDistance > contactTolerance then
+			local denyReason = if hardAirborne then "Airborne" else "NotGrounded"
 			logWarn(
 				"server burrow denied before ground contact player=%s reason=%s drop=%.2f tolerance=%.2f humanoidState=%s floor=%s",
 				player and player.Name or "<nil>",
@@ -1105,6 +1184,16 @@ function MoguServer.Burrow(context)
 				ApplyCooldown = false,
 				DenyReason = denyReason,
 			}
+		end
+		if floorMaterialAir then
+			logInfo(
+				"server burrow tolerated floor air player=%s drop=%.2f tolerance=%.2f humanoidState=%s floor=%s",
+				player and player.Name or "<nil>",
+				dropDistance,
+				contactTolerance,
+				tostring(humanoidState and humanoidState.Name or "<nil>"),
+				tostring(floorMaterial and floorMaterial.Name or "<nil>")
+			)
 		end
 	end
 	if player then
@@ -1160,19 +1249,29 @@ function MoguServer.Burrow(context)
 	}
 end
 
-function MoguServer.IsProtected(player)
+function MoguServer.IsPlayerUnderground(player)
 	if not player or not player:IsA("Player") then
 		return false
 	end
 
 	local activeBurrow = getActiveBurrow(player)
-	if activeBurrow then
+	return isBurrowStateUnderground(activeBurrow)
+end
+
+function MoguServer.IsMoguBurrowed(player)
+	return MoguServer.IsPlayerUnderground(player)
+end
+
+function MoguServer.IsProtected(player)
+	if MoguServer.IsPlayerUnderground(player) then
 		return true
 	end
 
-	clearInvalidProtection(player, PROTECTION_REASON_WITHOUT_SESSION, {
-		ClearSessionAttributes = true,
-	})
+	if not getActiveBurrow(player) then
+		clearInvalidProtection(player, PROTECTION_REASON_WITHOUT_SESSION, {
+			ClearSessionAttributes = true,
+		})
+	end
 	return false
 end
 

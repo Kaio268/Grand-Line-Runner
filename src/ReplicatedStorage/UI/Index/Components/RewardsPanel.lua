@@ -320,4 +320,10 @@ local function RewardsPanel(props)
 	})
 end
 
-return RewardsPanel
+local function areRewardsPanelPropsEqual(oldProps, newProps)
+	return oldProps.rewards == newProps.rewards
+		and oldProps.onClaimRequested == newProps.onClaimRequested
+		and oldProps.layoutOrder == newProps.layoutOrder
+end
+
+return React.memo(RewardsPanel, areRewardsPanelPropsEqual)

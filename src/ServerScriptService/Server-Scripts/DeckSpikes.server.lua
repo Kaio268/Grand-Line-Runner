@@ -10,6 +10,12 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+local HazardProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("HazardProtection")
+)
 
 local CONFIG = {
 	Enabled = true,
@@ -56,6 +62,8 @@ local CONFIG = {
 
 	Damage = 65,
 	KnockdownDuration = 0.8,
+	HazardClass = "minor",
+	HazardType = "deck_spikes",
 	SpikeTrapFolderName = "Spike Traps",
 	UseSpikeTrapTemplates = true,
 	ReverseBiomeTemplates = true,
@@ -433,7 +441,8 @@ local function configureSpikeVisual(model, hitbox)
 		configurePart(part, part == hitbox, part == hitbox)
 		if part == hitbox then
 			part.Transparency = 1
-			part:SetAttribute("HazardType", "deck_spikes")
+			part:SetAttribute("HazardClass", CONFIG.HazardClass)
+			part:SetAttribute("HazardType", CONFIG.HazardType)
 		end
 	end
 end
@@ -462,8 +471,6 @@ end
 local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
 	local pathLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
-	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
-	local laneWidth = math.max(4, corridorWidth / laneCount)
 	local size = getSpikeSize(corridorWidth)
 	local edgeBuffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
 	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (size.X * 0.5) - edgeBuffer)
@@ -581,7 +588,8 @@ local function createGeneratedSpike(model, placement)
 		0.05
 	)
 	configurePart(spike, true, true)
-	spike:SetAttribute("HazardType", "deck_spikes")
+	spike:SetAttribute("HazardClass", CONFIG.HazardClass)
+	spike:SetAttribute("HazardType", CONFIG.HazardType)
 
 	return spike, spike, hiddenCFrame, extendedCFrame
 end
@@ -589,7 +597,8 @@ end
 local function createDeckSpike(hazardsFolder, placement)
 	local model = Instance.new("Model")
 	model.Name = "DeckSpikes"
-	model:SetAttribute("HazardType", "deck_spikes")
+	model:SetAttribute("HazardClass", CONFIG.HazardClass)
+	model:SetAttribute("HazardType", CONFIG.HazardType)
 
 	local warningPosition = placement.GroundPosition + Vector3.new(0, CONFIG.WarningGroundOffset, 0)
 	local warningCFrame = CFrame.fromMatrix(warningPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
@@ -664,9 +673,22 @@ local function damagePlayer(controller, player)
 		return false
 	end
 
+	local isHazardProtected = HazardProtection.IsProtected(player, {
+		Position = rootPart.Position,
+		HazardClass = CONFIG.HazardClass,
+		HazardType = CONFIG.HazardType,
+		Source = "DeckSpikes",
+	})
+	if isHazardProtected then
+		return false
+	end
+
 	HitEffectService.ApplyEffect(player, "Knockdown", {
 		Duration = CONFIG.KnockdownDuration,
 		Priority = 30,
+		HazardClass = CONFIG.HazardClass,
+		HazardType = CONFIG.HazardType,
+		Source = "DeckSpikes",
 		Movement = {
 			WalkSpeedMultiplier = 0,
 			JumpMultiplier = 0,

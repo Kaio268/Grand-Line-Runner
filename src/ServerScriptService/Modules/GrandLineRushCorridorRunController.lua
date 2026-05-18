@@ -36,6 +36,8 @@ local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local CARRY_VISUAL_SPACING = CarriedRewardVisuals.DefaultSpacing
+local REWARD_CARRY_PREVIOUS_CAN_QUERY_ATTRIBUTE = "RewardCarryPreviousCanQuery"
+local MOGU_BURROW_RAYCAST_IGNORE_ATTRIBUTE = "MoguBurrowIgnoreRaycast"
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -790,14 +792,43 @@ local function positionRewardObject(player, rewardObject, rewardState, startPart
 end
 
 local function setRewardHeldPhysics(object, held)
+	local changedQueryCount = 0
 	forEachRewardPart(object, function(part)
 		part.Anchored = not held
 		part.CanCollide = false
 		part.CanTouch = false
+		if held then
+			if part:GetAttribute(REWARD_CARRY_PREVIOUS_CAN_QUERY_ATTRIBUTE) == nil then
+				part:SetAttribute(REWARD_CARRY_PREVIOUS_CAN_QUERY_ATTRIBUTE, part.CanQuery)
+			end
+			if part.CanQuery ~= false then
+				changedQueryCount += 1
+			end
+			part.CanQuery = false
+		else
+			local previousCanQuery = part:GetAttribute(REWARD_CARRY_PREVIOUS_CAN_QUERY_ATTRIBUTE)
+			if previousCanQuery ~= nil then
+				part.CanQuery = previousCanQuery == true
+				part:SetAttribute(REWARD_CARRY_PREVIOUS_CAN_QUERY_ATTRIBUTE, nil)
+				changedQueryCount += 1
+			end
+		end
 		part.Massless = held
 		part.AssemblyLinearVelocity = Vector3.zero
 		part.AssemblyAngularVelocity = Vector3.zero
 	end)
+	if object then
+		object:SetAttribute(MOGU_BURROW_RAYCAST_IGNORE_ATTRIBUTE, if held then true else nil)
+	end
+	if changedQueryCount > 0 then
+		horoCarryTrace(
+			"reward query state updated reward=%s held=%s parts=%d moguIgnore=%s",
+			formatInstancePath(object),
+			tostring(held == true),
+			changedQueryCount,
+			tostring(object and object:GetAttribute(MOGU_BURROW_RAYCAST_IGNORE_ATTRIBUTE) == true)
+		)
+	end
 end
 
 local function clearCarryWeld(rootPart)

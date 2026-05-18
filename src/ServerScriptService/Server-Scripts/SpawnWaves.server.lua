@@ -20,8 +20,13 @@ local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("
 local ServerScriptService = game:GetService("ServerScriptService")
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+local HazardProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("HazardProtection")
+)
 local devilFruitModules = ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruits")
-local MoguServer = require(getNamedFolder(devilFruitModules, "Mogu"):WaitForChild("Server"):WaitForChild("MoguServer"))
 local HoroServer = require(getNamedFolder(devilFruitModules, "Horo"):WaitForChild("Server"):WaitForChild("HoroServer"))
 local toriFolder = getNamedFolder(devilFruitModules, "Tori")
 local ToriServer = require(toriFolder:WaitForChild("Server"):WaitForChild("ToriServer"))
@@ -523,7 +528,14 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 		HoroServer.InterruptActiveProjection(player, "wave_touch")
 		return true
 	end
-	if MoguServer.IsProtected(player) then
+	local isHazardProtected = HazardProtection.IsProtected(player, {
+		Position = hit and hit.HitPosition or rootPart.Position,
+		HitPosition = hit and hit.HitPosition or rootPart.Position,
+		HazardClass = CONFIG.HazardClass,
+		HazardType = "wave",
+		Source = "SpawnWaves",
+	})
+	if isHazardProtected then
 		return true
 	end
 	if ToriServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then

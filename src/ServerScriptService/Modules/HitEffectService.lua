@@ -303,6 +303,9 @@ function HitEffectService.ApplyEffect(target, effectName, options)
 		TargetContext = targetContext,
 		Position = rootPart.Position,
 		EffectName = effectName,
+		HazardClass = options.HazardClass,
+		HazardType = options.HazardType,
+		Source = options.Source,
 		IgnoreProtection = options.IgnoreProtection,
 		IgnoreHazardProtection = options.IgnoreHazardProtection,
 	})

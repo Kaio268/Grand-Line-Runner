@@ -43,8 +43,11 @@ local PREVIEW_TEXTURE_FALLBACK_MESH_IDS = {
 	["rbxassetid://134340562190607"] = true, -- Wapol shell
 	["rbxassetid://76188112058780"] = true, -- XDrake shell
 }
+local PREVIEW_TEMPLATE_CACHE_MAX_ENTRIES = 120
 
 local debugMountCounter = 0
+local previewTemplateCache = {}
+local previewTemplateCacheOrder = {}
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -136,6 +139,57 @@ end
 local function clearChildren(instance)
 	for _, child in ipairs(instance:GetChildren()) do
 		child:Destroy()
+	end
+end
+
+local function formatCacheValue(value)
+	if typeof(value) == "Color3" then
+		return string.format("%.4f,%.4f,%.4f", value.R, value.G, value.B)
+	end
+	if typeof(value) == "EnumItem" then
+		return value.Name
+	end
+
+	return tostring(value)
+end
+
+local function getPreviewTemplateKey(props)
+	return table.concat({
+		formatCacheValue(props.previewKind),
+		formatCacheValue(props.previewName),
+		formatCacheValue(props.tintColor),
+		formatCacheValue(props.tintTransparency),
+		formatCacheValue(props.tintMaterial),
+		formatCacheValue(props.fieldOfView or 36),
+	}, "|")
+end
+
+local function rememberPreviewTemplate(key, template)
+	previewTemplateCache[key] = template
+	previewTemplateCacheOrder[#previewTemplateCacheOrder + 1] = key
+
+	while #previewTemplateCacheOrder > PREVIEW_TEMPLATE_CACHE_MAX_ENTRIES do
+		local oldestKey = table.remove(previewTemplateCacheOrder, 1)
+		local oldestTemplate = previewTemplateCache[oldestKey]
+		previewTemplateCache[oldestKey] = nil
+		if oldestTemplate then
+			oldestTemplate:Destroy()
+		end
+	end
+end
+
+local function mountPreviewTemplate(viewport, template)
+	clearChildren(viewport)
+
+	local mountedRoot = template:Clone()
+	for _, child in ipairs(mountedRoot:GetChildren()) do
+		child.Parent = viewport
+	end
+	mountedRoot:Destroy()
+
+	local camera = viewport:FindFirstChild("PreviewCamera")
+	if camera and camera:IsA("Camera") then
+		viewport.CurrentCamera = camera
 	end
 end
 
@@ -397,6 +451,58 @@ local function applyTint(previewModel, tintColor, tintTransparency, tintMaterial
 	end
 end
 
+local function createPreviewModel(props)
+	if props.previewKind == "DevilFruit" then
+		return DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
+	elseif props.previewKind == "CrewMember" then
+		return cloneCrewPreviewModel(props.previewName)
+	end
+
+	return nil
+end
+
+local function getOrCreatePreviewTemplate(props)
+	local key = getPreviewTemplateKey(props)
+	local cachedTemplate = previewTemplateCache[key]
+	if cachedTemplate then
+		return cachedTemplate, key, true
+	end
+
+	local previewModel = createPreviewModel(props)
+	if not previewModel then
+		return nil, key, false
+	end
+
+	if props.tintColor then
+		applyTint(previewModel, props.tintColor, props.tintTransparency, props.tintMaterial)
+	end
+
+	local templateRoot = Instance.new("Folder")
+	templateRoot.Name = "PreviewTemplate"
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Name = "PreviewWorld"
+	worldModel.Parent = templateRoot
+
+	previewModel.Parent = worldModel
+	positionPreviewModel(previewModel, props.previewKind, props.previewName)
+
+	local boxCF, boxSize = getBoundingInfo(previewModel)
+	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
+
+	local camera = Instance.new("Camera")
+	camera.Name = "PreviewCamera"
+	camera.FieldOfView = props.fieldOfView or 36
+	camera.CFrame = CFrame.lookAt(
+		boxCF.Position + Vector3.new(maxSize * 0.92, maxSize * 0.38, maxSize * 1.7),
+		boxCF.Position
+	)
+	camera.Parent = templateRoot
+
+	rememberPreviewTemplate(key, templateRoot)
+	return templateRoot, key, false
+end
+
 local function ViewportPreviewModel(props)
 	local viewportRef = React.useRef(nil)
 
@@ -421,20 +527,13 @@ local function ViewportPreviewModel(props)
 			))
 		end
 
-		clearChildren(viewport)
-
-		local previewModel
-		if props.previewKind == "DevilFruit" then
-			previewModel = DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
-		elseif props.previewKind == "CrewMember" then
-			previewModel = cloneCrewPreviewModel(props.previewName)
-		end
-
-		if not previewModel then
+		local template, cacheKey, fromCache = getOrCreatePreviewTemplate(props)
+		if not template then
 			if DEBUG_PREVIEW_VIEWPORT then
 				debugLog(string.format(
-					"preview_model_missing id=%d kind=%s name=%s",
+					"preview_model_missing id=%d key=%s kind=%s name=%s",
 					mountId,
+					tostring(cacheKey),
 					tostring(props.previewKind),
 					tostring(props.previewName)
 				))
@@ -454,52 +553,34 @@ local function ViewportPreviewModel(props)
 			end
 		end
 
-		if props.tintColor then
-			applyTint(previewModel, props.tintColor, props.tintTransparency, props.tintMaterial)
-		end
-
-		local worldModel = Instance.new("WorldModel")
-		worldModel.Parent = viewport
-		previewModel.Parent = worldModel
-		positionPreviewModel(previewModel, props.previewKind, props.previewName)
-
-		local boxCF, boxSize = getBoundingInfo(previewModel)
-		local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
-
-		local camera = Instance.new("Camera")
-		camera.Name = "PreviewCamera"
-		camera.FieldOfView = props.fieldOfView or 36
-		camera.CFrame = CFrame.lookAt(
-			boxCF.Position + Vector3.new(maxSize * 0.92, maxSize * 0.38, maxSize * 1.7),
-			boxCF.Position
-		)
-		camera.Parent = viewport
-		viewport.CurrentCamera = camera
+		mountPreviewTemplate(viewport, template)
 
 		if DEBUG_PREVIEW_VIEWPORT then
-			local stats = collectPreviewDebugStats(previewModel)
+			local worldModel = viewport:FindFirstChild("PreviewWorld")
+			local previewChildren = worldModel and worldModel:GetChildren() or {}
+			local previewModel = previewChildren[1]
+			local camera = viewport.CurrentCamera
+			local stats = worldModel and collectPreviewDebugStats(worldModel) or nil
 			debugLog(string.format(
-				"mounted id=%d kind=%s name=%s model=%s worldModel=%s baseParts=%d visibleParts=%d transparentParts=%d localHiddenParts=%d anchoredParts=%d meshParts=%d accessories=%d decals=%d textures=%d boundsCenter=%s boundsSize=%s maxSize=%.2f cameraPos=%s cameraLookAt=%s samples=%s",
+				"mounted id=%d key=%s cache=%s kind=%s name=%s model=%s worldModel=%s baseParts=%d visibleParts=%d transparentParts=%d localHiddenParts=%d anchoredParts=%d meshParts=%d accessories=%d decals=%d textures=%d camera=%s samples=%s",
 				mountId,
+				tostring(cacheKey),
+				tostring(fromCache),
 				tostring(props.previewKind),
 				tostring(props.previewName),
 				getFullNameSafe(previewModel),
 				getFullNameSafe(worldModel),
-				stats.baseParts,
-				stats.visibleParts,
-				stats.transparentParts,
-				stats.localHiddenParts,
-				stats.anchoredParts,
-				stats.meshParts,
-				stats.accessories,
-				stats.decals,
-				stats.textures,
-				formatVector3(boxCF.Position),
-				formatVector3(boxSize),
-				maxSize,
-				formatVector3(camera.CFrame.Position),
-				formatVector3(boxCF.Position),
-				formatSampleParts(stats)
+				stats and stats.baseParts or 0,
+				stats and stats.visibleParts or 0,
+				stats and stats.transparentParts or 0,
+				stats and stats.localHiddenParts or 0,
+				stats and stats.anchoredParts or 0,
+				stats and stats.meshParts or 0,
+				stats and stats.accessories or 0,
+				stats and stats.decals or 0,
+				stats and stats.textures or 0,
+				getFullNameSafe(camera),
+				stats and formatSampleParts(stats) or "<none>"
 			))
 		end
 
@@ -560,4 +641,22 @@ local function PreviewViewport(props)
 	return e(ViewportPreviewModel, props)
 end
 
-return PreviewViewport
+local function arePreviewPropsEqual(oldProps, newProps)
+	return oldProps.previewKind == newProps.previewKind
+		and oldProps.previewName == newProps.previewName
+		and oldProps.preferModel == newProps.preferModel
+		and oldProps.anchorPoint == newProps.anchorPoint
+		and oldProps.position == newProps.position
+		and oldProps.size == newProps.size
+		and oldProps.scaleType == newProps.scaleType
+		and oldProps.tintColor == newProps.tintColor
+		and oldProps.tintTransparency == newProps.tintTransparency
+		and oldProps.tintMaterial == newProps.tintMaterial
+		and oldProps.ambient == newProps.ambient
+		and oldProps.lightColor == newProps.lightColor
+		and oldProps.lightDirection == newProps.lightDirection
+		and oldProps.fieldOfView == newProps.fieldOfView
+		and oldProps.zIndex == newProps.zIndex
+end
+
+return React.memo(PreviewViewport, arePreviewPropsEqual)

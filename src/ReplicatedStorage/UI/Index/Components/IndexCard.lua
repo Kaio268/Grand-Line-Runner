@@ -767,4 +767,10 @@ local function IndexCard(props)
 	})
 end
 
-return IndexCard
+local function areIndexCardPropsEqual(oldProps, newProps)
+	return oldProps.unit == newProps.unit
+		and oldProps.renderPreview == newProps.renderPreview
+		and oldProps.layoutOrder == newProps.layoutOrder
+end
+
+return React.memo(IndexCard, areIndexCardPropsEqual)

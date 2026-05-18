@@ -1,5 +1,7 @@
 local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -47,6 +49,10 @@ local FORCE_PASS_THROUGH_TAG = "MoguBurrowPassThrough"
 local FORCE_BLOCKER_TAG = "MoguBurrowBlocker"
 local FORCE_PASS_THROUGH_ATTRIBUTE = "MoguBurrowPassThrough"
 local FORCE_BLOCKER_ATTRIBUTE = "MoguBurrowBlocker"
+local CARRIED_REWARDS_FOLDER_NAME = "CarriedRewards"
+local MOGU_BURROW_RAYCAST_IGNORE_ATTRIBUTE = "MoguBurrowIgnoreRaycast"
+local CARRIED_REWARD_IGNORE_LOG_COOLDOWN = 2
+local DEBUG_INFO = RunService:IsStudio()
 
 local TRUSTED_SURFACE_NAME_PATTERNS = {
 	"floor",
@@ -222,18 +228,112 @@ local function isHazardLike(instance, refs)
 		or hasHazardMetadata(instance)
 end
 
+local carriedRewardIgnoreLogByCharacter
+local diagnostics
+
+local function getInstancePath(instance)
+	if typeof(instance) ~= "Instance" then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function getCarriedRewardsFolder(refs)
+	local corridorFolder = refs and refs.GrandLineRushFolder
+	if not corridorFolder and refs and refs.WaveFolder then
+		corridorFolder = refs.WaveFolder:FindFirstChild("GrandLineRush")
+	end
+	if not corridorFolder then
+		return nil
+	end
+
+	local carriedFolder = corridorFolder:FindFirstChild(CARRIED_REWARDS_FOLDER_NAME)
+	if carriedFolder and carriedFolder:IsA("Folder") then
+		return carriedFolder
+	end
+
+	return nil
+end
+
+local function logCarriedRewardRaycastIgnore(character, player, count, signature)
+	if not DEBUG_INFO or count <= 0 then
+		return
+	end
+
+	local now = os.clock()
+	local previous = carriedRewardIgnoreLogByCharacter[character]
+	if
+		type(previous) == "table"
+		and previous.Signature == signature
+		and now - (tonumber(previous.At) or 0) < CARRIED_REWARD_IGNORE_LOG_COOLDOWN
+	then
+		return
+	end
+
+	carriedRewardIgnoreLogByCharacter[character] = {
+		At = now,
+		Signature = signature,
+	}
+	print(string.format(
+		"[MOGU BURROW SHARED] ignoring carried reward raycast targets player=%s count=%d",
+		player and player.Name or "<nil>",
+		count
+	))
+end
+
+local function collectCarriedRewardRaycastIgnores(character, refs)
+	if typeof(character) ~= "Instance" then
+		return {}, ""
+	end
+
+	local player = Players:GetPlayerFromCharacter(character)
+	if not player then
+		return {}, ""
+	end
+
+	local carriedFolder = getCarriedRewardsFolder(refs)
+	if not carriedFolder then
+		return {}, ""
+	end
+
+	local ignoreList = {}
+	local signatureParts = {}
+	for _, rewardObject in ipairs(carriedFolder:GetChildren()) do
+		local ownerUserId = tonumber(rewardObject:GetAttribute("OwnerUserId"))
+		local ownerMatches = ownerUserId == player.UserId
+		local explicitlyIgnored = rewardObject:GetAttribute(MOGU_BURROW_RAYCAST_IGNORE_ATTRIBUTE) == true
+		if ownerMatches and (explicitlyIgnored or rewardObject.Parent == carriedFolder) then
+			appendRaycastIgnore(ignoreList, rewardObject)
+			signatureParts[#signatureParts + 1] = getInstancePath(rewardObject)
+		end
+	end
+
+	if #ignoreList == 0 then
+		return ignoreList, ""
+	end
+
+	table.sort(signatureParts)
+	local signature = table.concat(signatureParts, "|")
+	diagnostics.CarriedRewardIgnoreCount += #ignoreList
+	logCarriedRewardRaycastIgnore(character, player, #ignoreList, signature)
+	return ignoreList, signature
+end
+
 local cachedHazardRaycastIgnores = nil
 local cachedHazardRaycastIgnoresAt = 0
 local cachedHazardRaycastIgnoresVersion = 0
 local surfaceRaycastParamsByCharacter = setmetatable({}, { __mode = "k" })
 local nilCharacterSurfaceRaycastParams = nil
-local diagnostics = {
+carriedRewardIgnoreLogByCharacter = setmetatable({}, { __mode = "k" })
+diagnostics = {
 	RaycastCount = 0,
 	SurfaceProbeCount = 0,
 	SurfaceProbeTimeMs = 0,
 	RejectedSurfaceHitCount = 0,
 	PassThroughMovementHitCount = 0,
 	BlockedMovementCount = 0,
+	CarriedRewardIgnoreCount = 0,
 }
 
 local isSurfaceNormalValid
@@ -287,6 +387,8 @@ end
 
 local function createSurfaceRaycastParams(character, abilityConfig)
 	local shouldIgnoreHazards = not (abilityConfig and abilityConfig.IgnoreHazardsInSurfaceRaycasts == false)
+	local refs = MapResolver.GetRefs()
+	local carriedRewardIgnores, carriedRewardSignature = collectCarriedRewardRaycastIgnores(character, refs)
 	local hazardVersion = cachedHazardRaycastIgnoresVersion
 	if shouldIgnoreHazards then
 		getHazardRaycastIgnores()
@@ -296,21 +398,39 @@ local function createSurfaceRaycastParams(character, abilityConfig)
 	local params = cache.Params
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.IgnoreWater = false
+	local carriedRewardsChanged = cache.CarriedRewardIgnoreCount ~= #carriedRewardIgnores
+	local cachedCarriedRewardIgnores = cache.CarriedRewardIgnores or {}
+	if not carriedRewardsChanged and #carriedRewardIgnores > 0 then
+		for index, instance in ipairs(carriedRewardIgnores) do
+			if cachedCarriedRewardIgnores[index] ~= instance then
+				carriedRewardsChanged = true
+				break
+			end
+		end
+	end
 
 	if cache.Character ~= character
 		or cache.ShouldIgnoreHazards ~= shouldIgnoreHazards
 		or cache.HazardVersion ~= hazardVersion
+		or cache.CarriedRewardSignature ~= carriedRewardSignature
+		or carriedRewardsChanged
 	then
 		local ignoreList = {}
 		appendRaycastIgnore(ignoreList, character)
 		if shouldIgnoreHazards then
 			appendHazardRaycastIgnores(ignoreList)
 		end
+		for _, instance in ipairs(carriedRewardIgnores) do
+			appendRaycastIgnore(ignoreList, instance)
+		end
 		params.FilterDescendantsInstances = ignoreList
 		cache.IgnoreList = ignoreList
 		cache.Character = character
 		cache.ShouldIgnoreHazards = shouldIgnoreHazards
 		cache.HazardVersion = hazardVersion
+		cache.CarriedRewardSignature = carriedRewardSignature
+		cache.CarriedRewardIgnoreCount = #carriedRewardIgnores
+		cache.CarriedRewardIgnores = carriedRewardIgnores
 	end
 
 	return params, cache.IgnoreList or {}
@@ -458,17 +578,17 @@ local function classifyMovementBlockerResult(result, refs, abilityConfig)
 		}
 	end
 
-	if isSurfaceNormalValid(result, abilityConfig) then
-		return {
-			Blocks = false,
-			Reason = "floor_or_slope_normal",
-		}
-	end
-
 	if matchesAnyNamePattern(instance, HARD_BLOCKER_NAME_PATTERNS) then
 		return {
 			Blocks = true,
 			Reason = "hard_blocker_name",
+		}
+	end
+
+	if isSurfaceNormalValid(result, abilityConfig) then
+		return {
+			Blocks = false,
+			Reason = "floor_or_slope_normal",
 		}
 	end
 
@@ -900,6 +1020,7 @@ function MoguBurrowShared.ConsumeDiagnostics()
 		RejectedSurfaceHitCount = diagnostics.RejectedSurfaceHitCount,
 		PassThroughMovementHitCount = diagnostics.PassThroughMovementHitCount,
 		BlockedMovementCount = diagnostics.BlockedMovementCount,
+		CarriedRewardIgnoreCount = diagnostics.CarriedRewardIgnoreCount,
 	}
 	diagnostics.RaycastCount = 0
 	diagnostics.SurfaceProbeCount = 0
@@ -907,6 +1028,7 @@ function MoguBurrowShared.ConsumeDiagnostics()
 	diagnostics.RejectedSurfaceHitCount = 0
 	diagnostics.PassThroughMovementHitCount = 0
 	diagnostics.BlockedMovementCount = 0
+	diagnostics.CarriedRewardIgnoreCount = 0
 	return snapshot
 end
 

@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local AbilityTargeting = require(
@@ -11,6 +12,9 @@ local AbilityTargeting = require(
 local HazardProtection = {}
 
 local moduleCache = {}
+local protectionSkipLogByKey = {}
+local DEBUG_INFO = RunService:IsStudio()
+local PROTECTION_SKIP_LOG_COOLDOWN = 1.5
 
 local function findNamedChildOfClass(parent, childName, className)
 	if typeof(parent) ~= "Instance" then
@@ -60,6 +64,64 @@ local function buildReason(source, reason)
 	return string.format("%s:%s", normalizedSource, normalizedReason)
 end
 
+local function getProtectionLabel(options)
+	if type(options) ~= "table" then
+		return "hazard"
+	end
+
+	return tostring(options.HazardType or options.EffectName or options.HazardClass or options.Source or "hazard")
+end
+
+local function logProtectionSkip(protection, options)
+	if not DEBUG_INFO or type(protection) ~= "table" then
+		return
+	end
+
+	local player = protection.Player
+	local playerKey = player and player.UserId or "unknown"
+	local source = tostring(protection.Source or "unknown")
+	local reason = tostring(protection.Reason or "protected")
+	local label = getProtectionLabel(options)
+	local key = string.format("%s:%s:%s:%s", tostring(playerKey), source, reason, label)
+	local now = os.clock()
+	if now - (tonumber(protectionSkipLogByKey[key]) or 0) < PROTECTION_SKIP_LOG_COOLDOWN then
+		return
+	end
+
+	protectionSkipLogByKey[key] = now
+	print(string.format(
+		"[HazardProtection] skipped hazard player=%s source=%s reason=%s label=%s",
+		player and player.Name or "<nil>",
+		source,
+		reason,
+		label
+	))
+end
+
+local function getMoguUndergroundProtection(moguServer, targetPlayer, position)
+	if not moguServer then
+		return nil
+	end
+
+	for _, helperName in ipairs({ "IsPlayerUnderground", "IsMoguBurrowed", "IsProtected" }) do
+		local helper = moguServer[helperName]
+		if typeof(helper) == "function" then
+			local ok, isUnderground = pcall(helper, targetPlayer)
+			if ok and isUnderground == true then
+				return {
+					Protected = true,
+					Source = "MoguBurrow",
+					Reason = helperName == "IsProtected" and "mogu_burrow" or "mogu_underground",
+					Player = targetPlayer,
+					Position = position,
+				}
+			end
+		end
+	end
+
+	return nil
+end
+
 function HazardProtection.GetProtection(target, options)
 	options = type(options) == "table" and options or {}
 	if options.IgnoreProtection == true or options.IgnoreHazardProtection == true then
@@ -85,17 +147,10 @@ function HazardProtection.GetProtection(target, options)
 		else nil
 
 	local moguServer = getServerFruitModule("Mogu", "MoguServer")
-	if moguServer and typeof(moguServer.IsProtected) == "function" then
-		local ok, isProtected = pcall(moguServer.IsProtected, targetPlayer)
-		if ok and isProtected == true then
-			return {
-				Protected = true,
-				Source = "MoguBurrow",
-				Reason = "mogu_burrow",
-				Player = targetPlayer,
-				Position = position,
-			}
-		end
+	local moguProtection = getMoguUndergroundProtection(moguServer, targetPlayer, position)
+	if moguProtection then
+		logProtectionSkip(moguProtection, options)
+		return moguProtection
 	end
 
 	local toriServer = getServerFruitModule("Tori", "ToriServer")

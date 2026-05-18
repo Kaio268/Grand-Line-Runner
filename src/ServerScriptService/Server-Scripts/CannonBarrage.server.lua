@@ -1,9 +1,16 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
+local HazardProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("HazardProtection")
+)
 
 local CONFIG = {
 	Enabled = true,
@@ -23,6 +30,8 @@ local CONFIG = {
 	},
 	ImpactRadius = 18,
 	Damage = 100,
+	HazardClass = "major",
+	HazardType = "cannon_barrage",
 	BombSize = 6,
 	CircleHeight = 0.18,
 	ZoneCount = 8,
@@ -532,7 +541,16 @@ local function damagePlayersAt(position)
 		local targetPosition = getPlayerBombTarget(player)
 		local _, humanoid, rootPart = getCharacterParts(player)
 		if targetPosition and humanoid and rootPart and (rootPart.Position - position).Magnitude <= CONFIG.ImpactRadius then
-			humanoid:TakeDamage(CONFIG.Damage)
+			local isHazardProtected = HazardProtection.IsProtected(player, {
+				Position = position,
+				HitPosition = position,
+				HazardClass = CONFIG.HazardClass,
+				HazardType = CONFIG.HazardType,
+				Source = "CannonBarrage",
+			})
+			if not isHazardProtected then
+				humanoid:TakeDamage(CONFIG.Damage)
+			end
 		end
 	end
 end

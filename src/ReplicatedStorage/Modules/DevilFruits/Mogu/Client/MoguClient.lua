@@ -1024,9 +1024,9 @@ local function zeroRootVelocity(rootPart, includeAngular, includeLinear)
 	return wrote
 end
 
-local function isHumanoidAirborne(humanoid)
+local function getHumanoidGroundState(humanoid)
 	if not humanoid then
-		return false
+		return false, false, nil, nil
 	end
 
 	local state = humanoid:GetState()
@@ -1034,10 +1034,11 @@ local function isHumanoidAirborne(humanoid)
 		or state == Enum.HumanoidStateType.Freefall
 		or state == Enum.HumanoidStateType.FallingDown
 	then
-		return true
+		return true, true, state, humanoid.FloorMaterial
 	end
 
-	return humanoid.FloorMaterial == Enum.Material.Air
+	local floorMaterial = humanoid.FloorMaterial
+	return false, floorMaterial == Enum.Material.Air, state, floorMaterial
 end
 
 local function isMoguMovementLockActive(player)
@@ -2600,20 +2601,35 @@ function MoguClient:ValidateGroundedOnlyBurrowStart(shouldShowFeedback)
 
 	local surfacePosition, hasSurface, dropDistance =
 		self:ResolveGroundedActivationSurface(character, rootPart, abilityConfig)
+	local hardAirborne, floorMaterialAir, humanoidState, floorMaterial = getHumanoidGroundState(humanoid)
+	self:SetDiagnosticAttribute("MoguGroundedOnlyHumanoidState", humanoidState and humanoidState.Name or nil)
+	self:SetDiagnosticAttribute("MoguGroundedOnlyFloorMaterial", floorMaterial and floorMaterial.Name or nil)
+	self:SetDiagnosticAttribute("MoguGroundedOnlyRaycastConfirmed", hasSurface == true)
 	if not hasSurface then
-		self:RejectGroundedOnlyBurrow("NoGround", dropDistance, shouldShowFeedback)
+		self:RejectGroundedOnlyBurrow("NoGround", dropDistance, shouldShowFeedback and (hardAirborne or floorMaterialAir))
 		return false
 	end
 
 	local contactTolerance = getBurrowGroundContactTolerance(abilityConfig)
-	if isHumanoidAirborne(humanoid) then
+	if hardAirborne then
 		self:RejectGroundedOnlyBurrow("Airborne", dropDistance, shouldShowFeedback)
 		return false
 	end
 
 	if dropDistance > contactTolerance then
-		self:RejectGroundedOnlyBurrow("NotGrounded", dropDistance, shouldShowFeedback)
+		self:RejectGroundedOnlyBurrow("NotGrounded", dropDistance, shouldShowFeedback and floorMaterialAir)
 		return false
+	end
+
+	if floorMaterialAir then
+		logInfo(
+			"grounded-only burrow tolerated floor air player=%s drop=%.2f tolerance=%.2f humanoidState=%s floor=%s",
+			self.player.Name,
+			dropDistance,
+			contactTolerance,
+			tostring(humanoidState and humanoidState.Name or "<nil>"),
+			tostring(floorMaterial and floorMaterial.Name or "<nil>")
+		)
 	end
 
 	self:SetDiagnosticAttribute("MoguGroundedOnlyState", "Grounded")
@@ -4184,7 +4200,13 @@ function MoguClient:HandleStateEvent(eventName, abilityName, value)
 			return true
 		end
 		if value == "Airborne" or value == "NotGrounded" or value == "NoGround" then
-			self:RejectGroundedOnlyBurrow(tostring(value), 0, true)
+			local shouldShowGroundFeedback = true
+			if value == "NotGrounded" or value == "NoGround" then
+				local humanoid = self.getHumanoid()
+				local hardAirborne, floorMaterialAir = getHumanoidGroundState(humanoid)
+				shouldShowGroundFeedback = hardAirborne or floorMaterialAir
+			end
+			self:RejectGroundedOnlyBurrow(tostring(value), 0, shouldShowGroundFeedback)
 		end
 		self:CancelServerConfirmedBurrowStart("server_denied")
 		self:CancelLocalStartFeedback("server_denied")

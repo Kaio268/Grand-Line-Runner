@@ -12,11 +12,13 @@ local GRID_GAP = 6
 local GRID_PADDING = 6
 local DEFAULT_COLUMNS = 5
 local DEFAULT_VIEWPORT_HEIGHT = 560
-local LAZY_PREVIEW_OVERSCAN_ROWS = 3
+local VIRTUAL_OVERSCAN_ROWS = 3
+local LAZY_PREVIEW_OVERSCAN_ROWS = 1
 local MIN_LAYOUT_SCALE = 0.05
-local SCROLL_CHANGE_EPSILON = 48
-local SCROLL_UPDATE_DEBOUNCE_SECONDS = 0.08
+local SCROLL_CHANGE_EPSILON = 24
+local SCROLL_UPDATE_DEBOUNCE_SECONDS = 0.04
 local WIDTH_CHANGE_EPSILON = 1
+local DEBUG_INDEX_GRID_PERF = false
 
 local function getCardMetrics(containerWidth, columns)
 	local width = math.max(containerWidth, 0)
@@ -102,6 +104,54 @@ local function shouldRenderPreview(index, columns, cardHeight, viewportHeight, c
 	local maxRow = firstVisibleRow + visibleRows + LAZY_PREVIEW_OVERSCAN_ROWS
 
 	return row >= minRow and row <= maxRow
+end
+
+local function getTotalRows(unitCount, columns)
+	if unitCount <= 0 then
+		return 0
+	end
+
+	return math.ceil(unitCount / math.max(1, columns))
+end
+
+local function getCanvasHeight(unitCount, columns, cardHeight)
+	local totalRows = getTotalRows(unitCount, columns)
+	if totalRows <= 0 then
+		return 0
+	end
+
+	return (GRID_PADDING * 2) + (totalRows * cardHeight) + (math.max(0, totalRows - 1) * GRID_GAP)
+end
+
+local function getVirtualIndexRange(unitCount, columns, cardHeight, viewportHeight, canvasY)
+	if unitCount <= 0 then
+		return 1, 0
+	end
+
+	local rowHeight = math.max(1, cardHeight + GRID_GAP)
+	local totalRows = getTotalRows(unitCount, columns)
+	local firstVisibleRow = math.floor(math.max(0, (canvasY or 0) - GRID_PADDING) / rowHeight) + 1
+	local visibleRows = math.ceil(math.max(cardHeight, viewportHeight or DEFAULT_VIEWPORT_HEIGHT) / rowHeight)
+	local minRow = math.max(1, firstVisibleRow - VIRTUAL_OVERSCAN_ROWS)
+	local maxRow = math.min(totalRows, firstVisibleRow + visibleRows + VIRTUAL_OVERSCAN_ROWS)
+
+	return ((minRow - 1) * columns) + 1, math.min(unitCount, maxRow * columns)
+end
+
+local function getCardPosition(index, columns, cardWidth, cardHeight)
+	local zeroIndex = math.max(0, index - 1)
+	local row = math.floor(zeroIndex / columns)
+	local column = zeroIndex % columns
+	local x = GRID_PADDING + (column * (cardWidth + GRID_GAP))
+	local y = GRID_PADDING + (row * (cardHeight + GRID_GAP))
+
+	return x, y
+end
+
+local function debugGridLog(message)
+	if DEBUG_INDEX_GRID_PERF then
+		print("[IndexGridPerf] " .. message)
+	end
 end
 
 local function IndexGrid(props)
@@ -194,33 +244,51 @@ local function IndexGrid(props)
 		})
 	end
 
-	local gridChildren = {
-		Padding = e("UIPadding", {
-			PaddingBottom = UDim.new(0, GRID_PADDING),
-			PaddingLeft = UDim.new(0, GRID_PADDING),
-			PaddingRight = UDim.new(0, GRID_PADDING),
-			PaddingTop = UDim.new(0, GRID_PADDING),
-		}),
-		Grid = e("UIGridLayout", {
-			FillDirectionMaxCells = columns,
-			CellPadding = UDim2.fromOffset(GRID_GAP, GRID_GAP),
-			CellSize = UDim2.fromOffset(cardWidth, cardHeight),
-			SortOrder = Enum.SortOrder.LayoutOrder,
-		}),
-	}
+	local canvasHeight = getCanvasHeight(#units, columns, cardHeight)
+	local firstRenderedIndex, lastRenderedIndex = getVirtualIndexRange(
+		#units,
+		columns,
+		cardHeight,
+		previewScrollState.viewportHeight,
+		previewScrollState.canvasY
+	)
+	local renderedCardCount = math.max(0, lastRenderedIndex - firstRenderedIndex + 1)
+	local gridChildren = {}
 
-	for index, unit in ipairs(units) do
-		gridChildren["Card" .. tostring(unit.id)] = e(IndexCard, {
-			layoutOrder = index,
-			renderPreview = shouldRenderPreview(
-				index,
-				columns,
-				cardHeight,
-				previewScrollState.viewportHeight,
-				previewScrollState.canvasY
-			),
-			unit = unit,
-		})
+	debugGridLog(string.format(
+		"units=%d rendered=%d range=%d-%d canvasY=%d viewport=%d card=%dx%d",
+		#units,
+		renderedCardCount,
+		firstRenderedIndex,
+		lastRenderedIndex,
+		previewScrollState.canvasY or 0,
+		previewScrollState.viewportHeight or 0,
+		cardWidth,
+		cardHeight
+	))
+
+	for index = firstRenderedIndex, lastRenderedIndex do
+		local unit = units[index]
+		if unit then
+			local x, y = getCardPosition(index, columns, cardWidth, cardHeight)
+			gridChildren["Card" .. tostring(unit.id)] = e("Frame", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(x, y),
+				Size = UDim2.fromOffset(cardWidth, cardHeight),
+			}, {
+				Content = e(IndexCard, {
+					layoutOrder = index,
+					renderPreview = shouldRenderPreview(
+						index,
+						columns,
+						cardHeight,
+						previewScrollState.viewportHeight,
+						previewScrollState.canvasY
+					),
+					unit = unit,
+				}),
+			})
+		end
 	end
 
 	return e("Frame", {
@@ -246,10 +314,10 @@ local function IndexGrid(props)
 			}),
 		}),
 		Scroller = e("ScrollingFrame", {
-			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			AutomaticCanvasSize = Enum.AutomaticSize.None,
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			CanvasSize = UDim2.new(),
+			CanvasSize = UDim2.fromOffset(0, canvasHeight),
 			ScrollBarImageColor3 = Theme.Palette.GoldSoft,
 			ScrollBarThickness = 5,
 			ScrollingDirection = Enum.ScrollingDirection.Y,
@@ -280,8 +348,19 @@ local function IndexGrid(props)
 					}, false)
 				end
 			end,
-		}, gridChildren),
+		}, {
+			Canvas = e("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 0, 0, canvasHeight),
+			}, gridChildren),
+		}),
 	})
 end
 
-return IndexGrid
+local function areIndexGridPropsEqual(oldProps, newProps)
+	return oldProps.units == newProps.units
+		and oldProps.columns == newProps.columns
+		and oldProps.layoutOrder == newProps.layoutOrder
+end
+
+return React.memo(IndexGrid, areIndexGridPropsEqual)

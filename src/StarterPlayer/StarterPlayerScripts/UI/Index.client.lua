@@ -41,6 +41,7 @@ local devilFruitStateConnections = {}
 local rewardConnections = {}
 
 local scheduleRender
+local scheduleViewModelRender
 local fireClaimReward
 local indexDataModule = nil
 local indexScreenModule = nil
@@ -60,6 +61,11 @@ local indexDisplayMetadataExpiresAt = 0
 local indexDisplayMetadataRequestInFlight = false
 local indexDisplayMetadataNextRefreshAt = 0
 local lastFruitLifetimeMismatchWarning = nil
+local DEBUG_INDEX_PERF = false
+local cachedViewModel = nil
+local cachedViewModelPreviewMode = nil
+local viewModelDirty = true
+local viewModelBuildCount = 0
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Index",
@@ -210,6 +216,27 @@ local function trackConnection(signal, callback, bucket)
 	return connection
 end
 
+local function debugPerfLog(message)
+	if DEBUG_INDEX_PERF then
+		print("[IndexReactPerf] " .. message)
+	end
+end
+
+local function invalidateViewModel()
+	viewModelDirty = true
+end
+
+local function deferRender()
+	if scheduleRender then
+		task.defer(scheduleRender)
+	end
+end
+
+scheduleViewModelRender = function()
+	invalidateViewModel()
+	deferRender()
+end
+
 local function holdClaimRewardRenders()
 	claimRewardRenderHoldUntil = math.max(claimRewardRenderHoldUntil, os.clock() + CLAIM_REWARD_RENDER_HOLD_TIME)
 end
@@ -218,6 +245,7 @@ local function scheduleClaimAwareRender()
 	if destroyed then
 		return
 	end
+	invalidateViewModel()
 
 	local remainingHold = claimRewardRenderHoldUntil - os.clock()
 	if remainingHold > 0 then
@@ -259,17 +287,17 @@ local function bindLiveValueTree(folder, bucket)
 	local function bindValueObserver(descendant)
 		if descendant:IsA("ValueBase") then
 			trackConnection(descendant:GetPropertyChangedSignal("Value"), function()
-				task.defer(scheduleRender)
+				scheduleViewModelRender()
 			end, bucket)
 		end
 	end
 
 	trackConnection(folder.ChildAdded, function()
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	end, bucket)
 
 	trackConnection(folder.ChildRemoved, function()
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	end, bucket)
 
 	for _, descendant in ipairs(folder:GetDescendants()) do
@@ -278,11 +306,11 @@ local function bindLiveValueTree(folder, bucket)
 
 	trackConnection(folder.DescendantAdded, function(descendant)
 		bindValueObserver(descendant)
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	end, bucket)
 
 	trackConnection(folder.DescendantRemoving, function()
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	end, bucket)
 end
 
@@ -524,6 +552,7 @@ local function refreshIndexDisplayMetadata(reason, force)
 		indexDisplayMetadata = nextMetadata
 		indexDisplayMetadataExpiresAt = nextExpiresAt
 		indexDisplayMetadataRequestInFlight = false
+		invalidateViewModel()
 
 		if scheduleRender and not destroyed then
 			task.defer(scheduleRender)
@@ -572,6 +601,35 @@ local function buildViewModel(previewMode)
 	end
 
 	return buildEmptyViewModel()
+end
+
+local function getCachedViewModel(previewMode)
+	local metadataExpired = previewMode ~= true
+		and indexDisplayMetadata ~= nil
+		and indexDisplayMetadataExpiresAt > 0
+		and os.clock() >= indexDisplayMetadataExpiresAt
+	if cachedViewModel ~= nil
+		and cachedViewModelPreviewMode == previewMode
+		and viewModelDirty ~= true
+		and metadataExpired ~= true
+	then
+		return cachedViewModel
+	end
+
+	local startedAt = os.clock()
+	local viewModel = buildViewModel(previewMode)
+	cachedViewModel = viewModel
+	cachedViewModelPreviewMode = previewMode
+	viewModelDirty = false
+	viewModelBuildCount += 1
+	debugPerfLog(string.format(
+		"viewModelBuild count=%d preview=%s duration=%.4fs",
+		viewModelBuildCount,
+		tostring(previewMode == true),
+		os.clock() - startedAt
+	))
+
+	return viewModel
 end
 
 local function findRemoteEventByName(parent, remoteName)
@@ -626,7 +684,7 @@ local function bindClaimRemote(remote)
 		if success == true then
 			scheduleClaimAwareRender()
 		else
-			task.defer(scheduleRender)
+			scheduleViewModelRender()
 		end
 	end)
 end
@@ -721,7 +779,6 @@ local function StandaloneIndexApp()
 		or crewMemberInventoryFolder ~= nil
 		or devilFruitStateFolder ~= nil
 		or indexRewardsFolder ~= nil
-	local viewModel = buildViewModel(not hasLiveState)
 	local isOpen, setIsOpen = React.useState(true)
 
 	if not isOpen then
@@ -757,6 +814,8 @@ local function StandaloneIndexApp()
 			setIsOpen(false)
 		end)
 	end
+
+	local viewModel = getCachedViewModel(not hasLiveState)
 
 	return e("Frame", {
 		BackgroundColor3 = Color3.fromRGB(4, 10, 18),
@@ -826,11 +885,17 @@ local function render()
 	local host = modalAdapter:EnsureHost()
 	if host then
 		modalAdapter:SetFallbackEnabled(false)
+		local isVisible = modalAdapter:IsVisible()
+		if not isVisible then
+			modalAdapter:SyncOverlayState()
+			debugPerfLog("render skipped while hidden")
+			return
+		end
 
 		local content
 		local _, indexScreen = loadIndexModules()
 		if indexScreen then
-			local viewModel = buildViewModel(false)
+			local viewModel = getCachedViewModel(false)
 
 			content = e(indexScreen, {
 				categories = viewModel.categories,
@@ -890,21 +955,21 @@ trackConnection(player.ChildAdded, function(child)
 	if child.Name == "Inventory" then
 		bindInventoryFolder(child)
 		refreshIndexDisplayMetadata("inventory_added")
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child.Name == "IndexCollection" then
 		bindIndexCollectionFolder(child)
 		refreshIndexDisplayMetadata("index_collection_added")
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child.Name == "CrewMemberInventory" then
 		bindCrewMemberInventoryFolder(child)
 		refreshIndexDisplayMetadata("crew_member_inventory_added")
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child.Name == "DevilFruit" then
 		bindDevilFruitStateFolder(child)
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child.Name == "IndexRewards" then
 		bindIndexRewardsFolder(child)
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	end
 end, cleanupConnections)
 
@@ -912,26 +977,26 @@ trackConnection(player.ChildRemoved, function(child)
 	if child == inventoryFolder then
 		bindInventoryFolder(nil)
 		refreshIndexDisplayMetadata("inventory_removed")
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child == indexCollectionFolder then
 		bindIndexCollectionFolder(nil)
 		refreshIndexDisplayMetadata("index_collection_removed")
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child == crewMemberInventoryFolder then
 		bindCrewMemberInventoryFolder(nil)
 		refreshIndexDisplayMetadata("crew_member_inventory_removed")
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child == devilFruitStateFolder then
 		bindDevilFruitStateFolder(nil)
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	elseif child == indexRewardsFolder then
 		bindIndexRewardsFolder(nil)
-		task.defer(scheduleRender)
+		scheduleViewModelRender()
 	end
 end, cleanupConnections)
 
 trackConnection(player:GetAttributeChangedSignal("EquippedDevilFruit"), function()
-	task.defer(scheduleRender)
+	scheduleViewModelRender()
 end, cleanupConnections)
 
 trackConnection(playerGui.ChildAdded, function(child)
