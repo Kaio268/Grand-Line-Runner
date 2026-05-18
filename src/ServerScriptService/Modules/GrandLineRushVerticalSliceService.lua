@@ -2149,6 +2149,7 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 	local grantedFruits = {}
 	local duplicateCount = 0
 	local convertedChestCount = 0
+	local convertedChestCounts = {}
 	local conversionDoubloons = 0
 	local mythicKeyCount = 0
 
@@ -2164,12 +2165,29 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		end
 		if result.ConversionRewardType == "Chest" then
 			convertedChestCount += 1
+			local convertedChestName = tostring(
+				result.ConversionRewardDisplayName
+					or ((result.GrantedChest or {}).displayName)
+					or "Devil Fruit Chest"
+			)
+			convertedChestCounts[convertedChestName] = math.max(0, tonumber(convertedChestCounts[convertedChestName]) or 0) + 1
 		elseif result.ConversionRewardType == "Doubloons" then
 			conversionDoubloons += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
 		elseif result.ConversionRewardType == "MythicKey" then
 			mythicKeyCount += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
 		end
 	end
+
+	local convertedChests = {}
+	for displayName, amount in pairs(convertedChestCounts) do
+		convertedChests[#convertedChests + 1] = {
+			DisplayName = displayName,
+			Amount = amount,
+		}
+	end
+	table.sort(convertedChests, function(a, b)
+		return tostring(a.DisplayName) < tostring(b.DisplayName)
+	end)
 
 	return {
 		IsBatch = true,
@@ -2181,6 +2199,7 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		GrantedFruits = grantedFruits,
 		DuplicateCount = duplicateCount,
 		ConvertedChestCount = convertedChestCount,
+		ConvertedChests = convertedChests,
 		ConversionDoubloons = conversionDoubloons,
 		MythicKeyCount = mythicKeyCount,
 	}

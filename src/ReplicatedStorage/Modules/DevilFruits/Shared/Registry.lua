@@ -52,7 +52,7 @@ local EFFECT_CONTRACTS_BY_KEY = {
 				Resolve = true,
 			},
 			TargetScope = "all_clients",
-			Prediction = "server_only",
+			Prediction = "client_predicted",
 			ServerAuthoritative = true,
 		},
 	},
@@ -157,19 +157,11 @@ local STRUCTURED_FRUIT_ENTRY_MODULES = {
 }
 
 local function cloneDictionary(source)
-	local clone = {}
-	for key, value in pairs(source) do
-		clone[key] = value
-	end
-	return clone
+	return table.clone(source or {})
 end
 
 local function cloneArray(source)
-	local clone = {}
-	for index, value in ipairs(source or {}) do
-		clone[index] = value
-	end
-	return clone
+	return table.clone(source or {})
 end
 
 local function formatAbilityDisplayName(abilityName)

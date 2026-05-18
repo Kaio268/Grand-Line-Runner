@@ -140,6 +140,12 @@ local function buildGuaranteedRewardsSection(chestData)
 end
 
 local function buildBonusRewardsSection(chestData)
+	if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
+		and ChestRewards.DevilFruitChestGrantsBaseRewards ~= true
+	then
+		return nil
+	end
+
 	local tierConfig = (Economy.Chests.Tiers or {})[chestData.Tier]
 	local bonusRoll = tierConfig and tierConfig.Rewards and tierConfig.Rewards.BonusRoll
 	if typeof(bonusRoll) ~= "table" then
@@ -173,35 +179,29 @@ local function buildFruitRaritySection(chestData)
 		return nil
 	end
 
-	local rows = {}
 	if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit and chestData.FruitRarity then
-		rows[1] = {
-			name = chestData.FruitRarity,
-			chance = 1,
-			rarity = chestData.FruitRarity,
-		}
-	else
-		local totalWeight = 0
-		for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
-			totalWeight += math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
-		end
-		for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
-			local rarityWeight = math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
-			if rarityWeight > 0 and totalWeight > 0 then
-				rows[#rows + 1] = {
-					name = rarityName,
-					chance = gateChance * (rarityWeight / totalWeight),
-					rarity = rarityName,
-				}
-			end
+		return nil
+	end
+
+	local rows = {}
+	local totalWeight = 0
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		totalWeight += math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
+	end
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		local rarityWeight = math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
+		if rarityWeight > 0 and totalWeight > 0 then
+			rows[#rows + 1] = {
+				name = rarityName,
+				chance = gateChance * (rarityWeight / totalWeight),
+				rarity = rarityName,
+			}
 		end
 	end
 
 	return {
 		title = "Devil Fruit Rates",
-		note = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
-			then "Rates are shown by rarity. Owned fruits are skipped first when possible, so exact fruit odds can change by player."
-			else "Percentages include this chest's devil-fruit roll chance.",
+		note = "Percentages include this chest's devil-fruit roll chance.",
 		rows = rows,
 	}
 end

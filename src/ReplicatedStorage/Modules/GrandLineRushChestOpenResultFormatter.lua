@@ -186,17 +186,27 @@ local function buildBatchAcknowledgement(openResult)
 
 	local convertedChestCount = math.max(0, tonumber(openResult.ConvertedChestCount) or 0)
 	if convertedChestCount > 0 then
-		appendLine(lines, string.format("+%d converted Devil Fruit Chest%s", convertedChestCount, convertedChestCount == 1 and "" or "s"))
+		appendLine(lines, string.format(
+			"%d duplicate%s refunded as Devil Fruit Chest%s",
+			convertedChestCount,
+			convertedChestCount == 1 and "" or "s",
+			convertedChestCount == 1 and "" or "s"
+		))
+	end
+	for _, convertedChest in ipairs(openResult.ConvertedChests or {}) do
+		appendRewardRow(rewardRows, string.format("Duplicate Refund - %s", tostring(convertedChest.DisplayName)), convertedChest.Amount)
 	end
 
 	local conversionDoubloons = math.max(0, tonumber(openResult.ConversionDoubloons) or 0)
 	if conversionDoubloons > 0 then
 		appendLine(lines, string.format("+%d duplicate-conversion Doubloons", conversionDoubloons))
+		appendRewardRow(rewardRows, "Doubloons", conversionDoubloons)
 	end
 
 	local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
 	if mythicKeyCount > 0 then
 		appendLine(lines, string.format("+%d Mythic Key%s", mythicKeyCount, mythicKeyCount == 1 and "" or "s"))
+		appendRewardRow(rewardRows, "Mythic Key", mythicKeyCount)
 	end
 
 	if #lines == 0 then

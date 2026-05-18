@@ -180,17 +180,24 @@ mapTrace(
 
 local sharedHazardsFolder = waveFolder:FindFirstChild("Hazards") or waveFolder:WaitForChild("Hazards", 15)
 local useSharedHazards = sharedHazardsFolder ~= nil
+-- Keep fallback spawning disabled so all live waves use the server-sized WaveHitbox path.
+local CLIENT_FALLBACK_WAVE_SPAWNING_ENABLED = false
 local clientWavesFolder = sharedHazardsFolder or resolvedMapRefs.ClientWaves or waveFolder:FindFirstChild("ClientWaves")
 local clientWavesFolderCreated = false
 if not clientWavesFolder then
-	waveWarn(
-		"startup hazards folder missing under waveFolder=%s; falling back to a local ClientWaves folder",
-		formatInstancePath(waveFolder)
-	)
 	clientWavesFolder = Instance.new("Folder")
 	clientWavesFolder.Name = "ClientWaves"
 	clientWavesFolder.Parent = waveFolder
 	clientWavesFolderCreated = true
+end
+if not useSharedHazards then
+	waveWarn(
+		"startup hazards folder missing under waveFolder=%s; client-side fallback wave spawning disabled so raw templates cannot bypass server wave sizing",
+		formatInstancePath(waveFolder)
+	)
+	if not CLIENT_FALLBACK_WAVE_SPAWNING_ENABLED then
+		clientWavesFolder:ClearAllChildren()
+	end
 end
 waveTrace(
 	"startup trackedHazardsFolder path=%s useSharedHazards=%s created=%s",
@@ -602,7 +609,7 @@ if useSharedHazards then
 		"startup shared hazards detected; client-side wave spawning disabled trackedFolder=%s",
 		formatInstancePath(clientWavesFolder)
 	)
-else
+elseif CLIENT_FALLBACK_WAVE_SPAWNING_ENABLED then
 	for waveName, info in pairs(WavesConfig) do
 		configuredWaveCount += 1
 		local template = getTemplate(waveName)
@@ -642,6 +649,11 @@ else
 			tostring(configuredWaveCount)
 		)
 	end
+else
+	waveWarn(
+		"startup client fallback entries skipped reason=disabled server_hazards_required=true wavesFolder=%s",
+		formatInstancePath(WavesFolder)
+	)
 end
 
 local rng = Random.new()
@@ -1993,7 +2005,7 @@ local function updatePause()
 			)
 		end
 		paused = true
-		if not useSharedHazards then
+		if not useSharedHazards and CLIENT_FALLBACK_WAVE_SPAWNING_ENABLED then
 			clientWavesFolder:ClearAllChildren()
 		end
 	else
@@ -2030,7 +2042,7 @@ RunService.RenderStepped:Connect(function(deltaTime)
 end)
 
 while true do
-	if useSharedHazards then
+	if useSharedHazards or not CLIENT_FALLBACK_WAVE_SPAWNING_ENABLED then
 		task.wait(1)
 	elseif not paused then
 		local selectedEntry = nil

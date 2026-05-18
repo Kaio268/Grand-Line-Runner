@@ -815,13 +815,17 @@ function MoguBurrowShared.ResolveSurfaceRootPosition(
 	if rootPart then
 		castBaseY = math.max(castBaseY, rootPart.Position.Y)
 	end
-	if fallbackPosition then
+	local ignoreFallbackHeightForCast = type(options) == "table" and options.IgnoreFallbackHeightForCast == true
+	if fallbackPosition and not ignoreFallbackHeightForCast then
 		castBaseY = math.max(castBaseY, fallbackPosition.Y)
 	end
 
 	local _, baseIgnoreList = createSurfaceRaycastParams(character, abilityConfig)
 	local cast = Vector3.new(0, -(probeHeight + probeDepth), 0)
-	local guardRootY = fallbackPosition and fallbackPosition.Y or (rootPart and rootPart.Position.Y)
+	local explicitGuardRootY = type(options) == "table" and tonumber(options.GuardRootY) or nil
+	local guardRootY = if explicitGuardRootY and explicitGuardRootY == explicitGuardRootY
+		then explicitGuardRootY
+		else fallbackPosition and fallbackPosition.Y or (rootPart and rootPart.Position.Y)
 	local sampleRadius = MoguBurrowShared.GetSurfaceProbeRadius(rootPart, abilityConfig)
 	local bestResult = nil
 	local bestResolvedRootY = nil

@@ -74,6 +74,54 @@ local function matchesStringSet(value, allowedValues)
 	return allowedValues[normalizedValue] == true
 end
 
+function HazardRuntime.SegmentIntersectsBox(startPosition, endPosition, boxCFrame, boxSize, padding)
+	if typeof(startPosition) ~= "Vector3"
+		or typeof(endPosition) ~= "Vector3"
+		or typeof(boxCFrame) ~= "CFrame"
+		or typeof(boxSize) ~= "Vector3"
+	then
+		return false, nil, nil
+	end
+
+	local safePadding = if typeof(padding) == "Vector3" then padding else Vector3.zero
+	local halfSize = (boxSize + safePadding) * 0.5
+	local localStart = boxCFrame:PointToObjectSpace(startPosition)
+	local localEnd = boxCFrame:PointToObjectSpace(endPosition)
+	local localDelta = localEnd - localStart
+	local minAlpha = 0
+	local maxAlpha = 1
+	local epsilon = 1e-6
+
+	local function clipAxis(startValue, deltaValue, halfExtent)
+		if math.abs(deltaValue) <= epsilon then
+			return math.abs(startValue) <= halfExtent
+		end
+
+		local enter = (-halfExtent - startValue) / deltaValue
+		local exit = (halfExtent - startValue) / deltaValue
+		if enter > exit then
+			enter, exit = exit, enter
+		end
+
+		minAlpha = math.max(minAlpha, enter)
+		maxAlpha = math.min(maxAlpha, exit)
+		return minAlpha <= maxAlpha
+	end
+
+	if not clipAxis(localStart.X, localDelta.X, halfSize.X) then
+		return false, nil, nil
+	end
+	if not clipAxis(localStart.Y, localDelta.Y, halfSize.Y) then
+		return false, nil, nil
+	end
+	if not clipAxis(localStart.Z, localDelta.Z, halfSize.Z) then
+		return false, nil, nil
+	end
+
+	local hitAlpha = math.clamp(minAlpha, 0, 1)
+	return true, startPosition:Lerp(endPosition, hitAlpha), hitAlpha
+end
+
 function HazardRuntime.Register(rootInstance, controller)
 	if typeof(rootInstance) ~= "Instance" or type(controller) ~= "table" then
 		return false
