@@ -44,6 +44,9 @@ local CONFIG = {
 	GroundProbeHeight = 120,
 	GroundProbeDepth = 260,
 	MaxGroundHeightDelta = 4,
+	GroundNormalMin = 0.65,
+	FootprintSampleSpacing = 5,
+	MaxFootprintSampleSteps = 14,
 	SpawnAttempts = 24,
 	MinPuddleEdgeGap = 4,
 	PuddleFolderName = "Puddles",
@@ -74,7 +77,18 @@ local CONFIG = {
 		[7] = 0.10,
 		[8] = 0.08,
 	},
-	SafeGapBuffer = 12,
+	SafeGapBuffer = 32,
+	SafeGapBufferByBiome = {
+		[1] = 32,
+		[2] = 32,
+		[3] = 32,
+		[4] = 36,
+		[5] = 48,
+		[6] = 60,
+		[7] = 72,
+		[8] = 84,
+	},
+	LargePuddleGapBufferScale = 1.85,
 	SafeFloorNameKeywords = {
 		"gap",
 		"safe",
@@ -281,7 +295,7 @@ local function buildGroundRaycastParams(refs)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	raycastParams.FilterDescendantsInstances = exclusions
-	raycastParams.IgnoreWater = false
+	raycastParams.IgnoreWater = true
 	return raycastParams
 end
 
@@ -327,36 +341,73 @@ local function raycastGround(position, refs, raycastParams)
 		raycastParams or buildGroundRaycastParams(refs)
 	)
 
-	if result and not isUnsafePuddleSurface(result.Instance) then
+	if result
+		and result.Instance
+		and result.Instance:IsA("BasePart")
+		and result.Instance.CanCollide == true
+		and result.Normal.Y >= math.clamp(tonumber(CONFIG.GroundNormalMin) or 0.65, 0, 1)
+		and not isUnsafePuddleSurface(result.Instance)
+	then
 		return result.Position
 	end
 
 	return nil
 end
 
-local function isNearSafePuddleGap(position, refs, forward, lateral, footprintSize, raycastParams)
+local function buildFootprintSampleOffsets(forward, lateral, footprintSize, buffer)
 	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
 	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
-	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
+	local size = typeof(footprintSize) == "Vector3" and footprintSize or Vector3.new(8, 1, 8)
+	local footprintDiameter = math.max(size.X, size.Z)
+	local sampleX = math.max(1, (footprintDiameter * 0.5) + buffer)
+	local sampleZ = math.max(1, (footprintDiameter * 0.5) + buffer)
+	local spacing = math.max(2, tonumber(CONFIG.FootprintSampleSpacing) or 8)
+	local maxSteps = math.max(2, math.floor(tonumber(CONFIG.MaxFootprintSampleSteps) or 8))
+	local xSteps = math.clamp(math.ceil((sampleX * 2) / spacing), 2, maxSteps)
+	local zSteps = math.clamp(math.ceil((sampleZ * 2) / spacing), 2, maxSteps)
+	local offsets = { Vector3.zero }
+
+	for xIndex = 0, xSteps do
+		local xAlpha = if xSteps > 0 then xIndex / xSteps else 0.5
+		local x = -sampleX + (sampleX * 2 * xAlpha)
+		for zIndex = 0, zSteps do
+			local zAlpha = if zSteps > 0 then zIndex / zSteps else 0.5
+			local z = -sampleZ + (sampleZ * 2 * zAlpha)
+			if math.abs(x) > 1e-3 or math.abs(z) > 1e-3 then
+				offsets[#offsets + 1] = (lateralUnit * x) + (forwardUnit * z)
+			end
+		end
+	end
+
+	return offsets
+end
+
+local function getSafeGapBufferForBiome(biomeIndex)
+	local fallback = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
+	local byBiome = CONFIG.SafeGapBufferByBiome
+	if type(byBiome) ~= "table" then
+		return fallback
+	end
+
+	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
+	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
+	return math.max(0, tonumber(byBiome[normalizedBiome]) or fallback)
+end
+
+local function isNearSafePuddleGap(position, refs, forward, lateral, footprintSize, raycastParams, biomeIndex)
+	local buffer = getSafeGapBufferForBiome(biomeIndex)
 	if buffer <= 0 then
 		return false
 	end
 
 	local size = typeof(footprintSize) == "Vector3" and footprintSize or Vector3.new(8, 1, 8)
-	local sampleX = math.max(buffer, size.X * 0.5 + buffer)
-	local sampleZ = math.max(buffer, size.Z * 0.5 + buffer)
-	for _, offset in ipairs({
-		Vector3.zero,
-		forwardUnit * sampleZ,
-		-forwardUnit * sampleZ,
-		lateralUnit * sampleX,
-		-lateralUnit * sampleX,
-		lateralUnit * sampleX + forwardUnit * sampleZ,
-		lateralUnit * -sampleX + forwardUnit * sampleZ,
-		lateralUnit * sampleX + forwardUnit * -sampleZ,
-		lateralUnit * -sampleX + forwardUnit * -sampleZ,
-	}) do
-		if not raycastGround(position + offset, refs, raycastParams) then
+	local largePuddleBuffer = math.max(size.X, size.Z) * math.max(0, tonumber(CONFIG.LargePuddleGapBufferScale) or 0)
+	local sampleBuffer = math.max(buffer, largePuddleBuffer)
+	local maxHeightDelta = math.max(0.5, tonumber(CONFIG.MaxGroundHeightDelta) or 4)
+
+	for _, offset in ipairs(buildFootprintSampleOffsets(forward, lateral, footprintSize, sampleBuffer)) do
+		local samplePosition = raycastGround(position + offset, refs, raycastParams)
+		if not samplePosition or math.abs(samplePosition.Y - position.Y) > maxHeightDelta then
 			return true
 		end
 	end
@@ -364,31 +415,21 @@ local function isNearSafePuddleGap(position, refs, forward, lateral, footprintSi
 	return false
 end
 
-local function resolveSafeGroundPosition(position, refs, lateral, forward, footprintSize)
+local function resolveSafeGroundPosition(position, refs, lateral, forward, footprintSize, biomeIndex)
 	local raycastParams = buildGroundRaycastParams(refs)
 	local centerPosition = raycastGround(position, refs, raycastParams)
 	if not centerPosition then
 		return nil
 	end
 
-	if isNearSafePuddleGap(centerPosition, refs, forward, lateral, footprintSize, raycastParams) then
+	if isNearSafePuddleGap(centerPosition, refs, forward, lateral, footprintSize, raycastParams, biomeIndex) then
 		return nil
 	end
 
 	local size = typeof(footprintSize) == "Vector3" and footprintSize or Vector3.new(8, 1, 8)
-	local sampleX = math.max(1, size.X * 0.42)
-	local sampleZ = math.max(1, size.Z * 0.42)
-	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
-	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
 	local maxHeightDelta = math.max(0.5, tonumber(CONFIG.MaxGroundHeightDelta) or 4)
-	local sampleOffsets = {
-		lateralUnit * sampleX + forwardUnit * sampleZ,
-		lateralUnit * -sampleX + forwardUnit * sampleZ,
-		lateralUnit * sampleX + forwardUnit * -sampleZ,
-		lateralUnit * -sampleX + forwardUnit * -sampleZ,
-	}
 
-	for _, offset in ipairs(sampleOffsets) do
+	for _, offset in ipairs(buildFootprintSampleOffsets(forward, lateral, size, 0)) do
 		local samplePosition = raycastGround(position + offset, refs, raycastParams)
 		if not samplePosition or math.abs(samplePosition.Y - centerPosition.Y) > maxHeightDelta then
 			return nil
@@ -622,7 +663,7 @@ local function choosePuddlePlacement(refs, startPart, endPart, leftBound, rightB
 		local centerProjection = corridorCenter:Dot(lateral)
 		local pathProjection = centerOnPath:Dot(lateral)
 		local planarPosition = centerOnPath + (lateral * (centerProjection - pathProjection + laneOffset))
-		local groundPosition = resolveSafeGroundPosition(planarPosition, refs, lateral, forward, footprintSize)
+		local groundPosition = resolveSafeGroundPosition(planarPosition, refs, lateral, forward, footprintSize, normalizedBiome)
 		if groundPosition and not isTooCloseToActivePuddle(groundPosition, footprintSize) then
 			local yaw = CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
 			return {
