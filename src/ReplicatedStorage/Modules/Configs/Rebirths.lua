@@ -8,6 +8,10 @@ local Rebirths = {
 	BaseShipIncomeMultiplier = 1,
 	ShipIncomeMultiplierStep = 0.15,
 	ShipIncomeIcon = "rbxassetid://99305009492305",
+	BeliCostBase = 1_000_000,
+	BeliCostExponent = 1.45,
+	BeliCostGrowth = 1.25,
+	BeliCostRoundTo = 100_000,
 }
 
 local function coerceWholeNumber(value, fallback)
@@ -23,9 +27,23 @@ local function roundToHundredths(value)
 	return math.floor((tonumber(value) or 0) * 100 + 0.5) / 100
 end
 
+local function roundToNearest(value, step)
+	local numericStep = math.max(1, tonumber(step) or 1)
+	return math.floor(((tonumber(value) or 0) / numericStep) + 0.5) * numericStep
+end
+
 function Rebirths.GetShipIncomeMultiplier(rebirthCount)
 	local numericRebirths = coerceWholeNumber(rebirthCount, 0)
 	return roundToHundredths(Rebirths.BaseShipIncomeMultiplier + (numericRebirths * Rebirths.ShipIncomeMultiplierStep))
+end
+
+function Rebirths.GetBeliCostForRebirth(targetRebirthCount)
+	local target = math.max(1, coerceWholeNumber(targetRebirthCount, 1))
+	local rawCost = Rebirths.BeliCostBase
+		* (target ^ Rebirths.BeliCostExponent)
+		* (Rebirths.BeliCostGrowth ^ (target - 1))
+
+	return roundToNearest(rawCost, Rebirths.BeliCostRoundTo)
 end
 
 function Rebirths.GetHighestShipLevelForRebirthCount(rebirthCount)
@@ -43,29 +61,16 @@ function Rebirths.GetHighestShipLevelForRebirthCount(rebirthCount)
 	return highestLevel
 end
 
-local function getPriceForShipLevel(level)
-	local targetLevel = PlotUpgradeConfig.ClampLevel(level)
-	if targetLevel <= 0 then
-		return 0
-	end
-
-	local costRequirement = PlotUpgradeConfig.RequirementsByLevel[targetLevel - 1]
-	if typeof(costRequirement) ~= "table" then
-		return 0
-	end
-
-	return math.max(0, math.floor(tonumber(costRequirement.Doubloons) or 0))
-end
-
 local function buildConfig(index)
 	local targetRebirthCount = math.max(1, coerceWholeNumber(index, 1))
 	local currentRebirthCount = targetRebirthCount - 1
 	local shipLevelNeeded = Rebirths.GetHighestShipLevelForRebirthCount(currentRebirthCount)
-	local price = getPriceForShipLevel(shipLevelNeeded)
+	local price = Rebirths.GetBeliCostForRebirth(targetRebirthCount)
 	local multiplier = Rebirths.GetShipIncomeMultiplier(targetRebirthCount)
 
 	return {
 		Index = targetRebirthCount,
+		BeliCost = price,
 		Price = price,
 		ShipLevelNeeded = shipLevelNeeded,
 		PlotUpgradeNeeded = shipLevelNeeded,

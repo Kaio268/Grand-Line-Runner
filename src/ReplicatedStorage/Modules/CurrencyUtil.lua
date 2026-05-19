@@ -1,10 +1,23 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local Shorten = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
 
 local CurrencyUtil = {}
 
 local Primary = Economy.Currency.Primary
+local LegacyKeys = Primary.LegacyKeys or {}
+
+local LEGACY_LEADERSTAT_NAMES = {
+	LegacyKeys.Leaderstat,
+	LegacyKeys.LeaderstatMoney,
+	LegacyKeys.LeaderstatTypo,
+}
+
+local LEGACY_TOTAL_NAMES = {
+	LegacyKeys.Total,
+	LegacyKeys.TotalMoney,
+}
 
 local function isNumericValueObject(value)
 	return value
@@ -32,11 +45,13 @@ local function findLegacyValueObject(player: Player)
 		return nil
 	end
 
-	local value = leaderstats:FindFirstChild(Primary.LegacyKeys.Leaderstat)
-		or leaderstats:FindFirstChild(Primary.LegacyKeys.LeaderstatTypo)
-
-	if isNumericValueObject(value) then
-		return value
+	for _, legacyName in ipairs(LEGACY_LEADERSTAT_NAMES) do
+		if typeof(legacyName) == "string" and legacyName ~= "" then
+			local value = leaderstats:FindFirstChild(legacyName)
+			if isNumericValueObject(value) then
+				return value
+			end
+		end
 	end
 
 	return nil
@@ -50,6 +65,10 @@ function CurrencyUtil.getPrimaryLeaderstatName()
 	return Primary.Key
 end
 
+function CurrencyUtil.getDisplayName()
+	return tostring(Primary.DisplayName or Primary.Key or "Beli")
+end
+
 function CurrencyUtil.getPrimaryPath()
 	return Primary.Path
 end
@@ -59,11 +78,39 @@ function CurrencyUtil.getTotalPath()
 end
 
 function CurrencyUtil.getCompactSuffix()
-	return " " .. Primary.ShortLabel
+	return " " .. tostring(Primary.ShortLabel or CurrencyUtil.getDisplayName())
 end
 
 function CurrencyUtil.getPerSecondSuffix()
 	return CurrencyUtil.getCompactSuffix() .. "/s"
+end
+
+function CurrencyUtil.getLegacyLeaderstatNames()
+	return table.clone(LEGACY_LEADERSTAT_NAMES)
+end
+
+function CurrencyUtil.getLegacyTotalStatNames()
+	return table.clone(LEGACY_TOTAL_NAMES)
+end
+
+function CurrencyUtil.getAmountFromTable(source)
+	if typeof(source) ~= "table" then
+		return 0
+	end
+
+	local direct = tonumber(source[Primary.Key])
+	if direct ~= nil then
+		return direct
+	end
+
+	for _, legacyName in ipairs(LEGACY_LEADERSTAT_NAMES) do
+		local value = if typeof(legacyName) == "string" then tonumber(source[legacyName]) else nil
+		if value ~= nil then
+			return value
+		end
+	end
+
+	return 0
 end
 
 function CurrencyUtil.findPrimaryValueObject(player: Player): NumberValue?
@@ -92,12 +139,25 @@ end
 
 function CurrencyUtil.formatCompact(amount: number): string
 	local rounded = math.floor((tonumber(amount) or 0) + 0.5)
-	return tostring(rounded) .. CurrencyUtil.getCompactSuffix()
+	return Shorten.roundNumber(rounded) .. CurrencyUtil.getCompactSuffix()
 end
 
 function CurrencyUtil.formatPerSecond(amount: number): string
 	local rounded = math.floor((tonumber(amount) or 0) + 0.5)
-	return tostring(rounded) .. CurrencyUtil.getPerSecondSuffix()
+	return Shorten.roundNumber(rounded) .. CurrencyUtil.getPerSecondSuffix()
+end
+
+function CurrencyUtil.formatAmount(amount: number): string
+	return CurrencyUtil.formatCompact(amount)
+end
+
+function CurrencyUtil.formatMultiplier(multiplier: number): string
+	local numeric = tonumber(multiplier) or 1
+	if numeric == math.floor(numeric) then
+		return string.format("%dx %s", numeric, CurrencyUtil.getDisplayName())
+	end
+
+	return string.format("%.1fx %s", numeric, CurrencyUtil.getDisplayName())
 end
 
 return CurrencyUtil

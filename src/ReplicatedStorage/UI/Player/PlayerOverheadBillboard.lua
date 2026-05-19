@@ -52,7 +52,7 @@ local function getStatusText(entry)
 
 	local activeBuffs = {}
 	if tonumber(entry.beliBoostRemaining) and entry.beliBoostRemaining > 0 then
-		activeBuffs[#activeBuffs + 1] = "x2 Beli " .. formatRemaining(entry.beliBoostRemaining)
+		activeBuffs[#activeBuffs + 1] = "2x Beli " .. formatRemaining(entry.beliBoostRemaining)
 	end
 	if tonumber(entry.speedBoostRemaining) and entry.speedBoostRemaining > 0 then
 		activeBuffs[#activeBuffs + 1] = "x1.5 Speed " .. formatRemaining(entry.speedBoostRemaining)

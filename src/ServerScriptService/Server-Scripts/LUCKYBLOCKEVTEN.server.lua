@@ -21,6 +21,7 @@ local LuckyTemplate = ReplicatedStorage:WaitForChild("LuckyBlock")
 LuckyTemplate.Archivable = true
 
 local PopUpModule = require(ReplicatedStorage.Modules:WaitForChild("PopUpModule"))
+local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
 local function getOrMakeRemote(name)
 	local r = ReplicatedStorage:FindFirstChild(name)
@@ -96,13 +97,15 @@ local REWARDS = {
 		Popup = "LuckyBlock didn't give anything 😭",
 	},
 
-	["Doubloons"] = {
+	["Beli"] = {
 		chance = 27, -- dość częste
 		amount = math.random(2500, 5000),
 		Give = function(plr, amount)
-			DataManager:AddValue(plr, "leaderstats.Doubloons", amount)
+			DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), amount)
 		end,
-		Popup = "You got {reward} +{amount}!",
+		Popup = function(_plr, _rewardName, amount)
+			return "You got +" .. CurrencyUtil.formatAmount(amount) .. "!"
+		end,
 	},
 
 	["MoneyBoost"] = {
@@ -111,7 +114,7 @@ local REWARDS = {
 		Give = function(plr, amount)
 			DataManager:AddValue(plr, "Potions.x2MoneyTime", amount)
 		end,
-		Popup = "You got 2 Minutes x2 Doubloons Boost!",
+		Popup = "You got 2 Minutes 2x Beli Boost!",
 	},
 
 	["SpeedBoost"] = {

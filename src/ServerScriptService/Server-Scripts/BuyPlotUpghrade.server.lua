@@ -246,8 +246,8 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	local currentMoney = getMoney(player)
-	local doubloonCost = math.max(0, math.floor(tonumber(requirement.Doubloons) or 0))
-	if currentMoney < doubloonCost then
+	local beliCost = math.max(0, math.floor(tonumber(requirement.Beli) or 0))
+	if currentMoney < beliCost then
 		busy[player] = nil
 		return
 	end
@@ -268,7 +268,7 @@ remote.OnServerEvent:Connect(function(player)
 	local mutations = {
 		{
 			Path = CurrencyUtil.getPrimaryPath(),
-			Value = currentMoney - doubloonCost,
+			Value = currentMoney - beliCost,
 		},
 		{
 			Path = PLOT_UPGRADE_PATH,

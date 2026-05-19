@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DevilFruits = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local ChestOpenResultFormatter = {}
 
@@ -36,6 +37,11 @@ local function appendRewardRow(rows, name, amount, icon)
 		Amount = normalizedAmount,
 		Icon = if typeof(icon) == "string" then icon else "",
 	}
+end
+
+local function getGrantedBeli(grantedResources)
+	grantedResources = if typeof(grantedResources) == "table" then grantedResources else {}
+	return math.max(0, tonumber(grantedResources.beli) or tonumber(grantedResources.doubloons) or 0)
 end
 
 local function fruitDisplayName(fruitKey)
@@ -84,9 +90,9 @@ local function addGrantedResourceLines(lines, grantedResources)
 		end
 	end
 
-	local doubloons = math.max(0, tonumber(grantedResources.doubloons) or 0)
-	if doubloons > 0 then
-		appendLine(lines, string.format("+%d Doubloons", doubloons))
+	local beli = getGrantedBeli(grantedResources)
+	if beli > 0 then
+		appendLine(lines, "+" .. CurrencyUtil.formatAmount(beli))
 		addedAny = true
 	end
 
@@ -117,7 +123,7 @@ local function addGrantedResourceRows(rows, grantedResources)
 		end
 	end
 
-	appendRewardRow(rows, "Doubloons", grantedResources.doubloons)
+	appendRewardRow(rows, CurrencyUtil.getDisplayName(), getGrantedBeli(grantedResources))
 end
 
 local function resolveAccent(openResult)
@@ -197,10 +203,10 @@ local function buildBatchAcknowledgement(openResult)
 		appendRewardRow(rewardRows, string.format("Duplicate Refund - %s", tostring(convertedChest.DisplayName)), convertedChest.Amount)
 	end
 
-	local conversionDoubloons = math.max(0, tonumber(openResult.ConversionDoubloons) or 0)
-	if conversionDoubloons > 0 then
-		appendLine(lines, string.format("+%d duplicate-conversion Doubloons", conversionDoubloons))
-		appendRewardRow(rewardRows, "Doubloons", conversionDoubloons)
+	local conversionBeli = math.max(0, tonumber(openResult.ConversionBeli) or tonumber(openResult.ConversionDoubloons) or 0)
+	if conversionBeli > 0 then
+		appendLine(lines, "+" .. CurrencyUtil.formatAmount(conversionBeli) .. " duplicate conversion")
+		appendRewardRow(rewardRows, CurrencyUtil.getDisplayName(), conversionBeli)
 	end
 
 	local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
@@ -273,14 +279,10 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 			if openResult.AutoConvertedMythicChest == true and typeof(openResult.GrantedChest) == "table" then
 				appendLine(lines, string.format("Auto-converted: %s", tostring(openResult.GrantedChest.displayName or "Mythic Devil Fruit Chest")))
 			end
-		elseif openResult.ConversionRewardType == "Doubloons" then
+		elseif openResult.ConversionRewardType == "Beli" or openResult.ConversionRewardType == "Doubloons" then
 			appendLine(
 				lines,
-				string.format(
-					"Converted to: +%d %s",
-					math.max(0, tonumber(openResult.ConversionRewardAmount) or 0),
-					tostring(openResult.ConversionRewardDisplayName or "Doubloons")
-				)
+				"Converted to: +" .. CurrencyUtil.formatAmount(math.max(0, tonumber(openResult.ConversionRewardAmount) or 0))
 			)
 		elseif typeof(openResult.Message) == "string" and openResult.Message ~= "" then
 			appendLine(lines, openResult.Message)

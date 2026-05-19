@@ -346,43 +346,43 @@ local COMMANDS = {
 	{
 		id = "money_delta",
 		category = "Currency",
-		marker = "$",
-		name = "Adjust Doubloons",
-		syntax = "/money <delta>",
-		description = "Add or subtract Doubloons.",
-		example = "/money 1000",
+		marker = "BE",
+		name = "Adjust Beli",
+		syntax = "/beli <delta>",
+		description = "Add or subtract Beli.",
+		example = "/beli 1000",
 		inputs = {
 			{ key = "amount", label = "Delta", placeholder = "1000 or -500" },
 		},
 		build = function(values)
-			return "/money " .. inputValue(values, "amount", "<delta>")
+			return "/beli " .. inputValue(values, "amount", "<delta>")
 		end,
 	},
 	{
 		id = "money_set",
 		category = "Currency",
-		marker = "$",
-		name = "Set Doubloons",
-		syntax = "/money set <amount>",
-		description = "Set Doubloons to an exact amount.",
-		example = "/money set 25000",
+		marker = "BE",
+		name = "Set Beli",
+		syntax = "/beli set <amount>",
+		description = "Set Beli to an exact amount.",
+		example = "/beli set 25000",
 		inputs = {
 			{ key = "amount", label = "Amount", placeholder = "25000" },
 		},
 		build = function(values)
-			return "/money set " .. inputValue(values, "amount", "<amount>")
+			return "/beli set " .. inputValue(values, "amount", "<amount>")
 		end,
 	},
 	{
 		id = "money_clear",
 		category = "Currency",
-		marker = "$",
-		name = "Clear Doubloons",
-		syntax = "/money clear | /money reset | /money zero",
-		description = "Set Doubloons to zero.",
-		example = "/money clear",
+		marker = "BE",
+		name = "Clear Beli",
+		syntax = "/beli clear | /beli reset | /beli zero",
+		description = "Set Beli to zero.",
+		example = "/beli clear",
 		build = function()
-			return "/money clear"
+			return "/beli clear"
 		end,
 	},
 	{
@@ -433,14 +433,14 @@ local COMMANDS = {
 		marker = "x2",
 		name = "Grant Boost",
 		syntax = "/boost <boostType> [minutes]",
-		description = "Grant a timed boost. Supported aliases include x2money, money, x2doubloons, doubloons, 2xmoney, x15walkspeed, speed, and walkspeed.",
-		example = "/boost x2money 5",
+		description = "Grant a timed boost. Use 2xbeli/x2beli for Beli boosts, or speed/walkspeed for movement boosts.",
+		example = "/boost 2xbeli 5",
 		inputs = {
-			{ key = "boost", label = "Boost type", placeholder = "x2money", default = "x2money" },
+			{ key = "boost", label = "Boost type", placeholder = "2xbeli", default = "2xbeli" },
 			{ key = "minutes", label = "Minutes", placeholder = "5", default = "5" },
 		},
 		build = function(values)
-			return "/boost " .. inputValue(values, "boost", "x2money") .. " " .. inputValue(values, "minutes", "5")
+			return "/boost " .. inputValue(values, "boost", "2xbeli") .. " " .. inputValue(values, "minutes", "5")
 		end,
 	},
 	{
@@ -545,10 +545,10 @@ local COMMANDS = {
 		marker = "RS",
 		name = "Give Resource",
 		syntax = "/give <resource> <amount>",
-		description = "Grant Doubloons/money, configured materials, or configured food resources.",
+		description = "Grant Beli, configured materials, or configured food resources.",
 		example = "/give timber 25",
 		inputs = {
-			{ key = "resource", label = "Resource", placeholder = "doubloons, timber, iron..." },
+			{ key = "resource", label = "Resource", placeholder = "beli, timber, iron..." },
 			{ key = "amount", label = "Amount", placeholder = "25" },
 		},
 		build = function(values)

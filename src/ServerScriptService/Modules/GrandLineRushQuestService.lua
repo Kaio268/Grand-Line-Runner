@@ -258,7 +258,7 @@ local function countOpenedChests(dataRoot)
 	return math.max(0, createdChestCount - countUnopenedChests(unopenedChests))
 end
 
-local function getTotalDoubloons(dataRoot)
+local function getTotalBeli(dataRoot)
 	local totalStats = if typeof(dataRoot.TotalStats) == "table" then dataRoot.TotalStats else {}
 	local leaderstats = if typeof(dataRoot.leaderstats) == "table" then dataRoot.leaderstats else {}
 	return math.max(
@@ -316,8 +316,8 @@ local function getProfileBackfillProgress(dataRoot, definition)
 		return countExtractedCrew(dataRoot)
 	elseif objectiveType == "OpenChest" then
 		return countOpenedChests(dataRoot)
-	elseif objectiveType == "EarnDoubloons" then
-		return getTotalDoubloons(dataRoot)
+	elseif objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons" then
+		return getTotalBeli(dataRoot)
 	elseif objectiveType == "ReachDepth" then
 		return countExtractedRewardsAtDepth(dataRoot, objective.DepthBand)
 	elseif objectiveType == "UpgradeCrew" then

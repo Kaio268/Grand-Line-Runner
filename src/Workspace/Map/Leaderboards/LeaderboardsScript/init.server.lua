@@ -118,11 +118,15 @@ end
 
 local Boards = {
 	{
+		-- Board/ordered-store names stay legacy to preserve existing ranks and map wiring;
+		-- the stat source is the canonical Beli total.
 		name = "TotalMoney",
-		stat = "TotalDoubloons",
+		stat = "TotalBeli",
 		ds = DataStoreService:GetOrderedDataStore("TotalMonDa2ta0fbsdfb24"),
 		folder = resolveBoardFolder("TotalMoney"),
 		display = function(v) return Suffix(v) end,
+		headerText = "Beli",
+		legacyLabels = { "Money", "Total Money", "Doubloons", "Total Doubloons" },
 	},
 	{
 		name = "TotalSpeed",

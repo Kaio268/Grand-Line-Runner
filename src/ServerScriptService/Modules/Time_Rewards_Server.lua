@@ -546,7 +546,7 @@ end
 
 local function addReward(player: Player, rewardName: string, amount: number)
 	local normalizedRewardName = tostring(rewardName)
-	if normalizedRewardName == "Money" or normalizedRewardName == "Doubloons" then
+	if normalizedRewardName == "Beli" or normalizedRewardName == "Money" or normalizedRewardName == "Doubloons" then
 		return DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), amount)
 	end
 

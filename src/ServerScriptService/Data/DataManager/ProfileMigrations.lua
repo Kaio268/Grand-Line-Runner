@@ -369,19 +369,44 @@ function ProfileMigrations.Apply(data)
 	mergeDefaults(data, ProfileTemplate)
 
 	local leaderstats = ensureTable(data, "leaderstats")
-	local legacyMoney = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.Leaderstat], 0)
-	local typoMoney = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.LeaderstatTypo], 0)
-	local resolvedMoney = math.max(legacyMoney, typoMoney)
+	local currencyLegacy = ensureTable(data, "CurrencyLegacy")
+	local existingLegacyDoubloons = coerceNumber(currencyLegacy.LeaderstatDoubloons, 0)
+	local existingLegacyMoney = coerceNumber(currencyLegacy.LeaderstatMoney, 0)
+	local existingLegacyTypo = coerceNumber(currencyLegacy.LeaderstatTypo, 0)
+	local legacyDoubloons = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.Leaderstat], existingLegacyDoubloons)
+	local legacyMoney = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.LeaderstatMoney], existingLegacyMoney)
+	local typoMoney = coerceNumber(leaderstats[primaryCurrency.LegacyKeys.LeaderstatTypo], existingLegacyTypo)
+	local resolvedMoney = math.max(coerceNumber(leaderstats[primaryCurrency.Key], 0), legacyDoubloons, legacyMoney, typoMoney)
 
-	leaderstats[primaryCurrency.Key] = coerceNumber(leaderstats[primaryCurrency.Key], resolvedMoney)
+	leaderstats[primaryCurrency.Key] = resolvedMoney
 	leaderstats.Bounty = math.max(0, coerceNumber(leaderstats.Bounty, 0))
+	currencyLegacy.LeaderstatDoubloons = legacyDoubloons
+	currencyLegacy.LeaderstatMoney = legacyMoney
+	currencyLegacy.LeaderstatTypo = typoMoney
+	currencyLegacy.CurrentBeli = resolvedMoney
+	currencyLegacy.Doubloons = resolvedMoney
+	currencyLegacy.Money = resolvedMoney
+	currencyLegacy.Moeny = resolvedMoney
+	-- Old currency leaderstat keys are removed from the visible leaderstats folder after
+	-- their values are copied into Beli. DataManager path aliases keep old code working.
 	leaderstats[primaryCurrency.LegacyKeys.Leaderstat] = nil
+	leaderstats[primaryCurrency.LegacyKeys.LeaderstatMoney] = nil
 	leaderstats[primaryCurrency.LegacyKeys.LeaderstatTypo] = nil
 
 	local totalStats = ensureTable(data, "TotalStats")
-	local legacyTotal = coerceNumber(totalStats[primaryCurrency.LegacyKeys.Total], 0)
-	totalStats[primaryCurrency.TotalKey] = coerceNumber(totalStats[primaryCurrency.TotalKey], legacyTotal)
+	local existingLegacyTotal = coerceNumber(currencyLegacy.LegacyTotalDoubloons, 0)
+	local existingLegacyTotalMoney = coerceNumber(currencyLegacy.LegacyTotalMoney, 0)
+	local legacyTotal = coerceNumber(totalStats[primaryCurrency.LegacyKeys.Total], existingLegacyTotal)
+	local legacyTotalMoney = coerceNumber(totalStats[primaryCurrency.LegacyKeys.TotalMoney], existingLegacyTotalMoney)
+	local resolvedTotal = math.max(coerceNumber(totalStats[primaryCurrency.TotalKey], 0), legacyTotal, legacyTotalMoney)
+	totalStats[primaryCurrency.TotalKey] = resolvedTotal
+	currencyLegacy.LegacyTotalDoubloons = legacyTotal
+	currencyLegacy.LegacyTotalMoney = legacyTotalMoney
+	currencyLegacy.CurrentTotalBeli = resolvedTotal
+	currencyLegacy.TotalDoubloons = resolvedTotal
+	currencyLegacy.TotalMoney = resolvedTotal
 	totalStats[primaryCurrency.LegacyKeys.Total] = nil
+	totalStats[primaryCurrency.LegacyKeys.TotalMoney] = nil
 
 	local bounty = ensureTable(data, "Bounty")
 	bounty.LifetimeExtraction = math.max(0, coerceNumber(bounty.LifetimeExtraction, 0))
@@ -526,7 +551,11 @@ function ProfileMigrations.Apply(data)
 	)
 	hiddenLeaderstats.TutorialBrainrotGranted = nil
 	hiddenLeaderstats.TutorialSpeedTopUpGranted = coerceBoolean(hiddenLeaderstats.TutorialSpeedTopUpGranted, false)
-	hiddenLeaderstats.TutorialStarterDoubloonsGranted = coerceBoolean(hiddenLeaderstats.TutorialStarterDoubloonsGranted, false)
+	hiddenLeaderstats.TutorialStarterBeliGranted = coerceBoolean(
+		hiddenLeaderstats.TutorialStarterBeliGranted or hiddenLeaderstats.TutorialStarterDoubloonsGranted,
+		false
+	)
+	hiddenLeaderstats.TutorialStarterDoubloonsGranted = nil
 	if hiddenLeaderstats.Tutorial == true then
 		hiddenLeaderstats.TutorialCrewMemberGranted = true
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = true
@@ -534,18 +563,25 @@ function ProfileMigrations.Apply(data)
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
 	end
 
-	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingDoubloons, 0)
-	if hiddenLeaderstats.TutorialStarterDoubloonsGranted ~= true then
+	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingBeli, 0)
+	if hiddenLeaderstats.TutorialStarterBeliGranted ~= true then
 		if hiddenLeaderstats.Tutorial == true then
-			hiddenLeaderstats.TutorialStarterDoubloonsGranted = true
+			hiddenLeaderstats.TutorialStarterBeliGranted = true
 		elseif tutorialStartAmount > 0 then
 			local currentBalance = coerceNumber(leaderstats[primaryCurrency.Key], 0)
 			local shortfall = math.max(0, tutorialStartAmount - currentBalance)
 			if shortfall > 0 then
 				leaderstats[primaryCurrency.Key] = currentBalance + shortfall
 				totalStats[primaryCurrency.TotalKey] = coerceNumber(totalStats[primaryCurrency.TotalKey], 0) + shortfall
+				currencyLegacy.CurrentBeli = leaderstats[primaryCurrency.Key]
+				currencyLegacy.CurrentTotalBeli = totalStats[primaryCurrency.TotalKey]
+				currencyLegacy.Doubloons = leaderstats[primaryCurrency.Key]
+				currencyLegacy.Money = leaderstats[primaryCurrency.Key]
+				currencyLegacy.Moeny = leaderstats[primaryCurrency.Key]
+				currencyLegacy.TotalDoubloons = totalStats[primaryCurrency.TotalKey]
+				currencyLegacy.TotalMoney = totalStats[primaryCurrency.TotalKey]
 			end
-			hiddenLeaderstats.TutorialStarterDoubloonsGranted = true
+			hiddenLeaderstats.TutorialStarterBeliGranted = true
 		end
 	end
 

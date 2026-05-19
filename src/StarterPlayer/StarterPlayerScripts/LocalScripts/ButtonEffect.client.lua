@@ -10,7 +10,7 @@ local MoneyEffectTemplate = Particles and Particles:FindFirstChild("MoneyEffect"
 
 local dropMod = ReplicatedStorage.Modules.MoneyEffect
 
-local DropDollars = dropMod and require(dropMod) or nil
+local BeliDropEffect = dropMod and require(dropMod) or nil
 
 local function getPrimaryPart(inst)
 	if inst:IsA("BasePart") then
@@ -127,10 +127,10 @@ MoneyCollectedRE.OnClientEvent:Connect(function(standModel, amount, displayPaylo
 		Debris:AddItem(fx, 3)
 	end
 
-	if DropDollars and typeof(DropDollars.DropDollars) == "function" then
+	if BeliDropEffect and typeof(BeliDropEffect.DropBeli) == "function" then
 		local a = tonumber(amount) or 0
-		local coins = math.clamp(math.floor(a / 25), 6, 25)
-		DropDollars:DropDollars(pp.CFrame, coins)
+		local tokens = math.clamp(math.floor(a / 25), 6, 25)
+		BeliDropEffect:DropBeli(pp.CFrame, tokens)
 	end
 
 	showIncomeToastDisplayName(pp, amount, displayPayload)

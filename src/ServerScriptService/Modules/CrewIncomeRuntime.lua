@@ -1658,6 +1658,7 @@ local function getMoneyLabel(standModel)
 	if not bb then
 		return nil
 	end
+	-- The template TextLabel is still named Money in Studio; only its displayed text is Beli.
 	return getTextTarget(bb, "Money")
 end
 
@@ -2103,7 +2104,7 @@ local function bindZoneCollect(player, plot, standModel)
 
 		DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected)
 		DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected)
-		QuestSignals.Record(plr, "EarnDoubloons", collected, {
+		QuestSignals.Record(plr, "EarnBeli", collected, {
 			Source = "StandIncome",
 			StandName = standName,
 		})

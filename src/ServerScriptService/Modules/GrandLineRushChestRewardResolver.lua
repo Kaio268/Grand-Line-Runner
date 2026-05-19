@@ -5,6 +5,7 @@ local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local DevilFruitInventoryService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitInventoryService"))
 
 local ChestRewardResolver = {}
@@ -117,9 +118,25 @@ local function getTierRewards(tierName)
 	return (tierConfig and tierConfig.Rewards) or {}
 end
 
-local function getScaledDoubloonReward(tierName)
+local function getBeliRewardSpec(rewardBundle)
+	if typeof(rewardBundle) ~= "table" then
+		return nil
+	end
+
+	return rewardBundle.Beli or rewardBundle.Doubloons
+end
+
+local function getFruitConversionBeliSpec(rewards)
+	if typeof(rewards) ~= "table" then
+		return nil
+	end
+
+	return rewards.FruitConversionBeli or rewards.FruitConversionDoubloons or getBeliRewardSpec(rewards)
+end
+
+local function getScaledBeliReward(tierName)
 	local rewards = getTierRewards(tierName)
-	return getStaticRewardAmount(rewards.FruitConversionDoubloons or rewards.Doubloons)
+	return getStaticRewardAmount(getFruitConversionBeliSpec(rewards))
 end
 
 local function shouldGrantBaseRewards(chestData)
@@ -210,6 +227,8 @@ local function buildOpenResult(dataRoot, openedChest)
 		GrantedResources = {
 			food = {},
 			materials = {},
+			beli = 0,
+			-- Legacy payload alias kept during the currency transition.
 			doubloons = 0,
 		},
 		GrantedFruit = nil,
@@ -241,7 +260,7 @@ local function grantFruit(dataRoot, fruitKey)
 	ensureIndexCollection(dataRoot)[fruitKey] = true
 end
 
-local function addDoubloons(dataRoot, amount)
+local function addBeli(dataRoot, amount)
 	local increment = math.max(0, tonumber(amount) or 0)
 	if increment <= 0 then
 		return 0
@@ -249,9 +268,19 @@ local function addDoubloons(dataRoot, amount)
 
 	local leaderstats = ensureLeaderstats(dataRoot)
 	local totalStats = ensureTotalStats(dataRoot)
+	local primary = CurrencyUtil.getConfig()
 
-	leaderstats.Doubloons = math.max(0, tonumber(leaderstats.Doubloons) or 0) + increment
-	totalStats.TotalDoubloons = math.max(0, tonumber(totalStats.TotalDoubloons) or 0) + increment
+	leaderstats[primary.Key] = math.max(0, tonumber(leaderstats[primary.Key]) or 0) + increment
+	totalStats[primary.TotalKey] = math.max(0, tonumber(totalStats[primary.TotalKey]) or 0) + increment
+	local legacy = if typeof(dataRoot.CurrencyLegacy) == "table" then dataRoot.CurrencyLegacy else {}
+	dataRoot.CurrencyLegacy = legacy
+	legacy.CurrentBeli = leaderstats[primary.Key]
+	legacy.Doubloons = leaderstats[primary.Key]
+	legacy.Money = leaderstats[primary.Key]
+	legacy.Moeny = leaderstats[primary.Key]
+	legacy.CurrentTotalBeli = totalStats[primary.TotalKey]
+	legacy.TotalDoubloons = totalStats[primary.TotalKey]
+	legacy.TotalMoney = totalStats[primary.TotalKey]
 
 	return increment
 end
@@ -301,8 +330,9 @@ local function grantRewardBundle(randomObject, dataRoot, grantedResources, rewar
 	materials.CommonShipMaterial = materials.Timber
 	materials.RareShipMaterial = materials.Iron
 
-	local doubloonReward = addDoubloons(dataRoot, rollRewardAmount(randomObject, rewardBundle.Doubloons))
-	grantedResources.doubloons += doubloonReward
+	local beliReward = addBeli(dataRoot, rollRewardAmount(randomObject, getBeliRewardSpec(rewardBundle)))
+	grantedResources.beli += beliReward
+	grantedResources.doubloons = grantedResources.beli
 end
 
 local function normalizeChance(rawChance)
@@ -339,6 +369,7 @@ local function grantBaseRewards(randomObject, dataRoot, chestData, changedRoots)
 	local grantedResources = {
 		food = {},
 		materials = {},
+		beli = 0,
 		doubloons = 0,
 	}
 
@@ -413,22 +444,22 @@ local function chooseRequestedRarity(randomObject, chestData)
 	return chooseWeightedKey(randomObject, ChestRewards.FruitRarityWeights, ChestRewards.FruitRarityOrder)
 end
 
-local function applyFallbackDoubloons(dataRoot, chestData, openResult, changedRoots)
+local function applyFallbackBeli(dataRoot, chestData, openResult, changedRoots)
 	local fallbackReward = 0
 	if ChestRewards.FallbackReward.ScaleByTier == true then
-		fallbackReward = getScaledDoubloonReward(chestData.Tier)
+		fallbackReward = getScaledBeliReward(chestData.Tier)
 	else
 		fallbackReward = math.max(0, tonumber(ChestRewards.FallbackReward.Amount) or 0)
 	end
 
-	local grantedAmount = addDoubloons(dataRoot, fallbackReward)
+	local grantedAmount = addBeli(dataRoot, fallbackReward)
 	if grantedAmount > 0 then
 		changedRoots.Leaderstats = true
 		changedRoots.TotalStats = true
 	end
 
-	openResult.Message = string.format("No fruit pool was available - granted %d Doubloons instead", grantedAmount)
-	return string.format("%d Doubloons (fruit fallback)", grantedAmount)
+	openResult.Message = string.format("No fruit pool was available - granted %s instead", CurrencyUtil.formatAmount(grantedAmount))
+	return string.format("%s (fruit fallback)", CurrencyUtil.formatAmount(grantedAmount))
 end
 
 local function handleDuplicateConversion(params, chestData, fruit, openResult, changedRoots)
@@ -438,22 +469,22 @@ local function handleDuplicateConversion(params, chestData, fruit, openResult, c
 		return "No duplicate conversion reward"
 	end
 
-	if conversion.Type == "Doubloons" then
+	if conversion.Type == "Beli" or conversion.Type == "Doubloons" then
 		local amount = if conversion.ScaleByTier == true
-			then getScaledDoubloonReward(chestData.Tier)
+			then getScaledBeliReward(chestData.Tier)
 			else math.max(0, tonumber(conversion.Amount) or 0)
 
-		local grantedAmount = addDoubloons(params.DataRoot, amount)
+		local grantedAmount = addBeli(params.DataRoot, amount)
 		if grantedAmount > 0 then
 			changedRoots.Leaderstats = true
 			changedRoots.TotalStats = true
 		end
 
-		openResult.ConversionRewardType = "Doubloons"
+		openResult.ConversionRewardType = "Beli"
 		openResult.ConversionRewardAmount = grantedAmount
-		openResult.ConversionRewardDisplayName = "Doubloons"
-		openResult.Message = string.format("Already owned - converted to %d Doubloons", grantedAmount)
-		return string.format("%d Doubloons (duplicate)", grantedAmount)
+		openResult.ConversionRewardDisplayName = CurrencyUtil.getDisplayName()
+		openResult.Message = string.format("Already owned - converted to %s", CurrencyUtil.formatAmount(grantedAmount))
+		return string.format("%s (duplicate)", CurrencyUtil.formatAmount(grantedAmount))
 	end
 
 	if conversion.Type == "Chest" then
@@ -593,7 +624,7 @@ function ChestRewardResolver.Resolve(params)
 		return {
 			OpenResult = openResult,
 			ChangedRoots = changedRoots,
-			RewardText = applyFallbackDoubloons(params.DataRoot, chestData, openResult, changedRoots),
+			RewardText = applyFallbackBeli(params.DataRoot, chestData, openResult, changedRoots),
 		}
 	end
 

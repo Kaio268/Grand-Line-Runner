@@ -5,10 +5,10 @@ local Gamepasses = {
 		Active = true,
 		Icon = "rbxassetid://118443250256506",
 		
-		Description = "Get x1.25 Beli, a VIP tag, plus access to shortcuts",
+		Description = "Get 1.25x Beli, a VIP tag, plus access to shortcuts",
 	},
 
-	["x2 Money"] = {
+	["2x Beli"] = {
 		TYPE = "Gamepass",
 
 		ID = 1667343349,

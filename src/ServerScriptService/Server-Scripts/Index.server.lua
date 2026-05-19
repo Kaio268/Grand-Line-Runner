@@ -312,7 +312,7 @@ local function formatRewardLabel(path)
 		return "Ship Income"
 	end
 	if pathValue:find("x2MoneyTime", 1, true) then
-		return "x2 Money"
+		return "2x Beli"
 	end
 	if pathValue:find("WalkSpeed", 1, true) then
 		return "Speed Boost"

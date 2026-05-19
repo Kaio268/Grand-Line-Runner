@@ -10,6 +10,7 @@ local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local GrandLineRushCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local CanonicalCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewInteraction = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
@@ -168,6 +169,7 @@ end
 local function buildRewardChangedPaths(dataRoot, changedRoots, options)
 	local changedPaths = {}
 	local settings = if typeof(options) == "table" then options else {}
+	local primaryCurrency = CurrencyUtil.getConfig()
 
 	if changedRoots.FoodInventory then
 		changedPaths[#changedPaths + 1] = { Path = { "FoodInventory" }, Value = dataRoot.FoodInventory }
@@ -176,10 +178,10 @@ local function buildRewardChangedPaths(dataRoot, changedRoots, options)
 		changedPaths[#changedPaths + 1] = { Path = { "Materials" }, Value = dataRoot.Materials }
 	end
 	if changedRoots.Leaderstats then
-		changedPaths[#changedPaths + 1] = { Path = { "leaderstats", "Doubloons" }, Value = dataRoot.leaderstats.Doubloons }
+		changedPaths[#changedPaths + 1] = { Path = { "leaderstats", primaryCurrency.Key }, Value = dataRoot.leaderstats[primaryCurrency.Key] }
 	end
 	if changedRoots.TotalStats then
-		changedPaths[#changedPaths + 1] = { Path = { "TotalStats", "TotalDoubloons" }, Value = dataRoot.TotalStats.TotalDoubloons }
+		changedPaths[#changedPaths + 1] = { Path = { "TotalStats", primaryCurrency.TotalKey }, Value = dataRoot.TotalStats[primaryCurrency.TotalKey] }
 	end
 	if changedRoots.InventoryDevilFruits then
 		changedPaths[#changedPaths + 1] = { Path = { "Inventory", "DevilFruits" }, Value = ((dataRoot.Inventory or {}).DevilFruits) or {} }
@@ -198,6 +200,11 @@ local function buildRewardChangedPaths(dataRoot, changedRoots, options)
 	end
 
 	return changedPaths
+end
+
+local function getGrantedBeli(grantedResources)
+	grantedResources = if typeof(grantedResources) == "table" then grantedResources else {}
+	return math.max(0, tonumber(grantedResources.beli) or tonumber(grantedResources.doubloons) or 0)
 end
 
 local function normalizeMaterialsTable(materials)
@@ -1373,7 +1380,9 @@ local function buildState(player, options)
 	end
 
 	return {
-		Doubloons = tonumber(leaderstats.Doubloons) or 0,
+		Beli = CurrencyUtil.getAmountFromTable(leaderstats),
+		-- Legacy payload alias kept while older clients finish moving to Beli.
+		Doubloons = CurrencyUtil.getAmountFromTable(leaderstats),
 		Bounty = getBountyBreakdown(player),
 		Run = {
 			InRun = runtime.InRun,
@@ -2028,8 +2037,9 @@ local function openChest(player, requestedChestId)
 		ChestKind = tostring(normalizedChestData.ChestKind or ""),
 		FruitRarity = tostring(normalizedChestData.FruitRarity or ""),
 	})
-	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
-		QuestSignals.Record(player, "EarnDoubloons", grantedResources.doubloons, {
+	local grantedBeli = getGrantedBeli(grantedResources)
+	if grantedBeli > 0 then
+		QuestSignals.Record(player, "EarnBeli", grantedBeli, {
 			Source = "Chest",
 			Tier = tostring(tierName or ""),
 		})
@@ -2068,8 +2078,8 @@ local function openChest(player, requestedChestId)
 			)
 		end
 	end
-	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
-		rewardParts[#rewardParts + 1] = string.format("%d Doubloons", grantedResources.doubloons)
+	if grantedBeli > 0 then
+		rewardParts[#rewardParts + 1] = CurrencyUtil.formatAmount(grantedBeli)
 	end
 	if resolution.RewardText then
 		rewardParts[#rewardParts + 1] = tostring(resolution.RewardText)
@@ -2097,7 +2107,8 @@ local function mergeGrantedResources(target, source)
 	for materialKey, amount in pairs(source.materials or {}) do
 		target.materials[materialKey] = math.max(0, tonumber(target.materials[materialKey]) or 0) + math.max(0, tonumber(amount) or 0)
 	end
-	target.doubloons = math.max(0, tonumber(target.doubloons) or 0) + math.max(0, tonumber(source.doubloons) or 0)
+	target.beli = math.max(0, tonumber(target.beli) or 0) + getGrantedBeli(source)
+	target.doubloons = target.beli
 
 	return target
 end
@@ -2117,8 +2128,9 @@ local function recordChestRewardQuestSignals(player, normalizedChestData, grante
 		ChestKind = tostring(normalizedChestData.ChestKind or ""),
 		FruitRarity = tostring(normalizedChestData.FruitRarity or ""),
 	})
-	if math.max(0, tonumber(grantedResources.doubloons) or 0) > 0 then
-		QuestSignals.Record(player, "EarnDoubloons", grantedResources.doubloons, {
+	local grantedBeli = getGrantedBeli(grantedResources)
+	if grantedBeli > 0 then
+		QuestSignals.Record(player, "EarnBeli", grantedBeli, {
 			Source = "Chest",
 			Tier = tostring(tierName or ""),
 		})
@@ -2150,7 +2162,7 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 	local duplicateCount = 0
 	local convertedChestCount = 0
 	local convertedChestCounts = {}
-	local conversionDoubloons = 0
+	local conversionBeli = 0
 	local mythicKeyCount = 0
 
 	for _, result in ipairs(batchResults) do
@@ -2171,8 +2183,8 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 					or "Devil Fruit Chest"
 			)
 			convertedChestCounts[convertedChestName] = math.max(0, tonumber(convertedChestCounts[convertedChestName]) or 0) + 1
-		elseif result.ConversionRewardType == "Doubloons" then
-			conversionDoubloons += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
+		elseif result.ConversionRewardType == "Beli" or result.ConversionRewardType == "Doubloons" then
+			conversionBeli += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
 		elseif result.ConversionRewardType == "MythicKey" then
 			mythicKeyCount += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
 		end
@@ -2200,7 +2212,9 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		DuplicateCount = duplicateCount,
 		ConvertedChestCount = convertedChestCount,
 		ConvertedChests = convertedChests,
-		ConversionDoubloons = conversionDoubloons,
+		ConversionBeli = conversionBeli,
+		-- Legacy payload alias kept while older clients finish moving to Beli.
+		ConversionDoubloons = conversionBeli,
 		MythicKeyCount = mythicKeyCount,
 	}
 end
@@ -2241,6 +2255,7 @@ local function openChests(player, inventoryName, requestedAmount)
 	local aggregateResources = {
 		food = {},
 		materials = {},
+		beli = 0,
 		doubloons = 0,
 	}
 	local batchResults = {}

@@ -176,7 +176,7 @@ local function RebirthScreen(props)
 			}),
 			Money = e(requirementRow, {
 				complete = props.moneyComplete,
-				label = "Doubloons",
+				label = "Beli",
 				layoutOrder = 1,
 				progress = props.moneyProgress,
 				valueText = props.moneyText,

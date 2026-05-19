@@ -97,8 +97,8 @@ define("daily_open_chests", {
 define("daily_collect_doubloons", {
 	Category = "Daily",
 	Name = "Ship Fund",
-	Description = "Collect 300 Doubloons from support systems.",
-	Objective = { Type = "EarnDoubloons", Target = 300 },
+	Description = "Collect 300 Beli from support systems.",
+	Objective = { Type = "EarnBeli", Target = 300 },
 	Rewards = {
 		{ Type = "Currency", Amount = 120 },
 		{ Type = "Food", Key = "Apple", Amount = 4 },

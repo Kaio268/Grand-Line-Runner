@@ -10,7 +10,7 @@ local e = React.createElement
 
 local BOOST_METADATA = {
 	x2MoneyTime = {
-		label = "x2 Beli",
+		label = "2x Beli",
 		icon = "rbxassetid://123727379614328",
 		accent = Color3.fromRGB(111, 230, 124),
 		order = 1,

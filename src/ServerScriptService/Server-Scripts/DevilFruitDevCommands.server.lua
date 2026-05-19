@@ -93,25 +93,37 @@ local chestTierAliases = {}
 local resourceAliases = {}
 local BOOST_COMMAND_DEFAULT_MINUTES = 5
 local boostAliases = {
+	["x2beli"] = {
+		BoostName = "x2Money",
+		DisplayName = "2x Beli",
+	},
+	["2xbeli"] = {
+		BoostName = "x2Money",
+		DisplayName = "2x Beli",
+	},
+	["beli"] = {
+		BoostName = "x2Money",
+		DisplayName = "2x Beli",
+	},
 	["x2money"] = {
 		BoostName = "x2Money",
-		DisplayName = "x2 Money",
+		DisplayName = "2x Beli",
 	},
 	["money"] = {
 		BoostName = "x2Money",
-		DisplayName = "x2 Money",
+		DisplayName = "2x Beli",
 	},
 	["x2doubloons"] = {
 		BoostName = "x2Money",
-		DisplayName = "x2 Money",
+		DisplayName = "2x Beli",
 	},
 	["doubloons"] = {
 		BoostName = "x2Money",
-		DisplayName = "x2 Money",
+		DisplayName = "2x Beli",
 	},
 	["2xmoney"] = {
 		BoostName = "x2Money",
-		DisplayName = "x2 Money",
+		DisplayName = "2x Beli",
 	},
 	["x15walkspeed"] = {
 		BoostName = "x15WalkSpeed",
@@ -129,6 +141,7 @@ local boostAliases = {
 
 local ADMIN_COMMAND_NAMES = {
 	fruit = true,
+	beli = true,
 	money = true,
 	hazard = true,
 	hazards = true,
@@ -750,7 +763,7 @@ local function processMoneyCommand(player, argumentText)
 
 	local normalizedArgument = normalizeText(argumentText)
 	if normalizedArgument == "" then
-		warn(string.format("[DevFruitDevCommands] Invalid /money usage from %s. Use /money <delta>, /money set <amount>, or /money clear", player.Name))
+		warn(string.format("[DevFruitDevCommands] Invalid /beli usage from %s. Use /beli <delta>, /beli set <amount>, or /beli clear", player.Name))
 		return
 	end
 
@@ -758,13 +771,13 @@ local function processMoneyCommand(player, argumentText)
 		local previousMoney = getDisplayedMoney(player)
 		local success = DataManager:SetValue(player, CurrencyUtil.getPrimaryPath(), 0)
 		if success == false then
-			warn(string.format("[DevFruitDevCommands] Failed to clear Doubloons for %s", player.Name))
+			warn(string.format("[DevFruitDevCommands] Failed to clear Beli for %s", player.Name))
 			return
 		end
 
 		local newMoney = getDisplayedMoney(player)
 		print(string.format(
-			"[DevFruitDevCommands] %s cleared Doubloons (old balance=%d, new balance=%d)",
+			"[DevFruitDevCommands] %s cleared Beli (old balance=%d, new balance=%d)",
 			player.Name,
 			math.floor(previousMoney),
 			math.floor(newMoney)
@@ -776,20 +789,20 @@ local function processMoneyCommand(player, argumentText)
 	if setArgument ~= nil then
 		local targetAmount = parseWholeAmount(setArgument)
 		if typeof(targetAmount) ~= "number" then
-			warn(string.format("[DevFruitDevCommands] Invalid /money set amount '%s' from %s", tostring(setArgument), player.Name))
+			warn(string.format("[DevFruitDevCommands] Invalid /beli set amount '%s' from %s", tostring(setArgument), player.Name))
 			return
 		end
 
 		local previousMoney = getDisplayedMoney(player)
 		local success = DataManager:SetValue(player, CurrencyUtil.getPrimaryPath(), targetAmount)
 		if success == false then
-			warn(string.format("[DevFruitDevCommands] Failed to set Doubloons for %s", player.Name))
+			warn(string.format("[DevFruitDevCommands] Failed to set Beli for %s", player.Name))
 			return
 		end
 
 		local newMoney = getDisplayedMoney(player)
 		print(string.format(
-			"[DevFruitDevCommands] %s set Doubloons to %d (old balance=%d, new balance=%d)",
+			"[DevFruitDevCommands] %s set Beli to %d (old balance=%d, new balance=%d)",
 			player.Name,
 			math.floor(targetAmount),
 			math.floor(previousMoney),
@@ -800,7 +813,7 @@ local function processMoneyCommand(player, argumentText)
 
 	local amount = parseWholeAmount(argumentText)
 	if typeof(amount) ~= "number" or amount == 0 then
-		warn(string.format("[DevFruitDevCommands] Invalid /money amount '%s' from %s", tostring(argumentText), player.Name))
+		warn(string.format("[DevFruitDevCommands] Invalid /beli amount '%s' from %s", tostring(argumentText), player.Name))
 		return
 	end
 
@@ -812,7 +825,7 @@ local function processMoneyCommand(player, argumentText)
 
 	local appliedDelta = math.floor(newMoney - previousMoney)
 	print(string.format(
-		"[DevFruitDevCommands] %s adjusted Doubloons by %d (applied=%d, new balance=%d)",
+		"[DevFruitDevCommands] %s adjusted Beli by %d (applied=%d, new balance=%d)",
 		player.Name,
 		math.floor(amount),
 		appliedDelta,
@@ -880,7 +893,7 @@ local function processBoostCommand(player, argumentText)
 	local trimmedArgument = trimText(argumentText)
 	if trimmedArgument == "" then
 		warn(string.format(
-			"[DevFruitDevCommands] Invalid /boost usage from %s. Use /boost x2money [minutes].",
+			"[DevFruitDevCommands] Invalid /boost usage from %s. Use /boost 2xbeli [minutes].",
 			player.Name
 		))
 		return
@@ -890,7 +903,7 @@ local function processBoostCommand(player, argumentText)
 	local boostData = boostAliases[normalizeText(boostToken)]
 	if boostData == nil then
 		warn(string.format(
-			"[DevFruitDevCommands] Invalid /boost type '%s' from %s. Use /boost x2money [minutes].",
+			"[DevFruitDevCommands] Invalid /boost type '%s' from %s. Use /boost 2xbeli [minutes].",
 			tostring(boostToken),
 			player.Name
 		))
@@ -5667,17 +5680,19 @@ local function processSpawnCommand(player, argumentText)
 end
 
 local primaryCurrencyConfig = CurrencyUtil.getConfig()
-local doubloonResource = {
+local beliResource = {
 	Kind = "currency",
 	Path = CurrencyUtil.getPrimaryPath(),
-	DisplayName = tostring(primaryCurrencyConfig.DisplayName or primaryCurrencyConfig.Key or "Doubloons"),
+	DisplayName = tostring(primaryCurrencyConfig.DisplayName or primaryCurrencyConfig.Key or "Beli"),
 }
 
-registerResourceAlias("doubloons", doubloonResource)
-registerResourceAlias("doubloon", doubloonResource)
-registerResourceAlias("money", doubloonResource)
-registerResourceAlias(primaryCurrencyConfig.Key, doubloonResource)
-registerResourceAlias(primaryCurrencyConfig.DisplayName, doubloonResource)
+registerResourceAlias("beli", beliResource)
+registerResourceAlias(primaryCurrencyConfig.Key, beliResource)
+registerResourceAlias(primaryCurrencyConfig.DisplayName, beliResource)
+-- Legacy admin aliases remain accepted, but command output/display names use Beli.
+registerResourceAlias("doubloons", beliResource)
+registerResourceAlias("doubloon", beliResource)
+registerResourceAlias("money", beliResource)
 
 for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder or {}) do
 	local displayName = tostring(PlotUpgradeConfig.MaterialDisplayNames[materialKey] or materialKey)
@@ -6218,7 +6233,7 @@ local function setupTextChatCommand()
 	if not moneyCommand then
 		moneyCommand = Instance.new("TextChatCommand")
 		moneyCommand.Name = "MoneyDevCommand"
-		moneyCommand.PrimaryAlias = "/money"
+		moneyCommand.PrimaryAlias = "/beli"
 		moneyCommand.SecondaryAlias = "/money"
 		moneyCommand.AutocompleteVisible = false
 		moneyCommand.Parent = commandsFolder
@@ -6232,12 +6247,12 @@ local function setupTextChatCommand()
 		end
 
 		local normalizedText = normalizeText(unfilteredText)
-		if normalizedText:sub(1, 6) == "/money" or normalizedText:sub(1, 7) == "/ money" then
+		if normalizedText:sub(1, 5) == "/beli" or normalizedText:sub(1, 6) == "/ beli" or normalizedText:sub(1, 6) == "/money" or normalizedText:sub(1, 7) == "/ money" then
 			handleChatCommand(player, normalizedText, "TextChatCommand:MoneyDevCommand")
 			return
 		end
 
-		local syntheticCommand = normalizedText ~= "" and ("/money " .. normalizedText) or "/money"
+		local syntheticCommand = normalizedText ~= "" and ("/beli " .. normalizedText) or "/beli"
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:MoneyDevCommand")
 	end)
 

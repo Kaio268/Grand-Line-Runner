@@ -85,7 +85,6 @@ local Players = game:GetService("Players")
 local MarketPlaceService = game:GetService("MarketplaceService")
 local HttpService = game:GetService("HttpService")
 --// Variables
-local CLASS_NAMES = {["string"] = "StringValue", ["number"] = "NumberValue", ["boolean"] = "BoolValue"}
 local PURCHASE_ID_CACHE_SIZE = 100
 local PASTEBIN = "https://pastebin.com/raw/JT4wrgrq"
 local SCRIPT_VERSION = script:GetTags()[1]
@@ -104,6 +103,7 @@ local MAX_LEGACY_DEPRECATION_RECENT_EVENTS = 20
 ]]
 
 local PathAliasLookup = {}
+local PrimaryCurrencyConfig = EconomyConfig.Currency and EconomyConfig.Currency.Primary or {}
 
 for canonicalPath, aliases in pairs(EconomyConfig.PathAliases or {}) do
 	for _, alias in ipairs(aliases) do
@@ -117,6 +117,31 @@ local function NormalizeDataPath(path: string): string
 	end
 
 	return PathAliasLookup[path] or path
+end
+
+local function SyncCurrencyCompatibilityMirror(player: Player, pathTable: {string}, value: any)
+	local profile = Profiles[player]
+	if profile == nil or typeof(profile.Data) ~= "table" then
+		return
+	end
+
+	local legacy = profile.Data.CurrencyLegacy
+	if typeof(legacy) ~= "table" then
+		legacy = {}
+		profile.Data.CurrencyLegacy = legacy
+	end
+
+	if pathTable[1] == "leaderstats" and pathTable[2] == PrimaryCurrencyConfig.Key then
+		legacy.CurrentBeli = value
+		-- Mirrored legacy names are kept out of leaderstats so players only see Beli.
+		legacy.Doubloons = value
+		legacy.Money = value
+		legacy.Moeny = value
+	elseif pathTable[1] == "TotalStats" and pathTable[2] == PrimaryCurrencyConfig.TotalKey then
+		legacy.CurrentTotalBeli = value
+		legacy.TotalDoubloons = value
+		legacy.TotalMoney = value
+	end
 end
 
 local function DeepCopyTable(value)
@@ -375,6 +400,7 @@ end
 local SyncPathToInstances
 
 local function SyncDataMutation(player: Player, replica, pathTable: {string}, value: any)
+	SyncCurrencyCompatibilityMirror(player, pathTable, value)
 	replica:Set(pathTable, value)
 
 	if GetRootDataKey(pathTable) == "leaderstats" and not Settings.Experimental.CreateFolders then
@@ -586,7 +612,7 @@ end
 --[[
 	Get value from a path
 	[player]: player you want to get value from
-	[path]: path to the value (e.g. "leaderstats.Coins")
+	[path]: path to the value (e.g. "leaderstats.Beli")
 ]]
 function DataManager:GetValue(player : Player, path: string) : (number | string | boolean)?
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
@@ -605,7 +631,7 @@ end
 --[[
 	Sets variable value
 	[player]: which player you want to change the date
-	[path]: path to variable (e.g. leaderstats.Coins)
+	[path]: path to variable (e.g. leaderstats.Beli)
 	[newValue]: to which value it should be set 
 ]]
 function DataManager:SetValue(player: Player, path: string, newValue : (string | number | boolean | {any?})?)
@@ -702,7 +728,7 @@ end
 --[[
 	Adds variable value
 	[player]: which player you want to change the date
-	[path]: path to variable (e.g. leaderstats.Coins)
+	[path]: path to variable (e.g. leaderstats.Beli)
 	[addValue]: to which value it should be set 
 ]]
 function DataManager:AddValue(player, path, addValue)
@@ -761,7 +787,7 @@ end
 --[[
 	Substracts variable value
 	[player]: which player you want to change the date
-	[path]: path to variable (e.g. leaderstats.Coins)
+	[path]: path to variable (e.g. leaderstats.Beli)
 	[subValue]: to which value it should be set 
 ]]
 function DataManager:SubValue(player : Player, path : string, subValue : (number | {any?}))
@@ -993,6 +1019,8 @@ end
 	Update or create player leaderstats
 	[player]: player you want to create/update leaderstats
 ]]
+local SyncLeaderstatsFolder
+
 function DataManager:Leaderstats(player : Player)
 	local playerProfile = DataManager:GetProfile(player)
 
@@ -1000,23 +1028,8 @@ function DataManager:Leaderstats(player : Player)
 		return
 	end
 
-	local folder = player:FindFirstChild("leaderstats")
-	if not folder then
-		folder = Instance.new("Folder")
-		folder.Parent = player
-		folder.Name = "leaderstats"
-	end
-
 	if playerProfile.Data and playerProfile.Data.leaderstats then
-		for index, value in pairs(playerProfile.Data.leaderstats) do
-			local element = folder:FindFirstChild(index)
-			if not element then
-				element = Instance.new(CLASS_NAMES[typeof(value)])
-				element.Parent = folder
-				element.Name = index
-			end
-			element.Value = value
-		end
+		SyncLeaderstatsFolder(player, playerProfile.Data.leaderstats)
 	end
 end
 
@@ -1034,8 +1047,128 @@ function ConvertType(TypeOf)
 	return nil
 end
 
+local function appendLeaderstatName(order: {string}, seen: {[string]: boolean}, statName: any)
+	if typeof(statName) ~= "string" or statName == "" or seen[statName] then
+		return
+	end
+
+	seen[statName] = true
+	order[#order + 1] = statName
+end
+
+local function GetLeaderstatDisplayOrder(leaderstatsData: {[string]: any}?): {string}
+	local order = {}
+	local seen = {}
+	local configuredOrder = EconomyConfig.Leaderstats and EconomyConfig.Leaderstats.DisplayOrder
+
+	if typeof(configuredOrder) == "table" then
+		for _, statName in ipairs(configuredOrder) do
+			appendLeaderstatName(order, seen, statName)
+		end
+	end
+
+	appendLeaderstatName(order, seen, PrimaryCurrencyConfig.Key)
+
+	if typeof(leaderstatsData) == "table" then
+		local extraNames = {}
+		for statName, value in pairs(leaderstatsData) do
+			if typeof(statName) == "string" and seen[statName] ~= true and typeof(value) ~= "table" then
+				extraNames[#extraNames + 1] = statName
+			end
+		end
+
+		table.sort(extraNames)
+		for _, statName in ipairs(extraNames) do
+			appendLeaderstatName(order, seen, statName)
+		end
+	end
+
+	return order
+end
+
+local function ReorderLeaderstatsChildren(folder: Folder, orderedChildren: {Instance})
+	local currentChildren = folder:GetChildren()
+	if #currentChildren == #orderedChildren then
+		local alreadyOrdered = true
+		for index, child in ipairs(orderedChildren) do
+			if currentChildren[index] ~= child then
+				alreadyOrdered = false
+				break
+			end
+		end
+
+		if alreadyOrdered then
+			return
+		end
+	end
+
+	for _, child in ipairs(orderedChildren) do
+		child.Parent = nil
+	end
+
+	for _, child in ipairs(orderedChildren) do
+		child.Parent = folder
+	end
+end
+
+SyncLeaderstatsFolder = function(player: Player, leaderstatsData: {[string]: any}?)
+	if typeof(leaderstatsData) ~= "table" then
+		return
+	end
+
+	local folder = player:FindFirstChild("leaderstats")
+	if folder and not folder:IsA("Folder") then
+		folder:Destroy()
+		folder = nil
+	end
+
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = "leaderstats"
+		folder.Parent = player
+	end
+
+	local expectedObjects = {}
+	local orderedChildren = {}
+
+	for _, statName in ipairs(GetLeaderstatDisplayOrder(leaderstatsData)) do
+		local value = leaderstatsData[statName]
+		local className = ConvertType(typeof(value))
+		if value ~= nil and typeof(value) ~= "table" and className ~= nil then
+			local valueObject = folder:FindFirstChild(statName)
+			if valueObject and valueObject.ClassName ~= className then
+				valueObject:Destroy()
+				valueObject = nil
+			end
+
+			if not valueObject then
+				valueObject = Instance.new(className)
+				valueObject.Name = statName
+				valueObject.Parent = folder
+			end
+
+			valueObject.Value = value
+			expectedObjects[valueObject] = true
+			orderedChildren[#orderedChildren + 1] = valueObject
+		end
+	end
+
+	for _, child in ipairs(folder:GetChildren()) do
+		if expectedObjects[child] ~= true then
+			child:Destroy()
+		end
+	end
+
+	ReorderLeaderstatsChildren(folder, orderedChildren)
+end
+
 local function RecursiveUpdate(folder, data)
 	for k, v in pairs(data) do
+		if folder ~= nil and folder:IsA("Player") and k == "leaderstats" and typeof(v) == "table" then
+			SyncLeaderstatsFolder(folder, v)
+			continue
+		end
+
 		if folder == nil then
 			local NewInstance = Instance.new(ConvertType(typeof(v)))
 			NewInstance.Name = k
@@ -1087,6 +1220,15 @@ end
 SyncPathToInstances = function(player: Player, pathTable: {string}, value: any)
 	if #pathTable == 0 then
 		return
+	end
+
+	if pathTable[1] == "leaderstats" then
+		local profile = Profiles[player]
+		local leaderstatsData = if profile and profile.Data then profile.Data.leaderstats else value
+		if typeof(leaderstatsData) == "table" then
+			SyncLeaderstatsFolder(player, leaderstatsData)
+			return
+		end
 	end
 
 	local parent: Instance = player
@@ -1152,6 +1294,7 @@ function DataManager:UpdateData(player : Player)
 	local profile : typeof(Profiles[player]) = self:GetProfile(player)
 	local replica: typeof(Replicas[player]) = self:GetReplica(player)
 	if profile ~= nil and replica ~= nil then
+		SyncLeaderstatsFolder(player, profile.Data.leaderstats)
 		RecursiveUpdate(player, profile.Data)
 		RecursiveRemove(profile.Data, player)
 		local attrStore = profile.Data[ATTRIBUTE_STORE_KEY]
@@ -1376,6 +1519,8 @@ function PlayerAdded(player: Player)
 		folder.Name = "leaderstats"
 		folder.Parent = player
 	end
+
+	SyncLeaderstatsFolder(player, GetTemplate.leaderstats)
 
 	-- Ładowanie profilu
 	local profile = PlayerStore:StartSessionAsync(`Player_{player.UserId}`, {

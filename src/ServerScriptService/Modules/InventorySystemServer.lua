@@ -639,6 +639,37 @@ local function appendQuantityEntry(list, name, quantity, metadata, modelPreviewD
 	end
 end
 
+local function appendCanonicalChestEntries(player, chests)
+	local sliceService = getSliceService()
+	if not (sliceService and typeof(sliceService.GetState) == "function") then
+		return false
+	end
+
+	local state = sliceService.GetState(player)
+	if typeof(state) ~= "table" or typeof(state.UnopenedChests) ~= "table" then
+		return false
+	end
+
+	local counts = {}
+	for _, chestEntry in ipairs(state.UnopenedChests) do
+		if typeof(chestEntry) == "table" then
+			local chestName = tostring(chestEntry.InventoryName or "")
+			if chestName == "" then
+				chestName = ChestUtils.GetInventoryName(chestEntry)
+			end
+			if chestName ~= "" then
+				counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0) + 1
+			end
+		end
+	end
+
+	for chestName, quantity in pairs(counts) do
+		appendQuantityEntry(chests, chestName, quantity)
+	end
+
+	return true
+end
+
 local function getCrewInventoryAvailableCounts(player, inventory)
 	return CrewInventoryDerivedCache.GetCounts(player, {
 		Inventory = inventory,
@@ -760,10 +791,12 @@ local function buildInventorySnapshot(player)
 		end
 	end
 
-	local chestInventory = player:FindFirstChild("ChestInventory")
-	if chestInventory and chestInventory:IsA("Folder") then
-		for _, child in ipairs(chestInventory:GetChildren()) do
-			appendQuantityEntry(chests, child.Name, readPositiveQuantity(child))
+	if not appendCanonicalChestEntries(player, chests) then
+		local chestInventory = player:FindFirstChild("ChestInventory")
+		if chestInventory and chestInventory:IsA("Folder") then
+			for _, child in ipairs(chestInventory:GetChildren()) do
+				appendQuantityEntry(chests, child.Name, readPositiveQuantity(child))
+			end
 		end
 	end
 

@@ -509,7 +509,7 @@ local function ensureParticleLoop()
 	end)
 end
 
-local function spawnDollarBurst()
+local function spawnBeliBurst()
 	local originPx, tSize = getBurstOriginPx()
 	local count = rng:NextInteger(2, 3)
 	local absSize = particleLayer.AbsoluteSize
@@ -597,6 +597,6 @@ moneyValue:GetPropertyChangedSignal("Value"):Connect(function()
 	animateMoney(newVal)
 	pushNotif(diff)
 	if diff > 0 then
-		spawnDollarBurst()
+		spawnBeliBurst()
 	end
 end)

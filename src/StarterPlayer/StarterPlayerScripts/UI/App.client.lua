@@ -261,6 +261,8 @@ local itemState = {}
 local acquisition = {}
 local acquisitionCounter = 0
 local metaState = nil
+local canonicalChestCountsDirty = true
+local canonicalChestCountsResolved = false
 local equippedKind = nil
 local equippedName = nil
 local keyboardHotbar = {}
@@ -269,6 +271,7 @@ local destroyed = false
 local stopObservingState = nil
 local render
 local scheduleRender
+local syncChestsFromCanonicalSources
 local syncChestsFromInventory
 local syncDevilFruitsFromInventory
 local cachedLegacyInventoryIcon = nil
@@ -631,6 +634,154 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 	return applied
 end
 
+local function readInstanceValueOrAttribute(instance, key)
+	if not instance then
+		return nil
+	end
+
+	local attributeValue = instance:GetAttribute(key)
+	if attributeValue ~= nil then
+		return attributeValue
+	end
+
+	local child = instance:FindFirstChild(key)
+	if child and child:IsA("ValueBase") then
+		return child.Value
+	end
+
+	return nil
+end
+
+local function getChestInventoryNameFromStateEntry(entry)
+	if typeof(entry) ~= "table" then
+		return ""
+	end
+
+	local explicitName = tostring(entry.InventoryName or entry.inventoryName or "")
+	if explicitName ~= "" then
+		return explicitName
+	end
+
+	return ChestUtils.GetInventoryName(entry)
+end
+
+local function getChestInventoryNameFromFolder(chestFolder)
+	if not chestFolder then
+		return ""
+	end
+
+	local explicitName = tostring(readInstanceValueOrAttribute(chestFolder, "InventoryName") or "")
+	if explicitName ~= "" then
+		return explicitName
+	end
+
+	local chestKind = readInstanceValueOrAttribute(chestFolder, "ChestKind")
+	local tier = readInstanceValueOrAttribute(chestFolder, "Tier")
+	local fruitRarity = readInstanceValueOrAttribute(chestFolder, "FruitRarity")
+
+	if chestKind ~= nil or tier ~= nil or fruitRarity ~= nil then
+		return ChestUtils.GetInventoryName({
+			ChestKind = chestKind,
+			Tier = tier,
+			FruitRarity = fruitRarity,
+		})
+	end
+
+	return ""
+end
+
+local function collectChestCountsFromState(state)
+	if typeof(state) ~= "table" or typeof(state.UnopenedChests) ~= "table" then
+		return nil
+	end
+
+	local counts = {}
+	for _, chestEntry in ipairs(state.UnopenedChests) do
+		local chestName = getChestInventoryNameFromStateEntry(chestEntry)
+		if chestName ~= "" then
+			counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0) + 1
+		end
+	end
+
+	return counts
+end
+
+local function collectChestCountsFromPlayerFolder()
+	local unopenedFolder = player:FindFirstChild("UnopenedChests")
+	local byIdFolder = unopenedFolder and unopenedFolder:FindFirstChild("ById")
+	if not (byIdFolder and byIdFolder:IsA("Folder")) then
+		return nil
+	end
+
+	local counts = {}
+	local childCount = 0
+	local matchedCount = 0
+	for _, chestFolder in ipairs(byIdFolder:GetChildren()) do
+		childCount += 1
+		local chestName = getChestInventoryNameFromFolder(chestFolder)
+		if chestName ~= "" then
+			matchedCount += 1
+			counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0) + 1
+		end
+	end
+
+	if childCount > 0 and matchedCount == 0 then
+		return nil
+	end
+
+	return counts
+end
+
+local function applyCanonicalChestCounts(counts)
+	if typeof(counts) ~= "table" then
+		return false
+	end
+
+	local seenChestKeys = {}
+	for chestName, quantity in pairs(counts) do
+		local safeQuantity = math.max(0, math.floor(tonumber(quantity) or 0))
+		local key = "Chest|" .. tostring(chestName)
+		seenChestKeys[key] = true
+
+		if safeQuantity > 0 then
+			ensureAcquired(key)
+			itemState[key] = {
+				kind = "Chest",
+				name = tostring(chestName),
+				qty = safeQuantity,
+			}
+		else
+			itemState[key] = nil
+		end
+	end
+
+	for key, state in pairs(itemState) do
+		if state.kind == "Chest" and seenChestKeys[key] ~= true then
+			itemState[key] = nil
+		end
+	end
+
+	return true
+end
+
+local function markCanonicalChestCountsDirty()
+	canonicalChestCountsDirty = true
+end
+
+syncChestsFromCanonicalSources = function(force)
+	if force ~= true and canonicalChestCountsResolved == true and canonicalChestCountsDirty ~= true then
+		return true
+	end
+
+	local applied = applyCanonicalChestCounts(collectChestCountsFromPlayerFolder() or collectChestCountsFromState(metaState))
+	canonicalChestCountsResolved = applied == true
+	if applied then
+		canonicalChestCountsDirty = false
+	end
+
+	return applied
+end
+
 local function applyInventorySnapshot(snapshot)
 	if typeof(snapshot) ~= "table" then
 		warn("[INV][SNAPSHOT][CLIENT][APP] invalid snapshot payload")
@@ -689,9 +840,18 @@ local function applyInventorySnapshot(snapshot)
 		end
 	end
 
-	local chestCount = applyQuantitySnapshotEntries(snapshot.Chests, "Chest", function(name)
-		return ChestUtils.GetDisplayName(name) ~= nil
-	end)
+	local chestCount = 0
+	if syncChestsFromCanonicalSources(true) then
+		for _, state in pairs(itemState) do
+			if state.kind == "Chest" and (state.qty or 0) > 0 then
+				chestCount += 1
+			end
+		end
+	else
+		chestCount = applyQuantitySnapshotEntries(snapshot.Chests, "Chest", function(name)
+			return ChestUtils.GetDisplayName(name) ~= nil
+		end)
+	end
 
 	inventorySnapshotDebug(
 		"applied",
@@ -1256,14 +1416,14 @@ local function countCrewItems(crewKeys)
 	return count
 end
 
-local function readPlayerDoubloons()
+local function readPlayerBeli()
 	local leaderstats = player:FindFirstChild("leaderstats")
-	local value = readChildValue(leaderstats, "Doubloons")
+	local value = readChildValue(leaderstats, Economy.Currency.Primary.Key)
 	if typeof(value) == "number" then
 		return math.max(0, value)
 	end
 
-	return math.max(0, tonumber(metaState and metaState.Doubloons) or 0)
+	return math.max(0, tonumber(metaState and (metaState.Beli or metaState.Doubloons)) or 0)
 end
 
 local function readPlayerRebirths()
@@ -1877,7 +2037,9 @@ local function buildCrewQuickSlotEntry(slotIndex, locked)
 end
 
 local function buildRenderData()
-	syncChestsFromInventory()
+	if not syncChestsFromCanonicalSources() then
+		syncChestsFromInventory()
+	end
 	syncDevilFruitsFromInventory()
 
 	local gearsList, chestsList, crewList, devilFruitList, resourceList = buildLists()
@@ -2019,7 +2181,9 @@ local function buildRenderData()
 			bounty = bountySummary.total,
 			crewBounty = bountySummary.crew,
 			extractionBounty = bountySummary.extraction,
-			doubloons = readPlayerDoubloons(),
+			beli = readPlayerBeli(),
+			-- Legacy client summary alias kept for older React surfaces.
+			doubloons = readPlayerBeli(),
 			rebirths = liveRebirths,
 			multiplier = formatMultiplier(liveMultiplier),
 			chests = chestCount,
@@ -2150,21 +2314,29 @@ local function bindShipDataTracking()
 			return
 		end
 
+		local function handleChanged()
+			if dataRoot.Name == "UnopenedChests" then
+				markCanonicalChestCountsDirty()
+				syncChestsFromCanonicalSources(true)
+			end
+			scheduleRender()
+		end
+
 		for _, descendant in ipairs(dataRoot:GetDescendants()) do
 			if descendant:IsA("ValueBase") then
-				trackConnection(descendant:GetPropertyChangedSignal("Value"), scheduleRender, shipDataConnections)
+				trackConnection(descendant:GetPropertyChangedSignal("Value"), handleChanged, shipDataConnections)
 			end
 		end
 
 		trackConnection(dataRoot.DescendantAdded, function(descendant)
 			if descendant:IsA("ValueBase") then
-				trackConnection(descendant:GetPropertyChangedSignal("Value"), scheduleRender, shipDataConnections)
+				trackConnection(descendant:GetPropertyChangedSignal("Value"), handleChanged, shipDataConnections)
 			end
-			scheduleRender()
+			handleChanged()
 		end, shipDataConnections)
 
 		trackConnection(dataRoot.DescendantRemoving, function()
-			scheduleRender()
+			handleChanged()
 		end, shipDataConnections)
 	end
 
@@ -2187,6 +2359,9 @@ local function bindShipDataTracking()
 
 	trackConnection(player.ChildAdded, function(child)
 		if watchedRoots[child.Name] then
+			if child.Name == "UnopenedChests" then
+				markCanonicalChestCountsDirty()
+			end
 			task.defer(bindShipDataTracking)
 			scheduleRender()
 		end
@@ -2194,6 +2369,9 @@ local function bindShipDataTracking()
 
 	trackConnection(player.ChildRemoved, function(child)
 		if watchedRoots[child.Name] then
+			if child.Name == "UnopenedChests" then
+				markCanonicalChestCountsDirty()
+			end
 			task.defer(bindShipDataTracking)
 			scheduleRender()
 		end
@@ -2750,6 +2928,11 @@ trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 			end
 		end
 	elseif kind == "Chest" then
+		if syncChestsFromCanonicalSources() then
+			scheduleRender()
+			return
+		end
+
 		local quantity = tonumber(value) or 0
 		local key = "Chest|" .. tostring(name)
 		if quantity > 0 then
@@ -2905,6 +3088,8 @@ end, cleanupConnections)
 stopObservingState = MetaClient.ObserveState(function(state)
 	metaState = state
 	syncResourcesFromState(state)
+	markCanonicalChestCountsDirty()
+	syncChestsFromCanonicalSources(true)
 	scheduleRender()
 end)
 

@@ -2,7 +2,7 @@ local CometMerchant = {
 
 	All_Things = {
 		["Potions.x2MoneyTime"] = {
-			Display_name = "x2 Beli Boost",
+			Display_name = "2x Beli Boost",
 
 			Chance = 40,
 			Amount = math.random(120, 300),
@@ -12,7 +12,7 @@ local CometMerchant = {
 			Price = 125,
 
 			Icon = "rbxassetid://123727379614328",
-			Desc = "Earn x2 Beli and double your profits for a limited time!",
+			Desc = "Earn 2x Beli and double your profits for a limited time!",
 		},
 
 		["Potions.x15WalkSpeedTime"] = {
@@ -29,7 +29,7 @@ local CometMerchant = {
 			Desc = "Get x1.5 WalkSpeed and move faster for a limited time!",
 		},
 
-		["leaderstats.Doubloons"] = {
+		["leaderstats.Beli"] = {
 			Display_name = "??? Beli",
 
 			Chance = 40,

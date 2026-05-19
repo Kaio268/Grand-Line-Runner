@@ -80,10 +80,11 @@ local function appendBundleRows(rows, rewardBundle, chance, sourceLabel)
 			sourceLabel = sourceLabel,
 		}
 	end
-	if rewardBundle and rewardBundle.Doubloons ~= nil then
+	local beliReward = rewardBundle and (rewardBundle.Beli or rewardBundle.Doubloons)
+	if beliReward ~= nil then
 		rows[#rows + 1] = {
 			name = "Beli",
-			amountText = getRangeText(rewardBundle.Doubloons),
+			amountText = getRangeText(beliReward),
 			chance = chance,
 			sourceLabel = sourceLabel,
 		}

@@ -43,7 +43,7 @@ local ChestRewards = {
 	DevilFruitChestGrantsBaseRewards = false,
 
 	DuplicateConversion = {
-		Common = { Type = "Doubloons", ScaleByTier = true },
+		Common = { Type = "Beli", ScaleByTier = true },
 		Rare = { Type = "Chest", FruitRarity = "Rare" },
 		Legendary = { Type = "Chest", FruitRarity = "Legendary" },
 		Mythic = { Type = "MythicKey", Amount = 1 },
@@ -55,7 +55,7 @@ local ChestRewards = {
 	},
 
 	FallbackReward = {
-		Type = "Doubloons",
+		Type = "Beli",
 		ScaleByTier = true,
 	},
 

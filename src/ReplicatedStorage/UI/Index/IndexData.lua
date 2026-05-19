@@ -342,7 +342,7 @@ local function formatRewardLabel(path)
 		return "Beli Boost"
 	end
 	if pathValue:find("x2MoneyTime", 1, true) then
-		return "x2 Beli"
+		return "2x Beli"
 	end
 	if pathValue:find("WalkSpeed", 1, true) then
 		return "Speed Boost"

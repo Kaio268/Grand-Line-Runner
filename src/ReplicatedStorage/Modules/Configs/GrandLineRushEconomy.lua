@@ -1,28 +1,34 @@
 local Economy = {
-	Version = "v1",
+	Version = "v2",
 
 	Currency = {
 		Primary = {
-			Key = "Doubloons",
-			Path = "leaderstats.Doubloons",
-			TotalKey = "TotalDoubloons",
-			TotalPath = "TotalStats.TotalDoubloons",
+			Key = "Beli",
+			Path = "leaderstats.Beli",
+			TotalKey = "TotalBeli",
+			TotalPath = "TotalStats.TotalBeli",
 			DisplayName = "Beli",
 			ShortLabel = "Beli",
+			-- Legacy keys are intentionally preserved for old saves, aliases, receipts,
+			-- admin commands, and transitional reads. Player-facing text should use Beli.
 			LegacyKeys = {
-				Leaderstat = "Money",
+				Leaderstat = "Doubloons",
+				LeaderstatMoney = "Money",
 				LeaderstatTypo = "Moeny",
-				Total = "TotalMoney",
+				Total = "TotalDoubloons",
+				TotalMoney = "TotalMoney",
 			},
 		},
 	},
 
 	PathAliases = {
-		["leaderstats.Doubloons"] = {
+		["leaderstats.Beli"] = {
+			"leaderstats.Doubloons",
 			"leaderstats.Money",
 			"leaderstats.Moeny",
 		},
-		["TotalStats.TotalDoubloons"] = {
+		["TotalStats.TotalBeli"] = {
+			"TotalStats.TotalDoubloons",
 			"TotalStats.TotalMoney",
 		},
 		["HiddenLeaderstats.PlotUpgrade"] = {
@@ -33,6 +39,16 @@ local Economy = {
 		},
 		["Materials.Iron"] = {
 			"Materials.RareShipMaterial",
+		},
+	},
+
+	Leaderstats = {
+		-- Roblox's People list is sensitive to child order. Keep this order stable
+		-- whenever DataManager creates or repairs the leaderstats folder.
+		DisplayOrder = {
+			"Bounty",
+			"Rebirths",
+			"Beli",
 		},
 	},
 
@@ -50,7 +66,7 @@ local Economy = {
 	},
 
 	Tutorial = {
-		StartingDoubloons = 200,
+		StartingBeli = 200,
 	},
 
 	VerticalSlice = {
@@ -167,6 +183,7 @@ local Economy = {
 			Rare = 1.50,
 			Epic = 1.90,
 			Legendary = 2.40,
+			Mythic = 3.10,
 			Mythical = 3.10,
 			Celestial = 4.00,
 			Godly = 5.20,
@@ -184,8 +201,8 @@ local Economy = {
 						Apple = { Min = 3, Max = 6 },
 						Rice = { Min = 1, Max = 3 },
 					},
-					Doubloons = { Min = 250, Max = 600 },
-					FruitConversionDoubloons = 15,
+					Beli = { Min = 250, Max = 600 },
+					FruitConversionBeli = 15,
 					Materials = {
 						Timber = { Min = 12, Max = 20 },
 					},
@@ -196,7 +213,7 @@ local Economy = {
 							{ Materials = { Iron = 1 } },
 							{ Food = { Apple = 3 } },
 							{ Food = { Rice = 2 } },
-							{ Doubloons = 300 },
+							{ Beli = 300 },
 						},
 					},
 				},
@@ -209,8 +226,8 @@ local Economy = {
 						Rice = { Min = 3, Max = 5 },
 						Meat = { Min = 1, Max = 2 },
 					},
-					Doubloons = { Min = 1000, Max = 2500 },
-					FruitConversionDoubloons = 30,
+					Beli = { Min = 1000, Max = 2500 },
+					FruitConversionBeli = 30,
 					Materials = {
 						Timber = { Min = 35, Max = 55 },
 						Iron = { Min = 4, Max = 8 },
@@ -222,7 +239,7 @@ local Economy = {
 							{ Materials = { Iron = 3 } },
 							{ Materials = { AncientTimber = 1 } },
 							{ Food = { Meat = 2 } },
-							{ Doubloons = 1500 },
+							{ Beli = 1500 },
 						},
 					},
 				},
@@ -235,8 +252,8 @@ local Economy = {
 						Meat = { Min = 3, Max = 5 },
 						SeaBeastMeat = { Min = 1, Max = 2 },
 					},
-					Doubloons = { Min = 4000, Max = 8000 },
-					FruitConversionDoubloons = 120,
+					Beli = { Min = 4000, Max = 8000 },
+					FruitConversionBeli = 120,
 					Materials = {
 						Timber = { Min = 80, Max = 140 },
 						Iron = { Min = 12, Max = 20 },
@@ -248,7 +265,7 @@ local Economy = {
 						Pool = {
 							{ Materials = { AncientTimber = 2 } },
 							{ Food = { SeaBeastMeat = 2 } },
-							{ Doubloons = 5000 },
+							{ Beli = 5000 },
 						},
 					},
 					DevilFruitChance = 0.10,
@@ -322,6 +339,7 @@ local Economy = {
 			Rare = 1.50,
 			Epic = 1.90,
 			Legendary = 2.40,
+			Mythic = 3.10,
 			Mythical = 3.10,
 			Celestial = 4.00,
 			Godly = 5.20,
@@ -329,23 +347,24 @@ local Economy = {
 		},
 
 		ShipIncomePerHourByRarity = {
-			Common = 20,
-			Uncommon = 35,
-			Rare = 60,
-			Epic = 100,
-			Legendary = 170,
-			Mythical = 280,
-			Celestial = 450,
-			Godly = 700,
-			Secret = 1100,
+			Common = 21_600,
+			Uncommon = 70_200,
+			Rare = 198_000,
+			Epic = 409_500,
+			Legendary = 819_000,
+			Mythic = 1_777_500,
+			Mythical = 1_777_500,
+			Celestial = 3_000_000,
+			Godly = 5_580_000,
+			Secret = 18_450_000,
 		},
 
 		ShipIncomeMultiplierByLevelBand = {
-			{ MinLevel = 1, MaxLevel = 10, Multiplier = 1.00 },
-			{ MinLevel = 11, MaxLevel = 20, Multiplier = 1.10 },
-			{ MinLevel = 21, MaxLevel = 30, Multiplier = 1.25 },
-			{ MinLevel = 31, MaxLevel = 40, Multiplier = 1.45 },
-			{ MinLevel = 41, MaxLevel = 50, Multiplier = 1.70 },
+			{ MinLevel = 1, MaxLevel = 10, Multiplier = 1.18 },
+			{ MinLevel = 11, MaxLevel = 20, Multiplier = 1.58 },
+			{ MinLevel = 21, MaxLevel = 30, Multiplier = 1.98 },
+			{ MinLevel = 31, MaxLevel = 40, Multiplier = 2.38 },
+			{ MinLevel = 41, MaxLevel = 50, Multiplier = 2.78 },
 		},
 
 		RewardOddsByDepthBand = {

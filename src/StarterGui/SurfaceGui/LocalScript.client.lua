@@ -62,7 +62,7 @@ local function formatRequirementText(requirement)
 	end
 
 	local lines = {
-		string.format("%s%s", short.roundNumber(math.max(0, tonumber(requirement.Doubloons) or 0)), CurrencyUtil.getCompactSuffix()),
+		CurrencyUtil.formatAmount(math.max(0, tonumber(requirement.Beli) or 0)),
 	}
 
 	local materialParts = {}

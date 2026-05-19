@@ -18,7 +18,7 @@ local ProfileTemplate = {
 		Tutorial = false,
 		TutorialCrewMemberGranted = false,
 		TutorialSpeedTopUpGranted = false,
-		TutorialStarterDoubloonsGranted = false,
+		TutorialStarterBeliGranted = false,
 		ClaimedTolilola = false,
 		LimitedReward = false,
 		Group = false,
@@ -33,6 +33,16 @@ local ProfileTemplate = {
 		TotalWins = 0,
 		TimePlayed = 0,
 		RobuxSpent = 0,
+	},
+
+	CurrencyLegacy = {
+		CurrentBeli = 0,
+		CurrentTotalBeli = 0,
+		Doubloons = 0,
+		Money = 0,
+		Moeny = 0,
+		TotalDoubloons = 0,
+		TotalMoney = 0,
 	},
 
 	Inventory = {

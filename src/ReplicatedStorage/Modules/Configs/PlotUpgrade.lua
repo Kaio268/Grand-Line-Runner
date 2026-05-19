@@ -52,33 +52,33 @@ local Config = {
 
 	RequirementsByLevel = {
 		[0] = {
-			Doubloons = 1_000,
+			Beli = 1_000,
 			Materials = {
 				Timber = 25,
 			},
 		},
 		[1] = {
-			Doubloons = 3_000,
+			Beli = 3_000,
 			Materials = {
 				Timber = 50,
 			},
 		},
 		[2] = {
-			Doubloons = 7_500,
+			Beli = 7_500,
 			Materials = {
 				Timber = 90,
 				Iron = 10,
 			},
 		},
 		[3] = {
-			Doubloons = 15_000,
+			Beli = 15_000,
 			Materials = {
 				Timber = 140,
 				Iron = 25,
 			},
 		},
 		[4] = {
-			Doubloons = 35_000,
+			Beli = 35_000,
 			Materials = {
 				Timber = 220,
 				Iron = 50,
@@ -86,7 +86,7 @@ local Config = {
 			},
 		},
 		[5] = {
-			Doubloons = 75_000,
+			Beli = 75_000,
 			Materials = {
 				Timber = 320,
 				Iron = 90,
@@ -94,7 +94,7 @@ local Config = {
 			},
 		},
 		[6] = {
-			Doubloons = 150_000,
+			Beli = 150_000,
 			Materials = {
 				Timber = 450,
 				Iron = 140,
@@ -102,7 +102,7 @@ local Config = {
 			},
 		},
 		[7] = {
-			Doubloons = 225_000,
+			Beli = 225_000,
 			Materials = {
 				Timber = 600,
 				Iron = 220,
@@ -177,7 +177,7 @@ function Config.GetRequirementForLevel(level)
 	end
 
 	return {
-		Doubloons = math.max(0, math.floor(tonumber(requirement.Doubloons) or 0)),
+		Beli = math.max(0, math.floor(tonumber(requirement.Beli or requirement.Doubloons) or 0)),
 		Materials = table.clone(typeof(requirement.Materials) == "table" and requirement.Materials or {}),
 		Rebirths = Config.GetRequiredRebirthsForLevel(clamped + 1),
 		TargetLevel = clamped + 1,

@@ -70,8 +70,10 @@ local unregisterModal = ReactModalRegistry.Register("Store", {
 })
 
 local LEGACY_CREW_TERM = "Brain" .. "rots"
+local LEGACY_MONEY_TERM = "Mo" .. "ney"
 local LEGACY_STORE_COPY_REPLACEMENTS = {
-	["Earn x2 Money and make 2x more from " .. LEGACY_CREW_TERM] = "Earn x2 Money and make 2x more from Crewmates",
+	["Earn x2 " .. LEGACY_MONEY_TERM .. " and make 2x more from " .. LEGACY_CREW_TERM] = "Earn 2x Beli and make 2x more from Crewmates",
+	["Earn x2 " .. LEGACY_MONEY_TERM .. " and make 2x more from Crewmates"] = "Earn 2x Beli and make 2x more from Crewmates",
 }
 local watchedStoreTextObjects = {}
 local watchedStoreRoots = {}

@@ -102,7 +102,8 @@ local items = {
 			ownedKey = "VIP",
 		},
 	}),
-	twoXMoney = item({
+	twoXBeli = item({
+		-- Legacy id kept for product/catalog compatibility; display is Beli.
 		id = "x2-doubloons",
 		sectionKey = "gamepasses",
 		title = "2x Beli",
@@ -286,7 +287,8 @@ local items = {
 			kind = "stub",
 		},
 	}),
-	doubloonPack = item({
+	beliPack = item({
+		-- Legacy id kept for product/catalog compatibility; display is Beli.
 		id = "doubloon-pack",
 		sectionKey = "currency",
 		title = "Beli Pack",
@@ -445,7 +447,7 @@ Catalog.sections = {
 		themeKey = "Emerald",
 		items = {
 			items.vip,
-			items.twoXMoney,
+			items.twoXBeli,
 			items.privateServers,
 			items.crewUtilityPass,
 		},
@@ -485,7 +487,7 @@ Catalog.sections = {
 		description = "Treasury packs for captains saving up for rerolls, upgrades, and premium convenience buys.",
 		themeKey = "Orange",
 		items = {
-			items.doubloonPack,
+			items.beliPack,
 			items.captainsStash,
 			items.fleetReserve,
 			items.portTreasury,

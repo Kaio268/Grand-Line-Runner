@@ -34,7 +34,7 @@ local OBJECTIVE_CHECK_INTERVAL = 0.35
 local PUSH_PROGRESS_DELTA = 0.05
 local HIDDEN_LEADERSTATS_NAME = "HiddenLeaderstats"
 local TUTORIAL_VALUE_NAME = "Tutorial"
-local TUTORIAL_STARTER_GRANTED_PATH = "HiddenLeaderstats.TutorialStarterDoubloonsGranted"
+local TUTORIAL_STARTER_GRANTED_PATH = "HiddenLeaderstats.TutorialStarterBeliGranted"
 local TUTORIAL_CREW_MEMBER_GRANTED_PATH = tostring(
 	(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.GrantedPath)
 		or "HiddenLeaderstats.TutorialCrewMemberGranted"
@@ -277,13 +277,13 @@ local function getCurrentSpeedUpgradeCost(player)
 	return math.floor(total + 0.5)
 end
 
-local function ensureTutorialStarterDoubloons(player)
+local function ensureTutorialStarterBeli(player)
 	local granted, reason = DataManager:TryGetValue(player, TUTORIAL_STARTER_GRANTED_PATH)
 	if reason ~= nil or granted == true then
 		return
 	end
 
-	local tutorialAmount = math.max(0, math.floor(tonumber(Economy.Tutorial and Economy.Tutorial.StartingDoubloons) or 0))
+	local tutorialAmount = math.max(0, math.floor(tonumber(Economy.Tutorial and Economy.Tutorial.StartingBeli) or 0))
 	if tutorialAmount > 0 then
 		local shortfall = math.max(0, tutorialAmount - getPrimaryBalance(player))
 		if shortfall > 0 then
@@ -1503,7 +1503,7 @@ local function createSession(player)
 		return nil
 	end
 
-	ensureTutorialStarterDoubloons(player)
+	ensureTutorialStarterBeli(player)
 
 	local session = {
 		active = true,
@@ -1932,7 +1932,7 @@ local function onObjectiveRecorded(player, eventData)
 			session.placedTutorialCrewMemberName = tostring(context.CrewMemberName or "")
 			advanceIfCurrentStep(player, "place_on_stand")
 		end
-	elseif objectiveType == "EarnDoubloons" and source == "StandIncome" then
+	elseif (objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons") and source == "StandIncome" then
 		local session = sessions[player]
 		if session and isTutorialCrewMemberOnStand(player, session, context.StandName) then
 			session.collectedTutorialBeli = true

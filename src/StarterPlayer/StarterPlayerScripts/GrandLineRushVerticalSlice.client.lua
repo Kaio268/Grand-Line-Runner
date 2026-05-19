@@ -356,10 +356,10 @@ local function render()
 	local carriedText = runState.CarriedReward and runState.CarriedReward.DisplayName or "None"
 
 	runStatusLabel.Text = string.format(
-		"Run Active: %s\nDepth: %s\nDoubloons: %s",
+		"Run Active: %s\nDepth: %s\nBeli: %s",
 		runState.InRun and "Yes" or "No",
 		tostring(runState.DepthBand or selectedDepthBand),
-		tostring(currentState.Doubloons or 0)
+		tostring(currentState.Beli or currentState.Doubloons or 0)
 	)
 	rewardStatusLabel.Text = string.format("Spawned: %s    |    Carrying: %s", spawnedText, carriedText)
 	setMessage(runState.ResolutionText or lastMessage)

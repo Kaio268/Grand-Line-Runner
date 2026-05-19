@@ -5,7 +5,7 @@ local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUti
 local Premades = {}
 local DataManager: Types.DataManager
 
-function Premades.AddMoney(DataManager: Types.DataManager, Player: Player, Amount: number)
+function Premades.AddBeli(DataManager: Types.DataManager, Player: Player, Amount: number)
 	local finalAmount = Amount  * Player.Gamepasses.x2MoneyValue.Value * Player.Active.x2Money.Value
 		
 	if finalAmount ~= 0 then
@@ -13,6 +13,8 @@ function Premades.AddMoney(DataManager: Types.DataManager, Player: Player, Amoun
 		DataManager:AddValue(Player, CurrencyUtil.getTotalPath(), finalAmount)
 	end
 end
+
+Premades.AddMoney = Premades.AddBeli
 
 Premades.Init = function(_DataManager: Types.DataManager)
 	DataManager = _DataManager

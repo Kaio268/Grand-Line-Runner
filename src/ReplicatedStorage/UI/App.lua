@@ -3001,7 +3001,7 @@ local function App(props)
 				{ label = "Total Bounty", value = formatNumber(summary.bounty or 0), valueColor3 = PALETTE.Gold },
 				{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
 				{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
-				{ label = "Beli", value = formatNumber(summary.doubloons or 0) .. " Beli", valueColor3 = PALETTE.Gold },
+				{ label = "Beli", value = formatNumber(summary.beli or summary.doubloons or 0) .. " Beli", valueColor3 = PALETTE.Gold },
 				{
 					label = "Quick Equip Slots",
 					value = string.format("%d / %d", crewQuickSlotsUnlocked, crewQuickSlotsMax),

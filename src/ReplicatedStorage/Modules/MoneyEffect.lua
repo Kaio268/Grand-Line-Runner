@@ -11,7 +11,7 @@ local camera   = workspace.CurrentCamera
 local module = {}
 
 local CFG = {
-	CoinsPerBurst      = 6,
+	TokensPerBurst     = 6,
 
 	PopTime            = 0.18,
 	HoverTimeBase      = 0.35,
@@ -159,7 +159,7 @@ local function playCollectSound()
 	Debris:AddItem(s, lifeTime)
 end
 
-function module:DropDollars(origin: Vector3 | CFrame, Amount)
+function module:DropBeli(origin: Vector3 | CFrame, Amount)
 	local oPos: Vector3
 	if typeof(origin) == "CFrame" then
 		oPos = (origin :: CFrame).Position
@@ -169,14 +169,15 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 		return
 	end
 
-	local template = RS:FindFirstChild("Dollar")
+	-- Dollar is a legacy asset fallback; new places should provide Beli or BeliCoin.
+	local template = RS:FindFirstChild("Beli") or RS:FindFirstChild("BeliCoin") or RS:FindFirstChild("Dollar")
 	if not template then
-		warn("Dollar template not found in ReplicatedStorage!")
+		warn("Beli token template not found in ReplicatedStorage!")
 		return
 	end
 
 	task.spawn(function()
-		for i = 1, Amount or CFG.CoinsPerBurst do
+		for i = 1, Amount or CFG.TokensPerBurst do
 			task.spawn(function()
 				local d = template:Clone()
 				setAnchored(d, true)
@@ -393,5 +394,8 @@ function module:DropDollars(origin: Vector3 | CFrame, Amount)
 		end
 	end)
 end
+
+-- Keep the old API name while callers move to DropBeli.
+module.DropDollars = module.DropBeli
 
 return module

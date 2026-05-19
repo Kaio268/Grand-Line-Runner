@@ -7,12 +7,12 @@ local Rewards = {
 		Time = 60,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards = {
-			Doubloons = { Chance = 100, Amount = 1000 },
+			Beli = { Chance = 100, Amount = 1000 },
 		},
 	},
 
 	[2] = {
-		RewName = "5 Min x2 Beli",
+		RewName = "5 Min 2x Beli",
 		Icon = "rbxassetid://123727379614328",
 
 		Time = 120,
@@ -31,7 +31,7 @@ local Rewards = {
 		Time = 900,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards = {
-			Doubloons = { Chance = 100, Amount = 10000 },
+			Beli = { Chance = 100, Amount = 10000 },
 		},
 	},
 
@@ -86,7 +86,7 @@ local Rewards = {
 		Time = 3600,
 		RewardTextTemplate = "You Get %d %s",
 		Rewards = {
-			Doubloons = { Chance = 100, Amount = 100000 },
+			Beli = { Chance = 100, Amount = 100000 },
 		},
 	},
 }

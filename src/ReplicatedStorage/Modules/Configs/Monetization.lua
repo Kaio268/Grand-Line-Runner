@@ -24,7 +24,7 @@ Monetization.ActiveChefsDeveloperProducts = {
 }
 
 Monetization.PlaceholderGamepasses = {
-	X2Money = {
+	X2Beli = {
 		Id = 1667343349,
 		Name = "2x Beli",
 		Reason = "Not Chefs-owned. Awaiting replacement gamepass.",
