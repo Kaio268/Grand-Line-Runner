@@ -14,8 +14,10 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
+local MonetizationConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
+local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local GearStoreScreen = require(UiFolder:WaitForChild("GearStore"):WaitForChild("GearStoreScreen"))
 
 local BuyRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("GearStore")
@@ -105,6 +107,9 @@ local function getDevProductPrice(productId)
 	if typeof(productId) ~= "number" then
 		return 0
 	end
+	if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
+		return 0
+	end
 	if productPriceCache[productId] ~= nil then
 		return productPriceCache[productId]
 	end
@@ -120,6 +125,22 @@ local function getDevProductPrice(productId)
 	return price
 end
 
+local function showPurchaseUnavailable(productId)
+	warn(string.format(
+		"[GearStore] Blocked disabled/non-GTR gear product prompt productId=%s",
+		tostring(productId)
+	))
+	pcall(function()
+		PopUpModule:Local_SendPopUp(
+			MonetizationConfig.UnavailableMessage,
+			Color3.fromRGB(255, 104, 104),
+			Color3.fromRGB(0, 0, 0),
+			3,
+			true
+		)
+	end)
+end
+
 local function buildViewModel()
 	local items = {}
 	for index, gear in ipairs(gearList) do
@@ -127,12 +148,14 @@ local function buildViewModel()
 		local owned = boolValue and boolValue:IsA("BoolValue")
 		local equipped = owned and boolValue.Value == true
 		local productId = tonumber(gear.data.ProductID)
+		local canPromptRobux = MonetizationConfig.CanPromptDeveloperProduct(productId)
 		items[index] = {
 			name = gear.name,
 			typeText = tostring(gear.data.Type or "Gear"),
 			icon = tostring(gear.data.Icon or ""),
 			buyText = if equipped then "Equipped" elseif owned then "Equip" else Shorten.roundNumber(gear.price) .. CurrencyUtil.getCompactSuffix(),
-			robuxText = "" .. Shorten.roundNumber(getDevProductPrice(productId)),
+			robuxText = if canPromptRobux then "Robux " .. Shorten.roundNumber(getDevProductPrice(productId)) else "Coming Soon",
+			robuxEnabled = canPromptRobux,
 			showRobux = not owned and not hasTool(gear.name),
 		}
 	end
@@ -154,6 +177,12 @@ local function render()
 			ReactModalRegistry.Close("GearStore")
 		end,
 		onRobux = function(gearName)
+			local gearData = Gears[gearName]
+			local productId = gearData and tonumber(gearData.ProductID)
+			if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
+				showPurchaseUnavailable(productId)
+				return
+			end
 			RobuxRemote:FireServer(gearName)
 		end,
 	}), host))

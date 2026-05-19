@@ -1,17 +1,15 @@
 local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Theme = require(script.Parent:WaitForChild("Theme"))
+local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
 
 local PurchaseAdapter = {}
 PurchaseAdapter.__index = PurchaseAdapter
 
 local function copyTable(source)
-	local result = {}
-	for key, value in pairs(source) do
-		result[key] = value
-	end
-	return result
+	return table.clone(source)
 end
 
 local function disconnectAll(list)
@@ -173,6 +171,13 @@ function PurchaseAdapter:_refreshStateForItem(item)
 		return
 	end
 
+	if not MonetizationConfig.CanPromptPurchase(purchase.kind, purchase.id) then
+		state.buttonText = item.placeholderAction or "Coming Soon"
+		state.statusText = "Not available yet"
+		state.priceText = item.priceText or "Soon"
+		return
+	end
+
 	state.supportsPrompt = true
 	if purchase.kind == "gamepass" then
 		state.isOwned = self:_readOwnedValue(purchase.ownedKey or item.title)
@@ -283,6 +288,24 @@ function PurchaseAdapter:requestPurchase(item)
 
 	if purchase.kind == "stub" or purchase.id == nil then
 		return false, "This offer is not available just yet."
+	end
+
+	if not MonetizationConfig.CanPromptPurchase(purchase.kind, purchase.id) then
+		local status, metadata
+		if purchase.kind == "gamepass" then
+			status, metadata = MonetizationConfig.GetGamepassStatus(purchase.id)
+		else
+			status, metadata = MonetizationConfig.GetDeveloperProductStatus(purchase.id)
+		end
+		warn(string.format(
+			"[PurchaseAdapter] Blocked disabled/non-GTR purchase prompt item=%s kind=%s id=%s status=%s reason=%s",
+			tostring(item.id or item.title or "<unknown>"),
+			tostring(purchase.kind),
+			tostring(purchase.id),
+			tostring(status),
+			tostring(metadata and metadata.Reason or "not_active_chefs_product")
+		))
+		return false, MonetizationConfig.UnavailableMessage
 	end
 
 	local state = self:_getState(item)

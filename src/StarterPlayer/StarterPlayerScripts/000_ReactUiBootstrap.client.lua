@@ -85,24 +85,12 @@ local function ensureLegacyHudCompatibility(hud)
 		return
 	end
 
-	local gamepassesAd = ensureFrame(hud, "GamepassesAd")
-	gamepassesAd.Visible = false
-	gamepassesAd.Size = UDim2.fromOffset(260, 120)
-	gamepassesAd.Position = UDim2.new(1, -280, 0.5, -60)
-	if not gamepassesAd:FindFirstChildOfClass("UIScale") then
-		Instance.new("UIScale").Parent = gamepassesAd
+	local existingGamepassesAd = hud:FindFirstChild("GamepassesAd")
+	if existingGamepassesAd and existingGamepassesAd:IsA("GuiObject") then
+		existingGamepassesAd.Visible = false
 	end
-	ensureImageLabel(gamepassesAd, "Icon").Size = UDim2.fromOffset(56, 56)
-	ensureTextLabel(gamepassesAd, "Info").Size = UDim2.fromOffset(160, 28)
-	local productName = ensureTextLabel(gamepassesAd, "PName")
-	productName.Size = UDim2.fromOffset(160, 28)
-	ensureTextLabel(productName, "Shadow").Size = UDim2.fromScale(1, 1)
-	ensureTextLabel(gamepassesAd, "Price").Size = UDim2.fromOffset(96, 24)
-	ensureImageLabel(gamepassesAd, "ImageLabel").Size = UDim2.fromOffset(24, 24)
-	ensureFrame(gamepassesAd, "Time").Size = UDim2.new(1, 0, 0, 6)
-	ensureTextButton(gamepassesAd, "TextButton").Size = UDim2.fromScale(1, 1)
 
-	hudLog("[HUD][LEGACY]", string.format("gamepassesAd=%s", gamepassesAd:GetFullName()))
+	hudLog("[HUD][LEGACY]", "legacy GamepassesAd disabled")
 end
 
 local HUD_BUTTON_LAYOUT = {

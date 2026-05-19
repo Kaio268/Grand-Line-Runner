@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local GamepassesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local AdminPermissions = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminPermissions"))
 local VIPTestOverrides = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("VIPTestOverrides"))
@@ -328,7 +329,7 @@ local function sendVipRequiredFeedback(player)
 	lastFeedbackAtByPlayer[player] = now
 
 	PopUpModule:Server_SendPopUp(player, "VIP Required", POPUP_COLOR, POPUP_STROKE, 3, true)
-	if VIP_GAMEPASS_ID and VIP_GAMEPASS_ID > 0 then
+	if VIP_GAMEPASS_ID and VIP_GAMEPASS_ID > 0 and MonetizationConfig.CanPromptGamepass(VIP_GAMEPASS_ID) then
 		local ok, err = pcall(function()
 			MarketplaceService:PromptGamePassPurchase(player, VIP_GAMEPASS_ID)
 		end)
@@ -339,6 +340,11 @@ local function sendVipRequiredFeedback(player)
 				tostring(err)
 			))
 		end
+	elseif VIP_GAMEPASS_ID and VIP_GAMEPASS_ID > 0 then
+		warn(string.format(
+			"[VIPBarrierService] Refused VIP prompt because gamepass id=%s is not active in Monetization config",
+			tostring(VIP_GAMEPASS_ID)
+		))
 	end
 end
 

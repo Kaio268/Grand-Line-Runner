@@ -36,6 +36,7 @@ local ProductFunctions = require(script.ProductFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
 local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local MonetizationConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
 local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
   
 --// ProfileStore
@@ -1488,6 +1489,24 @@ end
 
 -- PRODUCT MANAGER SECTION
 function DataManager:PromptProductPurchase(player : Player, productId : number)
+	productId = tonumber(productId)
+	if productId == nil then
+		warn("[DataManager]: Refused product prompt with invalid product id")
+		return
+	end
+
+	if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
+		local status, metadata = MonetizationConfig.GetDeveloperProductStatus(productId)
+		warn(string.format(
+			"[DataManager]: Blocked disabled/non-GTR product prompt player=%s productId=%s status=%s reason=%s",
+			player and player.Name or "<unknown>",
+			tostring(productId),
+			tostring(status),
+			tostring(metadata and metadata.Reason or "not_active_chefs_product")
+		))
+		return
+	end
+
 	if ProductFunctions[productId] == nil then
 		warn("[DataManager]: No product function under id: ".. productId)
 		return
@@ -1672,8 +1691,9 @@ local function ProcessReceipt(recieptInfo)
 		end
 
 		if profile ~= nil then
-			if ProductFunctions[recieptInfo.ProductId] == nil then
-				warn("[DataManager]: No product found under id: " .. recieptInfo.ProductId)
+			local productId = tonumber(recieptInfo.ProductId)
+			if productId == nil or ProductFunctions[productId] == nil then
+				warn("[DataManager]: No product found under id: " .. tostring(recieptInfo.ProductId))
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
 
@@ -1690,20 +1710,36 @@ local function ProcessReceipt(recieptInfo)
 						return Enum.ProductPurchaseDecision.NotProcessedYet
 					end
 
-					local price, productName = GetProductPrice(recieptInfo.ProductId)
-					if price > 0 then
-						DataManager:AddValue(player, "TotalStats.RobuxSpent", price)
+					local productStatus, productMetadata = MonetizationConfig.GetDeveloperProductStatus(productId)
+					local shouldRecordPurchase = productStatus == MonetizationConfig.Status.Active
+					local price = 0
+					local productName = "Product " .. tostring(productId)
+					if shouldRecordPurchase then
+						price, productName = GetProductPrice(productId)
+						if price > 0 then
+							DataManager:AddValue(player, "TotalStats.RobuxSpent", price)
+						end
+					else
+						warn(string.format(
+							"[DataManager]: Processing disabled/non-GTR product receipt without grant accounting player=%s productId=%s status=%s reason=%s",
+							player.Name,
+							tostring(productId),
+							tostring(productStatus),
+							tostring(productMetadata and productMetadata.Reason or "not_active_chefs_product")
+						))
 					end
 
 					---------------------------------------------------------------
 					--  ➤  oryginalna logika produktu
 					---------------------------------------------------------------
-					ProductFunctions[recieptInfo.ProductId](recieptInfo, player, profile, DataManager)
+					ProductFunctions[productId](recieptInfo, player, profile, DataManager)
 
 					---------------------------------------------------------------
 					--  ➤  wrzuć ogłoszenie do kolejki MessagingService
 					---------------------------------------------------------------
-					EnqueuePurchaseAnnouncement(player, recieptInfo.ProductId, productName, price)
+					if shouldRecordPurchase then
+						EnqueuePurchaseAnnouncement(player, productId, productName, price)
+					end
 				end
 			)
 		end

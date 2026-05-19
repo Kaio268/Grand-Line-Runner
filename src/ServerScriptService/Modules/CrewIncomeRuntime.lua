@@ -27,6 +27,8 @@ local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
 local shorten = require(ReplicatedStorage.Modules.Shorten)
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
+local MonetizationConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
+local PopUpModule = require(ReplicatedStorage.Modules:WaitForChild("PopUpModule"))
 
 local stealProductByRarity = {
 	Common = 3512126073,
@@ -2191,6 +2193,24 @@ local function bindStandPrompt(player, plot, standModel)
 				stealPromptDebounce[plr] = now
 
 				local productId = getStealProductIdForCrewMember(crewMemberToSteal)
+				if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
+					standDebug(
+						"steal rejected actor=%s stand=%s crewMember=%s productId=%s reason=disabled_non_gtr_product",
+						plr.Name,
+						standName,
+						tostring(crewMemberToSteal),
+						tostring(productId)
+					)
+					PopUpModule:Server_SendPopUp(
+						plr,
+						MonetizationConfig.UnavailableMessage,
+						Color3.fromRGB(255, 104, 104),
+						Color3.fromRGB(0, 0, 0),
+						3,
+						true
+					)
+					return
+				end
 				if not CrewQuickSlotService.CanGainOrNotify(plr, crewMemberToSteal, 1, "StealPrompt:" .. tostring(standName)) then
 					standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=quick_slots_full", plr.Name, standName, tostring(crewMemberToSteal))
 					return

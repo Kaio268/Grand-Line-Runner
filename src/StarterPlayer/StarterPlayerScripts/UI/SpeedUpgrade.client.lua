@@ -15,8 +15,10 @@ local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdap
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local SpeedUpgradeTutorialBridge = require(Modules:WaitForChild("SpeedUpgradeTutorialBridge"))
 local SpeedUpgrade = require(Modules:WaitForChild("Configs"):WaitForChild("SpeedUpgrade"))
+local MonetizationConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
+local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local SpeedUpgradeScreen = require(UiFolder:WaitForChild("SpeedUpgrade"):WaitForChild("SpeedUpgradeScreen"))
 
 local BuySpeedUpgradeRemote = ReplicatedStorage:WaitForChild("BuySpeedUpgrade")
@@ -87,6 +89,9 @@ local function getProductPrice(productId)
 	if typeof(productId) ~= "number" then
 		return 0
 	end
+	if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
+		return 0
+	end
 	if productPriceCache[productId] ~= nil then
 		return productPriceCache[productId]
 	end
@@ -117,6 +122,22 @@ local function computeCost(config, currentSpeed)
 	return math.floor(total + 0.5)
 end
 
+local function showPurchaseUnavailable(productId)
+	warn(string.format(
+		"[SpeedUpgrade] Blocked disabled/non-GTR speed product prompt productId=%s",
+		tostring(productId)
+	))
+	pcall(function()
+		PopUpModule:Local_SendPopUp(
+			MonetizationConfig.UnavailableMessage,
+			Color3.fromRGB(255, 104, 104),
+			Color3.fromRGB(0, 0, 0),
+			3,
+			true
+		)
+	end)
+end
+
 local function buildViewModel()
 	local currentSpeed = tonumber(speedValue.Value) or 0
 	local items = {}
@@ -125,6 +146,7 @@ local function buildViewModel()
 		local config = SpeedUpgrade[key]
 		local addSpeed = tonumber(config.AddSpeed) or 0
 		local productId = tonumber(config.ProductID)
+		local canPromptRobux = MonetizationConfig.CanPromptDeveloperProduct(productId)
 		local cost = computeCost(config, currentSpeed)
 		items[index] = {
 			key = tostring(key),
@@ -132,7 +154,8 @@ local function buildViewModel()
 			currentText = string.format("Current: %s", Shorten.roundNumber(currentSpeed)),
 			afterText = string.format("After: %s", Shorten.roundNumber(currentSpeed + addSpeed)),
 			buyText = Shorten.roundNumber(cost) .. CurrencyUtil.getCompactSuffix(),
-			robuxText = "" .. Shorten.roundNumber(getProductPrice(productId)),
+			robuxText = if canPromptRobux then "Robux " .. Shorten.roundNumber(getProductPrice(productId)) else "Coming Soon",
+			robuxEnabled = canPromptRobux,
 			productId = productId,
 		}
 	end
@@ -163,9 +186,14 @@ local function render()
 			ReactModalRegistry.Close("SpeedUpgrade")
 		end,
 		onRobux = function(productId)
-			if typeof(productId) == "number" then
-				MarketplaceService:PromptProductPurchase(player, productId)
+			if typeof(productId) ~= "number" then
+				return
 			end
+			if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
+				showPurchaseUnavailable(productId)
+				return
+			end
+			MarketplaceService:PromptProductPurchase(player, productId)
 		end,
 		onRefsChanged = syncTutorialRefs,
 	}), host))

@@ -2,7 +2,6 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
-local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ContentProvider = game:GetService("ContentProvider")
 local RNG = Random.new()
@@ -1215,116 +1214,14 @@ function PopUpModule:Local_ShowChestOpenResult(openResult)
 	end
 end
 
-local isPromptActive = false
-local function playBuyAnimation(mainGui)
-	local buyAnimation = mainGui:WaitForChild("BuyAnimation")
-	buyAnimation.Visible = true
-	buyAnimation.Transparency = 1
-
-	local circle = buyAnimation:WaitForChild("Loading")
-	circle.ImageTransparency = 1
-
-	local tweenInfoShow = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(buyAnimation, tweenInfoShow, {Transparency = 0.5}):Play()
-	TweenService:Create(circle, tweenInfoShow, {ImageTransparency = 0}):Play()
-
-	circle.Rotation = 0
-	local rotationTween = TweenService:Create(
-		circle,
-		TweenInfo.new(1, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1),
-		{Rotation = 360}
-	)
-	rotationTween:Play()
-
-	local moneyLabels = {}
-	for _, child in ipairs(buyAnimation:GetDescendants()) do
-		if child:IsA("ImageLabel") and child.Name == "Money" then
-			table.insert(moneyLabels, child)
-			child:SetAttribute("OriginalSize", child.Size)
-			child.ImageTransparency = 1
-		end
-	end
-
-	local moneyTweenActive = true
-	local function startMoneyTween(label)
-		if not moneyTweenActive then return end
-		local orig = label:GetAttribute("OriginalSize")
-		if not orig then return end
-
-		local multiplier = math.random(105, 110) / 100
-		local newSize = UDim2.new(
-			orig.X.Scale * multiplier,
-			orig.X.Offset * multiplier,
-			orig.Y.Scale * multiplier,
-			orig.Y.Offset * multiplier
-		)
-
-		local tweenBig = TweenService:Create(
-			label,
-			TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{Size = newSize, ImageTransparency = 0}
-		)
-		local tweenSmall = TweenService:Create(
-			label,
-			TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{Size = orig, ImageTransparency = 0}
-		)
-
-		tweenBig.Completed:Connect(function()
-			tweenSmall:Play()
-		end)
-		tweenSmall.Completed:Connect(function()
-			if moneyTweenActive then
-				startMoneyTween(label)
-			end
-		end)
-
-		tweenBig:Play()
-	end
-
-	for _, label in ipairs(moneyLabels) do
-		startMoneyTween(label)
-	end
-
-	local function cleanup(callback)
-		moneyTweenActive = false
-		rotationTween:Cancel()
-
-		local tweenHide = TweenService:Create(
-			buyAnimation,
-			TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{Transparency = 1}
-		)
-		local tweenCircleHide = TweenService:Create(
-			circle,
-			TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-			{ImageTransparency = 1}
-		)
-
-		tweenHide:Play()
-		tweenCircleHide:Play()
-
-		for _, label in ipairs(moneyLabels) do
-			local orig = label:GetAttribute("OriginalSize")
-			if orig then
-				TweenService:Create(
-					label,
-					TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-					{Size = orig, ImageTransparency = 1}
-				):Play()
-			end
-		end
-
-		tweenHide.Completed:Connect(function()
-			buyAnimation.Visible = false
-			callback()
-		end)
-	end
-
-	return { buyAnimation = buyAnimation, cleanup = cleanup }
-end
-
 function PopUpModule:Local_PromptGamepass(player, id)
+	warn(string.format(
+		"[PopUpModule] Legacy Local_PromptGamepass blocked player=%s id=%s",
+		player and player.Name or "<unknown>",
+		tostring(id)
+	))
+	return
+	--[[
 	if isPromptActive then return end
 	isPromptActive = true
 
@@ -1335,8 +1232,6 @@ function PopUpModule:Local_PromptGamepass(player, id)
 	playSound("Prompt")
 
 	local connection
-	connection = MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(plr, gamePassId, wasPurchased)
-		print("Event PromptGamePassPurchaseFinished fired for", plr, gamePassId, wasPurchased)
 		if ((typeof(plr) == "Instance" and plr == player) or (typeof(plr) == "number" and plr == player.UserId))
 			and gamePassId == id then
 
@@ -1357,7 +1252,6 @@ function PopUpModule:Local_PromptGamepass(player, id)
 				-- Pobieramy informacje o gamepassie
 				local gamepassInfo
 				local success = pcall(function()
-					gamepassInfo = MarketplaceService:GetProductInfo(id, Enum.InfoType.GamePass)
 				end)
 
 				if success and gamepassInfo then
@@ -1500,10 +1394,17 @@ function PopUpModule:Local_PromptGamepass(player, id)
 		end
 	end)
 
-	MarketplaceService:PromptGamePassPurchase(player, id)
+	]]
 end
 
 function PopUpModule:Local_PromptProduct(player, id)
+	warn(string.format(
+		"[PopUpModule] Legacy Local_PromptProduct blocked player=%s id=%s",
+		player and player.Name or "<unknown>",
+		tostring(id)
+	))
+	return
+	--[[
 	if isPromptActive then return end
 	isPromptActive = true
 
@@ -1514,8 +1415,6 @@ function PopUpModule:Local_PromptProduct(player, id)
 	playSound("Prompt")
 
 	local connection
-	connection = MarketplaceService.PromptProductPurchaseFinished:Connect(function(plr, productId, wasPurchased)
-		print("Event PromptProductPurchaseFinished fired for", plr, productId, wasPurchased)
 		if ((typeof(plr) == "Instance" and plr == player) or (typeof(plr) == "number" and plr == player.UserId))
 			and productId == id then
 			self:Local_SendPopUp(
@@ -1532,7 +1431,7 @@ function PopUpModule:Local_PromptProduct(player, id)
 		end
 	end)
 
-	MarketplaceService:PromptProductPurchase(player, id)
+	]]
 end
 
 
@@ -1685,11 +1584,19 @@ function PopUpModule:Server_ShowChestOpenResult(player, openResult)
 end
 
 function PopUpModule:Server_PromptGamepass(player, id)
-	PopUpEvent:FireClient(player, "PromptGamepass", id)
+	warn(string.format(
+		"[PopUpModule] Legacy Server_PromptGamepass blocked player=%s id=%s",
+		player and player.Name or "<unknown>",
+		tostring(id)
+	))
 end
 
 function PopUpModule:Server_PromptProduct(player, id)
-	PopUpEvent:FireClient(player, "PromptProduct", id)
+	warn(string.format(
+		"[PopUpModule] Legacy Server_PromptProduct blocked player=%s id=%s",
+		player and player.Name or "<unknown>",
+		tostring(id)
+	))
 end
 
 function PopUpModule:Server_Transition(player, time)

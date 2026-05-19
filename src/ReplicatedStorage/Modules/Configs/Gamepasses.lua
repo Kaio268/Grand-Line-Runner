@@ -2,6 +2,7 @@ local Gamepasses = {
 	["VIP"] = {
 		TYPE = "Gamepass",
 		ID = 1827239335,
+		Active = true,
 		Icon = "rbxassetid://118443250256506",
 		
 		Description = "Get x1.25 Beli, a VIP tag, plus access to shortcuts",
@@ -11,28 +12,11 @@ local Gamepasses = {
 		TYPE = "Gamepass",
 
 		ID = 1667343349,
+		Active = false,
+		Placeholder = true,
 		Icon = "rbxassetid://76300573750363",
 
-		Description = "Earn x2 Money and make 2x more from Crewmates",
-	},
-	
-	["Juice Duchess"] = {
-		TYPE = "Product",
-
-		ID = 3512059347,
-		Icon = "rbxassetid://89671349580383",
-		LegacyRewardName = "La Vacca Saturno Saturnita",
-
-		Description = "Earn lots of Beli and progress much faster in the game",
-	},
-	
-	["Stop Disasters"] = {
-		TYPE = "Product",
-
-		ID = 3509345591,
-		Icon = "rbxassetid://108891018223154",
-
-		Description = "Pause all Disasters for 30 seconds and gain time to progress safely",
+		Description = "Future 2x Beli gamepass. Purchase is disabled until a Chefs-owned pass is configured.",
 	},
 }
 
