@@ -52,6 +52,8 @@ local CONFIG = {
 	WaveHeightScale = 1,
 	-- WaveThicknessScale controls front-to-back wave depth.
 	WaveThicknessScale = 1,
+	-- Keeps wave hitboxes/visuals away from side walls and late-added cave/VIP spaces.
+	WaveWallPadding = 60,
 	DiagnosticsInterval = 2,
 	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
 	DriftSpeedMinMultiplier = 1.35,
@@ -61,16 +63,25 @@ local CONFIG = {
 			Name = "Normal",
 			Speed = 72,
 			WidthScale = 1,
+			DriftScale = 0.7,
 		},
 		{
 			Name = "Fast",
 			Speed = 128,
 			WidthScale = 1,
+			DriftScale = 0.3,
+		},
+		{
+			Name = "Fast Wide",
+			Speed = 108,
+			WidthScale = 1.35,
+			DriftScale = 0.65,
 		},
 		{
 			Name = "Wide",
 			Speed = 52,
 			WidthScale = 1.6,
+			DriftScale = 1,
 		},
 	},
 }
@@ -788,11 +799,16 @@ local function getWaveTemplate()
 end
 
 -- Accepts the corridor direction and available sideways room for drifting hazards.
-local function createServerHazardController(hazardRoot, startCF, endCF, speed, lateralDirection, lateralDriftLimit)
+local function createServerHazardController(hazardRoot, startCF, endCF, speed, lateralDirection, lateralDriftLimit, variant)
 	local distance = (startCF.Position - endCF.Position).Magnitude
 	local _, hazardSize = getBox(hazardRoot)
 	local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
-	local maxDrift = math.max(0, tonumber(lateralDriftLimit) or 0) * math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+	local availableDrift = math.max(0, tonumber(lateralDriftLimit) or 0)
+	local variantDriftScale = math.clamp(tonumber(variant and variant.DriftScale) or 1, 0, 1)
+	local requestedMaxDrift = availableDrift
+		* math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+		* variantDriftScale
+	local maxDrift = math.min(availableDrift, requestedMaxDrift)
 	local initialLateralOffset = 0
 	local lateralVelocity = 0
 
@@ -838,6 +854,7 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 	hazardRoot:SetAttribute("WaveInitialLateralOffset", initialLateralOffset)
 	hazardRoot:SetAttribute("WaveLateralVelocity", lateralVelocity)
 	hazardRoot:SetAttribute("WaveMaxDrift", maxDrift)
+	hazardRoot:SetAttribute("WaveDriftScale", variantDriftScale)
 	hazardRoot:SetAttribute("WaveMovementMode", "timeline_proxy")
 	hazardRoot:SetAttribute("WaveSpawnServerTime", Workspace:GetServerTimeNow())
 
@@ -1191,16 +1208,32 @@ local function spawnSharedHazard(spawnDelay)
 	end
 
 	local lateralDirection = corridorVector.Unit
-	local safeHalfOffset = math.max(corridorWidth - waveWidth, 0) * 0.5
+	local wallPadding = math.max(0, tonumber(CONFIG.WaveWallPadding) or 0)
+	local paddedCorridorWidth = math.max(0, corridorWidth - (wallPadding * 2))
+	local corridorWidthScale = 1
+	if paddedCorridorWidth > 1e-4 and waveWidth > paddedCorridorWidth then
+		corridorWidthScale = math.max(0.05, paddedCorridorWidth / waveWidth)
+		scaleHazardWidth(clone, corridorWidthScale)
+		clone:SetAttribute("WaveCorridorWidthScale", corridorWidthScale)
+		startCF = computePivotOnTop(clone, startPart)
+		endCF = computePivotOnTop(clone, endPart)
+		_, boxSize = getBox(clone)
+		waveWidth = boxSize.X
+	end
+
+	local safeHalfOffset = math.max(paddedCorridorWidth - waveWidth, 0) * 0.5
 	local chosenOffset = 0
 	if safeHalfOffset > 1e-4 then
 		chosenOffset = rng:NextNumber(-safeHalfOffset, safeHalfOffset)
-	elseif waveWidth > corridorWidth then
+	elseif waveWidth > paddedCorridorWidth then
 		hazardTrace(
-			"offset clamped reason=wave_wider_than_corridor variant=%s waveWidth=%.2f corridorWidth=%.2f",
+			"offset clamped reason=wave_wider_than_padded_corridor variant=%s waveWidth=%.2f corridorWidth=%.2f wallPadding=%.2f paddedCorridorWidth=%.2f corridorWidthScale=%.3f",
 			tostring(variant.Name),
 			waveWidth,
-			corridorWidth
+			corridorWidth,
+			wallPadding,
+			paddedCorridorWidth,
+			corridorWidthScale
 		)
 	end
 
@@ -1241,7 +1274,7 @@ local function spawnSharedHazard(spawnDelay)
 	publishWaveDiagnostics(hazardsFolder)
 
 	hazardTrace(
-		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
+		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f wallPadding=%.2f paddedCorridorWidth=%.2f corridorWidthScale=%.3f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
 		formatInstancePath(waveFolder),
 		tostring(variant.Name),
 		tonumber(variant.Speed) or 0,
@@ -1252,6 +1285,9 @@ local function spawnSharedHazard(spawnDelay)
 		formatVector3(leftBound.Position),
 		formatVector3(rightBound.Position),
 		corridorWidth,
+		wallPadding,
+		paddedCorridorWidth,
+		corridorWidthScale,
 		chosenOffset,
 		endFrontExtent,
 		formatVector3(startCF.Position),
@@ -1260,7 +1296,7 @@ local function spawnSharedHazard(spawnDelay)
 	)
 
 	local lateralDriftLimit = math.max(0, safeHalfOffset - math.abs(chosenOffset))
-	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit)
+	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit, variant)
 	publishWaveDiagnostics(hazardsFolder)
 	return true, "spawned"
 end

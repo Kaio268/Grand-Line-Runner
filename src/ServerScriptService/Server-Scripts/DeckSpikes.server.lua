@@ -39,7 +39,10 @@ local CONFIG = {
 	GroundProbeHeight = 120,
 	GroundProbeDepth = 260,
 	MaxGroundHeightDelta = 3,
-	SafeGapBuffer = 24,
+	GroundNormalMin = 0.65,
+	SafeGapBuffer = 36,
+	FootprintSampleSpacing = 5,
+	MaxFootprintSampleSteps = 14,
 	SafeFloorNameKeywords = {
 		"gap",
 		"safe",
@@ -237,7 +240,7 @@ local function buildGroundRaycastParams(hazardsFolder)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	raycastParams.FilterDescendantsInstances = exclusions
-	raycastParams.IgnoreWater = false
+	raycastParams.IgnoreWater = true
 	return raycastParams
 end
 
@@ -274,16 +277,22 @@ local function isUnsafeSpikeSurface(instance)
 	return false
 end
 
-local function raycastGround(position, hazardsFolder)
+local function raycastGround(position, hazardsFolder, raycastParams)
 	local height = math.max(10, tonumber(CONFIG.GroundProbeHeight) or 120)
 	local depth = math.max(height + 10, tonumber(CONFIG.GroundProbeDepth) or 260)
 	local result = Workspace:Raycast(
 		position + Vector3.new(0, height, 0),
 		Vector3.new(0, -depth, 0),
-		buildGroundRaycastParams(hazardsFolder)
+		raycastParams or buildGroundRaycastParams(hazardsFolder)
 	)
 
-	if result and result.Instance and result.Instance:IsA("BasePart") and not isUnsafeSpikeSurface(result.Instance) then
+	if result
+		and result.Instance
+		and result.Instance:IsA("BasePart")
+		and result.Instance.CanCollide == true
+		and result.Normal.Y >= math.clamp(tonumber(CONFIG.GroundNormalMin) or 0.65, 0, 1)
+		and not isUnsafeSpikeSurface(result.Instance)
+	then
 		return result.Position
 	end
 
@@ -300,7 +309,8 @@ local function getSpikeSize(corridorWidth)
 end
 
 local function hasSafeGroundForFootprint(position, hazardsFolder, forward, lateral, size)
-	local centerPosition = raycastGround(position, hazardsFolder)
+	local raycastParams = buildGroundRaycastParams(hazardsFolder)
+	local centerPosition = raycastGround(position, hazardsFolder, raycastParams)
 	if not centerPosition then
 		return nil
 	end
@@ -310,29 +320,23 @@ local function hasSafeGroundForFootprint(position, hazardsFolder, forward, later
 	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
 	local sampleX = math.max(1, (size.X * 0.5) + buffer)
 	local sampleZ = math.max(1, (size.Z * 0.5) + buffer)
-	local innerSampleX = math.max(1, size.X * 0.35)
-	local innerSampleZ = math.max(1, size.Z * 0.35)
 	local maxHeightDelta = math.max(0.5, tonumber(CONFIG.MaxGroundHeightDelta) or 3)
-	local sampleOffsets = {
-		Vector3.zero,
-		forwardUnit * innerSampleZ,
-		-forwardUnit * innerSampleZ,
-		lateralUnit * innerSampleX,
-		-lateralUnit * innerSampleX,
-		forwardUnit * sampleZ,
-		-forwardUnit * sampleZ,
-		lateralUnit * sampleX,
-		-lateralUnit * sampleX,
-		lateralUnit * sampleX + forwardUnit * sampleZ,
-		lateralUnit * -sampleX + forwardUnit * sampleZ,
-		lateralUnit * sampleX + forwardUnit * -sampleZ,
-		lateralUnit * -sampleX + forwardUnit * -sampleZ,
-	}
+	local spacing = math.max(2, tonumber(CONFIG.FootprintSampleSpacing) or 8)
+	local maxSteps = math.max(2, math.floor(tonumber(CONFIG.MaxFootprintSampleSteps) or 8))
+	local xSteps = math.clamp(math.ceil((sampleX * 2) / spacing), 2, maxSteps)
+	local zSteps = math.clamp(math.ceil((sampleZ * 2) / spacing), 2, maxSteps)
 
-	for _, offset in ipairs(sampleOffsets) do
-		local samplePosition = raycastGround(position + offset, hazardsFolder)
-		if not samplePosition or math.abs(samplePosition.Y - centerPosition.Y) > maxHeightDelta then
-			return nil
+	for xIndex = 0, xSteps do
+		local xAlpha = if xSteps > 0 then xIndex / xSteps else 0.5
+		local x = -sampleX + (sampleX * 2 * xAlpha)
+		for zIndex = 0, zSteps do
+			local zAlpha = if zSteps > 0 then zIndex / zSteps else 0.5
+			local z = -sampleZ + (sampleZ * 2 * zAlpha)
+			local offset = (lateralUnit * x) + (forwardUnit * z)
+			local samplePosition = raycastGround(position + offset, hazardsFolder, raycastParams)
+			if not samplePosition or math.abs(samplePosition.Y - centerPosition.Y) > maxHeightDelta then
+				return nil
+			end
 		end
 	end
 
@@ -436,6 +440,28 @@ local function getOrCreateHitbox(model)
 	return hitbox
 end
 
+local function getSpikeFootprintSize(areaName, corridorWidth)
+	local size = getSpikeSize(corridorWidth)
+	local template = CONFIG.UseSpikeTrapTemplates and findSpikeTrapTemplate(areaName) or nil
+	if not template then
+		return size
+	end
+
+	local clone = template:Clone()
+	clone:ScaleTo(math.max(0.01, tonumber(CONFIG.SpikeVisualScale) or 1))
+	local hitbox = getOrCreateHitbox(clone)
+	if hitbox then
+		size = Vector3.new(
+			math.max(size.X, hitbox.Size.X),
+			math.max(size.Y, hitbox.Size.Y),
+			math.max(size.Z, hitbox.Size.Z)
+		)
+	end
+	clone:Destroy()
+
+	return size
+end
+
 local function configureSpikeVisual(model, hitbox)
 	for _, part in ipairs(getBaseParts(model)) do
 		configurePart(part, part == hitbox, part == hitbox)
@@ -471,7 +497,8 @@ end
 local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
 	local pathLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
-	local size = getSpikeSize(corridorWidth)
+	local areaName = getAreaNameForBiome(biomeIndex)
+	local size = getSpikeFootprintSize(areaName, corridorWidth)
 	local edgeBuffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
 	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (size.X * 0.5) - edgeBuffer)
 
