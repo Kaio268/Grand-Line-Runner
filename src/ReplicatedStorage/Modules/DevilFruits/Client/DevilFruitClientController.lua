@@ -361,7 +361,7 @@ end
 local function isCompactHud()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
 end
 
 local function renderCooldownHud()

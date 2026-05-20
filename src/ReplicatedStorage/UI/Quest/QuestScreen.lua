@@ -349,8 +349,8 @@ local function QuestScreen(props)
 			quest = quest,
 		})
 	end
-	local listY = props.noticeText and 154 or 118
-	local listHeightDelta = props.noticeText and -166 or -130
+	local listY = props.noticeText and 142 or 106
+	local listHeightDelta = props.noticeText and -154 or -118
 
 	return e("Frame", {
 		ref = rootRef,
@@ -471,15 +471,15 @@ local function QuestScreen(props)
 		}),
 		Body = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(18, 116),
-			Size = UDim2.new(1, -42, 1, -126),
+			Position = UDim2.fromOffset(18, 82),
+			Size = UDim2.new(1, -42, 1, -92),
 			ZIndex = 3,
 		}, {
 			Tabs = e("Frame", {
 				AnchorPoint = Vector2.new(0.5, 0),
 				BackgroundTransparency = 1,
 				Position = UDim2.fromScale(0.5, 0),
-				Size = compact and UDim2.new(1, 0, 0, 34) or UDim2.fromOffset(380, 34),
+				Size = UDim2.fromOffset(380, 34),
 				ZIndex = 4,
 			}, tabChildren),
 			Summary = e("Frame", {

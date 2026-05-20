@@ -69,7 +69,7 @@ end
 local function isCompact()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
 end
 
 local function PlayerOverheadBillboard(props)
@@ -81,14 +81,14 @@ local function PlayerOverheadBillboard(props)
 		Adornee = entry.adornee,
 		AlwaysOnTop = true,
 		LightInfluence = 0,
-		MaxDistance = compact and 70 or 120,
-		Size = compact and UDim2.fromOffset(250, 72) or UDim2.fromOffset(330, 96),
-		StudsOffsetWorldSpace = compact and Vector3.new(0, 2.75, 0) or Vector3.new(0, 3.05, 0),
+		MaxDistance = compact and 45 or 120,
+		Size = compact and UDim2.fromOffset(150, 44) or UDim2.fromOffset(330, 96),
+		StudsOffsetWorldSpace = compact and Vector3.new(0, 2.45, 0) or Vector3.new(0, 3.05, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Name = textRow(tostring(entry.playerName or "Player"), TEXT, 0, compact and 25 or 34),
-		Beli = textRow(formatBeli(entry.balance), GOLD, compact and 23 or 31, compact and 19 or 24),
-		Status = textRow(statusText, statusColor, compact and 46 or 59, compact and 14 or 18),
+		Name = textRow(tostring(entry.playerName or "Player"), TEXT, 0, compact and 15 or 34),
+		Beli = textRow(formatBeli(entry.balance), GOLD, compact and 15 or 31, compact and 11 or 24),
+		Status = textRow(statusText, statusColor, compact and 28 or 59, compact and 8 or 18),
 	})
 end
 

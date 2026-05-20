@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -11,6 +12,8 @@ local FRAMES_DISPLAY_ORDER = 120
 local STANDALONE_LAYER_NAME = "ReactModalLayer"
 local BYPASS_OPEN_UI_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
 local VIEWPORT_MARGIN = Vector2.new(24, 24)
+local MOBILE_FRAME_SCALE = Vector2.new(0.74, 0.8)
+local MOBILE_CONTENT_SCALE = 0.62
 
 local function disconnectAll(bucket)
 	for _, connection in ipairs(bucket) do
@@ -83,6 +86,12 @@ function ReactFrameModalAdapter:_getAvailableViewportSize()
 		math.max(1, viewport.X - VIEWPORT_MARGIN.X),
 		math.max(1, viewport.Y - VIEWPORT_MARGIN.Y)
 	)
+end
+
+function ReactFrameModalAdapter:_isMobileTestViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000
 end
 
 function ReactFrameModalAdapter:_bindViewportTracking()
@@ -242,7 +251,8 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	if self.standalone or frame.Visible ~= true then
 		frame.Position = UDim2.fromScale(0.5, 0.5)
 	end
-	local desiredSize = self.frameSize or UDim2.fromScale(0.9, 0.84)
+	local mobileTest = self:_isMobileTestViewport()
+	local desiredSize = if mobileTest then UDim2.fromScale(MOBILE_FRAME_SCALE.X, MOBILE_FRAME_SCALE.Y) else (self.frameSize or UDim2.fromScale(0.9, 0.84))
 	if self.standalone or frame.Visible ~= true then
 		frame.Size = desiredSize
 	end
@@ -257,11 +267,14 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 		end
 
 		local availableSize = self:_getAvailableViewportSize()
-		local maxSize = self.maxSize and Vector2.new(
+		local configuredMaxSize = self.maxSize and Vector2.new(
 			math.min(self.maxSize.X, availableSize.X),
 			math.min(self.maxSize.Y, availableSize.Y)
 		) or availableSize
-		local minSize = self.minSize and Vector2.new(
+		local maxSize = if mobileTest
+			then Vector2.new(availableSize.X * MOBILE_FRAME_SCALE.X, availableSize.Y * MOBILE_FRAME_SCALE.Y)
+			else configuredMaxSize
+		local minSize = if mobileTest then Vector2.new(1, 1) else self.minSize and Vector2.new(
 			math.min(self.minSize.X, maxSize.X),
 			math.min(self.minSize.Y, maxSize.Y)
 		) or Vector2.zero
@@ -457,6 +470,18 @@ function ReactFrameModalAdapter:EnsureHost()
 		host.Parent = frame
 	end
 
+	local mobileTest = self:_isMobileTestViewport()
+	local contentScale = mobileTest and MOBILE_CONTENT_SCALE or 1
+	local scale = host:FindFirstChild(self.hostName .. "ContentScale")
+	if not scale then
+		scale = Instance.new("UIScale")
+		scale.Name = self.hostName .. "ContentScale"
+		scale.Parent = host
+	end
+	scale.Scale = contentScale
+	host.AnchorPoint = Vector2.new(0.5, 0.5)
+	host.Position = UDim2.fromScale(0.5, 0.5)
+	host.Size = UDim2.fromScale(1 / contentScale, 1 / contentScale)
 	host.Visible = true
 	host.ClipsDescendants = true
 	self:_bindLegacySuppression(frame, host)

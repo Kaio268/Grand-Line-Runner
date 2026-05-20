@@ -466,7 +466,7 @@ local function IndexScreen(props)
 				Visible = activeTab == "index" and activeCategory == categoryId,
 			}, {
 				Content = e(IndexGrid, {
-					columns = isCompact and 2 or 5,
+					columns = 5,
 					units = categoryUnits,
 				}),
 			})
@@ -481,7 +481,7 @@ local function IndexScreen(props)
 			Visible = activeTab == "index",
 		}, {
 			Content = e(IndexGrid, {
-				columns = isCompact and 2 or 5,
+				columns = 5,
 				units = filteredUnits,
 			}),
 		})
@@ -604,7 +604,7 @@ local function IndexScreen(props)
 					Visible = activeTab == "fruits",
 				}, {
 					Content = e(IndexGrid, {
-						columns = isCompact and 2 or 5,
+						columns = 5,
 						units = fruitUnits,
 					}),
 				}) or nil,

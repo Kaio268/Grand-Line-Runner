@@ -18,7 +18,9 @@ local LavaWaves = require(Modules:WaitForChild("Configs"):WaitForChild("LavaWave
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
 
 local function isCompactViewport()
-	return UserInputService.TouchEnabled
+	local camera = workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000
 end
 
 local function buildDefaultSections()
@@ -236,7 +238,7 @@ local function render()
 			alpha = alpha,
 			userId = tonumber(info.UserId) or 0,
 			isDead = humanoid ~= nil and humanoid.Health <= 0,
-			size = isCompactViewport() and 22 or nil,
+			size = isCompactViewport() and 14 or nil,
 		}
 	end
 
@@ -248,7 +250,7 @@ local function render()
 				waveMarkers[#waveMarkers + 1] = {
 					alpha = alphaFromWorldPos(worldPos, WAVE_MARKER_PADDING),
 					image = getHazardImage(hazard),
-					size = isCompactViewport() and 24 or nil,
+					size = isCompactViewport() and 16 or nil,
 				}
 			end
 		end

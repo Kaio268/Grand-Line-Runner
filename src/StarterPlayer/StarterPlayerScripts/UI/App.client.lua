@@ -2263,12 +2263,12 @@ end
 local function getToggleLayout()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
 
 	return {
 		anchorPoint = Vector2.new(0, 0),
 		position = UDim2.fromOffset(0, 16),
-		size = UDim2.fromOffset(mobile and 58 or 74, mobile and 58 or 74),
+		size = UDim2.fromOffset(mobile and 52 or 74, mobile and 52 or 74),
 		compact = true,
 		dock = "hotbarLeft",
 		mobile = mobile,

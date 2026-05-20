@@ -1,5 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -356,7 +358,10 @@ local function prepareFrame()
 		return
 	end
 
-	if frame.Visible ~= true then
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	if frame.Visible ~= true and not mobile then
 		frame.Size = SETTINGS_FRAME_SIZE
 	end
 	frame.BackgroundTransparency = 1

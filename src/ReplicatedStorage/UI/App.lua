@@ -897,6 +897,33 @@ local function AnimatedInventoryModal(props)
 		panelChildren[key] = value
 	end
 
+	local contentScale = math.clamp(tonumber(props.contentScale) or 1, 0.5, 1)
+	local renderedPanelChildren = panelChildren
+	if contentScale < 1 then
+		local scaledChildren = {
+			ContentScale = e("UIScale", {
+				Scale = contentScale,
+			}),
+		}
+
+		for key, value in pairs(cachedPanelChildren) do
+			scaledChildren[key] = value
+		end
+
+		renderedPanelChildren = {
+			Scale = panelChildren.Scale,
+			ContentHost = e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				BackgroundTransparency = 1,
+				BorderSizePixel = 0,
+				ClipsDescendants = false,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromScale(1 / contentScale, 1 / contentScale),
+				ZIndex = 5,
+			}, scaledChildren),
+		}
+	end
+
 	return e("Frame", {
 		ref = rootRef,
 		BackgroundTransparency = 1,
@@ -919,7 +946,7 @@ local function AnimatedInventoryModal(props)
 			Position = props.isOpen and (props.openPosition or INVENTORY_MODAL_OPEN_POSITION) or (props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION),
 			Size = props.panelSize or UDim2.fromScale(0.82, 0.76),
 			ZIndex = 5,
-		}, panelChildren),
+		}, renderedPanelChildren),
 	})
 end
 
@@ -939,6 +966,7 @@ local function hotbarSlot(props)
 	local slotBottomColor = item and accent:Lerp(Color3.fromRGB(12, 17, 30), 0.92) or Color3.fromRGB(10, 14, 24)
 	local staticPreviewImage = getStaticCrewPreviewImage(item)
 	local hasStaticPreview = staticPreviewImage ~= ""
+	local compactSlot = slotSize <= 40
 
 	local slotProps = mergeProps({
 		BackgroundColor3 = slotBaseColor,
@@ -963,7 +991,7 @@ local function hotbarSlot(props)
 	if not hasStaticPreview then
 		previewChild = renderItemPreview(item, {
 			position = UDim2.fromScale(0.5, 0.52),
-			size = UDim2.fromOffset(40, 40),
+			size = UDim2.fromOffset(compactSlot and 22 or 40, compactSlot and 22 or 40),
 			zIndex = zIndexBase + 3 + hoverZIndexOffset,
 			fallbackFont = Enum.Font.GothamMedium,
 			fallbackTextColor = PALETTE.Muted,
@@ -1022,17 +1050,17 @@ local function hotbarSlot(props)
 			Font = Enum.Font.GothamBold,
 			Text = tostring(slot.slotLabel),
 			TextColor3 = item and (lockedSlot and Color3.fromRGB(230, 236, 245) or PALETTE.Cream) or PALETTE.Steel,
-			TextSize = 10,
+			TextSize = compactSlot and 7 or 10,
 			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
 			}),
 			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 3),
-				PaddingBottom = UDim.new(0, 3),
-				PaddingLeft = UDim.new(0, 7),
-				PaddingRight = UDim.new(0, 7),
+				PaddingTop = UDim.new(0, compactSlot and 1 or 3),
+				PaddingBottom = UDim.new(0, compactSlot and 1 or 3),
+				PaddingLeft = UDim.new(0, compactSlot and 4 or 7),
+				PaddingRight = UDim.new(0, compactSlot and 4 or 7),
 			}),
 		}) or nil,
 		Preview = previewChild,
@@ -1045,7 +1073,7 @@ local function hotbarSlot(props)
 			Font = Enum.Font.GothamBold,
 			Text = item.priceRobux and item.priceRobux > 0 and (tostring(item.priceRobux) .. " R$") or "LOCK",
 			TextColor3 = PALETTE.Cream,
-			TextSize = 10,
+			TextSize = compactSlot and 7 or 10,
 			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
 		}, {
 			Corner = e("UICorner", {
@@ -2775,13 +2803,13 @@ local function App(props)
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
 	local toggleGap = dockToggleLeft and (mobileLayout and 8 or 20) or 0
 	local hotbarSlotCount = math.max(1, #(props.hotbarSlots or {}))
-	local hotbarSlotWidth = mobileLayout and 54 or 64
-	local hotbarSlotGap = mobileLayout and 6 or 10
+	local hotbarSlotWidth = mobileLayout and 52 or 64
+	local hotbarSlotGap = mobileLayout and 7 or 10
 	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth
 		+ math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
 	local toggleSlotX = math.max(0, (toggleSlotIndex - 1) * (hotbarSlotWidth + hotbarSlotGap))
-	local resolvedTogglePosition = dockToggleLeft and UDim2.fromOffset(0, 20)
+	local resolvedTogglePosition = dockToggleLeft and UDim2.fromOffset(0, mobileLayout and 4 or 20)
 		or (dockToggleSlot and UDim2.fromOffset(toggleSlotX, 20) or toggleLayout.position)
 	local hotbarOffsetX = dockToggleLeft and (toggleWidth + toggleGap) or 0
 	local bottomBarZIndex = props.isOpen and 2 or 10
@@ -2812,8 +2840,8 @@ local function App(props)
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundTransparency = 1,
 			ClipsDescendants = false,
-			Position = UDim2.new(0.5, mobileLayout and 52 or 0, 1, mobileLayout and -10 or -20),
-			Size = UDim2.fromOffset(bottomBarWidth, mobileLayout and 82 or 104),
+			Position = UDim2.new(0.5, mobileLayout and -40 or 0, 1, mobileLayout and -10 or -20),
+			Size = UDim2.fromOffset(bottomBarWidth, mobileLayout and 66 or 104),
 			ZIndex = bottomBarZIndex,
 		}, {
 			Toggle = e(inventoryToggleButton, {
@@ -2831,7 +2859,7 @@ local function App(props)
 				BackgroundTransparency = 1,
 				ClipsDescendants = false,
 				Position = UDim2.fromOffset(hotbarOffsetX, 0),
-				Size = UDim2.fromOffset(hotbarWidth, mobileLayout and 78 or 96),
+				Size = UDim2.fromOffset(hotbarWidth, mobileLayout and 64 or 96),
 				ZIndex = bottomBarZIndex,
 			}, {
 				Label = not mobileLayout and e("TextLabel", {
@@ -2851,11 +2879,11 @@ local function App(props)
 					BorderSizePixel = 0,
 					CanvasSize = UDim2.new(),
 					ClipsDescendants = false,
-					Position = UDim2.fromOffset(0, mobileLayout and 6 or 18),
+					Position = UDim2.fromOffset(0, mobileLayout and 4 or 18),
 					ScrollBarImageTransparency = 1,
 					ScrollBarThickness = 0,
 					ScrollingDirection = Enum.ScrollingDirection.X,
-					Size = UDim2.new(1, 0, 0, mobileLayout and 64 or 78),
+					Size = UDim2.new(1, 0, 0, mobileLayout and 58 or 78),
 					ZIndex = bottomBarZIndex + 1,
 				}, (function()
 					local slotChildren = {
@@ -3597,7 +3625,8 @@ local function App(props)
 	local inventoryModal = e(AnimatedInventoryModal, {
 		isOpen = props.isOpen,
 		panelChildren = modalPanelChildren,
-		panelSize = UDim2.fromScale(0.82, 0.76),
+		panelSize = mobileLayout and UDim2.fromScale(0.74, 0.8) or UDim2.fromScale(0.82, 0.76),
+		contentScale = mobileLayout and 0.62 or 1,
 		openPosition = INVENTORY_MODAL_OPEN_POSITION,
 		closedPosition = INVENTORY_MODAL_CLOSED_POSITION,
 		backdropTransparency = INVENTORY_MODAL_BACKDROP_TRANSPARENCY,

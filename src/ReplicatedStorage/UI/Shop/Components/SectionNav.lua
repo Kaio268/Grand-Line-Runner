@@ -22,7 +22,7 @@ local function navButton(props)
 		BackgroundTransparency = 0.15,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.fromOffset(184, 52),
+		Size = UDim2.fromOffset(160, 52),
 		Text = "",
 		ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		[React.Event.MouseEnter] = function()

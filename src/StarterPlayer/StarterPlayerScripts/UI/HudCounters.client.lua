@@ -124,17 +124,17 @@ local function layoutDisplayLayer(layer, rowCount)
 	local _, bottomRightInset = GuiService:GetGuiInset()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
-	local rowHeight = mobile and 34 or TARGET_ROW_HEIGHT
-	local rowSpacing = mobile and 4 or TARGET_ROW_SPACING
-	local panelTop = mobile and 7 or HudCounterConfig.PanelPadding.Top
-	local panelBottom = mobile and 7 or HudCounterConfig.PanelPadding.Bottom
+	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	local rowHeight = mobile and 20 or TARGET_ROW_HEIGHT
+	local rowSpacing = mobile and 2 or TARGET_ROW_SPACING
+	local panelTop = mobile and 3 or HudCounterConfig.PanelPadding.Top
+	local panelBottom = mobile and 3 or HudCounterConfig.PanelPadding.Bottom
 	local totalHeight = panelTop + panelBottom + (rowCount * rowHeight) + (math.max(0, rowCount - 1) * rowSpacing)
 	local moneyRowY = panelTop + ((math.min(3, math.max(1, rowCount)) - 1) * (rowHeight + rowSpacing))
-	local layerWidth = mobile and 176 or COUNTERS_WIDTH
+	local layerWidth = mobile and 96 or COUNTERS_WIDTH
 
 	layer.AnchorPoint = Vector2.new(0, 1)
-	layer.Position = UDim2.new(0, mobile and 10 or COUNTERS_LEFT_PADDING, 1, -((mobile and 14 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y))
+	layer.Position = UDim2.new(0, mobile and 4 or COUNTERS_LEFT_PADDING, 1, -((mobile and 4 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y))
 	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1
 	layer.BorderSizePixel = 0
@@ -157,7 +157,7 @@ local function layoutDisplayLayer(layer, rowCount)
 			0,
 			math.max(0, moneyRowY - notificationHeight + 6)
 		)
-		notifications.Size = UDim2.fromOffset(mobile and 138 or HudCounterConfig.NotificationWidth, notificationHeight)
+		notifications.Size = UDim2.fromOffset(mobile and 92 or HudCounterConfig.NotificationWidth, notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
 end
@@ -165,16 +165,16 @@ end
 local function getCounterRenderMetrics()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
 
 	return {
-		barGap = mobile and 5 or BAR_GAP,
-		iconSlotInnerSize = mobile and 26 or HudCounterConfig.IconSize,
-		iconSlotWidth = mobile and 34 or ICON_SLOT_WIDTH,
-		labelTextSize = mobile and 13 or nil,
-		rowHeight = mobile and 34 or TARGET_ROW_HEIGHT,
-		rowSpacing = mobile and 4 or TARGET_ROW_SPACING,
-		valueTextSize = mobile and 22 or nil,
+		barGap = mobile and 2 or BAR_GAP,
+		iconSlotInnerSize = mobile and 14 or HudCounterConfig.IconSize,
+		iconSlotWidth = mobile and 18 or ICON_SLOT_WIDTH,
+		labelTextSize = mobile and 8 or nil,
+		rowHeight = mobile and 20 or TARGET_ROW_HEIGHT,
+		rowSpacing = mobile and 2 or TARGET_ROW_SPACING,
+		valueTextSize = mobile and 14 or nil,
 	}
 end
 

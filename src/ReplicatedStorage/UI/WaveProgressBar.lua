@@ -189,12 +189,12 @@ local function segmentRow(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamMedium,
 				Position = UDim2.fromScale(0.5, 1),
-				Size = UDim2.new(1, -6, 0, compact and 10 or 14),
+				Size = UDim2.new(1, -6, 0, compact and 7 or 14),
 				Text = section.label or ("Biome " .. tostring(index)),
 				TextColor3 = if section.isImpact
 					then Color3.fromRGB(255, 228, 214)
 					else Color3.fromRGB(233, 241, 255),
-				TextSize = compact and 7 or 10,
+				TextSize = compact and 5 or 10,
 				TextTransparency = if section.isImpact then 0.05 else 0.16,
 				TextWrapped = true,
 				TextYAlignment = Enum.TextYAlignment.Bottom,
@@ -231,20 +231,20 @@ local function WaveProgressBar(props)
 		Root = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
-			Position = UDim2.new(0.5, 0, 0, compact and 86 or 18),
-			Size = UDim2.fromOffset(compact and 560 or 820, compact and 48 or 80),
+			Position = UDim2.new(0.5, 0, 0, compact and 58 or 18),
+			Size = UDim2.fromOffset(compact and 390 or 820, compact and 36 or 80),
 			ZIndex = 5,
 		}, {
 			Constraint = e("UISizeConstraint", {
-				MaxSize = compact and Vector2.new(620, 48) or Vector2.new(940, 80),
-				MinSize = compact and Vector2.new(320, 44) or Vector2.new(500, 72),
+				MaxSize = compact and Vector2.new(430, 36) or Vector2.new(940, 80),
+				MinSize = compact and Vector2.new(280, 32) or Vector2.new(500, 72),
 			}),
 			Backdrop = e("Frame", {
 				BackgroundColor3 = Color3.fromRGB(11, 15, 24),
 				BackgroundTransparency = 0.1,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, compact and 10 or 16),
-				Size = UDim2.new(1, 0, 0, compact and 26 or 40),
+				Position = UDim2.fromOffset(0, compact and 7 or 16),
+				Size = UDim2.new(1, 0, 0, compact and 20 or 40),
 				ZIndex = 5,
 			}, {
 				Corner = e("UICorner", {

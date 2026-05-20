@@ -298,6 +298,7 @@ local function SliderRow(props)
 	end
 
 	return e(RowShell, {
+		enableHover = false,
 		layoutOrder = props.layoutOrder,
 		children = {
 			Icon = e(IconBubble, {

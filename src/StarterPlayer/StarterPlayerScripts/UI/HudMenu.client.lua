@@ -57,11 +57,11 @@ local TILE_DEFS = {
 local function getHudLayout()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled
+	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000
 	local compact = mobile or viewport.X < 700 or viewport.Y < 500
-	local tileSize = if mobile then 58 elseif compact then 72 else 98
+	local tileSize = if mobile then 56 elseif compact then 72 else 98
 	local columnGap = if mobile then 4 elseif compact then 6 else 10
-	local rowGap = if mobile then 5 elseif compact then 6 else 10
+	local rowGap = if mobile then 4 elseif compact then 6 else 10
 	local stepX = tileSize + columnGap
 	local stepY = tileSize + rowGap
 
@@ -72,7 +72,7 @@ local function getHudLayout()
 		stepX = stepX,
 		stepY = stepY,
 		mobile = mobile,
-		containerPosition = if mobile then UDim2.fromOffset(6, 194) elseif compact then UDim2.fromOffset(8, 160) else UDim2.fromOffset(10, 250),
+		containerPosition = if mobile then UDim2.fromOffset(118, 138) elseif compact then UDim2.fromOffset(8, 160) else UDim2.fromOffset(10, 250),
 		positions = {
 			Store = Vector2.new(0, 0),
 			Index = Vector2.new(stepX, 0),
@@ -433,7 +433,7 @@ local function ensureShell(container, definition, index)
 	if existing and existing:IsA("GuiButton") then
 		existing.Visible = true
 		existing.Active = true
-		existing.ClipsDescendants = false
+		existing.ClipsDescendants = true
 		existing.Size = UDim2.fromOffset(layout.tileSize, layout.tileSize)
 		existing.LayoutOrder = index
 		CollectionService:AddTag(existing, HUD_BUTTON_NO_ANIM_TAG)
@@ -449,7 +449,7 @@ local function ensureShell(container, definition, index)
 	button.Active = true
 	button.BackgroundTransparency = 1
 	button.BorderSizePixel = 0
-	button.ClipsDescendants = false
+	button.ClipsDescendants = true
 	button.ImageTransparency = 1
 	button.Visible = true
 	button.LayoutOrder = index
@@ -525,6 +525,7 @@ local function ensureBadge(button, defaultText)
 		gradient.Parent = badge
 	end
 
+	local layout = getHudLayout()
 	button.ClipsDescendants = false
 
 	local badgeTextValue = readBadgeDisplayText(badge, defaultText)
@@ -533,12 +534,12 @@ local function ensureBadge(button, defaultText)
 		badge.ClipsDescendants = false
 		badge.AnchorPoint = Vector2.new(1, 0)
 		badge.BackgroundColor3 = Color3.fromRGB(232, 72, 102)
-		badge.Position = UDim2.new(1, 8, 0, -6)
+		badge.Position = layout.mobile and UDim2.new(1, 3, 0, -3) or UDim2.new(1, 8, 0, -6)
 		badge.ZIndex = math.max(badge.ZIndex, button.ZIndex + 28, 32)
 		if badgeTextValue == "NEW" then
-			badge.Size = UDim2.fromOffset(42, 22)
+			badge.Size = layout.mobile and UDim2.fromOffset(28, 14) or UDim2.fromOffset(42, 22)
 		else
-			badge.Size = UDim2.fromOffset(34, 22)
+			badge.Size = layout.mobile and UDim2.fromOffset(24, 14) or UDim2.fromOffset(34, 22)
 		end
 	end
 
@@ -567,6 +568,7 @@ local function ensureBadge(button, defaultText)
 		end
 		textLabel.TextStrokeColor3 = Color3.fromRGB(82, 12, 29)
 		textLabel.TextStrokeTransparency = 0.08
+		textLabel.TextSize = layout.mobile and 9 or textLabel.TextSize
 		textLabel.ZIndex = math.max(textLabel.ZIndex, badge.ZIndex + 1, 33)
 	end
 
@@ -641,17 +643,18 @@ local function ensureGiftSummaryTimer(button)
 	end
 
 	summary.Visible = true
+	local layout = getHudLayout()
 	summary.AnchorPoint = Vector2.new(0.5, 0)
 	summary.BackgroundColor3 = Color3.fromRGB(7, 14, 24)
 	summary.BackgroundTransparency = 0.16
 	summary.BorderSizePixel = 0
 	summary.Font = Enum.Font.GothamBold
-	summary.Position = UDim2.new(0.5, 0, 0, 4)
-	summary.Size = UDim2.fromOffset(60, 18)
+	summary.Position = UDim2.new(0.5, 0, 0, layout.mobile and 2 or 4)
+	summary.Size = layout.mobile and UDim2.fromOffset(42, 12) or UDim2.fromOffset(60, 18)
 	summary.Text = tostring(summary.Text ~= "" and summary.Text or "--")
 	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
 	summary.TextScaled = false
-	summary.TextSize = 13
+	summary.TextSize = layout.mobile and 8 or 13
 	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	summary.TextStrokeTransparency = 0
 	summary.TextXAlignment = Enum.TextXAlignment.Center
@@ -838,19 +841,29 @@ local function buildTileStyle(button)
 	if iconStyle then
 		local iconSize = HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66)
 		local layout = getHudLayout()
-		local maxIconSize = layout.mobile and math.max(42, layout.tileSize - 8) or math.huge
-		iconStyle.position = UDim2.fromScale(0.5, 0.34)
+		local mobileIconInset = if button.Name == "Store" or button.Name == "Quest" or button.Name == "Settings" then 2 else 6
+		local maxIconSize = layout.mobile and math.max(42, layout.tileSize - mobileIconInset) or math.huge
+		iconStyle.position = UDim2.fromScale(0.5, layout.mobile and 0.36 or 0.34)
 		iconStyle.size = UDim2.fromOffset(math.min(iconSize.X, maxIconSize), math.min(iconSize.Y, maxIconSize))
 		iconStyle.scaleType = HUD_ICON_SCALE_TYPE_OVERRIDES[button.Name] or Enum.ScaleType.Fit
 		iconStyle.backgroundTransparency = 1
 		iconStyle.zIndex = math.max(clampNumber(iconStyle.zIndex, 14, 24), 18)
 	end
 
+	local titleStyle = normalizeTitleStyle(pickTitleStyle(button))
+	local layout = getHudLayout()
+	if layout.mobile then
+		titleStyle.position = UDim2.fromScale(0.5, 0.73)
+		titleStyle.size = UDim2.new(1, -6, 0, 11)
+		titleStyle.textSize = 9
+		titleStyle.textWrapped = false
+	end
+
 	return {
 		background = backgroundStyle,
 		icon = iconStyle,
 		accent = nil,
-		title = normalizeTitleStyle(pickTitleStyle(button)),
+		title = titleStyle,
 		titleBand = buildTitleBandStyle(),
 		showBackground = false,
 		showTitleBand = false,
