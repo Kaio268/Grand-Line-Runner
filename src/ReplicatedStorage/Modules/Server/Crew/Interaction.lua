@@ -849,7 +849,7 @@ end
 
 local function reserveCrewCarrySlot(player, model, st, crewMemberData)
 	if carrySlotAdapter and typeof(carrySlotAdapter.AddCrewMember) == "function" then
-		return carrySlotAdapter.AddCrewMember(player, {
+		local carryData = {
 			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
 			DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
 			Image = crewMemberData and crewMemberData.Image or nil,
@@ -857,7 +857,21 @@ local function reserveCrewCarrySlot(player, model, st, crewMemberData)
 			CrewStorageName = resolveCrewMemberStorageName(model, st, crewMemberData),
 			Rarity = st and st.Rarity or nil,
 			Physical = true,
-		})
+		}
+
+		if model and model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true then
+			carryData.TutorialCrewMember = true
+			carryData.TutorialReward = true
+			carryData.TutorialToken = tostring(model:GetAttribute(TUTORIAL_TOKEN_ATTRIBUTE) or "")
+			carryData.TutorialRewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
+
+			local tutorialOwnerUserId = model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE)
+			if typeof(tutorialOwnerUserId) == "number" then
+				carryData.TutorialOwnerUserId = tutorialOwnerUserId
+			end
+		end
+
+		return carrySlotAdapter.AddCrewMember(player, carryData)
 	end
 
 	return {
