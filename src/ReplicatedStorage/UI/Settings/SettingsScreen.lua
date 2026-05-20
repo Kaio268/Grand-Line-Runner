@@ -122,7 +122,21 @@ end
 
 local function SliderRow(props)
 	local trackRef = React.useRef(nil)
-	local externalValue = clamp(round(props.value), 0, 100)
+	local minValue = round(if props.min ~= nil then props.min else 0)
+	local maxValue = round(if props.max ~= nil then props.max else 100)
+	if maxValue < minValue then
+		maxValue = minValue
+	end
+	local step = math.max(1, round(props.step or 1))
+	local function clampSliderValue(value)
+		local clamped = clamp(round(value), minValue, maxValue)
+		if step > 1 then
+			local stepped = minValue + (math.floor(((clamped - minValue) / step) + 0.5) * step)
+			return clamp(round(stepped), minValue, maxValue)
+		end
+		return clamped
+	end
+	local externalValue = clampSliderValue(props.value)
 	local displayValue, setDisplayValue = React.useState(externalValue)
 	local displayValueRef = React.useRef(externalValue)
 	local draggingRef = React.useRef(false)
@@ -130,12 +144,13 @@ local function SliderRow(props)
 	local inputEndedConnectionRef = React.useRef(nil)
 	local renderSteppedConnectionRef = React.useRef(nil)
 	local knobHovered, setKnobHovered = React.useState(false)
-	local progress = displayValue / 100
+	local sliderRange = math.max(0, maxValue - minValue)
+	local progress = if sliderRange > 0 then clamp((displayValue - minValue) / sliderRange, 0, 1) else 1
 	local knobDiameter = knobHovered and 40 or 36
 	local knobOffset = math.floor((0.5 - progress) * knobDiameter)
 
 	local function setDisplayAndPreview(nextValue)
-		local clamped = clamp(round(nextValue), 0, 100)
+		local clamped = clampSliderValue(nextValue)
 		if clamped == displayValueRef.current then
 			return
 		end
@@ -161,6 +176,7 @@ local function SliderRow(props)
 		end
 
 		local normalized = clamp((screenX - track.AbsolutePosition.X) / width, 0, 1)
+		local value = minValue + (normalized * math.max(0, maxValue - minValue))
 		debugSlider(
 			props.id,
 			"valueFromScreenX id=%s screenX=%.1f trackX=%.1f width=%.1f normalized=%.3f value=%.1f",
@@ -169,9 +185,9 @@ local function SliderRow(props)
 			track.AbsolutePosition.X,
 			width,
 			normalized,
-			normalized * 100
+			value
 		)
-		return normalized * 100
+		return value
 	end
 
 	local function updateFromScreenX(screenX)
@@ -263,11 +279,11 @@ local function SliderRow(props)
 			return nil
 		end
 
-		local synced = clamp(round(externalValue), 0, 100)
+		local synced = clampSliderValue(externalValue)
 		displayValueRef.current = synced
 		setDisplayValue(synced)
 		return nil
-	end, { externalValue })
+	end, { externalValue, minValue, maxValue })
 
 	React.useEffect(function()
 		return function()
@@ -315,6 +331,20 @@ local function SliderRow(props)
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 6,
 			}),
+			RangeLabel = props.rangeText and props.rangeText ~= "" and e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(74, 44),
+				Size = UDim2.fromOffset(178, 18),
+				Text = tostring(props.rangeText),
+				TextColor3 = THEME.GoldHighlight,
+				TextSize = 14,
+				TextScaled = false,
+				TextStrokeColor3 = THEME.TextShadow,
+				TextStrokeTransparency = 0.45,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 6,
+			}) or nil,
 			Track = e("TextButton", {
 				ref = trackRef,
 				Active = true,
@@ -452,11 +482,16 @@ local function SliderRow(props)
 						Size = UDim2.fromScale(1, 1),
 						Text = tostring(displayValue),
 						TextColor3 = THEME.TextBright,
-						TextScaled = false,
+						TextScaled = true,
 						TextSize = 18,
 						TextStrokeColor3 = THEME.TextShadow,
 						TextStrokeTransparency = 0.35,
 						ZIndex = 8,
+					}, {
+						TextSize = e("UITextSizeConstraint", {
+							MaxTextSize = 18,
+							MinTextSize = 9,
+						}),
 					}),
 				}),
 			}),
@@ -481,6 +516,8 @@ local function SettingsScreen(props)
 			icon = item.icon,
 			label = item.label,
 			layoutOrder = index,
+			max = item.max,
+			min = item.min,
 			onCommit = function(value)
 				if props.onSliderCommit then
 					props.onSliderCommit(item.id, value)
@@ -491,6 +528,8 @@ local function SettingsScreen(props)
 					props.onSliderPreview(item.id, value)
 				end
 			end,
+			rangeText = item.rangeText,
+			step = item.step,
 			value = item.value,
 		})
 	end

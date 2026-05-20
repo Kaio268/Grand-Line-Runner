@@ -23,7 +23,7 @@ local INFO_COLOR = Color3.fromRGB(255, 229, 132)
 local SUCCESS_COLOR = Color3.fromRGB(90, 255, 145)
 local ERROR_COLOR = Color3.fromRGB(255, 86, 86)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
-local FULL_MESSAGE = "Crew quick slots full. Unlock another slot to carry more."
+local FULL_MESSAGE = "Crew quick slots full. Free a slot before carrying more."
 
 local dataManagerModule = nil
 local crewStorageModule = nil
@@ -131,22 +131,6 @@ local function waitForReady(player)
 		return dataManager:WaitUntilReady(player, DATA_READY_TIMEOUT)
 	end
 	return false
-end
-
-local function canPromptUnlockProduct(productId)
-	productId = tonumber(productId)
-	if not productId or productId <= 0 then
-		return false, "missing_product_id"
-	end
-
-	local ok, productInfo = pcall(function()
-		return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
-	end)
-	if not ok or typeof(productInfo) ~= "table" then
-		return false, tostring(productInfo)
-	end
-
-	return true, productInfo
 end
 
 local function copyProductAuthorityToken(token)
@@ -283,20 +267,10 @@ local function handleProductAuthorityPromptFinished(playerOrUserId, productId, w
 	end
 end
 
-local function normalizeSlotData(slotData, options)
+local function normalizeSlotData(_slotData, options)
 	options = if typeof(options) == "table" then options else {}
-	if typeof(slotData) ~= "table" then
-		slotData = CrewQuickSlotConfig.GetDefaults()
-	end
-
-	local maxSlots = math.max(
-		CrewQuickSlotConfig.DefaultUnlockedSlots,
-		math.floor(tonumber(slotData.MaxSlots) or CrewQuickSlotConfig.MaxSlots)
-	)
-	maxSlots = math.min(maxSlots, CrewQuickSlotConfig.MaxSlots)
-
-	local unlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(slotData.UnlockedSlots)
-	unlockedSlots = math.min(unlockedSlots, maxSlots)
+	local maxSlots = math.max(0, math.floor(tonumber(CrewQuickSlotConfig.MaxSlots) or 0))
+	local unlockedSlots = maxSlots
 
 	local normalized = {
 		UnlockedSlots = unlockedSlots,
@@ -623,74 +597,29 @@ function CrewQuickSlotService.CanEquipCrewMember(player, crewMemberId)
 	return slotIndex <= slots.UnlockedSlots, slotIndex, slots.UnlockedSlots
 end
 
-function CrewQuickSlotService.RequestUnlock(player, requestedSlot)
+function CrewQuickSlotService.RequestUnlock(player, _requestedSlot)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		return false
+		return false, {
+			Reason = "invalid_player",
+		}
 	end
 	if not waitForReady(player) then
 		sendPopup(player, "Player data is still loading. Try again in a moment.", ERROR_COLOR, true)
-		return false
+		return false, {
+			Reason = "data_not_ready",
+		}
 	end
 
-	local dataManager = getDataManager()
 	local slots = CrewQuickSlotService.EnsureSlots(player)
-	if slots.UnlockedSlots >= slots.MaxSlots then
-		sendPopup(player, "Crew Quick Slots are already fully unlocked.", INFO_COLOR, false)
-		return false
-	end
-
-	local nextSlot = CrewQuickSlotConfig.GetNextLockedSlot(slots.UnlockedSlots)
-	local requested = math.floor(tonumber(requestedSlot) or nextSlot or 0)
-	if requested > 0 and requested < nextSlot then
-		return false
-	end
-
-	local productId = tonumber(CrewQuickSlotConfig.ProductId)
-	if not productId or productId <= 0 then
-		sendPopup(player, "Crew Quick Slot purchases are not configured yet.", ERROR_COLOR, true)
-		return false
-	end
-	local canPrompt, productInfoOrReason = canPromptUnlockProduct(productId)
-	if not canPrompt then
-		warn(string.format(
-			"[CrewQuickSlots] unlock prompt blocked player=%s productId=%s reason=%s",
-			player.Name,
-			tostring(productId),
-			tostring(productInfoOrReason)
-		))
-		sendPopup(player, "Crew Quick Slot product is not valid for this experience yet.", ERROR_COLOR, true)
-		return false
-	end
-
-	player:SetAttribute("PendingCrewQuickSlot", nextSlot)
-	local flags = getCrewStorage().GetShadowFlags()
-	if flags.CrewMemberProductQuickSlotWriteAuthorityEnabled == true then
-		local token, tokenReason = createProductAuthorityToken(player, productId, {
-			Source = "live_prompt",
-			IntendedTargetUnlockedSlots = nextSlot,
-			IntendedTargetMaxSlots = slots.MaxSlots,
-		})
-		if token == nil then
-			warn(string.format(
-				"[CrewQuickSlots] product authority token creation failed player=%s productId=%s reason=%s",
-				player.Name,
-				tostring(productId),
-				tostring(tokenReason or "unknown_error")
-			))
-		else
-			print(string.format(
-				"[CrewQuickSlots] product authority token created player=%s productId=%s token=%s target=%s/%s expiresAt=%s",
-				player.Name,
-				tostring(productId),
-				tostring(token.TokenId),
-				tostring(token.IntendedTargetUnlockedSlots),
-				tostring(token.IntendedTargetMaxSlots),
-				tostring(token.ExpiresAt)
-			))
-		end
-	end
-	dataManager:PromptProductPurchase(player, productId)
-	return true
+	player:SetAttribute("PendingCrewQuickSlot", nil)
+	sendPopup(player, "Crew Quick Slots are already fully unlocked.", INFO_COLOR, false)
+	return false, {
+		Reason = "already_max",
+		AlreadyMax = true,
+		PaidUnlocksEnabled = false,
+		UnlockedSlots = slots.UnlockedSlots,
+		MaxSlots = slots.MaxSlots,
+	}
 end
 
 function CrewQuickSlotService.PromptUnlockForCrewMember(player, crewMemberId)
@@ -700,8 +629,14 @@ function CrewQuickSlotService.PromptUnlockForCrewMember(player, crewMemberId)
 		return false
 	end
 
-	sendPopup(player, string.format("Crew Quick Slot %d is locked.", slotIndex), INFO_COLOR, false)
-	return CrewQuickSlotService.RequestUnlock(player, slotIndex)
+	sendPopup(player, "Crew Quick Slots are already fully unlocked.", INFO_COLOR, false)
+	return false, {
+		Reason = "already_max",
+		AlreadyMax = true,
+		SlotIndex = slotIndex,
+		UnlockedSlots = slots.UnlockedSlots,
+		MaxSlots = slots.MaxSlots,
+	}
 end
 
 local function cloneValue(value)
@@ -890,9 +825,40 @@ local function getProductAuthorityPreflightNoGoReasons(flags, status, compareRep
 	return reasons
 end
 
+local function processRetiredUnlockReceipt(player, productId, _dataManager)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return true, {
+			RetiredProduct = true,
+			ProductId = productId,
+			Reason = "retired_product_disabled",
+		}
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	player:SetAttribute("PendingCrewQuickSlot", nil)
+	print(string.format(
+		"[CrewQuickSlots] retired quick-slot receipt consumed player=%s productId=%s unlockedSlots=%d maxSlots=%d",
+		player.Name,
+		tostring(productId),
+		slots.UnlockedSlots,
+		slots.MaxSlots
+	))
+	return true, {
+		RetiredProduct = true,
+		AlreadyMax = true,
+		ProductId = productId,
+		UnlockedSlots = slots.UnlockedSlots,
+		MaxSlots = slots.MaxSlots,
+		Reason = "retired_product_full_slots",
+	}
+end
+
 local function processCanonicalUnlockReceipt(player, productId, dataManager)
 	dataManager = dataManager or getDataManager()
 	if not CrewQuickSlotConfig.IsUnlockProduct(productId) then
+		if CrewQuickSlotConfig.IsRetiredUnlockProduct(productId) then
+			return processRetiredUnlockReceipt(player, productId, dataManager)
+		end
 		return false, {
 			Reason = "invalid_product_id",
 		}
@@ -1237,6 +1203,9 @@ end
 function CrewQuickSlotService.ProcessUnlockReceipt(player, productId, dataManager, _receiptInfo)
 	dataManager = dataManager or getDataManager()
 	if not CrewQuickSlotConfig.IsUnlockProduct(productId) then
+		if CrewQuickSlotConfig.IsRetiredUnlockProduct(productId) then
+			return processRetiredUnlockReceipt(player, productId, dataManager)
+		end
 		return false, {
 			Reason = "invalid_product_id",
 		}

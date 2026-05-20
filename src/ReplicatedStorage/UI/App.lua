@@ -1036,28 +1036,6 @@ local function hotbarSlot(props)
 			}),
 		}) or nil,
 		Preview = previewChild,
-		Price = lockedSlot and e("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
-			BackgroundTransparency = hovered and 0.08 or 0.16,
-			Position = UDim2.new(0.5, 0, 1, -6),
-			Font = Enum.Font.GothamBold,
-			Text = item.priceRobux and item.priceRobux > 0 and (tostring(item.priceRobux) .. " R$") or "LOCK",
-			TextColor3 = PALETTE.Cream,
-			TextSize = 10,
-			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 2),
-				PaddingBottom = UDim.new(0, 2),
-				PaddingLeft = UDim.new(0, 6),
-				PaddingRight = UDim.new(0, 6),
-			}),
-		}) or nil,
 		Count = item and not lockedSlot and (item.quantity or 0) > 1 and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			AutomaticSize = Enum.AutomaticSize.XY,

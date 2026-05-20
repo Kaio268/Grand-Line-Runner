@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
+local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewInventoryDerivedCache = require(script.Parent:WaitForChild("CrewInventoryDerivedCache"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(script.Parent:WaitForChild("CrewStandIncomeAuthority"))
@@ -1292,6 +1293,100 @@ local function getStandOccupancy(player, standName, crewMemberInventory)
 	return false, nil
 end
 
+local function failCrewSwitch(debugInfo, reason)
+	reason = tostring(reason or "swap_commit_failed")
+	debugInfo = if typeof(debugInfo) == "table" then debugInfo else {}
+	debugInfo.Reason = reason
+	crewPickupDebug(formatCrewPickupDebugFields({
+		{ "event", "switch_failed" },
+		{ "reason", reason },
+		{ "player", debugInfo.PlayerName or "" },
+		{ "userId", debugInfo.UserId or "" },
+		{ "stand", debugInfo.StandName or "" },
+		{ "incomingInstanceId", debugInfo.IncomingInstanceId or "" },
+		{ "incomingStorage", debugInfo.IncomingStorageName or "" },
+		{ "incomingAssignedStand", debugInfo.IncomingAssignedStand or "" },
+		{ "outgoingInstanceId", debugInfo.OutgoingInstanceId or "" },
+		{ "outgoingStorage", debugInfo.OutgoingStorageName or "" },
+		{ "outgoingAssignedStand", debugInfo.OutgoingAssignedStand or "" },
+		{ "quickOccupied", debugInfo.QuickSlotOccupied or "" },
+		{ "quickUnlocked", debugInfo.QuickSlotUnlocked or "" },
+		{ "quickMax", debugInfo.QuickSlotMax or "" },
+		{ "commitSaveOk", debugInfo.CommitSaveOk or "" },
+		{ "standWriteOk", debugInfo.StandWriteOk or "" },
+		{ "rollbackOk", debugInfo.RollbackOk or "" },
+	}))
+	return nil, nil, nil, nil, reason, debugInfo
+end
+
+local function findExistingStandInstance(crewMemberInventory, standName, standData)
+	standName = tostring(standName or "")
+	standData = if typeof(standData) == "table" then standData else {}
+
+	local standInstanceId = tostring(standData.CrewMemberInstanceId or "")
+	if standInstanceId ~= "" then
+		local instanceData = crewMemberInventory.ById[standInstanceId]
+		if typeof(instanceData) == "table" then
+			if tostring(instanceData.AssignedStand or "") == standName then
+				return standInstanceId, instanceData
+			end
+			return nil, nil, "ownership_mismatch"
+		end
+	end
+
+	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
+		local instanceId = tostring(orderedInstanceId)
+		local instanceData = crewMemberInventory.ById[instanceId]
+		if typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") == standName then
+			return instanceId, instanceData
+		end
+	end
+
+	if tostring(standData.CrewMemberName or "") ~= "" or standInstanceId ~= "" then
+		return nil, nil, "outgoing_instance_missing"
+	end
+
+	return nil, nil, "outgoing_instance_missing"
+end
+
+local function getExpectedStorageName(options)
+	options = if typeof(options) == "table" then options else {}
+	local expected = tostring(options.ExpectedIncomingStorageName or options.StorageName or "")
+	if expected == "" then
+		return ""
+	end
+
+	local canonicalStorageName, info = resolveCanonicalCrewMemberId(expected)
+	if not info then
+		return ""
+	end
+	return canonicalStorageName
+end
+
+local function applyTutorialMetadataClear(instanceData)
+	instanceData.TutorialReward = false
+	instanceData.TutorialToken = ""
+	instanceData.TutorialOwnerUserId = nil
+	instanceData.TutorialCrewMember = nil
+	instanceData.TutorialRewardName = nil
+end
+
+local function buildStandAssignmentRow(instanceId, instanceData)
+	return {
+		CrewMemberName = getInstanceCrewKey(instanceData),
+		CrewMemberInstanceId = tostring(instanceId),
+		IncomeToCollect = 0,
+		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+	}
+end
+
+local function validateQuickSlotCapacityForInventory(player, crewMemberInventory)
+	local unlockedSlots = CrewQuickSlotService.GetUnlockedSlots(player)
+	local maxSlots = CrewQuickSlotService.GetMaxSlots(player)
+	local occupiedStacks = #CrewInventoryStacks.BuildAvailableStacks(crewMemberInventory)
+	return occupiedStacks <= unlockedSlots, occupiedStacks, unlockedSlots, maxSlots
+end
+
 function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
 	filters = getTutorialRewardFilters(filters)
 	filters.RequireAvailable = true
@@ -1956,6 +2051,206 @@ function Module.AssignAvailableInstanceToStand(player, storageName, standName)
 	return tostring(instanceId), crewMemberInventory.ById[tostring(instanceId)]
 end
 
+function Module.AssignInstanceToStand(player, instanceRef, standName, options)
+	options = if typeof(options) == "table" then options else {}
+	standName = tostring(standName or "")
+	if standName == "" then
+		return nil, nil, "invalid_stand"
+	end
+
+	local ready, readyReason = ensureInventoryAuthorityReady(player, "stand_place_exact")
+	if ready ~= true then
+		return nil, nil, tostring(readyReason or "inventory_authority_not_ready")
+	end
+
+	local instanceId, instanceData, crewMemberInventory = Module.GetInstance(player, instanceRef)
+	if not instanceData then
+		return nil, nil, "incoming_instance_missing"
+	end
+
+	local expectedStorageName = getExpectedStorageName(options)
+	if expectedStorageName ~= "" and getInstanceCrewKey(instanceData) ~= expectedStorageName then
+		return nil, nil, "ownership_mismatch"
+	end
+
+	if tostring(instanceData.AssignedStand or "") ~= "" then
+		return nil, nil, "incoming_already_assigned"
+	end
+
+	local occupied, occupancyReason = getStandOccupancy(player, standName, crewMemberInventory)
+	if occupied then
+		return nil, nil, occupancyReason
+	end
+
+	local originalInstanceData = cloneValue(instanceData)
+	local committedInstanceData = cloneValue(instanceData)
+	committedInstanceData.AssignedStand = standName
+	if options.ClearTutorialMetadataAfterAssign == true then
+		applyTutorialMetadataClear(committedInstanceData)
+	end
+	crewMemberInventory.ById[tostring(instanceId)] = committedInstanceData
+
+	local saveOk, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
+		SourcePath = "stand_place_exact",
+	})
+	if saveOk ~= true then
+		crewMemberInventory.ById[tostring(instanceId)] = originalInstanceData
+		return nil, nil, tostring(saveReason or "assignment_save_failed")
+	end
+
+	local standOk, standReason = updateStandData(
+		player,
+		standName,
+		buildStandAssignmentRow(instanceId, committedInstanceData),
+		"stand_place_exact"
+	)
+	if standOk ~= true then
+		crewMemberInventory.ById[tostring(instanceId)] = originalInstanceData
+		saveCrewMemberInventory(player, crewMemberInventory, {
+			SourcePath = "stand_place_exact_rollback",
+		})
+		return nil, nil, tostring(standReason or "stand_income_write_failed")
+	end
+
+	syncAvailableCounts(player, crewMemberInventory)
+	refreshCrewMemberShadow(player, "stand_place_exact")
+
+	return tostring(instanceId), crewMemberInventory.ById[tostring(instanceId)]
+end
+
+function Module.SwapStandInstance(player, standName, incomingInstanceRef, options)
+	options = if typeof(options) == "table" then options else {}
+	standName = tostring(standName or "")
+	local debugInfo = {
+		PlayerName = player and player.Name or "unknown",
+		UserId = player and player.UserId or 0,
+		StandName = standName,
+		IncomingInstanceId = if typeof(incomingInstanceRef) == "table"
+			then tostring(incomingInstanceRef.InstanceId or "")
+			else tostring(incomingInstanceRef or ""),
+	}
+
+	if standName == "" then
+		return failCrewSwitch(debugInfo, "invalid_stand")
+	end
+	if debugInfo.IncomingInstanceId == "" then
+		return failCrewSwitch(debugInfo, "incoming_instance_missing")
+	end
+
+	local ready, readyReason = ensureInventoryAuthorityReady(player, "stand_swap")
+	if ready ~= true then
+		return failCrewSwitch(debugInfo, tostring(readyReason or "swap_commit_failed"))
+	end
+
+	local standData = getStandData(player, standName)
+	if tostring(standData.CrewMemberName or "") == "" and tostring(standData.CrewMemberInstanceId or "") == "" then
+		return failCrewSwitch(debugInfo, "outgoing_instance_missing")
+	end
+
+	local incomingInstanceId, incomingInstanceData, crewMemberInventory = Module.GetInstance(player, debugInfo.IncomingInstanceId)
+	if not incomingInstanceData then
+		return failCrewSwitch(debugInfo, "incoming_instance_missing")
+	end
+
+	debugInfo.IncomingInstanceId = tostring(incomingInstanceId)
+	debugInfo.IncomingStorageName = getInstanceCrewKey(incomingInstanceData)
+	debugInfo.IncomingAssignedStand = tostring(incomingInstanceData.AssignedStand or "")
+
+	local expectedStorageName = getExpectedStorageName(options)
+	if expectedStorageName ~= "" and debugInfo.IncomingStorageName ~= expectedStorageName then
+		return failCrewSwitch(debugInfo, "ownership_mismatch")
+	end
+
+	if tostring(incomingInstanceData.AssignedStand or "") ~= "" then
+		return failCrewSwitch(debugInfo, "incoming_already_assigned")
+	end
+
+	local outgoingInstanceId, outgoingInstanceData, outgoingReason =
+		findExistingStandInstance(crewMemberInventory, standName, standData)
+	if not outgoingInstanceData then
+		return failCrewSwitch(debugInfo, outgoingReason or "outgoing_instance_missing")
+	end
+
+	debugInfo.OutgoingInstanceId = tostring(outgoingInstanceId)
+	debugInfo.OutgoingStorageName = getInstanceCrewKey(outgoingInstanceData)
+	debugInfo.OutgoingAssignedStand = tostring(outgoingInstanceData.AssignedStand or "")
+
+	if tostring(outgoingInstanceId) == tostring(incomingInstanceId) then
+		return failCrewSwitch(debugInfo, "incoming_already_assigned")
+	end
+
+	local finalInventory = cloneValue(crewMemberInventory)
+	local finalIncoming = cloneValue(incomingInstanceData)
+	local finalOutgoing = cloneValue(outgoingInstanceData)
+	finalIncoming.AssignedStand = standName
+	if options.ClearIncomingTutorialMetadataAfterAssign == true then
+		applyTutorialMetadataClear(finalIncoming)
+	end
+	finalOutgoing.AssignedStand = ""
+	finalOutgoing.LastReleasedAt = os.time()
+	finalInventory.ById[tostring(incomingInstanceId)] = finalIncoming
+	finalInventory.ById[tostring(outgoingInstanceId)] = finalOutgoing
+	moveInstanceToFront(finalInventory, outgoingInstanceId)
+
+	local capacityOk, occupiedStacks, unlockedSlots, maxSlots = validateQuickSlotCapacityForInventory(player, finalInventory)
+	debugInfo.QuickSlotOccupied = occupiedStacks
+	debugInfo.QuickSlotUnlocked = unlockedSlots
+	debugInfo.QuickSlotMax = maxSlots
+	if capacityOk ~= true then
+		CrewQuickSlotService.NotifyFull(player)
+		return failCrewSwitch(debugInfo, "quick_slot_blocked")
+	end
+
+	local saveOk, saveReason = saveCrewMemberInventory(player, finalInventory, {
+		SourcePath = "stand_swap",
+	})
+	debugInfo.CommitSaveOk = saveOk == true
+	debugInfo.CommitSaveReason = tostring(saveReason or "")
+	if saveOk ~= true then
+		return failCrewSwitch(debugInfo, "swap_commit_failed")
+	end
+
+	local standOk, standReason = updateStandData(
+		player,
+		standName,
+		buildStandAssignmentRow(incomingInstanceId, finalIncoming),
+		"stand_swap"
+	)
+	debugInfo.StandWriteOk = standOk == true
+	debugInfo.StandWriteReason = tostring(standReason or "")
+	if standOk ~= true then
+		local rollbackOk, rollbackReason = saveCrewMemberInventory(player, crewMemberInventory, {
+			SourcePath = "stand_swap_rollback",
+		})
+		debugInfo.RollbackOk = rollbackOk == true
+		debugInfo.RollbackReason = tostring(rollbackReason or "")
+		return failCrewSwitch(debugInfo, "swap_commit_failed")
+	end
+
+	syncAvailableCounts(player, finalInventory)
+	refreshCrewMemberShadow(player, "stand_swap")
+
+	crewPickupDebug(formatCrewPickupDebugFields({
+		{ "event", "switch_success" },
+		{ "player", debugInfo.PlayerName },
+		{ "userId", debugInfo.UserId },
+		{ "stand", standName },
+		{ "incomingInstanceId", tostring(incomingInstanceId) },
+		{ "incomingStorage", getInstanceCrewKey(finalIncoming) },
+		{ "outgoingInstanceId", tostring(outgoingInstanceId) },
+		{ "outgoingStorage", getInstanceCrewKey(finalOutgoing) },
+		{ "quickOccupied", occupiedStacks },
+		{ "quickUnlocked", unlockedSlots },
+	}))
+
+	return tostring(incomingInstanceId),
+		finalInventory.ById[tostring(incomingInstanceId)],
+		tostring(outgoingInstanceId),
+		finalInventory.ById[tostring(outgoingInstanceId)],
+		nil,
+		debugInfo
+end
+
 function Module.ReleaseStandInstance(player, standName, options)
 	options = if typeof(options) == "table" then options else {}
 	standName = tostring(standName or "")
@@ -2447,6 +2742,8 @@ Module.GetCrewStandInstanceId = Module.GetStandInstanceId
 Module.EnsureStandCrewMemberInstance = Module.EnsureStandInstance
 Module.FindAvailableCrewMemberInstance = Module.FindAvailableInstance
 Module.AssignAvailableCrewMemberToStand = Module.AssignAvailableInstanceToStand
+Module.AssignCrewMemberInstanceToStand = Module.AssignInstanceToStand
+Module.SwapCrewMemberStandInstance = Module.SwapStandInstance
 Module.ReleaseStandCrewMember = Module.ReleaseStandInstance
 Module.RemoveAvailableCrewMember = Module.RemoveAvailableInstance
 Module.TransferStandCrewMember = Module.TransferStandInstance

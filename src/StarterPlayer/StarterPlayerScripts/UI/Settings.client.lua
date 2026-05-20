@@ -20,6 +20,9 @@ local SettingsScreen = require(UiFolder:WaitForChild("Settings"):WaitForChild("S
 local UpdateSettingRemote = ReplicatedStorage:WaitForChild("UpdateSetting")
 
 local e = React.createElement
+local SPEED_SETTING_NAME = "Speed"
+local SPEED_AUTO_MAX_SETTING_NAME = "SpeedAutoMax"
+local SPEED_ICON_ASSET = "rbxassetid://108512951338844"
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactSettingsRoot"
@@ -44,11 +47,13 @@ local modalAdapter = ReactFrameModalAdapter.new({
 local SETTING_ORDER = {
 	"Music",
 	"SoundEffects",
+	SPEED_SETTING_NAME,
 }
 
 local ICONS = {
 	Music = "rbxassetid://125384263224347",
 	SoundEffects = "rbxassetid://131189007512696",
+	Speed = SPEED_ICON_ASSET,
 	HidePopUps = "rbxassetid://77322372470208",
 	LowGraphic = "rbxassetid://131189007512696",
 }
@@ -117,6 +122,14 @@ local function clampNumber(value, minimum, maximum)
 		return maximum
 	end
 	return numeric
+end
+
+local function roundNumber(value)
+	return math.floor((tonumber(value) or 0) + 0.5)
+end
+
+local function isAudioSetting(settingName)
+	return settingName == "Music" or settingName == "SoundEffects"
 end
 
 local function disconnectAll(bucket)
@@ -199,6 +212,72 @@ local function resolveSettingInstance(settingName, config)
 	return nil
 end
 
+local function getEarnedSpeedMax()
+	local hidden = player:FindFirstChild("HiddenLeaderstats")
+	local speed = hidden and hidden:FindFirstChild("Speed")
+	if speed and (speed:IsA("NumberValue") or speed:IsA("IntValue")) then
+		return math.max(1, roundNumber(speed.Value))
+	end
+
+	return 1
+end
+
+local function getSpeedHudIcon()
+	local hud = playerGui:FindFirstChild("HUD")
+	local counters = hud and hud:FindFirstChild("Counters")
+	local speedCounter = counters and counters:FindFirstChild("Speed")
+	local icon = speedCounter and speedCounter:FindFirstChildWhichIsA("ImageLabel", true)
+	if icon and icon.Image ~= "" then
+		return icon.Image
+	end
+
+	return SPEED_ICON_ASSET
+end
+
+local function getSettingIcon(settingName)
+	if settingName == SPEED_SETTING_NAME then
+		return getSpeedHudIcon()
+	end
+
+	return ICONS[settingName]
+end
+
+local function getSliderBounds(settingName, config)
+	local minimum = tonumber(config and config.Min)
+	local maximum = tonumber(config and config.Max)
+
+	if settingName == SPEED_SETTING_NAME then
+		minimum = 1
+		maximum = getEarnedSpeedMax()
+	else
+		minimum = if minimum ~= nil then minimum else 0
+		maximum = if maximum ~= nil then maximum else 100
+	end
+
+	minimum = roundNumber(minimum)
+	maximum = math.max(minimum, roundNumber(maximum))
+	return minimum, maximum
+end
+
+local function clampSliderValue(settingName, config, value)
+	local minimum, maximum = getSliderBounds(settingName, config)
+	return roundNumber(clampNumber(value, minimum, maximum))
+end
+
+local function readSpeedAutoMax(config)
+	local autoInstance = getFromPath(player, config and config.AutoMaxPath or "Settings.SpeedAutoMax")
+	if autoInstance and autoInstance:IsA("BoolValue") then
+		return autoInstance.Value == true
+	end
+
+	local override = settingOverrides[SPEED_AUTO_MAX_SETTING_NAME]
+	if typeof(override) == "boolean" then
+		return override
+	end
+
+	return true
+end
+
 local function describeSettingInstance(instance)
 	if typeof(instance) ~= "Instance" then
 		return "<nil>"
@@ -212,13 +291,20 @@ local function readSettingValue(settingName, config)
 	local settingType = tostring(config and config.Type or "")
 
 	if settingType == "Slider" then
+		if sliderPreviewActive and typeof(settingOverrides[settingName]) == "number" then
+			return clampSliderValue(settingName, config, settingOverrides[settingName])
+		end
+		if settingName == SPEED_SETTING_NAME and readSpeedAutoMax(config) then
+			local _, maximum = getSliderBounds(settingName, config)
+			return maximum
+		end
 		if instance and (instance:IsA("NumberValue") or instance:IsA("IntValue")) then
-			return math.floor(clampNumber(instance.Value, 0, 100) + 0.5)
+			return clampSliderValue(settingName, config, instance.Value)
 		end
 		if typeof(settingOverrides[settingName]) == "number" then
-			return math.floor(clampNumber(settingOverrides[settingName], 0, 100) + 0.5)
+			return clampSliderValue(settingName, config, settingOverrides[settingName])
 		end
-		return math.floor(clampNumber(config and config.Start or 100, 0, 100) + 0.5)
+		return clampSliderValue(settingName, config, config and config.Start or 100)
 	end
 
 	if instance and instance:IsA("BoolValue") then
@@ -234,7 +320,7 @@ end
 syncAudioFromSettings = function()
 	for _, settingName in ipairs(SETTING_ORDER) do
 		local config = SettingsConfig[settingName]
-		if typeof(config) == "table" and tostring(config.Type or "") == "Slider" then
+		if typeof(config) == "table" and tostring(config.Type or "") == "Slider" and isAudioSetting(settingName) then
 			local value = readSettingValue(settingName, config)
 			debugAudio("syncFromSettings name=%s value=%s", tostring(settingName), tostring(value))
 			applyAudioSetting(settingName, value)
@@ -247,7 +333,7 @@ local function applyLocalSetting(settingName, config, nextValue)
 	local instance = resolveSettingInstance(settingName, config)
 
 	if settingType == "Slider" then
-		local clamped = math.floor(clampNumber(nextValue, 0, 100) + 0.5)
+		local clamped = clampSliderValue(settingName, config, nextValue)
 		if not sliderPreviewActive then
 			debugAudio(
 				"localSetting name=%s value=%d instance=%s",
@@ -261,7 +347,18 @@ local function applyLocalSetting(settingName, config, nextValue)
 		else
 			settingOverrides[settingName] = clamped
 		end
-		applyAudioSetting(settingName, clamped)
+		if settingName == SPEED_SETTING_NAME then
+			local _, maximum = getSliderBounds(settingName, config)
+			local autoMax = clamped >= maximum
+			local autoInstance = getFromPath(player, config and config.AutoMaxPath or "Settings.SpeedAutoMax")
+			if autoInstance and autoInstance:IsA("BoolValue") then
+				autoInstance.Value = autoMax
+			else
+				settingOverrides[SPEED_AUTO_MAX_SETTING_NAME] = autoMax
+			end
+		elseif isAudioSetting(settingName) then
+			applyAudioSetting(settingName, clamped)
+		end
 		return clamped
 	end
 
@@ -293,12 +390,17 @@ local function buildItems()
 	for _, settingName in ipairs(SETTING_ORDER) do
 		local config = SettingsConfig[settingName]
 		if typeof(config) == "table" then
+			local minimum, maximum = getSliderBounds(settingName, config)
 			items[#items + 1] = {
 				id = settingName,
 				label = DISPLAY_LABELS[settingName] or settingName,
 				type = tostring(config.Type or "Switch"),
 				value = readSettingValue(settingName, config),
-				icon = ICONS[settingName],
+				min = minimum,
+				max = maximum,
+				step = tonumber(config.Step) or 1,
+				rangeText = if settingName == SPEED_SETTING_NAME then "Max " .. tostring(maximum) else nil,
+				icon = getSettingIcon(settingName),
 			}
 		end
 	end
@@ -348,6 +450,18 @@ local function bindSettingFolder(folder)
 			scheduleRender()
 		end)
 	end, settingConnections)
+end
+
+local function bindEarnedSpeedValue()
+	local hidden = player:FindFirstChild("HiddenLeaderstats") or player:WaitForChild("HiddenLeaderstats", 5)
+	local speed = hidden and (hidden:FindFirstChild("Speed") or hidden:WaitForChild("Speed", 5))
+	if not (speed and (speed:IsA("NumberValue") or speed:IsA("IntValue"))) then
+		return
+	end
+
+	trackConnection(speed:GetPropertyChangedSignal("Value"), function()
+		task.defer(scheduleRender)
+	end, cleanupConnections)
 end
 
 local function prepareFrame()
@@ -433,6 +547,7 @@ modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
 
 bindSettingFolder(player:FindFirstChild("Settings") or player:WaitForChild("Settings", 5))
+bindEarnedSpeedValue()
 SettingsAudioController.Start()
 syncAudioFromSettings()
 

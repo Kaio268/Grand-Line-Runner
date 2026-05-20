@@ -563,6 +563,19 @@ function ProfileMigrations.Apply(data)
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
 	end
 
+	local settings = ensureTable(data, "Settings")
+	local earnedMaxSpeed = math.max(1, math.floor((tonumber(hiddenLeaderstats.Speed) or defaultSpeed) + 0.5))
+	settings.SpeedAutoMax = coerceBoolean(settings.SpeedAutoMax, true)
+	if settings.SpeedAutoMax == true then
+		settings.SelectedSpeed = earnedMaxSpeed
+	else
+		local selectedSpeed = tonumber(settings.SelectedSpeed)
+		if selectedSpeed == nil or selectedSpeed ~= selectedSpeed or selectedSpeed == math.huge or selectedSpeed == -math.huge then
+			selectedSpeed = earnedMaxSpeed
+		end
+		settings.SelectedSpeed = math.clamp(math.floor(selectedSpeed + 0.5), 1, earnedMaxSpeed)
+	end
+
 	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingBeli, 0)
 	if hiddenLeaderstats.TutorialStarterBeliGranted ~= true then
 		if hiddenLeaderstats.Tutorial == true then
