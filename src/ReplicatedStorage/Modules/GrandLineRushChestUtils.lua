@@ -34,6 +34,21 @@ local function normalizeRewardProfile(rewardProfile)
 	return ChestRewards.DefaultRewardProfile
 end
 
+local function normalizePaidRandomItem(options, source)
+	if typeof(options) ~= "table" then
+		return false
+	end
+
+	if options.PaidRandomItem == true
+		or options.PaidRandom == true
+		or options.RequiresPaidRandomItemPolicy == true
+	then
+		return true
+	end
+
+	return tostring(source or "") == "Purchase"
+end
+
 local function getTopStandardTier()
 	return ChestRewards.StandardTierOrder[#ChestRewards.StandardTierOrder] or ChestRewards.StandardTierOrder[1] or "Wooden"
 end
@@ -89,6 +104,10 @@ function ChestUtils.BuildChestData(options)
 	local chestKind = ChestUtils.NormalizeChestKind(options.ChestKind)
 	local fruitRarity = ChestUtils.NormalizeFruitRarity(options.FruitRarity)
 	local tierName = ChestUtils.NormalizeTier(options.Tier)
+	local source = normalizeSource(options.Source)
+	local paidRandomItem = normalizePaidRandomItem(options, source)
+	local paidRandomProductId = tonumber(options.PaidRandomProductId or options.ProductId)
+	local paidRandomPurchaseId = tostring(options.PaidRandomPurchaseId or options.PurchaseId or "")
 
 	if chestKind == ChestRewards.ChestKinds.DevilFruit then
 		if options.Tier == nil or STANDARD_TIER_SET[tostring(options.Tier)] ~= true then
@@ -102,10 +121,13 @@ function ChestUtils.BuildChestData(options)
 		ChestKind = chestKind,
 		Tier = tierName,
 		FruitRarity = fruitRarity,
-		Source = normalizeSource(options.Source),
+		Source = source,
 		RewardProfile = normalizeRewardProfile(options.RewardProfile),
 		DepthBand = tostring(options.DepthBand or ""),
 		CreatedAt = math.max(0, tonumber(options.CreatedAt) or os.time()),
+		PaidRandomItem = paidRandomItem,
+		PaidRandomProductId = paidRandomProductId,
+		PaidRandomPurchaseId = if paidRandomPurchaseId ~= "" then paidRandomPurchaseId else nil,
 	}
 end
 
@@ -164,6 +186,9 @@ function ChestUtils.GetStackKey(chestDataOrName)
 	local chestData = ChestUtils.BuildChestData(chestDataOrName)
 
 	if chestData.ChestKind ~= ChestRewards.ChestKinds.Standard then
+		return nil
+	end
+	if chestData.PaidRandomItem == true then
 		return nil
 	end
 	if STANDARD_TIER_SET[chestData.Tier] ~= true then

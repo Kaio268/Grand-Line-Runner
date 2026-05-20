@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
 local Config = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CometMerchant"))
+local PaidRandomItemPolicy = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local PurchaseEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("CometMerchantPurchase")
@@ -196,6 +197,10 @@ local function refundComets(player, price)
 	DataManager:AdjustValue(player, "HiddenLeaderstats.Comets", price)
 end
 
+local function requiresPaidRandomItemPolicy()
+	return Config.RequiresPaidRandomItemPolicy == true or Config.RobuxFundedRandomCurrency == true
+end
+
 local function runReward(player, fullKey, amount)
 	local info = Config.All_Things[fullKey]
 
@@ -255,6 +260,20 @@ PurchaseEvent.OnServerEvent:Connect(function(player, fullKeyIncoming)
 
 	if not isPath(fullKey) then
 		if CometMerchantService.RewardHandlers[fullKey] == nil then
+			return
+		end
+	end
+
+	if requiresPaidRandomItemPolicy() then
+		local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+		if allowed ~= true then
+			warn(string.format(
+				"[CometMerchant] Blocked Robux-funded random currency spend player=%s item=%s policyStatus=%s reason=%s",
+				player and player.Name or "<unknown>",
+				tostring(fullKey),
+				tostring(policyState and policyState.Status or "unknown"),
+				tostring(policyState and policyState.Reason or "policy_unknown")
+			))
 			return
 		end
 	end

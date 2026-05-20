@@ -10,6 +10,7 @@ local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local GrandLineRushCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local CanonicalCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
@@ -19,6 +20,7 @@ local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("Gr
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 
 local Service = {}
@@ -1066,7 +1068,7 @@ end
 
 local function buildStoredChestEntry(chestData)
 	local normalizedChest = ChestUtils.BuildChestData(chestData)
-	return {
+	local storedChest = {
 		ChestKind = normalizedChest.ChestKind,
 		Tier = normalizedChest.Tier,
 		FruitRarity = normalizedChest.FruitRarity,
@@ -1075,6 +1077,14 @@ local function buildStoredChestEntry(chestData)
 		RewardProfile = tostring(normalizedChest.RewardProfile or ChestRewards.DefaultRewardProfile),
 		CreatedAt = math.max(0, tonumber(normalizedChest.CreatedAt) or os.time()),
 	}
+
+	if normalizedChest.PaidRandomItem == true then
+		storedChest.PaidRandomItem = true
+		storedChest.PaidRandomProductId = tonumber(normalizedChest.PaidRandomProductId)
+		storedChest.PaidRandomPurchaseId = normalizedChest.PaidRandomPurchaseId
+	end
+
+	return storedChest
 end
 
 local function normalizeStackCount(value)
@@ -1210,6 +1220,8 @@ local function buildChestSummary(chestId, chestData, quantity)
 		Source = tostring(chestData.Source or ChestRewards.DefaultChestSource),
 		RewardProfile = tostring(chestData.RewardProfile or ChestRewards.DefaultRewardProfile),
 		CreatedAt = math.max(0, tonumber(chestData.CreatedAt) or 0),
+		PaidRandomItem = normalizedChest.PaidRandomItem == true,
+		PaidRandomProductId = tonumber(normalizedChest.PaidRandomProductId),
 		InventoryName = inventoryName,
 		DisplayName = ChestUtils.GetDisplayName(normalizedChest),
 		Quantity = safeQuantity,
@@ -1263,6 +1275,36 @@ local function countUnopenedChestsByInventoryName(unopenedChests, chestData)
 	local count = normalizeStackCount(counts[inventoryName])
 
 	return count
+end
+
+local function isPaidRandomChestData(chestData)
+	local normalizedChest = ChestUtils.BuildChestData(chestData)
+	return normalizedChest.PaidRandomItem == true
+end
+
+local function canOpenPaidRandomChest(player, chestData, context)
+	if not isPaidRandomChestData(chestData) then
+		return true, nil
+	end
+
+	local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+	if allowed == true then
+		return true, policyState
+	end
+
+	local normalizedChest = ChestUtils.BuildChestData(chestData)
+	warn(string.format(
+		"[GrandLineRush] Blocked paid random chest open player=%s context=%s chest=%s source=%s productId=%s policyStatus=%s reason=%s",
+		player and player.Name or "<unknown>",
+		tostring(context or "OpenChest"),
+		tostring(ChestUtils.GetInventoryName(normalizedChest)),
+		tostring(normalizedChest.Source),
+		tostring(normalizedChest.PaidRandomProductId),
+		tostring(policyState and policyState.Status or "unknown"),
+		tostring(policyState and policyState.Reason or "policy_unknown")
+	))
+
+	return false, policyState
 end
 
 local ensureStarterCrew
@@ -2308,8 +2350,23 @@ local function openChest(player, requestedChestId)
 			end
 		end
 		if chestData == nil then
-			chestId = tostring(unopenedChests.Order[1] or "")
-			chestData = unopenedChests.ById[chestId]
+			local blockedPaidChest = false
+			for _, candidateChestId in ipairs(unopenedChests.Order or {}) do
+				local candidateId = tostring(candidateChestId)
+				local candidateChestData = unopenedChests.ById[candidateId]
+				if typeof(candidateChestData) == "table" then
+					local canOpenCandidate = canOpenPaidRandomChest(player, candidateChestData, "OpenChest")
+					if canOpenCandidate then
+						chestId = candidateId
+						chestData = candidateChestData
+						break
+					end
+					blockedPaidChest = true
+				end
+			end
+			if chestData == nil and blockedPaidChest then
+				return resolveActionResponse(player, false, MonetizationConfig.PaidRandomItemUnavailableMessage, "paid_random_items_restricted")
+			end
 		end
 	end
 
@@ -2319,6 +2376,11 @@ local function openChest(player, requestedChestId)
 
 	if typeof(chestData) ~= "table" then
 		return resolveActionResponse(player, false, nil, "missing_chest")
+	end
+
+	local canOpenPaidChest = canOpenPaidRandomChest(player, chestData, "OpenChest")
+	if canOpenPaidChest ~= true then
+		return resolveActionResponse(player, false, MonetizationConfig.PaidRandomItemUnavailableMessage, "paid_random_items_restricted")
 	end
 
 	local normalizedChestData = ChestUtils.BuildChestData(chestData)
@@ -2571,19 +2633,28 @@ local function openChests(player, inventoryName, requestedAmount)
 
 	local legacyNeededCount = requestedCount - stackOpenCount
 	local chestIds = {}
+	local skippedPaidChest = false
 	if legacyNeededCount > 0 then
 		for _, chestId in ipairs(unopenedChests.Order) do
 			local chestData = unopenedChests.ById[tostring(chestId)]
 			if chestData and ChestUtils.GetInventoryName(chestData) == targetInventoryName then
-				chestIds[#chestIds + 1] = tostring(chestId)
-				if #chestIds >= legacyNeededCount then
-					break
+				local canOpenCandidate = canOpenPaidRandomChest(player, chestData, "OpenChests")
+				if canOpenCandidate then
+					chestIds[#chestIds + 1] = tostring(chestId)
+					if #chestIds >= legacyNeededCount then
+						break
+					end
+				else
+					skippedPaidChest = true
 				end
 			end
 		end
 	end
 
 	if stackOpenCount + #chestIds <= 0 then
+		if skippedPaidChest then
+			return resolveActionResponse(player, false, MonetizationConfig.PaidRandomItemUnavailableMessage, "paid_random_items_restricted")
+		end
 		return resolveActionResponse(player, false, nil, "no_chests_available")
 	end
 
@@ -2696,6 +2767,24 @@ local function grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
 	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 
 	local options = if typeof(sourceOptions) == "table" then sourceOptions else {}
+	if options.PaidRandomItem == true
+		or options.RequiresPaidRandomItemPolicy == true
+		or tostring(options.Source or "") == "Purchase"
+	then
+		local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+		if allowed ~= true then
+			warn(string.format(
+				"[GrandLineRush] Blocked paid random direct fruit reward player=%s fruit=%s source=%s policyStatus=%s reason=%s",
+				player and player.Name or "<unknown>",
+				tostring(fruitIdentifier),
+				tostring(options.Source or ""),
+				tostring(policyState and policyState.Status or "unknown"),
+				tostring(policyState and policyState.Reason or "policy_unknown")
+			))
+			return resolveActionResponse(player, false, MonetizationConfig.PaidRandomItemUnavailableMessage, "paid_random_items_restricted")
+		end
+	end
+
 	local resolution = ChestRewardResolver.ResolveSpecificFruit({
 		Player = player,
 		DataRoot = dataRoot,
@@ -3080,7 +3169,7 @@ function Service.ExtractRun(player)
 	return extractRun(player)
 end
 
-function Service.GrantChest(player, tierName, amount, depthBand)
+function Service.GrantChest(player, tierName, amount, depthBand, options)
 	if not waitForDataReady(player, 10) then
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
 	end
@@ -3097,13 +3186,36 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 
 	local count = math.max(1, math.floor(tonumber(amount) or 1))
 	local normalizedDepthBand = tostring(depthBand or Economy.VerticalSlice.DefaultDepthBand)
+	options = if typeof(options) == "table" then options else {}
+	if options.PaidRandomItem == true
+		or options.RequiresPaidRandomItemPolicy == true
+		or tostring(options.Source or "") == "Purchase"
+	then
+		local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+		if allowed ~= true then
+			warn(string.format(
+				"[GrandLineRush] Blocked paid random chest grant player=%s tier=%s source=%s productId=%s policyStatus=%s reason=%s",
+				player and player.Name or "<unknown>",
+				tostring(tierName),
+				tostring(options.Source or ""),
+				tostring(options.ProductId or options.PaidRandomProductId),
+				tostring(policyState and policyState.Status or "unknown"),
+				tostring(policyState and policyState.Reason or "policy_unknown")
+			))
+			return resolveActionResponse(player, false, MonetizationConfig.PaidRandomItemUnavailableMessage, "paid_random_items_restricted")
+		end
+	end
+
 	local dataRoot = profile.Data
 	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 	local chestData = ChestUtils.BuildChestData({
 		ChestKind = ChestRewards.ChestKinds.Standard,
 		Tier = normalizedTier,
 		DepthBand = normalizedDepthBand,
-		Source = "Admin",
+		Source = tostring(options.Source or (if options.PaidRandomItem == true then "Purchase" else "Admin")),
+		PaidRandomItem = options.PaidRandomItem == true or options.RequiresPaidRandomItemPolicy == true,
+		ProductId = options.ProductId or options.PaidRandomProductId,
+		PurchaseId = options.PurchaseId or options.PaidRandomPurchaseId,
 	})
 	local chestRef, _, addedCount = addUnopenedChestToCollection(unopenedChests, chestData, count)
 	local grantedCount = math.max(0, tonumber(addedCount) or (chestRef ~= nil and 1 or 0))

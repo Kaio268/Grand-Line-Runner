@@ -2363,7 +2363,19 @@ local function bindStandPrompt(player, plot, standModel)
 				plr:SetAttribute("StealProductId", productId)
 				plr:SetAttribute("StealTime", os.time())
 
-				MarketplaceService:PromptProductPurchase(plr, productId)
+				if DataManager and typeof(DataManager.PromptProductPurchase) == "function" then
+					DataManager:PromptProductPurchase(plr, productId)
+				elseif MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+					standDebug(
+						"steal prompt rejected actor=%s stand=%s crewMember=%s productId=%s reason=paid_random_policy_handler_unavailable",
+						plr.Name,
+						standName,
+						tostring(crewMemberToSteal),
+						tostring(productId)
+					)
+				else
+					MarketplaceService:PromptProductPurchase(plr, productId)
+				end
 				standDebug("steal prompt actor=%s stand=%s crewMember=%s productId=%s", plr.Name, standName, tostring(crewMemberToSteal), tostring(productId))
 				return
 			end

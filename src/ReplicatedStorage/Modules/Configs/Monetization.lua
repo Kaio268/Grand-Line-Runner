@@ -8,6 +8,19 @@ Monetization.Status = {
 }
 
 Monetization.UnavailableMessage = "This purchase is not available yet."
+Monetization.PaidRandomItemUnavailableMessage = "This paid random item is unavailable for your account."
+
+Monetization.PaidRandomItemPolicy = {
+	Remotes = {
+		StateRequestName = "PaidRandomItemPolicyStateRequest",
+		ProductPromptRequestName = "PaidRandomProductPromptRequest",
+	},
+	ReceiptFallback = {
+		Mode = "SupportMarker",
+		DataKey = "PaidRandomItemReceiptFallbacks",
+		MaxEntries = 100,
+	},
+}
 
 Monetization.ActiveChefsGamepasses = {
 	VIP = {
@@ -214,6 +227,10 @@ local function register(entries, status, metadataById, idsByStatus)
 				Name = entry.Name,
 				Reason = entry.Reason,
 				Status = status,
+				RequiresPaidRandomItemPolicy = entry.RequiresPaidRandomItemPolicy == true,
+				PaidRandomItem = entry.PaidRandomItem == true,
+				RobuxFundedRandomCurrency = entry.RobuxFundedRandomCurrency == true,
+				RandomRewardGenerator = entry.RandomRewardGenerator == true,
 			}
 			metadataById[id] = metadata
 			table.insert(idsByStatus[status], id)
@@ -290,6 +307,81 @@ function Monetization.CanPromptPurchase(kind, id)
 		return Monetization.CanPromptDeveloperProduct(id)
 	end
 	return false
+end
+
+local function metadataRequiresPaidRandomItemPolicy(metadata)
+	return typeof(metadata) == "table"
+		and (
+			metadata.RequiresPaidRandomItemPolicy == true
+			or metadata.PaidRandomItem == true
+			or metadata.RobuxFundedRandomCurrency == true
+			or metadata.RandomRewardGenerator == true
+		)
+end
+
+local function purchaseTableRequiresPaidRandomItemPolicy(purchase)
+	if typeof(purchase) ~= "table" then
+		return false
+	end
+
+	if purchase.RequiresPaidRandomItemPolicy == true
+		or purchase.PaidRandomItem == true
+		or purchase.RobuxFundedRandomCurrency == true
+		or purchase.RandomRewardGenerator == true
+	then
+		return true
+	end
+
+	local kind = tostring(purchase.kind or purchase.Kind or "")
+	local id = purchase.id or purchase.Id
+	if kind == "product" then
+		return Monetization.DeveloperProductRequiresPaidRandomItemPolicy(id)
+	elseif kind == "gamepass" then
+		return Monetization.GamepassRequiresPaidRandomItemPolicy(id)
+	end
+
+	return false
+end
+
+function Monetization.DeveloperProductRequiresPaidRandomItemPolicy(productId)
+	local _, metadata = Monetization.GetDeveloperProductStatus(productId)
+	return metadataRequiresPaidRandomItemPolicy(metadata)
+end
+
+function Monetization.GamepassRequiresPaidRandomItemPolicy(gamepassId)
+	local _, metadata = Monetization.GetGamepassStatus(gamepassId)
+	return metadataRequiresPaidRandomItemPolicy(metadata)
+end
+
+function Monetization.PurchaseRequiresPaidRandomItemPolicy(kindOrPurchase, id)
+	if typeof(kindOrPurchase) == "table" then
+		return purchaseTableRequiresPaidRandomItemPolicy(kindOrPurchase)
+	end
+
+	local kind = tostring(kindOrPurchase or "")
+	if kind == "product" then
+		return Monetization.DeveloperProductRequiresPaidRandomItemPolicy(id)
+	elseif kind == "gamepass" then
+		return Monetization.GamepassRequiresPaidRandomItemPolicy(id)
+	end
+
+	return false
+end
+
+function Monetization.ItemRequiresPaidRandomItemPolicy(item)
+	if typeof(item) ~= "table" then
+		return false
+	end
+
+	if item.RequiresPaidRandomItemPolicy == true
+		or item.PaidRandomItem == true
+		or item.RobuxFundedRandomCurrency == true
+		or item.RandomRewardGenerator == true
+	then
+		return true
+	end
+
+	return purchaseTableRequiresPaidRandomItemPolicy(item.purchase)
 end
 
 function Monetization.GetDeveloperProductIdsForStatus(status)

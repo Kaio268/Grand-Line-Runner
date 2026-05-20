@@ -17,7 +17,7 @@ export type DataManager = {
 	HardResetData : (self: any, userId: number, kickMessage: string?) -> (boolean, string?),
 	IsHardResetPending : (self: any, userId: number) -> boolean,
 	MessageAsync : (self: any, userId: number, message: {any?}) -> boolean,
-	PromptProductPurchase : (self: any, player: Player, productId: number) -> (),
+	PromptProductPurchase : (self: any, player: Player, productId: number) -> (boolean, string?),
 	ResetData : (self: any, userId: number) -> boolean,
 	SetValue : (self: any, player: Player, path: string, newValue: (string | number | boolean | {any?})?) -> (),
 	SubValue : (self: any, player: Player, path: string, subValue: (number | {any?})) -> (),

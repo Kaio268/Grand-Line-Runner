@@ -122,14 +122,14 @@ local function computeCost(config, currentSpeed)
 	return math.floor(total + 0.5)
 end
 
-local function showPurchaseUnavailable(productId)
+local function showPurchaseUnavailable(productId, message)
 	warn(string.format(
-		"[SpeedUpgrade] Blocked disabled/non-GTR speed product prompt productId=%s",
+		"[SpeedUpgrade] Blocked speed product prompt productId=%s",
 		tostring(productId)
 	))
 	pcall(function()
 		PopUpModule:Local_SendPopUp(
-			MonetizationConfig.UnavailableMessage,
+			message or MonetizationConfig.UnavailableMessage,
 			Color3.fromRGB(255, 104, 104),
 			Color3.fromRGB(0, 0, 0),
 			3,
@@ -191,6 +191,10 @@ local function render()
 			end
 			if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
 				showPurchaseUnavailable(productId)
+				return
+			end
+			if MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+				showPurchaseUnavailable(productId, MonetizationConfig.PaidRandomItemUnavailableMessage)
 				return
 			end
 			MarketplaceService:PromptProductPurchase(player, productId)

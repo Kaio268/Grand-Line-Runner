@@ -37,6 +37,8 @@ local Settings = require(script.Settings)
 local Premades = require(script.Premades)
 local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local MonetizationConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
+local PaidRandomItemPolicy = require(game.ServerScriptService.Modules.PaidRandomItemPolicy)
+local RemoteGuard = require(game.ServerScriptService.Modules.RemoteGuard)
 local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
   
 --// ProfileStore
@@ -1637,7 +1639,7 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 	productId = tonumber(productId)
 	if productId == nil then
 		warn("[DataManager]: Refused product prompt with invalid product id")
-		return
+		return false, "invalid_product_id"
 	end
 
 	if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
@@ -1649,15 +1651,30 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 			tostring(status),
 			tostring(metadata and metadata.Reason or "not_active_chefs_product")
 		))
-		return
+		return false, "product_not_available"
+	end
+
+	if MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+		local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+		if allowed ~= true then
+			warn(string.format(
+				"[DataManager]: Blocked paid random product prompt player=%s productId=%s policyStatus=%s reason=%s",
+				player and player.Name or "<unknown>",
+				tostring(productId),
+				tostring(policyState and policyState.Status or "unknown"),
+				tostring(policyState and policyState.Reason or "policy_unknown")
+			))
+			return false, tostring(policyState and policyState.Reason or "policy_unknown"), policyState
+		end
 	end
 
 	if ProductFunctions[productId] == nil then
 		warn("[DataManager]: No product function under id: ".. productId)
-		return
+		return false, "missing_product_function"
 	end
 
 	MarketPlaceService:PromptProductPurchase(player, productId)
+	return true, nil
 end
 
 function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()), purchase_id, grant_purchase): Enum.ProductPurchaseDecision
@@ -1837,7 +1854,40 @@ local function ProcessReceipt(recieptInfo)
 
 		if profile ~= nil then
 			local productId = tonumber(recieptInfo.ProductId)
-			if productId == nil or ProductFunctions[productId] == nil then
+			if productId == nil then
+				warn("[DataManager]: No product found under id: " .. tostring(recieptInfo.ProductId))
+				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+
+			if MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+				local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+				if allowed ~= true then
+					return PurchaseIdCheckAsync(
+						profile,
+						recieptInfo.PurchaseId,
+						function()
+							local marker, created = PaidRandomItemPolicy.RecordBlockedReceiptFallback(
+								profile,
+								player,
+								recieptInfo,
+								policyState
+							)
+							warn(string.format(
+								"[DataManager]: Blocked paid random receipt and recorded support marker player=%s productId=%s purchaseId=%s markerCreated=%s policyStatus=%s reason=%s fallbackMode=%s",
+								player.Name,
+								tostring(productId),
+								tostring(recieptInfo.PurchaseId),
+								tostring(created == true),
+								tostring(policyState and policyState.Status or "unknown"),
+								tostring(policyState and policyState.Reason or "policy_unknown"),
+								tostring(marker and marker.FallbackMode or "SupportMarker")
+							))
+						end
+					)
+				end
+			end
+
+			if ProductFunctions[productId] == nil then
 				warn("[DataManager]: No product found under id: " .. tostring(recieptInfo.ProductId))
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
@@ -2262,6 +2312,49 @@ local function SetupAnnouncementSubscription()
 	end
 end
 
+local function SetupPaidRandomItemPolicyRemotes()
+	local remotesConfig = MonetizationConfig.PaidRandomItemPolicy
+		and MonetizationConfig.PaidRandomItemPolicy.Remotes
+		or {}
+	local promptRemoteName = tostring(remotesConfig.ProductPromptRequestName or "PaidRandomProductPromptRequest")
+
+	PaidRandomItemPolicy.SetupRemotes({
+		PromptProductPurchase = function(player: Player, productId: number)
+			if not RemoteGuard.Check(player, promptRemoteName, { productId }, {
+				Cooldown = 0.35,
+				Args = {
+					{ Type = "finiteNumber", Integer = true, Min = 1 },
+				},
+			}) then
+				return {
+					ok = false,
+					error = "remote_guard_rejected",
+				}
+			end
+
+			productId = tonumber(productId)
+			if productId == nil or not MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+				warn(string.format(
+					"[DataManager]: Rejected paid random prompt remote for non-paid-random product player=%s productId=%s",
+					player and player.Name or "<unknown>",
+					tostring(productId)
+				))
+				return {
+					ok = false,
+					error = "not_paid_random_product",
+				}
+			end
+
+			local prompted, reason = DataManager:PromptProductPurchase(player, productId)
+			return {
+				ok = prompted == true,
+				error = if prompted == true then nil else tostring(reason or "prompt_rejected"),
+				policy = PaidRandomItemPolicy.GetClientState(player),
+			}
+		end,
+	})
+end
+
 
 DataManager.init = function()
 	if DataManagerInitialized then
@@ -2279,6 +2372,7 @@ DataManager.init = function()
 
 	FillMessageFunctions()
 	DataManager.Premades = Premades
+	SetupPaidRandomItemPolicyRemotes()
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		task.spawn(PlayerAdded, player)

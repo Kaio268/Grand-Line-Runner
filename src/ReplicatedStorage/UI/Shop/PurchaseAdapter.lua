@@ -8,6 +8,13 @@ local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wai
 local PurchaseAdapter = {}
 PurchaseAdapter.__index = PurchaseAdapter
 
+local DEFAULT_PAID_RANDOM_POLICY_STATE = {
+	CanUsePaidRandomItems = false,
+	Resolved = false,
+	Status = "unknown",
+	Reason = "policy_unknown",
+}
+
 local function copyTable(source)
 	return table.clone(source)
 end
@@ -23,6 +30,33 @@ local function getPurchaseKey(purchase)
 	return tostring(purchase.kind) .. ":" .. tostring(purchase.id)
 end
 
+local function getPolicyRemoteNames()
+	local policyConfig = MonetizationConfig.PaidRandomItemPolicy or {}
+	local remotes = policyConfig.Remotes or {}
+	return tostring(remotes.StateRequestName or "PaidRandomItemPolicyStateRequest"),
+		tostring(remotes.ProductPromptRequestName or "PaidRandomProductPromptRequest")
+end
+
+local function normalizePolicyState(state)
+	if typeof(state) ~= "table" then
+		return table.clone(DEFAULT_PAID_RANDOM_POLICY_STATE)
+	end
+
+	return {
+		CanUsePaidRandomItems = state.CanUsePaidRandomItems == true,
+		Resolved = state.Resolved == true,
+		Status = tostring(state.Status or "unknown"),
+		Reason = tostring(state.Reason or "policy_unknown"),
+	}
+end
+
+local function getPaidRandomUnavailableMessage(policyState)
+	if policyState and policyState.Status == "restricted" then
+		return MonetizationConfig.PaidRandomItemUnavailableMessage
+	end
+	return "Purchase availability could not be verified."
+end
+
 function PurchaseAdapter.new(player)
 	local self = setmetatable({}, PurchaseAdapter)
 
@@ -34,9 +68,15 @@ function PurchaseAdapter.new(player)
 	self._connections = {}
 	self._passConnections = {}
 	self._changed = Instance.new("BindableEvent")
+	self._paidRandomPolicyState = table.clone(DEFAULT_PAID_RANDOM_POLICY_STATE)
+	self._paidRandomPolicyRequestInFlight = false
+	self._paidRandomPolicyRequested = false
+	self._policyStateRequest = nil
+	self._paidRandomPromptRequest = nil
 
 	self:_bindPasses()
 	self:_bindPromptSignals()
+	self:_requestPaidRandomPolicyState()
 
 	return self
 end
@@ -153,9 +193,78 @@ function PurchaseAdapter:_bindPromptSignals()
 	end))
 end
 
+function PurchaseAdapter:_getRemoteFunction(remoteName)
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 5)
+	if not remotes then
+		return nil
+	end
+
+	local remote = remotes:FindFirstChild(remoteName) or remotes:WaitForChild(remoteName, 5)
+	if remote and remote:IsA("RemoteFunction") then
+		return remote
+	end
+
+	return nil
+end
+
+function PurchaseAdapter:_getPolicyStateRequest()
+	if self._policyStateRequest and self._policyStateRequest.Parent then
+		return self._policyStateRequest
+	end
+
+	local stateRequestName = getPolicyRemoteNames()
+	self._policyStateRequest = self:_getRemoteFunction(stateRequestName)
+	return self._policyStateRequest
+end
+
+function PurchaseAdapter:_getPaidRandomPromptRequest()
+	if self._paidRandomPromptRequest and self._paidRandomPromptRequest.Parent then
+		return self._paidRandomPromptRequest
+	end
+
+	local _, promptRequestName = getPolicyRemoteNames()
+	self._paidRandomPromptRequest = self:_getRemoteFunction(promptRequestName)
+	return self._paidRandomPromptRequest
+end
+
+function PurchaseAdapter:_refreshPaidRandomItems()
+	for _, item in pairs(self._catalogItems) do
+		if MonetizationConfig.ItemRequiresPaidRandomItemPolicy(item) then
+			self:_refreshStateForItem(item)
+		end
+	end
+end
+
+function PurchaseAdapter:_requestPaidRandomPolicyState()
+	if self._paidRandomPolicyRequestInFlight or self._paidRandomPolicyRequested then
+		return
+	end
+
+	self._paidRandomPolicyRequestInFlight = true
+	self._paidRandomPolicyRequested = true
+	task.spawn(function()
+		local remote = self:_getPolicyStateRequest()
+		local nextState = table.clone(DEFAULT_PAID_RANDOM_POLICY_STATE)
+		if remote then
+			local ok, result = pcall(function()
+				return remote:InvokeServer()
+			end)
+			if ok then
+				nextState = normalizePolicyState(result)
+			end
+		end
+
+		self._paidRandomPolicyState = nextState
+		self._paidRandomPolicyRequestInFlight = false
+		self:_refreshPaidRandomItems()
+		self:_emitChanged()
+	end)
+end
+
 function PurchaseAdapter:_refreshStateForItem(item)
 	local purchase = item.purchase or { kind = "stub" }
 	local state = self:_getState(item)
+	local requiresPaidRandomPolicy = MonetizationConfig.ItemRequiresPaidRandomItemPolicy(item)
 
 	state.priceText = item.priceText or state.priceText or "--"
 	state.isPriceLoading = false
@@ -164,10 +273,24 @@ function PurchaseAdapter:_refreshStateForItem(item)
 	state.buttonEnabled = true
 	state.buttonText = item.callToAction or "Purchase"
 	state.statusText = "Ready"
+	state.requiresPaidRandomPolicy = requiresPaidRandomPolicy
+
+	if requiresPaidRandomPolicy then
+		self:_requestPaidRandomPolicyState()
+	end
+
+	if requiresPaidRandomPolicy and self._paidRandomPolicyState.CanUsePaidRandomItems ~= true then
+		state.buttonText = "Unavailable"
+		state.statusText = "Unavailable"
+		state.priceText = item.priceText or "Unavailable"
+		state.buttonEnabled = false
+		return
+	end
 
 	if purchase.kind == "stub" or purchase.id == nil then
 		state.buttonText = item.callToAction or "Coming Soon"
 		state.statusText = "Arriving soon"
+		state.buttonEnabled = false
 		return
 	end
 
@@ -175,6 +298,7 @@ function PurchaseAdapter:_refreshStateForItem(item)
 		state.buttonText = item.placeholderAction or "Coming Soon"
 		state.statusText = "Not available yet"
 		state.priceText = item.priceText or "Soon"
+		state.buttonEnabled = false
 		return
 	end
 
@@ -308,9 +432,40 @@ function PurchaseAdapter:requestPurchase(item)
 		return false, MonetizationConfig.UnavailableMessage
 	end
 
+	local requiresPaidRandomPolicy = MonetizationConfig.ItemRequiresPaidRandomItemPolicy(item)
+	if requiresPaidRandomPolicy and self._paidRandomPolicyState.CanUsePaidRandomItems ~= true then
+		self:_requestPaidRandomPolicyState()
+		return false, getPaidRandomUnavailableMessage(self._paidRandomPolicyState)
+	end
+
 	local state = self:_getState(item)
 	if state.isOwned then
 		return false, item.title .. " is already unlocked."
+	end
+
+	if purchase.kind == "product" and requiresPaidRandomPolicy then
+		local remote = self:_getPaidRandomPromptRequest()
+		if not remote then
+			return false, "Purchase availability could not be verified."
+		end
+
+		local ok, response = pcall(function()
+			return remote:InvokeServer(purchase.id)
+		end)
+
+		if ok and typeof(response) == "table" then
+			if typeof(response.policy) == "table" then
+				self._paidRandomPolicyState = normalizePolicyState(response.policy)
+				self:_refreshPaidRandomItems()
+				self:_emitChanged()
+			end
+			if response.ok == true then
+				return true, nil
+			end
+			return false, getPaidRandomUnavailableMessage(self._paidRandomPolicyState)
+		end
+
+		return false, "The Roblox purchase prompt could not be opened."
 	end
 
 	local ok = pcall(function()

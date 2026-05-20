@@ -180,6 +180,7 @@ local ProfileTemplate = {
 	},
 	Packs = {},
 	CometMerchant = {},
+	PaidRandomItemReceiptFallbacks = {},
 	PurchaseIdCache = {},
 	__Attributes = {},
 }

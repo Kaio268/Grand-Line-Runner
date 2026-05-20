@@ -114,6 +114,8 @@ local function PriceDisplay(props)
 
 	if props.isOwned then
 		purchaseText = "Owned"
+	elseif buttonEnabled == false and props.buttonText ~= nil and tostring(props.buttonText) ~= "" then
+		purchaseText = tostring(props.buttonText)
 	else
 		purchaseText = tostring(priceLabel or "...")
 	end

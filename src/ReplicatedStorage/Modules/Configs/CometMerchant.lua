@@ -1,4 +1,6 @@
 local CometMerchant = {
+	RequiresPaidRandomItemPolicy = false,
+	RobuxFundedRandomCurrency = false,
 
 	All_Things = {
 		["Potions.x2MoneyTime"] = {

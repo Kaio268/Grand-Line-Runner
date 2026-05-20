@@ -135,6 +135,13 @@ MythicKey = {
 
 Devil Fruit Chests are a special chest type that guarantees a fruit. They are distributed through quests, events, and optionally monetization.
 
+**Paid random item policy**
+- Any Robux product that grants a chest, chest bundle, direct random fruit roll, or Robux-funded currency for random rewards must be marked with paid-random metadata in monetization config.
+- Server code must check `PolicyService:GetPolicyInfoForPlayerAsync(player)` and fail closed when `ArePaidRandomItemsRestricted` is missing, errored, or `true`.
+- Paid chests must persist `PaidRandomItem = true` and purchase metadata so earned/free chests remain usable for restricted players.
+- If a paid-random receipt reaches the server while policy is restricted or unknown, the server must not roll a random reward; it records a support/refund marker in `PaidRandomItemReceiptFallbacks`.
+- Client UI may hide or disable paid-random purchase buttons, but the server prompt, receipt, and opening/grant paths are authoritative.
+
 **Behavior**
 - Use the **same fruit-resolution pipeline** as regular chests
 - Do **not** grant baseline food, materials, or Doubloons on open

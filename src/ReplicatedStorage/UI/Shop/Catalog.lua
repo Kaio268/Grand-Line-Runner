@@ -60,6 +60,8 @@ local items = {
 		themeKey = "Violet",
 		iconText = "FH",
 		callToAction = "Track Loot",
+		RequiresPaidRandomItemPolicy = true,
+		PaidRandomItem = true,
 		highlights = {
 			"Great for fruit routes",
 			"Includes premium hunt tools",
@@ -78,6 +80,8 @@ local items = {
 		themeKey = "Cyan",
 		iconText = "SC",
 		callToAction = "Open Crate",
+		RequiresPaidRandomItemPolicy = true,
+		PaidRandomItem = true,
 		purchase = {
 			kind = "stub",
 		},
@@ -183,6 +187,8 @@ local items = {
 		themeKey = "Gold",
 		iconText = "CB",
 		callToAction = "Coming Soon",
+		RequiresPaidRandomItemPolicy = true,
+		PaidRandomItem = true,
 		purchase = {
 			kind = "stub",
 		},
@@ -269,6 +275,8 @@ local items = {
 		themeKey = "Violet",
 		iconText = "DR",
 		callToAction = "Coming Soon",
+		RequiresPaidRandomItemPolicy = true,
+		RandomRewardGenerator = true,
 		purchase = {
 			kind = "stub",
 		},
@@ -298,6 +306,8 @@ local items = {
 		themeKey = "Gold",
 		iconText = "DP",
 		callToAction = "Coming Soon",
+		RequiresPaidRandomItemPolicy = true,
+		RobuxFundedRandomCurrency = true,
 		purchase = {
 			kind = "stub",
 		},
@@ -312,6 +322,8 @@ local items = {
 		themeKey = "Orange",
 		iconText = "CS",
 		callToAction = "Coming Soon",
+		RequiresPaidRandomItemPolicy = true,
+		RobuxFundedRandomCurrency = true,
 		purchase = {
 			kind = "stub",
 		},
@@ -326,6 +338,8 @@ local items = {
 		themeKey = "Crimson",
 		iconText = "FR",
 		callToAction = "Coming Soon",
+		RequiresPaidRandomItemPolicy = true,
+		RobuxFundedRandomCurrency = true,
 		purchase = {
 			kind = "stub",
 		},
@@ -341,6 +355,8 @@ local items = {
 		themeKey = "Slate",
 		iconText = "PT",
 		callToAction = "Coming Soon",
+		RequiresPaidRandomItemPolicy = true,
+		RobuxFundedRandomCurrency = true,
 		purchase = {
 			kind = "stub",
 		},
