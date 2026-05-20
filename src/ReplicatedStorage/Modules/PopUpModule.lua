@@ -38,6 +38,9 @@ local REWARD_ICON_FADE_TIME = 0.12
 local REWARD_POOL_TARGET_SIZE = 6
 local NOTIFY_TWEEN_IN_TIME = 0.5
 local NOTIFY_TWEEN_OUT_TIME = 0.25
+local DEBUG_FULLSCREEN_EFFECTS = false
+local FLASHBANG_MAX_DURATION = 3
+local TRANSITION_MAX_TIME = 8
 
 local EASING_STYLE_IN = Enum.EasingStyle.Back
 local EASING_DIRECTION_IN = Enum.EasingDirection.Out
@@ -55,6 +58,70 @@ if not PopUpEvent then
 	PopUpEvent = Instance.new("RemoteEvent")
 	PopUpEvent.Name = "PopUpEvent"
 	PopUpEvent.Parent = ReplicatedStorage
+end
+
+local function debugFullscreenEffect(message, ...)
+	if not DEBUG_FULLSCREEN_EFFECTS then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, message, ...)
+	print("[PopUpModule] " .. (ok and formatted or tostring(message)))
+end
+
+local function getClientAnimations(timeout)
+	local player = Players.LocalPlayer
+	if not player then
+		return nil
+	end
+
+	local playerGui = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui", timeout or 3)
+	if not playerGui then
+		return nil
+	end
+
+	return playerGui:FindFirstChild("Animations") or playerGui:WaitForChild("Animations", timeout or 3)
+end
+
+local function resetTransitionFrame(frame)
+	if not frame:IsA("Frame") then
+		return
+	end
+
+	frame.Visible = false
+	local uiScale = frame:FindFirstChildOfClass("UIScale")
+	if uiScale then
+		uiScale.Scale = 0
+	end
+end
+
+local function sanitizeTransitionFolder(transitionFolder)
+	if not transitionFolder then
+		return
+	end
+
+	for _, child in ipairs(transitionFolder:GetChildren()) do
+		if child:IsA("Frame") then
+			resetTransitionFrame(child)
+		end
+	end
+end
+
+local function sanitizeFlashbangTemplate(animations)
+	local flashbangTemplate = animations and animations:FindFirstChild("FlashbangEffect")
+	if flashbangTemplate and flashbangTemplate:IsA("GuiObject") then
+		flashbangTemplate.Visible = false
+		flashbangTemplate.BackgroundTransparency = 1
+	end
+end
+
+local function sanitizeFullscreenEffectTemplates(animations)
+	if not animations then
+		return
+	end
+
+	sanitizeFlashbangTemplate(animations)
+	sanitizeTransitionFolder(animations:FindFirstChild("Transition"))
 end
 
 local function playSound(name)
@@ -1436,20 +1503,25 @@ end
 
 
 function PopUpModule:Local_Transition(totalTime)
-	local player = Players.LocalPlayer
-	local playerGui = player:WaitForChild("PlayerGui")
-	local animations = playerGui:WaitForChild("Animations")
-	local transitionFolder = animations:WaitForChild("Transition")
+	local animations = getClientAnimations(3)
+	local transitionFolder = animations and (animations:FindFirstChild("Transition") or animations:WaitForChild("Transition", 3))
+	if not transitionFolder then
+		return
+	end
+
+	totalTime = math.clamp(tonumber(totalTime) or 0.75, 0.1, TRANSITION_MAX_TIME)
+	sanitizeTransitionFolder(transitionFolder)
 
 	local frames = {}
 	for _, child in ipairs(transitionFolder:GetChildren()) do
 		if child:IsA("Frame") then
-			child.Visible = false
 			local uiScale = child:FindFirstChildOfClass("UIScale")
 			if uiScale then
 				uiScale.Scale = 0
+				table.insert(frames, child)
+			else
+				child.Visible = false
 			end
-			table.insert(frames, child)
 		end
 	end
 
@@ -1462,12 +1534,16 @@ function PopUpModule:Local_Transition(totalTime)
 	local n = #frames
 	if n == 0 then return end
 
+	debugFullscreenEffect("Transition triggered totalTime=%.2f frames=%d", totalTime, n)
 	local delayPerFrame = totalTime / n
 	for i, frame in ipairs(frames) do
 		frame.Visible = true
 		local uiScale = frame:FindFirstChildOfClass("UIScale")
 		if uiScale then
 			task.delay((i + 0.5) * delayPerFrame, function()
+				if not frame.Parent then
+					return
+				end
 				TweenService:Create(uiScale, TweenInfo.new(delayPerFrame, EASING_STYLE_IN, EASING_DIRECTION_IN), {Scale = 1}):Play()
 			end)
 		end
@@ -1486,39 +1562,70 @@ function PopUpModule:Local_Transition(totalTime)
 				tween.Completed:Connect(function()
 					frame.Visible = false
 				end)
+			else
+				frame.Visible = false
 			end
+		end
+	end)
+
+	task.delay(totalTime + 1.75, function()
+		if transitionFolder.Parent then
+			sanitizeTransitionFolder(transitionFolder)
 		end
 	end)
 end
 
 function PopUpModule:Local_FlashbangEffect(duration, color)
-	local player = Players.LocalPlayer
-	local playerGui = player:WaitForChild("PlayerGui")
-	local animations = playerGui:WaitForChild("Animations")
-	local flashbangTemplate = animations:WaitForChild("FlashbangEffect")
+	local animations = getClientAnimations(3)
+	local flashbangTemplate = animations and (animations:FindFirstChild("FlashbangEffect") or animations:WaitForChild("FlashbangEffect", 3))
+	if not (animations and flashbangTemplate and flashbangTemplate:IsA("GuiObject")) then
+		return
+	end
+
+	duration = math.clamp(tonumber(duration) or 0.35, 0.05, FLASHBANG_MAX_DURATION)
+	color = if typeof(color) == "Color3" then color else Color3.new(1, 1, 1)
+	sanitizeFlashbangTemplate(animations)
+	debugFullscreenEffect("FlashbangEffect triggered duration=%.2f", duration)
 
 	local flashbangClone = flashbangTemplate:Clone()
+	flashbangClone.Name = "FlashbangEffectActive"
 	flashbangClone.Parent = animations
 	flashbangClone.Visible = true
 	flashbangClone.BackgroundColor3 = color
-	flashbangClone.Transparency = 1
+	flashbangClone.BackgroundTransparency = 1
+
+	local cleanedUp = false
+	local function cleanup()
+		if cleanedUp then
+			return
+		end
+
+		cleanedUp = true
+		if flashbangClone and flashbangClone.Parent then
+			flashbangClone:Destroy()
+		end
+	end
+
+	task.delay(duration + 1, cleanup)
 
 	local tweenIn = TweenService:Create(
 		flashbangClone,
 		TweenInfo.new(0.05, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-		{Transparency = 0}
+		{BackgroundTransparency = 0}
 	)
 	tweenIn:Play()
 	tweenIn.Completed:Connect(function()
+		if cleanedUp or not flashbangClone.Parent then
+			return
+		end
+
 		local tweenOut = TweenService:Create(
 			flashbangClone,
 			TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{Transparency = 1}
+			{BackgroundTransparency = 1}
 		)
 		tweenOut:Play()
-		tweenOut.Completed:Connect(function()
-			flashbangClone:Destroy()
-		end)
+		tweenOut.Completed:Connect(cleanup)
 	end)
 end
 
@@ -1605,6 +1712,9 @@ end
 
 if RunService:IsClient() then
 	warmRewardPool()
+	task.defer(function()
+		sanitizeFullscreenEffectTemplates(getClientAnimations(5))
+	end)
 
 	PopUpEvent.OnClientEvent:Connect(function(funcName, ...)
 		local f = PopUpModule["Local_" .. funcName]

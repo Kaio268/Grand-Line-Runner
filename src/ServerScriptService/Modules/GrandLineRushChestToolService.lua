@@ -190,26 +190,17 @@ local function connectChestTool(player, tool)
 		busyTools[busyKey] = true
 
 		local tierName = tostring(tool:GetAttribute("InventoryItemName") or tool.Name)
-		local state = SliceService.GetState(player)
-		local unopenedChests = state and state.UnopenedChests or {}
-		local chestId = nil
-		for _, chest in ipairs(unopenedChests) do
-			if getChestSummaryName(chest) == tierName then
-				chestId = chest.ChestId
-				break
-			end
-		end
-
-		if not chestId then
-			sendPopup(player, string.format("No %s is available to open.", ChestUtils.GetDisplayName(tierName)), ERROR_COLOR, true)
-			ChestToolService.SyncPlayer(player, state)
-			busyTools[busyKey] = nil
-			return
-		end
-
-		local response = SliceService.OpenChest(player, chestId)
+		local response = SliceService.OpenChests(player, tierName, 1)
 		if response and response.ok then
-			consumeOpenedChestTool(player, tool)
+			local remainingCount = 0
+			local responseCounts = response.state and response.state.UnopenedChestCounts
+			if typeof(responseCounts) == "table" then
+				remainingCount = math.max(0, math.floor(tonumber(responseCounts[tierName]) or 0))
+			end
+			if remainingCount <= 0 then
+				consumeOpenedChestTool(player, tool)
+			end
+			ChestToolService.SyncPlayer(player, response.state)
 			if typeof(response.openResult) == "table" then
 				PopUpModule:Server_ShowChestOpenResult(player, response.openResult)
 			else
@@ -282,11 +273,18 @@ local function buildTierCounts(state)
 		counts[tierName] = 0
 	end
 
+	if typeof(state) == "table" and typeof(state.UnopenedChestCounts) == "table" then
+		for chestName, amount in pairs(state.UnopenedChestCounts) do
+			counts[tostring(chestName)] = math.max(0, math.floor(tonumber(amount) or 0))
+		end
+		return counts
+	end
+
 	local unopenedChests = state and state.UnopenedChests or {}
 	for _, chest in ipairs(unopenedChests) do
 		local chestName = getChestSummaryName(chest)
 		if chestName ~= "" then
-			counts[chestName] = (counts[chestName] or 0) + 1
+			counts[chestName] = (counts[chestName] or 0) + math.max(1, math.floor(tonumber(chest.Quantity) or 1))
 		end
 	end
 

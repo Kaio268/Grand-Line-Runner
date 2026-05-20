@@ -136,16 +136,25 @@ local function countUnopenedChests(unopenedChests)
 		return 0
 	end
 
-	if typeof(unopenedChests.Order) == "table" and #unopenedChests.Order > 0 then
-		return #unopenedChests.Order
+	local count = 0
+	for _, amount in pairs(unopenedChests.Stacks or {}) do
+		count += math.max(0, math.floor(tonumber(amount) or 0))
 	end
 
-	return countMapEntries(unopenedChests.ById)
+	if typeof(unopenedChests.Order) == "table" and #unopenedChests.Order > 0 then
+		return count + #unopenedChests.Order
+	end
+
+	return count + countMapEntries(unopenedChests.ById)
 end
 
 local function getChestEntries(unopenedChests)
 	local entries = {}
-	if typeof(unopenedChests) ~= "table" or typeof(unopenedChests.ById) ~= "table" then
+	if typeof(unopenedChests) ~= "table" then
+		return entries
+	end
+
+	if typeof(unopenedChests.ById) ~= "table" then
 		return entries
 	end
 
@@ -580,6 +589,20 @@ end
 local function addUnopenedChestToCollection(unopenedChests, chestData)
 	unopenedChests.Order = unopenedChests.Order or {}
 	unopenedChests.ById = unopenedChests.ById or {}
+	unopenedChests.Stacks = unopenedChests.Stacks or {}
+	for _, tierName in ipairs(ChestRewards.StandardTierOrder) do
+		unopenedChests.Stacks[tierName] = math.max(0, math.floor(tonumber(unopenedChests.Stacks[tierName]) or 0))
+	end
+	unopenedChests.StackSchemaVersion = 1
+
+	local stackKey = ChestUtils.GetStackKey(chestData)
+	if stackKey ~= nil then
+		unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+		unopenedChests.Stacks[stackKey] = math.max(0, math.floor(tonumber(unopenedChests.Stacks[stackKey]) or 0)) + 1
+		unopenedChests.NextChestId += 1
+		return "stack:" .. stackKey
+	end
+
 	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
 
 	local chestId = tostring(unopenedChests.NextChestId)

@@ -27,6 +27,7 @@ local randomObject = Random.new()
 local requestRemote
 local stateRemote
 local stateChangedEvent = Instance.new("BindableEvent")
+local droppedChestWorldHandler = nil
 local started = false
 local runtimeByPlayer = {}
 local deathConnections = {}
@@ -472,6 +473,40 @@ local function cloneRewardData(reward)
 	return data
 end
 
+local function createDroppedWorldChest(player, reward)
+	if typeof(droppedChestWorldHandler) ~= "function" then
+		return false, "dropped_chest_handler_missing"
+	end
+
+	local data = cloneRewardData(reward)
+	if typeof(data) ~= "table" then
+		return false, "missing_dropped_chest_data"
+	end
+
+	data.RewardType = "Chest"
+	data.Source = if typeof(data.Source) == "string" and data.Source ~= "" then data.Source else "DroppedWorld"
+
+	local ok, result, resultReason = pcall(droppedChestWorldHandler, player, data)
+	if not ok then
+		warn(string.format("[GrandLineRush] Dropped chest world handler failed: %s", tostring(result)))
+		return false, "dropped_chest_handler_failed"
+	end
+
+	if result == false then
+		return false, tostring(resultReason or "dropped_chest_create_failed")
+	end
+
+	if typeof(result) == "table" and result.ok == false then
+		return false, tostring(result.reason or result.error or "dropped_chest_create_failed")
+	end
+
+	if result == nil then
+		return false, "dropped_chest_create_failed"
+	end
+
+	return true, nil
+end
+
 local function sanitizeReward(reward)
 	local data = cloneRewardData(reward)
 	if not data then
@@ -770,6 +805,7 @@ local function removeCarryItem(player, runtime, slotIndexOrCarryId)
 	slot.ItemType = nil
 	slot.DisplayName = nil
 	slot.Data = nil
+	slot.DropInProgress = nil
 
 	syncCarrySlotsToClient(player, runtime)
 	refreshHeldCarryVisualLayout(player)
@@ -789,6 +825,7 @@ local function clearAllCarryItems(player, runtime, _reason)
 		slot.ItemType = nil
 		slot.DisplayName = nil
 		slot.Data = nil
+		slot.DropInProgress = nil
 	end
 
 	runtime.CarriedReward = nil
@@ -855,9 +892,91 @@ local function chooseWeightedKey(weightTable, orderedKeys)
 	return orderedKeys[#orderedKeys]
 end
 
-local function chooseChestTier(depthBand)
+local function getSharedChestConfig()
+	local verticalSlice = Economy.VerticalSlice
+	local worldRun = typeof(verticalSlice) == "table" and verticalSlice.WorldRun or nil
+	return if typeof(worldRun) == "table" and typeof(worldRun.SharedChests) == "table" then worldRun.SharedChests else {}
+end
+
+local function getDistributionTotal(weightTable)
+	local totalWeight = 0
+	for _, key in ipairs(CHEST_TIER_ORDER) do
+		totalWeight += math.max(0, tonumber(weightTable[key]) or 0)
+	end
+	return totalWeight
+end
+
+local function copyChestDistribution(weightTable)
+	local copy = {}
+	for _, key in ipairs(CHEST_TIER_ORDER) do
+		copy[key] = math.max(0, tonumber(weightTable[key]) or 0)
+	end
+	return copy
+end
+
+local function getPopulationGoldBonusWeight(weightTable, activePlayerCount)
+	local sharedConfig = getSharedChestConfig()
+	local perExtraPlayer = math.max(0, tonumber(sharedConfig.PopulationGoldBonusPerExtraPlayer) or 0)
+	local bonusCap = math.max(0, tonumber(sharedConfig.PopulationGoldBonusCap) or 0)
+	local extraPlayers = math.max(0, math.floor(tonumber(activePlayerCount) or 1) - 1)
+	if perExtraPlayer <= 0 or bonusCap <= 0 or extraPlayers <= 0 then
+		return 0
+	end
+
+	local bonus = math.min(bonusCap, perExtraPlayer * extraPlayers)
+	local totalWeight = getDistributionTotal(weightTable)
+	if totalWeight <= 0 then
+		return 0
+	end
+
+	-- Config values <= 1 are treated as chance fractions, so 0.01 is +1 percentage point.
+	if perExtraPlayer <= 1 and bonusCap <= 1 then
+		return bonus * totalWeight
+	end
+
+	return bonus
+end
+
+local function applySharedChestPopulationBonus(weightTable, activePlayerCount)
+	local adjusted = copyChestDistribution(weightTable)
+	local bonusWeight = getPopulationGoldBonusWeight(adjusted, activePlayerCount)
+	if bonusWeight <= 0 then
+		return adjusted
+	end
+
+	local remaining = bonusWeight
+	local transferred = 0
+	for _, sourceKey in ipairs({ "Wooden", "Iron" }) do
+		local available = math.max(0, tonumber(adjusted[sourceKey]) or 0)
+		local taken = math.min(available, remaining)
+		adjusted[sourceKey] = available - taken
+		transferred += taken
+		remaining -= taken
+		if remaining <= 0 then
+			break
+		end
+	end
+	adjusted.Gold = math.max(0, tonumber(adjusted.Gold) or 0) + transferred
+
+	return adjusted
+end
+
+local function chooseChestTier(depthBand, options)
+	options = if typeof(options) == "table" then options else {}
+	if options.ForceGold == true and Economy.Chests.Tiers.Gold ~= nil then
+		return "Gold"
+	end
+
+	local forceTier = tostring(options.ForceTier or "")
+	if forceTier ~= "" and Economy.Chests.Tiers[forceTier] ~= nil then
+		return forceTier
+	end
+
 	local stage = Economy.VerticalSlice.ChestStageByDepthBand[depthBand] or Economy.VerticalSlice.ChestStageByDepthBand[Economy.VerticalSlice.DefaultDepthBand]
 	local distribution = Economy.Chests.ExpectedTierDistributionByStage[stage] or Economy.Chests.ExpectedTierDistributionByStage.Mid
+	if options.SharedWorldChest == true then
+		distribution = applySharedChestPopulationBonus(distribution, options.ActivePlayerCount)
+	end
 	return chooseWeightedKey(distribution, CHEST_TIER_ORDER)
 end
 
@@ -958,7 +1077,97 @@ local function buildStoredChestEntry(chestData)
 	}
 end
 
-local function addUnopenedChestToCollection(unopenedChests, chestData)
+local function normalizeStackCount(value)
+	return math.max(0, math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function ensureUnopenedChestCollection(dataRoot)
+	if typeof(dataRoot.UnopenedChests) ~= "table" then
+		dataRoot.UnopenedChests = {}
+	end
+
+	local unopenedChests = dataRoot.UnopenedChests
+	unopenedChests.Order = unopenedChests.Order or {}
+	unopenedChests.ById = unopenedChests.ById or {}
+	unopenedChests.Stacks = unopenedChests.Stacks or {}
+	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+	unopenedChests.StackSchemaVersion = 1
+
+	for _, stackKey in ipairs(ChestUtils.GetStackKeys()) do
+		unopenedChests.Stacks[stackKey] = normalizeStackCount(unopenedChests.Stacks[stackKey])
+	end
+
+	local seenOrderedChestIds = {}
+	local normalizedOrder = {}
+	local compactedStackableCount = 0
+
+	local function keepLegacyChest(chestId, entry)
+		local storedChest = buildStoredChestEntry(entry)
+		storedChest.ChestId = tostring(entry.ChestId or chestId)
+		unopenedChests.ById[chestId] = storedChest
+		normalizedOrder[#normalizedOrder + 1] = chestId
+	end
+
+	local function compactOrKeepLegacyChest(rawChestId, entry)
+		local chestId = tostring(rawChestId or "")
+		if chestId == "" or typeof(entry) ~= "table" then
+			if chestId ~= "" then
+				unopenedChests.ById[chestId] = nil
+			end
+			return
+		end
+
+		local stackKey = ChestUtils.GetStackKey(entry)
+		if stackKey ~= nil then
+			unopenedChests.Stacks[stackKey] = normalizeStackCount(unopenedChests.Stacks[stackKey]) + 1
+			unopenedChests.ById[chestId] = nil
+			compactedStackableCount += 1
+			return
+		end
+
+		keepLegacyChest(chestId, entry)
+	end
+
+	for _, rawChestId in ipairs(unopenedChests.Order) do
+		local chestId = tostring(rawChestId or "")
+		if chestId ~= "" and seenOrderedChestIds[chestId] ~= true then
+			seenOrderedChestIds[chestId] = true
+			local entry = unopenedChests.ById[chestId]
+			if entry ~= nil then
+				compactOrKeepLegacyChest(chestId, entry)
+			end
+		end
+	end
+
+	local unorderedLegacyChests = {}
+	for rawChestId, entry in pairs(unopenedChests.ById) do
+		local chestId = tostring(rawChestId or "")
+		if chestId ~= "" and seenOrderedChestIds[chestId] ~= true then
+			unorderedLegacyChests[#unorderedLegacyChests + 1] = {
+				ChestId = chestId,
+				Entry = entry,
+			}
+		end
+	end
+	for _, record in ipairs(unorderedLegacyChests) do
+		compactOrKeepLegacyChest(record.ChestId, record.Entry)
+	end
+
+	unopenedChests.Order = normalizedOrder
+	local unopenedStackCount = 0
+	for _, amount in pairs(unopenedChests.Stacks) do
+		unopenedStackCount += normalizeStackCount(amount)
+	end
+	unopenedChests.NextChestId = math.max(unopenedChests.NextChestId, unopenedStackCount + #normalizedOrder + 1)
+	if compactedStackableCount > 0 then
+		unopenedChests.CompactedStackableLegacyCount =
+			normalizeStackCount(unopenedChests.CompactedStackableLegacyCount) + compactedStackableCount
+	end
+
+	return unopenedChests
+end
+
+local function addLegacyUnopenedChestToCollection(unopenedChests, chestData)
 	unopenedChests.Order = unopenedChests.Order or {}
 	unopenedChests.ById = unopenedChests.ById or {}
 	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
@@ -974,16 +1183,84 @@ local function addUnopenedChestToCollection(unopenedChests, chestData)
 	return chestId, storedChest
 end
 
-local function countUnopenedChestsByInventoryName(unopenedChests, chestData)
-	local inventoryName = ChestUtils.GetInventoryName(chestData)
-	local count = 0
+local function addUnopenedChestToCollection(unopenedChests, chestData, amount)
+	local stackKey = ChestUtils.GetStackKey(chestData)
+	if stackKey ~= nil then
+		unopenedChests.Stacks = unopenedChests.Stacks or {}
+		unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+		local increment = math.max(1, math.floor(tonumber(amount) or 1))
+		unopenedChests.Stacks[stackKey] = normalizeStackCount(unopenedChests.Stacks[stackKey]) + increment
+		unopenedChests.NextChestId += increment
+		return "stack:" .. stackKey, buildStoredChestEntry(chestData), increment
+	end
+
+	return addLegacyUnopenedChestToCollection(unopenedChests, chestData)
+end
+
+local function buildChestSummary(chestId, chestData, quantity)
+	local normalizedChest = ChestUtils.BuildChestData(chestData)
+	local safeQuantity = math.max(1, math.floor(tonumber(quantity) or 1))
+	local inventoryName = ChestUtils.GetInventoryName(normalizedChest)
+	local summary = {
+		ChestId = chestId and tostring(chestId) or nil,
+		ChestKind = normalizedChest.ChestKind,
+		Tier = normalizedChest.Tier,
+		FruitRarity = normalizedChest.FruitRarity,
+		DepthBand = tostring(chestData.DepthBand or ""),
+		Source = tostring(chestData.Source or ChestRewards.DefaultChestSource),
+		RewardProfile = tostring(chestData.RewardProfile or ChestRewards.DefaultRewardProfile),
+		CreatedAt = math.max(0, tonumber(chestData.CreatedAt) or 0),
+		InventoryName = inventoryName,
+		DisplayName = ChestUtils.GetDisplayName(normalizedChest),
+		Quantity = safeQuantity,
+	}
+
+	local stackKey = ChestUtils.GetStackKey(normalizedChest)
+	if stackKey ~= nil and safeQuantity > 1 then
+		summary.StackKey = stackKey
+		summary.IsStack = true
+	end
+
+	return summary
+end
+
+local function collectUnopenedChestCounts(unopenedChests)
+	local counts = {}
+	local totalCount = 0
+
+	for stackKey, amount in pairs(unopenedChests.Stacks or {}) do
+		local count = normalizeStackCount(amount)
+		if count > 0 then
+			counts[stackKey] = normalizeStackCount(counts[stackKey]) + count
+			totalCount += count
+		end
+	end
 
 	for _, existingChestId in ipairs(unopenedChests.Order or {}) do
 		local entry = unopenedChests.ById and unopenedChests.ById[tostring(existingChestId)]
-		if entry and ChestUtils.GetInventoryName(entry) == inventoryName then
-			count += 1
+		if entry then
+			local inventoryName = ChestUtils.GetInventoryName(entry)
+			counts[inventoryName] = normalizeStackCount(counts[inventoryName]) + 1
+			totalCount += 1
 		end
 	end
+
+	return counts, totalCount
+end
+
+local function resolveStackKeyFromName(name)
+	local candidate = tostring(name or "")
+	if candidate:sub(1, 6) == "stack:" then
+		candidate = candidate:sub(7)
+	end
+
+	return ChestUtils.ResolveStandardTier(candidate)
+end
+
+local function countUnopenedChestsByInventoryName(unopenedChests, chestData)
+	local inventoryName = ChestUtils.GetInventoryName(chestData)
+	local counts = collectUnopenedChestCounts(unopenedChests)
+	local count = normalizeStackCount(counts[inventoryName])
 
 	return count
 end
@@ -1289,7 +1566,7 @@ local function addUnopenedChest(player, chestInfoOrTier, depthBand)
 		return nil
 	end
 
-	local unopenedChests = profile.Data.UnopenedChests
+	local unopenedChests = ensureUnopenedChestCollection(profile.Data)
 	local normalizedChest = if typeof(chestInfoOrTier) == "table"
 		then ChestUtils.BuildChestData(chestInfoOrTier)
 		else ChestUtils.BuildChestData({
@@ -1299,17 +1576,18 @@ local function addUnopenedChest(player, chestInfoOrTier, depthBand)
 			Source = "Run",
 		})
 
-	local chestId, storedChest = addUnopenedChestToCollection(unopenedChests, normalizedChest)
+	local chestId, storedChest, addedCount = addUnopenedChestToCollection(unopenedChests, normalizedChest)
 	local inventoryQuantity = countUnopenedChestsByInventoryName(unopenedChests, storedChest)
 
 	chestDebug(
-		"addUnopenedChest player=%s inventoryName=%s tier=%s fruitRarity=%s depth=%s newChestId=%s quantity=%d totalOrder=%d",
+		"addUnopenedChest player=%s inventoryName=%s tier=%s fruitRarity=%s depth=%s ref=%s added=%d quantity=%d legacyOrder=%d",
 		player.Name,
 		ChestUtils.GetInventoryName(storedChest),
 		tostring(storedChest.Tier),
 		tostring(storedChest.FruitRarity),
 		tostring(storedChest.DepthBand),
 		tostring(chestId),
+		tonumber(addedCount) or 1,
 		inventoryQuantity,
 		#unopenedChests.Order
 	)
@@ -1343,7 +1621,7 @@ local function buildState(player, options)
 	end
 
 	local dataRoot = profile.Data
-	local unopenedChests = dataRoot.UnopenedChests or {}
+	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 	local chestRewardsState = ensureChestRewardsState(dataRoot)
 	local foodInventory = dataRoot.FoodInventory or {}
 	local materials = normalizeMaterialsTable(dataRoot.Materials)
@@ -1351,22 +1629,21 @@ local function buildState(player, options)
 	local devilFruits = ((dataRoot.Inventory or {}).DevilFruits) or {}
 
 	local chestSummaries = {}
+	local chestCounts, unopenedChestCount = collectUnopenedChestCounts(unopenedChests)
+	for _, stackKey in ipairs(ChestUtils.GetStackKeys()) do
+		local stackCount = normalizeStackCount((unopenedChests.Stacks or {})[stackKey])
+		if stackCount > 0 then
+			chestSummaries[#chestSummaries + 1] = buildChestSummary("stack:" .. stackKey, {
+				ChestKind = ChestRewards.ChestKinds.Standard,
+				Tier = stackKey,
+				Source = "Stack",
+			}, stackCount)
+		end
+	end
 	for _, chestId in ipairs(unopenedChests.Order or {}) do
 		local entry = unopenedChests.ById and unopenedChests.ById[tostring(chestId)]
 		if entry then
-			local normalizedChest = ChestUtils.BuildChestData(entry)
-			chestSummaries[#chestSummaries + 1] = {
-				ChestId = tostring(chestId),
-				ChestKind = normalizedChest.ChestKind,
-				Tier = normalizedChest.Tier,
-				FruitRarity = normalizedChest.FruitRarity,
-				DepthBand = tostring(entry.DepthBand or ""),
-				Source = tostring(entry.Source or ChestRewards.DefaultChestSource),
-				RewardProfile = tostring(entry.RewardProfile or ChestRewards.DefaultRewardProfile),
-				CreatedAt = math.max(0, tonumber(entry.CreatedAt) or 0),
-				InventoryName = ChestUtils.GetInventoryName(normalizedChest),
-				DisplayName = ChestUtils.GetDisplayName(normalizedChest),
-			}
+			chestSummaries[#chestSummaries + 1] = buildChestSummary(tostring(chestId), entry, 1)
 		end
 	end
 
@@ -1395,7 +1672,9 @@ local function buildState(player, options)
 			ResolutionText = runtime.ResolutionText,
 		},
 		UnopenedChests = chestSummaries,
-		UnopenedChestCount = #chestSummaries,
+		UnopenedChestCounts = chestCounts,
+		UnopenedChestStacks = unopenedChests.Stacks or {},
+		UnopenedChestCount = unopenedChestCount,
 		MythicKeyProgress = {
 			current = chestRewardsState.MythicKeys,
 			threshold = ChestRewards.MythicKey.Threshold,
@@ -1620,9 +1899,8 @@ local function grantCarrySlotReward(player, slot)
 			return false, nil, "persist_chest_failed"
 		end
 		message = string.format(
-			"Extracted %s and stored it in Treasure as chest #%s.",
-			getRewardToolDisplay(carriedReward),
-			tostring(chestId or "?")
+			"Extracted %s and stored it in Treasure.",
+			getRewardToolDisplay(carriedReward)
 		)
 	else
 		local instanceId = addCrewInstance(player, {
@@ -1892,7 +2170,20 @@ local function dropCarriedReward(player, options)
 		droppedReward.WorldDropPosition = dropPosition
 	end
 
-	if slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
+	if slot.ItemType == "Chest" then
+		if slot.DropInProgress == true then
+			return resolveActionResponse(player, false, nil, "drop_in_progress")
+		end
+
+		slot.DropInProgress = true
+		local dropped, dropReason = createDroppedWorldChest(player, droppedReward)
+		slot.DropInProgress = nil
+		if not dropped then
+			return resolveActionResponse(player, false, nil, tostring(dropReason or "dropped_chest_create_failed"))
+		end
+
+		removeCarryItem(player, runtime, slotKey)
+	elseif slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
 		local droppedPhysical, dropReason = CrewInteraction.DropHeldAtPosition(CrewInteraction.GetActiveContext(), player, nil, dropPosition, droppedReward.CarryId, {
 			SkipCarrySlotRemove = true,
 		})
@@ -1908,10 +2199,14 @@ local function dropCarriedReward(player, options)
 		removeCarryItem(player, runtime, slotKey)
 	end
 
-	runtime.ResolutionText = string.format(
-		"%s was dropped. Recover it before extracting.",
-		getRewardToolDisplay(droppedReward)
-	)
+	if droppedReward.RewardType == "Chest" then
+		runtime.ResolutionText = string.format("%s was dropped back into the world.", getRewardToolDisplay(droppedReward))
+	else
+		runtime.ResolutionText = string.format(
+			"%s was dropped. Recover it before extracting.",
+			getRewardToolDisplay(droppedReward)
+		)
+	end
 	syncCarrySlotsToClient(player, runtime)
 
 	return resolveActionResponse(player, true, runtime.ResolutionText)
@@ -1982,16 +2277,46 @@ local function openChest(player, requestedChestId)
 	end
 
 	local dataRoot = profile.Data
-	local unopenedChests = dataRoot.UnopenedChests
-	unopenedChests.Order = unopenedChests.Order or {}
-	unopenedChests.ById = unopenedChests.ById or {}
+	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 
-	local chestId = requestedChestId and tostring(requestedChestId) or tostring(unopenedChests.Order[1] or "")
-	if chestId == "" then
+	local chestId = requestedChestId and tostring(requestedChestId) or ""
+	local stackKey = nil
+	local chestData = nil
+	if chestId ~= "" then
+		chestData = unopenedChests.ById[chestId]
+		if typeof(chestData) ~= "table" then
+			local requestedStackKey = resolveStackKeyFromName(chestId)
+			if requestedStackKey ~= nil and normalizeStackCount(unopenedChests.Stacks[requestedStackKey]) > 0 then
+				stackKey = requestedStackKey
+				chestData = ChestUtils.BuildChestData({
+					ChestKind = ChestRewards.ChestKinds.Standard,
+					Tier = stackKey,
+					Source = "Stack",
+				})
+			end
+		end
+	else
+		for _, candidateStackKey in ipairs(ChestUtils.GetStackKeys()) do
+			if normalizeStackCount(unopenedChests.Stacks[candidateStackKey]) > 0 then
+				stackKey = candidateStackKey
+				chestData = ChestUtils.BuildChestData({
+					ChestKind = ChestRewards.ChestKinds.Standard,
+					Tier = stackKey,
+					Source = "Stack",
+				})
+				break
+			end
+		end
+		if chestData == nil then
+			chestId = tostring(unopenedChests.Order[1] or "")
+			chestData = unopenedChests.ById[chestId]
+		end
+	end
+
+	if chestId == "" and stackKey == nil then
 		return resolveActionResponse(player, false, nil, "no_chests_available")
 	end
 
-	local chestData = unopenedChests.ById[chestId]
 	if typeof(chestData) ~= "table" then
 		return resolveActionResponse(player, false, nil, "missing_chest")
 	end
@@ -2014,11 +2339,15 @@ local function openChest(player, requestedChestId)
 		end,
 	})
 
-	unopenedChests.ById[chestId] = nil
-	for index = #unopenedChests.Order, 1, -1 do
-		if tostring(unopenedChests.Order[index]) == chestId then
-			table.remove(unopenedChests.Order, index)
-			break
+	if stackKey ~= nil then
+		unopenedChests.Stacks[stackKey] = math.max(0, normalizeStackCount(unopenedChests.Stacks[stackKey]) - 1)
+	else
+		unopenedChests.ById[chestId] = nil
+		for index = #unopenedChests.Order, 1, -1 do
+			if tostring(unopenedChests.Order[index]) == chestId then
+				table.remove(unopenedChests.Order, index)
+				break
+			end
 		end
 	end
 	local changedRoots = resolution.ChangedRoots or {}
@@ -2232,22 +2561,29 @@ local function openChests(player, inventoryName, requestedAmount)
 
 	local requestedCount = math.clamp(math.floor(tonumber(requestedAmount) or 1), 1, MAX_BATCH_CHEST_OPEN_COUNT)
 	local dataRoot = profile.Data
-	local unopenedChests = dataRoot.UnopenedChests
-	unopenedChests.Order = unopenedChests.Order or {}
-	unopenedChests.ById = unopenedChests.ById or {}
+	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 
+	local targetStackKey = resolveStackKeyFromName(targetInventoryName)
+	local stackOpenCount = 0
+	if targetStackKey ~= nil then
+		stackOpenCount = math.min(requestedCount, normalizeStackCount(unopenedChests.Stacks[targetStackKey]))
+	end
+
+	local legacyNeededCount = requestedCount - stackOpenCount
 	local chestIds = {}
-	for _, chestId in ipairs(unopenedChests.Order) do
-		local chestData = unopenedChests.ById[tostring(chestId)]
-		if chestData and ChestUtils.GetInventoryName(chestData) == targetInventoryName then
-			chestIds[#chestIds + 1] = tostring(chestId)
-			if #chestIds >= requestedCount then
-				break
+	if legacyNeededCount > 0 then
+		for _, chestId in ipairs(unopenedChests.Order) do
+			local chestData = unopenedChests.ById[tostring(chestId)]
+			if chestData and ChestUtils.GetInventoryName(chestData) == targetInventoryName then
+				chestIds[#chestIds + 1] = tostring(chestId)
+				if #chestIds >= legacyNeededCount then
+					break
+				end
 			end
 		end
 	end
 
-	if #chestIds <= 0 then
+	if stackOpenCount + #chestIds <= 0 then
 		return resolveActionResponse(player, false, nil, "no_chests_available")
 	end
 
@@ -2260,6 +2596,41 @@ local function openChests(player, inventoryName, requestedAmount)
 	}
 	local batchResults = {}
 	local openedCount = 0
+
+	if targetStackKey ~= nil and stackOpenCount > 0 then
+		for _ = 1, stackOpenCount do
+			if normalizeStackCount(unopenedChests.Stacks[targetStackKey]) <= 0 then
+				break
+			end
+
+			local normalizedChestData = ChestUtils.BuildChestData({
+				ChestKind = ChestRewards.ChestKinds.Standard,
+				Tier = targetStackKey,
+				Source = "Stack",
+			})
+			local resolution = ChestRewardResolver.Resolve({
+				Player = player,
+				DataRoot = dataRoot,
+				ChestData = normalizedChestData,
+				Random = randomObject,
+				AddChestEntry = function(grantedChestData)
+					local grantedChestId = addUnopenedChestToCollection(unopenedChests, grantedChestData)
+					return grantedChestId
+				end,
+			})
+
+			unopenedChests.Stacks[targetStackKey] = math.max(
+				0,
+				normalizeStackCount(unopenedChests.Stacks[targetStackKey]) - 1
+			)
+			openedCount += 1
+			local openResult = resolution.OpenResult or {}
+			batchResults[#batchResults + 1] = openResult
+			mergeChangedRoots(changedRoots, resolution.ChangedRoots)
+			mergeGrantedResources(aggregateResources, openResult.GrantedResources)
+			recordChestRewardQuestSignals(player, normalizedChestData, openResult.GrantedResources or {})
+		end
+	end
 
 	for _, chestId in ipairs(chestIds) do
 		local chestData = unopenedChests.ById[chestId]
@@ -2322,14 +2693,7 @@ local function grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
 	end
 
 	local dataRoot = profile.Data
-	if typeof(dataRoot.UnopenedChests) ~= "table" then
-		dataRoot.UnopenedChests = {}
-	end
-
-	local unopenedChests = dataRoot.UnopenedChests
-	unopenedChests.Order = unopenedChests.Order or {}
-	unopenedChests.ById = unopenedChests.ById or {}
-	unopenedChests.NextChestId = math.max(1, tonumber(unopenedChests.NextChestId) or 1)
+	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
 
 	local options = if typeof(sourceOptions) == "table" then sourceOptions else {}
 	local resolution = ChestRewardResolver.ResolveSpecificFruit({
@@ -2620,6 +2984,10 @@ end
 
 Service.StateChanged = stateChangedEvent.Event
 
+function Service.SetDroppedChestWorldHandler(handler)
+	droppedChestWorldHandler = if typeof(handler) == "function" then handler else nil
+end
+
 function Service.GetState(player, options)
 	return buildState(player, options)
 end
@@ -2637,12 +3005,12 @@ function Service.StartRun(player, rewardType, depthBand)
 	return startRun(player, rewardType, depthBand)
 end
 
-function Service.CreateChestRewardData(depthBand)
+function Service.CreateChestRewardData(depthBand, options)
 	local normalizedDepthBand = tostring(depthBand or Economy.VerticalSlice.DefaultDepthBand)
 	return {
 		RewardType = "Chest",
 		ChestKind = ChestRewards.ChestKinds.Standard,
-		Tier = chooseChestTier(normalizedDepthBand),
+		Tier = chooseChestTier(normalizedDepthBand, options),
 		DepthBand = normalizedDepthBand,
 	}
 end
@@ -2717,6 +3085,11 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
 	end
 
+	local profile, replica = getProfileAndReplica(player)
+	if not profile or not replica then
+		return resolveActionResponse(player, false, nil, "profile_not_ready")
+	end
+
 	local normalizedTier = ChestUtils.ResolveStandardTier(tierName)
 	if normalizedTier == nil or Economy.Chests.Tiers[normalizedTier] == nil then
 		return resolveActionResponse(player, false, nil, "invalid_chest_tier")
@@ -2724,18 +3097,24 @@ function Service.GrantChest(player, tierName, amount, depthBand)
 
 	local count = math.max(1, math.floor(tonumber(amount) or 1))
 	local normalizedDepthBand = tostring(depthBand or Economy.VerticalSlice.DefaultDepthBand)
-	local grantedCount = 0
-
-	for _ = 1, count do
-		local chestId = addUnopenedChest(player, normalizedTier, normalizedDepthBand)
-		if chestId ~= nil then
-			grantedCount += 1
-		end
-	end
+	local dataRoot = profile.Data
+	local unopenedChests = ensureUnopenedChestCollection(dataRoot)
+	local chestData = ChestUtils.BuildChestData({
+		ChestKind = ChestRewards.ChestKinds.Standard,
+		Tier = normalizedTier,
+		DepthBand = normalizedDepthBand,
+		Source = "Admin",
+	})
+	local chestRef, _, addedCount = addUnopenedChestToCollection(unopenedChests, chestData, count)
+	local grantedCount = math.max(0, tonumber(addedCount) or (chestRef ~= nil and 1 or 0))
 
 	if grantedCount <= 0 then
 		return resolveActionResponse(player, false, nil, "grant_failed")
 	end
+
+	syncPaths(player, replica, {
+		{ Path = { "UnopenedChests" }, Value = unopenedChests },
+	})
 
 	local message = string.format(
 		"Granted %d %s%s.",

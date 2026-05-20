@@ -156,6 +156,35 @@ function ChestUtils.GetInventoryName(chestDataOrName)
 	return chestData.Tier
 end
 
+function ChestUtils.GetStackKey(chestDataOrName)
+	if typeof(chestDataOrName) == "string" then
+		return ChestUtils.ResolveStandardTier(chestDataOrName)
+	end
+
+	local chestData = ChestUtils.BuildChestData(chestDataOrName)
+
+	if chestData.ChestKind ~= ChestRewards.ChestKinds.Standard then
+		return nil
+	end
+	if STANDARD_TIER_SET[chestData.Tier] ~= true then
+		return nil
+	end
+
+	return chestData.Tier
+end
+
+function ChestUtils.IsStackable(chestDataOrName)
+	return ChestUtils.GetStackKey(chestDataOrName) ~= nil
+end
+
+function ChestUtils.GetStackKeys()
+	local keys = {}
+	for _, tierName in ipairs(ChestRewards.StandardTierOrder) do
+		keys[#keys + 1] = tierName
+	end
+	return keys
+end
+
 function ChestUtils.GetDisplayName(chestDataOrName)
 	return string.format("%s Chest", ChestUtils.GetInventoryName(chestDataOrName))
 end

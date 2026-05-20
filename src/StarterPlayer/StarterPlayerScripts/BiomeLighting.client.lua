@@ -2,6 +2,7 @@ local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -15,7 +16,9 @@ local BIOME_FOLDER_PATTERN = "^Biome%s+(%d+)$"
 local UPDATE_INTERVAL = 0.12
 local RAYCAST_START_HEIGHT = 12
 local RAYCAST_DISTANCE = 220
-local NO_AREA_CLEAR_DELAY = 0.8
+local AREA_CHANGE_CONFIRM_DELAY = 0.28
+local AREA_LOST_CLEAR_DELAY = 3
+local DEBUG_BIOME_LIGHTING = false
 local LOG_PREFIX = "[BIOME LIGHTING]"
 
 local RUNTIME_ATTRIBUTE = "BiomeLightingRuntime"
@@ -26,6 +29,7 @@ local ACTIVE_BIOME_ATTRIBUTE = BiomeAreas.ActiveBiomeAttribute
 local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 local ACTIVE_STAGE_ATTRIBUTE = "ActiveBiomeLightingStage"
 local SUPPRESSED_FOLDER_NAME = "_BiomeLightingSuppressed"
+local LIGHTING_PROPERTY_TWEEN_INFO = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 local LIGHTING_VALUE_CLASSES = {
 	BoolValue = true,
@@ -46,10 +50,22 @@ local EXCLUSIVE_LIGHTING_CLASSES = {
 	SunRaysEffect = true,
 }
 
+local TWEENED_LIGHTING_PROPERTIES = {
+	Ambient = true,
+	Brightness = true,
+	ClockTime = true,
+	ExposureCompensation = true,
+	OutdoorAmbient = true,
+}
+
 local activeBiomeIndex = nil
 local activeAreaKey = nil
 local activeStageIndex = nil
 local noAreaDetectedSince = nil
+local pendingAreaKey = nil
+local pendingBiomeIndex = nil
+local pendingAreaDetectedSince = nil
+local activeLightingTweens = {}
 local appliedPropertyNames = {}
 local originalLightingProperties = {}
 local warnedMissingStages = {}
@@ -57,6 +73,15 @@ local warnedMissingBiomes = false
 local biomesRoot = nil
 local startingAreaRoot = nil
 local biomeContainersByIndex = {}
+
+local function debugLog(message, ...)
+	if not DEBUG_BIOME_LIGHTING then
+		return
+	end
+
+	local ok, formatted = pcall(string.format, message, ...)
+	print(string.format("%s %s", LOG_PREFIX, ok and formatted or tostring(message)))
+end
 
 local function getIndexFromName(name, pattern)
 	local indexText = tostring(name):match(pattern)
@@ -144,6 +169,7 @@ local function restoreSuppressedLightingObjects()
 	end
 
 	for _, child in ipairs(folder:GetChildren()) do
+		debugLog("post effect restored path=%s", child:GetFullName())
 		child.Parent = Lighting
 	end
 end
@@ -151,25 +177,65 @@ end
 local function destroyRuntimeLightingObjects()
 	for _, child in ipairs(Lighting:GetChildren()) do
 		if child:GetAttribute(RUNTIME_ATTRIBUTE) == true and child.Name ~= SUPPRESSED_FOLDER_NAME then
+			debugLog("post effect removed path=%s", child:GetFullName())
 			child:Destroy()
 		end
 	end
+end
+
+local function cancelLightingTween(propertyName)
+	local tween = activeLightingTweens[propertyName]
+	if tween then
+		tween:Cancel()
+		activeLightingTweens[propertyName] = nil
+	end
+end
+
+local function setLightingProperty(propertyName, value, allowTween)
+	if allowTween and TWEENED_LIGHTING_PROPERTIES[propertyName] == true then
+		cancelLightingTween(propertyName)
+
+		local ok, tween = pcall(function()
+			return TweenService:Create(Lighting, LIGHTING_PROPERTY_TWEEN_INFO, {
+				[propertyName] = value,
+			})
+		end)
+
+		if ok and tween then
+			activeLightingTweens[propertyName] = tween
+			tween.Completed:Connect(function()
+				if activeLightingTweens[propertyName] == tween then
+					activeLightingTweens[propertyName] = nil
+				end
+			end)
+			tween:Play()
+			return true
+		end
+	end
+
+	cancelLightingTween(propertyName)
+	return pcall(function()
+		Lighting[propertyName] = value
+	end)
 end
 
 local function restoreLightingProperties()
 	for propertyName in pairs(appliedPropertyNames) do
 		local originalValue = originalLightingProperties[propertyName]
 		if originalValue ~= nil then
-			pcall(function()
-				Lighting[propertyName] = originalValue
-			end)
+			setLightingProperty(propertyName, originalValue, true)
 		end
 	end
 
 	table.clear(appliedPropertyNames)
 end
 
-local function clearActiveStageLighting()
+local function clearActiveStageLighting(reason)
+	if activeStageIndex == nil and next(appliedPropertyNames) == nil then
+		return
+	end
+
+	debugLog("lighting cleared reason=%s activeStage=%s", tostring(reason or "unknown"), tostring(activeStageIndex))
 	destroyRuntimeLightingObjects()
 	restoreSuppressedLightingObjects()
 	restoreLightingProperties()
@@ -223,6 +289,7 @@ local function suppressConflictingLightingObjects(source)
 	for _, existing in ipairs(Lighting:GetChildren()) do
 		if not isProtectedLightingChild(existing) and lightingObjectsConflict(existing, source) then
 			suppressedFolder = suppressedFolder or getSuppressedFolder()
+			debugLog("post effect suppressed existing=%s source=%s", existing:GetFullName(), source:GetFullName())
 			existing.Parent = suppressedFolder
 		end
 	end
@@ -240,9 +307,7 @@ local function applyStageProperties(stageFolder)
 			end
 		end
 
-		local ok = pcall(function()
-			Lighting[propertyName] = valueObject.Value
-		end)
+		local ok = setLightingProperty(propertyName, valueObject.Value, true)
 		if ok then
 			appliedPropertyNames[propertyName] = true
 		end
@@ -260,6 +325,7 @@ local function applyStageObjects(stageFolder, stageIndex)
 		clone:SetAttribute(SOURCE_STAGE_ATTRIBUTE, stageIndex)
 		clone:SetAttribute(SOURCE_ATTRIBUTE, source:GetFullName())
 		clone.Parent = Lighting
+		debugLog("post effect added path=%s source=%s stage=%s", clone:GetFullName(), source:GetFullName(), tostring(stageIndex))
 	end
 end
 
@@ -267,8 +333,6 @@ local function applyStageLighting(stageIndex)
 	if activeStageIndex == stageIndex then
 		return
 	end
-
-	clearActiveStageLighting()
 
 	local stageFolder = findStageFolder(stageIndex)
 	if not stageFolder then
@@ -279,11 +343,13 @@ local function applyStageLighting(stageIndex)
 		return
 	end
 
+	clearActiveStageLighting("stage_changed")
 	applyStageProperties(stageFolder)
 	applyStageObjects(stageFolder, stageIndex)
 
 	activeStageIndex = stageIndex
 	Lighting:SetAttribute(ACTIVE_STAGE_ATTRIBUTE, stageIndex)
+	debugLog("lighting applied stage=%s folder=%s", tostring(stageIndex), stageFolder:GetFullName())
 end
 
 local function setActiveBiome(biomeIndex)
@@ -291,13 +357,14 @@ local function setActiveBiome(biomeIndex)
 		return
 	end
 
+	debugLog("biome changed old=%s new=%s", tostring(activeBiomeIndex), tostring(biomeIndex))
 	activeBiomeIndex = biomeIndex
 	Lighting:SetAttribute(ACTIVE_BIOME_ATTRIBUTE, biomeIndex)
 
 	if biomeIndex then
 		applyStageLighting(biomeIndex)
 	else
-		clearActiveStageLighting()
+		clearActiveStageLighting("biome_cleared")
 	end
 end
 
@@ -416,19 +483,63 @@ end
 
 local function updateActiveAreaFromPosition()
 	local areaKey, biomeIndex = detectCurrentArea()
+	local now = os.clock()
 	if areaKey == nil then
-		if activeAreaKey ~= nil then
-			noAreaDetectedSince = noAreaDetectedSince or os.clock()
-			if os.clock() - noAreaDetectedSince < NO_AREA_CLEAR_DELAY then
-				return
-			end
+		pendingAreaKey = nil
+		pendingBiomeIndex = nil
+		pendingAreaDetectedSince = nil
+
+		if activeAreaKey == nil and activeBiomeIndex == nil then
+			return
 		end
-	else
-		noAreaDetectedSince = nil
+
+		noAreaDetectedSince = noAreaDetectedSince or now
+		local lostFor = now - noAreaDetectedSince
+		if lostFor < AREA_LOST_CLEAR_DELAY then
+			debugLog("clear skipped shortMiss=%.2f activeArea=%s activeBiome=%s", lostFor, tostring(activeAreaKey), tostring(activeBiomeIndex))
+			return
+		end
+
+		debugLog("biome lost clearAfter=%.2f activeArea=%s activeBiome=%s", lostFor, tostring(activeAreaKey), tostring(activeBiomeIndex))
+		setActiveArea(nil)
+		setActiveBiome(nil)
+		return
 	end
 
+	noAreaDetectedSince = nil
+
+	if areaKey == activeAreaKey and biomeIndex == activeBiomeIndex then
+		pendingAreaKey = nil
+		pendingBiomeIndex = nil
+		pendingAreaDetectedSince = nil
+		return
+	end
+
+	if activeAreaKey == nil and activeBiomeIndex == nil then
+		debugLog("initial biome confirmed area=%s biome=%s", tostring(areaKey), tostring(biomeIndex))
+		setActiveArea(areaKey)
+		setActiveBiome(biomeIndex)
+		return
+	end
+
+	if pendingAreaKey ~= areaKey or pendingBiomeIndex ~= biomeIndex then
+		pendingAreaKey = areaKey
+		pendingBiomeIndex = biomeIndex
+		pendingAreaDetectedSince = now
+		debugLog("biome candidate area=%s biome=%s", tostring(areaKey), tostring(biomeIndex))
+		return
+	end
+
+	if now - pendingAreaDetectedSince < AREA_CHANGE_CONFIRM_DELAY then
+		return
+	end
+
+	debugLog("biome candidate confirmed area=%s biome=%s", tostring(pendingAreaKey), tostring(pendingBiomeIndex))
 	setActiveArea(areaKey)
 	setActiveBiome(biomeIndex)
+	pendingAreaKey = nil
+	pendingBiomeIndex = nil
+	pendingAreaDetectedSince = nil
 end
 
 local function updateActiveAreaWhenCharacterReady(character)
@@ -471,6 +582,9 @@ end
 
 player.CharacterRemoving:Connect(function()
 	noAreaDetectedSince = nil
+	pendingAreaKey = nil
+	pendingBiomeIndex = nil
+	pendingAreaDetectedSince = nil
 	setActiveArea(nil)
 	setActiveBiome(nil)
 end)

@@ -476,9 +476,15 @@ local function ownsChest(player, tierName)
 	local sliceService = getSliceService()
 	if sliceService and sliceService.GetState then
 		local state = sliceService.GetState(player)
+		local chestCounts = state and state.UnopenedChestCounts
+		if typeof(chestCounts) == "table" and (tonumber(chestCounts[tostring(tierName)]) or 0) > 0 then
+			return true
+		end
+
 		local unopenedChests = state and state.UnopenedChests or {}
 		for _, chest in ipairs(unopenedChests) do
-			if ChestUtils.GetInventoryName(chest) == tostring(tierName) then
+			if ChestUtils.GetInventoryName(chest) == tostring(tierName)
+				and math.max(1, math.floor(tonumber(chest.Quantity) or 1)) > 0 then
 				return true
 			end
 		end
@@ -646,19 +652,28 @@ local function appendCanonicalChestEntries(player, chests)
 	end
 
 	local state = sliceService.GetState(player)
-	if typeof(state) ~= "table" or typeof(state.UnopenedChests) ~= "table" then
+	if typeof(state) ~= "table" then
 		return false
 	end
 
 	local counts = {}
-	for _, chestEntry in ipairs(state.UnopenedChests) do
-		if typeof(chestEntry) == "table" then
-			local chestName = tostring(chestEntry.InventoryName or "")
-			if chestName == "" then
-				chestName = ChestUtils.GetInventoryName(chestEntry)
-			end
-			if chestName ~= "" then
-				counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0) + 1
+	if typeof(state.UnopenedChestCounts) == "table" then
+		for chestName, quantity in pairs(state.UnopenedChestCounts) do
+			counts[tostring(chestName)] = math.max(0, math.floor(tonumber(quantity) or 0))
+		end
+	elseif typeof(state.UnopenedChests) ~= "table" then
+		return false
+	else
+		for _, chestEntry in ipairs(state.UnopenedChests) do
+			if typeof(chestEntry) == "table" then
+				local chestName = tostring(chestEntry.InventoryName or "")
+				if chestName == "" then
+					chestName = ChestUtils.GetInventoryName(chestEntry)
+				end
+				if chestName ~= "" then
+					counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0)
+						+ math.max(1, math.floor(tonumber(chestEntry.Quantity) or 1))
+				end
 			end
 		end
 	end

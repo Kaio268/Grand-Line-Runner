@@ -612,7 +612,17 @@ function ProfileMigrations.Apply(data)
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))
 	unopenedChests.ById = ensureTable(unopenedChests, "ById")
 	unopenedChests.Order = ensureTable(unopenedChests, "Order")
-	for chestId, chestEntry in pairs(unopenedChests.ById) do
+	unopenedChests.Stacks = ensureTable(unopenedChests, "Stacks")
+	for _, tierName in ipairs(ChestRewards.StandardTierOrder) do
+		unopenedChests.Stacks[tierName] = math.max(0, math.floor(coerceNumber(tonumber(unopenedChests.Stacks[tierName]), 0)))
+	end
+	unopenedChests.StackSchemaVersion = 1
+
+	local compactedStackableCount = 0
+	local seenOrderedChestIds = {}
+	local normalizedOrder = {}
+
+	local function normalizeLegacyChestEntry(chestId, chestEntry)
 		local safeChestEntry = if typeof(chestEntry) == "table" then chestEntry else {}
 		local normalized = ChestUtils.BuildChestData(safeChestEntry)
 		local normalizedChestId = tostring(chestId)
@@ -624,8 +634,56 @@ function ProfileMigrations.Apply(data)
 			normalized.Tier = ChestUtils.GetDefaultTierForDevilFruitChest(nil)
 		end
 
-		unopenedChests.ById[normalizedChestId] = normalized
+		return normalizedChestId, normalized
 	end
+
+	local function migrateLegacyChest(chestId, chestEntry)
+		local normalizedChestId, normalized = normalizeLegacyChestEntry(chestId, chestEntry)
+		local stackKey = ChestUtils.GetStackKey(normalized)
+		if stackKey ~= nil then
+			unopenedChests.Stacks[stackKey] = math.max(0, tonumber(unopenedChests.Stacks[stackKey]) or 0) + 1
+			unopenedChests.ById[normalizedChestId] = nil
+			compactedStackableCount += 1
+			return
+		end
+
+		unopenedChests.ById[normalizedChestId] = normalized
+		normalizedOrder[#normalizedOrder + 1] = normalizedChestId
+	end
+
+	for _, rawChestId in ipairs(unopenedChests.Order) do
+		local chestId = tostring(rawChestId)
+		if chestId ~= "" and seenOrderedChestIds[chestId] ~= true then
+			seenOrderedChestIds[chestId] = true
+			local chestEntry = unopenedChests.ById[chestId]
+			if chestEntry ~= nil then
+				migrateLegacyChest(chestId, chestEntry)
+			end
+		end
+	end
+
+	local unorderedLegacyChests = {}
+	for chestId, chestEntry in pairs(unopenedChests.ById) do
+		local normalizedChestId = tostring(chestId)
+		if seenOrderedChestIds[normalizedChestId] ~= true then
+			unorderedLegacyChests[#unorderedLegacyChests + 1] = {
+				ChestId = normalizedChestId,
+				Entry = chestEntry,
+			}
+		end
+	end
+	for _, record in ipairs(unorderedLegacyChests) do
+		migrateLegacyChest(record.ChestId, record.Entry)
+	end
+
+	unopenedChests.Order = normalizedOrder
+	local unopenedStackCount = 0
+	for _, amount in pairs(unopenedChests.Stacks) do
+		unopenedStackCount += math.max(0, math.floor(tonumber(amount) or 0))
+	end
+	unopenedChests.NextChestId = math.max(unopenedChests.NextChestId, unopenedStackCount + #normalizedOrder + 1)
+	unopenedChests.CompactedStackableLegacyCount =
+		math.max(0, coerceNumber(tonumber(unopenedChests.CompactedStackableLegacyCount), 0)) + compactedStackableCount
 
 	local chestRewards = ensureTable(data, "ChestRewards")
 	chestRewards.MythicKeys = math.max(0, coerceNumber(chestRewards.MythicKeys, 0))

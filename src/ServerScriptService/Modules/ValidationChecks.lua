@@ -43,6 +43,7 @@ function ValidationChecks.ValidateProfileData(data)
 		{ Path = { "CrewMemberQuickSlots", "UnlockedSlots" }, ExpectedType = "number" },
 		{ Path = { "CrewMemberQuickSlots", "MaxSlots" }, ExpectedType = "number" },
 		{ Path = { "UnopenedChests", "ById" }, ExpectedType = "table" },
+		{ Path = { "UnopenedChests", "Stacks" }, ExpectedType = "table" },
 		{ Path = { "ChestRewards" }, ExpectedType = "table" },
 		{ Path = { "Quests" }, ExpectedType = "table" },
 		{ Path = { "DevilFruit", "Equipped" }, ExpectedType = "string" },

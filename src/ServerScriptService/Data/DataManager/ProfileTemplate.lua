@@ -54,6 +54,12 @@ local ProfileTemplate = {
 		NextChestId = 1,
 		ById = {},
 		Order = {},
+		StackSchemaVersion = 1,
+		Stacks = {
+			Wooden = 0,
+			Iron = 0,
+			Gold = 0,
+		},
 	},
 
 	ChestRewards = {

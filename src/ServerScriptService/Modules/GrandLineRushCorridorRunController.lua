@@ -23,6 +23,8 @@ local carriedSharedChestByUserId = {}
 local extractionTouchDebounce = {}
 local sharedChestSequence = 0
 local nextSharedChestRespawnAt = 0
+local sharedChestNonGoldStreak = 0
+local sharedChestSpawnPartCache = nil
 local worldRandom = Random.new()
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebugTrace") == true
 local loggedExtractionTouchByPlayer = {}
@@ -969,7 +971,9 @@ local function addRewardBillboard(part, rewardState, player)
 	subtitle.BackgroundTransparency = 1
 	subtitle.Position = UDim2.fromOffset(0, 28)
 	subtitle.Size = UDim2.new(1, 0, 0, 22)
-	if player then
+	if rewardState and rewardState.RewardType == "Chest" then
+		subtitle.Text = "Treasure chest"
+	elseif player then
 		subtitle.Text = string.format("%s's reward", player.DisplayName)
 	else
 		subtitle.Text = "Shared corridor reward"
@@ -981,7 +985,17 @@ local function addRewardBillboard(part, rewardState, player)
 	subtitle.Parent = billboard
 end
 
+local function shouldShowChestDebugBeacon()
+	local sharedConfig = ((Economy.VerticalSlice.WorldRun or {}).SharedChests or {})
+	return sharedConfig.DebugBeaconEnabled == true
+		or (RunService:IsStudio() and game:GetAttribute("ChestDebugBeaconEnabled") == true)
+end
+
 local function addChestDebugBeacon(rootPart)
+	if not shouldShowChestDebugBeacon() then
+		return
+	end
+
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "ChestDebugAttachment"
 	attachment.Parent = rootPart
@@ -1126,22 +1140,288 @@ local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFo
 	return true
 end
 
-local function getAllSharedChestSpawnContexts()
-	local contexts = {}
-	for _, context in ipairs(getAllCrewMemberSpawnContexts()) do
-		contexts[#contexts + 1] = context
-	end
-
-	return contexts
-end
-
-local function chooseSharedChestSpawnContext()
-	local contexts = getAllSharedChestSpawnContexts()
-	if #contexts == 0 then
+local function getSharedChestAttribute(instance, attributeName)
+	if not instance or typeof(attributeName) ~= "string" or attributeName == "" then
 		return nil
 	end
 
-	return contexts[worldRandom:NextInteger(1, #contexts)]
+	return instance:GetAttribute(attributeName)
+end
+
+local function isTruthySharedChestAttribute(instance, attributeName)
+	local value = getSharedChestAttribute(instance, attributeName)
+	if value == true or value == 1 then
+		return true
+	end
+
+	if typeof(value) == "string" then
+		local lowered = string.lower(value)
+		return lowered == "true" or lowered == "yes" or lowered == "1"
+	end
+
+	return false
+end
+
+local function isConfiguredSharedChestDepthBand(value)
+	local depthBand = tostring(value or "")
+	if depthBand == "" then
+		return false
+	end
+
+	for _, configuredDepthBand in ipairs(Economy.VerticalSlice.DepthBands or {}) do
+		if tostring(configuredDepthBand) == depthBand then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
+	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
+	local depthBandAttribute = tostring(sharedConfig.SpawnPartDepthBandAttribute or "SharedChestDepthBand")
+	local attributeDepthBand = getSharedChestAttribute(spawnPart, depthBandAttribute)
+	if isConfiguredSharedChestDepthBand(attributeDepthBand) then
+		return tostring(attributeDepthBand)
+	end
+
+	local tierMap = SpawnPartsConfig.RarityTier or {}
+	local depthBandByTier = sharedConfig.SpawnTierToDepthBand or {}
+	local spawnTier = tonumber(tierMap[tostring(spawnPart and spawnPart.Name or "")]) or 1
+	return tostring(depthBandByTier[spawnTier] or Economy.VerticalSlice.DefaultDepthBand)
+end
+
+local function getSharedChestSpawnPartWeight(sharedConfig, spawnPart, depthBand)
+	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
+	local weightAttribute = tostring(sharedConfig.SpawnPartWeightAttribute or "SharedChestSpawnWeight")
+	local attributeWeight = tonumber(getSharedChestAttribute(spawnPart, weightAttribute))
+	if attributeWeight ~= nil then
+		return math.max(0, attributeWeight)
+	end
+
+	local depthWeights = sharedConfig.SpawnWeightByDepthBand
+	if typeof(depthWeights) == "table" then
+		local depthWeight = tonumber(depthWeights[tostring(depthBand or "")])
+		if depthWeight ~= nil then
+			return math.max(0, depthWeight)
+		end
+	end
+
+	return 1
+end
+
+local function buildSharedChestSpawnPartRecord(sharedConfig, spawnPart)
+	if not spawnPart or not spawnPart:IsA("BasePart") then
+		return nil
+	end
+
+	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
+	if isTruthySharedChestAttribute(spawnPart, sharedConfig.SpawnPartDisabledAttribute or "SharedChestSpawnDisabled") then
+		return nil
+	end
+
+	local explicit = isTruthySharedChestAttribute(
+		spawnPart,
+		sharedConfig.SpawnPartEligibleAttribute or "SharedChestSpawnEligible"
+	)
+	if not explicit and not isValidSpawnRarityPart(spawnPart) then
+		return nil
+	end
+
+	local depthBand = getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
+	local weight = getSharedChestSpawnPartWeight(sharedConfig, spawnPart, depthBand)
+	if weight <= 0 then
+		return nil
+	end
+
+	return {
+		SpawnPart = spawnPart,
+		DepthBand = depthBand,
+		Weight = weight,
+		Explicit = explicit,
+	}
+end
+
+local function collectSharedChestSpawnPartRecords(root, sharedConfig, records, seen)
+	if not root then
+		return
+	end
+
+	local rootRecord = buildSharedChestSpawnPartRecord(sharedConfig, root)
+	if rootRecord and not seen[rootRecord.SpawnPart] then
+		seen[rootRecord.SpawnPart] = true
+		records[#records + 1] = rootRecord
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		local record = buildSharedChestSpawnPartRecord(sharedConfig, descendant)
+		if record and not seen[record.SpawnPart] then
+			seen[record.SpawnPart] = true
+			records[#records + 1] = record
+		end
+	end
+end
+
+local function getSharedChestSpawnPartCacheRefreshSeconds(sharedConfig)
+	return math.max(5, tonumber(sharedConfig.SpawnPartCacheRefreshSeconds) or 60)
+end
+
+local function getSharedChestSpawnPartRecords(sharedConfig)
+	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
+	local refs = MapResolver.GetRefs()
+	local mapRoot = refs.MapRoot
+	local biomesRoot = refs.Biomes or (mapRoot and mapRoot:FindFirstChild("Biomes"))
+	local spawnFolder = refs.SpawnFolder
+	local now = os.clock()
+	local cacheRefreshSeconds = getSharedChestSpawnPartCacheRefreshSeconds(sharedConfig)
+
+	if
+		sharedChestSpawnPartCache
+		and sharedChestSpawnPartCache.MapRoot == mapRoot
+		and sharedChestSpawnPartCache.BiomesRoot == biomesRoot
+		and sharedChestSpawnPartCache.SpawnFolder == spawnFolder
+		and now - sharedChestSpawnPartCache.RefreshedAt < cacheRefreshSeconds
+	then
+		return sharedChestSpawnPartCache.Records
+	end
+
+	local records = {}
+	local seen = {}
+	if biomesRoot then
+		for _, biomeContainer in ipairs(biomesRoot:GetChildren()) do
+			local innerBiome = biomeContainer:FindFirstChild(biomeContainer.Name)
+			collectSharedChestSpawnPartRecords(innerBiome or biomeContainer, sharedConfig, records, seen)
+		end
+	else
+		collectSharedChestSpawnPartRecords(spawnFolder, sharedConfig, records, seen)
+	end
+
+	if #records == 0 and spawnFolder and spawnFolder ~= biomesRoot then
+		collectSharedChestSpawnPartRecords(spawnFolder, sharedConfig, records, seen)
+	end
+
+	sharedChestSpawnPartCache = {
+		MapRoot = mapRoot,
+		BiomesRoot = biomesRoot,
+		SpawnFolder = spawnFolder,
+		RefreshedAt = now,
+		Records = records,
+	}
+
+	waveTrace(
+		"sharedChestSpawnPartCache refreshed map=%s biomesRoot=%s spawnFolder=%s records=%d",
+		formatInstancePath(mapRoot),
+		formatInstancePath(biomesRoot),
+		formatInstancePath(spawnFolder),
+		#records
+	)
+
+	return records
+end
+
+local function getSharedChestMaxActivePerSpawnPart(sharedConfig)
+	local maxActivePerSpawnPart = tonumber(sharedConfig.MaxActivePerSpawnPart)
+	if maxActivePerSpawnPart == nil then
+		return 0
+	end
+
+	return math.max(0, math.floor(maxActivePerSpawnPart))
+end
+
+local function countActiveSharedChestsOnSpawnPart(spawnPart)
+	local count = 0
+	for _, node in pairs(sharedChestNodesById) do
+		if node.SpawnPart == spawnPart and node.Object and node.Object.Parent then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function isSharedChestSpawnPartBelowCap(spawnPart, sharedConfig)
+	local maxActivePerSpawnPart = getSharedChestMaxActivePerSpawnPart(sharedConfig)
+	if maxActivePerSpawnPart <= 0 then
+		return true
+	end
+
+	return countActiveSharedChestsOnSpawnPart(spawnPart) < maxActivePerSpawnPart
+end
+
+local function chooseSharedChestPlacementCrewMember(spawnPart)
+	local crewMembersFolder = spawnPart and spawnPart:FindFirstChild("CrewMembers")
+	if not crewMembersFolder then
+		return nil
+	end
+
+	local candidates = {}
+	for _, candidate in ipairs(crewMembersFolder:GetChildren()) do
+		if getObjectRootPart(candidate) then
+			candidates[#candidates + 1] = candidate
+		end
+	end
+
+	if #candidates <= 0 then
+		return nil
+	end
+
+	return candidates[worldRandom:NextInteger(1, #candidates)]
+end
+
+local function chooseSharedChestSpawnRecord(sharedConfig)
+	local records = getSharedChestSpawnPartRecords(sharedConfig)
+	local weightedRecords = {}
+	local totalWeight = 0
+
+	for _, record in ipairs(records) do
+		local spawnPart = record.SpawnPart
+		if spawnPart and spawnPart.Parent and isSharedChestSpawnPartBelowCap(spawnPart, sharedConfig) then
+			local weight = math.max(0, tonumber(record.Weight) or 0)
+			if weight > 0 then
+				totalWeight += weight
+				weightedRecords[#weightedRecords + 1] = record
+			end
+		end
+	end
+
+	if totalWeight <= 0 then
+		return nil
+	end
+
+	local roll = worldRandom:NextNumber(0, totalWeight)
+	local cursor = 0
+	for _, record in ipairs(weightedRecords) do
+		cursor += math.max(0, tonumber(record.Weight) or 0)
+		if roll <= cursor then
+			return record
+		end
+	end
+
+	return weightedRecords[#weightedRecords]
+end
+
+local function chooseSharedChestSpawnContext()
+	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
+	local record = chooseSharedChestSpawnRecord(sharedConfig)
+	if not record then
+		return nil
+	end
+
+	local crewMember = chooseSharedChestPlacementCrewMember(record.SpawnPart)
+	waveTrace(
+		"sharedChestSpawnContext part=%s partPos=%s depthBand=%s weight=%s nearbyCrew=%s",
+		formatInstancePath(record.SpawnPart),
+		formatVector3(record.SpawnPart and record.SpawnPart.Position or nil),
+		tostring(record.DepthBand),
+		tostring(record.Weight),
+		formatInstancePath(crewMember)
+	)
+
+	return {
+		SpawnPart = record.SpawnPart,
+		CrewMember = crewMember,
+		DepthBand = record.DepthBand,
+	}
 end
 
 local function getOccupiedSharedChestOffsets(spawnPart)
@@ -1212,10 +1492,7 @@ end
 
 local function getDepthBandForSharedChestSpawn(spawnPart)
 	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
-	local tierMap = SpawnPartsConfig.RarityTier or {}
-	local depthBandByTier = sharedConfig.SpawnTierToDepthBand or {}
-	local spawnTier = tonumber(tierMap[tostring(spawnPart and spawnPart.Name or "")]) or 1
-	return tostring(depthBandByTier[spawnTier] or Economy.VerticalSlice.DefaultDepthBand)
+	return getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
 end
 
 local function countActiveSharedChests()
@@ -1228,57 +1505,273 @@ local function countActiveSharedChests()
 	return count
 end
 
-local function spawnSharedChestNode(rewardFolder, _carriedFolder)
-	local spawnContext = chooseSharedChestSpawnContext()
-	if not spawnContext or not spawnContext.SpawnPart then
+local function getActiveSharedChestPlayerCount()
+	return math.max(1, #Players:GetPlayers())
+end
+
+local function getSharedChestCheckInterval(sharedConfig)
+	return math.max(1, tonumber(sharedConfig.SpawnCheckInterval) or tonumber(sharedConfig.RespawnCheckInterval) or 5)
+end
+
+local function getSharedChestSpawnInterval(sharedConfig, activePlayerCount)
+	local intervalConfig = sharedConfig.SpawnIntervalSeconds
+	if typeof(intervalConfig) == "table" then
+		local base = tonumber(intervalConfig.Base) or tonumber(intervalConfig.Max) or tonumber(sharedConfig.RespawnDelay) or 75
+		local perExtraDecrease = tonumber(intervalConfig.SecondsRemovedPerExtraPlayer) or 0
+		local minInterval = tonumber(intervalConfig.Min) or 1
+		local maxInterval = tonumber(intervalConfig.Max) or base
+		local extraPlayers = math.max(0, math.floor(tonumber(activePlayerCount) or 1) - 1)
+		return math.clamp(base - (extraPlayers * perExtraDecrease), minInterval, maxInterval)
+	end
+
+	return math.max(1, tonumber(intervalConfig) or tonumber(sharedConfig.RespawnDelay) or 10)
+end
+
+local function getSharedChestMaxActiveFromTable(maxActiveByPlayerCount, activePlayerCount)
+	if typeof(maxActiveByPlayerCount) ~= "table" then
 		return nil
 	end
 
-	local depthBand = getDepthBandForSharedChestSpawn(spawnContext.SpawnPart)
-	local rewardState = SliceService.CreateChestRewardData(depthBand)
-	rewardState.DisplayName = string.format("%s Chest", tostring(rewardState.Tier or "Wooden"))
+	local playerCount = math.max(1, math.floor(tonumber(activePlayerCount) or 1))
+	local exactValue = tonumber(maxActiveByPlayerCount[playerCount])
+	if exactValue ~= nil then
+		return math.max(0, math.floor(exactValue))
+	end
 
-	local rewardObject = createRewardInstance(rewardState)
+	local nearestLowerPlayerCount = nil
+	local nearestLowerValue = nil
+	local nearestHigherPlayerCount = nil
+	local nearestHigherValue = nil
+	for key, value in pairs(maxActiveByPlayerCount) do
+		local configuredPlayerCount = math.floor(tonumber(key) or 0)
+		local configuredValue = tonumber(value)
+		if configuredPlayerCount >= 1 and configuredValue ~= nil then
+			if configuredPlayerCount <= playerCount then
+				if nearestLowerPlayerCount == nil or configuredPlayerCount > nearestLowerPlayerCount then
+					nearestLowerPlayerCount = configuredPlayerCount
+					nearestLowerValue = configuredValue
+				end
+			elseif nearestHigherPlayerCount == nil or configuredPlayerCount < nearestHigherPlayerCount then
+				nearestHigherPlayerCount = configuredPlayerCount
+				nearestHigherValue = configuredValue
+			end
+		end
+	end
+
+	local bestValue = nearestLowerValue or nearestHigherValue
+	if bestValue == nil then
+		return nil
+	end
+
+	return math.max(0, math.floor(bestValue))
+end
+
+local function getSharedChestMaxActive(sharedConfig, activePlayerCount)
+	local tableMaxActive = getSharedChestMaxActiveFromTable(sharedConfig.MaxActiveByPlayerCount, activePlayerCount)
+	if tableMaxActive ~= nil then
+		return tableMaxActive
+	end
+
+	local maxActiveConfig = sharedConfig.MaxActive
+	if typeof(maxActiveConfig) == "table" then
+		tableMaxActive = getSharedChestMaxActiveFromTable(maxActiveConfig.ByPlayerCount, activePlayerCount)
+		if tableMaxActive ~= nil then
+			return tableMaxActive
+		end
+
+		local base = math.floor(tonumber(maxActiveConfig.Base) or 2)
+		local playersPerExtra = math.max(1, math.floor(tonumber(maxActiveConfig.PlayersPerExtra) or 4))
+		local minActive = math.floor(tonumber(maxActiveConfig.Min) or base)
+		local maxActive = math.floor(tonumber(maxActiveConfig.Max) or base)
+		local extraPlayers = math.max(0, math.floor(tonumber(activePlayerCount) or 1) - 1)
+		local scaledActive = base + math.floor(extraPlayers / playersPerExtra)
+		return math.clamp(scaledActive, minActive, maxActive)
+	end
+
+	return math.max(0, math.floor(tonumber(maxActiveConfig) or 0))
+end
+
+local function shouldForceSharedGold(sharedConfig)
+	local pityThreshold = math.floor(tonumber(sharedConfig.GoldPityAfterNonGoldSpawns) or 0)
+	return pityThreshold > 0 and sharedChestNonGoldStreak >= pityThreshold
+end
+
+local function recordSharedChestTier(tierName)
+	if tostring(tierName or "") == "Gold" then
+		sharedChestNonGoldStreak = 0
+	else
+		sharedChestNonGoldStreak += 1
+	end
+end
+
+local function destroySharedChestNode(chestId, node)
+	sharedChestNodesById[chestId] = nil
+	local object = node and node.Object
+	if object and object.Parent then
+		object:Destroy()
+	end
+end
+
+local function despawnExpiredSharedChests(now, sharedConfig)
+	local despawnSeconds = tonumber(sharedConfig.UnclaimedDespawnSeconds) or 0
+	if despawnSeconds <= 0 then
+		return
+	end
+
+	for chestId, node in pairs(sharedChestNodesById) do
+		local object = node and node.Object
+		if not object or not object.Parent then
+			sharedChestNodesById[chestId] = nil
+		elseif node.Claimed ~= true then
+			local spawnedAt = tonumber(node.SpawnedAt) or now
+			node.SpawnedAt = spawnedAt
+			if now - spawnedAt >= despawnSeconds then
+				destroySharedChestNode(chestId, node)
+			end
+		end
+	end
+end
+
+local function normalizeWorldChestRewardState(rewardState)
+	local normalized = {}
+	if typeof(rewardState) == "table" then
+		for key, value in pairs(rewardState) do
+			normalized[key] = value
+		end
+	end
+
+	normalized.RewardType = "Chest"
+	normalized.Tier = tostring(normalized.Tier or "Wooden")
+	normalized.DepthBand = tostring(normalized.DepthBand or Economy.VerticalSlice.DefaultDepthBand)
+	normalized.DisplayName = tostring(normalized.DisplayName or string.format("%s Chest", normalized.Tier))
+	return normalized
+end
+
+local function getPlayerDropFallbackPosition(player)
+	local character = player and player.Character
+	local rootPart = nil
+	if character then
+		rootPart = character:FindFirstChild("HumanoidRootPart")
+			or character.PrimaryPart
+			or character:FindFirstChild("Head")
+	end
+	if not (rootPart and rootPart:IsA("BasePart")) then
+		return nil
+	end
+
+	local lookVector = rootPart.CFrame.LookVector
+	local flatDirection = Vector3.new(lookVector.X, 0, lookVector.Z)
+	if flatDirection.Magnitude < 1e-4 then
+		flatDirection = Vector3.new(0, 0, -1)
+	else
+		flatDirection = flatDirection.Unit
+	end
+
+	return rootPart.Position + (flatDirection * 5)
+end
+
+local function positionWorldChestObject(rewardObject, rewardState, options)
+	options = if typeof(options) == "table" then options else {}
+	local spawnContext = options.SpawnContext
+	if spawnContext and spawnContext.SpawnPart then
+		local placement = buildSharedChestPlacement(rewardObject, spawnContext)
+		if placement then
+			waveTrace(
+				"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceCrewMember=%s localXZ=%s",
+				tostring(options.ChestId),
+				formatInstancePath(placement.SpawnPart),
+				formatVector3(placement.SpawnPart and placement.SpawnPart.Position or nil),
+				tostring(placement.SourceCrewMemberName),
+				formatVector3(Vector3.new(placement.LocalXZ.X, 0, placement.LocalXZ.Y))
+			)
+			setObjectCFrame(
+				rewardObject,
+				computeObjectPivotOnSpawnPart(
+					rewardObject,
+					placement.SpawnPart,
+					placement.LocalXZ,
+					tonumber(placement.Yaw) or 0
+				)
+			)
+			return placement.SpawnPart
+		end
+	end
+
+	local dropPosition = options.DropPosition
+	if typeof(dropPosition) ~= "Vector3" then
+		dropPosition = rewardState.WorldDropPosition
+	end
+	if typeof(dropPosition) ~= "Vector3" then
+		dropPosition = getPlayerDropFallbackPosition(options.Dropper)
+	end
+	if typeof(dropPosition) == "Vector3" then
+		local character = options.Dropper and options.Dropper.Character
+		local ignoreInstances = character and { character } or nil
+		local pivot = getDroppedRewardPivot(rewardObject, dropPosition, ignoreInstances)
+		setObjectCFrame(rewardObject, pivot)
+	end
+
+	return nil
+end
+
+local function connectSharedChestPrompt(chestId, node, prompt)
+	prompt.Triggered:Connect(function(triggerPlayer)
+		local currentNode = sharedChestNodesById[chestId]
+		if currentNode ~= node or node.Claimed then
+			return
+		end
+		node.Claimed = true
+		local response = SliceService.ClaimWorldChest(triggerPlayer, node.RewardState)
+		if not response or not response.ok then
+			node.Claimed = false
+			sendPopup(triggerPlayer, buildResponseMessage(response, "Could not pick up chest."), ERROR_COLOR, true)
+			return
+		end
+
+		destroySharedChestNode(chestId, node)
+
+		sendPopup(triggerPlayer, buildResponseMessage(response, "Chest picked up. Bring it back to extract."), SUCCESS_COLOR, false)
+	end)
+end
+
+local function createSharedChestNode(rewardFolder, rewardState, options)
+	if not rewardFolder then
+		return nil
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	rewardState = normalizeWorldChestRewardState(rewardState)
 	sharedChestSequence += 1
 	local chestId = tostring(sharedChestSequence)
-	rewardObject.Name = string.format("SharedChest_%s", chestId)
+	options.ChestId = chestId
+
+	local namePrefix = tostring(options.NamePrefix or "SharedChest")
+	local rewardObject = createRewardInstance(rewardState)
+	rewardObject.Name = string.format("%s_%s", namePrefix, chestId)
 	rewardObject:SetAttribute("RewardType", "Chest")
 	rewardObject:SetAttribute("SharedWorldChest", true)
 	rewardObject:SetAttribute("SharedChestId", chestId)
+	if options.DroppedWorldChest == true then
+		rewardObject:SetAttribute("DroppedWorldChest", true)
+	end
 	rewardObject.Parent = rewardFolder
 
 	local rootPart = getObjectRootPart(rewardObject)
 	if not rootPart then
 		rewardObject:Destroy()
 		rewardObject = createDefaultRewardPart(rewardState)
-		rewardObject.Name = string.format("SharedChest_%s", chestId)
+		rewardObject.Name = string.format("%s_%s", namePrefix, chestId)
 		rewardObject:SetAttribute("RewardType", "Chest")
 		rewardObject:SetAttribute("SharedWorldChest", true)
 		rewardObject:SetAttribute("SharedChestId", chestId)
+		if options.DroppedWorldChest == true then
+			rewardObject:SetAttribute("DroppedWorldChest", true)
+		end
 		rewardObject.Parent = rewardFolder
 		rootPart = rewardObject
 	end
 
-	local placement = buildSharedChestPlacement(rewardObject, spawnContext)
-	if placement then
-		waveTrace(
-			"sharedChestPlacement chestId=%s spawnPart=%s spawnPartPos=%s sourceCrewMember=%s localXZ=%s",
-			tostring(chestId),
-			formatInstancePath(placement.SpawnPart),
-			formatVector3(placement.SpawnPart and placement.SpawnPart.Position or nil),
-			tostring(placement.SourceCrewMemberName),
-			formatVector3(Vector3.new(placement.LocalXZ.X, 0, placement.LocalXZ.Y))
-		)
-		setObjectCFrame(
-			rewardObject,
-			computeObjectPivotOnSpawnPart(
-				rewardObject,
-				placement.SpawnPart,
-				placement.LocalXZ,
-				tonumber(placement.Yaw) or 0
-			)
-		)
-	end
+	local spawnPart = positionWorldChestObject(rewardObject, rewardState, options)
 
 	local highlight = Instance.new("Highlight")
 	highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
@@ -1301,31 +1794,63 @@ local function spawnSharedChestNode(rewardFolder, _carriedFolder)
 		Object = rewardObject,
 		RootPart = rootPart,
 		RewardState = rewardState,
-		SpawnPart = spawnContext.SpawnPart,
+		SpawnPart = spawnPart,
 		Claimed = false,
+		SpawnedAt = os.clock(),
+		DroppedWorldChest = options.DroppedWorldChest == true,
 	}
 	sharedChestNodesById[chestId] = node
+	connectSharedChestPrompt(chestId, node, prompt)
 
-	prompt.Triggered:Connect(function(triggerPlayer)
-		local currentNode = sharedChestNodesById[chestId]
-		if currentNode ~= node or node.Claimed then
-			return
-		end
-		node.Claimed = true
-		local response = SliceService.ClaimWorldChest(triggerPlayer, node.RewardState)
-		if not response or not response.ok then
-			node.Claimed = false
-			sendPopup(triggerPlayer, buildResponseMessage(response, "Could not pick up chest."), ERROR_COLOR, true)
-			return
-		end
+	return node
+end
 
-		sharedChestNodesById[chestId] = nil
-		if rewardObject.Parent then
-			rewardObject:Destroy()
-		end
+local function spawnSharedChestNode(rewardFolder, _carriedFolder, activePlayerCount, forceGold)
+	local spawnContext = chooseSharedChestSpawnContext()
+	if not spawnContext or not spawnContext.SpawnPart then
+		return nil
+	end
 
-		sendPopup(triggerPlayer, buildResponseMessage(response, "Chest picked up. Bring it back to extract."), SUCCESS_COLOR, false)
-	end)
+	local depthBand = tostring(spawnContext.DepthBand or getDepthBandForSharedChestSpawn(spawnContext.SpawnPart))
+	local rewardState = SliceService.CreateChestRewardData(depthBand, {
+		ActivePlayerCount = activePlayerCount,
+		ForceGold = forceGold == true,
+		SharedWorldChest = true,
+	})
+	rewardState.DisplayName = string.format("%s Chest", tostring(rewardState.Tier or "Wooden"))
+
+	local node = createSharedChestNode(rewardFolder, rewardState, {
+		SpawnContext = spawnContext,
+	})
+	if node then
+		recordSharedChestTier(rewardState.Tier)
+	end
+
+	return node
+end
+
+local function spawnDroppedSharedChestNode(rewardFolder, player, rewardData)
+	if typeof(rewardData) ~= "table" or rewardData.RewardType ~= "Chest" then
+		return false, "invalid_dropped_chest"
+	end
+
+	local dropPosition = rewardData.WorldDropPosition
+	if typeof(dropPosition) ~= "Vector3" then
+		dropPosition = getPlayerDropFallbackPosition(player)
+	end
+	if typeof(dropPosition) ~= "Vector3" then
+		return false, "drop_position_unavailable"
+	end
+
+	local node = createSharedChestNode(rewardFolder, rewardData, {
+		NamePrefix = "DroppedSharedChest",
+		DroppedWorldChest = true,
+		Dropper = player,
+		DropPosition = dropPosition,
+	})
+	if not node then
+		return false, "dropped_chest_create_failed"
+	end
 
 	return node
 end
@@ -1336,27 +1861,34 @@ local function ensureSharedChestNodes(rewardFolder, carriedFolder)
 		return
 	end
 
-	local maxActive = math.max(0, tonumber(sharedConfig.MaxActive) or 0)
+	local now = os.clock()
+	despawnExpiredSharedChests(now, sharedConfig)
+
+	local activePlayerCount = getActiveSharedChestPlayerCount()
+	local maxActive = getSharedChestMaxActive(sharedConfig, activePlayerCount)
 	if maxActive <= 0 then
 		return
 	end
 
+	local spawnInterval = getSharedChestSpawnInterval(sharedConfig, activePlayerCount)
 	local activeCount = countActiveSharedChests()
-	if activeCount == 0 then
-		while activeCount < maxActive do
-			if not spawnSharedChestNode(rewardFolder, carriedFolder) then
-				break
-			end
-			activeCount += 1
-		end
-		nextSharedChestRespawnAt = os.clock() + (tonumber(sharedConfig.RespawnDelay) or 10)
+	if activeCount >= maxActive then
+		nextSharedChestRespawnAt = now + spawnInterval
 		return
 	end
 
-	if activeCount < maxActive and os.clock() >= nextSharedChestRespawnAt then
-		if spawnSharedChestNode(rewardFolder, carriedFolder) then
-			nextSharedChestRespawnAt = os.clock() + (tonumber(sharedConfig.RespawnDelay) or 10)
-		end
+	if nextSharedChestRespawnAt <= 0 then
+		nextSharedChestRespawnAt = now
+	end
+
+	if now < nextSharedChestRespawnAt then
+		return
+	end
+
+	if spawnSharedChestNode(rewardFolder, carriedFolder, activePlayerCount, shouldForceSharedGold(sharedConfig)) then
+		nextSharedChestRespawnAt = now + spawnInterval
+	else
+		nextSharedChestRespawnAt = now + math.min(getSharedChestCheckInterval(sharedConfig), spawnInterval)
 	end
 end
 
@@ -1795,6 +2327,10 @@ function Controller.Start()
 		end
 	end)
 
+	SliceService.SetDroppedChestWorldHandler(function(player, rewardData)
+		return spawnDroppedSharedChestNode(rewardFolder, player, rewardData)
+	end)
+
 	Players.PlayerRemoving:Connect(function(player)
 		destroyRewardObject(player.UserId)
 		destroyCarriedSharedChest(player.UserId)
@@ -1808,10 +2344,9 @@ function Controller.Start()
 	end
 
 	task.spawn(function()
-		local interval = math.max(1, tonumber((Economy.VerticalSlice.WorldRun.SharedChests or {}).RespawnCheckInterval) or 5)
 		while started do
 			ensureSharedChestNodes(rewardFolder, carriedFolder)
-			task.wait(interval)
+			task.wait(getSharedChestCheckInterval(Economy.VerticalSlice.WorldRun.SharedChests or {}))
 		end
 	end)
 end

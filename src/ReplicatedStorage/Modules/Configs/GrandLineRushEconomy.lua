@@ -81,10 +81,10 @@ local Economy = {
 			"Abyssal",
 		},
 		ChestStageByDepthBand = {
-			Shallow = "Early",
+			Shallow = "Shallow",
 			Mid = "Mid",
-			Deep = "Strong",
-			Abyssal = "Elite",
+			Deep = "Deep",
+			Abyssal = "Abyssal",
 		},
 		StarterCrew = {
 			Enabled = true,
@@ -120,9 +120,49 @@ local Economy = {
 			StartHubSize = Vector3.new(16, 1, 16),
 			SharedChests = {
 				Enabled = true,
-				MaxActive = 3,
-				RespawnCheckInterval = 5,
-				RespawnDelay = 10,
+				SpawnCheckInterval = 5,
+				RespawnCheckInterval = 5, -- Legacy alias; prefer SpawnCheckInterval.
+				SpawnMode = "OneAtATime",
+				SpawnIntervalSeconds = {
+					Base = 75,
+					SecondsRemovedPerExtraPlayer = 5,
+					Min = 35,
+					Max = 75,
+				},
+				RespawnDelay = 75, -- Legacy fallback for older shared chest code.
+				MaxActiveByPlayerCount = {
+					[1] = 2,
+					[2] = 3,
+					[3] = 3,
+					[4] = 4,
+					[5] = 4,
+					[6] = 5,
+					[7] = 5,
+					[8] = 6,
+				},
+				MaxActive = {
+					Base = 2,
+					PlayersPerExtra = 2,
+					Min = 2,
+					Max = 6,
+				},
+				UnclaimedDespawnSeconds = 120,
+				GoldPityAfterNonGoldSpawns = 6,
+				PopulationGoldBonusPerExtraPlayer = 0.01,
+				PopulationGoldBonusCap = 0.08,
+				DebugBeaconEnabled = false,
+				SpawnPartCacheRefreshSeconds = 60,
+				MaxActivePerSpawnPart = 1,
+				SpawnPartEligibleAttribute = "SharedChestSpawnEligible",
+				SpawnPartDisabledAttribute = "SharedChestSpawnDisabled",
+				SpawnPartDepthBandAttribute = "SharedChestDepthBand",
+				SpawnPartWeightAttribute = "SharedChestSpawnWeight",
+				SpawnWeightByDepthBand = {
+					Shallow = 1,
+					Mid = 1,
+					Deep = 1,
+					Abyssal = 1,
+				},
 				SpawnTierToDepthBand = {
 					[1] = "Shallow",
 					[2] = "Shallow",
@@ -274,25 +314,41 @@ local Economy = {
 		},
 
 		ExpectedTierDistributionByStage = {
-			Early = {
-				Wooden = 60,
-				Iron = 30,
-				Gold = 10,
+			Shallow = {
+				Wooden = 76,
+				Iron = 21,
+				Gold = 3,
 			},
 			Mid = {
-				Wooden = 25,
-				Iron = 45,
-				Gold = 30,
+				Wooden = 45,
+				Iron = 47,
+				Gold = 8,
+			},
+			Deep = {
+				Wooden = 0,
+				Iron = 82,
+				Gold = 18,
+			},
+			Abyssal = {
+				Wooden = 0,
+				Iron = 72,
+				Gold = 28,
+			},
+			-- Legacy stage aliases kept for compatibility with older callers.
+			Early = {
+				Wooden = 76,
+				Iron = 21,
+				Gold = 3,
 			},
 			Strong = {
-				Wooden = 10,
-				Iron = 30,
-				Gold = 60,
+				Wooden = 0,
+				Iron = 82,
+				Gold = 18,
 			},
 			Elite = {
-				Wooden = 5,
-				Iron = 15,
-				Gold = 80,
+				Wooden = 0,
+				Iron = 72,
+				Gold = 28,
 			},
 		},
 	},

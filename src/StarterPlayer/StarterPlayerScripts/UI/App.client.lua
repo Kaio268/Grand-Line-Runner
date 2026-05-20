@@ -691,7 +691,22 @@ local function getChestInventoryNameFromFolder(chestFolder)
 end
 
 local function collectChestCountsFromState(state)
-	if typeof(state) ~= "table" or typeof(state.UnopenedChests) ~= "table" then
+	if typeof(state) ~= "table" then
+		return nil
+	end
+
+	if typeof(state.UnopenedChestCounts) == "table" then
+		local counts = {}
+		for chestName, quantity in pairs(state.UnopenedChestCounts) do
+			local safeQuantity = math.max(0, math.floor(tonumber(quantity) or 0))
+			if safeQuantity > 0 then
+				counts[tostring(chestName)] = safeQuantity
+			end
+		end
+		return counts
+	end
+
+	if typeof(state.UnopenedChests) ~= "table" then
 		return nil
 	end
 
@@ -699,7 +714,8 @@ local function collectChestCountsFromState(state)
 	for _, chestEntry in ipairs(state.UnopenedChests) do
 		local chestName = getChestInventoryNameFromStateEntry(chestEntry)
 		if chestName ~= "" then
-			counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0) + 1
+			counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0)
+				+ math.max(1, math.floor(tonumber(chestEntry.Quantity) or 1))
 		end
 	end
 
@@ -708,12 +724,24 @@ end
 
 local function collectChestCountsFromPlayerFolder()
 	local unopenedFolder = player:FindFirstChild("UnopenedChests")
-	local byIdFolder = unopenedFolder and unopenedFolder:FindFirstChild("ById")
-	if not (byIdFolder and byIdFolder:IsA("Folder")) then
-		return nil
+	local counts = {}
+	local resolvedCount = 0
+	local stacksFolder = unopenedFolder and unopenedFolder:FindFirstChild("Stacks")
+	if stacksFolder and stacksFolder:IsA("Folder") then
+		for _, stackValue in ipairs(stacksFolder:GetChildren()) do
+			if stackValue:IsA("ValueBase") then
+				local quantity = math.max(0, math.floor(tonumber(stackValue.Value) or 0))
+				counts[stackValue.Name] = quantity
+				resolvedCount += quantity
+			end
+		end
 	end
 
-	local counts = {}
+	local byIdFolder = unopenedFolder and unopenedFolder:FindFirstChild("ById")
+	if not (byIdFolder and byIdFolder:IsA("Folder")) then
+		return if resolvedCount > 0 then counts else nil
+	end
+
 	local childCount = 0
 	local matchedCount = 0
 	for _, chestFolder in ipairs(byIdFolder:GetChildren()) do
@@ -722,14 +750,15 @@ local function collectChestCountsFromPlayerFolder()
 		if chestName ~= "" then
 			matchedCount += 1
 			counts[chestName] = math.max(0, tonumber(counts[chestName]) or 0) + 1
+			resolvedCount += 1
 		end
 	end
 
-	if childCount > 0 and matchedCount == 0 then
+	if childCount > 0 and matchedCount == 0 and resolvedCount <= 0 then
 		return nil
 	end
 
-	return counts
+	return if resolvedCount > 0 then counts else nil
 end
 
 local function applyCanonicalChestCounts(counts)
@@ -1504,14 +1533,25 @@ local function _readPlayerMaterials()
 end
 
 local function readPlayerChestCount(chestsList)
-	local unopenedFolder = player:FindFirstChild("UnopenedChests")
-	local byIdFolder = unopenedFolder and unopenedFolder:FindFirstChild("ById")
-
-	if byIdFolder then
-		return #byIdFolder:GetChildren()
+	local chestCount = math.max(0, tonumber(metaState and metaState.UnopenedChestCount) or 0)
+	if chestCount > 0 then
+		return chestCount
 	end
 
-	local chestCount = math.max(0, tonumber(metaState and metaState.UnopenedChestCount) or 0)
+	local unopenedFolder = player:FindFirstChild("UnopenedChests")
+	local stacksFolder = unopenedFolder and unopenedFolder:FindFirstChild("Stacks")
+	if stacksFolder and stacksFolder:IsA("Folder") then
+		for _, stackValue in ipairs(stacksFolder:GetChildren()) do
+			if stackValue:IsA("ValueBase") then
+				chestCount += math.max(0, math.floor(tonumber(stackValue.Value) or 0))
+			end
+		end
+	end
+
+	local byIdFolder = unopenedFolder and unopenedFolder:FindFirstChild("ById")
+	if byIdFolder then
+		chestCount += #byIdFolder:GetChildren()
+	end
 	if chestCount > 0 then
 		return chestCount
 	end
@@ -2320,6 +2360,44 @@ local function bindShipDataTracking()
 				syncChestsFromCanonicalSources(true)
 			end
 			scheduleRender()
+		end
+
+		if dataRoot.Name == "UnopenedChests" then
+			local function watchChestCountContainer(container)
+				if not (container and container:IsA("Folder")) then
+					return
+				end
+				for _, descendant in ipairs(container:GetDescendants()) do
+					if descendant:IsA("ValueBase") then
+						trackConnection(descendant:GetPropertyChangedSignal("Value"), handleChanged, shipDataConnections)
+					end
+				end
+				trackConnection(container.DescendantAdded, function(descendant)
+					if descendant:IsA("ValueBase") then
+						trackConnection(descendant:GetPropertyChangedSignal("Value"), handleChanged, shipDataConnections)
+					end
+					handleChanged()
+				end, shipDataConnections)
+				trackConnection(container.DescendantRemoving, handleChanged, shipDataConnections)
+			end
+
+			watchChestCountContainer(dataRoot:FindFirstChild("Stacks"))
+			local byIdFolder = dataRoot:FindFirstChild("ById")
+			if byIdFolder and byIdFolder:IsA("Folder") then
+				trackConnection(byIdFolder.ChildAdded, handleChanged, shipDataConnections)
+				trackConnection(byIdFolder.ChildRemoved, handleChanged, shipDataConnections)
+			end
+			trackConnection(dataRoot.ChildAdded, function(child)
+				if child.Name == "Stacks" then
+					watchChestCountContainer(child)
+				elseif child.Name == "ById" and child:IsA("Folder") then
+					trackConnection(child.ChildAdded, handleChanged, shipDataConnections)
+					trackConnection(child.ChildRemoved, handleChanged, shipDataConnections)
+				end
+				handleChanged()
+			end, shipDataConnections)
+			trackConnection(dataRoot.ChildRemoved, handleChanged, shipDataConnections)
+			return
 		end
 
 		for _, descendant in ipairs(dataRoot:GetDescendants()) do
