@@ -22,6 +22,7 @@ local ServerMods = Modules:WaitForChild("Server"):WaitForChild("Crew")
 
 local SpawnerConfig = require(Configs:WaitForChild("CrewSpawnSettings"))
 local SpawnPartsCfg = require(Configs:WaitForChild("SpawnParts"))
+local CrewVariantsCfg = require(Configs:WaitForChild("CrewVariants"))
 local Registry = require(ServerMods:WaitForChild("Registry"))
 local Placement = require(ServerMods:WaitForChild("Placement"))
 local Interaction = require(ServerMods:WaitForChild("Interaction"))
@@ -246,6 +247,7 @@ local PAD_INTENDED_TIER = {
 	Omega = SECRET_TIER,
 }
 
+-- Canonical nearby-rarity pools. Selection never falls back to SpawnParts.LuckMult caps.
 local PAD_ALLOWED_ENTRY_TIERS = {
 	Common = {
 		[COMMON_TIER] = true,
@@ -296,6 +298,79 @@ local PAD_ALLOWED_ENTRY_TIERS = {
 	},
 }
 
+local EXPECTED_RARITY_DISTANCE_WEIGHTS = {
+	SameTier = 1,
+	OneTierBelow = 0.02,
+	OneTierAbove = 0.01,
+}
+
+local EXPECTED_VARIANT_CHANCES = {
+	Normal = 90,
+	Golden = 8,
+	Diamond = 2,
+}
+
+local EXPECTED_PAD_ALLOWED_TIERS = {
+	Common = { COMMON_TIER, UNCOMMON_TIER },
+	Uncommon = { COMMON_TIER, UNCOMMON_TIER, RARE_TIER },
+	Rare = { UNCOMMON_TIER, RARE_TIER, EPIC_TIER },
+	Epic = { RARE_TIER, EPIC_TIER, LEGENDARY_TIER },
+	Legendary = { EPIC_TIER, LEGENDARY_TIER, MYTHIC_TIER },
+	Mythic = { LEGENDARY_TIER, MYTHIC_TIER, GODLY_TIER },
+	Mythical = { LEGENDARY_TIER, MYTHIC_TIER, GODLY_TIER },
+	Godly = { MYTHIC_TIER, GODLY_TIER, SECRET_TIER },
+	Secret = { GODLY_TIER, SECRET_TIER },
+	Omega = { GODLY_TIER, SECRET_TIER },
+}
+
+local SECRET_ALLOWED_PAD_NAMES = {
+	Godly = true,
+	Secret = true,
+	Omega = true,
+}
+
+local GODLY_ALLOWED_PAD_NAMES = {
+	Mythic = true,
+	Mythical = true,
+	Godly = true,
+	Secret = true,
+	Omega = true,
+}
+
+local function tierSetMatchesExpected(actualSet, expectedList)
+	if not actualSet then
+		return false
+	end
+
+	local expectedCount = 0
+	local expectedSet = {}
+	for _, tier in ipairs(expectedList or {}) do
+		expectedSet[tier] = true
+		expectedCount += 1
+		if actualSet[tier] ~= true then
+			return false
+		end
+	end
+
+	local actualCount = 0
+	for tier in pairs(actualSet) do
+		actualCount += 1
+		if expectedSet[tier] ~= true then
+			return false
+		end
+	end
+
+	return actualCount == expectedCount
+end
+
+local function joinTierList(tiers)
+	local parts = {}
+	for _, tier in ipairs(tiers or {}) do
+		parts[#parts + 1] = tostring(tier)
+	end
+	return table.concat(parts, ",")
+end
+
 local ServerEvents = ReplicatedStorage:FindFirstChild("ServerEvents")
 if not ServerEvents then
 	ServerEvents = Instance.new("Folder")
@@ -309,6 +384,68 @@ if not LikeGoalSpawnSecret then
 	LikeGoalSpawnSecret.Name = "LikeGoalSpawnSecret"
 	LikeGoalSpawnSecret.Parent = ServerEvents
 end
+
+local function validateSpawnBalanceGuards()
+	if not DEBUG_TRACE then
+		return
+	end
+
+	local expectedWeights = EXPECTED_RARITY_DISTANCE_WEIGHTS
+	if math.abs(SAME_TIER_WEIGHT - expectedWeights.SameTier) > 1e-9
+		or math.abs(ONE_TIER_BELOW_WEIGHT - expectedWeights.OneTierBelow) > 1e-9
+		or math.abs(ONE_TIER_ABOVE_WEIGHT - expectedWeights.OneTierAbove) > 1e-9
+	then
+		spawnWarnThrottled(
+			"spawn_balance_distance_weights_changed",
+			"spawnBalance warning=rarity_distance_weights_changed same=%s below=%s above=%s expectedSame=%s expectedBelow=%s expectedAbove=%s",
+			tostring(SAME_TIER_WEIGHT),
+			tostring(ONE_TIER_BELOW_WEIGHT),
+			tostring(ONE_TIER_ABOVE_WEIGHT),
+			tostring(expectedWeights.SameTier),
+			tostring(expectedWeights.OneTierBelow),
+			tostring(expectedWeights.OneTierAbove)
+		)
+	end
+
+	for padName, expectedTiers in pairs(EXPECTED_PAD_ALLOWED_TIERS) do
+		local actualSet = PAD_ALLOWED_ENTRY_TIERS[padName]
+		if not tierSetMatchesExpected(actualSet, expectedTiers) then
+			spawnWarnThrottled(
+				"spawn_balance_pad_pool_changed_" .. tostring(padName),
+				"spawnBalance warning=pad_pool_changed pad=%s expectedTiers=%s",
+				tostring(padName),
+				joinTierList(expectedTiers)
+			)
+		end
+	end
+
+	local order = CrewVariantsCfg.Order or {}
+	if order[1] ~= "Normal" or order[2] ~= "Golden" or order[3] ~= "Diamond" then
+		spawnWarnThrottled(
+			"spawn_balance_variant_order_changed",
+			"spawnBalance warning=variant_order_changed order=%s,%s,%s expected=Normal,Golden,Diamond",
+			tostring(order[1]),
+			tostring(order[2]),
+			tostring(order[3])
+		)
+	end
+
+	local versions = CrewVariantsCfg.Versions or {}
+	for variantName, expectedChance in pairs(EXPECTED_VARIANT_CHANCES) do
+		local actualChance = tonumber((versions[variantName] or {}).Chance) or 0
+		if math.abs(actualChance - expectedChance) > 1e-9 then
+			spawnWarnThrottled(
+				"spawn_balance_variant_chance_changed_" .. tostring(variantName),
+				"spawnBalance warning=variant_chance_changed variant=%s chance=%s expected=%s",
+				tostring(variantName),
+				tostring(actualChance),
+				tostring(expectedChance)
+			)
+		end
+	end
+end
+
+validateSpawnBalanceGuards()
 
 mapTrace(
 	"SpawnCrewMembers requestedMap=%s activeMap=%s mapPath=%s biomesRoot=%s legacySpawnFolder=%s hitBox=%s hitBoxPos=%s",
@@ -477,6 +614,47 @@ local function getAllowedEntryTiersForPadName(padName)
 	return PAD_ALLOWED_ENTRY_TIERS[tostring(padName or "")]
 end
 
+local function isEntryTierAllowedOnPadName(padName, entryTier)
+	local padNameText = tostring(padName or "")
+	local entryTierNumber = tonumber(entryTier) or COMMON_TIER
+	local allowedEntryTiers = PAD_ALLOWED_ENTRY_TIERS[padNameText]
+	if not allowedEntryTiers or allowedEntryTiers[entryTierNumber] ~= true then
+		return false
+	end
+
+	if entryTierNumber == SECRET_TIER then
+		return SECRET_ALLOWED_PAD_NAMES[padNameText] == true
+	elseif entryTierNumber == GODLY_TIER then
+		return GODLY_ALLOWED_PAD_NAMES[padNameText] == true
+	end
+
+	return true
+end
+
+local function validateChosenEntryForPad(data, entry, context)
+	if not data or not entry then
+		return false
+	end
+
+	local padName = tostring(data.Name or "")
+	local entryTier = tonumber(entry.Tier) or COMMON_TIER
+	if isEntryTierAllowedOnPadName(padName, entryTier) then
+		return true
+	end
+
+	spawnWarnThrottled(
+		"spawn_balance_out_of_band_choice_" .. formatInstancePath(data.Part),
+		"spawnBalance blocked reason=out_of_band_rarity_choice context=%s spawnPart=%s pad=%s entry=%s entryRarity=%s entryTier=%s",
+		tostring(context),
+		formatInstancePath(data.Part),
+		padName,
+		tostring(entry.Id),
+		tostring(entry.Rarity),
+		tostring(entryTier)
+	)
+	return false
+end
+
 local function getRarityDistanceWeight(entryTier, intendedTier)
 	local distance = (tonumber(entryTier) or COMMON_TIER) - (tonumber(intendedTier) or COMMON_TIER)
 	if distance == 0 then
@@ -497,8 +675,7 @@ local function weightForEntry(entry, data, serverLuckMult)
 	end
 
 	local entryTier = tonumber(entry.Tier) or COMMON_TIER
-	local allowedEntryTiers = data and data.AllowedEntryTiers
-	if allowedEntryTiers and allowedEntryTiers[entryTier] ~= true then
+	if not isEntryTierAllowedOnPadName(data and data.Name, entryTier) then
 		return 0, "rarity_distance"
 	end
 
@@ -675,9 +852,6 @@ local function setupSpawnPart(spawnPart)
 		local partTier = tonumber((SpawnPartsCfg.RarityTier or {})[rarityName]) or 1
 		local intendedTier = getIntendedTierForPadName(rarityName)
 		local allowedEntryTiers = getAllowedEntryTiersForPadName(rarityName)
-		local chanceCap = tonumber((SpawnPartsCfg.LuckMult or {})[rarityName])
-			or tonumber(SpawnPartsCfg.DefaultLuckMult)
-			or 100
 
 		local container = spawnPart:FindFirstChild(CREW_MEMBERS_SPAWN_FOLDER_NAME)
 		if not container then
@@ -694,7 +868,6 @@ local function setupSpawnPart(spawnPart)
 			Tier = partTier,
 			IntendedTier = intendedTier,
 			AllowedEntryTiers = allowedEntryTiers,
-			ChanceCap = chanceCap,
 			Container = container,
 			Spacing = spacing,
 			SlotOccupied = {},
@@ -1660,6 +1833,9 @@ local function spawnOne(data)
 			)
 			return false
 		end
+		if not validateChosenEntryForPad(data, baseEntry, "spawnOne") then
+			return false
+		end
 
 		local forcedVariant = getForcedVariantKey()
 		local variantKey = forcedVariant or Registry.RollVariant(rng)
@@ -1919,6 +2095,9 @@ local function spawnRandomSecretIgnoreLimits()
 		baseEntry = secretEntries[rng:NextInteger(1, #secretEntries)]
 	else
 		spawnWarn("likeGoal skipped reason=no_secret_entries")
+		return
+	end
+	if not validateChosenEntryForPad(data, baseEntry, "likeGoalSecret") then
 		return
 	end
 

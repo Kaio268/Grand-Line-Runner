@@ -5,9 +5,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local DECREASE_PART = Workspace:WaitForChild("DecreaseSpeed")
-local FORCED_SPEED = 35
+-- Legacy Studio part name. The part is still observed for diagnostics, but it no longer changes speed.
+local LEGACY_DECREASE_SPEED_FLOOR = nil
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 local DEBUG_TRACE = RunService:IsStudio()
+local SELECTED_SPEED_SETTING_NAME = "SelectedSpeed"
+local SPEED_AUTO_MAX_SETTING_NAME = "SpeedAutoMax"
 local HORO_GHOST_ATTRIBUTE = "HoroProjectionGhost"
 local HORO_BODY_ATTRIBUTE = "HoroProjectionBody"
 local HORO_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
@@ -173,12 +176,38 @@ local function hookCharacter(player, character)
 
 	local conns = {}
 
-	local function getUnboostedSpeed()
-		if inDecreaseZone then
-			return FORCED_SPEED
+	local function getEarnedMaxSpeed()
+		return math.max(1, math.floor((tonumber(speedObj.Value) or 1) + 0.5))
+	end
+
+	local function getSelectedSpeed()
+		local earnedMax = getEarnedMaxSpeed()
+		local settings = player:FindFirstChild("Settings")
+		local autoValue = settings and settings:FindFirstChild(SPEED_AUTO_MAX_SETTING_NAME)
+		local selectedValue = settings and settings:FindFirstChild(SELECTED_SPEED_SETTING_NAME)
+		local autoMax = true
+
+		if autoValue and autoValue:IsA("BoolValue") then
+			autoMax = autoValue.Value == true
 		end
 
-		return base + speedObj.Value
+		if autoMax then
+			return earnedMax
+		end
+
+		if selectedValue and (selectedValue:IsA("NumberValue") or selectedValue:IsA("IntValue")) then
+			return math.clamp(math.floor((tonumber(selectedValue.Value) or earnedMax) + 0.5), 1, earnedMax)
+		end
+
+		return earnedMax
+	end
+
+	local function getNormalUnboostedSpeed()
+		return base + getSelectedSpeed()
+	end
+
+	local function getUnboostedSpeed()
+		return getNormalUnboostedSpeed()
 	end
 
 	local function isProjectedBody()
@@ -246,7 +275,7 @@ local function hookCharacter(player, character)
 
 	local function logSpeedState(reason, oldState, newState)
 		zoneTrace(
-			"player=%s reason=%s zone=%s zonePos=%s zoneSize=%s oldState=%s newState=%s appliedSpeed=%s base=%s purchasedSpeed=%s activeMap=%s mapPath=%s",
+			"player=%s reason=%s zone=%s zonePos=%s zoneSize=%s oldState=%s newState=%s appliedSpeed=%s base=%s earnedSpeed=%s selectedSpeed=%s normalUnboostedSpeed=%s legacyFloor=%s activeMap=%s mapPath=%s",
 			player.Name,
 			tostring(reason),
 			formatInstancePath(DECREASE_PART),
@@ -257,6 +286,9 @@ local function hookCharacter(player, character)
 			tostring(humanoid.WalkSpeed),
 			tostring(base),
 			tostring(speedObj.Value),
+			tostring(getSelectedSpeed()),
+			tostring(getNormalUnboostedSpeed()),
+			tostring(LEGACY_DECREASE_SPEED_FLOOR),
 			tostring(MapResolver.GetRefs().ActiveMapName),
 			formatInstancePath(MapResolver.GetRefs().MapRoot)
 		)
@@ -276,6 +308,41 @@ local function hookCharacter(player, character)
 
 	conns[#conns + 1] = speedObj.Changed:Connect(function()
 		apply()
+	end)
+
+	local function bindSpeedSettingValue(instance)
+		if not (instance and instance:IsA("ValueBase")) then
+			return
+		end
+		if instance.Name ~= SELECTED_SPEED_SETTING_NAME and instance.Name ~= SPEED_AUTO_MAX_SETTING_NAME then
+			return
+		end
+
+		conns[#conns + 1] = instance:GetPropertyChangedSignal("Value"):Connect(function()
+			apply()
+		end)
+	end
+
+	local function bindSpeedSettingsFolder(folder)
+		if not folder then
+			return
+		end
+
+		bindSpeedSettingValue(folder:FindFirstChild(SELECTED_SPEED_SETTING_NAME))
+		bindSpeedSettingValue(folder:FindFirstChild(SPEED_AUTO_MAX_SETTING_NAME))
+		conns[#conns + 1] = folder.ChildAdded:Connect(function(child)
+			bindSpeedSettingValue(child)
+			apply()
+		end)
+	end
+
+	bindSpeedSettingsFolder(player:FindFirstChild("Settings"))
+	apply()
+	conns[#conns + 1] = player.ChildAdded:Connect(function(child)
+		if child.Name == "Settings" then
+			bindSpeedSettingsFolder(child)
+			apply()
+		end
 	end)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal("HieIceBoostUntil"):Connect(function()
@@ -362,7 +429,7 @@ local function hookCharacter(player, character)
 			end
 
 			local normalizedSpeed = humanoid.WalkSpeed / totalSpeedMultiplier
-			base = normalizedSpeed - speedObj.Value
+			base = normalizedSpeed - getSelectedSpeed()
 			apply()
 		end
 	end)

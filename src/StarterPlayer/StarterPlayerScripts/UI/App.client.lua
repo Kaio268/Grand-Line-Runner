@@ -48,7 +48,6 @@ local equipRemote = ReplicatedStorage:WaitForChild("CrewMemberEquipToggleRemote"
 local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
 local titleEquipRemote = remotesFolder:WaitForChild("TitleEquipRequest")
 local shipUpgradeResultRemote = remotesFolder:WaitForChild("ShipUpgradeResultRemote")
-local crewQuickSlotsRequestRemote = remotesFolder:WaitForChild("CrewMemberQuickSlotsRequest", 15)
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactInventoryRoot"
@@ -2041,27 +2040,7 @@ local function buildEntry(key, state)
 	}
 end
 
-local function buildCrewQuickSlotEntry(slotIndex, locked)
-	local product = CrewQuickSlotConfig.GetSlotProduct(slotIndex) or {}
-	local price = math.max(0, math.floor(tonumber(product.Price) or 0))
-	if locked then
-		return {
-			key = "CrewQuickSlotLocked|" .. tostring(slotIndex),
-			kind = "CrewQuickSlot",
-			slotIndex = slotIndex,
-			displayName = "Quick Slot " .. tostring(slotIndex) .. " Locked",
-			shortName = "Locked",
-			subtitle = "Crew Quick Slot",
-			footer = price > 0 and (tostring(price) .. " Robux") or "Locked",
-			fallbackText = "LOCK",
-			priceRobux = price,
-			productId = product.ProductId,
-			accentColor = Color3.fromRGB(128, 139, 156),
-			interactive = true,
-			lockedSlot = true,
-		}
-	end
-
+local function buildCrewQuickSlotEntry(slotIndex)
 	return {
 		key = "CrewQuickSlotEmpty|" .. tostring(slotIndex),
 		kind = "CrewQuickSlot",
@@ -2097,14 +2076,10 @@ local function buildRenderData()
 		if state then
 			entry = buildEntry(key, state)
 		end
-		if slotIndex <= crewQuickSlots.unlockedSlots then
-			if entry then
-				entry.quickSlotIndex = slotIndex
-			else
-				entry = buildCrewQuickSlotEntry(slotIndex, false)
-			end
+		if entry then
+			entry.quickSlotIndex = slotIndex
 		else
-			entry = buildCrewQuickSlotEntry(slotIndex, true)
+			entry = buildCrewQuickSlotEntry(slotIndex)
 		end
 
 		hotbarSlots[#hotbarSlots + 1] = {
@@ -2676,31 +2651,27 @@ render = function()
 					return
 				end
 
-				titleEquipRemote:FireServer(entry.isEquipped and "" or titleId)
-			end,
-			onActivateItem = function(entry)
-				if shipUpgradeModal ~= nil then
-					return
-				end
-				if entry and entry.kind == "CrewQuickSlot" and entry.lockedSlot == true then
-					crewQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
-					return
-				end
-				if entry and entry.kind == "Chest" then
-					local availableAmount = math.max(1, tonumber(entry.quantity) or 1)
-					chestOpenPrompt = {
-						name = tostring(entry.name or ""),
-						displayName = string.format("%s Chests", tostring(entry.name or "Treasure")),
-						amount = 1,
-						maxAmount = math.min(MAX_BATCH_CHEST_OPEN_COUNT, availableAmount),
-					}
-					render()
-					return
-				end
-				if entry and entry.kind ~= "Resource" then
-					equipRemote:FireServer(entry.kind, entry.name)
-				end
-			end,
+					titleEquipRemote:FireServer(entry.isEquipped and "" or titleId)
+				end,
+				onActivateItem = function(entry)
+					if shipUpgradeModal ~= nil then
+						return
+					end
+					if entry and entry.kind == "Chest" then
+						local availableAmount = math.max(1, tonumber(entry.quantity) or 1)
+						chestOpenPrompt = {
+							name = tostring(entry.name or ""),
+							displayName = string.format("%s Chests", tostring(entry.name or "Treasure")),
+							amount = 1,
+							maxAmount = math.min(MAX_BATCH_CHEST_OPEN_COUNT, availableAmount),
+						}
+						render()
+						return
+					end
+					if entry and entry.kind ~= "Resource" then
+						equipRemote:FireServer(entry.kind, entry.name)
+					end
+				end,
 			onChestOpenAmountChanged = function(nextAmount)
 				if not chestOpenPrompt then
 					return
@@ -2886,10 +2857,6 @@ end
 local function activateSlot(slotNumber)
 	local entry = keyboardHotbar[slotNumber]
 	if entry then
-		if entry.kind == "CrewQuickSlot" and entry.lockedSlot == true then
-			crewQuickSlotsRequestRemote:FireServer("UnlockSlot", entry.slotIndex)
-			return
-		end
 		equipRemote:FireServer(entry.kind, entry.name)
 	end
 end

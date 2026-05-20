@@ -16,12 +16,7 @@ Monetization.ActiveChefsGamepasses = {
 	},
 }
 
-Monetization.ActiveChefsDeveloperProducts = {
-	CrewQuickSlot = {
-		Id = 3584712420,
-		Name = "+1 Crew Quick Slot",
-	},
-}
+Monetization.ActiveChefsDeveloperProducts = {}
 
 Monetization.PlaceholderGamepasses = {
 	X2Beli = {
@@ -140,6 +135,11 @@ Monetization.PlaceholderDeveloperProducts = {
 }
 
 Monetization.RetiredLegacyProducts = {
+	CrewQuickSlot = {
+		Id = 3584712420,
+		Name = "+1 Crew Quick Slot",
+		Reason = "retired_hotbar_slots_unlocked_by_default",
+	},
 	StarterPackOne = {
 		Id = 3509345784,
 		Name = "Starter Pack #1",

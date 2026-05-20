@@ -125,12 +125,14 @@ local function isCrewTool(tool)
 	return isKnownCrewItem(getToolItemName(tool))
 end
 
-local function applyToolMetadata(tool, itemName, variantKey, baseName)
+local function applyToolMetadata(tool, itemName, variantKey, baseName, instanceId, instanceData)
 	local canonicalItemName, resolvedInfo, legacyStorageName = resolveCrewItemName(itemName)
 	itemName = canonicalItemName
 	local parsedVariant, parsedBaseName = getVariantAndBaseName(itemName)
 	variantKey = variantKey or parsedVariant
 	baseName = baseName or parsedBaseName
+	instanceData = if typeof(instanceData) == "table" then instanceData else {}
+	instanceId = tostring(instanceId or instanceData.InstanceId or "")
 
 	local info = resolvedInfo or CrewCatalog.GetInfoById(itemName) or CrewCatalog.GetInfoById(baseName)
 	local displayName = tostring((info and (info.DisplayName or info.Name)) or itemName)
@@ -138,18 +140,25 @@ local function applyToolMetadata(tool, itemName, variantKey, baseName)
 	local realCharacterName = tostring((info and info.RealCharacterName) or "")
 	local modelName = tostring((info and info.ModelName) or baseName)
 	local crewMemberId = tostring((info and info.CrewMemberId) or itemName)
+	local rarity = tostring(instanceData.Rarity or (info and info.Rarity) or "")
 
 	tool.Name = itemName
 	tool.ToolTip = displayName
 	tool:SetAttribute("InvItem", itemName)
 	tool:SetAttribute("InventoryItemKind", CREW_ITEM_KIND)
 	tool:SetAttribute("InventoryItemName", itemName)
+	tool:SetAttribute("CrewMemberInstanceId", if instanceId ~= "" then instanceId else nil)
+	tool:SetAttribute("CrewInstanceId", if instanceId ~= "" then instanceId else nil)
 	tool:SetAttribute("DisplayName", displayName)
 	tool:SetAttribute("CrewMemberDisplayName", displayName)
 	tool:SetAttribute("Variant", variantKey)
 	tool:SetAttribute("BaseName", baseName)
 	tool:SetAttribute("ModelName", modelName)
 	tool:SetAttribute("CrewMemberId", crewMemberId)
+	tool:SetAttribute("CrewMemberRarity", if rarity ~= "" then rarity else nil)
+	tool:SetAttribute("CrewMemberLevel", tonumber(instanceData.Level))
+	tool:SetAttribute("CrewMemberCurrentXP", tonumber(instanceData.CurrentXP))
+	tool:SetAttribute("CrewMemberTotalXP", tonumber(instanceData.TotalXP))
 	_ = legacyStorageName
 
 	if productionName ~= "" then
@@ -161,7 +170,7 @@ local function applyToolMetadata(tool, itemName, variantKey, baseName)
 	return itemName
 end
 
-local function makeTool(itemName)
+local function makeTool(itemName, instanceId, instanceData)
 	local template, variantKey, baseName, canonicalItemName = findTemplate(itemName)
 	if not template then
 		return nil
@@ -170,7 +179,7 @@ local function makeTool(itemName)
 	local tool = Instance.new("Tool")
 	tool.RequiresHandle = true
 	tool.CanBeDropped = false
-	applyToolMetadata(tool, canonicalItemName or itemName, variantKey, baseName)
+	applyToolMetadata(tool, canonicalItemName or itemName, variantKey, baseName, instanceId, instanceData)
 
 	local function setupPart(part)
 		part.Anchored = false
@@ -247,31 +256,79 @@ local function readValue(parent, childName)
 	return nil
 end
 
-local function normalizeCount(value)
-	local count = tonumber(value) or 0
-	if count < 0 then
-		count = 0
+local function getToolInstanceId(tool)
+	if not tool or not tool:IsA("Tool") then
+		return ""
 	end
-	return math.floor(count + 1e-9)
+	return tostring(tool:GetAttribute("CrewMemberInstanceId") or tool:GetAttribute("CrewInstanceId") or "")
 end
 
-local function addDesiredCount(counts, itemName, amount)
+local function compareInstanceIds(left, right)
+	local leftNumber = tonumber(left)
+	local rightNumber = tonumber(right)
+	if leftNumber ~= nil and rightNumber ~= nil and leftNumber ~= rightNumber then
+		return leftNumber < rightNumber
+	end
+	return tostring(left) < tostring(right)
+end
+
+local function getOrderedInventoryInstanceIds(inventory)
+	local ids = {}
+	local seen = {}
+
+	if typeof(inventory.Order) == "table" then
+		for _, rawInstanceId in ipairs(inventory.Order) do
+			local instanceId = tostring(rawInstanceId or "")
+			if instanceId ~= "" and seen[instanceId] ~= true then
+				seen[instanceId] = true
+				table.insert(ids, instanceId)
+			end
+		end
+	end
+
+	local remaining = {}
+	if typeof(inventory.ById) == "table" then
+		for rawInstanceId in pairs(inventory.ById) do
+			local instanceId = tostring(rawInstanceId or "")
+			if instanceId ~= "" and seen[instanceId] ~= true then
+				seen[instanceId] = true
+				table.insert(remaining, instanceId)
+			end
+		end
+	end
+
+	table.sort(remaining, compareInstanceIds)
+	for _, instanceId in ipairs(remaining) do
+		table.insert(ids, instanceId)
+	end
+
+	return ids
+end
+
+local function addDesiredTool(tools, player, instanceId, itemName, instanceData, source)
+	instanceId = tostring(instanceId or "")
 	itemName = resolveCrewItemName(itemName)
-	if itemName == "" or not isKnownCrewItem(itemName) then
+	if instanceId == "" or itemName == "" or not isKnownCrewItem(itemName) then
+		warnInvalidCrewToolIdentity(source or "desired_tool", player, itemName)
 		return
 	end
 
-	counts[itemName] = normalizeCount((counts[itemName] or 0) + amount)
+	table.insert(tools, {
+		InstanceId = instanceId,
+		ItemName = itemName,
+		InstanceData = if typeof(instanceData) == "table" then instanceData else nil,
+	})
 end
 
-local function readCanonicalCountsFromData(player, inventory)
+local function readCanonicalToolsFromData(player, inventory)
 	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
 		return nil, false
 	end
 
-	local counts = {}
+	local tools = {}
 	local hasCanonicalData = false
-	for _, instanceData in pairs(inventory.ById) do
+	for _, instanceId in ipairs(getOrderedInventoryInstanceIds(inventory)) do
+		local instanceData = inventory.ById[tostring(instanceId)]
 		if typeof(instanceData) == "table" then
 			local storageName = tostring(
 				instanceData.CrewMemberId
@@ -282,7 +339,7 @@ local function readCanonicalCountsFromData(player, inventory)
 			if canonicalStorageName ~= "" and isKnownCrewItem(canonicalStorageName) then
 				hasCanonicalData = true
 				if tostring(instanceData.AssignedStand or "") == "" then
-					addDesiredCount(counts, canonicalStorageName, 1)
+					addDesiredTool(tools, player, instanceId, canonicalStorageName, instanceData, "inventory_data")
 				end
 			elseif storageName ~= "" then
 				warnInvalidCrewToolIdentity("inventory_data", player, storageName)
@@ -290,10 +347,10 @@ local function readCanonicalCountsFromData(player, inventory)
 		end
 	end
 
-	return counts, hasCanonicalData
+	return tools, hasCanonicalData
 end
 
-local function readCanonicalCountsFromService(player)
+local function readCanonicalToolsFromService(player)
 	if player:GetAttribute("PlayerDataReady") ~= true then
 		return nil, false
 	end
@@ -305,10 +362,10 @@ local function readCanonicalCountsFromService(player)
 		return nil, false
 	end
 
-	return readCanonicalCountsFromData(player, inventory)
+	return readCanonicalToolsFromData(player, inventory)
 end
 
-local function readCanonicalCountsFromFolder(player)
+local function readCanonicalToolsFromFolder(player)
 	local root = player:FindFirstChild(CANONICAL_INVENTORY_NAME)
 	if not root or not root:IsA("Folder") then
 		return nil, false
@@ -319,10 +376,11 @@ local function readCanonicalCountsFromFolder(player)
 		return nil, false
 	end
 
-	local counts = {}
+	local tools = {}
 	local hasCanonicalData = false
 	for _, instanceFolder in ipairs(byId:GetChildren()) do
 		if instanceFolder:IsA("Folder") then
+			local instanceId = tostring(readValue(instanceFolder, "InstanceId") or instanceFolder.Name or "")
 			local storageName = tostring(
 				readValue(instanceFolder, "CrewMemberId")
 					or readValue(instanceFolder, "StorageName")
@@ -332,7 +390,15 @@ local function readCanonicalCountsFromFolder(player)
 			if canonicalStorageName ~= "" and isKnownCrewItem(canonicalStorageName) then
 				hasCanonicalData = true
 				if tostring(readValue(instanceFolder, "AssignedStand") or "") == "" then
-					addDesiredCount(counts, canonicalStorageName, 1)
+					addDesiredTool(tools, player, instanceId, canonicalStorageName, {
+						InstanceId = instanceId,
+						StorageName = canonicalStorageName,
+						CrewMemberId = canonicalStorageName,
+						Rarity = readValue(instanceFolder, "Rarity"),
+						Level = readValue(instanceFolder, "Level"),
+						CurrentXP = readValue(instanceFolder, "CurrentXP"),
+						TotalXP = readValue(instanceFolder, "TotalXP"),
+					}, "inventory_folder")
 				end
 			elseif storageName ~= "" then
 				warnInvalidCrewToolIdentity("inventory_folder", player, storageName)
@@ -340,24 +406,24 @@ local function readCanonicalCountsFromFolder(player)
 		end
 	end
 
-	return counts, hasCanonicalData
+	return tools, hasCanonicalData
 end
 
-local function getDesiredCrewCounts(player)
-	local counts, hasCanonicalData = readCanonicalCountsFromService(player)
+local function getDesiredCrewTools(player)
+	local tools, hasCanonicalData = readCanonicalToolsFromService(player)
 	if hasCanonicalData then
-		return counts
+		return tools
 	end
 
-	counts, hasCanonicalData = readCanonicalCountsFromFolder(player)
+	tools, hasCanonicalData = readCanonicalToolsFromFolder(player)
 	if hasCanonicalData then
-		return counts
+		return tools
 	end
 
 	return {}
 end
 
-local function collectCrewTools(player, container, toolsByName)
+local function collectCrewTools(player, container, tools)
 	if not container then
 		return
 	end
@@ -368,55 +434,98 @@ local function collectCrewTools(player, container, toolsByName)
 			if itemName ~= "" then
 				local canonicalItemName = resolveCrewItemName(itemName)
 				if canonicalItemName ~= "" then
-					itemName = applyToolMetadata(child, canonicalItemName) or canonicalItemName
-					toolsByName[itemName] = toolsByName[itemName] or {}
-					table.insert(toolsByName[itemName], child)
+					applyToolMetadata(child, canonicalItemName, nil, nil, getToolInstanceId(child))
+					table.insert(tools, child)
 				else
 					warnInvalidCrewToolIdentity("existing_tool", player, itemName)
-					toolsByName[itemName] = toolsByName[itemName] or {}
-					table.insert(toolsByName[itemName], child)
+					table.insert(tools, child)
 				end
 			end
 		end
 	end
 end
 
-local function syncDesiredTools(player, desiredCounts)
+local function syncDesiredTools(player, desiredTools)
 	local backpack = player:FindFirstChildOfClass("Backpack")
 	if not backpack then
 		return
 	end
 
-	local toolsByName = {}
-	collectCrewTools(player, backpack, toolsByName)
-	collectCrewTools(player, player.Character, toolsByName)
+	local existingTools = {}
+	collectCrewTools(player, backpack, existingTools)
+	collectCrewTools(player, player.Character, existingTools)
 
-	for itemName, tools in pairs(toolsByName) do
-		local desiredCount = normalizeCount(desiredCounts[itemName] or 0)
-		for index = #tools, desiredCount + 1, -1 do
-			local tool = tools[index]
-			if tool and tool.Parent then
-				tool:Destroy()
-			end
-			tools[index] = nil
+	local desiredById = {}
+	for _, desired in ipairs(desiredTools or {}) do
+		desiredById[tostring(desired.InstanceId or "")] = desired
+	end
+
+	local toolsByInstanceId = {}
+	local toolsByName = {}
+	for _, tool in ipairs(existingTools) do
+		local itemName = resolveCrewItemName(getToolItemName(tool))
+		local instanceId = getToolInstanceId(tool)
+		if instanceId ~= "" then
+			toolsByInstanceId[instanceId] = toolsByInstanceId[instanceId] or {}
+			table.insert(toolsByInstanceId[instanceId], tool)
+		end
+		if itemName ~= "" then
+			toolsByName[itemName] = toolsByName[itemName] or {}
+			table.insert(toolsByName[itemName], tool)
 		end
 	end
 
-	for itemName, desiredCount in pairs(desiredCounts) do
-		desiredCount = normalizeCount(desiredCount)
-		local tools = toolsByName[itemName] or {}
-		for _ = #tools + 1, desiredCount do
-			local tool = makeTool(itemName)
+	local usedTools = {}
+
+	local function useTool(tool, desired)
+		usedTools[tool] = true
+		applyToolMetadata(tool, desired.ItemName, nil, nil, desired.InstanceId, desired.InstanceData)
+	end
+
+	for _, desired in ipairs(desiredTools or {}) do
+		local desiredInstanceId = tostring(desired.InstanceId or "")
+		local selectedTool = nil
+		for _, candidate in ipairs(toolsByInstanceId[desiredInstanceId] or {}) do
+			if not usedTools[candidate] then
+				selectedTool = candidate
+				break
+			end
+		end
+
+		if not selectedTool then
+			for _, candidate in ipairs(toolsByName[desired.ItemName] or {}) do
+				local candidateInstanceId = getToolInstanceId(candidate)
+				if
+					not usedTools[candidate]
+					and (candidateInstanceId == "" or desiredById[candidateInstanceId] == nil)
+				then
+					selectedTool = candidate
+					break
+				end
+			end
+		end
+
+		if selectedTool then
+			useTool(selectedTool, desired)
+		else
+			local tool = makeTool(desired.ItemName, desired.InstanceId, desired.InstanceData)
 			if tool then
 				tool.Parent = backpack
+				usedTools[tool] = true
 			end
+		end
+	end
+
+	for _, tool in ipairs(existingTools) do
+		if not usedTools[tool] and tool.Parent then
+			tool:Destroy()
 		end
 	end
 end
 
 local function syncCrewTools(player)
-	local desiredCounts = getDesiredCrewCounts(player)
-	syncDesiredTools(player, desiredCounts)
+	local desiredTools = getDesiredCrewTools(player)
+	syncDesiredTools(player, desiredTools)
 end
 
 local function scheduleSync(player)

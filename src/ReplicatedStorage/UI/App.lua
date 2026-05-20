@@ -150,28 +150,136 @@ local function buildResourcePreviewModel(resourceKey)
 	model.Name = "ResourcePreview"
 
 	if resourceKey == "Apple" then
-		createPreviewPart(model, Vector3.new(0.9, 0.9, 0.9), Color3.fromRGB(214, 67, 52), CFrame.new(0, 0, 0), Enum.PartType.Ball)
-		createPreviewPart(model, Vector3.new(0.12, 0.35, 0.12), Color3.fromRGB(86, 53, 31), CFrame.new(0, 0.5, 0), Enum.PartType.Cylinder, Enum.Material.Wood)
-		createPreviewPart(model, Vector3.new(0.35, 0.12, 0.2), Color3.fromRGB(80, 170, 72), CFrame.new(0.18, 0.42, 0), Enum.PartType.Block, Enum.Material.Grass)
+		createPreviewPart(
+			model,
+			Vector3.new(0.9, 0.9, 0.9),
+			Color3.fromRGB(214, 67, 52),
+			CFrame.new(0, 0, 0),
+			Enum.PartType.Ball
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.12, 0.35, 0.12),
+			Color3.fromRGB(86, 53, 31),
+			CFrame.new(0, 0.5, 0),
+			Enum.PartType.Cylinder,
+			Enum.Material.Wood
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.35, 0.12, 0.2),
+			Color3.fromRGB(80, 170, 72),
+			CFrame.new(0.18, 0.42, 0),
+			Enum.PartType.Block,
+			Enum.Material.Grass
+		)
 	elseif resourceKey == "Rice" then
-		createPreviewPart(model, Vector3.new(1.0, 0.35, 1.0), Color3.fromRGB(171, 106, 57), CFrame.new(0, -0.18, 0), Enum.PartType.Cylinder, Enum.Material.Wood)
-		createPreviewPart(model, Vector3.new(0.82, 0.28, 0.82), Color3.fromRGB(242, 240, 223), CFrame.new(0, 0.08, 0), Enum.PartType.Cylinder, Enum.Material.Sand)
+		createPreviewPart(
+			model,
+			Vector3.new(1.0, 0.35, 1.0),
+			Color3.fromRGB(171, 106, 57),
+			CFrame.new(0, -0.18, 0),
+			Enum.PartType.Cylinder,
+			Enum.Material.Wood
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.82, 0.28, 0.82),
+			Color3.fromRGB(242, 240, 223),
+			CFrame.new(0, 0.08, 0),
+			Enum.PartType.Cylinder,
+			Enum.Material.Sand
+		)
 	elseif resourceKey == "Meat" then
-		createPreviewPart(model, Vector3.new(1.0, 0.7, 0.7), Color3.fromRGB(160, 64, 56), CFrame.new(0, 0, 0), Enum.PartType.Block)
-		createPreviewPart(model, Vector3.new(0.22, 0.22, 0.9), Color3.fromRGB(231, 220, 208), CFrame.new(-0.6, 0, 0), Enum.PartType.Cylinder)
+		createPreviewPart(
+			model,
+			Vector3.new(1.0, 0.7, 0.7),
+			Color3.fromRGB(160, 64, 56),
+			CFrame.new(0, 0, 0),
+			Enum.PartType.Block
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.22, 0.22, 0.9),
+			Color3.fromRGB(231, 220, 208),
+			CFrame.new(-0.6, 0, 0),
+			Enum.PartType.Cylinder
+		)
 	elseif resourceKey == "SeaBeastMeat" then
-		createPreviewPart(model, Vector3.new(1.05, 0.78, 0.74), Color3.fromRGB(105, 41, 56), CFrame.new(0, 0, 0), Enum.PartType.Block)
-		createPreviewPart(model, Vector3.new(0.18, 0.82, 0.7), Color3.fromRGB(76, 186, 199), CFrame.new(0.52, 0, 0), Enum.PartType.Block, Enum.Material.Neon)
+		createPreviewPart(
+			model,
+			Vector3.new(1.05, 0.78, 0.74),
+			Color3.fromRGB(105, 41, 56),
+			CFrame.new(0, 0, 0),
+			Enum.PartType.Block
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.18, 0.82, 0.7),
+			Color3.fromRGB(76, 186, 199),
+			CFrame.new(0.52, 0, 0),
+			Enum.PartType.Block,
+			Enum.Material.Neon
+		)
 	elseif resourceKey == "Iron" then
-		createPreviewPart(model, Vector3.new(0.95, 0.28, 0.55), Color3.fromRGB(180, 186, 196), CFrame.new(0, -0.08, 0), Enum.PartType.Block, Enum.Material.Metal)
-		createPreviewPart(model, Vector3.new(0.8, 0.2, 0.45), Color3.fromRGB(150, 157, 168), CFrame.new(0.08, 0.16, 0.02), Enum.PartType.Block, Enum.Material.Metal)
+		createPreviewPart(
+			model,
+			Vector3.new(0.95, 0.28, 0.55),
+			Color3.fromRGB(180, 186, 196),
+			CFrame.new(0, -0.08, 0),
+			Enum.PartType.Block,
+			Enum.Material.Metal
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.8, 0.2, 0.45),
+			Color3.fromRGB(150, 157, 168),
+			CFrame.new(0.08, 0.16, 0.02),
+			Enum.PartType.Block,
+			Enum.Material.Metal
+		)
 	elseif resourceKey == "AncientTimber" then
-		createPreviewPart(model, Vector3.new(1.0, 0.24, 0.32), Color3.fromRGB(112, 83, 55), CFrame.new(0, -0.12, 0), Enum.PartType.Block, Enum.Material.WoodPlanks)
-		createPreviewPart(model, Vector3.new(0.92, 0.24, 0.32), Color3.fromRGB(128, 97, 65), CFrame.new(0.08, 0.14, 0.08), Enum.PartType.Block, Enum.Material.WoodPlanks)
-		createPreviewPart(model, Vector3.new(0.16, 0.34, 0.16), Color3.fromRGB(110, 186, 136), CFrame.new(-0.3, 0.2, 0), Enum.PartType.Cylinder, Enum.Material.Neon)
+		createPreviewPart(
+			model,
+			Vector3.new(1.0, 0.24, 0.32),
+			Color3.fromRGB(112, 83, 55),
+			CFrame.new(0, -0.12, 0),
+			Enum.PartType.Block,
+			Enum.Material.WoodPlanks
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.92, 0.24, 0.32),
+			Color3.fromRGB(128, 97, 65),
+			CFrame.new(0.08, 0.14, 0.08),
+			Enum.PartType.Block,
+			Enum.Material.WoodPlanks
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.16, 0.34, 0.16),
+			Color3.fromRGB(110, 186, 136),
+			CFrame.new(-0.3, 0.2, 0),
+			Enum.PartType.Cylinder,
+			Enum.Material.Neon
+		)
 	else
-		createPreviewPart(model, Vector3.new(1.0, 0.25, 0.26), Color3.fromRGB(147, 103, 67), CFrame.new(0, -0.12, 0), Enum.PartType.Block, Enum.Material.WoodPlanks)
-		createPreviewPart(model, Vector3.new(0.92, 0.25, 0.26), Color3.fromRGB(171, 121, 79), CFrame.new(0.06, 0.12, 0.06), Enum.PartType.Block, Enum.Material.WoodPlanks)
+		createPreviewPart(
+			model,
+			Vector3.new(1.0, 0.25, 0.26),
+			Color3.fromRGB(147, 103, 67),
+			CFrame.new(0, -0.12, 0),
+			Enum.PartType.Block,
+			Enum.Material.WoodPlanks
+		)
+		createPreviewPart(
+			model,
+			Vector3.new(0.92, 0.25, 0.26),
+			Color3.fromRGB(171, 121, 79),
+			CFrame.new(0.06, 0.12, 0.06),
+			Enum.PartType.Block,
+			Enum.Material.WoodPlanks
+		)
 	end
 
 	return model
@@ -181,9 +289,30 @@ local function buildInventoryIconModel()
 	local model = Instance.new("Model")
 	model.Name = "InventoryIcon"
 
-	createPreviewPart(model, Vector3.new(0.95, 0.75, 0.46), Color3.fromRGB(204, 96, 42), CFrame.new(0, 0, 0), Enum.PartType.Block, Enum.Material.SmoothPlastic)
-	createPreviewPart(model, Vector3.new(0.65, 0.2, 0.12), Color3.fromRGB(85, 49, 31), CFrame.new(0, 0.44, 0), Enum.PartType.Block, Enum.Material.Wood)
-	createPreviewPart(model, Vector3.new(0.3, 0.28, 0.1), Color3.fromRGB(238, 203, 95), CFrame.new(0, -0.06, 0.24), Enum.PartType.Block, Enum.Material.Neon)
+	createPreviewPart(
+		model,
+		Vector3.new(0.95, 0.75, 0.46),
+		Color3.fromRGB(204, 96, 42),
+		CFrame.new(0, 0, 0),
+		Enum.PartType.Block,
+		Enum.Material.SmoothPlastic
+	)
+	createPreviewPart(
+		model,
+		Vector3.new(0.65, 0.2, 0.12),
+		Color3.fromRGB(85, 49, 31),
+		CFrame.new(0, 0.44, 0),
+		Enum.PartType.Block,
+		Enum.Material.Wood
+	)
+	createPreviewPart(
+		model,
+		Vector3.new(0.3, 0.28, 0.1),
+		Color3.fromRGB(238, 203, 95),
+		CFrame.new(0, -0.06, 0.24),
+		Enum.PartType.Block,
+		Enum.Material.Neon
+	)
 
 	return model
 end
@@ -219,7 +348,8 @@ local function sanitizeCrewPreviewClone(previewModel)
 			setPreviewPartDefaults(descendant)
 		elseif descendant:IsA("BaseScript") or descendant:IsA("ModuleScript") or descendant:IsA("Sound") then
 			descendant:Destroy()
-		elseif descendant:IsA("ParticleEmitter")
+		elseif
+			descendant:IsA("ParticleEmitter")
 			or descendant:IsA("Trail")
 			or descendant:IsA("Beam")
 			or descendant:IsA("PointLight")
@@ -338,10 +468,8 @@ local function PreviewViewport(props)
 		local camera = Instance.new("Camera")
 		camera.Name = "PreviewCamera"
 		camera.FieldOfView = props.fieldOfView or 36
-		camera.CFrame = CFrame.lookAt(
-			boxCF.Position + Vector3.new(maxSize * 0.92, maxSize * 0.38, maxSize * 1.7),
-			boxCF.Position
-		)
+		camera.CFrame =
+			CFrame.lookAt(boxCF.Position + Vector3.new(maxSize * 0.92, maxSize * 0.38, maxSize * 1.7), boxCF.Position)
 		camera.Parent = viewport
 		viewport.CurrentCamera = camera
 
@@ -785,11 +913,8 @@ local function AnimatedInventoryModal(props)
 		panel.Position = props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION
 		scale.Scale = 0
 
-		local tweenInfo = TweenInfo.new(
-			props.openTime or INVENTORY_MODAL_OPEN_TIME,
-			Enum.EasingStyle.Quad,
-			Enum.EasingDirection.Out
-		)
+		local tweenInfo =
+			TweenInfo.new(props.openTime or INVENTORY_MODAL_OPEN_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
 		local backdropTween = TweenService:Create(backdrop, tweenInfo, {
 			BackgroundTransparency = props.backdropTransparency or INVENTORY_MODAL_BACKDROP_TRANSPARENCY,
@@ -826,11 +951,8 @@ local function AnimatedInventoryModal(props)
 		cancelActiveTweens()
 		animationStateRef.current = "closing"
 
-		local tweenInfo = TweenInfo.new(
-			props.closeTime or INVENTORY_MODAL_CLOSE_TIME,
-			Enum.EasingStyle.Quad,
-			Enum.EasingDirection.In
-		)
+		local tweenInfo =
+			TweenInfo.new(props.closeTime or INVENTORY_MODAL_CLOSE_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
 		local backdropTween = TweenService:Create(backdrop, tweenInfo, {
 			BackgroundTransparency = 1,
@@ -934,7 +1056,9 @@ local function AnimatedInventoryModal(props)
 		Backdrop = e("Frame", {
 			ref = backdropRef,
 			BackgroundColor3 = PALETTE.Ink,
-			BackgroundTransparency = props.isOpen and (props.backdropTransparency or INVENTORY_MODAL_BACKDROP_TRANSPARENCY) or 1,
+			BackgroundTransparency = props.isOpen
+					and (props.backdropTransparency or INVENTORY_MODAL_BACKDROP_TRANSPARENCY)
+				or 1,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
 			ZIndex = 4,
@@ -943,7 +1067,8 @@ local function AnimatedInventoryModal(props)
 			ref = panelRef,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
-			Position = props.isOpen and (props.openPosition or INVENTORY_MODAL_OPEN_POSITION) or (props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION),
+			Position = props.isOpen and (props.openPosition or INVENTORY_MODAL_OPEN_POSITION)
+				or (props.closedPosition or INVENTORY_MODAL_CLOSED_POSITION),
 			Size = props.panelSize or UDim2.fromScale(0.82, 0.76),
 			ZIndex = 5,
 		}, renderedPanelChildren),
@@ -1064,28 +1189,6 @@ local function hotbarSlot(props)
 			}),
 		}) or nil,
 		Preview = previewChild,
-		Price = lockedSlot and e("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
-			BackgroundTransparency = hovered and 0.08 or 0.16,
-			Position = UDim2.new(0.5, 0, 1, -6),
-			Font = Enum.Font.GothamBold,
-			Text = item.priceRobux and item.priceRobux > 0 and (tostring(item.priceRobux) .. " R$") or "LOCK",
-			TextColor3 = PALETTE.Cream,
-			TextSize = compactSlot and 7 or 10,
-			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 999),
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 2),
-				PaddingBottom = UDim.new(0, 2),
-				PaddingLeft = UDim.new(0, 6),
-				PaddingRight = UDim.new(0, 6),
-			}),
-		}) or nil,
 		Count = item and not lockedSlot and (item.quantity or 0) > 1 and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			AutomaticSize = Enum.AutomaticSize.XY,
@@ -1154,104 +1257,108 @@ local function inventoryToggleButton(props)
 		})
 	end
 
-	return e("TextButton", mergeProps({
-		AnchorPoint = layout.anchorPoint or Vector2.new(0, 0),
-		AutoButtonColor = false,
-		BackgroundColor3 = PALETTE.InkSoft,
-		BackgroundTransparency = compact and 0.6 or 0.5,
-		BorderSizePixel = 0,
-		Position = position,
-		ref = hoverRef,
-		Size = size,
-		Text = "",
-		ZIndex = zIndexBase + 1,
-		[React.Event.Activated] = props.onToggle,
-	}, handlers), {
-		Scale = e("UIScale", {
-			Scale = (hovered and 1.018 or 1) - (pressed and 0.016 or 0),
-		}),
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, compact and 6 or 16),
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(21, 31, 49)),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 24)),
-			}),
-		}),
-		Stroke = e("UIStroke", {
-			Color = Color3.fromRGB(72, 98, 146),
-			Transparency = hovered and 0.08 or (compact and 0.22 or 0.18),
-			Thickness = compact and (hovered and 2 or 1.8) or (hovered and 1.7 or 1.4),
-		}),
-		Shadow = e("UIStroke", {
-			Color = PALETTE.Sea,
-			Transparency = hovered and (compact and 0.82 or 0.84) or (compact and 0.94 or 0.95),
-			Thickness = compact and 3 or 2,
-		}),
-		Inset = e("Frame", {
-			BackgroundColor3 = Color3.fromRGB(7, 11, 20),
-			BackgroundTransparency = compact and 0.66 or 0.74,
+	return e(
+		"TextButton",
+		mergeProps({
+			AnchorPoint = layout.anchorPoint or Vector2.new(0, 0),
+			AutoButtonColor = false,
+			BackgroundColor3 = PALETTE.InkSoft,
+			BackgroundTransparency = compact and 0.6 or 0.5,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(4, 4),
-			Size = UDim2.new(1, -8, 1, -8),
+			Position = position,
+			ref = hoverRef,
+			Size = size,
+			Text = "",
 			ZIndex = zIndexBase + 1,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, compact and 5 or 12),
+			[React.Event.Activated] = props.onToggle,
+		}, handlers),
+		{
+			Scale = e("UIScale", {
+				Scale = (hovered and 1.018 or 1) - (pressed and 0.016 or 0),
 			}),
-		}),
-		Icon = iconChild,
-		KeyHint = compact and e("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundColor3 = Color3.fromRGB(11, 18, 32),
-			BackgroundTransparency = 0.14,
-			BorderSizePixel = 0,
-			Font = Enum.Font.GothamBlack,
-			Position = UDim2.new(0.5, 0, 0, 2),
-			Size = UDim2.fromOffset(18, 16),
-			Text = "F",
-			TextColor3 = Color3.fromRGB(233, 242, 255),
-			TextSize = 10,
-			TextStrokeTransparency = 0.7,
-			ZIndex = zIndexBase + 4,
-		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 5),
+				CornerRadius = UDim.new(0, compact and 6 or 16),
+			}),
+			Gradient = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(21, 31, 49)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 24)),
+				}),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(91, 117, 166),
-				Transparency = 0.3,
-				Thickness = 1,
+				Color = Color3.fromRGB(72, 98, 146),
+				Transparency = hovered and 0.08 or (compact and 0.22 or 0.18),
+				Thickness = compact and (hovered and 2 or 1.8) or (hovered and 1.7 or 1.4),
 			}),
-		}) or nil,
-		Title = e("TextLabel", {
-			AnchorPoint = compact and Vector2.new(0.5, 1) or Vector2.new(0.5, 0),
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBlack,
-			Position = compact and UDim2.new(0.5, 0, 1, -1) or UDim2.new(0.5, 0, 0, 10),
-			Size = UDim2.new(1, -6, 0, compact and 15 or 16),
-			Text = "Inventory",
-			TextColor3 = PALETTE.Cream,
-			TextSize = compact and 11 or 13,
-			TextStrokeTransparency = compact and 0.5 or 0.65,
-			TextStrokeColor3 = Color3.fromRGB(8, 12, 20),
-			TextWrapped = true,
-			ZIndex = zIndexBase + 3,
-		}),
-		Body = not compact and e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.Gotham,
-			Position = UDim2.fromOffset(14, 28),
-			Size = UDim2.new(1, -28, 0, 12),
-			Text = "Press F or `",
-			TextColor3 = PALETTE.Steel,
-			TextSize = 10,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = zIndexBase + 3,
-		}) or nil,
-	})
+			Shadow = e("UIStroke", {
+				Color = PALETTE.Sea,
+				Transparency = hovered and (compact and 0.82 or 0.84) or (compact and 0.94 or 0.95),
+				Thickness = compact and 3 or 2,
+			}),
+			Inset = e("Frame", {
+				BackgroundColor3 = Color3.fromRGB(7, 11, 20),
+				BackgroundTransparency = compact and 0.66 or 0.74,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(4, 4),
+				Size = UDim2.new(1, -8, 1, -8),
+				ZIndex = zIndexBase + 1,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, compact and 5 or 12),
+				}),
+			}),
+			Icon = iconChild,
+			KeyHint = compact and e("TextLabel", {
+				AnchorPoint = Vector2.new(0.5, 0),
+				BackgroundColor3 = Color3.fromRGB(11, 18, 32),
+				BackgroundTransparency = 0.14,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBlack,
+				Position = UDim2.new(0.5, 0, 0, 2),
+				Size = UDim2.fromOffset(18, 16),
+				Text = "F",
+				TextColor3 = Color3.fromRGB(233, 242, 255),
+				TextSize = 10,
+				TextStrokeTransparency = 0.7,
+				ZIndex = zIndexBase + 4,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 5),
+				}),
+				Stroke = e("UIStroke", {
+					Color = Color3.fromRGB(91, 117, 166),
+					Transparency = 0.3,
+					Thickness = 1,
+				}),
+			}) or nil,
+			Title = e("TextLabel", {
+				AnchorPoint = compact and Vector2.new(0.5, 1) or Vector2.new(0.5, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBlack,
+				Position = compact and UDim2.new(0.5, 0, 1, -1) or UDim2.new(0.5, 0, 0, 10),
+				Size = UDim2.new(1, -6, 0, compact and 15 or 16),
+				Text = "Inventory",
+				TextColor3 = PALETTE.Cream,
+				TextSize = compact and 11 or 13,
+				TextStrokeTransparency = compact and 0.5 or 0.65,
+				TextStrokeColor3 = Color3.fromRGB(8, 12, 20),
+				TextWrapped = true,
+				ZIndex = zIndexBase + 3,
+			}),
+			Body = not compact and e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Gotham,
+				Position = UDim2.fromOffset(14, 28),
+				Size = UDim2.new(1, -28, 0, 12),
+				Text = "Press F or `",
+				TextColor3 = PALETTE.Steel,
+				TextSize = 10,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = zIndexBase + 3,
+			}) or nil,
+		}
+	)
 end
 
 local function modeTab(props)
@@ -1400,7 +1507,8 @@ local function categoryMenuTab(props)
 			Position = UDim2.fromOffset(14, -1),
 			Size = UDim2.new(1, -52, 1, 0),
 			Text = props.label or "",
-			TextColor3 = active and INVENTORY_UI.GoldHighlight or (hovered and INVENTORY_UI.GoldBase or INVENTORY_UI.TextMain),
+			TextColor3 = active and INVENTORY_UI.GoldHighlight
+				or (hovered and INVENTORY_UI.GoldBase or INVENTORY_UI.TextMain),
 			TextSize = 16,
 			TextStrokeTransparency = 0.75,
 			TextXAlignment = Enum.TextXAlignment.Left,
@@ -1696,7 +1804,9 @@ local function manifestTile(props)
 			Position = UDim2.fromOffset(10, 101),
 			Size = UDim2.new(1, -20, 0, 20),
 			Text = item.displayName or "",
-			TextColor3 = (isEquipped and PALETTE.Text) or (isLockedSlot and Color3.fromRGB(224, 229, 238)) or PALETTE.Cream,
+			TextColor3 = (isEquipped and PALETTE.Text)
+				or (isLockedSlot and Color3.fromRGB(224, 229, 238))
+				or PALETTE.Cream,
 			TextSize = 12,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextWrapped = false,
@@ -1787,12 +1897,18 @@ local function chestOpenQuantityPrompt(props)
 			if not draggingRef.current then
 				return
 			end
-			if changedInput.UserInputType == Enum.UserInputType.MouseMovement or changedInput.UserInputType == Enum.UserInputType.Touch then
+			if
+				changedInput.UserInputType == Enum.UserInputType.MouseMovement
+				or changedInput.UserInputType == Enum.UserInputType.Touch
+			then
 				setAmountFromScreenX(changedInput.Position.X)
 			end
 		end)
 		endedConnectionRef.current = UserInputService.InputEnded:Connect(function(endedInput)
-			if endedInput.UserInputType == Enum.UserInputType.MouseButton1 or endedInput.UserInputType == Enum.UserInputType.Touch then
+			if
+				endedInput.UserInputType == Enum.UserInputType.MouseButton1
+				or endedInput.UserInputType == Enum.UserInputType.Touch
+			then
 				endDrag()
 			end
 		end)
@@ -2338,7 +2454,11 @@ local function captainsLogRow(props)
 			Font = Enum.Font.Gotham,
 			Position = UDim2.fromOffset(104, 38),
 			Size = UDim2.new(1, -360, 0, 18),
-			Text = string.format("%s  |  %s", tostring(entry.subtitle or "Crewmate"), tostring(entry.standName or "Stand")),
+			Text = string.format(
+				"%s  |  %s",
+				tostring(entry.subtitle or "Crewmate"),
+				tostring(entry.standName or "Stand")
+			),
 			TextColor3 = Color3.fromRGB(181, 191, 210),
 			TextSize = 12,
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -2805,8 +2925,7 @@ local function App(props)
 	local hotbarSlotCount = math.max(1, #(props.hotbarSlots or {}))
 	local hotbarSlotWidth = mobileLayout and 52 or 64
 	local hotbarSlotGap = mobileLayout and 7 or 10
-	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth
-		+ math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
+	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth + math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
 	local toggleSlotX = math.max(0, (toggleSlotIndex - 1) * (hotbarSlotWidth + hotbarSlotGap))
 	local resolvedTogglePosition = dockToggleLeft and UDim2.fromOffset(0, mobileLayout and 4 or 20)
@@ -2873,44 +2992,48 @@ local function App(props)
 					TextXAlignment = Enum.TextXAlignment.Left,
 					ZIndex = bottomBarZIndex + 1,
 				}) or nil,
-				Scroller = e("ScrollingFrame", {
-					AutomaticCanvasSize = Enum.AutomaticSize.X,
-					BackgroundTransparency = 1,
-					BorderSizePixel = 0,
-					CanvasSize = UDim2.new(),
-					ClipsDescendants = false,
-					Position = UDim2.fromOffset(0, mobileLayout and 4 or 18),
-					ScrollBarImageTransparency = 1,
-					ScrollBarThickness = 0,
-					ScrollingDirection = Enum.ScrollingDirection.X,
-					Size = UDim2.new(1, 0, 0, mobileLayout and 58 or 78),
-					ZIndex = bottomBarZIndex + 1,
-				}, (function()
-					local slotChildren = {
-						List = e("UIListLayout", {
-							FillDirection = Enum.FillDirection.Horizontal,
-							Padding = UDim.new(0, hotbarSlotGap),
-							SortOrder = Enum.SortOrder.LayoutOrder,
-							VerticalAlignment = Enum.VerticalAlignment.Center,
-						}),
-						Padding = e("UIPadding", {
-							PaddingBottom = UDim.new(0, 7),
-							PaddingTop = UDim.new(0, 7),
-						}),
-					}
+				Scroller = e(
+					"ScrollingFrame",
+					{
+						AutomaticCanvasSize = Enum.AutomaticSize.X,
+						BackgroundTransparency = 1,
+						BorderSizePixel = 0,
+						CanvasSize = UDim2.new(),
+						ClipsDescendants = false,
+						Position = UDim2.fromOffset(0, mobileLayout and 4 or 18),
+						ScrollBarImageTransparency = 1,
+						ScrollBarThickness = 0,
+						ScrollingDirection = Enum.ScrollingDirection.X,
+						Size = UDim2.new(1, 0, 0, mobileLayout and 58 or 78),
+						ZIndex = bottomBarZIndex + 1,
+					},
+					(function()
+						local slotChildren = {
+							List = e("UIListLayout", {
+								FillDirection = Enum.FillDirection.Horizontal,
+								Padding = UDim.new(0, hotbarSlotGap),
+								SortOrder = Enum.SortOrder.LayoutOrder,
+								VerticalAlignment = Enum.VerticalAlignment.Center,
+							}),
+							Padding = e("UIPadding", {
+								PaddingBottom = UDim.new(0, 7),
+								PaddingTop = UDim.new(0, 7),
+							}),
+						}
 
-					for index, slot in ipairs(props.hotbarSlots or {}) do
-						slotChildren["Slot" .. tostring(index)] = e(hotbarSlot, {
-							slot = slot,
-							layoutOrder = index,
-							slotSize = hotbarSlotWidth,
-							zIndexBase = bottomBarZIndex,
-							onActivated = props.onActivateItem,
-						})
-					end
+						for index, slot in ipairs(props.hotbarSlots or {}) do
+							slotChildren["Slot" .. tostring(index)] = e(hotbarSlot, {
+								slot = slot,
+								layoutOrder = index,
+								slotSize = hotbarSlotWidth,
+								zIndexBase = bottomBarZIndex,
+								onActivated = props.onActivateItem,
+							})
+						end
 
-					return slotChildren
-				end)()),
+						return slotChildren
+					end)()
+				),
 			}),
 		}),
 	}
@@ -2970,7 +3093,12 @@ local function App(props)
 
 		local modeTabs = {
 			{ key = "Inventory", label = "Inventory", fillColor3 = PALETTE.Sea, size = UDim2.fromOffset(124, 38) },
-			{ key = "CaptainLog", label = "Captain's Log", fillColor3 = PALETTE.Orange, size = UDim2.fromOffset(152, 38) },
+			{
+				key = "CaptainLog",
+				label = "Captain's Log",
+				fillColor3 = PALETTE.Orange,
+				size = UDim2.fromOffset(152, 38),
+			},
 			{ key = "Titles", label = "Titles", fillColor3 = PALETTE.Gold, size = UDim2.fromOffset(112, 38) },
 		}
 
@@ -3030,9 +3158,21 @@ local function App(props)
 		else
 			ledgerEntries = {
 				{ label = "Total Bounty", value = formatNumber(summary.bounty or 0), valueColor3 = PALETTE.Gold },
-				{ label = "Ship Crew Bounty", value = formatNumber(summary.crewBounty or 0), valueColor3 = PALETTE.Orange },
-				{ label = "Extraction Bounty", value = formatNumber(summary.extractionBounty or 0), valueColor3 = PALETTE.Green },
-				{ label = "Beli", value = formatNumber(summary.beli or summary.doubloons or 0) .. " Beli", valueColor3 = PALETTE.Gold },
+				{
+					label = "Ship Crew Bounty",
+					value = formatNumber(summary.crewBounty or 0),
+					valueColor3 = PALETTE.Orange,
+				},
+				{
+					label = "Extraction Bounty",
+					value = formatNumber(summary.extractionBounty or 0),
+					valueColor3 = PALETTE.Green,
+				},
+				{
+					label = "Beli",
+					value = formatNumber(summary.beli or summary.doubloons or 0) .. " Beli",
+					valueColor3 = PALETTE.Gold,
+				},
 				{
 					label = "Quick Equip Slots",
 					value = string.format("%d / %d", crewQuickSlotsUnlocked, crewQuickSlotsMax),
@@ -3041,7 +3181,11 @@ local function App(props)
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
 				{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
-				{ label = "Mythic Keys", value = formatNumber(summary.mythicKeys or 0), valueColor3 = Color3.fromRGB(255, 101, 134) },
+				{
+					label = "Mythic Keys",
+					value = formatNumber(summary.mythicKeys or 0),
+					valueColor3 = Color3.fromRGB(255, 101, 134),
+				},
 			}
 		end
 
@@ -3245,8 +3389,7 @@ local function App(props)
 						Font = Enum.Font.Gotham,
 						Position = UDim2.fromOffset(16, 44),
 						Size = UDim2.new(1, -32, 0, 30),
-						Text = showingTitles
-								and "Honor marks tied to your long-term feats and current bounty rank."
+						Text = showingTitles and "Honor marks tied to your long-term feats and current bounty rank."
 							or "Current haul and ship stores at a glance.",
 						TextColor3 = INVENTORY_UI.TextMuted,
 						TextSize = 12,
@@ -3328,20 +3471,20 @@ local function App(props)
 						Font = Enum.Font.Gotham,
 						Position = UDim2.fromOffset(18, 56),
 						Size = UDim2.new(1, -320, 0, 18),
-						Text = showingCaptainLog
-							and string.format(
-								"%d of %d placed crewmates visible in the log",
-								(props.captainLog and props.captainLog.filteredCount) or 0,
-								(props.captainLog and props.captainLog.totalCount) or 0
-							)
-							or (showingTitles
-								and string.format(
-									"%d of %d titles visible, %d unlocked",
-									(props.titles and props.titles.filteredCount) or 0,
-									(props.titles and props.titles.totalCount) or 0,
-									(props.titles and props.titles.unlockedCount) or 0
-								)
-								or string.format("%d shown of %d items ready to manage", props.filteredCount or 0, props.totalCount or 0)),
+						Text = showingCaptainLog and string.format(
+							"%d of %d placed crewmates visible in the log",
+							(props.captainLog and props.captainLog.filteredCount) or 0,
+							(props.captainLog and props.captainLog.totalCount) or 0
+						) or (showingTitles and string.format(
+							"%d of %d titles visible, %d unlocked",
+							(props.titles and props.titles.filteredCount) or 0,
+							(props.titles and props.titles.totalCount) or 0,
+							(props.titles and props.titles.unlockedCount) or 0
+						) or string.format(
+							"%d shown of %d items ready to manage",
+							props.filteredCount or 0,
+							props.totalCount or 0
+						)),
 						TextColor3 = INVENTORY_UI.TextMuted,
 						TextSize = 12,
 						TextXAlignment = Enum.TextXAlignment.Left,
@@ -3526,7 +3669,10 @@ local function App(props)
 								Font = Enum.Font.Cartoon,
 								Position = UDim2.new(1, -16, 22 / 58, 0),
 								Size = UDim2.fromOffset(180, 26),
-								Text = tostring((props.titles and props.titles.bountyRankLabel) or formatLeaderboardRank(props.titles and props.titles.bountyRank)),
+								Text = tostring(
+									(props.titles and props.titles.bountyRankLabel)
+										or formatLeaderboardRank(props.titles and props.titles.bountyRank)
+								),
 								TextColor3 = activeAccent,
 								TextSize = 28,
 								TextStrokeTransparency = 0.56,
@@ -3567,30 +3713,34 @@ local function App(props)
 							Size = UDim2.new(1, -28, 1, -96),
 							ZIndex = 8,
 						}, titleChildren) or nil,
-					Empty = (showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0
-								or (showingTitles and #((props.titles and props.titles.entries) or {}) == 0)
-								or (showingInventory and #(props.items or {}) == 0)) and e("TextLabel", {
-							AnchorPoint = Vector2.new(0.5, 0.5),
-							BackgroundTransparency = 1,
-							Font = Enum.Font.Cartoon,
-							Position = UDim2.fromScale(0.5, 0.52),
-							Size = UDim2.fromOffset(360, 26),
-							Text = showingCaptainLog
-									and (((props.captainLog and props.captainLog.totalCount) or 0) > 0
-										and "No placed crewmates match that search."
-										or "No crewmates are placed on your ship yet.")
-								or (showingTitles
-									and (((props.titles and props.titles.totalCount) or 0) > 0
-										and "No titles match that search."
-										or "No titles are registered yet.")
-									or ((props.totalCount or 0) > 0
-										and "No inventory items match that search."
-										or "Nothing in this hold yet.")),
-							TextColor3 = INVENTORY_UI.TextMuted,
-							TextSize = 24,
-							TextStrokeTransparency = 0.6,
-							ZIndex = 8,
-						}) or nil,
+						Empty = (
+							showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0
+							or (showingTitles and #((props.titles and props.titles.entries) or {}) == 0)
+							or (showingInventory and #(props.items or {}) == 0)
+						)
+								and e("TextLabel", {
+									AnchorPoint = Vector2.new(0.5, 0.5),
+									BackgroundTransparency = 1,
+									Font = Enum.Font.Cartoon,
+									Position = UDim2.fromScale(0.5, 0.52),
+									Size = UDim2.fromOffset(360, 26),
+									Text = showingCaptainLog
+											and (((props.captainLog and props.captainLog.totalCount) or 0) > 0 and "No placed crewmates match that search." or "No crewmates are placed on your ship yet.")
+										or (
+											showingTitles
+												and (((props.titles and props.titles.totalCount) or 0) > 0 and "No titles match that search." or "No titles are registered yet.")
+											or (
+												(props.totalCount or 0) > 0
+													and "No inventory items match that search."
+												or "Nothing in this hold yet."
+											)
+										),
+									TextColor3 = INVENTORY_UI.TextMuted,
+									TextSize = 24,
+									TextStrokeTransparency = 0.6,
+									ZIndex = 8,
+								})
+							or nil,
 					}),
 				}),
 				FooterStrip = e("Frame", {
@@ -3694,4 +3844,3 @@ local function App(props)
 end
 
 return App
-

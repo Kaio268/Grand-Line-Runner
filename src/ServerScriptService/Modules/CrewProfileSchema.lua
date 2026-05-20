@@ -1,4 +1,6 @@
 local CrewProfileSchema = {}
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 
 CrewProfileSchema.SchemaVersion = 1
 
@@ -70,11 +72,18 @@ end
 
 function CrewProfileSchema.NewCrewMemberQuickSlots(overrides)
 	overrides = if typeof(overrides) == "table" then overrides else {}
+	local maxSlots = math.max(
+		CrewQuickSlotConfig.DefaultUnlockedSlots,
+		floorNumber(overrides.MaxSlots, CrewQuickSlotConfig.MaxSlots)
+	)
+	maxSlots = math.min(maxSlots, CrewQuickSlotConfig.MaxSlots)
+	local unlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(overrides.UnlockedSlots)
+	unlockedSlots = math.min(unlockedSlots, maxSlots)
 
 	return {
 		SchemaVersion = CrewProfileSchema.SchemaVersion,
-		UnlockedSlots = math.max(0, floorNumber(overrides.UnlockedSlots, 0)),
-		MaxSlots = math.max(0, floorNumber(overrides.MaxSlots, 0)),
+		UnlockedSlots = unlockedSlots,
+		MaxSlots = maxSlots,
 	}
 end
 

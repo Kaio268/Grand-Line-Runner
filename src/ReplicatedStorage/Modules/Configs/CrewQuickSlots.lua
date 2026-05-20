@@ -1,10 +1,14 @@
--- Crew-facing alias to the quick-slot product config.
+-- Crew-facing quick-slot capacity config.
 local CrewQuickSlots = {}
 
-CrewQuickSlots.DefaultUnlockedSlots = 2
 CrewQuickSlots.MaxSlots = 8
-CrewQuickSlots.ProductId = 3584712420
-CrewQuickSlots.PriceRobux = 49
+CrewQuickSlots.DefaultUnlockedSlots = CrewQuickSlots.MaxSlots
+CrewQuickSlots.ProductId = 0
+CrewQuickSlots.PriceRobux = 0
+CrewQuickSlots.PaidUnlocksEnabled = false
+CrewQuickSlots.RetiredProductIds = {
+	[3584712420] = true,
+}
 
 function CrewQuickSlots.ClampUnlockedSlots(value)
 	return math.clamp(
@@ -15,6 +19,10 @@ function CrewQuickSlots.ClampUnlockedSlots(value)
 end
 
 function CrewQuickSlots.GetSlotProduct(slotIndex)
+	if CrewQuickSlots.PaidUnlocksEnabled ~= true then
+		return nil
+	end
+
 	slotIndex = tonumber(slotIndex)
 	if not slotIndex or slotIndex <= CrewQuickSlots.DefaultUnlockedSlots or slotIndex > CrewQuickSlots.MaxSlots then
 		return nil
@@ -32,6 +40,11 @@ function CrewQuickSlots.IsUnlockProduct(productId)
 	return configuredProductId ~= nil
 		and configuredProductId > 0
 		and tonumber(productId) == configuredProductId
+end
+
+function CrewQuickSlots.IsRetiredUnlockProduct(productId)
+	local retiredProductId = tonumber(productId)
+	return retiredProductId ~= nil and CrewQuickSlots.RetiredProductIds[retiredProductId] == true
 end
 
 function CrewQuickSlots.GetNextLockedSlot(unlockedSlots)

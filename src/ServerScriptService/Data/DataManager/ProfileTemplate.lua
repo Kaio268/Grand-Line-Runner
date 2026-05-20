@@ -174,7 +174,10 @@ local ProfileTemplate = {
 		x15WalkSpeed = 0,
 		x15WalkSpeedTime = 0,
 	},
-	Settings = {},
+	Settings = {
+		SelectedSpeed = 1,
+		SpeedAutoMax = true,
+	},
 	Packs = {},
 	CometMerchant = {},
 	PurchaseIdCache = {},

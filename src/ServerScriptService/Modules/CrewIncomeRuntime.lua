@@ -119,6 +119,7 @@ local standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction()
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CrewIncomeDebugTrace") == true
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
+local CREW_ITEM_KIND = "CrewMember"
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 local INCOME_SHADOW_BANK_THROTTLE_SECONDS = 3
 local INCOME_STATUS_DISPLAY_METADATA_CACHE_SECONDS = 15
@@ -299,6 +300,16 @@ end
 
 local function refreshCollectedIncomeShadow(player)
 	return refreshCrewMemberShadow(player, "income_collect")
+end
+
+local function logCrewSwitchFailure(player, standName, reason, detail)
+	warn(string.format(
+		"[CrewSwitch] player=%s stand=%s reason=%s%s",
+		player and player.Name or "unknown",
+		tostring(standName or ""),
+		tostring(reason or "unknown"),
+		if detail and detail ~= "" then " " .. tostring(detail) else ""
+	))
 end
 
 local function isActiveTutorialPlacementStep(player)
@@ -543,18 +554,76 @@ local function getStandCollectMultiplier(player, standName)
 end
 
  
-local function getEquippedToolName(player)
+local function getToolCrewMemberInstanceId(tool)
+	if not tool or not tool:IsA("Tool") then
+		return ""
+	end
+	return tostring(tool:GetAttribute("CrewMemberInstanceId") or tool:GetAttribute("CrewInstanceId") or "")
+end
+
+local function getAvailableInstanceIdForEquippedName(player, crewMemberName)
+	crewMemberName = tostring(crewMemberName or "")
+	if crewMemberName == "" then
+		return ""
+	end
+
+	local ok, crewInventory = pcall(function()
+		return CrewInstanceService.GetCrewInventory(player)
+	end)
+	if not ok or typeof(crewInventory) ~= "table" or typeof(crewInventory.ById) ~= "table" then
+		return ""
+	end
+
+	local matchedInstanceId = ""
+	local matchCount = 0
+	for instanceId, instanceData in pairs(crewInventory.ById) do
+		if
+			typeof(instanceData) == "table"
+			and tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == crewMemberName
+			and tostring(instanceData.AssignedStand or "") == ""
+		then
+			matchedInstanceId = tostring(instanceId)
+			matchCount += 1
+			if matchCount > 1 then
+				return ""
+			end
+		end
+	end
+
+	return if matchCount == 1 then matchedInstanceId else ""
+end
+
+local function getEquippedCrewMemberToolInfo(player)
 	local char = player.Character
 	if not char then
 		return nil
 	end
 	for _, c in ipairs(char:GetChildren()) do
 		if c:IsA("Tool") then
-			local canonical = c:GetAttribute("InvItem") or c:GetAttribute("InventoryItemName")
-			if typeof(canonical) == "string" and canonical ~= "" then
-				return canonical
+			local itemKind = c:GetAttribute("InventoryItemKind")
+			if typeof(itemKind) == "string" and itemKind ~= "" and itemKind ~= CREW_ITEM_KIND then
+				continue
 			end
-			return c.Name
+
+			local rawName = c:GetAttribute("InvItem") or c:GetAttribute("InventoryItemName") or c.Name
+			local canonicalName, info = CrewCatalog.ResolveCanonicalCrewMemberId(rawName)
+			if info then
+				local instanceId = getToolCrewMemberInstanceId(c)
+				if instanceId == "" then
+					instanceId = getAvailableInstanceIdForEquippedName(player, canonicalName)
+					if instanceId ~= "" then
+						c:SetAttribute("CrewMemberInstanceId", instanceId)
+						c:SetAttribute("CrewInstanceId", instanceId)
+					end
+				end
+
+				return {
+					Tool = c,
+					Name = canonicalName,
+					InstanceId = instanceId,
+					HasExactInstanceId = instanceId ~= "",
+				}
+			end
 		end
 	end
 	return nil
@@ -1381,9 +1450,11 @@ local function updateStandPromptTexts(player, standModel)
 	local standName = standModel.Name
 	local slotState = player and player:IsA("Player") and getStandSlotState(player, standName) or nil
 	local crewMemberName = ""
+	local equippedCrewMember = nil
 
 	if player and player:IsA("Player") then
 		crewMemberName = getPlayerStandCrewMemberName(player, standName)
+		equippedCrewMember = getEquippedCrewMemberToolInfo(player)
 	end
 
 	if slotState and slotState.Visible and not slotState.Usable then
@@ -1404,14 +1475,16 @@ local function updateStandPromptTexts(player, standModel)
 		else
 			prompt.ObjectText = displayName
 		end
-		prompt.ActionText = "Pick Up"
+		prompt.ActionText = if equippedCrewMember then "Switch" else "Pick Up"
 	else
 		if slotState and slotState.BonusInfo then
 			prompt.ObjectText = tostring(slotState.BonusInfo.Label or standName)
-			prompt.ActionText = string.format("Place Here (+%d%%)", slotState.BonusPercent)
+			prompt.ActionText = if equippedCrewMember
+				then string.format("Place Here (+%d%%)", slotState.BonusPercent)
+				else "Empty Slot"
 		else
 			prompt.ObjectText = tostring(standName)
-			prompt.ActionText = "Place Here"
+			prompt.ActionText = if equippedCrewMember then "Place Here" else "Empty Slot"
 		end
 	end
 end
@@ -1618,7 +1691,7 @@ local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
 			player and player.Name or "?",
 			standModel and standModel.Name or "?"
 		)
-		return
+		return nil, "no_template"
 	end
 
 	local clone = template:Clone()
@@ -1643,6 +1716,63 @@ local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
 		clone:GetFullName(),
 		tostring(resolved and resolved.Info and resolved.Info.Income or info and info.Income or "nil")
 	)
+	return clone, nil
+end
+
+local function findCrewMemberToolByInstanceId(player, instanceId)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" then
+		return nil
+	end
+
+	local function scan(container)
+		if not container then
+			return nil
+		end
+		for _, child in ipairs(container:GetChildren()) do
+			if child:IsA("Tool") and getToolCrewMemberInstanceId(child) == instanceId then
+				return child
+			end
+		end
+		return nil
+	end
+
+	return scan(player.Character) or scan(player:FindFirstChildOfClass("Backpack"))
+end
+
+local function equipCrewMemberToolByInstanceId(player, instanceId, storageName)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" then
+		return
+	end
+
+	task.spawn(function()
+		for attempt = 1, 12 do
+			if player.Parent ~= Players then
+				return
+			end
+
+			local character = player.Character
+			local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+			local tool = findCrewMemberToolByInstanceId(player, instanceId)
+			if humanoid and tool and tool:IsA("Tool") then
+				if tool.Parent ~= character then
+					humanoid:UnequipTools()
+					humanoid:EquipTool(tool)
+				end
+				return
+			end
+
+			task.wait(if attempt == 1 then 0.05 else 0.1)
+		end
+
+		logCrewSwitchFailure(
+			player,
+			"",
+			"outgoing_equip_failed",
+			string.format("instanceId=%s storage=%s", instanceId, tostring(storageName or ""))
+		)
+	end)
 end
 
 local function getMoneyLabel(standModel)
@@ -2181,6 +2311,9 @@ local function bindStandPrompt(player, plot, standModel)
 			local standName = standModel.Name
 
 			if plr.UserId ~= ownerUserId then
+				if getEquippedCrewMemberToolInfo(plr) then
+					logCrewSwitchFailure(plr, standName, "stand_not_owned", string.format("ownerUserId=%s", tostring(ownerUserId)))
+				end
 				local crewMemberToSteal = getPlayerStandCrewMemberName(player, standName)
 				if crewMemberToSteal == "" then
 					standDebug("steal rejected actor=%s stand=%s reason=empty_stand", plr.Name, standName)
@@ -2237,7 +2370,11 @@ local function bindStandPrompt(player, plot, standModel)
 
 			dmEnsureStandFolder(plr, standName)
 			local slotState = getStandSlotState(plr, standName)
+			local equippedInfo = getEquippedCrewMemberToolInfo(plr)
 			if slotState.Visible and not slotState.Usable then
+				if equippedInfo then
+					logCrewSwitchFailure(plr, standName, "stand_locked", string.format("level=%s", tostring(slotState.Level)))
+				end
 				tutorialStandPlacementLog(plr, standName, "stand_unavailable", string.format("level=%s", tostring(slotState.Level)))
 				updateStandMoneyText(plr, standModel)
 				updateLevelUpUI(plr, standModel)
@@ -2258,6 +2395,73 @@ local function bindStandPrompt(player, plot, standModel)
 						))
 					end
 					tutorialStandPlacementLog(plr, standName, "recent_place", string.format("action=ignore_pickup cooldown=%.2f", placementGuardRemaining))
+					updateStandMoneyText(plr, standModel)
+					updateLevelUpUI(plr, standModel)
+					updateStandPromptTexts(plr, standModel)
+					return
+				end
+
+				if equippedInfo and equippedInfo.Name ~= "" then
+					if equippedInfo.InstanceId == "" then
+						logCrewSwitchFailure(plr, standName, "incoming_instance_missing", "equipped_tool_missing_instance_id")
+						updateStandMoneyText(plr, standModel)
+						updateLevelUpUI(plr, standModel)
+						updateStandPromptTexts(plr, standModel)
+						return
+					end
+
+					local tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, equippedInfo.Name)
+					local incomingInstanceId, incomingInstance, outgoingInstanceId, outgoingInstance, switchReason =
+						CrewInstanceService.SwapStandInstance(plr, standName, equippedInfo.InstanceId, {
+							ExpectedIncomingStorageName = equippedInfo.Name,
+							ClearIncomingTutorialMetadataAfterAssign = tutorialInstance ~= nil
+								and tostring(tutorialInstanceId) == tostring(equippedInfo.InstanceId),
+						})
+					if not incomingInstance then
+						logCrewSwitchFailure(plr, standName, switchReason or "swap_commit_failed")
+						updateStandMoneyText(plr, standModel)
+						updateLevelUpUI(plr, standModel)
+						updateStandPromptTexts(plr, standModel)
+						return
+					end
+
+					clearCrewRecordCache(plr)
+					getCrewMemberLevel(plr, incomingInstanceId)
+					syncStandLevelFromCrewMember(plr, standName, incomingInstanceId)
+					setPlacementPickupGuard(plr, standName)
+
+					local placedModel, visualReason = spawnStandCrewMember(plr, standModel, handle, incomingInstance.StorageName)
+					if not placedModel then
+						logCrewSwitchFailure(
+							plr,
+							standName,
+							"visual_refresh_failed",
+							string.format("incomingInstanceId=%s reason=%s", tostring(incomingInstanceId), tostring(visualReason or "unknown"))
+						)
+					end
+
+					if tutorialInstance then
+						QuestSignals.Record(plr, "PlaceOnStand", 1, {
+							Source = "StandPlacement",
+							StandName = standName,
+							CrewMemberName = tostring(incomingInstance.StorageName or equippedInfo.Name),
+							CrewMemberInstanceId = tostring(incomingInstanceId),
+							TutorialPlacement = true,
+							TutorialRewardConverted = true,
+							SwitchPlacement = true,
+						})
+					end
+
+					standDebug(
+						"switch accepted player=%s stand=%s incoming=%s outgoing=%s incomingStorage=%s outgoingStorage=%s",
+						plr.Name,
+						standName,
+						tostring(incomingInstanceId),
+						tostring(outgoingInstanceId),
+						tostring(incomingInstance.StorageName or ""),
+						tostring(outgoingInstance and outgoingInstance.StorageName or "")
+					)
+					equipCrewMemberToolByInstanceId(plr, outgoingInstanceId, outgoingInstance and outgoingInstance.StorageName or "")
 					updateStandMoneyText(plr, standModel)
 					updateLevelUpUI(plr, standModel)
 					updateStandPromptTexts(plr, standModel)
@@ -2322,11 +2526,12 @@ local function bindStandPrompt(player, plot, standModel)
 				return
 			end
 
-			local toolName = getEquippedToolName(plr)
+			local toolName = equippedInfo and equippedInfo.Name or nil
 			local tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, toolName)
 			if not toolName or toolName == "" then
-				tutorialStandPlacementLog(plr, standName, "no_equipped_tool", "action=reject requires_equipped_tutorial_reward")
-				standDebug("place rejected player=%s stand=%s reason=no_equipped_tool", plr.Name, standName)
+				tutorialStandPlacementLog(plr, standName, "no_equipped_crewmate", "action=reject requires_equipped_tutorial_reward")
+				logCrewSwitchFailure(plr, standName, "no_equipped_crewmate", "empty_slot_place_rejected")
+				standDebug("place rejected player=%s stand=%s reason=no_equipped_crewmate", plr.Name, standName)
 				return
 			end
 
@@ -2371,24 +2576,31 @@ local function bindStandPrompt(player, plot, standModel)
 				)
 			end
 
-			local placedInstanceId, placedInstance
+			local placedInstanceId, placedInstance, placeReason
 			if tutorialInstance then
-				placedInstanceId, placedInstance = CrewInstanceService.AssignTutorialRewardInstanceToStand(plr, standName, {
+				placedInstanceId, placedInstance, placeReason = CrewInstanceService.AssignTutorialRewardInstanceToStand(plr, standName, {
 					InstanceId = tutorialInstanceId,
 					StorageName = toolName,
 					ClearTutorialMetadataAfterAssign = true,
 				})
+			elseif equippedInfo.InstanceId ~= "" then
+				placedInstanceId, placedInstance, placeReason = CrewInstanceService.AssignInstanceToStand(plr, equippedInfo.InstanceId, standName, {
+					ExpectedIncomingStorageName = toolName,
+				})
 			else
-				placedInstanceId, placedInstance = CrewInstanceService.AssignAvailableInstanceToStand(plr, toolName, standName)
+				placeReason = "incoming_instance_missing"
 			end
 			if not placedInstance then
 				tutorialStandPlacementLog(
 					plr,
 					standName,
-					"no_instance_available",
+					tostring(placeReason or "no_instance_available"),
 					string.format("action=reject tool=%s tutorialReward=%s", tostring(toolName), tostring(tutorialInstance ~= nil))
 				)
-				standDebug("place rejected player=%s stand=%s tool=%s reason=no_instance_available", plr.Name, standName, tostring(toolName))
+				if placeReason then
+					logCrewSwitchFailure(plr, standName, placeReason, "empty_slot_place_rejected")
+				end
+				standDebug("place rejected player=%s stand=%s tool=%s reason=%s", plr.Name, standName, tostring(toolName), tostring(placeReason or "no_instance_available"))
 				return
 			end
 
@@ -2414,8 +2626,16 @@ local function bindStandPrompt(player, plot, standModel)
 			end
 			standDebug("place accepted player=%s stand=%s tool=%s quantityBefore=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(qty), tostring(placedInstanceId))
 
-			spawnStandCrewMember(plr, standModel, handle, placedInstance.StorageName)
-			local placedModel = standModel:FindFirstChild("PlacedCrewMember")
+			local placedModel, visualReason = spawnStandCrewMember(plr, standModel, handle, placedInstance.StorageName)
+			if not placedModel then
+				logCrewSwitchFailure(
+					plr,
+					standName,
+					"visual_refresh_failed",
+					string.format("placedInstanceId=%s reason=%s", tostring(placedInstanceId), tostring(visualReason or "unknown"))
+				)
+			end
+			placedModel = standModel:FindFirstChild("PlacedCrewMember")
 			standDebug(
 				"place post-spawn player=%s stand=%s tool=%s placedModel=%s incomePerTick=%s instanceId=%s",
 				plr.Name,

@@ -2,6 +2,7 @@ local CrewVariants = {}
 
 CrewVariants.Order = { "Normal", "Golden", "Diamond" }
 
+-- World spawns expect this to stay at 90 / 8 / 2 unless a rush event forces a variant.
 CrewVariants.Versions = {
 	Normal = {
 		Chance = 90,
