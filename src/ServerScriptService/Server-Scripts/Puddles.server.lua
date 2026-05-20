@@ -67,6 +67,7 @@ local CONFIG = {
 		[8] = 6,
 	},
 	GlobalScaleMultiplier = .5,
+	YawDegrees = 90,
 	ScaleByBiome = {
 		[1] = 0.25,
 		[2] = 0.20,
@@ -82,11 +83,11 @@ local CONFIG = {
 		[1] = 32,
 		[2] = 32,
 		[3] = 32,
-		[4] = 36,
-		[5] = 48,
-		[6] = 60,
-		[7] = 72,
-		[8] = 84,
+		[4] = 2.5,
+		[5] = 2,
+		[6] = 1.5,
+		[7] = 1,
+		[8] = .5,
 	},
 	LargePuddleGapBufferScale = 1.85,
 	SafeFloorNameKeywords = {
@@ -646,11 +647,14 @@ local function choosePuddlePlacement(refs, startPart, endPart, leftBound, rightB
 
 	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
 	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
-	local biomeStartAlpha = (normalizedBiome - 1) / biomeCount
-	local biomeEndAlpha = normalizedBiome / biomeCount
+	local minimumAlpha = math.clamp(tonumber(CONFIG.MinimumForwardAlpha) or 0, 0, 1)
+	local maximumAlpha = math.clamp(tonumber(CONFIG.MaximumForwardAlpha) or 1, minimumAlpha, 1)
+	local usableAlphaRange = math.max(0.001, maximumAlpha - minimumAlpha)
+	local biomeStartAlpha = minimumAlpha + (usableAlphaRange * ((normalizedBiome - 1) / biomeCount))
+	local biomeEndAlpha = minimumAlpha + (usableAlphaRange * (normalizedBiome / biomeCount))
 	local padding = math.clamp(tonumber(CONFIG.BiomePaddingAlpha) or 0.08, 0, 0.35)
-	local startAlpha = math.max(CONFIG.MinimumForwardAlpha, biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * padding))
-	local endAlpha = math.min(CONFIG.MaximumForwardAlpha, biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * padding))
+	local startAlpha = biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * padding)
+	local endAlpha = biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * padding)
 	local attempts = math.max(1, math.floor(tonumber(CONFIG.SpawnAttempts) or 24))
 	local halfWidth = corridorWidth * 0.5
 	local footprintWidth = math.max(2, typeof(footprintSize) == "Vector3" and footprintSize.X or 2)
@@ -665,7 +669,7 @@ local function choosePuddlePlacement(refs, startPart, endPart, leftBound, rightB
 		local planarPosition = centerOnPath + (lateral * (centerProjection - pathProjection + laneOffset))
 		local groundPosition = resolveSafeGroundPosition(planarPosition, refs, lateral, forward, footprintSize, normalizedBiome)
 		if groundPosition and not isTooCloseToActivePuddle(groundPosition, footprintSize) then
-			local yaw = CFrame.Angles(0, rng:NextNumber(0, math.pi * 2), 0)
+			local yaw = CFrame.Angles(0, math.rad(tonumber(CONFIG.YawDegrees) or 0), 0)
 			return {
 				GroundPosition = groundPosition,
 				CFrame = CFrame.new(groundPosition) * yaw,

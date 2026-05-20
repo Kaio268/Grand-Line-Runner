@@ -96,6 +96,38 @@ local function waveTry(context, callback)
 	return ok, result
 end
 
+local function getMovedWavesFolder()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local hazards = assets and assets:FindFirstChild("Hazards")
+	local waves = hazards and hazards:FindFirstChild("Waves")
+	if waves and waves:IsA("Folder") then
+		return waves
+	end
+
+	return nil
+end
+
+local function resolveWavesFolder()
+	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
+	if wavesFolder and wavesFolder:IsA("Folder") then
+		return wavesFolder
+	end
+
+	wavesFolder = getMovedWavesFolder()
+	if wavesFolder then
+		return wavesFolder
+	end
+
+	local assets = ReplicatedStorage:WaitForChild("Assets", 15)
+	local hazards = assets and assets:WaitForChild("Hazards", 15)
+	wavesFolder = hazards and hazards:WaitForChild("Waves", 15)
+	if wavesFolder and wavesFolder:IsA("Folder") then
+		return wavesFolder
+	end
+
+	return ReplicatedStorage:WaitForChild("Waves", 15)
+end
+
 local WavesConfig = require(
 	Modules
 		:WaitForChild("Configs")
@@ -124,11 +156,10 @@ local ProtectionRuntime = require(
 )
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 
-waveTrace("startup awaiting ReplicatedStorage.Waves")
-local WavesFolder = ReplicatedStorage:WaitForChild("Waves", 15)
+waveTrace("startup awaiting waves folder")
+local WavesFolder = resolveWavesFolder()
 if not WavesFolder then
-	waveWarn("startup waitForChild timed out path=ReplicatedStorage.Waves; continuing to wait indefinitely")
-	WavesFolder = ReplicatedStorage:WaitForChild("Waves")
+	waveWarn("startup waves folder missing checked=ReplicatedStorage.Waves,ReplicatedStorage.Assets.Hazards.Waves")
 end
 waveTrace("startup resolvedWavesFolder path=%s", formatInstancePath(WavesFolder))
 
@@ -622,7 +653,7 @@ else
 end
 
 local function getTemplate(name)
-	local t = WavesFolder:FindFirstChild(name)
+	local t = WavesFolder and (WavesFolder:FindFirstChild(name) or WavesFolder:FindFirstChild(name, true))
 	if not t then return nil end
 	if t:IsA("Model") or t:IsA("BasePart") then
 		return t

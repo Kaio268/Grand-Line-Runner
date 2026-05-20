@@ -40,9 +40,10 @@ local CONFIG = {
 	GroundProbeDepth = 260,
 	MaxGroundHeightDelta = 3,
 	GroundNormalMin = 0.65,
-	SafeGapBuffer = 36,
+	SafeGapBuffer = 18,
 	FootprintSampleSpacing = 5,
 	MaxFootprintSampleSteps = 14,
+	BiomeGeometrySpawnAttempts = 40,
 	SafeFloorNameKeywords = {
 		"gap",
 		"safe",
@@ -494,7 +495,83 @@ local function cleanupActiveControllers()
 	return count
 end
 
-local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+local function getBiomeGeometryRoot(refs, biomeIndex)
+	local biomesRoot = refs and refs.Biomes
+	if not biomesRoot then
+		return nil
+	end
+
+	local name = "Biome " .. tostring(biomeIndex)
+	local container = biomesRoot:FindFirstChild(name)
+	if not container then
+		return nil
+	end
+
+	return container:FindFirstChild(name) or container
+end
+
+local function collectBiomeGroundParts(root)
+	local parts = {}
+	if not root then
+		return parts
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("BasePart")
+			and descendant.CanCollide == true
+			and descendant.Size.X >= 4
+			and descendant.Size.Z >= 4
+			and not isUnsafeSpikeSurface(descendant)
+		then
+			parts[#parts + 1] = descendant
+		end
+	end
+
+	return parts
+end
+
+local function chooseSpikePlacementFromBiomeGeometry(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	local biomeRoot = getBiomeGeometryRoot(refs, biomeIndex)
+	local groundParts = collectBiomeGroundParts(biomeRoot)
+	if #groundParts == 0 then
+		return nil
+	end
+
+	local forward, lateral, _, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
+	local areaName = getAreaNameForBiome(biomeIndex)
+	local size = getSpikeFootprintSize(areaName, corridorWidth)
+	local attempts = math.max(1, math.floor(tonumber(CONFIG.BiomeGeometrySpawnAttempts) or CONFIG.SpawnAttempts or 30))
+
+	for _ = 1, attempts do
+		local part = groundParts[rng:NextInteger(1, #groundParts)]
+		local halfX = math.max(0, (part.Size.X - size.X) * 0.5)
+		local halfZ = math.max(0, (part.Size.Z - size.Z) * 0.5)
+		local localX = if halfX > 0 then rng:NextNumber(-halfX, halfX) else 0
+		local localZ = if halfZ > 0 then rng:NextNumber(-halfZ, halfZ) else 0
+		local topY = (part.Size.Y * 0.5) + 2
+		local samplePosition = (part.CFrame * CFrame.new(localX, topY, localZ)).Position
+		local groundPosition = hasSafeGroundForFootprint(samplePosition, hazardsFolder, forward, lateral, size)
+		if groundPosition then
+			return {
+				GroundPosition = groundPosition,
+				Forward = forward,
+				Lateral = lateral,
+				Size = size,
+				BiomeIndex = biomeIndex,
+			}
+		end
+	end
+
+	return nil
+end
+
+local function chooseSpikePlacement(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	local geometryPlacement =
+		chooseSpikePlacementFromBiomeGeometry(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	if geometryPlacement then
+		return geometryPlacement
+	end
+
 	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
 	local pathLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
 	local areaName = getAreaNameForBiome(biomeIndex)
@@ -504,11 +581,14 @@ local function chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound
 
 	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
 	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
-	local biomeStartAlpha = (normalizedBiome - 1) / biomeCount
-	local biomeEndAlpha = normalizedBiome / biomeCount
+	local minimumAlpha = math.clamp(tonumber(CONFIG.MinimumForwardAlpha) or 0, 0, 1)
+	local maximumAlpha = math.clamp(tonumber(CONFIG.MaximumForwardAlpha) or 1, minimumAlpha, 1)
+	local usableAlphaRange = math.max(0.001, maximumAlpha - minimumAlpha)
+	local biomeStartAlpha = minimumAlpha + (usableAlphaRange * ((normalizedBiome - 1) / biomeCount))
+	local biomeEndAlpha = minimumAlpha + (usableAlphaRange * (normalizedBiome / biomeCount))
 	local padding = math.clamp(tonumber(CONFIG.BiomePaddingAlpha) or 0.08, 0, 0.35)
-	local startAlpha = math.max(CONFIG.MinimumForwardAlpha, biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * padding))
-	local endAlpha = math.min(CONFIG.MaximumForwardAlpha, biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * padding))
+	local startAlpha = biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * padding)
+	local endAlpha = biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * padding)
 	local attempts = math.max(1, math.floor(tonumber(CONFIG.SpawnAttempts) or 30))
 
 	for _ = 1, attempts do
@@ -766,12 +846,12 @@ local function runDeckSpike(controller)
 	controller:Destroy()
 end
 
-local function spawnDeckSpike(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+local function spawnDeckSpike(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 	if cleanupActiveControllers() >= CONFIG.MaxActiveSpikes then
 		return false
 	end
 
-	local placement = chooseSpikePlacement(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	local placement = chooseSpikePlacement(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 	if not placement then
 		return false
 	end
@@ -789,7 +869,7 @@ local function spawnDeckSpike(hazardsFolder, startPart, endPart, leftBound, righ
 end
 
 local function spawnSpikePop()
-	local _, hazardsFolder, startPart, endPart, leftBound, rightBound = resolveRefs()
+	local refs, hazardsFolder, startPart, endPart, leftBound, rightBound = resolveRefs()
 	if not hazardsFolder or not startPart or not endPart then
 		return
 	end
@@ -799,7 +879,7 @@ local function spawnSpikePop()
 	for _ = 1, spikesPerPop do
 		local biomeIndex = rng:NextInteger(1, biomeCount)
 		local ok, err = xpcall(function()
-			spawnDeckSpike(hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+			spawnDeckSpike(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
 		end, debug.traceback)
 		if not ok then
 			warn(string.format("[DECK SPIKES] spawn error=%s", tostring(err)))

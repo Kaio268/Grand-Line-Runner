@@ -140,6 +140,39 @@ local function hazardTrace(message, ...)
 	print(string.format("[HAZARD TRACE] " .. message, ...))
 end
 
+local function findChildRecursive(parent, childName)
+	if not parent then
+		return nil
+	end
+
+	local direct = parent:FindFirstChild(childName)
+	if direct then
+		return direct
+	end
+
+	return parent:FindFirstChild(childName, true)
+end
+
+local function getMovedWavesFolder()
+	local assets = ReplicatedStorage:FindFirstChild("Assets")
+	local hazards = assets and assets:FindFirstChild("Hazards")
+	local waves = hazards and hazards:FindFirstChild("Waves")
+	if waves and waves:IsA("Folder") then
+		return waves
+	end
+
+	return nil
+end
+
+local function getWavesFolder()
+	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
+	if wavesFolder and wavesFolder:IsA("Folder") then
+		return wavesFolder
+	end
+
+	return getMovedWavesFolder()
+end
+
 local function getOrCreateRemotesFolder()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	if remotes and remotes:IsA("Folder") then
@@ -778,15 +811,24 @@ local function resolveHazardRefs()
 end
 
 local function getWaveTemplate()
-	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves") or ReplicatedStorage:WaitForChild("Waves", 15)
+	local wavesFolder = getWavesFolder()
 	if not wavesFolder then
-		hazardTrace("spawn skipped reason=missing_waves_folder path=ReplicatedStorage.Waves")
+		hazardTrace("spawn skipped reason=missing_waves_folder checked=ReplicatedStorage.Waves,ReplicatedStorage.Assets.Hazards.Waves")
 		return nil
 	end
 
-	local template = wavesFolder:FindFirstChild("WaveTemplate") or wavesFolder:WaitForChild("WaveTemplate", 15)
+	local template = findChildRecursive(wavesFolder, "WaveTemplate")
 	if not template then
-		hazardTrace("spawn skipped reason=missing_wave_template path=ReplicatedStorage.Waves.WaveTemplate")
+		for _, descendant in ipairs(wavesFolder:GetDescendants()) do
+			if descendant:IsA("Model") or descendant:IsA("BasePart") then
+				template = descendant
+				break
+			end
+		end
+	end
+
+	if not template then
+		hazardTrace("spawn skipped reason=missing_wave_template wavesFolder=%s", formatInstancePath(wavesFolder))
 		return nil
 	end
 
@@ -795,6 +837,7 @@ local function getWaveTemplate()
 		return nil
 	end
 
+	hazardTrace("using wave template path=%s", formatInstancePath(template))
 	return template
 end
 

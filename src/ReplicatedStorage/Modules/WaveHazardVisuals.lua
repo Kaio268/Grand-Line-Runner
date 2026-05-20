@@ -27,6 +27,19 @@ local function getChild(parent, name)
 	return parent:FindFirstChild(name)
 end
 
+local function findFirstChildRecursive(parent, name)
+	if not parent then
+		return nil
+	end
+
+	local direct = parent:FindFirstChild(name)
+	if direct then
+		return direct
+	end
+
+	return parent:FindFirstChild(name, true)
+end
+
 local function getWaveAssetsFolder()
 	local assetsFolder = getChild(ReplicatedStorage, ASSETS_FOLDER_NAME)
 	local hazardsFolder = getChild(assetsFolder, HAZARDS_FOLDER_NAME)
@@ -40,7 +53,7 @@ end
 
 local function getWaveAsset(assetName)
 	local wavesFolder = getWaveAssetsFolder()
-	local asset = wavesFolder and wavesFolder:FindFirstChild(assetName)
+	local asset = findFirstChildRecursive(wavesFolder, assetName)
 	if asset and (asset:IsA("Model") or asset:IsA("BasePart")) then
 		return asset
 	end
