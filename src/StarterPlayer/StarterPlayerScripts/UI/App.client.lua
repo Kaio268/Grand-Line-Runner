@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -2260,12 +2261,17 @@ local function hideLegacyInventory()
 end
 
 local function getToggleLayout()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local mobile = UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+
 	return {
 		anchorPoint = Vector2.new(0, 0),
 		position = UDim2.fromOffset(0, 16),
-		size = UDim2.fromOffset(74, 74),
+		size = UDim2.fromOffset(mobile and 58 or 74, mobile and 58 or 74),
 		compact = true,
 		dock = "hotbarLeft",
+		mobile = mobile,
 	}
 end
 

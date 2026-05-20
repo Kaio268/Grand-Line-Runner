@@ -2,6 +2,7 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
@@ -56,10 +57,11 @@ local TILE_DEFS = {
 local function getHudLayout()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local compact = viewport.X < 700 or viewport.Y < 500
-	local tileSize = compact and 78 or 98
-	local columnGap = compact and 6 or 10
-	local rowGap = compact and 6 or 10
+	local mobile = UserInputService.TouchEnabled
+	local compact = mobile or viewport.X < 700 or viewport.Y < 500
+	local tileSize = if mobile then 58 elseif compact then 72 else 98
+	local columnGap = if mobile then 4 elseif compact then 6 else 10
+	local rowGap = if mobile then 5 elseif compact then 6 else 10
 	local stepX = tileSize + columnGap
 	local stepY = tileSize + rowGap
 
@@ -69,7 +71,8 @@ local function getHudLayout()
 		rowGap = rowGap,
 		stepX = stepX,
 		stepY = stepY,
-		containerPosition = compact and UDim2.fromOffset(8, 160) or UDim2.fromOffset(10, 250),
+		mobile = mobile,
+		containerPosition = if mobile then UDim2.fromOffset(6, 194) elseif compact then UDim2.fromOffset(8, 160) else UDim2.fromOffset(10, 250),
 		positions = {
 			Store = Vector2.new(0, 0),
 			Index = Vector2.new(stepX, 0),
@@ -834,8 +837,10 @@ local function buildTileStyle(button)
 
 	if iconStyle then
 		local iconSize = HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66)
+		local layout = getHudLayout()
+		local maxIconSize = layout.mobile and math.max(42, layout.tileSize - 8) or math.huge
 		iconStyle.position = UDim2.fromScale(0.5, 0.34)
-		iconStyle.size = UDim2.fromOffset(iconSize.X, iconSize.Y)
+		iconStyle.size = UDim2.fromOffset(math.min(iconSize.X, maxIconSize), math.min(iconSize.Y, maxIconSize))
 		iconStyle.scaleType = HUD_ICON_SCALE_TYPE_OVERRIDES[button.Name] or Enum.ScaleType.Fit
 		iconStyle.backgroundTransparency = 1
 		iconStyle.zIndex = math.max(clampNumber(iconStyle.zIndex, 14, 24), 18)

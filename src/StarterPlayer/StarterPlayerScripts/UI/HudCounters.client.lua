@@ -1,6 +1,8 @@
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -120,12 +122,20 @@ local function layoutDisplayLayer(layer, rowCount)
 	end
 
 	local _, bottomRightInset = GuiService:GetGuiInset()
-	local totalHeight = HudCounterConfig.getTotalHeight(rowCount)
-	local moneyRowY = HudCounterConfig.getRowY(math.min(3, math.max(1, rowCount)))
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local mobile = UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+	local rowHeight = mobile and 34 or TARGET_ROW_HEIGHT
+	local rowSpacing = mobile and 4 or TARGET_ROW_SPACING
+	local panelTop = mobile and 7 or HudCounterConfig.PanelPadding.Top
+	local panelBottom = mobile and 7 or HudCounterConfig.PanelPadding.Bottom
+	local totalHeight = panelTop + panelBottom + (rowCount * rowHeight) + (math.max(0, rowCount - 1) * rowSpacing)
+	local moneyRowY = panelTop + ((math.min(3, math.max(1, rowCount)) - 1) * (rowHeight + rowSpacing))
+	local layerWidth = mobile and 176 or COUNTERS_WIDTH
 
 	layer.AnchorPoint = Vector2.new(0, 1)
-	layer.Position = UDim2.new(0, COUNTERS_LEFT_PADDING, 1, -(COUNTERS_BOTTOM_PADDING + bottomRightInset.Y))
-	layer.Size = UDim2.fromOffset(COUNTERS_WIDTH, totalHeight)
+	layer.Position = UDim2.new(0, mobile and 10 or COUNTERS_LEFT_PADDING, 1, -((mobile and 14 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y))
+	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1
 	layer.BorderSizePixel = 0
 	layer.ClipsDescendants = false
@@ -134,7 +144,7 @@ local function layoutDisplayLayer(layer, rowCount)
 	local moneyAnchor = layer:FindFirstChild("ReactHudMoneyRowAnchor")
 	if moneyAnchor and moneyAnchor:IsA("Frame") then
 		moneyAnchor.Position = UDim2.fromOffset(HudCounterConfig.getContentLeft(), moneyRowY)
-		moneyAnchor.Size = UDim2.fromOffset(HudCounterConfig.getContentWidth(), TARGET_ROW_HEIGHT)
+		moneyAnchor.Size = UDim2.fromOffset(layerWidth - HudCounterConfig.PanelPadding.Left - HudCounterConfig.PanelPadding.Right, rowHeight)
 		moneyAnchor.ZIndex = DISPLAY_LAYER_ZINDEX + 10
 	end
 
@@ -147,9 +157,25 @@ local function layoutDisplayLayer(layer, rowCount)
 			0,
 			math.max(0, moneyRowY - notificationHeight + 6)
 		)
-		notifications.Size = UDim2.fromOffset(HudCounterConfig.NotificationWidth, notificationHeight)
+		notifications.Size = UDim2.fromOffset(mobile and 138 or HudCounterConfig.NotificationWidth, notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
+end
+
+local function getCounterRenderMetrics()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local mobile = UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+
+	return {
+		barGap = mobile and 5 or BAR_GAP,
+		iconSlotInnerSize = mobile and 26 or HudCounterConfig.IconSize,
+		iconSlotWidth = mobile and 34 or ICON_SLOT_WIDTH,
+		labelTextSize = mobile and 13 or nil,
+		rowHeight = mobile and 34 or TARGET_ROW_HEIGHT,
+		rowSpacing = mobile and 4 or TARGET_ROW_SPACING,
+		valueTextSize = mobile and 22 or nil,
+	}
 end
 
 local function isProtectedDescendant(host, descendant)
@@ -488,16 +514,20 @@ local function render()
 	local displayLayer = ensureDisplayLayer(hud)
 	layoutDisplayLayer(displayLayer, #items)
 	local notificationSurface = displayLayer:FindFirstChild("ReactHudCounterNotifications")
+	local metrics = getCounterRenderMetrics()
 
 	root:render(e(React.Fragment, nil, {
 		Rows = e(HudStatRow, {
 			surface = displayLayer,
 			items = items,
-			rowHeight = TARGET_ROW_HEIGHT,
-			rowSpacing = TARGET_ROW_SPACING,
-			iconSlotWidth = ICON_SLOT_WIDTH,
-			barGap = BAR_GAP,
+			rowHeight = metrics.rowHeight,
+			rowSpacing = metrics.rowSpacing,
+			iconSlotWidth = metrics.iconSlotWidth,
+			iconSlotInnerSize = metrics.iconSlotInnerSize,
+			barGap = metrics.barGap,
 			labelSlotWidth = HudCounterConfig.LabelSlotWidth,
+			valueTextSize = metrics.valueTextSize,
+			labelTextSize = metrics.labelTextSize,
 		}),
 		Notifications = notificationSurface and e(HudStatNotificationLayer, {
 			surface = notificationSurface,
@@ -568,6 +598,12 @@ local childRemovedConnection = playerGui.ChildRemoved:Connect(function(child)
 	end
 end)
 
+local viewportConnection = nil
+local currentCamera = Workspace.CurrentCamera
+if currentCamera then
+	viewportConnection = currentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
+end
+
 bindHudConnections()
 render()
 
@@ -575,6 +611,9 @@ script.Destroying:Connect(function()
 	destroyed = true
 	childAddedConnection:Disconnect()
 	childRemovedConnection:Disconnect()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+	end
 	disconnectHudConnections()
 	root:unmount()
 end)

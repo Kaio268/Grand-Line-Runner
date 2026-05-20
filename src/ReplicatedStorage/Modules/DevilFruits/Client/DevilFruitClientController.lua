@@ -358,6 +358,12 @@ local function buildCooldownAbilities(fruitName)
 	return abilities
 end
 
+local function isCompactHud()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+end
+
 local function renderCooldownHud()
 	local ok, err = xpcall(function()
 		ensureCooldownHudRoot()
@@ -365,6 +371,7 @@ local function renderCooldownHud()
 		local fruit = fruitName and DevilFruitConfig.GetFruit(fruitName)
 		cooldownHudRoot:render(reactRoblox.createPortal(react.createElement(cooldownHudComponent, {
 			abilities = cooldownHud.Abilities,
+			compact = isCompactHud(),
 			fruitName = fruit and tostring(fruit.DisplayName or fruitName) or "",
 			visible = cooldownHud.Visible == true,
 		}), getCooldownHudHost()))

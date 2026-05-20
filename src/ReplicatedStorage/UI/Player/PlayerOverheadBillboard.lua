@@ -1,4 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -64,22 +66,29 @@ local function getStatusText(entry)
 	return string.format("Rebirths %d", math.max(0, math.floor(tonumber(entry.rebirths) or 0))), MUTED
 end
 
+local function isCompact()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 520
+end
+
 local function PlayerOverheadBillboard(props)
 	local entry = props.entry or {}
 	local statusText, statusColor = getStatusText(entry)
+	local compact = isCompact()
 
 	return e("BillboardGui", {
 		Adornee = entry.adornee,
 		AlwaysOnTop = true,
 		LightInfluence = 0,
-		MaxDistance = 120,
-		Size = UDim2.fromOffset(330, 96),
-		StudsOffsetWorldSpace = Vector3.new(0, 3.05, 0),
+		MaxDistance = compact and 70 or 120,
+		Size = compact and UDim2.fromOffset(250, 72) or UDim2.fromOffset(330, 96),
+		StudsOffsetWorldSpace = compact and Vector3.new(0, 2.75, 0) or Vector3.new(0, 3.05, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
-		Name = textRow(tostring(entry.playerName or "Player"), TEXT, 0, 34),
-		Beli = textRow(formatBeli(entry.balance), GOLD, 31, 24),
-		Status = textRow(statusText, statusColor, 59, 18),
+		Name = textRow(tostring(entry.playerName or "Player"), TEXT, 0, compact and 25 or 34),
+		Beli = textRow(formatBeli(entry.balance), GOLD, compact and 23 or 31, compact and 19 or 24),
+		Status = textRow(statusText, statusColor, compact and 46 or 59, compact and 14 or 18),
 	})
 end
 

@@ -125,7 +125,7 @@ local function extractDisplayParts(text, fallbackLabel)
 	return raw, sourceLabel
 end
 
-local function renderLayeredText(name, props)
+local function renderLayeredText(props)
 	local theme = HudStatsTheme.Typography
 	local font = props.font or HudStatsTheme.Font
 	local shadowOffset = props.shadowOffset or theme.ValueShadowOffset
@@ -137,7 +137,7 @@ local function renderLayeredText(name, props)
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
 		LayoutOrder = props.layoutOrder,
-		Size = UDim2.new(0, 0, 1, 0),
+		Size = UDim2.fromScale(0, 1),
 		ZIndex = props.zIndex,
 	}, {
 		Shadow = e("TextLabel", {
@@ -146,7 +146,7 @@ local function renderLayeredText(name, props)
 			BorderSizePixel = 0,
 			Font = font,
 			Position = UDim2.fromOffset(shadowOffset.X, shadowOffset.Y),
-			Size = UDim2.new(0, 0, 1, 0),
+			Size = UDim2.fromScale(0, 1),
 			Text = props.text,
 			TextColor3 = props.shadowColor,
 			TextScaled = false,
@@ -166,7 +166,7 @@ local function renderLayeredText(name, props)
 			BorderSizePixel = 0,
 			Font = font,
 			Position = UDim2.fromOffset(mainOffset.X, mainOffset.Y),
-			Size = UDim2.new(0, 0, 1, 0),
+			Size = UDim2.fromScale(0, 1),
 			Text = props.text,
 			TextColor3 = props.textColor3,
 			TextScaled = false,
@@ -253,8 +253,8 @@ local function HudStatCounter(props)
 	local effectiveIconScale = math.clamp(state.iconScale, 0.88, 1.12)
 
 	local typography = HudStatsTheme.Typography
-	local valueTextSize = typography.ValueSize
-	local labelTextSize = typography.LabelSize
+	local valueTextSize = tonumber(props.valueTextSize) or typography.ValueSize
+	local labelTextSize = tonumber(props.labelTextSize) or typography.LabelSize
 	local valueStroke = math.min(typography.ValueStrokeTransparency, math.clamp(state.textStrokeTransparency, 0, 1))
 	local labelStroke = math.min(typography.LabelStrokeTransparency, math.clamp(state.textStrokeTransparency, 0, 1))
 	local contentWidthOffset = iconSlotWidth + barGap
@@ -314,7 +314,7 @@ local function HudStatCounter(props)
 		RowContent = e("Frame", {
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 1, 0),
+			Size = UDim2.fromScale(1, 1),
 			ZIndex = rowZIndex + 2,
 		}, {
 			Layout = e("UIListLayout", {
@@ -411,8 +411,8 @@ local function HudStatCounter(props)
 					AutomaticSize = Enum.AutomaticSize.X,
 					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
-					Position = UDim2.new(0, 0, 0.5, 0),
-					Size = UDim2.new(0, 0, 1, 0),
+					Position = UDim2.fromScale(0, 0.5),
+					Size = UDim2.fromScale(0, 1),
 					ZIndex = rowZIndex + 4,
 				}, {
 					Layout = e("UIListLayout", {
@@ -422,7 +422,7 @@ local function HudStatCounter(props)
 						SortOrder = Enum.SortOrder.LayoutOrder,
 						VerticalAlignment = Enum.VerticalAlignment.Center,
 					}),
-					Value = renderLayeredText("ReactHudStatValue", {
+					Value = renderLayeredText({
 						layoutOrder = 1,
 						font = HudStatsTheme.Font,
 						text = valueText,
@@ -436,7 +436,7 @@ local function HudStatCounter(props)
 						shadowOffset = typography.ValueShadowOffset,
 						zIndex = rowZIndex + 5,
 					}),
-					Label = labelText ~= "" and renderLayeredText("ReactHudStatLabel", {
+					Label = labelText ~= "" and renderLayeredText({
 						layoutOrder = 2,
 						font = HudStatsTheme.Font,
 						text = labelText,

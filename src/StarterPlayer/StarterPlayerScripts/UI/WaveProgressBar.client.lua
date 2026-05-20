@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -15,6 +16,10 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local LavaWaves = require(Modules:WaitForChild("Configs"):WaitForChild("LavaWaves"))
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
+
+local function isCompactViewport()
+	return UserInputService.TouchEnabled
+end
 
 local function buildDefaultSections()
 	local sections = {}
@@ -231,6 +236,7 @@ local function render()
 			alpha = alpha,
 			userId = tonumber(info.UserId) or 0,
 			isDead = humanoid ~= nil and humanoid.Health <= 0,
+			size = isCompactViewport() and 22 or nil,
 		}
 	end
 
@@ -242,12 +248,14 @@ local function render()
 				waveMarkers[#waveMarkers + 1] = {
 					alpha = alphaFromWorldPos(worldPos, WAVE_MARKER_PADDING),
 					image = getHazardImage(hazard),
+					size = isCompactViewport() and 24 or nil,
 				}
 			end
 		end
 	end
 
 	root:render(ReactRoblox.createPortal(React.createElement(WaveProgressBar, {
+		compact = isCompactViewport(),
 		players = playerMarkers,
 		waves = waveMarkers,
 		sections = DEFAULT_SECTIONS,

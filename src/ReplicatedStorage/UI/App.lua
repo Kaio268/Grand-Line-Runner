@@ -932,6 +932,7 @@ local function hotbarSlot(props)
 	local interactive = item ~= nil and item.interactive ~= false and props.onActivated ~= nil
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(interactive)
 	local zIndexBase = props.zIndexBase or 0
+	local slotSize = math.max(46, math.floor(tonumber(props.slotSize) or 64))
 	local hoverZIndexOffset = hovered and 12 or 0
 	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(20, 28, 44), 0.78) or Color3.fromRGB(13, 19, 31)
 	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 39, 61), 0.84) or Color3.fromRGB(18, 26, 41)
@@ -946,7 +947,7 @@ local function hotbarSlot(props)
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
 		ref = hoverRef,
-		Size = UDim2.fromOffset(64, 64),
+		Size = UDim2.fromOffset(slotSize, slotSize),
 		ZIndex = zIndexBase + 1 + hoverZIndexOffset,
 	}, handlers)
 
@@ -2769,12 +2770,13 @@ local function App(props)
 	local toggleLayout = props.toggleLayout or {}
 	local dockToggleLeft = toggleLayout.dock == "hotbarLeft"
 	local dockToggleSlot = toggleLayout.dock == "hotbarSlot"
+	local mobileLayout = toggleLayout.mobile == true
 	local toggleSlotIndex = math.max(1, math.floor(tonumber(toggleLayout.slotIndex) or 5))
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
-	local toggleGap = dockToggleLeft and 20 or 0
+	local toggleGap = dockToggleLeft and (mobileLayout and 8 or 20) or 0
 	local hotbarSlotCount = math.max(1, #(props.hotbarSlots or {}))
-	local hotbarSlotWidth = 64
-	local hotbarSlotGap = 10
+	local hotbarSlotWidth = mobileLayout and 54 or 64
+	local hotbarSlotGap = mobileLayout and 6 or 10
 	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth
 		+ math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
@@ -2810,8 +2812,8 @@ local function App(props)
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundTransparency = 1,
 			ClipsDescendants = false,
-			Position = UDim2.new(0.5, 0, 1, -20),
-			Size = UDim2.fromOffset(bottomBarWidth, 104),
+			Position = UDim2.new(0.5, mobileLayout and 52 or 0, 1, mobileLayout and -10 or -20),
+			Size = UDim2.fromOffset(bottomBarWidth, mobileLayout and 82 or 104),
 			ZIndex = bottomBarZIndex,
 		}, {
 			Toggle = e(inventoryToggleButton, {
@@ -2829,10 +2831,10 @@ local function App(props)
 				BackgroundTransparency = 1,
 				ClipsDescendants = false,
 				Position = UDim2.fromOffset(hotbarOffsetX, 0),
-				Size = UDim2.fromOffset(hotbarWidth, 96),
+				Size = UDim2.fromOffset(hotbarWidth, mobileLayout and 78 or 96),
 				ZIndex = bottomBarZIndex,
 			}, {
-				Label = e("TextLabel", {
+				Label = not mobileLayout and e("TextLabel", {
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBold,
 					Position = UDim2.fromOffset(0, 0),
@@ -2842,18 +2844,18 @@ local function App(props)
 					TextSize = 11,
 					TextXAlignment = Enum.TextXAlignment.Left,
 					ZIndex = bottomBarZIndex + 1,
-				}),
+				}) or nil,
 				Scroller = e("ScrollingFrame", {
 					AutomaticCanvasSize = Enum.AutomaticSize.X,
 					BackgroundTransparency = 1,
 					BorderSizePixel = 0,
 					CanvasSize = UDim2.new(),
 					ClipsDescendants = false,
-					Position = UDim2.fromOffset(0, 18),
+					Position = UDim2.fromOffset(0, mobileLayout and 6 or 18),
 					ScrollBarImageTransparency = 1,
 					ScrollBarThickness = 0,
 					ScrollingDirection = Enum.ScrollingDirection.X,
-					Size = UDim2.new(1, 0, 0, 78),
+					Size = UDim2.new(1, 0, 0, mobileLayout and 64 or 78),
 					ZIndex = bottomBarZIndex + 1,
 				}, (function()
 					local slotChildren = {
@@ -2873,6 +2875,7 @@ local function App(props)
 						slotChildren["Slot" .. tostring(index)] = e(hotbarSlot, {
 							slot = slot,
 							layoutOrder = index,
+							slotSize = hotbarSlotWidth,
 							zIndexBase = bottomBarZIndex,
 							onActivated = props.onActivateItem,
 						})

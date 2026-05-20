@@ -43,6 +43,9 @@ local function HudStatRow(props)
 			rowHeight = rowHeight,
 			iconSlotWidth = iconSlotWidth,
 			barGap = barGap,
+			iconSlotInnerSize = props.iconSlotInnerSize,
+			valueTextSize = props.valueTextSize,
+			labelTextSize = props.labelTextSize,
 			sourceLabel = item.sourceLabel,
 			showDivider = index < #props.items,
 		})
