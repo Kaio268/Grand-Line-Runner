@@ -177,7 +177,9 @@ function MeraDashClient.new(config)
 		and config.StopFlameDashTrailSampling
 		or function() end
 	self.activeDash = nil
-	self.cameraTween = nil
+	self.cameraFovTweens = nil
+	self.cameraFovToken = 0
+	self.cameraBaseFov = nil
 	self.carryConnection = nil
 	self.sequence = 0
 	return self
@@ -306,13 +308,21 @@ function MeraDashClient:KickCamera()
 		return
 	end
 
-	local baselineFov = camera.FieldOfView
+	local baselineFov = self.cameraBaseFov or camera.FieldOfView
 	local boostedFov = math.min(baselineFov + CAMERA_FOV_BOOST, MAX_CAMERA_FOV)
 
-	if self.cameraTween then
-		self.cameraTween:Cancel()
-		self.cameraTween = nil
+	self.cameraFovToken += 1
+	local fovToken = self.cameraFovToken
+
+	if type(self.cameraFovTweens) == "table" then
+		for _, tween in pairs(self.cameraFovTweens) do
+			if tween then
+				tween:Cancel()
+			end
+		end
 	end
+
+	self.cameraBaseFov = baselineFov
 
 	local punchOut = TweenService:Create(camera, TweenInfo.new(CAMERA_PUNCH_OUT_TIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		FieldOfView = boostedFov,
@@ -321,15 +331,23 @@ function MeraDashClient:KickCamera()
 		FieldOfView = baselineFov,
 	})
 
-	self.cameraTween = settle
+	self.cameraFovTweens = {
+		PunchOut = punchOut,
+		Settle = settle,
+	}
 
 	punchOut.Completed:Connect(function()
+		if self.cameraFovToken ~= fovToken then
+			return
+		end
+
 		settle:Play()
 	end)
 
 	settle.Completed:Connect(function()
-		if self.cameraTween == settle then
-			self.cameraTween = nil
+		if self.cameraFovToken == fovToken then
+			self.cameraFovTweens = nil
+			self.cameraBaseFov = nil
 		end
 	end)
 

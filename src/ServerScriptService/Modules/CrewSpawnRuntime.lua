@@ -217,6 +217,84 @@ local ServerLuck = workspace:WaitForChild("ServerLuck")
 local CurrentEvent = workspace:WaitForChild("CurrentEvent")
 
 local RUSH_TRIM_SECONDS = 3
+local RARITY_DISTANCE_WEIGHTS = SpawnerConfig.RarityDistanceWeights or {}
+local SAME_TIER_WEIGHT = tonumber(RARITY_DISTANCE_WEIGHTS.SameTier) or 1
+local ONE_TIER_BELOW_WEIGHT = tonumber(RARITY_DISTANCE_WEIGHTS.OneTierBelow) or 0.02
+local ONE_TIER_ABOVE_WEIGHT = tonumber(RARITY_DISTANCE_WEIGHTS.OneTierAbove) or 0.01
+local RECONCILE_INTERVAL = math.max(0.5, tonumber(SpawnerConfig.ReconcileInterval) or 2)
+
+local RARITY_TIER = SpawnPartsCfg.RarityTier or {}
+local COMMON_TIER = tonumber(RARITY_TIER.Common) or 1
+local UNCOMMON_TIER = tonumber(RARITY_TIER.Uncommon) or 2
+local RARE_TIER = tonumber(RARITY_TIER.Rare) or 3
+local EPIC_TIER = tonumber(RARITY_TIER.Epic) or 4
+local LEGENDARY_TIER = tonumber(RARITY_TIER.Legendary) or 5
+local MYTHIC_TIER = tonumber(RARITY_TIER.Mythic) or tonumber(RARITY_TIER.Mythical) or 6
+local GODLY_TIER = tonumber(RARITY_TIER.Godly) or 7
+local SECRET_TIER = tonumber(RARITY_TIER.Secret) or 8
+
+local PAD_INTENDED_TIER = {
+	Common = COMMON_TIER,
+	Uncommon = UNCOMMON_TIER,
+	Rare = RARE_TIER,
+	Epic = EPIC_TIER,
+	Legendary = LEGENDARY_TIER,
+	Mythic = MYTHIC_TIER,
+	Mythical = MYTHIC_TIER,
+	Godly = GODLY_TIER,
+	Secret = SECRET_TIER,
+	Omega = SECRET_TIER,
+}
+
+local PAD_ALLOWED_ENTRY_TIERS = {
+	Common = {
+		[COMMON_TIER] = true,
+		[UNCOMMON_TIER] = true,
+	},
+	Uncommon = {
+		[COMMON_TIER] = true,
+		[UNCOMMON_TIER] = true,
+		[RARE_TIER] = true,
+	},
+	Rare = {
+		[UNCOMMON_TIER] = true,
+		[RARE_TIER] = true,
+		[EPIC_TIER] = true,
+	},
+	Epic = {
+		[RARE_TIER] = true,
+		[EPIC_TIER] = true,
+		[LEGENDARY_TIER] = true,
+	},
+	Legendary = {
+		[EPIC_TIER] = true,
+		[LEGENDARY_TIER] = true,
+		[MYTHIC_TIER] = true,
+	},
+	Mythic = {
+		[LEGENDARY_TIER] = true,
+		[MYTHIC_TIER] = true,
+		[GODLY_TIER] = true,
+	},
+	Mythical = {
+		[LEGENDARY_TIER] = true,
+		[MYTHIC_TIER] = true,
+		[GODLY_TIER] = true,
+	},
+	Godly = {
+		[MYTHIC_TIER] = true,
+		[GODLY_TIER] = true,
+		[SECRET_TIER] = true,
+	},
+	Secret = {
+		[GODLY_TIER] = true,
+		[SECRET_TIER] = true,
+	},
+	Omega = {
+		[GODLY_TIER] = true,
+		[SECRET_TIER] = true,
+	},
+}
 
 local ServerEvents = ReplicatedStorage:FindFirstChild("ServerEvents")
 if not ServerEvents then
@@ -389,66 +467,132 @@ local function getServerLuckMult()
 	return v
 end
 
-local function weightForEntry(entry, partTier, serverLuckMult, chanceCap)
-	local base = tonumber(entry.Info.Chance) or 0
-	if base <= 0 then
-		return 0
-	end
-
-	chanceCap = tonumber(chanceCap) or 100
-	if base > chanceCap then
-		return 0
-	end
-
-	serverLuckMult = tonumber(serverLuckMult) or 1
-	if serverLuckMult <= 1 or maxTier <= 1 then
-		return base
-	end
-
-	local LEGEND_TIER = tonumber((SpawnPartsCfg.RarityTier or {}).Legendary) or 5
-	if (entry.Tier or 1) < LEGEND_TIER then
-		return base
-	end
-
-	local partBias = math.clamp((partTier or 1) / maxTier, 0, 1)
-	local denom = math.max(1, (maxTier - LEGEND_TIER))
-	local highBias = math.clamp(((entry.Tier or 1) - LEGEND_TIER) / denom, 0, 1)
-	local exponent = math.clamp(partBias * (0.35 + 0.65 * highBias), 0, 1)
-
-	return base * math.exp(math.log(serverLuckMult) * exponent)
+local function getIntendedTierForPadName(padName)
+	return tonumber(PAD_INTENDED_TIER[tostring(padName or "")])
+		or tonumber(RARITY_TIER[tostring(padName or "")])
+		or COMMON_TIER
 end
 
-local function chooseForPart(partTier, serverLuckMult, chanceCap)
+local function getAllowedEntryTiersForPadName(padName)
+	return PAD_ALLOWED_ENTRY_TIERS[tostring(padName or "")]
+end
+
+local function getRarityDistanceWeight(entryTier, intendedTier)
+	local distance = (tonumber(entryTier) or COMMON_TIER) - (tonumber(intendedTier) or COMMON_TIER)
+	if distance == 0 then
+		return SAME_TIER_WEIGHT, distance
+	elseif distance == -1 then
+		return ONE_TIER_BELOW_WEIGHT, distance
+	elseif distance == 1 then
+		return ONE_TIER_ABOVE_WEIGHT, distance
+	end
+
+	return 0, distance
+end
+
+local function weightForEntry(entry, data, serverLuckMult)
+	local base = tonumber(entry.Info and entry.Info.Chance) or 0
+	if base <= 0 then
+		return 0, "disabled_chance"
+	end
+
+	local entryTier = tonumber(entry.Tier) or COMMON_TIER
+	local allowedEntryTiers = data and data.AllowedEntryTiers
+	if allowedEntryTiers and allowedEntryTiers[entryTier] ~= true then
+		return 0, "rarity_distance"
+	end
+
+	local intendedTier = tonumber(data and data.IntendedTier) or tonumber(data and data.Tier) or COMMON_TIER
+	local distanceWeight, distance = getRarityDistanceWeight(entryTier, intendedTier)
+	if distanceWeight <= 0 then
+		return 0, "distance_weight"
+	end
+
+	local weight = base * distanceWeight
+	serverLuckMult = tonumber(serverLuckMult) or 1
+	if serverLuckMult <= 1 or maxTier <= 1 then
+		return weight, nil, distance, distanceWeight
+	end
+
+	if entryTier < LEGENDARY_TIER then
+		return weight, nil, distance, distanceWeight
+	end
+
+	local partBias = math.clamp(intendedTier / maxTier, 0, 1)
+	local denom = math.max(1, (maxTier - LEGENDARY_TIER))
+	local highBias = math.clamp((entryTier - LEGENDARY_TIER) / denom, 0, 1)
+	local exponent = math.clamp(partBias * (0.35 + 0.65 * highBias), 0, 1)
+
+	return weight * math.exp(math.log(serverLuckMult) * exponent), nil, distance, distanceWeight
+end
+
+local function chooseForPart(data, serverLuckMult)
 	local total = 0
 	local eligible = {}
+	local filteredByReason = {}
 
 	for i = 1, #entries do
-		local w = weightForEntry(entries[i], partTier, serverLuckMult, chanceCap)
+		local entry = entries[i]
+		local w, reason, distance, distanceWeight = weightForEntry(entry, data, serverLuckMult)
 		if w > 0 then
 			total += w
-			eligible[#eligible + 1] = entries[i]
+			eligible[#eligible + 1] = {
+				Entry = entry,
+				Weight = w,
+			}
+
+			if DEBUG_TRACE then
+				spawnTrace(
+					"rarityEligibility allowed spawnPad=%s intendedTier=%s crewMember=%s entryRarity=%s entryTier=%s distance=%s distanceWeight=%.4f finalWeight=%.8f",
+					tostring(data and data.Name),
+					tostring(data and data.IntendedTier),
+					tostring(entry.Id),
+					tostring(entry.Rarity),
+					tostring(entry.Tier),
+					tostring(distance),
+					tonumber(distanceWeight) or 0,
+					w
+				)
+			end
+		else
+			filteredByReason[reason or "zero_weight"] = (filteredByReason[reason or "zero_weight"] or 0) + 1
 		end
 	end
 
 	if #eligible == 0 then
-		return entries[rng:NextInteger(1, #entries)]
+		if DEBUG_TRACE then
+			local parts = {}
+			for reason, count in pairs(filteredByReason) do
+				parts[#parts + 1] = string.format("%s=%s", tostring(reason), tostring(count))
+			end
+			table.sort(parts)
+			spawnWarnThrottled(
+				"spawn_no_nearby_rarity_entries_" .. formatInstancePath(data and data.Part),
+				"chooseForPart skipped reason=no_nearby_rarity_entries spawnPart=%s padRarity=%s intendedTier=%s filters=%s",
+				formatInstancePath(data and data.Part),
+				tostring(data and data.Name),
+				tostring(data and data.IntendedTier),
+				table.concat(parts, ", ")
+			)
+		end
+		return nil
 	end
 
 	if total <= 0 then
-		return eligible[rng:NextInteger(1, #eligible)]
+		return eligible[rng:NextInteger(1, #eligible)].Entry
 	end
 
 	local pick = rng:NextNumber() * total
 	local acc = 0
 
 	for i = 1, #eligible do
-		acc += weightForEntry(eligible[i], partTier, serverLuckMult, chanceCap)
+		acc += eligible[i].Weight
 		if pick <= acc then
-			return eligible[i]
+			return eligible[i].Entry
 		end
 	end
 
-	return eligible[#eligible]
+	return eligible[#eligible].Entry
 end
 
 local function tryPlayIdle(model, animId)
@@ -472,6 +616,29 @@ local function tryPlayIdle(model, animId)
 		track.Looped = true
 		track:Play()
 	end)
+end
+
+local function getBiomeIndexFromName(name)
+	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
+	return indexText and tonumber(indexText) or nil
+end
+
+local function getSpawnPartBiomeIndex(spawnPart)
+	if not spawnPart or not biomesRoot then
+		return nil
+	end
+
+	local current = spawnPart
+	while current and current ~= biomesRoot do
+		local parent = current.Parent
+		if parent == biomesRoot then
+			return getBiomeIndexFromName(current.Name)
+		end
+
+		current = parent
+	end
+
+	return nil
 end
 
 local partDataList = {}
@@ -506,6 +673,8 @@ local function setupSpawnPart(spawnPart)
 		end
 
 		local partTier = tonumber((SpawnPartsCfg.RarityTier or {})[rarityName]) or 1
+		local intendedTier = getIntendedTierForPadName(rarityName)
+		local allowedEntryTiers = getAllowedEntryTiersForPadName(rarityName)
 		local chanceCap = tonumber((SpawnPartsCfg.LuckMult or {})[rarityName])
 			or tonumber(SpawnPartsCfg.DefaultLuckMult)
 			or 100
@@ -523,6 +692,8 @@ local function setupSpawnPart(spawnPart)
 			Part = spawnPart,
 			Name = rarityName,
 			Tier = partTier,
+			IntendedTier = intendedTier,
+			AllowedEntryTiers = allowedEntryTiers,
 			ChanceCap = chanceCap,
 			Container = container,
 			Spacing = spacing,
@@ -534,10 +705,24 @@ local function setupSpawnPart(spawnPart)
 		partDataByPart[spawnPart] = data
 		partDataList[#partDataList + 1] = data
 
+		local biomeIndex = getSpawnPartBiomeIndex(spawnPart)
+		if biomeIndex and biomeIndex ~= intendedTier then
+			spawnWarnThrottled(
+				"spawn_pad_biome_mismatch_" .. formatInstancePath(spawnPart),
+				"setupSpawnPart warning=unexpected_rarity_pad_biome_mismatch part=%s padRarity=%s intendedTier=%s biomeIndex=%s",
+				formatInstancePath(spawnPart),
+				tostring(rarityName),
+				tostring(intendedTier),
+				tostring(biomeIndex)
+			)
+		end
+
 		spawnTrace(
-			"setupSpawnPart part=%s rarity=%s pos=%s size=%s container=%s",
+			"setupSpawnPart part=%s rarity=%s rawTier=%s intendedTier=%s pos=%s size=%s container=%s",
 			formatInstancePath(spawnPart),
 			tostring(rarityName),
+			tostring(partTier),
+			tostring(intendedTier),
 			formatVector3(spawnPart.Position),
 			formatVector3(spawnPart.Size),
 			formatInstancePath(container)
@@ -637,6 +822,222 @@ end
 local active = {}
 ctx.Active = active
 
+local function releaseSpawnSlot(data, slotIndex, model, reason, cooldownSeconds)
+	if not data or not slotIndex then
+		return false
+	end
+
+	local current = data.SlotOccupied and data.SlotOccupied[slotIndex]
+	local canRelease = model == nil or current == nil or current == model
+	if not canRelease then
+		spawnWarnThrottled(
+			"slot_release_mismatch_" .. formatInstancePath(data.Part) .. "_" .. tostring(slotIndex),
+			"releaseSpawnSlot skipped reason=model_mismatch spawnPart=%s slot=%s expected=%s current=%s cleanupReason=%s",
+			formatInstancePath(data.Part),
+			tostring(slotIndex),
+			formatInstancePath(model),
+			formatInstancePath(current),
+			tostring(reason)
+		)
+		return false
+	end
+
+	local released = current ~= nil
+	if data.SlotOccupied then
+		data.SlotOccupied[slotIndex] = nil
+	end
+	if data.SlotOffsets then
+		data.SlotOffsets[slotIndex] = nil
+	end
+	if data.SlotCooldown and tonumber(cooldownSeconds) and tonumber(cooldownSeconds) > 0 then
+		data.SlotCooldown[slotIndex] = os.clock() + tonumber(cooldownSeconds)
+	end
+
+	if released then
+		spawnTrace(
+			"slotReleased spawnPart=%s slot=%s model=%s reason=%s",
+			formatInstancePath(data.Part),
+			tostring(slotIndex),
+			formatInstancePath(current),
+			tostring(reason)
+		)
+	end
+
+	return released
+end
+
+local function releaseStateOriginSlot(st, model, reason, clearOrigin)
+	if not st then
+		return false
+	end
+
+	local released = releaseSpawnSlot(st.OriginData, st.SlotIndex, model, reason)
+	if clearOrigin then
+		st.OriginData = nil
+		st.SlotIndex = nil
+	end
+	return released
+end
+
+local function disconnectActiveState(st)
+	if st and st.AncestryConn then
+		st.AncestryConn:Disconnect()
+		st.AncestryConn = nil
+	end
+end
+
+local function clearActiveState(model, st, reason)
+	if st then
+		disconnectActiveState(st)
+		releaseStateOriginSlot(st, model, reason, false)
+	end
+
+	if model and active[model] == st then
+		active[model] = nil
+	end
+end
+
+local function ensureSpawnContainer(data)
+	if not data or data.Disabled or not data.Part or not data.Part.Parent or not data.Part:IsA("BasePart") then
+		return false
+	end
+
+	if data.Container and data.Container.Parent == data.Part then
+		return true
+	end
+
+	local container = data.Part:FindFirstChild(CREW_MEMBERS_SPAWN_FOLDER_NAME)
+	if not container then
+		container = Instance.new("Folder")
+		container.Name = CREW_MEMBERS_SPAWN_FOLDER_NAME
+		container.Parent = data.Part
+	end
+
+	data.Container = container
+	spawnTrace(
+		"spawnContainerRebound spawnPart=%s container=%s",
+		formatInstancePath(data.Part),
+		formatInstancePath(container)
+	)
+	return true
+end
+
+local function cleanupInvalidSpawnData(data, reason)
+	if not data or data.Disabled then
+		return
+	end
+
+	data.Disabled = true
+	if data.Part then
+		partDataByPart[data.Part] = nil
+	end
+
+	for i = 1, SpawnerConfig.MaxPerPart do
+		local model = data.SlotOccupied and data.SlotOccupied[i]
+		if model then
+			local st = active[model]
+			if model.Parent and model.Parent ~= data.Container then
+				if st then
+					releaseStateOriginSlot(st, model, reason or "invalid_spawn_part_parented_away", true)
+				else
+					releaseSpawnSlot(data, i, model, reason or "invalid_spawn_part_parented_away")
+				end
+			elseif st then
+				clearActiveState(model, st, reason or "invalid_spawn_part")
+			else
+				releaseSpawnSlot(data, i, model, reason or "invalid_spawn_part")
+			end
+
+			if model.Parent == data.Container and not isTutorialCrewMemberModel(model) and not isHeldCrewMemberModel(model, st) then
+				pcall(function()
+					model:Destroy()
+				end)
+			end
+		end
+		if data.SlotCooldown then
+			data.SlotCooldown[i] = nil
+		end
+	end
+
+	spawnWarnThrottled(
+		"invalid_spawn_data_" .. formatInstancePath(data.Part),
+		"spawnData disabled reason=%s spawnPart=%s container=%s",
+		tostring(reason),
+		formatInstancePath(data.Part),
+		formatInstancePath(data.Container)
+	)
+end
+
+local function reconcileSpawnData(data, reason)
+	if not data or data.Disabled then
+		return false
+	end
+
+	if not data.Part or not data.Part.Parent or not data.Part:IsA("BasePart") then
+		cleanupInvalidSpawnData(data, reason or "invalid_spawn_part")
+		return false
+	end
+
+	if not ensureSpawnContainer(data) then
+		cleanupInvalidSpawnData(data, reason or "invalid_spawn_container")
+		return false
+	end
+
+	local occupiedModels = {}
+	for i = 1, SpawnerConfig.MaxPerPart do
+		local model = data.SlotOccupied and data.SlotOccupied[i]
+		if model then
+			local st = active[model]
+			if not model.Parent then
+				if st then
+					clearActiveState(model, st, "destroyed_slot_model")
+				else
+					releaseSpawnSlot(data, i, model, "destroyed_slot_model")
+				end
+			elseif model.Parent ~= data.Container then
+				if st then
+					releaseStateOriginSlot(st, model, "parented_away_from_spawn_folder", true)
+				else
+					releaseSpawnSlot(data, i, model, "parented_away_from_spawn_folder")
+				end
+			elseif st and (st.OriginData ~= data or st.SlotIndex ~= i) then
+				releaseSpawnSlot(data, i, model, "active_origin_mismatch")
+				spawnWarnThrottled(
+					"slot_active_origin_mismatch_" .. formatInstancePath(data.Part) .. "_" .. tostring(i),
+					"reconcileSpawnData cleared reason=active_origin_mismatch spawnPart=%s slot=%s model=%s activeOrigin=%s activeSlot=%s",
+					formatInstancePath(data.Part),
+					tostring(i),
+					formatInstancePath(model),
+					formatInstancePath(st.OriginData and st.OriginData.Part),
+					tostring(st.SlotIndex)
+				)
+			else
+				occupiedModels[model] = true
+			end
+		end
+	end
+
+	for _, child in ipairs(data.Container:GetChildren()) do
+		if child:IsA("Model") and not occupiedModels[child] and not isTutorialCrewMemberModel(child) then
+			local st = active[child]
+			if st then
+				clearActiveState(child, st, "orphaned_spawn_folder_model")
+			end
+			spawnWarnThrottled(
+				"orphaned_spawn_model_" .. formatInstancePath(child),
+				"reconcileSpawnData destroying reason=orphaned_spawn_folder_model spawnPart=%s model=%s",
+				formatInstancePath(data.Part),
+				formatInstancePath(child)
+			)
+			pcall(function()
+				child:Destroy()
+			end)
+		end
+	end
+
+	return true
+end
+
 local function expireCrewMember(model, st)
 	if active[model] ~= st then
 		return
@@ -648,18 +1049,7 @@ local function expireCrewMember(model, st)
 		return
 	end
 
-	if st.OriginData and st.SlotIndex then
-		local od = st.OriginData
-		local si = st.SlotIndex
-		if od.SlotOccupied and od.SlotOccupied[si] == model then
-			od.SlotOccupied[si] = nil
-		end
-		if od.SlotOffsets then
-			od.SlotOffsets[si] = nil
-		end
-	end
-
-	active[model] = nil
+	clearActiveState(model, st, "expired")
 	pcall(function()
 		model:Destroy()
 	end)
@@ -857,17 +1247,7 @@ hitBox.Touched:Connect(function(hit)
 			TutorialToken = tostring(info.TutorialToken or ""),
 		})
 		if info.OriginData and info.SlotIndex then
-			local od = info.OriginData
-			local si = info.SlotIndex
-			if od.SlotOccupied and od.SlotOccupied[si] then
-				od.SlotOccupied[si] = nil
-			end
-			if od.SlotOffsets then
-				od.SlotOffsets[si] = nil
-			end
-			if od.SlotCooldown then
-				od.SlotCooldown[si] = os.clock() + rng:NextNumber(4, 6)
-			end
+			releaseSpawnSlot(info.OriginData, info.SlotIndex, info.Model, "extracted", rng:NextNumber(4, 6))
 		end
 	end
 	if not collectedAny then
@@ -901,9 +1281,21 @@ local function registerActive(model, entry, originData, slotIndex)
 		Weld = nil,
 		OriginData = originData,
 		SlotIndex = slotIndex,
+		AncestryConn = nil,
 	}
 
 	active[model] = st
+	st.AncestryConn = model.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			clearActiveState(model, st, "destroyed_or_removed")
+			return
+		end
+
+		if st.OriginData and st.SlotIndex and st.OriginData.Container and parent ~= st.OriginData.Container then
+			releaseStateOriginSlot(st, model, "parented_away_from_spawn_folder", true)
+		end
+	end)
+
 	syncSpawnOverhead(model, entry, tl)
 	st.Prompt = Interaction.BindPrompt(ctx, model, st, Placement.EnsurePrimaryPart)
 
@@ -963,29 +1355,6 @@ local function pickRandomOffset(data, halfX, halfZ)
 	return Vector2.new(rng:NextNumber(-halfX, halfX), rng:NextNumber(-halfZ, halfZ))
 end
 
-local function getBiomeIndexFromName(name)
-	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
-	return indexText and tonumber(indexText) or nil
-end
-
-local function getSpawnPartBiomeIndex(spawnPart)
-	if not spawnPart or not biomesRoot then
-		return nil
-	end
-
-	local current = spawnPart
-	while current and current ~= biomesRoot do
-		local parent = current.Parent
-		if parent == biomesRoot then
-			return getBiomeIndexFromName(current.Name)
-		end
-
-		current = parent
-	end
-
-	return nil
-end
-
 local function getTutorialSpawnDataCandidates()
 	local firstBiome = {}
 	local indexedBiomes = {}
@@ -993,7 +1362,7 @@ local function getTutorialSpawnDataCandidates()
 
 	for i = 1, #partDataList do
 		local data = partDataList[i]
-		if data and data.Part and data.Part.Parent and data.Container and data.Container.Parent then
+		if data and not data.Disabled and reconcileSpawnData(data, "tutorial_candidate") then
 			local biomeIndex = getSpawnPartBiomeIndex(data.Part)
 			if biomeIndex == FIRST_TUTORIAL_BIOME_INDEX then
 				firstBiome[#firstBiome + 1] = data
@@ -1046,6 +1415,10 @@ local function getTutorialSpawnDataCandidates()
 end
 
 local function reserveTutorialSlot(data)
+	if not reconcileSpawnData(data, "tutorial_reserve_preflight") then
+		return nil
+	end
+
 	local slotIndex = findFreeSlotRandom(data, os.clock())
 	if slotIndex then
 		return slotIndex
@@ -1057,19 +1430,6 @@ local function reserveTutorialSlot(data)
 	end
 
 	return slotIndex
-end
-
-local function releaseSpawnSlot(data, slotIndex, model)
-	if not data or not slotIndex then
-		return
-	end
-
-	if data.SlotOccupied and (model == nil or data.SlotOccupied[slotIndex] == model) then
-		data.SlotOccupied[slotIndex] = nil
-	end
-	if data.SlotOffsets then
-		data.SlotOffsets[slotIndex] = nil
-	end
 end
 
 local function spawnTutorialCrewMemberOnData(data, options)
@@ -1123,6 +1483,12 @@ local function spawnTutorialCrewMemberOnData(data, options)
 	local halfX = math.max(0, (effX / 2) - (finalSize.X / 2))
 	local halfZ = math.max(0, (effZ / 2) - (finalSize.Z / 2))
 	local slotIndex = reserveTutorialSlot(data)
+	if not slotIndex then
+		pcall(function()
+			clone:Destroy()
+		end)
+		return nil, "Tutorial spawn part is no longer valid."
+	end
 	local offsetXZ = pickRandomOffset(data, halfX, halfZ)
 	local yaw = rng:NextNumber(0, math.pi * 2)
 
@@ -1149,7 +1515,7 @@ local function spawnTutorialCrewMemberOnData(data, options)
 			if conn then
 				conn:Disconnect()
 			end
-			releaseSpawnSlot(data, slotIndex, clone)
+			releaseSpawnSlot(data, slotIndex, clone, "tutorial_clone_removed_during_spawn_tween")
 			return
 		end
 
@@ -1187,7 +1553,7 @@ local function spawnTutorialCrewMemberOnData(data, options)
 				state.Prompt.ObjectText = "Tutorial Pickup"
 			end
 		else
-			releaseSpawnSlot(data, slotIndex, clone)
+			releaseSpawnSlot(data, slotIndex, clone, "tutorial_clone_missing_before_register")
 			spawnWarnThrottled(
 				"tutorial_spawn_completed_missing_clone_" .. tostring(finalId),
 				"tutorialSpawn skipped reason=clone_missing_before_register spawnPart=%s crewMember=%s player=%s",
@@ -1244,7 +1610,7 @@ local function getSameNameSpawnPartPaths(rarityName)
 
 	for i = 1, #partDataList do
 		local data = partDataList[i]
-		if data and data.Part and data.Name == rarityName then
+		if data and not data.Disabled and data.Part and data.Name == rarityName then
 			paths[#paths + 1] = formatInstancePath(data.Part)
 		end
 	end
@@ -1255,6 +1621,10 @@ end
 
 local function spawnOne(data)
 	local ok, result = xpcall(function()
+		if not reconcileSpawnData(data, "spawn_one_preflight") then
+			return false
+		end
+
 		local now = os.clock()
 		local occupied = occupiedCount(data)
 		if occupied >= SpawnerConfig.MaxPerPart then
@@ -1279,15 +1649,14 @@ local function spawnOne(data)
 			return false
 		end
 
-		local baseEntry = chooseForPart(data.Tier, getServerLuckMult(), data.ChanceCap)
+		local baseEntry = chooseForPart(data, getServerLuckMult())
 		if not baseEntry then
 			spawnWarnThrottled(
 				"spawn_skip_no_entry_" .. formatInstancePath(data.Part),
-				"spawnOne skipped reason=no_base_entry spawnPart=%s rarity=%s tier=%s chanceCap=%s",
+				"spawnOne skipped reason=no_base_entry spawnPart=%s rarity=%s intendedTier=%s",
 				formatInstancePath(data.Part),
 				tostring(data.Name),
-				tostring(data.Tier),
-				tostring(data.ChanceCap)
+				tostring(data.IntendedTier)
 			)
 			return false
 		end
@@ -1399,6 +1768,7 @@ local function spawnOne(data)
 				if conn then
 					conn:Disconnect()
 				end
+				releaseSpawnSlot(data, freeIndex, clone, "clone_removed_during_spawn_tween")
 				return
 			end
 			local s = tonumber(v)
@@ -1438,8 +1808,7 @@ local function spawnOne(data)
 				tryPlayIdle(clone, entry.Info.IdleAnim)
 				registerActive(clone, entry, data, freeIndex)
 			else
-				data.SlotOccupied[freeIndex] = nil
-				data.SlotOffsets[freeIndex] = nil
+				releaseSpawnSlot(data, freeIndex, clone, "clone_missing_before_register")
 				spawnWarnThrottled(
 					"spawn_completed_missing_clone_" .. tostring(finalId),
 					"spawnOne skipped reason=clone_missing_before_register spawnPart=%s crewMember=%s",
@@ -1465,15 +1834,31 @@ local function spawnOne(data)
 end
 
 local function despawnAllInData(data)
+	if not reconcileSpawnData(data, "despawn_all_preflight") then
+		return
+	end
+
 	for i = 1, SpawnerConfig.MaxPerPart do
 		local m = data.SlotOccupied[i]
-		if m and m.Parent == data.Container then
+		if m then
+			local st = active[m]
 			if isTutorialCrewMemberModel(m) then
 				continue
 			end
-			active[m] = nil
-			data.SlotOccupied[i] = nil
-			data.SlotOffsets[i] = nil
+			if isHeldCrewMemberModel(m, st) then
+				if st then
+					releaseStateOriginSlot(st, m, "despawn_all_held_parented_away", true)
+				else
+					releaseSpawnSlot(data, i, m, "despawn_all_held_parented_away")
+				end
+				continue
+			end
+
+			if st then
+				clearActiveState(m, st, "despawn_all")
+			else
+				releaseSpawnSlot(data, i, m, "despawn_all")
+			end
 			pcall(function()
 				m:Destroy()
 			end)
@@ -1498,16 +1883,34 @@ end
 local secretEntries = buildSecretPool()
 
 local function pickRandomPartData()
-	if #partDataList == 0 then
+	local candidates = {}
+	for i = 1, #partDataList do
+		local data = partDataList[i]
+		if data
+			and not data.Disabled
+			and (data.Name == "Secret" or data.Name == "Omega")
+			and reconcileSpawnData(data, "like_goal_secret_candidate")
+		then
+			candidates[#candidates + 1] = data
+		end
+	end
+
+	if #candidates == 0 then
 		return nil
 	end
-	return partDataList[rng:NextInteger(1, #partDataList)]
+	return candidates[rng:NextInteger(1, #candidates)]
 end
 
 local function spawnRandomSecretIgnoreLimits()
 	local data = pickRandomPartData()
 	if not data or not data.Part or not data.Part.Parent then
-		spawnWarn("likeGoal skipped reason=no_spawn_parts")
+		spawnWarn("likeGoal skipped reason=no_secret_spawn_parts")
+		return
+	end
+
+	local freeIndex = findFreeSlotRandom(data, os.clock())
+	if not freeIndex then
+		spawnWarn("likeGoal skipped reason=no_free_secret_slot spawnPart=%s", formatInstancePath(data.Part))
 		return
 	end
 
@@ -1515,8 +1918,8 @@ local function spawnRandomSecretIgnoreLimits()
 	if #secretEntries > 0 then
 		baseEntry = secretEntries[rng:NextInteger(1, #secretEntries)]
 	else
-		spawnWarn("likeGoal no_secret_entries fallback=random_entry")
-		baseEntry = entries[rng:NextInteger(1, #entries)]
+		spawnWarn("likeGoal skipped reason=no_secret_entries")
+		return
 	end
 
 	local variantKey = "Normal"
@@ -1572,8 +1975,10 @@ local function spawnRandomSecretIgnoreLimits()
 	local yaw = rng:NextNumber(0, math.pi * 2)
 
 	Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
+	data.SlotOffsets[freeIndex] = offsetXZ
+	data.SlotOccupied[freeIndex] = clone
 	tryPlayIdle(clone, entry.Info.IdleAnim)
-	registerActive(clone, entry, nil, nil)
+	registerActive(clone, entry, data, freeIndex)
 
 	spawnTrace(
 		"likeGoalSpawn rarity=%s crewMember=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPosition=%s",
@@ -1588,25 +1993,27 @@ end
 
 
 local rrIndex = 0
+local lastReconcileAt = 0
 
 while true do
 	local positions = getPlayerPositions()
 	local now = os.clock()
+	local shouldReconcile = (now - lastReconcileAt) >= RECONCILE_INTERVAL
+	if shouldReconcile then
+		lastReconcileAt = now
+		for i = 1, #partDataList do
+			reconcileSpawnData(partDataList[i], "periodic_audit")
+		end
+	end
 
 	for model, st in pairs(active) do
 		if not model.Parent then
-			if st.OriginData and st.SlotIndex then
-				local od = st.OriginData
-				local si = st.SlotIndex
-				if od.SlotOccupied and od.SlotOccupied[si] == model then
-					od.SlotOccupied[si] = nil
-				end
-				if od.SlotOffsets then
-					od.SlotOffsets[si] = nil
-				end
-			end
-			active[model] = nil
+			clearActiveState(model, st, "destroyed_or_removed")
 		else
+			if st.OriginData and st.SlotIndex and st.OriginData.Container and model.Parent ~= st.OriginData.Container then
+				releaseStateOriginSlot(st, model, "parented_away_from_spawn_folder", true)
+			end
+
 			if isHeldCrewMemberModel(model, st) then
 				st.LastUpdate = now
 			else
@@ -1624,17 +2031,7 @@ while true do
 				end
 
 				if st.Remaining <= 0 and not isTutorialCrewMemberModel(model) then
-					if st.OriginData and st.SlotIndex then
-						local od = st.OriginData
-						local si = st.SlotIndex
-						if od.SlotOccupied and od.SlotOccupied[si] == model then
-							od.SlotOccupied[si] = nil
-						end
-						if od.SlotOffsets then
-							od.SlotOffsets[si] = nil
-						end
-					end
-					active[model] = nil
+					clearActiveState(model, st, "expired")
 					pcall(function()
 						model:Destroy()
 					end)
@@ -1655,7 +2052,7 @@ while true do
 			end
 
 			local data = partDataList[rrIndex]
-			if data and data.Part and data.Part.Parent then
+			if data and not data.Disabled and reconcileSpawnData(data, "spawn_loop") then
 				local near = anyPlayerNearPart(data.Part, positions, SpawnerConfig.PlayerSpawnRadius)
 				if not near then
 					if SpawnerConfig.DespawnWhenNoPlayers then

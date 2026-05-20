@@ -1252,6 +1252,7 @@ local function buildHeldInfo(model, st)
 	local tutorialRewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
 
 	local info = {
+		Model = model,
 		Name = storageName,
 		CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
 		DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
