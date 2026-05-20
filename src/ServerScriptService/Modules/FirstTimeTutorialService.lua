@@ -1917,7 +1917,7 @@ local function onObjectiveRecorded(player, eventData)
 	local context = if typeof(eventData.Context) == "table" then eventData.Context else {}
 	local source = tostring(context.Source or "")
 
-	if objectiveType == "ExtractCrew" and source == "SpawnCrewMembers" and context.TutorialCrewMember == true then
+	if objectiveType == "ExtractCrew" and context.TutorialCrewMember == true then
 		local session = sessions[player]
 		local eventToken = tostring(context.TutorialToken or "")
 		if session and (eventToken == tostring(session.tutorialToken or "") or hasTutorialReward(player, session)) then

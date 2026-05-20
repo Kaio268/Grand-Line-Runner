@@ -1522,11 +1522,17 @@ local function grantCanonicalCrewMember(player, rewardData, source, options)
 		return nil, nil, nil
 	end
 
+	local tutorialReward = options.TutorialReward == true
+		or rewardData.TutorialReward == true
+		or rewardData.TutorialCrewMember == true
+
 	local ok, createdIds = AddCrewMember:AddCrewMember(player, grantData.StorageName, 1, {
 		LegacyStorageName = grantData.LegacyStorageName,
 		Source = source or tostring(rewardData.Source or "GrandLineRush"),
 		DepthBand = tostring(rewardData.DepthBand or ""),
 		TotalXP = math.max(0, math.floor(tonumber(rewardData.TotalXP) or 0)),
+		TutorialReward = tutorialReward,
+		TutorialToken = tostring(options.TutorialToken or rewardData.TutorialToken or ""),
 		GrandLineRushStarter = options.GrandLineRushStarter == true or rewardData.GrandLineRushStarter == true,
 		_QuickSlotCapacityReserved = options.BypassCapacity == true,
 	})
@@ -1793,6 +1799,8 @@ local function installCarrySlotAdapter()
 		end,
 		AddCrewMember = function(player, crewData)
 			crewData = if typeof(crewData) == "table" then crewData else {}
+			local tutorialCrewMember = crewData.TutorialCrewMember == true
+			local tutorialReward = crewData.TutorialReward == true or tutorialCrewMember
 			local slot, reason = addCarryItem(player, getRuntime(player), {
 				ItemType = "CrewMember",
 				DisplayName = crewData.DisplayName or crewData.CrewName or crewData.CrewMemberId,
@@ -1806,6 +1814,11 @@ local function installCarrySlotAdapter()
 					CanonicalRarity = crewData.CanonicalRarity,
 					Image = crewData.Image,
 					Physical = crewData.Physical == true,
+					TutorialCrewMember = tutorialCrewMember,
+					TutorialReward = tutorialReward,
+					TutorialToken = if tutorialReward then tostring(crewData.TutorialToken or "") else nil,
+					TutorialRewardName = if tutorialReward then tostring(crewData.TutorialRewardName or "") else nil,
+					TutorialOwnerUserId = if tutorialReward then tonumber(crewData.TutorialOwnerUserId) else nil,
 				},
 			})
 			if slot then
@@ -1953,6 +1966,10 @@ local function grantCarrySlotReward(player, slot)
 			Rarity = carriedReward.Rarity,
 			CanonicalRarity = carriedReward.CanonicalRarity,
 			DepthBand = carriedReward.DepthBand,
+			TutorialCrewMember = carriedReward.TutorialCrewMember == true,
+			TutorialReward = carriedReward.TutorialReward == true or carriedReward.TutorialCrewMember == true,
+			TutorialToken = tostring(carriedReward.TutorialToken or ""),
+			TutorialRewardName = tostring(carriedReward.TutorialRewardName or ""),
 		}, "GrandLineRush")
 		if instanceId == nil then
 			return false, nil, "persist_crew_failed"
@@ -1970,11 +1987,22 @@ local function grantCarrySlotReward(player, slot)
 		RewardType = tostring(carriedReward.RewardType or ""),
 	})
 	if carriedReward.RewardType == "Crew" then
-		QuestSignals.Record(player, "ExtractCrew", 1, {
+		local extractContext = {
+			Source = "GrandLineRush",
 			DepthBand = tostring(carriedReward.DepthBand or ""),
 			Rarity = tostring(carriedReward.Rarity or ""),
 			CrewName = tostring(carriedReward.CrewName or carriedReward.DisplayName or ""),
-		})
+			CrewMemberId = tostring(carriedReward.CrewMemberId or ""),
+			CrewStorageName = tostring(carriedReward.CrewStorageName or ""),
+		}
+
+		if carriedReward.TutorialCrewMember == true or carriedReward.TutorialReward == true then
+			extractContext.TutorialCrewMember = true
+			extractContext.TutorialToken = tostring(carriedReward.TutorialToken or "")
+			extractContext.TutorialRewardName = tostring(carriedReward.TutorialRewardName or "")
+		end
+
+		QuestSignals.Record(player, "ExtractCrew", 1, extractContext)
 	end
 
 	local extractionBounty, _ = BountyService.AwardExtractionBountyForReward(player, carriedReward)
