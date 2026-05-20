@@ -22,7 +22,7 @@ local function navButton(props)
 		BackgroundTransparency = 0.15,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.fromOffset(160, 52),
+		Size = UDim2.fromOffset(props.compact and 136 or 160, 52),
 		Text = "",
 		ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		[React.Event.MouseEnter] = function()
@@ -80,12 +80,19 @@ local function navButton(props)
 end
 
 local function SectionNav(props)
+	local compact = props.compact == true
+	local padding = compact and 6 or 8
+
 	local children = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			Padding = UDim.new(0, 10),
+			HorizontalAlignment = Enum.HorizontalAlignment.Left,
+			Padding = UDim.new(0, compact and 8 or 10),
 			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+		Padding = e("UIPadding", {
+			PaddingLeft = UDim.new(0, padding),
+			PaddingRight = UDim.new(0, padding),
 		}),
 	}
 
@@ -94,6 +101,7 @@ local function SectionNav(props)
 			active = props.activeSectionKey == section.key,
 			layoutOrder = index,
 			onSectionSelected = props.onSectionSelected,
+			compact = compact,
 			section = section,
 			zIndex = props.zIndex,
 		})
@@ -104,6 +112,7 @@ local function SectionNav(props)
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		CanvasSize = UDim2.new(),
+		ElasticBehavior = Enum.ElasticBehavior.Never,
 		LayoutOrder = props.layoutOrder or 0,
 		Position = props.position,
 		ScrollBarImageTransparency = 1,

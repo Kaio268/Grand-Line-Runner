@@ -95,6 +95,7 @@ local function ShopShell(props)
 	local navTop = headerHeight + noticeHeight + 12
 	local contentTop = navTop + navHeight + 14
 	local titleTextSize = contentWidth >= 1320 and 56 or (contentWidth >= 1120 and 52 or 46)
+	local compactNav = contentWidth < 1120
 
 	local function scrollToSection(sectionKey)
 		local scroller = scrollerRef.current
@@ -410,6 +411,7 @@ local function ShopShell(props)
 				sections = props.catalog.sections,
 				activeSectionKey = activeSectionKey,
 				onSectionSelected = handleSectionSelected,
+				compact = compactNav,
 				position = UDim2.fromOffset(12, 6),
 				size = UDim2.new(1, -24, 0, 54),
 				zIndex = 13,
