@@ -6,14 +6,19 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local Theme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
+local ObjectiveVectorIndicator = require(script.Parent:WaitForChild("ObjectiveVectorIndicator"))
 
 local e = React.createElement
 
+local VECTOR_PATH_INDICATOR_STYLE = "VectorPath"
 local EDGE_PADDING = 54
 local TOP_PADDING = 74
 local BOTTOM_PADDING = 220
 local MARKER_OFFSET = 42
 local ARROW_IMAGE_ASSET = "rbxassetid://136351759076111"
+local PICKUP_CREW_MEMBER_TARGET_ID = "tutorial_crew_member"
+local PICKUP_CREW_MEMBER_TARGET_KIND = "crew_member"
+local SPEED_UPGRADE_NPC_TARGET_ID = "speed_upgrade_npc"
 
 local COLORS = {
 	Gold = Theme.Palette.Gold,
@@ -22,6 +27,45 @@ local COLORS = {
 	Text = Theme.Palette.Text,
 	Panel = Color3.fromRGB(14, 26, 38),
 }
+
+local DEFAULT_SIZES = {
+	ArrowOnScreen = 42,
+	ArrowOffScreen = 52,
+	IndicatorOnScreen = 52,
+	IndicatorOffScreen = 66,
+	Dot = 9,
+	LabelWidth = 142,
+	LabelHeight = 26,
+	LabelText = 13,
+}
+
+local PICKUP_CREW_MEMBER_SIZES = {
+	ArrowOnScreen = 68,
+	ArrowOffScreen = 82,
+	IndicatorOnScreen = 82,
+	IndicatorOffScreen = 96,
+	Dot = 13,
+	LabelWidth = 184,
+	LabelHeight = 30,
+	LabelText = 15,
+}
+
+local function isPickupCrewMemberTarget(target)
+	if typeof(target) ~= "table" then
+		return false
+	end
+
+	return tostring(target.id or "") == PICKUP_CREW_MEMBER_TARGET_ID
+		and tostring(target.kind or "") == PICKUP_CREW_MEMBER_TARGET_KIND
+end
+
+local function isSpeedUpgradeNpcTarget(target)
+	if typeof(target) ~= "table" then
+		return false
+	end
+
+	return tostring(target.id or "") == SPEED_UPGRADE_NPC_TARGET_ID
+end
 
 local function createFallbackArrow(rotation, size, zIndex, visible)
 	return e("TextLabel", {
@@ -134,7 +178,7 @@ local function projectTarget(target)
 	}
 end
 
-local function ObjectiveIndicator(props)
+local function ObjectiveScreenIndicator(props)
 	local target = props.target
 	local projected, setProjected = React.useState(nil)
 	local arrowImageRef = React.useRef(nil)
@@ -229,7 +273,14 @@ local function ObjectiveIndicator(props)
 	local label = tostring(target.label or "Objective")
 	local position = projected.position
 	local zIndex = tonumber(props.zIndex) or 184
-	local arrowSize = if projected.onScreen then 42 else 52
+	local isPickupTarget = isPickupCrewMemberTarget(target)
+	local isSpeedUpgradeTarget = isSpeedUpgradeNpcTarget(target)
+	local isLargeTarget = isPickupTarget or isSpeedUpgradeTarget
+	local showLabel = not isSpeedUpgradeTarget
+	local sizes = if isLargeTarget then PICKUP_CREW_MEMBER_SIZES else DEFAULT_SIZES
+	local arrowSize = if projected.onScreen then sizes.ArrowOnScreen else sizes.ArrowOffScreen
+	local indicatorSize = if projected.onScreen then sizes.IndicatorOnScreen else sizes.IndicatorOffScreen
+	local labelOffsetY = (indicatorSize / 2) + 8
 
 	local indicatorChildren = {
 		Corner = e("UICorner", {
@@ -237,12 +288,33 @@ local function ObjectiveIndicator(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = COLORS.GoldSoft,
-			Thickness = 2,
-			Transparency = 0.08,
+			Thickness = if isLargeTarget then 3 else 2,
+			Transparency = if isLargeTarget then 0 else 0.08,
 		}),
 		FallbackArrow = createFallbackArrow(projected.rotation, arrowSize, zIndex + 3, not arrowImageLoaded),
 		Arrow = createArrowPointer(projected.rotation, arrowSize, zIndex + 4, arrowImageRef),
 	}
+
+	if isLargeTarget then
+		indicatorChildren.PickupGlow = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(indicatorSize + 18, indicatorSize + 18),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = COLORS.GoldShadow,
+				Thickness = 4,
+				Transparency = 0.58,
+			}),
+		})
+	end
 
 	if projected.onScreen then
 		indicatorChildren.Dot = e("Frame", {
@@ -250,7 +322,7 @@ local function ObjectiveIndicator(props)
 			BackgroundColor3 = COLORS.Gold,
 			BorderSizePixel = 0,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(9, 9),
+			Size = UDim2.fromOffset(sizes.Dot, sizes.Dot),
 			ZIndex = zIndex + 2,
 		}, {
 			Corner = e("UICorner", {
@@ -271,20 +343,20 @@ local function ObjectiveIndicator(props)
 			BackgroundTransparency = if projected.onScreen then 0.48 else 0.06,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(position.X, position.Y),
-			Size = UDim2.fromOffset(if projected.onScreen then 52 else 66, if projected.onScreen then 52 else 66),
+			Size = UDim2.fromOffset(indicatorSize, indicatorSize),
 			ZIndex = zIndex + 1,
 		}, indicatorChildren),
-		Label = e("TextLabel", {
+		Label = showLabel and e("TextLabel", {
 			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundColor3 = COLORS.Panel,
 			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(position.X, position.Y + if projected.onScreen then 34 else 41),
-			Size = UDim2.fromOffset(142, 26),
+			Position = UDim2.fromOffset(position.X, position.Y + labelOffsetY),
+			Size = UDim2.fromOffset(sizes.LabelWidth, sizes.LabelHeight),
 			Text = label,
 			TextColor3 = COLORS.Text,
-			TextSize = 13,
+			TextSize = sizes.LabelText,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			ZIndex = zIndex + 1,
 		}, {
@@ -292,12 +364,22 @@ local function ObjectiveIndicator(props)
 				CornerRadius = UDim.new(0, 8),
 			}),
 			Stroke = e("UIStroke", {
-				Color = COLORS.GoldShadow,
-				Thickness = 1,
-				Transparency = 0.35,
+				Color = if isLargeTarget then COLORS.GoldSoft else COLORS.GoldShadow,
+				Thickness = if isLargeTarget then 2 else 1,
+				Transparency = if isLargeTarget then 0.12 else 0.35,
 			}),
-		}),
+		}) or nil,
 	})
+end
+
+local function ObjectiveIndicator(props)
+	if tostring(props.indicatorStyle or "") == VECTOR_PATH_INDICATOR_STYLE then
+		return e(ObjectiveVectorIndicator, {
+			target = props.target,
+		})
+	end
+
+	return e(ObjectiveScreenIndicator, props)
 end
 
 return ObjectiveIndicator

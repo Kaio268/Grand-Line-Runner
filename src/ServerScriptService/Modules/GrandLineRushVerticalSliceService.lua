@@ -35,6 +35,7 @@ local REQUEST_ACTION_ALLOWLIST = {
 	DropCarriedReward = true,
 	FeedCrew = true,
 }
+local TUTORIAL_EXTRACTION_SOURCE = "GrandLineRushTutorialExtraction"
 local CHEST_DEBUG = false
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("VerticalSliceDebugTrace") == true
 
@@ -1474,6 +1475,11 @@ local function installCarrySlotAdapter()
 					CanonicalRarity = crewData.CanonicalRarity,
 					Image = crewData.Image,
 					Physical = crewData.Physical == true,
+					TutorialCrewMember = crewData.TutorialCrewMember == true,
+					TutorialOwnerUserId = crewData.TutorialOwnerUserId,
+					TutorialToken = tostring(crewData.TutorialToken or ""),
+					TutorialRewardName = tostring(crewData.TutorialRewardName or ""),
+					TutorialCrewMemberId = tostring(crewData.TutorialCrewMemberId or ""),
 				},
 			})
 			if slot then
@@ -1596,6 +1602,85 @@ local function claimSpawnedReward(player)
 	return resolveActionResponse(player, true, runtime.ResolutionText)
 end
 
+local function isTutorialPhysicalCrewReward(carriedReward)
+	return typeof(carriedReward) == "table"
+		and carriedReward.RewardType ~= "Chest"
+		and carriedReward.Physical == true
+		and carriedReward.TutorialCrewMember == true
+end
+
+local function getTutorialRewardNameFromCarriedReward(carriedReward)
+	if typeof(carriedReward) ~= "table" then
+		return ""
+	end
+
+	return firstNonEmpty(
+		carriedReward.TutorialRewardName,
+		carriedReward.TutorialCrewMemberId,
+		carriedReward.CrewStorageName,
+		carriedReward.CrewMemberId,
+		carriedReward.CrewName
+	)
+end
+
+local function grantTutorialCarrySlotReward(player, carriedReward)
+	local ownerUserId = tonumber(carriedReward.TutorialOwnerUserId)
+	if ownerUserId ~= player.UserId then
+		return false, nil, "tutorial_owner_mismatch"
+	end
+
+	local tutorialToken = tostring(carriedReward.TutorialToken or "")
+	if tutorialToken == "" then
+		return false, nil, "tutorial_token_missing"
+	end
+
+	local tutorialRewardName = getTutorialRewardNameFromCarriedReward(carriedReward)
+	if tutorialRewardName == "" then
+		return false, nil, "tutorial_reward_missing"
+	end
+
+	local alreadyGranted, existingInstanceId = CrewInstanceService.HasUsableTutorialReward(
+		player,
+		tutorialRewardName,
+		tutorialToken
+	)
+	local instanceId = existingInstanceId
+	if alreadyGranted ~= true then
+		local ok, createdIds = AddCrewMember:AddCrewMember(player, tutorialRewardName, 1, {
+			TutorialReward = true,
+			TutorialToken = tutorialToken,
+			Source = TUTORIAL_EXTRACTION_SOURCE,
+			_QuickSlotCapacityReserved = true,
+		})
+		if ok ~= true then
+			return false, nil, "persist_tutorial_crew_failed"
+		end
+
+		instanceId = if typeof(createdIds) == "table" then tostring(createdIds[1] or "") else ""
+		if instanceId == "" then
+			return false, nil, "persist_tutorial_crew_failed"
+		end
+	end
+
+	local displayName = tostring(carriedReward.CrewDisplayName or carriedReward.DisplayName or carriedReward.CrewName or tutorialRewardName)
+	QuestSignals.Record(player, "ExtractCrew", 1, {
+		Source = TUTORIAL_EXTRACTION_SOURCE,
+		CrewName = displayName,
+		TutorialCrewMember = true,
+		TutorialOwnerUserId = ownerUserId,
+		TutorialCrewMemberId = tostring(carriedReward.TutorialCrewMemberId or carriedReward.CrewMemberId or ""),
+		TutorialRewardName = tutorialRewardName,
+		TutorialToken = tutorialToken,
+		TutorialAlreadyGranted = alreadyGranted == true,
+	})
+
+	return true, string.format(
+		"Recruited %s as tutorial crew #%s.",
+		displayName,
+		tostring(instanceId or "?")
+	), nil
+end
+
 local function grantCarrySlotReward(player, slot)
 	local carriedReward = buildLegacyRewardFromCarrySlot(slot)
 	if carriedReward == nil then
@@ -1613,6 +1698,12 @@ local function grantCarrySlotReward(player, slot)
 			getRewardToolDisplay(carriedReward),
 			tostring(chestId or "?")
 		)
+	elseif isTutorialPhysicalCrewReward(carriedReward) then
+		local ok, tutorialMessage, reason = grantTutorialCarrySlotReward(player, carriedReward)
+		if ok ~= true then
+			return false, nil, reason or "persist_tutorial_crew_failed"
+		end
+		message = tutorialMessage
 	else
 		local instanceId = addCrewInstance(player, {
 			Name = carriedReward.CrewName,
@@ -1639,11 +1730,13 @@ local function grantCarrySlotReward(player, slot)
 		RewardType = tostring(carriedReward.RewardType or ""),
 	})
 	if carriedReward.RewardType == "Crew" then
-		QuestSignals.Record(player, "ExtractCrew", 1, {
-			DepthBand = tostring(carriedReward.DepthBand or ""),
-			Rarity = tostring(carriedReward.Rarity or ""),
-			CrewName = tostring(carriedReward.CrewName or carriedReward.DisplayName or ""),
-		})
+		if not isTutorialPhysicalCrewReward(carriedReward) then
+			QuestSignals.Record(player, "ExtractCrew", 1, {
+				DepthBand = tostring(carriedReward.DepthBand or ""),
+				Rarity = tostring(carriedReward.Rarity or ""),
+				CrewName = tostring(carriedReward.CrewName or carriedReward.DisplayName or ""),
+			})
+		end
 	end
 
 	local extractionBounty, _ = BountyService.AwardExtractionBountyForReward(player, carriedReward)

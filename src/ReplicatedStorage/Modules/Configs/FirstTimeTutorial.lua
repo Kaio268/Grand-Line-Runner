@@ -39,6 +39,7 @@ local FirstTimeTutorial = {
 			Instruction = "Hold E to pick up the Crewmate.",
 			WaitText = "Pick up a Crewmate",
 			CompletionMode = "CarryCrewMember",
+			IndicatorStyle = "VectorPath",
 		},
 		{
 			Id = "extract_crew_member",
@@ -47,6 +48,7 @@ local FirstTimeTutorial = {
 			Instruction = "Reach the extraction zone while carrying it.",
 			WaitText = "Extract the Crewmate",
 			CompletionMode = "ExtractCrewMember",
+			IndicatorStyle = "VectorPath",
 		},
 		{
 			Id = "place_on_stand",
@@ -71,11 +73,12 @@ local FirstTimeTutorial = {
 			Instruction = "Open Speed Upgrades and buy the first speed upgrade.",
 			WaitText = "Buy speed",
 			CompletionMode = "BuySpeed",
+			IndicatorStyle = "VectorPath",
 		},
 		{
 			Id = "final_guidance",
 			Title = "Set sail",
-			Body = "Keep collecting Crewmates, opening chests, completing quests, and pushing deeper into runs.",
+			Body = "Keep collecting Crewmates, obtain mysterious abilities, opening chests, completing quests, and pushing deeper into runs.",
 			Instruction = "You are ready to play.",
 			ActionText = "Finish",
 			CompletionMode = "Acknowledge",

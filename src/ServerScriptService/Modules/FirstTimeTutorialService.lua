@@ -49,6 +49,10 @@ local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local SAVE_FAILURE_MESSAGE = "Tutorial progress could not be saved yet. Try again in a moment."
+local TUTORIAL_EXTRACTION_SOURCES = {
+	SpawnCrewMembers = true,
+	GrandLineRushTutorialExtraction = true,
+}
 
 local started = false
 local requestRemote
@@ -337,14 +341,22 @@ local function getCrewInventoryCount(player)
 	return countCrewMemberInstances(player)
 end
 
-local function getTutorialRewardInstance(player, requireAssigned)
-	return CrewInstanceService.FindTutorialRewardInstance(player, {
+local function getTutorialRewardInstance(player, requireAssigned, session)
+	local filters = {
 		RequireAssigned = requireAssigned == true,
-	})
+	}
+	local expectedStorageName = tostring(session and session.tutorialCrewMemberName or "")
+	if expectedStorageName == "" then
+		expectedStorageName = tostring(TutorialConfig.TutorialCrewMember and TutorialConfig.TutorialCrewMember.Name or "")
+	end
+	if expectedStorageName ~= "" then
+		filters.StorageName = expectedStorageName
+	end
+	return CrewInstanceService.FindTutorialRewardInstance(player, filters)
 end
 
-local function hasTutorialReward(player, _session)
-	local _, instanceData = getTutorialRewardInstance(player, false)
+local function hasTutorialReward(player, session)
+	local _, instanceData = getTutorialRewardInstance(player, false, session)
 	return instanceData ~= nil
 end
 
@@ -391,7 +403,7 @@ local function getPlacedTutorialStandName(player, session)
 		return sessionStandName
 	end
 
-	local instanceId, instanceData = getTutorialRewardInstance(player, true)
+	local instanceId, instanceData = getTutorialRewardInstance(player, true, session)
 	if instanceData and tostring(instanceData.AssignedStand or "") ~= "" then
 		local standName = tostring(instanceData.AssignedStand)
 		if session then
@@ -691,6 +703,34 @@ local function getTutorialRewardStorageNames(session, extraNames)
 	return names
 end
 
+local function firstNonEmptyText(...)
+	for index = 1, select("#", ...) do
+		local value = select(index, ...)
+		if value ~= nil then
+			local text = tostring(value)
+			if text ~= "" then
+				return text
+			end
+		end
+	end
+	return ""
+end
+
+local function isExpectedTutorialRewardName(session, rewardName)
+	rewardName = tostring(rewardName or "")
+	if rewardName == "" then
+		return false
+	end
+
+	for _, expectedName in ipairs(getTutorialRewardStorageNames(session)) do
+		if rewardName == tostring(expectedName or "") then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function getToolStorageName(tool)
 	if not tool or not tool:IsA("Tool") then
 		return ""
@@ -966,6 +1006,7 @@ local function serializeStep(step)
 		actionText = tostring(step.ActionText or ""),
 		waitText = tostring(step.WaitText or ""),
 		completionMode = tostring(step.CompletionMode or ""),
+		indicatorStyle = tostring(step.IndicatorStyle or ""),
 		requiredDistance = tonumber(step.RequiredDistance) or 0,
 	}
 end
@@ -1275,6 +1316,26 @@ ObjectiveTargetResolvers.place_on_stand = function(player, session)
 	local target = selectNearestStandObjectiveTarget(player)
 	setObjectiveTargetCache(session, "place_on_stand", if target then { StandName = target.standName } else nil)
 	return target
+end
+
+ObjectiveTargetResolvers.buy_speed = function()
+	local refs = MapResolver.GetRefs({
+		context = "FirstTimeTutorialService",
+	})
+	local npc = refs and refs.BrrBrrPatapimNpc
+	local position = getInstanceWorldPosition(npc)
+	if not position then
+		return nil
+	end
+
+	local prompt = npc and npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+	return {
+		id = "speed_upgrade_npc",
+		kind = "npc",
+		label = "Franky",
+		position = position,
+		promptName = prompt and prompt.Name or "",
+	}
 end
 
 local function serializeObjectiveTarget(player, session, step)
@@ -1917,10 +1978,23 @@ local function onObjectiveRecorded(player, eventData)
 	local context = if typeof(eventData.Context) == "table" then eventData.Context else {}
 	local source = tostring(context.Source or "")
 
-	if objectiveType == "ExtractCrew" and source == "SpawnCrewMembers" and context.TutorialCrewMember == true then
+	if objectiveType == "ExtractCrew" and TUTORIAL_EXTRACTION_SOURCES[source] == true and context.TutorialCrewMember == true then
 		local session = sessions[player]
 		local eventToken = tostring(context.TutorialToken or "")
-		if session and (eventToken == tostring(session.tutorialToken or "") or hasTutorialReward(player, session)) then
+		local eventOwnerUserId = tonumber(context.TutorialOwnerUserId)
+		local rewardName = firstNonEmptyText(
+			context.TutorialRewardName,
+			context.TutorialCrewMemberId,
+			context.CrewMemberId,
+			context.CrewName
+		)
+		if
+			session
+			and eventToken ~= ""
+			and eventToken == tostring(session.tutorialToken or "")
+			and eventOwnerUserId == player.UserId
+			and isExpectedTutorialRewardName(session, rewardName)
+		then
 			advanceIfCurrentStep(player, "extract_crew_member")
 		end
 	elseif objectiveType == "PlaceOnStand" and source == "StandPlacement" and context.TutorialPlacement == true then

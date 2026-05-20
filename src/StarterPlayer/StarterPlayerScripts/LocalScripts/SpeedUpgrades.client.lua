@@ -25,13 +25,17 @@ end
 local remote = ReplicatedStorage:WaitForChild("BuySpeedUpgrade")
 
 local gui = player:WaitForChild("PlayerGui")
-local main = gui:WaitForChild("Frames"):WaitForChild("SpeedUpgrade"):WaitForChild("Main")
+local frames = gui:WaitForChild("Frames")
+local speedUpgradeFrame = frames:WaitForChild("SpeedUpgrade")
+local main = speedUpgradeFrame:WaitForChild("Main")
 
 local hidden = player:WaitForChild("HiddenLeaderstats")
 local speedValueObj = hidden:WaitForChild("Speed")
 
 local connectedButtons = {}
 local productPriceCache = {}
+local productPricePending = {}
+local updateAll
 
 local function setText(inst, value)
 	if not inst then return end
@@ -73,18 +77,29 @@ local function getProductPrice(productId)
 	if productPriceCache[productId] ~= nil then
 		return productPriceCache[productId]
 	end
-
-	local ok, info = pcall(function()
-		return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
-	end)
-
-	local price = 0
-	if ok and info and typeof(info) == "table" and typeof(info.PriceInRobux) == "number" then
-		price = info.PriceInRobux
+	if productPricePending[productId] then
+		return 0
 	end
 
-	productPriceCache[productId] = price
-	return price
+	productPricePending[productId] = true
+	task.spawn(function()
+		local ok, info = pcall(function()
+			return MarketplaceService:GetProductInfo(productId, Enum.InfoType.Product)
+		end)
+
+		local price = 0
+		if ok and info and typeof(info) == "table" and typeof(info.PriceInRobux) == "number" then
+			price = info.PriceInRobux
+		end
+
+		productPriceCache[productId] = price
+		productPricePending[productId] = nil
+		if updateAll then
+			updateAll()
+		end
+	end)
+
+	return 0
 end
 
 local function hookButton(btn, fn)
@@ -161,7 +176,7 @@ local function updateOne(frameName, frame, cfg, speedVal)
 	bindRobux(productId, template)
 end
 
-local function updateAll()
+updateAll = function()
 	local speedVal = speedValueObj.Value
 	for k, cfg in pairs(SpeedUpgrade) do
 		local f = main:FindFirstChild(tostring(k))
@@ -171,5 +186,16 @@ local function updateAll()
 	end
 end
 
-updateAll()
 speedValueObj.Changed:Connect(updateAll)
+player:GetAttributeChangedSignal("PlayerDataReady"):Connect(function()
+	if player:GetAttribute("PlayerDataReady") == true then
+		updateAll()
+	end
+end)
+speedUpgradeFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+	if speedUpgradeFrame.Visible then
+		updateAll()
+	end
+end)
+
+updateAll()

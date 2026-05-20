@@ -486,6 +486,15 @@ function ProfileMigrations.Apply(data)
 	end
 
 	local hiddenLeaderstats = ensureTable(data, "HiddenLeaderstats")
+	local defaultSpeed = math.max(1, tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1)
+	local function sanitizeSpeed(value, fallback)
+		local numeric = tonumber(value)
+		if numeric == nil or numeric ~= numeric or numeric == math.huge or numeric == -math.huge then
+			return fallback
+		end
+		return math.max(defaultSpeed, numeric)
+	end
+
 	local legacyHiddenLeadderstats = data.HiddenLeadderstats
 	if typeof(legacyHiddenLeadderstats) == "table" then
 		for key, value in pairs(legacyHiddenLeadderstats) do
@@ -501,10 +510,15 @@ function ProfileMigrations.Apply(data)
 				coerceNumber(legacyHiddenLeadderstats.PlotUpgrade, 0)
 			)
 		)
+		hiddenLeaderstats.Speed = math.max(
+			sanitizeSpeed(hiddenLeaderstats.Speed, defaultSpeed),
+			sanitizeSpeed(legacyHiddenLeadderstats.Speed, defaultSpeed)
+		)
 		data.HiddenLeadderstats = nil
 	end
 
 	hiddenLeaderstats.PlotUpgrade = math.clamp(coerceNumber(hiddenLeaderstats.PlotUpgrade, 0), 0, PlotUpgradeConfig.MaxLevel)
+	hiddenLeaderstats.Speed = sanitizeSpeed(hiddenLeaderstats.Speed, defaultSpeed)
 	hiddenLeaderstats.Tutorial = coerceBoolean(hiddenLeaderstats.Tutorial, false)
 	hiddenLeaderstats.TutorialCrewMemberGranted = coerceBoolean(
 		hiddenLeaderstats.TutorialCrewMemberGranted or hiddenLeaderstats.TutorialBrainrotGranted,

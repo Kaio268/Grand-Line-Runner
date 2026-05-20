@@ -40,8 +40,11 @@ local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
 local DEFAULT_ENTRY_CUE_FALLBACK_TIME = 0.24
 local DEFAULT_MOVEMENT_CUE_FALLBACK_TIME = 0.42
 local DEFAULT_VISUAL_SINK_DURATION = 0.24
-local DEFAULT_PRE_ENTRY_VISUAL_SINK_DEPTH = 0.8
-local DEFAULT_PRE_ENTRY_VISUAL_SINK_DURATION = 0.14
+local DEFAULT_BURROW_START_SINK_DELAY = 0.4
+local DEFAULT_BURROW_GROUND_DETECT_DISTANCE = 48
+local DEFAULT_BURROW_FORCED_FALL_SPEED = 72
+local DEFAULT_BURROW_MAX_FALL_WAIT = 1.25
+local DEFAULT_BURROW_GROUND_CONTACT_TOLERANCE = 0.6
 local DEFAULT_VISUAL_RISE_DURATION = 0.18
 local DEFAULT_RESOLVE_REVEAL_DELAY = 0.08
 local DEFAULT_RESOLVE_SURFACE_LOCK_DURATION = 0.28
@@ -230,26 +233,133 @@ local function getVisualSinkDuration(abilityConfig)
 	)
 end
 
-local function getPreEntryVisualSinkDepth(abilityConfig)
+local function getBurrowStartSinkDelay(abilityConfig)
 	local startConfig = getAnimationStageConfig("Start", abilityConfig)
 	return math.max(
 		0,
-		tonumber(startConfig.PreEntryVisualSinkDepth)
-			or tonumber(startConfig.PreEntrySinkDepth)
-			or tonumber(abilityConfig and abilityConfig.PreEntryVisualSinkDepth)
-			or DEFAULT_PRE_ENTRY_VISUAL_SINK_DEPTH
+		tonumber(startConfig.BurrowStartSinkDelay)
+			or tonumber(startConfig.BurrowSinkDelay)
+			or tonumber(abilityConfig and abilityConfig.BurrowStartSinkDelay)
+			or tonumber(abilityConfig and abilityConfig.BurrowSinkDelay)
+			or DEFAULT_BURROW_START_SINK_DELAY
 	)
 end
 
-local function getPreEntryVisualSinkDuration(abilityConfig)
+local function shouldStabilizeCameraDuringSink(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	local configured = startConfig.StabilizeCameraDuringSink
+	if configured == nil and type(abilityConfig) == "table" then
+		configured = abilityConfig.StabilizeCameraDuringSink
+	end
+	if configured == nil then
+		return true
+	end
+	return configured ~= false
+end
+
+local function shouldForceFallBeforeBurrow(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	local configured = startConfig.ForceFallBeforeBurrow
+	if configured == nil and type(abilityConfig) == "table" then
+		configured = abilityConfig.ForceFallBeforeBurrow
+	end
+	return configured == true
+end
+
+local function getBurrowGroundDetectDistance(abilityConfig)
 	local startConfig = getAnimationStageConfig("Start", abilityConfig)
 	return math.max(
 		0,
-		tonumber(startConfig.PreEntryVisualSinkDuration)
-			or tonumber(startConfig.PreEntrySinkDuration)
-			or tonumber(abilityConfig and abilityConfig.PreEntryVisualSinkDuration)
-			or DEFAULT_PRE_ENTRY_VISUAL_SINK_DURATION
+		tonumber(startConfig.BurrowGroundDetectDistance)
+			or tonumber(abilityConfig and abilityConfig.BurrowGroundDetectDistance)
+			or DEFAULT_BURROW_GROUND_DETECT_DISTANCE
 	)
+end
+
+local function getBurrowForcedFallSpeed(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	return math.max(
+		0,
+		tonumber(startConfig.BurrowForcedFallSpeed)
+			or tonumber(abilityConfig and abilityConfig.BurrowForcedFallSpeed)
+			or DEFAULT_BURROW_FORCED_FALL_SPEED
+	)
+end
+
+local function getBurrowMaxFallWait(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	return math.max(
+		0,
+		tonumber(startConfig.BurrowMaxFallWait)
+			or tonumber(abilityConfig and abilityConfig.BurrowMaxFallWait)
+			or DEFAULT_BURROW_MAX_FALL_WAIT
+	)
+end
+
+local function getBurrowGroundContactTolerance(abilityConfig)
+	local startConfig = getAnimationStageConfig("Start", abilityConfig)
+	return math.max(
+		0,
+		tonumber(startConfig.BurrowGroundContactTolerance)
+			or tonumber(startConfig.BurrowGroundContactDistance)
+			or tonumber(abilityConfig and abilityConfig.BurrowGroundContactTolerance)
+			or tonumber(abilityConfig and abilityConfig.BurrowGroundContactDistance)
+			or DEFAULT_BURROW_GROUND_CONTACT_TOLERANCE
+	)
+end
+
+local function getForcedFallProbeConfig(abilityConfig)
+	local probeConfig = if type(abilityConfig) == "table" then table.clone(abilityConfig) else {}
+	local detectDistance = getBurrowGroundDetectDistance(abilityConfig)
+	probeConfig.ActivationGroundProbeDepth = detectDistance
+	probeConfig.ActivationMaxSurfaceDrop = detectDistance
+	return probeConfig
+end
+
+local function getBurrowStartSinkRemaining(burrowState, abilityConfig)
+	local sinkDelay = getBurrowStartSinkDelay(abilityConfig)
+	if sinkDelay <= 0 then
+		return 0
+	end
+
+	local localStartAt = type(burrowState) == "table" and tonumber(burrowState.LocalStartFeedbackAt) or nil
+	if localStartAt then
+		return math.max(0, sinkDelay - (os.clock() - localStartAt))
+	end
+
+	local startedAt = type(burrowState) == "table" and tonumber(burrowState.StartedAt) or nil
+	if startedAt then
+		return math.max(0, sinkDelay - (Workspace:GetServerTimeNow() - startedAt))
+	end
+
+	return sinkDelay
+end
+
+local function getBurrowSinkCompleteRemaining(burrowState, abilityConfig)
+	local sinkStartRemaining = getBurrowStartSinkRemaining(burrowState, abilityConfig)
+	local sinkDuration = getVisualSinkDuration(abilityConfig)
+	if sinkStartRemaining > 0 then
+		return sinkStartRemaining + sinkDuration
+	end
+
+	if type(burrowState) ~= "table" then
+		return 0
+	end
+
+	if burrowState.StartupVisualSinkAttempted ~= true then
+		return sinkDuration
+	end
+
+	if burrowState.StartupVisualSinkSucceeded ~= true then
+		return 0
+	end
+
+	local startedAt = tonumber(burrowState.StartupVisualSinkStartedAt)
+	if not startedAt then
+		return 0
+	end
+
+	return math.max(0, sinkDuration - (os.clock() - startedAt))
 end
 
 local function getVisualRiseDuration(abilityConfig)
@@ -377,6 +487,7 @@ local function clearEntryCueState(burrowState)
 	end
 
 	burrowState.EntryCueToken = nil
+	burrowState.EntryCueDelayToken = nil
 	disconnectConnections(burrowState.EntryCueConnections)
 	burrowState.EntryCueConnections = nil
 end
@@ -387,11 +498,15 @@ local function clearMovementCueState(burrowState)
 	end
 
 	burrowState.MovementCueToken = nil
+	burrowState.MovementCueWaitingForEntry = nil
 	disconnectConnections(burrowState.MovementCueConnections)
 	burrowState.MovementCueConnections = nil
 end
 
 local function clearBurrowCueState(burrowState)
+	if type(burrowState) == "table" then
+		burrowState.StartupVisualSinkToken = nil
+	end
 	clearEntryCueState(burrowState)
 	clearMovementCueState(burrowState)
 end
@@ -728,6 +843,36 @@ local function zeroRootVelocity(rootPart, includeAngular, includeLinear)
 	return wrote
 end
 
+local function applyForcedFallVelocity(rootPart, fallSpeed)
+	if not rootPart or fallSpeed <= 0 then
+		return false
+	end
+
+	local velocity = rootPart.AssemblyLinearVelocity
+	if velocity.Y <= -fallSpeed then
+		return false
+	end
+
+	rootPart.AssemblyLinearVelocity = Vector3.new(velocity.X, -fallSpeed, velocity.Z)
+	return true
+end
+
+local function isHumanoidAirborne(humanoid)
+	if not humanoid then
+		return false
+	end
+
+	local state = humanoid:GetState()
+	if state == Enum.HumanoidStateType.Jumping
+		or state == Enum.HumanoidStateType.Freefall
+		or state == Enum.HumanoidStateType.FallingDown
+	then
+		return true
+	end
+
+	return humanoid.FloorMaterial == Enum.Material.Air
+end
+
 local function lockCharacterToSurface(
 	character,
 	rootPart,
@@ -865,6 +1010,9 @@ function MoguClient.Create(config)
 	end
 	self.playOptionalEffect = type(config.PlayOptionalEffect) == "function" and config.PlayOptionalEffect or function() end
 	self.requestAbility = type(config.RequestAbility) == "function" and config.RequestAbility or nil
+	self.isAbilityLocallyReady = type(config.IsAbilityLocallyReady) == "function" and config.IsAbilityLocallyReady or function()
+		return true
+	end
 	self.animationController = MoguAnimationController.new()
 	self.vfxController = MoguVfxController.new()
 	self.burrowInputState = {
@@ -877,6 +1025,7 @@ function MoguClient.Create(config)
 	self.visualBurrowStates = {}
 	self.concealStates = {}
 	self.pendingBurrowFeedback = nil
+	self.pendingBurrowFall = nil
 	self.diagnostics = {
 		LastFlushAt = os.clock(),
 		PivotWrites = 0,
@@ -1198,9 +1347,9 @@ function MoguClient:ApplyVisualBurrowOffset(targetPlayer, abilityConfig, options
 	return true
 end
 
-function MoguClient:ApplyPreEntryVisualSinkPolish(targetPlayer, abilityConfig)
-	local depth = getPreEntryVisualSinkDepth(abilityConfig)
-	local duration = getPreEntryVisualSinkDuration(abilityConfig)
+function MoguClient:ApplyStartupVisualSink(targetPlayer, abilityConfig)
+	local depth = getVisualSinkDepth(abilityConfig)
+	local duration = getVisualSinkDuration(abilityConfig)
 	if depth <= 0 then
 		return false
 	end
@@ -1210,13 +1359,48 @@ function MoguClient:ApplyPreEntryVisualSinkPolish(targetPlayer, abilityConfig)
 		Duration = duration,
 	})
 	logInfo(
-		"pre-entry sink polish started player=%s depth=%.2f duration=%.2f success=%s",
+		"startup visual sink started player=%s depth=%.2f duration=%.2f success=%s",
 		targetPlayer.Name,
 		depth,
 		duration,
 		tostring(didStart)
 	)
 	return didStart
+end
+
+function MoguClient:ScheduleStartupVisualSink(targetPlayer, burrowState, abilityConfig)
+	if not targetPlayer or type(burrowState) ~= "table" or burrowState.StartupVisualSinkSucceeded == true then
+		return false
+	end
+
+	local token = {}
+	burrowState.StartupVisualSinkToken = token
+
+	local function apply()
+		local isPendingLocal = targetPlayer == self.player and self.pendingBurrowFeedback == burrowState
+		local isActive = self.burrowStates[targetPlayer] == burrowState
+		if not isPendingLocal and not isActive then
+			return
+		end
+		if burrowState.StartupVisualSinkToken ~= token then
+			return
+		end
+
+		burrowState.StartupVisualSinkToken = nil
+		burrowState.StartupVisualSinkAttempted = true
+		local didStart = self:ApplyStartupVisualSink(targetPlayer, abilityConfig)
+		burrowState.StartupVisualSinkStartedAt = if didStart then os.clock() else nil
+		burrowState.StartupVisualSinkSucceeded = didStart
+	end
+
+	local remainingDelay = getBurrowStartSinkRemaining(burrowState, abilityConfig)
+	if remainingDelay > 0 then
+		task.delay(remainingDelay, apply)
+	else
+		apply()
+	end
+
+	return true
 end
 
 function MoguClient:SnapVisualBurrowOffset(targetPlayer)
@@ -1368,6 +1552,66 @@ function MoguClient:ApplyConcealWhenReady(targetPlayer, burrowState)
 	end)
 end
 
+function MoguClient:ApplyBurrowCameraStabilization(ownerState, humanoid, surfacePosition, buriedPosition, abilityConfig)
+	if type(ownerState) ~= "table" or not humanoid or not shouldStabilizeCameraDuringSink(abilityConfig) then
+		return false
+	end
+	if typeof(surfacePosition) ~= "Vector3" or typeof(buriedPosition) ~= "Vector3" then
+		return false
+	end
+
+	local compensation = math.max(0, surfacePosition.Y - buriedPosition.Y)
+	if compensation <= 0 then
+		return false
+	end
+
+	local cameraState = ownerState.CameraStabilizationState
+	if type(cameraState) ~= "table" or cameraState.Humanoid ~= humanoid then
+		cameraState = {
+			Humanoid = humanoid,
+			AppliedOffset = Vector3.zero,
+		}
+		ownerState.CameraStabilizationState = cameraState
+	end
+
+	local previousAppliedOffset = if typeof(cameraState.AppliedOffset) == "Vector3"
+		then cameraState.AppliedOffset
+		else Vector3.zero
+	local shouldLog = cameraState.Active ~= true or math.abs(previousAppliedOffset.Y - compensation) > 0.05
+	local baseOffset = humanoid.CameraOffset - previousAppliedOffset
+	local appliedOffset = Vector3.new(0, compensation, 0)
+	humanoid.CameraOffset = baseOffset + appliedOffset
+	cameraState.AppliedOffset = appliedOffset
+	cameraState.Active = true
+	if shouldLog then
+		logInfo("camera stabilization applied player=%s offsetY=%.2f", self.player.Name, compensation)
+	end
+	return true
+end
+
+function MoguClient:RestoreBurrowCameraStabilization(ownerState, reason)
+	if type(ownerState) ~= "table" then
+		return false
+	end
+
+	local cameraState = ownerState.CameraStabilizationState
+	if type(cameraState) ~= "table" or cameraState.Active ~= true then
+		return false
+	end
+
+	cameraState.Active = false
+	ownerState.CameraStabilizationState = nil
+	local humanoid = cameraState.Humanoid
+	local appliedOffset = if typeof(cameraState.AppliedOffset) == "Vector3"
+		then cameraState.AppliedOffset
+		else Vector3.zero
+	if humanoid and humanoid.Parent then
+		humanoid.CameraOffset = humanoid.CameraOffset - appliedOffset
+	end
+	logInfo("camera stabilization restored player=%s reason=%s", self.player.Name, tostring(reason or "unknown"))
+	return true
+end
+
 function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
 	if not targetPlayer or self.burrowStates[targetPlayer] ~= burrowState then
 		return false
@@ -1377,7 +1621,37 @@ function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPositi
 		return false
 	end
 
+	if shouldUseTrueBurrowRoot(burrowState) and burrowState.StartupVisualSinkAttempted ~= true then
+		self:ScheduleStartupVisualSink(targetPlayer, burrowState, abilityConfig)
+	end
+
+	local remainingSinkDelay = if shouldUseTrueBurrowRoot(burrowState)
+		then getBurrowSinkCompleteRemaining(burrowState, abilityConfig)
+		else getBurrowStartSinkRemaining(burrowState, abilityConfig)
+	if remainingSinkDelay > 0 then
+		if not burrowState.EntryCueDelayToken then
+			local delayToken = {}
+			burrowState.EntryCueDelayToken = delayToken
+			logInfo(
+				"entry cue delayed player=%s delay=%.2f",
+				targetPlayer.Name,
+				remainingSinkDelay
+			)
+			task.delay(remainingSinkDelay, function()
+				if self.burrowStates[targetPlayer] ~= burrowState or burrowState.EntryCueDelayToken ~= delayToken then
+					return
+				end
+
+				burrowState.EntryCueDelayToken = nil
+				self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+			end)
+		end
+		return false
+	end
+
 	burrowState.EntryCueTriggered = true
+	burrowState.EntryCueDelayToken = nil
+	burrowState.StartupVisualSinkToken = nil
 	clearEntryCueState(burrowState)
 
 	if shouldUseTrueBurrowRoot(burrowState) then
@@ -1392,10 +1666,11 @@ function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPositi
 			burrowState.SurfaceRootPosition = surfacePosition
 		end
 		if character and rootPart and typeof(buriedPosition) == "Vector3" then
-			local hadPreEntryPolish = self:HasVisualBurrowOffset(targetPlayer)
+			local hadStartupSink = self:HasVisualBurrowOffset(targetPlayer)
 			self:ClearVisualBurrowOffset(targetPlayer, false)
-			logInfo("pre-entry sink polish cleared player=%s hadPolish=%s", targetPlayer.Name, tostring(hadPreEntryPolish))
+			logInfo("startup visual sink cleared player=%s hadSink=%s", targetPlayer.Name, tostring(hadStartupSink))
 			if humanoid then
+				self:ApplyBurrowCameraStabilization(burrowState, humanoid, surfacePosition, buriedPosition, abilityConfig)
 				self:ApplyBurrowPhysicsState(burrowState, character, humanoid)
 			end
 			burrowState.BuriedRootPosition = buriedPosition
@@ -1427,7 +1702,7 @@ function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPositi
 		end
 		burrowState.VisualSinkSkipped = true
 		burrowState.VisualSinkSucceeded = true
-		logInfo("old visual sink skipped due to true-burrow mode player=%s phase=entry", targetPlayer.Name)
+		logInfo("true burrow root transition complete player=%s phase=entry", targetPlayer.Name)
 	elseif not self:HasVisualBurrowOffset(targetPlayer) then
 		local visualSinkSucceeded = self:ApplyVisualBurrowOffset(targetPlayer, abilityConfig)
 		burrowState.VisualSinkSucceeded = visualSinkSucceeded
@@ -1455,6 +1730,14 @@ function MoguClient:TriggerBurrowEntryCue(targetPlayer, burrowState, startPositi
 		burrowState.ConcealApplied = true
 		logInfo("conceal timing player=%s phase=entry_cue", targetPlayer.Name)
 	end
+	if burrowState.MovementCueWaitingForEntry == true then
+		burrowState.MovementCueWaitingForEntry = nil
+		task.defer(function()
+			if self.burrowStates[targetPlayer] == burrowState then
+				self:TriggerBurrowMovementCue(targetPlayer, burrowState, startPosition, abilityConfig)
+			end
+		end)
+	end
 
 	return true
 end
@@ -1469,15 +1752,21 @@ function MoguClient:TriggerBurrowMovementCue(targetPlayer, burrowState, startPos
 	end
 
 	if not burrowState.EntryCueTriggered then
-		self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+		if not self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig) then
+			burrowState.MovementCueWaitingForEntry = true
+			return false
+		end
 	end
 
 	burrowState.MovementCueTriggered = true
 	clearMovementCueState(burrowState)
 	burrowState.LastTrailAt = Workspace:GetServerTimeNow()
 	if shouldUseTrueBurrowRoot(burrowState) then
-		if not burrowState.BuriedRootActive then
-			self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig)
+		if not burrowState.BuriedRootActive and not burrowState.EntryCueTriggered then
+			if not self:TriggerBurrowEntryCue(targetPlayer, burrowState, startPosition, abilityConfig) then
+				burrowState.MovementCueWaitingForEntry = true
+				return false
+			end
 		end
 		burrowState.VisualSinkSkipped = true
 		burrowState.VisualSinkSucceeded = true
@@ -1705,6 +1994,165 @@ function MoguClient:RestoreStartupStabilization(pending, reason)
 	return restored
 end
 
+function MoguClient:ResolveForcedFallSurface(character, rootPart, abilityConfig)
+	if not character or not rootPart then
+		return nil, false, math.huge
+	end
+
+	local probeConfig = getForcedFallProbeConfig(abilityConfig)
+	local surfacePosition, hasSurface = MoguBurrowShared.ResolveSurfaceRootPosition(
+		character,
+		rootPart,
+		rootPart.Position,
+		probeConfig,
+		rootPart.Position,
+		{
+			FastSample = true,
+			AllowActivationDrop = true,
+		}
+	)
+	if not hasSurface or typeof(surfacePosition) ~= "Vector3" then
+		return nil, false, math.huge
+	end
+
+	local dropDistance = math.max(0, rootPart.Position.Y - surfacePosition.Y)
+	return surfacePosition, true, dropDistance
+end
+
+function MoguClient:CancelForcedBurrowFall(reason)
+	local fallState = self.pendingBurrowFall
+	if not fallState then
+		return false
+	end
+
+	self.pendingBurrowFall = nil
+	fallState.Token = nil
+	logInfo("forced fall cancelled player=%s reason=%s", self.player.Name, tostring(reason or "unknown"))
+	return true
+end
+
+function MoguClient:BeginForcedFallBeforeBurrow(direction)
+	if self.pendingBurrowFall then
+		return true
+	end
+	if self.pendingBurrowFeedback or self:GetLocalBurrowState() then
+		return false
+	end
+
+	local abilityConfig = getAbilityConfig()
+	if not shouldForceFallBeforeBurrow(abilityConfig) then
+		return false
+	end
+	if self.isAbilityLocallyReady(ABILITY_NAME) == false then
+		return false
+	end
+	if typeof(self.requestAbility) ~= "function" then
+		return false
+	end
+
+	local character = getCharacter(self.player)
+	local rootPart = self.getLocalRootPart()
+	local humanoid = self.getHumanoid()
+	if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+
+	local surfacePosition, hasSurface, dropDistance = self:ResolveForcedFallSurface(character, rootPart, abilityConfig)
+	local contactTolerance = getBurrowGroundContactTolerance(abilityConfig)
+	if not hasSurface then
+		logWarn("forced fall cancelled player=%s reason=no_ground_detected", self.player.Name)
+		return true
+	end
+	if dropDistance <= contactTolerance and not isHumanoidAirborne(humanoid) then
+		return false
+	end
+
+	local token = {}
+	local resolvedDirection = resolvePlanarDirection(direction, rootPart.CFrame.LookVector)
+	self.pendingBurrowFall = {
+		Token = token,
+		StartedAt = os.clock(),
+		Deadline = os.clock() + getBurrowMaxFallWait(abilityConfig),
+		Direction = resolvedDirection,
+		SurfaceRootPosition = surfacePosition,
+		LastDropDistance = dropDistance,
+	}
+	humanoid.Jump = false
+	pcall(function()
+		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	end)
+	applyForcedFallVelocity(rootPart, getBurrowForcedFallSpeed(abilityConfig))
+	logInfo(
+		"forced fall started player=%s drop=%.2f targetSurface=%s",
+		self.player.Name,
+		dropDistance,
+		tostring(surfacePosition)
+	)
+	return true
+end
+
+function MoguClient:FinishForcedBurrowFall(fallState, surfacePosition)
+	if self.pendingBurrowFall ~= fallState then
+		return false
+	end
+	if typeof(self.requestAbility) ~= "function" then
+		self:CancelForcedBurrowFall("missing_request_ability")
+		return false
+	end
+
+	self.pendingBurrowFall = nil
+	local rootPart = self.getLocalRootPart()
+	local direction = resolvePlanarDirection(fallState.Direction, rootPart and rootPart.CFrame.LookVector or nil)
+	logInfo("forced fall complete player=%s surface=%s", self.player.Name, tostring(surfacePosition))
+	self.requestAbility(ABILITY_NAME, {
+		Direction = direction,
+		PredictedStartPosition = surfacePosition,
+	})
+	return true
+end
+
+function MoguClient:UpdateForcedBurrowFall()
+	local fallState = self.pendingBurrowFall
+	if not fallState then
+		return false
+	end
+
+	local character = getCharacter(self.player)
+	local rootPart = self.getLocalRootPart()
+	local humanoid = self.getHumanoid()
+	if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
+		self:CancelForcedBurrowFall("character_unavailable")
+		return true
+	end
+	if self.pendingBurrowFeedback or self:GetLocalBurrowState() then
+		self:CancelForcedBurrowFall("burrow_started")
+		return true
+	end
+
+	local abilityConfig = getAbilityConfig()
+	local surfacePosition, hasSurface, dropDistance = self:ResolveForcedFallSurface(character, rootPart, abilityConfig)
+	if hasSurface then
+		fallState.SurfaceRootPosition = surfacePosition
+		fallState.LastDropDistance = dropDistance
+		if dropDistance <= getBurrowGroundContactTolerance(abilityConfig) and not isHumanoidAirborne(humanoid) then
+			self:FinishForcedBurrowFall(fallState, surfacePosition)
+			return true
+		end
+	end
+
+	if os.clock() >= (tonumber(fallState.Deadline) or 0) then
+		self:CancelForcedBurrowFall(if hasSurface then "max_wait" else "no_ground_detected")
+		return true
+	end
+
+	humanoid.Jump = false
+	pcall(function()
+		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	end)
+	applyForcedFallVelocity(rootPart, getBurrowForcedFallSpeed(abilityConfig))
+	return true
+end
+
 function MoguClient:BeginLocalStartFeedback(direction)
 	if self.pendingBurrowFeedback or self:GetLocalBurrowState() then
 		return nil
@@ -1731,13 +2179,13 @@ function MoguClient:BeginLocalStartFeedback(direction)
 		self.player.Name,
 		tostring(animationState and animationState.Track ~= nil)
 	)
-	local preEntrySinkSucceeded = self:ApplyPreEntryVisualSinkPolish(self.player, abilityConfig)
-	logInfo("old full visual sink skipped due to true-burrow mode player=%s phase=prediction", self.player.Name)
+	logInfo("startup visual sink scheduled player=%s phase=prediction", self.player.Name)
 
 	local token = {}
 	local pending = {
 		Token = token,
 		RequestedAt = requestedAt,
+		LocalStartFeedbackAt = requestedAt,
 		Direction = resolvedDirection,
 		SurfaceRootPosition = surfacePosition,
 		BuriedRootPosition = stabilization.BuriedRootPosition,
@@ -1745,7 +2193,9 @@ function MoguClient:BeginLocalStartFeedback(direction)
 		EntryCueTriggered = false,
 		VisualSinkSucceeded = false,
 		VisualSinkSkipped = true,
-		PreEntryVisualSinkSucceeded = preEntrySinkSucceeded,
+		StartupVisualSinkAttempted = false,
+		StartupVisualSinkSucceeded = false,
+		StartupVisualSinkStartedAt = nil,
 		StartupStabilized = true,
 		BuriedRootActive = false,
 		StatePhase = STATE_STARTUP_SURFACE,
@@ -1757,6 +2207,7 @@ function MoguClient:BeginLocalStartFeedback(direction)
 		StartupHasSurface = stabilization.HasSurface,
 	}
 	self.pendingBurrowFeedback = pending
+	self:ScheduleStartupVisualSink(self.player, pending, abilityConfig)
 	if self.diagnostics then
 		self.diagnostics.LastStartInputToFeedbackMs = (os.clock() - requestedAt) * 1000
 	end
@@ -1777,6 +2228,8 @@ function MoguClient:CancelLocalStartFeedback(reason)
 	end
 
 	self.pendingBurrowFeedback = nil
+	pending.StartupVisualSinkToken = nil
+	self:RestoreBurrowCameraStabilization(pending, reason or "prediction_cancelled")
 	self.animationController:StopAnimation(pending.AnimationState, reason or "prediction_cancelled")
 	local character = getCharacter(self.player)
 	local rootPart = self.getLocalRootPart()
@@ -2112,6 +2565,7 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 	end
 	if pendingFeedback then
 		self.pendingBurrowFeedback = nil
+		pendingFeedback.StartupVisualSinkToken = nil
 		if self.diagnostics then
 			self.diagnostics.LastStartInputToAuthorizedMs = (os.clock() - pendingFeedback.RequestedAt) * 1000
 		end
@@ -2148,10 +2602,13 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 		),
 		ConcealDelay = math.max(0, tonumber(getAnimationStageConfig("Start", abilityConfig).ConcealDelay) or 0),
 		IsLocal = targetPlayer == self.player,
+		LocalStartFeedbackAt = pendingFeedback and pendingFeedback.LocalStartFeedbackAt or nil,
 		EntryCueTriggered = predictedEntryCueTriggered and predictedVisualSinkSucceeded,
 		VisualSinkSucceeded = predictedVisualSinkSucceeded,
 		VisualSinkSkipped = pendingFeedback and pendingFeedback.VisualSinkSkipped == true or false,
-		PreEntryVisualSinkSucceeded = pendingFeedback and pendingFeedback.PreEntryVisualSinkSucceeded == true or false,
+		StartupVisualSinkAttempted = pendingFeedback and pendingFeedback.StartupVisualSinkAttempted == true or false,
+		StartupVisualSinkSucceeded = pendingFeedback and pendingFeedback.StartupVisualSinkSucceeded == true or false,
+		StartupVisualSinkStartedAt = pendingFeedback and pendingFeedback.StartupVisualSinkStartedAt or nil,
 		StartupStabilized = pendingFeedback and pendingFeedback.StartupStabilized == true or false,
 		StartupPredictedStartDistance = predictedStartDistance,
 		BurrowPhysicsState = pendingFeedback and pendingFeedback.BurrowPhysicsState or nil,
@@ -2258,9 +2715,9 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 			targetPlayer.Name,
 			tostring(burrowState.AnimationState and burrowState.AnimationState.Track ~= nil)
 		)
-		if burrowState.IsLocal then
-			burrowState.PreEntryVisualSinkSucceeded = self:ApplyPreEntryVisualSinkPolish(targetPlayer, abilityConfig)
-		end
+	end
+	if burrowState.IsLocal and burrowState.StartupVisualSinkSucceeded ~= true then
+		self:ScheduleStartupVisualSink(targetPlayer, burrowState, abilityConfig)
 	end
 
 	if not burrowState.EntryCueTriggered then
@@ -2291,6 +2748,7 @@ function MoguClient:FinishResolve(targetPlayer, burrowState, reason)
 	self:SetBurrowStatePhase(targetPlayer, burrowState, STATE_FINISHED, reason or "resolve_cleanup")
 	self:ClearConceal(targetPlayer)
 	if targetPlayer == self.player then
+		self:RestoreBurrowCameraStabilization(burrowState, reason or "resolve_cleanup")
 		self:RestoreBurrowPhysicsState(burrowState, "resolve_complete")
 		local humanoid = self.getHumanoid()
 		if humanoid and humanoid.Health > 0 then
@@ -2375,6 +2833,7 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 			getBurrowStatePhase(burrowState)
 		)
 		self:ClearVisualBurrowOffset(targetPlayer, true, visualRiseDuration)
+		self:RestoreBurrowCameraStabilization(burrowState, "resolve_before_buried")
 		self:FinishResolve(targetPlayer, burrowState, "resolve_before_buried")
 		return false
 	end
@@ -2497,6 +2956,7 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 			)
 			if targetPlayer == self.player then
 				self:RecordPivotWrite(didPivot)
+				self:RestoreBurrowCameraStabilization(burrowState, "resolve_reveal")
 				lockCharacterToSurface(
 					revealCharacter,
 					revealRootPart,
@@ -2543,15 +3003,25 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 end
 
 function MoguClient:HandleInputBegan(input, gameProcessed)
-	if input and input.KeyCode == Enum.KeyCode.Q and not gameProcessed and self.pendingBurrowFeedback then
-		logInfo("Q ignored player=%s reason=start_request_pending", self.player.Name)
-		return true
-	end
+	if input and input.KeyCode == Enum.KeyCode.Q and not gameProcessed then
+		if self.pendingBurrowFall then
+			logInfo("Q ignored player=%s reason=forced_fall_pending", self.player.Name)
+			return true
+		end
+		if self.pendingBurrowFeedback then
+			logInfo("Q ignored player=%s reason=start_request_pending", self.player.Name)
+			return true
+		end
 
-	local burrowState = self:GetLocalBurrowState()
-	if burrowState and input and input.KeyCode == Enum.KeyCode.Q and not gameProcessed then
-		self:RequestSurface(SURFACE_REASON_MANUAL_TOGGLE)
-		return true
+		local burrowState = self:GetLocalBurrowState()
+		if burrowState then
+			self:RequestSurface(SURFACE_REASON_MANUAL_TOGGLE)
+			return true
+		end
+
+		if self:BeginForcedFallBeforeBurrow(self:GetBurrowActivationDirection(self.getLocalRootPart())) then
+			return true
+		end
 	end
 
 	return self:SetBurrowInputKeyState(input and input.KeyCode, true)
@@ -2574,6 +3044,11 @@ function MoguClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 		return nil
 	end
 
+	if self.pendingBurrowFall then
+		logInfo("Q ignored player=%s reason=forced_fall_pending", self.player.Name)
+		return nil
+	end
+
 	local burrowState = self:GetLocalBurrowState()
 	if burrowState then
 		logInfo(
@@ -2590,6 +3065,10 @@ function MoguClient:BeginPredictedRequest(abilityName, fallbackBuilder)
 	end
 
 	local direction = self:GetBurrowActivationDirection(rootPart)
+	if self:BeginForcedFallBeforeBurrow(direction) then
+		return nil
+	end
+
 	local pending = self:BeginLocalStartFeedback(direction)
 	local payload = {
 		Direction = direction,
@@ -2663,6 +3142,15 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	end
 	burrowState.SurfaceRootPosition = currentSurfacePosition
 	burrowState.BuriedRootPosition = getBuriedRootPosition(currentSurfacePosition, abilityConfig)
+	if burrowState.BuriedRootActive == true and typeof(burrowState.BuriedRootPosition) == "Vector3" then
+		self:ApplyBurrowCameraStabilization(
+			burrowState,
+			humanoid,
+			currentSurfacePosition,
+			burrowState.BuriedRootPosition,
+			abilityConfig
+		)
+	end
 
 	if now >= burrowState.EndTime and not burrowState.SurfaceRequested then
 		logInfo(
@@ -2916,6 +3404,8 @@ function MoguClient:HandleStateEvent(eventName, abilityName, value)
 end
 
 function MoguClient:Update(dt)
+	self:UpdateForcedBurrowFall()
+
 	local now = Workspace:GetServerTimeNow()
 	for targetPlayer, burrowState in pairs(self.burrowStates) do
 		if burrowState.ResolveInProgress then
@@ -2945,6 +3435,7 @@ function MoguClient:HandleUnequipped()
 end
 
 function MoguClient:HandleCharacterRemoving()
+	self:CancelForcedBurrowFall("character_removing")
 	self:CancelLocalStartFeedback("character_removing")
 	local localBurrowState = self.burrowStates[self.player]
 	if localBurrowState then
@@ -2962,6 +3453,7 @@ function MoguClient:HandleCharacterRemoving()
 		self:ClearVisualBurrowOffset(targetPlayer, false)
 		self:ClearConceal(targetPlayer)
 		if targetPlayer == self.player then
+			self:RestoreBurrowCameraStabilization(localBurrowState, "character_removing")
 			self:RestoreBurrowPhysicsState(localBurrowState, "character_removing")
 		end
 	end
@@ -2981,7 +3473,9 @@ end
 
 function MoguClient:HandlePlayerRemoving(leavingPlayer)
 	if leavingPlayer == self.player then
+		self:CancelForcedBurrowFall("player_removing")
 		self:CancelLocalStartFeedback("player_removing")
+		self:RestoreBurrowCameraStabilization(self.burrowStates[leavingPlayer], "player_removing")
 	end
 	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	self.animationController:StopAnimation(self.burrowStates[leavingPlayer] and self.burrowStates[leavingPlayer].AnimationState, "player_removing")

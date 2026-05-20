@@ -1037,14 +1037,21 @@ end
 
 local function reserveCrewCarrySlot(player, model, st, crewMemberData)
 	if carrySlotAdapter and typeof(carrySlotAdapter.AddCrewMember) == "function" then
+		local tutorialRewardName = tostring(model:GetAttribute(TUTORIAL_REWARD_NAME_ATTRIBUTE) or "")
+		local tutorialCrewMemberId = resolveCrewMemberStorageName(model, st, crewMemberData)
 		return carrySlotAdapter.AddCrewMember(player, {
 			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
 			DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
 			Image = crewMemberData and crewMemberData.Image or nil,
-			CrewName = resolveCrewMemberStorageName(model, st, crewMemberData),
-			CrewStorageName = resolveCrewMemberStorageName(model, st, crewMemberData),
+			CrewName = tutorialCrewMemberId,
+			CrewStorageName = tutorialCrewMemberId,
 			Rarity = st and st.Rarity or nil,
 			Physical = true,
+			TutorialCrewMember = model:GetAttribute(TUTORIAL_CREW_MEMBER_ATTRIBUTE) == true,
+			TutorialOwnerUserId = model:GetAttribute(TUTORIAL_OWNER_ATTRIBUTE),
+			TutorialToken = tostring(model:GetAttribute(TUTORIAL_TOKEN_ATTRIBUTE) or ""),
+			TutorialRewardName = tutorialRewardName,
+			TutorialCrewMemberId = tutorialCrewMemberId,
 		})
 	end
 

@@ -1532,6 +1532,9 @@ fruitModuleLoader = FruitModuleLoader.new({
 	RequestAbility = function(abilityName, payload)
 		requestRemote:FireServer(abilityName, payload)
 	end,
+	IsAbilityLocallyReady = function(abilityName)
+		return isLocallyReady(abilityName)
+	end,
 	CreateEffectVisual = function(startPosition, endPosition, direction, isPredicted)
 		clientEffectVisuals:CreateMeraFlameDashEffectVisual(startPosition, endPosition, direction, isPredicted)
 	end,

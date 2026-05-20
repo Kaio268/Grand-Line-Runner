@@ -818,6 +818,9 @@ hitBox.Touched:Connect(function(hit)
 			ActiveMap = tostring(resolvedMapRefs.ActiveMapName or ""),
 			TutorialCrewMember = isTutorialCrewMemberInfo(info),
 			TutorialAlreadyGranted = heldTutorialAlreadyGranted,
+			TutorialOwnerUserId = tonumber(info.TutorialOwnerUserId) or plr.UserId,
+			TutorialCrewMemberId = tostring(info.CrewMemberId or info.Name or ""),
+			TutorialRewardName = tostring(info.TutorialRewardName or ""),
 			TutorialToken = tostring(info.TutorialToken or ""),
 		})
 		if info.OriginData and info.SlotIndex then

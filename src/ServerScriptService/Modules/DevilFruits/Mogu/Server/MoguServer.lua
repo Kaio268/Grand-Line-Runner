@@ -65,6 +65,27 @@ local function getMinimumManualResolveDelay(abilityConfig)
 	)
 end
 
+local function shouldForceFallBeforeBurrow(abilityConfig)
+	local startConfig = getStartAnimationConfig(abilityConfig)
+	local configured = startConfig.ForceFallBeforeBurrow
+	if configured == nil and type(abilityConfig) == "table" then
+		configured = abilityConfig.ForceFallBeforeBurrow
+	end
+	return configured == true
+end
+
+local function getBurrowGroundContactTolerance(abilityConfig)
+	local startConfig = getStartAnimationConfig(abilityConfig)
+	return math.max(
+		0,
+		tonumber(startConfig.BurrowGroundContactTolerance)
+			or tonumber(startConfig.BurrowGroundContactDistance)
+			or tonumber(abilityConfig and abilityConfig.BurrowGroundContactTolerance)
+			or tonumber(abilityConfig and abilityConfig.BurrowGroundContactDistance)
+			or 0.6
+	)
+end
+
 local function getPlanarDirection(direction)
 	if typeof(direction) ~= "Vector3" then
 		return nil
@@ -434,6 +455,24 @@ function MoguServer.Burrow(context)
 			ApplyCooldown = false,
 			DenyReason = "NoGround",
 		}
+	end
+	if shouldForceFallBeforeBurrow(abilityConfig) then
+		local rootPosition = context.RootPart and context.RootPart.Position or nil
+		local dropDistance = if typeof(rootPosition) == "Vector3"
+			then math.max(0, rootPosition.Y - startSurfacePosition.Y)
+			else 0
+		if dropDistance > getBurrowGroundContactTolerance(abilityConfig) then
+			logWarn(
+				"server burrow denied before ground contact player=%s drop=%.2f tolerance=%.2f",
+				player and player.Name or "<nil>",
+				dropDistance,
+				getBurrowGroundContactTolerance(abilityConfig)
+			)
+			return nil, {
+				ApplyCooldown = false,
+				DenyReason = "NotGrounded",
+			}
+		end
 	end
 
 	faceCharacterAlongDirection(context.Character, context.RootPart, direction)

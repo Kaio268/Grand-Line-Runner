@@ -68,6 +68,9 @@ local function scheduleRender()
 				ObjectiveIndicator = if typeof(tutorialState.target) == "table"
 					then React.createElement(ObjectiveIndicator, {
 						target = tutorialState.target,
+						indicatorStyle = if typeof(tutorialState.step) == "table"
+							then tutorialState.step.indicatorStyle
+							else "",
 						zIndex = 184,
 					})
 					else nil,
