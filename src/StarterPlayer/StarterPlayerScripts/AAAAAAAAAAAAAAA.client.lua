@@ -3,14 +3,23 @@ local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local ContentProvider = game:GetService("ContentProvider")
 
 local LocalPlayer = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
+local HazardHitboxVisualizer = require(
+	Modules:WaitForChild("Debug"):WaitForChild("HazardHitboxVisualizer")
+)
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("WaveClientDebugTrace") == true
 local seenWaveLogKeys = {}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+
+local hazardHitboxVisualizerOk, hazardHitboxVisualizerError = pcall(HazardHitboxVisualizer.Start)
+if not hazardHitboxVisualizerOk then
+	warn("[HazardHitboxVisualizer] " .. tostring(hazardHitboxVisualizerError))
+end
 
 local function getNonEmptyAttribute(instance, attributeName)
 	local value = instance:GetAttribute(attributeName)
@@ -111,12 +120,7 @@ local function getMovedWavesFolder()
 end
 
 local function resolveWavesFolder()
-	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
-	if wavesFolder and wavesFolder:IsA("Folder") then
-		return wavesFolder
-	end
-
-	wavesFolder = getMovedWavesFolder()
+	local wavesFolder = getMovedWavesFolder()
 	if wavesFolder then
 		return wavesFolder
 	end
@@ -127,6 +131,15 @@ local function resolveWavesFolder()
 		CacheMissing = false,
 	})
 	if wavesFolder and wavesFolder:IsA("Folder") then
+		return wavesFolder
+	end
+
+	wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
+	if wavesFolder and wavesFolder:IsA("Folder") then
+		waveWarnOnce(
+			"legacy_waves_folder_fallback",
+			"startup using legacy ReplicatedStorage.Waves because canonical ReplicatedStorage.Assets.Hazards.Waves was unavailable"
+		)
 		return wavesFolder
 	end
 
@@ -160,6 +173,7 @@ local ProtectionRuntime = require(
 		:WaitForChild("ProtectionRuntime")
 )
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
+WaveHazardVisuals.ValidateWaveAssets("WaveClient")
 
 waveTrace("startup awaiting waves folder")
 local WavesFolder = resolveWavesFolder()
@@ -695,7 +709,7 @@ elseif CLIENT_FALLBACK_WAVE_SPAWNING_ENABLED then
 			waveWarn(
 				"startup waveTemplateMissing name=%s expectedPath=%s chance=%s speed=%s",
 				tostring(waveName),
-				"ReplicatedStorage.Waves." .. tostring(waveName),
+				"resolved Waves folder/" .. tostring(waveName),
 				tostring(info and info.Chance),
 				tostring(info and info.Speed)
 			)
@@ -1056,6 +1070,7 @@ local LOCAL_WAVE_VISUAL_FOLDER_NAME = "_LocalWaveVisuals"
 local SMOOTHED_VISUAL_SOURCE_ATTRIBUTE = "SmoothedWaveVisualSource"
 local REGULAR_WAVE_VISUAL_ASSET_NAME = "Regular Wave"
 local FROZEN_WAVE_VISUAL_ASSET_NAME = "Frozen Wave"
+local WAVE_VISUAL_ASSET_NAMES = { REGULAR_WAVE_VISUAL_ASSET_NAME, FROZEN_WAVE_VISUAL_ASSET_NAME }
 local WAVE_VISUAL_NAME = "WaveVisual"
 local FROZEN_WAVE_VISUAL_NAME = "FrozenWaveVisual"
 local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
@@ -1286,6 +1301,7 @@ local function createSharedHazardVisualSmoother(hazard)
 		Velocity = Vector3.zero,
 		Destroyed = false,
 		RefreshQueued = false,
+		VisualPreloadRoot = nil,
 	}
 
 	sharedHazardVisualSmoothers[hazard] = controller
@@ -1323,6 +1339,19 @@ local function createSharedHazardVisualSmoother(hazard)
 		return self.Hazard:GetAttribute("WaveMovementMode") == "timeline_proxy"
 			or self.Hazard:GetAttribute("ClientWaveVisualsOnly") == true
 			or self.Hazard:GetAttribute("WaveVisualMode") == "ClientTimeline"
+	end
+
+	function controller:GetActiveVisualAssetName()
+		local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
+		if self.Hazard:GetAttribute("Frozen") == true then
+			return FROZEN_WAVE_VISUAL_ASSET_NAME
+		end
+
+		if activeAsset == FROZEN_WAVE_VISUAL_ASSET_NAME then
+			return FROZEN_WAVE_VISUAL_ASSET_NAME
+		end
+
+		return REGULAR_WAVE_VISUAL_ASSET_NAME
 	end
 
 	function controller:GetTimelineTargetCFrame()
@@ -1383,6 +1412,60 @@ local function createSharedHazardVisualSmoother(hazard)
 		return root
 	end
 
+	function controller:PreloadPreparedVisuals(root, preparedVisuals)
+		if self.VisualPreloadRoot == root then
+			return
+		end
+
+		local preloadInstances = {}
+		for _, assetName in ipairs(WAVE_VISUAL_ASSET_NAMES) do
+			local visual = preparedVisuals and preparedVisuals[assetName]
+			if visual and visual.Parent then
+				preloadInstances[#preloadInstances + 1] = visual
+			end
+		end
+
+		if #preloadInstances <= 0 then
+			return
+		end
+
+		self.VisualPreloadRoot = root
+		local hazardPath = formatInstancePath(self.Hazard)
+		task.spawn(function()
+			local ok, result = pcall(function()
+				ContentProvider:PreloadAsync(preloadInstances)
+			end)
+
+			if not ok then
+				waveWarnOnce(
+					"timeline_visual_preload_failed_" .. tostring(hazardPath),
+					"shared wave visual preload failed hazard=%s detail=%s",
+					tostring(hazardPath),
+					tostring(result)
+				)
+			end
+		end)
+	end
+
+	function controller:PrepareClientVisuals(root, activeAsset)
+		local prepared, preparedVisuals = WaveHazardVisuals.PrepareVisuals(root, WAVE_VISUAL_ASSET_NAMES, {
+			ActiveAssetName = activeAsset,
+			Context = "client timeline wave",
+			WarnIfMissing = true,
+		})
+
+		if not prepared then
+			waveWarnOnce(
+				"timeline_visual_prepare_incomplete_" .. tostring(self.Hazard.Name),
+				"shared wave visual preparation incomplete hazard=%s",
+				formatInstancePath(self.Hazard)
+			)
+		end
+
+		self:PreloadPreparedVisuals(root, preparedVisuals)
+		return prepared, preparedVisuals
+	end
+
 	function controller:RefreshClientVisualRoot()
 		local root = self:EnsureClientVisualRoot()
 		if not root then
@@ -1394,12 +1477,8 @@ local function createSharedHazardVisualSmoother(hazard)
 			return
 		end
 
-		local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
-		if self.Hazard:GetAttribute("Frozen") == true then
-			activeAsset = FROZEN_WAVE_VISUAL_ASSET_NAME
-		elseif activeAsset ~= FROZEN_WAVE_VISUAL_ASSET_NAME then
-			activeAsset = REGULAR_WAVE_VISUAL_ASSET_NAME
-		end
+		local activeAsset = self:GetActiveVisualAssetName()
+		self:PrepareClientVisuals(root, activeAsset)
 
 		if not WaveHazardVisuals.ApplyVisual(root, activeAsset) then
 			waveWarnOnce(
@@ -1556,12 +1635,7 @@ local function createSharedHazardVisualSmoother(hazard)
 
 	function controller:UpdateVisibility()
 		if self.VisualRoot and self.VisualRoot.Parent then
-			local activeAsset = self.Hazard:GetAttribute("ActiveWaveVisualAssetName")
-			if self.Hazard:GetAttribute("Frozen") == true then
-				activeAsset = FROZEN_WAVE_VISUAL_ASSET_NAME
-			elseif activeAsset ~= FROZEN_WAVE_VISUAL_ASSET_NAME then
-				activeAsset = REGULAR_WAVE_VISUAL_ASSET_NAME
-			end
+			local activeAsset = self:GetActiveVisualAssetName()
 			WaveHazardVisuals.ApplyVisual(self.VisualRoot, activeAsset)
 			return
 		end
@@ -1660,13 +1734,16 @@ local function createSharedHazardVisualSmoother(hazard)
 		end
 	end))
 
-	table.insert(controller.Connections, hazard:GetAttributeChangedSignal("Frozen"):Connect(function()
+	local function handleVisualStateChanged()
+		if controller:IsTimelineProxy() then
+			controller:UpdateVisibility()
+		end
 		controller:ScheduleRefresh()
-	end))
+	end
 
-	table.insert(controller.Connections, hazard:GetAttributeChangedSignal("ActiveWaveVisualAssetName"):Connect(function()
-		controller:ScheduleRefresh()
-	end))
+	table.insert(controller.Connections, hazard:GetAttributeChangedSignal("Frozen"):Connect(handleVisualStateChanged))
+
+	table.insert(controller.Connections, hazard:GetAttributeChangedSignal("ActiveWaveVisualAssetName"):Connect(handleVisualStateChanged))
 
 	table.insert(controller.Connections, hazard.AncestryChanged:Connect(function(_, parent)
 		if parent == nil then

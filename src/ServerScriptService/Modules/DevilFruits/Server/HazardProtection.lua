@@ -8,6 +8,7 @@ local AbilityTargeting = require(
 		:WaitForChild("Shared")
 		:WaitForChild("AbilityTargeting")
 )
+local AdminInvincibility = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminInvincibility"))
 
 local HazardProtection = {}
 
@@ -124,9 +125,6 @@ end
 
 function HazardProtection.GetProtection(target, options)
 	options = type(options) == "table" and options or {}
-	if options.IgnoreProtection == true or options.IgnoreHazardProtection == true then
-		return nil
-	end
 
 	local targetContext = type(options.TargetContext) == "table" and options.TargetContext
 		or AbilityTargeting.GetCharacterContext(target)
@@ -145,6 +143,22 @@ function HazardProtection.GetProtection(target, options)
 		elseif typeof(options.HitPosition) == "Vector3" then options.HitPosition
 		elseif rootPart and rootPart:IsA("BasePart") then rootPart.Position
 		else nil
+
+	if AdminInvincibility.IsEnabled(targetPlayer) then
+		local protection = {
+			Protected = true,
+			Source = "AdminInvincible",
+			Reason = "admin_invincible",
+			Player = targetPlayer,
+			Position = position,
+		}
+		logProtectionSkip(protection, options)
+		return protection
+	end
+
+	if options.IgnoreProtection == true or options.IgnoreHazardProtection == true then
+		return nil
+	end
 
 	local moguServer = getServerFruitModule("Mogu", "MoguServer")
 	local moguProtection = getMoguUndergroundProtection(moguServer, targetPlayer, position)

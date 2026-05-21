@@ -47,6 +47,11 @@ local CONFIG = {
 	SweptKillEnabled = true,
 	SweptKillPadding = Vector3.zero,
 	SweptKillTeleportResetDistance = 512,
+	RuntimeWaveName = "WaveTemplate", -- Historical runtime name only; spawning no longer reads this asset.
+	-- Scales the canonical ReplicatedStorage.Assets.Hazards.Waves.Regular Wave bounds to gameplay size.
+	BaseWaveVisualScale = 35.98836032827221,
+	BaseWavePivotOffset = Vector3.zero,
+	BaseWaveOrientation = CFrame.Angles(0, math.rad(180), 0),
 	-- WaveWidthScale controls left-to-right wave size. Variant WidthScale still applies on top of this.
 	WaveWidthScale = 0.65,
 	-- WaveHeightScale controls vertical wave size.
@@ -94,6 +99,7 @@ local traceStateKey = nil
 local activeHazardStates = {}
 local playerWaveSweepStates = {}
 local diagnosticsHazardsFolder = nil
+local warningKeys = {}
 local waveDiagnostics = {
 	KillRemoteCount = 0,
 	ServerSweepHitCount = 0,
@@ -118,6 +124,7 @@ local isValidActiveHazardState = nil
 local publishWaveDiagnostics = nil
 
 StudioAssetResolver.ValidateRequiredAssets({ "Waves" }, "SpawnWaves")
+WaveHazardVisuals.ValidateWaveAssets("SpawnWaves")
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -143,6 +150,50 @@ local function hazardTrace(message, ...)
 	print(string.format("[HAZARD TRACE] " .. message, ...))
 end
 
+local function hazardWarnOnce(key, message, ...)
+	if warningKeys[key] then
+		return
+	end
+
+	warningKeys[key] = true
+	warn(string.format("[SpawnWaves] " .. message, ...))
+end
+
+local function validateWaveMeasurementConfig()
+	local baseWaveVisualScale = tonumber(CONFIG.BaseWaveVisualScale)
+	if not baseWaveVisualScale then
+		hazardWarnOnce(
+			"missing_wave_base_visual_scale",
+			"Missing BaseWaveVisualScale; configured wave hitbox creation will fall back to legacy WaveTemplate if available."
+		)
+		return
+	end
+
+	if baseWaveVisualScale <= 0 then
+		hazardWarnOnce(
+			"invalid_wave_base_visual_scale",
+			"Invalid BaseWaveVisualScale=%s; configured wave hitbox creation will fall back to legacy WaveTemplate if available.",
+			tostring(CONFIG.BaseWaveVisualScale)
+		)
+	end
+
+	if typeof(CONFIG.BaseWavePivotOffset) ~= "Vector3" then
+		hazardWarnOnce(
+			"invalid_wave_pivot_offset",
+			"BaseWavePivotOffset is not a Vector3; generated wave hitboxes will use Vector3.zero."
+		)
+	end
+
+	if typeof(CONFIG.BaseWaveOrientation) ~= "CFrame" then
+		hazardWarnOnce(
+			"invalid_wave_orientation",
+			"BaseWaveOrientation is not a CFrame; generated wave hitboxes will use the default Regular Wave orientation."
+		)
+	end
+end
+
+validateWaveMeasurementConfig()
+
 local function findChildRecursive(parent, childName)
 	if not parent then
 		return nil
@@ -156,7 +207,7 @@ local function findChildRecursive(parent, childName)
 	return parent:FindFirstChild(childName, true)
 end
 
-local function getMovedWavesFolder()
+local function getResolvedWavesFolder()
 	local waves = StudioAssetResolver.ResolveAsset("Waves", {
 		Context = "SpawnWaves",
 		Required = true,
@@ -166,15 +217,6 @@ local function getMovedWavesFolder()
 	end
 
 	return nil
-end
-
-local function getWavesFolder()
-	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
-	if wavesFolder and wavesFolder:IsA("Folder") then
-		return wavesFolder
-	end
-
-	return getMovedWavesFolder()
 end
 
 local function getOrCreateRemotesFolder()
@@ -572,10 +614,6 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 		return false
 	end
 
-	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
-		HoroServer.InterruptActiveProjection(player, "wave_touch")
-		return true
-	end
 	local isHazardProtected = HazardProtection.IsProtected(player, {
 		Position = hit and hit.HitPosition or rootPart.Position,
 		HitPosition = hit and hit.HitPosition or rootPart.Position,
@@ -584,6 +622,10 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 		Source = "SpawnWaves",
 	})
 	if isHazardProtected then
+		return true
+	end
+	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
+		HoroServer.InterruptActiveProjection(player, "wave_touch")
 		return true
 	end
 	if ToriServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then
@@ -699,7 +741,7 @@ local function translateCFrame(cframeValue, offset)
 end
 
 local function applyHazardAttributes(instance, variant)
-	instance.Name = "WaveTemplate"
+	instance.Name = tostring(CONFIG.RuntimeWaveName or "Wave")
 	instance:SetAttribute("HazardClass", CONFIG.HazardClass)
 	instance:SetAttribute("HazardType", "Wave")
 	instance:SetAttribute("Variant", variant.Name)
@@ -814,35 +856,67 @@ local function resolveHazardRefs()
 	return refs, waveFolder, hazardsFolder, refs.WaveStart, refs.WaveEnd, leftBound, rightBound
 end
 
-local function getWaveTemplate()
-	local wavesFolder = getWavesFolder()
+local function getLegacyWaveTemplate()
+	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
 	if not wavesFolder then
-		hazardTrace("spawn skipped reason=missing_waves_folder checked=StudioAssetResolver.Waves")
 		return nil
 	end
 
 	local template = findChildRecursive(wavesFolder, "WaveTemplate")
 	if not template then
-		for _, descendant in ipairs(wavesFolder:GetDescendants()) do
-			if descendant:IsA("Model") or descendant:IsA("BasePart") then
-				template = descendant
-				break
-			end
-		end
-	end
-
-	if not template then
-		hazardTrace("spawn skipped reason=missing_wave_template wavesFolder=%s", formatInstancePath(wavesFolder))
 		return nil
 	end
 
 	if not (template:IsA("Model") or template:IsA("BasePart")) then
-		hazardTrace("spawn skipped reason=invalid_wave_template class=%s", template.ClassName)
+		hazardWarnOnce(
+			"invalid_legacy_wave_template",
+			"Ignoring legacy ReplicatedStorage.Waves.WaveTemplate because class=%s is not a Model/BasePart.",
+			tostring(template.ClassName)
+		)
 		return nil
 	end
 
-	hazardTrace("using wave template path=%s", formatInstancePath(template))
 	return template
+end
+
+local function getWaveMeasurementConfig()
+	return {
+		Name = CONFIG.RuntimeWaveName,
+		BaseVisualScale = CONFIG.BaseWaveVisualScale,
+		PivotOffset = CONFIG.BaseWavePivotOffset,
+		Orientation = CONFIG.BaseWaveOrientation,
+	}
+end
+
+local function createWaveHazard()
+	local resolvedWavesFolder = getResolvedWavesFolder()
+	if resolvedWavesFolder then
+		hazardTrace("using resolved wave assets folder=%s", formatInstancePath(resolvedWavesFolder))
+	end
+
+	local clone, _, reason = WaveHazardVisuals.CreateHazardFromConfig(getWaveMeasurementConfig())
+	if clone then
+		return clone, "config"
+	end
+
+	hazardWarnOnce(
+		"invalid_wave_measurement_config",
+		"Configured wave hitbox creation failed reason=%s baseWaveVisualScale=%s; checking legacy ReplicatedStorage.Waves.WaveTemplate fallback.",
+		tostring(reason),
+		tostring(CONFIG.BaseWaveVisualScale)
+	)
+
+	local legacyTemplate = getLegacyWaveTemplate()
+	if legacyTemplate then
+		hazardWarnOnce(
+			"legacy_wave_template_fallback",
+			"Using legacy ReplicatedStorage.Waves.WaveTemplate only as a temporary fallback. Configure BaseWaveVisualScale/BaseWavePivotOffset/BaseWaveOrientation to remove this fallback."
+		)
+		return WaveHazardVisuals.CreateHazardFromTemplate(legacyTemplate), "legacy_template"
+	end
+
+	hazardTrace("spawn skipped reason=missing_wave_measurement source=config_or_legacy reason=%s", tostring(reason))
+	return nil, "missing_measurement"
 end
 
 -- Accepts the corridor direction and available sideways room for drifting hazards.
@@ -1212,11 +1286,6 @@ local function spawnSharedHazard(spawnDelay)
 	end
 	diagnosticsHazardsFolder = hazardsFolder
 
-	local template = getWaveTemplate()
-	if not template then
-		return false, "missing_template"
-	end
-
 	local maxActiveHazards = math.max(1, math.floor(tonumber(CONFIG.MaxActiveHazards) or 20))
 	local activeHazardCount = cleanupActiveHazardStates()
 	if activeHazardCount >= maxActiveHazards then
@@ -1229,12 +1298,19 @@ local function spawnSharedHazard(spawnDelay)
 		return false, "max_active_hazards"
 	end
 
+	local clone, waveMeasurementSource = createWaveHazard()
+	if not clone then
+		return false, "missing_measurement"
+	end
+
 	local variant = chooseVariant()
-	local clone = WaveHazardVisuals.CreateHazardFromTemplate(template)
 	scaleHazardWidth(clone, variant.WidthScale)
 	scaleHazardDimensions(clone, CONFIG.WaveWidthScale, CONFIG.WaveHeightScale, CONFIG.WaveThicknessScale)
 	anchorHazard(clone)
 	applyHazardAttributes(clone, variant)
+	clone:SetAttribute("WaveMeasurementSource", waveMeasurementSource)
+	clone:SetAttribute("WaveBaseVisualAssetName", "Regular Wave")
+	clone:SetAttribute("WaveBaseVisualScale", CONFIG.BaseWaveVisualScale)
 
 	local startCF = computePivotOnTop(clone, startPart)
 	local endCF = computePivotOnTop(clone, endPart)
@@ -1321,8 +1397,9 @@ local function spawnSharedHazard(spawnDelay)
 	publishWaveDiagnostics(hazardsFolder)
 
 	hazardTrace(
-		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f wallPadding=%.2f paddedCorridorWidth=%.2f corridorWidthScale=%.3f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
+		"spawned waveFolder=%s measurementSource=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f wallPadding=%.2f paddedCorridorWidth=%.2f corridorWidthScale=%.3f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
 		formatInstancePath(waveFolder),
+		tostring(waveMeasurementSource),
 		tostring(variant.Name),
 		tonumber(variant.Speed) or 0,
 		tostring(activeHazardCount),

@@ -1,3 +1,4 @@
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -7,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
+local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
 		:WaitForChild("DevilFruits")
@@ -66,6 +68,20 @@ local CONFIG = {
 
 if not CONFIG.Enabled then
 	return
+end
+
+local function markHazardHitboxPart(part)
+	if not part or not part:IsA("BasePart") then
+		return
+	end
+
+	CollectionService:AddTag(part, HazardDebugConstants.HitboxTag)
+	part:SetAttribute(HazardDebugConstants.DebugHitboxAttribute, true)
+	part:SetAttribute(HazardDebugConstants.HazardHitboxAttribute, true)
+	part:SetAttribute(HazardDebugConstants.HazardClassAttribute, CONFIG.HazardClass)
+	part:SetAttribute(HazardDebugConstants.HazardTypeAttribute, CONFIG.HazardType)
+	part:SetAttribute("HazardHitboxShape", "Cylinder")
+	part:SetAttribute("HazardHitboxRadius", CONFIG.ImpactRadius)
 end
 
 local hazardsFolder = Workspace:FindFirstChild("CannonBarrages")
@@ -286,6 +302,7 @@ local function makeImpactCircle(position)
 	circle.Material = Enum.Material.Neon
 	circle.Color = Color3.fromRGB(255, 35, 25)
 	circle.Transparency = 0.35
+	markHazardHitboxPart(circle)
 	circle.Parent = hazardsFolder
 
 	return circle

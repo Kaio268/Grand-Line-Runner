@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local AdminInvincibility = require(Modules:WaitForChild("AdminInvincibility"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local CrewInteraction = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
@@ -1325,17 +1326,21 @@ local function startProjectionMonitor(state)
 			if now >= state.NextHazardProbeAt then
 				state.NextHazardProbeAt = now + state.ServerHazardProbeInterval
 				if probeHazards(state) then
-					finishProjection(state, "hazard_overlap", ghostRoot.Position, true)
-					return
+					if not AdminInvincibility.IsEnabled(state.Player) then
+						finishProjection(state, "hazard_overlap", ghostRoot.Position, true)
+						return
+					end
 				end
 
 				if probeBodyHazards(state) then
-					finishProjection(state, "body_hazard_overlap", ghostRoot.Position, true)
-					if humanoid.Parent and humanoid.Health > 0 then
-						humanoid.Health = 0
-						scheduleRespawnIfBodyDead(state)
+					if not AdminInvincibility.IsEnabled(state.Player) then
+						finishProjection(state, "body_hazard_overlap", ghostRoot.Position, true)
+						if humanoid.Parent and humanoid.Health > 0 then
+							humanoid.Health = 0
+							scheduleRespawnIfBodyDead(state)
+						end
+						return
 					end
-					return
 				end
 			end
 
@@ -1483,6 +1488,10 @@ local function handleActionRemote(player, actionName, payload)
 	end
 
 	if actionName == ACTION_INTERRUPT then
+		if AdminInvincibility.IsEnabled(state.Player) then
+			return
+		end
+
 		local now = os.clock()
 		if now < state.NextClientInterruptAt then
 			return
@@ -1493,6 +1502,10 @@ local function handleActionRemote(player, actionName, payload)
 	end
 
 	if actionName == ACTION_BODY_HAZARD then
+		if AdminInvincibility.IsEnabled(state.Player) then
+			return
+		end
+
 		local now = os.clock()
 		if now < state.NextClientInterruptAt then
 			return

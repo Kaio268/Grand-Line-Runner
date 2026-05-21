@@ -8,6 +8,7 @@ local AbilityTargeting = require(
 		:WaitForChild("Shared")
 		:WaitForChild("AbilityTargeting")
 )
+local AdminInvincibility = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminInvincibility"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
 		:WaitForChild("DevilFruits")
@@ -239,6 +240,12 @@ local function hookPlayer(player)
 	player.CharacterAdded:Connect(function()
 		clearActiveState(player)
 		clearEffectAttributes(player)
+	end)
+
+	player:GetAttributeChangedSignal(AdminInvincibility.AttributeName):Connect(function()
+		if AdminInvincibility.IsEnabled(player) then
+			clearActiveState(player)
+		end
 	end)
 end
 

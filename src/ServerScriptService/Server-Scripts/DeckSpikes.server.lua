@@ -1,3 +1,4 @@
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -8,6 +9,7 @@ local Workspace = game:GetService("Workspace")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
+local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local HazardProtection = require(
@@ -78,6 +80,18 @@ if not CONFIG.Enabled then
 end
 
 StudioAssetResolver.ValidateRequiredAssets({ "SpikeTraps" }, "DeckSpikes")
+
+local function markHazardHitboxPart(part)
+	if not part or not part:IsA("BasePart") then
+		return
+	end
+
+	CollectionService:AddTag(part, HazardDebugConstants.HitboxTag)
+	part:SetAttribute(HazardDebugConstants.DebugHitboxAttribute, true)
+	part:SetAttribute(HazardDebugConstants.HazardHitboxAttribute, true)
+	part:SetAttribute(HazardDebugConstants.HazardClassAttribute, CONFIG.HazardClass)
+	part:SetAttribute(HazardDebugConstants.HazardTypeAttribute, CONFIG.HazardType)
+end
 
 local SPIKE_TEMPLATE_NAMES_BY_AREA = {
 	["foosha village"] = "(FOOSHA) WOODEN SPIKE TRAP",
@@ -458,6 +472,7 @@ local function configureSpikeVisual(model, hitbox)
 			part.Transparency = 1
 			part:SetAttribute("HazardClass", CONFIG.HazardClass)
 			part:SetAttribute("HazardType", CONFIG.HazardType)
+			markHazardHitboxPart(part)
 		end
 	end
 end
@@ -685,6 +700,7 @@ local function createGeneratedSpike(model, placement)
 	configurePart(spike, true, true)
 	spike:SetAttribute("HazardClass", CONFIG.HazardClass)
 	spike:SetAttribute("HazardType", CONFIG.HazardType)
+	markHazardHitboxPart(spike)
 
 	return spike, spike, hiddenCFrame, extendedCFrame
 end

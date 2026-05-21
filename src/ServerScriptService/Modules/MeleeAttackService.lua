@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
+local AdminInvincibility = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminInvincibility"))
 
 local MeleeAttackService = {}
 
@@ -201,6 +202,10 @@ local function resolveValidatedTarget(player, attackerCharacter, attackerRootPar
 	local targetHumanoid = hitResult.Humanoid
 	local targetRootPart = hitResult.RootPart
 	if not targetModel or not targetHumanoid or not targetRootPart then
+		return nil
+	end
+
+	if AdminInvincibility.IsTargetInvincible(targetModel) then
 		return nil
 	end
 
