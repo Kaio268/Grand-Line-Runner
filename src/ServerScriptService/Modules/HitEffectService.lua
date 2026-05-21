@@ -25,6 +25,7 @@ local sliceServiceCache = nil
 local crewInteractionCache = nil
 local temporaryRagdollServiceCache = nil
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
+local DIRECT_KNOCKBACK_OWNER_RESTORE_DELAY = 0.35
 
 local function hasCarriedCrewMember(player)
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
@@ -176,7 +177,7 @@ local function clearActiveState(player, expectedState)
 	clearEffectAttributes(player)
 end
 
-local function applyKnockback(rootPart, knockbackVector)
+local function applyKnockback(rootPart, knockbackVector, restoreOwner)
 	if typeof(knockbackVector) ~= "Vector3" or knockbackVector.Magnitude <= 0.01 then
 		return
 	end
@@ -191,6 +192,16 @@ local function applyKnockback(rootPart, knockbackVector)
 		math.max(currentVelocity.Y, knockbackVector.Y),
 		knockbackVector.Z
 	)
+
+	if restoreOwner and restoreOwner.Parent == Players then
+		task.delay(DIRECT_KNOCKBACK_OWNER_RESTORE_DELAY, function()
+			if rootPart.Parent and restoreOwner.Parent == Players then
+				pcall(function()
+					rootPart:SetNetworkOwner(restoreOwner)
+				end)
+			end
+		end)
+	end
 end
 
 local function forceDropCarriedItems(player, dropPosition, effectName)
@@ -380,7 +391,7 @@ function HitEffectService.ApplyEffect(target, effectName, options)
 		dropResponse = forceDropCarriedItems(targetPlayer, dropPosition, effectName)
 	end
 
-	applyKnockback(rootPart, options.KnockbackVector or effectDefinition.Knockback)
+	applyKnockback(rootPart, options.KnockbackVector or effectDefinition.Knockback, targetPlayer)
 
 	if duration > 0 then
 		task.delay(duration + 0.05, function()

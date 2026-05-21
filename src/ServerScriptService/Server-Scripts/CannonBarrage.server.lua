@@ -41,6 +41,8 @@ local CONFIG = {
 	IntervalJitterMax = 0.65,
 	KnockdownDuration = 0.8,
 	KnockdownPriority = 30,
+	RagdollImpulseHorizontal = 55,
+	RagdollImpulseVertical = 18,
 	ImpactVfxLifetime = 3,
 	ImpactVfxScale = 3,
 	DefaultVfxEmitCount = 30,
@@ -621,6 +623,8 @@ local function setCannonDebugAttributes(instance, shot)
 	instance:SetAttribute("CannonInterval", shot.CannonInterval)
 	instance:SetAttribute("CannonIntervalBase", shot.CannonIntervalBase)
 	instance:SetAttribute("CannonIntervalJitter", shot.CannonIntervalJitter)
+	instance:SetAttribute("RagdollImpulseHorizontal", shot.RagdollImpulseHorizontal)
+	instance:SetAttribute("RagdollImpulseVertical", shot.RagdollImpulseVertical)
 	if shot.GroundPart then
 		instance:SetAttribute("GroundPartPath", shot.GroundPart:GetFullName())
 	end
@@ -961,19 +965,36 @@ local function canTakeCannonImpactDamage(player, rootPart, impactPosition)
 	return true
 end
 
-local function applyCannonKnockdown(player)
+local function getCannonRagdollImpulse(impactPosition, rootPart)
+	if typeof(impactPosition) ~= "Vector3" or typeof(rootPart) ~= "Instance" or not rootPart:IsA("BasePart") then
+		return nil
+	end
+
+	local offset = rootPart.Position - impactPosition
+	local fallbackDirection = rootPart.CFrame.LookVector
+	local direction = getPlanarUnit(offset, fallbackDirection)
+	local horizontalStrength = math.max(0, tonumber(CONFIG.RagdollImpulseHorizontal) or 0)
+	local verticalStrength = math.max(0, tonumber(CONFIG.RagdollImpulseVertical) or 0)
+
+	return (direction * horizontalStrength) + Vector3.new(0, verticalStrength, 0)
+end
+
+local function applyCannonKnockdown(player, impactPosition, rootPart)
 	HitEffectService.ApplyEffect(player, "Knockdown", {
 		Duration = CONFIG.KnockdownDuration,
 		Priority = CONFIG.KnockdownPriority,
 		HazardClass = CONFIG.HazardClass,
 		HazardType = CONFIG.HazardType,
 		Source = "CannonBarrage",
+		DropPosition = rootPart.Position,
+		RagdollJoints = true,
+		RagdollImpulse = getCannonRagdollImpulse(impactPosition, rootPart),
 		Movement = {
 			WalkSpeedMultiplier = 0,
 			JumpMultiplier = 0,
 			AutoRotate = false,
 			PlatformStand = true,
-			State = Enum.HumanoidStateType.Physics,
+			State = Enum.HumanoidStateType.Ragdoll,
 		},
 	})
 end
@@ -996,7 +1017,7 @@ local function damagePlayersAt(position, shot)
 				Source = "CannonBarrage",
 			})
 			if not isHazardProtected then
-				applyCannonKnockdown(player)
+				applyCannonKnockdown(player, position, rootPart)
 				humanoid:TakeDamage(damage)
 			end
 		end
@@ -1131,6 +1152,8 @@ local function buildShotContext(player, targetData, tuning, shotIndex, shotsPerC
 		CannonInterval = tonumber(bountyContext.Interval) or 0,
 		CannonIntervalBase = tonumber(bountyContext.IntervalBase) or 0,
 		CannonIntervalJitter = tonumber(bountyContext.IntervalJitter) or 0,
+		RagdollImpulseHorizontal = math.max(0, tonumber(CONFIG.RagdollImpulseHorizontal) or 0),
+		RagdollImpulseVertical = math.max(0, tonumber(CONFIG.RagdollImpulseVertical) or 0),
 	}
 end
 
