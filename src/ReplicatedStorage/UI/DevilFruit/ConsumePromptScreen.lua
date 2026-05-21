@@ -1,4 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -30,10 +32,17 @@ local function gradient(first, second)
 	})
 end
 
+local function isMobileViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
+
 local function actionButton(props)
 	local hovered, setHovered = React.useState(false)
 	local fill = if hovered then props.hoverFill else props.fill
 	local textColor = if hovered then props.hoverText else props.textColor
+	local compact = props.compact == true
 
 	return e("TextButton", {
 		AutoButtonColor = false,
@@ -41,7 +50,7 @@ local function actionButton(props)
 		BackgroundTransparency = 0.12,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder,
-		Size = UDim2.new(0.5, -14, 0, 46),
+		Size = UDim2.new(0.5, compact and -8 or -14, 0, compact and 36 or 46),
 		Text = "",
 		[React.Event.Activated] = props.onActivated,
 		[React.Event.MouseEnter] = function()
@@ -67,7 +76,7 @@ local function actionButton(props)
 			Size = UDim2.fromScale(1, 1),
 			Text = props.text,
 			TextColor3 = textColor,
-			TextSize = 22,
+			TextSize = compact and 16 or 22,
 		}),
 	})
 end
@@ -76,6 +85,10 @@ local function ConsumePromptScreen(props)
 	if props.visible ~= true then
 		return e(React.Fragment)
 	end
+	local mobile = isMobileViewport()
+	local panelSize = mobile and Vector2.new(380, 248) or Vector2.new(620, 360)
+	local topBarHeight = mobile and 62 or 88
+	local contentTop = mobile and 88 or 114
 
 	return e("ScreenGui", {
 		DisplayOrder = 120,
@@ -97,7 +110,7 @@ local function ConsumePromptScreen(props)
 			BorderSizePixel = 0,
 			ClipsDescendants = true,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(620, 360),
+			Size = UDim2.fromOffset(panelSize.X, panelSize.Y),
 			ZIndex = 80,
 		}, {
 			Corner = e("UICorner", {
@@ -135,8 +148,8 @@ local function ConsumePromptScreen(props)
 				BackgroundColor3 = THEME.HeaderBackground,
 				BackgroundTransparency = 0.25,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(14, 12),
-				Size = UDim2.new(1, -28, 0, 88),
+				Position = UDim2.fromOffset(mobile and 10 or 14, mobile and 10 or 12),
+				Size = UDim2.new(1, mobile and -20 or -28, 0, topBarHeight),
 				ZIndex = 81,
 			}, {
 				Corner = e("UICorner", {
@@ -151,22 +164,22 @@ local function ConsumePromptScreen(props)
 				Accent = e("TextLabel", {
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBold,
-					Position = UDim2.fromOffset(16, 8),
-					Size = UDim2.new(1, -32, 0, 20),
+					Position = UDim2.fromOffset(mobile and 12 or 16, mobile and 6 or 8),
+					Size = UDim2.new(1, mobile and -24 or -32, 0, mobile and 16 or 20),
 					Text = "DEVIL FRUIT",
 					TextColor3 = THEME.GoldHighlight,
-					TextSize = 16,
+					TextSize = mobile and 11 or 16,
 					TextXAlignment = Enum.TextXAlignment.Left,
 					ZIndex = 82,
 				}),
 				Title = e("TextLabel", {
 					BackgroundTransparency = 1,
 					Font = Enum.Font.GothamBold,
-					Position = UDim2.fromOffset(16, 30),
-					Size = UDim2.new(1, -32, 0, 48),
+					Position = UDim2.fromOffset(mobile and 12 or 16, mobile and 22 or 30),
+					Size = UDim2.new(1, mobile and -24 or -32, 0, mobile and 34 or 48),
 					Text = props.title,
 					TextColor3 = THEME.TextMain,
-					TextSize = 22,
+					TextSize = mobile and 17 or 22,
 					TextStrokeColor3 = THEME.GoldHighlight,
 					TextStrokeTransparency = 0.58,
 					TextTruncate = Enum.TextTruncate.AtEnd,
@@ -176,15 +189,15 @@ local function ConsumePromptScreen(props)
 			}),
 			Content = e("Frame", {
 				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(20, 114),
-				Size = UDim2.new(1, -40, 1, -136),
+				Position = UDim2.fromOffset(mobile and 14 or 20, contentTop),
+				Size = UDim2.new(1, mobile and -28 or -40, 1, -(contentTop + (mobile and 14 or 22))),
 				ZIndex = 81,
 			}, {
 				BodyCard = e("Frame", {
 					BackgroundColor3 = THEME.SectionBackground,
 					BackgroundTransparency = 0.22,
 					BorderSizePixel = 0,
-					Size = UDim2.new(1, 0, 1, -64),
+					Size = UDim2.new(1, 0, 1, mobile and -48 or -64),
 					ZIndex = 81,
 				}, {
 					Corner = e("UICorner", {
@@ -197,10 +210,10 @@ local function ConsumePromptScreen(props)
 					}),
 					Gradient = gradient(THEME.SecondaryBg, THEME.PrimaryBg),
 					Padding = e("UIPadding", {
-						PaddingBottom = UDim.new(0, 14),
-						PaddingLeft = UDim.new(0, 16),
-						PaddingRight = UDim.new(0, 16),
-						PaddingTop = UDim.new(0, 14),
+						PaddingBottom = UDim.new(0, mobile and 10 or 14),
+						PaddingLeft = UDim.new(0, mobile and 12 or 16),
+						PaddingRight = UDim.new(0, mobile and 12 or 16),
+						PaddingTop = UDim.new(0, mobile and 10 or 14),
 					}),
 					Body = e("TextLabel", {
 						BackgroundTransparency = 1,
@@ -208,7 +221,7 @@ local function ConsumePromptScreen(props)
 						Size = UDim2.fromScale(1, 1),
 						Text = props.body,
 						TextColor3 = THEME.TextSecondary,
-						TextSize = 24,
+						TextSize = mobile and 16 or 24,
 						TextWrapped = true,
 						TextXAlignment = Enum.TextXAlignment.Left,
 						TextYAlignment = Enum.TextYAlignment.Top,
@@ -219,13 +232,13 @@ local function ConsumePromptScreen(props)
 					AnchorPoint = Vector2.new(0.5, 1),
 					BackgroundTransparency = 1,
 					Position = UDim2.fromScale(0.5, 1),
-					Size = UDim2.new(1, 0, 0, 48),
+					Size = UDim2.new(1, 0, 0, mobile and 38 or 48),
 					ZIndex = 82,
 				}, {
 					Layout = e("UIListLayout", {
 						FillDirection = Enum.FillDirection.Horizontal,
 						HorizontalAlignment = Enum.HorizontalAlignment.Center,
-						Padding = UDim.new(0, 28),
+						Padding = UDim.new(0, mobile and 16 or 28),
 						SortOrder = Enum.SortOrder.LayoutOrder,
 					}),
 					Confirm = e(actionButton, {
@@ -237,6 +250,7 @@ local function ConsumePromptScreen(props)
 						hoverTop = THEME.GoldHighlight,
 						layoutOrder = 1,
 						onActivated = props.onConfirm,
+						compact = mobile,
 						text = props.confirmText,
 						textColor = THEME.PrimaryBg,
 						top = THEME.GoldHighlight,
@@ -250,6 +264,7 @@ local function ConsumePromptScreen(props)
 						hoverTop = THEME.CloseHover,
 						layoutOrder = 2,
 						onActivated = props.onCancel,
+						compact = mobile,
 						text = props.cancelText,
 						textColor = THEME.TextMain,
 						top = THEME.SecondaryBg,

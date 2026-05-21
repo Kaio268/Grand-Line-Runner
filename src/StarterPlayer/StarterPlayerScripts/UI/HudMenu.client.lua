@@ -59,11 +59,27 @@ local function getHudLayout()
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
 	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000
 	local compact = mobile or viewport.X < 700 or viewport.Y < 500
-	local tileSize = if mobile then 56 elseif compact then 72 else 98
-	local columnGap = if mobile then 4 elseif compact then 6 else 10
-	local rowGap = if mobile then 4 elseif compact then 6 else 10
+	local tileSize = if mobile then 42 elseif compact then 72 else 98
+	local columnGap = if mobile then 6 elseif compact then 6 else 10
+	local rowGap = if mobile then 6 elseif compact then 6 else 10
 	local stepX = tileSize + columnGap
 	local stepY = tileSize + rowGap
+	local mobilePositions = {
+		Store = Vector2.new(0, 0),
+		Index = Vector2.new(stepX, 0),
+		Gifts = Vector2.new(stepX * 2, 0),
+		Quest = Vector2.new(0, stepY),
+		Rebirth = Vector2.new(stepX, stepY),
+		Settings = Vector2.new(stepX * 2, stepY),
+	}
+	local stackedPositions = {
+		Store = Vector2.new(0, 0),
+		Index = Vector2.new(stepX, 0),
+		Gifts = Vector2.new(0, stepY),
+		Quest = Vector2.new(stepX, stepY),
+		Rebirth = Vector2.new(0, stepY * 2),
+		Settings = Vector2.new(stepX, stepY * 2),
+	}
 
 	return {
 		tileSize = tileSize,
@@ -72,15 +88,11 @@ local function getHudLayout()
 		stepX = stepX,
 		stepY = stepY,
 		mobile = mobile,
-		containerPosition = if mobile then UDim2.fromOffset(118, 138) elseif compact then UDim2.fromOffset(8, 160) else UDim2.fromOffset(10, 250),
-		positions = {
-			Store = Vector2.new(0, 0),
-			Index = Vector2.new(stepX, 0),
-			Gifts = Vector2.new(0, stepY),
-			Quest = Vector2.new(stepX, stepY),
-			Rebirth = Vector2.new(0, stepY * 2),
-			Settings = Vector2.new(stepX, stepY * 2),
-		},
+		containerPosition = if mobile
+			then UDim2.fromOffset(4, 98)
+			elseif compact then UDim2.fromOffset(8, 160)
+			else UDim2.fromOffset(10, 250),
+		positions = if mobile then mobilePositions else stackedPositions,
 	}
 end
 
@@ -101,6 +113,15 @@ local HUD_ICON_SIZE_OVERRIDES = {
 	Settings = Vector2.new(88, 88),
 	Rebirth = Vector2.new(82, 82),
 	Quest = Vector2.new(94, 94),
+}
+
+local HUD_MOBILE_ICON_SIZE_OVERRIDES = {
+	Store = Vector2.new(42, 42),
+	Index = Vector2.new(38, 38),
+	Gifts = Vector2.new(38, 38),
+	Settings = Vector2.new(38, 38),
+	Rebirth = Vector2.new(40, 40),
+	Quest = Vector2.new(42, 42),
 }
 
 local HUD_ICON_SCALE_TYPE_OVERRIDES = {
@@ -329,8 +350,12 @@ end
 local function ensureContainer(hud)
 	local layout = getHudLayout()
 	local lButtons = hud:FindFirstChild("LButtons")
-	local containerWidth = (layout.tileSize * 2) + layout.columnGap
-	local containerHeight = (layout.tileSize * 3) + (layout.rowGap * 2)
+	local containerWidth = if layout.mobile
+		then (layout.tileSize * 3) + (layout.columnGap * 2)
+		else (layout.tileSize * 2) + layout.columnGap
+	local containerHeight = if layout.mobile
+		then (layout.tileSize * 2) + layout.rowGap
+		else (layout.tileSize * 3) + (layout.rowGap * 2)
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
@@ -649,12 +674,12 @@ local function ensureGiftSummaryTimer(button)
 	summary.BackgroundTransparency = 0.16
 	summary.BorderSizePixel = 0
 	summary.Font = Enum.Font.GothamBold
-	summary.Position = UDim2.new(0.5, 0, 0, layout.mobile and 2 or 4)
-	summary.Size = layout.mobile and UDim2.fromOffset(42, 12) or UDim2.fromOffset(60, 18)
+	summary.Position = UDim2.new(0.5, 0, 0, layout.mobile and -1 or 4)
+	summary.Size = layout.mobile and UDim2.fromOffset(30, 8) or UDim2.fromOffset(60, 18)
 	summary.Text = tostring(summary.Text ~= "" and summary.Text or "--")
 	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
 	summary.TextScaled = false
-	summary.TextSize = layout.mobile and 8 or 13
+	summary.TextSize = layout.mobile and 5 or 13
 	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	summary.TextStrokeTransparency = 0
 	summary.TextXAlignment = Enum.TextXAlignment.Center
@@ -666,7 +691,7 @@ local function ensureGiftSummaryTimer(button)
 		corner = Instance.new("UICorner")
 		corner.Parent = summary
 	end
-	corner.CornerRadius = UDim.new(0, 9)
+	corner.CornerRadius = UDim.new(0, layout.mobile and 5 or 9)
 
 	local stroke = summary:FindFirstChildOfClass("UIStroke")
 	if not stroke then
@@ -677,7 +702,7 @@ local function ensureGiftSummaryTimer(button)
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Color = Color3.fromRGB(255, 237, 203)
 	stroke.Transparency = 0.6
-	stroke.Thickness = 1
+	stroke.Thickness = layout.mobile and 0.7 or 1
 	stroke.Enabled = true
 
 	local gradient = summary:FindFirstChildOfClass("UIGradient")
@@ -839,10 +864,11 @@ local function buildTileStyle(button)
 	end
 
 	if iconStyle then
-		local iconSize = HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66)
 		local layout = getHudLayout()
-		local mobileIconInset = if button.Name == "Store" or button.Name == "Quest" or button.Name == "Settings" then 2 else 6
-		local maxIconSize = layout.mobile and math.max(42, layout.tileSize - mobileIconInset) or math.huge
+		local iconSize = if layout.mobile
+			then (HUD_MOBILE_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(40, 40))
+			else (HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66))
+		local maxIconSize = layout.mobile and 42 or math.huge
 		iconStyle.position = UDim2.fromScale(0.5, layout.mobile and 0.36 or 0.34)
 		iconStyle.size = UDim2.fromOffset(math.min(iconSize.X, maxIconSize), math.min(iconSize.Y, maxIconSize))
 		iconStyle.scaleType = HUD_ICON_SCALE_TYPE_OVERRIDES[button.Name] or Enum.ScaleType.Fit
@@ -853,9 +879,9 @@ local function buildTileStyle(button)
 	local titleStyle = normalizeTitleStyle(pickTitleStyle(button))
 	local layout = getHudLayout()
 	if layout.mobile then
-		titleStyle.position = UDim2.fromScale(0.5, 0.73)
-		titleStyle.size = UDim2.new(1, -6, 0, 11)
-		titleStyle.textSize = 9
+		titleStyle.position = UDim2.fromScale(0.5, 0.74)
+		titleStyle.size = UDim2.new(1, -4, 0, 12)
+		titleStyle.textSize = if button.Name == "Settings" then 8 else 10
 		titleStyle.textWrapped = false
 	end
 
@@ -1017,12 +1043,14 @@ local function bindViewportConnections()
 
 	local camera = Workspace.CurrentCamera
 	if camera then
-		viewportConnections[#viewportConnections + 1] = camera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
+		viewportConnections[#viewportConnections + 1] =
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
 	end
-	viewportConnections[#viewportConnections + 1] = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-		bindViewportConnections()
-		scheduleRender()
-	end)
+	viewportConnections[#viewportConnections + 1] = Workspace:GetPropertyChangedSignal("CurrentCamera")
+		:Connect(function()
+			bindViewportConnections()
+			scheduleRender()
+		end)
 end
 
 bindHudConnections()

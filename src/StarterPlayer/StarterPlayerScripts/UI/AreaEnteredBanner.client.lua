@@ -2,6 +2,8 @@ local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -28,6 +30,25 @@ local loadingWaitRunning = false
 
 local LOADING_SCREEN_NAME = "LoadingScreen"
 local LOADING_SCREEN_ACTIVE_ATTRIBUTE = "LoadingScreenActive"
+
+local function isMobileViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
+
+local function getBannerTopOffset()
+	if isMobileViewport() then
+		return UI_CONFIG.MobileTopOffset or 52
+	end
+
+	return UI_CONFIG.TopOffset
+end
+
+local function getBannerScaleTarget()
+	return if isMobileViewport() then 0.84 else 1
+end
+
 
 local function cancelActiveTweens()
 	for _, tween in ipairs(activeTweens) do
@@ -106,11 +127,12 @@ local rootScale = createInstance("UIScale", {
 })
 rootScale.Parent = root
 
-createInstance("UISizeConstraint", {
+local sizeConstraint = createInstance("UISizeConstraint", {
 	Name = "AreaEnteredBannerSize",
 	MinSize = Vector2.new(UI_CONFIG.MinWidth, UI_CONFIG.Height),
 	MaxSize = Vector2.new(UI_CONFIG.MaxWidth, UI_CONFIG.Height),
-}).Parent = root
+})
+sizeConstraint.Parent = root
 
 local glow = createInstance("Frame", {
 	Name = "Glow",
@@ -214,21 +236,58 @@ local accentLine = createInstance("Frame", {
 accentLine.Parent = card
 
 local entryLabel = createLabel("EntryLabel", 11, Enum.Font.GothamMedium, TEXT_MUTED)
-entryLabel.Position = UDim2.new(0, 24, 0, 9)
+entryLabel.Position = UDim2.fromOffset(24, 9)
 entryLabel.Size = UDim2.new(1, -48, 0, 12)
 entryLabel.Text = "AREA ENTERED"
 entryLabel.TextTransparency = 0.08
 entryLabel.Parent = card
 
 local areaNameLabel = createLabel("AreaName", 26, Enum.Font.GothamBold, TEXT_MAIN)
-areaNameLabel.Position = UDim2.new(0, 24, 0, 23)
+areaNameLabel.Position = UDim2.fromOffset(24, 23)
 areaNameLabel.Size = UDim2.new(1, -48, 0, 30)
 areaNameLabel.Parent = card
 
 local rarityLabel = createLabel("RarityTier", 12, Enum.Font.GothamMedium, STROKE_BASE)
-rarityLabel.Position = UDim2.new(0, 24, 0, 53)
+rarityLabel.Position = UDim2.fromOffset(24, 53)
 rarityLabel.Size = UDim2.new(1, -48, 0, 14)
 rarityLabel.Parent = card
+
+local function applyResponsiveLayout()
+	if isMobileViewport() then
+		sizeConstraint.MinSize = Vector2.new(220, 46)
+		sizeConstraint.MaxSize = Vector2.new(340, 46)
+		root.Size = UDim2.new(0.48, 0, 0, 46)
+		rootScale.Scale = 0.68
+		card.Size = UDim2.new(1, 0, 0, 42)
+		entryLabel.TextSize = 7
+		entryLabel.Position = UDim2.fromOffset(16, 5)
+		entryLabel.Size = UDim2.new(1, -32, 0, 8)
+		areaNameLabel.TextSize = 16
+		areaNameLabel.Position = UDim2.fromOffset(16, 14)
+		areaNameLabel.Size = UDim2.new(1, -32, 0, 20)
+		rarityLabel.TextSize = 8
+		rarityLabel.Position = UDim2.fromOffset(16, 31)
+		rarityLabel.Size = UDim2.new(1, -32, 0, 10)
+		accentLine.Position = UDim2.new(0.5, 0, 1, -4)
+		return
+	end
+
+	root.Size = UDim2.new(UI_CONFIG.WidthScale, 0, 0, UI_CONFIG.Height)
+	sizeConstraint.MinSize = Vector2.new(UI_CONFIG.MinWidth, UI_CONFIG.Height)
+	sizeConstraint.MaxSize = Vector2.new(UI_CONFIG.MaxWidth, UI_CONFIG.Height)
+	rootScale.Scale = 0.98
+	card.Size = UDim2.new(1, 0, 0, 74)
+	entryLabel.TextSize = 11
+	entryLabel.Position = UDim2.fromOffset(24, 9)
+	entryLabel.Size = UDim2.new(1, -48, 0, 12)
+	areaNameLabel.TextSize = 26
+	areaNameLabel.Position = UDim2.fromOffset(24, 23)
+	areaNameLabel.Size = UDim2.new(1, -48, 0, 30)
+	rarityLabel.TextSize = 12
+	rarityLabel.Position = UDim2.fromOffset(24, 53)
+	rarityLabel.Size = UDim2.new(1, -48, 0, 14)
+	accentLine.Position = UDim2.new(0.5, 0, 1, -7)
+end
 
 local function setBannerContent(entry)
 	local style = BiomeAreas.GetRarityStyle(entry.Rarity)
@@ -247,14 +306,17 @@ end
 local function playBanner(entry)
 	sequenceId += 1
 	local thisSequence = sequenceId
+	local topOffset = getBannerTopOffset()
+	local scaleTarget = getBannerScaleTarget()
 
 	cancelActiveTweens()
+	applyResponsiveLayout()
 	setBannerContent(entry)
 
 	root.Visible = true
 	root.GroupTransparency = 1
-	root.Position = UDim2.new(0.5, 0, 0, UI_CONFIG.TopOffset + ANIMATION_CONFIG.SlideOffset)
-	rootScale.Scale = 0.98
+	root.Position = UDim2.new(0.5, 0, 0, topOffset + ANIMATION_CONFIG.SlideOffset)
+	rootScale.Scale = if isMobileViewport() then 0.68 else 0.98
 
 	tween(root, TweenInfo.new(
 		ANIMATION_CONFIG.FadeInTime,
@@ -262,7 +324,7 @@ local function playBanner(entry)
 		Enum.EasingDirection.Out
 	), {
 		GroupTransparency = 0,
-		Position = UDim2.new(0.5, 0, 0, UI_CONFIG.TopOffset),
+		Position = UDim2.new(0.5, 0, 0, topOffset),
 	})
 
 	tween(rootScale, TweenInfo.new(
@@ -270,7 +332,7 @@ local function playBanner(entry)
 		Enum.EasingStyle.Quart,
 		Enum.EasingDirection.Out
 	), {
-		Scale = 1,
+		Scale = scaleTarget,
 	})
 
 	task.delay(ANIMATION_CONFIG.FadeInTime + ANIMATION_CONFIG.HoldTime, function()
@@ -286,7 +348,7 @@ local function playBanner(entry)
 			Enum.EasingDirection.In
 		), {
 			GroupTransparency = 1,
-			Position = UDim2.new(0.5, 0, 0, UI_CONFIG.TopOffset - 8),
+			Position = UDim2.new(0.5, 0, 0, topOffset - 8),
 		})
 
 		tween(rootScale, TweenInfo.new(
@@ -294,7 +356,7 @@ local function playBanner(entry)
 			Enum.EasingStyle.Quad,
 			Enum.EasingDirection.In
 		), {
-			Scale = 0.985,
+			Scale = scaleTarget * 0.985,
 		})
 
 		fadeOut.Completed:Connect(function()

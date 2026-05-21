@@ -71,10 +71,12 @@ local moguHazardDiagnostics = {
 local playOptionalEffect
 local getFruitFolder
 local getEquippedFruit
+local buildAbilityRequestPayload
 local fruitModuleLoader
 local inputController
 local effectRouter
 local syncDevilFruitClientState
+local isLocallyReady
 local lastSyncedFruitName = DevilFruitConfig.None
 local cooldownHud = {
 	CurrentFruit = nil,
@@ -344,6 +346,7 @@ local function buildCooldownAbilities(fruitName)
 
 		local keyCode = abilityConfig.KeyCode
 		abilities[#abilities + 1] = {
+			abilityName = abilityName,
 			detail = detail,
 			fillColor3 = (isReady or isWaitingForCooldownStart) and DEVIL_FRUIT_UI.Ready
 				or DEVIL_FRUIT_UI.CooldownFill,
@@ -356,6 +359,43 @@ local function buildCooldownAbilities(fruitName)
 	end
 
 	return abilities
+end
+
+local function activateAbilityByName(abilityName, sourceLabel)
+	local fruitName = getEquippedFruit()
+	local abilityEntry = Registry.GetAbility(fruitName, abilityName)
+	if not fruitName or fruitName == DevilFruitConfig.None or not abilityName then
+		return
+	end
+
+	if not isLocallyReady(abilityName) then
+		local _, canActivateOnLocalCooldown = fruitModuleLoader:CallControllerMethod(
+			fruitName,
+			"CanActivateOnLocalCooldown",
+			abilityName,
+			abilityEntry,
+			nil
+		)
+		if canActivateOnLocalCooldown ~= true then
+			return
+		end
+	end
+
+	local requestPayload = inputController:BuildPredictedRequest(fruitName, abilityName, function()
+		return buildAbilityRequestPayload(fruitName, abilityName)
+	end)
+	if requestPayload == false then
+		return
+	end
+
+	logDevilFruitClient(
+		"touch dispatch source=%s fruit=%s ability=%s payloadKeys=%d",
+		tostring(sourceLabel or "hud"),
+		tostring(fruitName),
+		tostring(abilityName),
+		countPayloadKeys(requestPayload)
+	)
+	requestRemote:FireServer(abilityName, requestPayload)
 end
 
 local function isCompactHud()
@@ -373,6 +413,7 @@ local function renderCooldownHud()
 			abilities = cooldownHud.Abilities,
 			compact = isCompactHud(),
 			fruitName = fruit and tostring(fruit.DisplayName or fruitName) or "",
+			onActivateAbility = activateAbilityByName,
 			visible = cooldownHud.Visible == true,
 		}), getCooldownHudHost()))
 	end, debug.traceback)
@@ -509,7 +550,7 @@ local function getAbilityForKeyCode(keyCode)
 	return nil, nil, nil
 end
 
-local function isLocallyReady(abilityName)
+function isLocallyReady(abilityName)
 	if isCooldownBypassEnabled() then
 		return true
 	end
@@ -577,7 +618,7 @@ local function buildDefaultAbilityRequestPayload(_fruitName, _abilityName)
 	return nil
 end
 
-local function buildAbilityRequestPayload(fruitName, abilityName)
+function buildAbilityRequestPayload(fruitName, abilityName)
 	local abilityEntry = Registry.GetAbility(fruitName, abilityName)
 	local character = getCharacter()
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid") or nil

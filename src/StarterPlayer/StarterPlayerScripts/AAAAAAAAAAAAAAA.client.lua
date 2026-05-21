@@ -247,15 +247,20 @@ waveTrace(
 	formatInstancePath(ProgressBarSync)
 )
 
+local LEGACY_PROGRESS_BAR_UI_ENABLED = false
 local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-local hud = playerGui:WaitForChild("HUD")
-local progressBar = hud:WaitForChild("ProgressBar")
+local hud = if LEGACY_PROGRESS_BAR_UI_ENABLED then playerGui:WaitForChild("HUD") else nil
+local progressBar = if hud then hud:WaitForChild("ProgressBar") else nil
 
-local pfpTemplate = progressBar:WaitForChild("PFP")
-pfpTemplate.Visible = false
+local pfpTemplate = progressBar and progressBar:FindFirstChild("PFP")
+if pfpTemplate and pfpTemplate:IsA("GuiObject") then
+	pfpTemplate.Visible = false
+end
 
-local disasterTemplate = progressBar:WaitForChild("Disaster")
-disasterTemplate.Visible = false
+local disasterTemplate = progressBar and progressBar:FindFirstChild("Disaster")
+if disasterTemplate and disasterTemplate:IsA("GuiObject") then
+	disasterTemplate.Visible = false
+end
 
 local pfpClones = {}
 local waveIndicators = {}
@@ -352,6 +357,10 @@ local function applySkullToPfp(pfpGui, plr)
 end
 
 local function ensurePfp(userId)
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED or not pfpTemplate then
+		return nil
+	end
+
 	if pfpClones[userId] and pfpClones[userId].Parent then
 		return pfpClones[userId]
 	end
@@ -410,6 +419,10 @@ local function alphaToXScale(alpha)
 end
 
 local function updatePfpPositions()
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED then
+		return
+	end
+
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local gui = pfpClones[plr.UserId]
 		if gui and gui.Parent then
@@ -424,6 +437,10 @@ local function updatePfpPositions()
 end
 
 local function updatePfpCrewMemberAndSkull()
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED then
+		return
+	end
+
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local gui = pfpClones[plr.UserId]
 		if gui and gui.Parent then
@@ -479,10 +496,14 @@ local function getRewardWorldPos(obj)
 	return nil
 end
 
-local disasterYScale = disasterTemplate.Position.Y.Scale
-local disasterYOffset = disasterTemplate.Position.Y.Offset
+local disasterYScale = if disasterTemplate then disasterTemplate.Position.Y.Scale else 0
+local disasterYOffset = if disasterTemplate then disasterTemplate.Position.Y.Offset else 0
 
 local function createChestIndicator(rewardObject)
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED or not progressBar then
+		return nil
+	end
+
 	local indicator = Instance.new("TextLabel")
 	indicator.Name = "ChestIndicator_" .. rewardObject.Name
 	indicator.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -512,6 +533,10 @@ local function createChestIndicator(rewardObject)
 end
 
 local function ensureChestIndicator(rewardObject)
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED then
+		return nil
+	end
+
 	if chestIndicators[rewardObject] and chestIndicators[rewardObject].Parent then
 		return chestIndicators[rewardObject]
 	end
@@ -533,6 +558,15 @@ local function removeUnusedChestIndicators(validMap)
 end
 
 local function ensureWaveIndicator(waveObj)
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED or not disasterTemplate then
+		local existing = waveIndicators[waveObj]
+		if existing and existing.Parent then
+			existing:Destroy()
+		end
+		waveIndicators[waveObj] = nil
+		return nil
+	end
+
 	if not isWaveMinimapHazard(waveObj) then
 		local existing = waveIndicators[waveObj]
 		if existing and existing.Parent then
@@ -562,31 +596,37 @@ local function removeWaveIndicator(waveObj)
 	waveIndicators[waveObj] = nil
 end
 
-clientWavesFolder.ChildAdded:Connect(function(child)
-	waveTrace(
-		"clientWavesFolder childAdded name=%s path=%s class=%s",
-		tostring(child.Name),
-		formatInstancePath(child),
-		tostring(child.ClassName)
-	)
-	waveTry("clientWavesFolder.ChildAdded", function()
-		ensureWaveIndicator(child)
+if LEGACY_PROGRESS_BAR_UI_ENABLED then
+	clientWavesFolder.ChildAdded:Connect(function(child)
+		waveTrace(
+			"clientWavesFolder childAdded name=%s path=%s class=%s",
+			tostring(child.Name),
+			formatInstancePath(child),
+			tostring(child.ClassName)
+		)
+		waveTry("clientWavesFolder.ChildAdded", function()
+			ensureWaveIndicator(child)
+		end)
 	end)
-end)
 
-clientWavesFolder.ChildRemoved:Connect(function(child)
-	waveTrace(
-		"clientWavesFolder childRemoved name=%s path=%s class=%s",
-		tostring(child.Name),
-		formatInstancePath(child),
-		tostring(child.ClassName)
-	)
-	waveTry("clientWavesFolder.ChildRemoved", function()
-		removeWaveIndicator(child)
+	clientWavesFolder.ChildRemoved:Connect(function(child)
+		waveTrace(
+			"clientWavesFolder childRemoved name=%s path=%s class=%s",
+			tostring(child.Name),
+			formatInstancePath(child),
+			tostring(child.ClassName)
+		)
+		waveTry("clientWavesFolder.ChildRemoved", function()
+			removeWaveIndicator(child)
+		end)
 	end)
-end)
+end
 
 local function updateWaveIndicators()
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED then
+		return
+	end
+
 	for waveObj, gui in pairs(waveIndicators) do
 		if not waveObj or not waveObj.Parent or not gui or not gui.Parent then
 			if gui and gui.Parent then
@@ -606,6 +646,10 @@ local function updateWaveIndicators()
 end
 
 local function updateChestIndicators()
+	if not LEGACY_PROGRESS_BAR_UI_ENABLED then
+		return
+	end
+
 	local valid = {}
 	local controllerFolder = waveFolder:FindFirstChild("GrandLineRush")
 	local rewardFolder = controllerFolder and controllerFolder:FindFirstChild("RunRewards")
@@ -629,7 +673,7 @@ local function updateChestIndicators()
 	removeUnusedChestIndicators(valid)
 end
 
-if ProgressBarSync and ProgressBarSync:IsA("RemoteEvent") then
+if LEGACY_PROGRESS_BAR_UI_ENABLED and ProgressBarSync and ProgressBarSync:IsA("RemoteEvent") then
 	ProgressBarSync.OnClientEvent:Connect(function(_, payload)
 		waveTry("ProgressBarSync.OnClientEvent", function()
 			local valid = {}
@@ -642,7 +686,7 @@ if ProgressBarSync and ProgressBarSync:IsA("RemoteEvent") then
 		end)
 	end)
 	ProgressBarSync:FireServer("Request")
-else
+elseif LEGACY_PROGRESS_BAR_UI_ENABLED then
 	waveWarnOnce(
 		"progress_bar_sync_missing",
 		"startup ProgressBarSync remote missing; falling back to current Players list"
@@ -2083,20 +2127,23 @@ updatePause()
 
 RunService.RenderStepped:Connect(function(deltaTime)
 	updateSharedHazardVisualSmoothers(deltaTime)
-	if useSharedHazards then
-		legacySharedProgressAccumulator += deltaTime
-		if legacySharedProgressAccumulator >= LEGACY_SHARED_PROGRESS_UPDATE_INTERVAL then
-			legacySharedProgressAccumulator = 0
+
+	if LEGACY_PROGRESS_BAR_UI_ENABLED then
+		if useSharedHazards then
+			legacySharedProgressAccumulator += deltaTime
+			if legacySharedProgressAccumulator >= LEGACY_SHARED_PROGRESS_UPDATE_INTERVAL then
+				legacySharedProgressAccumulator = 0
+				updatePfpPositions()
+				updateWaveIndicators()
+				updateChestIndicators()
+				updatePfpCrewMemberAndSkull()
+			end
+		else
 			updatePfpPositions()
 			updateWaveIndicators()
 			updateChestIndicators()
 			updatePfpCrewMemberAndSkull()
 		end
-	else
-		updatePfpPositions()
-		updateWaveIndicators()
-		updateChestIndicators()
-		updatePfpCrewMemberAndSkull()
 	end
 end)
 

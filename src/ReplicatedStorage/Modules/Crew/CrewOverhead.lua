@@ -13,6 +13,7 @@ CrewOverhead.Attribute = {
 	Rarity = "CrewOverheadRarity",
 	Variant = "CrewOverheadVariant",
 	IncomePerSecond = "CrewOverheadIncomePerSecond",
+	BeliBoosted = "CrewOverheadBeliBoosted",
 	SlotBonusLabel = "CrewOverheadSlotBonusLabel",
 	SlotBonusPercent = "CrewOverheadSlotBonusPercent",
 	ExpiresAt = "CrewOverheadExpiresAt",

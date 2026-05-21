@@ -414,28 +414,13 @@ local function createLockedImagePreview(image, unit, isFruit)
 	}
 end
 
-local function createLockedCrewModelPreview(previewName, includeFallback)
-	local previewChildren = {
-		Shadow = e(PreviewViewport, {
-			previewKind = "CrewMember",
-			previewName = previewName,
-			preferModel = true,
-			size = UDim2.fromScale(0.86, 0.86),
-			position = UDim2.fromScale(0.5, 0.57),
-			anchorPoint = PREVIEW_ANCHOR,
-			tintColor = BLACK,
-			tintTransparency = 0.35,
-			tintMaterial = Enum.Material.Plastic,
-			ambient = LOCKED_CREW_AMBIENT,
-			lightColor = LOCKED_CREW_LIGHT,
-			lightDirection = Vector3.new(0.2, -0.2, -1),
-			zIndex = 1,
-		}),
+local function createLockedCrewModelPreview(previewName)
+	return {
 		Character = e(PreviewViewport, {
 			previewKind = "CrewMember",
 			previewName = previewName,
 			preferModel = true,
-			size = UDim2.fromScale(0.84, 0.84),
+			size = UDim2.fromScale(0.86, 0.86),
 			position = PREVIEW_POSITION,
 			anchorPoint = PREVIEW_ANCHOR,
 			tintColor = LOCKED_CREW_SILHOUETTE_COLOR,
@@ -447,12 +432,6 @@ local function createLockedCrewModelPreview(previewName, includeFallback)
 			zIndex = 3,
 		}),
 	}
-
-	if includeFallback then
-		previewChildren.Fallback = fallbackSilhouette()
-	end
-
-	return previewChildren
 end
 
 local function createLockedPreview(unit, renderPreview)
@@ -498,12 +477,12 @@ local function createLockedPreview(unit, renderPreview)
 			}
 		end
 
-		return createLockedCrewModelPreview(unit.previewName, true)
+		return createLockedCrewModelPreview(unit.previewName)
 	end
 
 	local crewModelName = tostring(unit.crewModelName or "")
 	if not isFruit and crewModelName ~= "" and renderPreview ~= false then
-		return createLockedCrewModelPreview(crewModelName, true)
+		return createLockedCrewModelPreview(crewModelName)
 	end
 
 	local staticPreviewImage = tostring(unit.staticPreviewImage or "")
@@ -589,7 +568,6 @@ local function createDiscoveredPreview(unit, renderPreview, isFruit)
 	local crewModelName = tostring(unit.crewModelName or "")
 	if not isFruit and crewModelName ~= "" and renderPreview ~= false then
 		return {
-			Fallback = fallbackSilhouette(),
 			Shadow = previewDropShadow(),
 			Character = e(PreviewViewport, {
 				previewKind = "CrewMember",

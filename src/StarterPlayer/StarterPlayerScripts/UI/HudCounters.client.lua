@@ -134,7 +134,12 @@ local function layoutDisplayLayer(layer, rowCount)
 	local layerWidth = mobile and 96 or COUNTERS_WIDTH
 
 	layer.AnchorPoint = Vector2.new(0, 1)
-	layer.Position = UDim2.new(0, mobile and 4 or COUNTERS_LEFT_PADDING, 1, -((mobile and 4 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y))
+	layer.Position = UDim2.new(
+		0,
+		mobile and 8 or COUNTERS_LEFT_PADDING,
+		1,
+		-((mobile and 10 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y)
+	)
 	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1
 	layer.BorderSizePixel = 0
@@ -144,19 +149,18 @@ local function layoutDisplayLayer(layer, rowCount)
 	local moneyAnchor = layer:FindFirstChild("ReactHudMoneyRowAnchor")
 	if moneyAnchor and moneyAnchor:IsA("Frame") then
 		moneyAnchor.Position = UDim2.fromOffset(HudCounterConfig.getContentLeft(), moneyRowY)
-		moneyAnchor.Size = UDim2.fromOffset(layerWidth - HudCounterConfig.PanelPadding.Left - HudCounterConfig.PanelPadding.Right, rowHeight)
+		moneyAnchor.Size = UDim2.fromOffset(
+			layerWidth - HudCounterConfig.PanelPadding.Left - HudCounterConfig.PanelPadding.Right,
+			rowHeight
+		)
 		moneyAnchor.ZIndex = DISPLAY_LAYER_ZINDEX + 10
 	end
 
 	local notifications = layer:FindFirstChild("ReactHudCounterNotifications")
 	if notifications and notifications:IsA("Frame") then
 		local notificationHeight = HudCounterConfig.NotificationHeight
-		notifications.Position = UDim2.new(
-			0,
-			HudCounterConfig.getNotificationX(),
-			0,
-			math.max(0, moneyRowY - notificationHeight + 6)
-		)
+		notifications.Position =
+			UDim2.fromOffset(HudCounterConfig.getNotificationX(), math.max(0, moneyRowY - notificationHeight + 6))
 		notifications.Size = UDim2.fromOffset(mobile and 92 or HudCounterConfig.NotificationWidth, notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
@@ -199,7 +203,8 @@ local function findCounterIcon(counters, host, statName)
 	local statNameLower = string.lower(statName or host.Name or "")
 
 	for _, descendant in ipairs(host:GetDescendants()) do
-		if (descendant:IsA("ImageLabel") or descendant:IsA("ImageButton"))
+		if
+			(descendant:IsA("ImageLabel") or descendant:IsA("ImageButton"))
 			and not isProtectedDescendant(host, descendant)
 		then
 			local image = tostring(descendant.Image or "")
@@ -260,7 +265,8 @@ local function findCounterIcon(counters, host, statName)
 		local height = math.max(absoluteSize.Y, candidate.Size.Y.Offset, 1)
 		local score = width * height
 		local nameLower = string.lower(candidate.Name)
-		local candidateY = candidate.AbsolutePosition.Y ~= 0 and candidate.AbsolutePosition.Y or candidate.Position.Y.Offset
+		local candidateY = candidate.AbsolutePosition.Y ~= 0 and candidate.AbsolutePosition.Y
+			or candidate.Position.Y.Offset
 		local yDistance = math.abs(candidateY - hostY)
 
 		if nameLower == statNameLower then
@@ -269,7 +275,10 @@ local function findCounterIcon(counters, host, statName)
 		if string.find(nameLower, statNameLower, 1, true) then
 			score += 7000
 		end
-		if statNameLower == "money" and (string.find(nameLower, "cash", 1, true) or string.find(nameLower, "dollar", 1, true)) then
+		if
+			statNameLower == "money"
+			and (string.find(nameLower, "cash", 1, true) or string.find(nameLower, "dollar", 1, true))
+		then
 			score += 3500
 		end
 		if statNameLower == "speed" and string.find(nameLower, "shoe", 1, true) then
@@ -306,7 +315,8 @@ local function collectIconCandidates(counters, hosts)
 	local candidates = {}
 
 	for _, descendant in ipairs(counters:GetDescendants()) do
-		if (descendant:IsA("ImageLabel") or descendant:IsA("ImageButton"))
+		if
+			(descendant:IsA("ImageLabel") or descendant:IsA("ImageButton"))
 			and not isReactNode(descendant)
 			and tostring(descendant.Image or "") ~= ""
 			and descendant.ImageTransparency < 0.95
@@ -339,7 +349,8 @@ local function collectIconCandidates(counters, hosts)
 				candidates[#candidates + 1] = {
 					instance = descendant,
 					score = score,
-					y = descendant.AbsolutePosition.Y ~= 0 and descendant.AbsolutePosition.Y or descendant.Position.Y.Offset,
+					y = descendant.AbsolutePosition.Y ~= 0 and descendant.AbsolutePosition.Y
+						or descendant.Position.Y.Offset,
 					name = string.lower(descendant.Name),
 				}
 			end
@@ -617,4 +628,3 @@ script.Destroying:Connect(function()
 	disconnectHudConnections()
 	root:unmount()
 end)
-

@@ -4,6 +4,8 @@ local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ContentProvider = game:GetService("ContentProvider")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 local RNG = Random.new()
 
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
@@ -52,6 +54,7 @@ local REWARD_EASING_DIRECTION_IN = Enum.EasingDirection.Out
 local activePopups = {}
 local activeRewardTweens = setmetatable({}, { __mode = "k" })
 local rewardPoolWarmStarted = false
+local isMobileViewport
 
 local PopUpEvent = ReplicatedStorage:FindFirstChild("PopUpEvent")
 if not PopUpEvent then
@@ -370,7 +373,9 @@ function PopUpModule:Local_ShowReward(rewardTable)
 	end
 
 	local function getTargetScale(count)
-		return if count > 6 then 6 / count else 1
+		local countScale = if count > 6 then 6 / count else 1
+		local viewportScale = if isMobileViewport() then 0.74 else 1
+		return math.min(countScale, viewportScale)
 	end
 
 	local function updateScale(excludedRewards)
@@ -649,6 +654,7 @@ end
 local acknowledgeGui
 local acknowledgeOverlay
 local acknowledgePanel
+local acknowledgePanelScale
 local acknowledgeAccent
 local acknowledgeTitle
 local acknowledgeBody
@@ -676,6 +682,26 @@ local DEVIL_FRUIT_ACK_THEME = {
 
 local ACK_PREVIEW_WIDTH = 220
 local ACK_BODY_BOTTOM_PADDING = 62
+
+isMobileViewport = function()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
+
+local function getAcknowledgementScale()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local availableX = math.max(260, viewport.X - 28)
+	local availableY = math.max(220, viewport.Y - 28)
+	local scale = math.min(availableX / 620, availableY / 370, 1)
+
+	if isMobileViewport() then
+		scale = math.min(scale, 0.74)
+	end
+
+	return math.clamp(scale, 0.56, 1)
+end
 
 local function ensureAckCorner(instance, radius)
 	local corner = instance:FindFirstChildOfClass("UICorner")
@@ -890,6 +916,7 @@ local function ensureAcknowledgeGui()
 		acknowledgeGui = nil
 		acknowledgeOverlay = nil
 		acknowledgePanel = nil
+		acknowledgePanelScale = nil
 		acknowledgeAccent = nil
 		acknowledgeTitle = nil
 		acknowledgeBody = nil
@@ -937,6 +964,10 @@ local function ensureAcknowledgeGui()
 	acknowledgePanel.Parent = acknowledgeGui
 
 	ensureAckCorner(acknowledgePanel, 16)
+	acknowledgePanelScale = Instance.new("UIScale")
+	acknowledgePanelScale.Name = "ResponsiveScale"
+	acknowledgePanelScale.Scale = getAcknowledgementScale()
+	acknowledgePanelScale.Parent = acknowledgePanel
 	local panelStroke = ensureAckStroke(acknowledgePanel, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0, 2.2)
 	panelStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
@@ -1212,6 +1243,9 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 	options = options or {}
 	ensureAcknowledgeGui()
 	acknowledgeGui.DisplayOrder = math.max(0, math.floor(tonumber(options.DisplayOrder or options.displayOrder) or 75))
+	if acknowledgePanelScale then
+		acknowledgePanelScale.Scale = getAcknowledgementScale()
+	end
 
 	local title = tostring(options.Title or options.title or "Notice")
 	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")

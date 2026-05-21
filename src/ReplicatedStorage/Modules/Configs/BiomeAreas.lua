@@ -16,6 +16,7 @@ end
 BiomeAreas.Ui = {
 	DisplayOrder = 122,
 	TopOffset = 106,
+	MobileTopOffset = 52,
 	WidthScale = 0.82,
 	Height = 84,
 	MinWidth = 280,

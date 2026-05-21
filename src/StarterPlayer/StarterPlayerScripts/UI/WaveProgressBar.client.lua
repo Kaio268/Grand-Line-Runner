@@ -15,6 +15,7 @@ local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local LavaWaves = require(Modules:WaitForChild("Configs"):WaitForChild("LavaWaves"))
+local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
 
 local function isCompactViewport()
@@ -44,7 +45,8 @@ local DEFAULT_SECTIONS = buildDefaultSections()
 
 local PLAYER_MARKER_PADDING = 0
 local WAVE_MARKER_PADDING = 0
-local RENDER_INTERVAL = 1 / 12
+local WAVE_MARKER_MERGE_ALPHA = 0.018
+local RENDER_INTERVAL = 1 / 30
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactWaveProgressRoot"
@@ -117,6 +119,38 @@ local function getWorldPosition(instance)
 	return nil
 end
 
+local function getPredictedWavePosition(hazard)
+	if not hazard then
+		return nil
+	end
+
+	local startCFrame = hazard:GetAttribute("WaveStartCFrame")
+	local endCFrame = hazard:GetAttribute("WaveEndCFrame")
+	if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
+		return nil
+	end
+
+	local activeSeconds = tonumber(hazard:GetAttribute("WaveActiveSeconds")) or 0
+	local stateServerTime = tonumber(hazard:GetAttribute("WaveStateServerTime"))
+	if hazard:GetAttribute("Frozen") ~= true and stateServerTime then
+		activeSeconds += math.max(0, workspace:GetServerTimeNow() - stateServerTime)
+	end
+
+	local currentCFrame = WaveHazardVisuals.ComputeTimelineCFrame(
+		startCFrame,
+		endCFrame,
+		activeSeconds,
+		hazard:GetAttribute("WaveServerSpeed") or hazard:GetAttribute("Speed"),
+		hazard:GetAttribute("WaveDistance"),
+		hazard:GetAttribute("WaveLateralDirection"),
+		hazard:GetAttribute("WaveInitialLateralOffset"),
+		hazard:GetAttribute("WaveLateralVelocity"),
+		hazard:GetAttribute("WaveMaxDrift")
+	)
+
+	return currentCFrame and currentCFrame.Position or nil
+end
+
 local function updatePath()
 	local startPos = waveStart and getWorldPosition(waveStart)
 	local endPos = waveEnd and getWorldPosition(waveEnd)
@@ -185,6 +219,16 @@ local function isWaveHazard(hazard)
 	return false
 end
 
+local function shouldMergeWaveMarker(existingMarkers, alpha, image)
+	for _, markerInfo in ipairs(existingMarkers) do
+		if markerInfo.image == image and math.abs((tonumber(markerInfo.alpha) or 0) - alpha) <= WAVE_MARKER_MERGE_ALPHA then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function hideLegacyProgressBar()
 	if legacyProgressBarHidden then
 		return
@@ -234,23 +278,29 @@ local function render()
 			alpha = alphaFromWorldPos(rootPart.Position, PLAYER_MARKER_PADDING)
 		end
 
-		playerMarkers[#playerMarkers + 1] = {
-			alpha = alpha,
-			userId = tonumber(info.UserId) or 0,
-			isDead = humanoid ~= nil and humanoid.Health <= 0,
-			size = isCompactViewport() and 14 or nil,
-		}
+			playerMarkers[#playerMarkers + 1] = {
+				alpha = alpha,
+				userId = tonumber(info.UserId) or 0,
+				isDead = humanoid ~= nil and humanoid.Health <= 0,
+				size = isCompactViewport() and 32 or nil,
+			}
 	end
 
 	local waveMarkers = {}
 	if hazardFolder and hazardFolder.Parent then
 		for _, hazard in ipairs(hazardFolder:GetChildren()) do
-			local worldPos = isWaveHazard(hazard) and getWorldPosition(hazard) or nil
+			local worldPos = isWaveHazard(hazard) and (getPredictedWavePosition(hazard) or getWorldPosition(hazard)) or nil
 			if worldPos then
+				local alpha = alphaFromWorldPos(worldPos, WAVE_MARKER_PADDING)
+				local image = getHazardImage(hazard)
+				if shouldMergeWaveMarker(waveMarkers, alpha, image) then
+					continue
+				end
+
 				waveMarkers[#waveMarkers + 1] = {
-					alpha = alphaFromWorldPos(worldPos, WAVE_MARKER_PADDING),
-					image = getHazardImage(hazard),
-					size = isCompactViewport() and 16 or nil,
+					alpha = alpha,
+					image = image,
+					size = isCompactViewport() and 24 or nil,
 				}
 			end
 		end

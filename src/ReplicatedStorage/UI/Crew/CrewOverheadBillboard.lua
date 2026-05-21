@@ -1,4 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -16,6 +18,7 @@ local PANEL_FILL_SOFT = Color3.fromRGB(29, 43, 61)
 local TEXT = Color3.fromRGB(239, 239, 235)
 local MUTED = Color3.fromRGB(194, 203, 216)
 local GOLD = Color3.fromRGB(242, 209, 107)
+local BOOST_GOLD = Color3.fromRGB(111, 230, 124)
 local GOLD_VARIANT = Color3.fromRGB(255, 210, 92)
 local DIAMOND_VARIANT = Color3.fromRGB(128, 236, 255)
 local SHADOW = Color3.fromRGB(0, 0, 0)
@@ -33,6 +36,12 @@ end
 
 local function blendColor(baseColor, accentColor, alpha)
 	return baseColor:Lerp(accentColor, math.clamp(alpha or 0, 0, 1))
+end
+
+local function isMobileViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.X < 760 or math.min(viewport.X, viewport.Y) < 560
 end
 
 local function getVariantStyle(entry, rarityStyle)
@@ -77,7 +86,7 @@ local function getVariantStyle(entry, rarityStyle)
 	}
 end
 
-local function pill(text, textColor, size, position)
+local function pill(text, textColor, size, position, textSize)
 	return e("Frame", {
 		AnchorPoint = Vector2.new(0, 0.5),
 		BackgroundColor3 = blendColor(PANEL_FILL_SOFT, textColor, 0.18),
@@ -100,7 +109,7 @@ local function pill(text, textColor, size, position)
 			Size = UDim2.fromScale(1, 1),
 			Text = text,
 			TextColor3 = textColor,
-			TextSize = 12,
+			TextSize = textSize or 12,
 			TextStrokeColor3 = SHADOW,
 			TextStrokeTransparency = 0.42,
 		}),
@@ -115,21 +124,30 @@ local function CrewOverheadBillboard(props)
 	local remaining = tonumber(entry.remaining)
 	local showTimer = isSpawned and remaining ~= nil and entry.held ~= true
 	local hasSlotBonus = not isSpawned and tostring(entry.slotBonusLabel or "") ~= "" and (tonumber(entry.slotBonusPercent) or 0) > 0
+	local mobile = isMobileViewport()
 	local panelHeight = if showTimer then 78 elseif hasSlotBonus then 82 else 58
 	local hasVariant = variantStyle.variantLabel ~= nil
-	local rarityPillWidth = if showTimer then 74 else 92
-	local variantPillWidth = if hasVariant then 70 else 0
-	local rarityPillX = if hasVariant then 86 else 10
+	local incomeColor = if entry.beliBoosted == true then BOOST_GOLD else GOLD
+	local rarityPillWidth = if showTimer then (if mobile then 60 else 74) else (if mobile then 72 else 92)
+	local variantPillWidth = if hasVariant then (if mobile then 58 else 70) else 0
+	local rarityPillX = if hasVariant then (if mobile then 74 else 86) else 10
 	local billboardWidth = if hasVariant then 252 else 228
 	local incomeWidth = if hasVariant then 84 else 112
+	local billboardScale = 0.84
+	local pillHeight = if mobile then 18 else 22
+	local pillY = 40
+	local nameTextSize = 16
+	local labelTextSize = if mobile then 10 else 12
+	local incomeTextSize = 14
+	local metaTextSize = 11
 
 	return e("BillboardGui", {
 		Adornee = entry.adornee,
 		AlwaysOnTop = true,
 		LightInfluence = 0,
-		MaxDistance = if isSpawned then 60 else 120,
-		Size = UDim2.fromOffset(billboardWidth, panelHeight),
-		StudsOffsetWorldSpace = Vector3.new(0, if isSpawned then 4.8 else 4.35, 0),
+		MaxDistance = if isSpawned then 46 else 92,
+		Size = UDim2.fromOffset(math.floor(billboardWidth * billboardScale), math.floor(panelHeight * billboardScale)),
+		StudsOffsetWorldSpace = Vector3.new(0, if isSpawned then 4.45 else 4.05, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
 		Panel = e("Frame", {
@@ -138,6 +156,9 @@ local function CrewOverheadBillboard(props)
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
 		}, {
+			Scale = e("UIScale", {
+				Scale = billboardScale,
+			}),
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 10),
 			}),
@@ -178,7 +199,7 @@ local function CrewOverheadBillboard(props)
 				Size = UDim2.new(1, -20, 0, 22),
 				Text = tostring(entry.displayName or "Crewmate"),
 				TextColor3 = TEXT,
-				TextSize = 16,
+				TextSize = nameTextSize,
 				TextStrokeColor3 = SHADOW,
 				TextStrokeTransparency = 0.28,
 				TextTruncate = Enum.TextTruncate.AtEnd,
@@ -188,25 +209,27 @@ local function CrewOverheadBillboard(props)
 				then pill(
 					variantStyle.variantLabel,
 					variantStyle.variantAccent,
-					UDim2.fromOffset(variantPillWidth, 22),
-					UDim2.fromOffset(10, 40)
+					UDim2.fromOffset(variantPillWidth, pillHeight),
+					UDim2.fromOffset(10, pillY),
+					labelTextSize
 				)
 				else nil,
 			Rarity = pill(
 				variantStyle.rarityLabel,
 				variantStyle.rarityAccent,
-				UDim2.fromOffset(rarityPillWidth, 22),
-				UDim2.fromOffset(rarityPillX, 40)
+				UDim2.fromOffset(rarityPillWidth, pillHeight),
+				UDim2.fromOffset(rarityPillX, pillY),
+				labelTextSize
 			),
 			Income = e("TextLabel", {
 				AnchorPoint = Vector2.new(1, 0.5),
 				BackgroundTransparency = 1,
 				Font = IndexTheme.Fonts.Display,
-				Position = UDim2.new(1, -10, 0, 40),
-				Size = UDim2.fromOffset(incomeWidth, 22),
+				Position = UDim2.new(1, -10, 0, pillY),
+				Size = UDim2.fromOffset(incomeWidth, pillHeight),
 				Text = formatIncome(entry.incomePerSecond),
-				TextColor3 = variantStyle.variantAccent or GOLD,
-				TextSize = 14,
+				TextColor3 = incomeColor,
+				TextSize = incomeTextSize,
 				TextStrokeColor3 = SHADOW,
 				TextStrokeTransparency = 0.3,
 				TextXAlignment = Enum.TextXAlignment.Right,
@@ -228,7 +251,7 @@ local function CrewOverheadBillboard(props)
 						Size = UDim2.fromScale(1, 1),
 						Text = string.format("%s +%d%%", tostring(entry.slotBonusLabel), math.floor((tonumber(entry.slotBonusPercent) or 0) + 0.5)),
 						TextColor3 = GOLD,
-						TextSize = 11,
+						TextSize = metaTextSize,
 						TextStrokeColor3 = SHADOW,
 						TextStrokeTransparency = 0.4,
 					}),
@@ -251,7 +274,7 @@ local function CrewOverheadBillboard(props)
 						Size = UDim2.fromScale(1, 1),
 						Text = "Despawns in " .. formatRemaining(remaining),
 						TextColor3 = MUTED,
-						TextSize = 11,
+						TextSize = metaTextSize,
 						TextStrokeColor3 = SHADOW,
 						TextStrokeTransparency = 0.48,
 					}),

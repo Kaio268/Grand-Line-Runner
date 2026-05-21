@@ -2233,6 +2233,13 @@ local function hideLegacyInventory()
 			inventory.Visible = false
 		end
 	end
+
+	for _, descendant in ipairs(hud:GetDescendants()) do
+		if descendant.Name == "InventoryBtn" and descendant:IsA("GuiObject") then
+			descendant.Visible = false
+			descendant.Active = false
+		end
+	end
 end
 
 local function getToggleLayout()
@@ -2243,7 +2250,7 @@ local function getToggleLayout()
 	return {
 		anchorPoint = Vector2.new(0, 0),
 		position = UDim2.fromOffset(0, 16),
-		size = UDim2.fromOffset(mobile and 52 or 74, mobile and 52 or 74),
+		size = UDim2.fromOffset(mobile and 56 or 74, mobile and 56 or 74),
 		compact = true,
 		dock = "hotbarLeft",
 		mobile = mobile,

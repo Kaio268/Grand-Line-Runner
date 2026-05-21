@@ -1,4 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -28,6 +30,12 @@ local SHELL = {
 	Disabled = Color3.fromRGB(65, 73, 84),
 }
 
+local function isMobileViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.X < 760 or math.min(viewport.X, viewport.Y) < 560
+end
+
 local function TutorialPrompt(props)
 	local state = props.state or {}
 	local step = state.step or {}
@@ -39,23 +47,35 @@ local function TutorialPrompt(props)
 	if actionText == "" then
 		actionText = tostring(step.waitText or "Continue")
 	end
+	local mobile = isMobileViewport()
+	local stepId = tostring(step.id or step.Id or "")
+	local hotbarSensitiveStep = mobile and stepId == "place_on_stand"
+	local cardHeight = mobile and (if hotbarSensitiveStep then 124 else 132) or CARD_HEIGHT
+	local horizontalPadding = mobile and 10 or 18
+	local buttonHeight = mobile and 28 or ACTION_BUTTON_HEIGHT
+	local actionButtonWidth = mobile and 88 or ACTION_BUTTON_WIDTH
+	local skipButtonWidth = mobile and 70 or SKIP_BUTTON_WIDTH
+	local anchorPoint = if hotbarSensitiveStep then Vector2.new(0.5, 0) else Vector2.new(0.5, 1)
+	local promptPosition = if hotbarSensitiveStep
+		then UDim2.new(0.5, 0, 0, 82)
+		else UDim2.new(0.5, 0, 1, mobile and -18 or -112)
 
 	return e("Frame", {
-		AnchorPoint = Vector2.new(0.5, 1),
+		AnchorPoint = anchorPoint,
 		BackgroundColor3 = SHELL.Background,
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Position = UDim2.new(0.5, 0, 1, -112),
-		Size = UDim2.new(0.86, 0, 0, CARD_HEIGHT),
+		Position = promptPosition,
+		Size = UDim2.new(mobile and 0.56 or 0.86, 0, 0, cardHeight),
 		ZIndex = 180,
 	}, {
 		Constraint = e("UISizeConstraint", {
-			MaxSize = Vector2.new(560, CARD_HEIGHT),
-			MinSize = Vector2.new(320, 172),
+			MaxSize = mobile and Vector2.new(360, cardHeight) or Vector2.new(560, CARD_HEIGHT),
+			MinSize = mobile and Vector2.new(260, 120) or Vector2.new(320, 172),
 		}),
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 14),
+			CornerRadius = UDim.new(0, mobile and 11 or 14),
 		}),
 		Stroke = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
@@ -73,22 +93,22 @@ local function TutorialPrompt(props)
 		StepLabel = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 14),
-			Size = UDim2.new(1, -36, 0, 18),
+			Position = UDim2.fromOffset(horizontalPadding, mobile and 7 or 14),
+			Size = UDim2.new(1, -(horizontalPadding * 2), 0, mobile and 12 or 18),
 			Text = string.format("STEP %d / %d", stepIndex, totalSteps),
 			TextColor3 = SHELL.GoldSoft,
-			TextSize = 13,
+			TextSize = mobile and 9 or 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 181,
 		}),
 		Title = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(18, 34),
-			Size = UDim2.new(1, -36, 0, 28),
+			Position = UDim2.fromOffset(horizontalPadding, mobile and 20 or 34),
+			Size = UDim2.new(1, -(horizontalPadding * 2), 0, mobile and 20 or 28),
 			Text = tostring(step.title or "Tutorial"),
 			TextColor3 = SHELL.Text,
-			TextSize = 24,
+			TextSize = mobile and 16 or 24,
 			TextStrokeColor3 = SHELL.GoldShadow,
 			TextStrokeTransparency = 0.55,
 			TextXAlignment = Enum.TextXAlignment.Left,
@@ -97,11 +117,11 @@ local function TutorialPrompt(props)
 		Body = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(18, 66),
-			Size = UDim2.new(1, -36, 0, 34),
+			Position = UDim2.fromOffset(horizontalPadding, mobile and 43 or 66),
+			Size = UDim2.new(1, -(horizontalPadding * 2), 0, mobile and 18 or 34),
 			Text = tostring(step.body or ""),
 			TextColor3 = SHELL.Text,
-			TextSize = 15,
+			TextSize = mobile and 10 or 15,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
@@ -110,11 +130,11 @@ local function TutorialPrompt(props)
 		Instruction = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(18, 102),
-			Size = UDim2.new(1, -36, 0, 20),
+			Position = UDim2.fromOffset(horizontalPadding, mobile and 64 or 102),
+			Size = UDim2.new(1, -(horizontalPadding * 2), 0, mobile and 22 or 20),
 			Text = tostring(step.instruction or ""),
 			TextColor3 = SHELL.Muted,
-			TextSize = 13,
+			TextSize = mobile and 9 or 13,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 181,
@@ -124,8 +144,8 @@ local function TutorialPrompt(props)
 			BackgroundColor3 = SHELL.Track,
 			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
-			Position = UDim2.new(0, 18, 1, -58),
-			Size = UDim2.new(1, -36, 0, 10),
+			Position = UDim2.new(0, horizontalPadding, 1, mobile and -36 or -58),
+			Size = UDim2.new(1, -(horizontalPadding * 2), 0, mobile and 5 or 10),
 			ZIndex = 181,
 		}, {
 			Corner = e("UICorner", {
@@ -160,11 +180,11 @@ local function TutorialPrompt(props)
 			BackgroundTransparency = 0,
 			BorderSizePixel = 0,
 			Font = Theme.Fonts.Button,
-			Position = UDim2.new(1, -(18 + ACTION_BUTTON_WIDTH + ACTION_BUTTON_GAP), 1, -14),
-			Size = UDim2.fromOffset(SKIP_BUTTON_WIDTH, ACTION_BUTTON_HEIGHT),
+			Position = UDim2.new(1, -(horizontalPadding + actionButtonWidth + ACTION_BUTTON_GAP), 1, mobile and -5 or -14),
+			Size = UDim2.fromOffset(skipButtonWidth, buttonHeight),
 			Text = "Skip",
 			TextColor3 = Color3.fromRGB(31, 24, 10),
-			TextSize = 14,
+			TextSize = mobile and 10 or 14,
 			TextStrokeTransparency = 1,
 			ZIndex = 184,
 			[React.Event.Activated] = function()
@@ -196,11 +216,11 @@ local function TutorialPrompt(props)
 			BackgroundTransparency = if canAdvance then 0 else 0.18,
 			BorderSizePixel = 0,
 			Font = Theme.Fonts.Button,
-			Position = UDim2.new(1, -18, 1, -14),
-			Size = UDim2.fromOffset(ACTION_BUTTON_WIDTH, ACTION_BUTTON_HEIGHT),
+			Position = UDim2.new(1, -horizontalPadding, 1, mobile and -5 or -14),
+			Size = UDim2.fromOffset(actionButtonWidth, buttonHeight),
 			Text = actionText,
 			TextColor3 = if canAdvance then Color3.fromRGB(31, 24, 10) else Color3.fromRGB(222, 228, 238),
-			TextSize = 15,
+			TextSize = mobile and 10 or 15,
 			TextStrokeTransparency = 1,
 			ZIndex = 184,
 			[React.Event.Activated] = function()

@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
@@ -22,6 +23,12 @@ local COLORS = {
 	Text = Theme.Palette.Text,
 	Panel = Color3.fromRGB(14, 26, 38),
 }
+
+local function isMobileViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
 
 local function createFallbackArrow(rotation, size, zIndex, visible)
 	return e("TextLabel", {
@@ -229,7 +236,9 @@ local function ObjectiveIndicator(props)
 	local label = tostring(target.label or "Objective")
 	local position = projected.position
 	local zIndex = tonumber(props.zIndex) or 184
-	local arrowSize = if projected.onScreen then 42 else 52
+	local mobile = isMobileViewport()
+	local arrowSize = if mobile then (if projected.onScreen then 58 else 68) else (if projected.onScreen then 42 else 52)
+	local indicatorSize = if mobile then (if projected.onScreen then 66 else 78) else (if projected.onScreen then 52 else 66)
 
 	local indicatorChildren = {
 		Corner = e("UICorner", {
@@ -271,7 +280,7 @@ local function ObjectiveIndicator(props)
 			BackgroundTransparency = if projected.onScreen then 0.48 else 0.06,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(position.X, position.Y),
-			Size = UDim2.fromOffset(if projected.onScreen then 52 else 66, if projected.onScreen then 52 else 66),
+			Size = UDim2.fromOffset(indicatorSize, indicatorSize),
 			ZIndex = zIndex + 1,
 		}, indicatorChildren),
 		Label = e("TextLabel", {
@@ -280,11 +289,11 @@ local function ObjectiveIndicator(props)
 			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(position.X, position.Y + if projected.onScreen then 34 else 41),
-			Size = UDim2.fromOffset(142, 26),
+			Position = UDim2.fromOffset(position.X, position.Y + if mobile then (if projected.onScreen then 42 else 50) else (if projected.onScreen then 34 else 41)),
+			Size = UDim2.fromOffset(mobile and 154 or 142, mobile and 28 or 26),
 			Text = label,
 			TextColor3 = COLORS.Text,
-			TextSize = 13,
+			TextSize = mobile and 14 or 13,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			ZIndex = zIndex + 1,
 		}, {

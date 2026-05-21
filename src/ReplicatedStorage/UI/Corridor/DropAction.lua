@@ -1,5 +1,7 @@
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -54,6 +56,12 @@ local PALETTE = {
 }
 
 local warnedMissingCrewPreview = {}
+
+local function isCompactViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
 
 local function useButtonState(enabled)
 	local hovered, setHovered = React.useState(false)
@@ -865,6 +873,7 @@ local function inHandSlot(props)
 end
 
 local function inHandCrewHud(props)
+	local compact = isCompactViewport()
 	local item = props.item or props.crewmate
 	local slots = if typeof(props.slots) == "table" then props.slots else nil
 	local selectedSlotKey = props.selectedSlotKey
@@ -900,16 +909,16 @@ local function inHandCrewHud(props)
 		BackgroundTransparency = 0.14,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
-		Position = UDim2.new(1, -24, 1, -IN_HAND_BOTTOM_OFFSET),
-		Size = UDim2.new(0.32, 0, 0, IN_HAND_HEIGHT),
+		Position = UDim2.new(1, compact and -140 or -24, 1, compact and -226 or -IN_HAND_BOTTOM_OFFSET),
+		Size = compact and UDim2.new(0.26, 0, 0, 104) or UDim2.new(0.32, 0, 0, IN_HAND_HEIGHT),
 		ZIndex = 42,
 	}, {
 		Scale = e("UIScale", {
-			Scale = 1,
+			Scale = compact and 0.78 or 1,
 		}),
 		SizeLimit = e("UISizeConstraint", {
-			MaxSize = IN_HAND_MAX_SIZE,
-			MinSize = IN_HAND_MIN_SIZE,
+			MaxSize = compact and Vector2.new(310, 104) or IN_HAND_MAX_SIZE,
+			MinSize = compact and Vector2.new(230, 94) or IN_HAND_MIN_SIZE,
 		}),
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 8),
@@ -966,6 +975,7 @@ end
 
 local function DropAction(props)
 	local visible = props.visible == true
+	local compact = isCompactViewport()
 	local carriedItem = props.carriedItem or props.carriedCrewMember
 	local carriedSlots = props.carriedSlots
 	local selectedSlotKey, setSelectedSlotKey = React.useState(nil)
@@ -1024,9 +1034,9 @@ local function DropAction(props)
 		BackgroundTransparency = panelTransparency,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Position = UDim2.new(0.5, 0, 1, -BUTTON_BOTTOM_OFFSET),
+		Position = UDim2.new(0.5, 0, 1, compact and -118 or -BUTTON_BOTTOM_OFFSET),
 		ref = buttonRef,
-		Size = UDim2.new(0.45, 0, 0, BUTTON_HEIGHT),
+		Size = compact and UDim2.new(0.34, 0, 0, 58) or UDim2.new(0.45, 0, 0, BUTTON_HEIGHT),
 		Text = "",
 		ZIndex = 50,
 		[React.Event.Activated] = function()
@@ -1062,8 +1072,8 @@ local function DropAction(props)
 				Scale = scale,
 			}),
 			SizeLimit = e("UISizeConstraint", {
-				MaxSize = BUTTON_MAX_SIZE,
-				MinSize = BUTTON_MIN_SIZE,
+				MaxSize = compact and Vector2.new(286, 58) or BUTTON_MAX_SIZE,
+				MinSize = compact and Vector2.new(220, 54) or BUTTON_MIN_SIZE,
 			}),
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),

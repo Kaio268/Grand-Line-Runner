@@ -553,6 +553,25 @@ local function getStandCollectMultiplier(player, standName)
 		* RebirthConfig.GetShipIncomeMultiplier(rebirthCount)
 end
 
+local function getBeliBoostRemaining(player)
+	local potions = player and player:FindFirstChild("Potions")
+	local timeValue = potions and potions:FindFirstChild("x2MoneyTime")
+	if timeValue and timeValue:IsA("NumberValue") then
+		return math.max(0, tonumber(timeValue.Value) or 0)
+	end
+
+	local storedTime = dmGet(player, "Potions.x2MoneyTime")
+	return math.max(0, tonumber(storedTime) or 0)
+end
+
+local function isBeliBoostActive(player)
+	return getBeliBoostRemaining(player) > 0
+end
+
+local function getBeliBoostMultiplier(player)
+	return if isBeliBoostActive(player) then 2 else 1
+end
+
  
 local function getToolCrewMemberInstanceId(tool)
 	if not tool or not tool:IsA("Tool") then
@@ -1526,7 +1545,7 @@ local function getStandIncomeDisplay(player, standName)
 end
 
 local function getStandIncomePerSecond(player, standName, crewMemberName)
-	return getIncomeWithLevel(player, crewMemberName) * getStandCollectMultiplier(player, standName)
+	return getIncomeWithLevel(player, crewMemberName) * getStandCollectMultiplier(player, standName) * getBeliBoostMultiplier(player)
 end
 
 local function getTextTarget(root, name)
@@ -1638,6 +1657,7 @@ local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, pl
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Rarity, if displayRarity ~= "" then displayRarity else "Common")
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Variant, variantKey)
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.IncomePerSecond, math.max(0, incomePerSecond))
+	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.BeliBoosted, isBeliBoostActive(player))
 	setAttributeIfChanged(
 		placedModel,
 		OVERHEAD_ATTRIBUTES.SlotBonusLabel,
@@ -3069,7 +3089,7 @@ task.spawn(function()
 									spawnStandCrewMember(plr, standModel, handle, crewMemberName)
 								end
 							end
-							local inc = getIncomeWithLevel(plr, crewMemberName)
+							local inc = getIncomeWithLevel(plr, crewMemberName) * getBeliBoostMultiplier(plr)
 							if inc ~= 0 then
 								zeroIncomeLogged[plr] = zeroIncomeLogged[plr] or {}
 								zeroIncomeLogged[plr][standName] = nil

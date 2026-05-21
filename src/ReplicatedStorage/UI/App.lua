@@ -19,6 +19,12 @@ local INVENTORY_MODAL_OPEN_TIME = 0.16
 local INVENTORY_MODAL_CLOSE_TIME = 0.16
 local INVENTORY_MODAL_BACKDROP_TRANSPARENCY = 0.28
 
+local function isMobileViewport()
+	local camera = workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
+
 local PALETTE = {
 	Background = Color3.fromRGB(16, 12, 11),
 	Board = Color3.fromRGB(54, 36, 25),
@@ -1221,8 +1227,8 @@ local function inventoryToggleButton(props)
 	local compact = layout.compact == true
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(props.onToggle ~= nil)
 	local zIndexBase = props.zIndexBase or 0
-	local iconPosition = compact and UDim2.new(0.5, 0, 0, 38) or UDim2.fromScale(0.5, 0.44)
-	local iconSize = compact and UDim2.fromOffset(56, 56) or UDim2.fromOffset(34, 34)
+	local iconPosition = compact and UDim2.fromScale(0.5, 0.5) or UDim2.fromScale(0.5, 0.44)
+	local iconSize = compact and UDim2.fromOffset(46, 46) or UDim2.fromOffset(34, 34)
 	local toggleIcon = props.toggleIcon or {}
 	local hasLegacyIcon = typeof(toggleIcon.image) == "string" and toggleIcon.image ~= ""
 
@@ -1424,22 +1430,26 @@ end
 
 local function ledgerLine(props)
 	local multiLine = props.multiLine == true
+	local compact = props.compact == true
 	local valueWidthScale = multiLine and 1 or math.clamp(props.valueWidthScale or 0.42, 0.24, 0.7)
 	local labelWidthScale = multiLine and 1 or (1 - valueWidthScale)
+	local rowHeight = if compact then (multiLine and 34 or 21) else (multiLine and 44 or 28)
+	local labelTextSize = if compact then 13 else 18
+	local valueTextSize = props.valueTextSize or if compact then (multiLine and 12 or 13) else (multiLine and 15 or 18)
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, 0, 0, multiLine and 44 or 28),
+		Size = UDim2.new(1, 0, 0, rowHeight),
 	}, {
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.fromOffset(0, -1),
-			Size = multiLine and UDim2.new(1, 0, 0, 16) or UDim2.fromScale(labelWidthScale, 1),
+			Size = multiLine and UDim2.new(1, 0, 0, compact and 13 or 16) or UDim2.fromScale(labelWidthScale, 1),
 			Text = props.label or "",
 			TextColor3 = PALETTE.Cream,
-			TextSize = 18,
+			TextSize = labelTextSize,
 			TextStrokeTransparency = 0.6,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
@@ -1447,11 +1457,11 @@ local function ledgerLine(props)
 			AnchorPoint = multiLine and Vector2.new(0, 0) or Vector2.new(1, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = multiLine and UDim2.fromOffset(0, 18) or UDim2.new(1, 0, 0, 3),
-			Size = multiLine and UDim2.new(1, 0, 0, 22) or UDim2.fromScale(valueWidthScale, 1),
+			Position = multiLine and UDim2.fromOffset(0, compact and 14 or 18) or UDim2.new(1, 0, 0, compact and 2 or 3),
+			Size = multiLine and UDim2.new(1, 0, 0, compact and 18 or 22) or UDim2.fromScale(valueWidthScale, 1),
 			Text = props.value or "",
 			TextColor3 = props.valueColor3 or PALETTE.Cyan,
-			TextSize = props.valueTextSize or (multiLine and 15 or 18),
+			TextSize = valueTextSize,
 			TextStrokeTransparency = 0.8,
 			TextTruncate = props.valueTruncate or Enum.TextTruncate.AtEnd,
 			TextWrapped = multiLine,
@@ -1845,6 +1855,14 @@ local function chestOpenQuantityPrompt(props)
 	local maxAmount = math.max(1, math.floor(tonumber(props.maxAmount) or 1))
 	local amount = math.clamp(math.floor(tonumber(props.amount) or 1), 1, maxAmount)
 	local progress = if maxAmount <= 1 then 1 else (amount - 1) / (maxAmount - 1)
+	local mobile = isMobileViewport()
+	local panelHeight = mobile and 202 or 248
+	local panelMaxSize = mobile and Vector2.new(360, panelHeight) or Vector2.new(430, panelHeight)
+	local titleY = mobile and 16 or 24
+	local amountY = mobile and 58 or 82
+	local trackY = mobile and 98 or 126
+	local buttonY = mobile and 146 or 174
+	local buttonHeight = mobile and 34 or 42
 	local trackRef = React.useRef(nil)
 	local draggingRef = React.useRef(false)
 	local changedConnectionRef = React.useRef(nil)
@@ -1939,11 +1957,11 @@ local function chestOpenQuantityPrompt(props)
 			BackgroundColor3 = INVENTORY_UI.SectionBg,
 			BorderSizePixel = 0,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.new(1, -24, 0, 248),
+			Size = UDim2.new(1, -24, 0, panelHeight),
 			ZIndex = 31,
 		}, {
 			SizeConstraint = e("UISizeConstraint", {
-				MaxSize = Vector2.new(430, 248),
+				MaxSize = panelMaxSize,
 			}),
 			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
 			Stroke = e("UIStroke", {
@@ -1954,22 +1972,22 @@ local function chestOpenQuantityPrompt(props)
 			Title = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(24, 24),
+				Position = UDim2.fromOffset(20, titleY),
 				Size = UDim2.new(1, -48, 0, 34),
 				Text = string.format("Open %s", tostring(props.displayName or "Chests")),
 				TextColor3 = INVENTORY_UI.TextMain,
-				TextSize = 26,
+				TextSize = mobile and 20 or 26,
 				TextXAlignment = Enum.TextXAlignment.Center,
 				ZIndex = 32,
 			}),
 			Amount = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(24, 82),
+				Position = UDim2.fromOffset(20, amountY),
 				Size = UDim2.new(1, -48, 0, 30),
 				Text = string.format("%d / %d", amount, maxAmount),
 				TextColor3 = INVENTORY_UI.GoldHighlight,
-				TextSize = 24,
+				TextSize = mobile and 20 or 24,
 				TextXAlignment = Enum.TextXAlignment.Center,
 				ZIndex = 32,
 			}),
@@ -1977,8 +1995,8 @@ local function chestOpenQuantityPrompt(props)
 				ref = trackRef,
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(36, 126),
-				Size = UDim2.new(1, -72, 0, 18),
+				Position = UDim2.fromOffset(32, trackY),
+				Size = UDim2.new(1, -64, 0, mobile and 14 or 18),
 				ZIndex = 32,
 			}, {
 				Corner = e("UICorner", { CornerRadius = UDim.new(1, 0) }),
@@ -2025,11 +2043,11 @@ local function chestOpenQuantityPrompt(props)
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(24, 174),
-				Size = UDim2.new(0.3, -18, 0, 42),
-				Text = "Drop Rates",
+					Position = UDim2.fromOffset(20, buttonY),
+					Size = UDim2.new(0.32, -15, 0, buttonHeight),
+					Text = "Drop Rates",
 				TextColor3 = INVENTORY_UI.GoldHighlight,
-				TextSize = 15,
+					TextSize = mobile and 12 or 15,
 				ZIndex = 32,
 				[React.Event.MouseEnter] = function()
 					setDropRatesHovered(true)
@@ -2075,11 +2093,11 @@ local function chestOpenQuantityPrompt(props)
 				BackgroundColor3 = INVENTORY_UI.GoldBase,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.new(0.3, 18, 0, 174),
-				Size = UDim2.new(0.35, -21, 0, 42),
+				Position = UDim2.new(0.32, 10, 0, buttonY),
+				Size = UDim2.new(0.34, -16, 0, buttonHeight),
 				Text = string.format("Open %d", amount),
 				TextColor3 = PALETTE.Ink,
-				TextSize = 16,
+				TextSize = mobile and 13 or 16,
 				ZIndex = 32,
 				[React.Event.Activated] = props.onConfirm,
 			}, {
@@ -2090,11 +2108,11 @@ local function chestOpenQuantityPrompt(props)
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.new(0.65, 3, 0, 174),
-				Size = UDim2.new(0.35, -27, 0, 42),
+				Position = UDim2.new(0.66, 4, 0, buttonY),
+				Size = UDim2.new(0.34, -24, 0, buttonHeight),
 				Text = "Cancel",
 				TextColor3 = INVENTORY_UI.TextMain,
-				TextSize = 16,
+				TextSize = mobile and 13 or 16,
 				ZIndex = 32,
 				[React.Event.Activated] = props.onDismiss,
 			}, {
@@ -2131,7 +2149,7 @@ local function formatDropChance(chance)
 	return string.format("%.2f%%", percent)
 end
 
-local function dropRateRow(row, order)
+local function dropRateRow(row, order, compact)
 	local amountSuffix = if row.amountText and row.amountText ~= "" then string.format(" x%s", row.amountText) else ""
 	local nameColor = DROP_RATE_COLORS[row.rarity] or INVENTORY_UI.TextMain
 	return e("Frame", {
@@ -2139,7 +2157,7 @@ local function dropRateRow(row, order)
 		BackgroundTransparency = 0.16,
 		BorderSizePixel = 0,
 		LayoutOrder = order,
-		Size = UDim2.new(1, 0, 0, 34),
+		Size = UDim2.new(1, 0, 0, compact and 28 or 34),
 		ZIndex = 43,
 	}, {
 		Corner = e("UICorner", { CornerRadius = UDim.new(0, 8) }),
@@ -2150,7 +2168,7 @@ local function dropRateRow(row, order)
 			Size = UDim2.new(1, -108, 1, 0),
 			Text = tostring(row.name or "Unknown") .. amountSuffix,
 			TextColor3 = nameColor,
-			TextSize = 14,
+			TextSize = compact and 12 or 14,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 44,
 		}),
@@ -2159,10 +2177,10 @@ local function dropRateRow(row, order)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.new(1, -12, 0, 0),
-			Size = UDim2.fromOffset(88, 34),
+			Size = UDim2.fromOffset(88, compact and 28 or 34),
 			Text = formatDropChance(row.chance),
 			TextColor3 = INVENTORY_UI.GoldHighlight,
-			TextSize = 14,
+			TextSize = compact and 12 or 14,
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = 44,
 		}),
@@ -2171,9 +2189,10 @@ end
 
 local function chestDropRatesPrompt(props)
 	local sections = props.sections or {}
+	local mobile = isMobileViewport()
 	local children = {
 		ListLayout = e("UIListLayout", {
-			Padding = UDim.new(0, 12),
+			Padding = UDim.new(0, mobile and 8 or 12),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 	}
@@ -2182,17 +2201,17 @@ local function chestDropRatesPrompt(props)
 		layoutOrder += 1
 		local sectionChildren = {
 			ListLayout = e("UIListLayout", {
-				Padding = UDim.new(0, 6),
+				Padding = UDim.new(0, mobile and 4 or 6),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
 			Title = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				LayoutOrder = 1,
-				Size = UDim2.new(1, 0, 0, 22),
+				Size = UDim2.new(1, 0, 0, mobile and 18 or 22),
 				Text = tostring(section.title or "Drops"),
 				TextColor3 = INVENTORY_UI.GoldHighlight,
-				TextSize = 16,
+				TextSize = mobile and 13 or 16,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 43,
 			}),
@@ -2200,10 +2219,10 @@ local function chestDropRatesPrompt(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.Gotham,
 				LayoutOrder = 2,
-				Size = UDim2.new(1, 0, 0, 30),
+				Size = UDim2.new(1, 0, 0, mobile and 24 or 30),
 				Text = tostring(section.note),
 				TextColor3 = INVENTORY_UI.TextMuted,
-				TextSize = 12,
+				TextSize = mobile and 10 or 12,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Top,
@@ -2211,7 +2230,7 @@ local function chestDropRatesPrompt(props)
 			}) or nil,
 		}
 		for rowIndex, row in ipairs(section.rows or {}) do
-			sectionChildren["Row" .. tostring(rowIndex)] = dropRateRow(row, rowIndex + 2)
+			sectionChildren["Row" .. tostring(rowIndex)] = dropRateRow(row, rowIndex + 2, mobile)
 		end
 		children["Section" .. tostring(sectionIndex)] = e("Frame", {
 			AutomaticSize = Enum.AutomaticSize.Y,
@@ -2245,7 +2264,7 @@ local function chestDropRatesPrompt(props)
 			ZIndex = 41,
 		}, {
 			SizeConstraint = e("UISizeConstraint", {
-				MaxSize = Vector2.new(520, 430),
+				MaxSize = mobile and Vector2.new(390, 330) or Vector2.new(520, 430),
 			}),
 			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
 			Stroke = e("UIStroke", {
@@ -2256,22 +2275,22 @@ local function chestDropRatesPrompt(props)
 			Title = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(22, 18),
-				Size = UDim2.new(1, -74, 0, 28),
+				Position = UDim2.fromOffset(mobile and 16 or 22, mobile and 14 or 18),
+				Size = UDim2.new(1, mobile and -62 or -74, 0, mobile and 24 or 28),
 				Text = string.format("%s Drop Rates", tostring(props.chestName or "Chest")),
 				TextColor3 = INVENTORY_UI.TextMain,
-				TextSize = 24,
+				TextSize = mobile and 18 or 24,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 42,
 			}),
 			Subtitle = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.Gotham,
-				Position = UDim2.fromOffset(22, 48),
-				Size = UDim2.new(1, -44, 0, 20),
+				Position = UDim2.fromOffset(mobile and 16 or 22, mobile and 38 or 48),
+				Size = UDim2.new(1, mobile and -32 or -44, 0, mobile and 18 or 20),
 				Text = "Possible rewards and their chances",
 				TextColor3 = INVENTORY_UI.TextMuted,
-				TextSize = 13,
+				TextSize = mobile and 11 or 13,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 42,
 			}),
@@ -2281,8 +2300,8 @@ local function chestDropRatesPrompt(props)
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.new(1, -18, 0, 18),
-				Size = UDim2.fromOffset(34, 34),
+				Position = UDim2.new(1, mobile and -14 or -18, 0, mobile and 14 or 18),
+				Size = UDim2.fromOffset(mobile and 30 or 34, mobile and 30 or 34),
 				Text = "X",
 				TextColor3 = INVENTORY_UI.GoldHighlight,
 				TextSize = 16,
@@ -2296,10 +2315,10 @@ local function chestDropRatesPrompt(props)
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
 				CanvasSize = UDim2.new(),
-				Position = UDim2.fromOffset(22, 84),
+				Position = UDim2.fromOffset(mobile and 16 or 22, mobile and 68 or 84),
 				ScrollBarImageColor3 = INVENTORY_UI.GoldHighlight,
 				ScrollBarThickness = 5,
-				Size = UDim2.new(1, -44, 1, -106),
+				Size = UDim2.new(1, mobile and -32 or -44, 1, mobile and -86 or -106),
 				ZIndex = 42,
 			}, children),
 		}),
@@ -2704,10 +2723,11 @@ local function shipUpgradeModal(props)
 	local modal = props.modal or {}
 	local lines = modal.Lines or modal.lines or {}
 	local accent = modal.IsError and PALETTE.Rose or (modal.IsMaxLevel and PALETTE.Gold or PALETTE.Green)
+	local mobile = isMobileViewport()
 	local listChildren = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Vertical,
-			Padding = UDim.new(0, 8),
+			Padding = UDim.new(0, mobile and 6 or 8),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 	}
@@ -2735,10 +2755,10 @@ local function shipUpgradeModal(props)
 				Thickness = 1,
 			}),
 			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 10),
-				PaddingBottom = UDim.new(0, 10),
-				PaddingLeft = UDim.new(0, 14),
-				PaddingRight = UDim.new(0, 14),
+				PaddingTop = UDim.new(0, mobile and 8 or 10),
+				PaddingBottom = UDim.new(0, mobile and 8 or 10),
+				PaddingLeft = UDim.new(0, mobile and 12 or 14),
+				PaddingRight = UDim.new(0, mobile and 12 or 14),
 			}),
 			Dot = e("Frame", {
 				BackgroundColor3 = accent,
@@ -2759,7 +2779,7 @@ local function shipUpgradeModal(props)
 				Size = UDim2.new(1, -18, 0, 0),
 				Text = tostring(line),
 				TextColor3 = PALETTE.Text,
-				TextSize = 16,
+				TextSize = mobile and 13 or 16,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Top,
@@ -2806,12 +2826,12 @@ local function shipUpgradeModal(props)
 				BackgroundColor3 = PALETTE.InkSoft,
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.fromOffset(500, 0),
+				Size = UDim2.fromOffset(mobile and 356 or 500, 0),
 				ZIndex = 80,
 			}, {
 				SizeConstraint = e("UISizeConstraint", {
-					MaxSize = Vector2.new(540, 720),
-					MinSize = Vector2.new(440, 0),
+					MaxSize = mobile and Vector2.new(380, 520) or Vector2.new(540, 720),
+					MinSize = mobile and Vector2.new(280, 0) or Vector2.new(440, 0),
 				}),
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 18),
@@ -2829,14 +2849,14 @@ local function shipUpgradeModal(props)
 					}),
 				}),
 				Padding = e("UIPadding", {
-					PaddingTop = UDim.new(0, 18),
-					PaddingBottom = UDim.new(0, 18),
-					PaddingLeft = UDim.new(0, 18),
-					PaddingRight = UDim.new(0, 18),
+					PaddingTop = UDim.new(0, mobile and 14 or 18),
+					PaddingBottom = UDim.new(0, mobile and 14 or 18),
+					PaddingLeft = UDim.new(0, mobile and 14 or 18),
+					PaddingRight = UDim.new(0, mobile and 14 or 18),
 				}),
 				List = e("UIListLayout", {
 					FillDirection = Enum.FillDirection.Vertical,
-					Padding = UDim.new(0, 12),
+					Padding = UDim.new(0, mobile and 8 or 12),
 					SortOrder = Enum.SortOrder.LayoutOrder,
 				}),
 				Eyebrow = e("TextLabel", {
@@ -2846,7 +2866,7 @@ local function shipUpgradeModal(props)
 					Size = UDim2.new(1, 0, 0, 16),
 					Text = tostring(modal.AccentText or "Ship Upgrade Complete"),
 					TextColor3 = accent,
-					TextSize = 12,
+					TextSize = mobile and 10 or 12,
 					TextXAlignment = Enum.TextXAlignment.Left,
 					ZIndex = 81,
 				}),
@@ -2858,7 +2878,7 @@ local function shipUpgradeModal(props)
 					Size = UDim2.fromScale(1, 0),
 					Text = tostring(modal.Title or "Ship upgraded"),
 					TextColor3 = PALETTE.Cream,
-					TextSize = 34,
+					TextSize = mobile and 26 or 34,
 					TextStrokeTransparency = 0.62,
 					TextWrapped = true,
 					TextXAlignment = Enum.TextXAlignment.Left,
@@ -2875,7 +2895,7 @@ local function shipUpgradeModal(props)
 				ActionRow = e("Frame", {
 					BackgroundTransparency = 1,
 					LayoutOrder = 4,
-					Size = UDim2.new(1, 0, 0, 44),
+					Size = UDim2.new(1, 0, 0, mobile and 38 or 44),
 					ZIndex = 81,
 				}, {
 					Okay = e("TextButton", {
@@ -2884,10 +2904,10 @@ local function shipUpgradeModal(props)
 						BackgroundColor3 = accent,
 						BorderSizePixel = 0,
 						Position = UDim2.fromScale(1, 0),
-						Size = UDim2.fromOffset(136, 42),
+						Size = UDim2.fromOffset(mobile and 112 or 136, mobile and 36 or 42),
 						Text = "Okay",
 						TextColor3 = Color3.fromRGB(14, 21, 22),
-						TextSize = 18,
+						TextSize = mobile and 15 or 18,
 						Font = Enum.Font.GothamBold,
 						ZIndex = 82,
 						[React.Event.Activated] = props.onDismiss,
@@ -2921,10 +2941,10 @@ local function App(props)
 	local mobileLayout = toggleLayout.mobile == true
 	local toggleSlotIndex = math.max(1, math.floor(tonumber(toggleLayout.slotIndex) or 5))
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
-	local toggleGap = dockToggleLeft and (mobileLayout and 8 or 20) or 0
+	local toggleGap = dockToggleLeft and (mobileLayout and 7 or 20) or 0
 	local hotbarSlotCount = math.max(1, #(props.hotbarSlots or {}))
-	local hotbarSlotWidth = mobileLayout and 52 or 64
-	local hotbarSlotGap = mobileLayout and 7 or 10
+	local hotbarSlotWidth = mobileLayout and 50 or 64
+	local hotbarSlotGap = mobileLayout and 5 or 10
 	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth + math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
 	local toggleSlotX = math.max(0, (toggleSlotIndex - 1) * (hotbarSlotWidth + hotbarSlotGap))
@@ -2959,7 +2979,7 @@ local function App(props)
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundTransparency = 1,
 			ClipsDescendants = false,
-			Position = UDim2.new(0.5, mobileLayout and -40 or 0, 1, mobileLayout and -10 or -20),
+			Position = UDim2.new(0.5, mobileLayout and 28 or 0, 1, mobileLayout and -10 or -20),
 			Size = UDim2.fromOffset(bottomBarWidth, mobileLayout and 66 or 104),
 			ZIndex = bottomBarZIndex,
 		}, {
@@ -3118,7 +3138,7 @@ local function App(props)
 		local ledgerChildren = {
 			List = e("UIListLayout", {
 				FillDirection = Enum.FillDirection.Vertical,
-				Padding = UDim.new(0, 3),
+				Padding = UDim.new(0, mobileLayout and 1 or 3),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
 		}
@@ -3196,6 +3216,7 @@ local function App(props)
 				value = entry.value,
 				valueColor3 = entry.valueColor3,
 				multiLine = entry.multiLine,
+				compact = mobileLayout,
 			})
 		end
 
@@ -3375,11 +3396,11 @@ local function App(props)
 					Title = e("TextLabel", {
 						BackgroundTransparency = 1,
 						Font = Enum.Font.Cartoon,
-						Position = UDim2.fromOffset(16, 14),
-						Size = UDim2.new(1, -32, 0, 28),
+						Position = UDim2.fromOffset(16, mobileLayout and 10 or 14),
+						Size = UDim2.new(1, -32, 0, mobileLayout and 24 or 28),
 						Text = showingTitles and "Title Registry" or "Captain's Ledger",
 						TextColor3 = PALETTE.Cream,
-						TextSize = 28,
+						TextSize = mobileLayout and 22 or 28,
 						TextStrokeTransparency = 0.6,
 						TextXAlignment = Enum.TextXAlignment.Left,
 						ZIndex = 8,
@@ -3387,12 +3408,12 @@ local function App(props)
 					Subtitle = e("TextLabel", {
 						BackgroundTransparency = 1,
 						Font = Enum.Font.Gotham,
-						Position = UDim2.fromOffset(16, 44),
-						Size = UDim2.new(1, -32, 0, 30),
+						Position = UDim2.fromOffset(16, mobileLayout and 36 or 44),
+						Size = UDim2.new(1, -32, 0, mobileLayout and 24 or 30),
 						Text = showingTitles and "Honor marks tied to your long-term feats and current bounty rank."
 							or "Current haul and ship stores at a glance.",
 						TextColor3 = INVENTORY_UI.TextMuted,
-						TextSize = 12,
+						TextSize = mobileLayout and 10 or 12,
 						TextWrapped = true,
 						TextXAlignment = Enum.TextXAlignment.Left,
 						TextYAlignment = Enum.TextYAlignment.Top,
@@ -3402,7 +3423,7 @@ local function App(props)
 						BackgroundColor3 = INVENTORY_UI.GoldBase,
 						BackgroundTransparency = 0.26,
 						BorderSizePixel = 0,
-						Position = UDim2.fromOffset(16, 84),
+						Position = UDim2.fromOffset(16, mobileLayout and 68 or 84),
 						Size = UDim2.new(1, -32, 0, 2),
 						ZIndex = 8,
 					}, {
@@ -3412,8 +3433,8 @@ local function App(props)
 					}),
 					Stats = e("Frame", {
 						BackgroundTransparency = 1,
-						Position = UDim2.fromOffset(16, 102),
-						Size = UDim2.new(1, -32, 1, -118),
+						Position = UDim2.fromOffset(16, mobileLayout and 80 or 102),
+						Size = UDim2.new(1, -32, 1, mobileLayout and -88 or -118),
 						ZIndex = 8,
 					}, ledgerChildren),
 				}),

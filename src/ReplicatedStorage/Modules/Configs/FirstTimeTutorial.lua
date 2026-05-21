@@ -52,7 +52,7 @@ local FirstTimeTutorial = {
 			Id = "place_on_stand",
 			Title = "Put crew to work",
 			Body = "Crewmates earn Beli when they are placed on your stand.",
-			Instruction = "Select your Crewmate from the hotbar, then place it on an empty stand.",
+			Instruction = "Tap your Crewmate in the hotbar, then place it on an empty stand.",
 			WaitText = "Place on a stand",
 			CompletionMode = "PlaceOnStand",
 		},

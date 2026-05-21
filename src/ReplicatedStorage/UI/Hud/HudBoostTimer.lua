@@ -1,6 +1,8 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 
@@ -24,6 +26,12 @@ local BOOST_METADATA = {
 }
 
 local DEFAULT_ACCENT = Color3.fromRGB(238, 191, 99)
+
+local function isCompactViewport()
+	local camera = Workspace.CurrentCamera
+	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+end
 
 local function trimTimeSuffix(name)
 	return string.sub(tostring(name or ""), 1, math.max(0, #tostring(name or "") - 4))
@@ -171,6 +179,7 @@ local function HudBoostTimer(props)
 	if #boostState.entries == 0 then
 		return nil
 	end
+	local compact = isCompactViewport()
 
 	local children = {
 		Layout = e("UIListLayout", {
@@ -189,7 +198,7 @@ local function HudBoostTimer(props)
 			BackgroundTransparency = 0.18,
 			BorderSizePixel = 0,
 			LayoutOrder = index,
-			Size = UDim2.fromOffset(0, 44),
+			Size = UDim2.fromOffset(0, compact and 34 or 44),
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 999),
@@ -200,15 +209,15 @@ local function HudBoostTimer(props)
 				Transparency = 0.18,
 			}),
 			Padding = e("UIPadding", {
-				PaddingLeft = UDim.new(0, 10),
-				PaddingRight = UDim.new(0, 12),
-				PaddingTop = UDim.new(0, 5),
-				PaddingBottom = UDim.new(0, 5),
+				PaddingLeft = UDim.new(0, compact and 8 or 10),
+				PaddingRight = UDim.new(0, compact and 9 or 12),
+				PaddingTop = UDim.new(0, compact and 4 or 5),
+				PaddingBottom = UDim.new(0, compact and 4 or 5),
 			}),
 			Layout = e("UIListLayout", {
 				FillDirection = Enum.FillDirection.Horizontal,
 				HorizontalAlignment = Enum.HorizontalAlignment.Left,
-				Padding = UDim.new(0, 8),
+				Padding = UDim.new(0, compact and 6 or 8),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				VerticalAlignment = Enum.VerticalAlignment.Center,
 			}),
@@ -216,7 +225,7 @@ local function HudBoostTimer(props)
 				BackgroundTransparency = 1,
 				Image = entry.icon,
 				LayoutOrder = 1,
-				Size = UDim2.fromOffset(32, 32),
+				Size = UDim2.fromOffset(compact and 24 or 32, compact and 24 or 32),
 				ScaleType = Enum.ScaleType.Fit,
 			}) or nil,
 			Label = e("TextLabel", {
@@ -224,10 +233,10 @@ local function HudBoostTimer(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				LayoutOrder = 2,
-				Size = UDim2.fromOffset(0, 30),
+				Size = UDim2.fromOffset(0, compact and 24 or 30),
 				Text = tostring(entry.label),
 				TextColor3 = Color3.fromRGB(247, 242, 230),
-				TextSize = 16,
+				TextSize = compact and 13 or 16,
 				TextStrokeColor3 = Color3.fromRGB(4, 6, 10),
 				TextStrokeTransparency = 0.25,
 				TextTruncate = Enum.TextTruncate.AtEnd,
@@ -238,10 +247,10 @@ local function HudBoostTimer(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				LayoutOrder = 3,
-				Size = UDim2.fromOffset(0, 30),
+				Size = UDim2.fromOffset(0, compact and 24 or 30),
 				Text = formatDuration(entry.remaining),
 				TextColor3 = entry.accent,
-				TextSize = 15,
+				TextSize = compact and 12 or 15,
 				TextStrokeColor3 = Color3.fromRGB(4, 6, 10),
 				TextStrokeTransparency = 0.2,
 				TextXAlignment = Enum.TextXAlignment.Left,

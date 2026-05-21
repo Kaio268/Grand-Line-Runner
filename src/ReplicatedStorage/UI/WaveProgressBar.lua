@@ -6,7 +6,7 @@ local React = require(Packages:WaitForChild("React"))
 local e = React.createElement
 local SEGMENT_GAP_PX = 4
 local AVATAR_MARKER_SIZE = 32
-local WAVE_MARKER_SIZE = 34
+local WAVE_MARKER_SIZE = 26
 
 local SEGMENT_COLORS = {
 	Color3.fromRGB(56, 67, 98),
@@ -56,16 +56,16 @@ local function avatarMarker(props)
 		size = props.size or AVATAR_MARKER_SIZE,
 		zIndex = 8,
 		children = {
-				Backdrop = e("Frame", {
-					BackgroundColor3 = dead and Color3.fromRGB(72, 41, 49) or Color3.fromRGB(21, 27, 41),
-					BorderSizePixel = 0,
-					Size = UDim2.fromScale(1, 1),
-					ZIndex = 8,
-				}, {
-					Corner = e("UICorner", {
-						CornerRadius = UDim.new(1, 0),
-					}),
-					Stroke = e("UIStroke", {
+			Backdrop = e("Frame", {
+				BackgroundColor3 = dead and Color3.fromRGB(72, 41, 49) or Color3.fromRGB(21, 27, 41),
+				BorderSizePixel = 0,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = 8,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(1, 0),
+				}),
+				Stroke = e("UIStroke", {
 					Color = dead and Color3.fromRGB(255, 128, 128) or Color3.fromRGB(223, 236, 255),
 					Transparency = 0.08,
 					Thickness = 1.5,
@@ -110,7 +110,7 @@ local function waveMarker(props)
 				BackgroundColor3 = Color3.fromRGB(22, 25, 36),
 				BackgroundTransparency = 0.04,
 				BorderSizePixel = 0,
-				Image = props.image or "",
+				Image = "",
 				ImageColor3 = Color3.new(1, 1, 1),
 				Position = UDim2.fromScale(0.5, 0.5),
 				Rotation = 45,
@@ -134,7 +134,7 @@ local function waveMarker(props)
 					Position = UDim2.fromScale(0.5, 0.5),
 					Rotation = -45,
 					ScaleType = Enum.ScaleType.Fit,
-					Size = UDim2.fromScale(0.68, 0.68),
+					Size = UDim2.fromScale(0.76, 0.76),
 					ZIndex = 10,
 				}),
 			}),
@@ -158,6 +158,9 @@ local function segmentRow(props)
 			or if section.isImpact
 				then Color3.fromRGB(104, 56, 54)
 				else SEGMENT_COLORS[((index - 1) % #SEGMENT_COLORS) + 1]
+		local labelColor = if section.isImpact
+			then Color3.fromRGB(255, 228, 214)
+			else color:Lerp(Color3.new(1, 1, 1), 0.52)
 		local widthScale = section.widthScale or (1 / #sections)
 		children["Segment" .. tostring(index)] = e("Frame", {
 			BackgroundColor3 = color,
@@ -187,17 +190,18 @@ local function segmentRow(props)
 			Label = e("TextLabel", {
 				AnchorPoint = Vector2.new(0.5, 1),
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamMedium,
-				Position = UDim2.fromScale(0.5, 1),
-				Size = UDim2.new(1, -6, 0, compact and 7 or 14),
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromScale(0.5, 0.92),
+				Size = UDim2.new(1, -8, 0, compact and 16 or 30),
 				Text = section.label or ("Biome " .. tostring(index)),
-				TextColor3 = if section.isImpact
-					then Color3.fromRGB(255, 228, 214)
-					else Color3.fromRGB(233, 241, 255),
-				TextSize = compact and 5 or 10,
-				TextTransparency = if section.isImpact then 0.05 else 0.16,
+				TextColor3 = labelColor,
+				TextSize = compact and 6 or 11,
+				TextStrokeColor3 = Color3.fromRGB(5, 8, 14),
+				TextStrokeTransparency = 0.18,
+				TextTransparency = if section.isImpact then 0.02 else 0.04,
 				TextWrapped = true,
-				TextYAlignment = Enum.TextYAlignment.Bottom,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextYAlignment = Enum.TextYAlignment.Center,
 				ZIndex = 7,
 			}),
 		})
@@ -231,7 +235,7 @@ local function WaveProgressBar(props)
 		Root = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
-			Position = UDim2.new(0.5, 0, 0, compact and 58 or 18),
+			Position = UDim2.new(0.5, 0, 0, compact and 8 or 18),
 			Size = UDim2.fromOffset(compact and 390 or 820, compact and 36 or 80),
 			ZIndex = 5,
 		}, {
@@ -239,6 +243,18 @@ local function WaveProgressBar(props)
 				MaxSize = compact and Vector2.new(430, 36) or Vector2.new(940, 80),
 				MinSize = compact and Vector2.new(280, 32) or Vector2.new(500, 72),
 			}),
+			IconBacking = compact and e("Frame", {
+				BackgroundColor3 = Color3.fromRGB(8, 12, 20),
+				BackgroundTransparency = 0.38,
+				BorderSizePixel = 0,
+				Position = UDim2.fromOffset(0, 2),
+				Size = UDim2.new(1, 0, 0, 32),
+				ZIndex = 4,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 14),
+				}),
+			}) or nil,
 			Backdrop = e("Frame", {
 				BackgroundColor3 = Color3.fromRGB(11, 15, 24),
 				BackgroundTransparency = 0.1,

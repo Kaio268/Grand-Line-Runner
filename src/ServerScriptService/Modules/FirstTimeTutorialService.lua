@@ -1152,6 +1152,97 @@ local function buildStandObjectiveTarget(player, standModel)
 	}
 end
 
+local function promptTextContains(prompt, needle)
+	local parent = prompt.Parent
+	local model = parent and parent:FindFirstAncestorOfClass("Model")
+	local haystack = string.lower(table.concat({
+		tostring(prompt.Name or ""),
+		tostring(prompt.ActionText or ""),
+		tostring(prompt.ObjectText or ""),
+		parent and tostring(parent.Name or "") or "",
+		model and tostring(model.Name or "") or "",
+	}, " "))
+
+	return string.find(haystack, string.lower(tostring(needle or "")), 1, true) ~= nil
+end
+
+local function getPromptWorldPosition(prompt)
+	local parent = prompt and prompt.Parent
+	if not parent then
+		return nil
+	end
+
+	if parent:IsA("Attachment") then
+		return parent.WorldPosition
+	end
+
+	local position = getInstanceWorldPosition(parent)
+	if position then
+		return position
+	end
+
+	local model = parent:FindFirstAncestorOfClass("Model")
+	return getInstanceWorldPosition(model)
+end
+
+local function buildSpeedUpgradeObjectiveTarget(prompt)
+	if not prompt or not prompt:IsA("ProximityPrompt") then
+		return nil
+	end
+	if prompt.Enabled == false or (tonumber(prompt.MaxActivationDistance) or 0) <= 0 then
+		return nil
+	end
+	if not promptTextContains(prompt, "franky") and not promptTextContains(prompt, "frank") then
+		return nil
+	end
+
+	local position = getPromptWorldPosition(prompt)
+	if not position then
+		return nil
+	end
+
+	return {
+		id = "speed_upgrade_franky",
+		kind = "speed_upgrade",
+		label = "Frank",
+		position = position,
+		promptName = tostring(prompt.Name or ""),
+	}
+end
+
+local function selectNearestSpeedUpgradeObjectiveTarget(player)
+	local rootPosition = getRootPosition(player)
+	local candidates = {}
+
+	for _, descendant in ipairs(Workspace:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			local target = buildSpeedUpgradeObjectiveTarget(descendant)
+			if target then
+				local distance = math.huge
+				if rootPosition and typeof(target.position) == "Vector3" then
+					distance = (target.position - rootPosition).Magnitude
+				end
+
+				table.insert(candidates, {
+					Distance = distance,
+					Target = target,
+				})
+			end
+		end
+	end
+
+	table.sort(candidates, function(left, right)
+		if math.abs(left.Distance - right.Distance) > 0.05 then
+			return left.Distance < right.Distance
+		end
+
+		return tostring(left.Target.promptName) < tostring(right.Target.promptName)
+	end)
+
+	local chosen = candidates[1]
+	return chosen and chosen.Target or nil
+end
+
 local function selectNearestStandObjectiveTarget(player)
 	local plot = getPlayerPlot(player)
 	local stands = getStandsFolder(plot)
@@ -1275,6 +1366,10 @@ ObjectiveTargetResolvers.place_on_stand = function(player, session)
 	local target = selectNearestStandObjectiveTarget(player)
 	setObjectiveTargetCache(session, "place_on_stand", if target then { StandName = target.standName } else nil)
 	return target
+end
+
+ObjectiveTargetResolvers.buy_speed = function(player, _session)
+	return selectNearestSpeedUpgradeObjectiveTarget(player)
 end
 
 local function serializeObjectiveTarget(player, session, step)

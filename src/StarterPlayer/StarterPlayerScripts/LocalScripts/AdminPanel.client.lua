@@ -97,6 +97,19 @@ local BODY_FONT = Enum.Font.Gotham
 local PANEL_WIDTH = 1040
 local PANEL_HEIGHT = 660
 local PANEL_PADDING = 28
+local MOBILE_PANEL_SCALE_CAP = 0.78
+
+local function getDashboardScale(viewport)
+	local availableX = math.max(360, viewport.X - (PANEL_PADDING * 2))
+	local availableY = math.max(260, viewport.Y - (PANEL_PADDING * 2))
+	local scale = math.min(availableX / PANEL_WIDTH, availableY / PANEL_HEIGHT, 1)
+
+	if UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 700 then
+		scale = math.min(scale, MOBILE_PANEL_SCALE_CAP)
+	end
+
+	return math.clamp(scale, 0.55, 1)
+end
 
 local CATEGORIES = {
 	"All",
@@ -885,6 +898,11 @@ local function buildDashboard()
 		Parent = outerScroll,
 	})
 	addCorner(shadow, 24)
+	local shadowScale = create("UIScale", {
+		Name = "ResponsiveScale",
+		Scale = 1,
+		Parent = shadow,
+	})
 
 	local main = create("Frame", {
 		Name = "Panel",
@@ -896,6 +914,11 @@ local function buildDashboard()
 	addCorner(main, 22)
 	addStroke(main, COLORS.Border, 2, 0.1)
 	addGradient(main, COLORS.PanelTop, COLORS.PanelBottom)
+	local mainScale = create("UIScale", {
+		Name = "ResponsiveScale",
+		Scale = 1,
+		Parent = main,
+	})
 
 	local header = create("Frame", {
 		Name = "Header",
@@ -2104,17 +2127,29 @@ local function buildDashboard()
 
 	local function updateCanvas()
 		local viewport = outerScroll.AbsoluteSize
-		local canvasX = math.max(viewport.X, PANEL_WIDTH + PANEL_PADDING * 2)
-		local canvasY = math.max(viewport.Y, PANEL_HEIGHT + PANEL_PADDING * 2)
+		local scale = getDashboardScale(viewport)
+		local scaledPanelWidth = math.floor(PANEL_WIDTH * scale)
+		local scaledPanelHeight = math.floor(PANEL_HEIGHT * scale)
+
+		mainScale.Scale = scale
+		shadowScale.Scale = scale
+		outerScroll.ScrollBarThickness = scale < 1 and 4 or 8
+
+		local canvasX = math.max(viewport.X, scaledPanelWidth + PANEL_PADDING * 2)
+		local canvasY = math.max(viewport.Y, scaledPanelHeight + PANEL_PADDING * 2)
 		outerScroll.CanvasSize = UDim2.fromOffset(canvasX, canvasY)
 
-		local panelX = math.floor((canvasX - PANEL_WIDTH) * 0.5)
-		local panelY = math.floor((canvasY - PANEL_HEIGHT) * 0.5)
+		local panelX = math.floor((canvasX - scaledPanelWidth) * 0.5)
+		local panelY = math.floor((canvasY - scaledPanelHeight) * 0.5)
 		main.Position = UDim2.fromOffset(panelX, panelY)
-		shadow.Position = UDim2.fromOffset(panelX + 10, panelY + 12)
+		shadow.Position = UDim2.fromOffset(panelX + math.floor(10 * scale), panelY + math.floor(12 * scale))
 	end
 
 	outerScroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateCanvas)
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateCanvas)
+	end
 	task.defer(updateCanvas)
 
 	commandLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
