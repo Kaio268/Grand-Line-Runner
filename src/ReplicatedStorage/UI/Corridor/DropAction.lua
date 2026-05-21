@@ -293,15 +293,25 @@ end
 
 local function trashIcon(props)
 	local zIndex = props.zIndex or 1
-	local strokeThickness = props.strokeThickness or 3
+	local compact = props.compact == true
+	local strokeThickness = props.strokeThickness or (compact and 1.6 or 3)
 	local iconTransparency = props.transparency or 0.12
 	local strokeTransparency = props.strokeTransparency or 0.34
+	local handleY = compact and 2 or 4
+	local handleSize = compact and Vector2.new(17, 6) or Vector2.new(28, 10)
+	local lidY = compact and 10 or 17
+	local lidSize = compact and Vector2.new(30, 5) or Vector2.new(50, 8)
+	local bodyY = compact and 15 or 24
+	local bodySize = compact and Vector2.new(24, 17) or Vector2.new(40, 31)
+	local slotHeight = compact and 10 or 19
+	local centerSlotHeight = compact and 11 or 21
+	local slotWidth = compact and 2 or 3
 
 	return e("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		BackgroundTransparency = 1,
 		Position = props.position or UDim2.fromScale(0.5, 0.5),
-		Size = props.size or UDim2.fromOffset(70, 58),
+		Size = props.size or UDim2.fromOffset(compact and 34 or 70, compact and 32 or 58),
 		ZIndex = zIndex,
 	}, {
 		Handle = e("Frame", {
@@ -309,8 +319,8 @@ local function trashIcon(props)
 			BackgroundColor3 = PALETTE.Icon,
 			BackgroundTransparency = iconTransparency,
 			BorderSizePixel = 0,
-			Position = UDim2.new(0.5, 0, 0, 4),
-			Size = UDim2.fromOffset(28, 10),
+			Position = UDim2.new(0.5, 0, 0, handleY),
+			Size = UDim2.fromOffset(handleSize.X, handleSize.Y),
 			ZIndex = zIndex + 2,
 		}, {
 			Corner = e("UICorner", {
@@ -327,8 +337,8 @@ local function trashIcon(props)
 			BackgroundColor3 = PALETTE.Icon,
 			BackgroundTransparency = iconTransparency,
 			BorderSizePixel = 0,
-			Position = UDim2.new(0.5, 0, 0, 17),
-			Size = UDim2.fromOffset(50, 8),
+			Position = UDim2.new(0.5, 0, 0, lidY),
+			Size = UDim2.fromOffset(lidSize.X, lidSize.Y),
 			ZIndex = zIndex + 3,
 		}, {
 			Corner = e("UICorner", {
@@ -345,8 +355,8 @@ local function trashIcon(props)
 			BackgroundColor3 = PALETTE.Icon,
 			BackgroundTransparency = iconTransparency,
 			BorderSizePixel = 0,
-			Position = UDim2.new(0.5, 0, 0, 24),
-			Size = UDim2.fromOffset(40, 31),
+			Position = UDim2.new(0.5, 0, 0, bodyY),
+			Size = UDim2.fromOffset(bodySize.X, bodySize.Y),
 			ZIndex = zIndex + 1,
 		}, {
 			Corner = e("UICorner", {
@@ -370,7 +380,7 @@ local function trashIcon(props)
 				BackgroundTransparency = math.min(iconTransparency + 0.08, 1),
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0.34, 0.52),
-				Size = UDim2.fromOffset(3, 19),
+				Size = UDim2.fromOffset(slotWidth, slotHeight),
 				ZIndex = zIndex + 4,
 			}, {
 				Corner = e("UICorner", {
@@ -383,7 +393,7 @@ local function trashIcon(props)
 				BackgroundTransparency = math.min(iconTransparency + 0.08, 1),
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0.5, 0.52),
-				Size = UDim2.fromOffset(3, 21),
+				Size = UDim2.fromOffset(slotWidth, centerSlotHeight),
 				ZIndex = zIndex + 4,
 			}, {
 				Corner = e("UICorner", {
@@ -396,7 +406,7 @@ local function trashIcon(props)
 				BackgroundTransparency = math.min(iconTransparency + 0.08, 1),
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0.66, 0.52),
-				Size = UDim2.fromOffset(3, 19),
+				Size = UDim2.fromOffset(slotWidth, slotHeight),
 				ZIndex = zIndex + 4,
 			}, {
 				Corner = e("UICorner", {
@@ -998,6 +1008,15 @@ local function DropAction(props)
 	end
 	local panelTransparency = if pressed or props.isPending == true then 0.32 elseif hovered then 0.4 else 0.5
 	local strokeTransparency = if hovered then 0.58 else 0.74
+	local dropButtonHeight = compact and 42 or BUTTON_HEIGHT
+	local dropIconSize = compact and 38 or 76
+	local dropIconInnerSize = compact and 34 or 70
+	local dropTextX = compact and 58 or 110
+	local dropTextSize = compact and 22 or 36
+	local dropMetaTextSize = compact and 8 or 12
+	local dropMetaHeight = compact and 10 or 16
+	local dropMetaY = compact and 6 or 15
+	local dropLabelY = compact and 8 or 12
 
 	React.useEffect(function()
 		local button = buttonRef.current
@@ -1031,9 +1050,9 @@ local function DropAction(props)
 		BackgroundTransparency = panelTransparency,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Position = UDim2.new(0.5, 0, 1, compact and -118 or -BUTTON_BOTTOM_OFFSET),
+		Position = UDim2.new(0.5, 0, 1, compact and -92 or -BUTTON_BOTTOM_OFFSET),
 		ref = buttonRef,
-		Size = compact and UDim2.new(0.34, 0, 0, 58) or UDim2.new(0.45, 0, 0, BUTTON_HEIGHT),
+		Size = compact and UDim2.new(0.25, 0, 0, dropButtonHeight) or UDim2.new(0.45, 0, 0, BUTTON_HEIGHT),
 		Text = "",
 		ZIndex = 50,
 		[React.Event.Activated] = function()
@@ -1069,8 +1088,8 @@ local function DropAction(props)
 				Scale = scale,
 			}),
 			SizeLimit = e("UISizeConstraint", {
-				MaxSize = compact and Vector2.new(286, 58) or BUTTON_MAX_SIZE,
-				MinSize = compact and Vector2.new(220, 54) or BUTTON_MIN_SIZE,
+				MaxSize = compact and Vector2.new(210, dropButtonHeight) or BUTTON_MAX_SIZE,
+				MinSize = compact and Vector2.new(156, 38) or BUTTON_MIN_SIZE,
 			}),
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
@@ -1091,8 +1110,8 @@ local function DropAction(props)
 				BackgroundColor3 = PALETTE.Highlight,
 				BackgroundTransparency = hovered and 0.78 or 0.88,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(9, 7),
-				Size = UDim2.new(1, -18, 0, 4),
+				Position = UDim2.fromOffset(compact and 8 or 9, compact and 5 or 7),
+				Size = UDim2.new(1, compact and -16 or -18, 0, compact and 2 or 4),
 				ZIndex = 51,
 			}, {
 				Corner = e("UICorner", {
@@ -1105,7 +1124,7 @@ local function DropAction(props)
 				BackgroundTransparency = pressed and 0.52 or 0.7,
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0, 1),
-				Size = UDim2.new(1, 0, 0, 7),
+				Size = UDim2.new(1, 0, 0, compact and 4 or 7),
 				ZIndex = 51,
 			}),
 			RightRail = e("Frame", {
@@ -1113,8 +1132,8 @@ local function DropAction(props)
 				BackgroundColor3 = PALETTE.Border,
 				BackgroundTransparency = hovered and 0.72 or 0.86,
 				BorderSizePixel = 0,
-				Position = UDim2.new(1, -10, 0, 18),
-				Size = UDim2.new(0, 4, 1, -36),
+				Position = UDim2.new(1, compact and -7 or -10, 0, compact and 12 or 18),
+				Size = UDim2.new(0, compact and 2 or 4, 1, compact and -24 or -36),
 				ZIndex = 52,
 			}, {
 				Corner = e("UICorner", {
@@ -1126,8 +1145,8 @@ local function DropAction(props)
 				BackgroundColor3 = PALETTE.Ink,
 				BackgroundTransparency = 0.36,
 				BorderSizePixel = 0,
-				Position = UDim2.new(0, 18, 0.5, 0),
-				Size = UDim2.fromOffset(76, 60),
+				Position = UDim2.new(0, compact and 10 or 18, 0.5, 0),
+				Size = UDim2.fromOffset(dropIconSize, compact and 30 or 60),
 				ZIndex = 52,
 			}, {
 				Corner = e("UICorner", {
@@ -1146,8 +1165,9 @@ local function DropAction(props)
 					Transparency = if hovered then 0.62 else 0.78,
 				}),
 				Icon = e(trashIcon, {
+					compact = compact,
 					position = UDim2.fromScale(0.5, 0.5),
-					size = UDim2.fromOffset(70, 58),
+					size = UDim2.fromOffset(dropIconInnerSize, compact and 30 or 58),
 					transparency = 0.18,
 					strokeTransparency = 0.46,
 					zIndex = 54,
@@ -1156,11 +1176,11 @@ local function DropAction(props)
 			Meta = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(112, 15),
-				Size = UDim2.new(1, -148, 0, 16),
+				Position = UDim2.fromOffset(dropTextX, dropMetaY),
+				Size = UDim2.new(1, compact and -74 or -148, 0, dropMetaHeight),
 				Text = metaText,
 				TextColor3 = PALETTE.MutedText,
-				TextSize = 12,
+				TextSize = dropMetaTextSize,
 				TextStrokeTransparency = 1,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Center,
@@ -1170,13 +1190,13 @@ local function DropAction(props)
 				AnchorPoint = Vector2.new(0, 0.5),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBlack,
-				Position = UDim2.new(0, 110, 0.5, 12),
-				Size = UDim2.new(1, -148, 0, 40),
+				Position = UDim2.new(0, dropTextX, 0.5, dropLabelY),
+				Size = UDim2.new(1, compact and -74 or -148, 0, compact and 24 or 40),
 				Text = "DROP",
 				TextColor3 = PALETTE.Text,
 				TextStrokeColor3 = PALETTE.GlassDeep,
 				TextStrokeTransparency = 0.48,
-				TextSize = 36,
+				TextSize = dropTextSize,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Center,
 				ZIndex = 52,

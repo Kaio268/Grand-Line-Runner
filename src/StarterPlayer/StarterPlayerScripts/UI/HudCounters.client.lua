@@ -132,6 +132,7 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	local _, bottomRightInset = GuiService:GetGuiInset()
 	local compact = Responsive.isCompact()
+	local bottomInset = if compact then 0 else bottomRightInset.Y
 	local rowHeight = compact and MOBILE_ROW_HEIGHT or TARGET_ROW_HEIGHT
 	local rowSpacing = compact and MOBILE_ROW_SPACING or TARGET_ROW_SPACING
 	local panelPadding = compact and MOBILE_PANEL_PADDING or HudCounterConfig.PanelPadding
@@ -146,7 +147,7 @@ local function layoutDisplayLayer(layer, rowCount)
 		0,
 		compact and 0 or COUNTERS_LEFT_PADDING,
 		1,
-		-((compact and 0 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y)
+		-((compact and 0 or COUNTERS_BOTTOM_PADDING) + bottomInset)
 	)
 	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1

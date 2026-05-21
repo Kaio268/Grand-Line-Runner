@@ -250,23 +250,26 @@ rarityLabel.Position = UDim2.fromOffset(24, 53)
 rarityLabel.Size = UDim2.new(1, -48, 0, 14)
 rarityLabel.Parent = card
 
+local bannerHasSubtitle = true
+
 local function applyResponsiveLayout()
 	if isMobileViewport() then
-		sizeConstraint.MinSize = Vector2.new(220, 46)
-		sizeConstraint.MaxSize = Vector2.new(340, 46)
-		root.Size = UDim2.new(0.48, 0, 0, 46)
+		sizeConstraint.MinSize = Vector2.new(220, 52)
+		sizeConstraint.MaxSize = Vector2.new(340, 52)
+		root.Size = UDim2.new(0.48, 0, 0, 52)
 		rootScale.Scale = 0.68
-		card.Size = UDim2.new(1, 0, 0, 42)
+		card.Size = UDim2.new(1, 0, 0, 48)
 		entryLabel.TextSize = 7
 		entryLabel.Position = UDim2.fromOffset(16, 5)
 		entryLabel.Size = UDim2.new(1, -32, 0, 8)
 		areaNameLabel.TextSize = 16
-		areaNameLabel.Position = UDim2.fromOffset(16, 14)
-		areaNameLabel.Size = UDim2.new(1, -32, 0, 20)
+		areaNameLabel.Position = UDim2.fromOffset(16, bannerHasSubtitle and 13 or 18)
+		areaNameLabel.Size = UDim2.new(1, -32, 0, bannerHasSubtitle and 19 or 22)
 		rarityLabel.TextSize = 8
-		rarityLabel.Position = UDim2.fromOffset(16, 31)
-		rarityLabel.Size = UDim2.new(1, -32, 0, 10)
-		accentLine.Position = UDim2.new(0.5, 0, 1, -4)
+		rarityLabel.Position = UDim2.fromOffset(16, 33)
+		rarityLabel.Size = UDim2.new(1, -32, 0, 9)
+		rarityLabel.Visible = bannerHasSubtitle
+		accentLine.Position = UDim2.new(0.5, 0, 1, -3)
 		return
 	end
 
@@ -279,11 +282,12 @@ local function applyResponsiveLayout()
 	entryLabel.Position = UDim2.fromOffset(24, 9)
 	entryLabel.Size = UDim2.new(1, -48, 0, 12)
 	areaNameLabel.TextSize = 26
-	areaNameLabel.Position = UDim2.fromOffset(24, 23)
-	areaNameLabel.Size = UDim2.new(1, -48, 0, 30)
+	areaNameLabel.Position = UDim2.fromOffset(24, bannerHasSubtitle and 23 or 29)
+	areaNameLabel.Size = UDim2.new(1, -48, 0, bannerHasSubtitle and 30 or 34)
 	rarityLabel.TextSize = 12
 	rarityLabel.Position = UDim2.fromOffset(24, 53)
 	rarityLabel.Size = UDim2.new(1, -48, 0, 14)
+	rarityLabel.Visible = bannerHasSubtitle
 	accentLine.Position = UDim2.new(0.5, 0, 1, -7)
 end
 
@@ -293,7 +297,9 @@ local function setBannerContent(entry)
 	local glowColor = style.GlowColor or accentColor
 
 	areaNameLabel.Text = tostring(entry.AreaName or entry.BiomeName or "")
-	rarityLabel.Text = BiomeAreas.GetSubtitle(entry)
+	local subtitle = BiomeAreas.GetSubtitle(entry)
+	bannerHasSubtitle = tostring(subtitle or "") ~= ""
+	rarityLabel.Text = subtitle
 
 	rarityLabel.TextColor3 = accentColor
 	cardStroke.Color = accentColor:Lerp(STROKE_BASE, 0.24)
@@ -308,8 +314,8 @@ local function playBanner(entry)
 	local scaleTarget = getBannerScaleTarget()
 
 	cancelActiveTweens()
-	applyResponsiveLayout()
 	setBannerContent(entry)
+	applyResponsiveLayout()
 
 	root.Visible = true
 	root.GroupTransparency = 1
