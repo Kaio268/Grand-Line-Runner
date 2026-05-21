@@ -20,7 +20,7 @@ local function HudStatRow(props)
 	local rowSpacing = tonumber(props.rowSpacing) or 10
 	local iconSlotWidth = tonumber(props.iconSlotWidth) or 40
 	local barGap = tonumber(props.barGap) or 10
-	local panelPadding = HudCounterConfig.PanelPadding
+	local panelPadding = props.panelPadding or HudCounterConfig.PanelPadding
 
 	local rowChildren = {
 		Layout = e("UIListLayout", {

@@ -5,6 +5,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
+local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 
 local function safeWait(parent, name)
 	local obj = parent:WaitForChild(name, 15)
@@ -104,7 +105,7 @@ local function getDashboardScale(viewport)
 	local availableY = math.max(260, viewport.Y - (PANEL_PADDING * 2))
 	local scale = math.min(availableX / PANEL_WIDTH, availableY / PANEL_HEIGHT, 1)
 
-	if UserInputService.TouchEnabled or viewport.X < 760 or viewport.Y < 700 then
+	if Responsive.isCompact(viewport) then
 		scale = math.min(scale, MOBILE_PANEL_SCALE_CAP)
 	end
 

@@ -1,9 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
+local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 
 local e = React.createElement
 
@@ -33,9 +32,7 @@ local function gradient(first, second)
 end
 
 local function isMobileViewport()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	return Responsive.isMobile()
 end
 
 local function actionButton(props)

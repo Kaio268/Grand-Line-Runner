@@ -1,7 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -16,12 +15,11 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local LavaWaves = require(Modules:WaitForChild("Configs"):WaitForChild("LavaWaves"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
 
 local function isCompactViewport()
-	local camera = workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000
+	return Responsive.isCompact()
 end
 
 local function buildDefaultSections()

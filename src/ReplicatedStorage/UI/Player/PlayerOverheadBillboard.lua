@@ -1,6 +1,4 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -8,6 +6,7 @@ local React = require(Packages:WaitForChild("React"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Shorten = require(Modules:WaitForChild("Shorten"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
 local e = React.createElement
@@ -67,9 +66,7 @@ local function getStatusText(entry)
 end
 
 local function isCompact()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	return Responsive.isCompact()
 end
 
 local function PlayerOverheadBillboard(props)

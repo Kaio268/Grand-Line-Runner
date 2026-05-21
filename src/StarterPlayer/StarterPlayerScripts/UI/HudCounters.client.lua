@@ -1,7 +1,6 @@
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
@@ -12,6 +11,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local HudStatRow = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatRow"))
 local HudStatNotificationLayer = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatNotificationLayer"))
 local HudCounterConfig = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudCounterConfig"))
@@ -40,6 +40,15 @@ local TARGET_ROW_SPACING = HudCounterConfig.RowSpacing
 local ICON_SLOT_WIDTH = HudCounterConfig.IconSlotWidth
 local BAR_GAP = HudCounterConfig.BarGap
 local DISPLAY_LAYER_ZINDEX = HudCounterConfig.DisplayLayerZIndex
+local MOBILE_COUNTER_WIDTH = 132
+local MOBILE_ROW_HEIGHT = 26
+local MOBILE_ROW_SPACING = 3
+local MOBILE_PANEL_PADDING = {
+	Left = 2,
+	Right = 4,
+	Top = 3,
+	Bottom = 2,
+}
 
 local PROTECTED_NAMES = {
 	UIGradient = true,
@@ -122,23 +131,22 @@ local function layoutDisplayLayer(layer, rowCount)
 	end
 
 	local _, bottomRightInset = GuiService:GetGuiInset()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
-	local rowHeight = mobile and 20 or TARGET_ROW_HEIGHT
-	local rowSpacing = mobile and 2 or TARGET_ROW_SPACING
-	local panelTop = mobile and 3 or HudCounterConfig.PanelPadding.Top
-	local panelBottom = mobile and 3 or HudCounterConfig.PanelPadding.Bottom
+	local compact = Responsive.isCompact()
+	local rowHeight = compact and MOBILE_ROW_HEIGHT or TARGET_ROW_HEIGHT
+	local rowSpacing = compact and MOBILE_ROW_SPACING or TARGET_ROW_SPACING
+	local panelPadding = compact and MOBILE_PANEL_PADDING or HudCounterConfig.PanelPadding
+	local panelTop = panelPadding.Top
+	local panelBottom = panelPadding.Bottom
 	local totalHeight = panelTop + panelBottom + (rowCount * rowHeight) + (math.max(0, rowCount - 1) * rowSpacing)
 	local moneyRowY = panelTop + ((math.min(3, math.max(1, rowCount)) - 1) * (rowHeight + rowSpacing))
-	local layerWidth = mobile and 96 or COUNTERS_WIDTH
+	local layerWidth = compact and MOBILE_COUNTER_WIDTH or COUNTERS_WIDTH
 
 	layer.AnchorPoint = Vector2.new(0, 1)
 	layer.Position = UDim2.new(
 		0,
-		mobile and 8 or COUNTERS_LEFT_PADDING,
+		compact and 0 or COUNTERS_LEFT_PADDING,
 		1,
-		-((mobile and 10 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y)
+		-((compact and 0 or COUNTERS_BOTTOM_PADDING) + bottomRightInset.Y)
 	)
 	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1
@@ -148,9 +156,9 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	local moneyAnchor = layer:FindFirstChild("ReactHudMoneyRowAnchor")
 	if moneyAnchor and moneyAnchor:IsA("Frame") then
-		moneyAnchor.Position = UDim2.fromOffset(HudCounterConfig.getContentLeft(), moneyRowY)
+		moneyAnchor.Position = UDim2.fromOffset(panelPadding.Left, moneyRowY)
 		moneyAnchor.Size = UDim2.fromOffset(
-			layerWidth - HudCounterConfig.PanelPadding.Left - HudCounterConfig.PanelPadding.Right,
+			layerWidth - panelPadding.Left - panelPadding.Right,
 			rowHeight
 		)
 		moneyAnchor.ZIndex = DISPLAY_LAYER_ZINDEX + 10
@@ -159,26 +167,25 @@ local function layoutDisplayLayer(layer, rowCount)
 	local notifications = layer:FindFirstChild("ReactHudCounterNotifications")
 	if notifications and notifications:IsA("Frame") then
 		local notificationHeight = HudCounterConfig.NotificationHeight
-		notifications.Position =
-			UDim2.fromOffset(HudCounterConfig.getNotificationX(), math.max(0, moneyRowY - notificationHeight + 6))
-		notifications.Size = UDim2.fromOffset(mobile and 92 or HudCounterConfig.NotificationWidth, notificationHeight)
+		local notificationX = panelPadding.Left + (compact and 34 or (HudCounterConfig.getBarX() + 10))
+		notifications.Position = UDim2.fromOffset(notificationX, math.max(0, moneyRowY - notificationHeight + 6))
+		notifications.Size = UDim2.fromOffset(compact and 108 or HudCounterConfig.NotificationWidth, notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
 end
 
 local function getCounterRenderMetrics()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	local compact = Responsive.isCompact()
 
 	return {
-		barGap = mobile and 2 or BAR_GAP,
-		iconSlotInnerSize = mobile and 14 or HudCounterConfig.IconSize,
-		iconSlotWidth = mobile and 18 or ICON_SLOT_WIDTH,
-		labelTextSize = mobile and 8 or nil,
-		rowHeight = mobile and 20 or TARGET_ROW_HEIGHT,
-		rowSpacing = mobile and 2 or TARGET_ROW_SPACING,
-		valueTextSize = mobile and 14 or nil,
+		barGap = compact and 4 or BAR_GAP,
+		iconSlotInnerSize = compact and 20 or HudCounterConfig.IconSize,
+		iconSlotWidth = compact and 28 or ICON_SLOT_WIDTH,
+		labelTextSize = compact and 10 or nil,
+		panelPadding = compact and MOBILE_PANEL_PADDING or nil,
+		rowHeight = compact and MOBILE_ROW_HEIGHT or TARGET_ROW_HEIGHT,
+		rowSpacing = compact and MOBILE_ROW_SPACING or TARGET_ROW_SPACING,
+		valueTextSize = compact and 18 or nil,
 	}
 end
 
@@ -536,6 +543,7 @@ local function render()
 			iconSlotWidth = metrics.iconSlotWidth,
 			iconSlotInnerSize = metrics.iconSlotInnerSize,
 			barGap = metrics.barGap,
+			panelPadding = metrics.panelPadding,
 			labelSlotWidth = HudCounterConfig.LabelSlotWidth,
 			valueTextSize = metrics.valueTextSize,
 			labelTextSize = metrics.labelTextSize,

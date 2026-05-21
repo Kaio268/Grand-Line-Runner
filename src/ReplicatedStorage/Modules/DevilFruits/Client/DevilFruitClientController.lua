@@ -8,7 +8,9 @@ local DevilFruitClientController = {}
 local started = false
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local SharedFolder = DevilFruits:WaitForChild("Shared")
@@ -399,9 +401,7 @@ local function activateAbilityByName(abilityName, sourceLabel)
 end
 
 local function isCompactHud()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	return Responsive.isCompact()
 end
 
 local function renderCooldownHud()

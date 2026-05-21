@@ -4,10 +4,10 @@ local SoundService = game:GetService("SoundService")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ContentProvider = game:GetService("ContentProvider")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local RNG = Random.new()
 
+local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
 local DevilFruitAssets = require(
 	ReplicatedStorage
@@ -684,9 +684,7 @@ local ACK_PREVIEW_WIDTH = 220
 local ACK_BODY_BOTTOM_PADDING = 62
 
 isMobileViewport = function()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	return Responsive.isMobile()
 end
 
 local function getAcknowledgementScale()

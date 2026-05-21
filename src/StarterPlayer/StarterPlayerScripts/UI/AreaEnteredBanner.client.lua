@@ -2,14 +2,14 @@ local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 
@@ -32,9 +32,7 @@ local LOADING_SCREEN_NAME = "LoadingScreen"
 local LOADING_SCREEN_ACTIVE_ATTRIBUTE = "LoadingScreenActive"
 
 local function isMobileViewport()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	return Responsive.isMobile()
 end
 
 local function getBannerTopOffset()

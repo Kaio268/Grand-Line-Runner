@@ -2,7 +2,6 @@ local Players = game:GetService("Players")
 local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -16,6 +15,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local App = require(UiFolder:WaitForChild("App"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
@@ -2243,9 +2243,7 @@ local function hideLegacyInventory()
 end
 
 local function getToggleLayout()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	local mobile = Responsive.isMobile()
 
 	return {
 		anchorPoint = Vector2.new(0, 0),

@@ -2,7 +2,6 @@ local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
@@ -13,6 +12,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local HudMenuGroup = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudMenuGroup"))
 
 local e = React.createElement
@@ -57,8 +57,8 @@ local TILE_DEFS = {
 local function getHudLayout()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000
-	local compact = mobile or viewport.X < 700 or viewport.Y < 500
+	local mobile = Responsive.isMobile(viewport)
+	local compact = Responsive.isCompact(viewport)
 	local tileSize = if mobile then 42 elseif compact then 72 else 98
 	local columnGap = if mobile then 6 elseif compact then 6 else 10
 	local rowGap = if mobile then 6 elseif compact then 6 else 10

@@ -1,7 +1,5 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -14,6 +12,7 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 local SettingsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Settings"))
 local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
@@ -472,9 +471,7 @@ local function prepareFrame()
 		return
 	end
 
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	local mobile = Responsive.isMobile()
 	if frame.Visible ~= true and not mobile then
 		frame.Size = SETTINGS_FRAME_SIZE
 	end

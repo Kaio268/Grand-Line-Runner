@@ -9,6 +9,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
+local Responsive = require(script.Parent:WaitForChild("Responsive"))
 
 local e = React.createElement
 local CREW_PREVIEW_ASSET_ROOT_NAME = "One Piece Characters"
@@ -20,9 +21,7 @@ local INVENTORY_MODAL_CLOSE_TIME = 0.16
 local INVENTORY_MODAL_BACKDROP_TRANSPARENCY = 0.28
 
 local function isMobileViewport()
-	local camera = workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000 or viewport.X < 760
+	return Responsive.isMobile()
 end
 
 local PALETTE = {
@@ -1342,11 +1341,11 @@ local function inventoryToggleButton(props)
 				AnchorPoint = compact and Vector2.new(0.5, 1) or Vector2.new(0.5, 0),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBlack,
-				Position = compact and UDim2.new(0.5, 0, 1, -1) or UDim2.new(0.5, 0, 0, 10),
-				Size = UDim2.new(1, -6, 0, compact and 15 or 16),
+				Position = compact and UDim2.new(0.5, 0, 1, -3) or UDim2.new(0.5, 0, 0, 10),
+				Size = UDim2.new(1, -4, 0, compact and 13 or 16),
 				Text = "Inventory",
 				TextColor3 = PALETTE.Cream,
-				TextSize = compact and 11 or 13,
+				TextSize = compact and 9 or 13,
 				TextStrokeTransparency = compact and 0.5 or 0.65,
 				TextStrokeColor3 = Color3.fromRGB(8, 12, 20),
 				TextWrapped = true,

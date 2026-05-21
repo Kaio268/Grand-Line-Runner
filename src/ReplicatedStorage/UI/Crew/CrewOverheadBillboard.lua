@@ -1,6 +1,4 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local Workspace = game:GetService("Workspace")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -9,6 +7,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
 local e = React.createElement
@@ -39,9 +38,7 @@ local function blendColor(baseColor, accentColor, alpha)
 end
 
 local function isMobileViewport()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.X < 760 or math.min(viewport.X, viewport.Y) < 560
+	return Responsive.isMobile()
 end
 
 local function getVariantStyle(entry, rarityStyle)

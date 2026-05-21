@@ -1,8 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 local UiModalState = require(Modules:WaitForChild("UiModalState"))
 
 local ReactFrameModalAdapter = {}
@@ -89,9 +89,7 @@ function ReactFrameModalAdapter:_getAvailableViewportSize()
 end
 
 function ReactFrameModalAdapter:_isMobileTestViewport()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	return UserInputService.TouchEnabled or viewport.Y < 1000
+	return Responsive.isMobile()
 end
 
 function ReactFrameModalAdapter:_bindViewportTracking()

@@ -487,8 +487,9 @@ local function ensureHud()
 	local counters = ensureFrame(hud, "Counters")
 	local legacyCounterImages = captureLegacyCounterImages(counters)
 	clearChildren(counters)
+	counters.AnchorPoint = Vector2.new(0, 1)
 	counters.Size = UDim2.fromOffset(250, 172)
-	counters.Position = UDim2.fromOffset(24, 520)
+	counters.Position = UDim2.fromScale(0, 1)
 	counters.ClipsDescendants = false
 
 	local comet = ensureCounterHost(counters, "Comet", legacyCounterImages.Comet)
