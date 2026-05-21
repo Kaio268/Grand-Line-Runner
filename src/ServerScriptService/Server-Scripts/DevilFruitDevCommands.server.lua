@@ -55,6 +55,7 @@ local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local GrandLineRushEconomy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local AdminInvincibility = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminInvincibility"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
 adminCommandFlowLog("DevilFruitDevCommands dependencies loaded")
@@ -80,6 +81,7 @@ local WIPE_CONFIRM_WINDOW = 20
 local SPEED_STAT_PATH = "HiddenLeaderstats.Speed"
 local DEFAULT_SPEED_STAT = tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1
 local HITBOX_VISUAL_ATTRIBUTE = "ShowAbilityHitboxes"
+local ADMIN_INVINCIBLE_ATTRIBUTE = AdminInvincibility.AttributeName
 local HITBOX_POPUP_ON_COLOR = Color3.fromRGB(105, 225, 255)
 local HITBOX_POPUP_OFF_COLOR = Color3.fromRGB(220, 220, 220)
 local HITBOX_POPUP_ERROR_COLOR = Color3.fromRGB(255, 85, 85)
@@ -146,6 +148,7 @@ local ADMIN_COMMAND_NAMES = {
 	hazard = true,
 	hazards = true,
 	hitbox = true,
+	invincible = true,
 	speed = true,
 	setspeed = true,
 	boost = true,
@@ -528,13 +531,62 @@ local function processHitboxCommand(player, argumentText)
 	player:SetAttribute(HITBOX_VISUAL_ATTRIBUTE, nextState)
 	sendHitboxPopup(
 		player,
-		nextState and "Ability hitboxes: ON" or "Ability hitboxes: OFF",
+		nextState and "Ability + hazard hitboxes: ON" or "Ability + hazard hitboxes: OFF",
 		nextState and HITBOX_POPUP_ON_COLOR or HITBOX_POPUP_OFF_COLOR,
 		false
 	)
 
 	print(string.format(
-		"[DevFruitDevCommands] %s set client ability hitbox visuals to %s",
+		"[DevFruitDevCommands] %s set client ability and hazard hitbox visuals to %s",
+		player.Name,
+		nextState and "on" or "off"
+	))
+end
+
+local function processInvincibleCommand(player, argumentText)
+	if not isAuthorized(player) then
+		return
+	end
+
+	local normalizedArgument = normalizeText(argumentText)
+	local nextState
+
+	if normalizedArgument == "" or normalizedArgument == "toggle" then
+		nextState = player:GetAttribute(ADMIN_INVINCIBLE_ATTRIBUTE) ~= true
+	elseif normalizedArgument == "on"
+		or normalizedArgument == "true"
+		or normalizedArgument == "1"
+		or normalizedArgument == "enable"
+		or normalizedArgument == "enabled"
+	then
+		nextState = true
+	elseif normalizedArgument == "off"
+		or normalizedArgument == "false"
+		or normalizedArgument == "0"
+		or normalizedArgument == "disable"
+		or normalizedArgument == "disabled"
+	then
+		nextState = false
+	else
+		warn(string.format(
+			"[DevFruitDevCommands] Invalid /invincible argument '%s' from %s (expected 'on', 'off', or 'toggle')",
+			normalizedArgument,
+			player.Name
+		))
+		sendHitboxPopup(player, "Usage: /invincible on, off, or toggle", HITBOX_POPUP_ERROR_COLOR, true)
+		return
+	end
+
+	player:SetAttribute(ADMIN_INVINCIBLE_ATTRIBUTE, nextState)
+	sendHitboxPopup(
+		player,
+		nextState and "Admin invincibility: ON" or "Admin invincibility: OFF",
+		nextState and HITBOX_POPUP_ON_COLOR or HITBOX_POPUP_OFF_COLOR,
+		false
+	)
+
+	print(string.format(
+		"[DevFruitDevCommands] %s set admin invincibility to %s",
 		player.Name,
 		nextState and "on" or "off"
 	))
@@ -6041,6 +6093,13 @@ local function handleChatCommand(player, rawText, source)
 		return
 	end
 
+	if commandName == "invincible" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processInvincibleCommand(player, argumentText)
+		end)
+		return
+	end
+
 	if commandName == "hazards" or commandName == "hazard" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processHazardsCommand(player, argumentText)
@@ -6672,6 +6731,38 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:HitboxDevCommand")
 	end)
 
+	local invincibleCommand = commandsFolder:FindFirstChild("InvincibleDevCommand")
+	if invincibleCommand and not invincibleCommand:IsA("TextChatCommand") then
+		invincibleCommand:Destroy()
+		invincibleCommand = nil
+	end
+
+	if not invincibleCommand then
+		invincibleCommand = Instance.new("TextChatCommand")
+		invincibleCommand.Name = "InvincibleDevCommand"
+		invincibleCommand.PrimaryAlias = "/invincible"
+		invincibleCommand.SecondaryAlias = "/invincible"
+		invincibleCommand.AutocompleteVisible = false
+		invincibleCommand.Parent = commandsFolder
+	end
+
+	invincibleCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=InvincibleDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 11) == "/invincible" or normalizedText:sub(1, 12) == "/ invincible" then
+			handleChatCommand(player, normalizedText, "TextChatCommand:InvincibleDevCommand")
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/invincible " .. normalizedText) or "/invincible"
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:InvincibleDevCommand")
+	end)
+
 	local hazardsCommand = commandsFolder:FindFirstChild("HazardsDevCommand")
 	if hazardsCommand and not hazardsCommand:IsA("TextChatCommand") then
 		hazardsCommand:Destroy()
@@ -6704,7 +6795,7 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:HazardsDevCommand")
 	end)
 
-	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=16")
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=17")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do
@@ -6713,4 +6804,14 @@ end
 
 Players.PlayerAdded:Connect(hookPlayer)
 adminCommandFlowLog("PlayerAdded listener connected for admin chat commands")
+
+AdminPermissions.AdminStateChanged:Connect(function(player, enabled)
+	if enabled == true or not player then
+		return
+	end
+
+	if player:GetAttribute(ADMIN_INVINCIBLE_ATTRIBUTE) == true then
+		player:SetAttribute(ADMIN_INVINCIBLE_ATTRIBUTE, false)
+	end
+end)
 setupTextChatCommand()

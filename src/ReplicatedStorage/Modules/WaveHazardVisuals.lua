@@ -1,10 +1,14 @@
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local StudioAssetResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("StudioAssetResolver"))
+local HazardDebugConstants = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Debug"):WaitForChild("HazardDebugConstants")
+)
 
 local WaveHazardVisuals = {}
 
-local ASSETS_FOLDER_NAME = "Assets"
-local HAZARDS_FOLDER_NAME = "Hazards"
-local WAVES_FOLDER_NAME = "Waves"
 local REGULAR_WAVE_ASSET_NAME = "Regular Wave"
 local FROZEN_WAVE_ASSET_NAME = "Frozen Wave"
 local HITBOX_NAME = "WaveHitbox"
@@ -14,17 +18,37 @@ local USES_ASSET_VISUALS_ATTRIBUTE = "UsesWaveAssetVisuals"
 local CLIENT_VISUALS_ONLY_ATTRIBUTE = "ClientWaveVisualsOnly"
 local VISUAL_ASSET_NAME_ATTRIBUTE = "WaveVisualAssetName"
 local ACTIVE_VISUAL_ASSET_ATTRIBUTE = "ActiveWaveVisualAssetName"
+local PREPARED_VISUAL_ATTRIBUTE = "WaveVisualPrepared"
+local PREPARED_VISUALS_ATTRIBUTE = "WaveVisualsPrepared"
 local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
 local ORIGINAL_ENABLED_ATTRIBUTE = "WaveVisualOriginalEnabled"
 local MIN_PART_SIZE = 0.001
 local ASSET_TEMPLATE_ROTATION = CFrame.Angles(0, math.rad(180), 0)
+local VISUAL_BOUNDS_DIAGNOSTIC_ATTRIBUTE = "WaveVisualBoundsDebug"
+local VISUAL_BOUNDS_DRIFT_WARN_RATIO = 1.05
+local waveAssetCache = {}
+local waveAssetMeasurementCache = {}
+local warningKeys = {}
 
-local function getChild(parent, name)
-	if not parent then
-		return nil
+local function markHazardHitboxPart(part)
+	if not part or not part:IsA("BasePart") then
+		return
 	end
 
-	return parent:FindFirstChild(name)
+	CollectionService:AddTag(part, HazardDebugConstants.HitboxTag)
+	part:SetAttribute(HazardDebugConstants.DebugHitboxAttribute, true)
+	part:SetAttribute(HazardDebugConstants.HazardHitboxAttribute, true)
+	part:SetAttribute(HazardDebugConstants.HazardClassAttribute, "major")
+	part:SetAttribute(HazardDebugConstants.HazardTypeAttribute, "Wave")
+end
+
+local function warnOnce(key, message, ...)
+	if warningKeys[key] then
+		return
+	end
+
+	warningKeys[key] = true
+	warn(string.format("[WaveHazardVisuals] " .. message, ...))
 end
 
 local function findFirstChildRecursive(parent, name)
@@ -41,9 +65,10 @@ local function findFirstChildRecursive(parent, name)
 end
 
 local function getWaveAssetsFolder()
-	local assetsFolder = getChild(ReplicatedStorage, ASSETS_FOLDER_NAME)
-	local hazardsFolder = getChild(assetsFolder, HAZARDS_FOLDER_NAME)
-	local wavesFolder = getChild(hazardsFolder, WAVES_FOLDER_NAME)
+	local wavesFolder = StudioAssetResolver.ResolveAsset("Waves", {
+		Context = "WaveHazardVisuals",
+		Required = true,
+	})
 	if wavesFolder and wavesFolder:IsA("Folder") then
 		return wavesFolder
 	end
@@ -51,14 +76,63 @@ local function getWaveAssetsFolder()
 	return nil
 end
 
-local function getWaveAsset(assetName)
+local function getWaveAsset(assetName, options)
+	options = if typeof(options) == "table" then options else {}
+	local cachedAsset = waveAssetCache[assetName]
+	if cachedAsset and cachedAsset.Parent then
+		return cachedAsset
+	elseif cachedAsset then
+		waveAssetCache[assetName] = nil
+	end
+
 	local wavesFolder = getWaveAssetsFolder()
 	local asset = findFirstChildRecursive(wavesFolder, assetName)
 	if asset and (asset:IsA("Model") or asset:IsA("BasePart")) then
+		waveAssetCache[assetName] = asset
 		return asset
 	end
 
+	if options.WarnIfMissing == true then
+		warnOnce(
+			"missing_asset_" .. tostring(assetName) .. "_" .. tostring(options.Context or "unknown"),
+			"Missing wave visual asset '%s' for %s. Expected it under ReplicatedStorage.Assets.Hazards.Waves.",
+			tostring(assetName),
+			tostring(options.Context or "unknown")
+		)
+	end
+
 	return nil
+end
+
+local function getWaveAssetSourceSize(asset)
+	if not asset then
+		return nil
+	end
+
+	local cacheKey = asset:GetFullName()
+	local cachedMeasurement = waveAssetMeasurementCache[cacheKey]
+	if cachedMeasurement and cachedMeasurement.Asset == asset and asset.Parent then
+		return cachedMeasurement.Size
+	elseif cachedMeasurement then
+		waveAssetMeasurementCache[cacheKey] = nil
+	end
+
+	local sourceSize = nil
+	if asset:IsA("BasePart") then
+		sourceSize = asset.Size
+	else
+		local _, measuredSize = asset:GetBoundingBox()
+		sourceSize = measuredSize
+	end
+
+	if sourceSize then
+		waveAssetMeasurementCache[cacheKey] = {
+			Asset = asset,
+			Size = sourceSize,
+		}
+	end
+
+	return sourceSize
 end
 
 local function forEachBasePart(root, callback)
@@ -122,22 +196,35 @@ local function translateCFrame(cframeValue, offset)
 	return CFrame.new(cframeValue.Position + offset) * rotation
 end
 
+local function getBouncedLateralOffsetInRange(rawOffset, minOffset, maxOffset)
+	local lower = tonumber(minOffset) or 0
+	local upper = tonumber(maxOffset) or lower
+	if upper < lower then
+		lower, upper = upper, lower
+	end
+
+	local span = upper - lower
+	if span <= 1e-4 then
+		return lower
+	end
+
+	local cycle = span * 2
+	local shifted = ((tonumber(rawOffset) or lower) - lower) % cycle
+
+	if shifted <= span then
+		return lower + shifted
+	end
+
+	return upper - (shifted - span)
+end
+
 local function getBouncedLateralOffset(rawOffset, maxDrift)
 	local limit = math.max(0, tonumber(maxDrift) or 0)
 	if limit <= 1e-4 then
 		return 0
 	end
 
-	local minOffset = -limit
-	local span = limit * 2
-	local cycle = span * 2
-	local shifted = (rawOffset - minOffset) % cycle
-
-	if shifted <= span then
-		return minOffset + shifted
-	end
-
-	return limit - (shifted - span)
+	return getBouncedLateralOffsetInRange(rawOffset, -limit, limit)
 end
 
 local function findHitboxRoot(root)
@@ -179,6 +266,8 @@ local function configureHitboxPart(part)
 			part.CollisionFidelity = Enum.CollisionFidelity.Box
 		end)
 	end
+
+	markHazardHitboxPart(part)
 end
 
 local function configureFrozenHitboxPart(part)
@@ -198,6 +287,8 @@ local function configureFrozenHitboxPart(part)
 			part.CollisionFidelity = Enum.CollisionFidelity.Box
 		end)
 	end
+
+	markHazardHitboxPart(part)
 end
 
 local function configureVisualPart(part)
@@ -430,8 +521,8 @@ local function setVisualVisible(visual, isVisible)
 	end)
 end
 
-local function createVisual(root, assetName)
-	local asset = getWaveAsset(assetName)
+local function createVisual(root, assetName, options)
+	local asset = getWaveAsset(assetName, options)
 	if not asset then
 		return nil
 	end
@@ -454,10 +545,11 @@ local function createVisual(root, assetName)
 	visual.Parent = root
 	WaveHazardVisuals.ConfigureVisualRoot(visual)
 	rememberVisualState(visual)
+	visual:SetAttribute(PREPARED_VISUAL_ATTRIBUTE, true)
 	return visual
 end
 
-local function ensureVisual(root, assetName)
+local function ensureVisual(root, assetName, options)
 	if not root then
 		return nil
 	end
@@ -468,10 +560,55 @@ local function ensureVisual(root, assetName)
 		visual:SetAttribute(VISUAL_ASSET_NAME_ATTRIBUTE, assetName)
 		WaveHazardVisuals.ConfigureVisualRoot(visual)
 		rememberVisualState(visual)
+		visual:SetAttribute(PREPARED_VISUAL_ATTRIBUTE, true)
 		return visual
 	end
 
-	return createVisual(root, assetName)
+	return createVisual(root, assetName, options)
+end
+
+local function shouldRunVisualBoundsDiagnostic()
+	return RunService:IsStudio() and game:GetAttribute(VISUAL_BOUNDS_DIAGNOSTIC_ATTRIBUTE) == true
+end
+
+local function getAxisDriftRatio(a, b)
+	local first = math.max(MIN_PART_SIZE, tonumber(a) or 0)
+	local second = math.max(MIN_PART_SIZE, tonumber(b) or 0)
+	return math.max(first / second, second / first)
+end
+
+local function warnIfVisualBoundsDrift(root, visual, assetName)
+	if not shouldRunVisualBoundsDiagnostic() then
+		return
+	end
+
+	local targetCFrame, targetSize = getVisualTargetBox(root)
+	if not targetCFrame or not targetSize then
+		return
+	end
+
+	local visualSize = getBoundsSizeInFrame(visual, targetCFrame)
+	if not visualSize then
+		return
+	end
+
+	local driftRatio = math.max(
+		getAxisDriftRatio(visualSize.X, targetSize.X),
+		getAxisDriftRatio(visualSize.Y, targetSize.Y),
+		getAxisDriftRatio(visualSize.Z, targetSize.Z)
+	)
+	if driftRatio <= VISUAL_BOUNDS_DRIFT_WARN_RATIO then
+		return
+	end
+
+	warnOnce(
+		"visual_bounds_drift_" .. tostring(assetName),
+		"Prepared wave visual bounds differ from WaveHitbox target asset=%s visual=%s target=%s root=%s.",
+		tostring(assetName),
+		tostring(visualSize),
+		tostring(targetSize),
+		root:GetFullName()
+	)
 end
 
 local function findVisual(root, assetName)
@@ -509,13 +646,7 @@ local function getProxyHitboxBox(template)
 
 	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME)
 	if regularAsset then
-		local _, sourceSize
-		if regularAsset:IsA("BasePart") then
-			sourceSize = regularAsset.Size
-		else
-			_, sourceSize = regularAsset:GetBoundingBox()
-		end
-
+		local sourceSize = getWaveAssetSourceSize(regularAsset)
 		if sourceSize then
 			local scale = getWaveShapeScale(sourceSize, targetSize)
 			targetCFrame = targetCFrame * ASSET_TEMPLATE_ROTATION
@@ -530,12 +661,81 @@ local function getProxyHitboxBox(template)
 	return targetCFrame, targetSize
 end
 
+local function getSanitizedBaseWaveVisualScale(config)
+	if typeof(config) ~= "table" then
+		return nil, "missing_config"
+	end
+
+	local visualScale = tonumber(config.BaseVisualScale)
+	if not visualScale then
+		return nil, "missing_base_visual_scale"
+	end
+
+	if visualScale <= 0 then
+		return nil, "invalid_base_visual_scale"
+	end
+
+	return math.max(MIN_PART_SIZE, visualScale), nil
+end
+
+local function getConfiguredProxyHitboxBox(config)
+	local visualScale, reason = getSanitizedBaseWaveVisualScale(config)
+	if not visualScale then
+		return nil, nil, reason
+	end
+
+	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME, {
+		Context = "configured wave hitbox",
+		WarnIfMissing = true,
+	})
+	local sourceSize = getWaveAssetSourceSize(regularAsset)
+	if not sourceSize then
+		return nil, nil, "missing_regular_wave_bounds"
+	end
+
+	local pivotOffset = if typeof(config.PivotOffset) == "Vector3" then config.PivotOffset else Vector3.zero
+	local orientation = if typeof(config.Orientation) == "CFrame" then config.Orientation else ASSET_TEMPLATE_ROTATION
+	local targetCFrame = CFrame.new(pivotOffset) * orientation
+	local targetSize = Vector3.new(
+		clampSize(sourceSize.X * visualScale),
+		clampSize(sourceSize.Y * visualScale),
+		clampSize(sourceSize.Z * visualScale)
+	)
+
+	return targetCFrame, targetSize, nil
+end
+
+local function createGeneratedWaveHazard(name, targetCFrame, targetSize, worldPivot)
+	local model = Instance.new("Model")
+	model.Name = tostring(name or "Wave")
+	model:SetAttribute(USES_ASSET_VISUALS_ATTRIBUTE, true)
+	model:SetAttribute(CLIENT_VISUALS_ONLY_ATTRIBUTE, true)
+	model:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, REGULAR_WAVE_ASSET_NAME)
+
+	local hitbox = createProxyHitbox(targetCFrame, targetSize)
+	hitbox.Parent = model
+	model.WorldPivot = worldPivot or CFrame.new()
+	return model, true
+end
+
 function WaveHazardVisuals.GetRegularWaveAsset()
 	return getWaveAsset(REGULAR_WAVE_ASSET_NAME)
 end
 
 function WaveHazardVisuals.GetFrozenWaveAsset()
 	return getWaveAsset(FROZEN_WAVE_ASSET_NAME)
+end
+
+function WaveHazardVisuals.ValidateWaveAssets(context)
+	context = tostring(context or "unknown")
+	getWaveAsset(REGULAR_WAVE_ASSET_NAME, {
+		Context = context,
+		WarnIfMissing = true,
+	})
+	getWaveAsset(FROZEN_WAVE_ASSET_NAME, {
+		Context = context,
+		WarnIfMissing = true,
+	})
 end
 
 function WaveHazardVisuals.ComputeTimelineCFrame(
@@ -547,7 +747,9 @@ function WaveHazardVisuals.ComputeTimelineCFrame(
 	lateralDirection,
 	initialLateralOffset,
 	lateralVelocity,
-	maxDrift
+	maxDrift,
+	minLateralOffset,
+	maxLateralOffset
 )
 	if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
 		return nil, 0
@@ -561,13 +763,22 @@ function WaveHazardVisuals.ComputeTimelineCFrame(
 	local alpha = math.clamp((elapsed * moveSpeed) / travelDistance, 0, 1)
 	local currentCFrame = startCFrame:Lerp(endCFrame, alpha)
 
-	local driftLimit = math.max(0, tonumber(maxDrift) or 0)
 	local driftVelocity = tonumber(lateralVelocity) or 0
-	if driftLimit > 1e-4 and math.abs(driftVelocity) > 1e-4 and typeof(lateralDirection) == "Vector3" then
+	local hasLateralRange = typeof(minLateralOffset) == "number"
+		and typeof(maxLateralOffset) == "number"
+
+	local driftLimit = math.max(0, tonumber(maxDrift) or 0)
+	local shouldApplyLegacyDrift = driftLimit > 1e-4 and math.abs(driftVelocity) > 1e-4
+	if (hasLateralRange or shouldApplyLegacyDrift) and typeof(lateralDirection) == "Vector3" then
 		local lateralMagnitude = lateralDirection.Magnitude
 		if lateralMagnitude > 1e-4 then
 			local rawOffset = (tonumber(initialLateralOffset) or 0) + driftVelocity * elapsed
-			local lateralOffset = getBouncedLateralOffset(rawOffset, driftLimit)
+			local lateralOffset
+			if hasLateralRange then
+				lateralOffset = getBouncedLateralOffsetInRange(rawOffset, minLateralOffset, maxLateralOffset)
+			else
+				lateralOffset = getBouncedLateralOffset(rawOffset, driftLimit)
+			end
 			currentCFrame = translateCFrame(currentCFrame, lateralDirection.Unit * lateralOffset)
 		end
 	end
@@ -616,6 +827,64 @@ function WaveHazardVisuals.SetHitboxFrozen(root, isFrozen)
 	return configuredCount
 end
 
+function WaveHazardVisuals.PrepareVisual(root, assetName, options)
+	options = if typeof(options) == "table" then options else {}
+
+	local visual = ensureVisual(root, assetName, options)
+	if not visual then
+		return nil
+	end
+
+	if typeof(options.Visible) == "boolean" then
+		setVisualVisible(visual, options.Visible)
+	end
+
+	warnIfVisualBoundsDrift(root, visual, assetName)
+	return visual
+end
+
+function WaveHazardVisuals.PrepareVisuals(root, assetNames, options)
+	options = if typeof(options) == "table" then options else {}
+	local preparedVisuals = {}
+
+	if not root or typeof(assetNames) ~= "table" then
+		return false, preparedVisuals
+	end
+
+	local activeAssetName = options.ActiveAssetName
+	local shouldApplyVisibility = typeof(activeAssetName) == "string" and activeAssetName ~= ""
+	local activeVisual = nil
+	local allPrepared = true
+	local preparedCount = 0
+
+	for _, assetName in ipairs(assetNames) do
+		if typeof(assetName) == "string" and assetName ~= "" then
+			local visual = ensureVisual(root, assetName, options)
+			if visual then
+				preparedVisuals[assetName] = visual
+				preparedCount += 1
+				warnIfVisualBoundsDrift(root, visual, assetName)
+
+				if assetName == activeAssetName then
+					activeVisual = visual
+				end
+			else
+				allPrepared = false
+			end
+		end
+	end
+
+	if shouldApplyVisibility and activeVisual then
+		for assetName, visual in pairs(preparedVisuals) do
+			setVisualVisible(visual, assetName == activeAssetName)
+		end
+	end
+
+	local prepared = allPrepared and preparedCount > 0
+	root:SetAttribute(PREPARED_VISUALS_ATTRIBUTE, prepared)
+	return prepared, preparedVisuals
+end
+
 function WaveHazardVisuals.ApplyVisual(root, assetName)
 	if not root then
 		return false
@@ -639,18 +908,18 @@ function WaveHazardVisuals.ApplyVisual(root, assetName)
 end
 
 function WaveHazardVisuals.CreateHazardFromTemplate(template)
-	local model = Instance.new("Model")
-	model.Name = template.Name
-	model:SetAttribute(USES_ASSET_VISUALS_ATTRIBUTE, true)
-	model:SetAttribute(CLIENT_VISUALS_ONLY_ATTRIBUTE, true)
-	model:SetAttribute(ACTIVE_VISUAL_ASSET_ATTRIBUTE, REGULAR_WAVE_ASSET_NAME)
-
 	local targetCFrame, targetSize = getProxyHitboxBox(template)
+	return createGeneratedWaveHazard(template.Name, targetCFrame, targetSize, getPivot(template))
+end
 
-	local hitbox = createProxyHitbox(targetCFrame, targetSize)
-	hitbox.Parent = model
-	model.WorldPivot = getPivot(template)
-	return model, true
+function WaveHazardVisuals.CreateHazardFromConfig(config)
+	config = if typeof(config) == "table" then config else {}
+	local targetCFrame, targetSize, reason = getConfiguredProxyHitboxBox(config)
+	if not targetCFrame or not targetSize then
+		return nil, false, reason or "invalid_config"
+	end
+
+	return createGeneratedWaveHazard(config.Name, targetCFrame, targetSize, CFrame.new())
 end
 
 function WaveHazardVisuals.SetFrozen(root, isFrozen)

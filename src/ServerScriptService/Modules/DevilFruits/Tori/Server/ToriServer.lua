@@ -454,9 +454,13 @@ function ToriServer.PhoenixFlameShield(context)
 	local duration = clampPositiveNumber(abilityConfig.Duration, DEFAULT_PHOENIX_SHIELD_DURATION)
 	local shieldState = startEndCooldownState(context, PHOENIX_SHIELD_ABILITY, duration, tonumber(abilityConfig.Cooldown) or 0)
 	local serverStartTime = shieldState and shieldState.StartedAt or getSharedTimestamp()
+	local radius = resolvePhoenixShieldRadius(abilityConfig)
 
 	return {
-		Radius = resolvePhoenixShieldRadius(abilityConfig),
+		Radius = radius,
+		HitboxDebugMode = "FollowTargetRoot",
+		HitboxDebugRadius = radius,
+		HitboxVisualDuration = duration,
 		Duration = duration,
 		StartedAt = serverStartTime,
 		EndTime = serverStartTime + duration,

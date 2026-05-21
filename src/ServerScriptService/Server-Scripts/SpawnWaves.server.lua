@@ -15,6 +15,7 @@ end
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -46,14 +47,19 @@ local CONFIG = {
 	SweptKillEnabled = true,
 	SweptKillPadding = Vector3.zero,
 	SweptKillTeleportResetDistance = 512,
+	RuntimeWaveName = "WaveTemplate", -- Historical runtime name only; spawning no longer reads this asset.
+	-- Scales the canonical ReplicatedStorage.Assets.Hazards.Waves.Regular Wave bounds to gameplay size.
+	BaseWaveVisualScale = 35.98836032827221,
+	BaseWavePivotOffset = Vector3.zero,
+	BaseWaveOrientation = CFrame.Angles(0, math.rad(180), 0),
 	-- WaveWidthScale controls left-to-right wave size. Variant WidthScale still applies on top of this.
 	WaveWidthScale = 0.65,
 	-- WaveHeightScale controls vertical wave size.
 	WaveHeightScale = 1,
 	-- WaveThicknessScale controls front-to-back wave depth.
 	WaveThicknessScale = 1,
-	-- Keeps wave hitboxes/visuals away from side walls and late-added cave/VIP spaces.
-	WaveWallPadding = 60,
+	-- Tiny wall contact tolerance. Bounce limits use the actual WaveHitbox edge, not a gameplay safe strip.
+	WaveWallContactPadding = 2,
 	DiagnosticsInterval = 2,
 	DriftStrengthMultiplier = 1.35,              --DRIFT SPEED MANIPULATOR
 	DriftSpeedMinMultiplier = 1.35,
@@ -93,6 +99,7 @@ local traceStateKey = nil
 local activeHazardStates = {}
 local playerWaveSweepStates = {}
 local diagnosticsHazardsFolder = nil
+local warningKeys = {}
 local waveDiagnostics = {
 	KillRemoteCount = 0,
 	ServerSweepHitCount = 0,
@@ -115,6 +122,9 @@ local findSweptWaveHit = nil
 local applyConfirmedWaveHit = nil
 local isValidActiveHazardState = nil
 local publishWaveDiagnostics = nil
+
+StudioAssetResolver.ValidateRequiredAssets({ "Waves" }, "SpawnWaves")
+WaveHazardVisuals.ValidateWaveAssets("SpawnWaves")
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -140,6 +150,50 @@ local function hazardTrace(message, ...)
 	print(string.format("[HAZARD TRACE] " .. message, ...))
 end
 
+local function hazardWarnOnce(key, message, ...)
+	if warningKeys[key] then
+		return
+	end
+
+	warningKeys[key] = true
+	warn(string.format("[SpawnWaves] " .. message, ...))
+end
+
+local function validateWaveMeasurementConfig()
+	local baseWaveVisualScale = tonumber(CONFIG.BaseWaveVisualScale)
+	if not baseWaveVisualScale then
+		hazardWarnOnce(
+			"missing_wave_base_visual_scale",
+			"Missing BaseWaveVisualScale; configured wave hitbox creation will fall back to legacy WaveTemplate if available."
+		)
+		return
+	end
+
+	if baseWaveVisualScale <= 0 then
+		hazardWarnOnce(
+			"invalid_wave_base_visual_scale",
+			"Invalid BaseWaveVisualScale=%s; configured wave hitbox creation will fall back to legacy WaveTemplate if available.",
+			tostring(CONFIG.BaseWaveVisualScale)
+		)
+	end
+
+	if typeof(CONFIG.BaseWavePivotOffset) ~= "Vector3" then
+		hazardWarnOnce(
+			"invalid_wave_pivot_offset",
+			"BaseWavePivotOffset is not a Vector3; generated wave hitboxes will use Vector3.zero."
+		)
+	end
+
+	if typeof(CONFIG.BaseWaveOrientation) ~= "CFrame" then
+		hazardWarnOnce(
+			"invalid_wave_orientation",
+			"BaseWaveOrientation is not a CFrame; generated wave hitboxes will use the default Regular Wave orientation."
+		)
+	end
+end
+
+validateWaveMeasurementConfig()
+
 local function findChildRecursive(parent, childName)
 	if not parent then
 		return nil
@@ -153,24 +207,16 @@ local function findChildRecursive(parent, childName)
 	return parent:FindFirstChild(childName, true)
 end
 
-local function getMovedWavesFolder()
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local hazards = assets and assets:FindFirstChild("Hazards")
-	local waves = hazards and hazards:FindFirstChild("Waves")
+local function getResolvedWavesFolder()
+	local waves = StudioAssetResolver.ResolveAsset("Waves", {
+		Context = "SpawnWaves",
+		Required = true,
+	})
 	if waves and waves:IsA("Folder") then
 		return waves
 	end
 
 	return nil
-end
-
-local function getWavesFolder()
-	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
-	if wavesFolder and wavesFolder:IsA("Folder") then
-		return wavesFolder
-	end
-
-	return getMovedWavesFolder()
 end
 
 local function getOrCreateRemotesFolder()
@@ -375,6 +421,68 @@ local function getFrontExtentFromPivot(instance, pivotCFrame, forwardDirection)
 	return math.max(0, frontExtent)
 end
 
+local function getProjectionExtentsFromPivot(instance, pivotCFrame, direction)
+	if typeof(direction) ~= "Vector3" or direction.Magnitude <= 1e-4 then
+		return nil, nil
+	end
+
+	local directionUnit = direction.Unit
+	local sourcePivot = getPivot(instance)
+	local minProjection = math.huge
+	local maxProjection = -math.huge
+	local hasProjection = false
+
+	for _, part in ipairs(getHazardMeasureParts(instance)) do
+		if part.Parent then
+			local relativeCFrame = sourcePivot:ToObjectSpace(part.CFrame)
+			local partCFrame = pivotCFrame * relativeCFrame
+			local halfSize = part.Size * 0.5
+
+			for _, xSign in ipairs({ -1, 1 }) do
+				for _, ySign in ipairs({ -1, 1 }) do
+					for _, zSign in ipairs({ -1, 1 }) do
+						local cornerPosition = partCFrame:PointToWorldSpace(Vector3.new(
+							halfSize.X * xSign,
+							halfSize.Y * ySign,
+							halfSize.Z * zSign
+						))
+						local projection = (cornerPosition - pivotCFrame.Position):Dot(directionUnit)
+						minProjection = math.min(minProjection, projection)
+						maxProjection = math.max(maxProjection, projection)
+						hasProjection = true
+					end
+				end
+			end
+		end
+	end
+
+	if not hasProjection then
+		return nil, nil
+	end
+
+	return minProjection, maxProjection
+end
+
+local function getLateralOffsetRangeForPivot(
+	instance,
+	pivotCFrame,
+	lateralDirection,
+	minBoundaryProjection,
+	maxBoundaryProjection,
+	contactPadding
+)
+	local minRelativeProjection, maxRelativeProjection = getProjectionExtentsFromPivot(instance, pivotCFrame, lateralDirection)
+	if not minRelativeProjection or not maxRelativeProjection then
+		return nil, nil
+	end
+
+	local lateralUnit = lateralDirection.Unit
+	local pivotProjection = pivotCFrame.Position:Dot(lateralUnit)
+	local minOffset = minBoundaryProjection + contactPadding - pivotProjection - minRelativeProjection
+	local maxOffset = maxBoundaryProjection - contactPadding - pivotProjection - maxRelativeProjection
+	return minOffset, maxOffset
+end
+
 local function getHazardHitboxVolumes(hazardRoot, fallbackCFrame, fallbackSize)
 	local volumes = {}
 
@@ -568,10 +676,6 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 		return false
 	end
 
-	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
-		HoroServer.InterruptActiveProjection(player, "wave_touch")
-		return true
-	end
 	local isHazardProtected = HazardProtection.IsProtected(player, {
 		Position = hit and hit.HitPosition or rootPart.Position,
 		HitPosition = hit and hit.HitPosition or rootPart.Position,
@@ -580,6 +684,10 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 		Source = "SpawnWaves",
 	})
 	if isHazardProtected then
+		return true
+	end
+	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
+		HoroServer.InterruptActiveProjection(player, "wave_touch")
 		return true
 	end
 	if ToriServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then
@@ -695,7 +803,7 @@ local function translateCFrame(cframeValue, offset)
 end
 
 local function applyHazardAttributes(instance, variant)
-	instance.Name = "WaveTemplate"
+	instance.Name = tostring(CONFIG.RuntimeWaveName or "Wave")
 	instance:SetAttribute("HazardClass", CONFIG.HazardClass)
 	instance:SetAttribute("HazardType", "Wave")
 	instance:SetAttribute("Variant", variant.Name)
@@ -810,63 +918,128 @@ local function resolveHazardRefs()
 	return refs, waveFolder, hazardsFolder, refs.WaveStart, refs.WaveEnd, leftBound, rightBound
 end
 
-local function getWaveTemplate()
-	local wavesFolder = getWavesFolder()
+local function getLegacyWaveTemplate()
+	local wavesFolder = ReplicatedStorage:FindFirstChild("Waves")
 	if not wavesFolder then
-		hazardTrace("spawn skipped reason=missing_waves_folder checked=ReplicatedStorage.Waves,ReplicatedStorage.Assets.Hazards.Waves")
 		return nil
 	end
 
 	local template = findChildRecursive(wavesFolder, "WaveTemplate")
 	if not template then
-		for _, descendant in ipairs(wavesFolder:GetDescendants()) do
-			if descendant:IsA("Model") or descendant:IsA("BasePart") then
-				template = descendant
-				break
-			end
-		end
-	end
-
-	if not template then
-		hazardTrace("spawn skipped reason=missing_wave_template wavesFolder=%s", formatInstancePath(wavesFolder))
 		return nil
 	end
 
 	if not (template:IsA("Model") or template:IsA("BasePart")) then
-		hazardTrace("spawn skipped reason=invalid_wave_template class=%s", template.ClassName)
+		hazardWarnOnce(
+			"invalid_legacy_wave_template",
+			"Ignoring legacy ReplicatedStorage.Waves.WaveTemplate because class=%s is not a Model/BasePart.",
+			tostring(template.ClassName)
+		)
 		return nil
 	end
 
-	hazardTrace("using wave template path=%s", formatInstancePath(template))
 	return template
 end
 
--- Accepts the corridor direction and available sideways room for drifting hazards.
-local function createServerHazardController(hazardRoot, startCF, endCF, speed, lateralDirection, lateralDriftLimit, variant)
+local function getWaveMeasurementConfig()
+	return {
+		Name = CONFIG.RuntimeWaveName,
+		BaseVisualScale = CONFIG.BaseWaveVisualScale,
+		PivotOffset = CONFIG.BaseWavePivotOffset,
+		Orientation = CONFIG.BaseWaveOrientation,
+	}
+end
+
+local function createWaveHazard()
+	local resolvedWavesFolder = getResolvedWavesFolder()
+	if resolvedWavesFolder then
+		hazardTrace("using resolved wave assets folder=%s", formatInstancePath(resolvedWavesFolder))
+	end
+
+	local clone, _, reason = WaveHazardVisuals.CreateHazardFromConfig(getWaveMeasurementConfig())
+	if clone then
+		return clone, "config"
+	end
+
+	hazardWarnOnce(
+		"invalid_wave_measurement_config",
+		"Configured wave hitbox creation failed reason=%s baseWaveVisualScale=%s; checking legacy ReplicatedStorage.Waves.WaveTemplate fallback.",
+		tostring(reason),
+		tostring(CONFIG.BaseWaveVisualScale)
+	)
+
+	local legacyTemplate = getLegacyWaveTemplate()
+	if legacyTemplate then
+		hazardWarnOnce(
+			"legacy_wave_template_fallback",
+			"Using legacy ReplicatedStorage.Waves.WaveTemplate only as a temporary fallback. Configure BaseWaveVisualScale/BaseWavePivotOffset/BaseWaveOrientation to remove this fallback."
+		)
+		return WaveHazardVisuals.CreateHazardFromTemplate(legacyTemplate), "legacy_template"
+	end
+
+	hazardTrace("spawn skipped reason=missing_wave_measurement source=config_or_legacy reason=%s", tostring(reason))
+	return nil, "missing_measurement"
+end
+
+-- Accepts the corridor direction and hitbox-edge-safe lateral center range for drifting hazards.
+local function createServerHazardController(
+	hazardRoot,
+	startCF,
+	endCF,
+	speed,
+	lateralDirection,
+	lateralMinOffset,
+	lateralMaxOffset,
+	initialLateralOffset,
+	variant
+)
 	local distance = (startCF.Position - endCF.Position).Magnitude
 	local _, hazardSize = getBox(hazardRoot)
 	local driftStyle = rng:NextNumber() < 0.15 and "straight" or "drift"
-	local availableDrift = math.max(0, tonumber(lateralDriftLimit) or 0)
+	local minOffset = tonumber(lateralMinOffset) or 0
+	local maxOffset = tonumber(lateralMaxOffset) or minOffset
+	if maxOffset < minOffset then
+		minOffset, maxOffset = maxOffset, minOffset
+	end
+	local lateralRange = math.max(0, maxOffset - minOffset)
 	local variantDriftScale = math.clamp(tonumber(variant and variant.DriftScale) or 1, 0, 1)
-	local requestedMaxDrift = availableDrift
-		* math.max(1, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
-		* variantDriftScale
-	local maxDrift = math.min(availableDrift, requestedMaxDrift)
-	local initialLateralOffset = 0
+	local maxDrift = lateralRange * 0.5
+	local initialOffset = math.clamp(tonumber(initialLateralOffset) or 0, minOffset, maxOffset)
 	local lateralVelocity = 0
 
-	if driftStyle == "drift" and maxDrift > 1e-3 and distance > 1e-4 then
+	if driftStyle == "drift" and lateralRange > 1e-3 and distance > 1e-4 and variantDriftScale > 0 then
 		local travelTime = distance / math.max(speed, 1e-3)
 		local bounceCount = rng:NextInteger(3, 6)
-		local minLateralSpeed = ((maxDrift * 2) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
-		local maxLateralSpeed = ((maxDrift * 2 * bounceCount) / math.max(travelTime, 1e-3)) * math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
+		local driftStrength = math.max(0, tonumber(CONFIG.DriftStrengthMultiplier) or 1)
+		local driftSpeedScale = driftStrength * variantDriftScale
+		local minLateralSpeed = (lateralRange / math.max(travelTime, 1e-3))
+			* math.max(1, tonumber(CONFIG.DriftSpeedMinMultiplier) or 1)
+			* driftSpeedScale
+		local maxLateralSpeed = ((lateralRange * bounceCount) / math.max(travelTime, 1e-3))
+			* math.max(1, tonumber(CONFIG.DriftSpeedMaxMultiplier) or 1)
+			* driftSpeedScale
 
-		initialLateralOffset = rng:NextNumber(-maxDrift, maxDrift)
-		lateralVelocity = rng:NextNumber(minLateralSpeed, maxLateralSpeed)
-		if rng:NextInteger(0, 1) == 0 then
-			lateralVelocity = -lateralVelocity
+		if maxLateralSpeed > 1e-4 then
+			lateralVelocity = rng:NextNumber(math.min(minLateralSpeed, maxLateralSpeed), maxLateralSpeed)
+			if rng:NextInteger(0, 1) == 0 then
+				lateralVelocity = -lateralVelocity
+			end
 		end
 	end
+
+	local initialCF = WaveHazardVisuals.ComputeTimelineCFrame(
+		startCF,
+		endCF,
+		0,
+		speed,
+		distance,
+		lateralDirection,
+		initialOffset,
+		lateralVelocity,
+		maxDrift,
+		minOffset,
+		maxOffset
+	) or startCF
 
 	local controller = {
 		HazardRoot = hazardRoot,
@@ -875,8 +1048,8 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 		FreezeToken = 0,
 		Alpha = 0,
 		ActiveSeconds = 0,
-		CurrentCFrame = startCF,
-		Position = startCF.Position,
+		CurrentCFrame = initialCF,
+		Position = initialCF.Position,
 		VolumeSize = hazardSize,
 		Width = hazardSize.X,
 		StartCFrame = startCF,
@@ -884,9 +1057,11 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 		Distance = distance,
 		Speed = speed,
 		LateralDirection = lateralDirection,
-		InitialLateralOffset = initialLateralOffset,
+		InitialLateralOffset = initialOffset,
 		LateralVelocity = lateralVelocity,
 		MaxDrift = maxDrift,
+		LateralMinOffset = minOffset,
+		LateralMaxOffset = maxOffset,
 	}
 
 	hazardRoot:SetAttribute("WaveStartCFrame", startCF)
@@ -894,12 +1069,15 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 	hazardRoot:SetAttribute("WaveDistance", distance)
 	hazardRoot:SetAttribute("WaveServerSpeed", speed)
 	hazardRoot:SetAttribute("WaveLateralDirection", lateralDirection)
-	hazardRoot:SetAttribute("WaveInitialLateralOffset", initialLateralOffset)
+	hazardRoot:SetAttribute("WaveInitialLateralOffset", initialOffset)
 	hazardRoot:SetAttribute("WaveLateralVelocity", lateralVelocity)
 	hazardRoot:SetAttribute("WaveMaxDrift", maxDrift)
+	hazardRoot:SetAttribute("WaveLateralMinOffset", minOffset)
+	hazardRoot:SetAttribute("WaveLateralMaxOffset", maxOffset)
 	hazardRoot:SetAttribute("WaveDriftScale", variantDriftScale)
 	hazardRoot:SetAttribute("WaveMovementMode", "timeline_proxy")
 	hazardRoot:SetAttribute("WaveSpawnServerTime", Workspace:GetServerTimeNow())
+	setPivot(hazardRoot, initialCF)
 
 	function controller:SyncTimelineState()
 		if not self.HazardRoot.Parent then
@@ -1060,9 +1238,11 @@ local function createServerHazardController(hazardRoot, startCF, endCF, speed, l
 					speed,
 					distance,
 					lateralDirection,
-					initialLateralOffset,
+					initialOffset,
 					lateralVelocity,
-					maxDrift
+					maxDrift,
+					minOffset,
+					maxOffset
 				)
 
 				controller.Alpha = alpha
@@ -1208,11 +1388,6 @@ local function spawnSharedHazard(spawnDelay)
 	end
 	diagnosticsHazardsFolder = hazardsFolder
 
-	local template = getWaveTemplate()
-	if not template then
-		return false, "missing_template"
-	end
-
 	local maxActiveHazards = math.max(1, math.floor(tonumber(CONFIG.MaxActiveHazards) or 20))
 	local activeHazardCount = cleanupActiveHazardStates()
 	if activeHazardCount >= maxActiveHazards then
@@ -1225,12 +1400,19 @@ local function spawnSharedHazard(spawnDelay)
 		return false, "max_active_hazards"
 	end
 
+	local clone, waveMeasurementSource = createWaveHazard()
+	if not clone then
+		return false, "missing_measurement"
+	end
+
 	local variant = chooseVariant()
-	local clone = WaveHazardVisuals.CreateHazardFromTemplate(template)
 	scaleHazardWidth(clone, variant.WidthScale)
 	scaleHazardDimensions(clone, CONFIG.WaveWidthScale, CONFIG.WaveHeightScale, CONFIG.WaveThicknessScale)
 	anchorHazard(clone)
 	applyHazardAttributes(clone, variant)
+	clone:SetAttribute("WaveMeasurementSource", waveMeasurementSource)
+	clone:SetAttribute("WaveBaseVisualAssetName", "Regular Wave")
+	clone:SetAttribute("WaveBaseVisualScale", CONFIG.BaseWaveVisualScale)
 
 	local startCF = computePivotOnTop(clone, startPart)
 	local endCF = computePivotOnTop(clone, endPart)
@@ -1251,11 +1433,11 @@ local function spawnSharedHazard(spawnDelay)
 	end
 
 	local lateralDirection = corridorVector.Unit
-	local wallPadding = math.max(0, tonumber(CONFIG.WaveWallPadding) or 0)
-	local paddedCorridorWidth = math.max(0, corridorWidth - (wallPadding * 2))
+	local contactPadding = math.max(0, tonumber(CONFIG.WaveWallContactPadding) or 0)
+	local availableCorridorWidth = math.max(0, corridorWidth - (contactPadding * 2))
 	local corridorWidthScale = 1
-	if paddedCorridorWidth > 1e-4 and waveWidth > paddedCorridorWidth then
-		corridorWidthScale = math.max(0.05, paddedCorridorWidth / waveWidth)
+	if availableCorridorWidth > 1e-4 and waveWidth > availableCorridorWidth then
+		corridorWidthScale = math.max(0.05, availableCorridorWidth / waveWidth)
 		scaleHazardWidth(clone, corridorWidthScale)
 		clone:SetAttribute("WaveCorridorWidthScale", corridorWidthScale)
 		startCF = computePivotOnTop(clone, startPart)
@@ -1264,25 +1446,20 @@ local function spawnSharedHazard(spawnDelay)
 		waveWidth = boxSize.X
 	end
 
-	local safeHalfOffset = math.max(paddedCorridorWidth - waveWidth, 0) * 0.5
-	local chosenOffset = 0
-	if safeHalfOffset > 1e-4 then
-		chosenOffset = rng:NextNumber(-safeHalfOffset, safeHalfOffset)
-	elseif waveWidth > paddedCorridorWidth then
+	if waveWidth > availableCorridorWidth and availableCorridorWidth <= 1e-4 then
 		hazardTrace(
-			"offset clamped reason=wave_wider_than_padded_corridor variant=%s waveWidth=%.2f corridorWidth=%.2f wallPadding=%.2f paddedCorridorWidth=%.2f corridorWidthScale=%.3f",
+			"spawn skipped reason=invalid_lateral_width variant=%s waveWidth=%.2f corridorWidth=%.2f contactPadding=%.2f availableCorridorWidth=%.2f corridorWidthScale=%.3f",
 			tostring(variant.Name),
 			waveWidth,
 			corridorWidth,
-			wallPadding,
-			paddedCorridorWidth,
+			contactPadding,
+			availableCorridorWidth,
 			corridorWidthScale
 		)
+		clone:Destroy()
+		return false, "invalid_lateral_width"
 	end
 
-	local lateralOffset = lateralDirection * chosenOffset
-	startCF = translateCFrame(startCF, lateralOffset)
-	endCF = translateCFrame(endCF, lateralOffset)
 	local travelDelta = endCF.Position - startCF.Position
 	local forwardDirection = travelDelta.Magnitude > 1e-4 and travelDelta.Unit or startPart.CFrame.LookVector
 	local endFrontExtent = getFrontExtentFromPivot(clone, endCF, forwardDirection)
@@ -1290,8 +1467,78 @@ local function spawnSharedHazard(spawnDelay)
 		endCF = translateCFrame(endCF, -forwardDirection * endFrontExtent)
 		travelDelta = endCF.Position - startCF.Position
 	end
+
+	local leftProjection = leftBound.Position:Dot(lateralDirection)
+	local rightProjection = rightBound.Position:Dot(lateralDirection)
+	local minBoundaryProjection = math.min(leftProjection, rightProjection)
+	local maxBoundaryProjection = math.max(leftProjection, rightProjection)
+	local startMinOffset, startMaxOffset = getLateralOffsetRangeForPivot(
+		clone,
+		startCF,
+		lateralDirection,
+		minBoundaryProjection,
+		maxBoundaryProjection,
+		contactPadding
+	)
+	local endMinOffset, endMaxOffset = getLateralOffsetRangeForPivot(
+		clone,
+		endCF,
+		lateralDirection,
+		minBoundaryProjection,
+		maxBoundaryProjection,
+		contactPadding
+	)
+
+	if not (startMinOffset and startMaxOffset and endMinOffset and endMaxOffset) then
+		hazardTrace(
+			"spawn skipped reason=missing_lateral_extents variant=%s waveWidth=%.2f corridorWidth=%.2f contactPadding=%.2f",
+			tostring(variant.Name),
+			waveWidth,
+			corridorWidth,
+			contactPadding
+		)
+		clone:Destroy()
+		return false, "missing_lateral_extents"
+	end
+
+	local minLateralOffset = math.max(startMinOffset, endMinOffset)
+	local maxLateralOffset = math.min(startMaxOffset, endMaxOffset)
+	if maxLateralOffset < minLateralOffset then
+		hazardTrace(
+			"spawn skipped reason=invalid_lateral_range variant=%s waveWidth=%.2f corridorWidth=%.2f contactPadding=%.2f minLateralOffset=%.2f maxLateralOffset=%.2f",
+			tostring(variant.Name),
+			waveWidth,
+			corridorWidth,
+			contactPadding,
+			minLateralOffset,
+			maxLateralOffset
+		)
+		clone:Destroy()
+		return false, "invalid_lateral_range"
+	end
+
+	local chosenOffset = minLateralOffset
+	if maxLateralOffset - minLateralOffset > 1e-4 then
+		chosenOffset = rng:NextNumber(minLateralOffset, maxLateralOffset)
+	end
+
+	local distance = math.max((endCF.Position - startCF.Position).Magnitude, 1e-4)
+	local initialCF = WaveHazardVisuals.ComputeTimelineCFrame(
+		startCF,
+		endCF,
+		0,
+		variant.Speed,
+		distance,
+		lateralDirection,
+		chosenOffset,
+		0,
+		(maxLateralOffset - minLateralOffset) * 0.5,
+		minLateralOffset,
+		maxLateralOffset
+	) or translateCFrame(startCF, lateralDirection * chosenOffset)
+
 	local nearestBlockingDistance, minimumForwardSpacing = findNearestBlockingHazardDistance(
-		startCF.Position,
+		initialCF.Position,
 		waveWidth,
 		forwardDirection,
 		lateralDirection
@@ -1306,19 +1553,20 @@ local function spawnSharedHazard(spawnDelay)
 			nearestBlockingDistance,
 			minimumForwardSpacing,
 			tonumber(spawnDelay) or 0,
-			formatVector3(startCF.Position)
+			formatVector3(initialCF.Position)
 		)
 		clone:Destroy()
 		return false, "spacing"
 	end
 
-	setPivot(clone, startCF)
+	setPivot(clone, initialCF)
 	clone.Parent = hazardsFolder
 	publishWaveDiagnostics(hazardsFolder)
 
 	hazardTrace(
-		"spawned waveFolder=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f wallPadding=%.2f paddedCorridorWidth=%.2f corridorWidthScale=%.3f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s finalEndPosition=%s hazard=%s",
+		"spawned waveFolder=%s measurementSource=%s variant=%s speed=%.2f activeHazardCount=%s maxActiveHazards=%s spawnDelay=%.2f waveWidth=%.2f leftBoundPos=%s rightBoundPos=%s corridorWidth=%.2f contactPadding=%.2f availableCorridorWidth=%.2f corridorWidthScale=%.3f minLateralOffset=%.2f maxLateralOffset=%.2f chosenOffset=%.2f endFrontExtent=%.2f finalSpawnPosition=%s centerlineEndPosition=%s hazard=%s",
 		formatInstancePath(waveFolder),
+		tostring(waveMeasurementSource),
 		tostring(variant.Name),
 		tonumber(variant.Speed) or 0,
 		tostring(activeHazardCount),
@@ -1328,18 +1576,34 @@ local function spawnSharedHazard(spawnDelay)
 		formatVector3(leftBound.Position),
 		formatVector3(rightBound.Position),
 		corridorWidth,
-		wallPadding,
-		paddedCorridorWidth,
+		contactPadding,
+		availableCorridorWidth,
 		corridorWidthScale,
+		minLateralOffset,
+		maxLateralOffset,
 		chosenOffset,
 		endFrontExtent,
-		formatVector3(startCF.Position),
+		formatVector3(initialCF.Position),
 		formatVector3(endCF.Position),
 		formatInstancePath(clone)
 	)
 
-	local lateralDriftLimit = math.max(0, safeHalfOffset - math.abs(chosenOffset))
-	createServerHazardController(clone, startCF, endCF, variant.Speed, lateralDirection, lateralDriftLimit, variant)
+	clone:SetAttribute("WaveWallContactPadding", contactPadding)
+	clone:SetAttribute("WaveLateralMinOffset", minLateralOffset)
+	clone:SetAttribute("WaveLateralMaxOffset", maxLateralOffset)
+	clone:SetAttribute("WaveLateralStartOffset", chosenOffset)
+	clone:SetAttribute("WaveBoundaryMode", "hitbox_edge_contact")
+	createServerHazardController(
+		clone,
+		startCF,
+		endCF,
+		variant.Speed,
+		lateralDirection,
+		minLateralOffset,
+		maxLateralOffset,
+		chosenOffset,
+		variant
+	)
 	publishWaveDiagnostics(hazardsFolder)
 	return true, "spawned"
 end

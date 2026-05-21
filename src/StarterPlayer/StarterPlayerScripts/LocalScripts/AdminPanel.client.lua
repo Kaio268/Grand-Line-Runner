@@ -285,15 +285,30 @@ local COMMANDS = {
 		id = "ability_hitboxes",
 		category = "Devil Fruits",
 		marker = "HB",
-		name = "Ability Hitboxes",
+		name = "Hitboxes",
 		syntax = "/hitbox on|off",
-		description = "Toggle local client-side hitbox visuals for ability effects.",
+		description = "Toggle local client-side hitbox visuals for ability effects and hazards.",
 		example = "/hitbox on",
 		inputs = {
 			{ key = "state", label = "State", placeholder = "on or off", default = "on" },
 		},
 		build = function(values)
 			return "/hitbox " .. inputValue(values, "state", "on")
+		end,
+	},
+	{
+		id = "admin_invincible",
+		category = "Access",
+		marker = "IV",
+		name = "Invincible",
+		syntax = "/invincible on|off|toggle",
+		description = "Toggle admin-only immunity to hazards and disruptive hit effects.",
+		example = "/invincible on",
+		inputs = {
+			{ key = "state", label = "State", placeholder = "on, off, or toggle", default = "on" },
+		},
+		build = function(values)
+			return "/invincible " .. inputValue(values, "state", "on")
 		end,
 	},
 	{

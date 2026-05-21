@@ -56,6 +56,7 @@ local function snapshot(host, iconSource, palette)
 		iconRotation = iconSource and tonumber(iconSource.Rotation) or 0,
 		iconScale = iconScale and tonumber(iconScale.Scale) or 1,
 		iconImageTransparency = iconSource and tonumber(iconSource.ImageTransparency) or 0,
+		speedDebuffActive = host:GetAttribute(HudStatsTheme.SpeedDebuffAttribute) == true,
 	}
 end
 
@@ -189,10 +190,10 @@ local function HudStatCounter(props)
 		return nil
 	end
 
-	local palette = HudStatsTheme.getPalette(props.kind)
+	local basePalette = HudStatsTheme.getPalette(props.kind)
 	local iconSource = props.iconSource
 	local state, setState = React.useState(function()
-		return snapshot(host, iconSource, palette)
+		return snapshot(host, iconSource, basePalette)
 	end)
 
 	React.useEffect(function()
@@ -211,7 +212,7 @@ local function HudStatCounter(props)
 				return
 			end
 
-			setState(snapshot(host, iconSource, palette))
+			setState(snapshot(host, iconSource, basePalette))
 		end
 
 		connectProperty(connections, host, "Text", refresh)
@@ -228,6 +229,7 @@ local function HudStatCounter(props)
 		connectProperty(connections, iconSource, "ImageTransparency", refresh)
 		connectProperty(connections, iconSource, "Rotation", refresh)
 		connectProperty(connections, iconScale, "Scale", refresh)
+		connections[#connections + 1] = host:GetAttributeChangedSignal(HudStatsTheme.SpeedDebuffAttribute):Connect(refresh)
 
 		return function()
 			destroyed = true
@@ -241,6 +243,7 @@ local function HudStatCounter(props)
 		return nil
 	end
 
+	local palette = HudStatsTheme.getPalette(props.kind, state)
 	local fallbackLabel = tostring(props.sourceLabel or props.name or "")
 	local valueText, labelText = extractDisplayParts(state.text, fallbackLabel)
 	valueText = simplifyValueText(props.kind, valueText)
