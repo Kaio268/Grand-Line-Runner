@@ -15,7 +15,6 @@ local TEXT = Color3.fromRGB(242, 242, 238)
 local GOLD = Color3.fromRGB(242, 209, 107)
 local MUTED = Color3.fromRGB(194, 203, 216)
 local CYAN = Color3.fromRGB(176, 220, 255)
-local GREEN = Color3.fromRGB(165, 248, 199)
 local SHADOW = Color3.fromRGB(0, 0, 0)
 
 local function formatBeli(value)
@@ -49,17 +48,6 @@ end
 local function getStatusText(entry)
 	if entry.horoActive == true and tonumber(entry.horoRemaining) ~= nil then
 		return "Ghost Projection " .. formatRemaining(entry.horoRemaining), CYAN
-	end
-
-	local activeBuffs = {}
-	if tonumber(entry.beliBoostRemaining) and entry.beliBoostRemaining > 0 then
-		activeBuffs[#activeBuffs + 1] = "2x Beli " .. formatRemaining(entry.beliBoostRemaining)
-	end
-	if tonumber(entry.speedBoostRemaining) and entry.speedBoostRemaining > 0 then
-		activeBuffs[#activeBuffs + 1] = "x1.5 Speed " .. formatRemaining(entry.speedBoostRemaining)
-	end
-	if #activeBuffs > 0 then
-		return table.concat(activeBuffs, "  |  "), GREEN
 	end
 
 	return string.format("Rebirths %d", math.max(0, math.floor(tonumber(entry.rebirths) or 0))), MUTED

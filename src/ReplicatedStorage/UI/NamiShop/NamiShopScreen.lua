@@ -196,7 +196,7 @@ local function NamiShopScreen(props)
 			BackgroundTransparency = 0.25,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(12, 10),
-			Size = UDim2.new(1, -24, 0, 54),
+			Size = UDim2.new(1, -24, 0, 48),
 			ZIndex = 5,
 		}, {
 			Corner = e("UICorner", {
@@ -231,7 +231,7 @@ local function NamiShopScreen(props)
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBold,
 				Position = UDim2.new(1, -8, 0.5, 0),
-				Size = UDim2.fromOffset(34, 34),
+				Size = UDim2.fromOffset(32, 32),
 				Text = "X",
 				TextColor3 = Color3.new(1, 1, 1),
 				TextScaled = true,
@@ -255,8 +255,8 @@ local function NamiShopScreen(props)
 			BackgroundColor3 = THEME.SectionBackground,
 			BackgroundTransparency = 0.25,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(18, 80),
-			Size = UDim2.new(1, -36, 0, 108),
+			Position = UDim2.fromOffset(18, 70),
+			Size = UDim2.new(1, -36, 0, 100),
 			ZIndex = 5,
 		}, {
 			Corner = e("UICorner", {
@@ -269,10 +269,10 @@ local function NamiShopScreen(props)
 				Thickness = 1.5,
 			}),
 			Padding = e("UIPadding", {
-				PaddingBottom = UDim.new(0, 10),
+				PaddingBottom = UDim.new(0, 8),
 				PaddingLeft = UDim.new(0, 12),
 				PaddingRight = UDim.new(0, 12),
-				PaddingTop = UDim.new(0, 10),
+				PaddingTop = UDim.new(0, 8),
 			}),
 			Layout = e("UIListLayout", {
 				Padding = UDim.new(0, 4),
@@ -299,8 +299,8 @@ local function NamiShopScreen(props)
 		Actions = e("Frame", {
 			BackgroundTransparency = 1,
 			ClipsDescendants = true,
-			Position = UDim2.fromOffset(18, 202),
-			Size = UDim2.new(1, -36, 0, 188),
+			Position = UDim2.fromOffset(18, 182),
+			Size = UDim2.new(1, -36, 0, 112),
 			ZIndex = 5,
 		}, {
 			Layout = e("UIListLayout", {
@@ -332,16 +332,6 @@ local function NamiShopScreen(props)
 				onMouseEnter = makeActionHoverHandler("SellEquipped"),
 				onMouseLeave = makeActionHoverHandler(nil),
 				text = "Sell This Item",
-			}),
-			CheckValue = e(actionButton, {
-				color3 = THEME.CheckValue,
-				hovered = hoveredAction == "CheckValue",
-				hoverColor3 = THEME.CheckValueHover,
-				layoutOrder = 3,
-				onActivated = props.onCheckValue,
-				onMouseEnter = makeActionHoverHandler("CheckValue"),
-				onMouseLeave = makeActionHoverHandler(nil),
-				text = "Check This Item's Value",
 			}),
 		}),
 		Status = e("Frame", {

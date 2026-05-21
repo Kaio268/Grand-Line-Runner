@@ -19,6 +19,10 @@ local NamiShopScreen = require(UiFolder:WaitForChild("NamiShop"):WaitForChild("N
 local LegacyCrewConfig = CrewCatalog.GetLegacyConfig()
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = remotes:WaitForChild("SellItemEvent")
+local InventorySnapshotRequest = ReplicatedStorage:WaitForChild("CrewMemberInventorySnapshotRequest", 15)
+if InventorySnapshotRequest and not InventorySnapshotRequest:IsA("RemoteFunction") then
+	InventorySnapshotRequest = nil
+end
 local SellDialogDisplayNameRequest = remotes:FindFirstChild("CrewMemberSellDialogDisplayNameRequest")
 if SellDialogDisplayNameRequest and not SellDialogDisplayNameRequest:IsA("RemoteFunction") then
 	SellDialogDisplayNameRequest = nil
@@ -36,9 +40,9 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	hostName = "ReactNamiShopHost",
 	backdropName = "ReactNamiShopBackdrop",
 	modalStateKey = "NamiShopModal",
-	minSize = Vector2.new(430, 440),
-	maxSize = Vector2.new(620, 560),
-	frameSize = UDim2.fromScale(0.42, 0.52),
+	minSize = Vector2.new(430, 360),
+	maxSize = Vector2.new(620, 430),
+	frameSize = UDim2.fromScale(0.42, 0.42),
 	createFrameIfMissing = true,
 	standalone = true,
 })
@@ -51,6 +55,11 @@ local characterConnections = {}
 local statusText = "Choose what you want to do."
 local statusColor3 = nil
 local scheduleRender
+local requestInventorySnapshot
+local cachedCrewSnapshotEntries = nil
+local snapshotRequestInFlight = false
+local lastSnapshotRequestAt = 0
+local SNAPSHOT_REFRESH_SECONDS = 0.75
 
 local unregisterModal = ReactModalRegistry.Register("NamiShop", {
 	toggle = function()
@@ -63,6 +72,7 @@ local unregisterModal = ReactModalRegistry.Register("NamiShop", {
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
 		end
+		requestInventorySnapshot(true)
 		if scheduleRender then
 			scheduleRender()
 		end
@@ -164,6 +174,20 @@ local function getClientInventoryFolder()
 end
 
 local function getTotalInventorySellValue()
+	if typeof(cachedCrewSnapshotEntries) == "table" then
+		local total = 0
+		for _, entry in ipairs(cachedCrewSnapshotEntries) do
+			if typeof(entry) == "table" then
+				local name = tostring(entry.CrewMemberId or entry.Name or entry.name or "")
+				local quantity = math.max(0, math.floor(tonumber(entry.Quantity or entry.quantity or entry.Qty or 0) or 0))
+				if name ~= "" and quantity > 0 then
+					total += (getSellPrice(name) or 0) * quantity
+				end
+			end
+		end
+		return total
+	end
+
 	local inv = getClientInventoryFolder()
 	if not inv then
 		return 0
@@ -184,12 +208,41 @@ local function getTotalInventorySellValue()
 	return total
 end
 
+requestInventorySnapshot = function(force)
+	if not InventorySnapshotRequest or snapshotRequestInFlight then
+		return
+	end
+
+	local now = os.clock()
+	if force ~= true and now - lastSnapshotRequestAt < SNAPSHOT_REFRESH_SECONDS then
+		return
+	end
+
+	lastSnapshotRequestAt = now
+	snapshotRequestInFlight = true
+	task.spawn(function()
+		local ok, snapshot = pcall(function()
+			return InventorySnapshotRequest:InvokeServer()
+		end)
+		snapshotRequestInFlight = false
+
+		if ok and typeof(snapshot) == "table" and snapshot.Ready ~= false and typeof(snapshot.Crew) == "table" then
+			cachedCrewSnapshotEntries = snapshot.Crew
+			if scheduleRender then
+				scheduleRender()
+	end
+end
+	end)
+end
+
 local function setStatus(text, color)
 	statusText = text
 	statusColor3 = color
 end
 
 local function buildViewModel()
+	requestInventorySnapshot(false)
+
 	local tool = getEquippedTool()
 	local toolName = tool and cleanName(tool.Name) or nil
 	local equippedPrice = toolName and getSellPrice(toolName) or nil
@@ -215,30 +268,6 @@ local function render()
 		equippedValueText = viewModel.equippedValueText,
 		hasEquippedValue = viewModel.hasEquippedValue,
 		inventoryValueText = viewModel.inventoryValueText,
-		onCheckValue = function()
-			local tool = getEquippedTool()
-			if not tool then
-				setStatus("You do not have any item equipped.", Color3.fromRGB(239, 199, 109))
-				task.defer(render)
-				return
-			end
-
-			local name = cleanName(tool.Name)
-			local price = getSellPrice(name)
-			if price and price > 0 then
-				setStatus(
-					("%s can be sold for %s%s."):format(
-						getSellDialogDisplayName(name),
-						moneyStr(price),
-						CurrencyUtil.getCompactSuffix()
-					),
-					Color3.fromRGB(132, 220, 158)
-				)
-			else
-				setStatus("This item cannot be sold.", Color3.fromRGB(239, 199, 109))
-			end
-			task.defer(render)
-		end,
 		onClose = function()
 			ReactModalRegistry.Close("NamiShop")
 		end,
@@ -259,6 +288,7 @@ local function render()
 			end
 
 			SellEvent:FireServer("SINGLE", tool.Name)
+			cachedCrewSnapshotEntries = nil
 			setStatus(
 				("%s sold for %s%s."):format(
 					getSellDialogDisplayName(name),
@@ -267,15 +297,22 @@ local function render()
 				),
 				Color3.fromRGB(132, 220, 158)
 			)
+			task.delay(0.25, function()
+				requestInventorySnapshot(true)
+			end)
 			task.defer(render)
 		end,
 		onSellInventory = function()
 			local total = getTotalInventorySellValue()
 			SellEvent:FireServer("ALL")
+			cachedCrewSnapshotEntries = nil
 			setStatus(
 				("Inventory sold for %s%s."):format(moneyStr(total), CurrencyUtil.getCompactSuffix()),
 				Color3.fromRGB(132, 220, 158)
 			)
+			task.delay(0.25, function()
+				requestInventorySnapshot(true)
+			end)
 			task.defer(render)
 		end,
 		statusColor3 = statusColor3,
