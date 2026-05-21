@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("WaveClientDebugTrace") == true
 local seenWaveLogKeys = {}
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
@@ -97,9 +98,11 @@ local function waveTry(context, callback)
 end
 
 local function getMovedWavesFolder()
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local hazards = assets and assets:FindFirstChild("Hazards")
-	local waves = hazards and hazards:FindFirstChild("Waves")
+	local waves = StudioAssetResolver.ResolveAsset("Waves", {
+		Context = "WaveClient",
+		WarnIfMissing = false,
+		CacheMissing = false,
+	})
 	if waves and waves:IsA("Folder") then
 		return waves
 	end
@@ -118,9 +121,11 @@ local function resolveWavesFolder()
 		return wavesFolder
 	end
 
-	local assets = ReplicatedStorage:WaitForChild("Assets", 15)
-	local hazards = assets and assets:WaitForChild("Hazards", 15)
-	wavesFolder = hazards and hazards:WaitForChild("Waves", 15)
+	wavesFolder = StudioAssetResolver.WaitForAsset("Waves", 15, {
+		Context = "WaveClient",
+		WarnIfMissing = false,
+		CacheMissing = false,
+	})
 	if wavesFolder and wavesFolder:IsA("Folder") then
 		return wavesFolder
 	end
@@ -159,7 +164,7 @@ local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 waveTrace("startup awaiting waves folder")
 local WavesFolder = resolveWavesFolder()
 if not WavesFolder then
-	waveWarn("startup waves folder missing checked=ReplicatedStorage.Waves,ReplicatedStorage.Assets.Hazards.Waves")
+	waveWarn("startup waves folder missing checked=StudioAssetResolver.Waves")
 end
 waveTrace("startup resolvedWavesFolder path=%s", formatInstancePath(WavesFolder))
 

@@ -4,7 +4,9 @@ local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
-local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
 		:WaitForChild("DevilFruits")
@@ -75,6 +77,11 @@ end
 
 local activeLoopsByPlayer = {}
 local cachedCannonVfxRoot = false
+
+StudioAssetResolver.ResolveAsset("CannonVfx", {
+	Context = "CannonBarrage",
+	WarnIfMissing = true,
+})
 
 local function getCharacterParts(player)
 	local character = player.Character
@@ -306,20 +313,11 @@ local function getCannonVfxRoot()
 		return cachedCannonVfxRoot
 	end
 
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local directFolder = assets and assets:FindFirstChild("cannonVFX")
-	local directAsset = directFolder
-		and (directFolder:FindFirstChild("canonballVFX") or directFolder:FindFirstChild("canonballVFX (1)"))
-	if directAsset then
-		cachedCannonVfxRoot = directAsset
-		return directAsset
-	end
-
-	local vfxFolder = assets and assets:FindFirstChild("VFX")
-	local cannonFolder = vfxFolder and vfxFolder:FindFirstChild("canonball_vfx")
-	local cannonAsset = cannonFolder and cannonFolder:FindFirstChild("canonballVFX")
-	cachedCannonVfxRoot = cannonAsset
-	return cannonAsset
+	cachedCannonVfxRoot = StudioAssetResolver.ResolveAsset("CannonVfx", {
+		Context = "CannonBarrage",
+		WarnIfMissing = false,
+	})
+	return cachedCannonVfxRoot
 end
 
 local function findDescendantByLowerName(root, lowerName)

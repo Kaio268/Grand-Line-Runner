@@ -1,10 +1,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local StudioAssetResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("StudioAssetResolver"))
+
 local WaveHazardVisuals = {}
 
-local ASSETS_FOLDER_NAME = "Assets"
-local HAZARDS_FOLDER_NAME = "Hazards"
-local WAVES_FOLDER_NAME = "Waves"
 local REGULAR_WAVE_ASSET_NAME = "Regular Wave"
 local FROZEN_WAVE_ASSET_NAME = "Frozen Wave"
 local HITBOX_NAME = "WaveHitbox"
@@ -18,14 +17,7 @@ local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
 local ORIGINAL_ENABLED_ATTRIBUTE = "WaveVisualOriginalEnabled"
 local MIN_PART_SIZE = 0.001
 local ASSET_TEMPLATE_ROTATION = CFrame.Angles(0, math.rad(180), 0)
-
-local function getChild(parent, name)
-	if not parent then
-		return nil
-	end
-
-	return parent:FindFirstChild(name)
-end
+local waveAssetCache = {}
 
 local function findFirstChildRecursive(parent, name)
 	if not parent then
@@ -41,9 +33,10 @@ local function findFirstChildRecursive(parent, name)
 end
 
 local function getWaveAssetsFolder()
-	local assetsFolder = getChild(ReplicatedStorage, ASSETS_FOLDER_NAME)
-	local hazardsFolder = getChild(assetsFolder, HAZARDS_FOLDER_NAME)
-	local wavesFolder = getChild(hazardsFolder, WAVES_FOLDER_NAME)
+	local wavesFolder = StudioAssetResolver.ResolveAsset("Waves", {
+		Context = "WaveHazardVisuals",
+		Required = true,
+	})
 	if wavesFolder and wavesFolder:IsA("Folder") then
 		return wavesFolder
 	end
@@ -52,9 +45,17 @@ local function getWaveAssetsFolder()
 end
 
 local function getWaveAsset(assetName)
+	local cachedAsset = waveAssetCache[assetName]
+	if cachedAsset and cachedAsset.Parent then
+		return cachedAsset
+	elseif cachedAsset then
+		waveAssetCache[assetName] = nil
+	end
+
 	local wavesFolder = getWaveAssetsFolder()
 	local asset = findFirstChildRecursive(wavesFolder, assetName)
 	if asset and (asset:IsA("Model") or asset:IsA("BasePart")) then
+		waveAssetCache[assetName] = asset
 		return asset
 	end
 

@@ -2,12 +2,12 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
-local ServerStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local HazardProtection = require(
@@ -68,7 +68,6 @@ local CONFIG = {
 	KnockdownDuration = 0.8,
 	HazardClass = "minor",
 	HazardType = "deck_spikes",
-	SpikeTrapFolderName = "Spike Traps",
 	UseSpikeTrapTemplates = true,
 	ReverseBiomeTemplates = true,
 	IgnoreNoDisastersTimerInStudio = true,
@@ -77,6 +76,8 @@ local CONFIG = {
 if not CONFIG.Enabled then
 	return
 end
+
+StudioAssetResolver.ValidateRequiredAssets({ "SpikeTraps" }, "DeckSpikes")
 
 local SPIKE_TEMPLATE_NAMES_BY_AREA = {
 	["foosha village"] = "(FOOSHA) WOODEN SPIKE TRAP",
@@ -104,16 +105,7 @@ local SPIKE_TEMPLATE_TOKENS_BY_AREA = {
 
 local rng = Random.new()
 local activeControllers = {}
-local warnedMessages = {}
-
-local function warnOnce(key, message, ...)
-	if warnedMessages[key] then
-		return
-	end
-
-	warnedMessages[key] = true
-	warn(string.format("[DECK SPIKES] " .. message, ...))
-end
+local templateCacheByArea = {}
 
 local function getNoDisastersTimer()
 	local timer = Workspace:FindFirstChild("NoDisastersTimer")
@@ -355,24 +347,10 @@ local function getAreaNameForBiome(biomeIndex)
 end
 
 local function findSpikeTrapFolder()
-	local folderNames = {
-		CONFIG.SpikeTrapFolderName,
-		"SpikeTraps",
-		"Spike Traps",
-		"SpikeTrapsFolder",
-	}
-
-	for _, root in ipairs({ ServerStorage, ReplicatedStorage, Workspace }) do
-		for _, folderName in ipairs(folderNames) do
-			local folder = root:FindFirstChild(folderName, true)
-			if folder then
-				return folder
-			end
-		end
-	end
-
-	warnOnce("missing_spike_folder", "Could not find spike trap template folder.")
-	return nil
+	return StudioAssetResolver.ResolveAsset("SpikeTraps", {
+		Context = "DeckSpikes",
+		Required = true,
+	})
 end
 
 local function findHitbox(model)
@@ -386,16 +364,24 @@ local function findHitbox(model)
 end
 
 local function findSpikeTrapTemplate(areaName)
+	local key = string.lower(tostring(areaName or ""))
+	local cachedTemplate = templateCacheByArea[key]
+	if cachedTemplate and cachedTemplate.Parent then
+		return cachedTemplate
+	elseif cachedTemplate then
+		templateCacheByArea[key] = nil
+	end
+
 	local folder = findSpikeTrapFolder()
 	if not folder then
 		return nil
 	end
 
-	local key = string.lower(tostring(areaName or ""))
 	local namedTemplate = SPIKE_TEMPLATE_NAMES_BY_AREA[key]
 	if namedTemplate then
 		local template = folder:FindFirstChild(namedTemplate, true)
 		if template and template:IsA("Model") then
+			templateCacheByArea[key] = template
 			return template
 		end
 	end
@@ -411,6 +397,7 @@ local function findSpikeTrapTemplate(areaName)
 		local candidateName = string.lower(candidate.Name)
 		for _, token in ipairs(SPIKE_TEMPLATE_TOKENS_BY_AREA[key] or {}) do
 			if candidateName:find(token, 1, true) then
+				templateCacheByArea[key] = candidate
 				return candidate
 			end
 		end
@@ -418,6 +405,7 @@ local function findSpikeTrapTemplate(areaName)
 
 	for _, candidate in ipairs(candidates) do
 		if findHitbox(candidate) or #getBaseParts(candidate) > 0 then
+			templateCacheByArea[key] = candidate
 			return candidate
 		end
 	end

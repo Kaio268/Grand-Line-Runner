@@ -2,12 +2,12 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
-local ServerStorage = game:GetService("ServerStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
@@ -49,7 +49,6 @@ local CONFIG = {
 	MaxFootprintSampleSteps = 14,
 	SpawnAttempts = 24,
 	MinPuddleEdgeGap = 4,
-	PuddleFolderName = "Puddles",
 	HazardClass = "minor",
 	HazardType = "puddle",
 	FreezeBehavior = "pause",
@@ -82,7 +81,7 @@ local CONFIG = {
 	SafeGapBufferByBiome = {
 		[1] = 38,
 		[2] = 35,
-		[3] = 3	0,
+		[3] = 30,
 		[4] = 28,
 		[5] = 25,
 		[6] = 15,
@@ -105,6 +104,8 @@ local CONFIG = {
 if not CONFIG.Enabled then
 	return
 end
+
+StudioAssetResolver.ValidateRequiredAssets({ "Puddles" }, "Puddles")
 
 local PUDDLE_TEMPLATE_NAMES_BY_AREA = {
 	["foosha village"] = "Foosha Puddle",
@@ -132,6 +133,7 @@ local PUDDLE_TEMPLATE_TOKENS_BY_AREA = {
 
 local rng = Random.new()
 local activeControllers = {}
+local templateCacheByArea = {}
 local warnedMessages = {}
 local lastTraceStateKey = nil
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("PuddlesDebugTrace") == true
@@ -467,24 +469,10 @@ local function getAreaNameForBiome(biomeIndex)
 end
 
 local function findPuddleFolder()
-	local folderNames = {
-		CONFIG.PuddleFolderName,
-		"PUDDLES",
-		"Puddle",
-		"puddles",
-	}
-
-	for _, root in ipairs({ ServerStorage, ReplicatedStorage, Workspace }) do
-		for _, folderName in ipairs(folderNames) do
-			local folder = root:FindFirstChild(folderName, true)
-			if folder then
-				return folder
-			end
-		end
-	end
-
-	warnOnce("missing_folder", "Could not find puddle templates folder named %s.", tostring(CONFIG.PuddleFolderName))
-	return nil
+	return StudioAssetResolver.ResolveAsset("Puddles", {
+		Context = "Puddles",
+		Required = true,
+	})
 end
 
 local function findHitbox(model)
@@ -512,12 +500,19 @@ local function hasBasePart(instance)
 end
 
 local function findPuddleTemplate(areaName)
+	local key = string.lower(tostring(areaName or ""))
+	local cachedTemplate = templateCacheByArea[key]
+	if cachedTemplate and cachedTemplate.Parent then
+		return cachedTemplate
+	elseif cachedTemplate then
+		templateCacheByArea[key] = nil
+	end
+
 	local folder = findPuddleFolder()
 	if not folder then
 		return nil
 	end
 
-	local key = string.lower(tostring(areaName or ""))
 	local modelCandidates = {}
 	for _, descendant in ipairs(folder:GetDescendants()) do
 		if descendant:IsA("Model") then
@@ -529,6 +524,7 @@ local function findPuddleTemplate(areaName)
 	if templateName then
 		local template = folder:FindFirstChild(templateName, true)
 		if template and template:IsA("Model") then
+			templateCacheByArea[key] = template
 			return template
 		end
 	end
@@ -536,11 +532,13 @@ local function findPuddleTemplate(areaName)
 	for _, candidate in ipairs(modelCandidates) do
 		local candidateName = string.lower(candidate.Name)
 		if key ~= "" and candidateName:find(key, 1, true) then
+			templateCacheByArea[key] = candidate
 			return candidate
 		end
 
 		for _, token in ipairs(PUDDLE_TEMPLATE_TOKENS_BY_AREA[key] or {}) do
 			if candidateName:find(token, 1, true) then
+				templateCacheByArea[key] = candidate
 				return candidate
 			end
 		end
@@ -548,6 +546,7 @@ local function findPuddleTemplate(areaName)
 
 	for _, candidate in ipairs(modelCandidates) do
 		if findHitbox(candidate) or hasBasePart(candidate) then
+			templateCacheByArea[key] = candidate
 			return candidate
 		end
 	end

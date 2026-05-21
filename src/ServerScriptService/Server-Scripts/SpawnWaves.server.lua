@@ -15,6 +15,7 @@ end
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -116,6 +117,8 @@ local applyConfirmedWaveHit = nil
 local isValidActiveHazardState = nil
 local publishWaveDiagnostics = nil
 
+StudioAssetResolver.ValidateRequiredAssets({ "Waves" }, "SpawnWaves")
+
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
 		return tostring(value)
@@ -154,9 +157,10 @@ local function findChildRecursive(parent, childName)
 end
 
 local function getMovedWavesFolder()
-	local assets = ReplicatedStorage:FindFirstChild("Assets")
-	local hazards = assets and assets:FindFirstChild("Hazards")
-	local waves = hazards and hazards:FindFirstChild("Waves")
+	local waves = StudioAssetResolver.ResolveAsset("Waves", {
+		Context = "SpawnWaves",
+		Required = true,
+	})
 	if waves and waves:IsA("Folder") then
 		return waves
 	end
@@ -813,7 +817,7 @@ end
 local function getWaveTemplate()
 	local wavesFolder = getWavesFolder()
 	if not wavesFolder then
-		hazardTrace("spawn skipped reason=missing_waves_folder checked=ReplicatedStorage.Waves,ReplicatedStorage.Assets.Hazards.Waves")
+		hazardTrace("spawn skipped reason=missing_waves_folder checked=StudioAssetResolver.Waves")
 		return nil
 	end
 
