@@ -45,6 +45,7 @@ local DEFAULT_DENY_ATTRIBUTES = {
 	"NoHazards",
 	"NoPuddle",
 	"NoPuddles",
+	"PuddleBlocked",
 	"SafeZone",
 }
 
@@ -66,6 +67,7 @@ local DEFAULT_DENY_TAGS = {
 	"NoHazard",
 	"NoPuddle",
 	"NoPuddles",
+	"PuddleBlocked",
 	"SafeZone",
 }
 
@@ -166,6 +168,18 @@ local function containsKeyword(name, keywords)
 	return findKeyword(name, keywords) ~= nil
 end
 
+local function findExactName(name, names)
+	local lowerName = string.lower(tostring(name or ""))
+	for _, allowedName in ipairs(names or {}) do
+		local normalized = string.lower(tostring(allowedName or ""))
+		if normalized ~= "" and lowerName == normalized then
+			return tostring(allowedName)
+		end
+	end
+
+	return nil
+end
+
 local function hasAnyAttribute(instance, attributeNames)
 	local current = instance
 	while current do
@@ -194,6 +208,14 @@ end
 local function hasExplicitAllow(instance, options)
 	return hasAnyAttribute(instance, getList(options, "AllowAttributes", DEFAULT_ALLOW_ATTRIBUTES))
 		or hasAnyTag(instance, getList(options, "AllowTags", DEFAULT_ALLOW_TAGS))
+end
+
+local function getFallbackSurfaceName(part, options)
+	if not (part and options and options.RequireExplicitOrFallbackSurface == true) then
+		return nil
+	end
+
+	return findExactName(part.Name, getList(options, "FallbackSurfaceNames", {}))
 end
 
 local function hasDenyMarker(instance, options)
@@ -332,12 +354,13 @@ local function getEntryWeight(entries)
 	return total
 end
 
-local function addSurfaceEntry(entries, part, isExplicit)
+local function addSurfaceEntry(entries, part, isExplicit, acceptanceReason)
 	local weight = math.max(1, part.Size.X * part.Size.Z)
 	entries[#entries + 1] = {
 		Part = part,
 		Weight = weight,
 		UsedExplicitSurface = isExplicit == true,
+		SurfaceAcceptanceReason = tostring(acceptanceReason or (if isExplicit then "explicit_marker" else "general_surface")),
 	}
 end
 
@@ -348,6 +371,7 @@ local function makeSurfaceDiagnostics(root)
 		UsableParts = 0,
 		ExplicitUsableParts = 0,
 		GeneralUsableParts = 0,
+		FallbackUsableParts = 0,
 		UsedExplicitOnly = false,
 		Rejections = {},
 		RejectionSamples = {},
@@ -393,13 +417,28 @@ local function collectBiomeSurfaceEntries(root, options)
 			return
 		end
 
+		local explicitAllow = hasExplicitAllow(part, options)
+		local fallbackName = getFallbackSurfaceName(part, options)
+		if options and options.RequireExplicitOrFallbackSurface == true and not explicitAllow and not fallbackName then
+			addRejectDiagnostic(diagnostics, tostring(options.UnmarkedSurfaceRejectReason or "unmarked_non_rarity_surface"), part)
+			return
+		end
+
 		diagnostics.UsableParts += 1
-		if hasExplicitAllow(part, options) then
+		if explicitAllow then
 			diagnostics.ExplicitUsableParts += 1
-			addSurfaceEntry(explicitEntries, part, true)
+			addSurfaceEntry(explicitEntries, part, true, options and options.ExplicitSurfaceAcceptanceReason or "explicit_marker")
 		else
 			diagnostics.GeneralUsableParts += 1
-			addSurfaceEntry(generalEntries, part, false)
+			if fallbackName then
+				diagnostics.FallbackUsableParts += 1
+			end
+			addSurfaceEntry(
+				generalEntries,
+				part,
+				false,
+				if fallbackName then options and options.FallbackSurfaceAcceptanceReason or "fallback_surface" else "general_surface"
+			)
 		end
 	end
 
@@ -428,6 +467,11 @@ local function getGeneralSurfaceCount(surfaceData)
 	return surfaceData and #surfaceData.GeneralEntries or 0
 end
 
+local function getFallbackSurfaceCount(surfaceData)
+	local diagnostics = surfaceData and surfaceData.Diagnostics
+	return diagnostics and tonumber(diagnostics.FallbackUsableParts) or 0
+end
+
 local function getRootPath(surfaceData)
 	return (surfaceData and surfaceData.Diagnostics and surfaceData.Diagnostics.RootPath) or "<nil>"
 end
@@ -439,6 +483,7 @@ function BiomePlacementResolver.GetSurfaceSummary(surfaceData)
 			SurfaceCount = 0,
 			ExplicitSurfaceCount = 0,
 			GeneralSurfaceCount = 0,
+			FallbackSurfaceCount = 0,
 			UsedExplicit = false,
 			Diagnostics = nil,
 		}
@@ -449,6 +494,7 @@ function BiomePlacementResolver.GetSurfaceSummary(surfaceData)
 		SurfaceCount = getSurfaceCount(surfaceData),
 		ExplicitSurfaceCount = getExplicitSurfaceCount(surfaceData),
 		GeneralSurfaceCount = getGeneralSurfaceCount(surfaceData),
+		FallbackSurfaceCount = getFallbackSurfaceCount(surfaceData),
 		UsedExplicit = surfaceData.UsedExplicit == true,
 		Diagnostics = surfaceData.Diagnostics,
 	}
@@ -627,6 +673,7 @@ local function chooseCandidateFromEntries(surfaceData, entries, totalWeight, rng
 					Lateral = lateral,
 					Root = surfaceData.Root,
 					UsedExplicitSurface = usedExplicit == true,
+					SurfaceAcceptanceReason = entry.SurfaceAcceptanceReason,
 				}
 			end
 
@@ -644,7 +691,11 @@ local function chooseCandidateFromEntries(surfaceData, entries, totalWeight, rng
 	return nil, "no_candidate_fits_footprint"
 end
 
-local function getCandidateFallbackEntries(surfaceData)
+local function getCandidateFallbackEntries(surfaceData, options)
+	if options and options.AllowFallbackAfterExplicitFailure == false then
+		return nil, 0
+	end
+
 	if not (surfaceData and surfaceData.UsedExplicit == true) then
 		return nil, 0
 	end
@@ -661,6 +712,7 @@ local function stampCandidateSummary(candidate, biomeIndex, surfaceData)
 	candidate.SurfaceCount = getSurfaceCount(surfaceData)
 	candidate.ExplicitSurfaceCount = getExplicitSurfaceCount(surfaceData)
 	candidate.GeneralSurfaceCount = getGeneralSurfaceCount(surfaceData)
+	candidate.FallbackSurfaceCount = getFallbackSurfaceCount(surfaceData)
 	candidate.BiomeRootPath = getRootPath(surfaceData)
 	candidate.Diagnostics = surfaceData.Diagnostics
 	return candidate
@@ -689,7 +741,7 @@ function BiomePlacementResolver.GetRandomSurfaceCandidate(refs, biomeIndex, rng,
 		return stampCandidateSummary(candidate, biomeIndex, surfaceData), nil, makeCandidateDiagnostics(surfaceData, "ok")
 	end
 
-	local fallbackEntries, fallbackTotalWeight = getCandidateFallbackEntries(surfaceData)
+	local fallbackEntries, fallbackTotalWeight = getCandidateFallbackEntries(surfaceData, options)
 	if fallbackEntries then
 		candidate, reason = chooseCandidateFromEntries(surfaceData, fallbackEntries, fallbackTotalWeight, rng, options, false)
 		if candidate then

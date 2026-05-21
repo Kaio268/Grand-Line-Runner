@@ -196,22 +196,35 @@ local function translateCFrame(cframeValue, offset)
 	return CFrame.new(cframeValue.Position + offset) * rotation
 end
 
+local function getBouncedLateralOffsetInRange(rawOffset, minOffset, maxOffset)
+	local lower = tonumber(minOffset) or 0
+	local upper = tonumber(maxOffset) or lower
+	if upper < lower then
+		lower, upper = upper, lower
+	end
+
+	local span = upper - lower
+	if span <= 1e-4 then
+		return lower
+	end
+
+	local cycle = span * 2
+	local shifted = ((tonumber(rawOffset) or lower) - lower) % cycle
+
+	if shifted <= span then
+		return lower + shifted
+	end
+
+	return upper - (shifted - span)
+end
+
 local function getBouncedLateralOffset(rawOffset, maxDrift)
 	local limit = math.max(0, tonumber(maxDrift) or 0)
 	if limit <= 1e-4 then
 		return 0
 	end
 
-	local minOffset = -limit
-	local span = limit * 2
-	local cycle = span * 2
-	local shifted = (rawOffset - minOffset) % cycle
-
-	if shifted <= span then
-		return minOffset + shifted
-	end
-
-	return limit - (shifted - span)
+	return getBouncedLateralOffsetInRange(rawOffset, -limit, limit)
 end
 
 local function findHitboxRoot(root)
@@ -734,7 +747,9 @@ function WaveHazardVisuals.ComputeTimelineCFrame(
 	lateralDirection,
 	initialLateralOffset,
 	lateralVelocity,
-	maxDrift
+	maxDrift,
+	minLateralOffset,
+	maxLateralOffset
 )
 	if typeof(startCFrame) ~= "CFrame" or typeof(endCFrame) ~= "CFrame" then
 		return nil, 0
@@ -748,13 +763,22 @@ function WaveHazardVisuals.ComputeTimelineCFrame(
 	local alpha = math.clamp((elapsed * moveSpeed) / travelDistance, 0, 1)
 	local currentCFrame = startCFrame:Lerp(endCFrame, alpha)
 
-	local driftLimit = math.max(0, tonumber(maxDrift) or 0)
 	local driftVelocity = tonumber(lateralVelocity) or 0
-	if driftLimit > 1e-4 and math.abs(driftVelocity) > 1e-4 and typeof(lateralDirection) == "Vector3" then
+	local hasLateralRange = typeof(minLateralOffset) == "number"
+		and typeof(maxLateralOffset) == "number"
+
+	local driftLimit = math.max(0, tonumber(maxDrift) or 0)
+	local shouldApplyLegacyDrift = driftLimit > 1e-4 and math.abs(driftVelocity) > 1e-4
+	if (hasLateralRange or shouldApplyLegacyDrift) and typeof(lateralDirection) == "Vector3" then
 		local lateralMagnitude = lateralDirection.Magnitude
 		if lateralMagnitude > 1e-4 then
 			local rawOffset = (tonumber(initialLateralOffset) or 0) + driftVelocity * elapsed
-			local lateralOffset = getBouncedLateralOffset(rawOffset, driftLimit)
+			local lateralOffset
+			if hasLateralRange then
+				lateralOffset = getBouncedLateralOffsetInRange(rawOffset, minLateralOffset, maxLateralOffset)
+			else
+				lateralOffset = getBouncedLateralOffset(rawOffset, driftLimit)
+			end
 			currentCFrame = translateCFrame(currentCFrame, lateralDirection.Unit * lateralOffset)
 		end
 	end

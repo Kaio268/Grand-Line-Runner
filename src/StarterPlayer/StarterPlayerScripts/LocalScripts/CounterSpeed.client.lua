@@ -1,13 +1,20 @@
 local Players = game:GetService("Players")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local HudStatNotificationService = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudStatNotificationService"))
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local HudFolder = ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud")
+local ModulesFolder = ReplicatedStorage:WaitForChild("Modules")
+
 local CounterVisibilityUtil = require(script.Parent:WaitForChild("CounterVisibilityUtil"))
-local Shorten = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
+local HitEffectConfig = require(ModulesFolder:WaitForChild("Configs"):WaitForChild("HitEffects"))
+local HudStatNotificationService = require(HudFolder:WaitForChild("HudStatNotificationService"))
+local HudStatsTheme = require(HudFolder:WaitForChild("HudStatsTheme"))
+local MovementSpeedConfig = require(ModulesFolder:WaitForChild("Configs"):WaitForChild("MovementSpeed"))
+local Shorten = require(ModulesFolder:WaitForChild("Shorten"))
 
 local player = Players.LocalPlayer
-local moneyValue = player:WaitForChild("HiddenLeaderstats"):WaitForChild("Speed")
+local earnedSpeedValue = player:WaitForChild("HiddenLeaderstats"):WaitForChild("Speed")
 
 local playerGui = player:WaitForChild("PlayerGui")
 local hud = playerGui:WaitForChild("HUD")
@@ -18,6 +25,13 @@ local textLabel = counter
 local uiGradient = textLabel:WaitForChild("UIGradient")
 local uiStroke = textLabel:WaitForChild("UIStroke")
 local icon = counter:FindFirstChildWhichIsA("ImageLabel")
+
+local SPEED_DEBUFF_ATTRIBUTE = HudStatsTheme.SpeedDebuffAttribute or "SpeedDebuffActive"
+local SLOW_CLEAR_GRACE_SECONDS = 0.18
+local SPEED_CHANGE_MIN_ANIMATION_SECONDS = 0.10
+local SPEED_CHANGE_MAX_ANIMATION_SECONDS = 0.34
+local SPEED_CHANGE_BASE_ANIMATION_SECONDS = 0.08
+local SPEED_CHANGE_LOG_SCALE_SECONDS = 0.075
 
 local textScale = textLabel:FindFirstChildOfClass("UIScale")
 if not textScale then
@@ -40,6 +54,10 @@ local normalG0 = Color3.fromRGB(255, 121, 121)
 local normalG1 = Color3.fromRGB(255, 201, 176)
 local normalStroke = Color3.fromRGB(70, 14, 18)
 
+local debuffG0 = Color3.fromRGB(179, 112, 255)
+local debuffG1 = Color3.fromRGB(236, 198, 255)
+local debuffStroke = Color3.fromRGB(64, 24, 104)
+
 local upG0 = Color3.fromRGB(255, 255, 255)
 local upG1 = Color3.fromRGB(255, 255, 255)
 local upStroke = Color3.fromRGB(0, 0, 0)
@@ -50,6 +68,27 @@ local downStroke = Color3.fromRGB(61, 20, 20)
 
 local currentG0, currentG1 = normalG0, normalG1
 local currentS = normalStroke
+local currentHumanoid = nil
+local currentCharacter = nil
+local characterConnections = {}
+local speedDebuffActive = false
+local slowClearToken = 0
+local pendingEarnedSpeedAnimation = false
+local pendingEarnedSpeedAnimationToken = 0
+
+local displayed = 0
+local animId = 0
+local activeTween, activeNum
+local connValueChanged, connRender, connCompleted
+local restoreBlend, restoreTween
+local posTween, rotTween, textRotTween, iconRotTween, textScaleTween, iconScaleTween
+
+local homeCounterPos = counter.Position
+local homeCounterRot = counter.Rotation
+local homeTextRot = textLabel.Rotation
+local homeTextScale = textScale.Scale
+local homeIconRot = icon and icon.Rotation or 0
+local homeIconScale = iconScale and iconScale.Scale or 1
 
 local function setGradient(c0, c1)
 	currentG0, currentG1 = c0, c1
@@ -64,42 +103,48 @@ local function setStroke(c)
 	uiStroke.Color = c
 end
 
-local function formatNumber(n)
-	return Shorten.withCommas(math.floor((tonumber(n) or 0) + 0.5))
+local function getRestingColors()
+	if speedDebuffActive then
+		return debuffG0, debuffG1, debuffStroke
+	end
+
+	return normalG0, normalG1, normalStroke
 end
 
-local function moneyText(n)
-	return formatNumber(n) .. " Speed"
+local function setRestingColors()
+	local g0, g1, stroke = getRestingColors()
+	setGradient(g0, g1)
+	setStroke(stroke)
+end
+
+local function formatDisplayNumber(value)
+	local numeric = math.max(0, tonumber(value) or 0)
+	local roundedInteger = math.floor(numeric + 0.5)
+	if math.abs(numeric - roundedInteger) < 0.05 then
+		return Shorten.withCommas(roundedInteger)
+	end
+
+	local roundedTenth = math.floor((numeric * 10) + 0.5) / 10
+	return Shorten.withCommas(roundedTenth)
+end
+
+local function formatWholeNumber(value)
+	return Shorten.withCommas(math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function speedText(value)
+	return formatDisplayNumber(value) .. " Speed"
 end
 
 local function pushNotif(delta)
 	HudStatNotificationService.pushValueChange({
 		kind = "Speed",
 		delta = delta,
-		valueText = formatNumber(math.abs(delta)),
-		labelText = HudStatNotificationService.getLabelFromFormattedText(moneyText(0), counter.Name),
+		valueText = formatWholeNumber(math.abs(delta)),
+		labelText = HudStatNotificationService.getLabelFromFormattedText(speedText(0), counter.Name),
 		icon = HudStatNotificationService.snapshotIcon(icon),
 	})
 end
-
-setGradient(normalG0, normalG1)
-setStroke(normalStroke)
-
-local displayed = moneyValue.Value
-textLabel.Text = moneyText(displayed)
-
-local animId = 0
-local activeTween, activeNum
-local connValueChanged, connRender, connCompleted
-local restoreBlend, restoreTween
-local posTween, rotTween, textRotTween, iconRotTween, textScaleTween, iconScaleTween
-
-local homeCounterPos = counter.Position
-local homeCounterRot = counter.Rotation
-local homeTextRot = textLabel.Rotation
-local homeTextScale = textScale.Scale
-local homeIconRot = icon and icon.Rotation or 0
-local homeIconScale = iconScale and iconScale.Scale or 1
 
 local function hardRestore()
 	counter.Position = homeCounterPos
@@ -174,7 +219,33 @@ local function clearActive()
 	hardRestore()
 end
 
-local function animateBackToNormal(id)
+local function setDisplayedSpeed(value)
+	displayed = math.max(0, tonumber(value) or 0)
+	textLabel.Text = speedText(displayed)
+end
+
+local function getBaseWalkSpeed()
+	local replicatedBase = player:GetAttribute(MovementSpeedConfig.Attributes.BaseWalkSpeed)
+	if typeof(replicatedBase) == "number" and replicatedBase >= 0 then
+		return replicatedBase
+	end
+
+	return math.max(0, tonumber(MovementSpeedConfig.FallbackBaseWalkSpeed) or 16)
+end
+
+local function getDisplayedGameSpeedFromWalkSpeed(walkSpeed)
+	return math.max(0, (tonumber(walkSpeed) or 0) - getBaseWalkSpeed())
+end
+
+local function getCurrentDisplayedGameSpeed()
+	if currentHumanoid and currentHumanoid.Parent then
+		return getDisplayedGameSpeedFromWalkSpeed(currentHumanoid.WalkSpeed)
+	end
+
+	return math.max(0, tonumber(earnedSpeedValue.Value) or 0)
+end
+
+local function animateBackToResting(id)
 	if restoreBlend then
 		restoreBlend:Destroy()
 		restoreBlend = nil
@@ -184,18 +255,19 @@ local function animateBackToNormal(id)
 
 	local fromG0, fromG1 = currentG0, currentG1
 	local fromS = currentS
+	local targetG0, targetG1, targetS = getRestingColors()
 
 	local c
 	c = restoreBlend:GetPropertyChangedSignal("Value"):Connect(function()
 		if id ~= animId then
 			if c then
-			c:Disconnect()
-		end
+				c:Disconnect()
+			end
 			return
 		end
 		local a = restoreBlend.Value
-		setGradient(fromG0:Lerp(normalG0, a), fromG1:Lerp(normalG1, a))
-		setStroke(fromS:Lerp(normalStroke, a))
+		setGradient(fromG0:Lerp(targetG0, a), fromG1:Lerp(targetG1, a))
+		setStroke(fromS:Lerp(targetS, a))
 	end)
 
 	restoreTween = TweenService:Create(restoreBlend, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Value = 1 })
@@ -207,9 +279,9 @@ local function animateBackToNormal(id)
 			return
 		end
 		if restoreBlend then
-		restoreBlend:Destroy()
-		restoreBlend = nil
-	end
+			restoreBlend:Destroy()
+			restoreBlend = nil
+		end
 		restoreTween = nil
 	end)
 	restoreTween:Play()
@@ -234,7 +306,7 @@ local function animateBackToNormal(id)
 	end
 end
 
-local function animateMoney(target)
+local function animateSpeed(target)
 	animId += 1
 	local id = animId
 
@@ -247,23 +319,29 @@ local function animateMoney(target)
 	homeIconRot = icon and icon.Rotation or 0
 	homeIconScale = iconScale and iconScale.Scale or 1
 
+	target = math.max(0, tonumber(target) or 0)
 	local start = displayed
-	if start == target then
-		textLabel.Text = moneyText(target)
-		setGradient(normalG0, normalG1)
-		setStroke(normalStroke)
+	if math.abs(start - target) < 0.05 then
+		setDisplayedSpeed(target)
+		setRestingColors()
 		return
 	end
 
 	local isUp = target > start
 	local delta = math.abs(target - start)
-	local duration = math.clamp(0.10 + (math.log(delta + 1) / math.log(10)) * 0.10, 0.10, 0.55)
+	local duration = math.clamp(
+		SPEED_CHANGE_BASE_ANIMATION_SECONDS + (math.log(delta + 1) / math.log(10)) * SPEED_CHANGE_LOG_SCALE_SECONDS,
+		SPEED_CHANGE_MIN_ANIMATION_SECONDS,
+		SPEED_CHANGE_MAX_ANIMATION_SECONDS
+	)
 
 	local gradStart0, gradStart1 = currentG0, currentG1
 	local strokeStart = currentS
 
 	local gradEnd0, gradEnd1, strokeEnd
-	if isUp then
+	if speedDebuffActive then
+		gradEnd0, gradEnd1, strokeEnd = getRestingColors()
+	elseif isUp then
 		gradEnd0, gradEnd1, strokeEnd = upG0, upG1, upStroke
 	else
 		gradEnd0, gradEnd1, strokeEnd = downG0, downG1, downStroke
@@ -276,9 +354,7 @@ local function animateMoney(target)
 		if id ~= animId then
 			return
 		end
-		local v = math.floor(activeNum.Value + 0.5)
-		displayed = v
-		textLabel.Text = moneyText(v)
+		setDisplayedSpeed(activeNum.Value)
 	end)
 
 	activeTween = TweenService:Create(activeNum, TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Value = target })
@@ -320,11 +396,9 @@ local function animateMoney(target)
 			iconScale.Scale = homeIconScale * (1 + iconPunch * (1 - p) + 0.015 * math.sin((t - t0) * 26 + 0.7))
 		end
 
-		if p >= 1 then
-			if connRender then
-		connRender:Disconnect()
-		connRender = nil
-	end
+		if p >= 1 and connRender then
+			connRender:Disconnect()
+			connRender = nil
 		end
 	end)
 
@@ -336,35 +410,178 @@ local function animateMoney(target)
 			return
 		end
 
-		displayed = target
-		textLabel.Text = moneyText(target)
+		setDisplayedSpeed(target)
 
 		if connValueChanged then
-		connValueChanged:Disconnect()
-		connValueChanged = nil
-	end
+			connValueChanged:Disconnect()
+			connValueChanged = nil
+		end
 		if activeNum then
-		activeNum:Destroy()
-		activeNum = nil
-	end
+			activeNum:Destroy()
+			activeNum = nil
+		end
 		activeTween = nil
 
-		animateBackToNormal(id)
+		animateBackToResting(id)
 	end)
 
 	activeTween:Play()
 end
- 
 
- 
-local last = moneyValue.Value
-moneyValue:GetPropertyChangedSignal("Value"):Connect(function()
-	local newVal = moneyValue.Value
-	if newVal == last then
+local function syncDisplayedSpeed(animate)
+	local target = getCurrentDisplayedGameSpeed()
+	if animate then
+		animateSpeed(target)
 		return
 	end
-	local diff = newVal - last
-	last = newVal
-	animateMoney(newVal)
+
+	clearActive()
+	setDisplayedSpeed(target)
+	setRestingColors()
+end
+
+local function setSpeedDebuffActive(active)
+	if speedDebuffActive == active then
+		if counter:GetAttribute(SPEED_DEBUFF_ATTRIBUTE) ~= active then
+			counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, active)
+		end
+		return
+	end
+
+	speedDebuffActive = active
+	counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, active)
+	setRestingColors()
+end
+
+local function hasActiveSlowDebuff()
+	local effectName = player:GetAttribute(HitEffectConfig.Attributes.Type)
+	local speedMultiplier = player:GetAttribute(HitEffectConfig.Attributes.WalkSpeedMultiplier)
+
+	return effectName == "Slow" and typeof(speedMultiplier) == "number" and speedMultiplier < 1
+end
+
+local function updateSlowDebuffState()
+	if hasActiveSlowDebuff() then
+		slowClearToken += 1
+		setSpeedDebuffActive(true)
+		return
+	end
+
+	slowClearToken += 1
+	local token = slowClearToken
+	task.delay(SLOW_CLEAR_GRACE_SECONDS, function()
+		if token ~= slowClearToken then
+			return
+		end
+		if hasActiveSlowDebuff() then
+			return
+		end
+		setSpeedDebuffActive(false)
+	end)
+end
+
+local function disconnectCharacterConnections()
+	for _, connection in ipairs(characterConnections) do
+		connection:Disconnect()
+	end
+	table.clear(characterConnections)
+	currentCharacter = nil
+	currentHumanoid = nil
+end
+
+local function bindCharacter(character)
+	disconnectCharacterConnections()
+	currentCharacter = character
+
+	if not character then
+		syncDisplayedSpeed(false)
+		return
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
+	if not (humanoid and humanoid:IsA("Humanoid")) then
+		syncDisplayedSpeed(false)
+		return
+	end
+
+	currentHumanoid = humanoid
+	characterConnections[#characterConnections + 1] = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+		pendingEarnedSpeedAnimation = false
+		syncDisplayedSpeed(true)
+	end)
+	characterConnections[#characterConnections + 1] = character.AncestryChanged:Connect(function(_, parent)
+		if parent ~= nil or character ~= currentCharacter then
+			return
+		end
+		disconnectCharacterConnections()
+		syncDisplayedSpeed(false)
+	end)
+
+	syncDisplayedSpeed(false)
+end
+
+local function scheduleEarnedSpeedAnimationFallback()
+	pendingEarnedSpeedAnimationToken += 1
+	local token = pendingEarnedSpeedAnimationToken
+	task.delay(0.08, function()
+		if token ~= pendingEarnedSpeedAnimationToken or not pendingEarnedSpeedAnimation then
+			return
+		end
+
+		pendingEarnedSpeedAnimation = false
+		syncDisplayedSpeed(true)
+	end)
+end
+
+setRestingColors()
+counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, false)
+setDisplayedSpeed(getCurrentDisplayedGameSpeed())
+updateSlowDebuffState()
+
+player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Type):Connect(function()
+	updateSlowDebuffState()
+	syncDisplayedSpeed(true)
+end)
+player:GetAttributeChangedSignal(HitEffectConfig.Attributes.WalkSpeedMultiplier):Connect(function()
+	updateSlowDebuffState()
+	syncDisplayedSpeed(true)
+end)
+player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Until):Connect(function()
+	updateSlowDebuffState()
+	syncDisplayedSpeed(true)
+end)
+player:GetAttributeChangedSignal(MovementSpeedConfig.Attributes.BaseWalkSpeed):Connect(function()
+	syncDisplayedSpeed(true)
+end)
+
+player.CharacterAdded:Connect(function(character)
+	bindCharacter(character)
+end)
+player.CharacterRemoving:Connect(function(character)
+	if character ~= currentCharacter then
+		return
+	end
+
+	disconnectCharacterConnections()
+	syncDisplayedSpeed(false)
+end)
+
+if player.Character then
+	task.defer(bindCharacter, player.Character)
+else
+	syncDisplayedSpeed(false)
+end
+
+local lastEarnedSpeed = earnedSpeedValue.Value
+earnedSpeedValue:GetPropertyChangedSignal("Value"):Connect(function()
+	local newVal = earnedSpeedValue.Value
+	if newVal == lastEarnedSpeed then
+		return
+	end
+
+	local diff = newVal - lastEarnedSpeed
+	lastEarnedSpeed = newVal
+	pendingEarnedSpeedAnimation = true
+	scheduleEarnedSpeedAnimationFallback()
 	pushNotif(diff)
 end)

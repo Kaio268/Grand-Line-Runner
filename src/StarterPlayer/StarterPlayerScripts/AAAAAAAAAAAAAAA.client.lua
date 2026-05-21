@@ -1376,7 +1376,9 @@ local function createSharedHazardVisualSmoother(hazard)
 			self.Hazard:GetAttribute("WaveLateralDirection"),
 			self.Hazard:GetAttribute("WaveInitialLateralOffset"),
 			self.Hazard:GetAttribute("WaveLateralVelocity"),
-			self.Hazard:GetAttribute("WaveMaxDrift")
+			self.Hazard:GetAttribute("WaveMaxDrift"),
+			self.Hazard:GetAttribute("WaveLateralMinOffset"),
+			self.Hazard:GetAttribute("WaveLateralMaxOffset")
 		)
 
 		return currentCFrame or getPivot(self.Hazard)

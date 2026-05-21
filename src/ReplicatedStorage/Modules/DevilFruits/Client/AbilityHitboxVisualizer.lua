@@ -1,6 +1,9 @@
-local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DebugHitboxOverlay = require(Modules:WaitForChild("Debug"):WaitForChild("DebugHitboxOverlay"))
 
 local AbilityHitboxVisualizer = {}
 
@@ -9,17 +12,19 @@ local HITBOX_ATTRIBUTE = "ShowAbilityHitboxes"
 local FOLDER_NAME = "ClientAbilityHitboxes"
 local DEFAULT_DURATION = 0.75
 local DEFAULT_PATH_RADIUS = 1.25
-local RING_SEGMENT_MIN = 32
-local RING_SEGMENT_MAX = 96
 local RING_HEIGHT = 0.2
 local GROUND_RAYCAST_UP = 8
 local GROUND_RAYCAST_DOWN = 48
-local MAX_DURATION = 5
+local MAX_DURATION = 15
 local MAX_RADIUS = 300
 local MAX_SEGMENT_LENGTH = 700
 local MIN_RADIUS = 0.1
+local OVERLAY_COLOR = Color3.fromRGB(255, 0, 0)
+local WORLD_LOOKUP_TIMEOUT = 1.5
+local WORLD_LOOKUP_INTERVAL = 0.05
 
 local RADIUS_KEYS = {
+	"HitboxDebugRadius",
 	"HitboxRadius",
 	"Radius",
 	"ImpactBurstRadius",
@@ -71,36 +76,16 @@ local DIRECTION_KEYS = {
 }
 
 local started = false
+local overlayScope = DebugHitboxOverlay.CreateScope({
+	FolderName = FOLDER_NAME,
+})
 
 local function isEnabled()
 	return LOCAL_PLAYER ~= nil and LOCAL_PLAYER:GetAttribute(HITBOX_ATTRIBUTE) == true
 end
 
-local function getFolder()
-	local folder = Workspace:FindFirstChild(FOLDER_NAME)
-	if folder and not folder:IsA("Folder") then
-		folder:Destroy()
-		folder = nil
-	end
-
-	if not folder then
-		folder = Instance.new("Folder")
-		folder.Name = FOLDER_NAME
-		folder.Parent = Workspace
-	end
-
-	return folder
-end
-
 local function clearVisuals()
-	local folder = Workspace:FindFirstChild(FOLDER_NAME)
-	if not folder then
-		return
-	end
-
-	for _, child in ipairs(folder:GetChildren()) do
-		child:Destroy()
-	end
+	overlayScope:Clear()
 end
 
 local function getVector3FromKeys(payload, keys)
@@ -118,7 +103,7 @@ local function getVector3FromKeys(payload, keys)
 	return nil
 end
 
-local function getTargetRootPosition(targetPlayer)
+local function getTargetRootPart(targetPlayer)
 	if not targetPlayer or not targetPlayer:IsA("Player") then
 		return nil
 	end
@@ -126,10 +111,15 @@ local function getTargetRootPosition(targetPlayer)
 	local character = targetPlayer.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	if rootPart and rootPart:IsA("BasePart") then
-		return rootPart.Position
+		return rootPart
 	end
 
 	return nil
+end
+
+local function getTargetRootPosition(targetPlayer)
+	local rootPart = getTargetRootPart(targetPlayer)
+	return rootPart and rootPart.Position or nil
 end
 
 local function getRadius(payload)
@@ -177,48 +167,8 @@ local function getDuration(payload)
 	return math.clamp(duration, 0.15, MAX_DURATION)
 end
 
-local function getColor(fruitName, abilityName)
-	local fruitText = tostring(fruitName or ""):lower()
-	local abilityText = tostring(abilityName or ""):lower()
-
-	if fruitText:find("mera") or abilityText:find("fire") or abilityText:find("flame") then
-		return Color3.fromRGB(255, 115, 42)
-	elseif fruitText:find("hie") or abilityText:find("freeze") or abilityText:find("ice") then
-		return Color3.fromRGB(92, 226, 255)
-	elseif fruitText:find("bomu") or abilityText:find("bomb") or abilityText:find("mine") then
-		return Color3.fromRGB(255, 215, 74)
-	elseif fruitText:find("gomu") or abilityText:find("rubber") then
-		return Color3.fromRGB(255, 95, 168)
-	elseif fruitText:find("tori") or abilityText:find("phoenix") or abilityText:find("shield") then
-		return Color3.fromRGB(88, 180, 255)
-	elseif fruitText:find("mogu") or abilityText:find("burrow") then
-		return Color3.fromRGB(151, 226, 101)
-	end
-
-	return Color3.fromRGB(255, 255, 255)
-end
-
-local function configureDebugPart(part, color, transparency)
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Color = color
-	part.Locked = true
-	part.Material = Enum.Material.ForceField
-	part.Transparency = transparency
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
-end
-
-local function addSelectionOutline(part, color)
-	local outline = Instance.new("SelectionBox")
-	outline.Adornee = part
-	outline.Color3 = color
-	outline.LineThickness = 0.04
-	outline.SurfaceTransparency = 1
-	outline.Parent = part
+local function getColor(_fruitName, _abilityName)
+	return OVERLAY_COLOR
 end
 
 local drawPoint
@@ -228,17 +178,12 @@ local function drawSphere(position, radius, color, duration)
 		return false
 	end
 
-	local part = Instance.new("Part")
-	part.Name = "AbilityHitboxRadius"
-	part.Shape = Enum.PartType.Ball
-	part.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
-	part.CFrame = CFrame.new(position)
-	configureDebugPart(part, color, 0.78)
-	addSelectionOutline(part, color)
-	part.Parent = getFolder()
-	Debris:AddItem(part, duration)
-
-	return true
+	return overlayScope:StaticSphere(position, radius, {
+		Name = "AbilityHitboxRadius",
+		Color = color,
+		Transparency = 0.78,
+		Duration = duration,
+	}) ~= nil
 end
 
 local function resolveGroundedPosition(position)
@@ -283,29 +228,12 @@ local function drawPlanarRadius(position, radius, color, duration, payload)
 		centerPosition = resolveGroundedPosition(position) or position
 	end
 
-	local segmentCount = math.clamp(math.floor(radius * 0.75), RING_SEGMENT_MIN, RING_SEGMENT_MAX)
-	local thickness = math.clamp(radius * 0.0125, 0.6, 2.5)
-	local folder = getFolder()
-
-	for index = 1, segmentCount do
-		local angleA = ((index - 1) / segmentCount) * math.pi * 2
-		local angleB = (index / segmentCount) * math.pi * 2
-		local pointA = centerPosition + Vector3.new(math.cos(angleA) * radius, 0, math.sin(angleA) * radius)
-		local pointB = centerPosition + Vector3.new(math.cos(angleB) * radius, 0, math.sin(angleB) * radius)
-		local offset = pointB - pointA
-		local length = offset.Magnitude
-
-		if length > 0.01 then
-			local part = Instance.new("Part")
-			part.Name = "AbilityHitboxPlanarRadius"
-			part.Shape = Enum.PartType.Block
-			part.Size = Vector3.new(thickness, RING_HEIGHT, length)
-			part.CFrame = CFrame.lookAt(pointA + (offset * 0.5), pointB)
-			configureDebugPart(part, color, 0.28)
-			part.Parent = folder
-			Debris:AddItem(part, duration)
-		end
-	end
+	overlayScope:StaticPlanarRadius(centerPosition, radius, {
+		Name = "AbilityHitboxPlanarRadius",
+		Color = color,
+		Transparency = 0.28,
+		Duration = duration,
+	})
 
 	drawPoint(centerPosition, math.min(radius * 0.025, 3), color, duration)
 	return true
@@ -317,16 +245,12 @@ function drawPoint(position, radius, color, duration)
 	end
 
 	local markerRadius = math.clamp((tonumber(radius) or DEFAULT_PATH_RADIUS) * 1.35, 0.5, 8)
-	local part = Instance.new("Part")
-	part.Name = "AbilityHitboxPoint"
-	part.Shape = Enum.PartType.Ball
-	part.Size = Vector3.new(markerRadius * 2, markerRadius * 2, markerRadius * 2)
-	part.CFrame = CFrame.new(position)
-	configureDebugPart(part, color, 0.45)
-	part.Parent = getFolder()
-	Debris:AddItem(part, duration)
-
-	return true
+	return overlayScope:StaticSphere(position, markerRadius, {
+		Name = "AbilityHitboxPoint",
+		Color = color,
+		Transparency = 0.45,
+		Duration = duration,
+	}) ~= nil
 end
 
 local function drawSegment(startPosition, endPosition, radius, color, duration)
@@ -346,18 +270,14 @@ local function drawSegment(startPosition, endPosition, radius, color, duration)
 		length = offset.Magnitude
 	end
 
-	local width = math.clamp((tonumber(radius) or DEFAULT_PATH_RADIUS) * 2, 0.2, 48)
-	local midpoint = startPosition + (offset * 0.5)
-
-	local part = Instance.new("Part")
-	part.Name = "AbilityHitboxPath"
-	part.Shape = Enum.PartType.Block
-	part.Size = Vector3.new(width, width, length)
-	part.CFrame = CFrame.lookAt(midpoint, endPosition)
-	configureDebugPart(part, color, 0.72)
-	addSelectionOutline(part, color)
-	part.Parent = getFolder()
-	Debris:AddItem(part, duration)
+	local pathRadius = math.clamp(tonumber(radius) or DEFAULT_PATH_RADIUS, 0.1, 24)
+	local width = pathRadius * 2
+	overlayScope:StaticPath(startPosition, endPosition, pathRadius, {
+		Name = "AbilityHitboxPath",
+		Color = color,
+		Transparency = 0.72,
+		Duration = duration,
+	})
 
 	drawPoint(startPosition, width * 0.5, color, duration)
 	drawPoint(endPosition, width * 0.5, color, duration)
@@ -427,6 +347,266 @@ local function shouldDrawPlanarRadius(payload)
 		or shape == "circle"
 end
 
+local function normalizeMode(value)
+	if typeof(value) ~= "string" then
+		return nil
+	end
+
+	local text = value:lower():gsub("[%s_%-]", "")
+	if text == "" then
+		return nil
+	end
+	return text
+end
+
+local function getDebugMode(payload)
+	if typeof(payload) ~= "table" then
+		return nil
+	end
+
+	return normalizeMode(payload.HitboxDebugMode or payload.DebugHitboxMode or payload.HitboxMode)
+end
+
+local function getDebugRadii(payload)
+	local radii = {}
+	if typeof(payload) == "table" and type(payload.HitboxDebugRadii) == "table" then
+		for index, entry in ipairs(payload.HitboxDebugRadii) do
+			local radius
+			local label = "Radius" .. tostring(index)
+			if type(entry) == "table" then
+				radius = tonumber(entry.Radius or entry.HitboxDebugRadius or entry.Value or entry[1])
+				if typeof(entry.Name) == "string" and entry.Name ~= "" then
+					label = entry.Name
+				end
+			else
+				radius = tonumber(entry)
+			end
+
+			if radius and radius > 0 then
+				radii[#radii + 1] = {
+					Radius = math.clamp(radius, MIN_RADIUS, MAX_RADIUS),
+					Label = label,
+				}
+			end
+		end
+	end
+
+	if #radii > 0 then
+		return radii
+	end
+
+	local radius = getRadius(payload)
+	if radius then
+		return {
+			{
+				Radius = radius,
+				Label = "Radius",
+			},
+		}
+	end
+
+	return {}
+end
+
+local function getPlayerByUserId(value)
+	local userId = tonumber(value)
+	if not userId then
+		return nil
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.UserId == userId then
+			return player
+		end
+	end
+
+	return nil
+end
+
+local function getFollowRootPart(targetPlayer, payload, mode)
+	if mode == "followownerroot" then
+		local owner = getPlayerByUserId(payload and (payload.HitboxDebugOwnerUserId or payload.OwnerUserId))
+		if owner then
+			return getTargetRootPart(owner)
+		end
+	end
+
+	return getTargetRootPart(targetPlayer)
+end
+
+local function drawFollowRootRadii(targetPlayer, payload, radii, color, duration, mode)
+	local rootPart = getFollowRootPart(targetPlayer, payload, mode)
+	if not rootPart then
+		return false
+	end
+
+	local drewVisual = false
+	for _, radiusInfo in ipairs(radii) do
+		local record = overlayScope:FollowSphere(rootPart, radiusInfo.Radius, {
+			Name = "AbilityHitboxFollow" .. tostring(radiusInfo.Label or "Radius"),
+			Color = color,
+			Transparency = 0.72,
+			Duration = duration,
+		})
+		drewVisual = record ~= nil or drewVisual
+	end
+
+	return drewVisual
+end
+
+local function getRootFromPath(path)
+	if type(path) ~= "table" then
+		return Workspace
+	end
+
+	local current = nil
+	for index, segment in ipairs(path) do
+		if typeof(segment) ~= "string" or segment == "" then
+			return nil
+		end
+
+		if index == 1 then
+			local lowered = segment:lower()
+			if lowered == "workspace" or lowered == "game.workspace" then
+				current = Workspace
+			elseif lowered == "replicatedstorage" or lowered == "game.replicatedstorage" then
+				current = ReplicatedStorage
+			elseif lowered == "players" or lowered == "game.players" then
+				current = Players
+			else
+				current = Workspace:FindFirstChild(segment)
+			end
+		else
+			current = current and current:FindFirstChild(segment) or nil
+		end
+
+		if not current then
+			return nil
+		end
+	end
+
+	return current or Workspace
+end
+
+local function findPartInInstance(instance, partName)
+	if not instance then
+		return nil
+	end
+
+	if instance:IsA("BasePart") then
+		return instance
+	end
+
+	if typeof(partName) == "string" and partName ~= "" then
+		local namedPart = instance:FindFirstChild(partName, true)
+		if namedPart and namedPart:IsA("BasePart") then
+			return namedPart
+		end
+	end
+
+	if instance:IsA("Model") and instance.PrimaryPart then
+		return instance.PrimaryPart
+	end
+
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function findFollowPart(payload)
+	if typeof(payload) ~= "table" then
+		return nil
+	end
+
+	local directPart = payload.HitboxDebugFollowPart
+	if typeof(directPart) == "Instance" and directPart:IsA("BasePart") then
+		return directPart
+	end
+
+	local root = getRootFromPath(payload.HitboxDebugSearchPath)
+	if not root then
+		return nil
+	end
+
+	local attributeName = payload.HitboxDebugAttributeName
+	local attributeValue = payload.HitboxDebugAttributeValue
+	local partName = payload.HitboxDebugPartName or "HumanoidRootPart"
+	if typeof(attributeName) ~= "string" or attributeName == "" or attributeValue == nil then
+		return findPartInInstance(root, partName)
+	end
+
+	for _, child in ipairs(root:GetChildren()) do
+		if child:GetAttribute(attributeName) == attributeValue then
+			return findPartInInstance(child, partName)
+		end
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:GetAttribute(attributeName) == attributeValue then
+			return findPartInInstance(descendant, partName)
+		end
+	end
+
+	return nil
+end
+
+local function drawFollowPartRadii(payload, radii, color, duration)
+	local function attachToPart()
+		local part = findFollowPart(payload)
+		if not part then
+			return false
+		end
+
+		local drewVisual = false
+		for _, radiusInfo in ipairs(radii) do
+			local record = overlayScope:FollowSphere(part, radiusInfo.Radius, {
+				Name = "AbilityHitboxFollow" .. tostring(radiusInfo.Label or "Radius"),
+				Color = color,
+				Transparency = 0.72,
+				Duration = duration,
+			})
+			drewVisual = record ~= nil or drewVisual
+		end
+		return drewVisual
+	end
+
+	if attachToPart() then
+		return true
+	end
+
+	task.spawn(function()
+		local deadline = os.clock() + math.max(0, tonumber(payload.HitboxDebugLookupTimeout) or WORLD_LOOKUP_TIMEOUT)
+		while isEnabled() and os.clock() <= deadline do
+			task.wait(WORLD_LOOKUP_INTERVAL)
+			if attachToPart() then
+				return
+			end
+		end
+	end)
+
+	return true
+end
+
+local function drawDynamicRadiusVisual(targetPlayer, payload, color, duration)
+	local mode = getDebugMode(payload)
+	if not mode then
+		return false
+	end
+
+	local radii = getDebugRadii(payload)
+	if #radii <= 0 then
+		return false
+	end
+
+	if mode == "followtargetroot" or mode == "followownerroot" or mode == "followroot" then
+		return drawFollowRootRadii(targetPlayer, payload, radii, color, duration, mode)
+	elseif mode == "followpart" or mode == "followworldpart" or mode == "followmodelroot" then
+		return drawFollowPartRadii(payload, radii, color, duration)
+	elseif mode == "staticradius" then
+		return false
+	end
+
+	return false
+end
+
 function AbilityHitboxVisualizer.Start()
 	if started then
 		return
@@ -456,6 +636,11 @@ function AbilityHitboxVisualizer.HandleEffect(targetPlayer, fruitName, abilityNa
 	local duration = getDuration(payload)
 	local color = getColor(fruitName, abilityName)
 	local drewVisual = drawPathVisual(payload, color, duration)
+	local drewDynamicVisual = drawDynamicRadiusVisual(targetPlayer, payload, color, duration)
+	if drewDynamicVisual then
+		return true
+	end
+
 	local radius = getRadius(payload)
 	local centerPosition = getVector3FromKeys(payload, CENTER_POSITION_KEYS) or getTargetRootPosition(targetPlayer)
 

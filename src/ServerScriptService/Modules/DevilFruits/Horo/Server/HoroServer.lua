@@ -1544,6 +1544,26 @@ local function buildStartPayload(state)
 		MaxDistanceFromBody = getEffectiveMaxDistanceFromBody(state),
 		RewardInteractRadius = state.RewardInteractRadius,
 		HazardProbeRadius = state.HazardProbeRadius,
+		HitboxDebugMode = "FollowWorldPart",
+		HitboxDebugSearchPath = {
+			"Workspace",
+			WORLD_EFFECTS_FOLDER_NAME,
+			GHOSTS_FOLDER_NAME,
+		},
+		HitboxDebugAttributeName = "ProjectionId",
+		HitboxDebugAttributeValue = state.ProjectionId,
+		HitboxDebugPartName = "HumanoidRootPart",
+		HitboxDebugLookupTimeout = 2,
+		HitboxDebugRadii = {
+			{
+				Name = "RewardInteractRadius",
+				Radius = state.RewardInteractRadius,
+			},
+			{
+				Name = "HazardProbeRadius",
+				Radius = state.HazardProbeRadius,
+			},
+		},
 	}
 end
 

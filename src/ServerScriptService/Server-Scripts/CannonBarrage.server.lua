@@ -6,7 +6,9 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local BiomeAreas = require(Configs:WaitForChild("BiomeAreas"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
 local HazardProtection = require(
@@ -15,43 +17,101 @@ local HazardProtection = require(
 		:WaitForChild("Server")
 		:WaitForChild("HazardProtection")
 )
+local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
 local CONFIG = {
 	Enabled = true,
-	WarningTime = 0.65,
-	RetargetDelay = 0.1,
+	InterShotDelay = 0.15,
 	DropHeight = 180,
 	FallTime = 0.65,
-	FallTimeByZone = {
-		[1] = 0.25,
-		[2] = 0.30,
-		[3] = 0.35,
-		[4] = 0.40,
-		[5] = 0.45,
-		[6] = 0.50,
-		[7] = 0.55,
-		[8] = 0.60,
-	},
-	ImpactRadius = 18,
-	Damage = 100,
+	ImpactDebugLinger = 0.2,
+	MaxActiveBombs = 12,
+	MaxActiveBombsPerPlayer = 3,
 	HazardClass = "major",
-	HazardType = "cannon_barrage",
+	HazardType = "CannonBarrage",
 	BombSize = 6,
 	CircleHeight = 0.18,
-	ZoneCount = 8,
 	GroundRayHeight = 6,
 	GroundRayDepth = 14,
+	VerticalDamageTolerance = 12,
+	BountyCheckDelay = 1,
 	TargetCheckDelay = 0.2,
+	MinCannonInterval = 1,
+	IntervalJitterMin = -0.35,
+	IntervalJitterMax = 0.65,
+	KnockdownDuration = 0.8,
+	KnockdownPriority = 30,
 	ImpactVfxLifetime = 3,
 	ImpactVfxScale = 3,
 	DefaultVfxEmitCount = 30,
-	ZoneVfxNames = {
+	DefaultImpactRadius = 18,
+	DefaultDamage = 65,
+	DefaultWarningTime = 0.75,
+	DefaultVfxName = "canon explosion",
+
+	-- Bounty balance knobs:
+	-- Interval = nil means this bounty tier is not targeted by cannon barrage.
+	-- Lower Interval values make cannons attack more often.
+	-- Bounty controls cannon frequency only, not damage.
+	-- Biome bands below still control cannon severity.
+	CannonBountyTiers = {
+		{ Tier = 0, MinBounty = 0, Interval = nil },
+		{ Tier = 1, MinBounty = 1, Interval = 10 },
+		{ Tier = 2, MinBounty = 10000, Interval = 7 },
+		{ Tier = 3, MinBounty = 75000, Interval = 5 },
+		{ Tier = 4, MinBounty = 500000, Interval = 3 },
+	},
+
+	-- Cannon balance knobs:
+	-- Higher ShotsPerCycle values add more drops per targeting cycle.
+	-- Lower WarningTime values make cannon impacts harder to dodge.
+	-- Higher ImpactRadius values make the damage circle larger.
+	-- Higher DamageRange values make cannon impacts hit harder.
+	CannonBarrageBands = {
+		{
+			Band = 1,
+			BiomeStart = 1,
+			BiomeEnd = 2,
+			ShotsPerCycle = { Min = 1, Max = 1 },
+			WarningTime = 0.9,
+			ImpactRadius = 16,
+			DamageRange = { Min = 45, Max = 55 },
+		},
+		{
+			Band = 2,
+			BiomeStart = 3,
+			BiomeEnd = 4,
+			ShotsPerCycle = { Min = 1, Max = 2 },
+			WarningTime = 0.8,
+			ImpactRadius = 17,
+			DamageRange = { Min = 55, Max = 65 },
+		},
+		{
+			Band = 3,
+			BiomeStart = 5,
+			BiomeEnd = 6,
+			ShotsPerCycle = { Min = 2, Max = 2 },
+			WarningTime = 0.7,
+			ImpactRadius = 18,
+			DamageRange = { Min = 65, Max = 75 },
+		},
+		{
+			Band = 4,
+			BiomeStart = 7,
+			BiomeEnd = 8,
+			ShotsPerCycle = { Min = 2, Max = 3 },
+			WarningTime = 0.6,
+			ImpactRadius = 20,
+			DamageRange = { Min = 75, Max = 85 },
+		},
+	},
+	VfxNameByBiome = {
 		[1] = "canon explosion",
 		[2] = "water explosion",
-		[3] = "ice",
-		[4] = "water explosion",
-		[5] = "canon explosion",
-		[6] = "ice",
+		[3] = "ice  explosion",
+		[4] = "canon explosion",
+		[5] = "water explosion",
+		[6] = "ice  explosion",
 		[7] = "water explosion",
 		[8] = "canon explosion",
 	},
@@ -70,7 +130,185 @@ if not CONFIG.Enabled then
 	return
 end
 
-local function markHazardHitboxPart(part)
+local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
+local biomeBoundsCacheRoot = nil
+local biomeBoundsCache = nil
+local warningKeys = {}
+local activeBombCount = 0
+local activeBombCountByUserId = {}
+local rng = Random.new()
+
+local VFX_NAME_ALIASES = {
+	["cannon"] = "canon explosion",
+	["cannon explosion"] = "canon explosion",
+	["canon"] = "canon explosion",
+	["ice"] = "ice  explosion",
+	["ice explosion"] = "ice  explosion",
+}
+
+local function warnOnce(key, message, ...)
+	if warningKeys[key] then
+		return
+	end
+
+	warningKeys[key] = true
+	warn(string.format(message, ...))
+end
+
+local function readNumberValue(instance)
+	if instance and (instance:IsA("NumberValue") or instance:IsA("IntValue")) then
+		return tonumber(instance.Value)
+	end
+
+	return nil
+end
+
+local function readChildNumber(parent, childName)
+	local child = parent and parent:FindFirstChild(childName)
+	return readNumberValue(child)
+end
+
+local function getPlayerBounty(player)
+	if not player then
+		return 0
+	end
+
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local leaderstatBounty = readChildNumber(leaderstats, "Bounty")
+	if leaderstatBounty ~= nil then
+		return math.max(0, math.floor(leaderstatBounty + 0.5))
+	end
+
+	local bountyFolder = player:FindFirstChild("Bounty")
+	local totalBounty = readChildNumber(bountyFolder, "Total")
+	if totalBounty ~= nil then
+		return math.max(0, math.floor(totalBounty + 0.5))
+	end
+
+	return math.max(0, math.floor((tonumber(player:GetAttribute("Bounty")) or 0) + 0.5))
+end
+
+local function getCannonBountyTier(bounty)
+	local normalizedBounty = math.max(0, math.floor((tonumber(bounty) or 0) + 0.5))
+	local selectedTier = nil
+	local selectedIndex = 0
+
+	for index, tier in ipairs(CONFIG.CannonBountyTiers) do
+		local minBounty = math.max(0, math.floor(tonumber(tier.MinBounty) or 0))
+		if normalizedBounty >= minBounty then
+			selectedTier = tier
+			selectedIndex = index
+		end
+	end
+
+	if selectedTier == nil then
+		selectedTier = CONFIG.CannonBountyTiers[1]
+		selectedIndex = 1
+	end
+
+	return selectedTier, math.floor(tonumber(selectedTier and selectedTier.Tier) or math.max(0, selectedIndex - 1))
+end
+
+local function getCannonIntervalForBounty(bounty)
+	local tier, tierId = getCannonBountyTier(bounty)
+	local interval = tier and tonumber(tier.Interval) or nil
+	if not interval or interval <= 0 then
+		return nil, tier, tierId
+	end
+
+	return math.max(tonumber(CONFIG.MinCannonInterval) or 1, interval), tier, tierId
+end
+
+local function getCannonIntervalJitter()
+	local minJitter = tonumber(CONFIG.IntervalJitterMin) or 0
+	local maxJitter = tonumber(CONFIG.IntervalJitterMax) or minJitter
+	if maxJitter < minJitter then
+		minJitter, maxJitter = maxJitter, minJitter
+	end
+
+	if math.abs(maxJitter - minJitter) <= 1e-4 then
+		return minJitter
+	end
+
+	return rng:NextNumber(minJitter, maxJitter)
+end
+
+local function normalizeBiomeIndex(biomeIndex)
+	local index = math.floor(tonumber(biomeIndex) or 0)
+	if index < 1 then
+		return nil
+	end
+
+	return index
+end
+
+local function getAreaNameForBiome(biomeIndex)
+	local entry = BiomeAreas.GetBiome and BiomeAreas.GetBiome(normalizeBiomeIndex(biomeIndex))
+	return entry and entry.AreaName or string.format("Biome %s", tostring(biomeIndex or "?"))
+end
+
+local function rollIntegerRange(range, fallback)
+	if type(range) ~= "table" then
+		return math.max(0, math.floor(tonumber(fallback) or 0))
+	end
+
+	local minValue = math.floor(tonumber(range.Min) or tonumber(range[1]) or tonumber(fallback) or 0)
+	local maxValue = math.floor(tonumber(range.Max) or tonumber(range[2]) or minValue)
+	if maxValue < minValue then
+		minValue, maxValue = maxValue, minValue
+	end
+
+	return rng:NextInteger(minValue, maxValue)
+end
+
+local function rollNumberRange(range, fallback)
+	if type(range) ~= "table" then
+		return tonumber(fallback) or 0
+	end
+
+	local minValue = tonumber(range.Min) or tonumber(range[1]) or tonumber(fallback) or 0
+	local maxValue = tonumber(range.Max) or tonumber(range[2]) or minValue
+	if maxValue < minValue then
+		minValue, maxValue = maxValue, minValue
+	end
+
+	if math.abs(maxValue - minValue) <= 1e-4 then
+		return minValue
+	end
+
+	return rng:NextNumber(minValue, maxValue)
+end
+
+local function getCannonTuningForBiome(biomeIndex)
+	local normalizedBiome = normalizeBiomeIndex(biomeIndex) or 1
+	for _, tuning in ipairs(CONFIG.CannonBarrageBands) do
+		local biomeStart = math.floor(tonumber(tuning.BiomeStart) or 1)
+		local biomeEnd = math.floor(tonumber(tuning.BiomeEnd) or biomeStart)
+		if normalizedBiome >= biomeStart and normalizedBiome <= biomeEnd then
+			return tuning
+		end
+	end
+
+	return CONFIG.CannonBarrageBands[1]
+end
+
+local function rollShotsPerCycle(tuning)
+	return math.max(0, rollIntegerRange(tuning and tuning.ShotsPerCycle, 1))
+end
+
+local function rollCannonDamage(tuning)
+	return math.max(0, rollNumberRange(tuning and tuning.DamageRange, CONFIG.DefaultDamage))
+end
+
+local function resolveCannonVfxName(tuning, biomeIndex)
+	local configuredName = CONFIG.VfxNameByBiome[normalizeBiomeIndex(biomeIndex) or 0]
+		or (tuning and tuning.VfxName)
+		or CONFIG.DefaultVfxName
+	local lowerName = string.lower(tostring(configuredName or ""))
+	return VFX_NAME_ALIASES[lowerName] or configuredName
+end
+
+local function markHazardHitboxPart(part, radius)
 	if not part or not part:IsA("BasePart") then
 		return
 	end
@@ -81,7 +319,7 @@ local function markHazardHitboxPart(part)
 	part:SetAttribute(HazardDebugConstants.HazardClassAttribute, CONFIG.HazardClass)
 	part:SetAttribute(HazardDebugConstants.HazardTypeAttribute, CONFIG.HazardType)
 	part:SetAttribute("HazardHitboxShape", "Cylinder")
-	part:SetAttribute("HazardHitboxRadius", CONFIG.ImpactRadius)
+	part:SetAttribute("HazardHitboxRadius", math.max(0, tonumber(radius) or CONFIG.DefaultImpactRadius))
 end
 
 local hazardsFolder = Workspace:FindFirstChild("CannonBarrages")
@@ -159,29 +397,79 @@ local function isInsideRunZone(position)
 	return true
 end
 
-local function getRunAlpha(position)
-	local refs = MapResolver.GetRefs()
-	local startPart = refs.WaveStart
-	local endPart = refs.WaveEnd
-	if not startPart or not endPart then
-		return 0
+local function getBiomeIndexFromName(name)
+	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
+	return indexText and tonumber(indexText) or nil
+end
+
+local function getBiomeIndexFromInstance(instance)
+	local current = instance
+	while current and current ~= Workspace do
+		local biomeIndex = getBiomeIndexFromName(current.Name)
+		if biomeIndex then
+			return biomeIndex, current
+		end
+
+		current = current.Parent
 	end
 
-	local forward = getPlanarUnit(endPart.Position - startPart.Position, startPart.CFrame.LookVector)
-	local runLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
-	local forwardDistance = (position - startPart.Position):Dot(forward)
-
-	return math.clamp(forwardDistance / runLength, 0, 0.999)
+	return nil, nil
 end
 
-local function getZoneIndex(position)
-	local zoneCount = math.max(1, math.floor(tonumber(CONFIG.ZoneCount) or 8))
-	return math.clamp(math.floor(getRunAlpha(position) * zoneCount) + 1, 1, zoneCount)
+local function buildBiomeBoundsCache(refs)
+	local biomesRoot = refs and refs.Biomes
+	if not biomesRoot then
+		return {}
+	end
+
+	if biomeBoundsCacheRoot == biomesRoot and biomeBoundsCache then
+		return biomeBoundsCache
+	end
+
+	local entries = {}
+	for _, biomeFolder in ipairs(biomesRoot:GetChildren()) do
+		local biomeIndex = getBiomeIndexFromName(biomeFolder.Name)
+		if biomeIndex then
+			local root = biomeFolder:FindFirstChild(biomeFolder.Name) or biomeFolder
+			for _, descendant in ipairs(root:GetDescendants()) do
+				if descendant:IsA("BasePart") and descendant.CanQuery ~= false then
+					entries[#entries + 1] = {
+						BiomeIndex = biomeIndex,
+						Root = root,
+						Part = descendant,
+					}
+				end
+			end
+		end
+	end
+
+	biomeBoundsCacheRoot = biomesRoot
+	biomeBoundsCache = entries
+	return entries
 end
 
-local function getZoneFallTime(position)
-	local zoneIndex = getZoneIndex(position)
-	return CONFIG.FallTimeByZone[zoneIndex] or CONFIG.FallTime
+local function isPositionInsidePartFootprint(part, position)
+	if not (part and part:IsA("BasePart") and typeof(position) == "Vector3") then
+		return false
+	end
+
+	local localPosition = part.CFrame:PointToObjectSpace(position)
+	local halfSize = part.Size * 0.5
+	local heightTolerance = math.max(8, CONFIG.GroundRayHeight + CONFIG.GroundRayDepth)
+	return math.abs(localPosition.X) <= halfSize.X
+		and math.abs(localPosition.Z) <= halfSize.Z
+		and math.abs(localPosition.Y) <= halfSize.Y + heightTolerance
+end
+
+local function resolveBiomeIndexFromPosition(position)
+	local refs = MapResolver.GetRefs()
+	for _, entry in ipairs(buildBiomeBoundsCache(refs)) do
+		if isPositionInsidePartFootprint(entry.Part, position) then
+			return entry.BiomeIndex, entry.Root
+		end
+	end
+
+	return nil, nil
 end
 
 local function hasKeywordInAncestry(instance, keywords)
@@ -236,11 +524,6 @@ local function getGroundHit(position, character)
 	return result
 end
 
-local function getGroundPosition(position, character)
-	local result = getGroundHit(position, character)
-	return result and result.Position or nil
-end
-
 local function isNearSafeGap(position, character)
 	local refs = MapResolver.GetRefs()
 	local startPart = refs.WaveStart
@@ -281,19 +564,77 @@ local function getPlayerBombTarget(player)
 		return nil
 	end
 
-	local groundPosition = getGroundPosition(rootPart.Position, character)
+	local groundHit = getGroundHit(rootPart.Position, character)
+	local groundPosition = groundHit and groundHit.Position
 	if not groundPosition or not isInsideRunZone(groundPosition) then
 		return nil
 	end
 
-	return groundPosition
+	local biomeIndex, biomeRoot = getBiomeIndexFromInstance(groundHit.Instance)
+	if not biomeIndex then
+		biomeIndex, biomeRoot = resolveBiomeIndexFromPosition(groundPosition)
+	end
+
+	if not biomeIndex then
+		warnOnce(
+			string.format("missing_biome:%s", tostring(groundHit.Instance and groundHit.Instance:GetFullName())),
+			"[CannonBarrage] skipped target player=%s reason=missing_biome ground=%s position=%s",
+			player.Name,
+			groundHit.Instance and groundHit.Instance:GetFullName() or "<nil>",
+			tostring(groundPosition)
+		)
+		return nil
+	end
+
+	return {
+		Position = groundPosition,
+		GroundPart = groundHit.Instance,
+		BiomeIndex = biomeIndex,
+		BiomeRoot = biomeRoot,
+		AreaName = getAreaNameForBiome(biomeIndex),
+		TargetSource = "PlayerGroundBiome",
+		TargetPlayer = player,
+	}
 end
 
-local function makeImpactCircle(position)
+local function setCannonDebugAttributes(instance, shot)
+	if not instance or type(shot) ~= "table" then
+		return
+	end
+
+	instance:SetAttribute("HazardClass", CONFIG.HazardClass)
+	instance:SetAttribute("HazardType", CONFIG.HazardType)
+	instance:SetAttribute("BiomeIndex", shot.BiomeIndex)
+	instance:SetAttribute("AreaName", tostring(shot.AreaName or ""))
+	instance:SetAttribute("CannonBand", shot.Band)
+	instance:SetAttribute("WarningTime", shot.WarningTime)
+	instance:SetAttribute("ImpactRadius", shot.ImpactRadius)
+	instance:SetAttribute("Damage", shot.Damage)
+	instance:SetAttribute("VfxName", tostring(shot.VfxName or ""))
+	instance:SetAttribute("TargetPlayer", tostring(shot.TargetPlayerName or ""))
+	instance:SetAttribute("TargetUserId", shot.TargetUserId)
+	instance:SetAttribute("TargetSource", tostring(shot.TargetSource or ""))
+	instance:SetAttribute("ShotIndex", shot.ShotIndex)
+	instance:SetAttribute("ShotsPerCycle", shot.ShotsPerCycle)
+	instance:SetAttribute("Bounty", shot.Bounty)
+	instance:SetAttribute("CannonBountyTier", shot.CannonBountyTier)
+	instance:SetAttribute("CannonInterval", shot.CannonInterval)
+	instance:SetAttribute("CannonIntervalBase", shot.CannonIntervalBase)
+	instance:SetAttribute("CannonIntervalJitter", shot.CannonIntervalJitter)
+	if shot.GroundPart then
+		instance:SetAttribute("GroundPartPath", shot.GroundPart:GetFullName())
+	end
+	if shot.BiomeRoot then
+		instance:SetAttribute("BiomeRootPath", shot.BiomeRoot:GetFullName())
+	end
+end
+
+local function makeImpactCircle(position, shot)
+	local radius = math.max(0.1, tonumber(shot and shot.ImpactRadius) or CONFIG.DefaultImpactRadius)
 	local circle = Instance.new("Part")
 	circle.Name = "BombTargetCircle"
 	circle.Shape = Enum.PartType.Cylinder
-	circle.Size = Vector3.new(CONFIG.CircleHeight, CONFIG.ImpactRadius * 2, CONFIG.ImpactRadius * 2)
+	circle.Size = Vector3.new(CONFIG.CircleHeight, radius * 2, radius * 2)
 	circle.CFrame = CFrame.new(position + Vector3.new(0, CONFIG.CircleHeight / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
 	circle.Anchored = true
 	circle.CanCollide = false
@@ -302,13 +643,14 @@ local function makeImpactCircle(position)
 	circle.Material = Enum.Material.Neon
 	circle.Color = Color3.fromRGB(255, 35, 25)
 	circle.Transparency = 0.35
-	markHazardHitboxPart(circle)
+	markHazardHitboxPart(circle, radius)
+	setCannonDebugAttributes(circle, shot)
 	circle.Parent = hazardsFolder
 
 	return circle
 end
 
-local function makeBomb(position)
+local function makeBomb(position, shot)
 	local bomb = Instance.new("Part")
 	bomb.Name = "SkyBomb"
 	bomb.Shape = Enum.PartType.Ball
@@ -320,6 +662,7 @@ local function makeBomb(position)
 	bomb.CanQuery = false
 	bomb.Material = Enum.Material.Metal
 	bomb.Color = Color3.fromRGB(18, 18, 20)
+	setCannonDebugAttributes(bomb, shot)
 	bomb.Parent = hazardsFolder
 
 	return bomb
@@ -355,22 +698,54 @@ local function findDescendantByLowerName(root, lowerName)
 	return nil
 end
 
-local function getImpactVfxTemplate(position)
+local function normalizeAssetName(name)
+	return string.lower(tostring(name or "")):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function findDescendantByNormalizedName(root, name)
+	if not root then
+		return nil
+	end
+
+	local normalizedName = normalizeAssetName(name)
+	if normalizeAssetName(root.Name) == normalizedName then
+		return root
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if normalizeAssetName(descendant.Name) == normalizedName then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local function getImpactVfxTemplate(vfxName)
 	local root = getCannonVfxRoot()
 	if not root then
 		return nil
 	end
 
-	local zoneIndex = getZoneIndex(position)
-	local configuredName = CONFIG.ZoneVfxNames[zoneIndex] or CONFIG.ZoneVfxNames[1]
-	local template = configuredName and findDescendantByLowerName(root, string.lower(configuredName))
-	if template then
-		return template
+	local configuredName = tostring(vfxName or CONFIG.DefaultVfxName)
+	local aliasName = VFX_NAME_ALIASES[normalizeAssetName(configuredName)] or configuredName
+	for _, candidateName in ipairs({ configuredName, aliasName }) do
+		local template = findDescendantByLowerName(root, string.lower(candidateName))
+			or findDescendantByNormalizedName(root, candidateName)
+		if template then
+			return template
+		end
 	end
 
+	warnOnce(
+		string.format("missing_vfx:%s", normalizeAssetName(configuredName)),
+		"[CannonBarrage] VFX template missing name=%s resolved=%s; falling back to canon explosion.",
+		configuredName,
+		tostring(aliasName)
+	)
+
 	return findDescendantByLowerName(root, "canon explosion")
-		or findDescendantByLowerName(root, "water explosion")
-		or findDescendantByLowerName(root, "ice")
+		or findDescendantByNormalizedName(root, "canon explosion")
 		or root
 end
 
@@ -497,12 +872,13 @@ local function emitVfx(root)
 	end
 end
 
-local function makeFallbackImpactFlash(position)
+local function makeFallbackImpactFlash(position, radius)
+	local impactRadius = math.max(0.1, tonumber(radius) or CONFIG.DefaultImpactRadius)
 	local flash = Instance.new("Part")
 	flash.Name = "BombImpactFlash"
 	flash.Shape = Enum.PartType.Ball
-	flash.Size = Vector3.new(CONFIG.ImpactRadius * 1.4, CONFIG.ImpactRadius * 1.4, CONFIG.ImpactRadius * 1.4)
-	flash.CFrame = CFrame.new(position + Vector3.new(0, CONFIG.ImpactRadius * 0.25, 0))
+	flash.Size = Vector3.new(impactRadius * 1.4, impactRadius * 1.4, impactRadius * 1.4)
+	flash.CFrame = CFrame.new(position + Vector3.new(0, impactRadius * 0.25, 0))
 	flash.Anchored = true
 	flash.CanCollide = false
 	flash.CanTouch = false
@@ -519,15 +895,16 @@ local function makeFallbackImpactFlash(position)
 	end)
 end
 
-local function playImpactVfx(position)
-	local template = getImpactVfxTemplate(position)
+local function playImpactVfx(position, shot)
+	local template = getImpactVfxTemplate(shot and shot.VfxName)
 	if not template then
-		makeFallbackImpactFlash(position)
+		makeFallbackImpactFlash(position, shot and shot.ImpactRadius)
 		return
 	end
 
 	local clone = template:Clone()
 	clone.Name = "CannonImpactVfx"
+	setCannonDebugAttributes(clone, shot)
 	scaleVfxClone(clone, CONFIG.ImpactVfxScale)
 	for _, item in ipairs(clone:GetDescendants()) do
 		configureVfxInstance(item)
@@ -547,15 +924,70 @@ local function playImpactVfx(position)
 	end)
 end
 
-local function makeExplosion(position)
-	playImpactVfx(position)
+local function makeExplosion(position, shot)
+	playImpactVfx(position, shot)
 end
 
-local function damagePlayersAt(position)
+local function isInsidePlanarImpactRadius(position, impactPosition, radius)
+	if typeof(position) ~= "Vector3" or typeof(impactPosition) ~= "Vector3" then
+		return false
+	end
+
+	local offset = position - impactPosition
+	local planarDistanceSquared = (offset.X * offset.X) + (offset.Z * offset.Z)
+	return planarDistanceSquared <= radius * radius
+end
+
+local function canTakeCannonImpactDamage(player, rootPart, impactPosition)
+	if not (player and rootPart and typeof(impactPosition) == "Vector3") then
+		return false
+	end
+
+	if not isInsideRunZone(rootPart.Position) then
+		return false
+	end
+
+	local verticalTolerance = math.max(0, tonumber(CONFIG.VerticalDamageTolerance) or 0)
+	if math.abs(rootPart.Position.Y - impactPosition.Y) > verticalTolerance then
+		return false
+	end
+
+	local character = player.Character
+	local groundHit = getGroundHit(rootPart.Position, character)
+	if not groundHit then
+		return false
+	end
+
+	return true
+end
+
+local function applyCannonKnockdown(player)
+	HitEffectService.ApplyEffect(player, "Knockdown", {
+		Duration = CONFIG.KnockdownDuration,
+		Priority = CONFIG.KnockdownPriority,
+		HazardClass = CONFIG.HazardClass,
+		HazardType = CONFIG.HazardType,
+		Source = "CannonBarrage",
+		Movement = {
+			WalkSpeedMultiplier = 0,
+			JumpMultiplier = 0,
+			AutoRotate = false,
+			PlatformStand = true,
+			State = Enum.HumanoidStateType.Physics,
+		},
+	})
+end
+
+local function damagePlayersAt(position, shot)
+	local impactRadius = math.max(0.1, tonumber(shot and shot.ImpactRadius) or CONFIG.DefaultImpactRadius)
+	local damage = math.max(0, tonumber(shot and shot.Damage) or CONFIG.DefaultDamage)
 	for _, player in ipairs(Players:GetPlayers()) do
-		local targetPosition = getPlayerBombTarget(player)
 		local _, humanoid, rootPart = getCharacterParts(player)
-		if targetPosition and humanoid and rootPart and (rootPart.Position - position).Magnitude <= CONFIG.ImpactRadius then
+		if humanoid
+			and rootPart
+			and isInsidePlanarImpactRadius(rootPart.Position, position, impactRadius)
+			and canTakeCannonImpactDamage(player, rootPart, position)
+		then
 			local isHazardProtected = HazardProtection.IsProtected(player, {
 				Position = position,
 				HitPosition = position,
@@ -564,17 +996,90 @@ local function damagePlayersAt(position)
 				Source = "CannonBarrage",
 			})
 			if not isHazardProtected then
-				humanoid:TakeDamage(CONFIG.Damage)
+				applyCannonKnockdown(player)
+				humanoid:TakeDamage(damage)
 			end
 		end
 	end
 end
 
-local function dropBombAt(position)
+local function destroyImpactCircle(circle)
+	if circle and circle.Parent then
+		circle:Destroy()
+	end
+end
+
+local function hideWarningCircle(circle)
+	if circle and circle.Parent then
+		circle.Transparency = 1
+	end
+end
+
+local function getActiveBombCountForUserId(userId)
+	local normalizedUserId = tonumber(userId)
+	if not normalizedUserId or normalizedUserId <= 0 then
+		return 0
+	end
+
+	return math.max(0, tonumber(activeBombCountByUserId[normalizedUserId]) or 0)
+end
+
+local function releaseActiveBombSlot(userId)
+	activeBombCount = math.max(0, activeBombCount - 1)
+
+	local normalizedUserId = tonumber(userId)
+	if normalizedUserId and normalizedUserId > 0 then
+		local current = math.max(0, tonumber(activeBombCountByUserId[normalizedUserId]) or 0)
+		if current <= 1 then
+			activeBombCountByUserId[normalizedUserId] = nil
+		else
+			activeBombCountByUserId[normalizedUserId] = current - 1
+		end
+	end
+end
+
+local function tryReserveActiveBombSlot(shot, circle)
+	local globalLimit = math.max(1, tonumber(CONFIG.MaxActiveBombs) or 12)
+	if activeBombCount >= globalLimit then
+		warnOnce(
+			"max_active_bombs",
+			"[CannonBarrage] skipped drop reason=max_active_bombs limit=%d",
+			globalLimit
+		)
+		destroyImpactCircle(circle)
+		return false
+	end
+
+	local userId = tonumber(shot and shot.TargetUserId)
+	local perPlayerLimit = math.max(1, tonumber(CONFIG.MaxActiveBombsPerPlayer) or 1)
+	if userId and userId > 0 and getActiveBombCountForUserId(userId) >= perPlayerLimit then
+		warnOnce(
+			string.format("max_active_bombs_player:%d", userId),
+			"[CannonBarrage] skipped drop player=%s reason=max_active_bombs_per_player limit=%d",
+			tostring(shot and shot.TargetPlayerName or userId),
+			perPlayerLimit
+		)
+		destroyImpactCircle(circle)
+		return false
+	end
+
+	activeBombCount += 1
+	if userId and userId > 0 then
+		activeBombCountByUserId[userId] = getActiveBombCountForUserId(userId) + 1
+	end
+
+	return true
+end
+
+local function dropBombAt(position, shot, circle)
+	if not tryReserveActiveBombSlot(shot, circle) then
+		return
+	end
+
 	local startPosition = position + Vector3.new(0, CONFIG.DropHeight, 0)
 	local endPosition = position + Vector3.new(0, CONFIG.BombSize / 2, 0)
-	local fallTime = getZoneFallTime(position)
-	local bomb = makeBomb(startPosition)
+	local fallTime = math.max(0.05, tonumber(shot and shot.FallTime) or CONFIG.FallTime)
+	local bomb = makeBomb(startPosition, shot)
 
 	local elapsed = 0
 	while elapsed < fallTime and bomb.Parent do
@@ -590,8 +1095,43 @@ local function dropBombAt(position)
 		bomb:Destroy()
 	end
 
-	makeExplosion(position)
-	damagePlayersAt(position)
+	makeExplosion(position, shot)
+	damagePlayersAt(position, shot)
+	task.delay(math.max(0, tonumber(CONFIG.ImpactDebugLinger) or 0), function()
+		destroyImpactCircle(circle)
+	end)
+	releaseActiveBombSlot(shot and shot.TargetUserId)
+end
+
+local function buildShotContext(player, targetData, tuning, shotIndex, shotsPerCycle, bountyContext)
+	local biomeIndex = normalizeBiomeIndex(targetData and targetData.BiomeIndex) or 1
+	local resolvedTuning = tuning or getCannonTuningForBiome(biomeIndex)
+	bountyContext = if typeof(bountyContext) == "table" then bountyContext else {}
+	return {
+		Band = math.floor(tonumber(resolvedTuning and resolvedTuning.Band) or 1),
+		BiomeIndex = biomeIndex,
+		AreaName = targetData and targetData.AreaName or getAreaNameForBiome(biomeIndex),
+		BiomeRoot = targetData and targetData.BiomeRoot,
+		GroundPart = targetData and targetData.GroundPart,
+		TargetSource = targetData and targetData.TargetSource or "PlayerGroundBiome",
+		TargetPlayerName = player and player.Name or "",
+		TargetUserId = player and player.UserId or 0,
+		ShotIndex = math.floor(tonumber(shotIndex) or 1),
+		ShotsPerCycle = math.floor(tonumber(shotsPerCycle) or 1),
+		WarningTime = math.max(0.05, tonumber(resolvedTuning and resolvedTuning.WarningTime) or CONFIG.DefaultWarningTime),
+		ImpactRadius = math.max(
+			0.1,
+			tonumber(resolvedTuning and resolvedTuning.ImpactRadius) or CONFIG.DefaultImpactRadius
+		),
+		Damage = rollCannonDamage(resolvedTuning),
+		FallTime = math.max(0.05, tonumber(resolvedTuning and resolvedTuning.FallTime) or CONFIG.FallTime),
+		VfxName = resolveCannonVfxName(resolvedTuning, biomeIndex),
+		Bounty = math.max(0, math.floor((tonumber(bountyContext.Bounty) or 0) + 0.5)),
+		CannonBountyTier = math.max(0, math.floor(tonumber(bountyContext.TierId) or 0)),
+		CannonInterval = tonumber(bountyContext.Interval) or 0,
+		CannonIntervalBase = tonumber(bountyContext.IntervalBase) or 0,
+		CannonIntervalJitter = tonumber(bountyContext.IntervalJitter) or 0,
+	}
 end
 
 local function runPlayerLoop(player)
@@ -603,22 +1143,55 @@ local function runPlayerLoop(player)
 
 	task.spawn(function()
 		while player.Parent == Players do
-			local targetPosition = getPlayerBombTarget(player)
-			if not targetPosition then
+			local bounty = getPlayerBounty(player)
+			local intervalBase, _, bountyTierId = getCannonIntervalForBounty(bounty)
+			if not intervalBase then
+				task.wait(CONFIG.BountyCheckDelay)
+				continue
+			end
+
+			local initialTargetData = getPlayerBombTarget(player)
+			if not initialTargetData then
 				task.wait(CONFIG.TargetCheckDelay)
 				continue
 			end
 
-			local circle = makeImpactCircle(targetPosition)
+			local intervalJitter = getCannonIntervalJitter()
+			local cannonInterval = math.max(
+				tonumber(CONFIG.MinCannonInterval) or 1,
+				intervalBase + intervalJitter
+			)
+			local bountyContext = {
+				Bounty = bounty,
+				TierId = bountyTierId,
+				Interval = cannonInterval,
+				IntervalBase = intervalBase,
+				IntervalJitter = intervalJitter,
+			}
+			local cycleTuning = getCannonTuningForBiome(initialTargetData.BiomeIndex)
+			local shotsPerCycle = rollShotsPerCycle(cycleTuning)
+			local firedAnyShot = false
+			for shotIndex = 1, shotsPerCycle do
+				local targetData = getPlayerBombTarget(player)
+				if not targetData then
+					break
+				end
 
-			task.wait(CONFIG.WarningTime)
+				local tuning = getCannonTuningForBiome(targetData.BiomeIndex)
+				local shot = buildShotContext(player, targetData, tuning, shotIndex, shotsPerCycle, bountyContext)
+				local circle = makeImpactCircle(targetData.Position, shot)
+				firedAnyShot = true
 
-			if circle.Parent then
-				circle:Destroy()
+				task.wait(shot.WarningTime)
+
+				hideWarningCircle(circle)
+				dropBombAt(targetData.Position, shot, circle)
+				if shotIndex < shotsPerCycle then
+					task.wait(CONFIG.InterShotDelay)
+				end
 			end
 
-			dropBombAt(targetPosition)
-			task.wait(CONFIG.RetargetDelay)
+			task.wait(if firedAnyShot then cannonInterval else CONFIG.TargetCheckDelay)
 		end
 
 		activeLoopsByPlayer[player] = nil
@@ -628,6 +1201,7 @@ end
 Players.PlayerAdded:Connect(runPlayerLoop)
 Players.PlayerRemoving:Connect(function(player)
 	activeLoopsByPlayer[player] = nil
+	activeBombCountByUserId[player.UserId] = nil
 end)
 
 for _, player in ipairs(Players:GetPlayers()) do

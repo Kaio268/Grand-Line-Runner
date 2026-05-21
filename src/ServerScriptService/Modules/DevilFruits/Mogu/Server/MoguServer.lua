@@ -813,6 +813,7 @@ end
 local function buildStartPayload(context, burrowState, startedAt, endsAt, direction, directionSource, startPosition)
 	local abilityConfig = context.AbilityConfig or {}
 	local resolvedStartPosition = startPosition or context.RootPart.Position
+	local hazardProtectionRadius = math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or 0)
 
 	return {
 		Phase = PHASE_START,
@@ -828,7 +829,10 @@ local function buildStartPayload(context, burrowState, startedAt, endsAt, direct
 		StartPosition = resolvedStartPosition,
 		EntryBurstRadius = MoguBurrowShared.GetEntryBurstRadius(abilityConfig),
 		ResolveBurstRadius = MoguBurrowShared.GetResolveBurstRadius(abilityConfig),
-		HazardProtectionRadius = math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or 0),
+		HazardProtectionRadius = hazardProtectionRadius,
+		HitboxDebugMode = "FollowTargetRoot",
+		HitboxDebugRadius = hazardProtectionRadius,
+		HitboxVisualDuration = endsAt - startedAt,
 		ConcealTransparency = MoguBurrowShared.GetConcealTransparency(abilityConfig),
 		TrailInterval = MoguBurrowShared.GetTrailInterval(abilityConfig),
 	}

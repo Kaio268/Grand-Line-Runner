@@ -7,11 +7,13 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomePlacementResolver = require(Modules:WaitForChild("BiomePlacementResolver"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
-local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
+local BiomeAreas = require(Configs:WaitForChild("BiomeAreas"))
+local SpawnPartsConfig = require(Configs:WaitForChild("SpawnParts"))
 local HazardRuntime = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
@@ -52,13 +54,19 @@ local CONFIG = {
 	BiomePlacementEdgePadding = 1,
 	GlobalScaleMultiplier = 1,
 	YawDegrees = 90,
+
+	-- Puddle balance knobs:
+	-- Higher ScaleRange values make larger puddles.
+	-- Lower SlowMultiplier values make puddles slow players harder.
+	-- Higher PuddlesPerSurface values add more puddles per accepted platform.
+	-- Larger MinSpacing values reduce close/overlapping puddle placements.
 	ProgressionBands = {
 		{
 			Band = 1,
 			BiomeStart = 1,
 			BiomeEnd = 2,
 			PuddlesPerSurface = 1,
-			ScaleRange = { Min = 0.95, Max = 1.15 },
+			ScaleRange = { Min = 1.00, Max = 1.25 },
 			SlowMultiplier = 0.75,
 			MinSpacing = 4,
 			MaxPlacementAttempts = 24,
@@ -69,33 +77,33 @@ local CONFIG = {
 			BiomeStart = 3,
 			BiomeEnd = 4,
 			PuddlesPerSurface = 2,
-			ScaleRange = { Min = 1.15, Max = 1.40 },
+			ScaleRange = { Min = 1.35, Max = 1.70 },
 			SlowMultiplier = 0.65,
 			MinSpacing = 5,
-			MaxPlacementAttempts = 28,
-			CandidateAttempts = 14,
+			MaxPlacementAttempts = 32,
+			CandidateAttempts = 16,
 		},
 		{
 			Band = 3,
 			BiomeStart = 5,
 			BiomeEnd = 6,
 			PuddlesPerSurface = 3,
-			ScaleRange = { Min = 1.40, Max = 1.75 },
+			ScaleRange = { Min = 1.85, Max = 2.35 },
 			SlowMultiplier = 0.55,
 			MinSpacing = 6,
-			MaxPlacementAttempts = 32,
-			CandidateAttempts = 16,
+			MaxPlacementAttempts = 40,
+			CandidateAttempts = 20,
 		},
 		{
 			Band = 4,
 			BiomeStart = 7,
 			BiomeEnd = 8,
 			PuddlesPerSurface = 4,
-			ScaleRange = { Min = 1.75, Max = 2.15 },
+			ScaleRange = { Min = 2.50, Max = 3.25 },
 			SlowMultiplier = 0.45,
 			MinSpacing = 7,
-			MaxPlacementAttempts = 36,
-			CandidateAttempts = 18,
+			MaxPlacementAttempts = 48,
+			CandidateAttempts = 24,
 		},
 	},
 	SafeFloorNameKeywords = {
@@ -152,12 +160,54 @@ local PUDDLE_TEMPLATE_TOKENS_BY_AREA = {
 	["dresserosa"] = { "dresserosa", "dressrosa" },
 }
 
+local PUDDLE_EXPLICIT_SURFACE_ATTRIBUTES = {
+	"AllowPuddle",
+	"AllowPuddles",
+	"BiomeFloor",
+	"PuddleFloor",
+	"PuddlePlacement",
+	"PuddleSpawnFloor",
+}
+
+local PUDDLE_EXPLICIT_SURFACE_TAGS = {
+	"AllowPuddle",
+	"AllowPuddles",
+	"BiomeFloor",
+	"PuddleFloor",
+	"PuddlePlacement",
+	"PuddleSpawnFloor",
+}
+
+local PUDDLE_DENY_ATTRIBUTES = {
+	"BombSafe",
+	"DebugHitbox",
+	"HazardHitbox",
+	"IsSafeZone",
+	"NoHazard",
+	"NoHazards",
+	"NoPuddle",
+	"NoPuddles",
+	"PuddleBlocked",
+	"SafeZone",
+}
+
+local PUDDLE_DENY_TAGS = {
+	"DebugHitbox",
+	"HazardHitbox",
+	"NoHazard",
+	"NoPuddle",
+	"NoPuddles",
+	"PuddleBlocked",
+	"SafeZone",
+}
+
 local rng = Random.new()
 local activeControllers = {}
 local templateCacheByArea = {}
 local templateMetadataByTemplate = setmetatable({}, { __mode = "k" })
 local placementFailureCountsByArea = {}
 local warnedMessages = {}
+local rarityPadSurfaceNames = nil
 local lastTraceStateKey = nil
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("PuddlesDebugTrace") == true
 
@@ -198,7 +248,7 @@ end
 
 local function formatPlacementDiagnostics(diagnostics)
 	if type(diagnostics) ~= "table" then
-		return "reason=unknown root=<nil> candidate=<nil> surfaces=0 explicit=0 general=0 usedExplicit=false rejections={none} samples={none}"
+		return "reason=unknown root=<nil> candidate=<nil> acceptedAs=<nil> surfaces=0 explicit=0 fallback=0 general=0 usedExplicit=false rejections={none} samples={none}"
 	end
 
 	local surfaceDiagnostics = diagnostics.Diagnostics
@@ -206,12 +256,14 @@ local function formatPlacementDiagnostics(diagnostics)
 	local rejectionSamples = BiomePlacementResolver.FormatRejectionSamples(surfaceDiagnostics)
 
 	return string.format(
-		"reason=%s root=%s candidate=%s surfaces=%d explicit=%d general=%d usedExplicit=%s rejections={%s} samples={%s}",
+		"reason=%s root=%s candidate=%s acceptedAs=%s surfaces=%d explicit=%d fallback=%d general=%d usedExplicit=%s rejections={%s} samples={%s}",
 		tostring(diagnostics.Reason or "unknown"),
 		tostring(diagnostics.RootPath or "<nil>"),
 		tostring(diagnostics.CandidatePartPath or "<nil>"),
+		tostring(diagnostics.SurfaceAcceptanceReason or "<nil>"),
 		tonumber(diagnostics.SurfaceCount) or 0,
 		tonumber(diagnostics.ExplicitSurfaceCount) or 0,
+		tonumber(diagnostics.FallbackSurfaceCount) or 0,
 		tonumber(diagnostics.GeneralSurfaceCount) or 0,
 		tostring(diagnostics.UsedExplicit == true),
 		rejectionSummary,
@@ -579,10 +631,35 @@ local function getSlowMultiplierForTuning(tuning)
 	return math.clamp(tonumber(tuning.SlowMultiplier) or tonumber(CONFIG.FallbackSlowMultiplier) or 0.5, 0, 1)
 end
 
+local function getRarityPadSurfaceNames()
+	if rarityPadSurfaceNames then
+		return rarityPadSurfaceNames
+	end
+
+	local names = {}
+	for rarityName in pairs(SpawnPartsConfig.RarityTier or {}) do
+		names[#names + 1] = tostring(rarityName)
+	end
+	table.sort(names)
+
+	rarityPadSurfaceNames = names
+	return rarityPadSurfaceNames
+end
+
 local function buildSurfaceQueryOptions()
 	return {
 		Context = "Puddles",
-		FilterKey = "Puddles",
+		FilterKey = "PuddlesStrictSurfaces",
+		AllowAttributes = PUDDLE_EXPLICIT_SURFACE_ATTRIBUTES,
+		AllowTags = PUDDLE_EXPLICIT_SURFACE_TAGS,
+		DenyAttributes = PUDDLE_DENY_ATTRIBUTES,
+		DenyTags = PUDDLE_DENY_TAGS,
+		RequireExplicitOrFallbackSurface = true,
+		AllowFallbackAfterExplicitFailure = false,
+		FallbackSurfaceNames = getRarityPadSurfaceNames(),
+		ExplicitSurfaceAcceptanceReason = "explicit_puddle_marker",
+		FallbackSurfaceAcceptanceReason = "rarity_pad_fallback",
+		UnmarkedSurfaceRejectReason = "unmarked_non_rarity_surface",
 		WarnIfMissing = false,
 	}
 end
@@ -1092,9 +1169,12 @@ local function choosePuddlePlacementFromBiomeGeometry(
 		placementDiagnostics.SurfaceCount = candidate.SurfaceCount or placementDiagnostics.SurfaceCount
 		placementDiagnostics.ExplicitSurfaceCount = candidate.ExplicitSurfaceCount
 			or placementDiagnostics.ExplicitSurfaceCount
+		placementDiagnostics.FallbackSurfaceCount = candidate.FallbackSurfaceCount
+			or placementDiagnostics.FallbackSurfaceCount
 		placementDiagnostics.GeneralSurfaceCount = candidate.GeneralSurfaceCount
 			or placementDiagnostics.GeneralSurfaceCount
 		placementDiagnostics.UsedExplicit = candidate.UsedExplicitSurface == true
+		placementDiagnostics.SurfaceAcceptanceReason = candidate.SurfaceAcceptanceReason
 
 		return {
 			GroundPosition = groundPosition,
@@ -1108,8 +1188,10 @@ local function choosePuddlePlacementFromBiomeGeometry(
 			BiomeRootPath = candidate.BiomeRootPath,
 			SurfaceCount = candidate.SurfaceCount,
 			ExplicitSurfaceCount = candidate.ExplicitSurfaceCount,
+			FallbackSurfaceCount = candidate.FallbackSurfaceCount,
 			GeneralSurfaceCount = candidate.GeneralSurfaceCount,
 			UsedExplicitSurface = candidate.UsedExplicitSurface == true,
+			SurfaceAcceptanceReason = candidate.SurfaceAcceptanceReason,
 		},
 			nil,
 			placementDiagnostics
@@ -1504,6 +1586,7 @@ local function setPuddlePlacementAttributes(instance, placement, areaName, templ
 	instance:SetAttribute("TemplateName", template and template.Name or "")
 	instance:SetAttribute("PlacementSource", tostring((placement and placement.PlacementSource) or "BiomeGeometry"))
 	instance:SetAttribute("PlacementPartPath", formatInstancePath(placement and placement.PlacementPart))
+	instance:SetAttribute("PlacementSurfaceReason", tostring((placement and placement.SurfaceAcceptanceReason) or ""))
 	instance:SetAttribute("BiomeRootPath", tostring((placement and placement.BiomeRootPath) or ""))
 	instance:SetAttribute("PlacementSurfaceCount", tonumber(placement and placement.SurfaceCount) or 0)
 	instance:SetAttribute("PuddleBand", tonumber(placement and placement.PuddleBand) or 0)
@@ -1699,12 +1782,13 @@ local function spawnPuddle(
 	end)
 
 	trace(
-		"spawned biome=%d area=%s band=%d template=%s source=%s part=%s surfaces=%d relativeScale=%.2f slow=%.2f perSurface=%d",
+		"spawned biome=%d area=%s band=%d template=%s source=%s surfaceReason=%s part=%s surfaces=%d relativeScale=%.2f slow=%.2f perSurface=%d",
 		biomeIndex,
 		tostring(areaName),
 		tonumber(placement.PuddleBand) or 0,
 		template.Name,
 		tostring(placement.PlacementSource or "unknown"),
+		tostring(placement.SurfaceAcceptanceReason or "unknown"),
 		formatInstancePath(placement.PlacementPart),
 		tonumber(placement.SurfaceCount) or 0,
 		relativeScale,

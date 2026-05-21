@@ -1,6 +1,7 @@
 local HudStatsTheme = {}
 
 HudStatsTheme.Font = Enum.Font.FredokaOne
+HudStatsTheme.SpeedDebuffAttribute = "SpeedDebuffActive"
 
 HudStatsTheme.Card = {
 	CornerRadius = 20,
@@ -96,6 +97,15 @@ HudStatsTheme.Palette = {
 		rowFill = Color3.fromRGB(180, 87, 63),
 		rowStroke = Color3.fromRGB(233, 127, 97),
 	},
+	SpeedDebuffed = {
+		value = Color3.fromRGB(241, 225, 255),
+		label = Color3.fromRGB(213, 164, 255),
+		stroke = Color3.fromRGB(83, 38, 126),
+		shadow = Color3.fromRGB(28, 10, 45),
+		glow = Color3.fromRGB(179, 99, 255),
+		rowFill = Color3.fromRGB(112, 68, 168),
+		rowStroke = Color3.fromRGB(193, 128, 255),
+	},
 	Money = {
 		value = Color3.fromRGB(255, 241, 176),
 		label = Color3.fromRGB(242, 209, 107),
@@ -116,7 +126,11 @@ HudStatsTheme.Palette = {
 	},
 }
 
-function HudStatsTheme.getPalette(kind)
+function HudStatsTheme.getPalette(kind, state)
+	if kind == "Speed" and typeof(state) == "table" and state.speedDebuffActive == true then
+		return HudStatsTheme.Palette.SpeedDebuffed
+	end
+
 	return HudStatsTheme.Palette[kind] or HudStatsTheme.Palette.Default
 end
 

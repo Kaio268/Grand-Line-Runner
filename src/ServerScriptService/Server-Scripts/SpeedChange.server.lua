@@ -8,6 +8,7 @@ local DECREASE_PART = Workspace:WaitForChild("DecreaseSpeed")
 -- Legacy Studio part name. The part is still observed for diagnostics, but it no longer changes speed.
 local LEGACY_DECREASE_SPEED_FLOOR = nil
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
+local MovementSpeedConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("MovementSpeed"))
 local DEBUG_TRACE = RunService:IsStudio()
 local SELECTED_SPEED_SETTING_NAME = "SelectedSpeed"
 local SPEED_AUTO_MAX_SETTING_NAME = "SpeedAutoMax"
@@ -165,6 +166,7 @@ local function hookCharacter(player, character)
 	local speedObj = hidden:WaitForChild("Speed")
 
 	local base = humanoid.WalkSpeed
+	setAttributeIfChanged(player, MovementSpeedConfig.Attributes.BaseWalkSpeed, base)
 
 	local inDecreaseZone = false
 
@@ -430,6 +432,7 @@ local function hookCharacter(player, character)
 
 			local normalizedSpeed = humanoid.WalkSpeed / totalSpeedMultiplier
 			base = normalizedSpeed - getSelectedSpeed()
+			setAttributeIfChanged(player, MovementSpeedConfig.Attributes.BaseWalkSpeed, base)
 			apply()
 		end
 	end)

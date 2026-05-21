@@ -8,9 +8,11 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local BiomePlacementResolver = require(Modules:WaitForChild("BiomePlacementResolver"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
+local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
@@ -24,30 +26,30 @@ local CONFIG = {
 	InitialSpawnDelay = 3,
 	SpawnDelayMin = 0.08,
 	SpawnDelayMax = 0.18,
-	SpikesPerPop = 2,
+	MaxSpawnOperationsPerCycle = 4,
 
-	WarningTime = 3,
 	ThrustTime = 0.12,
-	HoldTime = 2.5,
 	RetractTime = 0.16,
 
 	BiomeCount = 8,
 	MaxActiveSpikes = 180,
-	SpawnAttempts = 30,
-	MinimumForwardAlpha = 0.14,
-	MaximumForwardAlpha = 0.94,
-	BiomePaddingAlpha = 0.08,
 
 	GroundProbeHeight = 120,
 	GroundProbeDepth = 260,
 	MaxGroundHeightDelta = 3,
 	GroundNormalMin = 0.65,
-	SafeGapBuffer = 18,
+	FootprintSupportPadding = 4,
 	FootprintSampleSpacing = 5,
-	MaxFootprintSampleSteps = 14,
-	BiomeGeometrySpawnAttempts = 40,
+	MaxFootprintSampleSteps = 8,
+	SurfaceEdgePadding = 1,
 	SafeFloorNameKeywords = {
+		"barrier",
+		"bound",
+		"boundary",
+		"decor",
+		"decoration",
 		"gap",
+		"marker",
 		"safe",
 		"safezone",
 		"refuge",
@@ -58,21 +60,81 @@ local CONFIG = {
 		"no_spike",
 	},
 
-	LaneCount = 20,
-	LaneWidthScale = 0.82,
-	SpikeHeight = 7,
-	SpikeLength = 18,
+	GeneratedSpikeBaseSize = Vector3.new(7.5, 5.86, 5.77),
 	SpikeVisualScale = 3.2,
 	PreviewHeight = 0.45,
 	WarningGroundOffset = 0.25,
 
-	Damage = 65,
+	FallbackWarningTime = 3,
+	FallbackHoldTime = 2.5,
+	FallbackDamage = 65,
 	KnockdownDuration = 0.8,
 	HazardClass = "minor",
 	HazardType = "deck_spikes",
 	UseSpikeTrapTemplates = true,
-	ReverseBiomeTemplates = true,
 	IgnoreNoDisastersTimerInStudio = true,
+
+	-- Spike balance knobs:
+	-- Higher SpikesPerSurface values add more traps per accepted platform.
+	-- Higher ScaleRange values make larger spike traps.
+	-- WarningTime is the telegraph/windup before spikes rise.
+	-- HoldTime is how long raised spikes stay dangerous.
+	-- Higher DamageRange values make spikes hit harder.
+	-- Larger MinSpacing values reduce close/overlapping spike placements.
+	SpikeTuningBands = {
+		{
+			Id = 1,
+			MinBiome = 1,
+			MaxBiome = 2,
+			SpikesPerSurface = { Min = 2, Max = 2 },
+			ScaleRange = { Min = 0.95, Max = 1.05 },
+			DamageRange = { Min = 45, Max = 55 },
+			WarningTime = 3.2,
+			HoldTime = 2.5,
+			MinSpacing = 8,
+			MaxPlacementAttempts = 24,
+			CandidateAttempts = 12,
+		},
+		{
+			Id = 2,
+			MinBiome = 3,
+			MaxBiome = 4,
+			SpikesPerSurface = { Min = 4, Max = 4 },
+			ScaleRange = { Min = 1.0, Max = 1.1 },
+			DamageRange = { Min = 55, Max = 65 },
+			WarningTime = 3.0,
+			HoldTime = 2.5,
+			MinSpacing = 10,
+			MaxPlacementAttempts = 26,
+			CandidateAttempts = 12,
+		},
+		{
+			Id = 3,
+			MinBiome = 5,
+			MaxBiome = 6,
+			SpikesPerSurface = { Min = 6, Max = 6 },
+			ScaleRange = { Min = 1.05, Max = 1.18 },
+			DamageRange = { Min = 65, Max = 65 },
+			WarningTime = 2.7,
+			HoldTime = 2.5,
+			MinSpacing = 12,
+			MaxPlacementAttempts = 28,
+			CandidateAttempts = 14,
+		},
+		{
+			Id = 4,
+			MinBiome = 7,
+			MaxBiome = 8,
+			SpikesPerSurface = { Min = 8, Max = 8 },
+			ScaleRange = { Min = 1.1, Max = 1.25 },
+			DamageRange = { Min = 70, Max = 75 },
+			WarningTime = 2.5,
+			HoldTime = 2.5,
+			MinSpacing = 14,
+			MaxPlacementAttempts = 30,
+			CandidateAttempts = 14,
+		},
+	},
 }
 
 if not CONFIG.Enabled then
@@ -94,7 +156,7 @@ local function markHazardHitboxPart(part)
 end
 
 local SPIKE_TEMPLATE_NAMES_BY_AREA = {
-	["foosha village"] = "(FOOSHA) WOODEN SPIKE TRAP",
+	["foosha village"] = "(FOOSHA) WOODEN SPIKE TRAPS",
 	["arlong park"] = "(ARLONG PARK) BONE SPIKE TRAP",
 	["drum island"] = "(DRUM ISLAND) ICE SPIKE TRAP",
 	["alabasta"] = "(ALABASTA) SAND SPIKE TRAP",
@@ -117,9 +179,51 @@ local SPIKE_TEMPLATE_TOKENS_BY_AREA = {
 	["dresserosa"] = { "dresserosa", "dressrosa" },
 }
 
+local SPIKE_SURFACE_ALLOW_ATTRIBUTES = {
+	"SpikeFloor",
+	"SpikePlacement",
+	"SpikeSpawnFloor",
+	"SpikeTrapFloor",
+	"HazardFloor",
+}
+
+local SPIKE_SURFACE_ALLOW_TAGS = {
+	"SpikeFloor",
+	"SpikePlacement",
+	"SpikeSpawnFloor",
+	"SpikeTrapFloor",
+	"HazardFloor",
+}
+
+local SPIKE_SURFACE_DENY_ATTRIBUTES = {
+	"BombSafe",
+	"DebugHitbox",
+	"HazardHitbox",
+	"IsSafeZone",
+	"NoHazard",
+	"NoHazards",
+	"NoSpike",
+	"NoSpikes",
+	"SafeZone",
+	"SpikeBlocked",
+}
+
+local SPIKE_SURFACE_DENY_TAGS = {
+	"DebugHitbox",
+	"HazardHitbox",
+	"NoHazard",
+	"NoHazards",
+	"NoSpike",
+	"NoSpikes",
+	"SafeZone",
+	"SpikeBlocked",
+}
+
 local rng = Random.new()
 local activeControllers = {}
 local templateCacheByArea = {}
+local templateMetadataCacheByArea = {}
+local warnedPlacementFailures = {}
 
 local function getNoDisastersTimer()
 	local timer = Workspace:FindFirstChild("NoDisastersTimer")
@@ -136,6 +240,130 @@ local function isNoDisastersPaused(timer)
 	end
 
 	return timer and timer.Value > 0
+end
+
+local function formatInstancePath(instance)
+	return if instance then instance:GetFullName() else "<nil>"
+end
+
+local function warnPlacementFailure(key, message, ...)
+	local textKey = tostring(key or message)
+	if warnedPlacementFailures[textKey] then
+		return
+	end
+
+	warnedPlacementFailures[textKey] = true
+	warn(string.format(message, ...))
+end
+
+local function getRarityPadSurfaceNames()
+	local names = {}
+	for name in pairs(SpawnPartsConfig.RarityTier or {}) do
+		names[#names + 1] = tostring(name)
+	end
+	table.sort(names)
+	return names
+end
+
+local function rollNumberRange(range, fallback)
+	if type(range) ~= "table" then
+		return tonumber(range) or fallback
+	end
+
+	local minValue = tonumber(range.Min) or tonumber(range[1]) or fallback
+	local maxValue = tonumber(range.Max) or tonumber(range[2]) or minValue
+	if maxValue < minValue then
+		minValue, maxValue = maxValue, minValue
+	end
+
+	if math.abs(maxValue - minValue) <= 0.0001 then
+		return minValue
+	end
+
+	return rng:NextNumber(minValue, maxValue)
+end
+
+local function rollIntegerRange(range, fallback)
+	local value = rollNumberRange(range, fallback)
+	return math.max(0, math.floor(value + 0.5))
+end
+
+local function getSpikeTuningForBiome(biomeIndex)
+	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, CONFIG.BiomeCount)
+	for _, tuning in ipairs(CONFIG.SpikeTuningBands or {}) do
+		local minBiome = math.floor(tonumber(tuning.MinBiome) or normalizedBiome)
+		local maxBiome = math.floor(tonumber(tuning.MaxBiome) or minBiome)
+		if normalizedBiome >= minBiome and normalizedBiome <= maxBiome then
+			return tuning
+		end
+	end
+
+	return {
+		Id = 0,
+		SpikesPerSurface = 1,
+		ScaleRange = 1,
+		DamageRange = CONFIG.FallbackDamage,
+		WarningTime = CONFIG.FallbackWarningTime,
+		HoldTime = CONFIG.FallbackHoldTime,
+		MinSpacing = 8,
+		MaxPlacementAttempts = 24,
+		CandidateAttempts = 12,
+	}
+end
+
+local function rollSpikeScale(tuning)
+	return math.max(0.1, rollNumberRange(tuning and tuning.ScaleRange, 1))
+end
+
+local function getMaxSpikeScale(tuning)
+	local range = tuning and tuning.ScaleRange
+	if type(range) == "table" then
+		local minValue = tonumber(range.Min) or tonumber(range[1]) or 1
+		local maxValue = tonumber(range.Max) or tonumber(range[2]) or minValue
+		return math.max(minValue, maxValue)
+	end
+
+	return tonumber(range) or 1
+end
+
+local function rollSpikeDamage(tuning)
+	return math.max(0, rollIntegerRange(tuning and tuning.DamageRange, CONFIG.FallbackDamage))
+end
+
+local function rollSpikesPerSurface(tuning)
+	return math.max(0, rollIntegerRange(tuning and tuning.SpikesPerSurface, 1))
+end
+
+local function getTargetSpikeModelScale(relativeScale)
+	return math.max(0.01, (tonumber(CONFIG.SpikeVisualScale) or 1) * math.max(0.1, tonumber(relativeScale) or 1))
+end
+
+local function getPlacementAttemptsForTuning(tuning)
+	return math.max(1, math.floor(tonumber(tuning and tuning.MaxPlacementAttempts) or 24))
+end
+
+local function getCandidateAttemptsForTuning(tuning)
+	return math.max(1, math.floor(tonumber(tuning and tuning.CandidateAttempts) or 12))
+end
+
+local function buildSurfaceQueryOptions(footprintSize, tuning)
+	return {
+		Context = "DeckSpikes",
+		FilterKey = "DeckSpikesStrictSurfaces",
+		AllowAttributes = SPIKE_SURFACE_ALLOW_ATTRIBUTES,
+		AllowTags = SPIKE_SURFACE_ALLOW_TAGS,
+		DenyAttributes = SPIKE_SURFACE_DENY_ATTRIBUTES,
+		DenyTags = SPIKE_SURFACE_DENY_TAGS,
+		RequireExplicitOrFallbackSurface = true,
+		FallbackSurfaceNames = getRarityPadSurfaceNames(),
+		ExplicitSurfaceAcceptanceReason = "explicit_spike_marker",
+		FallbackSurfaceAcceptanceReason = "rarity_pad_fallback",
+		UnmarkedSurfaceRejectReason = "unmarked_non_rarity_surface",
+		FootprintSize = footprintSize,
+		EdgePadding = math.max(0, tonumber(CONFIG.SurfaceEdgePadding) or 0),
+		CandidateAttempts = getCandidateAttemptsForTuning(tuning),
+		MinSurfaceSize = 4,
+	}
 end
 
 local function getPlanarUnit(vector, fallback)
@@ -196,7 +424,7 @@ end
 
 local function resolveRefs()
 	local refs = MapResolver.WaitForRefs(
-		{ "MapRoot", "WaveFolder", "WaveStart", "WaveEnd" },
+		{ "MapRoot", "WaveFolder", "Biomes" },
 		nil,
 		{
 			warn = true,
@@ -212,24 +440,7 @@ local function resolveRefs()
 		hazardsFolder.Parent = waveFolder
 	end
 
-	local leftBound = waveFolder and waveFolder:FindFirstChild("LeftBound")
-	local rightBound = waveFolder and waveFolder:FindFirstChild("RightBound")
-	return refs, hazardsFolder, refs.WaveStart, refs.WaveEnd, leftBound, rightBound
-end
-
-local function getCorridorBasis(startPart, endPart, leftBound, rightBound)
-	local forward = getPlanarUnit(endPart.Position - startPart.Position, startPart.CFrame.LookVector)
-	local lateral = getPlanarUnit(forward:Cross(Vector3.yAxis), startPart.CFrame.RightVector)
-	local center = (startPart.Position + endPart.Position) * 0.5
-	local width = 36
-
-	if leftBound and rightBound then
-		lateral = getPlanarUnit(rightBound.Position - leftBound.Position, lateral)
-		center = (leftBound.Position + rightBound.Position) * 0.5
-		width = math.max(6, math.abs((rightBound.Position - leftBound.Position):Dot(lateral)))
-	end
-
-	return forward, lateral, center, width
+	return refs, hazardsFolder
 end
 
 local function buildGroundRaycastParams(hazardsFolder)
@@ -306,16 +517,7 @@ local function raycastGround(position, hazardsFolder, raycastParams)
 	return nil
 end
 
-local function getSpikeSize(corridorWidth)
-	local laneCount = math.max(1, math.floor(tonumber(CONFIG.LaneCount) or 5))
-	local laneWidth = math.max(4, corridorWidth / laneCount)
-	local width = laneWidth * math.clamp(tonumber(CONFIG.LaneWidthScale) or 0.82, 0.25, 1)
-	local length = math.max(4, tonumber(CONFIG.SpikeLength) or 18)
-	local visualScale = math.max(0.01, tonumber(CONFIG.SpikeVisualScale) or 1)
-	return Vector3.new(width * visualScale, CONFIG.SpikeHeight * visualScale, length * visualScale)
-end
-
-local function hasSafeGroundForFootprint(position, hazardsFolder, forward, lateral, size)
+local function hasSafeGroundForFootprint(position, hazardsFolder, forward, lateral, size, supportPadding)
 	local raycastParams = buildGroundRaycastParams(hazardsFolder)
 	local centerPosition = raycastGround(position, hazardsFolder, raycastParams)
 	if not centerPosition then
@@ -324,7 +526,7 @@ local function hasSafeGroundForFootprint(position, hazardsFolder, forward, later
 
 	local forwardUnit = getPlanarUnit(forward, Vector3.zAxis)
 	local lateralUnit = getPlanarUnit(lateral, Vector3.xAxis)
-	local buffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
+	local buffer = math.clamp(tonumber(supportPadding) or tonumber(CONFIG.FootprintSupportPadding) or 0, 0, 8)
 	local sampleX = math.max(1, (size.X * 0.5) + buffer)
 	local sampleZ = math.max(1, (size.Z * 0.5) + buffer)
 	local maxHeightDelta = math.max(0.5, tonumber(CONFIG.MaxGroundHeightDelta) or 3)
@@ -353,10 +555,7 @@ end
 local function getAreaNameForBiome(biomeIndex)
 	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
 	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
-	local templateBiomeIndex = if CONFIG.ReverseBiomeTemplates == true
-		then (biomeCount - normalizedBiome + 1)
-		else normalizedBiome
-	local entry = BiomeAreas.GetBiome and BiomeAreas.GetBiome(templateBiomeIndex)
+	local entry = BiomeAreas.GetBiome and BiomeAreas.GetBiome(normalizedBiome)
 	return entry and entry.AreaName or nil
 end
 
@@ -443,26 +642,52 @@ local function getOrCreateHitbox(model)
 	return hitbox
 end
 
-local function getSpikeFootprintSize(areaName, corridorWidth)
-	local size = getSpikeSize(corridorWidth)
+local function getSpikeTemplateMetadata(areaName)
+	local key = string.lower(tostring(areaName or ""))
+	local cached = templateMetadataCacheByArea[key]
+	if cached and cached.Template and cached.Template.Parent then
+		return cached
+	elseif cached then
+		templateMetadataCacheByArea[key] = nil
+	end
+
 	local template = CONFIG.UseSpikeTrapTemplates and findSpikeTrapTemplate(areaName) or nil
 	if not template then
-		return size
+		return nil
 	end
 
-	local clone = template:Clone()
-	clone:ScaleTo(math.max(0.01, tonumber(CONFIG.SpikeVisualScale) or 1))
-	local hitbox = getOrCreateHitbox(clone)
-	if hitbox then
-		size = Vector3.new(
-			math.max(size.X, hitbox.Size.X),
-			math.max(size.Y, hitbox.Size.Y),
-			math.max(size.Z, hitbox.Size.Z)
-		)
-	end
-	clone:Destroy()
+	local boundsCFrame, boundsSize = template:GetBoundingBox()
+	local hitbox = findHitbox(template)
+	local sourceSize = hitbox and hitbox.Size or boundsSize
+	local metadata = {
+		Template = template,
+		TemplateName = template.Name,
+		TemplateScale = math.max(0.001, template:GetScale()),
+		SourceHitboxSize = Vector3.new(
+			math.max(1, sourceSize.X),
+			math.max(1, sourceSize.Y),
+			math.max(1, sourceSize.Z)
+		),
+		SourceBoundsSize = boundsSize,
+		SourceBoundsCFrame = boundsCFrame,
+	}
 
-	return size
+	templateMetadataCacheByArea[key] = metadata
+	return metadata
+end
+
+local function getSpikeFootprintSize(areaName, relativeScale)
+	local targetScale = getTargetSpikeModelScale(relativeScale)
+	local metadata = getSpikeTemplateMetadata(areaName)
+	local size = CONFIG.GeneratedSpikeBaseSize * targetScale
+	if metadata then
+		local scaleRatio = targetScale / metadata.TemplateScale
+		size = metadata.SourceHitboxSize * scaleRatio
+	end
+
+	size = Vector3.new(math.max(1, size.X), math.max(1, size.Y), math.max(1, size.Z))
+
+	return size, metadata
 end
 
 local function configureSpikeVisual(model, hitbox)
@@ -498,126 +723,170 @@ local function cleanupActiveControllers()
 	return count
 end
 
-local function getBiomeGeometryRoot(refs, biomeIndex)
-	local biomesRoot = refs and refs.Biomes
-	if not biomesRoot then
-		return nil
-	end
-
-	local name = "Biome " .. tostring(biomeIndex)
-	local container = biomesRoot:FindFirstChild(name)
-	if not container then
-		return nil
-	end
-
-	return container:FindFirstChild(name) or container
+local function createFootprintRecord(placement, spacing)
+	local margin = math.max(0, tonumber(spacing) or 0)
+	return {
+		Center = placement.GroundPosition,
+		Forward = getPlanarUnit(placement.Forward, Vector3.zAxis),
+		Lateral = getPlanarUnit(placement.Lateral, Vector3.xAxis),
+		HalfX = (placement.Size.X * 0.5) + margin,
+		HalfZ = (placement.Size.Z * 0.5) + margin,
+	}
 end
 
-local function collectBiomeGroundParts(root)
-	local parts = {}
-	if not root then
-		return parts
+local function footprintsOverlap(a, b)
+	if not (a and b) then
+		return false
 	end
 
-	for _, descendant in ipairs(root:GetDescendants()) do
-		if descendant:IsA("BasePart")
-			and descendant.CanCollide == true
-			and descendant.Size.X >= 4
-			and descendant.Size.Z >= 4
-			and not isUnsafeSpikeSurface(descendant)
-		then
-			parts[#parts + 1] = descendant
+	local delta = b.Center - a.Center
+	local aX = math.abs(delta:Dot(a.Lateral))
+	local aZ = math.abs(delta:Dot(a.Forward))
+	if aX <= (a.HalfX + b.HalfX) and aZ <= (a.HalfZ + b.HalfZ) then
+		return true
+	end
+
+	local bX = math.abs(delta:Dot(b.Lateral))
+	local bZ = math.abs(delta:Dot(b.Forward))
+	return bX <= (a.HalfX + b.HalfX) and bZ <= (a.HalfZ + b.HalfZ)
+end
+
+local function isTooCloseToActiveSpike(placement, reservedFootprints, tuning)
+	local candidate = createFootprintRecord(placement, tuning and tuning.MinSpacing)
+
+	for _, reserved in ipairs(reservedFootprints or {}) do
+		if footprintsOverlap(candidate, reserved) then
+			return true
 		end
 	end
 
-	return parts
-end
-
-local function chooseSpikePlacementFromBiomeGeometry(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
-	local biomeRoot = getBiomeGeometryRoot(refs, biomeIndex)
-	local groundParts = collectBiomeGroundParts(biomeRoot)
-	if #groundParts == 0 then
-		return nil
+	for model, controller in pairs(activeControllers) do
+		if controller and not controller.Destroyed and model.Parent and controller.Footprint then
+			if footprintsOverlap(candidate, controller.Footprint) then
+				return true
+			end
+		end
 	end
 
-	local forward, lateral, _, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
-	local areaName = getAreaNameForBiome(biomeIndex)
-	local size = getSpikeFootprintSize(areaName, corridorWidth)
-	local attempts = math.max(1, math.floor(tonumber(CONFIG.BiomeGeometrySpawnAttempts) or CONFIG.SpawnAttempts or 30))
+	return false
+end
+
+local function getSpikeSurfaceEntries(refs, biomeIndex, tuning, footprintSize)
+	local options = buildSurfaceQueryOptions(footprintSize, tuning)
+	return BiomePlacementResolver.GetBiomeSurfaceEntries(refs, biomeIndex, options)
+end
+
+local function warnSpikePlacementFailure(biomeIndex, areaName, templateName, reason, diagnostics)
+	local summary = diagnostics or {}
+	local rootPath = tostring(summary.RootPath or "<nil>")
+	local surfaceCount = tonumber(summary.SurfaceCount) or 0
+	local explicitCount = tonumber(summary.ExplicitSurfaceCount) or 0
+	local fallbackCount = tonumber(summary.FallbackSurfaceCount) or 0
+	local rejectionSource = summary.Diagnostics or summary
+	local rejectionSummary = BiomePlacementResolver.FormatRejectionSummary(rejectionSource)
+	local rejectionSamples = BiomePlacementResolver.FormatRejectionSamples(rejectionSource)
+	local key = string.format("%s:%s:%s", tostring(biomeIndex), tostring(reason), rootPath)
+
+	warnPlacementFailure(
+		key,
+		"[DECK SPIKES] placement_failed biome=%s area=%s template=%s reason=%s root=%s surfaceCount=%s explicitSurfaces=%s fallbackSurfaces=%s rejections={%s} samples={%s}",
+		tostring(biomeIndex),
+		tostring(areaName or ""),
+		tostring(templateName or ""),
+		tostring(reason or "unknown"),
+		rootPath,
+		tostring(surfaceCount),
+		tostring(explicitCount),
+		tostring(fallbackCount),
+		rejectionSummary,
+		rejectionSamples
+	)
+end
+
+local function chooseSpikePlacement(refs, hazardsFolder, biomeIndex, tuning, surfaceEntry, reservedFootprints, targetCount)
+	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, CONFIG.BiomeCount)
+	local areaName = getAreaNameForBiome(normalizedBiome)
+	local relativeScale = rollSpikeScale(tuning)
+	local size, metadata = getSpikeFootprintSize(areaName, relativeScale)
+	local options = buildSurfaceQueryOptions(size, tuning)
+	local attempts = getPlacementAttemptsForTuning(tuning)
+	local lastReason = "no_candidate"
+	local lastDiagnostics = nil
 
 	for _ = 1, attempts do
-		local part = groundParts[rng:NextInteger(1, #groundParts)]
-		local halfX = math.max(0, (part.Size.X - size.X) * 0.5)
-		local halfZ = math.max(0, (part.Size.Z - size.Z) * 0.5)
-		local localX = if halfX > 0 then rng:NextNumber(-halfX, halfX) else 0
-		local localZ = if halfZ > 0 then rng:NextNumber(-halfZ, halfZ) else 0
-		local topY = (part.Size.Y * 0.5) + 2
-		local samplePosition = (part.CFrame * CFrame.new(localX, topY, localZ)).Position
-		local groundPosition = hasSafeGroundForFootprint(samplePosition, hazardsFolder, forward, lateral, size)
-		if groundPosition then
-			return {
-				GroundPosition = groundPosition,
-				Forward = forward,
-				Lateral = lateral,
-				Size = size,
-				BiomeIndex = biomeIndex,
-			}
+		local candidate, reason, diagnostics
+		if surfaceEntry then
+			candidate, reason, diagnostics = BiomePlacementResolver.GetRandomSurfaceCandidateFromEntry(
+				refs,
+				normalizedBiome,
+				surfaceEntry,
+				rng,
+				options
+			)
+		else
+			candidate, reason, diagnostics =
+				BiomePlacementResolver.GetRandomSurfaceCandidate(refs, normalizedBiome, rng, options)
+		end
+
+		lastReason = reason or lastReason
+		lastDiagnostics = diagnostics or lastDiagnostics
+		if candidate then
+			local groundPosition = hasSafeGroundForFootprint(
+				candidate.Position,
+				hazardsFolder,
+				candidate.Forward,
+				candidate.Lateral,
+				size,
+				CONFIG.FootprintSupportPadding
+			)
+			if groundPosition then
+				local placement = {
+					GroundPosition = groundPosition,
+					Forward = candidate.Forward,
+					Lateral = candidate.Lateral,
+					Size = size,
+					BiomeIndex = normalizedBiome,
+					AreaName = areaName,
+					TemplateName = metadata and metadata.TemplateName or "generated_spike",
+					PlacementSource = "BiomeSurface",
+					PlacementPart = candidate.Part,
+					PlacementPartPath = formatInstancePath(candidate.Part),
+					PlacementSurfaceReason = candidate.SurfaceAcceptanceReason,
+					BiomeRootPath = candidate.BiomeRootPath,
+					PlacementSurfaceCount = candidate.SurfaceCount,
+					SpikeBand = tuning and tuning.Id or 0,
+					RolledScale = relativeScale,
+					TargetModelScale = getTargetSpikeModelScale(relativeScale),
+					SpikeDamage = rollSpikeDamage(tuning),
+					SpikeWarningDuration = tonumber(tuning and tuning.WarningTime) or CONFIG.FallbackWarningTime,
+					SpikeActiveDuration = tonumber(tuning and tuning.HoldTime) or CONFIG.FallbackHoldTime,
+					SpikesPerSurface = tonumber(targetCount) or rollSpikesPerSurface(tuning),
+				}
+
+				if not isTooCloseToActiveSpike(placement, reservedFootprints, tuning) then
+					return placement
+				end
+
+				lastReason = "overlaps_existing_spike"
+			else
+				lastReason = "unsafe_footprint"
+			end
+		elseif reason == "missing_biome_root" or reason == "no_biome_surfaces" then
+			break
 		end
 	end
 
+	warnSpikePlacementFailure(
+		normalizedBiome,
+		areaName,
+		metadata and metadata.TemplateName or "",
+		lastReason,
+		lastDiagnostics
+	)
 	return nil
 end
 
-local function chooseSpikePlacement(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
-	local geometryPlacement =
-		chooseSpikePlacementFromBiomeGeometry(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
-	if geometryPlacement then
-		return geometryPlacement
-	end
-
-	local forward, lateral, corridorCenter, corridorWidth = getCorridorBasis(startPart, endPart, leftBound, rightBound)
-	local pathLength = math.max(1, math.abs((endPart.Position - startPart.Position):Dot(forward)))
-	local areaName = getAreaNameForBiome(biomeIndex)
-	local size = getSpikeFootprintSize(areaName, corridorWidth)
-	local edgeBuffer = math.max(0, tonumber(CONFIG.SafeGapBuffer) or 0)
-	local safeHalfWidth = math.max(0, (corridorWidth * 0.5) - (size.X * 0.5) - edgeBuffer)
-
-	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
-	local normalizedBiome = math.clamp(math.floor(tonumber(biomeIndex) or 1), 1, biomeCount)
-	local minimumAlpha = math.clamp(tonumber(CONFIG.MinimumForwardAlpha) or 0, 0, 1)
-	local maximumAlpha = math.clamp(tonumber(CONFIG.MaximumForwardAlpha) or 1, minimumAlpha, 1)
-	local usableAlphaRange = math.max(0.001, maximumAlpha - minimumAlpha)
-	local biomeStartAlpha = minimumAlpha + (usableAlphaRange * ((normalizedBiome - 1) / biomeCount))
-	local biomeEndAlpha = minimumAlpha + (usableAlphaRange * (normalizedBiome / biomeCount))
-	local padding = math.clamp(tonumber(CONFIG.BiomePaddingAlpha) or 0.08, 0, 0.35)
-	local startAlpha = biomeStartAlpha + ((biomeEndAlpha - biomeStartAlpha) * padding)
-	local endAlpha = biomeEndAlpha - ((biomeEndAlpha - biomeStartAlpha) * padding)
-	local attempts = math.max(1, math.floor(tonumber(CONFIG.SpawnAttempts) or 30))
-
-	for _ = 1, attempts do
-		local forwardAlpha = rng:NextNumber(startAlpha, math.max(startAlpha, endAlpha))
-		local laneOffset = if safeHalfWidth > 0 then rng:NextNumber(-safeHalfWidth, safeHalfWidth) else 0
-
-		local centerOnPath = startPart.Position + (forward * pathLength * forwardAlpha)
-		local centerProjection = corridorCenter:Dot(lateral)
-		local pathProjection = centerOnPath:Dot(lateral)
-		local planarPosition = centerOnPath + (lateral * (centerProjection - pathProjection + laneOffset))
-		local groundPosition = hasSafeGroundForFootprint(planarPosition, hazardsFolder, forward, lateral, size)
-		if groundPosition then
-			return {
-				GroundPosition = groundPosition,
-				Forward = forward,
-				Lateral = lateral,
-				Size = size,
-				BiomeIndex = normalizedBiome,
-			}
-		end
-	end
-
-	return nil
-end
-
-local function makeController(model, hitbox, warning, visual, hiddenCFrame, extendedCFrame)
+local function makeController(model, hitbox, warning, visual, hiddenCFrame, extendedCFrame, placement)
 	local controller = {
 		Model = model,
 		Hitbox = hitbox,
@@ -625,6 +894,11 @@ local function makeController(model, hitbox, warning, visual, hiddenCFrame, exte
 		Visual = visual,
 		HiddenCFrame = hiddenCFrame,
 		ExtendedCFrame = extendedCFrame,
+		Footprint = placement and createFootprintRecord(placement, 0) or nil,
+		SurfaceKey = placement and placement.PlacementPartPath or nil,
+		Damage = placement and placement.SpikeDamage or CONFIG.FallbackDamage,
+		WarningTime = placement and placement.SpikeWarningDuration or CONFIG.FallbackWarningTime,
+		HoldTime = placement and placement.SpikeActiveDuration or CONFIG.FallbackHoldTime,
 		Active = false,
 		Destroyed = false,
 		DamagedPlayers = {},
@@ -648,7 +922,8 @@ local function makeController(model, hitbox, warning, visual, hiddenCFrame, exte
 end
 
 local function createTemplateSpike(model, placement, areaName)
-	local template = CONFIG.UseSpikeTrapTemplates and findSpikeTrapTemplate(areaName) or nil
+	local metadata = getSpikeTemplateMetadata(areaName)
+	local template = metadata and metadata.Template or nil
 	if not template then
 		return nil
 	end
@@ -656,7 +931,7 @@ local function createTemplateSpike(model, placement, areaName)
 	local visual = template:Clone()
 	visual.Name = "SpikeTrapVisual"
 	visual.Parent = model
-	visual:ScaleTo(math.max(0.01, tonumber(CONFIG.SpikeVisualScale) or 1))
+	visual:ScaleTo(math.max(0.01, tonumber(placement.TargetModelScale) or getTargetSpikeModelScale(1)))
 
 	local hitbox = getOrCreateHitbox(visual)
 	configureSpikeVisual(visual, hitbox)
@@ -705,11 +980,33 @@ local function createGeneratedSpike(model, placement)
 	return spike, spike, hiddenCFrame, extendedCFrame
 end
 
+local function setSpikePlacementAttributes(instance, placement)
+	if not (instance and placement) then
+		return
+	end
+
+	instance:SetAttribute("BiomeIndex", placement.BiomeIndex)
+	instance:SetAttribute("AreaName", tostring(placement.AreaName or ""))
+	instance:SetAttribute("TemplateName", tostring(placement.TemplateName or ""))
+	instance:SetAttribute("PlacementSource", tostring(placement.PlacementSource or ""))
+	instance:SetAttribute("PlacementPartPath", tostring(placement.PlacementPartPath or ""))
+	instance:SetAttribute("PlacementSurfaceReason", tostring(placement.PlacementSurfaceReason or ""))
+	instance:SetAttribute("BiomeRootPath", tostring(placement.BiomeRootPath or ""))
+	instance:SetAttribute("PlacementSurfaceCount", tonumber(placement.PlacementSurfaceCount) or 0)
+	instance:SetAttribute("SpikeBand", tonumber(placement.SpikeBand) or 0)
+	instance:SetAttribute("RolledScale", tonumber(placement.RolledScale) or 1)
+	instance:SetAttribute("SpikeDamage", tonumber(placement.SpikeDamage) or CONFIG.FallbackDamage)
+	instance:SetAttribute("SpikeWarningDuration", tonumber(placement.SpikeWarningDuration) or CONFIG.FallbackWarningTime)
+	instance:SetAttribute("SpikeActiveDuration", tonumber(placement.SpikeActiveDuration) or CONFIG.FallbackHoldTime)
+	instance:SetAttribute("SpikesPerSurface", tonumber(placement.SpikesPerSurface) or 1)
+end
+
 local function createDeckSpike(hazardsFolder, placement)
 	local model = Instance.new("Model")
 	model.Name = "DeckSpikes"
 	model:SetAttribute("HazardClass", CONFIG.HazardClass)
 	model:SetAttribute("HazardType", CONFIG.HazardType)
+	setSpikePlacementAttributes(model, placement)
 
 	local warningPosition = placement.GroundPosition + Vector3.new(0, CONFIG.WarningGroundOffset, 0)
 	local warningCFrame = CFrame.fromMatrix(warningPosition, placement.Lateral, Vector3.yAxis, -placement.Forward)
@@ -732,10 +1029,11 @@ local function createDeckSpike(hazardsFolder, placement)
 	if hitbox then
 		warning.Size = Vector3.new(math.max(1, hitbox.Size.X), 0.12, math.max(1, hitbox.Size.Z))
 		warning.CFrame = warningCFrame
+		setSpikePlacementAttributes(hitbox, placement)
 	end
 
 	model.Parent = hazardsFolder
-	return makeController(model, hitbox, warning, visual, hiddenCFrame, extendedCFrame)
+	return makeController(model, hitbox, warning, visual, hiddenCFrame, extendedCFrame, placement)
 end
 
 local function tweenVisual(controller, targetCFrame, duration, easingDirection)
@@ -809,7 +1107,7 @@ local function damagePlayer(controller, player)
 		},
 	})
 
-	humanoid:TakeDamage(CONFIG.Damage)
+	humanoid:TakeDamage(controller.Damage or CONFIG.FallbackDamage)
 	controller.DamagedPlayers[player] = true
 	return true
 end
@@ -821,7 +1119,7 @@ local function damagePlayersInside(controller)
 end
 
 local function runDeckSpike(controller)
-	task.wait(CONFIG.WarningTime)
+	task.wait(controller.WarningTime or CONFIG.FallbackWarningTime)
 	if controller.Destroyed then
 		return
 	end
@@ -835,7 +1133,7 @@ local function runDeckSpike(controller)
 	damagePlayersInside(controller)
 
 	local elapsed = 0
-	while elapsed < CONFIG.HoldTime do
+	while elapsed < (controller.HoldTime or CONFIG.FallbackHoldTime) do
 		if controller.Destroyed or not controller.Model.Parent then
 			return
 		end
@@ -850,15 +1148,39 @@ local function runDeckSpike(controller)
 	controller:Destroy()
 end
 
-local function spawnDeckSpike(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+local function getActiveSpikeCountsBySurface()
+	local counts = {}
+	for model, controller in pairs(activeControllers) do
+		if controller and not controller.Destroyed and model.Parent and controller.SurfaceKey then
+			counts[controller.SurfaceKey] = (counts[controller.SurfaceKey] or 0) + 1
+		end
+	end
+	return counts
+end
+
+local function getSurfaceKey(surfaceEntry)
+	return formatInstancePath(surfaceEntry and surfaceEntry.Part)
+end
+
+local function shuffleJobs(jobs)
+	for index = #jobs, 2, -1 do
+		local swapIndex = rng:NextInteger(1, index)
+		jobs[index], jobs[swapIndex] = jobs[swapIndex], jobs[index]
+	end
+end
+
+local function spawnDeckSpike(refs, hazardsFolder, biomeIndex, tuning, surfaceEntry, reservedFootprints, targetCount)
 	if cleanupActiveControllers() >= CONFIG.MaxActiveSpikes then
 		return false
 	end
 
-	local placement = chooseSpikePlacement(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+	local placement =
+		chooseSpikePlacement(refs, hazardsFolder, biomeIndex, tuning, surfaceEntry, reservedFootprints, targetCount)
 	if not placement then
 		return false
 	end
+
+	reservedFootprints[#reservedFootprints + 1] = createFootprintRecord(placement, tuning and tuning.MinSpacing)
 
 	local controller = createDeckSpike(hazardsFolder, placement)
 	if not controller then
@@ -873,17 +1195,67 @@ local function spawnDeckSpike(refs, hazardsFolder, startPart, endPart, leftBound
 end
 
 local function spawnSpikePop()
-	local refs, hazardsFolder, startPart, endPart, leftBound, rightBound = resolveRefs()
-	if not hazardsFolder or not startPart or not endPart then
+	local refs, hazardsFolder = resolveRefs()
+	if not hazardsFolder or not refs or not refs.Biomes then
 		return
 	end
 
+	local activeCountsBySurface = getActiveSpikeCountsBySurface()
+	local reservedCountsBySurface = {}
+	local reservedFootprints = {}
+	local jobs = {}
 	local biomeCount = math.max(1, math.floor(tonumber(CONFIG.BiomeCount) or 8))
-	local spikesPerPop = math.max(1, math.floor(tonumber(CONFIG.SpikesPerPop) or 1))
-	for _ = 1, spikesPerPop do
-		local biomeIndex = rng:NextInteger(1, biomeCount)
+
+	for biomeIndex = 1, biomeCount do
+		local tuning = getSpikeTuningForBiome(biomeIndex)
+		local areaName = getAreaNameForBiome(biomeIndex)
+		local maxScale = getMaxSpikeScale(tuning)
+		local footprintSize = getSpikeFootprintSize(areaName, maxScale)
+		local surfaceEntries, surfaceSummary = getSpikeSurfaceEntries(refs, biomeIndex, tuning, footprintSize)
+
+		if #surfaceEntries == 0 then
+			warnSpikePlacementFailure(
+				biomeIndex,
+				areaName,
+				"",
+				"no_spike_surfaces",
+				surfaceSummary
+			)
+		else
+			for _, surfaceEntry in ipairs(surfaceEntries) do
+				local surfaceKey = getSurfaceKey(surfaceEntry)
+				local targetCount = rollSpikesPerSurface(tuning)
+				local currentCount = activeCountsBySurface[surfaceKey] or 0
+				local reservedCount = reservedCountsBySurface[surfaceKey] or 0
+				local missing = math.max(0, targetCount - currentCount - reservedCount)
+				for _ = 1, missing do
+					jobs[#jobs + 1] = {
+						BiomeIndex = biomeIndex,
+						Tuning = tuning,
+						SurfaceEntry = surfaceEntry,
+						SpikesPerSurface = targetCount,
+					}
+					reservedCountsBySurface[surfaceKey] = (reservedCountsBySurface[surfaceKey] or 0) + 1
+				end
+			end
+		end
+	end
+
+	shuffleJobs(jobs)
+
+	local maxOperations = math.max(1, math.floor(tonumber(CONFIG.MaxSpawnOperationsPerCycle) or 1))
+	for index = 1, math.min(maxOperations, #jobs) do
+		local job = jobs[index]
 		local ok, err = xpcall(function()
-			spawnDeckSpike(refs, hazardsFolder, startPart, endPart, leftBound, rightBound, biomeIndex)
+			spawnDeckSpike(
+				refs,
+				hazardsFolder,
+				job.BiomeIndex,
+				job.Tuning,
+				job.SurfaceEntry,
+				reservedFootprints,
+				job.SpikesPerSurface
+			)
 		end, debug.traceback)
 		if not ok then
 			warn(string.format("[DECK SPIKES] spawn error=%s", tostring(err)))

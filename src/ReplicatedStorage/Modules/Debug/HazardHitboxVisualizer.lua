@@ -3,6 +3,7 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local HazardDebugConstants = require(script.Parent:WaitForChild("HazardDebugConstants"))
+local DebugHitboxOverlay = require(script.Parent:WaitForChild("DebugHitboxOverlay"))
 
 local HazardHitboxVisualizer = {}
 
@@ -16,38 +17,16 @@ local OVERLAY_TRANSPARENCY = 0.72
 
 local started = false
 local enabled = false
-local overlayFolder = nil
 local trackedParts = {}
 local activeConnections = {}
+local overlayScope = DebugHitboxOverlay.CreateScope({
+	FolderName = OVERLAY_FOLDER_NAME,
+})
 
 local function disconnectConnection(connection)
 	if connection then
 		connection:Disconnect()
 	end
-end
-
-local function getOverlayParent()
-	return Workspace.CurrentCamera or Workspace
-end
-
-local function getOverlayFolder()
-	local parent = getOverlayParent()
-	if not parent then
-		return nil
-	end
-
-	if overlayFolder and overlayFolder.Parent == parent then
-		return overlayFolder
-	end
-
-	overlayFolder = parent:FindFirstChild(OVERLAY_FOLDER_NAME)
-	if not overlayFolder then
-		overlayFolder = Instance.new("Folder")
-		overlayFolder.Name = OVERLAY_FOLDER_NAME
-		overlayFolder.Parent = parent
-	end
-
-	return overlayFolder
 end
 
 local function isTaggedHazardHitbox(instance)
@@ -60,13 +39,22 @@ local function isValidHitboxPart(instance)
 	return instance and instance:IsA("BasePart") and isTaggedHazardHitbox(instance)
 end
 
-local function updateBoxSize(part)
-	local record = trackedParts[part]
-	if not record or not record.Box or not record.Box.Parent then
-		return
+local function getCylinderHitboxRadius(part)
+	if not part then
+		return nil
 	end
 
-	record.Box.Size = part.Size
+	local shape = string.lower(tostring(part:GetAttribute("HazardHitboxShape") or ""))
+	if shape ~= "cylinder" then
+		return nil
+	end
+
+	local radius = tonumber(part:GetAttribute("HazardHitboxRadius"))
+	if not radius or radius <= 0 then
+		return nil
+	end
+
+	return radius
 end
 
 local function removeOverlay(part)
@@ -76,14 +64,7 @@ local function removeOverlay(part)
 	end
 
 	trackedParts[part] = nil
-	disconnectConnection(record.SizeConnection)
-	disconnectConnection(record.AncestryConnection)
-	if record.Box then
-		record.Box:Destroy()
-	end
-	if record.Outline then
-		record.Outline:Destroy()
-	end
+	record:Destroy()
 end
 
 local function addOverlay(instance)
@@ -93,46 +74,41 @@ local function addOverlay(instance)
 
 	local part = instance
 	if trackedParts[part] then
-		updateBoxSize(part)
 		return
 	end
 
-	local folder = getOverlayFolder()
-	if not folder then
+	local radius = getCylinderHitboxRadius(part)
+	local record
+	if radius then
+		record = overlayScope:StaticPlanarRadius(part.Position, radius, {
+			Name = "DebugHazardHitboxRadius",
+			Color = OVERLAY_COLOR,
+			Transparency = 0.28,
+		})
+		if record then
+			record:AddConnection(part.AncestryChanged:Connect(function(_, parent)
+				if not parent then
+					removeOverlay(part)
+				end
+			end))
+		end
+	else
+		record = overlayScope:AttachBox(part, {
+			BoxName = BOX_ADORNMENT_NAME,
+			OutlineName = OUTLINE_NAME,
+			Color = OVERLAY_COLOR,
+			Transparency = OVERLAY_TRANSPARENCY,
+			LineThickness = 0.06,
+			OnDestroy = function()
+				trackedParts[part] = nil
+			end,
+		})
+	end
+	if not record then
 		return
 	end
 
-	local box = Instance.new("BoxHandleAdornment")
-	box.Name = BOX_ADORNMENT_NAME
-	box.Adornee = part
-	box.AlwaysOnTop = true
-	box.ZIndex = 10
-	box.Color3 = OVERLAY_COLOR
-	box.Transparency = OVERLAY_TRANSPARENCY
-	box.Size = part.Size
-	box.Parent = folder
-
-	local outline = Instance.new("SelectionBox")
-	outline.Name = OUTLINE_NAME
-	outline.Adornee = part
-	outline.Color3 = OVERLAY_COLOR
-	outline.LineThickness = 0.06
-	outline.SurfaceColor3 = OVERLAY_COLOR
-	outline.SurfaceTransparency = 1
-	outline.Parent = folder
-
-	trackedParts[part] = {
-		Box = box,
-		Outline = outline,
-		SizeConnection = part:GetPropertyChangedSignal("Size"):Connect(function()
-			updateBoxSize(part)
-		end),
-		AncestryConnection = part.AncestryChanged:Connect(function(_, parent)
-			if not parent then
-				removeOverlay(part)
-			end
-		end),
-	}
+	trackedParts[part] = record
 end
 
 local function clearOverlays()
@@ -145,9 +121,7 @@ local function clearOverlays()
 		removeOverlay(part)
 	end
 
-	if overlayFolder then
-		overlayFolder:ClearAllChildren()
-	end
+	overlayScope:Clear()
 end
 
 local function disconnectActiveConnections()
