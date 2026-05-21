@@ -223,24 +223,6 @@ local function configurePrompt(prompt, actionText, objectText)
 	prompt.ClickablePrompt = false
 end
 
-local function getOrCreatePrompt(parent, name, actionText, objectText)
-	local prompt = parent:FindFirstChild(name)
-	if prompt and prompt:IsA("ProximityPrompt") then
-		configurePrompt(prompt, actionText, objectText)
-		return prompt
-	end
-
-	if prompt then
-		prompt:Destroy()
-	end
-
-	prompt = Instance.new("ProximityPrompt")
-	prompt.Name = name
-	configurePrompt(prompt, actionText, objectText)
-	prompt.Parent = parent
-	return prompt
-end
-
 local function getLaneDirections(startPart, endPart)
 	local forward = startPart.Position - endPart.Position
 	if forward.Magnitude < 0.001 then
@@ -2165,7 +2147,6 @@ function Controller.Start()
 		legacyChestPrompt:Destroy()
 	end
 
-	local crewPrompt = getOrCreatePrompt(startHub, "StartCrewRunPrompt", "Start Crew Run", "Grand Line Rush Corridor")
 	local sharedHitBox = getMapHitBox()
 	zoneTrace(
 		"corridorZones activeMap=%s mapPath=%s waveFolder=%s extractionZone=%s extractionPos=%s extractionSize=%s sharedHitBox=%s sharedHitBoxPos=%s sharedHitBoxSize=%s",
@@ -2191,20 +2172,6 @@ function Controller.Start()
 		formatInstancePath(rewardFolder),
 		formatInstancePath(carriedFolder)
 	)
-
-	local function startRunForPlayer(player, rewardType)
-		local response = SliceService.StartRun(player, rewardType, worldConfig.StartDepthBand or Economy.VerticalSlice.DefaultDepthBand)
-		if response.ok then
-			local rewardLabel = if rewardType == "Chest" then "Chest" else "Crew"
-			sendPopup(player, string.format("%s run started. A %s reward should now be visible in the corridor.", rewardLabel, rewardLabel:lower()), INFO_COLOR, false)
-		else
-			sendPopup(player, buildResponseMessage(response, "Could not start run."), ERROR_COLOR, true)
-		end
-	end
-
-	crewPrompt.Triggered:Connect(function(player)
-		startRunForPlayer(player, "Crew")
-	end)
 
 	local function tryExtractFromTouch(hit, sourceLabel, sourcePart)
 		local player = findPlayerFromHit(hit)

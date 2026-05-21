@@ -220,7 +220,7 @@ local function hookCharacter(player, character)
 		return getUnboostedSpeed() * getDevilFruitSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
 	end
 
-	local function getDesiredSpeed()
+	local function getDesiredSpeed(nonProjectionDesiredSpeed)
 		if character:GetAttribute(HORO_GHOST_ATTRIBUTE) == true and player:GetAttribute("HoroProjectionActive") == true then
 			local ghostSpeed = player:GetAttribute("HoroProjectionGhostSpeed")
 			local carrySpeed = player:GetAttribute("HoroProjectionCarrySpeed")
@@ -231,16 +231,23 @@ local function hookCharacter(player, character)
 			end
 		end
 
-		return getNonProjectionDesiredSpeed()
+		return nonProjectionDesiredSpeed or getNonProjectionDesiredSpeed()
+	end
+
+	local function getDisplaySpeedFromWalkSpeed(walkSpeed)
+		return math.max(0, (tonumber(walkSpeed) or 0) - base)
 	end
 
 	local function apply()
 		if updating then return end
-		setAttributeIfChanged(player, HORO_SOURCE_SPEED_ATTRIBUTE, getNonProjectionDesiredSpeed())
+		local nonProjectionDesiredSpeed = getNonProjectionDesiredSpeed()
+		setAttributeIfChanged(player, HORO_SOURCE_SPEED_ATTRIBUTE, nonProjectionDesiredSpeed)
 		if isProjectedBody() then return end
+		local desiredSpeed = getDesiredSpeed(nonProjectionDesiredSpeed)
 		updating = true
-		humanoid.WalkSpeed = getDesiredSpeed()
+		humanoid.WalkSpeed = desiredSpeed
 		updating = false
+		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.DisplaySpeed, getDisplaySpeedFromWalkSpeed(desiredSpeed))
 	end
 
 	local function scheduleBomuLockExpiryApply()

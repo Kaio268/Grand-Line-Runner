@@ -135,6 +135,10 @@ end
 local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
 local biomeBoundsCacheRoot = nil
 local biomeBoundsCache = nil
+local carriedGroundFilterCacheRoot = nil
+local carriedGroundFilterCacheWaveFolder = nil
+local carriedGroundFilterCache = nil
+local carriedGroundFilterCacheComplete = false
 local warningKeys = {}
 local activeBombCount = 0
 local activeBombCountByUserId = {}
@@ -351,6 +355,84 @@ local function getCharacterParts(player)
 	return character, humanoid, rootPart
 end
 
+local function addUniqueInstance(instances, seen, instance)
+	if not instance or seen[instance] then
+		return
+	end
+
+	seen[instance] = true
+	instances[#instances + 1] = instance
+end
+
+local function getCarriedGroundRaycastContainers(refs)
+	refs = refs or MapResolver.GetRefs()
+	local mapRoot = refs and refs.MapRoot
+	local waveFolder = refs and refs.WaveFolder
+
+	if
+		carriedGroundFilterCache
+		and carriedGroundFilterCacheRoot == mapRoot
+		and carriedGroundFilterCacheWaveFolder == waveFolder
+		and carriedGroundFilterCacheComplete
+	then
+		local allCachedContainersStillExist = true
+		for _, container in ipairs(carriedGroundFilterCache) do
+			if not container.Parent then
+				allCachedContainersStillExist = false
+				break
+			end
+		end
+
+		if allCachedContainersStillExist then
+			return carriedGroundFilterCache
+		end
+	end
+
+	local containers = {}
+	local seen = {}
+	local complete = true
+
+	local grandLineRushFolder = refs and refs.GrandLineRushFolder
+	if not grandLineRushFolder and waveFolder then
+		grandLineRushFolder = waveFolder:FindFirstChild("GrandLineRush")
+	end
+
+	local carriedRewardsFolder = grandLineRushFolder and grandLineRushFolder:FindFirstChild("CarriedRewards")
+	if carriedRewardsFolder then
+		addUniqueInstance(containers, seen, carriedRewardsFolder)
+	else
+		complete = false
+	end
+
+	local crewMembersWorld = mapRoot and mapRoot:FindFirstChild("CrewMembersWorld")
+	local carriedCrewFolder = crewMembersWorld and crewMembersWorld:FindFirstChild("Carried")
+	if carriedCrewFolder then
+		addUniqueInstance(containers, seen, carriedCrewFolder)
+	else
+		complete = false
+	end
+
+	carriedGroundFilterCacheRoot = mapRoot
+	carriedGroundFilterCacheWaveFolder = waveFolder
+	carriedGroundFilterCache = containers
+	carriedGroundFilterCacheComplete = complete
+	return containers
+end
+
+local function buildGroundRaycastFilter(character, refs)
+	local filter = { hazardsFolder }
+	if character then
+		filter[#filter + 1] = character
+	end
+
+	-- Held rewards are parented outside the character, so exclude their containers explicitly.
+	for _, container in ipairs(getCarriedGroundRaycastContainers(refs)) do
+		filter[#filter + 1] = container
+	end
+
+	return filter
+end
+
 local function getPlanarUnit(vector, fallback)
 	local planar = Vector3.new(vector.X, 0, vector.Z)
 	if planar.Magnitude > 0.001 then
@@ -365,8 +447,8 @@ local function getPlanarUnit(vector, fallback)
 	return Vector3.zAxis
 end
 
-local function isInsideRunZone(position)
-	local refs = MapResolver.GetRefs()
+local function isInsideRunZone(position, refs)
+	refs = refs or MapResolver.GetRefs()
 	local waveFolder = refs.WaveFolder
 	local startPart = refs.WaveStart
 	local endPart = refs.WaveEnd
@@ -463,8 +545,8 @@ local function isPositionInsidePartFootprint(part, position)
 		and math.abs(localPosition.Y) <= halfSize.Y + heightTolerance
 end
 
-local function resolveBiomeIndexFromPosition(position)
-	local refs = MapResolver.GetRefs()
+local function resolveBiomeIndexFromPosition(position, refs)
+	refs = refs or MapResolver.GetRefs()
 	for _, entry in ipairs(buildBiomeBoundsCache(refs)) do
 		if isPositionInsidePartFootprint(entry.Part, position) then
 			return entry.BiomeIndex, entry.Root
@@ -502,10 +584,10 @@ local function isSafeGapFloor(part)
 	return hasKeywordInAncestry(part, CONFIG.SafeFloorNameKeywords)
 end
 
-local function getGroundHit(position, character)
+local function getGroundHit(position, character, refs)
 	local raycastParams = RaycastParams.new()
 	raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-	raycastParams.FilterDescendantsInstances = { hazardsFolder, character }
+	raycastParams.FilterDescendantsInstances = buildGroundRaycastFilter(character, refs)
 
 	local origin = position + Vector3.new(0, CONFIG.GroundRayHeight, 0)
 	local direction = Vector3.new(0, -(CONFIG.GroundRayHeight + CONFIG.GroundRayDepth), 0)
@@ -526,8 +608,8 @@ local function getGroundHit(position, character)
 	return result
 end
 
-local function isNearSafeGap(position, character)
-	local refs = MapResolver.GetRefs()
+local function isNearSafeGap(position, character, refs)
+	refs = refs or MapResolver.GetRefs()
 	local startPart = refs.WaveStart
 	local endPart = refs.WaveEnd
 	if not startPart or not endPart then
@@ -540,7 +622,7 @@ local function isNearSafeGap(position, character)
 		-forward * CONFIG.SafeGapBuffer,
 		Vector3.zero,
 	}) do
-		if not getGroundHit(position + offset, character) then
+		if not getGroundHit(position + offset, character, refs) then
 			return true
 		end
 	end
@@ -553,28 +635,29 @@ local function getPlayerBombTarget(player)
 	if not character then
 		return nil
 	end
+	local refs = MapResolver.GetRefs()
 
 	if humanoid.FloorMaterial == Enum.Material.Air then
 		return nil
 	end
 
-	if not isInsideRunZone(rootPart.Position) then
+	if not isInsideRunZone(rootPart.Position, refs) then
 		return nil
 	end
 
-	if isNearSafeGap(rootPart.Position, character) then
+	if isNearSafeGap(rootPart.Position, character, refs) then
 		return nil
 	end
 
-	local groundHit = getGroundHit(rootPart.Position, character)
+	local groundHit = getGroundHit(rootPart.Position, character, refs)
 	local groundPosition = groundHit and groundHit.Position
-	if not groundPosition or not isInsideRunZone(groundPosition) then
+	if not groundPosition or not isInsideRunZone(groundPosition, refs) then
 		return nil
 	end
 
 	local biomeIndex, biomeRoot = getBiomeIndexFromInstance(groundHit.Instance)
 	if not biomeIndex then
-		biomeIndex, biomeRoot = resolveBiomeIndexFromPosition(groundPosition)
+		biomeIndex, biomeRoot = resolveBiomeIndexFromPosition(groundPosition, refs)
 	end
 
 	if not biomeIndex then
@@ -946,8 +1029,9 @@ local function canTakeCannonImpactDamage(player, rootPart, impactPosition)
 	if not (player and rootPart and typeof(impactPosition) == "Vector3") then
 		return false
 	end
+	local refs = MapResolver.GetRefs()
 
-	if not isInsideRunZone(rootPart.Position) then
+	if not isInsideRunZone(rootPart.Position, refs) then
 		return false
 	end
 
@@ -957,7 +1041,7 @@ local function canTakeCannonImpactDamage(player, rootPart, impactPosition)
 	end
 
 	local character = player.Character
-	local groundHit = getGroundHit(rootPart.Position, character)
+	local groundHit = getGroundHit(rootPart.Position, character, refs)
 	if not groundHit then
 		return false
 	end

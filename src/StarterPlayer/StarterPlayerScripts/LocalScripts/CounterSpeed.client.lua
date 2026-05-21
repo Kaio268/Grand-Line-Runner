@@ -32,6 +32,7 @@ local SPEED_CHANGE_MIN_ANIMATION_SECONDS = 0.10
 local SPEED_CHANGE_MAX_ANIMATION_SECONDS = 0.34
 local SPEED_CHANGE_BASE_ANIMATION_SECONDS = 0.08
 local SPEED_CHANGE_LOG_SCALE_SECONDS = 0.075
+local DISPLAY_SPEED_ATTRIBUTE = MovementSpeedConfig.Attributes.DisplaySpeed
 
 local textScale = textLabel:FindFirstChildOfClass("UIScale")
 if not textScale then
@@ -237,7 +238,21 @@ local function getDisplayedGameSpeedFromWalkSpeed(walkSpeed)
 	return math.max(0, (tonumber(walkSpeed) or 0) - getBaseWalkSpeed())
 end
 
+local function getReplicatedDisplaySpeed()
+	local replicatedDisplaySpeed = player:GetAttribute(DISPLAY_SPEED_ATTRIBUTE)
+	if typeof(replicatedDisplaySpeed) == "number" and replicatedDisplaySpeed >= 0 then
+		return replicatedDisplaySpeed
+	end
+
+	return nil
+end
+
 local function getCurrentDisplayedGameSpeed()
+	local replicatedDisplaySpeed = getReplicatedDisplaySpeed()
+	if replicatedDisplaySpeed ~= nil then
+		return replicatedDisplaySpeed
+	end
+
 	if currentHumanoid and currentHumanoid.Parent then
 		return getDisplayedGameSpeedFromWalkSpeed(currentHumanoid.WalkSpeed)
 	end
@@ -507,7 +522,9 @@ local function bindCharacter(character)
 	currentHumanoid = humanoid
 	characterConnections[#characterConnections + 1] = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
 		pendingEarnedSpeedAnimation = false
-		syncDisplayedSpeed(true)
+		if getReplicatedDisplaySpeed() == nil then
+			syncDisplayedSpeed(true)
+		end
 	end)
 	characterConnections[#characterConnections + 1] = character.AncestryChanged:Connect(function(_, parent)
 		if parent ~= nil or character ~= currentCharacter then
@@ -540,17 +557,31 @@ updateSlowDebuffState()
 
 player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Type):Connect(function()
 	updateSlowDebuffState()
-	syncDisplayedSpeed(true)
+	if getReplicatedDisplaySpeed() == nil then
+		syncDisplayedSpeed(true)
+	end
 end)
 player:GetAttributeChangedSignal(HitEffectConfig.Attributes.WalkSpeedMultiplier):Connect(function()
 	updateSlowDebuffState()
-	syncDisplayedSpeed(true)
+	if getReplicatedDisplaySpeed() == nil then
+		syncDisplayedSpeed(true)
+	end
 end)
 player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Until):Connect(function()
 	updateSlowDebuffState()
-	syncDisplayedSpeed(true)
+	if getReplicatedDisplaySpeed() == nil then
+		syncDisplayedSpeed(true)
+	end
 end)
 player:GetAttributeChangedSignal(MovementSpeedConfig.Attributes.BaseWalkSpeed):Connect(function()
+	if getReplicatedDisplaySpeed() ~= nil then
+		return
+	end
+
+	syncDisplayedSpeed(true)
+end)
+player:GetAttributeChangedSignal(DISPLAY_SPEED_ATTRIBUTE):Connect(function()
+	pendingEarnedSpeedAnimation = false
 	syncDisplayedSpeed(true)
 end)
 
@@ -581,7 +612,11 @@ earnedSpeedValue:GetPropertyChangedSignal("Value"):Connect(function()
 
 	local diff = newVal - lastEarnedSpeed
 	lastEarnedSpeed = newVal
-	pendingEarnedSpeedAnimation = true
-	scheduleEarnedSpeedAnimationFallback()
+	if getReplicatedDisplaySpeed() == nil then
+		pendingEarnedSpeedAnimation = true
+		scheduleEarnedSpeedAnimationFallback()
+	else
+		pendingEarnedSpeedAnimation = false
+	end
 	pushNotif(diff)
 end)
