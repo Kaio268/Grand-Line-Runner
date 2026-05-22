@@ -3,14 +3,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GroupService = game:GetService("GroupService")
 
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 
 local GROUP_ID = 17179624
 local REMOTE_NAME = "GroupRewardClaim"
 
 local player = Players.LocalPlayer
-
-local PlotSystem = workspace:WaitForChild("PlotSystem")
-local PlotsFolder = PlotSystem:WaitForChild("Plots")
 
 local remoteEvent = ReplicatedStorage:WaitForChild(REMOTE_NAME)
 
@@ -20,30 +18,50 @@ local function popup(text, isError)
 	PopUpModule:Local_SendPopUp(text, textColor, strokeColor, 3, isError)
 end
 
-local function getOwnedPlot()
-	for _, plot in ipairs(PlotsFolder:GetChildren()) do
-		if plot:IsA("Model") then
-			local ownerId = plot:GetAttribute("OwnerUserId")
-			if ownerId == player.UserId then
-				return plot
-			end
+local function resolveWorkspacePath(pathSegments)
+	local current = workspace
+	for _, segment in ipairs(pathSegments or {}) do
+		current = current and current:WaitForChild(segment, 30)
+		if not current then
+			return nil
 		end
 	end
+	return current
+end
+
+local function getActiveShipsFolder()
+	local shipSystem = resolveWorkspacePath(ShipVisuals.ShipSystemPath)
+	return shipSystem and shipSystem:WaitForChild(ShipVisuals.ActiveShipsName, 30) or nil
+end
+
+local ActiveShips = getActiveShipsFolder()
+
+local function getOwnedShip()
+	if not ActiveShips then
+		return nil
+	end
+
+	for _, ship in ipairs(ActiveShips:GetChildren()) do
+		if ship:IsA("Model") and ship:GetAttribute(ShipVisuals.Attributes.OwnerUserId) == player.UserId then
+			return ship
+		end
+	end
+
 	return nil
 end
 
-local function getPromptFromPlot(plot)
-	local groupReward = plot:WaitForChild("GroupReward", 30)
+local function getPromptFromShip(ship)
+	local groupReward = ship:FindFirstChild("GroupReward", true)
 	if not groupReward then
 		return nil
 	end
 
-	local hitbox = groupReward:WaitForChild("Hitbox", 30)
+	local hitbox = groupReward:FindFirstChild("Hitbox", true) or groupReward:FindFirstChild("HitBox", true)
 	if not hitbox then
 		return nil
 	end
 
-	local prompt = hitbox:WaitForChild("ProximityPrompt", 30)
+	local prompt = hitbox:FindFirstChildOfClass("ProximityPrompt") or hitbox:FindFirstChild("ProximityPrompt", true)
 	if not prompt then
 		return nil
 	end
@@ -51,8 +69,7 @@ local function getPromptFromPlot(plot)
 	return prompt
 end
 
-local currentPlot = nil
-local currentPrompt = nil
+local currentShip = nil
 local promptConn = nil
 local busy = false
 
@@ -61,12 +78,10 @@ local function disconnectPrompt()
 		promptConn:Disconnect()
 		promptConn = nil
 	end
-	currentPrompt = nil
 end
 
 local function connectPrompt(prompt)
 	disconnectPrompt()
-	currentPrompt = prompt
 
 	promptConn = prompt.Triggered:Connect(function(triggeringPlayer)
 		if triggeringPlayer and triggeringPlayer ~= player then
@@ -130,36 +145,38 @@ local function connectPrompt(prompt)
 end
 
 local function tryBind()
-	local plot = getOwnedPlot()
-	if not plot then
+	local ship = getOwnedShip()
+	if not ship then
 		return
 	end
 
-	if currentPlot ~= plot then
-		currentPlot = plot
-		local prompt = getPromptFromPlot(plot)
+	if currentShip ~= ship then
+		currentShip = ship
+		local prompt = getPromptFromShip(ship)
 		if not prompt then
-			warn("GroupReward prompt not found in your plot.")
+			warn("GroupReward prompt not found on your active ship.")
 			return
 		end
 		connectPrompt(prompt)
 	end
 end
 
-PlotsFolder.ChildAdded:Connect(function()
-	task.defer(tryBind)
-end)
-
-PlotsFolder.ChildRemoved:Connect(function(child)
-	if child == currentPlot then
-		currentPlot = nil
-		disconnectPrompt()
+if ActiveShips then
+	ActiveShips.ChildAdded:Connect(function()
 		task.defer(tryBind)
-	end
-end)
+	end)
+
+	ActiveShips.ChildRemoved:Connect(function(child)
+		if child == currentShip then
+			currentShip = nil
+			disconnectPrompt()
+			task.defer(tryBind)
+		end
+	end)
+end
 
 task.defer(function()
-	while not currentPlot do
+	while not currentShip do
 		tryBind()
 		task.wait(0.5)
 	end

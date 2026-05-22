@@ -20,6 +20,7 @@ local CANONICAL_INVENTORY_PATH = "CrewMemberInventory"
 local INVENTORY_AUTHORITY_AUDIT_PATH = "CrewMemberInventoryAuthorityAudit"
 local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
 local INVENTORY_AUTHORITY_SNAPSHOT_VERSION = 1
+local CAPTAIN_SLOT_KEY = "Captain"
 -- Function names still carry legacy terms for callers, but normal gameplay now
 -- reads and writes CrewMemberInventory. Legacy inventory roots are repair mirrors.
 
@@ -1978,7 +1979,7 @@ function Module.RepairCanonicalCrewState(player)
 	for _, instanceData in pairs(crewMemberInventory.ById) do
 		if typeof(instanceData) == "table" then
 			local assignedStand = tostring(instanceData.AssignedStand or "")
-			if assignedStand ~= "" then
+			if assignedStand ~= "" and assignedStand ~= CAPTAIN_SLOT_KEY then
 				standNames[assignedStand] = true
 			end
 		end

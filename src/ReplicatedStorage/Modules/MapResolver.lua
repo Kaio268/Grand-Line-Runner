@@ -41,8 +41,10 @@ local PATH_LABELS = {
 	ExtractionZone = "active map GrandLineRush.ExtractionZone",
 	ExtractionTouch = "active map extraction touch part",
 	ExtractionTouchPart = "active map extraction touch part",
-	PlotSystem = "Workspace.PlotSystem",
-	ShipArea = "Workspace.PlotSystem.Plots or PlotSystem",
+	ShipSystem = "active map ShipSystem",
+	ActiveShips = "active map ShipSystem.ActiveShips",
+	ShipPositions = "active map ShipSystem.ShipPositions",
+	ShipArea = "active map ShipSystem.ActiveShips",
 }
 
 local function warnOnce(key, message)
@@ -350,7 +352,7 @@ local function collectRefs(options)
 
 	local waveFolder = findDirectOrRecursiveInRoots(gameplayRoots, { "WaveFolder" })
 	local corridorFolder = getChild(waveFolder, "GrandLineRush")
-	local plotSystem = getChild(Workspace, "PlotSystem")
+	local shipSystem = findDirectOrRecursiveInRoots(activeMapRoots, { "ShipSystem" })
 	local biomes = findDirectOrRecursiveInRoots(gameplayRoots, { "Biomes" })
 	local startingArea = findDirectOrRecursiveInRoots(gameplayRoots, { "Starting Area", "StartingArea" })
 	local spawnPart = findDirectOrRecursiveInRoots(gameplayRoots, { "SpawnPart" })
@@ -401,8 +403,10 @@ local function collectRefs(options)
 	refs.GroupRewardHitBox = groupRewardHitBox
 	refs.GroupRewardPrompt = groupRewardHitBox
 		and getChildByNames(groupRewardHitBox, { "ProximityPrompt" }, "ProximityPrompt", true)
-	refs.PlotSystem = plotSystem
-	refs.ShipArea = plotSystem and (plotSystem:FindFirstChild("Plots") or plotSystem) or nil
+	refs.ShipSystem = shipSystem
+	refs.ActiveShips = shipSystem and getChild(shipSystem, "ActiveShips")
+	refs.ShipPositions = shipSystem and getChild(shipSystem, "ShipPositions")
+	refs.ShipArea = refs.ActiveShips or shipSystem
 	refs.Warnings = warnings
 	refs.MapRoot = refs.Map
 	refs.ActiveMapRoot = refs.Map

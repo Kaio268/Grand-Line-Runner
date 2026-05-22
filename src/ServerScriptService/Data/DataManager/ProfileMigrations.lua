@@ -361,6 +361,134 @@ local function normalizeCrewMemberInventory(crewMemberInventory)
 	return #normalizedOrder
 end
 
+local function coerceNumberish(value, fallback)
+	local numeric = tonumber(value)
+	if numeric == nil or numeric ~= numeric or numeric == math.huge or numeric == -math.huge then
+		return fallback
+	end
+	return numeric
+end
+
+local function normalizeLegacySlotKey(value)
+	local numeric = tonumber(value)
+	if numeric == nil or numeric ~= numeric or numeric == math.huge or numeric == -math.huge then
+		return nil
+	end
+
+	numeric = math.floor(numeric)
+	if numeric < 1 then
+		return nil
+	end
+
+	return tostring(numeric)
+end
+
+local function hasCrewSlotAssignment(row)
+	if typeof(row) ~= "table" then
+		return false
+	end
+
+	return firstNonEmpty(
+		row.CrewMemberName,
+		row.CrewMemberId,
+		row.StorageName,
+		row.LegacyStorageName,
+		row.CrewMemberInstanceId,
+		row.InstanceId,
+		row.CrewInstanceId
+	) ~= ""
+end
+
+local function buildCrewSlotIncomeRow(row)
+	if typeof(row) ~= "table" then
+		return nil
+	end
+
+	local crewMemberName = firstNonEmpty(
+		row.CrewMemberName,
+		row.CrewMemberId,
+		row.StorageName,
+		row.Name,
+		row.LegacyStorageName,
+		row.BrainrotName,
+		row.Brainrot,
+		row.ItemName
+	)
+	local instanceId = firstNonEmpty(row.CrewMemberInstanceId, row.InstanceId, row.CrewInstanceId)
+	if crewMemberName == "" and instanceId == "" then
+		return nil
+	end
+
+	return {
+		CrewMemberName = crewMemberName,
+		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
+		CrewMemberInstanceId = instanceId,
+		IncomeToCollect = coerceNumberish(row.IncomeToCollect or row.Income or row.Money or row.Cash, 0),
+		StandLevel = math.max(1, math.floor(coerceNumberish(row.StandLevel or row.Level, 1))),
+	}
+end
+
+local function migrateLegacyCrewSlotRows(data, sourceRows)
+	if typeof(sourceRows) ~= "table" then
+		return 0
+	end
+
+	local crewMemberIncome = ensureTable(data, "CrewMemberIncome")
+	local migrated = 0
+
+	for rawSlotName, row in pairs(sourceRows) do
+		local slotKey = normalizeLegacySlotKey(rawSlotName)
+		if slotKey == nil then
+			continue
+		end
+
+		local existing = crewMemberIncome[slotKey]
+		if hasCrewSlotAssignment(existing) then
+			continue
+		end
+
+		local migratedRow = buildCrewSlotIncomeRow(row)
+		if migratedRow then
+			crewMemberIncome[slotKey] = migratedRow
+			migrated += 1
+		end
+	end
+
+	return migrated
+end
+
+local function migrateLegacyStandLevels(data, sourceLevels)
+	if typeof(sourceLevels) ~= "table" then
+		return 0
+	end
+
+	local crewMemberIncome = ensureTable(data, "CrewMemberIncome")
+	local migrated = 0
+
+	for rawSlotName, levelValue in pairs(sourceLevels) do
+		local slotKey = normalizeLegacySlotKey(rawSlotName)
+		if slotKey == nil then
+			continue
+		end
+
+		local row = crewMemberIncome[slotKey]
+		if typeof(row) ~= "table" then
+			continue
+		end
+
+		local rawLevel = if typeof(levelValue) == "table"
+			then levelValue.StandLevel or levelValue.Level or levelValue.Value
+			else levelValue
+		local level = math.max(1, math.floor(coerceNumberish(rawLevel, tonumber(row.StandLevel) or 1)))
+		if tonumber(row.StandLevel) ~= level then
+			row.StandLevel = level
+			migrated += 1
+		end
+	end
+
+	return migrated
+end
+
 function ProfileMigrations.Apply(data)
 	if typeof(data) ~= "table" then
 		return
@@ -599,7 +727,12 @@ function ProfileMigrations.Apply(data)
 	end
 
 	local ship = ensureTable(data, "Ship")
+	ship.Slots = ensureTable(ship, "Slots")
+	ship.CaptainSlot = ensureTable(ship, "CaptainSlot")
 	ship.MaxSlots = Economy.Rules.MaxShipSlots
+	migrateLegacyCrewSlotRows(data, ship.Slots)
+	migrateLegacyCrewSlotRows(data, data.IncomeBrainrots)
+	migrateLegacyStandLevels(data, data.StandsLevels)
 
 	local chef = ensureTable(data, "Chef")
 	local bank = ensureTable(chef, "Bank")

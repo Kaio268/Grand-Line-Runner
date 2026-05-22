@@ -37,10 +37,6 @@ local function ensureBindableFunction(name)
 	return bindable
 end
 
-function Module.GetPlotCommandFunction()
-	return ensureBindableFunction("PlotCommand")
-end
-
 function Module.GetStandCommandFunction()
 	return ensureBindableFunction("StandCommand")
 end

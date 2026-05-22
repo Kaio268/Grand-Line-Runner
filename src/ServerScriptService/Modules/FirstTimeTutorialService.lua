@@ -15,6 +15,8 @@ local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):
 local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
 local ShipRuntimeSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeSignals"))
+local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
+local ShipSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipSlotService"))
 local CrewInteraction = require(ServerCrewModules:WaitForChild("Interaction"))
 local CrewRegistry = require(ServerCrewModules:WaitForChild("Registry"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
@@ -1018,29 +1020,8 @@ local function getObjectiveTargetSignature(target)
 	)
 end
 
-local function getPlayerPlot(player)
-	local plotSystem = Workspace:FindFirstChild("PlotSystem")
-	local plots = plotSystem and plotSystem:FindFirstChild("Plots")
-	if not plots then
-		return nil
-	end
-
-	for _, plot in ipairs(plots:GetChildren()) do
-		if plot:IsA("Model") and plot:GetAttribute("OwnerUserId") == player.UserId then
-			return plot
-		end
-	end
-
-	return nil
-end
-
-local function getStandsFolder(plot)
-	local stands = plot and plot:FindFirstChild("Stands", true)
-	if stands and stands:IsA("Folder") then
-		return stands
-	end
-
-	return nil
+local function getPlayerActiveShip(player)
+	return ShipRuntimeService.GetActiveShip(player)
 end
 
 local function getStandPromptRefs(standModel)
@@ -1064,22 +1045,29 @@ local function getStandPromptRefs(standModel)
 	return handle, prompt
 end
 
+local function findOwnedShipSlotModel(player, standName)
+	local activeShip = getPlayerActiveShip(player)
+	if not activeShip then
+		return nil
+	end
+
+	local slotModel = ShipSlotService.GetSlot(activeShip, standName)
+	if slotModel and slotModel:IsA("Model") and getStandPromptRefs(slotModel) then
+		return slotModel
+	end
+
+	return nil
+end
+
 local function findOwnedStandModel(player, standName)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return nil
 	end
 
-	local plot = getPlayerPlot(player)
-	local stands = getStandsFolder(plot)
-	if not stands then
-		return nil
-	end
-
-	for _, descendant in ipairs(stands:GetDescendants()) do
-		if descendant:IsA("Model") and descendant.Name == standName and getStandPromptRefs(descendant) then
-			return descendant
-		end
+	local shipSlot = findOwnedShipSlotModel(player, standName)
+	if shipSlot then
+		return shipSlot
 	end
 
 	return nil
@@ -1244,30 +1232,35 @@ local function selectNearestSpeedUpgradeObjectiveTarget(player)
 end
 
 local function selectNearestStandObjectiveTarget(player)
-	local plot = getPlayerPlot(player)
-	local stands = getStandsFolder(plot)
-	if not stands then
-		return nil
-	end
-
 	local rootPosition = getRootPosition(player)
 	local candidates = {}
 
-	for _, descendant in ipairs(stands:GetDescendants()) do
-		if descendant:IsA("Model") and tonumber(descendant.Name) and getStandPromptRefs(descendant) then
-			local target = buildStandObjectiveTarget(player, descendant)
-			if target then
-				local distance = math.huge
-				if rootPosition and typeof(target.position) == "Vector3" then
-					distance = (target.position - rootPosition).Magnitude
-				end
+	local function addStandCandidate(standModel)
+		if not standModel or not standModel:IsA("Model") or not tonumber(standModel.Name) or not getStandPromptRefs(standModel) then
+			return
+		end
 
-				table.insert(candidates, {
-					Distance = distance,
-					StandNumber = tonumber(target.standName) or math.huge,
-					Target = target,
-				})
-			end
+		local target = buildStandObjectiveTarget(player, standModel)
+		if not target then
+			return
+		end
+
+		local distance = math.huge
+		if rootPosition and typeof(target.position) == "Vector3" then
+			distance = (target.position - rootPosition).Magnitude
+		end
+
+		table.insert(candidates, {
+			Distance = distance,
+			StandNumber = tonumber(target.standName) or math.huge,
+			Target = target,
+		})
+	end
+
+	local activeShip = getPlayerActiveShip(player)
+	if activeShip then
+		for _, slotName in ipairs(ShipSlotService.GetAvailableSlotNumbers(activeShip)) do
+			addStandCandidate(ShipSlotService.GetSlot(activeShip, slotName))
 		end
 	end
 

@@ -1,6 +1,84 @@
 local CrewIncomeRuntime = {}
 local started = false
 
+local STEAL_PRODUCT_BY_RARITY = {
+	Common = 3512126073,
+	Uncommon = 3512126073,
+	Rare = 3512126073,
+	Epic = 3512126073,
+
+	Legendary = 3512126373,
+	Mythic = 3512127278,
+	Godly = 3512127790,
+	Secret = 3512128038,
+	Omega = 3512128716,
+}
+
+local RARITY_PRIORITY = { "Omega", "Secret", "Godly", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
+
+local function normalizeRarity(rarity)
+	rarity = tostring(rarity or "")
+	if rarity == "" then
+		return "Common"
+	end
+
+	local lower = string.lower(rarity)
+	for _, key in ipairs(RARITY_PRIORITY) do
+		if string.find(lower, string.lower(key), 1, true) then
+			return key
+		end
+	end
+
+	return "Common"
+end
+
+local function formatVector3(value)
+	if typeof(value) ~= "Vector3" then
+		return tostring(value)
+	end
+
+	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatInstancePath(instance)
+	if not instance then
+		return "<nil>"
+	end
+
+	return instance:GetFullName()
+end
+
+local function countSavedStandEntries(incomeCrewMembers)
+	if typeof(incomeCrewMembers) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _, standData in pairs(incomeCrewMembers) do
+		if
+			typeof(standData) == "table"
+			and tostring(standData.CrewMemberName or standData.LegacyStorageName or "") ~= ""
+		then
+			count += 1
+		end
+	end
+
+	return count
+end
+
+local function countTableEntries(value)
+	if typeof(value) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	for _ in pairs(value) do
+		count += 1
+	end
+
+	return count
+end
+
 function CrewIncomeRuntime.Start()
 	if started then
 		return
@@ -14,53 +92,24 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
-local _STEAL_PRODUCT_ID = 3512126073
 local MAX_INCOME_ON_JOIN = 1e16
 
 local CrewFoodProgression = require(ServerScriptService.Modules:WaitForChild("CrewFoodProgression"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
+local CaptainSlotRuntime = require(ServerScriptService.Modules:WaitForChild("CaptainSlotRuntime"))
+local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
+local ShipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
+local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
 local shorten = require(ReplicatedStorage.Modules.Shorten)
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 local MonetizationConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
 local PopUpModule = require(ReplicatedStorage.Modules:WaitForChild("PopUpModule"))
-
-local stealProductByRarity = {
-	Common = 3512126073,
-	Uncommon = 3512126073,
-	Rare = 3512126073,
-	Epic = 3512126073,
-
-	Legendary = 3512126373,
-	Mythic = 3512127278,
-	Godly = 3512127790,
-	Secret = 3512128038,
-	Omega = 3512128716,
-}
-
-local rarityPriority = { "Omega", "Secret", "Godly", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
-
-local function normalizeRarity(r)
-	r = tostring(r or "")
-	if r == "" then
-		return "Common"
-	end
-	local lower = string.lower(r)
-	for _, key in ipairs(rarityPriority) do
-		if string.find(lower, string.lower(key), 1, true) then
-			return key
-		end
-	end
-	return "Common"
-end
-
-
-
 
 local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 if not Remotes then
@@ -99,11 +148,10 @@ local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOver
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
+local ShipVisuals = require(Configs:WaitForChild("ShipVisuals"))
 local CrewRegistry = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Registry"))
 local dmGet
-
-local PlotSystem = workspace:WaitForChild("PlotSystem")
-local PlotsFolder = PlotSystem:WaitForChild("Plots")
+local ShipSlotGuiIdentity = require(Modules:WaitForChild("ShipSlotGuiIdentity"))
 
 pcall(function()
 	CrewRegistry.Build()
@@ -120,27 +168,12 @@ local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CrewIncomeDebug
 local TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive"
 local TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId"
 local CREW_ITEM_KIND = "CrewMember"
+local LEGACY_STAND_CREW_PLACEMENT_ROTATION_OFFSET_DEGREES = 90
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 local INCOME_SHADOW_BANK_THROTTLE_SECONDS = 3
 local INCOME_STATUS_DISPLAY_METADATA_CACHE_SECONDS = 15
 local crewRecordCache = setmetatable({}, { __mode = "k" })
 local OVERHEAD_ATTRIBUTES = CrewOverhead.Attribute
-
-local function formatVector3(value)
-	if typeof(value) ~= "Vector3" then
-		return tostring(value)
-	end
-
-	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
-end
-
-local function formatInstancePath(instance)
-	if not instance then
-		return "<nil>"
-	end
-
-	return instance:GetFullName()
-end
 
 local function ownershipTrace(message, ...)
 	if not DEBUG_TRACE then
@@ -164,37 +197,6 @@ local function saveTrace(message, ...)
 	end
 
 	print(string.format("[SAVE TRACE] t=%.3f " .. message, os.clock(), ...))
-end
-
-local function countSavedStandEntries(incomeCrewMembers)
-	if typeof(incomeCrewMembers) ~= "table" then
-		return 0
-	end
-
-	local count = 0
-	for _, standData in pairs(incomeCrewMembers) do
-		if
-			typeof(standData) == "table"
-			and tostring(standData.CrewMemberName or standData.LegacyStorageName or "") ~= ""
-		then
-			count += 1
-		end
-	end
-
-	return count
-end
-
-local function countTableEntries(value)
-	if typeof(value) ~= "table" then
-		return 0
-	end
-
-	local count = 0
-	for _ in pairs(value) do
-		count += 1
-	end
-
-	return count
 end
 
 local function logSavedShipSnapshot(player, context)
@@ -548,8 +550,10 @@ local function getStandCollectMultiplier(player, standName)
 		end
 	end
 
+	local captainMultiplier = CaptainSlotRuntime.GetCaptainBonusMultiplier(player, upgradeLevel, rebirthCount)
+
 	return mult
-		* PlotUpgradeConfig.GetSlotBonusMultiplier(upgradeLevel, standName, rebirthCount)
+		* captainMultiplier
 		* RebirthConfig.GetShipIncomeMultiplier(rebirthCount)
 end
 
@@ -725,14 +729,6 @@ local function getPlayerShipUpgradeLevel(player)
 	return 0
 end
 
-local function getSlotBonusPercent(bonusInfo)
-	if typeof(bonusInfo) ~= "table" then
-		return 0
-	end
-
-	return math.max(0, math.floor((((tonumber(bonusInfo.Multiplier) or 1) - 1) * 100) + 0.5))
-end
-
 local function getStandSlotState(player, standName)
 	local upgradeLevel = getPlayerShipUpgradeLevel(player)
 	local leaderstats = player:FindFirstChild("leaderstats")
@@ -749,15 +745,13 @@ local function getStandSlotState(player, standName)
 
 	local isVisible = PlotUpgradeConfig.IsStandVisible(upgradeLevel, standName, rebirthCount)
 	local isUsable = PlotUpgradeConfig.IsStandUsable(upgradeLevel, standName, rebirthCount)
-	local bonusInfo = isUsable and PlotUpgradeConfig.GetSlotBonusInfo(upgradeLevel, standName, rebirthCount) or nil
-
 	return {
 		Level = upgradeLevel,
 		Rebirths = rebirthCount,
 		Visible = isVisible,
 		Usable = isUsable,
-		BonusInfo = bonusInfo,
-		BonusPercent = getSlotBonusPercent(bonusInfo),
+		BonusInfo = nil,
+		BonusPercent = 0,
 		UnlockLevel = PlotUpgradeConfig.GetStandUnlockLevel(standName),
 	}
 end
@@ -780,6 +774,40 @@ local function syncShipSlotAssignment(player, standName, slotData)
 	end
 
 	dmSet(player, "Ship.Slots", slots)
+end
+
+local function reconcileSlotAssignmentsForRender(player, activeShip, source)
+	if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+		return false, "reset_in_progress"
+	end
+
+	local ok, result, reasonOrSummary, maybeSummary = pcall(function()
+		return CrewSlotAssignmentReconciler.ReconcilePlayer(player, {
+			ActiveShip = activeShip,
+			Source = source,
+		})
+	end)
+
+	if not ok then
+		warn(("[CrewIncomeRuntime] Slot assignment reconciliation errored for %s during %s: %s"):format(
+			player and player.Name or "unknown",
+			tostring(source),
+			tostring(result)
+		))
+		return false, result
+	end
+
+	if result ~= true then
+		local summary = maybeSummary or reasonOrSummary
+		warn(("[CrewIncomeRuntime] Slot assignment reconciliation failed for %s during %s: %s"):format(
+			player and player.Name or "unknown",
+			tostring(source),
+			tostring(summary)
+		))
+		return false, summary
+	end
+
+	return true, maybeSummary or reasonOrSummary
 end
 
 local function clearPlacedStandIncome(player, standName)
@@ -882,40 +910,6 @@ local function getPlayerStandIncome(player, standName)
 		return 0
 	end
 	return v
-end
-
-local function _ensureInventoryLevelValue(player, crewMemberName, level)
-	local inv = player:FindFirstChild("Inventory")
-	if not inv then
-		inv = Instance.new("Folder")
-		inv.Name = "Inventory"
-		inv.Parent = player
-	end
-
-	local item = inv:FindFirstChild(crewMemberName)
-	if not item then
-		item = Instance.new("Folder")
-		item.Name = crewMemberName
-		item.Parent = inv
-	end
-
-	local lv = item:FindFirstChild("Level")
-	if not lv then
-		lv = Instance.new("NumberValue")
-		lv.Name = "Level"
-		lv.Parent = item
-	end
-	lv.Value = level
-
-	local currentXP = item:FindFirstChild("CurrentXP")
-	if not currentXP then
-		currentXP = Instance.new("NumberValue")
-		currentXP.Name = "CurrentXP"
-		currentXP.Parent = item
-	end
-	if currentXP.Value < 0 then
-		currentXP.Value = 0
-	end
 end
 
 local function findCatalogInfoByName(crewMemberName)
@@ -1447,64 +1441,72 @@ local function getStealProductIdForCrewMember(crewMemberName)
 	local info = findCrewMemberInfoByName(crewMemberName)
 	local rarity = info and info.Rarity or "Common"
 	local fixed = normalizeRarity(rarity)
-	return stealProductByRarity[fixed] or 3512126073
+	return STEAL_PRODUCT_BY_RARITY[fixed] or 3512126073
 end
 
+local getSlotRuntime
 
-local function updateStandPromptTexts(player, standModel)
+local function updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, equippedCrewMember)
 	if typeof(standModel) ~= "Instance" or not standModel:IsA("Model") then
 		return
 	end
 
-	local handle = standModel:FindFirstChild("Handle", true)
-	if not handle or not handle:IsA("BasePart") then
-		return
-	end
-
-	local prompt = handle:FindFirstChildOfClass("ProximityPrompt")
+	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
+	local prompt = cache and cache.Prompt
 	if not prompt then
 		return
 	end
 
 	local standName = standModel.Name
-	local slotState = player and player:IsA("Player") and getStandSlotState(player, standName) or nil
-	local crewMemberName = ""
-	local equippedCrewMember = nil
+	slotState = slotState or (player and player:IsA("Player") and getStandSlotState(player, standName) or nil)
+	local hasCrewMemberName = crewMemberName ~= nil
+	crewMemberName = crewMemberName or ""
 
 	if player and player:IsA("Player") then
-		crewMemberName = getPlayerStandCrewMemberName(player, standName)
-		equippedCrewMember = getEquippedCrewMemberToolInfo(player)
+		if not hasCrewMemberName then
+			crewMemberName = getPlayerStandCrewMemberName(player, standName)
+		end
+		if equippedCrewMember == nil then
+			equippedCrewMember = getEquippedCrewMemberToolInfo(player)
+		end
 	end
+
+	local objectText
+	local actionText
 
 	if slotState and slotState.Visible and not slotState.Usable then
-		prompt.ObjectText = "Slot Locked"
-		prompt.ActionText = PlotUpgradeConfig.GetLockedSlotDescription(slotState.Level, standName, slotState.Rebirths) or "Upgrade Ship"
-		return
-	end
-
-	if crewMemberName ~= "" then
+		objectText = "Slot Locked"
+		actionText = PlotUpgradeConfig.GetLockedSlotDescription(slotState.Level, standName, slotState.Rebirths) or "Upgrade Ship"
+	elseif crewMemberName ~= "" then
 		local displayName = resolveStandStatusDisplayName(player, crewMemberName)
 		if slotState and slotState.BonusInfo then
-			prompt.ObjectText = string.format(
+			objectText = string.format(
 				"%s (%s +%d%%)",
 				displayName,
 				tostring(slotState.BonusInfo.Label or "Bonus"),
 				slotState.BonusPercent
 			)
 		else
-			prompt.ObjectText = displayName
+			objectText = displayName
 		end
-		prompt.ActionText = if equippedCrewMember then "Switch" else "Pick Up"
+		actionText = if equippedCrewMember then "Switch" else "Pick Up"
+	elseif slotState and slotState.BonusInfo then
+		objectText = tostring(slotState.BonusInfo.Label or standName)
+		actionText = if equippedCrewMember
+			then string.format("Place Here (+%d%%)", slotState.BonusPercent)
+			else "Empty Slot"
 	else
-		if slotState and slotState.BonusInfo then
-			prompt.ObjectText = tostring(slotState.BonusInfo.Label or standName)
-			prompt.ActionText = if equippedCrewMember
-				then string.format("Place Here (+%d%%)", slotState.BonusPercent)
-				else "Empty Slot"
-		else
-			prompt.ObjectText = tostring(standName)
-			prompt.ActionText = if equippedCrewMember then "Place Here" else "Empty Slot"
-		end
+		objectText = tostring(standName)
+		actionText = if equippedCrewMember then "Place Here" else "Empty Slot"
+	end
+
+	if cache.LastPromptObjectText ~= objectText then
+		prompt.ObjectText = objectText
+		cache.LastPromptObjectText = objectText
+	end
+	if cache.LastPromptActionText ~= actionText then
+		prompt.ActionText = actionText
+		cache.LastPromptActionText = actionText
 	end
 end
 
@@ -1557,6 +1559,219 @@ local function getTextTarget(root, name)
 		return obj
 	end
 	return obj:FindFirstChildWhichIsA("TextLabel", true) or obj:FindFirstChildWhichIsA("TextButton", true) or obj:FindFirstChildWhichIsA("TextBox", true)
+end
+
+local SLOT_LEVEL_UI_REFRESH_INTERVAL_SECONDS = 5
+local slotRuntimeByStand = setmetatable({}, { __mode = "k" })
+
+local function isLiveInstance(instance)
+	return typeof(instance) == "Instance" and instance.Parent ~= nil
+end
+
+local function resolveSlotHandle(standModel)
+	local handle = standModel and standModel:FindFirstChild("Handle", true)
+	return if handle and handle:IsA("BasePart") then handle else nil
+end
+
+local function resolveSlotLevelUpPart(standModel)
+	local part = standModel and standModel:FindFirstChild("LevelUp", true)
+	return if part and part:IsA("BasePart") then part else nil
+end
+
+local function resolvePlayerLevelUpSurfaceGui(player, slotKey, levelUpPart, allowPartFallback)
+	if player and player:IsA("Player") then
+		local playerGui = player:FindFirstChild("PlayerGui")
+		if playerGui then
+			local legacyGui = playerGui:FindFirstChild(slotKey)
+			if legacyGui and legacyGui:IsA("SurfaceGui") then
+				return legacyGui
+			end
+
+			local runtimeGuiName = ShipSlotGuiIdentity.GetRuntimeGuiName(slotKey)
+			local runtimeGui = runtimeGuiName and playerGui:FindFirstChild(runtimeGuiName)
+			if runtimeGui and runtimeGui:IsA("SurfaceGui") then
+				return runtimeGui
+			end
+
+			for _, child in ipairs(playerGui:GetChildren()) do
+				if child:IsA("SurfaceGui") and ShipSlotGuiIdentity.GetSlotKeyFromGui(child) == slotKey then
+					return child
+				end
+			end
+		end
+	end
+
+	if allowPartFallback and levelUpPart then
+		return levelUpPart:FindFirstChildWhichIsA("SurfaceGui", true) or levelUpPart:FindFirstChild("SurfaceGui")
+	end
+
+	return nil
+end
+
+local function resolveLevelUpRefs(cache)
+	local surfaceGui = cache.LevelUpSurfaceGui
+	if not isLiveInstance(surfaceGui) or not surfaceGui:IsA("SurfaceGui") then
+		return
+	end
+
+	local root = surfaceGui:FindFirstChild("LevelUp")
+	if root and not root:IsA("GuiObject") then
+		root = nil
+	end
+
+	local container = root or surfaceGui
+	local main = container:FindFirstChild("Main", true) or container
+	cache.LevelUpRoot = root
+	cache.LevelUpMain = main
+	cache.LevelUpPrice = getTextTarget(main, "Price")
+	cache.LevelUpUpgrade = getTextTarget(main, "Upgarde") or getTextTarget(main, "Upgrade")
+end
+
+local function disconnectSlotRuntime(cache)
+	if not cache or typeof(cache.Connections) ~= "table" then
+		return
+	end
+
+	for _, connection in pairs(cache.Connections) do
+		if connection and connection.Connected then
+			connection:Disconnect()
+		end
+	end
+	table.clear(cache.Connections)
+	cache.PromptTriggeredConnection = nil
+	cache.ZoneTouchedConnection = nil
+end
+
+local function resetSlotRenderState(cache)
+	if cache then
+		cache.LastMoneyText = nil
+		cache.LastPromptActionText = nil
+		cache.LastPromptObjectText = nil
+		cache.LastLevelVisible = nil
+		cache.LastLevelRootVisible = nil
+		cache.LastLevelPriceText = nil
+		cache.LastLevelUpgradeText = nil
+		cache.LastLevelProgressKey = nil
+		cache.NextLevelUiRefreshAt = 0
+		cache.NextLevelUpLookupAt = nil
+	end
+end
+
+local function cleanupSlotRuntime(standModel)
+	local cache = slotRuntimeByStand[standModel]
+	if not cache then
+		return
+	end
+
+	disconnectSlotRuntime(cache)
+	slotRuntimeByStand[standModel] = nil
+end
+
+local function buildSlotRuntime(player, plot, standModel)
+	local slotKey = tostring(standModel.Name)
+	local handle = resolveSlotHandle(standModel)
+	local levelUpPart = resolveSlotLevelUpPart(standModel)
+	local allowLevelUpPartFallback = not ShipRuntimeService.IsActiveShip(standModel.Parent)
+	local cache = {
+		Player = player,
+		Plot = plot,
+		StandModel = standModel,
+		SlotKey = slotKey,
+		Handle = handle,
+		Prompt = handle and handle:FindFirstChildOfClass("ProximityPrompt") or nil,
+		ClaimHitBox = ShipSlotService.GetClaimHitBox(standModel),
+		MoneyLabel = ShipSlotService.GetClaimMoneyLabel(standModel),
+		LevelUpPart = levelUpPart,
+		LevelUpSurfaceGui = resolvePlayerLevelUpSurfaceGui(player, slotKey, levelUpPart, allowLevelUpPartFallback),
+		Connections = {},
+		NextLevelUiRefreshAt = 0,
+	}
+
+	resolveLevelUpRefs(cache)
+	slotRuntimeByStand[standModel] = cache
+	return cache
+end
+
+function getSlotRuntime(player, plot, standModel)
+	if typeof(standModel) ~= "Instance" or not standModel:IsA("Model") then
+		return nil
+	end
+
+	local cache = slotRuntimeByStand[standModel]
+	if
+		cache
+		and cache.Player == player
+		and cache.StandModel == standModel
+		and standModel.Parent ~= nil
+	then
+		if plot and cache.Plot == nil then
+			cache.Plot = plot
+		end
+		return cache
+	end
+
+	if cache then
+		cleanupSlotRuntime(standModel)
+	end
+
+	return buildSlotRuntime(player, plot or standModel.Parent, standModel)
+end
+
+local function getExistingSlotRuntime(standModel)
+	return slotRuntimeByStand[standModel]
+end
+
+local function cleanupPlayerSlotRuntime(player)
+	for standModel, cache in pairs(slotRuntimeByStand) do
+		if cache.Player == player then
+			cleanupSlotRuntime(standModel)
+		end
+	end
+end
+
+local function setTextIfChanged(cache, fieldName, label, text)
+	if not cache then
+		return
+	end
+
+	if not label or not label.Parent then
+		return
+	end
+
+	text = tostring(text or "")
+	if cache[fieldName] == text and label.Text == text then
+		return
+	end
+
+	label.TextWrapped = true
+	label.Text = text
+	cache[fieldName] = text
+end
+
+local function setCachedLevelUpVisible(cache, visible)
+	if not cache then
+		return
+	end
+
+	local surfaceGui = cache.LevelUpSurfaceGui
+	if surfaceGui and surfaceGui.Parent and (cache.LastLevelVisible ~= visible or surfaceGui.Enabled ~= visible) then
+		surfaceGui.Enabled = visible
+		cache.LastLevelVisible = visible
+	end
+
+	local root = cache.LevelUpRoot
+	if root and root.Parent and (cache.LastLevelRootVisible ~= visible or root.Visible ~= visible) then
+		root.Visible = visible
+		cache.LastLevelRootVisible = visible
+	end
+
+	local clickDetector = cache.ClickDetector
+	if clickDetector and clickDetector.Parent then
+		local maxDistance = if visible then 15 else 0
+		if clickDetector.MaxActivationDistance ~= maxDistance then
+			clickDetector.MaxActivationDistance = maxDistance
+		end
+	end
 end
 
 local VariantOrder = { "Normal", "Golden", "Diamond" }
@@ -1648,8 +1863,9 @@ local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, pl
 	end
 
 	local displayRarity = stripVariantPrefix(rawRarity, variantKey)
-	local incomePerSecond = getStandIncomePerSecond(player, standModel.Name, canonicalName)
-	local slotState = getStandSlotState(player, standModel.Name)
+	local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standModel.Name)
+	local incomePerSecond = if isCaptainSlot then 0 else getStandIncomePerSecond(player, standModel.Name, canonicalName)
+	local slotState = if isCaptainSlot then nil else getStandSlotState(player, standModel.Name)
 	local slotBonusInfo = slotState and slotState.BonusInfo or nil
 
 	setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Placed)
@@ -1678,17 +1894,56 @@ local function clearStandVisual(standModel)
 	if existing and existing:IsA("Model") then
 		existing:Destroy()
 	end
+	resetSlotRenderState(getExistingSlotRuntime(standModel))
 end
 
-local function placeModelBottomOnHandleLeft(model, handle)
+local function findActiveShipAncestor(instance)
+	local current = instance
+
+	while current do
+		if ShipRuntimeService.IsActiveShip(current) then
+			return current
+		end
+
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function isNumericShipCrewSlot(standModel)
+	return ShipSlotService.NormalizeSlotNumber(standModel and standModel.Name) ~= nil
+		and findActiveShipAncestor(standModel) ~= nil
+end
+
+local function getCrewPlacementRotationOffsetDegrees(standModel)
+	if
+		isNumericShipCrewSlot(standModel)
+		or (
+			ShipSlotService.IsCaptainSlotName(standModel and standModel.Name)
+			and findActiveShipAncestor(standModel) ~= nil
+		)
+	then
+		return tonumber(ShipVisuals.ShipCrewPlacementRotationOffsetDegrees)
+			or LEGACY_STAND_CREW_PLACEMENT_ROTATION_OFFSET_DEGREES
+	end
+
+	return LEGACY_STAND_CREW_PLACEMENT_ROTATION_OFFSET_DEGREES
+end
+
+local function getCrewPlacementCFrame(model, handle, standModel)
 	local boxCF, boxSize = model:GetBoundingBox()
 	local offset = model:GetPivot():ToObjectSpace(boxCF)
 	local up = handle.CFrame.UpVector
 	local surface = handle.Position + up * (handle.Size.Y / 2)
-	local rot = (handle.CFrame - handle.Position) * CFrame.Angles(0, math.rad(90), 0)
+	local rotationOffsetDegrees = getCrewPlacementRotationOffsetDegrees(standModel)
+	local rot = (handle.CFrame - handle.Position) * CFrame.Angles(0, math.rad(rotationOffsetDegrees), 0)
 	local desiredBox = CFrame.new(surface + up * (boxSize.Y / 2)) * rot
-	local pivotTarget = desiredBox * offset:Inverse()
-	model:PivotTo(pivotTarget)
+	return desiredBox * offset:Inverse()
+end
+
+local function placeModelBottomOnHandle(model, handle, standModel)
+	model:PivotTo(getCrewPlacementCFrame(model, handle, standModel))
 end
 
 local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
@@ -1721,7 +1976,7 @@ local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
 	ensurePrimaryPart(clone)
 	anchorModel(clone)
 	makeStandVisualNonBlocking(clone)
-	placeModelBottomOnHandleLeft(clone, handle)
+	placeModelBottomOnHandle(clone, handle, standModel)
 
 	local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
 	if info then
@@ -1729,6 +1984,7 @@ local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
 	end
 
 	syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
+	resetSlotRenderState(getExistingSlotRuntime(standModel))
 	standDebug(
 		"spawnStandCrewMember success player=%s stand=%s model=%s incomeBase=%s",
 		player and player.Name or "?",
@@ -1795,56 +2051,32 @@ local function equipCrewMemberToolByInstanceId(player, instanceId, storageName)
 	end)
 end
 
-local function getMoneyLabel(standModel)
-	local claim = standModel:FindFirstChild("Claim", true)
-	if not claim then
-		return nil
-	end
-	local zone = claim:FindFirstChild("Zone", true)
-	if not zone then
-		return nil
-	end
-	local bb = zone:FindFirstChildWhichIsA("BillboardGui", true) or zone:FindFirstChild("BillboardGui", true)
-	if not bb then
-		return nil
-	end
-	-- The template TextLabel is still named Money in Studio; only its displayed text is Beli.
-	return getTextTarget(bb, "Money")
+local function setMoneyLabelText(cache, text)
+	setTextIfChanged(cache, "LastMoneyText", cache and cache.MoneyLabel, text)
 end
 
-local function setMoneyText(standModel, amount)
-	local money = getMoneyLabel(standModel)
-	if money then
-		money.TextWrapped = true
-		money.Text = shorten.roundNumber(math.floor(amount)) .. CurrencyUtil.getCompactSuffix()
-	end
-end
-
-local function setMoneyLabelText(standModel, text)
-	local money = getMoneyLabel(standModel)
-	if money then
-		money.TextWrapped = true
-		money.Text = tostring(text)
-	end
-end
-
-local function updateStandMoneyText(player, standModel)
+local function updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return
 	end
 
-	local standName = standModel.Name
-	local slotState = getStandSlotState(player, standName)
-	if slotState.Visible and not slotState.Usable then
-		setMoneyLabelText(standModel, "LOCKED")
+	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
+	if not cache or not isLiveInstance(cache.MoneyLabel) then
 		return
 	end
 
-	local crewMemberName = getPlayerStandCrewMemberName(player, standName)
+	local standName = standModel.Name
+	slotState = slotState or getStandSlotState(player, standName)
+	if slotState.Visible and not slotState.Usable then
+		setMoneyLabelText(cache, "LOCKED")
+		return
+	end
+
+	crewMemberName = if crewMemberName ~= nil then crewMemberName else getPlayerStandCrewMemberName(player, standName)
 	local incomeText = shorten.roundNumber(math.floor(getStandIncomeDisplay(player, standName))) .. CurrencyUtil.getCompactSuffix()
 	if crewMemberName == "" and slotState.BonusInfo then
 		setMoneyLabelText(
-			standModel,
+			cache,
 			string.format("%s +%d%%", tostring(slotState.BonusInfo.Label or "Bonus"), slotState.BonusPercent)
 		)
 		return
@@ -1852,111 +2084,63 @@ local function updateStandMoneyText(player, standModel)
 
 	if crewMemberName ~= "" and slotState.BonusInfo then
 		setMoneyLabelText(
-			standModel,
+			cache,
 			string.format("%s +%d%%\n%s", tostring(slotState.BonusInfo.Label or "Bonus"), slotState.BonusPercent, incomeText)
 		)
 		return
 	end
 
-	setMoneyText(standModel, getStandIncomeDisplay(player, standName))
+	setMoneyLabelText(cache, incomeText)
 end
 
-local function getHitBoxPart(standModel)
-	local claim = standModel:FindFirstChild("Claim", true)
-	if not claim then
-		return nil
+local function getHitBoxPart(standModel, cache)
+	cache = cache or getExistingSlotRuntime(standModel)
+	if cache then
+		return cache.ClaimHitBox
 	end
-	local zone = claim:FindFirstChild("HitBox", true)
-	if zone and zone:IsA("BasePart") then
-		return zone
-	end
-	return nil
-end
 
-local function findPlotForPlayer(player)
-	for _, m in ipairs(PlotsFolder:GetChildren()) do
-		if m:IsA("Model") then
-			local owner = m:GetAttribute("OwnerUserId")
-			local ownerName = m:GetAttribute("OwnerName")
-			local matchedByUserId = owner == player.UserId
-			local decision = matchedByUserId and "accepted" or "rejected_owner_userid_mismatch"
-			ownershipTrace(
-				"findPlotForPlayer player=%s userId=%s plot=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s plotName=%s matchedByUserId=%s decision=%s",
-				player.Name,
-				tostring(player.UserId),
-				formatInstancePath(m),
-				tostring(owner),
-				typeof(owner),
-				tostring(ownerName),
-				tostring(m.Name),
-				tostring(matchedByUserId),
-				decision
-			)
-			if matchedByUserId then
-				return m
-			end
-		end
-	end
-	return nil
+	return ShipSlotService.GetClaimHitBox(standModel)
 end
 
 local function waitForPlot(player, timeout)
 	local t0 = os.clock()
-	standDebug("waitForPlot begin player=%s timeout=%s", player.Name, tostring(timeout or 15))
+	standDebug("waitForShip begin player=%s timeout=%s", player.Name, tostring(timeout or 15))
 	saveTrace(
-		"restoreWait begin player=%s userId=%s timeout=%s check=plot.OwnerUserId==player.UserId",
+		"restoreWait begin player=%s userId=%s timeout=%s check=active_ship.OwnerUserId==player.UserId",
 		player.Name,
 		tostring(player.UserId),
 		tostring(timeout or 15)
 	)
 	ownershipTrace(
-		"waitForPlot begin player=%s userId=%s timeout=%s",
+		"waitForShip begin player=%s userId=%s timeout=%s",
 		player.Name,
 		tostring(player.UserId),
 		tostring(timeout or 15)
 	)
 	while os.clock() - t0 < (timeout or 15) do
-		local plot = findPlotForPlayer(player)
-		if plot then
-			standDebug("waitForPlot found player=%s plot=%s", player.Name, plot:GetFullName())
-			local slot = plot:FindFirstChild("Slot")
-			local posPart = slot and slot:IsA("ObjectValue") and slot.Value or nil
-			local spawnPart = plot:FindFirstChild("SpawnLocation", true)
-			plotTrace(
-				"waitForPlot found player=%s userId=%s plot=%s slot=%s slotPos=%s spawn=%s spawnPos=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s accepted=%s",
-				player.Name,
-				tostring(player.UserId),
-				formatInstancePath(plot),
-				formatInstancePath(posPart),
-				formatVector3(posPart and posPart.Position or nil),
-				formatInstancePath(spawnPart),
-				formatVector3(spawnPart and spawnPart:IsA("BasePart") and spawnPart.Position or nil),
-				tostring(plot:GetAttribute("OwnerUserId")),
-				typeof(plot:GetAttribute("OwnerUserId")),
-				tostring(plot:GetAttribute("OwnerName")),
-				"true"
-			)
+		local activeShip = ShipRuntimeService.GetActiveShip(player)
+		if activeShip then
+			standDebug("waitForShip found player=%s ship=%s", player.Name, activeShip:GetFullName())
 			saveTrace(
-				"restoreWait accepted player=%s userId=%s plot=%s plotOwnerUserId=%s plotOwnerUserIdType=%s reason=owner_userid_match",
+				"restoreWait accepted player=%s userId=%s ship=%s reason=active_ship_runtime",
 				player.Name,
 				tostring(player.UserId),
-				formatInstancePath(plot),
-				tostring(plot:GetAttribute("OwnerUserId")),
-				typeof(plot:GetAttribute("OwnerUserId"))
+				formatInstancePath(activeShip)
 			)
-			return plot
+			return activeShip
 		end
+
 		task.wait(0.25)
 	end
-	standDebug("waitForPlot timed_out player=%s", player.Name)
+	standDebug("waitForShip timed_out player=%s", player.Name)
 	saveTrace(
-		"restoreWait skipped player=%s userId=%s reason=no_plot_with_matching_owner_userid timeout=%s",
+		"restoreWait skipped player=%s userId=%s reason=no_active_ship_with_matching_owner_userid timeout=%s",
 		player.Name,
 		tostring(player.UserId),
 		tostring(timeout or 15)
 	)
 	ownershipTrace(
-		"waitForPlot timed_out player=%s userId=%s timeout=%s",
+		"waitForShip timed_out player=%s userId=%s timeout=%s",
 		player.Name,
 		tostring(player.UserId),
 		tostring(timeout or 15)
@@ -1964,75 +2148,56 @@ local function waitForPlot(player, timeout)
 	return nil
 end
 
-local function _getStandsFolder(plot)
-	local stands = plot:FindFirstChild("Stands", true)
-	if stands and stands:IsA("Folder") then
-		return stands
-	end
-	return nil
-end
-
 local function getLevelUpPart(standModel)
-	local p = standModel:FindFirstChild("LevelUp", true)
-	if p and p:IsA("BasePart") then
-		return p
+	local cache = getExistingSlotRuntime(standModel)
+	if cache and isLiveInstance(cache.LevelUpPart) then
+		return cache.LevelUpPart
 	end
-	return nil
+
+	return resolveSlotLevelUpPart(standModel)
 end
 
-local function getLevelUpGuiRoot(standModel, player)
-	local part = getLevelUpPart(standModel)
-	if not part then
+local function getLevelUpGuiRoot(standModel, player, cache)
+	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
+	if not cache or not isLiveInstance(cache.LevelUpPart) then
 		return nil, nil, nil
 	end
-	local sg = part:FindFirstChildWhichIsA("SurfaceGui", true) or part:FindFirstChild("SurfaceGui")
-	if (not sg or not sg:IsA("SurfaceGui")) and player and player:IsA("Player") then
-		local playerGui = player:FindFirstChild("PlayerGui")
-		local playerSurfaceGui = playerGui and playerGui:FindFirstChild(standModel.Name)
-		if playerSurfaceGui and playerSurfaceGui:IsA("SurfaceGui") then
-			sg = playerSurfaceGui
+
+	if not isLiveInstance(cache.LevelUpSurfaceGui) then
+		local now = os.clock()
+		if cache.NextLevelUpLookupAt and now < cache.NextLevelUpLookupAt then
+			return cache.LevelUpPart, nil, nil
+		end
+		cache.NextLevelUpLookupAt = now + SLOT_LEVEL_UI_REFRESH_INTERVAL_SECONDS
+		local allowPartFallback = not ShipRuntimeService.IsActiveShip(standModel.Parent)
+		cache.LevelUpSurfaceGui = resolvePlayerLevelUpSurfaceGui(player, cache.SlotKey, cache.LevelUpPart, allowPartFallback)
+		resolveLevelUpRefs(cache)
+		if cache.LevelUpSurfaceGui then
+			cache.NextLevelUpLookupAt = nil
 		end
 	end
-	if not sg or not sg:IsA("SurfaceGui") then
-		return part, nil, nil
+
+	if not cache.LevelUpSurfaceGui or not cache.LevelUpSurfaceGui:IsA("SurfaceGui") then
+		return cache.LevelUpPart, nil, nil
 	end
-	local root = sg:FindFirstChild("LevelUp")
-	if root and root:IsA("GuiObject") then
-		return part, sg, root
-	end
-	return part, sg, nil
+
+	return cache.LevelUpPart, cache.LevelUpSurfaceGui, cache.LevelUpRoot
 end
 
-local function setLevelUpVisible(standModel, visible, player)
-	local part, sg, root = getLevelUpGuiRoot(standModel, player)
-	if sg then
-		sg.Enabled = visible
-	end
-	if root then
-		root.Visible = visible
-	end
-	local cd = part and part:FindFirstChildOfClass("ClickDetector")
-	if cd then
-		cd.MaxActivationDistance = visible and 15 or 0
-	end
-end
-
-local function getLevelUpRefs(standModel, player)
-	local part, sg, root = getLevelUpGuiRoot(standModel, player)
-	if not part or not sg then
+local function getLevelUpRefs(standModel, player, cache)
+	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
+	local part, sg = getLevelUpGuiRoot(standModel, player, cache)
+	if not part or not sg or not cache then
 		return nil
 	end
-	local container = root or sg
-	local main = container:FindFirstChild("Main", true) or container
-	local price = getTextTarget(main, "Price")
-	local upg = getTextTarget(main, "Upgarde") or getTextTarget(main, "Upgrade")
+
 	return {
 		Part = part,
 		SurfaceGui = sg,
-		Root = root,
-		Main = main,
-		Price = price,
-		Upgrade = upg,
+		Root = cache.LevelUpRoot,
+		Main = cache.LevelUpMain,
+		Price = cache.LevelUpPrice,
+		Upgrade = cache.LevelUpUpgrade,
 	}
 end
 
@@ -2059,7 +2224,9 @@ end
 
 local function setStandLevel(player, standName, level)
 	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
-	CrewStandIncomeAuthority.SetStandLevel(player, standName, safeLevel, "stand_level_sync")
+	if CrewStandIncomeAuthority.GetStandLevel(player, standName) ~= safeLevel then
+		CrewStandIncomeAuthority.SetStandLevel(player, standName, safeLevel, "stand_level_sync")
+	end
 	return safeLevel
 end
 
@@ -2072,79 +2239,77 @@ local function syncStandLevelFromCrewMember(player, standName, crewMemberName)
 	return setStandLevel(player, standName, lvl)
 end
 
-local function updateLevelUpUI(player, standModel)
-	local refs = getLevelUpRefs(standModel, player)
+local function updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, forceRefresh, totalFoodCount)
+	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
+	local refs = getLevelUpRefs(standModel, player, cache)
 	if not refs then
 		return
 	end
 
 	local standName = standModel.Name
-	local slotState = getStandSlotState(player, standName)
+	slotState = slotState or getStandSlotState(player, standName)
 	if slotState.Visible and not slotState.Usable then
-		setLevelUpVisible(standModel, false, player)
-		if refs.Price then
-			refs.Price.Text = ""
-		end
-		if refs.Upgrade then
-			refs.Upgrade.Text = ""
-		end
+		setCachedLevelUpVisible(cache, false)
+		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
+		setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "")
 		return
 	end
 
-	local crewMemberName = getPlayerStandCrewMemberName(player, standName)
-	local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
+	crewMemberName = if crewMemberName ~= nil then crewMemberName else getPlayerStandCrewMemberName(player, standName)
+	crewMemberInstanceId = if crewMemberInstanceId ~= nil then crewMemberInstanceId else getPlayerStandCrewMemberInstanceId(player, standName)
 
 	if crewMemberName == "" then
-		setLevelUpVisible(standModel, false, player)
-		if refs.Price then
-			refs.Price.Text = ""
-		end
-		if refs.Upgrade then
-			refs.Upgrade.Text = ""
-		end
+		setCachedLevelUpVisible(cache, false)
+		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
+		setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "")
 		standDebug("updateLevelUpUI hidden player=%s stand=%s reason=no_crew_member", player.Name, standName)
 		return
 	end
 
+	local now = os.clock()
+	local availableFoodCount = if totalFoodCount ~= nil then totalFoodCount else CrewFoodProgression.GetTotalFoodCount(player)
+	local progressKey = table.concat({
+		crewMemberName,
+		tostring(crewMemberInstanceId or ""),
+		tostring(availableFoodCount),
+	}, "|")
+	if
+		forceRefresh ~= true
+		and cache.LastLevelProgressKey == progressKey
+		and now < (cache.NextLevelUiRefreshAt or 0)
+	then
+		return
+	end
+	cache.LastLevelProgressKey = progressKey
+	cache.NextLevelUiRefreshAt = now + SLOT_LEVEL_UI_REFRESH_INTERVAL_SECONDS
+
 	local progress = CrewFoodProgression.GetProgress(player, crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberName)
 	if not progress then
-		setLevelUpVisible(standModel, false, player)
-		if refs.Price then
-			refs.Price.Text = ""
-		end
-		if refs.Upgrade then
-			refs.Upgrade.Text = ""
-		end
+		setCachedLevelUpVisible(cache, false)
+		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
+		setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "")
 		return
 	end
 
 	local currentLevel = setStandLevel(player, standName, progress.Level)
 	local xpText = string.format("XP: %d / %d", math.max(0, progress.CurrentXP), math.max(0, progress.NextLevelXP))
-	if CrewFoodProgression.GetTotalFoodCount(player) > 0 then
+	if availableFoodCount > 0 then
 		xpText ..= " | Auto-feed"
 	else
 		xpText ..= " | No Food"
 	end
 
 	if currentLevel >= progress.MaxLevel then
-		setLevelUpVisible(standModel, true, player)
-		if refs.Upgrade then
-			refs.Upgrade.Text = "Current Level: " .. tostring(currentLevel)
-		end
-		if refs.Price then
-			refs.Price.Text = "Max Level"
-		end
+		setCachedLevelUpVisible(cache, true)
+		setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "Current Level: " .. tostring(currentLevel))
+		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "Max Level")
 		standDebug("updateLevelUpUI maxed player=%s stand=%s currentLevel=%s", player.Name, standName, tostring(currentLevel))
 		return
 	end
 
-	setLevelUpVisible(standModel, true, player)
-	if refs.Upgrade then
-		refs.Upgrade.Text = "Current Level: " .. tostring(currentLevel)
-	end
-	if refs.Price then
-		refs.Price.Text = xpText
-	end
+	setCachedLevelUpVisible(cache, true)
+	setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "Current Level: " .. tostring(currentLevel))
+	setTextIfChanged(cache, "LastLevelPriceText", refs.Price, xpText)
 	standDebug(
 		"updateLevelUpUI visible player=%s stand=%s currentLevel=%s currentXP=%s nextXP=%s",
 		player.Name,
@@ -2155,9 +2320,6 @@ local function updateLevelUpUI(player, standModel)
 	)
 end
 
-local promptBound = {}
-local zoneBound = {}
-local levelUpBound = {}
 local playerStandList = {}
 local touchDebounce = {}
 local stealPromptDebounce = {}
@@ -2188,17 +2350,32 @@ local function getPlacementPickupGuardRemaining(player, standName)
 	return remaining
 end
 
-local function bindZoneCollect(player, plot, standModel)
-	local zone = getHitBoxPart(standModel)
+CaptainSlotRuntime.Configure({
+	ClearCrewRecordCache = clearCrewRecordCache,
+	ClearVisual = clearStandVisual,
+	EquipCrewMemberToolByInstanceId = equipCrewMemberToolByInstanceId,
+	GetCrewMemberLevel = getCrewMemberLevel,
+	GetEquippedCrewMemberToolInfo = getEquippedCrewMemberToolInfo,
+	LogCrewSwitchFailure = logCrewSwitchFailure,
+	ResolveDisplayName = resolveStandStatusDisplayName,
+	SpawnCrewMember = spawnStandCrewMember,
+})
+
+local function bindZoneCollect(player, plot, standModel, cache)
+	cache = cache or getSlotRuntime(player, plot, standModel)
+	local zone = getHitBoxPart(standModel, cache)
 	if not zone then
 		return
 	end
-	if zoneBound[zone] then
+	if cache.ZoneTouchedConnection and cache.ZoneTouchedConnection.Connected and cache.ClaimHitBox == zone then
 		return
 	end
-	zoneBound[zone] = true
 
-	zone.Touched:Connect(function(hit)
+	if cache.ZoneTouchedConnection and cache.ZoneTouchedConnection.Connected then
+		cache.ZoneTouchedConnection:Disconnect()
+	end
+
+	cache.ZoneTouchedConnection = zone.Touched:Connect(function(hit)
 		if not hit or hit.Name ~= "HumanoidRootPart" then
 			return
 		end
@@ -2270,51 +2447,56 @@ local function bindZoneCollect(player, plot, standModel)
 
 		updateStandMoneyText(plr, standModel)
 	end)
+	cache.Connections.ZoneTouched = cache.ZoneTouchedConnection
 end
 
 
-local function bindLevelUp(player, _plot, standModel)
+local function bindLevelUp(player, _plot, standModel, cache)
 	local cd = ensureLevelUpClickDetector(standModel)
 	if not cd then
 		return
 	end
-	if levelUpBound[cd] then
-		return
-	end
-	levelUpBound[cd] = true
 
+	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
+	if cache then
+		cache.ClickDetector = cd
+	end
 	cd.MaxActivationDistance = 0
 
-	updateLevelUpUI(player, standModel)
+	updateLevelUpUI(player, standModel, cache, nil, nil, nil, true)
 end
 
 local function bindStandPrompt(player, plot, standModel)
-	local handle = standModel:FindFirstChild("Handle", true)
+	local cache = getSlotRuntime(player, plot, standModel)
+	local handle = cache and cache.Handle
 	if not handle or not handle:IsA("BasePart") then
 		standDebug("bindStandPrompt skip player=%s stand=%s reason=no_handle", player.Name, standModel.Name)
 		return
 	end
 
-	local prompt = handle:FindFirstChildOfClass("ProximityPrompt")
+	local prompt = cache.Prompt
 	if not prompt then
 		standDebug("bindStandPrompt skip player=%s stand=%s reason=no_prompt", player.Name, standModel.Name)
 		return
 	end
 
-	if promptBound[prompt] then
+	dmEnsureStandFolder(player, standModel.Name)
+	standDebug("bindStandPrompt ready player=%s stand=%s savedCrewMember=%s", player.Name, standModel.Name, tostring(getPlayerStandCrewMemberName(player, standModel.Name)))
+	updateStandMoneyText(player, standModel, cache)
+	bindZoneCollect(player, plot, standModel, cache)
+	bindLevelUp(player, plot, standModel, cache)
+	updateStandPromptTexts(player, standModel, cache)
+
+	if cache.PromptTriggeredConnection and cache.PromptTriggeredConnection.Connected and cache.Prompt == prompt then
 		standDebug("bindStandPrompt already_bound player=%s stand=%s", player.Name, standModel.Name)
 		return
 	end
-	promptBound[prompt] = true
 
-	dmEnsureStandFolder(player, standModel.Name)
-	standDebug("bindStandPrompt ready player=%s stand=%s savedCrewMember=%s", player.Name, standModel.Name, tostring(getPlayerStandCrewMemberName(player, standModel.Name)))
-	updateStandMoneyText(player, standModel)
-	bindZoneCollect(player, plot, standModel)
-	bindLevelUp(player, plot, standModel)
-	updateStandPromptTexts(player, standModel)
+	if cache.PromptTriggeredConnection and cache.PromptTriggeredConnection.Connected then
+		cache.PromptTriggeredConnection:Disconnect()
+	end
 
-	prompt.Triggered:Connect(function(plr)
+	cache.PromptTriggeredConnection = prompt.Triggered:Connect(function(plr)
 		local ok, err = xpcall(function()
 			standDebug("prompt triggered actor=%s standOwner=%s stand=%s", plr and plr.Name or "nil", player.Name, standModel.Name)
 			if not plr or not plr:IsA("Player") then
@@ -2686,6 +2868,7 @@ local function bindStandPrompt(player, plot, standModel)
 			standDebug("prompt handler error stand=%s err=%s", standModel.Name, tostring(err))
 		end
 	end)
+	cache.Connections.PromptTriggered = cache.PromptTriggeredConnection
 end
 
 local function registerStand(player, plot, standModel)
@@ -2705,6 +2888,7 @@ local function registerStand(player, plot, standModel)
 		list = {}
 		playerStandList[player] = list
 	end
+	local cache = getSlotRuntime(player, plot, standModel)
 
 	for i = 1, #list do
 		if list[i] == standModel then
@@ -2723,7 +2907,7 @@ local function registerStand(player, plot, standModel)
 		standDebug("registerStand init-task begin player=%s stand=%s", player.Name, standModel.Name)
 		local ok, err = xpcall(function()
 			standDebug("registerStand before handle lookup player=%s stand=%s", player.Name, standModel.Name)
-			local handle = standModel:FindFirstChild("Handle", true)
+			local handle = cache and cache.Handle or resolveSlotHandle(standModel)
 			standDebug("registerStand after handle lookup player=%s stand=%s handle=%s", player.Name, standModel.Name, tostring(handle ~= nil))
 			if handle and handle:IsA("BasePart") then
 				standDebug("registerStand before savedName lookup player=%s stand=%s", player.Name, standModel.Name)
@@ -2741,6 +2925,23 @@ local function registerStand(player, plot, standModel)
 				)
 				standDebug("registerStand after savedName lookup player=%s stand=%s savedName=%s", player.Name, standModel.Name, tostring(name))
 				if name ~= "" then
+					local slotState = getStandSlotState(player, standModel.Name)
+					if not slotState.Usable then
+						saveTrace(
+							"restoreDeferred player=%s userId=%s stand=%s savedName=%s reason=slot_locked level=%s",
+							player.Name,
+							tostring(player.UserId),
+							tostring(standModel.Name),
+							tostring(name),
+							tostring(slotState.Level)
+						)
+						clearStandVisual(standModel)
+						updateStandMoneyText(player, standModel, cache, slotState, name)
+						updateLevelUpUI(player, standModel, cache, slotState, name, savedInstanceId, true)
+						updateStandPromptTexts(player, standModel, cache, slotState, name)
+						return
+					end
+
 					standDebug("registerStand savedCrewMember branch entered player=%s stand=%s", player.Name, standModel.Name)
 					standDebug("registerStand restore-begin player=%s stand=%s savedName=%s", player.Name, standModel.Name, tostring(name))
 					standDebug("registerStand before ensureStandInstance player=%s stand=%s", player.Name, standModel.Name)
@@ -2797,15 +2998,20 @@ local function registerStand(player, plot, standModel)
 			end
 
 			standDebug("registerStand before setMoneyText player=%s stand=%s", player.Name, standModel.Name)
-			updateStandMoneyText(player, standModel)
+			updateStandMoneyText(player, standModel, cache)
 			standDebug("registerStand after setMoneyText player=%s stand=%s", player.Name, standModel.Name)
 			standDebug("registerStand before updateLevelUpUI player=%s stand=%s", player.Name, standModel.Name)
-			updateLevelUpUI(player, standModel)
+			updateLevelUpUI(player, standModel, cache, nil, nil, nil, true)
 			standDebug("registerStand after updateLevelUpUI player=%s stand=%s", player.Name, standModel.Name)
 		end, debug.traceback)
 
 		if not ok then
 			standDebug("registerStand init-task error player=%s stand=%s err=%s", player.Name, standModel.Name, tostring(err))
+			warn(("[CrewIncomeRuntime] Failed to initialize crew slot %s for %s: %s"):format(
+				standModel:GetFullName(),
+				player.Name,
+				tostring(err)
+			))
 		end
 	end)
 end
@@ -2813,16 +3019,36 @@ end
 
 local plotScanBound = {} 
 
-local function waitForStandsFolder(plot, timeout)
-	local t0 = os.clock()
-	while os.clock() - t0 < (timeout or 20) do
-		local stands = plot:FindFirstChild("Stands", true)
-		if stands and stands:IsA("Folder") then
-			return stands
-		end
-		task.wait(0.25)
+local function waitForStandContainer(plot, _timeout)
+	if ShipRuntimeService.IsActiveShip(plot) then
+		return plot, "ship"
 	end
-	return nil
+
+	return nil, nil
+end
+
+local function scanAndBindShipSlots(player, activeShip)
+	local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(activeShip)
+	if #slotNumbers == 0 then
+		warn(("[CrewIncomeRuntime] Active ship has no numbered crew slots with Handles: %s"):format(activeShip:GetFullName()))
+		return
+	end
+
+	for _, slotNumber in ipairs(slotNumbers) do
+		local slotModel = ShipSlotService.GetSlot(activeShip, slotNumber)
+		if slotModel and slotModel:IsA("Model") then
+			registerStand(player, activeShip, slotModel)
+		elseif slotModel then
+			warn(("[CrewIncomeRuntime] Ship slot %s is not a Model and cannot host crew visuals yet: %s"):format(
+				tostring(slotNumber),
+				slotModel:GetFullName()
+			))
+		end
+	end
+end
+
+local function scanAndBindCaptainSlot(player, activeShip)
+	CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 end
 
 local function scanAndBindPlot(player, plot)
@@ -2853,11 +3079,11 @@ local function scanAndBindPlot(player, plot)
 	end
 	plotScanBound[plot] = true
 
-	local stands = waitForStandsFolder(plot, 25)
-	if not stands then
-		standDebug("scanAndBindPlot failed player=%s plot=%s reason=no_stands_folder", player.Name, plot:GetFullName())
+	local stands, containerKind = waitForStandContainer(plot, 25)
+	if not stands or containerKind ~= "ship" then
+		standDebug("scanAndBindPlot failed player=%s plot=%s reason=no_active_ship_slots", player.Name, plot:GetFullName())
 		saveTrace(
-			"scanAndBindPlot failed player=%s userId=%s plot=%s reason=no_stands_folder",
+			"scanAndBindPlot failed player=%s userId=%s plot=%s reason=no_active_ship_slots",
 			player.Name,
 			tostring(player.UserId),
 			formatInstancePath(plot)
@@ -2865,41 +3091,10 @@ local function scanAndBindPlot(player, plot)
 		plotScanBound[plot] = nil
 		return
 	end
-	standDebug("scanAndBindPlot stands_folder player=%s stands=%s", player.Name, stands:GetFullName())
-
-	for _, m in ipairs(stands:GetDescendants()) do
-		if m:IsA("Model") then
-			local handle = m:FindFirstChild("Handle", true)
-			local prompt = handle and handle:IsA("BasePart") and handle:FindFirstChildOfClass("ProximityPrompt") or nil
-			standDebug(
-				"scanAndBindPlot found_model player=%s stand=%s handle=%s prompt=%s",
-				player.Name,
-				m.Name,
-				tostring(handle ~= nil),
-				tostring(prompt ~= nil)
-			)
-			if prompt then
-				registerStand(player, plot, m)
-			end
-		end
-	end
-
-	stands.DescendantAdded:Connect(function(inst)
-		if not player.Parent then
-			return
-		end
-
-		if inst:IsA("ProximityPrompt") then
-			local h = inst.Parent
-			if h and h:IsA("BasePart") and h.Name == "Handle" then
-				local sm = h:FindFirstAncestorOfClass("Model")
-				if sm then
-					standDebug("scanAndBindPlot descendant_prompt player=%s stand=%s prompt=%s", player.Name, sm.Name, inst:GetFullName())
-					registerStand(player, plot, sm)
-				end
-			end
-		end
-	end)
+	standDebug("scanAndBindPlot active_ship player=%s ship=%s", player.Name, stands:GetFullName())
+	reconcileSlotAssignmentsForRender(player, plot, "scan_and_bind_ship")
+	scanAndBindShipSlots(player, plot)
+	scanAndBindCaptainSlot(player, plot)
 end
 
 local function clearBoundStateForStand(standModel)
@@ -2907,26 +3102,7 @@ local function clearBoundStateForStand(standModel)
 		return
 	end
 
-	local handle = standModel:FindFirstChild("Handle", true)
-	if handle and handle:IsA("BasePart") then
-		local prompt = handle:FindFirstChildOfClass("ProximityPrompt")
-		if prompt then
-			promptBound[prompt] = nil
-		end
-	end
-
-	local hitBox = getHitBoxPart(standModel)
-	if hitBox then
-		zoneBound[hitBox] = nil
-	end
-
-	local levelUpPart = getLevelUpPart(standModel)
-	if levelUpPart then
-		local clickDetector = levelUpPart:FindFirstChildOfClass("ClickDetector")
-		if clickDetector then
-			levelUpBound[clickDetector] = nil
-		end
-	end
+	cleanupSlotRuntime(standModel)
 end
 
 local function clearPlotScanStateForPlayer(player)
@@ -2953,7 +3129,9 @@ local function clearPlayerStandRuntime(player)
 		end
 	end
 
+	CaptainSlotRuntime.CleanupPlayer(player)
 	playerStandList[player] = nil
+	cleanupPlayerSlotRuntime(player)
 	ensuredStandFolders[player] = nil
 	touchDebounce[player] = nil
 	stealPromptDebounce[player] = nil
@@ -2967,7 +3145,7 @@ local function refreshPlayerStandRuntime(player)
 
 	local plot = waitForPlot(player, 10)
 	if not plot then
-		return false, "plot_not_found"
+		return false, "active_ship_not_found"
 	end
 
 	scanAndBindPlot(player, plot)
@@ -2996,7 +3174,22 @@ end
 
 CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
 	if player and player.Parent == Players then
-		task.defer(reconcilePlayerStandAssignments, player)
+		if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+			return
+		end
+
+		task.defer(function()
+			if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+				return
+			end
+
+			local activeShip = ShipRuntimeService.GetActiveShip(player)
+			reconcileSlotAssignmentsForRender(player, activeShip, "inventory_saved")
+			if activeShip then
+				scanAndBindCaptainSlot(player, activeShip)
+			end
+			reconcilePlayerStandAssignments(player)
+		end)
 	end
 end)
 
@@ -3010,8 +3203,8 @@ Players.PlayerAdded:Connect(function(player)
 
 		local plot = waitForPlot(player, 25)
 		if not plot then
-			standDebug("PlayerAdded abort player=%s reason=no_plot", player.Name)
-			saveTrace("PlayerAdded restoreSkipped player=%s userId=%s reason=no_plot_owned_by_userid", player.Name, tostring(player.UserId))
+			standDebug("PlayerAdded abort player=%s reason=no_active_ship", player.Name)
+			saveTrace("PlayerAdded restoreSkipped player=%s userId=%s reason=no_active_ship_owned_by_userid", player.Name, tostring(player.UserId))
 			return
 		end
 		saveTrace(
@@ -3060,7 +3253,7 @@ for _, p in ipairs(Players:GetPlayers()) do
 			reconcilePlayerStandAssignments(p)
 			resetHugeIncomeOnJoin(p)
 		else
-			standDebug("bootstrap existing_player=%s reason=no_plot", p.Name)
+			standDebug("bootstrap existing_player=%s reason=no_active_ship", p.Name)
 		end
 	end)
 end
@@ -3072,19 +3265,31 @@ task.spawn(function()
 
 		for plr, stands in pairs(playerStandList) do
 			if not plr.Parent then
-				playerStandList[plr] = nil
+				clearPlayerStandRuntime(plr)
 			else
 				local didBankIncome = false
+				local equippedCrewMember = getEquippedCrewMemberToolInfo(plr)
+				local totalFoodCount = CrewFoodProgression.GetTotalFoodCount(plr)
 				for i = 1, #stands do
 					local standModel = stands[i]
 					if standModel and standModel.Parent then
 						local standName = standModel.Name
+						local cache = getSlotRuntime(plr, standModel.Parent, standModel)
 						dmEnsureStandFolder(plr, standName)
-
+						local slotState = getStandSlotState(plr, standName)
 						local crewMemberName = getPlayerStandCrewMemberName(plr, standName)
+						local crewMemberInstanceId = if crewMemberName ~= "" then getPlayerStandCrewMemberInstanceId(plr, standName) else ""
+						if not slotState.Usable then
+							clearStandVisual(standModel)
+							updateStandMoneyText(plr, standModel, cache, slotState, crewMemberName)
+							updateLevelUpUI(plr, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
+							updateStandPromptTexts(plr, standModel, cache, slotState, crewMemberName, equippedCrewMember)
+							continue
+						end
+
 						if crewMemberName ~= "" then
 							if not standModel:FindFirstChild("PlacedCrewMember") then
-								local handle = standModel:FindFirstChild("Handle", true)
+								local handle = cache and cache.Handle or resolveSlotHandle(standModel)
 								if handle and handle:IsA("BasePart") then
 									spawnStandCrewMember(plr, standModel, handle, crewMemberName)
 								end
@@ -3106,9 +3311,9 @@ task.spawn(function()
 							updateStandHover(plr, standModel, crewMemberName)
 						end
 
-						updateStandMoneyText(plr, standModel)
-						updateLevelUpUI(plr, standModel)
-						updateStandPromptTexts(plr, standModel)
+						updateStandMoneyText(plr, standModel, cache, slotState, crewMemberName)
+						updateLevelUpUI(plr, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
+						updateStandPromptTexts(plr, standModel, cache, slotState, crewMemberName, equippedCrewMember)
 					end
 				end
 				if didBankIncome then

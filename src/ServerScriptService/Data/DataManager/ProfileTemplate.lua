@@ -102,6 +102,7 @@ local ProfileTemplate = {
 	Ship = {
 		MaxSlots = Economy.Rules.MaxShipSlots,
 		Slots = {},
+		CaptainSlot = {},
 	},
 
 	Chef = {

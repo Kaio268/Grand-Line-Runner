@@ -3,31 +3,52 @@ local parent = script.Parent.Modules
 local function requireModules()
 	local modules = {}
 	local retries = {}
+	local failureCounts = {}
+
 	for _, child in ipairs(parent:GetChildren()) do
 		if child:IsA("ModuleScript") then
 			table.insert(modules, child)
 		end
 	end
+
 	local function tryRequire(module)
-		local success, result = pcall(require, module)
-		return success, result
+		return xpcall(function()
+			return require(module)
+		end, debug.traceback)
 	end
+
+	local function summarizeError(result)
+		local text = tostring(result)
+		return text:match("([^\n]+)") or text
+	end
+
 	while #modules > 0 do
-		for i = #modules, 1, -1 do
-			local module = modules[i]
-			local success = tryRequire(module)
+		for index = #modules, 1, -1 do
+			local module = modules[index]
+			local success, result = tryRequire(module)
 
 			if success then
-				print("✅Loaded module:", module.Name)
-				table.remove(modules, i) 
+				print("[Library] Loaded module:", module.Name)
+				table.remove(modules, index)
 			else
-				wait(1)
-				print("❌Failed to load module:", module.Name, "Retrying.")
-				wait(1)
+				failureCounts[module] = (failureCounts[module] or 0) + 1
+				if failureCounts[module] == 1 then
+					warn(("[Library] Failed to load module %s (%s):\n%s"):format(
+						module.Name,
+						module:GetFullName(),
+						tostring(result)
+					))
+				else
+					warn(("[Library] Failed to load module %s. Retrying. Attempt=%d Error=%s"):format(
+						module.Name,
+						failureCounts[module],
+						summarizeError(result)
+					))
+				end
 
+				wait(1)
 				table.insert(retries, module)
 				wait(1)
-
 			end
 		end
 		modules = retries

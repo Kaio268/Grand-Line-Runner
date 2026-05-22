@@ -3,7 +3,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local CrewSlotAssignmentReconciler = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewSlotAssignmentReconciler"))
 local GrandLineRushVerticalSliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
+local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
 local cfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
@@ -18,6 +20,7 @@ end
 
 local busy = {}
 local PLOT_UPGRADE_PATH = "HiddenLeaderstats.PlotUpgrade"
+local RESET_REFRESH_WAIT_TIMEOUT_SECONDS = 8
 local MATERIAL_PATHS = {
 	Timber = {
 		Primary = "Materials.Timber",
@@ -196,7 +199,28 @@ local function fireUpgradeSuccess(player, newLevel)
 	})
 end
 
-local function fireUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
+local function fireUpgradeFailure(player, errorCode, title, accentText, lines, level, message, isError, extra)
+	local payload = {
+		Success = false,
+		IsError = if isError == nil then true else isError,
+		ErrorCode = tostring(errorCode or "upgrade_failed"),
+		Title = tostring(title or "Ship Upgrade Failed"),
+		AccentText = tostring(accentText or "Try Again"),
+		Lines = if typeof(lines) == "table" then lines else { tostring(message or "Unable to upgrade your ship right now.") },
+		Level = cfg.ClampLevel(level or 0),
+		Message = tostring(message or (typeof(lines) == "table" and lines[1]) or "Unable to upgrade your ship right now."),
+	}
+
+	if typeof(extra) == "table" then
+		for key, value in pairs(extra) do
+			payload[key] = value
+		end
+	end
+
+	fireUpgradeResult(player, payload)
+end
+
+local function fireRebirthUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
 	fireUpgradeResult(player, {
 		Success = false,
 		IsError = true,
@@ -218,38 +242,102 @@ local function fireUpgradeFailure(player, targetLevel, requiredRebirths, current
 	})
 end
 
-remote.OnServerEvent:Connect(function(player)
-	if busy[player] then
-		return
+local function getRefreshReason(reason, details)
+	if typeof(details) == "table" and details.Reason ~= nil then
+		return tostring(details.Reason)
 	end
-	busy[player] = true
 
+	return tostring(reason or "unknown_error")
+end
+
+local function refreshShipAfterUpgrade(player)
+	local refreshOk, refreshSuccess, refreshReason, refreshDetails = xpcall(function()
+		return ShipRuntimeService.RefreshPlayerShip(player)
+	end, debug.traceback)
+
+	if not refreshOk then
+		return false, "unknown_error", {
+			Reason = "unknown_error",
+			Error = tostring(refreshSuccess),
+		}
+	end
+
+	if refreshSuccess == true then
+		return true, refreshReason, refreshDetails
+	end
+
+	local reason = getRefreshReason(refreshReason, refreshDetails)
+	local retryable = typeof(refreshDetails) == "table" and refreshDetails.Retryable == true
+	if reason ~= "reset_in_progress" and retryable ~= true then
+		return false, reason, refreshDetails
+	end
+
+	local resetComplete, resetReason = CrewSlotAssignmentReconciler.WaitForResetToComplete(
+		player,
+		RESET_REFRESH_WAIT_TIMEOUT_SECONDS
+	)
+	if resetComplete ~= true then
+		return false, "reset_wait_failed", {
+			Reason = "reset_wait_failed",
+			ResetReason = tostring(resetReason),
+			OriginalReason = reason,
+		}
+	end
+
+	local retryOk, retrySuccess, retryReason, retryDetails = xpcall(function()
+		return ShipRuntimeService.RefreshPlayerShip(player, {
+			Reason = "ship_upgrade_after_reset_retry",
+		})
+	end, debug.traceback)
+
+	if not retryOk then
+		return false, "unknown_error", {
+			Reason = "unknown_error",
+			Error = tostring(retrySuccess),
+			OriginalReason = reason,
+		}
+	end
+
+	if retrySuccess == true then
+		return true, retryReason, retryDetails
+	end
+
+	return false, getRefreshReason(retryReason, retryDetails), retryDetails
+end
+
+local function processUpgradePurchase(player)
 	local current = getCurrentUpgrade(player, PLOT_UPGRADE_PATH)
 	if cfg.IsMaxLevel(current) then
-		busy[player] = nil
-		return
+		fireUpgradeFailure(player, "max_level", "Ship Already Maxed", "Max Level", {
+			"Your ship progression is already fully upgraded.",
+		}, current, "Your ship progression is already fully upgraded.", false)
+		return false
 	end
 
 	local requirement = cfg.GetRequirementForLevel(current)
 	if typeof(requirement) ~= "table" then
-		busy[player] = nil
-		return
+		fireUpgradeFailure(player, "missing_requirement", "Ship Upgrade Unavailable", "Requirement Missing", {
+			"The next ship upgrade requirement could not be loaded.",
+		}, current, "The next ship upgrade requirement could not be loaded.")
+		return false
 	end
 
 	local targetLevel = cfg.ClampLevel(tonumber(requirement.TargetLevel) or (current + 1))
 	local currentRebirths = getRebirthCount(player)
 	local requiredRebirths = math.max(0, math.floor(tonumber(requirement.Rebirths) or 0))
 	if currentRebirths < requiredRebirths then
-		fireUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
-		busy[player] = nil
-		return
+		fireRebirthUpgradeFailure(player, targetLevel, requiredRebirths, currentRebirths)
+		return false
 	end
 
 	local currentMoney = getMoney(player)
 	local beliCost = math.max(0, math.floor(tonumber(requirement.Beli) or 0))
 	if currentMoney < beliCost then
-		busy[player] = nil
-		return
+		fireUpgradeFailure(player, "not_enough_beli", "Need More " .. CurrencyUtil.getDisplayName(), "Requirement Not Met", {
+			string.format("Required: %s %s.", tostring(beliCost), CurrencyUtil.getDisplayName()),
+			string.format("Current: %s %s.", tostring(currentMoney), CurrencyUtil.getDisplayName()),
+		}, current, "Not enough " .. CurrencyUtil.getDisplayName() .. ".")
+		return false
 	end
 
 	local materialBalances = {}
@@ -259,8 +347,12 @@ remote.OnServerEvent:Connect(function(player)
 		materialBalances[materialKey] = currentAmount
 
 		if currentAmount < requiredAmount then
-			busy[player] = nil
-			return
+			local displayName = tostring(cfg.MaterialDisplayNames[materialKey] or materialKey)
+			fireUpgradeFailure(player, "not_enough_" .. string.lower(tostring(materialKey)), "Need More " .. displayName, "Requirement Not Met", {
+				string.format("Required: %s %s.", tostring(requiredAmount), displayName),
+				string.format("Current: %s %s.", tostring(currentAmount), displayName),
+			}, current, "Not enough " .. displayName .. ".")
+			return false
 		end
 	end
 
@@ -285,12 +377,68 @@ remote.OnServerEvent:Connect(function(player)
 	end
 
 	if not applyMutations(player, mutations) then
-		busy[player] = nil
-		return
+		fireUpgradeFailure(player, "data_not_ready", "Ship Upgrade Failed", "Data Not Ready", {
+			"Your save data was not ready for this upgrade.",
+			"Please try again in a moment.",
+		}, current, "Your save data was not ready for this upgrade.")
+		return false
 	end
 
-	GrandLineRushVerticalSliceService.PushState(player)
+	local pushOk, pushErr = pcall(function()
+		GrandLineRushVerticalSliceService.PushState(player)
+	end)
+	if not pushOk then
+		warn(("[BuyPlotUpgrade] PushState failed for %s after ship upgrade to level %d: %s"):format(
+			player.Name,
+			newLevel,
+			tostring(pushErr)
+		))
+	end
+
+	local refreshSuccess, refreshReason, refreshDetails = refreshShipAfterUpgrade(player)
+	if refreshSuccess ~= true then
+		local detailReason = getRefreshReason(refreshReason, refreshDetails)
+		warn(("[BuyPlotUpgrade] Ship refresh failed for %s after upgrade to level %d: %s"):format(
+			player.Name,
+			newLevel,
+			detailReason
+		))
+		fireUpgradeFailure(player, "refresh_failed", "Ship Upgrade Saved", "Refresh Failed", {
+			"Your upgrade was saved, but the active ship could not refresh.",
+			"Reason: " .. detailReason,
+			"Please try again or rejoin if the ship does not update.",
+		}, newLevel, "Ship upgrade saved, but refresh failed.", true, {
+			RefreshReason = detailReason,
+			RefreshDetails = refreshDetails,
+		})
+		return false
+	end
+
 	fireUpgradeSuccess(player, newLevel)
+	return true
+end
+
+remote.OnServerEvent:Connect(function(player)
+	if busy[player] then
+		fireUpgradeFailure(player, "already_processing", "Ship Upgrade Pending", "Please Wait", {
+			"A ship upgrade is already being processed.",
+		}, getCurrentUpgrade(player, PLOT_UPGRADE_PATH), "A ship upgrade is already being processed.", false)
+		return
+	end
+	busy[player] = true
+
+	local ok, err = xpcall(function()
+		processUpgradePurchase(player)
+	end, debug.traceback)
+
+	if not ok then
+		warn(("[BuyPlotUpgrade] Unexpected ship upgrade error for %s: %s"):format(player.Name, tostring(err)))
+		fireUpgradeFailure(player, "server_error", "Ship Upgrade Failed", "Server Error", {
+			"Something went wrong while upgrading your ship.",
+			"Please try again in a moment.",
+		}, getCurrentUpgrade(player, PLOT_UPGRADE_PATH), "Something went wrong while upgrading your ship.")
+	end
+
 	busy[player] = nil
 end)
 

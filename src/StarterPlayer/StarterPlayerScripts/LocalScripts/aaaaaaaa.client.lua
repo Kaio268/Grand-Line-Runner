@@ -1,69 +1,114 @@
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local localPlayer = Players.LocalPlayer
 
-local PlotSystem = workspace:WaitForChild("PlotSystem")
-local PlotsFolder = PlotSystem:WaitForChild("Plots")
+local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 
-local function setIndicatorVisible(plotModel, state)
-	local home = plotModel:FindFirstChild("HOME", true)
+local function resolveWorkspacePath(pathSegments)
+	local current = workspace
+	for _, segment in ipairs(pathSegments or {}) do
+		current = current and current:WaitForChild(segment, 30)
+		if not current then
+			return nil
+		end
+	end
+	return current
+end
+
+local function getActiveShipsFolder()
+	local shipSystem = resolveWorkspacePath(ShipVisuals.ShipSystemPath)
+	return shipSystem and shipSystem:WaitForChild(ShipVisuals.ActiveShipsName, 30) or nil
+end
+
+local ActiveShips = getActiveShipsFolder()
+
+local function getHomeIndicatorPart(shipModel)
+	local homeConfig = ShipVisuals.RuntimePoints and ShipVisuals.RuntimePoints.Home
+	local configuredName = homeConfig and tostring(homeConfig.Name or "") or ""
+
+	if configuredName ~= "" then
+		local home = shipModel:FindFirstChild(configuredName, true)
+		if home then
+			return home
+		end
+	end
+
+	return shipModel:FindFirstChild("HOME", true) or shipModel:FindFirstChild("Home", true)
+end
+
+local function setIndicatorVisible(shipModel, state)
+	local home = getHomeIndicatorPart(shipModel)
 	if not home then return end
 
 	local billboard = home:FindFirstChild("BillboardGui")
 	if not billboard then return end
 
-	local imageLabel = billboard:FindFirstChild("ImageLabel")
-	if not imageLabel or not imageLabel:IsA("ImageLabel") then return end
+	local display = billboard:FindFirstChild("PlayerDisplay") or billboard:FindFirstChild("ImageLabel")
+	if not display or not display:IsA("GuiObject") then return end
 
-	imageLabel.Visible = state
+	display.Visible = state
 end
 
-local function isMyPlot(plotModel)
-	local ownerId = plotModel:GetAttribute("OwnerUserId")
+local function isMyShip(shipModel)
+	local ownerId = shipModel:GetAttribute(ShipVisuals.Attributes.OwnerUserId)
 	if ownerId ~= nil then
 		return ownerId == localPlayer.UserId
 	end
 
-	return plotModel.Name == localPlayer.Name
+	return shipModel.Name == localPlayer.Name
 end
 
-local function updateAllPlots()
-	for _, plot in ipairs(PlotsFolder:GetChildren()) do
-		if plot:IsA("Model") then
-			setIndicatorVisible(plot, isMyPlot(plot))
+local function updateAllShips()
+	if not ActiveShips then
+		return
+	end
+
+	for _, ship in ipairs(ActiveShips:GetChildren()) do
+		if ship:IsA("Model") then
+			setIndicatorVisible(ship, isMyShip(ship))
 		end
 	end
 end
 
-local function watchPlot(plot)
-	if not plot:IsA("Model") then return end
+local function watchShip(ship)
+	if not ship:IsA("Model") then return end
 
 	task.defer(function()
-		setIndicatorVisible(plot, isMyPlot(plot))
+		setIndicatorVisible(ship, isMyShip(ship))
 	end)
 
-	plot:GetAttributeChangedSignal("OwnerUserId"):Connect(function()
-		setIndicatorVisible(plot, isMyPlot(plot))
+	ship:GetAttributeChangedSignal(ShipVisuals.Attributes.OwnerUserId):Connect(function()
+		setIndicatorVisible(ship, isMyShip(ship))
 	end)
 
-	plot.DescendantAdded:Connect(function(desc)
-		if desc.Name == "Home" or desc.Name == "BillboardGui" or desc.Name == "ImageLabel" then
-			setIndicatorVisible(plot, isMyPlot(plot))
+	ship.DescendantAdded:Connect(function(desc)
+		if
+			desc.Name == "HOME"
+			or desc.Name == "Home"
+			or desc.Name == "BillboardGui"
+			or desc.Name == "PlayerDisplay"
+			or desc.Name == "PlayerIcon"
+			or desc.Name == "PlayerName"
+		then
+			setIndicatorVisible(ship, isMyShip(ship))
 		end
 	end)
 end
 
-for _, plot in ipairs(PlotsFolder:GetChildren()) do
-	watchPlot(plot)
+if ActiveShips then
+	for _, ship in ipairs(ActiveShips:GetChildren()) do
+		watchShip(ship)
+	end
+
+	ActiveShips.ChildAdded:Connect(function(ship)
+		watchShip(ship)
+		updateAllShips()
+	end)
+
+	ActiveShips.ChildRemoved:Connect(function()
+		updateAllShips()
+	end)
 end
 
-PlotsFolder.ChildAdded:Connect(function(plot)
-	watchPlot(plot)
-	updateAllPlots()
-end)
-
-PlotsFolder.ChildRemoved:Connect(function()
-	updateAllPlots()
-end)
-
-task.defer(updateAllPlots)
+task.defer(updateAllShips)

@@ -32,8 +32,13 @@ local function setNumber(player, path, target)
 	local cur = getNumber(player, path)
 	local delta = target - cur
 	if delta ~= 0 then
-		DataManager:AdjustValue(player, path, delta)
+		local result, reason = DataManager:AdjustValue(player, path, delta)
+		if result == nil then
+			return false, reason or "adjust_failed"
+		end
 	end
+
+	return true
 end
 
 local function getShipLevel(player)
@@ -62,14 +67,26 @@ RebirthRemote.OnServerEvent:Connect(function(player)
 		return
 	end
 
-	local resetOk = ShipResetService.ResetPlayerShip(player)
+	local resetOk = ShipResetService.ResetPlayerShip(player, {
+		Reason = "rebirth",
+		MutateProfile = function()
+			local moneyOk, moneyReason = setNumber(player, moneyPath, 0)
+			if not moneyOk then
+				return false, moneyReason
+			end
+
+			local rebirthsAfter, rebirthReason = DataManager:AdjustValue(player, "leaderstats.Rebirths", 1)
+			if rebirthsAfter == nil then
+				return false, rebirthReason or "failed_to_increment_rebirths"
+			end
+
+			return true
+		end,
+	})
 	if resetOk == false then
 		serverDebounce[player] = nil
 		return
 	end
-
-	setNumber(player, moneyPath, 0)
-	DataManager:AdjustValue(player, "leaderstats.Rebirths", 1)
 
 	serverDebounce[player] = nil
 end)

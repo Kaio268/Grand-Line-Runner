@@ -76,7 +76,12 @@ end
 function ValidationChecks.ValidateCoreDependencies()
 	local missing = {}
 	local checks = {
-		{ Root = Workspace, Label = "Workspace.PlotSystem", Path = { "PlotSystem" } },
+		{ Root = Workspace, Label = "Workspace.Map.Main Map.ShipSystem", Path = { "Map", "Main Map", "ShipSystem" } },
+		{
+			Root = ReplicatedStorage,
+			Label = "ReplicatedStorage.Assets.Ships",
+			Path = { "Assets", "Ships" },
+		},
 		{
 			Root = ReplicatedStorage,
 			Label = "ReplicatedStorage.Assets.One Piece Characters",

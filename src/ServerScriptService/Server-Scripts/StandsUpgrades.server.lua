@@ -28,7 +28,11 @@ local CrewInstanceService = require(game.ServerScriptService.Modules:WaitForChil
 local CrewMemberCanonicalReadGate = require(game.ServerScriptService.Modules:WaitForChild("CrewMemberCanonicalReadGate"))
 local CrewStandIncomeAuthority = require(game.ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 local GrandLineRushVerticalSliceService = require(game.ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
+local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local ShipRuntimeService = require(game.ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
+local ShipSlotGuiIdentity = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShipSlotGuiIdentity"))
+local ShipSlotService = require(game.ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 
 local SUCCESS_COLOR = Color3.fromRGB(92, 230, 126)
 local INFO_COLOR = Color3.fromRGB(111, 188, 255)
@@ -46,13 +50,15 @@ local function sendPopup(player, text, color, isError)
 end
 
 local function getStandName(payload)
+	local rawStandName = ""
+
 	if typeof(payload) == "table" then
-		return tostring(payload.StandName or "")
+		rawStandName = tostring(payload.StandName or "")
+	elseif typeof(payload) == "string" then
+		rawStandName = payload
 	end
-	if typeof(payload) == "string" then
-		return payload
-	end
-	return ""
+
+	return ShipSlotGuiIdentity.NormalizeSlotKey(rawStandName) or ""
 end
 
 local function buildFailurePayload(standName, errorCode, message, progress, step)
@@ -140,6 +146,86 @@ local function getFoodStatusReadAuthorityDisplayNameForPopup(player, context, pr
 	return displayName
 end
 
+local function getPlayerUpgradeLevel(player)
+	local hiddenLeaderstats = player and player:FindFirstChild("HiddenLeaderstats")
+	local valueObject = hiddenLeaderstats and hiddenLeaderstats:FindFirstChild(PlotUpgradeConfig.InternalStatName or "PlotUpgrade")
+	if valueObject and valueObject:IsA("ValueBase") then
+		return PlotUpgradeConfig.ClampLevel(valueObject.Value)
+	end
+
+	return 0
+end
+
+local function getPlayerRebirthCount(player)
+	local leaderstats = player and player:FindFirstChild("leaderstats")
+	local valueObject = leaderstats and leaderstats:FindFirstChild("Rebirths")
+	if valueObject and valueObject:IsA("ValueBase") then
+		return math.max(0, math.floor(tonumber(valueObject.Value) or 0))
+	end
+
+	return 0
+end
+
+local function findSlotGui(playerGui, standName)
+	local slotKey = ShipSlotGuiIdentity.NormalizeSlotKey(standName)
+	if not slotKey then
+		return nil
+	end
+
+	local legacyGui = playerGui:FindFirstChild(slotKey)
+	if legacyGui and legacyGui:IsA("SurfaceGui") and ShipSlotGuiIdentity.GetSlotKeyFromGui(legacyGui) == slotKey then
+		return legacyGui
+	end
+
+	local runtimeGuiName = ShipSlotGuiIdentity.GetRuntimeGuiName(slotKey)
+	local runtimeGui = runtimeGuiName and playerGui:FindFirstChild(runtimeGuiName)
+	if runtimeGui and runtimeGui:IsA("SurfaceGui") and ShipSlotGuiIdentity.GetSlotKeyFromGui(runtimeGui) == slotKey then
+		return runtimeGui
+	end
+
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("SurfaceGui") and ShipSlotGuiIdentity.GetSlotKeyFromGui(gui) == slotKey then
+			return gui
+		end
+	end
+
+	return nil
+end
+
+local function validateOwnedShipSlot(player, standName)
+	local slotKey = ShipSlotGuiIdentity.NormalizeSlotKey(standName)
+	if not slotKey then
+		return false, "invalid_stand", "Stand could not be identified."
+	end
+
+	local activeShip = ShipRuntimeService.GetActiveShip(player)
+	if not activeShip then
+		return false, "active_ship_not_found", "Your ship is not ready yet."
+	end
+
+	if activeShip:GetAttribute("OwnerUserId") ~= player.UserId then
+		return false, "ship_owner_mismatch", "This ship slot does not belong to you."
+	end
+
+	local slotModel = ShipSlotService.GetSlot(activeShip, slotKey)
+	if not slotModel or not slotModel:IsA("Model") then
+		return false, "slot_not_found", "This crew slot is not available on your current ship."
+	end
+
+	local upgradeLevel = getPlayerUpgradeLevel(player)
+	local rebirthCount = getPlayerRebirthCount(player)
+	if not PlotUpgradeConfig.IsStandUsable(upgradeLevel, slotKey, rebirthCount) then
+		return false, "slot_locked", PlotUpgradeConfig.GetLockedSlotDescription(upgradeLevel, slotKey, rebirthCount)
+			or "This crew slot is locked."
+	end
+
+	if slotModel:GetAttribute("ShipSlotUsable") == false then
+		return false, "slot_locked", "This crew slot is locked."
+	end
+
+	return true
+end
+
 local function updateStandGui(player, standName, progress)
 	if not progress then
 		return
@@ -150,7 +236,7 @@ local function updateStandGui(player, standName, progress)
 		return
 	end
 
-	local standGui = playerGui:FindFirstChild(standName)
+	local standGui = findSlotGui(playerGui, standName)
 	if not standGui or not standGui:FindFirstChild("LevelUp") or not standGui.LevelUp:FindFirstChild("Main") then
 		return
 	end
@@ -189,6 +275,11 @@ local function resolveUpgradeContext(player, standName)
 		return false, buildFailurePayload(standName, "missing_crew_member", "Place a Crewmate on this stand first.")
 	end
 
+	local slotOk, slotError, slotMessage = validateOwnedShipSlot(player, standName)
+	if not slotOk then
+		return false, buildFailurePayload(standName, slotError, slotMessage or "This crew slot is not available.")
+	end
+
 	local crewMemberInstanceId = CrewInstanceService.GetStandInstanceId(player, standName)
 	if crewMemberInstanceId == "" then
 		crewMemberInstanceId = CrewInstanceService.EnsureStandInstance(player, standName, crewMemberId) or ""
@@ -216,14 +307,20 @@ local function syncStandStateForProgress(player, fallbackStandName, progress)
 
 	if playerGui then
 		for _, gui in ipairs(playerGui:GetChildren()) do
-			if gui:IsA("SurfaceGui") and tonumber(gui.Name) then
-				local guiStandName = gui.Name
-				local guiCrewMemberInstanceId = CrewInstanceService.GetStandInstanceId(player, guiStandName)
-				if guiCrewMemberInstanceId == targetInstanceId then
-					CrewStandIncomeAuthority.SetStandLevel(player, guiStandName, progress.Level, "stand_upgrade_progress_sync")
-					updateStandGui(player, guiStandName, progress)
-					updatedAnyStand = true
-				end
+			if not gui:IsA("SurfaceGui") then
+				continue
+			end
+
+			local guiStandName = ShipSlotGuiIdentity.GetSlotKeyFromGui(gui)
+			if not guiStandName then
+				continue
+			end
+
+			local guiCrewMemberInstanceId = CrewInstanceService.GetStandInstanceId(player, guiStandName)
+			if guiCrewMemberInstanceId == targetInstanceId then
+				CrewStandIncomeAuthority.SetStandLevel(player, guiStandName, progress.Level, "stand_upgrade_progress_sync")
+				updateStandGui(player, guiStandName, progress)
+				updatedAnyStand = true
 			end
 		end
 	end

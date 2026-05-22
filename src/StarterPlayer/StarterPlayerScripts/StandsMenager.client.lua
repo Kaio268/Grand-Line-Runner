@@ -12,6 +12,7 @@ local React = require(packages:WaitForChild("React"))
 local ReactRoblox = require(packages:WaitForChild("ReactRoblox"))
 local UiModalState = require(modules:WaitForChild("UiModalState"))
 local PopUpModule = require(modules:WaitForChild("PopUpModule"))
+local ShipSlotGuiIdentity = require(modules:WaitForChild("ShipSlotGuiIdentity"))
 local StandUpgradePromptScreen = require(uiFolder:WaitForChild("Crew"):WaitForChild("StandUpgradePromptScreen"))
 
 local remote = remotes:WaitForChild("CrewMemberStandUpgradeRemote", 15)
@@ -27,7 +28,9 @@ local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactStandUpgradePromptRoot"
 
 local root = ReactRoblox.createRoot(rootContainer)
-local connections = {}
+local connectionsByGui = {}
+local guiBySlotKey = {}
+local slotKeyByGui = {}
 local pendingPreview
 local awaitingResultStandName
 local scheduledPromptId = 0
@@ -220,25 +223,43 @@ local function requestPreview(standName, priorFoodDisplayName)
 	showPreviewPrompt(standName, response.Step, priorFoodDisplayName)
 end
 
-local function disconnectGui(name)
-	local connection = connections[name]
+local function disconnectGui(gui)
+	local connection = connectionsByGui[gui]
 	if connection then
 		connection:Disconnect()
-		connections[name] = nil
+		connectionsByGui[gui] = nil
 	end
+
+	local slotKey = slotKeyByGui[gui]
+	if slotKey and guiBySlotKey[slotKey] == gui then
+		guiBySlotKey[slotKey] = nil
+	end
+
+	slotKeyByGui[gui] = nil
 end
 
 local function bindGui(gui)
-	if not gui:IsA("SurfaceGui") or tonumber(gui.Name) == nil then
+	local slotKey = ShipSlotGuiIdentity.GetSlotKeyFromGui(gui)
+	if not slotKey then
 		return
 	end
 
-	disconnectGui(gui.Name)
+	if connectionsByGui[gui] then
+		return
+	end
+
+	local existingGui = guiBySlotKey[slotKey]
+	if existingGui and existingGui ~= gui then
+		disconnectGui(existingGui)
+	end
+
 	local button = gui:FindFirstChildWhichIsA("TextButton", true)
 	if button then
-		connections[gui.Name] = button.MouseButton1Click:Connect(function()
+		guiBySlotKey[slotKey] = gui
+		slotKeyByGui[gui] = slotKey
+		connectionsByGui[gui] = button.MouseButton1Click:Connect(function()
 			if not awaitingResultStandName then
-				requestPreview(gui.Name, nil)
+				requestPreview(slotKey, nil)
 			end
 		end)
 	end
@@ -290,8 +311,8 @@ end)
 
 playerGui.ChildAdded:Connect(bindGui)
 playerGui.ChildRemoved:Connect(function(gui)
-	if gui and gui:IsA("SurfaceGui") and tonumber(gui.Name) ~= nil then
-		disconnectGui(gui.Name)
+	if gui and gui:IsA("SurfaceGui") then
+		disconnectGui(gui)
 	end
 end)
 
@@ -304,9 +325,11 @@ render()
 script.Destroying:Connect(function()
 	destroyed = true
 	hidePrompt()
-	for _, connection in pairs(connections) do
+	for _, connection in pairs(connectionsByGui) do
 		connection:Disconnect()
 	end
-	table.clear(connections)
+	table.clear(connectionsByGui)
+	table.clear(guiBySlotKey)
+	table.clear(slotKeyByGui)
 	root:unmount()
 end)

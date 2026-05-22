@@ -1,7 +1,10 @@
+local ShipVisuals = require(script.Parent:WaitForChild("ShipVisuals"))
+
 local Config = {
 	DisplayName = "Ship Upgrade",
 	InternalStatName = "PlotUpgrade",
-	MaxLevel = 8,
+	MaxLevel = ShipVisuals.MaxLevel or 8,
+	CaptainSlotName = ShipVisuals.CaptainSlotName,
 
 	MaterialOrder = {
 		"Timber",
@@ -15,39 +18,17 @@ local Config = {
 		AncientTimber = "Ancient Timber",
 	},
 
-	FloorUnlockLevels = {
-		Floor1 = 0,
-		Floor2 = 4,
-		Floor3 = 6,
-	},
-
-	StandFloorRanges = {
-		Floor1 = { 1, 8 },
-		Floor2 = { 9, 16 },
-		Floor3 = { 17, 24 },
-	},
-
-	UsableStandCountByLevel = {
-		[0] = 4,
-		[1] = 6,
-		[2] = 8,
-		[3] = 8,
-		[4] = 16,
-		[5] = 16,
-		[6] = 24,
-		[7] = 24,
-		[8] = 24,
-	},
+	UsableStandCountByLevel = ShipVisuals.GetNormalCrewSlotsByLevel(),
 
 	LevelUnlockDescriptions = {
-		[1] = "Floor 1 now has 6/8 usable slots",
-		[2] = "Floor 1 now has 8/8 usable slots",
-		[3] = "Captain Slot unlocked on Floor 1 Slot 1 (+25%)",
-		[4] = "Floor 2 unlocked with all 8 slots usable",
-		[5] = "First Mate Slot unlocked on Floor 2 Slot 1 (+20%)",
-		[6] = "Floor 3 unlocked with all 8 slots usable",
-		[7] = "Third Floor Slot unlocked on Floor 3 Slot 1 (+15%)",
-		[8] = "Flagship frame reinforced to max level",
+		[1] = "Lvl 1 Ship expands to 6 normal crew slots",
+		[2] = "Lvl 2 Ship unlocks 8 normal crew slots",
+		[3] = "Captain's Spot unlocked (+5% captain bonus)",
+		[4] = "Lvl 3 Ship unlocks 12 normal crew slots and +8% captain bonus",
+		[5] = "Captain bonus upgraded to +12%",
+		[6] = "Lvl 4 Ship unlocks 16 normal crew slots and +16% captain bonus",
+		[7] = "Lvl 4 Ship expands to 24 normal crew slots and +20% captain bonus",
+		[8] = "Lvl 5 Ship reaches max captain bonus (+25%)",
 	},
 
 	RequirementsByLevel = {
@@ -122,29 +103,6 @@ local Config = {
 		[8] = 10,
 	},
 
-	SlotBonuses = {
-		["1"] = {
-			Label = "Captain Slot",
-			UnlockLevel = 3,
-			Multiplier = 1.25,
-			Floor = 1,
-			Slot = 1,
-		},
-		["9"] = {
-			Label = "First Mate Slot",
-			UnlockLevel = 5,
-			Multiplier = 1.20,
-			Floor = 2,
-			Slot = 1,
-		},
-		["17"] = {
-			Label = "Third Floor Slot",
-			UnlockLevel = 7,
-			Multiplier = 1.15,
-			Floor = 3,
-			Slot = 1,
-		},
-	},
 }
 
 function Config.ClampLevel(level)
@@ -223,42 +181,31 @@ end
 
 function Config.GetUsableStandCount(level, rebirths)
 	local clamped = Config.GetEffectiveLevel(level, rebirths)
-	return Config.UsableStandCountByLevel[clamped] or 0
+	return ShipVisuals.GetNormalCrewSlotsForUpgradeLevel(clamped)
 end
 
-function Config.IsFloorUnlocked(level, floorName, rebirths)
-	local unlockLevel = Config.FloorUnlockLevels[tostring(floorName)] or math.huge
-	return Config.GetEffectiveLevel(level, rebirths) >= unlockLevel
-end
-
-function Config.GetStandFloorName(standName)
+local function normalizeStandNumber(standName)
 	local standNumber = tonumber(tostring(standName or ""))
 	if not standNumber then
 		return nil
 	end
 
-	for floorName, range in pairs(Config.StandFloorRanges) do
-		local startStand = tonumber(range[1]) or 0
-		local endStand = tonumber(range[2]) or -1
-		if standNumber >= startStand and standNumber <= endStand then
-			return floorName
-		end
-	end
-
-	return nil
+	standNumber = math.floor(standNumber)
+	return if standNumber >= 1 then standNumber else nil
 end
 
 function Config.IsStandVisible(level, standName, rebirths)
-	local floorName = Config.GetStandFloorName(standName)
-	if floorName == nil then
+	local standNumber = normalizeStandNumber(standName)
+	if not standNumber then
 		return false
 	end
 
-	return Config.IsFloorUnlocked(level, floorName, rebirths)
+	local effectiveLevel = Config.GetEffectiveLevel(level, rebirths)
+	return standNumber <= ShipVisuals.GetAssetNormalSlotCapacityForUpgradeLevel(effectiveLevel)
 end
 
 function Config.IsStandUsable(level, standName, rebirths)
-	local standNumber = tonumber(tostring(standName or ""))
+	local standNumber = normalizeStandNumber(standName)
 	if not standNumber then
 		return false
 	end
@@ -320,26 +267,24 @@ function Config.GetLevelUnlockDescription(level)
 	return description
 end
 
-function Config.GetSlotBonusInfo(level, standName, rebirths)
-	local entry = Config.SlotBonuses[tostring(standName)]
-	if typeof(entry) ~= "table" then
-		return nil
-	end
-
-	if Config.GetEffectiveLevel(level, rebirths) < tonumber(entry.UnlockLevel or Config.MaxLevel) then
-		return nil
-	end
-
-	return entry
+function Config.GetCaptainSlotInfo(level, rebirths)
+	local effectiveLevel = Config.GetEffectiveLevel(level, rebirths)
+	return ShipVisuals.GetCaptainSlotInfoForUpgradeLevel(effectiveLevel)
 end
 
-function Config.GetSlotBonusMultiplier(level, standName, rebirths)
-	local info = Config.GetSlotBonusInfo(level, standName, rebirths)
-	if info then
-		return tonumber(info.Multiplier) or 1
-	end
+function Config.IsCaptainSlotUnlocked(level, rebirths)
+	local info = Config.GetCaptainSlotInfo(level, rebirths)
+	return info and info.Unlocked == true
+end
 
-	return 1
+function Config.GetCaptainBonusPercent(level, rebirths)
+	local info = Config.GetCaptainSlotInfo(level, rebirths)
+	return info and info.BonusPercent or 0
+end
+
+function Config.GetCaptainBonusMultiplier(level, rebirths)
+	local percent = Config.GetCaptainBonusPercent(level, rebirths)
+	return 1 + (math.max(0, tonumber(percent) or 0) / 100)
 end
 
 return Config

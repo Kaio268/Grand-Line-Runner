@@ -148,6 +148,8 @@ local function refreshCrewMemberShadow(_player, _reason)
 	return nil
 end
 
+local CAPTAIN_SLOT_KEY = "Captain"
+
 function Module.RefreshProgressionShadow(player, reason)
 	return refreshCrewMemberShadow(player, tostring(reason or "food_progression"))
 end
@@ -158,7 +160,7 @@ local function syncAssignedStandLevel(player, instanceData, level)
 	end
 
 	local assignedStand = tostring(instanceData.AssignedStand or "")
-	if assignedStand == "" then
+	if assignedStand == "" or assignedStand == CAPTAIN_SLOT_KEY then
 		return false
 	end
 

@@ -27,6 +27,7 @@ local ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+local ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
 local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
 local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
@@ -991,6 +992,23 @@ local function getClientShipUpgradeLevel()
 	return math.max(0, math.floor(tonumber(rawLevel) or 0))
 end
 
+local function hasClientCaptainAssigned()
+	local ship = player:FindFirstChild("Ship")
+	local captainSlot = ship and ship:FindFirstChild("CaptainSlot")
+	if not captainSlot then
+		return false
+	end
+
+	for _, fieldName in ipairs({ "CrewMemberInstanceId", "InstanceId", "CrewInstanceId", "CrewMemberName", "CrewMemberId" }) do
+		local valueObject = captainSlot:FindFirstChild(fieldName)
+		if valueObject and valueObject:IsA("ValueBase") and tostring(valueObject.Value or "") ~= "" then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function getCrewMemberIncomePerTick(standName, crewMemberName)
 	local info = getCrewInfo(crewMemberName)
 	local baseIncome = tonumber(info and info.Income) or 0
@@ -1001,12 +1019,12 @@ local function getCrewMemberIncomePerTick(standName, crewMemberName)
 	local level = getCrewMemberLevelForStand(standName)
 	local levelMultiplier = getStandLevelMultiplier(level)
 	local shipUpgradeLevel = getClientShipUpgradeLevel()
-	local slotMultiplier = 1
-	if PlotUpgradeConfig and PlotUpgradeConfig.GetSlotBonusMultiplier then
-		slotMultiplier = tonumber(PlotUpgradeConfig.GetSlotBonusMultiplier(shipUpgradeLevel, tostring(standName))) or 1
+	local captainMultiplier = 1
+	if hasClientCaptainAssigned() and PlotUpgradeConfig and PlotUpgradeConfig.GetCaptainBonusMultiplier then
+		captainMultiplier = tonumber(PlotUpgradeConfig.GetCaptainBonusMultiplier(shipUpgradeLevel)) or 1
 	end
 
-	return math.max(0, baseIncome * levelMultiplier * slotMultiplier)
+	return math.max(0, baseIncome * levelMultiplier * captainMultiplier)
 end
 
 local incomeStatusDisplayMetadata = nil
@@ -1185,40 +1203,14 @@ local function compareInventoryKeys(a, b)
 	return tostring(a) < tostring(b)
 end
 
-local function countUsableSlotsForFloor(level, floorName, rebirths)
-	local floorRange = PlotUpgradeConfig.StandFloorRanges[tostring(floorName)]
-	if typeof(floorRange) ~= "table" then
-		return 0
-	end
-
-	local startStand = tonumber(floorRange[1]) or 0
-	local endStand = tonumber(floorRange[2]) or -1
-	local total = 0
-
-	for standNumber = startStand, endStand do
-		if PlotUpgradeConfig.IsStandUsable(level, tostring(standNumber), rebirths) then
-			total += 1
-		end
-	end
-
-	return total
-end
-
-local function formatBonusPercent(multiplier)
-	local percent = math.floor(((tonumber(multiplier) or 1) - 1) * 100 + 0.5)
-	return string.format("+%d%%", percent)
-end
-
 local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	local lines = {}
 	local seen = {}
 	local previousLevel = math.max(0, PlotUpgradeConfig.ClampLevel(level) - 1)
-	local rebirths = 0
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local rebirthValue = leaderstats and leaderstats:FindFirstChild("Rebirths")
-	if rebirthValue and rebirthValue:IsA("ValueBase") then
-		rebirths = math.max(0, math.floor(tonumber(rebirthValue.Value) or 0))
-	end
+	local previousInfo = ShipVisuals.GetUpgradeLevelInfo(previousLevel)
+	local currentInfo = ShipVisuals.GetUpgradeLevelInfo(level)
+	local previousCaptain = ShipVisuals.GetCaptainSlotInfoForUpgradeLevel(previousLevel)
+	local currentCaptain = ShipVisuals.GetCaptainSlotInfoForUpgradeLevel(level)
 
 	local function pushLine(text, key)
 		local value = trim(text)
@@ -1230,57 +1222,26 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 		lines[#lines + 1] = value
 	end
 
-	for _, floorName in ipairs({ "Floor1", "Floor2", "Floor3" }) do
-		local wasUnlocked = PlotUpgradeConfig.IsFloorUnlocked(previousLevel, floorName, rebirths)
-		local isUnlocked = PlotUpgradeConfig.IsFloorUnlocked(level, floorName, rebirths)
-		local previousCount = countUsableSlotsForFloor(previousLevel, floorName, rebirths)
-		local currentCount = countUsableSlotsForFloor(level, floorName, rebirths)
-		local floorLabel = string.gsub(floorName, "Floor", "Floor ")
-
-		if (not wasUnlocked) and isUnlocked then
-			pushLine(string.format("Unlocked %s", floorLabel), floorName .. ":unlock")
-		end
-
-		if currentCount > previousCount then
-			pushLine(string.format("%s now supports %d usable slots", floorLabel, currentCount), floorName .. ":slots")
-		end
+	if currentInfo and previousInfo and tostring(currentInfo.ModelName) ~= tostring(previousInfo.ModelName) then
+		pushLine(string.format("Ship upgraded to %s", tostring(currentInfo.ModelName)), "model")
 	end
 
-	local bonusEntries = {}
-	for standName, bonusInfo in pairs(PlotUpgradeConfig.SlotBonuses) do
-		bonusEntries[#bonusEntries + 1] = {
-			standName = standName,
-			info = bonusInfo,
-		}
+	local previousSlots = previousInfo and tonumber(previousInfo.NormalCrewSlots) or 0
+	local currentSlots = currentInfo and tonumber(currentInfo.NormalCrewSlots) or previousSlots
+	if currentSlots > previousSlots then
+		pushLine(string.format("Normal crew slots: %d -> %d", previousSlots, currentSlots), "normal_slots")
 	end
 
-	table.sort(bonusEntries, function(a, b)
-		local unlockA = tonumber(a.info.UnlockLevel) or math.huge
-		local unlockB = tonumber(b.info.UnlockLevel) or math.huge
-		if unlockA == unlockB then
-			return tostring(a.standName) < tostring(b.standName)
-		end
-		return unlockA < unlockB
-	end)
-
-	for _, entry in ipairs(bonusEntries) do
-		local bonusInfo = entry.info
-		if tonumber(bonusInfo.UnlockLevel) == level then
-			pushLine(
-				string.format(
-					"%s unlocked on Floor %d Slot %d (%s income)",
-					tostring(bonusInfo.Label or "Bonus Slot"),
-					tonumber(bonusInfo.Floor) or 1,
-					tonumber(bonusInfo.Slot) or 1,
-					formatBonusPercent(bonusInfo.Multiplier)
-				),
-				tostring(entry.standName) .. ":bonus"
-			)
-		end
+	local previousBonus = previousCaptain and tonumber(previousCaptain.BonusPercent) or 0
+	local currentBonus = currentCaptain and tonumber(currentCaptain.BonusPercent) or previousBonus
+	if currentCaptain and currentCaptain.Unlocked and not (previousCaptain and previousCaptain.Unlocked) then
+		pushLine(string.format("Captain's Spot unlocked (+%d%% income)", currentBonus), "captain_unlock")
+	elseif currentBonus > previousBonus then
+		pushLine(string.format("Captain bonus: +%d%% -> +%d%%", previousBonus, currentBonus), "captain_bonus")
 	end
 
 	if isMaxLevel then
-		pushLine("Ship frame reinforced to maximum level", "max")
+		pushLine("Ship progression fully maxed", "max")
 	end
 
 	if #lines == 0 then
