@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local CrewRewardService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewRewardService"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
@@ -324,6 +325,9 @@ local function getProfileBackfillProgress(dataRoot, definition)
 	if objectiveType == "ExtractCrew" then
 		return countExtractedCrew(dataRoot)
 	elseif objectiveType == "OpenChest" then
+		if objective.Tier or objective.ChestKind or objective.FruitRarity then
+			return 0
+		end
 		return countOpenedChests(dataRoot)
 	elseif objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons" then
 		return getTotalBeli(dataRoot)
@@ -625,6 +629,10 @@ local function validateQuestReward(reward)
 	if rewardType == "Currency" or rewardType == "Food" or rewardType == "Material" then
 		return true
 	end
+	if rewardType == "Crew" then
+		local resolved = CrewRewardService.Resolve(reward)
+		return resolved.Resolved == true, if resolved.Resolved == true then nil else tostring(resolved.Reason or "invalid_crew_reward")
+	end
 	if rewardType ~= "Chest" then
 		return false, "unsupported_reward"
 	end
@@ -659,7 +667,7 @@ local function addRewardPopup(rewardPopup, reward)
 	end
 end
 
-local function grantQuestRewardToData(dataRoot, reward, changedRoots, rewardPopup)
+local function grantQuestRewardToData(player, dataRoot, reward, changedRoots, rewardPopup)
 	local rewardType = tostring(reward.Type or "")
 	local amount = math.max(1, math.floor(tonumber(reward.Amount) or 1))
 
@@ -699,6 +707,20 @@ local function grantQuestRewardToData(dataRoot, reward, changedRoots, rewardPopu
 			addUnopenedChestToCollection(dataRoot.UnopenedChests, normalizedChest)
 		end
 		changedRoots.UnopenedChests = true
+	elseif rewardType == "Crew" then
+		local ok, resolved, reason = CrewRewardService.Grant(player, reward, amount, {
+			Source = "Quest",
+			Context = "QuestReward",
+		})
+		if ok ~= true then
+			warn(string.format(
+				"[GrandLineRushQuestService] Failed to grant crew quest reward %s: %s",
+				tostring(reward.CrewMemberId or reward.DisplayName or "Crew"),
+				tostring(reason or (resolved and resolved.Reason) or "unknown")
+			))
+		elseif resolved and resolved.DisplayName then
+			reward.DisplayName = tostring(resolved.DisplayName)
+		end
 	end
 
 	addRewardPopup(rewardPopup, reward)
@@ -812,7 +834,7 @@ local function claimQuestInternal(player, payload)
 	categoryState.Claimed[questId] = true
 
 	for _, reward in ipairs(definition.Rewards or {}) do
-		grantQuestRewardToData(dataRoot, reward, changedRoots, rewardPopup)
+		grantQuestRewardToData(player, dataRoot, reward, changedRoots, rewardPopup)
 	end
 
 	syncClaimMutation(player, replica, dataRoot, changedRoots)

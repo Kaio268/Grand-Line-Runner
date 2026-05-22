@@ -14,6 +14,12 @@ local SHELL = {
 	HeaderTransparency = 0.25,
 	SectionBackground = Color3.fromRGB(27, 46, 68),
 	SectionHover = Color3.fromRGB(46, 74, 99),
+	WeeklyQuestBackground = Color3.fromRGB(42, 49, 112),
+	WeeklyQuestHover = Color3.fromRGB(65, 72, 148),
+	SpecialQuestBackground = Color3.fromRGB(153, 107, 29),
+	SpecialQuestHover = Color3.fromRGB(190, 139, 44),
+	FinalQuestBackground = Color3.fromRGB(126, 29, 38),
+	FinalQuestHover = Color3.fromRGB(170, 45, 55),
 	GoldHighlight = Color3.fromRGB(242, 209, 107),
 	GoldShadow = Color3.fromRGB(140, 107, 31),
 	CloseFill = Color3.fromRGB(200, 0, 9),
@@ -182,10 +188,17 @@ local function questCard(props)
 		elseif claimable then SHELL.GoldHighlight
 		else Theme.Palette.Text
 	local compact = props.compact == true
+	local isWeekly = quest.category == "Weekly"
+	local isSpecial = quest.category == "Special"
+	local isFinalQuest = quest.id == "special_final_golden_legend"
+	local cardBackground = if isFinalQuest then (hovered and SHELL.FinalQuestHover or SHELL.FinalQuestBackground)
+		elseif isSpecial then (hovered and SHELL.SpecialQuestHover or SHELL.SpecialQuestBackground)
+		elseif isWeekly then (hovered and SHELL.WeeklyQuestHover or SHELL.WeeklyQuestBackground)
+		else (hovered and SHELL.SectionHover or SHELL.SectionBackground)
 
 	return e("Frame", {
 		Active = true,
-		BackgroundColor3 = hovered and SHELL.SectionHover or SHELL.SectionBackground,
+		BackgroundColor3 = cardBackground,
 		BackgroundTransparency = 0.25,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
