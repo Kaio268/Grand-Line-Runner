@@ -420,7 +420,7 @@ local function collectBiomeSurfaceEntries(root, options)
 		local explicitAllow = hasExplicitAllow(part, options)
 		local fallbackName = getFallbackSurfaceName(part, options)
 		if options and options.RequireExplicitOrFallbackSurface == true and not explicitAllow and not fallbackName then
-			addRejectDiagnostic(diagnostics, tostring(options.UnmarkedSurfaceRejectReason or "unmarked_non_rarity_surface"), part)
+			addRejectDiagnostic(diagnostics, tostring(options.UnmarkedSurfaceRejectReason or "unmarked_surface"), part)
 			return
 		end
 

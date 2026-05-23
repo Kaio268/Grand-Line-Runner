@@ -15,7 +15,7 @@ local refs = MapResolver.WaitForRefs(
 	}
 )
 local SpawnPartsFolder = refs.SpawnFolder
-local VALID_SPAWN_PLATFORM_NAMES = SpawnPartsConfig.RarityTier or {}
+local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
 
 local LuckyTemplate = ReplicatedStorage:WaitForChild("LuckyBlock")
 LuckyTemplate.Archivable = true
@@ -56,7 +56,7 @@ local runId = 0
 local partCount = {}
 local blockById = {}
 local hitDebounce = {}
-local cachedSpawnPlatforms = nil
+local cachedSpawnPlatformGroups = nil
 
 local DataManager
 pcall(function()
@@ -180,10 +180,18 @@ local function stillValid(token)
 	return running and token == runId and isLuckyEvent()
 end
 
+local function getBiomeIndexFromName(name)
+	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
+	return indexText and tonumber(indexText) or nil
+end
+
 local function isValidSpawnPlatform(instance)
-	return instance
-		and instance:IsA("BasePart")
-		and VALID_SPAWN_PLATFORM_NAMES[tostring(instance.Name)] ~= nil
+	local isPlacementPart = SpawnPartsConfig.IsPlacementPart
+	if type(isPlacementPart) == "function" then
+		return isPlacementPart(instance)
+	end
+
+	return instance and instance:IsA("BasePart") and instance.Name == "Platform"
 end
 
 local function collectSpawnPlatforms(root, platforms, seen)
@@ -204,33 +212,68 @@ local function collectSpawnPlatforms(root, platforms, seen)
 	end
 end
 
-local function refreshSpawnPlatforms()
-	local latestRefs = MapResolver.GetRefs()
-	local root = latestRefs.SpawnFolder or SpawnPartsFolder
-	local platforms = {}
-	local seen = {}
-	collectSpawnPlatforms(root, platforms, seen)
-	cachedSpawnPlatforms = platforms
-	return platforms
+local function getBiomeScanRoot(biomeContainer)
+	if not biomeContainer then
+		return nil
+	end
+
+	return biomeContainer:FindFirstChild(biomeContainer.Name) or biomeContainer
 end
 
-local function getSpawnPlatforms()
-	local platforms = cachedSpawnPlatforms
-	if platforms and #platforms > 0 then
+local function refreshSpawnPlatformGroups()
+	local latestRefs = MapResolver.GetRefs()
+	local biomesRoot = latestRefs.Biomes
+	local seen = {}
+	local groups = {}
+
+	if biomesRoot then
+		for _, biomeContainer in ipairs(biomesRoot:GetChildren()) do
+			local platforms = {}
+			collectSpawnPlatforms(getBiomeScanRoot(biomeContainer), platforms, seen)
+			if #platforms > 0 then
+				groups[#groups + 1] = {
+					BiomeIndex = getBiomeIndexFromName(biomeContainer.Name),
+					Platforms = platforms,
+				}
+			end
+		end
+	else
+		local platforms = {}
+		collectSpawnPlatforms(latestRefs.SpawnFolder or SpawnPartsFolder, platforms, seen)
+		if #platforms > 0 then
+			groups[#groups + 1] = {
+				BiomeIndex = nil,
+				Platforms = platforms,
+			}
+		end
+	end
+
+	cachedSpawnPlatformGroups = groups
+	return groups
+end
+
+local function getSpawnPlatformGroups()
+	local groups = cachedSpawnPlatformGroups
+	if groups and #groups > 0 then
 		local allStillValid = true
-		for _, platform in ipairs(platforms) do
-			if not platform or not platform.Parent then
-				allStillValid = false
+		for _, group in ipairs(groups) do
+			for _, platform in ipairs(group.Platforms or {}) do
+				if not platform or not platform.Parent then
+					allStillValid = false
+					break
+				end
+			end
+			if not allStillValid then
 				break
 			end
 		end
 
 		if allStillValid then
-			return platforms
+			return groups
 		end
 	end
 
-	return refreshSpawnPlatforms()
+	return refreshSpawnPlatformGroups()
 end
 
 local function ensurePrimary(model: Model)
@@ -470,20 +513,22 @@ local function spawnOne(platform: BasePart, token: number)
 end
 
 local function spawnWave(token: number)
-	local platforms = getSpawnPlatforms()
+	local platformGroups = getSpawnPlatformGroups()
 	local perPart = rng:NextInteger(PER_PART_MIN, PER_PART_MAX)
 
-	for _, platform in ipairs(platforms) do
-		if not stillValid(token) then return end
+	for _, group in ipairs(platformGroups) do
+		for _, platform in ipairs(group.Platforms or {}) do
+			if not stillValid(token) then return end
 
-		local c = partCount[platform] or 0
-		local free = MAX_PER_PART - c
-		if free > 0 then
-			local count = math.min(perPart, free)
-			for _ = 1, count do
-				if not stillValid(token) then return end
-				spawnOne(platform, token)
-				task.wait(0.01)
+			local c = partCount[platform] or 0
+			local free = MAX_PER_PART - c
+			if free > 0 then
+				local count = math.min(perPart, free)
+				for _ = 1, count do
+					if not stillValid(token) then return end
+					spawnOne(platform, token)
+					task.wait(0.01)
+				end
 			end
 		end
 	end

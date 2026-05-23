@@ -22,6 +22,7 @@ local ServerMods = Modules:WaitForChild("Server"):WaitForChild("Crew")
 
 local SpawnerConfig = require(Configs:WaitForChild("CrewSpawnSettings"))
 local SpawnPartsCfg = require(Configs:WaitForChild("SpawnParts"))
+local BiomeAreas = require(Configs:WaitForChild("BiomeAreas"))
 local CrewVariantsCfg = require(Configs:WaitForChild("CrewVariants"))
 local Registry = require(ServerMods:WaitForChild("Registry"))
 local Placement = require(ServerMods:WaitForChild("Placement"))
@@ -29,7 +30,15 @@ local Interaction = require(ServerMods:WaitForChild("Interaction"))
 
 local entries, maxTier, globalMaxFoot = Registry.Build()
 local STARTUP_TRACE = RunService:IsStudio() and game:GetAttribute("CrewSpawnDebugTrace") == true
-local VALID_RARITY_NAMES = SpawnPartsCfg.RarityTier or {}
+local function resolvePlacementPartName()
+	if type(SpawnPartsCfg.GetPlacementPartName) == "function" then
+		return SpawnPartsCfg.GetPlacementPartName()
+	end
+
+	return "Platform"
+end
+
+local PLACEMENT_PART_NAME = resolvePlacementPartName()
 
 if STARTUP_TRACE then
 	print("[SPAWN TRACE] startup awaiting MapResolver refs required=MapRoot,HitBox hitBoxRequired=true")
@@ -66,6 +75,11 @@ local CrewInstanceService = require(script.Parent.Parent.Modules:WaitForChild("C
 local CrewQuickSlotService = require(script.Parent.Parent.Modules:WaitForChild("CrewQuickSlotService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
+local SpikeRuntimeService = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("Hazards")
+		:WaitForChild("SpikeRuntimeService")
+)
 local TutorialConfig = require(Configs:WaitForChild("FirstTimeTutorial"))
 
 local rng = Random.new()
@@ -154,6 +168,72 @@ local function spawnError(message, ...)
 	warn(string.format("[SPAWN ERROR] " .. message, ...))
 end
 
+local function trySpawnDormantSpikeForCrew(model, data)
+	if not (model and data) then
+		return
+	end
+
+	local ok, spawned, reason = pcall(function()
+		return SpikeRuntimeService.TrySpawnDormantForCrew({
+			CrewModel = model,
+			SpawnPart = data.Part,
+			BiomeIndex = data.BiomeIndex,
+			PlacementRarity = data.PlacementRarity,
+		})
+	end)
+
+	if not ok then
+		spawnWarnThrottled(
+			"dormant_spike_error_" .. formatInstancePath(model),
+			"dormantSpike skipped reason=service_error crewMember=%s spawnPart=%s error=%s",
+			formatInstancePath(model),
+			formatInstancePath(data.Part),
+			tostring(spawned)
+		)
+	elseif spawned then
+		spawnTrace(
+			"dormantSpike spawned crewMember=%s spawnPart=%s biomeIndex=%s placementRarity=%s",
+			formatInstancePath(model),
+			formatInstancePath(data.Part),
+			tostring(data.BiomeIndex),
+			tostring(data.PlacementRarity)
+		)
+	else
+		spawnTrace(
+			"dormantSpike skipped reason=%s crewMember=%s spawnPart=%s biomeIndex=%s placementRarity=%s",
+			tostring(reason),
+			formatInstancePath(model),
+			formatInstancePath(data.Part),
+			tostring(data.BiomeIndex),
+			tostring(data.PlacementRarity)
+		)
+	end
+end
+
+local function destroyDormantSpikeForCrew(model, reason)
+	if not model then
+		return
+	end
+
+	local ok, destroyed, destroyReason = pcall(function()
+		return SpikeRuntimeService.DestroyDormantForCrew(model, reason)
+	end)
+	if not ok then
+		spawnWarnThrottled(
+			"dormant_spike_destroy_error_" .. formatInstancePath(model),
+			"dormantSpike destroy skipped reason=service_error crewMember=%s error=%s",
+			formatInstancePath(model),
+			tostring(destroyed)
+		)
+	elseif destroyed then
+		spawnTrace(
+			"dormantSpike destroyed crewMember=%s reason=%s",
+			formatInstancePath(model),
+			tostring(destroyReason)
+		)
+	end
+end
+
 local function zoneTrace(message, ...)
 	if not DEBUG_TRACE then
 		return
@@ -234,7 +314,7 @@ local MYTHIC_TIER = tonumber(RARITY_TIER.Mythic) or tonumber(RARITY_TIER.Mythica
 local GODLY_TIER = tonumber(RARITY_TIER.Godly) or 7
 local SECRET_TIER = tonumber(RARITY_TIER.Secret) or 8
 
-local PAD_INTENDED_TIER = {
+local PLACEMENT_RARITY_INTENDED_TIER = {
 	Common = COMMON_TIER,
 	Uncommon = UNCOMMON_TIER,
 	Rare = RARE_TIER,
@@ -248,7 +328,7 @@ local PAD_INTENDED_TIER = {
 }
 
 -- Canonical nearby-rarity pools. Selection never falls back to SpawnParts.LuckMult caps.
-local PAD_ALLOWED_ENTRY_TIERS = {
+local PLACEMENT_RARITY_ALLOWED_ENTRY_TIERS = {
 	Common = {
 		[COMMON_TIER] = true,
 		[UNCOMMON_TIER] = true,
@@ -310,7 +390,7 @@ local EXPECTED_VARIANT_CHANCES = {
 	Diamond = 2,
 }
 
-local EXPECTED_PAD_ALLOWED_TIERS = {
+local EXPECTED_PLACEMENT_RARITY_ALLOWED_TIERS = {
 	Common = { COMMON_TIER, UNCOMMON_TIER },
 	Uncommon = { COMMON_TIER, UNCOMMON_TIER, RARE_TIER },
 	Rare = { UNCOMMON_TIER, RARE_TIER, EPIC_TIER },
@@ -323,13 +403,13 @@ local EXPECTED_PAD_ALLOWED_TIERS = {
 	Omega = { GODLY_TIER, SECRET_TIER },
 }
 
-local SECRET_ALLOWED_PAD_NAMES = {
+local SECRET_ALLOWED_PLACEMENT_RARITIES = {
 	Godly = true,
 	Secret = true,
 	Omega = true,
 }
 
-local GODLY_ALLOWED_PAD_NAMES = {
+local GODLY_ALLOWED_PLACEMENT_RARITIES = {
 	Mythic = true,
 	Mythical = true,
 	Godly = true,
@@ -407,13 +487,13 @@ local function validateSpawnBalanceGuards()
 		)
 	end
 
-	for padName, expectedTiers in pairs(EXPECTED_PAD_ALLOWED_TIERS) do
-		local actualSet = PAD_ALLOWED_ENTRY_TIERS[padName]
+	for placementRarity, expectedTiers in pairs(EXPECTED_PLACEMENT_RARITY_ALLOWED_TIERS) do
+		local actualSet = PLACEMENT_RARITY_ALLOWED_ENTRY_TIERS[placementRarity]
 		if not tierSetMatchesExpected(actualSet, expectedTiers) then
 			spawnWarnThrottled(
-				"spawn_balance_pad_pool_changed_" .. tostring(padName),
-				"spawnBalance warning=pad_pool_changed pad=%s expectedTiers=%s",
-				tostring(padName),
+				"spawn_balance_placement_rarity_pool_changed_" .. tostring(placementRarity),
+				"spawnBalance warning=placement_rarity_pool_changed placementRarity=%s expectedTiers=%s",
+				tostring(placementRarity),
 				joinTierList(expectedTiers)
 			)
 		end
@@ -466,19 +546,12 @@ zoneTrace(
 	formatVector3(hitBox and hitBox.Size or nil)
 )
 spawnTrace(
-	"startup map=%s biomesRoot=%s usingBiomePads=%s legacySpawnFolder=%s acceptedRarities=%s crewMembersWorld=%s carried=%s dropped=%s",
+	"startup map=%s biomesRoot=%s usingBiomePlatforms=%s legacySpawnFolder=%s placementPartName=%s crewMembersWorld=%s carried=%s dropped=%s",
 	formatInstancePath(map),
 	formatInstancePath(biomesRoot),
 	tostring(biomesRoot ~= nil),
 	formatInstancePath(legacySpawnFolder),
-	table.concat((function()
-		local names = {}
-		for rarityName in pairs(VALID_RARITY_NAMES) do
-			names[#names + 1] = tostring(rarityName)
-		end
-		table.sort(names)
-		return names
-	end)(), ", "),
+	PLACEMENT_PART_NAME,
 	formatInstancePath(map:FindFirstChild(CREW_MEMBERS_WORLD_FOLDER_NAME)),
 	formatInstancePath(ctx and ctx.CarriedFolder),
 	formatInstancePath(ctx and ctx.DroppedFolder)
@@ -604,50 +677,50 @@ local function getServerLuckMult()
 	return v
 end
 
-local function getIntendedTierForPadName(padName)
-	return tonumber(PAD_INTENDED_TIER[tostring(padName or "")])
-		or tonumber(RARITY_TIER[tostring(padName or "")])
+local function getIntendedTierForPlacementRarity(placementRarity)
+	return tonumber(PLACEMENT_RARITY_INTENDED_TIER[tostring(placementRarity or "")])
+		or tonumber(RARITY_TIER[tostring(placementRarity or "")])
 		or COMMON_TIER
 end
 
-local function getAllowedEntryTiersForPadName(padName)
-	return PAD_ALLOWED_ENTRY_TIERS[tostring(padName or "")]
+local function getAllowedEntryTiersForPlacementRarity(placementRarity)
+	return PLACEMENT_RARITY_ALLOWED_ENTRY_TIERS[tostring(placementRarity or "")]
 end
 
-local function isEntryTierAllowedOnPadName(padName, entryTier)
-	local padNameText = tostring(padName or "")
+local function isEntryTierAllowedForPlacementRarity(placementRarity, entryTier)
+	local placementRarityText = tostring(placementRarity or "")
 	local entryTierNumber = tonumber(entryTier) or COMMON_TIER
-	local allowedEntryTiers = PAD_ALLOWED_ENTRY_TIERS[padNameText]
+	local allowedEntryTiers = PLACEMENT_RARITY_ALLOWED_ENTRY_TIERS[placementRarityText]
 	if not allowedEntryTiers or allowedEntryTiers[entryTierNumber] ~= true then
 		return false
 	end
 
 	if entryTierNumber == SECRET_TIER then
-		return SECRET_ALLOWED_PAD_NAMES[padNameText] == true
+		return SECRET_ALLOWED_PLACEMENT_RARITIES[placementRarityText] == true
 	elseif entryTierNumber == GODLY_TIER then
-		return GODLY_ALLOWED_PAD_NAMES[padNameText] == true
+		return GODLY_ALLOWED_PLACEMENT_RARITIES[placementRarityText] == true
 	end
 
 	return true
 end
 
-local function validateChosenEntryForPad(data, entry, context)
+local function validateChosenEntryForPlacementRarity(data, entry, context)
 	if not data or not entry then
 		return false
 	end
 
-	local padName = tostring(data.Name or "")
+	local placementRarity = tostring(data.PlacementRarity or data.Name or "")
 	local entryTier = tonumber(entry.Tier) or COMMON_TIER
-	if isEntryTierAllowedOnPadName(padName, entryTier) then
+	if isEntryTierAllowedForPlacementRarity(placementRarity, entryTier) then
 		return true
 	end
 
 	spawnWarnThrottled(
 		"spawn_balance_out_of_band_choice_" .. formatInstancePath(data.Part),
-		"spawnBalance blocked reason=out_of_band_rarity_choice context=%s spawnPart=%s pad=%s entry=%s entryRarity=%s entryTier=%s",
+		"spawnBalance blocked reason=out_of_band_rarity_choice context=%s spawnPart=%s placementRarity=%s entry=%s entryRarity=%s entryTier=%s",
 		tostring(context),
 		formatInstancePath(data.Part),
-		padName,
+		placementRarity,
 		tostring(entry.Id),
 		tostring(entry.Rarity),
 		tostring(entryTier)
@@ -675,7 +748,7 @@ local function weightForEntry(entry, data, serverLuckMult)
 	end
 
 	local entryTier = tonumber(entry.Tier) or COMMON_TIER
-	if not isEntryTierAllowedOnPadName(data and data.Name, entryTier) then
+	if not isEntryTierAllowedForPlacementRarity(data and (data.PlacementRarity or data.Name), entryTier) then
 		return 0, "rarity_distance"
 	end
 
@@ -720,8 +793,8 @@ local function chooseForPart(data, serverLuckMult)
 
 			if DEBUG_TRACE then
 				spawnTrace(
-					"rarityEligibility allowed spawnPad=%s intendedTier=%s crewMember=%s entryRarity=%s entryTier=%s distance=%s distanceWeight=%.4f finalWeight=%.8f",
-					tostring(data and data.Name),
+					"rarityEligibility allowed placementRarity=%s intendedTier=%s crewMember=%s entryRarity=%s entryTier=%s distance=%s distanceWeight=%.4f finalWeight=%.8f",
+					tostring(data and (data.PlacementRarity or data.Name)),
 					tostring(data and data.IntendedTier),
 					tostring(entry.Id),
 					tostring(entry.Rarity),
@@ -745,9 +818,9 @@ local function chooseForPart(data, serverLuckMult)
 			table.sort(parts)
 			spawnWarnThrottled(
 				"spawn_no_nearby_rarity_entries_" .. formatInstancePath(data and data.Part),
-				"chooseForPart skipped reason=no_nearby_rarity_entries spawnPart=%s padRarity=%s intendedTier=%s filters=%s",
+				"chooseForPart skipped reason=no_nearby_rarity_entries spawnPart=%s placementRarity=%s intendedTier=%s filters=%s",
 				formatInstancePath(data and data.Part),
-				tostring(data and data.Name),
+				tostring(data and (data.PlacementRarity or data.Name)),
 				tostring(data and data.IntendedTier),
 				table.concat(parts, ", ")
 			)
@@ -818,6 +891,33 @@ local function getSpawnPartBiomeIndex(spawnPart)
 	return nil
 end
 
+local function isPlacementPart(spawnPart)
+	local isPlacement = SpawnPartsCfg.IsPlacementPart
+	if type(isPlacement) == "function" then
+		return isPlacement(spawnPart)
+	end
+
+	return spawnPart and spawnPart:IsA("BasePart") and spawnPart.Name == PLACEMENT_PART_NAME
+end
+
+local function getPlacementRarityForPart(spawnPart, biomeIndex)
+	local getRarity = SpawnPartsCfg.GetPlacementRarityForPart
+	if type(getRarity) == "function" then
+		return getRarity(spawnPart, biomeIndex, BiomeAreas)
+	end
+
+	return "Common"
+end
+
+local function getPlacementTierForPart(spawnPart, biomeIndex)
+	local getTier = SpawnPartsCfg.GetPlacementTierForPart
+	if type(getTier) == "function" then
+		return getTier(spawnPart, biomeIndex, BiomeAreas)
+	end
+
+	return COMMON_TIER
+end
+
 local partDataList = {}
 local partDataByPart = {}
 
@@ -837,21 +937,23 @@ local function setupSpawnPart(spawnPart)
 			return
 		end
 
-		local rarityName = spawnPart.Name
-		if VALID_RARITY_NAMES[rarityName] == nil then
+		if not isPlacementPart(spawnPart) then
 			spawnWarnThrottled(
-				"setup_invalid_rarity_" .. formatInstancePath(spawnPart),
-				"setupSpawnPart skipped reason=invalid_rarity_name part=%s name=%s class=%s",
+				"setup_invalid_placement_part_" .. formatInstancePath(spawnPart),
+				"setupSpawnPart skipped reason=invalid_placement_part part=%s name=%s expectedName=%s class=%s",
 				formatInstancePath(spawnPart),
-				tostring(rarityName),
+				tostring(spawnPart.Name),
+				tostring(PLACEMENT_PART_NAME),
 				tostring(spawnPart.ClassName)
 			)
 			return
 		end
 
-		local partTier = tonumber((SpawnPartsCfg.RarityTier or {})[rarityName]) or 1
-		local intendedTier = getIntendedTierForPadName(rarityName)
-		local allowedEntryTiers = getAllowedEntryTiersForPadName(rarityName)
+		local biomeIndex = getSpawnPartBiomeIndex(spawnPart)
+		local placementRarity = getPlacementRarityForPart(spawnPart, biomeIndex)
+		local partTier = tonumber(getPlacementTierForPart(spawnPart, biomeIndex)) or COMMON_TIER
+		local intendedTier = getIntendedTierForPlacementRarity(placementRarity)
+		local allowedEntryTiers = getAllowedEntryTiersForPlacementRarity(placementRarity)
 
 		local container = spawnPart:FindFirstChild(CREW_MEMBERS_SPAWN_FOLDER_NAME)
 		if not container then
@@ -864,7 +966,9 @@ local function setupSpawnPart(spawnPart)
 
 		local data = {
 			Part = spawnPart,
-			Name = rarityName,
+			Name = placementRarity,
+			PlacementRarity = placementRarity,
+			BiomeIndex = biomeIndex,
 			Tier = partTier,
 			IntendedTier = intendedTier,
 			AllowedEntryTiers = allowedEntryTiers,
@@ -878,24 +982,13 @@ local function setupSpawnPart(spawnPart)
 		partDataByPart[spawnPart] = data
 		partDataList[#partDataList + 1] = data
 
-		local biomeIndex = getSpawnPartBiomeIndex(spawnPart)
-		if biomeIndex and biomeIndex ~= intendedTier then
-			spawnWarnThrottled(
-				"spawn_pad_biome_mismatch_" .. formatInstancePath(spawnPart),
-				"setupSpawnPart warning=unexpected_rarity_pad_biome_mismatch part=%s padRarity=%s intendedTier=%s biomeIndex=%s",
-				formatInstancePath(spawnPart),
-				tostring(rarityName),
-				tostring(intendedTier),
-				tostring(biomeIndex)
-			)
-		end
-
 		spawnTrace(
-			"setupSpawnPart part=%s rarity=%s rawTier=%s intendedTier=%s pos=%s size=%s container=%s",
+			"setupSpawnPart part=%s placementRarity=%s rawTier=%s intendedTier=%s biomeIndex=%s pos=%s size=%s container=%s",
 			formatInstancePath(spawnPart),
-			tostring(rarityName),
+			tostring(placementRarity),
 			tostring(partTier),
 			tostring(intendedTier),
+			tostring(biomeIndex),
 			formatVector3(spawnPart.Position),
 			formatVector3(spawnPart.Size),
 			formatInstancePath(container)
@@ -961,7 +1054,7 @@ end
 
 if not biomesRoot then
 	spawnError(
-		"spawnPadDiscovery failed reason=missing_biomes_root map=%s legacySpawnFolder=%s",
+		"spawnPlatformDiscovery failed reason=missing_biomes_root map=%s legacySpawnFolder=%s",
 		formatInstancePath(map),
 		formatInstancePath(legacySpawnFolder)
 	)
@@ -1062,6 +1155,7 @@ end
 local function clearActiveState(model, st, reason)
 	if st then
 		disconnectActiveState(st)
+		destroyDormantSpikeForCrew(model, reason)
 		releaseStateOriginSlot(st, model, reason, false)
 	end
 
@@ -1670,8 +1764,8 @@ local function spawnTutorialCrewMemberOnData(data, options)
 	data.SlotOccupied[slotIndex] = clone
 
 	spawnTrace(
-		"tutorialSpawn spawnPadRarity=%s crewMember=%s player=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s slotIndex=%s",
-		tostring(data.Name),
+		"tutorialSpawn placementRarity=%s crewMember=%s player=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s slotIndex=%s",
+		tostring(data.PlacementRarity or data.Name),
 		tostring(finalId),
 		player.Name,
 		formatInstancePath(data.Part),
@@ -1778,12 +1872,12 @@ end
 
 ctx.SpawnTutorialCrewMember = spawnTutorialCrewMember
 
-local function getSameNameSpawnPartPaths(rarityName)
+local function getSamePlacementRarityPartPaths(placementRarity)
 	local paths = {}
 
 	for i = 1, #partDataList do
 		local data = partDataList[i]
-		if data and not data.Disabled and data.Part and data.Name == rarityName then
+		if data and not data.Disabled and data.Part and (data.PlacementRarity or data.Name) == placementRarity then
 			paths[#paths + 1] = formatInstancePath(data.Part)
 		end
 	end
@@ -1826,14 +1920,14 @@ local function spawnOne(data)
 		if not baseEntry then
 			spawnWarnThrottled(
 				"spawn_skip_no_entry_" .. formatInstancePath(data.Part),
-				"spawnOne skipped reason=no_base_entry spawnPart=%s rarity=%s intendedTier=%s",
+				"spawnOne skipped reason=no_base_entry spawnPart=%s placementRarity=%s intendedTier=%s",
 				formatInstancePath(data.Part),
-				tostring(data.Name),
+				tostring(data.PlacementRarity or data.Name),
 				tostring(data.IntendedTier)
 			)
 			return false
 		end
-		if not validateChosenEntryForPad(data, baseEntry, "spawnOne") then
+		if not validateChosenEntryForPlacementRarity(data, baseEntry, "spawnOne") then
 			return false
 		end
 
@@ -1922,10 +2016,10 @@ local function spawnOne(data)
 		data.SlotOccupied[freeIndex] = clone
 
 		local pivotPosition = clone:GetPivot().Position
-		local matchingCandidatePaths = getSameNameSpawnPartPaths(data.Name)
+		local matchingCandidatePaths = getSamePlacementRarityPartPaths(data.PlacementRarity or data.Name)
 		spawnTrace(
-			"spawnOne spawnPadRarity=%s chosenRarity=%s crewMember=%s variant=%s candidateCount=%s candidates=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s",
-			tostring(data.Name),
+			"spawnOne placementRarity=%s chosenRarity=%s crewMember=%s variant=%s candidateCount=%s candidates=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPivot=%s offset=%s",
+			tostring(data.PlacementRarity or data.Name),
 			tostring(rarityLabel),
 			tostring(baseEntry.Id),
 			tostring(variantKey),
@@ -1983,6 +2077,7 @@ local function spawnOne(data)
 				)
 				tryPlayIdle(clone, entry.Info.IdleAnim)
 				registerActive(clone, entry, data, freeIndex)
+				trySpawnDormantSpikeForCrew(clone, data)
 			else
 				releaseSpawnSlot(data, freeIndex, clone, "clone_missing_before_register")
 				spawnWarnThrottled(
@@ -2064,7 +2159,7 @@ local function pickRandomPartData()
 		local data = partDataList[i]
 		if data
 			and not data.Disabled
-			and (data.Name == "Secret" or data.Name == "Omega")
+			and (data.PlacementRarity == "Secret" or data.PlacementRarity == "Omega")
 			and reconcileSpawnData(data, "like_goal_secret_candidate")
 		then
 			candidates[#candidates + 1] = data
@@ -2097,7 +2192,7 @@ local function spawnRandomSecretIgnoreLimits()
 		spawnWarn("likeGoal skipped reason=no_secret_entries")
 		return
 	end
-	if not validateChosenEntryForPad(data, baseEntry, "likeGoalSecret") then
+	if not validateChosenEntryForPlacementRarity(data, baseEntry, "likeGoalSecret") then
 		return
 	end
 
@@ -2158,6 +2253,7 @@ local function spawnRandomSecretIgnoreLimits()
 	data.SlotOccupied[freeIndex] = clone
 	tryPlayIdle(clone, entry.Info.IdleAnim)
 	registerActive(clone, entry, data, freeIndex)
+	trySpawnDormantSpikeForCrew(clone, data)
 
 	spawnTrace(
 		"likeGoalSpawn rarity=%s crewMember=%s chosenSpawnPart=%s chosenSpawnPartPos=%s finalParent=%s finalPosition=%s",
@@ -2169,6 +2265,38 @@ local function spawnRandomSecretIgnoreLimits()
 		formatVector3(clone:GetPivot().Position)
 	)
 end
+
+local LIKEGOAL_COOLDOWN = 30
+local pendingSecretSpawns = 0
+local processingSecretQueue = false
+local nextSecretAllowedAt = 0
+
+local function processSecretQueue()
+	if processingSecretQueue then
+		return
+	end
+
+	processingSecretQueue = true
+	task.spawn(function()
+		while pendingSecretSpawns > 0 do
+			local now = os.clock()
+			if now < nextSecretAllowedAt then
+				task.wait(nextSecretAllowedAt - now)
+			end
+
+			pendingSecretSpawns -= 1
+			spawnRandomSecretIgnoreLimits()
+			nextSecretAllowedAt = os.clock() + LIKEGOAL_COOLDOWN
+		end
+
+		processingSecretQueue = false
+	end)
+end
+
+LikeGoalSpawnSecret.Event:Connect(function(_count)
+	pendingSecretSpawns += 1
+	processSecretQueue()
+end)
 
 
 local rrIndex = 0
@@ -2254,48 +2382,6 @@ while true do
   
 	task.wait(SpawnerConfig.TickInterval)
 end
-
-local LIKEGOAL_COOLDOWN = 30 
-local pendingSecretSpawns = 0
-local processingSecretQueue = false
-local nextSecretAllowedAt = 0
-
-
-local function processSecretQueue()
-	if processingSecretQueue then return end
-	processingSecretQueue = true
-
-
-	task.spawn(function()
-		while pendingSecretSpawns > 0 do
-			local now = os.clock()
-
-
-			if now < nextSecretAllowedAt then
-				task.wait(nextSecretAllowedAt - now)
-			end
-
-
-			pendingSecretSpawns -= 1
-			spawnRandomSecretIgnoreLimits()
-
-
-			nextSecretAllowedAt = os.clock() + LIKEGOAL_COOLDOWN
-		end
-
-
-		processingSecretQueue = false
-	end)
-end
-
-
-LikeGoalSpawnSecret.Event:Connect(function(count)
-	count = 1
-
-
-	pendingSecretSpawns += count
-	processSecretQueue()
-end)
 
 end
 

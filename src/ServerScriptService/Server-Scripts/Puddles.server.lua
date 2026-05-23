@@ -58,7 +58,7 @@ local CONFIG = {
 	-- Puddle balance knobs:
 	-- Higher ScaleRange values make larger puddles.
 	-- Lower SlowMultiplier values make puddles slow players harder.
-	-- Higher PuddlesPerSurface values add more puddles per accepted platform.
+	-- PuddlesPerSurface should stay at 1 so each accepted Platform gets one puddle.
 	-- Larger MinSpacing values reduce close/overlapping puddle placements.
 	ProgressionBands = {
 		{
@@ -76,7 +76,7 @@ local CONFIG = {
 			Band = 2,
 			BiomeStart = 3,
 			BiomeEnd = 4,
-			PuddlesPerSurface = 2,
+			PuddlesPerSurface = 1,
 			ScaleRange = { Min = 1.35, Max = 1.70 },
 			SlowMultiplier = 0.65,
 			MinSpacing = 5,
@@ -87,7 +87,7 @@ local CONFIG = {
 			Band = 3,
 			BiomeStart = 5,
 			BiomeEnd = 6,
-			PuddlesPerSurface = 3,
+			PuddlesPerSurface = 1,
 			ScaleRange = { Min = 1.85, Max = 2.35 },
 			SlowMultiplier = 0.55,
 			MinSpacing = 6,
@@ -98,7 +98,7 @@ local CONFIG = {
 			Band = 4,
 			BiomeStart = 7,
 			BiomeEnd = 8,
-			PuddlesPerSurface = 4,
+			PuddlesPerSurface = 1,
 			ScaleRange = { Min = 2.50, Max = 3.25 },
 			SlowMultiplier = 0.45,
 			MinSpacing = 7,
@@ -207,7 +207,7 @@ local templateCacheByArea = {}
 local templateMetadataByTemplate = setmetatable({}, { __mode = "k" })
 local placementFailureCountsByArea = {}
 local warnedMessages = {}
-local rarityPadSurfaceNames = nil
+local platformSurfaceNames = nil
 local lastTraceStateKey = nil
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("PuddlesDebugTrace") == true
 
@@ -631,23 +631,20 @@ local function getSlowMultiplierForTuning(tuning)
 	return math.clamp(tonumber(tuning.SlowMultiplier) or tonumber(CONFIG.FallbackSlowMultiplier) or 0.5, 0, 1)
 end
 
-local function getRarityPadSurfaceNames()
-	if rarityPadSurfaceNames then
-		return rarityPadSurfaceNames
+local function getPlatformSurfaceNames()
+	if platformSurfaceNames then
+		return platformSurfaceNames
 	end
 
-	local names = {}
-	for rarityName in pairs(SpawnPartsConfig.RarityTier or {}) do
-		names[#names + 1] = tostring(rarityName)
-	end
-	table.sort(names)
+	local getNames = SpawnPartsConfig.GetPlacementSurfaceNames
+	local names = if type(getNames) == "function" then getNames() else { "Platform" }
 
-	rarityPadSurfaceNames = names
-	return rarityPadSurfaceNames
+	platformSurfaceNames = names
+	return platformSurfaceNames
 end
 
-local function buildSurfaceQueryOptions()
-	return {
+local function buildSurfaceQueryOptions(overrides)
+	local options = {
 		Context = "Puddles",
 		FilterKey = "PuddlesStrictSurfaces",
 		AllowAttributes = PUDDLE_EXPLICIT_SURFACE_ATTRIBUTES,
@@ -656,12 +653,20 @@ local function buildSurfaceQueryOptions()
 		DenyTags = PUDDLE_DENY_TAGS,
 		RequireExplicitOrFallbackSurface = true,
 		AllowFallbackAfterExplicitFailure = false,
-		FallbackSurfaceNames = getRarityPadSurfaceNames(),
+		FallbackSurfaceNames = getPlatformSurfaceNames(),
 		ExplicitSurfaceAcceptanceReason = "explicit_puddle_marker",
-		FallbackSurfaceAcceptanceReason = "rarity_pad_fallback",
-		UnmarkedSurfaceRejectReason = "unmarked_non_rarity_surface",
+		FallbackSurfaceAcceptanceReason = "platform_surface",
+		UnmarkedSurfaceRejectReason = "unmarked_non_platform_surface",
 		WarnIfMissing = false,
 	}
+
+	if type(overrides) == "table" then
+		for key, value in pairs(overrides) do
+			options[key] = value
+		end
+	end
+
+	return options
 end
 
 local function findPuddleFolder()
@@ -1106,14 +1111,13 @@ local function choosePuddlePlacementFromBiomeGeometry(
 	local attempts = getPlacementAttemptsForTuning(tuning)
 	local minSpacing = getMinSpacingForTuning(tuning)
 
-	local candidateOptions = {
-		Context = "Puddles",
+	local candidateOptions = buildSurfaceQueryOptions({
 		FilterKey = "Puddles",
 		FootprintSize = footprintSize,
 		CandidateAttempts = getCandidateAttemptsForTuning(tuning),
 		EdgePadding = math.max(0, tonumber(CONFIG.BiomePlacementEdgePadding) or 0),
 		WarnIfMissing = false,
-	}
+	})
 
 	local lastReason = nil
 	local lastDiagnostics = nil

@@ -7,6 +7,7 @@ local RunService = game:GetService("RunService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
@@ -28,7 +29,7 @@ local sharedChestSpawnPartCache = nil
 local worldRandom = Random.new()
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebugTrace") == true
 local loggedExtractionTouchByPlayer = {}
-local VALID_SPAWN_RARITY_NAMES = SpawnPartsConfig.RarityTier or {}
+local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
 
 local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)
 local ERROR_COLOR = Color3.fromRGB(255, 104, 104)
@@ -479,33 +480,77 @@ local function getSpawnPartsFolder()
 	return MapResolver.GetRefs().SpawnFolder
 end
 
-local function isValidSpawnRarityPart(spawnPart)
-	return spawnPart
-		and spawnPart:IsA("BasePart")
-		and VALID_SPAWN_RARITY_NAMES[tostring(spawnPart.Name)] ~= nil
+local function getBiomeIndexFromName(name)
+	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
+	return indexText and tonumber(indexText) or nil
 end
 
-local function collectSpawnRarityParts(root, spawnParts)
+local function getBiomeIndexFromInstance(instance, biomesRoot)
+	local current = instance
+	while current do
+		local index = getBiomeIndexFromName(current.Name)
+		if index then
+			return index
+		end
+
+		if current == biomesRoot then
+			return nil
+		end
+
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function isValidPlacementPart(spawnPart)
+	local isPlacementPart = SpawnPartsConfig.IsPlacementPart
+	if type(isPlacementPart) == "function" then
+		return isPlacementPart(spawnPart)
+	end
+
+	return spawnPart and spawnPart:IsA("BasePart") and spawnPart.Name == "Platform"
+end
+
+local function getPlacementTierForPart(spawnPart, biomeIndex)
+	local getTier = SpawnPartsConfig.GetPlacementTierForPart
+	if type(getTier) == "function" then
+		return getTier(spawnPart, biomeIndex, BiomeAreas)
+	end
+
+	return 1
+end
+
+local function collectPlacementPartRecords(root, spawnPartRecords, seen, biomeIndex, biomesRoot)
 	if not root then
 		return
 	end
 
-	if isValidSpawnRarityPart(root) then
-		spawnParts[#spawnParts + 1] = root
+	local function tryAdd(spawnPart)
+		if not isValidPlacementPart(spawnPart) or seen[spawnPart] then
+			return
+		end
+
+		seen[spawnPart] = true
+		spawnPartRecords[#spawnPartRecords + 1] = {
+			Part = spawnPart,
+			BiomeIndex = biomeIndex or getBiomeIndexFromInstance(spawnPart, biomesRoot),
+		}
 	end
 
+	tryAdd(root)
+
 	for _, descendant in ipairs(root:GetDescendants()) do
-		if isValidSpawnRarityPart(descendant) then
-			spawnParts[#spawnParts + 1] = descendant
-		end
+		tryAdd(descendant)
 	end
 end
 
-local function getBiomeSpawnParts()
+local function getBiomeSpawnPartRecords()
 	local refs = MapResolver.GetRefs()
 	local mapRoot = refs.MapRoot
 	local biomesRoot = refs.Biomes or (mapRoot and mapRoot:FindFirstChild("Biomes"))
-	local spawnParts = {}
+	local spawnPartRecords = {}
+	local seen = {}
 
 	if biomesRoot then
 		waveTrace(
@@ -523,7 +568,13 @@ local function getBiomeSpawnParts()
 				formatInstancePath(scanRoot),
 				formatInstancePath(innerBiome)
 			)
-			collectSpawnRarityParts(scanRoot, spawnParts)
+			collectPlacementPartRecords(
+				scanRoot,
+				spawnPartRecords,
+				seen,
+				getBiomeIndexFromName(biomeContainer.Name),
+				biomesRoot
+			)
 		end
 	else
 		local spawnFolder = getSpawnPartsFolder()
@@ -533,18 +584,19 @@ local function getBiomeSpawnParts()
 			formatInstancePath(spawnFolder)
 		)
 		if spawnFolder then
-			collectSpawnRarityParts(spawnFolder, spawnParts)
+			collectPlacementPartRecords(spawnFolder, spawnPartRecords, seen, nil, biomesRoot)
 		end
 	end
 
-	waveTrace("chestSpawnDiscovery resultCount=%s", tostring(#spawnParts))
-	return spawnParts
+	waveTrace("chestSpawnDiscovery resultCount=%s", tostring(#spawnPartRecords))
+	return spawnPartRecords
 end
 
 local function getAllCrewMemberSpawnContexts()
 	local contexts = {}
 
-	for _, spawnPart in ipairs(getBiomeSpawnParts()) do
+	for _, record in ipairs(getBiomeSpawnPartRecords()) do
+		local spawnPart = record.Part
 		local crewMembersFolder = spawnPart:FindFirstChild("CrewMembers")
 		local hadCrewMember = false
 		if crewMembersFolder then
@@ -554,6 +606,7 @@ local function getAllCrewMemberSpawnContexts()
 					contexts[#contexts + 1] = {
 						SpawnPart = spawnPart,
 						CrewMember = candidate,
+						BiomeIndex = record.BiomeIndex,
 					}
 				end
 			end
@@ -563,6 +616,7 @@ local function getAllCrewMemberSpawnContexts()
 			contexts[#contexts + 1] = {
 				SpawnPart = spawnPart,
 				CrewMember = nil,
+				BiomeIndex = record.BiomeIndex,
 			}
 		end
 	end
@@ -1159,7 +1213,7 @@ local function isConfiguredSharedChestDepthBand(value)
 	return false
 end
 
-local function getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
+local function getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart, biomeIndex)
 	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
 	local depthBandAttribute = tostring(sharedConfig.SpawnPartDepthBandAttribute or "SharedChestDepthBand")
 	local attributeDepthBand = getSharedChestAttribute(spawnPart, depthBandAttribute)
@@ -1167,9 +1221,8 @@ local function getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
 		return tostring(attributeDepthBand)
 	end
 
-	local tierMap = SpawnPartsConfig.RarityTier or {}
 	local depthBandByTier = sharedConfig.SpawnTierToDepthBand or {}
-	local spawnTier = tonumber(tierMap[tostring(spawnPart and spawnPart.Name or "")]) or 1
+	local spawnTier = tonumber(getPlacementTierForPart(spawnPart, biomeIndex)) or 1
 	return tostring(depthBandByTier[spawnTier] or Economy.VerticalSlice.DefaultDepthBand)
 end
 
@@ -1192,7 +1245,7 @@ local function getSharedChestSpawnPartWeight(sharedConfig, spawnPart, depthBand)
 	return 1
 end
 
-local function buildSharedChestSpawnPartRecord(sharedConfig, spawnPart)
+local function buildSharedChestSpawnPartRecord(sharedConfig, spawnPart, biomeIndex, biomesRoot)
 	if not spawnPart or not spawnPart:IsA("BasePart") then
 		return nil
 	end
@@ -1206,11 +1259,12 @@ local function buildSharedChestSpawnPartRecord(sharedConfig, spawnPart)
 		spawnPart,
 		sharedConfig.SpawnPartEligibleAttribute or "SharedChestSpawnEligible"
 	)
-	if not explicit and not isValidSpawnRarityPart(spawnPart) then
+	if not explicit and not isValidPlacementPart(spawnPart) then
 		return nil
 	end
 
-	local depthBand = getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
+	local resolvedBiomeIndex = biomeIndex or getBiomeIndexFromInstance(spawnPart, biomesRoot)
+	local depthBand = getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart, resolvedBiomeIndex)
 	local weight = getSharedChestSpawnPartWeight(sharedConfig, spawnPart, depthBand)
 	if weight <= 0 then
 		return nil
@@ -1221,22 +1275,28 @@ local function buildSharedChestSpawnPartRecord(sharedConfig, spawnPart)
 		DepthBand = depthBand,
 		Weight = weight,
 		Explicit = explicit,
+		BiomeIndex = resolvedBiomeIndex,
 	}
 end
 
-local function collectSharedChestSpawnPartRecords(root, sharedConfig, records, seen)
+local function collectSharedChestSpawnPartRecords(root, sharedConfig, records, seen, biomeIndex, biomesRoot)
 	if not root then
 		return
 	end
 
-	local rootRecord = buildSharedChestSpawnPartRecord(sharedConfig, root)
+	local rootRecord = buildSharedChestSpawnPartRecord(sharedConfig, root, biomeIndex, biomesRoot)
 	if rootRecord and not seen[rootRecord.SpawnPart] then
 		seen[rootRecord.SpawnPart] = true
 		records[#records + 1] = rootRecord
 	end
 
 	for _, descendant in ipairs(root:GetDescendants()) do
-		local record = buildSharedChestSpawnPartRecord(sharedConfig, descendant)
+		local record = buildSharedChestSpawnPartRecord(
+			sharedConfig,
+			descendant,
+			biomeIndex or getBiomeIndexFromInstance(descendant, biomesRoot),
+			biomesRoot
+		)
 		if record and not seen[record.SpawnPart] then
 			seen[record.SpawnPart] = true
 			records[#records + 1] = record
@@ -1272,14 +1332,21 @@ local function getSharedChestSpawnPartRecords(sharedConfig)
 	if biomesRoot then
 		for _, biomeContainer in ipairs(biomesRoot:GetChildren()) do
 			local innerBiome = biomeContainer:FindFirstChild(biomeContainer.Name)
-			collectSharedChestSpawnPartRecords(innerBiome or biomeContainer, sharedConfig, records, seen)
+			collectSharedChestSpawnPartRecords(
+				innerBiome or biomeContainer,
+				sharedConfig,
+				records,
+				seen,
+				getBiomeIndexFromName(biomeContainer.Name),
+				biomesRoot
+			)
 		end
 	else
-		collectSharedChestSpawnPartRecords(spawnFolder, sharedConfig, records, seen)
+		collectSharedChestSpawnPartRecords(spawnFolder, sharedConfig, records, seen, nil, biomesRoot)
 	end
 
 	if #records == 0 and spawnFolder and spawnFolder ~= biomesRoot then
-		collectSharedChestSpawnPartRecords(spawnFolder, sharedConfig, records, seen)
+		collectSharedChestSpawnPartRecords(spawnFolder, sharedConfig, records, seen, nil, biomesRoot)
 	end
 
 	sharedChestSpawnPartCache = {
@@ -1474,7 +1541,12 @@ end
 
 local function getDepthBandForSharedChestSpawn(spawnPart)
 	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
-	return getSharedChestDepthBandForSpawnPart(sharedConfig, spawnPart)
+	local refs = MapResolver.GetRefs()
+	return getSharedChestDepthBandForSpawnPart(
+		sharedConfig,
+		spawnPart,
+		getBiomeIndexFromInstance(spawnPart, refs and refs.Biomes)
+	)
 end
 
 local function countActiveSharedChests()
