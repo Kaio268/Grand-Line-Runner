@@ -1,6 +1,7 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 
@@ -40,6 +41,18 @@ local function firstNonEmpty(...)
 		end
 	end
 	return ""
+end
+
+local function cloneValue(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local copy = {}
+	for key, child in pairs(value) do
+		copy[key] = cloneValue(child)
+	end
+	return copy
 end
 
 local function hasStandAssignment(row)
@@ -87,6 +100,27 @@ local function hasCaptainAssignment(row)
 	) ~= ""
 end
 
+local function hasCaptainIncome(row)
+	return typeof(row) == "table" and math.max(0, tonumber(row.IncomeToCollect) or 0) > 0
+end
+
+local function isCaptainAssignableStandMarker(assignedStand)
+	local marker = tostring(assignedStand or "")
+	return marker == "" or marker == CAPTAIN_SLOT_KEY
+end
+
+local function clearTutorialMetadata(instanceData)
+	if typeof(instanceData) ~= "table" then
+		return
+	end
+
+	instanceData.TutorialReward = false
+	instanceData.TutorialToken = ""
+	instanceData.TutorialOwnerUserId = nil
+	instanceData.TutorialCrewMember = nil
+	instanceData.TutorialRewardName = nil
+end
+
 local function makeCaptainSlotDataFromInstance(instanceId, instanceData, existingRow)
 	local crewMemberName = getInstanceCrewKey(instanceData)
 	if crewMemberName == "" then
@@ -94,12 +128,16 @@ local function makeCaptainSlotDataFromInstance(instanceId, instanceData, existin
 	end
 
 	existingRow = if typeof(existingRow) == "table" then existingRow else {}
+	local level = math.max(1, math.floor(tonumber(instanceData.Level) or tonumber(existingRow.Level) or 1))
 	return {
 		CrewMemberName = crewMemberName,
 		CrewMemberId = tostring(instanceData.CrewMemberId or crewMemberName),
 		LegacyStorageName = tostring(instanceData.LegacyStorageName or existingRow.LegacyStorageName or ""),
 		CrewMemberInstanceId = tostring(instanceId),
 		AssignedAt = math.max(0, math.floor(tonumber(existingRow.AssignedAt) or os.time())),
+		IncomeToCollect = math.max(0, tonumber(existingRow.IncomeToCollect) or 0),
+		Level = level,
+		CurrentXP = math.max(0, math.floor(tonumber(instanceData.CurrentXP) or tonumber(existingRow.CurrentXP) or 0)),
 	}
 end
 
@@ -261,7 +299,7 @@ local function setCaptainSlotData(player, captainSlot)
 	return DataManager:SetValue(player, SHIP_CAPTAIN_SLOT_PATH, if typeof(captainSlot) == "table" then captainSlot else {})
 end
 
-local function findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId)
+local function findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId, player)
 	if typeof(crewMemberInventory) ~= "table" or typeof(crewMemberInventory.ById) ~= "table" then
 		return nil, nil
 	end
@@ -270,7 +308,16 @@ local function findCaptainInventoryInstance(crewMemberInventory, preferredInstan
 	if preferredInstanceId ~= "" then
 		local preferred = crewMemberInventory.ById[preferredInstanceId]
 		if typeof(preferred) == "table" then
-			return preferredInstanceId, preferred
+			local assignedStand = tostring(preferred.AssignedStand or "")
+			if isCaptainAssignableStandMarker(assignedStand) then
+				return preferredInstanceId, preferred
+			end
+
+			warn(("[CrewSlotAssignmentReconciler] Preserving numeric crew assignment for %s: Ship.CaptainSlot points at instance %s assigned to %s. Clearing stale captain data instead."):format(
+				player and player.Name or "unknown",
+				preferredInstanceId,
+				assignedStand
+			))
 		end
 	end
 
@@ -522,7 +569,7 @@ function CrewSlotAssignmentReconciler.ReconcileCaptain(player, options)
 
 	local captainSlot = getCaptainSlotData(player)
 	local preferredInstanceId = firstNonEmpty(captainSlot.CrewMemberInstanceId, captainSlot.InstanceId, captainSlot.CrewInstanceId)
-	local selectedInstanceId, selectedInstanceData = findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId)
+	local selectedInstanceId, selectedInstanceData = findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId, player)
 	local changedInventory = false
 	local changedCaptainSlot = false
 
@@ -542,13 +589,15 @@ function CrewSlotAssignmentReconciler.ReconcileCaptain(player, options)
 			or tostring(captainSlot.CrewMemberInstanceId or "") ~= tostring(nextCaptainSlot.CrewMemberInstanceId or "")
 			or tostring(captainSlot.CrewMemberName or "") ~= tostring(nextCaptainSlot.CrewMemberName or "")
 			or tostring(captainSlot.LegacyStorageName or "") ~= tostring(nextCaptainSlot.LegacyStorageName or "")
+			or tonumber(captainSlot.Level) ~= tonumber(nextCaptainSlot.Level)
+			or tonumber(captainSlot.CurrentXP) ~= tonumber(nextCaptainSlot.CurrentXP)
 		then
 			if setCaptainSlotData(player, nextCaptainSlot) == false then
 				return false, "failed_to_write_captain_slot"
 			end
 			changedCaptainSlot = true
 		end
-	elseif hasCaptainAssignment(captainSlot) then
+	elseif hasCaptainAssignment(captainSlot) or hasCaptainIncome(captainSlot) then
 		if setCaptainSlotData(player, {}) == false then
 			return false, "failed_to_clear_stale_captain_slot"
 		end
@@ -607,6 +656,9 @@ function CrewSlotAssignmentReconciler.AssignCaptain(player, instanceRef, options
 
 	local originalInstanceData = table.clone(instanceData)
 	instanceData.AssignedStand = CAPTAIN_SLOT_KEY
+	if options.ClearTutorialMetadataAfterAssign == true then
+		clearTutorialMetadata(instanceData)
+	end
 	crewMemberInventory.ById[tostring(instanceId)] = instanceData
 
 	local saved, saveReason = CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
@@ -634,6 +686,91 @@ function CrewSlotAssignmentReconciler.AssignCaptain(player, instanceRef, options
 	return tostring(instanceId), instanceData, "ok"
 end
 
+function CrewSlotAssignmentReconciler.SwapCaptain(player, incomingInstanceRef, options)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, nil, nil, nil, "invalid_player"
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local reconcileOk, reconcileReason = CrewSlotAssignmentReconciler.ReconcileCaptain(player, {
+		Source = tostring(options.Source or "captain_swap_preflight"),
+	})
+	if reconcileOk == false then
+		return nil, nil, nil, nil, tostring(reconcileReason or "captain_reconcile_failed")
+	end
+
+	local crewMemberInventory = CrewInstanceService.GetCrewInventory(player)
+	local captainSlot = getCaptainSlotData(player)
+	local preferredInstanceId = firstNonEmpty(captainSlot.CrewMemberInstanceId, captainSlot.InstanceId, captainSlot.CrewInstanceId)
+	local outgoingInstanceId, outgoingInstanceData = findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId, player)
+	if not outgoingInstanceData then
+		return nil, nil, nil, nil, "no_captain_assigned"
+	end
+
+	local incomingInstanceId, incomingInstanceData = CrewInstanceService.GetInstance(player, incomingInstanceRef)
+	if not incomingInstanceData then
+		return nil, nil, nil, nil, "incoming_instance_missing"
+	end
+
+	incomingInstanceId = tostring(incomingInstanceId)
+	outgoingInstanceId = tostring(outgoingInstanceId)
+	if incomingInstanceId == outgoingInstanceId then
+		return nil, nil, nil, nil, "incoming_already_assigned"
+	end
+
+	local expectedStorageName = tostring(options.ExpectedIncomingStorageName or options.StorageName or "")
+	if expectedStorageName ~= "" and getInstanceCrewKey(incomingInstanceData) ~= expectedStorageName then
+		return nil, nil, nil, nil, "ownership_mismatch"
+	end
+
+	if tostring(incomingInstanceData.AssignedStand or "") ~= "" then
+		return nil, nil, nil, nil, "incoming_already_assigned"
+	end
+
+	local finalInventory = cloneValue(crewMemberInventory)
+	local finalIncoming = cloneValue(incomingInstanceData)
+	local finalOutgoing = cloneValue(outgoingInstanceData)
+	finalIncoming.AssignedStand = CAPTAIN_SLOT_KEY
+	if options.ClearIncomingTutorialMetadataAfterAssign == true then
+		clearTutorialMetadata(finalIncoming)
+	end
+	finalOutgoing.AssignedStand = ""
+	finalOutgoing.LastReleasedAt = os.time()
+	finalInventory.ById[incomingInstanceId] = finalIncoming
+	finalInventory.ById[outgoingInstanceId] = finalOutgoing
+
+	local capacityOk, _, _, _, capacityReason = CrewQuickSlotService.CanInventoryFitOrNotify(
+		player,
+		finalInventory,
+		"CaptainSlotSwap"
+	)
+	if capacityOk ~= true then
+		return nil, nil, nil, nil, tostring(capacityReason or "quick_slot_capacity")
+	end
+
+	local saved, saveReason = CrewInstanceService.SaveCrewInventory(player, finalInventory, {
+		SourcePath = tostring(options.SourcePath or "captain_slot_swap"),
+	})
+	if saved == false then
+		return nil, nil, nil, nil, tostring(saveReason or "captain_swap_save_failed")
+	end
+
+	local captainSlotRow = makeCaptainSlotDataFromInstance(incomingInstanceId, finalIncoming, {
+		AssignedAt = os.time(),
+		IncomeToCollect = 0,
+	})
+	if setCaptainSlotData(player, captainSlotRow) == false then
+		CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
+			SourcePath = "captain_slot_swap_rollback",
+		})
+		return nil, nil, nil, nil, "captain_slot_write_failed"
+	end
+
+	CrewInstanceService.SyncCrewAvailableCounts(player)
+
+	return incomingInstanceId, finalIncoming, outgoingInstanceId, finalOutgoing, "ok"
+end
+
 function CrewSlotAssignmentReconciler.ClearCaptainAssignment(player, options)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return nil, nil, "invalid_player"
@@ -643,31 +780,38 @@ function CrewSlotAssignmentReconciler.ClearCaptainAssignment(player, options)
 	local crewMemberInventory = CrewInstanceService.GetCrewInventory(player)
 	local captainSlot = getCaptainSlotData(player)
 	local preferredInstanceId = firstNonEmpty(captainSlot.CrewMemberInstanceId, captainSlot.InstanceId, captainSlot.CrewInstanceId)
-	local instanceId, instanceData = findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId)
+	local instanceId, instanceData = findCaptainInventoryInstance(crewMemberInventory, preferredInstanceId, player)
 
 	if not instanceData then
-		if hasCaptainAssignment(captainSlot) then
+		if hasCaptainAssignment(captainSlot) or hasCaptainIncome(captainSlot) then
 			setCaptainSlotData(player, {})
 		end
 		return nil, nil, "no_captain_assigned"
 	end
 
-	instanceData.AssignedStand = ""
-	instanceData.LastReleasedAt = os.time()
-	crewMemberInventory.ById[tostring(instanceId)] = instanceData
+	local releaseInventory = cloneValue(crewMemberInventory)
+	local releasedInstanceData = cloneValue(instanceData)
+	releasedInstanceData.AssignedStand = ""
+	releasedInstanceData.LastReleasedAt = os.time()
+	releaseInventory.ById[tostring(instanceId)] = releasedInstanceData
 
-	local saved, saveReason = CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
+	local capacityOk, _, _, _, capacityReason = CrewQuickSlotService.CanInventoryFitOrNotify(
+		player,
+		releaseInventory,
+		"CaptainSlotRelease"
+	)
+	if capacityOk ~= true then
+		return nil, nil, tostring(capacityReason or "quick_slot_capacity")
+	end
+
+	local saved, saveReason = CrewInstanceService.SaveCrewInventory(player, releaseInventory, {
 		SourcePath = tostring(options.SourcePath or "captain_slot_release"),
 	})
 	if saved == false then
-		instanceData.AssignedStand = CAPTAIN_SLOT_KEY
-		crewMemberInventory.ById[tostring(instanceId)] = instanceData
 		return nil, nil, tostring(saveReason or "captain_release_save_failed")
 	end
 
 	if setCaptainSlotData(player, {}) == false then
-		instanceData.AssignedStand = CAPTAIN_SLOT_KEY
-		crewMemberInventory.ById[tostring(instanceId)] = instanceData
 		CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
 			SourcePath = "captain_slot_release_rollback",
 		})
@@ -676,7 +820,7 @@ function CrewSlotAssignmentReconciler.ClearCaptainAssignment(player, options)
 
 	CrewInstanceService.SyncCrewAvailableCounts(player)
 
-	return tostring(instanceId), instanceData, "ok"
+	return tostring(instanceId), releasedInstanceData, "ok"
 end
 
 function CrewSlotAssignmentReconciler.BeginReset(player, source)

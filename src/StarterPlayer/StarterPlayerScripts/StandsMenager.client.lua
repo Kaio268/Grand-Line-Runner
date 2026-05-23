@@ -23,6 +23,9 @@ local POPUP_ERROR = Color3.fromRGB(255, 94, 94)
 local POPUP_INFO = Color3.fromRGB(111, 188, 255)
 local POPUP_STROKE = Color3.fromRGB(0, 0, 0)
 local MODAL_STATE_KEY = "StandUpgradePrompt"
+local CAPTAIN_SLOT_KEY = "Captain"
+local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
+local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactStandUpgradePromptRoot"
@@ -238,8 +241,26 @@ local function disconnectGui(gui)
 	slotKeyByGui[gui] = nil
 end
 
-local function bindGui(gui)
+local function getUpgradeSlotKeyFromGui(gui)
 	local slotKey = ShipSlotGuiIdentity.GetSlotKeyFromGui(gui)
+	if slotKey then
+		return slotKey
+	end
+
+	if
+		gui
+		and gui:IsA("SurfaceGui")
+		and gui:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+		and tostring(gui:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+	then
+		return CAPTAIN_SLOT_KEY
+	end
+
+	return nil
+end
+
+local function bindGui(gui)
+	local slotKey = getUpgradeSlotKeyFromGui(gui)
 	if not slotKey then
 		return
 	end

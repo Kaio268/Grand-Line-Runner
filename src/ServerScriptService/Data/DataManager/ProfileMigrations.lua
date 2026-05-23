@@ -729,6 +729,7 @@ function ProfileMigrations.Apply(data)
 	local ship = ensureTable(data, "Ship")
 	ship.Slots = ensureTable(ship, "Slots")
 	ship.CaptainSlot = ensureTable(ship, "CaptainSlot")
+	ship.CaptainSlot.IncomeToCollect = coerceNumber(ship.CaptainSlot.IncomeToCollect, 0)
 	ship.MaxSlots = Economy.Rules.MaxShipSlots
 	migrateLegacyCrewSlotRows(data, ship.Slots)
 	migrateLegacyCrewSlotRows(data, data.IncomeBrainrots)

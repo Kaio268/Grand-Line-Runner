@@ -11,6 +11,7 @@ local CANONICAL_ROOT = "CrewMemberIncome"
 local AUDIT_ROOT = "CrewMemberStandIncomeAuthorityAudit"
 
 local dataManagerModule = nil
+local INCOME_COMPARE_EPSILON = 1e-6
 
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -135,6 +136,12 @@ local function canonicalFromStandRow(player, standName, standRow)
 	}
 end
 
+local function numbersNearlyEqual(left, right)
+	local leftNumber = tonumber(left) or 0
+	local rightNumber = tonumber(right) or 0
+	return math.abs(leftNumber - rightNumber) <= INCOME_COMPARE_EPSILON
+end
+
 local function updateAudit(player, updates)
 	local dataManager = getDataManager()
 	local audit = dataManager:GetValue(player, AUDIT_ROOT)
@@ -198,7 +205,7 @@ local function compareRows(standRow, canonicalRow)
 	if tostring(canonicalRow.CrewMemberInstanceId or "") ~= tostring(expected.CrewMemberInstanceId or "") then
 		return false, "instance_mismatch"
 	end
-	if math.floor(tonumber(canonicalRow.IncomeToCollect) or 0) ~= math.floor(tonumber(expected.IncomeToCollect) or 0) then
+	if not numbersNearlyEqual(canonicalRow.IncomeToCollect, expected.IncomeToCollect) then
 		return false, "income_mismatch"
 	end
 	if math.floor(tonumber(canonicalRow.StandLevel) or 1) ~= math.floor(tonumber(expected.StandLevel) or 1) then

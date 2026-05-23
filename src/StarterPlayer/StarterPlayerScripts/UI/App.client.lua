@@ -26,6 +26,7 @@ local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
 local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
@@ -234,11 +235,6 @@ local RESOURCE_RARITY_COLORS = {
 	Legendary = Color3.fromRGB(255, 187, 74),
 }
 
-local function getStandLevelMultiplier(level)
-	local safeLevel = math.clamp(math.floor(tonumber(level) or 1), 1, 50)
-	return 1 + ((safeLevel - 1) * 0.25)
-end
-
 local KEY_TO_SLOT = {
 	[Enum.KeyCode.One] = 1,
 	[Enum.KeyCode.Two] = 2,
@@ -279,6 +275,8 @@ local cachedLegacyInventoryIcon = nil
 local INVENTORY_ICON_OVERRIDE = "rbxassetid://71513318604974"
 local INVENTORY_SNAPSHOT_DEBUG = false
 local INCOME_STATUS_METADATA_RETRY_SECONDS = 3
+local INCOME_STATUS_SNAPSHOT_FALLBACK_CACHE_SECONDS = 1
+local INCOME_STATUS_SNAPSHOT_REFRESH_SECONDS = 1
 local shipUpgradeModal = nil
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
@@ -392,31 +390,8 @@ local function shortName(text)
 	return string.sub(value, 1, 11) .. "..."
 end
 
-local function formatNumber(value)
-	local number = tonumber(value) or 0
-	local sign = number < 0 and "-" or ""
-	local absValue = math.abs(number)
-
-	local suffixes = {
-		{ value = 1e18, suffix = "Qui" },
-		{ value = 1e15, suffix = "Qd" },
-		{ value = 1e12, suffix = "T" },
-		{ value = 1e9, suffix = "B" },
-		{ value = 1e6, suffix = "M" },
-		{ value = 1e3, suffix = "K" },
-	}
-
-	for _, entry in ipairs(suffixes) do
-		if absValue >= entry.value then
-			local scaled = absValue / entry.value
-			local decimals = if scaled >= 100 then 0 elseif scaled >= 10 then 1 else 2
-			local text = string.format("%." .. tostring(decimals) .. "f", scaled)
-			text = text:gsub("%.?0+$", "")
-			return sign .. text .. entry.suffix
-		end
-	end
-
-	return sign .. tostring(math.floor(absValue + 0.5))
+local function formatIncomeNumber(value)
+	return CurrencyUtil.formatIncomeExact(value)
 end
 
 local function formatMultiplier(value)
@@ -980,57 +955,20 @@ local function getCrewMemberLevelForStand(standName)
 	return math.max(1, math.floor(tonumber(levelValue and levelValue.Value) or 1))
 end
 
-local function getClientShipUpgradeLevel()
-	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
-	local plotUpgradeValue = hiddenLeaderstats and hiddenLeaderstats:FindFirstChild("PlotUpgrade")
-	local rawLevel = plotUpgradeValue and plotUpgradeValue:IsA("ValueBase") and plotUpgradeValue.Value or 0
-
-	if PlotUpgradeConfig and PlotUpgradeConfig.ClampLevel then
-		return PlotUpgradeConfig.ClampLevel(rawLevel)
-	end
-
-	return math.max(0, math.floor(tonumber(rawLevel) or 0))
-end
-
-local function hasClientCaptainAssigned()
-	local ship = player:FindFirstChild("Ship")
-	local captainSlot = ship and ship:FindFirstChild("CaptainSlot")
-	if not captainSlot then
-		return false
-	end
-
-	for _, fieldName in ipairs({ "CrewMemberInstanceId", "InstanceId", "CrewInstanceId", "CrewMemberName", "CrewMemberId" }) do
-		local valueObject = captainSlot:FindFirstChild(fieldName)
-		if valueObject and valueObject:IsA("ValueBase") and tostring(valueObject.Value or "") ~= "" then
-			return true
-		end
-	end
-
-	return false
-end
-
-local function getCrewMemberIncomePerTick(standName, crewMemberName)
-	local info = getCrewInfo(crewMemberName)
-	local baseIncome = tonumber(info and info.Income) or 0
-	if baseIncome <= 0 then
-		return 0
-	end
-
-	local level = getCrewMemberLevelForStand(standName)
-	local levelMultiplier = getStandLevelMultiplier(level)
-	local shipUpgradeLevel = getClientShipUpgradeLevel()
-	local captainMultiplier = 1
-	if hasClientCaptainAssigned() and PlotUpgradeConfig and PlotUpgradeConfig.GetCaptainBonusMultiplier then
-		captainMultiplier = tonumber(PlotUpgradeConfig.GetCaptainBonusMultiplier(shipUpgradeLevel)) or 1
-	end
-
-	return math.max(0, baseIncome * levelMultiplier * captainMultiplier)
-end
-
 local incomeStatusDisplayMetadata = nil
 local incomeStatusDisplayMetadataExpiresAt = 0
+local incomeStatusIncomeSnapshot = nil
+local incomeStatusIncomeSnapshotExpiresAt = 0
+local incomeStatusIncomeSnapshotStale = true
+local incomeStatusSnapshotRefreshPending = false
 local incomeStatusDisplayMetadataRequestInFlight = false
 local incomeStatusDisplayMetadataNextRefreshAt = 0
+local incomeStatusRequestSerial = 0
+
+local function markIncomeStatusIncomeSnapshotStale()
+	incomeStatusIncomeSnapshotStale = true
+	incomeStatusIncomeSnapshotExpiresAt = 0
+end
 
 local function getIncomeStatusDisplayMetadata(standName, crewMemberName)
 	if typeof(incomeStatusDisplayMetadata) ~= "table" or os.clock() >= incomeStatusDisplayMetadataExpiresAt then
@@ -1056,41 +994,119 @@ local function getIncomeStatusDisplayMetadata(standName, crewMemberName)
 	return descriptor
 end
 
+local function getIncomeStatusIncomeSnapshot()
+	if typeof(incomeStatusIncomeSnapshot) ~= "table" then
+		return nil
+	end
+
+	return incomeStatusIncomeSnapshot
+end
+
+local function isIncomeStatusIncomeSnapshotStale()
+	return typeof(incomeStatusIncomeSnapshot) ~= "table"
+		or incomeStatusIncomeSnapshotStale == true
+		or os.clock() >= incomeStatusIncomeSnapshotExpiresAt
+end
+
+local function getStandIncomeSnapshot(standName)
+	local snapshot = getIncomeStatusIncomeSnapshot()
+	local stands = snapshot and snapshot.Stands
+	if typeof(stands) ~= "table" then
+		return nil
+	end
+
+	local entry = stands[tostring(standName or "")]
+	return if typeof(entry) == "table" then entry else nil
+end
+
+local function getCaptainIncomeSnapshot()
+	local snapshot = getIncomeStatusIncomeSnapshot()
+	local captain = snapshot and snapshot.Captain
+	return if typeof(captain) == "table" then captain else nil
+end
+
+local function getCaptainLogSnapshot()
+	local snapshot = getIncomeStatusIncomeSnapshot()
+	local captainLog = snapshot and snapshot.CaptainLog
+	if typeof(captainLog) ~= "table" or typeof(captainLog.Rows) ~= "table" then
+		return nil
+	end
+
+	return captainLog
+end
+
+local function getSnapshotClaimReadyAmount(snapshotEntry, rawIncomeToCollect)
+	local raw = math.max(0, tonumber(rawIncomeToCollect) or 0)
+	if typeof(snapshotEntry) ~= "table" then
+		return math.floor(raw)
+	end
+
+	local claimReadyAmount = tonumber(snapshotEntry.ClaimReadyAmount)
+	if claimReadyAmount then
+		return math.max(0, math.floor(claimReadyAmount))
+	end
+
+	return math.floor(raw)
+end
+
 local function refreshIncomeStatusDisplayMetadata(reason, force)
-	if incomeStatusDisplayMetadataRequestInFlight or not incomeStatusDisplayMetadataRemote or destroyed then
+	if
+		incomeStatusDisplayMetadataRequestInFlight
+		or incomeStatusSnapshotRefreshPending
+		or not incomeStatusDisplayMetadataRemote
+		or destroyed
+	then
 		return
 	end
 
 	local now = os.clock()
-	if force ~= true and now < incomeStatusDisplayMetadataNextRefreshAt then
+	if now < incomeStatusDisplayMetadataNextRefreshAt then
 		return
 	end
 
-	incomeStatusDisplayMetadataNextRefreshAt = now + INCOME_STATUS_METADATA_RETRY_SECONDS
+	incomeStatusDisplayMetadataNextRefreshAt = now
+		+ (if force == true then INCOME_STATUS_SNAPSHOT_REFRESH_SECONDS else INCOME_STATUS_METADATA_RETRY_SECONDS)
 	incomeStatusDisplayMetadataRequestInFlight = true
+	incomeStatusSnapshotRefreshPending = true
+	incomeStatusRequestSerial += 1
+	local requestSerial = incomeStatusRequestSerial
 
 	task.spawn(function()
 		local ok, response = pcall(function()
 			return incomeStatusDisplayMetadataRemote:InvokeServer(reason or "captain_log")
 		end)
 		incomeStatusDisplayMetadataRequestInFlight = false
+		incomeStatusSnapshotRefreshPending = false
 
-		if destroyed then
+		if destroyed or requestSerial ~= incomeStatusRequestSerial then
 			return
 		end
 
 		if not ok or typeof(response) ~= "table" or response.Ready ~= true or typeof(response.Metadata) ~= "table" then
-			incomeStatusDisplayMetadata = nil
-			incomeStatusDisplayMetadataExpiresAt = 0
+			incomeStatusIncomeSnapshotStale = true
 			task.delay(INCOME_STATUS_METADATA_RETRY_SECONDS, function()
-				refreshIncomeStatusDisplayMetadata("retry", true)
+				if isIncomeStatusIncomeSnapshotStale() then
+					refreshIncomeStatusDisplayMetadata("retry", true)
+				end
 			end)
 			return
 		end
 
 		incomeStatusDisplayMetadata = response.Metadata
+		if typeof(response.IncomeSnapshot) == "table" then
+			incomeStatusIncomeSnapshot = response.IncomeSnapshot
+			incomeStatusIncomeSnapshotStale = false
+		else
+			incomeStatusIncomeSnapshotStale = true
+		end
 		local cacheSeconds = math.clamp(tonumber(response.CacheSeconds) or 15, 1, 60)
+		local snapshotCacheSeconds = math.clamp(
+			tonumber(response.IncomeSnapshotCacheSeconds) or INCOME_STATUS_SNAPSHOT_FALLBACK_CACHE_SECONDS,
+			0.25,
+			5
+		)
 		incomeStatusDisplayMetadataExpiresAt = os.clock() + cacheSeconds
+		incomeStatusIncomeSnapshotExpiresAt = os.clock() + snapshotCacheSeconds
 		if scheduleRender then
 			scheduleRender()
 		end
@@ -1237,7 +1253,7 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	if currentCaptain and currentCaptain.Unlocked and not (previousCaptain and previousCaptain.Unlocked) then
 		pushLine(string.format("Captain's Spot unlocked (+%d%% income)", currentBonus), "captain_unlock")
 	elseif currentBonus > previousBonus then
-		pushLine(string.format("Captain bonus: +%d%% -> +%d%%", previousBonus, currentBonus), "captain_bonus")
+		pushLine(string.format("Captain Slot bonus: +%d%% -> +%d%%", previousBonus, currentBonus), "captain_bonus")
 	end
 
 	if isMaxLevel then
@@ -1770,6 +1786,281 @@ local function buildTitlesData(query)
 	}
 end
 
+local function readValueOrAttribute(parent, key)
+	if not parent then
+		return nil
+	end
+
+	local attributeValue = parent:GetAttribute(key)
+	if attributeValue ~= nil then
+		return attributeValue
+	end
+
+	return readChildValue(parent, key)
+end
+
+local function firstCaptainField(parent, fieldNames)
+	for _, fieldName in ipairs(fieldNames) do
+		local value = tostring(readValueOrAttribute(parent, fieldName) or "")
+		if value ~= "" then
+			return value
+		end
+	end
+
+	return ""
+end
+
+local function getCrewInventoryInstanceFolder(instanceId)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" then
+		return nil
+	end
+
+	local inventoryFolder = player:FindFirstChild("CrewMemberInventory")
+	local byIdFolder = inventoryFolder and inventoryFolder:FindFirstChild("ById")
+	local instanceFolder = byIdFolder and byIdFolder:FindFirstChild(instanceId)
+	if instanceFolder then
+		return instanceFolder
+	end
+
+	return inventoryFolder and inventoryFolder:FindFirstChild(instanceId) or nil
+end
+
+local function getCaptainLogAssignment(captainSlot)
+	if not captainSlot then
+		return "", "", 1
+	end
+
+	local instanceId = firstCaptainField(captainSlot, { "CrewMemberInstanceId", "InstanceId", "CrewInstanceId" })
+	local crewMemberName = firstCaptainField(captainSlot, {
+		"CrewMemberName",
+		"CrewMemberId",
+		"StorageName",
+		"LegacyStorageName",
+	})
+	local level = math.max(
+		1,
+		math.floor(tonumber(readValueOrAttribute(captainSlot, "Level") or readValueOrAttribute(captainSlot, "StandLevel")) or 1)
+	)
+
+	local instanceFolder = getCrewInventoryInstanceFolder(instanceId)
+	if instanceFolder then
+		if crewMemberName == "" then
+			crewMemberName = firstCaptainField(instanceFolder, {
+				"StorageName",
+				"CrewMemberId",
+				"CrewMemberName",
+				"LegacyStorageName",
+			})
+		end
+
+		level = math.max(1, math.floor(tonumber(readValueOrAttribute(instanceFolder, "Level")) or level))
+	end
+
+	return crewMemberName, instanceId, level
+end
+
+local function buildCaptainLogEntry(shipFolder)
+	local captainSlot = shipFolder and shipFolder:FindFirstChild("CaptainSlot")
+	local crewMemberName, _, captainLevel = getCaptainLogAssignment(captainSlot)
+	if crewMemberName == "" then
+		return nil, 0
+	end
+
+	local rawIncomeToCollect = math.max(0, tonumber(readValueOrAttribute(captainSlot, "IncomeToCollect")) or 0)
+	local incomeSnapshot = getCaptainIncomeSnapshot()
+	local claimReadyAmount = getSnapshotClaimReadyAmount(incomeSnapshot, rawIncomeToCollect)
+	local incomePerTick = math.max(0, tonumber(incomeSnapshot and incomeSnapshot.IncomePerSecond) or 0)
+	local subtitle = getSubtitle(CREW_ITEM_KIND, crewMemberName)
+	local displayName = getDisplayName(CREW_ITEM_KIND, crewMemberName)
+	local modelPreview = getCrewModelPreviewDescriptor(crewMemberName)
+	local previewKind = nil
+	local previewName = nil
+	if modelPreview then
+		previewKind = CREW_ITEM_KIND
+		previewName = tostring(modelPreview.ModelName or "")
+	end
+
+	local staticPreviewImage = getStaticCrewPreviewImage(crewMemberName, nil, modelPreview, displayName)
+	local bounty = math.max(
+		0,
+		BountyResolver.ResolveCrewMemberBounty({
+			StorageName = crewMemberName,
+			Level = captainLevel,
+		})
+	)
+
+	return {
+		key = "Captain",
+		standName = "Captain's Spot",
+		crewMemberName = crewMemberName,
+		displayName = displayName,
+		subtitle = subtitle,
+		footer = string.format("Captain's Spot  |  %s Beli ready", formatIncomeNumber(claimReadyAmount)),
+		image = getIcon(CREW_ITEM_KIND, crewMemberName),
+		fallbackText = string.sub(string.upper(displayName), 1, 2),
+		previewKind = previewKind,
+		previewName = previewName,
+		staticPreviewImage = staticPreviewImage,
+		modelPreview = modelPreview,
+		accentColor = getAccentColor(CREW_ITEM_KIND, crewMemberName),
+		level = captainLevel,
+		bounty = bounty,
+		incomePerTick = incomePerTick,
+		collectable = claimReadyAmount,
+	}, claimReadyAmount
+end
+
+local function sortCaptainLogEntries(entries)
+	table.sort(entries, function(a, b)
+		local keyA = tostring(a.key or a.standName or "")
+		local keyB = tostring(b.key or b.standName or "")
+		if keyA == "Captain" or keyB == "Captain" then
+			return keyA == "Captain" and keyB ~= "Captain"
+		end
+
+		local slotA = tonumber(keyA)
+		local slotB = tonumber(keyB)
+		if slotA and slotB and slotA ~= slotB then
+			return slotA < slotB
+		end
+		if slotA ~= nil or slotB ~= nil then
+			return slotA ~= nil
+		end
+
+		return keyA < keyB
+	end)
+end
+
+local function buildCaptainLogEntryFromSnapshotRow(row)
+	if typeof(row) ~= "table" then
+		return nil
+	end
+
+	local rowType = tostring(row.RowType or row.Type or "")
+	local slotKey = tostring(row.SlotKey or row.Key or "")
+	local key = tostring(row.Key or slotKey or row.StandName or "")
+	local isCaptain = rowType == "Captain" or key == "Captain" or slotKey == "Captain"
+	if isCaptain then
+		key = "Captain"
+	elseif key == "" then
+		return nil
+	end
+
+	local standName = tostring(row.StandName or row.SlotName or slotKey or key)
+	if standName == "" then
+		standName = key
+	end
+	if isCaptain then
+		standName = "Captain's Spot"
+	end
+
+	local crewMemberName = tostring(
+		row.CrewMemberName
+			or row.CrewMemberId
+			or row.StorageName
+			or row.LegacyStorageName
+			or ""
+	)
+	if crewMemberName == "" then
+		return nil
+	end
+
+	local standLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or 1))
+	local claimReadyAmount = math.max(0, math.floor(tonumber(row.ClaimReadyAmount) or 0))
+	local incomePerTick = math.max(0, tonumber(row.IncomePerSecond) or 0)
+	local subtitle = getSubtitle(CREW_ITEM_KIND, crewMemberName)
+	local displayName = getDisplayName(CREW_ITEM_KIND, crewMemberName)
+	local incomeDisplayMetadata = if isCaptain then nil else getIncomeStatusDisplayMetadata(slotKey, crewMemberName)
+	if incomeDisplayMetadata ~= nil then
+		displayName = tostring(incomeDisplayMetadata.DisplayName)
+	end
+
+	local modelPreview = getCrewModelPreviewDescriptor(crewMemberName)
+	local previewKind = nil
+	local previewName = nil
+	if modelPreview then
+		previewKind = CREW_ITEM_KIND
+		previewName = tostring(modelPreview.ModelName or "")
+	end
+
+	local staticPreviewImage = getStaticCrewPreviewImage(crewMemberName, nil, modelPreview, displayName)
+	local bounty = math.max(
+		0,
+		BountyResolver.ResolveCrewMemberBounty({
+			StorageName = crewMemberName,
+			Level = standLevel,
+		})
+	)
+
+	return {
+		key = key,
+		standName = standName,
+		crewMemberName = crewMemberName,
+		displayName = displayName,
+		subtitle = subtitle,
+		footer = string.format("%s  |  %s Beli ready", standName, formatIncomeNumber(claimReadyAmount)),
+		image = getIcon(CREW_ITEM_KIND, crewMemberName),
+		fallbackText = string.sub(string.upper(displayName), 1, 2),
+		previewKind = previewKind,
+		previewName = previewName,
+		staticPreviewImage = staticPreviewImage,
+		modelPreview = modelPreview,
+		accentColor = getAccentColor(CREW_ITEM_KIND, crewMemberName),
+		level = standLevel,
+		bounty = bounty,
+		incomePerTick = incomePerTick,
+		collectable = claimReadyAmount,
+	}
+end
+
+local function buildCaptainLogDataFromSnapshot(captainLogSnapshot, query)
+	local entries = {}
+	local validRowCount = 0
+	local totalCollectable = tonumber(captainLogSnapshot.TotalClaimReadyAmount)
+
+	if totalCollectable == nil then
+		totalCollectable = 0
+		for _, row in ipairs(captainLogSnapshot.Rows) do
+			if typeof(row) == "table" then
+				totalCollectable += math.max(0, math.floor(tonumber(row.ClaimReadyAmount) or 0))
+			end
+		end
+	end
+
+	for _, row in ipairs(captainLogSnapshot.Rows) do
+		local ok, entry = pcall(buildCaptainLogEntryFromSnapshotRow, row)
+		if ok and entry then
+			validRowCount += 1
+			if matchesQuery(entry, query) then
+				entries[#entries + 1] = entry
+			end
+		end
+	end
+
+	sortCaptainLogEntries(entries)
+
+	local placedCount = math.max(
+		validRowCount,
+		math.floor(tonumber(captainLogSnapshot.PlacedCount or captainLogSnapshot.TotalCount) or 0)
+	)
+	local totalCount = math.max(
+		placedCount,
+		math.floor(tonumber(captainLogSnapshot.TotalCount or captainLogSnapshot.PlacedCount) or 0)
+	)
+
+	return {
+		entries = entries,
+		filteredCount = #entries,
+		placedCount = placedCount,
+		totalCollectable = math.max(0, math.floor(totalCollectable)),
+		totalCount = totalCount,
+		totalIncomePerSecond = math.max(0, tonumber(captainLogSnapshot.TotalIncomePerSecond) or 0),
+		totalsScope = "all",
+		source = "server",
+	}
+end
+
 local function buildCaptainLogData(query)
 	local entries = {}
 	local totalCollectable = 0
@@ -1791,7 +2082,12 @@ local function buildCaptainLogData(query)
 			standNames[child.Name] = true
 		end
 	end
-	refreshIncomeStatusDisplayMetadata("captain_log")
+	refreshIncomeStatusDisplayMetadata("captain_log", isIncomeStatusIncomeSnapshotStale())
+
+	local captainLogSnapshot = getCaptainLogSnapshot()
+	if captainLogSnapshot then
+		return buildCaptainLogDataFromSnapshot(captainLogSnapshot, query)
+	end
 
 	for standName in pairs(standNames) do
 		local ok, entry, collectable = pcall(function()
@@ -1808,8 +2104,10 @@ local function buildCaptainLogData(query)
 			end
 
 			local standLevel = getCrewMemberLevelForStand(standName)
-			local incomePerTick = getCrewMemberIncomePerTick(standName, crewMemberName)
-			local incomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
+			local rawIncomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
+			local incomeSnapshot = getStandIncomeSnapshot(standName)
+			local incomePerTick = math.max(0, tonumber(incomeSnapshot and incomeSnapshot.IncomePerSecond) or 0)
+			local claimReadyAmount = getSnapshotClaimReadyAmount(incomeSnapshot, rawIncomeToCollect)
 			local subtitle = getSubtitle(CREW_ITEM_KIND, crewMemberName)
 			local displayName = getDisplayName(CREW_ITEM_KIND, crewMemberName)
 			local modelPreview = getCrewModelPreviewDescriptor(crewMemberName)
@@ -1838,7 +2136,7 @@ local function buildCaptainLogData(query)
 				crewMemberName = crewMemberName,
 				displayName = displayName,
 				subtitle = subtitle,
-				footer = string.format("%s  |  %s Beli ready", standName, formatNumber(incomeToCollect)),
+				footer = string.format("%s  |  %s Beli ready", standName, formatIncomeNumber(claimReadyAmount)),
 				image = getIcon(CREW_ITEM_KIND, crewMemberName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				previewKind = previewKind,
@@ -1849,10 +2147,10 @@ local function buildCaptainLogData(query)
 				level = standLevel,
 				bounty = bounty,
 				incomePerTick = incomePerTick,
-				collectable = incomeToCollect,
+				collectable = claimReadyAmount,
 			}
 
-			return nextEntry, incomeToCollect
+			return nextEntry, claimReadyAmount
 		end)
 
 		if ok and entry then
@@ -1864,28 +2162,16 @@ local function buildCaptainLogData(query)
 		end
 	end
 
-	table.sort(entries, function(a, b)
-		local rankA = RARITY_ORDER[tostring(a.subtitle or "")] or 0
-		local rankB = RARITY_ORDER[tostring(b.subtitle or "")] or 0
-		if rankA ~= rankB then
-			return rankA > rankB
+	local captainEntry, captainCollectable = buildCaptainLogEntry(shipFolder)
+	if captainEntry then
+		totalPlaced += 1
+		totalCollectable += captainCollectable or 0
+		if matchesQuery(captainEntry, query) then
+			entries[#entries + 1] = captainEntry
 		end
-		local nameA = string.lower(tostring(a.displayName or ""))
-		local nameB = string.lower(tostring(b.displayName or ""))
-		if nameA ~= nameB then
-			return nameA < nameB
-		end
-		if (a.level or 0) ~= (b.level or 0) then
-			return (a.level or 0) > (b.level or 0)
-		end
-		if a.collectable ~= b.collectable then
-			return (a.collectable or 0) > (b.collectable or 0)
-		end
-		if a.incomePerTick ~= b.incomePerTick then
-			return (a.incomePerTick or 0) > (b.incomePerTick or 0)
-		end
-		return tostring(a.standName) < tostring(b.standName)
-	end)
+	end
+
+	sortCaptainLogEntries(entries)
 
 	return {
 		entries = entries,
@@ -1893,6 +2179,8 @@ local function buildCaptainLogData(query)
 		placedCount = totalPlaced,
 		totalCollectable = totalCollectable,
 		totalCount = totalPlaced,
+		totalsScope = "all",
+		source = "fallback",
 	}
 end
 
@@ -2306,6 +2594,14 @@ local function bindShipDataTracking()
 				markCanonicalChestCountsDirty()
 				syncChestsFromCanonicalSources(true)
 			end
+		if dataRoot.Name == "Ship"
+				or dataRoot.Name == "CrewMemberIncome"
+				or dataRoot.Name == "CrewMemberInventory"
+				or dataRoot.Name == "leaderstats"
+				or dataRoot.Name == "Potions"
+			then
+				markIncomeStatusIncomeSnapshotStale()
+			end
 			scheduleRender()
 		end
 
@@ -2367,10 +2663,12 @@ local function bindShipDataTracking()
 
 	local watchedRoots = {
 		Bounty = true,
+		CrewMemberInventory = true,
 		CrewMemberQuickSlots = true,
 		ChestInventory = true,
 		CrewMemberIncome = true,
 		Inventory = true,
+		Potions = true,
 		Ship = true,
 		Titles = true,
 		leaderstats = true,
@@ -2967,42 +3265,43 @@ trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
 	scheduleRender()
 end, cleanupConnections)
 
-local snapshotRequestInFlight = false
-local lastSnapshotRequestAt = 0
-local snapshotRequestQueued = false
-local queuedSnapshotReason = nil
-local SNAPSHOT_UPDATE_DEBOUNCE_SECONDS = 0.15
-
-local function isTransientSnapshotInvokeError(err)
-	return tostring(err):find("cannot resume non%-suspended coroutine") ~= nil
-end
+local inventorySnapshotRequestState = {
+	InFlight = false,
+	LastRequestAt = 0,
+	Queued = false,
+	QueuedReason = nil,
+	DebounceSeconds = 0.15,
+	IsTransientInvokeError = function(err)
+		return tostring(err):find("cannot resume non%-suspended coroutine") ~= nil
+	end,
+}
 
 requestInventorySnapshot = function(reason)
-	if snapshotRequestInFlight or not snapshotRemote or destroyed then
+	if inventorySnapshotRequestState.InFlight or not snapshotRemote or destroyed then
 		return
 	end
 
 	local now = os.clock()
-	if (now - lastSnapshotRequestAt) < 1 then
+	if (now - inventorySnapshotRequestState.LastRequestAt) < 1 then
 		return
 	end
 
-	lastSnapshotRequestAt = now
-	snapshotRequestInFlight = true
+	inventorySnapshotRequestState.LastRequestAt = now
+	inventorySnapshotRequestState.InFlight = true
 	inventorySnapshotDebug("requested", "reason", tostring(reason))
 
 	task.spawn(function()
 		local ok, snapshot = pcall(function()
 			return snapshotRemote:InvokeServer()
 		end)
-		snapshotRequestInFlight = false
+		inventorySnapshotRequestState.InFlight = false
 
 		if destroyed then
 			return
 		end
 
 		if not ok then
-			if isTransientSnapshotInvokeError(snapshot) and reason ~= "retryTransientInvoke" then
+			if inventorySnapshotRequestState.IsTransientInvokeError(snapshot) and reason ~= "retryTransientInvoke" then
 				task.delay(1.25, function()
 					requestInventorySnapshot("retryTransientInvoke")
 				end)
@@ -3029,18 +3328,18 @@ scheduleInventorySnapshotRequest = function(reason)
 		return
 	end
 
-	queuedSnapshotReason = tostring(reason or "queued")
-	if snapshotRequestQueued then
+	inventorySnapshotRequestState.QueuedReason = tostring(reason or "queued")
+	if inventorySnapshotRequestState.Queued then
 		return
 	end
 
-	snapshotRequestQueued = true
-	task.delay(SNAPSHOT_UPDATE_DEBOUNCE_SECONDS, function()
-		snapshotRequestQueued = false
+	inventorySnapshotRequestState.Queued = true
+	task.delay(inventorySnapshotRequestState.DebounceSeconds, function()
+		inventorySnapshotRequestState.Queued = false
 		if destroyed then
 			return
 		end
-		requestInventorySnapshot(queuedSnapshotReason or reason)
+		requestInventorySnapshot(inventorySnapshotRequestState.QueuedReason or reason)
 	end)
 end
 

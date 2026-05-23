@@ -1,4 +1,6 @@
 local Players = game:GetService("Players")
+Players.CharacterAutoLoads = false
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
@@ -20,8 +22,10 @@ local DATA_READY_TIMEOUT_SECONDS = 20
 local UPGRADE_VALUE_TIMEOUT_SECONDS = 20
 local CHARACTER_SPAWN_TIMEOUT_SECONDS = 10
 local RESET_REFRESH_WAIT_TIMEOUT_SECONDS = 8
-local SHIP_SPAWN_RETRY_COUNT = 4
-local SHIP_SPAWN_RETRY_DELAY_SECONDS = 0.5
+local SHIP_SPAWN_RETRY_COUNT = 12
+local SHIP_SPAWN_RETRY_DELAY_SECONDS = 0.4
+local SHIP_READY_RETRY_COUNT = 6
+local SHIP_READY_RETRY_DELAY_SECONDS = 0.75
 local RUNTIME_SPAWN_LOCATION_ATTRIBUTE = "ShipRuntimeSpawnLocation"
 
 local runtimeStateByPlayer = {}
@@ -33,6 +37,11 @@ local ATTR = ShipVisuals.Attributes
 local RUNTIME_POINTS = ShipVisuals.RuntimePoints or {}
 local RUNTIME_POINTS_FOLDER_NAME = tostring(RUNTIME_POINTS.FolderName or "ShipRuntimePoints")
 local WORLD_UP = Vector3.new(0, 1, 0)
+
+local function getRuntimeSpawnLocationName()
+	local spawnConfig = RUNTIME_POINTS.Spawn or {}
+	return tostring(spawnConfig.Name or "ShipSpawnPoint")
+end
 
 local function warnOnce(key, message, ...)
 	if warnedKeys[key] then
@@ -51,6 +60,10 @@ local function formatPlayer(player)
 	return string.format("%s(%d)", player.Name, player.UserId)
 end
 
+local function namesMatchIgnoringCase(left, right)
+	return tostring(left or ""):lower() == tostring(right or ""):lower()
+end
+
 local function getRuntimeState(player)
 	local state = runtimeStateByPlayer[player]
 	if not state then
@@ -59,6 +72,7 @@ local function getRuntimeState(player)
 			connections = {},
 			position = nil,
 			positionIndex = nil,
+			respawnRequestId = 0,
 			ship = nil,
 		}
 		runtimeStateByPlayer[player] = state
@@ -605,13 +619,33 @@ local function findMarkerByName(activeShip, markerName)
 		return nil
 	end
 
+	markerName = tostring(markerName or "")
+	if markerName == "" then
+		return nil
+	end
+
 	local directMarker = activeShip:FindFirstChild(markerName, true)
-	if directMarker and not isRuntimePointDescendant(activeShip, directMarker) then
+	if directMarker
+		and not isRuntimePointDescendant(activeShip, directMarker)
+		and getInstanceCFrame(directMarker) ~= nil
+	then
 		return directMarker
 	end
 
 	for _, descendant in ipairs(activeShip:GetDescendants()) do
-		if descendant.Name == markerName and not isRuntimePointDescendant(activeShip, descendant) then
+		if descendant.Name == markerName
+			and not isRuntimePointDescendant(activeShip, descendant)
+			and getInstanceCFrame(descendant) ~= nil
+		then
+			return descendant
+		end
+	end
+
+	for _, descendant in ipairs(activeShip:GetDescendants()) do
+		if namesMatchIgnoringCase(descendant.Name, markerName)
+			and not isRuntimePointDescendant(activeShip, descendant)
+			and getInstanceCFrame(descendant) ~= nil
+		then
 			return descendant
 		end
 	end
@@ -625,7 +659,7 @@ local function findMarkerCFrame(activeShip, markerNames)
 		local marker = findMarkerByName(activeShip, markerName)
 		local markerCFrame = getInstanceCFrame(marker)
 		if markerCFrame then
-			return markerCFrame, marker, markerName
+			return markerCFrame, marker, marker.Name
 		end
 	end
 
@@ -707,7 +741,7 @@ end
 
 local function warnForRuntimePointMarker(activeShip, pointKey, pointConfig, markerName)
 	local preferredMarkerName = tostring(pointConfig.PreferredMarkerName or "")
-	if preferredMarkerName == "" or markerName == preferredMarkerName then
+	if preferredMarkerName == "" or markerName == preferredMarkerName or namesMatchIgnoringCase(markerName, preferredMarkerName) then
 		return
 	end
 
@@ -722,6 +756,20 @@ local function warnForRuntimePointMarker(activeShip, pointKey, pointConfig, mark
 		preferredMarkerName,
 		pointName,
 		fallbackLabel
+	)
+end
+
+local function warnForMissingRequiredRuntimePointMarker(activeShip, pointKey, pointConfig)
+	local shipName = tostring(activeShip:GetAttribute(ATTR.ActiveModelName) or activeShip.Name)
+	local pointName = tostring(pointConfig.Name or pointKey)
+	local markerLabel = tostring(pointConfig.PreferredMarkerName or pointKey)
+
+	warnOnce(
+		string.format("missing_required_runtime_marker_%s_%s", shipName, tostring(pointKey)),
+		"[ShipRuntimeService] %s has no valid %s marker for %s; player spawning is blocked until the asset provides one.",
+		shipName,
+		markerLabel,
+		pointName
 	)
 end
 
@@ -749,6 +797,21 @@ local function resolveRuntimePoint(activeShip, pointKey, pointConfig)
 
 	warnForRuntimePointMarker(activeShip, pointKey, pointConfig, nil)
 	return nil, applyPointFacingCorrection(getBoundingBoxFallbackCFrame(activeShip, pointConfig), pointConfig, false)
+end
+
+local function resolveRequiredRuntimePoint(activeShip, pointKey, pointConfig)
+	local markerCFrame, marker, markerName = findMarkerCFrame(activeShip, pointConfig.MarkerNames)
+	if not markerCFrame then
+		warnForMissingRequiredRuntimePointMarker(activeShip, pointKey, pointConfig)
+		return nil, nil, "missing_ship_spawn_marker", {
+			ActiveShip = activeShip,
+			PointKey = pointKey,
+		}
+	end
+
+	warnForRuntimePointMarker(activeShip, pointKey, pointConfig, markerName)
+	local cframe = applyMarkerPointOffset(markerCFrame, pointConfig)
+	return marker, applyPointFacingCorrection(cframe, pointConfig, true)
 end
 
 local function resolveRuntimePointCFrame(activeShip, pointKey, pointConfig)
@@ -809,6 +872,18 @@ local function ensureRuntimeSpawnLocation(parent, name, cframe, size)
 	spawnLocation.Neutral = true
 
 	return spawnLocation
+end
+
+local function getRuntimeSpawnLocation(activeShip)
+	local folder = activeShip and activeShip:FindFirstChild(RUNTIME_POINTS_FOLDER_NAME)
+	local spawnLocation = folder and folder:FindFirstChild(getRuntimeSpawnLocationName())
+	if isRuntimeShipSpawnLocation(spawnLocation)
+		and spawnLocation:IsDescendantOf(activeShip)
+	then
+		return spawnLocation
+	end
+
+	return nil
 end
 
 local function getShipOwnerDisplayText(player)
@@ -964,12 +1039,26 @@ local function ensureRuntimePoints(player, activeShip)
 	local folder = getRuntimePointsFolder(activeShip)
 
 	local spawnConfig = RUNTIME_POINTS.Spawn or {}
+	local _, spawnCFrame, spawnReason, spawnDetails = resolveRequiredRuntimePoint(activeShip, "Spawn", spawnConfig)
+	if not spawnCFrame then
+		clearPlayerRespawnLocation(player, activeShip)
+		return nil, spawnReason or "missing_ship_spawn_marker", spawnDetails
+	end
+
 	local spawnPart = ensureRuntimeSpawnLocation(
 		folder,
-		tostring(spawnConfig.Name or "ShipSpawnPoint"),
-		resolveRuntimePointCFrame(activeShip, "Spawn", spawnConfig),
+		getRuntimeSpawnLocationName(),
+		spawnCFrame,
 		spawnConfig.Size or Vector3.new(4, 1, 4)
 	)
+	if not isRuntimeShipSpawnLocation(spawnPart) then
+		clearPlayerRespawnLocation(player, activeShip)
+		return nil, "invalid_runtime_spawn_location", {
+			ActiveShip = activeShip,
+			SpawnLocation = spawnPart,
+		}
+	end
+
 	player.RespawnLocation = spawnPart
 
 	ensureGroupRewardPoint(folder, activeShip)
@@ -1201,38 +1290,54 @@ local function shouldRetryShipTeleport(reason)
 		or reason == "missing_humanoid"
 end
 
-local function teleportPlayerToShipSpawnWithRetry(player, character, context, warnKeyPrefix)
-	task.spawn(function()
-		local lastReason = nil
+local function teleportPlayerToShipSpawnWithRetrySync(player, character, context)
+	local lastReason = nil
+	local lastDetails = nil
 
-		for attempt = 1, SHIP_SPAWN_RETRY_COUNT do
-			if player.Parent ~= Players or character.Parent == nil then
-				return
-			end
-
-			if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
-				CrewSlotAssignmentReconciler.WaitForResetToComplete(player, RESET_REFRESH_WAIT_TIMEOUT_SECONDS)
-			end
-
-			local ok, reason = ShipRuntimeService.TeleportPlayerToShip(player, character, context)
-			if ok or reason == "horo_projection" or reason == "dead" then
-				return
-			end
-
-			lastReason = reason
-			if not shouldRetryShipTeleport(reason) or attempt >= SHIP_SPAWN_RETRY_COUNT then
-				break
-			end
-
-			task.wait(SHIP_SPAWN_RETRY_DELAY_SECONDS * attempt)
+	for attempt = 1, SHIP_SPAWN_RETRY_COUNT do
+		if player.Parent ~= Players or character.Parent == nil or player.Character ~= character then
+			return false, "character_unavailable"
 		end
 
-		warnOnce(
-			string.format("%s_%d_%s", tostring(warnKeyPrefix or "ship_spawn_failed"), player.UserId, tostring(lastReason)),
-			"[ShipRuntimeService] Could not move %s to their active ship spawn after retries: %s.",
-			formatPlayer(player),
-			tostring(lastReason)
-		)
+		if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+			CrewSlotAssignmentReconciler.WaitForResetToComplete(player, RESET_REFRESH_WAIT_TIMEOUT_SECONDS)
+		end
+
+		local ok, reason, details = ShipRuntimeService.TeleportPlayerToShip(player, character, context)
+		if ok or reason == "horo_projection" then
+			return true, reason, details
+		end
+		if reason == "dead" then
+			return false, reason, details
+		end
+
+		lastReason = reason
+		lastDetails = details
+		if not shouldRetryShipTeleport(reason) or attempt >= SHIP_SPAWN_RETRY_COUNT then
+			break
+		end
+
+		task.wait(SHIP_SPAWN_RETRY_DELAY_SECONDS * attempt)
+	end
+
+	return false, lastReason, lastDetails
+end
+
+local function warnShipTeleportFailure(player, reason, warnKeyPrefix)
+	warnOnce(
+		string.format("%s_%d_%s", tostring(warnKeyPrefix or "ship_spawn_failed"), player.UserId, tostring(reason)),
+		"[ShipRuntimeService] Could not move %s to their active ship spawn after retries: %s.",
+		formatPlayer(player),
+		tostring(reason)
+	)
+end
+
+local function teleportPlayerToShipSpawnWithRetry(player, character, context, warnKeyPrefix)
+	task.spawn(function()
+		local ok, reason = teleportPlayerToShipSpawnWithRetrySync(player, character, context)
+		if not ok and reason ~= "dead" and reason ~= "character_unavailable" then
+			warnShipTeleportFailure(player, reason, warnKeyPrefix)
+		end
 	end)
 end
 
@@ -1286,9 +1391,17 @@ function ShipRuntimeService.GetPlayerSpawnCFrame(player)
 		return nil
 	end
 
-	local spawnConfig = RUNTIME_POINTS.Spawn or {}
-	local _, spawnCFrame = resolveRuntimePoint(activeShip, "Spawn", spawnConfig)
-	return spawnCFrame
+	local runtimeSpawnLocation = getRuntimeSpawnLocation(activeShip)
+	if runtimeSpawnLocation then
+		return runtimeSpawnLocation.CFrame
+	end
+
+	local runtimePoints = ensureRuntimePoints(player, activeShip)
+	if not runtimePoints or not runtimePoints.Spawn then
+		return nil
+	end
+
+	return runtimePoints.Spawn.CFrame
 end
 
 function ShipRuntimeService.TeleportPlayerToShip(player, targetCharacter, context)
@@ -1454,7 +1567,11 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		state.position = position
 		state.positionIndex = positionIndex
 
-		ensureRuntimePoints(player, currentShip)
+		local runtimePoints, runtimePointReason, runtimePointDetails = ensureRuntimePoints(player, currentShip)
+		if not runtimePoints then
+			return makeRefreshFailure(runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
+		end
+
 		local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, currentShip, upgradeLevel)
 		if not slotRefreshOk then
 			return makeRefreshFailure("slot_interaction_refresh_failed", {
@@ -1486,7 +1603,12 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	warnIfMissingWalkableCollision(clone, visual)
 	clone:PivotTo(position.CFrame)
 	clone.Parent = activeShips
-	ensureRuntimePoints(player, clone)
+
+	local runtimePoints, runtimePointReason, runtimePointDetails = ensureRuntimePoints(player, clone)
+	if not runtimePoints then
+		clone:Destroy()
+		return makeRefreshFailure(runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
+	end
 
 	destroyShips(existingShips)
 
@@ -1520,17 +1642,52 @@ local function characterNeedsLoad(player)
 	return humanoid ~= nil and humanoid.Health <= 0
 end
 
+local function ensureActiveShipSpawnReady(player, activeShip)
+	if not activeShip or not activeShip.Parent or not ShipRuntimeService.IsActiveShip(activeShip) then
+		return false, "active_ship_not_found"
+	end
+
+	local runtimePoints, runtimePointReason, runtimePointDetails = ensureRuntimePoints(player, activeShip)
+	if not runtimePoints or not runtimePoints.Spawn then
+		return false, runtimePointReason or "ship_spawn_not_ready", runtimePointDetails
+	end
+
+	local spawnLocation = runtimePoints.Spawn
+	if not isRuntimeShipSpawnLocation(spawnLocation) or not spawnLocation:IsDescendantOf(activeShip) then
+		clearPlayerRespawnLocation(player, activeShip)
+		return false, "invalid_runtime_spawn_location", {
+			ActiveShip = activeShip,
+			SpawnLocation = spawnLocation,
+		}
+	end
+
+	player.RespawnLocation = spawnLocation
+	return true, activeShip, {
+		ActiveShip = activeShip,
+		SpawnLocation = spawnLocation,
+		SpawnCFrame = spawnLocation.CFrame,
+	}
+end
+
 local function ensureShipReadyForCharacterLoad(player, reason)
 	local activeShip = ShipRuntimeService.GetActiveShip(player)
 	if activeShip then
-		return true, activeShip
+		local spawnReady, spawnResult, spawnDetails = ensureActiveShipSpawnReady(player, activeShip)
+		if spawnReady then
+			return true, spawnResult, spawnDetails
+		end
 	end
 
 	local refreshed, result, details = ShipRuntimeService.RefreshPlayerShip(player, {
 		Reason = reason or "character_load",
 	})
 	if refreshed == true then
-		return true, result, details
+		local spawnReady, spawnResult, spawnDetails = ensureActiveShipSpawnReady(player, result)
+		if spawnReady then
+			return true, spawnResult, spawnDetails
+		end
+
+		return false, spawnResult, spawnDetails
 	end
 
 	if result == "reset_in_progress" then
@@ -1539,17 +1696,32 @@ local function ensureShipReadyForCharacterLoad(player, reason)
 			Reason = tostring(reason or "character_load") .. "_after_reset",
 		})
 		if refreshed == true then
-			return true, result, details
+			local spawnReady, spawnResult, spawnDetails = ensureActiveShipSpawnReady(player, result)
+			if spawnReady then
+				return true, spawnResult, spawnDetails
+			end
+
+			return false, spawnResult, spawnDetails
 		end
 	end
 
 	return false, result, details
 end
 
-local function loadPlayerCharacterAtShipSpawn(player, reason)
-	task.spawn(function()
+local function shouldRetryShipReadyFailure(reason)
+	return reason ~= "invalid_player" and reason ~= "player_left"
+end
+
+local function waitForShipSpawnReady(player, reason, options)
+	local retryCount = math.max(1, math.floor(tonumber(options.ReadyRetryCount) or SHIP_READY_RETRY_COUNT))
+	local retryDelay = math.max(0.05, tonumber(options.ReadyRetryDelay) or SHIP_READY_RETRY_DELAY_SECONDS)
+	local lastReason = nil
+	local lastDetails = nil
+	local warnedDelay = false
+
+	for attempt = 1, retryCount do
 		if player.Parent ~= Players then
-			return
+			return false, "player_left"
 		end
 
 		if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
@@ -1557,33 +1729,122 @@ local function loadPlayerCharacterAtShipSpawn(player, reason)
 		end
 
 		local shipReady, result, details = ensureShipReadyForCharacterLoad(player, reason)
-		if not shipReady then
+		if shipReady then
+			return true, result, details
+		end
+
+		lastReason = result
+		lastDetails = details
+		if not warnedDelay then
+			warnedDelay = true
 			warnOnce(
-				"load_without_ship_" .. tostring(player.UserId) .. "_" .. tostring(result),
-				"[ShipRuntimeService] Loading %s without a ready ship spawn because ship refresh failed: %s.",
+				"respawn_delayed_" .. tostring(player.UserId) .. "_" .. tostring(reason) .. "_" .. tostring(result),
+				"[ShipRuntimeService] Respawn for %s is delayed because their ship spawn is not ready: %s.",
 				formatPlayer(player),
 				tostring(result or (details and details.Reason) or "unknown_error")
 			)
 		end
 
-		local character = player.Character
-		if character and character.Parent and not characterNeedsLoad(player) then
-			teleportPlayerToShipSpawnWithRetry(player, character, reason or "character_load", "character_load_spawn_failed")
-			return
+		if not shouldRetryShipReadyFailure(result) or attempt >= retryCount then
+			break
 		end
 
-		local ok, loadError = pcall(function()
-			player:LoadCharacter()
-		end)
-		if not ok then
-			warnOnce(
-				"load_character_failed_" .. tostring(player.UserId),
-				"[ShipRuntimeService] Failed to load character for %s: %s.",
-				formatPlayer(player),
-				tostring(loadError)
-			)
+		task.wait(retryDelay * attempt)
+	end
+
+	return false, lastReason, lastDetails
+end
+
+local function isLatestRespawnRequest(player, requestId)
+	local state = runtimeStateByPlayer[player]
+	return state ~= nil and state.respawnRequestId == requestId
+end
+
+local function respawnPlayerAtShipSync(player, reason, options, requestId)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local respawnReason = tostring(reason or options.Reason or "ship_respawn")
+	local shipReady, result, details = waitForShipSpawnReady(player, respawnReason, options)
+	if requestId and not isLatestRespawnRequest(player, requestId) then
+		return false, "superseded"
+	end
+
+	if not shipReady then
+		warnOnce(
+			"respawn_without_ship_blocked_"
+				.. tostring(player.UserId)
+				.. "_"
+				.. tostring(respawnReason)
+				.. "_"
+				.. tostring(result),
+			"[ShipRuntimeService] Blocked respawn for %s because no ready ship spawn was available after controlled retries: %s.",
+			formatPlayer(player),
+			tostring(result or (details and details.Reason) or "unknown_error")
+		)
+		return false, result or "ship_spawn_not_ready", details
+	end
+
+	local character = player.Character
+	if character and character.Parent and not characterNeedsLoad(player) then
+		local moved, moveReason, moveDetails = teleportPlayerToShipSpawnWithRetrySync(player, character, respawnReason)
+		if requestId and not isLatestRespawnRequest(player, requestId) then
+			return false, "superseded"
 		end
+
+		if moved then
+			return true, moveReason or "teleported", moveDetails
+		end
+
+		if moveReason == "character_unavailable" and player.Character ~= character then
+			return false, moveReason, moveDetails
+		elseif moveReason ~= "dead" and moveReason ~= "character_unavailable" then
+			warnShipTeleportFailure(player, moveReason, "character_load_spawn_failed")
+			return false, moveReason, moveDetails
+		end
+	end
+
+	local ok, loadError = pcall(function()
+		player:LoadCharacter()
 	end)
+	if not ok then
+		warnOnce(
+			"load_character_failed_" .. tostring(player.UserId),
+			"[ShipRuntimeService] Failed to load character for %s: %s.",
+			formatPlayer(player),
+			tostring(loadError)
+		)
+		return false, "load_character_failed"
+	end
+
+	return true, "loaded"
+end
+
+function ShipRuntimeService.RespawnPlayerAtShip(player, reason, options)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local state = getRuntimeState(player)
+	state.respawnRequestId = (tonumber(state.respawnRequestId) or 0) + 1
+	local requestId = state.respawnRequestId
+
+	if options.Async == false then
+		return respawnPlayerAtShipSync(player, reason, options, requestId)
+	end
+
+	task.spawn(function()
+		respawnPlayerAtShipSync(player, reason, options, requestId)
+	end)
+
+	return true, "queued"
+end
+
+local function loadPlayerCharacterAtShipSpawn(player, reason)
+	return ShipRuntimeService.RespawnPlayerAtShip(player, reason)
 end
 
 local function waitForUpgradeValue(player, timeoutSeconds)
@@ -1708,7 +1969,7 @@ local function attachCharacterSpawnHandler(player)
 				return
 			end
 
-			teleportPlayerToShipSpawnWithRetry(player, character, "character_spawn", "spawn_failed")
+			ShipRuntimeService.RespawnPlayerAtShip(player, "character_spawn")
 		end)
 	end
 

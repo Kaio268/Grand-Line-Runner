@@ -9,6 +9,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local Responsive = require(script.Parent:WaitForChild("Responsive"))
 
 local e = React.createElement
@@ -95,6 +96,10 @@ local function formatNumber(value)
 	end
 
 	return sign .. tostring(math.floor(absValue + 0.5))
+end
+
+local function formatRateNumber(value)
+	return CurrencyUtil.formatIncomeExact(tonumber(value) or 0)
 end
 
 local function formatLeaderboardRank(rank)
@@ -2491,7 +2496,7 @@ local function captainsLogRow(props)
 			Text = string.format(
 				"Bounty: %s  |  %s Beli ready",
 				formatNumber(entry.bounty or 0),
-				formatNumber(entry.collectable or 0)
+				CurrencyUtil.formatIncomeExact(entry.collectable or 0)
 			),
 			TextColor3 = accent,
 			TextSize = 12,
@@ -2517,7 +2522,7 @@ local function captainsLogRow(props)
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.new(1, -18, 33 / 88, 0),
 			Size = UDim2.fromOffset(180, 30),
-			Text = string.format("%s Beli / tick", formatNumber(entry.incomePerTick or 0)),
+			Text = string.format("%s Beli /s", formatRateNumber(entry.incomePerTick or 0)),
 			TextColor3 = PALETTE.Cream,
 			TextSize = 24,
 			TextStrokeTransparency = 0.58,
@@ -2973,6 +2978,27 @@ local function App(props)
 		activeAccent = PALETTE.Gold
 	end
 
+	local captainLogData = props.captainLog or {}
+	local captainLogFilteredCount = math.max(0, math.floor(tonumber(captainLogData.filteredCount) or 0))
+	local captainLogTotalCount = math.max(0, math.floor(tonumber(captainLogData.totalCount) or 0))
+	local captainLogQuery = tostring(props.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	local captainLogHasFilter = captainLogQuery ~= ""
+	local captainLogPlural = if captainLogTotalCount == 1 then "crewmate" else "crewmates"
+	local captainLogInfoText
+	if captainLogHasFilter then
+		captainLogInfoText = string.format(
+			"Showing %d of %d placed crewmates; totals include all slots",
+			captainLogFilteredCount,
+			captainLogTotalCount
+		)
+	else
+		captainLogInfoText = string.format(
+			"%d placed %s; totals include all slots",
+			captainLogTotalCount,
+			captainLogPlural
+		)
+	end
+
 	local children = {
 		BottomBar = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 1),
@@ -3233,7 +3259,8 @@ local function App(props)
 		}
 
 		for index, entry in ipairs((props.captainLog and props.captainLog.entries) or {}) do
-			captainLogChildren["Row" .. tostring(index)] = e(captainsLogRow, {
+			local rowKey = tostring(entry.key or entry.standName or index)
+			captainLogChildren["Row:" .. rowKey] = e(captainsLogRow, {
 				entry = entry,
 				layoutOrder = index,
 			})
@@ -3491,11 +3518,7 @@ local function App(props)
 						Font = Enum.Font.Gotham,
 						Position = UDim2.fromOffset(18, 56),
 						Size = UDim2.new(1, -320, 0, 18),
-						Text = showingCaptainLog and string.format(
-							"%d of %d placed crewmates visible in the log",
-							(props.captainLog and props.captainLog.filteredCount) or 0,
-							(props.captainLog and props.captainLog.totalCount) or 0
-						) or (showingTitles and string.format(
+						Text = showingCaptainLog and captainLogInfoText or (showingTitles and string.format(
 							"%d of %d titles visible, %d unlocked",
 							(props.titles and props.titles.filteredCount) or 0,
 							(props.titles and props.titles.totalCount) or 0,
@@ -3582,7 +3605,7 @@ local function App(props)
 								Font = Enum.Font.GothamBold,
 								Position = UDim2.fromOffset(16, 10),
 								Size = UDim2.new(0.5, 0, 0, 14),
-								Text = "Ready to Collect",
+								Text = "Total Ready to Collect",
 								TextColor3 = PALETTE.Muted,
 								TextSize = 11,
 								TextXAlignment = Enum.TextXAlignment.Left,
@@ -3595,7 +3618,9 @@ local function App(props)
 								Size = UDim2.new(0.5, -10, 0, 26),
 								Text = string.format(
 									"%s Beli",
-									formatNumber((props.captainLog and props.captainLog.totalCollectable) or 0)
+									CurrencyUtil.formatIncomeExact(
+										(props.captainLog and props.captainLog.totalCollectable) or 0
+									)
 								),
 								TextColor3 = PALETTE.Gold,
 								TextSize = 28,
@@ -3609,7 +3634,7 @@ local function App(props)
 								Font = Enum.Font.GothamBold,
 								Position = UDim2.new(1, -16, 10 / 58, 0),
 								Size = UDim2.fromOffset(180, 14),
-								Text = "Placed Crewmates",
+								Text = "All Placed Crewmates",
 								TextColor3 = PALETTE.Muted,
 								TextSize = 11,
 								TextXAlignment = Enum.TextXAlignment.Right,

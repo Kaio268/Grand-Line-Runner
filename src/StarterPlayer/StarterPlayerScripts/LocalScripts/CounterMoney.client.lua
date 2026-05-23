@@ -11,7 +11,6 @@ local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local HudCounterConfig = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudCounterConfig"))
 local HudStatNotificationService = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudStatNotificationService"))
 local CounterVisibilityUtil = require(script.Parent:WaitForChild("CounterVisibilityUtil"))
-local Shorten = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
 local currencyConfig = CurrencyUtil.getConfig()
 local moneyValue = CurrencyUtil.waitForPrimaryValueObject(player, 10)
 if not moneyValue then
@@ -149,16 +148,11 @@ local function setStroke(c)
 end
 
 local function formatNumber(n)
-	local rounded = math.floor((tonumber(n) or 0) + 0.5)
-	if math.abs(rounded) >= 1_000_000 then
-		return Shorten.roundNumber(rounded)
-	end
-
-	return Shorten.withCommas(rounded)
+	return CurrencyUtil.formatIncomeExact(n)
 end
 
 local function moneyText(n)
-	return formatNumber(n) .. CurrencyUtil.getCompactSuffix()
+	return CurrencyUtil.formatIncomeCompactAmount(n)
 end
 
 local function pushNotif(delta)

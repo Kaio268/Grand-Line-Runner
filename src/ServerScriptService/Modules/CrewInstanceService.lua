@@ -1389,6 +1389,11 @@ local function validateQuickSlotCapacityForInventory(player, crewMemberInventory
 end
 
 function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
+	standName = tostring(standName or "")
+	if standName == CAPTAIN_SLOT_KEY then
+		return nil, nil, "captain_slot_not_numeric_stand"
+	end
+
 	filters = getTutorialRewardFilters(filters)
 	filters.RequireAvailable = true
 	local clearTutorialMetadataAfterAssign = filters.ClearTutorialMetadataAfterAssign == true
@@ -1750,6 +1755,11 @@ function Module.UpdateProgress(player, instanceId, level, currentXP, options)
 end
 
 function Module.GetStandInstanceId(player, standName)
+	standName = tostring(standName or "")
+	if standName == CAPTAIN_SLOT_KEY then
+		return ""
+	end
+
 	local standData = getStandData(player, standName)
 	local rawInstanceId = tostring(standData.CrewMemberInstanceId or "")
 	if rawInstanceId == "" then
@@ -1772,6 +1782,11 @@ function Module.GetStandInstanceId(player, standName)
 end
 
 function Module.EnsureStandInstance(player, standName, fallbackStorageName)
+	standName = tostring(standName or "")
+	if standName == CAPTAIN_SLOT_KEY then
+		return nil, nil
+	end
+
 	local standData = getStandData(player, standName)
 	local standStorageName = firstNonEmpty(standData.CrewMemberName, fallbackStorageName)
 	if standStorageName == "" then
@@ -1891,6 +1906,9 @@ function Module.ReconcileStandAssignment(player, standName)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return false, "invalid_stand"
+	end
+	if standName == CAPTAIN_SLOT_KEY then
+		return false, "captain_slot_not_numeric_stand"
 	end
 
 	local standData = getStandData(player, standName)
@@ -2020,6 +2038,11 @@ function Module.FindAvailableInstance(player, storageName)
 end
 
 function Module.AssignAvailableInstanceToStand(player, storageName, standName)
+	standName = tostring(standName or "")
+	if standName == CAPTAIN_SLOT_KEY then
+		return nil, nil, "captain_slot_not_numeric_stand"
+	end
+
 	local instanceId, instanceData, crewMemberInventory = Module.FindAvailableInstance(player, storageName)
 	if not instanceData then
 		return nil, nil, "instance_unavailable"
@@ -2057,6 +2080,9 @@ function Module.AssignInstanceToStand(player, instanceRef, standName, options)
 	standName = tostring(standName or "")
 	if standName == "" then
 		return nil, nil, "invalid_stand"
+	end
+	if standName == CAPTAIN_SLOT_KEY then
+		return nil, nil, "captain_slot_not_numeric_stand"
 	end
 
 	local ready, readyReason = ensureInventoryAuthorityReady(player, "stand_place_exact")
@@ -2133,6 +2159,9 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 
 	if standName == "" then
 		return failCrewSwitch(debugInfo, "invalid_stand")
+	end
+	if standName == CAPTAIN_SLOT_KEY then
+		return failCrewSwitch(debugInfo, "captain_slot_not_numeric_stand")
 	end
 	if debugInfo.IncomingInstanceId == "" then
 		return failCrewSwitch(debugInfo, "incoming_instance_missing")
@@ -2255,6 +2284,13 @@ end
 function Module.ReleaseStandInstance(player, standName, options)
 	options = if typeof(options) == "table" then options else {}
 	standName = tostring(standName or "")
+	if standName == CAPTAIN_SLOT_KEY then
+		return nil, nil, "captain_slot_not_numeric_stand", {
+			PlayerName = player and player.Name or "unknown",
+			UserId = player and player.UserId or 0,
+			StandName = standName,
+		}
+	end
 
 	local standDataBefore, standMetaBefore = getStandData(player, standName)
 	local canonicalBefore = if typeof(standMetaBefore) == "table" then standMetaBefore.CanonicalRow else nil

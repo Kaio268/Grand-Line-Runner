@@ -12,6 +12,11 @@ local ShipSlotInteractionService = {}
 local RUNTIME_GUI_ATTRIBUTE = ShipSlotGuiIdentity.RuntimeGuiAttribute
 local RUNTIME_GUI_SLOT_ATTRIBUTE = ShipSlotGuiIdentity.SlotNumberAttribute
 local RUNTIME_GUI_SHIP_ATTRIBUTE = "ShipSlotRuntimeShip"
+local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
+local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
+local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
+local CAPTAIN_RUNTIME_GUI_SHIP_ATTRIBUTE = "ShipCaptainSlotRuntimeShip"
+local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
 
 local SLOT_ATTRIBUTES = {
 	Visible = "ShipSlotVisible",
@@ -89,6 +94,7 @@ local function getState(player)
 	if not state then
 		state = {
 			activeShip = nil,
+			captainGui = nil,
 			guisBySlot = {},
 		}
 		playerState[player] = state
@@ -98,12 +104,43 @@ local function getState(player)
 end
 
 local function isRuntimeGui(instance)
-	return instance and instance:IsA("SurfaceGui") and instance:GetAttribute(RUNTIME_GUI_ATTRIBUTE) == true
+	return instance
+		and instance:IsA("SurfaceGui")
+		and (
+			instance:GetAttribute(RUNTIME_GUI_ATTRIBUTE) == true
+			or instance:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+		)
 end
 
 local function destroyGui(gui)
 	if gui and gui.Parent then
 		gui:Destroy()
+	end
+end
+
+local function isCaptainRuntimeGui(instance)
+	return instance
+		and instance:IsA("SurfaceGui")
+		and instance:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+		and tostring(instance:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+end
+
+local function cleanupCaptainRuntimeGui(player, keepGui)
+	local state = playerState[player]
+	if state and state.captainGui and state.captainGui ~= keepGui then
+		destroyGui(state.captainGui)
+		state.captainGui = nil
+	end
+
+	local playerGui = getPlayerGui(player)
+	if not playerGui then
+		return
+	end
+
+	for _, child in ipairs(playerGui:GetChildren()) do
+		if isCaptainRuntimeGui(child) and child ~= keepGui then
+			destroyGui(child)
+		end
 	end
 end
 
@@ -138,6 +175,8 @@ local function cleanupAllRuntimeGuis(player)
 			destroyGui(gui)
 			state.guisBySlot[slotName] = nil
 		end
+		destroyGui(state.captainGui)
+		state.captainGui = nil
 	end
 
 	local playerGui = getPlayerGui(player)
@@ -240,6 +279,15 @@ local function tagRuntimeGui(gui, player, activeShip, slotName)
 	gui:SetAttribute("OwnerUserId", player.UserId)
 end
 
+local function tagCaptainRuntimeGui(gui, player, activeShip)
+	gui.Name = CAPTAIN_RUNTIME_GUI_NAME
+	gui.ResetOnSpawn = false
+	gui:SetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE, true)
+	gui:SetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE, CAPTAIN_SLOT_KEY)
+	gui:SetAttribute(CAPTAIN_RUNTIME_GUI_SHIP_ATTRIBUTE, activeShip:GetFullName())
+	gui:SetAttribute("OwnerUserId", player.UserId)
+end
+
 local function getExistingRuntimeGui(player, activeShip, slotName, levelUpPart)
 	local state = getState(player)
 	local gui = state.guisBySlot[slotName]
@@ -251,6 +299,37 @@ local function getExistingRuntimeGui(player, activeShip, slotName, levelUpPart)
 		and gui:GetAttribute(RUNTIME_GUI_SHIP_ATTRIBUTE) == activeShip:GetFullName()
 	then
 		return gui
+	end
+
+	return nil
+end
+
+local function getExistingCaptainRuntimeGui(player, activeShip, levelUpPart)
+	local playerGui = getPlayerGui(player)
+	if not playerGui then
+		return nil
+	end
+
+	local direct = playerGui:FindFirstChild(CAPTAIN_RUNTIME_GUI_NAME)
+	if
+		direct
+		and direct:IsA("SurfaceGui")
+		and isCaptainRuntimeGui(direct)
+		and direct.Adornee == levelUpPart
+		and direct:GetAttribute(CAPTAIN_RUNTIME_GUI_SHIP_ATTRIBUTE) == activeShip:GetFullName()
+	then
+		return direct
+	end
+
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if
+			gui:IsA("SurfaceGui")
+			and isCaptainRuntimeGui(gui)
+			and gui.Adornee == levelUpPart
+			and gui:GetAttribute(CAPTAIN_RUNTIME_GUI_SHIP_ATTRIBUTE) == activeShip:GetFullName()
+		then
+			return gui
+		end
 	end
 
 	return nil
@@ -312,6 +391,53 @@ local function setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, s
 	state.guisBySlot[slotName] = surfaceGui
 end
 
+local function setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, captainInfo)
+	local levelUpPart = captainSpot and getLevelUpPart(captainSpot)
+	local sourceGui = levelUpPart and levelUpPart:FindFirstChildOfClass("SurfaceGui")
+	if captainInfo.Unlocked ~= true then
+		if sourceGui then
+			sourceGui.Enabled = false
+		end
+		cleanupCaptainRuntimeGui(player)
+		return
+	end
+
+	local playerGui = getPlayerGui(player)
+	if not playerGui or not levelUpPart then
+		cleanupCaptainRuntimeGui(player)
+		return
+	end
+
+	local existingGui = getExistingCaptainRuntimeGui(player, activeShip, levelUpPart)
+	if existingGui then
+		cleanupCaptainRuntimeGui(player, existingGui)
+		local state = getState(player)
+		state.captainGui = existingGui
+		return
+	end
+
+	cleanupCaptainRuntimeGui(player)
+
+	if not sourceGui then
+		warnOnce(
+			"missing_captain_surface_gui_" .. captainSpot:GetFullName(),
+			"[ShipSlotInteractionService] Captain's Spot LevelUp part is missing SurfaceGui: %s",
+			captainSpot:GetFullName()
+		)
+		return
+	end
+
+	local surfaceGui = sourceGui:Clone()
+	sourceGui.Enabled = false
+	surfaceGui.Adornee = levelUpPart
+	surfaceGui.Enabled = false
+	tagCaptainRuntimeGui(surfaceGui, player, activeShip)
+	surfaceGui.Parent = playerGui
+
+	local state = getState(player)
+	state.captainGui = surfaceGui
+end
+
 local function disableInteractionInstance(instance)
 	if instance:IsA("ProximityPrompt") or instance:IsA("LayerCollector") then
 		instance.Enabled = false
@@ -330,6 +456,54 @@ local function disableInteractionDescendants(root)
 	disableInteractionInstance(root)
 	for _, descendant in ipairs(root:GetDescendants()) do
 		disableInteractionInstance(descendant)
+	end
+end
+
+local function setTextControlText(label, text)
+	if not label or not label.Parent then
+		return
+	end
+	if not (label:IsA("TextLabel") or label:IsA("TextButton") or label:IsA("TextBox")) then
+		return
+	end
+
+	label.TextWrapped = true
+	label.Text = tostring(text or "")
+end
+
+local function setCaptainDisplayGuisEnabled(captainSpot)
+	for _, descendant in ipairs(captainSpot:GetDescendants()) do
+		if descendant:IsA("BillboardGui") then
+			descendant.Enabled = true
+		end
+	end
+
+	local levelUpPart = getLevelUpPart(captainSpot)
+	local levelSurface = levelUpPart and levelUpPart:FindFirstChildOfClass("SurfaceGui")
+	if levelSurface then
+		levelSurface.Enabled = false
+	end
+end
+
+local function setCaptainInteractionEnabled(captainSpot, handle, prompt, enabled)
+	for _, descendant in ipairs(captainSpot:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			descendant.Enabled = false
+		elseif descendant:IsA("ClickDetector") then
+			descendant.MaxActivationDistance = 0
+		elseif ShipSlotService.IsClaimHitBox(descendant) then
+			descendant.CanTouch = enabled == true
+		end
+	end
+
+	if prompt then
+		prompt.Enabled = enabled == true
+	elseif enabled and handle then
+		warnOnce(
+			"missing_captain_prompt_" .. captainSpot:GetFullName(),
+			"[ShipSlotInteractionService] Unlocked Captain's Spot is missing a Handle ProximityPrompt: %s",
+			captainSpot:GetFullName()
+		)
 	end
 end
 
@@ -412,7 +586,7 @@ local function setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
 				activeShip:GetFullName()
 			)
 		end
-		return
+		return nil, captainInfo
 	end
 
 	captainSpot:SetAttribute(CAPTAIN_ATTRIBUTES.IsCaptainSlot, true)
@@ -420,30 +594,33 @@ local function setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
 	captainSpot:SetAttribute(CAPTAIN_ATTRIBUTES.State, captainInfo.State)
 	captainSpot:SetAttribute(CAPTAIN_ATTRIBUTES.BonusPercent, captainInfo.BonusPercent)
 	captainSpot:SetAttribute(CAPTAIN_ATTRIBUTES.BonusLabel, captainInfo.BonusLabel)
-	captainSpot:SetAttribute(SLOT_ATTRIBUTES.Visible, captainInfo.Unlocked)
+	captainSpot:SetAttribute(SLOT_ATTRIBUTES.Visible, true)
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.Usable, captainInfo.Unlocked)
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.Locked, not captainInfo.Unlocked)
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.Role, "captain")
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.BonusPercent, captainInfo.BonusPercent)
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.UnlockLevel, nil)
 
-	disableInteractionDescendants(captainSpot)
+	setCaptainDisplayGuisEnabled(captainSpot)
+	setCaptainInteractionEnabled(captainSpot, handle, prompt, captainInfo.Unlocked)
 
 	if not captainInfo.Unlocked then
-		return
+		setTextControlText(ShipSlotService.GetClaimMoneyLabel(captainSpot), "LOCKED")
+		return captainSpot, captainInfo
 	end
+
+	setTextControlText(
+		ShipSlotService.GetClaimMoneyLabel(captainSpot),
+		if captainInfo.BonusPercent > 0 then string.format("CAPTAIN +%d%%", captainInfo.BonusPercent) else "CAPTAIN"
+	)
 
 	if prompt then
 		prompt.Enabled = true
 		prompt.ObjectText = "Captain's Spot"
 		prompt.ActionText = "Assign Captain"
-	elseif handle then
-		warnOnce(
-			"missing_captain_prompt_" .. captainSpot:GetFullName(),
-			"[ShipSlotInteractionService] Unlocked Captain's Spot is missing a Handle ProximityPrompt: %s",
-			captainSpot:GetFullName()
-		)
 	end
+
+	return captainSpot, captainInfo
 end
 
 function ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, options)
@@ -469,7 +646,12 @@ function ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, option
 	local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(activeShip)
 
 	disableNonnumericInteractions(activeShip)
-	setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
+	local captainSpot, captainInfo = setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
+	if captainSpot and captainInfo then
+		setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, captainInfo)
+	else
+		cleanupCaptainRuntimeGui(player)
+	end
 
 	if #slotNumbers == 0 then
 		warnOnce(

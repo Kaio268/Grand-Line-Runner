@@ -79,6 +79,115 @@ local function countTableEntries(value)
 	return count
 end
 
+local function bootstrapExistingCrewIncomePlayer(runtime, player)
+	runtime.standDebug("bootstrap existing_player=%s", player.Name)
+
+	local plot = runtime.waitForPlot(player, 5)
+	if plot then
+		runtime.scanAndBindPlot(player, plot)
+		runtime.reconcilePlayerStandAssignments(player)
+		runtime.resetHugeIncomeOnJoin(player)
+		runtime.refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+	else
+		runtime.standDebug("bootstrap existing_player=%s reason=no_active_ship", player.Name)
+	end
+end
+
+local function bootstrapExistingCrewIncomePlayers(runtime)
+	for _, player in ipairs(runtime.Players:GetPlayers()) do
+		task.spawn(bootstrapExistingCrewIncomePlayer, runtime, player)
+	end
+end
+
+local function updateCrewStandIncomeForTick(runtime, player, standModel, equippedCrewMember, totalFoodCount, zeroIncomeLogged)
+	if not standModel or not standModel.Parent then
+		return false
+	end
+
+	local standName = standModel.Name
+	local cache = runtime.getSlotRuntime(player, standModel.Parent, standModel)
+	runtime.dmEnsureStandFolder(player, standName)
+
+	local slotState = runtime.getStandSlotState(player, standName)
+	local crewMemberName = runtime.getPlayerStandCrewMemberName(player, standName)
+	local crewMemberInstanceId = if crewMemberName ~= "" then runtime.getPlayerStandCrewMemberInstanceId(player, standName) else ""
+
+	if not slotState.Usable then
+		runtime.clearStandVisual(standModel)
+		runtime.updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
+		runtime.updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
+		runtime.updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, equippedCrewMember)
+		return false
+	end
+
+	local didBankIncome = false
+	if crewMemberName ~= "" then
+		if not standModel:FindFirstChild("PlacedCrewMember") then
+			local handle = cache and cache.Handle or runtime.resolveSlotHandle(standModel)
+			if handle and handle:IsA("BasePart") then
+				runtime.spawnStandCrewMember(player, standModel, handle, crewMemberName)
+			end
+		end
+
+		local inc = runtime.getIncomeWithLevel(player, crewMemberName) * runtime.getBeliBoostMultiplier(player)
+		zeroIncomeLogged[player] = zeroIncomeLogged[player] or {}
+		if inc ~= 0 then
+			zeroIncomeLogged[player][standName] = nil
+			if runtime.CrewStandIncomeAuthority.AdjustIncomeToCollect(player, standName, inc, "income_bank") then
+				didBankIncome = true
+			end
+		elseif zeroIncomeLogged[player][standName] ~= true then
+			zeroIncomeLogged[player][standName] = true
+			runtime.standDebug("income zero player=%s stand=%s crewMember=%s", player.Name, standName, tostring(crewMemberName))
+		end
+
+		runtime.updateStandHover(player, standModel, crewMemberName)
+	end
+
+	runtime.updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
+	runtime.updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
+	runtime.updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, equippedCrewMember)
+
+	return didBankIncome
+end
+
+local function updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
+	if not player.Parent then
+		runtime.clearPlayerStandRuntime(player)
+		return
+	end
+
+	if typeof(stands) ~= "table" then
+		return
+	end
+
+	local didBankIncome = false
+	local equippedCrewMember = runtime.getEquippedCrewMemberToolInfo(player)
+	local totalFoodCount = runtime.CrewFoodProgression.GetTotalFoodCount(player)
+
+	for i = 1, #stands do
+		if updateCrewStandIncomeForTick(runtime, player, stands[i], equippedCrewMember, totalFoodCount, zeroIncomeLogged) then
+			didBankIncome = true
+		end
+	end
+
+	if didBankIncome then
+		runtime.refreshBankedIncomeShadow(player)
+	end
+end
+
+local function runCrewIncomeBankLoop(runtime)
+	local zeroIncomeLogged = {}
+
+	while true do
+		task.wait(1)
+
+		for player, stands in pairs(runtime.playerStandList) do
+			updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
+		end
+	end
+end
+
 function CrewIncomeRuntime.Start()
 	if started then
 		return
@@ -100,13 +209,13 @@ local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("C
 local CaptainSlotRuntime = require(ServerScriptService.Modules:WaitForChild("CaptainSlotRuntime"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
+local IncomeClaimMath = require(ServerScriptService.Modules:WaitForChild("IncomeClaimMath"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local ShipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
-local shorten = require(ReplicatedStorage.Modules.Shorten)
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 local MonetizationConfig = require(ReplicatedStorage.Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
 local PopUpModule = require(ReplicatedStorage.Modules:WaitForChild("PopUpModule"))
@@ -152,6 +261,10 @@ local ShipVisuals = require(Configs:WaitForChild("ShipVisuals"))
 local CrewRegistry = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Registry"))
 local dmGet
 local ShipSlotGuiIdentity = require(Modules:WaitForChild("ShipSlotGuiIdentity"))
+local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
+local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
+local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
+local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
 
 pcall(function()
 	CrewRegistry.Build()
@@ -513,25 +626,6 @@ local function getStandCollectMultiplier(player, standName)
 	end
 	local rebirthCount = 0
 
-	local upgradeLevel = 0
-	local hiddenLeaderstats = player:FindFirstChild("HiddenLeaderstats")
-	if hiddenLeaderstats then
-		local valueObject = hiddenLeaderstats:FindFirstChild("PlotUpgrade")
-		if valueObject and valueObject:IsA("NumberValue") then
-			upgradeLevel = valueObject.Value
-		else
-			local storedUpgrade = dmGet(player, "HiddenLeaderstats.PlotUpgrade")
-			if typeof(storedUpgrade) == "number" then
-				upgradeLevel = storedUpgrade
-			end
-		end
-	else
-		local storedUpgrade = dmGet(player, "HiddenLeaderstats.PlotUpgrade")
-		if typeof(storedUpgrade) == "number" then
-			upgradeLevel = storedUpgrade
-		end
-	end
-
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if leaderstats then
 		local rebirthValue = leaderstats:FindFirstChild("Rebirths")
@@ -550,11 +644,7 @@ local function getStandCollectMultiplier(player, standName)
 		end
 	end
 
-	local captainMultiplier = CaptainSlotRuntime.GetCaptainBonusMultiplier(player, upgradeLevel, rebirthCount)
-
-	return mult
-		* captainMultiplier
-		* RebirthConfig.GetShipIncomeMultiplier(rebirthCount)
+	return mult * RebirthConfig.GetShipIncomeMultiplier(rebirthCount)
 end
 
 local function getBeliBoostRemaining(player)
@@ -1370,6 +1460,8 @@ local function buildIncomeStatusDisplayDescriptor(result, fallbackDisplayName, c
 	}
 end
 
+local buildIncomeSnapshot
+
 local function buildIncomeStatusDisplayMetadataResponse(player)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return {
@@ -1427,7 +1519,9 @@ local function buildIncomeStatusDisplayMetadataResponse(player)
 	return {
 		Ready = true,
 		CacheSeconds = INCOME_STATUS_DISPLAY_METADATA_CACHE_SECONDS,
+		IncomeSnapshotCacheSeconds = 1,
 		Metadata = metadataByStand,
+		IncomeSnapshot = if typeof(buildIncomeSnapshot) == "function" then buildIncomeSnapshot(player) else {},
 		CanonicalValues = canonicalCount,
 		FallbackReasons = fallbackReasons,
 	}
@@ -1541,13 +1635,175 @@ local function getStandIncomeDisplay(player, standName)
 		standDebug("getStandIncomeDisplay early_zero player=%s stand=%s", player.Name, standName)
 		return 0
 	end
-	local display = base * getStandCollectMultiplier(player, standName)
+	local display = IncomeClaimMath.GetWholeClaimableAmount(base, getStandCollectMultiplier(player, standName))
 	standDebug("getStandIncomeDisplay done player=%s stand=%s base=%s display=%s", player.Name, standName, tostring(base), tostring(display))
 	return display
 end
 
 local function getStandIncomePerSecond(player, standName, crewMemberName)
 	return getIncomeWithLevel(player, crewMemberName) * getStandCollectMultiplier(player, standName) * getBeliBoostMultiplier(player)
+end
+
+local function normalizeIncomeSnapshotSlotKey(value)
+	local numeric = tonumber(value)
+	if not numeric or numeric ~= numeric or numeric == math.huge or numeric == -math.huge then
+		return nil
+	end
+
+	numeric = math.floor(numeric)
+	if numeric < 1 then
+		return nil
+	end
+
+	return tostring(numeric)
+end
+
+buildIncomeSnapshot = function(player)
+	local snapshot = {
+		Stands = {},
+		Captain = nil,
+		TotalClaimReadyAmount = 0,
+		CaptainLog = {
+			Rows = {},
+			PlacedCount = 0,
+			TotalCount = 0,
+			TotalClaimReadyAmount = 0,
+			TotalIncomePerSecond = 0,
+		},
+	}
+
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return snapshot
+	end
+
+	local captainLog = snapshot.CaptainLog
+	local captainLogRows = captainLog.Rows
+	local function appendCaptainLogRow(row, insertFirst)
+		if typeof(row) ~= "table" then
+			return
+		end
+
+		if insertFirst == true then
+			table.insert(captainLogRows, 1, row)
+		else
+			captainLogRows[#captainLogRows + 1] = row
+		end
+		captainLog.PlacedCount += 1
+		captainLog.TotalCount = captainLog.PlacedCount
+		captainLog.TotalClaimReadyAmount += math.max(0, math.floor(tonumber(row.ClaimReadyAmount) or 0))
+		captainLog.TotalIncomePerSecond += math.max(0, tonumber(row.IncomePerSecond) or 0)
+	end
+
+	local standNames = {}
+	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
+		local slotKey = normalizeIncomeSnapshotSlotKey(standName)
+		local crewMemberName = if typeof(standData) == "table" then tostring(standData.CrewMemberName or "") else ""
+		if slotKey and crewMemberName ~= "" then
+			standNames[#standNames + 1] = slotKey
+		end
+	end
+	table.sort(standNames, function(a, b)
+		return (tonumber(a) or 0) < (tonumber(b) or 0)
+	end)
+
+	for _, standName in ipairs(standNames) do
+		local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
+		local crewMemberName = tostring(standData and standData.CrewMemberName or "")
+		if crewMemberName ~= "" then
+			local rawIncomeToCollect = math.max(0, tonumber(standData.IncomeToCollect) or 0)
+			local collectMultiplier = getStandCollectMultiplier(player, standName)
+			local claimReadyAmount, exactClaimReadyAmount =
+				IncomeClaimMath.GetWholeClaimableAmount(rawIncomeToCollect, collectMultiplier)
+			local incomePerSecond = math.max(0, getStandIncomePerSecond(player, standName, crewMemberName))
+
+			snapshot.Stands[standName] = {
+				SlotKey = standName,
+				CrewMemberName = crewMemberName,
+				CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
+				StandLevel = math.max(1, math.floor(tonumber(standData.StandLevel) or 1)),
+				RawIncomeToCollect = rawIncomeToCollect,
+				CollectMultiplier = collectMultiplier,
+				IncomePerSecond = incomePerSecond,
+				ExactClaimReadyAmount = exactClaimReadyAmount,
+				ClaimReadyAmount = claimReadyAmount,
+				ClaimRemainderAmount = math.max(0, exactClaimReadyAmount - claimReadyAmount),
+			}
+			snapshot.TotalClaimReadyAmount += claimReadyAmount
+			appendCaptainLogRow({
+				Key = standName,
+				RowType = "Normal",
+				SlotKey = standName,
+				StandName = standName,
+				CrewMemberName = crewMemberName,
+				CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
+				StandLevel = math.max(1, math.floor(tonumber(standData.StandLevel) or 1)),
+				RawIncomeToCollect = rawIncomeToCollect,
+				CollectMultiplier = collectMultiplier,
+				IncomePerSecond = incomePerSecond,
+				ExactClaimReadyAmount = exactClaimReadyAmount,
+				ClaimReadyAmount = claimReadyAmount,
+				ClaimRemainderAmount = math.max(0, exactClaimReadyAmount - claimReadyAmount),
+			})
+		end
+	end
+
+	local captainAssignment = CaptainSlotRuntime.GetAssignment(player)
+	if typeof(captainAssignment) == "table" then
+		local rawCaptainIncome = math.max(0, tonumber(captainAssignment.IncomeToCollect) or 0)
+		local captainCollectMultiplier = math.max(0, CaptainSlotRuntime.GetCaptainCollectMultiplier(player))
+		local captainClaimReady, captainExactClaimReady =
+			IncomeClaimMath.GetWholeClaimableAmount(rawCaptainIncome, captainCollectMultiplier)
+		local captainIncomePerSecond = math.max(0, CaptainSlotRuntime.GetCaptainIncomePerSecond(player))
+		local captainCrewMemberName = tostring(
+			captainAssignment.CrewMemberName
+				or captainAssignment.CrewMemberId
+				or captainAssignment.StorageName
+				or captainAssignment.LegacyStorageName
+				or ""
+		)
+		local captainCrewMemberInstanceId = tostring(
+			captainAssignment.CrewMemberInstanceId
+				or captainAssignment.InstanceId
+				or captainAssignment.CrewInstanceId
+				or ""
+		)
+		local captainStandLevel = math.max(
+			1,
+			math.floor(tonumber(captainAssignment.Level or captainAssignment.StandLevel) or 1)
+		)
+		if captainCrewMemberName ~= "" then
+			snapshot.Captain = {
+				SlotKey = CAPTAIN_SLOT_KEY,
+				CrewMemberName = captainCrewMemberName,
+				CrewMemberInstanceId = captainCrewMemberInstanceId,
+				StandLevel = captainStandLevel,
+				RawIncomeToCollect = rawCaptainIncome,
+				CollectMultiplier = captainCollectMultiplier,
+				IncomePerSecond = captainIncomePerSecond,
+				ExactClaimReadyAmount = captainExactClaimReady,
+				ClaimReadyAmount = captainClaimReady,
+				ClaimRemainderAmount = math.max(0, captainExactClaimReady - captainClaimReady),
+			}
+			snapshot.TotalClaimReadyAmount += captainClaimReady
+			appendCaptainLogRow({
+				Key = CAPTAIN_SLOT_KEY,
+				RowType = "Captain",
+				SlotKey = CAPTAIN_SLOT_KEY,
+				StandName = "Captain's Spot",
+				CrewMemberName = captainCrewMemberName,
+				CrewMemberInstanceId = captainCrewMemberInstanceId,
+				StandLevel = captainStandLevel,
+				RawIncomeToCollect = rawCaptainIncome,
+				CollectMultiplier = captainCollectMultiplier,
+				IncomePerSecond = captainIncomePerSecond,
+				ExactClaimReadyAmount = captainExactClaimReady,
+				ClaimReadyAmount = captainClaimReady,
+				ClaimRemainderAmount = math.max(0, captainExactClaimReady - captainClaimReady),
+			}, true)
+		end
+	end
+
+	return snapshot
 end
 
 local function getTextTarget(root, name)
@@ -1582,6 +1838,30 @@ local function resolvePlayerLevelUpSurfaceGui(player, slotKey, levelUpPart, allo
 	if player and player:IsA("Player") then
 		local playerGui = player:FindFirstChild("PlayerGui")
 		if playerGui then
+			if slotKey == CAPTAIN_SLOT_KEY then
+				local captainGui = playerGui:FindFirstChild(CAPTAIN_RUNTIME_GUI_NAME)
+				if
+					captainGui
+					and captainGui:IsA("SurfaceGui")
+					and captainGui:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+					and tostring(captainGui:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+				then
+					return captainGui
+				end
+
+				for _, child in ipairs(playerGui:GetChildren()) do
+					if
+						child:IsA("SurfaceGui")
+						and child:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+						and tostring(child:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+					then
+						return child
+					end
+				end
+
+				return nil
+			end
+
 			local legacyGui = playerGui:FindFirstChild(slotKey)
 			if legacyGui and legacyGui:IsA("SurfaceGui") then
 				return legacyGui
@@ -1668,7 +1948,9 @@ local function cleanupSlotRuntime(standModel)
 end
 
 local function buildSlotRuntime(player, plot, standModel)
-	local slotKey = tostring(standModel.Name)
+	local slotKey = if ShipSlotService.IsCaptainSlotName(standModel.Name)
+		then CAPTAIN_SLOT_KEY
+		else tostring(standModel.Name)
 	local handle = resolveSlotHandle(standModel)
 	local levelUpPart = resolveSlotLevelUpPart(standModel)
 	local allowLevelUpPartFallback = not ShipRuntimeService.IsActiveShip(standModel.Parent)
@@ -1719,6 +2001,37 @@ end
 
 local function getExistingSlotRuntime(standModel)
 	return slotRuntimeByStand[standModel]
+end
+
+local function isLiveSlotDescendant(cache, instance)
+	return cache
+		and isLiveInstance(cache.StandModel)
+		and isLiveInstance(instance)
+		and instance:IsDescendantOf(cache.StandModel)
+end
+
+local function refreshSlotRuntimeRefs(cache)
+	if not cache or not isLiveInstance(cache.StandModel) then
+		return
+	end
+
+	local standModel = cache.StandModel
+	if not isLiveSlotDescendant(cache, cache.Handle) then
+		cache.Handle = resolveSlotHandle(standModel)
+	end
+	if cache.Handle and not isLiveSlotDescendant(cache, cache.Prompt) then
+		cache.Prompt = cache.Handle:FindFirstChildOfClass("ProximityPrompt")
+	end
+	if not isLiveSlotDescendant(cache, cache.ClaimHitBox) then
+		cache.ClaimHitBox = ShipSlotService.GetClaimHitBox(standModel)
+	end
+	if not isLiveSlotDescendant(cache, cache.MoneyLabel) then
+		cache.MoneyLabel = ShipSlotService.GetClaimMoneyLabel(standModel)
+		cache.LastMoneyText = nil
+	end
+	if not isLiveSlotDescendant(cache, cache.LevelUpPart) then
+		cache.LevelUpPart = resolveSlotLevelUpPart(standModel)
+	end
 end
 
 local function cleanupPlayerSlotRuntime(player)
@@ -1864,7 +2177,9 @@ local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, pl
 
 	local displayRarity = stripVariantPrefix(rawRarity, variantKey)
 	local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standModel.Name)
-	local incomePerSecond = if isCaptainSlot then 0 else getStandIncomePerSecond(player, standModel.Name, canonicalName)
+	local incomePerSecond = if isCaptainSlot
+		then CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
+		else getStandIncomePerSecond(player, standModel.Name, canonicalName)
 	local slotState = if isCaptainSlot then nil else getStandSlotState(player, standModel.Name)
 	local slotBonusInfo = slotState and slotState.BonusInfo or nil
 
@@ -2061,7 +2376,10 @@ local function updateStandMoneyText(player, standModel, cache, slotState, crewMe
 	end
 
 	cache = cache or getSlotRuntime(player, standModel.Parent, standModel)
-	if not cache or not isLiveInstance(cache.MoneyLabel) then
+	if cache and not isLiveSlotDescendant(cache, cache.MoneyLabel) then
+		refreshSlotRuntimeRefs(cache)
+	end
+	if not cache or not isLiveSlotDescendant(cache, cache.MoneyLabel) then
 		return
 	end
 
@@ -2073,7 +2391,7 @@ local function updateStandMoneyText(player, standModel, cache, slotState, crewMe
 	end
 
 	crewMemberName = if crewMemberName ~= nil then crewMemberName else getPlayerStandCrewMemberName(player, standName)
-	local incomeText = shorten.roundNumber(math.floor(getStandIncomeDisplay(player, standName))) .. CurrencyUtil.getCompactSuffix()
+	local incomeText = CurrencyUtil.formatIncomeCompactAmount(getStandIncomeDisplay(player, standName))
 	if crewMemberName == "" and slotState.BonusInfo then
 		setMoneyLabelText(
 			cache,
@@ -2247,7 +2565,11 @@ local function updateLevelUpUI(player, standModel, cache, slotState, crewMemberN
 	end
 
 	local standName = standModel.Name
-	slotState = slotState or getStandSlotState(player, standName)
+	local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standName)
+	slotState = slotState or (if isCaptainSlot then {
+		Visible = true,
+		Usable = true,
+	} else getStandSlotState(player, standName))
 	if slotState.Visible and not slotState.Usable then
 		setCachedLevelUpVisible(cache, false)
 		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
@@ -2291,7 +2613,7 @@ local function updateLevelUpUI(player, standModel, cache, slotState, crewMemberN
 		return
 	end
 
-	local currentLevel = setStandLevel(player, standName, progress.Level)
+	local currentLevel = if isCaptainSlot then progress.Level else setStandLevel(player, standName, progress.Level)
 	local xpText = string.format("XP: %d / %d", math.max(0, progress.CurrentXP), math.max(0, progress.NextLevelXP))
 	if availableFoodCount > 0 then
 		xpText ..= " | Auto-feed"
@@ -2350,15 +2672,89 @@ local function getPlacementPickupGuardRemaining(player, standName)
 	return remaining
 end
 
+local function fireMoneyCollected(player, standModel, collected, incomeToastDisplayPayload)
+	if not MoneyCollectedRE then
+		return
+	end
+
+	if incomeToastDisplayPayload ~= nil then
+		MoneyCollectedRE:FireClient(player, standModel, collected, incomeToastDisplayPayload)
+	else
+		MoneyCollectedRE:FireClient(player, standModel, collected)
+	end
+end
+
+local function updateCaptainLevelUpUI(player, captainSpot, slotState, crewMemberName, crewMemberInstanceId, forceRefresh, totalFoodCount)
+	if typeof(captainSpot) ~= "Instance" or not captainSpot:IsA("Model") then
+		return
+	end
+
+	local cache = getSlotRuntime(player, captainSpot.Parent, captainSpot)
+	updateLevelUpUI(player, captainSpot, cache, slotState, crewMemberName, crewMemberInstanceId, forceRefresh, totalFoodCount)
+end
+
+local function refreshPlayerIncomeDisplays(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	local stands = playerStandList[player]
+	if typeof(stands) ~= "table" then
+		return
+	end
+
+	local equippedCrewMember = getEquippedCrewMemberToolInfo(player)
+	local totalFoodCount = CrewFoodProgression.GetTotalFoodCount(player)
+	for _, standModel in ipairs(stands) do
+		if standModel and standModel.Parent then
+			local standName = standModel.Name
+			local cache = getSlotRuntime(player, standModel.Parent, standModel)
+			local slotState = getStandSlotState(player, standName)
+			local crewMemberName = getPlayerStandCrewMemberName(player, standName)
+			local crewMemberInstanceId = if crewMemberName ~= "" then getPlayerStandCrewMemberInstanceId(player, standName) else ""
+			if crewMemberName ~= "" then
+				updateStandHover(player, standModel, crewMemberName)
+			end
+			updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
+			updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
+			updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, equippedCrewMember)
+		end
+	end
+end
+
+local function refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+	refreshPlayerIncomeDisplays(player)
+	task.defer(function()
+		if player and player.Parent == Players then
+			refreshPlayerIncomeDisplays(player)
+		end
+	end)
+end
+
 CaptainSlotRuntime.Configure({
+	BuildIncomeToastDisplayPayload = buildIncomeToastDisplayPayload,
+	CanEquipCrewMember = function(player, crewMemberId)
+		return CrewQuickSlotService.CanEquipCrewMember(player, crewMemberId)
+	end,
 	ClearCrewRecordCache = clearCrewRecordCache,
 	ClearVisual = clearStandVisual,
 	EquipCrewMemberToolByInstanceId = equipCrewMemberToolByInstanceId,
+	FindAvailableTutorialPlacementReward = findAvailableTutorialPlacementReward,
+	FireMoneyCollected = fireMoneyCollected,
+	GetBaseIncome = getBaseIncome,
+	GetBeliBoostMultiplier = getBeliBoostMultiplier,
 	GetCrewMemberLevel = getCrewMemberLevel,
 	GetEquippedCrewMemberToolInfo = getEquippedCrewMemberToolInfo,
+	GetInventoryQuantity = getInventoryQuantity,
 	LogCrewSwitchFailure = logCrewSwitchFailure,
+	PromptUnlockForCrewMember = function(player, crewMemberId)
+		CrewQuickSlotService.PromptUnlockForCrewMember(player, crewMemberId)
+	end,
+	RefreshNormalIncomeDisplays = refreshPlayerIncomeDisplays,
 	ResolveDisplayName = resolveStandStatusDisplayName,
 	SpawnCrewMember = spawnStandCrewMember,
+	SyncPlacedOverheadMetadata = syncPlacedOverheadMetadata,
+	UpdateCaptainLevelUpUI = updateCaptainLevelUpUI,
 })
 
 local function bindZoneCollect(player, plot, standModel, cache)
@@ -2422,12 +2818,19 @@ local function bindZoneCollect(player, plot, standModel, cache)
 			return
 		end
 
-		if CrewStandIncomeAuthority.SetIncomeToCollect(plr, standName, 0, "income_collect") then
-			refreshCollectedIncomeShadow(plr)
+		local mult = getStandCollectMultiplier(plr, standName)
+		local collected = IncomeClaimMath.GetWholeClaimableAmount(baseToCollect, mult)
+		if collected <= 0 then
+			updateStandMoneyText(plr, standModel)
+			return
 		end
 
-		local mult = getStandCollectMultiplier(plr, standName)
-		local collected = math.floor(baseToCollect * mult)
+		local remainingRawIncome = IncomeClaimMath.GetRawRemainderAfterClaim(baseToCollect, mult, collected)
+		if CrewStandIncomeAuthority.SetIncomeToCollect(plr, standName, remainingRawIncome, "income_collect") then
+			refreshCollectedIncomeShadow(plr)
+		else
+			return
+		end
 
 		DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected)
 		DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected)
@@ -2468,6 +2871,7 @@ end
 
 local function bindStandPrompt(player, plot, standModel)
 	local cache = getSlotRuntime(player, plot, standModel)
+	refreshSlotRuntimeRefs(cache)
 	local handle = cache and cache.Handle
 	if not handle or not handle:IsA("BasePart") then
 		standDebug("bindStandPrompt skip player=%s stand=%s reason=no_handle", player.Name, standModel.Name)
@@ -2894,6 +3298,21 @@ local function registerStand(player, plot, standModel)
 		if list[i] == standModel then
 			standDebug("registerStand reuse player=%s stand=%s", player.Name, standModel.Name)
 			bindStandPrompt(player, plot, standModel)
+			local slotState = getStandSlotState(player, standModel.Name)
+			local crewMemberName = getPlayerStandCrewMemberName(player, standModel.Name)
+			local crewMemberInstanceId = if crewMemberName ~= "" then getPlayerStandCrewMemberInstanceId(player, standModel.Name) else ""
+			updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
+			updateLevelUpUI(
+				player,
+				standModel,
+				cache,
+				slotState,
+				crewMemberName,
+				crewMemberInstanceId,
+				true,
+				CrewFoodProgression.GetTotalFoodCount(player)
+			)
+			updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName)
 			return
 		end
 	end
@@ -3150,6 +3569,7 @@ local function refreshPlayerStandRuntime(player)
 
 	scanAndBindPlot(player, plot)
 	reconcilePlayerStandAssignments(player)
+	refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
 	return true, plot
 end
 
@@ -3189,6 +3609,7 @@ CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
 				scanAndBindCaptainSlot(player, activeShip)
 			end
 			reconcilePlayerStandAssignments(player)
+			refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
 		end)
 	end
 end)
@@ -3218,6 +3639,7 @@ Players.PlayerAdded:Connect(function(player)
 		)
 		scanAndBindPlot(player, plot)
 		reconcilePlayerStandAssignments(player)
+		refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
 	end)
 end)
 
@@ -3244,85 +3666,39 @@ standCommandFunction.OnInvoke = function(action, player)
 	return false, "unsupported_action"
 end
 
-for _, p in ipairs(Players:GetPlayers()) do
-	task.spawn(function()
-		standDebug("bootstrap existing_player=%s", p.Name)
-		local plot = waitForPlot(p, 5)
-		if plot then
-			scanAndBindPlot(p, plot)
-			reconcilePlayerStandAssignments(p)
-			resetHugeIncomeOnJoin(p)
-		else
-			standDebug("bootstrap existing_player=%s reason=no_active_ship", p.Name)
-		end
-	end)
-end
-  
-task.spawn(function()
-	local zeroIncomeLogged = {}
-	while true do
-		task.wait(1)
+task.spawn(bootstrapExistingCrewIncomePlayers, {
+	Players = Players,
+	standDebug = standDebug,
+	waitForPlot = waitForPlot,
+	scanAndBindPlot = scanAndBindPlot,
+	reconcilePlayerStandAssignments = reconcilePlayerStandAssignments,
+	resetHugeIncomeOnJoin = resetHugeIncomeOnJoin,
+	refreshPlayerIncomeDisplaysAfterLifecycleUpdate = refreshPlayerIncomeDisplaysAfterLifecycleUpdate,
+})
 
-		for plr, stands in pairs(playerStandList) do
-			if not plr.Parent then
-				clearPlayerStandRuntime(plr)
-			else
-				local didBankIncome = false
-				local equippedCrewMember = getEquippedCrewMemberToolInfo(plr)
-				local totalFoodCount = CrewFoodProgression.GetTotalFoodCount(plr)
-				for i = 1, #stands do
-					local standModel = stands[i]
-					if standModel and standModel.Parent then
-						local standName = standModel.Name
-						local cache = getSlotRuntime(plr, standModel.Parent, standModel)
-						dmEnsureStandFolder(plr, standName)
-						local slotState = getStandSlotState(plr, standName)
-						local crewMemberName = getPlayerStandCrewMemberName(plr, standName)
-						local crewMemberInstanceId = if crewMemberName ~= "" then getPlayerStandCrewMemberInstanceId(plr, standName) else ""
-						if not slotState.Usable then
-							clearStandVisual(standModel)
-							updateStandMoneyText(plr, standModel, cache, slotState, crewMemberName)
-							updateLevelUpUI(plr, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
-							updateStandPromptTexts(plr, standModel, cache, slotState, crewMemberName, equippedCrewMember)
-							continue
-						end
-
-						if crewMemberName ~= "" then
-							if not standModel:FindFirstChild("PlacedCrewMember") then
-								local handle = cache and cache.Handle or resolveSlotHandle(standModel)
-								if handle and handle:IsA("BasePart") then
-									spawnStandCrewMember(plr, standModel, handle, crewMemberName)
-								end
-							end
-							local inc = getIncomeWithLevel(plr, crewMemberName) * getBeliBoostMultiplier(plr)
-							if inc ~= 0 then
-								zeroIncomeLogged[plr] = zeroIncomeLogged[plr] or {}
-								zeroIncomeLogged[plr][standName] = nil
-								if CrewStandIncomeAuthority.AdjustIncomeToCollect(plr, standName, inc, "income_bank") then
-									didBankIncome = true
-								end
-							else
-								zeroIncomeLogged[plr] = zeroIncomeLogged[plr] or {}
-								if zeroIncomeLogged[plr][standName] ~= true then
-									zeroIncomeLogged[plr][standName] = true
-									standDebug("income zero player=%s stand=%s crewMember=%s", plr.Name, standName, tostring(crewMemberName))
-								end
-							end
-							updateStandHover(plr, standModel, crewMemberName)
-						end
-
-						updateStandMoneyText(plr, standModel, cache, slotState, crewMemberName)
-						updateLevelUpUI(plr, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
-						updateStandPromptTexts(plr, standModel, cache, slotState, crewMemberName, equippedCrewMember)
-					end
-				end
-				if didBankIncome then
-					refreshBankedIncomeShadow(plr)
-				end
-			end
-		end
-	end
-end)
+task.spawn(runCrewIncomeBankLoop, {
+	CrewFoodProgression = CrewFoodProgression,
+	CrewStandIncomeAuthority = CrewStandIncomeAuthority,
+	clearPlayerStandRuntime = clearPlayerStandRuntime,
+	clearStandVisual = clearStandVisual,
+	dmEnsureStandFolder = dmEnsureStandFolder,
+	getBeliBoostMultiplier = getBeliBoostMultiplier,
+	getEquippedCrewMemberToolInfo = getEquippedCrewMemberToolInfo,
+	getIncomeWithLevel = getIncomeWithLevel,
+	getPlayerStandCrewMemberInstanceId = getPlayerStandCrewMemberInstanceId,
+	getPlayerStandCrewMemberName = getPlayerStandCrewMemberName,
+	getSlotRuntime = getSlotRuntime,
+	getStandSlotState = getStandSlotState,
+	playerStandList = playerStandList,
+	refreshBankedIncomeShadow = refreshBankedIncomeShadow,
+	resolveSlotHandle = resolveSlotHandle,
+	spawnStandCrewMember = spawnStandCrewMember,
+	standDebug = standDebug,
+	updateLevelUpUI = updateLevelUpUI,
+	updateStandHover = updateStandHover,
+	updateStandMoneyText = updateStandMoneyText,
+	updateStandPromptTexts = updateStandPromptTexts,
+})
 
 end
 

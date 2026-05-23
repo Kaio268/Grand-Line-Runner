@@ -10,6 +10,7 @@ local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Ha
 local CrewInteraction = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local CorridorController = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushCorridorRunController"))
+local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
 local HoroAnimationController = require(script.Parent:WaitForChild("HoroAnimationController"))
 local HoroGhostAnimateController = require(script.Parent:WaitForChild("HoroGhostAnimateController"))
 
@@ -1003,7 +1004,13 @@ local function scheduleRespawnIfBodyDead(state)
 			and humanoid.Parent ~= nil
 			and humanoid.Health <= 0
 		then
-			player:LoadCharacter()
+			local queued, reason = ShipRuntimeService.RespawnPlayerAtShip(player, "horo_body_dead")
+			if queued == false then
+				warn(("[HoroServer] Failed to queue ship respawn for %s after body death: %s"):format(
+					player.Name,
+					tostring(reason)
+				))
+			end
 		end
 	end)
 end

@@ -1,3 +1,4 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
@@ -6,20 +7,32 @@ local Configs = Modules:WaitForChild("Configs")
 
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local IncomeClaimMath = require(ServerScriptService.Modules:WaitForChild("IncomeClaimMath"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
+local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
+local StandUpgradeMults = require(ServerScriptService.Modules:WaitForChild("StandsMultiply"))
 
 local CaptainSlotRuntime = {}
 
 local CAPTAIN_SLOT_KEY = CrewSlotAssignmentReconciler.CaptainSlotKey or ShipSlotService.CaptainSlotKey or "Captain"
 local CAPTAIN_SLOT_DATA_PATH = "Ship.CaptainSlot"
+local CAPTAIN_INCOME_FIELD = "IncomeToCollect"
+local CAPTAIN_INCOME_PATH = CAPTAIN_SLOT_DATA_PATH .. "." .. CAPTAIN_INCOME_FIELD
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
+local CLAIM_TOUCH_DEBOUNCE_SECONDS = 0.35
+local INCOME_TICK_SECONDS = 1
+local LOCKED_LABEL = "LOCKED"
+local EMPTY_LABEL = "CAPTAIN"
 
 local runtimeByPlayer = setmetatable({}, { __mode = "k" })
 local placementPickupGuardUntil = setmetatable({}, { __mode = "k" })
+local claimTouchDebounce = setmetatable({}, { __mode = "k" })
 local callbacks = {}
 local dataManagerModule = nil
+local incomeLoopStarted = false
 
 local function firstNonEmpty(...)
 	for index = 1, select("#", ...) do
@@ -45,6 +58,22 @@ local function dmGet(player, path)
 	end)
 
 	return if ok then value else nil
+end
+
+local function dmSet(player, path, value)
+	local ok, result = pcall(function()
+		return getDataManager():SetValue(player, path, value)
+	end)
+
+	return ok and result ~= false
+end
+
+local function dmAdd(player, path, amount)
+	local ok, result = pcall(function()
+		return getDataManager():AddValue(player, path, amount)
+	end)
+
+	return ok and result ~= false
 end
 
 local function getPlayerShipUpgradeLevel(player)
@@ -141,6 +170,93 @@ local function getCaptainAssignmentCrewName(player, assignment)
 	return crewMemberName, instanceId
 end
 
+local function getCaptainIncomeToCollect(player, captainSlot)
+	captainSlot = if typeof(captainSlot) == "table" then captainSlot else dmGet(player, CAPTAIN_SLOT_DATA_PATH)
+	if typeof(captainSlot) ~= "table" then
+		return 0
+	end
+
+	return math.max(0, tonumber(captainSlot[CAPTAIN_INCOME_FIELD]) or 0)
+end
+
+local function setCaptainIncomeToCollect(player, amount)
+	return dmSet(player, CAPTAIN_INCOME_PATH, math.max(0, tonumber(amount) or 0))
+end
+
+local function getBaseIncome(player, crewMemberName)
+	if typeof(callbacks.GetBaseIncome) == "function" then
+		return math.max(0, tonumber(callbacks.GetBaseIncome(player, crewMemberName)) or 0)
+	end
+
+	return 0
+end
+
+local function getBeliBoostMultiplier(player)
+	if typeof(callbacks.GetBeliBoostMultiplier) == "function" then
+		return math.max(0, tonumber(callbacks.GetBeliBoostMultiplier(player)) or 1)
+	end
+
+	return 1
+end
+
+local function getCrewMemberLevel(player, crewMemberName, instanceId)
+	local target = if tostring(instanceId or "") ~= "" then tostring(instanceId) else tostring(crewMemberName or "")
+	if target ~= "" and typeof(callbacks.GetCrewMemberLevel) == "function" then
+		return math.max(1, math.floor(tonumber(callbacks.GetCrewMemberLevel(player, target)) or 1))
+	end
+
+	return 1
+end
+
+local function getCrewLevelMultiplier(player, crewMemberName, instanceId)
+	local level = getCrewMemberLevel(player, crewMemberName, instanceId)
+	local multiplier = tonumber(StandUpgradeMults[tostring(level)]) or 1
+	if multiplier <= 0 then
+		return 1
+	end
+
+	return multiplier
+end
+
+local function getCaptainBonusMultiplierForAssignment(player, instanceId)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" then
+		return 1
+	end
+
+	local assignment = getSavedCaptainAssignment(player)
+	local _, assignedInstanceId = getCaptainAssignmentCrewName(player, assignment)
+	if assignedInstanceId == "" or assignedInstanceId ~= instanceId then
+		return 1
+	end
+
+	local _, instanceData = CrewInstanceService.GetInstance(player, instanceId)
+	if typeof(instanceData) ~= "table" or tostring(instanceData.AssignedStand or "") ~= CAPTAIN_SLOT_KEY then
+		return 1
+	end
+
+	return PlotUpgradeConfig.GetCaptainBonusMultiplier(getPlayerShipUpgradeLevel(player), getPlayerRebirthCount(player))
+end
+
+local function getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+	return getCrewLevelMultiplier(player, crewMemberName, instanceId)
+		* RebirthConfig.GetShipIncomeMultiplier(getPlayerRebirthCount(player))
+		* getCaptainBonusMultiplierForAssignment(player, instanceId)
+end
+
+local function getCaptainBankAmountPerTick(player, crewMemberName)
+	return getBaseIncome(player, crewMemberName) * getBeliBoostMultiplier(player)
+end
+
+local function getCaptainDisplayIncome(player, crewMemberName, instanceId)
+	local assignment = getSavedCaptainAssignment(player)
+	local pending = getCaptainIncomeToCollect(player, assignment)
+	return IncomeClaimMath.GetWholeClaimableAmount(
+		pending,
+		getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+	)
+end
+
 local function setPlacementPickupGuard(player)
 	placementPickupGuardUntil[player] = os.clock() + PLACEMENT_PICKUP_GUARD_SECONDS
 end
@@ -176,10 +292,107 @@ local function clearVisual(runtime)
 	end
 end
 
+local function refreshRuntimeSlotRefs(runtime)
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		return
+	end
+
+	runtime.ClaimHitBox = ShipSlotService.GetClaimHitBox(runtime.CaptainSpot)
+	runtime.MoneyLabel = ShipSlotService.GetClaimMoneyLabel(runtime.CaptainSpot)
+end
+
+local function setMoneyLabelText(runtime, text)
+	if not runtime or not runtime.MoneyLabel or not runtime.MoneyLabel.Parent then
+		return
+	end
+
+	text = tostring(text or "")
+	if runtime.LastMoneyText == text and runtime.MoneyLabel.Text == text then
+		return
+	end
+
+	runtime.MoneyLabel.TextWrapped = true
+	runtime.MoneyLabel.Text = text
+	runtime.LastMoneyText = text
+end
+
+local function updateCaptainMoneyText(player, runtime, assignment)
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		return
+	end
+	if not runtime.MoneyLabel or not runtime.MoneyLabel.Parent then
+		refreshRuntimeSlotRefs(runtime)
+	end
+	if not runtime.MoneyLabel or not runtime.MoneyLabel.Parent then
+		return
+	end
+
+	local state = runtime.State or getCaptainSlotState(player)
+	if not state.Unlocked then
+		setMoneyLabelText(runtime, LOCKED_LABEL)
+		return
+	end
+
+	assignment = if typeof(assignment) == "table" then assignment else getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		if state.BonusPercent > 0 then
+			setMoneyLabelText(runtime, string.format("%s +%d%%", EMPTY_LABEL, state.BonusPercent))
+		else
+			setMoneyLabelText(runtime, EMPTY_LABEL)
+		end
+		return
+	end
+
+	local displayIncome = getCaptainDisplayIncome(player, crewMemberName, instanceId)
+	setMoneyLabelText(runtime, CurrencyUtil.formatIncomeCompactAmount(displayIncome))
+end
+
+local function updateCaptainLevelUpUI(player, runtime, assignment, forceRefresh)
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		return
+	end
+	if typeof(callbacks.UpdateCaptainLevelUpUI) ~= "function" then
+		return
+	end
+
+	local state = runtime.State or getCaptainSlotState(player)
+	assignment = if typeof(assignment) == "table" then assignment else getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	callbacks.UpdateCaptainLevelUpUI(
+		player,
+		runtime.CaptainSpot,
+		{
+			Visible = true,
+			Usable = state.Unlocked == true,
+		},
+		crewMemberName,
+		instanceId,
+		forceRefresh == true
+	)
+end
+
+local function setClaimTouchEnabled(runtime, enabled)
+	if runtime and runtime.ClaimHitBox and runtime.ClaimHitBox.Parent then
+		runtime.ClaimHitBox.CanTouch = enabled == true
+	end
+end
+
+local function refreshNormalIncomeDisplays(player)
+	if typeof(callbacks.RefreshNormalIncomeDisplays) == "function" then
+		callbacks.RefreshNormalIncomeDisplays(player)
+	end
+end
+
 local function setRuntimeHasCaptain(player, hasCaptain)
 	local runtime = runtimeByPlayer[player]
 	if runtime then
-		runtime.HasCaptain = hasCaptain == true
+		local nextHasCaptain = hasCaptain == true
+		local changed = runtime.HasCaptain ~= nextHasCaptain
+		runtime.HasCaptain = nextHasCaptain
+		if changed then
+			refreshNormalIncomeDisplays(player)
+		end
 	end
 end
 
@@ -219,7 +432,11 @@ local function updatePromptText(player, runtime)
 	local crewMemberName = getCaptainAssignmentCrewName(player, assignment)
 	if crewMemberName ~= "" then
 		prompt.ObjectText = resolveDisplayName(player, crewMemberName)
-		prompt.ActionText = "Remove Captain"
+		local getEquippedCrewMemberToolInfo = callbacks.GetEquippedCrewMemberToolInfo
+		local equippedInfo = if typeof(getEquippedCrewMemberToolInfo) == "function"
+			then getEquippedCrewMemberToolInfo(player)
+			else nil
+		prompt.ActionText = if equippedInfo and equippedInfo.Name ~= "" then "Switch Captain" else "Remove Captain"
 	else
 		prompt.ObjectText = if state.BonusPercent > 0
 			then string.format("Captain's Spot (+%d%%)", state.BonusPercent)
@@ -237,6 +454,9 @@ local function renderAssignedCaptain(player, runtime)
 	if not state.Unlocked then
 		clearVisual(runtime)
 		updatePromptText(player, runtime)
+		setClaimTouchEnabled(runtime, false)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
 		return
 	end
 
@@ -258,6 +478,9 @@ local function renderAssignedCaptain(player, runtime)
 	if not hasCaptain then
 		clearVisual(runtime)
 		updatePromptText(player, runtime)
+		setClaimTouchEnabled(runtime, true)
+		updateCaptainMoneyText(player, runtime, assignment)
+		updateCaptainLevelUpUI(player, runtime, assignment, true)
 		return
 	end
 
@@ -265,6 +488,8 @@ local function renderAssignedCaptain(player, runtime)
 	if typeof(spawnCrewMember) ~= "function" then
 		logCrewSwitchFailure(player, "captain_visual_refresh_failed", "missing_spawn_callback")
 		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime, assignment)
+		updateCaptainLevelUpUI(player, runtime, assignment, true)
 		return
 	end
 
@@ -277,6 +502,48 @@ local function renderAssignedCaptain(player, runtime)
 		)
 	end
 	updatePromptText(player, runtime)
+	setClaimTouchEnabled(runtime, true)
+	updateCaptainMoneyText(player, runtime, assignment)
+	updateCaptainLevelUpUI(player, runtime, assignment, true)
+end
+
+local function getCaptainPlacementCandidate(player, equippedInfo, options)
+	options = if typeof(options) == "table" then options else {}
+	if not equippedInfo or equippedInfo.Name == "" then
+		return nil, nil, false, "no_equipped_crewmate"
+	end
+
+	local tutorialInstanceId, tutorialInstance
+	if options.AllowTutorialFallback ~= false and typeof(callbacks.FindAvailableTutorialPlacementReward) == "function" then
+		tutorialInstanceId, tutorialInstance = callbacks.FindAvailableTutorialPlacementReward(player, equippedInfo.Name)
+	end
+	if tutorialInstance then
+		return tostring(tutorialInstanceId or ""), tutorialInstance, true, nil
+	end
+
+	if
+		options.SkipInventoryPreflight ~= true
+		and typeof(callbacks.GetInventoryQuantity) == "function"
+		and callbacks.GetInventoryQuantity(player, equippedInfo.Name) < 1
+	then
+		return nil, nil, false, "no_inventory"
+	end
+
+	if options.SkipInventoryPreflight ~= true and typeof(callbacks.CanEquipCrewMember) == "function" then
+		local quickSlotUnlocked = callbacks.CanEquipCrewMember(player, equippedInfo.Name)
+		if not quickSlotUnlocked then
+			if typeof(callbacks.PromptUnlockForCrewMember) == "function" then
+				callbacks.PromptUnlockForCrewMember(player, equippedInfo.Name)
+			end
+			return nil, nil, false, "quick_slot_locked"
+		end
+	end
+
+	if equippedInfo.InstanceId == "" then
+		return nil, nil, false, "incoming_instance_missing"
+	end
+
+	return equippedInfo.InstanceId, nil, false, nil
 end
 
 local function assignEquippedCaptain(player, runtime)
@@ -284,21 +551,21 @@ local function assignEquippedCaptain(player, runtime)
 	local equippedInfo = if typeof(getEquippedCrewMemberToolInfo) == "function"
 		then getEquippedCrewMemberToolInfo(player)
 		else nil
-	if not equippedInfo or equippedInfo.Name == "" then
-		logCrewSwitchFailure(player, "no_equipped_crewmate", "captain_place_rejected")
-		return
-	end
-
-	if equippedInfo.InstanceId == "" then
-		logCrewSwitchFailure(player, "incoming_instance_missing", "captain_tool_missing_instance_id")
+	local candidateInstanceId, _, isTutorialPlacement, candidateReason = getCaptainPlacementCandidate(player, equippedInfo)
+	if not candidateInstanceId then
+		logCrewSwitchFailure(player, tostring(candidateReason or "captain_place_rejected"), "captain_place_rejected")
+		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
 		return
 	end
 
 	local placedInstanceId, placedInstance, placeReason = CrewSlotAssignmentReconciler.AssignCaptain(
 		player,
-		equippedInfo.InstanceId,
+		candidateInstanceId,
 		{
 			ExpectedIncomingStorageName = equippedInfo.Name,
+			ClearTutorialMetadataAfterAssign = isTutorialPlacement == true,
 			Source = "captain_prompt_assign",
 			SourcePath = "captain_prompt_assign",
 		}
@@ -313,7 +580,7 @@ local function assignEquippedCaptain(player, runtime)
 		callbacks.ClearCrewRecordCache(player)
 	end
 	if typeof(callbacks.GetCrewMemberLevel) == "function" then
-		callbacks.GetCrewMemberLevel(player, placedInstance.StorageName or equippedInfo.Name)
+		callbacks.GetCrewMemberLevel(player, placedInstanceId)
 	end
 	setPlacementPickupGuard(player)
 
@@ -334,9 +601,80 @@ local function assignEquippedCaptain(player, runtime)
 		StandName = CAPTAIN_SLOT_KEY,
 		CrewMemberName = tostring(placedInstance.StorageName or equippedInfo.Name),
 		CrewMemberInstanceId = tostring(placedInstanceId),
+		TutorialPlacement = isTutorialPlacement == true,
+		TutorialRewardConverted = isTutorialPlacement == true,
 	})
 	setRuntimeHasCaptain(player, true)
 	updatePromptText(player, runtime)
+	updateCaptainMoneyText(player, runtime)
+	updateCaptainLevelUpUI(player, runtime, nil, true)
+end
+
+local function switchEquippedCaptain(player, runtime, equippedInfo)
+	local candidateInstanceId, _, isTutorialPlacement, candidateReason = getCaptainPlacementCandidate(player, equippedInfo, {
+		AllowTutorialFallback = false,
+		SkipInventoryPreflight = true,
+	})
+	if not candidateInstanceId then
+		logCrewSwitchFailure(player, tostring(candidateReason or "captain_switch_rejected"), "captain_switch_rejected")
+		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
+		return
+	end
+
+	local incomingInstanceId, incomingInstance, outgoingInstanceId, outgoingInstance, switchReason =
+		CrewSlotAssignmentReconciler.SwapCaptain(player, candidateInstanceId, {
+			ExpectedIncomingStorageName = equippedInfo.Name,
+			ClearIncomingTutorialMetadataAfterAssign = isTutorialPlacement == true,
+			Source = "captain_prompt_switch",
+			SourcePath = "captain_prompt_switch",
+		})
+	if not incomingInstance then
+		logCrewSwitchFailure(player, tostring(switchReason or "captain_switch_failed"))
+		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
+		return
+	end
+
+	if typeof(callbacks.ClearCrewRecordCache) == "function" then
+		callbacks.ClearCrewRecordCache(player)
+	end
+	if typeof(callbacks.GetCrewMemberLevel) == "function" then
+		callbacks.GetCrewMemberLevel(player, incomingInstanceId)
+	end
+	setPlacementPickupGuard(player)
+
+	local spawnCrewMember = callbacks.SpawnCrewMember
+	if typeof(spawnCrewMember) == "function" then
+		local placedModel, visualReason = spawnCrewMember(player, runtime.CaptainSpot, runtime.Handle, incomingInstance.StorageName)
+		if not placedModel then
+			logCrewSwitchFailure(
+				player,
+				"captain_visual_refresh_failed",
+				string.format("incomingInstanceId=%s reason=%s", tostring(incomingInstanceId), tostring(visualReason or "unknown"))
+			)
+		end
+	end
+
+	if typeof(callbacks.EquipCrewMemberToolByInstanceId) == "function" then
+		callbacks.EquipCrewMemberToolByInstanceId(player, outgoingInstanceId, outgoingInstance and outgoingInstance.StorageName or "")
+	end
+
+	QuestSignals.Record(player, "PlaceOnStand", 1, {
+		Source = "CaptainPlacement",
+		StandName = CAPTAIN_SLOT_KEY,
+		CrewMemberName = tostring(incomingInstance.StorageName or equippedInfo.Name),
+		CrewMemberInstanceId = tostring(incomingInstanceId),
+		SwitchPlacement = true,
+		TutorialPlacement = isTutorialPlacement == true,
+		TutorialRewardConverted = isTutorialPlacement == true,
+	})
+	setRuntimeHasCaptain(player, true)
+	updatePromptText(player, runtime)
+	updateCaptainMoneyText(player, runtime)
+	updateCaptainLevelUpUI(player, runtime, nil, true)
 end
 
 local function releaseAssignedCaptain(player, runtime)
@@ -356,6 +694,8 @@ local function releaseAssignedCaptain(player, runtime)
 		clearVisual(runtime)
 		setRuntimeHasCaptain(player, false)
 		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
 		return
 	end
 
@@ -368,6 +708,8 @@ local function releaseAssignedCaptain(player, runtime)
 		callbacks.EquipCrewMemberToolByInstanceId(player, releasedInstanceId, releasedInstance.StorageName)
 	end
 	updatePromptText(player, runtime)
+	updateCaptainMoneyText(player, runtime)
+	updateCaptainLevelUpUI(player, runtime, nil, true)
 end
 
 local function bindPrompt(player, activeShip, runtime)
@@ -401,8 +743,16 @@ local function bindPrompt(player, activeShip, runtime)
 				return
 			end
 
+			local getEquippedCrewMemberToolInfo = callbacks.GetEquippedCrewMemberToolInfo
+			local equippedInfo = if typeof(getEquippedCrewMemberToolInfo) == "function"
+				then getEquippedCrewMemberToolInfo(player)
+				else nil
 			if CaptainSlotRuntime.HasAssignedCaptain(player) then
-				releaseAssignedCaptain(player, runtime)
+				if equippedInfo and equippedInfo.Name ~= "" then
+					switchEquippedCaptain(player, runtime, equippedInfo)
+				else
+					releaseAssignedCaptain(player, runtime)
+				end
 			else
 				assignEquippedCaptain(player, runtime)
 			end
@@ -413,6 +763,202 @@ local function bindPrompt(player, activeShip, runtime)
 				player.Name,
 				tostring(err)
 			))
+		end
+	end)
+end
+
+local function fireMoneyCollected(player, captainSpot, collected, crewMemberName)
+	if typeof(callbacks.FireMoneyCollected) ~= "function" then
+		return
+	end
+
+	local payload = nil
+	if typeof(callbacks.BuildIncomeToastDisplayPayload) == "function" then
+		payload = callbacks.BuildIncomeToastDisplayPayload(player, crewMemberName)
+	end
+
+	callbacks.FireMoneyCollected(player, captainSpot, collected, payload)
+end
+
+local function collectCaptainIncome(player, activeShip, runtime)
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		return
+	end
+
+	runtime.State = getCaptainSlotState(player)
+	if not runtime.State.Unlocked then
+		updatePromptText(player, runtime)
+		setClaimTouchEnabled(runtime, false)
+		updateCaptainMoneyText(player, runtime)
+		return
+	end
+
+	if activeShip:GetAttribute("OwnerUserId") ~= player.UserId then
+		return
+	end
+
+	local assignment = getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		updateCaptainMoneyText(player, runtime, assignment)
+		return
+	end
+
+	local baseToCollect = getCaptainIncomeToCollect(player, assignment)
+	if baseToCollect <= 0 then
+		updateCaptainMoneyText(player, runtime, assignment)
+		return
+	end
+
+	local collectMultiplier = getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+	local collected = IncomeClaimMath.GetWholeClaimableAmount(baseToCollect, collectMultiplier)
+	if collected <= 0 then
+		updateCaptainMoneyText(player, runtime, assignment)
+		return
+	end
+
+	local remainingRawIncome = IncomeClaimMath.GetRawRemainderAfterClaim(baseToCollect, collectMultiplier, collected)
+	if not setCaptainIncomeToCollect(player, remainingRawIncome) then
+		return
+	end
+
+	dmAdd(player, CurrencyUtil.getPrimaryPath(), collected)
+	dmAdd(player, CurrencyUtil.getTotalPath(), collected)
+	QuestSignals.Record(player, "EarnBeli", collected, {
+		Source = "CaptainIncome",
+		StandName = CAPTAIN_SLOT_KEY,
+	})
+	fireMoneyCollected(player, runtime.CaptainSpot, collected, crewMemberName)
+	updateCaptainMoneyText(player, runtime)
+end
+
+local function bindClaimHitBox(player, activeShip, runtime)
+	if not runtime or not runtime.ClaimHitBox then
+		return
+	end
+
+	local zone = runtime.ClaimHitBox
+	if runtime.Connections.ClaimTouched and runtime.Connections.ClaimTouched.Connected and runtime.BoundClaimHitBox == zone then
+		return
+	end
+
+	if runtime.Connections.ClaimTouched and runtime.Connections.ClaimTouched.Connected then
+		runtime.Connections.ClaimTouched:Disconnect()
+	end
+
+	runtime.BoundClaimHitBox = zone
+	runtime.Connections.ClaimTouched = zone.Touched:Connect(function(hit)
+		if not hit or hit.Name ~= "HumanoidRootPart" then
+			return
+		end
+
+		local character = hit.Parent
+		if not character then
+			return
+		end
+
+		local touchingPlayer = Players:GetPlayerFromCharacter(character)
+		if touchingPlayer ~= player then
+			return
+		end
+
+		claimTouchDebounce[player] = claimTouchDebounce[player] or {}
+		local now = os.clock()
+		local last = claimTouchDebounce[player][zone]
+		if last and (now - last) < CLAIM_TOUCH_DEBOUNCE_SECONDS then
+			return
+		end
+		claimTouchDebounce[player][zone] = now
+
+		collectCaptainIncome(player, activeShip, runtime)
+	end)
+end
+
+local function syncCaptainOverhead(player, runtime, crewMemberName)
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		return
+	end
+	if typeof(callbacks.SyncPlacedOverheadMetadata) ~= "function" then
+		return
+	end
+
+	local placedModel = runtime.CaptainSpot:FindFirstChild("PlacedCrewMember")
+	if placedModel and placedModel:IsA("Model") then
+		callbacks.SyncPlacedOverheadMetadata(player, runtime.CaptainSpot, crewMemberName, placedModel)
+	end
+end
+
+local function bankCaptainIncome(player, runtime)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent == nil then
+		CaptainSlotRuntime.CleanupPlayer(player)
+		return
+	end
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		CaptainSlotRuntime.CleanupPlayer(player)
+		return
+	end
+	if not runtime.ActiveShip or runtime.ActiveShip.Parent == nil or runtime.ActiveShip:GetAttribute("OwnerUserId") ~= player.UserId then
+		CaptainSlotRuntime.CleanupPlayer(player)
+		return
+	end
+
+	runtime.State = getCaptainSlotState(player)
+	if not runtime.State.Unlocked then
+		setClaimTouchEnabled(runtime, false)
+		clearVisual(runtime)
+		setRuntimeHasCaptain(player, false)
+		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, false)
+		return
+	end
+
+	setClaimTouchEnabled(runtime, true)
+
+	local assignment = getSavedCaptainAssignment(player)
+	local crewMemberName = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		setRuntimeHasCaptain(player, false)
+		updatePromptText(player, runtime)
+		updateCaptainMoneyText(player, runtime, assignment)
+		updateCaptainLevelUpUI(player, runtime, assignment, false)
+		return
+	end
+
+	setRuntimeHasCaptain(player, true)
+	local incomeDelta = getCaptainBankAmountPerTick(player, crewMemberName)
+	if incomeDelta > 0 then
+		local nextIncome = getCaptainIncomeToCollect(player, assignment) + incomeDelta
+		setCaptainIncomeToCollect(player, nextIncome)
+	end
+
+	syncCaptainOverhead(player, runtime, crewMemberName)
+	updatePromptText(player, runtime)
+	updateCaptainMoneyText(player, runtime)
+	updateCaptainLevelUpUI(player, runtime, assignment, false)
+end
+
+local function ensureIncomeLoopStarted()
+	if incomeLoopStarted then
+		return
+	end
+	incomeLoopStarted = true
+
+	task.spawn(function()
+		while true do
+			task.wait(INCOME_TICK_SECONDS)
+
+			for player, runtime in pairs(runtimeByPlayer) do
+				local ok, err = xpcall(function()
+					bankCaptainIncome(player, runtime)
+				end, debug.traceback)
+				if not ok then
+					warn(("[CaptainSlotRuntime] Captain income tick failed for %s: %s"):format(
+						player and player.Name or "unknown",
+						tostring(err)
+					))
+				end
+			end
 		end
 	end)
 end
@@ -452,6 +998,42 @@ function CaptainSlotRuntime.GetCaptainBonusMultiplier(player, upgradeLevel, rebi
 	return PlotUpgradeConfig.GetCaptainBonusMultiplier(upgradeLevel, rebirthCount)
 end
 
+function CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
+	local assignment = getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		return 0
+	end
+
+	return getCaptainBankAmountPerTick(player, crewMemberName)
+		* getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+end
+
+function CaptainSlotRuntime.GetCaptainCollectMultiplier(player)
+	local assignment = getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		return 1
+	end
+
+	return getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+end
+
+function CaptainSlotRuntime.GetCaptainIncomeToCollect(player)
+	local assignment = getSavedCaptainAssignment(player)
+	if not assignment then
+		return 0
+	end
+
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		return 0
+	end
+
+	return getCaptainIncomeToCollect(player, assignment)
+		* getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+end
+
 function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false, "invalid_player"
@@ -487,6 +1069,8 @@ function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 			CaptainSpot = captainSpot,
 			Handle = handle,
 			Prompt = prompt,
+			ClaimHitBox = nil,
+			MoneyLabel = nil,
 			Connections = {},
 			State = state,
 			HasCaptain = getSavedCaptainAssignment(player) ~= nil,
@@ -498,6 +1082,7 @@ function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 		runtime.Prompt = prompt
 		runtime.State = state
 	end
+	refreshRuntimeSlotRefs(runtime)
 
 	if not handle then
 		if state.Unlocked then
@@ -506,6 +1091,9 @@ function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 				captainSpot:GetFullName()
 			))
 		end
+		setClaimTouchEnabled(runtime, false)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
 		return false, "captain_handle_missing"
 	end
 
@@ -517,12 +1105,19 @@ function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 			))
 		end
 		clearVisual(runtime)
+		setClaimTouchEnabled(runtime, state.Unlocked)
+		updateCaptainMoneyText(player, runtime)
+		updateCaptainLevelUpUI(player, runtime, nil, true)
 		return false, "captain_prompt_missing"
 	end
 
 	prompt.Enabled = state.Unlocked
+	setClaimTouchEnabled(runtime, state.Unlocked)
+	bindClaimHitBox(player, activeShip, runtime)
 	bindPrompt(player, activeShip, runtime)
 	renderAssignedCaptain(player, runtime)
+	refreshNormalIncomeDisplays(player)
+	ensureIncomeLoopStarted()
 	return true
 end
 
@@ -530,6 +1125,7 @@ function CaptainSlotRuntime.CleanupPlayer(player)
 	local runtime = runtimeByPlayer[player]
 	if not runtime then
 		placementPickupGuardUntil[player] = nil
+		claimTouchDebounce[player] = nil
 		return
 	end
 
@@ -537,6 +1133,7 @@ function CaptainSlotRuntime.CleanupPlayer(player)
 	clearVisual(runtime)
 	runtimeByPlayer[player] = nil
 	placementPickupGuardUntil[player] = nil
+	claimTouchDebounce[player] = nil
 end
 
 return CaptainSlotRuntime

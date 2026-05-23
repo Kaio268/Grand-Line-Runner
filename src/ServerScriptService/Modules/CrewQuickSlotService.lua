@@ -547,6 +547,41 @@ function CrewQuickSlotService.CanGainCrewMemberBatch(player, grants, context)
 	return allowed, tonumber(fit.OccupiedStacks) or 0, slots.UnlockedSlots, slots.MaxSlots, tostring(fit.Reason or "unknown")
 end
 
+function CrewQuickSlotService.CanInventoryFit(player, crewMemberInventory, context)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, 0, 0, 0, "invalid_player"
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local occupiedStacks = #CrewInventoryStacks.BuildAvailableStacks(crewMemberInventory)
+	local allowed = occupiedStacks <= slots.UnlockedSlots
+
+	quickSlotDebug(
+		"inventoryFit %s player=%s context=%s occupied=%d unlocked=%d max=%d",
+		allowed and "allow" or "block",
+		player.Name,
+		tostring(context or "unknown"),
+		occupiedStacks,
+		slots.UnlockedSlots,
+		slots.MaxSlots
+	)
+
+	return allowed,
+		occupiedStacks,
+		slots.UnlockedSlots,
+		slots.MaxSlots,
+		if allowed then "ok" else "quick_slots_full"
+end
+
+function CrewQuickSlotService.CanInventoryFitOrNotify(player, crewMemberInventory, context)
+	local allowed, occupiedStacks, unlockedSlots, maxSlots, reason =
+		CrewQuickSlotService.CanInventoryFit(player, crewMemberInventory, context)
+	if not allowed then
+		CrewQuickSlotService.NotifyFull(player)
+	end
+	return allowed, occupiedStacks, unlockedSlots, maxSlots, reason
+end
+
 function CrewQuickSlotService.NotifyFull(player)
 	sendPopup(player, FULL_MESSAGE, ERROR_COLOR, true)
 end

@@ -51,7 +51,7 @@ local Config = {
 		Spawn = {
 			Name = "ShipSpawnPoint",
 			PreferredMarkerName = "Spawn",
-			MarkerNames = { "Spawn", "ShipSpawn", "SpawnPoint", "PlayerSpawn", "Ship Spawn", "SpawnLocation", "Captain's Spot" },
+			MarkerNames = { "Spawn", "spawn", "ShipSpawn", "SpawnPoint", "PlayerSpawn", "Ship Spawn", "SpawnLocation", "Captain's Spot" },
 			MarkerWorldOffset = Vector3.new(0, 4, 0),
 			Fallback = {
 				PositionScale = Vector3.new(0, 0.5, 0),
@@ -173,7 +173,7 @@ local Config = {
 			CaptainState = "unlocked",
 			CaptainBonusPercent = 5,
 			CaptainBonusLabel = "Captain's Spot +5%",
-			UpgradeRewardLabel = "Captain's Spot unlocked with a 5% captain bonus",
+			UpgradeRewardLabel = "Captain's Spot unlocked: Captain earns +5%",
 		},
 		[4] = {
 			ModelName = "Lvl 3 Ship",
@@ -182,7 +182,7 @@ local Config = {
 			CaptainState = "unlocked",
 			CaptainBonusPercent = 8,
 			CaptainBonusLabel = "Captain's Spot +8%",
-			UpgradeRewardLabel = "Lvl 3 Ship unlocks 12 normal crew slots and an 8% captain bonus",
+			UpgradeRewardLabel = "Lvl 3 Ship unlocks 12 normal crew slots and Captain earns +8%",
 		},
 		[5] = {
 			ModelName = "Lvl 3 Ship",
@@ -191,7 +191,7 @@ local Config = {
 			CaptainState = "upgraded",
 			CaptainBonusPercent = 12,
 			CaptainBonusLabel = "Captain's Spot +12%",
-			UpgradeRewardLabel = "Captain bonus upgraded to 12%",
+			UpgradeRewardLabel = "Captain Slot bonus upgraded to +12%",
 		},
 		[6] = {
 			ModelName = "Lvl 4 Ship",
@@ -200,7 +200,7 @@ local Config = {
 			CaptainState = "upgraded",
 			CaptainBonusPercent = 16,
 			CaptainBonusLabel = "Captain's Spot +16%",
-			UpgradeRewardLabel = "Lvl 4 Ship unlocks 16 normal crew slots and a 16% captain bonus",
+			UpgradeRewardLabel = "Lvl 4 Ship unlocks 16 normal crew slots and Captain earns +16%",
 		},
 		[7] = {
 			ModelName = "Lvl 4 Ship",
@@ -209,7 +209,7 @@ local Config = {
 			CaptainState = "upgraded",
 			CaptainBonusPercent = 20,
 			CaptainBonusLabel = "Captain's Spot +20%",
-			UpgradeRewardLabel = "Lvl 4 Ship expands to 24 normal crew slots and a 20% captain bonus",
+			UpgradeRewardLabel = "Lvl 4 Ship expands to 24 normal crew slots and Captain earns +20%",
 		},
 		[8] = {
 			ModelName = "Lvl 5 Ship",
@@ -218,7 +218,7 @@ local Config = {
 			CaptainState = "maxed",
 			CaptainBonusPercent = 25,
 			CaptainBonusLabel = "Captain's Spot +25%",
-			UpgradeRewardLabel = "Lvl 5 Ship reaches max captain bonus at 25%",
+			UpgradeRewardLabel = "Lvl 5 Ship reaches max Captain Slot bonus at +25%",
 		},
 	},
 }

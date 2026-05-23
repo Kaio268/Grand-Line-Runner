@@ -23,6 +23,7 @@ local crewMemberRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_REMOTE_NAME
 local crewMemberPreviewRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_PREVIEW_REMOTE_NAME, "RemoteFunction")
 local crewMemberResultRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_RESULT_REMOTE_NAME, "RemoteEvent")
 
+local CaptainSlotRuntime = require(game.ServerScriptService.Modules:WaitForChild("CaptainSlotRuntime"))
 local CrewFoodProgression = require(game.ServerScriptService.Modules:WaitForChild("CrewFoodProgression"))
 local CrewInstanceService = require(game.ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewMemberCanonicalReadGate = require(game.ServerScriptService.Modules:WaitForChild("CrewMemberCanonicalReadGate"))
@@ -38,6 +39,10 @@ local SUCCESS_COLOR = Color3.fromRGB(92, 230, 126)
 local INFO_COLOR = Color3.fromRGB(111, 188, 255)
 local ERROR_COLOR = Color3.fromRGB(255, 94, 94)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
+local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
+local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
+local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
+local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
 
 local function pushResourceState(player)
 	if GrandLineRushVerticalSliceService and typeof(GrandLineRushVerticalSliceService.PushState) == "function" then
@@ -56,6 +61,10 @@ local function getStandName(payload)
 		rawStandName = tostring(payload.StandName or "")
 	elseif typeof(payload) == "string" then
 		rawStandName = payload
+	end
+
+	if rawStandName == CAPTAIN_SLOT_KEY then
+		return CAPTAIN_SLOT_KEY
 	end
 
 	return ShipSlotGuiIdentity.NormalizeSlotKey(rawStandName) or ""
@@ -167,6 +176,30 @@ local function getPlayerRebirthCount(player)
 end
 
 local function findSlotGui(playerGui, standName)
+	if standName == CAPTAIN_SLOT_KEY then
+		local direct = playerGui:FindFirstChild(CAPTAIN_RUNTIME_GUI_NAME)
+		if
+			direct
+			and direct:IsA("SurfaceGui")
+			and direct:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+			and tostring(direct:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+		then
+			return direct
+		end
+
+		for _, gui in ipairs(playerGui:GetChildren()) do
+			if
+				gui:IsA("SurfaceGui")
+				and gui:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
+				and tostring(gui:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+			then
+				return gui
+			end
+		end
+
+		return nil
+	end
+
 	local slotKey = ShipSlotGuiIdentity.NormalizeSlotKey(standName)
 	if not slotKey then
 		return nil
@@ -226,6 +259,34 @@ local function validateOwnedShipSlot(player, standName)
 	return true
 end
 
+local function validateOwnedCaptainSlot(player)
+	local activeShip = ShipRuntimeService.GetActiveShip(player)
+	if not activeShip then
+		return false, "active_ship_not_found", "Your ship is not ready yet."
+	end
+
+	if activeShip:GetAttribute("OwnerUserId") ~= player.UserId then
+		return false, "ship_owner_mismatch", "This ship slot does not belong to you."
+	end
+
+	local captainSpot = ShipSlotService.GetCaptainSlot(activeShip)
+	if not captainSpot or not captainSpot:IsA("Model") then
+		return false, "slot_not_found", "Captain's Spot is not available on your current ship."
+	end
+
+	local upgradeLevel = getPlayerUpgradeLevel(player)
+	local rebirthCount = getPlayerRebirthCount(player)
+	if not PlotUpgradeConfig.IsCaptainSlotUnlocked(upgradeLevel, rebirthCount) then
+		return false, "slot_locked", "Captain's Spot is locked."
+	end
+
+	if captainSpot:GetAttribute("ShipSlotUsable") == false then
+		return false, "slot_locked", "Captain's Spot is locked."
+	end
+
+	return true
+end
+
 local function updateStandGui(player, standName, progress)
 	if not progress then
 		return
@@ -269,6 +330,75 @@ local function resolveUpgradeContext(player, standName)
 		return false, buildFailurePayload("", "invalid_stand", "Stand could not be identified.")
 	end
 
+	if standName == CAPTAIN_SLOT_KEY then
+		local slotOk, slotError, slotMessage = validateOwnedCaptainSlot(player)
+		if not slotOk then
+			return false, buildFailurePayload(standName, slotError, slotMessage or "Captain's Spot is not available.")
+		end
+
+		local assignment = CaptainSlotRuntime.GetAssignment(player)
+		if typeof(assignment) ~= "table" then
+			return false, buildFailurePayload(standName, "missing_crew_member", "Assign a captain first.")
+		end
+
+		local crewMemberInstanceId = tostring(
+			assignment.CrewMemberInstanceId or assignment.InstanceId or assignment.CrewInstanceId or ""
+		)
+		local crewMemberId = tostring(
+			assignment.CrewMemberName
+				or assignment.CrewMemberId
+				or assignment.StorageName
+				or assignment.LegacyStorageName
+				or ""
+		)
+		if crewMemberInstanceId == "" and crewMemberId == "" then
+			return false, buildFailurePayload(standName, "missing_crew_member", "Assign a captain first.")
+		end
+
+		local instanceData = nil
+		if crewMemberInstanceId ~= "" then
+			local _, resolvedInstance = CrewInstanceService.GetInstance(player, crewMemberInstanceId)
+			instanceData = resolvedInstance
+		end
+		if not instanceData then
+			local crewMemberInventory = CrewInstanceService.GetCrewInventory(player)
+			if typeof(crewMemberInventory) == "table" and typeof(crewMemberInventory.ById) == "table" then
+				for candidateInstanceId, candidate in pairs(crewMemberInventory.ById) do
+					if
+						typeof(candidate) == "table"
+						and tostring(candidate.AssignedStand or "") == CAPTAIN_SLOT_KEY
+						and (
+							crewMemberId == ""
+							or tostring(candidate.StorageName or candidate.CrewMemberId or candidate.LegacyStorageName or "") == crewMemberId
+						)
+					then
+						crewMemberInstanceId = tostring(candidateInstanceId)
+						instanceData = candidate
+						break
+					end
+				end
+			end
+		end
+		if not instanceData or tostring(instanceData.AssignedStand or "") ~= CAPTAIN_SLOT_KEY then
+			return false, buildFailurePayload(standName, "missing_crew_member", "Captain assignment could not be loaded.")
+		end
+
+		crewMemberId = tostring(instanceData.StorageName or instanceData.CrewMemberId or crewMemberId)
+		local progressTarget = crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberId
+		local progress = CrewFoodProgression.GetProgress(player, progressTarget)
+		if not progress then
+			return false, buildFailurePayload(standName, "missing_crew_member", "Captain progress could not be loaded.")
+		end
+
+		return true, {
+			StandName = standName,
+			CrewMemberId = crewMemberId,
+			CrewMemberInstanceId = crewMemberInstanceId,
+			ProgressTarget = progressTarget,
+			Progress = progress,
+		}
+	end
+
 	local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 	local crewMemberId = standData and standData.CrewMemberName
 	if typeof(crewMemberId) ~= "string" or crewMemberId == "" then
@@ -301,6 +431,11 @@ local function resolveUpgradeContext(player, standName)
 end
 
 local function syncStandStateForProgress(player, fallbackStandName, progress)
+	if fallbackStandName == CAPTAIN_SLOT_KEY then
+		updateStandGui(player, fallbackStandName, progress)
+		return
+	end
+
 	local playerGui = player:FindFirstChild("PlayerGui")
 	local targetInstanceId = tostring(progress.InstanceId or "")
 	local updatedAnyStand = false

@@ -149,19 +149,43 @@ local function refreshCrewMemberShadow(_player, _reason)
 end
 
 local CAPTAIN_SLOT_KEY = "Captain"
+local SHIP_CAPTAIN_SLOT_PATH = "Ship.CaptainSlot"
+
+local function syncCaptainSlotProgress(player, instanceId, instanceData, level)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" or typeof(instanceData) ~= "table" then
+		return false
+	end
+
+	local captainSlot = DataManager:GetValue(player, SHIP_CAPTAIN_SLOT_PATH)
+	if typeof(captainSlot) ~= "table" then
+		return false
+	end
+	if tostring(captainSlot.CrewMemberInstanceId or captainSlot.InstanceId or captainSlot.CrewInstanceId or "") ~= instanceId then
+		return false
+	end
+
+	local nextCaptainSlot = cloneValue(captainSlot)
+	nextCaptainSlot.Level = math.max(1, math.floor(tonumber(level) or tonumber(instanceData.Level) or 1))
+	nextCaptainSlot.CurrentXP = math.max(0, math.floor(tonumber(instanceData.CurrentXP) or 0))
+	return DataManager:SetValue(player, SHIP_CAPTAIN_SLOT_PATH, nextCaptainSlot) ~= false
+end
 
 function Module.RefreshProgressionShadow(player, reason)
 	return refreshCrewMemberShadow(player, tostring(reason or "food_progression"))
 end
 
-local function syncAssignedStandLevel(player, instanceData, level)
+local function syncAssignedStandLevel(player, instanceData, level, instanceId)
 	if typeof(instanceData) ~= "table" then
 		return false
 	end
 
 	local assignedStand = tostring(instanceData.AssignedStand or "")
-	if assignedStand == "" or assignedStand == CAPTAIN_SLOT_KEY then
+	if assignedStand == "" then
 		return false
+	end
+	if assignedStand == CAPTAIN_SLOT_KEY then
+		return syncCaptainSlotProgress(player, instanceId, instanceData, level)
 	end
 
 	local safeLevel = math.max(1, math.floor(tonumber(level) or tonumber(instanceData.Level) or 1))
@@ -317,7 +341,7 @@ function Module.GetProgress(player, crewMemberId)
 		local updated = CrewInstanceService.UpdateProgress(player, instanceId, level, currentXP)
 		if updated then
 			instanceData = updated
-			syncAssignedStandLevel(player, instanceData, level)
+			syncAssignedStandLevel(player, instanceData, level, instanceId)
 			Module.RefreshProgressionShadow(player, "data_repair_progression")
 		end
 	end
@@ -534,7 +558,7 @@ function Module.ApplyAutoFeed(player, crewMemberId, options)
 		}
 	end
 	if updated then
-		syncAssignedStandLevel(player, updated, plan.LevelAfter)
+		syncAssignedStandLevel(player, updated, plan.LevelAfter, progress.InstanceId)
 		if options.DeferShadowRefresh ~= true then
 			refreshCrewMemberShadow(player, "food_progression")
 		end
@@ -651,7 +675,7 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 		}
 	end
 	if updated then
-		syncAssignedStandLevel(player, updated, levelAfter)
+		syncAssignedStandLevel(player, updated, levelAfter, progress.InstanceId)
 		if options.DeferShadowRefresh ~= true then
 			refreshCrewMemberShadow(player, "food_progression")
 		end

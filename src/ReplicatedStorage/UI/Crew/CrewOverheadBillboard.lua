@@ -5,7 +5,6 @@ local React = require(Packages:WaitForChild("React"))
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
-local Shorten = require(Modules:WaitForChild("Shorten"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
@@ -23,7 +22,7 @@ local DIAMOND_VARIANT = Color3.fromRGB(128, 236, 255)
 local SHADOW = Color3.fromRGB(0, 0, 0)
 
 local function formatIncome(value)
-	return Shorten.roundNumber(math.max(0, math.floor((tonumber(value) or 0) + 0.5))) .. CurrencyUtil.getPerSecondSuffix()
+	return CurrencyUtil.formatIncomeCompactPerSecond(math.max(0, tonumber(value) or 0))
 end
 
 local function formatRemaining(seconds)
@@ -226,10 +225,16 @@ local function CrewOverheadBillboard(props)
 				Size = UDim2.fromOffset(incomeWidth, pillHeight),
 				Text = formatIncome(entry.incomePerSecond),
 				TextColor3 = incomeColor,
+				TextScaled = true,
 				TextSize = incomeTextSize,
 				TextStrokeColor3 = SHADOW,
 				TextStrokeTransparency = 0.3,
 				TextXAlignment = Enum.TextXAlignment.Right,
+			}, {
+				TextSizeConstraint = e("UITextSizeConstraint", {
+					MaxTextSize = incomeTextSize,
+					MinTextSize = 7,
+				}),
 			}),
 			SlotBonus = if hasSlotBonus
 				then e("Frame", {
