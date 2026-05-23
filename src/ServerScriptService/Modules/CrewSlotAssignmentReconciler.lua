@@ -277,6 +277,15 @@ local function findAssignedInventoryInstance(crewMemberInventory, slotKey)
 	return nil, nil
 end
 
+local function inventoryHasInstance(crewMemberInventory, instanceId)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" or typeof(crewMemberInventory) ~= "table" or typeof(crewMemberInventory.ById) ~= "table" then
+		return false
+	end
+
+	return typeof(crewMemberInventory.ById[instanceId]) == "table"
+end
+
 local function getShipSlots(player)
 	local shipSlots = DataManager:GetValue(player, SHIP_SLOTS_PATH)
 	if typeof(shipSlots) == "table" then
@@ -414,6 +423,178 @@ local function clearAssignmentTables(player)
 	end
 
 	return true
+end
+
+local function getStorageNameFromStandRow(row)
+	if typeof(row) ~= "table" then
+		return ""
+	end
+
+	return firstNonEmpty(row.CrewMemberName, row.CrewMemberId, row.StorageName, row.LegacyStorageName)
+end
+
+local function materializeAssignedCrewInstance(player, storageName, assignedStand, level, currentXP, sourcePath)
+	storageName = tostring(storageName or "")
+	assignedStand = tostring(assignedStand or "")
+	if storageName == "" or assignedStand == "" then
+		return false, "missing_assignment_identity"
+	end
+
+	local createdIds, createReason = CrewInstanceService.CreateInstances(player, storageName, 1, {
+		AssignedStand = assignedStand,
+		Level = math.max(1, math.floor(tonumber(level) or 1)),
+		CurrentXP = math.max(0, math.floor(tonumber(currentXP) or 0)),
+		Source = tostring(sourcePath or "rebirth_materialize_assigned"),
+		_QuickSlotCapacityReserved = true,
+	})
+
+	if typeof(createdIds) ~= "table" or createdIds[1] == nil then
+		return false, tostring(createReason or "failed_to_create_inventory_instance")
+	end
+
+	return true, tostring(createdIds[1])
+end
+
+local function applyAssignedRowProgress(instanceData, row)
+	if typeof(instanceData) ~= "table" or typeof(row) ~= "table" then
+		return false
+	end
+
+	local changed = false
+	local currentLevel = math.max(1, math.floor(tonumber(instanceData.Level) or 1))
+	local rowLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or currentLevel))
+	if rowLevel > currentLevel then
+		instanceData.Level = rowLevel
+		changed = true
+	end
+
+	local rowCurrentXP = tonumber(row.CurrentXP)
+	if rowCurrentXP ~= nil then
+		rowCurrentXP = math.max(0, math.floor(rowCurrentXP))
+		if rowCurrentXP > math.max(0, math.floor(tonumber(instanceData.CurrentXP) or 0)) then
+			instanceData.CurrentXP = rowCurrentXP
+			changed = true
+		end
+	end
+
+	return changed
+end
+
+local function materializeAssignedShipCrewForRebirth(player, crewMemberInventory, options)
+	options = if typeof(options) == "table" then options else {}
+	local materialized = 0
+	local skipped = 0
+	local progressMerged = 0
+	local failures = {}
+	local seenAssignments = {}
+
+	local function rememberAssignment(assignedStand)
+		assignedStand = tostring(assignedStand or "")
+		if assignedStand ~= "" then
+			seenAssignments[assignedStand] = true
+		end
+	end
+
+	for _, instanceData in pairs(crewMemberInventory.ById) do
+		if typeof(instanceData) == "table" then
+			rememberAssignment(instanceData.AssignedStand)
+		end
+	end
+
+	local function ensureFromRow(assignedStand, row, sourcePath)
+		assignedStand = tostring(assignedStand or "")
+		if assignedStand == "" or typeof(row) ~= "table" then
+			return
+		end
+		if seenAssignments[assignedStand] == true then
+			local existingInstanceId, existingInstanceData = findAssignedInventoryInstance(crewMemberInventory, assignedStand)
+			if existingInstanceId and applyAssignedRowProgress(existingInstanceData, row) then
+				crewMemberInventory.ById[tostring(existingInstanceId)] = existingInstanceData
+				progressMerged += 1
+			end
+			skipped += 1
+			return
+		end
+
+		local rowInstanceId = firstNonEmpty(row.CrewMemberInstanceId, row.InstanceId, row.CrewInstanceId)
+		if rowInstanceId ~= "" and inventoryHasInstance(crewMemberInventory, rowInstanceId) then
+			local existingInstanceData = crewMemberInventory.ById[tostring(rowInstanceId)]
+			if applyAssignedRowProgress(existingInstanceData, row) then
+				crewMemberInventory.ById[tostring(rowInstanceId)] = existingInstanceData
+				progressMerged += 1
+			end
+			skipped += 1
+			seenAssignments[assignedStand] = true
+			return
+		end
+
+		local storageName = getStorageNameFromStandRow(row)
+		if storageName == "" then
+			skipped += 1
+			warn(("[CrewSlotAssignmentReconciler] Cannot transfer assigned crew for %s during rebirth: missing crew identity in %s"):format(
+				player.Name,
+				assignedStand
+			))
+			return
+		end
+
+		local ok, result = materializeAssignedCrewInstance(
+			player,
+			storageName,
+			assignedStand,
+			row.StandLevel or row.Level,
+			row.CurrentXP,
+			sourcePath
+		)
+		if ok then
+			materialized += 1
+			seenAssignments[assignedStand] = true
+			local refreshedInventory = CrewInstanceService.GetCrewInventory(player)
+			if typeof(refreshedInventory) == "table" and typeof(refreshedInventory.ById) == "table" then
+				crewMemberInventory = refreshedInventory
+			end
+		else
+			failures[#failures + 1] = string.format("%s:%s", assignedStand, tostring(result))
+		end
+	end
+
+	for standName, standData in pairs(CrewStandIncomeAuthority.GetAllStandData(player)) do
+		if hasStandAssignment(standData) then
+			local slotKey = normalizeSlotKey(standName)
+			if slotKey then
+				ensureFromRow(slotKey, standData, tostring(options.SourcePath or "rebirth_materialize_income_row"))
+			end
+		end
+	end
+
+	for slotName, slotData in pairs(getShipSlots(player)) do
+		local slotKey = normalizeSlotKey(slotName)
+		local row = makeStandRowFromLegacySlot(slotData)
+		if slotKey and row then
+			ensureFromRow(slotKey, row, tostring(options.SourcePath or "rebirth_materialize_ship_slot"))
+		end
+	end
+
+	local captainSlot = getCaptainSlotData(player)
+	if hasCaptainAssignment(captainSlot) then
+		ensureFromRow(CAPTAIN_SLOT_KEY, captainSlot, tostring(options.SourcePath or "rebirth_materialize_captain_slot"))
+	end
+
+	if #failures > 0 then
+		return false, "failed_to_transfer_assigned_crew:" .. table.concat(failures, ","), crewMemberInventory, {
+			MaterializedCount = materialized,
+			SkippedCount = skipped,
+			ProgressMergedCount = progressMerged,
+			FailureCount = #failures,
+		}
+	end
+
+	return true, "ok", crewMemberInventory, {
+		MaterializedCount = materialized,
+		SkippedCount = skipped,
+		ProgressMergedCount = progressMerged,
+		FailureCount = 0,
+	}
 end
 
 local function migrateShipSlotMirror(player, slotKeys)
@@ -932,6 +1113,13 @@ function CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, options
 		return false, "missing_crew_inventory"
 	end
 
+	local materializeOk, materializeReason, materializedInventory, materializeSummary =
+		materializeAssignedShipCrewForRebirth(player, crewMemberInventory, options)
+	if materializeOk == false then
+		return false, tostring(materializeReason or "failed_to_transfer_assigned_crew")
+	end
+	crewMemberInventory = materializedInventory
+
 	local now = os.time()
 	local unassigned = 0
 	for _, instanceData in pairs(crewMemberInventory.ById) do
@@ -947,7 +1135,7 @@ function CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, options
 		return false, reason
 	end
 
-	if unassigned > 0 then
+	if unassigned > 0 or (materializeSummary and tonumber(materializeSummary.ProgressMergedCount) or 0) > 0 then
 		local saved, saveReason = CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
 			SourcePath = tostring(options.SourcePath or "rebirth_slot_reset_release_assigned"),
 		})
@@ -966,6 +1154,9 @@ function CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, options
 	return true, "ok", {
 		Source = tostring(options.Source or "rebirth_slot_reset"),
 		UnassignedCount = unassigned,
+		MaterializedCount = materializeSummary and materializeSummary.MaterializedCount or 0,
+		MaterializedSkippedCount = materializeSummary and materializeSummary.SkippedCount or 0,
+		ProgressMergedCount = materializeSummary and materializeSummary.ProgressMergedCount or 0,
 		ClearedCrewMemberIncome = true,
 		ClearedShipSlots = true,
 		ClearedCaptainSlot = true,

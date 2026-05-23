@@ -194,6 +194,10 @@ local CATEGORY_DEFS = {
 		label = "Devil Fruits",
 		accentColor = Color3.fromRGB(239, 129, 156),
 	},
+	Crewmates = {
+		label = "Crewmates",
+		accentColor = CREW_QUICK_ACCENT,
+	},
 	Resources = {
 		label = "Resources",
 		accentColor = Color3.fromRGB(241, 184, 86),
@@ -2355,6 +2359,8 @@ local function buildRenderData()
 	local activeKeys
 	if uiState.activeCategory == "DevilFruits" then
 		activeKeys = devilFruitList
+	elseif uiState.activeCategory == "Crewmates" then
+		activeKeys = crewList
 	elseif uiState.activeCategory == "Resources" then
 		activeKeys = resourceList
 	else
@@ -2383,6 +2389,12 @@ local function buildRenderData()
 			label = CATEGORY_DEFS.DevilFruits.label,
 			count = #devilFruitList,
 			accentColor = CATEGORY_DEFS.DevilFruits.accentColor,
+		},
+		{
+			key = "Crewmates",
+			label = CATEGORY_DEFS.Crewmates.label,
+			count = #crewList,
+			accentColor = CATEGORY_DEFS.Crewmates.accentColor,
 		},
 		{
 			key = "Resources",

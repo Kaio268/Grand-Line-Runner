@@ -86,14 +86,6 @@ local function resetPlayerShipData(player, options)
 		return false, "failed_to_reset_speed"
 	end
 
-	if DataManager:SetValue(player, "Ship", {
-		MaxSlots = GrandLineRushEconomy.Rules.MaxShipSlots,
-		Slots = {},
-		CaptainSlot = {},
-	}) == false then
-		return false, "failed_to_clear_ship_slot_assignments"
-	end
-
 	local resetOk, resetReason, resetSummary = CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, {
 		Source = tostring(options.Reason or "ship_reset"),
 		SourcePath = tostring(options.Reason or "ship_reset") .. "_release_assigned",
@@ -102,7 +94,21 @@ local function resetPlayerShipData(player, options)
 		return false, tostring(resetReason)
 	end
 
-	if resetSummary and tonumber(resetSummary.UnassignedCount) and resetSummary.UnassignedCount > 0 then
+	if DataManager:SetValue(player, "Ship", {
+		MaxSlots = GrandLineRushEconomy.Rules.MaxShipSlots,
+		Slots = {},
+		CaptainSlot = {},
+	}) == false then
+		return false, "failed_to_clear_ship_slot_assignments"
+	end
+
+	if resetSummary
+		and (
+			(tonumber(resetSummary.UnassignedCount) or 0) > 0
+			or (tonumber(resetSummary.MaterializedCount) or 0) > 0
+			or (tonumber(resetSummary.ProgressMergedCount) or 0) > 0
+		)
+	then
 		BountyService.RefreshPlayerBounty(player, CrewInstanceService.GetCrewInventory(player))
 	end
 
