@@ -36,6 +36,9 @@ local started = false
 local ATTR = ShipVisuals.Attributes
 local RUNTIME_POINTS = ShipVisuals.RuntimePoints or {}
 local RUNTIME_POINTS_FOLDER_NAME = tostring(RUNTIME_POINTS.FolderName or "ShipRuntimePoints")
+local OWNER_ONLY_ATTRIBUTE = ATTR.OwnerOnlyInteraction or "ShipOwnerOnlyInteraction"
+local INTERACTION_KIND_ATTRIBUTE = ATTR.InteractionKind or "ShipInteractionKind"
+local INTERACTION_KINDS = ShipVisuals.InteractionKinds or {}
 local WORLD_UP = Vector3.new(0, 1, 0)
 
 local function getRuntimeSpawnLocationName()
@@ -985,6 +988,32 @@ local function ensureHomeIndicator(homePart, player)
 	})
 end
 
+local function setAttributeIfChanged(instance, attributeName, value)
+	if not instance or instance:GetAttribute(attributeName) == value then
+		return
+	end
+
+	instance:SetAttribute(attributeName, value)
+end
+
+local function markOwnerOnlyInteraction(instance, activeShip, kind, slotKey)
+	if not instance or not activeShip then
+		return
+	end
+
+	local ownerUserId = activeShip:GetAttribute(ATTR.OwnerUserId)
+	if ownerUserId == nil then
+		return
+	end
+
+	setAttributeIfChanged(instance, OWNER_ONLY_ATTRIBUTE, true)
+	setAttributeIfChanged(instance, ATTR.OwnerUserId, ownerUserId)
+	setAttributeIfChanged(instance, INTERACTION_KIND_ATTRIBUTE, tostring(kind or ""))
+	if slotKey ~= nil then
+		setAttributeIfChanged(instance, ATTR.InteractionSlotKey or "ShipInteractionSlotKey", tostring(slotKey))
+	end
+end
+
 local function ensureGroupRewardPoint(folder, activeShip)
 	local config = RUNTIME_POINTS.GroupReward or {}
 	local modelName = tostring(config.Name or "GroupReward")
@@ -1020,6 +1049,10 @@ local function ensureGroupRewardPoint(folder, activeShip)
 	prompt.HoldDuration = 0
 	prompt.MaxActivationDistance = 12
 	prompt.RequiresLineOfSight = false
+
+	markOwnerOnlyInteraction(model, activeShip, INTERACTION_KINDS.GroupReward or "GroupReward")
+	markOwnerOnlyInteraction(hitbox, activeShip, INTERACTION_KINDS.GroupReward or "GroupReward")
+	markOwnerOnlyInteraction(prompt, activeShip, INTERACTION_KINDS.GroupReward or "GroupReward")
 	prompt.Enabled = true
 
 	model.PrimaryPart = hitbox
@@ -1600,6 +1633,7 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	clone.Name = getRuntimeName(player)
 	sanitizeRuntimeClone(clone)
 	applyRuntimeAttributes(clone, player, visual, upgradeLevel, positionIndex, position)
+	ShipSlotInteractionService.InitializeOwnerOnlyInteractions(player, clone)
 	warnIfMissingWalkableCollision(clone, visual)
 	clone:PivotTo(position.CFrame)
 	clone.Parent = activeShips

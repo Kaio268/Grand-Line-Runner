@@ -12,11 +12,16 @@ local ShipSlotInteractionService = {}
 local RUNTIME_GUI_ATTRIBUTE = ShipSlotGuiIdentity.RuntimeGuiAttribute
 local RUNTIME_GUI_SLOT_ATTRIBUTE = ShipSlotGuiIdentity.SlotNumberAttribute
 local RUNTIME_GUI_SHIP_ATTRIBUTE = "ShipSlotRuntimeShip"
+local OWNER_ONLY_ATTRIBUTE = ShipVisuals.Attributes.OwnerOnlyInteraction or "ShipOwnerOnlyInteraction"
+local OWNER_USER_ID_ATTRIBUTE = ShipVisuals.Attributes.OwnerUserId or "OwnerUserId"
+local INTERACTION_KIND_ATTRIBUTE = ShipVisuals.Attributes.InteractionKind or "ShipInteractionKind"
+local INTERACTION_SLOT_ATTRIBUTE = ShipVisuals.Attributes.InteractionSlotKey or "ShipInteractionSlotKey"
 local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
 local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
 local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
 local CAPTAIN_RUNTIME_GUI_SHIP_ATTRIBUTE = "ShipCaptainSlotRuntimeShip"
 local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
+local INTERACTION_KINDS = ShipVisuals.InteractionKinds or {}
 
 local SLOT_ATTRIBUTES = {
 	Visible = "ShipSlotVisible",
@@ -229,6 +234,87 @@ local function getLevelUpPart(slotModel)
 	end
 
 	return nil
+end
+
+local function setAttributeIfChanged(instance, attributeName, value)
+	if not instance or instance:GetAttribute(attributeName) == value then
+		return
+	end
+
+	instance:SetAttribute(attributeName, value)
+end
+
+local function markOwnerOnlyInteraction(instance, player, kind, slotKey)
+	if not instance then
+		return
+	end
+
+	setAttributeIfChanged(instance, OWNER_ONLY_ATTRIBUTE, true)
+	setAttributeIfChanged(instance, OWNER_USER_ID_ATTRIBUTE, player.UserId)
+	setAttributeIfChanged(instance, INTERACTION_KIND_ATTRIBUTE, tostring(kind or ""))
+	setAttributeIfChanged(instance, INTERACTION_SLOT_ATTRIBUTE, tostring(slotKey or ""))
+end
+
+local function markSlotPrompt(player, prompt, slotKey)
+	markOwnerOnlyInteraction(prompt, player, INTERACTION_KINDS.CrewSlot or "CrewSlot", slotKey)
+end
+
+local function markSlotClaimUi(player, slotModel, slotKey)
+	local hitBox = getClaimHitBox(slotModel)
+	if hitBox then
+		markOwnerOnlyInteraction(hitBox, player, INTERACTION_KINDS.ClaimPad or "ClaimPad", slotKey)
+	end
+
+	local claimContainer = ShipSlotService.GetClaimContainer(slotModel) or slotModel
+	for _, descendant in ipairs(claimContainer:GetDescendants()) do
+		if descendant:IsA("BillboardGui") then
+			markOwnerOnlyInteraction(descendant, player, INTERACTION_KINDS.ClaimPad or "ClaimPad", slotKey)
+		end
+	end
+end
+
+local function markSlotWorldUi(player, slotModel, slotKey)
+	local levelUpPart = getLevelUpPart(slotModel)
+	if not levelUpPart then
+		return
+	end
+
+	markOwnerOnlyInteraction(levelUpPart, player, INTERACTION_KINDS.SlotWorldUi or "SlotWorldUi", slotKey)
+
+	for _, descendant in ipairs(levelUpPart:GetDescendants()) do
+		if descendant:IsA("SurfaceGui") or descendant:IsA("ClickDetector") then
+			markOwnerOnlyInteraction(descendant, player, INTERACTION_KINDS.SlotWorldUi or "SlotWorldUi", slotKey)
+		end
+	end
+end
+
+local function markCrewSlotInteractions(player, slotModel, handle, slotKey)
+	if handle then
+		markOwnerOnlyInteraction(handle, player, INTERACTION_KINDS.CrewSlot or "CrewSlot", slotKey)
+	end
+
+	markSlotPrompt(player, handle and getHandlePrompt(handle), slotKey)
+	markSlotClaimUi(player, slotModel, slotKey)
+	markSlotWorldUi(player, slotModel, slotKey)
+end
+
+local function markCaptainInteractions(player, captainSpot, handle, prompt)
+	if not captainSpot then
+		return
+	end
+
+	if handle then
+		markOwnerOnlyInteraction(handle, player, INTERACTION_KINDS.CaptainSlot or "CaptainSlot", CAPTAIN_SLOT_KEY)
+	end
+	markOwnerOnlyInteraction(prompt, player, INTERACTION_KINDS.CaptainSlot or "CaptainSlot", CAPTAIN_SLOT_KEY)
+	markSlotClaimUi(player, captainSpot, CAPTAIN_SLOT_KEY)
+	markSlotWorldUi(player, captainSpot, CAPTAIN_SLOT_KEY)
+
+	for _, descendant in ipairs(captainSpot:GetDescendants()) do
+		if descendant:IsA("BillboardGui") and descendant:GetAttribute(INTERACTION_KIND_ATTRIBUTE) == nil then
+			markOwnerOnlyInteraction(descendant, player, INTERACTION_KINDS.CaptainSlot or "CaptainSlot", CAPTAIN_SLOT_KEY)
+		end
+	end
 end
 
 local function setSlotInteractionEnabled(slotModel, handle, slotState)
@@ -566,7 +652,7 @@ local function disableExtraNumericSlotInteractions(activeShip, activeSlots)
 	end
 end
 
-local function setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
+local function setupCaptainSpot(player, activeShip, upgradeLevel, rebirthCount)
 	local effectiveLevel = PlotUpgradeConfig.GetEffectiveLevel(upgradeLevel, rebirthCount)
 	local captainInfo = ShipVisuals.GetCaptainSlotInfoForUpgradeLevel(effectiveLevel)
 	local captainSpot, handle, prompt = ShipSlotService.GetCaptainSlotPrompt(activeShip)
@@ -601,6 +687,7 @@ local function setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.BonusPercent, captainInfo.BonusPercent)
 	captainSpot:SetAttribute(SLOT_ATTRIBUTES.UnlockLevel, nil)
 
+	markCaptainInteractions(player, captainSpot, handle, prompt)
 	setCaptainDisplayGuisEnabled(captainSpot)
 	setCaptainInteractionEnabled(captainSpot, handle, prompt, captainInfo.Unlocked)
 
@@ -621,6 +708,30 @@ local function setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
 	end
 
 	return captainSpot, captainInfo
+end
+
+function ShipSlotInteractionService.InitializeOwnerOnlyInteractions(player, activeShip)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	if typeof(activeShip) ~= "Instance" or not activeShip:IsA("Model") then
+		return false, "invalid_ship"
+	end
+
+	for _, slotName in ipairs(ShipSlotService.GetAllSlotNumbers(activeShip)) do
+		local slotModel, handle = ShipSlotService.GetSlotHandle(activeShip, slotName)
+		if slotModel and slotModel:IsA("Model") then
+			markCrewSlotInteractions(player, slotModel, handle, slotName)
+		end
+	end
+
+	local captainSpot, handle, prompt = ShipSlotService.GetCaptainSlotPrompt(activeShip)
+	if captainSpot then
+		markCaptainInteractions(player, captainSpot, handle, prompt)
+	end
+
+	return true
 end
 
 function ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, options)
@@ -646,7 +757,9 @@ function ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, option
 	local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(activeShip)
 
 	disableNonnumericInteractions(activeShip)
-	local captainSpot, captainInfo = setupCaptainSpot(activeShip, upgradeLevel, rebirthCount)
+	ShipSlotInteractionService.InitializeOwnerOnlyInteractions(player, activeShip)
+
+	local captainSpot, captainInfo = setupCaptainSpot(player, activeShip, upgradeLevel, rebirthCount)
 	if captainSpot and captainInfo then
 		setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, captainInfo)
 	else
@@ -667,6 +780,7 @@ function ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, option
 			activeSlots[slotName] = true
 
 			local slotState = setSlotAttributes(slotModel, slotName, upgradeLevel, rebirthCount)
+			markCrewSlotInteractions(player, slotModel, handle, slotName)
 			setSlotInteractionEnabled(slotModel, handle, slotState)
 			setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, slotState)
 		end

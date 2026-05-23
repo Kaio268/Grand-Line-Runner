@@ -41,8 +41,4 @@ function Module.GetStandCommandFunction()
 	return ensureBindableFunction("StandCommand")
 end
 
-function Module.GetPlotCommandFunction()
-	return ensureBindableFunction("PlotCommand")
-end
-
 return Module

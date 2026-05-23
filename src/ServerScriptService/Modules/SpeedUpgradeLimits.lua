@@ -47,16 +47,43 @@ end
 function SpeedUpgradeLimits.ApplySpeedIncrease(dataManager, player, requestedIncrease)
 	local increase = SpeedUpgradeLimits.SanitizeSpeedIncrease(requestedIncrease)
 	if increase <= 0 then
-		return 0, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player)
+		return false, 0, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player), "invalid_increase"
 	end
 
-	dataManager:AdjustValue(player, TOTAL_SPEED_PATH, increase)
-	local newSpeed = dataManager:AdjustValue(player, SPEED_PATH, increase)
+	local newTotal, totalReason = dataManager:AdjustValue(player, TOTAL_SPEED_PATH, increase)
+	if typeof(newTotal) ~= "number" then
+		return false, 0, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player), totalReason or "total_speed_update_failed"
+	end
+
+	local newSpeed, speedReason = dataManager:AdjustValue(player, SPEED_PATH, increase)
 	if typeof(newSpeed) == "number" then
-		return increase, newSpeed
+		return true, increase, newSpeed
 	end
 
-	return increase, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player)
+	local rolledBackTotal = dataManager:AdjustValue(player, TOTAL_SPEED_PATH, -increase)
+	if typeof(rolledBackTotal) ~= "number" then
+		warn(string.format(
+			"[SpeedUpgradeLimits] Failed to roll back TotalSpeed after Speed update failed for %s",
+			player and player.Name or "<unknown>"
+		))
+	end
+
+	return false, 0, SpeedUpgradeLimits.GetCurrentSpeed(dataManager, player), speedReason or "speed_update_failed"
+end
+
+function SpeedUpgradeLimits.RollbackSpeedIncrease(dataManager, player, appliedIncrease)
+	local increase = SpeedUpgradeLimits.SanitizeSpeedIncrease(appliedIncrease)
+	if increase <= 0 then
+		return true
+	end
+
+	local speedAfter, speedReason = dataManager:AdjustValue(player, SPEED_PATH, -increase)
+	local totalAfter, totalReason = dataManager:AdjustValue(player, TOTAL_SPEED_PATH, -increase)
+	if typeof(speedAfter) == "number" and typeof(totalAfter) == "number" then
+		return true
+	end
+
+	return false, speedReason or totalReason or "rollback_failed"
 end
 
 return SpeedUpgradeLimits

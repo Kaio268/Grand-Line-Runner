@@ -11,6 +11,7 @@ local SpeedUpgrade = require(
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+local PlayerMovementSpeedService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("PlayerMovementSpeedService"))
 local SpeedUpgradeLimits = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("SpeedUpgradeLimits"))
 local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local TUTORIAL_SPEED_TOP_UP_GRANTED_PATH = "HiddenLeaderstats.TutorialSpeedTopUpGranted"
@@ -93,6 +94,20 @@ local function applyTutorialSpeedRecovery(player, upgradeIndex, moneyPath, money
 	return true, shortfall
 end
 
+local function rollbackTutorialSpeedRecovery(player, moneyPath, tutorialRecoveryAmount)
+	if tutorialRecoveryAmount > 0 then
+		local rolledBack = DataManager:TryAddValue(player, moneyPath, -tutorialRecoveryAmount)
+		if rolledBack ~= true then
+			warn(string.format(
+				"[BuySpeedUpgrade] failed to roll back tutorial top-up player=%s amount=%s",
+				player.Name,
+				tostring(tutorialRecoveryAmount)
+			))
+		end
+	end
+	DataManager:TrySetValue(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, false)
+end
+
 local function handleSpeedUpgrade(player, upgradeName)
 	if typeof(upgradeName) ~= "string" then
 		return
@@ -138,17 +153,70 @@ local function handleSpeedUpgrade(player, upgradeName)
 		tutorialRecoveryAmount = recoveryAmount
 	end
 
-	local newBalance = DataManager:AdjustValue(player, moneyPath, -cost)
-	if typeof(newBalance) ~= "number" then
+	local speedApplied, appliedIncrease, newSpeed, speedReason =
+		SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, effectiveAddSpeed)
+	if speedApplied ~= true then
 		if usedTutorialRecovery then
-			if tutorialRecoveryAmount > 0 then
-				DataManager:TryAddValue(player, moneyPath, -tutorialRecoveryAmount)
-			end
-			DataManager:TrySetValue(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, false)
+			rollbackTutorialSpeedRecovery(player, moneyPath, tutorialRecoveryAmount)
 		end
+		warn(string.format(
+			"[BuySpeedUpgrade] speed update failed player=%s reason=%s",
+			player.Name,
+			tostring(speedReason)
+		))
 		return
 	end
-	SpeedUpgradeLimits.ApplySpeedIncrease(DataManager, player, effectiveAddSpeed)
+
+	local chargeMoney = DataManager:GetValue(player, moneyPath)
+	if typeof(chargeMoney) ~= "number" then
+		local moneyValue = CurrencyUtil.findPrimaryValueObject(player)
+		chargeMoney = (moneyValue and moneyValue.Value) or 0
+	end
+	if chargeMoney < cost then
+		local rollbackOk, rollbackReason = SpeedUpgradeLimits.RollbackSpeedIncrease(DataManager, player, appliedIncrease)
+		if usedTutorialRecovery then
+			rollbackTutorialSpeedRecovery(player, moneyPath, tutorialRecoveryAmount)
+		end
+		warn(string.format(
+			"[BuySpeedUpgrade] balance changed before charge player=%s speedRollback=%s reason=%s",
+			player.Name,
+			tostring(rollbackOk),
+			tostring(rollbackReason or "insufficient_balance_before_charge")
+		))
+		PlayerMovementSpeedService.ApplyPlayerSpeed(player, "speed_upgrade_balance_rollback")
+		return
+	end
+
+	local newBalance = DataManager:AdjustValue(player, moneyPath, -cost)
+	if typeof(newBalance) ~= "number" then
+		local rollbackOk, rollbackReason = SpeedUpgradeLimits.RollbackSpeedIncrease(DataManager, player, appliedIncrease)
+		if usedTutorialRecovery then
+			rollbackTutorialSpeedRecovery(player, moneyPath, tutorialRecoveryAmount)
+		end
+		warn(string.format(
+			"[BuySpeedUpgrade] currency charge failed after speed update player=%s speedRollback=%s reason=%s",
+			player.Name,
+			tostring(rollbackOk),
+			tostring(rollbackReason or "charge_failed")
+		))
+		PlayerMovementSpeedService.ApplyPlayerSpeed(player, "speed_upgrade_charge_rollback")
+		return
+	end
+
+	local settingsResult, settingsReason = PlayerMovementSpeedService.NormalizePlayerSpeedSettings(
+		player,
+		DataManager,
+		"speed_upgrade_purchase"
+	)
+	if not settingsResult then
+		warn(string.format(
+			"[BuySpeedUpgrade] speed settings normalize failed player=%s newSpeed=%s reason=%s",
+			player.Name,
+			tostring(newSpeed),
+			tostring(settingsReason)
+		))
+	end
+	PlayerMovementSpeedService.ApplyPlayerSpeed(player, "speed_upgrade_purchase")
 end
 
 remote.OnServerEvent:Connect(function(player, upgradeName)

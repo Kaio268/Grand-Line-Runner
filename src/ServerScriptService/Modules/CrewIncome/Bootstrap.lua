@@ -1,0 +1,186 @@
+local Module = {}
+
+function Module.Install(ctx)
+	local function clearPlayerStandRuntime(...)
+		return ctx.clearPlayerStandRuntime(...)
+	end
+	local function countSavedStandEntries(...)
+		return ctx.countSavedStandEntries(...)
+	end
+	local function countTableEntries(...)
+		return ctx.countTableEntries(...)
+	end
+	local CrewInstanceService = ctx.CrewInstanceService
+	local CrewSlotAssignmentReconciler = ctx.CrewSlotAssignmentReconciler
+	local DataManager = ctx.DataManager
+	local DEBUG_TRACE = ctx.DEBUG_TRACE
+	local function formatInstancePath(...)
+		return ctx.formatInstancePath(...)
+	end
+	local function getCrewStorage(...)
+		return ctx.getCrewStorage(...)
+	end
+	local Players = ctx.Players
+	local function reconcilePlayerStandAssignments(...)
+		return ctx.reconcilePlayerStandAssignments(...)
+	end
+	local function reconcileSlotAssignmentsForRender(...)
+		return ctx.reconcileSlotAssignmentsForRender(...)
+	end
+	local function refreshPlayerIncomeDisplaysAfterLifecycleUpdate(...)
+		return ctx.refreshPlayerIncomeDisplaysAfterLifecycleUpdate(...)
+	end
+	local function resetHugeIncomeOnJoin(...)
+		return ctx.resetHugeIncomeOnJoin(...)
+	end
+	local function saveTrace(...)
+		return ctx.saveTrace(...)
+	end
+	local function scanAndBindCaptainSlot(...)
+		return ctx.scanAndBindCaptainSlot(...)
+	end
+	local function scanAndBindPlot(...)
+		return ctx.scanAndBindPlot(...)
+	end
+	local ShipRuntimeService = ctx.ShipRuntimeService
+	local function standDebug(...)
+		return ctx.standDebug(...)
+	end
+	local function waitForPlot(...)
+		return ctx.waitForPlot(...)
+	end
+
+	local function bootstrapExistingCrewIncomePlayer(runtime, player)
+		runtime.standDebug("bootstrap existing_player=%s", player.Name)
+
+		local plot = runtime.waitForPlot(player, 5)
+		if plot then
+			runtime.scanAndBindPlot(player, plot)
+			runtime.reconcilePlayerStandAssignments(player)
+			runtime.resetHugeIncomeOnJoin(player)
+			runtime.refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+		else
+			runtime.standDebug("bootstrap existing_player=%s reason=no_active_ship", player.Name)
+		end
+	end
+
+	local function bootstrapExistingCrewIncomePlayers(runtime)
+		for _, player in ipairs(runtime.Players:GetPlayers()) do
+			task.spawn(bootstrapExistingCrewIncomePlayer, runtime, player)
+		end
+	end
+
+	local function logSavedShipSnapshot(player, context)
+		if not DEBUG_TRACE or not DataManager then
+			return
+		end
+
+		local ok, result = pcall(function()
+			local crewMemberIncome = DataManager:GetValue(player, "CrewMemberIncome")
+			local shipSlots = DataManager:GetValue(player, "Ship.Slots")
+			local plotUpgrade = DataManager:GetValue(player, "HiddenLeaderstats.PlotUpgrade")
+
+			return {
+				CrewMemberIncome = crewMemberIncome,
+				ShipSlots = shipSlots,
+				PlotUpgrade = plotUpgrade,
+			}
+		end)
+
+		if not ok then
+			saveTrace(
+				"snapshot context=%s player=%s userId=%s result=lookup_failed reason=%s",
+				tostring(context),
+				player.Name,
+				tostring(player.UserId),
+				tostring(result)
+			)
+			return
+		end
+
+		saveTrace(
+			"snapshot context=%s player=%s userId=%s plotUpgrade=%s savedStandEntries=%s shipSlots=%s",
+			tostring(context),
+			player.Name,
+			tostring(player.UserId),
+			tostring(result.PlotUpgrade),
+			tostring(countSavedStandEntries(result.CrewMemberIncome)),
+			tostring(countTableEntries(result.ShipSlots))
+		)
+	end
+
+
+	CrewInstanceService.RegisterCrewInventorySavedCallback(function(player)
+		if player and player.Parent == Players then
+			if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+				return
+			end
+
+			task.defer(function()
+				if CrewSlotAssignmentReconciler.IsResetInProgress(player) then
+					return
+				end
+
+				local activeShip = ShipRuntimeService.GetActiveShip(player)
+				reconcileSlotAssignmentsForRender(player, activeShip, "inventory_saved")
+				if activeShip then
+					scanAndBindCaptainSlot(player, activeShip)
+				end
+				reconcilePlayerStandAssignments(player)
+				refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+			end)
+		end
+	end)
+
+
+	Players.PlayerAdded:Connect(function(player)
+		standDebug("PlayerAdded player=%s", player.Name)
+		task.spawn(function()
+			saveTrace("PlayerAdded begin player=%s userId=%s event=restore_begin", player.Name, tostring(player.UserId))
+			logSavedShipSnapshot(player, "PlayerAdded")
+			resetHugeIncomeOnJoin(player)
+
+			local plot = waitForPlot(player, 25)
+			if not plot then
+				standDebug("PlayerAdded abort player=%s reason=no_active_ship", player.Name)
+				saveTrace("PlayerAdded restoreSkipped player=%s userId=%s reason=no_active_ship_owned_by_userid", player.Name, tostring(player.UserId))
+				return
+			end
+			saveTrace(
+				"PlayerAdded plotReady player=%s userId=%s plot=%s ownerUserId=%s ownerUserIdType=%s ownerName=%s event=restore_continue",
+				player.Name,
+				tostring(player.UserId),
+				formatInstancePath(plot),
+				tostring(plot:GetAttribute("OwnerUserId")),
+				typeof(plot:GetAttribute("OwnerUserId")),
+				tostring(plot:GetAttribute("OwnerName"))
+			)
+			scanAndBindPlot(player, plot)
+			reconcilePlayerStandAssignments(player)
+			refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+		end)
+	end)
+
+
+	Players.PlayerRemoving:Connect(function(player)
+		clearPlayerStandRuntime(player)
+		getCrewStorage().ClearIncomeShadowSyncState(player)
+	end)
+
+	task.spawn(bootstrapExistingCrewIncomePlayers, {
+		Players = Players,
+		standDebug = standDebug,
+		waitForPlot = waitForPlot,
+		scanAndBindPlot = scanAndBindPlot,
+		reconcilePlayerStandAssignments = reconcilePlayerStandAssignments,
+		resetHugeIncomeOnJoin = resetHugeIncomeOnJoin,
+		refreshPlayerIncomeDisplaysAfterLifecycleUpdate = refreshPlayerIncomeDisplaysAfterLifecycleUpdate,
+	})
+
+
+	ctx.bootstrapExistingCrewIncomePlayer = bootstrapExistingCrewIncomePlayer
+	ctx.bootstrapExistingCrewIncomePlayers = bootstrapExistingCrewIncomePlayers
+	ctx.logSavedShipSnapshot = logSavedShipSnapshot
+end
+
+return Module

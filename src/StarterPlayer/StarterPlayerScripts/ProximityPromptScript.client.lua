@@ -3,8 +3,13 @@ local ProximityPromptService = game:GetService("ProximityPromptService")
 local TweenService = game:GetService("TweenService")
 local TextService = game:GetService("TextService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
+local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ShipVisuals"))
+local ATTR = ShipVisuals.Attributes
+local OWNER_ONLY_ATTRIBUTE = ATTR.OwnerOnlyInteraction or "ShipOwnerOnlyInteraction"
+local OWNER_USER_ID_ATTRIBUTE = ATTR.OwnerUserId or "OwnerUserId"
 
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -68,6 +73,41 @@ local function getScreenGui()
 	return screenGui
 end
 
+local function readUserIdAttribute(instance, attributeName)
+	local value = instance and instance:GetAttribute(attributeName)
+	if typeof(value) == "number" then
+		return value
+	elseif typeof(value) == "string" then
+		return tonumber(value)
+	end
+
+	return nil
+end
+
+local function getOwnerOnlySource(instance)
+	local current = instance
+	while current do
+		if current:GetAttribute(OWNER_ONLY_ATTRIBUTE) == true then
+			return current
+		end
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function shouldRenderPrompt(prompt)
+	local ownerOnlySource = getOwnerOnlySource(prompt)
+	if not ownerOnlySource then
+		return true
+	end
+
+	local ownerUserId = readUserIdAttribute(prompt, OWNER_USER_ID_ATTRIBUTE)
+		or readUserIdAttribute(ownerOnlySource, OWNER_USER_ID_ATTRIBUTE)
+
+	return ownerUserId == LocalPlayer.UserId
+end
+
 local function setUpCircularProgressBar(bar)
 	local leftGradient = bar.LeftGradient.ProgressBarImage.UIGradient
 	local rightGradient = bar.RightGradient.ProgressBarImage.UIGradient
@@ -86,7 +126,6 @@ local function createPrompt(prompt, inputType, gui)
 	local tweensForFadeOut = {}
 	local tweensForFadeIn = {}
 	local tweenInfoInFullDuration = TweenInfo.new(prompt.HoldDuration, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
-	local tweenInfoOutHalfSecond = TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	local tweenInfoFast = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	local tweenInfoQuick = TweenInfo.new(0.06, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
 	local tweenInfoInstant = TweenInfo.new(0, Enum.EasingStyle.Linear, Enum.EasingDirection.Out)
@@ -153,12 +192,12 @@ local function createPrompt(prompt, inputType, gui)
 	end
 
 	local function setupImageLabelTweens(imageLabel)
-		local imageTransparency = imageLabel.ImageTransparency
+		local imageLabelImageTransparency = imageLabel.ImageTransparency
 		imageLabel.ImageTransparency = 1
 		table.insert(tweensForButtonHoldBegin, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = 1 }))
-		table.insert(tweensForButtonHoldEnd, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = imageTransparency }))
+		table.insert(tweensForButtonHoldEnd, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = imageLabelImageTransparency }))
 		table.insert(tweensForFadeOut, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = 1 }))
-		table.insert(tweensForFadeIn, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = imageTransparency }))
+		table.insert(tweensForFadeIn, TweenService:Create(imageLabel, tweenInfoFast, { ImageTransparency = imageLabelImageTransparency }))
 	end
 
 		local function setupUnexpectedChildTweens(child)
@@ -471,6 +510,9 @@ end
 local function onLoad()
 	ProximityPromptService.PromptShown:Connect(function(prompt, inputType)
 		if prompt.Style == Enum.ProximityPromptStyle.Default then
+			return
+		end
+		if not shouldRenderPrompt(prompt) then
 			return
 		end
 

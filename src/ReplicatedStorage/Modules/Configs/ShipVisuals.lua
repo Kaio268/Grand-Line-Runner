@@ -15,8 +15,11 @@ local Config = {
 		ActiveModelName = "ActiveShipModelName",
 		ActiveTier = "ActiveShipTier",
 		ActiveUpgradeLevel = "ActiveShipUpgradeLevel",
+		InteractionKind = "ShipInteractionKind",
+		InteractionSlotKey = "ShipInteractionSlotKey",
 		IsActiveShip = "ShipRuntimeActive",
 		OwnerName = "OwnerName",
+		OwnerOnlyInteraction = "ShipOwnerOnlyInteraction",
 		OwnerUserId = "OwnerUserId",
 		PositionIndex = "ShipPositionIndex",
 		PositionName = "ShipPositionName",
@@ -24,6 +27,14 @@ local Config = {
 		SourceTier = "ShipVisualTier",
 		NormalCrewSlots = "ActiveShipNormalCrewSlots",
 		AssetNormalSlotCapacity = "ActiveShipAssetNormalSlotCapacity",
+	},
+
+	InteractionKinds = {
+		CaptainSlot = "CaptainSlot",
+		ClaimPad = "ClaimPad",
+		CrewSlot = "CrewSlot",
+		GroupReward = "GroupReward",
+		SlotWorldUi = "SlotWorldUi",
 	},
 
 	RuntimeSafetyAttributes = {

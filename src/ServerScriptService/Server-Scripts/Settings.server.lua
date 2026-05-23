@@ -17,10 +17,10 @@ local SettingsConfig = require(
 )
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
+local PlayerMovementSpeedService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("PlayerMovementSpeedService"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local DEBUG_SETTINGS_SERVER = true
 local SPEED_SETTING_NAME = "Speed"
-local SPEED_PATH = "HiddenLeaderstats.Speed"
 local SELECTED_SPEED_PATH = "Settings.SelectedSpeed"
 local SPEED_AUTO_MAX_PATH = "Settings.SpeedAutoMax"
 local speedConnectionsByPlayer = {}
@@ -37,77 +37,26 @@ local function isValidNumber(n)
 	return typeof(n) == "number" and n == n and n > -math.huge and n < math.huge
 end
 
-local function roundNumber(value)
-	return math.floor((tonumber(value) or 0) + 0.5)
-end
-
-local function clampSelectedSpeed(value, earnedMax)
-	local maximum = math.max(1, roundNumber(earnedMax))
-	return math.clamp(roundNumber(value), 1, maximum)
-end
-
-local function getEarnedSpeedValue(player)
-	local hidden = player and player:FindFirstChild("HiddenLeaderstats")
-	local speed = hidden and hidden:FindFirstChild("Speed")
-	if speed and (speed:IsA("NumberValue") or speed:IsA("IntValue")) then
-		return speed
-	end
-
-	return nil
-end
-
-local function getEarnedMaxSpeed(player)
-	local speedValue = getEarnedSpeedValue(player)
-	if speedValue then
-		return math.max(1, roundNumber(speedValue.Value))
-	end
-
-	local stored = DataManager:GetValue(player, SPEED_PATH)
-	if typeof(stored) == "number" then
-		return math.max(1, roundNumber(stored))
-	end
-
-	return 1
-end
-
-local function getSettingsValue(player, valueName)
-	local settings = player and player:FindFirstChild("Settings")
-	return settings and settings:FindFirstChild(valueName) or nil
-end
-
-local function setProfileValueIfChanged(player, path, value, instance)
-	if instance and instance:IsA("ValueBase") and instance.Value == value then
-		return true
-	end
-
-	return DataManager:SetValue(player, path, value) ~= false
-end
-
 local function normalizePlayerSpeedSettings(player, reason)
-	local earnedMax = getEarnedMaxSpeed(player)
-	local selectedValue = getSettingsValue(player, "SelectedSpeed")
-	local autoValue = getSettingsValue(player, "SpeedAutoMax")
-	local autoMax = true
-
-	if autoValue and autoValue:IsA("BoolValue") then
-		autoMax = autoValue.Value == true
+	local result, normalizeReason = PlayerMovementSpeedService.NormalizePlayerSpeedSettings(player, DataManager, reason)
+	if not result then
+		debugSettings(
+			"normalize failed player=%s reason=%s context=%s",
+			player.Name,
+			tostring(normalizeReason),
+			tostring(reason)
+		)
+		return
 	end
 
-	local selected = earnedMax
-	if not autoMax and selectedValue and (selectedValue:IsA("NumberValue") or selectedValue:IsA("IntValue")) then
-		selected = selectedValue.Value
-	end
-	selected = if autoMax then earnedMax else clampSelectedSpeed(selected, earnedMax)
-
-	setProfileValueIfChanged(player, SPEED_AUTO_MAX_PATH, autoMax, autoValue)
-	setProfileValueIfChanged(player, SELECTED_SPEED_PATH, selected, selectedValue)
+	PlayerMovementSpeedService.ApplyPlayerSpeed(player, "settings_normalized")
 	debugSettings(
 		"normalized speed player=%s reason=%s selected=%d max=%d auto=%s",
 		player.Name,
 		tostring(reason),
-		selected,
-		earnedMax,
-		tostring(autoMax)
+		result.SelectedSpeed,
+		result.EarnedMaxSpeed,
+		tostring(result.SpeedAutoMax)
 	)
 end
 
@@ -116,8 +65,8 @@ local function saveRequestedSpeed(player, value)
 		return nil, "bad_number"
 	end
 
-	local earnedMax = getEarnedMaxSpeed(player)
-	local selected = clampSelectedSpeed(value, earnedMax)
+	local earnedMax = PlayerMovementSpeedService.GetEarnedMaxSpeed(player, DataManager)
+	local selected = PlayerMovementSpeedService.ClampSelectedSpeed(value, earnedMax)
 	local autoMax = selected >= earnedMax
 
 	if DataManager:SetValue(player, SPEED_AUTO_MAX_PATH, autoMax) == false then
@@ -227,6 +176,7 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 			result.EarnedMaxSpeed,
 			tostring(result.SpeedAutoMax)
 		)
+		PlayerMovementSpeedService.ApplyPlayerSpeed(player, "settings_speed_saved")
 		return
 	end
 
