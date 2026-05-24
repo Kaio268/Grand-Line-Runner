@@ -43,6 +43,15 @@ local function writeRoot(player, path, value)
 	return true, nil
 end
 
+local function readRoot(player, path)
+	local dataManager = getDataManager()
+	if typeof(dataManager.TryGetValue) == "function" then
+		return dataManager:TryGetValue(player, path)
+	end
+
+	return dataManager:GetValue(player, path), nil
+end
+
 local function getCanonicalCrewMemberId(storageName, info)
 	local fallback = tostring(storageName or "")
 	local canonicalId, resolvedInfo = CrewCatalog.ResolveCanonicalCrewMemberId(fallback)
@@ -117,7 +126,7 @@ local function canonicalFromStandRow(player, standName, standRow)
 	local storageName = tostring(standRow.CrewMemberName or "")
 	local _, info = CrewCatalog.ResolveCanonicalCrewMemberId(storageName)
 	local legacyStorageName = tostring(standRow.LegacyStorageName or "")
-	local existing = getDataManager():GetValue(player, CANONICAL_ROOT .. "." .. tostring(standName or ""))
+	local existing = readRoot(player, CANONICAL_ROOT .. "." .. tostring(standName or ""))
 	local existingLevel = if typeof(existing) == "table" then tonumber(existing.StandLevel) else nil
 	local standLevel = math.max(1, math.floor(tonumber(standRow.StandLevel) or existingLevel or 1))
 	if storageName == "" and tostring(standRow.CrewMemberInstanceId or "") == "" then
@@ -144,7 +153,7 @@ end
 
 local function updateAudit(player, updates)
 	local dataManager = getDataManager()
-	local audit = dataManager:GetValue(player, AUDIT_ROOT)
+	local audit = readRoot(player, AUDIT_ROOT)
 	if typeof(audit) ~= "table" then
 		audit = {}
 	else
@@ -155,9 +164,13 @@ local function updateAudit(player, updates)
 		audit[key] = value
 	end
 	audit.UpdatedAt = os.time()
-	pcall(function()
-		dataManager:SetValue(player, AUDIT_ROOT, audit)
-	end)
+	if typeof(dataManager.TrySetValue) == "function" then
+		dataManager:TrySetValue(player, AUDIT_ROOT, audit)
+	else
+		pcall(function()
+			dataManager:SetValue(player, AUDIT_ROOT, audit)
+		end)
+	end
 	return audit
 end
 
@@ -181,14 +194,13 @@ local function restoreSnapshot(player, snapshot, reason)
 end
 
 local function buildSnapshot(player)
-	local dataManager = getDataManager()
 	return {
 		Kind = "stand_income_write_authority",
 		PlayerUserId = player and player.UserId or 0,
 		PlaceId = game.PlaceId,
 		GameId = game.GameId,
 		CreatedAt = os.time(),
-		Canonical = cloneValue(dataManager:GetValue(player, CANONICAL_ROOT)),
+		Canonical = cloneValue(readRoot(player, CANONICAL_ROOT)),
 	}
 end
 
@@ -253,8 +265,7 @@ end
 
 function CrewStandIncomeAuthority.GetStandData(player, standName)
 	standName = tostring(standName or "")
-	local dataManager = getDataManager()
-	local canonicalRow = dataManager:GetValue(player, CANONICAL_ROOT .. "." .. standName)
+	local canonicalRow = readRoot(player, CANONICAL_ROOT .. "." .. standName)
 	if typeof(canonicalRow) == "table" then
 		return standRowFromCanonicalRow(canonicalRow), {
 			UsedCanonical = true,
@@ -289,7 +300,7 @@ function CrewStandIncomeAuthority.SetStandData(player, standName, standRow, sour
 		return false, "stand_income_write_failed:canonical:" .. tostring(canonicalReason)
 	end
 
-	local persistedCanonical = getDataManager():GetValue(player, CANONICAL_ROOT .. "." .. standName)
+	local persistedCanonical = readRoot(player, CANONICAL_ROOT .. "." .. standName)
 	local expectedPersistedStandRow = standRowFromCanonicalRow(canonicalRow)
 	local mirrorOk, mirrorReason = compareRows(expectedPersistedStandRow, persistedCanonical)
 	if mirrorOk ~= true then
@@ -355,9 +366,8 @@ function CrewStandIncomeAuthority.ClearStandData(player, standName, sourcePath)
 end
 
 function CrewStandIncomeAuthority.GetAllStandData(player)
-	local dataManager = getDataManager()
 	local result = {}
-	local canonical = dataManager:GetValue(player, CANONICAL_ROOT)
+	local canonical = readRoot(player, CANONICAL_ROOT)
 	if typeof(canonical) == "table" then
 		for standName, row in pairs(canonical) do
 			if typeof(row) == "table" then

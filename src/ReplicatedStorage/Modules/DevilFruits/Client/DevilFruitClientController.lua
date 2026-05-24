@@ -33,6 +33,11 @@ local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
 local MOGU_BURROW_ABILITY = "Burrow"
 local MOGU_BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
 local MOGU_BURROW_SESSION_STATE_ATTRIBUTE = "MoguBurrowSessionState"
+local MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE = "MoguStartupInvincibleFrom"
+local MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE = "MoguStartupInvincibleUntil"
+local MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE = "MoguStartupInvincibleSeconds"
+local MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE = "MoguStartupInvincibleStartOffsetSeconds"
+local MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE = "MoguStartupInvincibleSessionId"
 local BOMU_FRUIT_NAME = "Bomu Bomu no Mi"
 local BOMU_LAND_MINE_ABILITY = "LandMine"
 local PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
@@ -158,6 +163,14 @@ local function formatVector3ForLog(value)
 	end
 
 	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
+end
+
+local function formatNumberForLog(value)
+	if typeof(value) ~= "number" then
+		return tostring(value)
+	end
+
+	return string.format("%.3f", value)
 end
 
 local function shouldTraceAbilityInput(keyCode)
@@ -852,6 +865,58 @@ local function isLocalPlayerBurrowProtected(now)
 	return true
 end
 
+local function isMoguStartupDamageTraceEnabled()
+	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	return abilityConfig.DebugStartupDamageTrace == true
+end
+
+local function isMoguStartupTraceRelevant()
+	if type(activeMoguBurrow) == "table" then
+		return true
+	end
+
+	if player:GetAttribute(MOGU_BURROW_SESSION_STATE_ATTRIBUTE) == "Startup" then
+		return true
+	end
+
+	local invincibleUntil = player:GetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE)
+	return typeof(invincibleUntil) == "number"
+end
+
+local function traceMoguStartupClientDamage(path, rootPosition, extra)
+	if not isMoguStartupDamageTraceEnabled() or not isMoguStartupTraceRelevant() then
+		return
+	end
+
+	extra = type(extra) == "table" and extra or {}
+	local serverNow = Workspace:GetServerTimeNow()
+	local invincibleFrom = player:GetAttribute(MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE)
+	local invincibleUntil = player:GetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE)
+	local invincibleStartsIn = if typeof(invincibleFrom) == "number" then invincibleFrom - serverNow else nil
+	local invincibleRemaining = if typeof(invincibleUntil) == "number" then invincibleUntil - serverNow else nil
+	local activeSessionId = if type(activeMoguBurrow) == "table" then activeMoguBurrow.SessionId else nil
+	print(string.format(
+		"[MOGU STARTUP DAMAGE TRACE][CLIENT] path=%s player=%s localNow=%s serverNow=%s state=%s session=%s activeSession=%s invincibleFrom=%s invincibleStartsIn=%s invincibleUntil=%s invincibleRemaining=%s invincibleSession=%s invincibleSeconds=%s invincibleStartOffset=%s protected=%s remote=%s position=%s",
+		tostring(path or "unknown"),
+		player.Name,
+		formatNumberForLog(os.clock()),
+		formatNumberForLog(serverNow),
+		tostring(player:GetAttribute(MOGU_BURROW_SESSION_STATE_ATTRIBUTE)),
+		tostring(player:GetAttribute(MOGU_BURROW_SESSION_ID_ATTRIBUTE)),
+		tostring(activeSessionId),
+		formatNumberForLog(invincibleFrom),
+		formatNumberForLog(invincibleStartsIn),
+		formatNumberForLog(invincibleUntil),
+		formatNumberForLog(invincibleRemaining),
+		tostring(player:GetAttribute(MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE)),
+		formatNumberForLog(player:GetAttribute(MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE)),
+		formatNumberForLog(player:GetAttribute(MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE)),
+		tostring(extra.Protected == true),
+		tostring(extra.Remote),
+		formatVector3ForLog(rootPosition)
+	))
+end
+
 ProtectionRuntime.Register("MoguBurrowProtection", function(targetPlayer, _position)
 	if targetPlayer ~= player then
 		return false
@@ -934,15 +999,24 @@ local function fireWaveKillFromMoguSurface(rootPosition)
 		return
 	end
 
-	if ProtectionRuntime.IsProtected(player, rootPosition, "WaveKill") then
+	local isProtected = ProtectionRuntime.IsProtected(player, rootPosition, "WaveKill")
+	if isProtected then
 		return
 	end
 
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
 	local killMeEvent = remotesFolder and remotesFolder:FindFirstChild("KillMe")
 	if killMeEvent and killMeEvent:IsA("RemoteEvent") then
+		traceMoguStartupClientDamage("DevilFruitClientController.fireWaveKillFromMoguSurface.remote", rootPosition, {
+			Protected = false,
+			Remote = killMeEvent:GetFullName(),
+		})
 		killMeEvent:FireServer()
 	else
+		traceMoguStartupClientDamage("DevilFruitClientController.fireWaveKillFromMoguSurface.localFallback", rootPosition, {
+			Protected = false,
+			Remote = killMeEvent and killMeEvent:GetFullName() or nil,
+		})
 		humanoid.Health = 0
 	end
 end

@@ -398,6 +398,35 @@ function Module.GetFoodInventory(player)
 	return inventory
 end
 
+function Module.TryGetFoodInventory(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, "invalid_player"
+	end
+
+	local dataManager = getDataManager()
+	if typeof(dataManager.IsHardResetPending) == "function" and dataManager:IsHardResetPending(player.UserId) then
+		return nil, "hard_reset_pending"
+	end
+	if typeof(dataManager.IsReady) == "function" and not dataManager:IsReady(player) then
+		return nil, "not_ready"
+	end
+
+	local inventory, reason
+	if typeof(dataManager.TryGetValue) == "function" then
+		inventory, reason = dataManager:TryGetValue(player, "FoodInventory")
+	else
+		inventory = DataManager:GetValue(player, "FoodInventory")
+	end
+
+	if reason ~= nil then
+		return nil, reason
+	end
+	if typeof(inventory) ~= "table" then
+		inventory = {}
+	end
+	return inventory, nil
+end
+
 function Module.GetTotalFoodCount(player)
 	local total = 0
 	local inventory = Module.GetFoodInventory(player)
@@ -405,6 +434,19 @@ function Module.GetTotalFoodCount(player)
 		total += math.max(0, math.floor(tonumber(inventory[foodKey]) or 0))
 	end
 	return total
+end
+
+function Module.TryGetTotalFoodCount(player)
+	local inventory, reason = Module.TryGetFoodInventory(player)
+	if inventory == nil then
+		return nil, reason
+	end
+
+	local total = 0
+	for foodKey in pairs(Economy.Food) do
+		total += math.max(0, math.floor(tonumber(inventory[foodKey]) or 0))
+	end
+	return total, nil
 end
 
 function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP)

@@ -17,6 +17,12 @@ local HazardProtection = require(
 		:WaitForChild("Server")
 		:WaitForChild("HazardProtection")
 )
+local DamageProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("DamageProtection")
+)
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 
 local CONFIG = {
@@ -1101,6 +1107,18 @@ local function damagePlayersAt(position, shot)
 				Source = "CannonBarrage",
 			})
 			if not isHazardProtected then
+				DamageProtection.TraceMoguStartupDamage(player, {
+					TargetContext = {
+						Player = player,
+						Character = player.Character,
+						Humanoid = humanoid,
+						RootPart = rootPart,
+					},
+					Position = position,
+					HitPosition = position,
+					Source = "CannonBarrage",
+					Path = "CannonBarrage.damagePlayersAt",
+				})
 				applyCannonKnockdown(player, position, rootPart)
 				humanoid:TakeDamage(damage)
 			end

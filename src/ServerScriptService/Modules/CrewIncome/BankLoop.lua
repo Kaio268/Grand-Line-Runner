@@ -1,6 +1,25 @@
 local Module = {}
 
 function Module.Install(ctx)
+	local function getPlayerIncomeTickReadiness(runtime, player)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "cleanup"
+		end
+		if player.Parent ~= runtime.Players then
+			return false, "cleanup"
+		end
+
+		local dataManager = runtime.DataManager
+		if dataManager and typeof(dataManager.IsHardResetPending) == "function" and dataManager:IsHardResetPending(player.UserId) then
+			return false, "cleanup"
+		end
+		if dataManager and typeof(dataManager.IsReady) == "function" and not dataManager:IsReady(player) then
+			return false, "not_ready"
+		end
+
+		return true, nil
+	end
+
 	local function updateCrewStandIncomeForTick(runtime, player, standModel, equippedCrewMember, totalFoodCount, zeroIncomeLogged)
 
 		if not standModel or not standModel.Parent then
@@ -107,12 +126,14 @@ function Module.Install(ctx)
 
 	local function updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
 
-		if not player.Parent then
+		local ready, readinessReason = getPlayerIncomeTickReadiness(runtime, player)
 
-			runtime.clearPlayerStandRuntime(player)
-
+		if not ready then
+			if readinessReason == "cleanup" then
+				zeroIncomeLogged[player] = nil
+				runtime.clearPlayerStandRuntime(player)
+			end
 			return
-
 		end
 
 
@@ -129,7 +150,15 @@ function Module.Install(ctx)
 
 		local equippedCrewMember = runtime.getEquippedCrewMemberToolInfo(player)
 
-		local totalFoodCount = runtime.CrewFoodProgression.GetTotalFoodCount(player)
+		local totalFoodCount = nil
+		if typeof(runtime.CrewFoodProgression.TryGetTotalFoodCount) == "function" then
+			totalFoodCount = runtime.CrewFoodProgression.TryGetTotalFoodCount(player)
+		else
+			totalFoodCount = runtime.CrewFoodProgression.GetTotalFoodCount(player)
+		end
+		if totalFoodCount == nil then
+			return
+		end
 
 
 
@@ -168,7 +197,15 @@ function Module.Install(ctx)
 
 
 			for player, stands in pairs(runtime.playerStandList) do
-				updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
+				local ok, err = xpcall(function()
+					updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
+				end, debug.traceback)
+				if not ok then
+					warn(("[CrewIncome] Bank loop tick failed for %s: %s"):format(
+						player and player.Name or "unknown",
+						tostring(err)
+					))
+				end
 			end
 		end
 	end

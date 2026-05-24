@@ -77,6 +77,7 @@ local TRAIL_PULSE_POOL_LIMIT = 48
 local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.5
 local WARN_COOLDOWN = 3
+local NIL_DIAGNOSTIC_ATTRIBUTE_VALUE = {}
 local DEFAULT_ENTRY_CUE_MARKERS = {
 	"EnterGround",
 	"EntryVfx",
@@ -1272,6 +1273,7 @@ function MoguClient.Create(config)
 	self.pendingBurrowFeedback = nil
 	self.pendingServerConfirmedBurrowStart = nil
 	self.lastGroundedRequiredFeedbackAt = 0
+	self.diagnosticAttributeValues = {}
 	self.diagnostics = {
 		LastFlushAt = os.clock(),
 		PivotWrites = 0,
@@ -1293,7 +1295,22 @@ function MoguClient:SetDiagnosticAttribute(name, value)
 		return
 	end
 
+	local cachedValue = if value == nil then NIL_DIAGNOSTIC_ATTRIBUTE_VALUE else value
+	local diagnosticAttributeValues = self.diagnosticAttributeValues
+	if diagnosticAttributeValues and diagnosticAttributeValues[name] == cachedValue then
+		return
+	end
+	if player:GetAttribute(name) == value then
+		if diagnosticAttributeValues then
+			diagnosticAttributeValues[name] = cachedValue
+		end
+		return
+	end
+
 	player:SetAttribute(name, value)
+	if diagnosticAttributeValues then
+		diagnosticAttributeValues[name] = cachedValue
+	end
 end
 
 function MoguClient:RecordPivotWrite(didWrite)
@@ -3858,13 +3875,14 @@ function MoguClient:BuildRequestPayload(abilityName, _abilityEntry, fallbackBuil
 	return nil
 end
 
-function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
+function MoguClient:UpdateLocalBurrowState(burrowState, dt, now, abilityConfig)
 	local character = getCharacter(self.player)
 	local rootPart = self.getLocalRootPart()
 	local humanoid = self.getHumanoid()
 	if not character or not rootPart or not humanoid or humanoid.Health <= 0 then
 		return
 	end
+	abilityConfig = abilityConfig or getAbilityConfig()
 
 	humanoid.AutoRotate = false
 	humanoid.WalkSpeed = 0
@@ -3882,7 +3900,7 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 		local holdPosition = getGameplayRootPosition(
 			burrowState,
 			burrowState.SurfaceRootPosition or rootPart.Position,
-			getAbilityConfig()
+			abilityConfig
 		)
 		if burrowState.ResolveRevealed ~= true and typeof(holdPosition) == "Vector3" then
 			self:RecordPivotWrite(
@@ -3893,7 +3911,6 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 		return
 	end
 
-	local abilityConfig = getAbilityConfig()
 	local localNow = os.clock()
 	local currentSurfacePosition = burrowState.SurfaceRootPosition
 	if typeof(currentSurfacePosition) ~= "Vector3" then
@@ -4118,7 +4135,7 @@ function MoguClient:UpdateLocalBurrowState(burrowState, dt, now)
 	zeroRootVelocity(rootPart, true)
 end
 
-function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
+function MoguClient:UpdateTrailState(targetPlayer, burrowState, now, abilityConfig)
 	if
 		not burrowState
 		or burrowState.ResolveInProgress
@@ -4133,12 +4150,13 @@ function MoguClient:UpdateTrailState(targetPlayer, burrowState, now)
 		return
 	end
 
+	abilityConfig = abilityConfig or getAbilityConfig()
 	burrowState.LastTrailAt = now
 	local trailPosition = if typeof(burrowState.SurfaceRootPosition) == "Vector3"
 		then burrowState.SurfaceRootPosition
 		else rootPart.Position
-	if not self.vfxController:PlayTrail(trailPosition, burrowState.Direction, getAbilityConfig()) then
-		if createTrailPulse(trailPosition, tonumber(getAbilityConfig().TrailWidth) or 2.6) and self.diagnostics then
+	if not self.vfxController:PlayTrail(trailPosition, burrowState.Direction, abilityConfig) then
+		if createTrailPulse(trailPosition, tonumber(abilityConfig.TrailWidth) or 2.6) and self.diagnostics then
 			self.diagnostics.TrailPulseCount += 1
 		end
 	end
@@ -4220,18 +4238,19 @@ function MoguClient:Update(dt)
 	self:UpdatePendingLocalStartFeedback()
 
 	local now = Workspace:GetServerTimeNow()
+	local abilityConfig = getAbilityConfig()
 	for targetPlayer, burrowState in pairs(self.burrowStates) do
 		if burrowState.ResolveInProgress then
-			self:UpdateTrailState(targetPlayer, burrowState, now)
-		elseif now > (burrowState.EndTime + MoguBurrowShared.GetSurfaceResolveGrace(getAbilityConfig())) and not burrowState.IsLocal then
+			self:UpdateTrailState(targetPlayer, burrowState, now, abilityConfig)
+		elseif now > (burrowState.EndTime + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig)) and not burrowState.IsLocal then
 			self:StopBurrow(targetPlayer, {
 				ActualEndPosition = getRootPart(targetPlayer) and getRootPart(targetPlayer).Position or nil,
 				ResolveBurstRadius = burrowState.ResolveBurstRadius,
 			})
 		else
-			self:UpdateTrailState(targetPlayer, burrowState, now)
+			self:UpdateTrailState(targetPlayer, burrowState, now, abilityConfig)
 			if burrowState.IsLocal then
-				self:UpdateLocalBurrowState(burrowState, dt or 0, now)
+				self:UpdateLocalBurrowState(burrowState, dt or 0, now, abilityConfig)
 			end
 		end
 	end

@@ -27,6 +27,10 @@ local DEFAULT_CONCEAL_TRANSPARENCY = 1
 local DEFAULT_ENTRY_BURST_RADIUS = 3.2
 local DEFAULT_RESOLVE_BURST_RADIUS = 4.2
 local DEFAULT_SURFACE_RESOLVE_GRACE = 0.45
+local DEFAULT_STARTUP_INVINCIBILITY_MAX_SECONDS = 0.75
+local DEFAULT_STARTUP_INVINCIBILITY_START_OFFSET_SECONDS = 0
+local MIN_STARTUP_INVINCIBILITY_START_OFFSET_SECONDS = -0.25
+local MAX_STARTUP_INVINCIBILITY_START_OFFSET_SECONDS = 0.25
 local MIN_BURROW_DURATION = 0.5
 local MIN_TRAIL_INTERVAL = 0.05
 local MIN_BURST_RADIUS = 0.5
@@ -699,6 +703,23 @@ end
 
 function MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig)
 	return math.max(0, tonumber(abilityConfig and abilityConfig.SurfaceResolveGrace) or DEFAULT_SURFACE_RESOLVE_GRACE)
+end
+
+function MoguBurrowShared.GetStartupInvincibilityMaxSeconds(abilityConfig)
+	return math.max(
+		0,
+		tonumber(abilityConfig and abilityConfig.StartupInvincibilityMaxSeconds)
+			or DEFAULT_STARTUP_INVINCIBILITY_MAX_SECONDS
+	)
+end
+
+function MoguBurrowShared.GetStartupInvincibilityStartOffsetSeconds(abilityConfig)
+	return math.clamp(
+		tonumber(abilityConfig and abilityConfig.StartupInvincibilityStartOffsetSeconds)
+			or DEFAULT_STARTUP_INVINCIBILITY_START_OFFSET_SECONDS,
+		MIN_STARTUP_INVINCIBILITY_START_OFFSET_SECONDS,
+		MAX_STARTUP_INVINCIBILITY_START_OFFSET_SECONDS
+	)
 end
 
 function MoguBurrowShared.GetActivationGroundProbeDepth(abilityConfig)

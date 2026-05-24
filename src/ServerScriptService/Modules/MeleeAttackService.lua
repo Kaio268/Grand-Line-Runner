@@ -5,7 +5,12 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
-local AdminInvincibility = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminInvincibility"))
+local DamageProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("DamageProtection")
+)
 
 local MeleeAttackService = {}
 
@@ -205,7 +210,18 @@ local function resolveValidatedTarget(player, attackerCharacter, attackerRootPar
 		return nil
 	end
 
-	if AdminInvincibility.IsTargetInvincible(targetModel) then
+	if
+		DamageProtection.IsProtected(targetModel, {
+			TargetContext = {
+				Player = Players:GetPlayerFromCharacter(targetModel),
+				Character = targetModel,
+				Humanoid = targetHumanoid,
+				RootPart = targetRootPart,
+			},
+			Position = targetRootPart.Position,
+			Source = "MeleeAttack",
+		})
+	then
 		return nil
 	end
 
@@ -223,6 +239,18 @@ local function resolveValidatedTarget(player, attackerCharacter, attackerRootPar
 	if facingDot < config.MinFacingDot then
 		return nil
 	end
+
+	DamageProtection.TraceMoguStartupDamage(targetModel, {
+		TargetContext = {
+			Player = Players:GetPlayerFromCharacter(targetModel),
+			Character = targetModel,
+			Humanoid = targetHumanoid,
+			RootPart = targetRootPart,
+		},
+		Position = targetRootPart.Position,
+		Source = "MeleeAttack",
+		Path = "MeleeAttackService.resolveValidatedTarget",
+	})
 
 	return hitResult, targetHumanoid, targetRootPart
 end

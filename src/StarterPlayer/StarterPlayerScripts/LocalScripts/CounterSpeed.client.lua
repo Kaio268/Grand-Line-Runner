@@ -11,7 +11,7 @@ local HitEffectConfig = require(ModulesFolder:WaitForChild("Configs"):WaitForChi
 local HudStatNotificationService = require(HudFolder:WaitForChild("HudStatNotificationService"))
 local HudStatsTheme = require(HudFolder:WaitForChild("HudStatsTheme"))
 local MovementSpeedConfig = require(ModulesFolder:WaitForChild("Configs"):WaitForChild("MovementSpeed"))
-local Shorten = require(ModulesFolder:WaitForChild("Shorten"))
+local CurrencyUtil = require(ModulesFolder:WaitForChild("CurrencyUtil"))
 
 local player = Players.LocalPlayer
 local earnedSpeedValue = player:WaitForChild("HiddenLeaderstats"):WaitForChild("Speed")
@@ -122,15 +122,19 @@ local function formatDisplayNumber(value)
 	local numeric = math.max(0, tonumber(value) or 0)
 	local roundedInteger = math.floor(numeric + 0.5)
 	if math.abs(numeric - roundedInteger) < 0.05 then
-		return Shorten.withCommas(roundedInteger)
+		return CurrencyUtil.formatCompactNumber(roundedInteger)
 	end
 
 	local roundedTenth = math.floor((numeric * 10) + 0.5) / 10
-	return Shorten.withCommas(roundedTenth)
+	if roundedTenth < 1000 then
+		return tostring(roundedTenth)
+	end
+
+	return CurrencyUtil.formatCompactNumber(roundedTenth)
 end
 
 local function formatWholeNumber(value)
-	return Shorten.withCommas(math.floor((tonumber(value) or 0) + 0.5))
+	return CurrencyUtil.formatCompactNumber(math.floor((tonumber(value) or 0) + 0.5))
 end
 
 local function speedText(value)

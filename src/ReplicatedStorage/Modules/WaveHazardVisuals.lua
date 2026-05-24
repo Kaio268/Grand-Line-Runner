@@ -12,6 +12,7 @@ local WaveHazardVisuals = {}
 local REGULAR_WAVE_ASSET_NAME = "Regular Wave"
 local FROZEN_WAVE_ASSET_NAME = "Frozen Wave"
 local HITBOX_NAME = "WaveHitbox"
+local VISUAL_BOUNDS_NAME = "WaveVisualBounds"
 local VISUAL_NAME = "WaveVisual"
 local FROZEN_VISUAL_NAME = "FrozenWaveVisual"
 local USES_ASSET_VISUALS_ATTRIBUTE = "UsesWaveAssetVisuals"
@@ -22,10 +23,23 @@ local PREPARED_VISUAL_ATTRIBUTE = "WaveVisualPrepared"
 local PREPARED_VISUALS_ATTRIBUTE = "WaveVisualsPrepared"
 local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
 local ORIGINAL_ENABLED_ATTRIBUTE = "WaveVisualOriginalEnabled"
+local HITBOX_CONTRIBUTES_ATTRIBUTE = "WaveHitboxContributes"
+local HITBOX_IGNORE_ATTRIBUTE = "WaveHitboxIgnore"
+local VISUAL_TARGET_LOCAL_POSITION_ATTRIBUTE = "WaveVisualTargetLocalPosition"
+local VISUAL_TARGET_SIZE_ATTRIBUTE = "WaveVisualTargetSize"
 local MIN_PART_SIZE = 0.001
 local ASSET_TEMPLATE_ROTATION = CFrame.Angles(0, math.rad(180), 0)
 local VISUAL_BOUNDS_DIAGNOSTIC_ATTRIBUTE = "WaveVisualBoundsDebug"
 local VISUAL_BOUNDS_DRIFT_WARN_RATIO = 1.05
+local MEASUREMENT_FULL = "full"
+local MEASUREMENT_DAMAGE = "damage"
+local HITBOX_CONTRIBUTOR_NAMES = {
+	["Through"] = true,
+	["Through Sides"] = true,
+}
+local HITBOX_IGNORED_NAMES = {
+	Crest = true,
+}
 local waveAssetCache = {}
 local waveAssetMeasurementCache = {}
 local warningKeys = {}
@@ -104,37 +118,6 @@ local function getWaveAsset(assetName, options)
 	return nil
 end
 
-local function getWaveAssetSourceSize(asset)
-	if not asset then
-		return nil
-	end
-
-	local cacheKey = asset:GetFullName()
-	local cachedMeasurement = waveAssetMeasurementCache[cacheKey]
-	if cachedMeasurement and cachedMeasurement.Asset == asset and asset.Parent then
-		return cachedMeasurement.Size
-	elseif cachedMeasurement then
-		waveAssetMeasurementCache[cacheKey] = nil
-	end
-
-	local sourceSize = nil
-	if asset:IsA("BasePart") then
-		sourceSize = asset.Size
-	else
-		local _, measuredSize = asset:GetBoundingBox()
-		sourceSize = measuredSize
-	end
-
-	if sourceSize then
-		waveAssetMeasurementCache[cacheKey] = {
-			Asset = asset,
-			Size = sourceSize,
-		}
-	end
-
-	return sourceSize
-end
-
 local function forEachBasePart(root, callback)
 	if not root then
 		return
@@ -150,6 +133,188 @@ local function forEachBasePart(root, callback)
 			callback(descendant)
 		end
 	end
+end
+
+local function getPivot(instance)
+	if instance:IsA("Model") then
+		return instance:GetPivot()
+	end
+
+	return instance.CFrame
+end
+
+local function clampSize(value)
+	return math.max(MIN_PART_SIZE, value)
+end
+
+local function getBoundsMeasurementInFrame(parts, boundsFrame)
+	local minX, minY, minZ = math.huge, math.huge, math.huge
+	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
+	local hasBounds = false
+
+	for _, part in ipairs(parts) do
+		if part and part:IsA("BasePart") and part.Parent then
+			local halfSize = part.Size * 0.5
+
+			for _, xSign in ipairs({ -1, 1 }) do
+				for _, ySign in ipairs({ -1, 1 }) do
+					for _, zSign in ipairs({ -1, 1 }) do
+						local worldCorner = part.CFrame:PointToWorldSpace(Vector3.new(
+							halfSize.X * xSign,
+							halfSize.Y * ySign,
+							halfSize.Z * zSign
+						))
+						local localCorner = boundsFrame:PointToObjectSpace(worldCorner)
+
+						minX = math.min(minX, localCorner.X)
+						minY = math.min(minY, localCorner.Y)
+						minZ = math.min(minZ, localCorner.Z)
+						maxX = math.max(maxX, localCorner.X)
+						maxY = math.max(maxY, localCorner.Y)
+						maxZ = math.max(maxZ, localCorner.Z)
+						hasBounds = true
+					end
+				end
+			end
+		end
+	end
+
+	if not hasBounds then
+		return nil
+	end
+
+	local minBounds = Vector3.new(minX, minY, minZ)
+	local maxBounds = Vector3.new(maxX, maxY, maxZ)
+	return {
+		Center = (minBounds + maxBounds) * 0.5,
+		Size = Vector3.new(
+			clampSize(maxX - minX),
+			clampSize(maxY - minY),
+			clampSize(maxZ - minZ)
+		),
+	}
+end
+
+local function getAllBaseParts(root)
+	local parts = {}
+	forEachBasePart(root, function(part)
+		parts[#parts + 1] = part
+	end)
+	return parts
+end
+
+local function hasExplicitHitboxContributors(root)
+	local foundExplicitContributor = false
+	forEachBasePart(root, function(part)
+		if part:GetAttribute(HITBOX_CONTRIBUTES_ATTRIBUTE) == true
+			and part:GetAttribute(HITBOX_IGNORE_ATTRIBUTE) ~= true then
+			foundExplicitContributor = true
+		end
+	end)
+	return foundExplicitContributor
+end
+
+local function getDamageMeasurementParts(asset)
+	local parts = {}
+	local useExplicitContributors = hasExplicitHitboxContributors(asset)
+
+	forEachBasePart(asset, function(part)
+		if part:GetAttribute(HITBOX_IGNORE_ATTRIBUTE) == true then
+			return
+		end
+
+		if useExplicitContributors then
+			if part:GetAttribute(HITBOX_CONTRIBUTES_ATTRIBUTE) == true then
+				parts[#parts + 1] = part
+			end
+			return
+		end
+
+		if HITBOX_IGNORED_NAMES[part.Name] == true then
+			return
+		end
+
+		if HITBOX_CONTRIBUTOR_NAMES[part.Name] == true then
+			parts[#parts + 1] = part
+		end
+	end)
+
+	return parts
+end
+
+local function computeWaveAssetMeasurement(asset, measurementMode)
+	if not asset then
+		return nil
+	end
+
+	local sourceFrame = getPivot(asset)
+	local parts = nil
+	if measurementMode == MEASUREMENT_DAMAGE then
+		parts = getDamageMeasurementParts(asset)
+		if #parts <= 0 then
+			warnOnce(
+				"missing_damage_measurement_parts_" .. asset:GetFullName(),
+				"Wave asset '%s' has no body hitbox contributors; falling back to full visual bounds.",
+				asset:GetFullName()
+			)
+			parts = getAllBaseParts(asset)
+		end
+	else
+		parts = getAllBaseParts(asset)
+	end
+
+	return getBoundsMeasurementInFrame(parts, sourceFrame)
+end
+
+local function getWaveAssetMeasurement(asset, measurementMode)
+	if not asset then
+		return nil
+	end
+
+	local resolvedMode = measurementMode == MEASUREMENT_DAMAGE and MEASUREMENT_DAMAGE or MEASUREMENT_FULL
+	local cacheKey = string.format("%s::%s", asset:GetFullName(), resolvedMode)
+	local cachedMeasurement = waveAssetMeasurementCache[cacheKey]
+	if cachedMeasurement and cachedMeasurement.Asset == asset and asset.Parent then
+		return cachedMeasurement.Measurement
+	elseif cachedMeasurement then
+		waveAssetMeasurementCache[cacheKey] = nil
+	end
+
+	local measurement = computeWaveAssetMeasurement(asset, resolvedMode)
+	if measurement then
+		waveAssetMeasurementCache[cacheKey] = {
+			Asset = asset,
+			Measurement = measurement,
+		}
+	end
+
+	return measurement
+end
+
+local function scaleOffset(value, scale)
+	return Vector3.new(
+		value.X * scale,
+		value.Y * scale,
+		value.Z * scale
+	)
+end
+
+local function scaleSize(value, scale)
+	return Vector3.new(
+		clampSize(value.X * scale),
+		clampSize(value.Y * scale),
+		clampSize(value.Z * scale)
+	)
+end
+
+local function getMeasuredTargetBox(baseCFrame, measurement, scale)
+	if not measurement then
+		return nil, nil
+	end
+
+	local localCenter = scaleOffset(measurement.Center or Vector3.zero, scale)
+	local targetSize = scaleSize(measurement.Size, scale)
+	return baseCFrame * CFrame.new(localCenter), targetSize
 end
 
 local function forEachSelfAndDescendant(root, callback)
@@ -181,14 +346,6 @@ local function ensureModelPrimaryPart(model)
 	end
 
 	return primaryPart
-end
-
-local function getPivot(instance)
-	if instance:IsA("Model") then
-		return instance:GetPivot()
-	end
-
-	return instance.CFrame
 end
 
 local function translateCFrame(cframeValue, offset)
@@ -244,6 +401,28 @@ local function findHitboxRoot(root)
 	local descendantHitbox = root:FindFirstChild(HITBOX_NAME, true)
 	if descendantHitbox and (descendantHitbox:IsA("Model") or descendantHitbox:IsA("BasePart")) then
 		return descendantHitbox
+	end
+
+	return nil
+end
+
+local function findVisualBoundsRoot(root)
+	if not root then
+		return nil
+	end
+
+	if (root:IsA("Model") or root:IsA("BasePart")) and root.Name == VISUAL_BOUNDS_NAME then
+		return root
+	end
+
+	local directVisualBounds = root:FindFirstChild(VISUAL_BOUNDS_NAME)
+	if directVisualBounds and (directVisualBounds:IsA("Model") or directVisualBounds:IsA("BasePart")) then
+		return directVisualBounds
+	end
+
+	local descendantVisualBounds = root:FindFirstChild(VISUAL_BOUNDS_NAME, true)
+	if descendantVisualBounds and (descendantVisualBounds:IsA("Model") or descendantVisualBounds:IsA("BasePart")) then
+		return descendantVisualBounds
 	end
 
 	return nil
@@ -311,10 +490,6 @@ local function configureVisualPart(part)
 			part.RenderFidelity = Enum.RenderFidelity.Precise
 		end)
 	end
-end
-
-local function clampSize(value)
-	return math.max(MIN_PART_SIZE, value)
 end
 
 local function getWaveShapeScale(sourceSize, targetSize)
@@ -445,8 +620,28 @@ end
 
 local function getVisualTargetBox(root)
 	if root:IsA("Model") and root:GetAttribute(USES_ASSET_VISUALS_ATTRIBUTE) == true then
-		local hitbox = findHitboxRoot(root)
 		local targetCFrame = root:GetPivot() * ASSET_TEMPLATE_ROTATION
+		local visualBounds = findVisualBoundsRoot(root)
+		if visualBounds then
+			if visualBounds:IsA("BasePart") then
+				return visualBounds.CFrame, visualBounds.Size
+			end
+
+			local visualBoundsCFrame, visualBoundsSize = visualBounds:GetBoundingBox()
+			return visualBoundsCFrame, visualBoundsSize
+		end
+
+		local visualTargetSize = root:GetAttribute(VISUAL_TARGET_SIZE_ATTRIBUTE)
+		if typeof(visualTargetSize) == "Vector3" then
+			local visualLocalPosition = root:GetAttribute(VISUAL_TARGET_LOCAL_POSITION_ATTRIBUTE)
+			if typeof(visualLocalPosition) ~= "Vector3" then
+				visualLocalPosition = Vector3.zero
+			end
+
+			return targetCFrame * CFrame.new(visualLocalPosition), visualTargetSize
+		end
+
+		local hitbox = findHitboxRoot(root)
 		if hitbox then
 			local targetSize = getBoundsSizeInFrame(hitbox, targetCFrame)
 			if targetSize then
@@ -603,7 +798,7 @@ local function warnIfVisualBoundsDrift(root, visual, assetName)
 
 	warnOnce(
 		"visual_bounds_drift_" .. tostring(assetName),
-		"Prepared wave visual bounds differ from WaveHitbox target asset=%s visual=%s target=%s root=%s.",
+		"Prepared wave visual bounds differ from target asset=%s visual=%s target=%s root=%s.",
 		tostring(assetName),
 		tostring(visualSize),
 		tostring(targetSize),
@@ -639,26 +834,46 @@ local function createProxyHitbox(targetCFrame, targetSize)
 	return hitbox
 end
 
+local function createVisualBoundsProxy(targetCFrame, targetSize)
+	local visualBounds = Instance.new("Part")
+	visualBounds.Name = VISUAL_BOUNDS_NAME
+	visualBounds.Size = Vector3.new(
+		clampSize(targetSize.X),
+		clampSize(targetSize.Y),
+		clampSize(targetSize.Z)
+	)
+	visualBounds.CFrame = targetCFrame
+	visualBounds.Transparency = 1
+	visualBounds.LocalTransparencyModifier = 1
+	visualBounds.CastShadow = false
+	pcall(function()
+		visualBounds.TopSurface = Enum.SurfaceType.Smooth
+		visualBounds.BottomSurface = Enum.SurfaceType.Smooth
+	end)
+	configureVisualPart(visualBounds)
+	return visualBounds
+end
+
 local function getProxyHitboxBox(template)
 	local targetCFrame, targetSize = getTargetBox(template)
 	targetCFrame = targetCFrame or getPivot(template)
 	targetSize = targetSize or Vector3.new(20, 8, 8)
+	local visualTargetCFrame = targetCFrame
+	local visualTargetSize = targetSize
 
 	local regularAsset = getWaveAsset(REGULAR_WAVE_ASSET_NAME)
 	if regularAsset then
-		local sourceSize = getWaveAssetSourceSize(regularAsset)
-		if sourceSize then
-			local scale = getWaveShapeScale(sourceSize, targetSize)
-			targetCFrame = targetCFrame * ASSET_TEMPLATE_ROTATION
-			targetSize = Vector3.new(
-				clampSize(sourceSize.X * scale),
-				clampSize(sourceSize.Y * scale),
-				clampSize(sourceSize.Z * scale)
-			)
+		local visualMeasurement = getWaveAssetMeasurement(regularAsset, MEASUREMENT_FULL)
+		local damageMeasurement = getWaveAssetMeasurement(regularAsset, MEASUREMENT_DAMAGE)
+		if visualMeasurement and damageMeasurement then
+			local scale = getWaveShapeScale(visualMeasurement.Size, targetSize)
+			local baseTargetCFrame = targetCFrame * ASSET_TEMPLATE_ROTATION
+			targetCFrame, targetSize = getMeasuredTargetBox(baseTargetCFrame, damageMeasurement, scale)
+			visualTargetCFrame, visualTargetSize = getMeasuredTargetBox(baseTargetCFrame, visualMeasurement, scale)
 		end
 	end
 
-	return targetCFrame, targetSize
+	return targetCFrame, targetSize, visualTargetCFrame, visualTargetSize
 end
 
 local function getSanitizedBaseWaveVisualScale(config)
@@ -688,24 +903,22 @@ local function getConfiguredProxyHitboxBox(config)
 		Context = "configured wave hitbox",
 		WarnIfMissing = true,
 	})
-	local sourceSize = getWaveAssetSourceSize(regularAsset)
-	if not sourceSize then
+	local visualMeasurement = getWaveAssetMeasurement(regularAsset, MEASUREMENT_FULL)
+	local damageMeasurement = getWaveAssetMeasurement(regularAsset, MEASUREMENT_DAMAGE)
+	if not visualMeasurement or not damageMeasurement then
 		return nil, nil, "missing_regular_wave_bounds"
 	end
 
 	local pivotOffset = if typeof(config.PivotOffset) == "Vector3" then config.PivotOffset else Vector3.zero
 	local orientation = if typeof(config.Orientation) == "CFrame" then config.Orientation else ASSET_TEMPLATE_ROTATION
-	local targetCFrame = CFrame.new(pivotOffset) * orientation
-	local targetSize = Vector3.new(
-		clampSize(sourceSize.X * visualScale),
-		clampSize(sourceSize.Y * visualScale),
-		clampSize(sourceSize.Z * visualScale)
-	)
+	local baseTargetCFrame = CFrame.new(pivotOffset) * orientation
+	local targetCFrame, targetSize = getMeasuredTargetBox(baseTargetCFrame, damageMeasurement, visualScale)
+	local visualTargetCFrame, visualTargetSize = getMeasuredTargetBox(baseTargetCFrame, visualMeasurement, visualScale)
 
-	return targetCFrame, targetSize, nil
+	return targetCFrame, targetSize, nil, visualTargetCFrame, visualTargetSize
 end
 
-local function createGeneratedWaveHazard(name, targetCFrame, targetSize, worldPivot)
+local function createGeneratedWaveHazard(name, targetCFrame, targetSize, worldPivot, visualTargetCFrame, visualTargetSize)
 	local model = Instance.new("Model")
 	model.Name = tostring(name or "Wave")
 	model:SetAttribute(USES_ASSET_VISUALS_ATTRIBUTE, true)
@@ -714,7 +927,20 @@ local function createGeneratedWaveHazard(name, targetCFrame, targetSize, worldPi
 
 	local hitbox = createProxyHitbox(targetCFrame, targetSize)
 	hitbox.Parent = model
+	if typeof(visualTargetCFrame) == "CFrame" and typeof(visualTargetSize) == "Vector3" then
+		local visualBounds = createVisualBoundsProxy(visualTargetCFrame, visualTargetSize)
+		visualBounds.Parent = model
+	end
+
 	model.WorldPivot = worldPivot or CFrame.new()
+	if typeof(visualTargetCFrame) == "CFrame" and typeof(visualTargetSize) == "Vector3" then
+		local visualTargetFrame = model:GetPivot() * ASSET_TEMPLATE_ROTATION
+		model:SetAttribute(
+			VISUAL_TARGET_LOCAL_POSITION_ATTRIBUTE,
+			visualTargetFrame:PointToObjectSpace(visualTargetCFrame.Position)
+		)
+		model:SetAttribute(VISUAL_TARGET_SIZE_ATTRIBUTE, scaleSize(visualTargetSize, 1))
+	end
 	return model, true
 end
 
@@ -802,6 +1028,41 @@ function WaveHazardVisuals.GetHitboxParts(root)
 	end
 
 	return parts
+end
+
+function WaveHazardVisuals.CopyVisualBoundsTarget(sourceRoot, targetRoot)
+	if not sourceRoot or not targetRoot then
+		return nil
+	end
+
+	local existingVisualBounds = findVisualBoundsRoot(targetRoot)
+	if existingVisualBounds then
+		existingVisualBounds:Destroy()
+	end
+
+	local sourceVisualBounds = findVisualBoundsRoot(sourceRoot)
+	if sourceVisualBounds then
+		local visualBounds = sourceVisualBounds:Clone()
+		visualBounds.Name = VISUAL_BOUNDS_NAME
+		visualBounds.Parent = targetRoot
+		WaveHazardVisuals.ConfigureVisualRoot(visualBounds)
+		return visualBounds
+	end
+
+	local visualTargetSize = sourceRoot:GetAttribute(VISUAL_TARGET_SIZE_ATTRIBUTE)
+	if typeof(visualTargetSize) ~= "Vector3" then
+		return nil
+	end
+
+	local targetCFrame = targetRoot:GetPivot() * ASSET_TEMPLATE_ROTATION
+	local visualLocalPosition = sourceRoot:GetAttribute(VISUAL_TARGET_LOCAL_POSITION_ATTRIBUTE)
+	if typeof(visualLocalPosition) == "Vector3" then
+		targetCFrame = targetCFrame * CFrame.new(visualLocalPosition)
+	end
+
+	local visualBounds = createVisualBoundsProxy(targetCFrame, visualTargetSize)
+	visualBounds.Parent = targetRoot
+	return visualBounds
 end
 
 function WaveHazardVisuals.ConfigureVisualRoot(root)
@@ -908,18 +1169,32 @@ function WaveHazardVisuals.ApplyVisual(root, assetName)
 end
 
 function WaveHazardVisuals.CreateHazardFromTemplate(template)
-	local targetCFrame, targetSize = getProxyHitboxBox(template)
-	return createGeneratedWaveHazard(template.Name, targetCFrame, targetSize, getPivot(template))
+	local targetCFrame, targetSize, visualTargetCFrame, visualTargetSize = getProxyHitboxBox(template)
+	return createGeneratedWaveHazard(
+		template.Name,
+		targetCFrame,
+		targetSize,
+		getPivot(template),
+		visualTargetCFrame,
+		visualTargetSize
+	)
 end
 
 function WaveHazardVisuals.CreateHazardFromConfig(config)
 	config = if typeof(config) == "table" then config else {}
-	local targetCFrame, targetSize, reason = getConfiguredProxyHitboxBox(config)
+	local targetCFrame, targetSize, reason, visualTargetCFrame, visualTargetSize = getConfiguredProxyHitboxBox(config)
 	if not targetCFrame or not targetSize then
 		return nil, false, reason or "invalid_config"
 	end
 
-	return createGeneratedWaveHazard(config.Name, targetCFrame, targetSize, CFrame.new())
+	return createGeneratedWaveHazard(
+		config.Name,
+		targetCFrame,
+		targetSize,
+		CFrame.new(),
+		visualTargetCFrame,
+		visualTargetSize
+	)
 end
 
 function WaveHazardVisuals.SetFrozen(root, isFrozen)

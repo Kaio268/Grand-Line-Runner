@@ -161,6 +161,7 @@ function Module.Install(ctx)
 			if slotBonusInfo then math.max(0, slotState.BonusPercent or 0) else nil
 		)
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ExpiresAt, nil)
+		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.DespawnSeconds, nil)
 		removeLegacyCrewHover(placedModel)
 		CollectionService:AddTag(placedModel, CrewOverhead.Tag)
 	end

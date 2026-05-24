@@ -334,8 +334,8 @@ local function processUpgradePurchase(player)
 	local beliCost = math.max(0, math.floor(tonumber(requirement.Beli) or 0))
 	if currentMoney < beliCost then
 		fireUpgradeFailure(player, "not_enough_beli", "Need More " .. CurrencyUtil.getDisplayName(), "Requirement Not Met", {
-			string.format("Required: %s %s.", tostring(beliCost), CurrencyUtil.getDisplayName()),
-			string.format("Current: %s %s.", tostring(currentMoney), CurrencyUtil.getDisplayName()),
+			string.format("Required: %s.", CurrencyUtil.formatCurrency(beliCost)),
+			string.format("Current: %s.", CurrencyUtil.formatCurrency(currentMoney)),
 		}, current, "Not enough " .. CurrencyUtil.getDisplayName() .. ".")
 		return false
 	end
@@ -349,8 +349,8 @@ local function processUpgradePurchase(player)
 		if currentAmount < requiredAmount then
 			local displayName = tostring(cfg.MaterialDisplayNames[materialKey] or materialKey)
 			fireUpgradeFailure(player, "not_enough_" .. string.lower(tostring(materialKey)), "Need More " .. displayName, "Requirement Not Met", {
-				string.format("Required: %s %s.", tostring(requiredAmount), displayName),
-				string.format("Current: %s %s.", tostring(currentAmount), displayName),
+				string.format("Required: %s %s.", CurrencyUtil.formatCount(requiredAmount), displayName),
+				string.format("Current: %s %s.", CurrencyUtil.formatCount(currentAmount), displayName),
 			}, current, "Not enough " .. displayName .. ".")
 			return false
 		end

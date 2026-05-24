@@ -4,6 +4,7 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 
@@ -153,10 +154,19 @@ local function formatCacheValue(value)
 	return tostring(value)
 end
 
+local function getPreviewProfileCacheKey(props)
+	if props.previewKind == "Chest" then
+		return ChestVisuals.GetPreviewCacheKey(props.previewName)
+	end
+
+	return ""
+end
+
 local function getPreviewTemplateKey(props)
 	return table.concat({
 		formatCacheValue(props.previewKind),
 		formatCacheValue(props.previewName),
+		formatCacheValue(getPreviewProfileCacheKey(props)),
 		formatCacheValue(props.tintColor),
 		formatCacheValue(props.tintTransparency),
 		formatCacheValue(props.tintMaterial),
@@ -380,6 +390,8 @@ local function positionPreviewModel(previewModel, previewKind, previewName)
 	local rotation = CFrame.Angles(math.rad(-12), math.rad(28), 0)
 	if previewKind == "CrewMember" then
 		rotation = CREW_PREVIEW_ROTATION
+	elseif previewKind == "Chest" then
+		rotation = ChestVisuals.GetPreviewRotation(previewName)
 	elseif previewKind == "DevilFruit" and previewName == "Tori" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
@@ -456,6 +468,8 @@ local function createPreviewModel(props)
 		return DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
 	elseif props.previewKind == "CrewMember" then
 		return cloneCrewPreviewModel(props.previewName)
+	elseif props.previewKind == "Chest" then
+		return ChestVisuals.CreatePreviewModel(props.previewName)
 	end
 
 	return nil
@@ -598,11 +612,18 @@ local function ViewportPreviewModel(props)
 				clearChildren(viewport)
 			end
 		end
-	end, { props.previewKind, props.previewName, props.tintColor, props.tintTransparency, props.tintMaterial, props.fieldOfView })
+	end, {
+		props.previewKind,
+		props.previewName,
+		props.tintColor,
+		props.tintTransparency,
+		props.tintMaterial,
+		props.fieldOfView,
+	})
 
 	return e("ViewportFrame", {
 		ref = viewportRef,
-		AnchorPoint = props.anchorPoint,
+		AnchorPoint = props.anchorPoint or Vector2.new(0.5, 0.5),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Position = props.position,

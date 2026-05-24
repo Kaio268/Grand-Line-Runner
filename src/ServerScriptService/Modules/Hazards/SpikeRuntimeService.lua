@@ -20,6 +20,12 @@ local HazardProtection = require(
 		:WaitForChild("Server")
 		:WaitForChild("HazardProtection")
 )
+local DamageProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("DamageProtection")
+)
 
 local SpikeRuntimeService = {}
 
@@ -1502,6 +1508,18 @@ local function damagePlayer(controller, player)
 	if isHazardProtected then
 		return false
 	end
+
+	DamageProtection.TraceMoguStartupDamage(player, {
+		TargetContext = {
+			Player = player,
+			Character = character,
+			Humanoid = humanoid,
+			RootPart = rootPart,
+		},
+		Position = rootPart.Position,
+		Source = "DeckSpikes",
+		Path = "SpikeRuntimeService.damagePlayer",
+	})
 
 	HitEffectService.ApplyEffect(player, "Knockdown", {
 		Duration = CONFIG.KnockdownDuration,

@@ -5,12 +5,17 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local AdminInvincibility = require(Modules:WaitForChild("AdminInvincibility"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local CrewInteraction = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local CorridorController = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushCorridorRunController"))
 local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
+local DamageProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("DamageProtection")
+)
 local HoroAnimationController = require(script.Parent:WaitForChild("HoroAnimationController"))
 local HoroGhostAnimateController = require(script.Parent:WaitForChild("HoroGhostAnimateController"))
 
@@ -38,6 +43,14 @@ local DEFAULT_SERVER_HAZARD_PROBE_INTERVAL = 0.08
 local DEFAULT_PICKUP_THROTTLE = 0.18
 local DEFAULT_PICKUP_RANGE_GRACE_DURATION = 0.45
 local DEFAULT_PICKUP_RANGE_GRACE_DISTANCE = 10
+
+local function isDamageProtected(player, position, source)
+	return DamageProtection.IsProtected(player, {
+		Position = position,
+		Source = source or "HoroProjection",
+	})
+end
+
 local DEFAULT_CLIENT_HAZARD_REPORT_THROTTLE = 0.12
 local DEFAULT_BODY_WALK_SPEED = 0
 local DEFAULT_BODY_JUMP_POWER = 0
@@ -1333,14 +1346,25 @@ local function startProjectionMonitor(state)
 			if now >= state.NextHazardProbeAt then
 				state.NextHazardProbeAt = now + state.ServerHazardProbeInterval
 				if probeHazards(state) then
-					if not AdminInvincibility.IsEnabled(state.Player) then
+					if not isDamageProtected(state.Player, ghostRoot.Position, "HoroGhostHazard") then
 						finishProjection(state, "hazard_overlap", ghostRoot.Position, true)
 						return
 					end
 				end
 
 				if probeBodyHazards(state) then
-					if not AdminInvincibility.IsEnabled(state.Player) then
+					if not isDamageProtected(state.Player, ghostRoot.Position, "HoroBodyHazard") then
+						DamageProtection.TraceMoguStartupDamage(state.Player, {
+							TargetContext = {
+								Player = state.Player,
+								Character = state.Character,
+								Humanoid = humanoid,
+								RootPart = rootPart,
+							},
+							Position = ghostRoot.Position,
+							Source = "HoroBodyHazard",
+							Path = "HoroServer.monitorProjection.bodyHazard",
+						})
 						finishProjection(state, "body_hazard_overlap", ghostRoot.Position, true)
 						if humanoid.Parent and humanoid.Health > 0 then
 							humanoid.Health = 0
@@ -1495,7 +1519,7 @@ local function handleActionRemote(player, actionName, payload)
 	end
 
 	if actionName == ACTION_INTERRUPT then
-		if AdminInvincibility.IsEnabled(state.Player) then
+		if isDamageProtected(state.Player, state.GhostRoot and state.GhostRoot.Position or nil, "HoroClientHazard") then
 			return
 		end
 
@@ -1509,7 +1533,7 @@ local function handleActionRemote(player, actionName, payload)
 	end
 
 	if actionName == ACTION_BODY_HAZARD then
-		if AdminInvincibility.IsEnabled(state.Player) then
+		if isDamageProtected(state.Player, state.GhostRoot and state.GhostRoot.Position or nil, "HoroClientBodyHazard") then
 			return
 		end
 
@@ -1520,6 +1544,17 @@ local function handleActionRemote(player, actionName, payload)
 		state.NextClientInterruptAt = now + state.ClientHazardReportThrottle
 		finishProjection(state, "body_hazard", state.GhostRoot and state.GhostRoot.Position or nil, true)
 		if state.Humanoid and state.Humanoid.Parent and state.Humanoid.Health > 0 then
+			DamageProtection.TraceMoguStartupDamage(state.Player, {
+				TargetContext = {
+					Player = state.Player,
+					Character = state.Character,
+					Humanoid = state.Humanoid,
+					RootPart = state.RootPart,
+				},
+				Position = state.GhostRoot and state.GhostRoot.Position or nil,
+				Source = "HoroClientBodyHazard",
+				Path = "HoroServer.handleActionRemote.bodyHazard",
+			})
 			state.Humanoid.Health = 0
 			scheduleRespawnIfBodyDead(state)
 		end

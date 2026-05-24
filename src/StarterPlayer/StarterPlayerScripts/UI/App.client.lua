@@ -391,7 +391,7 @@ local function shortName(text)
 end
 
 local function formatIncomeNumber(value)
-	return CurrencyUtil.formatIncomeExact(value)
+	return CurrencyUtil.formatCurrency(value)
 end
 
 local function formatMultiplier(value)
@@ -1896,7 +1896,7 @@ local function buildCaptainLogEntry(shipFolder)
 		crewMemberName = crewMemberName,
 		displayName = displayName,
 		subtitle = subtitle,
-		footer = string.format("Captain's Spot  |  %s Beli ready", formatIncomeNumber(claimReadyAmount)),
+		footer = string.format("Captain's Spot  |  %s ready", formatIncomeNumber(claimReadyAmount)),
 		image = getIcon(CREW_ITEM_KIND, crewMemberName),
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
@@ -1999,7 +1999,7 @@ local function buildCaptainLogEntryFromSnapshotRow(row)
 		crewMemberName = crewMemberName,
 		displayName = displayName,
 		subtitle = subtitle,
-		footer = string.format("%s  |  %s Beli ready", standName, formatIncomeNumber(claimReadyAmount)),
+		footer = string.format("%s  |  %s ready", standName, formatIncomeNumber(claimReadyAmount)),
 		image = getIcon(CREW_ITEM_KIND, crewMemberName),
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
@@ -2136,7 +2136,7 @@ local function buildCaptainLogData(query)
 				crewMemberName = crewMemberName,
 				displayName = displayName,
 				subtitle = subtitle,
-				footer = string.format("%s  |  %s Beli ready", standName, formatIncomeNumber(claimReadyAmount)),
+				footer = string.format("%s  |  %s ready", standName, formatIncomeNumber(claimReadyAmount)),
 				image = getIcon(CREW_ITEM_KIND, crewMemberName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				previewKind = previewKind,

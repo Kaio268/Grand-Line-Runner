@@ -1046,6 +1046,12 @@ local function dropHeldCrewMember(ctx, player, model, st, dropPosition, options)
 	st.CarryOrder = nil
 	st.LastUpdate = os.clock()
 	if tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.Kind) or "") == CrewOverhead.Kind.Spawned then
+		if tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.DespawnSeconds)) == nil then
+			model:SetAttribute(
+				OVERHEAD_ATTRIBUTES.DespawnSeconds,
+				math.max(0, tonumber(st.Remaining) or 0)
+			)
+		end
 		model:SetAttribute(
 			OVERHEAD_ATTRIBUTES.ExpiresAt,
 			workspace:GetServerTimeNow() + math.max(0, tonumber(st.Remaining) or 0)

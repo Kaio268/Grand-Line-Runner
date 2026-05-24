@@ -4,7 +4,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HudStatNotificationService = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Hud"):WaitForChild("HudStatNotificationService"))
 local CounterVisibilityUtil = require(script.Parent:WaitForChild("CounterVisibilityUtil"))
-local Shorten = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Shorten"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local player = Players.LocalPlayer
 local moneyValue = player:WaitForChild("HiddenLeaderstats"):WaitForChild("Comets")
@@ -65,7 +65,7 @@ local function setStroke(c)
 end
 
 local function formatNumber(n)
-	return Shorten.withCommas(math.floor((tonumber(n) or 0) + 0.5))
+	return CurrencyUtil.formatCompactNumber(n)
 end
 
 local function moneyText(n)

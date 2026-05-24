@@ -131,6 +131,9 @@ function Module.Install(ctx)
 		end
 
 		local ok, crewMemberIncome = pcall(function()
+			if typeof(DataManager.TryGetValue) == "function" then
+				return DataManager:TryGetValue(player, "CrewMemberIncome")
+			end
 			return DataManager:GetValue(player, "CrewMemberIncome")
 		end)
 
@@ -338,6 +341,10 @@ function Module.Install(ctx)
 			return nil
 		end
 		local ok, v = pcall(function()
+			if typeof(DataManager.TryGetValue) == "function" then
+				local value = DataManager:TryGetValue(player, path)
+				return value
+			end
 			return DataManager:GetValue(player, path)
 		end)
 		if ok then
@@ -351,7 +358,10 @@ function Module.Install(ctx)
 			return false
 		end
 		local ok, result = pcall(function()
-			DataManager:SetValue(player, path, value)
+			if typeof(DataManager.TrySetValue) == "function" then
+				return DataManager:TrySetValue(player, path, value)
+			end
+			return DataManager:SetValue(player, path, value)
 		end)
 		return ok and result ~= false
 	end

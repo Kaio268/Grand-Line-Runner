@@ -9,9 +9,15 @@ local MoguBurrowShared = require(
 	Modules:WaitForChild("DevilFruits"):WaitForChild("Mogu"):WaitForChild("Shared"):WaitForChild("MoguBurrowShared")
 )
 local MoguAnimationController = require(script.Parent:WaitForChild("MoguAnimationController"))
+local DamageProtection = require(script.Parent.Parent.Parent:WaitForChild("Server"):WaitForChild("DamageProtection"))
 
 local MoguServer = {}
 local BURROW_PROTECTED_UNTIL_ATTRIBUTE = "MoguBurrowProtectedUntil"
+local MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE = "MoguStartupInvincibleFrom"
+local MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE = "MoguStartupInvincibleUntil"
+local MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE = "MoguStartupInvincibleSeconds"
+local MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE = "MoguStartupInvincibleStartOffsetSeconds"
+local MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE = "MoguStartupInvincibleSessionId"
 local MOGU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "MoguMovementLockUntil"
 local MOGU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "MoguMovementLockSpeedMultiplier"
 local BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
@@ -422,12 +428,25 @@ local function normalizeProtectionClearReason(reason)
 	return PROTECTION_REASON_WITHOUT_SESSION
 end
 
+local function clearStartupInvincibilityState(player)
+	if not player or not player:IsA("Player") then
+		return
+	end
+
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE, nil)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE, nil)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE, nil)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE, nil)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE, nil)
+end
+
 local function clearProtectionState(player)
 	if not player or not player:IsA("Player") then
 		return
 	end
 
 	player:SetAttribute(BURROW_PROTECTED_UNTIL_ATTRIBUTE, nil)
+	clearStartupInvincibilityState(player)
 end
 
 local function clearSessionAttributes(player)
@@ -471,6 +490,31 @@ local function setSessionState(player, burrowState, state, reason)
 	return true
 end
 
+local function setStartupInvincibilityState(player, burrowState)
+	if not player or not player:IsA("Player") or type(burrowState) ~= "table" then
+		return
+	end
+
+	local invincibleUntil = tonumber(burrowState.StartupInvincibilityUntil)
+	if not invincibleUntil or invincibleUntil <= getSharedTimestamp() then
+		clearStartupInvincibilityState(player)
+		return
+	end
+
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE, tonumber(burrowState.StartupInvincibilityFrom) or nil)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE, invincibleUntil)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE, tonumber(burrowState.StartupInvincibilityMaxSeconds) or 0)
+	player:SetAttribute(
+		MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE,
+		tonumber(burrowState.StartupInvincibilityStartOffsetSeconds) or 0
+	)
+	player:SetAttribute(MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE, burrowState.SessionId)
+	DamageProtection.TraceMoguStartupDamage(player, {
+		Path = "MoguServer.setStartupInvincibilityState",
+		Source = "MoguServer",
+	})
+end
+
 local function disconnectConnections(connections)
 	if type(connections) ~= "table" then
 		return
@@ -498,8 +542,19 @@ local function hasMoguRuntimeProtection(player)
 	end
 
 	return typeof(player:GetAttribute(BURROW_PROTECTED_UNTIL_ATTRIBUTE)) == "number"
+		or typeof(player:GetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE)) == "number"
 		or typeof(player:GetAttribute(MOGU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE)) == "number"
 		or player:GetAttribute(MOGU_MOVEMENT_LOCK_SPEED_ATTRIBUTE) ~= nil
+end
+
+local function hasMoguRuntimeState(player)
+	if not player or not player:IsA("Player") then
+		return false
+	end
+
+	return hasMoguRuntimeProtection(player)
+		or player:GetAttribute(BURROW_SESSION_ID_ATTRIBUTE) ~= nil
+		or player:GetAttribute(BURROW_SESSION_STATE_ATTRIBUTE) ~= nil
 end
 
 local function getProtectionDiagnosticSnapshot(player, burrowState)
@@ -810,6 +865,38 @@ local function isBurrowStateUnderground(burrowState)
 	return true
 end
 
+local function isStartupInvincibilityActive(player, burrowState, now)
+	if type(burrowState) ~= "table" or burrowState.State ~= SESSION_STATE_STARTUP then
+		return false
+	end
+
+	if not player or not player:IsA("Player") then
+		return false
+	end
+
+	local sessionId = player:GetAttribute(BURROW_SESSION_ID_ATTRIBUTE)
+	if typeof(burrowState.SessionId) ~= "string" or burrowState.SessionId == "" or sessionId ~= burrowState.SessionId then
+		return false
+	end
+
+	local invincibleFrom = tonumber(burrowState.StartupInvincibilityFrom)
+	if invincibleFrom and now < invincibleFrom then
+		return false
+	end
+
+	local invincibleUntil = tonumber(burrowState.StartupInvincibilityUntil)
+	if not invincibleUntil or invincibleUntil <= now then
+		return false
+	end
+
+	local endTime = tonumber(burrowState.EndTime)
+	if endTime and now >= endTime then
+		return false
+	end
+
+	return true
+end
+
 local function buildStartPayload(context, burrowState, startedAt, endsAt, direction, directionSource, startPosition)
 	local abilityConfig = context.AbilityConfig or {}
 	local resolvedStartPosition = startPosition or context.RootPart.Position
@@ -988,6 +1075,7 @@ local function scheduleSessionTransitions(player, burrowState)
 		end
 
 		setSessionState(player, burrowState, SESSION_STATE_UNDERGROUND, "startup_elapsed")
+		clearStartupInvincibilityState(player)
 	end)
 
 	local timeoutToken = {}
@@ -1011,6 +1099,17 @@ local function hookSessionCleanup(player, burrowState)
 	local humanoid = burrowState.Humanoid
 	if humanoid then
 		connections[#connections + 1] = humanoid.Died:Connect(function()
+			DamageProtection.TraceMoguStartupDamage(player, {
+				TargetContext = {
+					Player = player,
+					Character = burrowState.Character,
+					Humanoid = humanoid,
+					RootPart = burrowState.RootPart,
+				},
+				Position = burrowState.RootPart and burrowState.RootPart.Position or nil,
+				Path = "MoguServer.HumanoidDied",
+				Source = "Humanoid.Died",
+			})
 			if activeBurrowsByPlayer[player] == burrowState then
 				clearActiveBurrow(player, CLEAR_REASON_HUMANOID_DIED)
 			end
@@ -1099,6 +1198,18 @@ function MoguServer.Burrow(context)
 	local startedAt = getSharedTimestamp()
 	local duration = MoguBurrowShared.GetBurrowDuration(abilityConfig)
 	local endsAt = startedAt + duration
+	local undergroundAt = startedAt + getMinimumManualResolveDelay(abilityConfig)
+	local startupInvincibilityMaxSeconds = MoguBurrowShared.GetStartupInvincibilityMaxSeconds(abilityConfig)
+	local startupInvincibilityStartOffsetSeconds =
+		MoguBurrowShared.GetStartupInvincibilityStartOffsetSeconds(abilityConfig)
+	local startupInvincibilityFrom = startedAt + startupInvincibilityStartOffsetSeconds
+	local startupInvincibilityUntil = nil
+	if startupInvincibilityMaxSeconds > 0 then
+		startupInvincibilityUntil = math.min(startedAt + startupInvincibilityMaxSeconds, endsAt)
+		if startupInvincibilityUntil <= startupInvincibilityFrom then
+			startupInvincibilityUntil = nil
+		end
+	end
 	local direction, directionSource =
 		MoguBurrowShared.ResolveDirection(context.Humanoid, context.RootPart, context.RequestPayload)
 	local predictedStartPosition, predictedStartDistance =
@@ -1222,7 +1333,11 @@ function MoguServer.Burrow(context)
 		SessionId = createSessionId(player),
 		State = SESSION_STATE_STARTUP,
 		StartedAt = startedAt,
-		UndergroundAt = startedAt + getMinimumManualResolveDelay(abilityConfig),
+		UndergroundAt = undergroundAt,
+		StartupInvincibilityMaxSeconds = startupInvincibilityMaxSeconds,
+		StartupInvincibilityStartOffsetSeconds = startupInvincibilityStartOffsetSeconds,
+		StartupInvincibilityFrom = startupInvincibilityFrom,
+		StartupInvincibilityUntil = startupInvincibilityUntil,
 		EndTime = endsAt,
 		Duration = duration,
 		Direction = direction,
@@ -1239,14 +1354,26 @@ function MoguServer.Burrow(context)
 		StartAbilityCooldown = context.StartAbilityCooldown,
 		CooldownApplied = false,
 	}
-	activeBurrowsByPlayer[player] = burrowState
+	local protectedUntil = endsAt + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig)
 	setSessionAttributes(player, burrowState)
+	setStartupInvincibilityState(player, burrowState)
+	setProtectionState(player, protectedUntil)
+	setMovementLockState(player, protectedUntil)
+	DamageProtection.TraceMoguStartupDamage(player, {
+		TargetContext = {
+			Player = player,
+			Character = context.Character,
+			Humanoid = context.Humanoid,
+			RootPart = context.RootPart,
+		},
+		Position = startSurfacePosition,
+		Path = "MoguServer.BurrowAccepted",
+		Source = "MoguServer",
+	})
+	activeBurrowsByPlayer[player] = burrowState
 	hookSessionCleanup(player, burrowState)
 	scheduleSessionTransitions(player, burrowState)
 	player:SetAttribute("MoguResolveCorrectionDistance", 0)
-	local protectedUntil = endsAt + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig)
-	setProtectionState(player, protectedUntil)
-	setMovementLockState(player, protectedUntil)
 
 	return buildStartPayload(context, burrowState, startedAt, endsAt, direction, directionSource, startSurfacePosition), {
 		ApplyCooldown = false,
@@ -1266,9 +1393,71 @@ function MoguServer.IsMoguBurrowed(player)
 	return MoguServer.IsPlayerUnderground(player)
 end
 
+function MoguServer.IsStartupInvincible(player)
+	local activeBurrow = getActiveBurrow(player)
+	if not activeBurrow then
+		return false
+	end
+
+	if isStartupInvincibilityActive(player, activeBurrow, getSharedTimestamp()) then
+		return true, "mogu_startup_invincible", {
+			Protected = true,
+			Source = "MoguBurrow",
+			Reason = "mogu_startup_invincible",
+			Player = player,
+			SessionId = activeBurrow.SessionId,
+			State = activeBurrow.State,
+			From = activeBurrow.StartupInvincibilityFrom,
+			Until = activeBurrow.StartupInvincibilityUntil,
+		}
+	end
+
+	return false
+end
+
+function MoguServer.GetProtection(player, position, _options)
+	if not player or not player:IsA("Player") then
+		return nil
+	end
+
+	local activeBurrow = getActiveBurrow(player)
+	if not activeBurrow then
+		return nil
+	end
+
+	if isBurrowStateUnderground(activeBurrow) then
+		return {
+			Protected = true,
+			Source = "MoguBurrow",
+			Reason = "mogu_underground",
+			Player = player,
+			Position = position,
+			SessionId = activeBurrow.SessionId,
+			State = activeBurrow.State,
+		}
+	end
+
+	if isStartupInvincibilityActive(player, activeBurrow, getSharedTimestamp()) then
+		return {
+			Protected = true,
+			Source = "MoguBurrow",
+			Reason = "mogu_startup_invincible",
+			Player = player,
+			Position = position,
+			SessionId = activeBurrow.SessionId,
+			State = activeBurrow.State,
+			From = activeBurrow.StartupInvincibilityFrom,
+			Until = activeBurrow.StartupInvincibilityUntil,
+		}
+	end
+
+	return nil
+end
+
 function MoguServer.IsProtected(player)
-	if MoguServer.IsPlayerUnderground(player) then
-		return true
+	local protection = MoguServer.GetProtection(player)
+	if protection then
+		return true, protection.Reason, protection
 	end
 
 	if not getActiveBurrow(player) then
@@ -1293,9 +1482,17 @@ local function enforceProtectionIntegrity(player, reason)
 		return false
 	end
 
+	if activeBurrowsByPlayer[player] == nil and not hasMoguRuntimeState(player) then
+		return false
+	end
+
 	local activeBurrow = getActiveBurrow(player)
 	if activeBurrow then
 		return true
+	end
+
+	if activeBurrowsByPlayer[player] == nil and not hasMoguRuntimeState(player) then
+		return false
 	end
 
 	return clearInvalidProtection(player, reason or PROTECTION_REASON_WITHOUT_SESSION, {

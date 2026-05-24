@@ -4,9 +4,12 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local CrewVariantsCfg = require(Configs:WaitForChild("CrewVariants"))
 local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
+local RewardOverheadBillboard = require(script.Parent.Parent:WaitForChild("RewardOverheadBillboard"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
 local e = React.createElement
@@ -14,7 +17,6 @@ local e = React.createElement
 local PANEL_FILL = Color3.fromRGB(17, 26, 39)
 local PANEL_FILL_SOFT = Color3.fromRGB(29, 43, 61)
 local TEXT = Color3.fromRGB(239, 239, 235)
-local MUTED = Color3.fromRGB(194, 203, 216)
 local GOLD = Color3.fromRGB(242, 209, 107)
 local BOOST_GOLD = Color3.fromRGB(111, 230, 124)
 local GOLD_VARIANT = Color3.fromRGB(255, 210, 92)
@@ -25,13 +27,6 @@ local function formatIncome(value)
 	return CurrencyUtil.formatIncomeCompactPerSecond(math.max(0, tonumber(value) or 0))
 end
 
-local function formatRemaining(seconds)
-	local safeSeconds = math.max(0, math.ceil(tonumber(seconds) or 0))
-	local minutes = math.floor(safeSeconds / 60)
-	local remainder = safeSeconds % 60
-	return string.format("%d:%02d", minutes, remainder)
-end
-
 local function blendColor(baseColor, accentColor, alpha)
 	return baseColor:Lerp(accentColor, math.clamp(alpha or 0, 0, 1))
 end
@@ -40,8 +35,69 @@ local function isMobileViewport()
 	return Responsive.isMobile()
 end
 
+local function startsWith(text, prefix)
+	return prefix ~= "" and text:sub(1, #prefix) == prefix
+end
+
+local function getVariantPrefix(variantLabel)
+	local versions = CrewVariantsCfg.Versions or {}
+	local variantInfo = versions[variantLabel]
+	local configuredPrefix = variantInfo and variantInfo.Prefix
+	if typeof(configuredPrefix) == "string" and configuredPrefix ~= "" then
+		return configuredPrefix
+	end
+
+	return tostring(variantLabel or "") .. " "
+end
+
+local function inferVariantFromDisplayName(displayName)
+	local name = tostring(displayName or "")
+	for _, variantName in ipairs(CrewVariantsCfg.Order or {}) do
+		variantName = tostring(variantName or "")
+		if variantName ~= "" and variantName ~= "Normal" then
+			local prefix = getVariantPrefix(variantName)
+			if startsWith(name, prefix) then
+				return variantName
+			end
+		end
+	end
+
+	return nil
+end
+
+local function getEntryVariantLabel(entry)
+	local rawVariant = entry.variant
+	if rawVariant ~= nil then
+		local variant = tostring(rawVariant)
+		if variant ~= "" and variant ~= "Normal" then
+			return variant
+		end
+
+		return nil
+	end
+
+	return inferVariantFromDisplayName(entry.displayName)
+end
+
+local function getVariantDisplayName(displayName, variantLabel)
+	local name = tostring(displayName or "Crewmate")
+	if not variantLabel then
+		return name
+	end
+
+	local prefix = getVariantPrefix(variantLabel)
+	if startsWith(name, prefix) then
+		local stripped = name:sub(#prefix + 1)
+		if stripped ~= "" then
+			return stripped
+		end
+	end
+
+	return name
+end
+
 local function getVariantStyle(entry, rarityStyle)
-	local variant = tostring(entry.variant or "Normal")
+	local variant = getEntryVariantLabel(entry)
 	local rarityAccent = rarityStyle.textColor or GOLD
 	if variant == "Golden" then
 		return {
@@ -117,14 +173,37 @@ local function CrewOverheadBillboard(props)
 	local rarityStyle = IndexTheme.getRarityStyle(entry.rarity)
 	local variantStyle = getVariantStyle(entry, rarityStyle)
 	local isSpawned = entry.kind == CrewOverhead.Kind.Spawned
-	local remaining = tonumber(entry.remaining)
-	local showTimer = isSpawned and remaining ~= nil and entry.held ~= true
-	local hasSlotBonus = not isSpawned and tostring(entry.slotBonusLabel or "") ~= "" and (tonumber(entry.slotBonusPercent) or 0) > 0
+
+	if isSpawned then
+		local remaining = if entry.held == true then nil else tonumber(entry.remaining)
+		local displayName = getVariantDisplayName(entry.displayName, variantStyle.variantLabel)
+		return e(RewardOverheadBillboard, {
+			adornee = entry.adornee,
+			offsetY = 4.45,
+			maxDistance = 54,
+			title = displayName,
+			typeLabel = "Crewmate",
+			extraLabel = variantStyle.variantLabel,
+			extraColor = variantStyle.variantAccent,
+			metaLabel = variantStyle.rarityLabel,
+			helperText = "Recruit / Extract",
+			remaining = remaining,
+			totalSeconds = tonumber(entry.despawnSeconds),
+			accentColor = variantStyle.border,
+			metaColor = variantStyle.rarityAccent,
+			panelFill = variantStyle.panelFill,
+			panelStart = variantStyle.panelStart,
+			panelEnd = variantStyle.panelEnd,
+			glowTransparency = variantStyle.glowTransparency,
+		})
+	end
+
+	local hasSlotBonus = tostring(entry.slotBonusLabel or "") ~= "" and (tonumber(entry.slotBonusPercent) or 0) > 0
 	local mobile = isMobileViewport()
-	local panelHeight = if showTimer then 78 elseif hasSlotBonus then 82 else 58
+	local panelHeight = if hasSlotBonus then 82 else 58
 	local hasVariant = variantStyle.variantLabel ~= nil
 	local incomeColor = if entry.beliBoosted == true then BOOST_GOLD else GOLD
-	local rarityPillWidth = if showTimer then (if mobile then 60 else 74) else (if mobile then 72 else 92)
+	local rarityPillWidth = if mobile then 72 else 92
 	local variantPillWidth = if hasVariant then (if mobile then 58 else 70) else 0
 	local rarityPillX = if hasVariant then (if mobile then 74 else 86) else 10
 	local billboardWidth = if hasVariant then 252 else 228
@@ -136,14 +215,15 @@ local function CrewOverheadBillboard(props)
 	local labelTextSize = if mobile then 10 else 12
 	local incomeTextSize = 14
 	local metaTextSize = 11
+	local displayName = getVariantDisplayName(entry.displayName, variantStyle.variantLabel)
 
 	return e("BillboardGui", {
 		Adornee = entry.adornee,
 		AlwaysOnTop = true,
 		LightInfluence = 0,
-		MaxDistance = if isSpawned then 46 else 92,
+		MaxDistance = 92,
 		Size = UDim2.fromOffset(math.floor(billboardWidth * billboardScale), math.floor(panelHeight * billboardScale)),
-		StudsOffsetWorldSpace = Vector3.new(0, if isSpawned then 4.45 else 4.05, 0),
+		StudsOffsetWorldSpace = Vector3.new(0, 4.05, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
 		Panel = e("Frame", {
@@ -193,7 +273,7 @@ local function CrewOverheadBillboard(props)
 				Font = IndexTheme.Fonts.Display,
 				Position = UDim2.fromOffset(10, 5),
 				Size = UDim2.new(1, -20, 0, 22),
-				Text = tostring(entry.displayName or "Crewmate"),
+				Text = displayName,
 				TextColor3 = TEXT,
 				TextSize = nameTextSize,
 				TextStrokeColor3 = SHADOW,
@@ -251,34 +331,15 @@ local function CrewOverheadBillboard(props)
 						BackgroundTransparency = 1,
 						Font = IndexTheme.Fonts.Label,
 						Size = UDim2.fromScale(1, 1),
-						Text = string.format("%s +%d%%", tostring(entry.slotBonusLabel), math.floor((tonumber(entry.slotBonusPercent) or 0) + 0.5)),
+						Text = string.format(
+							"%s +%d%%",
+							tostring(entry.slotBonusLabel),
+							math.floor((tonumber(entry.slotBonusPercent) or 0) + 0.5)
+						),
 						TextColor3 = GOLD,
 						TextSize = metaTextSize,
 						TextStrokeColor3 = SHADOW,
 						TextStrokeTransparency = 0.4,
-					}),
-				})
-				else nil,
-			Timer = if showTimer
-				then e("Frame", {
-					BackgroundColor3 = Color3.fromRGB(13, 20, 31),
-					BackgroundTransparency = 0.08,
-					BorderSizePixel = 0,
-					Position = UDim2.fromOffset(10, 56),
-					Size = UDim2.new(1, -20, 0, 14),
-				}, {
-					Corner = e("UICorner", {
-						CornerRadius = UDim.new(1, 0),
-					}),
-					Label = e("TextLabel", {
-						BackgroundTransparency = 1,
-						Font = IndexTheme.Fonts.Label,
-						Size = UDim2.fromScale(1, 1),
-						Text = "Despawns in " .. formatRemaining(remaining),
-						TextColor3 = MUTED,
-						TextSize = metaTextSize,
-						TextStrokeColor3 = SHADOW,
-						TextStrokeTransparency = 0.48,
 					}),
 				})
 				else nil,

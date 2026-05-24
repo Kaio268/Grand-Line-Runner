@@ -39,6 +39,10 @@ local function appendRewardRow(rows, name, amount, icon)
 	}
 end
 
+local function formatCount(amount)
+	return CurrencyUtil.formatCount(math.max(0, math.floor(tonumber(amount) or 0)))
+end
+
 local function getGrantedBeli(grantedResources)
 	grantedResources = if typeof(grantedResources) == "table" then grantedResources else {}
 	return math.max(0, tonumber(grantedResources.beli) or tonumber(grantedResources.doubloons) or 0)
@@ -63,7 +67,7 @@ local function addGrantedResourceLines(lines, grantedResources)
 		local amount = math.max(0, tonumber(foodRewards[foodKey]) or 0)
 		if amount > 0 then
 			local displayName = tostring(((Economy.Food or {})[foodKey] or {}).DisplayName or foodKey)
-			appendLine(lines, string.format("+%d %s", amount, displayName))
+			appendLine(lines, string.format("+%s %s", formatCount(amount), displayName))
 			addedAny = true
 		end
 	end
@@ -74,7 +78,7 @@ local function addGrantedResourceLines(lines, grantedResources)
 		local amount = math.max(0, tonumber(materialRewards[materialKey]) or 0)
 		if amount > 0 then
 			local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
-			appendLine(lines, string.format("+%d %s", amount, displayName))
+			appendLine(lines, string.format("+%s %s", formatCount(amount), displayName))
 			addedAny = true
 		end
 	end
@@ -84,7 +88,7 @@ local function addGrantedResourceLines(lines, grantedResources)
 			local amount = math.max(0, tonumber(amountValue) or 0)
 			if amount > 0 then
 				local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
-				appendLine(lines, string.format("+%d %s", amount, displayName))
+				appendLine(lines, string.format("+%s %s", formatCount(amount), displayName))
 				addedAny = true
 			end
 		end
@@ -181,20 +185,20 @@ local function buildBatchAcknowledgement(openResult)
 		end
 	end
 	for displayName, amount in pairs(fruitCounts) do
-		appendLine(lines, string.format("+%d %s", amount, displayName))
+		appendLine(lines, string.format("+%s %s", formatCount(amount), displayName))
 		appendRewardRow(rewardRows, displayName, amount)
 	end
 
 	local duplicateCount = math.max(0, tonumber(openResult.DuplicateCount) or 0)
 	if duplicateCount > 0 then
-		appendLine(lines, string.format("%d duplicate%s converted", duplicateCount, duplicateCount == 1 and "" or "s"))
+		appendLine(lines, string.format("%s duplicate%s converted", formatCount(duplicateCount), duplicateCount == 1 and "" or "s"))
 	end
 
 	local convertedChestCount = math.max(0, tonumber(openResult.ConvertedChestCount) or 0)
 	if convertedChestCount > 0 then
 		appendLine(lines, string.format(
-			"%d duplicate%s refunded as Devil Fruit Chest%s",
-			convertedChestCount,
+			"%s duplicate%s refunded as Devil Fruit Chest%s",
+			formatCount(convertedChestCount),
 			convertedChestCount == 1 and "" or "s",
 			convertedChestCount == 1 and "" or "s"
 		))
@@ -211,7 +215,7 @@ local function buildBatchAcknowledgement(openResult)
 
 	local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
 	if mythicKeyCount > 0 then
-		appendLine(lines, string.format("+%d Mythic Key%s", mythicKeyCount, mythicKeyCount == 1 and "" or "s"))
+		appendLine(lines, string.format("+%s Mythic Key%s", formatCount(mythicKeyCount), mythicKeyCount == 1 and "" or "s"))
 		appendRewardRow(rewardRows, "Mythic Key", mythicKeyCount)
 	end
 
@@ -220,7 +224,7 @@ local function buildBatchAcknowledgement(openResult)
 	end
 
 	return {
-		Title = string.format("Opened %d %s%s", openedCount, openedChestDisplay, openedCount == 1 and "" or "s"),
+		Title = string.format("Opened %s %s%s", formatCount(openedCount), openedChestDisplay, openedCount == 1 and "" or "s"),
 		AccentText = "BATCH OPEN",
 		AccentColor = RARITY_COLORS.Reward,
 		ButtonText = "Close",
@@ -266,14 +270,14 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 			appendLine(lines, string.format("Converted to: %s", convertedName))
 		elseif openResult.ConversionRewardType == "MythicKey" then
 			local amount = math.max(1, tonumber(openResult.ConversionRewardAmount) or 1)
-			appendLine(lines, string.format("Reward: +%d %s", amount, tostring(openResult.ConversionRewardDisplayName or "Mythic Key")))
+			appendLine(lines, string.format("Reward: +%s %s", formatCount(amount), tostring(openResult.ConversionRewardDisplayName or "Mythic Key")))
 			local progress = openResult.MythicKeyProgress or {}
 			appendLine(
 				lines,
 				string.format(
-					"Progress: %d/%d",
-					math.max(0, tonumber(progress.current) or 0),
-					math.max(0, tonumber(progress.threshold) or 0)
+					"Progress: %s/%s",
+					formatCount(progress.current),
+					formatCount(progress.threshold)
 				)
 			)
 			if openResult.AutoConvertedMythicChest == true and typeof(openResult.GrantedChest) == "table" then

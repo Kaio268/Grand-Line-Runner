@@ -49,6 +49,8 @@ local ActiveBoostRoutines = {}
 local PendingHardResetByUserId: {[number]: boolean} = {}
 local SuppressSessionEndKickByUserId: {[number]: boolean} = {}
 local DataManagerInitialized = false
+local HardResetStartingEvent = Instance.new("BindableEvent")
+DataManager.HardResetStarting = HardResetStartingEvent.Event
 
 --// GlobalStore
 local GlobalDataTemplate = {Players = {}}
@@ -549,8 +551,112 @@ local function ReadValueFromProfile(profile, path: string)
 	return value
 end
 
+local function GetReadyProfileReplica(player: Player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, nil, "invalid_player"
+	end
+
+	if PendingHardResetByUserId[player.UserId] == true then
+		return nil, nil, "hard_reset_pending"
+	end
+
+	local profile = Profiles[player]
+	local replica = Replicas[player]
+	if profile == nil or replica == nil then
+		return nil, nil, "not_ready"
+	end
+
+	return profile, replica, nil
+end
+
+local function SetValueWithProfileReplica(player: Player, profile, replica, path: string, newValue: any)
+	local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "SetValue")
+	if legacyWriteAllowed ~= true then
+		return false, legacyWriteReason
+	end
+
+	local defaultValue = if newValue == nil then true else DeepCopyTable(newValue)
+	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
+
+	if err then
+		warn(err)
+		return false, "invalid_path"
+	end
+
+	if currentValue == nil then
+		currentValue = parent[leafKey]
+		SyncDataMutation(player, replica, pathTable, currentValue)
+		return true, nil
+	end
+
+	local valueToStore = newValue
+	if valueToStore ~= nil then
+		if typeof(currentValue) ~= typeof(valueToStore) then
+			warn(`[DataManager]: Given value ({valueToStore} : {typeof(valueToStore)}) must be the same type as (Data.{path} : {typeof(currentValue)})!`)
+			return false, "type_mismatch"
+		end
+
+		valueToStore = DeepCopyTable(valueToStore)
+	else
+		if typeof(currentValue) ~= "boolean" then
+			warn(`[DataManager]: Can't toggle non-boolean value at Data.{path}!`)
+			return false, "invalid_toggle"
+		end
+
+		valueToStore = not currentValue
+	end
+
+	parent[leafKey] = valueToStore
+	SyncDataMutation(player, replica, pathTable, valueToStore)
+	return true, nil
+end
+
+local function AddValueWithProfileReplica(player: Player, profile, replica, path: string, addValue: any)
+	local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "AddValue")
+	if legacyWriteAllowed ~= true then
+		return false, legacyWriteReason
+	end
+
+	local defaultValue = if typeof(addValue) == "number" then 0 else {}
+	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
+
+	if err then
+		warn(err)
+		return false, "invalid_path"
+	end
+
+	if typeof(addValue) == "table" and typeof(currentValue) == "table" then
+		local didChange = false
+		for k, v in pairs(addValue) do
+			if currentValue[k] ~= nil then
+				warn("[DataManager]: value names are repeating!")
+			else
+				currentValue[k] = DeepCopyTable(v)
+				didChange = true
+			end
+		end
+
+		if didChange then
+			SyncDataMutation(player, replica, pathTable, currentValue)
+		end
+
+		return true, nil
+	end
+
+	if typeof(currentValue) == "number" and typeof(addValue) == "number" then
+		local final = currentValue + addValue
+		parent[leafKey] = final
+		SyncDataMutation(player, replica, pathTable, final)
+		return true, nil
+	end
+
+	warn("[DataManager]: You can add only numbers!")
+	return false, "invalid_add"
+end
+
 function DataManager:IsReady(player: Player): boolean
-	return Profiles[player] ~= nil and Replicas[player] ~= nil
+	local profile, replica = GetReadyProfileReplica(player)
+	return profile ~= nil and replica ~= nil
 end
 
 function DataManager:WaitUntilReady(player: Player, timeoutSeconds: number?): boolean
@@ -571,38 +677,30 @@ function DataManager:WaitUntilReady(player: Player, timeoutSeconds: number?): bo
 end
 
 function DataManager:TryGetValue(player: Player, path: string)
-	local profile = self:TryGetProfile(player)
+	local profile, _, reason = GetReadyProfileReplica(player)
 	if profile == nil then
-		return nil, "no_profile"
+		return nil, reason
 	end
 
 	return ReadValueFromProfile(profile, path), nil
 end
 
 function DataManager:TrySetValue(player: Player, path: string, newValue)
-	if not self:IsReady(player) then
-		return false, "not_ready"
+	local profile, replica, readyReason = GetReadyProfileReplica(player)
+	if profile == nil or replica == nil then
+		return false, readyReason
 	end
 
-	local success, reason = self:SetValue(player, path, newValue)
-	if success == false then
-		return false, reason or "set_failed"
-	end
-
-	return true, nil
+	return SetValueWithProfileReplica(player, profile, replica, path, newValue)
 end
 
 function DataManager:TryAddValue(player: Player, path: string, addValue)
-	if not self:IsReady(player) then
-		return false, "not_ready"
+	local profile, replica, readyReason = GetReadyProfileReplica(player)
+	if profile == nil or replica == nil then
+		return false, readyReason
 	end
 
-	local success, reason = self:AddValue(player, path, addValue)
-	if success == false then
-		return false, reason or "add_failed"
-	end
-
-	return true, nil
+	return AddValueWithProfileReplica(player, profile, replica, path, addValue)
 end
 
 --[[
@@ -946,6 +1044,9 @@ function DataManager:HardResetData(userId: number, kickMessage: string?): (boole
 	end
 
 	PendingHardResetByUserId[userId] = true
+	if targetPlayer ~= nil then
+		HardResetStartingEvent:Fire(targetPlayer, userId, profileKey)
+	end
 	dataResetLog("begin", "userId", userId, "profileKey", profileKey, "online", targetPlayer ~= nil)
 
 	local function finish(success: boolean, reason: string?)

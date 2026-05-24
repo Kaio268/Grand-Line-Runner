@@ -7,14 +7,6 @@ local CurrencyUtil = {}
 
 local Primary = Economy.Currency.Primary
 local LegacyKeys = Primary.LegacyKeys or {}
-local WHOLE_COMPACT_SUFFIXES = {
-	{ value = 1e18, suffix = "Qui" },
-	{ value = 1e15, suffix = "Qd" },
-	{ value = 1e12, suffix = "T" },
-	{ value = 1e9, suffix = "B" },
-	{ value = 1e6, suffix = "M" },
-	{ value = 1e3, suffix = "K" },
-}
 
 local LEGACY_LEADERSTAT_NAMES = {
 	LegacyKeys.Leaderstat,
@@ -65,35 +57,6 @@ local function findLegacyValueObject(player: Player)
 	return nil
 end
 
-local function formatWholeCompactNumber(amount: number): string
-	local number = tonumber(amount) or 0
-	local sign = if number < 0 then "-" else ""
-	local rounded = math.floor(math.abs(number) + 0.5)
-
-	for index, entry in ipairs(WHOLE_COMPACT_SUFFIXES) do
-		if rounded >= entry.value then
-			local scaled = rounded / entry.value
-			local decimals = if scaled >= 100 then 0 elseif scaled >= 10 then 1 else 2
-			local scale = 10 ^ decimals
-			local roundedScaled = math.floor((scaled * scale) + 0.5) / scale
-			if roundedScaled >= 1000 and index > 1 then
-				local largerEntry = WHOLE_COMPACT_SUFFIXES[index - 1]
-				scaled = rounded / largerEntry.value
-				decimals = if scaled >= 100 then 0 elseif scaled >= 10 then 1 else 2
-				scale = 10 ^ decimals
-				roundedScaled = math.floor((scaled * scale) + 0.5) / scale
-				local largerText = string.format("%." .. tostring(decimals) .. "f", roundedScaled):gsub("%.?0+$", "")
-				return sign .. largerText .. largerEntry.suffix
-			end
-
-			local text = string.format("%." .. tostring(decimals) .. "f", roundedScaled):gsub("%.?0+$", "")
-			return sign .. text .. entry.suffix
-		end
-	end
-
-	return sign .. tostring(rounded)
-end
-
 local function formatWholeCommaNumber(amount: number): string
 	local number = tonumber(amount) or 0
 	local sign = if number < 0 then "-" else ""
@@ -103,6 +66,15 @@ local function formatWholeCommaNumber(amount: number): string
 
 	grouped = string.gsub(grouped, "^,", "")
 	return sign .. grouped
+end
+
+local function roundWholeNumber(amount: number): number
+	local number = tonumber(amount) or 0
+	if number < 0 then
+		return -math.floor(math.abs(number) + 0.5)
+	end
+
+	return math.floor(number + 0.5)
 end
 
 function CurrencyUtil.getConfig()
@@ -185,22 +157,41 @@ function CurrencyUtil.waitForPrimaryValueObject(player: Player, timeout: number?
 	return findLegacyValueObject(player)
 end
 
+function CurrencyUtil.formatCompactNumber(amount: number): string
+	local rounded = roundWholeNumber(amount)
+	if rounded < 0 then
+		return "-" .. Shorten.roundNumber(math.abs(rounded))
+	end
+
+	return Shorten.roundNumber(rounded)
+end
+
+function CurrencyUtil.formatCount(amount: number): string
+	return CurrencyUtil.formatCompactNumber(amount)
+end
+
+function CurrencyUtil.formatCurrency(amount: number): string
+	return CurrencyUtil.formatCompactNumber(amount) .. CurrencyUtil.getCompactSuffix()
+end
+
+function CurrencyUtil.formatCurrencyPerSecond(amount: number): string
+	return CurrencyUtil.formatCompactNumber(amount) .. CurrencyUtil.getPerSecondSuffix()
+end
+
 function CurrencyUtil.formatCompact(amount: number): string
-	local rounded = math.floor((tonumber(amount) or 0) + 0.5)
-	return Shorten.roundNumber(rounded) .. CurrencyUtil.getCompactSuffix()
+	return CurrencyUtil.formatCurrency(amount)
 end
 
 function CurrencyUtil.formatPerSecond(amount: number): string
-	local rounded = math.floor((tonumber(amount) or 0) + 0.5)
-	return Shorten.roundNumber(rounded) .. CurrencyUtil.getPerSecondSuffix()
+	return CurrencyUtil.formatCurrencyPerSecond(amount)
 end
 
 function CurrencyUtil.formatAmount(amount: number): string
-	return CurrencyUtil.formatCompact(amount)
+	return CurrencyUtil.formatCurrency(amount)
 end
 
 function CurrencyUtil.formatIncomeNumber(amount: number): string
-	return formatWholeCompactNumber(amount)
+	return CurrencyUtil.formatCompactNumber(amount)
 end
 
 function CurrencyUtil.formatIncomeExact(amount: number): string
@@ -216,7 +207,7 @@ function CurrencyUtil.formatIncomeExactPerSecond(amount: number): string
 end
 
 function CurrencyUtil.formatIncomeCompact(amount: number): string
-	return CurrencyUtil.formatIncomeNumber(amount) .. CurrencyUtil.getCompactSuffix()
+	return CurrencyUtil.formatCurrency(amount)
 end
 
 function CurrencyUtil.formatIncomeCompactAmount(amount: number): string
@@ -224,7 +215,7 @@ function CurrencyUtil.formatIncomeCompactAmount(amount: number): string
 end
 
 function CurrencyUtil.formatIncomePerSecond(amount: number): string
-	return CurrencyUtil.formatIncomeNumber(amount) .. CurrencyUtil.getPerSecondSuffix()
+	return CurrencyUtil.formatCurrencyPerSecond(amount)
 end
 
 function CurrencyUtil.formatIncomeCompactPerSecond(amount: number): string

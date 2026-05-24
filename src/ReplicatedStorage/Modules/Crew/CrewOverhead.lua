@@ -17,6 +17,7 @@ CrewOverhead.Attribute = {
 	SlotBonusLabel = "CrewOverheadSlotBonusLabel",
 	SlotBonusPercent = "CrewOverheadSlotBonusPercent",
 	ExpiresAt = "CrewOverheadExpiresAt",
+	DespawnSeconds = "CrewOverheadDespawnSeconds",
 }
 
 return CrewOverhead

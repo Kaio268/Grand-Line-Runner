@@ -1,14 +1,17 @@
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
 local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
+local ChestOverhead = require(Modules:WaitForChild("ChestOverhead"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
@@ -30,6 +33,9 @@ local worldRandom = Random.new()
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebugTrace") == true
 local loggedExtractionTouchByPlayer = {}
 local BIOME_FOLDER_PATTERN = "^Biome%s*(%d+)$"
+local CHEST_OVERHEAD_ATTRIBUTES = ChestOverhead.Attribute
+local DROPPED_CHEST_FALL_HEIGHT = 6
+local DROPPED_CHEST_FALL_SECONDS = 0.35
 
 local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)
 local ERROR_COLOR = Color3.fromRGB(255, 104, 104)
@@ -977,12 +983,69 @@ end
 
 local function createRewardInstance(rewardState)
 	if rewardState.RewardType == "Chest" then
-		local chestModel = ChestVisuals.CreateWorldModel(rewardState.Tier, "ChestPlaceholder")
+		local chestModel = ChestVisuals.CreateWorldModel(rewardState.Tier, "ExtractionChest")
 		prepareTemplateClone(chestModel)
 		return chestModel
 	end
 
 	return createDefaultRewardPart(rewardState)
+end
+
+local function getChestDisplayName(rewardState)
+	local displayName = rewardState and rewardState.DisplayName
+	if typeof(displayName) == "string" and displayName ~= "" then
+		return displayName
+	end
+
+	return string.format("%s Chest", tostring(rewardState and rewardState.Tier or "Wooden"))
+end
+
+local function clearChestOverhead(rewardObject)
+	if not rewardObject or not rewardObject:IsA("Model") then
+		return
+	end
+
+	if CollectionService:HasTag(rewardObject, ChestOverhead.Tag) then
+		CollectionService:RemoveTag(rewardObject, ChestOverhead.Tag)
+	end
+
+	for _, attributeName in pairs(CHEST_OVERHEAD_ATTRIBUTES) do
+		rewardObject:SetAttribute(attributeName, nil)
+	end
+end
+
+local function applyChestOverheadState(rewardObject, rewardState)
+	if not rewardObject or not rewardObject:IsA("Model") then
+		return
+	end
+	if not rewardState or rewardState.RewardType ~= "Chest" then
+		clearChestOverhead(rewardObject)
+		return
+	end
+
+	local tierName = tostring(rewardState.Tier or "Wooden")
+	rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.Kind, ChestOverhead.Kind.World)
+	rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.DisplayName, getChestDisplayName(rewardState))
+	rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.Tier, tierName)
+	rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.TypeLabel, "Chest")
+	rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.HelperText, "Extract to open")
+	CollectionService:AddTag(rewardObject, ChestOverhead.Tag)
+end
+
+local function applyChestDespawnAttributes(rewardObject, despawnSeconds, droppedWorldChest)
+	if not rewardObject or not rewardObject:IsA("Model") then
+		return
+	end
+
+	local safeSeconds = math.max(0, tonumber(despawnSeconds) or 0)
+	rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.Dropped, droppedWorldChest == true)
+	if safeSeconds > 0 then
+		rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.DespawnSeconds, safeSeconds)
+		rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.DespawnDeadlineUnix, Workspace:GetServerTimeNow() + safeSeconds)
+	else
+		rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.DespawnSeconds, nil)
+		rewardObject:SetAttribute(CHEST_OVERHEAD_ATTRIBUTES.DespawnDeadlineUnix, nil)
+	end
 end
 
 local function addRewardBillboard(part, rewardState, player)
@@ -1021,58 +1084,6 @@ local function addRewardBillboard(part, rewardState, player)
 	subtitle.Parent = billboard
 end
 
-local function shouldShowChestDebugBeacon()
-	local sharedConfig = ((Economy.VerticalSlice.WorldRun or {}).SharedChests or {})
-	return sharedConfig.DebugBeaconEnabled == true
-		or (RunService:IsStudio() and game:GetAttribute("ChestDebugBeaconEnabled") == true)
-end
-
-local function addChestDebugBeacon(rootPart)
-	if not shouldShowChestDebugBeacon() then
-		return
-	end
-
-	local attachment = Instance.new("Attachment")
-	attachment.Name = "ChestDebugAttachment"
-	attachment.Parent = rootPart
-
-	local beacon = Instance.new("BillboardGui")
-	beacon.Name = "ChestDebugBeacon"
-	beacon.Size = UDim2.fromOffset(180, 36)
-	beacon.StudsOffset = Vector3.new(0, 10, 0)
-	beacon.AlwaysOnTop = true
-	beacon.Parent = rootPart
-
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.Size = UDim2.fromScale(1, 1)
-	text.Text = "TEST CHEST"
-	text.TextScaled = true
-	text.Font = Enum.Font.GothamBlack
-	text.TextColor3 = Color3.fromRGB(255, 239, 138)
-	text.TextStrokeTransparency = 0
-	text.Parent = beacon
-
-	local pillar = Instance.new("Part")
-	pillar.Name = "ChestDebugPillar"
-	pillar.Anchored = true
-	pillar.CanCollide = false
-	pillar.CanTouch = false
-	pillar.CanQuery = false
-	pillar.Material = Enum.Material.Neon
-	pillar.Color = Color3.fromRGB(255, 225, 102)
-	pillar.Transparency = 0.2
-	pillar.Size = Vector3.new(1.2, 30, 1.2)
-	pillar.CFrame = rootPart.CFrame + Vector3.new(0, 15, 0)
-	pillar.Parent = rootPart
-
-	local weld = Instance.new("WeldConstraint")
-	weld.Name = "ChestDebugPillarWeld"
-	weld.Part0 = rootPart
-	weld.Part1 = pillar
-	weld.Parent = pillar
-end
-
 local function configureRewardPickupPrompt(prompt, rewardState)
 	configurePrompt(prompt, tostring(rewardState.DisplayName or "Major Reward"), "Hold to Get")
 	prompt.Style = Enum.ProximityPromptStyle.Custom
@@ -1084,6 +1095,9 @@ local function applySpawnedRewardState(player, rewardObject, rootPart, rewardSta
 	clearCarryWeld(rootPart)
 	rewardObject.Parent = rewardFolder
 	setRewardHeldPhysics(rewardObject, false)
+	if rewardState and rewardState.RewardType == "Chest" then
+		applyChestOverheadState(rewardObject, rewardState)
+	end
 	local spawnHint = positionRewardObject(player, rewardObject, rewardState, startPart, endPart)
 	if rewardState and rewardState.RewardType == "Chest" and spawnHint and rewardObject:GetAttribute("SpawnHintShown") ~= true then
 		rewardObject:SetAttribute("SpawnHintShown", true)
@@ -1135,6 +1149,9 @@ local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFo
 	end
 
 	clearCarryWeld(rootPart)
+	if rewardState and rewardState.RewardType == "Chest" then
+		clearChestOverhead(rewardObject)
+	end
 	rewardObject.Parent = carriedFolder
 	setRewardHeldPhysics(rewardObject, true)
 
@@ -1150,6 +1167,9 @@ local function applyCarriedRewardState(player, rewardObject, rootPart, carriedFo
 	end
 	top += carrierPart.CFrame.RightVector * carryVisualOffset
 	local targetPivot = computePivotBottomOnPoint(rewardObject, top, computeCarrierRotOnly(carrierPart))
+	if rewardState and rewardState.RewardType == "Chest" then
+		targetPivot *= ChestVisuals.GetCarryRotation(rewardState.Tier)
+	end
 	setObjectCFrame(rewardObject, targetPivot)
 
 	local weld = Instance.new("WeldConstraint")
@@ -1487,6 +1507,21 @@ local function getOccupiedSharedChestOffsets(spawnPart)
 	return offsets
 end
 
+local function getSharedChestSpawnYaw(sharedConfig)
+	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
+	if sharedConfig.RandomSpawnYawEnabled ~= true then
+		return 0, 0, false
+	end
+
+	local yawDegrees = worldRandom:NextNumber(0, 360)
+	local stepDegrees = tonumber(sharedConfig.SpawnYawStepDegrees) or 0
+	if stepDegrees > 0 then
+		yawDegrees = (math.floor((yawDegrees / stepDegrees) + 0.5) * stepDegrees) % 360
+	end
+
+	return math.rad(yawDegrees), yawDegrees, true
+end
+
 local function buildSharedChestPlacement(rewardObject, spawnContext)
 	if not spawnContext or not spawnContext.SpawnPart then
 		return nil
@@ -1531,10 +1566,13 @@ local function buildSharedChestPlacement(rewardObject, spawnContext)
 		end
 	end
 
+	local yaw, yawDegrees, randomSpawnYaw = getSharedChestSpawnYaw(Economy.VerticalSlice.WorldRun.SharedChests)
 	return {
 		SpawnPart = spawnPart,
 		LocalXZ = chosenOffset,
-		Yaw = 0,
+		Yaw = yaw,
+		YawDegrees = yawDegrees,
+		RandomSpawnYaw = randomSpawnYaw,
 		SourceCrewMemberName = spawnContext.CrewMember and spawnContext.CrewMember.Name or nil,
 	}
 end
@@ -1666,17 +1704,35 @@ local function destroySharedChestNode(chestId, node)
 	end
 end
 
-local function despawnExpiredSharedChests(now, sharedConfig)
-	local despawnSeconds = tonumber(sharedConfig.UnclaimedDespawnSeconds) or 0
-	if despawnSeconds <= 0 then
-		return
+local function getSharedChestDespawnSeconds(node, sharedConfig)
+	sharedConfig = if typeof(sharedConfig) == "table" then sharedConfig else {}
+	local storedSeconds = tonumber(node and node.DespawnSeconds)
+	if storedSeconds ~= nil then
+		return math.max(0, storedSeconds)
 	end
 
+	local legacyFallback = tonumber(sharedConfig.UnclaimedDespawnSeconds) or 0
+	local configured
+	if node and node.DroppedWorldChest == true then
+		configured = tonumber(sharedConfig.DroppedChestDespawnSeconds)
+	else
+		configured = tonumber(sharedConfig.ChestDespawnSeconds)
+	end
+
+	return math.max(0, configured or legacyFallback)
+end
+
+local function despawnExpiredSharedChests(now, sharedConfig)
 	for chestId, node in pairs(sharedChestNodesById) do
 		local object = node and node.Object
 		if not object or not object.Parent then
 			sharedChestNodesById[chestId] = nil
 		elseif node.Claimed ~= true then
+			local despawnSeconds = getSharedChestDespawnSeconds(node, sharedConfig)
+			if despawnSeconds <= 0 then
+				continue
+			end
+
 			local spawnedAt = tonumber(node.SpawnedAt) or now
 			node.SpawnedAt = spawnedAt
 			if now - spawnedAt >= despawnSeconds then
@@ -1747,6 +1803,8 @@ local function positionWorldChestObject(rewardObject, rewardState, options)
 					tonumber(placement.Yaw) or 0
 				)
 			)
+			rewardObject:SetAttribute("ChestSpawnYawDegrees", tonumber(placement.YawDegrees) or 0)
+			rewardObject:SetAttribute("ChestRandomSpawnYaw", placement.RandomSpawnYaw == true)
 			return placement.SpawnPart
 		end
 	end
@@ -1762,16 +1820,98 @@ local function positionWorldChestObject(rewardObject, rewardState, options)
 		local character = options.Dropper and options.Dropper.Character
 		local ignoreInstances = character and { character } or nil
 		local pivot = getDroppedRewardPivot(rewardObject, dropPosition, ignoreInstances)
+		if options.DroppedWorldChest == true then
+			local startPivot = pivot + Vector3.new(0, DROPPED_CHEST_FALL_HEIGHT, 0)
+			setObjectCFrame(rewardObject, startPivot)
+			return nil, {
+				DropFinalPivot = pivot,
+				DropStartPivot = startPivot,
+			}
+		end
+
 		setObjectCFrame(rewardObject, pivot)
 	end
 
 	return nil
 end
 
+local function isSharedChestNodeCurrent(chestId, node)
+	if not chestId or not node then
+		return false
+	end
+
+	local currentNode = sharedChestNodesById[chestId]
+	local object = node.Object
+	return currentNode == node and object ~= nil and object.Parent ~= nil and node.Claimed ~= true
+end
+
+local function startDroppedChestAnimation(chestId, node, prompt)
+	if not node or node.DroppedWorldChest ~= true then
+		return
+	end
+
+	local object = node.Object
+	local startPivot = node.DropStartPivot
+	local finalPivot = node.DropFinalPivot
+	if not object or not object.Parent or typeof(startPivot) ~= "CFrame" or typeof(finalPivot) ~= "CFrame" then
+		if prompt and prompt.Parent then
+			prompt.Enabled = true
+		end
+		return
+	end
+
+	node.DropAnimating = true
+	node.DropAnimationToken = (tonumber(node.DropAnimationToken) or 0) + 1
+	local animationToken = node.DropAnimationToken
+	if prompt and prompt.Parent then
+		prompt.Enabled = false
+	end
+
+	task.spawn(function()
+		local function canContinue()
+			return isSharedChestNodeCurrent(chestId, node)
+				and node.DropAnimationToken == animationToken
+				and object.Parent ~= nil
+		end
+
+		if not canContinue() then
+			return
+		end
+
+		local cframeValue = Instance.new("CFrameValue")
+		cframeValue.Value = startPivot
+		local connection = cframeValue:GetPropertyChangedSignal("Value"):Connect(function()
+			if canContinue() then
+				setObjectCFrame(object, cframeValue.Value)
+			end
+		end)
+
+		local tween = TweenService:Create(
+			cframeValue,
+			TweenInfo.new(DROPPED_CHEST_FALL_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Value = finalPivot }
+		)
+		tween:Play()
+		tween.Completed:Wait()
+		connection:Disconnect()
+		cframeValue:Destroy()
+
+		if not canContinue() then
+			return
+		end
+
+		setObjectCFrame(object, finalPivot)
+		node.DropAnimating = false
+		if prompt and prompt.Parent then
+			prompt.Enabled = true
+		end
+	end)
+end
+
 local function connectSharedChestPrompt(chestId, node, prompt)
 	prompt.Triggered:Connect(function(triggerPlayer)
 		local currentNode = sharedChestNodesById[chestId]
-		if currentNode ~= node or node.Claimed then
+		if currentNode ~= node or node.Claimed or node.DropAnimating == true then
 			return
 		end
 		node.Claimed = true
@@ -1798,6 +1938,11 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 	sharedChestSequence += 1
 	local chestId = tostring(sharedChestSequence)
 	options.ChestId = chestId
+	local droppedWorldChest = options.DroppedWorldChest == true
+	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
+	local despawnSeconds = getSharedChestDespawnSeconds({
+		DroppedWorldChest = droppedWorldChest,
+	}, sharedConfig)
 
 	local namePrefix = tostring(options.NamePrefix or "SharedChest")
 	local rewardObject = createRewardInstance(rewardState)
@@ -1805,7 +1950,7 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 	rewardObject:SetAttribute("RewardType", "Chest")
 	rewardObject:SetAttribute("SharedWorldChest", true)
 	rewardObject:SetAttribute("SharedChestId", chestId)
-	if options.DroppedWorldChest == true then
+	if droppedWorldChest then
 		rewardObject:SetAttribute("DroppedWorldChest", true)
 	end
 	rewardObject.Parent = rewardFolder
@@ -1818,29 +1963,28 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 		rewardObject:SetAttribute("RewardType", "Chest")
 		rewardObject:SetAttribute("SharedWorldChest", true)
 		rewardObject:SetAttribute("SharedChestId", chestId)
-		if options.DroppedWorldChest == true then
+		if droppedWorldChest then
 			rewardObject:SetAttribute("DroppedWorldChest", true)
 		end
 		rewardObject.Parent = rewardFolder
 		rootPart = rewardObject
 	end
 
-	local spawnPart = positionWorldChestObject(rewardObject, rewardState, options)
+	local spawnPart, placementInfo = positionWorldChestObject(rewardObject, rewardState, options)
 
-	local highlight = Instance.new("Highlight")
-	highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
-	highlight.FillTransparency = 0.15
-	highlight.OutlineColor = Color3.new(1, 1, 1)
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = rewardObject
+	applyChestOverheadState(rewardObject, rewardState)
+	applyChestDespawnAttributes(rewardObject, despawnSeconds, droppedWorldChest)
 
-	addRewardBillboard(rootPart, rewardState, nil)
-	addChestDebugBeacon(rootPart)
-
+	local shouldAnimateDroppedChest = droppedWorldChest
+		and placementInfo ~= nil
+		and typeof(placementInfo.DropStartPivot) == "CFrame"
+		and typeof(placementInfo.DropFinalPivot) == "CFrame"
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PickUpPrompt"
 	configureRewardPickupPrompt(prompt, rewardState)
+	if shouldAnimateDroppedChest then
+		prompt.Enabled = false
+	end
 	prompt.Parent = rootPart
 
 	local node = {
@@ -1851,10 +1995,16 @@ local function createSharedChestNode(rewardFolder, rewardState, options)
 		SpawnPart = spawnPart,
 		Claimed = false,
 		SpawnedAt = os.clock(),
-		DroppedWorldChest = options.DroppedWorldChest == true,
+		DespawnSeconds = despawnSeconds,
+		DroppedWorldChest = droppedWorldChest,
+		DropStartPivot = shouldAnimateDroppedChest and placementInfo.DropStartPivot or nil,
+		DropFinalPivot = shouldAnimateDroppedChest and placementInfo.DropFinalPivot or nil,
 	}
 	sharedChestNodesById[chestId] = node
 	connectSharedChestPrompt(chestId, node, prompt)
+	if shouldAnimateDroppedChest then
+		startDroppedChestAnimation(chestId, node, prompt)
+	end
 
 	return node
 end
@@ -1911,12 +2061,12 @@ end
 
 local function ensureSharedChestNodes(rewardFolder, carriedFolder)
 	local sharedConfig = Economy.VerticalSlice.WorldRun.SharedChests or {}
-	if sharedConfig.Enabled ~= true then
-		return
-	end
 
 	local now = os.clock()
 	despawnExpiredSharedChests(now, sharedConfig)
+	if sharedConfig.Enabled ~= true then
+		return
+	end
 
 	local activePlayerCount = getActiveSharedChestPlayerCount()
 	local maxActive = getSharedChestMaxActive(sharedConfig, activePlayerCount)
@@ -1983,19 +2133,18 @@ local function createRewardObject(player, rewardState, rewardFolder, carriedFold
 		rootPart = rewardObject
 	end
 
-	local highlight = Instance.new("Highlight")
-	highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
-	highlight.FillTransparency = if rewardState.RewardType == "Chest" then 0.15 else 0.35
-	highlight.OutlineColor = Color3.new(1, 1, 1)
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = if rewardState.RewardType == "Chest"
-		then Enum.HighlightDepthMode.AlwaysOnTop
-		else Enum.HighlightDepthMode.Occluded
-	highlight.Parent = rewardObject
+	if rewardState.RewardType ~= "Chest" then
+		local highlight = Instance.new("Highlight")
+		highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
+		highlight.FillTransparency = 0.35
+		highlight.OutlineColor = Color3.new(1, 1, 1)
+		highlight.OutlineTransparency = 0
+		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
+		highlight.Parent = rewardObject
+	end
 
-	addRewardBillboard(rootPart, rewardState, player)
-	if rewardState.RewardType == "Chest" then
-		addChestDebugBeacon(rootPart)
+	if rewardState.RewardType ~= "Chest" then
+		addRewardBillboard(rootPart, rewardState, player)
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
@@ -2438,17 +2587,20 @@ function Controller.SpawnDebugRewardInFrontOfPlayer(player, rewardType)
 
 	setObjectCFrame(rewardObject, root.CFrame * CFrame.new(0, 1.5, -10))
 
-	local highlight = Instance.new("Highlight")
-	highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
-	highlight.FillTransparency = if normalizedRewardType == "Chest" then 0.15 else 0.35
-	highlight.OutlineColor = Color3.new(1, 1, 1)
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = rewardObject
+	if normalizedRewardType ~= "Chest" then
+		local highlight = Instance.new("Highlight")
+		highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
+		highlight.FillTransparency = 0.35
+		highlight.OutlineColor = Color3.new(1, 1, 1)
+		highlight.OutlineTransparency = 0
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		highlight.Parent = rewardObject
+	end
 
-	addRewardBillboard(rootPart, rewardState, player)
 	if normalizedRewardType == "Chest" then
-		addChestDebugBeacon(rootPart)
+		applyChestOverheadState(rewardObject, rewardState)
+	else
+		addRewardBillboard(rootPart, rewardState, player)
 	end
 
 	local prompt = Instance.new("ProximityPrompt")
@@ -2500,16 +2652,7 @@ function Controller.SpawnSharedChestInFrontOfPlayer(player)
 
 	setObjectCFrame(rewardObject, root.CFrame * CFrame.new(0, 1.5, -10))
 
-	local highlight = Instance.new("Highlight")
-	highlight.FillColor = if rootPart and rootPart:IsA("BasePart") then rootPart.Color else Color3.fromRGB(214, 155, 74)
-	highlight.FillTransparency = 0.15
-	highlight.OutlineColor = Color3.new(1, 1, 1)
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = rewardObject
-
-	addRewardBillboard(rootPart, rewardState, nil)
-	addChestDebugBeacon(rootPart)
+	applyChestOverheadState(rewardObject, rewardState)
 
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PickUpPrompt"

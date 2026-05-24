@@ -69,6 +69,19 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
+
+	local function isPlayerDataReady(player)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent ~= Players then
+			return false
+		end
+		if DataManager and typeof(DataManager.IsHardResetPending) == "function" and DataManager:IsHardResetPending(player.UserId) then
+			return false
+		end
+		if DataManager and typeof(DataManager.IsReady) == "function" and not DataManager:IsReady(player) then
+			return false
+		end
+		return true
+	end
 	local function updateStandHover(...)
 		return ctx.updateStandHover(...)
 	end
@@ -92,6 +105,9 @@ function Module.Install(ctx)
 		end
 
 		local ok, crewMemberIncome = pcall(function()
+			if typeof(DataManager.TryGetValue) == "function" then
+				return DataManager:TryGetValue(player, "CrewMemberIncome")
+			end
 			return DataManager:GetValue(player, "CrewMemberIncome")
 		end)
 		if not ok or typeof(crewMemberIncome) ~= "table" then
@@ -478,7 +494,17 @@ function Module.Install(ctx)
 		end
 
 		local now = os.clock()
-		local availableFoodCount = if totalFoodCount ~= nil then totalFoodCount else CrewFoodProgression.GetTotalFoodCount(player)
+		local availableFoodCount = totalFoodCount
+		if availableFoodCount == nil then
+			if typeof(CrewFoodProgression.TryGetTotalFoodCount) == "function" then
+				availableFoodCount = CrewFoodProgression.TryGetTotalFoodCount(player)
+			else
+				availableFoodCount = CrewFoodProgression.GetTotalFoodCount(player)
+			end
+		end
+		if availableFoodCount == nil then
+			return
+		end
 		local progressKey = table.concat({
 			crewMemberName,
 			tostring(crewMemberInstanceId or ""),
@@ -582,6 +608,9 @@ function Module.Install(ctx)
 		if typeof(player) ~= "Instance" or not player:IsA("Player") then
 			return
 		end
+		if not isPlayerDataReady(player) then
+			return
+		end
 
 		local stands = playerStandList[player]
 		if typeof(stands) ~= "table" then
@@ -589,7 +618,15 @@ function Module.Install(ctx)
 		end
 
 		local equippedCrewMember = getEquippedCrewMemberToolInfo(player)
-		local totalFoodCount = CrewFoodProgression.GetTotalFoodCount(player)
+		local totalFoodCount = nil
+		if typeof(CrewFoodProgression.TryGetTotalFoodCount) == "function" then
+			totalFoodCount = CrewFoodProgression.TryGetTotalFoodCount(player)
+		else
+			totalFoodCount = CrewFoodProgression.GetTotalFoodCount(player)
+		end
+		if totalFoodCount == nil then
+			return
+		end
 		for _, standModel in ipairs(stands) do
 			if standModel and standModel.Parent then
 				local standName = standModel.Name

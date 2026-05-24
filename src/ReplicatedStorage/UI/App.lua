@@ -7,9 +7,9 @@ local React = require(Packages:WaitForChild("React"))
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
-local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local SharedPreviewViewport = require(script.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport"))
 local Responsive = require(script.Parent:WaitForChild("Responsive"))
 
 local e = React.createElement
@@ -72,34 +72,11 @@ local INVENTORY_UI = {
 local INVENTORY_BACKGROUND_IMAGE = "rbxassetid://131358437063076"
 
 local function formatNumber(value)
-	local number = tonumber(value) or 0
-	local sign = number < 0 and "-" or ""
-	local absValue = math.abs(number)
-
-	local suffixes = {
-		{ value = 1e18, suffix = "Qui" },
-		{ value = 1e15, suffix = "Qd" },
-		{ value = 1e12, suffix = "T" },
-		{ value = 1e9, suffix = "B" },
-		{ value = 1e6, suffix = "M" },
-		{ value = 1e3, suffix = "K" },
-	}
-
-	for _, entry in ipairs(suffixes) do
-		if absValue >= entry.value then
-			local scaled = absValue / entry.value
-			local decimals = if scaled >= 100 then 0 elseif scaled >= 10 then 1 else 2
-			local text = string.format("%." .. tostring(decimals) .. "f", scaled)
-			text = text:gsub("%.?0+$", "")
-			return sign .. text .. entry.suffix
-		end
-	end
-
-	return sign .. tostring(math.floor(absValue + 0.5))
+	return CurrencyUtil.formatCompactNumber(value)
 end
 
 local function formatRateNumber(value)
-	return CurrencyUtil.formatIncomeExact(tonumber(value) or 0)
+	return CurrencyUtil.formatCurrencyPerSecond(tonumber(value) or 0)
 end
 
 local function formatLeaderboardRank(rank)
@@ -451,8 +428,6 @@ local function PreviewViewport(props)
 			previewModel = DevilFruitAssets.ClonePreviewWorldModel(props.previewName)
 		elseif props.previewKind == "CrewMember" then
 			previewModel = cloneCrewPreviewModel(props.previewName)
-		elseif props.previewKind == "Chest" then
-			previewModel = ChestVisuals.CreatePreviewModel(props.previewName)
 		elseif props.previewKind == "Resource" then
 			previewModel = buildResourcePreviewModel(props.previewName)
 		elseif props.previewKind == "Inventory" then
@@ -501,158 +476,6 @@ local function PreviewViewport(props)
 		LightColor = Color3.fromRGB(255, 252, 246),
 		LightDirection = Vector3.new(-1, -1, -1),
 		ZIndex = props.zIndex,
-	})
-end
-
-local function ChestIcon(props)
-	local woodColor, metalColor = ChestVisuals.GetTierColors(props.tierName)
-	local accent = props.accentColor or metalColor
-	local size = props.size or UDim2.fromOffset(40, 40)
-	local position = props.position or UDim2.fromScale(0.5, 0.5)
-	local anchorPoint = props.anchorPoint or Vector2.new(0.5, 0.5)
-	local zIndex = props.zIndex or 1
-
-	return e("Frame", {
-		AnchorPoint = anchorPoint,
-		BackgroundTransparency = 1,
-		Position = position,
-		Size = size,
-		ZIndex = zIndex,
-	}, {
-		Shadow = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BackgroundColor3 = Color3.fromRGB(6, 8, 14),
-			BackgroundTransparency = 0.48,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.96),
-			Size = UDim2.fromScale(0.68, 0.1),
-			ZIndex = zIndex,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
-			}),
-		}),
-		Body = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BackgroundColor3 = woodColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.83),
-			Size = UDim2.fromScale(0.74, 0.42),
-			ZIndex = zIndex + 1,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.16, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.18),
-				Transparency = 0.3,
-				Thickness = 1,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.1)),
-					ColorSequenceKeypoint.new(1, woodColor:Lerp(Color3.fromRGB(0, 0, 0), 0.2)),
-				}),
-			}),
-		}),
-		Lid = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.08),
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.37),
-			Rotation = -6,
-			Size = UDim2.fromScale(0.8, 0.28),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.2, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.22),
-				Transparency = 0.24,
-				Thickness = 1,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.16)),
-					ColorSequenceKeypoint.new(1, woodColor:Lerp(Color3.fromRGB(0, 0, 0), 0.12)),
-				}),
-			}),
-		}),
-		Band = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = metalColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.52),
-			Size = UDim2.fromScale(0.14, 0.56),
-			ZIndex = zIndex + 3,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.18, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = metalColor:Lerp(Color3.fromRGB(255, 255, 255), 0.24),
-				Transparency = 0.18,
-				Thickness = 1,
-			}),
-		}),
-		TrimLeft = e("Frame", {
-			AnchorPoint = Vector2.new(0, 0.5),
-			BackgroundColor3 = metalColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.13, 0.6),
-			Size = UDim2.fromScale(0.09, 0.32),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.18, 0),
-			}),
-		}),
-		TrimRight = e("Frame", {
-			AnchorPoint = Vector2.new(1, 0.5),
-			BackgroundColor3 = metalColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.87, 0.6),
-			Size = UDim2.fromScale(0.09, 0.32),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.18, 0),
-			}),
-		}),
-		Latch = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.08),
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.58),
-			Size = UDim2.fromScale(0.18, 0.16),
-			ZIndex = zIndex + 4,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.28, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(255, 244, 210),
-				Transparency = 0.26,
-				Thickness = 1,
-			}),
-		}),
-		Highlight = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-			BackgroundTransparency = 0.72,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.48, 0.18),
-			Rotation = -18,
-			Size = UDim2.fromScale(0.12, 0.24),
-			ZIndex = zIndex + 5,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
-			}),
-		}),
 	})
 end
 
@@ -771,6 +594,17 @@ local function renderItemPreview(item, props)
 		})
 	end
 
+	if hasViewportPreview and item.previewKind == "Chest" then
+		return e(SharedPreviewViewport, {
+			previewKind = item.previewKind,
+			previewName = item.previewName,
+			position = position,
+			size = size,
+			zIndex = zIndex,
+			fieldOfView = props.fieldOfView or 34,
+		})
+	end
+
 	if item and item.image and item.image ~= "" then
 		return e("ImageLabel", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
@@ -780,16 +614,6 @@ local function renderItemPreview(item, props)
 			Size = size,
 			ScaleType = Enum.ScaleType.Fit,
 			ZIndex = zIndex,
-		})
-	end
-
-	if item and (item.kind == "Chest" or item.previewKind == "Chest") then
-		return e(ChestIcon, {
-			accentColor = item.accentColor,
-			position = position,
-			size = size,
-			tierName = item.previewName or item.name,
-			zIndex = zIndex,
 		})
 	end
 
@@ -2494,9 +2318,9 @@ local function captainsLogRow(props)
 			Position = UDim2.fromOffset(104, 58),
 			Size = UDim2.new(1, -360, 0, 16),
 			Text = string.format(
-				"Bounty: %s  |  %s Beli ready",
+				"Bounty: %s  |  %s ready",
 				formatNumber(entry.bounty or 0),
-				CurrencyUtil.formatIncomeExact(entry.collectable or 0)
+				CurrencyUtil.formatCurrency(entry.collectable or 0)
 			),
 			TextColor3 = accent,
 			TextSize = 12,
@@ -2522,7 +2346,7 @@ local function captainsLogRow(props)
 			Font = Enum.Font.Cartoon,
 			Position = UDim2.new(1, -18, 33 / 88, 0),
 			Size = UDim2.fromOffset(180, 30),
-			Text = string.format("%s Beli /s", formatRateNumber(entry.incomePerTick or 0)),
+			Text = formatRateNumber(entry.incomePerTick or 0),
 			TextColor3 = PALETTE.Cream,
 			TextSize = 24,
 			TextStrokeTransparency = 0.58,
@@ -3616,11 +3440,8 @@ local function App(props)
 								Font = Enum.Font.Cartoon,
 								Position = UDim2.fromOffset(16, 22),
 								Size = UDim2.new(0.5, -10, 0, 26),
-								Text = string.format(
-									"%s Beli",
-									CurrencyUtil.formatIncomeExact(
-										(props.captainLog and props.captainLog.totalCollectable) or 0
-									)
+								Text = CurrencyUtil.formatCurrency(
+									(props.captainLog and props.captainLog.totalCollectable) or 0
 								),
 								TextColor3 = PALETTE.Gold,
 								TextSize = 28,

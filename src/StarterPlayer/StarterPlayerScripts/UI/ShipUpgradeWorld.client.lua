@@ -37,7 +37,7 @@ local WORLD_ADORNEE_SIZE = Vector3.new(
 )
 local SURFACE_CANVAS_SIZE = if typeof(UPGRADE_POINT_CONFIG.PromptCanvasSize) == "Vector2"
 	then UPGRADE_POINT_CONFIG.PromptCanvasSize
-	else Vector2.new(306, 170)
+	else Vector2.new(720, 430)
 local SURFACE_MAX_DISTANCE = math.max(1, tonumber(UPGRADE_POINT_CONFIG.PromptMaxDistance) or 46)
 local SURFACE_ALWAYS_ON_TOP = UPGRADE_POINT_CONFIG.PromptAlwaysOnTop == true
 local PROMPT_INPUT_CAN_QUERY = UPGRADE_POINT_CONFIG.PromptInputCanQuery ~= false
@@ -488,31 +488,34 @@ local function buildViewModel()
 	local nextCaptain = nextLevel and ShipVisuals.GetCaptainSlotInfoForUpgradeLevel(nextLevel) or currentCaptain
 	local requirement = PlotUpgradeConfig.GetRequirementForLevel(currentLevel)
 	local rebirths = getRebirthCount()
-	local costLines = {}
+	local requirements = {}
 	local canBuy = not isMaxLevel and typeof(requirement) == "table"
-	local currentModel = tostring(currentInfo and currentInfo.ModelName or "Ship")
-	local nextModel = tostring(nextInfo and nextInfo.ModelName or currentModel)
 
-	local function pushCostLine(line)
-		costLines[#costLines + 1] = line
-		if line.Ok == false then
+	local function pushRequirement(entry)
+		requirements[#requirements + 1] = entry
+		if entry.Ok == false then
 			canBuy = false
 		end
 	end
 
 	if isMaxLevel then
-		pushCostLine({
+		pushRequirement({
 			Kind = "Max",
+			Label = "Complete",
 			Ok = true,
+			Owned = 1,
+			Required = 1,
 			Text = "Ship fully upgraded",
 		})
 	else
 		local beliRequired = math.max(0, tonumber(requirement and requirement.Beli) or 0)
 		local beliCurrent = getBeli()
-		pushCostLine({
+		pushRequirement({
 			Kind = "Beli",
 			Label = CurrencyUtil.getDisplayName(),
 			Ok = beliCurrent >= beliRequired,
+			Owned = beliCurrent,
+			Required = beliRequired,
 			Text = formatCostRatio(beliCurrent, beliRequired),
 		})
 
@@ -520,10 +523,12 @@ local function buildViewModel()
 			local requiredAmount = PlotUpgradeConfig.GetMaterialCost(requirement, materialKey)
 			if requiredAmount > 0 then
 				local currentAmount = getMaterialAmount(materialKey)
-				pushCostLine({
+				pushRequirement({
 					Kind = materialKey,
 					Label = getMaterialDisplayName(materialKey),
 					Ok = currentAmount >= requiredAmount,
+					Owned = currentAmount,
+					Required = requiredAmount,
 					Text = formatCostRatio(currentAmount, requiredAmount),
 				})
 			end
@@ -531,10 +536,12 @@ local function buildViewModel()
 
 		local requiredRebirths = math.max(0, math.floor(tonumber(requirement and requirement.Rebirths) or 0))
 		if requiredRebirths > 0 then
-			pushCostLine({
-				Kind = "Rebirths",
-				Label = "Rebirths",
+			pushRequirement({
+				Kind = "Rebirth",
+				Label = "Rebirth",
 				Ok = rebirths >= requiredRebirths,
+				Owned = rebirths,
+				Required = requiredRebirths,
 				Text = string.format("%d / %d", rebirths, requiredRebirths),
 			})
 		end
@@ -544,18 +551,25 @@ local function buildViewModel()
 	local nextSlots = tonumber(nextInfo and nextInfo.NormalCrewSlots) or currentSlots
 	local currentBonus = tonumber(currentCaptain and currentCaptain.BonusPercent) or 0
 	local nextBonus = tonumber(nextCaptain and nextCaptain.BonusPercent) or currentBonus
-	local buttonText = "Buy"
+	local buttonText = "Upgrade Ship"
 	if isMaxLevel then
 		buttonText = "Max"
 	elseif pendingPurchase then
 		buttonText = "Buying"
 	elseif not canBuy then
-		buttonText = "Need More"
+		buttonText = "Not Enough Resources"
 	end
 
+	local currentShipLabel = string.format("Lv %d Ship", currentLevel)
+	local nextShipLabel = string.format("Lv %d Ship", nextLevel or currentLevel)
 	local description = if isMaxLevel
 		then "Your ship progression is fully maxed."
-		else string.format("%s -> %s | %s", currentModel, nextModel, PlotUpgradeConfig.GetNextUnlockDescription(currentLevel))
+		else string.format(
+			"%s -> %s | %s",
+			currentShipLabel,
+			nextShipLabel,
+			PlotUpgradeConfig.GetNextUnlockDescription(currentLevel)
+		)
 
 	return {
 		ButtonText = buttonText,
@@ -563,7 +577,8 @@ local function buildViewModel()
 		CaptainText = if nextBonus ~= currentBonus
 			then string.format("%s -> %s", formatBonus(currentBonus), formatBonus(nextBonus))
 			else formatBonus(currentBonus),
-		CostLines = costLines,
+		CostLines = requirements,
+		Requirements = requirements,
 		Description = description,
 		LevelText = if isMaxLevel
 			then string.format("Lv %d / %d", currentLevel, PlotUpgradeConfig.MaxLevel)

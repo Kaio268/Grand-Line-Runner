@@ -13,6 +13,7 @@ local Configs = Modules:WaitForChild("Configs")
 local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 
 local IndexConfig = require(Configs:WaitForChild("Index"))
 
@@ -336,7 +337,7 @@ local function formatRewardAmount(path, amount)
 		return Shorten.timeSuffix3(math.floor(numeric + 0.5))
 	end
 
-	return Shorten.withCommas(math.floor(numeric + 0.5))
+	return CurrencyUtil.formatCount(numeric)
 end
 
 local function buildRewardPopupTable(config)

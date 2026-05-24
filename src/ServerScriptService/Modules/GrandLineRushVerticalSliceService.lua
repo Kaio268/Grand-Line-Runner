@@ -2331,6 +2331,41 @@ local function dropAllCarriedRewards(player, options)
 	return resolveActionResponse(player, true, message, firstError)
 end
 
+local function dropCarriedChestRewardsForDeath(player, runtime)
+	runtime = runtime or getRuntime(player)
+	local rootPart = getCharacterDropRootPart(player)
+	local dropPosition = if rootPart and rootPart:IsA("BasePart") then rootPart.Position else nil
+	local chestSlots = {}
+
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if slot.ItemType == "Chest" and typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+			chestSlots[#chestSlots + 1] = {
+				CarryId = slot.CarryId,
+				SlotIndex = slot.SlotIndex,
+			}
+		end
+	end
+
+	local droppedCount = 0
+	local firstError = nil
+	for _, slotRef in ipairs(chestSlots) do
+		local response = dropCarriedReward(player, {
+			Reason = "PlayerDeath",
+			DropPosition = dropPosition,
+			IgnoreProtection = true,
+			SlotIndex = slotRef.SlotIndex,
+			CarryId = slotRef.CarryId,
+		})
+		if response and response.ok == true then
+			droppedCount += 1
+		else
+			firstError = firstError or (response and response.error) or "death_chest_drop_failed"
+		end
+	end
+
+	return droppedCount, #chestSlots, firstError
+end
+
 local function dropCarriedCrewMember(player, dropPosition)
 	local ok, result = CrewInteraction.DropHeldAtPosition(CrewInteraction.GetActiveContext(), player, nil, dropPosition)
 	if ok then
@@ -3042,7 +3077,22 @@ local function bindCharacter(player, character)
 	deathConnections[player] = humanoid.Died:Connect(function()
 		local runtime = getRuntime(player)
 		if runtime.InRun or hasCarryItems(runtime) or runtime.SpawnedReward ~= nil then
-			Service.FailRun(player, "Defeated before securing the reward. Unextracted rewards were lost.")
+			local droppedChestCount = 0
+			if hasCarryItems(runtime) then
+				droppedChestCount = dropCarriedChestRewardsForDeath(player, runtime)
+			end
+
+			if runtime.InRun or hasCarryItems(runtime) or runtime.SpawnedReward ~= nil then
+				local message = if droppedChestCount > 0
+					then "Defeated. Carried chests were dropped into the world; other unextracted rewards were lost."
+					else "Defeated before securing the reward. Unextracted rewards were lost."
+				Service.FailRun(player, message)
+			elseif droppedChestCount > 0 then
+				runtime.ResolutionText = if droppedChestCount == 1
+					then "Defeated. Carried chest was dropped into the world."
+					else string.format("Defeated. %d carried chests were dropped into the world.", droppedChestCount)
+				syncCarrySlotsToClient(player, runtime)
+			end
 		end
 	end)
 end

@@ -148,7 +148,7 @@ local function setStroke(c)
 end
 
 local function formatNumber(n)
-	return CurrencyUtil.formatIncomeExact(n)
+	return CurrencyUtil.formatCompactNumber(n)
 end
 
 local function moneyText(n)

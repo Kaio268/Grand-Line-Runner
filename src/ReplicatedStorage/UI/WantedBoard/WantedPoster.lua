@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
 local e = React.createElement
@@ -18,17 +19,7 @@ local thumbnailCache = {}
 
 local function formatBounty(value)
 	local number = math.max(0, math.floor((tonumber(value) or 0) + 0.5))
-	local text = tostring(number)
-
-	while true do
-		local nextText, count = text:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
-		text = nextText
-		if count == 0 then
-			break
-		end
-	end
-
-	return text .. " Bounty"
+	return CurrencyUtil.formatCompactNumber(number) .. " Bounty"
 end
 
 local function getDisplayName(entry)

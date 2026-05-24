@@ -32,6 +32,7 @@ local THEME = {
 
 local RESOURCE_ICON_IMAGES = {
 	Beli = ShopTheme.Assets.BeliIcon,
+	Rebirth = ShopTheme.Assets.RebirthIcon,
 	Rebirths = ShopTheme.Assets.RebirthIcon,
 }
 
@@ -47,9 +48,9 @@ local MATERIAL_ICON_COLORS = {
 		Accent = Color3.fromRGB(219, 228, 238),
 	},
 	AncientTimber = {
-		Fill = Color3.fromRGB(123, 88, 54),
-		FillAlt = Color3.fromRGB(75, 51, 34),
-		Accent = Color3.fromRGB(101, 232, 154),
+		Fill = Color3.fromRGB(113, 48, 176),
+		FillAlt = Color3.fromRGB(62, 30, 103),
+		Accent = Color3.fromRGB(218, 118, 255),
 	},
 }
 
@@ -128,6 +129,7 @@ local function materialIcon(props)
 	end
 
 	return e("Frame", {
+		AnchorPoint = props.AnchorPoint,
 		BackgroundColor3 = colors.Fill,
 		BorderSizePixel = 0,
 		Position = props.Position,
@@ -140,6 +142,7 @@ local function resourceIcon(props)
 	local image = RESOURCE_ICON_IMAGES[props.Kind]
 	if image and image ~= "" then
 		return e("ImageLabel", {
+			AnchorPoint = props.AnchorPoint,
 			BackgroundTransparency = 1,
 			Image = image,
 			ImageColor3 = props.Ok and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(255, 206, 216),
@@ -153,105 +156,253 @@ local function resourceIcon(props)
 	return e(materialIcon, props)
 end
 
-local function statTile(props)
-	local compact = props.Compact == true
+local function crewSlotsIcon(props)
+	local accent = props.Accent or THEME.Sea
+	local zIndex = props.ZIndex or 4
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		Position = props.Position,
+		Size = props.Size,
+		ZIndex = zIndex,
+	}, {
+		CenterHead = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.3),
+			Size = UDim2.fromScale(0.24, 0.24),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		}),
+		LeftHead = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent,
+			BackgroundTransparency = 0.18,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.24, 0.44),
+			Size = UDim2.fromScale(0.18, 0.18),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		}),
+		RightHead = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent,
+			BackgroundTransparency = 0.18,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.76, 0.44),
+			Size = UDim2.fromScale(0.18, 0.18),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		}),
+		Body = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent,
+			BackgroundTransparency = 0.06,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.68),
+			Size = UDim2.fromScale(0.7, 0.24),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 6),
+			}),
+		}),
+	})
+end
+
+local function captainBonusIcon(props)
+	local accent = props.Accent or THEME.Gold
+	local zIndex = props.ZIndex or 4
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		Position = props.Position,
+		Size = props.Size,
+		ZIndex = zIndex,
+	}, {
+		Diamond = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Rotation = 45,
+			Size = UDim2.fromScale(0.46, 0.46),
+			ZIndex = zIndex + 1,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 4),
+			}),
+		}),
+		Glow = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = accent,
+			BackgroundTransparency = 0.72,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(0.8, 0.8),
+			ZIndex = zIndex,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+		}),
+	})
+end
+
+local function statCard(props)
+	local accent = props.Accent or THEME.Stroke
+	local icon = if props.Icon == "Captain"
+		then e(captainBonusIcon, {
+			Accent = accent,
+			Position = UDim2.fromOffset(28, 32),
+			Size = UDim2.fromOffset(44, 44),
+			ZIndex = 5,
+		})
+		else e(crewSlotsIcon, {
+			Accent = accent,
+			Position = UDim2.fromOffset(24, 33),
+			Size = UDim2.fromOffset(52, 42),
+			ZIndex = 5,
+		})
+
 	return e("Frame", {
 		BackgroundColor3 = THEME.Section,
-		BackgroundTransparency = 0.08,
+		BackgroundTransparency = 0.12,
 		BorderSizePixel = 0,
 		LayoutOrder = props.LayoutOrder,
-		Size = UDim2.new(0.5, -4, 1, 0),
+		Size = UDim2.new(0.5, -8, 1, 0),
 		ZIndex = 3,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 7),
+			CornerRadius = UDim.new(0, 10),
 		}),
 		Stroke = e("UIStroke", {
-			Color = props.Accent or THEME.Stroke,
-			Transparency = 0.48,
-			Thickness = 1,
+			Color = accent,
+			Transparency = 0.36,
+			Thickness = 1.4,
 		}),
+		Gradient = e("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, THEME.SectionSoft),
+				ColorSequenceKeypoint.new(1, THEME.PanelBottom),
+			}),
+			Rotation = 90,
+		}),
+		Icon = icon,
 		Label = e(label, {
-			Color = THEME.Muted,
-			Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromOffset(8, 3),
-			Size = UDim2.new(1, -16, 0, 11),
+			Color = accent,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(96, 18),
+			Size = UDim2.new(1, -116, 0, 24),
 			Text = props.Label,
-			TextSize = compact and 8 or 9,
+			TextSize = 18,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
 		Value = e(label, {
-			Color = props.Accent or THEME.Text,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(8, compact and 14 or 15),
-			Size = UDim2.new(1, -16, 0, compact and 15 or 17),
+			Color = THEME.Text,
+			Font = Enum.Font.GothamBlack,
+			Position = UDim2.fromOffset(96, 45),
+			Size = UDim2.new(1, -116, 0, 34),
 			Text = props.Value,
-			TextSize = compact and 11 or 12,
+			TextSize = 27,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
 	})
 end
 
-local function costPill(props)
+local function requirementCard(props)
 	local ok = props.Ok ~= false
-	local text = tostring(props.Text or "")
-	local iconSize = props.Compact and 11 or 12
-	local hasIcon = props.Kind ~= nil and props.Kind ~= "Max"
+	local isMax = props.Kind == "Max"
+	local amountColor = if isMax then THEME.Green elseif ok then THEME.Text else THEME.Red
+	local strokeColor = if isMax then THEME.Green elseif ok then THEME.StrokeSoft else THEME.Red
+
 	return e("Frame", {
-		BackgroundColor3 = ok and THEME.SectionSoft or Color3.fromRGB(74, 42, 51),
-		BackgroundTransparency = ok and 0.18 or 0.04,
+		BackgroundColor3 = ok and THEME.Section or Color3.fromRGB(44, 32, 44),
+		BackgroundTransparency = ok and 0.1 or 0.02,
 		BorderSizePixel = 0,
 		LayoutOrder = props.LayoutOrder,
 		ZIndex = 3,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 6),
+			CornerRadius = UDim.new(0, 10),
 		}),
 		Stroke = e("UIStroke", {
-			Color = ok and THEME.StrokeSoft or THEME.Red,
-			Transparency = ok and 0.62 or 0.26,
-			Thickness = 1,
+			Color = strokeColor,
+			Transparency = ok and 0.48 or 0.22,
+			Thickness = 1.2,
 		}),
-		Icon = hasIcon and e(resourceIcon, {
-			Kind = props.Kind,
-			Ok = ok,
-			Position = UDim2.fromOffset(5, props.Compact and 1 or 1),
-			Size = UDim2.fromOffset(iconSize, iconSize),
-			ZIndex = 4,
-		}) or nil,
-		Text = e(label, {
-			Color = ok and THEME.Text or THEME.Red,
+		Icon = if isMax
+			then e(label, {
+				Color = THEME.Green,
+				Font = Enum.Font.GothamBlack,
+				Position = UDim2.fromOffset(0, 11),
+				Size = UDim2.new(1, 0, 0, 24),
+				Text = "OK",
+				TextSize = 16,
+				TextXAlignment = Enum.TextXAlignment.Center,
+			})
+			else e(resourceIcon, {
+				Kind = props.Kind,
+				Ok = ok,
+				AnchorPoint = Vector2.new(0.5, 0),
+				Position = UDim2.new(0.5, 0, 0, 8),
+				Size = UDim2.fromOffset(28, 28),
+				ZIndex = 4,
+			}),
+		Name = e(label, {
+			Color = THEME.Text,
 			Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromOffset(hasIcon and 20 or 6, 0),
-			Size = UDim2.new(1, hasIcon and -24 or -12, 1, 0),
-			Text = text,
-			TextSize = props.Compact and 8 or 9,
+			Position = UDim2.fromOffset(6, 36),
+			Size = UDim2.new(1, -12, 0, 22),
+			Text = tostring(props.Label or props.Kind or ""),
+			TextSize = 11,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Center,
+		}),
+		Amount = e(label, {
+			Color = amountColor,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(6, 58),
+			Size = UDim2.new(1, -12, 0, 16),
+			Text = tostring(props.Text or ""),
+			TextSize = 11,
 			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Center,
 		}),
 	})
 end
 
 local function ShipUpgradeWorldPrompt(props)
 	local view = props.View or {}
-	local compact = props.Compact == true
 	local hovered, setHovered = React.useState(false)
 	local buttonEnabled = view.CanBuy == true and view.Pending ~= true
 	local buttonFill = if buttonEnabled and hovered then THEME.ButtonHover elseif buttonEnabled then THEME.Button else THEME.ButtonDisabled
-	local costChildren = {
+	local requirements = view.Requirements or view.CostLines or {}
+	local requirementChildren = {
 		Grid = e("UIGridLayout", {
-			CellPadding = UDim2.fromOffset(5, 3),
-			CellSize = UDim2.new(0.5, -3, 0, compact and 14 or 14),
+			CellPadding = UDim2.fromOffset(10, 0),
+			CellSize = UDim2.new(0.2, -8, 1, 0),
 			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Left,
 			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Top,
 		}),
 	}
 
-	for index, line in ipairs(view.CostLines or {}) do
-		costChildren["Cost" .. tostring(index)] = e(costPill, {
-			Compact = compact,
+	for index, line in ipairs(requirements) do
+		requirementChildren["Requirement" .. tostring(index)] = e(requirementCard, {
+			Kind = line.Kind,
+			Label = line.Label,
 			LayoutOrder = index,
 			Ok = line.Ok,
-			Kind = line.Kind,
 			Text = line.Text,
 		})
 	end
@@ -264,62 +415,63 @@ local function ShipUpgradeWorldPrompt(props)
 		ZIndex = 1,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 10),
+			CornerRadius = UDim.new(0, 16),
 		}),
 		Stroke = e("UIStroke", {
 			Color = THEME.Stroke,
-			Transparency = 0.18,
-			Thickness = 1.15,
+			Transparency = 0.08,
+			Thickness = 1.5,
 		}),
 		Gradient = e("UIGradient", {
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, THEME.PanelTop),
-				ColorSequenceKeypoint.new(1, THEME.PanelBottom),
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(17, 29, 47)),
+				ColorSequenceKeypoint.new(0.48, Color3.fromRGB(9, 18, 31)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 13, 22)),
 			}),
 			Rotation = 90,
 		}),
 		Header = e("Frame", {
 			BackgroundColor3 = THEME.Header,
-			BackgroundTransparency = 0.06,
+			BackgroundTransparency = 0.18,
 			BorderSizePixel = 0,
-			Size = UDim2.new(1, 0, 0, compact and 38 or 42),
+			Size = UDim2.new(1, 0, 0, 112),
 			ZIndex = 2,
 		}, {
 			BottomLine = e("Frame", {
 				AnchorPoint = Vector2.new(0, 1),
 				BackgroundColor3 = THEME.Stroke,
-				BackgroundTransparency = 0.22,
+				BackgroundTransparency = 0.16,
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0, 1),
-				Size = UDim2.new(1, 0, 0, 1),
+				Size = UDim2.new(1, 0, 0, 2),
 				ZIndex = 3,
 			}),
 			Eyebrow = e(label, {
 				Color = THEME.Gold,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(12, 4),
-				Size = UDim2.new(0.5, -12, 0, 10),
+				Position = UDim2.fromOffset(34, 26),
+				Size = UDim2.new(0.5, -34, 0, 20),
 				Text = "SHIPYARD",
-				TextSize = compact and 8 or 9,
+				TextSize = 17,
 			}),
 			Title = e(label, {
 				Color = THEME.Text,
-				Font = Enum.Font.Cartoon,
-				Position = UDim2.fromOffset(12, compact and 14 or 15),
-				Size = UDim2.new(1, -104, 0, compact and 20 or 23),
-				StrokeColor = THEME.GoldDeep,
-				StrokeTransparency = 0.62,
+				Font = Enum.Font.GothamBlack,
+				Position = UDim2.fromOffset(34, 51),
+				Size = UDim2.new(1, -270, 0, 46),
+				StrokeColor = Color3.fromRGB(0, 0, 0),
+				StrokeTransparency = 0.82,
 				Text = tostring(view.Title or "Ship Upgrade"),
-				TextSize = compact and 18 or 21,
+				TextSize = 39,
 				TextTruncate = Enum.TextTruncate.AtEnd,
 			}),
 			Level = e("Frame", {
 				AnchorPoint = Vector2.new(1, 0),
-				BackgroundColor3 = THEME.Section,
-				BackgroundTransparency = 0.08,
+				BackgroundColor3 = Color3.fromRGB(17, 27, 42),
+				BackgroundTransparency = 0.02,
 				BorderSizePixel = 0,
-				Position = UDim2.new(1, -10, 0, 9),
-				Size = UDim2.fromOffset(compact and 82 or 88, compact and 22 or 24),
+				Position = UDim2.new(1, -34, 0, 30),
+				Size = UDim2.fromOffset(164, 50),
 				ZIndex = 3,
 			}, {
 				Corner = e("UICorner", {
@@ -327,75 +479,93 @@ local function ShipUpgradeWorldPrompt(props)
 				}),
 				Stroke = e("UIStroke", {
 					Color = THEME.Stroke,
-					Transparency = 0.42,
-					Thickness = 1,
+					Transparency = 0.02,
+					Thickness = 1.5,
 				}),
 				Text = e(label, {
 					Color = THEME.Gold,
-					Font = Enum.Font.GothamBold,
+					Font = Enum.Font.GothamBlack,
 					Size = UDim2.fromScale(1, 1),
 					Text = tostring(view.LevelText or ""),
-					TextSize = compact and 9 or 10,
+					TextSize = 23,
 					TextXAlignment = Enum.TextXAlignment.Center,
 				}),
 			}),
 		}),
 		Description = e(label, {
-			Color = THEME.Muted,
+			Color = THEME.Text,
 			Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromOffset(12, compact and 45 or 49),
-			Size = UDim2.new(1, -24, 0, compact and 18 or 20),
+			Position = UDim2.fromOffset(34, 128),
+			Size = UDim2.new(1, -68, 0, 44),
 			Text = tostring(view.Description or ""),
-			TextSize = compact and 9 or 10,
-			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextSize = 19,
+			TextWrapped = true,
+			TextYAlignment = Enum.TextYAlignment.Top,
 		}),
 		Stats = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(12, compact and 67 or 73),
-			Size = UDim2.new(1, -24, 0, compact and 32 or 35),
+			Position = UDim2.fromOffset(34, 183),
+			Size = UDim2.new(1, -68, 0, 94),
 			ZIndex = 3,
 		}, {
 			Layout = e("UIListLayout", {
 				FillDirection = Enum.FillDirection.Horizontal,
-				Padding = UDim.new(0, 8),
+				Padding = UDim.new(0, 16),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
-			Slots = e(statTile, {
+			Slots = e(statCard, {
 				Accent = THEME.Sea,
-				Compact = compact,
+				Icon = "Slots",
 				Label = "Normal Slots",
 				LayoutOrder = 1,
 				Value = tostring(view.SlotText or ""),
 			}),
-			Captain = e(statTile, {
+			Captain = e(statCard, {
 				Accent = THEME.Gold,
-				Compact = compact,
+				Icon = "Captain",
 				Label = "Captain Bonus",
 				LayoutOrder = 2,
 				Value = tostring(view.CaptainText or ""),
 			}),
 		}),
-		Costs = e("Frame", {
+		RequirementTitle = e(label, {
+			Color = THEME.Muted,
+			Font = Enum.Font.GothamBlack,
+			Position = UDim2.fromOffset(34, 297),
+			Size = UDim2.new(1, -68, 0, 23),
+			Text = "REQUIREMENTS",
+			TextSize = 16,
+		}),
+		RequirementDivider = e("Frame", {
+			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+			BackgroundTransparency = 0.9,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(0, 321),
+			Size = UDim2.new(1, 0, 0, 1),
+			ZIndex = 2,
+		}),
+		Requirements = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(12, compact and 104 or 111),
-			Size = UDim2.new(1, compact and -108 or -118, 0, compact and 50 or 50),
+			Position = UDim2.fromOffset(34, 337),
+			Size = UDim2.new(1, -282, 0, 76),
 			ZIndex = 3,
-		}, costChildren),
+		}, requirementChildren),
 		Buy = e("TextButton", {
 			Active = buttonEnabled,
 			AutoButtonColor = false,
 			BackgroundColor3 = buttonFill,
-			BackgroundTransparency = buttonEnabled and 0.02 or 0.04,
+			BackgroundTransparency = buttonEnabled and 0.02 or 0.08,
 			BorderSizePixel = 0,
-			Position = UDim2.new(1, compact and -88 or -96, 1, compact and -42 or -46),
+			Position = UDim2.new(1, -224, 0, 337),
 			Selectable = buttonEnabled,
-			Size = UDim2.fromOffset(compact and 76 or 84, compact and 34 or 36),
-			Text = tostring(view.ButtonText or "Buy"),
+			Size = UDim2.fromOffset(190, 76),
+			Text = tostring(view.ButtonText or "Upgrade Ship"),
 			TextColor3 = buttonEnabled and THEME.ButtonText or THEME.ButtonDisabledText,
-			TextSize = compact and 13 or 14,
+			TextSize = 18,
 			TextStrokeColor3 = Color3.fromRGB(14, 21, 32),
 			TextStrokeTransparency = buttonEnabled and 1 or 0.72,
-			Font = Enum.Font.GothamBold,
+			TextWrapped = true,
+			Font = Enum.Font.GothamBlack,
 			ZIndex = 4,
 			[React.Event.Activated] = function()
 				if buttonEnabled and props.OnBuy then
@@ -410,12 +580,12 @@ local function ShipUpgradeWorldPrompt(props)
 			end,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 9),
+				CornerRadius = UDim.new(0, 10),
 			}),
 			Stroke = e("UIStroke", {
 				Color = buttonEnabled and Color3.fromRGB(255, 255, 255) or THEME.Muted,
-				Transparency = buttonEnabled and 0.78 or 0.48,
-				Thickness = 1,
+				Transparency = buttonEnabled and 0.72 or 0.48,
+				Thickness = 1.2,
 			}),
 			Gradient = e("UIGradient", {
 				Color = ColorSequence.new({

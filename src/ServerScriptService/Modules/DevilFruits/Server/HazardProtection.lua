@@ -8,7 +8,7 @@ local AbilityTargeting = require(
 		:WaitForChild("Shared")
 		:WaitForChild("AbilityTargeting")
 )
-local AdminInvincibility = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminInvincibility"))
+local DamageProtection = require(script.Parent:WaitForChild("DamageProtection"))
 
 local HazardProtection = {}
 
@@ -99,9 +99,24 @@ local function logProtectionSkip(protection, options)
 	))
 end
 
-local function getMoguUndergroundProtection(moguServer, targetPlayer, position)
+local function getMoguProtection(moguServer, targetPlayer, position, options)
 	if not moguServer then
 		return nil
+	end
+
+	if typeof(moguServer.GetProtection) == "function" then
+		local ok, protection = pcall(moguServer.GetProtection, targetPlayer, position, options)
+		if ok and type(protection) == "table" and protection.Protected == true then
+			return protection
+		elseif ok and protection == true then
+			return {
+				Protected = true,
+				Source = "MoguBurrow",
+				Reason = "mogu_burrow",
+				Player = targetPlayer,
+				Position = position,
+			}
+		end
 	end
 
 	for _, helperName in ipairs({ "IsPlayerUnderground", "IsMoguBurrowed", "IsProtected" }) do
@@ -144,16 +159,18 @@ function HazardProtection.GetProtection(target, options)
 		elseif rootPart and rootPart:IsA("BasePart") then rootPart.Position
 		else nil
 
-	if AdminInvincibility.IsEnabled(targetPlayer) then
-		local protection = {
-			Protected = true,
-			Source = "AdminInvincible",
-			Reason = "admin_invincible",
-			Player = targetPlayer,
-			Position = position,
-		}
-		logProtectionSkip(protection, options)
-		return protection
+	local damageProtection = DamageProtection.GetProtection(targetPlayer, {
+		TargetContext = targetContext,
+		Position = position,
+		HitPosition = options.HitPosition,
+		HazardClass = options.HazardClass,
+		HazardType = options.HazardType,
+		EffectName = options.EffectName,
+		Source = options.Source,
+	})
+	if damageProtection then
+		logProtectionSkip(damageProtection, options)
+		return damageProtection
 	end
 
 	if options.IgnoreProtection == true or options.IgnoreHazardProtection == true then
@@ -161,7 +178,7 @@ function HazardProtection.GetProtection(target, options)
 	end
 
 	local moguServer = getServerFruitModule("Mogu", "MoguServer")
-	local moguProtection = getMoguUndergroundProtection(moguServer, targetPlayer, position)
+	local moguProtection = getMoguProtection(moguServer, targetPlayer, position, options)
 	if moguProtection then
 		logProtectionSkip(moguProtection, options)
 		return moguProtection

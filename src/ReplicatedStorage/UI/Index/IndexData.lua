@@ -311,7 +311,7 @@ local LUCK_BOOST_ICON = "rbxassetid://99305009492305"
 
 local function formatIncome(value)
 	local numeric = math.max(0, math.floor((tonumber(value) or 0) + 0.5))
-	return Shorten.withCommas(numeric) .. CurrencyUtil.getPerSecondSuffix()
+	return CurrencyUtil.formatCurrencyPerSecond(numeric)
 end
 
 local function isClaimed(indexRewardsFolder, threshold, claimedRewardOverrides)
@@ -369,7 +369,7 @@ local function formatRewardAmount(path, amount)
 		return Shorten.timeSuffix3(math.floor(numeric + 0.5))
 	end
 
-	return Shorten.withCommas(math.floor(numeric + 0.5))
+	return CurrencyUtil.formatCount(numeric)
 end
 
 local function isPreviewDiscovered(previewMode, categoryId, orderIndex)

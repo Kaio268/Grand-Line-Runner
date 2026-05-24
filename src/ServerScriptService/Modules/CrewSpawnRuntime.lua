@@ -600,7 +600,7 @@ local function removeLegacyCrewHover(model)
 	end
 end
 
-local function syncSpawnOverhead(model, entry, remaining)
+local function syncSpawnOverhead(model, entry, remaining, despawnSeconds)
 	if not model then
 		return
 	end
@@ -613,6 +613,13 @@ local function syncSpawnOverhead(model, entry, remaining)
 	local variant = normalizeCrewAttribute(info.Variant or entry and entry.Variant) or "Normal"
 	local income = math.max(0, tonumber(info.Income) or 0)
 	local safeRemaining = math.max(0, tonumber(remaining) or 0)
+	local safeDespawnSeconds = math.max(
+		safeRemaining,
+		tonumber(despawnSeconds)
+			or tonumber(model:GetAttribute(OVERHEAD_ATTRIBUTES.DespawnSeconds))
+			or tonumber(info.TimeLeft)
+			or safeRemaining
+	)
 
 	model:SetAttribute(OVERHEAD_ATTRIBUTES.Kind, CrewOverhead.Kind.Spawned)
 	model:SetAttribute(OVERHEAD_ATTRIBUTES.DisplayName, displayName)
@@ -620,6 +627,7 @@ local function syncSpawnOverhead(model, entry, remaining)
 	model:SetAttribute(OVERHEAD_ATTRIBUTES.Variant, variant)
 	model:SetAttribute(OVERHEAD_ATTRIBUTES.IncomePerSecond, income)
 	model:SetAttribute(OVERHEAD_ATTRIBUTES.ExpiresAt, workspace:GetServerTimeNow() + safeRemaining)
+	model:SetAttribute(OVERHEAD_ATTRIBUTES.DespawnSeconds, safeDespawnSeconds)
 	removeLegacyCrewHover(model)
 	CollectionService:AddTag(model, CrewOverhead.Tag)
 end
@@ -1563,7 +1571,7 @@ local function registerActive(model, entry, originData, slotIndex)
 		end
 	end)
 
-	syncSpawnOverhead(model, entry, tl)
+	syncSpawnOverhead(model, entry, tl, tl)
 	st.Prompt = Interaction.BindPrompt(ctx, model, st, Placement.EnsurePrimaryPart)
 
 	return st

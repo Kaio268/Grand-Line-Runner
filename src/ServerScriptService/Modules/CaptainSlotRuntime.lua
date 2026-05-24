@@ -54,7 +54,11 @@ end
 
 local function dmGet(player, path)
 	local ok, value = pcall(function()
-		return getDataManager():GetValue(player, path)
+		local dataManager = getDataManager()
+		if typeof(dataManager.TryGetValue) == "function" then
+			return dataManager:TryGetValue(player, path)
+		end
+		return dataManager:GetValue(player, path)
 	end)
 
 	return if ok then value else nil
@@ -62,7 +66,11 @@ end
 
 local function dmSet(player, path, value)
 	local ok, result = pcall(function()
-		return getDataManager():SetValue(player, path, value)
+		local dataManager = getDataManager()
+		if typeof(dataManager.TrySetValue) == "function" then
+			return dataManager:TrySetValue(player, path, value)
+		end
+		return dataManager:SetValue(player, path, value)
 	end)
 
 	return ok and result ~= false
@@ -70,10 +78,30 @@ end
 
 local function dmAdd(player, path, amount)
 	local ok, result = pcall(function()
-		return getDataManager():AddValue(player, path, amount)
+		local dataManager = getDataManager()
+		if typeof(dataManager.TryAddValue) == "function" then
+			return dataManager:TryAddValue(player, path, amount)
+		end
+		return dataManager:AddValue(player, path, amount)
 	end)
 
 	return ok and result ~= false
+end
+
+local function getRuntimeDataReadiness(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent == nil then
+		return false, "cleanup"
+	end
+
+	local dataManager = getDataManager()
+	if typeof(dataManager.IsHardResetPending) == "function" and dataManager:IsHardResetPending(player.UserId) then
+		return false, "cleanup"
+	end
+	if typeof(dataManager.IsReady) == "function" and not dataManager:IsReady(player) then
+		return false, "not_ready"
+	end
+
+	return true, nil
 end
 
 local function getPlayerShipUpgradeLevel(player)
@@ -891,6 +919,13 @@ end
 local function bankCaptainIncome(player, runtime)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent == nil then
 		CaptainSlotRuntime.CleanupPlayer(player)
+		return
+	end
+	local ready, readinessReason = getRuntimeDataReadiness(player)
+	if not ready then
+		if readinessReason == "cleanup" then
+			CaptainSlotRuntime.CleanupPlayer(player)
+		end
 		return
 	end
 	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then

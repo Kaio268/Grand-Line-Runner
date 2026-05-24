@@ -76,9 +76,17 @@ function Module.Install(ctx)
 		end
 
 		local ok, result = pcall(function()
-			local crewMemberIncome = DataManager:GetValue(player, "CrewMemberIncome")
-			local shipSlots = DataManager:GetValue(player, "Ship.Slots")
-			local plotUpgrade = DataManager:GetValue(player, "HiddenLeaderstats.PlotUpgrade")
+			local function read(path)
+				if typeof(DataManager.TryGetValue) == "function" then
+					local value = DataManager:TryGetValue(player, path)
+					return value
+				end
+				return DataManager:GetValue(player, path)
+			end
+
+			local crewMemberIncome = read("CrewMemberIncome")
+			local shipSlots = read("Ship.Slots")
+			local plotUpgrade = read("HiddenLeaderstats.PlotUpgrade")
 
 			return {
 				CrewMemberIncome = crewMemberIncome,
@@ -166,6 +174,17 @@ function Module.Install(ctx)
 		clearPlayerStandRuntime(player)
 		getCrewStorage().ClearIncomeShadowSyncState(player)
 	end)
+
+	if DataManager and DataManager.HardResetStarting then
+		DataManager.HardResetStarting:Connect(function(player)
+			if typeof(player) ~= "Instance" or not player:IsA("Player") then
+				return
+			end
+
+			clearPlayerStandRuntime(player)
+			getCrewStorage().ClearIncomeShadowSyncState(player)
+		end)
+	end
 
 	task.spawn(bootstrapExistingCrewIncomePlayers, {
 		Players = Players,

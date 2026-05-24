@@ -6,10 +6,11 @@ local React = require(Packages:WaitForChild("React"))
 local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
 local PreviewViewport = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport"))
 local IndexTheme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
-local ChestVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestVisuals"))
-local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
+local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewPreviewImages = require(
-	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewPreviewImages")
+	Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages")
 )
 
 local e = React.createElement
@@ -143,6 +144,27 @@ local function getChestPreviewName(item)
 	end
 
 	return nil
+end
+
+local function getChestTierLabel(item, chestPreviewName)
+	if typeof(item) ~= "table" then
+		return ""
+	end
+
+	local labelSource = item.RarityLabel
+		or item.rarityLabel
+		or item.Tier
+		or item.tier
+		or chestPreviewName
+		or item.PreviewName
+		or item.previewName
+		or item.DisplayName
+		or item.displayName
+	if typeof(labelSource) ~= "string" or labelSource == "" then
+		return ""
+	end
+
+	return ChestVisuals.GetTierLabel(labelSource)
 end
 
 local function getInHandDisplayName(item)
@@ -417,158 +439,6 @@ local function trashIcon(props)
 	})
 end
 
-local function chestIcon(props)
-	local woodColor, metalColor = ChestVisuals.GetTierColors(props.tierName)
-	local accent = props.accentColor or metalColor
-	local size = props.size or UDim2.fromScale(1, 1)
-	local position = props.position or UDim2.fromScale(0.5, 0.5)
-	local anchorPoint = props.anchorPoint or Vector2.new(0.5, 0.5)
-	local zIndex = props.zIndex or 1
-
-	return e("Frame", {
-		AnchorPoint = anchorPoint,
-		BackgroundTransparency = 1,
-		Position = position,
-		Size = size,
-		ZIndex = zIndex,
-	}, {
-		Shadow = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BackgroundColor3 = Color3.fromRGB(6, 8, 14),
-			BackgroundTransparency = 0.48,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.96),
-			Size = UDim2.fromScale(0.68, 0.1),
-			ZIndex = zIndex,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
-			}),
-		}),
-		Body = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 1),
-			BackgroundColor3 = woodColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.83),
-			Size = UDim2.fromScale(0.74, 0.42),
-			ZIndex = zIndex + 1,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.16, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.18),
-				Thickness = 1,
-				Transparency = 0.3,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.1)),
-					ColorSequenceKeypoint.new(1, woodColor:Lerp(Color3.fromRGB(0, 0, 0), 0.2)),
-				}),
-			}),
-		}),
-		Lid = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.08),
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.37),
-			Rotation = -6,
-			Size = UDim2.fromScale(0.8, 0.28),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.2, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.22),
-				Thickness = 1,
-				Transparency = 0.24,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, woodColor:Lerp(Color3.fromRGB(255, 255, 255), 0.16)),
-					ColorSequenceKeypoint.new(1, woodColor:Lerp(Color3.fromRGB(0, 0, 0), 0.12)),
-				}),
-			}),
-		}),
-		Band = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = metalColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.52),
-			Size = UDim2.fromScale(0.14, 0.56),
-			ZIndex = zIndex + 3,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.18, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = metalColor:Lerp(Color3.fromRGB(255, 255, 255), 0.24),
-				Thickness = 1,
-				Transparency = 0.18,
-			}),
-		}),
-		TrimLeft = e("Frame", {
-			AnchorPoint = Vector2.new(0, 0.5),
-			BackgroundColor3 = metalColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.13, 0.6),
-			Size = UDim2.fromScale(0.09, 0.32),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.18, 0),
-			}),
-		}),
-		TrimRight = e("Frame", {
-			AnchorPoint = Vector2.new(1, 0.5),
-			BackgroundColor3 = metalColor,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.87, 0.6),
-			Size = UDim2.fromScale(0.09, 0.32),
-			ZIndex = zIndex + 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.18, 0),
-			}),
-		}),
-		Latch = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundColor3 = accent:Lerp(Color3.fromRGB(255, 255, 255), 0.08),
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.5, 0.58),
-			Size = UDim2.fromScale(0.18, 0.16),
-			ZIndex = zIndex + 4,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0.28, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(255, 244, 210),
-				Thickness = 1,
-				Transparency = 0.26,
-			}),
-		}),
-		Highlight = e("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundColor3 = Color3.fromRGB(255, 255, 255),
-			BackgroundTransparency = 0.72,
-			BorderSizePixel = 0,
-			Position = UDim2.fromScale(0.48, 0.18),
-			Rotation = -18,
-			Size = UDim2.fromScale(0.12, 0.24),
-			ZIndex = zIndex + 5,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
-			}),
-		}),
-	})
-end
-
 local function lockIcon(props)
 	local zIndex = props.zIndex or 1
 
@@ -690,9 +560,19 @@ local function inHandSlot(props)
 	local crewRarity = if occupied and not itemIsChest then getCrewmateRarity(item) else ""
 	local crewRarityStyle = if crewRarity ~= "" then getCrewmateRarityStyle(item) else nil
 	local crewRarityColor = if crewRarityStyle and typeof(crewRarityStyle.textColor) == "Color3" then crewRarityStyle.textColor else PALETTE.Ready
-	local showCrewRarity = occupied and not itemIsChest and crewRarity ~= ""
-	local previewBottomInset = if showCrewRarity then 30 else 18
 	local chestPreviewName = if itemIsChest then getChestPreviewName(item) else nil
+	local chestTierLabel = if itemIsChest then getChestTierLabel(item, chestPreviewName) else ""
+	local chestTierColor = nil
+	if itemIsChest then
+		local _, metalColor = ChestVisuals.GetTierColors(chestTierLabel ~= "" and chestTierLabel or chestPreviewName)
+		chestTierColor = metalColor
+	end
+	local showCrewRarity = occupied and not itemIsChest and crewRarity ~= ""
+	local showChestTier = occupied and itemIsChest and chestTierLabel ~= ""
+	local showItemMeta = showCrewRarity or showChestTier
+	local itemMetaText = if showChestTier then chestTierLabel else crewRarity
+	local itemMetaColor = if showChestTier then (chestTierColor or PALETTE.Gold) else crewRarityColor
+	local previewBottomInset = if showItemMeta then 30 else 18
 	local modelName = if itemIsChest or not occupied then nil else getCrewmateModelName(item)
 	local staticPreviewImage = if occupied and not itemIsChest then getStaticCrewPreviewImage(item, modelName) else ""
 	local hasStaticPreview = staticPreviewImage ~= ""
@@ -799,10 +679,14 @@ local function inHandSlot(props)
 						AspectRatio = IN_HAND_PREVIEW_ASPECT_RATIO,
 						DominantAxis = Enum.DominantAxis.Width,
 					}),
-					Preview = e(chestIcon, {
-						position = UDim2.fromScale(0.5, 0.5),
+					Preview = e(PreviewViewport, {
+						anchorPoint = Vector2.new(0.5, 0.5),
+						fieldOfView = 34,
+						position = UDim2.fromScale(0.5, 0.54),
+						previewKind = "Chest",
+						previewName = chestPreviewName,
+						scaleType = Enum.ScaleType.Fit,
 						size = UDim2.fromScale(1, 1),
-						tierName = chestPreviewName,
 						zIndex = zIndex + 2,
 					}),
 				})
@@ -846,11 +730,11 @@ local function inHandSlot(props)
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = if showCrewRarity then UDim2.new(0.5, 0, 1, -15) else UDim2.new(0.5, 0, 1, -3),
-			Size = UDim2.new(1, -12, 0, if showCrewRarity then 12 else 13),
+			Position = if showItemMeta then UDim2.new(0.5, 0, 1, -15) else UDim2.new(0.5, 0, 1, -3),
+			Size = UDim2.new(1, -12, 0, if showItemMeta then 12 else 13),
 			Text = if locked then "Locked" else displayName,
-			TextColor3 = if showCrewRarity then crewRarityColor elseif occupied then PALETTE.Ready else PALETTE.MutedText,
-			TextSize = if showCrewRarity then 10 else 11,
+			TextColor3 = if showItemMeta then itemMetaColor elseif occupied then PALETTE.Ready else PALETTE.MutedText,
+			TextSize = if showItemMeta then 10 else 11,
 			TextStrokeColor3 = PALETTE.Ink,
 			TextStrokeTransparency = 0.46,
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -858,15 +742,15 @@ local function inHandSlot(props)
 			TextYAlignment = Enum.TextYAlignment.Center,
 			ZIndex = zIndex + 3,
 		}),
-		Rarity = if showCrewRarity
+		Rarity = if showItemMeta
 			then e("TextLabel", {
 				AnchorPoint = Vector2.new(0.5, 1),
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				Position = UDim2.new(0.5, 0, 1, -3),
 				Size = UDim2.new(1, -12, 0, 10),
-				Text = crewRarity,
-				TextColor3 = crewRarityColor,
+				Text = itemMetaText,
+				TextColor3 = itemMetaColor,
 				TextSize = 9,
 				TextStrokeColor3 = PALETTE.Ink,
 				TextStrokeTransparency = 0.48,

@@ -41,6 +41,14 @@ local function formatVector3(value)
 	return string.format("(%.2f, %.2f, %.2f)", value.X, value.Y, value.Z)
 end
 
+local function formatNumber(value)
+	if typeof(value) ~= "number" then
+		return tostring(value)
+	end
+
+	return string.format("%.3f", value)
+end
+
 local function formatInstancePath(instance)
 	if not instance then
 		return "<nil>"
@@ -172,8 +180,19 @@ local ProtectionRuntime = require(
 		:WaitForChild("DevilFruits")
 		:WaitForChild("ProtectionRuntime")
 )
+local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 WaveHazardVisuals.ValidateWaveAssets("WaveClient")
+
+local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
+local MOGU_BURROW_ABILITY = "Burrow"
+local MOGU_BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
+local MOGU_BURROW_SESSION_STATE_ATTRIBUTE = "MoguBurrowSessionState"
+local MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE = "MoguStartupInvincibleFrom"
+local MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE = "MoguStartupInvincibleUntil"
+local MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE = "MoguStartupInvincibleSeconds"
+local MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE = "MoguStartupInvincibleStartOffsetSeconds"
+local MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE = "MoguStartupInvincibleSessionId"
 
 waveTrace("startup awaiting waves folder")
 local WavesFolder = resolveWavesFolder()
@@ -265,6 +284,63 @@ waveTrace(
 	formatInstancePath(KillMeEvent),
 	formatInstancePath(ProgressBarSync)
 )
+
+local function isMoguStartupDamageTraceEnabled()
+	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	return abilityConfig.DebugStartupDamageTrace == true
+end
+
+local function isMoguStartupTraceRelevant()
+	if LocalPlayer:GetAttribute(MOGU_BURROW_SESSION_STATE_ATTRIBUTE) == "Startup" then
+		return true
+	end
+
+	local invincibleUntil = LocalPlayer:GetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE)
+	return typeof(invincibleUntil) == "number"
+end
+
+local function traceMoguStartupClientDamage(path, rootPosition, extra)
+	if not isMoguStartupDamageTraceEnabled() or not isMoguStartupTraceRelevant() then
+		return
+	end
+
+	extra = type(extra) == "table" and extra or {}
+	local serverNow = Workspace:GetServerTimeNow()
+	local invincibleFrom = LocalPlayer:GetAttribute(MOGU_STARTUP_INVINCIBLE_FROM_ATTRIBUTE)
+	local invincibleUntil = LocalPlayer:GetAttribute(MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE)
+	local invincibleStartsIn = if typeof(invincibleFrom) == "number" then invincibleFrom - serverNow else nil
+	local invincibleRemaining = if typeof(invincibleUntil) == "number" then invincibleUntil - serverNow else nil
+	print(string.format(
+		"[MOGU STARTUP DAMAGE TRACE][CLIENT] path=%s player=%s localNow=%s serverNow=%s state=%s session=%s invincibleFrom=%s invincibleStartsIn=%s invincibleUntil=%s invincibleRemaining=%s invincibleSession=%s invincibleSeconds=%s invincibleStartOffset=%s protected=%s remote=%s position=%s",
+		tostring(path or "unknown"),
+		LocalPlayer.Name,
+		formatNumber(os.clock()),
+		formatNumber(serverNow),
+		tostring(LocalPlayer:GetAttribute(MOGU_BURROW_SESSION_STATE_ATTRIBUTE)),
+		tostring(LocalPlayer:GetAttribute(MOGU_BURROW_SESSION_ID_ATTRIBUTE)),
+		formatNumber(invincibleFrom),
+		formatNumber(invincibleStartsIn),
+		formatNumber(invincibleUntil),
+		formatNumber(invincibleRemaining),
+		tostring(LocalPlayer:GetAttribute(MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE)),
+		formatNumber(LocalPlayer:GetAttribute(MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE)),
+		formatNumber(LocalPlayer:GetAttribute(MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE)),
+		tostring(extra.Protected == true),
+		tostring(extra.Remote),
+		formatVector3(rootPosition)
+	))
+end
+
+local function getKillMeEvent()
+	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+	local remote = remotesFolder and remotesFolder:FindFirstChild("KillMe")
+	if remote and remote:IsA("RemoteEvent") then
+		KillMeEvent = remote
+		return remote
+	end
+
+	return nil
+end
 
 local LEGACY_PROGRESS_BAR_UI_ENABLED = false
 local playerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -1050,7 +1126,9 @@ local function killLocalPlayer()
 
 	local hum = char:FindFirstChildOfClass("Humanoid")
 	local hrp = char:FindFirstChild("HumanoidRootPart")
-	if hrp and ProtectionRuntime.IsProtected(LocalPlayer, hrp.Position, "WaveKill") then
+	local rootPosition = hrp and hrp.Position or nil
+	local isProtected = hrp and ProtectionRuntime.IsProtected(LocalPlayer, rootPosition, "WaveKill")
+	if isProtected then
 		waveTrace(
 			"killLocalPlayer skipped reason=protected hrpPos=%s",
 			formatVector3(hrp.Position)
@@ -1059,13 +1137,22 @@ local function killLocalPlayer()
 	end
 
 	if hum and hum.Health > 0 then
-		if KillMeEvent and KillMeEvent:IsA("RemoteEvent") then
+		local killMeEvent = getKillMeEvent()
+		if killMeEvent then
+			traceMoguStartupClientDamage("WaveClient.killLocalPlayer.remote", rootPosition, {
+				Protected = false,
+				Remote = killMeEvent:GetFullName(),
+			})
 			waveTrace(
 				"killLocalPlayer firing kill remote=%s",
-				formatInstancePath(KillMeEvent)
+				formatInstancePath(killMeEvent)
 			)
-			KillMeEvent:FireServer()
+			killMeEvent:FireServer()
 		else
+			traceMoguStartupClientDamage("WaveClient.killLocalPlayer.localFallback", rootPosition, {
+				Protected = false,
+				Remote = KillMeEvent and KillMeEvent:GetFullName() or nil,
+			})
 			waveWarnOnce(
 				"kill_remote_missing",
 				"killLocalPlayer no KillMe remote found; applying local Humanoid.Health = 0 fallback"
@@ -1451,6 +1538,7 @@ local function createSharedHazardVisualSmoother(hazard)
 		targetPart.Parent = root
 
 		root.WorldPivot = getPivot(self.Hazard)
+		WaveHazardVisuals.CopyVisualBoundsTarget(self.Hazard, root)
 		root.Parent = getLocalWaveVisualsFolder()
 
 		self.VisualRoot = root

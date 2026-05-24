@@ -124,6 +124,15 @@ function Module.Install(ctx)
 				local crewMemberName = getPlayerStandCrewMemberName(player, standModel.Name)
 				local crewMemberInstanceId = if crewMemberName ~= "" then getPlayerStandCrewMemberInstanceId(player, standModel.Name) else ""
 				updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
+				local totalFoodCount = nil
+				if typeof(CrewFoodProgression.TryGetTotalFoodCount) == "function" then
+					totalFoodCount = CrewFoodProgression.TryGetTotalFoodCount(player)
+				else
+					totalFoodCount = CrewFoodProgression.GetTotalFoodCount(player)
+				end
+				if totalFoodCount == nil then
+					return
+				end
 				updateLevelUpUI(
 					player,
 					standModel,
@@ -132,7 +141,7 @@ function Module.Install(ctx)
 					crewMemberName,
 					crewMemberInstanceId,
 					true,
-					CrewFoodProgression.GetTotalFoodCount(player)
+					totalFoodCount
 				)
 				updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName)
 				return

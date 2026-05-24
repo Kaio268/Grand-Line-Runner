@@ -15,6 +15,12 @@ local HazardProtection = require(
 		:WaitForChild("Server")
 		:WaitForChild("HazardProtection")
 )
+local DamageProtection = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("DamageProtection")
+)
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 
 local HitEffectService = {}
@@ -330,6 +336,14 @@ function HitEffectService.ApplyEffect(target, effectName, options)
 	if isHazardProtected then
 		return false, protectionReason or "hazard_protected"
 	end
+
+	DamageProtection.TraceMoguStartupDamage(target, {
+		TargetContext = targetContext,
+		Position = rootPart.Position,
+		EffectName = effectName,
+		Source = options.Source or "HitEffectService",
+		Path = "HitEffectService.ApplyEffect",
+	})
 
 	local now = os.clock()
 	local priority = tonumber(options.Priority) or tonumber(effectDefinition.Priority) or 0

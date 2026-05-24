@@ -9,6 +9,7 @@ local RNG = Random.new()
 
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local DevilFruitAssets = require(
 	ReplicatedStorage
 		:WaitForChild("Modules")
@@ -1154,11 +1155,7 @@ local function ensureAcknowledgeGui()
 end
 
 local function formatRewardAmount(amount)
-	return string.format("%d", math.max(0, math.floor(tonumber(amount) or 0)))
-		:reverse()
-		:gsub("(%d%d%d)", "%1,")
-		:reverse()
-		:gsub("^,", "")
+	return CurrencyUtil.formatCount(amount)
 end
 
 local function renderRewardRows(rewardRows)
