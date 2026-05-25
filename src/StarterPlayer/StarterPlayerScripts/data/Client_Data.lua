@@ -11,13 +11,20 @@ local self = setmetatable({}, Data)
 
 Data.PlayerData = {}
 Data.IsReady = false
+local DEFAULT_READY_TIMEOUT_SECONDS = 30
 
-function Data.WaitUntilReady()
-	while not self.IsReady do
-		task.wait()
+function Data.WaitUntilReady(timeoutSeconds: number?): boolean
+	if self.IsReady then
+		return true
+	end
+
+	local timeout = tonumber(timeoutSeconds) or DEFAULT_READY_TIMEOUT_SECONDS
+	local deadline = os.clock() + math.max(0, timeout)
+	while not self.IsReady and os.clock() < deadline do
+		task.wait(0.1)
 	end
 	
-	return
+	return self.IsReady
 end
 
 function Data:GetData()
@@ -45,18 +52,18 @@ function Data:Update(action : string, path : {string}, value : any)
 	end
 end
 function Data.New(token : string)
-	ReplicaClient.RequestData()
-	
 	ReplicaClient.OnNew(token, function(replica)
 		if replica.Tags.UserId and replica.Tags.UserId == Player.UserId then
 			Data.PlayerData = replica.Data
 			Data.IsReady = true
 			
-			replica:OnChange(function(action, path, v1, v2)
+			replica:OnChange(function(action, path, v1)
 				self:Update(action, path, v1)
 			end)
 		end
 	end)
+
+	ReplicaClient.RequestData()
 end
 
 

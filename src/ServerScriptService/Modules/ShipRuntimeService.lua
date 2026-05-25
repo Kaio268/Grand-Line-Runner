@@ -121,6 +121,19 @@ local function clearPlayerRespawnLocation(player, expectedAncestor)
 	player.RespawnLocation = nil
 end
 
+local function findFallbackSpawnLocation()
+	for _, instance in ipairs(Workspace:GetDescendants()) do
+		if instance:IsA("SpawnLocation")
+			and not isRuntimeShipSpawnLocation(instance)
+			and instance.Enabled ~= false
+		then
+			return instance
+		end
+	end
+
+	return nil
+end
+
 local function makeRefreshFailure(reason, details)
 	local safeReason = tostring(reason or "unknown_error")
 	local payload = if typeof(details) == "table" then table.clone(details) else {}
@@ -1676,6 +1689,49 @@ local function characterNeedsLoad(player)
 	return humanoid ~= nil and humanoid.Health <= 0
 end
 
+local function loadCharacterWithFallbackSpawn(player, respawnReason, blockedReason, details)
+	if player.Parent ~= Players then
+		return false, "player_left"
+	end
+
+	local character = player.Character
+	if character and character.Parent and not characterNeedsLoad(player) then
+		return true, "fallback_existing_character", details
+	end
+
+	clearPlayerRespawnLocation(player)
+
+	local fallbackSpawn = findFallbackSpawnLocation()
+	if fallbackSpawn then
+		player.RespawnLocation = fallbackSpawn
+	else
+		player.RespawnLocation = nil
+	end
+
+	local ok, loadError = pcall(function()
+		player:LoadCharacter()
+	end)
+	if not ok then
+		warnOnce(
+			"fallback_load_character_failed_" .. tostring(player.UserId),
+			"[ShipRuntimeService] Failed fallback LoadCharacter for %s after ship spawn was unavailable for %s: %s.",
+			formatPlayer(player),
+			tostring(respawnReason),
+			tostring(loadError)
+		)
+		return false, "fallback_load_character_failed", {
+			Reason = blockedReason,
+			Details = details,
+		}
+	end
+
+	return true, "fallback_loaded", {
+		Reason = blockedReason,
+		Details = details,
+		SpawnLocation = fallbackSpawn,
+	}
+end
+
 local function ensureActiveShipSpawnReady(player, activeShip)
 	if not activeShip or not activeShip.Parent or not ShipRuntimeService.IsActiveShip(activeShip) then
 		return false, "active_ship_not_found"
@@ -1807,18 +1863,23 @@ local function respawnPlayerAtShipSync(player, reason, options, requestId)
 	end
 
 	if not shipReady then
+		if result == "player_left" or player.Parent ~= Players then
+			return false, result or "player_left", details
+		end
+
 		warnOnce(
-			"respawn_without_ship_blocked_"
+			"respawn_without_ship_fallback_"
 				.. tostring(player.UserId)
 				.. "_"
 				.. tostring(respawnReason)
 				.. "_"
 				.. tostring(result),
-			"[ShipRuntimeService] Blocked respawn for %s because no ready ship spawn was available after controlled retries: %s.",
+			"[ShipRuntimeService] Falling back to default character load for %s because no ready ship spawn was available after controlled retries for %s: %s.",
 			formatPlayer(player),
+			tostring(respawnReason),
 			tostring(result or (details and details.Reason) or "unknown_error")
 		)
-		return false, result or "ship_spawn_not_ready", details
+		return loadCharacterWithFallbackSpawn(player, respawnReason, result or "ship_spawn_not_ready", details)
 	end
 
 	local character = player.Character

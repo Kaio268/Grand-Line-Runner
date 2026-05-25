@@ -46,6 +46,7 @@ local PlayerStore = ProfileStore.New(Key, GetTemplate)
 local Profiles: {[Player]: typeof(PlayerStore:StartSessionAsync())} = {}
 local Replicas: {[Player]: typeof(Replica)} = {}
 local ActiveBoostRoutines = {}  
+local PendingReplicaReadyConnections: {[Player]: any} = {}
 local PendingHardResetByUserId: {[number]: boolean} = {}
 local SuppressSessionEndKickByUserId: {[number]: boolean} = {}
 local DataManagerInitialized = false
@@ -98,6 +99,7 @@ local HARD_RESET_PROGRESS_KICK_MESSAGE = "A data reset is still being applied to
 local HARD_RESET_SAVE_TIMEOUT = 30
 local PLAYER_DATA_READY_ATTRIBUTE = "PlayerDataReady"
 local PLAYER_DATA_READY_AT_ATTRIBUTE = "PlayerDataReadyAt"
+local REPLICA_READY_TIMEOUT_SECONDS = 10
 local DATA_READY_DEBUG = true
 local CREW_LEGACY_DEPRECATION_AUDIT_PATH = "CrewMemberLegacyDeprecationAudit"
 local MAX_LEGACY_DEPRECATION_RECENT_EVENTS = 20
@@ -1590,6 +1592,80 @@ local function runCrewMemberShadowWriteOnProfileReady(player: Player, profile)
 	return if ok then result else nil
 end
 
+local function disconnectPendingReplicaReadyConnection(player: Player)
+	local connection = PendingReplicaReadyConnections[player]
+	if connection then
+		connection:Disconnect()
+		PendingReplicaReadyConnections[player] = nil
+	end
+end
+
+local function subscribeReplicaPlayer(player: Player, replica): boolean
+	if player.Parent ~= Players then
+		return false
+	end
+
+	if Replica.ReadyPlayers[player] == nil then
+		return false
+	end
+
+	local ok, err = pcall(function()
+		replica:Subscribe(player)
+	end)
+
+	if not ok then
+		warn(string.format(
+			"[DataManager]: Failed to subscribe player data replica for %s(%d): %s",
+			player.Name,
+			player.UserId,
+			tostring(err)
+		))
+		return false
+	end
+
+	return true
+end
+
+local function waitForReplicaReady(player: Player, timeoutSeconds: number): (boolean, number)
+	local startedAt = os.clock()
+	local deadline = startedAt + math.max(0, timeoutSeconds)
+
+	while player.Parent == Players and Replica.ReadyPlayers[player] == nil and os.clock() < deadline do
+		task.wait(0.1)
+	end
+
+	return Replica.ReadyPlayers[player] ~= nil, os.clock() - startedAt
+end
+
+local function subscribeReplicaPlayerWhenReady(player: Player, startedAt: number)
+	disconnectPendingReplicaReadyConnection(player)
+
+	PendingReplicaReadyConnections[player] = Replica.NewReadyPlayer:Connect(function(readyPlayer: Player)
+		if readyPlayer ~= player then
+			return
+		end
+
+		disconnectPendingReplicaReadyConnection(player)
+
+		local replica = Replicas[player]
+		if replica == nil then
+			return
+		end
+
+		if subscribeReplicaPlayer(player, replica) then
+			dataReadyLog(
+				"late_replica_subscribe",
+				"player",
+				player.Name,
+				"userId",
+				player.UserId,
+				"elapsed",
+				string.format("%.2f", os.clock() - startedAt)
+			)
+		end
+	end)
+end
+
 function PlayerAdded(player: Player)
 	local dataReadyStartedAt = os.clock()
 	player:SetAttribute(PLAYER_DATA_READY_ATTRIBUTE, false)
@@ -1644,6 +1720,7 @@ function PlayerAdded(player: Player)
 		profile.OnSessionEnd:Connect(function()
 			Profiles[player] = nil
 			ActiveBoostRoutines[player] = nil
+			disconnectPendingReplicaReadyConnection(player)
 			ReplicaPlayerRemoving(player)
 
 			if SuppressSessionEndKickByUserId[player.UserId] == true then
@@ -1658,18 +1735,25 @@ function PlayerAdded(player: Player)
 			Profiles[player] = profile
 		else
 			profile:EndSession()
+			return
 		end
 
-		if Replica.ReadyPlayers[player] ~= nil then
-			NewReplicaPlayer(player)
-		else
-			while Replica.ReadyPlayers[player] == nil do
-				if Replica.ReadyPlayers[player] ~= nil then
-					break
-				end
-				task.wait()
+		local replicaReady, replicaWaitElapsed = waitForReplicaReady(player, REPLICA_READY_TIMEOUT_SECONDS)
+		local replica = NewReplicaPlayer(player, replicaReady)
+		if replica == nil then
+			return
+		end
+
+		if not replicaReady and player.Parent == Players then
+			warn(string.format(
+				"[DataManager]: Replica readiness timed out for %s(%d) after %.2fs; continuing data startup and will attempt a late subscription when the client is ready.",
+				player.Name,
+				player.UserId,
+				replicaWaitElapsed
+			))
+			if not subscribeReplicaPlayer(player, replica) then
+				subscribeReplicaPlayerWhenReady(player, dataReadyStartedAt)
 			end
-			NewReplicaPlayer(player)
 		end
 
 		AddNewGlobalPlayer(player)
@@ -1690,8 +1774,8 @@ end
 
 local PlayerDataStoreToken = Replica.Token("PlayerDataStore")
 
-function NewReplicaPlayer(player: Player)
-	local profile = self:GetProfile(player)
+function NewReplicaPlayer(player: Player, subscribeImmediately: boolean?)
+	local profile = Profiles[player]
 	if not profile then
 		player:Kick("Replica – profile load fail – Please rejoin!")
 		return
@@ -1703,17 +1787,22 @@ function NewReplicaPlayer(player: Player)
 		Data  = profile.Data,
 		Tags  = { UserId = player.UserId },
 	})
-	replica:Subscribe(player)
 
 	if player.Parent == Players then
 		Replicas[player] = replica
+		if subscribeImmediately ~= false then
+			subscribeReplicaPlayer(player, replica)
+		end
 	else
 		replica:Unsubscribe()
 		Replicas[player] = nil
 	end
+
+	return replica
 end
 
 function PlayerRemoving(player: Player)
+	disconnectPendingReplicaReadyConnection(player)
 	local profile = Profiles[player]
 	if profile ~= nil then
 		profile:EndSession()

@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -65,6 +66,21 @@ local function giftBootstrapLog(...)
 	if GIFT_BOOTSTRAP_DEBUG then
 		print("[GIFT][BOOTSTRAP]", ...)
 	end
+end
+
+local function markHudReady()
+	local modules = ReplicatedStorage:FindFirstChild("Modules")
+	local startupStateScript = modules and modules:FindFirstChild("StartupState")
+	if startupStateScript and startupStateScript:IsA("ModuleScript") then
+		local ok, StartupState = pcall(require, startupStateScript)
+		if ok and typeof(StartupState) == "table" and StartupState.MarkHudReady then
+			if StartupState.MarkHudReady(player) then
+				return
+			end
+		end
+	end
+
+	playerGui:SetAttribute("StartupHudReady", true)
 end
 
 local function ensureLegacyHudCompatibility(hud)
@@ -584,4 +600,4 @@ giftBootstrapLog(
 )
 ensureHud()
 ensureFrames()
-
+markHudReady()

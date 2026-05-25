@@ -1,0 +1,68 @@
+<roblox version="4">
+	<Item class="ScreenGui" referent="LoadingScreen">
+		<Properties>
+			<string name="Name">LoadingScreen</string>
+		</Properties>
+		<Item class="BoolValue" referent="UseLoadingScreenDefaultStyle">
+			<Properties>
+				<string name="Name">UseLoadingScreenDefaultStyle</string>
+				<bool name="Value">true</bool>
+			</Properties>
+		</Item>
+		<Item class="Frame" referent="LoadingScreenRoot">
+			<Properties>
+				<string name="Name">LoadingScreen</string>
+			</Properties>
+			<Item class="ImageLabel" referent="LoadingScreenBackground">
+				<Properties>
+					<string name="Name">Background</string>
+				</Properties>
+			</Item>
+			<Item class="Frame" referent="LoadingScreenGradientHost">
+				<Properties>
+					<string name="Name">Gradinet</string>
+				</Properties>
+				<Item class="Frame" referent="LoadingScreenWarmBloom">
+					<Properties>
+						<string name="Name">WarmBloom</string>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="Frame" referent="LoadingScreenVignette">
+				<Properties>
+					<string name="Name">Vignette</string>
+				</Properties>
+			</Item>
+			<Item class="Frame" referent="LoadingScreenCinematicShade">
+				<Properties>
+					<string name="Name">CinematicShade</string>
+				</Properties>
+			</Item>
+			<Item class="TextLabel" referent="LoadingScreenLoadingLabel">
+				<Properties>
+					<string name="Name">Loading</string>
+				</Properties>
+			</Item>
+			<Item class="TextLabel" referent="LoadingScreenStatusLabel">
+				<Properties>
+					<string name="Name">TextLabel</string>
+				</Properties>
+			</Item>
+			<Item class="Frame" referent="LoadingScreenBar">
+				<Properties>
+					<string name="Name">Bar</string>
+				</Properties>
+				<Item class="Frame" referent="LoadingScreenBarMain">
+					<Properties>
+						<string name="Name">Main</string>
+					</Properties>
+				</Item>
+			</Item>
+			<Item class="TextLabel" referent="LoadingScreenTipLabel">
+				<Properties>
+					<string name="Name">Tip</string>
+				</Properties>
+			</Item>
+		</Item>
+	</Item>
+</roblox>
