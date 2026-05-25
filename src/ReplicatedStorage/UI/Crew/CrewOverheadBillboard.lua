@@ -23,6 +23,13 @@ local GOLD_VARIANT = Color3.fromRGB(255, 210, 92)
 local DIAMOND_VARIANT = Color3.fromRGB(128, 236, 255)
 local SHADOW = Color3.fromRGB(0, 0, 0)
 
+local PLACED_LAYOUT_WIDTH_DESKTOP = 304
+local PLACED_LAYOUT_WIDTH_MOBILE = 264
+local PLACED_LAYOUT_HEIGHT = 104
+local PLACED_WORLD_WIDTH_DESKTOP_STUDS = 8.6
+local PLACED_WORLD_WIDTH_MOBILE_STUDS = 7.5
+local PLACED_WORLD_HEIGHT_STUDS = 2.95
+
 local function formatIncome(value)
 	return CurrencyUtil.formatIncomeCompactPerSecond(math.max(0, tonumber(value) or 0))
 end
@@ -33,6 +40,10 @@ end
 
 local function isMobileViewport()
 	return Responsive.isMobile()
+end
+
+local function proportion(value, total)
+	return value / math.max(total, 1)
 end
 
 local function startsWith(text, prefix)
@@ -138,13 +149,12 @@ local function getVariantStyle(entry, rarityStyle)
 	}
 end
 
-local function pill(text, textColor, size, position, textSize)
+local function pill(text, textColor, size, textSize, layoutOrder)
 	return e("Frame", {
-		AnchorPoint = Vector2.new(0, 0.5),
 		BackgroundColor3 = blendColor(PANEL_FILL_SOFT, textColor, 0.18),
 		BackgroundTransparency = 0.03,
 		BorderSizePixel = 0,
-		Position = position,
+		LayoutOrder = layoutOrder,
 		Size = size,
 	}, {
 		Corner = e("UICorner", {
@@ -161,9 +171,15 @@ local function pill(text, textColor, size, position, textSize)
 			Size = UDim2.fromScale(1, 1),
 			Text = text,
 			TextColor3 = textColor,
+			TextScaled = true,
 			TextSize = textSize or 12,
 			TextStrokeColor3 = SHADOW,
 			TextStrokeTransparency = 0.42,
+		}, {
+			TextSizeConstraint = e("UITextSizeConstraint", {
+				MaxTextSize = textSize or 12,
+				MinTextSize = 7,
+			}),
 		}),
 	})
 end
@@ -200,21 +216,27 @@ local function CrewOverheadBillboard(props)
 
 	local hasSlotBonus = tostring(entry.slotBonusLabel or "") ~= "" and (tonumber(entry.slotBonusPercent) or 0) > 0
 	local mobile = isMobileViewport()
-	local panelHeight = if hasSlotBonus then 82 else 58
 	local hasVariant = variantStyle.variantLabel ~= nil
 	local incomeColor = if entry.beliBoosted == true then BOOST_GOLD else GOLD
 	local rarityPillWidth = if mobile then 72 else 92
 	local variantPillWidth = if hasVariant then (if mobile then 58 else 70) else 0
-	local rarityPillX = if hasVariant then (if mobile then 74 else 86) else 10
-	local billboardWidth = if hasVariant then 252 else 228
-	local incomeWidth = if hasVariant then 84 else 112
-	local billboardScale = 0.84
-	local pillHeight = if mobile then 18 else 22
-	local pillY = 40
+	local layoutWidth = if mobile then PLACED_LAYOUT_WIDTH_MOBILE else PLACED_LAYOUT_WIDTH_DESKTOP
+	local layoutHeight = PLACED_LAYOUT_HEIGHT
+	local billboardStudWidth = if mobile then PLACED_WORLD_WIDTH_MOBILE_STUDS else PLACED_WORLD_WIDTH_DESKTOP_STUDS
+	local billboardStudHeight = PLACED_WORLD_HEIGHT_STUDS
+	local panelPaddingX = 12
+	local panelPaddingY = 6
+	local rowGap = 4
+	local nameRowHeight = 22
+	local pillHeight = 22
+	local incomeRowHeight = 20
+	local slotBonusRowHeight = 16
 	local nameTextSize = 16
 	local labelTextSize = if mobile then 10 else 12
 	local incomeTextSize = 14
 	local metaTextSize = 11
+	local contentLayoutWidth = layoutWidth - (panelPaddingX * 2)
+	local contentLayoutHeight = layoutHeight - (panelPaddingY * 2)
 	local displayName = getVariantDisplayName(entry.displayName, variantStyle.variantLabel)
 
 	return e("BillboardGui", {
@@ -222,8 +244,8 @@ local function CrewOverheadBillboard(props)
 		AlwaysOnTop = true,
 		LightInfluence = 0,
 		MaxDistance = 92,
-		Size = UDim2.fromOffset(math.floor(billboardWidth * billboardScale), math.floor(panelHeight * billboardScale)),
-		StudsOffsetWorldSpace = Vector3.new(0, 4.05, 0),
+		Size = UDim2.fromScale(billboardStudWidth, billboardStudHeight),
+		StudsOffsetWorldSpace = Vector3.new(0, 4.45, 0),
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 	}, {
 		Panel = e("Frame", {
@@ -232,9 +254,6 @@ local function CrewOverheadBillboard(props)
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
 		}, {
-			Scale = e("UIScale", {
-				Scale = billboardScale,
-			}),
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 10),
 			}),
@@ -268,81 +287,134 @@ local function CrewOverheadBillboard(props)
 					ColorSequenceKeypoint.new(1, variantStyle.panelEnd),
 				}),
 			}),
-			Name = e("TextLabel", {
+			Content = e("Frame", {
 				BackgroundTransparency = 1,
-				Font = IndexTheme.Fonts.Display,
-				Position = UDim2.fromOffset(10, 5),
-				Size = UDim2.new(1, -20, 0, 22),
-				Text = displayName,
-				TextColor3 = TEXT,
-				TextSize = nameTextSize,
-				TextStrokeColor3 = SHADOW,
-				TextStrokeTransparency = 0.28,
-				TextTruncate = Enum.TextTruncate.AtEnd,
-				TextXAlignment = Enum.TextXAlignment.Left,
-			}),
-			Variant = if hasVariant
-				then pill(
-					variantStyle.variantLabel,
-					variantStyle.variantAccent,
-					UDim2.fromOffset(variantPillWidth, pillHeight),
-					UDim2.fromOffset(10, pillY),
-					labelTextSize
-				)
-				else nil,
-			Rarity = pill(
-				variantStyle.rarityLabel,
-				variantStyle.rarityAccent,
-				UDim2.fromOffset(rarityPillWidth, pillHeight),
-				UDim2.fromOffset(rarityPillX, pillY),
-				labelTextSize
-			),
-			Income = e("TextLabel", {
-				AnchorPoint = Vector2.new(1, 0.5),
-				BackgroundTransparency = 1,
-				Font = IndexTheme.Fonts.Display,
-				Position = UDim2.new(1, -10, 0, pillY),
-				Size = UDim2.fromOffset(incomeWidth, pillHeight),
-				Text = formatIncome(entry.incomePerSecond),
-				TextColor3 = incomeColor,
-				TextScaled = true,
-				TextSize = incomeTextSize,
-				TextStrokeColor3 = SHADOW,
-				TextStrokeTransparency = 0.3,
-				TextXAlignment = Enum.TextXAlignment.Right,
+				Size = UDim2.fromScale(1, 1),
 			}, {
-				TextSizeConstraint = e("UITextSizeConstraint", {
-					MaxTextSize = incomeTextSize,
-					MinTextSize = 7,
+				Padding = e("UIPadding", {
+					PaddingBottom = UDim.new(proportion(panelPaddingY, layoutHeight), 0),
+					PaddingLeft = UDim.new(proportion(panelPaddingX, layoutWidth), 0),
+					PaddingRight = UDim.new(proportion(panelPaddingX, layoutWidth), 0),
+					PaddingTop = UDim.new(proportion(panelPaddingY, layoutHeight), 0),
 				}),
-			}),
-			SlotBonus = if hasSlotBonus
-				then e("Frame", {
-					BackgroundColor3 = blendColor(PANEL_FILL_SOFT, GOLD, 0.22),
-					BackgroundTransparency = 0.02,
-					BorderSizePixel = 0,
-					Position = UDim2.fromOffset(10, 58),
-					Size = UDim2.new(1, -20, 0, 16),
+				Layout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Vertical,
+					Padding = UDim.new(proportion(rowGap, contentLayoutHeight), 0),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					VerticalAlignment = Enum.VerticalAlignment.Top,
+				}),
+				NameRow = e("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = 1,
+					Size = UDim2.fromScale(1, proportion(nameRowHeight, contentLayoutHeight)),
 				}, {
-					Corner = e("UICorner", {
-						CornerRadius = UDim.new(1, 0),
-					}),
 					Label = e("TextLabel", {
 						BackgroundTransparency = 1,
-						Font = IndexTheme.Fonts.Label,
+						Font = IndexTheme.Fonts.Display,
 						Size = UDim2.fromScale(1, 1),
-						Text = string.format(
-							"%s +%d%%",
-							tostring(entry.slotBonusLabel),
-							math.floor((tonumber(entry.slotBonusPercent) or 0) + 0.5)
-						),
-						TextColor3 = GOLD,
-						TextSize = metaTextSize,
+						Text = displayName,
+						TextColor3 = TEXT,
+						TextScaled = true,
+						TextSize = nameTextSize,
 						TextStrokeColor3 = SHADOW,
-						TextStrokeTransparency = 0.4,
+						TextStrokeTransparency = 0.28,
+						TextTruncate = Enum.TextTruncate.AtEnd,
+						TextXAlignment = Enum.TextXAlignment.Left,
+					}, {
+						TextSizeConstraint = e("UITextSizeConstraint", {
+							MaxTextSize = nameTextSize,
+							MinTextSize = 8,
+						}),
 					}),
-				})
-				else nil,
+				}),
+				PillRow = e("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = 2,
+					Size = UDim2.fromScale(1, proportion(pillHeight, contentLayoutHeight)),
+				}, {
+					Layout = e("UIListLayout", {
+						FillDirection = Enum.FillDirection.Horizontal,
+						HorizontalAlignment = Enum.HorizontalAlignment.Left,
+						Padding = UDim.new(proportion(8, contentLayoutWidth), 0),
+						SortOrder = Enum.SortOrder.LayoutOrder,
+						VerticalAlignment = Enum.VerticalAlignment.Center,
+					}),
+					Variant = if hasVariant
+						then pill(
+							variantStyle.variantLabel,
+							variantStyle.variantAccent,
+							UDim2.fromScale(proportion(variantPillWidth, contentLayoutWidth), 1),
+							labelTextSize,
+							1
+						)
+						else nil,
+					Rarity = pill(
+						variantStyle.rarityLabel,
+						variantStyle.rarityAccent,
+						UDim2.fromScale(proportion(rarityPillWidth, contentLayoutWidth), 1),
+						labelTextSize,
+						2
+					),
+				}),
+				IncomeRow = e("Frame", {
+					BackgroundTransparency = 1,
+					LayoutOrder = 3,
+					Size = UDim2.fromScale(1, proportion(incomeRowHeight, contentLayoutHeight)),
+				}, {
+					Label = e("TextLabel", {
+						BackgroundTransparency = 1,
+						Font = IndexTheme.Fonts.Display,
+						Size = UDim2.fromScale(1, 1),
+						Text = formatIncome(entry.incomePerSecond),
+						TextColor3 = incomeColor,
+						TextScaled = true,
+						TextSize = incomeTextSize,
+						TextStrokeColor3 = SHADOW,
+						TextStrokeTransparency = 0.3,
+						TextXAlignment = Enum.TextXAlignment.Right,
+					}, {
+						TextSizeConstraint = e("UITextSizeConstraint", {
+							MaxTextSize = incomeTextSize,
+							MinTextSize = 8,
+						}),
+					}),
+				}),
+				SlotBonusRow = e("Frame", {
+					BackgroundColor3 = blendColor(PANEL_FILL_SOFT, GOLD, 0.22),
+					BackgroundTransparency = if hasSlotBonus then 0.02 else 1,
+					BorderSizePixel = 0,
+					LayoutOrder = 4,
+					Size = UDim2.fromScale(1, proportion(slotBonusRowHeight, contentLayoutHeight)),
+				}, {
+					Corner = if hasSlotBonus
+						then e("UICorner", {
+							CornerRadius = UDim.new(1, 0),
+						})
+						else nil,
+					Label = if hasSlotBonus
+						then e("TextLabel", {
+							BackgroundTransparency = 1,
+							Font = IndexTheme.Fonts.Label,
+							Size = UDim2.fromScale(1, 1),
+							Text = string.format(
+								"%s +%d%%",
+								tostring(entry.slotBonusLabel),
+								math.floor((tonumber(entry.slotBonusPercent) or 0) + 0.5)
+							),
+							TextColor3 = GOLD,
+							TextScaled = true,
+							TextSize = metaTextSize,
+							TextStrokeColor3 = SHADOW,
+							TextStrokeTransparency = 0.4,
+						}, {
+							TextSizeConstraint = e("UITextSizeConstraint", {
+								MaxTextSize = metaTextSize,
+								MinTextSize = 7,
+							}),
+						})
+						else nil,
+				}),
+			}),
 		}),
 	})
 end
