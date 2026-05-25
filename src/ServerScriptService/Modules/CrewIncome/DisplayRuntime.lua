@@ -64,6 +64,7 @@ function Module.Install(ctx)
 	local function setStandLevel(...)
 		return ctx.setStandLevel(...)
 	end
+	local ShipSlotLevelPanelState = ctx.ShipSlotLevelPanelState
 	local ShipSlotService = ctx.ShipSlotService
 	local SLOT_LEVEL_UI_REFRESH_INTERVAL_SECONDS = ctx.SLOT_LEVEL_UI_REFRESH_INTERVAL_SECONDS
 	local function standDebug(...)
@@ -421,6 +422,56 @@ function Module.Install(ctx)
 		setTextIfChanged(cache, "LastMoneyText", cache and cache.MoneyLabel, text)
 	end
 
+	local function clearLevelPanelState(refs)
+		if ShipSlotLevelPanelState and refs and refs.SurfaceGui then
+			ShipSlotLevelPanelState.Clear(refs.SurfaceGui)
+		end
+	end
+
+	local function publishLevelPanelState(refs, state)
+		if not ShipSlotLevelPanelState then
+			local progressText = if state.IsMaxLevel
+				then "Max Level"
+				else string.format("XP: %d / %d", math.max(0, state.CurrentXP), math.max(0, state.NextLevelXP))
+			if not state.IsMaxLevel then
+				progressText ..= if state.HasFood then " | Auto-feed" else " | No Food"
+			end
+			return {
+				levelText = "Current Level: " .. tostring(state.CurrentLevel),
+				progressText = progressText,
+			}
+		end
+
+		local normalized = ShipSlotLevelPanelState.Publish(refs and refs.SurfaceGui, state) or state
+		return {
+			levelText = ShipSlotLevelPanelState.FormatLevelText(normalized),
+			progressText = ShipSlotLevelPanelState.FormatProgressText(normalized),
+		}
+	end
+
+	local function getUpgradeCostText(player, progressTarget, hasFood, isMaxLevel)
+		if not hasFood or isMaxLevel then
+			return ""
+		end
+		if tostring(progressTarget or "") == "" or typeof(CrewFoodProgression.GetNextAutoFeedStep) ~= "function" then
+			return ""
+		end
+
+		local previewOk, preview = CrewFoodProgression.GetNextAutoFeedStep(player, progressTarget)
+		local step = previewOk and preview and preview.Step
+		if typeof(step) ~= "table" then
+			return ""
+		end
+
+		local amountUsed = math.max(0, math.floor(tonumber(step.AmountUsed) or 0))
+		local foodName = tostring(step.FoodDisplayName or step.FoodKey or "")
+		if amountUsed <= 0 or foodName == "" then
+			return ""
+		end
+
+		return string.format("%dx %s", amountUsed, foodName)
+	end
+
 	local function updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
 		if typeof(player) ~= "Instance" or not player:IsA("Player") then
 			return
@@ -476,6 +527,7 @@ function Module.Install(ctx)
 			Usable = true,
 		} else getStandSlotState(player, standName))
 		if slotState.Visible and not slotState.Usable then
+			clearLevelPanelState(refs)
 			setCachedLevelUpVisible(cache, false)
 			setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
 			setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "")
@@ -486,6 +538,7 @@ function Module.Install(ctx)
 		crewMemberInstanceId = if crewMemberInstanceId ~= nil then crewMemberInstanceId else getPlayerStandCrewMemberInstanceId(player, standName)
 
 		if crewMemberName == "" then
+			clearLevelPanelState(refs)
 			setCachedLevelUpVisible(cache, false)
 			setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
 			setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "")
@@ -520,8 +573,10 @@ function Module.Install(ctx)
 		cache.LastLevelProgressKey = progressKey
 		cache.NextLevelUiRefreshAt = now + SLOT_LEVEL_UI_REFRESH_INTERVAL_SECONDS
 
-		local progress = CrewFoodProgression.GetProgress(player, crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberName)
+		local progressTarget = crewMemberInstanceId ~= "" and crewMemberInstanceId or crewMemberName
+		local progress = CrewFoodProgression.GetProgress(player, progressTarget)
 		if not progress then
+			clearLevelPanelState(refs)
 			setCachedLevelUpVisible(cache, false)
 			setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "")
 			setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "")
@@ -529,24 +584,31 @@ function Module.Install(ctx)
 		end
 
 		local currentLevel = if isCaptainSlot then progress.Level else setStandLevel(player, standName, progress.Level)
-		local xpText = string.format("XP: %d / %d", math.max(0, progress.CurrentXP), math.max(0, progress.NextLevelXP))
-		if availableFoodCount > 0 then
-			xpText ..= " | Auto-feed"
-		else
-			xpText ..= " | No Food"
-		end
+		local hasFood = availableFoodCount > 0
+		local isMaxLevel = currentLevel >= progress.MaxLevel
+		local levelPanelState = {
+			CurrentLevel = currentLevel,
+			CurrentXP = progress.CurrentXP,
+			FoodCount = availableFoodCount,
+			HasFood = hasFood,
+			IsMaxLevel = isMaxLevel,
+			MaxLevel = progress.MaxLevel,
+			NextLevelXP = progress.NextLevelXP,
+			UpgradeCostText = getUpgradeCostText(player, progressTarget, hasFood, isMaxLevel),
+		}
+		local panelText = publishLevelPanelState(refs, levelPanelState)
 
 		if currentLevel >= progress.MaxLevel then
 			setCachedLevelUpVisible(cache, true)
-			setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "Current Level: " .. tostring(currentLevel))
-			setTextIfChanged(cache, "LastLevelPriceText", refs.Price, "Max Level")
+			setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, panelText.levelText)
+			setTextIfChanged(cache, "LastLevelPriceText", refs.Price, panelText.progressText)
 			standDebug("updateLevelUpUI maxed player=%s stand=%s currentLevel=%s", player.Name, standName, tostring(currentLevel))
 			return
 		end
 
 		setCachedLevelUpVisible(cache, true)
-		setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, "Current Level: " .. tostring(currentLevel))
-		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, xpText)
+		setTextIfChanged(cache, "LastLevelUpgradeText", refs.Upgrade, panelText.levelText)
+		setTextIfChanged(cache, "LastLevelPriceText", refs.Price, panelText.progressText)
 		standDebug(
 			"updateLevelUpUI visible player=%s stand=%s currentLevel=%s currentXP=%s nextXP=%s",
 			player.Name,

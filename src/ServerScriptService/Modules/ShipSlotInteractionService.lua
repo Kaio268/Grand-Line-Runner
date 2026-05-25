@@ -22,6 +22,8 @@ local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
 local CAPTAIN_RUNTIME_GUI_SHIP_ATTRIBUTE = "ShipCaptainSlotRuntimeShip"
 local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
 local INTERACTION_KINDS = ShipVisuals.InteractionKinds or {}
+local MIN_LEVEL_PANEL_PIXELS_PER_STUD = 100
+local MIN_LEVEL_PANEL_CANVAS_SIZE = Vector2.new(1024, 576)
 
 local SLOT_ATTRIBUTES = {
 	Visible = "ShipSlotVisible",
@@ -128,6 +130,24 @@ local function isCaptainRuntimeGui(instance)
 		and instance:IsA("SurfaceGui")
 		and instance:GetAttribute(CAPTAIN_RUNTIME_GUI_ATTRIBUTE) == true
 		and tostring(instance:GetAttribute(CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE) or CAPTAIN_SLOT_KEY) == CAPTAIN_SLOT_KEY
+end
+
+local function configureLevelPanelSurfaceGui(surfaceGui)
+	if not surfaceGui or not surfaceGui:IsA("SurfaceGui") then
+		return
+	end
+
+	surfaceGui.LightInfluence = 0
+
+	if surfaceGui.SizingMode == Enum.SurfaceGuiSizingMode.PixelsPerStud then
+		surfaceGui.PixelsPerStud = math.max(surfaceGui.PixelsPerStud, MIN_LEVEL_PANEL_PIXELS_PER_STUD)
+	elseif surfaceGui.SizingMode == Enum.SurfaceGuiSizingMode.FixedSize then
+		local canvasSize = surfaceGui.CanvasSize
+		surfaceGui.CanvasSize = Vector2.new(
+			math.max(canvasSize.X, MIN_LEVEL_PANEL_CANVAS_SIZE.X),
+			math.max(canvasSize.Y, MIN_LEVEL_PANEL_CANVAS_SIZE.Y)
+		)
+	end
 end
 
 local function cleanupCaptainRuntimeGui(player, keepGui)
@@ -470,6 +490,7 @@ local function setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, s
 	sourceGui.Enabled = false
 	surfaceGui.Adornee = levelUpPart
 	surfaceGui.Enabled = false
+	configureLevelPanelSurfaceGui(surfaceGui)
 	tagRuntimeGui(surfaceGui, player, activeShip, slotName)
 	surfaceGui.Parent = playerGui
 
@@ -517,6 +538,7 @@ local function setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, ca
 	sourceGui.Enabled = false
 	surfaceGui.Adornee = levelUpPart
 	surfaceGui.Enabled = false
+	configureLevelPanelSurfaceGui(surfaceGui)
 	tagCaptainRuntimeGui(surfaceGui, player, activeShip)
 	surfaceGui.Parent = playerGui
 

@@ -14,6 +14,7 @@ local UiModalState = require(modules:WaitForChild("UiModalState"))
 local PopUpModule = require(modules:WaitForChild("PopUpModule"))
 local ShipSlotGuiIdentity = require(modules:WaitForChild("ShipSlotGuiIdentity"))
 local StandUpgradePromptScreen = require(uiFolder:WaitForChild("Crew"):WaitForChild("StandUpgradePromptScreen"))
+local ShipSlotLevelPanelBinder = require(script.Parent:WaitForChild("UI"):WaitForChild("ShipSlotLevelPanelBinder"))
 
 local remote = remotes:WaitForChild("CrewMemberStandUpgradeRemote", 15)
 local previewRemote = remotes:WaitForChild("CrewMemberStandUpgradePreviewRemote", 15)
@@ -32,6 +33,7 @@ rootContainer.Name = "ReactStandUpgradePromptRoot"
 
 local root = ReactRoblox.createRoot(rootContainer)
 local connectionsByGui = {}
+local levelPanelHandlesByGui = {}
 local guiBySlotKey = {}
 local slotKeyByGui = {}
 local pendingPreview
@@ -233,6 +235,12 @@ local function disconnectGui(gui)
 		connectionsByGui[gui] = nil
 	end
 
+	local levelPanelHandle = levelPanelHandlesByGui[gui]
+	if levelPanelHandle then
+		levelPanelHandle:Destroy()
+		levelPanelHandlesByGui[gui] = nil
+	end
+
 	local slotKey = slotKeyByGui[gui]
 	if slotKey and guiBySlotKey[slotKey] == gui then
 		guiBySlotKey[slotKey] = nil
@@ -268,21 +276,42 @@ local function bindGui(gui)
 	if connectionsByGui[gui] then
 		return
 	end
+	if levelPanelHandlesByGui[gui] then
+		return
+	end
 
 	local existingGui = guiBySlotKey[slotKey]
 	if existingGui and existingGui ~= gui then
 		disconnectGui(existingGui)
 	end
 
+	local function activatePanel()
+		if not awaitingResultStandName then
+			requestPreview(slotKey, nil)
+		end
+	end
+
+	local mountOk, levelPanelHandle = pcall(function()
+		return ShipSlotLevelPanelBinder.Mount(gui, activatePanel)
+	end)
+	if mountOk and levelPanelHandle then
+		guiBySlotKey[slotKey] = gui
+		slotKeyByGui[gui] = slotKey
+		levelPanelHandlesByGui[gui] = levelPanelHandle
+		return
+	end
+	if not mountOk then
+		warn(("[StandsMenager] Failed to mount ship slot level panel for %s: %s"):format(
+			gui:GetFullName(),
+			tostring(levelPanelHandle)
+		))
+	end
+
 	local button = gui:FindFirstChildWhichIsA("TextButton", true)
 	if button then
 		guiBySlotKey[slotKey] = gui
 		slotKeyByGui[gui] = slotKey
-		connectionsByGui[gui] = button.MouseButton1Click:Connect(function()
-			if not awaitingResultStandName then
-				requestPreview(slotKey, nil)
-			end
-		end)
+		connectionsByGui[gui] = button.MouseButton1Click:Connect(activatePanel)
 	end
 end
 
@@ -349,7 +378,11 @@ script.Destroying:Connect(function()
 	for _, connection in pairs(connectionsByGui) do
 		connection:Disconnect()
 	end
+	for _, levelPanelHandle in pairs(levelPanelHandlesByGui) do
+		levelPanelHandle:Destroy()
+	end
 	table.clear(connectionsByGui)
+	table.clear(levelPanelHandlesByGui)
 	table.clear(guiBySlotKey)
 	table.clear(slotKeyByGui)
 	root:unmount()

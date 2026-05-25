@@ -119,6 +119,7 @@ function Context.Create()
 	local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 	local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
+	local ShipSlotLevelPanelState = require(Modules:WaitForChild("Crew"):WaitForChild("ShipSlotLevelPanelState"))
 	local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 	local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
 	local ShipVisuals = require(Configs:WaitForChild("ShipVisuals"))
@@ -186,6 +187,7 @@ function Context.Create()
 		Configs = Configs,
 		CrewCatalog = CrewCatalog,
 		CrewOverhead = CrewOverhead,
+		ShipSlotLevelPanelState = ShipSlotLevelPanelState,
 		VariantCfg = CrewCatalog.GetVariantConfig(),
 		PlotUpgradeConfig = PlotUpgradeConfig,
 		RebirthConfig = RebirthConfig,

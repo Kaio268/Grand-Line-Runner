@@ -31,6 +31,7 @@ local CrewStandIncomeAuthority = require(game.ServerScriptService.Modules:WaitFo
 local GrandLineRushVerticalSliceService = require(game.ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local ShipSlotLevelPanelState = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("ShipSlotLevelPanelState"))
 local ShipRuntimeService = require(game.ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 local ShipSlotGuiIdentity = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShipSlotGuiIdentity"))
 local ShipSlotService = require(game.ServerScriptService.Modules:WaitForChild("ShipSlotService"))
@@ -287,6 +288,31 @@ local function validateOwnedCaptainSlot(player)
 	return true
 end
 
+local function getPanelUpgradeCostText(player, progress, hasFood)
+	if not hasFood or not progress or (tonumber(progress.Level) or 1) >= (tonumber(progress.MaxLevel) or 1) then
+		return ""
+	end
+
+	local progressTarget = tostring(progress.InstanceId or progress.StorageName or "")
+	if progressTarget == "" or typeof(CrewFoodProgression.GetNextAutoFeedStep) ~= "function" then
+		return ""
+	end
+
+	local previewOk, preview = CrewFoodProgression.GetNextAutoFeedStep(player, progressTarget)
+	local step = previewOk and preview and preview.Step
+	if typeof(step) ~= "table" then
+		return ""
+	end
+
+	local amountUsed = math.max(0, math.floor(tonumber(step.AmountUsed) or 0))
+	local foodName = tostring(step.FoodDisplayName or step.FoodKey or "")
+	if amountUsed <= 0 or foodName == "" then
+		return ""
+	end
+
+	return string.format("%dx %s", amountUsed, foodName)
+end
+
 local function updateStandGui(player, standName, progress)
 	if not progress then
 		return
@@ -298,7 +324,26 @@ local function updateStandGui(player, standName, progress)
 	end
 
 	local standGui = findSlotGui(playerGui, standName)
-	if not standGui or not standGui:FindFirstChild("LevelUp") or not standGui.LevelUp:FindFirstChild("Main") then
+	if not standGui then
+		return
+	end
+
+	local foodCount = CrewFoodProgression.GetTotalFoodCount(player)
+	local hasFood = foodCount > 0
+	local panelState = ShipSlotLevelPanelState.Publish(standGui, {
+		CurrentLevel = progress.Level,
+		CurrentXP = progress.CurrentXP,
+		FoodCount = foodCount,
+		HasFood = hasFood,
+		IsMaxLevel = progress.Level >= progress.MaxLevel,
+		MaxLevel = progress.MaxLevel,
+		NextLevelXP = progress.NextLevelXP,
+		UpgradeCostText = getPanelUpgradeCostText(player, progress, hasFood),
+	})
+
+	local levelText = ShipSlotLevelPanelState.FormatLevelText(panelState)
+	local progressText = ShipSlotLevelPanelState.FormatProgressText(panelState)
+	if not standGui:FindFirstChild("LevelUp") or not standGui.LevelUp:FindFirstChild("Main") then
 		return
 	end
 
@@ -307,21 +352,11 @@ local function updateStandGui(player, standName, progress)
 	local upgrade = main:FindFirstChild("Upgarde", true) or main:FindFirstChild("Upgrade", true)
 
 	if upgrade and (upgrade:IsA("TextLabel") or upgrade:IsA("TextButton") or upgrade:IsA("TextBox")) then
-		upgrade.Text = "Current Level: " .. tostring(progress.Level)
+		upgrade.Text = levelText
 	end
 
 	if price and (price:IsA("TextLabel") or price:IsA("TextButton") or price:IsA("TextBox")) then
-		if progress.Level >= progress.MaxLevel then
-			price.Text = "Max Level"
-		else
-			local text = string.format("XP: %d / %d", math.max(0, progress.CurrentXP), math.max(0, progress.NextLevelXP))
-			if CrewFoodProgression.GetTotalFoodCount(player) > 0 then
-				text ..= " | Auto-feed"
-			else
-				text ..= " | No Food"
-			end
-			price.Text = text
-		end
+		price.Text = progressText
 	end
 end
 
