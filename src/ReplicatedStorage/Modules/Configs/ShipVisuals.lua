@@ -57,6 +57,69 @@ local Config = {
 		"DecorativeNoCollision",
 	},
 
+	SailName = {
+		Enabled = true,
+		FolderName = "ShipSailCustomization",
+		AnchorName = "ShipSailIdentityAnchor",
+		SurfaceGuiName = "ShipSailIdentitySurfaceGui",
+		RuntimeAttribute = "ShipSailIdentityRuntime",
+		EnabledAttribute = "SailIdentityEnabled",
+		OwnerUserIdAttribute = "ShipSailIdentityOwnerUserId",
+		OwnerNameAttribute = "ShipSailIdentityOwnerName",
+		DisplayTextAttribute = "ShipSailIdentityDisplayText",
+		OwnerDisplayTextAttribute = "OwnerDisplayText",
+		ConfigKeyAttribute = "ShipSailIdentityConfigKey",
+		FailureReasonAttribute = "ShipSailIdentityFailureReason",
+		CanvasSize = Vector2.new(512, 192),
+		PixelsPerStud = 50,
+		SurfaceFace = Enum.NormalId.Back,
+		LightInfluence = 0.15,
+		MaxDistance = 250,
+		Side = "Back",
+		SurfaceOffset = 0.12,
+		AnchorDepth = 0.05,
+		MaxDisplayNameLength = 24,
+
+		DisplayNameAttributes = {
+			"ShipDisplayName",
+			"CrewDisplayName",
+			"CustomShipName",
+			"CustomCrewName",
+		},
+
+		Models = {
+			["Lvl 1 Ship"] = {
+				Enabled = true,
+				FlagPath = { "Ship Mesh", "Flags" },
+				AnchorSize = Vector3.new(22, 6.5, 0.05),
+			},
+
+			["Lvl 2 Ship"] = {
+				Enabled = true,
+				FlagPath = { "Ship Mesh", "Flags" },
+				AnchorSize = Vector3.new(28, 7.5, 0.05),
+			},
+
+			["Lvl 3 Ship"] = {
+				Enabled = true,
+				FlagPath = { "Ship Mesh", "Flags" },
+				AnchorSize = Vector3.new(30, 9.5, 0.05),
+			},
+
+			["Lvl 4 Ship"] = {
+				Enabled = true,
+				FlagPath = { "Ship Mesh", "Flags" },
+				AnchorSize = Vector3.new(42, 13, 0.05),
+			},
+
+			["Lvl 5 Ship"] = {
+				Enabled = true,
+				FlagPath = { "Ship Mesh", "Flags" },
+				AnchorSize = Vector3.new(48, 16, 0.05),
+			},
+		},
+	},
+
 	RuntimePoints = {
 		FolderName = "ShipRuntimePoints",
 		Spawn = {

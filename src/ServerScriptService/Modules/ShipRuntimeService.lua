@@ -9,6 +9,7 @@ local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChil
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 local ShipSlotInteractionService = require(ServerScriptService.Modules:WaitForChild("ShipSlotInteractionService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
+local ShipSailNameService = require(ServerScriptService.Modules:WaitForChild("ShipSailNameService"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -40,6 +41,52 @@ local OWNER_ONLY_ATTRIBUTE = ATTR.OwnerOnlyInteraction or "ShipOwnerOnlyInteract
 local INTERACTION_KIND_ATTRIBUTE = ATTR.InteractionKind or "ShipInteractionKind"
 local INTERACTION_KINDS = ShipVisuals.InteractionKinds or {}
 local WORLD_UP = Vector3.new(0, 1, 0)
+
+local function getInstancePath(instance)
+	if typeof(instance) == "Instance" then
+		return instance:GetFullName()
+	end
+
+	return "<nil>"
+end
+
+local function formatDiagValue(value)
+	if typeof(value) == "Instance" then
+		return getInstancePath(value)
+	end
+
+	if typeof(value) == "CFrame" then
+		return tostring(value.Position)
+	end
+
+	return tostring(value)
+end
+
+local function formatDiagDetails(details)
+	if typeof(details) ~= "table" then
+		return tostring(details)
+	end
+
+	local values = {}
+	for key, value in pairs(details) do
+		values[#values + 1] = tostring(key) .. "=" .. formatDiagValue(value)
+	end
+
+	table.sort(values)
+	return table.concat(values, ",")
+end
+
+local function diag(...)
+	return select("#", ...)
+end
+
+local function getChildCount(instance)
+	if typeof(instance) ~= "Instance" then
+		return 0
+	end
+
+	return #instance:GetChildren()
+end
 
 local function getRuntimeSpawnLocationName()
 	local spawnConfig = RUNTIME_POINTS.Spawn or {}
@@ -139,6 +186,18 @@ local function makeRefreshFailure(reason, details)
 	local payload = if typeof(details) == "table" then table.clone(details) else {}
 	payload.Reason = safeReason
 	return false, safeReason, payload
+end
+
+local function makeLoggedRefreshFailure(player, reason, details)
+	diag(
+		"refresh_return player=%s userId=%s ok=false reason=%s details=%s",
+		player and player.Name or "<nil>",
+		player and tostring(player.UserId) or "<nil>",
+		tostring(reason),
+		formatDiagDetails(details)
+	)
+
+	return makeRefreshFailure(reason, details)
 end
 
 local function cloneRefreshOptions(options)
@@ -1537,13 +1596,24 @@ end
 
 function ShipRuntimeService.RefreshPlayerShip(player, options)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		diag("refresh_return player=<invalid> userId=<nil> ok=false reason=invalid_player details=nil")
 		return makeRefreshFailure("invalid_player")
 	end
 
 	options = options or {}
+	diag(
+		"refresh_begin player=%s userId=%s reason=%s forceReplace=%s teleportAfterReplace=%s allowDuringReset=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(options.Reason),
+		tostring(options.ForceReplace),
+		tostring(options.TeleportAfterReplace),
+		tostring(options.AllowDuringReset)
+	)
+
 	if CrewSlotAssignmentReconciler.IsResetInProgress(player) and options.AllowDuringReset ~= true then
 		local queued, queueReason = queueRefreshAfterReset(player, options)
-		return makeRefreshFailure("reset_in_progress", {
+		return makeLoggedRefreshFailure(player, "reset_in_progress", {
 			Retryable = true,
 			Queued = queued,
 			QueueReason = queueReason,
@@ -1551,32 +1621,64 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	end
 	pendingRefreshAfterResetByPlayer[player] = nil
 
+	diag(
+		"refresh_wait_data_begin player=%s userId=%s timeout=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(DATA_READY_TIMEOUT_SECONDS)
+	)
 	if DataManager.WaitUntilReady and not DataManager:WaitUntilReady(player, DATA_READY_TIMEOUT_SECONDS) then
 		warnOnce(
 			"data_not_ready_" .. tostring(player.UserId),
 			"[ShipRuntimeService] Player data was not ready for %s; skipping active ship refresh.",
 			formatPlayer(player)
 		)
-		return makeRefreshFailure("data_not_ready")
+		return makeLoggedRefreshFailure(player, "data_not_ready")
 	end
+	diag("refresh_data_ready player=%s userId=%s", player.Name, tostring(player.UserId))
 
 	local upgradeLevel = getUpgradeLevel(player)
 	local sourceModel, visual = resolveSourceModel(upgradeLevel)
 	if not sourceModel or not visual then
-		return makeRefreshFailure("missing_ship_template", {
+		return makeLoggedRefreshFailure(player, "missing_ship_template", {
 			UpgradeLevel = upgradeLevel,
 		})
 	end
+	diag(
+		"refresh_source_resolved player=%s userId=%s upgradeLevel=%s sourceModel=%s visualModel=%s tier=%s normalSlots=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(upgradeLevel),
+		getInstancePath(sourceModel),
+		tostring(visual.ModelName),
+		tostring(visual.Tier),
+		tostring(visual.NormalCrewSlots)
+	)
 
 	local position, positionIndex = assignPosition(player)
 	if not position then
-		return makeRefreshFailure("missing_ship_position")
+		return makeLoggedRefreshFailure(player, "missing_ship_position")
 	end
+	diag(
+		"refresh_position_assigned player=%s userId=%s position=%s positionIndex=%s positionCFrame=%s",
+		player.Name,
+		tostring(player.UserId),
+		getInstancePath(position),
+		tostring(positionIndex),
+		formatDiagValue(position.CFrame)
+	)
 
 	local activeShips = getActiveShipsFolder()
 	if not activeShips then
-		return makeRefreshFailure("missing_active_ships")
+		return makeLoggedRefreshFailure(player, "missing_active_ships")
 	end
+	diag(
+		"refresh_active_folder player=%s userId=%s activeShips=%s childCount=%s",
+		player.Name,
+		tostring(player.UserId),
+		getInstancePath(activeShips),
+		tostring(getChildCount(activeShips))
+	)
 
 	local existingShips = getActiveShipsForPlayer(player)
 	local currentShip = existingShips[1]
@@ -1596,6 +1698,17 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		and currentTier == visual.Tier
 		and currentModelName == visual.ModelName
 		and currentPositionIndex == positionIndex
+	diag(
+		"refresh_existing_ships player=%s userId=%s existingCount=%s currentShip=%s currentModel=%s currentTier=%s currentPositionIndex=%s isCorrect=%s",
+		player.Name,
+		tostring(player.UserId),
+		tostring(#existingShips),
+		getInstancePath(currentShip),
+		tostring(currentModelName),
+		tostring(currentTier),
+		tostring(currentPositionIndex),
+		tostring(isCorrectShip == true)
+	)
 
 	if isCorrectShip and not options.ForceReplace then
 		local duplicateShips = {}
@@ -1603,9 +1716,17 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 			duplicateShips[#duplicateShips + 1] = existingShips[index]
 		end
 		destroyShips(duplicateShips)
+		diag(
+			"refresh_reuse_current player=%s userId=%s ship=%s duplicateCount=%s",
+			player.Name,
+			tostring(player.UserId),
+			getInstancePath(currentShip),
+			tostring(#duplicateShips)
+		)
 
 		currentShip.Name = getRuntimeName(player)
 		applyRuntimeAttributes(currentShip, player, visual, upgradeLevel, positionIndex, position)
+		ShipSailNameService.Apply(player, currentShip, visual)
 		warnIfMissingWalkableCollision(currentShip, visual)
 
 		local state = getRuntimeState(player)
@@ -1615,27 +1736,41 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 
 		local runtimePoints, runtimePointReason, runtimePointDetails = ensureRuntimePoints(player, currentShip)
 		if not runtimePoints then
-			return makeRefreshFailure(runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
+			return makeLoggedRefreshFailure(player, runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
 		end
 
 		local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, currentShip, upgradeLevel)
 		if not slotRefreshOk then
-			return makeRefreshFailure("slot_interaction_refresh_failed", {
+			return makeLoggedRefreshFailure(player, "slot_interaction_refresh_failed", {
 				Error = slotRefreshError,
 			})
 		end
 		invokeStandRefresh(player)
 
+		diag(
+			"refresh_return player=%s userId=%s ok=true branch=reuse ship=%s activeShipsChildCount=%s",
+			player.Name,
+			tostring(player.UserId),
+			getInstancePath(currentShip),
+			tostring(getChildCount(activeShips))
+		)
 		return true, currentShip
 	end
 
 	ShipSlotInteractionService.CleanupPlayer(player)
 
+	diag(
+		"refresh_clone_begin player=%s userId=%s sourceModel=%s runtimeName=%s",
+		player.Name,
+		tostring(player.UserId),
+		getInstancePath(sourceModel),
+		getRuntimeName(player)
+	)
 	local cloneOk, cloneOrError = xpcall(function()
 		return sourceModel:Clone()
 	end, debug.traceback)
 	if not cloneOk or typeof(cloneOrError) ~= "Instance" or not cloneOrError:IsA("Model") then
-		return makeRefreshFailure("clone_failed", {
+		return makeLoggedRefreshFailure(player, "clone_failed", {
 			UpgradeLevel = upgradeLevel,
 			SourceModel = sourceModel:GetFullName(),
 			Error = tostring(cloneOrError),
@@ -1650,11 +1785,22 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	warnIfMissingWalkableCollision(clone, visual)
 	clone:PivotTo(position.CFrame)
 	clone.Parent = activeShips
+	diag(
+		"refresh_clone_parented player=%s userId=%s clone=%s parent=%s activeShipsChildCount=%s walkableCollisionParts=%s runtimeCollidableParts=%s",
+		player.Name,
+		tostring(player.UserId),
+		getInstancePath(clone),
+		getInstancePath(activeShips),
+		tostring(getChildCount(activeShips)),
+		tostring(clone:GetAttribute("ShipWalkableCollisionParts")),
+		tostring(clone:GetAttribute("ShipRuntimeCollidableParts"))
+	)
+	ShipSailNameService.Apply(player, clone, visual)
 
 	local runtimePoints, runtimePointReason, runtimePointDetails = ensureRuntimePoints(player, clone)
 	if not runtimePoints then
 		clone:Destroy()
-		return makeRefreshFailure(runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
+		return makeLoggedRefreshFailure(player, runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
 	end
 
 	destroyShips(existingShips)
@@ -1666,7 +1812,7 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 
 	local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, clone, upgradeLevel)
 	if not slotRefreshOk then
-		return makeRefreshFailure("slot_interaction_refresh_failed", {
+		return makeLoggedRefreshFailure(player, "slot_interaction_refresh_failed", {
 			Error = slotRefreshError,
 		})
 	end
@@ -1676,6 +1822,13 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		teleportPlayerToShipSpawnDeferred(player, "ship_replacement")
 	end
 
+	diag(
+		"refresh_return player=%s userId=%s ok=true branch=clone ship=%s activeShipsChildCount=%s",
+		player.Name,
+		tostring(player.UserId),
+		getInstancePath(clone),
+		tostring(getChildCount(activeShips))
+	)
 	return true, clone
 end
 
@@ -2078,18 +2231,22 @@ end
 
 function ShipRuntimeService.Start()
 	if started then
+		diag("service_start_skipped reason=already_started playerCount=%s", tostring(#Players:GetPlayers()))
 		return
 	end
 	started = true
 	Players.CharacterAutoLoads = false
+	diag("service_start playerCount=%s characterAutoLoads=%s", tostring(#Players:GetPlayers()), tostring(Players.CharacterAutoLoads))
 
 	Players.PlayerAdded:Connect(function(player)
+		diag("player_added player=%s userId=%s", player.Name, tostring(player.UserId))
 		attachCharacterSpawnHandler(player)
 		watchPlayerUpgrade(player)
 		loadPlayerCharacterAtShipSpawn(player, "initial_join")
 	end)
 
 	Players.PlayerRemoving:Connect(function(player)
+		diag("player_removing player=%s userId=%s", player.Name, tostring(player.UserId))
 		pendingRefreshAfterResetByPlayer[player] = nil
 		clearPlayerRespawnLocation(player)
 		ShipRuntimeService.ClearPlayerShip(player)
@@ -2098,6 +2255,7 @@ function ShipRuntimeService.Start()
 	end)
 
 	for _, player in ipairs(Players:GetPlayers()) do
+		diag("existing_player_start player=%s userId=%s", player.Name, tostring(player.UserId))
 		attachCharacterSpawnHandler(player)
 		watchPlayerUpgrade(player)
 		loadPlayerCharacterAtShipSpawn(player, "initial_join")
