@@ -52,6 +52,7 @@ local TILE_DEFS = {
 	{ name = "Settings", label = "Settings" },
 	{ name = "Rebirth", label = "Rebirth", badgeText = "NEW" },
 	{ name = "Quest", label = "Quest", badgeText = "" },
+	{ name = "SpeedModifier", label = "Speed\nChanger" },
 }
 
 local function getHudLayout()
@@ -71,6 +72,7 @@ local function getHudLayout()
 		Quest = Vector2.new(0, stepY),
 		Rebirth = Vector2.new(stepX, stepY),
 		Settings = Vector2.new(stepX * 2, stepY),
+		SpeedModifier = Vector2.new(0, stepY * 2),
 	}
 	local stackedPositions = {
 		Store = Vector2.new(0, 0),
@@ -79,6 +81,7 @@ local function getHudLayout()
 		Quest = Vector2.new(stepX, stepY),
 		Rebirth = Vector2.new(0, stepY * 2),
 		Settings = Vector2.new(stepX, stepY * 2),
+		SpeedModifier = Vector2.new(0, stepY * 3),
 	}
 
 	return {
@@ -104,6 +107,7 @@ local HUD_ICON_ASSET_OVERRIDES = {
 	Settings = "rbxassetid://125384263224347",
 	Rebirth = "rbxassetid://116163404622119",
 	Quest = "rbxassetid://78184151901761",
+	SpeedModifier = "rbxassetid://108512951338844",
 }
 
 local HUD_ICON_SIZE_OVERRIDES = {
@@ -113,6 +117,7 @@ local HUD_ICON_SIZE_OVERRIDES = {
 	Settings = Vector2.new(88, 88),
 	Rebirth = Vector2.new(82, 82),
 	Quest = Vector2.new(94, 94),
+	SpeedModifier = Vector2.new(62, 62),
 }
 
 local HUD_MOBILE_ICON_SIZE_OVERRIDES = {
@@ -122,6 +127,7 @@ local HUD_MOBILE_ICON_SIZE_OVERRIDES = {
 	Settings = Vector2.new(38, 38),
 	Rebirth = Vector2.new(40, 40),
 	Quest = Vector2.new(42, 42),
+	SpeedModifier = Vector2.new(30, 30),
 }
 
 local HUD_ICON_SCALE_TYPE_OVERRIDES = {
@@ -354,8 +360,8 @@ local function ensureContainer(hud)
 		then (layout.tileSize * 3) + (layout.columnGap * 2)
 		else (layout.tileSize * 2) + layout.columnGap
 	local containerHeight = if layout.mobile
-		then (layout.tileSize * 2) + layout.rowGap
-		else (layout.tileSize * 3) + (layout.rowGap * 2)
+		then (layout.tileSize * 3) + (layout.rowGap * 2)
+		else (layout.tileSize * 4) + (layout.rowGap * 3)
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
@@ -883,6 +889,12 @@ local function buildTileStyle(button)
 		titleStyle.size = UDim2.new(1, -4, 0, 12)
 		titleStyle.textSize = if button.Name == "Settings" then 8 else 10
 		titleStyle.textWrapped = false
+	end
+	if button.Name == "SpeedModifier" then
+		titleStyle.position = UDim2.fromScale(0.5, layout.mobile and 0.58 or 0.64)
+		titleStyle.size = UDim2.new(1, -6, 0, layout.mobile and 18 or 28)
+		titleStyle.textSize = layout.mobile and 7 or 12
+		titleStyle.textWrapped = true
 	end
 
 	return {

@@ -1732,11 +1732,14 @@ local function buildTitlesData(query)
 			equippedTitleColor = visualStyle.ledgerColor
 		end
 
+		local unlockTypeLabel = titleDefinition.UnlockType == "DynamicRank" and "Leaderboard Title" or "Persistent Title"
+		local tierLabel = tostring(titleDefinition.Tier or "Common")
+
 		local entry = {
 			key = tostring(titleDefinition.Id or totalCount),
 			titleId = tostring(titleDefinition.Id or ""),
 			displayName = tostring(titleDefinition.DisplayName or titleDefinition.Id or "Title"),
-			subtitle = titleDefinition.UnlockType == "DynamicRank" and "Leaderboard Title" or "Persistent Title",
+			subtitle = string.format("%s | %s", tierLabel, unlockTypeLabel),
 			footer = tostring(titleDefinition.RequirementText or ""),
 			description = tostring(titleDefinition.Description or ""),
 			requirementText = tostring(titleDefinition.RequirementText or ""),

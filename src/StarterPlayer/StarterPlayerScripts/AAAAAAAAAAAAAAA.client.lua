@@ -1206,6 +1206,7 @@ local WAVE_VISUAL_NAME = "WaveVisual"
 local FROZEN_WAVE_VISUAL_NAME = "FrozenWaveVisual"
 local ORIGINAL_TRANSPARENCY_ATTRIBUTE = "WaveVisualOriginalTransparency"
 local ORIGINAL_ENABLED_ATTRIBUTE = "WaveVisualOriginalEnabled"
+local ORIGINAL_COLOR_ATTRIBUTE = "WaveVisualOriginalColor"
 local SHARED_WAVE_VISUAL_SMOOTHNESS = 28
 local SHARED_WAVE_VISUAL_MAX_LEAD = 0.08
 local SHARED_WAVE_VISUAL_DECAY_DELAY = 0.12
@@ -1404,6 +1405,48 @@ local function setLocalVisualVisible(root, isVisible)
 			else
 				item.Enabled = false
 			end
+		end
+	end)
+end
+
+local function setLocalVisualFlash(root, hazard)
+	if not root or not hazard then
+		return
+	end
+
+	local flashEnabled = hazard:GetAttribute("WaveFlashEnabled") == true and hazard:GetAttribute("Frozen") ~= true
+	if not flashEnabled then
+		forEachVisualItem(root, function(item)
+			if item:IsA("BasePart") then
+				local originalColor = item:GetAttribute(ORIGINAL_COLOR_ATTRIBUTE)
+				if typeof(originalColor) == "Color3" then
+					item.Color = originalColor
+				end
+			end
+		end)
+		return
+	end
+
+	local baseColor = hazard:GetAttribute("WaveFlashBaseColor")
+	if typeof(baseColor) ~= "Color3" then
+		baseColor = Color3.fromRGB(0, 170, 255)
+	end
+
+	local peakColor = hazard:GetAttribute("WaveFlashPeakColor")
+	if typeof(peakColor) ~= "Color3" then
+		peakColor = Color3.fromRGB(255, 255, 255)
+	end
+
+	local period = math.max(0.05, tonumber(hazard:GetAttribute("WaveFlashPeriod")) or 0.6)
+	local alpha = (math.sin((Workspace:GetServerTimeNow() / period) * math.pi * 2) + 1) * 0.5
+	local color = baseColor:Lerp(peakColor, alpha)
+
+	forEachVisualItem(root, function(item)
+		if item:IsA("BasePart") then
+			if typeof(item:GetAttribute(ORIGINAL_COLOR_ATTRIBUTE)) ~= "Color3" then
+				item:SetAttribute(ORIGINAL_COLOR_ATTRIBUTE, item.Color)
+			end
+			item.Color = color
 		end
 	end)
 end
@@ -1808,10 +1851,12 @@ local function createSharedHazardVisualSmoother(hazard)
 
 			if self.VisualRoot and self.VisualRoot.Parent then
 				setPivot(self.VisualRoot, self.CurrentCFrame)
+				setLocalVisualFlash(self.VisualRoot, self.Hazard)
 			else
 				self:RefreshClientVisualRoot()
 				if self.VisualRoot and self.VisualRoot.Parent then
 					setPivot(self.VisualRoot, self.CurrentCFrame)
+					setLocalVisualFlash(self.VisualRoot, self.Hazard)
 				end
 			end
 			return
