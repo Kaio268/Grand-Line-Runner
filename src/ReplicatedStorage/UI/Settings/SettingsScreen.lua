@@ -500,6 +500,89 @@ local function SliderRow(props)
 	})
 end
 
+local function SwitchRow(props)
+	local enabled = props.value == true
+	local knobX = if enabled then 42 else 4
+	local fillColor = if enabled then THEME.GoldBase else THEME.SwitchFill
+	local labelText = if enabled then "ON" else "OFF"
+
+	return e(RowShell, {
+		layoutOrder = props.layoutOrder,
+		children = {
+			Icon = e(IconBubble, {
+				icon = props.icon,
+			}),
+			Label = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(74, 22),
+				Size = UDim2.new(1, -240, 0, 28),
+				Text = props.label,
+				TextColor3 = THEME.TextMain,
+				TextSize = 20,
+				TextScaled = false,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 6,
+			}),
+			Switch = e("TextButton", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				AutoButtonColor = false,
+				BackgroundColor3 = fillColor,
+				BackgroundTransparency = 0.08,
+				BorderSizePixel = 0,
+				Position = UDim2.new(1, -20, 0.5, 0),
+				Size = UDim2.fromOffset(88, 40),
+				Text = "",
+				ZIndex = 6,
+				[React.Event.Activated] = function()
+					if props.onToggle then
+						props.onToggle(not enabled)
+					end
+				end,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(1, 0),
+				}),
+				Stroke = e("UIStroke", {
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+					Color = THEME.GoldHighlight,
+					Transparency = if enabled then 0 else 0.35,
+					Thickness = 1.5,
+				}),
+				State = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBold,
+					Position = UDim2.fromOffset(if enabled then 8 else 34, 0),
+					Size = UDim2.fromOffset(42, 40),
+					Text = labelText,
+					TextColor3 = THEME.TextBright,
+					TextSize = 14,
+					TextStrokeColor3 = THEME.TextShadow,
+					TextStrokeTransparency = 0.45,
+					ZIndex = 7,
+				}),
+				Knob = e("Frame", {
+					BackgroundColor3 = THEME.TextBright,
+					BorderSizePixel = 0,
+					Position = UDim2.fromOffset(knobX, 4),
+					Size = UDim2.fromOffset(32, 32),
+					ZIndex = 8,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(1, 0),
+					}),
+					Stroke = e("UIStroke", {
+						ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+						Color = THEME.GoldShadow,
+						Transparency = 0.15,
+						Thickness = 1,
+					}),
+				}),
+			}),
+		},
+	})
+end
+
 local function SettingsScreen(props)
 	local items = props.items or {}
 
@@ -512,27 +595,42 @@ local function SettingsScreen(props)
 	}
 
 	for index, item in ipairs(items) do
-		rows["Slider_" .. tostring(item.id)] = e(SliderRow, {
-			id = item.id,
-			icon = item.icon,
-			label = item.label,
-			layoutOrder = index,
-			max = item.max,
-			min = item.min,
-			onCommit = function(value)
-				if props.onSliderCommit then
-					props.onSliderCommit(item.id, value)
-				end
-			end,
-			onPreview = function(value)
-				if props.onSliderPreview then
-					props.onSliderPreview(item.id, value)
-				end
-			end,
-			rangeText = item.rangeText,
-			step = item.step,
-			value = item.value,
-		})
+		if item.type == "Slider" then
+			rows["Slider_" .. tostring(item.id)] = e(SliderRow, {
+				id = item.id,
+				icon = item.icon,
+				label = item.label,
+				layoutOrder = index,
+				max = item.max,
+				min = item.min,
+				onCommit = function(value)
+					if props.onSliderCommit then
+						props.onSliderCommit(item.id, value)
+					end
+				end,
+				onPreview = function(value)
+					if props.onSliderPreview then
+						props.onSliderPreview(item.id, value)
+					end
+				end,
+				rangeText = item.rangeText,
+				step = item.step,
+				value = item.value,
+			})
+		else
+			rows["Switch_" .. tostring(item.id)] = e(SwitchRow, {
+				id = item.id,
+				icon = item.icon,
+				label = item.label,
+				layoutOrder = index,
+				onToggle = function(value)
+					if props.onSwitchToggle then
+						props.onSwitchToggle(item.id, value)
+					end
+				end,
+				value = item.value,
+			})
+		end
 	end
 
 	return e("Frame", {

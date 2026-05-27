@@ -1,7 +1,6 @@
 local Module = {}
 
 function Module.Install(ctx)
-	local ALLOW_NON_OWNER_STEAL_PROMPTS = ctx.ALLOW_NON_OWNER_STEAL_PROMPTS
 	local function bindZoneCollect(...)
 		return ctx.bindZoneCollect(...)
 	end
@@ -19,7 +18,6 @@ function Module.Install(ctx)
 		return ctx.crewPickupDebug(...)
 	end
 	local CrewQuickSlotService = ctx.CrewQuickSlotService
-	local DataManager = ctx.DataManager
 	local DEBUG_TRACE = ctx.DEBUG_TRACE
 	local function dmEnsureStandFolder(...)
 		return ctx.dmEnsureStandFolder(...)
@@ -29,9 +27,6 @@ function Module.Install(ctx)
 	end
 	local function findAvailableTutorialPlacementReward(...)
 		return ctx.findAvailableTutorialPlacementReward(...)
-	end
-	local function findCrewMemberInfoByName(...)
-		return ctx.findCrewMemberInfoByName(...)
 	end
 	local function formatCrewPickupDebugFields(...)
 		return ctx.formatCrewPickupDebugFields(...)
@@ -54,9 +49,6 @@ function Module.Install(ctx)
 	local function getPickupStandSnapshot(...)
 		return ctx.getPickupStandSnapshot(...)
 	end
-	local function getPlayerStandCrewMemberInstanceId(...)
-		return ctx.getPlayerStandCrewMemberInstanceId(...)
-	end
 	local function getPlayerStandCrewMemberName(...)
 		return ctx.getPlayerStandCrewMemberName(...)
 	end
@@ -72,15 +64,11 @@ function Module.Install(ctx)
 	local function logCrewSwitchFailure(...)
 		return ctx.logCrewSwitchFailure(...)
 	end
-	local MarketplaceService = ctx.MarketplaceService
-	local MonetizationConfig = ctx.MonetizationConfig
-	local function normalizeRarity(...)
-		return ctx.normalizeRarity(...)
-	end
 	local PLACEMENT_PICKUP_GUARD_SECONDS = ctx.PLACEMENT_PICKUP_GUARD_SECONDS
 	local placementPickupGuardUntil = ctx.placementPickupGuardUntil
 	local Players = ctx.Players
 	local PopUpModule = ctx.PopUpModule
+	local PremiumCrewStealService = ctx.PremiumCrewStealService
 	local QuestSignals = ctx.QuestSignals
 	local function refreshSlotRuntimeRefs(...)
 		return ctx.refreshSlotRuntimeRefs(...)
@@ -95,8 +83,6 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
-	local STEAL_PRODUCT_BY_RARITY = ctx.STEAL_PRODUCT_BY_RARITY
-	local stealPromptDebounce = ctx.stealPromptDebounce
 	local function syncStandLevelFromCrewMember(...)
 		return ctx.syncStandLevelFromCrewMember(...)
 	end
@@ -110,14 +96,15 @@ function Module.Install(ctx)
 		return ctx.updateStandMoneyText(...)
 	end
 	local function updateStandPromptTexts(...)
-		return ctx.updateStandPromptTexts(...)
-	end
-
-	local function getStealProductIdForCrewMember(crewMemberName)
-		local info = findCrewMemberInfoByName(crewMemberName)
-		local rarity = info and info.Rarity or "Common"
-		local fixed = normalizeRarity(rarity)
-		return STEAL_PRODUCT_BY_RARITY[fixed] or 3512126073
+		local result = ctx.updateStandPromptTexts(...)
+		local owner = select(1, ...)
+		local standModel = select(2, ...)
+		local cache = select(3, ...)
+		if ctx.PremiumCrewStealPromptRuntime and typeof(ctx.PremiumCrewStealPromptRuntime.UpdateStandPrompt) == "function" then
+			local activeShip = standModel and standModel.Parent
+			ctx.PremiumCrewStealPromptRuntime.UpdateStandPrompt(ctx, owner, activeShip, standModel, cache)
+		end
+		return result
 	end
 
 	local function findCrewMemberToolByInstanceId(player, instanceId)
@@ -272,83 +259,33 @@ function Module.Install(ctx)
 					if getEquippedCrewMemberToolInfo(plr) then
 						logCrewSwitchFailure(plr, standName, "stand_not_owned", string.format("ownerUserId=%s", tostring(ownerUserId)))
 					end
-					if not ALLOW_NON_OWNER_STEAL_PROMPTS then
-						standDebug(
-							"prompt rejected actor=%s stand=%s reason=non_owner_interaction_disabled ownerUserId=%s",
-							plr.Name,
-							standName,
-							tostring(ownerUserId)
-						)
-						return
-					end
+					standDebug(
+						"prompt rejected actor=%s stand=%s reason=non_owner_use_premium_steal_prompt ownerUserId=%s",
+						plr.Name,
+						standName,
+						tostring(ownerUserId)
+					)
+					return
+				end
 
-					local crewMemberToSteal = getPlayerStandCrewMemberName(player, standName)
-					if crewMemberToSteal == "" then
-						standDebug("steal rejected actor=%s stand=%s reason=empty_stand", plr.Name, standName)
-						return
-					end
-					local now = os.clock()
-					local last = stealPromptDebounce[plr]
-					if last and (now - last) < 1 then
-						return
-					end
-					stealPromptDebounce[plr] = now
-
-					local productId = getStealProductIdForCrewMember(crewMemberToSteal)
-					if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
-						standDebug(
-							"steal rejected actor=%s stand=%s crewMember=%s productId=%s reason=disabled_non_gtr_product",
-							plr.Name,
-							standName,
-							tostring(crewMemberToSteal),
-							tostring(productId)
-						)
+				dmEnsureStandFolder(plr, standName)
+				if PremiumCrewStealService and typeof(PremiumCrewStealService.IsStandLocked) == "function" then
+					local locked = PremiumCrewStealService.IsStandLocked(plr, standName)
+					if locked then
 						PopUpModule:Server_SendPopUp(
 							plr,
-							MonetizationConfig.UnavailableMessage,
+							"This stand is reserved for a premium steal purchase. Try again in a moment.",
 							Color3.fromRGB(255, 104, 104),
 							Color3.fromRGB(0, 0, 0),
 							3,
 							true
 						)
+						updateStandMoneyText(plr, standModel)
+						updateLevelUpUI(plr, standModel)
+						updateStandPromptTexts(plr, standModel)
 						return
 					end
-					if not CrewQuickSlotService.CanGainOrNotify(plr, crewMemberToSteal, 1, "StealPrompt:" .. tostring(standName)) then
-						standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=quick_slots_full", plr.Name, standName, tostring(crewMemberToSteal))
-						return
-					end
-					local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
-					local _, crewMemberInstance = CrewInstanceService.GetInstance(player, crewMemberInstanceId)
-					if CrewInstanceService.IsTutorialRewardProtected(player, crewMemberInstance) then
-						standDebug("steal rejected actor=%s stand=%s crewMember=%s reason=tutorial_reward_protected", plr.Name, standName, tostring(crewMemberToSteal))
-						return
-					end
-
-					plr:SetAttribute("StealOwnerUserId", ownerUserId)
-					plr:SetAttribute("StealStandName", standName)
-					plr:SetAttribute("StealCrewMemberName", crewMemberToSteal)
-					plr:SetAttribute("StealCrewMemberInstanceId", crewMemberInstanceId)
-					plr:SetAttribute("StealProductId", productId)
-					plr:SetAttribute("StealTime", os.time())
-
-					if DataManager and typeof(DataManager.PromptProductPurchase) == "function" then
-						DataManager:PromptProductPurchase(plr, productId)
-					elseif MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
-						standDebug(
-							"steal prompt rejected actor=%s stand=%s crewMember=%s productId=%s reason=paid_random_policy_handler_unavailable",
-							plr.Name,
-							standName,
-							tostring(crewMemberToSteal),
-							tostring(productId)
-						)
-					else
-						MarketplaceService:PromptProductPurchase(plr, productId)
-					end
-					standDebug("steal prompt actor=%s stand=%s crewMember=%s productId=%s", plr.Name, standName, tostring(crewMemberToSteal), tostring(productId))
-					return
 				end
-
-				dmEnsureStandFolder(plr, standName)
 				local slotState = getStandSlotState(plr, standName)
 				local equippedInfo = getEquippedCrewMemberToolInfo(plr)
 				if slotState.Visible and not slotState.Usable then
@@ -644,7 +581,6 @@ function Module.Install(ctx)
 	ctx.equipCrewMemberToolByInstanceId = equipCrewMemberToolByInstanceId
 	ctx.findCrewMemberToolByInstanceId = findCrewMemberToolByInstanceId
 	ctx.getPlacementPickupGuardRemaining = getPlacementPickupGuardRemaining
-	ctx.getStealProductIdForCrewMember = getStealProductIdForCrewMember
 	ctx.setPlacementPickupGuard = setPlacementPickupGuard
 end
 

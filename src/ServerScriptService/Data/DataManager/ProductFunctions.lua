@@ -4,6 +4,7 @@ local Types = require(ReplicatedStorage.Modules.Types)
 local CrewQuickSlotService = require(script.Parent.Parent.Parent.Modules.CrewQuickSlotService)
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
+local PremiumCrewStealConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PremiumCrewStealConfig"))
 
 local function DisabledDeveloperProduct(receiptInfo, player, _profile, _DataManager: Types.DataManager)
 	local productId = tonumber(receiptInfo and receiptInfo.ProductId)
@@ -24,6 +25,29 @@ local handlers = {}
 
 for _, productId in ipairs(MonetizationConfig.GetDisabledDeveloperProductIds()) do
 	handlers[productId] = DisabledDeveloperProduct
+end
+
+for _, bucket in ipairs(PremiumCrewStealConfig.GetActiveProductBuckets()) do
+	local productId = tonumber(bucket.ProductId)
+	if productId and productId > 0 then
+		if not MonetizationConfig.IsActiveDeveloperProduct(productId) then
+			warn(string.format(
+				"[ProductFunctions] Premium crew steal product id=%s bucket=%s is not marked active in Monetization config",
+				tostring(productId),
+				tostring(bucket.Key)
+			))
+		end
+
+		handlers[productId] = function(receiptInfo, player, profile, DataManager: Types.DataManager)
+			local PremiumCrewStealReceiptHandler = require(script.Parent.Parent.Parent.Modules.PremiumCrewStealReceiptHandler)
+			local ok, result = PremiumCrewStealReceiptHandler.ProcessReceipt(receiptInfo, player, profile, DataManager)
+			if ok ~= true then
+				local reason = if typeof(result) == "table" then tostring(result.Reason or "unknown") else tostring(result or "unknown")
+				local outcome = if typeof(result) == "table" then tostring(result.Outcome or "retryable_failure") else "retryable_failure"
+				error("premium_crew_steal_receipt_" .. outcome .. ":" .. reason)
+			end
+		end
+	end
 end
 
 local crewQuickSlotProductId = tonumber(CrewQuickSlotConfig.ProductId)

@@ -16,14 +16,6 @@ local Module = {}
 local SHIP_UPGRADE_PATH = string.format("HiddenLeaderstats.%s", tostring(PlotUpgradeConfig.InternalStatName or "PlotUpgrade"))
 local SPEED_PATH = "HiddenLeaderstats.Speed"
 local DEFAULT_SPEED = math.max(1, math.floor(tonumber(ProfileTemplate.HiddenLeaderstats.Speed) or 1))
-local SHIP_RESET_ATTRIBUTES = {
-	"StealOwnerUserId",
-	"StealStandName",
-	"StealCrewMemberName",
-	"StealCrewMemberInstanceId",
-	"StealProductId",
-	"StealTime",
-}
 
 local function invokeRuntimeCommand(bindable, action, player)
 	local ok, result, extra = pcall(function()
@@ -39,12 +31,6 @@ local function invokeRuntimeCommand(bindable, action, player)
 	end
 
 	return true, extra
-end
-
-local function clearPlayerResetAttributes(player)
-	for _, attributeName in ipairs(SHIP_RESET_ATTRIBUTES) do
-		player:SetAttribute(attributeName, nil)
-	end
 end
 
 local function runOptionalMutation(player, mutation)
@@ -110,8 +96,6 @@ local function resetPlayerShipData(player, options)
 	if not ok then
 		return false, tostring(reason)
 	end
-
-	clearPlayerResetAttributes(player)
 
 	return true, resetSummary
 end

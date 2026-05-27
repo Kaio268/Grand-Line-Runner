@@ -1827,6 +1827,45 @@ function FillMessageFunctions()
 end
 
 -- PRODUCT MANAGER SECTION
+local DEV_PRODUCT_RECEIPT_AUDIT_PREFIX = "[DEV_PRODUCT_RECEIPT_AUDIT]"
+
+local function normalizeReceiptAuditValue(value)
+	local valueType = typeof(value)
+	if value == nil or valueType == "string" or valueType == "number" or valueType == "boolean" then
+		return value
+	end
+	return tostring(value)
+end
+
+local function developerProductReceiptAudit(eventName: string, receiptInfo, fields)
+	local productId = tonumber(receiptInfo and receiptInfo.ProductId)
+	local playerId = tonumber(receiptInfo and receiptInfo.PlayerId)
+	local player = if playerId then Players:GetPlayerByUserId(playerId) else nil
+	local payload = {
+		Event = tostring(eventName or "unknown"),
+		ProductId = productId,
+		PurchaseId = tostring(receiptInfo and receiptInfo.PurchaseId or ""),
+		PlayerId = playerId,
+		PlayerExists = player ~= nil,
+		At = os.time(),
+	}
+
+	if typeof(fields) == "table" then
+		for key, value in pairs(fields) do
+			payload[tostring(key)] = normalizeReceiptAuditValue(value)
+		end
+	end
+
+	local ok, encoded = pcall(function()
+		return HttpService:JSONEncode(payload)
+	end)
+	if ok then
+		print(DEV_PRODUCT_RECEIPT_AUDIT_PREFIX .. " " .. encoded)
+	else
+		print(DEV_PRODUCT_RECEIPT_AUDIT_PREFIX .. " " .. tostring(payload.Event))
+	end
+end
+
 function DataManager:PromptProductPurchase(player : Player, productId : number)
 	productId = tonumber(productId)
 	if productId == nil then
@@ -1869,7 +1908,14 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 	return true, nil
 end
 
-function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()), purchase_id, grant_purchase): Enum.ProductPurchaseDecision
+function PurchaseIdCheckAsync(
+	profile : typeof(PlayerStore:StartSessionAsync()),
+	purchase_id,
+	grant_purchase,
+	receiptAuditContext
+): Enum.ProductPurchaseDecision
+	local auditContext = if typeof(receiptAuditContext) == "table" then receiptAuditContext else nil
+	local receiptInfo = auditContext and auditContext.ReceiptInfo
 	if profile:IsActive() then
 		local purchase_id_cache = profile.Data.PurchaseIdCache
 
@@ -1881,8 +1927,29 @@ function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()),
 		if table.find(purchase_id_cache, purchase_id) == nil then
 			local success, result = pcall(grant_purchase)
 			if success ~= true then
+				if auditContext then
+					developerProductReceiptAudit("product_handler_threw", receiptInfo, {
+						ProfileExists = true,
+						ProductHandlerExists = auditContext.ProductHandlerExists,
+						HandlerResult = result,
+						ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+					})
+					developerProductReceiptAudit("returning_not_processed_yet", receiptInfo, {
+						ProfileExists = true,
+						ProductHandlerExists = auditContext.ProductHandlerExists,
+						Reason = "product_handler_threw",
+						ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+					})
+				end
 				warn("[DataManager]: Failed to process receipt:" .. profile.Key, purchase_id, result)
 				return Enum.ProductPurchaseDecision.NotProcessedYet
+			end
+			if auditContext then
+				developerProductReceiptAudit("grant_purchase_returned", receiptInfo, {
+					ProfileExists = true,
+					ProductHandlerExists = auditContext.ProductHandlerExists,
+					HandlerResult = result,
+				})
 			end
 
 			while #purchase_id_cache >= PURCHASE_ID_CACHE_SIZE do
@@ -1898,6 +1965,14 @@ function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()),
 		end
 
 		if is_purchase_saved() == true then
+			if auditContext then
+				developerProductReceiptAudit("returning_purchase_granted", receiptInfo, {
+					ProfileExists = true,
+					ProductHandlerExists = auditContext.ProductHandlerExists,
+					ReturnedDecision = tostring(Enum.ProductPurchaseDecision.PurchaseGranted),
+					Reason = "purchase_saved",
+				})
+			end
 			return Enum.ProductPurchaseDecision.PurchaseGranted
 		end
 
@@ -1910,6 +1985,14 @@ function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()),
 			end
 
 			if is_purchase_saved() == true then
+				if auditContext then
+					developerProductReceiptAudit("returning_purchase_granted", receiptInfo, {
+						ProfileExists = true,
+						ProductHandlerExists = auditContext.ProductHandlerExists,
+						ReturnedDecision = tostring(Enum.ProductPurchaseDecision.PurchaseGranted),
+						Reason = "purchase_saved_after_profile_save",
+					})
+				end
 				return Enum.ProductPurchaseDecision.PurchaseGranted
 			end
 
@@ -1919,6 +2002,14 @@ function PurchaseIdCheckAsync(profile : typeof(PlayerStore:StartSessionAsync()),
 		end
 	end
 
+	if auditContext then
+		developerProductReceiptAudit("returning_not_processed_yet", receiptInfo, {
+			ProfileExists = profile ~= nil,
+			ProductHandlerExists = auditContext.ProductHandlerExists,
+			Reason = "profile_inactive",
+			ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+		})
+	end
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
 
@@ -2032,9 +2123,18 @@ local function EnqueuePurchaseAnnouncement(player: Player, productId: number, pr
 end
 
 local function ProcessReceipt(recieptInfo)
+	developerProductReceiptAudit("process_receipt_entered", recieptInfo, {
+		ProfileExists = false,
+		ProductHandlerExists = nil,
+	})
+
 	local player = Players:GetPlayerByUserId(recieptInfo.PlayerId)
 	if player ~= nil then
 		local profile = self:GetProfile(player)
+		developerProductReceiptAudit("before_profile_wait", recieptInfo, {
+			ProfileExists = profile ~= nil,
+			ProductHandlerExists = nil,
+		})
 
 		while profile == nil and player.Parent == Players do
 			profile = Profiles[player]
@@ -2045,9 +2145,20 @@ local function ProcessReceipt(recieptInfo)
 		end
 
 		if profile ~= nil then
+			developerProductReceiptAudit("profile_found", recieptInfo, {
+				ProfileExists = true,
+				ProductHandlerExists = nil,
+			})
+
 			local productId = tonumber(recieptInfo.ProductId)
 			if productId == nil then
 				warn("[DataManager]: No product found under id: " .. tostring(recieptInfo.ProductId))
+				developerProductReceiptAudit("returning_not_processed_yet", recieptInfo, {
+					ProfileExists = true,
+					ProductHandlerExists = false,
+					Reason = "invalid_product_id",
+					ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+				})
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
 
@@ -2079,8 +2190,23 @@ local function ProcessReceipt(recieptInfo)
 				end
 			end
 
+			local productHandlerExists = ProductFunctions[productId] ~= nil
+			developerProductReceiptAudit("before_product_handler_lookup", recieptInfo, {
+				ProfileExists = true,
+				ProductHandlerExists = productHandlerExists,
+			})
 			if ProductFunctions[productId] == nil then
 				warn("[DataManager]: No product found under id: " .. tostring(recieptInfo.ProductId))
+				developerProductReceiptAudit("product_handler_missing", recieptInfo, {
+					ProfileExists = true,
+					ProductHandlerExists = false,
+				})
+				developerProductReceiptAudit("returning_not_processed_yet", recieptInfo, {
+					ProfileExists = true,
+					ProductHandlerExists = false,
+					Reason = "missing_product_handler",
+					ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+				})
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
 
@@ -2094,6 +2220,12 @@ local function ProcessReceipt(recieptInfo)
 					if recieptInfo.PlayerId ~= player.UserId then
 						-- to nie powinno się zdarzyć, ale jeśli jednak – nie ryzykuj
 						warn("[DataManager]: PlayerId z receiptInfo nie zgadza się z player.UserId!")
+						developerProductReceiptAudit("returning_not_processed_yet", recieptInfo, {
+							ProfileExists = true,
+							ProductHandlerExists = productHandlerExists,
+							Reason = "receipt_player_mismatch",
+							ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+						})
 						return Enum.ProductPurchaseDecision.NotProcessedYet
 					end
 
@@ -2119,7 +2251,16 @@ local function ProcessReceipt(recieptInfo)
 					---------------------------------------------------------------
 					--  ➤  oryginalna logika produktu
 					---------------------------------------------------------------
-					ProductFunctions[productId](recieptInfo, player, profile, DataManager)
+					developerProductReceiptAudit("before_product_handler_call", recieptInfo, {
+						ProfileExists = true,
+						ProductHandlerExists = productHandlerExists,
+					})
+					local handlerResult = ProductFunctions[productId](recieptInfo, player, profile, DataManager)
+					developerProductReceiptAudit("product_handler_returned", recieptInfo, {
+						ProfileExists = true,
+						ProductHandlerExists = productHandlerExists,
+						HandlerResult = if handlerResult == nil then "<nil>" else handlerResult,
+					})
 
 					---------------------------------------------------------------
 					--  ➤  wrzuć ogłoszenie do kolejki MessagingService
@@ -2127,11 +2268,21 @@ local function ProcessReceipt(recieptInfo)
 					if shouldRecordPurchase then
 						EnqueuePurchaseAnnouncement(player, productId, productName, price)
 					end
-				end
+				end,
+				{
+					ReceiptInfo = recieptInfo,
+					ProductHandlerExists = productHandlerExists,
+				}
 			)
 		end
 	end
 
+	developerProductReceiptAudit("returning_not_processed_yet", recieptInfo, {
+		ProfileExists = false,
+		ProductHandlerExists = nil,
+		Reason = "player_or_profile_missing",
+		ReturnedDecision = tostring(Enum.ProductPurchaseDecision.NotProcessedYet),
+	})
 	return Enum.ProductPurchaseDecision.NotProcessedYet
 end
 

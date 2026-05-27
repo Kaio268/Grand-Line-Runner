@@ -18,6 +18,7 @@ local Config = {
 		InteractionKind = "ShipInteractionKind",
 		InteractionSlotKey = "ShipInteractionSlotKey",
 		IsActiveShip = "ShipRuntimeActive",
+		HideFromOwnerInteraction = "ShipHideFromOwnerInteraction",
 		OwnerName = "OwnerName",
 		OwnerOnlyInteraction = "ShipOwnerOnlyInteraction",
 		OwnerUserId = "OwnerUserId",

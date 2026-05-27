@@ -10,6 +10,7 @@ local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 local ATTR = ShipVisuals.Attributes
 local OWNER_ONLY_ATTRIBUTE = ATTR.OwnerOnlyInteraction or "ShipOwnerOnlyInteraction"
 local OWNER_USER_ID_ATTRIBUTE = ATTR.OwnerUserId or "OwnerUserId"
+local HIDE_FROM_OWNER_ATTRIBUTE = ATTR.HideFromOwnerInteraction or "ShipHideFromOwnerInteraction"
 
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -96,7 +97,27 @@ local function getOwnerOnlySource(instance)
 	return nil
 end
 
+local function getHideFromOwnerSource(instance)
+	local current = instance
+	while current do
+		if current:GetAttribute(HIDE_FROM_OWNER_ATTRIBUTE) == true then
+			return current
+		end
+		current = current.Parent
+	end
+
+	return nil
+end
+
 local function shouldRenderPrompt(prompt)
+	local hideFromOwnerSource = getHideFromOwnerSource(prompt)
+	if hideFromOwnerSource then
+		local ownerUserId = readUserIdAttribute(prompt, OWNER_USER_ID_ATTRIBUTE)
+			or readUserIdAttribute(hideFromOwnerSource, OWNER_USER_ID_ATTRIBUTE)
+
+		return ownerUserId ~= LocalPlayer.UserId
+	end
+
 	local ownerOnlySource = getOwnerOnlySource(prompt)
 	if not ownerOnlySource then
 		return true

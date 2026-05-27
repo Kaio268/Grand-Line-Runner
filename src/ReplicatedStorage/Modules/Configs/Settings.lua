@@ -12,6 +12,7 @@ local Settings = {
  
 	["LowGraphic"] = {Path = "Settings.LowGraphic", Type = "Switch", Start = false},
 	["HidePopUps"] = {Path = "Settings.HidePopUps", Type = "Switch", Start = false},
+	["PremiumStealProtection"] = {Path = "Settings.PremiumStealProtectionEnabled", Type = "Switch", Start = true},
 
 }
 

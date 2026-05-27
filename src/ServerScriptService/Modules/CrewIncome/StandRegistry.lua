@@ -76,7 +76,6 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
-	local stealPromptDebounce = ctx.stealPromptDebounce
 	local function syncStandLevelFromCrewMember(...)
 		return ctx.syncStandLevelFromCrewMember(...)
 	end
@@ -384,7 +383,6 @@ function Module.Install(ctx)
 		cleanupPlayerSlotRuntime(player)
 		ensuredStandFolders[player] = nil
 		touchDebounce[player] = nil
-		stealPromptDebounce[player] = nil
 		placementPickupGuardUntil[player] = nil
 		clearCrewRecordCache(player)
 		clearPlotScanStateForPlayer(player)

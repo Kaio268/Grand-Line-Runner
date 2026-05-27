@@ -718,6 +718,7 @@ function ProfileMigrations.Apply(data)
 	local settings = ensureTable(data, "Settings")
 	local earnedMaxSpeed = math.max(1, math.floor((tonumber(hiddenLeaderstats.Speed) or defaultSpeed) + 0.5))
 	settings.SpeedAutoMax = coerceBoolean(settings.SpeedAutoMax, true)
+	settings.PremiumStealProtectionEnabled = coerceBoolean(settings.PremiumStealProtectionEnabled, true)
 	if settings.SpeedAutoMax == true then
 		settings.SelectedSpeed = earnedMaxSpeed
 	else
@@ -726,6 +727,16 @@ function ProfileMigrations.Apply(data)
 			selectedSpeed = earnedMaxSpeed
 		end
 		settings.SelectedSpeed = math.clamp(math.floor(selectedSpeed + 0.5), 1, earnedMaxSpeed)
+	end
+
+	local premiumCrewStealProtection = ensureTable(data, "PremiumCrewStealProtection")
+	premiumCrewStealProtection.NewPlayerRemoved = coerceBoolean(
+		premiumCrewStealProtection.NewPlayerRemoved,
+		false
+	)
+	premiumCrewStealProtection.RemovedAt = math.max(0, coerceNumber(premiumCrewStealProtection.RemovedAt, 0))
+	if typeof(premiumCrewStealProtection.RemovedReason) ~= "string" then
+		premiumCrewStealProtection.RemovedReason = ""
 	end
 
 	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingBeli, 0)

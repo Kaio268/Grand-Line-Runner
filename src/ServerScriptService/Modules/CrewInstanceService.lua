@@ -969,16 +969,23 @@ end
 clearShipSlotAssignment = function(player, standName)
 	standName = tostring(standName or "")
 	if standName == "" then
-		return
+		return false, "invalid_stand"
 	end
 
 	local shipSlots = getDataManager():GetValue(player, "Ship.Slots")
 	if typeof(shipSlots) ~= "table" then
-		return
+		return true, "missing_ship_slots"
 	end
 
 	shipSlots[standName] = nil
-	getDataManager():SetValue(player, "Ship.Slots", shipSlots)
+	local ok = getDataManager():SetValue(player, "Ship.Slots", shipSlots)
+	return ok == true, if ok == true then nil else "ship_slots_write_failed"
+end
+
+local function restoreShipSlots(player, shipSlotsSnapshot)
+	local nextSlots = if typeof(shipSlotsSnapshot) == "table" then cloneValue(shipSlotsSnapshot) else {}
+	local ok = getDataManager():SetValue(player, "Ship.Slots", nextSlots)
+	return ok == true, if ok == true then nil else "ship_slots_restore_failed"
 end
 
 local function getStandData(player, standName)
@@ -2694,13 +2701,28 @@ function Module.RemoveTutorialRewardInstances(player, options)
 	}
 end
 
-function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
+function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName, options)
+	options = if typeof(options) == "table" then options else {}
+	standName = tostring(standName or "")
+	local debugInfo = {
+		OwnerName = ownerPlayer and ownerPlayer.Name or "unknown",
+		OwnerUserId = ownerPlayer and ownerPlayer.UserId or 0,
+		BuyerName = buyerPlayer and buyerPlayer.Name or "unknown",
+		BuyerUserId = buyerPlayer and buyerPlayer.UserId or 0,
+		StandName = standName,
+		ExpectedInstanceId = tostring(options.ExpectedInstanceId or ""),
+	}
+
 	local instanceId, instanceData = Module.EnsureStandInstance(ownerPlayer, standName)
+	debugInfo.SourceInstanceId = tostring(instanceId or "")
 	if not instanceData then
-		return nil, nil
+		return nil, nil, "no_instance_available", debugInfo
+	end
+	if debugInfo.ExpectedInstanceId ~= "" and tostring(instanceId) ~= debugInfo.ExpectedInstanceId then
+		return nil, nil, "instance_mismatch", debugInfo
 	end
 	if isProtectedTutorialReward(ownerPlayer, instanceData) then
-		return nil, nil
+		return nil, nil, "protected_tutorial_reward", debugInfo
 	end
 
 	if not CrewQuickSlotService.CanGainOrNotify(
@@ -2709,47 +2731,96 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 		1,
 		"TransferStandInstance:" .. tostring(standName)
 	) then
-		return nil, nil
+		return nil, nil, "quick_slot_capacity", debugInfo
 	end
 
-	local buyerInventory = getCrewMemberInventory(buyerPlayer)
-
 	local _, _, ownerInventory = Module.GetInstance(ownerPlayer, instanceId)
-	ownerInventory.ById[tostring(instanceId)] = nil
-	for index = #ownerInventory.Order, 1, -1 do
-		if tostring(ownerInventory.Order[index]) == tostring(instanceId) then
-			table.remove(ownerInventory.Order, index)
+	if typeof(ownerInventory) ~= "table" or typeof(ownerInventory.ById) ~= "table" then
+		return nil, nil, "owner_inventory_missing", debugInfo
+	end
+
+	local standDataBefore = getStandData(ownerPlayer, standName)
+	local ownerShipSlotsBefore = cloneValue(getDataManager():GetValue(ownerPlayer, "Ship.Slots"))
+	local ownerInventoryBefore = cloneValue(ownerInventory)
+	local buyerInventoryBefore = getCrewMemberInventory(buyerPlayer)
+	local buyerInventory = cloneValue(buyerInventoryBefore)
+
+	local buyerInstanceId = tostring(buyerInventory.NextInstanceId)
+	buyerInventory.NextInstanceId += 1
+	local buyerInstanceData = cloneValue(instanceData)
+	buyerInstanceData.AssignedStand = ""
+	buyerInstanceData.LastReleasedAt = os.time()
+	buyerInstanceData = normalizeInstanceData(buyerInstanceId, buyerInstanceData, instanceData.StorageName)
+	if buyerInstanceData == nil then
+		return nil, nil, "buyer_instance_normalize_failed", debugInfo
+	end
+	buyerInventory.ById[buyerInstanceId] = buyerInstanceData
+	table.insert(buyerInventory.Order, 1, buyerInstanceId)
+
+	local finalOwnerInventory = cloneValue(ownerInventory)
+	finalOwnerInventory.ById[tostring(instanceId)] = nil
+	for index = #finalOwnerInventory.Order, 1, -1 do
+		if tostring(finalOwnerInventory.Order[index]) == tostring(instanceId) then
+			table.remove(finalOwnerInventory.Order, index)
 			break
 		end
 	end
-	saveCrewMemberInventory(ownerPlayer, ownerInventory)
-	updateStandData(ownerPlayer, standName, {
-		CrewMemberName = "",
-		CrewMemberInstanceId = "",
-		IncomeToCollect = 0,
-	}, "product_reward_transfer_out")
-	syncAvailableCounts(ownerPlayer, ownerInventory)
-	refreshCrewMemberShadow(ownerPlayer, "product_reward_transfer_out")
 
-	ensureInventoryMetadata(buyerPlayer, instanceData.StorageName, instanceData)
-	local buyerInstanceId = tostring(buyerInventory.NextInstanceId)
-	buyerInventory.NextInstanceId += 1
-	buyerInventory.ById[buyerInstanceId] = normalizeInstanceData(buyerInstanceId, {
-		StorageName = instanceData.StorageName,
-		BaseName = instanceData.BaseName,
-		Variant = instanceData.Variant,
-		Rarity = instanceData.Rarity,
-		Income = instanceData.Income,
-		Render = instanceData.Render,
-		GoldenRender = instanceData.GoldenRender,
-		DiamondRender = instanceData.DiamondRender,
-		Level = instanceData.Level,
-		CurrentXP = instanceData.CurrentXP,
-		AssignedStand = "",
-		AcquiredAt = instanceData.AcquiredAt,
-		LastReleasedAt = os.time(),
+	local function rollbackOwnerState(reason)
+		local rollbackInventoryOk, rollbackInventoryReason = saveCrewMemberInventory(ownerPlayer, ownerInventoryBefore, {
+			SourcePath = "premium_crew_steal_transfer_out_rollback",
+		})
+		local rollbackStandOk, rollbackStandReason = setStandData(
+			ownerPlayer,
+			standName,
+			standDataBefore,
+			"premium_crew_steal_transfer_out_rollback"
+		)
+		local rollbackShipOk, rollbackShipReason = restoreShipSlots(ownerPlayer, ownerShipSlotsBefore)
+		debugInfo.RollbackInventoryOk = rollbackInventoryOk == true
+		debugInfo.RollbackInventoryReason = tostring(rollbackInventoryReason or "")
+		debugInfo.RollbackStandOk = rollbackStandOk == true
+		debugInfo.RollbackStandReason = tostring(rollbackStandReason or "")
+		debugInfo.RollbackShipSlotsOk = rollbackShipOk == true
+		debugInfo.RollbackShipSlotsReason = tostring(rollbackShipReason or "")
+		return nil, nil, reason, debugInfo
+	end
+
+	local ownerSaveOk, ownerSaveReason = saveCrewMemberInventory(ownerPlayer, finalOwnerInventory, {
+		SourcePath = "premium_crew_steal_transfer_out",
 	})
-	table.insert(buyerInventory.Order, 1, buyerInstanceId)
+	debugInfo.OwnerInventorySaveOk = ownerSaveOk == true
+	debugInfo.OwnerInventorySaveReason = tostring(ownerSaveReason or "")
+	if ownerSaveOk ~= true then
+		return nil, nil, tostring(ownerSaveReason or "owner_inventory_write_failed"), debugInfo
+	end
+
+	local clearOk, clearReason = clearStandData(ownerPlayer, standName, "premium_crew_steal_transfer_out")
+	debugInfo.OwnerStandClearOk = clearOk == true
+	debugInfo.OwnerStandClearReason = tostring(clearReason or "")
+	if clearOk ~= true then
+		return rollbackOwnerState(tostring(clearReason or "stand_clear_failed"))
+	end
+
+	local shipClearOk, shipClearReason = clearShipSlotAssignment(ownerPlayer, standName)
+	debugInfo.OwnerShipSlotClearOk = shipClearOk == true
+	debugInfo.OwnerShipSlotClearReason = tostring(shipClearReason or "")
+	if shipClearOk ~= true then
+		return rollbackOwnerState(tostring(shipClearReason or "ship_slot_clear_failed"))
+	end
+
+	local buyerSaveOk, buyerSaveReason = saveCrewMemberInventory(buyerPlayer, buyerInventory, {
+		SourcePath = "premium_crew_steal_transfer_in",
+	})
+	debugInfo.BuyerInventorySaveOk = buyerSaveOk == true
+	debugInfo.BuyerInventorySaveReason = tostring(buyerSaveReason or "")
+	if buyerSaveOk ~= true then
+		return rollbackOwnerState(tostring(buyerSaveReason or "buyer_inventory_write_failed"))
+	end
+
+	syncAvailableCounts(ownerPlayer, finalOwnerInventory)
+	refreshCrewMemberShadow(ownerPlayer, "product_reward_transfer_out")
+	ensureInventoryMetadata(buyerPlayer, instanceData.StorageName, instanceData)
 	IndexCollectionService.MarkCrewMemberDiscovered(
 		buyerPlayer,
 		instanceData.StorageName,
@@ -2759,11 +2830,53 @@ function Module.TransferStandInstance(ownerPlayer, buyerPlayer, standName)
 			DeferShadowRefresh = true,
 		}
 	)
-	saveCrewMemberInventory(buyerPlayer, buyerInventory)
 	syncAvailableCounts(buyerPlayer, buyerInventory)
 	refreshCrewMemberShadow(buyerPlayer, "product_reward_transfer_in")
 
-	return buyerInstanceId, buyerInventory.ById[buyerInstanceId]
+	return buyerInstanceId, buyerInventory.ById[buyerInstanceId], nil, debugInfo
+end
+
+function Module.VerifyStandEmpty(player, standName, options)
+	options = if typeof(options) == "table" then options else {}
+	standName = tostring(standName or "")
+	local expectedSourceInstanceId = tostring(options.SourceInstanceId or "")
+	local standData = getStandData(player, standName)
+	local shipSlots = getDataManager():GetValue(player, "Ship.Slots")
+	local crewMemberInventory = getCrewMemberInventory(player)
+	local assignedStandRefs = {}
+
+	if typeof(crewMemberInventory) == "table" and typeof(crewMemberInventory.ById) == "table" then
+		for ownedInstanceId, ownedInstanceData in pairs(crewMemberInventory.ById) do
+			if typeof(ownedInstanceData) == "table" and tostring(ownedInstanceData.AssignedStand or "") == standName then
+				table.insert(assignedStandRefs, tostring(ownedInstanceId))
+			end
+		end
+	end
+	table.sort(assignedStandRefs)
+
+	local sourceInstanceStillOwned = expectedSourceInstanceId ~= ""
+		and typeof(crewMemberInventory) == "table"
+		and typeof(crewMemberInventory.ById) == "table"
+		and crewMemberInventory.ById[expectedSourceInstanceId] ~= nil
+	local crewMemberName = tostring(standData and standData.CrewMemberName or "")
+	local crewMemberInstanceId = tostring(standData and standData.CrewMemberInstanceId or "")
+	local shipSlotEmpty = typeof(shipSlots) ~= "table" or shipSlots[standName] == nil
+	local detail = {
+		StandName = standName,
+		CrewMemberName = crewMemberName,
+		CrewMemberInstanceId = crewMemberInstanceId,
+		ShipSlotEmpty = shipSlotEmpty,
+		SourceInstanceId = expectedSourceInstanceId,
+		SourceInstanceStillOwned = sourceInstanceStillOwned == true,
+		AssignedStandRefs = assignedStandRefs,
+	}
+
+	local isEmpty = crewMemberName == ""
+		and crewMemberInstanceId == ""
+		and shipSlotEmpty == true
+		and sourceInstanceStillOwned ~= true
+		and #assignedStandRefs == 0
+	return isEmpty, if isEmpty then nil else "victim_stand_not_cleared", detail
 end
 
 Module.IsCrewInventoryEntry = Module.IsCrewMemberInventoryEntry
@@ -2783,7 +2896,6 @@ Module.AssignCrewMemberInstanceToStand = Module.AssignInstanceToStand
 Module.SwapCrewMemberStandInstance = Module.SwapStandInstance
 Module.ReleaseStandCrewMember = Module.ReleaseStandInstance
 Module.RemoveAvailableCrewMember = Module.RemoveAvailableInstance
-Module.TransferStandCrewMember = Module.TransferStandInstance
 Module.RepairCanonicalCrewMemberState = Module.RepairCanonicalCrewState
 
 return Module

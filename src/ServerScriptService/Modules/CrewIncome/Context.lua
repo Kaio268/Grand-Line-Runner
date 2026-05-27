@@ -1,41 +1,10 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local MarketplaceService = game:GetService("MarketplaceService")
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 
 local Context = {}
-
-local STEAL_PRODUCT_BY_RARITY = {
-	Common = 3512126073,
-	Uncommon = 3512126073,
-	Rare = 3512126073,
-	Epic = 3512126073,
-	Legendary = 3512126373,
-	Mythic = 3512127278,
-	Godly = 3512127790,
-	Secret = 3512128038,
-	Omega = 3512128716,
-}
-
-local RARITY_PRIORITY = { "Omega", "Secret", "Godly", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common" }
-
-local function normalizeRarity(rarity)
-	local text = tostring(rarity or "")
-	if text == "" then
-		return "Common"
-	end
-
-	local lowered = string.lower(text)
-	for _, key in ipairs(RARITY_PRIORITY) do
-		if string.find(lowered, string.lower(key), 1, true) then
-			return key
-		end
-	end
-
-	return "Common"
-end
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -115,7 +84,6 @@ function Context.Create()
 	local Modules = ReplicatedStorage:WaitForChild("Modules")
 	local Configs = Modules:WaitForChild("Configs")
 	local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
-	local MonetizationConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
 	local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 	local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
@@ -126,6 +94,15 @@ function Context.Create()
 	local CrewRegistry = require(Modules:WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Registry"))
 	local ShipSlotGuiIdentity = require(Modules:WaitForChild("ShipSlotGuiIdentity"))
 	local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+	local PremiumCrewStealPromptRuntime = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealPromptRuntime"))
+	local PremiumCrewStealService = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealService"))
+	local PremiumCrewStealProtectionVisuals =
+		require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealProtectionVisuals"))
+
+	PremiumCrewStealService.Configure({
+		DataManager = DataManager,
+	})
+	PremiumCrewStealService.Start()
 
 	local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
 	if not Remotes then
@@ -163,7 +140,6 @@ function Context.Create()
 		Players = Players,
 		ReplicatedStorage = ReplicatedStorage,
 		ServerScriptService = ServerScriptService,
-		MarketplaceService = MarketplaceService,
 		RunService = RunService,
 		CollectionService = CollectionService,
 
@@ -175,12 +151,14 @@ function Context.Create()
 		CrewStandIncomeAuthority = CrewStandIncomeAuthority,
 		IncomeClaimMath = IncomeClaimMath,
 		QuestSignals = QuestSignals,
+		PremiumCrewStealPromptRuntime = PremiumCrewStealPromptRuntime,
+		PremiumCrewStealService = PremiumCrewStealService,
+		PremiumCrewStealProtectionVisuals = PremiumCrewStealProtectionVisuals,
 		ShipRuntimeSignals = ShipRuntimeSignals,
 		ShipRuntimeService = ShipRuntimeService,
 		ShipSlotService = ShipSlotService,
 		StandUpgradeMults = StandUpgradeMults,
 		CurrencyUtil = CurrencyUtil,
-		MonetizationConfig = MonetizationConfig,
 		PopUpModule = PopUpModule,
 		DataManager = DataManager,
 		Modules = Modules,
@@ -199,7 +177,6 @@ function Context.Create()
 		incomeStatusDisplayMetadataRequest = incomeStatusDisplayMetadataRequest,
 		standCommandFunction = ShipRuntimeSignals.GetStandCommandFunction(),
 
-		STEAL_PRODUCT_BY_RARITY = STEAL_PRODUCT_BY_RARITY,
 		MAX_INCOME_ON_JOIN = 1e16,
 		CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain",
 		CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui",
@@ -207,7 +184,6 @@ function Context.Create()
 		CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp",
 		STAND_DEBUG = false,
 		DEBUG_TRACE = debugTrace,
-		ALLOW_NON_OWNER_STEAL_PROMPTS = game:GetAttribute("AllowNonOwnerCrewStealPrompts") == true,
 		TUTORIAL_RUNTIME_ACTIVE_ATTRIBUTE = "FirstTimeTutorialActive",
 		TUTORIAL_RUNTIME_STEP_ATTRIBUTE = "FirstTimeTutorialStepId",
 		CREW_ITEM_KIND = "CrewMember",
@@ -222,11 +198,9 @@ function Context.Create()
 		slotRuntimeByStand = setmetatable({}, { __mode = "k" }),
 		playerStandList = {},
 		touchDebounce = {},
-		stealPromptDebounce = {},
 		placementPickupGuardUntil = {},
 		plotScanBound = {},
 
-		normalizeRarity = normalizeRarity,
 		formatVector3 = formatVector3,
 		formatInstancePath = formatInstancePath,
 		countSavedStandEntries = countSavedStandEntries,

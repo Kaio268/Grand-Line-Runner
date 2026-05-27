@@ -1,5 +1,4 @@
 --// Services
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local Players = game:GetService("Players")
 
@@ -14,7 +13,9 @@ function UpdatePlaytime()
 	task.spawn(function()
 		while task.wait(1) do
 			for _, Player in ipairs(Players:GetPlayers()) do
-				DataManager:AddValue(Player, `TotalStats.TimePlayed`, 1)
+				if DataManager:IsReady(Player) then
+					DataManager:TryAddValue(Player, "TotalStats.TimePlayed", 1)
+				end
 			end
 		end
 	end)

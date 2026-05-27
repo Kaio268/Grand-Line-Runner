@@ -82,13 +82,22 @@ local function disconnectAll()
 	table.clear(connections)
 end
 
+local function formatRewardAmount(amount)
+	local numeric = tonumber(amount)
+	if numeric then
+		return string.format("%.2f", numeric)
+	end
+
+	return tostring(amount or "")
+end
+
 local function buildRewards(config)
 	local rewards = {}
 	for key, data in pairs((config and config.Getting) or {}) do
 		rewards[#rewards + 1] = {
 			key = tostring(key),
 			icon = tostring(data and data.Icon or ""),
-			text = string.format("x%s %s", tostring(data and data.Amount or ""), tostring(key)),
+			text = string.format("x%s %s", formatRewardAmount(data and data.Amount), tostring(key)),
 		}
 	end
 	table.sort(rewards, function(a, b)

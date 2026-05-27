@@ -7,6 +7,7 @@ local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 local ATTR = ShipVisuals.Attributes
 local OWNER_ONLY_ATTRIBUTE = ATTR.OwnerOnlyInteraction or "ShipOwnerOnlyInteraction"
 local OWNER_USER_ID_ATTRIBUTE = ATTR.OwnerUserId or "OwnerUserId"
+local HIDE_FROM_OWNER_ATTRIBUTE = ATTR.HideFromOwnerInteraction or "ShipHideFromOwnerInteraction"
 
 local trackedShips = {}
 local originalStateByInstance = setmetatable({}, { __mode = "k" })
@@ -55,6 +56,21 @@ local function getOwnerOnlySource(instance, ship)
 	local current = instance
 	while current and current ~= ship.Parent do
 		if current:GetAttribute(OWNER_ONLY_ATTRIBUTE) == true then
+			return current
+		end
+		if current == ship then
+			break
+		end
+		current = current.Parent
+	end
+
+	return nil
+end
+
+local function getHideFromOwnerSource(instance, ship)
+	local current = instance
+	while current and current ~= ship.Parent do
+		if current:GetAttribute(HIDE_FROM_OWNER_ATTRIBUTE) == true then
 			return current
 		end
 		if current == ship then
@@ -118,6 +134,17 @@ end
 
 local function applyVisibility(ship, instance)
 	if not ship or not ship.Parent or not instance or not instance.Parent or not isManageableInteraction(instance) then
+		return
+	end
+
+	local hideFromOwnerSource = getHideFromOwnerSource(instance, ship)
+	if hideFromOwnerSource then
+		local ownerUserId = getOwnerUserId(instance, ship, hideFromOwnerSource)
+		if ownerUserId == localPlayer.UserId then
+			hideInteraction(instance)
+		else
+			restoreInteraction(instance)
+		end
 		return
 	end
 

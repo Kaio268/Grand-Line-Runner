@@ -42,6 +42,7 @@ function Module.Install(ctx)
 	local ShipRuntimeService = ctx.ShipRuntimeService
 	local ShipSlotService = ctx.ShipSlotService
 	local ShipVisuals = ctx.ShipVisuals
+	local PremiumCrewStealProtectionVisuals = ctx.PremiumCrewStealProtectionVisuals
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
@@ -167,6 +168,9 @@ function Module.Install(ctx)
 	end
 
 	local function clearStandVisual(standModel)
+		if PremiumCrewStealProtectionVisuals and typeof(PremiumCrewStealProtectionVisuals.ClearStand) == "function" then
+			PremiumCrewStealProtectionVisuals.ClearStand(standModel)
+		end
 		local existing = standModel:FindFirstChild("PlacedCrewMember")
 		if existing and existing:IsA("Model") then
 			existing:Destroy()
@@ -261,6 +265,9 @@ function Module.Install(ctx)
 		end
 
 		syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
+		if PremiumCrewStealProtectionVisuals and typeof(PremiumCrewStealProtectionVisuals.UpdateStand) == "function" then
+			PremiumCrewStealProtectionVisuals.UpdateStand(player, standModel)
+		end
 		resetSlotRenderState(getExistingSlotRuntime(standModel))
 		standDebug(
 			"spawnStandCrewMember success player=%s stand=%s model=%s incomeBase=%s",

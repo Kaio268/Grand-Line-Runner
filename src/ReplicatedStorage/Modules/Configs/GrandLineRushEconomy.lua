@@ -247,7 +247,8 @@ local Economy = {
 					Beli = { Min = 250, Max = 600 },
 					FruitConversionBeli = 15,
 					Materials = {
-						Timber = { Min = 12, Max = 20 },
+						Timber = { Min = 14, Max = 24 },
+						Iron = { Min = 1, Max = 2 },
 					},
 					BonusRoll = {
 						Chance = 0.25,
@@ -272,14 +273,14 @@ local Economy = {
 					Beli = { Min = 1000, Max = 2500 },
 					FruitConversionBeli = 30,
 					Materials = {
-						Timber = { Min = 35, Max = 55 },
-						Iron = { Min = 4, Max = 8 },
+						Timber = { Min = 45, Max = 70 },
+						Iron = { Min = 10, Max = 16 },
 					},
 					BonusRoll = {
-						Chance = 0.35,
+						Chance = 0.45,
 						Rolls = 1,
 						Pool = {
-							{ Materials = { Iron = 3 } },
+							{ Materials = { Iron = 6 } },
 							{ Materials = { AncientTimber = 1 } },
 							{ Food = { Meat = 2 } },
 							{ Beli = 1500 },
@@ -299,13 +300,14 @@ local Economy = {
 					FruitConversionBeli = 120,
 					Materials = {
 						Timber = { Min = 80, Max = 140 },
-						Iron = { Min = 12, Max = 20 },
-						AncientTimber = { Min = 1, Max = 3 },
+						Iron = { Min = 24, Max = 36 },
+						AncientTimber = { Min = 2, Max = 4 },
 					},
 					BonusRoll = {
 						Chance = 0.50,
 						Rolls = 1,
 						Pool = {
+							{ Materials = { Iron = 10 } },
 							{ Materials = { AncientTimber = 2 } },
 							{ Food = { SeaBeastMeat = 2 } },
 							{ Beli = 5000 },

@@ -185,9 +185,17 @@ local ProfileTemplate = {
 	Settings = {
 		SelectedSpeed = 1,
 		SpeedAutoMax = true,
+		PremiumStealProtectionEnabled = true,
 	},
 	Packs = {},
 	CometMerchant = {},
+	PremiumCrewStealProtection = {
+		NewPlayerRemoved = false,
+		RemovedAt = 0,
+		RemovedReason = "",
+	},
+	PremiumCrewStealReceiptFallbacks = {},
+	PremiumCrewStealSuccessfulReceipts = {},
 	PaidRandomItemReceiptFallbacks = {},
 	PurchaseIdCache = {},
 	__Attributes = {},

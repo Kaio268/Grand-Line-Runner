@@ -1,4 +1,5 @@
 local Monetization = {}
+local PremiumCrewStealConfig = require(script.Parent:WaitForChild("PremiumCrewStealConfig"))
 
 Monetization.Status = {
 	Active = "active_chefs",
@@ -30,6 +31,17 @@ Monetization.ActiveChefsGamepasses = {
 }
 
 Monetization.ActiveChefsDeveloperProducts = {}
+
+for _, bucket in ipairs(PremiumCrewStealConfig.GetActiveProductBuckets()) do
+	local productId = tonumber(bucket.ProductId)
+	if productId and productId > 0 then
+		Monetization.ActiveChefsDeveloperProducts["PremiumCrewSteal_" .. tostring(bucket.Key)] = {
+			Id = productId,
+			Name = "Premium Crew Steal " .. tostring(bucket.PriceRobux) .. " Robux",
+			PremiumCrewSteal = true,
+		}
+	end
+end
 
 Monetization.PlaceholderGamepasses = {
 	X2Beli = {
@@ -115,36 +127,6 @@ Monetization.PlaceholderDeveloperProducts = {
 		Name = "Lava Speed Coil",
 		Reason = "Not Chefs-owned. Awaiting replacement product.",
 	},
-	StealCommonEpic = {
-		Id = 3512126073,
-		Name = "Steal Common - Epic",
-		Reason = "Not Chefs-owned. Awaiting replacement product.",
-	},
-	StealLegendary = {
-		Id = 3512126373,
-		Name = "Steal Legendary",
-		Reason = "Not Chefs-owned. Awaiting replacement product.",
-	},
-	StealMythic = {
-		Id = 3512127278,
-		Name = "Steal Mythic",
-		Reason = "Not Chefs-owned. Awaiting replacement product.",
-	},
-	StealGodly = {
-		Id = 3512127790,
-		Name = "Steal Godly",
-		Reason = "Not Chefs-owned. Awaiting replacement product.",
-	},
-	StealSecret = {
-		Id = 3512128038,
-		Name = "Steal Secret",
-		Reason = "Not Chefs-owned. Awaiting replacement product.",
-	},
-	StealOmega = {
-		Id = 3512128716,
-		Name = "Steal Omega",
-		Reason = "Not Chefs-owned. Awaiting replacement product.",
-	},
 }
 
 Monetization.RetiredLegacyProducts = {
@@ -207,6 +189,36 @@ Monetization.RetiredLegacyProducts = {
 		Id = 3515419300,
 		Name = "x1.5 Walk Speed 90min",
 		Reason = "retired_template_walkspeed_boost_bundle",
+	},
+	LegacyCrewStealCommonEpic = {
+		Id = 3512126073,
+		Name = "Retired Legacy Crew Steal Common - Epic",
+		Reason = "retired_legacy_crewmate_steal_product",
+	},
+	LegacyCrewStealLegendary = {
+		Id = 3512126373,
+		Name = "Retired Legacy Crew Steal Legendary",
+		Reason = "retired_legacy_crewmate_steal_product",
+	},
+	LegacyCrewStealMythic = {
+		Id = 3512127278,
+		Name = "Retired Legacy Crew Steal Mythic",
+		Reason = "retired_legacy_crewmate_steal_product",
+	},
+	LegacyCrewStealGodly = {
+		Id = 3512127790,
+		Name = "Retired Legacy Crew Steal Godly",
+		Reason = "retired_legacy_crewmate_steal_product",
+	},
+	LegacyCrewStealSecret = {
+		Id = 3512128038,
+		Name = "Retired Legacy Crew Steal Secret",
+		Reason = "retired_legacy_crewmate_steal_product",
+	},
+	LegacyCrewStealOmega = {
+		Id = 3512128716,
+		Name = "Retired Legacy Crew Steal Omega",
+		Reason = "retired_legacy_crewmate_steal_product",
 	},
 }
 

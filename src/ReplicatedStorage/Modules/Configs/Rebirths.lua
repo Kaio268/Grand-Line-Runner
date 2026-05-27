@@ -5,8 +5,18 @@ local Configs = Modules:WaitForChild("Configs")
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 
 local Rebirths = {
-	BaseShipIncomeMultiplier = 1,
-	ShipIncomeMultiplierStep = 0.15,
+	ShipIncomeMultiplierMilestones = {
+		{ Rebirths = 0, Multiplier = 1.00 },
+		{ Rebirths = 1, Multiplier = 1.50 },
+		{ Rebirths = 2, Multiplier = 2.25 },
+		{ Rebirths = 3, Multiplier = 3.25 },
+		{ Rebirths = 4, Multiplier = 4.50 },
+		{ Rebirths = 5, Multiplier = 6.00 },
+		{ Rebirths = 10, Multiplier = 16.00 },
+		{ Rebirths = 25, Multiplier = 80.00 },
+		{ Rebirths = 50, Multiplier = 275.00 },
+	},
+	PostMilestoneShipIncomeGrowthRate = 0.08,
 	ShipIncomeIcon = "rbxassetid://99305009492305",
 	BeliCostBase = 1_000_000,
 	BeliCostExponent = 1.45,
@@ -32,9 +42,71 @@ local function roundToNearest(value, step)
 	return math.floor(((tonumber(value) or 0) / numericStep) + 0.5) * numericStep
 end
 
+local function getSortedShipIncomeMilestones()
+	local milestones = {}
+
+	for _, milestone in ipairs(Rebirths.ShipIncomeMultiplierMilestones) do
+		local rebirths = tonumber(milestone.Rebirths)
+		local multiplier = tonumber(milestone.Multiplier)
+		if rebirths and multiplier and multiplier > 0 then
+			milestones[#milestones + 1] = {
+				Rebirths = math.max(0, math.floor(rebirths)),
+				Multiplier = multiplier,
+			}
+		end
+	end
+
+	table.sort(milestones, function(left, right)
+		return left.Rebirths < right.Rebirths
+	end)
+
+	return milestones
+end
+
+local function interpolateGeometric(startMultiplier, endMultiplier, alpha)
+	local startValue = tonumber(startMultiplier) or 0
+	local endValue = tonumber(endMultiplier) or 0
+	local clampedAlpha = math.clamp(tonumber(alpha) or 0, 0, 1)
+
+	if startValue <= 0 or endValue <= 0 then
+		return startValue + ((endValue - startValue) * clampedAlpha)
+	end
+
+	return startValue * ((endValue / startValue) ^ clampedAlpha)
+end
+
 function Rebirths.GetShipIncomeMultiplier(rebirthCount)
 	local numericRebirths = coerceWholeNumber(rebirthCount, 0)
-	return roundToHundredths(Rebirths.BaseShipIncomeMultiplier + (numericRebirths * Rebirths.ShipIncomeMultiplierStep))
+	local milestones = getSortedShipIncomeMilestones()
+
+	if #milestones == 0 then
+		return 1
+	end
+
+	local firstMilestone = milestones[1]
+	if numericRebirths <= firstMilestone.Rebirths then
+		return roundToHundredths(firstMilestone.Multiplier)
+	end
+
+	for index, milestone in ipairs(milestones) do
+		if numericRebirths == milestone.Rebirths then
+			return roundToHundredths(milestone.Multiplier)
+		end
+
+		local nextMilestone = milestones[index + 1]
+		if nextMilestone and numericRebirths < nextMilestone.Rebirths then
+			local span = nextMilestone.Rebirths - milestone.Rebirths
+			local progress = (numericRebirths - milestone.Rebirths) / span
+			return roundToHundredths(interpolateGeometric(milestone.Multiplier, nextMilestone.Multiplier, progress))
+		end
+	end
+
+	local finalMilestone = milestones[#milestones]
+	local growthRate = math.max(0, tonumber(Rebirths.PostMilestoneShipIncomeGrowthRate) or 0)
+	local extraRebirths = numericRebirths - finalMilestone.Rebirths
+	local multiplier = finalMilestone.Multiplier * ((1 + growthRate) ^ extraRebirths)
+
+	return roundToHundredths(multiplier)
 end
 
 function Rebirths.GetBeliCostForRebirth(targetRebirthCount)

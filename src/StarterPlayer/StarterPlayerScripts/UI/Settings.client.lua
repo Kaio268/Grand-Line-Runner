@@ -23,6 +23,7 @@ local UpdateSettingRemote = ReplicatedStorage:WaitForChild("UpdateSetting")
 local e = React.createElement
 local SPEED_SETTING_NAME = "Speed"
 local SPEED_AUTO_MAX_SETTING_NAME = "SpeedAutoMax"
+local PREMIUM_STEAL_PROTECTION_SETTING_NAME = "PremiumStealProtection"
 local SPEED_ICON_ASSET = "rbxassetid://108512951338844"
 
 local rootContainer = Instance.new("Folder")
@@ -49,18 +50,21 @@ local SETTING_ORDER = {
 	"Music",
 	"SoundEffects",
 	SPEED_SETTING_NAME,
+	PREMIUM_STEAL_PROTECTION_SETTING_NAME,
 }
 
 local ICONS = {
 	Music = "rbxassetid://125384263224347",
 	SoundEffects = "rbxassetid://131189007512696",
 	Speed = SPEED_ICON_ASSET,
+	PremiumStealProtection = "rbxassetid://125384263224347",
 	HidePopUps = "rbxassetid://77322372470208",
 	LowGraphic = "rbxassetid://131189007512696",
 }
 
 local DISPLAY_LABELS = {
 	SoundEffects = "Sounds",
+	PremiumStealProtection = "Steal Protection",
 }
 
 local SETTING_ALIASES = {
