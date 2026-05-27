@@ -739,6 +739,41 @@ function ProfileMigrations.Apply(data)
 		premiumCrewStealProtection.RemovedReason = ""
 	end
 
+	local raidShield = ensureTable(data, "RaidShield")
+	raidShield.SchemaVersion = math.max(1, math.floor(coerceNumber(raidShield.SchemaVersion, 1)))
+	raidShield.Enabled = coerceBoolean(raidShield.Enabled, settings.PremiumStealProtectionEnabled == true)
+	raidShield.SuppressionUntil = math.max(0, coerceNumber(raidShield.SuppressionUntil, 0))
+	raidShield.NewPlayerGrantSeeded = coerceBoolean(raidShield.NewPlayerGrantSeeded, false)
+	if typeof(raidShield.LastRaidPenaltyReceiptId) ~= "string" then
+		raidShield.LastRaidPenaltyReceiptId = ""
+	end
+	raidShield.LastRaidPenaltyAt = math.max(0, coerceNumber(raidShield.LastRaidPenaltyAt, 0))
+	if typeof(raidShield.LastRaidPenaltyReason) ~= "string" then
+		raidShield.LastRaidPenaltyReason = ""
+	end
+	local raidShieldGrants = ensureTable(raidShield, "Grants")
+	local timePlayed = math.max(0, coerceNumber(totalStats.TimePlayed, 0))
+	local newPlayerDuration = 28800
+	if raidShield.NewPlayerGrantSeeded ~= true then
+		raidShield.Enabled = settings.PremiumStealProtectionEnabled == true
+		raidShield.NewPlayerGrantSeeded = true
+		if premiumCrewStealProtection.NewPlayerRemoved == true then
+			raidShield.Enabled = false
+		elseif timePlayed < newPlayerDuration and typeof(raidShieldGrants.new_player) ~= "table" then
+			local migrationTime = os.time()
+			local remaining = math.max(1, newPlayerDuration - math.floor(timePlayed))
+			raidShieldGrants.new_player = {
+				Source = "new_player",
+				GrantedAt = migrationTime,
+				StartsAt = migrationTime,
+				ExpiresAt = migrationTime + remaining,
+				DurationSeconds = remaining,
+				RevokedAt = 0,
+				RevokedReason = "",
+			}
+		end
+	end
+
 	local tutorialStartAmount = coerceNumber(Economy.Tutorial and Economy.Tutorial.StartingBeli, 0)
 	if hiddenLeaderstats.TutorialStarterBeliGranted ~= true then
 		if hiddenLeaderstats.Tutorial == true then

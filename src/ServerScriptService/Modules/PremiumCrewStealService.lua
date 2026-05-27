@@ -15,7 +15,7 @@ local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("Cr
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
 local PremiumCrewStealCooldowns = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealCooldowns"))
 local PremiumCrewStealPricing = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealPricing"))
-local PremiumCrewStealProtection = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealProtection"))
+local RaidShieldService = require(ServerScriptService.Modules:WaitForChild("RaidShieldService"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 local ShipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
@@ -403,7 +403,10 @@ local function reasonToMessage(reason, detail)
 		return "This player is protected from premium steals."
 	elseif reason == "buyer_victim_cooldown" then
 		return getBuyerVictimCooldownMessage(detail and detail.Remaining)
-	elseif reason == "cooldown_persistence_unavailable" or reason == "protection_persistence_unavailable" then
+	elseif reason == "cooldown_persistence_unavailable"
+		or reason == "protection_persistence_unavailable"
+		or reason == "shield_persistence_unavailable"
+	then
 		return "Premium stealing is temporarily unavailable. Try again soon."
 	elseif reason == "stand_reserved" or reason == "stand_locked" then
 		return "That crewmate is already reserved for another premium steal purchase. Try again in a moment."
@@ -479,20 +482,16 @@ local function buildSnapshot(buyer, victim, standName, options)
 		reservationsByStandKey[reservationKey] = nil
 	end
 
-	local protected, protectedRemaining, protectionReason = PremiumCrewStealProtection.IsProtected(victim)
+	local protected, protectedRemaining, protectionReason = RaidShieldService.IsPlayerProtected(victim)
 	if protected == nil then
-		return nil, protectionReason or "protection_persistence_unavailable"
+		return nil, "protection_persistence_unavailable", {
+			Reason = protectionReason,
+		}
 	end
 	if protected then
 		return nil, "victim_protected", {
 			Remaining = protectedRemaining,
 		}
-	end
-	if Config.Protection.RemoveOnSuccessfulSteal == true then
-		local canPersistProtectionRemoval, persistProtectionReason = PremiumCrewStealProtection.CanPersistRemoval(buyer)
-		if canPersistProtectionRemoval ~= true then
-			return nil, persistProtectionReason or "protection_persistence_unavailable"
-		end
 	end
 
 	local cooldownAllowed, cooldownReason, cooldownRemaining =
@@ -1019,6 +1018,9 @@ local function recordSuccessfulReceipt(profile, receiptInfo, buyer, victim, offe
 		VictimStandClearedAt = if finalized then os.time() else nil,
 		CooldownPersisted = finalized,
 		ProtectionRemovalPersisted = if Config.Protection.RemoveOnSuccessfulSteal == true then finalized else nil,
+		RaidShieldPenaltyApplied = finalized,
+		RaidShieldSuppressionUntil = nil,
+		RaidShieldPenaltyReason = nil,
 		PersistenceFinalized = finalized,
 		GrantReady = finalized,
 		FinalizedAt = if finalized then os.time() else nil,
@@ -1136,14 +1138,27 @@ local function finalizeSuccessfulReceiptPersistence(marker, buyer)
 	end
 	marker.CooldownPersisted = true
 
-	if Config.Protection.RemoveOnSuccessfulSteal == true then
-		local protectionTarget = if typeof(buyer) == "Instance" and buyer:IsA("Player") then buyer else buyerUserId
-		local protectionOk, protectionReason =
-			PremiumCrewStealProtection.ClearProtection(protectionTarget, "successful_premium_steal")
+	if Config.Protection.RemoveOnSuccessfulSteal == true and marker.RaidShieldPenaltyApplied ~= true then
+		local protectionTarget = if typeof(buyer) == "Instance" and buyer:IsA("Player") then buyer else nil
+		if not protectionTarget then
+			return false, "protection_persistence_unavailable"
+		end
+		local protectionOk, protectionStateOrReason = RaidShieldService.ApplyRaidCompletedPenalty(protectionTarget, {
+			ReceiptId = marker.PurchaseId,
+			Reason = "successful_premium_steal",
+			VictimUserId = victimUserId,
+			StandName = marker.StandName,
+			SourceInstanceId = marker.SourceInstanceId,
+			BuyerInstanceId = marker.BuyerInstanceId,
+			CompletedAt = marker.CompletedAt,
+		})
 		if protectionOk ~= true then
-			return false, protectionReason or "protection_persistence_unavailable"
+			return false, protectionStateOrReason or "protection_persistence_unavailable"
 		end
 		marker.ProtectionRemovalPersisted = true
+		marker.RaidShieldPenaltyApplied = true
+		marker.RaidShieldSuppressionUntil = protectionStateOrReason and protectionStateOrReason.SuppressionUntil or nil
+		marker.RaidShieldPenaltyReason = "successful_premium_steal"
 	end
 
 	marker.PersistenceFinalized = true
@@ -1189,6 +1204,21 @@ local function buildOfferPayload(offer, includeToken)
 		payload.Token = offer.Token
 	end
 	return payload
+end
+
+local function sendWarningForOffer(player, offer)
+	ensureRemotes()
+	local shieldPrompt = RaidShieldService.BuildRaidAttemptPromptState(player)
+	local payload = buildOfferPayload(offer, true)
+	payload.Shield = shieldPrompt
+	warningRemote:FireClient(player, payload)
+	sendResult(player, {
+		Ok = true,
+		Reason = "awaiting_confirmation",
+		Offer = buildOfferPayload(offer, false),
+		Shield = shieldPrompt,
+	})
+	return true, nil
 end
 
 local function promptPurchaseForOffer(player, offer, phase)
@@ -1345,7 +1375,7 @@ function PremiumCrewStealService.Start()
 	started = true
 
 	ensureRemotes()
-	PremiumCrewStealProtection.Start()
+	RaidShieldService.Start()
 
 	confirmRemote.OnServerEvent:Connect(function(player, token, accepted)
 		PremiumCrewStealService.HandleClientConfirmation(player, token, accepted)
@@ -1567,7 +1597,7 @@ function PremiumCrewStealService.RequestPromptFromStand(buyer, victim, _activeSh
 	})
 	scheduleOfferExpiry(offer)
 
-	return promptPurchaseForOffer(buyer, offer, "prompt")
+	return sendWarningForOffer(buyer, offer)
 end
 
 function PremiumCrewStealService.HandleClientConfirmation(player, token, accepted)

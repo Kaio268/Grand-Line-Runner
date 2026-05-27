@@ -58,6 +58,31 @@ PremiumCrewStealConfig.NewPlayerProtection = {
 	RemovedReasonPath = "PremiumCrewStealProtection.RemovedReason",
 }
 
+PremiumCrewStealConfig.RaidShield = {
+	SchemaVersion = 1,
+	DataPath = "RaidShield",
+	LegacyManualEnabledPath = "Settings.PremiumStealProtectionEnabled",
+	NewPlayerGrantId = "new_player",
+	NewPlayerSource = "new_player",
+	NewPlayerDurationSeconds = 28800,
+	SuppressionSeconds = 300,
+	Remotes = {
+		StateName = "RaidShieldState",
+		SetEnabledName = "RaidShieldSetEnabled",
+	},
+	Attributes = {
+		Enabled = "RaidShieldEnabled",
+		Active = "RaidShieldActive",
+		ActiveUntil = "RaidShieldActiveUntil",
+		RemainingSeconds = "RaidShieldRemainingSeconds",
+		SuppressionUntil = "RaidShieldSuppressionUntil",
+		SuppressionRemainingSeconds = "RaidShieldSuppressionRemainingSeconds",
+		CanEnable = "RaidShieldCanEnable",
+		DisabledReason = "RaidShieldDisabledReason",
+		Source = "RaidShieldSource",
+	},
+}
+
 PremiumCrewStealConfig.ReceiptFallback = {
 	DataKey = "PremiumCrewStealReceiptFallbacks",
 	SuccessDataKey = "PremiumCrewStealSuccessfulReceipts",

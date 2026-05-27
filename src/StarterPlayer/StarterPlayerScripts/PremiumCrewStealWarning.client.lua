@@ -109,14 +109,14 @@ local function ensureGui()
 	panel.BackgroundColor3 = THEME.Panel
 	panel.BorderSizePixel = 0
 	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.new(0.9, 0, 0, 310)
+	panel.Size = UDim2.new(0.9, 0, 0, 340)
 	panel.Parent = backdrop
 	makeCorner(panel, 10)
 	makeStroke(panel, THEME.Border, 2, 0)
 
 	local widthLimit = Instance.new("UISizeConstraint")
-	widthLimit.MaxSize = Vector2.new(460, 330)
-	widthLimit.MinSize = Vector2.new(300, 290)
+	widthLimit.MaxSize = Vector2.new(500, 370)
+	widthLimit.MinSize = Vector2.new(300, 320)
 	widthLimit.Parent = panel
 
 	local padding = Instance.new("UIPadding")
@@ -134,15 +134,15 @@ local function ensureGui()
 
 	local warning = makeLabel(panel, "Warning", 18, Enum.Font.GothamBold, THEME.Danger)
 	warning.Position = UDim2.fromOffset(0, 48)
-	warning.Size = UDim2.new(1, 0, 0, 48)
+	warning.Size = UDim2.new(1, 0, 0, 70)
 	warning.Text = "This Robux purchase will take a placed crewmate from another player's ship."
 
 	local body = makeLabel(panel, "Body", 17, Enum.Font.Gotham, THEME.Muted)
-	body.Position = UDim2.fromOffset(0, 106)
-	body.Size = UDim2.new(1, 0, 0, 96)
+	body.Position = UDim2.fromOffset(0, 126)
+	body.Size = UDim2.new(1, 0, 0, 82)
 
 	local price = makeLabel(panel, "Price", 22, Enum.Font.GothamBlack, THEME.Border)
-	price.Position = UDim2.fromOffset(0, 206)
+	price.Position = UDim2.fromOffset(0, 216)
 	price.Size = UDim2.new(1, 0, 0, 34)
 	price.TextYAlignment = Enum.TextYAlignment.Center
 
@@ -189,6 +189,19 @@ warningRemote.OnClientEvent:Connect(function(payload)
 	local panel = screen.Backdrop.Panel
 	currentToken = tostring(payload.Token or "")
 
+	local shield = if typeof(payload.Shield) == "table" then payload.Shield else {}
+	local shieldMode = tostring(shield.Mode or "")
+	if shieldMode == "shield_on" then
+		panel.Title.Text = "Raid With Shield On?"
+	elseif shieldMode == "shield_off" or shieldMode == "suppressed" then
+		panel.Title.Text = "Raid With Protection Off?"
+	else
+		panel.Title.Text = "Steal Crewmate?"
+	end
+	panel.Warning.Text = tostring(
+		shield.Message
+			or "A successful raid may affect your protection status. The server will recheck before purchase."
+	)
 	panel.Body.Text = string.format(
 		"You are about to spend Robux to steal %s from %s's ship stand %s. The server will recheck the target after purchase.",
 		tostring(payload.CrewDisplayName or "this crewmate"),

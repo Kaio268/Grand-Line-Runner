@@ -502,6 +502,7 @@ end
 
 local function SwitchRow(props)
 	local enabled = props.value == true
+	local hasStatus = typeof(props.statusText) == "string" and props.statusText ~= ""
 	local knobX = if enabled then 42 else 4
 	local fillColor = if enabled then THEME.GoldBase else THEME.SwitchFill
 	local labelText = if enabled then "ON" else "OFF"
@@ -515,7 +516,7 @@ local function SwitchRow(props)
 			Label = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromOffset(74, 22),
+				Position = UDim2.fromOffset(74, if hasStatus then 13 else 22),
 				Size = UDim2.new(1, -240, 0, 28),
 				Text = props.label,
 				TextColor3 = THEME.TextMain,
@@ -524,6 +525,21 @@ local function SwitchRow(props)
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 6,
 			}),
+			Status = hasStatus and e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(74, 42),
+				Size = UDim2.new(1, -240, 0, 18),
+				Text = props.statusText,
+				TextColor3 = THEME.GoldHighlight,
+				TextSize = 14,
+				TextScaled = false,
+				TextStrokeColor3 = THEME.TextShadow,
+				TextStrokeTransparency = 0.45,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 6,
+			}) or nil,
 			Switch = e("TextButton", {
 				AnchorPoint = Vector2.new(1, 0.5),
 				AutoButtonColor = false,
@@ -628,6 +644,7 @@ local function SettingsScreen(props)
 						props.onSwitchToggle(item.id, value)
 					end
 				end,
+				statusText = item.statusText,
 				value = item.value,
 			})
 		end

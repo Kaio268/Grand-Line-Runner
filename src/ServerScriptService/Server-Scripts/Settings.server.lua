@@ -18,9 +18,12 @@ local SettingsConfig = require(
 
 local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataManager"))
 local PlayerMovementSpeedService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("PlayerMovementSpeedService"))
+local RaidShieldService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RaidShieldService"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local DEBUG_SETTINGS_SERVER = true
 local SPEED_SETTING_NAME = "Speed"
+local PREMIUM_STEAL_PROTECTION_SETTING_NAME = "PremiumStealProtection"
 local SELECTED_SPEED_PATH = "Settings.SelectedSpeed"
 local SPEED_AUTO_MAX_PATH = "Settings.SpeedAutoMax"
 local speedConnectionsByPlayer = {}
@@ -163,6 +166,26 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 		return
 	end
 
+	if settingName == PREMIUM_STEAL_PROTECTION_SETTING_NAME then
+		if typeof(value) ~= "boolean" then
+			debugSettings("reject reason=bad_boolean value=%s", tostring(value))
+			return
+		end
+		local ok, reasonOrState, state = RaidShieldService.SetEnabled(player, value, "legacy_settings_update")
+		if ok ~= true then
+			PopUpModule:Server_SendPopUp(
+				player,
+				RaidShieldService.GetDenialMessage(reasonOrState, state),
+				Color3.fromRGB(255, 104, 104),
+				Color3.fromRGB(0, 0, 0),
+				3,
+				true
+			)
+			debugSettings("reject reason=%s value=%s", tostring(reasonOrState), tostring(value))
+		end
+		return
+	end
+
 	if settingName == SPEED_SETTING_NAME then
 		local result, reason = saveRequestedSpeed(player, value)
 		if not result then
@@ -203,6 +226,8 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 		debugSettings("saved switch player=%s path=%s value=%s", player.Name, entry.Path, tostring(value))
 	end
 end)
+
+RaidShieldService.Start()
 
 for _, player in ipairs(Players:GetPlayers()) do
 	bindPlayerSpeedSettings(player)
