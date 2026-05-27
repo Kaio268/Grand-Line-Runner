@@ -12,17 +12,19 @@ local function navButton(props)
 	local surface = Theme.getSurfaceTheme(section.themeKey)
 	local isActive = props.active == true
 	local hovered, setHovered = React.useState(false)
-	local fillColor = isActive and surface.fill or (hovered and Theme.Palette.PanelSoft or Theme.Palette.ButtonInactive)
-	local textColor = isActive and Theme.Palette.GoldSoft or Theme.Palette.Text
-	local subtitleColor = isActive and surface.accentSoft or Theme.Palette.Muted
+	local fillColor = if isActive
+		then surface.fill
+		elseif hovered then Theme.Palette.TabFillHover
+		else Theme.Palette.TabFill
+	local textColor = if isActive then Theme.Palette.GoldSoft else Theme.Palette.Text
 
 	return e("TextButton", {
 		AutoButtonColor = false,
 		BackgroundColor3 = fillColor,
-		BackgroundTransparency = 0.15,
+		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.fromOffset(props.compact and 136 or 160, 52),
+		Size = UDim2.fromOffset(props.compact and 118 or 136, props.compact and 40 or 44),
 		Text = "",
 		ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		[React.Event.MouseEnter] = function()
@@ -38,56 +40,50 @@ local function navButton(props)
 		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 12),
+			CornerRadius = UDim.new(0, 9),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Theme.Palette.GoldSoft,
-			Transparency = 0,
-			Thickness = 1.35,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, isActive and surface.fill or Theme.Palette.PanelSoft),
-				ColorSequenceKeypoint.new(1, fillColor),
-			}),
+			Color = isActive and surface.stroke or Theme.Palette.BorderSoft,
+			Transparency = isActive and 0.1 or 0.42,
+			Thickness = isActive and 1.2 or 1,
 		}),
 		Title = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(8, 8),
-			Size = UDim2.new(1, -16, 0, 15),
-			Text = section.title,
+			Position = UDim2.fromOffset(8, 0),
+			Size = UDim2.new(1, -16, 1, 0),
+			Text = section.title or "",
 			TextColor3 = textColor,
-			TextSize = 12,
-			TextStrokeColor3 = Theme.Palette.GoldSoft,
-			TextStrokeTransparency = isActive and 0.4 or 0.56,
+			TextSize = props.compact and 12 or 13,
+			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Center,
+			TextYAlignment = Enum.TextYAlignment.Center,
 			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
 		}),
-		Subtitle = e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(8, 25),
-			Size = UDim2.new(1, -16, 0, 12),
-			Text = section.eyebrow,
-			TextColor3 = subtitleColor,
-			TextSize = 10,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
-		}),
+		ActiveLine = isActive and e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundColor3 = surface.accent,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0.5, 0, 1, -4),
+			Size = UDim2.new(1, -26, 0, 3),
+			ZIndex = props.zIndex and (props.zIndex + 3) or nil,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+		}) or nil,
 	})
 end
 
 local function SectionNav(props)
 	local compact = props.compact == true
-	local padding = compact and 6 or 8
+	local padding = compact and 4 or 6
 
 	local children = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
 			HorizontalAlignment = Enum.HorizontalAlignment.Left,
-			Padding = UDim.new(0, compact and 8 or 10),
+			Padding = UDim.new(0, compact and 7 or 8),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 		Padding = e("UIPadding", {
@@ -118,7 +114,7 @@ local function SectionNav(props)
 		ScrollBarImageTransparency = 1,
 		ScrollBarThickness = 0,
 		ScrollingDirection = Enum.ScrollingDirection.X,
-		Size = props.size or UDim2.new(1, 0, 0, 58),
+		Size = props.size or UDim2.new(1, 0, 0, 48),
 		ZIndex = props.zIndex,
 	}, children)
 end

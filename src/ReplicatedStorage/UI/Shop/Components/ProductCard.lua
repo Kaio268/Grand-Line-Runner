@@ -4,23 +4,68 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local Theme = require(script.Parent.Parent:WaitForChild("Theme"))
-local Badge = require(script.Parent:WaitForChild("Badge"))
 local MonogramIcon = require(script.Parent:WaitForChild("MonogramIcon"))
 local PriceDisplay = require(script.Parent:WaitForChild("PriceDisplay"))
 
 local e = React.createElement
 
+local function buildTagRow(tags, zIndex)
+	local tagChildren = {
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+
+	local tagCount = math.min(3, #(tags or {}))
+	if tagCount <= 0 then
+		return nil
+	end
+
+	local cellOffset = math.ceil((6 * math.max(0, tagCount - 1)) / tagCount)
+	for index = 1, tagCount do
+		tagChildren["Tag" .. tostring(index)] = e("Frame", {
+			BackgroundColor3 = Theme.Palette.PanelSoft,
+			BackgroundTransparency = 0.06,
+			BorderSizePixel = 0,
+			LayoutOrder = index,
+			Size = UDim2.new(1 / tagCount, -cellOffset, 0, 22),
+			ZIndex = zIndex,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 8),
+			}),
+			Label = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Theme.Fonts.Label,
+				Size = UDim2.new(1, -8, 1, 0),
+				Position = UDim2.fromOffset(4, 0),
+				Text = tostring(tags[index] or ""),
+				TextColor3 = Theme.Palette.Muted,
+				TextSize = 10,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = zIndex and (zIndex + 1) or nil,
+			}),
+		})
+	end
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(16, 174),
+		Size = UDim2.new(1, -32, 0, 22),
+		ZIndex = zIndex,
+	}, tagChildren)
+end
+
 local function ProductCard(props)
-	local item = props.item
+	local item = props.item or {}
 	local state = item.purchaseState or {}
 	local surface = Theme.getSurfaceTheme(item.themeKey)
 	local hovered, setHovered = React.useState(false)
-	local iconSize = 70
-	local iconX = -6
-	local iconY = 54
-	local copyX = 106
-	local copyWidthOffset = copyX + 18
-	local footerHeight = 58
+	local footerHeight = 46
+	local contentZ = props.zIndex and (props.zIndex + 2) or nil
 
 	return e("Frame", {
 		Active = true,
@@ -28,7 +73,7 @@ local function ProductCard(props)
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = props.size or UDim2.new(1, 0, 1, 0),
+		Size = props.size or UDim2.fromScale(1, 1),
 		ZIndex = props.zIndex,
 		[React.Event.MouseEnter] = function()
 			setHovered(true)
@@ -38,92 +83,58 @@ local function ProductCard(props)
 		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 20),
+			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
 			Color = surface.stroke,
-			Transparency = hovered and 0.05 or 0.22,
-			Thickness = hovered and 1.6 or 1.2,
-		}),
-		Glow = e("UIStroke", {
-			Color = surface.glow,
-			Transparency = hovered and 0.78 or 0.9,
-			Thickness = 4,
+			Transparency = hovered and 0.08 or 0.28,
+			Thickness = hovered and 1.5 or 1,
 		}),
 		Gradient = e("UIGradient", {
-			Rotation = 125,
+			Rotation = 90,
 			Color = ColorSequence.new({
 				ColorSequenceKeypoint.new(0, surface.fill),
 				ColorSequenceKeypoint.new(1, surface.fillAlt),
 			}),
 		}),
-		Padding = e("UIPadding", {
-			PaddingLeft = UDim.new(0, 16),
-			PaddingRight = UDim.new(0, 16),
-			PaddingTop = UDim.new(0, 16),
-			PaddingBottom = UDim.new(0, 16),
-		}),
-		TopMeta = e("Frame", {
-			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 0, 28),
-		}, {
-			Badge = e(Badge, {
-				text = item.badge,
-				variant = item.badge,
-				position = UDim2.fromOffset(0, 0),
-				zIndex = props.zIndex and (props.zIndex + 2) or nil,
-			}),
-			Timer = item.timerText and e("TextLabel", {
-				AnchorPoint = Vector2.new(1, 0),
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Position = UDim2.new(1, 0, 0, 6),
-				Size = UDim2.new(0, 136, 0, 12),
-				Text = item.timerText,
-				TextColor3 = surface.accent,
-				TextSize = 10,
-				TextXAlignment = Enum.TextXAlignment.Right,
-				ZIndex = props.zIndex and (props.zIndex + 2) or nil,
-			}) or nil,
-		}),
 		Icon = e(MonogramIcon, {
-			position = UDim2.fromOffset(iconX, iconY),
-			size = UDim2.fromOffset(iconSize, iconSize),
+			position = UDim2.new(0.5, -42, 0, 14),
+			size = UDim2.fromOffset(84, 84),
 			image = Theme.getItemIcon(item),
 			label = item.iconText,
 			themeKey = item.themeKey,
-			zIndex = props.zIndex and (props.zIndex + 2) or nil,
+			isLarge = true,
+			zIndex = contentZ,
 		}),
 		Title = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(copyX, 48),
-			Size = UDim2.new(1, -copyWidthOffset, 0, 40),
-			Text = item.title,
+			Position = UDim2.fromOffset(14, 104),
+			Size = UDim2.new(1, -28, 0, 38),
+			Text = item.title or "",
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 25,
-			TextStrokeTransparency = 1,
+			TextSize = 21,
 			TextWrapped = true,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextYAlignment = Enum.TextYAlignment.Top,
-			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			TextYAlignment = Enum.TextYAlignment.Center,
+			ZIndex = contentZ,
 		}),
-		Description = e("TextLabel", {
+		Subtitle = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(copyX, 96),
-			Size = UDim2.new(1, -copyWidthOffset, 0, 64),
-			Text = item.description,
-			TextColor3 = Theme.Palette.Muted,
-			TextSize = 14,
-			TextWrapped = true,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextYAlignment = Enum.TextYAlignment.Top,
-			ZIndex = props.zIndex and (props.zIndex + 2) or nil,
+			Font = Theme.Fonts.BodyStrong,
+			Position = UDim2.fromOffset(16, 142),
+			Size = UDim2.new(1, -32, 0, 20),
+			Text = tostring(item.subtitle or item.description or ""),
+			TextColor3 = surface.accentSoft,
+			TextSize = 13,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = contentZ,
 		}),
+		Tags = buildTagRow(item.tags, contentZ),
 		Price = e(PriceDisplay, {
 			position = UDim2.new(0, 0, 1, -footerHeight),
-			size = UDim2.new(1, 0, 0, footerHeight - 2),
+			size = UDim2.new(1, 0, 0, footerHeight),
 			compact = true,
 			priceText = state.priceText,
 			buttonText = state.buttonText,
@@ -132,15 +143,10 @@ local function ProductCard(props)
 			isPriceLoading = state.isPriceLoading,
 			statusText = state.statusText,
 			themeKey = item.themeKey,
-			zIndex = props.zIndex and (props.zIndex + 2) or nil,
+			zIndex = contentZ,
 			onActivated = function()
 				if props.onPurchaseRequested then
 					props.onPurchaseRequested(item)
-				end
-			end,
-			onGiftActivated = function()
-				if props.onGiftRequested then
-					props.onGiftRequested(item)
 				end
 			end,
 		}),

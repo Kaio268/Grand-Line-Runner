@@ -225,17 +225,25 @@ end
 local function buildCatalogViewModel()
 	local catalog = {
 		title = Catalog.title,
-		subtitle = Catalog.subtitle,
-		heroEyebrow = Catalog.heroEyebrow,
-		heroHeadline = Catalog.heroHeadline,
-		heroCopy = Catalog.heroCopy,
-		codesPanel = Catalog.codesPanel,
-		featuredOffers = {},
+		featuredSections = {},
 		sections = {},
 	}
 
-	for index, item in ipairs(Catalog.featuredOffers or {}) do
-		catalog.featuredOffers[index] = purchaseAdapter:getViewModel(item)
+	for sectionIndex, section in ipairs(Catalog.featuredSections or {}) do
+		local sectionModel = {
+			key = section.key,
+			title = section.title,
+			eyebrow = section.eyebrow,
+			description = section.description,
+			themeKey = section.themeKey,
+			items = {},
+		}
+
+		for itemIndex, item in ipairs(section.items or {}) do
+			sectionModel.items[itemIndex] = purchaseAdapter:getViewModel(item)
+		end
+
+		catalog.featuredSections[sectionIndex] = sectionModel
 	end
 
 	for sectionIndex, section in ipairs(Catalog.sections or {}) do
@@ -277,19 +285,6 @@ local function render()
 			if not success and message then
 				setNotice(message)
 			end
-		end,
-		onGiftRequested = function(item)
-			local itemTitle = item and item.title or "This offer"
-			setNotice(itemTitle .. " gifting is not available yet.")
-		end,
-		onRedeemRequested = function(codeText)
-			local trimmed = string.gsub(tostring(codeText or ""), "^%s*(.-)%s*$", "%1")
-			if trimmed == "" then
-				setNotice("Enter a code before redeeming.")
-				return
-			end
-
-			setNotice("Code redemption is not active right now. Watch for update and event drops.")
 		end,
 		onSectionSelected = function()
 		end,

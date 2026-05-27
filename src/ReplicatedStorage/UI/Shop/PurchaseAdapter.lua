@@ -275,6 +275,13 @@ function PurchaseAdapter:_refreshStateForItem(item)
 	state.statusText = "Ready"
 	state.requiresPaidRandomPolicy = requiresPaidRandomPolicy
 
+	if purchase.kind == "stub" or purchase.id == nil then
+		state.buttonText = item.callToAction or "Coming Soon"
+		state.statusText = "Arriving soon"
+		state.buttonEnabled = false
+		return
+	end
+
 	if requiresPaidRandomPolicy then
 		self:_requestPaidRandomPolicyState()
 	end
@@ -283,13 +290,6 @@ function PurchaseAdapter:_refreshStateForItem(item)
 		state.buttonText = "Unavailable"
 		state.statusText = "Unavailable"
 		state.priceText = item.priceText or "Unavailable"
-		state.buttonEnabled = false
-		return
-	end
-
-	if purchase.kind == "stub" or purchase.id == nil then
-		state.buttonText = item.callToAction or "Coming Soon"
-		state.statusText = "Arriving soon"
 		state.buttonEnabled = false
 		return
 	end
@@ -376,6 +376,12 @@ function PurchaseAdapter:primeCatalog(catalog)
 
 	for _, item in ipairs(catalog.featuredOffers or {}) do
 		register(item)
+	end
+
+	for _, section in ipairs(catalog.featuredSections or {}) do
+		for _, item in ipairs(section.items or {}) do
+			register(item)
+		end
 	end
 
 	for _, section in ipairs(catalog.sections or {}) do

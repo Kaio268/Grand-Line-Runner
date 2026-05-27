@@ -67,7 +67,7 @@ local function FeaturedOfferCard(props)
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Label,
 				Position = UDim2.new(1, 0, 0, 6),
-				Size = UDim2.new(0, isWide and 220 or 170, 0, 14),
+				Size = UDim2.fromOffset(isWide and 220 or 170, 14),
 				Text = item.timerText,
 				TextColor3 = surface.accent,
 				TextSize = 11,

@@ -4,63 +4,59 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local Theme = require(script.Parent:WaitForChild("Theme"))
-local FeaturedOfferCard = require(script.Parent:WaitForChild("Components"):WaitForChild("FeaturedOfferCard"))
 local SectionBlock = require(script.Parent:WaitForChild("Components"):WaitForChild("SectionBlock"))
 local SectionNav = require(script.Parent:WaitForChild("Components"):WaitForChild("SectionNav"))
-local RedeemCodesPanel = require(script.Parent:WaitForChild("Components"):WaitForChild("RedeemCodesPanel"))
 
 local e = React.createElement
 
-local function titleDivider(props)
-	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.GoldShadow,
-		BackgroundTransparency = 0.22,
-		BorderSizePixel = 0,
-		Position = props.position,
-		Size = props.size,
-	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 999),
-		}),
-	})
+local FEATURED_TAB = {
+	key = "featured",
+	title = "Featured",
+	themeKey = "Gold",
+}
+
+local function buildFeaturedSection(catalog)
+	local featuredItems = {}
+
+	for _, item in ipairs(catalog.featuredOffers or {}) do
+		featuredItems[#featuredItems + 1] = item
+	end
+
+	for _, section in ipairs(catalog.featuredSections or {}) do
+		for _, item in ipairs(section.items or {}) do
+			featuredItems[#featuredItems + 1] = item
+		end
+	end
+
+	return {
+		key = FEATURED_TAB.key,
+		title = FEATURED_TAB.title,
+		themeKey = FEATURED_TAB.themeKey,
+		items = featuredItems,
+	}
 end
 
-local function sectionBanner(props)
-	return e("Frame", {
-		BackgroundTransparency = 1,
-		LayoutOrder = props.layoutOrder,
-		Size = UDim2.new(1, 0, 0, 34),
-	}, {
-		Left = titleDivider({
-			position = UDim2.new(0, 0, 0.5, 1),
-			size = UDim2.new(0.36, -14, 0, 3),
-		}),
-		Right = titleDivider({
-			position = UDim2.new(0.64, 14, 0.5, 1),
-			size = UDim2.new(0.36, -14, 0, 3),
-		}),
-		Title = e("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(420, 32),
-			Text = props.title,
-			TextColor3 = Theme.Palette.Text,
-			TextSize = 30,
-			TextStrokeColor3 = Theme.Palette.GoldSoft,
-			TextStrokeTransparency = 0.48,
-			TextXAlignment = Enum.TextXAlignment.Center,
-		}),
-	})
+local function buildPageSections(catalog)
+	local sections = {}
+	local featuredSection = buildFeaturedSection(catalog)
+
+	if #(featuredSection.items or {}) > 0 then
+		sections[#sections + 1] = featuredSection
+	end
+
+	for _, section in ipairs(catalog.sections or {}) do
+		sections[#sections + 1] = section
+	end
+
+	return sections
 end
 
 local function ShopShell(props)
 	local shellRef = React.useRef(nil)
 	local scrollerRef = React.useRef(nil)
 	local contentWidth, setContentWidth = React.useState(1220)
-	local activeSectionKey, setActiveSectionKey =
-		React.useState(props.catalog.sections[1] and props.catalog.sections[1].key or "")
+	local activeSectionKey, setActiveSectionKey = React.useState(FEATURED_TAB.key)
+	local activeSectionKeyRef = React.useRef(FEATURED_TAB.key)
 
 	React.useEffect(function()
 		local shell = shellRef.current
@@ -81,21 +77,24 @@ local function ShopShell(props)
 	end, {})
 
 	local columns = 3
-	if contentWidth < 1140 then
+	if contentWidth < 1080 then
 		columns = 2
 	end
-	if contentWidth < 760 then
+	if contentWidth < 720 then
 		columns = 1
 	end
 
-	local wideHero = contentWidth >= 1160
-	local headerHeight = 136
-	local noticeHeight = props.noticeText and 48 or 0
-	local navHeight = 68
-	local navTop = headerHeight + noticeHeight + 12
-	local contentTop = navTop + navHeight + 14
-	local titleTextSize = contentWidth >= 1320 and 56 or (contentWidth >= 1120 and 52 or 46)
-	local compactNav = contentWidth < 1120
+	local isNarrow = contentWidth < 760
+	local headerHeight = isNarrow and 78 or 88
+	local noticeHeight = props.noticeText and 42 or 0
+	local navHeight = isNarrow and 52 or 58
+	local navTop = headerHeight + noticeHeight + 8
+	local contentTop = navTop + navHeight + 10
+	local titleTextSize = if isNarrow then 30 elseif contentWidth < 1040 then 34 else 38
+	local horizontalInset = isNarrow and 16 or 24
+	local pageSections = buildPageSections(props.catalog)
+
+	activeSectionKeyRef.current = activeSectionKey
 
 	local function scrollToSection(sectionKey)
 		local scroller = scrollerRef.current
@@ -108,13 +107,14 @@ local function ShopShell(props)
 			return false
 		end
 
-		local nextY = target.AbsolutePosition.Y - scroller.AbsolutePosition.Y + scroller.CanvasPosition.Y - 10
+		local nextY = target.AbsolutePosition.Y - scroller.AbsolutePosition.Y + scroller.CanvasPosition.Y - 8
 		local maxCanvasY = math.max(0, scroller.AbsoluteCanvasSize.Y - scroller.AbsoluteWindowSize.Y)
 		scroller.CanvasPosition = Vector2.new(0, math.clamp(math.floor(nextY), 0, maxCanvasY))
 		return true
 	end
 
 	local function handleSectionSelected(sectionKey)
+		activeSectionKeyRef.current = sectionKey
 		setActiveSectionKey(sectionKey)
 		if props.onSectionSelected then
 			props.onSectionSelected(sectionKey)
@@ -138,12 +138,12 @@ local function ShopShell(props)
 
 		local function syncActiveSection()
 			local viewportTop = scroller.AbsolutePosition.Y
-			local nextKey = props.catalog.sections[1] and props.catalog.sections[1].key or activeSectionKey
+			local nextKey = pageSections[1] and pageSections[1].key or activeSectionKeyRef.current
 
-			for _, section in ipairs(props.catalog.sections or {}) do
+			for _, section in ipairs(pageSections) do
 				local target = scroller:FindFirstChild("Section_" .. tostring(section.key), true)
 				if target and target:IsA("GuiObject") then
-					if target.AbsolutePosition.Y <= (viewportTop + 98) then
+					if target.AbsolutePosition.Y <= (viewportTop + 72) then
 						nextKey = section.key
 					else
 						break
@@ -151,7 +151,8 @@ local function ShopShell(props)
 				end
 			end
 
-			if nextKey and nextKey ~= "" then
+			if nextKey and nextKey ~= "" and nextKey ~= activeSectionKeyRef.current then
+				activeSectionKeyRef.current = nextKey
 				setActiveSectionKey(nextKey)
 			end
 		end
@@ -169,66 +170,31 @@ local function ShopShell(props)
 
 	local contentChildren = {
 		List = e("UIListLayout", {
-			Padding = UDim.new(0, 26),
+			Padding = UDim.new(0, isNarrow and 18 or 22),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 		Padding = e("UIPadding", {
-			PaddingLeft = UDim.new(0, 28),
-			PaddingRight = UDim.new(0, 36),
-			PaddingTop = UDim.new(0, 26),
-			PaddingBottom = UDim.new(0, 34),
-		}),
-		FeaturedLabel = sectionBanner({
-			layoutOrder = 1,
-			title = "Featured / Top Offers",
+			PaddingLeft = UDim.new(0, horizontalInset),
+			PaddingRight = UDim.new(0, horizontalInset + 8),
+			PaddingTop = UDim.new(0, isNarrow and 16 or 20),
+			PaddingBottom = UDim.new(0, 28),
 		}),
 	}
 
-	for index, item in ipairs(props.catalog.featuredOffers or {}) do
-		contentChildren["Featured" .. tostring(index)] = e(FeaturedOfferCard, {
-			item = item,
-			layoutOrder = 1 + index,
-			onPurchaseRequested = props.onPurchaseRequested,
-			onGiftRequested = props.onGiftRequested,
-			zIndex = 8,
-			isWide = wideHero,
-			size = UDim2.new(1, 0, 0, wideHero and 258 or 290),
-		})
-	end
-
-	for index, section in ipairs(props.catalog.sections or {}) do
+	for index, section in ipairs(pageSections) do
 		contentChildren["Section_" .. tostring(section.key or index)] = e(SectionBlock, {
 			section = section,
 			columns = columns,
-			layoutOrder = 10 + index,
+			layoutOrder = index,
 			onPurchaseRequested = props.onPurchaseRequested,
-			onGiftRequested = props.onGiftRequested,
 			zIndex = 8,
-		})
-	end
-
-	if props.catalog.codesPanel then
-		contentChildren.CodesBanner = sectionBanner({
-			layoutOrder = 998,
-			title = "Redeem Codes",
-		})
-		contentChildren.CodesPanel = e(RedeemCodesPanel, {
-			layoutOrder = 999,
-			title = props.catalog.codesPanel.title,
-			eyebrow = props.catalog.codesPanel.eyebrow,
-			description = props.catalog.codesPanel.description,
-			placeholder = props.catalog.codesPanel.placeholder,
-			helperText = props.catalog.codesPanel.helperText,
-			buttonText = props.catalog.codesPanel.buttonText,
-			zIndex = 8,
-			onRedeemRequested = props.onRedeemRequested,
 		})
 	end
 
 	contentChildren.BottomSpacer = e("Frame", {
 		BackgroundTransparency = 1,
-		LayoutOrder = 1001,
-		Size = UDim2.new(1, 0, 0, 12),
+		LayoutOrder = 1000,
+		Size = UDim2.new(1, 0, 0, 8),
 	})
 
 	return e("Frame", {
@@ -248,172 +214,135 @@ local function ShopShell(props)
 			ZIndex = 1,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 24),
+				CornerRadius = UDim.new(0, 18),
 			}),
 		}),
 		Overlay = e("Frame", {
 			BackgroundColor3 = Theme.Palette.Ink,
-			BackgroundTransparency = 0.24,
+			BackgroundTransparency = 0.16,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(2, 2),
 			Size = UDim2.new(1, -4, 1, -4),
 			ZIndex = 2,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 24),
+				CornerRadius = UDim.new(0, 18),
 			}),
 		}),
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 26),
+			CornerRadius = UDim.new(0, 20),
 		}),
 		Stroke = e("UIStroke", {
 			Color = Theme.Palette.Border,
-			Transparency = 0.02,
-			Thickness = 2.2,
-		}),
-		InnerBorder = e("Frame", {
-			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(2, 2),
-			Size = UDim2.new(1, -4, 1, -4),
-			ZIndex = 9,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 24),
-			}),
-			Stroke = e("UIStroke", {
-				Color = Theme.Palette.BorderSoft,
-				Transparency = 0.08,
-				Thickness = 1.2,
-			}),
+			Transparency = 0.05,
+			Thickness = 1.6,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({
 				ColorSequenceKeypoint.new(0, Theme.Palette.BoardSoft),
-				ColorSequenceKeypoint.new(0.42, Theme.Palette.Board),
 				ColorSequenceKeypoint.new(1, Theme.Palette.Ink),
 			}),
 		}),
 		Header = e("Frame", {
-			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(24, 8),
-			Size = UDim2.new(1, -56, 0, headerHeight),
-			ZIndex = 10,
-		}, {
-			Panel = e("Frame", {
-				BackgroundColor3 = Theme.Palette.InkSoft,
-				BackgroundTransparency = 0.08,
-				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, 6),
-				Size = UDim2.new(1, -56, 0, 112),
-				ZIndex = 10,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 20),
-				}),
-				Stroke = e("UIStroke", {
-					Color = Theme.Palette.BorderSoft,
-					Transparency = 0.06,
-					Thickness = 1.35,
-				}),
-				Gradient = e("UIGradient", {
-					Rotation = 90,
-					Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, Theme.Palette.BoardSoft),
-						ColorSequenceKeypoint.new(1, Theme.Palette.Board),
-					}),
-				}),
-			}),
-			ShopTitle = e("TextLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
-				Position = UDim2.new(0.5, -28, 0.5, 0),
-				Size = UDim2.new(1, -148, 0, 72),
-				Text = props.catalog.title or "Grand Tide Rush Store",
-				TextColor3 = Theme.Palette.GoldSoft,
-				TextSize = titleTextSize,
-				TextStrokeColor3 = Theme.Palette.GoldShadow,
-				TextStrokeTransparency = 0.44,
-				TextWrapped = true,
-				TextYAlignment = Enum.TextYAlignment.Center,
-				TextXAlignment = Enum.TextXAlignment.Center,
-				ZIndex = 11,
-			}),
-			Close = e("TextButton", {
-				AnchorPoint = Vector2.new(1, 0),
-				AutoButtonColor = false,
-				BackgroundColor3 = Color3.fromRGB(200, 0, 9),
-				BorderSizePixel = 0,
-				Position = UDim2.new(1, 0, 0, 14),
-				Size = UDim2.fromOffset(38, 38),
-				Text = "X",
-				TextColor3 = Theme.Palette.Text,
-				TextSize = 18,
-				Font = Theme.Fonts.Display,
-				ZIndex = 11,
-				[React.Event.Activated] = props.onClose,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 12),
-				}),
-				Stroke = e("UIStroke", {
-					Color = Theme.Palette.GoldShadow,
-					Transparency = 0.04,
-				}),
-			}),
-		}),
-		Notice = props.noticeText and e("Frame", {
-			BackgroundColor3 = Theme.Palette.PanelSoft,
+			BackgroundColor3 = Theme.Palette.InkSoft,
+			BackgroundTransparency = 0.06,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(30, headerHeight),
-			Size = UDim2.new(1, -60, 0, 42),
+			Position = UDim2.fromOffset(horizontalInset, 10),
+			Size = UDim2.new(1, -(horizontalInset * 2), 0, headerHeight - 18),
 			ZIndex = 10,
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 14),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Theme.Palette.Gold,
+				Color = Theme.Palette.BorderSoft,
 				Transparency = 0.12,
+				Thickness = 1.1,
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Theme.Fonts.Display,
+				Position = UDim2.fromOffset(18, 0),
+				Size = UDim2.new(1, -82, 1, 0),
+				Text = props.catalog.title or "Store",
+				TextColor3 = Theme.Palette.GoldSoft,
+				TextSize = titleTextSize,
+				TextWrapped = true,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextYAlignment = Enum.TextYAlignment.Center,
+				ZIndex = 11,
+			}),
+			Close = e("TextButton", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				AutoButtonColor = false,
+				BackgroundColor3 = Theme.Palette.CloseFill,
+				BorderSizePixel = 0,
+				Position = UDim2.new(1, -12, 0.5, 0),
+				Size = UDim2.fromOffset(40, 40),
+				Text = "X",
+				TextColor3 = Theme.Palette.Text,
+				TextSize = 18,
+				Font = Theme.Fonts.Display,
+				ZIndex = 12,
+				[React.Event.Activated] = props.onClose,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 10),
+				}),
+				Stroke = e("UIStroke", {
+					Color = Theme.Palette.CloseStroke,
+					Transparency = 0.08,
+					Thickness = 1,
+				}),
+			}),
+		}),
+		Notice = props.noticeText and e("Frame", {
+			BackgroundColor3 = Theme.Palette.PanelSoft,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(horizontalInset, headerHeight),
+			Size = UDim2.new(1, -(horizontalInset * 2), 0, 36),
+			ZIndex = 10,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
 			}),
 			Label = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(14, 0),
-				Size = UDim2.new(1, -28, 1, 0),
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(1, -24, 1, 0),
 				Text = props.noticeText,
 				TextColor3 = Theme.Palette.Text,
 				TextSize = 12,
 				TextWrapped = true,
 				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 11,
 			}),
 		}) or nil,
 		StickyNav = e("Frame", {
 			BackgroundColor3 = Theme.Palette.InkSoft,
-			BackgroundTransparency = 0.08,
+			BackgroundTransparency = 0.04,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(28, navTop),
-			Size = UDim2.new(1, -56, 0, navHeight),
+			Position = UDim2.fromOffset(horizontalInset, navTop),
+			Size = UDim2.new(1, -(horizontalInset * 2), 0, navHeight),
 			ZIndex = 12,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 20),
+				CornerRadius = UDim.new(0, 14),
 			}),
 			Stroke = e("UIStroke", {
 				Color = Theme.Palette.BorderSoft,
-				Transparency = 0.1,
-				Thickness = 1.2,
+				Transparency = 0.16,
+				Thickness = 1,
 			}),
 			Nav = e(SectionNav, {
-				layoutOrder = 1,
-				sections = props.catalog.sections,
+				sections = pageSections,
 				activeSectionKey = activeSectionKey,
 				onSectionSelected = handleSectionSelected,
-				compact = compactNav,
-				position = UDim2.fromOffset(12, 6),
-				size = UDim2.new(1, -24, 0, 54),
+				compact = contentWidth < 1020,
+				position = UDim2.fromOffset(8, 6),
+				size = UDim2.new(1, -16, 0, navHeight - 8),
 				zIndex = 13,
 			}),
 		}),
@@ -423,11 +352,13 @@ local function ShopShell(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			CanvasSize = UDim2.new(),
+			ElasticBehavior = Enum.ElasticBehavior.Never,
 			Position = UDim2.fromOffset(0, contentTop),
-			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			ScrollBarImageColor3 = Theme.Palette.Cyan,
-			ScrollBarThickness = 9,
+			ScrollBarThickness = isNarrow and 5 or 7,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
 			Size = UDim2.new(1, 0, 1, -contentTop),
+			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			ZIndex = 8,
 		}, contentChildren),
 	})

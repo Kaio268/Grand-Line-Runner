@@ -47,7 +47,7 @@ local function Badge(props)
 			AutomaticSize = Enum.AutomaticSize.X,
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Label,
-			Size = UDim2.new(0, 0, 1, 0),
+			Size = UDim2.fromScale(0, 1),
 			Text = string.upper(text),
 			TextColor3 = badgeTheme.text,
 			TextSize = 10,

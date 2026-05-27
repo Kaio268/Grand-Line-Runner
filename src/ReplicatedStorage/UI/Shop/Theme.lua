@@ -206,7 +206,23 @@ function Theme.getItemIcon(item)
 		return Theme.Assets.BeliBoostIcon
 	end
 
-	if sectionKey == "gamepasses" then
+	if sectionKey == "fruit-chests" then
+		return Theme.Assets.RebirthIcon
+	end
+
+	if sectionKey == "protection" then
+		return Theme.Assets.SettingsIcon
+	end
+
+	if sectionKey == "raiding" then
+		return Theme.Assets.QuestIcon
+	end
+
+	if sectionKey == "cosmetics" then
+		return Theme.Assets.IndexIcon
+	end
+
+	if sectionKey == "vip" or sectionKey == "gamepasses" then
 		return Theme.Assets.IndexIcon
 	end
 
