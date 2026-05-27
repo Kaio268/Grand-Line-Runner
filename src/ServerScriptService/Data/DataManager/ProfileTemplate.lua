@@ -26,6 +26,11 @@ local ProfileTemplate = {
 		Comets = 0,
 	},
 
+	Tutorials = {
+		SchemaVersion = 1,
+		Completed = {},
+	},
+
 	TotalStats = {
 		[primaryCurrency.TotalKey] = 0,
 		TotalSpeed = 0,

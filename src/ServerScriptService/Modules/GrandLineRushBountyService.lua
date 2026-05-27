@@ -9,6 +9,10 @@ local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):
 
 local Service = {}
 
+local bountyChangedEvent = Instance.new("BindableEvent")
+
+Service.BountyChanged = bountyChangedEvent.Event
+
 local started = false
 
 local function coerceNumber(value, fallback)
@@ -35,10 +39,11 @@ end
 local function setNumberIfChanged(player, path, value)
 	local current = DataManager:GetValue(player, path)
 	if typeof(current) == "number" and current == value then
-		return true
+		return true, false
 	end
 
-	return DataManager:SetValue(player, path, value)
+	local success = DataManager:SetValue(player, path, value)
+	return success, success == true
 end
 
 local function readCachedBreakdown(player)
@@ -110,8 +115,12 @@ function Service.RefreshPlayerBounty(player, crewInventory)
 	local leaderstatKey = tostring(BountyConfig.Display.LeaderstatKey or "Bounty")
 
 	setNumberIfChanged(player, "Bounty.Crew", breakdown.Crew)
-	setNumberIfChanged(player, "Bounty.Total", breakdown.Total)
-	setNumberIfChanged(player, "leaderstats." .. leaderstatKey, breakdown.Total)
+	local _, totalChanged = setNumberIfChanged(player, "Bounty.Total", breakdown.Total)
+	local _, leaderstatChanged = setNumberIfChanged(player, "leaderstats." .. leaderstatKey, breakdown.Total)
+
+	if totalChanged or leaderstatChanged then
+		bountyChangedEvent:Fire(player, breakdown)
+	end
 
 	return breakdown
 end

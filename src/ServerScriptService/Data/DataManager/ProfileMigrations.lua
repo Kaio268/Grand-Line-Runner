@@ -9,6 +9,7 @@ local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
+local TutorialConfigs = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Tutorials"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local ProfileMigrations = {}
@@ -689,6 +690,29 @@ function ProfileMigrations.Apply(data)
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = true
 	elseif coerceNumber(hiddenLeaderstats.Speed, 1) <= 1 then
 		hiddenLeaderstats.TutorialSpeedTopUpGranted = false
+	end
+
+	local tutorials = ensureTable(data, "Tutorials")
+	tutorials.SchemaVersion = math.max(
+		1,
+		math.floor(coerceNumber(tutorials.SchemaVersion, 1)),
+		math.floor(coerceNumber(TutorialConfigs.SchemaVersion, 1))
+	)
+	local completedTutorials = ensureTable(tutorials, "Completed")
+	for tutorialId, completed in pairs(completedTutorials) do
+		if typeof(tutorialId) ~= "string" or tutorialId == "" or typeof(completed) ~= "boolean" then
+			completedTutorials[tutorialId] = nil
+		end
+	end
+	if hiddenLeaderstats.Tutorial == true then
+		if completedTutorials.FirstRun == nil then
+			completedTutorials.FirstRun = true
+		end
+		for _, tutorialId in ipairs(TutorialConfigs.GetLegacyFirstRunBackfillIds()) do
+			if completedTutorials[tutorialId] == nil then
+				completedTutorials[tutorialId] = true
+			end
+		end
 	end
 
 	local settings = ensureTable(data, "Settings")
