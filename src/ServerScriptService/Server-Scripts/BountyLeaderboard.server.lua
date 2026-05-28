@@ -16,7 +16,8 @@ local MAX_ENTRIES = 10
 local READY_TIMEOUT_SECONDS = 30
 local WRITE_DEBOUNCE_SECONDS = 2
 local REFRESH_AFTER_WRITE_SECONDS = 3
-local SAFE_REFRESH_SECONDS = 120
+local MIN_GLOBAL_READ_SECONDS = 60
+local SAFE_REFRESH_SECONDS = 300
 local DATASTORE_RETRIES = 3
 local DEFAULT_SILHOUETTE_IMAGE = "rbxassetid://114486835434518"
 
@@ -33,6 +34,8 @@ local pendingWriteOrder = {}
 local writeQueuedByKey = {}
 local lastWrittenValues = {}
 local refreshScheduled = false
+local refreshDirty = false
+local lastGlobalReadAt = -math.huge
 local warnedMissingBoard = false
 
 local remotesFolder = ReplicatedStorage:FindFirstChild(REMOTES_FOLDER_NAME)
@@ -274,17 +277,25 @@ local function buildSnapshotFromPage(page)
 	return snapshot
 end
 
-local function refreshBoardFromStore()
+local function getGlobalReadCooldownRemaining()
+	return math.max(0, (lastGlobalReadAt + MIN_GLOBAL_READ_SECONDS) - os.clock())
+end
+
+local function refreshBoardFromStore(reason)
 	local budget = DataStoreService:GetRequestBudgetForRequestType(Enum.DataStoreRequestType.GetSortedAsync)
 	if budget <= 0 then
 		return false, "no_get_budget"
 	end
 
-	local ok, pagesOrError = callWithRetries(function()
+	lastGlobalReadAt = os.clock()
+	local ok, pagesOrError = pcall(function()
 		return bountyStore:GetSortedAsync(false, MAX_ENTRIES)
 	end)
 	if not ok then
-		warn("[BountyLeaderboard] Failed to read OrderedDataStore: " .. tostring(pagesOrError))
+		warn(("[BountyLeaderboard] Failed to read OrderedDataStore reason=%s: %s"):format(
+			tostring(reason or "unspecified"),
+			tostring(pagesOrError)
+		))
 		return false, pagesOrError
 	end
 
@@ -293,17 +304,38 @@ local function refreshBoardFromStore()
 	return true, nil
 end
 
-local function scheduleBoardRefresh(delaySeconds)
+local function scheduleBoardRefresh(reason, delaySeconds)
+	refreshDirty = true
+
 	if refreshScheduled then
 		return
 	end
 
+	local requestedDelay = math.max(0, tonumber(delaySeconds) or 0)
+	local cooldownDelay = getGlobalReadCooldownRemaining()
+	local scheduledDelay = math.max(requestedDelay, cooldownDelay)
+
 	refreshScheduled = true
-	task.delay(delaySeconds or 0, function()
+	task.delay(scheduledDelay, function()
 		refreshScheduled = false
-		local refreshed = refreshBoardFromStore()
+
+		if not refreshDirty then
+			return
+		end
+
+		local cooldownRemaining = getGlobalReadCooldownRemaining()
+		if cooldownRemaining > 0 then
+			scheduleBoardRefresh(reason or "cooldown", cooldownRemaining)
+			return
+		end
+
+		refreshDirty = false
+		local refreshed, refreshReason = refreshBoardFromStore(reason)
 		if not refreshed then
 			renderSnapshot(currentSnapshot)
+			refreshDirty = true
+			local retryDelay = if refreshReason == "no_get_budget" then math.min(15, MIN_GLOBAL_READ_SECONDS) else MIN_GLOBAL_READ_SECONDS
+			scheduleBoardRefresh(refreshReason or "read_retry", retryDelay)
 		end
 	end)
 end
@@ -390,7 +422,7 @@ local function drainWrites()
 
 				if ok then
 					lastWrittenValues[key] = value
-					scheduleBoardRefresh(REFRESH_AFTER_WRITE_SECONDS)
+					scheduleBoardRefresh("write_success", REFRESH_AFTER_WRITE_SECONDS)
 				else
 					warn(("[BountyLeaderboard] Failed to write bounty userId=%s: %s"):format(key, tostring(err)))
 					pendingWrites[key] = entry
@@ -433,7 +465,7 @@ local function refreshPlayerWhenReady(player)
 		if ready and player.Parent == Players then
 			BountyService.RefreshPlayerBounty(player)
 			queuePlayerBountyWrite(player)
-			scheduleBoardRefresh(REFRESH_AFTER_WRITE_SECONDS)
+			scheduleBoardRefresh("player_ready", REFRESH_AFTER_WRITE_SECONDS)
 		end
 	end)
 end
@@ -463,7 +495,7 @@ local function disconnectPlayer(player)
 	queuePlayerBountyWrite(player)
 	disconnectConnections(playerConnections[player])
 	playerConnections[player] = nil
-	scheduleBoardRefresh(REFRESH_AFTER_WRITE_SECONDS)
+	scheduleBoardRefresh("player_left", REFRESH_AFTER_WRITE_SECONDS)
 end
 
 snapshotRequest.OnServerInvoke = function()
@@ -478,7 +510,7 @@ BountyService.BountyChanged:Connect(function(player, breakdown)
 		end
 		if bounty ~= nil then
 			queueBountyWrite(player, bounty)
-			scheduleBoardRefresh(REFRESH_AFTER_WRITE_SECONDS)
+			scheduleBoardRefresh("bounty_changed", REFRESH_AFTER_WRITE_SECONDS)
 		end
 	end
 end)
@@ -495,7 +527,7 @@ task.spawn(drainWrites)
 task.spawn(function()
 	renderSnapshot({})
 	task.wait(2)
-	if not refreshBoardFromStore() then
+	if not refreshBoardFromStore("startup") then
 		renderSnapshot(currentSnapshot)
 	end
 
@@ -503,7 +535,7 @@ task.spawn(function()
 		for _, player in ipairs(Players:GetPlayers()) do
 			queuePlayerBountyWrite(player)
 		end
-		scheduleBoardRefresh()
+		scheduleBoardRefresh("safety")
 		task.wait(SAFE_REFRESH_SECONDS)
 	end
 end)
