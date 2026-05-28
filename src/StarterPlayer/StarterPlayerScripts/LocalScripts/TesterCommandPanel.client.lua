@@ -136,6 +136,9 @@ local MOBILE_PANEL_SCALE_CAP = 0.82
 local STATUS_OK = COLORS.Green
 local STATUS_WARN = COLORS.Gold
 local STATUS_ERROR = COLORS.Red
+local DROPDOWN_OPTION_THRESHOLD = 6
+local DROPDOWN_ROW_HEIGHT = 34
+local DROPDOWN_MAX_HEIGHT = 180
 
 local CATEGORY_ORDER = {
 	"All",
@@ -344,10 +347,10 @@ local COMMANDS = {
 	{
 		Section = "Chests",
 		Title = "Give Chest",
-		Help = "Server cap: 5 chests per command.",
+		Help = "Server cap: 500 chests per command.",
 		Controls = {
 			{ Type = "select", Key = "tier", Label = "Tier", Options = CHEST_OPTIONS, Default = "Wooden" },
-			{ Type = "number", Key = "amount", Label = "Amount", Placeholder = "1", Default = "1", PositiveOnly = true },
+			{ Type = "number", Key = "amount", Label = "Amount", Placeholder = "1-500", Default = "1", PositiveOnly = true },
 		},
 		Build = function(values)
 			return "/chest " .. values.tier .. " " .. values.amount
@@ -356,9 +359,9 @@ local COMMANDS = {
 	{
 		Section = "Economy",
 		Title = "Give Beli",
-		Help = "Server cap: 25,000 absolute delta.",
+		Help = "Server cap: 500Q absolute delta. Enter 5e17 or the full number; suffixes are not parsed.",
 		Controls = {
-			{ Type = "number", Key = "amount", Label = "Delta", Placeholder = "1000", Default = "1000", AllowNegative = true },
+			{ Type = "number", Key = "amount", Label = "Delta", Placeholder = "5e17", Default = "1000", AllowNegative = true },
 		},
 		Build = function(values)
 			return "/beli " .. values.amount
@@ -367,10 +370,10 @@ local COMMANDS = {
 	{
 		Section = "Economy",
 		Title = "Give Resource or Food",
-		Help = "Caps: Timber 600, Iron 220, Ancient Timber 15, Apple/Rice 100, Meat 50, Sea Beast Meat 15.",
+		Help = "Server cap: 5,000 per resource or food command.",
 		Controls = {
 			{ Type = "select", Key = "resource", Label = "Resource", Options = RESOURCE_OPTIONS, Default = "Timber" },
-			{ Type = "number", Key = "amount", Label = "Amount", Placeholder = "25", Default = "25", PositiveOnly = true },
+			{ Type = "number", Key = "amount", Label = "Amount", Placeholder = "1-5000", Default = "25", PositiveOnly = true },
 		},
 		Build = function(values)
 			return "/give " .. values.resource .. " " .. values.amount
@@ -391,9 +394,9 @@ local COMMANDS = {
 	{
 		Section = "Progression",
 		Title = "Set Speed",
-		Help = "Server cap: speed 1 through 50.",
+		Help = "Server cap: speed 1 through 500.",
 		Controls = {
-			{ Type = "number", Key = "amount", Label = "Speed", Placeholder = "5", Default = "5", PositiveOnly = true },
+			{ Type = "number", Key = "amount", Label = "Speed", Placeholder = "1-500", Default = "5", PositiveOnly = true },
 		},
 		Build = function(values)
 			return "/speed " .. values.amount
@@ -737,6 +740,7 @@ local selectedCategory = "All"
 local searchQuery = ""
 local lastSentAt = 0
 local renderCommandList
+local activeDropdownCloser = nil
 
 local function setStatus(text, color)
 	statusLabel.Text = cleanSingleLine(text, 180)
@@ -777,6 +781,7 @@ for index, categoryName in ipairs(CATEGORY_ORDER) do
 end
 
 local function makeSelector(parent, control, values)
+	local options = control.Options or {}
 	local selectedValue = tostring(control.Default or ((control.Options and control.Options[1]) and control.Options[1].Value) or "")
 	values[control.Key] = selectedValue
 
@@ -791,6 +796,205 @@ local function makeSelector(parent, control, values)
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Parent = parent,
 	})
+
+	local useDropdown = control.UseDropdown == true or #options > DROPDOWN_OPTION_THRESHOLD
+	if useDropdown then
+		local function getOptionLabel(value)
+			for _, option in ipairs(options) do
+				local optionValue = tostring(option.Value or "")
+				if optionValue == value then
+					return tostring(option.Label or optionValue)
+				end
+			end
+
+			return value ~= "" and value or "Select"
+		end
+
+		local dropdown = create("Frame", {
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			LayoutOrder = 2,
+			Size = UDim2.new(1, 0, 0, 40),
+			Parent = parent,
+		})
+
+		local closedColor = Color3.fromRGB(7, 17, 36)
+		local hoverColor = Color3.fromRGB(11, 24, 48)
+		local openColor = COLORS.PanelRaised
+		local hovered = false
+
+		local selectedField = create("Frame", {
+			BackgroundColor3 = closedColor,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.new(1, 0, 0, 38),
+			Parent = dropdown,
+		})
+		addCorner(selectedField, 10)
+		addStroke(selectedField, COLORS.BorderSoft, 1, 0.18)
+
+		local selectedLabel = create("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = FONT,
+			Position = UDim2.fromOffset(12, 0),
+			Size = UDim2.new(1, -52, 1, 0),
+			Text = "",
+			TextColor3 = COLORS.Text,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Parent = selectedField,
+		})
+
+		local arrow = create("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			BackgroundTransparency = 1,
+			Font = FONT,
+			Position = UDim2.new(1, -12, 0, 0),
+			Size = UDim2.fromOffset(20, 38),
+			Text = "v",
+			TextColor3 = COLORS.Gold,
+			TextSize = 14,
+			Parent = selectedField,
+		})
+
+		local selectedButton = create("TextButton", {
+			AutoButtonColor = false,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Font = FONT,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.fromScale(1, 1),
+			Text = "",
+			TextTransparency = 1,
+			Parent = selectedField,
+		})
+
+		local list = create("ScrollingFrame", {
+			Active = true,
+			BackgroundColor3 = Color3.fromRGB(7, 17, 36),
+			BorderSizePixel = 0,
+			CanvasSize = UDim2.fromOffset(0, 0),
+			AutomaticCanvasSize = Enum.AutomaticSize.Y,
+			Position = UDim2.fromOffset(0, 46),
+			ScrollBarImageColor3 = COLORS.Gold,
+			ScrollBarThickness = 5,
+			ScrollingDirection = Enum.ScrollingDirection.Y,
+			Size = UDim2.fromScale(1, 0),
+			Visible = false,
+			Parent = dropdown,
+		})
+		addCorner(list, 10)
+		addStroke(list, COLORS.BorderSoft, 1, 0.14)
+		addPadding(list, 6, 6, 8, 6)
+
+		local listLayout = create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			Padding = UDim.new(0, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Parent = list,
+		})
+
+		local open = false
+		local function refreshSelected()
+			selectedLabel.Text = getOptionLabel(values[control.Key])
+		end
+
+		local closeDropdown
+		local function refreshDropdownChrome()
+			if open then
+				selectedField.BackgroundColor3 = openColor
+				arrow.Text = "^"
+				arrow.TextColor3 = COLORS.Cyan
+			else
+				selectedField.BackgroundColor3 = hovered and hoverColor or closedColor
+				arrow.Text = "v"
+				arrow.TextColor3 = COLORS.Gold
+			end
+		end
+
+		local function setOpen(nextOpen)
+			if dropdown.Parent == nil then
+				if activeDropdownCloser == closeDropdown then
+					activeDropdownCloser = nil
+				end
+				return
+			end
+
+			open = nextOpen == true
+			if open and activeDropdownCloser and activeDropdownCloser ~= closeDropdown then
+				activeDropdownCloser()
+			end
+
+			local desiredHeight = math.min((#options * DROPDOWN_ROW_HEIGHT) + 14, DROPDOWN_MAX_HEIGHT)
+			list.Visible = open
+			list.Size = UDim2.new(1, 0, 0, open and desiredHeight or 0)
+			dropdown.Size = UDim2.new(1, 0, 0, open and (46 + desiredHeight) or 40)
+			refreshDropdownChrome()
+
+			if open then
+				activeDropdownCloser = closeDropdown
+			elseif activeDropdownCloser == closeDropdown then
+				activeDropdownCloser = nil
+			end
+		end
+
+		closeDropdown = function()
+			setOpen(false)
+		end
+
+		for optionIndex, option in ipairs(options) do
+			local value = tostring(option.Value or "")
+			local text = tostring(option.Label or value)
+			local button = create("TextButton", {
+				AutoButtonColor = true,
+				BackgroundColor3 = value == selectedValue and COLORS.Gold or COLORS.PanelRaised,
+				BorderSizePixel = 0,
+				Font = FONT,
+				LayoutOrder = optionIndex,
+				Size = UDim2.new(1, -2, 0, 30),
+				Text = text,
+				TextColor3 = value == selectedValue and Color3.fromRGB(31, 24, 10) or COLORS.Text,
+				TextSize = 12,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Parent = list,
+			})
+			addCorner(button, 8)
+			addPadding(button, 10, 0, 10, 0)
+			button.Activated:Connect(function()
+				values[control.Key] = value
+				refreshSelected()
+				for _, sibling in ipairs(list:GetChildren()) do
+					if sibling:IsA("TextButton") then
+						local active = sibling == button
+						sibling.BackgroundColor3 = active and COLORS.Gold or COLORS.PanelRaised
+						sibling.TextColor3 = active and Color3.fromRGB(31, 24, 10) or COLORS.Text
+					end
+				end
+				setOpen(false)
+			end)
+		end
+
+		listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+			list.CanvasSize = UDim2.fromOffset(0, listLayout.AbsoluteContentSize.Y + 12)
+		end)
+
+		selectedButton.Activated:Connect(function()
+			setOpen(not open)
+		end)
+		selectedButton.MouseEnter:Connect(function()
+			hovered = true
+			refreshDropdownChrome()
+		end)
+		selectedButton.MouseLeave:Connect(function()
+			hovered = false
+			refreshDropdownChrome()
+		end)
+		refreshSelected()
+		refreshDropdownChrome()
+		return
+	end
 
 	local optionGrid = create("Frame", {
 		BackgroundTransparency = 1,
@@ -816,7 +1020,7 @@ local function makeSelector(parent, control, values)
 		end
 	end
 
-	for optionIndex, option in ipairs(control.Options or {}) do
+	for optionIndex, option in ipairs(options) do
 		local value = tostring(option.Value or "")
 		local text = tostring(option.Label or value)
 		local button = create("TextButton", {
@@ -1078,6 +1282,10 @@ local function commandMatchesFilters(command)
 end
 
 local function clearCommandList()
+	if activeDropdownCloser then
+		activeDropdownCloser()
+	end
+
 	for _, child in ipairs(commandScroll:GetChildren()) do
 		if child ~= commandLayout and child ~= commandPadding then
 			child:Destroy()

@@ -230,7 +230,7 @@ function Module.Install(ctx)
 						standDebug("registerStand before updateStandHover player=%s stand=%s", player.Name, standModel.Name)
 						updateStandHover(player, standModel, name)
 						standDebug("registerStand after updateStandHover player=%s stand=%s", player.Name, standModel.Name)
-						standDebug("registerStand restore-done player=%s stand=%s incomePerTick=%s", player.Name, standModel.Name, tostring(getIncomeWithLevel(player, name)))
+						standDebug("registerStand restore-done player=%s stand=%s incomePerTick=%s", player.Name, standModel.Name, tostring(getIncomeWithLevel(player, name, restoredInstanceId)))
 					else
 						saveTrace(
 							"restoreSkipped player=%s userId=%s stand=%s reason=empty_saved_name",

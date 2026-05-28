@@ -5,6 +5,7 @@ local Configs = Modules:WaitForChild("Configs")
 
 local VariantCfg = require(Configs:WaitForChild("CrewVariants"))
 local CrewMembers = require(script.Parent:WaitForChild("CrewMembers"))
+local CrewIncomeBalance = require(script.Parent:WaitForChild("CrewIncomeBalance"))
 
 local CrewCatalog = {}
 
@@ -80,12 +81,14 @@ local function infoFromProductionEntry(entry)
 	info.RealCharacterName = tostring(entry.RealCharacterName or "")
 	info.Arc = tostring(entry.Arc or "")
 	info.CrewArc = info.Arc
-	info.Rarity = tostring(entry.Rarity or "Common")
+	info.Rarity = CrewIncomeBalance.NormalizeRarity(entry.Rarity or "Common")
 	info.Render = render
 	info.GoldenRender = tostring(entry.GoldenRender or render)
 	info.DiamondRender = tostring(entry.DiamondRender or render)
 	info.RenderStatus = renderStatus
-	info.Income = tonumber(entry.Income) or 0
+	local baseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(info.Rarity)
+	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetBaseIncomeRange(info.Rarity)
+	info.Income = baseIncomeRoll
 	info.Chance = tonumber(entry.Chance) or 0
 	info.TimeLeft = tonumber(entry.TimeLeft) or 30
 	info.ModelNameVerified = entry.ModelNameVerified == true
@@ -230,7 +233,6 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	end
 
 	local variantInfo = getVariantConfig(variantKey)
-	local mult = tonumber(variantInfo and variantInfo.IncomeMult) or 1
 	local variantPrefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
 	local variantCrewMemberId = variantPrefix .. tostring(baseInfo.CrewMemberId or baseIdStr)
 	local info = cloneShallow(baseInfo)
@@ -253,7 +255,7 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	else
 		info.Render = tostring(baseInfo.Render or "")
 	end
-	info.Income = math.floor((tonumber(baseInfo.Income) or 0) * mult + 0.5)
+	info.Income = CrewIncomeBalance.ComputeIncome(tonumber(baseInfo.Income) or 0, variantKey)
 
 	return info
 end

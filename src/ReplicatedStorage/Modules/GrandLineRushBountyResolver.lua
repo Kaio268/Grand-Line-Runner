@@ -7,6 +7,9 @@ local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local BountyConfig = require(Configs:WaitForChild("GrandLineRushBounty"))
 
 local Resolver = {}
+local RARITY_ALIASES = {
+	Mythic = "Mythical",
+}
 
 local function round(value)
 	return math.floor((tonumber(value) or 0) + 0.5)
@@ -24,6 +27,11 @@ local function normalizeRarity(rawRarity)
 	local rarity = tostring(rawRarity or "Common")
 	if BountyConfig.Crew.RarityBaseByRarity[rarity] then
 		return rarity
+	end
+
+	local alias = RARITY_ALIASES[rarity]
+	if alias and BountyConfig.Crew.RarityBaseByRarity[alias] then
+		return alias
 	end
 
 	return "Common"
@@ -48,7 +56,7 @@ local function resolveCrewContext(crewLike)
 	local config = resolvedConfig or resolveCrewConfig(crewMemberId)
 	local rarity = normalizeRarity(context.Rarity or (config and config.Rarity) or "Common")
 	local level = math.max(1, math.floor(coerceNumber(context.Level, 1)))
-	local income = math.max(0, coerceNumber(config and tonumber(config.Income), coerceNumber(context.Income, 0)))
+	local income = math.max(0, coerceNumber(context.Income, coerceNumber(config and tonumber(config.Income), 0)))
 
 	return {
 		CrewMemberId = crewMemberId,

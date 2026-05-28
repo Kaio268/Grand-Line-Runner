@@ -578,15 +578,24 @@ function Module.Install(ctx)
 		return progress.Level
 	end
 
-	local function getBaseIncome(player, crewMemberName)
+	local function getBaseIncome(player, crewMemberName, crewMemberInstanceId)
+		crewMemberInstanceId = tostring(crewMemberInstanceId or "")
+		if crewMemberInstanceId ~= "" then
+			local _, instanceData = CrewInstanceService.GetInstance(player, crewMemberInstanceId)
+			local savedIncome = typeof(instanceData) == "table" and tonumber(instanceData.Income) or nil
+			if savedIncome and savedIncome > 0 then
+				return savedIncome
+			end
+		end
+
 		local resolved = resolveCrewMemberRecord(player, crewMemberName)
 		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
 		local base = info and (tonumber(info.Income) or 0) or 0
 		return base
 	end
 
-	local function getIncomeWithLevel(player, crewMemberName)
-		local base = getBaseIncome(player, crewMemberName)
+	local function getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
+		local base = getBaseIncome(player, crewMemberName, crewMemberInstanceId)
 		if base <= 0 then
 			return 0
 		end
@@ -607,7 +616,10 @@ function Module.Install(ctx)
 	end
 
 	local function getStandIncomePerSecond(player, standName, crewMemberName)
-		return getIncomeWithLevel(player, crewMemberName) * getStandCollectMultiplier(player, standName) * getBeliBoostMultiplier(player)
+		local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
+		return getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
+			* getStandCollectMultiplier(player, standName)
+			* getBeliBoostMultiplier(player)
 	end
 
 	local function normalizeIncomeSnapshotSlotKey(value)

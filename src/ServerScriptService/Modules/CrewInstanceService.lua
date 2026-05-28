@@ -3,6 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewInventoryDerivedCache = require(script.Parent:WaitForChild("CrewInventoryDerivedCache"))
@@ -19,6 +20,7 @@ local TUTORIAL_COMPLETION_PATH = "HiddenLeaderstats.Tutorial"
 local CANONICAL_INVENTORY_PATH = "CrewMemberInventory"
 local INVENTORY_AUTHORITY_AUDIT_PATH = "CrewMemberInventoryAuthorityAudit"
 local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
+local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
 local INVENTORY_AUTHORITY_SNAPSHOT_VERSION = 1
 local CAPTAIN_SLOT_KEY = "Captain"
 -- Function names still carry legacy terms for callers, but normal gameplay now
@@ -277,6 +279,16 @@ local function buildMetadata(storageName, entry)
 	}
 end
 
+local function buildIncomeRollFields(rarity, variant, instanceData)
+	local baseIncomeRoll = CrewIncomeBalance.GetOrRollBaseIncome(
+		rarity,
+		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+	)
+	local income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant)
+
+	return baseIncomeRoll, income, CrewIncomeBalance.GetIncomeRollVersion()
+end
+
 local function getInstanceCrewKey(instanceData)
 	if typeof(instanceData) ~= "table" then
 		return ""
@@ -365,14 +377,19 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		return nil
 	end
 
+	local rarity = CrewIncomeBalance.NormalizeRarity(metadata.Rarity or instanceData.Rarity)
+	local variant = CrewIncomeBalance.NormalizeVariant(metadata.Variant or instanceData.Variant)
+	local baseIncomeRoll, income, incomeRollVersion = buildIncomeRollFields(rarity, variant, instanceData)
 	local normalized = {
 		InstanceId = tostring(instanceId),
 		StorageName = metadata.StorageName,
 		LegacyStorageName = metadata.LegacyStorageName,
 		BaseName = metadata.BaseName,
-		Variant = metadata.Variant,
-		Rarity = tostring(metadata.Rarity or instanceData.Rarity or "Common"),
-		Income = tonumber(metadata.Income or instanceData.Income) or 0,
+		Variant = variant,
+		Rarity = rarity,
+		BaseIncomeRoll = baseIncomeRoll,
+		IncomeRollVersion = incomeRollVersion,
+		Income = income,
 		Render = firstNonEmpty(metadata.Render, instanceData.Render),
 		GoldenRender = firstNonEmpty(metadata.GoldenRender, instanceData.GoldenRender, metadata.Render),
 		DiamondRender = firstNonEmpty(metadata.DiamondRender, instanceData.DiamondRender, metadata.Render),
@@ -429,7 +446,7 @@ local function normalizeInventoryData(rawInventory, options)
 		end
 	end
 	if options.Canonical == true then
-		local schemaVersion = math.max(1, math.floor(coerceNumber(inventory.SchemaVersion, 1)))
+		local schemaVersion = CREW_MEMBER_INVENTORY_SCHEMA_VERSION
 		if inventory.SchemaVersion ~= schemaVersion then
 			inventory.SchemaVersion = schemaVersion
 			changed = true
@@ -1028,6 +1045,8 @@ local function createInstanceInternal(player, crewMemberInventory, storageName, 
 		BaseName = overrides and overrides.BaseName or metadata.BaseName,
 		Variant = overrides and overrides.Variant or metadata.Variant,
 		Rarity = overrides and overrides.Rarity or metadata.Rarity,
+		BaseIncomeRoll = overrides and overrides.BaseIncomeRoll or nil,
+		IncomeRollVersion = overrides and overrides.IncomeRollVersion or nil,
 		Income = overrides and overrides.Income or metadata.Income,
 		Render = overrides and overrides.Render or metadata.Render,
 		GoldenRender = overrides and overrides.GoldenRender or metadata.GoldenRender,

@@ -211,9 +211,9 @@ local function setCaptainIncomeToCollect(player, amount)
 	return dmSet(player, CAPTAIN_INCOME_PATH, math.max(0, tonumber(amount) or 0))
 end
 
-local function getBaseIncome(player, crewMemberName)
+local function getBaseIncome(player, crewMemberName, instanceId)
 	if typeof(callbacks.GetBaseIncome) == "function" then
-		return math.max(0, tonumber(callbacks.GetBaseIncome(player, crewMemberName)) or 0)
+		return math.max(0, tonumber(callbacks.GetBaseIncome(player, crewMemberName, instanceId)) or 0)
 	end
 
 	return 0
@@ -272,8 +272,8 @@ local function getCaptainCollectMultiplier(player, crewMemberName, instanceId)
 		* getCaptainBonusMultiplierForAssignment(player, instanceId)
 end
 
-local function getCaptainBankAmountPerTick(player, crewMemberName)
-	return getBaseIncome(player, crewMemberName) * getBeliBoostMultiplier(player)
+local function getCaptainBankAmountPerTick(player, crewMemberName, instanceId)
+	return getBaseIncome(player, crewMemberName, instanceId) * getBeliBoostMultiplier(player)
 end
 
 local function getCaptainDisplayIncome(player, crewMemberName, instanceId)
@@ -951,7 +951,7 @@ local function bankCaptainIncome(player, runtime)
 	setClaimTouchEnabled(runtime, true)
 
 	local assignment = getSavedCaptainAssignment(player)
-	local crewMemberName = getCaptainAssignmentCrewName(player, assignment)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
 	if crewMemberName == "" then
 		setRuntimeHasCaptain(player, false)
 		updatePromptText(player, runtime)
@@ -961,7 +961,7 @@ local function bankCaptainIncome(player, runtime)
 	end
 
 	setRuntimeHasCaptain(player, true)
-	local incomeDelta = getCaptainBankAmountPerTick(player, crewMemberName)
+	local incomeDelta = getCaptainBankAmountPerTick(player, crewMemberName, instanceId)
 	if incomeDelta > 0 then
 		local nextIncome = getCaptainIncomeToCollect(player, assignment) + incomeDelta
 		setCaptainIncomeToCollect(player, nextIncome)
@@ -1040,7 +1040,7 @@ function CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 		return 0
 	end
 
-	return getCaptainBankAmountPerTick(player, crewMemberName)
+	return getCaptainBankAmountPerTick(player, crewMemberName, instanceId)
 		* getCaptainCollectMultiplier(player, crewMemberName, instanceId)
 end
 

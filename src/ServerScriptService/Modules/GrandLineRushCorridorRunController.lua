@@ -16,6 +16,7 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local SliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
+local ChestRushService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushChestRushService"))
 
 local Controller = {}
 
@@ -28,6 +29,7 @@ local extractionTouchDebounce = {}
 local sharedChestSequence = 0
 local nextSharedChestRespawnAt = 0
 local sharedChestNonGoldStreak = 0
+local lastSharedChestRushActive = false
 local sharedChestSpawnPartCache = nil
 local worldRandom = Random.new()
 local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("CorridorRunDebugTrace") == true
@@ -1683,6 +1685,19 @@ local function getSharedChestMaxActive(sharedConfig, activePlayerCount)
 	return math.max(0, math.floor(tonumber(maxActiveConfig) or 0))
 end
 
+local function applyChestRushSpawnModifiers(maxActive, spawnInterval)
+	local modifiers = ChestRushService.GetSpawnModifiers()
+	if modifiers.Active ~= true then
+		return maxActive, spawnInterval, false
+	end
+
+	local boostedMaxActive = math.ceil(maxActive * modifiers.MaxActiveMultiplier)
+	boostedMaxActive = math.min(boostedMaxActive, modifiers.MaxActiveCap)
+
+	local boostedSpawnInterval = math.max(modifiers.MinSpawnIntervalSeconds, spawnInterval * modifiers.SpawnIntervalMultiplier)
+	return boostedMaxActive, boostedSpawnInterval, true
+end
+
 local function shouldForceSharedGold(sharedConfig)
 	local pityThreshold = math.floor(tonumber(sharedConfig.GoldPityAfterNonGoldSpawns) or 0)
 	return pityThreshold > 0 and sharedChestNonGoldStreak >= pityThreshold
@@ -2075,7 +2090,14 @@ local function ensureSharedChestNodes(rewardFolder, carriedFolder)
 	end
 
 	local spawnInterval = getSharedChestSpawnInterval(sharedConfig, activePlayerCount)
+	local chestRushActive
+	maxActive, spawnInterval, chestRushActive = applyChestRushSpawnModifiers(maxActive, spawnInterval)
 	local activeCount = countActiveSharedChests()
+	if chestRushActive and not lastSharedChestRushActive and activeCount < maxActive then
+		nextSharedChestRespawnAt = math.min(nextSharedChestRespawnAt, now)
+	end
+	lastSharedChestRushActive = chestRushActive
+
 	if activeCount >= maxActive then
 		nextSharedChestRespawnAt = now + spawnInterval
 		return
@@ -2332,6 +2354,7 @@ function Controller.Start()
 	end
 
 	SliceService.Start()
+	ChestRushService.Start()
 	started = true
 
 	local resolvedRefs = MapResolver.WaitForRefs(

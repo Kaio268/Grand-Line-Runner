@@ -39,6 +39,7 @@ local BountyService = require(ServerScriptService.Modules:WaitForChild("GrandLin
 local GrandLineRushChestToolService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestToolService"))
 local GrandLineRushVerticalSliceService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
 local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:WaitForChild("GrandLineRushCorridorRunController"))
+local GrandLineRushChestRushService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRushService"))
 local ShipResetService = require(ServerScriptService.Modules:WaitForChild("ShipResetService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local TimeRewardsService = require(ServerScriptService.Modules:WaitForChild("Time_Rewards_Server"))
@@ -114,20 +115,21 @@ local fruitAliases = {}
 local chestTierAliases = {}
 local resourceAliases = {}
 local BOOST_COMMAND_DEFAULT_MINUTES = 5
-local TESTER_CHEST_AMOUNT_CAP = 5
-local TESTER_MONEY_DELTA_CAP = 25000
+local TESTER_CHEST_AMOUNT_CAP = 500
+local TESTER_MONEY_DELTA_CAP = 500_000_000_000_000_000
 local TESTER_BOOST_DURATION_MINUTES_CAP = 30
-local TESTER_SPEED_CAP = 50
-local TESTER_FALLBACK_MATERIAL_CAP = 250
-local TESTER_FALLBACK_FOOD_CAP = 50
+local TESTER_SPEED_CAP = 500
+local TESTER_RESOURCE_AMOUNT_CAP = 5000
+local TESTER_FALLBACK_MATERIAL_CAP = TESTER_RESOURCE_AMOUNT_CAP
+local TESTER_FALLBACK_FOOD_CAP = TESTER_RESOURCE_AMOUNT_CAP
 local TESTER_RESOURCE_CAPS_BY_KEY = {
-	Timber = 600,
-	Iron = 220,
-	AncientTimber = 15,
-	Apple = 100,
-	Rice = 100,
-	Meat = 50,
-	SeaBeastMeat = 15,
+	Timber = TESTER_RESOURCE_AMOUNT_CAP,
+	Iron = TESTER_RESOURCE_AMOUNT_CAP,
+	AncientTimber = TESTER_RESOURCE_AMOUNT_CAP,
+	Apple = TESTER_RESOURCE_AMOUNT_CAP,
+	Rice = TESTER_RESOURCE_AMOUNT_CAP,
+	Meat = TESTER_RESOURCE_AMOUNT_CAP,
+	SeaBeastMeat = TESTER_RESOURCE_AMOUNT_CAP,
 }
 local boostAliases = {
 	["x2beli"] = {
@@ -194,6 +196,7 @@ local ADMIN_COMMAND_NAMES = {
 	chest = true,
 	shipreset = true,
 	clear = true,
+	chestrush = true,
 	tutorial = true,
 	wipeplayer = true,
 	resetprogress = true,
@@ -773,6 +776,81 @@ local function processHazardsCommand(player, argumentText)
 		clearReason and (", " .. tostring(clearReason)) or ""
 	))
 	return true, detail
+end
+
+local function formatChestRushRemaining(seconds)
+	seconds = math.max(0, math.floor(tonumber(seconds) or 0))
+	local minutes = math.floor(seconds / 60)
+	local remainingSeconds = seconds % 60
+	if minutes >= 60 then
+		local hours = math.floor(minutes / 60)
+		minutes %= 60
+		return string.format("%dh %02dm %02ds", hours, minutes, remainingSeconds)
+	end
+
+	return string.format("%dm %02ds", minutes, remainingSeconds)
+end
+
+local function getChestRushAction(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	local action, extra = normalizedArgument:match("^(%S+)%s*(.*)$")
+	return action or "", trimText(extra or "")
+end
+
+local function getChestRushSourceText(state)
+	if state.ScheduledActive == true and state.ForcedActive == true then
+		return "schedule+force"
+	elseif state.ScheduledActive == true then
+		return "schedule"
+	elseif state.ForcedActive == true then
+		return "force"
+	end
+
+	return "inactive"
+end
+
+local function getChestRushStatusDetail(state)
+	local active = state.Active == true
+	local remainingSeconds = math.max(0, math.floor((tonumber(state.EndsAtUnix) or tonumber(state.UnixNow) or 0) - (tonumber(state.UnixNow) or os.time())))
+	return string.format(
+		"active=%s source=%s remaining=%s scheduled=%s forced=%s",
+		active and "true" or "false",
+		getChestRushSourceText(state),
+		formatChestRushRemaining(remainingSeconds),
+		state.ScheduledActive == true and "active" or "inactive",
+		state.ForcedActive == true and "active" or "inactive"
+	)
+end
+
+local function processChestRushCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
+		return
+	end
+
+	local action, extra = getChestRushAction(argumentText)
+	if action == "" then
+		return false, "Usage: /chestrush start, /chestrush stop, or /chestrush status"
+	end
+
+	if extra ~= "" then
+		return false, "/chestrush does not accept custom duration or extra arguments."
+	end
+
+	GrandLineRushChestRushService.Start()
+
+	if action == "start" then
+		local ok, message = GrandLineRushChestRushService.ForceStart(player)
+		local state = GrandLineRushChestRushService.GetStatus()
+		return ok, string.format("%s %s", tostring(message), getChestRushStatusDetail(state))
+	elseif action == "stop" then
+		local ok, message = GrandLineRushChestRushService.ForceStop(player)
+		local state = GrandLineRushChestRushService.GetStatus()
+		return ok, string.format("%s %s", tostring(message), getChestRushStatusDetail(state))
+	elseif action == "status" then
+		return true, getChestRushStatusDetail(GrandLineRushChestRushService.GetStatus())
+	end
+
+	return false, "Usage: /chestrush start, /chestrush stop, or /chestrush status"
 end
 
 local function parseSignedAmount(text)
@@ -6103,6 +6181,19 @@ local function validateTesterGiftsCommand(commandName, argumentText)
 	return rejectTesterCommand("tester_giftreset_self_only")
 end
 
+local function validateTesterChestRushCommand(argumentText)
+	local action, extra = getChestRushAction(argumentText)
+	if extra ~= "" then
+		return rejectTesterCommand("tester_chestrush_extra_args_disallowed")
+	end
+
+	if action == "start" or action == "stop" or action == "status" then
+		return true
+	end
+
+	return rejectTesterCommand("tester_chestrush_requires_start_stop_or_status")
+end
+
 local function validateTesterCommand(commandName, argumentText)
 	if commandName == "hitbox" or commandName == "invincible" then
 		return validateTesterOnOffArgument(commandName, argumentText)
@@ -6126,6 +6217,8 @@ local function validateTesterCommand(commandName, argumentText)
 		return validateTesterBountyCommand(argumentText)
 	elseif commandName == "gifts" or commandName == "giftreset" then
 		return validateTesterGiftsCommand(commandName, argumentText)
+	elseif commandName == "chestrush" then
+		return validateTesterChestRushCommand(argumentText)
 	end
 
 	return rejectTesterCommand("tester_command_disallowed")
@@ -6534,6 +6627,13 @@ local function handleChatCommand(player, rawText, source)
 	if commandName == "chest" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processChestCommand(player, argumentText, commandContext)
+		end, commandContext)
+		return
+	end
+
+	if commandName == "chestrush" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processChestRushCommand(player, argumentText, commandContext)
 		end, commandContext)
 		return
 	end
@@ -7196,7 +7296,39 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:HazardsDevCommand")
 	end)
 
-	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=17")
+	local chestRushCommand = commandsFolder:FindFirstChild("ChestRushDevCommand")
+	if chestRushCommand and not chestRushCommand:IsA("TextChatCommand") then
+		chestRushCommand:Destroy()
+		chestRushCommand = nil
+	end
+
+	if not chestRushCommand then
+		chestRushCommand = Instance.new("TextChatCommand")
+		chestRushCommand.Name = "ChestRushDevCommand"
+		chestRushCommand.PrimaryAlias = "/chestrush"
+		chestRushCommand.SecondaryAlias = "/chestrush"
+		chestRushCommand.AutocompleteVisible = false
+		chestRushCommand.Parent = commandsFolder
+	end
+
+	chestRushCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=ChestRushDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 10) == "/chestrush" or normalizedText:sub(1, 11) == "/ chestrush" then
+			handleChatCommand(player, normalizedText, "TextChatCommand:ChestRushDevCommand")
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/chestrush " .. normalizedText) or "/chestrush"
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:ChestRushDevCommand")
+	end)
+
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=18")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do

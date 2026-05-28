@@ -80,7 +80,8 @@ function Module.Install(ctx)
 
 
 
-			local inc = runtime.getIncomeWithLevel(player, crewMemberName) * runtime.getBeliBoostMultiplier(player)
+			local inc = runtime.getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
+				* runtime.getBeliBoostMultiplier(player)
 
 			zeroIncomeLogged[player] = zeroIncomeLogged[player] or {}
 

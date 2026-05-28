@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local CrewMembers = require(Modules:WaitForChild("Crew"):WaitForChild("CrewMembers"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
@@ -309,9 +310,22 @@ local SORTED_FRUITS = getSortedFruits()
 local BELI_ICON = "rbxassetid://76300573750363"
 local LUCK_BOOST_ICON = "rbxassetid://99305009492305"
 
-local function formatIncome(value)
+local function formatBeliPerSecond(value)
 	local numeric = math.max(0, math.floor((tonumber(value) or 0) + 0.5))
-	return CurrencyUtil.formatCurrencyPerSecond(numeric)
+	return string.format("%s Beli/s", CurrencyUtil.formatCompactNumber(numeric))
+end
+
+local function formatIncomeRange(rarity, variantKey)
+	local minIncome, maxIncome = CrewIncomeBalance.GetRangeDisplayIncome(rarity, variantKey)
+	if minIncome == maxIncome then
+		return formatBeliPerSecond(minIncome)
+	end
+
+	return string.format(
+		"%s–%s Beli/s",
+		CurrencyUtil.formatCompactNumber(minIncome),
+		CurrencyUtil.formatCompactNumber(maxIncome)
+	)
 end
 
 local function isClaimed(indexRewardsFolder, threshold, claimedRewardOverrides)
@@ -458,14 +472,17 @@ function IndexData.buildViewModel(options)
 					ModelName = itemInfo.ModelName or entry.info.ModelName,
 				})
 
+				local rawIncome = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
+					* CrewIncomeBalance.GetVariantIncomeMultiplier(variantKey)
 				local unit = {
 					id = itemId,
 					baseName = entry.name,
 					name = entry.name,
 					displayName = displayName,
 					rarity = rarity,
-					production = formatIncome(itemInfo.Income or entry.info.Income or 0),
-					rawIncome = tonumber(itemInfo.Income or entry.info.Income) or 0,
+					production = formatIncomeRange(rarity, variantKey),
+					hiddenProduction = "??? Beli/s",
+					rawIncome = rawIncome,
 					discovered = discovered,
 					image = if modelPreview then "" else getCrewRenderImage(render, renderStatus),
 					staticPreviewImage = staticPreviewImage,

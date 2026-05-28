@@ -1,5 +1,5 @@
 local MAX_LEVEL = 50
-local MULTIPLIER_STEP_PER_LEVEL = 0.04
+local MULTIPLIER_STEP_PER_LEVEL = 0.08
 
 local multipliers = {}
 

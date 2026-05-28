@@ -8,6 +8,7 @@ local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local IndexDiscovery = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local TutorialConfigs = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Tutorials"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
@@ -15,6 +16,7 @@ local VariantCfg = CrewCatalog.GetVariantConfig()
 local ProfileMigrations = {}
 
 local primaryCurrency = Economy.Currency.Primary
+local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -109,6 +111,23 @@ local function normalizeVariantKey(variantKey)
 	return "Normal"
 end
 
+local function buildIncomeRollFields(rarity, variant, instanceData)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local normalizedVariant = CrewIncomeBalance.NormalizeVariant(variant)
+	local baseIncomeRoll = CrewIncomeBalance.GetOrRollBaseIncome(
+		normalizedRarity,
+		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+	)
+
+	return {
+		Rarity = normalizedRarity,
+		Variant = normalizedVariant,
+		BaseIncomeRoll = baseIncomeRoll,
+		IncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion(),
+		Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, normalizedVariant),
+	}
+end
+
 local function resolveCrewMemberItemId(storageName, baseName, variantKey)
 	local storageNameValue = tostring(storageName or "")
 	local baseNameValue = tostring(baseName or "")
@@ -158,14 +177,17 @@ local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallb
 	if variantKey == "" then
 		variantKey = "Normal"
 	end
+	local incomeFields = buildIncomeRollFields(instanceData.Rarity or "Common", variantKey, instanceData)
 
 	return {
 		InstanceId = tostring(instanceId),
 		StorageName = storageName,
 		BaseName = baseName,
-		Variant = variantKey,
-		Rarity = tostring(instanceData.Rarity or "Common"),
-		Income = coerceNumber(instanceData.Income, 0),
+		Variant = incomeFields.Variant,
+		Rarity = incomeFields.Rarity,
+		BaseIncomeRoll = incomeFields.BaseIncomeRoll,
+		IncomeRollVersion = incomeFields.IncomeRollVersion,
+		Income = incomeFields.Income,
 		Render = tostring(instanceData.Render or ""),
 		GoldenRender = tostring(instanceData.GoldenRender or instanceData.Render or ""),
 		DiamondRender = tostring(instanceData.DiamondRender or instanceData.Render or ""),
@@ -235,6 +257,8 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		BaseName = baseName,
 		Variant = variantKey,
 		Rarity = info and info.Rarity or instanceData.Rarity,
+		BaseIncomeRoll = instanceData.BaseIncomeRoll,
+		IncomeRollVersion = instanceData.IncomeRollVersion,
 		Income = info and info.Income or instanceData.Income,
 		Render = info and info.Render or instanceData.Render,
 		GoldenRender = info and info.GoldenRender or instanceData.GoldenRender,
@@ -270,6 +294,8 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		BaseName = legacyInstance.BaseName,
 		Variant = legacyInstance.Variant,
 		Rarity = legacyInstance.Rarity,
+		BaseIncomeRoll = legacyInstance.BaseIncomeRoll,
+		IncomeRollVersion = legacyInstance.IncomeRollVersion,
 		Income = legacyInstance.Income,
 		Render = legacyInstance.Render,
 		GoldenRender = legacyInstance.GoldenRender,
@@ -295,7 +321,7 @@ local function ensureCrewMemberInventoryShape(crewMemberInventory)
 		crewMemberInventory = {}
 	end
 
-	crewMemberInventory.SchemaVersion = 1
+	crewMemberInventory.SchemaVersion = CREW_MEMBER_INVENTORY_SCHEMA_VERSION
 	crewMemberInventory.NextInstanceId = math.max(1, coerceNumber(crewMemberInventory.NextInstanceId, 1))
 	crewMemberInventory.ById = ensureTable(crewMemberInventory, "ById")
 	crewMemberInventory.Order = ensureTable(crewMemberInventory, "Order")

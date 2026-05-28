@@ -20,6 +20,7 @@ local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("Gr
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local StandIncomeMultipliers = require(ServerScriptService.Modules:WaitForChild("StandsMultiply"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 
@@ -224,19 +225,26 @@ local function normalizeMaterialsTable(materials)
 	return materials
 end
 
-local function getShipIncomeMultiplier(level)
-	for _, band in ipairs(Economy.Crew.ShipIncomeMultiplierByLevelBand) do
-		if level >= band.MinLevel and level <= band.MaxLevel then
-			return band.Multiplier
-		end
+local function getCrewSummaryIncomePerSecond(crewData, mirrorData)
+	crewData = if typeof(crewData) == "table" then crewData else {}
+	mirrorData = if typeof(mirrorData) == "table" then mirrorData else {}
+
+	local income = tonumber(crewData.Income)
+	if income == nil then
+		income = tonumber(mirrorData.Income)
 	end
 
-	return 1
+	return math.max(0, income or 0)
 end
 
-local function getCrewShipIncomePerHour(rarity, level)
-	local baseIncome = Economy.Crew.ShipIncomePerHourByRarity[rarity] or 0
-	return math.floor((baseIncome * getShipIncomeMultiplier(level)) + 0.5)
+local function getCrewSummaryLevelMultiplier(level)
+	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
+	return tonumber(StandIncomeMultipliers[tostring(safeLevel)]) or 1
+end
+
+local function getCrewSummaryIncomePerHour(crewData, mirrorData, level)
+	local incomePerSecond = getCrewSummaryIncomePerSecond(crewData, mirrorData)
+	return math.floor((incomePerSecond * getCrewSummaryLevelMultiplier(level) * 3600) + 0.5)
 end
 
 local function getCrewXPRequiredForLevel(rarity, level)
@@ -345,6 +353,8 @@ local function buildCrewSummary(instanceId, crewData, mirrorData, options)
 	local currentXP = math.max(0, math.floor(getCrewSummaryNumber(crewData.CurrentXP, mirrorData.CurrentXP, 0)))
 	local totalXP = math.max(0, math.floor(getCrewSummaryNumber(crewData.TotalXP, mirrorData.TotalXP, 0)))
 	local rarity = firstNonEmpty(crewData.Rarity, mirrorData.Rarity, "Common")
+	local baseIncomeRoll = math.max(0, math.floor(getCrewSummaryNumber(crewData.BaseIncomeRoll, mirrorData.BaseIncomeRoll, 0)))
+	local income = getCrewSummaryIncomePerSecond(crewData, mirrorData)
 	local canonicalInstanceId = firstNonEmpty(options.CanonicalInstanceId, crewData.CanonicalInstanceId)
 	local legacyInstanceId = firstNonEmpty(options.LegacyInstanceId)
 
@@ -361,7 +371,9 @@ local function buildCrewSummary(instanceId, crewData, mirrorData, options)
 		CurrentXP = currentXP,
 		TotalXP = totalXP,
 		NextLevelXP = getCrewXPRequiredForLevel(rarity, level),
-		ShipIncomePerHour = getCrewShipIncomePerHour(rarity, level),
+		BaseIncomeRoll = baseIncomeRoll,
+		Income = income,
+		ShipIncomePerHour = getCrewSummaryIncomePerHour(crewData, mirrorData, level),
 		Source = source,
 		DepthBand = depthBand,
 		GrandLineRushStarter = isStarter,

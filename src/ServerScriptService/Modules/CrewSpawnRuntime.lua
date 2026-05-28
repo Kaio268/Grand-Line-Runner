@@ -18,6 +18,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local ServerMods = Modules:WaitForChild("Server"):WaitForChild("Crew")
 
 local SpawnerConfig = require(Configs:WaitForChild("CrewSpawnSettings"))
@@ -611,7 +612,8 @@ local function syncSpawnOverhead(model, entry, remaining, despawnSeconds)
 		or "Crewmate"
 	local rarity = normalizeCrewAttribute(info.Rarity or entry and entry.Rarity) or "Common"
 	local variant = normalizeCrewAttribute(info.Variant or entry and entry.Variant) or "Normal"
-	local income = math.max(0, tonumber(info.Income) or 0)
+	local minIncome, maxIncome = CrewIncomeBalance.GetRangeDisplayIncome(rarity, variant)
+	local income = math.max(0, math.floor(((minIncome + maxIncome) / 2) + 0.5))
 	local safeRemaining = math.max(0, tonumber(remaining) or 0)
 	local safeDespawnSeconds = math.max(
 		safeRemaining,

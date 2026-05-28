@@ -90,7 +90,7 @@ local ProfileTemplate = {
 	},
 
 	CrewMemberInventory = {
-		SchemaVersion = 1,
+		SchemaVersion = 2,
 		NextInstanceId = 1,
 		ById = {},
 		Order = {},

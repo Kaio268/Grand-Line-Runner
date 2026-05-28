@@ -23,6 +23,7 @@ local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):
 local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
 
 local Module = {}
@@ -218,12 +219,13 @@ local function getFoodXP(foodKey)
 	return math.max(0, tonumber(config and config.XP) or 0)
 end
 
-local function getXPRequiredForLevel(rarity, level)
+local function getXPRequiredForLevel(rarity, level, variantKey)
 	if level >= getMaxLevel() then
 		return 0
 	end
 
 	local multiplier = tonumber(Economy.CrewMembers.TotalXPMultiplierByRarity[normalizeRarity(rarity)]) or 1
+	multiplier *= CrewIncomeBalance.GetVariantUpgradeCostMultiplier(variantKey)
 	for _, band in ipairs(Economy.CrewMembers.BaseXPPerLevelBand) do
 		if level >= band.MinLevel and level <= band.MaxLevel then
 			return math.max(1, math.floor((tonumber(band.XPPerLevel) or 0) * multiplier + 0.5))
@@ -258,13 +260,13 @@ local function getStoredRarity(_player, storageName)
 	return normalizeRarity(baseInfo and baseInfo.Rarity or nil)
 end
 
-local function normalizeProgress(rarity, level, currentXP)
+local function normalizeProgress(rarity, variantKey, level, currentXP)
 	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
 	local safeXP = math.max(0, math.floor(tonumber(currentXP) or 0))
 	local maxLevel = getMaxLevel()
 
 	while safeLevel < maxLevel do
-		local needed = getXPRequiredForLevel(rarity, safeLevel)
+		local needed = getXPRequiredForLevel(rarity, safeLevel, variantKey)
 		if needed <= 0 or safeXP < needed then
 			break
 		end
@@ -318,8 +320,8 @@ function Module.GetFoodPriorityDisplay()
 	return table.concat(names, " -> ")
 end
 
-function Module.GetXPRequiredForLevel(rarity, level)
-	return getXPRequiredForLevel(rarity, level)
+function Module.GetXPRequiredForLevel(rarity, level, variantKey)
+	return getXPRequiredForLevel(rarity, level, variantKey)
 end
 
 function Module.GetProgress(player, crewMemberId)
@@ -330,12 +332,14 @@ function Module.GetProgress(player, crewMemberId)
 
 	local storageName = tostring(instanceData.StorageName or "")
 	local rarity = normalizeRarity(instanceData.Rarity or getStoredRarity(player, storageName))
+	local parsedVariant = getVariantAndBaseName(storageName)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(instanceData.Variant or parsedVariant)
 	local rawLevel = tonumber(instanceData.Level) or 1
 	local rawCurrentXP = tonumber(instanceData.CurrentXP) or 0
 	local level = rawLevel
 	local currentXP = rawCurrentXP
 
-	level, currentXP = normalizeProgress(rarity, level, currentXP)
+	level, currentXP = normalizeProgress(rarity, variantKey, level, currentXP)
 
 	if rawLevel ~= level or rawCurrentXP ~= currentXP or tostring(instanceData.Rarity or "") ~= rarity then
 		local updated = CrewInstanceService.UpdateProgress(player, instanceId, level, currentXP)
@@ -350,9 +354,10 @@ function Module.GetProgress(player, crewMemberId)
 		InstanceId = tostring(instanceId),
 		StorageName = storageName,
 		Rarity = rarity,
+		Variant = variantKey,
 		Level = level,
 		CurrentXP = currentXP,
-		NextLevelXP = getXPRequiredForLevel(rarity, level),
+		NextLevelXP = getXPRequiredForLevel(rarity, level, variantKey),
 		MaxLevel = getMaxLevel(),
 	}
 end
@@ -373,7 +378,7 @@ function Module.GetNextAutoFeedStep(player, crewMemberId)
 	end
 
 	local foodInventory = Module.GetFoodInventory(player)
-	local plan = Module.BuildAutoFeedPlan(foodInventory, progress.Rarity, progress.Level, progress.CurrentXP)
+	local plan = Module.BuildAutoFeedPlan(foodInventory, progress.Rarity, progress.Level, progress.CurrentXP, progress.Variant)
 	local stepPreview = buildPreviewStep(plan)
 	if not stepPreview then
 		return false, {
@@ -449,7 +454,8 @@ function Module.TryGetTotalFoodCount(player)
 	return total, nil
 end
 
-function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP)
+function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP, variantKey)
+	variantKey = CrewIncomeBalance.NormalizeVariant(variantKey)
 	local maxLevel = getMaxLevel()
 	local result = {
 		FoodUsed = {},
@@ -461,7 +467,8 @@ function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP)
 		LevelAfter = level,
 		CurrentXPAfter = currentXP,
 		LevelUps = 0,
-		XPNeededBefore = math.max(0, getXPRequiredForLevel(rarity, level) - currentXP),
+		Variant = variantKey,
+		XPNeededBefore = math.max(0, getXPRequiredForLevel(rarity, level, variantKey) - currentXP),
 		ReachedMax = level >= maxLevel,
 		StoppedForLackOfFood = false,
 	}
@@ -486,7 +493,7 @@ function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP)
 
 			local pendingXP = foodXP
 			while pendingXP > 0 and result.LevelAfter < maxLevel do
-				local needed = getXPRequiredForLevel(rarity, result.LevelAfter)
+				local needed = getXPRequiredForLevel(rarity, result.LevelAfter, variantKey)
 				local remaining = math.max(0, needed - result.CurrentXPAfter)
 				local applied = math.min(pendingXP, remaining)
 				result.CurrentXPAfter += applied
@@ -519,7 +526,7 @@ function Module.BuildAutoFeedPlan(foodInventory, rarity, level, currentXP)
 
 	result.StoppedForLackOfFood = result.FoodsConsumed == 0 or remainingThreshold > 0
 	result.ReachedMax = result.LevelAfter >= maxLevel
-	result.NextLevelXPAfter = getXPRequiredForLevel(rarity, result.LevelAfter)
+	result.NextLevelXPAfter = getXPRequiredForLevel(rarity, result.LevelAfter, variantKey)
 	return result
 end
 
@@ -542,7 +549,7 @@ function Module.ApplyAutoFeed(player, crewMemberId, options)
 	end
 
 	local foodInventory = Module.GetFoodInventory(player)
-	local plan = Module.BuildAutoFeedPlan(foodInventory, progress.Rarity, progress.Level, progress.CurrentXP)
+	local plan = Module.BuildAutoFeedPlan(foodInventory, progress.Rarity, progress.Level, progress.CurrentXP, progress.Variant)
 	if plan.FoodsConsumed <= 0 then
 		return false, {
 			Error = "not_enough_food",
@@ -629,6 +636,7 @@ function Module.ApplyAutoFeed(player, crewMemberId, options)
 		InstanceId = tostring(progress.InstanceId),
 		StorageName = progress.StorageName,
 		Rarity = progress.Rarity,
+		Variant = progress.Variant,
 		Level = plan.LevelAfter,
 		CurrentXP = plan.CurrentXPAfter,
 		NextLevelXP = plan.NextLevelXPAfter,
@@ -656,7 +664,7 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 	end
 
 	local foodInventory = Module.GetFoodInventory(player)
-	local plan = Module.BuildAutoFeedPlan(foodInventory, progress.Rarity, progress.Level, progress.CurrentXP)
+	local plan = Module.BuildAutoFeedPlan(foodInventory, progress.Rarity, progress.Level, progress.CurrentXP, progress.Variant)
 	local stepPreview = buildPreviewStep(plan)
 	if not stepPreview then
 		return false, {
@@ -696,6 +704,7 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 
 	local levelAfter, currentXPAfter = normalizeProgress(
 		progress.Rarity,
+		progress.Variant,
 		progress.Level,
 		math.max(0, progress.CurrentXP) + stepPreview.XPGained
 	)
@@ -750,9 +759,10 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 			InstanceId = tostring(progress.InstanceId),
 			StorageName = progress.StorageName,
 			Rarity = progress.Rarity,
+			Variant = progress.Variant,
 			Level = levelAfter,
 			CurrentXP = currentXPAfter,
-			NextLevelXP = getXPRequiredForLevel(progress.Rarity, levelAfter),
+			NextLevelXP = getXPRequiredForLevel(progress.Rarity, levelAfter, progress.Variant),
 			MaxLevel = progress.MaxLevel,
 		},
 	}

@@ -1,4 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextService = game:GetService("TextService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -39,6 +40,11 @@ local INDEX_STATIC_PREVIEW_OVERRIDE_KEYS = {
 	"name",
 	"previewName",
 }
+local PRODUCTION_BADGE_TEXT_SIZE = 11
+local PRODUCTION_BADGE_HEIGHT = 24
+local PRODUCTION_BADGE_MIN_WIDTH = 84
+local PRODUCTION_BADGE_MAX_WIDTH = 142
+local PRODUCTION_BADGE_HORIZONTAL_PADDING = 18
 
 local function getIndexStaticPreviewSize(unit)
 	for _, key in ipairs(INDEX_STATIC_PREVIEW_OVERRIDE_KEYS) do
@@ -124,16 +130,29 @@ local function footerLabel(props)
 end
 
 local function productionBadge(text)
+	local badgeText = tostring(text or "")
+	local measuredSize = TextService:GetTextSize(
+		badgeText,
+		PRODUCTION_BADGE_TEXT_SIZE,
+		Theme.Fonts.Display,
+		Vector2.new(PRODUCTION_BADGE_MAX_WIDTH, PRODUCTION_BADGE_HEIGHT)
+	)
+	local badgeWidth = math.clamp(
+		math.ceil(measuredSize.X + PRODUCTION_BADGE_HORIZONTAL_PADDING),
+		PRODUCTION_BADGE_MIN_WIDTH,
+		PRODUCTION_BADGE_MAX_WIDTH
+	)
+
 	return e("Frame", {
 		BackgroundColor3 = Theme.Palette.BadgeFill,
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
 		Position = UDim2.fromOffset(6, 6),
-		Size = UDim2.fromOffset(72, 22),
+		Size = UDim2.fromOffset(badgeWidth, PRODUCTION_BADGE_HEIGHT),
 		ZIndex = 4,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 7),
+			CornerRadius = UDim.new(1, 0),
 		}),
 		Stroke = e("UIStroke", {
 			Color = Theme.Palette.BadgeStroke,
@@ -143,12 +162,15 @@ local function productionBadge(text)
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
-			Size = UDim2.fromScale(1, 1),
-			Text = tostring(text or ""),
+			Position = UDim2.fromOffset(8, 0),
+			Size = UDim2.new(1, -16, 1, 0),
+			Text = badgeText,
 			TextColor3 = Theme.Palette.BadgeText,
-			TextSize = 11,
+			TextSize = PRODUCTION_BADGE_TEXT_SIZE,
 			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
 			TextStrokeTransparency = 0.45,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Center,
 		}),
 	})
 end
@@ -639,6 +661,10 @@ local function IndexCard(props)
 
 	if not unit.discovered then
 		local lockedChildren = createLockedPreview(unit, props.renderPreview)
+		local hiddenProduction = tostring(unit.hiddenProduction or "")
+		if not isFruit and hiddenProduction ~= "" then
+			lockedChildren.Production = productionBadge(hiddenProduction)
+		end
 
 		lockedChildren.Question = e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 0),
