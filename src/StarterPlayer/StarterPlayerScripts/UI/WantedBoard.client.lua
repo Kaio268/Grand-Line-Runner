@@ -1,3 +1,0 @@
--- The authored bounty board is rendered by ServerScriptService.Server-Scripts.BountyLeaderboard.
--- The React wanted-board modules are kept in ReplicatedStorage for a future client-rendered board,
--- but this LocalScript no longer targets the removed Workspace["Bounty Leaderboard_V3"] model.

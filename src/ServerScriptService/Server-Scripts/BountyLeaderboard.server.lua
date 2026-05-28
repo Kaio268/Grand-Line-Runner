@@ -1,6 +1,5 @@
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 local UserService = game:GetService("UserService")
 
@@ -21,10 +20,6 @@ local SAFE_REFRESH_SECONDS = 300
 local DATASTORE_RETRIES = 3
 local DEFAULT_SILHOUETTE_IMAGE = "rbxassetid://114486835434518"
 
-local REMOTES_FOLDER_NAME = "Remotes"
-local STATE_EVENT_NAME = "BountyLeaderboardState"
-local SNAPSHOT_REQUEST_NAME = "BountyLeaderboardSnapshotRequest"
-
 local bountyStore = DataStoreService:GetOrderedDataStore(STORE_NAME)
 local currentSnapshot = {}
 local identityCache = {}
@@ -37,35 +32,6 @@ local refreshScheduled = false
 local refreshDirty = false
 local lastGlobalReadAt = -math.huge
 local warnedMissingBoard = false
-
-local remotesFolder = ReplicatedStorage:FindFirstChild(REMOTES_FOLDER_NAME)
-if not remotesFolder then
-	remotesFolder = Instance.new("Folder")
-	remotesFolder.Name = REMOTES_FOLDER_NAME
-	remotesFolder.Parent = ReplicatedStorage
-end
-
-local stateEvent = remotesFolder:FindFirstChild(STATE_EVENT_NAME)
-if stateEvent and not stateEvent:IsA("RemoteEvent") then
-	stateEvent:Destroy()
-	stateEvent = nil
-end
-if not stateEvent then
-	stateEvent = Instance.new("RemoteEvent")
-	stateEvent.Name = STATE_EVENT_NAME
-	stateEvent.Parent = remotesFolder
-end
-
-local snapshotRequest = remotesFolder:FindFirstChild(SNAPSHOT_REQUEST_NAME)
-if snapshotRequest and not snapshotRequest:IsA("RemoteFunction") then
-	snapshotRequest:Destroy()
-	snapshotRequest = nil
-end
-if not snapshotRequest then
-	snapshotRequest = Instance.new("RemoteFunction")
-	snapshotRequest.Name = SNAPSHOT_REQUEST_NAME
-	snapshotRequest.Parent = remotesFolder
-end
 
 local function disconnectConnections(connections)
 	for _, connection in ipairs(connections or {}) do
@@ -196,10 +162,9 @@ local function renderSnapshot(snapshot)
 	end
 end
 
-local function publishSnapshot(snapshot)
+local function applySnapshot(snapshot)
 	currentSnapshot = snapshot or {}
 	renderSnapshot(currentSnapshot)
-	stateEvent:FireAllClients(currentSnapshot)
 end
 
 local function callWithRetries(callback, retries)
@@ -300,7 +265,7 @@ local function refreshBoardFromStore(reason)
 	end
 
 	local page = pagesOrError:GetCurrentPage()
-	publishSnapshot(buildSnapshotFromPage(page))
+	applySnapshot(buildSnapshotFromPage(page))
 	return true, nil
 end
 
@@ -496,10 +461,6 @@ local function disconnectPlayer(player)
 	disconnectConnections(playerConnections[player])
 	playerConnections[player] = nil
 	scheduleBoardRefresh("player_left", REFRESH_AFTER_WRITE_SECONDS)
-end
-
-snapshotRequest.OnServerInvoke = function()
-	return currentSnapshot
 end
 
 BountyService.BountyChanged:Connect(function(player, breakdown)
