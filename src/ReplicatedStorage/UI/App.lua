@@ -2358,13 +2358,19 @@ end
 
 local function titleRegistryRow(props)
 	local entry = props.entry or {}
-	local unlocked = entry.unlocked == true or entry.isEquipped == true
+	local unlocked = entry.unlocked == true
+	local isEquipped = entry.isEquipped == true
+	local canToggleEquipped = isEquipped or unlocked
+	local actionLabel = if isEquipped then "Unequip" elseif unlocked then "Equip" else nil
+	local requirementText = tostring(entry.requirementText or "")
+	local showEquipButton = actionLabel ~= nil
 	local accent = entry.accentColor or (unlocked and PALETTE.Gold or PALETTE.Steel)
 	local surfaceColor = entry.surfaceColor or Color3.fromRGB(16, 22, 35)
 	local surfaceColor2 = entry.surfaceColor2 or Color3.fromRGB(10, 15, 25)
 	local sealColor = entry.sealColor or accent:Lerp(Color3.fromRGB(52, 57, 74), unlocked and 0.62 or 0.82)
 	local stateFill = unlocked and (entry.stateColor or accent) or Color3.fromRGB(44, 51, 67)
 	local stateTextColor = unlocked and PALETTE.Ink or PALETTE.Cream
+	local badgeText = string.upper(if isEquipped then "Equipped" elseif unlocked then "Unlocked" else "Locked")
 
 	return e("Frame", {
 		BackgroundColor3 = surfaceColor,
@@ -2452,7 +2458,7 @@ local function titleRegistryRow(props)
 			BackgroundTransparency = unlocked and 0.02 or 0.16,
 			Position = UDim2.new(1, -18, 14 / 104, 0),
 			Font = Enum.Font.GothamBold,
-			Text = string.upper(entry.stateText or (unlocked and "Unlocked" or "Locked")),
+			Text = badgeText,
 			TextColor3 = stateTextColor,
 			TextSize = 10,
 			ZIndex = 3,
@@ -2491,18 +2497,18 @@ local function titleRegistryRow(props)
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 3,
 		}),
-		Requirement = e("TextLabel", {
+		Requirement = requirementText ~= "" and e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamMedium,
 			Position = UDim2.fromOffset(106, 76),
 			Size = UDim2.new(1, -176, 0, 16),
-			Text = "Requirement: " .. tostring(entry.requirementText or ""),
+			Text = "Requirement: " .. requirementText,
 			TextColor3 = unlocked and PALETTE.Cream or PALETTE.Muted,
 			TextSize = 11,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 3,
-		}),
+		}) or nil,
 		Rank = (entry.currentRank or entry.rankLabel) and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			BackgroundTransparency = 1,
@@ -2516,21 +2522,21 @@ local function titleRegistryRow(props)
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = 3,
 		}) or nil,
-		Action = entry.actionLabel and e("TextButton", {
+		Action = showEquipButton and e("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
 			AutoButtonColor = false,
-			BackgroundColor3 = entry.isEquipped and Color3.fromRGB(44, 54, 72) or accent,
-			BackgroundTransparency = entry.canToggleEquipped and 0.02 or 0.28,
+			BackgroundColor3 = isEquipped and Color3.fromRGB(44, 54, 72) or accent,
+			BackgroundTransparency = canToggleEquipped and 0.02 or 0.28,
 			BorderSizePixel = 0,
 			Position = UDim2.new(1, -18, 0.5, 0),
 			Size = UDim2.fromOffset(104, 34),
-			Text = tostring(entry.actionLabel),
-			TextColor3 = entry.isEquipped and PALETTE.Cream or Color3.fromRGB(14, 21, 22),
+			Text = actionLabel,
+			TextColor3 = isEquipped and PALETTE.Cream or Color3.fromRGB(14, 21, 22),
 			TextSize = 16,
 			Font = Enum.Font.GothamBold,
 			ZIndex = 3,
 			[React.Event.Activated] = function()
-				if props.onToggleTitle then
+				if canToggleEquipped and props.onToggleTitle then
 					props.onToggleTitle(entry)
 				end
 			end,
@@ -2540,8 +2546,8 @@ local function titleRegistryRow(props)
 			}),
 			Stroke = e("UIStroke", {
 				Color = accent,
-				Transparency = entry.isEquipped and 0.08 or 0.72,
-				Thickness = entry.isEquipped and 1.2 or 1,
+				Transparency = isEquipped and 0.08 or 0.72,
+				Thickness = isEquipped and 1.2 or 1,
 			}),
 		}) or nil,
 	})

@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MessagingService = game:GetService("MessagingService")
 local TextService = game:GetService("TextService")
 local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
 
 local ServerScriptService = game:GetService("ServerScriptService")
 local EventController = require(ServerScriptService:WaitForChild("EventController"))
@@ -25,6 +26,8 @@ end
 
 local adminStatusFunction = getOrCreateRemote("AdminStatusRequest", "RemoteFunction")
 local adminRosterFunction = getOrCreateRemote("AdminRosterRequest", "RemoteFunction")
+local adminTesterRoleFunction = getOrCreateRemote("AdminTesterRoleRequest", "RemoteFunction")
+local adminRosterUpdatedEvent = getOrCreateRemote("AdminRosterUpdated")
 local requestEvent = getOrCreateRemote("AdminAnnouncementRequest")
 local broadcastEvent = getOrCreateRemote("AdminAnnouncementBroadcast")
 
@@ -48,6 +51,24 @@ local MAIN_EVENT_ALLOWLIST = {
 	luckyblock = "LuckyBlock",
 	luckyblocks = "LuckyBlock",
 }
+
+local TESTER_ROLE_ACTIONS = {
+	AddTester = true,
+	RemoveTester = true,
+}
+
+local function fireAdminRosterUpdated(reason)
+	local payload = {
+		Reason = tostring(reason or "roster_changed"),
+		SentAt = os.time(),
+	}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if AdminPermissions.IsAdmin(player) then
+			adminRosterUpdatedEvent:FireClient(player, payload)
+		end
+	end
+end
 
 local function getAllowedMainEventName(eventName)
 	local trimmed = tostring(eventName or ""):gsub("\r", ""):gsub("\n", " ")
@@ -77,6 +98,51 @@ adminRosterFunction.OnServerInvoke = function(player)
 
 	return AdminPermissions.GetAdminRoster(player)
 end
+
+adminTesterRoleFunction.OnServerInvoke = function(player, action, target)
+	if not RemoteGuard.Check(player, "AdminTesterRoleRequest", { action, target }, {
+		Cooldown = 0.5,
+		ActionIndex = 1,
+		ActionAllowlist = TESTER_ROLE_ACTIONS,
+		Args = {
+			{ Type = "string", MaxLength = 24 },
+			{ Type = "string", MaxLength = 80 },
+		},
+	}) then
+		return {
+			Success = false,
+			Message = "Invalid tester role request.",
+		}
+	end
+
+	if not AdminPermissions.IsAdmin(player) then
+		AdminPermissions.LogCommandRejected(player, "testerRole", "AdminTesterRoleRequest", "reason=not_admin")
+		return {
+			Success = false,
+			Message = "Admin access required.",
+		}
+	end
+
+	return AdminPermissions.SetTesterRole(player, target, action == "AddTester", "AdminTesterRoleRequest")
+end
+
+AdminPermissions.TesterStateChanged:Connect(function(_, payload)
+	local reason = "tester_state_changed"
+	if typeof(payload) == "table" and typeof(payload.Source) == "string" then
+		reason = payload.Source
+	end
+	fireAdminRosterUpdated(reason)
+end)
+
+Players.PlayerAdded:Connect(function()
+	task.defer(function()
+		fireAdminRosterUpdated("player_added")
+	end)
+end)
+
+Players.PlayerRemoving:Connect(function()
+	fireAdminRosterUpdated("player_removing")
+end)
 
 local function markSeen(tbl, id)
 	tbl[id] = os.clock()

@@ -10,20 +10,63 @@ local EQUIP_REMOTE_NAME = "TitleEquipRequest"
 local EQUIPPED_TITLE_ATTRIBUTE = "EquippedTitleId"
 local EQUIPPED_TITLE_DISPLAY_ATTRIBUTE = "EquippedTitleDisplay"
 local NONE_EQUIPPED = ""
+local DATA_MANAGER_UNAVAILABLE_REASON = "data_manager_unavailable"
 
+local AdminConfig = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminConfig"))
 local TitlesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Titles"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
-
-if not DataManager._initialized and typeof(DataManager.init) == "function" then
-	DataManager.init()
-end
 
 local started = false
 local pendingUnlocksByPlayer = {}
 local pendingEquippedByPlayer = {}
 local hydrationTasksByPlayer = {}
 local validationConnectionsByPlayer = {}
+local cachedDataManager = nil
+local dataManagerWarningPrinted = false
+
+local function warnDataManagerUnavailable(reason)
+	if dataManagerWarningPrinted then
+		return
+	end
+
+	dataManagerWarningPrinted = true
+	warn("[TitleService] DataManager unavailable; runtime titles will still hydrate, persistence skipped: " .. tostring(reason))
+end
+
+local function getDataManager()
+	if cachedDataManager ~= nil then
+		return cachedDataManager, nil
+	end
+
+	local dataFolder = ServerScriptService:FindFirstChild("Data")
+	if not dataFolder then
+		return nil, DATA_MANAGER_UNAVAILABLE_REASON
+	end
+
+	local dataManagerModule = dataFolder:FindFirstChild("DataManager")
+	if not (dataManagerModule and dataManagerModule:IsA("ModuleScript")) then
+		return nil, DATA_MANAGER_UNAVAILABLE_REASON
+	end
+
+	local requireOk, dataManagerOrError = pcall(require, dataManagerModule)
+	if not requireOk or typeof(dataManagerOrError) ~= "table" then
+		warnDataManagerUnavailable(dataManagerOrError)
+		return nil, DATA_MANAGER_UNAVAILABLE_REASON
+	end
+
+	if dataManagerOrError._initialized ~= true and typeof(dataManagerOrError.init) == "function" then
+		local initOk, initError = pcall(function()
+			dataManagerOrError.init()
+		end)
+		if not initOk then
+			warnDataManagerUnavailable(initError)
+			return nil, DATA_MANAGER_UNAVAILABLE_REASON
+		end
+	end
+
+	cachedDataManager = dataManagerOrError
+	return cachedDataManager, nil
+end
 
 local function getOrCreateRemotesFolder()
 	local remotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
@@ -51,17 +94,23 @@ end
 local EquipRemote = getOrCreateRemote(getOrCreateRemotesFolder(), EQUIP_REMOTE_NAME)
 
 local function waitForDataReady(player, timeoutSeconds)
+	local dataManager = getDataManager()
+	if dataManager == nil then
+		return false, DATA_MANAGER_UNAVAILABLE_REASON
+	end
+
 	local deadline = os.clock() + (timeoutSeconds or PERSIST_READY_TIMEOUT)
 
 	while player.Parent == Players and os.clock() <= deadline do
-		if DataManager:IsReady(player) then
-			return true
+		if dataManager:IsReady(player) then
+			return true, nil
 		end
 
 		task.wait(0.1)
 	end
 
-	return DataManager:IsReady(player)
+	local ready = dataManager:IsReady(player)
+	return ready, if ready then nil else "data_not_ready"
 end
 
 local function normalizeTitleId(titleId)
@@ -76,6 +125,23 @@ local function normalizeTitleId(titleId)
 	end
 
 	return titleId
+end
+
+local function getPublicTesterTitleId()
+	if typeof(AdminConfig) ~= "table" then
+		return "Tester"
+	end
+
+	local titleId = normalizeTitleId(AdminConfig.PublicTesterTitleId)
+	return titleId ~= NONE_EQUIPPED and titleId or "Tester"
+end
+
+local function isPublicTesterTitleEnabled()
+	return typeof(AdminConfig) == "table" and AdminConfig.EnablePublicTesterTitle == true
+end
+
+local function isPublicTesterTitle(titleId)
+	return normalizeTitleId(titleId) == getPublicTesterTitleId()
 end
 
 local function ensureTitlesFolder(player)
@@ -103,6 +169,18 @@ local function ensureTitlesFolder(player)
 		unlockedFolder.Parent = titlesFolder
 	end
 
+	local runtimeUnlockedFolder = titlesFolder:FindFirstChild("RuntimeUnlocked")
+	if runtimeUnlockedFolder and not runtimeUnlockedFolder:IsA("Folder") then
+		runtimeUnlockedFolder:Destroy()
+		runtimeUnlockedFolder = nil
+	end
+
+	if not runtimeUnlockedFolder then
+		runtimeUnlockedFolder = Instance.new("Folder")
+		runtimeUnlockedFolder.Name = "RuntimeUnlocked"
+		runtimeUnlockedFolder.Parent = titlesFolder
+	end
+
 	local equippedValue = titlesFolder:FindFirstChild("Equipped")
 	if equippedValue and not equippedValue:IsA("StringValue") then
 		equippedValue:Destroy()
@@ -116,7 +194,7 @@ local function ensureTitlesFolder(player)
 		equippedValue.Parent = titlesFolder
 	end
 
-	return titlesFolder, unlockedFolder, equippedValue
+	return titlesFolder, unlockedFolder, equippedValue, runtimeUnlockedFolder
 end
 
 local function getRuntimeUnlockValue(player, titleId)
@@ -130,6 +208,17 @@ local function getRuntimeUnlockValue(player, titleId)
 	return unlockedFolder, valueObject
 end
 
+local function getRuntimeOnlyUnlockValue(player, titleId)
+	local _, _, _, runtimeUnlockedFolder = ensureTitlesFolder(player)
+	local valueObject = runtimeUnlockedFolder:FindFirstChild(titleId)
+	if valueObject and not valueObject:IsA("BoolValue") then
+		valueObject:Destroy()
+		valueObject = nil
+	end
+
+	return runtimeUnlockedFolder, valueObject
+end
+
 local function getRuntimeEquippedValue(player)
 	local _, _, equippedValue = ensureTitlesFolder(player)
 	return equippedValue
@@ -140,15 +229,43 @@ local function setRuntimeTitleUnlocked(player, titleId, isUnlocked)
 	if not valueObject then
 		valueObject = Instance.new("BoolValue")
 		valueObject.Name = titleId
+		valueObject.Value = isUnlocked == true
 		valueObject.Parent = unlockedFolder
+		return valueObject
 	end
 
 	valueObject.Value = isUnlocked == true
 	return valueObject
 end
 
+local function setRuntimeOnlyTitleUnlocked(player, titleId, isUnlocked)
+	local runtimeUnlockedFolder, valueObject = getRuntimeOnlyUnlockValue(player, titleId)
+	if not valueObject then
+		valueObject = Instance.new("BoolValue")
+		valueObject.Name = titleId
+		valueObject.Value = isUnlocked == true
+		valueObject.Parent = runtimeUnlockedFolder
+		return valueObject
+	end
+
+	valueObject.Value = isUnlocked == true
+	return valueObject
+end
+
+local function syncPublicTesterTitleUnlock(player)
+	local testerTitleId = getPublicTesterTitleId()
+	if TitlesConfig.Get(testerTitleId) then
+		setRuntimeOnlyTitleUnlocked(player, testerTitleId, isPublicTesterTitleEnabled())
+	end
+end
+
 local function isRuntimeTitleUnlocked(player, titleId)
 	local _, valueObject = getRuntimeUnlockValue(player, titleId)
+	return valueObject ~= nil and valueObject.Value == true
+end
+
+local function isRuntimeOnlyTitleUnlocked(player, titleId)
+	local _, valueObject = getRuntimeOnlyUnlockValue(player, titleId)
 	return valueObject ~= nil and valueObject.Value == true
 end
 
@@ -188,7 +305,12 @@ local function disconnectValidationHooks(player)
 end
 
 local function persistTitleUnlock(player, titleId)
-	local success, reason = DataManager:TrySetValue(player, "Titles.Unlocked." .. titleId, true)
+	local dataManager, unavailableReason = getDataManager()
+	if dataManager == nil then
+		return false, unavailableReason or DATA_MANAGER_UNAVAILABLE_REASON
+	end
+
+	local success, reason = dataManager:TrySetValue(player, "Titles.Unlocked." .. titleId, true)
 	if success then
 		return true, nil
 	end
@@ -197,7 +319,12 @@ local function persistTitleUnlock(player, titleId)
 end
 
 local function persistEquippedTitle(player, titleId)
-	local success, reason = DataManager:TrySetValue(player, "Titles.Equipped", normalizeTitleId(titleId))
+	local dataManager, unavailableReason = getDataManager()
+	if dataManager == nil then
+		return false, unavailableReason or DATA_MANAGER_UNAVAILABLE_REASON
+	end
+
+	local success, reason = dataManager:TrySetValue(player, "Titles.Equipped", normalizeTitleId(titleId))
 	if success then
 		return true, nil
 	end
@@ -322,7 +449,15 @@ local function isTitleEquippable(player, titleId, allowPendingDynamic)
 	end
 
 	if titleDefinition.UnlockType == "Persistent" then
-		if isRuntimeTitleUnlocked(player, titleDefinition.Id) then
+		local publicTesterAllowed = isPublicTesterTitle(titleDefinition.Id) and isPublicTesterTitleEnabled()
+		local persistentUnlocked = isRuntimeTitleUnlocked(player, titleDefinition.Id)
+		local runtimeUnlocked = isRuntimeOnlyTitleUnlocked(player, titleDefinition.Id)
+
+		if publicTesterAllowed then
+			return true, "public_tester_title"
+		end
+
+		if persistentUnlocked or runtimeUnlocked then
 			return true, "persistent_unlocked"
 		end
 
@@ -418,28 +553,37 @@ local function hydrateRuntimeTitles(player)
 	hydrationTasksByPlayer[player] = task.spawn(function()
 		ensureTitlesFolder(player)
 		publishEquippedTitle(player, NONE_EQUIPPED)
+		syncPublicTesterTitleUnlock(player)
 		hookValidationSignals(player)
 
-		if not waitForDataReady(player, HYDRATE_READY_TIMEOUT) then
+		local dataReady = waitForDataReady(player, HYDRATE_READY_TIMEOUT)
+		if not dataReady then
 			hydrationTasksByPlayer[player] = nil
 			return
 		end
 
-		local persistedTitles = DataManager:TryGetValue(player, "Titles.Unlocked")
+		local dataManager = getDataManager()
+		if dataManager == nil then
+			hydrationTasksByPlayer[player] = nil
+			return
+		end
+
+		local persistedTitles = dataManager:TryGetValue(player, "Titles.Unlocked")
 		if typeof(persistedTitles) == "table" then
 			for titleId, unlocked in pairs(persistedTitles) do
-				if unlocked == true then
+				if unlocked == true and not isPublicTesterTitle(titleId) then
 					setRuntimeTitleUnlocked(player, tostring(titleId), true)
 				end
 			end
 		end
+		syncPublicTesterTitleUnlock(player)
 
-		local equippedFruit = DataManager:TryGetValue(player, "DevilFruit.Equipped")
+		local equippedFruit = dataManager:TryGetValue(player, "DevilFruit.Equipped")
 		if typeof(equippedFruit) == "string" and equippedFruit ~= DevilFruitConfig.None then
 			TitleService.UnlockTitle(player, "EnemyOfTheSea")
 		end
 
-		local persistedEquippedTitle = normalizeTitleId(DataManager:TryGetValue(player, "Titles.Equipped"))
+		local persistedEquippedTitle = normalizeTitleId(dataManager:TryGetValue(player, "Titles.Equipped"))
 		if persistedEquippedTitle ~= NONE_EQUIPPED then
 			local equipped = setEquippedTitleInternal(player, persistedEquippedTitle, true)
 			if not equipped then
@@ -499,6 +643,15 @@ function TitleService.UnlockTitle(player, titleId)
 		return false, validationError
 	end
 
+	if isPublicTesterTitle(titleId) then
+		if isPublicTesterTitleEnabled() then
+			setRuntimeOnlyTitleUnlocked(player, titleId, true)
+			return true, "public_runtime_unlocked"
+		end
+
+		return false, "public_tester_title_disabled"
+	end
+
 	if isRuntimeTitleUnlocked(player, titleId) then
 		return true, "already_unlocked"
 	end
@@ -546,7 +699,11 @@ function TitleService.IsTitleOwned(player, titleId)
 	end
 
 	if titleDefinition.UnlockType == "Persistent" then
-		return isRuntimeTitleUnlocked(player, titleId)
+		if isPublicTesterTitle(titleId) and isPublicTesterTitleEnabled() then
+			return true
+		end
+
+		return isRuntimeTitleUnlocked(player, titleId) or isRuntimeOnlyTitleUnlocked(player, titleId)
 	end
 
 	if titleDefinition.UnlockType == "DynamicRank" then
@@ -559,5 +716,12 @@ end
 function TitleService.GetEquippedTitle(player)
 	return getRuntimeEquippedTitle(player)
 end
+
+task.defer(function()
+	local ok, err = pcall(TitleService.Start)
+	if not ok then
+		warn("[TitleService] Deferred auto-start failed: " .. tostring(err))
+	end
+end)
 
 return TitleService

@@ -871,6 +871,8 @@ local function buildDashboard()
 	local adminCommandRequestEvent = safeWait(ReplicatedStorage, "AdminCommandRequest")
 	local adminCommandFeedbackEvent = safeWait(ReplicatedStorage, "AdminCommandFeedback")
 	local adminRosterFunction = safeWait(ReplicatedStorage, "AdminRosterRequest")
+	local adminTesterRoleFunction = safeWait(ReplicatedStorage, "AdminTesterRoleRequest")
+	local adminRosterUpdatedEvent = safeWait(ReplicatedStorage, "AdminRosterUpdated")
 	local currentTab = "Commands"
 	local tabButtons = {}
 	local setActiveTab
@@ -973,7 +975,7 @@ local function buildDashboard()
 		TextSize = 28,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.fromOffset(72, 8),
-		Size = UDim2.new(1, -430, 0, 32),
+		Size = UDim2.new(1, -650, 0, 32),
 		Parent = header,
 	})
 
@@ -986,7 +988,7 @@ local function buildDashboard()
 		TextSize = 15,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		Position = UDim2.fromOffset(73, 42),
-		Size = UDim2.new(1, -430, 0, 22),
+		Size = UDim2.new(1, -650, 0, 22),
 		Parent = header,
 	})
 
@@ -1010,8 +1012,8 @@ local function buildDashboard()
 		Name = "TopTabs",
 		BackgroundColor3 = Color3.fromRGB(7, 17, 36),
 		BorderSizePixel = 0,
-		Position = UDim2.new(1, -330, 0, 18),
-		Size = UDim2.fromOffset(254, 38),
+		Position = UDim2.new(1, -558, 0, 18),
+		Size = UDim2.fromOffset(482, 38),
 		Parent = header,
 	})
 	addCorner(tabBar, 14)
@@ -1033,8 +1035,8 @@ local function buildDashboard()
 		LayoutOrder = 1,
 		Text = "Commands",
 		TextColor3 = Color3.fromRGB(31, 24, 10),
-		TextSize = 12,
-		Size = UDim2.fromOffset(118, 30),
+		TextSize = 11,
+		Size = UDim2.fromOffset(112, 30),
 		Parent = tabBar,
 	})
 	addCorner(tabButtons.Commands, 10)
@@ -1048,11 +1050,41 @@ local function buildDashboard()
 		LayoutOrder = 2,
 		Text = "Admins",
 		TextColor3 = COLORS.Text,
-		TextSize = 12,
-		Size = UDim2.fromOffset(118, 30),
+		TextSize = 11,
+		Size = UDim2.fromOffset(88, 30),
 		Parent = tabBar,
 	})
 	addCorner(tabButtons.Admins, 10)
+
+	tabButtons.AllPlayers = create("TextButton", {
+		Name = "AllPlayersTab",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		LayoutOrder = 3,
+		Text = "All Players",
+		TextColor3 = COLORS.Text,
+		TextSize = 11,
+		Size = UDim2.fromOffset(126, 30),
+		Parent = tabBar,
+	})
+	addCorner(tabButtons.AllPlayers, 10)
+
+	tabButtons.Testers = create("TextButton", {
+		Name = "TestersTab",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		LayoutOrder = 4,
+		Text = "Testers",
+		TextColor3 = COLORS.Text,
+		TextSize = 11,
+		Size = UDim2.fromOffset(96, 30),
+		Parent = tabBar,
+	})
+	addCorner(tabButtons.Testers, 10)
 
 	local content = create("Frame", {
 		Name = "Content",
@@ -1269,7 +1301,7 @@ local function buildDashboard()
 	addCorner(rosterHeader, 18)
 	addStroke(rosterHeader, COLORS.BorderSoft, 1, 0.2)
 
-	create("TextLabel", {
+	local rosterTitleLabel = create("TextLabel", {
 		BackgroundTransparency = 1,
 		Font = Enum.Font.GothamBlack,
 		Text = "Admin Roster",
@@ -1366,6 +1398,7 @@ local function buildDashboard()
 		})
 
 		return {
+			Panel = panel,
 			CountLabel = countLabel,
 			List = list,
 			Layout = layout,
@@ -1387,6 +1420,94 @@ local function buildDashboard()
 		UDim2.new(0.5, 10, 0, 66),
 		UDim2.new(0.5, -10, 1, -66)
 	)
+	local allPlayersRoster = makeRosterPanel(
+		"AllPlayersRoster",
+		"All Players",
+		COLORS.Green,
+		UDim2.fromOffset(0, 66),
+		UDim2.new(1, 0, 1, -66)
+	)
+	allPlayersRoster.Panel.Visible = false
+
+	local testerAddBar = create("Frame", {
+		Name = "TesterAddBar",
+		BackgroundColor3 = COLORS.Panel,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 66),
+		Size = UDim2.new(1, 0, 0, 58),
+		Visible = false,
+		Parent = rosterView,
+	})
+	addCorner(testerAddBar, 18)
+	addStroke(testerAddBar, COLORS.Gold, 1, 0.25)
+
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = FONT,
+		Text = "Add Tester",
+		TextColor3 = COLORS.Gold,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(16, 10),
+		Size = UDim2.fromOffset(120, 20),
+		Parent = testerAddBar,
+	})
+
+	create("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = BODY_FONT,
+		Text = "UserId is preferred; username also works when Roblox can resolve it.",
+		TextColor3 = COLORS.Muted,
+		TextSize = 11,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(16, 31),
+		Size = UDim2.new(1, -360, 0, 18),
+		Parent = testerAddBar,
+	})
+
+	local testerAddBox = create("TextBox", {
+		Name = "TesterTarget",
+		BackgroundColor3 = Color3.fromRGB(7, 17, 36),
+		BorderSizePixel = 0,
+		ClearTextOnFocus = false,
+		Font = BODY_FONT,
+		PlaceholderColor3 = COLORS.Faint,
+		PlaceholderText = "UserId or username",
+		Text = "",
+		TextColor3 = COLORS.Text,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.new(1, -330, 0, 11),
+		Size = UDim2.fromOffset(190, 36),
+		Parent = testerAddBar,
+	})
+	addCorner(testerAddBox, 12)
+	addStroke(testerAddBox, COLORS.BorderSoft, 1, 0.2)
+	addPadding(testerAddBox, 12, 0, 12, 0)
+
+	local testerAddButton = create("TextButton", {
+		Name = "AddTester",
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.Gold,
+		BorderSizePixel = 0,
+		Font = FONT,
+		Text = "Add Tester",
+		TextColor3 = Color3.fromRGB(31, 24, 10),
+		TextSize = 13,
+		Position = UDim2.new(1, -126, 0, 11),
+		Size = UDim2.fromOffset(108, 36),
+		Parent = testerAddBar,
+	})
+	addCorner(testerAddButton, 12)
+
+	local testerRoster = makeRosterPanel(
+		"TesterRoster",
+		"Testers",
+		COLORS.Gold,
+		UDim2.fromOffset(0, 134),
+		UDim2.new(1, 0, 1, -134)
+	)
+	testerRoster.Panel.Visible = false
 
 	local currentCategory = "All"
 	local selectedCommand = COMMANDS[1]
@@ -1395,10 +1516,14 @@ local function buildDashboard()
 	local commandCards = {}
 	local pendingDanger = nil
 	local rosterLoading = false
+	local testerRoleLoading = false
 	local lastRosterRefresh = 0
+	local lastRosterPayload = nil
+	local rosterRefreshQueued = false
 	local renderCommandList
 	local renderRoster
 	local requestRoster
+	local requestTesterRoleChange
 
 	local function setStatus(text, color)
 		statusLabel.Text = cleanSingleLine(text, 180)
@@ -1421,12 +1546,20 @@ local function buildDashboard()
 	end
 
 	setActiveTab = function(tabName)
-		currentTab = if tabName == "Admins" then "Admins" else "Commands"
+		if tabName == "Admins" or tabName == "AllPlayers" or tabName == "Testers" then
+			currentTab = tabName
+		else
+			currentTab = "Commands"
+		end
 		commandView.Visible = currentTab == "Commands"
-		rosterView.Visible = currentTab == "Admins"
+		rosterView.Visible = currentTab ~= "Commands"
 		updateTabButtons()
 
-		if currentTab == "Admins" and requestRoster and os.clock() - lastRosterRefresh > 2 then
+		if currentTab ~= "Commands" and renderRoster then
+			renderRoster(lastRosterPayload)
+		end
+
+		if currentTab ~= "Commands" and requestRoster and os.clock() - lastRosterRefresh > 2 then
 			requestRoster()
 		end
 	end
@@ -1439,6 +1572,16 @@ local function buildDashboard()
 	tabButtons.Admins.Activated:Connect(function()
 		pulseButton(tabButtons.Admins)
 		setActiveTab("Admins")
+	end)
+
+	tabButtons.AllPlayers.Activated:Connect(function()
+		pulseButton(tabButtons.AllPlayers)
+		setActiveTab("AllPlayers")
+	end)
+
+	tabButtons.Testers.Activated:Connect(function()
+		pulseButton(tabButtons.Testers)
+		setActiveTab("Testers")
 	end)
 
 	local function clearRosterList(roster)
@@ -1459,14 +1602,18 @@ local function buildDashboard()
 	end
 
 	local function getRosterRoleText(entry, fallbackRole)
-		local isSuper = entry.IsSuperAdmin == true
-		local isConfigured = entry.IsConfiguredAdmin == true
-		if isSuper and isConfigured then
-			return "SuperAdmin + Admin"
-		elseif isSuper then
-			return "SuperAdmin"
-		elseif isConfigured then
-			return "Admin"
+		local roles = {}
+		if entry.IsSuperAdmin == true then
+			table.insert(roles, "SuperAdmin")
+		end
+		if entry.IsConfiguredAdmin == true then
+			table.insert(roles, "Admin")
+		end
+		if entry.IsTester == true then
+			table.insert(roles, "Tester")
+		end
+		if #roles > 0 then
+			return table.concat(roles, " + ")
 		end
 		return fallbackRole
 	end
@@ -1493,7 +1640,7 @@ local function buildDashboard()
 		})
 	end
 
-	local function makeRosterRow(roster, entry, index, fallbackRole)
+	local function makeRosterRow(roster, entry, index, fallbackRole, actionSpec)
 		local userId = math.floor(tonumber(entry.UserId) or 0)
 		local username = cleanSingleLine(entry.Username, 60)
 		local displayName = cleanSingleLine(entry.DisplayName, 60)
@@ -1507,16 +1654,26 @@ local function buildDashboard()
 		local statusText, statusColor = getRosterStatus(entry)
 		local roleText = getRosterRoleText(entry, fallbackRole)
 		local reason = cleanSingleLine(entry.AdminStatusReason, 80)
+		local testerSource = cleanSingleLine(entry.TesterSource, 40)
+		if testerSource ~= "" then
+			reason = "Tester source: " .. testerSource
+		end
+		local hasAction = typeof(actionSpec) == "table" and actionSpec.Label ~= nil
 
 		local row = create("Frame", {
 			BackgroundColor3 = Color3.fromRGB(8, 18, 38),
 			BorderSizePixel = 0,
 			LayoutOrder = index,
-			Size = UDim2.new(1, -4, 0, 82),
+			Size = UDim2.new(1, -4, 0, if hasAction then 96 else 82),
 			Parent = roster.List,
 		})
 		addCorner(row, 14)
-		addStroke(row, entry.IsActiveAdmin and COLORS.Green or roster.AccentColor, entry.IsActiveAdmin and 2 or 1, entry.IsActiveAdmin and 0.05 or 0.38)
+		addStroke(
+			row,
+			entry.IsActiveAdmin and COLORS.Green or roster.AccentColor,
+			entry.IsActiveAdmin and 2 or 1,
+			entry.IsActiveAdmin and 0.05 or 0.38
+		)
 
 		local avatar = create("ImageLabel", {
 			BackgroundColor3 = COLORS.PanelRaised,
@@ -1537,7 +1694,7 @@ local function buildDashboard()
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			Position = UDim2.fromOffset(80, 10),
-			Size = UDim2.new(1, -230, 0, 22),
+			Size = UDim2.new(1, if hasAction then -260 else -230, 0, 22),
 			Parent = row,
 		})
 		create("TextLabel", {
@@ -1549,7 +1706,7 @@ local function buildDashboard()
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			Position = UDim2.fromOffset(80, 34),
-			Size = UDim2.new(1, -224, 0, 18),
+			Size = UDim2.new(1, if hasAction then -258 else -224, 0, 18),
 			Parent = row,
 		})
 		create("TextLabel", {
@@ -1561,7 +1718,7 @@ local function buildDashboard()
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			Position = UDim2.fromOffset(80, 54),
-			Size = UDim2.new(1, -224, 0, 16),
+			Size = UDim2.new(1, if hasAction then -258 else -224, 0, 16),
 			Parent = row,
 		})
 
@@ -1571,7 +1728,7 @@ local function buildDashboard()
 			Font = FONT,
 			Text = roleText,
 			TextColor3 = roster.AccentColor,
-			TextSize = 10,
+			TextSize = if #roleText > 16 then 8 else 10,
 			Position = UDim2.new(1, -138, 0, 13),
 			Size = UDim2.fromOffset(124, 24),
 			Parent = row,
@@ -1591,26 +1748,141 @@ local function buildDashboard()
 		})
 		addCorner(statusPill, 12)
 		addStroke(statusPill, statusColor, 1, 0.35)
+
+		if hasAction then
+			local actionButton = create("TextButton", {
+				Name = tostring(actionSpec.Action or "TesterRoleAction"),
+				AutoButtonColor = actionSpec.Enabled ~= false,
+				BackgroundColor3 = actionSpec.Dangerous == true and COLORS.RedDark or COLORS.Gold,
+				BorderSizePixel = 0,
+				Font = FONT,
+				Text = cleanSingleLine(actionSpec.Label, 24),
+				TextColor3 = actionSpec.Dangerous == true and COLORS.Text or Color3.fromRGB(31, 24, 10),
+				TextSize = 11,
+				Position = UDim2.new(1, -138, 0, 69),
+				Size = UDim2.fromOffset(124, 22),
+				Parent = row,
+			})
+			addCorner(actionButton, 10)
+			addStroke(actionButton, actionSpec.Dangerous == true and COLORS.Red or COLORS.GoldDark, 1, 0.2)
+
+			actionButton.Activated:Connect(function()
+				if actionSpec.Enabled == false or testerRoleLoading then
+					return
+				end
+				pulseButton(actionButton)
+				if requestTesterRoleChange then
+					requestTesterRoleChange(tostring(actionSpec.Action or ""), tostring(actionSpec.Target or userId))
+				end
+			end)
+		end
 	end
 
 	renderRoster = function(payload)
 		clearRosterList(superAdminRoster)
 		clearRosterList(adminRoster)
+		clearRosterList(allPlayersRoster)
+		clearRosterList(testerRoster)
+
+		local function setRosterPanels(adminsVisible, allPlayersVisible, testersVisible, showTesterAdd)
+			superAdminRoster.Panel.Visible = adminsVisible
+			adminRoster.Panel.Visible = adminsVisible
+			allPlayersRoster.Panel.Visible = allPlayersVisible
+			testerAddBar.Visible = showTesterAdd
+			testerRoster.Panel.Visible = testersVisible
+
+			if testersVisible then
+				testerRoster.Panel.Position = if showTesterAdd then UDim2.fromOffset(0, 134) else UDim2.fromOffset(0, 66)
+				testerRoster.Panel.Size = if showTesterAdd then UDim2.new(1, 0, 1, -134) else UDim2.new(1, 0, 1, -66)
+			end
+		end
 
 		if typeof(payload) ~= "table" or payload.Success == false then
 			local message = if typeof(payload) == "table" then cleanSingleLine(payload.Message, 120) else ""
 			if message == "" then
 				message = "Roster unavailable."
 			end
-			superAdminRoster.CountLabel.Text = "0 listed"
-			adminRoster.CountLabel.Text = "0 listed"
-			makeRosterEmpty(superAdminRoster, message)
-			makeRosterEmpty(adminRoster, message)
+			rosterTitleLabel.Text = if currentTab == "Testers"
+				then "Testers"
+				elseif currentTab == "AllPlayers" then "All Players"
+				else "Admin Roster"
+			setRosterPanels(currentTab == "Admins", currentTab == "AllPlayers", currentTab == "Testers", false)
+
+			local targetRoster = if currentTab == "Testers"
+				then testerRoster
+				elseif currentTab == "AllPlayers" then allPlayersRoster
+				else superAdminRoster
+			targetRoster.CountLabel.Text = "0 listed"
+			makeRosterEmpty(targetRoster, message)
+			if currentTab == "Admins" then
+				adminRoster.CountLabel.Text = "0 listed"
+				makeRosterEmpty(adminRoster, message)
+			end
 			return
 		end
 
+		local viewer = if typeof(payload.Viewer) == "table" then payload.Viewer else {}
+		local viewerIsSuperAdmin = viewer.IsSuperAdmin == true
 		local superAdmins = if typeof(payload.SuperAdmins) == "table" then payload.SuperAdmins else {}
 		local admins = if typeof(payload.Admins) == "table" then payload.Admins else {}
+		local allPlayers = if typeof(payload.AllPlayers) == "table" then payload.AllPlayers else {}
+		local testers = if typeof(payload.Testers) == "table" then payload.Testers else {}
+
+		if currentTab == "AllPlayers" then
+			rosterTitleLabel.Text = "All Players"
+			setRosterPanels(false, true, false, false)
+			allPlayersRoster.CountLabel.Text = ("%d online"):format(#allPlayers)
+			if #allPlayers == 0 then
+				makeRosterEmpty(allPlayersRoster, "No players are currently in this server.")
+			else
+				for index, entry in ipairs(allPlayers) do
+					local actionSpec = nil
+					if viewerIsSuperAdmin and entry.CanAddTester == true then
+						actionSpec = {
+							Label = "Add Tester",
+							Action = "AddTester",
+							Target = tostring(entry.UserId),
+							Dangerous = false,
+						}
+					elseif viewerIsSuperAdmin and entry.CanRemoveTester == true then
+						actionSpec = {
+							Label = "Remove Tester",
+							Action = "RemoveTester",
+							Target = tostring(entry.UserId),
+							Dangerous = true,
+						}
+					end
+					makeRosterRow(allPlayersRoster, entry, index, "Player", actionSpec)
+				end
+			end
+			return
+		end
+
+		if currentTab == "Testers" then
+			rosterTitleLabel.Text = "Testers"
+			setRosterPanels(false, false, true, viewerIsSuperAdmin)
+			testerRoster.CountLabel.Text = ("%d listed"):format(#testers)
+			if #testers == 0 then
+				makeRosterEmpty(testerRoster, "No testers are currently configured.")
+			else
+				for index, entry in ipairs(testers) do
+					local actionSpec = nil
+					if viewerIsSuperAdmin and entry.CanRemoveTester == true then
+						actionSpec = {
+							Label = "Remove Tester",
+							Action = "RemoveTester",
+							Target = tostring(entry.UserId),
+							Dangerous = true,
+						}
+					end
+					makeRosterRow(testerRoster, entry, index, "Tester", actionSpec)
+				end
+			end
+			return
+		end
+
+		rosterTitleLabel.Text = "Admin Roster"
+		setRosterPanels(true, false, false, false)
 		superAdminRoster.CountLabel.Text = ("%d listed"):format(#superAdmins)
 		adminRoster.CountLabel.Text = ("%d listed"):format(#admins)
 
@@ -1661,6 +1933,7 @@ local function buildDashboard()
 
 			if ok and typeof(payload) == "table" and payload.Success ~= false then
 				lastRosterRefresh = os.clock()
+				lastRosterPayload = payload
 				rosterUpdatedLabel.Text = "Updated now"
 				renderRoster(payload)
 			else
@@ -1672,6 +1945,10 @@ local function buildDashboard()
 					message = "Unable to load roster."
 				end
 				rosterUpdatedLabel.Text = message
+				lastRosterPayload = {
+					Success = false,
+					Message = message,
+				}
 				renderRoster({
 					Success = false,
 					Message = message,
@@ -1682,10 +1959,94 @@ local function buildDashboard()
 		end)
 	end
 
+	local function queueRosterRefresh(reason)
+		if rosterRefreshQueued or currentTab == "Commands" or not gui.Enabled then
+			return
+		end
+
+		rosterRefreshQueued = true
+		rosterUpdatedLabel.Text = cleanSingleLine(reason or "Roster changed.", 120)
+		task.delay(0.2, function()
+			rosterRefreshQueued = false
+			if gui.Parent and gui.Enabled and currentTab ~= "Commands" and requestRoster then
+				requestRoster()
+			end
+		end)
+	end
+
+	requestTesterRoleChange = function(action, target)
+		if testerRoleLoading then
+			return
+		end
+
+		action = cleanSingleLine(action, 24)
+		target = cleanSingleLine(target, 80)
+		if target == "" then
+			rosterUpdatedLabel.Text = "Enter a UserId or username."
+			return
+		end
+
+		if not adminTesterRoleFunction:IsA("RemoteFunction") then
+			rosterUpdatedLabel.Text = "Tester role remote unavailable."
+			return
+		end
+
+		testerRoleLoading = true
+		rosterUpdatedLabel.Text = "Updating tester role..."
+
+		task.spawn(function()
+			local ok, payload = pcall(function()
+				return adminTesterRoleFunction:InvokeServer(action, target)
+			end)
+
+			testerRoleLoading = false
+			if not gui.Parent then
+				return
+			end
+
+			local message = "Tester role update failed."
+			if ok and typeof(payload) == "table" then
+				message = cleanSingleLine(payload.Message, 120)
+				if message == "" then
+					message = if payload.Success == false then "Tester role update failed." else "Tester role updated."
+				end
+				if payload.Success ~= false and typeof(payload.Roster) == "table" then
+					lastRosterRefresh = os.clock()
+					lastRosterPayload = payload.Roster
+					if action == "AddTester" then
+						testerAddBox.Text = ""
+					end
+					renderRoster(payload.Roster)
+				elseif payload.Success ~= false then
+					requestRoster()
+				end
+			end
+
+			rosterUpdatedLabel.Text = message
+		end)
+	end
+
 	rosterRefreshButton.Activated:Connect(function()
 		pulseButton(rosterRefreshButton)
 		requestRoster()
 	end)
+
+	testerAddButton.Activated:Connect(function()
+		pulseButton(testerAddButton)
+		if requestTesterRoleChange then
+			requestTesterRoleChange("AddTester", testerAddBox.Text)
+		end
+	end)
+
+	if adminRosterUpdatedEvent:IsA("RemoteEvent") then
+		adminRosterUpdatedEvent.OnClientEvent:Connect(function(payload)
+			local reason = "Roster changed."
+			if typeof(payload) == "table" and typeof(payload.Reason) == "string" then
+				reason = "Roster changed: " .. cleanSingleLine(payload.Reason, 80)
+			end
+			queueRosterRefresh(reason)
+		end)
+	end
 
 	if adminCommandFeedbackEvent:IsA("RemoteEvent") then
 		adminCommandFeedbackEvent.OnClientEvent:Connect(function(payload)

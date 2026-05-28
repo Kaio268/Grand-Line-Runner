@@ -1304,9 +1304,21 @@ local function RecursiveUpdate(folder, data)
 	end
 end
 
+local function shouldPreserveRuntimeFolder(folder: Folder, child: Instance): boolean
+	return folder.Name == "Titles"
+		and folder.Parent ~= nil
+		and folder.Parent:IsA("Player")
+		and child:IsA("Folder")
+		and child.Name == "RuntimeUnlocked"
+end
+
 local function RecursiveRemove(data, folder : Folder)
-	for k, v in pairs(folder:GetChildren()) do
+	for _, v in pairs(folder:GetChildren()) do
 		if not (v:IsA("Folder") or v:IsA("NumberValue") or v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("BoolValue")) then
+			continue
+		end
+
+		if shouldPreserveRuntimeFolder(folder, v) then
 			continue
 		end
 

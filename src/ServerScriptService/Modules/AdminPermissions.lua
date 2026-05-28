@@ -1,8 +1,10 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local MessagingService = game:GetService("MessagingService")
 local TextChatService = game:GetService("TextChatService")
 
 local AdminConfig = require(script.Parent:WaitForChild("AdminConfig"))
+local TesterRoleStore = require(script.Parent:WaitForChild("TesterRoleStore"))
 local VIPTestOverrides = require(script.Parent:WaitForChild("VIPTestOverrides"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
@@ -17,13 +19,27 @@ local SuperAdmins = {
 
 local configuredAdmins = {}
 local configuredAdminIds = {}
+local baseConfiguredTesters = {}
+local baseConfiguredTesterIds = {}
+local configuredTesters = {}
+local configuredTesterIds = {}
+local testerRoleOverrides = {
+	Added = {},
+	Removed = {},
+	UpdatedAt = 0,
+	UpdatedBy = 0,
+	Available = false,
+}
+local activePublicTesterTitleByUserId = {}
 local superAdminIds = {}
 local activeAdmins = {}
 local userInfoCache = {}
 local chatConnections = {}
+local testerTitleConnections = {}
 local textChatCommandConnection = nil
 local vipTextChatCommandConnection = nil
 local adminStateChanged = Instance.new("BindableEvent")
+local testerStateChanged = Instance.new("BindableEvent")
 
 local POPUP_STROKE = Color3.fromRGB(0, 0, 0)
 local POPUP_INFO = Color3.fromRGB(105, 225, 255)
@@ -33,6 +49,9 @@ local POPUP_ERROR = Color3.fromRGB(255, 92, 92)
 local POPUP_DURATION_SECONDS = 4
 local POPUP_MESSAGE_LIMIT = 140
 local ADMIN_COMMAND_FEEDBACK_EVENT_NAME = "AdminCommandFeedback"
+local TESTER_ROLE_UPDATE_TOPIC = "AdminTesterRolesV1"
+local TESTER_STATUS_CHANGED_EVENT_NAME = "TesterStatusChanged"
+local EQUIPPED_TITLE_ATTRIBUTE = "EquippedTitleId"
 
 local function getOrCreateRemoteEvent(remoteName: string): RemoteEvent
 	local remote = ReplicatedStorage:FindFirstChild(remoteName)
@@ -51,6 +70,7 @@ local function getOrCreateRemoteEvent(remoteName: string): RemoteEvent
 end
 
 local adminCommandFeedbackEvent = getOrCreateRemoteEvent(ADMIN_COMMAND_FEEDBACK_EVENT_NAME)
+local testerStatusChangedEvent = getOrCreateRemoteEvent(TESTER_STATUS_CHANGED_EVENT_NAME)
 
 local COMMAND_DISPLAY_NAMES = {
 	admin = "Admin toggle",
@@ -76,6 +96,7 @@ local COMMAND_DISPLAY_NAMES = {
 	shipreset = "Ship reset",
 	spawn = "Spawn",
 	speed = "Speed",
+	testerRole = "Tester role",
 	tutorial = "Tutorial reset",
 	vip = "VIP test override",
 	wipeplayer = "Wipe player",
@@ -162,6 +183,7 @@ local function sendCommandFeedback(player: Player?, status: string, commandName:
 end
 
 AdminPermissions.AdminStateChanged = adminStateChanged.Event
+AdminPermissions.TesterStateChanged = testerStateChanged.Event
 
 if typeof(AdminConfig) ~= "table" then
 	warn(string.format(
@@ -190,11 +212,36 @@ else
 	end
 end
 
+if typeof(AdminConfig) == "table" and AdminConfig.Testers ~= nil then
+	if typeof(AdminConfig.Testers) ~= "table" then
+		warn(string.format(
+			"[AdminPermissions] Tester config load failed reason=invalid_testers_table testersType=%s",
+			typeof(AdminConfig.Testers)
+		))
+	else
+		for userId, enabled in pairs(AdminConfig.Testers) do
+			local numericUserId = tonumber(userId)
+			if numericUserId and enabled == true then
+				numericUserId = math.floor(numericUserId)
+				baseConfiguredTesters[numericUserId] = true
+				table.insert(baseConfiguredTesterIds, numericUserId)
+			elseif enabled == true then
+				warn(string.format(
+					"[AdminPermissions] Ignored tester config entry reason=invalid_user_id key=%s keyType=%s",
+					tostring(userId),
+					typeof(userId)
+				))
+			end
+		end
+	end
+end
+
 for userId in pairs(SuperAdmins) do
 	table.insert(superAdminIds, userId)
 end
 
 table.sort(configuredAdminIds)
+table.sort(baseConfiguredTesterIds)
 table.sort(superAdminIds)
 
 local function getIdsText(ids)
@@ -204,6 +251,220 @@ local function getIdsText(ids)
 	end
 	return table.concat(parts, ",")
 end
+
+local function getPublicTesterTitleId(): string
+	if typeof(AdminConfig) ~= "table" then
+		return "Tester"
+	end
+
+	local titleId = tostring(AdminConfig.PublicTesterTitleId or ""):match("^%s*(.-)%s*$") or ""
+	if titleId == "" then
+		return "Tester"
+	end
+
+	return titleId
+end
+
+local function normalizeTitleId(titleId): string
+	if typeof(titleId) ~= "string" then
+		return ""
+	end
+
+	return titleId:match("^%s*(.-)%s*$") or ""
+end
+
+local function readEquippedTitleId(player: Player?): string
+	if player == nil then
+		return ""
+	end
+
+	local attributeTitleId = normalizeTitleId(player:GetAttribute(EQUIPPED_TITLE_ATTRIBUTE))
+	if attributeTitleId ~= "" then
+		return attributeTitleId
+	end
+
+	local titlesFolder = player:FindFirstChild("Titles")
+	local equippedValue = titlesFolder and titlesFolder:FindFirstChild("Equipped")
+	if equippedValue and equippedValue:IsA("StringValue") then
+		return normalizeTitleId(equippedValue.Value)
+	end
+
+	return ""
+end
+
+local function isPublicTesterTitleEnabled(): boolean
+	return typeof(AdminConfig) == "table" and AdminConfig.EnablePublicTesterTitle == true
+end
+
+local function isTesterUserId(userId): boolean
+	local numericUserId = math.floor(tonumber(userId) or 0)
+	return numericUserId > 0
+		and (configuredTesters[numericUserId] == true or activePublicTesterTitleByUserId[numericUserId] == true)
+end
+
+local function emitTesterStateChanged(player: Player?, userId, source: string?)
+	local numericUserId = math.floor(tonumber(userId) or (player and player.UserId) or 0)
+	if numericUserId <= 0 then
+		return
+	end
+
+	local isTester = isTesterUserId(numericUserId)
+	local payload = {
+		UserId = numericUserId,
+		IsTester = isTester,
+		Source = source or "unknown",
+		SentAt = os.time(),
+	}
+
+	testerStateChanged:Fire(player, payload)
+	if player and player.Parent == Players then
+		testerStatusChangedEvent:FireClient(player, payload)
+	end
+end
+
+local function emitTesterStateChangedForAll(source: string?)
+	for _, player in ipairs(Players:GetPlayers()) do
+		emitTesterStateChanged(player, player.UserId, source)
+	end
+end
+
+local function updatePublicTesterTitleState(player: Player?, source: string?)
+	if player == nil or player.Parent ~= Players then
+		return
+	end
+
+	local userId = math.floor(tonumber(player.UserId) or 0)
+	if userId <= 0 then
+		return
+	end
+
+	local equippedTitleId = readEquippedTitleId(player)
+	local active = isPublicTesterTitleEnabled()
+		and equippedTitleId ~= ""
+		and equippedTitleId == getPublicTesterTitleId()
+	local previous = activePublicTesterTitleByUserId[userId] == true
+
+	if active then
+		activePublicTesterTitleByUserId[userId] = true
+	else
+		activePublicTesterTitleByUserId[userId] = nil
+	end
+
+	if previous ~= active then
+		emitTesterStateChanged(player, userId, source or "tester_title_changed")
+	end
+end
+
+local function addSortedUnique(ids, seen, userId)
+	local numericUserId = math.floor(tonumber(userId) or 0)
+	if numericUserId <= 0 or seen[numericUserId] == true then
+		return
+	end
+
+	seen[numericUserId] = true
+	table.insert(ids, numericUserId)
+end
+
+local function rebuildEffectiveTesters()
+	configuredTesters = {}
+	configuredTesterIds = {}
+
+	local seen = {}
+	local removed = if typeof(testerRoleOverrides.Removed) == "table" then testerRoleOverrides.Removed else {}
+	local added = if typeof(testerRoleOverrides.Added) == "table" then testerRoleOverrides.Added else {}
+
+	for userId in pairs(baseConfiguredTesters) do
+		if removed[tostring(userId)] ~= true then
+			configuredTesters[userId] = true
+			addSortedUnique(configuredTesterIds, seen, userId)
+		end
+	end
+
+	for userId, enabled in pairs(added) do
+		local numericUserId = tonumber(userId)
+		if numericUserId and enabled == true then
+			numericUserId = math.floor(numericUserId)
+			if removed[tostring(numericUserId)] ~= true then
+				configuredTesters[numericUserId] = true
+				addSortedUnique(configuredTesterIds, seen, numericUserId)
+			end
+		end
+	end
+
+	table.sort(configuredTesterIds)
+end
+
+local function applyTesterRoleOverrides(state)
+	testerRoleOverrides = if typeof(state) == "table" then state else testerRoleOverrides
+	rebuildEffectiveTesters()
+end
+
+local function loadTesterRoleOverrides(keepCurrentOnFailure: boolean?)
+	local state = TesterRoleStore.Load()
+	if state.Available == false and keepCurrentOnFailure == true and testerRoleOverrides.Available == true then
+		warn("[AdminPermissions] Keeping existing tester role overrides after reload failure.")
+		return false
+	end
+
+	applyTesterRoleOverrides(state)
+	return state.Available == true
+end
+
+local function publishTesterRoleUpdate(actorUserId)
+	task.spawn(function()
+		pcall(function()
+			MessagingService:PublishAsync(TESTER_ROLE_UPDATE_TOPIC, {
+				UpdatedAt = os.time(),
+				UpdatedBy = math.floor(tonumber(actorUserId) or 0),
+			})
+		end)
+	end)
+end
+
+local function getTesterSource(userId: number): string
+	local numericUserId = math.floor(tonumber(userId) or 0)
+	local parts = {}
+	local isStatic = baseConfiguredTesters[numericUserId] == true
+	local isAdded = typeof(testerRoleOverrides.Added) == "table"
+		and testerRoleOverrides.Added[tostring(numericUserId)] == true
+	local isTitleActive = activePublicTesterTitleByUserId[numericUserId] == true
+
+	if isStatic then
+		table.insert(parts, "Configured Tester")
+	end
+	if isAdded then
+		table.insert(parts, "Persistent Tester")
+	end
+	if isTitleActive then
+		table.insert(parts, "Tester Title Active")
+	end
+
+	return table.concat(parts, " + ")
+end
+
+local function getTesterManageBlockedReason(userId: number): string?
+	local numericUserId = math.floor(tonumber(userId) or 0)
+	if numericUserId <= 0 then
+		return "invalid_user_id"
+	end
+
+	if SuperAdmins[numericUserId] == true then
+		return "super_admin_locked"
+	end
+
+	if configuredAdmins[numericUserId] == true then
+		return "admin_locked"
+	end
+
+	local onlinePlayer = Players:GetPlayerByUserId(numericUserId)
+	if onlinePlayer and AdminPermissions.IsAdmin(onlinePlayer) then
+		return "active_admin_locked"
+	end
+
+	return nil
+end
+
+loadTesterRoleOverrides(false)
 
 local function getCachedUserInfo(userId: number, onlinePlayer: Player?)
 	local numericUserId = math.floor(tonumber(userId) or 0)
@@ -260,6 +521,10 @@ local function buildRosterEntry(userId: number, roleName: string)
 	local userInfo = getCachedUserInfo(numericUserId, onlinePlayer)
 	local isActiveAdmin = false
 	local adminStatusReason = "offline"
+	local isConfiguredTesterRole = configuredTesters[numericUserId] == true
+	local isTesterTitleActive = activePublicTesterTitleByUserId[numericUserId] == true
+	local isTester = isConfiguredTesterRole or isTesterTitleActive
+	local testerBlockReason = getTesterManageBlockedReason(numericUserId)
 
 	if onlinePlayer then
 		isActiveAdmin, adminStatusReason = AdminPermissions.GetAdminStatus(onlinePlayer)
@@ -276,6 +541,16 @@ local function buildRosterEntry(userId: number, roleName: string)
 		Role = roleName,
 		IsSuperAdmin = SuperAdmins[numericUserId] == true,
 		IsConfiguredAdmin = configuredAdmins[numericUserId] == true,
+		IsTester = isTester,
+		IsConfiguredTester = isConfiguredTesterRole,
+		IsBaseTester = baseConfiguredTesters[numericUserId] == true,
+		IsPersistedTester = typeof(testerRoleOverrides.Added) == "table"
+			and testerRoleOverrides.Added[tostring(numericUserId)] == true,
+		IsTesterTitleActive = isTesterTitleActive,
+		TesterSource = getTesterSource(numericUserId),
+		CanAddTester = testerBlockReason == nil and not isConfiguredTesterRole,
+		CanRemoveTester = testerBlockReason == nil and isConfiguredTesterRole,
+		TesterManageBlockedReason = testerBlockReason,
 		IsOnline = onlinePlayer ~= nil,
 		IsActiveAdmin = isActiveAdmin == true,
 		AdminStatusReason = adminStatusReason,
@@ -290,6 +565,42 @@ local function buildRosterList(ids, roleName: string)
 	return entries
 end
 
+local function buildTesterRosterList()
+	local ids = {}
+	local seen = {}
+
+	for _, userId in ipairs(configuredTesterIds) do
+		addSortedUnique(ids, seen, userId)
+	end
+
+	for userId, active in pairs(activePublicTesterTitleByUserId) do
+		if active == true then
+			addSortedUnique(ids, seen, userId)
+		end
+	end
+
+	table.sort(ids)
+	return buildRosterList(ids, "Tester")
+end
+
+local function buildAllPlayerRosterList()
+	local entries = {}
+	for _, onlinePlayer in ipairs(Players:GetPlayers()) do
+		table.insert(entries, buildRosterEntry(onlinePlayer.UserId, "Player"))
+	end
+
+	table.sort(entries, function(left, right)
+		local leftName = string.lower(tostring(left.Username or left.DisplayName or ""))
+		local rightName = string.lower(tostring(right.Username or right.DisplayName or ""))
+		if leftName == rightName then
+			return tonumber(left.UserId) < tonumber(right.UserId)
+		end
+		return leftName < rightName
+	end)
+
+	return entries
+end
+
 local function getUserId(player: Player?): number?
 	if player == nil then
 		return nil
@@ -301,6 +612,42 @@ local function getUserId(player: Player?): number?
 	end
 
 	return math.floor(numericUserId)
+end
+
+local function resolveUserIdFromTarget(target): (number?, string?)
+	local text = tostring(target or ""):gsub("\r", ""):gsub("\n", " ")
+	text = text:match("^%s*(.-)%s*$") or ""
+	if text == "" then
+		return nil, "target_required"
+	end
+
+	local numericUserId = tonumber(text)
+	if numericUserId ~= nil then
+		numericUserId = math.floor(numericUserId)
+		if numericUserId > 0 then
+			return numericUserId, nil
+		end
+
+		return nil, "invalid_user_id"
+	end
+
+	text = text:gsub("^@", "")
+	local lowered = string.lower(text)
+	for _, onlinePlayer in ipairs(Players:GetPlayers()) do
+		if string.lower(onlinePlayer.Name) == lowered or string.lower(onlinePlayer.DisplayName) == lowered then
+			return onlinePlayer.UserId, nil
+		end
+	end
+
+	local ok, userIdOrError = pcall(function()
+		return Players:GetUserIdFromNameAsync(text)
+	end)
+
+	if ok and tonumber(userIdOrError) ~= nil then
+		return math.floor(tonumber(userIdOrError)), nil
+	end
+
+	return nil, "target_unresolved"
 end
 
 local function isConfiguredAdmin(player: Player?): boolean
@@ -544,6 +891,14 @@ local function bindPlayer(player: Player)
 		handleVipTestCommand(player, message, "Player.Chatted")
 	end)
 
+	if testerTitleConnections[player] then
+		testerTitleConnections[player]:Disconnect()
+	end
+	testerTitleConnections[player] = player:GetAttributeChangedSignal(EQUIPPED_TITLE_ATTRIBUTE):Connect(function()
+		updatePublicTesterTitleState(player, "tester_title_changed")
+	end)
+	updatePublicTesterTitleState(player, "player_bound")
+
 	AdminPermissions.LogPlayerResolved(player)
 end
 
@@ -554,9 +909,19 @@ local function unbindPlayer(player: Player)
 		chatConnections[player] = nil
 	end
 
+	local testerTitleConnection = testerTitleConnections[player]
+	if testerTitleConnection then
+		testerTitleConnection:Disconnect()
+		testerTitleConnections[player] = nil
+	end
+
 	local userId = getUserId(player)
 	if userId ~= nil then
 		activeAdmins[userId] = nil
+		if activePublicTesterTitleByUserId[userId] == true then
+			activePublicTesterTitleByUserId[userId] = nil
+			emitTesterStateChanged(player, userId, "player_removing")
+		end
 	end
 end
 
@@ -566,6 +931,14 @@ print(string.format(
 	getIdsText(configuredAdminIds),
 	#superAdminIds,
 	getIdsText(superAdminIds)
+))
+print(string.format(
+	"[AdminPermissions] Tester config loaded baseTesterCount=%d baseTesterUserIds=%s effectiveTesterCount=%d effectiveTesterUserIds=%s storeAvailable=%s",
+	#baseConfiguredTesterIds,
+	getIdsText(baseConfiguredTesterIds),
+	#configuredTesterIds,
+	getIdsText(configuredTesterIds),
+	tostring(testerRoleOverrides.Available == true)
 ))
 
 function AdminPermissions.IsSuperAdmin(player: Player?): boolean
@@ -630,6 +1003,12 @@ function AdminPermissions.IsAdmin(player: Player?): boolean
 	return isAdmin == true
 end
 
+function AdminPermissions.IsTester(player: Player?): boolean
+	updatePublicTesterTitleState(player, "tester_status_check")
+	local userId = getUserId(player)
+	return userId ~= nil and isTesterUserId(userId)
+end
+
 function AdminPermissions.GetAdminRoster(requestingPlayer: Player?): table
 	local viewerIsAdmin, viewerReason = AdminPermissions.GetAdminStatus(requestingPlayer)
 	local viewer = {
@@ -649,6 +1028,8 @@ function AdminPermissions.GetAdminRoster(requestingPlayer: Player?): table
 			Viewer = viewer,
 			SuperAdmins = {},
 			Admins = {},
+			AllPlayers = {},
+			Testers = {},
 		}
 	end
 
@@ -658,6 +1039,119 @@ function AdminPermissions.GetAdminRoster(requestingPlayer: Player?): table
 		Viewer = viewer,
 		SuperAdmins = buildRosterList(superAdminIds, "SuperAdmin"),
 		Admins = buildRosterList(configuredAdminIds, "Admin"),
+		AllPlayers = buildAllPlayerRosterList(),
+		Testers = buildTesterRosterList(),
+		TesterRoleStoreAvailable = testerRoleOverrides.Available == true,
+		TesterRoleStoreUpdatedAt = math.floor(tonumber(testerRoleOverrides.UpdatedAt) or 0),
+		TesterRoleStoreUpdatedBy = math.floor(tonumber(testerRoleOverrides.UpdatedBy) or 0),
+	}
+end
+
+function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabled: boolean, source: string?): table
+	source = source or "AdminTesterRoleRequest"
+	local action = if enabled == true then "add" else "remove"
+	AdminPermissions.LogCommandAttempt(requestingPlayer, "testerRole", source, string.format(
+		"action=%s target=%s",
+		action,
+		tostring(target)
+	))
+
+	if not AdminPermissions.IsSuperAdmin(requestingPlayer) then
+		AdminPermissions.LogCommandRejected(requestingPlayer, "testerRole", source, "reason=not_super_admin")
+		return {
+			Success = false,
+			Message = "SuperAdmin access required.",
+		}
+	end
+
+	local targetUserId, resolveReason = resolveUserIdFromTarget(target)
+	if targetUserId == nil then
+		AdminPermissions.LogCommandFailed(requestingPlayer, "testerRole", source, "reason=" .. tostring(resolveReason))
+		return {
+			Success = false,
+			Message = "Could not resolve that tester target.",
+		}
+	end
+
+	local blockedReason = getTesterManageBlockedReason(targetUserId)
+	if blockedReason ~= nil then
+		AdminPermissions.LogCommandRejected(
+			requestingPlayer,
+			"testerRole",
+			source,
+			string.format("reason=%s targetUserId=%d", blockedReason, targetUserId)
+		)
+		return {
+			Success = false,
+			Message = "Admins and SuperAdmins cannot be modified through tester management.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	local isTester = configuredTesters[targetUserId] == true
+	if enabled == true and isTester then
+		AdminPermissions.LogCommandExecuted(
+			requestingPlayer,
+			"testerRole",
+			source,
+			string.format("action=%s targetUserId=%d changed=false", action, targetUserId)
+		)
+		return {
+			Success = true,
+			Message = "That player is already a tester.",
+			Changed = false,
+			Entry = buildRosterEntry(targetUserId, "Tester"),
+			Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
+		}
+	elseif enabled ~= true and not isTester then
+		AdminPermissions.LogCommandExecuted(
+			requestingPlayer,
+			"testerRole",
+			source,
+			string.format("action=%s targetUserId=%d changed=false", action, targetUserId)
+		)
+		return {
+			Success = true,
+			Message = "That player is not a configured or persistent tester.",
+			Changed = false,
+			Entry = buildRosterEntry(targetUserId, "Tester"),
+			Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
+		}
+	end
+
+	local ok, state, errorMessage = TesterRoleStore.SetTester(targetUserId, enabled == true, getUserId(requestingPlayer) or 0)
+	if not ok then
+		AdminPermissions.LogCommandFailed(
+			requestingPlayer,
+			"testerRole",
+			source,
+			string.format("reason=store_write_failed targetUserId=%d error=%s", targetUserId, tostring(errorMessage))
+		)
+		return {
+			Success = false,
+			Message = "Tester role storage failed. No role changed.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	applyTesterRoleOverrides(state)
+	emitTesterStateChanged(Players:GetPlayerByUserId(targetUserId), targetUserId, "tester_role_changed")
+	publishTesterRoleUpdate(getUserId(requestingPlayer) or 0)
+
+	AdminPermissions.LogCommandExecuted(
+		requestingPlayer,
+		"testerRole",
+		source,
+		string.format("action=%s targetUserId=%d changed=true", action, targetUserId)
+	)
+
+	local message = if enabled == true then "Tester added." else "Tester removed."
+	return {
+		Success = true,
+		Message = message,
+		Changed = true,
+		Entry = buildRosterEntry(targetUserId, "Tester"),
+		Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
 	}
 end
 
@@ -828,6 +1322,13 @@ function AdminPermissions.LogCommandExecuted(player: Player, commandName: string
 	))
 	sendCommandFeedback(player, "success", commandName, source, detail)
 end
+
+pcall(function()
+	MessagingService:SubscribeAsync(TESTER_ROLE_UPDATE_TOPIC, function()
+		loadTesterRoleOverrides(true)
+		emitTesterStateChangedForAll("tester_role_reload")
+	end)
+end)
 
 for _, player in ipairs(Players:GetPlayers()) do
 	bindPlayer(player)

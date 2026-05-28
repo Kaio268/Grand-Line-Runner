@@ -74,7 +74,27 @@ local function getOrCreateRemoteEvent(name)
 	return remote
 end
 
+local function getOrCreateRemoteFunction(name)
+	local remote = ReplicatedStorage:FindFirstChild(name)
+	if remote and not remote:IsA("RemoteFunction") then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new("RemoteFunction")
+		remote.Name = name
+		remote.Parent = ReplicatedStorage
+	end
+	return remote
+end
+
 local adminCommandRequestEvent = getOrCreateRemoteEvent("AdminCommandRequest")
+local testerCommandRequestEvent = getOrCreateRemoteEvent("TesterCommandRequest")
+local testerStatusRequestFunction = getOrCreateRemoteFunction("TesterStatusRequest")
+
+testerStatusRequestFunction.OnServerInvoke = function(player)
+	return AdminPermissions.IsTester(player)
+end
 
 local RECENT_COMMAND_WINDOW = 0.4
 local WIPE_CONFIRM_WINDOW = 20
@@ -94,6 +114,21 @@ local fruitAliases = {}
 local chestTierAliases = {}
 local resourceAliases = {}
 local BOOST_COMMAND_DEFAULT_MINUTES = 5
+local TESTER_CHEST_AMOUNT_CAP = 5
+local TESTER_MONEY_DELTA_CAP = 25000
+local TESTER_BOOST_DURATION_MINUTES_CAP = 30
+local TESTER_SPEED_CAP = 50
+local TESTER_FALLBACK_MATERIAL_CAP = 250
+local TESTER_FALLBACK_FOOD_CAP = 50
+local TESTER_RESOURCE_CAPS_BY_KEY = {
+	Timber = 600,
+	Iron = 220,
+	AncientTimber = 15,
+	Apple = 100,
+	Rice = 100,
+	Meat = 50,
+	SeaBeastMeat = 15,
+}
 local boostAliases = {
 	["x2beli"] = {
 		BoostName = "x2Money",
@@ -311,8 +346,16 @@ for _, fruit in ipairs(DevilFruitConfig.GetAllFruits()) do
 	end
 end
 
-local function isAuthorized(player)
-	return AdminPermissions.IsAdmin(player)
+local function isTesterCommandContext(commandContext)
+	return typeof(commandContext) == "table" and commandContext.TesterApproved == true
+end
+
+local function isAuthorized(player, commandContext)
+	if AdminPermissions.IsAdmin(player) then
+		return true
+	end
+
+	return isTesterCommandContext(commandContext) and AdminPermissions.IsTester(player)
 end
 
 local function markRecentCommand(player, commandText)
@@ -389,8 +432,8 @@ local function grantAllFruits(player)
 	))
 end
 
-local function processFruitCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processFruitCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -504,8 +547,8 @@ local function sendHitboxPopup(player, text, color, isError)
 	end
 end
 
-local function processHitboxCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processHitboxCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -543,8 +586,8 @@ local function processHitboxCommand(player, argumentText)
 	))
 end
 
-local function processInvincibleCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processInvincibleCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -808,8 +851,8 @@ local function getDisplayedBountyBreakdown(player)
 	}
 end
 
-local function processMoneyCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processMoneyCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -894,8 +937,8 @@ local function parseSpeedAmount(text)
 	return amount
 end
 
-local function processSpeedCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processSpeedCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -937,8 +980,8 @@ local function processSpeedCommand(player, argumentText)
 	))
 end
 
-local function processBoostCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processBoostCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -1088,8 +1131,8 @@ local function processRebirthCommand(player, argumentText)
 	))
 end
 
-local function processBountyCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processBountyCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -1214,8 +1257,8 @@ local function getTrackedResourceValue(player, resourceData)
 	return nil
 end
 
-local function processGiveCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processGiveCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -1375,8 +1418,8 @@ local function processClearCommand(player, argumentText)
 	print(string.format("[DevFruitDevCommands] %s cleared inventory via /clear inv", player.Name))
 end
 
-local function processTutorialCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processTutorialCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -5683,8 +5726,8 @@ local function processWipePlayerCommand(player, argumentText, commandName)
 	))
 end
 
-local function processSpawnCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function processSpawnCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -5793,8 +5836,303 @@ registerChestAlias("gold", "Gold")
 registerChestAlias("legend", "Gold")
 registerChestAlias("legendary", "Gold")
 
-local function processChestCommand(player, argumentText)
-	if not isAuthorized(player) then
+local function rejectTesterCommand(reason)
+	return false, "reason=" .. tostring(reason)
+end
+
+local function validateTesterOnOffArgument(commandName, argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "on" or normalizedArgument == "off" then
+		return true
+	end
+
+	return rejectTesterCommand("tester_" .. tostring(commandName) .. "_requires_on_or_off")
+end
+
+local function validateTesterFruitCommand(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		return rejectTesterCommand("tester_fruit_requires_argument")
+	end
+
+	if normalizedArgument == "all" then
+		return rejectTesterCommand("tester_fruit_all_disallowed")
+	end
+
+	local cooldownArgument = normalizedArgument:match("^nocd%s*(.*)$")
+	if cooldownArgument ~= nil then
+		local normalizedCooldownArgument = normalizeText(cooldownArgument)
+		if normalizedCooldownArgument == "on" or normalizedCooldownArgument == "off" then
+			return true
+		end
+
+		return rejectTesterCommand("tester_fruit_nocd_requires_on_or_off")
+	end
+
+	local directEquipArgument = normalizedArgument:match("^equip%s+(.+)$")
+	if directEquipArgument then
+		if fruitAliases[normalizeText(directEquipArgument)] ~= nil then
+			return true
+		end
+
+		return rejectTesterCommand("tester_fruit_unknown_alias")
+	end
+
+	if normalizedArgument == "clear" or normalizedArgument == "none" or normalizedArgument == "remove" then
+		return true
+	end
+
+	if fruitAliases[normalizedArgument] ~= nil then
+		return true
+	end
+
+	return rejectTesterCommand("tester_fruit_unknown_alias")
+end
+
+local function validateTesterChestCommand(argumentText)
+	local trimmedArguments = trimText(argumentText)
+	if trimmedArguments == "" then
+		return rejectTesterCommand("tester_chest_requires_tier")
+	end
+
+	local rarityArgument, amountArgument = trimmedArguments:match("^(%S+)%s*(.*)$")
+	if chestTierAliases[normalizeText(rarityArgument)] == nil then
+		return rejectTesterCommand("tester_chest_unknown_tier")
+	end
+
+	local amount = 1
+	local normalizedAmount = trimText(amountArgument)
+	if normalizedAmount ~= "" then
+		amount = tonumber(normalizedAmount)
+	end
+
+	if typeof(amount) ~= "number" or amount ~= amount or amount < 1 then
+		return rejectTesterCommand("tester_chest_invalid_amount")
+	end
+
+	if amount > TESTER_CHEST_AMOUNT_CAP then
+		return rejectTesterCommand("tester_chest_amount_cap_" .. tostring(TESTER_CHEST_AMOUNT_CAP))
+	end
+
+	return true
+end
+
+local function getTesterResourceCap(resourceData)
+	if typeof(resourceData) ~= "table" then
+		return nil
+	end
+
+	if resourceData.Kind == "currency" then
+		return TESTER_MONEY_DELTA_CAP
+	end
+
+	local key = tostring(resourceData.Key or "")
+	local keyCap = TESTER_RESOURCE_CAPS_BY_KEY[key]
+	if typeof(keyCap) == "number" then
+		return keyCap
+	end
+
+	if resourceData.Kind == "material" then
+		return TESTER_FALLBACK_MATERIAL_CAP
+	elseif resourceData.Kind == "food" then
+		return TESTER_FALLBACK_FOOD_CAP
+	end
+
+	return nil
+end
+
+local function validateTesterGiveCommand(argumentText)
+	local trimmedArguments = trimText(argumentText)
+	if trimmedArguments == "" then
+		return rejectTesterCommand("tester_give_requires_resource_and_amount")
+	end
+
+	local resourceArgument, amountArgument = trimmedArguments:match("^(.-)%s+([^%s]+)$")
+	if resourceArgument == nil or amountArgument == nil then
+		return rejectTesterCommand("tester_give_requires_resource_and_amount")
+	end
+
+	local resourceKey = normalizeResourceAlias(resourceArgument)
+	local resourceData = resourceAliases[resourceKey] or resourceAliases[resourceKey:gsub("%s+", "")]
+	if typeof(resourceData) ~= "table" then
+		return rejectTesterCommand("tester_give_unknown_resource")
+	end
+
+	local rawAmount = parseSignedAmount(amountArgument)
+	if typeof(rawAmount) ~= "number" or rawAmount ~= rawAmount or rawAmount <= 0 then
+		return rejectTesterCommand("tester_give_invalid_amount")
+	end
+
+	local cap = getTesterResourceCap(resourceData)
+	if typeof(cap) ~= "number" then
+		return rejectTesterCommand("tester_give_resource_disallowed")
+	end
+
+	if rawAmount > cap then
+		return rejectTesterCommand("tester_give_amount_cap_" .. tostring(cap))
+	end
+
+	return true
+end
+
+local function validateTesterMoneyCommand(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		return rejectTesterCommand("tester_money_requires_delta")
+	end
+
+	if normalizedArgument == "clear" or normalizedArgument == "reset" or normalizedArgument == "zero" then
+		return rejectTesterCommand("tester_money_reset_disallowed")
+	end
+
+	if normalizedArgument:match("^set%s+") then
+		return rejectTesterCommand("tester_money_set_disallowed")
+	end
+
+	local amount = parseSignedAmount(argumentText)
+	if typeof(amount) ~= "number" or amount ~= amount or amount == 0 then
+		return rejectTesterCommand("tester_money_invalid_delta")
+	end
+
+	if math.abs(amount) > TESTER_MONEY_DELTA_CAP then
+		return rejectTesterCommand("tester_money_delta_cap_" .. tostring(TESTER_MONEY_DELTA_CAP))
+	end
+
+	return true
+end
+
+local function validateTesterSpeedCommand(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "" then
+		return rejectTesterCommand("tester_speed_requires_amount")
+	end
+
+	if normalizedArgument == "clear" or normalizedArgument == "reset" or normalizedArgument == "default" then
+		return true
+	end
+
+	local setArgument = normalizedArgument:match("^set%s+(.+)$")
+	local targetSpeed = parseSpeedAmount(setArgument or normalizedArgument)
+	if typeof(targetSpeed) ~= "number" then
+		return rejectTesterCommand("tester_speed_invalid_amount")
+	end
+
+	if targetSpeed < 1 or targetSpeed > TESTER_SPEED_CAP then
+		return rejectTesterCommand("tester_speed_cap_" .. tostring(TESTER_SPEED_CAP))
+	end
+
+	return true
+end
+
+local function validateTesterBoostCommand(argumentText)
+	local trimmedArgument = trimText(argumentText)
+	if trimmedArgument == "" then
+		return rejectTesterCommand("tester_boost_requires_type")
+	end
+
+	local boostToken, durationText = trimmedArgument:match("^(%S+)%s*(.*)$")
+	if boostAliases[normalizeText(boostToken)] == nil then
+		return rejectTesterCommand("tester_boost_unknown_type")
+	end
+
+	local durationMinutes = BOOST_COMMAND_DEFAULT_MINUTES
+	local normalizedDurationText = trimText(durationText)
+	if normalizedDurationText ~= "" then
+		durationMinutes = parseSignedAmount(normalizedDurationText)
+	end
+
+	if typeof(durationMinutes) ~= "number" or durationMinutes < 1 then
+		return rejectTesterCommand("tester_boost_invalid_duration")
+	end
+
+	if durationMinutes > TESTER_BOOST_DURATION_MINUTES_CAP then
+		return rejectTesterCommand("tester_boost_duration_cap_" .. tostring(TESTER_BOOST_DURATION_MINUTES_CAP))
+	end
+
+	return true
+end
+
+local function validateTesterSpawnCommand(argumentText)
+	local targetName = normalizeText(argumentText)
+	if targetName == "chest" or targetName == "crew" then
+		return true
+	end
+
+	return rejectTesterCommand("tester_spawn_requires_chest_or_crew")
+end
+
+local function validateTesterTutorialCommand(argumentText)
+	if normalizeText(argumentText) == "reset" then
+		return true
+	end
+
+	return rejectTesterCommand("tester_tutorial_requires_reset")
+end
+
+local function validateTesterBountyCommand(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+	if normalizedArgument == "debug" or normalizedArgument == "info" or normalizedArgument == "status" then
+		return true
+	end
+
+	return rejectTesterCommand("tester_bounty_debug_only")
+end
+
+local function validateTesterGiftsCommand(commandName, argumentText)
+	local normalizedCommand = normalizeText(commandName)
+	local trimmedArgument = trimText(argumentText)
+	local normalizedArgument = normalizeText(argumentText)
+
+	if normalizedCommand == "gifts" then
+		local action, rest = trimmedArgument:match("^(%S+)%s*(.*)$")
+		local normalizedAction = normalizeText(action)
+		local normalizedTarget = normalizeText(rest)
+		if (normalizedAction == "reset" or normalizedAction == "clear")
+			and (normalizedTarget == "" or normalizedTarget == "me" or normalizedTarget == "self")
+		then
+			return true
+		end
+
+		return rejectTesterCommand("tester_gifts_self_only")
+	end
+
+	if normalizedArgument == "" or normalizedArgument == "me" or normalizedArgument == "self" then
+		return true
+	end
+
+	return rejectTesterCommand("tester_giftreset_self_only")
+end
+
+local function validateTesterCommand(commandName, argumentText)
+	if commandName == "hitbox" or commandName == "invincible" then
+		return validateTesterOnOffArgument(commandName, argumentText)
+	elseif commandName == "fruit" then
+		return validateTesterFruitCommand(argumentText)
+	elseif commandName == "chest" then
+		return validateTesterChestCommand(argumentText)
+	elseif commandName == "give" then
+		return validateTesterGiveCommand(argumentText)
+	elseif commandName == "beli" or commandName == "money" then
+		return validateTesterMoneyCommand(argumentText)
+	elseif commandName == "speed" or commandName == "setspeed" then
+		return validateTesterSpeedCommand(argumentText)
+	elseif commandName == "boost" then
+		return validateTesterBoostCommand(argumentText)
+	elseif commandName == "spawn" then
+		return validateTesterSpawnCommand(argumentText)
+	elseif commandName == "tutorial" then
+		return validateTesterTutorialCommand(argumentText)
+	elseif commandName == "bounty" then
+		return validateTesterBountyCommand(argumentText)
+	elseif commandName == "gifts" or commandName == "giftreset" then
+		return validateTesterGiftsCommand(commandName, argumentText)
+	end
+
+	return rejectTesterCommand("tester_command_disallowed")
+end
+
+local function processChestCommand(player, argumentText, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -5851,8 +6189,8 @@ local function processChestCommand(player, argumentText)
 	end
 end
 
-local function processGiftResetCommand(player, argumentText, commandName)
-	if not isAuthorized(player) then
+local function processGiftResetCommand(player, argumentText, commandName, commandContext)
+	if not isAuthorized(player, commandContext) then
 		return
 	end
 
@@ -5957,7 +6295,24 @@ local function getWarningFeedbackStatus(warningText)
 	return "error"
 end
 
-local function executeAdminCommandHandler(player, commandName, source, normalizedText, handler)
+local function withTesterFeedbackDetail(commandContext, detail)
+	if not isTesterCommandContext(commandContext) then
+		return detail
+	end
+
+	local text = tostring(detail or "")
+	if string.find(text, "role=tester", 1, true) then
+		return text
+	end
+
+	if text == "" then
+		return "role=tester"
+	end
+
+	return "role=tester " .. text
+end
+
+local function executeAdminCommandHandler(player, commandName, source, normalizedText, handler, commandContext)
 	local defaultDetail = string.format("text=%s", normalizedText)
 	local warnings = {}
 	local previousWarnings = activeCommandWarnings
@@ -5981,7 +6336,7 @@ local function executeAdminCommandHandler(player, commandName, source, normalize
 		status = result.Status or result.status or status
 	end
 
-	local feedbackDetail = cleanFeedbackText(detail or defaultDetail)
+	local feedbackDetail = withTesterFeedbackDetail(commandContext, cleanFeedbackText(detail or defaultDetail))
 	local commandOutcome = if success == true
 		then "success"
 		elseif success == false
@@ -6006,7 +6361,7 @@ local function executeAdminCommandHandler(player, commandName, source, normalize
 	end
 
 	if #warnings > 0 then
-		local warningText = cleanFeedbackText(warnings[#warnings])
+		local warningText = withTesterFeedbackDetail(commandContext, cleanFeedbackText(warnings[#warnings]))
 		if getWarningFeedbackStatus(warningText) == "warning" then
 			AdminPermissions.LogCommandWarning(player, commandName, source, warningText)
 		else
@@ -6051,11 +6406,37 @@ local function handleChatCommand(player, rawText, source)
 		return
 	end
 
-	AdminPermissions.LogCommandAttempt(player, commandName, source, string.format("text=%s", normalizedText))
+	local isAdmin = AdminPermissions.IsAdmin(player)
+	local isTester = AdminPermissions.IsTester(player)
+	local commandContext = nil
+	local attemptDetail = if isTester and not isAdmin
+		then string.format("role=tester text=%s", normalizedText)
+		else string.format("text=%s", normalizedText)
+	AdminPermissions.LogCommandAttempt(player, commandName, source, attemptDetail)
 
-	if not isAuthorized(player) then
-		AdminPermissions.LogCommandRejected(player, commandName, source)
-		return
+	if not isAdmin then
+		if not isTester then
+			AdminPermissions.LogCommandRejected(player, commandName, source)
+			return
+		end
+
+		if source == "AdminPanelRemote" then
+			AdminPermissions.LogCommandRejected(player, commandName, source, "role=tester reason=admin_panel_unavailable")
+			return
+		end
+
+		local testerAllowed, testerDetail = validateTesterCommand(commandName, argumentText)
+		if testerAllowed ~= true then
+			AdminPermissions.LogCommandRejected(
+				player,
+				commandName,
+				source,
+				withTesterFeedbackDetail({ TesterApproved = true }, testerDetail)
+			)
+			return
+		end
+
+		commandContext = { TesterApproved = true }
 	end
 
 	if not markRecentCommand(player, normalizedText) then
@@ -6071,136 +6452,137 @@ local function handleChatCommand(player, rawText, source)
 	end
 
 	adminCommandFlowLog(
-		"accepted admin command source=%s player=%s userId=%d command=%s args=%s",
+		"accepted admin command source=%s player=%s userId=%d command=%s role=%s args=%s",
 		tostring(source),
 		player.Name,
 		player.UserId,
 		commandName,
+		isTesterCommandContext(commandContext) and "tester" or "admin",
 		argumentText
 	)
 
 	if commandName == "fruit" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processFruitCommand(player, argumentText)
-		end)
+			return processFruitCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "hitbox" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processHitboxCommand(player, argumentText)
-		end)
+			return processHitboxCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "invincible" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processInvincibleCommand(player, argumentText)
-		end)
+			return processInvincibleCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "hazards" or commandName == "hazard" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processHazardsCommand(player, argumentText)
-		end)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "boost" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processBoostCommand(player, argumentText)
-		end)
+			return processBoostCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "speed" or commandName == "setspeed" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processSpeedCommand(player, argumentText)
-		end)
+			return processSpeedCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "rebirth" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processRebirthCommand(player, argumentText)
-		end)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "bounty" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processBountyCommand(player, argumentText)
-		end)
+			return processBountyCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "spawn" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processSpawnCommand(player, argumentText)
-		end)
+			return processSpawnCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "give" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processGiveCommand(player, argumentText)
-		end)
+			return processGiveCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "chest" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processChestCommand(player, argumentText)
-		end)
+			return processChestCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "shipreset" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processShipResetCommand(player, argumentText)
-		end)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "clear" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processClearCommand(player, argumentText)
-		end)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "tutorial" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processTutorialCommand(player, argumentText)
-		end)
+			return processTutorialCommand(player, argumentText, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "gifts" or commandName == "giftreset" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-			return processGiftResetCommand(player, argumentText, commandName)
-		end)
+			return processGiftResetCommand(player, argumentText, commandName, commandContext)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "crewcanary" or commandName == "crewread" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processCrewCanaryCommand(player, argumentText)
-		end)
+		end, commandContext)
 		return
 	end
 
 	if commandName == "wipeplayer" or commandName == "resetprogress" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processWipePlayerCommand(player, argumentText, commandName)
-		end)
+		end, commandContext)
 		return
 	end
 
 	executeAdminCommandHandler(player, commandName, source, normalizedText, function()
-		return processMoneyCommand(player, argumentText)
-	end)
+		return processMoneyCommand(player, argumentText, commandContext)
+	end, commandContext)
 end
 
 -- Admin panel execution stays server-authoritative by reusing the exact same
@@ -6232,6 +6614,25 @@ adminCommandRequestEvent.OnServerEvent:Connect(function(player, rawText)
 	end
 
 	handleChatCommand(player, commandText, "AdminPanelRemote")
+end)
+
+testerCommandRequestEvent.OnServerEvent:Connect(function(player, rawText)
+	if type(rawText) ~= "string" then
+		AdminPermissions.LogCommandRejected(player, "testerCommand", "TesterCommandRemote", "reason=invalid_payload")
+		return
+	end
+
+	local commandText = rawText:gsub("\r", ""):gsub("\n", " ")
+	commandText = commandText:match("^%s*(.-)%s*$") or ""
+	if commandText == "" then
+		return
+	end
+	commandText = commandText:sub(1, 240)
+	if commandText:sub(1, 1) ~= "/" then
+		commandText = "/" .. commandText
+	end
+
+	handleChatCommand(player, commandText, "TesterCommandRemote")
 end)
 
 local function hookPlayer(player)

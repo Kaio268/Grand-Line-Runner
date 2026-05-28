@@ -7,54 +7,158 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local INVENTORY_MENU_OPEN_ATTRIBUTE = "InventoryMenuOpen"
 local MAX_BATCH_CHEST_OPEN_COUNT = 50
+local ClientRuntime = {
+	OptionalRemoteWaitSeconds = 0.25,
+	EquipRemoteMissingWarned = false,
+	TitleEquipRemoteMissingWarned = false,
+}
 
-local Packages = ReplicatedStorage:WaitForChild("Packages")
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-local UiFolder = ReplicatedStorage:WaitForChild("UI")
+local React, ReactRoblox, App, Responsive
+local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewQuickSlotConfig
+local ChestUtils, ChestDropRates, Titles, Economy, CurrencyUtil
+local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
+local UiModalState, ReactModalRegistry
 
-local React = require(Packages:WaitForChild("React"))
-local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
-local App = require(UiFolder:WaitForChild("App"))
-local Responsive = require(UiFolder:WaitForChild("Responsive"))
+do
+	local Packages = ReplicatedStorage:WaitForChild("Packages")
+	local Modules = ReplicatedStorage:WaitForChild("Modules")
+	local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
-local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
-local Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
-local DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
-local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
-local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
-local ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
-local Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
-local Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
-local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
-local PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
-local ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
-local RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
-local MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
-local BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
-local UiModalState = require(Modules:WaitForChild("UiModalState"))
-local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
+	React = require(Packages:WaitForChild("React"))
+	ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
+	App = require(UiFolder:WaitForChild("App"))
+	Responsive = require(UiFolder:WaitForChild("Responsive"))
 
-local updateRemote = ReplicatedStorage:WaitForChild("InventoryGearRemote")
-local snapshotRemote = ReplicatedStorage:WaitForChild("CrewMemberInventorySnapshotRequest", 15)
-if snapshotRemote and not snapshotRemote:IsA("RemoteFunction") then
-	warn("[INV][SNAPSHOT][CLIENT] Inventory snapshot request remote is not a RemoteFunction")
-	snapshotRemote = nil
+	CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+	CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
+	Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
+	DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+	CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
+	ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
+	ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
+	Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
+	Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+	CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+	PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
+	ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
+	RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
+	MetaClient = require(Modules:WaitForChild("GrandLineRushMetaClient"))
+	BountyResolver = require(Modules:WaitForChild("GrandLineRushBountyResolver"))
+	UiModalState = require(Modules:WaitForChild("UiModalState"))
+	ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 end
-local incomeStatusDisplayMetadataRemote = ReplicatedStorage:WaitForChild("IncomeStatusDisplayMetadataRequest", 15)
-if incomeStatusDisplayMetadataRemote and not incomeStatusDisplayMetadataRemote:IsA("RemoteFunction") then
-	warn("[INCOME][STATUS][CLIENT] IncomeStatusDisplayMetadataRequest is not a RemoteFunction")
-	incomeStatusDisplayMetadataRemote = nil
+
+function ClientRuntime.findOptionalChild(parent, childName, className)
+	if not parent then
+		return nil
+	end
+
+	local child = parent:FindFirstChild(childName)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	return nil
 end
-local equipRemote = ReplicatedStorage:WaitForChild("CrewMemberEquipToggleRemote", 15)
-local remotesFolder = ReplicatedStorage:WaitForChild("Remotes")
-local titleEquipRemote = remotesFolder:WaitForChild("TitleEquipRequest")
-local shipUpgradeResultRemote = remotesFolder:WaitForChild("ShipUpgradeResultRemote")
 
-local rootContainer = Instance.new("Folder")
-rootContainer.Name = "ReactInventoryRoot"
+function ClientRuntime.waitForOptionalChild(parent, childName, className, timeoutSeconds)
+	local child = ClientRuntime.findOptionalChild(parent, childName, className)
+	if child then
+		return child
+	end
+	if not parent then
+		return nil
+	end
 
-local root = ReactRoblox.createRoot(rootContainer)
+	child = parent:WaitForChild(childName, timeoutSeconds or ClientRuntime.OptionalRemoteWaitSeconds)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	if child then
+		warn(string.format(
+			"[InventoryUI] Expected %s.%s to be a %s, got %s",
+			parent:GetFullName(),
+			childName,
+			className,
+			child.ClassName
+		))
+	end
+
+	return nil
+end
+
+ClientRuntime.UpdateRemote = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"InventoryGearRemote",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.SnapshotRemote = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"CrewMemberInventorySnapshotRequest",
+	"RemoteFunction",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.IncomeStatusDisplayMetadataRemote = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"IncomeStatusDisplayMetadataRequest",
+	"RemoteFunction",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.EquipRemote = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"CrewMemberEquipToggleRemote",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.RemotesFolder = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"Remotes",
+	"Folder",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.TitleEquipRemote = ClientRuntime.waitForOptionalChild(
+	ClientRuntime.RemotesFolder,
+	"TitleEquipRequest",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.ShipUpgradeResultRemote = ClientRuntime.waitForOptionalChild(
+	ClientRuntime.RemotesFolder,
+	"ShipUpgradeResultRemote",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+
+function ClientRuntime.getEquipRemote()
+	if ClientRuntime.EquipRemote and ClientRuntime.EquipRemote:IsA("RemoteEvent") then
+		return ClientRuntime.EquipRemote
+	end
+
+	ClientRuntime.EquipRemote = ClientRuntime.findOptionalChild(ReplicatedStorage, "CrewMemberEquipToggleRemote", "RemoteEvent")
+	return ClientRuntime.EquipRemote
+end
+
+function ClientRuntime.fireEquipRequest(kind, name)
+	local remote = ClientRuntime.getEquipRemote()
+	if not (remote and remote:IsA("RemoteEvent")) then
+		if not ClientRuntime.EquipRemoteMissingWarned then
+			ClientRuntime.EquipRemoteMissingWarned = true
+			warn("[InventoryUI] CrewMemberEquipToggleRemote is unavailable; item equip is temporarily disabled.")
+		end
+		return
+	end
+
+	remote:FireServer(kind, name)
+end
+
+local root
+do
+	local rootContainer = Instance.new("Folder")
+	rootContainer.Name = "ReactInventoryRoot"
+	root = ReactRoblox.createRoot(rootContainer)
+end
 
 local RESOURCE_ORDER = {
 	Apple = 1,
@@ -1053,7 +1157,7 @@ local function refreshIncomeStatusDisplayMetadata(reason, force)
 	if
 		incomeStatusDisplayMetadataRequestInFlight
 		or incomeStatusSnapshotRefreshPending
-		or not incomeStatusDisplayMetadataRemote
+		or not ClientRuntime.IncomeStatusDisplayMetadataRemote
 		or destroyed
 	then
 		return
@@ -1073,7 +1177,7 @@ local function refreshIncomeStatusDisplayMetadata(reason, force)
 
 	task.spawn(function()
 		local ok, response = pcall(function()
-			return incomeStatusDisplayMetadataRemote:InvokeServer(reason or "captain_log")
+			return ClientRuntime.IncomeStatusDisplayMetadataRemote:InvokeServer(reason or "captain_log")
 		end)
 		incomeStatusDisplayMetadataRequestInFlight = false
 		incomeStatusSnapshotRefreshPending = false
@@ -1545,11 +1649,31 @@ local function readPlayerMythicKeys()
 	return math.max(0, math.floor(tonumber(mythicKeyProgress and mythicKeyProgress.current) or 0))
 end
 
-local function readPersistentTitleUnlocked(titleId)
+function ClientRuntime.readTitleBoolSet(folder)
+	local result = {}
+	if not (folder and folder:IsA("Folder")) then
+		return result
+	end
+
+	for _, child in ipairs(folder:GetChildren()) do
+		if child:IsA("BoolValue") and child.Value == true then
+			result[child.Name] = true
+		end
+	end
+
+	return result
+end
+
+function ClientRuntime.readTitleUnlockSets()
 	local titlesFolder = player:FindFirstChild("Titles")
 	local unlockedFolder = titlesFolder and titlesFolder:FindFirstChild("Unlocked")
-	local valueObject = unlockedFolder and unlockedFolder:FindFirstChild(titleId)
-	return valueObject ~= nil and valueObject:IsA("BoolValue") and valueObject.Value == true
+	local runtimeUnlockedFolder = titlesFolder and titlesFolder:FindFirstChild("RuntimeUnlocked")
+	return ClientRuntime.readTitleBoolSet(unlockedFolder), ClientRuntime.readTitleBoolSet(runtimeUnlockedFolder)
+end
+
+function ClientRuntime.isTitleUnlocked(titleId, persistentUnlocked, runtimeUnlocked)
+	local key = tostring(titleId or "")
+	return persistentUnlocked[key] == true or runtimeUnlocked[key] == true
 end
 
 local function readEquippedTitleId()
@@ -1695,12 +1819,17 @@ local function buildTitlesData(query)
 	local bountyRankLabel = "Checking Board..."
 	local bountyRankValue = nil
 	local bountyRankStatus = "PendingBoard"
+	local persistentUnlockedTitles, runtimeUnlockedTitles = ClientRuntime.readTitleUnlockSets()
 
 	for _, titleDefinition in ipairs(Titles.GetAll()) do
 		totalCount += 1
 
+		local titleId = tostring(titleDefinition.Id or "")
 		local persistentUnlocked = titleDefinition.UnlockType == "Persistent"
-				and readPersistentTitleUnlocked(titleDefinition.Id)
+				and persistentUnlockedTitles[titleId] == true
+			or false
+		local runtimeUnlocked = titleDefinition.UnlockType == "Persistent"
+				and runtimeUnlockedTitles[titleId] == true
 			or false
 		local dynamicUnlocked = false
 		local currentRank = nil
@@ -1714,7 +1843,8 @@ local function buildTitlesData(query)
 			rankStatusKey = dynamicStatus.statusKey
 		end
 
-		local unlocked = persistentUnlocked or dynamicUnlocked
+		local unlocked = ClientRuntime.isTitleUnlocked(titleId, persistentUnlockedTitles, runtimeUnlockedTitles)
+			or dynamicUnlocked
 		local visualStyle = resolveTitleVisualStyle(titleDefinition, unlocked)
 		if persistentUnlocked then
 			persistentUnlockedCount += 1
@@ -1733,8 +1863,8 @@ local function buildTitlesData(query)
 		end
 
 		local entry = {
-			key = tostring(titleDefinition.Id or totalCount),
-			titleId = tostring(titleDefinition.Id or ""),
+			key = titleId ~= "" and titleId or tostring(totalCount),
+			titleId = titleId,
 			displayName = tostring(titleDefinition.DisplayName or titleDefinition.Id or "Title"),
 			subtitle = titleDefinition.UnlockType == "DynamicRank" and "Leaderboard Title" or "Persistent Title",
 			footer = tostring(titleDefinition.RequirementText or ""),
@@ -1743,6 +1873,7 @@ local function buildTitlesData(query)
 			stateText = isEquipped and "Equipped" or (unlocked and "Unlocked" or "Locked"),
 			unlocked = unlocked,
 			persistentUnlocked = persistentUnlocked,
+			runtimeUnlocked = runtimeUnlocked,
 			dynamicUnlocked = dynamicUnlocked,
 			isEquipped = isEquipped,
 			actionLabel = isEquipped and "Unequip" or (unlocked and "Equip" or nil),
@@ -2766,6 +2897,47 @@ end
 local function bindTitleTracking()
 	disconnectAll(titleAttributeConnections)
 
+	local function bindTitleValue(valueObject)
+		if valueObject and valueObject:IsA("ValueBase") then
+			trackConnection(valueObject:GetPropertyChangedSignal("Value"), function()
+				scheduleRender()
+			end, titleAttributeConnections)
+		end
+	end
+
+	local function bindTitleFolder(folder)
+		if not (folder and folder:IsA("Folder")) then
+			return
+		end
+
+		for _, descendant in ipairs(folder:GetDescendants()) do
+			bindTitleValue(descendant)
+		end
+
+		trackConnection(folder.DescendantAdded, function(descendant)
+			bindTitleValue(descendant)
+			scheduleRender()
+		end, titleAttributeConnections)
+		trackConnection(folder.DescendantRemoving, function()
+			scheduleRender()
+		end, titleAttributeConnections)
+	end
+
+	local titlesFolder = player:FindFirstChild("Titles")
+	bindTitleFolder(titlesFolder)
+	trackConnection(player.ChildAdded, function(child)
+		if child.Name == "Titles" then
+			task.defer(bindTitleTracking)
+			scheduleRender()
+		end
+	end, titleAttributeConnections)
+	trackConnection(player.ChildRemoved, function(child)
+		if child.Name == "Titles" then
+			task.defer(bindTitleTracking)
+			scheduleRender()
+		end
+	end, titleAttributeConnections)
+
 	local watchedAttributes = {}
 	for _, titleDefinition in ipairs(Titles.GetAll()) do
 		local rankAttribute = titleDefinition.RankAttribute
@@ -2915,8 +3087,30 @@ render = function()
 					return
 				end
 
-					titleEquipRemote:FireServer(entry.isEquipped and "" or titleId)
-				end,
+				local remote = ClientRuntime.TitleEquipRemote
+				if not (remote and remote:IsA("RemoteEvent")) then
+					local latestRemotesFolder = ClientRuntime.findOptionalChild(ReplicatedStorage, "Remotes", "Folder")
+					if latestRemotesFolder then
+						ClientRuntime.RemotesFolder = latestRemotesFolder
+						remote = ClientRuntime.findOptionalChild(
+							ClientRuntime.RemotesFolder,
+							"TitleEquipRequest",
+							"RemoteEvent"
+						)
+						ClientRuntime.TitleEquipRemote = remote
+					end
+				end
+
+				if not (remote and remote:IsA("RemoteEvent")) then
+					if not ClientRuntime.TitleEquipRemoteMissingWarned then
+						ClientRuntime.TitleEquipRemoteMissingWarned = true
+						warn("[InventoryTitles] TitleEquipRequest is unavailable; title equip is temporarily disabled.")
+					end
+					return
+				end
+
+				remote:FireServer(entry.isEquipped and "" or titleId)
+			end,
 				onActivateItem = function(entry)
 					if shipUpgradeModal ~= nil then
 						return
@@ -2933,7 +3127,7 @@ render = function()
 						return
 					end
 					if entry and entry.kind ~= "Resource" then
-						equipRemote:FireServer(entry.kind, entry.name)
+						ClientRuntime.fireEquipRequest(entry.kind, entry.name)
 					end
 				end,
 			onChestOpenAmountChanged = function(nextAmount)
@@ -3121,7 +3315,7 @@ end
 local function activateSlot(slotNumber)
 	local entry = keyboardHotbar[slotNumber]
 	if entry then
-		equipRemote:FireServer(entry.kind, entry.name)
+		ClientRuntime.fireEquipRequest(entry.kind, entry.name)
 	end
 end
 
@@ -3194,76 +3388,80 @@ end
 local requestInventorySnapshot = nil
 local scheduleInventorySnapshotRequest = nil
 
-trackConnection(updateRemote.OnClientEvent, function(kind, name, value)
-	if isCrewItemKind(kind) then
-		if snapshotRemote ~= nil and scheduleInventorySnapshotRequest ~= nil then
-			scheduleInventorySnapshotRequest("crewUpdateRemote")
-			return
-		end
+if ClientRuntime.UpdateRemote and ClientRuntime.UpdateRemote:IsA("RemoteEvent") then
+	trackConnection(ClientRuntime.UpdateRemote.OnClientEvent, function(kind, name, value)
+		if isCrewItemKind(kind) then
+			if ClientRuntime.SnapshotRemote ~= nil and scheduleInventorySnapshotRequest ~= nil then
+				scheduleInventorySnapshotRequest("crewUpdateRemote")
+				return
+			end
 
-		local quantity = tonumber(value) or 0
-		local key = CREW_ITEM_KIND .. "|" .. tostring(name)
-		local previous = itemState[key]
-		if quantity > 0 then
-			ensureAcquired(key)
-			itemState[key] = applyDisplayMetadataToState({
-				kind = CREW_ITEM_KIND,
-				name = name,
-				qty = quantity,
-			}, previous)
-		else
-			itemState[key] = nil
-		end
-	elseif kind == "Gear" then
-		local key = "Gear|" .. tostring(name)
-		if value == true then
-			ensureAcquired(key)
-			itemState[key] = {
-				kind = "Gear",
-				name = name,
-				owned = true,
-			}
-		else
-			itemState[key] = nil
-		end
-	elseif kind == "DevilFruit" then
-		local fruit = DevilFruits.GetFruit(name)
-		if fruit then
 			local quantity = tonumber(value) or 0
-			local key = "DevilFruit|" .. fruit.FruitKey
+			local key = CREW_ITEM_KIND .. "|" .. tostring(name)
+			local previous = itemState[key]
+			if quantity > 0 then
+				ensureAcquired(key)
+				itemState[key] = applyDisplayMetadataToState({
+					kind = CREW_ITEM_KIND,
+					name = name,
+					qty = quantity,
+				}, previous)
+			else
+				itemState[key] = nil
+			end
+		elseif kind == "Gear" then
+			local key = "Gear|" .. tostring(name)
+			if value == true then
+				ensureAcquired(key)
+				itemState[key] = {
+					kind = "Gear",
+					name = name,
+					owned = true,
+				}
+			else
+				itemState[key] = nil
+			end
+		elseif kind == "DevilFruit" then
+			local fruit = DevilFruits.GetFruit(name)
+			if fruit then
+				local quantity = tonumber(value) or 0
+				local key = "DevilFruit|" .. fruit.FruitKey
+				if quantity > 0 then
+					ensureAcquired(key)
+					itemState[key] = {
+						kind = "DevilFruit",
+						name = fruit.FruitKey,
+						qty = quantity,
+					}
+				else
+					itemState[key] = nil
+				end
+			end
+		elseif kind == "Chest" then
+			if syncChestsFromCanonicalSources() then
+				scheduleRender()
+				return
+			end
+
+			local quantity = tonumber(value) or 0
+			local key = "Chest|" .. tostring(name)
 			if quantity > 0 then
 				ensureAcquired(key)
 				itemState[key] = {
-					kind = "DevilFruit",
-					name = fruit.FruitKey,
+					kind = "Chest",
+					name = name,
 					qty = quantity,
 				}
 			else
 				itemState[key] = nil
 			end
 		end
-	elseif kind == "Chest" then
-		if syncChestsFromCanonicalSources() then
-			scheduleRender()
-			return
-		end
 
-		local quantity = tonumber(value) or 0
-		local key = "Chest|" .. tostring(name)
-		if quantity > 0 then
-			ensureAcquired(key)
-			itemState[key] = {
-				kind = "Chest",
-				name = name,
-				qty = quantity,
-			}
-		else
-			itemState[key] = nil
-		end
-	end
-
-	scheduleRender()
-end, cleanupConnections)
+		scheduleRender()
+	end, cleanupConnections)
+else
+	warn("[InventoryUI] InventoryGearRemote is unavailable; live inventory item updates are disabled.")
+end
 
 local inventorySnapshotRequestState = {
 	InFlight = false,
@@ -3277,7 +3475,7 @@ local inventorySnapshotRequestState = {
 }
 
 requestInventorySnapshot = function(reason)
-	if inventorySnapshotRequestState.InFlight or not snapshotRemote or destroyed then
+	if inventorySnapshotRequestState.InFlight or not ClientRuntime.SnapshotRemote or destroyed then
 		return
 	end
 
@@ -3292,7 +3490,7 @@ requestInventorySnapshot = function(reason)
 
 	task.spawn(function()
 		local ok, snapshot = pcall(function()
-			return snapshotRemote:InvokeServer()
+			return ClientRuntime.SnapshotRemote:InvokeServer()
 		end)
 		inventorySnapshotRequestState.InFlight = false
 
@@ -3324,7 +3522,7 @@ requestInventorySnapshot = function(reason)
 end
 
 scheduleInventorySnapshotRequest = function(reason)
-	if snapshotRemote == nil or destroyed then
+	if ClientRuntime.SnapshotRemote == nil or destroyed then
 		return
 	end
 
@@ -3353,53 +3551,57 @@ task.defer(function()
 	requestInventorySnapshot("clientStartup")
 end)
 
-trackConnection(shipUpgradeResultRemote.OnClientEvent, function(payload)
-	if typeof(payload) ~= "table" then
-		return
-	end
+if ClientRuntime.ShipUpgradeResultRemote and ClientRuntime.ShipUpgradeResultRemote:IsA("RemoteEvent") then
+	trackConnection(ClientRuntime.ShipUpgradeResultRemote.OnClientEvent, function(payload)
+		if typeof(payload) ~= "table" then
+			return
+		end
 
-	if shipUpgradeModal ~= nil then
-		return
-	end
+		if shipUpgradeModal ~= nil then
+			return
+		end
 
-	if payload.Success == false then
-		local lines = {}
-		if typeof(payload.Lines) == "table" then
-			for _, line in ipairs(payload.Lines) do
-				if typeof(line) == "string" and trim(line) ~= "" then
-					lines[#lines + 1] = trim(line)
+		if payload.Success == false then
+			local lines = {}
+			if typeof(payload.Lines) == "table" then
+				for _, line in ipairs(payload.Lines) do
+					if typeof(line) == "string" and trim(line) ~= "" then
+						lines[#lines + 1] = trim(line)
+					end
 				end
 			end
-		end
-		if #lines == 0 then
-			lines = { trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
+			if #lines == 0 then
+				lines = { trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
+			end
+
+			shipUpgradeModal = {
+				Title = tostring(payload.Title or "Ship Upgrade Locked"),
+				AccentText = tostring(payload.AccentText or "Requirement Not Met"),
+				Lines = lines,
+				IsError = payload.IsError ~= false,
+			}
+			updateModalInputCapture()
+			scheduleRender()
+			return
 		end
 
+		local level = PlotUpgradeConfig.ClampLevel(payload.Level)
+		local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
+		local isMaxLevel = payload.IsMaxLevel == true
+		local gainLines = buildShipUpgradeGainLines(level, description, isMaxLevel)
+
 		shipUpgradeModal = {
-			Title = tostring(payload.Title or "Ship Upgrade Locked"),
-			AccentText = tostring(payload.AccentText or "Requirement Not Met"),
-			Lines = lines,
-			IsError = payload.IsError ~= false,
+			Title = string.format("Ship upgraded to Lv %d", level),
+			AccentText = isMaxLevel and "Ship Max Level" or "Ship Upgrade Complete",
+			Lines = gainLines,
+			IsMaxLevel = isMaxLevel,
 		}
 		updateModalInputCapture()
 		scheduleRender()
-		return
-	end
-
-	local level = PlotUpgradeConfig.ClampLevel(payload.Level)
-	local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
-	local isMaxLevel = payload.IsMaxLevel == true
-	local gainLines = buildShipUpgradeGainLines(level, description, isMaxLevel)
-
-	shipUpgradeModal = {
-		Title = string.format("Ship upgraded to Lv %d", level),
-		AccentText = isMaxLevel and "Ship Max Level" or "Ship Upgrade Complete",
-		Lines = gainLines,
-		IsMaxLevel = isMaxLevel,
-	}
-	updateModalInputCapture()
-	scheduleRender()
-end, cleanupConnections)
+	end, cleanupConnections)
+else
+	warn("[InventoryUI] ShipUpgradeResultRemote is unavailable; ship upgrade result modal is disabled.")
+end
 
 stopObservingState = MetaClient.ObserveState(function(state)
 	metaState = state

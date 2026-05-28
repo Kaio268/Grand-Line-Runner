@@ -1,11 +1,37 @@
 local Titles = {}
 
 local ORDER = {
+	"Tester",
 	"EnemyOfTheSea",
 	"PirateEmperor",
 }
 
 local BY_ID = {
+	Tester = {
+		Id = "Tester",
+		DisplayName = "Tester",
+		Description = "Temporary pre-release testing title.",
+		UnlockType = "Persistent",
+		VisualStyle = {
+			AccentColor = Color3.fromRGB(105, 225, 255),
+			SurfaceColor = Color3.fromRGB(15, 48, 65),
+			SurfaceColor2 = Color3.fromRGB(7, 22, 35),
+			SealColor = Color3.fromRGB(61, 165, 205),
+			LedgerColor = Color3.fromRGB(125, 234, 255),
+		},
+		ChatStyle = {
+			gradient = {
+				colors = {
+					Color3.fromRGB(122, 255, 244),
+					Color3.fromRGB(92, 181, 255),
+				},
+			},
+			bold = true,
+			brackets = true,
+			spaceAfter = true,
+		},
+		SortOrder = 0,
+	},
 	EnemyOfTheSea = {
 		Id = "EnemyOfTheSea",
 		DisplayName = "Enemy of the Sea",

@@ -4,4 +4,7 @@ return {
 		[4843576528] = true, -- ChefChris
 		[3897656396] = true, -- Nicholas_Mist123
 	},
+	Testers = {},
+	EnablePublicTesterTitle = true,
+	PublicTesterTitleId = "Tester",
 }
