@@ -335,7 +335,7 @@ local function footer(rarityText, nameText, rarityColor)
 end
 
 local function baseCard(props)
-	return e("Frame", {
+	local baseProps = {
 		Active = true,
 		BackgroundColor3 = Theme.Palette.CardShell,
 		BackgroundTransparency = props.backgroundTransparency or DEFAULT_CARD_BACKGROUND_TRANSPARENCY,
@@ -343,9 +343,18 @@ local function baseCard(props)
 		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.fromScale(1, 1),
-		[React.Event.MouseEnter] = props.onMouseEnter,
-		[React.Event.MouseLeave] = props.onMouseLeave,
-	}, props.children)
+	}
+
+	if props.onActivated then
+		baseProps.AutoButtonColor = false
+		baseProps.Text = ""
+		baseProps[React.Event.Activated] = props.onActivated
+	end
+
+	baseProps[React.Event.MouseEnter] = props.onMouseEnter
+	baseProps[React.Event.MouseLeave] = props.onMouseLeave
+
+	return e(if props.onActivated then "TextButton" else "Frame", baseProps, props.children)
 end
 
 local function createRarityChrome(rarityStyle, hovered)
@@ -687,10 +696,11 @@ local function IndexCard(props)
 			onMouseEnter = function()
 				setHovered(true)
 			end,
-			onMouseLeave = function()
-				setHovered(false)
-			end,
-			children = {
+		onMouseLeave = function()
+			setHovered(false)
+		end,
+		onActivated = props.onActivated,
+		children = {
 				Corner = e("UICorner", {
 					CornerRadius = CARD_CORNER_RADIUS,
 				}),
@@ -767,6 +777,7 @@ local function IndexCard(props)
 		onMouseLeave = function()
 			setHovered(false)
 		end,
+		onActivated = props.onActivated,
 		children = discoveredCardChildren,
 	})
 end
@@ -775,6 +786,7 @@ local function areIndexCardPropsEqual(oldProps, newProps)
 	return oldProps.unit == newProps.unit
 		and oldProps.renderPreview == newProps.renderPreview
 		and oldProps.layoutOrder == newProps.layoutOrder
+		and oldProps.onActivated == newProps.onActivated
 end
 
 return React.memo(IndexCard, areIndexCardPropsEqual)
