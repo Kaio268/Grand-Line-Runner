@@ -2497,17 +2497,6 @@ local function resolveCrewProtectionStatus(instanceId, isPlaced, protectionData)
 		}
 	end
 
-	if isPlaced == true and protectionData.fleetShield.active == true then
-		return {
-			key = "fleet",
-			label = "Fleet Shield Active",
-			statusLabel = "Fleet Shield Active",
-			detail = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
-			detailLabel = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
-			remainingSeconds = protectionData.fleetShield.remainingSeconds,
-		}
-	end
-
 	local crewShield = if instanceId ~= "" then protectionData.crewShieldsByInstanceId[instanceId] else nil
 	if crewShield then
 		return {
@@ -2517,6 +2506,17 @@ local function resolveCrewProtectionStatus(instanceId, isPlaced, protectionData)
 			detail = formatDuration(crewShield.remainingSeconds) .. " remaining",
 			detailLabel = formatDuration(crewShield.remainingSeconds) .. " remaining",
 			remainingSeconds = crewShield.remainingSeconds,
+		}
+	end
+
+	if isPlaced == true and protectionData.fleetShield.active == true then
+		return {
+			key = "fleet",
+			label = "Fleet Shield Active",
+			statusLabel = "Fleet Shield Active",
+			detail = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
+			detailLabel = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
+			remainingSeconds = protectionData.fleetShield.remainingSeconds,
 		}
 	end
 

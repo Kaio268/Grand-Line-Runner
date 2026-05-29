@@ -1,15 +1,23 @@
 local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
+
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
+local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local RemoteGuard = require(script.Parent:WaitForChild("RemoteGuard"))
+local ShipVisuals = require(Configs:WaitForChild("ShipVisuals"))
 
 local CrewProtectionService = {}
 
 local DATA_PATH = "CrewProtection"
 local DAY_SECONDS = 24 * 60 * 60
 local ACTION_REMOTE_NAME = "CrewProtectionActionRequest"
+local OWNER_USER_ID_ATTRIBUTE = ShipVisuals.Attributes.OwnerUserId or "OwnerUserId"
+local OVERHEAD_ATTRIBUTES = CrewOverhead.Attribute
 
 local ACTION_ALLOWLIST = {
 	ApplyCrewShield = true,
@@ -21,6 +29,7 @@ local ACTION_ALLOWLIST = {
 
 local DataManagerModule
 local started = false
+local protectionRefreshTokens = setmetatable({}, { __mode = "k" })
 
 local function getDataManager(dataManager)
 	if dataManager ~= nil then
@@ -121,6 +130,168 @@ local function getFleetShieldRemaining(data, currentPlayTime)
 	return math.max(0, math.floor(coerceNumber(fleetShield.ExpiresAtPlayTime, 0) - currentPlayTime))
 end
 
+local function makeProtectionDisplayState(protectionType, label, detail)
+	return {
+		Type = tostring(protectionType or "none"),
+		Label = tostring(label or ""),
+		Detail = tostring(detail or ""),
+	}
+end
+
+local function setModelAttributeIfChanged(instance, attributeName, value)
+	if instance:GetAttribute(attributeName) ~= value then
+		instance:SetAttribute(attributeName, value)
+	end
+end
+
+local function resolveProtectionDisplayStateFromData(player, instanceId, isPlaced, data, currentPlayTime)
+	local normalizedInstanceId = tostring(instanceId or "")
+	if normalizedInstanceId == "" or typeof(data) ~= "table" then
+		return makeProtectionDisplayState("none", "", "")
+	end
+
+	for slotKey, assignedInstanceId in pairs(data.PermanentAssignments or {}) do
+		if not instanceExists(player, assignedInstanceId) then
+			data.PermanentAssignments[slotKey] = nil
+		elseif tostring(assignedInstanceId) == normalizedInstanceId then
+			return makeProtectionDisplayState("permanent", "Permanent", "Cannot Be Stolen")
+		end
+	end
+
+	local crewShields = data.CrewShields and data.CrewShields.ByInstanceId
+	local shield = if typeof(crewShields) == "table" then crewShields[normalizedInstanceId] else nil
+	if typeof(shield) == "table" then
+		local remaining = math.max(0, math.floor(coerceNumber(shield.ExpiresAtPlayTime, 0) - currentPlayTime))
+		if remaining > 0 then
+			return makeProtectionDisplayState("crew", "Crew Shield", "")
+		end
+
+		crewShields[normalizedInstanceId] = nil
+	end
+
+	if isPlaced == true and getFleetShieldRemaining(data, currentPlayTime) > 0 then
+		return makeProtectionDisplayState("fleet", "Fleet Shield", "")
+	end
+
+	return makeProtectionDisplayState("none", "", "")
+end
+
+local function isOwnedPlacedOverheadModel(player, model)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false
+	end
+	if typeof(model) ~= "Instance" or not model:IsA("Model") then
+		return false
+	end
+	if tostring(model:GetAttribute(OVERHEAD_ATTRIBUTES.Kind) or "") ~= CrewOverhead.Kind.Placed then
+		return false
+	end
+
+	local current = model
+	while current do
+		local ownerUserId = tonumber(current:GetAttribute(OWNER_USER_ID_ATTRIBUTE))
+		if ownerUserId ~= nil then
+			return ownerUserId == player.UserId
+		end
+
+		current = current.Parent
+	end
+
+	return false
+end
+
+local function resolvePlacedModelInstanceId(player, placedModel)
+	local instanceId = tostring(placedModel:GetAttribute(OVERHEAD_ATTRIBUTES.InstanceId) or "")
+	if instanceId ~= "" then
+		return instanceId
+	end
+
+	local standModel = placedModel.Parent
+	if standModel and standModel:IsA("Model") then
+		instanceId = tostring(CrewInstanceService.GetStandInstanceId(player, standModel.Name) or "")
+		if instanceId ~= "" then
+			setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.InstanceId, instanceId)
+		end
+	end
+
+	return instanceId
+end
+
+local function applyProtectionAttributesFromData(player, placedModel, instanceId, isPlaced, data, currentPlayTime)
+	if typeof(placedModel) ~= "Instance" or not placedModel:IsA("Model") then
+		return false
+	end
+
+	local normalizedInstanceId = tostring(instanceId or "")
+	if normalizedInstanceId == "" then
+		normalizedInstanceId = resolvePlacedModelInstanceId(player, placedModel)
+	elseif placedModel:GetAttribute(OVERHEAD_ATTRIBUTES.InstanceId) ~= normalizedInstanceId then
+		setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.InstanceId, normalizedInstanceId)
+	end
+
+	local displayState = resolveProtectionDisplayStateFromData(
+		player,
+		normalizedInstanceId,
+		isPlaced == true,
+		data,
+		currentPlayTime
+	)
+	setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionType, displayState.Type)
+	setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionLabel, displayState.Label)
+	setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionDetail, displayState.Detail)
+
+	return true
+end
+
+local function getNextProtectionRefreshDelay(data, currentPlayTime)
+	local nextDelay = nil
+	local function includeRemaining(remaining)
+		remaining = math.floor(tonumber(remaining) or 0)
+		if remaining <= 0 then
+			return
+		end
+
+		nextDelay = if nextDelay == nil then remaining else math.min(nextDelay, remaining)
+	end
+
+	includeRemaining(getFleetShieldRemaining(data, currentPlayTime))
+
+	local crewShields = data and data.CrewShields and data.CrewShields.ByInstanceId
+	if typeof(crewShields) == "table" then
+		for _, shield in pairs(crewShields) do
+			if typeof(shield) == "table" then
+				includeRemaining(coerceNumber(shield.ExpiresAtPlayTime, 0) - currentPlayTime)
+			end
+		end
+	end
+
+	return nextDelay
+end
+
+local function scheduleProtectionRefresh(player, dataManager, data, currentPlayTime)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	currentPlayTime = currentPlayTime or getPlayTime(player, dataManager)
+	local nextDelay = getNextProtectionRefreshDelay(data, currentPlayTime)
+	local nextToken = (protectionRefreshTokens[player] or 0) + 1
+	protectionRefreshTokens[player] = nextToken
+
+	if nextDelay == nil then
+		return
+	end
+
+	local delaySeconds = math.max(1, math.ceil(nextDelay) + 1)
+	task.delay(delaySeconds, function()
+		if protectionRefreshTokens[player] ~= nextToken or player.Parent ~= Players then
+			return
+		end
+
+		CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
+	end)
+end
+
 local function getRaidShieldService()
 	local ok, RaidShieldService = pcall(function()
 		return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RaidShieldService"))
@@ -185,6 +356,64 @@ function CrewProtectionService.EnsureData(player, dataManager)
 	end
 
 	return ensureData(profile.Data), nil
+end
+
+function CrewProtectionService.ResolveProtectionDisplayState(player, instanceId, isPlaced, dataManager)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return makeProtectionDisplayState("none", "", ""), "invalid_player"
+	end
+
+	local data, reason = CrewProtectionService.EnsureData(player, dataManager)
+	if data == nil then
+		return makeProtectionDisplayState("none", "", ""), reason
+	end
+
+	local currentPlayTime = getPlayTime(player, dataManager)
+	return resolveProtectionDisplayStateFromData(player, instanceId, isPlaced == true, data, currentPlayTime), nil
+end
+
+function CrewProtectionService.ApplyPlacedProtectionAttributes(player, placedModel, instanceId, isPlaced, dataManager)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+	if typeof(placedModel) ~= "Instance" or not placedModel:IsA("Model") then
+		return false, "invalid_model"
+	end
+
+	local data, reason = CrewProtectionService.EnsureData(player, dataManager)
+	if data == nil then
+		return false, reason
+	end
+
+	local currentPlayTime = getPlayTime(player, dataManager)
+	applyProtectionAttributesFromData(player, placedModel, instanceId, isPlaced == true, data, currentPlayTime)
+	scheduleProtectionRefresh(player, dataManager, data, currentPlayTime)
+	return true, nil
+end
+
+function CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	local data, reason = CrewProtectionService.EnsureData(player, dataManager)
+	if data == nil then
+		return false, reason
+	end
+
+	local currentPlayTime = getPlayTime(player, dataManager)
+	local updatedCount = 0
+	for _, model in ipairs(CollectionService:GetTagged(CrewOverhead.Tag)) do
+		if isOwnedPlacedOverheadModel(player, model) then
+			local instanceId = resolvePlacedModelInstanceId(player, model)
+			if applyProtectionAttributesFromData(player, model, instanceId, true, data, currentPlayTime) then
+				updatedCount += 1
+			end
+		end
+	end
+
+	scheduleProtectionRefresh(player, dataManager, data, currentPlayTime)
+	return true, nil, updatedCount
 end
 
 function CrewProtectionService.GrantCrewShieldTokens(player, count, dataManager)
@@ -278,6 +507,7 @@ function CrewProtectionService.AssignCrewShield(player, instanceId, durationSeco
 		return false, saveReason
 	end
 
+	CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
 	return true, nil
 end
 
@@ -323,6 +553,7 @@ function CrewProtectionService.GrantFleetShield(player, durationSeconds, dataMan
 		return false, raidReason
 	end
 
+	CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
 	return true, nil
 end
 
@@ -384,6 +615,7 @@ function CrewProtectionService.ActivateFleetShieldFromToken(player, durationSeco
 		return false, raidReason
 	end
 
+	CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
 	return true, nil
 end
 
@@ -438,6 +670,7 @@ function CrewProtectionService.PauseFleetShield(player, dataManager)
 		return false, raidReason
 	end
 
+	CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
 	return true, nil
 end
 
@@ -496,6 +729,7 @@ function CrewProtectionService.ResumeFleetShield(player, dataManager, metadata)
 		return false, raidReason
 	end
 
+	CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
 	return true, nil
 end
 
@@ -558,7 +792,11 @@ function CrewProtectionService.AssignPermanentSlot(player, slotKey, instanceId, 
 	end
 
 	data.PermanentAssignments[normalizedSlotKey] = normalizedInstanceId
-	return syncData(player, dataManager, data)
+	local saved, saveReason = syncData(player, dataManager, data)
+	if saved == true then
+		CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
+	end
+	return saved, saveReason
 end
 
 function CrewProtectionService.AssignNextPermanentSlot(player, instanceId, dataManager)
@@ -617,6 +855,7 @@ function CrewProtectionService.AssignNextPermanentSlot(player, instanceId, dataM
 		return false, saveReason
 	end
 
+	CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataManager)
 	return true, nil
 end
 
@@ -900,6 +1139,7 @@ function CrewProtectionService.Start(dataManager)
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	protectionRefreshTokens[player] = nil
 	if DataManagerModule == nil then
 		return
 	end

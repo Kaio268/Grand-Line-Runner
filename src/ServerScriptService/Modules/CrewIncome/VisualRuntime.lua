@@ -4,6 +4,7 @@ function Module.Install(ctx)
 	local CaptainSlotRuntime = ctx.CaptainSlotRuntime
 	local CollectionService = ctx.CollectionService
 	local CrewOverhead = ctx.CrewOverhead
+	local CrewProtectionService = ctx.CrewProtectionService
 	local function detectVariant(...)
 		return ctx.detectVariant(...)
 	end
@@ -21,6 +22,13 @@ function Module.Install(ctx)
 	end
 	local function getStandSlotState(...)
 		return ctx.getStandSlotState(...)
+	end
+	local function getPlayerStandCrewMemberInstanceId(...)
+		if typeof(ctx.getPlayerStandCrewMemberInstanceId) == "function" then
+			return ctx.getPlayerStandCrewMemberInstanceId(...)
+		end
+
+		return ""
 	end
 	local function isBeliBoostActive(...)
 		return ctx.isBeliBoostActive(...)
@@ -139,6 +147,7 @@ function Module.Install(ctx)
 
 		local displayRarity = stripVariantPrefix(rawRarity, variantKey)
 		local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standModel.Name)
+		local crewMemberInstanceId = tostring(getPlayerStandCrewMemberInstanceId(player, standModel.Name) or "")
 		local incomePerSecond = if isCaptainSlot
 			then CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 			else getStandIncomePerSecond(player, standModel.Name, canonicalName)
@@ -161,8 +170,25 @@ function Module.Install(ctx)
 			OVERHEAD_ATTRIBUTES.SlotBonusPercent,
 			if slotBonusInfo then math.max(0, slotState.BonusPercent or 0) else nil
 		)
+		setAttributeIfChanged(
+			placedModel,
+			OVERHEAD_ATTRIBUTES.InstanceId,
+			if crewMemberInstanceId ~= "" then crewMemberInstanceId else nil
+		)
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ExpiresAt, nil)
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.DespawnSeconds, nil)
+		if
+			CrewProtectionService
+			and typeof(CrewProtectionService.ApplyPlacedProtectionAttributes) == "function"
+		then
+			CrewProtectionService.ApplyPlacedProtectionAttributes(
+				player,
+				placedModel,
+				crewMemberInstanceId,
+				true,
+				ctx.DataManager
+			)
+		end
 		removeLegacyCrewHover(placedModel)
 		CollectionService:AddTag(placedModel, CrewOverhead.Tag)
 	end

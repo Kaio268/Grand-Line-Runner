@@ -71,6 +71,7 @@ function Context.Create()
 	local CrewFoodProgression = require(ServerScriptService.Modules:WaitForChild("CrewFoodProgression"))
 	local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 	local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
+	local CrewProtectionService = require(ServerScriptService.Modules:WaitForChild("CrewProtectionService"))
 	local CaptainSlotRuntime = require(ServerScriptService.Modules:WaitForChild("CaptainSlotRuntime"))
 	local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 	local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
@@ -146,6 +147,7 @@ function Context.Create()
 		CrewFoodProgression = CrewFoodProgression,
 		CrewInstanceService = CrewInstanceService,
 		CrewQuickSlotService = CrewQuickSlotService,
+		CrewProtectionService = CrewProtectionService,
 		CaptainSlotRuntime = CaptainSlotRuntime,
 		CrewSlotAssignmentReconciler = CrewSlotAssignmentReconciler,
 		CrewStandIncomeAuthority = CrewStandIncomeAuthority,

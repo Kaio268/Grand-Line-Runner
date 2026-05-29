@@ -16,6 +16,10 @@ CrewOverhead.Attribute = {
 	BeliBoosted = "CrewOverheadBeliBoosted",
 	SlotBonusLabel = "CrewOverheadSlotBonusLabel",
 	SlotBonusPercent = "CrewOverheadSlotBonusPercent",
+	InstanceId = "CrewOverheadInstanceId",
+	ProtectionType = "CrewOverheadProtectionType",
+	ProtectionLabel = "CrewOverheadProtectionLabel",
+	ProtectionDetail = "CrewOverheadProtectionDetail",
 	ExpiresAt = "CrewOverheadExpiresAt",
 	DespawnSeconds = "CrewOverheadDespawnSeconds",
 }
