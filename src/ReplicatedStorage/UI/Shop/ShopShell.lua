@@ -51,12 +51,79 @@ local function buildPageSections(catalog)
 	return sections
 end
 
+local function buildDetailRows(item, zIndex)
+	local rows = {
+		List = e("UIListLayout", {
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+		Padding = e("UIPadding", {
+			PaddingLeft = UDim.new(0, 14),
+			PaddingRight = UDim.new(0, 14),
+			PaddingTop = UDim.new(0, 12),
+			PaddingBottom = UDim.new(0, 16),
+		}),
+	}
+
+	local order = 1
+	local function addLabel(key, text, font, textSize, color)
+		rows[key] = e("TextLabel", {
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			Font = font,
+			LayoutOrder = order,
+			Size = UDim2.fromScale(1, 0),
+			Text = text,
+			TextColor3 = color,
+			TextSize = textSize,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			ZIndex = zIndex,
+		})
+		order += 1
+	end
+
+	if tostring(item.description or "") ~= "" then
+		addLabel("Description", tostring(item.description), Theme.Fonts.Body, 14, Theme.Palette.Text)
+	end
+
+	if #(item.includes or {}) > 0 then
+		addLabel("IncludesHeader", "Includes", Theme.Fonts.Display, 17, Theme.Palette.GoldSoft)
+		for index, includeText in ipairs(item.includes) do
+			addLabel("Include" .. tostring(index), "- " .. tostring(includeText), Theme.Fonts.Body, 13, Theme.Palette.Muted)
+		end
+	end
+
+	for groupIndex, group in ipairs(item.detailGroups or {}) do
+		addLabel(
+			"GroupHeader" .. tostring(groupIndex),
+			tostring(group.title or "Details"),
+			Theme.Fonts.Display,
+			17,
+			Theme.Palette.GoldSoft
+		)
+		for itemIndex, detailText in ipairs(group.items or {}) do
+			addLabel(
+				"GroupItem" .. tostring(groupIndex) .. "_" .. tostring(itemIndex),
+				"- " .. tostring(detailText),
+				Theme.Fonts.Body,
+				13,
+				Theme.Palette.Muted
+			)
+		end
+	end
+
+	return rows
+end
+
 local function ShopShell(props)
 	local shellRef = React.useRef(nil)
 	local scrollerRef = React.useRef(nil)
 	local contentWidth, setContentWidth = React.useState(1220)
 	local activeSectionKey, setActiveSectionKey = React.useState(FEATURED_TAB.key)
 	local activeSectionKeyRef = React.useRef(FEATURED_TAB.key)
+	local detailItem, setDetailItem = React.useState(nil)
 
 	React.useEffect(function()
 		local shell = shellRef.current
@@ -187,6 +254,9 @@ local function ShopShell(props)
 			columns = columns,
 			layoutOrder = index,
 			onPurchaseRequested = props.onPurchaseRequested,
+			onDetailsRequested = function(item)
+				setDetailItem(item)
+			end,
 			zIndex = 8,
 		})
 	end
@@ -361,6 +431,76 @@ local function ShopShell(props)
 			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			ZIndex = 8,
 		}, contentChildren),
+		DetailOverlay = detailItem and e("Frame", {
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.32,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 30,
+		}, {
+			Modal = e("Frame", {
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				BackgroundColor3 = Theme.Palette.InkSoft,
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.new(isNarrow and 1 or 0, isNarrow and -32 or 520, 0, isNarrow and 420 or 460),
+				ZIndex = 31,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 16),
+				}),
+				Stroke = e("UIStroke", {
+					Color = Theme.Palette.BorderSoft,
+					Transparency = 0.08,
+					Thickness = 1.2,
+				}),
+				Title = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Theme.Fonts.Display,
+					Position = UDim2.fromOffset(18, 8),
+					Size = UDim2.new(1, -72, 0, 42),
+					Text = tostring(detailItem.title or "Details"),
+					TextColor3 = Theme.Palette.Text,
+					TextSize = 24,
+					TextTruncate = Enum.TextTruncate.AtEnd,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					TextYAlignment = Enum.TextYAlignment.Center,
+					ZIndex = 32,
+				}),
+				Close = e("TextButton", {
+					AnchorPoint = Vector2.new(1, 0),
+					AutoButtonColor = false,
+					BackgroundColor3 = Theme.Palette.CloseFill,
+					BorderSizePixel = 0,
+					Font = Theme.Fonts.Display,
+					Position = UDim2.new(1, -12, 0, 12),
+					Size = UDim2.fromOffset(34, 34),
+					Text = "X",
+					TextColor3 = Theme.Palette.Text,
+					TextSize = 16,
+					ZIndex = 33,
+					[React.Event.Activated] = function()
+						setDetailItem(nil)
+					end,
+				}, {
+					Corner = e("UICorner", {
+						CornerRadius = UDim.new(0, 9),
+					}),
+				}),
+				Body = e("ScrollingFrame", {
+					AutomaticCanvasSize = Enum.AutomaticSize.Y,
+					BackgroundTransparency = 1,
+					BorderSizePixel = 0,
+					CanvasSize = UDim2.new(),
+					Position = UDim2.fromOffset(0, 58),
+					ScrollBarImageColor3 = Theme.Palette.Cyan,
+					ScrollBarThickness = 5,
+					ScrollingDirection = Enum.ScrollingDirection.Y,
+					Size = UDim2.new(1, 0, 1, -66),
+					ZIndex = 32,
+				}, buildDetailRows(detailItem, 33)),
+			}),
+		}) or nil,
 	})
 end
 

@@ -181,6 +181,8 @@ local ProfileTemplate = {
 		x2MoneyTime = 0,
 		x15WalkSpeed = 0,
 		x15WalkSpeedTime = 0,
+		xLuck = 0,
+		xLuckTime = 0,
 	},
 	Settings = {
 		SelectedSpeed = 1,
@@ -188,6 +190,28 @@ local ProfileTemplate = {
 		PremiumStealProtectionEnabled = true,
 	},
 	Packs = {},
+	DailyClaims = {
+		CaptainSupply = {
+			LastClaimDate = "",
+		},
+	},
+	CrewProtection = {
+		SchemaVersion = 1,
+		ShieldTokens = 0,
+		FleetShieldTokens = 0,
+		CrewShields = {
+			ByInstanceId = {},
+		},
+		FleetShield = {
+			Enabled = true,
+			ExpiresAtPlayTime = 0,
+			PausedRemainingSeconds = 0,
+			LastGrantedAt = 0,
+			Source = "",
+		},
+		PermanentSlotsOwned = 0,
+		PermanentAssignments = {},
+	},
 	CometMerchant = {},
 	PremiumCrewStealProtection = {
 		NewPlayerRemoved = false,

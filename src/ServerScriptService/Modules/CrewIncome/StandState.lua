@@ -227,6 +227,15 @@ function Module.Install(ctx)
 		return if isBeliBoostActive(player) then 2 else 1
 	end
 
+	local function getCaptainPassBeliMultiplier(player)
+		local passes = player and player:FindFirstChild("Passes")
+		local vip = passes and passes:FindFirstChild("VIP")
+		if vip and vip:IsA("BoolValue") and vip.Value == true then
+			return 1.1
+		end
+		return 1
+	end
+
 	 
 	local function getToolCrewMemberInstanceId(tool)
 		if not tool or not tool:IsA("Tool") then
@@ -620,6 +629,7 @@ function Module.Install(ctx)
 		return getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
 			* getStandCollectMultiplier(player, standName)
 			* getBeliBoostMultiplier(player)
+			* getCaptainPassBeliMultiplier(player)
 	end
 
 	local function normalizeIncomeSnapshotSlotKey(value)
@@ -670,6 +680,7 @@ function Module.Install(ctx)
 	ctx.getBaseIncome = getBaseIncome
 	ctx.getBeliBoostMultiplier = getBeliBoostMultiplier
 	ctx.getBeliBoostRemaining = getBeliBoostRemaining
+	ctx.getCaptainPassBeliMultiplier = getCaptainPassBeliMultiplier
 	ctx.getCrewMemberCanonicalReadGate = getCrewMemberCanonicalReadGate
 	ctx.getCrewMemberLevel = getCrewMemberLevel
 	ctx.getCrewStorage = getCrewStorage

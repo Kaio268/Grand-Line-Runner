@@ -10,6 +10,7 @@ Monetization.Status = {
 
 Monetization.UnavailableMessage = "This purchase is not available yet."
 Monetization.PaidRandomItemUnavailableMessage = "This paid random item is unavailable for your account."
+Monetization.ShopProductPromptRemoteName = "ShopProductPromptRequest"
 
 Monetization.PaidRandomItemPolicy = {
 	Remotes = {
@@ -23,6 +24,116 @@ Monetization.PaidRandomItemPolicy = {
 	},
 }
 
+Monetization.ShopGamepasses = {}
+
+Monetization.ShopDeveloperProducts = {
+	StarterPack = {
+		Id = 3600539456,
+		Active = true,
+		Name = "Starter Pack",
+		PriceRobux = 499,
+		GrantKey = "StarterPack",
+		OneTime = true,
+		OwnedPath = "Packs.StarterPack",
+	},
+	MythicFruitChest = {
+		Id = 3600539928,
+		Active = true,
+		Name = "Mythic Fruit Chest",
+		PriceRobux = 3000,
+		GrantKey = "MythicFruitChest",
+		RequiresPaidRandomItemPolicy = true,
+		PaidRandomItem = true,
+	},
+	MoneyBoost15 = {
+		Id = 3600539532,
+		Active = true,
+		Name = "Money Boost 15 min",
+		PriceRobux = 49,
+		GrantKey = "MoneyBoost",
+		DurationSeconds = 15 * 60,
+	},
+	MoneyBoost30 = {
+		Id = 3600539577,
+		Active = true,
+		Name = "Money Boost 30 min",
+		PriceRobux = 79,
+		GrantKey = "MoneyBoost",
+		DurationSeconds = 30 * 60,
+	},
+	MoneyBoost60 = {
+		Id = 3600539622,
+		Active = true,
+		Name = "Money Boost 60 min",
+		PriceRobux = 129,
+		GrantKey = "MoneyBoost",
+		DurationSeconds = 60 * 60,
+	},
+	LuckBoost15 = {
+		Id = 3600539668,
+		Active = true,
+		Name = "Luck Boost 15 min",
+		PriceRobux = 79,
+		GrantKey = "LuckBoost",
+		DurationSeconds = 15 * 60,
+	},
+	LuckBoost30 = {
+		Id = 3600539718,
+		Active = true,
+		Name = "Luck Boost 30 min",
+		PriceRobux = 129,
+		GrantKey = "LuckBoost",
+		DurationSeconds = 30 * 60,
+	},
+	LuckBoost60 = {
+		Id = 3600539770,
+		Active = true,
+		Name = "Luck Boost 60 min",
+		PriceRobux = 199,
+		GrantKey = "LuckBoost",
+		DurationSeconds = 60 * 60,
+	},
+	SpeedBoost15 = {
+		Id = 3600539821,
+		Active = true,
+		Name = "Speed Boost 15 min",
+		PriceRobux = 49,
+		GrantKey = "SpeedBoost",
+		DurationSeconds = 15 * 60,
+	},
+	SpeedBoost30 = {
+		Id = 3600539874,
+		Active = true,
+		Name = "Speed Boost 30 min",
+		PriceRobux = 79,
+		GrantKey = "SpeedBoost",
+		DurationSeconds = 30 * 60,
+	},
+	CrewShield = {
+		Id = 3600539971,
+		Active = true,
+		Name = "Crew Shield",
+		PriceRobux = 99,
+		GrantKey = "CrewShield",
+		DurationSeconds = 24 * 60 * 60,
+	},
+	FleetShield = {
+		Id = 3600540015,
+		Active = true,
+		Name = "Fleet Shield",
+		PriceRobux = 499,
+		GrantKey = "FleetShield",
+		DurationSeconds = 24 * 60 * 60,
+	},
+	PermanentShieldSlot = {
+		Id = 3600540049,
+		Active = true,
+		Name = "Permanent Shield Slot",
+		PriceRobux = 999,
+		GrantKey = "PermanentShieldSlot",
+	},
+}
+
 Monetization.ActiveChefsGamepasses = {
 	VIP = {
 		Id = 1827239335,
@@ -30,7 +141,40 @@ Monetization.ActiveChefsGamepasses = {
 	},
 }
 
+for key, entry in pairs(Monetization.ShopGamepasses) do
+	local productId = tonumber(entry.Id)
+	if entry.Active == true and productId and productId > 0 then
+		Monetization.ActiveChefsGamepasses[key] = {
+			Id = productId,
+			Name = entry.Name,
+			ShopProduct = true,
+			GrantKey = entry.GrantKey,
+			OwnedPath = entry.OwnedPath,
+		}
+	end
+end
+
 Monetization.ActiveChefsDeveloperProducts = {}
+
+for key, entry in pairs(Monetization.ShopDeveloperProducts) do
+	local productId = tonumber(entry.Id)
+	if entry.Active == true and productId and productId > 0 then
+		Monetization.ActiveChefsDeveloperProducts[key] = {
+			Id = productId,
+			Name = entry.Name,
+			PriceRobux = entry.PriceRobux,
+			ShopProduct = true,
+			GrantKey = entry.GrantKey,
+			DurationSeconds = entry.DurationSeconds,
+			OneTime = entry.OneTime == true,
+			OwnedPath = entry.OwnedPath,
+			RequiresPaidRandomItemPolicy = entry.RequiresPaidRandomItemPolicy == true,
+			PaidRandomItem = entry.PaidRandomItem == true,
+			RobuxFundedRandomCurrency = entry.RobuxFundedRandomCurrency == true,
+			RandomRewardGenerator = entry.RandomRewardGenerator == true,
+		}
+	end
+end
 
 for _, bucket in ipairs(PremiumCrewStealConfig.GetActiveProductBuckets()) do
 	local productId = tonumber(bucket.ProductId)
@@ -222,6 +366,21 @@ Monetization.RetiredLegacyProducts = {
 	},
 }
 
+for key, entry in pairs(Monetization.ShopDeveloperProducts) do
+	local productId = tonumber(entry.Id)
+	if entry.Active ~= true and productId and productId > 0 then
+		Monetization.PlaceholderDeveloperProducts["Shop_" .. tostring(key)] = {
+			Id = productId,
+			Name = entry.Name,
+			Reason = entry.Reason or "Shop product is configured but not active.",
+			RequiresPaidRandomItemPolicy = entry.RequiresPaidRandomItemPolicy == true,
+			PaidRandomItem = entry.PaidRandomItem == true,
+			RobuxFundedRandomCurrency = entry.RobuxFundedRandomCurrency == true,
+			RandomRewardGenerator = entry.RandomRewardGenerator == true,
+		}
+	end
+end
+
 local gamepassMetadataById = {}
 local gamepassIdsByStatus = {}
 local developerProductMetadataById = {}
@@ -243,6 +402,12 @@ local function register(entries, status, metadataById, idsByStatus)
 				PaidRandomItem = entry.PaidRandomItem == true,
 				RobuxFundedRandomCurrency = entry.RobuxFundedRandomCurrency == true,
 				RandomRewardGenerator = entry.RandomRewardGenerator == true,
+				ShopProduct = entry.ShopProduct == true,
+				GrantKey = entry.GrantKey,
+				PriceRobux = entry.PriceRobux,
+				DurationSeconds = entry.DurationSeconds,
+				OneTime = entry.OneTime == true,
+				OwnedPath = entry.OwnedPath,
 			}
 			metadataById[id] = metadata
 			table.insert(idsByStatus[status], id)
@@ -293,6 +458,32 @@ function Monetization.GetDeveloperProductStatus(productId)
 		return metadata.Status, metadata
 	end
 	return Monetization.Status.Unknown, nil
+end
+
+function Monetization.GetGamepassMetadata(gamepassId)
+	local id = tonumber(gamepassId)
+	return id and gamepassMetadataById[id] or nil
+end
+
+function Monetization.GetDeveloperProductMetadata(productId)
+	local id = tonumber(productId)
+	return id and developerProductMetadataById[id] or nil
+end
+
+function Monetization.GetShopDeveloperProductMetadata(productId)
+	local metadata = Monetization.GetDeveloperProductMetadata(productId)
+	if metadata and metadata.ShopProduct == true then
+		return metadata
+	end
+	return nil
+end
+
+function Monetization.GetShopGamepassMetadata(gamepassId)
+	local metadata = Monetization.GetGamepassMetadata(gamepassId)
+	if metadata and metadata.ShopProduct == true then
+		return metadata
+	end
+	return nil
 end
 
 function Monetization.IsActiveGamepass(gamepassId)

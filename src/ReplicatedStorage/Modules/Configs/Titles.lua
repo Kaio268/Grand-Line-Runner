@@ -2,6 +2,7 @@ local Titles = {}
 
 local ORDER = {
 	"Tester",
+	"Captain",
 	"EnemyOfTheSea",
 	"PirateEmperor",
 }
@@ -32,6 +33,33 @@ local BY_ID = {
 		},
 		SortOrder = 0,
 	},
+	Captain = {
+		Id = "Captain",
+		DisplayName = "Captain",
+		Description = "Permanent title granted by the Captain Pass.",
+		RequirementText = "Own the Captain Pass.",
+		UnlockType = "Persistent",
+		VisualStyle = {
+			AccentColor = Color3.fromRGB(255, 213, 92),
+			SurfaceColor = Color3.fromRGB(72, 48, 18),
+			SurfaceColor2 = Color3.fromRGB(30, 19, 8),
+			SealColor = Color3.fromRGB(205, 151, 48),
+			LedgerColor = Color3.fromRGB(255, 234, 146),
+		},
+		ChatStyle = {
+			gradient = {
+				colors = {
+					Color3.fromRGB(255, 244, 173),
+					Color3.fromRGB(255, 205, 82),
+					Color3.fromRGB(255, 153, 58),
+				},
+			},
+			bold = true,
+			brackets = true,
+			spaceAfter = true,
+		},
+		SortOrder = 1,
+	},
 	EnemyOfTheSea = {
 		Id = "EnemyOfTheSea",
 		DisplayName = "Enemy of the Sea",
@@ -56,7 +84,7 @@ local BY_ID = {
 			brackets = true,
 			spaceAfter = true,
 		},
-		SortOrder = 1,
+		SortOrder = 2,
 	},
 	PirateEmperor = {
 		Id = "PirateEmperor",
@@ -85,7 +113,7 @@ local BY_ID = {
 			brackets = true,
 			spaceAfter = true,
 		},
-		SortOrder = 2,
+		SortOrder = 3,
 	},
 }
 

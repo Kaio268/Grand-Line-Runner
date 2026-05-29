@@ -280,8 +280,8 @@ local function render()
 		onClose = function()
 			modalAdapter:Close()
 		end,
-		onPurchaseRequested = function(item)
-			local success, message = purchaseAdapter:requestPurchase(item)
+		onPurchaseRequested = function(item, selectedVariant)
+			local success, message = purchaseAdapter:requestPurchase(item, selectedVariant)
 			if not success and message then
 				setNotice(message)
 			end

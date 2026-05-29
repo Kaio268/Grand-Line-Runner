@@ -5,7 +5,7 @@ local Gamepasses = {
 		Active = true,
 		Icon = "rbxassetid://118443250256506",
 		
-		Description = "Get 1.25x Beli, a VIP tag, plus access to shortcuts",
+		Description = "Get a gold name, Captain title, +10% Beli, and a daily supply chest.",
 	},
 
 	["2x Beli"] = {

@@ -998,8 +998,42 @@ function ProfileMigrations.Apply(data)
 	active.x2Money = coerceNumber(active.x2Money, 1)
 	active.x15WalkSpeed = coerceNumber(active.x15WalkSpeed, 1)
 
+	local potions = ensureTable(data, "Potions")
+	potions.x2Money = math.max(0, coerceNumber(potions.x2Money, 0))
+	potions.x2MoneyTime = math.max(0, coerceNumber(potions.x2MoneyTime, 0))
+	potions.x15WalkSpeed = math.max(0, coerceNumber(potions.x15WalkSpeed, 0))
+	potions.x15WalkSpeedTime = math.max(0, coerceNumber(potions.x15WalkSpeedTime, 0))
+	potions.xLuck = math.max(0, coerceNumber(potions.xLuck, 0))
+	potions.xLuckTime = math.max(0, coerceNumber(potions.xLuckTime, 0))
+
 	local gamepasses = ensureTable(data, "Gamepasses")
 	gamepasses.x2MoneyValue = coerceNumber(gamepasses.x2MoneyValue, 1)
+
+	local dailyClaims = ensureTable(data, "DailyClaims")
+	local captainSupply = ensureTable(dailyClaims, "CaptainSupply")
+	if typeof(captainSupply.LastClaimDate) ~= "string" then
+		captainSupply.LastClaimDate = ""
+	end
+
+	local packs = ensureTable(data, "Packs")
+	packs.StarterPack = packs.StarterPack == true
+
+	local crewProtection = ensureTable(data, "CrewProtection")
+	crewProtection.SchemaVersion = 1
+	crewProtection.ShieldTokens = math.max(0, math.floor(coerceNumber(crewProtection.ShieldTokens, 0)))
+	crewProtection.FleetShieldTokens = math.max(0, math.floor(coerceNumber(crewProtection.FleetShieldTokens, 0)))
+	local crewShields = ensureTable(crewProtection, "CrewShields")
+	crewShields.ByInstanceId = ensureTable(crewShields, "ByInstanceId")
+	local fleetShield = ensureTable(crewProtection, "FleetShield")
+	fleetShield.Enabled = fleetShield.Enabled ~= false
+	fleetShield.ExpiresAtPlayTime = math.max(0, coerceNumber(fleetShield.ExpiresAtPlayTime, 0))
+	fleetShield.PausedRemainingSeconds = math.max(0, math.floor(coerceNumber(fleetShield.PausedRemainingSeconds, 0)))
+	fleetShield.LastGrantedAt = math.max(0, coerceNumber(fleetShield.LastGrantedAt, 0))
+	if typeof(fleetShield.Source) ~= "string" then
+		fleetShield.Source = ""
+	end
+	crewProtection.PermanentSlotsOwned = math.max(0, math.floor(coerceNumber(crewProtection.PermanentSlotsOwned, 0)))
+	crewProtection.PermanentAssignments = ensureTable(crewProtection, "PermanentAssignments")
 end
 
 return ProfileMigrations

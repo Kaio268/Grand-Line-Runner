@@ -196,7 +196,7 @@ function Theme.getItemIcon(item)
 		return Theme.Assets.BeliIcon
 	end
 
-	if sectionKey == "boosts" then
+	if sectionKey == "boosts" or sectionKey == "boosts-chests" then
 		if string.find(titleLower, "luck", 1, true) or string.find(titleLower, "drop", 1, true) then
 			return Theme.Assets.LuckBoostIcon
 		end
@@ -210,7 +210,7 @@ function Theme.getItemIcon(item)
 		return Theme.Assets.RebirthIcon
 	end
 
-	if sectionKey == "protection" then
+	if sectionKey == "protection" or sectionKey == "crew-protection" then
 		return Theme.Assets.SettingsIcon
 	end
 

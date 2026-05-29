@@ -1,477 +1,290 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local GamepassesConfig =
-	require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Gamepasses"))
+local Configs = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs")
+local GamepassesConfig = require(Configs:WaitForChild("Gamepasses"))
+local MonetizationConfig = require(Configs:WaitForChild("Monetization"))
 
 local Catalog = {}
+
 local VIP_GAMEPASS_ID =
 	assert(tonumber(GamepassesConfig.VIP and GamepassesConfig.VIP.ID), "VIP gamepass ID is not configured")
 local VIP_ICON = tostring(GamepassesConfig.VIP and GamepassesConfig.VIP.Icon or "")
 
+local function formatRobux(price)
+	local numericPrice = tonumber(price)
+	if numericPrice and numericPrice > 0 then
+		return tostring(numericPrice)
+	end
+	return "Soon"
+end
+
+local function gamepassPurchase(gamepassKey)
+	if gamepassKey == "VIP" then
+		return {
+			kind = "gamepass",
+			id = VIP_GAMEPASS_ID,
+			ownedKey = "VIP",
+		}
+	end
+
+	local config = MonetizationConfig.ShopGamepasses[gamepassKey]
+	local id = tonumber(config and config.Id)
+	if id and id > 0 then
+		return {
+			kind = "gamepass",
+			id = id,
+			ownedPath = config.OwnedPath,
+			grantKey = config.GrantKey,
+		}
+	end
+
+	return {
+		kind = "stub",
+	}
+end
+
+local function productPurchase(productKey)
+	local config = MonetizationConfig.ShopDeveloperProducts[productKey]
+	local id = tonumber(config and config.Id)
+	if id and id > 0 then
+		return {
+			kind = "product",
+			id = id,
+			grantKey = config.GrantKey,
+			durationSeconds = config.DurationSeconds,
+			oneTime = config.OneTime == true,
+			ownedPath = config.OwnedPath,
+			OneTime = config.OneTime == true,
+			OwnedPath = config.OwnedPath,
+			RequiresPaidRandomItemPolicy = config.RequiresPaidRandomItemPolicy == true,
+			PaidRandomItem = config.PaidRandomItem == true,
+			RandomRewardGenerator = config.RandomRewardGenerator == true,
+		}
+	end
+
+	return {
+		kind = "stub",
+	}
+end
+
 local function item(config)
-	config.description = config.subtitle
 	config.priceText = config.priceText or "Soon"
-	config.callToAction = config.callToAction or "Coming Soon"
+	config.callToAction = config.callToAction or "Purchase"
 	config.purchase = config.purchase or {
 		kind = "stub",
 	}
 	return config
 end
 
+local function boostVariant(configKey, id, label)
+	local config = MonetizationConfig.ShopDeveloperProducts[configKey] or {}
+	local purchase = productPurchase(configKey)
+
+	return {
+		id = id,
+		label = label,
+		durationSeconds = tonumber(config.DurationSeconds) or 0,
+		priceText = formatRobux(config.PriceRobux),
+		callToAction = "Buy",
+		purchase = purchase,
+	}
+end
+
 local items = {
-	limitedVoyagePack = item({
-		id = "limited-voyage-pack",
-		sectionKey = "featured",
-		title = "Limited Voyage Pack",
-		subtitle = "Launch bundle",
-		tags = { "Limited", "Bundle", "Value" },
-		themeKey = "Crimson",
-		iconText = "LV",
-	}),
 	starterPack = item({
 		id = "starter-pack",
-		sectionKey = "bundles",
+		sectionKey = "featured",
 		title = "Starter Pack",
-		subtitle = "First boost",
-		tags = { "Bundle", "New" },
+		subtitle = "Best deal for new players",
+		description = "Start strong with a Golden crewmate, lots of Beli, food, materials, boosts, and protection.",
+		includes = {
+			"Golden Bloom Scholar",
+			"250K Beli",
+			"250 Timber",
+			"40 Iron",
+			"20 Apples",
+			"15 Rice",
+			"10 Meat",
+			"3 Beast Meat",
+			"1 Hour Money Boost",
+			"1 Hour Speed Boost",
+			"1 Hour Luck Boost",
+			"3 Crew Shields",
+		},
+		tags = { "Bundle", "New", "Value" },
+		priceText = "499",
+		callToAction = "Buy",
 		themeKey = "Gold",
 		iconText = "SP",
+		purchase = productPurchase("StarterPack"),
 	}),
-	raiderPack = item({
-		id = "raider-pack",
-		sectionKey = "bundles",
-		title = "Raider Pack",
-		subtitle = "Raid ready",
-		tags = { "Bundle", "Raid" },
-		themeKey = "Orange",
-		iconText = "RP",
-	}),
-	emperorPack = item({
-		id = "emperor-pack",
-		sectionKey = "bundles",
-		title = "Emperor Pack",
-		subtitle = "Premium haul",
-		tags = { "Bundle", "Best" },
-		themeKey = "Violet",
-		iconText = "EP",
-	}),
-	captainsPass = item({
-		id = "captains-pass",
-		sectionKey = "vip",
-		title = "Captain's Pass",
-		subtitle = "Permanent perks",
+	captainPass = item({
+		id = "captain-pass",
+		sectionKey = "featured",
+		title = "Captain Pass",
+		subtitle = "Permanent VIP perks",
+		description = "Get a gold name, Captain title, extra Beli, and a free supply chest every day.",
+		includes = {
+			"Gold Name",
+			"Captain Title",
+			"+10% Beli",
+			"Daily Supply Chest",
+		},
+		detailGroups = {
+			{
+				title = "Daily Chest",
+				items = {
+					"10K Beli",
+					"10 Apples",
+					"5 Rice",
+					"3 Meat",
+					"1 Beast Meat",
+					"75 Timber",
+					"20 Iron",
+					"1 Ancient Timber",
+				},
+			},
+		},
 		tags = { "VIP", "Permanent" },
-		priceText = "...",
+		priceText = "499",
 		callToAction = "Unlock",
 		themeKey = "Emerald",
 		iconText = "VIP",
 		iconImage = VIP_ICON,
-		purchase = {
-			kind = "gamepass",
-			id = VIP_GAMEPASS_ID,
-			ownedKey = "VIP",
+		purchase = gamepassPurchase("VIP"),
+	}),
+	mythicFruitChest = item({
+		id = "mythic-fruit-chest",
+		sectionKey = "featured",
+		title = "Mythic Fruit Chest",
+		subtitle = "Guaranteed Mythic Fruit",
+		description = "Opens into one Mythical Devil Fruit. No lower rarities.",
+		tags = { "Chest", "Mythic" },
+		priceText = "3000",
+		callToAction = "Buy",
+		themeKey = "Violet",
+		iconText = "MF",
+		RequiresPaidRandomItemPolicy = true,
+		PaidRandomItem = true,
+		purchase = productPurchase("MythicFruitChest"),
+	}),
+	moneyBoost = item({
+		id = "money-boost",
+		sectionKey = "boosts-chests",
+		title = "Money Boost",
+		subtitle = "2x Beli",
+		description = "Earn double Beli for a limited time.",
+		tags = { "Boost", "Beli" },
+		themeKey = "Gold",
+		iconText = "2X",
+		variants = {
+			boostVariant("MoneyBoost15", "money-boost-15", "15 min"),
+			boostVariant("MoneyBoost30", "money-boost-30", "30 min"),
+			boostVariant("MoneyBoost60", "money-boost-60", "60 min"),
 		},
 	}),
-	commonDfChest = item({
-		id = "common-df-chest",
-		sectionKey = "fruit-chests",
-		title = "Common DF Chest",
-		subtitle = "Starter fruit roll",
-		tags = { "Chest", "Common" },
-		themeKey = "Cyan",
-		iconText = "DF",
-		RequiresPaidRandomItemPolicy = true,
-		PaidRandomItem = true,
-	}),
-	legendaryDfCrate = item({
-		id = "legendary-df-crate",
-		sectionKey = "fruit-chests",
-		title = "Legendary DF Crate",
-		subtitle = "High rarity chance",
-		tags = { "Crate", "Legendary" },
-		themeKey = "Gold",
-		iconText = "LD",
-		RequiresPaidRandomItemPolicy = true,
-		PaidRandomItem = true,
-	}),
-	mythicDfCrate = item({
-		id = "mythic-df-crate",
-		sectionKey = "fruit-chests",
-		title = "Mythic DF Crate",
-		subtitle = "Best mythic chance",
-		tags = { "Crate", "Mythic" },
+	luckBoost = item({
+		id = "luck-boost",
+		sectionKey = "boosts-chests",
+		title = "Luck Boost",
+		subtitle = "Better rare drops",
+		description = "Increases your chance of getting rare drops, including fruits.",
+		tags = { "Boost", "Luck" },
 		themeKey = "Violet",
-		iconText = "MD",
-		RequiresPaidRandomItemPolicy = true,
-		PaidRandomItem = true,
+		iconText = "LK",
+		variants = {
+			boostVariant("LuckBoost15", "luck-boost-15", "15 min"),
+			boostVariant("LuckBoost30", "luck-boost-30", "30 min"),
+			boostVariant("LuckBoost60", "luck-boost-60", "60 min"),
+		},
 	}),
-	basicReroll = item({
-		id = "basic-reroll",
-		sectionKey = "fruit-chests",
-		title = "Basic Reroll",
-		subtitle = "Fresh roll",
-		tags = { "Reroll", "Basic" },
+	speedBoost = item({
+		id = "speed-boost",
+		sectionKey = "boosts-chests",
+		title = "Speed Boost",
+		subtitle = "+15% speed",
+		description = "Run faster for a limited time.",
+		tags = { "Boost", "Speed" },
 		themeKey = "Cyan",
-		iconText = "BR",
-		RequiresPaidRandomItemPolicy = true,
-		RandomRewardGenerator = true,
+		iconText = "SP",
+		variants = {
+			boostVariant("SpeedBoost15", "speed-boost-15", "15 min"),
+			boostVariant("SpeedBoost30", "speed-boost-30", "30 min"),
+		},
 	}),
-	legendaryReroll = item({
-		id = "legendary-reroll",
-		sectionKey = "fruit-chests",
-		title = "Legendary Reroll",
-		subtitle = "Better odds",
-		tags = { "Reroll", "Legendary" },
-		themeKey = "Gold",
-		iconText = "LR",
-		RequiresPaidRandomItemPolicy = true,
-		RandomRewardGenerator = true,
-	}),
-	mythicReroll = item({
-		id = "mythic-reroll",
-		sectionKey = "fruit-chests",
-		title = "Mythic Reroll",
-		subtitle = "Top odds",
-		tags = { "Reroll", "Mythic" },
-		themeKey = "Violet",
-		iconText = "MR",
-		RequiresPaidRandomItemPolicy = true,
-		RandomRewardGenerator = true,
-	}),
-	goldSurge15 = item({
-		id = "gold-surge-15",
-		sectionKey = "boosts",
-		title = "Gold Surge 15 min",
-		subtitle = "2x money",
-		tags = { "Boost", "15m" },
-		themeKey = "Gold",
-		iconText = "2X",
-	}),
-	goldSurge60 = item({
-		id = "gold-surge-60",
-		sectionKey = "boosts",
-		title = "Gold Surge 60 min",
-		subtitle = "2x money",
-		tags = { "Boost", "60m" },
-		themeKey = "Gold",
-		iconText = "2X",
-	}),
-	fortuneTide15 = item({
-		id = "fortune-tide-15",
-		sectionKey = "boosts",
-		title = "Fortune Tide 15 min",
-		subtitle = "Rare boost",
-		tags = { "Luck", "15m" },
-		themeKey = "Violet",
-		iconText = "FT",
-		RequiresPaidRandomItemPolicy = true,
-		RandomRewardGenerator = true,
-	}),
-	fortuneTide60 = item({
-		id = "fortune-tide-60",
-		sectionKey = "boosts",
-		title = "Fortune Tide 60 min",
-		subtitle = "Rare boost",
-		tags = { "Luck", "60m" },
-		themeKey = "Violet",
-		iconText = "FT",
-		RequiresPaidRandomItemPolicy = true,
-		RandomRewardGenerator = true,
-	}),
-	treasureSense15 = item({
-		id = "treasure-sense-15",
-		sectionKey = "boosts",
-		title = "Treasure Sense 15 min",
-		subtitle = "Find loot",
-		tags = { "Sense", "15m" },
-		themeKey = "Cyan",
-		iconText = "TS",
-	}),
-	treasureSense60 = item({
-		id = "treasure-sense-60",
-		sectionKey = "boosts",
-		title = "Treasure Sense 60 min",
-		subtitle = "Find loot",
-		tags = { "Sense", "60m" },
-		themeKey = "Cyan",
-		iconText = "TS",
-	}),
-	treasureSense30 = item({
-		id = "treasure-sense-30",
-		sectionKey = "raiding",
-		title = "Treasure Sense 30 min",
-		subtitle = "Find loot",
-		tags = { "Sense", "30m" },
-		themeKey = "Cyan",
-		iconText = "TS",
-	}),
-	guardBarrier = item({
-		id = "guard-barrier",
-		sectionKey = "protection",
-		title = "Guard Barrier",
-		subtitle = "Protect haul",
-		tags = { "Shield", "Safety" },
+	crewShield = item({
+		id = "crew-shield",
+		sectionKey = "crew-protection",
+		title = "Crew Shield",
+		subtitle = "Protect 1 crewmate",
+		description = "Protects 1 crewmate from being stolen for 24 playable hours.",
+		tags = { "Shield", "Crew" },
+		priceText = "99",
+		callToAction = "Buy",
 		themeKey = "Emerald",
-		iconText = "GB",
+		iconText = "CS",
+		purchase = productPurchase("CrewShield"),
 	}),
-	returnBeacon = item({
-		id = "return-beacon",
-		sectionKey = "protection",
-		title = "Return Beacon",
-		subtitle = "Emergency exit",
-		tags = { "Escape", "Safety" },
+	fleetShield = item({
+		id = "fleet-shield",
+		sectionKey = "crew-protection",
+		title = "Fleet Shield",
+		subtitle = "Protect all crewmates",
+		description = "Protects your whole crew from being stolen for 24 playable hours.",
+		tags = { "Shield", "Fleet" },
+		priceText = "499",
+		callToAction = "Buy",
 		themeKey = "Cyan",
-		iconText = "RB",
+		iconText = "FS",
+		purchase = productPurchase("FleetShield"),
 	}),
-	extraCharge = item({
-		id = "extra-charge",
-		sectionKey = "protection",
-		title = "Extra Charge",
-		subtitle = "More uses",
-		tags = { "Charge", "Utility" },
-		themeKey = "Orange",
-		iconText = "EC",
-	}),
-	vaultSealOne = item({
-		id = "vault-seal-1",
-		sectionKey = "protection",
-		title = "Vault Seal I",
-		subtitle = "Lock crewmate",
-		tags = { "Seal", "I" },
+	permanentShieldSlot = item({
+		id = "permanent-shield-slot",
+		sectionKey = "crew-protection",
+		title = "Permanent Shield Slot",
+		subtitle = "Protect 1 crewmate forever",
+		description = "Adds 1 permanent protection slot for your favorite crewmate.",
+		tags = { "Permanent", "Shield" },
+		priceText = "999",
+		callToAction = "Buy",
 		themeKey = "Slate",
-		iconText = "V1",
-	}),
-	vaultSealTwo = item({
-		id = "vault-seal-2",
-		sectionKey = "protection",
-		title = "Vault Seal II",
-		subtitle = "Lock crewmate",
-		tags = { "Seal", "II" },
-		themeKey = "Violet",
-		iconText = "V2",
-	}),
-	raidMark = item({
-		id = "raid-mark",
-		sectionKey = "raiding",
-		title = "Raid Mark",
-		subtitle = "Start raid",
-		tags = { "Raid", "1x" },
-		themeKey = "Crimson",
-		iconText = "RM",
-	}),
-	raidMarksThree = item({
-		id = "raid-marks-3",
-		sectionKey = "raiding",
-		title = "Raid Marks x3",
-		subtitle = "More raids",
-		tags = { "Raid", "3x" },
-		themeKey = "Orange",
-		iconText = "3R",
-	}),
-	bronzeRaider = item({
-		id = "bronze-raider",
-		sectionKey = "cosmetics",
-		title = "Bronze Raider",
-		subtitle = "Ship skin",
-		tags = { "Skin", "Bronze" },
-		themeKey = "Orange",
-		iconText = "BR",
-	}),
-	goldenGalleon = item({
-		id = "golden-galleon",
-		sectionKey = "cosmetics",
-		title = "Golden Galleon",
-		subtitle = "Ship skin",
-		tags = { "Skin", "Gold" },
-		themeKey = "Gold",
-		iconText = "GG",
-	}),
-	phantomShip = item({
-		id = "phantom-ship",
-		sectionKey = "cosmetics",
-		title = "Phantom Ship",
-		subtitle = "Ship skin",
-		tags = { "Skin", "Rare" },
-		themeKey = "Violet",
 		iconText = "PS",
-	}),
-	simpleAura = item({
-		id = "simple-aura",
-		sectionKey = "cosmetics",
-		title = "Simple Aura",
-		subtitle = "Soft glow",
-		tags = { "Aura", "Basic" },
-		themeKey = "Cyan",
-		iconText = "SA",
-	}),
-	enhancedAura = item({
-		id = "enhanced-aura",
-		sectionKey = "cosmetics",
-		title = "Enhanced Aura",
-		subtitle = "Bright glow",
-		tags = { "Aura", "Plus" },
-		themeKey = "Emerald",
-		iconText = "EA",
-	}),
-	mythicAura = item({
-		id = "mythic-aura",
-		sectionKey = "cosmetics",
-		title = "Mythic Aura",
-		subtitle = "Mythic glow",
-		tags = { "Aura", "Mythic" },
-		themeKey = "Violet",
-		iconText = "MA",
-	}),
-	seaEmperorTitle = item({
-		id = "sea-emperor-title",
-		sectionKey = "cosmetics",
-		title = "Sea Emperor Title",
-		subtitle = "Name flair",
-		tags = { "Title", "Royal" },
-		themeKey = "Cyan",
-		iconText = "SE",
-	}),
-	crimsonKingTitle = item({
-		id = "crimson-king-title",
-		sectionKey = "cosmetics",
-		title = "Crimson King Title",
-		subtitle = "Name flair",
-		tags = { "Title", "Crimson" },
-		themeKey = "Crimson",
-		iconText = "CK",
-	}),
-	goldPedestal = item({
-		id = "gold-pedestal",
-		sectionKey = "cosmetics",
-		title = "Gold Pedestal",
-		subtitle = "Display stand",
-		tags = { "Pedestal", "Gold" },
-		themeKey = "Gold",
-		iconText = "GP",
-	}),
-	mythicPedestal = item({
-		id = "mythic-pedestal",
-		sectionKey = "cosmetics",
-		title = "Mythic Pedestal",
-		subtitle = "Display stand",
-		tags = { "Pedestal", "Mythic" },
-		themeKey = "Violet",
-		iconText = "MP",
+		purchase = productPurchase("PermanentShieldSlot"),
 	}),
 }
 
 Catalog.title = "Robux Shop"
-
-Catalog.featuredSections = {
-	{
-		key = "featured-packs",
-		title = "Featured Packs",
-		themeKey = "Crimson",
-		items = {
-			items.limitedVoyagePack,
-			items.starterPack,
-		},
-	},
-	{
-		key = "featured-perks",
-		title = "Captain Perks",
-		themeKey = "Emerald",
-		items = {
-			items.captainsPass,
-		},
-	},
-	{
-		key = "featured-chests",
-		title = "Fruit Spotlight",
-		themeKey = "Violet",
-		items = {
-			items.mythicDfCrate,
-		},
-	},
-}
+Catalog.featuredSections = {}
 
 Catalog.sections = {
 	{
-		key = "bundles",
-		title = "Bundles",
-		themeKey = "Crimson",
-		items = {
-			items.starterPack,
-			items.raiderPack,
-			items.emperorPack,
-		},
-	},
-	{
-		key = "fruit-chests",
-		title = "Fruit Chests",
-		themeKey = "Violet",
-		items = {
-			items.commonDfChest,
-			items.legendaryDfCrate,
-			items.mythicDfCrate,
-			items.basicReroll,
-			items.legendaryReroll,
-			items.mythicReroll,
-		},
-	},
-	{
-		key = "boosts",
-		title = "Boosts",
+		key = "featured",
+		title = "Featured",
 		themeKey = "Gold",
 		items = {
-			items.goldSurge15,
-			items.goldSurge60,
-			items.fortuneTide15,
-			items.fortuneTide60,
-			items.treasureSense15,
-			items.treasureSense60,
+			items.starterPack,
+			items.captainPass,
+			items.mythicFruitChest,
 		},
 	},
 	{
-		key = "protection",
-		title = "Protection",
+		key = "boosts-chests",
+		title = "Boosts & Chests",
+		themeKey = "Violet",
+		items = {
+			items.moneyBoost,
+			items.luckBoost,
+			items.speedBoost,
+		},
+	},
+	{
+		key = "crew-protection",
+		title = "Crew Protection",
 		themeKey = "Emerald",
 		items = {
-			items.guardBarrier,
-			items.returnBeacon,
-			items.extraCharge,
-			items.vaultSealOne,
-			items.vaultSealTwo,
-		},
-	},
-	{
-		key = "raiding",
-		title = "Raiding",
-		themeKey = "Crimson",
-		items = {
-			items.raidMark,
-			items.raidMarksThree,
-			items.treasureSense30,
-		},
-	},
-	{
-		key = "cosmetics",
-		title = "Cosmetics",
-		themeKey = "Cyan",
-		items = {
-			items.bronzeRaider,
-			items.goldenGalleon,
-			items.phantomShip,
-			items.simpleAura,
-			items.enhancedAura,
-			items.mythicAura,
-			items.seaEmperorTitle,
-			items.crimsonKingTitle,
-			items.goldPedestal,
-			items.mythicPedestal,
-		},
-	},
-	{
-		key = "vip",
-		title = "VIP",
-		themeKey = "Emerald",
-		items = {
-			items.captainsPass,
+			items.crewShield,
+			items.fleetShield,
+			items.permanentShieldSlot,
 		},
 	},
 }

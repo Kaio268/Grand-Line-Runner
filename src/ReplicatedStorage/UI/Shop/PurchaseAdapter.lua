@@ -30,11 +30,46 @@ local function getPurchaseKey(purchase)
 	return tostring(purchase.kind) .. ":" .. tostring(purchase.id)
 end
 
+local function copyOfferForState(offer, inheritedItem)
+	local result = copyTable(offer or {})
+	if typeof(inheritedItem) == "table" then
+		result.title = result.title or inheritedItem.title
+		result.themeKey = result.themeKey or inheritedItem.themeKey
+		result.RequiresPaidRandomItemPolicy = result.RequiresPaidRandomItemPolicy
+			or inheritedItem.RequiresPaidRandomItemPolicy
+		result.PaidRandomItem = result.PaidRandomItem or inheritedItem.PaidRandomItem
+		result.RobuxFundedRandomCurrency = result.RobuxFundedRandomCurrency
+			or inheritedItem.RobuxFundedRandomCurrency
+		result.RandomRewardGenerator = result.RandomRewardGenerator or inheritedItem.RandomRewardGenerator
+	end
+	return result
+end
+
+local function readValuePath(root, path)
+	if typeof(root) ~= "Instance" or typeof(path) ~= "string" or path == "" then
+		return nil
+	end
+
+	local current = root
+	for _, segment in ipairs(path:split(".")) do
+		current = current and current:FindFirstChild(segment)
+		if not current then
+			return nil
+		end
+	end
+
+	return current
+end
+
 local function getPolicyRemoteNames()
 	local policyConfig = MonetizationConfig.PaidRandomItemPolicy or {}
 	local remotes = policyConfig.Remotes or {}
 	return tostring(remotes.StateRequestName or "PaidRandomItemPolicyStateRequest"),
 		tostring(remotes.ProductPromptRequestName or "PaidRandomProductPromptRequest")
+end
+
+local function getShopProductPromptRemoteName()
+	return tostring(MonetizationConfig.ShopProductPromptRemoteName or "ShopProductPromptRequest")
 end
 
 local function normalizePolicyState(state)
@@ -73,6 +108,7 @@ function PurchaseAdapter.new(player)
 	self._paidRandomPolicyRequested = false
 	self._policyStateRequest = nil
 	self._paidRandomPromptRequest = nil
+	self._shopProductPromptRequest = nil
 
 	self:_bindPasses()
 	self:_bindPromptSignals()
@@ -122,46 +158,74 @@ function PurchaseAdapter:_getState(item)
 end
 
 function PurchaseAdapter:_readOwnedValue(valueName)
+	if typeof(valueName) ~= "string" or valueName == "" then
+		return false
+	end
+
+	if valueName:find(".", 1, true) ~= nil then
+		local valueObject = readValuePath(self.player, valueName)
+		if valueObject and valueObject:IsA("BoolValue") then
+			return valueObject.Value == true
+		end
+		if valueObject and valueObject:IsA("NumberValue") then
+			return valueObject.Value > 0
+		end
+		return false
+	end
+
 	local passes = self.player:FindFirstChild("Passes")
 	local valueObject = passes and passes:FindFirstChild(valueName)
 	return valueObject ~= nil and valueObject:IsA("BoolValue") and valueObject.Value == true
 end
 
 function PurchaseAdapter:_bindPasses()
+	local watchedRoots = {
+		Passes = true,
+		Packs = true,
+		CrewProtection = true,
+	}
+
 	local function reconnectPasses()
 		disconnectAll(self._passConnections)
 
-		local passes = self.player:FindFirstChild("Passes")
-		if not passes then
-			return
+		local function bindRoot(root)
+			if not root then
+				return
+			end
+
+			table.insert(self._passConnections, root.DescendantAdded:Connect(function()
+				reconnectPasses()
+				self:refreshOwnership()
+			end))
+			table.insert(self._passConnections, root.DescendantRemoving:Connect(function()
+				task.defer(function()
+					reconnectPasses()
+					self:refreshOwnership()
+				end)
+			end))
+
+			for _, child in ipairs(root:GetDescendants()) do
+				if child:IsA("BoolValue") or child:IsA("NumberValue") then
+					table.insert(self._passConnections, child:GetPropertyChangedSignal("Value"):Connect(function()
+						self:refreshOwnership()
+					end))
+				end
+			end
 		end
 
-		table.insert(self._passConnections, passes.ChildAdded:Connect(function()
-			reconnectPasses()
-			self:refreshOwnership()
-		end))
-		table.insert(self._passConnections, passes.ChildRemoved:Connect(function()
-			reconnectPasses()
-			self:refreshOwnership()
-		end))
-
-		for _, child in ipairs(passes:GetChildren()) do
-			if child:IsA("BoolValue") then
-				table.insert(self._passConnections, child:GetPropertyChangedSignal("Value"):Connect(function()
-					self:refreshOwnership()
-				end))
-			end
+		for rootName in pairs(watchedRoots) do
+			bindRoot(self.player:FindFirstChild(rootName))
 		end
 	end
 
 	table.insert(self._connections, self.player.ChildAdded:Connect(function(child)
-		if child.Name == "Passes" then
+		if watchedRoots[child.Name] then
 			reconnectPasses()
 			self:refreshOwnership()
 		end
 	end))
 	table.insert(self._connections, self.player.ChildRemoved:Connect(function(child)
-		if child.Name == "Passes" then
+		if watchedRoots[child.Name] then
 			reconnectPasses()
 			self:refreshOwnership()
 		end
@@ -227,6 +291,15 @@ function PurchaseAdapter:_getPaidRandomPromptRequest()
 	return self._paidRandomPromptRequest
 end
 
+function PurchaseAdapter:_getShopProductPromptRequest()
+	if self._shopProductPromptRequest and self._shopProductPromptRequest.Parent then
+		return self._shopProductPromptRequest
+	end
+
+	self._shopProductPromptRequest = self:_getRemoteFunction(getShopProductPromptRemoteName())
+	return self._shopProductPromptRequest
+end
+
 function PurchaseAdapter:_refreshPaidRandomItems()
 	for _, item in pairs(self._catalogItems) do
 		if MonetizationConfig.ItemRequiresPaidRandomItemPolicy(item) then
@@ -276,7 +349,7 @@ function PurchaseAdapter:_refreshStateForItem(item)
 	state.requiresPaidRandomPolicy = requiresPaidRandomPolicy
 
 	if purchase.kind == "stub" or purchase.id == nil then
-		state.buttonText = item.callToAction or "Coming Soon"
+		state.buttonText = item.placeholderAction or "Coming Soon"
 		state.statusText = "Arriving soon"
 		state.buttonEnabled = false
 		return
@@ -304,7 +377,9 @@ function PurchaseAdapter:_refreshStateForItem(item)
 
 	state.supportsPrompt = true
 	if purchase.kind == "gamepass" then
-		state.isOwned = self:_readOwnedValue(purchase.ownedKey or item.title)
+		state.isOwned = self:_readOwnedValue(purchase.ownedPath or purchase.ownedKey or item.title)
+	elseif purchase.kind == "product" and (purchase.oneTime == true or purchase.OneTime == true) then
+		state.isOwned = self:_readOwnedValue(purchase.ownedPath or purchase.OwnedPath)
 	end
 
 	if state.isOwned then
@@ -374,19 +449,26 @@ function PurchaseAdapter:primeCatalog(catalog)
 		self:_refreshStateForItem(item)
 	end
 
-	for _, item in ipairs(catalog.featuredOffers or {}) do
+	local function registerItemAndVariants(item)
 		register(item)
+		for _, variant in ipairs(item and item.variants or {}) do
+			register(copyOfferForState(variant, item))
+		end
+	end
+
+	for _, item in ipairs(catalog.featuredOffers or {}) do
+		registerItemAndVariants(item)
 	end
 
 	for _, section in ipairs(catalog.featuredSections or {}) do
 		for _, item in ipairs(section.items or {}) do
-			register(item)
+			registerItemAndVariants(item)
 		end
 	end
 
 	for _, section in ipairs(catalog.sections or {}) do
 		for _, item in ipairs(section.items or {}) do
-			register(item)
+			registerItemAndVariants(item)
 		end
 	end
 
@@ -396,7 +478,10 @@ end
 function PurchaseAdapter:refreshOwnership()
 	for _, item in pairs(self._catalogItems) do
 		local purchase = item.purchase
-		if purchase and purchase.kind == "gamepass" then
+		if purchase and (
+			purchase.kind == "gamepass"
+			or (purchase.kind == "product" and (purchase.oneTime == true or purchase.OneTime == true))
+		) then
 			self:_refreshStateForItem(item)
 		end
 	end
@@ -407,11 +492,20 @@ end
 function PurchaseAdapter:getViewModel(item)
 	local model = copyTable(item)
 	model.purchaseState = copyTable(self:_getState(item))
+	if typeof(item.variants) == "table" then
+		model.variants = {}
+		for index, variant in ipairs(item.variants) do
+			local variantModel = copyOfferForState(variant, item)
+			variantModel.purchaseState = copyTable(self:_getState(variantModel))
+			model.variants[index] = variantModel
+		end
+	end
 	return model
 end
 
-function PurchaseAdapter:requestPurchase(item)
-	local purchase = item and item.purchase
+function PurchaseAdapter:requestPurchase(item, selectedVariant)
+	local offer = if selectedVariant ~= nil then copyOfferForState(selectedVariant, item) else item
+	local purchase = offer and offer.purchase
 	if not purchase then
 		return false, "This offer is missing purchase metadata."
 	end
@@ -429,7 +523,7 @@ function PurchaseAdapter:requestPurchase(item)
 		end
 		warn(string.format(
 			"[PurchaseAdapter] Blocked disabled/non-GTR purchase prompt item=%s kind=%s id=%s status=%s reason=%s",
-			tostring(item.id or item.title or "<unknown>"),
+			tostring(offer.id or item.id or item.title or "<unknown>"),
 			tostring(purchase.kind),
 			tostring(purchase.id),
 			tostring(status),
@@ -438,13 +532,14 @@ function PurchaseAdapter:requestPurchase(item)
 		return false, MonetizationConfig.UnavailableMessage
 	end
 
-	local requiresPaidRandomPolicy = MonetizationConfig.ItemRequiresPaidRandomItemPolicy(item)
+	local requiresPaidRandomPolicy = MonetizationConfig.ItemRequiresPaidRandomItemPolicy(offer)
+		or MonetizationConfig.ItemRequiresPaidRandomItemPolicy(item)
 	if requiresPaidRandomPolicy and self._paidRandomPolicyState.CanUsePaidRandomItems ~= true then
 		self:_requestPaidRandomPolicyState()
 		return false, getPaidRandomUnavailableMessage(self._paidRandomPolicyState)
 	end
 
-	local state = self:_getState(item)
+	local state = self:_getState(offer)
 	if state.isOwned then
 		return false, item.title .. " is already unlocked."
 	end
@@ -469,6 +564,30 @@ function PurchaseAdapter:requestPurchase(item)
 				return true, nil
 			end
 			return false, getPaidRandomUnavailableMessage(self._paidRandomPolicyState)
+		end
+
+		return false, "The Roblox purchase prompt could not be opened."
+	end
+
+	if purchase.kind == "product" and (purchase.oneTime == true or purchase.OneTime == true) then
+		local remote = self:_getShopProductPromptRequest()
+		if not remote then
+			return false, "Purchase availability could not be verified."
+		end
+
+		local ok, response = pcall(function()
+			return remote:InvokeServer(purchase.id)
+		end)
+
+		if ok and typeof(response) == "table" then
+			if response.ok == true then
+				return true, nil
+			end
+			if response.error == "already_owned" then
+				self:refreshOwnership()
+				return false, item.title .. " is already unlocked."
+			end
+			return false, MonetizationConfig.UnavailableMessage
 		end
 
 		return false, "The Roblox purchase prompt could not be opened."

@@ -15,7 +15,7 @@ local ClientRuntime = {
 
 local React, ReactRoblox, App, Responsive
 local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewQuickSlotConfig
-local ChestUtils, ChestDropRates, Titles, Economy, CurrencyUtil
+local ChestUtils, ChestDropRates, Titles, Economy, CurrencyUtil, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
 
@@ -39,6 +39,7 @@ do
 	Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 	Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 	CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+	PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 	ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
 	RebirthConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Rebirths"))
@@ -130,6 +131,12 @@ ClientRuntime.ShipUpgradeResultRemote = ClientRuntime.waitForOptionalChild(
 	"RemoteEvent",
 	ClientRuntime.OptionalRemoteWaitSeconds
 )
+ClientRuntime.CrewProtectionActionRemote = ClientRuntime.waitForOptionalChild(
+	ClientRuntime.RemotesFolder,
+	"CrewProtectionActionRequest",
+	"RemoteFunction",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
 
 function ClientRuntime.getEquipRemote()
 	if ClientRuntime.EquipRemote and ClientRuntime.EquipRemote:IsA("RemoteEvent") then
@@ -151,6 +158,21 @@ function ClientRuntime.fireEquipRequest(kind, name)
 	end
 
 	remote:FireServer(kind, name)
+end
+
+function ClientRuntime.getCrewProtectionActionRemote()
+	if ClientRuntime.CrewProtectionActionRemote and ClientRuntime.CrewProtectionActionRemote:IsA("RemoteFunction") then
+		return ClientRuntime.CrewProtectionActionRemote
+	end
+
+	local remotesFolder = ClientRuntime.findOptionalChild(ReplicatedStorage, "Remotes", "Folder")
+	if remotesFolder then
+		ClientRuntime.RemotesFolder = remotesFolder
+		ClientRuntime.CrewProtectionActionRemote =
+			ClientRuntime.findOptionalChild(remotesFolder, "CrewProtectionActionRequest", "RemoteFunction")
+	end
+
+	return ClientRuntime.CrewProtectionActionRemote
 end
 
 local root
@@ -437,6 +459,8 @@ local uiState = {
 }
 local chestOpenPrompt = nil
 local chestDropRatesPrompt = nil
+local crewProtectionPending = false
+local crewProtectionFeedback = nil
 
 local cleanupConnections = {}
 local characterConnections = {}
@@ -496,6 +520,16 @@ end
 
 local function formatIncomeNumber(value)
 	return CurrencyUtil.formatCurrency(value)
+end
+
+local function formatDuration(seconds)
+	local totalSeconds = math.max(0, math.floor(tonumber(seconds) or 0))
+	local hours = math.floor(totalSeconds / 3600)
+	local minutes = math.floor((totalSeconds % 3600) / 60)
+	if hours > 0 then
+		return string.format("%dh %02dm", hours, minutes)
+	end
+	return string.format("%dm", minutes)
 end
 
 local function formatMultiplier(value)
@@ -1941,6 +1975,98 @@ local function firstCaptainField(parent, fieldNames)
 	return ""
 end
 
+local function readNumberValue(parent, childName, fallback)
+	local value = readChildValue(parent, childName)
+	return math.max(0, math.floor(tonumber(value) or tonumber(fallback) or 0))
+end
+
+local function readCrewProtectionData()
+	local protectionFolder = player:FindFirstChild("CrewProtection")
+	local totalStatsFolder = player:FindFirstChild("TotalStats")
+	local timePlayed = readNumberValue(totalStatsFolder, "TimePlayed", 0)
+	local permanentAssignments = {}
+	local permanentAssignmentsByInstanceId = {}
+	local permanentAssignedCount = 0
+	local crewShieldsByInstanceId = {}
+	local fleetShieldRemaining = 0
+	local fleetShieldExpiresAt = 0
+	local fleetShieldPausedRemaining = 0
+	local fleetShieldEnabled = true
+
+	if protectionFolder then
+		local assignmentsFolder = protectionFolder:FindFirstChild("PermanentAssignments")
+		if assignmentsFolder and assignmentsFolder:IsA("Folder") then
+			for _, child in ipairs(assignmentsFolder:GetChildren()) do
+				local assignedInstanceId = if child:IsA("ValueBase") then tostring(child.Value or "") else ""
+				if assignedInstanceId ~= "" then
+					permanentAssignments[child.Name] = assignedInstanceId
+					permanentAssignmentsByInstanceId[assignedInstanceId] = child.Name
+					permanentAssignedCount += 1
+				end
+			end
+		end
+
+		local crewShieldsFolder = protectionFolder:FindFirstChild("CrewShields")
+		local byInstanceFolder = crewShieldsFolder and crewShieldsFolder:FindFirstChild("ByInstanceId")
+		if byInstanceFolder and byInstanceFolder:IsA("Folder") then
+			for _, shieldFolder in ipairs(byInstanceFolder:GetChildren()) do
+				if shieldFolder:IsA("Folder") then
+					local expiresAt = tonumber(readChildValue(shieldFolder, "ExpiresAtPlayTime")) or 0
+					local remaining = math.max(0, math.floor(expiresAt - timePlayed))
+					if remaining > 0 then
+						crewShieldsByInstanceId[tostring(shieldFolder.Name)] = {
+							remainingSeconds = remaining,
+							expiresAtPlayTime = expiresAt,
+						}
+					end
+				end
+			end
+		end
+
+		local fleetShieldFolder = protectionFolder:FindFirstChild("FleetShield")
+		fleetShieldExpiresAt = tonumber(readChildValue(fleetShieldFolder, "ExpiresAtPlayTime")) or 0
+		fleetShieldPausedRemaining = readNumberValue(fleetShieldFolder, "PausedRemainingSeconds", 0)
+		local enabledValue = readChildValue(fleetShieldFolder, "Enabled")
+		fleetShieldEnabled = enabledValue ~= false
+		fleetShieldRemaining = if fleetShieldEnabled then math.max(0, math.floor(fleetShieldExpiresAt - timePlayed)) else 0
+	end
+
+	local permanentSlotsOwned = readNumberValue(protectionFolder, "PermanentSlotsOwned", 0)
+	local fleetShieldPaused = fleetShieldEnabled == false and fleetShieldPausedRemaining > 0
+	local fleetShieldActive = fleetShieldRemaining > 0
+
+	return {
+		shieldTokens = readNumberValue(protectionFolder, "ShieldTokens", 0),
+		fleetShieldTokens = readNumberValue(protectionFolder, "FleetShieldTokens", 0),
+		permanentSlotsOwned = permanentSlotsOwned,
+		permanentSlotsAvailable = math.max(0, permanentSlotsOwned - permanentAssignedCount),
+		permanentAssignments = permanentAssignments,
+		permanentAssignmentsByInstanceId = permanentAssignmentsByInstanceId,
+		crewShieldsByInstanceId = crewShieldsByInstanceId,
+		fleetShield = {
+			active = fleetShieldActive,
+			enabled = fleetShieldEnabled,
+			paused = fleetShieldPaused,
+			remainingSeconds = fleetShieldRemaining,
+			pausedRemainingSeconds = fleetShieldPausedRemaining,
+			expiresAtPlayTime = fleetShieldExpiresAt,
+			statusLabel = if fleetShieldActive then "ACTIVE" else "OFF",
+			remainingLabel = if fleetShieldActive then formatDuration(fleetShieldRemaining) else "Not Running",
+			buttonText = if fleetShieldActive
+				then "TURN OFF"
+				elseif fleetShieldPaused or readNumberValue(protectionFolder, "FleetShieldTokens", 0) > 0
+					then "TURN ON"
+					else "NO FLEET SHIELDS",
+			actionName = if fleetShieldActive
+				then "PauseFleetShield"
+				elseif fleetShieldPaused
+					then "ResumeFleetShield"
+					else "ActivateFleetShield",
+		},
+		timePlayed = timePlayed,
+	}
+end
+
 local function getCrewInventoryInstanceFolder(instanceId)
 	instanceId = tostring(instanceId or "")
 	if instanceId == "" then
@@ -1993,7 +2119,7 @@ end
 
 local function buildCaptainLogEntry(shipFolder)
 	local captainSlot = shipFolder and shipFolder:FindFirstChild("CaptainSlot")
-	local crewMemberName, _, captainLevel = getCaptainLogAssignment(captainSlot)
+	local crewMemberName, captainInstanceId, captainLevel = getCaptainLogAssignment(captainSlot)
 	if crewMemberName == "" then
 		return nil, 0
 	end
@@ -2023,6 +2149,7 @@ local function buildCaptainLogEntry(shipFolder)
 
 	return {
 		key = "Captain",
+		instanceId = captainInstanceId,
 		standName = "Captain's Spot",
 		crewMemberName = crewMemberName,
 		displayName = displayName,
@@ -2098,6 +2225,7 @@ local function buildCaptainLogEntryFromSnapshotRow(row)
 	end
 
 	local standLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or 1))
+	local instanceId = tostring(row.CrewMemberInstanceId or row.InstanceId or row.CrewInstanceId or "")
 	local claimReadyAmount = math.max(0, math.floor(tonumber(row.ClaimReadyAmount) or 0))
 	local incomePerTick = math.max(0, tonumber(row.IncomePerSecond) or 0)
 	local subtitle = getSubtitle(CREW_ITEM_KIND, crewMemberName)
@@ -2126,6 +2254,7 @@ local function buildCaptainLogEntryFromSnapshotRow(row)
 
 	return {
 		key = key,
+		instanceId = instanceId,
 		standName = standName,
 		crewMemberName = crewMemberName,
 		displayName = displayName,
@@ -2235,6 +2364,13 @@ local function buildCaptainLogData(query)
 			end
 
 			local standLevel = getCrewMemberLevelForStand(standName)
+			local instanceId = tostring(
+				readChildValue(standIncomeFolder, "CrewMemberInstanceId")
+					or readChildValue(slotFolder, "CrewMemberInstanceId")
+					or readChildValue(slotFolder, "InstanceId")
+					or readChildValue(slotFolder, "CrewInstanceId")
+					or ""
+			)
 			local rawIncomeToCollect = math.max(0, tonumber(readChildValue(standIncomeFolder, "IncomeToCollect")) or 0)
 			local incomeSnapshot = getStandIncomeSnapshot(standName)
 			local incomePerTick = math.max(0, tonumber(incomeSnapshot and incomeSnapshot.IncomePerSecond) or 0)
@@ -2263,6 +2399,7 @@ local function buildCaptainLogData(query)
 
 			local nextEntry = {
 				key = standName,
+				instanceId = instanceId,
 				standName = standName,
 				crewMemberName = crewMemberName,
 				displayName = displayName,
@@ -2312,6 +2449,311 @@ local function buildCaptainLogData(query)
 		totalCount = totalPlaced,
 		totalsScope = "all",
 		source = "fallback",
+	}
+end
+
+local function buildPlacedCrewMap()
+	local placedByInstanceId = {}
+	refreshIncomeStatusDisplayMetadata("crew_management", isIncomeStatusIncomeSnapshotStale())
+
+	local captainLogSnapshot = getCaptainLogSnapshot()
+	if captainLogSnapshot then
+		for _, row in ipairs(captainLogSnapshot.Rows or {}) do
+			if typeof(row) == "table" then
+				local instanceId = tostring(row.CrewMemberInstanceId or row.InstanceId or row.CrewInstanceId or "")
+				if instanceId ~= "" then
+					local entry = buildCaptainLogEntryFromSnapshotRow(row)
+					if entry then
+						placedByInstanceId[instanceId] = entry
+					end
+				end
+			end
+		end
+	else
+		local captainLogData = buildCaptainLogData("")
+		for _, entry in ipairs(captainLogData.entries or {}) do
+			local instanceId = tostring(entry.instanceId or "")
+			if instanceId ~= "" then
+				placedByInstanceId[instanceId] = entry
+			end
+		end
+	end
+
+	return placedByInstanceId
+end
+
+local function resolveCrewProtectionStatus(instanceId, isPlaced, protectionData)
+	instanceId = tostring(instanceId or "")
+	protectionData = protectionData or readCrewProtectionData()
+	if instanceId ~= "" and protectionData.permanentAssignmentsByInstanceId[instanceId] ~= nil then
+		return {
+			key = "permanent",
+			label = "PERMANENTLY PROTECTED",
+			statusLabel = "PERMANENTLY PROTECTED",
+			detail = "CANNOT BE STOLEN",
+			detailLabel = "CANNOT BE STOLEN  |  Permanent Slot",
+			badge = "Permanent Slot",
+			remainingSeconds = math.huge,
+		}
+	end
+
+	if isPlaced == true and protectionData.fleetShield.active == true then
+		return {
+			key = "fleet",
+			label = "Fleet Shield Active",
+			statusLabel = "Fleet Shield Active",
+			detail = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
+			detailLabel = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
+			remainingSeconds = protectionData.fleetShield.remainingSeconds,
+		}
+	end
+
+	local crewShield = if instanceId ~= "" then protectionData.crewShieldsByInstanceId[instanceId] else nil
+	if crewShield then
+		return {
+			key = "crew",
+			label = "Crew Shield Active",
+			statusLabel = "Crew Shield Active",
+			detail = formatDuration(crewShield.remainingSeconds) .. " remaining",
+			detailLabel = formatDuration(crewShield.remainingSeconds) .. " remaining",
+			remainingSeconds = crewShield.remainingSeconds,
+		}
+	end
+
+	return {
+		key = "none",
+		label = "Not Protected",
+		statusLabel = "Not Protected",
+		detail = "Use a shield or permanent slot",
+		detailLabel = "Use a shield or permanent slot",
+		remainingSeconds = 0,
+	}
+end
+
+local function makeCrewManagementEntry(instanceId, crewMemberName, level, assignedStand, state, placedData, protectionData)
+	instanceId = tostring(instanceId or "")
+	crewMemberName = tostring(crewMemberName or "")
+	if instanceId == "" or crewMemberName == "" then
+		return nil
+	end
+
+	state = state or {}
+	level = math.max(1, math.floor(tonumber(level) or tonumber(state.level) or 1))
+	assignedStand = tostring(assignedStand or state.assignedStand or "")
+	local isPlaced = assignedStand ~= "" or placedData ~= nil
+	local standName = if placedData and tostring(placedData.standName or "") ~= ""
+		then tostring(placedData.standName)
+		elseif assignedStand == "Captain"
+			then "Captain's Spot"
+		elseif assignedStand ~= ""
+			then assignedStand
+		else "Unplaced"
+	local displayName = getDisplayName(CREW_ITEM_KIND, crewMemberName, state)
+	local subtitle = getSubtitle(CREW_ITEM_KIND, crewMemberName, state)
+	local modelPreview = getCrewModelPreviewDescriptor(crewMemberName, state)
+	local previewKind = nil
+	local previewName = nil
+	if modelPreview then
+		previewKind = CREW_ITEM_KIND
+		previewName = tostring(modelPreview.ModelName or "")
+	end
+	local staticPreviewImage = getStaticCrewPreviewImage(crewMemberName, state, modelPreview, displayName)
+	local collectable = math.max(0, math.floor(tonumber(placedData and placedData.collectable) or 0))
+	local incomePerTick = math.max(0, tonumber(placedData and placedData.incomePerTick) or 0)
+	local protection = resolveCrewProtectionStatus(instanceId, isPlaced, protectionData)
+	local canApplyCrewShield = protection.key == "none"
+		and protectionData.shieldTokens > 0
+		and instanceId ~= ""
+	local canApplyPermanentSlot = protection.key == "none"
+		and protectionData.permanentSlotsAvailable > 0
+		and instanceId ~= ""
+	local crewShieldButtonText = "Apply Shield"
+	local permanentButtonText = "Apply Permanent"
+	local crewShieldDisabledReason = ""
+	local permanentDisabledReason = ""
+
+	if protection.key == "fleet" then
+		crewShieldButtonText = "Fleet Active"
+		permanentButtonText = "Fleet Active"
+		crewShieldDisabledReason = "fleet_active"
+		permanentDisabledReason = "fleet_active"
+	elseif protection.key ~= "none" then
+		crewShieldButtonText = "Protected"
+		permanentButtonText = "Protected"
+		crewShieldDisabledReason = "protected"
+		permanentDisabledReason = "protected"
+	else
+		if protectionData.shieldTokens <= 0 then
+			crewShieldButtonText = "No Shields"
+			crewShieldDisabledReason = "no_shields"
+		end
+		if protectionData.permanentSlotsAvailable <= 0 then
+			permanentButtonText = "No Slots"
+			permanentDisabledReason = "no_slots"
+		end
+	end
+
+	return {
+		key = instanceId,
+		instanceId = instanceId,
+		crewMemberName = crewMemberName,
+		displayName = displayName,
+		subtitle = subtitle,
+		footer = if isPlaced
+			then string.format("%s  |  %s ready", standName, formatIncomeNumber(collectable))
+			else "Owned crewmate",
+		description = table.concat({ displayName, subtitle, standName, protection.label }, " "),
+		image = getIcon(CREW_ITEM_KIND, crewMemberName, state),
+		fallbackText = string.sub(string.upper(displayName), 1, 2),
+		previewKind = previewKind,
+		previewName = previewName,
+		staticPreviewImage = staticPreviewImage,
+		modelPreview = modelPreview,
+		accentColor = getAccentColor(CREW_ITEM_KIND, crewMemberName, state),
+		level = level,
+		bounty = math.max(0, BountyResolver.ResolveCrewMemberBounty({
+			StorageName = crewMemberName,
+			Level = level,
+		})),
+		incomePerTick = incomePerTick,
+		collectable = collectable,
+		standName = standName,
+		assignedStand = assignedStand,
+		isPlaced = isPlaced,
+		protection = protection,
+		canApplyCrewShield = canApplyCrewShield,
+		canApplyPermanentSlot = canApplyPermanentSlot,
+		crewShieldButtonText = crewShieldButtonText,
+		permanentButtonText = permanentButtonText,
+		crewShieldDisabledReason = crewShieldDisabledReason,
+		permanentDisabledReason = permanentDisabledReason,
+		disabledReason = crewShieldDisabledReason ~= "" and crewShieldDisabledReason or permanentDisabledReason,
+	}
+end
+
+local function buildCrewManagementData(query)
+	local protectionData = readCrewProtectionData()
+	local placedByInstanceId = buildPlacedCrewMap()
+	local entries = {}
+	local totalCount = 0
+	local seenInstanceIds = {}
+	local inventoryFolder = player:FindFirstChild("CrewMemberInventory")
+	local byIdFolder = inventoryFolder and inventoryFolder:FindFirstChild("ById")
+
+	if byIdFolder and byIdFolder:IsA("Folder") then
+		for _, instanceFolder in ipairs(byIdFolder:GetChildren()) do
+			if instanceFolder:IsA("Folder") then
+				local instanceId = tostring(instanceFolder.Name)
+				local crewMemberName = firstCaptainField(instanceFolder, {
+					"StorageName",
+					"CrewMemberId",
+					"CrewMemberName",
+					"LegacyStorageName",
+					"BaseName",
+				})
+				local state = {
+					displayName = tostring(readValueOrAttribute(instanceFolder, "DisplayName") or ""),
+					rarity = tostring(readValueOrAttribute(instanceFolder, "Rarity") or ""),
+					modelName = tostring(readValueOrAttribute(instanceFolder, "ModelName") or ""),
+					render = tostring(readValueOrAttribute(instanceFolder, "Render") or ""),
+					crewMemberId = tostring(readValueOrAttribute(instanceFolder, "CrewMemberId") or crewMemberName),
+					realCharacterName = tostring(readValueOrAttribute(instanceFolder, "RealCharacterName") or ""),
+					level = readValueOrAttribute(instanceFolder, "Level"),
+					assignedStand = tostring(readValueOrAttribute(instanceFolder, "AssignedStand") or ""),
+				}
+				local entry = makeCrewManagementEntry(
+					instanceId,
+					crewMemberName,
+					state.level,
+					state.assignedStand,
+					state,
+					placedByInstanceId[instanceId],
+					protectionData
+				)
+				if entry then
+					totalCount += 1
+					seenInstanceIds[instanceId] = true
+					if matchesQuery(entry, query) then
+						entries[#entries + 1] = entry
+					end
+				end
+			end
+		end
+	end
+
+	for _, state in pairs(itemState) do
+		if state and isCrewItemKind(state.kind) and typeof(state.instanceIds) == "table" then
+			for _, rawInstanceId in ipairs(state.instanceIds) do
+				local instanceId = tostring(rawInstanceId or "")
+				if instanceId ~= "" and seenInstanceIds[instanceId] ~= true then
+					local entry = makeCrewManagementEntry(
+						instanceId,
+						state.name,
+						state.level,
+						"",
+						state,
+						placedByInstanceId[instanceId],
+						protectionData
+					)
+					if entry then
+						totalCount += 1
+						seenInstanceIds[instanceId] = true
+						if matchesQuery(entry, query) then
+							entries[#entries + 1] = entry
+						end
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(entries, function(a, b)
+		if a.isPlaced ~= b.isPlaced then
+			return a.isPlaced == true
+		end
+		local standA = tonumber(a.assignedStand)
+		local standB = tonumber(b.assignedStand)
+		if standA and standB and standA ~= standB then
+			return standA < standB
+		end
+		local nameA = string.lower(tostring(a.displayName or ""))
+		local nameB = string.lower(tostring(b.displayName or ""))
+		if nameA ~= nameB then
+			return nameA < nameB
+		end
+		return tostring(a.instanceId or "") < tostring(b.instanceId or "")
+	end)
+
+	local fleetShield = {
+		active = protectionData.fleetShield.active == true,
+		enabled = protectionData.fleetShield.enabled == true,
+		paused = protectionData.fleetShield.paused == true,
+		remainingSeconds = protectionData.fleetShield.remainingSeconds or 0,
+		pausedRemainingSeconds = protectionData.fleetShield.pausedRemainingSeconds or 0,
+		expiresAtPlayTime = protectionData.fleetShield.expiresAtPlayTime or 0,
+		statusLabel = protectionData.fleetShield.statusLabel or "OFF",
+		remainingLabel = protectionData.fleetShield.remainingLabel or "Not Running",
+		buttonText = protectionData.fleetShield.buttonText or "NO FLEET SHIELDS",
+		actionName = protectionData.fleetShield.actionName or "ActivateFleetShield",
+		buttonEnabled = protectionData.fleetShield.active == true
+			or protectionData.fleetShield.paused == true
+			or protectionData.fleetShieldTokens > 0,
+		helperText = "Protects ALL placed crewmates",
+	}
+
+	return {
+		entries = entries,
+		filteredCount = #entries,
+		totalCount = totalCount,
+		resources = {
+			crewShields = protectionData.shieldTokens,
+			fleetShields = protectionData.fleetShieldTokens,
+			permanentSlots = protectionData.permanentSlotsAvailable,
+			permanentSlotsOwned = protectionData.permanentSlotsOwned,
+		},
+		fleetShield = fleetShield,
+		pending = crewProtectionPending,
+		feedback = crewProtectionFeedback,
 	}
 end
 
@@ -2567,11 +3009,45 @@ local function buildRenderData()
 		end
 	end
 
+	local crewManagement = {
+		entries = {},
+		filteredCount = 0,
+		totalCount = 0,
+		resources = {
+			crewShields = 0,
+			fleetShields = 0,
+			permanentSlots = 0,
+			permanentSlotsOwned = 0,
+		},
+		fleetShield = {
+			active = false,
+			enabled = true,
+			paused = false,
+			remainingSeconds = 0,
+			pausedRemainingSeconds = 0,
+			statusLabel = "OFF",
+			remainingLabel = "Not Running",
+			buttonText = "NO FLEET SHIELDS",
+			actionName = "ActivateFleetShield",
+			buttonEnabled = false,
+			helperText = "Protects ALL placed crewmates",
+		},
+		pending = crewProtectionPending,
+		feedback = crewProtectionFeedback,
+	}
+	if uiState.activeView == "CrewManagement" then
+		local crewManagementOk, result = pcall(buildCrewManagementData, query)
+		if crewManagementOk and typeof(result) == "table" then
+			crewManagement = result
+		end
+	end
+
 	return {
 		hotbarSlots = hotbarSlots,
 		items = items,
 		categories = categories,
 		captainLog = captainLog,
+		crewManagement = crewManagement,
 		titles = titles,
 		summary = {
 			bounty = bountySummary.total,
@@ -2800,6 +3276,7 @@ local function bindShipDataTracking()
 		CrewMemberIncome = true,
 		Inventory = true,
 		Potions = true,
+		CrewProtection = true,
 		Ship = true,
 		Titles = true,
 		leaderstats = true,
@@ -3024,6 +3501,115 @@ local unregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
 	end,
 })
 
+local function setCrewProtectionFeedback(ok, message)
+	crewProtectionFeedback = {
+		ok = ok == true,
+		message = tostring(message or ""),
+	}
+end
+
+local function showCrewProtectionPopup(message, isError)
+	if not PopUpModule then
+		return
+	end
+	PopUpModule:Local_SendPopUp(
+		tostring(message or "Crew protection updated."),
+		if isError then Color3.fromRGB(255, 104, 104) else Color3.fromRGB(111, 255, 136),
+		Color3.fromRGB(0, 0, 0),
+		3,
+		isError == true
+	)
+end
+
+local function getCrewProtectionActionMessage(actionName, response, displayName)
+	local ok = typeof(response) == "table" and response.Ok == true
+	local code = tostring(if typeof(response) == "table" then response.Code or "" else "")
+	local name = tostring(displayName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if name == "" then
+		name = "this crewmate"
+	end
+
+	if ok then
+		if actionName == "ApplyCrewShield" then
+			return "Crew Shield applied to " .. name
+		elseif actionName == "ApplyPermanentSlot" then
+			return name .. " is now Permanently Protected"
+		elseif actionName == "PauseFleetShield" then
+			return "Fleet Shield paused"
+		elseif actionName == "ActivateFleetShield" or actionName == "ResumeFleetShield" then
+			return "Fleet Shield activated"
+		end
+		return tostring(response.Message or "Crew protection updated.")
+	end
+
+	if code == "no_tokens" then
+		if actionName == "ApplyCrewShield" then
+			return "No Crew Shields left"
+		elseif actionName == "ActivateFleetShield" or actionName == "ResumeFleetShield" then
+			return "No Fleet Shields left"
+		end
+		return "No shields left"
+	elseif code == "no_slots" then
+		return "No Permanent Slots left"
+	elseif code == "already_protected" then
+		return "Already Protected"
+	elseif code == "fleet_already_active" then
+		return "Fleet Shield is already active"
+	elseif code == "fleet_not_active" then
+		return "Fleet Shield is already off"
+	elseif code == "data_unavailable" then
+		return "Crew protection is not ready"
+	elseif code == "invalid_crewmate" then
+		return "That crewmate could not be found"
+	end
+
+	return tostring(if typeof(response) == "table" then response.Message or "Crew protection could not be updated." else "Crew protection could not be updated.")
+end
+
+local function requestCrewProtectionAction(actionName, instanceId, displayName)
+	if crewProtectionPending == true or shipUpgradeModal ~= nil then
+		return
+	end
+
+	local remote = ClientRuntime.getCrewProtectionActionRemote()
+	if not (remote and remote:IsA("RemoteFunction")) then
+		local message = "Crew protection is not ready"
+		setCrewProtectionFeedback(false, message)
+		showCrewProtectionPopup(message, true)
+		render()
+		return
+	end
+
+	crewProtectionPending = true
+	crewProtectionFeedback = nil
+	render()
+
+	task.spawn(function()
+		local ok, response = pcall(function()
+			return remote:InvokeServer(actionName, {
+				CrewMemberInstanceId = tostring(instanceId or ""),
+			})
+		end)
+
+		crewProtectionPending = false
+		if not ok or typeof(response) ~= "table" then
+			local message = "Crew protection could not be updated."
+			setCrewProtectionFeedback(false, message)
+			showCrewProtectionPopup(message, true)
+			scheduleRender()
+			return
+		end
+
+		local message = getCrewProtectionActionMessage(actionName, response, displayName)
+		setCrewProtectionFeedback(response.Ok == true, message)
+		showCrewProtectionPopup(message, response.Ok ~= true)
+		if response.Ok == true then
+			refreshIncomeStatusDisplayMetadata("crew_protection_action", true)
+		end
+		scheduleRender()
+	end)
+end
+
 render = function()
 	local data = buildRenderData()
 	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
@@ -3038,6 +3624,7 @@ render = function()
 			categories = data.categories,
 			items = data.items,
 			captainLog = data.captainLog,
+			crewManagement = data.crewManagement,
 			titles = data.titles,
 			hotbarSlots = data.hotbarSlots,
 			summary = data.summary,
@@ -3076,6 +3663,21 @@ render = function()
 				end
 				uiState.query = nextQuery
 				render()
+			end,
+			onFleetShieldAction = function(actionName)
+				requestCrewProtectionAction(tostring(actionName or "ActivateFleetShield"))
+			end,
+			onApplyCrewShield = function(entry)
+				if typeof(entry) ~= "table" then
+					return
+				end
+				requestCrewProtectionAction("ApplyCrewShield", entry.instanceId, entry.displayName)
+			end,
+			onApplyPermanentSlot = function(entry)
+				if typeof(entry) ~= "table" then
+					return
+				end
+				requestCrewProtectionAction("ApplyPermanentSlot", entry.instanceId, entry.displayName)
 			end,
 			onToggleTitle = function(entry)
 				if shipUpgradeModal ~= nil or typeof(entry) ~= "table" then

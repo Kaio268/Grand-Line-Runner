@@ -9,6 +9,7 @@ local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local DevilFruitInventoryService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitInventoryService"))
 
 local ChestRewardResolver = {}
+local PLAYER_LUCK_MULTIPLIER = 1.25
 
 local function chooseWeightedKey(randomObject, weightTable, orderedKeys)
 	local totalWeight = 0
@@ -436,12 +437,38 @@ local function buildUnownedFruitPool(player, pool)
 	return unownedPool
 end
 
-local function chooseRequestedRarity(randomObject, chestData)
+local function getPlayerLuckMultiplier(player)
+	local potions = player and player:FindFirstChild("Potions")
+	local luckTime = potions and potions:FindFirstChild("xLuckTime")
+	if luckTime and luckTime:IsA("NumberValue") and luckTime.Value > 0 then
+		return PLAYER_LUCK_MULTIPLIER
+	end
+	return 1
+end
+
+local function buildLuckAdjustedFruitWeights(player)
+	local multiplier = getPlayerLuckMultiplier(player)
+	if multiplier <= 1 then
+		return ChestRewards.FruitRarityWeights
+	end
+
+	local adjusted = {}
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		local weight = math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
+		if rarityName ~= "Common" then
+			weight *= multiplier
+		end
+		adjusted[rarityName] = weight
+	end
+	return adjusted
+end
+
+local function chooseRequestedRarity(randomObject, chestData, player)
 	if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit and chestData.FruitRarity ~= nil then
 		return chestData.FruitRarity
 	end
 
-	return chooseWeightedKey(randomObject, ChestRewards.FruitRarityWeights, ChestRewards.FruitRarityOrder)
+	return chooseWeightedKey(randomObject, buildLuckAdjustedFruitWeights(player), ChestRewards.FruitRarityOrder)
 end
 
 local function applyFallbackBeli(dataRoot, chestData, openResult, changedRoots)
@@ -618,7 +645,7 @@ function ChestRewardResolver.Resolve(params)
 		}
 	end
 
-	local requestedRarity = chooseRequestedRarity(randomObject, chestData)
+	local requestedRarity = chooseRequestedRarity(randomObject, chestData, params.Player)
 	local effectiveRarity, pool = resolveEffectiveRarity(requestedRarity, getFruitPoolsByRarity())
 	if effectiveRarity == nil or pool == nil or #pool <= 0 then
 		return {

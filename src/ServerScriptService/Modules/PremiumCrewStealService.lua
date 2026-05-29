@@ -16,6 +16,7 @@ local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("C
 local PremiumCrewStealCooldowns = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealCooldowns"))
 local PremiumCrewStealPricing = require(ServerScriptService.Modules:WaitForChild("PremiumCrewStealPricing"))
 local RaidShieldService = require(ServerScriptService.Modules:WaitForChild("RaidShieldService"))
+local CrewProtectionService = require(ServerScriptService.Modules:WaitForChild("CrewProtectionService"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 local ShipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
@@ -68,6 +69,7 @@ local RETRYABLE_RECEIPT_REASONS = {
 	unsupported_rarity = true,
 	quick_slots_full = true,
 	victim_protected = true,
+	target_protected = true,
 	buyer_victim_cooldown = true,
 	cooldown_persistence_unavailable = true,
 	protection_persistence_unavailable = true,
@@ -401,6 +403,8 @@ local function reasonToMessage(reason, detail)
 		return "Premium steal purchase is still clearing the ship stand. Try again soon."
 	elseif reason == "victim_protected" then
 		return "This player is protected from premium steals."
+	elseif reason == "target_protected" then
+		return "That crewmate is protected from premium steals."
 	elseif reason == "buyer_victim_cooldown" then
 		return getBuyerVictimCooldownMessage(detail and detail.Remaining)
 	elseif reason == "cooldown_persistence_unavailable"
@@ -494,6 +498,18 @@ local function buildSnapshot(buyer, victim, standName, options)
 		}
 	end
 
+	local fleetProtected, fleetRemaining, fleetReason = CrewProtectionService.IsFleetProtected(victim)
+	if fleetProtected == nil then
+		return nil, "protection_persistence_unavailable", {
+			Reason = fleetReason,
+		}
+	end
+	if fleetProtected then
+		return nil, "victim_protected", {
+			Remaining = fleetRemaining,
+		}
+	end
+
 	local cooldownAllowed, cooldownReason, cooldownRemaining =
 		PremiumCrewStealCooldowns.CanSteal(buyer.UserId, victim.UserId)
 	if cooldownAllowed ~= true then
@@ -505,6 +521,18 @@ local function buildSnapshot(buyer, victim, standName, options)
 	local instanceId, instanceData = CrewInstanceService.EnsureStandInstance(victim, normalizedStandName)
 	if typeof(instanceData) ~= "table" then
 		return nil, "empty_stand"
+	end
+	local instanceProtected, instanceProtectedRemaining, instanceProtectionReason =
+		CrewProtectionService.IsInstanceProtected(victim, instanceId)
+	if instanceProtected == nil then
+		return nil, "protection_persistence_unavailable", {
+			Reason = instanceProtectionReason,
+		}
+	end
+	if instanceProtected then
+		return nil, "target_protected", {
+			Remaining = instanceProtectedRemaining,
+		}
 	end
 	if CrewInstanceService.IsTutorialRewardProtected(victim, instanceData) then
 		return nil, "target_protected_tutorial_reward"

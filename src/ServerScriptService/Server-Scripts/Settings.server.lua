@@ -20,10 +20,8 @@ local DataManager = require(game.ServerScriptService.Data:WaitForChild("DataMana
 local PlayerMovementSpeedService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("PlayerMovementSpeedService"))
 local RaidShieldService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RaidShieldService"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
-local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local DEBUG_SETTINGS_SERVER = true
 local SPEED_SETTING_NAME = "Speed"
-local PREMIUM_STEAL_PROTECTION_SETTING_NAME = "PremiumStealProtection"
 local SELECTED_SPEED_PATH = "Settings.SelectedSpeed"
 local SPEED_AUTO_MAX_PATH = "Settings.SpeedAutoMax"
 local speedConnectionsByPlayer = {}
@@ -163,26 +161,6 @@ Remote.OnServerEvent:Connect(function(player, settingName, settingPath, value)
 	end
 	if entry.Path ~= settingPath then
 		debugSettings("reject reason=path_mismatch expected=%s actual=%s", tostring(entry.Path), tostring(settingPath))
-		return
-	end
-
-	if settingName == PREMIUM_STEAL_PROTECTION_SETTING_NAME then
-		if typeof(value) ~= "boolean" then
-			debugSettings("reject reason=bad_boolean value=%s", tostring(value))
-			return
-		end
-		local ok, reasonOrState, state = RaidShieldService.SetEnabled(player, value, "legacy_settings_update")
-		if ok ~= true then
-			PopUpModule:Server_SendPopUp(
-				player,
-				RaidShieldService.GetDenialMessage(reasonOrState, state),
-				Color3.fromRGB(255, 104, 104),
-				Color3.fromRGB(0, 0, 0),
-				3,
-				true
-			)
-			debugSettings("reject reason=%s value=%s", tostring(reasonOrState), tostring(value))
-		end
 		return
 	end
 

@@ -88,6 +88,16 @@ local function formatLeaderboardRank(rank)
 	return "Unranked"
 end
 
+local function formatDuration(seconds)
+	local totalSeconds = math.max(0, math.floor(tonumber(seconds) or 0))
+	local hours = math.floor(totalSeconds / 3600)
+	local minutes = math.floor((totalSeconds % 3600) / 60)
+	if hours > 0 then
+		return string.format("%dh %02dm", hours, minutes)
+	end
+	return string.format("%dm", minutes)
+end
+
 local function initials(text)
 	local letters = {}
 	for token in string.gmatch(tostring(text or ""), "%S+") do
@@ -2356,6 +2366,496 @@ local function captainsLogRow(props)
 	})
 end
 
+local function crewProtectionActionButton(props)
+	local enabled = props.enabled == true
+	local accent = props.accentColor or PALETTE.Sea
+	local hovered, pressed, handlers, hoverRef = useInteractiveState(enabled)
+	local fill = if enabled then accent else (props.disabledColor or Color3.fromRGB(54, 62, 78))
+	local textColor = if enabled then PALETTE.Ink else (props.disabledTextColor or Color3.fromRGB(214, 220, 232))
+
+	return e("TextButton", mergeProps({
+		AnchorPoint = props.anchorPoint or Vector2.new(0, 0),
+		AutoButtonColor = false,
+		BackgroundColor3 = fill,
+		BackgroundTransparency = enabled and 0.02 or 0.28,
+		BorderSizePixel = 0,
+		Position = props.position or UDim2.new(),
+		ref = hoverRef,
+		Size = props.size or UDim2.fromOffset(112, 30),
+		Text = tostring(props.text or ""),
+		TextColor3 = textColor,
+		TextSize = props.textSize or 11,
+		TextWrapped = true,
+		Font = Enum.Font.GothamBold,
+		ZIndex = props.zIndex or 4,
+		[React.Event.Activated] = if enabled then props.onActivated else nil,
+	}, handlers), {
+		Scale = e("UIScale", {
+			Scale = (hovered and 1.02 or 1) - (pressed and 0.018 or 0),
+		}),
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 9),
+		}),
+		Stroke = e("UIStroke", {
+			Color = enabled and PALETTE.Cream or Color3.fromRGB(105, 118, 141),
+			Transparency = enabled and 0.78 or 0.44,
+			Thickness = 1,
+		}),
+	})
+end
+
+local function crewManagementRow(props)
+	local entry = props.entry or {}
+	local protection = entry.protection or {}
+	local pending = props.pending == true
+	local accent = entry.accentColor or PALETTE.Sea
+	local protectionKey = tostring(protection.key or "none")
+	local permanent = protectionKey == "permanent"
+	local statusAccent = if permanent
+		then PALETTE.Violet:Lerp(PALETTE.Gold, 0.34)
+		elseif protectionKey == "crew"
+			then PALETTE.Green
+		elseif protectionKey == "fleet"
+			then PALETTE.Cyan
+		else PALETTE.Steel
+	local statusText = tostring(protection.statusLabel or protection.label or "Not Protected")
+	local detailText = tostring(protection.detailLabel or protection.detail or "")
+	if detailText == "" and (protectionKey == "crew" or protectionKey == "fleet") then
+		local remaining = tonumber(protection.remainingSeconds) or 0
+		if remaining > 0 then
+			detailText = string.format("%s remaining", formatDuration(remaining))
+		end
+	elseif detailText == "" and permanent then
+		detailText = "CANNOT BE STOLEN  |  Permanent Slot"
+	end
+
+	local hasViewportPreview = entry.previewKind ~= nil
+		and tostring(entry.previewKind) ~= ""
+		and entry.previewName ~= nil
+		and tostring(entry.previewName) ~= ""
+	local staticPreviewImage = getStaticCrewPreviewImage(entry)
+	local previewChild
+	if staticPreviewImage ~= "" then
+		previewChild = staticCrewPreviewImage(staticPreviewImage, {
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromScale(1, 1),
+			zIndex = 3,
+		})
+	elseif hasViewportPreview then
+		previewChild = e(PreviewViewport, {
+			previewKind = entry.previewKind,
+			previewName = entry.previewName,
+			position = UDim2.fromScale(0.5, 0.5),
+			size = UDim2.fromOffset(76, 76),
+			zIndex = 3,
+			fieldOfView = 34,
+		})
+	else
+		previewChild = e("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.new(1, -10, 1, -10),
+			Text = entry.fallbackText or initials(entry.displayName),
+			TextColor3 = PALETTE.Cream,
+			TextSize = 20,
+			ZIndex = 3,
+		})
+	end
+
+	local crewEnabled = entry.canApplyCrewShield == true and not pending
+	local permanentEnabled = entry.canApplyPermanentSlot == true and not pending
+	local crewButtonText = if pending then "Working..." else tostring(entry.crewShieldButtonText or "Apply Shield")
+	local permanentButtonText = if pending then "Working..." else tostring(entry.permanentButtonText or "Apply Permanent")
+
+	return e("Frame", {
+		BackgroundColor3 = permanent and Color3.fromRGB(35, 24, 58) or Color3.fromRGB(16, 22, 35),
+		BackgroundTransparency = permanent and 0 or 0.02,
+		BorderSizePixel = 0,
+		LayoutOrder = props.layoutOrder or 0,
+		Size = UDim2.new(1, -6, 0, 132),
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 12),
+		}),
+		Stroke = e("UIStroke", {
+			Color = permanent and statusAccent or accent,
+			Transparency = permanent and 0.02 or 0.16,
+			Thickness = permanent and 2.35 or 1.35,
+		}),
+		Glow = e("UIStroke", {
+			Color = statusAccent,
+			Transparency = permanent and 0.74 or 0.93,
+			Thickness = permanent and 4 or 2,
+		}),
+		Accent = e("Frame", {
+			BackgroundColor3 = permanent and statusAccent or accent,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.new(0, 5, 1, 0),
+			ZIndex = 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 12),
+			}),
+		}),
+		PreviewPlate = e("Frame", {
+			BackgroundColor3 = accent:Lerp(Color3.fromRGB(59, 63, 78), 0.9),
+			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			Position = UDim2.fromOffset(16, 14),
+			Size = UDim2.fromOffset(76, 78),
+			ZIndex = 2,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = 0.42,
+				Thickness = 1,
+			}),
+			Preview = previewChild,
+		}),
+		Name = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Cartoon,
+			Position = UDim2.fromOffset(106, 10),
+			Size = UDim2.new(1, -390, 0, 28),
+			Text = entry.displayName or "",
+			TextColor3 = PALETTE.Cream,
+			TextSize = 24,
+			TextStrokeTransparency = 0.62,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		Subtitle = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Gotham,
+			Position = UDim2.fromOffset(108, 38),
+			Size = UDim2.new(1, -410, 0, 18),
+			Text = string.format("%s  |  %s", tostring(entry.subtitle or "Crewmate"), tostring(entry.standName or "Owned")),
+			TextColor3 = Color3.fromRGB(181, 191, 210),
+			TextSize = 12,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		Footer = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(108, 58),
+			Size = UDim2.new(1, -410, 0, 16),
+			Text = string.format(
+				"Bounty: %s  |  %s",
+				formatNumber(entry.bounty or 0),
+				if entry.isPlaced then (CurrencyUtil.formatCurrency(entry.collectable or 0) .. " ready") else "not placed"
+			),
+			TextColor3 = accent,
+			TextSize = 12,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}),
+		StatusBadge = e("Frame", {
+			BackgroundColor3 = statusAccent,
+			BackgroundTransparency = protectionKey == "none" and 0.54 or 0.04,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(108, 80),
+			Size = UDim2.fromOffset(permanent and 248 or 194, 28),
+			ZIndex = 3,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Stroke = e("UIStroke", {
+				Color = permanent and PALETTE.Gold or statusAccent,
+				Transparency = permanent and 0.16 or 0.42,
+				Thickness = 1,
+			}),
+			Label = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(10, 0),
+				Size = UDim2.new(1, -20, 1, 0),
+				Text = statusText,
+				TextColor3 = protectionKey == "none" and PALETTE.Cream or PALETTE.Ink,
+				TextSize = permanent and 13 or 12,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 4,
+			}),
+		}),
+		StatusDetail = detailText ~= "" and e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = permanent and Enum.Font.GothamBold or Enum.Font.Gotham,
+			Position = UDim2.fromOffset(108, 108),
+			Size = UDim2.new(1, -430, 0, 18),
+			Text = detailText,
+			TextColor3 = permanent and PALETTE.Gold or INVENTORY_UI.TextMuted,
+			TextSize = permanent and 12 or 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 3,
+		}) or nil,
+		IncomeLabel = e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(1, -18, 0, 14),
+			Size = UDim2.fromOffset(160, 14),
+			Text = if entry.isPlaced then "Making" else "Status",
+			TextColor3 = PALETTE.Muted,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 3,
+		}),
+		IncomeValue = e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Cartoon,
+			Position = UDim2.new(1, -18, 0, 31),
+			Size = UDim2.fromOffset(190, 30),
+			Text = if entry.isPlaced then formatRateNumber(entry.incomePerTick or 0) else "Owned",
+			TextColor3 = PALETTE.Cream,
+			TextSize = 24,
+			TextStrokeTransparency = 0.58,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 3,
+		}),
+		CrewShieldButton = e(crewProtectionActionButton, {
+			anchorPoint = Vector2.new(1, 0),
+			position = UDim2.new(1, -166, 0, 88),
+			size = UDim2.fromOffset(140, 32),
+			text = crewButtonText,
+			accentColor = PALETTE.Green,
+			disabledColor = Color3.fromRGB(64, 72, 88),
+			textSize = 10,
+			enabled = crewEnabled,
+			zIndex = 4,
+			onActivated = function()
+				if props.onApplyCrewShield then
+					props.onApplyCrewShield(entry)
+				end
+			end,
+		}),
+		PermanentButton = e(crewProtectionActionButton, {
+			anchorPoint = Vector2.new(1, 0),
+			position = UDim2.new(1, -18, 0, 88),
+			size = UDim2.fromOffset(140, 32),
+			text = permanentButtonText,
+			accentColor = PALETTE.Violet:Lerp(PALETTE.Gold, 0.34),
+			disabledColor = Color3.fromRGB(64, 72, 88),
+			textSize = 10,
+			enabled = permanentEnabled,
+			zIndex = 4,
+			onActivated = function()
+				if props.onApplyPermanentSlot then
+					props.onApplyPermanentSlot(entry)
+				end
+			end,
+		}),
+	})
+end
+
+local function crewManagementSummary(props)
+	local data = props.data or {}
+	local resources = data.resources or {}
+	local fleetShield = data.fleetShield or {}
+	local feedback = data.feedback
+	local pending = data.pending == true
+	local active = fleetShield.active == true
+	local defaultStatusText = if active then "ACTIVE" else "OFF"
+	local defaultRemainingText = if active then formatDuration(fleetShield.remainingSeconds or 0) else "Not Running"
+	local defaultFleetButtonText = if active then "TURN OFF" else "NO FLEET SHIELDS"
+	local defaultFleetActionName = if active then "PauseFleetShield" else "ActivateFleetShield"
+	local statusText = string.upper(tostring(fleetShield.statusLabel or defaultStatusText))
+	local statusColor = if active then PALETTE.Green else PALETTE.Rose
+	local remainingText = tostring(fleetShield.remainingLabel or defaultRemainingText)
+	local fleetButtonText = if pending then "WORKING..." else tostring(fleetShield.buttonText or defaultFleetButtonText)
+	local fleetButtonEnabled = pending ~= true and (
+		fleetShield.buttonEnabled == true
+		or active
+		or math.max(0, tonumber(resources.fleetShields) or 0) > 0
+	)
+	local fleetActionName = tostring(fleetShield.actionName or defaultFleetActionName)
+	local children = {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 10),
+		}),
+		Stroke = e("UIStroke", {
+			Color = Color3.fromRGB(72, 93, 134),
+			Transparency = 0.12,
+		}),
+		Title = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(16, 10),
+			Size = UDim2.new(1, -250, 0, 14),
+			Text = "Crew Protection Tools",
+			TextColor3 = PALETTE.Muted,
+			TextSize = 11,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 9,
+		}),
+		FleetTitle = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.Cartoon,
+			Position = UDim2.fromOffset(16, 62),
+			Size = UDim2.fromOffset(142, 25),
+			Text = "Fleet Shield",
+			TextColor3 = PALETTE.Cyan,
+			TextSize = 24,
+			TextStrokeTransparency = 0.56,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 9,
+		}),
+		FleetStatus = e("Frame", {
+			BackgroundColor3 = statusColor,
+			BackgroundTransparency = active and 0.04 or 0.12,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(166, 61),
+			Size = UDim2.fromOffset(96, 28),
+			ZIndex = 9,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Stroke = e("UIStroke", {
+				Color = active and PALETTE.Cream or PALETTE.Rose,
+				Transparency = active and 0.72 or 0.34,
+				Thickness = 1,
+			}),
+			Label = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(10, 0),
+				Size = UDim2.new(1, -20, 1, 0),
+				Text = statusText,
+				TextColor3 = PALETTE.Ink,
+				TextSize = 13,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 10,
+			}),
+		}),
+		Remaining = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(16, 91),
+			Size = UDim2.new(1, -260, 0, 16),
+			Text = "Remaining Time: " .. remainingText,
+			TextColor3 = active and PALETTE.Green or INVENTORY_UI.TextMuted,
+			TextSize = 12,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 9,
+		}),
+		FleetHelper = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(16, 110),
+			Size = UDim2.new(1, -260, 0, 14),
+			Text = tostring(fleetShield.helperText or "Protects ALL placed crewmates"),
+			TextColor3 = PALETTE.Cyan,
+			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 9,
+		}),
+		FleetButton = e(crewProtectionActionButton, {
+			anchorPoint = Vector2.new(1, 0),
+			position = UDim2.new(1, -16, 0, 72),
+			size = UDim2.fromOffset(184, 34),
+			text = fleetButtonText,
+			accentColor = if active then PALETTE.Rose else PALETTE.Cyan,
+			disabledColor = Color3.fromRGB(68, 74, 88),
+			enabled = fleetButtonEnabled,
+			zIndex = 10,
+			onActivated = function()
+				if props.onFleetShieldAction then
+					props.onFleetShieldAction(fleetActionName)
+				end
+			end,
+		}),
+	}
+
+	local chipData = {
+		{ label = "Crew Shields", value = resources.crewShields or 0, color = PALETTE.Green },
+		{ label = "Fleet Shields", value = resources.fleetShields or 0, color = PALETTE.Cyan },
+		{ label = "Permanent Slots", value = resources.permanentSlots or 0, color = PALETTE.Violet:Lerp(PALETTE.Gold, 0.34) },
+	}
+	for index, chip in ipairs(chipData) do
+		children["Chip" .. tostring(index)] = e("Frame", {
+			BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+			BackgroundTransparency = 0.1,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(16 + ((index - 1) * 150), 28),
+			Size = UDim2.fromOffset(138, 24),
+			ZIndex = 9,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			Stroke = e("UIStroke", {
+				Color = chip.color,
+				Transparency = 0.38,
+				Thickness = 1,
+			}),
+			Label = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(10, 0),
+				Size = UDim2.new(1, -48, 1, 0),
+				Text = chip.label,
+				TextColor3 = PALETTE.Cream,
+				TextSize = 10,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 10,
+			}),
+			Value = e("TextLabel", {
+				AnchorPoint = Vector2.new(1, 0),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.new(1, -10, 0, 0),
+				Size = UDim2.fromOffset(34, 24),
+				Text = tostring(chip.value or 0),
+				TextColor3 = chip.color,
+				TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Right,
+				ZIndex = 10,
+			}),
+		})
+	end
+
+	if typeof(feedback) == "table" and tostring(feedback.message or "") ~= "" then
+		children.Feedback = e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(1, -16, 0, 28),
+			Size = UDim2.fromOffset(220, 18),
+			Text = tostring(feedback.message),
+			TextColor3 = feedback.ok == true and PALETTE.Green or PALETTE.Rose,
+			TextSize = 10,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 10,
+		})
+	end
+
+	return e("Frame", {
+		BackgroundColor3 = Color3.fromRGB(16, 22, 37),
+		BackgroundTransparency = 0.04,
+		BorderSizePixel = 0,
+		Position = UDim2.fromOffset(14, 14),
+		Size = UDim2.new(1, -28, 0, 128),
+		ZIndex = 8,
+	}, children)
+end
+
 local function titleRegistryRow(props)
 	local entry = props.entry or {}
 	local unlocked = entry.unlocked == true
@@ -2767,8 +3267,9 @@ local function App(props)
 	local crewQuickSlotsMax = summary.crewQuickSlotsMax or crewQuickSlotsUnlocked
 	local activeView = props.activeView or "Inventory"
 	local showingCaptainLog = activeView == "CaptainLog"
+	local showingCrewManagement = activeView == "CrewManagement"
 	local showingTitles = activeView == "Titles"
-	local showingInventory = not showingCaptainLog and not showingTitles
+	local showingInventory = activeView == "Inventory"
 	local toggleLayout = props.toggleLayout or {}
 	local dockToggleLeft = toggleLayout.dock == "hotbarLeft"
 	local dockToggleSlot = toggleLayout.dock == "hotbarSlot"
@@ -2804,11 +3305,14 @@ local function App(props)
 
 	if showingCaptainLog then
 		activeAccent = PALETTE.Orange
+	elseif showingCrewManagement then
+		activeAccent = PALETTE.Violet:Lerp(PALETTE.Gold, 0.28)
 	elseif showingTitles then
 		activeAccent = PALETTE.Gold
 	end
 
 	local captainLogData = props.captainLog or {}
+	local crewManagementData = props.crewManagement or {}
 	local captainLogFilteredCount = math.max(0, math.floor(tonumber(captainLogData.filteredCount) or 0))
 	local captainLogTotalCount = math.max(0, math.floor(tonumber(captainLogData.totalCount) or 0))
 	local captainLogQuery = tostring(props.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -2828,6 +3332,12 @@ local function App(props)
 			captainLogPlural
 		)
 	end
+	local crewManagementFilteredCount = math.max(0, math.floor(tonumber(crewManagementData.filteredCount) or 0))
+	local crewManagementTotalCount = math.max(0, math.floor(tonumber(crewManagementData.totalCount) or 0))
+	local crewManagementQuery = tostring(props.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	local crewManagementInfoText = if crewManagementQuery ~= ""
+		then string.format("Showing %d of %d crewmates", crewManagementFilteredCount, crewManagementTotalCount)
+		else string.format("%d crewmates ready for crew tools", crewManagementTotalCount)
 
 	local children = {
 		BottomBar = e("Frame", {
@@ -2974,6 +3484,12 @@ local function App(props)
 				fillColor3 = PALETTE.Orange,
 				size = UDim2.fromOffset(152, 38),
 			},
+			{
+				key = "CrewManagement",
+				label = "Crew Management",
+				fillColor3 = PALETTE.Violet,
+				size = UDim2.fromOffset(178, 38),
+			},
 			{ key = "Titles", label = "Titles", fillColor3 = PALETTE.Gold, size = UDim2.fromOffset(112, 38) },
 		}
 
@@ -3096,6 +3612,31 @@ local function App(props)
 			})
 		end
 
+		local crewManagementChildren = {
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Vertical,
+				Padding = UDim.new(0, 10),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+			}),
+			Padding = e("UIPadding", {
+				PaddingBottom = UDim.new(0, 2),
+				PaddingLeft = UDim.new(0, 4),
+				PaddingRight = UDim.new(0, 4),
+				PaddingTop = UDim.new(0, 2),
+			}),
+		}
+
+		for index, entry in ipairs((props.crewManagement and props.crewManagement.entries) or {}) do
+			local rowKey = tostring(entry.instanceId or entry.key or index)
+			crewManagementChildren["Row:" .. rowKey] = e(crewManagementRow, {
+				entry = entry,
+				layoutOrder = index,
+				pending = props.crewManagement and props.crewManagement.pending == true,
+				onApplyCrewShield = props.onApplyCrewShield,
+				onApplyPermanentSlot = props.onApplyPermanentSlot,
+			})
+		end
+
 		local titleChildren = {
 			List = e("UIListLayout", {
 				FillDirection = Enum.FillDirection.Vertical,
@@ -3189,7 +3730,7 @@ local function App(props)
 					AnchorPoint = Vector2.new(0, 0),
 					BackgroundTransparency = 1,
 					Position = UDim2.fromOffset(24, 16),
-					Size = UDim2.fromOffset(412, 40),
+					Size = UDim2.fromOffset(606, 40),
 					ZIndex = 8,
 				}, topModeChildren),
 				Close = e("TextButton", {
@@ -3323,7 +3864,7 @@ local function App(props)
 						Position = UDim2.fromOffset(18, 12),
 						Size = UDim2.new(1, -320, 0, 14),
 						Text = showingCaptainLog and "Ship Income Overview"
-							or (showingTitles and "Crew Honors" or "Captain's Hold"),
+							or (showingCrewManagement and "Crew Tools" or (showingTitles and "Crew Honors" or "Captain's Hold")),
 						TextColor3 = activeAccent,
 						TextSize = 12,
 						TextXAlignment = Enum.TextXAlignment.Left,
@@ -3335,7 +3876,10 @@ local function App(props)
 						Position = UDim2.fromOffset(18, 22),
 						Size = UDim2.new(1, -320, 0, 30),
 						Text = showingCaptainLog and "Captain's Log"
-							or (showingTitles and "Titles" or (props.activeCategoryLabel or "Inventory")),
+							or (
+								showingCrewManagement and "Crew Management"
+								or (showingTitles and "Titles" or (props.activeCategoryLabel or "Inventory"))
+							),
 						TextColor3 = PALETTE.Cream,
 						TextSize = 34,
 						TextStrokeTransparency = 0.58,
@@ -3348,16 +3892,23 @@ local function App(props)
 						Font = Enum.Font.Gotham,
 						Position = UDim2.fromOffset(18, 56),
 						Size = UDim2.new(1, -320, 0, 18),
-						Text = showingCaptainLog and captainLogInfoText or (showingTitles and string.format(
-							"%d of %d titles visible, %d unlocked",
-							(props.titles and props.titles.filteredCount) or 0,
-							(props.titles and props.titles.totalCount) or 0,
-							(props.titles and props.titles.unlockedCount) or 0
-						) or string.format(
-							"%d shown of %d items ready to manage",
-							props.filteredCount or 0,
-							props.totalCount or 0
-						)),
+						Text = showingCaptainLog and captainLogInfoText
+							or (
+								showingCrewManagement and crewManagementInfoText
+								or (
+									showingTitles and string.format(
+										"%d of %d titles visible, %d unlocked",
+										(props.titles and props.titles.filteredCount) or 0,
+										(props.titles and props.titles.totalCount) or 0,
+										(props.titles and props.titles.unlockedCount) or 0
+									)
+									or string.format(
+										"%d shown of %d items ready to manage",
+										props.filteredCount or 0,
+										props.totalCount or 0
+									)
+								)
+							),
 						TextColor3 = INVENTORY_UI.TextMuted,
 						TextSize = 12,
 						TextXAlignment = Enum.TextXAlignment.Left,
@@ -3386,7 +3937,10 @@ local function App(props)
 							Font = Enum.Font.GothamBold,
 							PlaceholderColor3 = Color3.fromRGB(133, 136, 144),
 							PlaceholderText = showingCaptainLog and "Search placed crewmates..."
-								or (showingTitles and "Search titles..." or "Search inventory..."),
+								or (
+									showingCrewManagement and "Search crewmates..."
+									or (showingTitles and "Search titles..." or "Search inventory...")
+								),
 							Position = UDim2.fromOffset(36, 0),
 							Size = UDim2.new(1, -44, 1, 0),
 							Text = props.query or "",
@@ -3552,6 +4106,10 @@ local function App(props)
 								ZIndex = 9,
 							}),
 						}) or nil,
+						CrewManagementSummary = showingCrewManagement and e(crewManagementSummary, {
+							data = props.crewManagement,
+							onFleetShieldAction = props.onFleetShieldAction,
+						}) or nil,
 						Grid = showingInventory and e("ScrollingFrame", {
 							AutomaticCanvasSize = Enum.AutomaticSize.Y,
 							BackgroundTransparency = 1,
@@ -3574,6 +4132,17 @@ local function App(props)
 							Size = UDim2.new(1, -28, 1, -96),
 							ZIndex = 8,
 						}, captainLogChildren) or nil,
+						CrewManagementList = showingCrewManagement and e("ScrollingFrame", {
+							AutomaticCanvasSize = Enum.AutomaticSize.Y,
+							BackgroundTransparency = 1,
+							BorderSizePixel = 0,
+							CanvasSize = UDim2.new(),
+							Position = UDim2.fromOffset(14, 152),
+							ScrollBarImageColor3 = INVENTORY_UI.GoldBase,
+							ScrollBarThickness = 7,
+							Size = UDim2.new(1, -28, 1, -166),
+							ZIndex = 8,
+						}, crewManagementChildren) or nil,
 						TitleList = showingTitles and e("ScrollingFrame", {
 							AutomaticCanvasSize = Enum.AutomaticSize.Y,
 							BackgroundTransparency = 1,
@@ -3587,6 +4156,7 @@ local function App(props)
 						}, titleChildren) or nil,
 						Empty = (
 							showingCaptainLog and #((props.captainLog and props.captainLog.entries) or {}) == 0
+							or (showingCrewManagement and #((props.crewManagement and props.crewManagement.entries) or {}) == 0)
 							or (showingTitles and #((props.titles and props.titles.entries) or {}) == 0)
 							or (showingInventory and #(props.items or {}) == 0)
 						)
@@ -3599,12 +4169,16 @@ local function App(props)
 									Text = showingCaptainLog
 											and (((props.captainLog and props.captainLog.totalCount) or 0) > 0 and "No placed crewmates match that search." or "No crewmates are placed on your ship yet.")
 										or (
-											showingTitles
-												and (((props.titles and props.titles.totalCount) or 0) > 0 and "No titles match that search." or "No titles are registered yet.")
+											showingCrewManagement
+												and (((props.crewManagement and props.crewManagement.totalCount) or 0) > 0 and "No crewmates match that search." or "No crewmates are in your crew yet.")
 											or (
-												(props.totalCount or 0) > 0
-													and "No inventory items match that search."
-												or "Nothing in this hold yet."
+												showingTitles
+													and (((props.titles and props.titles.totalCount) or 0) > 0 and "No titles match that search." or "No titles are registered yet.")
+												or (
+													(props.totalCount or 0) > 0
+														and "No inventory items match that search."
+													or "Nothing in this hold yet."
+												)
 											)
 										),
 									TextColor3 = INVENTORY_UI.TextMuted,

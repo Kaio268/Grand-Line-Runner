@@ -40,6 +40,8 @@ local MonetizationConfig = require(game:GetService("ReplicatedStorage"):WaitForC
 local PaidRandomItemPolicy = require(game.ServerScriptService.Modules.PaidRandomItemPolicy)
 local RemoteGuard = require(game.ServerScriptService.Modules.RemoteGuard)
 local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
+local ShopEntitlementService = require(game.ServerScriptService.Modules.ShopEntitlementService)
+local CrewProtectionService = require(game.ServerScriptService.Modules.CrewProtectionService)
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -1779,6 +1781,7 @@ function PlayerAdded(player: Player)
 		end
 		markPlayerDataReady(player, dataReadyStartedAt)
 		DataManager:SetupBoostListeners(player)
+		ShopEntitlementService.ApplyOwnedEntitlements(player, self)
 	else
 		player:Kick("Profile load fail - Please rejoin!")
 	end
@@ -1878,6 +1881,30 @@ local function developerProductReceiptAudit(eventName: string, receiptInfo, fiel
 	end
 end
 
+local function isOneTimeShopDeveloperProductOwned(player: Player, metadata)
+	if typeof(metadata) ~= "table" or metadata.OneTime ~= true then
+		return false, nil
+	end
+
+	local ownedPath = tostring(metadata.OwnedPath or "")
+	if ownedPath == "" then
+		return false, "missing_owned_path"
+	end
+
+	local ownedValue, reason = DataManager:TryGetValue(player, ownedPath)
+	if ownedValue == true then
+		return true, nil
+	end
+	if typeof(ownedValue) == "number" and ownedValue > 0 then
+		return true, nil
+	end
+	if ownedValue == nil and reason ~= nil then
+		return false, reason
+	end
+
+	return false, nil
+end
+
 function DataManager:PromptProductPurchase(player : Player, productId : number)
 	productId = tonumber(productId)
 	if productId == nil then
@@ -1895,6 +1922,17 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 			tostring(metadata and metadata.Reason or "not_active_chefs_product")
 		))
 		return false, "product_not_available"
+	end
+
+	local shopMetadata = MonetizationConfig.GetShopDeveloperProductMetadata(productId)
+	if shopMetadata and shopMetadata.OneTime == true then
+		local alreadyOwned, reason = isOneTimeShopDeveloperProductOwned(player, shopMetadata)
+		if alreadyOwned == true then
+			return false, "already_owned"
+		end
+		if reason ~= nil then
+			return false, tostring(reason)
+		end
 	end
 
 	if MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
@@ -2667,6 +2705,90 @@ local function SetupAnnouncementSubscription()
 	end
 end
 
+local function getOrCreateRemotesFolder()
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	if remotes and remotes:IsA("Folder") then
+		return remotes
+	end
+
+	if remotes then
+		remotes:Destroy()
+	end
+
+	remotes = Instance.new("Folder")
+	remotes.Name = "Remotes"
+	remotes.Parent = ReplicatedStorage
+	return remotes
+end
+
+local function getOrCreateRemoteFunction(parent, remoteName)
+	local remote = parent:FindFirstChild(remoteName)
+	if remote and not remote:IsA("RemoteFunction") then
+		warn(string.format(
+			"[DataManager]: Replacing %s because it is %s, expected RemoteFunction",
+			tostring(remoteName),
+			remote.ClassName
+		))
+		remote:Destroy()
+		remote = nil
+	end
+
+	if not remote then
+		remote = Instance.new("RemoteFunction")
+		remote.Name = remoteName
+		remote.Parent = parent
+	end
+
+	return remote
+end
+
+local function SetupShopProductPromptRemote()
+	local promptRemoteName = tostring(MonetizationConfig.ShopProductPromptRemoteName or "ShopProductPromptRequest")
+	local remotes = getOrCreateRemotesFolder()
+	local promptRequest = getOrCreateRemoteFunction(remotes, promptRemoteName)
+
+	promptRequest.OnServerInvoke = function(player: Player, productId: number)
+		if not RemoteGuard.Check(player, promptRemoteName, { productId }, {
+			Cooldown = 0.35,
+			Args = {
+				{ Type = "finiteNumber", Integer = true, Min = 1 },
+			},
+		}) then
+			return {
+				ok = false,
+				error = "remote_guard_rejected",
+			}
+		end
+
+		productId = tonumber(productId)
+		local metadata = MonetizationConfig.GetShopDeveloperProductMetadata(productId)
+		if metadata == nil then
+			warn(string.format(
+				"[DataManager]: Rejected shop prompt remote for non-shop product player=%s productId=%s",
+				player and player.Name or "<unknown>",
+				tostring(productId)
+			))
+			return {
+				ok = false,
+				error = "not_shop_product",
+			}
+		end
+
+		if metadata.OneTime ~= true then
+			return {
+				ok = false,
+				error = "not_one_time_product",
+			}
+		end
+
+		local prompted, reason = DataManager:PromptProductPurchase(player, productId)
+		return {
+			ok = prompted == true,
+			error = if prompted == true then nil else tostring(reason or "prompt_rejected"),
+		}
+	end
+end
+
 local function SetupPaidRandomItemPolicyRemotes()
 	local remotesConfig = MonetizationConfig.PaidRandomItemPolicy
 		and MonetizationConfig.PaidRandomItemPolicy.Remotes
@@ -2727,7 +2849,10 @@ DataManager.init = function()
 
 	FillMessageFunctions()
 	DataManager.Premades = Premades
+	SetupShopProductPromptRemote()
 	SetupPaidRandomItemPolicyRemotes()
+	ShopEntitlementService.Start(DataManager)
+	CrewProtectionService.Start(DataManager)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		task.spawn(PlayerAdded, player)

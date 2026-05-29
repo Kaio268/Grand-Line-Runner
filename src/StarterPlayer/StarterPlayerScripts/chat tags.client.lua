@@ -230,6 +230,20 @@ Tags:AddTag("VIP", Config.VIPStyle, function(plr: Player)
 	return vip and vip:IsA("BoolValue") and vip.Value == true or false
 end)
 
+local function hasVIP(player: Player): boolean
+	local passes = player:FindFirstChild("Passes")
+	local vip = passes and passes:FindFirstChild("VIP")
+	return vip and vip:IsA("BoolValue") and vip.Value == true or false
+end
+
+local function formatDisplayName(player: Player): string
+	local displayName = player.DisplayName or player.Name
+	if hasVIP(player) then
+		return string.format('<font color="%s"><b>%s</b></font>', hex(Color3.fromRGB(255, 218, 88)), displayName)
+	end
+	return displayName
+end
+
 local function bindVIP(player: Player)
 	local passes = player:FindFirstChild("Passes") or player:WaitForChild("Passes")
 	if not passes or not passes:IsA("Folder") then return end
@@ -300,8 +314,7 @@ function AnimationSystem:Update()
 		if data.speaker and data.speaker.Parent then
 			local prefix, hasAnimated = Tags:GetPrefix(data.speaker, now)
 			if hasAnimated then
-				local displayName = data.speaker.DisplayName or data.speaker.Name
-				properties.PrefixText = prefix .. displayName
+				properties.PrefixText = prefix .. formatDisplayName(data.speaker)
 			else
 				self.activeMessages[properties] = nil
 			end
@@ -323,9 +336,8 @@ TextChatService.OnIncomingMessage = function(message: TextChatMessage)
 	local now = os.clock()
 
 	if speaker then
-		local displayName = speaker.DisplayName or speaker.Name
 		local prefix, hasAnimated = Tags:GetPrefix(speaker, now)
-		props.PrefixText = prefix .. displayName
+		props.PrefixText = prefix .. formatDisplayName(speaker)
 		if hasAnimated then
 			AnimationSystem:RegisterMessage(props, speaker)
 		end
