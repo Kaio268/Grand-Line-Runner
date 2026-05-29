@@ -1694,12 +1694,13 @@ local function chestOpenQuantityPrompt(props)
 	local amount = math.clamp(math.floor(tonumber(props.amount) or 1), 1, maxAmount)
 	local progress = if maxAmount <= 1 then 1 else (amount - 1) / (maxAmount - 1)
 	local mobile = isMobileViewport()
-	local panelHeight = mobile and 202 or 248
+	local panelHeight = mobile and 230 or 278
 	local panelMaxSize = mobile and Vector2.new(360, panelHeight) or Vector2.new(430, panelHeight)
 	local titleY = mobile and 16 or 24
-	local amountY = mobile and 58 or 82
-	local trackY = mobile and 98 or 126
-	local buttonY = mobile and 146 or 174
+	local amountY = mobile and 54 or 76
+	local presetY = mobile and 88 or 114
+	local trackY = mobile and 124 or 154
+	local buttonY = mobile and 176 or 214
 	local buttonHeight = mobile and 34 or 42
 	local trackRef = React.useRef(nil)
 	local draggingRef = React.useRef(false)
@@ -1776,6 +1777,62 @@ local function chestOpenQuantityPrompt(props)
 		end
 	end, {})
 
+	local function buildPresetButtons()
+		local presetChildren = {
+			Layout = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				HorizontalAlignment = Enum.HorizontalAlignment.Center,
+				Padding = UDim.new(0, mobile and 6 or 8),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+			}),
+		}
+		local presets = {
+			{ label = "1", value = 1 },
+			{ label = "3", value = 3 },
+			{ label = "10", value = 10 },
+			{ label = "Max", value = maxAmount, alwaysEnabled = true },
+		}
+
+		for index, preset in ipairs(presets) do
+			local clampedValue = math.clamp(preset.value, 1, maxAmount)
+			local enabled = preset.alwaysEnabled == true or preset.value <= maxAmount
+			local selected = enabled and amount == clampedValue
+			presetChildren["Preset" .. tostring(index)] = e("TextButton", {
+				AutoButtonColor = enabled,
+				BackgroundColor3 = if selected then INVENTORY_UI.GoldHighlight else INVENTORY_UI.ButtonIdle,
+				BackgroundTransparency = if enabled then 0 else 0.45,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = index,
+				Size = UDim2.new(0.25, mobile and -6 or -8, 1, 0),
+				Text = preset.label,
+				TextColor3 = if selected then PALETTE.Ink else INVENTORY_UI.TextMain,
+				TextSize = mobile and 12 or 14,
+				ZIndex = 32,
+				[React.Event.Activated] = function()
+					if enabled and props.onAmountChanged then
+						props.onAmountChanged(clampedValue)
+					end
+				end,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 9) }),
+				Stroke = e("UIStroke", {
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = selected and 0.08 or 0.42,
+					Thickness = 1,
+				}),
+			})
+		end
+
+		return e("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(32, presetY),
+			Size = UDim2.new(1, -64, 0, mobile and 26 or 30),
+			ZIndex = 32,
+		}, presetChildren)
+	end
+
 	return e("Frame", {
 		BackgroundColor3 = INVENTORY_UI.MenuOverlay,
 		BackgroundTransparency = 0.08,
@@ -1829,6 +1886,7 @@ local function chestOpenQuantityPrompt(props)
 				TextXAlignment = Enum.TextXAlignment.Center,
 				ZIndex = 32,
 			}),
+			Presets = buildPresetButtons(),
 			Track = e("Frame", {
 				ref = trackRef,
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
@@ -1906,7 +1964,7 @@ local function chestOpenQuantityPrompt(props)
 				AnchorPoint = Vector2.new(0, 1),
 				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(24, 166),
+				Position = UDim2.fromOffset(24, buttonY - 8),
 				Size = UDim2.fromOffset(210, 34),
 				ZIndex = 36,
 			}, {

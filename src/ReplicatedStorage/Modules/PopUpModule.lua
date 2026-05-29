@@ -30,6 +30,8 @@ local Colors = {
 
 local PopUpModule = {}
 PopUpModule.activeReward = nil
+local ChestResultsPresenter = nil
+local chestResultsPresenterLoadFailed = false
 
 local POPUP_TWEEN_IN_TIME = 0.5
 local REWARD_TWEEN_IN_TIME = 0.24
@@ -1158,6 +1160,24 @@ local function formatRewardAmount(amount)
 	return CurrencyUtil.formatCount(amount)
 end
 
+local function getChestResultsPresenter()
+	if ChestResultsPresenter ~= nil or chestResultsPresenterLoadFailed then
+		return ChestResultsPresenter
+	end
+
+	local ok, presenter = pcall(function()
+		return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ChestResultsPresenter"))
+	end)
+	if ok and typeof(presenter) == "table" then
+		ChestResultsPresenter = presenter
+	else
+		chestResultsPresenterLoadFailed = true
+		warn("[PopUpModule] ChestResultsPresenter unavailable; falling back to acknowledgement popup.")
+	end
+
+	return ChestResultsPresenter
+end
+
 local function renderRewardRows(rewardRows)
 	if not acknowledgeRewardsContainer then
 		return false
@@ -1300,9 +1320,20 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 end
 
 function PopUpModule:Local_ShowChestOpenResult(openResult)
-	local acknowledgement = ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
-	acknowledgement.DisplayOrder = 650
-	self:Local_ShowAcknowledgement(acknowledgement)
+	local shownWithChestResults = false
+	local presenter = getChestResultsPresenter()
+	if presenter and typeof(presenter.Enqueue) == "function" then
+		local ok, result = pcall(function()
+			return presenter.Enqueue(openResult)
+		end)
+		shownWithChestResults = ok and result == true
+	end
+
+	if not shownWithChestResults then
+		local acknowledgement = ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
+		acknowledgement.DisplayOrder = 650
+		self:Local_ShowAcknowledgement(acknowledgement)
+	end
 
 	local confettiCount = ChestOpenResultFormatter.GetCelebrationCount(openResult)
 	if confettiCount > 0 then
