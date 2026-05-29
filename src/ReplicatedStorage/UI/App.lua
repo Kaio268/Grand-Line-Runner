@@ -9,6 +9,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local IndexCard = require(script.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("IndexCard"))
 local SharedPreviewViewport = require(script.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport"))
 local Responsive = require(script.Parent:WaitForChild("Responsive"))
 
@@ -1685,6 +1686,88 @@ local function manifestTile(props)
 			TextSize = 20,
 			TextStrokeTransparency = 0.35,
 			ZIndex = 4,
+		}) or nil,
+	})
+end
+
+local function crewInventoryIndexTile(props)
+	local item = props.item or {}
+	local quantity = math.max(1, math.floor(tonumber(item.quantity) or 1))
+	local unit = {
+		discovered = true,
+		itemKind = "CrewMember",
+		name = item.name,
+		displayName = item.displayName,
+		rarity = item.subtitle,
+		image = item.image,
+		staticPreviewImage = item.staticPreviewImage,
+		previewKind = item.previewKind,
+		previewName = item.previewName,
+		crewModelName = item.previewName,
+	}
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		LayoutOrder = props.layoutOrder or 0,
+		Size = UDim2.fromScale(1, 1),
+	}, {
+		Card = e(IndexCard, {
+			unit = unit,
+			layoutOrder = props.layoutOrder,
+			renderPreview = true,
+			onActivated = item.interactive ~= false and props.onActivated ~= nil and function()
+				props.onActivated(item)
+			end or nil,
+		}),
+		Quantity = e("TextLabel", {
+			AnchorPoint = Vector2.new(1, 0),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			BackgroundColor3 = Color3.fromRGB(25, 36, 50),
+			BackgroundTransparency = 0.04,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(1, -10, 0, 10),
+			Text = "x" .. tostring(quantity),
+			TextColor3 = PALETTE.Cream,
+			TextSize = 12,
+			TextStrokeTransparency = 0.72,
+			ZIndex = 8,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = item.accentColor or PALETTE.Cyan,
+				Transparency = 0.14,
+				Thickness = 1,
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 4),
+				PaddingBottom = UDim.new(0, 4),
+				PaddingLeft = UDim.new(0, 8),
+				PaddingRight = UDim.new(0, 8),
+			}),
+		}),
+		Equipped = item.isEquipped == true and e("TextLabel", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			AutomaticSize = Enum.AutomaticSize.XY,
+			BackgroundColor3 = PALETTE.Cream,
+			BackgroundTransparency = 0.02,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(0.5, 0, 0, 10),
+			Text = "IN HAND",
+			TextColor3 = Color3.fromRGB(14, 21, 22),
+			TextSize = 10,
+			ZIndex = 8,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+			Padding = e("UIPadding", {
+				PaddingTop = UDim.new(0, 4),
+				PaddingBottom = UDim.new(0, 4),
+				PaddingLeft = UDim.new(0, 10),
+				PaddingRight = UDim.new(0, 10),
+			}),
 		}) or nil,
 	})
 end
@@ -3483,11 +3566,13 @@ local function App(props)
 	local modalPanelChildren = nil
 
 	if props.isOpen then
+		local showingCrewInventoryCategory = showingInventory and tostring(props.activeCategory or "") == "CrewMembers"
 		local gridChildren = {
 			Grid = e("UIGridLayout", {
 				CellPadding = UDim2.fromOffset(10, 10),
-				CellSize = UDim2.fromOffset(128, 136),
-				FillDirectionMaxCells = 6,
+				CellSize = showingCrewInventoryCategory and UDim2.fromOffset(150, 171)
+					or UDim2.fromOffset(128, 136),
+				FillDirectionMaxCells = showingCrewInventoryCategory and 5 or 6,
 				HorizontalAlignment = Enum.HorizontalAlignment.Left,
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				VerticalAlignment = Enum.VerticalAlignment.Top,
@@ -3495,7 +3580,10 @@ local function App(props)
 		}
 
 		for index, item in ipairs(props.items or {}) do
-			gridChildren["Item" .. tostring(index)] = e(manifestTile, {
+			local tileComponent = if showingCrewInventoryCategory and tostring(item.kind or "") == "CrewMember"
+				then crewInventoryIndexTile
+				else manifestTile
+			gridChildren["Item" .. tostring(index)] = e(tileComponent, {
 				item = item,
 				layoutOrder = index,
 				onActivated = props.onActivateItem,
@@ -3626,6 +3714,11 @@ local function App(props)
 					label = "Quick Equip Slots",
 					value = string.format("%d / %d", crewQuickSlotsUnlocked, crewQuickSlotsMax),
 					valueColor3 = PALETTE.Sea,
+				},
+				{
+					label = "Crewmate Storage",
+					value = string.format("%d / %d", summary.crewStorageUsed or 0, summary.crewStorageSlots or 40),
+					valueColor3 = Color3.fromRGB(93, 203, 200),
 				},
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },

@@ -25,6 +25,7 @@ local Quests = {
 			Label = "Daily",
 			ResetMode = "Daily",
 			PeriodSeconds = DAY_SECONDS,
+			ActiveCount = 5,
 			Description = "Short contracts that refresh every day.",
 		},
 		Weekly = {
@@ -32,12 +33,14 @@ local Quests = {
 			Label = "Weekly",
 			ResetMode = "Weekly",
 			PeriodSeconds = WEEK_SECONDS,
+			ActiveCount = 4,
 			Description = "Longer goals for the current week.",
 		},
 		Special = {
 			Id = "Special",
 			Label = "Special",
 			ResetMode = "Lifetime",
+			ActiveCount = 10,
 			Description = "Milestones that stay until claimed.",
 		},
 	},
@@ -47,184 +50,37 @@ local Quests = {
 		"Special",
 	},
 	ActiveQuestIds = {
-		Daily = {
-			"daily_extract_crew",
-			"daily_open_chests",
-			"daily_collect_doubloons",
-			"daily_reach_mid",
-		},
-		Weekly = {
-			"weekly_extract_crew",
-			"weekly_open_chests",
-			"weekly_reach_deep",
-			"weekly_train_crew",
-		},
-		Special = {
-			"special_first_crew",
-			"special_chest_starter",
-			"special_deep_explorer",
-			"special_crew_training",
-		},
+		Daily = {},
+		Weekly = {},
+		Special = {},
 	},
 }
 
-local function define(questId, definition)
-	Quests.Definitions[questId] = definition
+local function registerQuest(questDefinition)
+	if typeof(questDefinition) ~= "table" then
+		return
+	end
+
+	local questId = tostring(questDefinition.Id or "")
+	local categoryId = tostring(questDefinition.Category or "")
+	if questId == "" or not Quests.Categories[categoryId] then
+		warn(string.format("[GrandLineRushQuests] Skipping invalid quest definition %s.", questId))
+		return
+	end
+
+	local storedDefinition = table.clone(questDefinition)
+	storedDefinition.Id = nil
+	Quests.Definitions[questId] = storedDefinition
+	table.insert(Quests.ActiveQuestIds[categoryId], questId)
 end
 
-define("daily_extract_crew", {
-	Category = "Daily",
-	Name = "Fresh Recruits",
-	Description = "Extract 1 crew member from a corridor run.",
-	Objective = { Type = "ExtractCrew", Target = 1 },
-	Rewards = {
-		{ Type = "Currency", Amount = 180 },
-		{ Type = "Food", Key = "Apple", Amount = 3 },
-	},
-})
-
-define("daily_open_chests", {
-	Category = "Daily",
-	Name = "Treasure Check",
-	Description = "Open 2 treasure chests at base.",
-	Objective = { Type = "OpenChest", Target = 2 },
-	Rewards = {
-		{ Type = "Food", Key = "Rice", Amount = 2 },
-		{ Type = "Material", Key = "Timber", Amount = 2 },
-	},
-})
-
-define("daily_collect_doubloons", {
-	Category = "Daily",
-	Name = "Ship Fund",
-	Description = "Collect 300 Beli from support systems.",
-	Objective = { Type = "EarnBeli", Target = 300 },
-	Rewards = {
-		{ Type = "Currency", Amount = 120 },
-		{ Type = "Food", Key = "Apple", Amount = 4 },
-	},
-})
-
-define("daily_reach_mid", {
-	Category = "Daily",
-	Name = "Hold the Route",
-	Description = "Extract a reward from Mid depth or deeper.",
-	Objective = { Type = "ReachDepth", Target = 1, DepthBand = "Mid" },
-	Rewards = {
-		{ Type = "Food", Key = "Rice", Amount = 2 },
-		{ Type = "Material", Key = "Timber", Amount = 1 },
-	},
-})
-
-define("weekly_extract_crew", {
-	Category = "Weekly",
-	Name = "Crew Drive",
-	Description = "Extract 8 crew members from corridor runs.",
-	Objective = { Type = "ExtractCrew", Target = 8 },
-	Rewards = {
-		{ Type = "Currency", Amount = 1000 },
-		{ Type = "Food", Key = "Meat", Amount = 4 },
-		{ Type = "Material", Key = "Iron", Amount = 2 },
-	},
-})
-
-define("weekly_open_chests", {
-	Category = "Weekly",
-	Name = "Cargo Audit",
-	Description = "Open 12 treasure chests.",
-	Objective = { Type = "OpenChest", Target = 12 },
-	Rewards = {
-		{ Type = "Currency", Amount = 700 },
-		{ Type = "Food", Key = "Rice", Amount = 6 },
-		{ Type = "Material", Key = "Timber", Amount = 12 },
-	},
-})
-
-define("weekly_reach_deep", {
-	Category = "Weekly",
-	Name = "Deep Water Run",
-	Description = "Extract 3 rewards from Deep depth or deeper.",
-	Objective = { Type = "ReachDepth", Target = 3, DepthBand = "Deep" },
-	Rewards = {
-		{ Type = "Material", Key = "Iron", Amount = 5 },
-		{ Type = "Food", Key = "SeaBeastMeat", Amount = 1 },
-	},
-})
-
-define("weekly_train_crew", {
-	Category = "Weekly",
-	Name = "Crew Drills",
-	Description = "Gain 5 crew levels by feeding crew members.",
-	Objective = { Type = "UpgradeCrew", Target = 5 },
-	Rewards = {
-		{ Type = "Currency", Amount = 800 },
-		{ Type = "Food", Key = "Meat", Amount = 3 },
-	},
-})
-
-define("special_first_crew", {
-	Category = "Special",
-	Name = "First Mate",
-	Description = "Extract your first crew member.",
-	Objective = { Type = "ExtractCrew", Target = 1 },
-	Rewards = {
-		{
-			Type = "Chest",
-			ChestKind = ChestRewards.ChestKinds.DevilFruit,
-			Tier = "Wooden",
-			FruitRarity = "Common",
-			Amount = 1,
-		},
-	},
-})
-
-define("special_chest_starter", {
-	Category = "Special",
-	Name = "Locked Supply",
-	Description = "Open 10 treasure chests.",
-	Objective = { Type = "OpenChest", Target = 10 },
-	Rewards = {
-		{
-			Type = "Chest",
-			ChestKind = ChestRewards.ChestKinds.DevilFruit,
-			Tier = "Wooden",
-			FruitRarity = "Common",
-			Amount = 1,
-		},
-	},
-})
-
-define("special_deep_explorer", {
-	Category = "Special",
-	Name = "Deep Route",
-	Description = "Extract 5 rewards from Deep depth or deeper.",
-	Objective = { Type = "ReachDepth", Target = 5, DepthBand = "Deep" },
-	Rewards = {
-		{
-			Type = "Chest",
-			ChestKind = ChestRewards.ChestKinds.DevilFruit,
-			Tier = "Iron",
-			FruitRarity = "Common",
-			Amount = 1,
-		},
-	},
-})
-
-define("special_crew_training", {
-	Category = "Special",
-	Name = "Reliable Hands",
-	Description = "Gain 15 crew levels by feeding crew members.",
-	Objective = { Type = "UpgradeCrew", Target = 15 },
-	Rewards = {
-		{
-			Type = "Chest",
-			ChestKind = ChestRewards.ChestKinds.DevilFruit,
-			Tier = "Iron",
-			FruitRarity = "Common",
-			Amount = 1,
-		},
-	},
-})
+local definitionsFolder = script.Parent:WaitForChild("GrandLineRushQuestDefinitions")
+for _, categoryId in ipairs(Quests.CategoryOrder) do
+	local categoryDefinitions = require(definitionsFolder:WaitForChild(categoryId))
+	for _, questDefinition in ipairs(categoryDefinitions) do
+		registerQuest(questDefinition)
+	end
+end
 
 local function formatInteger(value)
 	local number = math.floor(tonumber(value) or 0)
@@ -268,7 +124,32 @@ function Quests.GetQuestDefinition(questId)
 end
 
 function Quests.GetActiveQuestIds(categoryId, _cycleId)
-	return Quests.ActiveQuestIds[tostring(categoryId or "")] or {}
+	local ids = Quests.ActiveQuestIds[tostring(categoryId or "")] or {}
+	local category = Quests.GetCategory(categoryId)
+	local activeCount = math.floor(tonumber(category and category.ActiveCount) or 0)
+	if activeCount <= 0 or activeCount >= #ids then
+		return ids
+	end
+
+	local seedText = string.format("%s:%s", tostring(categoryId or ""), tostring(_cycleId or ""))
+	local seed = 0
+	for index = 1, #seedText do
+		seed = (seed * 33 + string.byte(seedText, index)) % 2147483647
+	end
+
+	local rng = Random.new(seed)
+	local shuffled = table.clone(ids)
+	for index = #shuffled, 2, -1 do
+		local swapIndex = rng:NextInteger(1, index)
+		shuffled[index], shuffled[swapIndex] = shuffled[swapIndex], shuffled[index]
+	end
+
+	local activeIds = {}
+	for index = 1, activeCount do
+		activeIds[index] = shuffled[index]
+	end
+
+	return activeIds
 end
 
 function Quests.GetCycleId(categoryId, now)
@@ -359,6 +240,8 @@ function Quests.FormatReward(reward)
 			return string.format("%dx %s Devil Fruit Chest", amount, tostring(reward.FruitRarity or "Common"))
 		end
 		return string.format("%dx %s Chest", amount, tostring(reward.Tier or "Wooden"))
+	elseif rewardType == "Crew" then
+		return string.format("%dx %s Crewmate", amount, tostring(reward.DisplayName or reward.CrewMemberId or "Crewmate"))
 	end
 
 	return tostring(rewardType)

@@ -5,6 +5,8 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
+local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
+local CrewRewardService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewRewardService"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
@@ -16,6 +18,9 @@ local QuestService = {}
 local QUEST_REQUEST_NAME = "GrandLineRushQuestRequest"
 local QUEST_STATE_NAME = "GrandLineRushQuestState"
 local LOW_TIER_FRUIT_CHEST_SOURCE = "Quest"
+local CREW_REWARD_FULL_MESSAGE = "Crewmate inventory full. Free a slot and try again."
+local CREW_REWARD_GRANT_FAILED_MESSAGE = "That crew reward could not be added right now. Free crew inventory space and try again."
+local CREW_REWARD_UNAVAILABLE_MESSAGE = "That crew reward is not available right now."
 local SUCCESS_COLOR = Color3.fromRGB(98, 255, 124)
 local ERROR_COLOR = Color3.fromRGB(255, 104, 104)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
@@ -324,6 +329,9 @@ local function getProfileBackfillProgress(dataRoot, definition)
 	if objectiveType == "ExtractCrew" then
 		return countExtractedCrew(dataRoot)
 	elseif objectiveType == "OpenChest" then
+		if objective.Tier or objective.ChestKind or objective.FruitRarity then
+			return 0
+		end
 		return countOpenedChests(dataRoot)
 	elseif objectiveType == "EarnBeli" or objectiveType == "EarnDoubloons" then
 		return getTotalBeli(dataRoot)
@@ -625,6 +633,10 @@ local function validateQuestReward(reward)
 	if rewardType == "Currency" or rewardType == "Food" or rewardType == "Material" then
 		return true
 	end
+	if rewardType == "Crew" then
+		local resolved = CrewRewardService.Resolve(reward)
+		return resolved.Resolved == true, if resolved.Resolved == true then nil else tostring(resolved.Reason or "invalid_crew_reward")
+	end
 	if rewardType ~= "Chest" then
 		return false, "unsupported_reward"
 	end
@@ -652,6 +664,63 @@ local function validateQuestRewards(rewards)
 	return true
 end
 
+local function getRewardAmount(reward)
+	return math.max(1, math.floor(tonumber(reward and reward.Amount) or 1))
+end
+
+local function isCrewCapacityFailure(reason)
+	local normalized = tostring(reason or "")
+	return normalized == "crew_inventory_full"
+		or normalized == "crew_stack_capacity_full"
+end
+
+local function getCrewRewardFailureMessage(reason)
+	if isCrewCapacityFailure(reason) then
+		return CREW_REWARD_FULL_MESSAGE
+	elseif tostring(reason or "") == "crew_member_grant_failed" then
+		return CREW_REWARD_GRANT_FAILED_MESSAGE
+	end
+	return CREW_REWARD_UNAVAILABLE_MESSAGE
+end
+
+local function preflightClaimRewards(player, rewards)
+	local rewardsOk, rewardReason = validateQuestRewards(rewards)
+	if not rewardsOk then
+		return false, rewardReason, "That reward is not available right now."
+	end
+
+	local crewGrants = {}
+	for _, reward in ipairs(rewards or {}) do
+		if tostring(reward.Type or "") == "Crew" then
+			if #crewGrants > 0 then
+				return false, "multiple_crew_rewards_unsupported", CREW_REWARD_UNAVAILABLE_MESSAGE
+			end
+
+			local resolved = CrewRewardService.Resolve(reward)
+			if resolved.Resolved ~= true then
+				local reason = tostring(resolved.Reason or "invalid_crew_reward")
+				return false, reason, getCrewRewardFailureMessage(reason)
+			end
+
+			table.insert(crewGrants, {
+				CrewMemberId = tostring(resolved.GrantName or reward.CrewMemberId or ""),
+				Amount = getRewardAmount(reward),
+			})
+		end
+	end
+
+	if #crewGrants > 0 and typeof(CrewQuickSlotService.CanGainCrewMemberBatch) == "function" then
+		local allowed, _, _, _, reason =
+			CrewQuickSlotService.CanGainCrewMemberBatch(player, crewGrants, "QuestReward")
+		if allowed ~= true then
+			local failureReason = tostring(reason or "crew_inventory_full")
+			return false, failureReason, getCrewRewardFailureMessage(failureReason)
+		end
+	end
+
+	return true
+end
+
 local function addRewardPopup(rewardPopup, reward)
 	local text = QuestConfig.FormatReward(reward)
 	if text ~= "" then
@@ -659,9 +728,9 @@ local function addRewardPopup(rewardPopup, reward)
 	end
 end
 
-local function grantQuestRewardToData(dataRoot, reward, changedRoots, rewardPopup)
+local function grantQuestRewardToData(player, dataRoot, reward, changedRoots)
 	local rewardType = tostring(reward.Type or "")
-	local amount = math.max(1, math.floor(tonumber(reward.Amount) or 1))
+	local amount = getRewardAmount(reward)
 
 	if rewardType == "Currency" then
 		dataRoot.leaderstats = if typeof(dataRoot.leaderstats) == "table" then dataRoot.leaderstats else {}
@@ -699,9 +768,26 @@ local function grantQuestRewardToData(dataRoot, reward, changedRoots, rewardPopu
 			addUnopenedChestToCollection(dataRoot.UnopenedChests, normalizedChest)
 		end
 		changedRoots.UnopenedChests = true
+	elseif rewardType == "Crew" then
+		local ok, resolved, reason = CrewRewardService.Grant(player, reward, amount, {
+			Source = "Quest",
+			Context = "QuestReward",
+		})
+		if ok ~= true then
+			warn(string.format(
+				"[GrandLineRushQuestService] Failed to grant crew quest reward %s: %s",
+				tostring(reward.CrewMemberId or reward.DisplayName or "Crew"),
+				tostring(reason or (resolved and resolved.Reason) or "unknown")
+			))
+			return false, tostring(reason or (resolved and resolved.Reason) or "crew_member_grant_failed")
+		elseif resolved and resolved.DisplayName then
+			reward.DisplayName = tostring(resolved.DisplayName)
+		end
+	else
+		return false, "unsupported_reward"
 	end
 
-	addRewardPopup(rewardPopup, reward)
+	return true
 end
 
 local function syncChestTools(player)
@@ -800,19 +886,58 @@ local function claimQuestInternal(player, payload)
 		return makeResponse(player, false, "Finish the quest before claiming.", "not_complete")
 	end
 
-	local rewardsOk, rewardReason = validateQuestRewards(definition.Rewards)
+	local rewardsOk, rewardReason, rewardMessage = preflightClaimRewards(player, definition.Rewards)
 	if not rewardsOk then
-		warn(string.format("[GrandLineRushQuestService] Invalid reward for quest %s: %s", questId, tostring(rewardReason)))
-		return makeResponse(player, false, "That reward is not available right now.", rewardReason)
+		if not isCrewCapacityFailure(rewardReason) then
+			warn(string.format("[GrandLineRushQuestService] Invalid reward for quest %s: %s", questId, tostring(rewardReason)))
+		end
+		return makeResponse(player, false, rewardMessage or "That reward is not available right now.", rewardReason)
 	end
 
 	local dataRoot = profile.Data
 	local changedRoots = {}
 	local rewardPopup = {}
+	local rewards = definition.Rewards or {}
+
+	local function grantOrFail(reward)
+		local ok, grantReason = grantQuestRewardToData(player, dataRoot, reward, changedRoots)
+		if ok == true then
+			return nil
+		end
+
+		local message = if tostring(reward.Type or "") == "Crew"
+			then getCrewRewardFailureMessage(grantReason)
+			else "That reward could not be claimed right now."
+		warn(string.format(
+			"[GrandLineRushQuestService] Failed to grant quest reward for %s: %s",
+			questId,
+			tostring(grantReason or "unknown")
+		))
+		return makeResponse(player, false, message, grantReason)
+	end
+
+	for _, reward in ipairs(rewards) do
+		if tostring(reward.Type or "") == "Crew" then
+			local failureResponse = grantOrFail(reward)
+			if failureResponse then
+				return failureResponse
+			end
+		end
+	end
+
+	for _, reward in ipairs(rewards) do
+		if tostring(reward.Type or "") ~= "Crew" then
+			local failureResponse = grantOrFail(reward)
+			if failureResponse then
+				return failureResponse
+			end
+		end
+	end
+
 	categoryState.Claimed[questId] = true
 
-	for _, reward in ipairs(definition.Rewards or {}) do
-		grantQuestRewardToData(dataRoot, reward, changedRoots, rewardPopup)
+	for _, reward in ipairs(rewards) do
+		addRewardPopup(rewardPopup, reward)
 	end
 
 	syncClaimMutation(player, replica, dataRoot, changedRoots)

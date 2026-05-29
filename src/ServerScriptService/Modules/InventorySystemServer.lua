@@ -6,7 +6,6 @@ local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
-local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
 local dataManagerModule = nil
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -1305,11 +1304,6 @@ local function handleEquipToggleRequest(player, kind, name)
 			return
 		end
 		if not ownsCrewMember(player, canonicalName) then return end
-		local canEquip = CrewQuickSlotService.CanEquipCrewMember(player, canonicalName)
-		if not canEquip then
-			CrewQuickSlotService.PromptUnlockForCrewMember(player, canonicalName)
-			return
-		end
 		toggleEquip(player, TOOL_KIND_CREW_MEMBER, canonicalName)
 		return
 	end

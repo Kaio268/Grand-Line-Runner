@@ -1,0 +1,145 @@
+return {
+	{
+		Id = "daily_extract_crew",
+		Category = "Daily",
+		Name = "Fresh Recruits",
+		Description = "Extract 1 crew member from a corridor run.",
+		Objective = { Type = "ExtractCrew", Target = 1 },
+		Rewards = {
+			{ Type = "Currency", Amount = 180 },
+			{ Type = "Food", Key = "Apple", Amount = 3 },
+		},
+	},
+	{
+		Id = "daily_open_chests",
+		Category = "Daily",
+		Name = "Treasure Check",
+		Description = "Open 2 treasure chests at base.",
+		Objective = { Type = "OpenChest", Target = 2 },
+		Rewards = {
+			{ Type = "Food", Key = "Rice", Amount = 2 },
+			{ Type = "Material", Key = "Timber", Amount = 2 },
+		},
+	},
+	{
+		Id = "daily_collect_doubloons",
+		Category = "Daily",
+		Name = "Ship Fund",
+		Description = "Collect 300 Beli from support systems.",
+		Objective = { Type = "EarnBeli", Target = 300 },
+		Rewards = {
+			{ Type = "Currency", Amount = 120 },
+			{ Type = "Food", Key = "Apple", Amount = 4 },
+		},
+	},
+	{
+		Id = "daily_starter_route",
+		Category = "Daily",
+		Name = "Starter Route",
+		Description = "Extract 1 reward from a corridor run.",
+		Objective = { Type = "ReachDepth", Target = 1, DepthBand = "Shallow" },
+		Rewards = {
+			{ Type = "Food", Key = "Rice", Amount = 2 },
+			{ Type = "Material", Key = "Timber", Amount = 1 },
+		},
+	},
+	{
+		Id = "daily_upgrade_crew",
+		Category = "Daily",
+		Name = "Crew Tune-Up",
+		Description = "Gain 1 crew level by feeding a crew member.",
+		Objective = { Type = "UpgradeCrew", Target = 1 },
+		Rewards = {
+			{ Type = "Currency", Amount = 150 },
+			{ Type = "Food", Key = "Rice", Amount = 2 },
+		},
+	},
+	{
+		Id = "daily_quick_cache",
+		Category = "Daily",
+		Name = "Quick Cache",
+		Description = "Open 1 treasure chest at base.",
+		Objective = { Type = "OpenChest", Target = 1 },
+		Rewards = {
+			{ Type = "Currency", Amount = 90 },
+			{ Type = "Food", Key = "Apple", Amount = 2 },
+		},
+	},
+	{
+		Id = "daily_coin_pouch",
+		Category = "Daily",
+		Name = "Coin Pouch",
+		Description = "Collect 150 Beli from support systems.",
+		Objective = { Type = "EarnBeli", Target = 150 },
+		Rewards = {
+			{ Type = "Currency", Amount = 80 },
+			{ Type = "Food", Key = "Rice", Amount = 2 },
+		},
+	},
+	{
+		Id = "daily_supply_run",
+		Category = "Daily",
+		Name = "Supply Run",
+		Description = "Extract 2 rewards from corridor runs.",
+		Objective = { Type = "ReachDepth", Target = 2, DepthBand = "Shallow" },
+		Rewards = {
+			{ Type = "Currency", Amount = 130 },
+			{ Type = "Material", Key = "Timber", Amount = 2 },
+		},
+	},
+	{
+		Id = "daily_extra_hands",
+		Category = "Daily",
+		Name = "Extra Hands",
+		Description = "Extract 2 crew members from corridor runs.",
+		Objective = { Type = "ExtractCrew", Target = 2 },
+		Rewards = {
+			{ Type = "Currency", Amount = 220 },
+			{ Type = "Food", Key = "Apple", Amount = 3 },
+		},
+	},
+	{
+		Id = "daily_cargo_sort",
+		Category = "Daily",
+		Name = "Cargo Sort",
+		Description = "Open 3 treasure chests at base.",
+		Objective = { Type = "OpenChest", Target = 3 },
+		Rewards = {
+			{ Type = "Currency", Amount = 160 },
+			{ Type = "Material", Key = "Timber", Amount = 3 },
+		},
+	},
+	{
+		Id = "daily_beli_bundle",
+		Category = "Daily",
+		Name = "Beli Bundle",
+		Description = "Collect 450 Beli from support systems.",
+		Objective = { Type = "EarnBeli", Target = 450 },
+		Rewards = {
+			{ Type = "Currency", Amount = 180 },
+			{ Type = "Food", Key = "Apple", Amount = 3 },
+		},
+	},
+	{
+		Id = "daily_training_bite",
+		Category = "Daily",
+		Name = "Training Bite",
+		Description = "Gain 1 crew level by feeding a crew member.",
+		Objective = { Type = "UpgradeCrew", Target = 1 },
+		Rewards = {
+			{ Type = "Currency", Amount = 120 },
+			{ Type = "Food", Key = "Rice", Amount = 3 },
+		},
+	},
+	{
+		Id = "daily_route_check",
+		Category = "Daily",
+		Name = "Route Check",
+		Description = "Extract 1 reward from a corridor run.",
+		Objective = { Type = "ReachDepth", Target = 1, DepthBand = "Shallow" },
+		Rewards = {
+			{ Type = "Currency", Amount = 100 },
+			{ Type = "Material", Key = "Timber", Amount = 1 },
+		},
+	},
+}

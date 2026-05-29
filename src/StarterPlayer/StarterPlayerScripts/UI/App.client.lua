@@ -14,8 +14,8 @@ local ClientRuntime = {
 }
 
 local React, ReactRoblox, App, Responsive
-local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewQuickSlotConfig
-local ChestUtils, ChestDropRates, Titles, Economy, CurrencyUtil, PopUpModule
+local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
+local ChestUtils, ChestDropRates, Titles, Economy, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
 
@@ -33,12 +33,12 @@ do
 	CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 	Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 	DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+	CrewMemberInventoryConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewMemberInventory"))
 	CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 	ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 	ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
 	Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 	Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
-	CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 	PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 	ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
@@ -48,6 +48,8 @@ do
 	UiModalState = require(Modules:WaitForChild("UiModalState"))
 	ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 end
+
+ClientRuntime.Formatters = require(script.Parent:WaitForChild("AppClientFormatters"))
 
 function ClientRuntime.findOptionalChild(parent, childName, className)
 	if not parent then
@@ -324,6 +326,10 @@ local CATEGORY_DEFS = {
 		label = "Resources",
 		accentColor = Color3.fromRGB(241, 184, 86),
 	},
+	CrewMembers = {
+		label = "Crewmates",
+		accentColor = CREW_QUICK_ACCENT,
+	},
 }
 
 local RARITY_COLORS = {
@@ -483,58 +489,23 @@ local function trackConnection(signal, callback, bucket)
 	return connection
 end
 
+function ClientRuntime.bindCameraViewportTracking()
+	local currentCamera = workspace.CurrentCamera
+	if currentCamera then
+		trackConnection(currentCamera:GetPropertyChangedSignal("ViewportSize"), function()
+			scheduleRender()
+		end, cleanupConnections)
+	end
+
+	trackConnection(workspace:GetPropertyChangedSignal("CurrentCamera"), function()
+		scheduleRender()
+	end, cleanupConnections)
+end
+
 local function inventorySnapshotDebug(...)
 	if INVENTORY_SNAPSHOT_DEBUG then
 		print("[INV][SNAPSHOT][CLIENT][APP]", ...)
 	end
-end
-
-local function trim(text)
-	return tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
-
-local function matchesQuery(entry, query)
-	if query == "" then
-		return true
-	end
-
-	local haystack = string.lower(table.concat({
-		tostring(entry.displayName or ""),
-		tostring(entry.subtitle or ""),
-		tostring(entry.footer or ""),
-		tostring(entry.description or ""),
-		tostring(entry.requirementText or ""),
-		tostring(entry.stateText or ""),
-	}, " "))
-
-	return string.find(haystack, string.lower(query), 1, true) ~= nil
-end
-
-local function shortName(text)
-	local value = tostring(text or "")
-	if #value <= 12 then
-		return value
-	end
-	return string.sub(value, 1, 11) .. "..."
-end
-
-local function formatIncomeNumber(value)
-	return CurrencyUtil.formatCurrency(value)
-end
-
-local function formatDuration(seconds)
-	local totalSeconds = math.max(0, math.floor(tonumber(seconds) or 0))
-	local hours = math.floor(totalSeconds / 3600)
-	local minutes = math.floor((totalSeconds % 3600) / 60)
-	if hours > 0 then
-		return string.format("%dh %02dm", hours, minutes)
-	end
-	return string.format("%dm", minutes)
-end
-
-local function formatMultiplier(value)
-	local rounded = math.floor((tonumber(value) or 1) * 100 + 0.5) / 100
-	return string.format("%.2fx", rounded)
 end
 
 local function ensureAcquired(key)
@@ -1367,7 +1338,7 @@ local function buildShipUpgradeGainLines(level, description, isMaxLevel)
 	local currentCaptain = ShipVisuals.GetCaptainSlotInfoForUpgradeLevel(level)
 
 	local function pushLine(text, key)
-		local value = trim(text)
+		local value = ClientRuntime.Formatters.trim(text)
 		local dedupeKey = tostring(key or value)
 		if value == "" or seen[dedupeKey] then
 			return
@@ -1714,15 +1685,15 @@ local function readEquippedTitleId()
 	local titlesFolder = player:FindFirstChild("Titles")
 	local equippedValue = titlesFolder and titlesFolder:FindFirstChild("Equipped")
 	if equippedValue and equippedValue:IsA("StringValue") then
-		local equippedTitleId = trim(equippedValue.Value)
+		local equippedTitleId = ClientRuntime.Formatters.trim(equippedValue.Value)
 		if equippedTitleId ~= "" then
 			return equippedTitleId
 		end
 	end
 
 	local equippedAttribute = player:GetAttribute("EquippedTitleId")
-	if typeof(equippedAttribute) == "string" and trim(equippedAttribute) ~= "" then
-		return trim(equippedAttribute)
+	if typeof(equippedAttribute) == "string" and ClientRuntime.Formatters.trim(equippedAttribute) ~= "" then
+		return ClientRuntime.Formatters.trim(equippedAttribute)
 	end
 
 	return nil
@@ -1928,7 +1899,7 @@ local function buildTitlesData(query)
 			bountyRankStatus = rankStatusKey or bountyRankStatus
 		end
 
-		if matchesQuery(entry, query) then
+		if ClientRuntime.Formatters.matchesQuery(entry, query) then
 			entries[#entries + 1] = entry
 		end
 	end
@@ -2051,7 +2022,7 @@ local function readCrewProtectionData()
 			pausedRemainingSeconds = fleetShieldPausedRemaining,
 			expiresAtPlayTime = fleetShieldExpiresAt,
 			statusLabel = if fleetShieldActive then "ACTIVE" else "OFF",
-			remainingLabel = if fleetShieldActive then formatDuration(fleetShieldRemaining) else "Not Running",
+			remainingLabel = if fleetShieldActive then ClientRuntime.Formatters.formatDuration(fleetShieldRemaining) else "Not Running",
 			buttonText = if fleetShieldActive
 				then "TURN OFF"
 				elseif fleetShieldPaused or readNumberValue(protectionFolder, "FleetShieldTokens", 0) > 0
@@ -2154,7 +2125,7 @@ local function buildCaptainLogEntry(shipFolder)
 		crewMemberName = crewMemberName,
 		displayName = displayName,
 		subtitle = subtitle,
-		footer = string.format("Captain's Spot  |  %s ready", formatIncomeNumber(claimReadyAmount)),
+		footer = string.format("Captain's Spot  |  %s ready", ClientRuntime.Formatters.formatIncomeNumber(claimReadyAmount)),
 		image = getIcon(CREW_ITEM_KIND, crewMemberName),
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
@@ -2259,7 +2230,7 @@ local function buildCaptainLogEntryFromSnapshotRow(row)
 		crewMemberName = crewMemberName,
 		displayName = displayName,
 		subtitle = subtitle,
-		footer = string.format("%s  |  %s ready", standName, formatIncomeNumber(claimReadyAmount)),
+		footer = string.format("%s  |  %s ready", standName, ClientRuntime.Formatters.formatIncomeNumber(claimReadyAmount)),
 		image = getIcon(CREW_ITEM_KIND, crewMemberName),
 		fallbackText = string.sub(string.upper(displayName), 1, 2),
 		previewKind = previewKind,
@@ -2292,7 +2263,7 @@ local function buildCaptainLogDataFromSnapshot(captainLogSnapshot, query)
 		local ok, entry = pcall(buildCaptainLogEntryFromSnapshotRow, row)
 		if ok and entry then
 			validRowCount += 1
-			if matchesQuery(entry, query) then
+			if ClientRuntime.Formatters.matchesQuery(entry, query) then
 				entries[#entries + 1] = entry
 			end
 		end
@@ -2404,7 +2375,7 @@ local function buildCaptainLogData(query)
 				crewMemberName = crewMemberName,
 				displayName = displayName,
 				subtitle = subtitle,
-				footer = string.format("%s  |  %s ready", standName, formatIncomeNumber(claimReadyAmount)),
+				footer = string.format("%s  |  %s ready", standName, ClientRuntime.Formatters.formatIncomeNumber(claimReadyAmount)),
 				image = getIcon(CREW_ITEM_KIND, crewMemberName),
 				fallbackText = string.sub(string.upper(displayName), 1, 2),
 				previewKind = previewKind,
@@ -2424,7 +2395,7 @@ local function buildCaptainLogData(query)
 		if ok and entry then
 			totalPlaced += 1
 			totalCollectable += collectable or 0
-			if matchesQuery(entry, query) then
+			if ClientRuntime.Formatters.matchesQuery(entry, query) then
 				entries[#entries + 1] = entry
 			end
 		end
@@ -2434,7 +2405,7 @@ local function buildCaptainLogData(query)
 	if captainEntry then
 		totalPlaced += 1
 		totalCollectable += captainCollectable or 0
-		if matchesQuery(captainEntry, query) then
+		if ClientRuntime.Formatters.matchesQuery(captainEntry, query) then
 			entries[#entries + 1] = captainEntry
 		end
 	end
@@ -2503,8 +2474,8 @@ local function resolveCrewProtectionStatus(instanceId, isPlaced, protectionData)
 			key = "crew",
 			label = "Crew Shield Active",
 			statusLabel = "Crew Shield Active",
-			detail = formatDuration(crewShield.remainingSeconds) .. " remaining",
-			detailLabel = formatDuration(crewShield.remainingSeconds) .. " remaining",
+			detail = ClientRuntime.Formatters.formatDuration(crewShield.remainingSeconds) .. " remaining",
+			detailLabel = ClientRuntime.Formatters.formatDuration(crewShield.remainingSeconds) .. " remaining",
 			remainingSeconds = crewShield.remainingSeconds,
 		}
 	end
@@ -2514,8 +2485,8 @@ local function resolveCrewProtectionStatus(instanceId, isPlaced, protectionData)
 			key = "fleet",
 			label = "Fleet Shield Active",
 			statusLabel = "Fleet Shield Active",
-			detail = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
-			detailLabel = formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
+			detail = ClientRuntime.Formatters.formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
+			detailLabel = ClientRuntime.Formatters.formatDuration(protectionData.fleetShield.remainingSeconds) .. " remaining",
 			remainingSeconds = protectionData.fleetShield.remainingSeconds,
 		}
 	end
@@ -2600,7 +2571,7 @@ local function makeCrewManagementEntry(instanceId, crewMemberName, level, assign
 		displayName = displayName,
 		subtitle = subtitle,
 		footer = if isPlaced
-			then string.format("%s  |  %s ready", standName, formatIncomeNumber(collectable))
+			then string.format("%s  |  %s ready", standName, ClientRuntime.Formatters.formatIncomeNumber(collectable))
 			else "Owned crewmate",
 		description = table.concat({ displayName, subtitle, standName, protection.label }, " "),
 		image = getIcon(CREW_ITEM_KIND, crewMemberName, state),
@@ -2673,7 +2644,7 @@ local function buildCrewManagementData(query)
 				if entry then
 					totalCount += 1
 					seenInstanceIds[instanceId] = true
-					if matchesQuery(entry, query) then
+					if ClientRuntime.Formatters.matchesQuery(entry, query) then
 						entries[#entries + 1] = entry
 					end
 				end
@@ -2698,7 +2669,7 @@ local function buildCrewManagementData(query)
 					if entry then
 						totalCount += 1
 						seenInstanceIds[instanceId] = true
-						if matchesQuery(entry, query) then
+						if ClientRuntime.Formatters.matchesQuery(entry, query) then
 							entries[#entries + 1] = entry
 						end
 					end
@@ -2840,7 +2811,7 @@ local function buildEntry(key, state)
 		kind = state.kind,
 		name = state.name,
 		displayName = displayName,
-		shortName = shortName(displayName),
+		shortName = ClientRuntime.Formatters.shortName(displayName),
 		subtitle = subtitle,
 		footer = kindFooter,
 		image = getIcon(state.kind, state.name, state),
@@ -2885,7 +2856,7 @@ local function buildRenderData()
 	syncDevilFruitsFromInventory()
 
 	local gearsList, chestsList, crewList, devilFruitList, resourceList = buildLists()
-	local query = trim(uiState.query)
+	local query = ClientRuntime.Formatters.trim(uiState.query)
 	local crewQuickSlots = readCrewQuickSlots()
 	local crewCollectionCount = countCrewItems(crewList)
 
@@ -2930,6 +2901,8 @@ local function buildRenderData()
 		activeKeys = devilFruitList
 	elseif uiState.activeCategory == "Resources" then
 		activeKeys = resourceList
+	elseif uiState.activeCategory == "CrewMembers" then
+		activeKeys = crewList
 	else
 		activeKeys = chestsList
 	end
@@ -2939,7 +2912,7 @@ local function buildRenderData()
 		local state = itemState[key]
 		if state then
 			local entry = buildEntry(key, state)
-			if matchesQuery(entry, query) then
+			if ClientRuntime.Formatters.matchesQuery(entry, query) then
 				items[#items + 1] = entry
 			end
 		end
@@ -2962,6 +2935,12 @@ local function buildRenderData()
 			label = CATEGORY_DEFS.Resources.label,
 			count = #resourceList,
 			accentColor = CATEGORY_DEFS.Resources.accentColor,
+		},
+		{
+			key = "CrewMembers",
+			label = CATEGORY_DEFS.CrewMembers.label,
+			count = #crewList,
+			accentColor = CATEGORY_DEFS.CrewMembers.accentColor,
 		},
 	}
 
@@ -3057,11 +3036,13 @@ local function buildRenderData()
 			-- Legacy client summary alias kept for older React surfaces.
 			doubloons = readPlayerBeli(),
 			rebirths = liveRebirths,
-			multiplier = formatMultiplier(liveMultiplier),
+			multiplier = ClientRuntime.Formatters.formatMultiplier(liveMultiplier),
 			chests = chestCount,
 			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
 			crewCollectionCount = crewCollectionCount,
+			crewStorageUsed = #crewList,
+			crewStorageSlots = CrewMemberInventoryConfig.GetStorageSlots(),
 			crewQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
 			crewQuickSlotsMax = crewQuickSlots.maxSlots,
 		},
@@ -3655,6 +3636,8 @@ render = function()
 					return
 				end
 				uiState.activeCategory = categoryKey
+				uiState.activeView = "Inventory"
+				uiState.query = ""
 				render()
 			end,
 			onQueryChanged = function(nextQuery)
@@ -4167,13 +4150,13 @@ if ClientRuntime.ShipUpgradeResultRemote and ClientRuntime.ShipUpgradeResultRemo
 			local lines = {}
 			if typeof(payload.Lines) == "table" then
 				for _, line in ipairs(payload.Lines) do
-					if typeof(line) == "string" and trim(line) ~= "" then
-						lines[#lines + 1] = trim(line)
+					if typeof(line) == "string" and ClientRuntime.Formatters.trim(line) ~= "" then
+						lines[#lines + 1] = ClientRuntime.Formatters.trim(line)
 					end
 				end
 			end
 			if #lines == 0 then
-				lines = { trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
+				lines = { ClientRuntime.Formatters.trim(payload.Message or "You do not meet the requirements for this ship upgrade.") }
 			end
 
 			shipUpgradeModal = {
@@ -4188,7 +4171,7 @@ if ClientRuntime.ShipUpgradeResultRemote and ClientRuntime.ShipUpgradeResultRemo
 		end
 
 		local level = PlotUpgradeConfig.ClampLevel(payload.Level)
-		local description = trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
+		local description = ClientRuntime.Formatters.trim(payload.Description or PlotUpgradeConfig.GetLevelUnlockDescription(level))
 		local isMaxLevel = payload.IsMaxLevel == true
 		local gainLines = buildShipUpgradeGainLines(level, description, isMaxLevel)
 
@@ -4241,16 +4224,7 @@ trackConnection(playerGui.DescendantRemoving, function()
 	scheduleRender()
 end, cleanupConnections)
 
-local currentCamera = workspace.CurrentCamera
-if currentCamera then
-	trackConnection(currentCamera:GetPropertyChangedSignal("ViewportSize"), function()
-		scheduleRender()
-	end, cleanupConnections)
-end
-
-trackConnection(workspace:GetPropertyChangedSignal("CurrentCamera"), function()
-	scheduleRender()
-end, cleanupConnections)
+ClientRuntime.bindCameraViewportTracking()
 
 trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemKind"), function()
 	if player.Character then
