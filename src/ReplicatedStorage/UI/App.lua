@@ -2769,6 +2769,7 @@ local function App(props)
 	local showingCaptainLog = activeView == "CaptainLog"
 	local showingTitles = activeView == "Titles"
 	local showingInventory = not showingCaptainLog and not showingTitles
+	local showingInventoryCategories = not showingTitles
 	local toggleLayout = props.toggleLayout or {}
 	local dockToggleLeft = toggleLayout.dock == "hotbarLeft"
 	local dockToggleSlot = toggleLayout.dock == "hotbarSlot"
@@ -3053,6 +3054,11 @@ local function App(props)
 					value = string.format("%d / %d", crewQuickSlotsUnlocked, crewQuickSlotsMax),
 					valueColor3 = PALETTE.Sea,
 				},
+				{
+					label = "Crewmate Storage",
+					value = string.format("%d / %d", summary.crewStorageUsed or 0, summary.crewStorageSlots or 40),
+					valueColor3 = Color3.fromRGB(93, 203, 200),
+				},
 				{ label = "Rebirths", value = tostring(summary.rebirths or 0), valueColor3 = PALETTE.Sea },
 				{ label = "Multiplier", value = tostring(summary.multiplier or "1.00x"), valueColor3 = PALETTE.Cyan },
 				{ label = "Unopened Chests", value = tostring(summary.chests or 0), valueColor3 = PALETTE.Green },
@@ -3299,7 +3305,8 @@ local function App(props)
 					BackgroundTransparency = 0.12,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(286, 90),
-					Size = showingInventory and UDim2.new(1, -312, 1, -186) or UDim2.new(1, -312, 1, -116),
+					Size = showingInventoryCategories and UDim2.new(1, -312, 1, -186)
+						or UDim2.new(1, -312, 1, -116),
 					ZIndex = 7,
 				}, {
 					Corner = e("UICorner", {
@@ -3622,7 +3629,7 @@ local function App(props)
 					ClipsDescendants = true,
 					Position = UDim2.new(0, 286, 1, -86),
 					Size = UDim2.new(1, -312, 0, 58),
-					Visible = showingInventory,
+					Visible = showingInventoryCategories,
 					ZIndex = 7,
 				}, {
 					Corner = e("UICorner", {

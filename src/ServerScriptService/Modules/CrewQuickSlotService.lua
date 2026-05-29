@@ -7,6 +7,7 @@ local HttpService = game:GetService("HttpService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
+local CrewMemberInventoryConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewMemberInventory"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
@@ -19,11 +20,12 @@ local PRODUCT_AUTHORITY_AUDIT_PATH = "CrewQuickSlotProductAuthorityAudit"
 local CREW_MEMBER_QUICK_SLOT_REMOTE_NAME = "CrewMemberQuickSlotsRequest"
 local PRODUCT_AUTHORITY_TOKEN_TTL_SECONDS = 15 * 60
 local DATA_READY_TIMEOUT = 30
+local CREW_MEMBER_INVENTORY_STORAGE_SLOTS = CrewMemberInventoryConfig.GetStorageSlots()
 local INFO_COLOR = Color3.fromRGB(255, 229, 132)
 local SUCCESS_COLOR = Color3.fromRGB(90, 255, 145)
 local ERROR_COLOR = Color3.fromRGB(255, 86, 86)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
-local FULL_MESSAGE = "Crew quick slots full. Free a slot before carrying more."
+local FULL_MESSAGE = "Crewmate inventory full. Free a slot before carrying more."
 
 local dataManagerModule = nil
 local crewStorageModule = nil
@@ -470,6 +472,10 @@ function CrewQuickSlotService.GetMaxSlots(player)
 	return CrewQuickSlotService.EnsureSlots(player).MaxSlots
 end
 
+function CrewQuickSlotService.GetInventoryStorageSlots(_player)
+	return CREW_MEMBER_INVENTORY_STORAGE_SLOTS
+end
+
 function CrewQuickSlotService.CountOccupiedSlots(player)
 	return countOccupiedStacks(player)
 end
@@ -486,6 +492,7 @@ function CrewQuickSlotService.CanGainCrewMembers(player, crewMemberIdOrAmount, a
 	end
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
 	local stacks = getCrewQuickEntries(player)
 	local occupied = 0
 	local requiredSlots = 1
@@ -494,7 +501,7 @@ function CrewQuickSlotService.CanGainCrewMembers(player, crewMemberIdOrAmount, a
 	local targetCrewMemberId = tostring(crewMemberId or "")
 
 	if targetCrewMemberId ~= "" then
-		local fit = CrewInventoryStacks.CalculateIncomingFitFromStacks(stacks, targetCrewMemberId, requested, slots.UnlockedSlots)
+		local fit = CrewInventoryStacks.CalculateIncomingFitFromStacks(stacks, targetCrewMemberId, requested, storageSlots)
 		occupied = fit.OccupiedStacks
 		requiredSlots = fit.RequiredNewStacks
 		allowed = fit.Allowed == true
@@ -502,24 +509,25 @@ function CrewQuickSlotService.CanGainCrewMembers(player, crewMemberIdOrAmount, a
 		targetCrewMemberId = tostring(fit.CrewMemberId or targetCrewMemberId)
 	else
 		occupied = #stacks
-		allowed = (occupied + requiredSlots) <= slots.UnlockedSlots
+		allowed = (occupied + requiredSlots) <= storageSlots
 	end
 
 	quickSlotDebug(
-		"gain %s player=%s context=%s target=%s occupied=%d unlocked=%d amount=%d requiredSlots=%d max=%d reason=%s",
+		"gain %s player=%s context=%s target=%s occupied=%d quickUnlocked=%d storageSlots=%d amount=%d requiredSlots=%d max=%d reason=%s",
 		allowed and "allow" or "block",
 		player.Name,
 		tostring(resolvedContext or "unknown"),
 		targetCrewMemberId,
 		occupied,
 		slots.UnlockedSlots,
+		storageSlots,
 		requested,
 		requiredSlots,
 		slots.MaxSlots,
 		reason
 	)
 
-	return allowed, occupied, slots.UnlockedSlots, slots.MaxSlots, reason
+	return allowed, occupied, storageSlots, CREW_MEMBER_INVENTORY_STORAGE_SLOTS, reason
 end
 
 function CrewQuickSlotService.CanGainCrewMemberBatch(player, grants, context)
@@ -528,23 +536,29 @@ function CrewQuickSlotService.CanGainCrewMemberBatch(player, grants, context)
 	end
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
-	local fit = CrewInventoryStacks.CalculateBatchFitFromStacks(getCrewQuickEntries(player), grants, slots.UnlockedSlots)
+	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
+	local fit = CrewInventoryStacks.CalculateBatchFitFromStacks(getCrewQuickEntries(player), grants, storageSlots)
 	local allowed = fit.Allowed == true
 
 	quickSlotDebug(
-		"batchGain %s player=%s context=%s occupied=%d unlocked=%d requested=%d requiredSlots=%d max=%d reason=%s",
+		"batchGain %s player=%s context=%s occupied=%d quickUnlocked=%d storageSlots=%d requested=%d requiredSlots=%d max=%d reason=%s",
 		allowed and "allow" or "block",
 		player.Name,
 		tostring(context or "unknown"),
 		tonumber(fit.OccupiedStacks) or 0,
 		slots.UnlockedSlots,
+		storageSlots,
 		tonumber(fit.Requested) or 0,
 		tonumber(fit.RequiredNewStacks) or 0,
 		slots.MaxSlots,
 		tostring(fit.Reason or "unknown")
 	)
 
-	return allowed, tonumber(fit.OccupiedStacks) or 0, slots.UnlockedSlots, slots.MaxSlots, tostring(fit.Reason or "unknown")
+	return allowed,
+		tonumber(fit.OccupiedStacks) or 0,
+		storageSlots,
+		CREW_MEMBER_INVENTORY_STORAGE_SLOTS,
+		tostring(fit.Reason or "unknown")
 end
 
 function CrewQuickSlotService.CanInventoryFit(player, crewMemberInventory, context)
@@ -553,24 +567,26 @@ function CrewQuickSlotService.CanInventoryFit(player, crewMemberInventory, conte
 	end
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
 	local occupiedStacks = #CrewInventoryStacks.BuildAvailableStacks(crewMemberInventory)
-	local allowed = occupiedStacks <= slots.UnlockedSlots
+	local allowed = occupiedStacks <= storageSlots
 
 	quickSlotDebug(
-		"inventoryFit %s player=%s context=%s occupied=%d unlocked=%d max=%d",
+		"inventoryFit %s player=%s context=%s occupied=%d quickUnlocked=%d storageSlots=%d max=%d",
 		allowed and "allow" or "block",
 		player.Name,
 		tostring(context or "unknown"),
 		occupiedStacks,
 		slots.UnlockedSlots,
+		storageSlots,
 		slots.MaxSlots
 	)
 
 	return allowed,
 		occupiedStacks,
-		slots.UnlockedSlots,
-		slots.MaxSlots,
-		if allowed then "ok" else "quick_slots_full"
+		storageSlots,
+		CREW_MEMBER_INVENTORY_STORAGE_SLOTS,
+		if allowed then "ok" else "crew_inventory_full"
 end
 
 function CrewQuickSlotService.CanInventoryFitOrNotify(player, crewMemberInventory, context)

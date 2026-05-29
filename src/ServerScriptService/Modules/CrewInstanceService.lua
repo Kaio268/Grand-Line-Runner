@@ -1410,8 +1410,11 @@ end
 local function validateQuickSlotCapacityForInventory(player, crewMemberInventory)
 	local unlockedSlots = CrewQuickSlotService.GetUnlockedSlots(player)
 	local maxSlots = CrewQuickSlotService.GetMaxSlots(player)
+	local storageSlots = if typeof(CrewQuickSlotService.GetInventoryStorageSlots) == "function"
+		then CrewQuickSlotService.GetInventoryStorageSlots(player)
+		else unlockedSlots
 	local occupiedStacks = #CrewInventoryStacks.BuildAvailableStacks(crewMemberInventory)
-	return occupiedStacks <= unlockedSlots, occupiedStacks, unlockedSlots, maxSlots
+	return occupiedStacks <= storageSlots, occupiedStacks, storageSlots, math.max(maxSlots, storageSlots)
 end
 
 function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)

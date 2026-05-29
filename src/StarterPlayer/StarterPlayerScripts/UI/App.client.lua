@@ -14,7 +14,7 @@ local ClientRuntime = {
 }
 
 local React, ReactRoblox, App, Responsive
-local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewQuickSlotConfig
+local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
 local ChestUtils, ChestDropRates, Titles, Economy, CurrencyUtil
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
@@ -33,6 +33,7 @@ do
 	CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 	Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 	DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+	CrewMemberInventoryConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewMemberInventory"))
 	CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 	ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 	ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
@@ -301,6 +302,10 @@ local CATEGORY_DEFS = {
 	Resources = {
 		label = "Resources",
 		accentColor = Color3.fromRGB(241, 184, 86),
+	},
+	CrewMembers = {
+		label = "Crewmates",
+		accentColor = CREW_QUICK_ACCENT,
 	},
 }
 
@@ -2488,6 +2493,8 @@ local function buildRenderData()
 		activeKeys = devilFruitList
 	elseif uiState.activeCategory == "Resources" then
 		activeKeys = resourceList
+	elseif uiState.activeCategory == "CrewMembers" then
+		activeKeys = crewList
 	else
 		activeKeys = chestsList
 	end
@@ -2520,6 +2527,12 @@ local function buildRenderData()
 			label = CATEGORY_DEFS.Resources.label,
 			count = #resourceList,
 			accentColor = CATEGORY_DEFS.Resources.accentColor,
+		},
+		{
+			key = "CrewMembers",
+			label = CATEGORY_DEFS.CrewMembers.label,
+			count = #crewList,
+			accentColor = CATEGORY_DEFS.CrewMembers.accentColor,
 		},
 	}
 
@@ -2586,6 +2599,8 @@ local function buildRenderData()
 			mythicKeys = mythicKeyCount,
 			totalStacks = totalStacks,
 			crewCollectionCount = crewCollectionCount,
+			crewStorageUsed = #crewList,
+			crewStorageSlots = CrewMemberInventoryConfig.GetStorageSlots(),
 			crewQuickSlotsUnlocked = crewQuickSlots.unlockedSlots,
 			crewQuickSlotsMax = crewQuickSlots.maxSlots,
 		},
@@ -3068,6 +3083,8 @@ render = function()
 					return
 				end
 				uiState.activeCategory = categoryKey
+				uiState.activeView = "Inventory"
+				uiState.query = ""
 				render()
 			end,
 			onQueryChanged = function(nextQuery)
