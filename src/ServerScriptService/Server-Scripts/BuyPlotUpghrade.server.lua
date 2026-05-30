@@ -6,6 +6,7 @@ local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChil
 local CrewSlotAssignmentReconciler = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewSlotAssignmentReconciler"))
 local GrandLineRushVerticalSliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
 local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
+local TitleProgressService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleProgressService"))
 local cfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
@@ -415,6 +416,7 @@ local function processUpgradePurchase(player)
 	end
 
 	fireUpgradeSuccess(player, newLevel)
+	TitleProgressService.RecordShipUpgrade(player, newLevel)
 	return true
 end
 

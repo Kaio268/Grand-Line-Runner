@@ -9,6 +9,7 @@ local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegi
 local VariantCfg = CrewCatalog.GetVariantConfig()
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
+local TitleProgressService = require(script.Parent:WaitForChild("TitleProgressService"))
 
 local function validName(name)
 	if type(name) ~= "string" then return nil end
@@ -182,6 +183,14 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 			#createdIds
 		))
 	end
+
+	TitleProgressService.RecordCrewGained(plr, {
+		CrewName = crewMemberName,
+		Amount = n,
+		Rarity = tostring(info.Rarity or "Common"),
+		Source = tostring(options.Source or ""),
+		DepthBand = tostring(options.DepthBand or ""),
+	})
 
 	return true, createdIds
 end

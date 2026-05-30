@@ -581,6 +581,13 @@ local function hydrateRuntimeTitles(player)
 		local equippedFruit = dataManager:TryGetValue(player, "DevilFruit.Equipped")
 		if typeof(equippedFruit) == "string" and equippedFruit ~= DevilFruitConfig.None then
 			TitleService.UnlockTitle(player, "EnemyOfTheSea")
+			local fruitConfig = DevilFruitConfig.GetFruit(equippedFruit)
+			local fruitKey = fruitConfig and tostring(fruitConfig.FruitKey or "") or ""
+			if fruitKey == "Gomu" then
+				TitleService.UnlockTitle(player, "RubberRookie")
+			elseif fruitKey == "Tori" then
+				TitleService.UnlockTitle(player, "ThePhoenix")
+			end
 		end
 
 		local persistedEquippedTitle = normalizeTitleId(dataManager:TryGetValue(player, "Titles.Equipped"))

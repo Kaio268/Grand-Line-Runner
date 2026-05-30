@@ -38,7 +38,7 @@ local DevilFruitLogger = require(SharedFruitModules:WaitForChild("DevilFruitLogg
 local DevilFruitRemotes = require(SharedFruitModules:WaitForChild("DevilFruitRemotes"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local IndexCollectionService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
-local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
+local TitleProgressService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleProgressService"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local DevilFruitRequestGuard = require(ModulesFolder:WaitForChild("DevilFruitRequestGuard"))
 local FruitModuleLoader = require(ServerArchitectureFolder:WaitForChild("FruitModuleLoader"))
@@ -1321,7 +1321,7 @@ function DevilFruitService.SetEquippedFruit(player, fruitName)
 		-- Equipping only records lifetime discovery/title progress. Current owned
 		-- fruit items remain sourced from Inventory.DevilFruits.
 		IndexCollectionService.MarkDevilFruitDiscovered(player, resolvedFruitName)
-		TitleService.UnlockTitle(player, "EnemyOfTheSea")
+		TitleProgressService.RecordFruitEaten(player, resolvedFruitName)
 	end
 
 	-- ADDED THIS LINE: Apply the model swap immediately upon equipping

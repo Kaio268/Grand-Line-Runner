@@ -23,6 +23,7 @@ local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("Cr
 local StandIncomeMultipliers = require(ServerScriptService.Modules:WaitForChild("StandsMultiply"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
+local TitleProgressService = require(ServerScriptService.Modules:WaitForChild("TitleProgressService"))
 
 local Service = {}
 
@@ -1590,10 +1591,12 @@ ensureStarterCrew = function(player)
 	local canonicalStarterId, canonicalStarterEntry = findCanonicalStarterCrewInstance(player)
 	if canonicalStarterId and canonicalStarterEntry then
 		stampCanonicalStarterMetadata(player, canonicalStarterId, canonicalStarterEntry)
+		TitleProgressService.RecordStarterCrew(player)
 		return
 	end
 
 	if countCanonicalCrewEntries(player) > 0 then
+		TitleProgressService.RecordStarterCrew(player)
 		return
 	end
 
@@ -1617,6 +1620,7 @@ ensureStarterCrew = function(player)
 		return
 	end
 	stampCanonicalStarterMetadata(player, canonicalInstanceId, canonicalEntry)
+	TitleProgressService.RecordStarterCrew(player)
 end
 
 local function addUnopenedChest(player, chestInfoOrTier, depthBand)
@@ -2016,6 +2020,7 @@ local function grantCarrySlotReward(player, slot)
 
 		QuestSignals.Record(player, "ExtractCrew", 1, extractContext)
 	end
+	TitleProgressService.RecordRewardExtracted(player, carriedReward)
 
 	local extractionBounty, _ = BountyService.AwardExtractionBountyForReward(player, carriedReward)
 	if extractionBounty > 0 then
@@ -2055,6 +2060,8 @@ local function extractRun(player)
 			slotsToExtract[#slotsToExtract + 1] = slot
 		end
 	end
+	local maxExtractableCarry = getUnlockedCarrySlotCount(player, runtime)
+	local extractedMaxCarry = #slotsToExtract >= maxExtractableCarry
 
 	runTrace(
 		"sliceExtractBegin player=%s carriedCount=%d inRun=%s",
@@ -2080,6 +2087,9 @@ local function extractRun(player)
 
 	if extractedCount <= 0 then
 		return resolveActionResponse(player, false, nil, failedReason or "extract_failed")
+	end
+	if extractedMaxCarry and extractedCount >= maxExtractableCarry then
+		TitleProgressService.RecordMaxCarryExtraction(player)
 	end
 
 	local message = table.concat(messages, " ")
@@ -2530,6 +2540,7 @@ local function openChest(player, requestedChestId)
 			})
 		end
 	end
+	TitleProgressService.RecordChestOpened(player, normalizedChestData, resolution.OpenResult)
 
 	for foodKey, amount in pairs(grantedResources.food or {}) do
 		rewardParts[#rewardParts + 1] = string.format("%dx %s", amount, Economy.Food[foodKey].DisplayName)
@@ -2775,6 +2786,7 @@ local function openChests(player, inventoryName, requestedAmount)
 			mergeChangedRoots(changedRoots, resolution.ChangedRoots)
 			mergeGrantedResources(aggregateResources, openResult.GrantedResources)
 			recordChestRewardQuestSignals(player, normalizedChestData, openResult.GrantedResources or {})
+			TitleProgressService.RecordChestOpened(player, normalizedChestData, openResult)
 		end
 	end
 
@@ -2800,6 +2812,7 @@ local function openChests(player, inventoryName, requestedAmount)
 			mergeChangedRoots(changedRoots, resolution.ChangedRoots)
 			mergeGrantedResources(aggregateResources, openResult.GrantedResources)
 			recordChestRewardQuestSignals(player, normalizedChestData, openResult.GrantedResources or {})
+			TitleProgressService.RecordChestOpened(player, normalizedChestData, openResult)
 		end
 	end
 
@@ -2997,6 +3010,7 @@ local function feedCrew(player, crewInstanceId, foodKey)
 			FoodKey = tostring(foodKey or ""),
 			Level = level,
 		})
+		TitleProgressService.RecordCrewLevelsGained(player, levelUps)
 	end
 
 	local message = string.format(

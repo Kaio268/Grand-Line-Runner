@@ -9,6 +9,7 @@ local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):W
 local HieAnimationController = require(script.Parent:WaitForChild("HieAnimationController"))
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
+local TitleProgressService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleProgressService"))
 
 local HieHieNoMi = {}
 
@@ -1103,6 +1104,7 @@ local function freezePlayer(state, hitInfo)
 	)
 
 	scheduleRestoreLog(target, state.FreezeDuration, state.Id)
+	TitleProgressService.RecordPlayerFrozen(state.Player)
 	return true, "ok"
 end
 
@@ -1131,6 +1133,9 @@ local function freezeHazard(state, hitInfo)
 		tostring(applied),
 		state.FreezeDuration
 	)
+	if applied then
+		TitleProgressService.RecordHazardFrozen(state.Player, hitInfo)
+	end
 	return applied, applied and "ok" or "freeze_rejected"
 end
 

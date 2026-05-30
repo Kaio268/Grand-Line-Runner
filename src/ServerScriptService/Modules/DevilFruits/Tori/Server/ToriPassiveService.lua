@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local Workspace = game:GetService("Workspace")
 
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
+local TitleProgressService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleProgressService"))
 local DevilFruitConfig = require(
 	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits")
 )
@@ -616,6 +617,7 @@ local function triggerPhoenixRebirth(player, state, reason)
 	state.Reviving = true
 	state.Revived = false
 	state.ImmuneUntil = 0
+	TitleProgressService.RecordPhoenixRebirth(player)
 	local deathAt = getNow()
 	local activationDelay = math.max(0, tonumber(state.PassiveConfig.ActivationDelay) or 0)
 	local reviveDelay = math.max(0, tonumber(state.PassiveConfig.ReviveDelay) or state.PassiveConfig.RestoreDelay or 0)
