@@ -495,7 +495,24 @@ local function buildBatchAcknowledgement(openResult)
 	local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
 	if mythicKeyCount > 0 then
 		appendLine(lines, string.format("+%s Mythic Key%s", formatCount(mythicKeyCount), mythicKeyCount == 1 and "" or "s"))
-		appendRewardRow(rewardRows, "Mythic Key", mythicKeyCount)
+		appendRewardRow(rewardRows, "Duplicate Refund - Mythic Key", mythicKeyCount, REWARD_ICONS["Mythic Key"])
+	end
+
+	local autoConvertedChestCount = math.max(0, tonumber(openResult.AutoConvertedChestCount) or 0)
+	if autoConvertedChestCount > 0 then
+		appendLine(lines, string.format(
+			"+%s Mythic Devil Fruit Chest%s auto-converted",
+			formatCount(autoConvertedChestCount),
+			autoConvertedChestCount == 1 and "" or "s"
+		))
+	end
+	for _, autoConvertedChest in ipairs(openResult.AutoConvertedChests or {}) do
+		appendRewardRow(
+			rewardRows,
+			string.format("Auto Converted - %s", tostring(autoConvertedChest.DisplayName or "Mythic Devil Fruit Chest")),
+			autoConvertedChest.Amount,
+			DEFAULT_CHEST_ICON
+		)
 	end
 
 	if #lines == 0 then
@@ -612,21 +629,6 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 
 	if openResult.IsBatch == true then
 		local convertedChests = openResult.ConvertedChests or {}
-		if featuredReward == nil then
-			local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
-			if mythicKeyCount > 0 then
-				featuredReward = makeFeaturedReward("Mythic Key", mythicKeyCount, REWARD_ICONS["Mythic Key"], "Mythic")
-			elseif typeof(convertedChests) == "table" and #convertedChests > 0 then
-				local firstConverted = convertedChests[1]
-				featuredReward = makeFeaturedReward(
-					tostring(firstConverted.DisplayName or "Devil Fruit Chest"),
-					math.max(1, tonumber(firstConverted.Amount) or 1),
-					DEFAULT_CHEST_ICON,
-					"Reward"
-				)
-			end
-		end
-
 		for _, convertedChest in ipairs(convertedChests) do
 			appendResultCard(
 				rewardCards,
@@ -639,6 +641,25 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 
 		local conversionBeli = math.max(0, tonumber(openResult.ConversionBeli) or tonumber(openResult.ConversionDoubloons) or 0)
 		appendResultCard(rewardCards, CurrencyUtil.getDisplayName(), conversionBeli, REWARD_ICONS.Beli, "Duplicate")
+
+		local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
+		appendResultCard(
+			rewardCards,
+			"Duplicate Refund - Mythic Key",
+			mythicKeyCount,
+			REWARD_ICONS["Mythic Key"],
+			"Mythic"
+		)
+
+		for _, autoConvertedChest in ipairs(openResult.AutoConvertedChests or {}) do
+			appendResultCard(
+				rewardCards,
+				string.format("Auto Converted - %s", tostring(autoConvertedChest.DisplayName or "Mythic Devil Fruit Chest")),
+				autoConvertedChest.Amount,
+				DEFAULT_CHEST_ICON,
+				tostring(autoConvertedChest.Rarity or autoConvertedChest.FruitRarity or "Mythic")
+			)
+		end
 	else
 		if typeof(openResult.GrantedChest) == "table" and openResult.AutoConvertedMythicChest == true then
 			appendResultCard(

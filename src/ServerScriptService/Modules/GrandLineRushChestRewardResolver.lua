@@ -429,7 +429,7 @@ local function buildUnownedFruitPool(player, pool)
 	local unownedPool = {}
 
 	for _, fruit in ipairs(pool or {}) do
-		if not DevilFruitInventoryService.IsOwned(player, fruit.FruitKey) then
+		if not DevilFruitInventoryService.HasStoredDevilFruit(player, fruit.FruitKey) then
 			unownedPool[#unownedPool + 1] = fruit
 		end
 	end
@@ -666,7 +666,7 @@ function ChestRewardResolver.Resolve(params)
 	local fruit = selectionPool[randomObject:NextInteger(1, #selectionPool)]
 	openResult.GrantedFruitRarity = effectiveRarity
 
-	if DevilFruitInventoryService.IsOwned(params.Player, fruit.FruitKey) then
+	if DevilFruitInventoryService.HasStoredDevilFruit(params.Player, fruit.FruitKey) then
 		openResult.WasDuplicate = true
 		openResult.GrantedFruit = nil
 		openResult.GrantedFruitRarity = nil
@@ -716,7 +716,7 @@ function ChestRewardResolver.ResolveSpecificFruit(params)
 	})
 	openResult.GrantedFruitRarity = tostring(fruit.Rarity or "")
 
-	if DevilFruitInventoryService.IsOwned(params.Player, fruit.FruitKey) then
+	if DevilFruitInventoryService.HasStoredDevilFruit(params.Player, fruit.FruitKey) then
 		openResult.WasDuplicate = true
 		openResult.GrantedFruit = nil
 		openResult.GrantedFruitRarity = nil

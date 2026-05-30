@@ -2628,6 +2628,8 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 	local duplicateCount = 0
 	local convertedChestCount = 0
 	local convertedChestCounts = {}
+	local autoConvertedChestCount = 0
+	local autoConvertedChestCounts = {}
 	local conversionBeli = 0
 	local mythicKeyCount = 0
 
@@ -2654,6 +2656,38 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		elseif result.ConversionRewardType == "MythicKey" then
 			mythicKeyCount += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
 		end
+
+		if result.AutoConvertedMythicChest == true and typeof(result.GrantedChest) == "table" then
+			local grantedChest = result.GrantedChest
+			local displayName = tostring(grantedChest.displayName or "Mythic Devil Fruit Chest")
+			local inventoryName = tostring(grantedChest.inventoryName or displayName)
+			local chestKind = tostring(grantedChest.kind or "")
+			local tierName = tostring(grantedChest.tier or "")
+			local fruitRarity = tostring(grantedChest.fruitRarity or "")
+			local stableKey = table.concat({
+				chestKind,
+				inventoryName,
+				fruitRarity,
+				tierName,
+				displayName,
+			}, "|")
+			local autoConvertedEntry = autoConvertedChestCounts[stableKey]
+			if autoConvertedEntry == nil then
+				autoConvertedEntry = {
+					DisplayName = displayName,
+					InventoryName = inventoryName,
+					ChestKind = chestKind,
+					Tier = tierName,
+					FruitRarity = fruitRarity,
+					Rarity = if fruitRarity ~= "" then fruitRarity else tierName,
+					Amount = 0,
+				}
+				autoConvertedChestCounts[stableKey] = autoConvertedEntry
+			end
+
+			autoConvertedEntry.Amount += 1
+			autoConvertedChestCount += 1
+		end
 	end
 
 	local convertedChests = {}
@@ -2664,6 +2698,17 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		}
 	end
 	table.sort(convertedChests, function(a, b)
+		return tostring(a.DisplayName) < tostring(b.DisplayName)
+	end)
+
+	local autoConvertedChests = {}
+	for _, entry in pairs(autoConvertedChestCounts) do
+		autoConvertedChests[#autoConvertedChests + 1] = entry
+	end
+	table.sort(autoConvertedChests, function(a, b)
+		if tostring(a.DisplayName) == tostring(b.DisplayName) then
+			return tostring(a.InventoryName) < tostring(b.InventoryName)
+		end
 		return tostring(a.DisplayName) < tostring(b.DisplayName)
 	end)
 
@@ -2678,6 +2723,8 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		DuplicateCount = duplicateCount,
 		ConvertedChestCount = convertedChestCount,
 		ConvertedChests = convertedChests,
+		AutoConvertedChestCount = autoConvertedChestCount,
+		AutoConvertedChests = autoConvertedChests,
 		ConversionBeli = conversionBeli,
 		-- Legacy payload alias kept while older clients finish moving to Beli.
 		ConversionDoubloons = conversionBeli,

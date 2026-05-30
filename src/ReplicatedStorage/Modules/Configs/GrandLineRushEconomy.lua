@@ -61,7 +61,7 @@ local Economy = {
 		CrewLevelsArePerInstance = true,
 		CrewMaxLevel = 50,
 		DuplicateCrewHandling = "StoreAsSeparateInstances",
-		MaxShipSlots = 24,
+		MaxShipSlots = 38,
 		LoseUnextractedRewardsOnRunFailure = true,
 	},
 

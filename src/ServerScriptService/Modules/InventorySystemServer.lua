@@ -690,14 +690,16 @@ local function getCrewInventoryAvailableCounts(player, inventory)
 	})
 end
 
-local function pushCrewInventoryCounts(player, inventory)
+local function pushCrewInventoryCounts(player, inventory, options)
+	options = if typeof(options) == "table" then options else {}
 	local counts = getCrewInventoryAvailableCounts(player, inventory)
 	local previous = lastCrewInventoryCounts[player] or {}
 	local seen = {}
+	local force = options.Force == true
 
 	for storageName, quantity in pairs(counts) do
 		seen[storageName] = true
-		if previous[storageName] ~= quantity then
+		if force or previous[storageName] ~= quantity then
 			updateRemote:FireClient(player, TOOL_KIND_CREW_MEMBER, storageName, quantity)
 		end
 	end
@@ -710,6 +712,18 @@ local function pushCrewInventoryCounts(player, inventory)
 	end
 
 	lastCrewInventoryCounts[player] = counts
+end
+
+function Module.SyncCrewInventory(player, inventory, options)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+	if player.Parent ~= Players then
+		return false, "player_not_active"
+	end
+
+	pushCrewInventoryCounts(player, inventory, options)
+	return true
 end
 
 local function scheduleCrewInventoryCountsPush(player, inventory)

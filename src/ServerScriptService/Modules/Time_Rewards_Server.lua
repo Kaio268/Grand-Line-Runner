@@ -158,6 +158,7 @@ local lastClaimRequestAt = {}
 local playTimeSessions = {}
 local rewardIds = {}
 local CrewRewardModule = nil
+local InventorySystemServerModule = nil
 
 local POTION_REWARD_KEYS = {
 	x2Money = true,
@@ -170,6 +171,42 @@ local CREW_REWARD_KIND = {
 	CrewMember = true,
 	Crew = true,
 }
+
+local function syncCrewInventoryAfterReward(player: Player, rewardName: string)
+	if InventorySystemServerModule == false then
+		return
+	end
+
+	if InventorySystemServerModule == nil then
+		local ok, module = pcall(function()
+			return require(script.Parent:WaitForChild("InventorySystemServer"))
+		end)
+		if not ok or typeof(module) ~= "table" then
+			InventorySystemServerModule = false
+			giftError("Failed to load InventorySystemServer for Time Reward crew sync", player.Name, tostring(module))
+			return
+		end
+		InventorySystemServerModule = module
+	end
+
+	if typeof(InventorySystemServerModule.SyncCrewInventory) ~= "function" then
+		giftError("InventorySystemServer.SyncCrewInventory unavailable for Time Reward crew sync", player.Name)
+		return
+	end
+
+	local ok, synced, reason = pcall(function()
+		return InventorySystemServerModule.SyncCrewInventory(player, nil, {
+			Force = true,
+			Source = "TimeReward",
+			RewardName = tostring(rewardName or ""),
+		})
+	end)
+	if not ok then
+		giftError("Time Reward crew inventory sync errored", player.Name, tostring(rewardName), tostring(synced))
+	elseif synced ~= true then
+		giftError("Time Reward crew inventory sync failed", player.Name, tostring(rewardName), tostring(reason))
+	end
+end
 
 for id in pairs(RewardsConfig) do
 	table.insert(rewardIds, id)
@@ -597,6 +634,9 @@ local function grantReward(player: Player, rewardId: number, state)
 			Source = "TimeReward",
 		})
 		reason = if ok then nil else "crew_member_grant_failed"
+		if ok then
+			syncCrewInventoryAfterReward(player, grantName)
+		end
 		rewardName = displayName
 	else
 		ok, reason = addReward(player, rewardName, amount)

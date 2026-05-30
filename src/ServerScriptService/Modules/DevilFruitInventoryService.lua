@@ -308,7 +308,7 @@ function DevilFruitInventoryService.GetFruitQuantity(player, fruitIdentifier)
 	return persistedQuantity
 end
 
-function DevilFruitInventoryService.IsOwned(player, fruitIdentifier)
+function DevilFruitInventoryService.HasStoredDevilFruit(player, fruitIdentifier)
 	local fruit, reason = resolveFruit(fruitIdentifier)
 	if not fruit then
 		return false, reason
@@ -321,6 +321,26 @@ function DevilFruitInventoryService.IsOwned(player, fruitIdentifier)
 
 	if math.max(0, tonumber(currentQuantity) or 0) > 0 then
 		return true, nil
+	end
+
+	return false, nil
+end
+
+function DevilFruitInventoryService.IsOwned(player, fruitIdentifier)
+	-- Broad ownership includes stored inventory or equipped fruit. Chest duplicate
+	-- checks should use HasStoredDevilFruit so equipped-only fruit is not converted.
+	local hasStoredFruit, storedReason = DevilFruitInventoryService.HasStoredDevilFruit(player, fruitIdentifier)
+	if storedReason ~= nil then
+		return false, storedReason
+	end
+
+	if hasStoredFruit then
+		return true, nil
+	end
+
+	local fruit, reason = resolveFruit(fruitIdentifier)
+	if not fruit then
+		return false, reason
 	end
 
 	return DevilFruitService.GetEquippedFruitKey(player) == fruit.FruitKey, nil
@@ -1374,7 +1394,7 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 			Success = false,
 			Reason = "already_equipped",
 		})
-		showConsumeResultPopup(player, false, "That fruit is already equipped")
+		showConsumeResultPopup(player, false, "You already have this fruit.")
 		return
 	end
 
