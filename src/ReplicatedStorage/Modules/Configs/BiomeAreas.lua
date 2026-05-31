@@ -76,6 +76,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(1),
 		BiomeName = "Biome 1",
 		AreaName = "Foosha Village",
+		DisplayName = "Rookie's Cove",
 		ProgressColor = Color3.fromRGB(102, 166, 111),
 		Rarity = "Common",
 		Tier = 1,
@@ -84,6 +85,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(2),
 		BiomeName = "Biome 2",
 		AreaName = "Arlong Park",
+		DisplayName = "Coral Kingdom",
 		ProgressColor = Color3.fromRGB(70, 173, 176),
 		Rarity = "Uncommon",
 		Tier = 2,
@@ -92,6 +94,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(3),
 		BiomeName = "Biome 3",
 		AreaName = "Drum Island",
+		DisplayName = "Frozen Summit",
 		ProgressColor = Color3.fromRGB(126, 184, 226),
 		Rarity = "Rare",
 		Tier = 3,
@@ -100,6 +103,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(4),
 		BiomeName = "Biome 4",
 		AreaName = "Alabasta",
+		DisplayName = "Sunscorch Desert",
 		ProgressColor = Color3.fromRGB(211, 162, 91),
 		Rarity = "Epic",
 		Tier = 4,
@@ -108,6 +112,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(5),
 		BiomeName = "Biome 5",
 		AreaName = "Water 7",
+		DisplayName = "Storm Harbor",
 		ProgressColor = Color3.fromRGB(89, 151, 214),
 		Rarity = "Legendary",
 		Tier = 5,
@@ -116,6 +121,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(6),
 		BiomeName = "Biome 6",
 		AreaName = "Thriller Bark",
+		DisplayName = "Phantom Waters",
 		ProgressColor = Color3.fromRGB(143, 107, 171),
 		Rarity = "Mythic",
 		Tier = 6,
@@ -124,6 +130,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(7),
 		BiomeName = "Biome 7",
 		AreaName = "Sabaody",
+		DisplayName = "Bubble Isles",
 		ProgressColor = Color3.fromRGB(93, 190, 199),
 		Rarity = "Godly",
 		Tier = 7,
@@ -132,6 +139,7 @@ BiomeAreas.Biomes = {
 		AreaKey = getBiomeAreaKey(8),
 		BiomeName = "Biome 8",
 		AreaName = "Dressrosa",
+		DisplayName = "Royal Dominion",
 		ProgressColor = Color3.fromRGB(196, 98, 118),
 		Rarity = "Secret",
 		Tier = 8,
@@ -181,6 +189,14 @@ end
 
 function BiomeAreas.GetRarityStyle(rarity)
 	return BiomeAreas.RarityStyles[tostring(rarity or "")] or BiomeAreas.RarityStyles.Common
+end
+
+function BiomeAreas.GetDisplayName(entry)
+	if not entry then
+		return ""
+	end
+
+	return tostring(entry.DisplayName or entry.AreaName or entry.BiomeName or "")
 end
 
 function BiomeAreas.GetSubtitle(entry)

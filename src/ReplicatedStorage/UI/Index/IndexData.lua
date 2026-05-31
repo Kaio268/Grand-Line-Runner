@@ -607,7 +607,7 @@ function IndexData.buildViewModel(options)
 			id = "DevilFruit:" .. tostring(fruit.FruitKey),
 			itemKind = "DevilFruit",
 			name = fruit.FruitKey,
-			displayName = tostring(fruit.DisplayName or fruit.FruitKey or "Devil Fruit"),
+			displayName = DevilFruits.GetPlayerDisplayName(fruit),
 			rarity = tostring(fruit.Rarity or "Rare"),
 			discovered = discovered,
 			category = "fruits",

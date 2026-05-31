@@ -1235,11 +1235,7 @@ local function getItemDisplayName(kind, name, state)
 	end
 
 	if kind == "DevilFruit" then
-		local fruit = DevilFruits.GetFruit(name)
-		if fruit and fruit.DisplayName then
-			return tostring(fruit.DisplayName)
-		end
-		return tostring(name or "Devil Fruit")
+		return DevilFruits.GetPlayerDisplayName(name)
 	end
 
 	if isCrewItemKind(kind) then
@@ -1388,8 +1384,7 @@ local function getDisplayName(kind, name, state)
 	end
 
 	if kind == "DevilFruit" then
-		local fruit = DevilFruits.GetFruit(name)
-		return fruit and fruit.DisplayName or tostring(name)
+		return DevilFruits.GetPlayerDisplayName(name)
 	end
 
 	if isCrewItemKind(kind) then

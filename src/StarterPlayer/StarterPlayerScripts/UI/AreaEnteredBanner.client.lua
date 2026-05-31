@@ -296,7 +296,7 @@ local function setBannerContent(entry)
 	local accentColor = style.AccentColor
 	local glowColor = style.GlowColor or accentColor
 
-	areaNameLabel.Text = tostring(entry.AreaName or entry.BiomeName or "")
+	areaNameLabel.Text = BiomeAreas.GetDisplayName(entry)
 	local subtitle = BiomeAreas.GetSubtitle(entry)
 	bannerHasSubtitle = tostring(subtitle or "") ~= ""
 	rarityLabel.Text = subtitle
