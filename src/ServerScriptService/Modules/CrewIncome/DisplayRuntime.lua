@@ -7,6 +7,7 @@ function Module.Install(ctx)
 	local CAPTAIN_SLOT_KEY = ctx.CAPTAIN_SLOT_KEY
 	local CaptainSlotRuntime = ctx.CaptainSlotRuntime
 	local CrewFoodProgression = ctx.CrewFoodProgression
+	local CrewIncomeBalance = ctx.CrewIncomeBalance
 	local CrewStandIncomeAuthority = ctx.CrewStandIncomeAuthority
 	local CurrencyUtil = ctx.CurrencyUtil
 	local DataManager = ctx.DataManager
@@ -287,7 +288,7 @@ function Module.Install(ctx)
 					SlotKey = standName,
 					CrewMemberName = crewMemberName,
 					CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
-					StandLevel = math.max(1, math.floor(tonumber(standData.StandLevel) or 1)),
+					StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 					RawIncomeToCollect = rawIncomeToCollect,
 					CollectMultiplier = collectMultiplier,
 					IncomePerSecond = incomePerSecond,
@@ -303,7 +304,7 @@ function Module.Install(ctx)
 					StandName = standName,
 					CrewMemberName = crewMemberName,
 					CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
-					StandLevel = math.max(1, math.floor(tonumber(standData.StandLevel) or 1)),
+					StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 					RawIncomeToCollect = rawIncomeToCollect,
 					CollectMultiplier = collectMultiplier,
 					IncomePerSecond = incomePerSecond,
@@ -334,10 +335,7 @@ function Module.Install(ctx)
 					or captainAssignment.CrewInstanceId
 					or ""
 			)
-			local captainStandLevel = math.max(
-				1,
-				math.floor(tonumber(captainAssignment.Level or captainAssignment.StandLevel) or 1)
-			)
+			local captainStandLevel = CrewIncomeBalance.NormalizeLevel(captainAssignment.Level or captainAssignment.StandLevel)
 			if captainCrewMemberName ~= "" then
 				snapshot.Captain = {
 					SlotKey = CAPTAIN_SLOT_KEY,

@@ -69,6 +69,25 @@ local ProfileTemplate = {
 
 	ChestRewards = {
 		MythicKeys = 0,
+		AFKGoldChests = {
+			DayKey = "",
+			EarnedToday = 0,
+			ProgressSeconds = 0,
+		},
+		FruitPity = {
+			Common = {
+				FailedOpens = 0,
+			},
+			Rare = {
+				FailedOpens = 0,
+			},
+			Legendary = {
+				FailedOpens = 0,
+			},
+			Mythic = {
+				FailedOpens = 0,
+			},
+		},
 	},
 
 	Bounty = {

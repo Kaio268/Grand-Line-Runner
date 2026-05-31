@@ -7,13 +7,13 @@ local Configs = Modules:WaitForChild("Configs")
 
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local IncomeClaimMath = require(ServerScriptService.Modules:WaitForChild("IncomeClaimMath"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
 local RebirthConfig = require(Configs:WaitForChild("Rebirths"))
-local StandUpgradeMults = require(ServerScriptService.Modules:WaitForChild("StandsMultiply"))
 
 local CaptainSlotRuntime = {}
 
@@ -230,20 +230,10 @@ end
 local function getCrewMemberLevel(player, crewMemberName, instanceId)
 	local target = if tostring(instanceId or "") ~= "" then tostring(instanceId) else tostring(crewMemberName or "")
 	if target ~= "" and typeof(callbacks.GetCrewMemberLevel) == "function" then
-		return math.max(1, math.floor(tonumber(callbacks.GetCrewMemberLevel(player, target)) or 1))
+		return CrewIncomeBalance.NormalizeLevel(callbacks.GetCrewMemberLevel(player, target))
 	end
 
 	return 1
-end
-
-local function getCrewLevelMultiplier(player, crewMemberName, instanceId)
-	local level = getCrewMemberLevel(player, crewMemberName, instanceId)
-	local multiplier = tonumber(StandUpgradeMults[tostring(level)]) or 1
-	if multiplier <= 0 then
-		return 1
-	end
-
-	return multiplier
 end
 
 local function getCaptainBonusMultiplierForAssignment(player, instanceId)
@@ -267,9 +257,11 @@ local function getCaptainBonusMultiplierForAssignment(player, instanceId)
 end
 
 local function getCaptainCollectMultiplier(player, crewMemberName, instanceId)
-	return getCrewLevelMultiplier(player, crewMemberName, instanceId)
-		* RebirthConfig.GetShipIncomeMultiplier(getPlayerRebirthCount(player))
-		* getCaptainBonusMultiplierForAssignment(player, instanceId)
+	local level = getCrewMemberLevel(player, crewMemberName, instanceId)
+	return CrewIncomeBalance.GetClaimMultiplier(level, {
+		RebirthConfig.GetShipIncomeMultiplier(getPlayerRebirthCount(player)),
+		getCaptainBonusMultiplierForAssignment(player, instanceId),
+	})
 end
 
 local function getCaptainBankAmountPerTick(player, crewMemberName, instanceId)

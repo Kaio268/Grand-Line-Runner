@@ -262,6 +262,36 @@ local Economy = {
 	},
 
 	Chests = {
+		AFKGoldRewards = {
+			Enabled = true,
+			RewardTier = "Gold",
+			Source = "AFK",
+			Normal = {
+				IntervalSeconds = 3600,
+				DailyCap = 8,
+			},
+			Premium = {
+				IntervalSeconds = 1800,
+				DailyCap = 16,
+			},
+			Zone = {
+				Attribute = "AFKGoldChestZone",
+				Names = {
+					"AFKGoldChestZone",
+					"AFKZone",
+					"AFKLobby",
+				},
+			},
+			Remotes = {
+				StateEventName = "AFKGoldChestState",
+				StateRequestName = "AFKGoldChestStateRequest",
+				EntryRequestName = "AFKGoldChestEntryRequest",
+			},
+			Entry = {
+				MaxDistance = 18,
+			},
+		},
+
 		Tiers = {
 			Wooden = {
 				DepthBand = "Early",
@@ -340,7 +370,6 @@ local Economy = {
 							{ Beli = 5000 },
 						},
 					},
-					DevilFruitChance = 0.10,
 				},
 			},
 		},

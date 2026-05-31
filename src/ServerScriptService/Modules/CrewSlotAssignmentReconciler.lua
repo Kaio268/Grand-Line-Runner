@@ -1,5 +1,9 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local CrewIncomeBalance = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance")
+)
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
@@ -128,7 +132,7 @@ local function makeCaptainSlotDataFromInstance(instanceId, instanceData, existin
 	end
 
 	existingRow = if typeof(existingRow) == "table" then existingRow else {}
-	local level = math.max(1, math.floor(tonumber(instanceData.Level) or tonumber(existingRow.Level) or 1))
+	local level = CrewIncomeBalance.NormalizeLevel(instanceData.Level or existingRow.Level)
 	return {
 		CrewMemberName = crewMemberName,
 		CrewMemberId = tostring(instanceData.CrewMemberId or crewMemberName),
@@ -153,7 +157,7 @@ local function makeStandRowFromInstance(instanceId, instanceData, existingRow)
 		LegacyStorageName = tostring(instanceData.LegacyStorageName or existingRow.LegacyStorageName or ""),
 		CrewMemberInstanceId = tostring(instanceId),
 		IncomeToCollect = tonumber(existingRow.IncomeToCollect) or 0,
-		StandLevel = math.max(1, math.floor(tonumber(instanceData.Level or existingRow.StandLevel) or 1)),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level or existingRow.StandLevel),
 	}
 end
 
@@ -182,7 +186,7 @@ local function makeStandRowFromLegacySlot(row)
 		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
 		CrewMemberInstanceId = instanceId,
 		IncomeToCollect = tonumber(row.IncomeToCollect or row.Income or row.Money or row.Cash) or 0,
-		StandLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or 1)),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level),
 	}
 end
 
@@ -499,7 +503,7 @@ local function syncShipSlotsMirror(player, slotKeys)
 				CrewMemberName = tostring(standData.CrewMemberName or ""),
 				CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
 				IncomeToCollect = tonumber(standData.IncomeToCollect) or 0,
-				StandLevel = math.max(1, math.floor(tonumber(standData.StandLevel) or 1)),
+				StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 				LegacyStorageName = tostring(standData.LegacyStorageName or ""),
 			}
 
@@ -509,7 +513,7 @@ local function syncShipSlotsMirror(player, slotKeys)
 				or tostring(current.CrewMemberName or "") ~= nextSlotData.CrewMemberName
 				or tostring(current.CrewMemberInstanceId or "") ~= nextSlotData.CrewMemberInstanceId
 				or tonumber(current.IncomeToCollect) ~= nextSlotData.IncomeToCollect
-				or math.max(1, math.floor(tonumber(current.StandLevel) or 1)) ~= nextSlotData.StandLevel
+				or CrewIncomeBalance.NormalizeLevel(current.StandLevel) ~= nextSlotData.StandLevel
 			then
 				shipSlots[slotKey] = nextSlotData
 				changed = true

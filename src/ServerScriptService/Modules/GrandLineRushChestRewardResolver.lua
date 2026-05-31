@@ -219,6 +219,7 @@ local function ensureChestRewardsState(dataRoot)
 	end
 
 	dataRoot.ChestRewards.MythicKeys = math.max(0, tonumber(dataRoot.ChestRewards.MythicKeys) or 0)
+	ChestRewards.EnsureFruitPityState(dataRoot.ChestRewards)
 	return dataRoot.ChestRewards
 end
 
@@ -243,6 +244,8 @@ local function buildOpenResult(dataRoot, openedChest)
 			current = ensureChestRewardsState(dataRoot).MythicKeys,
 			threshold = ChestRewards.MythicKey.Threshold,
 		},
+		FruitPityProgress = nil,
+		FruitPityTriggered = nil,
 		AutoConvertedMythicChest = false,
 		GrantedChest = nil,
 		Message = nil,
@@ -425,6 +428,16 @@ local function resolveEffectiveRarity(requestedRarity, pools)
 	return nil, nil
 end
 
+local function resolveExactRarity(requestedRarity, pools)
+	local rarityName = tostring(requestedRarity or "")
+	local pool = pools[rarityName]
+	if pool and #pool > 0 then
+		return rarityName, pool
+	end
+
+	return nil, nil
+end
+
 local function buildUnownedFruitPool(player, pool)
 	local unownedPool = {}
 
@@ -469,6 +482,101 @@ local function chooseRequestedRarity(randomObject, chestData, player)
 	end
 
 	return chooseWeightedKey(randomObject, buildLuckAdjustedFruitWeights(player), ChestRewards.FruitRarityOrder)
+end
+
+local function getFailedPityOpens(chestRewardsState, rarityName)
+	local fruitPity = ChestRewards.EnsureFruitPityState(chestRewardsState)
+	local entry = fruitPity[tostring(rarityName or "")]
+	if typeof(entry) ~= "table" then
+		return 0
+	end
+
+	return math.max(0, math.floor(tonumber(entry.FailedOpens) or 0))
+end
+
+local function chooseStandardFruitRarity(randomObject, chestData, chestRewardsState)
+	local tierName = tostring(chestData.Tier or "")
+	local priority = ChestRewards.GetStandardFruitRaritiesForTier(tierName)
+	if #priority <= 0 then
+		return nil, nil
+	end
+
+	for _, rarityName in ipairs(priority) do
+		local pityConfig = ChestRewards.GetFruitPityConfig(rarityName)
+		local hardPity = math.max(1, math.floor(tonumber(pityConfig and pityConfig.HardPity) or 1))
+		if getFailedPityOpens(chestRewardsState, rarityName) >= hardPity - 1 then
+			return rarityName, rarityName
+		end
+	end
+
+	local roll = randomObject:NextNumber()
+	local cursor = 0
+	for _, rarityName in ipairs(priority) do
+		cursor += ChestRewards.GetStandardFruitChance(tierName, rarityName)
+		if roll <= cursor then
+			return rarityName, nil
+		end
+	end
+
+	return nil, nil
+end
+
+local function applyStandardFruitPityResult(dataRoot, chestData, droppedRarity, changedRoots, openResult, triggeredRarity)
+	if chestData.ChestKind ~= ChestRewards.ChestKinds.Standard then
+		return
+	end
+
+	local tierName = tostring(chestData.Tier or "")
+	local eligibleRarities = ChestRewards.GetStandardFruitRaritiesForTier(tierName)
+	if #eligibleRarities <= 0 then
+		return
+	end
+
+	local chestRewardsState = ensureChestRewardsState(dataRoot)
+	local fruitPity = ChestRewards.EnsureFruitPityState(chestRewardsState)
+	local normalizedDroppedRarity = if droppedRarity ~= nil then tostring(droppedRarity) else nil
+	local changed = false
+
+	for _, rarityName in ipairs(eligibleRarities) do
+		local entry = fruitPity[rarityName]
+		if typeof(entry) ~= "table" then
+			entry = { FailedOpens = 0 }
+			fruitPity[rarityName] = entry
+			changed = true
+		end
+
+		local pityConfig = ChestRewards.GetFruitPityConfig(rarityName)
+		local resetOn = if typeof(pityConfig) == "table" and typeof(pityConfig.ResetOn) == "table" then pityConfig.ResetOn else {}
+		local hardPity = math.max(1, math.floor(tonumber(pityConfig and pityConfig.HardPity) or 1))
+		local currentFailedOpens = math.clamp(math.floor(tonumber(entry.FailedOpens) or 0), 0, hardPity)
+		local nextFailedOpens = currentFailedOpens
+
+		if normalizedDroppedRarity ~= nil and resetOn[normalizedDroppedRarity] == true then
+			nextFailedOpens = 0
+		else
+			nextFailedOpens = math.clamp(currentFailedOpens + 1, 0, hardPity)
+		end
+
+		if currentFailedOpens ~= nextFailedOpens then
+			entry.FailedOpens = nextFailedOpens
+			changed = true
+		else
+			entry.FailedOpens = currentFailedOpens
+		end
+	end
+
+	if changed then
+		changedRoots.ChestRewards = true
+	end
+
+	openResult.FruitPityProgress = ChestRewards.GetFruitPityProgress(chestRewardsState, tierName)
+	if triggeredRarity ~= nil then
+		local pityConfig = ChestRewards.GetFruitPityConfig(triggeredRarity)
+		openResult.FruitPityTriggered = {
+			Rarity = tostring(triggeredRarity),
+			HardPity = math.max(1, math.floor(tonumber(pityConfig and pityConfig.HardPity) or 1)),
+		}
+	end
 end
 
 local function applyFallbackBeli(dataRoot, chestData, openResult, changedRoots)
@@ -625,29 +733,33 @@ function ChestRewardResolver.Resolve(params)
 		openResult.GrantedResources = grantBaseRewards(randomObject, params.DataRoot, chestData, changedRoots)
 	end
 
-	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
-		then 1
-		else math.max(0, tonumber(ChestRewards.FruitGateChanceByTier[chestData.Tier]) or 0)
-
-	if gateChance <= 0 then
-		return {
-			OpenResult = openResult,
-			ChangedRoots = changedRoots,
-			RewardText = nil,
-		}
+	local requestedRarity = nil
+	local triggeredPityRarity = nil
+	local isStandardChest = chestData.ChestKind == ChestRewards.ChestKinds.Standard
+	if isStandardChest then
+		local chestRewardsState = ensureChestRewardsState(params.DataRoot)
+		requestedRarity, triggeredPityRarity = chooseStandardFruitRarity(randomObject, chestData, chestRewardsState)
+		if requestedRarity == nil then
+			applyStandardFruitPityResult(params.DataRoot, chestData, nil, changedRoots, openResult, nil)
+			return {
+				OpenResult = openResult,
+				ChangedRoots = changedRoots,
+				RewardText = nil,
+			}
+		end
+	else
+		requestedRarity = chooseRequestedRarity(randomObject, chestData, params.Player)
 	end
 
-	if randomObject:NextNumber() > gateChance then
-		return {
-			OpenResult = openResult,
-			ChangedRoots = changedRoots,
-			RewardText = nil,
-		}
+	local fruitPools = getFruitPoolsByRarity()
+	local effectiveRarity, pool = nil, nil
+	if isStandardChest then
+		effectiveRarity, pool = resolveExactRarity(requestedRarity, fruitPools)
+	else
+		effectiveRarity, pool = resolveEffectiveRarity(requestedRarity, fruitPools)
 	end
-
-	local requestedRarity = chooseRequestedRarity(randomObject, chestData, params.Player)
-	local effectiveRarity, pool = resolveEffectiveRarity(requestedRarity, getFruitPoolsByRarity())
 	if effectiveRarity == nil or pool == nil or #pool <= 0 then
+		applyStandardFruitPityResult(params.DataRoot, chestData, nil, changedRoots, openResult, nil)
 		return {
 			OpenResult = openResult,
 			ChangedRoots = changedRoots,
@@ -667,6 +779,7 @@ function ChestRewardResolver.Resolve(params)
 	openResult.GrantedFruitRarity = effectiveRarity
 
 	if DevilFruitInventoryService.HasStoredDevilFruit(params.Player, fruit.FruitKey) then
+		applyStandardFruitPityResult(params.DataRoot, chestData, effectiveRarity, changedRoots, openResult, triggeredPityRarity)
 		openResult.WasDuplicate = true
 		openResult.GrantedFruit = nil
 		openResult.GrantedFruitRarity = nil
@@ -680,6 +793,7 @@ function ChestRewardResolver.Resolve(params)
 	grantFruit(params.DataRoot, fruit.FruitKey)
 	changedRoots.InventoryDevilFruits = true
 	changedRoots.IndexCollectionDevilFruits = true
+	applyStandardFruitPityResult(params.DataRoot, chestData, effectiveRarity, changedRoots, openResult, triggeredPityRarity)
 	openResult.GrantedFruit = fruit.FruitKey
 	openResult.Message = string.format("Obtained: %s (%s)", tostring(fruit.DisplayName), tostring(effectiveRarity))
 

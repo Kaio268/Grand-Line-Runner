@@ -4,6 +4,7 @@ function Module.Install(ctx)
 	local CREW_ITEM_KIND = ctx.CREW_ITEM_KIND
 	local CrewCatalog = ctx.CrewCatalog
 	local CrewFoodProgression = ctx.CrewFoodProgression
+	local CrewIncomeBalance = ctx.CrewIncomeBalance
 	local CrewInstanceService = ctx.CrewInstanceService
 	local CrewSlotAssignmentReconciler = ctx.CrewSlotAssignmentReconciler
 	local CrewStandIncomeAuthority = ctx.CrewStandIncomeAuthority
@@ -24,7 +25,6 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
-	local StandUpgradeMults = ctx.StandUpgradeMults
 	local function syncPlacedOverheadMetadata(...)
 		return ctx.syncPlacedOverheadMetadata(...)
 	end
@@ -181,10 +181,6 @@ function Module.Install(ctx)
 			lvl = 1
 		end
 
-		local mult = tonumber(StandUpgradeMults[tostring(lvl)]) or 1
-		if mult <= 0 then
-			mult = 1
-		end
 		local rebirthCount = 0
 
 		local leaderstats = player:FindFirstChild("leaderstats")
@@ -205,7 +201,7 @@ function Module.Install(ctx)
 			end
 		end
 
-		return mult * RebirthConfig.GetShipIncomeMultiplier(rebirthCount)
+		return CrewIncomeBalance.GetClaimMultiplier(lvl, RebirthConfig.GetShipIncomeMultiplier(rebirthCount))
 	end
 
 	local function getBeliBoostRemaining(player)
@@ -227,16 +223,6 @@ function Module.Install(ctx)
 		return if isBeliBoostActive(player) then 2 else 1
 	end
 
-	local function getCaptainPassBeliMultiplier(player)
-		local passes = player and player:FindFirstChild("Passes")
-		local vip = passes and passes:FindFirstChild("VIP")
-		if vip and vip:IsA("BoolValue") and vip.Value == true then
-			return 1.1
-		end
-		return 1
-	end
-
-	 
 	local function getToolCrewMemberInstanceId(tool)
 		if not tool or not tool:IsA("Tool") then
 			return ""
@@ -591,9 +577,9 @@ function Module.Install(ctx)
 		crewMemberInstanceId = tostring(crewMemberInstanceId or "")
 		if crewMemberInstanceId ~= "" then
 			local _, instanceData = CrewInstanceService.GetInstance(player, crewMemberInstanceId)
-			local savedIncome = typeof(instanceData) == "table" and tonumber(instanceData.Income) or nil
-			if savedIncome and savedIncome > 0 then
-				return savedIncome
+			local rawIncome = CrewIncomeBalance.GetRawBankIncomePerSecond(instanceData)
+			if rawIncome > 0 then
+				return rawIncome
 			end
 		end
 
@@ -603,13 +589,18 @@ function Module.Install(ctx)
 		return base
 	end
 
+	local function getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId)
+		return getBaseIncome(player, crewMemberName, crewMemberInstanceId)
+	end
+
 	local function getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
 		local base = getBaseIncome(player, crewMemberName, crewMemberInstanceId)
 		if base <= 0 then
 			return 0
 		end
-		local mult =1
-		return base * mult
+
+		local target = if tostring(crewMemberInstanceId or "") ~= "" then tostring(crewMemberInstanceId) else tostring(crewMemberName or "")
+		return base * CrewIncomeBalance.GetLevelIncomeMultiplier(getCrewMemberLevel(player, target))
 	end
 
 	local function getStandIncomeDisplay(player, standName)
@@ -626,10 +617,9 @@ function Module.Install(ctx)
 
 	local function getStandIncomePerSecond(player, standName, crewMemberName)
 		local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
-		return getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
-			* getStandCollectMultiplier(player, standName)
+		return getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId)
 			* getBeliBoostMultiplier(player)
-			* getCaptainPassBeliMultiplier(player)
+			* getStandCollectMultiplier(player, standName)
 	end
 
 	local function normalizeIncomeSnapshotSlotKey(value)
@@ -654,7 +644,7 @@ function Module.Install(ctx)
 	end
 
 	local function setStandLevel(player, standName, level)
-		local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
+		local safeLevel = CrewIncomeBalance.NormalizeLevel(level)
 		if CrewStandIncomeAuthority.GetStandLevel(player, standName) ~= safeLevel then
 			CrewStandIncomeAuthority.SetStandLevel(player, standName, safeLevel, "stand_level_sync")
 		end
@@ -680,13 +670,13 @@ function Module.Install(ctx)
 	ctx.getBaseIncome = getBaseIncome
 	ctx.getBeliBoostMultiplier = getBeliBoostMultiplier
 	ctx.getBeliBoostRemaining = getBeliBoostRemaining
-	ctx.getCaptainPassBeliMultiplier = getCaptainPassBeliMultiplier
 	ctx.getCrewMemberCanonicalReadGate = getCrewMemberCanonicalReadGate
 	ctx.getCrewMemberLevel = getCrewMemberLevel
 	ctx.getCrewStorage = getCrewStorage
 	ctx.getEquippedCrewMemberToolInfo = getEquippedCrewMemberToolInfo
 	ctx.getIncomeWithLevel = getIncomeWithLevel
 	ctx.getInventoryQuantity = getInventoryQuantity
+	ctx.getRawBankIncomePerSecond = getRawBankIncomePerSecond
 	ctx.getPickupDebugField = getPickupDebugField
 	ctx.getPickupStandSnapshot = getPickupStandSnapshot
 	ctx.getPlayerShipUpgradeLevel = getPlayerShipUpgradeLevel

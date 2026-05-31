@@ -14,7 +14,7 @@ local ClientRuntime = {
 }
 
 local React, ReactRoblox, App, Responsive
-local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
+local CrewCatalog, CrewIncomeBalance, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
 local ChestUtils, ChestDropRates, Titles, Economy, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
@@ -30,6 +30,7 @@ do
 	Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 	CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+	CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 	CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 	Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 	DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -1155,7 +1156,8 @@ local function getSnapshotClaimReadyAmount(snapshotEntry, rawIncomeToCollect)
 		return math.max(0, math.floor(claimReadyAmount))
 	end
 
-	return math.floor(raw)
+	local collectMultiplier = math.max(0, tonumber(snapshotEntry.CollectMultiplier) or 1)
+	return math.max(0, math.floor((raw * collectMultiplier) + 1e-7))
 end
 
 local function refreshIncomeStatusDisplayMetadata(reason, force)
@@ -2066,9 +2068,8 @@ local function getCaptainLogAssignment(captainSlot)
 		"StorageName",
 		"LegacyStorageName",
 	})
-	local level = math.max(
-		1,
-		math.floor(tonumber(readValueOrAttribute(captainSlot, "Level") or readValueOrAttribute(captainSlot, "StandLevel")) or 1)
+	local level = CrewIncomeBalance.NormalizeLevel(
+		readValueOrAttribute(captainSlot, "Level") or readValueOrAttribute(captainSlot, "StandLevel")
 	)
 
 	local instanceFolder = getCrewInventoryInstanceFolder(instanceId)
@@ -2082,7 +2083,7 @@ local function getCaptainLogAssignment(captainSlot)
 			})
 		end
 
-		level = math.max(1, math.floor(tonumber(readValueOrAttribute(instanceFolder, "Level")) or level))
+		level = CrewIncomeBalance.NormalizeLevel(readValueOrAttribute(instanceFolder, "Level") or level)
 	end
 
 	return crewMemberName, instanceId, level
@@ -2195,7 +2196,7 @@ local function buildCaptainLogEntryFromSnapshotRow(row)
 		return nil
 	end
 
-	local standLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or 1))
+	local standLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level)
 	local instanceId = tostring(row.CrewMemberInstanceId or row.InstanceId or row.CrewInstanceId or "")
 	local claimReadyAmount = math.max(0, math.floor(tonumber(row.ClaimReadyAmount) or 0))
 	local incomePerTick = math.max(0, tonumber(row.IncomePerSecond) or 0)
@@ -3743,7 +3744,7 @@ render = function()
 				if not chestOpenPrompt then
 					return
 				end
-				chestDropRatesPrompt = ChestDropRates.GetPreview(chestOpenPrompt.name)
+				chestDropRatesPrompt = ChestDropRates.GetPreview(chestOpenPrompt.name, metaState and metaState.ChestRewards)
 				render()
 			end,
 			onDismissChestDropRates = function()

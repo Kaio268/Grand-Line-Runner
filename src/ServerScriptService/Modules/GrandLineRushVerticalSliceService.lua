@@ -14,13 +14,13 @@ local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wai
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local GrandLineRushCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local CanonicalCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewInteraction = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
-local StandIncomeMultipliers = require(ServerScriptService.Modules:WaitForChild("StandsMultiply"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 
@@ -225,9 +225,21 @@ local function normalizeMaterialsTable(materials)
 	return materials
 end
 
-local function getCrewSummaryIncomePerSecond(crewData, mirrorData)
+local function getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
 	crewData = if typeof(crewData) == "table" then crewData else {}
 	mirrorData = if typeof(mirrorData) == "table" then mirrorData else {}
+
+	local baseIncomeRoll = tonumber(crewData.BaseIncomeRoll)
+	if baseIncomeRoll == nil then
+		baseIncomeRoll = tonumber(mirrorData.BaseIncomeRoll)
+	end
+	if baseIncomeRoll ~= nil and baseIncomeRoll > 0 then
+		return CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			crewData.Variant or mirrorData.Variant,
+			level
+		)
+	end
 
 	local income = tonumber(crewData.Income)
 	if income == nil then
@@ -237,14 +249,9 @@ local function getCrewSummaryIncomePerSecond(crewData, mirrorData)
 	return math.max(0, income or 0)
 end
 
-local function getCrewSummaryLevelMultiplier(level)
-	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
-	return tonumber(StandIncomeMultipliers[tostring(safeLevel)]) or 1
-end
-
 local function getCrewSummaryIncomePerHour(crewData, mirrorData, level)
-	local incomePerSecond = getCrewSummaryIncomePerSecond(crewData, mirrorData)
-	return math.floor((incomePerSecond * getCrewSummaryLevelMultiplier(level) * 3600) + 0.5)
+	local incomePerSecond = getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
+	return math.floor((incomePerSecond * 3600) + 0.5)
 end
 
 local function getCrewXPRequiredForLevel(rarity, level)
@@ -353,8 +360,9 @@ local function buildCrewSummary(instanceId, crewData, mirrorData, options)
 	local currentXP = math.max(0, math.floor(getCrewSummaryNumber(crewData.CurrentXP, mirrorData.CurrentXP, 0)))
 	local totalXP = math.max(0, math.floor(getCrewSummaryNumber(crewData.TotalXP, mirrorData.TotalXP, 0)))
 	local rarity = firstNonEmpty(crewData.Rarity, mirrorData.Rarity, "Common")
+	local variant = firstNonEmpty(crewData.Variant, mirrorData.Variant, "Normal")
 	local baseIncomeRoll = math.max(0, math.floor(getCrewSummaryNumber(crewData.BaseIncomeRoll, mirrorData.BaseIncomeRoll, 0)))
-	local income = getCrewSummaryIncomePerSecond(crewData, mirrorData)
+	local income = getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
 	local canonicalInstanceId = firstNonEmpty(options.CanonicalInstanceId, crewData.CanonicalInstanceId)
 	local legacyInstanceId = firstNonEmpty(options.LegacyInstanceId)
 
@@ -367,6 +375,7 @@ local function buildCrewSummary(instanceId, crewData, mirrorData, options)
 		StorageName = storageName,
 		CrewMemberId = firstNonEmpty(crewData.CrewMemberId, mirrorData.CrewMemberId, storageName),
 		Rarity = rarity,
+		Variant = variant,
 		Level = level,
 		CurrentXP = currentXP,
 		TotalXP = totalXP,
@@ -1075,6 +1084,7 @@ local function ensureChestRewardsState(dataRoot)
 	end
 
 	dataRoot.ChestRewards.MythicKeys = math.max(0, tonumber(dataRoot.ChestRewards.MythicKeys) or 0)
+	ChestRewards.EnsureFruitPityState(dataRoot.ChestRewards)
 	return dataRoot.ChestRewards
 end
 
@@ -1739,6 +1749,7 @@ local function buildState(player, options)
 			current = chestRewardsState.MythicKeys,
 			threshold = ChestRewards.MythicKey.Threshold,
 		},
+		ChestRewards = chestRewardsState,
 		FoodInventory = {
 			Apple = tonumber(foodInventory.Apple) or 0,
 			Rice = tonumber(foodInventory.Rice) or 0,
@@ -2632,8 +2643,16 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 	local autoConvertedChestCounts = {}
 	local conversionBeli = 0
 	local mythicKeyCount = 0
+	local fruitPityProgress = nil
+	local fruitPityTriggers = {}
 
 	for _, result in ipairs(batchResults) do
+		if typeof(result.FruitPityProgress) == "table" then
+			fruitPityProgress = result.FruitPityProgress
+		end
+		if typeof(result.FruitPityTriggered) == "table" then
+			fruitPityTriggers[#fruitPityTriggers + 1] = result.FruitPityTriggered
+		end
 		if result.GrantedFruit then
 			grantedFruits[#grantedFruits + 1] = {
 				FruitKey = result.GrantedFruit,
@@ -2729,6 +2748,8 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		-- Legacy payload alias kept while older clients finish moving to Beli.
 		ConversionDoubloons = conversionBeli,
 		MythicKeyCount = mythicKeyCount,
+		FruitPityProgress = fruitPityProgress,
+		FruitPityTriggers = fruitPityTriggers,
 	}
 end
 

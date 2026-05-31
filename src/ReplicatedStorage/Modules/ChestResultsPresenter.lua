@@ -13,6 +13,7 @@ local GUI_NAME = "ChestResultsGui"
 local CHEST_PREVIEW_VIEWPORT_NAME = "ChestPreviewViewport"
 local CHEST_PREVIEW_WORLD_NAME = "ChestPreviewWorld"
 local CHEST_PREVIEW_CAMERA_NAME = "ChestPreviewCamera"
+local PITY_BANNER_NAME = "PityBanner"
 local REWARD_ROW_SCROLLER_NAME = "RewardRowScroller"
 local REWARD_ROW_CONTENT_NAME = "RewardRowContent"
 local REWARD_PREVIEW_VIEWPORT_NAME = "RewardModelViewport"
@@ -47,6 +48,9 @@ local SPARKLE_A_IMAGE = "rbxassetid://91082304413966"
 local SPARKLE_B_IMAGE = "rbxassetid://95629190896984"
 local CROWN_IMAGE = "rbxassetid://93958716853645"
 local FEATURED_GLOW_IMAGE = "rbxassetid://114516018211032"
+local PITY_BANNER_BG = Color3.fromRGB(8, 20, 34)
+local PITY_BANNER_TEXT = Color3.fromRGB(255, 255, 255)
+local PITY_BANNER_MUTED = Color3.fromRGB(225, 232, 242)
 
 local queue = {}
 local activeConnections = {}
@@ -245,6 +249,73 @@ local function createRewardCardTemplate(name, featured)
 	end
 
 	return frame
+end
+
+local function createPityBanner(gui)
+	local banner = new("Frame", {
+		Name = PITY_BANNER_NAME,
+		AnchorPoint = Vector2.new(0.5, 0),
+		BackgroundColor3 = PITY_BANNER_BG,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Position = UDim2.fromScale(0.5, 0.025),
+		Size = UDim2.new(0.58, 0, 0, 58),
+		Visible = false,
+		ZIndex = 70,
+		Parent = gui,
+	}, {
+		new("UISizeConstraint", {
+			MaxSize = Vector2.new(780, 66),
+			MinSize = Vector2.new(300, 44),
+		}),
+	})
+	ensureCorner(banner, UDim.new(0, 10))
+	ensureStroke(banner, Color3.fromRGB(255, 216, 107), 2, 0.18, Enum.ApplyStrokeMode.Border)
+	ensureGradient(banner, Color3.fromRGB(18, 38, 58), PITY_BANNER_BG)
+
+	new("TextLabel", {
+		Name = "PityActivation",
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Position = UDim2.new(0, 14, 0.08, 0),
+		Size = UDim2.new(1, -28, 0.36, 0),
+		Text = "",
+		TextColor3 = Color3.fromRGB(255, 216, 107),
+		TextScaled = true,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		Visible = false,
+		ZIndex = 71,
+		Parent = banner,
+	}, {
+		new("UITextSizeConstraint", {
+			MaxTextSize = 18,
+			MinTextSize = 10,
+		}),
+	})
+	new("TextLabel", {
+		Name = "PityProgress",
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		Position = UDim2.new(0, 14, 0.22, 0),
+		Size = UDim2.new(1, -28, 0.56, 0),
+		Text = "",
+		TextColor3 = PITY_BANNER_TEXT,
+		TextScaled = true,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		ZIndex = 71,
+		Parent = banner,
+	}, {
+		new("UITextSizeConstraint", {
+			MaxTextSize = 16,
+			MinTextSize = 9,
+		}),
+	})
+
+	return banner
 end
 
 local function createBaseTemplate(gui)
@@ -503,11 +574,27 @@ local function createBaseTemplate(gui)
 	})
 	ensureCorner(exitButton, UDim.new(0, 15))
 	ensureStroke(exitButton, Color3.fromRGB(212, 175, 55), 2, 0, Enum.ApplyStrokeMode.Border)
+
+	createPityBanner(gui)
 end
 
 local function getRewardsFrame(gui)
 	local mainFrame = gui:FindFirstChild("MainFrame")
 	return mainFrame and mainFrame:FindFirstChild("RewardsFrame") or nil
+end
+
+local function ensurePityBanner(gui)
+	local banner = gui:FindFirstChild(PITY_BANNER_NAME)
+	if banner and not banner:IsA("Frame") then
+		banner:Destroy()
+		banner = nil
+	end
+
+	if not banner then
+		banner = createPityBanner(gui)
+	end
+
+	return banner
 end
 
 local function prepareTemplate(template)
@@ -653,6 +740,7 @@ local function ensureTemplate(gui)
 		return false
 	end
 
+	ensurePityBanner(gui)
 	ensureRewardTemplates(rewardsFrame)
 	ensureRewardLayout(rewardsFrame)
 	return true
@@ -703,6 +791,67 @@ end
 local function findTextLabel(root, name)
 	local instance = root and root:FindFirstChild(name, true)
 	return if instance and instance:IsA("TextLabel") then instance else nil
+end
+
+local function getPityBanner(gui)
+	local banner = gui and gui:FindFirstChild(PITY_BANNER_NAME)
+	return if banner and banner:IsA("Frame") then banner else nil
+end
+
+local function getPityActivationText(pityStatus)
+	if typeof(pityStatus) ~= "table" or typeof(pityStatus.activationTexts) ~= "table" then
+		return ""
+	end
+
+	local parts = {}
+	for _, text in ipairs(pityStatus.activationTexts) do
+		local normalized = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if normalized ~= "" then
+			parts[#parts + 1] = normalized
+		end
+	end
+
+	return table.concat(parts, "  ")
+end
+
+local function renderPityBanner(gui, pityStatus)
+	local banner = getPityBanner(gui)
+	if not banner then
+		return
+	end
+
+	if typeof(pityStatus) ~= "table" or tostring(pityStatus.progressText or "") == "" then
+		banner.Visible = false
+		return
+	end
+
+	local accentColor = if typeof(pityStatus.accentColor) == "Color3"
+		then pityStatus.accentColor
+		else Color3.fromRGB(255, 216, 107)
+	local activationText = getPityActivationText(pityStatus)
+	local activationLabel = findTextLabel(banner, "PityActivation")
+	local progressLabel = findTextLabel(banner, "PityProgress")
+
+	ensureStroke(banner, accentColor, 2, 0.18, Enum.ApplyStrokeMode.Border)
+
+	if activationLabel then
+		activationLabel.Text = activationText
+		activationLabel.TextColor3 = accentColor
+		activationLabel.Visible = activationText ~= ""
+	end
+
+	if progressLabel then
+		progressLabel.Text = tostring(pityStatus.progressText)
+		progressLabel.TextColor3 = if activationText ~= "" then PITY_BANNER_MUTED else PITY_BANNER_TEXT
+		progressLabel.Position = if activationText ~= ""
+			then UDim2.new(0, 14, 0.48, 0)
+			else UDim2.new(0, 14, 0.22, 0)
+		progressLabel.Size = if activationText ~= ""
+			then UDim2.new(1, -28, 0.42, 0)
+			else UDim2.new(1, -28, 0.56, 0)
+	end
+
+	banner.Visible = true
 end
 
 local function findImageLabel(root, name)
@@ -1505,6 +1654,7 @@ local function renderGui(gui, openResult)
 	end
 
 	renderChestPreview(gui, model)
+	renderPityBanner(gui, model.pityStatus)
 
 	local rewardsFrame = getRewardsFrame(gui)
 	if not rewardsFrame then

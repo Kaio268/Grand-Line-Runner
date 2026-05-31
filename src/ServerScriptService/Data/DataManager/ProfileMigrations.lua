@@ -124,7 +124,11 @@ local function buildIncomeRollFields(rarity, variant, instanceData)
 		Variant = normalizedVariant,
 		BaseIncomeRoll = baseIncomeRoll,
 		IncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion(),
-		Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, normalizedVariant),
+		Income = CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			normalizedVariant,
+			typeof(instanceData) == "table" and instanceData.Level or nil
+		),
 	}
 end
 
@@ -191,7 +195,7 @@ local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallb
 		Render = tostring(instanceData.Render or ""),
 		GoldenRender = tostring(instanceData.GoldenRender or instanceData.Render or ""),
 		DiamondRender = tostring(instanceData.DiamondRender or instanceData.Render or ""),
-		Level = math.max(1, coerceNumber(instanceData.Level, 1)),
+		Level = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 		CurrentXP = math.max(0, coerceNumber(instanceData.CurrentXP, 0)),
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
 		AcquiredAt = coerceNumber(instanceData.AcquiredAt, 0),
@@ -451,7 +455,7 @@ local function buildCrewSlotIncomeRow(row)
 		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
 		CrewMemberInstanceId = instanceId,
 		IncomeToCollect = coerceNumberish(row.IncomeToCollect or row.Income or row.Money or row.Cash, 0),
-		StandLevel = math.max(1, math.floor(coerceNumberish(row.StandLevel or row.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level),
 	}
 end
 
@@ -506,7 +510,7 @@ local function migrateLegacyStandLevels(data, sourceLevels)
 		local rawLevel = if typeof(levelValue) == "table"
 			then levelValue.StandLevel or levelValue.Level or levelValue.Value
 			else levelValue
-		local level = math.max(1, math.floor(coerceNumberish(rawLevel, tonumber(row.StandLevel) or 1)))
+		local level = CrewIncomeBalance.NormalizeLevel(coerceNumberish(rawLevel, tonumber(row.StandLevel) or 1))
 		if tonumber(row.StandLevel) ~= level then
 			row.StandLevel = level
 			migrated += 1
@@ -930,6 +934,13 @@ function ProfileMigrations.Apply(data)
 
 	local chestRewards = ensureTable(data, "ChestRewards")
 	chestRewards.MythicKeys = math.max(0, coerceNumber(chestRewards.MythicKeys, 0))
+	local afkGoldChests = ensureTable(chestRewards, "AFKGoldChests")
+	if typeof(afkGoldChests.DayKey) ~= "string" then
+		afkGoldChests.DayKey = ""
+	end
+	afkGoldChests.EarnedToday = math.max(0, math.floor(coerceNumber(afkGoldChests.EarnedToday, 0)))
+	afkGoldChests.ProgressSeconds = math.max(0, coerceNumber(afkGoldChests.ProgressSeconds, 0))
+	ChestRewards.EnsureFruitPityState(chestRewards)
 
 	local foodInventory = ensureTable(data, "FoodInventory")
 	local inventory = ensureTable(data, "Inventory")

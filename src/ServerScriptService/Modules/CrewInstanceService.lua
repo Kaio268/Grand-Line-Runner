@@ -284,7 +284,11 @@ local function buildIncomeRollFields(rarity, variant, instanceData)
 		rarity,
 		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
 	)
-	local income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant)
+	local income = CrewIncomeBalance.ComputeIncome(
+		baseIncomeRoll,
+		variant,
+		typeof(instanceData) == "table" and instanceData.Level or nil
+	)
 
 	return baseIncomeRoll, income, CrewIncomeBalance.GetIncomeRollVersion()
 end
@@ -393,7 +397,7 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		Render = firstNonEmpty(metadata.Render, instanceData.Render),
 		GoldenRender = firstNonEmpty(metadata.GoldenRender, instanceData.GoldenRender, metadata.Render),
 		DiamondRender = firstNonEmpty(metadata.DiamondRender, instanceData.DiamondRender, metadata.Render),
-		Level = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		Level = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 		CurrentXP = math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0))),
 		TotalXP = math.max(0, math.floor(coerceNumber(instanceData.TotalXP, 0))),
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
@@ -1096,7 +1100,7 @@ local function getStoredLegacyProgress(player, storageName)
 				or tostring(instanceData.LegacyStorageName or "") == tostring(storageName or "")
 			)
 		then
-			return math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+			return CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 				math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0)))
 		end
 	end
@@ -1403,7 +1407,7 @@ local function buildStandAssignmentRow(instanceId, instanceData)
 		CrewMemberName = getInstanceCrewKey(instanceData),
 		CrewMemberInstanceId = tostring(instanceId),
 		IncomeToCollect = 0,
-		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 	}
 end
 
@@ -1446,7 +1450,7 @@ function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
 	local standOk, standReason = updateStandData(player, standName, {
 		CrewMemberName = getInstanceCrewKey(instanceData),
 		CrewMemberInstanceId = tostring(instanceId),
-		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 	}, "stand_place_tutorial_reward")
 	if standOk ~= true then
 		instanceData.AssignedStand = ""
@@ -1692,8 +1696,14 @@ function Module.UpdateProgress(player, instanceId, level, currentXP, options)
 		})
 	end
 
-	instanceData.Level = math.max(1, math.floor(coerceNumber(level, instanceData.Level or 1)))
+	instanceData.Level = CrewIncomeBalance.NormalizeLevel(coerceNumber(level, instanceData.Level or 1))
 	instanceData.CurrentXP = math.max(0, math.floor(coerceNumber(currentXP, instanceData.CurrentXP or 0)))
+	instanceData.Income = CrewIncomeBalance.ComputeIncome(
+		instanceData.BaseIncomeRoll,
+		instanceData.Variant,
+		instanceData.Level
+	)
+	instanceData.IncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion()
 	if options.TotalXP ~= nil then
 		instanceData.TotalXP = math.max(0, math.floor(coerceNumber(options.TotalXP, instanceData.TotalXP or 0)))
 	end
@@ -1839,7 +1849,7 @@ function Module.EnsureStandInstance(player, standName, fallbackStorageName)
 		updateStandData(player, standName, {
 			CrewMemberName = standStorageName,
 			CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
-			StandLevel = math.max(1, math.floor(coerceNumber(standData.StandLevel, 1))),
+			StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 		}, "stand_identity_repair")
 	end
 
@@ -1995,7 +2005,7 @@ function Module.ReconcileStandAssignment(player, standName)
 		updateStandData(player, standName, {
 			CrewMemberName = canonicalCrewMemberId,
 			CrewMemberInstanceId = assignedInstanceId,
-			StandLevel = math.max(1, math.floor(coerceNumber(assignedInstanceData.Level, 1))),
+			StandLevel = CrewIncomeBalance.NormalizeLevel(assignedInstanceData.Level),
 		}, "stand_identity_repair")
 		refreshCrewMemberShadow(player, "stand_identity_repair")
 	end
@@ -2007,7 +2017,7 @@ function Module.ReconcileStandAssignment(player, standName)
 	local standOk, standReason = updateStandData(player, standName, {
 		CrewMemberName = canonicalCrewMemberId,
 		CrewMemberInstanceId = assignedInstanceId,
-		StandLevel = math.max(1, math.floor(coerceNumber(assignedInstanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(assignedInstanceData.Level),
 	}, "stand_assignment_reconcile")
 	if standOk ~= true then
 		assignedInstanceData.AssignedStand = ""
@@ -2091,7 +2101,7 @@ function Module.AssignAvailableInstanceToStand(player, storageName, standName)
 	local standOk, standReason = updateStandData(player, standName, {
 		CrewMemberName = getInstanceCrewKey(instanceData),
 		CrewMemberInstanceId = tostring(instanceId),
-		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 	}, "stand_place")
 	if standOk ~= true then
 		instanceData.AssignedStand = ""

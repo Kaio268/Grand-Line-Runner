@@ -42,6 +42,7 @@ local RemoteGuard = require(game.ServerScriptService.Modules.RemoteGuard)
 local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
 local ShopEntitlementService = require(game.ServerScriptService.Modules.ShopEntitlementService)
 local CrewProtectionService = require(game.ServerScriptService.Modules.CrewProtectionService)
+local AFKGoldChestRewardService = require(game.ServerScriptService.Modules.AFKGoldChestRewardService)
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -2853,6 +2854,7 @@ DataManager.init = function()
 	SetupPaidRandomItemPolicyRemotes()
 	ShopEntitlementService.Start(DataManager)
 	CrewProtectionService.Start(DataManager)
+	AFKGoldChestRewardService.Start(DataManager)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		task.spawn(PlayerAdded, player)

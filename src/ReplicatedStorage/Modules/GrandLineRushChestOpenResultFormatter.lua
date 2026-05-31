@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local DevilFruits = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -137,6 +138,87 @@ end
 
 local function formatCount(amount)
 	return CurrencyUtil.formatCount(math.max(0, math.floor(tonumber(amount) or 0)))
+end
+
+local function formatWholeCommaNumber(amount)
+	local number = tonumber(amount) or 0
+	local sign = if number < 0 then "-" else ""
+	local roundedText = tostring(math.floor(math.abs(number) + 0.5))
+	local reversed = string.reverse(roundedText)
+	local grouped = string.reverse((string.gsub(reversed, "(%d%d%d)", "%1,")))
+
+	grouped = string.gsub(grouped, "^,", "")
+	return sign .. grouped
+end
+
+local function getPityAccentColor(rarityName)
+	return RARITY_COLORS[tostring(rarityName or "")] or RARITY_COLORS.Reward
+end
+
+local function collectTriggeredPityTexts(openResult)
+	local triggeredByRarity = {}
+	local function addTrigger(trigger)
+		if typeof(trigger) ~= "table" then
+			return
+		end
+
+		local rarityName = tostring(trigger.Rarity or "")
+		if rarityName ~= "" then
+			triggeredByRarity[rarityName] = true
+		end
+	end
+
+	addTrigger(openResult.FruitPityTriggered)
+	for _, trigger in ipairs(openResult.FruitPityTriggers or {}) do
+		addTrigger(trigger)
+	end
+
+	local activationTexts = {}
+	local accentColor = nil
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		if triggeredByRarity[rarityName] == true then
+			activationTexts[#activationTexts + 1] = string.format("%s PITY ACTIVATED!", string.upper(rarityName))
+			accentColor = getPityAccentColor(rarityName)
+		end
+	end
+
+	return activationTexts, accentColor
+end
+
+local function buildFruitPityStatus(openResult)
+	openResult = if typeof(openResult) == "table" then openResult else {}
+	local fruitPityProgress = openResult.FruitPityProgress
+	if typeof(fruitPityProgress) ~= "table" then
+		return nil
+	end
+
+	local progressParts = {}
+	local accentColor = nil
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		local entry = fruitPityProgress[rarityName]
+		if typeof(entry) == "table" then
+			local failedOpens = math.max(0, math.floor(tonumber(entry.FailedOpens) or 0))
+			local hardPity = math.max(1, math.floor(tonumber(entry.HardPity) or 1))
+			progressParts[#progressParts + 1] = string.format(
+				"%s PITY: %s/%s",
+				string.upper(rarityName),
+				formatWholeCommaNumber(failedOpens),
+				formatWholeCommaNumber(hardPity)
+			)
+			accentColor = getPityAccentColor(rarityName)
+		end
+	end
+
+	if #progressParts <= 0 then
+		return nil
+	end
+
+	local activationTexts, activationAccent = collectTriggeredPityTexts(openResult)
+	return {
+		activationTexts = activationTexts,
+		progressText = table.concat(progressParts, "  |  "),
+		accentColor = activationAccent or accentColor or RARITY_COLORS.Reward,
+	}
 end
 
 local function getGrantedBeli(grantedResources)
@@ -527,6 +609,7 @@ local function buildBatchAcknowledgement(openResult)
 		ButtonColor = RARITY_COLORS.Reward,
 		Lines = lines,
 		RewardRows = rewardRows,
+		PityStatus = buildFruitPityStatus(openResult),
 	}
 end
 
@@ -608,6 +691,7 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 		BodyMode = bodyMode,
 		Lines = lines,
 		PreviewFruitKey = if typeof(openResult.GrantedFruit) == "string" then openResult.GrantedFruit else nil,
+		PityStatus = buildFruitPityStatus(openResult),
 	}
 end
 
@@ -700,6 +784,7 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 		chestVisualKey = resolveOpenedChestVisualKey(openedChest),
 		featuredReward = featuredReward,
 		rewardCards = rewardCards,
+		pityStatus = buildFruitPityStatus(openResult),
 	}
 end
 
