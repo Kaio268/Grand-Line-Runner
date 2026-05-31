@@ -26,6 +26,7 @@ local started = false
 local debugEnabled = false
 local routedDebugCount = 0
 local lastApplyLogValue = {}
+local temporaryMuteRequests = {}
 
 local trackedSounds = setmetatable({}, { __mode = "k" })
 local routedSounds = setmetatable({}, { __mode = "k" })
@@ -64,6 +65,23 @@ end
 
 local function soundGroupVolume(value)
 	return clampNumber(value, 0, 100) / 100
+end
+
+local function isTemporarilyMuted(category)
+	for _, request in pairs(temporaryMuteRequests) do
+		if typeof(request) == "table" and request[category] == true then
+			return true
+		end
+	end
+	return false
+end
+
+local function getEffectiveMusicValue()
+	return if isTemporarilyMuted("Music") then 0 else currentMusicValue
+end
+
+local function getEffectiveEffectsValue()
+	return if isTemporarilyMuted("SoundEffects") then 0 else currentEffectsValue
 end
 
 local function safeFullName(instance)
@@ -116,8 +134,8 @@ local function ensureSoundGroups()
 		}) or createSoundGroup(EFFECTS_GROUP_NAME, "SoundEffects")
 	end
 
-	musicGroup.Volume = soundGroupVolume(currentMusicValue)
-	effectsGroup.Volume = soundGroupVolume(currentEffectsValue)
+	musicGroup.Volume = soundGroupVolume(getEffectiveMusicValue())
+	effectsGroup.Volume = soundGroupVolume(getEffectiveEffectsValue())
 	return musicGroup, effectsGroup
 end
 
@@ -258,6 +276,10 @@ local function getStats()
 	return {
 		musicValue = currentMusicValue,
 		effectsValue = currentEffectsValue,
+		effectiveMusicValue = getEffectiveMusicValue(),
+		effectiveEffectsValue = getEffectiveEffectsValue(),
+		musicMuted = isTemporarilyMuted("Music"),
+		effectsMuted = isTemporarilyMuted("SoundEffects"),
 		musicSounds = musicCount,
 		effectSounds = effectsCount,
 		musicGroup = targetMusicGroup,
@@ -381,6 +403,52 @@ function SettingsAudioController.TrackSound(sound)
 	return getStats()
 end
 
+function SettingsAudioController.PushTemporaryMute(key, categories)
+	key = tostring(key or "")
+	if key == "" then
+		return getStats()
+	end
+
+	categories = if typeof(categories) == "table" then categories else {}
+	local request = {
+		Music = categories.Music == true,
+		SoundEffects = categories.SoundEffects == true or categories.Sounds == true,
+	}
+	if request.Music ~= true and request.SoundEffects ~= true then
+		request.Music = true
+	end
+
+	temporaryMuteRequests[key] = request
+	if not started then
+		SettingsAudioController.Start()
+	else
+		ensureSoundGroups()
+	end
+	return getStats()
+end
+
+function SettingsAudioController.PopTemporaryMute(key)
+	key = tostring(key or "")
+	if key == "" then
+		return getStats()
+	end
+
+	temporaryMuteRequests[key] = nil
+	if not started then
+		SettingsAudioController.Start()
+	else
+		ensureSoundGroups()
+	end
+	return getStats()
+end
+
+function SettingsAudioController.SetTemporaryMute(key, enabled, categories)
+	if enabled == true then
+		return SettingsAudioController.PushTemporaryMute(key, categories)
+	end
+	return SettingsAudioController.PopTemporaryMute(key)
+end
+
 function SettingsAudioController.GetStats()
 	return getStats()
 end
@@ -390,6 +458,7 @@ function SettingsAudioController.Destroy()
 		connection:Disconnect()
 	end
 	table.clear(connections)
+	table.clear(temporaryMuteRequests)
 	started = false
 end
 

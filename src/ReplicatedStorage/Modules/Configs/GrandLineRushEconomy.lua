@@ -274,21 +274,23 @@ local Economy = {
 				IntervalSeconds = 1800,
 				DailyCap = 16,
 			},
-			Zone = {
-				Attribute = "AFKGoldChestZone",
-				Names = {
-					"AFKGoldChestZone",
-					"AFKZone",
-					"AFKLobby",
-				},
-			},
 			Remotes = {
 				StateEventName = "AFKGoldChestState",
 				StateRequestName = "AFKGoldChestStateRequest",
 				EntryRequestName = "AFKGoldChestEntryRequest",
+				ExitRequestName = "AFKGoldChestExitRequest",
+				UiHeartbeatEventName = "AFKGoldChestUiHeartbeat",
+			},
+			Timing = {
+				TickSeconds = 1,
+				HeartbeatIntervalSeconds = 5,
+				HeartbeatTimeoutSeconds = 15,
+				HeartbeatMinIntervalSeconds = 1,
+				ShipSpawnCacheSeconds = 2,
 			},
 			Entry = {
 				MaxDistance = 18,
+				ShipAfkRadius = 34,
 			},
 		},
 
