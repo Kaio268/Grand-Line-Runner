@@ -11,6 +11,22 @@ local ReactNpcDialogService = require(ReplicatedStorage:WaitForChild("Modules"):
 
 local TICK_SOUND = script.sounds.tick
 local turnProximityPromptsOn
+local DEFAULT_IDLE_STUDS_OFFSET = Vector3.new(0, 6, 0)
+local DEFAULT_TALKING_STUDS_OFFSET = Vector3.new(0, 6, 0)
+local DEFAULT_IDLE_BOB_AMPLITUDE = 1 / 6
+
+local function getVector3Attribute(instance, attributeName, fallback)
+	local value = instance:GetAttribute(attributeName)
+	return if typeof(value) == "Vector3" then value else fallback
+end
+
+local function getNumberAttribute(instance, attributeName, fallback)
+	local value = tonumber(instance:GetAttribute(attributeName))
+	if value == nil then
+		return fallback
+	end
+	return value
+end
 
 function DialogModule.new(npcName, npc, prompt, animation)
 	local self = setmetatable({}, DialogModule)
@@ -20,6 +36,13 @@ function DialogModule.new(npcName, npc, prompt, animation)
 	self.responses = {}
 	self.dialogOption = 1
 	self.npcGui = self.npc.PrimaryPart:WaitForChild("gui")
+	self.idleStudsOffset = getVector3Attribute(self.npcGui, "DialogIdleStudsOffset", DEFAULT_IDLE_STUDS_OFFSET)
+	self.talkingStudsOffset = getVector3Attribute(
+		self.npcGui,
+		"DialogTalkingStudsOffset",
+		DEFAULT_TALKING_STUDS_OFFSET
+	)
+	self.idleBobAmplitude = getNumberAttribute(self.npcGui, "DialogIdleBobAmplitude", DEFAULT_IDLE_BOB_AMPLITUDE)
 	self.active = false
 	self.talking = false
 	self.prompt = prompt
@@ -44,9 +67,10 @@ function DialogModule.new(npcName, npc, prompt, animation)
 	local heartbeatConnection = runService.Heartbeat:Connect(function()
 		frameCount += 1
 		if self.talking then
-			self.npcGui.StudsOffset = Vector3.new(0, 6, 0)
+			self.npcGui.StudsOffset = self.talkingStudsOffset
 		else
-			self.npcGui.StudsOffset = Vector3.new(0, math.sin(frameCount / 25) / 6 + 6, 0)
+			self.npcGui.StudsOffset = self.idleStudsOffset
+				+ Vector3.new(0, math.sin(frameCount / 25) * self.idleBobAmplitude, 0)
 		end
 	end)
 

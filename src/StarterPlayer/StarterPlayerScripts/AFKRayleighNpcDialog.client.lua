@@ -77,7 +77,7 @@ if not entryRequest then
 end
 
 local dialogObject = DialogModule.new("Rayleigh", npc, prompt)
-dialogObject:addDialog("Do you want to train in the AFK World?", { "Train", "Not now" })
+dialogObject:addDialog("Do you want to start Rayleigh Training?", { "Train", "Not now" })
 
 prompt.Triggered:Connect(function(triggeringPlayer)
 	dialogObject:triggerDialog(triggeringPlayer or player, 1)
@@ -99,11 +99,11 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 
 	if ok and typeof(response) == "table" and response.ok == true then
 		dialogObject:hideGui("Good. Train hard.")
-		PopUpModule:Local_SendPopUp(tostring(response.message or "AFK training started."), SUCCESS_COLOR, POPUP_STROKE, 3, false)
+		PopUpModule:Local_SendPopUp(tostring(response.message or "Rayleigh Training started."), SUCCESS_COLOR, POPUP_STROKE, 3, false)
 	else
 		local message = if ok and typeof(response) == "table"
-			then tostring(response.message or "AFK training is unavailable.")
-			else "AFK training is unavailable."
+			then tostring(response.message or "Rayleigh Training is unavailable.")
+			else "Rayleigh Training is unavailable."
 		dialogObject:hideGui("Not yet.")
 		PopUpModule:Local_SendPopUp(message, ERROR_COLOR, POPUP_STROKE, 3, false)
 	end

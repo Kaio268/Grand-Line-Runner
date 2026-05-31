@@ -1,8 +1,10 @@
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 
@@ -12,6 +14,8 @@ local STATE_PATH = "ChestRewards.AFKGoldChests"
 local DEFAULT_STATE_EVENT_NAME = "AFKGoldChestState"
 local DEFAULT_STATE_REQUEST_NAME = "AFKGoldChestStateRequest"
 local DEFAULT_ENTRY_REQUEST_NAME = "AFKGoldChestEntryRequest"
+local DEFAULT_EXIT_REQUEST_NAME = "AFKGoldChestExitRequest"
+local DEFAULT_UI_HEARTBEAT_EVENT_NAME = "AFKGoldChestUiHeartbeat"
 local DEFAULT_REWARD_TIER = "Gold"
 local DEFAULT_SOURCE = "AFK"
 local DEFAULT_NORMAL_INTERVAL_SECONDS = 3600
@@ -19,23 +23,26 @@ local DEFAULT_PREMIUM_INTERVAL_SECONDS = 1800
 local DEFAULT_NORMAL_DAILY_CAP = 8
 local DEFAULT_PREMIUM_DAILY_CAP = 16
 local DEFAULT_ENTRY_MAX_DISTANCE = 18
+local DEFAULT_SHIP_AFK_RADIUS = 34
 local TICK_SECONDS = 1
 local MAX_DELTA_SECONDS = 5
 local PERSIST_INTERVAL_SECONDS = 30
-local ZONE_REFRESH_SECONDS = 10
 local GRANT_RETRY_SECONDS = 30
-local ZONE_PADDING = 0.5
+local UI_HEARTBEAT_INTERVAL_SECONDS = 5
+local UI_HEARTBEAT_TIMEOUT_SECONDS = 15
+local EXIT_TELEPORT_OFFSET = Vector3.new(0, 4, 0)
+local RAYLEIGH_EXIT_OFFSET = Vector3.new(0, 0, 10)
 
 local started = false
 local dataManagerRef = nil
 local stateEvent = nil
 local stateRequest = nil
 local entryRequest = nil
+local exitRequest = nil
+local uiHeartbeatEvent = nil
 local runtimeByPlayer = {}
-local zoneRecord = nil
-local nextZoneRefreshAt = 0
-local warnedMissingZone = false
 local verticalSliceService = nil
+local shipRuntimeService = nil
 
 local function getAfkConfig()
 	local chests = if typeof(Economy.Chests) == "table" then Economy.Chests else {}
@@ -80,6 +87,8 @@ local function getOrCreateRemotes()
 	local stateEventName = tostring(remoteConfig.StateEventName or DEFAULT_STATE_EVENT_NAME)
 	local stateRequestName = tostring(remoteConfig.StateRequestName or DEFAULT_STATE_REQUEST_NAME)
 	local entryRequestName = tostring(remoteConfig.EntryRequestName or DEFAULT_ENTRY_REQUEST_NAME)
+	local exitRequestName = tostring(remoteConfig.ExitRequestName or DEFAULT_EXIT_REQUEST_NAME)
+	local uiHeartbeatEventName = tostring(remoteConfig.UiHeartbeatEventName or DEFAULT_UI_HEARTBEAT_EVENT_NAME)
 
 	local existingStateEvent = remotes:FindFirstChild(stateEventName)
 	if existingStateEvent and not existingStateEvent:IsA("RemoteEvent") then
@@ -114,9 +123,33 @@ local function getOrCreateRemotes()
 		existingEntryRequest.Parent = remotes
 	end
 
+	local existingExitRequest = remotes:FindFirstChild(exitRequestName)
+	if existingExitRequest and not existingExitRequest:IsA("RemoteFunction") then
+		existingExitRequest:Destroy()
+		existingExitRequest = nil
+	end
+	if not existingExitRequest then
+		existingExitRequest = Instance.new("RemoteFunction")
+		existingExitRequest.Name = exitRequestName
+		existingExitRequest.Parent = remotes
+	end
+
+	local existingUiHeartbeatEvent = remotes:FindFirstChild(uiHeartbeatEventName)
+	if existingUiHeartbeatEvent and not existingUiHeartbeatEvent:IsA("RemoteEvent") then
+		existingUiHeartbeatEvent:Destroy()
+		existingUiHeartbeatEvent = nil
+	end
+	if not existingUiHeartbeatEvent then
+		existingUiHeartbeatEvent = Instance.new("RemoteEvent")
+		existingUiHeartbeatEvent.Name = uiHeartbeatEventName
+		existingUiHeartbeatEvent.Parent = remotes
+	end
+
 	stateEvent = existingStateEvent
 	stateRequest = existingStateRequest
 	entryRequest = existingEntryRequest
+	exitRequest = existingExitRequest
+	uiHeartbeatEvent = existingUiHeartbeatEvent
 end
 
 local function getPlayerSettings(player)
@@ -193,6 +226,8 @@ local function getRuntime(player)
 			LastStatePushAt = 0,
 			SessionActive = false,
 			SessionHadZone = false,
+			SessionToken = nil,
+			LastUiHeartbeatAt = 0,
 			WasInZone = false,
 			WasEligible = false,
 			WasSessionActive = false,
@@ -203,192 +238,6 @@ local function getRuntime(player)
 	return runtime
 end
 
-local function getBounds(instance)
-	if not instance then
-		return nil
-	end
-
-	if instance:IsA("BasePart") then
-		return instance.CFrame, instance.Size
-	end
-
-	if instance:IsA("Model") then
-		local cframe, size = instance:GetBoundingBox()
-		return cframe, size
-	end
-
-	local minX, minY, minZ = math.huge, math.huge, math.huge
-	local maxX, maxY, maxZ = -math.huge, -math.huge, -math.huge
-	local foundPart = false
-
-	for _, descendant in ipairs(instance:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			foundPart = true
-			local halfSize = descendant.Size * 0.5
-			local position = descendant.Position
-			minX = math.min(minX, position.X - halfSize.X)
-			minY = math.min(minY, position.Y - halfSize.Y)
-			minZ = math.min(minZ, position.Z - halfSize.Z)
-			maxX = math.max(maxX, position.X + halfSize.X)
-			maxY = math.max(maxY, position.Y + halfSize.Y)
-			maxZ = math.max(maxZ, position.Z + halfSize.Z)
-		end
-	end
-
-	if foundPart ~= true then
-		return nil
-	end
-
-	local minVector = Vector3.new(minX, minY, minZ)
-	local maxVector = Vector3.new(maxX, maxY, maxZ)
-	return CFrame.new((minVector + maxVector) * 0.5), maxVector - minVector
-end
-
-local function hasZoneName(instance, names)
-	local name = instance and instance.Name or ""
-	for _, candidate in ipairs(names or {}) do
-		if name == tostring(candidate) then
-			return true
-		end
-	end
-	return false
-end
-
-local function isZoneCandidate(instance)
-	if not instance then
-		return false
-	end
-
-	local config = getAfkConfig()
-	local zoneConfig = if typeof(config.Zone) == "table" then config.Zone else {}
-	local attributeName = tostring(zoneConfig.Attribute or "AFKGoldChestZone")
-	local names = if typeof(zoneConfig.Names) == "table"
-		then zoneConfig.Names
-		else { "AFKGoldChestZone", "AFKZone", "AFKLobby" }
-
-	return instance:GetAttribute(attributeName) == true or hasZoneName(instance, names)
-end
-
-local function buildZoneRecord(instance)
-	local cframe, size = getBounds(instance)
-	if cframe == nil or size == nil then
-		return nil
-	end
-
-	return {
-		Instance = instance,
-		CFrame = cframe,
-		Size = size,
-	}
-end
-
-local function findZone(root)
-	if not root then
-		return nil
-	end
-
-	if isZoneCandidate(root) then
-		local record = buildZoneRecord(root)
-		if record then
-			return record
-		end
-	end
-
-	for _, descendant in ipairs(root:GetDescendants()) do
-		if isZoneCandidate(descendant) then
-			local record = buildZoneRecord(descendant)
-			if record then
-				return record
-			end
-		end
-	end
-
-	return nil
-end
-
-local function findActiveZoneRecord(refs)
-	local roots = {}
-	if refs and refs.Lobby then
-		roots[#roots + 1] = refs.Lobby
-	end
-	if refs and refs.ActiveMapRoot then
-		roots[#roots + 1] = refs.ActiveMapRoot
-	end
-	if refs and refs.ActiveMapContainer then
-		roots[#roots + 1] = refs.ActiveMapContainer
-	end
-	if refs and refs.MapContainer then
-		roots[#roots + 1] = refs.MapContainer
-	end
-	local seen = {}
-
-	for _, root in ipairs(roots) do
-		if root and not seen[root] then
-			seen[root] = true
-			local found = findZone(root)
-			if found then
-				return found
-			end
-		end
-	end
-
-	return nil
-end
-
-local function getActiveZoneRecord(now)
-	now = tonumber(now) or os.clock()
-	if zoneRecord ~= nil and zoneRecord.Instance and zoneRecord.Instance.Parent ~= nil and now < nextZoneRefreshAt then
-		return zoneRecord
-	end
-
-	nextZoneRefreshAt = now + ZONE_REFRESH_SECONDS
-	local refs = MapResolver.GetRefs({
-		context = "AFKGoldChestRewardService",
-	})
-	zoneRecord = findActiveZoneRecord(refs)
-
-	if zoneRecord == nil and warnedMissingZone ~= true then
-		warn("[AFKGoldChestRewardService] No AFK Gold chest zone found in the active map.")
-		warnedMissingZone = true
-	elseif zoneRecord ~= nil then
-		warnedMissingZone = false
-	end
-
-	return zoneRecord
-end
-
-local function isPointInsideZone(position, record)
-	if typeof(position) ~= "Vector3" or typeof(record) ~= "table" then
-		return false
-	end
-
-	local cframe = record.CFrame
-	local size = record.Size
-	if typeof(cframe) ~= "CFrame" or typeof(size) ~= "Vector3" then
-		return false
-	end
-
-	local localPosition = cframe:PointToObjectSpace(position)
-	return math.abs(localPosition.X) <= size.X * 0.5 + ZONE_PADDING
-		and math.abs(localPosition.Y) <= size.Y * 0.5 + ZONE_PADDING
-		and math.abs(localPosition.Z) <= size.Z * 0.5 + ZONE_PADDING
-end
-
-local function isPlayerInZone(player, now)
-	local record = getActiveZoneRecord(now)
-	if record == nil then
-		return false
-	end
-
-	local character = player.Character
-	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-	if not (rootPart and rootPart:IsA("BasePart")) then
-		return false
-	end
-
-	return isPointInsideZone(rootPart.Position, record)
-end
-
 local function getPlayerRootPart(player)
 	local character = player.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
@@ -396,6 +245,46 @@ local function getPlayerRootPart(player)
 		return rootPart
 	end
 	return nil
+end
+
+local function getShipRuntimeService()
+	if shipRuntimeService == nil then
+		shipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
+	end
+	return shipRuntimeService
+end
+
+local function getShipAfkRadius()
+	return getPositiveNumber(getEntryConfig().ShipAfkRadius, DEFAULT_SHIP_AFK_RADIUS)
+end
+
+local function getPlayerShipSpawnCFrame(player)
+	local service = getShipRuntimeService()
+	if typeof(service.GetPlayerSpawnCFrame) ~= "function" then
+		return nil
+	end
+
+	local ok, spawnCFrame = pcall(function()
+		return service.GetPlayerSpawnCFrame(player)
+	end)
+	if ok and typeof(spawnCFrame) == "CFrame" then
+		return spawnCFrame
+	end
+	return nil
+end
+
+local function isPlayerInShipAfkArea(player)
+	local rootPart = getPlayerRootPart(player)
+	if not rootPart then
+		return false
+	end
+
+	local spawnCFrame = getPlayerShipSpawnCFrame(player)
+	if typeof(spawnCFrame) ~= "CFrame" then
+		return false
+	end
+
+	return (rootPart.Position - spawnCFrame.Position).Magnitude <= getShipAfkRadius()
 end
 
 local function getInstancePosition(instance)
@@ -445,14 +334,71 @@ local function isPlayerNearRayleigh(player)
 
 	local maxDistance = getPositiveNumber(getEntryConfig().MaxDistance, DEFAULT_ENTRY_MAX_DISTANCE)
 	if (rootPart.Position - rayleighPosition).Magnitude > maxDistance then
-		return false, "Move closer to Rayleigh to enter the AFK World."
+		return false, "Move closer to Rayleigh to start training."
 	end
 
 	return true, nil
 end
 
+local function getProfileDataRoot(player)
+	if dataManagerRef == nil or typeof(dataManagerRef.TryGetProfile) ~= "function" then
+		return nil
+	end
+
+	local profile = dataManagerRef:TryGetProfile(player)
+	return if profile and typeof(profile.Data) == "table" then profile.Data else nil
+end
+
+local function getGoldChestCount(dataRoot)
+	if typeof(dataRoot) ~= "table" then
+		return 0
+	end
+
+	local unopenedChests = dataRoot.UnopenedChests
+	if typeof(unopenedChests) ~= "table" then
+		return 0
+	end
+
+	local count = 0
+	local stacks = unopenedChests.Stacks
+	if typeof(stacks) == "table" then
+		count += math.max(0, math.floor(tonumber(stacks.Gold) or 0))
+	end
+
+	local byId = unopenedChests.ById
+	if typeof(byId) == "table" then
+		for _, chestData in pairs(byId) do
+			if typeof(chestData) == "table" and tostring(chestData.Tier or "") == "Gold" then
+				count += math.max(1, math.floor(tonumber(chestData.Quantity) or 1))
+			end
+		end
+	end
+
+	return count
+end
+
+local function getBeliAmount(player, dataRoot)
+	local valueObject = CurrencyUtil.findPrimaryValueObject(player)
+	if valueObject then
+		return math.max(0, tonumber(valueObject.Value) or 0)
+	end
+
+	if typeof(dataRoot) ~= "table" then
+		return 0
+	end
+
+	return CurrencyUtil.getAmountFromTable(dataRoot.leaderstats)
+end
+
+local function getGoldFruitPityProgress(dataRoot)
+	local chestRewardsState = if typeof(dataRoot) == "table" then dataRoot.ChestRewards else nil
+	return ChestRewards.GetFruitPityProgress(chestRewardsState, "Gold")
+end
+
 local function buildStatePayload(player, state, inZone, sessionActive)
 	local settings = getPlayerSettings(player)
+	local dataRoot = getProfileDataRoot(player)
+	local runtime = runtimeByPlayer[player]
 	local earnedToday = math.max(0, math.floor(getNumber(state and state.EarnedToday, 0)))
 	local progressSeconds = math.max(0, getNumber(state and state.ProgressSeconds, 0))
 	local capReached = earnedToday >= settings.DailyCap
@@ -472,8 +418,15 @@ local function buildStatePayload(player, state, inZone, sessionActive)
 		CapReached = capReached,
 		ProgressSeconds = progressSeconds,
 		RewardTier = settings.RewardTier,
+		SessionToken = if sessionActive == true and runtime ~= nil then runtime.SessionToken else nil,
+		UiHeartbeatIntervalSeconds = UI_HEARTBEAT_INTERVAL_SECONDS,
+		UiHeartbeatTimeoutSeconds = UI_HEARTBEAT_TIMEOUT_SECONDS,
+		UiHeartbeatRequired = true,
 		ServerTime = workspace:GetServerTimeNow(),
-		ZoneAvailable = zoneRecord ~= nil,
+		ShipAfkRadius = getShipAfkRadius(),
+		GoldChestCount = getGoldChestCount(dataRoot),
+		FruitPityProgress = getGoldFruitPityProgress(dataRoot),
+		Beli = getBeliAmount(player, dataRoot),
 	}
 end
 
@@ -537,6 +490,9 @@ local function fireReward(player, settings, state, inZone)
 	})
 end
 
+local endSession
+local isPlayerAlive
+
 local function processCompletedIntervals(player, state, runtime, inZone, now)
 	local settings = getPlayerSettings(player)
 	if math.max(0, math.floor(getNumber(state.EarnedToday, 0))) >= settings.DailyCap then
@@ -552,14 +508,13 @@ local function processCompletedIntervals(player, state, runtime, inZone, now)
 	end
 
 	local grantedAny = false
-	while getNumber(state.ProgressSeconds, 0) >= settings.IntervalSeconds
-		and math.max(0, math.floor(getNumber(state.EarnedToday, 0))) < settings.DailyCap do
+	if getNumber(state.ProgressSeconds, 0) >= settings.IntervalSeconds then
 		if grantGoldChest(player, settings) ~= true then
 			runtime.NextGrantRetryAt = now + GRANT_RETRY_SECONDS
-			break
+			return
 		end
 
-		state.ProgressSeconds = math.max(0, getNumber(state.ProgressSeconds, 0) - settings.IntervalSeconds)
+		state.ProgressSeconds = 0
 		state.EarnedToday = math.max(0, math.floor(getNumber(state.EarnedToday, 0))) + 1
 		grantedAny = true
 		persistAfkState(player, state)
@@ -593,23 +548,55 @@ local function processPlayer(player, now)
 		return
 	end
 
-	local inZone = isPlayerInZone(player, now)
+	local inZone = isPlayerInShipAfkArea(player)
 	local delta = math.clamp(now - (runtime.LastTickAt or now), 0, MAX_DELTA_SECONDS)
 	runtime.LastTickAt = now
 	local sessionActive = runtime.SessionActive == true
+
+	if sessionActive and isPlayerAlive(player) ~= true then
+		endSession(player, state, {
+			Reason = "character_unavailable",
+		})
+		sessionActive = false
+		inZone = false
+		fireState(player, state, inZone)
+		runtime.LastStatePushAt = now
+	end
 
 	if sessionActive and inZone then
 		runtime.SessionHadZone = true
 	end
 
 	if sessionActive and runtime.SessionHadZone == true and not inZone then
-		runtime.SessionActive = false
-		runtime.SessionHadZone = false
+		endSession(player, state, {
+			Reason = "left_ship_afk_radius",
+			TeleportToShip = true,
+			TeleportOnlyIfOutside = true,
+			TeleportContext = "rayleigh_training_radius_exit",
+		})
 		sessionActive = false
-		persistAfkState(player, state)
+		inZone = isPlayerInShipAfkArea(player)
+		fireState(player, state, inZone)
+		runtime.LastStatePushAt = now
 	end
 
-	local eligible = sessionActive and inZone
+	local heartbeatFresh = sessionActive
+		and runtime.SessionToken ~= nil
+		and now - getNumber(runtime.LastUiHeartbeatAt, 0) <= UI_HEARTBEAT_TIMEOUT_SECONDS
+
+	if sessionActive and inZone and heartbeatFresh ~= true then
+		endSession(player, state, {
+			Reason = "ui_heartbeat_expired",
+			TeleportToShip = true,
+			TeleportContext = "rayleigh_training_heartbeat_exit",
+		})
+		sessionActive = false
+		inZone = isPlayerInShipAfkArea(player)
+		fireState(player, state, inZone)
+		runtime.LastStatePushAt = now
+	end
+
+	local eligible = sessionActive and inZone and heartbeatFresh
 
 	if eligible then
 		local settings = getPlayerSettings(player)
@@ -656,13 +643,20 @@ local function buildCurrentStateForPlayer(player)
 			EarnedToday = 0,
 			DailyCap = DEFAULT_NORMAL_DAILY_CAP,
 			CapReached = false,
-			ZoneAvailable = zoneRecord ~= nil,
+			ShipAfkRadius = getShipAfkRadius(),
+			SessionToken = nil,
+			UiHeartbeatIntervalSeconds = UI_HEARTBEAT_INTERVAL_SECONDS,
+			UiHeartbeatTimeoutSeconds = UI_HEARTBEAT_TIMEOUT_SECONDS,
+			UiHeartbeatRequired = true,
+			GoldChestCount = 0,
+			FruitPityProgress = ChestRewards.GetFruitPityProgress(nil, "Gold"),
+			Beli = 0,
 			DataReady = false,
 		}
 	end
 
 	local state = getAfkState(player)
-	local inZone = isPlayerInZone(player, os.clock())
+	local inZone = isPlayerInShipAfkArea(player)
 	local runtime = getRuntime(player)
 	local payload = buildStatePayload(player, state, inZone, runtime.SessionActive == true)
 	payload.DataReady = true
@@ -677,10 +671,114 @@ local function buildEntryResponse(ok, message, state)
 	}
 end
 
+local function teleportPlayerToShip(player, context)
+	local service = getShipRuntimeService()
+	if typeof(service.TeleportPlayerToShip) ~= "function" then
+		return false, "ship_service_unavailable"
+	end
+
+	local ok, success, reason = pcall(function()
+		return service.TeleportPlayerToShip(player, nil, context or "rayleigh_training_ship")
+	end)
+	if ok ~= true then
+		return false, "ship_teleport_error"
+	end
+	if success ~= true then
+		return false, reason or "ship_teleport_failed"
+	end
+	return true, nil
+end
+
+function isPlayerAlive(player)
+	local character = player.Character
+	if not character then
+		return false
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+
+	return character:FindFirstChild("HumanoidRootPart") ~= nil
+end
+
+local function getReturnCFrame()
+	local refs = MapResolver.GetRefs({
+		context = "AFKGoldChestRewardService.Exit",
+	})
+	local spawnPart = refs and refs.SpawnPart
+	if spawnPart and spawnPart:IsA("BasePart") then
+		return spawnPart.CFrame + EXIT_TELEPORT_OFFSET
+	end
+
+	local rayleighNpc = refs and refs.AFKRayleighNpc
+	local rayleighPosition = getInstancePosition(rayleighNpc)
+	if typeof(rayleighPosition) == "Vector3" then
+		return CFrame.new(rayleighPosition + RAYLEIGH_EXIT_OFFSET + EXIT_TELEPORT_OFFSET)
+	end
+
+	return CFrame.new(EXIT_TELEPORT_OFFSET)
+end
+
+local function teleportPlayerToReturnPoint(player)
+	local character = player.Character
+	if not character then
+		return false, "missing_character"
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health <= 0 then
+		return false, "dead"
+	end
+
+	character:PivotTo(getReturnCFrame())
+	return true, nil
+end
+
+function endSession(player, state, options)
+	options = if typeof(options) == "table" then options else {}
+	local runtime = getRuntime(player)
+	local now = os.clock()
+	runtime.SessionActive = false
+	runtime.SessionHadZone = false
+	runtime.SessionToken = nil
+	runtime.LastUiHeartbeatAt = 0
+	runtime.WasInZone = false
+	runtime.WasEligible = false
+	runtime.WasSessionActive = false
+	runtime.NextGrantRetryAt = 0
+	runtime.LastTickAt = now
+	runtime.LastStatePushAt = now
+
+	if typeof(state) == "table" then
+		state.ProgressSeconds = 0
+		persistAfkState(player, state)
+	end
+
+	local teleportAttempted = false
+	local teleported = false
+	local teleportReason = nil
+	if options.TeleportToShip == true and player.Parent == Players and isPlayerAlive(player) then
+		if options.TeleportOnlyIfOutside ~= true or isPlayerInShipAfkArea(player) ~= true then
+			teleportAttempted = true
+			teleported, teleportReason = teleportPlayerToShip(player, tostring(options.TeleportContext or "rayleigh_training_exit"))
+		else
+			teleported = true
+		end
+	end
+
+	return {
+		TeleportAttempted = teleportAttempted,
+		Teleported = teleported,
+		TeleportReason = teleportReason,
+	}
+end
+
 local function handleEntryRequest(player)
 	local config = getAfkConfig()
 	if config.Enabled == false then
-		return buildEntryResponse(false, "AFK Gold Chest rewards are currently unavailable.", buildCurrentStateForPlayer(player))
+		return buildEntryResponse(false, "Rayleigh Training rewards are currently unavailable.", buildCurrentStateForPlayer(player))
 	end
 
 	if dataManagerRef == nil or dataManagerRef:IsReady(player) ~= true then
@@ -688,26 +786,46 @@ local function handleEntryRequest(player)
 	end
 
 	local now = os.clock()
-	if getActiveZoneRecord(now) == nil then
-		return buildEntryResponse(false, "The AFK World is not available on this map.", buildCurrentStateForPlayer(player))
-	end
-
 	local nearRayleigh, reason = isPlayerNearRayleigh(player)
 	if nearRayleigh ~= true then
-		return buildEntryResponse(false, reason or "Move closer to Rayleigh to enter the AFK World.", buildCurrentStateForPlayer(player))
+		return buildEntryResponse(false, reason or "Move closer to Rayleigh to start training.", buildCurrentStateForPlayer(player))
 	end
 
 	local state, stateReason = getAfkState(player)
 	if state == nil then
-		return buildEntryResponse(false, tostring(stateReason or "AFK progress is unavailable."), buildCurrentStateForPlayer(player))
+		return buildEntryResponse(false, tostring(stateReason or "Rayleigh Training progress is unavailable."), buildCurrentStateForPlayer(player))
+	end
+
+	if getNumber(state.ProgressSeconds, 0) ~= 0 then
+		state.ProgressSeconds = 0
+		persistAfkState(player, state)
+	end
+
+	local teleported, teleportReason = teleportPlayerToShip(player, "rayleigh_training_entry")
+	if teleported ~= true then
+		local message = "Your ship is not ready for Rayleigh Training. Try again in a moment."
+		if teleportReason == "active_ship_not_found" or teleportReason == "spawn_cframe_not_found" then
+			message = "Your active ship is not ready for Rayleigh Training. Try again in a moment."
+		end
+		return buildEntryResponse(false, message, buildCurrentStateForPlayer(player))
 	end
 
 	local runtime = getRuntime(player)
-	local inZone = isPlayerInZone(player, now)
+	local inZone = isPlayerInShipAfkArea(player)
+	if inZone ~= true then
+		endSession(player, state, {
+			Reason = "entry_ship_area_unavailable",
+		})
+		return buildEntryResponse(false, "The training ship area is unavailable. Try again in a moment.", buildCurrentStateForPlayer(player))
+	end
+
 	runtime.SessionActive = true
-	runtime.SessionHadZone = inZone
+	runtime.SessionHadZone = true
+	runtime.SessionToken = HttpService:GenerateGUID(false)
+	runtime.LastUiHeartbeatAt = now
 	runtime.LastTickAt = now
 	runtime.LastStatePushAt = now
+	runtime.NextGrantRetryAt = 0
 	runtime.WasInZone = inZone
 	runtime.WasEligible = inZone
 	runtime.WasSessionActive = true
@@ -716,10 +834,57 @@ local function handleEntryRequest(player)
 	payload.DataReady = true
 	fireState(player, state, inZone)
 
-	local message = if inZone
-		then "AFK training started."
-		else "AFK training started. Enter the AFK World to begin earning."
+	local message = "Rayleigh Training started."
 	return buildEntryResponse(true, message, payload)
+end
+
+local function handleExitRequest(player)
+	if dataManagerRef == nil or dataManagerRef:IsReady(player) ~= true then
+		return buildEntryResponse(false, "Your profile is still loading. Try again in a moment.", buildCurrentStateForPlayer(player))
+	end
+
+	local state = getAfkState(player)
+	local result = endSession(player, state, {
+		Reason = "explicit_exit",
+		TeleportToShip = true,
+		TeleportContext = "rayleigh_training_exit",
+	})
+	local teleported = result.Teleported == true
+	local teleportReason = result.TeleportReason
+	local usedFallback = false
+	if teleported ~= true then
+		usedFallback = true
+		teleported, teleportReason = teleportPlayerToReturnPoint(player)
+	end
+
+	local inZone = isPlayerInShipAfkArea(player)
+	local payload = buildStatePayload(player, state, inZone, false)
+	payload.DataReady = true
+	fireState(player, state, inZone)
+
+	if teleported ~= true then
+		return buildEntryResponse(false, tostring(teleportReason or "Unable to leave Rayleigh Training right now."), payload)
+	end
+	if usedFallback then
+		return buildEntryResponse(true, "Left Rayleigh Training. Your ship was unavailable, so you were moved to a safe point.", payload)
+	end
+	return buildEntryResponse(true, "Left Rayleigh Training.", payload)
+end
+
+local function handleUiHeartbeat(player, sessionToken)
+	if typeof(sessionToken) ~= "string" or sessionToken == "" then
+		return
+	end
+
+	local runtime = runtimeByPlayer[player]
+	if runtime == nil or runtime.SessionActive ~= true then
+		return
+	end
+	if runtime.SessionToken ~= sessionToken then
+		return
+	end
+
+	runtime.LastUiHeartbeatAt = os.clock()
 end
 
 local function runLoop()
@@ -751,11 +916,21 @@ function AFKGoldChestRewardService.Start(dataManager)
 		return handleEntryRequest(player)
 	end
 
+	exitRequest.OnServerInvoke = function(player)
+		return handleExitRequest(player)
+	end
+
+	uiHeartbeatEvent.OnServerEvent:Connect(function(player, sessionToken)
+		handleUiHeartbeat(player, sessionToken)
+	end)
+
 	Players.PlayerRemoving:Connect(function(player)
 		if dataManagerRef ~= nil and dataManagerRef:IsReady(player) == true then
 			local state = getAfkState(player)
 			if state then
-				persistAfkState(player, state)
+				endSession(player, state, {
+					Reason = "player_removing",
+				})
 			end
 		end
 		runtimeByPlayer[player] = nil
@@ -769,12 +944,6 @@ function AFKGoldChestRewardService.Start(dataManager)
 	end)
 
 	runLoop()
-
-	if RunService:IsStudio() then
-		task.defer(function()
-			getActiveZoneRecord(os.clock())
-		end)
-	end
 end
 
 return AFKGoldChestRewardService

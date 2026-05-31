@@ -274,21 +274,15 @@ local Economy = {
 				IntervalSeconds = 1800,
 				DailyCap = 16,
 			},
-			Zone = {
-				Attribute = "AFKGoldChestZone",
-				Names = {
-					"AFKGoldChestZone",
-					"AFKZone",
-					"AFKLobby",
-				},
-			},
 			Remotes = {
 				StateEventName = "AFKGoldChestState",
 				StateRequestName = "AFKGoldChestStateRequest",
 				EntryRequestName = "AFKGoldChestEntryRequest",
+				ExitRequestName = "AFKGoldChestExitRequest",
 			},
 			Entry = {
 				MaxDistance = 18,
+				ShipAfkRadius = 34,
 			},
 		},
 
