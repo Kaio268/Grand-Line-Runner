@@ -9,16 +9,22 @@ local modules = ReplicatedStorage:WaitForChild("Modules")
 local React = require(packages:WaitForChild("React"))
 local ReactRoblox = require(packages:WaitForChild("ReactRoblox"))
 local CurrencyUtil = require(modules:WaitForChild("CurrencyUtil"))
+local EconomyConfig = require(modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PopUpModule = require(modules:WaitForChild("PopUpModule"))
 local SettingsAudioController = require(modules:WaitForChild("SettingsAudioController"))
 local UiModalState = require(modules:WaitForChild("UiModalState"))
 
 local e = React.createElement
 
-local STATE_EVENT_NAME = "AFKGoldChestState"
-local STATE_REQUEST_NAME = "AFKGoldChestStateRequest"
-local EXIT_REQUEST_NAME = "AFKGoldChestExitRequest"
-local UI_HEARTBEAT_EVENT_NAME = "AFKGoldChestUiHeartbeat"
+local afkRewardsConfig = if EconomyConfig.Chests and typeof(EconomyConfig.Chests.AFKGoldRewards) == "table"
+	then EconomyConfig.Chests.AFKGoldRewards
+	else {}
+local afkRemoteConfig = if typeof(afkRewardsConfig.Remotes) == "table" then afkRewardsConfig.Remotes else {}
+
+local STATE_EVENT_NAME = tostring(afkRemoteConfig.StateEventName or "AFKGoldChestState")
+local STATE_REQUEST_NAME = tostring(afkRemoteConfig.StateRequestName or "AFKGoldChestStateRequest")
+local EXIT_REQUEST_NAME = tostring(afkRemoteConfig.ExitRequestName or "AFKGoldChestExitRequest")
+local UI_HEARTBEAT_EVENT_NAME = tostring(afkRemoteConfig.UiHeartbeatEventName or "AFKGoldChestUiHeartbeat")
 local INCOME_METADATA_REQUEST_NAME = "IncomeStatusDisplayMetadataRequest"
 local MODAL_STATE_KEY = "AFKWorld"
 local TEMP_AUDIO_MUTE_KEY = "RayleighTraining"
@@ -66,9 +72,15 @@ local wasSessionActive = false
 local wasCapReached = false
 local sessionEffectsActive = false
 local silentExitInFlight = false
+local destroyed = false
+local timerLoopRunning = false
+local heartbeatLoopRunning = false
 local controls = nil
 local controlsLocked = false
+local connections = {}
 local render
+local startTimerLoop
+local startHeartbeatLoop
 
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AFKWorldGui"
@@ -734,6 +746,9 @@ local function AFKWorldScreen(props)
 end
 
 render = function()
+	if destroyed == true then
+		return
+	end
 	if renderQueued == true then
 		return
 	end
@@ -746,6 +761,8 @@ render = function()
 		applySessionEffects(visible)
 		if visible then
 			requestIncomeSummary(false)
+			startTimerLoop()
+			startHeartbeatLoop()
 		end
 
 		root:render(e(AFKWorldScreen, {
@@ -896,6 +913,67 @@ local function requestSessionExitSilently()
 	end)
 end
 
+local function isVisible()
+	return destroyed ~= true and typeof(currentState) == "table" and currentState.SessionActive == true
+end
+
+function startTimerLoop()
+	if timerLoopRunning == true or isVisible() ~= true then
+		return
+	end
+
+	timerLoopRunning = true
+	task.spawn(function()
+		while destroyed ~= true and isVisible() == true do
+			render()
+			task.wait(1)
+		end
+		timerLoopRunning = false
+	end)
+end
+
+function startHeartbeatLoop()
+	if heartbeatLoopRunning == true or isVisible() ~= true then
+		return
+	end
+
+	heartbeatLoopRunning = true
+	task.spawn(function()
+		while destroyed ~= true and isVisible() == true do
+			local interval = 5
+			local token = getCurrentSessionToken()
+			if token ~= nil and uiHeartbeatEvent ~= nil then
+				uiHeartbeatEvent:FireServer(token)
+				interval = math.max(2, math.floor(tonumber(currentState.UiHeartbeatIntervalSeconds) or interval))
+			end
+			task.wait(interval)
+		end
+		heartbeatLoopRunning = false
+	end)
+end
+
+local function cleanup()
+	if destroyed == true then
+		return
+	end
+
+	destroyed = true
+	requestSessionExitSilently()
+	UiModalState.SetOpen(MODAL_STATE_KEY, false)
+	applySessionEffects(false)
+
+	for _, connection in ipairs(connections) do
+		if connection and connection.Connected then
+			connection:Disconnect()
+		end
+	end
+	table.clear(connections)
+
+	pcall(function()
+		root:unmount()
+	end)
+end
+
 local remotes = ReplicatedStorage:WaitForChild("Remotes", 20)
 if remotes then
 	stateEvent = waitForRemote(remotes, STATE_EVENT_NAME, "RemoteEvent", 20)
@@ -919,37 +997,18 @@ if incomeMetadataRequest == nil then
 end
 
 if stateEvent then
-	stateEvent.OnClientEvent:Connect(function(action, payload)
+	table.insert(connections, stateEvent.OnClientEvent:Connect(function(action, payload)
 		if action == "State" then
 			applyState(payload)
 		elseif action == "Reward" then
 			showReward(payload)
 		end
-	end)
+	end))
 end
 
 requestInitialState()
 
-task.spawn(function()
-	while true do
-		render()
-		task.wait(1)
-	end
-end)
-
-task.spawn(function()
-	while true do
-		local interval = 5
-		local token = getCurrentSessionToken()
-		if token ~= nil and uiHeartbeatEvent ~= nil then
-			uiHeartbeatEvent:FireServer(token)
-			interval = math.max(2, math.floor(tonumber(currentState.UiHeartbeatIntervalSeconds) or interval))
-		end
-		task.wait(interval)
-	end
-end)
-
-player.CharacterAdded:Connect(function()
+table.insert(connections, player.CharacterAdded:Connect(function()
 	task.defer(function()
 		if typeof(currentState) == "table" and currentState.SessionActive == true then
 			controls = nil
@@ -957,16 +1016,14 @@ player.CharacterAdded:Connect(function()
 			setMovementLocked(true)
 		end
 	end)
-end)
+end))
 
-screenGui.Destroying:Connect(function()
-	requestSessionExitSilently()
-	UiModalState.SetOpen(MODAL_STATE_KEY, false)
-	applySessionEffects(false)
-end)
+table.insert(connections, screenGui.Destroying:Connect(cleanup))
 
-screenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+table.insert(connections, script.Destroying:Connect(cleanup))
+
+table.insert(connections, screenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
 	if screenGui.Enabled ~= true then
 		requestSessionExitSilently()
 	end
-end)
+end))

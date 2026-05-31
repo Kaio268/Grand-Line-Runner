@@ -24,12 +24,14 @@ local DEFAULT_NORMAL_DAILY_CAP = 8
 local DEFAULT_PREMIUM_DAILY_CAP = 16
 local DEFAULT_ENTRY_MAX_DISTANCE = 18
 local DEFAULT_SHIP_AFK_RADIUS = 34
-local TICK_SECONDS = 1
+local DEFAULT_TICK_SECONDS = 1
 local MAX_DELTA_SECONDS = 5
 local PERSIST_INTERVAL_SECONDS = 30
 local GRANT_RETRY_SECONDS = 30
-local UI_HEARTBEAT_INTERVAL_SECONDS = 5
-local UI_HEARTBEAT_TIMEOUT_SECONDS = 15
+local DEFAULT_UI_HEARTBEAT_INTERVAL_SECONDS = 5
+local DEFAULT_UI_HEARTBEAT_TIMEOUT_SECONDS = 15
+local DEFAULT_UI_HEARTBEAT_MIN_INTERVAL_SECONDS = 1
+local DEFAULT_SHIP_SPAWN_CACHE_SECONDS = 2
 local EXIT_TELEPORT_OFFSET = Vector3.new(0, 4, 0)
 local RAYLEIGH_EXIT_OFFSET = Vector3.new(0, 0, 10)
 
@@ -54,6 +56,11 @@ local function getEntryConfig()
 	return if typeof(config.Entry) == "table" then config.Entry else {}
 end
 
+local function getTimingConfig()
+	local config = getAfkConfig()
+	return if typeof(config.Timing) == "table" then config.Timing else {}
+end
+
 local function getNumber(value, fallback)
 	local numberValue = tonumber(value)
 	if numberValue == nil then
@@ -68,6 +75,10 @@ end
 
 local function getPositiveNumber(value, fallback)
 	return math.max(0.01, getNumber(value, fallback))
+end
+
+local function getNonNegativeNumber(value, fallback)
+	return math.max(0, getNumber(value, fallback))
 end
 
 local function todayUtc()
@@ -228,6 +239,9 @@ local function getRuntime(player)
 			SessionHadZone = false,
 			SessionToken = nil,
 			LastUiHeartbeatAt = 0,
+			LastUiHeartbeatReceivedAt = 0,
+			CachedShipSpawnCFrame = nil,
+			CachedShipSpawnAt = 0,
 			WasInZone = false,
 			WasEligible = false,
 			WasSessionActive = false,
@@ -258,7 +272,38 @@ local function getShipAfkRadius()
 	return getPositiveNumber(getEntryConfig().ShipAfkRadius, DEFAULT_SHIP_AFK_RADIUS)
 end
 
-local function getPlayerShipSpawnCFrame(player)
+local function getTickSeconds()
+	return getPositiveNumber(getTimingConfig().TickSeconds, DEFAULT_TICK_SECONDS)
+end
+
+local function getUiHeartbeatIntervalSeconds()
+	return getPositiveNumber(getTimingConfig().HeartbeatIntervalSeconds, DEFAULT_UI_HEARTBEAT_INTERVAL_SECONDS)
+end
+
+local function getUiHeartbeatTimeoutSeconds()
+	return getPositiveNumber(getTimingConfig().HeartbeatTimeoutSeconds, DEFAULT_UI_HEARTBEAT_TIMEOUT_SECONDS)
+end
+
+local function getUiHeartbeatMinIntervalSeconds()
+	return getNonNegativeNumber(getTimingConfig().HeartbeatMinIntervalSeconds, DEFAULT_UI_HEARTBEAT_MIN_INTERVAL_SECONDS)
+end
+
+local function getShipSpawnCacheSeconds()
+	return getNonNegativeNumber(getTimingConfig().ShipSpawnCacheSeconds, DEFAULT_SHIP_SPAWN_CACHE_SECONDS)
+end
+
+local function getPlayerShipSpawnCFrame(player, runtime, now, forceRefresh)
+	now = tonumber(now) or os.clock()
+	local cacheSeconds = getShipSpawnCacheSeconds()
+	if
+		forceRefresh ~= true
+		and runtime ~= nil
+		and typeof(runtime.CachedShipSpawnCFrame) == "CFrame"
+		and now - getNumber(runtime.CachedShipSpawnAt, 0) <= cacheSeconds
+	then
+		return runtime.CachedShipSpawnCFrame
+	end
+
 	local service = getShipRuntimeService()
 	if typeof(service.GetPlayerSpawnCFrame) ~= "function" then
 		return nil
@@ -268,18 +313,26 @@ local function getPlayerShipSpawnCFrame(player)
 		return service.GetPlayerSpawnCFrame(player)
 	end)
 	if ok and typeof(spawnCFrame) == "CFrame" then
+		if runtime ~= nil then
+			runtime.CachedShipSpawnCFrame = spawnCFrame
+			runtime.CachedShipSpawnAt = now
+		end
 		return spawnCFrame
+	end
+	if runtime ~= nil then
+		runtime.CachedShipSpawnCFrame = nil
+		runtime.CachedShipSpawnAt = 0
 	end
 	return nil
 end
 
-local function isPlayerInShipAfkArea(player)
+local function isPlayerInShipAfkArea(player, runtime, now, forceRefresh)
 	local rootPart = getPlayerRootPart(player)
 	if not rootPart then
 		return false
 	end
 
-	local spawnCFrame = getPlayerShipSpawnCFrame(player)
+	local spawnCFrame = getPlayerShipSpawnCFrame(player, runtime, now, forceRefresh)
 	if typeof(spawnCFrame) ~= "CFrame" then
 		return false
 	end
@@ -419,8 +472,8 @@ local function buildStatePayload(player, state, inZone, sessionActive)
 		ProgressSeconds = progressSeconds,
 		RewardTier = settings.RewardTier,
 		SessionToken = if sessionActive == true and runtime ~= nil then runtime.SessionToken else nil,
-		UiHeartbeatIntervalSeconds = UI_HEARTBEAT_INTERVAL_SECONDS,
-		UiHeartbeatTimeoutSeconds = UI_HEARTBEAT_TIMEOUT_SECONDS,
+		UiHeartbeatIntervalSeconds = getUiHeartbeatIntervalSeconds(),
+		UiHeartbeatTimeoutSeconds = getUiHeartbeatTimeoutSeconds(),
 		UiHeartbeatRequired = true,
 		ServerTime = workspace:GetServerTimeNow(),
 		ShipAfkRadius = getShipAfkRadius(),
@@ -531,11 +584,23 @@ local function processPlayer(player, now)
 	if config.Enabled == false then
 		return
 	end
+
+	local runtime = getRuntime(player)
+	local sessionActive = runtime.SessionActive == true
+	if
+		sessionActive ~= true
+		and runtime.WasSessionActive ~= true
+		and runtime.WasEligible ~= true
+		and runtime.WasInZone ~= true
+	then
+		runtime.LastTickAt = now
+		return
+	end
+
 	if dataManagerRef == nil or dataManagerRef:IsReady(player) ~= true then
 		return
 	end
 
-	local runtime = getRuntime(player)
 	local state, reason = getAfkState(player)
 	if state == nil then
 		if reason ~= "profile_not_ready" then
@@ -548,10 +613,9 @@ local function processPlayer(player, now)
 		return
 	end
 
-	local inZone = isPlayerInShipAfkArea(player)
+	local inZone = isPlayerInShipAfkArea(player, runtime, now)
 	local delta = math.clamp(now - (runtime.LastTickAt or now), 0, MAX_DELTA_SECONDS)
 	runtime.LastTickAt = now
-	local sessionActive = runtime.SessionActive == true
 
 	if sessionActive and isPlayerAlive(player) ~= true then
 		endSession(player, state, {
@@ -575,14 +639,14 @@ local function processPlayer(player, now)
 			TeleportContext = "rayleigh_training_radius_exit",
 		})
 		sessionActive = false
-		inZone = isPlayerInShipAfkArea(player)
+		inZone = isPlayerInShipAfkArea(player, runtime, now, true)
 		fireState(player, state, inZone)
 		runtime.LastStatePushAt = now
 	end
 
 	local heartbeatFresh = sessionActive
 		and runtime.SessionToken ~= nil
-		and now - getNumber(runtime.LastUiHeartbeatAt, 0) <= UI_HEARTBEAT_TIMEOUT_SECONDS
+		and now - getNumber(runtime.LastUiHeartbeatAt, 0) <= getUiHeartbeatTimeoutSeconds()
 
 	if sessionActive and inZone and heartbeatFresh ~= true then
 		endSession(player, state, {
@@ -591,7 +655,7 @@ local function processPlayer(player, now)
 			TeleportContext = "rayleigh_training_heartbeat_exit",
 		})
 		sessionActive = false
-		inZone = isPlayerInShipAfkArea(player)
+		inZone = isPlayerInShipAfkArea(player, runtime, now, true)
 		fireState(player, state, inZone)
 		runtime.LastStatePushAt = now
 	end
@@ -645,8 +709,8 @@ local function buildCurrentStateForPlayer(player)
 			CapReached = false,
 			ShipAfkRadius = getShipAfkRadius(),
 			SessionToken = nil,
-			UiHeartbeatIntervalSeconds = UI_HEARTBEAT_INTERVAL_SECONDS,
-			UiHeartbeatTimeoutSeconds = UI_HEARTBEAT_TIMEOUT_SECONDS,
+			UiHeartbeatIntervalSeconds = getUiHeartbeatIntervalSeconds(),
+			UiHeartbeatTimeoutSeconds = getUiHeartbeatTimeoutSeconds(),
 			UiHeartbeatRequired = true,
 			GoldChestCount = 0,
 			FruitPityProgress = ChestRewards.GetFruitPityProgress(nil, "Gold"),
@@ -656,8 +720,8 @@ local function buildCurrentStateForPlayer(player)
 	end
 
 	local state = getAfkState(player)
-	local inZone = isPlayerInShipAfkArea(player)
 	local runtime = getRuntime(player)
+	local inZone = if runtime.SessionActive == true then isPlayerInShipAfkArea(player, runtime, os.clock()) else false
 	local payload = buildStatePayload(player, state, inZone, runtime.SessionActive == true)
 	payload.DataReady = true
 	return payload
@@ -744,6 +808,9 @@ function endSession(player, state, options)
 	runtime.SessionHadZone = false
 	runtime.SessionToken = nil
 	runtime.LastUiHeartbeatAt = 0
+	runtime.LastUiHeartbeatReceivedAt = 0
+	runtime.CachedShipSpawnCFrame = nil
+	runtime.CachedShipSpawnAt = 0
 	runtime.WasInZone = false
 	runtime.WasEligible = false
 	runtime.WasSessionActive = false
@@ -760,7 +827,7 @@ function endSession(player, state, options)
 	local teleported = false
 	local teleportReason = nil
 	if options.TeleportToShip == true and player.Parent == Players and isPlayerAlive(player) then
-		if options.TeleportOnlyIfOutside ~= true or isPlayerInShipAfkArea(player) ~= true then
+		if options.TeleportOnlyIfOutside ~= true or isPlayerInShipAfkArea(player, runtime, now, true) ~= true then
 			teleportAttempted = true
 			teleported, teleportReason = teleportPlayerToShip(player, tostring(options.TeleportContext or "rayleigh_training_exit"))
 		else
@@ -811,7 +878,7 @@ local function handleEntryRequest(player)
 	end
 
 	local runtime = getRuntime(player)
-	local inZone = isPlayerInShipAfkArea(player)
+	local inZone = isPlayerInShipAfkArea(player, runtime, now, true)
 	if inZone ~= true then
 		endSession(player, state, {
 			Reason = "entry_ship_area_unavailable",
@@ -823,6 +890,7 @@ local function handleEntryRequest(player)
 	runtime.SessionHadZone = true
 	runtime.SessionToken = HttpService:GenerateGUID(false)
 	runtime.LastUiHeartbeatAt = now
+	runtime.LastUiHeartbeatReceivedAt = now
 	runtime.LastTickAt = now
 	runtime.LastStatePushAt = now
 	runtime.NextGrantRetryAt = 0
@@ -857,7 +925,7 @@ local function handleExitRequest(player)
 		teleported, teleportReason = teleportPlayerToReturnPoint(player)
 	end
 
-	local inZone = isPlayerInShipAfkArea(player)
+	local inZone = false
 	local payload = buildStatePayload(player, state, inZone, false)
 	payload.DataReady = true
 	fireState(player, state, inZone)
@@ -884,7 +952,13 @@ local function handleUiHeartbeat(player, sessionToken)
 		return
 	end
 
-	runtime.LastUiHeartbeatAt = os.clock()
+	local now = os.clock()
+	if now - getNumber(runtime.LastUiHeartbeatReceivedAt, 0) < getUiHeartbeatMinIntervalSeconds() then
+		return
+	end
+
+	runtime.LastUiHeartbeatReceivedAt = now
+	runtime.LastUiHeartbeatAt = now
 end
 
 local function runLoop()
@@ -894,7 +968,7 @@ local function runLoop()
 			for _, player in ipairs(Players:GetPlayers()) do
 				processPlayer(player, now)
 			end
-			task.wait(TICK_SECONDS)
+			task.wait(getTickSeconds())
 		end
 	end)
 end

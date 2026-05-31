@@ -43,6 +43,7 @@ function DialogModule.new(npcName, npc, prompt, animation)
 		DEFAULT_TALKING_STUDS_OFFSET
 	)
 	self.idleBobAmplitude = getNumberAttribute(self.npcGui, "DialogIdleBobAmplitude", DEFAULT_IDLE_BOB_AMPLITUDE)
+	self.suppressNameLabel = self.npcGui:GetAttribute("DialogSuppressNameLabel") == true
 	self.active = false
 	self.talking = false
 	self.prompt = prompt
@@ -55,6 +56,12 @@ function DialogModule.new(npcName, npc, prompt, animation)
 	self.animNameStroke = tweenService:Create(self.npcGui.name.UIStroke, TweenInfo.new(0.3), { Transparency = 1 })
 	self.animDialogText = tweenService:Create(self.npcGui.dialog, TweenInfo.new(0.3), { TextTransparency = 1 })
 	self.animDialogStroke = tweenService:Create(self.npcGui.dialog.UIStroke, TweenInfo.new(0.3), { Transparency = 1 })
+
+	if self.suppressNameLabel then
+		self.npcGui.name.TextTransparency = 1
+		self.npcGui.name.UIStroke.Transparency = 1
+		self.npcGui.name.Visible = false
+	end
 
 	if animation ~= nil then
 		local newAnimation = Instance.new("Animation")
@@ -199,8 +206,16 @@ end
 function DialogModule:showGui()
 	turnProximityPromptsOn(false)
 
-	self.animNameText:Play()
-	self.animNameStroke:Play()
+	if self.suppressNameLabel then
+		self.animNameText:Cancel()
+		self.animNameStroke:Cancel()
+		self.npcGui.name.TextTransparency = 1
+		self.npcGui.name.UIStroke.Transparency = 1
+		self.npcGui.name.Visible = false
+	else
+		self.animNameText:Play()
+		self.animNameStroke:Play()
+	end
 
 	self.animDialogText:Cancel()
 	self.animDialogStroke:Cancel()
@@ -208,13 +223,15 @@ function DialogModule:showGui()
 	self.npcGui.dialog.TextTransparency = 0
 	self.npcGui.dialog.UIStroke.Transparency = 0
 
-	coroutine.wrap(function()
-		task.wait(0.3)
-		if self.npcGui.name.TextTransparency ~= 1 then
-			return
-		end
-		self.npcGui.name.Visible = false
-	end)()
+	if not self.suppressNameLabel then
+		coroutine.wrap(function()
+			task.wait(0.3)
+			if self.npcGui.name.TextTransparency ~= 1 then
+				return
+			end
+			self.npcGui.name.Visible = false
+		end)()
+	end
 end
 
 function DialogModule:hideGui(exitQuip, notActuallyAnExitQuip)
@@ -242,6 +259,9 @@ function DialogModule:hideGui(exitQuip, notActuallyAnExitQuip)
 		dialogObject.UIStroke.Transparency = 0
 		self.npcGui.name.TextTransparency = 1
 		self.npcGui.name.UIStroke.Transparency = 1
+		if self.suppressNameLabel then
+			self.npcGui.name.Visible = false
+		end
 
 		local currenttext = ""
 		dialogObject.Text = ""
@@ -287,13 +307,21 @@ function DialogModule:hideGui(exitQuip, notActuallyAnExitQuip)
 			end
 		end
 
-		if self.npcGui.name.TextTransparency ~= 1 then
+		if self.suppressNameLabel then
 			self.animNameText:Cancel()
 			self.animNameStroke:Cancel()
+			self.npcGui.name.TextTransparency = 1
+			self.npcGui.name.UIStroke.Transparency = 1
+			self.npcGui.name.Visible = false
+		else
+			if self.npcGui.name.TextTransparency ~= 1 then
+				self.animNameText:Cancel()
+				self.animNameStroke:Cancel()
+			end
+			self.npcGui.name.TextTransparency = 0
+			self.npcGui.name.UIStroke.Transparency = 0
+			self.npcGui.name.Visible = true
 		end
-		self.npcGui.name.TextTransparency = 0
-		self.npcGui.name.UIStroke.Transparency = 0
-		self.npcGui.name.Visible = true
 
 		self.animDialogText:Play()
 		self.animDialogStroke:Play()

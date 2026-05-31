@@ -279,6 +279,14 @@ local Economy = {
 				StateRequestName = "AFKGoldChestStateRequest",
 				EntryRequestName = "AFKGoldChestEntryRequest",
 				ExitRequestName = "AFKGoldChestExitRequest",
+				UiHeartbeatEventName = "AFKGoldChestUiHeartbeat",
+			},
+			Timing = {
+				TickSeconds = 1,
+				HeartbeatIntervalSeconds = 5,
+				HeartbeatTimeoutSeconds = 15,
+				HeartbeatMinIntervalSeconds = 1,
+				ShipSpawnCacheSeconds = 2,
 			},
 			Entry = {
 				MaxDistance = 18,
