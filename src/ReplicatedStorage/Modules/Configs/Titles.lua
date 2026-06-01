@@ -213,7 +213,7 @@ local TITLE_GROUPS = {
 			"Tester",
 			"Deckhand",
 			"FirstMate",
-			"ChestCracker",
+			"ChestChecker",
 		},
 		Definitions = {
 			Tester = {
@@ -239,6 +239,11 @@ local TITLE_GROUPS = {
 					brackets = true,
 					spaceAfter = true,
 				},
+				Perks = {
+					SpeedPercent = 20,
+					BeliPercent = 15,
+					BountyPercent = 10,
+				},
 				SortOrder = 0,
 			},
 			Deckhand = {
@@ -253,8 +258,8 @@ local TITLE_GROUPS = {
 				RequirementText = "Extract your first crew member.",
 				UnlockType = "Persistent",
 			},
-			ChestCracker = {
-				DisplayName = "Chest Cracker",
+			ChestChecker = {
+				DisplayName = "Chest Checker",
 				Description = "You heard treasure calling and knew exactly what to do.",
 				RequirementText = "Open your first treasure chest.",
 				UnlockType = "Persistent",
@@ -310,21 +315,21 @@ local TITLE_GROUPS = {
 	},
 	Epic = {
 		Order = {
-			"WaveFreezer",
-			"ColdHearted",
+			"Iceman",
+			"ColdBlooded",
 			"CaptainTrainer",
 			"GreedOverSpeed",
 			"GoldFever",
 		},
 		Definitions = {
-			WaveFreezer = {
-				DisplayName = "Wave Freezer",
+			Iceman = {
+				DisplayName = "Iceman",
 				Description = "The sea itself stopped moving when your cold will touched it.",
 				RequirementText = "Freeze a wave using an ice ability.",
 				UnlockType = "Persistent",
 			},
-			ColdHearted = {
-				DisplayName = "Cold-Hearted",
+			ColdBlooded = {
+				DisplayName = "Cold-Blooded",
 				Description = "One touch was enough to turn another pirate into a statue of ice.",
 				RequirementText = "Freeze another player using an ice ability.",
 				UnlockType = "Persistent",
@@ -346,6 +351,9 @@ local TITLE_GROUPS = {
 				Description = "If it shines, it is coming home with you.",
 				RequirementText = "Extract a Gold chest from any depth.",
 				UnlockType = "Persistent",
+				Perks = {
+					BeliPercent = 10,
+				},
 			},
 		},
 	},
@@ -410,6 +418,9 @@ local TITLE_GROUPS = {
 				Description = "Too slow to survive, too bold to turn back.",
 				RequirementText = "Complete an Abyssal run with less than 10 speed.",
 				UnlockType = "Persistent",
+				Perks = {
+					SpeedPercent = 5,
+				},
 			},
 			ThePhoenix = {
 				DisplayName = "The Phoenix",
@@ -452,7 +463,7 @@ local TITLE_GROUPS = {
 		},
 		Definitions = {
 			DressrosaSecret = {
-				DisplayName = "Dressrosa Secret",
+				DisplayName = "Dressrosa's Secret",
 				Description = "You found a name the world tried to hide.",
 				RequirementText = "Own or extract a Secret-rarity crewmate.",
 				UnlockType = "Persistent",
@@ -470,6 +481,9 @@ local TITLE_GROUPS = {
 				UnlockType = "DynamicRank",
 				RankAttribute = "LB_Bounty",
 				RequiredRank = 1,
+				Perks = {
+					BountyPercent = 15,
+				},
 			},
 		},
 	},
@@ -478,6 +492,19 @@ local TITLE_GROUPS = {
 local ORDER = {}
 local BY_ID = {}
 
+local function cloneTable(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local clone = {}
+	for key, item in pairs(value) do
+		clone[key] = item
+	end
+
+	return clone
+end
+
 local function applyTierDefaults(definition)
 	local tierKey = TIER_ALIASES[string.lower(tostring(definition.Tier or ""))] or "Common"
 	local tier = TIERS[tierKey] or TIERS.Common
@@ -485,6 +512,7 @@ local function applyTierDefaults(definition)
 	definition.TierRank = tier.Rank
 	definition.VisualStyle = definition.VisualStyle or tier.VisualStyle
 	definition.ChatStyle = definition.ChatStyle or tier.ChatStyle
+	definition.Perks = definition.Perks or cloneTable(tier.Perks)
 	return definition
 end
 
@@ -513,6 +541,24 @@ Titles.Tiers = TIERS
 
 function Titles.Get(titleId)
 	return BY_ID[titleId]
+end
+
+function Titles.GetPerks(titleId)
+	local titleDefinition = Titles.Get(titleId)
+	if typeof(titleDefinition) ~= "table" then
+		return nil
+	end
+
+	if typeof(titleDefinition.Perks) ~= "table" then
+		return nil
+	end
+
+	local perks = {}
+	for key, value in pairs(titleDefinition.Perks) do
+		perks[key] = value
+	end
+
+	return perks
 end
 
 function Titles.GetAll()

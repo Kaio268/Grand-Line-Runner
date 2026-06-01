@@ -14,6 +14,7 @@ local DATA_MANAGER_UNAVAILABLE_REASON = "data_manager_unavailable"
 
 local AdminConfig = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminConfig"))
 local TitlesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Titles"))
+local TitlePerkEffects = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("TitlePerks"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local started = false
@@ -405,6 +406,28 @@ local function getTitleDefinition(titleId)
 	return titleDefinition, nil
 end
 
+local function cloneTable(value)
+	if typeof(value) ~= "table" then
+		return value
+	end
+
+	local clone = {}
+	for key, item in pairs(value) do
+		clone[key] = item
+	end
+
+	return clone
+end
+
+local function getTitlePerks(titleId)
+	local titleDefinition = TitlesConfig.Get(titleId)
+	if typeof(titleDefinition) ~= "table" then
+		return nil
+	end
+
+	return titleDefinition.Perks and cloneTable(titleDefinition.Perks) or nil
+end
+
 local function ensurePersistentTitle(titleId)
 	local titleDefinition, validationError = getTitleDefinition(titleId)
 	if validationError ~= nil then
@@ -718,6 +741,36 @@ function TitleService.IsTitleOwned(player, titleId)
 	end
 
 	return false
+end
+
+function TitleService.GetTitlePerks(titleId)
+	return getTitlePerks(titleId)
+end
+
+function TitleService.GetTitlePerkMultipliers(titleId)
+	local perks = getTitlePerks(titleId)
+	if typeof(perks) ~= "table" then
+		return TitlePerkEffects.GetEffectMultipliers({})
+	end
+
+	return TitlePerkEffects.GetEffectMultipliers(perks)
+end
+
+function TitleService.GetEquippedTitlePerks(player)
+	if not player or not player:IsA("Player") then
+		return nil
+	end
+
+	local titleId = getRuntimeEquippedTitle(player)
+	if titleId == NONE_EQUIPPED then
+		return nil
+	end
+
+	return getTitlePerks(titleId)
+end
+
+function TitleService.GetEquippedTitlePerkMultipliers(player)
+	return TitlePerkEffects.GetEffectMultipliers(TitleService.GetEquippedTitlePerks(player) or {})
 end
 
 function TitleService.GetEquippedTitle(player)

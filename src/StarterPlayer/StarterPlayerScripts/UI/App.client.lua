@@ -2036,6 +2036,32 @@ local function resolveTitleVisualStyle(titleDefinition, unlocked)
 	}
 end
 
+local function formatTitlePerks(perks)
+	if typeof(perks) ~= "table" then
+		return nil
+	end
+
+	local labels = {}
+	if typeof(perks.SpeedPercent) == "number" and perks.SpeedPercent ~= 0 then
+		labels[#labels + 1] = string.format("Speed +%d%%", perks.SpeedPercent)
+	end
+	if typeof(perks.BeliPercent) == "number" and perks.BeliPercent ~= 0 then
+		labels[#labels + 1] = string.format("Beli +%d%%", perks.BeliPercent)
+	end
+	if typeof(perks.BountyPercent) == "number" and perks.BountyPercent ~= 0 then
+		labels[#labels + 1] = string.format("Bounty +%d%%", perks.BountyPercent)
+	end
+	if perks.DebugMenu == true then
+		labels[#labels + 1] = "Debug Menu"
+	end
+
+	if #labels == 0 then
+		return nil
+	end
+
+	return table.concat(labels, ", ")
+end
+
 local function buildTitlesData(query)
 	local entries = {}
 	local totalCount = 0
@@ -2092,13 +2118,23 @@ local function buildTitlesData(query)
 			equippedTitleColor = visualStyle.ledgerColor
 		end
 
+		local description = tostring(titleDefinition.Description or "")
+		local perksSummary = formatTitlePerks(titleDefinition.Perks)
+		if typeof(perksSummary) == "string" and perksSummary ~= "" then
+			if description ~= "" then
+				description = description .. "\n\nPerks: " .. perksSummary
+			else
+				description = "Perks: " .. perksSummary
+			end
+		end
+
 		local entry = {
 			key = titleId ~= "" and titleId or tostring(totalCount),
 			titleId = titleId,
 			displayName = tostring(titleDefinition.DisplayName or titleDefinition.Id or "Title"),
 			subtitle = titleDefinition.UnlockType == "DynamicRank" and "Leaderboard Title" or "Persistent Title",
 			footer = tostring(titleDefinition.RequirementText or ""),
-			description = tostring(titleDefinition.Description or ""),
+			description = description,
 			requirementText = tostring(titleDefinition.RequirementText or ""),
 			stateText = isEquipped and "Equipped" or (unlocked and "Unlocked" or "Locked"),
 			unlocked = unlocked,
