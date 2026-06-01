@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewInventoryStacks = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
@@ -616,6 +617,11 @@ local function applyDisplayMetadata(entry, metadata)
 		entry.Rarity = rarity
 	end
 
+	local gender = tostring(metadata.Gender or "")
+	if gender ~= "" then
+		entry.Gender = gender
+	end
+
 	local render = tostring(metadata.Render or "")
 	if render ~= "" then
 		entry.Render = render
@@ -804,6 +810,15 @@ local function getCrewIncome(instanceData, info)
 	if typeof(instanceData) ~= "table" then
 		return tonumber(info and info.Income)
 	end
+	local baseIncomeRoll = tonumber(instanceData.BaseIncomeRoll)
+	if baseIncomeRoll ~= nil and baseIncomeRoll > 0 then
+		return CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			getCrewVariant(instanceData),
+			getCrewLevel(instanceData),
+			instanceData.Rarity or (info and info.Rarity)
+		)
+	end
 	return tonumber(instanceData.Income or (info and info.Income))
 end
 
@@ -836,6 +851,7 @@ local function buildCrewDetails(_instanceId, instanceData, info, state, extra)
 		VariantTag = firstNonEmpty(displayInfo.VariantTag),
 		VariantDisplayName = firstNonEmpty(displayInfo.VariantDisplayName),
 		ShowVariantTag = displayInfo.ShowVariantTag == true,
+		Gender = firstNonEmpty(instanceData.Gender, info and info.Gender, displayInfo.Gender),
 		Level = getCrewLevel(instanceData),
 		Income = getCrewIncome(instanceData, info),
 		SellValue = getCrewSellValue(instanceData, info),
@@ -877,6 +893,7 @@ local function buildCrewMetadataFromInstance(instanceId, instanceData, state, ex
 		VariantDisplayName = tostring(displayInfo.VariantDisplayName or ""),
 		ShowVariantTag = displayInfo.ShowVariantTag == true,
 		Rarity = tostring(instanceData.Rarity or info.Rarity or ""),
+		Gender = tostring(instanceData.Gender or info.Gender or displayInfo.Gender or ""),
 		Render = tostring(instanceData.Render or info.Render or ""),
 		ModelName = tostring(instanceData.ModelName or info.ModelName or instanceData.BaseName or ""),
 		LegacyStorageName = tostring(instanceData.LegacyStorageName or ""),

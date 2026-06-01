@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewModules = Modules:WaitForChild("Crew")
+local CrewAuraVisuals = require(CrewModules:WaitForChild("CrewAuraVisuals"))
 local CrewCatalog = require(CrewModules:WaitForChild("CrewCatalog"))
 local CrewRegistry = require(CrewModules:WaitForChild("CrewRegistry"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
@@ -80,13 +81,13 @@ local function findTemplate(itemName)
 	local displayInfo = CrewCatalog.GetDisplayInfo(canonicalItemName)
 	local variantKey = tostring(displayInfo.Variant or "Normal")
 	local baseName = tostring(displayInfo.BaseId or canonicalItemName)
-	local template, usedVariant = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
+	local template = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 	if template then
-		return template, usedVariant or variantKey, baseName, canonicalItemName
+		return template, variantKey, baseName, canonicalItemName
 	end
 
-	template, usedVariant = CrewRegistry.GetTemplateWithFallback(canonicalItemName, "Normal")
-	return template, usedVariant or variantKey, baseName, canonicalItemName
+	template = CrewRegistry.GetTemplateWithFallback(canonicalItemName, "Normal")
+	return template, variantKey, baseName, canonicalItemName
 end
 
 local function isKnownCrewItem(itemName)
@@ -180,6 +181,14 @@ local function applyToolMetadata(tool, itemName, variantKey, baseName, instanceI
 	return itemName
 end
 
+local function refreshCrewToolAura(tool)
+	CrewAuraVisuals.Refresh(tool, {
+		CrewMemberId = tool:GetAttribute("InventoryItemName") or tool:GetAttribute("CrewMemberId") or tool.Name,
+		Variant = tool:GetAttribute("Variant"),
+		Source = "CrewTool",
+	})
+end
+
 local function makeTool(itemName, instanceId, instanceData)
 	local template, variantKey, baseName, canonicalItemName = findTemplate(itemName)
 	if not template then
@@ -203,6 +212,7 @@ local function makeTool(itemName, instanceId, instanceData)
 		setupPart(handle)
 		handle.CFrame = CFrame.new()
 		handle.Parent = tool
+		refreshCrewToolAura(tool)
 		return tool
 	end
 
@@ -255,6 +265,7 @@ local function makeTool(itemName, instanceId, instanceData)
 		end
 	end
 
+	refreshCrewToolAura(tool)
 	return tool
 end
 
@@ -481,6 +492,7 @@ local function syncDesiredTools(player, desiredTools)
 	local function useTool(tool, desired)
 		usedTools[tool] = true
 		applyToolMetadata(tool, desired.ItemName, nil, nil, desired.InstanceId, desired.InstanceData)
+		refreshCrewToolAura(tool)
 	end
 
 	for _, desired in ipairs(desiredTools or {}) do

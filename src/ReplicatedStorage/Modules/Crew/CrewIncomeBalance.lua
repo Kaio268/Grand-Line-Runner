@@ -11,8 +11,33 @@ local CrewIncomeBalance = {}
 local DEFAULT_RARITY = "Common"
 local DEFAULT_VARIANT = "Normal"
 local DEFAULT_MAX_LEVEL = 50
-local LEVEL_INCOME_BASE = 1.2
+local DEFAULT_MAX_LEVEL_INCOME_MULTIPLIER = 100
 local CLAIM_EPSILON = 1e-7
+
+local BASE_INCOME_ROLL_RANGES_BY_VERSION = {
+	[1] = {
+		Common = { Min = 4, Max = 8 },
+		Uncommon = { Min = 16, Max = 26 },
+		Rare = { Min = 45, Max = 70 },
+		Epic = { Min = 100, Max = 145 },
+		Legendary = { Min = 210, Max = 290 },
+		Mythic = { Min = 450, Max = 650 },
+		Mythical = { Min = 450, Max = 650 },
+		Godly = { Min = 1350, Max = 1750 },
+		Secret = { Min = 4600, Max = 6000 },
+	},
+	[2] = {
+		Common = { Min = 2, Max = 10 },
+		Uncommon = { Min = 17, Max = 55 },
+		Rare = { Min = 100, Max = 250 },
+		Epic = { Min = 360, Max = 800 },
+		Legendary = { Min = 1000, Max = 4000 },
+		Mythic = { Min = 2500, Max = 9000 },
+		Mythical = { Min = 2500, Max = 9000 },
+		Godly = { Min = 6000, Max = 18000 },
+		Secret = { Min = 16000, Max = 30000 },
+	},
+}
 
 local RARITY_ALIASES = {
 	common = "Common",
@@ -39,8 +64,28 @@ local function getIncomeRollConfig()
 	return getCrewConfig().BaseIncomeRollByRarity or {}
 end
 
+local function getVariantBandConfig()
+	return getCrewConfig().VariantIncomeBandsByRarity or {}
+end
+
 local function roundWhole(value)
 	return math.max(0, math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function getConfiguredRangeFromTable(rangeConfig, rarity)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local range = rangeConfig[normalizedRarity]
+	if typeof(range) ~= "table" then
+		range = rangeConfig[DEFAULT_RARITY]
+	end
+
+	local minValue = roundWhole(range and range.Min or 1)
+	local maxValue = roundWhole(range and range.Max or minValue)
+	if maxValue < minValue then
+		maxValue = minValue
+	end
+
+	return minValue, maxValue, normalizedRarity
 end
 
 local function sanitizeNonNegativeNumber(value)
@@ -104,7 +149,23 @@ end
 function CrewIncomeBalance.GetMaxLevel()
 	local crewConfig = getCrewConfig()
 	local rules = Economy.Rules or {}
-	return math.max(1, math.floor(tonumber(crewConfig.MaxLevel) or tonumber(rules.CrewMaxLevel) or DEFAULT_MAX_LEVEL))
+	local configuredMaxLevel = tonumber(crewConfig.MaxCrewLevel)
+		or tonumber(crewConfig.MaxLevel)
+		or tonumber(rules.CrewMaxLevel)
+		or DEFAULT_MAX_LEVEL
+	return math.max(
+		1,
+		math.floor(configuredMaxLevel)
+	)
+end
+
+function CrewIncomeBalance.GetMaxLevelIncomeMultiplier()
+	local configured = tonumber(getCrewConfig().MaxLevelIncomeMultiplier)
+	if configured == nil or configured ~= configured or configured == math.huge or configured == -math.huge then
+		return DEFAULT_MAX_LEVEL_INCOME_MULTIPLIER
+	end
+
+	return math.max(1, configured)
 end
 
 function CrewIncomeBalance.NormalizeLevel(level)
@@ -117,28 +178,56 @@ function CrewIncomeBalance.NormalizeLevel(level)
 end
 
 function CrewIncomeBalance.GetLevelIncomeMultiplier(level)
-	return LEVEL_INCOME_BASE ^ (CrewIncomeBalance.NormalizeLevel(level) - 1)
+	local maxLevel = CrewIncomeBalance.GetMaxLevel()
+	local progress = (CrewIncomeBalance.NormalizeLevel(level) - 1) / math.max(1, maxLevel - 1)
+	return CrewIncomeBalance.GetMaxLevelIncomeMultiplier() ^ progress
 end
 
 function CrewIncomeBalance.GetBaseIncomeRange(rarity)
-	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
-	local range = getIncomeRollConfig()[normalizedRarity]
-	if typeof(range) ~= "table" then
-		range = getIncomeRollConfig()[DEFAULT_RARITY]
-	end
-
-	local minValue = roundWhole(range and range.Min or 1)
-	local maxValue = roundWhole(range and range.Max or minValue)
-	if maxValue < minValue then
-		maxValue = minValue
-	end
-
-	return minValue, maxValue, normalizedRarity
+	return getConfiguredRangeFromTable(getIncomeRollConfig(), rarity)
 end
 
 function CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
 	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(rarity)
 	return roundWhole((minValue + maxValue) / 2)
+end
+
+function CrewIncomeBalance.GetBaseIncomePercentile(rarity, baseIncomeRoll)
+	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(rarity)
+	local normalizedRoll = CrewIncomeBalance.NormalizeBaseIncomeRoll(rarity, baseIncomeRoll)
+	if normalizedRoll == nil then
+		normalizedRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
+	end
+	if maxValue <= minValue then
+		return 0
+	end
+
+	return math.clamp((normalizedRoll - minValue) / (maxValue - minValue), 0, 1)
+end
+
+function CrewIncomeBalance.GetVariantIncomeRange(rarity, variant)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local rarityBands = getVariantBandConfig()[normalizedRarity]
+	local range = if typeof(rarityBands) == "table" then rarityBands[variantKey] else nil
+	if typeof(range) ~= "table" then
+		local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(normalizedRarity)
+		return minValue, maxValue, normalizedRarity, variantKey
+	end
+
+	local minValue = roundWhole(range.Min or 1)
+	local maxValue = roundWhole(range.Max or minValue)
+	if maxValue < minValue then
+		maxValue = minValue
+	end
+
+	return minValue, maxValue, normalizedRarity, variantKey
+end
+
+function CrewIncomeBalance.GetVariantBandMappedIncome(rarity, baseIncomeRoll, variant)
+	local percentile = CrewIncomeBalance.GetBaseIncomePercentile(rarity, baseIncomeRoll)
+	local minValue, maxValue = CrewIncomeBalance.GetVariantIncomeRange(rarity, variant)
+	return roundWhole(minValue + ((maxValue - minValue) * percentile))
 end
 
 function CrewIncomeBalance.RollBaseIncome(rarity, randomObject)
@@ -164,6 +253,47 @@ function CrewIncomeBalance.NormalizeBaseIncomeRoll(rarity, value)
 	return math.clamp(roundWhole(numeric), minValue, maxValue)
 end
 
+function CrewIncomeBalance.GetBaseIncomeRangeForVersion(rarity, version)
+	local numericVersion = math.floor(tonumber(version) or CrewIncomeBalance.GetIncomeRollVersion())
+	local versionConfig = BASE_INCOME_ROLL_RANGES_BY_VERSION[numericVersion]
+	if typeof(versionConfig) == "table" then
+		return getConfiguredRangeFromTable(versionConfig, rarity)
+	end
+
+	return CrewIncomeBalance.GetBaseIncomeRange(rarity)
+end
+
+function CrewIncomeBalance.NormalizeBaseIncomeRollForVersion(rarity, value, sourceVersion)
+	local numeric = tonumber(value)
+	if numeric == nil or numeric ~= numeric or numeric == math.huge or numeric == -math.huge then
+		return nil
+	end
+
+	local currentVersion = CrewIncomeBalance.GetIncomeRollVersion()
+	local numericSourceVersion = math.floor(tonumber(sourceVersion) or 1)
+	local targetMin, targetMax = CrewIncomeBalance.GetBaseIncomeRange(rarity)
+	if numericSourceVersion >= currentVersion then
+		return math.clamp(roundWhole(numeric), targetMin, targetMax)
+	end
+
+	local sourceMin, sourceMax = CrewIncomeBalance.GetBaseIncomeRangeForVersion(rarity, numericSourceVersion)
+	local percentile = 0
+	if sourceMax > sourceMin then
+		percentile = math.clamp((numeric - sourceMin) / (sourceMax - sourceMin), 0, 1)
+	end
+
+	return math.clamp(roundWhole(targetMin + ((targetMax - targetMin) * percentile)), targetMin, targetMax)
+end
+
+function CrewIncomeBalance.GetOrMigrateBaseIncome(rarity, value, sourceVersion, randomObject)
+	local normalized = CrewIncomeBalance.NormalizeBaseIncomeRollForVersion(rarity, value, sourceVersion)
+	if normalized ~= nil then
+		return normalized, CrewIncomeBalance.GetIncomeRollVersion()
+	end
+
+	return CrewIncomeBalance.RollBaseIncome(rarity, randomObject), CrewIncomeBalance.GetIncomeRollVersion()
+end
+
 function CrewIncomeBalance.GetOrRollBaseIncome(rarity, value, randomObject)
 	local numeric = tonumber(value)
 	if numeric ~= nil and numeric == numeric and numeric ~= math.huge and numeric ~= -math.huge and numeric > 0 then
@@ -179,17 +309,20 @@ function CrewIncomeBalance.GetVariantIncomeMultiplier(variant)
 	return math.max(0, tonumber(variantInfo and variantInfo.IncomeMult) or 1)
 end
 
-function CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant)
-	return roundWhole((tonumber(baseIncomeRoll) or 0) * CrewIncomeBalance.GetVariantIncomeMultiplier(variant))
+function CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant, rarity)
+	local mappedIncome = CrewIncomeBalance.GetVariantBandMappedIncome(rarity, baseIncomeRoll, variant)
+	-- Variant bands and variant multipliers are intentionally stacked so
+	-- Golden and Diamond crewmates feel meaningfully more rewarding.
+	return roundWhole(mappedIncome * CrewIncomeBalance.GetVariantIncomeMultiplier(variant))
 end
 
-function CrewIncomeBalance.GetFinalCrewIncome(baseIncomeRoll, variant, level)
-	return CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant)
+function CrewIncomeBalance.GetFinalCrewIncome(baseIncomeRoll, variant, level, rarity)
+	return CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant, rarity)
 		* CrewIncomeBalance.GetLevelIncomeMultiplier(level)
 end
 
-function CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant, level)
-	return roundWhole(CrewIncomeBalance.GetFinalCrewIncome(baseIncomeRoll, variant, level))
+function CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant, level, rarity)
+	return roundWhole(CrewIncomeBalance.GetFinalCrewIncome(baseIncomeRoll, variant, level, rarity))
 end
 
 function CrewIncomeBalance.GetRawBankIncomePerSecond(instanceData)
@@ -212,7 +345,7 @@ function CrewIncomeBalance.GetRawBankIncomePerSecond(instanceData)
 		baseIncomeRoll = roundWhole(baseIncomeRoll)
 	end
 
-	return CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant)
+	return CrewIncomeBalance.GetBaseVariantIncome(baseIncomeRoll, variant, rarity)
 end
 
 function CrewIncomeBalance.GetClaimMultiplier(level, extraMultipliers)
@@ -255,7 +388,7 @@ end
 
 function CrewIncomeBalance.GetRangeDisplayIncome(rarity, variant, level)
 	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(rarity)
-	return CrewIncomeBalance.ComputeIncome(minValue, variant, level), CrewIncomeBalance.ComputeIncome(maxValue, variant, level)
+	return CrewIncomeBalance.ComputeIncome(minValue, variant, level, rarity), CrewIncomeBalance.ComputeIncome(maxValue, variant, level, rarity)
 end
 
 return CrewIncomeBalance

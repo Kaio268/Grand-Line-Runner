@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
@@ -110,7 +111,16 @@ local function getSellPrice(instanceData)
 		return math.max(0, math.floor(tonumber(info.SellPrice) or 0))
 	end
 
-	local income = tonumber(info.Income or instanceData.Income)
+	local income = tonumber(instanceData.Income or info.Income)
+	local baseIncomeRoll = tonumber(instanceData.BaseIncomeRoll)
+	if baseIncomeRoll ~= nil and baseIncomeRoll > 0 then
+		income = CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			instanceData.Variant,
+			instanceData.Level,
+			instanceData.Rarity or info.Rarity
+		)
+	end
 	if income == nil then
 		return 0
 	end
@@ -165,6 +175,10 @@ local function getInstanceMetadata(instanceId, instanceData, slotIndex, toolEqui
 	local rarity = tostring(instanceData.Rarity or (info and info.Rarity) or "")
 	local variant = tostring(displayInfo.Variant or instanceData.Variant or instanceData.VariantKey or "")
 	local income = tonumber(instanceData.Income or (info and info.Income))
+	local baseIncomeRoll = tonumber(instanceData.BaseIncomeRoll)
+	if baseIncomeRoll ~= nil and baseIncomeRoll > 0 then
+		income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant, instanceData.Level, rarity)
+	end
 
 	return {
 		Action = tostring(action or "HoldEquipped"),

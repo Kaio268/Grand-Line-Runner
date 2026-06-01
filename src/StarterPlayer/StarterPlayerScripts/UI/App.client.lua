@@ -637,6 +637,11 @@ local function getEntryDisplayMetadata(entry)
 		metadata.rarity = rarity
 	end
 
+	local gender = tostring(entry.Gender or entry.gender or "")
+	if gender ~= "" then
+		metadata.gender = gender
+	end
+
 	local renderImage = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
 	if renderImage ~= "" then
 		metadata.render = renderImage
@@ -800,6 +805,9 @@ local function applyDisplayMetadataToState(state, metadata)
 	end
 	if metadata.rarity ~= nil then
 		state.rarity = metadata.rarity
+	end
+	if metadata.gender ~= nil then
+		state.gender = metadata.gender
 	end
 	if metadata.render ~= nil then
 		state.render = metadata.render

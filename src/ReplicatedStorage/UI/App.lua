@@ -7,6 +7,8 @@ local React = require(Packages:WaitForChild("React"))
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
+local CrewAuraVisuals = require(Modules:WaitForChild("Crew"):WaitForChild("CrewAuraVisuals"))
+local CrewIdleAnimator = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIdleAnimator"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local IndexCard = require(script.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("IndexCard"))
@@ -502,6 +504,16 @@ local function PreviewViewport(props)
 		worldModel.Parent = viewport
 		previewModel.Parent = worldModel
 		positionPreviewModel(previewModel, props.previewKind, props.previewName)
+		local idleController = nil
+		local auraRoot = nil
+
+		if props.previewKind == "CrewMember" and props.showCrewAura == true and previewModel:IsA("Model") then
+			auraRoot = CrewAuraVisuals.Refresh(previewModel, {
+				CrewMemberId = props.crewMemberId or props.previewCrewMemberId or props.previewName,
+				Variant = props.variant or props.Variant,
+				Source = "AppPreviewViewport",
+			})
+		end
 
 		local boxCF, boxSize = getBoundingInfo(previewModel)
 		local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
@@ -514,12 +526,38 @@ local function PreviewViewport(props)
 		camera.Parent = viewport
 		viewport.CurrentCamera = camera
 
+		if props.previewKind == "CrewMember" and props.animateCrewIdle ~= false and previewModel:IsA("Model") then
+			idleController = CrewIdleAnimator.Start(previewModel, {
+				CrewMemberId = props.crewMemberId or props.previewCrewMemberId or props.previewName,
+				Gender = props.gender,
+				ModelName = props.previewName,
+				Source = "AppPreviewViewport",
+				AnimateViewport = true,
+			})
+		end
+
 		return function()
+			if idleController then
+				CrewIdleAnimator.Stop(idleController)
+			end
+			if auraRoot then
+				CrewAuraVisuals.Remove(previewModel)
+			end
 			if viewport.Parent then
 				clearChildren(viewport)
 			end
 		end
-	end, { props.previewKind, props.previewName })
+	end, {
+		props.previewKind,
+		props.previewName,
+		props.animateCrewIdle,
+		props.showCrewAura,
+		props.crewMemberId,
+		props.previewCrewMemberId,
+		props.variant,
+		props.Variant,
+		props.gender,
+	})
 
 	return e("ViewportFrame", {
 		ref = viewportRef,
@@ -643,6 +681,9 @@ local function renderItemPreview(item, props)
 		return e(PreviewViewport, {
 			previewKind = item.previewKind,
 			previewName = item.previewName,
+			animateCrewIdle = true,
+			crewMemberId = item.crewMemberId or item.CrewMemberId or item.name,
+			gender = item.gender or item.Gender,
 			position = position,
 			size = size,
 			zIndex = zIndex,
@@ -677,6 +718,9 @@ local function renderItemPreview(item, props)
 		return e(PreviewViewport, {
 			previewKind = item.previewKind,
 			previewName = item.previewName,
+			animateCrewIdle = item.previewKind == "CrewMember",
+			crewMemberId = item.crewMemberId or item.CrewMemberId or item.name,
+			gender = item.gender or item.Gender,
 			position = position,
 			size = size,
 			zIndex = zIndex,

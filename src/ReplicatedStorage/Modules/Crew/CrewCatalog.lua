@@ -127,6 +127,7 @@ local function infoFromProductionEntry(entry)
 	info.RealCharacterName = tostring(entry.RealCharacterName or "")
 	info.Arc = tostring(entry.Arc or "")
 	info.CrewArc = info.Arc
+	info.Gender = tostring(entry.Gender or "")
 	info.Rarity = CrewIncomeBalance.NormalizeRarity(entry.Rarity or "Common")
 	info.Render = render
 	info.GoldenRender = tostring(entry.GoldenRender or render)
@@ -134,7 +135,7 @@ local function infoFromProductionEntry(entry)
 	info.RenderStatus = renderStatus
 	local baseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(info.Rarity)
 	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetBaseIncomeRange(info.Rarity)
-	info.Income = baseIncomeRoll
+	info.Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, "Normal", nil, info.Rarity)
 	info.Chance = tonumber(entry.Chance) or 0
 	info.TimeLeft = tonumber(entry.TimeLeft) or 30
 	info.ModelNameVerified = entry.ModelNameVerified == true
@@ -340,6 +341,7 @@ function CrewCatalog.GetDisplayInfo(crewMemberId, metadata)
 		IsVariant = isVariant,
 		BaseId = baseId,
 		CrewMemberId = tostring((info and info.CrewMemberId) or canonicalId or lookupId),
+		Gender = tostring((baseInfo and baseInfo.Gender) or (info and info.Gender) or metadata.Gender or ""),
 	}
 end
 
@@ -383,7 +385,9 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	else
 		info.Render = tostring(baseInfo.Render or "")
 	end
-	info.Income = CrewIncomeBalance.ComputeIncome(tonumber(baseInfo.Income) or 0, variantKey)
+	local baseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(info.Rarity)
+	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetVariantIncomeRange(info.Rarity, variantKey)
+	info.Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variantKey, nil, info.Rarity)
 
 	return info
 end

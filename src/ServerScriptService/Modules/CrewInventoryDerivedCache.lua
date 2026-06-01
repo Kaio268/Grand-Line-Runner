@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 
 local CrewInventoryDerivedCache = {}
@@ -53,6 +54,15 @@ end
 local function getInstanceIncome(instanceData, info)
 	if typeof(instanceData) ~= "table" then
 		return tonumber(info and info.Income)
+	end
+	local baseIncomeRoll = tonumber(instanceData.BaseIncomeRoll)
+	if baseIncomeRoll ~= nil and baseIncomeRoll > 0 then
+		return CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			getInstanceVariant(instanceData),
+			getInstanceLevel(instanceData),
+			instanceData.Rarity or (info and info.Rarity)
+		)
 	end
 	return tonumber(instanceData.Income or (info and info.Income))
 end

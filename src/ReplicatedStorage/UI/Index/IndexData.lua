@@ -311,8 +311,7 @@ local BELI_ICON = "rbxassetid://76300573750363"
 local LUCK_BOOST_ICON = "rbxassetid://99305009492305"
 
 local function formatBeliPerSecond(value)
-	local numeric = math.max(0, math.floor((tonumber(value) or 0) + 0.5))
-	return string.format("%s Beli/s", CurrencyUtil.formatCompactNumber(numeric))
+	return CurrencyUtil.formatIncomeCompactPerSecond(math.max(0, tonumber(value) or 0))
 end
 
 local function formatIncomeRange(rarity, variantKey)
@@ -322,9 +321,9 @@ local function formatIncomeRange(rarity, variantKey)
 	end
 
 	return string.format(
-		"%s–%s Beli/s",
+		"%s - %s",
 		CurrencyUtil.formatCompactNumber(minIncome),
-		CurrencyUtil.formatCompactNumber(maxIncome)
+		formatBeliPerSecond(maxIncome)
 	)
 end
 
@@ -472,8 +471,12 @@ function IndexData.buildViewModel(options)
 					ModelName = itemInfo.ModelName or entry.info.ModelName,
 				})
 
-				local rawIncome = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
-					* CrewIncomeBalance.GetVariantIncomeMultiplier(variantKey)
+				local rawIncome = CrewIncomeBalance.ComputeIncome(
+					CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity),
+					variantKey,
+					nil,
+					rarity
+				)
 				local unit = {
 					id = itemId,
 					baseName = entry.name,

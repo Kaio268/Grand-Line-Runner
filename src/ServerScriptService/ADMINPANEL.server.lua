@@ -27,6 +27,7 @@ end
 local adminStatusFunction = getOrCreateRemote("AdminStatusRequest", "RemoteFunction")
 local adminRosterFunction = getOrCreateRemote("AdminRosterRequest", "RemoteFunction")
 local adminTesterRoleFunction = getOrCreateRemote("AdminTesterRoleRequest", "RemoteFunction")
+local adminConsoleActionFunction = getOrCreateRemote("AdminConsoleActionRequest", "RemoteFunction")
 local adminRosterUpdatedEvent = getOrCreateRemote("AdminRosterUpdated")
 local requestEvent = getOrCreateRemote("AdminAnnouncementRequest")
 local broadcastEvent = getOrCreateRemote("AdminAnnouncementBroadcast")
@@ -57,6 +58,19 @@ local TESTER_ROLE_ACTIONS = {
 	RemoveTester = true,
 }
 
+local ADMIN_CONSOLE_ACTIONS = {
+	AddTester = true,
+	SetTester = true,
+	RemoveTester = true,
+	AddAdmin = true,
+	SetAdmin = true,
+	RemoveAdmin = true,
+	AddSuperAdmin = true,
+	SetSuperAdmin = true,
+	RemoveSuperAdmin = true,
+	Kick = true,
+}
+
 local function fireAdminRosterUpdated(reason)
 	local payload = {
 		Reason = tostring(reason or "roster_changed"),
@@ -64,7 +78,7 @@ local function fireAdminRosterUpdated(reason)
 	}
 
 	for _, player in ipairs(Players:GetPlayers()) do
-		if AdminPermissions.IsAdmin(player) then
+		if AdminPermissions.CanViewAdminConsole(player) then
 			adminRosterUpdatedEvent:FireClient(player, payload)
 		end
 	end
@@ -83,12 +97,12 @@ end
 
 adminStatusFunction.OnServerInvoke = function(player)
 	AdminPermissions.LogAdminStatusRequest(player, "AdminStatusRequest")
-	return AdminPermissions.IsAdmin(player)
+	return AdminPermissions.CanViewAdminConsole(player)
 end
 
 adminRosterFunction.OnServerInvoke = function(player)
 	AdminPermissions.LogAdminStatusRequest(player, "AdminRosterRequest")
-	if not AdminPermissions.IsAdmin(player) then
+	if not AdminPermissions.CanViewAdminConsole(player) then
 		AdminPermissions.LogCommandRejected(player, "adminRoster", "AdminRosterRequest", "reason=not_admin")
 		return {
 			Success = false,
@@ -115,7 +129,7 @@ adminTesterRoleFunction.OnServerInvoke = function(player, action, target)
 		}
 	end
 
-	if not AdminPermissions.IsAdmin(player) then
+	if not AdminPermissions.CanViewAdminConsole(player) then
 		AdminPermissions.LogCommandRejected(player, "testerRole", "AdminTesterRoleRequest", "reason=not_admin")
 		return {
 			Success = false,
@@ -126,8 +140,41 @@ adminTesterRoleFunction.OnServerInvoke = function(player, action, target)
 	return AdminPermissions.SetTesterRole(player, target, action == "AddTester", "AdminTesterRoleRequest")
 end
 
+adminConsoleActionFunction.OnServerInvoke = function(player, payload)
+	if not RemoteGuard.Check(player, "AdminConsoleActionRequest", { payload }, {
+		Cooldown = 0.5,
+		Args = {
+			{ Type = "table" },
+		},
+	}) then
+		return {
+			Success = false,
+			Message = "Invalid admin console request.",
+		}
+	end
+
+	local action = tostring(payload.Action or "")
+	if ADMIN_CONSOLE_ACTIONS[action] ~= true then
+		AdminPermissions.LogCommandRejected(player, "adminConsole", "AdminConsoleActionRequest", "reason=unsupported_action")
+		return {
+			Success = false,
+			Message = "Unsupported admin console action.",
+		}
+	end
+
+	return AdminPermissions.ApplyAdminConsoleAction(player, payload)
+end
+
 AdminPermissions.TesterStateChanged:Connect(function(_, payload)
 	local reason = "tester_state_changed"
+	if typeof(payload) == "table" and typeof(payload.Source) == "string" then
+		reason = payload.Source
+	end
+	fireAdminRosterUpdated(reason)
+end)
+
+AdminPermissions.StaffRoleStateChanged:Connect(function(_, payload)
+	local reason = "staff_role_changed"
 	if typeof(payload) == "table" and typeof(payload.Source) == "string" then
 		reason = payload.Source
 	end

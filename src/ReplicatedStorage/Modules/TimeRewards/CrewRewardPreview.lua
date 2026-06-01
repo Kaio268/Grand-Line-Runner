@@ -6,6 +6,12 @@ local CrewRewardResolver = require(
 local CrewPreviewImages = require(
 	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewPreviewImages")
 )
+local CrewAuraVisuals = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewAuraVisuals")
+)
+local CrewIdleAnimator = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIdleAnimator")
+)
 local RandomCrewReward = require(script.Parent:WaitForChild("RandomCrewReward"))
 
 local CrewRewardPreview = {}
@@ -213,6 +219,11 @@ end
 function CrewRewardPreview.Clear(iconObj: Instance)
 	local viewport = iconObj:FindFirstChild(CREW_REWARD_VIEWPORT_NAME)
 	if viewport then
+		local previewModel = viewport:FindFirstChildWhichIsA("Model", true)
+		if previewModel then
+			CrewIdleAnimator.Stop(previewModel)
+			CrewAuraVisuals.Remove(previewModel)
+		end
 		viewport:Destroy()
 	end
 
@@ -233,7 +244,8 @@ function CrewRewardPreview.Apply(iconObj: Instance, previewInfo): boolean
 	image.Image = ""
 	image.ImageTransparency = 1
 
-	local staticPreviewImage = CrewPreviewImages.Resolve(previewInfo)
+	local showCrewAura = previewInfo.ShowCrewAura == true or previewInfo.showCrewAura == true
+	local staticPreviewImage = if showCrewAura then "" else CrewPreviewImages.Resolve(previewInfo)
 	if staticPreviewImage ~= "" then
 		image.BackgroundTransparency = 1
 		image.Image = staticPreviewImage
@@ -272,6 +284,15 @@ function CrewRewardPreview.Apply(iconObj: Instance, previewInfo): boolean
 		end
 	end)
 
+	if showCrewAura then
+		CrewAuraVisuals.Refresh(previewModel, {
+			CrewMemberId = previewInfo.CrewMemberId or previewInfo.GrantName or previewInfo.ModelName,
+			Info = previewInfo,
+			Variant = previewInfo.Variant,
+			Source = "CrewRewardPreview",
+		})
+	end
+
 	local boxCF, boxSize = getBoundingInfo(previewModel)
 	local maxSize = math.max(boxSize.X, boxSize.Y, boxSize.Z, 1)
 	local camera = Instance.new("Camera")
@@ -283,6 +304,16 @@ function CrewRewardPreview.Apply(iconObj: Instance, previewInfo): boolean
 	)
 	camera.Parent = viewport
 	viewport.CurrentCamera = camera
+
+	if previewInfo.AnimateIdle == true then
+		CrewIdleAnimator.Start(previewModel, {
+			CrewMemberId = previewInfo.CrewMemberId or previewInfo.GrantName or previewInfo.ModelName,
+			Gender = previewInfo.Gender,
+			ModelName = previewInfo.ModelName,
+			Source = "CrewRewardPreview",
+			AnimateViewport = true,
+		})
+	end
 
 	return true
 end

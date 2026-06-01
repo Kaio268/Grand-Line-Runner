@@ -582,6 +582,11 @@ local function inHandSlot(props)
 		or hasStaticPreview
 		or (modelName ~= nil and findCrewPreviewModel(modelName) ~= nil)
 	)
+	local crewVariant = ""
+	if occupied and not itemIsChest and typeof(item) == "table" then
+		crewVariant = tostring(item.Variant or item.variant or item.VariantTag or item.variantTag or item.VariantDisplayName or "")
+	end
+	local showCrewAura = crewVariant == "Golden" or crewVariant == "Diamond"
 
 	if occupied and not itemIsChest and not hasPreviewModel then
 		warnMissingCrewPreview(item, modelName)
@@ -704,12 +709,18 @@ local function inHandSlot(props)
 					}),
 					Preview = e(PreviewViewport, {
 						anchorPoint = Vector2.new(0.5, 0.5),
+						animateCrewIdle = true,
+						crewMemberId = getCrewmateId(item),
 						fieldOfView = 34,
+						gender = item and (item.Gender or item.gender),
 						position = UDim2.fromScale(0.5, 0.54),
+						preferModel = showCrewAura,
 						previewKind = "CrewMember",
 						previewName = modelName or getCrewmateId(item) or displayName,
 						scaleType = Enum.ScaleType.Fit,
+						showCrewAura = showCrewAura,
 						size = UDim2.fromScale(1, 1),
+						variant = crewVariant,
 						zIndex = zIndex + 2,
 					}),
 				})

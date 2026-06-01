@@ -6,6 +6,8 @@ function Module.Install(ctx)
 	local CrewOverhead = ctx.CrewOverhead
 	local CrewCatalog = ctx.CrewCatalog
 	local CrewProtectionService = ctx.CrewProtectionService
+	local CrewAuraVisuals = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("CrewAuraVisuals"))
+	local CrewIdleAnimator = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("CrewIdleAnimator"))
 	local function findCrewMemberInfoByName(...)
 		return ctx.findCrewMemberInfoByName(...)
 	end
@@ -84,27 +86,22 @@ function Module.Install(ctx)
 		end
 	end
 
-	local function tryPlayIdle(model, animId)
-		animId = tonumber(animId)
-		if not animId or animId == 0 then
-			return
-		end
-		local controller = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
-		if not controller then
-			return
-		end
-		local animator = controller:FindFirstChildOfClass("Animator")
-		if not animator then
-			animator = Instance.new("Animator")
-			animator.Parent = controller
-		end
-		local anim = Instance.new("Animation")
-		anim.AnimationId = "rbxassetid://" .. tostring(animId)
-		pcall(function()
-			local track = animator:LoadAnimation(anim)
-			track.Looped = true
-			track:Play()
-		end)
+	local function tryPlayIdle(model, crewMemberId, info)
+		CrewIdleAnimator.Start(model, {
+			CrewMemberId = crewMemberId,
+			Gender = info and info.Gender,
+			Info = info,
+			Source = "StandVisual",
+		})
+	end
+
+	local function refreshVariantAura(model, resolved, crewMemberName, info)
+		CrewAuraVisuals.Refresh(model, {
+			CrewMemberId = resolved and resolved.CanonicalName or crewMemberName,
+			Variant = resolved and resolved.VariantKey,
+			Info = info,
+			Source = "StandVisual",
+		})
 	end
 
 	local function removeLegacyCrewHover(model)
@@ -285,9 +282,8 @@ function Module.Install(ctx)
 		placeModelBottomOnHandle(clone, handle, standModel)
 
 		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
-		if info then
-			tryPlayIdle(clone, info.IdleAnim)
-		end
+		refreshVariantAura(clone, resolved, crewMemberName, info)
+		tryPlayIdle(clone, resolved and resolved.CanonicalName or crewMemberName, info)
 
 		syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
 		if PremiumCrewStealProtectionVisuals and typeof(PremiumCrewStealProtectionVisuals.UpdateStand) == "function" then

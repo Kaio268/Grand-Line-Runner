@@ -282,17 +282,19 @@ local function buildMetadata(storageName, entry)
 end
 
 local function buildIncomeRollFields(rarity, variant, instanceData)
-	local baseIncomeRoll = CrewIncomeBalance.GetOrRollBaseIncome(
+	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
 		rarity,
-		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil,
+		typeof(instanceData) == "table" and instanceData.IncomeRollVersion or nil
 	)
 	local income = CrewIncomeBalance.ComputeIncome(
 		baseIncomeRoll,
 		variant,
-		typeof(instanceData) == "table" and instanceData.Level or nil
+		typeof(instanceData) == "table" and instanceData.Level or nil,
+		rarity
 	)
 
-	return baseIncomeRoll, income, CrewIncomeBalance.GetIncomeRollVersion()
+	return baseIncomeRoll, income, incomeRollVersion
 end
 
 local function getInstanceCrewKey(instanceData)
@@ -1823,12 +1825,19 @@ function Module.UpdateProgress(player, instanceId, level, currentXP, options)
 
 	instanceData.Level = CrewIncomeBalance.NormalizeLevel(coerceNumber(level, instanceData.Level or 1))
 	instanceData.CurrentXP = math.max(0, math.floor(coerceNumber(currentXP, instanceData.CurrentXP or 0)))
-	instanceData.Income = CrewIncomeBalance.ComputeIncome(
+	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
+		instanceData.Rarity,
 		instanceData.BaseIncomeRoll,
-		instanceData.Variant,
-		instanceData.Level
+		instanceData.IncomeRollVersion
 	)
-	instanceData.IncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion()
+	instanceData.BaseIncomeRoll = baseIncomeRoll
+	instanceData.Income = CrewIncomeBalance.ComputeIncome(
+		baseIncomeRoll,
+		instanceData.Variant,
+		instanceData.Level,
+		instanceData.Rarity
+	)
+	instanceData.IncomeRollVersion = incomeRollVersion
 	if options.TotalXP ~= nil then
 		instanceData.TotalXP = math.max(0, math.floor(coerceNumber(options.TotalXP, instanceData.TotalXP or 0)))
 	end

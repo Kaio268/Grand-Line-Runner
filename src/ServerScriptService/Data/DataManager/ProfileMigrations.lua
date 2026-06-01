@@ -115,20 +115,22 @@ end
 local function buildIncomeRollFields(rarity, variant, instanceData)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
 	local normalizedVariant = CrewIncomeBalance.NormalizeVariant(variant)
-	local baseIncomeRoll = CrewIncomeBalance.GetOrRollBaseIncome(
+	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
 		normalizedRarity,
-		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil,
+		typeof(instanceData) == "table" and instanceData.IncomeRollVersion or nil
 	)
 
 	return {
 		Rarity = normalizedRarity,
 		Variant = normalizedVariant,
 		BaseIncomeRoll = baseIncomeRoll,
-		IncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion(),
+		IncomeRollVersion = incomeRollVersion,
 		Income = CrewIncomeBalance.ComputeIncome(
 			baseIncomeRoll,
 			normalizedVariant,
-			typeof(instanceData) == "table" and instanceData.Level or nil
+			typeof(instanceData) == "table" and instanceData.Level or nil,
+			normalizedRarity
 		),
 	}
 end

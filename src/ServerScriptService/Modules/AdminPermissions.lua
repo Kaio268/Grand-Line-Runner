@@ -4,25 +4,43 @@ local MessagingService = game:GetService("MessagingService")
 local TextChatService = game:GetService("TextChatService")
 
 local AdminConfig = require(script.Parent:WaitForChild("AdminConfig"))
+local AdminStaffRoleStore = require(script.Parent:WaitForChild("AdminStaffRoleStore"))
+local AdminAuditLog = require(script.Parent:WaitForChild("AdminAuditLog"))
 local TesterRoleStore = require(script.Parent:WaitForChild("TesterRoleStore"))
 local VIPTestOverrides = require(script.Parent:WaitForChild("VIPTestOverrides"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 
 local AdminPermissions = {}
 
-local SuperAdmins = {
+local OwnerRoot = {
+	[5448954557] = true, -- YonkoKaio
+}
+
+local baseSuperAdmins = {
 	[5448954557] = true, -- YonkoKaio
 	[4843576528] = true, -- ChefChris
 	[3412846835] = true,
 	[4844244696] = true,
 }
 
+local SuperAdmins = {}
+local baseConfiguredAdmins = {}
+local baseConfiguredAdminIds = {}
 local configuredAdmins = {}
 local configuredAdminIds = {}
 local baseConfiguredTesters = {}
 local baseConfiguredTesterIds = {}
 local configuredTesters = {}
 local configuredTesterIds = {}
+local staffRoleOverrides = {
+	AdminsAdded = {},
+	AdminsRemoved = {},
+	SuperAdminsAdded = {},
+	SuperAdminsRemoved = {},
+	UpdatedAt = 0,
+	UpdatedBy = 0,
+	Available = false,
+}
 local testerRoleOverrides = {
 	Added = {},
 	Removed = {},
@@ -31,6 +49,7 @@ local testerRoleOverrides = {
 	Available = false,
 }
 local activePublicTesterTitleByUserId = {}
+local ownerRootIds = {}
 local superAdminIds = {}
 local activeAdmins = {}
 local userInfoCache = {}
@@ -39,6 +58,7 @@ local testerTitleConnections = {}
 local textChatCommandConnection = nil
 local vipTextChatCommandConnection = nil
 local adminStateChanged = Instance.new("BindableEvent")
+local staffRoleStateChanged = Instance.new("BindableEvent")
 local testerStateChanged = Instance.new("BindableEvent")
 
 local POPUP_STROKE = Color3.fromRGB(0, 0, 0)
@@ -49,6 +69,7 @@ local POPUP_ERROR = Color3.fromRGB(255, 92, 92)
 local POPUP_DURATION_SECONDS = 4
 local POPUP_MESSAGE_LIMIT = 140
 local ADMIN_COMMAND_FEEDBACK_EVENT_NAME = "AdminCommandFeedback"
+local STAFF_ROLE_UPDATE_TOPIC = "AdminStaffRolesV1"
 local TESTER_ROLE_UPDATE_TOPIC = "AdminTesterRolesV1"
 local TESTER_STATUS_CHANGED_EVENT_NAME = "TesterStatusChanged"
 local EQUIPPED_TITLE_ATTRIBUTE = "EquippedTitleId"
@@ -74,6 +95,7 @@ local testerStatusChangedEvent = getOrCreateRemoteEvent(TESTER_STATUS_CHANGED_EV
 
 local COMMAND_DISPLAY_NAMES = {
 	admin = "Admin toggle",
+	adminConsole = "Admin console",
 	adminRoster = "Admin roster",
 	announcement = "Announcement",
 	boost = "Boost",
@@ -96,6 +118,7 @@ local COMMAND_DISPLAY_NAMES = {
 	shipreset = "Ship reset",
 	spawn = "Spawn",
 	speed = "Speed",
+	staffRole = "Staff role",
 	testerRole = "Tester role",
 	tutorial = "Tutorial reset",
 	vip = "VIP test override",
@@ -183,6 +206,7 @@ local function sendCommandFeedback(player: Player?, status: string, commandName:
 end
 
 AdminPermissions.AdminStateChanged = adminStateChanged.Event
+AdminPermissions.StaffRoleStateChanged = staffRoleStateChanged.Event
 AdminPermissions.TesterStateChanged = testerStateChanged.Event
 
 if typeof(AdminConfig) ~= "table" then
@@ -200,8 +224,8 @@ else
 		local numericUserId = tonumber(userId)
 		if numericUserId and enabled == true then
 			numericUserId = math.floor(numericUserId)
-			configuredAdmins[numericUserId] = true
-			table.insert(configuredAdminIds, numericUserId)
+			baseConfiguredAdmins[numericUserId] = true
+			table.insert(baseConfiguredAdminIds, numericUserId)
 		elseif enabled == true then
 			warn(string.format(
 				"[AdminPermissions] Ignored admin config entry reason=invalid_user_id key=%s keyType=%s",
@@ -236,11 +260,23 @@ if typeof(AdminConfig) == "table" and AdminConfig.Testers ~= nil then
 	end
 end
 
-for userId in pairs(SuperAdmins) do
+for userId in pairs(OwnerRoot) do
+	table.insert(ownerRootIds, userId)
+end
+
+for userId in pairs(baseSuperAdmins) do
+	SuperAdmins[userId] = true
 	table.insert(superAdminIds, userId)
 end
 
+for userId in pairs(baseConfiguredAdmins) do
+	configuredAdmins[userId] = true
+	table.insert(configuredAdminIds, userId)
+end
+
+table.sort(ownerRootIds)
 table.sort(configuredAdminIds)
+table.sort(baseConfiguredAdminIds)
 table.sort(baseConfiguredTesterIds)
 table.sort(superAdminIds)
 
@@ -365,6 +401,101 @@ local function addSortedUnique(ids, seen, userId)
 	table.insert(ids, numericUserId)
 end
 
+local function isOverrideRemoved(removed, userId): boolean
+	return typeof(removed) == "table" and removed[tostring(userId)] == true
+end
+
+local function rebuildEffectiveStaffRoles()
+	SuperAdmins = {}
+	superAdminIds = {}
+	configuredAdmins = {}
+	configuredAdminIds = {}
+
+	local seenSuperAdmins = {}
+	local seenAdmins = {}
+	local superAdminsAdded = if typeof(staffRoleOverrides.SuperAdminsAdded) == "table"
+		then staffRoleOverrides.SuperAdminsAdded
+		else {}
+	local superAdminsRemoved = if typeof(staffRoleOverrides.SuperAdminsRemoved) == "table"
+		then staffRoleOverrides.SuperAdminsRemoved
+		else {}
+	local adminsAdded = if typeof(staffRoleOverrides.AdminsAdded) == "table" then staffRoleOverrides.AdminsAdded else {}
+	local adminsRemoved = if typeof(staffRoleOverrides.AdminsRemoved) == "table" then staffRoleOverrides.AdminsRemoved else {}
+
+	for userId in pairs(OwnerRoot) do
+		SuperAdmins[userId] = true
+		addSortedUnique(superAdminIds, seenSuperAdmins, userId)
+	end
+
+	for userId in pairs(baseSuperAdmins) do
+		if OwnerRoot[userId] == true or not isOverrideRemoved(superAdminsRemoved, userId) then
+			SuperAdmins[userId] = true
+			addSortedUnique(superAdminIds, seenSuperAdmins, userId)
+		end
+	end
+
+	for userId, enabled in pairs(superAdminsAdded) do
+		local numericUserId = tonumber(userId)
+		if numericUserId and enabled == true then
+			numericUserId = math.floor(numericUserId)
+			if numericUserId > 0 and not isOverrideRemoved(superAdminsRemoved, numericUserId) then
+				SuperAdmins[numericUserId] = true
+				addSortedUnique(superAdminIds, seenSuperAdmins, numericUserId)
+			end
+		end
+	end
+
+	for userId in pairs(baseConfiguredAdmins) do
+		if SuperAdmins[userId] ~= true and not isOverrideRemoved(adminsRemoved, userId) then
+			configuredAdmins[userId] = true
+			addSortedUnique(configuredAdminIds, seenAdmins, userId)
+		end
+	end
+
+	for userId, enabled in pairs(adminsAdded) do
+		local numericUserId = tonumber(userId)
+		if numericUserId and enabled == true then
+			numericUserId = math.floor(numericUserId)
+			if numericUserId > 0
+				and SuperAdmins[numericUserId] ~= true
+				and not isOverrideRemoved(adminsRemoved, numericUserId) then
+				configuredAdmins[numericUserId] = true
+				addSortedUnique(configuredAdminIds, seenAdmins, numericUserId)
+			end
+		end
+	end
+
+	table.sort(superAdminIds)
+	table.sort(configuredAdminIds)
+end
+
+local function applyStaffRoleOverrides(state)
+	staffRoleOverrides = if typeof(state) == "table" then state else staffRoleOverrides
+	rebuildEffectiveStaffRoles()
+end
+
+local function loadStaffRoleOverrides(keepCurrentOnFailure: boolean?)
+	local state = AdminStaffRoleStore.Load()
+	if state.Available == false and keepCurrentOnFailure == true and staffRoleOverrides.Available == true then
+		warn("[AdminPermissions] Keeping existing staff role overrides after reload failure.")
+		return false
+	end
+
+	applyStaffRoleOverrides(state)
+	return state.Available == true
+end
+
+local function publishStaffRoleUpdate(actorUserId)
+	task.spawn(function()
+		pcall(function()
+			MessagingService:PublishAsync(STAFF_ROLE_UPDATE_TOPIC, {
+				UpdatedAt = os.time(),
+				UpdatedBy = math.floor(tonumber(actorUserId) or 0),
+			})
+		end)
+	end)
+end
+
 local function rebuildEffectiveTesters()
 	configuredTesters = {}
 	configuredTesterIds = {}
@@ -464,7 +595,70 @@ local function getTesterManageBlockedReason(userId: number): string?
 	return nil
 end
 
+loadStaffRoleOverrides(false)
 loadTesterRoleOverrides(false)
+
+local ROLE_LEVELS = {
+	Normal = 0,
+	Tester = 1,
+	Admin = 2,
+	SuperAdmin = 3,
+	OwnerRoot = 4,
+}
+
+local ROLE_DISPLAY_NAMES = {
+	Normal = "Player",
+	Tester = "Tester",
+	Admin = "Admin",
+	SuperAdmin = "SuperAdmin",
+	OwnerRoot = "OwnerRoot",
+}
+
+local function getUserIdFromSubject(subject): number?
+	local numericUserId
+	if typeof(subject) == "Instance" and subject:IsA("Player") then
+		numericUserId = tonumber(subject.UserId)
+	else
+		numericUserId = tonumber(subject)
+	end
+
+	if numericUserId == nil then
+		return nil
+	end
+
+	numericUserId = math.floor(numericUserId)
+	if numericUserId <= 0 then
+		return nil
+	end
+
+	return numericUserId
+end
+
+local function getRoleNameForUserId(userId): string
+	local numericUserId = getUserIdFromSubject(userId)
+	if numericUserId == nil then
+		return "Normal"
+	end
+
+	if OwnerRoot[numericUserId] == true then
+		return "OwnerRoot"
+	end
+	if SuperAdmins[numericUserId] == true then
+		return "SuperAdmin"
+	end
+	if configuredAdmins[numericUserId] == true then
+		return "Admin"
+	end
+	if isTesterUserId(numericUserId) then
+		return "Tester"
+	end
+
+	return "Normal"
+end
+
+local function getRoleLevelForUserId(userId): number
+	return ROLE_LEVELS[getRoleNameForUserId(userId)] or ROLE_LEVELS.Normal
+end
 
 local function getCachedUserInfo(userId: number, onlinePlayer: Player?)
 	local numericUserId = math.floor(tonumber(userId) or 0)
@@ -515,7 +709,97 @@ local function getCachedUserInfo(userId: number, onlinePlayer: Player?)
 	return resolved
 end
 
-local function buildRosterEntry(userId: number, roleName: string)
+local function canManageRoleByUserId(actorUserId: number?, targetUserId: number?, roleName: string): (boolean, string?)
+	local actorId = getUserIdFromSubject(actorUserId)
+	local targetId = getUserIdFromSubject(targetUserId)
+	if actorId == nil then
+		return false, "invalid_actor"
+	end
+	if targetId == nil then
+		return false, "invalid_target"
+	end
+	if actorId == targetId then
+		return false, "cannot_modify_self"
+	end
+	if OwnerRoot[targetId] == true then
+		return false, "owner_root_locked"
+	end
+
+	local normalizedRole = tostring(roleName or "")
+	if normalizedRole == "SuperAdmin" then
+		if OwnerRoot[actorId] ~= true then
+			return false, "owner_root_required"
+		end
+		return true, nil
+	end
+
+	if normalizedRole == "Admin" or normalizedRole == "Tester" then
+		if SuperAdmins[actorId] ~= true then
+			return false, "super_admin_required"
+		end
+		if getRoleLevelForUserId(targetId) >= ROLE_LEVELS.SuperAdmin then
+			return false, "target_role_locked"
+		end
+		return true, nil
+	end
+
+	return false, "invalid_role"
+end
+
+local function canModerateByUserId(actorUserId: number?, targetUserId: number?, actionName: string?): (boolean, string?)
+	local actorId = getUserIdFromSubject(actorUserId)
+	local targetId = getUserIdFromSubject(targetUserId)
+	if actorId == nil then
+		return false, "invalid_actor"
+	end
+	if targetId == nil then
+		return false, "invalid_target"
+	end
+	if actorId == targetId then
+		return false, "cannot_target_self"
+	end
+	if tostring(actionName or "") ~= "Kick" then
+		return false, "unsupported_action"
+	end
+	if Players:GetPlayerByUserId(targetId) == nil then
+		return false, "target_offline"
+	end
+
+	local actorLevel = getRoleLevelForUserId(actorId)
+	local targetLevel = getRoleLevelForUserId(targetId)
+	if actorLevel < ROLE_LEVELS.Admin then
+		return false, "admin_required"
+	end
+	if actorLevel <= targetLevel then
+		return false, "target_role_too_high"
+	end
+
+	local actorPlayer = Players:GetPlayerByUserId(actorId)
+	if actorLevel == ROLE_LEVELS.Admin and not AdminPermissions.IsAdmin(actorPlayer) then
+		return false, "active_admin_required"
+	end
+
+	return true, nil
+end
+
+local function addRoleCapabilities(entry, viewerUserId: number?)
+	local userId = math.floor(tonumber(entry.UserId) or 0)
+	local canGrantTester = canManageRoleByUserId(viewerUserId, userId, "Tester")
+	local canGrantAdmin = canManageRoleByUserId(viewerUserId, userId, "Admin")
+	local canGrantSuperAdmin = canManageRoleByUserId(viewerUserId, userId, "SuperAdmin")
+	local canKick = canModerateByUserId(viewerUserId, userId, "Kick")
+
+	entry.CanGrantTester = canGrantTester == true and entry.IsConfiguredTester ~= true
+	entry.CanRemoveTester = canGrantTester == true and entry.IsConfiguredTester == true
+	entry.CanAddTester = entry.CanGrantTester
+	entry.CanGrantAdmin = canGrantAdmin == true and entry.IsConfiguredAdmin ~= true and entry.IsSuperAdmin ~= true
+	entry.CanRemoveAdmin = canGrantAdmin == true and entry.IsConfiguredAdmin == true
+	entry.CanGrantSuperAdmin = canGrantSuperAdmin == true and entry.IsSuperAdmin ~= true
+	entry.CanRemoveSuperAdmin = canGrantSuperAdmin == true and entry.IsSuperAdmin == true and entry.IsOwnerRoot ~= true
+	entry.CanKick = canKick == true
+end
+
+local function buildRosterEntry(userId: number, roleName: string, viewerUserId: number?)
 	local numericUserId = math.floor(tonumber(userId) or 0)
 	local onlinePlayer = Players:GetPlayerByUserId(numericUserId)
 	local userInfo = getCachedUserInfo(numericUserId, onlinePlayer)
@@ -534,13 +818,24 @@ local function buildRosterEntry(userId: number, roleName: string)
 		adminStatusReason = "configured_admin_offline"
 	end
 
-	return {
+	local roleNameForUser = getRoleNameForUserId(numericUserId)
+	local entry = {
 		UserId = numericUserId,
 		Username = userInfo.Username,
 		DisplayName = userInfo.DisplayName,
 		Role = roleName,
+		HighestRole = roleNameForUser,
+		RoleLevel = getRoleLevelForUserId(numericUserId),
+		RoleDisplayName = ROLE_DISPLAY_NAMES[roleNameForUser] or "Player",
+		IsOwnerRoot = OwnerRoot[numericUserId] == true,
 		IsSuperAdmin = SuperAdmins[numericUserId] == true,
 		IsConfiguredAdmin = configuredAdmins[numericUserId] == true,
+		IsBaseAdmin = baseConfiguredAdmins[numericUserId] == true,
+		IsPersistedAdmin = typeof(staffRoleOverrides.AdminsAdded) == "table"
+			and staffRoleOverrides.AdminsAdded[tostring(numericUserId)] == true,
+		IsBaseSuperAdmin = baseSuperAdmins[numericUserId] == true,
+		IsPersistedSuperAdmin = typeof(staffRoleOverrides.SuperAdminsAdded) == "table"
+			and staffRoleOverrides.SuperAdminsAdded[tostring(numericUserId)] == true,
 		IsTester = isTester,
 		IsConfiguredTester = isConfiguredTesterRole,
 		IsBaseTester = baseConfiguredTesters[numericUserId] == true,
@@ -555,17 +850,20 @@ local function buildRosterEntry(userId: number, roleName: string)
 		IsActiveAdmin = isActiveAdmin == true,
 		AdminStatusReason = adminStatusReason,
 	}
+
+	addRoleCapabilities(entry, viewerUserId)
+	return entry
 end
 
-local function buildRosterList(ids, roleName: string)
+local function buildRosterList(ids, roleName: string, viewerUserId: number?)
 	local entries = {}
 	for index, userId in ipairs(ids) do
-		entries[index] = buildRosterEntry(userId, roleName)
+		entries[index] = buildRosterEntry(userId, roleName, viewerUserId)
 	end
 	return entries
 end
 
-local function buildTesterRosterList()
+local function buildTesterRosterList(viewerUserId: number?)
 	local ids = {}
 	local seen = {}
 
@@ -580,13 +878,13 @@ local function buildTesterRosterList()
 	end
 
 	table.sort(ids)
-	return buildRosterList(ids, "Tester")
+	return buildRosterList(ids, "Tester", viewerUserId)
 end
 
-local function buildAllPlayerRosterList()
+local function buildAllPlayerRosterList(viewerUserId: number?)
 	local entries = {}
 	for _, onlinePlayer in ipairs(Players:GetPlayers()) do
-		table.insert(entries, buildRosterEntry(onlinePlayer.UserId, "Player"))
+		table.insert(entries, buildRosterEntry(onlinePlayer.UserId, "Player", viewerUserId))
 	end
 
 	table.sort(entries, function(left, right)
@@ -650,12 +948,48 @@ local function resolveUserIdFromTarget(target): (number?, string?)
 	return nil, "target_unresolved"
 end
 
+local getDefaultAdminState
+local setAdminInternal
+
 local function isConfiguredAdmin(player: Player?): boolean
 	local userId = getUserId(player)
 	return userId ~= nil and configuredAdmins[userId] == true
 end
 
-local function getDefaultAdminState(player: Player): boolean
+local function canViewAdminConsole(player: Player?): boolean
+	local userId = getUserId(player)
+	if userId == nil then
+		return false
+	end
+
+	if OwnerRoot[userId] == true or SuperAdmins[userId] == true then
+		return true
+	end
+
+	return AdminPermissions.IsAdmin(player)
+end
+
+local function refreshOnlineAdminStateForUserId(userId: number, source: string?)
+	local targetPlayer = Players:GetPlayerByUserId(math.floor(tonumber(userId) or 0))
+	if not targetPlayer then
+		return
+	end
+
+	local targetUserId = getUserId(targetPlayer)
+	if targetUserId == nil then
+		return
+	end
+
+	if getDefaultAdminState(targetPlayer) then
+		if activeAdmins[targetUserId] ~= true then
+			setAdminInternal(targetPlayer, true, source or "staff_role_changed")
+		end
+	elseif activeAdmins[targetUserId] == true then
+		setAdminInternal(targetPlayer, false, source or "staff_role_changed")
+	end
+end
+
+getDefaultAdminState = function(player: Player): boolean
 	return AdminPermissions.IsSuperAdmin(player) or isConfiguredAdmin(player)
 end
 
@@ -674,7 +1008,7 @@ local function sendVipTestMessage(player: Player, message: string, isWarning: bo
 	PopUpModule:Server_SendPopUp(player, message, color, POPUP_STROKE, 4, false)
 end
 
-local function setAdminInternal(player: Player, enabled: boolean, source: string?): (boolean, boolean)
+setAdminInternal = function(player: Player, enabled: boolean, source: string?): (boolean, boolean)
 	local userId = getUserId(player)
 	if userId == nil then
 		return false, false
@@ -941,9 +1275,56 @@ print(string.format(
 	tostring(testerRoleOverrides.Available == true)
 ))
 
+local function recordAdminAudit(player: Player?, actionName: string, targetUserId: number?, result: string, reason: string?)
+	local actorUserId = getUserId(player) or 0
+	local actorName = if player then (player.DisplayName or player.Name) else "Server"
+	local numericTargetUserId = math.floor(tonumber(targetUserId) or 0)
+	local targetName = ""
+	if numericTargetUserId > 0 then
+		local targetPlayer = Players:GetPlayerByUserId(numericTargetUserId)
+		local targetInfo = getCachedUserInfo(numericTargetUserId, targetPlayer)
+		targetName = targetInfo.DisplayName or targetInfo.Username or ("User " .. tostring(numericTargetUserId))
+	end
+
+	return AdminAuditLog.Record({
+		ActorUserId = actorUserId,
+		ActorName = actorName,
+		Action = actionName,
+		TargetUserId = numericTargetUserId,
+		TargetName = targetName,
+		Result = result,
+		Reason = reason or "",
+	})
+end
+
 function AdminPermissions.IsSuperAdmin(player: Player?): boolean
 	local userId = getUserId(player)
 	return userId ~= nil and SuperAdmins[userId] == true
+end
+
+function AdminPermissions.IsOwnerRoot(player: Player?): boolean
+	local userId = getUserId(player)
+	return userId ~= nil and OwnerRoot[userId] == true
+end
+
+function AdminPermissions.CanViewAdminConsole(player: Player?): boolean
+	return canViewAdminConsole(player)
+end
+
+function AdminPermissions.GetRoleLevel(subject): number
+	return getRoleLevelForUserId(getUserIdFromSubject(subject))
+end
+
+function AdminPermissions.GetRoleName(subject): string
+	return getRoleNameForUserId(getUserIdFromSubject(subject))
+end
+
+function AdminPermissions.CanManageRole(actor: Player?, target, roleName: string): (boolean, string?)
+	return canManageRoleByUserId(getUserId(actor), getUserIdFromSubject(target), roleName)
+end
+
+function AdminPermissions.CanModerate(actor: Player?, target, actionName: string?): (boolean, string?)
+	return canModerateByUserId(getUserId(actor), getUserIdFromSubject(target), actionName)
 end
 
 function AdminPermissions.SetAdmin(player: Player, enabled: boolean): boolean
@@ -1011,25 +1392,38 @@ end
 
 function AdminPermissions.GetAdminRoster(requestingPlayer: Player?): table
 	local viewerIsAdmin, viewerReason = AdminPermissions.GetAdminStatus(requestingPlayer)
+	local viewerUserId = getUserId(requestingPlayer) or 0
+	local viewerIsOwnerRoot = AdminPermissions.IsOwnerRoot(requestingPlayer)
+	local viewerIsSuperAdmin = AdminPermissions.IsSuperAdmin(requestingPlayer)
+	local viewerCanAccessConsole = canViewAdminConsole(requestingPlayer)
 	local viewer = {
 		UserId = requestingPlayer and requestingPlayer.UserId or 0,
 		Username = requestingPlayer and requestingPlayer.Name or "",
 		DisplayName = requestingPlayer and requestingPlayer.DisplayName or "",
 		IsAdmin = viewerIsAdmin,
-		IsSuperAdmin = AdminPermissions.IsSuperAdmin(requestingPlayer),
+		IsOwnerRoot = viewerIsOwnerRoot,
+		IsSuperAdmin = viewerIsSuperAdmin,
+		CanViewAdminConsole = viewerCanAccessConsole,
+		CanManageAdminRoles = viewerIsSuperAdmin,
+		CanManageSuperAdmins = viewerIsOwnerRoot,
+		CanModerate = viewerIsAdmin or viewerIsSuperAdmin or viewerIsOwnerRoot,
 		AdminStatusReason = viewerReason,
+		HighestRole = getRoleNameForUserId(viewerUserId),
+		RoleLevel = getRoleLevelForUserId(viewerUserId),
 	}
 
-	if not viewerIsAdmin then
+	if not viewerCanAccessConsole then
 		return {
 			Success = false,
 			Message = "Admin access required.",
 			GeneratedAt = os.time(),
 			Viewer = viewer,
+			OwnerRoots = {},
 			SuperAdmins = {},
 			Admins = {},
 			AllPlayers = {},
 			Testers = {},
+			AuditLog = {},
 		}
 	end
 
@@ -1037,10 +1431,15 @@ function AdminPermissions.GetAdminRoster(requestingPlayer: Player?): table
 		Success = true,
 		GeneratedAt = os.time(),
 		Viewer = viewer,
-		SuperAdmins = buildRosterList(superAdminIds, "SuperAdmin"),
-		Admins = buildRosterList(configuredAdminIds, "Admin"),
-		AllPlayers = buildAllPlayerRosterList(),
-		Testers = buildTesterRosterList(),
+		OwnerRoots = buildRosterList(ownerRootIds, "OwnerRoot", viewerUserId),
+		SuperAdmins = buildRosterList(superAdminIds, "SuperAdmin", viewerUserId),
+		Admins = buildRosterList(configuredAdminIds, "Admin", viewerUserId),
+		AllPlayers = buildAllPlayerRosterList(viewerUserId),
+		Testers = buildTesterRosterList(viewerUserId),
+		AuditLog = AdminAuditLog.GetRecent(60),
+		StaffRoleStoreAvailable = staffRoleOverrides.Available == true,
+		StaffRoleStoreUpdatedAt = math.floor(tonumber(staffRoleOverrides.UpdatedAt) or 0),
+		StaffRoleStoreUpdatedBy = math.floor(tonumber(staffRoleOverrides.UpdatedBy) or 0),
 		TesterRoleStoreAvailable = testerRoleOverrides.Available == true,
 		TesterRoleStoreUpdatedAt = math.floor(tonumber(testerRoleOverrides.UpdatedAt) or 0),
 		TesterRoleStoreUpdatedBy = math.floor(tonumber(testerRoleOverrides.UpdatedBy) or 0),
@@ -1058,6 +1457,7 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 
 	if not AdminPermissions.IsSuperAdmin(requestingPlayer) then
 		AdminPermissions.LogCommandRejected(requestingPlayer, "testerRole", source, "reason=not_super_admin")
+		recordAdminAudit(requestingPlayer, if enabled == true then "SetTester" else "RemoveTester", nil, "rejected", "not_super_admin")
 		return {
 			Success = false,
 			Message = "SuperAdmin access required.",
@@ -1067,20 +1467,22 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 	local targetUserId, resolveReason = resolveUserIdFromTarget(target)
 	if targetUserId == nil then
 		AdminPermissions.LogCommandFailed(requestingPlayer, "testerRole", source, "reason=" .. tostring(resolveReason))
+		recordAdminAudit(requestingPlayer, if enabled == true then "SetTester" else "RemoveTester", nil, "failed", tostring(resolveReason))
 		return {
 			Success = false,
 			Message = "Could not resolve that tester target.",
 		}
 	end
 
-	local blockedReason = getTesterManageBlockedReason(targetUserId)
-	if blockedReason ~= nil then
+	local canManageTester, blockedReason = canManageRoleByUserId(getUserId(requestingPlayer), targetUserId, "Tester")
+	if not canManageTester then
 		AdminPermissions.LogCommandRejected(
 			requestingPlayer,
 			"testerRole",
 			source,
 			string.format("reason=%s targetUserId=%d", blockedReason, targetUserId)
 		)
+		recordAdminAudit(requestingPlayer, if enabled == true then "SetTester" else "RemoveTester", targetUserId, "rejected", tostring(blockedReason))
 		return {
 			Success = false,
 			Message = "Admins and SuperAdmins cannot be modified through tester management.",
@@ -1096,6 +1498,7 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 			source,
 			string.format("action=%s targetUserId=%d changed=false", action, targetUserId)
 		)
+		recordAdminAudit(requestingPlayer, "SetTester", targetUserId, "success", "already_tester")
 		return {
 			Success = true,
 			Message = "That player is already a tester.",
@@ -1110,6 +1513,7 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 			source,
 			string.format("action=%s targetUserId=%d changed=false", action, targetUserId)
 		)
+		recordAdminAudit(requestingPlayer, "RemoveTester", targetUserId, "success", "not_tester")
 		return {
 			Success = true,
 			Message = "That player is not a configured or persistent tester.",
@@ -1127,6 +1531,7 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 			source,
 			string.format("reason=store_write_failed targetUserId=%d error=%s", targetUserId, tostring(errorMessage))
 		)
+		recordAdminAudit(requestingPlayer, if enabled == true then "SetTester" else "RemoveTester", targetUserId, "failed", "store_write_failed")
 		return {
 			Success = false,
 			Message = "Tester role storage failed. No role changed.",
@@ -1144,6 +1549,7 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 		source,
 		string.format("action=%s targetUserId=%d changed=true", action, targetUserId)
 	)
+	recordAdminAudit(requestingPlayer, if enabled == true then "SetTester" else "RemoveTester", targetUserId, "success", "changed=true")
 
 	local message = if enabled == true then "Tester added." else "Tester removed."
 	return {
@@ -1152,6 +1558,262 @@ function AdminPermissions.SetTesterRole(requestingPlayer: Player?, target, enabl
 		Changed = true,
 		Entry = buildRosterEntry(targetUserId, "Tester"),
 		Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
+	}
+end
+
+function AdminPermissions.SetStaffRole(requestingPlayer: Player?, target, roleName: string, enabled: boolean, source: string?, confirmed: boolean?): table
+	source = source or "AdminConsoleActionRequest"
+	roleName = tostring(roleName or "")
+	enabled = enabled == true
+
+	local auditAction = (enabled and "Set" or "Remove") .. roleName
+	AdminPermissions.LogCommandAttempt(requestingPlayer, "staffRole", source, string.format(
+		"role=%s enabled=%s target=%s confirmed=%s",
+		roleName,
+		tostring(enabled),
+		tostring(target),
+		tostring(confirmed == true)
+	))
+
+	if (roleName == "Admin" or roleName == "SuperAdmin") and confirmed ~= true then
+		recordAdminAudit(requestingPlayer, auditAction, nil, "rejected", "confirmation_required")
+		return {
+			Success = false,
+			Message = "Confirmation required before changing staff roles.",
+		}
+	end
+
+	local targetUserId, resolveReason = resolveUserIdFromTarget(target)
+	if targetUserId == nil then
+		AdminPermissions.LogCommandFailed(requestingPlayer, "staffRole", source, "reason=" .. tostring(resolveReason))
+		recordAdminAudit(requestingPlayer, auditAction, nil, "failed", tostring(resolveReason))
+		return {
+			Success = false,
+			Message = "Could not resolve that staff role target.",
+		}
+	end
+
+	local canManage, blockedReason = canManageRoleByUserId(getUserId(requestingPlayer), targetUserId, roleName)
+	if not canManage then
+		AdminPermissions.LogCommandRejected(
+			requestingPlayer,
+			"staffRole",
+			source,
+			string.format("reason=%s role=%s targetUserId=%d", tostring(blockedReason), roleName, targetUserId)
+		)
+		recordAdminAudit(requestingPlayer, auditAction, targetUserId, "rejected", tostring(blockedReason))
+		return {
+			Success = false,
+			Message = "You do not have permission to change that role.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	local alreadyEnabled = if roleName == "SuperAdmin" then SuperAdmins[targetUserId] == true else configuredAdmins[targetUserId] == true
+	if enabled == alreadyEnabled then
+		AdminPermissions.LogCommandExecuted(
+			requestingPlayer,
+			"staffRole",
+			source,
+			string.format("role=%s enabled=%s targetUserId=%d changed=false", roleName, tostring(enabled), targetUserId)
+		)
+		recordAdminAudit(requestingPlayer, auditAction, targetUserId, "success", "changed=false")
+		return {
+			Success = true,
+			Message = if enabled then "That role is already assigned." else "That role is not assigned.",
+			Changed = false,
+			Entry = buildRosterEntry(targetUserId, roleName, getUserId(requestingPlayer)),
+			Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
+		}
+	end
+
+	local ok, state, errorMessage = AdminStaffRoleStore.SetRole(roleName, targetUserId, enabled, getUserId(requestingPlayer) or 0)
+	if not ok then
+		AdminPermissions.LogCommandFailed(
+			requestingPlayer,
+			"staffRole",
+			source,
+			string.format("reason=store_write_failed role=%s targetUserId=%d error=%s", roleName, targetUserId, tostring(errorMessage))
+		)
+		recordAdminAudit(requestingPlayer, auditAction, targetUserId, "failed", "store_write_failed")
+		return {
+			Success = false,
+			Message = "Staff role storage failed. No role changed.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	applyStaffRoleOverrides(state)
+	refreshOnlineAdminStateForUserId(targetUserId, "staff_role_changed")
+	publishStaffRoleUpdate(getUserId(requestingPlayer) or 0)
+	staffRoleStateChanged:Fire(requestingPlayer, {
+		Source = "staff_role_changed",
+		TargetUserId = targetUserId,
+		Role = roleName,
+		Enabled = enabled,
+		SentAt = os.time(),
+	})
+
+	AdminPermissions.LogCommandExecuted(
+		requestingPlayer,
+		"staffRole",
+		source,
+		string.format("role=%s enabled=%s targetUserId=%d changed=true", roleName, tostring(enabled), targetUserId)
+	)
+	recordAdminAudit(requestingPlayer, auditAction, targetUserId, "success", "changed=true")
+
+	return {
+		Success = true,
+		Message = string.format("%s %s.", roleName, if enabled then "added" else "removed"),
+		Changed = true,
+		Entry = buildRosterEntry(targetUserId, roleName, getUserId(requestingPlayer)),
+		Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
+	}
+end
+
+function AdminPermissions.KickPlayer(requestingPlayer: Player?, target, reason, source: string?, confirmed: boolean?): table
+	source = source or "AdminConsoleActionRequest"
+	AdminPermissions.LogCommandAttempt(requestingPlayer, "adminConsole", source, string.format(
+		"action=Kick target=%s confirmed=%s",
+		tostring(target),
+		tostring(confirmed == true)
+	))
+
+	if confirmed ~= true then
+		recordAdminAudit(requestingPlayer, "Kick", nil, "rejected", "confirmation_required")
+		return {
+			Success = false,
+			Message = "Confirmation required before kicking a player.",
+		}
+	end
+
+	local targetUserId, resolveReason = resolveUserIdFromTarget(target)
+	if targetUserId == nil then
+		AdminPermissions.LogCommandFailed(requestingPlayer, "adminConsole", source, "reason=" .. tostring(resolveReason))
+		recordAdminAudit(requestingPlayer, "Kick", nil, "failed", tostring(resolveReason))
+		return {
+			Success = false,
+			Message = "Could not resolve that player.",
+		}
+	end
+
+	local canKick, blockedReason = canModerateByUserId(getUserId(requestingPlayer), targetUserId, "Kick")
+	if not canKick then
+		AdminPermissions.LogCommandRejected(
+			requestingPlayer,
+			"adminConsole",
+			source,
+			string.format("reason=%s action=Kick targetUserId=%d", tostring(blockedReason), targetUserId)
+		)
+		recordAdminAudit(requestingPlayer, "Kick", targetUserId, "rejected", tostring(blockedReason))
+		return {
+			Success = false,
+			Message = "You do not have permission to kick that player.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	local targetPlayer = Players:GetPlayerByUserId(targetUserId)
+	if not targetPlayer then
+		recordAdminAudit(requestingPlayer, "Kick", targetUserId, "failed", "target_offline")
+		return {
+			Success = false,
+			Message = "That player is no longer in this server.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	local kickReason = tostring(reason or ""):gsub("\r", ""):gsub("\n", " ")
+	kickReason = kickReason:match("^%s*(.-)%s*$") or ""
+	if kickReason == "" then
+		kickReason = "Removed from the server by an admin."
+	end
+	kickReason = kickReason:sub(1, 180)
+
+	local kickOk, kickError = pcall(function()
+		targetPlayer:Kick(kickReason)
+	end)
+	if not kickOk then
+		AdminPermissions.LogCommandFailed(
+			requestingPlayer,
+			"adminConsole",
+			source,
+			string.format("reason=kick_failed targetUserId=%d error=%s", targetUserId, tostring(kickError))
+		)
+		recordAdminAudit(requestingPlayer, "Kick", targetUserId, "failed", "kick_failed")
+		return {
+			Success = false,
+			Message = "Kick failed.",
+			TargetUserId = targetUserId,
+		}
+	end
+
+	AdminPermissions.LogCommandExecuted(
+		requestingPlayer,
+		"adminConsole",
+		source,
+		string.format("action=Kick targetUserId=%d reason=%s", targetUserId, kickReason)
+	)
+	recordAdminAudit(requestingPlayer, "Kick", targetUserId, "success", kickReason)
+
+	return {
+		Success = true,
+		Message = "Player kicked.",
+		Changed = true,
+		TargetUserId = targetUserId,
+		Roster = AdminPermissions.GetAdminRoster(requestingPlayer),
+	}
+end
+
+function AdminPermissions.ApplyAdminConsoleAction(requestingPlayer: Player?, payload): table
+	if not canViewAdminConsole(requestingPlayer) then
+		AdminPermissions.LogCommandRejected(requestingPlayer, "adminConsole", "AdminConsoleActionRequest", "reason=not_admin")
+		recordAdminAudit(requestingPlayer, "AdminConsole", nil, "rejected", "not_admin")
+		return {
+			Success = false,
+			Message = "Admin access required.",
+		}
+	end
+
+	if typeof(payload) ~= "table" then
+		recordAdminAudit(requestingPlayer, "AdminConsole", nil, "rejected", "invalid_payload")
+		return {
+			Success = false,
+			Message = "Invalid admin console action.",
+		}
+	end
+
+	local actionName = tostring(payload.Action or "")
+	local target = payload.TargetUserId or payload.Target or payload.TargetText
+	local confirmed = payload.Confirmed == true
+
+	if actionName == "SetTester" or actionName == "AddTester" then
+		return AdminPermissions.SetTesterRole(requestingPlayer, target, true, "AdminConsoleActionRequest")
+	elseif actionName == "RemoveTester" then
+		if not confirmed then
+			recordAdminAudit(requestingPlayer, "RemoveTester", nil, "rejected", "confirmation_required")
+			return {
+				Success = false,
+				Message = "Confirmation required before removing a role.",
+			}
+		end
+		return AdminPermissions.SetTesterRole(requestingPlayer, target, false, "AdminConsoleActionRequest")
+	elseif actionName == "SetAdmin" or actionName == "AddAdmin" then
+		return AdminPermissions.SetStaffRole(requestingPlayer, target, "Admin", true, "AdminConsoleActionRequest", confirmed)
+	elseif actionName == "RemoveAdmin" then
+		return AdminPermissions.SetStaffRole(requestingPlayer, target, "Admin", false, "AdminConsoleActionRequest", confirmed)
+	elseif actionName == "SetSuperAdmin" or actionName == "AddSuperAdmin" then
+		return AdminPermissions.SetStaffRole(requestingPlayer, target, "SuperAdmin", true, "AdminConsoleActionRequest", confirmed)
+	elseif actionName == "RemoveSuperAdmin" then
+		return AdminPermissions.SetStaffRole(requestingPlayer, target, "SuperAdmin", false, "AdminConsoleActionRequest", confirmed)
+	elseif actionName == "Kick" then
+		return AdminPermissions.KickPlayer(requestingPlayer, target, payload.Reason, "AdminConsoleActionRequest", confirmed)
+	end
+
+	recordAdminAudit(requestingPlayer, "AdminConsole", nil, "rejected", "unsupported_action")
+	return {
+		Success = false,
+		Message = "Unsupported admin console action.",
 	}
 end
 
@@ -1322,6 +1984,19 @@ function AdminPermissions.LogCommandExecuted(player: Player, commandName: string
 	))
 	sendCommandFeedback(player, "success", commandName, source, detail)
 end
+
+pcall(function()
+	MessagingService:SubscribeAsync(STAFF_ROLE_UPDATE_TOPIC, function()
+		loadStaffRoleOverrides(true)
+		for _, player in ipairs(Players:GetPlayers()) do
+			refreshOnlineAdminStateForUserId(player.UserId, "staff_role_reload")
+		end
+		staffRoleStateChanged:Fire(nil, {
+			Source = "staff_role_reload",
+			SentAt = os.time(),
+		})
+	end)
+end)
 
 pcall(function()
 	MessagingService:SubscribeAsync(TESTER_ROLE_UPDATE_TOPIC, function()

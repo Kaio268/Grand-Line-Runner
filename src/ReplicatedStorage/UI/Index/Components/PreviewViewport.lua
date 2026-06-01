@@ -6,6 +6,8 @@ local React = require(Packages:WaitForChild("React"))
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ChestVisuals = require(Modules:WaitForChild("GrandLineRushChestVisuals"))
 local DevilFruitAssets = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Assets"))
+local CrewAuraVisuals = require(Modules:WaitForChild("Crew"):WaitForChild("CrewAuraVisuals"))
+local CrewIdleAnimator = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIdleAnimator"))
 local CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 
 local e = React.createElement
@@ -568,11 +570,29 @@ local function ViewportPreviewModel(props)
 		end
 
 		mountPreviewTemplate(viewport, template)
+		local worldModel = viewport:FindFirstChild("PreviewWorld")
+		local previewChildren = worldModel and worldModel:GetChildren() or {}
+		local previewModel = previewChildren[1]
+		local idleController = nil
+		local auraRoot = nil
+		if props.previewKind == "CrewMember" and props.showCrewAura == true and previewModel and previewModel:IsA("Model") then
+			auraRoot = CrewAuraVisuals.Refresh(previewModel, {
+				CrewMemberId = props.crewMemberId or props.previewCrewMemberId or props.previewName,
+				Variant = props.variant or props.Variant,
+				Source = "PreviewViewport",
+			})
+		end
+		if props.previewKind == "CrewMember" and props.animateCrewIdle == true and previewModel and previewModel:IsA("Model") then
+			idleController = CrewIdleAnimator.Start(previewModel, {
+				CrewMemberId = props.crewMemberId or props.previewCrewMemberId or props.previewName,
+				Gender = props.gender,
+				ModelName = props.previewName,
+				Source = "PreviewViewport",
+				AnimateViewport = true,
+			})
+		end
 
 		if DEBUG_PREVIEW_VIEWPORT then
-			local worldModel = viewport:FindFirstChild("PreviewWorld")
-			local previewChildren = worldModel and worldModel:GetChildren() or {}
-			local previewModel = previewChildren[1]
 			local camera = viewport.CurrentCamera
 			local stats = worldModel and collectPreviewDebugStats(worldModel) or nil
 			debugLog(string.format(
@@ -599,6 +619,12 @@ local function ViewportPreviewModel(props)
 		end
 
 		return function()
+			if idleController then
+				CrewIdleAnimator.Stop(idleController)
+			end
+			if auraRoot and previewModel then
+				CrewAuraVisuals.Remove(previewModel)
+			end
 			if viewport.Parent then
 				if DEBUG_PREVIEW_VIEWPORT then
 					debugLog(string.format(
@@ -619,6 +645,13 @@ local function ViewportPreviewModel(props)
 		props.tintTransparency,
 		props.tintMaterial,
 		props.fieldOfView,
+		props.animateCrewIdle,
+		props.showCrewAura,
+		props.crewMemberId,
+		props.previewCrewMemberId,
+		props.variant,
+		props.Variant,
+		props.gender,
 	})
 
 	return e("ViewportFrame", {
@@ -673,6 +706,13 @@ local function arePreviewPropsEqual(oldProps, newProps)
 		and oldProps.tintColor == newProps.tintColor
 		and oldProps.tintTransparency == newProps.tintTransparency
 		and oldProps.tintMaterial == newProps.tintMaterial
+		and oldProps.animateCrewIdle == newProps.animateCrewIdle
+		and oldProps.showCrewAura == newProps.showCrewAura
+		and oldProps.crewMemberId == newProps.crewMemberId
+		and oldProps.previewCrewMemberId == newProps.previewCrewMemberId
+		and oldProps.variant == newProps.variant
+		and oldProps.Variant == newProps.Variant
+		and oldProps.gender == newProps.gender
 		and oldProps.ambient == newProps.ambient
 		and oldProps.lightColor == newProps.lightColor
 		and oldProps.lightDirection == newProps.lightDirection

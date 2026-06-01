@@ -1,5 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+
+local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local React = require(ReplicatedStorage:WaitForChild("Packages"):WaitForChild("React"))
 local PreviewViewport = require(
 	script.Parent.Parent:WaitForChild("Index"):WaitForChild("Components"):WaitForChild("PreviewViewport")
@@ -121,7 +124,7 @@ local function getMetaText(item)
 		parts[#parts + 1] = "Lv " .. level
 	end
 	if income ~= nil then
-		parts[#parts + 1] = "$" .. income .. "/s"
+		parts[#parts + 1] = CurrencyUtil.formatIncomeCompactPerSecond(income)
 	end
 
 	return if #parts > 0 then table.concat(parts, "  |  ") else "Ready"
@@ -189,6 +192,7 @@ local function baseHeldSlot(props)
 	local rarityColor = if rarityStyle and typeof(rarityStyle.textColor) == "Color3" then rarityStyle.textColor else PALETTE.Ready
 	local strokeColor = if rarityStyle and typeof(rarityStyle.borderColor) == "Color3" then rarityStyle.borderColor else PALETTE.Gold
 	local variantTag = getVariantTag(item)
+	local variant = item.Variant or item.variant or variantTag
 	local previewName = getPreviewName(item)
 	local previewSize = compact and 56 or 76
 	local previewLeft = compact and 36 or 42
@@ -257,12 +261,18 @@ local function baseHeldSlot(props)
 		}, {
 			Preview = e(PreviewViewport, {
 				anchorPoint = Vector2.new(0.5, 0.5),
+				animateCrewIdle = true,
+				crewMemberId = item.CrewMemberId or item.crewMemberId,
 				fieldOfView = 34,
+				gender = item.Gender or item.gender,
 				position = UDim2.fromScale(0.5, 0.52),
+				preferModel = variantTag ~= "",
 				previewKind = "CrewMember",
 				previewName = previewName,
 				scaleType = Enum.ScaleType.Fit,
+				showCrewAura = variantTag ~= "",
 				size = UDim2.fromScale(1, 1),
+				variant = variant,
 				zIndex = zIndex + 2,
 			}),
 		}),

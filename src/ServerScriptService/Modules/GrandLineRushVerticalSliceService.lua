@@ -237,7 +237,8 @@ local function getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
 		return CrewIncomeBalance.ComputeIncome(
 			baseIncomeRoll,
 			crewData.Variant or mirrorData.Variant,
-			level
+			level,
+			crewData.Rarity or mirrorData.Rarity
 		)
 	end
 
