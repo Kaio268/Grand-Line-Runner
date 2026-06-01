@@ -21,6 +21,7 @@ local DataManager = setmetatable({}, {
 })
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local CrewStandIncomeAuthority = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStandIncomeAuthority"))
+local TitleProgressService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleProgressService"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
@@ -643,6 +644,7 @@ function Module.ApplyAutoFeed(player, crewMemberId, options)
 		MaxLevel = progress.MaxLevel,
 	}
 
+	TitleProgressService.RecordCrewLevelsGained(player, plan.LevelUps)
 	return true, plan
 end
 
@@ -752,7 +754,7 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 		})
 	end
 
-	return true, {
+	local result = {
 		AppliedStep = stepPreview,
 		LevelUps = math.max(0, levelAfter - progress.Level),
 		Progress = {
@@ -766,6 +768,8 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 			MaxLevel = progress.MaxLevel,
 		},
 	}
+	TitleProgressService.RecordCrewLevelsGained(player, result.LevelUps)
+	return true, result
 end
 
 return Module

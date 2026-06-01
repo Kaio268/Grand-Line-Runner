@@ -621,6 +621,7 @@ function ProfileMigrations.Apply(data)
 
 	local titles = ensureTable(data, "Titles")
 	titles.Unlocked = ensureTable(titles, "Unlocked")
+	titles.Progress = ensureTable(titles, "Progress")
 	if typeof(titles.Equipped) ~= "string" then
 		titles.Equipped = ""
 	end

@@ -1906,6 +1906,7 @@ local function crewBackMetric(label, value, layoutOrder, valueColor)
 			Text = label,
 			TextColor3 = Color3.fromRGB(205, 196, 185),
 			TextSize = 9,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 8,
 		}),
@@ -2059,7 +2060,7 @@ local function crewInventoryBackFace(props)
 			Padding = UDim.new(0, 2),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
-		Income = crewBackMetric("Income", detail.income ~= nil and formatRateNumber(detail.income) or "", 1, PALETTE.Green),
+		Income = crewBackMetric("Crew", detail.income ~= nil and formatRateNumber(detail.income) or "", 1, PALETTE.Green),
 		Sell = crewBackMetric(
 			"Sell",
 			detail.sellValue ~= nil and CurrencyUtil.formatCurrency(detail.sellValue) or "",
@@ -2222,6 +2223,74 @@ local function crewInventoryCardFace(props)
 	})
 end
 
+local function crewInventoryActionButton(props)
+	local enabled = props.enabled ~= false and props.onActivated ~= nil
+	local hovered, pressed, handlers, hoverRef = useInteractiveState(enabled)
+	local actionText = tostring(props.text or "")
+	local actionFill = if actionText == "Equip"
+		then PALETTE.Cyan
+		elseif actionText == "Sell" then PALETTE.Rose
+		else INVENTORY_UI.ButtonIdle
+	local actionBottom = if actionText == "Sell"
+		then actionFill:Lerp(Color3.fromRGB(42, 12, 22), 0.36)
+		else actionFill:Lerp(INVENTORY_UI.ButtonIdleBottom, 0.28)
+	local hoverLift = Color3.fromRGB(255, 255, 255)
+	local fillTop = if enabled
+		then (if hovered then actionFill:Lerp(hoverLift, 0.18) else actionFill:Lerp(hoverLift, 0.08))
+		else INVENTORY_UI.ButtonIdle
+	local fillBottom = if enabled
+		then (if hovered then actionBottom:Lerp(hoverLift, 0.1) else actionBottom)
+		else INVENTORY_UI.ButtonIdleBottom
+	local buttonZIndex = props.zIndex or 11
+	local labelColor = if enabled then INVENTORY_UI.TextMain else INVENTORY_UI.TextMuted
+
+	return e("TextButton", mergeProps({
+		AutoButtonColor = false,
+		BackgroundColor3 = fillTop,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBlack,
+		LayoutOrder = props.layoutOrder or 0,
+		ref = hoverRef,
+		Size = props.size or UDim2.new(0.5, -3, 1, 0),
+		Text = "",
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = buttonZIndex,
+		[React.Event.Activated] = if enabled then props.onActivated else nil,
+	}, handlers), {
+		Scale = e("UIScale", {
+			Scale = (hovered and 1.012 or 1) - (pressed and 0.018 or 0),
+		}),
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 8),
+		}),
+		Stroke = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Color = INVENTORY_UI.GoldHighlight,
+			Transparency = if enabled then 0 else 0.5,
+			Thickness = hovered and 1.4 or 1.1,
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, fillTop),
+				ColorSequenceKeypoint.new(1, fillBottom),
+			}),
+		}),
+		Label = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Size = UDim2.fromScale(1, 1),
+			Text = actionText,
+			TextColor3 = labelColor,
+			TextSize = props.textSize or 11,
+			TextStrokeColor3 = INVENTORY_UI.GoldShadow,
+			TextStrokeTransparency = if enabled then 0.45 else 0.72,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = buttonZIndex + 1,
+		}),
+	})
+end
+
 local function crewInventoryIndexTile(props)
 	local item = props.item or {}
 	local quantity = math.max(1, math.floor(tonumber(item.quantity) or 1))
@@ -2351,51 +2420,25 @@ local function crewInventoryIndexTile(props)
 				Padding = UDim.new(0, 6),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
-			Equip = e("TextButton", {
-				AutoButtonColor = true,
-				BackgroundColor3 = PALETTE.Cyan,
-				BorderSizePixel = 0,
-				Font = Enum.Font.GothamBold,
-				LayoutOrder = 1,
-				Size = UDim2.new(0.5, -3, 1, 0),
-				Text = "Equip",
-				TextColor3 = PALETTE.Ink,
-				TextSize = 11,
-				TextTruncate = Enum.TextTruncate.AtEnd,
-				ZIndex = 11,
-				[React.Event.Activated] = function()
+			Equip = e(crewInventoryActionButton, {
+				layoutOrder = 1,
+				text = "Equip",
+				onActivated = function()
 					if props.onCrewAction then
 						props.onCrewAction(item, "Equip")
 					elseif props.onActivated then
 						props.onActivated(item)
 					end
 				end,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 8),
-				}),
 			}),
-			Sell = e("TextButton", {
-				AutoButtonColor = true,
-				BackgroundColor3 = PALETTE.Rose,
-				BorderSizePixel = 0,
-				Font = Enum.Font.GothamBold,
-				LayoutOrder = 2,
-				Size = UDim2.new(0.5, -3, 1, 0),
-				Text = "Sell",
-				TextColor3 = PALETTE.Cream,
-				TextSize = 11,
-				TextTruncate = Enum.TextTruncate.AtEnd,
-				ZIndex = 11,
-				[React.Event.Activated] = function()
+			Sell = e(crewInventoryActionButton, {
+				layoutOrder = 2,
+				text = "Sell",
+				onActivated = function()
 					if props.onCrewAction then
 						props.onCrewAction(item, "Sell")
 					end
 				end,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 8),
-				}),
 			}),
 		}) or nil,
 	})
@@ -2735,6 +2778,161 @@ local function chestOpenQuantityPrompt(props)
 	})
 end
 
+local function crewSellConfirmPrompt(props)
+	local prompt = props.prompt or {}
+	local mobile = isMobileViewport()
+	local panelHeight = mobile and 214 or 246
+	local panelMaxSize = mobile and Vector2.new(360, panelHeight) or Vector2.new(430, panelHeight)
+	local displayName = tostring(prompt.displayName or "Crewmate")
+	local rarity = tostring(prompt.rarity or "")
+	local variant = tostring(prompt.variant or "Normal")
+	if variant == "" then
+		variant = "Normal"
+	end
+	local metaText = if rarity ~= "" then string.format("%s  |  %s", rarity, variant) else variant
+	local sellValue = tonumber(prompt.sellValue)
+	local sellValueText = if sellValue ~= nil then CurrencyUtil.formatCurrency(sellValue) else "Unknown"
+	local buttonHeight = mobile and 36 or 42
+	local buttonY = mobile and 160 or 186
+
+	return e("Frame", {
+		Active = true,
+		BackgroundColor3 = INVENTORY_UI.MenuOverlay,
+		BackgroundTransparency = 0.08,
+		BorderSizePixel = 0,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 40,
+	}, {
+		Shade = e("Frame", {
+			Active = true,
+			BackgroundColor3 = PALETTE.Ink,
+			BackgroundTransparency = 0.24,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 40,
+		}),
+		InputBlocker = e("Frame", {
+			Active = true,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Selectable = false,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 41,
+			[React.Event.InputBegan] = function() end,
+			[React.Event.InputChanged] = function() end,
+			[React.Event.InputEnded] = function() end,
+		}),
+		Panel = e("Frame", {
+			Active = true,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = INVENTORY_UI.SectionBg,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.new(1, -24, 0, panelHeight),
+			ZIndex = 42,
+		}, {
+			SizeConstraint = e("UISizeConstraint", {
+				MaxSize = panelMaxSize,
+			}),
+			Corner = e("UICorner", { CornerRadius = UDim.new(0, 14) }),
+			Stroke = e("UIStroke", {
+				Color = PALETTE.Rose,
+				Thickness = 1.5,
+				Transparency = 0.08,
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(22, mobile and 18 or 22),
+				Size = UDim2.new(1, -44, 0, mobile and 26 or 32),
+				Text = "Confirm Sell",
+				TextColor3 = INVENTORY_UI.TextMain,
+				TextSize = mobile and 20 or 26,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 43,
+			}),
+			Name = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.Cartoon,
+				Position = UDim2.fromOffset(22, mobile and 50 or 62),
+				Size = UDim2.new(1, -44, 0, mobile and 30 or 36),
+				Text = displayName,
+				TextColor3 = PALETTE.Cream,
+				TextSize = mobile and 22 or 28,
+				TextStrokeTransparency = 0.62,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 43,
+			}),
+			Meta = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(22, mobile and 84 or 102),
+				Size = UDim2.new(1, -44, 0, 18),
+				Text = metaText,
+				TextColor3 = INVENTORY_UI.GoldHighlight,
+				TextSize = mobile and 12 or 14,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 43,
+			}),
+			Value = e("TextLabel", {
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BackgroundTransparency = 0.08,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(34, mobile and 110 or 130),
+				Size = UDim2.new(1, -68, 0, mobile and 34 or 38),
+				Text = "Sell Value: " .. sellValueText,
+				TextColor3 = PALETTE.Gold,
+				TextSize = mobile and 14 or 16,
+				ZIndex = 43,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+				Stroke = e("UIStroke", {
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = 0.36,
+					Thickness = 1,
+				}),
+			}),
+			Confirm = e("TextButton", {
+				AutoButtonColor = false,
+				BackgroundColor3 = PALETTE.Rose,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.fromOffset(24, buttonY),
+				Size = UDim2.new(0.5, -30, 0, buttonHeight),
+				Text = "Confirm Sell",
+				TextColor3 = PALETTE.Cream,
+				TextSize = mobile and 13 or 16,
+				ZIndex = 43,
+				[React.Event.Activated] = props.onConfirm,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+			}),
+			Cancel = e("TextButton", {
+				AutoButtonColor = false,
+				BackgroundColor3 = INVENTORY_UI.ButtonIdle,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.new(0.5, 6, 0, buttonY),
+				Size = UDim2.new(0.5, -30, 0, buttonHeight),
+				Text = "Cancel",
+				TextColor3 = INVENTORY_UI.TextMain,
+				TextSize = mobile and 13 or 16,
+				ZIndex = 43,
+				[React.Event.Activated] = props.onDismiss,
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 10) }),
+				Stroke = e("UIStroke", {
+					Color = INVENTORY_UI.GoldHighlight,
+					Transparency = 0.35,
+					Thickness = 1,
+				}),
+			}),
+		}),
+	})
+end
+
 local DROP_RATE_COLORS = {
 	Common = Color3.fromRGB(194, 204, 220),
 	Rare = Color3.fromRGB(112, 189, 255),
@@ -2965,6 +3163,241 @@ local function footerCategoryCell(props)
 	})
 end
 
+local CREW_SORT_OPTIONS = {
+	{ label = "Default", value = "Default" },
+	{ label = "High Income", value = "IncomeDesc" },
+	{ label = "Low Income", value = "IncomeAsc" },
+	{ label = "Rarity", value = "RarityVariant" },
+}
+
+local CREW_VARIANT_FILTER_OPTIONS = {
+	{ label = "All", value = "All" },
+	{ label = "Normal", value = "Normal" },
+	{ label = "Golden", value = "Golden" },
+	{ label = "Diamond", value = "Diamond" },
+}
+
+local function getCrewControlOptionLabel(options, selectedValue)
+	for _, option in ipairs(options) do
+		if tostring(option.value or "") == tostring(selectedValue or "") then
+			return tostring(option.label or "")
+		end
+	end
+
+	local fallback = options[1]
+	return fallback and tostring(fallback.label or "") or ""
+end
+
+local function crewDropdownOption(props)
+	local selected = tostring(props.option.value or "") == tostring(props.selectedValue or "")
+	local accent = props.accentColor or INVENTORY_UI.GoldHighlight
+
+	return e("TextButton", {
+		AutoButtonColor = true,
+		BackgroundColor3 = selected and Color3.fromRGB(42, 34, 16) or Color3.fromRGB(12, 20, 35),
+		BackgroundTransparency = selected and 0.04 or 1,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		LayoutOrder = props.layoutOrder or 0,
+		Size = UDim2.new(1, 0, 0, 28),
+		Text = tostring(props.option.label or ""),
+		TextColor3 = selected and accent or INVENTORY_UI.TextMain,
+		TextSize = 12,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = props.zIndex or 32,
+		[React.Event.Activated] = function()
+			if props.onSelected then
+				props.onSelected(props.option.value)
+			end
+		end,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 7),
+		}),
+		Padding = e("UIPadding", {
+			PaddingLeft = UDim.new(0, 10),
+			PaddingRight = UDim.new(0, 10),
+		}),
+	})
+end
+
+local function crewDropdownControl(props)
+	local selectedLabel = getCrewControlOptionLabel(props.options or {}, props.selectedValue)
+	local open = props.openDropdown == props.dropdownKey
+	local accent = props.accentColor or INVENTORY_UI.GoldHighlight
+	local optionChildren = {
+		Padding = e("UIPadding", {
+			PaddingTop = UDim.new(0, 6),
+			PaddingBottom = UDim.new(0, 6),
+			PaddingLeft = UDim.new(0, 6),
+			PaddingRight = UDim.new(0, 6),
+		}),
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			Padding = UDim.new(0, 2),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+
+	for index, option in ipairs(props.options or {}) do
+		optionChildren["Option" .. tostring(index)] = e(crewDropdownOption, {
+			option = option,
+			selectedValue = props.selectedValue,
+			layoutOrder = index,
+			accentColor = accent,
+			zIndex = (props.zIndex or 24) + 8,
+			onSelected = props.onSelected,
+		})
+	end
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		ClipsDescendants = false,
+		LayoutOrder = props.layoutOrder or 0,
+		Size = props.size or UDim2.fromOffset(150, 34),
+		ZIndex = props.zIndex or 24,
+	}, {
+		Button = e("TextButton", {
+			AutoButtonColor = true,
+			BackgroundColor3 = Color3.fromRGB(13, 24, 42),
+			BackgroundTransparency = open and 0.02 or 0.08,
+			BorderSizePixel = 0,
+			Font = Enum.Font.GothamBold,
+			Size = UDim2.fromScale(1, 1),
+			Text = string.format("%s: %s  v", tostring(props.label or ""), selectedLabel),
+			TextColor3 = PALETTE.Cream,
+			TextSize = 12,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = (props.zIndex or 24) + 2,
+			[React.Event.Activated] = function()
+				if props.onToggle then
+					props.onToggle(props.dropdownKey)
+				end
+			end,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = open and 0.04 or 0.12,
+				Thickness = open and 1.5 or 1,
+			}),
+		}),
+		Menu = open and e("Frame", {
+			BackgroundColor3 = Color3.fromRGB(13, 22, 38),
+			BackgroundTransparency = 0.02,
+			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			Position = UDim2.fromOffset(0, 40),
+			Size = UDim2.new(1, 0, 0, 130),
+			ZIndex = (props.zIndex or 24) + 6,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
+			}),
+			Stroke = e("UIStroke", {
+				Color = accent,
+				Transparency = 0.1,
+				Thickness = 1,
+			}),
+			Options = e("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = (props.zIndex or 24) + 7,
+			}, optionChildren),
+		}) or nil,
+	})
+end
+
+local function crewInventoryControls(props)
+	local openDropdown, setOpenDropdown = React.useState(nil)
+	local accent = INVENTORY_UI.GoldHighlight
+	local mobile = isMobileViewport()
+	local buttonSize = mobile and UDim2.new(0.5, -5, 0, 34) or UDim2.fromOffset(150, 34)
+	local controlsZIndex = 20
+
+	local function toggleDropdown(dropdownKey)
+		setOpenDropdown(if openDropdown == dropdownKey then nil else dropdownKey)
+	end
+
+	local function selectSortMode(nextValue)
+		setOpenDropdown(nil)
+		if props.onSortModeChanged then
+			props.onSortModeChanged(nextValue)
+		end
+	end
+
+	local function selectVariantFilter(nextValue)
+		setOpenDropdown(nil)
+		if props.onVariantFilterChanged then
+			props.onVariantFilterChanged(nextValue)
+		end
+	end
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		ClipsDescendants = false,
+		Position = UDim2.fromOffset(14, 12),
+		Size = UDim2.new(1, -28, 0, 34),
+		ZIndex = controlsZIndex,
+	}, {
+		Dismiss = openDropdown and e("TextButton", {
+			AutoButtonColor = false,
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(-14, -12),
+			Size = UDim2.new(1, 28, 0, 720),
+			Text = "",
+			ZIndex = controlsZIndex,
+			[React.Event.Activated] = function()
+				setOpenDropdown(nil)
+			end,
+		}) or nil,
+		Buttons = e("Frame", {
+			BackgroundTransparency = 1,
+			ClipsDescendants = false,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = controlsZIndex + 2,
+		}, {
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				HorizontalAlignment = Enum.HorizontalAlignment.Right,
+				Padding = UDim.new(0, 10),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				VerticalAlignment = Enum.VerticalAlignment.Top,
+			}),
+			Sort = e(crewDropdownControl, {
+				label = "Sort",
+				dropdownKey = "Sort",
+				options = CREW_SORT_OPTIONS,
+				selectedValue = props.sortMode or "Default",
+				layoutOrder = 1,
+				size = buttonSize,
+				openDropdown = openDropdown,
+				accentColor = accent,
+				zIndex = controlsZIndex + 3,
+				onToggle = toggleDropdown,
+				onSelected = selectSortMode,
+			}),
+			Variant = e(crewDropdownControl, {
+				label = "Variant",
+				dropdownKey = "Variant",
+				options = CREW_VARIANT_FILTER_OPTIONS,
+				selectedValue = props.variantFilter or "All",
+				layoutOrder = 2,
+				size = buttonSize,
+				openDropdown = openDropdown,
+				accentColor = accent,
+				zIndex = controlsZIndex + 3,
+				onToggle = toggleDropdown,
+				onSelected = selectVariantFilter,
+			}),
+		}),
+	})
+end
+
 local function captainsLogRow(props)
 	local entry = props.entry or {}
 	local accent = entry.accentColor or PALETTE.Sea
@@ -3114,7 +3547,7 @@ local function captainsLogRow(props)
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.new(1, -18, 16 / 88, 0),
 			Size = UDim2.fromOffset(150, 14),
-			Text = "Making",
+			Text = "Crew Income",
 			TextColor3 = PALETTE.Muted,
 			TextSize = 11,
 			TextXAlignment = Enum.TextXAlignment.Right,
@@ -3376,7 +3809,7 @@ local function crewManagementRow(props)
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.new(1, -18, 0, 14),
 			Size = UDim2.fromOffset(160, 14),
-			Text = if entry.isPlaced then "Making" else "Status",
+			Text = if entry.isPlaced then "Crew Income" else "Status",
 			TextColor3 = PALETTE.Muted,
 			TextSize = 11,
 			TextXAlignment = Enum.TextXAlignment.Right,
@@ -4112,6 +4545,8 @@ local function App(props)
 			captainLogPlural
 		)
 	end
+	local captainLogIncomePerSecond = captainLogData.totalIncomePerSecond
+	local captainLogHasIncomeRate = captainLogIncomePerSecond ~= nil
 	local crewManagementFilteredCount = math.max(0, math.floor(tonumber(crewManagementData.filteredCount) or 0))
 	local crewManagementTotalCount = math.max(0, math.floor(tonumber(crewManagementData.totalCount) or 0))
 	local crewManagementQuery = tostring(props.query or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -4207,6 +4642,7 @@ local function App(props)
 	if props.isOpen then
 		local showingCrewInventoryCategory = showingInventory and tostring(props.activeCategory or "") == "CrewMembers"
 		local crewGridLayout = showingCrewInventoryCategory and getCrewInventoryGridLayout() or nil
+		local inventoryGridTop = showingCrewInventoryCategory and 58 or 14
 		local gridChildren = {
 			Grid = e("UIGridLayout", {
 				CellPadding = crewGridLayout and crewGridLayout.cellPadding or UDim2.fromOffset(10, 10),
@@ -4809,7 +5245,9 @@ local function App(props)
 								Font = Enum.Font.GothamBold,
 								Position = UDim2.new(1, -16, 10 / 58, 0),
 								Size = UDim2.fromOffset(180, 14),
-								Text = "All Placed Crewmates",
+								Text = if captainLogHasIncomeRate
+									then "Total Crew Beli/s"
+									else "All Placed Crewmates",
 								TextColor3 = PALETTE.Muted,
 								TextSize = 11,
 								TextXAlignment = Enum.TextXAlignment.Right,
@@ -4821,7 +5259,9 @@ local function App(props)
 								Font = Enum.Font.Cartoon,
 								Position = UDim2.new(1, -16, 22 / 58, 0),
 								Size = UDim2.fromOffset(180, 26),
-								Text = tostring((props.captainLog and props.captainLog.placedCount) or 0),
+								Text = if captainLogHasIncomeRate
+									then formatRateNumber(captainLogIncomePerSecond or 0)
+									else tostring((props.captainLog and props.captainLog.placedCount) or 0),
 								TextColor3 = activeAccent,
 								TextSize = 28,
 								TextStrokeTransparency = 0.56,
@@ -4904,15 +5344,22 @@ local function App(props)
 							data = props.crewManagement,
 							onFleetShieldAction = props.onFleetShieldAction,
 						}) or nil,
+						CrewInventoryControls = showingCrewInventoryCategory and e(crewInventoryControls, {
+							sortMode = props.crewSortMode,
+							variantFilter = props.crewVariantFilter,
+							accentColor = activeAccent,
+							onSortModeChanged = props.onCrewSortModeChanged,
+							onVariantFilterChanged = props.onCrewVariantFilterChanged,
+						}) or nil,
 						Grid = showingInventory and e("ScrollingFrame", {
 							AutomaticCanvasSize = Enum.AutomaticSize.Y,
 							BackgroundTransparency = 1,
 							BorderSizePixel = 0,
 							CanvasSize = UDim2.new(),
-							Position = UDim2.fromOffset(14, 14),
+							Position = UDim2.fromOffset(14, inventoryGridTop),
 							ScrollBarImageColor3 = INVENTORY_UI.GoldBase,
 							ScrollBarThickness = 7,
-							Size = UDim2.new(1, -28, 1, -28),
+							Size = UDim2.new(1, -28, 1, -(inventoryGridTop + 14)),
 							ZIndex = 8,
 						}, gridChildren),
 						LogList = showingCaptainLog and e("ScrollingFrame", {
@@ -5061,6 +5508,21 @@ local function App(props)
 				onConfirm = props.onConfirmChestOpen,
 				onDismiss = props.onDismissChestOpen,
 				onShowDropRates = props.onShowChestDropRates,
+			}),
+		})
+	end
+
+	if props.crewSellConfirmPrompt then
+		appChildren.CrewSellConfirmPrompt = e("ScreenGui", {
+			DisplayOrder = 525,
+			IgnoreGuiInset = true,
+			ResetOnSpawn = false,
+			ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		}, {
+			Prompt = e(crewSellConfirmPrompt, {
+				prompt = props.crewSellConfirmPrompt,
+				onConfirm = props.onConfirmCrewSell,
+				onDismiss = props.onDismissCrewSell,
 			}),
 		})
 	end

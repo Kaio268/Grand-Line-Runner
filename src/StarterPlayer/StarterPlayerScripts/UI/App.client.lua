@@ -460,6 +460,9 @@ local INCOME_STATUS_METADATA_RETRY_SECONDS = 3
 local INCOME_STATUS_SNAPSHOT_FALLBACK_CACHE_SECONDS = 1
 local INCOME_STATUS_SNAPSHOT_REFRESH_SECONDS = 1
 local shipUpgradeModal = nil
+ClientRuntime.CrewInventoryFeedback = {
+	SellPrompt = nil,
+}
 local MODAL_INPUT_SINK_ACTION = "ReactShipUpgradeModalInputSink"
 local MODAL_BLOCKED_INPUTS = {
 	Enum.UserInputType.MouseButton1,
@@ -491,7 +494,7 @@ local function sinkModalInput()
 end
 
 local function updateModalInputCapture()
-	local modalOpen = shipUpgradeModal ~= nil
+	local modalOpen = shipUpgradeModal ~= nil or ClientRuntime.CrewInventoryFeedback.SellPrompt ~= nil
 	if modalOpen and not modalInputSinkBound then
 		ContextActionService:BindActionAtPriority(
 			MODAL_INPUT_SINK_ACTION,
@@ -512,6 +515,8 @@ local uiState = {
 	activeView = "Inventory",
 	activeCategory = "Chests",
 	query = "",
+	crewSortMode = "Default",
+	crewVariantFilter = "All",
 }
 local chestOpenPrompt = nil
 local chestDropRatesPrompt = nil
@@ -1552,6 +1557,185 @@ local function compareInventoryKeys(a, b)
 	end
 
 	return tostring(a) < tostring(b)
+end
+
+do
+	local Feedback = ClientRuntime.CrewInventoryFeedback
+	local SORT_MODES = {
+		Default = true,
+		IncomeDesc = true,
+		IncomeAsc = true,
+		RarityVariant = true,
+	}
+	local VARIANT_FILTERS = {
+		All = true,
+		Normal = true,
+		Golden = true,
+		Diamond = true,
+	}
+	local VARIANT_ORDER = {
+		Normal = 1,
+		Golden = 2,
+		Diamond = 3,
+	}
+
+	local function firstNonEmptyText(...)
+		for index = 1, select("#", ...) do
+			local value = tostring(select(index, ...) or "")
+			if value ~= "" then
+				return value
+			end
+		end
+		return ""
+	end
+
+	function Feedback.SanitizeSortMode(sortMode)
+		local normalized = tostring(sortMode or "Default")
+		if SORT_MODES[normalized] == true then
+			return normalized
+		end
+		return "Default"
+	end
+
+	function Feedback.SanitizeVariantFilter(variantFilter)
+		local normalized = tostring(variantFilter or "All")
+		if VARIANT_FILTERS[normalized] == true then
+			return normalized
+		end
+		return "All"
+	end
+
+	function Feedback.IsBlockingModalOpen()
+		return shipUpgradeModal ~= nil or Feedback.SellPrompt ~= nil
+	end
+
+	function Feedback.GetDetails(entry)
+		if typeof(entry) == "table" and typeof(entry.crewDetails) == "table" then
+			return entry.crewDetails
+		end
+		return nil
+	end
+
+	function Feedback.GetState(entry)
+		if typeof(entry) ~= "table" then
+			return nil
+		end
+		local key = tostring(entry.key or "")
+		if key ~= "" then
+			return itemState[key]
+		end
+		return nil
+	end
+
+	function Feedback.GetVariant(entry)
+		local details = Feedback.GetDetails(entry)
+		local state = Feedback.GetState(entry)
+		local rawVariant = firstNonEmptyText(
+			entry and entry.variant,
+			details and details.Variant,
+			details and details.variant,
+			entry and entry.variantDisplayName,
+			details and details.VariantDisplayName,
+			details and details.variantDisplayName,
+			entry and entry.variantTag,
+			details and details.VariantTag,
+			details and details.variantTag,
+			state and state.variant
+		)
+		return CrewIncomeBalance.NormalizeVariant(rawVariant)
+	end
+
+	function Feedback.GetIncome(entry)
+		local details = Feedback.GetDetails(entry)
+		local state = Feedback.GetState(entry)
+		local crewInfo = entry and getCrewInfo(entry.name) or nil
+		return math.max(0, tonumber(
+			details and (details.Income or details.income)
+				or entry and (entry.Income or entry.income)
+				or state and (state.Income or state.income)
+				or crewInfo and crewInfo.Income
+				or 0
+		) or 0)
+	end
+
+	function Feedback.GetSellValue(entry)
+		local details = Feedback.GetDetails(entry)
+		return tonumber(
+			details and (details.SellValue or details.sellValue)
+				or entry and (entry.SellValue or entry.sellValue)
+				or 0
+		)
+	end
+
+	function Feedback.GetRarity(entry)
+		local details = Feedback.GetDetails(entry)
+		local state = Feedback.GetState(entry)
+		return firstNonEmptyText(
+			details and details.Rarity,
+			details and details.rarity,
+			entry and (entry.Rarity or entry.rarity),
+			state and state.rarity,
+			entry and getRarityLabel(CREW_ITEM_KIND, entry.name, state)
+		)
+	end
+
+	function Feedback.GetRarityRank(entry)
+		return RARITY_ORDER[Feedback.GetRarity(entry)] or 0
+	end
+
+	function Feedback.MatchesVariantFilter(entry, variantFilter)
+		local filter = Feedback.SanitizeVariantFilter(variantFilter)
+		if filter == "All" then
+			return true
+		end
+		return Feedback.GetVariant(entry) == filter
+	end
+
+	function Feedback.SortEntries(entries, sortMode)
+		local mode = Feedback.SanitizeSortMode(sortMode)
+		if mode == "Default" then
+			return
+		end
+
+		local defaultOrderByKey = {}
+		for index, entry in ipairs(entries) do
+			defaultOrderByKey[tostring(entry.key or index)] = index
+		end
+
+		table.sort(entries, function(a, b)
+			if mode == "IncomeDesc" or mode == "IncomeAsc" then
+				local incomeA = Feedback.GetIncome(a)
+				local incomeB = Feedback.GetIncome(b)
+				if incomeA ~= incomeB then
+					if mode == "IncomeAsc" then
+						return incomeA < incomeB
+					end
+					return incomeA > incomeB
+				end
+			elseif mode == "RarityVariant" then
+				local rarityA = Feedback.GetRarityRank(a)
+				local rarityB = Feedback.GetRarityRank(b)
+				if rarityA ~= rarityB then
+					return rarityA > rarityB
+				end
+
+				local variantA = VARIANT_ORDER[Feedback.GetVariant(a)] or 0
+				local variantB = VARIANT_ORDER[Feedback.GetVariant(b)] or 0
+				if variantA ~= variantB then
+					return variantA > variantB
+				end
+
+				local incomeA = Feedback.GetIncome(a)
+				local incomeB = Feedback.GetIncome(b)
+				if incomeA ~= incomeB then
+					return incomeA > incomeB
+				end
+			end
+
+			return (defaultOrderByKey[tostring(a.key or "")] or math.huge)
+				< (defaultOrderByKey[tostring(b.key or "")] or math.huge)
+		end)
+	end
 end
 
 local function buildShipUpgradeGainLines(level, description, isMaxLevel)
@@ -3139,11 +3323,12 @@ local function buildRenderData()
 	end
 
 	local activeKeys
+	local showingCrewInventoryCategory = uiState.activeCategory == "CrewMembers"
 	if uiState.activeCategory == "DevilFruits" then
 		activeKeys = devilFruitList
 	elseif uiState.activeCategory == "Resources" then
 		activeKeys = resourceList
-	elseif uiState.activeCategory == "CrewMembers" then
+	elseif showingCrewInventoryCategory then
 		activeKeys = crewList
 	else
 		activeKeys = chestsList
@@ -3154,10 +3339,19 @@ local function buildRenderData()
 		local state = itemState[key]
 		if state then
 			local entry = buildEntry(key, state)
-			if ClientRuntime.Formatters.matchesQuery(entry, query) then
+			if
+				ClientRuntime.Formatters.matchesQuery(entry, query)
+				and (
+					not showingCrewInventoryCategory
+					or ClientRuntime.CrewInventoryFeedback.MatchesVariantFilter(entry, uiState.crewVariantFilter)
+				)
+			then
 				items[#items + 1] = entry
 			end
 		end
+	end
+	if showingCrewInventoryCategory then
+		ClientRuntime.CrewInventoryFeedback.SortEntries(items, uiState.crewSortMode)
 	end
 	local categories = {
 		{
@@ -3294,6 +3488,8 @@ local function buildRenderData()
 		filteredCount = #items,
 		totalCount = #activeKeys,
 		query = uiState.query,
+		crewSortMode = ClientRuntime.CrewInventoryFeedback.SanitizeSortMode(uiState.crewSortMode),
+		crewVariantFilter = ClientRuntime.CrewInventoryFeedback.SanitizeVariantFilter(uiState.crewVariantFilter),
 		shipUpgradeModal = shipUpgradeModal,
 	}
 end
@@ -3694,7 +3890,7 @@ local function bindRebirthSummaryTracking()
 end
 
 local function setInventoryOpen(isOpen)
-	if shipUpgradeModal ~= nil and isOpen ~= true then
+	if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() and isOpen ~= true then
 		return
 	end
 
@@ -3706,9 +3902,9 @@ local function setInventoryOpen(isOpen)
 	render()
 end
 
-local unregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
+ClientRuntime.UnregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
 	toggle = function()
-		if shipUpgradeModal ~= nil then
+		if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 			return
 		end
 		setInventoryOpen(not uiState.isOpen)
@@ -3790,7 +3986,7 @@ local function getCrewProtectionActionMessage(actionName, response, displayName)
 end
 
 local function requestCrewProtectionAction(actionName, instanceId, displayName)
-	if crewProtectionPending == true or shipUpgradeModal ~= nil then
+	if crewProtectionPending == true or ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 		return
 	end
 
@@ -3835,7 +4031,7 @@ end
 
 render = function()
 	local data = buildRenderData()
-	UiModalState.SetOpen("InventoryModal", uiState.isOpen or shipUpgradeModal ~= nil)
+	UiModalState.SetOpen("InventoryModal", uiState.isOpen or ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen())
 	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, uiState.isOpen == true)
 
 	root:render(ReactRoblox.createPortal(
@@ -3854,19 +4050,22 @@ render = function()
 			filteredCount = data.filteredCount,
 			totalCount = data.totalCount,
 			query = data.query,
+			crewSortMode = data.crewSortMode,
+			crewVariantFilter = data.crewVariantFilter,
 			shipUpgradeModal = data.shipUpgradeModal,
+			crewSellConfirmPrompt = ClientRuntime.CrewInventoryFeedback.SellPrompt,
 			chestOpenPrompt = chestOpenPrompt,
 			chestDropRatesPrompt = chestDropRatesPrompt,
 			toggleLayout = getToggleLayout(),
 			toggleIcon = getLegacyInventoryIcon(),
 			onToggle = function()
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				ReactModalRegistry.Toggle("Inventory")
 			end,
 			onSelectView = function(viewKey)
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				uiState.activeView = viewKey
@@ -3874,7 +4073,7 @@ render = function()
 				render()
 			end,
 			onSelectCategory = function(categoryKey)
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				uiState.activeCategory = categoryKey
@@ -3883,10 +4082,24 @@ render = function()
 				render()
 			end,
 			onQueryChanged = function(nextQuery)
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				uiState.query = nextQuery
+				render()
+			end,
+			onCrewSortModeChanged = function(nextSortMode)
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
+					return
+				end
+				uiState.crewSortMode = ClientRuntime.CrewInventoryFeedback.SanitizeSortMode(nextSortMode)
+				render()
+			end,
+			onCrewVariantFilterChanged = function(nextVariantFilter)
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
+					return
+				end
+				uiState.crewVariantFilter = ClientRuntime.CrewInventoryFeedback.SanitizeVariantFilter(nextVariantFilter)
 				render()
 			end,
 			onFleetShieldAction = function(actionName)
@@ -3905,7 +4118,7 @@ render = function()
 				requestCrewProtectionAction("ApplyPermanentSlot", entry.instanceId, entry.displayName)
 			end,
 			onToggleTitle = function(entry)
-				if shipUpgradeModal ~= nil or typeof(entry) ~= "table" then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() or typeof(entry) ~= "table" then
 					return
 				end
 
@@ -3939,7 +4152,7 @@ render = function()
 				remote:FireServer(entry.isEquipped and "" or titleId)
 			end,
 			onActivateHotbarItem = function(entry)
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				if entry and entry.kind ~= "Resource" then
@@ -3947,7 +4160,7 @@ render = function()
 				end
 			end,
 			onActivateItem = function(entry)
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				if entry and entry.kind == "Chest" then
@@ -3966,11 +4179,15 @@ render = function()
 				end
 			end,
 			onCrewAction = function(entry, action)
-				if shipUpgradeModal ~= nil then
+				if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 					return
 				end
 				if entry and isCrewItemKind(entry.kind) then
-					requestCrewEntryAction(entry, action)
+					if tostring(action or "") == "Sell" then
+						ClientRuntime.CrewInventoryFeedback.OpenSellPrompt(entry)
+					else
+						requestCrewEntryAction(entry, action)
+					end
 				end
 			end,
 			onChestOpenAmountChanged = function(nextAmount)
@@ -4010,6 +4227,24 @@ render = function()
 			end,
 			onDismissShipUpgradeModal = function()
 				shipUpgradeModal = nil
+				updateModalInputCapture()
+				render()
+			end,
+			onConfirmCrewSell = function()
+				if not ClientRuntime.CrewInventoryFeedback.SellPrompt then
+					return
+				end
+				local prompt = ClientRuntime.CrewInventoryFeedback.SellPrompt
+				ClientRuntime.CrewInventoryFeedback.SellPrompt = nil
+				updateModalInputCapture()
+				render()
+				requestCrewEntryAction(prompt.entry or {
+					instanceId = prompt.instanceId,
+					quickSlotIndex = prompt.quickSlotIndex,
+				}, "Sell")
+			end,
+			onDismissCrewSell = function()
+				ClientRuntime.CrewInventoryFeedback.SellPrompt = nil
 				updateModalInputCapture()
 				render()
 			end,
@@ -4175,6 +4410,26 @@ local function getEntryInstanceId(entry)
 	end
 
 	return ""
+end
+
+function ClientRuntime.CrewInventoryFeedback.OpenSellPrompt(entry)
+	local instanceId = getEntryInstanceId(entry)
+	if instanceId == "" then
+		warn("[InventoryUI] Crew sell blocked: missing exact instance id.")
+		return
+	end
+
+	ClientRuntime.CrewInventoryFeedback.SellPrompt = {
+		entry = entry,
+		instanceId = instanceId,
+		quickSlotIndex = tonumber(entry.quickSlotIndex),
+		displayName = tostring(entry.displayName or entry.name or "Crewmate"),
+		rarity = ClientRuntime.CrewInventoryFeedback.GetRarity(entry),
+		variant = ClientRuntime.CrewInventoryFeedback.GetVariant(entry),
+		sellValue = ClientRuntime.CrewInventoryFeedback.GetSellValue(entry),
+	}
+	updateModalInputCapture()
+	render()
 end
 
 requestCrewEntryAction = function(entry, action)
@@ -4459,7 +4714,7 @@ if ClientRuntime.ShipUpgradeResultRemote and ClientRuntime.ShipUpgradeResultRemo
 			return
 		end
 
-		if shipUpgradeModal ~= nil then
+		if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
 			return
 		end
 
@@ -4514,7 +4769,7 @@ stopObservingState = MetaClient.ObserveState(function(state)
 end)
 
 trackConnection(UserInputService.InputBegan, function(input, gameProcessed)
-	if shipUpgradeModal ~= nil or gameProcessed or UserInputService:GetFocusedTextBox() then
+	if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() or gameProcessed or UserInputService:GetFocusedTextBox() then
 		return
 	end
 
@@ -4593,7 +4848,10 @@ task.defer(scheduleRender)
 script.Destroying:Connect(function()
 	destroyed = true
 	UiModalState.SetOpen("InventoryModal", false)
-	unregisterInventoryModal()
+	if ClientRuntime.UnregisterInventoryModal then
+		ClientRuntime.UnregisterInventoryModal()
+		ClientRuntime.UnregisterInventoryModal = nil
+	end
 	player:SetAttribute(INVENTORY_MENU_OPEN_ATTRIBUTE, false)
 	if modalInputSinkBound then
 		ContextActionService:UnbindAction(MODAL_INPUT_SINK_ACTION)

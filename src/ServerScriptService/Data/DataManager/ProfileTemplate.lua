@@ -99,6 +99,7 @@ local ProfileTemplate = {
 	Titles = {
 		Unlocked = {},
 		Equipped = "",
+		Progress = {},
 	},
 
 	FoodInventory = {
