@@ -181,6 +181,7 @@ local ProtectionRuntime = require(
 		:WaitForChild("ProtectionRuntime")
 )
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local GameSounds = require(Modules:WaitForChild("GameSounds"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 WaveHazardVisuals.ValidateWaveAssets("WaveClient")
 
@@ -1212,6 +1213,10 @@ local SHARED_WAVE_VISUAL_DECAY_DELAY = 0.12
 local SHARED_WAVE_VISUAL_SNAP_DISTANCE = 90
 local SHARED_WAVE_VISUAL_REBUILD_DELAY = 0.05
 local SHARED_WAVE_DIAGNOSTICS_INTERVAL = 2
+local WAVE_SOUND_VOLUME = 0.7
+local WAVE_SOUND_ROLLOFF_MIN_DISTANCE = 45
+local WAVE_SOUND_ROLLOFF_MAX_DISTANCE = 450
+local WAVE_SOUND_ROLLOFF_MODE = Enum.RollOffMode.Linear
 
 local localWaveVisualsFolder = nil
 local sharedHazardVisualSmoothers = {}
@@ -1273,6 +1278,76 @@ local function getLocalWaveVisualsFolder()
 	folder.Parent = workspace
 	localWaveVisualsFolder = folder
 	return folder
+end
+
+local function getSoundParentPart(root)
+	if not root then
+		return nil
+	end
+	if root:IsA("BasePart") then
+		return root
+	end
+	if root:IsA("Model") then
+		return root.PrimaryPart or root:FindFirstChildWhichIsA("BasePart", true)
+	end
+	return nil
+end
+
+local function startWaveLoopOnInstance(root)
+	local parentPart = getSoundParentPart(root)
+	if not parentPart then
+		return nil
+	end
+
+	return GameSounds.PlayOnInstance(GameSounds.Ids.Hazards.Wave, parentPart, {
+		Name = "WaveLoop",
+		Volume = WAVE_SOUND_VOLUME,
+		Looped = true,
+		RollOffMaxDistance = WAVE_SOUND_ROLLOFF_MAX_DISTANCE,
+		RollOffMinDistance = WAVE_SOUND_ROLLOFF_MIN_DISTANCE,
+		RollOffMode = WAVE_SOUND_ROLLOFF_MODE,
+	})
+end
+
+local function stopWaveLoop(sound, soundAnchor)
+	if sound and sound.Parent then
+		sound:Stop()
+		sound:Destroy()
+	end
+	if soundAnchor and soundAnchor.Parent then
+		soundAnchor:Destroy()
+	end
+end
+
+local function ensureWaveLoopAnchor(controller)
+	if not controller or controller.WaveLoopSound then
+		return
+	end
+
+	local pivot = controller.CurrentCFrame or getPivot(controller.Hazard)
+	local sound, soundAnchor = GameSounds.PlayAtPosition(GameSounds.Ids.Hazards.Wave, pivot.Position, {
+		Name = "WaveLoop",
+		Volume = WAVE_SOUND_VOLUME,
+		Looped = true,
+		RollOffMaxDistance = WAVE_SOUND_ROLLOFF_MAX_DISTANCE,
+		RollOffMinDistance = WAVE_SOUND_ROLLOFF_MIN_DISTANCE,
+		RollOffMode = WAVE_SOUND_ROLLOFF_MODE,
+		Parent = getLocalWaveVisualsFolder(),
+		AnchorName = tostring(controller.Hazard.Name) .. "_WaveLoopAnchor",
+	})
+	controller.WaveLoopSound = sound
+	controller.WaveLoopAnchor = soundAnchor
+end
+
+local function updateWaveLoopAnchor(controller)
+	if not controller then
+		return
+	end
+	ensureWaveLoopAnchor(controller)
+	local soundAnchor = controller.WaveLoopAnchor
+	if soundAnchor and soundAnchor.Parent and controller.CurrentCFrame then
+		soundAnchor.CFrame = CFrame.new(controller.CurrentCFrame.Position)
+	end
 end
 
 local function getSharedHazardHitboxPart(hazard)
@@ -1409,7 +1484,7 @@ local function setLocalVisualVisible(root, isVisible)
 end
 
 local function createSharedHazardVisualSmoother(hazard)
-	if not useSharedHazards or not hazard or sharedHazardVisualSmoothers[hazard] then
+	if not useSharedHazards or not hazard or sharedHazardVisualSmoothers[hazard] or not isWaveMinimapHazard(hazard) then
 		return sharedHazardVisualSmoothers[hazard]
 	end
 
@@ -1458,6 +1533,10 @@ local function createSharedHazardVisualSmoother(hazard)
 				entry.Clone:Destroy()
 			end
 		end
+
+		stopWaveLoop(self.WaveLoopSound, self.WaveLoopAnchor)
+		self.WaveLoopSound = nil
+		self.WaveLoopAnchor = nil
 
 		if self.VisualRoot and self.VisualRoot.Parent then
 			self.VisualRoot:Destroy()
@@ -1814,6 +1893,7 @@ local function createSharedHazardVisualSmoother(hazard)
 					setPivot(self.VisualRoot, self.CurrentCFrame)
 				end
 			end
+			updateWaveLoopAnchor(self)
 			return
 		end
 
@@ -1851,6 +1931,7 @@ local function createSharedHazardVisualSmoother(hazard)
 				setPivot(entry.Clone, self.CurrentCFrame * entry.Offset)
 			end
 		end
+		updateWaveLoopAnchor(self)
 	end
 
 	table.insert(controller.Connections, hazard.ChildAdded:Connect(function(child)
@@ -1951,6 +2032,10 @@ local function hookSharedHazardKillOnTouch(hazard)
 end
 
 local function attachSharedHazard(hazard)
+	if not isWaveMinimapHazard(hazard) then
+		return
+	end
+
 	hookSharedHazardKillOnTouch(hazard)
 	createSharedHazardVisualSmoother(hazard)
 end
@@ -2054,6 +2139,7 @@ local function spawnWave(entry)
 		end
 
 		setPivot(clone, startCF)
+		local waveLoopSound = startWaveLoopOnInstance(movePart or clone)
 
 		local speed = tonumber(entry.Info.Speed) or 50
 		if speed <= 0 then
@@ -2108,6 +2194,7 @@ local function spawnWave(entry)
 			tween.Completed:Connect(function()
 				waveTry("spawnWave completed:" .. tostring(entry.Name), function()
 					freezeController:Destroy()
+					stopWaveLoop(waveLoopSound)
 					if clone.Parent then
 						clone:Destroy()
 					end
@@ -2251,6 +2338,7 @@ local function spawnWave(entry)
 					alpha:Destroy()
 				end
 				freezeController:Destroy()
+				stopWaveLoop(waveLoopSound)
 				if clone.Parent then
 					clone:Destroy()
 				end

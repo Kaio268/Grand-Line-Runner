@@ -13,6 +13,7 @@ local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local SpawnPartsConfig = require(Modules:WaitForChild("Configs"):WaitForChild("SpawnParts"))
+local GameSounds = require(Modules:WaitForChild("GameSounds"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
@@ -1547,6 +1548,23 @@ local function damagePlayersInside(controller)
 	end
 end
 
+local function getControllerSoundPosition(controller)
+	if not controller then
+		return nil
+	end
+	if controller.Hitbox and controller.Hitbox.Parent then
+		return controller.Hitbox.Position
+	end
+	if controller.Visual and controller.Visual.Parent then
+		if controller.Visual:IsA("Model") then
+			return controller.Visual:GetPivot().Position
+		elseif controller.Visual:IsA("BasePart") then
+			return controller.Visual.Position
+		end
+	end
+	return nil
+end
+
 local function runDeckSpike(controller, options)
 	controller.Activated = true
 	options = if typeof(options) == "table" then options else nil
@@ -1567,6 +1585,12 @@ local function runDeckSpike(controller, options)
 	end
 
 	controller.Active = true
+	GameSounds.PlayAtPosition(GameSounds.Ids.Hazards.Trap, getControllerSoundPosition(controller), {
+		Name = "SpikeTrapTrigger",
+		Volume = 0.9,
+		RollOffMaxDistance = 120,
+		Lifetime = 5,
+	})
 	tweenVisual(controller, controller.ExtendedCFrame, CONFIG.ThrustTime, Enum.EasingDirection.Out)
 	damagePlayersInside(controller)
 

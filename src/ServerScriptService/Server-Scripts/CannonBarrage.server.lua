@@ -11,6 +11,7 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Configs:WaitForChild("BiomeAreas"))
 local StudioAssetResolver = require(Modules:WaitForChild("StudioAssetResolver"))
 local HazardDebugConstants = require(Modules:WaitForChild("Debug"):WaitForChild("HazardDebugConstants"))
+local GameSounds = require(Modules:WaitForChild("GameSounds"))
 local HazardProtection = require(
 	ServerScriptService:WaitForChild("Modules")
 		:WaitForChild("DevilFruits")
@@ -1018,6 +1019,14 @@ local function playImpactVfx(position, shot)
 end
 
 local function makeExplosion(position, shot)
+	GameSounds.PlayAtPosition(GameSounds.Ids.Hazards.CannonExplosion, position, {
+		Name = "CannonExplosion",
+		Volume = 1,
+		RollOffMaxDistance = 220,
+		RollOffMinDistance = 20,
+		Lifetime = 6,
+		Parent = hazardsFolder,
+	})
 	playImpactVfx(position, shot)
 end
 

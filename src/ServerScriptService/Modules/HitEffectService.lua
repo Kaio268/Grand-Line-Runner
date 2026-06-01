@@ -22,16 +22,19 @@ local DamageProtection = require(
 		:WaitForChild("DamageProtection")
 )
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
+local GameSounds = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameSounds"))
 
 local HitEffectService = {}
 
 local activeStatesByPlayer = {}
+local lastDebuffSoundAtByPlayer = setmetatable({}, { __mode = "k" })
 local started = false
 local sliceServiceCache = nil
 local crewInteractionCache = nil
 local temporaryRagdollServiceCache = nil
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local DIRECT_KNOCKBACK_OWNER_RESTORE_DELAY = 0.35
+local DEBUFF_SOUND_COOLDOWN = 0.75
 
 local function hasCarriedCrewMember(player)
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
@@ -210,6 +213,26 @@ local function applyKnockback(rootPart, knockbackVector, restoreOwner)
 	end
 end
 
+local function playDebuffSound(player, rootPart, options)
+	if not player or not rootPart or options.PlayDebuffSound == false then
+		return
+	end
+
+	local now = os.clock()
+	if now - (lastDebuffSoundAtByPlayer[player] or 0) < DEBUFF_SOUND_COOLDOWN then
+		return
+	end
+
+	lastDebuffSoundAtByPlayer[player] = now
+	local position = if typeof(options.DebuffSoundPosition) == "Vector3" then options.DebuffSoundPosition else rootPart.Position
+	GameSounds.PlayAtPosition(GameSounds.Ids.Hazards.Debuff, position, {
+		Name = "DebuffApplied",
+		Volume = 0.85,
+		RollOffMaxDistance = 110,
+		Lifetime = 5,
+	})
+end
+
 local function forceDropCarriedItems(player, dropPosition, effectName)
 	local droppedAny = false
 	local dropResponse = nil
@@ -371,6 +394,7 @@ function HitEffectService.ApplyEffect(target, effectName, options)
 	if duration > 0 then
 		activeStatesByPlayer[target] = state
 		setEffectAttributes(target, effectName, untilTime, movement)
+		playDebuffSound(targetPlayer, rootPart, options)
 	end
 
 	if options.RagdollJoints == true then

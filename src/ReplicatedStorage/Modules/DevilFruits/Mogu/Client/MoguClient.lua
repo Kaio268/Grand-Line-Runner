@@ -18,6 +18,7 @@ local MoguVfxController = require(
 local MoguBurrowShared = require(
 	Modules:WaitForChild("DevilFruits"):WaitForChild("Mogu"):WaitForChild("Shared"):WaitForChild("MoguBurrowShared")
 )
+local GameSounds = require(Modules:WaitForChild("GameSounds"))
 
 local MoguClient = {}
 MoguClient.__index = MoguClient
@@ -769,6 +770,80 @@ end
 local function getRootPart(player)
 	local character = getCharacter(player)
 	return character and character:FindFirstChild("HumanoidRootPart") or nil
+end
+
+local function getBurrowSoundPosition(targetPlayer, burrowState, fallbackPosition)
+	if burrowState and typeof(burrowState.SurfaceRootPosition) == "Vector3" then
+		return burrowState.SurfaceRootPosition
+	end
+	local rootPart = getRootPart(targetPlayer)
+	if rootPart then
+		return rootPart.Position
+	end
+	return if typeof(fallbackPosition) == "Vector3" then fallbackPosition else nil
+end
+
+local function playBurrowOneShot(targetPlayer, burrowState, soundId, soundName, fallbackPosition)
+	local position = getBurrowSoundPosition(targetPlayer, burrowState, fallbackPosition)
+	GameSounds.PlayAtPosition(soundId, position, {
+		Name = soundName,
+		Volume = 0.85,
+		RollOffMaxDistance = 125,
+		Lifetime = 5,
+	})
+end
+
+local function stopBurrowLoopSound(burrowState)
+	if type(burrowState) ~= "table" then
+		return
+	end
+
+	local sound = burrowState.BurrowLoopSound
+	local anchor = burrowState.BurrowLoopAnchor
+	burrowState.BurrowLoopSound = nil
+	burrowState.BurrowLoopAnchor = nil
+	if sound and sound.Parent then
+		sound:Stop()
+	end
+	if anchor and anchor.Parent then
+		anchor:Destroy()
+	elseif sound and sound.Parent then
+		sound:Destroy()
+	end
+end
+
+local function startBurrowLoopSound(targetPlayer, burrowState, fallbackPosition)
+	if type(burrowState) ~= "table" or burrowState.BurrowLoopSound then
+		return
+	end
+
+	local position = getBurrowSoundPosition(targetPlayer, burrowState, fallbackPosition)
+	local sound, anchor = GameSounds.PlayAtPosition(GameSounds.Ids.Mogu.BurrowLoop, position, {
+		Name = "MoguBurrowLoop",
+		Volume = 0.7,
+		Looped = true,
+		RollOffMaxDistance = 120,
+	})
+	if sound then
+		burrowState.BurrowLoopSound = sound
+		burrowState.BurrowLoopAnchor = anchor
+	end
+end
+
+local function updateBurrowLoopSound(targetPlayer, burrowState)
+	if type(burrowState) ~= "table" then
+		return
+	end
+
+	local anchor = burrowState.BurrowLoopAnchor
+	if not (anchor and anchor.Parent) then
+		return
+	end
+
+	local position = getBurrowSoundPosition(targetPlayer, burrowState)
+	if typeof(position) == "Vector3" then
+		anchor.CFrame = CFrame.new(position)
+	end
 end
 
 local function getGroundEffectPosition(position)
@@ -2254,6 +2329,7 @@ function MoguClient:TriggerBurrowMovementCue(targetPlayer, burrowState, startPos
 	end
 
 	burrowState.MovementCueTriggered = true
+	startBurrowLoopSound(targetPlayer, burrowState, startPosition)
 	if targetPlayer == self.player then
 		self:ReleaseStartupMovementLock(burrowState, "movement_cue")
 	end
@@ -3371,6 +3447,7 @@ function MoguClient:StartBurrow(targetPlayer, payload)
 
 	self.burrowStates[targetPlayer] = burrowState
 	self:AttachBurrowLifecycleCleanup(targetPlayer, burrowState)
+	playBurrowOneShot(targetPlayer, burrowState, GameSounds.Ids.Mogu.BurrowStart, "MoguBurrowStart", startPosition)
 	logInfo(
 		"state transition player=%s <nil> -> %s reason=start_authorized",
 		targetPlayer.Name,
@@ -3463,6 +3540,7 @@ function MoguClient:FinishResolve(targetPlayer, burrowState, reason)
 	end
 	clearBurrowCueState(burrowState)
 	clearBurrowLifecycleState(burrowState)
+	stopBurrowLoopSound(burrowState)
 	self:SetBurrowStatePhase(targetPlayer, burrowState, STATE_FINISHED, reason or "resolve_cleanup")
 	self:ClearConceal(targetPlayer)
 	if targetPlayer == self.player then
@@ -3665,6 +3743,14 @@ function MoguClient:StopBurrow(targetPlayer, payload)
 
 		burrowState.ResolveRevealPending = false
 		burrowState.ResolveRevealed = true
+		stopBurrowLoopSound(burrowState)
+		playBurrowOneShot(
+			targetPlayer,
+			burrowState,
+			GameSounds.Ids.Mogu.BurrowEnd,
+			"MoguBurrowEnd",
+			resolveAnimationPosition or resolveVfxPosition or clampedResolvePosition
+		)
 		local visualRestored = self:RevealConcealedCharacter(targetPlayer)
 		self:SnapVisualBurrowOffset(targetPlayer)
 		self:ClearVisualBurrowOffset(targetPlayer, true, visualRiseDuration)
@@ -4156,6 +4242,7 @@ function MoguClient:UpdateTrailState(targetPlayer, burrowState, now, abilityConf
 		or not burrowState.MovementCueTriggered
 		or now < burrowState.LastTrailAt + burrowState.TrailInterval
 	then
+		updateBurrowLoopSound(targetPlayer, burrowState)
 		return
 	end
 
@@ -4166,6 +4253,7 @@ function MoguClient:UpdateTrailState(targetPlayer, burrowState, now, abilityConf
 
 	abilityConfig = abilityConfig or getAbilityConfig()
 	burrowState.LastTrailAt = now
+	updateBurrowLoopSound(targetPlayer, burrowState)
 	local trailPosition = if typeof(burrowState.SurfaceRootPosition) == "Vector3"
 		then burrowState.SurfaceRootPosition
 		else rootPart.Position
@@ -4295,6 +4383,7 @@ function MoguClient:HandleCharacterRemoving()
 	for targetPlayer in pairs(self.burrowStates) do
 		clearBurrowCueState(self.burrowStates[targetPlayer])
 		clearBurrowLifecycleState(self.burrowStates[targetPlayer])
+		stopBurrowLoopSound(self.burrowStates[targetPlayer])
 		self.animationController:StopAnimation(self.burrowStates[targetPlayer].AnimationState, "character_removing")
 		self.burrowStates[targetPlayer] = nil
 		self:ClearVisualBurrowOffset(targetPlayer, false)
@@ -4328,6 +4417,7 @@ function MoguClient:HandlePlayerRemoving(leavingPlayer)
 	end
 	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	clearBurrowLifecycleState(self.burrowStates[leavingPlayer])
+	stopBurrowLoopSound(self.burrowStates[leavingPlayer])
 	self.animationController:StopAnimation(self.burrowStates[leavingPlayer] and self.burrowStates[leavingPlayer].AnimationState, "player_removing")
 	self.burrowStates[leavingPlayer] = nil
 	self:ClearVisualBurrowOffset(leavingPlayer, false)
