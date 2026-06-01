@@ -83,7 +83,9 @@ local function resolveCanonicalCrewMemberData(model, st)
 
 	local crewMemberId = normalizeCarriedAttribute(info and info.CrewMemberId)
 		or normalizeCarriedAttribute(model and model:GetAttribute("CrewMemberId"))
-	local displayName = normalizeCarriedAttribute(info and (info.DisplayName or info.CrewMemberName or info.Name))
+	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, info)
+	local displayName = normalizeCarriedAttribute(displayInfo.DisplayName)
+		or normalizeCarriedAttribute(info and (info.DisplayName or info.CrewMemberName or info.Name))
 		or normalizeCarriedAttribute(model and model:GetAttribute("CrewMemberDisplayName"))
 		or crewMemberId
 
@@ -511,74 +513,6 @@ maintainHeldCarry = function(st, model)
 	return true
 end
 
-local VariantOrder = { "Normal", "Golden", "Diamond" }
-local VariantPrefix = {
-	Normal = "",
-	Golden = "Golden ",
-	Diamond = "Diamond ",
-}
-
-do
-	local ok, cfg = pcall(function()
-		return CrewCatalog.GetVariantConfig()
-	end)
-	if ok and cfg and typeof(cfg) == "table" then
-		if type(cfg.Order) == "table" then
-			VariantOrder = cfg.Order
-		end
-		if type(cfg.Versions) == "table" then
-			for k, v in pairs(cfg.Versions) do
-				if typeof(v) == "table" then
-					VariantPrefix[k] = tostring(v.Prefix or VariantPrefix[k] or "")
-				end
-			end
-		end
-	end
-end
-
-local function startsWith(s, pref)
-	return s:sub(1, #pref) == pref
-end
-
-local function detectVariant(text)
-	text = tostring(text or "")
-	for _, v in ipairs(VariantOrder) do
-		if v ~= "Normal" then
-			local pref = tostring(VariantPrefix[v] or (v .. " "))
-			if pref ~= "" and startsWith(text, pref) then
-				return v
-			end
-			local alt = v .. " "
-			if startsWith(text, alt) then
-				return v
-			end
-		end
-	end
-	return "Normal"
-end
-
-local function stripVariantPrefix(text, variantKey)
-	text = tostring(text or "")
-	if not variantKey or variantKey == "Normal" then
-		return text
-	end
-	local pref = tostring(VariantPrefix[variantKey] or (variantKey .. " "))
-	if pref ~= "" and startsWith(text, pref) then
-		local out = text:sub(#pref + 1)
-		if out ~= "" then
-			return out
-		end
-	end
-	local alt = variantKey .. " "
-	if startsWith(text, alt) then
-		local out = text:sub(#alt + 1)
-		if out ~= "" then
-			return out
-		end
-	end
-	return text
-end
-
 local function ensurePrompt(primary)
 	local p = primary:FindFirstChildOfClass("ProximityPrompt")
 	if not p then
@@ -849,13 +783,16 @@ end
 
 local function reserveCrewCarrySlot(player, model, st, crewMemberData)
 	if carrySlotAdapter and typeof(carrySlotAdapter.AddCrewMember) == "function" then
+		local info = getCrewMemberInfoFromState(st)
 		local carryData = {
 			CrewMemberId = crewMemberData and crewMemberData.CrewMemberId or nil,
 			DisplayName = crewMemberData and crewMemberData.DisplayName or nil,
 			Image = crewMemberData and crewMemberData.Image or nil,
 			CrewName = resolveCrewMemberStorageName(model, st, crewMemberData),
 			CrewStorageName = resolveCrewMemberStorageName(model, st, crewMemberData),
-			Rarity = st and st.Rarity or nil,
+			Rarity = info and info.Rarity or st and st.Rarity or nil,
+			CanonicalRarity = info and info.Rarity or nil,
+			Variant = info and info.Variant or nil,
 			Physical = true,
 		}
 
@@ -1407,14 +1344,9 @@ function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
 	local prompt = ensurePrompt(primary)
 
 	local rawName = tostring(st.Entry and st.Entry.Info and (st.Entry.Info.Name or st.Entry.Info.DisplayName) or st.Entry and st.Entry.Id or model.Name)
-	local rawRarity = tostring(st.Entry and st.Entry.Info and st.Entry.Info.Rarity or st.Rarity or "")
-
-	local variantKey = detectVariant(rawName)
-	if variantKey == "Normal" then
-		variantKey = detectVariant(rawRarity)
-	end
-
-	local displayName = stripVariantPrefix(rawName, variantKey)
+	local crewMemberId = tostring(st.Entry and (st.Entry.Id or (st.Entry.Info and st.Entry.Info.CrewMemberId)) or model.Name)
+	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, st.Entry and st.Entry.Info)
+	local displayName = tostring(displayInfo.DisplayName or rawName)
 
 	prompt.ActionText = displayName
 	prompt.ObjectText = "Hold to Get"

@@ -41,7 +41,9 @@ function Module.Install(ctx)
 		if canonicalName == "" then
 			return nil
 		end
-		local variantKey, baseName = getVariantAndBaseName(canonicalName)
+		local displayInfo = CrewCatalog.GetDisplayInfo(canonicalName)
+		local variantKey = tostring(displayInfo.Variant or "Normal")
+		local baseName = tostring(displayInfo.BaseId or canonicalName)
 
 		local registryTemplate = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 		if registryTemplate and registryTemplate:IsA("Model") then
@@ -217,7 +219,9 @@ function Module.Install(ctx)
 			if candidateName == "" then
 				continue
 			end
-			local variantKey, baseName = getVariantAndBaseName(candidateName)
+			local displayInfo = CrewCatalog.GetDisplayInfo(candidateName)
+			local variantKey = tostring(displayInfo.Variant or "Normal")
+			local baseName = tostring(displayInfo.BaseId or candidateName)
 			local template, usedVariant = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 			local finalVariant = usedVariant or variantKey or "Normal"
 			local info = CrewRegistry.GetOrBuildVariantInfo(baseName, finalVariant)
@@ -271,7 +275,8 @@ function Module.Install(ctx)
 	local function getLegacyStandStatusDisplayName(player, crewMemberName)
 		local resolved = resolveCrewMemberRecord(player, crewMemberName)
 		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
-		return info and tostring(info.Name or info.DisplayName or resolved and resolved.CanonicalName or crewMemberName)
+		local displayInfo = CrewCatalog.GetDisplayInfo(resolved and resolved.CanonicalName or crewMemberName, info)
+		return info and tostring(displayInfo.DisplayName or info.Name or info.DisplayName or resolved and resolved.CanonicalName or crewMemberName)
 			or tostring(crewMemberName)
 	end
 

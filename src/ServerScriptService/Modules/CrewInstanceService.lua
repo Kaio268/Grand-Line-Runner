@@ -5,7 +5,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local VariantCfg = CrewCatalog.GetVariantConfig()
-local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewInventoryDerivedCache = require(script.Parent:WaitForChild("CrewInventoryDerivedCache"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(script.Parent:WaitForChild("CrewStandIncomeAuthority"))
@@ -23,6 +22,7 @@ local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
 local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
 local INVENTORY_AUTHORITY_SNAPSHOT_VERSION = 1
 local CAPTAIN_SLOT_KEY = "Captain"
+local HOTBAR_STORAGE_FULL_REASON = "crew_hotbar_and_storage_full"
 -- Function names still carry legacy terms for callers, but normal gameplay now
 -- reads and writes CrewMemberInventory. Legacy inventory roots are repair mirrors.
 
@@ -238,7 +238,9 @@ local function buildMetadata(storageName, entry)
 		return nil
 	end
 
-	local variantKey, baseName = getVariantAndBaseName(canonicalId)
+	local displayInfo = CrewCatalog.GetDisplayInfo(canonicalId, entry)
+	local variantKey = tostring(displayInfo.Variant or "Normal")
+	local baseName = tostring(displayInfo.BaseId or "")
 	if variantKey == "" then
 		variantKey = "Normal"
 	end
@@ -271,7 +273,7 @@ local function buildMetadata(storageName, entry)
 		Render = render,
 		GoldenRender = goldenRender,
 		DiamondRender = diamondRender,
-		DisplayName = firstNonEmpty(info.DisplayName, info.Name, entry.DisplayName, canonicalId, requestedStorageName),
+		DisplayName = firstNonEmpty(displayInfo.DisplayName, info.DisplayName, info.Name, entry.DisplayName, canonicalId, requestedStorageName),
 		CrewMemberId = firstNonEmpty(info.CrewMemberId, canonicalId, requestedStorageName),
 		RealCharacterName = firstNonEmpty(info.RealCharacterName),
 		Arc = firstNonEmpty(info.Arc),
@@ -280,13 +282,19 @@ local function buildMetadata(storageName, entry)
 end
 
 local function buildIncomeRollFields(rarity, variant, instanceData)
-	local baseIncomeRoll = CrewIncomeBalance.GetOrRollBaseIncome(
+	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
 		rarity,
-		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil,
+		typeof(instanceData) == "table" and instanceData.IncomeRollVersion or nil
 	)
-	local income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant)
+	local income = CrewIncomeBalance.ComputeIncome(
+		baseIncomeRoll,
+		variant,
+		typeof(instanceData) == "table" and instanceData.Level or nil,
+		rarity
+	)
 
-	return baseIncomeRoll, income, CrewIncomeBalance.GetIncomeRollVersion()
+	return baseIncomeRoll, income, incomeRollVersion
 end
 
 local function getInstanceCrewKey(instanceData)
@@ -393,7 +401,7 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		Render = firstNonEmpty(metadata.Render, instanceData.Render),
 		GoldenRender = firstNonEmpty(metadata.GoldenRender, instanceData.GoldenRender, metadata.Render),
 		DiamondRender = firstNonEmpty(metadata.DiamondRender, instanceData.DiamondRender, metadata.Render),
-		Level = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		Level = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 		CurrentXP = math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0))),
 		TotalXP = math.max(0, math.floor(coerceNumber(instanceData.TotalXP, 0))),
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
@@ -404,6 +412,9 @@ local function normalizeInstanceData(instanceId, instanceData, fallbackStorageNa
 		TutorialReward = instanceData.TutorialReward == true,
 		TutorialToken = tostring(instanceData.TutorialToken or ""),
 		GrandLineRushStarter = instanceData.GrandLineRushStarter == true,
+		Overflow = instanceData.Overflow == true,
+		OverflowSource = tostring(instanceData.OverflowSource or ""),
+		OverflowedAt = coerceNumber(instanceData.OverflowedAt, 0),
 		CrewMemberId = metadata.CrewMemberId,
 		DisplayName = metadata.DisplayName,
 		ModelName = metadata.ModelName,
@@ -1096,7 +1107,7 @@ local function getStoredLegacyProgress(player, storageName)
 				or tostring(instanceData.LegacyStorageName or "") == tostring(storageName or "")
 			)
 		then
-			return math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+			return CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 				math.max(0, math.floor(coerceNumber(instanceData.CurrentXP, 0)))
 		end
 	end
@@ -1403,18 +1414,67 @@ local function buildStandAssignmentRow(instanceId, instanceData)
 		CrewMemberName = getInstanceCrewKey(instanceData),
 		CrewMemberInstanceId = tostring(instanceId),
 		IncomeToCollect = 0,
-		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 	}
 end
 
-local function validateQuickSlotCapacityForInventory(player, crewMemberInventory)
+local function notifyHotbarAndStorageFull(player)
+	if typeof(CrewQuickSlotService.NotifyHotbarAndStorageFull) == "function" then
+		CrewQuickSlotService.NotifyHotbarAndStorageFull(player)
+	else
+		CrewQuickSlotService.NotifyFull(player)
+	end
+end
+
+local function chooseReleasedCrewDestination(player, crewMemberInventory, storageAmount, quickSlotOptions)
+	local quickSlotIndex, quickSlotResult = nil, nil
+	if typeof(CrewQuickSlotService.GetFirstAvailableSlot) == "function" then
+		quickSlotIndex, quickSlotResult = CrewQuickSlotService.GetFirstAvailableSlot(player, quickSlotOptions)
+	end
+
+	local storageOk, occupiedInstances, storageSlots, maxSlots, storageReason =
+		CrewQuickSlotService.CanStoreInstances(player, crewMemberInventory, storageAmount)
 	local unlockedSlots = CrewQuickSlotService.GetUnlockedSlots(player)
-	local maxSlots = CrewQuickSlotService.GetMaxSlots(player)
-	local storageSlots = if typeof(CrewQuickSlotService.GetInventoryStorageSlots) == "function"
-		then CrewQuickSlotService.GetInventoryStorageSlots(player)
-		else unlockedSlots
-	local occupiedStacks = #CrewInventoryStacks.BuildAvailableStacks(crewMemberInventory)
-	return occupiedStacks <= storageSlots, occupiedStacks, storageSlots, math.max(maxSlots, storageSlots)
+	local result = {
+		QuickSlotIndex = quickSlotIndex,
+		QuickSlotReason = tostring(quickSlotResult and quickSlotResult.Reason or ""),
+		QuickSlotUnlocked = tonumber(quickSlotResult and quickSlotResult.UnlockedSlots) or unlockedSlots,
+		QuickSlotMax = tonumber(quickSlotResult and quickSlotResult.MaxSlots) or CrewQuickSlotService.GetMaxSlots(player),
+		StorageCanFit = storageOk == true,
+		StorageOccupied = tonumber(occupiedInstances) or 0,
+		StorageSlots = tonumber(storageSlots) or 0,
+		StorageMax = tonumber(maxSlots) or 0,
+		StorageReason = tostring(storageReason or ""),
+	}
+
+	if quickSlotIndex ~= nil then
+		result.Destination = "Hotbar"
+		result.Reason = "ok"
+	elseif storageOk == true then
+		result.Destination = "Stored"
+		result.Reason = "ok"
+	else
+		result.Destination = "Blocked"
+		result.Reason = HOTBAR_STORAGE_FULL_REASON
+	end
+
+	return result
+end
+
+local function applyReleasedCrewDestinationDebug(debugInfo, destination)
+	if typeof(debugInfo) ~= "table" or typeof(destination) ~= "table" then
+		return
+	end
+
+	debugInfo.ReleaseDestination = tostring(destination.Destination or "")
+	debugInfo.ReleaseDestinationReason = tostring(destination.Reason or "")
+	debugInfo.ReleaseQuickSlotIndex = tonumber(destination.QuickSlotIndex)
+	debugInfo.QuickSlotOccupied = tonumber(destination.StorageOccupied) or 0
+	debugInfo.QuickSlotUnlocked = tonumber(destination.QuickSlotUnlocked) or 0
+	debugInfo.QuickSlotMax = tonumber(destination.QuickSlotMax) or 0
+	debugInfo.StorageCanFit = destination.StorageCanFit == true
+	debugInfo.StorageSlots = tonumber(destination.StorageSlots) or 0
+	debugInfo.StorageReason = tostring(destination.StorageReason or "")
 end
 
 function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
@@ -1446,7 +1506,7 @@ function Module.AssignTutorialRewardInstanceToStand(player, standName, filters)
 	local standOk, standReason = updateStandData(player, standName, {
 		CrewMemberName = getInstanceCrewKey(instanceData),
 		CrewMemberInstanceId = tostring(instanceId),
-		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 	}, "stand_place_tutorial_reward")
 	if standOk ~= true then
 		instanceData.AssignedStand = ""
@@ -1620,6 +1680,77 @@ function Module.GetInstance(player, instanceRef)
 	return nil, nil, crewMemberInventory
 end
 
+function Module.GetInstanceState(player, instanceRef)
+	local instanceId, instanceData, crewMemberInventory = Module.GetInstance(player, instanceRef)
+	if not instanceData then
+		return "Missing", nil, nil, crewMemberInventory
+	end
+
+	local assignedStand = tostring(instanceData.AssignedStand or "")
+	if assignedStand ~= "" then
+		return "Placed", instanceId, instanceData, crewMemberInventory, assignedStand
+	end
+
+	local assignedSlot = if typeof(CrewQuickSlotService.GetInstanceSlot) == "function"
+		then CrewQuickSlotService.GetInstanceSlot(player, instanceId)
+		else nil
+	if assignedSlot ~= nil then
+		return "Equipped", instanceId, instanceData, crewMemberInventory, assignedSlot
+	end
+
+	if instanceData.Overflow == true then
+		return "Overflow", instanceId, instanceData, crewMemberInventory
+	end
+
+	return "Stored", instanceId, instanceData, crewMemberInventory
+end
+
+function Module.CountStoredInstances(player, crewMemberInventory)
+	return CrewQuickSlotService.CountStoredInstances(player, crewMemberInventory or getCrewMemberInventory(player))
+end
+
+function Module.CanStoreInstances(player, crewMemberInventory, amount)
+	return CrewQuickSlotService.CanStoreInstances(player, crewMemberInventory or getCrewMemberInventory(player), amount)
+end
+
+function Module.RemoveStoredInstanceById(player, instanceRef, options)
+	options = if typeof(options) == "table" then options else {}
+	local ready, readyReason = ensureInventoryAuthorityReady(player, "inventory_remove_exact")
+	if ready ~= true then
+		return nil, nil, tostring(readyReason or "inventory_authority_not_ready")
+	end
+
+	local state, instanceId, instanceData, crewMemberInventory = Module.GetInstanceState(player, instanceRef)
+	if state == "Missing" then
+		return nil, nil, "instance_missing"
+	end
+	if state ~= "Stored" then
+		return nil, nil, "instance_not_stored:" .. tostring(state)
+	end
+	if options.AllowProtectedTutorialReward ~= true and isProtectedTutorialReward(player, instanceData) then
+		return nil, nil, "protected_tutorial_reward"
+	end
+
+	crewMemberInventory.ById[tostring(instanceId)] = nil
+	for index = #crewMemberInventory.Order, 1, -1 do
+		if tostring(crewMemberInventory.Order[index]) == tostring(instanceId) then
+			table.remove(crewMemberInventory.Order, index)
+			break
+		end
+	end
+
+	local saved, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
+		SourcePath = tostring(options.SourcePath or "inventory_remove_exact"),
+	})
+	if saved ~= true then
+		return nil, nil, tostring(saveReason or "inventory_authority_save_failed")
+	end
+
+	syncAvailableCounts(player, crewMemberInventory)
+	refreshCrewMemberShadow(player, "inventory_remove_exact")
+	return tostring(instanceId), instanceData
+end
+
 function Module.ResolveProgressTarget(player, reference)
 	local instanceId, instanceData, crewMemberInventory = Module.GetInstance(player, reference)
 	if instanceData then
@@ -1692,8 +1823,21 @@ function Module.UpdateProgress(player, instanceId, level, currentXP, options)
 		})
 	end
 
-	instanceData.Level = math.max(1, math.floor(coerceNumber(level, instanceData.Level or 1)))
+	instanceData.Level = CrewIncomeBalance.NormalizeLevel(coerceNumber(level, instanceData.Level or 1))
 	instanceData.CurrentXP = math.max(0, math.floor(coerceNumber(currentXP, instanceData.CurrentXP or 0)))
+	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
+		instanceData.Rarity,
+		instanceData.BaseIncomeRoll,
+		instanceData.IncomeRollVersion
+	)
+	instanceData.BaseIncomeRoll = baseIncomeRoll
+	instanceData.Income = CrewIncomeBalance.ComputeIncome(
+		baseIncomeRoll,
+		instanceData.Variant,
+		instanceData.Level,
+		instanceData.Rarity
+	)
+	instanceData.IncomeRollVersion = incomeRollVersion
 	if options.TotalXP ~= nil then
 		instanceData.TotalXP = math.max(0, math.floor(coerceNumber(options.TotalXP, instanceData.TotalXP or 0)))
 	end
@@ -1839,7 +1983,7 @@ function Module.EnsureStandInstance(player, standName, fallbackStorageName)
 		updateStandData(player, standName, {
 			CrewMemberName = standStorageName,
 			CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
-			StandLevel = math.max(1, math.floor(coerceNumber(standData.StandLevel, 1))),
+			StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 		}, "stand_identity_repair")
 	end
 
@@ -1995,7 +2139,7 @@ function Module.ReconcileStandAssignment(player, standName)
 		updateStandData(player, standName, {
 			CrewMemberName = canonicalCrewMemberId,
 			CrewMemberInstanceId = assignedInstanceId,
-			StandLevel = math.max(1, math.floor(coerceNumber(assignedInstanceData.Level, 1))),
+			StandLevel = CrewIncomeBalance.NormalizeLevel(assignedInstanceData.Level),
 		}, "stand_identity_repair")
 		refreshCrewMemberShadow(player, "stand_identity_repair")
 	end
@@ -2007,7 +2151,7 @@ function Module.ReconcileStandAssignment(player, standName)
 	local standOk, standReason = updateStandData(player, standName, {
 		CrewMemberName = canonicalCrewMemberId,
 		CrewMemberInstanceId = assignedInstanceId,
-		StandLevel = math.max(1, math.floor(coerceNumber(assignedInstanceData.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(assignedInstanceData.Level),
 	}, "stand_assignment_reconcile")
 	if standOk ~= true then
 		assignedInstanceData.AssignedStand = ""
@@ -2050,58 +2194,16 @@ function Module.RepairCanonicalCrewState(player)
 end
 
 function Module.FindAvailableInstance(player, storageName)
-	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
-	if not info then
-		warnInvalidCrewIdentity("find_available_instance", storageName, player)
-		return nil, nil, getCrewMemberInventory(player)
-	end
-	Module.EnsureAvailableInstancesForStorage(player, storageName, 1)
-	local crewMemberInventory = getCrewMemberInventory(player)
-	for _, instanceId in ipairs(crewMemberInventory.Order) do
-		local instanceData = crewMemberInventory.ById[tostring(instanceId)]
-		if instanceData and getInstanceCrewKey(instanceData) == canonicalStorageName and instanceData.AssignedStand == "" then
-			return tostring(instanceId), instanceData, crewMemberInventory
-		end
-	end
-	return nil, nil, crewMemberInventory
+	warn(string.format(
+		"[CrewInstanceService] rejected legacy name-based crew lookup player=%s storage=%s",
+		player and player.Name or "unknown",
+		tostring(storageName)
+	))
+	return nil, nil, getCrewMemberInventory(player)
 end
 
-function Module.AssignAvailableInstanceToStand(player, storageName, standName)
-	standName = tostring(standName or "")
-	if standName == CAPTAIN_SLOT_KEY then
-		return nil, nil, "captain_slot_not_numeric_stand"
-	end
-
-	local instanceId, instanceData, crewMemberInventory = Module.FindAvailableInstance(player, storageName)
-	if not instanceData then
-		return nil, nil, "instance_unavailable"
-	end
-
-	local occupied, occupancyReason = getStandOccupancy(player, standName, crewMemberInventory)
-	if occupied then
-		return nil, nil, occupancyReason
-	end
-
-	instanceData.AssignedStand = tostring(standName)
-	local saveOk, saveReason = setInstanceData(player, crewMemberInventory, instanceId, instanceData)
-	if saveOk ~= true then
-		return nil, nil, tostring(saveReason or "assignment_save_failed")
-	end
-
-	local standOk, standReason = updateStandData(player, standName, {
-		CrewMemberName = getInstanceCrewKey(instanceData),
-		CrewMemberInstanceId = tostring(instanceId),
-		StandLevel = math.max(1, math.floor(coerceNumber(instanceData.Level, 1))),
-	}, "stand_place")
-	if standOk ~= true then
-		instanceData.AssignedStand = ""
-		setInstanceData(player, crewMemberInventory, instanceId, instanceData)
-		return nil, nil, tostring(standReason or "stand_income_write_failed")
-	end
-	syncAvailableCounts(player, crewMemberInventory)
-	refreshCrewMemberShadow(player, "stand_place")
-
-	return tostring(instanceId), crewMemberInventory.ById[tostring(instanceId)]
+function Module.AssignAvailableInstanceToStand(_player, _storageName, _standName)
+	return nil, nil, "exact_instance_required"
 end
 
 function Module.AssignInstanceToStand(player, instanceRef, standName, options)
@@ -2132,10 +2234,23 @@ function Module.AssignInstanceToStand(player, instanceRef, standName, options)
 	if tostring(instanceData.AssignedStand or "") ~= "" then
 		return nil, nil, "incoming_already_assigned"
 	end
+	if instanceData.Overflow == true then
+		return nil, nil, "incoming_instance_overflow"
+	end
 
 	local occupied, occupancyReason = getStandOccupancy(player, standName, crewMemberInventory)
 	if occupied then
 		return nil, nil, occupancyReason
+	end
+
+	local previousQuickSlot = if typeof(CrewQuickSlotService.GetInstanceSlot) == "function"
+		then CrewQuickSlotService.GetInstanceSlot(player, instanceId)
+		else nil
+	if previousQuickSlot ~= nil and typeof(CrewQuickSlotService.ClearAssignmentsForInstance) == "function" then
+		local clearOk, clearResult = CrewQuickSlotService.ClearAssignmentsForInstance(player, instanceId)
+		if clearOk ~= true then
+			return nil, nil, tostring(clearResult and clearResult.Reason or "quick_slot_clear_failed")
+		end
 	end
 
 	local originalInstanceData = cloneValue(instanceData)
@@ -2151,6 +2266,9 @@ function Module.AssignInstanceToStand(player, instanceRef, standName, options)
 	})
 	if saveOk ~= true then
 		crewMemberInventory.ById[tostring(instanceId)] = originalInstanceData
+		if previousQuickSlot ~= nil and typeof(CrewQuickSlotService.AssignInstanceToSlot) == "function" then
+			CrewQuickSlotService.AssignInstanceToSlot(player, instanceId, previousQuickSlot)
+		end
 		return nil, nil, tostring(saveReason or "assignment_save_failed")
 	end
 
@@ -2165,6 +2283,9 @@ function Module.AssignInstanceToStand(player, instanceRef, standName, options)
 		saveCrewMemberInventory(player, crewMemberInventory, {
 			SourcePath = "stand_place_exact_rollback",
 		})
+		if previousQuickSlot ~= nil and typeof(CrewQuickSlotService.AssignInstanceToSlot) == "function" then
+			CrewQuickSlotService.AssignInstanceToSlot(player, instanceId, previousQuickSlot)
+		end
 		return nil, nil, tostring(standReason or "stand_income_write_failed")
 	end
 
@@ -2223,6 +2344,9 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 	if tostring(incomingInstanceData.AssignedStand or "") ~= "" then
 		return failCrewSwitch(debugInfo, "incoming_already_assigned")
 	end
+	if incomingInstanceData.Overflow == true then
+		return failCrewSwitch(debugInfo, "incoming_instance_overflow")
+	end
 
 	local outgoingInstanceId, outgoingInstanceData, outgoingReason =
 		findExistingStandInstance(crewMemberInventory, standName, standData)
@@ -2238,6 +2362,21 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 		return failCrewSwitch(debugInfo, "incoming_already_assigned")
 	end
 
+	local previousQuickSlot = if typeof(CrewQuickSlotService.GetInstanceSlot) == "function"
+		then CrewQuickSlotService.GetInstanceSlot(player, incomingInstanceId)
+		else nil
+	if previousQuickSlot ~= nil and typeof(CrewQuickSlotService.ClearAssignmentsForInstance) == "function" then
+		local clearOk, clearResult = CrewQuickSlotService.ClearAssignmentsForInstance(player, incomingInstanceId)
+		if clearOk ~= true then
+			return failCrewSwitch(debugInfo, tostring(clearResult and clearResult.Reason or "quick_slot_clear_failed"))
+		end
+	end
+	local function restoreIncomingQuickSlot()
+		if previousQuickSlot ~= nil and typeof(CrewQuickSlotService.AssignInstanceToSlot) == "function" then
+			CrewQuickSlotService.AssignInstanceToSlot(player, incomingInstanceId, previousQuickSlot)
+		end
+	end
+
 	local finalInventory = cloneValue(crewMemberInventory)
 	local finalIncoming = cloneValue(incomingInstanceData)
 	local finalOutgoing = cloneValue(outgoingInstanceData)
@@ -2251,13 +2390,16 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 	finalInventory.ById[tostring(outgoingInstanceId)] = finalOutgoing
 	moveInstanceToFront(finalInventory, outgoingInstanceId)
 
-	local capacityOk, occupiedStacks, unlockedSlots, maxSlots = validateQuickSlotCapacityForInventory(player, finalInventory)
-	debugInfo.QuickSlotOccupied = occupiedStacks
-	debugInfo.QuickSlotUnlocked = unlockedSlots
-	debugInfo.QuickSlotMax = maxSlots
-	if capacityOk ~= true then
-		CrewQuickSlotService.NotifyFull(player)
-		return failCrewSwitch(debugInfo, "quick_slot_blocked")
+	local outgoingDestination = chooseReleasedCrewDestination(player, finalInventory, 0, {
+		IgnoreInstanceId = incomingInstanceId,
+	})
+	applyReleasedCrewDestinationDebug(debugInfo, outgoingDestination)
+	debugInfo.OutgoingDestination = tostring(outgoingDestination.Destination or "")
+	debugInfo.OutgoingQuickSlotIndex = tonumber(outgoingDestination.QuickSlotIndex)
+	if outgoingDestination.Destination == "Blocked" then
+		notifyHotbarAndStorageFull(player)
+		restoreIncomingQuickSlot()
+		return failCrewSwitch(debugInfo, HOTBAR_STORAGE_FULL_REASON)
 	end
 
 	local saveOk, saveReason = saveCrewMemberInventory(player, finalInventory, {
@@ -2266,7 +2408,31 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 	debugInfo.CommitSaveOk = saveOk == true
 	debugInfo.CommitSaveReason = tostring(saveReason or "")
 	if saveOk ~= true then
+		restoreIncomingQuickSlot()
 		return failCrewSwitch(debugInfo, "swap_commit_failed")
+	end
+
+	if outgoingDestination.Destination == "Hotbar" then
+		local assignOk, assignResult =
+			CrewQuickSlotService.AssignInstanceToSlot(player, outgoingInstanceId, outgoingDestination.QuickSlotIndex)
+		debugInfo.OutgoingQuickSlotAssignOk = assignOk == true
+		debugInfo.OutgoingQuickSlotAssignReason = tostring(assignResult and assignResult.Reason or "")
+		debugInfo.OutgoingQuickSlotIndex = tonumber(assignResult and assignResult.SlotIndex)
+			or tonumber(outgoingDestination.QuickSlotIndex)
+		if assignOk ~= true then
+			local rollbackOk, rollbackReason = saveCrewMemberInventory(player, crewMemberInventory, {
+				SourcePath = "stand_swap_quick_slot_rollback",
+			})
+			debugInfo.RollbackOk = rollbackOk == true
+			debugInfo.RollbackReason = tostring(rollbackReason or "")
+			CrewQuickSlotService.ClearAssignmentsForInstance(player, outgoingInstanceId)
+			restoreIncomingQuickSlot()
+			syncAvailableCounts(player, crewMemberInventory)
+			refreshCrewMemberShadow(player, "stand_swap_quick_slot_failed")
+			return failCrewSwitch(debugInfo, "quick_slot_assign_failed")
+		end
+	else
+		debugInfo.OutgoingQuickSlotAssignOk = false
 	end
 
 	local standOk, standReason = updateStandData(
@@ -2283,6 +2449,18 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 		})
 		debugInfo.RollbackOk = rollbackOk == true
 		debugInfo.RollbackReason = tostring(rollbackReason or "")
+		if outgoingDestination.Destination == "Hotbar" then
+			CrewQuickSlotService.ClearAssignmentsForInstance(player, outgoingInstanceId)
+		end
+		local standRestoreOk, standRestoreReason = updateStandData(
+			player,
+			standName,
+			buildStandAssignmentRow(outgoingInstanceId, outgoingInstanceData),
+			"stand_swap_rollback"
+		)
+		debugInfo.StandRestoreOk = standRestoreOk == true
+		debugInfo.StandRestoreReason = tostring(standRestoreReason or "")
+		restoreIncomingQuickSlot()
 		return failCrewSwitch(debugInfo, "swap_commit_failed")
 	end
 
@@ -2298,8 +2476,10 @@ function Module.SwapStandInstance(player, standName, incomingInstanceRef, option
 		{ "incomingStorage", getInstanceCrewKey(finalIncoming) },
 		{ "outgoingInstanceId", tostring(outgoingInstanceId) },
 		{ "outgoingStorage", getInstanceCrewKey(finalOutgoing) },
-		{ "quickOccupied", occupiedStacks },
-		{ "quickUnlocked", unlockedSlots },
+		{ "outgoingDestination", debugInfo.OutgoingDestination },
+		{ "outgoingQuickSlot", debugInfo.OutgoingQuickSlotIndex or "" },
+		{ "quickOccupied", debugInfo.QuickSlotOccupied },
+		{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
 	}))
 
 	return tostring(incomingInstanceId),
@@ -2374,57 +2554,42 @@ function Module.ReleaseStandInstance(player, standName, options)
 		return nil, nil, "no_instance_available", debugInfo
 	end
 
-	local canGain, occupiedSlots, unlockedSlots, maxSlots = CrewQuickSlotService.CanGainOrNotify(
-		player,
-		getInstanceCrewKey(instanceData),
-		1,
-		"ReleaseStandInstance:" .. standName
-	)
-	debugInfo.QuickSlotCanGain = canGain == true
-	debugInfo.QuickSlotOccupied = tonumber(occupiedSlots) or 0
-	debugInfo.QuickSlotUnlocked = tonumber(unlockedSlots) or 0
-	debugInfo.QuickSlotMax = tonumber(maxSlots) or 0
-	if not canGain then
-		local source = tostring(options.Source or "")
-		local expectedInstanceId = tostring(options.ExpectedInstanceId or "")
-		local allowCapacityBypass = options.AllowCapacityBypass == true
-			and source ~= ""
-			and expectedInstanceId ~= ""
-			and expectedInstanceId == tostring(instanceId)
-		debugInfo.AllowCapacityBypass = allowCapacityBypass == true
-		debugInfo.ExpectedInstanceId = expectedInstanceId
-		debugInfo.Source = source
-		if not allowCapacityBypass then
-			crewPickupDebug(formatCrewPickupDebugFields({
-				{ "event", "release_failed" },
-				{ "reason", "quick_slot_capacity" },
-				{ "player", debugInfo.PlayerName },
-				{ "userId", debugInfo.UserId },
-				{ "stand", standName },
-				{ "assignedName", debugInfo.AssignedCrewMemberName },
-				{ "instanceId", tostring(instanceId) },
-				{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
-				{ "legacyStorageName", debugInfo.LegacyStorageName },
-				{ "incomeBefore", debugInfo.IncomeBefore },
-				{ "quickOccupied", debugInfo.QuickSlotOccupied },
-				{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
-				{ "quickMax", debugInfo.QuickSlotMax },
-				{ "instanceExists", debugInfo.InstanceExistsInCrewInventory },
-				{ "playerOwnsInstance", debugInfo.PlayerOwnsInstance },
-				{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
-			}))
-			return nil, nil, "quick_slot_capacity", debugInfo
-		end
-	end
-
 	local _, _, releaseInventory = Module.GetInstance(player, instanceId)
 	if releaseInventory ~= nil then
 		crewMemberInventory = releaseInventory
 	end
 
-	instanceData.AssignedStand = ""
-	instanceData.LastReleasedAt = os.time()
-	crewMemberInventory.ById[tostring(instanceId)] = instanceData
+	local destination = chooseReleasedCrewDestination(player, crewMemberInventory, 1)
+	applyReleasedCrewDestinationDebug(debugInfo, destination)
+	if destination.Destination == "Blocked" then
+		notifyHotbarAndStorageFull(player)
+		crewPickupDebug(formatCrewPickupDebugFields({
+			{ "event", "release_failed" },
+			{ "reason", HOTBAR_STORAGE_FULL_REASON },
+			{ "player", debugInfo.PlayerName },
+			{ "userId", debugInfo.UserId },
+			{ "stand", standName },
+			{ "assignedName", debugInfo.AssignedCrewMemberName },
+			{ "instanceId", tostring(instanceId) },
+			{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+			{ "legacyStorageName", debugInfo.LegacyStorageName },
+			{ "incomeBefore", debugInfo.IncomeBefore },
+			{ "quickOccupied", debugInfo.QuickSlotOccupied },
+			{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
+			{ "quickMax", debugInfo.QuickSlotMax },
+			{ "storageSlots", debugInfo.StorageSlots },
+			{ "instanceExists", debugInfo.InstanceExistsInCrewInventory },
+			{ "playerOwnsInstance", debugInfo.PlayerOwnsInstance },
+			{ "placedTrackingRefs", debugInfo.AssignedStandRefs },
+		}))
+		return nil, nil, HOTBAR_STORAGE_FULL_REASON, debugInfo
+	end
+
+	local originalInstanceData = cloneValue(instanceData)
+	local releasedInstanceData = cloneValue(instanceData)
+	releasedInstanceData.AssignedStand = ""
+	releasedInstanceData.LastReleasedAt = os.time()
+	crewMemberInventory.ById[tostring(instanceId)] = releasedInstanceData
 	moveInstanceToFront(crewMemberInventory, instanceId)
 	local saveOk, saveReason = saveCrewMemberInventory(player, crewMemberInventory)
 	debugInfo.InventorySaveOk = saveOk == true
@@ -2438,7 +2603,7 @@ function Module.ReleaseStandInstance(player, standName, options)
 			{ "stand", standName },
 			{ "assignedName", debugInfo.AssignedCrewMemberName },
 			{ "releasedInstanceId", tostring(instanceId) },
-			{ "releasedStorage", tostring(instanceData.StorageName or "") },
+			{ "releasedStorage", tostring(releasedInstanceData.StorageName or "") },
 			{ "inventorySaveOk", debugInfo.InventorySaveOk },
 			{ "inventorySaveReason", debugInfo.InventorySaveReason },
 			{ "standClearOk", "" },
@@ -2451,8 +2616,7 @@ function Module.ReleaseStandInstance(player, standName, options)
 	debugInfo.StandClearOk = clearOk == true
 	debugInfo.StandClearReason = tostring(clearReason or "")
 	if clearOk ~= true then
-		instanceData.AssignedStand = standName
-		crewMemberInventory.ById[tostring(instanceId)] = instanceData
+		crewMemberInventory.ById[tostring(instanceId)] = originalInstanceData
 		local rollbackOk, rollbackReason = saveCrewMemberInventory(player, crewMemberInventory)
 		debugInfo.InventoryRollbackOk = rollbackOk == true
 		debugInfo.InventoryRollbackReason = tostring(rollbackReason or "")
@@ -2464,7 +2628,7 @@ function Module.ReleaseStandInstance(player, standName, options)
 			{ "stand", standName },
 			{ "assignedName", debugInfo.AssignedCrewMemberName },
 			{ "releasedInstanceId", tostring(instanceId) },
-			{ "releasedStorage", tostring(instanceData.StorageName or "") },
+			{ "releasedStorage", tostring(releasedInstanceData.StorageName or "") },
 			{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
 			{ "legacyStorageName", debugInfo.LegacyStorageName },
 			{ "incomeBefore", debugInfo.IncomeBefore },
@@ -2484,6 +2648,52 @@ function Module.ReleaseStandInstance(player, standName, options)
 		return nil, nil, "stand_clear_failed", debugInfo
 	end
 
+	if destination.Destination == "Hotbar" then
+		local assignOk, assignResult =
+			CrewQuickSlotService.AssignInstanceToSlot(player, instanceId, destination.QuickSlotIndex)
+		debugInfo.ReleaseQuickSlotAssignOk = assignOk == true
+		debugInfo.ReleaseQuickSlotAssignReason = tostring(assignResult and assignResult.Reason or "")
+		debugInfo.ReleaseQuickSlotIndex = tonumber(assignResult and assignResult.SlotIndex)
+			or tonumber(destination.QuickSlotIndex)
+		if assignOk ~= true then
+			CrewQuickSlotService.ClearAssignmentsForInstance(player, instanceId)
+			crewMemberInventory.ById[tostring(instanceId)] = originalInstanceData
+			local rollbackOk, rollbackReason = saveCrewMemberInventory(player, crewMemberInventory)
+			debugInfo.InventoryRollbackOk = rollbackOk == true
+			debugInfo.InventoryRollbackReason = tostring(rollbackReason or "")
+			local standRestoreOk, standRestoreReason = updateStandData(
+				player,
+				standName,
+				buildStandAssignmentRow(instanceId, originalInstanceData),
+				"stand_release_quick_slot_rollback"
+			)
+			debugInfo.StandRestoreOk = standRestoreOk == true
+			debugInfo.StandRestoreReason = tostring(standRestoreReason or "")
+			crewPickupDebug(formatCrewPickupDebugFields({
+				{ "event", "release_failed" },
+				{ "reason", "quick_slot_assign_failed" },
+				{ "player", debugInfo.PlayerName },
+				{ "userId", debugInfo.UserId },
+				{ "stand", standName },
+				{ "assignedName", debugInfo.AssignedCrewMemberName },
+				{ "releasedInstanceId", tostring(instanceId) },
+				{ "releasedStorage", tostring(releasedInstanceData.StorageName or "") },
+				{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
+				{ "legacyStorageName", debugInfo.LegacyStorageName },
+				{ "incomeBefore", debugInfo.IncomeBefore },
+				{ "quickSlotIndex", debugInfo.ReleaseQuickSlotIndex or "" },
+				{ "quickAssignReason", debugInfo.ReleaseQuickSlotAssignReason },
+				{ "inventoryRollbackOk", debugInfo.InventoryRollbackOk },
+				{ "standRestoreOk", debugInfo.StandRestoreOk },
+			}))
+			syncAvailableCounts(player, crewMemberInventory)
+			refreshCrewMemberShadow(player, "stand_release_quick_slot_failed")
+			return nil, nil, "quick_slot_assign_failed", debugInfo
+		end
+	else
+		debugInfo.ReleaseQuickSlotAssignOk = false
+	end
+
 	syncAvailableCounts(player, crewMemberInventory)
 	refreshCrewMemberShadow(player, "stand_release")
 
@@ -2495,10 +2705,12 @@ function Module.ReleaseStandInstance(player, standName, options)
 		{ "stand", standName },
 		{ "assignedName", debugInfo.AssignedCrewMemberName },
 		{ "releasedInstanceId", tostring(instanceId) },
-		{ "releasedStorage", tostring(instanceData.StorageName or "") },
+		{ "releasedStorage", tostring(releasedInstanceData.StorageName or "") },
 		{ "crewMemberInstanceId", debugInfo.CrewMemberInstanceId },
 		{ "legacyStorageName", debugInfo.LegacyStorageName },
 		{ "incomeBefore", debugInfo.IncomeBefore },
+		{ "destination", debugInfo.ReleaseDestination },
+		{ "quickSlotIndex", debugInfo.ReleaseQuickSlotIndex or "" },
 		{ "quickOccupied", debugInfo.QuickSlotOccupied },
 		{ "quickUnlocked", debugInfo.QuickSlotUnlocked },
 		{ "quickMax", debugInfo.QuickSlotMax },
@@ -2513,65 +2725,12 @@ function Module.ReleaseStandInstance(player, standName, options)
 end
 
 function Module.RemoveAvailableInstance(player, storageName)
-	local canonicalStorageName, info = resolveCanonicalCrewMemberId(storageName)
-	if not info then
-		warnInvalidCrewIdentity("inventory_remove", storageName, player)
-		return nil, nil, "unknown_crew_member_id"
-	end
-	local ready, readyReason = ensureInventoryAuthorityReady(player, "inventory_remove")
-	if ready ~= true then
-		warn(string.format(
-			"[CrewInstanceService] CrewMember inventory authority remove failed closed player=%s storage=%s reason=%s",
-			player and player.Name or "unknown",
-			tostring(storageName),
-			tostring(readyReason or "unknown")
-		))
-		return nil, nil, tostring(readyReason or "inventory_authority_not_ready")
-	end
-
-	Module.EnsureAvailableInstancesForStorage(player, storageName, 1)
-	local crewMemberInventory = getCrewMemberInventory(player)
-	local instanceId = nil
-	local instanceData = nil
-
-	for _, orderedInstanceId in ipairs(crewMemberInventory.Order) do
-		local candidate = crewMemberInventory.ById[tostring(orderedInstanceId)]
-		if candidate and getInstanceCrewKey(candidate) == canonicalStorageName and candidate.AssignedStand == "" then
-			if not isProtectedTutorialReward(player, candidate) then
-				instanceId = tostring(orderedInstanceId)
-				instanceData = candidate
-				break
-			end
-		end
-	end
-
-	if not instanceData then
-		return nil, nil
-	end
-
-	crewMemberInventory.ById[tostring(instanceId)] = nil
-	for index = #crewMemberInventory.Order, 1, -1 do
-		if tostring(crewMemberInventory.Order[index]) == tostring(instanceId) then
-			table.remove(crewMemberInventory.Order, index)
-			break
-		end
-	end
-
-	local saved, saveReason = saveCrewMemberInventory(player, crewMemberInventory, {
-		SourcePath = "inventory_remove",
-	})
-	if saved ~= true then
-		warn(string.format(
-			"[CrewInstanceService] CrewMember inventory authority remove save failed player=%s storage=%s reason=%s",
-			player and player.Name or "unknown",
-			tostring(storageName),
-			tostring(saveReason or "unknown")
-		))
-		return nil, nil, tostring(saveReason or "inventory_authority_save_failed")
-	end
-	syncAvailableCounts(player, crewMemberInventory)
-	refreshCrewMemberShadow(player, "inventory_remove")
-	return tostring(instanceId), instanceData
+	warn(string.format(
+		"[CrewInstanceService] rejected legacy name-based crew remove player=%s storage=%s",
+		player and player.Name or "unknown",
+		tostring(storageName)
+	))
+	return nil, nil, "exact_instance_required"
 end
 
 function Module.RemoveTutorialRewardInstances(player, options)

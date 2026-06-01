@@ -14,13 +14,13 @@ local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wai
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local GrandLineRushCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local CanonicalCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewInteraction = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Server"):WaitForChild("Crew"):WaitForChild("Interaction"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
-local StandIncomeMultipliers = require(ServerScriptService.Modules:WaitForChild("StandsMultiply"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 local TitleProgressService = require(ServerScriptService.Modules:WaitForChild("TitleProgressService"))
@@ -226,9 +226,22 @@ local function normalizeMaterialsTable(materials)
 	return materials
 end
 
-local function getCrewSummaryIncomePerSecond(crewData, mirrorData)
+local function getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
 	crewData = if typeof(crewData) == "table" then crewData else {}
 	mirrorData = if typeof(mirrorData) == "table" then mirrorData else {}
+
+	local baseIncomeRoll = tonumber(crewData.BaseIncomeRoll)
+	if baseIncomeRoll == nil then
+		baseIncomeRoll = tonumber(mirrorData.BaseIncomeRoll)
+	end
+	if baseIncomeRoll ~= nil and baseIncomeRoll > 0 then
+		return CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			crewData.Variant or mirrorData.Variant,
+			level,
+			crewData.Rarity or mirrorData.Rarity
+		)
+	end
 
 	local income = tonumber(crewData.Income)
 	if income == nil then
@@ -238,14 +251,9 @@ local function getCrewSummaryIncomePerSecond(crewData, mirrorData)
 	return math.max(0, income or 0)
 end
 
-local function getCrewSummaryLevelMultiplier(level)
-	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
-	return tonumber(StandIncomeMultipliers[tostring(safeLevel)]) or 1
-end
-
 local function getCrewSummaryIncomePerHour(crewData, mirrorData, level)
-	local incomePerSecond = getCrewSummaryIncomePerSecond(crewData, mirrorData)
-	return math.floor((incomePerSecond * getCrewSummaryLevelMultiplier(level) * 3600) + 0.5)
+	local incomePerSecond = getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
+	return math.floor((incomePerSecond * 3600) + 0.5)
 end
 
 local function getCrewXPRequiredForLevel(rarity, level)
@@ -294,15 +302,17 @@ local function getCrewSummaryDisplayName(crewData, mirrorData, storageName)
 	crewData = if typeof(crewData) == "table" then crewData else {}
 	mirrorData = if typeof(mirrorData) == "table" then mirrorData else {}
 
+	local displayInfo = CanonicalCrewCatalog.GetDisplayInfo(storageName, crewData)
 	local info = CanonicalCrewCatalog.GetInfoById(storageName)
 	return firstNonEmpty(
+		displayInfo.DisplayName,
+		info and info.DisplayName,
+		info and info.CrewMemberName,
+		info and info.Name,
 		crewData.DisplayName,
 		crewData.Name,
 		mirrorData.DisplayName,
 		mirrorData.Name,
-		info and info.DisplayName,
-		info and info.CrewMemberName,
-		info and info.Name,
 		storageName,
 		"Unnamed Crew"
 	)
@@ -354,8 +364,9 @@ local function buildCrewSummary(instanceId, crewData, mirrorData, options)
 	local currentXP = math.max(0, math.floor(getCrewSummaryNumber(crewData.CurrentXP, mirrorData.CurrentXP, 0)))
 	local totalXP = math.max(0, math.floor(getCrewSummaryNumber(crewData.TotalXP, mirrorData.TotalXP, 0)))
 	local rarity = firstNonEmpty(crewData.Rarity, mirrorData.Rarity, "Common")
+	local variant = firstNonEmpty(crewData.Variant, mirrorData.Variant, "Normal")
 	local baseIncomeRoll = math.max(0, math.floor(getCrewSummaryNumber(crewData.BaseIncomeRoll, mirrorData.BaseIncomeRoll, 0)))
-	local income = getCrewSummaryIncomePerSecond(crewData, mirrorData)
+	local income = getCrewSummaryIncomePerSecond(crewData, mirrorData, level)
 	local canonicalInstanceId = firstNonEmpty(options.CanonicalInstanceId, crewData.CanonicalInstanceId)
 	local legacyInstanceId = firstNonEmpty(options.LegacyInstanceId)
 
@@ -368,6 +379,7 @@ local function buildCrewSummary(instanceId, crewData, mirrorData, options)
 		StorageName = storageName,
 		CrewMemberId = firstNonEmpty(crewData.CrewMemberId, mirrorData.CrewMemberId, storageName),
 		Rarity = rarity,
+		Variant = variant,
 		Level = level,
 		CurrentXP = currentXP,
 		TotalXP = totalXP,
@@ -453,7 +465,11 @@ local function getRewardToolDisplay(reward)
 		return ChestUtils.GetDisplayName(reward)
 	end
 
-	return tostring(reward.CrewDisplayName or reward.DisplayName or reward.CrewName or "Crew Contract")
+	local displayInfo = CanonicalCrewCatalog.GetDisplayInfo(
+		reward.CrewMemberId or reward.CrewStorageName or reward.CrewName,
+		reward
+	)
+	return tostring(displayInfo.DisplayName or reward.CrewDisplayName or reward.DisplayName or reward.CrewName or "Crew Contract")
 end
 
 local function cloneRewardData(reward)
@@ -479,6 +495,7 @@ local function cloneRewardData(reward)
 		data.CrewDisplayName = reward.CrewDisplayName
 		data.CrewStorageName = reward.CrewStorageName
 		data.CrewMemberId = reward.CrewMemberId
+		data.Variant = reward.Variant
 	end
 
 	if typeof(reward.WorldDropPosition) == "Vector3" then
@@ -604,7 +621,12 @@ local function getCarryItemDisplayName(itemData)
 		return ChestUtils.GetDisplayName(data)
 	end
 
-	local displayName = itemData.DisplayName
+	local displayInfo = CanonicalCrewCatalog.GetDisplayInfo(
+		data.CrewMemberId or data.CrewStorageName or data.CrewName,
+		data
+	)
+	local displayName = displayInfo.DisplayName
+		or itemData.DisplayName
 		or data.DisplayName
 		or data.CrewDisplayName
 		or data.CrewName
@@ -1076,6 +1098,7 @@ local function ensureChestRewardsState(dataRoot)
 	end
 
 	dataRoot.ChestRewards.MythicKeys = math.max(0, tonumber(dataRoot.ChestRewards.MythicKeys) or 0)
+	ChestRewards.EnsureFruitPityState(dataRoot.ChestRewards)
 	return dataRoot.ChestRewards
 end
 
@@ -1743,6 +1766,7 @@ local function buildState(player, options)
 			current = chestRewardsState.MythicKeys,
 			threshold = ChestRewards.MythicKey.Threshold,
 		},
+		ChestRewards = chestRewardsState,
 		FoodInventory = {
 			Apple = tonumber(foodInventory.Apple) or 0,
 			Rice = tonumber(foodInventory.Rice) or 0,
@@ -1828,6 +1852,7 @@ local function installCarrySlotAdapter()
 					CrewMemberId = crewData.CrewMemberId,
 					Rarity = crewData.Rarity,
 					CanonicalRarity = crewData.CanonicalRarity,
+					Variant = crewData.Variant,
 					Image = crewData.Image,
 					Physical = crewData.Physical == true,
 					TutorialCrewMember = tutorialCrewMember,
@@ -1979,6 +2004,7 @@ local function grantCarrySlotReward(player, slot)
 			DisplayName = carriedReward.CrewDisplayName or carriedReward.DisplayName or carriedReward.CrewName,
 			StorageName = carriedReward.CrewStorageName,
 			CrewMemberId = carriedReward.CrewMemberId,
+			Variant = carriedReward.Variant,
 			Rarity = carriedReward.Rarity,
 			CanonicalRarity = carriedReward.CanonicalRarity,
 			DepthBand = carriedReward.DepthBand,
@@ -2040,6 +2066,43 @@ local function grantCarrySlotReward(player, slot)
 	end
 
 	return true, message, nil
+end
+
+local function storeHeldCrewMember(player, options)
+	options = if typeof(options) == "table" then options else {}
+	local runtime = getRuntime(player)
+	local slot = findCarrySlot(runtime, options.CarryId or options.SlotIndex)
+	if slot == nil then
+		return false, {
+			Reason = "no_carried_reward",
+		}
+	end
+	if slot.ItemType ~= "CrewMember" then
+		return false, {
+			Reason = "held_item_not_crewmate",
+		}
+	end
+
+	local carryId = tostring(slot.CarryId or "")
+	local slotIndex = tonumber(slot.SlotIndex)
+	local ok, message, reason = grantCarrySlotReward(player, slot)
+	if ok ~= true then
+		return false, {
+			Reason = tostring(reason or "store_held_failed"),
+		}
+	end
+
+	if slot.Data and slot.Data.Physical == true then
+		CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, carryId)
+	end
+	removeCarryItem(player, runtime, carryId)
+
+	return true, {
+		Action = "StoreHeld",
+		Message = message,
+		CarryId = carryId,
+		SlotIndex = slotIndex,
+	}
 end
 
 local function extractRun(player)
@@ -2639,10 +2702,20 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 	local duplicateCount = 0
 	local convertedChestCount = 0
 	local convertedChestCounts = {}
+	local autoConvertedChestCount = 0
+	local autoConvertedChestCounts = {}
 	local conversionBeli = 0
 	local mythicKeyCount = 0
+	local fruitPityProgress = nil
+	local fruitPityTriggers = {}
 
 	for _, result in ipairs(batchResults) do
+		if typeof(result.FruitPityProgress) == "table" then
+			fruitPityProgress = result.FruitPityProgress
+		end
+		if typeof(result.FruitPityTriggered) == "table" then
+			fruitPityTriggers[#fruitPityTriggers + 1] = result.FruitPityTriggered
+		end
 		if result.GrantedFruit then
 			grantedFruits[#grantedFruits + 1] = {
 				FruitKey = result.GrantedFruit,
@@ -2665,6 +2738,38 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		elseif result.ConversionRewardType == "MythicKey" then
 			mythicKeyCount += math.max(0, tonumber(result.ConversionRewardAmount) or 0)
 		end
+
+		if result.AutoConvertedMythicChest == true and typeof(result.GrantedChest) == "table" then
+			local grantedChest = result.GrantedChest
+			local displayName = tostring(grantedChest.displayName or "Mythic Devil Fruit Chest")
+			local inventoryName = tostring(grantedChest.inventoryName or displayName)
+			local chestKind = tostring(grantedChest.kind or "")
+			local tierName = tostring(grantedChest.tier or "")
+			local fruitRarity = tostring(grantedChest.fruitRarity or "")
+			local stableKey = table.concat({
+				chestKind,
+				inventoryName,
+				fruitRarity,
+				tierName,
+				displayName,
+			}, "|")
+			local autoConvertedEntry = autoConvertedChestCounts[stableKey]
+			if autoConvertedEntry == nil then
+				autoConvertedEntry = {
+					DisplayName = displayName,
+					InventoryName = inventoryName,
+					ChestKind = chestKind,
+					Tier = tierName,
+					FruitRarity = fruitRarity,
+					Rarity = if fruitRarity ~= "" then fruitRarity else tierName,
+					Amount = 0,
+				}
+				autoConvertedChestCounts[stableKey] = autoConvertedEntry
+			end
+
+			autoConvertedEntry.Amount += 1
+			autoConvertedChestCount += 1
+		end
 	end
 
 	local convertedChests = {}
@@ -2675,6 +2780,17 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		}
 	end
 	table.sort(convertedChests, function(a, b)
+		return tostring(a.DisplayName) < tostring(b.DisplayName)
+	end)
+
+	local autoConvertedChests = {}
+	for _, entry in pairs(autoConvertedChestCounts) do
+		autoConvertedChests[#autoConvertedChests + 1] = entry
+	end
+	table.sort(autoConvertedChests, function(a, b)
+		if tostring(a.DisplayName) == tostring(b.DisplayName) then
+			return tostring(a.InventoryName) < tostring(b.InventoryName)
+		end
 		return tostring(a.DisplayName) < tostring(b.DisplayName)
 	end)
 
@@ -2689,10 +2805,14 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		DuplicateCount = duplicateCount,
 		ConvertedChestCount = convertedChestCount,
 		ConvertedChests = convertedChests,
+		AutoConvertedChestCount = autoConvertedChestCount,
+		AutoConvertedChests = autoConvertedChests,
 		ConversionBeli = conversionBeli,
 		-- Legacy payload alias kept while older clients finish moving to Beli.
 		ConversionDoubloons = conversionBeli,
 		MythicKeyCount = mythicKeyCount,
+		FruitPityProgress = fruitPityProgress,
+		FruitPityTriggers = fruitPityTriggers,
 	}
 end
 
@@ -3249,6 +3369,17 @@ end
 
 function Service.RemoveCarryItem(player, slotIndexOrCarryId)
 	return removeCarryItem(player, getRuntime(player), slotIndexOrCarryId)
+end
+
+function Service.StoreHeldCrewMember(player, options)
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return false, {
+			Reason = errorResponse and errorResponse.error or "profile_not_ready",
+		}
+	end
+
+	return storeHeldCrewMember(player, options)
 end
 
 function Service.ClearAllCarryItems(player, reason)

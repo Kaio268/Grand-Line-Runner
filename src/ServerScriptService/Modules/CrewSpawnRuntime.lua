@@ -18,6 +18,8 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
+local CrewAuraVisuals = require(Modules:WaitForChild("Crew"):WaitForChild("CrewAuraVisuals"))
+local CrewIdleAnimator = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIdleAnimator"))
 local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local ServerMods = Modules:WaitForChild("Server"):WaitForChild("Crew")
 
@@ -855,27 +857,26 @@ local function chooseForPart(data, serverLuckMult)
 	return eligible[#eligible].Entry
 end
 
-local function tryPlayIdle(model, animId)
-	animId = tonumber(animId)
-	if not animId or animId == 0 then
-		return
-	end
-	local controller = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
-	if not controller then
-		return
-	end
-	local animator = controller:FindFirstChildOfClass("Animator")
-	if not animator then
-		animator = Instance.new("Animator")
-		animator.Parent = controller
-	end
-	local anim = Instance.new("Animation")
-	anim.AnimationId = "rbxassetid://" .. tostring(animId)
-	pcall(function()
-		local track = animator:LoadAnimation(anim)
-		track.Looped = true
-		track:Play()
-	end)
+local function tryPlayIdle(model, entry)
+	entry = if typeof(entry) == "table" then entry else {}
+	local info = if typeof(entry.Info) == "table" then entry.Info else entry
+	CrewIdleAnimator.Start(model, {
+		CrewMemberId = entry.Id or entry.BaseId or info.CrewMemberId or info.Id or info.ModelName,
+		Gender = info.Gender,
+		Info = info,
+		Source = "CrewSpawnRuntime",
+	})
+end
+
+local function refreshVariantAura(model, entry)
+	entry = if typeof(entry) == "table" then entry else {}
+	local info = if typeof(entry.Info) == "table" then entry.Info else entry
+	CrewAuraVisuals.Refresh(model, {
+		CrewMemberId = entry.Id or entry.BaseId or info.CrewMemberId or info.Id or info.ModelName,
+		Variant = entry.Variant or info.Variant,
+		Info = info,
+		Source = "CrewSpawnRuntime",
+	})
 end
 
 local function getBiomeIndexFromName(name)
@@ -1821,7 +1822,8 @@ local function spawnTutorialCrewMemberOnData(data, options)
 		end
 		if clone.Parent then
 			Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
-			tryPlayIdle(clone, entry.Info.IdleAnim)
+			refreshVariantAura(clone, entry)
+			tryPlayIdle(clone, entry)
 			local state = registerActive(clone, entry, data, slotIndex)
 			state.IsTutorial = true
 			state.TutorialOwnerUserId = player.UserId
@@ -1979,9 +1981,6 @@ local function spawnOne(data)
 		end
 
 		local rarityLabel = tostring(baseEntry.Rarity or "Common")
-		if variantKey ~= "Normal" then
-			rarityLabel = variantKey .. " " .. rarityLabel
-		end
 
 		local entry = {
 			Id = finalId,
@@ -2085,7 +2084,8 @@ local function spawnOne(data)
 					formatInstancePath(clone.Parent),
 					formatVector3(settledPosition)
 				)
-				tryPlayIdle(clone, entry.Info.IdleAnim)
+				refreshVariantAura(clone, entry)
+				tryPlayIdle(clone, entry)
 				registerActive(clone, entry, data, freeIndex)
 				trySpawnDormantSpikeForCrew(clone, data)
 			else
@@ -2261,7 +2261,8 @@ local function spawnRandomSecretIgnoreLimits()
 	Placement.AlignModelOnPartUpright(clone, data.Part, offsetXZ, yaw)
 	data.SlotOffsets[freeIndex] = offsetXZ
 	data.SlotOccupied[freeIndex] = clone
-	tryPlayIdle(clone, entry.Info.IdleAnim)
+	refreshVariantAura(clone, entry)
+	tryPlayIdle(clone, entry)
 	registerActive(clone, entry, data, freeIndex)
 	trySpawnDormantSpikeForCrew(clone, data)
 

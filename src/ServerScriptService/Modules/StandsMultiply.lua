@@ -1,10 +1,14 @@
-local MAX_LEVEL = 50
-local MULTIPLIER_STEP_PER_LEVEL = 0.08
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local CrewIncomeBalance = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance")
+)
+
+local maxLevel = CrewIncomeBalance.GetMaxLevel()
 local multipliers = {}
 
-for level = 1, MAX_LEVEL do
-	multipliers[tostring(level)] = math.floor((1 + MULTIPLIER_STEP_PER_LEVEL * (level - 1)) * 100 + 0.5) / 100
+for level = 1, maxLevel do
+	multipliers[tostring(level)] = CrewIncomeBalance.GetLevelIncomeMultiplier(level)
 end
 
 return multipliers

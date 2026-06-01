@@ -30,7 +30,7 @@ local function buildDefaultSections()
 	for index, biome in ipairs(BiomeAreas.Biomes) do
 		sections[index] = {
 			color = biome.ProgressColor,
-			label = biome.AreaName or biome.BiomeName or ("Biome " .. tostring(index)),
+			label = BiomeAreas.GetDisplayName(biome),
 			widthScale = widthScale,
 			isImpact = index == biomeCount,
 		}

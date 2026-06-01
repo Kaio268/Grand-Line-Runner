@@ -1,5 +1,9 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
+local CrewIncomeBalance = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance")
+)
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
 local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
@@ -128,7 +132,7 @@ local function makeCaptainSlotDataFromInstance(instanceId, instanceData, existin
 	end
 
 	existingRow = if typeof(existingRow) == "table" then existingRow else {}
-	local level = math.max(1, math.floor(tonumber(instanceData.Level) or tonumber(existingRow.Level) or 1))
+	local level = CrewIncomeBalance.NormalizeLevel(instanceData.Level or existingRow.Level)
 	return {
 		CrewMemberName = crewMemberName,
 		CrewMemberId = tostring(instanceData.CrewMemberId or crewMemberName),
@@ -153,7 +157,7 @@ local function makeStandRowFromInstance(instanceId, instanceData, existingRow)
 		LegacyStorageName = tostring(instanceData.LegacyStorageName or existingRow.LegacyStorageName or ""),
 		CrewMemberInstanceId = tostring(instanceId),
 		IncomeToCollect = tonumber(existingRow.IncomeToCollect) or 0,
-		StandLevel = math.max(1, math.floor(tonumber(instanceData.Level or existingRow.StandLevel) or 1)),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level or existingRow.StandLevel),
 	}
 end
 
@@ -182,7 +186,7 @@ local function makeStandRowFromLegacySlot(row)
 		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
 		CrewMemberInstanceId = instanceId,
 		IncomeToCollect = tonumber(row.IncomeToCollect or row.Income or row.Money or row.Cash) or 0,
-		StandLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or 1)),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level),
 	}
 end
 
@@ -499,7 +503,7 @@ local function syncShipSlotsMirror(player, slotKeys)
 				CrewMemberName = tostring(standData.CrewMemberName or ""),
 				CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
 				IncomeToCollect = tonumber(standData.IncomeToCollect) or 0,
-				StandLevel = math.max(1, math.floor(tonumber(standData.StandLevel) or 1)),
+				StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 				LegacyStorageName = tostring(standData.LegacyStorageName or ""),
 			}
 
@@ -509,7 +513,7 @@ local function syncShipSlotsMirror(player, slotKeys)
 				or tostring(current.CrewMemberName or "") ~= nextSlotData.CrewMemberName
 				or tostring(current.CrewMemberInstanceId or "") ~= nextSlotData.CrewMemberInstanceId
 				or tonumber(current.IncomeToCollect) ~= nextSlotData.IncomeToCollect
-				or math.max(1, math.floor(tonumber(current.StandLevel) or 1)) ~= nextSlotData.StandLevel
+				or CrewIncomeBalance.NormalizeLevel(current.StandLevel) ~= nextSlotData.StandLevel
 			then
 				shipSlots[slotKey] = nextSlotData
 				changed = true
@@ -653,6 +657,22 @@ function CrewSlotAssignmentReconciler.AssignCaptain(player, instanceRef, options
 	if tostring(instanceData.AssignedStand or "") ~= "" then
 		return nil, nil, "incoming_already_assigned"
 	end
+	if instanceData.Overflow == true then
+		return nil, nil, "incoming_instance_overflow"
+	end
+
+	local previousQuickSlot = CrewQuickSlotService.GetInstanceSlot(player, instanceId)
+	if previousQuickSlot ~= nil then
+		local clearOk, clearResult = CrewQuickSlotService.ClearAssignmentsForInstance(player, instanceId)
+		if clearOk ~= true then
+			return nil, nil, tostring(clearResult and clearResult.Reason or "quick_slot_clear_failed")
+		end
+	end
+	local function restoreQuickSlot()
+		if previousQuickSlot ~= nil then
+			CrewQuickSlotService.AssignInstanceToSlot(player, instanceId, previousQuickSlot)
+		end
+	end
 
 	local originalInstanceData = table.clone(instanceData)
 	instanceData.AssignedStand = CAPTAIN_SLOT_KEY
@@ -666,6 +686,7 @@ function CrewSlotAssignmentReconciler.AssignCaptain(player, instanceRef, options
 	})
 	if saved == false then
 		crewMemberInventory.ById[tostring(instanceId)] = originalInstanceData
+		restoreQuickSlot()
 		return nil, nil, tostring(saveReason or "captain_assignment_save_failed")
 	end
 
@@ -678,6 +699,7 @@ function CrewSlotAssignmentReconciler.AssignCaptain(player, instanceRef, options
 		CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
 			SourcePath = "captain_slot_assign_rollback",
 		})
+		restoreQuickSlot()
 		return nil, nil, "captain_slot_write_failed"
 	end
 
@@ -726,6 +748,22 @@ function CrewSlotAssignmentReconciler.SwapCaptain(player, incomingInstanceRef, o
 	if tostring(incomingInstanceData.AssignedStand or "") ~= "" then
 		return nil, nil, nil, nil, "incoming_already_assigned"
 	end
+	if incomingInstanceData.Overflow == true then
+		return nil, nil, nil, nil, "incoming_instance_overflow"
+	end
+
+	local previousQuickSlot = CrewQuickSlotService.GetInstanceSlot(player, incomingInstanceId)
+	if previousQuickSlot ~= nil then
+		local clearOk, clearResult = CrewQuickSlotService.ClearAssignmentsForInstance(player, incomingInstanceId)
+		if clearOk ~= true then
+			return nil, nil, nil, nil, tostring(clearResult and clearResult.Reason or "quick_slot_clear_failed")
+		end
+	end
+	local function restoreIncomingQuickSlot()
+		if previousQuickSlot ~= nil then
+			CrewQuickSlotService.AssignInstanceToSlot(player, incomingInstanceId, previousQuickSlot)
+		end
+	end
 
 	local finalInventory = cloneValue(crewMemberInventory)
 	local finalIncoming = cloneValue(incomingInstanceData)
@@ -745,6 +783,7 @@ function CrewSlotAssignmentReconciler.SwapCaptain(player, incomingInstanceRef, o
 		"CaptainSlotSwap"
 	)
 	if capacityOk ~= true then
+		restoreIncomingQuickSlot()
 		return nil, nil, nil, nil, tostring(capacityReason or "quick_slot_capacity")
 	end
 
@@ -752,6 +791,7 @@ function CrewSlotAssignmentReconciler.SwapCaptain(player, incomingInstanceRef, o
 		SourcePath = tostring(options.SourcePath or "captain_slot_swap"),
 	})
 	if saved == false then
+		restoreIncomingQuickSlot()
 		return nil, nil, nil, nil, tostring(saveReason or "captain_swap_save_failed")
 	end
 
@@ -763,6 +803,7 @@ function CrewSlotAssignmentReconciler.SwapCaptain(player, incomingInstanceRef, o
 		CrewInstanceService.SaveCrewInventory(player, crewMemberInventory, {
 			SourcePath = "captain_slot_swap_rollback",
 		})
+		restoreIncomingQuickSlot()
 		return nil, nil, nil, nil, "captain_slot_write_failed"
 	end
 
@@ -934,10 +975,28 @@ function CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, options
 
 	local now = os.time()
 	local unassigned = 0
-	for _, instanceData in pairs(crewMemberInventory.ById) do
+	local storedAfterDisplacement = CrewQuickSlotService.CountStoredInstances(player, crewMemberInventory)
+	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
+	local movedToStorage = 0
+	local movedToOverflow = 0
+	local displacedSource = tostring(options.Source or "rebirth_slot_reset")
+	for instanceId, instanceData in pairs(crewMemberInventory.ById) do
 		if typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") ~= "" then
 			instanceData.AssignedStand = ""
 			instanceData.LastReleasedAt = now
+			CrewQuickSlotService.ClearAssignmentsForInstance(player, tostring(instanceId))
+			if storedAfterDisplacement < storageSlots then
+				instanceData.Overflow = false
+				instanceData.OverflowSource = ""
+				instanceData.OverflowedAt = 0
+				storedAfterDisplacement += 1
+				movedToStorage += 1
+			else
+				instanceData.Overflow = true
+				instanceData.OverflowSource = displacedSource
+				instanceData.OverflowedAt = now
+				movedToOverflow += 1
+			end
 			unassigned += 1
 		end
 	end
@@ -966,6 +1025,8 @@ function CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, options
 	return true, "ok", {
 		Source = tostring(options.Source or "rebirth_slot_reset"),
 		UnassignedCount = unassigned,
+		MovedToStorageCount = movedToStorage,
+		MovedToOverflowCount = movedToOverflow,
 		ClearedCrewMemberIncome = true,
 		ClearedShipSlots = true,
 		ClearedCaptainSlot = true,

@@ -97,9 +97,14 @@ local function registerStaticPreview(image, aliases)
 	end
 end
 
-registerStaticPreview("rbxassetid://100397390355149", {
+registerStaticPreview("rbxthumb://type=Asset&id=96843004404471&w=420&h=420", {
 	"Ember Fist",
 	"Ace",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=78065712403161&w=420&h=420", {
+	"Clown Captain",
+	"Buggy",
 })
 
 registerStaticPreview("rbxassetid://78291935006007", {
@@ -116,6 +121,16 @@ registerStaticPreview("rbxassetid://115287190180699", {
 registerStaticPreview("rbxassetid://78116055270213", {
 	"Storm Cartographer",
 	"Nami",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=133560388282838&w=420&h=420", {
+	"Soul Fiddler",
+	"Brook",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=123932991079923&w=420&h=420", {
+	"Sawtooth Captain",
+	"Arlong",
 })
 
 registerStaticPreview("rbxassetid://134951637512759", {
@@ -141,6 +156,11 @@ registerStaticPreview("rbxassetid://86049312074858", {
 	"Hawkins",
 })
 
+registerStaticPreview("rbxthumb://type=Asset&id=137855325627287&w=420&h=420", {
+	"Fortress Don",
+	"Bege",
+})
+
 registerStaticPreview("rbxassetid://120380137910449", {
 	"Bloom Scholar",
 	"Robin",
@@ -151,9 +171,51 @@ registerStaticPreview("rbxassetid://102257447334492", {
 	"Bartolomeo",
 })
 
+registerStaticPreview("rbxthumb://type=Asset&id=96760557821865&w=420&h=420", {
+	"Flint Kicker",
+	"Sanji",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=107729717249998&w=420&h=420", {
+	"Blade Ronin",
+	"Zoro",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=88567320752920&w=420&h=420", {
+	"Sand Tyrant",
+	"Crocodile",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=105159278994769&w=420&h=420", {
+	"Surgeon Rogue",
+	"Law",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=123185333008649&w=420&h=420", {
+	"Shadow Baron",
+	"Moria",
+	"Gecko Moriah",
+})
+
 registerStaticPreview("rbxassetid://75586655035699", {
 	"Diamond Bruiser",
 	"Jozu",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=135537214535364&w=420&h=420", {
+	"Puppet King",
+	"Doflamingo",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=71053241723501&w=420&h=420", {
+	"Candy Duke",
+	"Perospero",
+	"Persopero",
+})
+
+registerStaticPreview("rbxthumb://type=Asset&id=93229781511499&w=420&h=420", {
+	"Juice Duchess",
+	"Smoothie",
 })
 
 registerStaticPreview("rbxassetid://109925942347680", {

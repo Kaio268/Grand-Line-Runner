@@ -27,8 +27,8 @@ local Config = {
 		[4] = "Lvl 3 Ship unlocks 12 normal crew slots and Captain earns +8%",
 		[5] = "Captain Slot bonus upgraded to +12%",
 		[6] = "Lvl 4 Ship unlocks 16 normal crew slots and Captain earns +16%",
-		[7] = "Lvl 4 Ship expands to 24 normal crew slots and Captain earns +20%",
-		[8] = "Lvl 5 Ship reaches max Captain Slot bonus (+25%)",
+		[7] = "Lvl 4 Ship expands to 26 normal crew slots and Captain earns +20%",
+		[8] = "Lvl 5 Ship unlocks 38 normal crew slots and reaches max Captain Slot bonus (+25%)",
 	},
 
 	RequirementsByLevel = {

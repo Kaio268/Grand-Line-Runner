@@ -93,11 +93,17 @@ local function buildResolved(entry, variantKey, inputName, sourceName)
 	local legacyId = tostring(entry.LegacyId or "")
 	local crewMemberId = tostring(entry.CrewMemberId or displayName)
 	local grantName = crewMemberId
-	local resolvedDisplayName = displayName
+	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, {
+		DisplayName = displayName,
+		Variant = variantKey,
+	})
 
 	if variantKey ~= "Normal" then
 		grantName = CrewCatalog.MakeVariantId(crewMemberId, variantKey)
-		resolvedDisplayName = CrewCatalog.MakeVariantId(displayName, variantKey)
+		displayInfo = CrewCatalog.GetDisplayInfo(grantName, {
+			DisplayName = displayName,
+			Variant = variantKey,
+		})
 	end
 
 	return {
@@ -105,13 +111,16 @@ local function buildResolved(entry, variantKey, inputName, sourceName)
 		InputName = inputName,
 		SourceName = sourceName or inputName,
 		GrantName = grantName,
-		DisplayName = resolvedDisplayName,
-		BaseDisplayName = displayName,
+		DisplayName = tostring(displayInfo.DisplayName or displayName),
+		BaseDisplayName = tostring(displayInfo.BaseDisplayName or displayName),
 		CrewMemberId = crewMemberId,
 		LegacyId = legacyId,
 		ModelName = entry.ModelName,
 		Rarity = entry.Rarity,
 		Variant = variantKey,
+		VariantTag = displayInfo.VariantTag,
+		VariantDisplayName = displayInfo.VariantDisplayName,
+		ShowVariantTag = displayInfo.ShowVariantTag == true,
 		Entry = cloneEntry(entry),
 	}
 end

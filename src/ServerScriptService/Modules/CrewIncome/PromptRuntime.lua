@@ -17,16 +17,12 @@ function Module.Install(ctx)
 	local function crewPickupDebug(...)
 		return ctx.crewPickupDebug(...)
 	end
-	local CrewQuickSlotService = ctx.CrewQuickSlotService
 	local DEBUG_TRACE = ctx.DEBUG_TRACE
 	local function dmEnsureStandFolder(...)
 		return ctx.dmEnsureStandFolder(...)
 	end
 	local function ensureLevelUpClickDetector(...)
 		return ctx.ensureLevelUpClickDetector(...)
-	end
-	local function findAvailableTutorialPlacementReward(...)
-		return ctx.findAvailableTutorialPlacementReward(...)
 	end
 	local function formatCrewPickupDebugFields(...)
 		return ctx.formatCrewPickupDebugFields(...)
@@ -39,9 +35,6 @@ function Module.Install(ctx)
 	end
 	local function getIncomeWithLevel(...)
 		return ctx.getIncomeWithLevel(...)
-	end
-	local function getInventoryQuantity(...)
-		return ctx.getInventoryQuantity(...)
 	end
 	local function getPickupDebugField(...)
 		return ctx.getPickupDebugField(...)
@@ -288,6 +281,17 @@ function Module.Install(ctx)
 				end
 				local slotState = getStandSlotState(plr, standName)
 				local equippedInfo = getEquippedCrewMemberToolInfo(plr)
+				local function getExactTutorialPlacementInstance()
+					if not equippedInfo or tostring(equippedInfo.InstanceId or "") == "" then
+						return nil, nil
+					end
+
+					local tutorialInstanceId, tutorialInstance = CrewInstanceService.GetInstance(plr, equippedInfo.InstanceId)
+					if tutorialInstance and tutorialInstance.TutorialReward == true then
+						return tutorialInstanceId, tutorialInstance
+					end
+					return nil, nil
+				end
 				if slotState.Visible and not slotState.Usable then
 					if equippedInfo then
 						logCrewSwitchFailure(plr, standName, "stand_locked", string.format("level=%s", tostring(slotState.Level)))
@@ -327,8 +331,8 @@ function Module.Install(ctx)
 							return
 						end
 
-						local tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, equippedInfo.Name)
-						local incomingInstanceId, incomingInstance, outgoingInstanceId, outgoingInstance, switchReason =
+						local tutorialInstanceId, tutorialInstance = getExactTutorialPlacementInstance()
+						local incomingInstanceId, incomingInstance, outgoingInstanceId, outgoingInstance, switchReason, switchDebug =
 							CrewInstanceService.SwapStandInstance(plr, standName, equippedInfo.InstanceId, {
 								ExpectedIncomingStorageName = equippedInfo.Name,
 								ClearIncomingTutorialMetadataAfterAssign = tutorialInstance ~= nil
@@ -370,15 +374,18 @@ function Module.Install(ctx)
 						end
 
 						standDebug(
-							"switch accepted player=%s stand=%s incoming=%s outgoing=%s incomingStorage=%s outgoingStorage=%s",
+							"switch accepted player=%s stand=%s incoming=%s outgoing=%s incomingStorage=%s outgoingStorage=%s outgoingDestination=%s",
 							plr.Name,
 							standName,
 							tostring(incomingInstanceId),
 							tostring(outgoingInstanceId),
 							tostring(incomingInstance.StorageName or ""),
-							tostring(outgoingInstance and outgoingInstance.StorageName or "")
+							tostring(outgoingInstance and outgoingInstance.StorageName or ""),
+							tostring(switchDebug and switchDebug.OutgoingDestination or "")
 						)
-						equipCrewMemberToolByInstanceId(plr, outgoingInstanceId, outgoingInstance and outgoingInstance.StorageName or "")
+						if tostring(switchDebug and switchDebug.OutgoingDestination or "") == "Hotbar" then
+							equipCrewMemberToolByInstanceId(plr, outgoingInstanceId, outgoingInstance and outgoingInstance.StorageName or "")
+						end
 						updateStandMoneyText(plr, standModel)
 						updateLevelUpUI(plr, standModel)
 						updateStandPromptTexts(plr, standModel)
@@ -410,6 +417,8 @@ function Module.Install(ctx)
 						{ "afterCrewMemberInstanceId", pickupAfter.CrewMemberInstanceId },
 						{ "afterLegacyStorageName", pickupAfter.LegacyStorageName },
 						{ "afterIncome", pickupAfter.IncomeToCollect },
+						{ "destination", getPickupDebugField(releaseDebug, "ReleaseDestination", "") },
+						{ "quickSlotIndex", getPickupDebugField(releaseDebug, "ReleaseQuickSlotIndex", "") },
 						{ "quickOccupied", getPickupDebugField(releaseDebug, "QuickSlotOccupied", "") },
 						{ "quickUnlocked", getPickupDebugField(releaseDebug, "QuickSlotUnlocked", "") },
 						{ "quickMax", getPickupDebugField(releaseDebug, "QuickSlotMax", "") },
@@ -444,7 +453,6 @@ function Module.Install(ctx)
 				end
 
 				local toolName = equippedInfo and equippedInfo.Name or nil
-				local tutorialInstanceId, tutorialInstance = findAvailableTutorialPlacementReward(plr, toolName)
 				if not toolName or toolName == "" then
 					tutorialStandPlacementLog(plr, standName, "no_equipped_crewmate", "action=reject requires_equipped_tutorial_reward")
 					logCrewSwitchFailure(plr, standName, "no_equipped_crewmate", "empty_slot_place_rejected")
@@ -452,61 +460,20 @@ function Module.Install(ctx)
 					return
 				end
 
-				local qty = getInventoryQuantity(plr, toolName)
-				if qty < 1 then
-					if tutorialInstance then
-						tutorialStandPlacementLog(
-							plr,
-							standName,
-							"no_inventory",
-							string.format(
-								"action=bypass tool=%s quantity=%s tutorialInstanceId=%s",
-								tostring(toolName),
-								tostring(qty),
-								tostring(tutorialInstanceId)
-							)
-						)
-					else
-						tutorialStandPlacementLog(
-							plr,
-							standName,
-							"no_inventory",
-							string.format("action=reject tool=%s quantity=%s", tostring(toolName), tostring(qty))
-						)
-						standDebug("place rejected player=%s stand=%s tool=%s reason=no_inventory quantity=%s", plr.Name, standName, tostring(toolName), tostring(qty))
-						return
-					end
-				end
-
-				local quickSlotUnlocked = CrewQuickSlotService.CanEquipCrewMember(plr, toolName)
-				if not quickSlotUnlocked and not tutorialInstance then
-					CrewQuickSlotService.PromptUnlockForCrewMember(plr, toolName)
-					tutorialStandPlacementLog(plr, standName, "quick_slot_locked", string.format("action=reject tool=%s", tostring(toolName)))
-					standDebug("place rejected player=%s stand=%s tool=%s reason=quick_slot_locked", plr.Name, standName, tostring(toolName))
+				if tostring(equippedInfo.InstanceId or "") == "" then
+					tutorialStandPlacementLog(plr, standName, "incoming_instance_missing", string.format("action=reject tool=%s", tostring(toolName)))
+					logCrewSwitchFailure(plr, standName, "incoming_instance_missing", "equipped_tool_missing_instance_id")
+					standDebug("place rejected player=%s stand=%s tool=%s reason=incoming_instance_missing", plr.Name, standName, tostring(toolName))
 					return
-				elseif not quickSlotUnlocked and tutorialInstance then
-					tutorialStandPlacementLog(
-						plr,
-						standName,
-						"quick_slot_locked",
-						string.format("action=bypass tool=%s tutorialInstanceId=%s", tostring(toolName), tostring(tutorialInstanceId))
-					)
 				end
 
+				local tutorialInstanceId, tutorialInstance = getExactTutorialPlacementInstance()
 				local placedInstanceId, placedInstance, placeReason
-				if tutorialInstance then
-					placedInstanceId, placedInstance, placeReason = CrewInstanceService.AssignTutorialRewardInstanceToStand(plr, standName, {
-						InstanceId = tutorialInstanceId,
-						StorageName = toolName,
-						ClearTutorialMetadataAfterAssign = true,
-					})
-				elseif equippedInfo.InstanceId ~= "" then
-					placedInstanceId, placedInstance, placeReason = CrewInstanceService.AssignInstanceToStand(plr, equippedInfo.InstanceId, standName, {
-						ExpectedIncomingStorageName = toolName,
-					})
-				else
-					placeReason = "incoming_instance_missing"
-				end
+				placedInstanceId, placedInstance, placeReason = CrewInstanceService.AssignInstanceToStand(plr, equippedInfo.InstanceId, standName, {
+					ExpectedIncomingStorageName = toolName,
+					ClearTutorialMetadataAfterAssign = tutorialInstance ~= nil
+						and tostring(tutorialInstanceId) == tostring(equippedInfo.InstanceId),
+				})
 				if not placedInstance then
 					tutorialStandPlacementLog(
 						plr,
@@ -541,7 +508,7 @@ function Module.Install(ctx)
 						TutorialRewardConverted = true,
 					})
 				end
-				standDebug("place accepted player=%s stand=%s tool=%s quantityBefore=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(qty), tostring(placedInstanceId))
+				standDebug("place accepted player=%s stand=%s tool=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(placedInstanceId))
 
 				local placedModel, visualReason = spawnStandCrewMember(plr, standModel, handle, placedInstance.StorageName)
 				if not placedModel then

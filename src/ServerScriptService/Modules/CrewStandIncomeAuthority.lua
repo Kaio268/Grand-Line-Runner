@@ -3,6 +3,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local CrewStorage = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewStorage"))
 
 local CrewStandIncomeAuthority = {}
@@ -70,6 +71,10 @@ local function getDisplayName(storageName, info)
 	if resolvedInfo then
 		info = resolvedInfo
 	end
+	local displayInfo = CrewCatalog.GetDisplayInfo(storageName, info)
+	if tostring(displayInfo.DisplayName or "") ~= "" then
+		return tostring(displayInfo.DisplayName)
+	end
 	if typeof(info) == "table" then
 		return tostring(info.DisplayName or info.CrewMemberName or info.Name or storageName)
 	end
@@ -102,7 +107,7 @@ local function normalizeStandRow(row)
 		CrewMemberName = crewMemberName,
 		CrewMemberInstanceId = crewMemberInstanceId,
 		IncomeToCollect = tonumber(row.IncomeToCollect) or 0,
-		StandLevel = math.max(1, math.floor(tonumber(row.StandLevel) or 1)),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel),
 		LegacyStorageName = legacyStorageName,
 		NeedsCanonicalRepair = rawCrewMemberName ~= "" and crewMemberName ~= "" and rawCrewMemberName ~= crewMemberName,
 		HasInvalidCrewMember = hasInvalidCrewMember,
@@ -128,7 +133,7 @@ local function canonicalFromStandRow(player, standName, standRow)
 	local legacyStorageName = tostring(standRow.LegacyStorageName or "")
 	local existing = readRoot(player, CANONICAL_ROOT .. "." .. tostring(standName or ""))
 	local existingLevel = if typeof(existing) == "table" then tonumber(existing.StandLevel) else nil
-	local standLevel = math.max(1, math.floor(tonumber(standRow.StandLevel) or existingLevel or 1))
+	local standLevel = CrewIncomeBalance.NormalizeLevel(standRow.StandLevel or existingLevel)
 	if storageName == "" and tostring(standRow.CrewMemberInstanceId or "") == "" then
 		standLevel = 1
 	end
@@ -220,7 +225,7 @@ local function compareRows(standRow, canonicalRow)
 	if not numbersNearlyEqual(canonicalRow.IncomeToCollect, expected.IncomeToCollect) then
 		return false, "income_mismatch"
 	end
-	if math.floor(tonumber(canonicalRow.StandLevel) or 1) ~= math.floor(tonumber(expected.StandLevel) or 1) then
+	if CrewIncomeBalance.NormalizeLevel(canonicalRow.StandLevel) ~= CrewIncomeBalance.NormalizeLevel(expected.StandLevel) then
 		return false, "stand_level_mismatch"
 	end
 	return true, nil
@@ -347,12 +352,12 @@ end
 
 function CrewStandIncomeAuthority.GetStandLevel(player, standName)
 	local row = CrewStandIncomeAuthority.GetStandData(player, standName)
-	return math.max(1, math.floor(tonumber(row and row.StandLevel) or 1))
+	return CrewIncomeBalance.NormalizeLevel(row and row.StandLevel)
 end
 
 function CrewStandIncomeAuthority.SetStandLevel(player, standName, level, sourcePath)
 	return CrewStandIncomeAuthority.UpdateStandData(player, standName, {
-		StandLevel = math.max(1, math.floor(tonumber(level) or 1)),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(level),
 	}, sourcePath or "stand_level_update")
 end
 

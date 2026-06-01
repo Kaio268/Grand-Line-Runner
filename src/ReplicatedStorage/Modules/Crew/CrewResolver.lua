@@ -115,10 +115,13 @@ local function findVariantModel(folder, modelName, variantKey)
 end
 
 function CrewResolver.ResolveCrewMember(crewMemberId, variantKey)
-	local parsedVariant, baseId = CrewCatalog.ParseVariantId(crewMemberId)
-	variantKey = variantKey or parsedVariant or "Normal"
+	local canonicalId, resolvedInfo = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+	local lookupId = if canonicalId ~= "" then canonicalId else crewMemberId
+	local displayInfo = CrewCatalog.GetDisplayInfo(lookupId, resolvedInfo)
+	local baseId = tostring(displayInfo.BaseId or lookupId or crewMemberId)
+	variantKey = variantKey or displayInfo.Variant or "Normal"
 
-	local info = CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey) or CrewCatalog.GetInfoById(crewMemberId)
+	local info = CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey) or resolvedInfo or CrewCatalog.GetInfoById(crewMemberId)
 	if not info then
 		appendDiagnostic("MissingCrewMemberIds", crewMemberId)
 		return nil

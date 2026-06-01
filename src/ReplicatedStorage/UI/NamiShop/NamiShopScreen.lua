@@ -321,7 +321,7 @@ local function NamiShopScreen(props)
 				onActivated = props.onSellInventory,
 				onMouseEnter = makeActionHoverHandler("SellInventory"),
 				onMouseLeave = makeActionHoverHandler(nil),
-				text = "Sell My Inventory",
+				text = "Use Inventory",
 			}),
 			SellEquipped = e(actionButton, {
 				color3 = THEME.SellOne,
@@ -331,7 +331,7 @@ local function NamiShopScreen(props)
 				onActivated = props.onSellEquipped,
 				onMouseEnter = makeActionHoverHandler("SellEquipped"),
 				onMouseLeave = makeActionHoverHandler(nil),
-				text = "Sell This Item",
+				text = "Stored Only",
 			}),
 		}),
 		Status = e("Frame", {

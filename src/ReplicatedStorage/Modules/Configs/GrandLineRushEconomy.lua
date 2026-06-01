@@ -61,7 +61,7 @@ local Economy = {
 		CrewLevelsArePerInstance = true,
 		CrewMaxLevel = 50,
 		DuplicateCrewHandling = "StoreAsSeparateInstances",
-		MaxShipSlots = 24,
+		MaxShipSlots = 38,
 		LoseUnextractedRewardsOnRunFailure = true,
 	},
 
@@ -217,17 +217,66 @@ local Economy = {
 
 	CrewMembers = {
 		MaxLevel = 50,
-		IncomeRollVersion = 1,
+		MaxCrewLevel = 50,
+		MaxLevelIncomeMultiplier = 100,
+		IncomeRollVersion = 3,
 		BaseIncomeRollByRarity = {
-			Common = { Min = 4, Max = 8 },
-			Uncommon = { Min = 16, Max = 26 },
-			Rare = { Min = 45, Max = 70 },
-			Epic = { Min = 100, Max = 145 },
-			Legendary = { Min = 210, Max = 290 },
-			Mythic = { Min = 450, Max = 650 },
-			Mythical = { Min = 450, Max = 650 },
-			Godly = { Min = 1350, Max = 1750 },
-			Secret = { Min = 4600, Max = 6000 },
+			Common = { Min = 2, Max = 10 },
+			Uncommon = { Min = 17, Max = 55 },
+			Rare = { Min = 100, Max = 250 },
+			Epic = { Min = 360, Max = 800 },
+			Legendary = { Min = 1000, Max = 4000 },
+			Mythic = { Min = 2500, Max = 9000 },
+			Mythical = { Min = 2500, Max = 9000 },
+			Godly = { Min = 6000, Max = 18000 },
+			Secret = { Min = 16000, Max = 30000 },
+		},
+		VariantIncomeBandsByRarity = {
+			Common = {
+				Normal = { Min = 2, Max = 10 },
+				Golden = { Min = 11, Max = 20 },
+				Diamond = { Min = 21, Max = 50 },
+			},
+			Uncommon = {
+				Normal = { Min = 17, Max = 55 },
+				Golden = { Min = 56, Max = 110 },
+				Diamond = { Min = 111, Max = 275 },
+			},
+			Rare = {
+				Normal = { Min = 100, Max = 250 },
+				Golden = { Min = 251, Max = 500 },
+				Diamond = { Min = 501, Max = 1250 },
+			},
+			Epic = {
+				Normal = { Min = 360, Max = 800 },
+				Golden = { Min = 801, Max = 1600 },
+				Diamond = { Min = 1800, Max = 4000 },
+			},
+			Legendary = {
+				Normal = { Min = 1000, Max = 4000 },
+				Golden = { Min = 4001, Max = 8000 },
+				Diamond = { Min = 8001, Max = 20000 },
+			},
+			Mythic = {
+				Normal = { Min = 2500, Max = 9000 },
+				Golden = { Min = 9001, Max = 18000 },
+				Diamond = { Min = 18001, Max = 45000 },
+			},
+			Mythical = {
+				Normal = { Min = 2500, Max = 9000 },
+				Golden = { Min = 9001, Max = 18000 },
+				Diamond = { Min = 18001, Max = 45000 },
+			},
+			Godly = {
+				Normal = { Min = 6000, Max = 18000 },
+				Golden = { Min = 18001, Max = 36000 },
+				Diamond = { Min = 36001, Max = 90000 },
+			},
+			Secret = {
+				Normal = { Min = 16000, Max = 30000 },
+				Golden = { Min = 32000, Max = 60000 },
+				Diamond = { Min = 80000, Max = 150000 },
+			},
 		},
 		VariantUpgradeCostMultiplier = {
 			Normal = 1,
@@ -262,6 +311,38 @@ local Economy = {
 	},
 
 	Chests = {
+		AFKGoldRewards = {
+			Enabled = true,
+			RewardTier = "Gold",
+			Source = "AFK",
+			Normal = {
+				IntervalSeconds = 3600,
+				DailyCap = 8,
+			},
+			Premium = {
+				IntervalSeconds = 1800,
+				DailyCap = 16,
+			},
+			Remotes = {
+				StateEventName = "AFKGoldChestState",
+				StateRequestName = "AFKGoldChestStateRequest",
+				EntryRequestName = "AFKGoldChestEntryRequest",
+				ExitRequestName = "AFKGoldChestExitRequest",
+				UiHeartbeatEventName = "AFKGoldChestUiHeartbeat",
+			},
+			Timing = {
+				TickSeconds = 1,
+				HeartbeatIntervalSeconds = 5,
+				HeartbeatTimeoutSeconds = 15,
+				HeartbeatMinIntervalSeconds = 1,
+				ShipSpawnCacheSeconds = 2,
+			},
+			Entry = {
+				MaxDistance = 18,
+				ShipAfkRadius = 34,
+			},
+		},
+
 		Tiers = {
 			Wooden = {
 				DepthBand = "Early",
@@ -340,7 +421,6 @@ local Economy = {
 							{ Beli = 5000 },
 						},
 					},
-					DevilFruitChance = 0.10,
 				},
 			},
 		},

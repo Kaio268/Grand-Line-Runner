@@ -4,10 +4,10 @@ function Module.Install(ctx)
 	local CaptainSlotRuntime = ctx.CaptainSlotRuntime
 	local CollectionService = ctx.CollectionService
 	local CrewOverhead = ctx.CrewOverhead
+	local CrewCatalog = ctx.CrewCatalog
 	local CrewProtectionService = ctx.CrewProtectionService
-	local function detectVariant(...)
-		return ctx.detectVariant(...)
-	end
+	local CrewAuraVisuals = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("CrewAuraVisuals"))
+	local CrewIdleAnimator = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("CrewIdleAnimator"))
 	local function findCrewMemberInfoByName(...)
 		return ctx.findCrewMemberInfoByName(...)
 	end
@@ -54,10 +54,6 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
-	local function stripVariantPrefix(...)
-		return ctx.stripVariantPrefix(...)
-	end
-
 	local function ensurePrimaryPart(model)
 		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
 			return model.PrimaryPart
@@ -90,27 +86,22 @@ function Module.Install(ctx)
 		end
 	end
 
-	local function tryPlayIdle(model, animId)
-		animId = tonumber(animId)
-		if not animId or animId == 0 then
-			return
-		end
-		local controller = model:FindFirstChildOfClass("Humanoid") or model:FindFirstChildOfClass("AnimationController")
-		if not controller then
-			return
-		end
-		local animator = controller:FindFirstChildOfClass("Animator")
-		if not animator then
-			animator = Instance.new("Animator")
-			animator.Parent = controller
-		end
-		local anim = Instance.new("Animation")
-		anim.AnimationId = "rbxassetid://" .. tostring(animId)
-		pcall(function()
-			local track = animator:LoadAnimation(anim)
-			track.Looped = true
-			track:Play()
-		end)
+	local function tryPlayIdle(model, crewMemberId, info)
+		CrewIdleAnimator.Start(model, {
+			CrewMemberId = crewMemberId,
+			Gender = info and info.Gender,
+			Info = info,
+			Source = "StandVisual",
+		})
+	end
+
+	local function refreshVariantAura(model, resolved, crewMemberName, info)
+		CrewAuraVisuals.Refresh(model, {
+			CrewMemberId = resolved and resolved.CanonicalName or crewMemberName,
+			Variant = resolved and resolved.VariantKey,
+			Info = info,
+			Source = "StandVisual",
+		})
 	end
 
 	local function removeLegacyCrewHover(model)
@@ -131,21 +122,26 @@ function Module.Install(ctx)
 		local canonicalName = resolved and resolved.CanonicalName or tostring(crewMemberName)
 		local rawName = info and tostring(info.Name or info.DisplayName or canonicalName) or tostring(crewMemberName)
 		local rawRarity = info and tostring(info.Rarity or "") or "Common"
-		local variantKey = resolved and resolved.VariantKey or detectVariant(crewMemberName)
-		if variantKey == "Normal" then
-			variantKey = detectVariant(rawName)
-		end
-		if variantKey == "Normal" then
-			variantKey = detectVariant(rawRarity)
-		end
-
-		local displayName = stripVariantPrefix(rawName, variantKey)
+		local displayInfo = if CrewCatalog and typeof(CrewCatalog.GetDisplayInfo) == "function"
+			then CrewCatalog.GetDisplayInfo(canonicalName, {
+				DisplayName = rawName,
+				Variant = resolved and resolved.VariantKey,
+			})
+			else nil
+		local variantKey = tostring((displayInfo and displayInfo.Variant) or (resolved and resolved.VariantKey) or "Normal")
+		local displayName = tostring((displayInfo and displayInfo.DisplayName) or rawName)
 		local helperDisplayName = resolveStandStatusDisplayName(player, crewMemberName)
 		if helperDisplayName ~= "" then
-			displayName = stripVariantPrefix(helperDisplayName, variantKey)
+			local helperDisplayInfo = if CrewCatalog and typeof(CrewCatalog.GetDisplayInfo) == "function"
+				then CrewCatalog.GetDisplayInfo(canonicalName, {
+					DisplayName = helperDisplayName,
+					Variant = variantKey,
+				})
+				else nil
+			displayName = tostring((helperDisplayInfo and helperDisplayInfo.DisplayName) or helperDisplayName)
 		end
 
-		local displayRarity = stripVariantPrefix(rawRarity, variantKey)
+		local displayRarity = rawRarity
 		local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standModel.Name)
 		local crewMemberInstanceId = tostring(getPlayerStandCrewMemberInstanceId(player, standModel.Name) or "")
 		local incomePerSecond = if isCaptainSlot
@@ -286,9 +282,8 @@ function Module.Install(ctx)
 		placeModelBottomOnHandle(clone, handle, standModel)
 
 		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
-		if info then
-			tryPlayIdle(clone, info.IdleAnim)
-		end
+		refreshVariantAura(clone, resolved, crewMemberName, info)
+		tryPlayIdle(clone, resolved and resolved.CanonicalName or crewMemberName, info)
 
 		syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
 		if PremiumCrewStealProtectionVisuals and typeof(PremiumCrewStealProtectionVisuals.UpdateStand) == "function" then

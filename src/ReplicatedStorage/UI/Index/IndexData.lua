@@ -311,8 +311,7 @@ local BELI_ICON = "rbxassetid://76300573750363"
 local LUCK_BOOST_ICON = "rbxassetid://99305009492305"
 
 local function formatBeliPerSecond(value)
-	local numeric = math.max(0, math.floor((tonumber(value) or 0) + 0.5))
-	return string.format("%s Beli/s", CurrencyUtil.formatCompactNumber(numeric))
+	return CurrencyUtil.formatIncomeCompactPerSecond(math.max(0, tonumber(value) or 0))
 end
 
 local function formatIncomeRange(rarity, variantKey)
@@ -322,9 +321,9 @@ local function formatIncomeRange(rarity, variantKey)
 	end
 
 	return string.format(
-		"%s–%s Beli/s",
+		"%s - %s",
 		CurrencyUtil.formatCompactNumber(minIncome),
-		CurrencyUtil.formatCompactNumber(maxIncome)
+		formatBeliPerSecond(maxIncome)
 	)
 end
 
@@ -450,8 +449,8 @@ function IndexData.buildViewModel(options)
 				end
 
 				local displayMetadata = getIndexDisplayMetadata(indexDisplayMetadata, itemId)
-				local displayName = readMetadataText(displayMetadata, "DisplayName")
-					or tostring(itemInfo.DisplayName or itemInfo.Name or entry.name)
+				local displayInfo = CrewCatalog.GetDisplayInfo(itemId, displayMetadata)
+				local displayName = tostring(displayInfo.DisplayName or itemInfo.DisplayName or itemInfo.Name or entry.name)
 				local rarity = readMetadataText(displayMetadata, "Rarity")
 					or tostring(itemInfo.Rarity or entry.info.Rarity or "Common")
 				local render = readMetadataText(displayMetadata, "Render")
@@ -472,13 +471,22 @@ function IndexData.buildViewModel(options)
 					ModelName = itemInfo.ModelName or entry.info.ModelName,
 				})
 
-				local rawIncome = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
-					* CrewIncomeBalance.GetVariantIncomeMultiplier(variantKey)
+				local rawIncome = CrewIncomeBalance.ComputeIncome(
+					CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity),
+					variantKey,
+					nil,
+					rarity
+				)
 				local unit = {
 					id = itemId,
 					baseName = entry.name,
 					name = entry.name,
 					displayName = displayName,
+					baseDisplayName = tostring(displayInfo.BaseDisplayName or displayName),
+					variant = tostring(displayInfo.Variant or variantKey),
+					variantTag = tostring(displayInfo.VariantTag or ""),
+					variantDisplayName = tostring(displayInfo.VariantDisplayName or ""),
+					showVariantTag = displayInfo.ShowVariantTag == true,
 					rarity = rarity,
 					production = formatIncomeRange(rarity, variantKey),
 					hiddenProduction = "??? Beli/s",
@@ -607,7 +615,7 @@ function IndexData.buildViewModel(options)
 			id = "DevilFruit:" .. tostring(fruit.FruitKey),
 			itemKind = "DevilFruit",
 			name = fruit.FruitKey,
-			displayName = tostring(fruit.DisplayName or fruit.FruitKey or "Devil Fruit"),
+			displayName = DevilFruits.GetPlayerDisplayName(fruit),
 			rarity = tostring(fruit.Rarity or "Rare"),
 			discovered = discovered,
 			category = "fruits",

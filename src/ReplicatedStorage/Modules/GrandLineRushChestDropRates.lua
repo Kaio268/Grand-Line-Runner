@@ -173,18 +173,34 @@ local function buildBonusRewardsSection(chestData)
 end
 
 local function buildFruitRaritySection(chestData)
-	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
-		then 1
-		else normalizeChance(ChestRewards.FruitGateChanceByTier[chestData.Tier])
-	if gateChance <= 0 then
-		return nil
-	end
-
-	if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit and chestData.FruitRarity then
-		return nil
-	end
-
 	local rows = {}
+	if chestData.ChestKind ~= ChestRewards.ChestKinds.DevilFruit then
+		for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+			local chance = ChestRewards.GetStandardFruitChance(chestData.Tier, rarityName)
+			if chance > 0 then
+				rows[#rows + 1] = {
+					name = rarityName,
+					chance = chance,
+					rarity = rarityName,
+				}
+			end
+		end
+
+		if #rows <= 0 then
+			return nil
+		end
+
+		return {
+			title = "Devil Fruit Rates",
+			note = "Percentages are direct final chances for this chest tier.",
+			rows = rows,
+		}
+	end
+
+	if chestData.FruitRarity then
+		return nil
+	end
+
 	local totalWeight = 0
 	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
 		totalWeight += math.max(0, tonumber(ChestRewards.FruitRarityWeights[rarityName]) or 0)
@@ -194,7 +210,7 @@ local function buildFruitRaritySection(chestData)
 		if rarityWeight > 0 and totalWeight > 0 then
 			rows[#rows + 1] = {
 				name = rarityName,
-				chance = gateChance * (rarityWeight / totalWeight),
+				chance = rarityWeight / totalWeight,
 				rarity = rarityName,
 			}
 		end
@@ -202,23 +218,58 @@ local function buildFruitRaritySection(chestData)
 
 	return {
 		title = "Devil Fruit Rates",
-		note = "Percentages include this chest's devil-fruit roll chance.",
+		note = "Devil Fruit chests are guaranteed to roll a fruit.",
+		rows = rows,
+	}
+end
+
+local function buildFruitPitySection(chestData, chestRewardsState)
+	if chestData.ChestKind ~= ChestRewards.ChestKinds.Standard then
+		return nil
+	end
+
+	local eligibleRarities = ChestRewards.GetStandardFruitRaritiesForTier(chestData.Tier)
+	if #eligibleRarities <= 0 then
+		return nil
+	end
+
+	local progress = ChestRewards.GetFruitPityProgress(chestRewardsState, chestData.Tier)
+	local rows = {}
+	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
+		local entry = progress[rarityName]
+		if typeof(entry) == "table" then
+			local failedOpens = math.max(0, math.floor(tonumber(entry.FailedOpens) or 0))
+			local hardPity = math.max(1, math.floor(tonumber(entry.HardPity) or 1))
+			rows[#rows + 1] = {
+				name = string.format("%s Fruit Pity: %d/%d", rarityName, failedOpens, hardPity),
+				rarity = rarityName,
+			}
+		end
+	end
+
+	if #rows <= 0 then
+		return nil
+	end
+
+	return {
+		title = "Fruit Pity",
+		note = "Hard pity progress for this chest tier.",
 		rows = rows,
 	}
 end
 
 local function buildPossibleFruitsSection(chestData)
-	local gateChance = if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit
-		then 1
-		else normalizeChance(ChestRewards.FruitGateChanceByTier[chestData.Tier])
-	if gateChance <= 0 then
-		return nil
-	end
-
 	local pools = getFruitPools()
 	local rows = {}
 	for _, rarityName in ipairs(ChestRewards.FruitRarityOrder) do
-		if chestData.FruitRarity == nil or chestData.FruitRarity == rarityName then
+		local eligible = false
+		if chestData.ChestKind == ChestRewards.ChestKinds.DevilFruit then
+			eligible = chestData.FruitRarity == nil or chestData.FruitRarity == rarityName
+		else
+			eligible = ChestRewards.IsStandardFruitRarityEligible(chestData.Tier, rarityName)
+		end
+
+		if eligible then
 			for _, fruit in ipairs(pools[rarityName] or {}) do
 				rows[#rows + 1] = {
 					name = tostring(fruit.DisplayName or fruit.FruitKey),
@@ -238,7 +289,7 @@ local function buildPossibleFruitsSection(chestData)
 	}
 end
 
-function ChestDropRates.GetPreview(chestDataOrName)
+function ChestDropRates.GetPreview(chestDataOrName, chestRewardsState)
 	local chestData = if typeof(chestDataOrName) == "string"
 		then ChestUtils.ParseInventoryName(chestDataOrName)
 		else ChestUtils.BuildChestData(chestDataOrName)
@@ -257,6 +308,11 @@ function ChestDropRates.GetPreview(chestDataOrName)
 	local fruitRateSection = buildFruitRaritySection(chestData)
 	if fruitRateSection then
 		sections[#sections + 1] = fruitRateSection
+	end
+
+	local fruitPitySection = buildFruitPitySection(chestData, chestRewardsState)
+	if fruitPitySection then
+		sections[#sections + 1] = fruitPitySection
 	end
 
 	local possibleFruitsSection = buildPossibleFruitsSection(chestData)

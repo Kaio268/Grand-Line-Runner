@@ -129,6 +129,50 @@ local function footerLabel(props)
 	})
 end
 
+local function shouldShowCrewVariantTag(unit)
+	if typeof(unit) ~= "table" or tostring(unit.itemKind or "") ~= "CrewMember" then
+		return false
+	end
+
+	local variantTag = tostring(unit.variantTag or unit.VariantTag or "")
+	return unit.showVariantTag == true and variantTag ~= "" and variantTag ~= "Normal"
+end
+
+local function footerChip(text, textColor, layoutOrder, width)
+	return e("Frame", {
+		BackgroundColor3 = Theme.Palette.CardFooter,
+		BackgroundTransparency = 0.04,
+		BorderSizePixel = 0,
+		LayoutOrder = layoutOrder,
+		Size = UDim2.fromOffset(width, 15),
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+		Stroke = e("UIStroke", {
+			Color = textColor,
+			Transparency = 0.22,
+			Thickness = 1,
+		}),
+		Label = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Theme.Fonts.Label,
+			Size = UDim2.fromScale(1, 1),
+			Text = text,
+			TextColor3 = textColor,
+			TextScaled = true,
+			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeTransparency = 0.48,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		}, {
+			TextSizeConstraint = e("UITextSizeConstraint", {
+				MaxTextSize = 9,
+				MinTextSize = 6,
+			}),
+		}),
+	})
+end
+
 local function productionBadge(text)
 	local badgeText = tostring(text or "")
 	local measuredSize = TextService:GetTextSize(
@@ -297,7 +341,53 @@ local function imageAreaShell(children, rarityStyle, hovered, appearance)
 	return shellChildren
 end
 
-local function footer(rarityText, nameText, rarityColor)
+local function footer(rarityText, nameText, rarityColor, unit)
+	local crewFooter = typeof(unit) == "table" and tostring(unit.itemKind or "") == "CrewMember"
+	local variantTag = tostring(if typeof(unit) == "table" then unit.variantTag or unit.VariantTag or "" else "")
+	local showVariantTag = shouldShowCrewVariantTag(unit)
+	if crewFooter then
+		return e("Frame", {
+			AnchorPoint = Vector2.new(0, 1),
+			BackgroundColor3 = Theme.Palette.CardFooter,
+			BackgroundTransparency = 0.2,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0, 4, 1, -4),
+			Size = UDim2.new(1, -8, 0, FOOTER_HEIGHT),
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = IMAGE_CORNER_RADIUS,
+			}),
+			Stroke = e("UIStroke", {
+				Color = Theme.Palette.CardFooterStroke,
+				Transparency = 0.12,
+			}),
+			Tags = e("Frame", {
+				BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(8, 4),
+				Size = UDim2.new(1, -16, 0, 16),
+			}, {
+				Layout = e("UIListLayout", {
+					FillDirection = Enum.FillDirection.Horizontal,
+					Padding = UDim.new(0, 4),
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					VerticalAlignment = Enum.VerticalAlignment.Center,
+				}),
+				Rarity = footerChip(rarityText, rarityColor, 1, 64),
+				Variant = showVariantTag and footerChip(variantTag, rarityColor, 2, 58) or nil,
+			}),
+			Name = footerLabel({
+				font = Theme.Fonts.Display,
+				position = UDim2.fromOffset(8, 21),
+				size = UDim2.new(1, -16, 0, 24),
+				text = nameText,
+				textColor = Theme.Palette.Text,
+				textSize = 14,
+				textWrapped = true,
+				textYAlignment = Enum.TextYAlignment.Top,
+			}),
+		})
+	end
+
 	return e("Frame", {
 		AnchorPoint = Vector2.new(0, 1),
 		BackgroundColor3 = Theme.Palette.CardFooter,
@@ -588,6 +678,9 @@ local function createDiscoveredPreview(unit, renderPreview, isFruit)
 			Character = e(PreviewViewport, {
 				previewKind = unit.previewKind,
 				previewName = unit.previewName,
+				animateCrewIdle = unit.previewKind == "CrewMember",
+				crewMemberId = unit.previewCrewMemberId or unit.id or unit.baseName,
+				gender = unit.gender or unit.Gender,
 				size = PREVIEW_SIZE,
 				position = PREVIEW_POSITION,
 				anchorPoint = PREVIEW_ANCHOR,
@@ -604,6 +697,9 @@ local function createDiscoveredPreview(unit, renderPreview, isFruit)
 				previewKind = "CrewMember",
 				previewName = crewModelName,
 				preferModel = true,
+				animateCrewIdle = true,
+				crewMemberId = unit.previewCrewMemberId or unit.id or unit.baseName,
+				gender = unit.gender or unit.Gender,
 				size = PREVIEW_SIZE,
 				position = PREVIEW_POSITION,
 				anchorPoint = PREVIEW_ANCHOR,
@@ -760,7 +856,8 @@ local function IndexCard(props)
 		Footer = footer(
 			tostring(unit.rarity or ""),
 			tostring(unit.displayName or unit.name or ""),
-			rarity.textColor or Theme.Palette.Text
+			rarity.textColor or Theme.Palette.Text,
+			unit
 		),
 	}
 

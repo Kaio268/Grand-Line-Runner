@@ -80,13 +80,13 @@ function Context.Create()
 	local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 	local ShipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 	local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
-	local StandUpgradeMults = require(ServerScriptService.Modules.StandsMultiply)
 
 	local Modules = ReplicatedStorage:WaitForChild("Modules")
 	local Configs = Modules:WaitForChild("Configs")
 	local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 	local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+	local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 	local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 	local ShipSlotLevelPanelState = require(Modules:WaitForChild("Crew"):WaitForChild("ShipSlotLevelPanelState"))
 	local PlotUpgradeConfig = require(Configs:WaitForChild("PlotUpgrade"))
@@ -159,13 +159,13 @@ function Context.Create()
 		ShipRuntimeSignals = ShipRuntimeSignals,
 		ShipRuntimeService = ShipRuntimeService,
 		ShipSlotService = ShipSlotService,
-		StandUpgradeMults = StandUpgradeMults,
 		CurrencyUtil = CurrencyUtil,
 		PopUpModule = PopUpModule,
 		DataManager = DataManager,
 		Modules = Modules,
 		Configs = Configs,
 		CrewCatalog = CrewCatalog,
+		CrewIncomeBalance = CrewIncomeBalance,
 		CrewOverhead = CrewOverhead,
 		ShipSlotLevelPanelState = ShipSlotLevelPanelState,
 		VariantCfg = CrewCatalog.GetVariantConfig(),

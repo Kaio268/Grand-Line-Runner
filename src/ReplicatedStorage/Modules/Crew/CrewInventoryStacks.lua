@@ -98,18 +98,150 @@ local function createStack(crewMemberId, rarity, maxQuantity, stackNumber, sortO
 	}
 end
 
-function CrewInventoryStacks.BuildAvailableStacks(inventory)
+local function buildAssignedSet(assignments)
+	local assigned = {}
+	if typeof(assignments) ~= "table" then
+		return assigned
+	end
+
+	for _, instanceId in pairs(assignments) do
+		local normalized = tostring(instanceId or "")
+		if normalized ~= "" then
+			assigned[normalized] = true
+		end
+	end
+	return assigned
+end
+
+local function buildOrderedAssignmentRecords(inventory, assignments)
+	local records = {}
+	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" or typeof(assignments) ~= "table" then
+		return records
+	end
+
+	for rawSlotIndex, rawInstanceId in pairs(assignments) do
+		local slotIndex = math.floor(tonumber(rawSlotIndex) or 0)
+		local instanceId = tostring(rawInstanceId or "")
+		local instanceData = inventory.ById[instanceId]
+		if
+			slotIndex > 0
+			and instanceId ~= ""
+			and typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+		then
+			local crewMemberId, info = resolveCrewMember(instanceData)
+			if crewMemberId then
+				table.insert(records, {
+					SlotIndex = slotIndex,
+					AssignmentInstanceId = instanceId,
+					InstanceId = getInstanceId(instanceId, instanceData),
+					Data = instanceData,
+					CrewMemberId = crewMemberId,
+					Rarity = getStackRarity(instanceData, info),
+				})
+			end
+		end
+	end
+
+	table.sort(records, function(left, right)
+		if left.SlotIndex ~= right.SlotIndex then
+			return left.SlotIndex < right.SlotIndex
+		end
+		return compareInstanceIds(left.InstanceId, right.InstanceId)
+	end)
+
+	return records
+end
+
+function CrewInventoryStacks.BuildAssignedStackMetadata(inventory, assignments)
+	local records = buildOrderedAssignmentRecords(inventory, assignments)
+	local bucketsByCrewMemberId = {}
+	local orderedCrewMemberIds = {}
+
+	for _, record in ipairs(records) do
+		local bucket = bucketsByCrewMemberId[record.CrewMemberId]
+		if bucket == nil then
+			bucket = {
+				CrewMemberId = record.CrewMemberId,
+				Rarity = record.Rarity,
+				MaxQuantity = CrewStacking.GetMaxStackForRarity(record.Rarity),
+				Instances = {},
+			}
+			bucketsByCrewMemberId[record.CrewMemberId] = bucket
+			table.insert(orderedCrewMemberIds, record.CrewMemberId)
+		end
+
+		table.insert(bucket.Instances, record)
+	end
+
+	local metadataByInstanceId = {}
+	for _, crewMemberId in ipairs(orderedCrewMemberIds) do
+		local bucket = bucketsByCrewMemberId[crewMemberId]
+		local stacks = {}
+		local stack = nil
+		local stackNumber = 0
+		local assignmentIdsByInstanceId = {}
+
+		for _, record in ipairs(bucket.Instances) do
+			if stack == nil or #stack.InstanceIds >= bucket.MaxQuantity then
+				stackNumber += 1
+				stack = {
+					StackId = string.format("CrewMemberHotbar|%s|%d", tostring(bucket.CrewMemberId), stackNumber),
+					StackNumber = stackNumber,
+					InstanceIds = {},
+				}
+				table.insert(stacks, stack)
+			end
+
+			table.insert(stack.InstanceIds, record.InstanceId)
+			assignmentIdsByInstanceId[record.InstanceId] = record.AssignmentInstanceId
+		end
+
+		for _, currentStack in ipairs(stacks) do
+			local quantity = #currentStack.InstanceIds
+			for index, instanceId in ipairs(currentStack.InstanceIds) do
+				local metadata = {
+					CrewMemberId = bucket.CrewMemberId,
+					Rarity = bucket.Rarity,
+					HotbarStackId = currentStack.StackId,
+					HotbarStackNumber = currentStack.StackNumber,
+					HotbarStackIndex = index,
+					HotbarStackQuantity = quantity,
+					HotbarStackMaxQuantity = bucket.MaxQuantity,
+				}
+				metadataByInstanceId[instanceId] = metadata
+				local assignmentInstanceId = tostring(assignmentIdsByInstanceId[instanceId] or "")
+				if assignmentInstanceId ~= "" then
+					metadataByInstanceId[assignmentInstanceId] = metadata
+				end
+			end
+		end
+	end
+
+	return metadataByInstanceId
+end
+
+function CrewInventoryStacks.BuildAvailableStacks(inventory, options)
 	local stacks = {}
 	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
 		return stacks
 	end
 
+	options = if typeof(options) == "table" then options else {}
+	local assignedSet = buildAssignedSet(options.Assignments)
 	local bucketsByCrewMemberId = {}
 	local orderedCrewMemberIds = {}
 
 	for _, instanceId in ipairs(buildOrderedInstanceIds(inventory)) do
 		local instanceData = inventory.ById[tostring(instanceId)]
-		if typeof(instanceData) == "table" and tostring(instanceData.AssignedStand or "") == "" then
+		local normalizedInstanceId = getInstanceId(instanceId, instanceData)
+		if
+			typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+			and assignedSet[normalizedInstanceId] ~= true
+		then
 			local crewMemberId, info = resolveCrewMember(instanceData)
 			if crewMemberId then
 				local bucket = bucketsByCrewMemberId[crewMemberId]
@@ -125,7 +257,6 @@ function CrewInventoryStacks.BuildAvailableStacks(inventory)
 					table.insert(orderedCrewMemberIds, crewMemberId)
 				end
 
-				local normalizedInstanceId = getInstanceId(instanceId, instanceData)
 				table.insert(bucket.Instances, {
 					InstanceId = normalizedInstanceId,
 					Data = instanceData,
@@ -165,11 +296,11 @@ function CrewInventoryStacks.BuildAvailableStacks(inventory)
 	return stacks
 end
 
-function CrewInventoryStacks.BuildAvailableCounts(inventory)
+function CrewInventoryStacks.BuildAvailableCounts(inventory, options)
 	local counts = {}
 	local representatives = {}
 
-	for _, stack in ipairs(CrewInventoryStacks.BuildAvailableStacks(inventory)) do
+	for _, stack in ipairs(CrewInventoryStacks.BuildAvailableStacks(inventory, options)) do
 		counts[stack.CrewMemberId] = (counts[stack.CrewMemberId] or 0) + stack.Quantity
 		if representatives[stack.CrewMemberId] == nil then
 			representatives[stack.CrewMemberId] = stack.Representative
@@ -240,9 +371,9 @@ function CrewInventoryStacks.CalculateIncomingFitFromStacks(stacks, crewMemberId
 	}
 end
 
-function CrewInventoryStacks.CalculateIncomingFit(inventory, crewMemberId, amount, unlockedSlots)
+function CrewInventoryStacks.CalculateIncomingFit(inventory, crewMemberId, amount, unlockedSlots, options)
 	return CrewInventoryStacks.CalculateIncomingFitFromStacks(
-		CrewInventoryStacks.BuildAvailableStacks(inventory),
+		CrewInventoryStacks.BuildAvailableStacks(inventory, options),
 		crewMemberId,
 		amount,
 		unlockedSlots
@@ -340,9 +471,9 @@ function CrewInventoryStacks.CalculateBatchFitFromStacks(stacks, grants, unlocke
 	}
 end
 
-function CrewInventoryStacks.CalculateBatchFit(inventory, grants, unlockedSlots)
+function CrewInventoryStacks.CalculateBatchFit(inventory, grants, unlockedSlots, options)
 	return CrewInventoryStacks.CalculateBatchFitFromStacks(
-		CrewInventoryStacks.BuildAvailableStacks(inventory),
+		CrewInventoryStacks.BuildAvailableStacks(inventory, options),
 		grants,
 		unlockedSlots
 	)

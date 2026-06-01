@@ -668,6 +668,9 @@ local acknowledgePreviewCard
 local acknowledgePreviewViewport
 local acknowledgePreviewFallback
 local acknowledgeRewardsContainer
+local acknowledgePityBanner
+local acknowledgePityActivation
+local acknowledgePityProgress
 
 local DEVIL_FRUIT_ACK_THEME = {
 	FruitBackgroundImage = "rbxassetid://134053886107384",
@@ -909,7 +912,19 @@ local function ensureAcknowledgeGui()
 		local buttonLabel = button and button:FindFirstChild("Label")
 		local previewCard = content and content:FindFirstChild("PreviewCard")
 		local rewards = content and content:FindFirstChild("Rewards")
-		if panel and topBar and content and button and buttonLabel and previewCard and rewards then
+		local pityBanner = acknowledgeGui:FindFirstChild("PityBanner")
+		local pityActivation = pityBanner and pityBanner:FindFirstChild("PityActivation")
+		local pityProgress = pityBanner and pityBanner:FindFirstChild("PityProgress")
+		if panel
+			and topBar
+			and content
+			and button
+			and buttonLabel
+			and previewCard
+			and rewards
+			and pityBanner
+			and pityActivation
+			and pityProgress then
 			return
 		end
 
@@ -928,6 +943,9 @@ local function ensureAcknowledgeGui()
 		acknowledgePreviewViewport = nil
 		acknowledgePreviewFallback = nil
 		acknowledgeRewardsContainer = nil
+		acknowledgePityBanner = nil
+		acknowledgePityActivation = nil
+		acknowledgePityProgress = nil
 	end
 
 	local player = Players.LocalPlayer
@@ -951,6 +969,68 @@ local function ensureAcknowledgeGui()
 	acknowledgeOverlay.Size = UDim2.fromScale(1, 1)
 	acknowledgeOverlay.ZIndex = 74
 	acknowledgeOverlay.Parent = acknowledgeGui
+
+	acknowledgePityBanner = Instance.new("Frame")
+	acknowledgePityBanner.Name = "PityBanner"
+	acknowledgePityBanner.AnchorPoint = Vector2.new(0.5, 0)
+	acknowledgePityBanner.Position = UDim2.fromScale(0.5, 0.025)
+	acknowledgePityBanner.Size = UDim2.new(0.58, 0, 0, 58)
+	acknowledgePityBanner.BackgroundColor3 = DEVIL_FRUIT_ACK_THEME.HeaderBg
+	acknowledgePityBanner.BackgroundTransparency = 0.08
+	acknowledgePityBanner.BorderSizePixel = 0
+	acknowledgePityBanner.Visible = false
+	acknowledgePityBanner.ZIndex = 92
+	acknowledgePityBanner.Parent = acknowledgeGui
+	ensureAckCorner(acknowledgePityBanner, 10)
+	local pityBannerStroke = ensureAckStroke(acknowledgePityBanner, DEVIL_FRUIT_ACK_THEME.GoldHighlight, 0.18, 2)
+	pityBannerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	ensureAckGradient(acknowledgePityBanner, DEVIL_FRUIT_ACK_THEME.SecondaryBg, DEVIL_FRUIT_ACK_THEME.HeaderBg)
+
+	local pityBannerSize = Instance.new("UISizeConstraint")
+	pityBannerSize.MaxSize = Vector2.new(780, 66)
+	pityBannerSize.MinSize = Vector2.new(300, 44)
+	pityBannerSize.Parent = acknowledgePityBanner
+
+	acknowledgePityActivation = Instance.new("TextLabel")
+	acknowledgePityActivation.Name = "PityActivation"
+	acknowledgePityActivation.BackgroundTransparency = 1
+	acknowledgePityActivation.Font = Enum.Font.GothamBold
+	acknowledgePityActivation.Position = UDim2.new(0, 14, 0.08, 0)
+	acknowledgePityActivation.Size = UDim2.new(1, -28, 0.36, 0)
+	acknowledgePityActivation.Text = ""
+	acknowledgePityActivation.TextColor3 = DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	acknowledgePityActivation.TextScaled = true
+	acknowledgePityActivation.TextWrapped = true
+	acknowledgePityActivation.TextXAlignment = Enum.TextXAlignment.Center
+	acknowledgePityActivation.TextYAlignment = Enum.TextYAlignment.Center
+	acknowledgePityActivation.Visible = false
+	acknowledgePityActivation.ZIndex = 93
+	acknowledgePityActivation.Parent = acknowledgePityBanner
+
+	local pityActivationSize = Instance.new("UITextSizeConstraint")
+	pityActivationSize.MaxTextSize = 18
+	pityActivationSize.MinTextSize = 10
+	pityActivationSize.Parent = acknowledgePityActivation
+
+	acknowledgePityProgress = Instance.new("TextLabel")
+	acknowledgePityProgress.Name = "PityProgress"
+	acknowledgePityProgress.BackgroundTransparency = 1
+	acknowledgePityProgress.Font = Enum.Font.GothamBold
+	acknowledgePityProgress.Position = UDim2.new(0, 14, 0.22, 0)
+	acknowledgePityProgress.Size = UDim2.new(1, -28, 0.56, 0)
+	acknowledgePityProgress.Text = ""
+	acknowledgePityProgress.TextColor3 = DEVIL_FRUIT_ACK_THEME.TextMain
+	acknowledgePityProgress.TextScaled = true
+	acknowledgePityProgress.TextWrapped = true
+	acknowledgePityProgress.TextXAlignment = Enum.TextXAlignment.Center
+	acknowledgePityProgress.TextYAlignment = Enum.TextYAlignment.Center
+	acknowledgePityProgress.ZIndex = 93
+	acknowledgePityProgress.Parent = acknowledgePityBanner
+
+	local pityProgressSize = Instance.new("UITextSizeConstraint")
+	pityProgressSize.MaxTextSize = 16
+	pityProgressSize.MinTextSize = 9
+	pityProgressSize.Parent = acknowledgePityProgress
 
 	acknowledgePanel = Instance.new("Frame")
 	acknowledgePanel.Name = "Panel"
@@ -1153,11 +1233,76 @@ local function ensureAcknowledgeGui()
 		if acknowledgeGui then
 			acknowledgeGui.Enabled = false
 		end
+		if acknowledgePityBanner then
+			acknowledgePityBanner.Visible = false
+		end
 	end)
 end
 
 local function formatRewardAmount(amount)
 	return CurrencyUtil.formatCount(amount)
+end
+
+local function getAcknowledgePityActivationText(pityStatus)
+	if typeof(pityStatus) ~= "table" or typeof(pityStatus.activationTexts) ~= "table" then
+		return ""
+	end
+
+	local parts = {}
+	for _, text in ipairs(pityStatus.activationTexts) do
+		local normalized = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if normalized ~= "" then
+			parts[#parts + 1] = normalized
+		end
+	end
+
+	return table.concat(parts, "  ")
+end
+
+local function renderAcknowledgePityStatus(pityStatus)
+	if not acknowledgePityBanner then
+		return
+	end
+
+	if typeof(pityStatus) ~= "table" or tostring(pityStatus.progressText or "") == "" then
+		acknowledgePityBanner.Visible = false
+		if acknowledgePityActivation then
+			acknowledgePityActivation.Text = ""
+			acknowledgePityActivation.Visible = false
+		end
+		if acknowledgePityProgress then
+			acknowledgePityProgress.Text = ""
+		end
+		return
+	end
+
+	local accentColor = if typeof(pityStatus.accentColor) == "Color3"
+		then pityStatus.accentColor
+		else DEVIL_FRUIT_ACK_THEME.GoldHighlight
+	local activationText = getAcknowledgePityActivationText(pityStatus)
+	local bannerStroke = ensureAckStroke(acknowledgePityBanner, accentColor, 0.18, 2)
+	bannerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+	if acknowledgePityActivation then
+		acknowledgePityActivation.Text = activationText
+		acknowledgePityActivation.TextColor3 = accentColor
+		acknowledgePityActivation.Visible = activationText ~= ""
+	end
+
+	if acknowledgePityProgress then
+		acknowledgePityProgress.Text = tostring(pityStatus.progressText)
+		acknowledgePityProgress.TextColor3 = if activationText ~= ""
+			then DEVIL_FRUIT_ACK_THEME.TextSecondary
+			else DEVIL_FRUIT_ACK_THEME.TextMain
+		acknowledgePityProgress.Position = if activationText ~= ""
+			then UDim2.new(0, 14, 0.48, 0)
+			else UDim2.new(0, 14, 0.22, 0)
+		acknowledgePityProgress.Size = if activationText ~= ""
+			then UDim2.new(1, -28, 0.42, 0)
+			else UDim2.new(1, -28, 0.56, 0)
+	end
+
+	acknowledgePityBanner.Visible = true
 end
 
 local function getChestResultsPresenter()
@@ -1261,6 +1406,8 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 	if acknowledgePanelScale then
 		acknowledgePanelScale.Scale = getAcknowledgementScale()
 	end
+
+	renderAcknowledgePityStatus(options.PityStatus or options.pityStatus)
 
 	local title = tostring(options.Title or options.title or "Notice")
 	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")

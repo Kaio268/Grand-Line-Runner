@@ -14,7 +14,7 @@ local ClientRuntime = {
 }
 
 local React, ReactRoblox, App, Responsive
-local CrewCatalog, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
+local CrewCatalog, CrewIncomeBalance, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
 local ChestUtils, ChestDropRates, Titles, Economy, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
@@ -30,6 +30,7 @@ do
 	Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 	CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+	CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 	CrewPreviewImages = require(Modules:WaitForChild("Crew"):WaitForChild("CrewPreviewImages"))
 	Gears = require(Modules:WaitForChild("Configs"):WaitForChild("Gears"))
 	DevilFruits = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
@@ -103,6 +104,18 @@ ClientRuntime.SnapshotRemote = ClientRuntime.waitForOptionalChild(
 	"RemoteFunction",
 	ClientRuntime.OptionalRemoteWaitSeconds
 )
+ClientRuntime.CrewActionRemote = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"CrewMemberActionRequest",
+	"RemoteFunction",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.CrewInventoryChangedRemote = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"CrewMemberInventoryChanged",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
 ClientRuntime.IncomeStatusDisplayMetadataRemote = ClientRuntime.waitForOptionalChild(
 	ReplicatedStorage,
 	"IncomeStatusDisplayMetadataRequest",
@@ -160,6 +173,39 @@ function ClientRuntime.fireEquipRequest(kind, name)
 	end
 
 	remote:FireServer(kind, name)
+end
+
+function ClientRuntime.getCrewActionRemote()
+	if ClientRuntime.CrewActionRemote and ClientRuntime.CrewActionRemote:IsA("RemoteFunction") then
+		return ClientRuntime.CrewActionRemote
+	end
+
+	ClientRuntime.CrewActionRemote = ClientRuntime.findOptionalChild(ReplicatedStorage, "CrewMemberActionRequest", "RemoteFunction")
+	return ClientRuntime.CrewActionRemote
+end
+
+function ClientRuntime.requestCrewAction(payload)
+	local remote = ClientRuntime.getCrewActionRemote()
+	if not (remote and remote:IsA("RemoteFunction")) then
+		warn("[InventoryUI] CrewMemberActionRequest is unavailable; crew action is temporarily disabled.")
+		return
+	end
+
+	task.spawn(function()
+		local ok, response = pcall(function()
+			return remote:InvokeServer(payload)
+		end)
+		if not ok then
+			warn("[InventoryUI] Crew action failed", response)
+			return
+		end
+		if typeof(response) == "table" and response.Ok ~= true then
+			warn("[InventoryUI] Crew action rejected", tostring(response.Reason or "unknown"))
+		end
+		if ClientRuntime.ScheduleInventorySnapshotRequest ~= nil then
+			ClientRuntime.ScheduleInventorySnapshotRequest("crewAction")
+		end
+	end)
 end
 
 function ClientRuntime.getCrewProtectionActionRemote()
@@ -392,13 +438,17 @@ local acquisitionCounter = 0
 local metaState = nil
 local canonicalChestCountsDirty = true
 local canonicalChestCountsResolved = false
-local equippedKind = nil
-local equippedName = nil
-local keyboardHotbar = {}
+ClientRuntime.HotbarState = {
+	KeyboardHotbar = {},
+	CrewQuickSlotKeys = {},
+}
 local renderQueued = false
 local destroyed = false
 local stopObservingState = nil
 local render
+local activateInventoryEntry
+local activateHotbarEntry
+local requestCrewEntryAction
 local scheduleRender
 local syncChestsFromCanonicalSources
 local syncChestsFromInventory
@@ -530,6 +580,23 @@ local function clearSnapshotOwnedItems()
 	end
 end
 
+function ClientRuntime.copyCrewDetails(details)
+	if typeof(details) ~= "table" then
+		return nil
+	end
+
+	local copy = {}
+	for key, value in pairs(details) do
+		if typeof(value) ~= "table" then
+			copy[key] = value
+		end
+	end
+	if next(copy) ~= nil then
+		return copy
+	end
+	return nil
+end
+
 local function getEntryDisplayMetadata(entry)
 	if typeof(entry) ~= "table" then
 		return nil
@@ -541,9 +608,38 @@ local function getEntryDisplayMetadata(entry)
 		metadata.displayName = displayName
 	end
 
+	local baseDisplayName = tostring(entry.BaseDisplayName or entry.baseDisplayName or "")
+	if baseDisplayName ~= "" then
+		metadata.baseDisplayName = baseDisplayName
+	end
+
+	local variant = tostring(entry.Variant or entry.variant or "")
+	if variant ~= "" then
+		metadata.variant = variant
+	end
+
+	local variantTag = tostring(entry.VariantTag or entry.variantTag or "")
+	if variantTag ~= "" then
+		metadata.variantTag = variantTag
+	end
+
+	local variantDisplayName = tostring(entry.VariantDisplayName or entry.variantDisplayName or "")
+	if variantDisplayName ~= "" then
+		metadata.variantDisplayName = variantDisplayName
+	end
+
+	if entry.ShowVariantTag ~= nil or entry.showVariantTag ~= nil then
+		metadata.showVariantTag = (entry.ShowVariantTag or entry.showVariantTag) == true
+	end
+
 	local rarity = tostring(entry.Rarity or entry.rarity or entry.RarityLabel or entry.rarityLabel or "")
 	if rarity ~= "" then
 		metadata.rarity = rarity
+	end
+
+	local gender = tostring(entry.Gender or entry.gender or "")
+	if gender ~= "" then
+		metadata.gender = gender
 	end
 
 	local renderImage = tostring(entry.Render or entry.render or entry.Image or entry.image or "")
@@ -604,16 +700,56 @@ local function getEntryDisplayMetadata(entry)
 		metadata.stackOrder = math.max(1, math.floor(stackOrder))
 	end
 
+	local hotbarStackId = tostring(entry.HotbarStackId or entry.hotbarStackId or "")
+	if hotbarStackId ~= "" then
+		metadata.hotbarStackId = hotbarStackId
+	end
+
+	local hotbarStackQuantity = tonumber(entry.HotbarStackQuantity or entry.hotbarStackQuantity)
+	if hotbarStackQuantity ~= nil then
+		metadata.hotbarStackQuantity = math.max(1, math.floor(hotbarStackQuantity))
+	end
+
+	local hotbarStackIndex = tonumber(entry.HotbarStackIndex or entry.hotbarStackIndex)
+	if hotbarStackIndex ~= nil then
+		metadata.hotbarStackIndex = math.max(1, math.floor(hotbarStackIndex))
+	end
+
+	local hotbarStackNumber = tonumber(entry.HotbarStackNumber or entry.hotbarStackNumber)
+	if hotbarStackNumber ~= nil then
+		metadata.hotbarStackNumber = math.max(1, math.floor(hotbarStackNumber))
+	end
+
+	local hotbarStackMaxQuantity = tonumber(entry.HotbarStackMaxQuantity or entry.hotbarStackMaxQuantity)
+	if hotbarStackMaxQuantity ~= nil then
+		metadata.hotbarStackMaxQuantity = math.max(1, math.floor(hotbarStackMaxQuantity))
+	end
+
 	local representativeInstanceId = tostring(entry.RepresentativeInstanceId or entry.representativeInstanceId or "")
 	if representativeInstanceId ~= "" then
 		metadata.representativeInstanceId = representativeInstanceId
 	end
 
+	local instanceId = tostring(entry.InstanceId or entry.instanceId or "")
+	if instanceId ~= "" then
+		metadata.instanceId = instanceId
+	end
+
+	local slotIndex = tonumber(entry.SlotIndex or entry.slotIndex)
+	if slotIndex ~= nil then
+		metadata.quickSlotIndex = math.max(1, math.floor(slotIndex))
+	end
+
+	local inventoryState = tostring(entry.State or entry.state or "")
+	if inventoryState ~= "" then
+		metadata.inventoryState = inventoryState
+	end
+
 	local instanceIds = entry.InstanceIds or entry.instanceIds
 	if typeof(instanceIds) == "table" then
 		local copy = {}
-		for _, instanceId in ipairs(instanceIds) do
-			local normalizedInstanceId = tostring(instanceId or "")
+		for _, rawInstanceId in ipairs(instanceIds) do
+			local normalizedInstanceId = tostring(rawInstanceId or "")
 			if normalizedInstanceId ~= "" then
 				table.insert(copy, normalizedInstanceId)
 			end
@@ -633,6 +769,11 @@ local function getEntryDisplayMetadata(entry)
 		metadata.realCharacterName = realCharacterName
 	end
 
+	local crewDetails = ClientRuntime.copyCrewDetails(entry.CrewDetails or entry.crewDetails)
+	if crewDetails ~= nil then
+		metadata.crewDetails = crewDetails
+	end
+
 	if next(metadata) ~= nil then
 		return metadata
 	end
@@ -647,8 +788,26 @@ local function applyDisplayMetadataToState(state, metadata)
 	if metadata.displayName ~= nil then
 		state.displayName = metadata.displayName
 	end
+	if metadata.baseDisplayName ~= nil then
+		state.baseDisplayName = metadata.baseDisplayName
+	end
+	if metadata.variant ~= nil then
+		state.variant = metadata.variant
+	end
+	if metadata.variantTag ~= nil then
+		state.variantTag = metadata.variantTag
+	end
+	if metadata.variantDisplayName ~= nil then
+		state.variantDisplayName = metadata.variantDisplayName
+	end
+	if metadata.showVariantTag ~= nil then
+		state.showVariantTag = metadata.showVariantTag
+	end
 	if metadata.rarity ~= nil then
 		state.rarity = metadata.rarity
+	end
+	if metadata.gender ~= nil then
+		state.gender = metadata.gender
 	end
 	if metadata.render ~= nil then
 		state.render = metadata.render
@@ -677,8 +836,32 @@ local function applyDisplayMetadataToState(state, metadata)
 	if metadata.stackOrder ~= nil then
 		state.stackOrder = metadata.stackOrder
 	end
+	if metadata.hotbarStackId ~= nil then
+		state.hotbarStackId = metadata.hotbarStackId
+	end
+	if metadata.hotbarStackQuantity ~= nil then
+		state.hotbarStackQuantity = metadata.hotbarStackQuantity
+	end
+	if metadata.hotbarStackIndex ~= nil then
+		state.hotbarStackIndex = metadata.hotbarStackIndex
+	end
+	if metadata.hotbarStackNumber ~= nil then
+		state.hotbarStackNumber = metadata.hotbarStackNumber
+	end
+	if metadata.hotbarStackMaxQuantity ~= nil then
+		state.hotbarStackMaxQuantity = metadata.hotbarStackMaxQuantity
+	end
 	if metadata.representativeInstanceId ~= nil then
 		state.representativeInstanceId = metadata.representativeInstanceId
+	end
+	if metadata.instanceId ~= nil then
+		state.instanceId = metadata.instanceId
+	end
+	if metadata.quickSlotIndex ~= nil then
+		state.quickSlotIndex = metadata.quickSlotIndex
+	end
+	if metadata.inventoryState ~= nil then
+		state.inventoryState = metadata.inventoryState
 	end
 	if metadata.instanceIds ~= nil then
 		state.instanceIds = metadata.instanceIds
@@ -688,6 +871,9 @@ local function applyDisplayMetadataToState(state, metadata)
 	end
 	if metadata.realCharacterName ~= nil then
 		state.realCharacterName = metadata.realCharacterName
+	end
+	if metadata.crewDetails ~= nil then
+		state.crewDetails = metadata.crewDetails
 	end
 	return state
 end
@@ -712,6 +898,46 @@ local function applyQuantitySnapshotEntries(entries, kind, configLookup)
 					qty = quantity,
 				}
 				itemState[key] = applyDisplayMetadataToState(nextState, getEntryDisplayMetadata(entry))
+				applied += 1
+			end
+		end
+	end
+	return applied
+end
+
+local function applyCrewQuickSlotSnapshot(quickSlots)
+	ClientRuntime.HotbarState.CrewQuickSlotKeys = {}
+	if typeof(quickSlots) ~= "table" or typeof(quickSlots.Slots) ~= "table" then
+		return 0
+	end
+
+	local applied = 0
+	for _, entry in ipairs(quickSlots.Slots) do
+		if typeof(entry) == "table" then
+			local name = tostring(entry.Name or entry.name or "")
+			local instanceId = tostring(
+				entry.InstanceId
+					or entry.instanceId
+					or entry.RepresentativeInstanceId
+					or entry.representativeInstanceId
+					or ""
+			)
+			local slotIndex = tonumber(entry.SlotIndex or entry.slotIndex)
+			if name ~= "" and instanceId ~= "" and slotIndex ~= nil and getCrewInfo(name) ~= nil then
+				local key = "CrewMemberEquipped|" .. instanceId
+				ensureAcquired(key)
+				local state = {
+					kind = CREW_ITEM_KIND,
+					name = name,
+					qty = 1,
+					instanceId = instanceId,
+					representativeInstanceId = instanceId,
+					instanceIds = { instanceId },
+					quickSlotIndex = math.floor(slotIndex),
+					inventoryState = "Equipped",
+				}
+				itemState[key] = applyDisplayMetadataToState(state, getEntryDisplayMetadata(entry))
+				ClientRuntime.HotbarState.CrewQuickSlotKeys[math.floor(slotIndex)] = key
 				applied += 1
 			end
 		end
@@ -913,6 +1139,7 @@ local function applyInventorySnapshot(snapshot)
 	local crewCount = applyQuantitySnapshotEntries(crewSnapshotEntries, CREW_ITEM_KIND, function(name)
 		return getCrewInfo(name) ~= nil
 	end)
+	local equippedCrewCount = applyCrewQuickSlotSnapshot(snapshot.CrewQuickSlots)
 
 	local devilFruitCount = 0
 	if typeof(snapshot.DevilFruits) == "table" then
@@ -971,6 +1198,8 @@ local function applyInventorySnapshot(snapshot)
 		"applied",
 		"crew",
 		crewCount,
+		"equippedCrew",
+		equippedCrewCount,
 		"devilFruits",
 		devilFruitCount,
 		"gears",
@@ -1155,7 +1384,8 @@ local function getSnapshotClaimReadyAmount(snapshotEntry, rawIncomeToCollect)
 		return math.max(0, math.floor(claimReadyAmount))
 	end
 
-	return math.floor(raw)
+	local collectMultiplier = math.max(0, tonumber(snapshotEntry.CollectMultiplier) or 1)
+	return math.max(0, math.floor((raw * collectMultiplier) + 1e-7))
 end
 
 local function refreshIncomeStatusDisplayMetadata(reason, force)
@@ -1233,11 +1463,7 @@ local function getItemDisplayName(kind, name, state)
 	end
 
 	if kind == "DevilFruit" then
-		local fruit = DevilFruits.GetFruit(name)
-		if fruit and fruit.DisplayName then
-			return tostring(fruit.DisplayName)
-		end
-		return tostring(name or "Devil Fruit")
+		return DevilFruits.GetPlayerDisplayName(name)
 	end
 
 	if isCrewItemKind(kind) then
@@ -1386,8 +1612,7 @@ local function getDisplayName(kind, name, state)
 	end
 
 	if kind == "DevilFruit" then
-		local fruit = DevilFruits.GetFruit(name)
-		return fruit and fruit.DisplayName or tostring(name)
+		return DevilFruits.GetPlayerDisplayName(name)
 	end
 
 	if isCrewItemKind(kind) then
@@ -2066,9 +2291,8 @@ local function getCaptainLogAssignment(captainSlot)
 		"StorageName",
 		"LegacyStorageName",
 	})
-	local level = math.max(
-		1,
-		math.floor(tonumber(readValueOrAttribute(captainSlot, "Level") or readValueOrAttribute(captainSlot, "StandLevel")) or 1)
+	local level = CrewIncomeBalance.NormalizeLevel(
+		readValueOrAttribute(captainSlot, "Level") or readValueOrAttribute(captainSlot, "StandLevel")
 	)
 
 	local instanceFolder = getCrewInventoryInstanceFolder(instanceId)
@@ -2082,7 +2306,7 @@ local function getCaptainLogAssignment(captainSlot)
 			})
 		end
 
-		level = math.max(1, math.floor(tonumber(readValueOrAttribute(instanceFolder, "Level")) or level))
+		level = CrewIncomeBalance.NormalizeLevel(readValueOrAttribute(instanceFolder, "Level") or level)
 	end
 
 	return crewMemberName, instanceId, level
@@ -2195,7 +2419,7 @@ local function buildCaptainLogEntryFromSnapshotRow(row)
 		return nil
 	end
 
-	local standLevel = math.max(1, math.floor(tonumber(row.StandLevel or row.Level) or 1))
+	local standLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level)
 	local instanceId = tostring(row.CrewMemberInstanceId or row.InstanceId or row.CrewInstanceId or "")
 	local claimReadyAmount = math.max(0, math.floor(tonumber(row.ClaimReadyAmount) or 0))
 	local incomePerTick = math.max(0, tonumber(row.IncomePerSecond) or 0)
@@ -2740,7 +2964,7 @@ local function buildLists()
 			gearsList[#gearsList + 1] = key
 		elseif state.kind == "Chest" and (state.qty or 0) > 0 then
 			chestsList[#chestsList + 1] = key
-		elseif isCrewItemKind(state.kind) and (state.qty or 0) > 0 then
+		elseif isCrewItemKind(state.kind) and (state.qty or 0) > 0 and state.inventoryState ~= "Equipped" then
 			crewList[#crewList + 1] = key
 		elseif state.kind == "DevilFruit" and (state.qty or 0) > 0 then
 			devilFruitList[#devilFruitList + 1] = key
@@ -2775,11 +2999,15 @@ end
 local function buildEntry(key, state)
 	local displayName = getDisplayName(state.kind, state.name, state)
 	local subtitle = getSubtitle(state.kind, state.name, state)
-	local equippedKindMatches = equippedKind == nil
-		or tostring(state.kind) == tostring(equippedKind)
-		or (isCrewItemKind(state.kind) and isCrewItemKind(equippedKind))
-	local isEquipped = tostring(state.name) == tostring(equippedName)
-		and equippedKindMatches
+	local equippedKindMatches = ClientRuntime.HotbarState.EquippedKind == nil
+		or tostring(state.kind) == tostring(ClientRuntime.HotbarState.EquippedKind)
+		or (isCrewItemKind(state.kind) and isCrewItemKind(ClientRuntime.HotbarState.EquippedKind))
+	local stateInstanceId = tostring(state.instanceId or state.representativeInstanceId or "")
+	local isEquipped = if isCrewItemKind(state.kind) then
+		(state.inventoryState == "Equipped")
+			or (stateInstanceId ~= "" and stateInstanceId == tostring(ClientRuntime.HotbarState.EquippedInstanceId or ""))
+	else
+		tostring(state.name) == tostring(ClientRuntime.HotbarState.EquippedName) and equippedKindMatches
 	local kindFooter = if state.kind == "Resource"
 		then "Display only"
 		else (isEquipped and "Click to unequip" or "Click to equip")
@@ -2811,6 +3039,11 @@ local function buildEntry(key, state)
 		kind = state.kind,
 		name = state.name,
 		displayName = displayName,
+		baseDisplayName = state.baseDisplayName,
+		variant = state.variant,
+		variantTag = state.variantTag,
+		variantDisplayName = state.variantDisplayName,
+		showVariantTag = state.showVariantTag,
 		shortName = ClientRuntime.Formatters.shortName(displayName),
 		subtitle = subtitle,
 		footer = kindFooter,
@@ -2825,8 +3058,17 @@ local function buildEntry(key, state)
 		stackId = state.stackId,
 		stackNumber = state.stackNumber,
 		stackOrder = state.stackOrder,
+		hotbarStackId = state.hotbarStackId,
+		hotbarStackQuantity = state.hotbarStackQuantity,
+		hotbarStackIndex = state.hotbarStackIndex,
+		hotbarStackNumber = state.hotbarStackNumber,
+		hotbarStackMaxQuantity = state.hotbarStackMaxQuantity,
+		instanceId = state.instanceId,
+		inventoryState = state.inventoryState,
+		quickSlotIndex = state.quickSlotIndex,
 		instanceIds = state.instanceIds,
 		representativeInstanceId = state.representativeInstanceId,
+		crewDetails = state.crewDetails,
 		accentColor = getAccentColor(state.kind, state.name, state),
 		interactive = state.kind ~= "Resource",
 		isEquipped = isEquipped,
@@ -2861,10 +3103,10 @@ local function buildRenderData()
 	local crewCollectionCount = countCrewItems(crewList)
 
 	local hotbarSlots = {}
-	keyboardHotbar = {}
+	ClientRuntime.HotbarState.KeyboardHotbar = {}
 	for slotIndex = 1, crewQuickSlots.maxSlots do
 		local entry = nil
-		local key = crewList[slotIndex]
+		local key = ClientRuntime.HotbarState.CrewQuickSlotKeys[slotIndex]
 		local state = key and itemState[key] or nil
 		if state then
 			entry = buildEntry(key, state)
@@ -2881,7 +3123,7 @@ local function buildRenderData()
 		}
 
 		if entry and entry.interactive ~= false then
-			keyboardHotbar[slotIndex] = entry
+			ClientRuntime.HotbarState.KeyboardHotbar[slotIndex] = entry
 		end
 	end
 
@@ -3696,25 +3938,41 @@ render = function()
 
 				remote:FireServer(entry.isEquipped and "" or titleId)
 			end,
-				onActivateItem = function(entry)
-					if shipUpgradeModal ~= nil then
-						return
-					end
-					if entry and entry.kind == "Chest" then
-						local availableAmount = math.max(1, tonumber(entry.quantity) or 1)
-						chestOpenPrompt = {
-							name = tostring(entry.name or ""),
-							displayName = string.format("%s Chests", tostring(entry.name or "Treasure")),
-							amount = 1,
-							maxAmount = math.min(MAX_BATCH_CHEST_OPEN_COUNT, availableAmount),
-						}
-						render()
-						return
-					end
-					if entry and entry.kind ~= "Resource" then
-						ClientRuntime.fireEquipRequest(entry.kind, entry.name)
-					end
-				end,
+			onActivateHotbarItem = function(entry)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				if entry and entry.kind ~= "Resource" then
+					activateHotbarEntry(entry)
+				end
+			end,
+			onActivateItem = function(entry)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				if entry and entry.kind == "Chest" then
+					local availableAmount = math.max(1, tonumber(entry.quantity) or 1)
+					chestOpenPrompt = {
+						name = tostring(entry.name or ""),
+						displayName = string.format("%s Chests", tostring(entry.name or "Treasure")),
+						amount = 1,
+						maxAmount = math.min(MAX_BATCH_CHEST_OPEN_COUNT, availableAmount),
+					}
+					render()
+					return
+				end
+				if entry and entry.kind ~= "Resource" then
+					activateInventoryEntry(entry)
+				end
+			end,
+			onCrewAction = function(entry, action)
+				if shipUpgradeModal ~= nil then
+					return
+				end
+				if entry and isCrewItemKind(entry.kind) then
+					requestCrewEntryAction(entry, action)
+				end
+			end,
 			onChestOpenAmountChanged = function(nextAmount)
 				if not chestOpenPrompt then
 					return
@@ -3743,7 +4001,7 @@ render = function()
 				if not chestOpenPrompt then
 					return
 				end
-				chestDropRatesPrompt = ChestDropRates.GetPreview(chestOpenPrompt.name)
+				chestDropRatesPrompt = ChestDropRates.GetPreview(chestOpenPrompt.name, metaState and metaState.ChestRewards)
 				render()
 			end,
 			onDismissChestDropRates = function()
@@ -3897,51 +4155,117 @@ syncDevilFruitsFromInventory = function()
 	end
 end
 
+local function getEntryInstanceId(entry)
+	if typeof(entry) ~= "table" then
+		return ""
+	end
+
+	local instanceId = tostring(entry.instanceId or entry.representativeInstanceId or "")
+	if instanceId ~= "" then
+		return instanceId
+	end
+
+	if typeof(entry.instanceIds) == "table" then
+		for _, rawInstanceId in ipairs(entry.instanceIds) do
+			instanceId = tostring(rawInstanceId or "")
+			if instanceId ~= "" then
+				return instanceId
+			end
+		end
+	end
+
+	return ""
+end
+
+requestCrewEntryAction = function(entry, action)
+	local instanceId = getEntryInstanceId(entry)
+	if instanceId == "" then
+		warn("[InventoryUI] Crew action blocked: missing exact instance id.")
+		return
+	end
+
+	ClientRuntime.requestCrewAction({
+		Action = action,
+		InstanceId = instanceId,
+		SlotIndex = tonumber(entry.quickSlotIndex),
+	})
+end
+
+activateInventoryEntry = function(entry)
+	if entry == nil then
+		return
+	end
+	if isCrewItemKind(entry.kind) then
+		local action = if entry.inventoryState == "Equipped" or entry.quickSlotIndex ~= nil then "Unequip" else "Equip"
+		requestCrewEntryAction(entry, action)
+		return
+	end
+	ClientRuntime.fireEquipRequest(entry.kind, entry.name)
+end
+
+activateHotbarEntry = function(entry)
+	if entry == nil then
+		return
+	end
+	if isCrewItemKind(entry.kind) then
+		requestCrewEntryAction(entry, "ToggleHoldEquipped")
+		return
+	end
+	activateInventoryEntry(entry)
+end
+
 local function activateSlot(slotNumber)
-	local entry = keyboardHotbar[slotNumber]
+	local entry = ClientRuntime.HotbarState.KeyboardHotbar[slotNumber]
 	if entry then
-		ClientRuntime.fireEquipRequest(entry.kind, entry.name)
+		activateHotbarEntry(entry)
 	end
 end
 
 local function resolveEquippedItemName(tool)
 	if not tool or not tool:IsA("Tool") then
-		return nil, nil
+		return nil, nil, nil
 	end
 
 	local canonicalName = tool:GetAttribute("InvItem") or tool:GetAttribute("InventoryItemName")
 	local canonicalKind = normalizeItemKind(tool:GetAttribute("InventoryItemKind"))
+	local instanceId = tostring(tool:GetAttribute("CrewMemberInstanceId") or tool:GetAttribute("CrewInstanceId") or "")
 	if typeof(canonicalName) == "string" and canonicalName ~= "" then
-		return canonicalKind, canonicalName
+		return canonicalKind, canonicalName, instanceId
 	end
 
-	return canonicalKind, tool.Name
+	return canonicalKind, tool.Name, instanceId
 end
 
 local function syncEquippedState(character)
 	local attributeKind = player:GetAttribute("EquippedInventoryItemKind")
 	local attributeName = player:GetAttribute("EquippedInventoryItemName")
+	local nextEquippedKind = nil
+	local nextEquippedName = nil
+	local nextEquippedInstanceId = nil
+	if character then
+		for _, child in ipairs(character:GetChildren()) do
+			if child:IsA("Tool") then
+				nextEquippedKind, nextEquippedName, nextEquippedInstanceId = resolveEquippedItemName(child)
+				break
+			end
+		end
+	end
+
 	if typeof(attributeName) == "string" and attributeName ~= "" then
 		local normalizedAttributeKind = normalizeItemKind(attributeKind)
-		equippedKind = if typeof(normalizedAttributeKind) == "string" and normalizedAttributeKind ~= ""
+		ClientRuntime.HotbarState.EquippedKind = if typeof(normalizedAttributeKind) == "string" and normalizedAttributeKind ~= ""
 			then normalizedAttributeKind
 			else nil
-		equippedName = attributeName
+		ClientRuntime.HotbarState.EquippedName = attributeName
+		ClientRuntime.HotbarState.EquippedInstanceId = nextEquippedInstanceId
 		scheduleRender()
 		return
 	end
 
-	local nextEquippedKind = nil
-	local nextEquippedName = nil
-	for _, child in ipairs(character:GetChildren()) do
-		if child:IsA("Tool") then
-			nextEquippedKind, nextEquippedName = resolveEquippedItemName(child)
-			break
-		end
-	end
-
-	equippedKind = if typeof(nextEquippedKind) == "string" and nextEquippedKind ~= "" then nextEquippedKind else nil
-	equippedName = nextEquippedName
+	ClientRuntime.HotbarState.EquippedKind =
+		if typeof(nextEquippedKind) == "string" and nextEquippedKind ~= "" then nextEquippedKind else nil
+	ClientRuntime.HotbarState.EquippedName = nextEquippedName
+	ClientRuntime.HotbarState.EquippedInstanceId = nextEquippedInstanceId
 	scheduleRender()
 end
 
@@ -3970,30 +4294,13 @@ local function hookCharacter(character)
 	end, characterConnections)
 end
 
-local requestInventorySnapshot = nil
-local scheduleInventorySnapshotRequest = nil
-
 if ClientRuntime.UpdateRemote and ClientRuntime.UpdateRemote:IsA("RemoteEvent") then
 	trackConnection(ClientRuntime.UpdateRemote.OnClientEvent, function(kind, name, value)
 		if isCrewItemKind(kind) then
-			if ClientRuntime.SnapshotRemote ~= nil and scheduleInventorySnapshotRequest ~= nil then
-				scheduleInventorySnapshotRequest("crewUpdateRemote")
-				return
+			if ClientRuntime.SnapshotRemote ~= nil and ClientRuntime.ScheduleInventorySnapshotRequest ~= nil then
+				ClientRuntime.ScheduleInventorySnapshotRequest("crewUpdateRemote")
 			end
-
-			local quantity = tonumber(value) or 0
-			local key = CREW_ITEM_KIND .. "|" .. tostring(name)
-			local previous = itemState[key]
-			if quantity > 0 then
-				ensureAcquired(key)
-				itemState[key] = applyDisplayMetadataToState({
-					kind = CREW_ITEM_KIND,
-					name = name,
-					qty = quantity,
-				}, previous)
-			else
-				itemState[key] = nil
-			end
+			return
 		elseif kind == "Gear" then
 			local key = "Gear|" .. tostring(name)
 			if value == true then
@@ -4048,7 +4355,15 @@ else
 	warn("[InventoryUI] InventoryGearRemote is unavailable; live inventory item updates are disabled.")
 end
 
-local inventorySnapshotRequestState = {
+if ClientRuntime.CrewInventoryChangedRemote and ClientRuntime.CrewInventoryChangedRemote:IsA("RemoteEvent") then
+	trackConnection(ClientRuntime.CrewInventoryChangedRemote.OnClientEvent, function()
+		if ClientRuntime.ScheduleInventorySnapshotRequest ~= nil then
+			ClientRuntime.ScheduleInventorySnapshotRequest("crewInventoryChanged")
+		end
+	end, cleanupConnections)
+end
+
+ClientRuntime.InventorySnapshotRequestState = {
 	InFlight = false,
 	LastRequestAt = 0,
 	Queued = false,
@@ -4059,40 +4374,42 @@ local inventorySnapshotRequestState = {
 	end,
 }
 
-requestInventorySnapshot = function(reason)
-	if inventorySnapshotRequestState.InFlight or not ClientRuntime.SnapshotRemote or destroyed then
+ClientRuntime.RequestInventorySnapshot = function(reason)
+	if ClientRuntime.InventorySnapshotRequestState.InFlight or not ClientRuntime.SnapshotRemote or destroyed then
 		return
 	end
 
 	local now = os.clock()
-	if (now - inventorySnapshotRequestState.LastRequestAt) < 1 then
+	if (now - ClientRuntime.InventorySnapshotRequestState.LastRequestAt) < 0.15 then
 		return
 	end
 
-	inventorySnapshotRequestState.LastRequestAt = now
-	inventorySnapshotRequestState.InFlight = true
+	ClientRuntime.InventorySnapshotRequestState.LastRequestAt = now
+	ClientRuntime.InventorySnapshotRequestState.InFlight = true
 	inventorySnapshotDebug("requested", "reason", tostring(reason))
 
 	task.spawn(function()
 		local ok, snapshot = pcall(function()
 			return ClientRuntime.SnapshotRemote:InvokeServer()
 		end)
-		inventorySnapshotRequestState.InFlight = false
+		ClientRuntime.InventorySnapshotRequestState.InFlight = false
 
 		if destroyed then
 			return
 		end
 
 		if not ok then
-			if inventorySnapshotRequestState.IsTransientInvokeError(snapshot) and reason ~= "retryTransientInvoke" then
+			if ClientRuntime.InventorySnapshotRequestState.IsTransientInvokeError(snapshot)
+				and reason ~= "retryTransientInvoke"
+			then
 				task.delay(1.25, function()
-					requestInventorySnapshot("retryTransientInvoke")
+					ClientRuntime.RequestInventorySnapshot("retryTransientInvoke")
 				end)
 				return
 			end
 			warn("[INV][SNAPSHOT][CLIENT][APP] request failed", snapshot)
 			task.delay(2, function()
-				requestInventorySnapshot("retryAfterError")
+				ClientRuntime.RequestInventorySnapshot("retryAfterError")
 			end)
 			return
 		end
@@ -4100,40 +4417,40 @@ requestInventorySnapshot = function(reason)
 		local applied = applyInventorySnapshot(snapshot)
 		if not applied then
 			task.delay(2, function()
-				requestInventorySnapshot("retryNotReady")
+				ClientRuntime.RequestInventorySnapshot("retryNotReady")
 			end)
 		end
 	end)
 end
 
-scheduleInventorySnapshotRequest = function(reason)
+ClientRuntime.ScheduleInventorySnapshotRequest = function(reason)
 	if ClientRuntime.SnapshotRemote == nil or destroyed then
 		return
 	end
 
-	inventorySnapshotRequestState.QueuedReason = tostring(reason or "queued")
-	if inventorySnapshotRequestState.Queued then
+	ClientRuntime.InventorySnapshotRequestState.QueuedReason = tostring(reason or "queued")
+	if ClientRuntime.InventorySnapshotRequestState.Queued then
 		return
 	end
 
-	inventorySnapshotRequestState.Queued = true
-	task.delay(inventorySnapshotRequestState.DebounceSeconds, function()
-		inventorySnapshotRequestState.Queued = false
+	ClientRuntime.InventorySnapshotRequestState.Queued = true
+	task.delay(ClientRuntime.InventorySnapshotRequestState.DebounceSeconds, function()
+		ClientRuntime.InventorySnapshotRequestState.Queued = false
 		if destroyed then
 			return
 		end
-		requestInventorySnapshot(inventorySnapshotRequestState.QueuedReason or reason)
+		ClientRuntime.RequestInventorySnapshot(ClientRuntime.InventorySnapshotRequestState.QueuedReason or reason)
 	end)
 end
 
 trackConnection(player:GetAttributeChangedSignal("PlayerDataReady"), function()
 	if player:GetAttribute("PlayerDataReady") == true then
-		scheduleInventorySnapshotRequest("playerDataReady")
+		ClientRuntime.ScheduleInventorySnapshotRequest("playerDataReady")
 	end
 end, cleanupConnections)
 
 task.defer(function()
-	requestInventorySnapshot("clientStartup")
+	ClientRuntime.RequestInventorySnapshot("clientStartup")
 end)
 
 if ClientRuntime.ShipUpgradeResultRemote and ClientRuntime.ShipUpgradeResultRemote:IsA("RemoteEvent") then
@@ -4230,7 +4547,8 @@ trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemKind"), f
 	if player.Character then
 		syncEquippedState(player.Character)
 	else
-		equippedKind = nil
+		ClientRuntime.HotbarState.EquippedKind = nil
+		ClientRuntime.HotbarState.EquippedInstanceId = nil
 		scheduleRender()
 	end
 end, cleanupConnections)
@@ -4239,7 +4557,8 @@ trackConnection(player:GetAttributeChangedSignal("EquippedInventoryItemName"), f
 	if player.Character then
 		syncEquippedState(player.Character)
 	else
-		equippedName = nil
+		ClientRuntime.HotbarState.EquippedName = nil
+		ClientRuntime.HotbarState.EquippedInstanceId = nil
 		scheduleRender()
 	end
 end, cleanupConnections)

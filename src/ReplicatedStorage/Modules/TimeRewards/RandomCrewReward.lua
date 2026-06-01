@@ -1,3 +1,4 @@
+local CrewCatalog = require(script.Parent.Parent:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewMembers = require(script.Parent.Parent:WaitForChild("Crew"):WaitForChild("CrewMembers"))
 
 local RandomCrewReward = {}
@@ -125,14 +126,20 @@ function RandomCrewReward.BuildPreviewInfo(playerOrUserId, rewardId, cycleStartP
 		}
 	end
 
+	local crewMemberId = tostring(entry.CrewMemberId or "")
+	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, entry)
 	return {
 		Resolved = true,
-		DisplayName = tostring(entry.DisplayName or entry.CrewMemberId or displayName),
-		BaseDisplayName = tostring(entry.DisplayName or entry.CrewMemberId or displayName),
-		CrewMemberId = tostring(entry.CrewMemberId or ""),
-		GrantName = tostring(entry.CrewMemberId or ""),
+		DisplayName = tostring(displayInfo.DisplayName or entry.DisplayName or entry.CrewMemberId or displayName),
+		BaseDisplayName = tostring(displayInfo.BaseDisplayName or displayInfo.DisplayName or displayName),
+		CrewMemberId = crewMemberId,
+		GrantName = crewMemberId,
 		ModelName = entry.ModelName,
 		Rarity = tostring(entry.Rarity or rarity),
+		Variant = displayInfo.Variant,
+		VariantTag = displayInfo.VariantTag,
+		VariantDisplayName = displayInfo.VariantDisplayName,
+		ShowVariantTag = displayInfo.ShowVariantTag == true,
 		Entry = table.clone(entry),
 	}
 end

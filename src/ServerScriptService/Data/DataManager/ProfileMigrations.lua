@@ -17,6 +17,7 @@ local ProfileMigrations = {}
 
 local primaryCurrency = Economy.Currency.Primary
 local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
+local CREW_MEMBER_QUICK_SLOT_SCHEMA_VERSION = 2
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -114,17 +115,23 @@ end
 local function buildIncomeRollFields(rarity, variant, instanceData)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
 	local normalizedVariant = CrewIncomeBalance.NormalizeVariant(variant)
-	local baseIncomeRoll = CrewIncomeBalance.GetOrRollBaseIncome(
+	local baseIncomeRoll, incomeRollVersion = CrewIncomeBalance.GetOrMigrateBaseIncome(
 		normalizedRarity,
-		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil
+		typeof(instanceData) == "table" and instanceData.BaseIncomeRoll or nil,
+		typeof(instanceData) == "table" and instanceData.IncomeRollVersion or nil
 	)
 
 	return {
 		Rarity = normalizedRarity,
 		Variant = normalizedVariant,
 		BaseIncomeRoll = baseIncomeRoll,
-		IncomeRollVersion = CrewIncomeBalance.GetIncomeRollVersion(),
-		Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, normalizedVariant),
+		IncomeRollVersion = incomeRollVersion,
+		Income = CrewIncomeBalance.ComputeIncome(
+			baseIncomeRoll,
+			normalizedVariant,
+			typeof(instanceData) == "table" and instanceData.Level or nil,
+			normalizedRarity
+		),
 	}
 end
 
@@ -191,13 +198,16 @@ local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallb
 		Render = tostring(instanceData.Render or ""),
 		GoldenRender = tostring(instanceData.GoldenRender or instanceData.Render or ""),
 		DiamondRender = tostring(instanceData.DiamondRender or instanceData.Render or ""),
-		Level = math.max(1, coerceNumber(instanceData.Level, 1)),
+		Level = CrewIncomeBalance.NormalizeLevel(instanceData.Level),
 		CurrentXP = math.max(0, coerceNumber(instanceData.CurrentXP, 0)),
 		AssignedStand = tostring(instanceData.AssignedStand or ""),
 		AcquiredAt = coerceNumber(instanceData.AcquiredAt, 0),
 		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
 		TutorialReward = instanceData.TutorialReward == true,
 		TutorialToken = tostring(instanceData.TutorialToken or ""),
+		Overflow = instanceData.Overflow == true,
+		OverflowSource = tostring(instanceData.OverflowSource or ""),
+		OverflowedAt = coerceNumber(instanceData.OverflowedAt, 0),
 	}
 end
 
@@ -274,6 +284,9 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		TutorialReward = instanceData.TutorialReward,
 		TutorialToken = instanceData.TutorialToken,
 		GrandLineRushStarter = instanceData.GrandLineRushStarter,
+		Overflow = instanceData.Overflow,
+		OverflowSource = instanceData.OverflowSource,
+		OverflowedAt = instanceData.OverflowedAt,
 	}, crewMemberId)
 	if not legacyInstance then
 		return nil
@@ -312,6 +325,9 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		TutorialReward = legacyInstance.TutorialReward,
 		TutorialToken = legacyInstance.TutorialToken,
 		GrandLineRushStarter = instanceData.GrandLineRushStarter == true or legacyInstance.GrandLineRushStarter == true,
+		Overflow = legacyInstance.Overflow == true,
+		OverflowSource = tostring(legacyInstance.OverflowSource or ""),
+		OverflowedAt = coerceNumber(legacyInstance.OverflowedAt, 0),
 		ProjectionSource = tostring(instanceData.ProjectionSource or projectionSource or "ProfileMigrations"),
 	}
 end
@@ -410,6 +426,40 @@ local function normalizeLegacySlotKey(value)
 	return tostring(numeric)
 end
 
+local function normalizeQuickSlotAssignments(assignments, crewMemberInventory)
+	local normalized = {}
+	local seen = {}
+	local maxSlots = math.max(0, tonumber(CrewQuickSlotConfig.MaxSlots) or 0)
+	local byId = if typeof(crewMemberInventory) == "table" and typeof(crewMemberInventory.ById) == "table"
+		then crewMemberInventory.ById
+		else {}
+
+	if typeof(assignments) ~= "table" then
+		return normalized
+	end
+
+	for rawSlotKey, rawInstanceId in pairs(assignments) do
+		local slotKey = normalizeLegacySlotKey(rawSlotKey)
+		local slotIndex = tonumber(slotKey)
+		local instanceId = tostring(rawInstanceId or "")
+		local instanceData = byId[instanceId]
+		if
+			slotIndex ~= nil
+			and slotIndex <= maxSlots
+			and instanceId ~= ""
+			and seen[instanceId] ~= true
+			and typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+		then
+			normalized[tostring(slotIndex)] = instanceId
+			seen[instanceId] = true
+		end
+	end
+
+	return normalized
+end
+
 local function hasCrewSlotAssignment(row)
 	if typeof(row) ~= "table" then
 		return false
@@ -451,7 +501,7 @@ local function buildCrewSlotIncomeRow(row)
 		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
 		CrewMemberInstanceId = instanceId,
 		IncomeToCollect = coerceNumberish(row.IncomeToCollect or row.Income or row.Money or row.Cash, 0),
-		StandLevel = math.max(1, math.floor(coerceNumberish(row.StandLevel or row.Level, 1))),
+		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level),
 	}
 end
 
@@ -506,7 +556,7 @@ local function migrateLegacyStandLevels(data, sourceLevels)
 		local rawLevel = if typeof(levelValue) == "table"
 			then levelValue.StandLevel or levelValue.Level or levelValue.Value
 			else levelValue
-		local level = math.max(1, math.floor(coerceNumberish(rawLevel, tonumber(row.StandLevel) or 1)))
+		local level = CrewIncomeBalance.NormalizeLevel(coerceNumberish(rawLevel, tonumber(row.StandLevel) or 1))
 		if tonumber(row.StandLevel) ~= level then
 			row.StandLevel = level
 			migrated += 1
@@ -847,9 +897,12 @@ function ProfileMigrations.Apply(data)
 
 	local crewMemberQuickSlots = ensureTable(data, "CrewMemberQuickSlots")
 	local canonicalUnlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(crewMemberQuickSlots.UnlockedSlots)
-	crewMemberQuickSlots.SchemaVersion = 1
+	crewMemberQuickSlots.SchemaVersion = CREW_MEMBER_QUICK_SLOT_SCHEMA_VERSION
 	crewMemberQuickSlots.UnlockedSlots = canonicalUnlockedSlots
 	crewMemberQuickSlots.MaxSlots = CrewQuickSlotConfig.MaxSlots
+	crewMemberQuickSlots.Assignments = if typeof(crewMemberQuickSlots.Assignments) == "table"
+		then crewMemberQuickSlots.Assignments
+		else {}
 
 	local unopenedChests = ensureTable(data, "UnopenedChests")
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))
@@ -930,6 +983,13 @@ function ProfileMigrations.Apply(data)
 
 	local chestRewards = ensureTable(data, "ChestRewards")
 	chestRewards.MythicKeys = math.max(0, coerceNumber(chestRewards.MythicKeys, 0))
+	local afkGoldChests = ensureTable(chestRewards, "AFKGoldChests")
+	if typeof(afkGoldChests.DayKey) ~= "string" then
+		afkGoldChests.DayKey = ""
+	end
+	afkGoldChests.EarnedToday = math.max(0, math.floor(coerceNumber(afkGoldChests.EarnedToday, 0)))
+	afkGoldChests.ProgressSeconds = math.max(0, coerceNumber(afkGoldChests.ProgressSeconds, 0))
+	ChestRewards.EnsureFruitPityState(chestRewards)
 
 	local foodInventory = ensureTable(data, "FoodInventory")
 	local inventory = ensureTable(data, "Inventory")
@@ -963,6 +1023,7 @@ function ProfileMigrations.Apply(data)
 	indexCollection.DevilFruits = discoveredDevilFruits
 
 	normalizeCrewMemberInventory(crewMemberInventory)
+	crewMemberQuickSlots.Assignments = normalizeQuickSlotAssignments(crewMemberQuickSlots.Assignments, crewMemberInventory)
 
 	local materials = ensureTable(data, "Materials")
 	materials.Inventory = ensureTable(materials, "Inventory")

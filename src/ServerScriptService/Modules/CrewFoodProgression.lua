@@ -168,7 +168,7 @@ local function syncCaptainSlotProgress(player, instanceId, instanceData, level)
 	end
 
 	local nextCaptainSlot = cloneValue(captainSlot)
-	nextCaptainSlot.Level = math.max(1, math.floor(tonumber(level) or tonumber(instanceData.Level) or 1))
+	nextCaptainSlot.Level = CrewIncomeBalance.NormalizeLevel(level or instanceData.Level)
 	nextCaptainSlot.CurrentXP = math.max(0, math.floor(tonumber(instanceData.CurrentXP) or 0))
 	return DataManager:SetValue(player, SHIP_CAPTAIN_SLOT_PATH, nextCaptainSlot) ~= false
 end
@@ -190,7 +190,7 @@ local function syncAssignedStandLevel(player, instanceData, level, instanceId)
 		return syncCaptainSlotProgress(player, instanceId, instanceData, level)
 	end
 
-	local safeLevel = math.max(1, math.floor(tonumber(level) or tonumber(instanceData.Level) or 1))
+	local safeLevel = CrewIncomeBalance.NormalizeLevel(level or instanceData.Level)
 	return CrewStandIncomeAuthority.SetStandLevel(player, assignedStand, safeLevel, "food_progression_stand_level")
 end
 
@@ -262,7 +262,7 @@ local function getStoredRarity(_player, storageName)
 end
 
 local function normalizeProgress(rarity, variantKey, level, currentXP)
-	local safeLevel = math.max(1, math.floor(tonumber(level) or 1))
+	local safeLevel = CrewIncomeBalance.NormalizeLevel(level)
 	local safeXP = math.max(0, math.floor(tonumber(currentXP) or 0))
 	local maxLevel = getMaxLevel()
 
@@ -333,8 +333,8 @@ function Module.GetProgress(player, crewMemberId)
 
 	local storageName = tostring(instanceData.StorageName or "")
 	local rarity = normalizeRarity(instanceData.Rarity or getStoredRarity(player, storageName))
-	local parsedVariant = getVariantAndBaseName(storageName)
-	local variantKey = CrewIncomeBalance.NormalizeVariant(instanceData.Variant or parsedVariant)
+	local displayInfo = CrewCatalog.GetDisplayInfo(storageName, instanceData)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(instanceData.Variant or displayInfo.Variant)
 	local rawLevel = tonumber(instanceData.Level) or 1
 	local rawCurrentXP = tonumber(instanceData.CurrentXP) or 0
 	local level = rawLevel

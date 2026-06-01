@@ -425,7 +425,7 @@ local function renderCooldownHud()
 		cooldownHudRoot:render(reactRoblox.createPortal(react.createElement(cooldownHudComponent, {
 			abilities = cooldownHud.Abilities,
 			compact = isCompactHud(),
-			fruitName = fruit and tostring(fruit.DisplayName or fruitName) or "",
+			fruitName = fruit and DevilFruitConfig.GetPlayerDisplayName(fruit) or "",
 			onActivateAbility = activateAbilityByName,
 			visible = cooldownHud.Visible == true,
 		}), getCooldownHudHost()))

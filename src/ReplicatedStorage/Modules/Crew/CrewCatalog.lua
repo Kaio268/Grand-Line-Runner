@@ -31,6 +31,52 @@ local function getVariantConfig(variantKey)
 	return (VariantCfg.Versions or {})[variantKey]
 end
 
+local function getVariantDisplayName(variantKey)
+	local normalizedVariant = tostring(variantKey or "")
+	if normalizedVariant == "" then
+		return ""
+	end
+
+	local variantInfo = getVariantConfig(normalizedVariant)
+	return tostring(
+		(variantInfo and (variantInfo.DisplayName or variantInfo.Name or variantInfo.Label))
+			or normalizedVariant
+	)
+end
+
+local function getVariantPrefix(variantKey)
+	local variantInfo = getVariantConfig(variantKey)
+	return tostring((variantInfo and variantInfo.Prefix) or (tostring(variantKey or "") .. " "))
+end
+
+local function stripConfirmedVariantPrefix(displayName, variantKey)
+	local text = tostring(displayName or "")
+	local prefix = getVariantPrefix(variantKey)
+	if prefix ~= "" and text:sub(1, #prefix) == prefix then
+		local stripped = text:sub(#prefix + 1)
+		if stripped ~= "" then
+			return stripped
+		end
+	end
+
+	return text
+end
+
+local function getBaseDisplayName(info, fallback)
+	if typeof(info) == "table" then
+		local displayName = tostring(info.BaseDisplayName or info.DisplayName or info.CrewMemberName or info.Name or "")
+		if displayName ~= "" then
+			return displayName
+		end
+	end
+
+	local fallbackText = tostring(fallback or "")
+	if fallbackText ~= "" then
+		return fallbackText
+	end
+	return "Crewmate"
+end
+
 local function getProductionEntry(id)
 	return CrewMembers.GetByCrewMemberId(id)
 		or CrewMembers.GetByDisplayName(id)
@@ -81,6 +127,7 @@ local function infoFromProductionEntry(entry)
 	info.RealCharacterName = tostring(entry.RealCharacterName or "")
 	info.Arc = tostring(entry.Arc or "")
 	info.CrewArc = info.Arc
+	info.Gender = tostring(entry.Gender or "")
 	info.Rarity = CrewIncomeBalance.NormalizeRarity(entry.Rarity or "Common")
 	info.Render = render
 	info.GoldenRender = tostring(entry.GoldenRender or render)
@@ -88,7 +135,7 @@ local function infoFromProductionEntry(entry)
 	info.RenderStatus = renderStatus
 	local baseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(info.Rarity)
 	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetBaseIncomeRange(info.Rarity)
-	info.Income = baseIncomeRoll
+	info.Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, "Normal", nil, info.Rarity)
 	info.Chance = tonumber(entry.Chance) or 0
 	info.TimeLeft = tonumber(entry.TimeLeft) or 30
 	info.ModelNameVerified = entry.ModelNameVerified == true
@@ -170,6 +217,11 @@ function CrewCatalog.ResolveCrewMemberId(crewMemberId)
 		return "", nil, ""
 	end
 
+	local directInfo = CrewCatalog.GetBaseInfo(id)
+	if directInfo then
+		return tostring(directInfo.CrewMemberId or id), directInfo, ""
+	end
+
 	local variantKey, baseId = CrewCatalog.ParseVariantId(id)
 	local aliasTarget = getRetiredAlias(baseId)
 	if aliasTarget then
@@ -221,6 +273,78 @@ function CrewCatalog.GetInfoByAnyId(crewMemberId)
 	return info
 end
 
+function CrewCatalog.GetDisplayInfo(crewMemberId, metadata)
+	metadata = if typeof(metadata) == "table" then metadata else {}
+	local lookupId = tostring(crewMemberId or "")
+	if lookupId == "" then
+		lookupId = tostring(metadata.CrewMemberId or "")
+	end
+	if lookupId == "" then
+		lookupId = tostring(metadata.StorageName or metadata.BaseName or metadata.Id or metadata.Name or "")
+	end
+	local explicitVariant = tostring(metadata.Variant or metadata.VariantKey or "")
+	local canonicalId, info = CrewCatalog.ResolveCrewMemberId(lookupId)
+	local variantKey = "Normal"
+	local baseId = tostring(canonicalId or lookupId)
+	local baseInfo = info
+	local isVariant = false
+
+	if typeof(info) == "table" and info.IsVariant == true then
+		variantKey = tostring(info.Variant or explicitVariant or "Normal")
+		baseId = tostring(info.BaseId or info.CrewMemberBaseId or baseId)
+		baseInfo = CrewCatalog.GetBaseInfo(baseId) or info
+		isVariant = variantKey ~= "Normal"
+	elseif explicitVariant ~= "" and explicitVariant ~= "Normal" then
+		local explicitBaseInfo = CrewCatalog.GetBaseInfo(baseId)
+		if explicitBaseInfo then
+			variantKey = explicitVariant
+			baseId = tostring(explicitBaseInfo.CrewMemberId or baseId)
+			baseInfo = explicitBaseInfo
+			isVariant = true
+		end
+	end
+
+	if not isVariant and lookupId ~= "" then
+		local parsedVariant, parsedBaseId = CrewCatalog.ParseVariantId(lookupId)
+		if parsedVariant ~= "Normal" then
+			local parsedBaseInfo = CrewCatalog.GetBaseInfo(parsedBaseId)
+			if parsedBaseInfo then
+				variantKey = parsedVariant
+				baseId = tostring(parsedBaseInfo.CrewMemberId or parsedBaseId)
+				baseInfo = parsedBaseInfo
+				info = CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey) or info
+				canonicalId = tostring((info and info.CrewMemberId) or CrewCatalog.MakeVariantId(baseId, variantKey))
+				isVariant = true
+			end
+		end
+	end
+
+	local metadataDisplayName = tostring(metadata.DisplayName or metadata.CrewMemberName or metadata.Name or "")
+	local baseDisplayName = getBaseDisplayName(baseInfo, if isVariant then baseId else metadataDisplayName)
+	local displayName = baseDisplayName
+	if not isVariant and metadataDisplayName ~= "" and info == nil then
+		displayName = metadataDisplayName
+	elseif isVariant and displayName == "" then
+		displayName = stripConfirmedVariantPrefix(metadataDisplayName, variantKey)
+	end
+
+	local variantDisplayName = getVariantDisplayName(variantKey)
+	local showVariantTag = isVariant and variantKey ~= "Normal"
+
+	return {
+		DisplayName = displayName,
+		BaseDisplayName = baseDisplayName,
+		Variant = variantKey,
+		VariantTag = if showVariantTag then variantDisplayName else "",
+		VariantDisplayName = variantDisplayName,
+		ShowVariantTag = showVariantTag,
+		IsVariant = isVariant,
+		BaseId = baseId,
+		CrewMemberId = tostring((info and info.CrewMemberId) or canonicalId or lookupId),
+		Gender = tostring((baseInfo and baseInfo.Gender) or (info and info.Gender) or metadata.Gender or ""),
+	}
+end
+
 function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	local baseIdStr = tostring(baseId or "")
 	if variantKey == "Normal" or variantKey == nil then
@@ -236,16 +360,22 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	local variantPrefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
 	local variantCrewMemberId = variantPrefix .. tostring(baseInfo.CrewMemberId or baseIdStr)
 	local info = cloneShallow(baseInfo)
+	local baseDisplayName = getBaseDisplayName(baseInfo, baseIdStr)
+	local variantDisplayName = getVariantDisplayName(variantKey)
 
 	info.Id = variantCrewMemberId
 	info.CrewMemberId = variantCrewMemberId
-	info.CrewMemberName = variantCrewMemberId
-	info.DisplayName = variantCrewMemberId
-	info.Name = variantCrewMemberId
+	info.CrewMemberName = baseDisplayName
+	info.DisplayName = baseDisplayName
+	info.Name = baseDisplayName
 	info.IsVariant = true
 	info.BaseId = tostring(baseInfo.CrewMemberId or baseIdStr)
 	info.CrewMemberBaseId = tostring(baseInfo.CrewMemberId or baseIdStr)
 	info.Variant = variantKey
+	info.BaseDisplayName = baseDisplayName
+	info.VariantDisplayName = variantDisplayName
+	info.VariantTag = variantDisplayName
+	info.ShowVariantTag = true
 	info.GoldenRender = baseInfo.GoldenRender
 	info.DiamondRender = baseInfo.DiamondRender
 	if variantKey == "Golden" then
@@ -255,7 +385,9 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	else
 		info.Render = tostring(baseInfo.Render or "")
 	end
-	info.Income = CrewIncomeBalance.ComputeIncome(tonumber(baseInfo.Income) or 0, variantKey)
+	local baseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(info.Rarity)
+	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetVariantIncomeRange(info.Rarity, variantKey)
+	info.Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variantKey, nil, info.Rarity)
 
 	return info
 end

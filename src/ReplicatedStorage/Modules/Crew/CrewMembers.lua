@@ -413,22 +413,59 @@ local balanceByCrewMemberId = {
 	["Plague Engineer"] = { Income = 8000, Chance = 0.00002, TimeLeft = 30 },
 }
 
+local genderByCrewMemberId = {
+	["Mask Dancer"] = "Male",
+	["Clown Captain"] = "Male",
+	["Metal Glutton"] = "Male",
+	["Pink Marine"] = "Male",
+	["Storm Cartographer"] = "Female",
+	["Iron Shipwright"] = "Male",
+	["Soul Fiddler"] = "Male",
+	["Sawtooth Captain"] = "Male",
+	["Straw Prophet"] = "Male",
+	["Dino Marine"] = "Male",
+	["Fortress Don"] = "Male",
+	["Bloom Scholar"] = "Female",
+	["Barrier Punk"] = "Male",
+	["Flint Kicker"] = "Male",
+	["Blade Ronin"] = "Male",
+	["Sand Tyrant"] = "Male",
+	["Ember Fist"] = "Male",
+	["Leopard Agent"] = "Male",
+	["Surgeon Rogue"] = "Male",
+	["Rubber Captain"] = "Male",
+	["Shadow Baron"] = "Male",
+	["Ghost Samurai"] = "Male",
+	["Venom Warden"] = "Male",
+	["Tide Monk"] = "Male",
+	["Puppet King"] = "Male",
+	["Candy Duke"] = "Male",
+	["Juice Duchess"] = "Female",
+	["Diamond Bruiser"] = "Male",
+	["Azure Phoenix"] = "Male",
+	["Frost Admiral"] = "Male",
+	["Hawkblade Lord"] = "Male",
+	["Plague Engineer"] = "Male",
+}
+
 local byCrewMemberId = {}
 local byDisplayName = {}
 local byLegacyId = {}
 local byRealCharacterName = {}
 
 for index, entry in ipairs(CrewMembers.Entries) do
+	local crewMemberId = tostring(entry.CrewMemberId)
 	entry.Order = index
+	entry.Gender = genderByCrewMemberId[crewMemberId] or "Male"
 	applyPlaceholderRenderAssets(entry)
-	local balance = balanceByCrewMemberId[tostring(entry.CrewMemberId)]
+	local balance = balanceByCrewMemberId[crewMemberId]
 	if balance then
 		entry.Income = balance.Income
 		entry.Chance = balance.Chance
 		entry.TimeLeft = balance.TimeLeft
 		entry.IdleAnim = balance.IdleAnim
 	end
-	byCrewMemberId[tostring(entry.CrewMemberId)] = entry
+	byCrewMemberId[crewMemberId] = entry
 	byDisplayName[tostring(entry.DisplayName)] = entry
 	byLegacyId[tostring(entry.LegacyId)] = entry
 	byRealCharacterName[tostring(entry.RealCharacterName)] = entry
@@ -483,6 +520,7 @@ function CrewMembers.GetLegacyIdMappings()
 			Chance = entry.Chance,
 			TimeLeft = entry.TimeLeft,
 			IdleAnim = entry.IdleAnim,
+			Gender = entry.Gender,
 			Order = entry.Order,
 		}
 	end

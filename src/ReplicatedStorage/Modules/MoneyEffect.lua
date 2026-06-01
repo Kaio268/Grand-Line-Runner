@@ -170,7 +170,7 @@ function module:DropBeli(origin: Vector3 | CFrame, Amount)
 	end
 
 	-- Dollar is a legacy asset fallback; new places should provide Beli or BeliCoin.
-	local template = RS:FindFirstChild("Beli") or RS:FindFirstChild("BeliCoin") or RS:FindFirstChild("Dollar")
+	local template = RS:FindFirstChild("Assets") and RS.Assets:FindFirstChild("RunRewards") and RS.Assets.RunRewards:FindFirstChild("BeliModel") or RS:FindFirstChild("Beli") or RS:FindFirstChild("BeliCoin") or RS:FindFirstChild("Dollar")
 	if not template then
 		warn("Beli token template not found in ReplicatedStorage!")
 		return

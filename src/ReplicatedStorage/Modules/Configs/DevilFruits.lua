@@ -85,6 +85,7 @@ local DevilFruits = {
 			Id = "MeraMeraNoMi",
 			FruitKey = "Mera",
 			DisplayName = "Mera Mera no Mi",
+			PlayerDisplayName = "Inferno Fruit",
 			AssetFolder = "Mera",
 			AbilityModule = "Mera",
 			Rarity = "Legendary",
@@ -201,6 +202,7 @@ local DevilFruits = {
 			Id = "HieHieNoMi",
 			FruitKey = "Hie",
 			DisplayName = "Hie Hie no Mi",
+			PlayerDisplayName = "Glacial Fruit",
 			AssetFolder = "Hie",
 			AbilityModule = "Hie",
 			Rarity = "Legendary",
@@ -282,6 +284,7 @@ local DevilFruits = {
 			Id = "GomuGomuNoMi",
 			FruitKey = "Gomu",
 			DisplayName = "Gomu Gomu no Mi",
+			PlayerDisplayName = "Elastic Fruit",
 			AssetFolder = "Gomu",
 			AbilityModule = "Gomu",
 			Rarity = "Rare",
@@ -332,6 +335,7 @@ local DevilFruits = {
 			Id = "BomuBomuNoMi",
 			FruitKey = "Bomu",
 			DisplayName = "Bomu Bomu no Mi",
+			PlayerDisplayName = "Blast Fruit",
 			AssetFolder = "Bomu",
 			AbilityModule = "Bomu",
 			Rarity = "Rare",
@@ -412,6 +416,7 @@ local DevilFruits = {
 			Id = "MoguMoguNoMi",
 			FruitKey = "Mogu",
 			DisplayName = "Mogu Mogu no Mi",
+			PlayerDisplayName = "Burrow Fruit",
 			AssetFolder = "Mogu",
 			AbilityModule = "Mogu",
 			Rarity = "Common",
@@ -533,6 +538,7 @@ local DevilFruits = {
 			Id = "SukeSukeNoMi",
 			FruitKey = "Suke",
 			DisplayName = "Suke Suke no Mi",
+			PlayerDisplayName = "Phantom Fruit",
 			AssetFolder = "Suke",
 			AbilityModule = "Suke",
 			Rarity = "Common",
@@ -584,6 +590,7 @@ local DevilFruits = {
 			Id = "HoroHoroNoMi",
 			FruitKey = "Horo",
 			DisplayName = "Horo Horo no Mi",
+			PlayerDisplayName = "Spirit Fruit",
 			AssetFolder = "Horo",
 			AbilityModule = "Horo",
 			Rarity = "Common",
@@ -651,6 +658,7 @@ local DevilFruits = {
 			Id = "ToriToriNoMiModelPhoenix",
 			FruitKey = "Tori",
 			DisplayName = "Tori Tori no Mi",
+			PlayerDisplayName = "Rebirth Fruit",
 			AssetFolder = "Tori",
 			AbilityModule = "Tori",
 			Rarity = "Mythic",
@@ -825,6 +833,29 @@ end
 function DevilFruits.GetFruitKey(identifier)
 	local fruit = DevilFruits.GetFruit(identifier)
 	return fruit and fruit.FruitKey or nil
+end
+
+local function nonEmptyText(value)
+	if value == nil then
+		return nil
+	end
+
+	local text = tostring(value)
+	if text == "" then
+		return nil
+	end
+
+	return text
+end
+
+function DevilFruits.GetPlayerDisplayName(fruitIdOrEntry)
+	local fruit = if typeof(fruitIdOrEntry) == "table" then fruitIdOrEntry else DevilFruits.GetFruit(fruitIdOrEntry)
+
+	return nonEmptyText(fruit and fruit.PlayerDisplayName)
+		or nonEmptyText(fruit and fruit.DisplayName)
+		or nonEmptyText(fruit and fruit.FruitKey)
+		or nonEmptyText(fruitIdOrEntry)
+		or "Devil Fruit"
 end
 
 function DevilFruits.GetAbility(fruitIdentifier, abilityName)

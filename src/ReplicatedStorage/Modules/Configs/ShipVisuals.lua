@@ -208,11 +208,11 @@ local Config = {
 		},
 		["Lvl 4 Ship"] = {
 			Tier = 4,
-			NormalSlotCapacity = 24,
+			NormalSlotCapacity = 26,
 		},
 		["Lvl 5 Ship"] = {
 			Tier = 5,
-			NormalSlotCapacity = 24,
+			NormalSlotCapacity = 38,
 		},
 	},
 
@@ -279,21 +279,21 @@ local Config = {
 		},
 		[7] = {
 			ModelName = "Lvl 4 Ship",
-			NormalCrewSlots = 24,
+			NormalCrewSlots = 26,
 			CaptainSlotUnlocked = true,
 			CaptainState = "upgraded",
 			CaptainBonusPercent = 20,
 			CaptainBonusLabel = "Captain's Spot +20%",
-			UpgradeRewardLabel = "Lvl 4 Ship expands to 24 normal crew slots and Captain earns +20%",
+			UpgradeRewardLabel = "Lvl 4 Ship expands to 26 normal crew slots and Captain earns +20%",
 		},
 		[8] = {
 			ModelName = "Lvl 5 Ship",
-			NormalCrewSlots = 24,
+			NormalCrewSlots = 38,
 			CaptainSlotUnlocked = true,
 			CaptainState = "maxed",
 			CaptainBonusPercent = 25,
 			CaptainBonusLabel = "Captain's Spot +25%",
-			UpgradeRewardLabel = "Lvl 5 Ship reaches max Captain Slot bonus at +25%",
+			UpgradeRewardLabel = "Lvl 5 Ship unlocks 38 normal crew slots and reaches max Captain Slot bonus at +25%",
 		},
 	},
 }

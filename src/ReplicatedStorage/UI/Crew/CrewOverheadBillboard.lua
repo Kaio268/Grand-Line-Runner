@@ -66,23 +66,8 @@ local function getVariantPrefix(variantLabel)
 	return tostring(variantLabel or "") .. " "
 end
 
-local function inferVariantFromDisplayName(displayName)
-	local name = tostring(displayName or "")
-	for _, variantName in ipairs(CrewVariantsCfg.Order or {}) do
-		variantName = tostring(variantName or "")
-		if variantName ~= "" and variantName ~= "Normal" then
-			local prefix = getVariantPrefix(variantName)
-			if startsWith(name, prefix) then
-				return variantName
-			end
-		end
-	end
-
-	return nil
-end
-
 local function getEntryVariantLabel(entry)
-	local rawVariant = entry.variant
+	local rawVariant = entry.variant or entry.variantTag
 	if rawVariant ~= nil then
 		local variant = tostring(rawVariant)
 		if variant ~= "" and variant ~= "Normal" then
@@ -92,7 +77,7 @@ local function getEntryVariantLabel(entry)
 		return nil
 	end
 
-	return inferVariantFromDisplayName(entry.displayName)
+	return nil
 end
 
 local function getVariantDisplayName(displayName, variantLabel)
