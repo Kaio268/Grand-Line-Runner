@@ -630,10 +630,9 @@ local function scheduleDroppedCrewMemberSettle(ctx, model, st)
 	end)
 end
 
-local function isRagdollState(state)
+local function isForcedCarryDropState(state)
 	return state == Enum.HumanoidStateType.Ragdoll
 		or state == Enum.HumanoidStateType.Physics
-		or state == Enum.HumanoidStateType.FallingDown
 end
 
 function Interaction.NewContext(map)
@@ -1086,7 +1085,7 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 	end)
 
 	ctx.RagdollConnByUserId[player.UserId] = hum.StateChanged:Connect(function(_, newState)
-		if not isRagdollState(newState) then
+		if not isForcedCarryDropState(newState) then
 			return
 		end
 

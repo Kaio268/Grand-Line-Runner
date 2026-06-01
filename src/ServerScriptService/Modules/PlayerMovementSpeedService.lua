@@ -73,6 +73,18 @@ local function setAttributeIfChanged(instance, attributeName, value)
 	instance:SetAttribute(attributeName, value)
 end
 
+local function getRuntimeWalkSpeedFromStat(baseWalkSpeed, selectedSpeed)
+	return MovementSpeedConfig.GetRuntimeWalkSpeedFromStat(baseWalkSpeed, selectedSpeed)
+end
+
+local function getStatSpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWalkSpeed)
+	return MovementSpeedConfig.GetStatSpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWalkSpeed)
+end
+
+local function getBaseWalkSpeedFromRuntimeStat(runtimeWalkSpeed, selectedSpeed)
+	return MovementSpeedConfig.GetBaseWalkSpeedFromRuntimeStat(runtimeWalkSpeed, selectedSpeed)
+end
+
 local function resolveDecreasePart()
 	local part = Workspace:FindFirstChild("DecreaseSpeed")
 	if part and part:IsA("BasePart") then
@@ -346,7 +358,7 @@ local function hookCharacter(player, character)
 	end
 
 	local function getNormalUnboostedSpeed()
-		return base + getSelectedSpeed()
+		return getRuntimeWalkSpeedFromStat(base, getSelectedSpeed())
 	end
 
 	local function isProjectedBody()
@@ -372,7 +384,7 @@ local function hookCharacter(player, character)
 	end
 
 	local function getDisplaySpeedFromWalkSpeed(walkSpeed)
-		return math.max(0, (tonumber(walkSpeed) or 0) - base)
+		return getStatSpeedFromRuntimeWalkSpeed(base, walkSpeed)
 	end
 
 	local function apply(reason)
@@ -601,7 +613,7 @@ local function hookCharacter(player, character)
 			end
 
 			local normalizedSpeed = humanoid.WalkSpeed / totalSpeedMultiplier
-			base = normalizedSpeed - getSelectedSpeed()
+			base = getBaseWalkSpeedFromRuntimeStat(normalizedSpeed, getSelectedSpeed())
 			setAttributeIfChanged(player, MovementSpeedConfig.Attributes.BaseWalkSpeed, base)
 			apply("base_walkspeed_changed")
 		end

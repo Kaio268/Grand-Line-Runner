@@ -20,11 +20,9 @@ local activeMovementLocksByOwner = {}
 local EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local LAND_MINE_MODEL_NAME = "BomuLandMine"
 local LAND_MINE_ACTION_PLACED = "Placed"
-local LAND_MINE_ACTION_DETONATING = "Detonating"
 local LAND_MINE_ACTION_DETONATED = "Detonated"
 local LAND_MINE_SOURCE = "LandMine"
 local BOMU_ACTION_PLANT = "Plant"
-local BOMU_ACTION_DETONATE = "Detonate"
 local BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "BomuMovementLockUntil"
 local BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "BomuMovementLockSpeedMultiplier"
 local BOMU_LEGACY_MOVEMENT_LOCK_JUMP_ATTRIBUTE = "BomuMovementLockJumpMultiplier"
@@ -66,7 +64,6 @@ local MAX_PLAYER_PLANAR_EXTENT = 3
 local SEGMENT_LENGTH_EPSILON = 0.0001
 local HAZARD_QUERY_PLAYER_DISTANCE_PADDING = 8
 local HAZARD_QUERY_MAX_TARGETS = 8
-local DEFAULT_DETONATION_EXPLOSION_DELAY = 0.35
 local DEFAULT_PLANT_MOVEMENT_LOCK_DURATION = 0.55
 local DEFAULT_SPEED_SCALING_REFERENCE_SPEED = 32
 
@@ -508,18 +505,7 @@ local function scheduleMineCleanup(player, mineEntry, lifetime)
 	end)
 end
 
-local function getDetonationExplosionDelay(abilityConfig)
-	local animationConfig = type(abilityConfig) == "table" and abilityConfig.Animation or nil
-	local detonateConfig = type(animationConfig) == "table" and animationConfig.Detonate or nil
-	local configuredDelay = type(detonateConfig) == "table" and tonumber(detonateConfig.ExplosionDelay) or nil
-	if configuredDelay == nil then
-		configuredDelay = type(abilityConfig) == "table" and tonumber(abilityConfig.DetonationExplosionDelay) or nil
-	end
-
-	return math.max(0, configuredDelay or DEFAULT_DETONATION_EXPLOSION_DELAY)
-end
-
-local function releaseMovementLock(ownerKey, reason)
+local function releaseMovementLock(ownerKey, _reason)
 	local state = activeMovementLocksByOwner[ownerKey]
 	if not state then
 		return false
@@ -809,6 +795,7 @@ local function detonateLandMine(context, activeMine, ownerKey)
 	end
 
 	activeMine.PendingDetonation = true
+	releaseMovementLock(ownerKey, "detonate")
 
 	local minePosition = activeMine.GroundPosition or activeMine.OriginPosition
 	local originPosition = activeMine.OriginPosition or context.RootPart.Position
@@ -816,41 +803,6 @@ local function detonateLandMine(context, activeMine, ownerKey)
 	local detonationSpeed = getEffectivePlanarSpeed(context.RootPart, context.Humanoid, context.AbilityConfig)
 	local explosionAbilityConfig, directionalBlastInfo =
 		buildExplosionAbilityConfig(context.AbilityConfig, radius, detonationSpeed)
-	local explosionDelay = getDetonationExplosionDelay(context.AbilityConfig)
-	local detonateLockDuration = getActionMovementLockDuration(
-		context.AbilityConfig,
-		BOMU_ACTION_DETONATE,
-		explosionDelay
-	)
-	local releaseDetonateMovementLock = applyActionMovementLock(
-		context,
-		ownerKey,
-		BOMU_ACTION_DETONATE,
-		detonateLockDuration
-	)
-	if typeof(context.EmitEffect) == "function" then
-		context.EmitEffect(LAND_MINE_SOURCE, {
-			Action = LAND_MINE_ACTION_DETONATING,
-			Source = LAND_MINE_SOURCE,
-			Radius = radius,
-			BaseRadius = activeMine.BaseRadius,
-			RadiusScaleSpeed = activeMine.RadiusScaleSpeed,
-			RadiusScaleMultiplier = activeMine.RadiusScaleMultiplier,
-			DirectionalBlastSpeed = directionalBlastInfo.Speed,
-			DirectionalBlastScaleMultiplier = directionalBlastInfo.Multiplier,
-			MinePosition = minePosition,
-			OriginPosition = originPosition,
-			ExplosionDelay = explosionDelay,
-		})
-	end
-
-	if explosionDelay > 0 then
-		task.wait(explosionDelay)
-	end
-
-	if releaseDetonateMovementLock then
-		releaseDetonateMovementLock("detonated")
-	end
 
 	if activeMinesByPlayer[ownerKey] == activeMine then
 		clearActiveMine(ownerKey)
@@ -862,7 +814,7 @@ local function detonateLandMine(context, activeMine, ownerKey)
 	payload.Action = LAND_MINE_ACTION_DETONATED
 	payload.Source = LAND_MINE_SOURCE
 	payload.MinePosition = minePosition
-	payload.ExplosionDelay = explosionDelay
+	payload.ExplosionDelay = 0
 	payload.BaseRadius = activeMine.BaseRadius
 	payload.RadiusScaleSpeed = activeMine.RadiusScaleSpeed
 	payload.RadiusScaleMultiplier = activeMine.RadiusScaleMultiplier

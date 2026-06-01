@@ -21,18 +21,15 @@ local LAND_MINE_ACTION_PLACED = "Placed"
 local LAND_MINE_ACTION_DETONATING = "Detonating"
 local LAND_MINE_ACTION_DETONATED = "Detonated"
 local BOMU_ACTION_PLANT = "Plant"
-local BOMU_ACTION_DETONATE = "Detonate"
 local BOMU_ACTION_JUMP = "Jump"
 local DEFAULT_ANIMATION_KEY_BY_ACTION = {
 	[BOMU_ACTION_PLANT] = "Bomu.Plant",
-	[BOMU_ACTION_DETONATE] = "Bomu.Detonate",
 	[BOMU_ACTION_JUMP] = "Bomu.Jump",
 }
 local DEFAULT_FADE_TIME = 0.05
 local DEFAULT_STOP_FADE_TIME = 0.08
 local DEFAULT_JUMP_DELAY = 0.12
 local DEFAULT_PLANT_MOVEMENT_LOCK_DURATION = 0.55
-local DEFAULT_DETONATE_MOVEMENT_LOCK_DURATION = 0.35
 local MOVEMENT_LOCK_INPUT_ACTION = "BomuActionMovementLock"
 local MOVEMENT_LOCK_INPUT_PRIORITY = 10000
 local SOURCE_LABEL = "ReplicatedStorage.Modules.DevilFruits.Bomu.Client.BomuClient"
@@ -690,14 +687,7 @@ function BomuClient:HandleEffect(targetPlayer, abilityName, payload)
 	end
 
 	if payload.Action == LAND_MINE_ACTION_DETONATING then
-		beginActionSequence(self, targetPlayer)
-		playActionAnimation(self, targetPlayer, BOMU_ACTION_DETONATE)
-		local detonateLockDuration = getActionMovementLockDuration(
-			self.abilityConfig,
-			BOMU_ACTION_DETONATE,
-			tonumber(payload.ExplosionDelay) or DEFAULT_DETONATE_MOVEMENT_LOCK_DURATION
-		)
-		applyLocalMovementLock(self, targetPlayer, BOMU_ACTION_DETONATE, detonateLockDuration)
+		-- Legacy pre-detonation payloads should not stop movement or play a character animation.
 		return true
 	end
 

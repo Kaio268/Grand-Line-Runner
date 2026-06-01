@@ -82,7 +82,10 @@ local PHOENIX_ANIMATION_LENGTHS = {
 	["Tori.PhoenixFlameShield"] = 1.6666667,
 	["Tori.PhoenixRevive"] = 2.4,
 }
+local PHOENIX_FLIGHT_START_TRACK_GROUP = "PhoenixFlightStart"
 local PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP = "PhoenixFlightSustain"
+local PHOENIX_FLIGHT_SUSTAIN_HEIGHT_TOLERANCE = 3
+local PHOENIX_FLIGHT_SUSTAIN_FALLBACK_GRACE = 0.75
 local PHOENIX_FLIGHT_IDLE_SPEED_THRESHOLD = 2.5
 local PHOENIX_FLIGHT_MOVE_SPEED_THRESHOLD = 5
 local PHOENIX_REFERENCE_PART_NAMES = { "Torso", "UpperTorso", "HumanoidRootPart" }
@@ -1359,16 +1362,47 @@ local function isPhoenixFlightMovementActive(rootPart, wasActive)
 	return planarSpeed >= PHOENIX_FLIGHT_MOVE_SPEED_THRESHOLD
 end
 
-function ClientEffectVisuals:SetPhoenixFlightSustainAnimation(state, targetPlayer, animationKey)
+local function getPhoenixAnimationOptions(options)
+	local animationOptions = type(options) == "table" and options.Animation or nil
+	return if type(animationOptions) == "table" then animationOptions else nil
+end
+
+local function getPhoenixAnimationNumber(animationOptions, key, fallback, minimum)
+	local numericValue = tonumber(animationOptions and animationOptions[key])
+	if not numericValue then
+		return fallback
+	end
+
+	if minimum ~= nil then
+		return math.max(minimum, numericValue)
+	end
+
+	return numericValue
+end
+
+local function getPhoenixAnimationPlaybackSpeed(animationOptions, key, fallback)
+	return getPhoenixAnimationNumber(animationOptions, key, fallback or 1, 0.01)
+end
+
+local function getPhoenixAnimationFadeTime(animationOptions, key, fallback)
+	return getPhoenixAnimationNumber(animationOptions, key, fallback or 0, 0)
+end
+
+function ClientEffectVisuals:SetPhoenixFlightSustainAnimation(state, targetPlayer, animationKey, animationOptions)
 	if not state or state.CleanedUp or state.PhoenixFlightSustainAnimationKey == animationKey then
 		return
 	end
 
-	stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, 0.12)
+	local stopFadeTime = getPhoenixAnimationFadeTime(animationOptions, "StopFadeTime", 0.12)
+	stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, stopFadeTime)
+	local playbackSpeed = if animationKey == PHOENIX_ANIMATION_KEYS.FlightIdle
+		then getPhoenixAnimationPlaybackSpeed(animationOptions, "IdlePlaybackSpeed", 1)
+		else getPhoenixAnimationPlaybackSpeed(animationOptions, "LoopPlaybackSpeed", 1)
 	local length = self:PlayPhoenixAnimation(state, targetPlayer, animationKey, {
 		Looped = true,
-		FadeTime = 0.12,
-		StopFadeTime = 0.12,
+		FadeTime = getPhoenixAnimationFadeTime(animationOptions, "FadeTime", 0.12),
+		StopFadeTime = stopFadeTime,
+		PlaybackSpeed = playbackSpeed,
 		TrackGroup = PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP,
 	})
 	state.PhoenixFlightSustainAnimationKey = if length then animationKey else nil
@@ -1644,6 +1678,10 @@ function ClientEffectVisuals:PlayPhoenixFlightAnimation(state, targetPlayer, dur
 		stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP, 0.08)
 	end
 
+	local animationOptions = getPhoenixAnimationOptions(options)
+	local startupPlaybackSpeed = getPhoenixAnimationPlaybackSpeed(animationOptions, "StartPlaybackSpeed", 1)
+	local startupFadeTime = getPhoenixAnimationFadeTime(animationOptions, "FadeTime", 0.04)
+	local startupStopFadeTime = getPhoenixAnimationFadeTime(animationOptions, "StopFadeTime", 0.08)
 	local audioMarkers = options.AudioMarkers
 	local liftOffMarkerNames = resolvePhoenixFlightAudioMarkerNames(audioMarkers, PHOENIX_FLIGHT_AUDIO_CUES.LiftOff)
 	local function connectStartupAudioCues(entry, trackContext)
@@ -1661,46 +1699,84 @@ function ClientEffectVisuals:PlayPhoenixFlightAnimation(state, targetPlayer, dur
 		)
 	end
 
-	local startupLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightStart, {
+	local startupRawLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightStart, {
 		Looped = false,
-		FadeTime = 0.04,
-		StopFadeTime = 0.08,
+		FadeTime = startupFadeTime,
+		StopFadeTime = startupStopFadeTime,
+		PlaybackSpeed = startupPlaybackSpeed,
+		TrackGroup = PHOENIX_FLIGHT_START_TRACK_GROUP,
 		OnTrackCreated = connectStartupAudioCues,
-	}) or PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY
+	})
+	local startupLength = if startupRawLength then startupRawLength / startupPlaybackSpeed else PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY
 	local requestedLoopDelay = tonumber(options.LoopDelay)
 	local defaultLoopDelay = math.max(PHOENIX_FLIGHT_LOOP_FALLBACK_DELAY, startupLength)
 	local loopDelay = if requestedLoopDelay and requestedLoopDelay >= 0 then requestedLoopDelay else defaultLoopDelay
 	loopDelay = math.min(loopDelay, math.max(PHOENIX_WING_MIN_DURATION, duration))
-	local airImpactDelay = math.max(0, loopDelay - math.max(0, tonumber(options.AirImpactLeadTime) or 0))
+	local sustainStartHeight = tonumber(options.SustainStartHeight)
+	local sustainFallbackDelay = math.max(0, tonumber(options.SustainFallbackDelay) or loopDelay)
 	if state then
 		state.FlightTrailDelay = loopDelay
 		schedulePhoenixFlightAudioFallback(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.LiftOff, options.LiftOffFallbackDelay, {
 			AnimationKey = PHOENIX_ANIMATION_KEYS.FlightStart,
 		})
-		schedulePhoenixFlightAudioFallback(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.AirImpact, airImpactDelay, {
-			AnimationKey = PHOENIX_ANIMATION_KEYS.FlightStart,
-			Source = "flight_sustain_transition",
-		})
 	end
 
-	task.delay(loopDelay, function()
-		if not self.PhoenixWingEffects or self.PhoenixWingEffects[targetPlayer] ~= state or state.CleanedUp then
-			return
-		end
-		if not state.Container or not state.Container.Parent then
-			return
+	task.spawn(function()
+		local sustainStarted = false
+		local fallbackAt = os.clock() + sustainFallbackDelay
+		local function isCurrentFlightState()
+			return state ~= nil
+				and isPhoenixWingStateCurrent(self, targetPlayer, state)
+				and not state.CleanedUp
+				and not state.FlightEndPlayed
+				and state.Container
+				and state.Container.Parent
 		end
 
-		while self.PhoenixWingEffects
-			and self.PhoenixWingEffects[targetPlayer] == state
-			and not state.CleanedUp
-			and not state.FlightEndPlayed
-			and state.Container
-			and state.Container.Parent
-		do
+		local function startSustain(source)
+			if sustainStarted or not isCurrentFlightState() then
+				return false
+			end
+
+			sustainStarted = true
+			state.PhoenixFlightSustainStarted = true
+			stopAnimationEntriesByGroup(state, PHOENIX_FLIGHT_START_TRACK_GROUP, startupStopFadeTime)
+			emitPhoenixFlightAudioCue(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.AirImpact, {
+				AnimationKey = PHOENIX_ANIMATION_KEYS.FlightStart,
+				Source = source or "height_gate",
+			}, true)
+
+			if typeof(options.OnSustainStarted) == "function" then
+				local ok, err = pcall(options.OnSustainStarted, source)
+				if not ok then
+					warn("[ClientEffectVisuals] Phoenix flight sustain callback failed: " .. tostring(err))
+				end
+			end
+
+			return true
+		end
+
+		while isCurrentFlightState() and not sustainStarted do
+			local rootPart = self.GetPlayerRootPart(targetPlayer)
+			local reachedHeight = rootPart
+				and sustainStartHeight
+				and rootPart.Position.Y >= sustainStartHeight - PHOENIX_FLIGHT_SUSTAIN_HEIGHT_TOLERANCE
+			if reachedHeight then
+				startSustain("height_gate")
+				break
+			end
+			if os.clock() >= fallbackAt then
+				startSustain("fallback")
+				break
+			end
+
+			RunService.Heartbeat:Wait()
+		end
+
+		while isCurrentFlightState() and sustainStarted do
 			local rootPart = self.GetPlayerRootPart(targetPlayer)
 			local animationKey = resolvePhoenixFlightSustainAnimationKey(rootPart, state.PhoenixFlightSustainAnimationKey)
-			self:SetPhoenixFlightSustainAnimation(state, targetPlayer, animationKey)
+			self:SetPhoenixFlightSustainAnimation(state, targetPlayer, animationKey, animationOptions)
 			task.wait(0.1)
 		end
 	end)
@@ -1833,11 +1909,18 @@ function ClientEffectVisuals:CreatePhoenixWingEffect(targetPlayer, duration, opt
 	if options.Mode == "Flight" then
 		state.PlayFlightEndOnExpire = true
 		state.FlightEndPlayed = false
+		state.PhoenixFlightAnimationOptions = getPhoenixAnimationOptions(options)
+		state.PhoenixFlightSustainStartHeight = tonumber(options.SustainStartHeight)
+		state.PhoenixFlightSustainFallbackDelay = tonumber(options.SustainFallbackDelay)
 		state.FlightTrailDelay = self:PlayPhoenixFlightAnimation(state, targetPlayer, duration, {
 			LoopDelay = options.FlightTrailDelay,
 			AudioMarkers = options.AudioMarkers,
 			LiftOffFallbackDelay = options.LiftOffFallbackDelay,
 			AirImpactLeadTime = options.AirImpactLeadTime,
+			Animation = options.Animation,
+			SustainStartHeight = options.SustainStartHeight,
+			SustainFallbackDelay = options.SustainFallbackDelay,
+			OnSustainStarted = options.OnSustainStarted,
 		}) or 0
 	elseif typeof(options.AnimationKey) == "string" then
 		local shouldPlayAnimation = true
@@ -1907,16 +1990,20 @@ function ClientEffectVisuals:StopPhoenixFlightEffect(targetPlayer)
 		)
 	end
 
-	local endLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightEnd, {
+	local animationOptions = state.PhoenixFlightAnimationOptions
+	local endPlaybackSpeed = getPhoenixAnimationPlaybackSpeed(animationOptions, "EndPlaybackSpeed", 1)
+	local endRawLength = self:PlayPhoenixAnimation(state, targetPlayer, PHOENIX_ANIMATION_KEYS.FlightEnd, {
 		Looped = false,
-		FadeTime = 0.04,
-		StopFadeTime = 0.08,
+		FadeTime = getPhoenixAnimationFadeTime(animationOptions, "FadeTime", 0.04),
+		StopFadeTime = getPhoenixAnimationFadeTime(animationOptions, "StopFadeTime", 0.08),
+		PlaybackSpeed = endPlaybackSpeed,
 		OnTrackCreated = connectEndAudioCue,
-	}) or 0.25
+	})
 	schedulePhoenixFlightAudioFallback(self, state, targetPlayer, PHOENIX_FLIGHT_AUDIO_CUES.Deactivate, 0, {
 		AnimationKey = PHOENIX_ANIMATION_KEYS.FlightEnd,
 	})
-	state.EndTime = os.clock() + math.max(0.15, math.min(endLength, 1.2))
+	local endDuration = if endRawLength then endRawLength / endPlaybackSpeed else 0.25
+	state.EndTime = os.clock() + math.max(0.15, math.min(endDuration, 1.2))
 	return true
 end
 
@@ -2281,19 +2368,13 @@ function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, 
 		payload.TrailOffset,
 		PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS[PHOENIX_AUTHORED_FLIGHT_FX_NAME]
 	)
-	local state = self:CreatePhoenixWingEffect(targetPlayer, visualDuration, {
-		Mode = "Flight",
-		FlightTrailDelay = startupDuration + heightDelay,
-		AudioMarkers = type(payload.AudioMarkers) == "table" and payload.AudioMarkers or nil,
-		LiftOffFallbackDelay = 0,
-		AirImpactLeadTime = math.max(0, tonumber(payload.AudioAirImpactLeadTime) or 0),
-	})
-	if not state then
-		return
-	end
+	local maxRiseHeight = tonumber(payload.MaxRiseHeight)
+	local sustainStartHeight = if maxRiseHeight and maxRiseHeight > 0 then rootPart.Position.Y + maxRiseHeight else nil
+	local sustainFallbackDelay = startupDuration + heightDelay + PHOENIX_FLIGHT_SUSTAIN_FALLBACK_GRACE
+	local state = nil
 
 	local function playFlightTrail()
-		if not self.PhoenixWingEffects or self.PhoenixWingEffects[targetPlayer] ~= state or state.CleanedUp then
+		if not state or not self.PhoenixWingEffects or self.PhoenixWingEffects[targetPlayer] ~= state or state.CleanedUp then
 			return
 		end
 		if not state.Container or not state.Container.Parent then
@@ -2314,11 +2395,19 @@ function ClientEffectVisuals:CreatePhoenixFlightEffect(targetPlayer, fruitName, 
 		})
 	end
 
-	local trailDelay = math.max(0, tonumber(state.FlightTrailDelay) or 0)
-	if trailDelay <= 0 then
-		playFlightTrail()
-	else
-		task.delay(trailDelay, playFlightTrail)
+	state = self:CreatePhoenixWingEffect(targetPlayer, visualDuration, {
+		Mode = "Flight",
+		FlightTrailDelay = startupDuration + heightDelay,
+		AudioMarkers = type(payload.AudioMarkers) == "table" and payload.AudioMarkers or nil,
+		LiftOffFallbackDelay = 0,
+		AirImpactLeadTime = math.max(0, tonumber(payload.AudioAirImpactLeadTime) or 0),
+		Animation = type(payload.Animation) == "table" and payload.Animation or nil,
+		SustainStartHeight = sustainStartHeight,
+		SustainFallbackDelay = sustainFallbackDelay,
+		OnSustainStarted = playFlightTrail,
+	})
+	if not state then
+		return
 	end
 end
 
@@ -2340,11 +2429,13 @@ function ClientEffectVisuals:CreatePhoenixShieldEffect(targetPlayer, fruitName, 
 		duration = math.max(0.1, serverEndTime - Workspace:GetServerTimeNow())
 	end
 	local radius = math.max(1, tonumber(payload.Radius) or DEFAULT_PHOENIX_SHIELD_RADIUS)
+	local animationOptions = type(payload.Animation) == "table" and payload.Animation or nil
 	local state = self:CreatePhoenixWingEffect(targetPlayer, duration, {
 		AnimationKey = PHOENIX_ANIMATION_KEYS.Shield,
 		Looped = false,
-		FadeTime = 0.06,
-		StopFadeTime = 0.1,
+		FadeTime = getPhoenixAnimationFadeTime(animationOptions, "FadeTime", 0.06),
+		StopFadeTime = getPhoenixAnimationFadeTime(animationOptions, "StopFadeTime", 0.1),
+		PlaybackSpeed = getPhoenixAnimationPlaybackSpeed(animationOptions, "PlaybackSpeed", 1),
 		PlayAnimationOnce = true,
 	})
 	if not state then

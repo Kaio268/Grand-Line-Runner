@@ -17,6 +17,7 @@ local DEFAULT_PHOENIX_MAX_DESCEND_SPEED = 72
 local DEFAULT_PHOENIX_HORIZONTAL_RESPONSIVENESS = 14
 local DEFAULT_PHOENIX_SHIELD_DURATION = 5
 local DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION = 1.6666667
+local DEFAULT_PHOENIX_SHIELD_SPEED_RADIUS_MAX_SPEED = 300
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local PHOENIX_FLIGHT_END_ACTION = "End"
@@ -287,6 +288,61 @@ local function copyStringArray(value)
 	return if #result > 0 then result else nil
 end
 
+local function getAbilityAnimationConfig(abilityConfig)
+	if type(abilityConfig) ~= "table" or type(abilityConfig.Animation) ~= "table" then
+		return nil
+	end
+
+	return abilityConfig.Animation
+end
+
+local function resolveAnimationPositiveNumber(animationConfig, key)
+	local numericValue = tonumber(animationConfig and animationConfig[key])
+	if not numericValue or numericValue <= 0 then
+		return nil
+	end
+
+	return numericValue
+end
+
+local function resolveAnimationNonNegativeNumber(animationConfig, key)
+	local numericValue = tonumber(animationConfig and animationConfig[key])
+	if not numericValue or numericValue < 0 then
+		return nil
+	end
+
+	return numericValue
+end
+
+local function buildPhoenixFlightAnimationPayload(abilityConfig)
+	local animationConfig = getAbilityAnimationConfig(abilityConfig)
+	if not animationConfig then
+		return nil
+	end
+
+	return {
+		FadeTime = resolveAnimationNonNegativeNumber(animationConfig, "FadeTime"),
+		StopFadeTime = resolveAnimationNonNegativeNumber(animationConfig, "StopFadeTime"),
+		StartPlaybackSpeed = resolveAnimationPositiveNumber(animationConfig, "StartPlaybackSpeed"),
+		LoopPlaybackSpeed = resolveAnimationPositiveNumber(animationConfig, "LoopPlaybackSpeed"),
+		IdlePlaybackSpeed = resolveAnimationPositiveNumber(animationConfig, "IdlePlaybackSpeed"),
+		EndPlaybackSpeed = resolveAnimationPositiveNumber(animationConfig, "EndPlaybackSpeed"),
+	}
+end
+
+local function buildPhoenixShieldAnimationPayload(abilityConfig)
+	local animationConfig = getAbilityAnimationConfig(abilityConfig)
+	if not animationConfig then
+		return nil
+	end
+
+	return {
+		FadeTime = resolveAnimationNonNegativeNumber(animationConfig, "FadeTime"),
+		StopFadeTime = resolveAnimationNonNegativeNumber(animationConfig, "StopFadeTime"),
+		PlaybackSpeed = resolveAnimationPositiveNumber(animationConfig, "PlaybackSpeed"),
+	}
+end
+
 local function resolvePhoenixShieldRadius(abilityConfig)
 	local configuredRadius = abilityConfig.ShieldRadius
 	if configuredRadius == nil then
@@ -294,6 +350,71 @@ local function resolvePhoenixShieldRadius(abilityConfig)
 	end
 
 	return clampPositiveNumber(configuredRadius, DEFAULT_PHOENIX_FLAME_SHIELD_RADIUS)
+end
+
+local function readNumericValueObject(instance)
+	if typeof(instance) ~= "Instance" or not instance:IsA("ValueBase") then
+		return nil
+	end
+
+	local ok, value = pcall(function()
+		return instance.Value
+	end)
+	if ok and typeof(value) == "number" then
+		return math.max(0, value)
+	end
+
+	return nil
+end
+
+local function getPhoenixShieldSpeedStatSample(player, speedScaling)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, nil
+	end
+
+	if type(speedScaling) == "table" and speedScaling.UseSpeedStat == false then
+		return nil, "speed_stat_disabled"
+	end
+
+	local folderName = type(speedScaling) == "table" and speedScaling.SpeedStatFolder or nil
+	local statName = type(speedScaling) == "table" and speedScaling.SpeedStatName or nil
+	folderName = if type(folderName) == "string" and folderName ~= "" then folderName else "HiddenLeaderstats"
+	statName = if type(statName) == "string" and statName ~= "" then statName else "Speed"
+
+	local folder = player:FindFirstChild(folderName)
+	local speedValue = folder and folder:FindFirstChild(statName) or nil
+	local statSpeed = readNumericValueObject(speedValue)
+	if statSpeed ~= nil then
+		return statSpeed, string.format("%s.%s", folderName, statName)
+	end
+
+	return nil, string.format("%s.%s_missing", folderName, statName)
+end
+
+local function resolvePhoenixShieldSpeedRadiusScale(player, abilityConfig)
+	local speedScaling = type(abilityConfig) == "table" and abilityConfig.SpeedRadiusScaling or nil
+	if type(speedScaling) ~= "table" or speedScaling.Enabled == false then
+		return 1, 0, 0, "disabled"
+	end
+
+	local minScale = math.max(1, clampNonNegativeNumber(speedScaling.MinScale, 1))
+	local scaleBonusPerSpeedRange = clampNonNegativeNumber(speedScaling.ScaleBonusPerSpeedRange, 0.45)
+	local baselineSpeed = math.max(0, tonumber(speedScaling.BaselineSpeed) or 0)
+	local maxSpeed = tonumber(speedScaling.SpeedForMaxScale)
+		or tonumber(speedScaling.MaxSpeed)
+		or DEFAULT_PHOENIX_SHIELD_SPEED_RADIUS_MAX_SPEED
+	local sourceSpeed, sourceName = getPhoenixShieldSpeedStatSample(player, speedScaling)
+
+	if sourceSpeed == nil then
+		sourceSpeed = baselineSpeed
+	end
+
+	if maxSpeed <= baselineSpeed then
+		return minScale, sourceSpeed, 0, sourceName or "invalid_speed_range"
+	end
+
+	local alpha = math.max((sourceSpeed - baselineSpeed) / (maxSpeed - baselineSpeed), 0)
+	return minScale + (alpha * scaleBonusPerSpeedRange), sourceSpeed, alpha, sourceName or "speed_stat"
 end
 
 local function getActivePhoenixShieldProtection(position)
@@ -315,7 +436,10 @@ local function getActivePhoenixShieldProtection(position)
 			and shieldOwner.Parent == Players
 		then
 			local ownerRootPart = getPlayerRootPart(shieldOwner)
-			local radius = resolvePhoenixShieldRadius(shieldState.AbilityConfig or {})
+			local radius = clampPositiveNumber(
+				shieldState.Radius,
+				resolvePhoenixShieldRadius(shieldState.AbilityConfig or {})
+			)
 			if ownerRootPart and radius > 0 and getPlanarDistance(ownerRootPart.Position, position) <= radius then
 				return {
 					Protected = true,
@@ -427,6 +551,7 @@ function ToriServer.PhoenixFlight(context)
 			abilityConfig.HorizontalResponsiveness,
 			DEFAULT_PHOENIX_HORIZONTAL_RESPONSIVENESS
 		),
+		Animation = buildPhoenixFlightAnimationPayload(abilityConfig),
 		TrailPartNames = copyStringArray(abilityConfig.FlightTrailPartNames),
 		TrailOffset = typeof(abilityConfig.FlightTrailOffset) == "CFrame" and abilityConfig.FlightTrailOffset or nil,
 	}, {
@@ -454,10 +579,27 @@ function ToriServer.PhoenixFlameShield(context)
 	local duration = clampPositiveNumber(abilityConfig.Duration, DEFAULT_PHOENIX_SHIELD_DURATION)
 	local shieldState = startEndCooldownState(context, PHOENIX_SHIELD_ABILITY, duration, tonumber(abilityConfig.Cooldown) or 0)
 	local serverStartTime = shieldState and shieldState.StartedAt or getSharedTimestamp()
-	local radius = resolvePhoenixShieldRadius(abilityConfig)
+	local baseRadius = resolvePhoenixShieldRadius(abilityConfig)
+	local speedRadiusScale, speedRadiusSourceSpeed, speedRadiusScaleAlpha, speedRadiusSource =
+		resolvePhoenixShieldSpeedRadiusScale(context.Player, abilityConfig)
+	local radius = baseRadius * speedRadiusScale
+
+	if shieldState then
+		shieldState.BaseRadius = baseRadius
+		shieldState.Radius = radius
+		shieldState.SpeedRadiusScale = speedRadiusScale
+		shieldState.SpeedRadiusSourceSpeed = speedRadiusSourceSpeed
+		shieldState.SpeedRadiusScaleAlpha = speedRadiusScaleAlpha
+		shieldState.SpeedRadiusSource = speedRadiusSource
+	end
 
 	return {
+		BaseRadius = baseRadius,
 		Radius = radius,
+		SpeedRadiusScale = speedRadiusScale,
+		SpeedRadiusSourceSpeed = speedRadiusSourceSpeed,
+		SpeedRadiusScaleAlpha = speedRadiusScaleAlpha,
+		SpeedRadiusSource = speedRadiusSource,
 		HitboxDebugMode = "FollowTargetRoot",
 		HitboxDebugRadius = radius,
 		HitboxVisualDuration = duration,
@@ -468,6 +610,7 @@ function ToriServer.PhoenixFlameShield(context)
 			abilityConfig.AnimationLockDuration,
 			DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION
 		),
+		Animation = buildPhoenixShieldAnimationPayload(abilityConfig),
 	}, {
 		ApplyCooldown = false,
 	}

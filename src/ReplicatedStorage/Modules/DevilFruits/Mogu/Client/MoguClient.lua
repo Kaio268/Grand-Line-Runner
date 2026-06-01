@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
+local MovementSpeedConfig = require(Modules:WaitForChild("Configs"):WaitForChild("MovementSpeed"))
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local MoguAnimationController = require(
 	Modules:WaitForChild("DevilFruits"):WaitForChild("Mogu"):WaitForChild("Client"):WaitForChild("MoguAnimationController")
@@ -61,7 +62,7 @@ local DEFAULT_RESOLVE_BACK_JERK_DISTANCE = 0.45
 local DEFAULT_RESOLVE_BACK_JERK_DURATION = 0.08
 local DEFAULT_RESOLVE_VFX_FORWARD_OFFSET = 0
 local DEFAULT_RESOLVE_FACING_LOCK_DURATION = 0.6
-local DEFAULT_FALLBACK_WALK_SPEED = 16
+local DEFAULT_FALLBACK_WALK_SPEED = MovementSpeedConfig.GetFallbackBaseWalkSpeed()
 local USE_VISUAL_ONLY_BURROW_ROOT = true
 local SURFACE_PROBE_INTERVAL = 1 / 24
 local SURFACE_REPROBE_DISTANCE = 0.75
@@ -1051,12 +1052,19 @@ local function isMoguMovementLockActive(player)
 	return typeof(movementLockUntil) == "number" and movementLockUntil > os.clock()
 end
 
+local function getMappedRuntimeWalkSpeed(player)
+	local runtimeWalkSpeed = MovementSpeedConfig.GetPlayerRuntimeWalkSpeed(player)
+	if typeof(runtimeWalkSpeed) == "number" and runtimeWalkSpeed > 0 then
+		return runtimeWalkSpeed
+	end
+
+	return nil
+end
+
 local function getFallbackWalkSpeed(player, humanoid)
-	local hiddenStats = player and player:FindFirstChild("HiddenLeaderstats") or nil
-	local speedValue = hiddenStats and hiddenStats:FindFirstChild("Speed") or nil
-	local purchasedSpeed = speedValue and tonumber(speedValue.Value) or nil
-	if purchasedSpeed then
-		return math.max(DEFAULT_FALLBACK_WALK_SPEED, DEFAULT_FALLBACK_WALK_SPEED + purchasedSpeed)
+	local runtimeWalkSpeed = getMappedRuntimeWalkSpeed(player)
+	if runtimeWalkSpeed then
+		return runtimeWalkSpeed
 	end
 
 	local currentWalkSpeed = humanoid and tonumber(humanoid.WalkSpeed) or nil
@@ -1070,6 +1078,12 @@ end
 local function restorePositiveWalkSpeed(player, humanoid, originalWalkSpeed, reason)
 	if not humanoid or humanoid.Health <= 0 then
 		return false
+	end
+
+	local runtimeWalkSpeed = getMappedRuntimeWalkSpeed(player)
+	if runtimeWalkSpeed then
+		humanoid.WalkSpeed = runtimeWalkSpeed
+		return true
 	end
 
 	if typeof(originalWalkSpeed) == "number" and originalWalkSpeed > 0 then

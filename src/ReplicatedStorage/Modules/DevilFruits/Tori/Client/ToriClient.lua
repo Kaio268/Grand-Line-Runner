@@ -9,6 +9,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local DevilFruitConfig = require(Modules:WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local HitEffectConfig = require(Modules:WaitForChild("Configs"):WaitForChild("HitEffects"))
+local MovementSpeedConfig = require(Modules:WaitForChild("Configs"):WaitForChild("MovementSpeed"))
 local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
 local DevilFruits = Modules:WaitForChild("DevilFruits")
 local HazardUtils = require(DevilFruits:WaitForChild("HazardUtils"))
@@ -99,6 +100,20 @@ local FLIGHT_INTERRUPT_HIT_EFFECTS = {
 }
 local PHOENIX_SHIELD_AUDIO_EXPIRY_RESCHEDULE_THRESHOLD = 0.02
 
+local function restoreMappedWalkSpeed(player, humanoid)
+	if not (humanoid and humanoid.Parent and humanoid.Health > 0) then
+		return false
+	end
+
+	local runtimeWalkSpeed = MovementSpeedConfig.GetPlayerRuntimeWalkSpeed(player)
+	if typeof(runtimeWalkSpeed) ~= "number" or runtimeWalkSpeed <= 0 then
+		return false
+	end
+
+	humanoid.WalkSpeed = runtimeWalkSpeed
+	return true
+end
+
 local function flightLog(...)
 	if not DEBUG_FLIGHT then
 		return
@@ -125,15 +140,6 @@ local function formatFlightVector(vector)
 	end
 
 	return string.format("(%.2f, %.2f, %.2f)", vector.X, vector.Y, vector.Z)
-end
-
-local function clampPositiveNumber(value, fallback)
-	local numericValue = tonumber(value)
-	if not numericValue or numericValue <= 0 then
-		return fallback
-	end
-
-	return numericValue
 end
 
 local function getCharacter(self)
@@ -1608,7 +1614,7 @@ function ToriClient:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
 	end
 end
 
-function ToriClient:UpdatePhoenixFlightStartup(rootPart, humanoid, dt, now)
+function ToriClient:UpdatePhoenixFlightStartup(rootPart, humanoid, _dt, now)
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 	self:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
 
@@ -2371,9 +2377,7 @@ function ToriClient:ReleasePhoenixShieldAnimationLock(lock)
 
 	local humanoid = lock.Humanoid
 	if humanoid and humanoid.Parent then
-		if lock.WalkSpeed ~= nil then
-			humanoid.WalkSpeed = lock.WalkSpeed
-		end
+		restoreMappedWalkSpeed(self.player, humanoid)
 		if lock.JumpPower ~= nil then
 			humanoid.JumpPower = lock.JumpPower
 		end
@@ -2437,7 +2441,6 @@ function ToriClient:StartPhoenixShieldAnimationLock(payload)
 	if not lock then
 		lock = {
 			Humanoid = humanoid,
-			WalkSpeed = humanoid.WalkSpeed,
 			JumpPower = humanoid.JumpPower,
 			JumpHeight = humanoid.JumpHeight,
 			AutoRotate = humanoid.AutoRotate,

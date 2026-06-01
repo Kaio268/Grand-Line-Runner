@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MovementSpeedConfig = require(Modules:WaitForChild("Configs"):WaitForChild("MovementSpeed"))
 local DiagnosticLogLimiter = require(Modules:WaitForChild("DevilFruits"):WaitForChild("DiagnosticLogLimiter"))
 local HazardUtils = require(Modules:WaitForChild("DevilFruits"):WaitForChild("HazardUtils"))
 local SettingsAudioController = require(Modules:WaitForChild("SettingsAudioController"))
@@ -70,6 +71,20 @@ local AIM_HELPER_NAMES = {
 	RunHub = true,
 	DecreaseSpeed = true,
 }
+
+local function restoreMappedWalkSpeed(player, humanoid)
+	if not (humanoid and humanoid.Parent and humanoid.Health > 0) then
+		return false
+	end
+
+	local runtimeWalkSpeed = MovementSpeedConfig.GetPlayerRuntimeWalkSpeed(player)
+	if typeof(runtimeWalkSpeed) ~= "number" or runtimeWalkSpeed <= 0 then
+		return false
+	end
+
+	humanoid.WalkSpeed = runtimeWalkSpeed
+	return true
+end
 
 local function formatVector3(value)
 	if typeof(value) ~= "Vector3" then
@@ -1270,7 +1285,7 @@ function HieClient:ClearLocalFreezeShotCastLock(expectedToken)
 	self.localFreezeShotCastLock = nil
 	local humanoid = state.Humanoid
 	if humanoid and humanoid.Parent then
-		humanoid.WalkSpeed = state.WalkSpeed
+		restoreMappedWalkSpeed(self.player, humanoid)
 		humanoid.AutoRotate = state.AutoRotate
 	end
 end
@@ -1305,7 +1320,6 @@ function HieClient:ApplyLocalFreezeShotCastLock(abilityConfig, aimPosition)
 	self.localFreezeShotCastLock = {
 		Token = token,
 		Humanoid = humanoid,
-		WalkSpeed = humanoid.WalkSpeed,
 		AutoRotate = humanoid.AutoRotate,
 	}
 	humanoid.WalkSpeed = humanoid.WalkSpeed * speedMultiplier
@@ -1807,7 +1821,7 @@ local function updateVisualOnlyProjectileMotion(projectileState, serverNow)
 	return currentPosition, currentVelocity
 end
 
-function HieClient:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptions, burstIndex, spawnDelay)
+function HieClient:SpawnVisualBurstClone(targetPlayer, projectileId, sharedOptions, burstIndex, _spawnDelay)
 	local burstGroup = self.activeBurstGroups[projectileId]
 	if not burstGroup or burstGroup.Canceled then
 		return
