@@ -4,6 +4,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
+local CrewInventoryStacks = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local dataManagerModule = nil
@@ -46,12 +47,14 @@ local function getOrCreateRemote(parent, remoteName, className)
 end
 
 local crewMemberSnapshotRemote = getOrCreateRemote(ReplicatedStorage, "CrewMemberInventorySnapshotRequest", "RemoteFunction")
+local crewMemberInventoryChangedRemote = getOrCreateRemote(ReplicatedStorage, "CrewMemberInventoryChanged", "RemoteEvent")
 
 local crewMemberEquipRemote = getOrCreateRemote(ReplicatedStorage, "CrewMemberEquipToggleRemote", "RemoteEvent")
 
 local Module = {}
 local chestToolServiceCache = nil
 local sliceServiceCache = nil
+local crewMemberActionServiceCache = nil
 local crewInventoryCallbackRegistered = false
 local CHEST_DEBUG = false
 local FRUIT_EQUIP_DEBUG = false
@@ -60,6 +63,7 @@ local INVENTORY_SNAPSHOT_DEBUG = false
 local lastCrewInventoryCounts = setmetatable({}, { __mode = "k" })
 local pendingCrewInventoryCountPushes = setmetatable({}, { __mode = "k" })
 local invalidCrewEquipWarnings = {}
+local SELL_TIME_SECONDS = 15
 
 local DATA_READY_TIMEOUT = 30
 local TOOL_KIND_CREW_MEMBER = "CrewMember"
@@ -111,10 +115,6 @@ local function warnInvalidCrewIdentity(source, player, identity)
 		player and player.Name or "unknown",
 		tostring(identity or "")
 	))
-end
-
-local function resolveCanonicalCrewMemberId(identity)
-	return CrewCatalog.ResolveCanonicalCrewMemberId(identity)
 end
 
 local function fruitEquipDebug(message, ...)
@@ -220,6 +220,18 @@ local function getSliceService()
 
 	sliceServiceCache = if ok then service else false
 	return if sliceServiceCache == false then nil else sliceServiceCache
+end
+
+local function getCrewMemberActionService()
+	if crewMemberActionServiceCache ~= nil then
+		return crewMemberActionServiceCache
+	end
+
+	local ok, service = pcall(function()
+		return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewMemberActionService"))
+	end)
+	crewMemberActionServiceCache = if ok then service else false
+	return if crewMemberActionServiceCache == false then nil else crewMemberActionServiceCache
 end
 
 local function getHumanoid(player)
@@ -441,16 +453,6 @@ local function unequipIfEquipped(player, toolName, itemKind)
 	end
 end
 
-local function ownsCrewMember(player, name)
-	local requestedName, info = resolveCanonicalCrewMemberId(name)
-	if not info then
-		warnInvalidCrewIdentity("owns_check", player, name)
-		return false
-	end
-	local counts = CrewInventoryDerivedCache.GetCounts(player)
-	return (tonumber(counts[requestedName]) or 0) > 0
-end
-
 local function ownsGear(player, name)
 	local gears = player:FindFirstChild("Gears")
 	if not gears then return false end
@@ -585,6 +587,30 @@ local function applyDisplayMetadata(entry, metadata)
 		entry.DisplayName = displayName
 	end
 
+	local baseDisplayName = tostring(metadata.BaseDisplayName or "")
+	if baseDisplayName ~= "" then
+		entry.BaseDisplayName = baseDisplayName
+	end
+
+	local variant = tostring(metadata.Variant or "")
+	if variant ~= "" then
+		entry.Variant = variant
+	end
+
+	local variantTag = tostring(metadata.VariantTag or "")
+	if variantTag ~= "" then
+		entry.VariantTag = variantTag
+	end
+
+	local variantDisplayName = tostring(metadata.VariantDisplayName or "")
+	if variantDisplayName ~= "" then
+		entry.VariantDisplayName = variantDisplayName
+	end
+
+	if metadata.ShowVariantTag ~= nil then
+		entry.ShowVariantTag = metadata.ShowVariantTag == true
+	end
+
 	local rarity = tostring(metadata.Rarity or "")
 	if rarity ~= "" then
 		entry.Rarity = rarity
@@ -593,6 +619,16 @@ local function applyDisplayMetadata(entry, metadata)
 	local render = tostring(metadata.Render or "")
 	if render ~= "" then
 		entry.Render = render
+	end
+
+	if typeof(metadata.CrewDetails) == "table" then
+		local details = {}
+		for key, value in pairs(metadata.CrewDetails) do
+			if typeof(value) ~= "table" then
+				details[key] = value
+			end
+		end
+		entry.CrewDetails = details
 	end
 end
 
@@ -693,25 +729,11 @@ end
 local function pushCrewInventoryCounts(player, inventory, options)
 	options = if typeof(options) == "table" then options else {}
 	local counts = getCrewInventoryAvailableCounts(player, inventory)
-	local previous = lastCrewInventoryCounts[player] or {}
-	local seen = {}
-	local force = options.Force == true
-
-	for storageName, quantity in pairs(counts) do
-		seen[storageName] = true
-		if force or previous[storageName] ~= quantity then
-			updateRemote:FireClient(player, TOOL_KIND_CREW_MEMBER, storageName, quantity)
-		end
-	end
-
-	for storageName in pairs(previous) do
-		if seen[storageName] ~= true then
-			updateRemote:FireClient(player, TOOL_KIND_CREW_MEMBER, storageName, 0)
-			unequipIfEquipped(player, storageName, TOOL_KIND_CREW_MEMBER)
-		end
-	end
-
 	lastCrewInventoryCounts[player] = counts
+	crewMemberInventoryChangedRemote:FireClient(player, {
+		Reason = tostring(options.Reason or "crew_inventory_changed"),
+		UpdatedAt = os.clock(),
+	})
 end
 
 function Module.SyncCrewInventory(player, inventory, options)
@@ -753,6 +775,178 @@ local function scheduleCrewInventoryCountsPush(player, inventory)
 	end)
 end
 
+local function firstNonEmpty(...)
+	for index = 1, select("#", ...) do
+		local value = tostring(select(index, ...) or "")
+		if value ~= "" then
+			return value
+		end
+	end
+	return ""
+end
+
+local function getCrewVariant(instanceData)
+	if typeof(instanceData) ~= "table" then
+		return ""
+	end
+	return firstNonEmpty(instanceData.Variant, instanceData.VariantKey)
+end
+
+local function getCrewLevel(instanceData)
+	if typeof(instanceData) ~= "table" then
+		return nil
+	end
+	local level = tonumber(instanceData.Level)
+	return if level ~= nil then math.max(1, math.floor(level)) else nil
+end
+
+local function getCrewIncome(instanceData, info)
+	if typeof(instanceData) ~= "table" then
+		return tonumber(info and info.Income)
+	end
+	return tonumber(instanceData.Income or (info and info.Income))
+end
+
+local function getCrewSellValue(instanceData, info)
+	if typeof(info) ~= "table" then
+		return 0
+	end
+	if info.SellPrice ~= nil then
+		return math.max(0, math.floor(tonumber(info.SellPrice) or 0))
+	end
+
+	local income = getCrewIncome(instanceData, info)
+	if income == nil then
+		return 0
+	end
+	return math.max(0, math.floor(income * SELL_TIME_SECONDS))
+end
+
+local function buildCrewDetails(_instanceId, instanceData, info, state, extra)
+	instanceData = if typeof(instanceData) == "table" then instanceData else {}
+	state = tostring(state or "Stored")
+	extra = if typeof(extra) == "table" then extra else {}
+	local displayInfo = CrewCatalog.GetDisplayInfo(instanceData.CrewMemberId or instanceData.StorageName, instanceData)
+
+	local details = {
+		DisplayName = firstNonEmpty(displayInfo.DisplayName, info and (info.DisplayName or info.CrewMemberName or info.Name), instanceData.CrewMemberId, instanceData.StorageName),
+		BaseDisplayName = firstNonEmpty(displayInfo.BaseDisplayName, displayInfo.DisplayName),
+		Rarity = firstNonEmpty(instanceData.Rarity, info and info.Rarity),
+		Variant = firstNonEmpty(displayInfo.Variant, getCrewVariant(instanceData)),
+		VariantTag = firstNonEmpty(displayInfo.VariantTag),
+		VariantDisplayName = firstNonEmpty(displayInfo.VariantDisplayName),
+		ShowVariantTag = displayInfo.ShowVariantTag == true,
+		Level = getCrewLevel(instanceData),
+		Income = getCrewIncome(instanceData, info),
+		SellValue = getCrewSellValue(instanceData, info),
+		State = state,
+		StackQuantity = math.max(1, math.floor(tonumber(extra.StackQuantity) or 1)),
+		StackRepresentative = extra.StackRepresentative == true,
+	}
+
+	if state == "Equipped" then
+		details.QuickSlotIndex = tonumber(extra.QuickSlotIndex)
+	elseif state == "Placed" then
+		details.AssignedStand = firstNonEmpty(extra.AssignedStand, instanceData.AssignedStand)
+	elseif state == "Overflow" then
+		details.OverflowReason = firstNonEmpty(instanceData.OverflowSource, "Protected overflow")
+	end
+
+	return details
+end
+
+local function buildCrewMetadataFromInstance(instanceId, instanceData, state, extra)
+	if typeof(instanceData) ~= "table" then
+		return nil
+	end
+
+	local crewMemberId = tostring(instanceData.CrewMemberId or instanceData.StorageName or "")
+	local canonicalId, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+	if not info then
+		return nil
+	end
+	local displayInfo = CrewCatalog.GetDisplayInfo(canonicalId, instanceData)
+
+	local metadata = {
+		InstanceId = tostring(instanceId or instanceData.InstanceId or ""),
+		CrewMemberId = canonicalId,
+		DisplayName = tostring(displayInfo.DisplayName or info.DisplayName or info.Name or instanceData.DisplayName or canonicalId),
+		BaseDisplayName = tostring(displayInfo.BaseDisplayName or displayInfo.DisplayName or ""),
+		Variant = tostring(displayInfo.Variant or instanceData.Variant or ""),
+		VariantTag = tostring(displayInfo.VariantTag or ""),
+		VariantDisplayName = tostring(displayInfo.VariantDisplayName or ""),
+		ShowVariantTag = displayInfo.ShowVariantTag == true,
+		Rarity = tostring(instanceData.Rarity or info.Rarity or ""),
+		Render = tostring(instanceData.Render or info.Render or ""),
+		ModelName = tostring(instanceData.ModelName or info.ModelName or instanceData.BaseName or ""),
+		LegacyStorageName = tostring(instanceData.LegacyStorageName or ""),
+	}
+	metadata.CrewDetails = buildCrewDetails(instanceId, instanceData, info, state or "Stored", extra)
+	return metadata
+end
+
+local function buildCrewQuickSlotSnapshot(derivedCrewInventory)
+	local inventory = derivedCrewInventory.Inventory
+	local assignments = if typeof(derivedCrewInventory.QuickSlotAssignments) == "table"
+		then derivedCrewInventory.QuickSlotAssignments
+		else {}
+	local hotbarStackMetadataByInstanceId = CrewInventoryStacks.BuildAssignedStackMetadata(inventory, assignments)
+	local slots = {}
+
+	for rawSlotIndex, rawInstanceId in pairs(assignments) do
+		local slotIndex = tonumber(rawSlotIndex)
+		local instanceId = tostring(rawInstanceId or "")
+		local instanceData = typeof(inventory) == "table"
+			and typeof(inventory.ById) == "table"
+			and inventory.ById[instanceId]
+			or nil
+		if
+			slotIndex ~= nil
+			and instanceId ~= ""
+			and typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+		then
+			local metadata = buildCrewMetadataFromInstance(instanceId, instanceData, "Equipped", {
+				QuickSlotIndex = slotIndex,
+				StackQuantity = 1,
+				StackRepresentative = true,
+			})
+			if metadata ~= nil then
+				local hotbarStackMetadata = hotbarStackMetadataByInstanceId[instanceId]
+				local entry = {
+					Name = tostring(metadata.CrewMemberId),
+					Quantity = 1,
+					InstanceId = instanceId,
+					RepresentativeInstanceId = instanceId,
+					InstanceIds = { instanceId },
+					CrewMemberId = tostring(metadata.CrewMemberId),
+					SlotIndex = slotIndex,
+					State = "Equipped",
+				}
+				if typeof(hotbarStackMetadata) == "table" then
+					entry.HotbarStackId = hotbarStackMetadata.HotbarStackId
+					entry.HotbarStackQuantity = hotbarStackMetadata.HotbarStackQuantity
+					entry.HotbarStackIndex = hotbarStackMetadata.HotbarStackIndex
+					entry.HotbarStackNumber = hotbarStackMetadata.HotbarStackNumber
+					entry.HotbarStackMaxQuantity = hotbarStackMetadata.HotbarStackMaxQuantity
+				end
+				applyDisplayMetadata(entry, metadata)
+				table.insert(slots, entry)
+			end
+		end
+	end
+
+	table.sort(slots, function(left, right)
+		return (tonumber(left.SlotIndex) or math.huge) < (tonumber(right.SlotIndex) or math.huge)
+	end)
+
+	return {
+		Assignments = table.clone(assignments),
+		Slots = slots,
+	}
+end
+
 local function buildInventorySnapshot(player)
 	local ready = isPlayerDataReadyNow(player)
 	if not ready then
@@ -792,9 +986,11 @@ local function buildInventorySnapshot(player)
 	end
 
 	local derivedCrewInventory = CrewInventoryDerivedCache.Get(player)
+	local crewStoredCount = 0
 	for _, stack in ipairs(derivedCrewInventory.Stacks) do
 		local storageName = stack.CrewMemberId
 		local quantity = stack.Quantity
+		crewStoredCount += quantity
 		appendQuantityEntry(crew, storageName, quantity, stack.Metadata, stack.ModelPreview, {
 			StackId = stack.StackId,
 			StackNumber = stack.StackNumber,
@@ -804,8 +1000,10 @@ local function buildInventorySnapshot(player)
 			RepresentativeInstanceId = stack.RepresentativeInstanceId,
 			CrewMemberId = storageName,
 			Rarity = stack.Rarity,
+			State = "Stored",
 		})
 	end
+	local crewQuickSlots = buildCrewQuickSlotSnapshot(derivedCrewInventory)
 
 	local gearsFolder = player:FindFirstChild("Gears")
 	if gearsFolder and gearsFolder:IsA("Folder") then
@@ -834,11 +1032,15 @@ local function buildInventorySnapshot(player)
 		DevilFruits = devilFruits,
 		Chests = chests,
 		Crew = crew,
+		CrewQuickSlots = crewQuickSlots,
+		CrewStorage = {
+			StoredCount = crewStoredCount,
+		},
 		Counts = {
 			Gears = #gears,
 			DevilFruits = #devilFruits,
 			Chests = #chests,
-			Crew = #crew,
+			Crew = crewStoredCount,
 		},
 	}
 
@@ -1312,13 +1514,21 @@ local function handleEquipToggleRequest(player, kind, name)
 	end
 
 	if isCrewMemberKind(kind) then
-		local canonicalName, info = resolveCanonicalCrewMemberId(name)
-		if not info then
-			warnInvalidCrewIdentity("equip_request", player, name)
+		local instanceId, instanceData = CrewInstanceService.GetInstance(player, name)
+		if not instanceData then
+			warnInvalidCrewIdentity("equip_request_exact_required", player, name)
 			return
 		end
-		if not ownsCrewMember(player, canonicalName) then return end
-		toggleEquip(player, TOOL_KIND_CREW_MEMBER, canonicalName)
+		local actionService = getCrewMemberActionService()
+		if actionService and typeof(actionService.HandleAction) == "function" then
+			local state = CrewInstanceService.GetInstanceState(player, instanceId)
+			actionService.HandleAction(player, {
+				Action = if state == "Equipped" then "ToggleHoldEquipped" else "Equip",
+				InstanceId = tostring(instanceId),
+			})
+		else
+			warnInvalidCrewIdentity("equip_request_action_service_missing", player, tostring(instanceId))
+		end
 		return
 	end
 
@@ -1368,6 +1578,11 @@ crewMemberEquipRemote.OnServerEvent:Connect(function(player, kind, name)
 end)
 
 function Module.Start()
+	local crewActionService = getCrewMemberActionService()
+	if crewActionService and typeof(crewActionService.Start) == "function" then
+		crewActionService.Start()
+	end
+
 	if crewInventoryCallbackRegistered ~= true then
 		crewInventoryCallbackRegistered = true
 		CrewInstanceService.RegisterCrewInventorySavedCallback(function(player, crewInventory)

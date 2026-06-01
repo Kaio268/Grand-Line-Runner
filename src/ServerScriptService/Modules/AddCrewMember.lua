@@ -6,7 +6,6 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewRegistry = require(Modules:WaitForChild("Crew"):WaitForChild("CrewRegistry"))
-local VariantCfg = CrewCatalog.GetVariantConfig()
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(script.Parent:WaitForChild("CrewQuickSlotService"))
 
@@ -15,23 +14,6 @@ local function validName(name)
 	if #name < 1 or #name > 80 then return nil end
 	if name:find("%.") then return nil end
 	return name
-end
-
-local function getVariantAndBaseName(fullName)
-	fullName = tostring(fullName)
-
-	for _, vKey in ipairs(VariantCfg.Order or {}) do
-		if vKey ~= "Normal" then
-			local v = (VariantCfg.Versions or {})[vKey]
-			local prefix = tostring(v and v.Prefix or (vKey .. " "))
-			if prefix ~= "" and fullName:sub(1, #prefix) == prefix then
-				local baseName = fullName:sub(#prefix + 1)
-				return vKey, baseName
-			end
-		end
-	end
-
-	return "Normal", fullName
 end
 
 local function findModelFor(variantKey, baseName)
@@ -82,7 +64,9 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		crewMemberName = canonicalCrewMemberName
 	end
 
-	local variantKey, baseName = getVariantAndBaseName(crewMemberName)
+	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberName, resolvedInfo)
+	local variantKey = tostring(displayInfo.Variant or "Normal")
+	local baseName = tostring(displayInfo.BaseId or crewMemberName)
 
 	local model = findModelFor(variantKey, baseName)
 	if not model then
@@ -118,6 +102,7 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	local goldenRender = (baseInfo and (baseInfo.GoldenRender or baseInfo.Render)) or render
 	local diamondRender = (baseInfo and (baseInfo.DiamondRender or baseInfo.Render)) or render
 	local bypassQuickSlotCapacity = options.TutorialReward == true or options._QuickSlotCapacityReserved == true
+	local cleanDisplayName = tostring(displayInfo.DisplayName or info.DisplayName or info.CrewMemberName or info.Name or crewMemberName)
 
 	if not bypassQuickSlotCapacity then
 		local canGain, _, _, _, capacityReason = CrewQuickSlotService.CanGainOrNotify(plr, crewMemberName, n, "AddCrewMember:" .. crewMemberName)
@@ -140,7 +125,7 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		StorageName = crewMemberName,
 		LegacyStorageName = legacyStorageName,
 		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
-		DisplayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or crewMemberName),
+		DisplayName = cleanDisplayName,
 		ModelName = tostring(info.ModelName or baseName),
 		BaseName = baseName,
 		Variant = variantKey,
@@ -154,7 +139,7 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		StorageName = crewMemberName,
 		LegacyStorageName = legacyStorageName,
 		CrewMemberId = tostring(info.CrewMemberId or crewMemberName),
-		DisplayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or crewMemberName),
+		DisplayName = cleanDisplayName,
 		ModelName = tostring(info.ModelName or baseName),
 		BaseName = baseName,
 		Variant = variantKey,

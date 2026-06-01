@@ -7,10 +7,12 @@ local CrewModules = Modules:WaitForChild("Crew")
 local CrewCatalog = require(CrewModules:WaitForChild("CrewCatalog"))
 local CrewRegistry = require(CrewModules:WaitForChild("CrewRegistry"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
+local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
 
 local CREW_ITEM_KIND = "CrewMember"
 local CANONICAL_INVENTORY_NAME = "CrewMemberInventory"
 local CANONICAL_BY_ID_NAME = "ById"
+local QUICK_SLOT_ROOT_NAME = "CrewMemberQuickSlots"
 
 local playerConnections = {}
 local playerBoundRoots = {}
@@ -75,7 +77,9 @@ local function findTemplate(itemName)
 	if canonicalItemName == "" then
 		return nil
 	end
-	local variantKey, baseName = getVariantAndBaseName(canonicalItemName)
+	local displayInfo = CrewCatalog.GetDisplayInfo(canonicalItemName)
+	local variantKey = tostring(displayInfo.Variant or "Normal")
+	local baseName = tostring(displayInfo.BaseId or canonicalItemName)
 	local template, usedVariant = CrewRegistry.GetTemplateWithFallback(baseName, variantKey)
 	if template then
 		return template, usedVariant or variantKey, baseName, canonicalItemName
@@ -128,19 +132,20 @@ end
 local function applyToolMetadata(tool, itemName, variantKey, baseName, instanceId, instanceData)
 	local canonicalItemName, resolvedInfo, legacyStorageName = resolveCrewItemName(itemName)
 	itemName = canonicalItemName
-	local parsedVariant, parsedBaseName = getVariantAndBaseName(itemName)
-	variantKey = variantKey or parsedVariant
-	baseName = baseName or parsedBaseName
 	instanceData = if typeof(instanceData) == "table" then instanceData else {}
 	instanceId = tostring(instanceId or instanceData.InstanceId or "")
+	local displayInfo = CrewCatalog.GetDisplayInfo(itemName, instanceData)
+	variantKey = variantKey or displayInfo.Variant or "Normal"
+	baseName = baseName or displayInfo.BaseId or itemName
 
 	local info = resolvedInfo or CrewCatalog.GetInfoById(itemName) or CrewCatalog.GetInfoById(baseName)
-	local displayName = tostring((info and (info.DisplayName or info.Name)) or itemName)
+	local displayName = tostring(displayInfo.DisplayName or (info and (info.DisplayName or info.Name)) or itemName)
 	local productionName = tostring((info and (info.RealCharacterName or info.ModelName or info.CrewMemberId)) or "")
 	local realCharacterName = tostring((info and info.RealCharacterName) or "")
 	local modelName = tostring((info and info.ModelName) or baseName)
 	local crewMemberId = tostring((info and info.CrewMemberId) or itemName)
 	local rarity = tostring(instanceData.Rarity or (info and info.Rarity) or "")
+	local income = tonumber(instanceData.Income or (info and info.Income))
 
 	tool.Name = itemName
 	tool.ToolTip = displayName
@@ -153,9 +158,14 @@ local function applyToolMetadata(tool, itemName, variantKey, baseName, instanceI
 	tool:SetAttribute("CrewMemberDisplayName", displayName)
 	tool:SetAttribute("Variant", variantKey)
 	tool:SetAttribute("BaseName", baseName)
+	tool:SetAttribute("CrewMemberBaseDisplayName", displayInfo.BaseDisplayName)
+	tool:SetAttribute("CrewMemberVariantTag", if tostring(displayInfo.VariantTag or "") ~= "" then displayInfo.VariantTag else nil)
+	tool:SetAttribute("CrewMemberVariantDisplayName", displayInfo.VariantDisplayName)
+	tool:SetAttribute("CrewMemberShowVariantTag", displayInfo.ShowVariantTag == true)
 	tool:SetAttribute("ModelName", modelName)
 	tool:SetAttribute("CrewMemberId", crewMemberId)
 	tool:SetAttribute("CrewMemberRarity", if rarity ~= "" then rarity else nil)
+	tool:SetAttribute("CrewMemberIncome", income)
 	tool:SetAttribute("CrewMemberLevel", tonumber(instanceData.Level))
 	tool:SetAttribute("CrewMemberCurrentXP", tonumber(instanceData.CurrentXP))
 	tool:SetAttribute("CrewMemberTotalXP", tonumber(instanceData.TotalXP))
@@ -263,48 +273,6 @@ local function getToolInstanceId(tool)
 	return tostring(tool:GetAttribute("CrewMemberInstanceId") or tool:GetAttribute("CrewInstanceId") or "")
 end
 
-local function compareInstanceIds(left, right)
-	local leftNumber = tonumber(left)
-	local rightNumber = tonumber(right)
-	if leftNumber ~= nil and rightNumber ~= nil and leftNumber ~= rightNumber then
-		return leftNumber < rightNumber
-	end
-	return tostring(left) < tostring(right)
-end
-
-local function getOrderedInventoryInstanceIds(inventory)
-	local ids = {}
-	local seen = {}
-
-	if typeof(inventory.Order) == "table" then
-		for _, rawInstanceId in ipairs(inventory.Order) do
-			local instanceId = tostring(rawInstanceId or "")
-			if instanceId ~= "" and seen[instanceId] ~= true then
-				seen[instanceId] = true
-				table.insert(ids, instanceId)
-			end
-		end
-	end
-
-	local remaining = {}
-	if typeof(inventory.ById) == "table" then
-		for rawInstanceId in pairs(inventory.ById) do
-			local instanceId = tostring(rawInstanceId or "")
-			if instanceId ~= "" and seen[instanceId] ~= true then
-				seen[instanceId] = true
-				table.insert(remaining, instanceId)
-			end
-		end
-	end
-
-	table.sort(remaining, compareInstanceIds)
-	for _, instanceId in ipairs(remaining) do
-		table.insert(ids, instanceId)
-	end
-
-	return ids
-end
-
 local function addDesiredTool(tools, player, instanceId, itemName, instanceData, source)
 	instanceId = tostring(instanceId or "")
 	itemName = resolveCrewItemName(itemName)
@@ -320,14 +288,48 @@ local function addDesiredTool(tools, player, instanceId, itemName, instanceData,
 	})
 end
 
+local function readQuickSlotAssignments(player)
+	local ok, assignments = pcall(function()
+		return CrewQuickSlotService.GetAssignments(player)
+	end)
+	if ok and typeof(assignments) == "table" then
+		return assignments
+	end
+	return {}
+end
+
+local function getSortedAssignedInstanceIds(assignments)
+	local assignedSlots = {}
+	for rawSlotIndex, rawInstanceId in pairs(if typeof(assignments) == "table" then assignments else {}) do
+		local slotIndex = tonumber(rawSlotIndex)
+		local instanceId = tostring(rawInstanceId or "")
+		if slotIndex ~= nil and instanceId ~= "" then
+			table.insert(assignedSlots, {
+				SlotIndex = slotIndex,
+				InstanceId = instanceId,
+			})
+		end
+	end
+
+	table.sort(assignedSlots, function(left, right)
+		return left.SlotIndex < right.SlotIndex
+	end)
+
+	local ids = {}
+	for _, entry in ipairs(assignedSlots) do
+		table.insert(ids, entry.InstanceId)
+	end
+	return ids
+end
+
 local function readCanonicalToolsFromData(player, inventory)
 	if typeof(inventory) ~= "table" or typeof(inventory.ById) ~= "table" then
 		return nil, false
 	end
 
 	local tools = {}
-	local hasCanonicalData = false
-	for _, instanceId in ipairs(getOrderedInventoryInstanceIds(inventory)) do
+	local hasCanonicalData = true
+	for _, instanceId in ipairs(getSortedAssignedInstanceIds(readQuickSlotAssignments(player))) do
 		local instanceData = inventory.ById[tostring(instanceId)]
 		if typeof(instanceData) == "table" then
 			local storageName = tostring(
@@ -337,8 +339,7 @@ local function readCanonicalToolsFromData(player, inventory)
 			)
 			local canonicalStorageName = resolveCrewItemName(storageName)
 			if canonicalStorageName ~= "" and isKnownCrewItem(canonicalStorageName) then
-				hasCanonicalData = true
-				if tostring(instanceData.AssignedStand or "") == "" then
+				if tostring(instanceData.AssignedStand or "") == "" and instanceData.Overflow ~= true then
 					addDesiredTool(tools, player, instanceId, canonicalStorageName, instanceData, "inventory_data")
 				end
 			elseif storageName ~= "" then
@@ -377,9 +378,10 @@ local function readCanonicalToolsFromFolder(player)
 	end
 
 	local tools = {}
-	local hasCanonicalData = false
-	for _, instanceFolder in ipairs(byId:GetChildren()) do
-		if instanceFolder:IsA("Folder") then
+	local hasCanonicalData = true
+	for _, assignedInstanceId in ipairs(getSortedAssignedInstanceIds(readQuickSlotAssignments(player))) do
+		local instanceFolder = byId:FindFirstChild(tostring(assignedInstanceId))
+		if instanceFolder and instanceFolder:IsA("Folder") then
 			local instanceId = tostring(readValue(instanceFolder, "InstanceId") or instanceFolder.Name or "")
 			local storageName = tostring(
 				readValue(instanceFolder, "CrewMemberId")
@@ -388,8 +390,7 @@ local function readCanonicalToolsFromFolder(player)
 			)
 			local canonicalStorageName = resolveCrewItemName(storageName)
 			if canonicalStorageName ~= "" and isKnownCrewItem(canonicalStorageName) then
-				hasCanonicalData = true
-				if tostring(readValue(instanceFolder, "AssignedStand") or "") == "" then
+				if tostring(readValue(instanceFolder, "AssignedStand") or "") == "" and readValue(instanceFolder, "Overflow") ~= true then
 					addDesiredTool(tools, player, instanceId, canonicalStorageName, {
 						InstanceId = instanceId,
 						StorageName = canonicalStorageName,
@@ -543,7 +544,7 @@ local function scheduleSync(player)
 end
 
 local function isTrackedRootName(rootName)
-	return rootName == CANONICAL_INVENTORY_NAME
+	return rootName == CANONICAL_INVENTORY_NAME or rootName == QUICK_SLOT_ROOT_NAME
 end
 
 local function bindValueObject(player, object)
@@ -585,6 +586,10 @@ local function bindKnownInventoryRoots(player)
 	local canonicalRoot = player:FindFirstChild(CANONICAL_INVENTORY_NAME)
 	if canonicalRoot then
 		bindInventoryRoot(player, canonicalRoot)
+	end
+	local quickSlotRoot = player:FindFirstChild(QUICK_SLOT_ROOT_NAME)
+	if quickSlotRoot then
+		bindInventoryRoot(player, quickSlotRoot)
 	end
 end
 

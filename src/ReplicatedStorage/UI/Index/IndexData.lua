@@ -450,8 +450,8 @@ function IndexData.buildViewModel(options)
 				end
 
 				local displayMetadata = getIndexDisplayMetadata(indexDisplayMetadata, itemId)
-				local displayName = readMetadataText(displayMetadata, "DisplayName")
-					or tostring(itemInfo.DisplayName or itemInfo.Name or entry.name)
+				local displayInfo = CrewCatalog.GetDisplayInfo(itemId, displayMetadata)
+				local displayName = tostring(displayInfo.DisplayName or itemInfo.DisplayName or itemInfo.Name or entry.name)
 				local rarity = readMetadataText(displayMetadata, "Rarity")
 					or tostring(itemInfo.Rarity or entry.info.Rarity or "Common")
 				local render = readMetadataText(displayMetadata, "Render")
@@ -479,6 +479,11 @@ function IndexData.buildViewModel(options)
 					baseName = entry.name,
 					name = entry.name,
 					displayName = displayName,
+					baseDisplayName = tostring(displayInfo.BaseDisplayName or displayName),
+					variant = tostring(displayInfo.Variant or variantKey),
+					variantTag = tostring(displayInfo.VariantTag or ""),
+					variantDisplayName = tostring(displayInfo.VariantDisplayName or ""),
+					showVariantTag = displayInfo.ShowVariantTag == true,
 					rarity = rarity,
 					production = formatIncomeRange(rarity, variantKey),
 					hiddenProduction = "??? Beli/s",

@@ -300,15 +300,17 @@ local function getCrewSummaryDisplayName(crewData, mirrorData, storageName)
 	crewData = if typeof(crewData) == "table" then crewData else {}
 	mirrorData = if typeof(mirrorData) == "table" then mirrorData else {}
 
+	local displayInfo = CanonicalCrewCatalog.GetDisplayInfo(storageName, crewData)
 	local info = CanonicalCrewCatalog.GetInfoById(storageName)
 	return firstNonEmpty(
+		displayInfo.DisplayName,
+		info and info.DisplayName,
+		info and info.CrewMemberName,
+		info and info.Name,
 		crewData.DisplayName,
 		crewData.Name,
 		mirrorData.DisplayName,
 		mirrorData.Name,
-		info and info.DisplayName,
-		info and info.CrewMemberName,
-		info and info.Name,
 		storageName,
 		"Unnamed Crew"
 	)
@@ -461,7 +463,11 @@ local function getRewardToolDisplay(reward)
 		return ChestUtils.GetDisplayName(reward)
 	end
 
-	return tostring(reward.CrewDisplayName or reward.DisplayName or reward.CrewName or "Crew Contract")
+	local displayInfo = CanonicalCrewCatalog.GetDisplayInfo(
+		reward.CrewMemberId or reward.CrewStorageName or reward.CrewName,
+		reward
+	)
+	return tostring(displayInfo.DisplayName or reward.CrewDisplayName or reward.DisplayName or reward.CrewName or "Crew Contract")
 end
 
 local function cloneRewardData(reward)
@@ -487,6 +493,7 @@ local function cloneRewardData(reward)
 		data.CrewDisplayName = reward.CrewDisplayName
 		data.CrewStorageName = reward.CrewStorageName
 		data.CrewMemberId = reward.CrewMemberId
+		data.Variant = reward.Variant
 	end
 
 	if typeof(reward.WorldDropPosition) == "Vector3" then
@@ -612,7 +619,12 @@ local function getCarryItemDisplayName(itemData)
 		return ChestUtils.GetDisplayName(data)
 	end
 
-	local displayName = itemData.DisplayName
+	local displayInfo = CanonicalCrewCatalog.GetDisplayInfo(
+		data.CrewMemberId or data.CrewStorageName or data.CrewName,
+		data
+	)
+	local displayName = displayInfo.DisplayName
+		or itemData.DisplayName
 		or data.DisplayName
 		or data.CrewDisplayName
 		or data.CrewName
@@ -1835,6 +1847,7 @@ local function installCarrySlotAdapter()
 					CrewMemberId = crewData.CrewMemberId,
 					Rarity = crewData.Rarity,
 					CanonicalRarity = crewData.CanonicalRarity,
+					Variant = crewData.Variant,
 					Image = crewData.Image,
 					Physical = crewData.Physical == true,
 					TutorialCrewMember = tutorialCrewMember,
@@ -1986,6 +1999,7 @@ local function grantCarrySlotReward(player, slot)
 			DisplayName = carriedReward.CrewDisplayName or carriedReward.DisplayName or carriedReward.CrewName,
 			StorageName = carriedReward.CrewStorageName,
 			CrewMemberId = carriedReward.CrewMemberId,
+			Variant = carriedReward.Variant,
 			Rarity = carriedReward.Rarity,
 			CanonicalRarity = carriedReward.CanonicalRarity,
 			DepthBand = carriedReward.DepthBand,
@@ -2046,6 +2060,43 @@ local function grantCarrySlotReward(player, slot)
 	end
 
 	return true, message, nil
+end
+
+local function storeHeldCrewMember(player, options)
+	options = if typeof(options) == "table" then options else {}
+	local runtime = getRuntime(player)
+	local slot = findCarrySlot(runtime, options.CarryId or options.SlotIndex)
+	if slot == nil then
+		return false, {
+			Reason = "no_carried_reward",
+		}
+	end
+	if slot.ItemType ~= "CrewMember" then
+		return false, {
+			Reason = "held_item_not_crewmate",
+		}
+	end
+
+	local carryId = tostring(slot.CarryId or "")
+	local slotIndex = tonumber(slot.SlotIndex)
+	local ok, message, reason = grantCarrySlotReward(player, slot)
+	if ok ~= true then
+		return false, {
+			Reason = tostring(reason or "store_held_failed"),
+		}
+	end
+
+	if slot.Data and slot.Data.Physical == true then
+		CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, carryId)
+	end
+	removeCarryItem(player, runtime, carryId)
+
+	return true, {
+		Action = "StoreHeld",
+		Message = message,
+		CarryId = carryId,
+		SlotIndex = slotIndex,
+	}
 end
 
 local function extractRun(player)
@@ -3303,6 +3354,17 @@ end
 
 function Service.RemoveCarryItem(player, slotIndexOrCarryId)
 	return removeCarryItem(player, getRuntime(player), slotIndexOrCarryId)
+end
+
+function Service.StoreHeldCrewMember(player, options)
+	local ready, errorResponse = preparePlayerState(player)
+	if not ready then
+		return false, {
+			Reason = errorResponse and errorResponse.error or "profile_not_ready",
+		}
+	end
+
+	return storeHeldCrewMember(player, options)
 end
 
 function Service.ClearAllCarryItems(player, reason)

@@ -116,9 +116,10 @@ local ProfileTemplate = {
 	},
 	CrewMemberInventoryAuthorityAudit = {},
 	CrewMemberQuickSlots = {
-		SchemaVersion = 1,
+		SchemaVersion = 2,
 		UnlockedSlots = CrewQuickSlotConfig.DefaultUnlockedSlots,
 		MaxSlots = CrewQuickSlotConfig.MaxSlots,
+		Assignments = {},
 	},
 	CrewMemberIncome = {},
 	CrewQuickSlotProductAuthorityAudit = {},

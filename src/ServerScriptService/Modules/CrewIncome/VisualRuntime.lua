@@ -4,10 +4,8 @@ function Module.Install(ctx)
 	local CaptainSlotRuntime = ctx.CaptainSlotRuntime
 	local CollectionService = ctx.CollectionService
 	local CrewOverhead = ctx.CrewOverhead
+	local CrewCatalog = ctx.CrewCatalog
 	local CrewProtectionService = ctx.CrewProtectionService
-	local function detectVariant(...)
-		return ctx.detectVariant(...)
-	end
 	local function findCrewMemberInfoByName(...)
 		return ctx.findCrewMemberInfoByName(...)
 	end
@@ -54,10 +52,6 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
-	local function stripVariantPrefix(...)
-		return ctx.stripVariantPrefix(...)
-	end
-
 	local function ensurePrimaryPart(model)
 		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
 			return model.PrimaryPart
@@ -131,21 +125,26 @@ function Module.Install(ctx)
 		local canonicalName = resolved and resolved.CanonicalName or tostring(crewMemberName)
 		local rawName = info and tostring(info.Name or info.DisplayName or canonicalName) or tostring(crewMemberName)
 		local rawRarity = info and tostring(info.Rarity or "") or "Common"
-		local variantKey = resolved and resolved.VariantKey or detectVariant(crewMemberName)
-		if variantKey == "Normal" then
-			variantKey = detectVariant(rawName)
-		end
-		if variantKey == "Normal" then
-			variantKey = detectVariant(rawRarity)
-		end
-
-		local displayName = stripVariantPrefix(rawName, variantKey)
+		local displayInfo = if CrewCatalog and typeof(CrewCatalog.GetDisplayInfo) == "function"
+			then CrewCatalog.GetDisplayInfo(canonicalName, {
+				DisplayName = rawName,
+				Variant = resolved and resolved.VariantKey,
+			})
+			else nil
+		local variantKey = tostring((displayInfo and displayInfo.Variant) or (resolved and resolved.VariantKey) or "Normal")
+		local displayName = tostring((displayInfo and displayInfo.DisplayName) or rawName)
 		local helperDisplayName = resolveStandStatusDisplayName(player, crewMemberName)
 		if helperDisplayName ~= "" then
-			displayName = stripVariantPrefix(helperDisplayName, variantKey)
+			local helperDisplayInfo = if CrewCatalog and typeof(CrewCatalog.GetDisplayInfo) == "function"
+				then CrewCatalog.GetDisplayInfo(canonicalName, {
+					DisplayName = helperDisplayName,
+					Variant = variantKey,
+				})
+				else nil
+			displayName = tostring((helperDisplayInfo and helperDisplayInfo.DisplayName) or helperDisplayName)
 		end
 
-		local displayRarity = stripVariantPrefix(rawRarity, variantKey)
+		local displayRarity = rawRarity
 		local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standModel.Name)
 		local crewMemberInstanceId = tostring(getPlayerStandCrewMemberInstanceId(player, standModel.Name) or "")
 		local incomePerSecond = if isCaptainSlot

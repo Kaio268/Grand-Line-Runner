@@ -547,8 +547,10 @@ local function resolveCrewMemberReward(player: Player, rewardId: number, state, 
 			return nil, nil, "random_crew_pool_empty"
 		end
 
+		local crewMemberId = tostring(entry.CrewMemberId or rewardName)
+		local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, entry)
 		return tostring(entry.CrewMemberId or rewardName),
-			tostring(entry.DisplayName or entry.CrewMemberId or rewardName),
+			tostring(displayInfo.DisplayName or entry.DisplayName or entry.CrewMemberId or rewardName),
 			nil
 	end
 
@@ -573,8 +575,10 @@ local function resolveCrewMemberReward(player: Player, rewardId: number, state, 
 		end
 
 		if info then
+			local crewMemberId = tostring(info.CrewMemberId or info.Id or candidate)
+			local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, info)
 			return tostring(info.CrewMemberId or info.Id or candidate),
-				tostring(info.DisplayName or info.CrewMemberName or info.Name or candidate)
+				tostring(displayInfo.DisplayName or info.DisplayName or info.CrewMemberName or info.Name or candidate)
 		end
 	end
 

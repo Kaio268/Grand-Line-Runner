@@ -4,15 +4,12 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(script.Parent.Data.DataManager)
 local CrewMemberCanonicalReadGate = require(script.Parent.Modules.CrewMemberCanonicalReadGate)
-local CrewInstanceService = require(script.Parent.Modules.CrewInstanceService)
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellEvent = Remotes:WaitForChild("SellItemEvent")
 
 local CrewCatalog = require(ReplicatedStorage.Modules.Crew:WaitForChild("CrewCatalog"))
-local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
 
-local SELL_TIME_SECONDS = 15
 local SELL_DIALOG_DISPLAY_NAME_REQUEST = "CrewMemberSellDialogDisplayNameRequest"
 
 local displayNameRequest = Remotes:FindFirstChild(SELL_DIALOG_DISPLAY_NAME_REQUEST)
@@ -36,20 +33,6 @@ local function getCrewInfo(crewName)
 	return CrewCatalog.GetInfoById(crewName)
 end
 
-local function getSellPrice(crewMemberName)
-	local data = getCrewInfo(crewMemberName)
-	if not data then return 0 end
-
-	if data.SellPrice then
-		return tonumber(data.SellPrice) or 0
-	end
-
-	local income = tonumber(data.Income)
-	if not income then return 0 end
-
-	return income * SELL_TIME_SECONDS
-end
-
 local function locateInventoryKey(inventoryTbl, wantName)
 	if inventoryTbl[wantName] ~= nil then
 		return wantName
@@ -63,13 +46,6 @@ local function locateInventoryKey(inventoryTbl, wantName)
 	end
 
 	return nil
-end
-
-local function getQuantity(entry)
-	if type(entry) == "table" then
-		return tonumber(entry.Quantity) or 0
-	end
-	return tonumber(entry) or 0
 end
 
 local function getCanonicalCrewInventory(player)
@@ -183,43 +159,6 @@ local function locateCanonicalStorageName(player, wantName)
 	return nil, 0
 end
 
-local function sellCrewStorage(player, storageName, quantity)
-	storageName = sanitizeKey(storageName)
-	quantity = math.max(0, math.floor(tonumber(quantity) or 0))
-	if storageName == "" or quantity <= 0 then
-		return 0, 0
-	end
-
-	CrewMemberCanonicalReadGate.CompareSellDialogDisplay(player, storageName, {
-		LogThrottleSeconds = 60,
-	})
-
-	local price = getSellPrice(storageName)
-	if price <= 0 then
-		return 0, 0
-	end
-
-	local soldCount = 0
-	for _ = 1, quantity do
-		if CrewInstanceService.RemoveAvailableCrewMember(player, storageName) then
-			soldCount += 1
-		else
-			break
-		end
-	end
-
-	return price * soldCount, soldCount
-end
-
-local function wasCanonicalStorageSold(soldCanonicalStorageNames, storageName)
-	for _, soldStorageName in ipairs(soldCanonicalStorageNames) do
-		if crewNamesMatch(soldStorageName, storageName) then
-			return true
-		end
-	end
-	return false
-end
-
 local function resolveSellDialogDisplayName(player, rawName)
 	local wantName = sanitizeKey(rawName)
 	if wantName == "" then
@@ -238,73 +177,10 @@ local function resolveSellDialogDisplayName(player, rawName)
 	local displayName = CrewMemberCanonicalReadGate.ResolveSellDialogDisplayName(player, sanitizeKey(displayKey), {
 		LogThrottleSeconds = 60,
 	})
-	return tostring(displayName or wantName)
-end
-
-local function sellSingle(player, rawName)
-	local wantName   = sanitizeKey(rawName)
-	local inventory  = DataManager:GetValue(player, "Inventory")
-	if wantName == "" then
-		return
-	end
-
-	local storageName = nil
-	local qty = 0
-
-	storageName, qty = locateCanonicalStorageName(player, wantName)
-
-	if type(inventory) == "table" then
-		local realKey = locateInventoryKey(inventory, wantName)
-		if not storageName and realKey then
-			local legacyQty = getQuantity(inventory[realKey])
-			if legacyQty > 0 then
-				storageName = sanitizeKey(realKey)
-				qty = legacyQty
-			end
-		end
-	end
-
-	if not storageName or qty <= 0 then
-		return
-	end
-
-	local total, soldCount = sellCrewStorage(player, storageName, 1)
-	if soldCount > 0 and total > 0 then
-		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), total)
-	end
-end
-
-local function sellAll(player)
-	local inventory = DataManager:GetValue(player, "Inventory")
-	local total = 0
-	local soldCanonicalStorageNames = {}
-
-	for storageName, qty in pairs(getCanonicalAvailableCounts(player)) do
-		local soldTotal, soldCount = sellCrewStorage(player, storageName, qty)
-		if soldCount > 0 then
-			total += soldTotal
-			table.insert(soldCanonicalStorageNames, storageName)
-		end
-	end
-
-	if type(inventory) ~= "table" then
-		if total > 0 then
-			DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), total)
-		end
-		return
-	end
-
-	for key, entry in pairs(inventory) do
-		local qty = getQuantity(entry)
-		if qty > 0 and not wasCanonicalStorageSold(soldCanonicalStorageNames, key) then
-			local soldTotal = sellCrewStorage(player, key, qty)
-			total += soldTotal
-		end
-	end
-
-	if total > 0 then
-		DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), total)
-	end
+	local displayInfo = CrewCatalog.GetDisplayInfo(displayKey, {
+		DisplayName = displayName,
+	})
+	return tostring(displayInfo.DisplayName or displayName or wantName)
 end
 
 displayNameRequest.OnServerInvoke = function(player, rawName)
@@ -329,9 +205,10 @@ SellEvent.OnServerEvent:Connect(function(player, mode, fullName)
 
 	if player.Parent ~= Players then return end
 
-	if mode == "SINGLE" and fullName then
-		sellSingle(player, fullName)
-	elseif mode == "ALL" then
-		sellAll(player)
-	end
+	warn(string.format(
+		"[SellItemEvent] rejected legacy crew sell request player=%s mode=%s item=%s; use CrewMemberActionRequest exact InstanceId",
+		player.Name,
+		tostring(mode),
+		tostring(fullName or "")
+	))
 end)

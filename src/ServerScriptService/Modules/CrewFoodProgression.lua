@@ -332,8 +332,8 @@ function Module.GetProgress(player, crewMemberId)
 
 	local storageName = tostring(instanceData.StorageName or "")
 	local rarity = normalizeRarity(instanceData.Rarity or getStoredRarity(player, storageName))
-	local parsedVariant = getVariantAndBaseName(storageName)
-	local variantKey = CrewIncomeBalance.NormalizeVariant(instanceData.Variant or parsedVariant)
+	local displayInfo = CrewCatalog.GetDisplayInfo(storageName, instanceData)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(instanceData.Variant or displayInfo.Variant)
 	local rawLevel = tonumber(instanceData.Level) or 1
 	local rawCurrentXP = tonumber(instanceData.CurrentXP) or 0
 	local level = rawLevel

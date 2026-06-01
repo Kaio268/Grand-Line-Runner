@@ -71,6 +71,10 @@ local function getDisplayName(storageName, info)
 	if resolvedInfo then
 		info = resolvedInfo
 	end
+	local displayInfo = CrewCatalog.GetDisplayInfo(storageName, info)
+	if tostring(displayInfo.DisplayName or "") ~= "" then
+		return tostring(displayInfo.DisplayName)
+	end
 	if typeof(info) == "table" then
 		return tostring(info.DisplayName or info.CrewMemberName or info.Name or storageName)
 	end

@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CrewQuickSlotConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 
 CrewProfileSchema.SchemaVersion = 1
+CrewProfileSchema.QuickSlotsSchemaVersion = 2
 
 CrewProfileSchema.Keys = {
 	Inventory = "CrewMemberInventory",
@@ -52,6 +53,9 @@ CrewProfileSchema.CrewMemberInstanceFields = {
 	"TutorialReward",
 	"TutorialToken",
 	"GrandLineRushStarter",
+	"Overflow",
+	"OverflowSource",
+	"OverflowedAt",
 	"ProjectionSource",
 }
 
@@ -81,9 +85,10 @@ function CrewProfileSchema.NewCrewMemberQuickSlots(overrides)
 	unlockedSlots = math.min(unlockedSlots, maxSlots)
 
 	return {
-		SchemaVersion = CrewProfileSchema.SchemaVersion,
+		SchemaVersion = CrewProfileSchema.QuickSlotsSchemaVersion,
 		UnlockedSlots = unlockedSlots,
 		MaxSlots = maxSlots,
+		Assignments = if typeof(overrides.Assignments) == "table" then table.clone(overrides.Assignments) else {},
 	}
 end
 

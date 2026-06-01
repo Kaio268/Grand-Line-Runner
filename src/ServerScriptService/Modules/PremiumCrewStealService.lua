@@ -9,7 +9,6 @@ local Config = require(Modules:WaitForChild("Configs"):WaitForChild("PremiumCrew
 local MonetizationConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Monetization"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
@@ -353,7 +352,8 @@ local function scheduleOfferExpiry(offer)
 end
 
 local function getCrewDisplayName(storageName, instanceData)
-	local displayName = tostring(instanceData and instanceData.DisplayName or "")
+	local displayInfo = CrewCatalog.GetDisplayInfo(storageName, instanceData)
+	local displayName = tostring(displayInfo.DisplayName or "")
 	if displayName ~= "" then
 		return displayName
 	end
@@ -764,47 +764,29 @@ local function verifyBuyerHotbarGrant(buyer, buyerInstanceId, expectedStorageNam
 		end
 	end
 
-	local stacks = CrewInventoryStacks.BuildAvailableStacks(inventory)
 	local unlockedSlots = CrewQuickSlotService.GetUnlockedSlots(buyer)
-	local foundStackIndex = nil
-	local foundStackKey = nil
-	for stackIndex, stack in ipairs(stacks) do
-		for _, stackInstanceId in ipairs(stack.InstanceIds or {}) do
-			if tostring(stackInstanceId) == tostring(resolvedInstanceId) then
-				foundStackIndex = stackIndex
-				foundStackKey = stack.CrewMemberId
-				break
-			end
-		end
-		if foundStackIndex then
-			break
-		end
-	end
-
-	if not foundStackIndex then
+	local assignedSlotIndex = CrewQuickSlotService.GetInstanceSlot(buyer, resolvedInstanceId)
+	if assignedSlotIndex == nil then
 		return false, "hotbar_verification_failed", {
-			Stage = "missing_hotbar_stack",
+			Stage = "missing_quick_slot_assignment",
 			BuyerInstanceId = normalizedInstanceId,
 			UnlockedSlots = unlockedSlots,
-			StackCount = #stacks,
 		}
 	end
 
-	if foundStackIndex > unlockedSlots then
+	if assignedSlotIndex > unlockedSlots then
 		return false, "hotbar_verification_failed", {
 			Stage = "outside_unlocked_hotbar",
 			BuyerInstanceId = normalizedInstanceId,
-			StackIndex = foundStackIndex,
+			SlotIndex = assignedSlotIndex,
 			UnlockedSlots = unlockedSlots,
-			StackKey = foundStackKey,
 		}
 	end
 
 	return true, nil, {
 		BuyerInstanceId = tostring(resolvedInstanceId),
-		StackIndex = foundStackIndex,
+		SlotIndex = assignedSlotIndex,
 		UnlockedSlots = unlockedSlots,
-		StackKey = foundStackKey,
 	}
 end
 

@@ -3020,12 +3020,14 @@ local function processCrewCanaryCommand(player, argumentText)
 		end
 
 		if removeArgument ~= nil then
-			local storageName = tostring(removeArgument or ""):match("^%s*(.-)%s*$") or ""
+			local instanceIdArgument = tostring(removeArgument or ""):match("^%s*(.-)%s*$") or ""
 			local flags = CrewMemberCanonicalReadGate.GetFlags()
 			if flags.CrewMemberInventoryWriteAuthorityEnabled ~= true then
 				return false, "inventory_write_authority_disabled"
 			end
-			local instanceId, _, reason = CrewInstanceService.RemoveAvailableInstance(player, storageName)
+			local instanceId, _, reason = CrewInstanceService.RemoveStoredInstanceById(player, instanceIdArgument, {
+				SourcePath = "dev_command_inventory_authority_remove_exact",
+			})
 			local status = CrewInstanceService.BuildInventoryAuthorityStatus(player)
 			CrewInstanceService.PrintInventoryAuthorityStatus(status)
 			if instanceId == nil or status.Passed ~= true then

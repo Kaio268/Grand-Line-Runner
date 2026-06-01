@@ -155,6 +155,19 @@ local function getPreviewContextValue(context, key)
 	return context[key]
 end
 
+local function getPlainDisplayName(previewInfo, fallback)
+	if typeof(previewInfo) ~= "table" then
+		return tostring(fallback or "")
+	end
+
+	local displayName = tostring(previewInfo.DisplayName or fallback or "")
+	local variantTag = tostring(previewInfo.VariantTag or previewInfo.VariantDisplayName or previewInfo.Variant or "")
+	if previewInfo.ShowVariantTag == true and variantTag ~= "" and variantTag ~= "Normal" then
+		return string.format("%s (%s)", displayName, variantTag)
+	end
+	return displayName
+end
+
 function CrewRewardPreview.Resolve(cfg, context)
 	if typeof(cfg) ~= "table" or typeof(cfg.Rewards) ~= "table" then
 		return nil
@@ -190,11 +203,11 @@ function CrewRewardPreview.ResolveDisplayName(rewardName, rewardData, context): 
 			getPreviewContextValue(context, "CycleStartPlayTime"),
 			rewardData
 		)
-		return tostring(previewInfo.DisplayName or rewardName)
+		return getPlainDisplayName(previewInfo, rewardName)
 	end
 
 	local resolved = CrewRewardResolver.Resolve(rewardName, rewardData)
-	return tostring(resolved.DisplayName or rewardName)
+	return getPlainDisplayName(resolved, rewardName)
 end
 
 function CrewRewardPreview.Clear(iconObj: Instance)

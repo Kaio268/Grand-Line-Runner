@@ -533,37 +533,16 @@ local function getCaptainPlacementCandidate(player, equippedInfo, options)
 		return nil, nil, false, "no_equipped_crewmate"
 	end
 
-	local tutorialInstanceId, tutorialInstance
-	if options.AllowTutorialFallback ~= false and typeof(callbacks.FindAvailableTutorialPlacementReward) == "function" then
-		tutorialInstanceId, tutorialInstance = callbacks.FindAvailableTutorialPlacementReward(player, equippedInfo.Name)
-	end
-	if tutorialInstance then
-		return tostring(tutorialInstanceId or ""), tutorialInstance, true, nil
-	end
-
-	if
-		options.SkipInventoryPreflight ~= true
-		and typeof(callbacks.GetInventoryQuantity) == "function"
-		and callbacks.GetInventoryQuantity(player, equippedInfo.Name) < 1
-	then
-		return nil, nil, false, "no_inventory"
-	end
-
-	if options.SkipInventoryPreflight ~= true and typeof(callbacks.CanEquipCrewMember) == "function" then
-		local quickSlotUnlocked = callbacks.CanEquipCrewMember(player, equippedInfo.Name)
-		if not quickSlotUnlocked then
-			if typeof(callbacks.PromptUnlockForCrewMember) == "function" then
-				callbacks.PromptUnlockForCrewMember(player, equippedInfo.Name)
-			end
-			return nil, nil, false, "quick_slot_locked"
-		end
-	end
-
 	if equippedInfo.InstanceId == "" then
 		return nil, nil, false, "incoming_instance_missing"
 	end
 
-	return equippedInfo.InstanceId, nil, false, nil
+	local instanceId, instanceData = CrewInstanceService.GetInstance(player, equippedInfo.InstanceId)
+	if not instanceData then
+		return nil, nil, false, "incoming_instance_missing"
+	end
+
+	return instanceId, instanceData, instanceData.TutorialReward == true, nil
 end
 
 local function assignEquippedCaptain(player, runtime)

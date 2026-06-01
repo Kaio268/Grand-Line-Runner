@@ -1979,9 +1979,6 @@ local function spawnOne(data)
 		end
 
 		local rarityLabel = tostring(baseEntry.Rarity or "Common")
-		if variantKey ~= "Normal" then
-			rarityLabel = variantKey .. " " .. rarityLabel
-		end
 
 		local entry = {
 			Id = finalId,

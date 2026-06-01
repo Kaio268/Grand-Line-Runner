@@ -7,9 +7,11 @@ local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatal
 local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 
 local CrewInventoryDerivedCache = {}
+local SELL_TIME_SECONDS = 15
 
 local cacheByPlayer = setmetatable({}, { __mode = "k" })
 local crewInstanceServiceModule = nil
+local dataManagerModule = nil
 
 local function firstNonEmpty(...)
 	for index = 1, select("#", ...) do
@@ -31,6 +33,50 @@ local function cloneArray(values)
 		copy[index] = value
 	end
 	return copy
+end
+
+local function getInstanceVariant(instanceData)
+	if typeof(instanceData) ~= "table" then
+		return ""
+	end
+	return firstNonEmpty(instanceData.Variant, instanceData.VariantKey)
+end
+
+local function getInstanceLevel(instanceData)
+	if typeof(instanceData) ~= "table" then
+		return nil
+	end
+	local level = tonumber(instanceData.Level)
+	return if level ~= nil then math.max(1, math.floor(level)) else nil
+end
+
+local function getInstanceIncome(instanceData, info)
+	if typeof(instanceData) ~= "table" then
+		return tonumber(info and info.Income)
+	end
+	return tonumber(instanceData.Income or (info and info.Income))
+end
+
+local function getSellValue(instanceData, info)
+	if typeof(info) ~= "table" then
+		return 0
+	end
+	if info.SellPrice ~= nil then
+		return math.max(0, math.floor(tonumber(info.SellPrice) or 0))
+	end
+
+	local income = getInstanceIncome(instanceData, info)
+	if income == nil then
+		return 0
+	end
+	return math.max(0, math.floor(income * SELL_TIME_SECONDS))
+end
+
+local function valuesDiffer(firstValue, nextValue)
+	if firstValue == nil and nextValue == nil then
+		return false
+	end
+	return tostring(firstValue or "") ~= tostring(nextValue or "")
 end
 
 local function getCache(player)
@@ -76,6 +122,35 @@ local function readCrewInventory(player)
 	return nil
 end
 
+local function getDataManager()
+	if dataManagerModule == nil then
+		local ok, module = pcall(function()
+			return require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+		end)
+		dataManagerModule = if ok then module else false
+	end
+	return if dataManagerModule == false then nil else dataManagerModule
+end
+
+local function readQuickSlotAssignments(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return {}
+	end
+
+	local dataManager = getDataManager()
+	if dataManager == nil then
+		return {}
+	end
+
+	local ok, quickSlots = pcall(function()
+		return dataManager:GetValue(player, "CrewMemberQuickSlots")
+	end)
+	if not ok or typeof(quickSlots) ~= "table" or typeof(quickSlots.Assignments) ~= "table" then
+		return {}
+	end
+	return quickSlots.Assignments
+end
+
 local function resolveInfo(crewMemberId, representative)
 	local canonicalId, info = CrewCatalog.ResolveCrewMemberId(crewMemberId)
 	if info then
@@ -92,17 +167,78 @@ local function resolveInfo(crewMemberId, representative)
 	return tostring(crewMemberId or ""), nil
 end
 
-local function buildMetadata(stack)
+local function buildCrewDetails(instanceId, instanceData, info, state, stack, inventory)
+	instanceData = if typeof(instanceData) == "table" then instanceData else {}
+	state = tostring(state or "Stored")
+	local displayInfo = CrewCatalog.GetDisplayInfo(instanceData.CrewMemberId or instanceData.StorageName, instanceData)
+
+	local details = {
+		DisplayName = firstNonEmpty(displayInfo.DisplayName, info and (info.DisplayName or info.CrewMemberName or info.Name), instanceData.CrewMemberId, instanceData.StorageName),
+		BaseDisplayName = firstNonEmpty(displayInfo.BaseDisplayName, displayInfo.DisplayName),
+		Rarity = firstNonEmpty(instanceData.Rarity, info and info.Rarity),
+		Variant = firstNonEmpty(displayInfo.Variant, getInstanceVariant(instanceData)),
+		VariantTag = firstNonEmpty(displayInfo.VariantTag),
+		VariantDisplayName = firstNonEmpty(displayInfo.VariantDisplayName),
+		ShowVariantTag = displayInfo.ShowVariantTag == true,
+		Level = getInstanceLevel(instanceData),
+		Income = getInstanceIncome(instanceData, info),
+		SellValue = getSellValue(instanceData, info),
+		State = state,
+	}
+
+	if typeof(stack) == "table" then
+		details.StackQuantity = math.max(1, math.floor(tonumber(stack.Quantity) or 1))
+		details.StackRepresentative = true
+		details.StackMaxQuantity = math.max(1, math.floor(tonumber(stack.MaxQuantity) or details.StackQuantity))
+
+		local representativeVariant = getInstanceVariant(instanceData)
+		local representativeLevel = getInstanceLevel(instanceData)
+		local representativeIncome = getInstanceIncome(instanceData, info)
+		local byId = typeof(inventory) == "table" and typeof(inventory.ById) == "table" and inventory.ById or {}
+
+		for _, rawStackInstanceId in ipairs(stack.InstanceIds or {}) do
+			local stackInstanceId = tostring(rawStackInstanceId or "")
+			if stackInstanceId ~= "" and stackInstanceId ~= tostring(instanceId or "") then
+				local stackInstanceData = byId[stackInstanceId]
+				if typeof(stackInstanceData) == "table" then
+					if valuesDiffer(representativeVariant, getInstanceVariant(stackInstanceData)) then
+						details.MixedVariant = true
+					end
+					if valuesDiffer(representativeLevel, getInstanceLevel(stackInstanceData)) then
+						details.MixedLevel = true
+					end
+					if valuesDiffer(representativeIncome, getInstanceIncome(stackInstanceData, info)) then
+						details.MixedIncome = true
+					end
+				end
+			end
+		end
+	end
+
+	if state == "Equipped" then
+		details.QuickSlotIndex = tonumber(instanceData.QuickSlotIndex)
+	elseif state == "Placed" then
+		details.AssignedStand = firstNonEmpty(instanceData.AssignedStand)
+	elseif state == "Overflow" then
+		details.OverflowReason = firstNonEmpty(instanceData.OverflowSource, "Protected overflow")
+	end
+
+	return details
+end
+
+local function buildMetadata(stack, inventory)
 	local representative = stack.Representative
 	local crewMemberId, info = resolveInfo(stack.CrewMemberId, representative)
+	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberId, representative)
 	local metadata = {
 		CrewMemberId = crewMemberId,
 		InstanceId = tostring(stack.RepresentativeInstanceId or ""),
-		DisplayName = firstNonEmpty(
-			representative and representative.DisplayName,
-			info and (info.DisplayName or info.CrewMemberName or info.Name),
-			crewMemberId
-		),
+		DisplayName = firstNonEmpty(displayInfo.DisplayName, info and (info.DisplayName or info.CrewMemberName or info.Name), crewMemberId),
+		BaseDisplayName = firstNonEmpty(displayInfo.BaseDisplayName, displayInfo.DisplayName),
+		Variant = firstNonEmpty(displayInfo.Variant, representative and representative.Variant),
+		VariantTag = firstNonEmpty(displayInfo.VariantTag),
+		VariantDisplayName = firstNonEmpty(displayInfo.VariantDisplayName),
+		ShowVariantTag = displayInfo.ShowVariantTag == true,
 		Rarity = firstNonEmpty(stack.Rarity, representative and representative.Rarity, info and info.Rarity),
 		Render = firstNonEmpty(representative and representative.Render, info and info.Render),
 		ModelName = firstNonEmpty(representative and representative.ModelName, info and info.ModelName),
@@ -114,6 +250,7 @@ local function buildMetadata(stack)
 	if metadata.InstanceId == "" and typeof(representative) == "table" then
 		metadata.InstanceId = tostring(representative.InstanceId or "")
 	end
+	metadata.CrewDetails = buildCrewDetails(metadata.InstanceId, representative, info, "Stored", stack, inventory)
 
 	return metadata, info
 end
@@ -139,13 +276,16 @@ local function buildModelPreviewDescriptor(stack, metadata, info)
 	}
 end
 
-local function buildSnapshot(inventory)
-	local stacks = CrewInventoryStacks.BuildAvailableStacks(inventory)
+local function buildSnapshot(player, inventory)
+	local assignments = readQuickSlotAssignments(player)
+	local stacks = CrewInventoryStacks.BuildAvailableStacks(inventory, {
+		Assignments = assignments,
+	})
 	local counts = {}
 	local representatives = {}
 
 	for _, stack in ipairs(stacks) do
-		local metadata, info = buildMetadata(stack)
+		local metadata, info = buildMetadata(stack, inventory)
 		local modelPreview = buildModelPreviewDescriptor(stack, metadata, info)
 
 		stack.Metadata = metadata
@@ -160,6 +300,7 @@ local function buildSnapshot(inventory)
 
 	return {
 		Inventory = inventory,
+		QuickSlotAssignments = assignments,
 		Stacks = stacks,
 		Counts = counts,
 		Representatives = representatives,
@@ -198,7 +339,7 @@ end
 
 function CrewInventoryDerivedCache.Get(player, options)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
-		return buildSnapshot(nil)
+		return buildSnapshot(player, nil)
 	end
 
 	options = if typeof(options) == "table" then options else {}
@@ -219,7 +360,7 @@ function CrewInventoryDerivedCache.Get(player, options)
 		then cache.Inventory
 		else readCrewInventory(player)
 
-	local snapshot = buildSnapshot(inventory)
+	local snapshot = buildSnapshot(player, inventory)
 	snapshot.Version = cache.Version
 	snapshot.Reason = cache.Reason
 	cache.Inventory = inventory

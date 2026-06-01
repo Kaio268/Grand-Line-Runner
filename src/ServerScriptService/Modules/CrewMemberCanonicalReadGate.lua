@@ -491,7 +491,9 @@ local function normalizeDisplayMetadata(value, fallbackName, source)
 		return nil
 	end
 
-	local displayName = value.DisplayName
+	local displayInfo = CrewCatalog.GetDisplayInfo(value.CrewMemberId or value.StorageName or fallbackName, value)
+	local displayName = displayInfo.DisplayName
+		or value.DisplayName
 		or value.CrewMemberDisplayName
 		or value.CrewMemberName
 		or value.Name

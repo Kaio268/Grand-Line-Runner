@@ -21,9 +21,54 @@ local INVENTORY_MODAL_CLOSED_POSITION = UDim2.fromScale(0.5, 10)
 local INVENTORY_MODAL_OPEN_TIME = 0.16
 local INVENTORY_MODAL_CLOSE_TIME = 0.16
 local INVENTORY_MODAL_BACKDROP_TRANSPARENCY = 0.28
+local CREW_CARD_FLIP_TWEEN = TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+local CREW_CARD_FACE_OPEN_SIZE = UDim2.fromScale(1, 1)
+local CREW_CARD_FACE_CLOSED_SIZE = UDim2.new(0, 2, 1, 0)
 
 local function isMobileViewport()
 	return Responsive.isMobile()
+end
+
+local function getCrewInventoryGridLayout()
+	local viewport = Responsive.getViewportSize()
+	local mobile = Responsive.isMobile(viewport)
+	local compact = Responsive.isCompact(viewport)
+	local width = viewport.X
+	local height = viewport.Y
+
+	if mobile then
+		return {
+			cellPadding = UDim2.fromOffset(8, 8),
+			cellSize = UDim2.fromOffset(150, 206),
+			columns = 2,
+			tapPinsBack = true,
+		}
+	end
+
+	if compact then
+		return {
+			cellPadding = UDim2.fromOffset(8, 8),
+			cellSize = UDim2.fromOffset(158, 210),
+			columns = 3,
+			tapPinsBack = UserInputService.GamepadEnabled,
+		}
+	end
+
+	if width >= 1550 and height >= 820 then
+		return {
+			cellPadding = UDim2.fromOffset(8, 8),
+			cellSize = UDim2.fromOffset(156, 204),
+			columns = 5,
+			tapPinsBack = UserInputService.GamepadEnabled,
+		}
+	end
+
+	return {
+		cellPadding = UDim2.fromOffset(8, 8),
+		cellSize = UDim2.fromOffset(160, 208),
+		columns = 4,
+		tapPinsBack = UserInputService.GamepadEnabled,
+	}
 end
 
 local PALETTE = {
@@ -937,6 +982,12 @@ local function hotbarSlot(props)
 	local staticPreviewImage = getStaticCrewPreviewImage(item)
 	local hasStaticPreview = staticPreviewImage ~= ""
 	local compactSlot = slotSize <= 40
+	local hotbarStackQuantity = item and math.floor(tonumber(item.hotbarStackQuantity) or 0) or 0
+	local itemQuantity = item and math.floor(tonumber(item.quantity) or 0) or 0
+	local countQuantity = if hotbarStackQuantity > 0 then hotbarStackQuantity else itemQuantity
+	local countText = if hotbarStackQuantity > 1 then "x" .. tostring(countQuantity) else tostring(countQuantity)
+	local variantTag = item and tostring(item.variantTag or item.VariantTag or "") or ""
+	local showVariantTag = item and item.showVariantTag == true and variantTag ~= "" and variantTag ~= "Normal"
 
 	local slotProps = mergeProps({
 		BackgroundColor3 = slotBaseColor,
@@ -1034,14 +1085,36 @@ local function hotbarSlot(props)
 			}),
 		}) or nil,
 		Preview = previewChild,
-		Count = item and not lockedSlot and (item.quantity or 0) > 1 and e("TextLabel", {
+		Variant = showVariantTag and e("TextLabel", {
+			AnchorPoint = Vector2.new(0, 1),
+			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
+			BackgroundTransparency = hovered and 0.1 or 0.18,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.new(0, 6, 1, -6),
+			Size = UDim2.fromOffset(compactSlot and 34 or 44, compactSlot and 12 or 15),
+			Text = variantTag,
+			TextColor3 = accent:Lerp(PALETTE.Cream, 0.3),
+			TextScaled = true,
+			TextStrokeTransparency = 0.72,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 999),
+			}),
+			TextSizeConstraint = e("UITextSizeConstraint", {
+				MaxTextSize = compactSlot and 7 or 9,
+				MinTextSize = 5,
+			}),
+		}) or nil,
+		Count = item and not lockedSlot and countQuantity > 1 and e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 1),
 			AutomaticSize = Enum.AutomaticSize.XY,
 			BackgroundColor3 = Color3.fromRGB(6, 10, 18),
 			BackgroundTransparency = hovered and 0.08 or 0.16,
 			Position = UDim2.new(1, -6, 1, -6),
 			Font = Enum.Font.GothamBold,
-			Text = tostring(item.quantity),
+			Text = countText,
 			TextColor3 = PALETTE.Cream,
 			TextSize = 10,
 			ZIndex = zIndexBase + 5 + hoverZIndexOffset,
@@ -1690,14 +1763,440 @@ local function manifestTile(props)
 	})
 end
 
+local function getCrewDetail(details, pascalKey, camelKey)
+	if typeof(details) ~= "table" then
+		return nil
+	end
+	local value = details[pascalKey]
+	if value == nil and camelKey ~= nil then
+		value = details[camelKey]
+	end
+	return value
+end
+
+local function formatCrewDetailText(value)
+	if value == nil then
+		return ""
+	end
+	return tostring(value)
+end
+
+local function crewBackChip(text, layoutOrder, textColor)
+	text = formatCrewDetailText(text)
+	if text == "" then
+		return nil
+	end
+
+	return e("TextLabel", {
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = Color3.fromRGB(10, 18, 31),
+		BackgroundTransparency = 0.04,
+		Font = Enum.Font.GothamBold,
+		LayoutOrder = layoutOrder,
+		Size = UDim2.fromOffset(0, 18),
+		Text = text,
+		TextColor3 = textColor or PALETTE.Cream,
+		TextSize = 9,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = 8,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(1, 0),
+		}),
+		Stroke = e("UIStroke", {
+			Color = textColor or PALETTE.Cream,
+			Transparency = 0.32,
+			Thickness = 1,
+		}),
+		Padding = e("UIPadding", {
+			PaddingTop = UDim.new(0, 2),
+			PaddingBottom = UDim.new(0, 2),
+			PaddingLeft = UDim.new(0, 7),
+			PaddingRight = UDim.new(0, 7),
+		}),
+	})
+end
+
+local function crewBackLine(text, layoutOrder, textColor, textSize, font)
+	text = formatCrewDetailText(text)
+	if text == "" then
+		return nil
+	end
+
+	return e("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = font or Enum.Font.GothamBold,
+		LayoutOrder = layoutOrder,
+		Size = UDim2.new(1, 0, 0, 18),
+		Text = text,
+		TextColor3 = textColor or PALETTE.Cream,
+		TextSize = textSize or 11,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ZIndex = 7,
+	})
+end
+
+local function crewBackMetric(label, value, layoutOrder, valueColor)
+	value = formatCrewDetailText(value)
+	if value == "" then
+		return nil
+	end
+
+	return e("Frame", {
+		BackgroundColor3 = Color3.fromRGB(12, 22, 35),
+		BackgroundTransparency = 0.28,
+		BorderSizePixel = 0,
+		LayoutOrder = layoutOrder,
+		Size = UDim2.new(1, 0, 0, 17),
+		ZIndex = 7,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 6),
+		}),
+		Label = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(7, 0),
+			Size = UDim2.fromOffset(43, 17),
+			Text = label,
+			TextColor3 = Color3.fromRGB(205, 196, 185),
+			TextSize = 9,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 8,
+		}),
+		Value = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			Position = UDim2.fromOffset(52, 0),
+			Size = UDim2.new(1, -59, 1, 0),
+			Text = value,
+			TextColor3 = valueColor or PALETTE.Cream,
+			TextSize = 10,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			ZIndex = 8,
+		}),
+	})
+end
+
+local function getCrewBackVariantColor(variantText, fallback)
+	local lowerVariant = string.lower(formatCrewDetailText(variantText))
+	if lowerVariant == "golden" or lowerVariant == "gold" then
+		return PALETTE.Gold
+	elseif lowerVariant == "diamond" then
+		return PALETTE.Cyan
+	elseif lowerVariant == "normal" then
+		return PALETTE.Sea
+	end
+	return fallback or PALETTE.Cream
+end
+
+local function formatCrewBackLevel(level)
+	local levelText = formatCrewDetailText(level)
+	if levelText == "" then
+		return ""
+	end
+
+	if string.lower(string.sub(levelText, 1, 2)) == "lv" then
+		return levelText
+	end
+
+	return "Lv " .. levelText
+end
+
+local function formatCrewBackStatus(detail)
+	local state = formatCrewDetailText(detail.state)
+	if state == "" then
+		state = "Stored"
+	end
+
+	local statusText = state
+	if state == "Equipped" then
+		statusText = if detail.assignmentText ~= "" then "Hotbar " .. detail.assignmentText else "Hotbar"
+	elseif state == "Placed" then
+		statusText = if detail.assignmentText ~= "" then "Ship " .. detail.assignmentText else "Placed"
+	elseif state == "Overflow" then
+		statusText = "Overflow"
+	end
+
+	local levelText = formatCrewBackLevel(detail.level)
+	if levelText ~= "" then
+		return levelText .. " - " .. statusText
+	end
+	return statusText
+end
+
+local function getCrewInventoryDetails(item)
+	item = item or {}
+	local details = item.crewDetails or {}
+	local displayName = formatCrewDetailText(getCrewDetail(details, "DisplayName", "displayName"))
+	if displayName == "" then
+		displayName = tostring(item.displayName or item.name or "Crewmate")
+	end
+
+	local rarity = formatCrewDetailText(getCrewDetail(details, "Rarity", "rarity"))
+	if rarity == "" then
+		rarity = tostring(item.subtitle or "")
+	end
+
+	local state = formatCrewDetailText(getCrewDetail(details, "State", "state"))
+	if state == "" then
+		state = tostring(item.inventoryState or "Stored")
+	end
+
+	local assignmentLabel = nil
+	local assignmentText = ""
+	if state == "Equipped" then
+		local slotIndex = tonumber(getCrewDetail(details, "QuickSlotIndex", "quickSlotIndex") or item.quickSlotIndex)
+		assignmentLabel = "Hotbar"
+		assignmentText = if slotIndex then "Slot " .. tostring(math.floor(slotIndex)) else "Assigned"
+	elseif state == "Placed" then
+		local assignedStand = formatCrewDetailText(getCrewDetail(details, "AssignedStand", "assignedStand"))
+		assignmentLabel = "Ship"
+		assignmentText = if assignedStand ~= "" then "Slot " .. assignedStand else "Placed"
+	elseif state == "Overflow" then
+		local overflowReason = formatCrewDetailText(getCrewDetail(details, "OverflowReason", "overflowReason"))
+		assignmentLabel = "Overflow"
+		assignmentText = if overflowReason ~= "" then overflowReason else "Protected overflow"
+	end
+
+	local stackQuantity = math.max(
+		1,
+		math.floor(tonumber(getCrewDetail(details, "StackQuantity", "stackQuantity") or item.quantity) or 1)
+	)
+	local income = getCrewDetail(details, "Income", "income")
+	local sellValue = getCrewDetail(details, "SellValue", "sellValue")
+	local mixedStack = getCrewDetail(details, "MixedVariant", "mixedVariant") == true
+		or getCrewDetail(details, "MixedLevel", "mixedLevel") == true
+		or getCrewDetail(details, "MixedIncome", "mixedIncome") == true
+	local variant = formatCrewDetailText(getCrewDetail(details, "VariantDisplayName", "variantDisplayName"))
+	if variant == "" then
+		variant = formatCrewDetailText(getCrewDetail(details, "VariantTag", "variantTag"))
+	end
+	if variant == "" then
+		variant = formatCrewDetailText(getCrewDetail(details, "Variant", "variant"))
+	end
+
+	return {
+		displayName = displayName,
+		rarity = rarity,
+		state = state,
+		assignmentLabel = assignmentLabel,
+		assignmentText = assignmentText,
+		stackQuantity = stackQuantity,
+		income = income,
+		sellValue = sellValue,
+		mixedStack = mixedStack,
+		variant = variant,
+		level = getCrewDetail(details, "Level", "level"),
+	}
+end
+
+local function crewInventoryBackFace(props)
+	local item = props.item or {}
+	local accent = item.accentColor or PALETTE.Cyan
+	local detail = getCrewInventoryDetails(item)
+	local variantColor = getCrewBackVariantColor(detail.variant, accent)
+	local chipChildren = {
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 5),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+		}),
+		Rarity = crewBackChip(detail.rarity, 1, accent),
+		Variant = crewBackChip(detail.variant, 2, variantColor),
+	}
+
+	local metrics = {
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			Padding = UDim.new(0, 2),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+		Income = crewBackMetric("Income", detail.income ~= nil and formatRateNumber(detail.income) or "", 1, PALETTE.Green),
+		Sell = crewBackMetric(
+			"Sell",
+			detail.sellValue ~= nil and CurrencyUtil.formatCurrency(detail.sellValue) or "",
+			2,
+			PALETTE.Gold
+		),
+		Stack = crewBackMetric("Stack", "x" .. tostring(detail.stackQuantity), 3, PALETTE.Cream),
+	}
+
+	return e("Frame", {
+		BackgroundColor3 = Color3.fromRGB(7, 14, 25),
+		BackgroundTransparency = 0.02,
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 6,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 8),
+		}),
+		Stroke = e("UIStroke", {
+			Color = accent,
+			Transparency = 0.14,
+			Thickness = 1,
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(13, 24, 39)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 10, 18)),
+			}),
+		}),
+		Padding = e("UIPadding", {
+			PaddingTop = UDim.new(0, 8),
+			PaddingBottom = UDim.new(0, 8),
+			PaddingLeft = UDim.new(0, 10),
+			PaddingRight = UDim.new(0, 10),
+		}),
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			Padding = UDim.new(0, 3),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+		Title = e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamBold,
+			LayoutOrder = 1,
+			Size = UDim2.new(1, 0, 0, 20),
+			Text = detail.displayName,
+			TextColor3 = PALETTE.Cream,
+			TextSize = 14,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 7,
+		}),
+		Chips = e("Frame", {
+			BackgroundTransparency = 1,
+			LayoutOrder = 2,
+			Size = UDim2.new(1, 0, 0, 18),
+			ZIndex = 7,
+		}, chipChildren),
+		Status = crewBackLine(formatCrewBackStatus(detail), 3, accent, 11, Enum.Font.GothamBold),
+		Metrics = e("Frame", {
+			BackgroundTransparency = 1,
+			LayoutOrder = 4,
+			Size = UDim2.new(1, 0, 0, 55),
+			ZIndex = 7,
+		}, metrics),
+		Warning = detail.mixedStack
+				and crewBackLine("Mixed stats in stack", 5, PALETTE.Orange, 10, Enum.Font.GothamBold)
+			or nil,
+	})
+end
+
+local function crewInventoryCardFace(props)
+	local faceRef = React.useRef(nil)
+	local activeTweensRef = React.useRef({})
+	local targetBackRef = React.useRef(props.showBack == true)
+	local showingBack, setShowingBack = React.useState(props.showBack == true)
+
+	local function cancelTweens()
+		for _, tween in ipairs(activeTweensRef.current) do
+			tween:Cancel()
+		end
+		table.clear(activeTweensRef.current)
+	end
+
+	React.useEffect(function()
+		return function()
+			cancelTweens()
+		end
+	end, {})
+
+	React.useEffect(function()
+		local targetBack = props.showBack == true
+		targetBackRef.current = targetBack
+		local face = faceRef.current
+
+		if not face then
+			setShowingBack(targetBack)
+			return
+		end
+
+		cancelTweens()
+		if showingBack == targetBack then
+			face.Size = CREW_CARD_FACE_OPEN_SIZE
+			return
+		end
+
+		local shrink = TweenService:Create(face, CREW_CARD_FLIP_TWEEN, {
+			Size = CREW_CARD_FACE_CLOSED_SIZE,
+		})
+		activeTweensRef.current = { shrink }
+		shrink.Completed:Connect(function(playbackState)
+			if playbackState ~= Enum.PlaybackState.Completed or targetBackRef.current ~= targetBack then
+				return
+			end
+
+			setShowingBack(targetBack)
+			task.defer(function()
+				local currentFace = faceRef.current
+				if not currentFace or targetBackRef.current ~= targetBack then
+					return
+				end
+
+				cancelTweens()
+				currentFace.Size = CREW_CARD_FACE_CLOSED_SIZE
+				local expand = TweenService:Create(currentFace, CREW_CARD_FLIP_TWEEN, {
+					Size = CREW_CARD_FACE_OPEN_SIZE,
+				})
+				activeTweensRef.current = { expand }
+				expand.Completed:Connect(function()
+					if activeTweensRef.current[1] == expand then
+						table.clear(activeTweensRef.current)
+					end
+				end)
+				expand:Play()
+			end)
+		end)
+		shrink:Play()
+	end, { props.showBack })
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		ClipsDescendants = false,
+		Size = UDim2.fromScale(1, 1),
+		ZIndex = 5,
+	}, {
+		Face = e("Frame", {
+			ref = faceRef,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			ClipsDescendants = true,
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = CREW_CARD_FACE_OPEN_SIZE,
+			ZIndex = 5,
+		}, {
+			Content = if showingBack then props.back else props.front,
+		}),
+	})
+end
+
 local function crewInventoryIndexTile(props)
 	local item = props.item or {}
 	local quantity = math.max(1, math.floor(tonumber(item.quantity) or 1))
+	local canUseCrewActions = tostring(item.inventoryState or "Stored") == "Stored"
+	local actionBandHeight = 42
+	local hasCrewDetails = typeof(item.crewDetails) == "table"
+	local detailsHovered, setDetailsHovered = React.useState(false)
+	local showBack = hasCrewDetails and (detailsHovered or props.backPinned == true)
+	local tapPinsBack = props.tapPinsBack == true
 	local unit = {
 		discovered = true,
 		itemKind = "CrewMember",
 		name = item.name,
 		displayName = item.displayName,
+		baseDisplayName = item.baseDisplayName,
+		variant = item.variant,
+		variantTag = item.variantTag,
+		variantDisplayName = item.variantDisplayName,
+		showVariantTag = item.showVariantTag,
 		rarity = item.subtitle,
 		image = item.image,
 		staticPreviewImage = item.staticPreviewImage,
@@ -1711,62 +2210,148 @@ local function crewInventoryIndexTile(props)
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.fromScale(1, 1),
 	}, {
-		Card = e(IndexCard, {
-			unit = unit,
-			layoutOrder = props.layoutOrder,
-			renderPreview = true,
-			onActivated = item.interactive ~= false and props.onActivated ~= nil and function()
-				props.onActivated(item)
-			end or nil,
-		}),
-		Quantity = e("TextLabel", {
-			AnchorPoint = Vector2.new(1, 0),
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = Color3.fromRGB(25, 36, 50),
-			BackgroundTransparency = 0.04,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(1, -10, 0, 10),
-			Text = "x" .. tostring(quantity),
-			TextColor3 = PALETTE.Cream,
-			TextSize = 12,
-			TextStrokeTransparency = 0.72,
-			ZIndex = 8,
+		CardArea = e("Frame", {
+			BackgroundTransparency = 1,
+			ClipsDescendants = true,
+			Position = UDim2.fromOffset(0, 0),
+			Size = UDim2.new(1, 0, 1, -actionBandHeight),
+			[React.Event.MouseEnter] = function()
+				setDetailsHovered(true)
+			end,
+			[React.Event.MouseLeave] = function()
+				setDetailsHovered(false)
+			end,
 		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
-			}),
-			Stroke = e("UIStroke", {
-				Color = item.accentColor or PALETTE.Cyan,
-				Transparency = 0.14,
-				Thickness = 1,
-			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 4),
-				PaddingBottom = UDim.new(0, 4),
-				PaddingLeft = UDim.new(0, 8),
-				PaddingRight = UDim.new(0, 8),
+			Flip = e(crewInventoryCardFace, {
+				showBack = showBack,
+				front = e("Frame", {
+					BackgroundTransparency = 1,
+					ClipsDescendants = false,
+					Size = UDim2.fromScale(1, 1),
+					ZIndex = 5,
+				}, {
+					Card = e(IndexCard, {
+						unit = unit,
+						layoutOrder = props.layoutOrder,
+						renderPreview = true,
+						onActivated = hasCrewDetails and tapPinsBack and props.onToggleBackPinned ~= nil and function()
+							props.onToggleBackPinned(item)
+						end or nil,
+					}),
+					Quantity = e("TextLabel", {
+						AnchorPoint = Vector2.new(1, 0),
+						AutomaticSize = Enum.AutomaticSize.XY,
+						BackgroundColor3 = Color3.fromRGB(25, 36, 50),
+						BackgroundTransparency = 0.04,
+						Font = Enum.Font.GothamBold,
+						Position = UDim2.new(1, -10, 0, 10),
+						Text = "x" .. tostring(quantity),
+						TextColor3 = PALETTE.Cream,
+						TextSize = 12,
+						TextStrokeTransparency = 0.72,
+						ZIndex = 8,
+					}, {
+						Corner = e("UICorner", {
+							CornerRadius = UDim.new(1, 0),
+						}),
+						Stroke = e("UIStroke", {
+							Color = item.accentColor or PALETTE.Cyan,
+							Transparency = 0.14,
+							Thickness = 1,
+						}),
+						Padding = e("UIPadding", {
+							PaddingTop = UDim.new(0, 4),
+							PaddingBottom = UDim.new(0, 4),
+							PaddingLeft = UDim.new(0, 8),
+							PaddingRight = UDim.new(0, 8),
+						}),
+					}),
+					Equipped = item.isEquipped == true and e("TextLabel", {
+						AnchorPoint = Vector2.new(0.5, 0),
+						AutomaticSize = Enum.AutomaticSize.XY,
+						BackgroundColor3 = PALETTE.Cream,
+						BackgroundTransparency = 0.02,
+						Font = Enum.Font.GothamBold,
+						Position = UDim2.new(0.5, 0, 0, 10),
+						Text = "IN HAND",
+						TextColor3 = Color3.fromRGB(14, 21, 22),
+						TextSize = 10,
+						TextTruncate = Enum.TextTruncate.AtEnd,
+						ZIndex = 8,
+					}, {
+						Corner = e("UICorner", {
+							CornerRadius = UDim.new(1, 0),
+						}),
+						Padding = e("UIPadding", {
+							PaddingTop = UDim.new(0, 4),
+							PaddingBottom = UDim.new(0, 4),
+							PaddingLeft = UDim.new(0, 10),
+							PaddingRight = UDim.new(0, 10),
+						}),
+					}) or nil,
+				}),
+				back = e(crewInventoryBackFace, {
+					item = item,
+				}),
 			}),
 		}),
-		Equipped = item.isEquipped == true and e("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			AutomaticSize = Enum.AutomaticSize.XY,
-			BackgroundColor3 = PALETTE.Cream,
-			BackgroundTransparency = 0.02,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(0.5, 0, 0, 10),
-			Text = "IN HAND",
-			TextColor3 = Color3.fromRGB(14, 21, 22),
-			TextSize = 10,
-			ZIndex = 8,
+		Actions = canUseCrewActions and e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1),
+			BackgroundTransparency = 1,
+			Position = UDim2.new(0.5, 0, 1, -2),
+			Size = UDim2.new(1, -10, 0, 34),
+			ZIndex = 10,
 		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Padding = UDim.new(0, 6),
+				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
-			Padding = e("UIPadding", {
-				PaddingTop = UDim.new(0, 4),
-				PaddingBottom = UDim.new(0, 4),
-				PaddingLeft = UDim.new(0, 10),
-				PaddingRight = UDim.new(0, 10),
+			Equip = e("TextButton", {
+				AutoButtonColor = true,
+				BackgroundColor3 = PALETTE.Cyan,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = 1,
+				Size = UDim2.new(0.5, -3, 1, 0),
+				Text = "Equip",
+				TextColor3 = PALETTE.Ink,
+				TextSize = 11,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 11,
+				[React.Event.Activated] = function()
+					if props.onCrewAction then
+						props.onCrewAction(item, "Equip")
+					elseif props.onActivated then
+						props.onActivated(item)
+					end
+				end,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 8),
+				}),
+			}),
+			Sell = e("TextButton", {
+				AutoButtonColor = true,
+				BackgroundColor3 = PALETTE.Rose,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = 2,
+				Size = UDim2.new(0.5, -3, 1, 0),
+				Text = "Sell",
+				TextColor3 = PALETTE.Cream,
+				TextSize = 11,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				ZIndex = 11,
+				[React.Event.Activated] = function()
+					if props.onCrewAction then
+						props.onCrewAction(item, "Sell")
+					end
+				end,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 8),
+				}),
 			}),
 		}) or nil,
 	})
@@ -3430,6 +4015,7 @@ local function App(props)
 	local bottomBarZIndex = props.isOpen and 2 or 10
 	local filledHotbarCount = 0
 	local activeAccent = PALETTE.Sea
+	local pinnedCrewCardKey, setPinnedCrewCardKey = React.useState(nil)
 
 	for _, slot in ipairs(props.hotbarSlots or {}) do
 		if slot.item then
@@ -3450,6 +4036,15 @@ local function App(props)
 		activeAccent = PALETTE.Violet:Lerp(PALETTE.Gold, 0.28)
 	elseif showingTitles then
 		activeAccent = PALETTE.Gold
+	end
+
+	local function togglePinnedCrewCard(item)
+		local itemKey = item and tostring(item.key or "")
+		if itemKey == "" then
+			return
+		end
+
+		setPinnedCrewCardKey(if pinnedCrewCardKey == itemKey then nil else itemKey)
 	end
 
 	local captainLogData = props.captainLog or {}
@@ -3553,7 +4148,7 @@ local function App(props)
 								layoutOrder = index,
 								slotSize = hotbarSlotWidth,
 								zIndexBase = bottomBarZIndex,
-								onActivated = props.onActivateItem,
+								onActivated = props.onActivateHotbarItem or props.onActivateItem,
 							})
 						end
 
@@ -3567,12 +4162,12 @@ local function App(props)
 
 	if props.isOpen then
 		local showingCrewInventoryCategory = showingInventory and tostring(props.activeCategory or "") == "CrewMembers"
+		local crewGridLayout = showingCrewInventoryCategory and getCrewInventoryGridLayout() or nil
 		local gridChildren = {
 			Grid = e("UIGridLayout", {
-				CellPadding = UDim2.fromOffset(10, 10),
-				CellSize = showingCrewInventoryCategory and UDim2.fromOffset(150, 171)
-					or UDim2.fromOffset(128, 136),
-				FillDirectionMaxCells = showingCrewInventoryCategory and 5 or 6,
+				CellPadding = crewGridLayout and crewGridLayout.cellPadding or UDim2.fromOffset(10, 10),
+				CellSize = crewGridLayout and crewGridLayout.cellSize or UDim2.fromOffset(128, 136),
+				FillDirectionMaxCells = crewGridLayout and crewGridLayout.columns or 6,
 				HorizontalAlignment = Enum.HorizontalAlignment.Left,
 				SortOrder = Enum.SortOrder.LayoutOrder,
 				VerticalAlignment = Enum.VerticalAlignment.Top,
@@ -3587,6 +4182,10 @@ local function App(props)
 				item = item,
 				layoutOrder = index,
 				onActivated = props.onActivateItem,
+				onCrewAction = props.onCrewAction,
+				backPinned = tostring(pinnedCrewCardKey or "") ~= "" and pinnedCrewCardKey == tostring(item.key or ""),
+				tapPinsBack = crewGridLayout and crewGridLayout.tapPinsBack or false,
+				onToggleBackPinned = togglePinnedCrewCard,
 			})
 		end
 
@@ -4372,7 +4971,7 @@ local function App(props)
 	local inventoryModal = e(AnimatedInventoryModal, {
 		isOpen = props.isOpen,
 		panelChildren = modalPanelChildren,
-		panelSize = mobileLayout and UDim2.fromScale(0.74, 0.8) or UDim2.fromScale(0.82, 0.76),
+		panelSize = mobileLayout and UDim2.fromScale(0.74, 0.8) or UDim2.fromScale(0.9, 0.82),
 		contentScale = mobileLayout and 0.62 or 1,
 		openPosition = INVENTORY_MODAL_OPEN_POSITION,
 		closedPosition = INVENTORY_MODAL_CLOSED_POSITION,

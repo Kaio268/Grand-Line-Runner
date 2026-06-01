@@ -17,6 +17,7 @@ local ProfileMigrations = {}
 
 local primaryCurrency = Economy.Currency.Primary
 local CREW_MEMBER_INVENTORY_SCHEMA_VERSION = 2
+local CREW_MEMBER_QUICK_SLOT_SCHEMA_VERSION = 2
 
 local function ensureTable(parent, key)
 	if typeof(parent[key]) ~= "table" then
@@ -202,6 +203,9 @@ local function normalizeCrewMemberSourceInstance(instanceId, instanceData, fallb
 		LastReleasedAt = coerceNumber(instanceData.LastReleasedAt, 0),
 		TutorialReward = instanceData.TutorialReward == true,
 		TutorialToken = tostring(instanceData.TutorialToken or ""),
+		Overflow = instanceData.Overflow == true,
+		OverflowSource = tostring(instanceData.OverflowSource or ""),
+		OverflowedAt = coerceNumber(instanceData.OverflowedAt, 0),
 	}
 end
 
@@ -278,6 +282,9 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		TutorialReward = instanceData.TutorialReward,
 		TutorialToken = instanceData.TutorialToken,
 		GrandLineRushStarter = instanceData.GrandLineRushStarter,
+		Overflow = instanceData.Overflow,
+		OverflowSource = instanceData.OverflowSource,
+		OverflowedAt = instanceData.OverflowedAt,
 	}, crewMemberId)
 	if not legacyInstance then
 		return nil
@@ -316,6 +323,9 @@ local function normalizeCrewMemberInstance(instanceId, instanceData, fallbackSto
 		TutorialReward = legacyInstance.TutorialReward,
 		TutorialToken = legacyInstance.TutorialToken,
 		GrandLineRushStarter = instanceData.GrandLineRushStarter == true or legacyInstance.GrandLineRushStarter == true,
+		Overflow = legacyInstance.Overflow == true,
+		OverflowSource = tostring(legacyInstance.OverflowSource or ""),
+		OverflowedAt = coerceNumber(legacyInstance.OverflowedAt, 0),
 		ProjectionSource = tostring(instanceData.ProjectionSource or projectionSource or "ProfileMigrations"),
 	}
 end
@@ -412,6 +422,40 @@ local function normalizeLegacySlotKey(value)
 	end
 
 	return tostring(numeric)
+end
+
+local function normalizeQuickSlotAssignments(assignments, crewMemberInventory)
+	local normalized = {}
+	local seen = {}
+	local maxSlots = math.max(0, tonumber(CrewQuickSlotConfig.MaxSlots) or 0)
+	local byId = if typeof(crewMemberInventory) == "table" and typeof(crewMemberInventory.ById) == "table"
+		then crewMemberInventory.ById
+		else {}
+
+	if typeof(assignments) ~= "table" then
+		return normalized
+	end
+
+	for rawSlotKey, rawInstanceId in pairs(assignments) do
+		local slotKey = normalizeLegacySlotKey(rawSlotKey)
+		local slotIndex = tonumber(slotKey)
+		local instanceId = tostring(rawInstanceId or "")
+		local instanceData = byId[instanceId]
+		if
+			slotIndex ~= nil
+			and slotIndex <= maxSlots
+			and instanceId ~= ""
+			and seen[instanceId] ~= true
+			and typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+		then
+			normalized[tostring(slotIndex)] = instanceId
+			seen[instanceId] = true
+		end
+	end
+
+	return normalized
 end
 
 local function hasCrewSlotAssignment(row)
@@ -851,9 +895,12 @@ function ProfileMigrations.Apply(data)
 
 	local crewMemberQuickSlots = ensureTable(data, "CrewMemberQuickSlots")
 	local canonicalUnlockedSlots = CrewQuickSlotConfig.ClampUnlockedSlots(crewMemberQuickSlots.UnlockedSlots)
-	crewMemberQuickSlots.SchemaVersion = 1
+	crewMemberQuickSlots.SchemaVersion = CREW_MEMBER_QUICK_SLOT_SCHEMA_VERSION
 	crewMemberQuickSlots.UnlockedSlots = canonicalUnlockedSlots
 	crewMemberQuickSlots.MaxSlots = CrewQuickSlotConfig.MaxSlots
+	crewMemberQuickSlots.Assignments = if typeof(crewMemberQuickSlots.Assignments) == "table"
+		then crewMemberQuickSlots.Assignments
+		else {}
 
 	local unopenedChests = ensureTable(data, "UnopenedChests")
 	unopenedChests.NextChestId = math.max(1, coerceNumber(unopenedChests.NextChestId, 1))
@@ -974,6 +1021,7 @@ function ProfileMigrations.Apply(data)
 	indexCollection.DevilFruits = discoveredDevilFruits
 
 	normalizeCrewMemberInventory(crewMemberInventory)
+	crewMemberQuickSlots.Assignments = normalizeQuickSlotAssignments(crewMemberQuickSlots.Assignments, crewMemberInventory)
 
 	local materials = ensureTable(data, "Materials")
 	materials.Inventory = ensureTable(materials, "Inventory")

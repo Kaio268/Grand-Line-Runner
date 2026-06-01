@@ -230,38 +230,6 @@ function Module.Install(ctx)
 		return tostring(tool:GetAttribute("CrewMemberInstanceId") or tool:GetAttribute("CrewInstanceId") or "")
 	end
 
-	local function getAvailableInstanceIdForEquippedName(player, crewMemberName)
-		crewMemberName = tostring(crewMemberName or "")
-		if crewMemberName == "" then
-			return ""
-		end
-
-		local ok, crewInventory = pcall(function()
-			return CrewInstanceService.GetCrewInventory(player)
-		end)
-		if not ok or typeof(crewInventory) ~= "table" or typeof(crewInventory.ById) ~= "table" then
-			return ""
-		end
-
-		local matchedInstanceId = ""
-		local matchCount = 0
-		for instanceId, instanceData in pairs(crewInventory.ById) do
-			if
-				typeof(instanceData) == "table"
-				and tostring(instanceData.CrewMemberId or instanceData.StorageName or "") == crewMemberName
-				and tostring(instanceData.AssignedStand or "") == ""
-			then
-				matchedInstanceId = tostring(instanceId)
-				matchCount += 1
-				if matchCount > 1 then
-					return ""
-				end
-			end
-		end
-
-		return if matchCount == 1 then matchedInstanceId else ""
-	end
-
 	local function getEquippedCrewMemberToolInfo(player)
 		local char = player.Character
 		if not char then
@@ -278,14 +246,6 @@ function Module.Install(ctx)
 				local canonicalName, info = CrewCatalog.ResolveCanonicalCrewMemberId(rawName)
 				if info then
 					local instanceId = getToolCrewMemberInstanceId(c)
-					if instanceId == "" then
-						instanceId = getAvailableInstanceIdForEquippedName(player, canonicalName)
-						if instanceId ~= "" then
-							c:SetAttribute("CrewMemberInstanceId", instanceId)
-							c:SetAttribute("CrewInstanceId", instanceId)
-						end
-					end
-
 					return {
 						Tool = c,
 						Name = canonicalName,
@@ -666,7 +626,6 @@ function Module.Install(ctx)
 	ctx.dmGet = dmGet
 	ctx.dmSet = dmSet
 	ctx.findAvailableTutorialPlacementReward = findAvailableTutorialPlacementReward
-	ctx.getAvailableInstanceIdForEquippedName = getAvailableInstanceIdForEquippedName
 	ctx.getBaseIncome = getBaseIncome
 	ctx.getBeliBoostMultiplier = getBeliBoostMultiplier
 	ctx.getBeliBoostRemaining = getBeliBoostRemaining

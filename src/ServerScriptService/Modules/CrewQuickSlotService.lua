@@ -5,8 +5,6 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local HttpService = game:GetService("HttpService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
-local CrewInventoryStacks = require(Modules:WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewMemberInventoryConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewMemberInventory"))
 local CrewQuickSlotConfig = require(Modules:WaitForChild("Configs"):WaitForChild("CrewQuickSlots"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
@@ -26,6 +24,7 @@ local SUCCESS_COLOR = Color3.fromRGB(90, 255, 145)
 local ERROR_COLOR = Color3.fromRGB(255, 86, 86)
 local STROKE_COLOR = Color3.fromRGB(0, 0, 0)
 local FULL_MESSAGE = "Crewmate inventory full. Free a slot before carrying more."
+local HOTBAR_AND_STORAGE_FULL_MESSAGE = "Crew hotbar and storage are full. Clear a hotbar slot or sell stored crewmates before recalling."
 
 local dataManagerModule = nil
 local crewStorageModule = nil
@@ -269,7 +268,44 @@ local function handleProductAuthorityPromptFinished(playerOrUserId, productId, w
 	end
 end
 
-local function normalizeSlotData(_slotData, options)
+local function normalizeAssignments(assignments, maxSlots)
+	local normalized = {}
+	local seen = {}
+	maxSlots = math.max(0, math.floor(tonumber(maxSlots) or 0))
+
+	if typeof(assignments) ~= "table" then
+		return normalized
+	end
+
+	for rawSlotIndex, rawInstanceId in pairs(assignments) do
+		local slotIndex = math.floor(tonumber(rawSlotIndex) or 0)
+		local instanceId = tostring(rawInstanceId or "")
+		if slotIndex >= 1 and slotIndex <= maxSlots and instanceId ~= "" and seen[instanceId] ~= true then
+			normalized[tostring(slotIndex)] = instanceId
+			seen[instanceId] = true
+		end
+	end
+
+	return normalized
+end
+
+local function assignmentsMatch(left, right)
+	left = if typeof(left) == "table" then left else {}
+	right = if typeof(right) == "table" then right else {}
+	for key, value in pairs(left) do
+		if tostring(right[key] or "") ~= tostring(value or "") then
+			return false
+		end
+	end
+	for key, value in pairs(right) do
+		if tostring(left[key] or "") ~= tostring(value or "") then
+			return false
+		end
+	end
+	return true
+end
+
+local function normalizeSlotData(slotData, options)
 	options = if typeof(options) == "table" then options else {}
 	local maxSlots = math.max(0, math.floor(tonumber(CrewQuickSlotConfig.MaxSlots) or 0))
 	local unlockedSlots = maxSlots
@@ -277,9 +313,10 @@ local function normalizeSlotData(_slotData, options)
 	local normalized = {
 		UnlockedSlots = unlockedSlots,
 		MaxSlots = maxSlots,
+		Assignments = normalizeAssignments(slotData and slotData.Assignments, maxSlots),
 	}
 	if options.IncludeSchemaVersion == true then
-		normalized.SchemaVersion = CrewProfileSchema.SchemaVersion
+		normalized.SchemaVersion = CrewProfileSchema.QuickSlotsSchemaVersion or CrewProfileSchema.SchemaVersion
 	end
 	return normalized
 end
@@ -302,10 +339,21 @@ local function readReplicatedQuickSlotData(player)
 		return nil
 	end
 
+	local assignments = {}
+	local assignmentsFolder = slotsFolder:FindFirstChild("Assignments")
+	if assignmentsFolder and assignmentsFolder:IsA("Folder") then
+		for _, child in ipairs(assignmentsFolder:GetChildren()) do
+			if child:IsA("ValueBase") then
+				assignments[child.Name] = tostring(child.Value or "")
+			end
+		end
+	end
+
 	return {
 		SchemaVersion = readValue("SchemaVersion"),
 		UnlockedSlots = readValue("UnlockedSlots"),
 		MaxSlots = readValue("MaxSlots"),
+		Assignments = assignments,
 	}
 end
 
@@ -323,11 +371,17 @@ local function normalizeRetainedSlotData(candidates, options)
 				retained.MaxSlots,
 				math.max(retained.UnlockedSlots, normalized.UnlockedSlots)
 			)
+			for slotKey, instanceId in pairs(normalized.Assignments or {}) do
+				if retained.Assignments[slotKey] == nil then
+					retained.Assignments[slotKey] = instanceId
+				end
+			end
 		end
 	end
+	retained.Assignments = normalizeAssignments(retained.Assignments, retained.MaxSlots)
 
 	if options.IncludeSchemaVersion == true then
-		retained.SchemaVersion = CrewProfileSchema.SchemaVersion
+		retained.SchemaVersion = CrewProfileSchema.QuickSlotsSchemaVersion or CrewProfileSchema.SchemaVersion
 	end
 	return retained
 end
@@ -336,6 +390,7 @@ local function toLegacySlotData(slotData)
 	return {
 		UnlockedSlots = slotData.UnlockedSlots,
 		MaxSlots = slotData.MaxSlots,
+		Assignments = slotData.Assignments or {},
 	}
 end
 
@@ -352,6 +407,9 @@ local function quickSlotRootNeedsRewrite(root, includeSchemaVersion)
 	if includeSchemaVersion == true and root.SchemaVersion ~= nil and typeof(root.SchemaVersion) ~= "number" then
 		return true
 	end
+	if root.Assignments ~= nil and typeof(root.Assignments) ~= "table" then
+		return true
+	end
 	return false
 end
 
@@ -366,6 +424,9 @@ local function quickSlotRootMatches(root, slotData, includeSchemaVersion)
 		return false
 	end
 	if includeSchemaVersion == true and tonumber(root.SchemaVersion) ~= slotData.SchemaVersion then
+		return false
+	end
+	if not assignmentsMatch(root.Assignments, slotData.Assignments) then
 		return false
 	end
 	return true
@@ -410,6 +471,7 @@ local function writeQuickSlotRoot(dataManager, player, path, slotData, includeSc
 
 	local ok = writeField("UnlockedSlots")
 		and writeField("MaxSlots")
+		and writeField("Assignments")
 		and (includeSchemaVersion ~= true or writeField("SchemaVersion"))
 	return ok == true, writes, didWrite
 end
@@ -423,12 +485,60 @@ local function writeQuickSlotRoots(dataManager, player, slotData)
 	return canonicalOk == true, writes, canonicalDidWrite == true
 end
 
-local function getCrewQuickEntries(player)
-	return CrewInventoryDerivedCache.GetStacks(player)
+local function buildAssignedSet(assignments)
+	local assigned = {}
+	for _, instanceId in pairs(if typeof(assignments) == "table" then assignments else {}) do
+		local normalized = tostring(instanceId or "")
+		if normalized ~= "" then
+			assigned[normalized] = true
+		end
+	end
+	return assigned
 end
 
-local function countOccupiedStacks(player)
-	return #getCrewQuickEntries(player)
+local function readCrewInventory(player)
+	local dataManager = getDataManager()
+	local ok, inventory = pcall(function()
+		return dataManager:GetValue(player, CrewProfileSchema.Keys.Inventory)
+	end)
+	if ok and typeof(inventory) == "table" then
+		return inventory
+	end
+	return nil
+end
+
+local function countStoredInstancesFromInventory(crewMemberInventory, assignments)
+	if typeof(crewMemberInventory) ~= "table" or typeof(crewMemberInventory.ById) ~= "table" then
+		return 0
+	end
+
+	local assignedSet = buildAssignedSet(assignments)
+	local count = 0
+	for rawInstanceId, instanceData in pairs(crewMemberInventory.ById) do
+		local instanceId = tostring(instanceData and instanceData.InstanceId or rawInstanceId or "")
+		if
+			instanceId ~= ""
+			and typeof(instanceData) == "table"
+			and tostring(instanceData.AssignedStand or "") == ""
+			and instanceData.Overflow ~= true
+			and assignedSet[instanceId] ~= true
+		then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function saveSlots(player, slotData, reason)
+	local dataManager = getDataManager()
+	slotData.SchemaVersion = CrewProfileSchema.QuickSlotsSchemaVersion or CrewProfileSchema.SchemaVersion
+	slotData.Assignments = normalizeAssignments(slotData.Assignments, slotData.MaxSlots)
+	local writeOk, writes, didWrite = writeQuickSlotRoots(dataManager, player, slotData)
+	if didWrite == true then
+		refreshCrewMemberShadow(player, reason or "quick_slot_update")
+		CrewInventoryDerivedCache.MarkDirty(player, reason or "quick_slot_update")
+	end
+	return writeOk == true, writes, didWrite == true
 end
 
 local function parseCanGainArguments(crewMemberIdOrAmount, amountOrContext, context)
@@ -472,12 +582,225 @@ function CrewQuickSlotService.GetMaxSlots(player)
 	return CrewQuickSlotService.EnsureSlots(player).MaxSlots
 end
 
+function CrewQuickSlotService.GetAssignments(player)
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	return table.clone(slots.Assignments or {})
+end
+
+function CrewQuickSlotService.GetFirstAvailableSlot(player, options)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, {
+			Reason = "invalid_player",
+		}
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	local ignoredInstanceIds = {}
+	local ignoreInstanceId = tostring(options.IgnoreInstanceId or "")
+	if ignoreInstanceId ~= "" then
+		ignoredInstanceIds[ignoreInstanceId] = true
+	end
+	if typeof(options.IgnoreInstanceIds) == "table" then
+		for _, rawInstanceId in ipairs(options.IgnoreInstanceIds) do
+			local normalizedInstanceId = tostring(rawInstanceId or "")
+			if normalizedInstanceId ~= "" then
+				ignoredInstanceIds[normalizedInstanceId] = true
+			end
+		end
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local assignments = slots.Assignments or {}
+	for index = 1, slots.UnlockedSlots do
+		local assignedInstanceId = tostring(assignments[tostring(index)] or "")
+		if assignedInstanceId == "" or ignoredInstanceIds[assignedInstanceId] == true then
+			return index, {
+				Reason = "ok",
+				UnlockedSlots = slots.UnlockedSlots,
+				MaxSlots = slots.MaxSlots,
+			}
+		end
+	end
+
+	return nil, {
+		Reason = "quick_slot_unavailable",
+		UnlockedSlots = slots.UnlockedSlots,
+		MaxSlots = slots.MaxSlots,
+	}
+end
+
+function CrewQuickSlotService.GetInstanceSlot(player, instanceId)
+	local normalizedInstanceId = tostring(instanceId or "")
+	if normalizedInstanceId == "" then
+		return nil
+	end
+
+	local assignments = CrewQuickSlotService.GetAssignments(player)
+	for rawSlotIndex, assignedInstanceId in pairs(assignments) do
+		if tostring(assignedInstanceId or "") == normalizedInstanceId then
+			return tonumber(rawSlotIndex)
+		end
+	end
+	return nil
+end
+
+function CrewQuickSlotService.IsInstanceAssigned(player, instanceId)
+	return CrewQuickSlotService.GetInstanceSlot(player, instanceId) ~= nil
+end
+
+function CrewQuickSlotService.AssignInstanceToSlot(player, instanceId, slotIndex)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, {
+			Reason = "invalid_player",
+		}
+	end
+
+	local normalizedInstanceId = tostring(instanceId or "")
+	if normalizedInstanceId == "" then
+		return false, {
+			Reason = "invalid_instance_id",
+		}
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local assignments = table.clone(slots.Assignments or {})
+	for key, assignedInstanceId in pairs(assignments) do
+		if tostring(assignedInstanceId or "") == normalizedInstanceId then
+			assignments[key] = nil
+		end
+	end
+
+	local targetSlotIndex = math.floor(tonumber(slotIndex) or 0)
+	if targetSlotIndex <= 0 then
+		for index = 1, slots.UnlockedSlots do
+			if tostring(assignments[tostring(index)] or "") == "" then
+				targetSlotIndex = index
+				break
+			end
+		end
+	end
+	if targetSlotIndex < 1 or targetSlotIndex > slots.UnlockedSlots then
+		return false, {
+			Reason = "quick_slot_unavailable",
+			UnlockedSlots = slots.UnlockedSlots,
+			MaxSlots = slots.MaxSlots,
+		}
+	end
+
+	local targetSlotKey = tostring(targetSlotIndex)
+	local previousAssignment = tostring(assignments[targetSlotKey] or "")
+	if previousAssignment ~= "" and previousAssignment ~= normalizedInstanceId then
+		return false, {
+			Reason = "quick_slot_occupied",
+			SlotIndex = targetSlotIndex,
+			InstanceId = normalizedInstanceId,
+			PreviousInstanceId = previousAssignment,
+		}
+	end
+
+	assignments[targetSlotKey] = normalizedInstanceId
+	slots.Assignments = assignments
+	local ok, writes = saveSlots(player, slots, "quick_slot_assign")
+	return ok, {
+		Reason = if ok then "ok" else "quick_slot_write_failed",
+		SlotIndex = targetSlotIndex,
+		InstanceId = normalizedInstanceId,
+		Writes = writes,
+	}
+end
+
+function CrewQuickSlotService.ClearSlotAssignment(player, slotIndex)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, {
+			Reason = "invalid_player",
+		}
+	end
+
+	local targetSlotIndex = math.floor(tonumber(slotIndex) or 0)
+	if targetSlotIndex < 1 then
+		return false, {
+			Reason = "invalid_slot",
+		}
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	if tostring(slots.Assignments[tostring(targetSlotIndex)] or "") == "" then
+		return true, {
+			Reason = "already_clear",
+			SlotIndex = targetSlotIndex,
+		}
+	end
+
+	slots.Assignments[tostring(targetSlotIndex)] = nil
+	local ok, writes = saveSlots(player, slots, "quick_slot_clear")
+	return ok, {
+		Reason = if ok then "ok" else "quick_slot_write_failed",
+		SlotIndex = targetSlotIndex,
+		Writes = writes,
+	}
+end
+
+function CrewQuickSlotService.ClearAssignmentsForInstance(player, instanceId)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, {
+			Reason = "invalid_player",
+		}
+	end
+
+	local normalizedInstanceId = tostring(instanceId or "")
+	if normalizedInstanceId == "" then
+		return false, {
+			Reason = "invalid_instance_id",
+		}
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	local changed = false
+	for key, assignedInstanceId in pairs(slots.Assignments or {}) do
+		if tostring(assignedInstanceId or "") == normalizedInstanceId then
+			slots.Assignments[key] = nil
+			changed = true
+		end
+	end
+
+	if changed ~= true then
+		return true, {
+			Reason = "already_clear",
+			InstanceId = normalizedInstanceId,
+		}
+	end
+
+	local ok, writes = saveSlots(player, slots, "quick_slot_clear_instance")
+	return ok, {
+		Reason = if ok then "ok" else "quick_slot_write_failed",
+		InstanceId = normalizedInstanceId,
+		Writes = writes,
+	}
+end
+
 function CrewQuickSlotService.GetInventoryStorageSlots(_player)
 	return CREW_MEMBER_INVENTORY_STORAGE_SLOTS
 end
 
 function CrewQuickSlotService.CountOccupiedSlots(player)
-	return countOccupiedStacks(player)
+	return CrewQuickSlotService.CountStoredInstances(player)
+end
+
+function CrewQuickSlotService.CountStoredInstances(player, crewMemberInventory)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return 0
+	end
+
+	local slots = CrewQuickSlotService.EnsureSlots(player)
+	return countStoredInstancesFromInventory(crewMemberInventory or readCrewInventory(player), slots.Assignments)
+end
+
+function CrewQuickSlotService.CanStoreInstances(player, crewMemberInventory, amount)
+	local requested = math.max(0, math.floor(tonumber(amount) or 0))
+	local occupied = CrewQuickSlotService.CountStoredInstances(player, crewMemberInventory)
+	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
+	local allowed = occupied + requested <= storageSlots
+	return allowed, occupied, storageSlots, CREW_MEMBER_INVENTORY_STORAGE_SLOTS, if allowed then "ok" else "crew_inventory_full"
 end
 
 function CrewQuickSlotService.CanGainCrewMembers(player, crewMemberIdOrAmount, amountOrContext, context)
@@ -493,24 +816,11 @@ function CrewQuickSlotService.CanGainCrewMembers(player, crewMemberIdOrAmount, a
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
-	local stacks = getCrewQuickEntries(player)
-	local occupied = 0
-	local requiredSlots = 1
-	local allowed = false
-	local reason = "legacy_capacity_check"
+	local occupied = CrewQuickSlotService.CountStoredInstances(player)
+	local requiredSlots = requested
+	local allowed = occupied + requested <= storageSlots
+	local reason = if allowed then "ok" else "crew_inventory_full"
 	local targetCrewMemberId = tostring(crewMemberId or "")
-
-	if targetCrewMemberId ~= "" then
-		local fit = CrewInventoryStacks.CalculateIncomingFitFromStacks(stacks, targetCrewMemberId, requested, storageSlots)
-		occupied = fit.OccupiedStacks
-		requiredSlots = fit.RequiredNewStacks
-		allowed = fit.Allowed == true
-		reason = tostring(fit.Reason or "unknown")
-		targetCrewMemberId = tostring(fit.CrewMemberId or targetCrewMemberId)
-	else
-		occupied = #stacks
-		allowed = (occupied + requiredSlots) <= storageSlots
-	end
 
 	quickSlotDebug(
 		"gain %s player=%s context=%s target=%s occupied=%d quickUnlocked=%d storageSlots=%d amount=%d requiredSlots=%d max=%d reason=%s",
@@ -537,28 +847,33 @@ function CrewQuickSlotService.CanGainCrewMemberBatch(player, grants, context)
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
-	local fit = CrewInventoryStacks.CalculateBatchFitFromStacks(getCrewQuickEntries(player), grants, storageSlots)
-	local allowed = fit.Allowed == true
+	local requested = 0
+	for _, grant in ipairs(if typeof(grants) == "table" then grants else {}) do
+		requested += math.max(0, math.floor(tonumber(grant and (grant.Amount or grant.Quantity)) or 0))
+	end
+	local occupied = CrewQuickSlotService.CountStoredInstances(player)
+	local allowed = occupied + requested <= storageSlots
+	local reason = if allowed then "ok" else "crew_inventory_full"
 
 	quickSlotDebug(
 		"batchGain %s player=%s context=%s occupied=%d quickUnlocked=%d storageSlots=%d requested=%d requiredSlots=%d max=%d reason=%s",
 		allowed and "allow" or "block",
 		player.Name,
 		tostring(context or "unknown"),
-		tonumber(fit.OccupiedStacks) or 0,
+		occupied,
 		slots.UnlockedSlots,
 		storageSlots,
-		tonumber(fit.Requested) or 0,
-		tonumber(fit.RequiredNewStacks) or 0,
+		requested,
+		requested,
 		slots.MaxSlots,
-		tostring(fit.Reason or "unknown")
+		reason
 	)
 
 	return allowed,
-		tonumber(fit.OccupiedStacks) or 0,
+		occupied,
 		storageSlots,
 		CREW_MEMBER_INVENTORY_STORAGE_SLOTS,
-		tostring(fit.Reason or "unknown")
+		reason
 end
 
 function CrewQuickSlotService.CanInventoryFit(player, crewMemberInventory, context)
@@ -568,22 +883,22 @@ function CrewQuickSlotService.CanInventoryFit(player, crewMemberInventory, conte
 
 	local slots = CrewQuickSlotService.EnsureSlots(player)
 	local storageSlots = CrewQuickSlotService.GetInventoryStorageSlots(player)
-	local occupiedStacks = #CrewInventoryStacks.BuildAvailableStacks(crewMemberInventory)
-	local allowed = occupiedStacks <= storageSlots
+	local occupiedInstances = CrewQuickSlotService.CountStoredInstances(player, crewMemberInventory)
+	local allowed = occupiedInstances <= storageSlots
 
 	quickSlotDebug(
 		"inventoryFit %s player=%s context=%s occupied=%d quickUnlocked=%d storageSlots=%d max=%d",
 		allowed and "allow" or "block",
 		player.Name,
 		tostring(context or "unknown"),
-		occupiedStacks,
+		occupiedInstances,
 		slots.UnlockedSlots,
 		storageSlots,
 		slots.MaxSlots
 	)
 
 	return allowed,
-		occupiedStacks,
+		occupiedInstances,
 		storageSlots,
 		CREW_MEMBER_INVENTORY_STORAGE_SLOTS,
 		if allowed then "ok" else "crew_inventory_full"
@@ -600,6 +915,10 @@ end
 
 function CrewQuickSlotService.NotifyFull(player)
 	sendPopup(player, FULL_MESSAGE, ERROR_COLOR, true)
+end
+
+function CrewQuickSlotService.NotifyHotbarAndStorageFull(player)
+	sendPopup(player, HOTBAR_AND_STORAGE_FULL_MESSAGE, ERROR_COLOR, true)
 end
 
 function CrewQuickSlotService.CanGainOrNotify(player, crewMemberIdOrAmount, amountOrContext, context)
@@ -624,28 +943,17 @@ function CrewQuickSlotService.CanGainCrewMemberBatchOrNotify(player, grants, con
 end
 
 function CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
-	local canonicalCrewMemberId, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
-	if not info then
-		return nil
-	end
-
-	for index, entry in ipairs(getCrewQuickEntries(player)) do
-		if tostring(entry.Name) == canonicalCrewMemberId then
-			return index
-		end
-	end
-
+	warn(string.format(
+		"[CrewQuickSlots] rejected legacy name/count crew slot lookup player=%s crewMemberId=%s",
+		player and player.Name or "unknown",
+		tostring(crewMemberId)
+	))
 	return nil
 end
 
 function CrewQuickSlotService.CanEquipCrewMember(player, crewMemberId)
-	local slotIndex = CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
-	if not slotIndex then
-		return false, nil, CrewQuickSlotService.GetUnlockedSlots(player)
-	end
-
-	local slots = CrewQuickSlotService.EnsureSlots(player)
-	return slotIndex <= slots.UnlockedSlots, slotIndex, slots.UnlockedSlots
+	CrewQuickSlotService.GetCrewSlotIndex(player, crewMemberId)
+	return false, nil, CrewQuickSlotService.GetUnlockedSlots(player), "exact_instance_required"
 end
 
 function CrewQuickSlotService.RequestUnlock(player, _requestedSlot)
@@ -935,9 +1243,10 @@ local function processCanonicalUnlockReceipt(player, productId, dataManager)
 
 	local grantedSlots = math.min(slots.UnlockedSlots + 1, slots.MaxSlots)
 	local targetSlotData = {
-		SchemaVersion = CrewProfileSchema.SchemaVersion,
+		SchemaVersion = CrewProfileSchema.QuickSlotsSchemaVersion or CrewProfileSchema.SchemaVersion,
 		UnlockedSlots = grantedSlots,
 		MaxSlots = slots.MaxSlots,
+		Assignments = slots.Assignments or {},
 	}
 	local rootsUpdated, writes, didWrite = writeQuickSlotRoots(dataManager, player, targetSlotData)
 	player:SetAttribute("PendingCrewQuickSlot", nil)
