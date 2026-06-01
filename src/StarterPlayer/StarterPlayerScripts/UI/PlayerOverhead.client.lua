@@ -12,12 +12,15 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local TitlesConfig = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 local PlayerOverheadBillboard = require(UiFolder:WaitForChild("Player"):WaitForChild("PlayerOverheadBillboard"))
 
 local BOARD_ATTRIBUTES = {
 	"LB_TotalMoney",
 	"LB_TotalSpeed",
 	"LB_Bounty",
+	"EquippedTitleId",
+	"EquippedTitleDisplay",
 }
 
 local HORO_ATTRIBUTES = {
@@ -303,6 +306,10 @@ local function buildEntries(now)
 	for player, key in pairs(trackedPlayers) do
 		local adornee = getHead(player)
 		if adornee then
+			local equippedTitleId = tostring(player:GetAttribute("EquippedTitleId") or "")
+			local titleDefinition = equippedTitleId ~= "" and TitlesConfig.Get(equippedTitleId) or nil
+			local visualStyle = titleDefinition and titleDefinition.VisualStyle or nil
+			local titleColor = visualStyle and visualStyle.LedgerColor or nil
 			local currencyValue = CurrencyUtil.findPrimaryValueObject(player)
 			local endTime = tonumber(player:GetAttribute("HoroProjectionEndTime"))
 			local horoActive = player:GetAttribute("HoroProjectionActive") == true
@@ -316,6 +323,8 @@ local function buildEntries(now)
 				key = key,
 				adornee = adornee,
 				playerName = player.Name,
+				titleDisplay = if titleDefinition then tostring(player:GetAttribute("EquippedTitleDisplay") or titleDefinition.DisplayName or equippedTitleId) else "",
+				titleColor = titleColor,
 				balance = currencyValue and currencyValue.Value or 0,
 				rebirths = rebirthsValue and rebirthsValue.Value or 0,
 				beliBoostRemaining = beliBoostValue and beliBoostValue.Value or 0,
