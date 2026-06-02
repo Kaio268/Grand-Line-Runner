@@ -1,0 +1,14 @@
+{
+  "ClassName": "SpawnLocation",
+  "Properties": {
+    "Anchored": true,
+    "BottomSurface": "Smooth",
+    "Duration": 0,
+    "Enabled": true,
+    "Name": "SpawnLocation",
+    "Neutral": true,
+    "Position": [0, 2, 0],
+    "Size": [8, 1, 8],
+    "TopSurface": "Smooth"
+  }
+}

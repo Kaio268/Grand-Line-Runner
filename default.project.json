@@ -1,5 +1,5 @@
 {
-  "name": "project",
+  "name": "grand-tide-rush-main",
   "tree": {
     "$className": "DataModel",
     "ReplicatedFirst": {

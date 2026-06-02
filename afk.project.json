@@ -1,0 +1,145 @@
+{
+  "name": "grand-tide-rush-afk",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "$ignoreUnknownInstances": true,
+      "Modules": {
+        "$className": "Folder",
+        "Configs": {
+          "$className": "Folder",
+          "GrandLineRushEconomy": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/GrandLineRushEconomy.lua"
+          },
+          "DevilFruits": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/DevilFruits.lua"
+          },
+          "CrewQuickSlots": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/CrewQuickSlots.lua"
+          },
+          "PlotUpgrade": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/PlotUpgrade.lua"
+          },
+          "Rebirths": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/Rebirths.lua"
+          },
+          "ShipVisuals": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/ShipVisuals.lua"
+          },
+          "GrandLineRushChestRewards": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/GrandLineRushChestRewards.lua"
+          },
+          "Tutorials": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/Tutorials.lua"
+          },
+          "CrewVariants": {
+            "$path": "src/ReplicatedStorage/Modules/Configs/CrewVariants.lua"
+          }
+        },
+        "CurrencyUtil": {
+          "$path": "src/ReplicatedStorage/Modules/CurrencyUtil.lua"
+        },
+        "Shorten": {
+          "$path": "src/ReplicatedStorage/Modules/Shorten.lua"
+        },
+        "Types": {
+          "$path": "src/ReplicatedStorage/Modules/Types.lua"
+        },
+        "GrandLineRushChestUtils": {
+          "$path": "src/ReplicatedStorage/Modules/GrandLineRushChestUtils.lua"
+        },
+        "Crew": {
+          "$className": "Folder",
+          "CrewCatalog": {
+            "$path": "src/ReplicatedStorage/Modules/Crew/CrewCatalog.lua"
+          },
+          "CrewMembers": {
+            "$path": "src/ReplicatedStorage/Modules/Crew/CrewMembers.lua"
+          },
+          "CrewIncomeBalance": {
+            "$path": "src/ReplicatedStorage/Modules/Crew/CrewIncomeBalance.lua"
+          },
+          "IndexDiscovery": {
+            "$path": "src/ReplicatedStorage/Modules/Crew/IndexDiscovery.lua"
+          }
+        },
+        "Dependencies": {
+          "$className": "Folder",
+          "ReplicaShared": {
+            "$className": "Folder",
+            "Maid": {
+              "$path": "src/ReplicatedStorage/Modules/Dependencies/ReplicaShared/Maid.lua"
+            },
+            "RateLimit": {
+              "$path": "src/ReplicatedStorage/Modules/Dependencies/ReplicaShared/RateLimit.lua"
+            },
+            "Remote": {
+              "$path": "src/ReplicatedStorage/Modules/Dependencies/ReplicaShared/Remote.lua"
+            },
+            "Signal": {
+              "$path": "src/ReplicatedStorage/Modules/Dependencies/ReplicaShared/Signal.lua"
+            }
+          }
+        }
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "$ignoreUnknownInstances": true,
+      "Framework": {
+        "$className": "Folder",
+        "ProfileStore": {
+          "$path": "src/ServerScriptService/Framework/ProfileStore.lua"
+        },
+        "GlobalStore": {
+          "$path": "src/ServerScriptService/Framework/GlobalStore.lua"
+        },
+        "ReplicaServer": {
+          "$path": "src/ServerScriptService/Framework/ReplicaServer.lua"
+        }
+      },
+      "Data": {
+        "$className": "Folder",
+        "DataEnvironment": {
+          "$path": "src/ServerScriptService/Data/DataEnvironment.lua"
+        },
+        "DataKeySecrets": {
+          "$path": "src/ServerScriptService/Data/DataKeySecrets.lua"
+        },
+        "DataManager": {
+          "$path": "src/ServerScriptService/Data/DataManager",
+          "$ignoreUnknownInstances": true
+        }
+      },
+      "Modules": {
+        "$className": "Folder",
+        "AFKTeleportService": {
+          "$path": "src/ServerScriptService/Modules/AFKTeleportService.lua"
+        },
+        "RemoteGuard": {
+          "$path": "src/ServerScriptService/Modules/RemoteGuard.lua"
+        }
+      },
+      "AFKBoot": {
+        "$path": "src/AFK/ServerScriptService/AFKBoot.server.lua"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "$ignoreUnknownInstances": true,
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+        "AFKTeleport": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/AFKTeleport.client.lua"
+        }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$ignoreUnknownInstances": true,
+      "$path": "src/AFK/Workspace"
+    }
+  }
+}

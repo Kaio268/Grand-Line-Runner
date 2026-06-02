@@ -992,6 +992,45 @@ function ProfileMigrations.Apply(data)
 	afkGoldChests.ProgressSeconds = math.max(0, coerceNumber(afkGoldChests.ProgressSeconds, 0))
 	ChestRewards.EnsureFruitPityState(chestRewards)
 
+	local afk = ensureTable(data, "AFK")
+	afk.SchemaVersion = 1
+	local afkSession = ensureTable(afk, "Session")
+	afkSession.Active = afkSession.Active == true
+	if typeof(afkSession.SessionId) ~= "string" then
+		afkSession.SessionId = ""
+	end
+	afkSession.StartedAtUnix = math.max(0, math.floor(coerceNumber(afkSession.StartedAtUnix, 0)))
+	afkSession.LastAccruedAtUnix = math.max(0, math.floor(coerceNumber(afkSession.LastAccruedAtUnix, 0)))
+	afkSession.ClaimedThroughUnix = math.max(0, math.floor(coerceNumber(afkSession.ClaimedThroughUnix, 0)))
+	afkSession.LastRewardSettledAtUnix =
+		math.max(0, math.floor(coerceNumber(afkSession.LastRewardSettledAtUnix, afkSession.ClaimedThroughUnix)))
+	afkSession.AwardedChestIntervals = math.max(0, math.floor(coerceNumber(afkSession.AwardedChestIntervals, 0)))
+	afkSession.BeliRemainder = math.max(0, coerceNumber(afkSession.BeliRemainder, 0))
+	afkSession.EarnedChestsThisSession =
+		math.max(0, math.floor(coerceNumber(afkSession.EarnedChestsThisSession, 0)))
+	afkSession.EarnedBeliThisSession =
+		math.max(0, math.floor(coerceNumber(afkSession.EarnedBeliThisSession, 0)))
+	afkSession.RefreshCount = math.max(0, math.floor(coerceNumber(afkSession.RefreshCount, 0)))
+	afkSession.PendingReturn = afkSession.PendingReturn == true
+	if typeof(afkSession.Source) ~= "string" then
+		afkSession.Source = ""
+	end
+	if typeof(afkSession.LastClaimId) ~= "string" then
+		afkSession.LastClaimId = ""
+	end
+	afkSession.LastKnownPlaceId = math.max(0, math.floor(coerceNumber(afkSession.LastKnownPlaceId, 0)))
+	afkSession.LastTeleportAtUnix = math.max(0, math.floor(coerceNumber(afkSession.LastTeleportAtUnix, 0)))
+
+	local afkDaily = ensureTable(afk, "Daily")
+	if typeof(afkDaily.DayKey) ~= "string" then
+		afkDaily.DayKey = ""
+	end
+	afkDaily.ClaimedSeconds = math.max(0, math.floor(coerceNumber(afkDaily.ClaimedSeconds, 0)))
+
+	local afkTotals = ensureTable(afk, "Totals")
+	afkTotals.ClaimedSeconds = math.max(0, math.floor(coerceNumber(afkTotals.ClaimedSeconds, 0)))
+	afkTotals.Claims = math.max(0, math.floor(coerceNumber(afkTotals.Claims, 0)))
+
 	local foodInventory = ensureTable(data, "FoodInventory")
 	local inventory = ensureTable(data, "Inventory")
 	local legacyFeed = ensureTable(inventory, "Feed")

@@ -90,6 +90,36 @@ local ProfileTemplate = {
 		},
 	},
 
+	AFK = {
+		SchemaVersion = 1,
+		Session = {
+			Active = false,
+			SessionId = "",
+			StartedAtUnix = 0,
+			LastAccruedAtUnix = 0,
+			ClaimedThroughUnix = 0,
+			LastRewardSettledAtUnix = 0,
+			AwardedChestIntervals = 0,
+			BeliRemainder = 0,
+			EarnedChestsThisSession = 0,
+			EarnedBeliThisSession = 0,
+			RefreshCount = 0,
+			PendingReturn = false,
+			Source = "",
+			LastClaimId = "",
+			LastKnownPlaceId = 0,
+			LastTeleportAtUnix = 0,
+		},
+		Daily = {
+			DayKey = "",
+			ClaimedSeconds = 0,
+		},
+		Totals = {
+			ClaimedSeconds = 0,
+			Claims = 0,
+		},
+	},
+
 	Bounty = {
 		LifetimeExtraction = 0,
 		Crew = 0,

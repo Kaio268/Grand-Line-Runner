@@ -196,6 +196,40 @@ local Economy = {
 		ToggleButtonText = "Ship Meta",
 	},
 
+	AFKTeleport = {
+		Enabled = true,
+		MainPlaceId = 110640828025742,
+		AFKPlaceId = 122987301330026,
+		ManualEnabled = true,
+		AutoEnabled = true,
+		InactivitySeconds = 1080,
+		ActivityPingCooldownSeconds = 15,
+		ScanIntervalSeconds = 30,
+		RefreshSeconds = 960,
+		RefreshRetrySeconds = 30,
+		RewardSettlementSeconds = 30,
+		Remotes = {
+			StateEventName = "AFKTeleportState",
+			StateRequestName = "AFKTeleportStateRequest",
+			EntryRequestName = "AFKTeleportEntryRequest",
+			ReturnRequestName = "AFKTeleportReturnRequest",
+			ActivityPingEventName = "AFKActivityPing",
+		},
+		Rewards = {
+			BeliRateMultiplier = 0.30,
+			ChestTier = "Gold",
+			ChestSource = "AFK",
+			Standard = {
+				ChestIntervalSeconds = 3600,
+				ChestsPerInterval = 1,
+			},
+			VIP = {
+				ChestIntervalSeconds = 5400,
+				ChestsPerInterval = 2,
+			},
+		},
+	},
+
 	Food = {
 		Apple = {
 			DisplayName = "Apple",

@@ -4,21 +4,21 @@ DataManager.__index = DataManager
 local self = setmetatable({}, DataManager)
 
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataEnvironment = require(script.Parent:WaitForChild("DataEnvironment"))
+
+local BOOT_MODE_MAIN = "Main"
+local BOOT_MODE_AFK = "AFK"
+
+DataManager.BootModes = {
+	Main = BOOT_MODE_MAIN,
+	AFK = BOOT_MODE_AFK,
+}
 
 --// Other 
-local keyAttribute = script:GetAttribute("Data_Key")
-local Key: string
-if typeof(keyAttribute) == "string" and keyAttribute ~= "" and keyAttribute ~= "DefaultKey_123" then
-	Key = keyAttribute
-elseif RunService:IsStudio() then
-	warn("[DataManager]: Data_Key attribute is missing or default; Studio is using an isolated fallback key. Set Data_Key before publishing.")
-	Key = "StudioMissingDataKey"
-else
-	error("[DataManager]: Data_Key attribute must be set to a non-default value outside Studio.")
-end
-if script:GetAttribute("Custom_Studio_Data") then
-	Key = "S__"..Key..tostring(script:GetAttribute("Studio_Version"))
-end
+local DataEnvironmentState = DataEnvironment.ResolveDataKey()
+local Key: string = DataEnvironmentState.DataKey
+DataManager.DataEnvironment = DataEnvironment.GetDiagnostics(DataEnvironmentState)
 
 local ATTRIBUTE_STORE_KEY = "__Attributes"
 
@@ -32,17 +32,19 @@ local Replica = require(game.ServerScriptService.Framework.ReplicaServer)
 local GetTemplate = require(script.GetTemplate)
 local ProfileMigrations = require(script.ProfileMigrations)
 local MessageFunctions = require(script.MessageFunctions)
-local ProductFunctions = require(script.ProductFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
-local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
-local MonetizationConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
-local PaidRandomItemPolicy = require(game.ServerScriptService.Modules.PaidRandomItemPolicy)
-local RemoteGuard = require(game.ServerScriptService.Modules.RemoteGuard)
-local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
-local ShopEntitlementService = require(game.ServerScriptService.Modules.ShopEntitlementService)
-local CrewProtectionService = require(game.ServerScriptService.Modules.CrewProtectionService)
-local AFKGoldChestRewardService = require(game.ServerScriptService.Modules.AFKGoldChestRewardService)
+local EconomyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+
+local ProductFunctions = nil
+local MonetizationConfig = nil
+local PaidRandomItemPolicy = nil
+local RemoteGuard = nil
+local ValidationChecks = nil
+local ShopEntitlementService = nil
+local CrewProtectionService = nil
+local AFKGoldChestRewardService = nil
+local AFKTeleportService = nil
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -53,8 +55,101 @@ local PendingReplicaReadyConnections: {[Player]: any} = {}
 local PendingHardResetByUserId: {[number]: boolean} = {}
 local SuppressSessionEndKickByUserId: {[number]: boolean} = {}
 local DataManagerInitialized = false
+local ActiveBootMode = BOOT_MODE_MAIN
 local HardResetStartingEvent = Instance.new("BindableEvent")
 DataManager.HardResetStarting = HardResetStartingEvent.Event
+
+local function normalizeBootMode(options)
+	local requestedMode = nil
+	if typeof(options) == "string" then
+		requestedMode = options
+	elseif typeof(options) == "table" then
+		requestedMode = options.Mode or options.mode
+	end
+
+	if requestedMode == BOOT_MODE_AFK then
+		return BOOT_MODE_AFK
+	end
+	return BOOT_MODE_MAIN
+end
+
+local function isMainBootMode()
+	return ActiveBootMode == BOOT_MODE_MAIN
+end
+
+local function getProductFunctions()
+	if ProductFunctions == nil then
+		ProductFunctions = require(script.ProductFunctions)
+	end
+	return ProductFunctions
+end
+
+local function getMonetizationConfig()
+	if MonetizationConfig == nil then
+		MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
+	end
+	return MonetizationConfig
+end
+
+local function getPaidRandomItemPolicy()
+	if PaidRandomItemPolicy == nil then
+		PaidRandomItemPolicy = require(game.ServerScriptService.Modules.PaidRandomItemPolicy)
+	end
+	return PaidRandomItemPolicy
+end
+
+local function getRemoteGuard()
+	if RemoteGuard == nil then
+		RemoteGuard = require(game.ServerScriptService.Modules.RemoteGuard)
+	end
+	return RemoteGuard
+end
+
+local function getValidationChecks()
+	if ValidationChecks == nil then
+		ValidationChecks = require(game.ServerScriptService.Modules.ValidationChecks)
+	end
+	return ValidationChecks
+end
+
+local function getShopEntitlementService()
+	if ShopEntitlementService == nil then
+		ShopEntitlementService = require(game.ServerScriptService.Modules.ShopEntitlementService)
+	end
+	return ShopEntitlementService
+end
+
+local function getCrewProtectionService()
+	if CrewProtectionService == nil then
+		CrewProtectionService = require(game.ServerScriptService.Modules.CrewProtectionService)
+	end
+	return CrewProtectionService
+end
+
+local function getAFKGoldChestRewardService()
+	if AFKGoldChestRewardService == nil then
+		AFKGoldChestRewardService = require(game.ServerScriptService.Modules.AFKGoldChestRewardService)
+	end
+	return AFKGoldChestRewardService
+end
+
+local function getAFKTeleportService()
+	if AFKTeleportService == nil then
+		AFKTeleportService = require(game.ServerScriptService.Modules.AFKTeleportService)
+	end
+	return AFKTeleportService
+end
+
+local function loadMainBootDependencies()
+	getProductFunctions()
+	getMonetizationConfig()
+	getPaidRandomItemPolicy()
+	getRemoteGuard()
+	getValidationChecks()
+	getShopEntitlementService()
+	getCrewProtectionService()
+	getAFKGoldChestRewardService()
+end
 
 --// GlobalStore
 local GlobalDataTemplate = {Players = {}}
@@ -1729,8 +1824,10 @@ function PlayerAdded(player: Player)
 		profile:AddUserId(player.UserId)
 		profile:Reconcile()
 		ProfileMigrations.Apply(profile.Data)
-		runCrewMemberShadowWriteOnProfileReady(player, profile)
-		ValidationChecks.WarnProfileData(player, profile.Data)
+		if isMainBootMode() then
+			runCrewMemberShadowWriteOnProfileReady(player, profile)
+			getValidationChecks().WarnProfileData(player, profile.Data)
+		end
 
 		profile.OnSessionEnd:Connect(function()
 			Profiles[player] = nil
@@ -1782,7 +1879,9 @@ function PlayerAdded(player: Player)
 		end
 		markPlayerDataReady(player, dataReadyStartedAt)
 		DataManager:SetupBoostListeners(player)
-		ShopEntitlementService.ApplyOwnedEntitlements(player, self)
+		if isMainBootMode() then
+			getShopEntitlementService().ApplyOwnedEntitlements(player, self)
+		end
 	else
 		player:Kick("Profile load fail - Please rejoin!")
 	end
@@ -1907,14 +2006,19 @@ local function isOneTimeShopDeveloperProductOwned(player: Player, metadata)
 end
 
 function DataManager:PromptProductPurchase(player : Player, productId : number)
+	if not isMainBootMode() then
+		return false, "products_unavailable_in_afk_mode"
+	end
+
 	productId = tonumber(productId)
 	if productId == nil then
 		warn("[DataManager]: Refused product prompt with invalid product id")
 		return false, "invalid_product_id"
 	end
 
-	if not MonetizationConfig.CanPromptDeveloperProduct(productId) then
-		local status, metadata = MonetizationConfig.GetDeveloperProductStatus(productId)
+	local monetizationConfig = getMonetizationConfig()
+	if not monetizationConfig.CanPromptDeveloperProduct(productId) then
+		local status, metadata = monetizationConfig.GetDeveloperProductStatus(productId)
 		warn(string.format(
 			"[DataManager]: Blocked disabled/non-GTR product prompt player=%s productId=%s status=%s reason=%s",
 			player and player.Name or "<unknown>",
@@ -1925,7 +2029,7 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 		return false, "product_not_available"
 	end
 
-	local shopMetadata = MonetizationConfig.GetShopDeveloperProductMetadata(productId)
+	local shopMetadata = monetizationConfig.GetShopDeveloperProductMetadata(productId)
 	if shopMetadata and shopMetadata.OneTime == true then
 		local alreadyOwned, reason = isOneTimeShopDeveloperProductOwned(player, shopMetadata)
 		if alreadyOwned == true then
@@ -1936,8 +2040,9 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 		end
 	end
 
-	if MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
-		local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+	local paidRandomItemPolicy = getPaidRandomItemPolicy()
+	if monetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+		local allowed, policyState = paidRandomItemPolicy.CanUsePaidRandomItems(player)
 		if allowed ~= true then
 			warn(string.format(
 				"[DataManager]: Blocked paid random product prompt player=%s productId=%s policyStatus=%s reason=%s",
@@ -1950,7 +2055,8 @@ function DataManager:PromptProductPurchase(player : Player, productId : number)
 		end
 	end
 
-	if ProductFunctions[productId] == nil then
+	local productFunctions = getProductFunctions()
+	if productFunctions[productId] == nil then
 		warn("[DataManager]: No product function under id: ".. productId)
 		return false, "missing_product_function"
 	end
@@ -2094,17 +2200,24 @@ function DataManager.RunProductReceiptIdempotencyCanary(dataManager, player: Pla
 	return PurchaseIdCheckAsync(profile, purchaseId, grant_purchase), nil
 end
 local MessagingService = game:GetService("MessagingService") -- <--- DODANE
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ANNOUNCE_TOPIC = "DM_DevProductAnnouncements" -- nazwa tematu w MessagingService
 local ANNOUNCE_EVENT_NAME = "DevProductAnnouncement" -- nazwa RemoteEventu
 
--- RemoteEvent do ogłoszeń
-local AnnouncementEvent = ReplicatedStorage:FindFirstChild(ANNOUNCE_EVENT_NAME)
-if not AnnouncementEvent then
-	AnnouncementEvent = Instance.new("RemoteEvent")
-	AnnouncementEvent.Name = ANNOUNCE_EVENT_NAME
-	AnnouncementEvent.Parent = ReplicatedStorage
+local AnnouncementEvent = nil
+
+local function getAnnouncementEvent()
+	if AnnouncementEvent ~= nil then
+		return AnnouncementEvent
+	end
+
+	AnnouncementEvent = ReplicatedStorage:FindFirstChild(ANNOUNCE_EVENT_NAME)
+	if not AnnouncementEvent then
+		AnnouncementEvent = Instance.new("RemoteEvent")
+		AnnouncementEvent.Name = ANNOUNCE_EVENT_NAME
+		AnnouncementEvent.Parent = ReplicatedStorage
+	end
+	return AnnouncementEvent
 end
 
 -- prosta kolejka wiadomości do MessagingService
@@ -2213,14 +2326,18 @@ local function ProcessReceipt(recieptInfo)
 				return Enum.ProductPurchaseDecision.NotProcessedYet
 			end
 
-			if MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
-				local allowed, policyState = PaidRandomItemPolicy.CanUsePaidRandomItems(player)
+			local monetizationConfig = getMonetizationConfig()
+			local paidRandomItemPolicy = getPaidRandomItemPolicy()
+			local productFunctions = getProductFunctions()
+
+			if monetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+				local allowed, policyState = paidRandomItemPolicy.CanUsePaidRandomItems(player)
 				if allowed ~= true then
 					return PurchaseIdCheckAsync(
 						profile,
 						recieptInfo.PurchaseId,
 						function()
-							local marker, created = PaidRandomItemPolicy.RecordBlockedReceiptFallback(
+							local marker, created = paidRandomItemPolicy.RecordBlockedReceiptFallback(
 								profile,
 								player,
 								recieptInfo,
@@ -2241,12 +2358,12 @@ local function ProcessReceipt(recieptInfo)
 				end
 			end
 
-			local productHandlerExists = ProductFunctions[productId] ~= nil
+			local productHandlerExists = productFunctions[productId] ~= nil
 			developerProductReceiptAudit("before_product_handler_lookup", recieptInfo, {
 				ProfileExists = true,
 				ProductHandlerExists = productHandlerExists,
 			})
-			if ProductFunctions[productId] == nil then
+			if productFunctions[productId] == nil then
 				warn("[DataManager]: No product found under id: " .. tostring(recieptInfo.ProductId))
 				developerProductReceiptAudit("product_handler_missing", recieptInfo, {
 					ProfileExists = true,
@@ -2280,8 +2397,8 @@ local function ProcessReceipt(recieptInfo)
 						return Enum.ProductPurchaseDecision.NotProcessedYet
 					end
 
-					local productStatus, productMetadata = MonetizationConfig.GetDeveloperProductStatus(productId)
-					local shouldRecordPurchase = productStatus == MonetizationConfig.Status.Active
+					local productStatus, productMetadata = monetizationConfig.GetDeveloperProductStatus(productId)
+					local shouldRecordPurchase = productStatus == monetizationConfig.Status.Active
 					local price = 0
 					local productName = "Product " .. tostring(productId)
 					if shouldRecordPurchase then
@@ -2306,7 +2423,7 @@ local function ProcessReceipt(recieptInfo)
 						ProfileExists = true,
 						ProductHandlerExists = productHandlerExists,
 					})
-					local handlerResult = ProductFunctions[productId](recieptInfo, player, profile, DataManager)
+					local handlerResult = productFunctions[productId](recieptInfo, player, profile, DataManager)
 					developerProductReceiptAudit("product_handler_returned", recieptInfo, {
 						ProfileExists = true,
 						ProductHandlerExists = productHandlerExists,
@@ -2697,7 +2814,7 @@ local function SetupAnnouncementSubscription()
 			end
 
 			-- Wysyłamy do wszystkich klientów na tym serwerze
-			AnnouncementEvent:FireAllClients(data)
+			getAnnouncementEvent():FireAllClients(data)
 		end)
 	end)
 
@@ -2744,12 +2861,14 @@ local function getOrCreateRemoteFunction(parent, remoteName)
 end
 
 local function SetupShopProductPromptRemote()
-	local promptRemoteName = tostring(MonetizationConfig.ShopProductPromptRemoteName or "ShopProductPromptRequest")
+	local monetizationConfig = getMonetizationConfig()
+	local remoteGuard = getRemoteGuard()
+	local promptRemoteName = tostring(monetizationConfig.ShopProductPromptRemoteName or "ShopProductPromptRequest")
 	local remotes = getOrCreateRemotesFolder()
 	local promptRequest = getOrCreateRemoteFunction(remotes, promptRemoteName)
 
 	promptRequest.OnServerInvoke = function(player: Player, productId: number)
-		if not RemoteGuard.Check(player, promptRemoteName, { productId }, {
+		if not remoteGuard.Check(player, promptRemoteName, { productId }, {
 			Cooldown = 0.35,
 			Args = {
 				{ Type = "finiteNumber", Integer = true, Min = 1 },
@@ -2762,7 +2881,7 @@ local function SetupShopProductPromptRemote()
 		end
 
 		productId = tonumber(productId)
-		local metadata = MonetizationConfig.GetShopDeveloperProductMetadata(productId)
+		local metadata = monetizationConfig.GetShopDeveloperProductMetadata(productId)
 		if metadata == nil then
 			warn(string.format(
 				"[DataManager]: Rejected shop prompt remote for non-shop product player=%s productId=%s",
@@ -2791,14 +2910,17 @@ local function SetupShopProductPromptRemote()
 end
 
 local function SetupPaidRandomItemPolicyRemotes()
-	local remotesConfig = MonetizationConfig.PaidRandomItemPolicy
-		and MonetizationConfig.PaidRandomItemPolicy.Remotes
+	local monetizationConfig = getMonetizationConfig()
+	local paidRandomItemPolicy = getPaidRandomItemPolicy()
+	local remoteGuard = getRemoteGuard()
+	local remotesConfig = monetizationConfig.PaidRandomItemPolicy
+		and monetizationConfig.PaidRandomItemPolicy.Remotes
 		or {}
 	local promptRemoteName = tostring(remotesConfig.ProductPromptRequestName or "PaidRandomProductPromptRequest")
 
-	PaidRandomItemPolicy.SetupRemotes({
+	paidRandomItemPolicy.SetupRemotes({
 		PromptProductPurchase = function(player: Player, productId: number)
-			if not RemoteGuard.Check(player, promptRemoteName, { productId }, {
+			if not remoteGuard.Check(player, promptRemoteName, { productId }, {
 				Cooldown = 0.35,
 				Args = {
 					{ Type = "finiteNumber", Integer = true, Min = 1 },
@@ -2811,7 +2933,7 @@ local function SetupPaidRandomItemPolicyRemotes()
 			end
 
 			productId = tonumber(productId)
-			if productId == nil or not MonetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
+			if productId == nil or not monetizationConfig.DeveloperProductRequiresPaidRandomItemPolicy(productId) then
 				warn(string.format(
 					"[DataManager]: Rejected paid random prompt remote for non-paid-random product player=%s productId=%s",
 					player and player.Name or "<unknown>",
@@ -2827,22 +2949,34 @@ local function SetupPaidRandomItemPolicyRemotes()
 			return {
 				ok = prompted == true,
 				error = if prompted == true then nil else tostring(reason or "prompt_rejected"),
-				policy = PaidRandomItemPolicy.GetClientState(player),
+				policy = paidRandomItemPolicy.GetClientState(player),
 			}
 		end,
 	})
 end
 
 
-DataManager.init = function()
+DataManager.init = function(options)
+	local requestedBootMode = normalizeBootMode(options)
 	if DataManagerInitialized then
+		if ActiveBootMode ~= requestedBootMode then
+			warn(string.format(
+				"[DataManager]: Already initialized in %s mode; ignoring %s init request.",
+				tostring(ActiveBootMode),
+				tostring(requestedBootMode)
+			))
+		end
 		return
 	end
 
+	DataEnvironment.ValidateBootMode(DataEnvironmentState, requestedBootMode)
 	DataManagerInitialized = true
 	DataManager._initialized = true
+	ActiveBootMode = requestedBootMode
+	DataManager.BootMode = ActiveBootMode
 	workspace:SetAttribute("DataManager_RuntimeSignature", "src-path-sync-2026-03-17")
 	workspace:SetAttribute("DataManager_TargetedSync", true)
+	workspace:SetAttribute("DataManager_BootMode", ActiveBootMode)
 	workspace:SetAttribute(
 		"DataManager_SyncMode",
 		if Settings.Experimental.CreateFolders then "targeted_path_sync" else "legacy_update_data"
@@ -2850,11 +2984,17 @@ DataManager.init = function()
 
 	FillMessageFunctions()
 	DataManager.Premades = Premades
-	SetupShopProductPromptRemote()
-	SetupPaidRandomItemPolicyRemotes()
-	ShopEntitlementService.Start(DataManager)
-	CrewProtectionService.Start(DataManager)
-	AFKGoldChestRewardService.Start(DataManager)
+	if isMainBootMode() then
+		loadMainBootDependencies()
+		MarketPlaceService.ProcessReceipt = ProcessReceipt
+		getAnnouncementEvent()
+		SetupShopProductPromptRemote()
+		SetupPaidRandomItemPolicyRemotes()
+		getShopEntitlementService().Start(DataManager)
+		getCrewProtectionService().Start(DataManager)
+		getAFKGoldChestRewardService().Start(DataManager)
+	end
+	getAFKTeleportService().Start(DataManager)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		task.spawn(PlayerAdded, player)
@@ -2862,26 +3002,30 @@ DataManager.init = function()
 	Players.PlayerAdded:Connect(PlayerAdded)
 	Players.PlayerRemoving:Connect(PlayerRemoving)
 
-	task.spawn(function()
-		local ok, err = pcall(CheckVersion)
-		if not ok then
-			warn("[DataManager]: Version check failed during init: ", err)
-		end
-	end)
+	if isMainBootMode() then
+		task.spawn(function()
+			local ok, err = pcall(CheckVersion)
+			if not ok then
+				warn("[DataManager]: Version check failed during init: ", err)
+			end
+		end)
 
-	task.spawn(function()
-		local ok, err = pcall(SetupAnnouncementSubscription)
-		if not ok then
-			warn("[DataManager]: Announcement subscription failed during init: ", err)
-		end
-	end)
+		task.spawn(function()
+			local ok, err = pcall(SetupAnnouncementSubscription)
+			if not ok then
+				warn("[DataManager]: Announcement subscription failed during init: ", err)
+			end
+		end)
 
-	task.spawn(function()
-		local ok, err = pcall(ValidationChecks.WarnMissingDependencies)
-		if not ok then
-			warn("[DataManager]: Validation checks failed during init: ", err)
-		end
-	end)
+		task.spawn(function()
+			local ok, err = pcall(function()
+				getValidationChecks().WarnMissingDependencies()
+			end)
+			if not ok then
+				warn("[DataManager]: Validation checks failed during init: ", err)
+			end
+		end)
+	end
 
 	game:BindToClose(function()
 		for _, player in ipairs(Players:GetPlayers()) do
@@ -2890,7 +3034,5 @@ DataManager.init = function()
 	end)
 end
 
-
-MarketPlaceService.ProcessReceipt = ProcessReceipt
 
 return DataManager

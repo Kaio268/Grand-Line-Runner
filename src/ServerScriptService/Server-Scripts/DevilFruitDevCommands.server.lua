@@ -49,6 +49,8 @@ local CrewMigrationPlanner = require(ServerScriptService.Modules:WaitForChild("C
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
+local DataEnvironment = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataEnvironment"))
+local DataRecoveryService = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataRecoveryService"))
 local ProfileTemplate = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"):WaitForChild("ProfileTemplate"))
 local SpeedUpgradeLimits = require(ServerScriptService.Modules:WaitForChild("SpeedUpgradeLimits"))
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
@@ -202,6 +204,8 @@ local ADMIN_COMMAND_NAMES = {
 	resetprogress = true,
 	gifts = true,
 	giftreset = true,
+	datadiag = true,
+	datarecover = true,
 	crewcanary = true,
 	crewread = true,
 }
@@ -6365,6 +6369,194 @@ local function processGiftResetCommand(player, argumentText, commandName, comman
 	))
 end
 
+local function formatDiagnosticValue(value)
+	if typeof(value) == "table" then
+		local parts = {}
+		for key, nestedValue in pairs(value) do
+			parts[#parts + 1] = tostring(key) .. "=" .. tostring(nestedValue)
+		end
+		table.sort(parts)
+		return "{" .. table.concat(parts, ",") .. "}"
+	end
+	return tostring(value)
+end
+
+local function processDataDiagnosticsCommand()
+	local diagnostics = DataEnvironment.GetActiveDiagnostics(DataManager.DataEnvironment)
+	local parts = {
+		"placeId=" .. tostring(game.PlaceId),
+		"name=" .. formatDiagnosticValue(diagnostics.Environment),
+		"role=" .. formatDiagnosticValue(diagnostics.PlaceRole),
+		"keyId=" .. formatDiagnosticValue(diagnostics.KeyId),
+		"keyFingerprint=" .. formatDiagnosticValue(diagnostics.KeyFingerprint),
+		"keyLength=" .. formatDiagnosticValue(diagnostics.KeyLength),
+		"source=" .. formatDiagnosticValue(diagnostics.Source),
+		"valid=" .. tostring(diagnostics.Valid == true),
+		"bootModeValid=" .. tostring(diagnostics.BootModeValid == true),
+		"expectedBootMode=" .. formatDiagnosticValue(diagnostics.ExpectedBootMode),
+		"observedBootMode=" .. formatDiagnosticValue(diagnostics.ObservedBootMode),
+	}
+
+	local message = "[DataDiagnostics] " .. table.concat(parts, " ")
+	print(message)
+	return true, message
+end
+
+local function parseKeyValueArguments(argumentText)
+	local parsed = {}
+	for token in tostring(argumentText or ""):gmatch("%S+") do
+		local key, value = token:match("^([^=]+)=(.+)$")
+		if key and value then
+			parsed[normalizeText(key)] = value
+		else
+			parsed[normalizeText(token)] = true
+		end
+	end
+	return parsed
+end
+
+local function getPrivateEnvironmentKey(environmentName)
+	local secretsModule = ServerScriptService:WaitForChild("Data"):FindFirstChild("DataKeySecrets")
+	if secretsModule == nil then
+		return nil, "missing_secrets"
+	end
+
+	local ok, secrets = pcall(require, secretsModule)
+	if not ok or typeof(secrets) ~= "table" then
+		return nil, "invalid_secrets"
+	end
+
+	local entry = secrets[environmentName]
+	if typeof(entry) ~= "table" or typeof(entry.DataKey) ~= "string" or entry.DataKey == "" then
+		return nil, "missing_environment_key"
+	end
+
+	return entry.DataKey, nil
+end
+
+local function getPrivateRecoveryStore(alias)
+	local normalizedAlias = normalizeText(alias)
+	if normalizedAlias == "" then
+		return nil, "missing_recovery_alias"
+	end
+
+	local secretsModule = ServerScriptService:WaitForChild("Data"):FindFirstChild("DataKeySecrets")
+	if secretsModule == nil then
+		return nil, "missing_secrets"
+	end
+
+	local ok, secrets = pcall(require, secretsModule)
+	if not ok or typeof(secrets) ~= "table" then
+		return nil, "invalid_secrets"
+	end
+
+	local recoveryStores = secrets.RecoveryStores
+	if typeof(recoveryStores) ~= "table" then
+		return nil, "missing_recovery_stores"
+	end
+
+	for key, entry in pairs(recoveryStores) do
+		if normalizeText(key) == normalizedAlias then
+			if typeof(entry) ~= "table" or typeof(entry.DataKey) ~= "string" or entry.DataKey == "" then
+				return nil, "invalid_recovery_store"
+			end
+			return entry.DataKey, nil
+		end
+	end
+
+	return nil, "unknown_recovery_alias"
+end
+
+local function getRecoveryStoreName(spec)
+	local normalized = normalizeText(spec)
+	if normalized == "" or normalized == "current" or normalized == "production" or normalized == "prod" then
+		return getPrivateEnvironmentKey("Production")
+	elseif normalized == "staging" then
+		return getPrivateEnvironmentKey("Staging")
+	elseif normalized == "development" or normalized == "dev" then
+		return getPrivateEnvironmentKey("Development")
+	end
+
+	return getPrivateRecoveryStore(normalized)
+end
+
+local function summarizeRecoverySide(label, side)
+	local current = side and side.Current or {}
+	local newestVersion = side and side.NewestVersion or {}
+	return string.format(
+		"%sStore=%s/%s %sCurrent=%s loadCount=%s roots=%s beli=%s plot=%s total=%s newestVersion=%s",
+		label,
+		tostring(side and side.Store and side.Store.Fingerprint),
+		tostring(side and side.Store and side.Store.Length),
+		label,
+		tostring(current.Exists == true),
+		tostring(current.SessionLoadCount or 0),
+		tostring(current.Data and current.Data.RootKeyCount or 0),
+		tostring(current.Data and current.Data.LeaderstatsBeli or 0),
+		tostring(current.Data and current.Data.PlotUpgrade or 0),
+		tostring(current.Data and current.Data.TotalBeli or 0),
+		tostring(newestVersion.Exists == true)
+	)
+end
+
+local function processDataRecoveryCommand(player, argumentText)
+	local args = parseKeyValueArguments(argumentText)
+	local mode = normalizeText(args.mode or args[1] or "")
+	if mode == "" then
+		mode = if args.restore then "restore" else "dryrun"
+	end
+
+	local userId = tonumber(args.userid or args.user or args.target)
+	if userId == nil then
+		return false, "usage=/datarecover mode=dryrun userId=<id> source=<production|historical-fallback|staging|development> target=<production>"
+	end
+
+	local sourceStore, sourceReason = getRecoveryStoreName(args.source or "production")
+	local targetStore, targetReason = getRecoveryStoreName(args.target or "production")
+	if sourceStore == nil then
+		return false, "source_store_unavailable reason=" .. tostring(sourceReason)
+	elseif targetStore == nil then
+		return false, "target_store_unavailable reason=" .. tostring(targetReason)
+	end
+
+	local options = {
+		UserId = userId,
+		SourceStoreName = sourceStore,
+		TargetStoreName = targetStore,
+		ActorUserId = player.UserId,
+		Confirm = args.confirm,
+		Steal = args.steal == true or args.steal == "true",
+	}
+
+	if mode == "restore" or mode == "restore-one-player" then
+		local result = DataRecoveryService.RestoreOnePlayer(options)
+		if result.Success ~= true then
+			return false, "restore_rejected reason=" .. tostring(result.Error or "unknown")
+		end
+		return true, string.format(
+			"restore_one_player userId=%d profileKey=%s audit=%s beforeRoots=%s afterRoots=%s",
+			result.UserId,
+			tostring(result.ProfileKey),
+			tostring(result.AuditWritten == true),
+			tostring(result.Before and result.Before.Data and result.Before.Data.RootKeyCount or 0),
+			tostring(result.After and result.After.Data and result.After.Data.RootKeyCount or 0)
+		)
+	end
+
+	local result = DataRecoveryService.DryRun(options)
+	if result.Success ~= true then
+		return false, "dryrun_failed reason=" .. tostring(result.Error or "unknown")
+	end
+
+	return true, string.format(
+		"dryrun userId=%d profileKey=%s %s %s",
+		result.UserId,
+		tostring(result.ProfileKey),
+		summarizeRecoverySide("source", result.Source),
+		summarizeRecoverySide("target", result.Target)
+	)
+end
+
 local function getCommandNameAndArguments(rawText)
 	local normalizedText = normalizeText(rawText)
 	local commandName, argumentText = normalizedText:match("^/%s*(%S+)%s*(.*)$")
@@ -6664,6 +6856,20 @@ local function handleChatCommand(player, rawText, source)
 	if commandName == "gifts" or commandName == "giftreset" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processGiftResetCommand(player, argumentText, commandName, commandContext)
+		end, commandContext)
+		return
+	end
+
+	if commandName == "datadiag" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processDataDiagnosticsCommand()
+		end, commandContext)
+		return
+	end
+
+	if commandName == "datarecover" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processDataRecoveryCommand(player, argumentText)
 		end, commandContext)
 		return
 	end

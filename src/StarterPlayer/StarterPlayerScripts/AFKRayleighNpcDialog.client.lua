@@ -4,10 +4,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local DialogModule = require(ReplicatedStorage:WaitForChild("DialogModule"))
+local EconomyConfig = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 
-local ENTRY_REQUEST_NAME = "AFKGoldChestEntryRequest"
+local afkTeleportConfig = if typeof(EconomyConfig.AFKTeleport) == "table" then EconomyConfig.AFKTeleport else {}
+local afkTeleportRemotes = if typeof(afkTeleportConfig.Remotes) == "table" then afkTeleportConfig.Remotes else {}
+local ENTRY_REQUEST_NAME = tostring(afkTeleportRemotes.EntryRequestName or "AFKTeleportEntryRequest")
 local SUCCESS_COLOR = Color3.fromRGB(255, 230, 145)
 local ERROR_COLOR = Color3.fromRGB(255, 125, 108)
 local POPUP_STROKE = Color3.fromRGB(66, 42, 4)
@@ -149,7 +152,7 @@ if not prompt then
 	return
 end
 prompt.ObjectText = "Dark King"
-prompt.ActionText = "Train"
+prompt.ActionText = "AFK"
 
 local entryRequest = waitForEntryRequest()
 if not entryRequest then
@@ -158,7 +161,7 @@ if not entryRequest then
 end
 
 local dialogObject = DialogModule.new("Dark King", npc, prompt)
-dialogObject:addDialog("Do you want to train with the Dark King?", { "Train", "Not now" })
+dialogObject:addDialog("Do you want to enter the AFK lobby?", { "Enter AFK", "Not now" })
 
 prompt.Triggered:Connect(function(triggeringPlayer)
 	dialogObject:triggerDialog(triggeringPlayer or player, 1)
@@ -179,12 +182,12 @@ dialogObject.responded:Connect(function(responseNum, dialogNum)
 	end)
 
 	if ok and typeof(response) == "table" and response.ok == true then
-		dialogObject:hideGui("Good. Train hard.")
-		PopUpModule:Local_SendPopUp(tostring(response.message or "Rayleigh Training started."), SUCCESS_COLOR, POPUP_STROKE, 3, false)
+		dialogObject:hideGui("Good. Rest your sea legs.")
+		PopUpModule:Local_SendPopUp(tostring(response.message or "Traveling to the AFK lobby..."), SUCCESS_COLOR, POPUP_STROKE, 3, false)
 	else
 		local message = if ok and typeof(response) == "table"
-			then tostring(response.message or "Rayleigh Training is unavailable.")
-			else "Rayleigh Training is unavailable."
+			then tostring(response.message or "AFK lobby is unavailable.")
+			else "AFK lobby is unavailable."
 		dialogObject:hideGui("Not yet.")
 		PopUpModule:Local_SendPopUp(message, ERROR_COLOR, POPUP_STROKE, 3, false)
 	end
