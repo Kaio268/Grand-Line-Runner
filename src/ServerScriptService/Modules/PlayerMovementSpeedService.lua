@@ -77,10 +77,6 @@ local function getRuntimeWalkSpeedFromStat(baseWalkSpeed, selectedSpeed)
 	return MovementSpeedConfig.GetRuntimeWalkSpeedFromStat(baseWalkSpeed, selectedSpeed)
 end
 
-local function getStatSpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWalkSpeed)
-	return MovementSpeedConfig.GetStatSpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWalkSpeed)
-end
-
 local function getBaseWalkSpeedFromRuntimeStat(runtimeWalkSpeed, selectedSpeed)
 	return MovementSpeedConfig.GetBaseWalkSpeedFromRuntimeStat(runtimeWalkSpeed, selectedSpeed)
 end
@@ -383,12 +379,9 @@ local function hookCharacter(player, character)
 		return nonProjectionDesiredSpeed or getNonProjectionDesiredSpeed()
 	end
 
-	local function getDisplaySpeedFromWalkSpeed(walkSpeed)
-		return getStatSpeedFromRuntimeWalkSpeed(base, walkSpeed)
-	end
-
 	local function apply(reason)
 		if updating or disconnected then return end
+		local selectedSpeed = getSelectedSpeed()
 		local nonProjectionDesiredSpeed = getNonProjectionDesiredSpeed()
 		setAttributeIfChanged(player, HORO_SOURCE_SPEED_ATTRIBUTE, nonProjectionDesiredSpeed)
 		if isProjectedBody() then return end
@@ -396,7 +389,7 @@ local function hookCharacter(player, character)
 		updating = true
 		humanoid.WalkSpeed = desiredSpeed
 		updating = false
-		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.DisplaySpeed, getDisplaySpeedFromWalkSpeed(desiredSpeed))
+		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.DisplaySpeed, selectedSpeed)
 		if reason then
 			zoneTrace("player=%s apply reason=%s speed=%s", player.Name, tostring(reason), tostring(desiredSpeed))
 		end

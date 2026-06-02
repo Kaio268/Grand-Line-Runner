@@ -1,6 +1,6 @@
 local MovementSpeed = {
 	FallbackBaseWalkSpeed = 16,
-	RuntimeBaselineWalkSpeed = 20,
+	RuntimeBaselineWalkSpeed = 25,
 	RuntimeStatBaseline = 1,
 	RuntimeWalkSpeedPerStat = 1,
 	Attributes = {
@@ -21,14 +21,16 @@ function MovementSpeed.GetFallbackBaseWalkSpeed()
 	return math.max(0, tonumber(MovementSpeed.FallbackBaseWalkSpeed) or 16)
 end
 
+function MovementSpeed.GetRuntimeBaselineWalkSpeed()
+	return math.max(0, tonumber(MovementSpeed.RuntimeBaselineWalkSpeed) or 20)
+end
+
 function MovementSpeed.GetRuntimeBaseWalkSpeed(baseWalkSpeed)
-	local fallbackBaseWalkSpeed = MovementSpeed.GetFallbackBaseWalkSpeed()
-	local runtimeBaselineWalkSpeed = math.max(
+	local baseWalkSpeedValue = tonumber(baseWalkSpeed) or MovementSpeed.GetFallbackBaseWalkSpeed()
+	return math.max(
 		0,
-		tonumber(MovementSpeed.RuntimeBaselineWalkSpeed) or fallbackBaseWalkSpeed
+		baseWalkSpeedValue + (MovementSpeed.GetRuntimeBaselineWalkSpeed() - MovementSpeed.GetFallbackBaseWalkSpeed())
 	)
-	local baseWalkSpeedValue = tonumber(baseWalkSpeed) or fallbackBaseWalkSpeed
-	return math.max(0, baseWalkSpeedValue + (runtimeBaselineWalkSpeed - fallbackBaseWalkSpeed))
 end
 
 function MovementSpeed.GetRuntimeWalkSpeedFromStat(baseWalkSpeed, selectedSpeed)
@@ -43,24 +45,18 @@ function MovementSpeed.GetStatSpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWa
 	local runtimeStatBaseline = math.max(0, tonumber(MovementSpeed.RuntimeStatBaseline) or 1)
 	local runtimeWalkSpeedPerStat = math.max(0.001, tonumber(MovementSpeed.RuntimeWalkSpeedPerStat) or 1)
 	local runtimeWalkSpeedValue = tonumber(runtimeWalkSpeed) or 0
-	local runtimeBaseWalkSpeed = MovementSpeed.GetRuntimeBaseWalkSpeed(baseWalkSpeed)
-	local speedStatOffset = (runtimeWalkSpeedValue - runtimeBaseWalkSpeed) / runtimeWalkSpeedPerStat
+	local speedStatOffset = (runtimeWalkSpeedValue - MovementSpeed.GetRuntimeBaseWalkSpeed(baseWalkSpeed)) / runtimeWalkSpeedPerStat
 	return math.max(0, runtimeStatBaseline + speedStatOffset)
 end
 
 function MovementSpeed.GetBaseWalkSpeedFromRuntimeStat(runtimeWalkSpeed, selectedSpeed)
-	local fallbackBaseWalkSpeed = MovementSpeed.GetFallbackBaseWalkSpeed()
-	local runtimeBaselineWalkSpeed = math.max(
-		0,
-		tonumber(MovementSpeed.RuntimeBaselineWalkSpeed) or fallbackBaseWalkSpeed
-	)
+	local runtimeWalkSpeedValue = tonumber(runtimeWalkSpeed) or 0
 	local runtimeStatBaseline = math.max(0, tonumber(MovementSpeed.RuntimeStatBaseline) or 1)
 	local runtimeWalkSpeedPerStat = math.max(0.001, tonumber(MovementSpeed.RuntimeWalkSpeedPerStat) or 1)
-	local runtimeWalkSpeedValue = tonumber(runtimeWalkSpeed) or 0
 	local selectedSpeedValue = tonumber(selectedSpeed) or runtimeStatBaseline
 	local speedStatOffset = math.max(0, selectedSpeedValue - runtimeStatBaseline)
 	return runtimeWalkSpeedValue
-		- (runtimeBaselineWalkSpeed - fallbackBaseWalkSpeed)
+		- (MovementSpeed.GetRuntimeBaselineWalkSpeed() - MovementSpeed.GetFallbackBaseWalkSpeed())
 		- (speedStatOffset * runtimeWalkSpeedPerStat)
 end
 
