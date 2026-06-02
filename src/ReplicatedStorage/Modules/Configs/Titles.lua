@@ -340,12 +340,18 @@ local TITLE_GROUPS = {
 				Description = "You were overloaded, slow, and still refused to drop the loot.",
 				RequirementText = "Extract while carrying the maximum number of rewards.",
 				UnlockType = "Persistent",
+				Buffs = {
+					resources = 0.15,
+				},
 			},
 			GoldFever = {
 				DisplayName = "Gold Fever",
 				Description = "If it shines, it is coming home with you.",
 				RequirementText = "Extract a Gold chest from any depth.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.08,
+				},
 			},
 		},
 	},
@@ -362,6 +368,11 @@ local TITLE_GROUPS = {
 				Description = "Permanent title granted by the Captain Pass.",
 				RequirementText = "Own the Captain Pass.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.20,
+					resources = 0.20,
+					speed = 0.10,
+				},
 				VisualStyle = {
 					AccentColor = Color3.fromRGB(255, 213, 92),
 					SurfaceColor = Color3.fromRGB(72, 48, 18),
@@ -410,6 +421,9 @@ local TITLE_GROUPS = {
 				Description = "Too slow to survive, too bold to turn back.",
 				RequirementText = "Complete an Abyssal run with less than 10 speed.",
 				UnlockType = "Persistent",
+				Buffs = {
+					speed = 2,
+				},
 			},
 			ThePhoenix = {
 				DisplayName = "The Phoenix",
@@ -422,6 +436,9 @@ local TITLE_GROUPS = {
 				Description = "The final blow came, the flames answered, and you stood back up anyway.",
 				RequirementText = "Trigger Phoenix Rebirth and survive.",
 				UnlockType = "Persistent",
+				Buffs = {
+					Speed = .10,
+				},
 			},
 			DespawnDenier = {
 				DisplayName = "Despawn Denier",
@@ -441,6 +458,9 @@ local TITLE_GROUPS = {
 				Description = "Even the darkest waters had to pay you.",
 				RequirementText = "Extract 10 rewards from Abyssal depth.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.10,
+				},
 			},
 		},
 	},
@@ -456,12 +476,16 @@ local TITLE_GROUPS = {
 				Description = "You found a name the world tried to hide.",
 				RequirementText = "Own or extract a Secret-rarity crewmate.",
 				UnlockType = "Persistent",
+				Buffs = {
+					resources = 0.10,
 			},
 			InsuranceFraud = {
 				DisplayName = "Insurance Fraud",
 				Description = "You died carrying treasure and came back like nothing happened.",
 				RequirementText = "Trigger Phoenix Rebirth while carrying a reward.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.08,
 			},
 			PirateEmperor = {
 				DisplayName = "Pirate Emperor",
@@ -485,6 +509,7 @@ local function applyTierDefaults(definition)
 	definition.TierRank = tier.Rank
 	definition.VisualStyle = definition.VisualStyle or tier.VisualStyle
 	definition.ChatStyle = definition.ChatStyle or tier.ChatStyle
+	definition.Buffs = definition.Buffs or {}
 	return definition
 end
 

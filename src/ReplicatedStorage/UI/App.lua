@@ -146,6 +146,19 @@ local function formatDuration(seconds)
 	return string.format("%dm", minutes)
 end
 
+local function formatPercentIncrease(amount, fallbackPercent)
+	local percent = tonumber(fallbackPercent)
+	if percent == nil then
+		percent = (tonumber(amount) or 0) * 100
+	end
+
+	if math.abs(percent - math.floor(percent + 0.5)) < 0.01 then
+		return tostring(math.floor(percent + 0.5)) .. "%"
+	end
+
+	return string.format("%.1f%%", percent)
+end
+
 local function initials(text)
 	local letters = {}
 	for token in string.gmatch(tostring(text or ""), "%S+") do
@@ -4074,13 +4087,69 @@ local function titleRegistryRow(props)
 	local stateFill = unlocked and (entry.stateColor or accent) or Color3.fromRGB(44, 51, 67)
 	local stateTextColor = unlocked and PALETTE.Ink or PALETTE.Cream
 	local badgeText = string.upper(if isEquipped then "Equipped" elseif unlocked then "Unlocked" else "Locked")
+	local buffEntries = typeof(entry.buffs) == "table" and entry.buffs or {}
+	local hasBuffs = #buffEntries > 0
+	local descriptionY = hasBuffs and 74 or 56
+	local requirementY = hasBuffs and 94 or 76
+	local rowHeight = hasBuffs and 122 or 104
+	local buffColors = {
+		beli = PALETTE.Gold,
+		resources = PALETTE.Green,
+		speed = PALETTE.Cyan,
+	}
+
+	local buffChildren = nil
+	if hasBuffs then
+		buffChildren = {
+			List = e("UIListLayout", {
+				FillDirection = Enum.FillDirection.Horizontal,
+				Padding = UDim.new(0, 6),
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				VerticalAlignment = Enum.VerticalAlignment.Center,
+			}),
+		}
+
+		for index, buff in ipairs(buffEntries) do
+			local key = tostring(buff.key or "")
+			local color = buffColors[key] or accent
+			local label = tostring(buff.label or key)
+			local amountText = formatPercentIncrease(buff.amount, buff.percent)
+			buffChildren["Buff" .. tostring(index)] = e("TextLabel", {
+				AutomaticSize = Enum.AutomaticSize.XY,
+				BackgroundColor3 = color:Lerp(Color3.fromRGB(11, 17, 29), 0.68),
+				BackgroundTransparency = unlocked and 0.06 or 0.18,
+				BorderSizePixel = 0,
+				Font = Enum.Font.GothamBold,
+				LayoutOrder = index,
+				Text = string.format("%s +%s", label, amountText),
+				TextColor3 = color:Lerp(PALETTE.Cream, 0.24),
+				TextSize = 10,
+				ZIndex = 3,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 999),
+				}),
+				Stroke = e("UIStroke", {
+					Color = color,
+					Transparency = unlocked and 0.42 or 0.68,
+					Thickness = 1,
+				}),
+				Padding = e("UIPadding", {
+					PaddingTop = UDim.new(0, 4),
+					PaddingBottom = UDim.new(0, 4),
+					PaddingLeft = UDim.new(0, 8),
+					PaddingRight = UDim.new(0, 8),
+				}),
+			})
+		end
+	end
 
 	return e("Frame", {
 		BackgroundColor3 = surfaceColor,
 		BackgroundTransparency = 0.02,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.new(1, -6, 0, 104),
+		Size = UDim2.new(1, -6, 0, rowHeight),
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 12),
@@ -4188,10 +4257,16 @@ local function titleRegistryRow(props)
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 3,
 		}),
+		Buffs = hasBuffs and e("Frame", {
+			BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(106, 55),
+			Size = UDim2.new(1, -268, 0, 18),
+			ZIndex = 3,
+		}, buffChildren) or nil,
 		Description = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Gotham,
-			Position = UDim2.fromOffset(106, 56),
+			Position = UDim2.fromOffset(106, descriptionY),
 			Size = UDim2.new(1, -176, 0, 16),
 			Text = tostring(entry.description or ""),
 			TextColor3 = Color3.fromRGB(181, 191, 210),
@@ -4203,7 +4278,7 @@ local function titleRegistryRow(props)
 		Requirement = requirementText ~= "" and e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamMedium,
-			Position = UDim2.fromOffset(106, 76),
+			Position = UDim2.fromOffset(106, requirementY),
 			Size = UDim2.new(1, -176, 0, 16),
 			Text = "Requirement: " .. requirementText,
 			TextColor3 = unlocked and PALETTE.Cream or PALETTE.Muted,

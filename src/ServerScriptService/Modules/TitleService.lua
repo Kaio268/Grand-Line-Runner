@@ -270,8 +270,49 @@ local function isRuntimeOnlyTitleUnlocked(player, titleId)
 end
 
 local function getRuntimeEquippedTitle(player)
+	if not player or not player:IsA("Player") then
+		return NONE_EQUIPPED
+	end
+
 	local equippedValue = getRuntimeEquippedValue(player)
 	return normalizeTitleId(equippedValue and equippedValue.Value)
+end
+
+local function normalizeBuffValue(value)
+	local amount = tonumber(value) or 0
+	return math.max(0, amount)
+end
+
+local function getEquippedTitleBuffs(player)
+	local titleId = getRuntimeEquippedTitle(player)
+	local titleDefinition = TitlesConfig.Get(titleId)
+	if typeof(titleDefinition) ~= "table" then
+		return {
+			beli = 0,
+			speed = 0,
+			resources = 0,
+		}
+	end
+
+	local buffs = titleDefinition.Buffs
+	if typeof(buffs) ~= "table" then
+		return {
+			beli = 0,
+			speed = 0,
+			resources = 0,
+		}
+	end
+
+	return {
+		beli = normalizeBuffValue(buffs.beli),
+		speed = normalizeBuffValue(buffs.speed),
+		resources = normalizeBuffValue(buffs.resources),
+	}
+end
+
+local function getEquippedTitleBuffMultiplier(player, buffType)
+	local buffs = getEquippedTitleBuffs(player)
+	return 1 + math.max(0, tonumber(buffs[buffType]) or 0)
 end
 
 local function publishEquippedTitle(player, titleId)
@@ -722,6 +763,14 @@ end
 
 function TitleService.GetEquippedTitle(player)
 	return getRuntimeEquippedTitle(player)
+end
+
+function TitleService.GetEquippedTitleBuffs(player)
+	return getEquippedTitleBuffs(player)
+end
+
+function TitleService.GetEquippedTitleBuffMultiplier(player, buffType)
+	return getEquippedTitleBuffMultiplier(player, buffType)
 end
 
 task.defer(function()

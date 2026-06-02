@@ -2220,6 +2220,30 @@ local function resolveTitleVisualStyle(titleDefinition, unlocked)
 	}
 end
 
+local function buildTitleBuffs(titleDefinition)
+	local buffs = typeof(titleDefinition.Buffs) == "table" and titleDefinition.Buffs or {}
+	local entries = {}
+	local order = {
+		{ key = "beli", label = "Beli" },
+		{ key = "resources", label = "Resources" },
+		{ key = "speed", label = "Speed" },
+	}
+
+	for _, spec in ipairs(order) do
+		local amount = math.max(0, tonumber(buffs[spec.key]) or 0)
+		if amount > 0 then
+			entries[#entries + 1] = {
+				key = spec.key,
+				label = spec.label,
+				amount = amount,
+				percent = math.floor((amount * 100) + 0.5),
+			}
+		end
+	end
+
+	return entries
+end
+
 local function buildTitlesData(query)
 	local entries = {}
 	local totalCount = 0
@@ -2295,6 +2319,7 @@ local function buildTitlesData(query)
 			currentRank = currentRank,
 			rankLabel = rankLabel,
 			rankStatusKey = rankStatusKey,
+			buffs = buildTitleBuffs(titleDefinition),
 			accentColor = visualStyle.accentColor,
 			surfaceColor = visualStyle.surfaceColor,
 			surfaceColor2 = visualStyle.surfaceColor2,

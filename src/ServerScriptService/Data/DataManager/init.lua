@@ -36,6 +36,7 @@ local ProductFunctions = require(script.ProductFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
 local EconomyConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local MonetizationConfig = require(game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
 local PaidRandomItemPolicy = require(game.ServerScriptService.Modules.PaidRandomItemPolicy)
 local RemoteGuard = require(game.ServerScriptService.Modules.RemoteGuard)
@@ -43,6 +44,7 @@ local ValidationChecks = require(game.ServerScriptService.Modules.ValidationChec
 local ShopEntitlementService = require(game.ServerScriptService.Modules.ShopEntitlementService)
 local CrewProtectionService = require(game.ServerScriptService.Modules.CrewProtectionService)
 local AFKGoldChestRewardService = require(game.ServerScriptService.Modules.AFKGoldChestRewardService)
+local cachedTitleService = nil
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -838,6 +840,54 @@ end
 	[path]: path to variable (e.g. leaderstats.Beli)
 	[addValue]: to which value it should be set 
 ]]
+local function buildDotPath(path)
+	if typeof(path) == "table" then
+		local parts = {}
+		for _, part in ipairs(path) do
+			parts[#parts + 1] = tostring(part)
+		end
+		return table.concat(parts, ".")
+	end
+
+	return tostring(path or "")
+end
+
+local function getTitleBuffMultiplier(player, buffType)
+	if cachedTitleService == nil then
+		local ok, result = pcall(function()
+			return require(game.ServerScriptService.Modules.TitleService)
+		end)
+		cachedTitleService = if ok and typeof(result) == "table" then result else false
+	end
+
+	if cachedTitleService == false then
+		return 1
+	end
+
+	local ok, multiplier = pcall(cachedTitleService.GetEquippedTitleBuffMultiplier, player, buffType)
+	return if ok then math.max(0, tonumber(multiplier) or 1) else 1
+end
+
+local function getTitleBuffMultiplierForPath(player, path)
+	local normalizedPath = buildDotPath(path)
+	if normalizedPath == CurrencyUtil.getPrimaryPath() or normalizedPath == CurrencyUtil.getTotalPath() then
+		return getTitleBuffMultiplier(player, "beli")
+	end
+
+	local resourceRoots = {
+		"FoodInventory",
+		"Materials",
+		"Inventory",
+	}
+	for _, root in ipairs(resourceRoots) do
+		if normalizedPath == root or normalizedPath:sub(1, #root + 1) == root .. "." then
+			return getTitleBuffMultiplier(player, "resources")
+		end
+	end
+
+	return 1
+end
+
 function DataManager:AddValue(player, path, addValue)
 	local profile = self:GetProfile(player)
 	local replica = self:GetReplica(player)
@@ -849,6 +899,13 @@ function DataManager:AddValue(player, path, addValue)
 	local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "AddValue")
 	if legacyWriteAllowed ~= true then
 		return false, legacyWriteReason
+	end
+
+	if typeof(addValue) == "number" and addValue > 0 then
+		local multiplier = getTitleBuffMultiplierForPath(player, path)
+		if multiplier ~= 1 then
+			addValue = math.floor(addValue * multiplier + 0.5)
+		end
 	end
 
 	local defaultValue = if typeof(addValue) == "number" then 0 else {}
