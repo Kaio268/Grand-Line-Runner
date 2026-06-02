@@ -51,6 +51,9 @@ rewardRemote.OnServerEvent:Connect(function(player, placeId)
 
 	DataManager:AddValue(player, "Potions.x2MoneyTime", 10 * 60)
 	DataManager:AddValue(player, "Potions.x15WalkSpeedTime", 10 * 60)
+	if typeof(DataManager.ResumeBoost) == "function" then
+		DataManager:ResumeBoost(player, "x15WalkSpeed")
+	end
 	DataManager:SetValue(player, "HiddenLeaderstats.LimitedReward", true)
 	sendClaimStatus(player, "Granted")
 end)

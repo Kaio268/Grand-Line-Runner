@@ -27,12 +27,16 @@ local uiStroke = textLabel:WaitForChild("UIStroke")
 local icon = counter:FindFirstChildWhichIsA("ImageLabel")
 
 local SPEED_DEBUFF_ATTRIBUTE = HudStatsTheme.SpeedDebuffAttribute or "SpeedDebuffActive"
+local SPEED_BUFF_ATTRIBUTE = HudStatsTheme.SpeedBuffAttribute or "SpeedBuffActive"
 local SLOW_CLEAR_GRACE_SECONDS = 0.18
 local SPEED_CHANGE_MIN_ANIMATION_SECONDS = 0.10
 local SPEED_CHANGE_MAX_ANIMATION_SECONDS = 0.34
 local SPEED_CHANGE_BASE_ANIMATION_SECONDS = 0.08
 local SPEED_CHANGE_LOG_SCALE_SECONDS = 0.075
 local DISPLAY_SPEED_ATTRIBUTE = MovementSpeedConfig.Attributes.DisplaySpeed
+local SPEED_MODIFIER_STATE_ATTRIBUTE = MovementSpeedConfig.Attributes.SpeedModifierState
+local SPEED_MODIFIER_STATE_BUFF = MovementSpeedConfig.ModifierStates.Buff
+local SPEED_MODIFIER_STATE_DEBUFF = MovementSpeedConfig.ModifierStates.Debuff
 
 local textScale = textLabel:FindFirstChildOfClass("UIScale")
 if not textScale then
@@ -59,9 +63,13 @@ local debuffG0 = Color3.fromRGB(179, 112, 255)
 local debuffG1 = Color3.fromRGB(236, 198, 255)
 local debuffStroke = Color3.fromRGB(64, 24, 104)
 
-local upG0 = Color3.fromRGB(255, 255, 255)
-local upG1 = Color3.fromRGB(255, 255, 255)
-local upStroke = Color3.fromRGB(0, 0, 0)
+local buffG0 = Color3.fromRGB(80, 224, 112)
+local buffG1 = Color3.fromRGB(204, 255, 213)
+local buffStroke = Color3.fromRGB(18, 91, 43)
+
+local upG0 = Color3.fromRGB(146, 255, 164)
+local upG1 = Color3.fromRGB(229, 255, 219)
+local upStroke = Color3.fromRGB(18, 91, 43)
 
 local downG0 = Color3.fromRGB(245, 71, 71)
 local downG1 = Color3.fromRGB(255, 117, 195)
@@ -73,6 +81,7 @@ local currentHumanoid = nil
 local currentCharacter = nil
 local characterConnections = {}
 local speedDebuffActive = false
+local speedBuffActive = false
 local slowClearToken = 0
 local pendingEarnedSpeedAnimation = false
 local pendingEarnedSpeedAnimationToken = 0
@@ -107,6 +116,9 @@ end
 local function getRestingColors()
 	if speedDebuffActive then
 		return debuffG0, debuffG1, debuffStroke
+	end
+	if speedBuffActive then
+		return buffG0, buffG1, buffStroke
 	end
 
 	return normalG0, normalG1, normalStroke
@@ -358,7 +370,7 @@ local function animateSpeed(target)
 	local strokeStart = currentS
 
 	local gradEnd0, gradEnd1, strokeEnd
-	if speedDebuffActive then
+	if speedDebuffActive or speedBuffActive then
 		gradEnd0, gradEnd1, strokeEnd = getRestingColors()
 	elseif isUp then
 		gradEnd0, gradEnd1, strokeEnd = upG0, upG1, upStroke
@@ -459,19 +471,6 @@ local function syncDisplayedSpeed(animate)
 	setRestingColors()
 end
 
-local function setSpeedDebuffActive(active)
-	if speedDebuffActive == active then
-		if counter:GetAttribute(SPEED_DEBUFF_ATTRIBUTE) ~= active then
-			counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, active)
-		end
-		return
-	end
-
-	speedDebuffActive = active
-	counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, active)
-	setRestingColors()
-end
-
 local function hasActiveSlowDebuff()
 	local effectName = player:GetAttribute(HitEffectConfig.Attributes.Type)
 	local speedMultiplier = player:GetAttribute(HitEffectConfig.Attributes.WalkSpeedMultiplier)
@@ -479,10 +478,52 @@ local function hasActiveSlowDebuff()
 	return effectName == "Slow" and typeof(speedMultiplier) == "number" and speedMultiplier < 1
 end
 
-local function updateSlowDebuffState()
+local function normalizeSpeedModifierState(state)
+	if state == SPEED_MODIFIER_STATE_BUFF or state == SPEED_MODIFIER_STATE_DEBUFF then
+		return state
+	end
+
+	return nil
+end
+
+local function getReplicatedSpeedModifierState()
+	return normalizeSpeedModifierState(player:GetAttribute(SPEED_MODIFIER_STATE_ATTRIBUTE))
+end
+
+local function syncCounterModifierAttributes(debuffActive, buffActive)
+	if counter:GetAttribute(SPEED_DEBUFF_ATTRIBUTE) ~= debuffActive then
+		counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, debuffActive)
+	end
+	if counter:GetAttribute(SPEED_BUFF_ATTRIBUTE) ~= buffActive then
+		counter:SetAttribute(SPEED_BUFF_ATTRIBUTE, buffActive)
+	end
+end
+
+local function setSpeedModifierState(state)
+	local debuffActive = state == SPEED_MODIFIER_STATE_DEBUFF
+	local buffActive = state == SPEED_MODIFIER_STATE_BUFF
+	if speedDebuffActive == debuffActive and speedBuffActive == buffActive then
+		syncCounterModifierAttributes(debuffActive, buffActive)
+		return
+	end
+
+	speedDebuffActive = debuffActive
+	speedBuffActive = buffActive
+	syncCounterModifierAttributes(debuffActive, buffActive)
+	setRestingColors()
+end
+
+local function updateSpeedModifierState()
+	local replicatedState = getReplicatedSpeedModifierState()
+	if replicatedState ~= nil then
+		slowClearToken += 1
+		setSpeedModifierState(replicatedState)
+		return
+	end
+
 	if hasActiveSlowDebuff() then
 		slowClearToken += 1
-		setSpeedDebuffActive(true)
+		setSpeedModifierState(SPEED_MODIFIER_STATE_DEBUFF)
 		return
 	end
 
@@ -495,7 +536,10 @@ local function updateSlowDebuffState()
 		if hasActiveSlowDebuff() then
 			return
 		end
-		setSpeedDebuffActive(false)
+		if getReplicatedSpeedModifierState() ~= nil then
+			return
+		end
+		setSpeedModifierState(nil)
 	end)
 end
 
@@ -556,26 +600,31 @@ end
 
 setRestingColors()
 counter:SetAttribute(SPEED_DEBUFF_ATTRIBUTE, false)
+counter:SetAttribute(SPEED_BUFF_ATTRIBUTE, false)
 setDisplayedSpeed(getCurrentDisplayedGameSpeed())
-updateSlowDebuffState()
+updateSpeedModifierState()
 
 player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Type):Connect(function()
-	updateSlowDebuffState()
+	updateSpeedModifierState()
 	if getReplicatedDisplaySpeed() == nil then
 		syncDisplayedSpeed(true)
 	end
 end)
 player:GetAttributeChangedSignal(HitEffectConfig.Attributes.WalkSpeedMultiplier):Connect(function()
-	updateSlowDebuffState()
+	updateSpeedModifierState()
 	if getReplicatedDisplaySpeed() == nil then
 		syncDisplayedSpeed(true)
 	end
 end)
 player:GetAttributeChangedSignal(HitEffectConfig.Attributes.Until):Connect(function()
-	updateSlowDebuffState()
+	updateSpeedModifierState()
 	if getReplicatedDisplaySpeed() == nil then
 		syncDisplayedSpeed(true)
 	end
+end)
+player:GetAttributeChangedSignal(SPEED_MODIFIER_STATE_ATTRIBUTE):Connect(function()
+	updateSpeedModifierState()
+	syncDisplayedSpeed(true)
 end)
 player:GetAttributeChangedSignal(MovementSpeedConfig.Attributes.BaseWalkSpeed):Connect(function()
 	if getReplicatedDisplaySpeed() ~= nil then

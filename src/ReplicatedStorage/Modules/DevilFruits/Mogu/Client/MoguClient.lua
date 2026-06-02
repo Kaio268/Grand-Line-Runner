@@ -1128,6 +1128,11 @@ local function isMoguMovementLockActive(player)
 end
 
 local function getMappedRuntimeWalkSpeed(player)
+	local effectiveWalkSpeed = player and player:GetAttribute(MovementSpeedConfig.Attributes.EffectiveWalkSpeed)
+	if typeof(effectiveWalkSpeed) == "number" and effectiveWalkSpeed > 0 then
+		return effectiveWalkSpeed
+	end
+
 	local runtimeWalkSpeed = MovementSpeedConfig.GetPlayerRuntimeWalkSpeed(player)
 	if typeof(runtimeWalkSpeed) == "number" and runtimeWalkSpeed > 0 then
 		return runtimeWalkSpeed

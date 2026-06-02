@@ -19,7 +19,7 @@ local BOOST_METADATA = {
 	x15WalkSpeedTime = {
 		label = "x1.5 Speed",
 		icon = "rbxassetid://96331945137652",
-		accent = Color3.fromRGB(100, 204, 255),
+		accent = Color3.fromRGB(111, 230, 124),
 		order = 2,
 	},
 }

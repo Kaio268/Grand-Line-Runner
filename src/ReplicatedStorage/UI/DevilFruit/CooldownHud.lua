@@ -18,6 +18,8 @@ local THEME = {
 	TextMain = Color3.fromRGB(230, 230, 230),
 	TextSecondary = Color3.fromRGB(184, 193, 204),
 	Ready = Color3.fromRGB(116, 255, 161),
+	Active = Color3.fromRGB(116, 208, 255),
+	ActiveFill = Color3.fromRGB(67, 171, 255),
 	Cooldown = Color3.fromRGB(255, 190, 116),
 	CooldownFill = Color3.fromRGB(255, 133, 44),
 }
@@ -39,7 +41,14 @@ local function abilityRow(props)
 	local onActivateAbility = props.onActivateAbility
 	local showKeybind = not compact
 	local showDetail = not compact
-	local textLeft = showKeybind and 52 or 7
+	local textLeft = showKeybind and 48 or 7
+	local statusWidth = compact and 68 or 118
+	local nameRightInset = compact and 84 or 58
+	local detailRightInset = compact and 68 or (textLeft + statusWidth + 18)
+	local nameText = props.name
+	if compact and typeof(props.compactName) == "string" and props.compactName ~= "" then
+		nameText = props.compactName
+	end
 
 	return e("TextButton", {
 		AutoButtonColor = false,
@@ -91,8 +100,8 @@ local function abilityRow(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(textLeft, compact and 4 or 8),
-			Size = UDim2.new(1, compact and -50 or -136, 0, compact and 10 or 18),
-			Text = props.name,
+			Size = UDim2.new(1, -nameRightInset, 0, compact and 10 or 18),
+			Text = nameText,
 			TextColor3 = THEME.TextMain,
 			TextSize = compact and 7 or 15,
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -103,11 +112,11 @@ local function abilityRow(props)
 			AnchorPoint = Vector2.new(1, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(1, compact and -7 or -10, 0, compact and 4 or 8),
-			Size = UDim2.fromOffset(compact and 40 or 72, compact and 10 or 18),
+			Position = UDim2.new(1, compact and -7 or -10, 0, compact and 4 or 29),
+			Size = UDim2.fromOffset(statusWidth, compact and 10 or 12),
 			Text = props.status,
 			TextColor3 = props.statusColor3,
-			TextSize = compact and 7 or 13,
+			TextSize = compact and 7 or 12,
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = 4,
 		}),
@@ -115,10 +124,11 @@ local function abilityRow(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Gotham,
 			Position = UDim2.fromOffset(textLeft, 29),
-			Size = UDim2.new(1, -68, 0, 12),
+			Size = UDim2.new(1, -detailRightInset, 0, 12),
 			Text = props.detail,
 			TextColor3 = THEME.TextSecondary,
 			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 4,
 		}) or nil,
@@ -179,6 +189,7 @@ local function CooldownHud(props)
 			abilityName = ability.abilityName,
 			keyCodeName = ability.keyCodeName,
 			compact = compact,
+			compactName = ability.compactName,
 			layoutOrder = index,
 			name = ability.name,
 			onActivateAbility = props.onActivateAbility,

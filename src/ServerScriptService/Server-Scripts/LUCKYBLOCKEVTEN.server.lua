@@ -122,6 +122,9 @@ local REWARDS = {
 		amount = 2*60,
 		Give = function(plr, amount)
 			DataManager:AddValue(plr, "Potions.x15WalkSpeedTime", amount)
+			if DataManager and typeof(DataManager.ResumeBoost) == "function" then
+				DataManager:ResumeBoost(plr, "x15WalkSpeed")
+			end
 		end,
 		Popup = "You got 2 Minutes x1.5 Speed Boost!",
 	},
