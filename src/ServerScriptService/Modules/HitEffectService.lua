@@ -224,8 +224,7 @@ local function playDebuffSound(player, rootPart, options)
 	end
 
 	lastDebuffSoundAtByPlayer[player] = now
-	local position = if typeof(options.DebuffSoundPosition) == "Vector3" then options.DebuffSoundPosition else rootPart.Position
-	GameSounds.PlayAtPosition(GameSounds.Ids.Hazards.Debuff, position, {
+	GameSounds.PlayOnInstance(GameSounds.Ids.Hazards.Debuff, rootPart, {
 		Name = "DebuffApplied",
 		Volume = 0.85,
 		RollOffMaxDistance = 110,
