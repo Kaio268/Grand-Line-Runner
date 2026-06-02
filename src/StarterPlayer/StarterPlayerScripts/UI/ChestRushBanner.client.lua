@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
@@ -6,6 +7,10 @@ local Workspace = game:GetService("Workspace")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
+local ModulesFolder = ReplicatedStorage:WaitForChild("Modules")
+local ChestRushWorldVfx = require(ModulesFolder:WaitForChild("ChestRushWorldVfx"))
+local ConfigsFolder = ModulesFolder:WaitForChild("Configs")
+local BiomeAreas = require(ConfigsFolder:WaitForChild("BiomeAreas"))
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
 
@@ -13,10 +18,28 @@ local STATE_EVENT_NAME = "GrandLineRushChestRushState"
 local STATE_REQUEST_NAME = "GrandLineRushChestRushStateRequest"
 
 local DISPLAY_ORDER = 124
+local CHEST_RUSH_GUI_DISPLAY_ORDER = DISPLAY_ORDER - 1
 local ANNOUNCEMENT_TOP_OFFSET = 176
 local ANNOUNCEMENT_MOBILE_TOP_OFFSET = 114
 local TIMER_TOP_OFFSET = 72
 local TIMER_MOBILE_TOP_OFFSET = 58
+local CHEST_RUSH_GUI_NAME = "ChestRushGui"
+local BASE_BANNER_SIZE = Vector2.new(400, 95)
+local BANNER_MOBILE_SCALE = 0.72
+local BANNER_COMPACT_SCALE = 0.88
+local BANNER_DESKTOP_SCALE = 1
+local BANNER_MOBILE_TOP_OFFSET = 76
+local BANNER_COMPACT_TOP_OFFSET = 90
+local BANNER_DESKTOP_TOP_OFFSET = 96
+local BANNER_MIN_SIZE = Vector2.new(288, 68)
+local BANNER_MAX_SIZE = Vector2.new(400, 95)
+local CHEST_RUSH_MAIN_TEXT = "CHEST RUSH"
+local CHEST_RUSH_SUB_TEXT = "DOUBLE CHESTS ARE SPAWNING!"
+local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
+local STARTING_AREA_KEY = BiomeAreas.StartingAreaKey
+local HUD_FADE_IN_TIME = 0.22
+local HUD_FADE_OUT_TIME = 0.24
+local GOLD_OVERLAY_ACTIVE_TRANSPARENCY = 0.88
 local SLIDE_OFFSET = 18
 local FADE_IN_TIME = 0.26
 local HOLD_TIME = 3.4
@@ -36,8 +59,32 @@ local currentState = nil
 local announcementSequence = 0
 local countdownToken = 0
 local timerVisible = false
+local countdownLoopRunning = false
+local corridorEffectsActive = false
 local announcementTweens = {}
 local timerTweens = {}
+local corridorEffectTweens = {}
+local chestRushGui = nil
+local chestRushTopBanner = nil
+local chestRushTopBannerScale = nil
+local chestRushTopBannerSize = nil
+local chestRushTopBannerStroke = nil
+local chestRushMainText = nil
+local chestRushSubText = nil
+local chestRushTimerText = nil
+local chestRushGoldOverlay = nil
+local chestRushFloatingImageFrame = nil
+local chestRushLeftSideGlow = nil
+local chestRushRightSideGlow = nil
+local chestRushIconTemplates = {}
+local chestRushTopBannerBackgroundTransparency = 0.35
+local chestRushTopBannerStrokeTransparency = 0
+local chestRushMainTextTransparency = 0
+local chestRushSubTextTransparency = 0
+local chestRushTimerTextTransparency = 0
+local viewportSizeConnection = nil
+local currentCameraConnection = nil
+local activeAreaConnection = nil
 
 local function isMobileViewport()
 	return Responsive.isMobile()
@@ -88,6 +135,211 @@ local function playTween(tweens, instance, tweenInfo, goal)
 	tweens[#tweens + 1] = activeTween
 	activeTween:Play()
 	return activeTween
+end
+
+local function getGuiObject(parent, name)
+	local child = if parent then parent:FindFirstChild(name) else nil
+	return if child and child:IsA("GuiObject") then child else nil
+end
+
+local function getTextLabel(parent, name)
+	local child = if parent then parent:FindFirstChild(name) else nil
+	return if child and child:IsA("TextLabel") then child else nil
+end
+
+local function getImageLabel(parent, name)
+	local child = if parent then parent:FindFirstChild(name) else nil
+	return if child and child:IsA("ImageLabel") then child else nil
+end
+
+local function getOrCreateChild(parent, name, className)
+	local child = parent:FindFirstChild(name)
+	if child and child:IsA(className) then
+		return child
+	end
+
+	child = parent:FindFirstChildOfClass(className)
+	if child then
+		return child
+	end
+
+	child = Instance.new(className)
+	child.Name = name
+	child.Parent = parent
+	return child
+end
+
+local function hideFloatingIconTemplates()
+	for _, template in pairs(chestRushIconTemplates) do
+		template.Visible = false
+	end
+end
+
+local function setChestRushGuiRestState()
+	if not chestRushGui then
+		return
+	end
+
+	if chestRushMainText then
+		chestRushMainText.Text = CHEST_RUSH_MAIN_TEXT
+		chestRushMainText.TextTransparency = 1
+	end
+
+	if chestRushSubText then
+		chestRushSubText.Text = CHEST_RUSH_SUB_TEXT
+		chestRushSubText.TextTransparency = 1
+	end
+
+	if chestRushTimerText then
+		chestRushTimerText.Text = "00:00"
+		chestRushTimerText.TextTransparency = 1
+	end
+
+	if chestRushTopBanner then
+		chestRushTopBanner.Visible = true
+		chestRushTopBanner.BackgroundTransparency = 1
+	end
+
+	if chestRushTopBannerStroke then
+		chestRushTopBannerStroke.Transparency = 1
+	end
+
+	if chestRushGoldOverlay then
+		chestRushGoldOverlay.BackgroundTransparency = 1
+	end
+
+	if chestRushLeftSideGlow then
+		chestRushLeftSideGlow.BackgroundTransparency = 1
+		chestRushLeftSideGlow.Visible = false
+	end
+
+	if chestRushRightSideGlow then
+		chestRushRightSideGlow.BackgroundTransparency = 1
+		chestRushRightSideGlow.Visible = false
+	end
+
+	hideFloatingIconTemplates()
+	chestRushGui.Enabled = false
+end
+
+local function getBannerScale(viewport)
+	if Responsive.isMobile(viewport) then
+		return BANNER_MOBILE_SCALE
+	end
+
+	if Responsive.isCompact(viewport) then
+		return BANNER_COMPACT_SCALE
+	end
+
+	return BANNER_DESKTOP_SCALE
+end
+
+local function getBannerTopOffset(viewport)
+	if Responsive.isMobile(viewport) then
+		return BANNER_MOBILE_TOP_OFFSET
+	end
+
+	if Responsive.isCompact(viewport) then
+		return BANNER_COMPACT_TOP_OFFSET
+	end
+
+	return BANNER_DESKTOP_TOP_OFFSET
+end
+
+local function applyChestRushGuiResponsiveLayout()
+	if not chestRushGui then
+		return
+	end
+
+	local viewport = Responsive.getViewportSize()
+	local scale = getBannerScale(viewport)
+	local topOffset = getBannerTopOffset(viewport)
+
+	if chestRushTopBanner then
+		chestRushTopBanner.Size = UDim2.fromOffset(BASE_BANNER_SIZE.X, BASE_BANNER_SIZE.Y)
+		chestRushTopBanner.Position = UDim2.fromOffset(
+			viewport.X * 0.5,
+			topOffset + (BASE_BANNER_SIZE.Y * scale * 0.5)
+		)
+	end
+
+	if chestRushTopBannerScale then
+		chestRushTopBannerScale.Scale = scale
+	end
+
+	if chestRushTopBannerSize then
+		chestRushTopBannerSize.MinSize = BANNER_MIN_SIZE
+		chestRushTopBannerSize.MaxSize = BANNER_MAX_SIZE
+	end
+
+	if chestRushGoldOverlay then
+		chestRushGoldOverlay.Size = UDim2.fromScale(1, 1)
+	end
+
+	if chestRushFloatingImageFrame then
+		chestRushFloatingImageFrame.Size = UDim2.fromScale(1, 1)
+		chestRushFloatingImageFrame.ClipsDescendants = false
+	end
+end
+
+local function bindChestRushGui(candidate)
+	if chestRushGui then
+		return true
+	end
+
+	if not candidate or not candidate:IsA("ScreenGui") then
+		return false
+	end
+
+	local topBanner = getGuiObject(candidate, "TopBanner")
+	if not topBanner then
+		return false
+	end
+
+	chestRushGui = candidate
+	chestRushGui.DisplayOrder = CHEST_RUSH_GUI_DISPLAY_ORDER
+	chestRushTopBanner = topBanner
+	chestRushTopBannerScale = getOrCreateChild(topBanner, "ChestRushTopBannerScale", "UIScale")
+	chestRushTopBannerSize = getOrCreateChild(topBanner, "ChestRushTopBannerSize", "UISizeConstraint")
+	chestRushTopBannerStroke = topBanner:FindFirstChildOfClass("UIStroke")
+	chestRushMainText = getTextLabel(topBanner, "MainText")
+	chestRushSubText = getTextLabel(topBanner, "SubText")
+	chestRushTimerText = getTextLabel(topBanner, "TimerText")
+	chestRushGoldOverlay = getGuiObject(candidate, "GoldOverlay")
+	chestRushFloatingImageFrame = getGuiObject(candidate, "FloatingImageFrame")
+	chestRushLeftSideGlow = getGuiObject(candidate, "LeftSideGlow")
+	chestRushRightSideGlow = getGuiObject(candidate, "RightSideGlow")
+
+	table.clear(chestRushIconTemplates)
+	if chestRushFloatingImageFrame then
+		chestRushIconTemplates.chest = getImageLabel(chestRushFloatingImageFrame, "ChestTemplate")
+		chestRushIconTemplates.sparkle = getImageLabel(chestRushFloatingImageFrame, "SparkleTemplate")
+		chestRushIconTemplates.beli = getImageLabel(chestRushFloatingImageFrame, "BeliTemplate")
+	end
+
+	chestRushTopBannerBackgroundTransparency = chestRushTopBanner.BackgroundTransparency
+	chestRushTopBannerStrokeTransparency = if chestRushTopBannerStroke then chestRushTopBannerStroke.Transparency else 0
+	chestRushMainTextTransparency = if chestRushMainText then chestRushMainText.TextTransparency else 0
+	chestRushSubTextTransparency = if chestRushSubText then chestRushSubText.TextTransparency else 0
+	chestRushTimerTextTransparency = if chestRushTimerText then chestRushTimerText.TextTransparency else 0
+
+	applyChestRushGuiResponsiveLayout()
+	setChestRushGuiRestState()
+	return true
+end
+
+local function connectViewportSizeChanged()
+	if viewportSizeConnection then
+		viewportSizeConnection:Disconnect()
+		viewportSizeConnection = nil
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportSizeConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyChestRushGuiResponsiveLayout)
+	end
+
+	applyChestRushGuiResponsiveLayout()
 end
 
 local screenGui = createInstance("ScreenGui", {
@@ -237,66 +489,6 @@ announcementSubtitle.Position = UDim2.fromOffset(24, 50)
 announcementSubtitle.Size = UDim2.new(1, -48, 0, 18)
 announcementSubtitle.Parent = announcementCard
 
-local timerRoot = createInstance("CanvasGroup", {
-	Name = "ChestRushTimer",
-	AnchorPoint = Vector2.new(0.5, 0),
-	BackgroundTransparency = 1,
-	BorderSizePixel = 0,
-	GroupTransparency = 1,
-	Position = UDim2.new(0.5, 0, 0, TIMER_TOP_OFFSET),
-	Size = UDim2.new(0.44, 0, 0, 56),
-	Visible = false,
-	ZIndex = 13,
-})
-timerRoot.Parent = screenGui
-
-local timerSize = createInstance("UISizeConstraint", {
-	Name = "ChestRushTimerSize",
-	MinSize = Vector2.new(220, 56),
-	MaxSize = Vector2.new(360, 56),
-})
-timerSize.Parent = timerRoot
-
-local timerCard = createInstance("Frame", {
-	Name = "Card",
-	BackgroundColor3 = BASE_CARD_COLOR,
-	BackgroundTransparency = 0.04,
-	BorderSizePixel = 0,
-	Size = UDim2.fromScale(1, 1),
-	ZIndex = 13,
-}, {
-	createInstance("UICorner", {
-		CornerRadius = UDim.new(0, 14),
-	}),
-	createInstance("UIGradient", {
-		Color = ColorSequence.new({
-			ColorSequenceKeypoint.new(0, Color3.fromRGB(41, 39, 30)),
-			ColorSequenceKeypoint.new(0.55, Color3.fromRGB(12, 28, 44)),
-			ColorSequenceKeypoint.new(1, Color3.fromRGB(7, 18, 34)),
-		}),
-		Rotation = 10,
-	}),
-	createInstance("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = GOLD,
-		Thickness = 1.2,
-		Transparency = 0.16,
-	}),
-})
-timerCard.Parent = timerRoot
-
-local timerTitle = createLabel("Title", 11, Enum.Font.GothamBold, GOLD_BRIGHT)
-timerTitle.Position = UDim2.fromOffset(18, 7)
-timerTitle.Size = UDim2.new(1, -36, 0, 14)
-timerTitle.Text = "CHEST RUSH"
-timerTitle.Parent = timerCard
-
-local timerLabel = createLabel("Time", 26, Enum.Font.GothamBold, TEXT_MAIN)
-timerLabel.Position = UDim2.fromOffset(18, 22)
-timerLabel.Size = UDim2.new(1, -36, 0, 28)
-timerLabel.Text = "10:00"
-timerLabel.Parent = timerCard
-
 local function getAnnouncementTopOffset()
 	return if isMobileViewport() then ANNOUNCEMENT_MOBILE_TOP_OFFSET else ANNOUNCEMENT_TOP_OFFSET
 end
@@ -322,15 +514,6 @@ local function applyResponsiveLayout()
 		announcementSubtitle.Position = UDim2.fromOffset(16, 34)
 		announcementSubtitle.Size = UDim2.new(1, -32, 0, 15)
 		announcementAccentLine.Position = UDim2.new(0.5, 0, 1, -5)
-		timerRoot.Size = UDim2.new(0.42, 0, 0, 46)
-		timerSize.MinSize = Vector2.new(170, 46)
-		timerSize.MaxSize = Vector2.new(260, 46)
-		timerTitle.TextSize = 9
-		timerTitle.Position = UDim2.fromOffset(14, 5)
-		timerTitle.Size = UDim2.new(1, -28, 0, 12)
-		timerLabel.TextSize = 20
-		timerLabel.Position = UDim2.fromOffset(14, 17)
-		timerLabel.Size = UDim2.new(1, -28, 0, 24)
 	else
 		announcementRoot.Size = UDim2.new(0.82, 0, 0, 92)
 		announcementSize.MinSize = Vector2.new(280, 92)
@@ -343,19 +526,10 @@ local function applyResponsiveLayout()
 		announcementSubtitle.Position = UDim2.fromOffset(24, 50)
 		announcementSubtitle.Size = UDim2.new(1, -48, 0, 18)
 		announcementAccentLine.Position = UDim2.new(0.5, 0, 1, -7)
-		timerRoot.Size = UDim2.new(0.44, 0, 0, 56)
-		timerSize.MinSize = Vector2.new(220, 56)
-		timerSize.MaxSize = Vector2.new(360, 56)
-		timerTitle.TextSize = 11
-		timerTitle.Position = UDim2.fromOffset(18, 7)
-		timerTitle.Size = UDim2.new(1, -36, 0, 14)
-		timerLabel.TextSize = 26
-		timerLabel.Position = UDim2.fromOffset(18, 22)
-		timerLabel.Size = UDim2.new(1, -36, 0, 28)
 	end
 
 	announcementRoot.Position = UDim2.new(0.5, 0, 0, getAnnouncementTopOffset())
-	timerRoot.Position = UDim2.new(0.5, 0, 0, getTimerTopOffset())
+	applyChestRushGuiResponsiveLayout()
 end
 
 local function formatRemainingTime(seconds)
@@ -430,49 +604,224 @@ local function showAnnouncement(title, subtitle)
 	end)
 end
 
+local function isInChestRushCorridorArea()
+	local activeArea = Lighting:GetAttribute(ACTIVE_AREA_ATTRIBUTE)
+	return typeof(activeArea) == "string" and activeArea ~= "" and activeArea ~= STARTING_AREA_KEY
+end
+
+local function setCorridorEffectsEnabled(enabled)
+	if enabled == corridorEffectsActive then
+		return
+	end
+
+	corridorEffectsActive = enabled
+	cancelTweens(corridorEffectTweens)
+
+	if enabled then
+		if chestRushGoldOverlay then
+			playTween(corridorEffectTweens, chestRushGoldOverlay, TweenInfo.new(
+				HUD_FADE_IN_TIME,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.Out
+			), {
+				BackgroundTransparency = GOLD_OVERLAY_ACTIVE_TRANSPARENCY,
+			})
+		end
+
+		ChestRushWorldVfx.Start()
+	else
+		ChestRushWorldVfx.Stop()
+
+		if chestRushGoldOverlay then
+			playTween(corridorEffectTweens, chestRushGoldOverlay, TweenInfo.new(
+				HUD_FADE_OUT_TIME,
+				Enum.EasingStyle.Quad,
+				Enum.EasingDirection.In
+			), {
+				BackgroundTransparency = 1,
+			})
+		end
+	end
+end
+
+local function updateCorridorEffects()
+	local shouldEnable = timerVisible
+		and currentState
+		and currentState.Active == true
+		and isInChestRushCorridorArea()
+
+	setCorridorEffectsEnabled(shouldEnable == true)
+end
+
 local function showTimer()
 	if timerVisible then
+		updateCorridorEffects()
+		return
+	end
+
+	if not bindChestRushGui(playerGui:FindFirstChild(CHEST_RUSH_GUI_NAME)) then
 		return
 	end
 
 	timerVisible = true
 	cancelTweens(timerTweens)
 	applyResponsiveLayout()
-	timerRoot.Visible = true
-	timerRoot.GroupTransparency = 1
+	hideFloatingIconTemplates()
 
-	playTween(timerTweens, timerRoot, TweenInfo.new(
-		0.18,
-		Enum.EasingStyle.Quad,
-		Enum.EasingDirection.Out
-	), {
-		GroupTransparency = 0,
-	})
+	chestRushGui.Enabled = true
+
+	if chestRushMainText then
+		chestRushMainText.Text = CHEST_RUSH_MAIN_TEXT
+		chestRushMainText.TextTransparency = 1
+	end
+
+	if chestRushSubText then
+		chestRushSubText.Text = CHEST_RUSH_SUB_TEXT
+		chestRushSubText.TextTransparency = 1
+	end
+
+	if chestRushTimerText then
+		chestRushTimerText.TextTransparency = 1
+	end
+
+	if chestRushTopBanner then
+		chestRushTopBanner.Visible = true
+		chestRushTopBanner.BackgroundTransparency = 1
+		playTween(timerTweens, chestRushTopBanner, TweenInfo.new(
+			HUD_FADE_IN_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		), {
+			BackgroundTransparency = chestRushTopBannerBackgroundTransparency,
+		})
+	end
+
+	if chestRushTopBannerStroke then
+		chestRushTopBannerStroke.Transparency = 1
+		playTween(timerTweens, chestRushTopBannerStroke, TweenInfo.new(
+			HUD_FADE_IN_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		), {
+			Transparency = chestRushTopBannerStrokeTransparency,
+		})
+	end
+
+	if chestRushMainText then
+		playTween(timerTweens, chestRushMainText, TweenInfo.new(
+			HUD_FADE_IN_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		), {
+			TextTransparency = chestRushMainTextTransparency,
+		})
+	end
+
+	if chestRushSubText then
+		playTween(timerTweens, chestRushSubText, TweenInfo.new(
+			HUD_FADE_IN_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		), {
+			TextTransparency = chestRushSubTextTransparency,
+		})
+	end
+
+	if chestRushTimerText then
+		playTween(timerTweens, chestRushTimerText, TweenInfo.new(
+			HUD_FADE_IN_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.Out
+		), {
+			TextTransparency = chestRushTimerTextTransparency,
+		})
+	end
+
+	if chestRushGoldOverlay then
+		chestRushGoldOverlay.BackgroundTransparency = 1
+	end
+
+	updateCorridorEffects()
 end
 
 local function hideTimer()
 	if not timerVisible then
-		timerRoot.Visible = false
+		setCorridorEffectsEnabled(false)
+		if chestRushGui then
+			setChestRushGuiRestState()
+		end
 		return
 	end
 
 	timerVisible = false
 	countdownToken += 1
+	countdownLoopRunning = false
 	cancelTweens(timerTweens)
+	setCorridorEffectsEnabled(false)
 
-	local fadeOut = playTween(timerTweens, timerRoot, TweenInfo.new(
-		0.2,
-		Enum.EasingStyle.Quad,
-		Enum.EasingDirection.In
-	), {
-		GroupTransparency = 1,
-	})
+	local fadeOut = nil
+	if chestRushTopBanner then
+		fadeOut = playTween(timerTweens, chestRushTopBanner, TweenInfo.new(
+			HUD_FADE_OUT_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.In
+		), {
+			BackgroundTransparency = 1,
+		})
+	end
 
-	fadeOut.Completed:Connect(function()
-		if not timerVisible then
-			timerRoot.Visible = false
+	if chestRushTopBannerStroke then
+		playTween(timerTweens, chestRushTopBannerStroke, TweenInfo.new(
+			HUD_FADE_OUT_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.In
+		), {
+			Transparency = 1,
+		})
+	end
+
+	if chestRushMainText then
+		playTween(timerTweens, chestRushMainText, TweenInfo.new(
+			HUD_FADE_OUT_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.In
+		), {
+			TextTransparency = 1,
+		})
+	end
+
+	if chestRushSubText then
+		playTween(timerTweens, chestRushSubText, TweenInfo.new(
+			HUD_FADE_OUT_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.In
+		), {
+			TextTransparency = 1,
+		})
+	end
+
+	if chestRushTimerText then
+		playTween(timerTweens, chestRushTimerText, TweenInfo.new(
+			HUD_FADE_OUT_TIME,
+			Enum.EasingStyle.Quad,
+			Enum.EasingDirection.In
+		), {
+			TextTransparency = 1,
+		})
+	end
+
+	local function disableAfterFade()
+		if not timerVisible and chestRushGui then
+			chestRushGui.Enabled = false
+			hideFloatingIconTemplates()
 		end
-	end)
+	end
+
+	if fadeOut then
+		fadeOut.Completed:Connect(disableAfterFade)
+	else
+		task.delay(HUD_FADE_OUT_TIME, disableAfterFade)
+	end
 end
 
 local function getRemainingSeconds(state)
@@ -489,12 +838,19 @@ local function getRemainingSeconds(state)
 end
 
 local function updateTimerText()
-	timerLabel.Text = formatRemainingTime(getRemainingSeconds(currentState))
+	if chestRushTimerText then
+		chestRushTimerText.Text = formatRemainingTime(getRemainingSeconds(currentState))
+	end
 end
 
 local function startCountdown()
+	if countdownLoopRunning then
+		return
+	end
+
 	countdownToken += 1
 	local thisToken = countdownToken
+	countdownLoopRunning = true
 
 	task.spawn(function()
 		while thisToken == countdownToken and currentState and currentState.Active == true do
@@ -503,6 +859,10 @@ local function startCountdown()
 				break
 			end
 			task.wait(1)
+		end
+
+		if thisToken == countdownToken then
+			countdownLoopRunning = false
 		end
 	end)
 end
@@ -561,6 +921,23 @@ local function requestInitialState()
 end
 
 applyResponsiveLayout()
+bindChestRushGui(playerGui:FindFirstChild(CHEST_RUSH_GUI_NAME))
+connectViewportSizeChanged()
+
+currentCameraConnection = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(connectViewportSizeChanged)
+activeAreaConnection = Lighting:GetAttributeChangedSignal(ACTIVE_AREA_ATTRIBUTE):Connect(updateCorridorEffects)
+
+task.defer(function()
+	if chestRushGui then
+		return
+	end
+
+	if bindChestRushGui(playerGui:WaitForChild(CHEST_RUSH_GUI_NAME, 10)) and currentState and currentState.Active == true then
+		showTimer()
+		updateTimerText()
+		startCountdown()
+	end
+end)
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes", 15)
 if remotes then
@@ -575,3 +952,24 @@ if stateEvent then
 end
 
 task.defer(requestInitialState)
+
+script.Destroying:Connect(function()
+	setCorridorEffectsEnabled(false)
+	ChestRushWorldVfx.Destroy()
+	cancelTweens(corridorEffectTweens)
+
+	if viewportSizeConnection then
+		viewportSizeConnection:Disconnect()
+		viewportSizeConnection = nil
+	end
+
+	if currentCameraConnection then
+		currentCameraConnection:Disconnect()
+		currentCameraConnection = nil
+	end
+
+	if activeAreaConnection then
+		activeAreaConnection:Disconnect()
+		activeAreaConnection = nil
+	end
+end)
