@@ -24,6 +24,8 @@ local BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "BomuMovementLockUntil"
 local BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "BomuMovementLockSpeedMultiplier"
 local MOGU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "MoguMovementLockUntil"
 local MOGU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "MoguMovementLockSpeedMultiplier"
+local POTIONS_FOLDER_NAME = "Potions"
+local POTION_SPEED_BOOST_TIME_NAME = "x15WalkSpeedTime"
 local LEGACY_DECREASE_SPEED_FLOOR = nil
 
 local started = false
@@ -138,6 +140,20 @@ local function getEarnedSpeedValue(player)
 	return nil
 end
 
+local function getPotionSpeedBoostTimeValue(player)
+	local potions = player and player:FindFirstChild(POTIONS_FOLDER_NAME)
+	if not potions then
+		return nil
+	end
+
+	local value = potions:FindFirstChild(POTION_SPEED_BOOST_TIME_NAME, true)
+	if value and value:IsA("NumberValue") then
+		return value
+	end
+
+	return nil
+end
+
 function PlayerMovementSpeedService.ClampSelectedSpeed(value, earnedMax)
 	local maximum = math.max(1, roundSpeed(earnedMax))
 	return math.clamp(roundSpeed(value), 1, maximum)
@@ -220,6 +236,20 @@ function PlayerMovementSpeedService.NormalizePlayerSpeedSettings(player, dataMan
 	}
 end
 
+local function getPotionSpeedBoostMultiplier(player)
+	local timeValue = getPotionSpeedBoostTimeValue(player)
+	if not timeValue then
+		return 1
+	end
+
+	local remaining = tonumber(timeValue.Value) or 0
+	if remaining <= 0 then
+		return 1
+	end
+
+	return math.max(1, tonumber(MovementSpeedConfig.PotionSpeedBoostMultiplier) or 1.5)
+end
+
 local function getHieIceBoostSpeedMultiplier(player)
 	local untilTime = player:GetAttribute("HieIceBoostUntil")
 	local speedMultiplier = player:GetAttribute("HieIceBoostSpeedMultiplier")
@@ -280,9 +310,13 @@ local function getMoguMovementLockSpeedMultiplier(player)
 	return math.max(0, speedMultiplier)
 end
 
-local function getDevilFruitSpeedMultiplier(player)
+local function getPositiveSpeedMultiplier(player)
 	return getHieIceBoostSpeedMultiplier(player)
-		* getHieFreezeShotCastSpeedMultiplier(player)
+		* getPotionSpeedBoostMultiplier(player)
+end
+
+local function getForcedSpeedMultiplier(player)
+	return getHieFreezeShotCastSpeedMultiplier(player)
 		* getBomuMovementLockSpeedMultiplier(player)
 		* getMoguMovementLockSpeedMultiplier(player)
 end
@@ -301,6 +335,32 @@ local function getHitEffectSpeedMultiplier(player)
 	end
 
 	return math.max(0, speedMultiplier)
+end
+
+local function getNonForcedSpeedMultiplier(player)
+	return getPositiveSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
+end
+
+local function getTotalSpeedMultiplier(player)
+	return getNonForcedSpeedMultiplier(player) * getForcedSpeedMultiplier(player)
+end
+
+local function getSpeedModifierState(positiveMultiplier, hitEffectMultiplier)
+	local resolvedHitEffectMultiplier = tonumber(hitEffectMultiplier) or 1
+	if resolvedHitEffectMultiplier < 0.999 then
+		return MovementSpeedConfig.ModifierStates.Debuff
+	end
+
+	local resolvedPositiveMultiplier = tonumber(positiveMultiplier) or 1
+	if resolvedPositiveMultiplier > 1.001 then
+		return MovementSpeedConfig.ModifierStates.Buff
+	end
+
+	return nil
+end
+
+local function getDisplaySpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWalkSpeed)
+	return MovementSpeedConfig.GetStatSpeedFromRuntimeWalkSpeed(baseWalkSpeed, runtimeWalkSpeed)
 end
 
 local function disconnectContext(player)
@@ -347,6 +407,7 @@ local function hookCharacter(player, character)
 	local moguExpiryApplyToken = 0
 	local disconnected = false
 	local conns = {}
+	local boundPotionBoostValues = {}
 	local context
 
 	local function getSelectedSpeed()
@@ -362,7 +423,7 @@ local function hookCharacter(player, character)
 	end
 
 	local function getNonProjectionDesiredSpeed()
-		return getNormalUnboostedSpeed() * getDevilFruitSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
+		return getNormalUnboostedSpeed() * getTotalSpeedMultiplier(player)
 	end
 
 	local function getDesiredSpeed(nonProjectionDesiredSpeed)
@@ -382,14 +443,28 @@ local function hookCharacter(player, character)
 	local function apply(reason)
 		if updating or disconnected then return end
 		local selectedSpeed = getSelectedSpeed()
-		local nonProjectionDesiredSpeed = getNonProjectionDesiredSpeed()
+		local normalUnboostedSpeed = getRuntimeWalkSpeedFromStat(base, selectedSpeed)
+		local positiveMultiplier = getPositiveSpeedMultiplier(player)
+		local hitEffectMultiplier = getHitEffectSpeedMultiplier(player)
+		local nonForcedMultiplier = positiveMultiplier * hitEffectMultiplier
+		local forcedMultiplier = getForcedSpeedMultiplier(player)
+		local totalSpeedMultiplier = nonForcedMultiplier * forcedMultiplier
+		local nonProjectionDesiredSpeed = normalUnboostedSpeed * totalSpeedMultiplier
 		setAttributeIfChanged(player, HORO_SOURCE_SPEED_ATTRIBUTE, nonProjectionDesiredSpeed)
 		if isProjectedBody() then return end
 		local desiredSpeed = getDesiredSpeed(nonProjectionDesiredSpeed)
+		local effectiveDisplaySpeed = getDisplaySpeedFromRuntimeWalkSpeed(base, nonProjectionDesiredSpeed)
+		setAttributeIfChanged(
+			player,
+			MovementSpeedConfig.Attributes.SpeedModifierState,
+			getSpeedModifierState(positiveMultiplier, hitEffectMultiplier)
+		)
+		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.SpeedModifierMultiplier, totalSpeedMultiplier)
 		updating = true
 		humanoid.WalkSpeed = desiredSpeed
 		updating = false
-		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.DisplaySpeed, selectedSpeed)
+		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.EffectiveWalkSpeed, desiredSpeed)
+		setAttributeIfChanged(player, MovementSpeedConfig.Attributes.DisplaySpeed, effectiveDisplaySpeed)
 		if reason then
 			zoneTrace("player=%s apply reason=%s speed=%s", player.Name, tostring(reason), tostring(desiredSpeed))
 		end
@@ -515,10 +590,74 @@ local function hookCharacter(player, character)
 
 	bindSpeedSettingsFolder(player:FindFirstChild("Settings"))
 	apply("settings_bound")
+
+	local potionSpeedBoostActive = getPotionSpeedBoostMultiplier(player) > 1
+	local function applyPotionSpeedBoostStateChanged(reason)
+		local active = getPotionSpeedBoostMultiplier(player) > 1
+		if potionSpeedBoostActive == active then
+			return
+		end
+
+		potionSpeedBoostActive = active
+		apply(reason)
+	end
+
+	local function bindPotionSpeedBoostValue(instance)
+		if not (instance and instance:IsA("NumberValue") and instance.Name == POTION_SPEED_BOOST_TIME_NAME) then
+			return
+		end
+		if boundPotionBoostValues[instance] then
+			return
+		end
+
+		boundPotionBoostValues[instance] = true
+		conns[#conns + 1] = instance:GetPropertyChangedSignal("Value"):Connect(function()
+			applyPotionSpeedBoostStateChanged("potion_speed_boost_time_changed")
+		end)
+	end
+
+	local function bindPotionsFolder(folder)
+		if not folder then
+			return
+		end
+
+		for _, descendant in ipairs(folder:GetDescendants()) do
+			bindPotionSpeedBoostValue(descendant)
+		end
+
+		conns[#conns + 1] = folder.DescendantAdded:Connect(function(descendant)
+			bindPotionSpeedBoostValue(descendant)
+			if descendant.Name == POTION_SPEED_BOOST_TIME_NAME then
+				applyPotionSpeedBoostStateChanged("potion_speed_boost_added")
+			end
+		end)
+		conns[#conns + 1] = folder.DescendantRemoving:Connect(function(descendant)
+			if descendant.Name ~= POTION_SPEED_BOOST_TIME_NAME then
+				return
+			end
+
+			task.defer(function()
+				applyPotionSpeedBoostStateChanged("potion_speed_boost_removed")
+			end)
+		end)
+	end
+
+	bindPotionsFolder(player:FindFirstChild(POTIONS_FOLDER_NAME))
+	apply("potions_bound")
 	conns[#conns + 1] = player.ChildAdded:Connect(function(child)
 		if child.Name == "Settings" then
 			bindSpeedSettingsFolder(child)
 			apply("settings_folder_added")
+		elseif child.Name == POTIONS_FOLDER_NAME then
+			bindPotionsFolder(child)
+			apply("potions_folder_added")
+		end
+	end)
+	conns[#conns + 1] = player.ChildRemoved:Connect(function(child)
+		if child.Name == POTIONS_FOLDER_NAME then
+			task.defer(function()
+				applyPotionSpeedBoostStateChanged("potions_folder_removed")
+			end)
 		end
 	end)
 
@@ -597,7 +736,7 @@ local function hookCharacter(player, character)
 			return
 		end
 
-		local totalSpeedMultiplier = getDevilFruitSpeedMultiplier(player) * getHitEffectSpeedMultiplier(player)
+		local totalSpeedMultiplier = getTotalSpeedMultiplier(player)
 		local expected = getDesiredSpeed()
 		if humanoid.WalkSpeed ~= expected then
 			if totalSpeedMultiplier <= 0 then

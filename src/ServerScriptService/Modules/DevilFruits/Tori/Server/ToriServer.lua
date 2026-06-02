@@ -24,6 +24,10 @@ local PHOENIX_FLIGHT_END_ACTION = "End"
 local CLIENT_NATURAL_END_GRACE = 0.35
 local SERVER_NATURAL_FALLBACK_GRACE = 0.75
 local CHARACTER_REMOVING_REASON = "character_removing"
+local PHOENIX_HOVER_HEIGHT_TOLERANCE = 0.75
+local PHOENIX_HOVER_CORRECTION_GAIN = 4
+local PHOENIX_HOVER_MIN_CORRECTION_SPEED = 8
+local PHOENIX_FLIGHT_ESTIMATE_STEP = 1 / 60
 
 local cachedToriPassiveService = nil
 local endCooldownSequence = 0
@@ -112,8 +116,48 @@ local function buildEndPayload(state, reason, endedAt)
 		NaturalEndAt = state.NaturalEndAt,
 		FallbackEndAt = state.FallbackEndAt,
 		ActualDuration = math.max(0, endedAt - state.StartedAt),
+		CooldownStartsAt = endedAt,
 		CooldownDuration = state.CooldownDuration,
 	}
+end
+
+local function addActiveHudTiming(
+	payload,
+	state,
+	fallbackStartedAt,
+	fallbackActiveEndsAt,
+	cooldownDuration,
+	activeCountdownStartsAt,
+	activeDuration
+)
+	local startedAt = state and state.StartedAt or fallbackStartedAt
+	local activeEndsAt = state and state.NaturalEndAt or fallbackActiveEndsAt
+	local resolvedCooldownDuration = math.max(0, tonumber(state and state.CooldownDuration) or tonumber(cooldownDuration) or 0)
+
+	if typeof(payload) ~= "table" or typeof(startedAt) ~= "number" or typeof(activeEndsAt) ~= "number" then
+		return payload
+	end
+
+	local countdownStartsAt = tonumber(activeCountdownStartsAt) or startedAt
+	local resolvedActiveDuration = tonumber(activeDuration) or math.max(0, activeEndsAt - countdownStartsAt)
+
+	payload.HudPhase = "Active"
+	payload.ActiveStartsAt = startedAt
+	payload.ActiveCountdownStartsAt = countdownStartsAt
+	payload.CountdownStartsAt = countdownStartsAt
+	payload.ActiveEndsAt = activeEndsAt
+	payload.ActiveDuration = math.max(0, resolvedActiveDuration)
+	payload.CooldownStartsAt = activeEndsAt
+	payload.CooldownDuration = resolvedCooldownDuration
+	if resolvedCooldownDuration > 0 then
+		payload.CooldownReadyAt = activeEndsAt + resolvedCooldownDuration
+	end
+
+	if state then
+		payload.RuntimeId = state.RuntimeId
+	end
+
+	return payload
 end
 
 local function beginCooldownForEndedState(state, reason, endedAt)
@@ -461,8 +505,31 @@ local function estimatePhoenixFlightHeightDelay(abilityConfig, initialLift, maxR
 	local resolvedInitialLift = math.max(0, initialLift)
 	local resolvedMaxRiseHeight = math.max(resolvedInitialLift, maxRiseHeight)
 	local verticalSpeed = clampPositiveNumber(abilityConfig.VerticalSpeed, DEFAULT_PHOENIX_VERTICAL_SPEED)
+	local targetRiseHeight = math.max(0, resolvedMaxRiseHeight - PHOENIX_HOVER_HEIGHT_TOLERANCE)
+	if targetRiseHeight <= 0 then
+		return 0
+	end
 
-	return math.max(takeoffDuration, resolvedMaxRiseHeight / verticalSpeed)
+	local gravity = math.max(Workspace.Gravity, 0.01)
+	local takeoffVelocity = math.sqrt(2 * gravity * resolvedInitialLift)
+	local height = 0
+	local elapsed = 0
+	local maximumEstimate = math.max(takeoffDuration, targetRiseHeight / PHOENIX_HOVER_MIN_CORRECTION_SPEED) + 1
+
+	while height < targetRiseHeight and elapsed < maximumEstimate do
+		local heightError = resolvedMaxRiseHeight - height
+		local correctionVelocity = math.min(
+			verticalSpeed,
+			math.max(PHOENIX_HOVER_MIN_CORRECTION_SPEED, heightError * PHOENIX_HOVER_CORRECTION_GAIN)
+		)
+		local inTakeoffPhase = elapsed < takeoffDuration and height < resolvedInitialLift
+		local targetVelocity = if inTakeoffPhase then math.max(takeoffVelocity, correctionVelocity) else correctionVelocity
+
+		height += targetVelocity * PHOENIX_FLIGHT_ESTIMATE_STEP
+		elapsed += PHOENIX_FLIGHT_ESTIMATE_STEP
+	end
+
+	return math.max(takeoffDuration, elapsed)
 end
 
 local function getToriPassiveService()
@@ -522,15 +589,20 @@ function ToriServer.PhoenixFlight(context)
 	local maxRiseHeight = clampPositiveNumber(abilityConfig.MaxRiseHeight, DEFAULT_PHOENIX_MAX_RISE_HEIGHT)
 	local verticalSpeed = clampPositiveNumber(abilityConfig.VerticalSpeed, DEFAULT_PHOENIX_VERTICAL_SPEED)
 	local heightDelay = estimatePhoenixFlightHeightDelay(abilityConfig, initialLift, maxRiseHeight, takeoffDuration)
-	startEndCooldownState(
+	local activeDuration = startupDuration + heightDelay + duration
+	local cooldownDuration = tonumber(abilityConfig.Cooldown) or 0
+	local flightState = startEndCooldownState(
 		context,
 		PHOENIX_FLIGHT_ABILITY,
-		startupDuration + heightDelay + duration,
-		tonumber(abilityConfig.Cooldown) or 0,
+		activeDuration,
+		cooldownDuration,
 		SERVER_NATURAL_FALLBACK_GRACE
 	)
+	local serverStartTime = flightState and flightState.StartedAt or getSharedTimestamp()
+	local activeCountdownStartsAt = serverStartTime + startupDuration + heightDelay
+	local activeEndsAt = activeCountdownStartsAt + duration
 
-	return {
+	local payload = {
 		Duration = duration,
 		StartupDuration = startupDuration,
 		TakeoffDuration = takeoffDuration,
@@ -554,7 +626,18 @@ function ToriServer.PhoenixFlight(context)
 		Animation = buildPhoenixFlightAnimationPayload(abilityConfig),
 		TrailPartNames = copyStringArray(abilityConfig.FlightTrailPartNames),
 		TrailOffset = typeof(abilityConfig.FlightTrailOffset) == "CFrame" and abilityConfig.FlightTrailOffset or nil,
-	}, {
+	}
+	addActiveHudTiming(
+		payload,
+		flightState,
+		serverStartTime,
+		activeEndsAt,
+		cooldownDuration,
+		activeCountdownStartsAt,
+		duration
+	)
+
+	return payload, {
 		ApplyCooldown = false,
 	}
 end
@@ -577,7 +660,8 @@ function ToriServer.PhoenixFlameShield(context)
 	end
 
 	local duration = clampPositiveNumber(abilityConfig.Duration, DEFAULT_PHOENIX_SHIELD_DURATION)
-	local shieldState = startEndCooldownState(context, PHOENIX_SHIELD_ABILITY, duration, tonumber(abilityConfig.Cooldown) or 0)
+	local cooldownDuration = tonumber(abilityConfig.Cooldown) or 0
+	local shieldState = startEndCooldownState(context, PHOENIX_SHIELD_ABILITY, duration, cooldownDuration)
 	local serverStartTime = shieldState and shieldState.StartedAt or getSharedTimestamp()
 	local baseRadius = resolvePhoenixShieldRadius(abilityConfig)
 	local speedRadiusScale, speedRadiusSourceSpeed, speedRadiusScaleAlpha, speedRadiusSource =
@@ -593,7 +677,7 @@ function ToriServer.PhoenixFlameShield(context)
 		shieldState.SpeedRadiusSource = speedRadiusSource
 	end
 
-	return {
+	local payload = {
 		BaseRadius = baseRadius,
 		Radius = radius,
 		SpeedRadiusScale = speedRadiusScale,
@@ -611,7 +695,10 @@ function ToriServer.PhoenixFlameShield(context)
 			DEFAULT_PHOENIX_SHIELD_ANIMATION_LOCK_DURATION
 		),
 		Animation = buildPhoenixShieldAnimationPayload(abilityConfig),
-	}, {
+	}
+	addActiveHudTiming(payload, shieldState, serverStartTime, serverStartTime + duration, cooldownDuration)
+
+	return payload, {
 		ApplyCooldown = false,
 	}
 end

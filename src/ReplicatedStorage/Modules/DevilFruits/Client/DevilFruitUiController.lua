@@ -5,8 +5,18 @@ local Registry = require(Modules:WaitForChild("DevilFruits"):WaitForChild("Share
 
 local DevilFruitUiController = {}
 
+local COMPACT_ABILITY_NAMES = {
+	PhoenixFlight = "Flight",
+	PhoenixFlameShield = "Flame Shield",
+}
+
 function DevilFruitUiController.FormatAbilityName(abilityName)
 	return tostring(abilityName):gsub("(%l)(%u)", "%1 %2")
+end
+
+function DevilFruitUiController.FormatCompactAbilityName(abilityName)
+	local resolvedAbilityName = tostring(abilityName)
+	return COMPACT_ABILITY_NAMES[resolvedAbilityName] or DevilFruitUiController.FormatAbilityName(resolvedAbilityName)
 end
 
 function DevilFruitUiController.FormatCooldownTime(seconds)

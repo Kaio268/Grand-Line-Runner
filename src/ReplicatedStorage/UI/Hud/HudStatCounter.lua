@@ -57,6 +57,7 @@ local function snapshot(host, iconSource, palette)
 		iconScale = iconScale and tonumber(iconScale.Scale) or 1,
 		iconImageTransparency = iconSource and tonumber(iconSource.ImageTransparency) or 0,
 		speedDebuffActive = host:GetAttribute(HudStatsTheme.SpeedDebuffAttribute) == true,
+		speedBuffActive = host:GetAttribute(HudStatsTheme.SpeedBuffAttribute) == true,
 	}
 end
 
@@ -230,6 +231,7 @@ local function HudStatCounter(props)
 		connectProperty(connections, iconSource, "Rotation", refresh)
 		connectProperty(connections, iconScale, "Scale", refresh)
 		connections[#connections + 1] = host:GetAttributeChangedSignal(HudStatsTheme.SpeedDebuffAttribute):Connect(refresh)
+		connections[#connections + 1] = host:GetAttributeChangedSignal(HudStatsTheme.SpeedBuffAttribute):Connect(refresh)
 
 		return function()
 			destroyed = true

@@ -105,8 +105,11 @@ local function restoreMappedWalkSpeed(player, humanoid)
 		return false
 	end
 
-	local runtimeWalkSpeed = MovementSpeedConfig.GetPlayerRuntimeWalkSpeed(player)
-	if typeof(runtimeWalkSpeed) ~= "number" or runtimeWalkSpeed <= 0 then
+	local effectiveWalkSpeed = player:GetAttribute(MovementSpeedConfig.Attributes.EffectiveWalkSpeed)
+	local runtimeWalkSpeed = if typeof(effectiveWalkSpeed) == "number" and effectiveWalkSpeed >= 0
+		then effectiveWalkSpeed
+		else MovementSpeedConfig.GetPlayerRuntimeWalkSpeed(player)
+	if typeof(runtimeWalkSpeed) ~= "number" or runtimeWalkSpeed < 0 then
 		return false
 	end
 

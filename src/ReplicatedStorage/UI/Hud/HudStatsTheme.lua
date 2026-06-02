@@ -2,6 +2,7 @@ local HudStatsTheme = {}
 
 HudStatsTheme.Font = Enum.Font.FredokaOne
 HudStatsTheme.SpeedDebuffAttribute = "SpeedDebuffActive"
+HudStatsTheme.SpeedBuffAttribute = "SpeedBuffActive"
 
 HudStatsTheme.Card = {
 	CornerRadius = 20,
@@ -106,6 +107,15 @@ HudStatsTheme.Palette = {
 		rowFill = Color3.fromRGB(112, 68, 168),
 		rowStroke = Color3.fromRGB(193, 128, 255),
 	},
+	SpeedBuffed = {
+		value = Color3.fromRGB(219, 255, 225),
+		label = Color3.fromRGB(127, 239, 155),
+		stroke = Color3.fromRGB(25, 96, 52),
+		shadow = Color3.fromRGB(8, 38, 20),
+		glow = Color3.fromRGB(94, 232, 132),
+		rowFill = Color3.fromRGB(58, 153, 82),
+		rowStroke = Color3.fromRGB(124, 239, 151),
+	},
 	Money = {
 		value = Color3.fromRGB(255, 241, 176),
 		label = Color3.fromRGB(242, 209, 107),
@@ -130,13 +140,16 @@ function HudStatsTheme.getPalette(kind, state)
 	if kind == "Speed" and typeof(state) == "table" and state.speedDebuffActive == true then
 		return HudStatsTheme.Palette.SpeedDebuffed
 	end
+	if kind == "Speed" and typeof(state) == "table" and state.speedBuffActive == true then
+		return HudStatsTheme.Palette.SpeedBuffed
+	end
 
 	return HudStatsTheme.Palette[kind] or HudStatsTheme.Palette.Default
 end
 
 function HudStatsTheme.getPopupPalette(kind, isPositive)
 	if isPositive then
-		local palette = HudStatsTheme.getPalette(kind)
+		local palette = if kind == "Speed" then HudStatsTheme.Palette.SpeedBuffed else HudStatsTheme.getPalette(kind)
 		return {
 			value = palette.value,
 			label = palette.label,

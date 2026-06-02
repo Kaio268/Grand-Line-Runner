@@ -66,6 +66,7 @@ local stateRemote
 local effectRemote
 
 local localCooldowns = {}
+local localAbilityHudStates = {}
 local suppressedParts = {}
 local activeFireBursts = {}
 local activeMoguBurrow = nil
@@ -98,9 +99,15 @@ local reactRoblox
 local cooldownHudLastError
 local DEVIL_FRUIT_UI = {
 	Ready = Color3.fromRGB(116, 255, 161),
+	Active = Color3.fromRGB(116, 208, 255),
+	ActiveFill = Color3.fromRGB(67, 171, 255),
 	Cooldown = Color3.fromRGB(255, 190, 116),
 	CooldownFill = Color3.fromRGB(255, 133, 44),
 }
+
+local HUD_PHASE_READY = "Ready"
+local HUD_PHASE_ACTIVE = "Active"
+local HUD_PHASE_COOLDOWN = "Cooldown"
 
 local HUD_REFRESH_INTERVAL = 0.05
 local nextHudRefreshAt = 0
@@ -193,6 +200,10 @@ local function formatAbilityName(abilityName)
 	return DevilFruitUiController.FormatAbilityName(abilityName)
 end
 
+local function formatCompactAbilityName(abilityName)
+	return DevilFruitUiController.FormatCompactAbilityName(abilityName)
+end
+
 local function formatCooldownTime(seconds)
 	return DevilFruitUiController.FormatCooldownTime(seconds)
 end
@@ -234,6 +245,157 @@ local function getLocalCooldownDuration(cooldownState, fallbackDuration)
 	end
 
 	return math.max(0, tonumber(fallbackDuration) or 0)
+end
+
+local function normalizeHudPhase(phase)
+	if typeof(phase) ~= "string" then
+		return nil
+	end
+
+	local normalizedPhase = string.lower(phase)
+	if normalizedPhase == string.lower(HUD_PHASE_ACTIVE) then
+		return HUD_PHASE_ACTIVE
+	elseif normalizedPhase == string.lower(HUD_PHASE_COOLDOWN) then
+		return HUD_PHASE_COOLDOWN
+	elseif normalizedPhase == string.lower(HUD_PHASE_READY) then
+		return HUD_PHASE_READY
+	end
+
+	return nil
+end
+
+local function clearLocalAbilityHudState(abilityName)
+	localAbilityHudStates[abilityName] = nil
+end
+
+local function clearLocalAbilityHudStatesForFruit(fruitName)
+	for abilityName, hudState in pairs(localAbilityHudStates) do
+		if typeof(hudState) == "table" and hudState.FruitName == fruitName then
+			localAbilityHudStates[abilityName] = nil
+		end
+	end
+end
+
+local function getPayloadNumber(payload, key)
+	if typeof(payload) ~= "table" then
+		return nil
+	end
+
+	return tonumber(payload[key])
+end
+
+local function getPayloadActiveEndsAt(payload, activeStartsAt, activeCountdownStartsAt)
+	local activeEndsAt = getPayloadNumber(payload, "ActiveEndsAt") or getPayloadNumber(payload, "EndTime")
+	if activeEndsAt and activeEndsAt > 0 then
+		return activeEndsAt
+	end
+
+	local activeDuration = getPayloadNumber(payload, "ActiveDuration") or getPayloadNumber(payload, "Duration")
+	if activeDuration and activeDuration > 0 then
+		return (activeCountdownStartsAt or activeStartsAt) + activeDuration
+	end
+
+	return nil
+end
+
+local function setLocalAbilityHudState(fruitName, abilityName, payload)
+	local hudPhase = normalizeHudPhase(typeof(payload) == "table" and payload.HudPhase or nil)
+	if hudPhase ~= HUD_PHASE_ACTIVE then
+		clearLocalAbilityHudState(abilityName)
+		return
+	end
+
+	local now = getCooldownNow()
+	local activeStartsAt = getPayloadNumber(payload, "ActiveStartsAt")
+		or getPayloadNumber(payload, "StartedAt")
+		or now
+	local activeCountdownStartsAt = getPayloadNumber(payload, "ActiveCountdownStartsAt")
+		or getPayloadNumber(payload, "CountdownStartsAt")
+		or activeStartsAt
+	activeCountdownStartsAt = math.max(activeStartsAt, activeCountdownStartsAt)
+
+	local activeEndsAt = getPayloadActiveEndsAt(payload, activeStartsAt, activeCountdownStartsAt)
+	if not activeEndsAt or activeEndsAt <= now then
+		clearLocalAbilityHudState(abilityName)
+		return
+	end
+
+	local activeDuration = getPayloadNumber(payload, "ActiveDuration")
+		or math.max(0, activeEndsAt - activeCountdownStartsAt)
+	local cooldownStartsAt = getPayloadNumber(payload, "CooldownStartsAt") or activeEndsAt
+	local cooldownDuration = getPayloadNumber(payload, "CooldownDuration") or 0
+	local cooldownEndsAt = getPayloadNumber(payload, "CooldownReadyAt")
+	if not cooldownEndsAt and cooldownStartsAt > 0 and cooldownDuration > 0 then
+		cooldownEndsAt = cooldownStartsAt + cooldownDuration
+	end
+
+	localAbilityHudStates[abilityName] = {
+		FruitName = fruitName,
+		Phase = HUD_PHASE_ACTIVE,
+		ActiveStartsAt = activeStartsAt,
+		ActiveCountdownStartsAt = activeCountdownStartsAt,
+		ActiveEndsAt = activeEndsAt,
+		ActiveDuration = activeDuration,
+		CooldownStartsAt = cooldownStartsAt,
+		CooldownEndsAt = cooldownEndsAt,
+		CooldownDuration = cooldownDuration,
+		RuntimeId = typeof(payload) == "table" and payload.RuntimeId or nil,
+	}
+end
+
+local function getLocalActiveHudState(fruitName, abilityName, now)
+	local hudState = localAbilityHudStates[abilityName]
+	if typeof(hudState) ~= "table" then
+		return nil, 0
+	end
+
+	if hudState.FruitName ~= fruitName then
+		return nil, 0
+	end
+
+	local activeEndsAt = tonumber(hudState.ActiveEndsAt) or 0
+	local activeCountdownStartsAt = tonumber(hudState.ActiveCountdownStartsAt)
+		or tonumber(hudState.ActiveStartsAt)
+		or 0
+	if now < activeCountdownStartsAt and activeEndsAt > now then
+		return hudState, math.max(0, tonumber(hudState.ActiveDuration) or (activeEndsAt - activeCountdownStartsAt))
+	end
+
+	local remaining = activeEndsAt - now
+	if remaining > 0 then
+		return hudState, remaining
+	end
+
+	return nil, 0
+end
+
+local function getPredictedCooldownHudState(fruitName, abilityName, now)
+	local hudState = localAbilityHudStates[abilityName]
+	if typeof(hudState) ~= "table" then
+		return nil
+	end
+
+	if hudState.FruitName ~= fruitName then
+		return nil
+	end
+
+	local cooldownEndsAt = tonumber(hudState.CooldownEndsAt) or 0
+	if cooldownEndsAt <= now then
+		clearLocalAbilityHudState(abilityName)
+		return nil
+	end
+
+	local cooldownStartsAt = tonumber(hudState.CooldownStartsAt) or 0
+	local cooldownDuration = tonumber(hudState.CooldownDuration) or 0
+	if cooldownDuration <= 0 then
+		cooldownDuration = math.max(0, cooldownEndsAt - cooldownStartsAt)
+	end
+
+	return {
+		ReadyAt = cooldownEndsAt,
+		StartsAt = cooldownStartsAt,
+		Duration = cooldownDuration,
+	}
 end
 
 local function setLocalCooldown(abilityName, readyAt, payload)
@@ -332,39 +494,65 @@ local function buildCooldownAbilities(fruitName)
 		local abilityName = entry.Name
 		local abilityConfig = entry.Config or {}
 		local cooldownValue = tonumber(abilityConfig.Cooldown) or 0
-		local cooldownState = if isCooldownBypassEnabled() then nil else localCooldowns[abilityName]
-		local readyAt = getLocalCooldownReadyAt(cooldownState)
 		local now = getCooldownNow()
-		local remaining = math.max(0, readyAt - now)
-		local startsAt = getLocalCooldownStartsAt(cooldownState, cooldownValue)
-		local startsIn = math.max(0, startsAt - now)
-		local isWaitingForCooldownStart = remaining > 0 and startsIn > 0
-		local total = math.max(getLocalCooldownDuration(cooldownState, cooldownValue), 0.001)
-		local progress = if isWaitingForCooldownStart then 1 else math.clamp(1 - (remaining / total), 0, 1)
-		local isReady = remaining <= 0
-
-		if isReady then
-			localCooldowns[abilityName] = nil
-		end
-
+		local cooldownState = if isCooldownBypassEnabled() then nil else localCooldowns[abilityName]
+		local activeState, activeRemaining = getLocalActiveHudState(fruitName, abilityName, now)
 		local status = "READY"
 		local statusColor3 = DEVIL_FRUIT_UI.Ready
 		local detail = "Move ready"
-		if isWaitingForCooldownStart then
-			status = "ACTIVE"
-			detail = "Cooldown starts in " .. formatCooldownTime(startsIn)
-		elseif not isReady then
-			status = "CD " .. formatCooldownTime(remaining)
-			statusColor3 = DEVIL_FRUIT_UI.Cooldown
-			detail = "On cooldown for " .. formatCooldownTime(remaining)
+		local fillColor3 = DEVIL_FRUIT_UI.Ready
+		local progress = 1
+
+		if activeState then
+			local total = math.max(tonumber(activeState.ActiveDuration) or 0, 0.001)
+			status = "ACTIVE " .. formatCooldownTime(activeRemaining)
+			statusColor3 = DEVIL_FRUIT_UI.Active
+			detail = "Active for " .. formatCooldownTime(activeRemaining)
+			fillColor3 = DEVIL_FRUIT_UI.ActiveFill
+			progress = math.clamp(activeRemaining / total, 0, 1)
+		else
+			local readyAt = getLocalCooldownReadyAt(cooldownState)
+			local remaining = math.max(0, readyAt - now)
+			if remaining <= 0 then
+				if cooldownState ~= nil then
+					localCooldowns[abilityName] = nil
+				end
+
+				cooldownState = if isCooldownBypassEnabled()
+					then nil
+					else getPredictedCooldownHudState(fruitName, abilityName, now)
+				readyAt = getLocalCooldownReadyAt(cooldownState)
+				remaining = math.max(0, readyAt - now)
+			end
+
+			if remaining > 0 then
+				local startsAt = getLocalCooldownStartsAt(cooldownState, cooldownValue)
+				local startsIn = math.max(0, startsAt - now)
+				local isWaitingForCooldownStart = startsIn > 0
+				if isWaitingForCooldownStart then
+					local total = math.max(startsAt - now + 0.001, 0.001)
+					status = "ACTIVE " .. formatCooldownTime(startsIn)
+					statusColor3 = DEVIL_FRUIT_UI.Active
+					detail = "Active for " .. formatCooldownTime(startsIn)
+					fillColor3 = DEVIL_FRUIT_UI.ActiveFill
+					progress = math.clamp(startsIn / total, 0, 1)
+				else
+					local total = math.max(getLocalCooldownDuration(cooldownState, cooldownValue), 0.001)
+					status = "COOLDOWN " .. formatCooldownTime(remaining)
+					statusColor3 = DEVIL_FRUIT_UI.Cooldown
+					detail = "Cooldown for " .. formatCooldownTime(remaining)
+					fillColor3 = DEVIL_FRUIT_UI.CooldownFill
+					progress = math.clamp(remaining / total, 0, 1)
+				end
+			end
 		end
 
 		local keyCode = abilityConfig.KeyCode
 		abilities[#abilities + 1] = {
 			abilityName = abilityName,
+			compactName = formatCompactAbilityName(abilityName),
 			detail = detail,
-			fillColor3 = (isReady or isWaitingForCooldownStart) and DEVIL_FRUIT_UI.Ready
-				or DEVIL_FRUIT_UI.CooldownFill,
+			fillColor3 = fillColor3,
 			keyCodeName = keyCode and keyCode.Name or "?",
 			name = formatAbilityName(abilityName),
 			progress = progress,
@@ -447,6 +635,7 @@ local function hideCooldownHud()
 	cooldownHud.Visible = false
 	cooldownHud.CurrentFruit = nil
 	cooldownHud.Abilities = {}
+	table.clear(localAbilityHudStates)
 	renderCooldownHud()
 end
 
@@ -1243,6 +1432,7 @@ local function initializeDevilFruitClient()
 		local previousFruitName = lastSyncedFruitName
 		if currentFruitName ~= lastSyncedFruitName then
 			fruitModuleLoader:CallControllerMethod(previousFruitName, "HandleUnequipped", currentFruitName)
+			clearLocalAbilityHudStatesForFruit(previousFruitName)
 			logDevilFruitClient(
 				"fruit changed previous=%s current=%s",
 				tostring(lastSyncedFruitName),
@@ -1469,6 +1659,7 @@ local function initializeDevilFruitClient()
 		if eventName == "Activated" then
 			local readyAt = tonumber(value) or 0
 			setLocalCooldown(abilityName, readyAt, payload)
+			setLocalAbilityHudState(fruitName, abilityName, payload)
 			updateCooldownHud()
 
 			fruitModuleLoader:CallControllerMethod(fruitName, "HandleStateEvent", eventName, abilityName, value, payload)
@@ -1484,6 +1675,7 @@ local function initializeDevilFruitClient()
 		if eventName == "Denied" and value == "Cooldown" then
 			local readyAt = tonumber(payload) or 0
 			if readyAt > 0 then
+				clearLocalAbilityHudState(abilityName)
 				setLocalCooldown(abilityName, readyAt)
 				updateCooldownHud()
 			end

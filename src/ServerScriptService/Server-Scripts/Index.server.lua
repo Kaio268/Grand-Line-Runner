@@ -450,6 +450,9 @@ claimRemote.OnServerEvent:Connect(function(player, questId)
 					if success == false then
 						error(string.format("failed to grant '%s' for quest %d: %s", path, q, tostring(reason)))
 					end
+					if path == "Potions.x15WalkSpeedTime" and typeof(DataManager.ResumeBoost) == "function" then
+						DataManager:ResumeBoost(player, "x15WalkSpeed")
+					end
 				end
 			end
 		end

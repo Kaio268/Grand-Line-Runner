@@ -208,6 +208,9 @@ local function runReward(player, fullKey, amount)
 		local ok = pcall(function()
 			DataManager:AdjustValue(player, fullKey, amount)
 		end)
+		if ok and fullKey == "Potions.x15WalkSpeedTime" and typeof(DataManager.ResumeBoost) == "function" then
+			DataManager:ResumeBoost(player, "x15WalkSpeed")
+		end
 		return ok
 	end
 

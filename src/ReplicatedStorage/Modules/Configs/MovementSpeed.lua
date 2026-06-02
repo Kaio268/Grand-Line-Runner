@@ -3,9 +3,17 @@ local MovementSpeed = {
 	RuntimeBaselineWalkSpeed = 25,
 	RuntimeStatBaseline = 1,
 	RuntimeWalkSpeedPerStat = 1,
+	PotionSpeedBoostMultiplier = 1.5,
 	Attributes = {
 		BaseWalkSpeed = "GrandLineRushBaseWalkSpeed",
 		DisplaySpeed = "GrandLineRushDisplaySpeed",
+		EffectiveWalkSpeed = "GrandLineRushEffectiveWalkSpeed",
+		SpeedModifierMultiplier = "GrandLineRushSpeedModifierMultiplier",
+		SpeedModifierState = "GrandLineRushSpeedModifierState",
+	},
+	ModifierStates = {
+		Buff = "Buff",
+		Debuff = "Debuff",
 	},
 }
 
