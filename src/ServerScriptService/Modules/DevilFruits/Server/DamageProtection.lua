@@ -20,13 +20,13 @@ local MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE = "MoguStartupInvin
 local MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE = "MoguStartupInvincibleSessionId"
 local MOGU_BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
 local MOGU_BURROW_SESSION_STATE_ATTRIBUTE = "MoguBurrowSessionState"
-local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
+local BURROW_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Burrow"), "Missing Burrow fruit config")
 local MOGU_BURROW_ABILITY = "Burrow"
 local MOGU_STARTUP_STATE = "Startup"
 local STARTUP_TRACE_RECENT_GRACE_SECONDS = 0.75
 
 local function getMoguBurrowConfig()
-	return DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	return DevilFruitConfig.GetAbility(BURROW_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
 end
 
 local function isMoguStartupDamageTraceEnabled()

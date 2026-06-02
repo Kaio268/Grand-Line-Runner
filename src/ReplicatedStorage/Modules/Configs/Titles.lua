@@ -303,7 +303,7 @@ local TITLE_GROUPS = {
 			RubberRookie = {
 				DisplayName = "Rubber Rookie",
 				Description = "Your first stretch into rubber power made the route feel a little less impossible.",
-				RequirementText = "Eat the Gomu Gomu Fruit.",
+				RequirementText = "Eat the Elastic Fruit.",
 				UnlockType = "Persistent",
 			},
 		},

@@ -29,7 +29,7 @@ local DevilFruitUiController = require(Modules:WaitForChild("DevilFruits"):WaitF
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
+local BURROW_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Burrow"), "Missing Burrow fruit config")
 local MOGU_BURROW_ABILITY = "Burrow"
 local MOGU_BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
 local MOGU_BURROW_SESSION_STATE_ATTRIBUTE = "MoguBurrowSessionState"
@@ -38,8 +38,9 @@ local MOGU_STARTUP_INVINCIBLE_UNTIL_ATTRIBUTE = "MoguStartupInvincibleUntil"
 local MOGU_STARTUP_INVINCIBLE_SECONDS_ATTRIBUTE = "MoguStartupInvincibleSeconds"
 local MOGU_STARTUP_INVINCIBLE_START_OFFSET_SECONDS_ATTRIBUTE = "MoguStartupInvincibleStartOffsetSeconds"
 local MOGU_STARTUP_INVINCIBLE_SESSION_ID_ATTRIBUTE = "MoguStartupInvincibleSessionId"
-local BOMU_FRUIT_NAME = "Bomu Bomu no Mi"
+local BLAST_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Blast"), "Missing Blast fruit config")
 local BOMU_LAND_MINE_ABILITY = "LandMine"
+local INFERNO_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Inferno"), "Missing Inferno fruit config")
 local PHOENIX_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Phoenix"), "Missing Phoenix fruit config")
 local PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
@@ -144,7 +145,7 @@ local function isBomuLandMineWorldEffect(targetPlayer, fruitName, abilityName, p
 		return false
 	end
 
-	if fruitName ~= BOMU_FRUIT_NAME or abilityName ~= BOMU_LAND_MINE_ABILITY or typeof(payload) ~= "table" then
+	if fruitName ~= BLAST_FRUIT_NAME or abilityName ~= BOMU_LAND_MINE_ABILITY or typeof(payload) ~= "table" then
 		return false
 	end
 
@@ -1010,12 +1011,12 @@ local function restoreSuppressedParts(now, source)
 end
 
 local function getMoguHazardProtectionRadius()
-	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	local abilityConfig = DevilFruitConfig.GetAbility(BURROW_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
 	return math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or DEFAULT_MOGU_HAZARD_PROTECTION_RADIUS)
 end
 
 local function getMoguResolveHazardProbePadding()
-	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	local abilityConfig = DevilFruitConfig.GetAbility(BURROW_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
 	return math.max(
 		0,
 		tonumber(abilityConfig.ResolveHazardProbePadding)
@@ -1055,7 +1056,7 @@ local function isLocalPlayerBurrowProtected(now)
 end
 
 local function isMoguStartupDamageTraceEnabled()
-	local abilityConfig = DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
+	local abilityConfig = DevilFruitConfig.GetAbility(BURROW_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}
 	return abilityConfig.DebugStartupDamageTrace == true
 end
 
@@ -1315,7 +1316,7 @@ local function startMoguBurrow(targetPlayer, payload)
 	local resolvedPayload = payload or {}
 	local duration = math.max(0, tonumber(resolvedPayload.Duration) or 0)
 	if duration <= 0 then
-		duration = math.max(0.5, tonumber((DevilFruitConfig.GetAbility(MOGU_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}).BurrowDuration) or 5)
+		duration = math.max(0.5, tonumber((DevilFruitConfig.GetAbility(BURROW_FRUIT_NAME, MOGU_BURROW_ABILITY) or {}).BurrowDuration) or 5)
 	end
 
 	activeMoguBurrow = {
@@ -1664,7 +1665,7 @@ local function initializeDevilFruitClient()
 
 			fruitModuleLoader:CallControllerMethod(fruitName, "HandleStateEvent", eventName, abilityName, value, payload)
 
-			if fruitName == "Mera Mera no Mi" and abilityName == "FireBurst" then
+			if fruitName == INFERNO_FRUIT_NAME and abilityName == "FireBurst" then
 				startFireBurst(payload or {})
 			end
 			return
@@ -1688,7 +1689,7 @@ local function initializeDevilFruitClient()
 			return
 		end
 
-		if hasPlayerTarget and fruitName == MOGU_FRUIT_NAME and abilityName == MOGU_BURROW_ABILITY then
+		if hasPlayerTarget and fruitName == BURROW_FRUIT_NAME and abilityName == MOGU_BURROW_ABILITY then
 			local phase = payload and payload.Phase
 			if phase == "Start" then
 				startMoguBurrow(targetPlayer, payload)

@@ -1,0 +1,252 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local DevilFruits = Modules:WaitForChild("DevilFruits")
+local DevilFruitLogger = require(DevilFruits:WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
+local InfernoFolder = DevilFruits:WaitForChild("Inferno")
+local ClientFolder = InfernoFolder:WaitForChild("Client")
+local MeraDashClient = require(ClientFolder:WaitForChild("MeraDashClient"))
+
+local InfernoClient = {}
+InfernoClient.__index = InfernoClient
+
+local cachedPresentationModule
+
+local function buildNoopPresentationClient()
+	return {
+		PlayFlameDashStartup = function()
+			return false
+		end,
+		PlayFlameDashComplete = function()
+			return false
+		end,
+		PlayFlameDashDashAudio = function()
+			return false
+		end,
+		MarkFlameDashTrailPredictedComplete = function()
+			return false
+		end,
+		StopFlameDashTrail = function()
+			return false
+		end,
+		StopFlameDashTrailSampling = function()
+			return false
+		end,
+		HandleFireBurstEffect = function()
+			return false
+		end,
+		HandleStateEvent = function()
+			return false
+		end,
+		HandleCharacterRemoving = function() end,
+		HandlePlayerRemoving = function() end,
+		HandleUnequipped = function() end,
+		StopFireBurstStartup = function()
+			return false
+		end,
+	}
+end
+
+local function requirePresentationModule()
+	if cachedPresentationModule ~= nil then
+		return cachedPresentationModule or nil
+	end
+
+	local ok, result = pcall(function()
+		return require(ClientFolder:WaitForChild("MeraPresentationClient"))
+	end)
+	if not ok then
+		DevilFruitLogger.Warn(
+			"CLIENT",
+			"presentation module load failed fruit=Inferno Fruit detail=%s fallback=noop",
+			tostring(result)
+		)
+		cachedPresentationModule = false
+		return nil
+	end
+
+	cachedPresentationModule = result
+	DevilFruitLogger.Info("CLIENT", "presentation module ready fruit=Inferno Fruit source=%s", ClientFolder:GetFullName())
+	return result
+end
+
+local function logRequest(message, ...)
+	if not game:GetService("RunService"):IsStudio() then
+		return
+	end
+
+	DevilFruitLogger.Info("REQUEST", message, ...)
+end
+
+function InfernoClient:GetPresentation()
+	if self.presentation ~= nil then
+		return self.presentation
+	end
+
+	local presentationModule = requirePresentationModule()
+	if presentationModule and typeof(presentationModule.new) == "function" then
+		local ok, result = pcall(function()
+			return presentationModule.new({
+				player = self.player,
+				createEffectVisual = self.createEffectVisual,
+			})
+		end)
+		if ok and result then
+			self.presentation = result
+			DevilFruitLogger.Info(
+				"CLIENT",
+				"presentation client ready fruit=Inferno Fruit player=%s",
+				tostring(self.player and self.player.Name or "<nil>")
+			)
+			return self.presentation
+		end
+
+		DevilFruitLogger.Warn(
+			"CLIENT",
+			"presentation client init failed fruit=Inferno Fruit player=%s detail=%s fallback=noop",
+			tostring(self.player and self.player.Name or "<nil>"),
+			tostring(result)
+		)
+	end
+
+	self.presentation = buildNoopPresentationClient()
+	return self.presentation
+end
+
+function InfernoClient.Create(config)
+	config = config or {}
+	local self = setmetatable({}, InfernoClient)
+	self.player = config.player
+	self.createEffectVisual = type(config.CreateEffectVisual) == "function"
+		and config.CreateEffectVisual
+		or nil
+	self.playOptionalEffect = function(targetPlayer, fruitName, abilityName)
+		if abilityName == "FlameDash" or abilityName == "FireBurst" then
+			return
+		end
+
+		if typeof(config.PlayOptionalEffect) == "function" then
+			config.PlayOptionalEffect(targetPlayer, fruitName, abilityName)
+		end
+	end
+	self.impl = MeraDashClient.new({
+		player = config.player,
+		PlayOptionalEffect = self.playOptionalEffect,
+		CreateEffectVisual = self.createEffectVisual or function() end,
+		PlayFlameDashStartup = function(targetPlayer, payload, isPredicted)
+			return self:GetPresentation():PlayFlameDashStartup(targetPlayer, payload, isPredicted)
+		end,
+		PlayFlameDashComplete = function(targetPlayer, payload)
+			return self:GetPresentation():PlayFlameDashComplete(targetPlayer, payload)
+		end,
+		PlayFlameDashAudioStart = function(targetPlayer, payload)
+			return self:GetPresentation():PlayFlameDashDashAudio(targetPlayer, payload, true)
+		end,
+		MarkFlameDashTrailPredictedComplete = function(targetPlayer, reason, finalPosition, direction, castToken)
+			return self:GetPresentation():MarkFlameDashTrailPredictedComplete(
+				targetPlayer,
+				reason,
+				finalPosition,
+				direction,
+				castToken
+			)
+		end,
+		StopFlameDashTrailSampling = function(targetPlayer, reason, finalPosition, direction, castToken)
+			return self:GetPresentation():StopFlameDashTrailSampling(targetPlayer, reason, finalPosition, direction, castToken)
+		end,
+		StopFlameDashTrail = function(targetPlayer, reason, finalPosition, direction, castToken)
+			return self:GetPresentation():StopFlameDashTrail(targetPlayer, reason, finalPosition, direction, castToken)
+		end,
+	})
+	return self
+end
+
+function InfernoClient:BeginPredictedRequest(abilityName, fallbackBuilder)
+	logRequest("fruit module request begin fruit=Inferno Fruit ability=%s", tostring(abilityName))
+	if abilityName == MeraDashClient.ABILITY_NAME then
+		local ok, payloadOrError = pcall(function()
+			return self.impl:BeginPredictedRequest()
+		end)
+		if not ok then
+			logRequest(
+				"fruit module request end fruit=Inferno Fruit ability=%s source=mera_dash_error payload=nil detail=%s",
+				tostring(abilityName),
+				tostring(payloadOrError)
+			)
+			return nil
+		end
+
+		local payload = payloadOrError
+		logRequest(
+			"fruit module request end fruit=Inferno Fruit ability=%s source=mera_dash payload=%s",
+			tostring(abilityName),
+			tostring(typeof(payload))
+		)
+		return payload
+	end
+
+	if typeof(fallbackBuilder) == "function" then
+		local ok, payloadOrError = pcall(fallbackBuilder)
+		if not ok then
+			logRequest(
+				"fruit module request end fruit=Inferno Fruit ability=%s source=fallback_error payload=nil detail=%s",
+				tostring(abilityName),
+				tostring(payloadOrError)
+			)
+			return nil
+		end
+
+		local payload = payloadOrError
+		logRequest(
+			"fruit module request end fruit=Inferno Fruit ability=%s source=fallback payload=%s",
+			tostring(abilityName),
+			tostring(typeof(payload))
+		)
+		return payload
+	end
+
+	logRequest("fruit module request end fruit=Inferno Fruit ability=%s source=none payload=nil", tostring(abilityName))
+	return nil
+end
+
+function InfernoClient:HandleEffect(targetPlayer, abilityName, payload)
+	if abilityName == MeraDashClient.ABILITY_NAME then
+		return self.impl:HandleEffect(targetPlayer, payload)
+	end
+
+	if abilityName == "FireBurst" then
+		return self:GetPresentation():HandleFireBurstEffect(targetPlayer, payload or {})
+	end
+
+	return false
+end
+
+function InfernoClient:HandleStateEvent(eventName, abilityName, value, payload)
+	if abilityName == "FireBurst" and eventName == "Denied" then
+		self:GetPresentation():StopFireBurstStartup(self.player, value)
+	end
+
+	return self.impl:HandleStateEvent(eventName, MeraDashClient.FRUIT_NAME, abilityName, value, payload)
+end
+
+function InfernoClient:HandleCharacterRemoving()
+	if self.presentation then
+		self.presentation:HandleCharacterRemoving()
+	end
+	self.impl:CleanupCharacterRemoving()
+end
+
+function InfernoClient:HandleUnequipped()
+	if self.presentation then
+		self.presentation:HandleUnequipped()
+	end
+	self.impl:CleanupUnequipped()
+end
+
+function InfernoClient:HandlePlayerRemoving(leavingPlayer)
+	if self.presentation then
+		self.presentation:HandlePlayerRemoving(leavingPlayer)
+	end
+end
+
+return InfernoClient

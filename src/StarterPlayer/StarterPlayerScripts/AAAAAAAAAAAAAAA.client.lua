@@ -185,7 +185,7 @@ local GameSounds = require(Modules:WaitForChild("GameSounds"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 WaveHazardVisuals.ValidateWaveAssets("WaveClient")
 
-local MOGU_FRUIT_NAME = "Mogu Mogu no Mi"
+local MOGU_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Burrow"), "Missing Burrow fruit config")
 local MOGU_BURROW_ABILITY = "Burrow"
 local MOGU_BURROW_SESSION_ID_ATTRIBUTE = "MoguBurrowSessionId"
 local MOGU_BURROW_SESSION_STATE_ATTRIBUTE = "MoguBurrowSessionState"

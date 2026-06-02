@@ -81,16 +81,16 @@ local DevilFruits = {
 	},
 	Fruits = {},
 	FruitsByKey = {
-		Mera = {
-			Id = "MeraMeraNoMi",
-			FruitKey = "Mera",
-			DisplayName = "Mera Mera no Mi",
-			PlayerDisplayName = "Inferno Fruit",
-			AssetFolder = "Mera",
-			AbilityModule = "Mera",
+		Inferno = {
+			Id = "InfernoFruit",
+			FruitKey = "Inferno",
+			DisplayName = "Inferno Fruit",
+			AssetFolder = "Inferno",
+			LegacyAssetFolders = { "Mera" },
+			AbilityModule = "Inferno",
 			Rarity = "Legendary",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "mera", "mera mera" },
+			Aliases = { "MeraMeraNoMi", "Mera Mera no Mi", "mera", "mera mera" },
 			Abilities = {
 				FlameDash = {
 					KeyCode = Enum.KeyCode.Q,
@@ -137,7 +137,7 @@ local DevilFruits = {
 						},
 					},
 					Animation = {
-						AnimationKey = "Mera.FlameDash",
+						AnimationKey = "Inferno.FlameDash",
 						FadeTime = 0.04,
 						StopFadeTime = 0.08,
 						PlaybackSpeed = 1.12,
@@ -188,7 +188,7 @@ local DevilFruits = {
 						Volume = 1,
 					},
 					Animation = {
-						AnimationKey = "Mera.FlameBurstR6",
+						AnimationKey = "Inferno.FlameBurstR6",
 						ReleaseMarker = "Release",
 						ReleaseFallbackTime = 0.22,
 						FadeTime = 0.06,
@@ -198,16 +198,16 @@ local DevilFruits = {
 				},
 			},
 		},
-		Hie = {
-			Id = "HieHieNoMi",
-			FruitKey = "Hie",
-			DisplayName = "Hie Hie no Mi",
-			PlayerDisplayName = "Glacial Fruit",
-			AssetFolder = "Hie",
-			AbilityModule = "Hie",
+		Glacial = {
+			Id = "GlacialFruit",
+			FruitKey = "Glacial",
+			DisplayName = "Glacial Fruit",
+			AssetFolder = "Glacial",
+			LegacyAssetFolders = { "Hie" },
+			AbilityModule = "Glacial",
 			Rarity = "Legendary",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "hie", "hie hie" },
+			Aliases = { "HieHieNoMi", "Hie Hie no Mi", "hie", "hie hie" },
 			Abilities = {
 				FreezeShot = {
 					KeyCode = Enum.KeyCode.Q,
@@ -249,7 +249,7 @@ local DevilFruits = {
 						ImpactSoundId = "rbxassetid://85701354119300",
 					},
 					Animation = {
-						AnimationKey = "Hie.IceBlast",
+						AnimationKey = "Glacial.IceBlast",
 						ReleaseMarker = "IceBlast",
 						ReleaseFallbackTime = 0.22,
 						FadeTime = 0.08,
@@ -272,7 +272,7 @@ local DevilFruits = {
 						LoopSoundId = "rbxassetid://95916960988717",
 					},
 					Animation = {
-						AnimationKey = "Hie.IceBoost",
+						AnimationKey = "Glacial.IceBoost",
 						FadeTime = 0.08,
 						StopFadeTime = 0.12,
 						Looped = true,
@@ -280,16 +280,16 @@ local DevilFruits = {
 				},
 			},
 		},
-		Gomu = {
-			Id = "GomuGomuNoMi",
-			FruitKey = "Gomu",
-			DisplayName = "Gomu Gomu no Mi",
-			PlayerDisplayName = "Elastic Fruit",
-			AssetFolder = "Gomu",
-			AbilityModule = "Gomu",
+		Elastic = {
+			Id = "ElasticFruit",
+			FruitKey = "Elastic",
+			DisplayName = "Elastic Fruit",
+			AssetFolder = "Elastic",
+			LegacyAssetFolders = { "Gomu" },
+			AbilityModule = "Elastic",
 			Rarity = "Rare",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "gomu", "gomu gomu" },
+			Aliases = { "GomuGomuNoMi", "Gomu Gomu no Mi", "gomu", "gomu gomu" },
 			Abilities = {
 				RubberLaunch = {
 					KeyCode = Enum.KeyCode.Q,
@@ -305,7 +305,7 @@ local DevilFruits = {
 						Volume = 1,
 					},
 					Animation = {
-						AnimationKey = "Gomu.Rocket",
+						AnimationKey = "Elastic.Rocket",
 						ReleaseTime = 0.25,
 						ReleaseMarker = "Unstretch",
 						ReleaseMarkers = { "Unstretch", "RestoreArms" },
@@ -331,16 +331,16 @@ local DevilFruits = {
 				},
 			},
 		},
-		Bomu = {
-			Id = "BomuBomuNoMi",
-			FruitKey = "Bomu",
-			DisplayName = "Bomu Bomu no Mi",
-			PlayerDisplayName = "Blast Fruit",
-			AssetFolder = "Bomu",
-			AbilityModule = "Bomu",
+		Blast = {
+			Id = "BlastFruit",
+			FruitKey = "Blast",
+			DisplayName = "Blast Fruit",
+			AssetFolder = "Blast",
+			LegacyAssetFolders = { "Bomu" },
+			AbilityModule = "Blast",
 			Rarity = "Rare",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "bomu", "bomu bomu", "bomb", "bomb fruit" },
+			Aliases = { "BomuBomuNoMi", "Bomu Bomu no Mi", "bomu", "bomu bomu", "bomb", "bomb fruit" },
 			Abilities = {
 				LandMine = {
 					KeyCode = Enum.KeyCode.Q,
@@ -385,7 +385,7 @@ local DevilFruits = {
 					},
 					Animation = {
 						Plant = {
-							AnimationKey = "Bomu.Plant",
+							AnimationKey = "Blast.Plant",
 							FadeTime = 0.05,
 							StopFadeTime = 0.08,
 							Looped = false,
@@ -393,7 +393,7 @@ local DevilFruits = {
 							MovementLockDuration = 0.55,
 						},
 						Jump = {
-							AnimationKey = "Bomu.Jump",
+							AnimationKey = "Blast.Jump",
 							FadeTime = 0.04,
 							StopFadeTime = 0.08,
 							Looped = false,
@@ -403,16 +403,16 @@ local DevilFruits = {
 				},
 			},
 		},
-		Mogu = {
-			Id = "MoguMoguNoMi",
-			FruitKey = "Mogu",
-			DisplayName = "Mogu Mogu no Mi",
-			PlayerDisplayName = "Burrow Fruit",
-			AssetFolder = "Mogu",
-			AbilityModule = "Mogu",
+		Burrow = {
+			Id = "BurrowFruit",
+			FruitKey = "Burrow",
+			DisplayName = "Burrow Fruit",
+			AssetFolder = "Burrow",
+			LegacyAssetFolders = { "Mogu" },
+			AbilityModule = "Burrow",
 			Rarity = "Common",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "mogu", "mogu mogu", "mole", "mole fruit" },
+			Aliases = { "MoguMoguNoMi", "Mogu Mogu no Mi", "mogu", "mogu mogu", "mole", "mole fruit" },
 			Abilities = {
 				Burrow = {
 					KeyCode = Enum.KeyCode.Q,
@@ -449,12 +449,12 @@ local DevilFruits = {
 					ConcealTransparency = 1,
 					Animation = {
 						Start = {
-							AnimationKey = "Mogu.MoleDigStart",
+							AnimationKey = "Burrow.MoleDigStart",
 							FadeTime = 0.05,
 							StopFadeTime = 0.08,
 							PlaybackSpeed = 1.18,
 							Looped = false,
-							-- The Mogu keyframe saves do not include named cue markers yet, so these fallbacks drive entry VFX and movement start.
+							-- The authored keyframe saves do not include named cue markers yet, so these fallbacks drive entry VFX and movement start.
 							EntryCueMarkers = { "EnterGround", "EntryVfx", "DigImpact", "Dig" },
 							EntryCueFallbackTime = 0.22,
 							MovementCueMarkers = { "FullyUnderground", "Underground", "BurrowMove", "MovementStart" },
@@ -475,7 +475,7 @@ local DevilFruits = {
 							VisualSinkEasingDirection = "InOut",
 						},
 						Resolve = {
-							AnimationKey = "Mogu.MoleDigEnd",
+							AnimationKey = "Burrow.MoleDigEnd",
 							FadeTime = 0.05,
 							StopFadeTime = 0.1,
 							StopAfter = 0.6,
@@ -491,7 +491,8 @@ local DevilFruits = {
 						},
 					},
 					Vfx = {
-						RootSegments = { "Assets", "VFX", "Mogu" },
+						RootSegments = { "Assets", "VFX", "Burrow" },
+						FallbackRootSegments = { "Assets", "VFX", "Mogu" },
 						Entry = {
 							AssetName = "Dig",
 							ForwardOffset = 1.15,
@@ -525,16 +526,16 @@ local DevilFruits = {
 				},
 			},
 		},
-		Suke = {
-			Id = "SukeSukeNoMi",
-			FruitKey = "Suke",
-			DisplayName = "Suke Suke no Mi",
-			PlayerDisplayName = "Phantom Fruit",
-			AssetFolder = "Suke",
-			AbilityModule = "Suke",
+		Phantom = {
+			Id = "PhantomFruit",
+			FruitKey = "Phantom",
+			DisplayName = "Phantom Fruit",
+			AssetFolder = "Phantom",
+			LegacyAssetFolders = { "Suke" },
+			AbilityModule = "Phantom",
 			Rarity = "Common",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "suke", "suke suke", "invisible", "invisibility fruit" },
+			Aliases = { "SukeSukeNoMi", "Suke Suke no Mi", "suke", "suke suke", "invisible", "invisibility fruit" },
 			Abilities = {
 				Fade = {
 					KeyCode = Enum.KeyCode.Q,
@@ -551,7 +552,7 @@ local DevilFruits = {
 						ActivateSoundId = "rbxassetid://78492636125633",
 					},
 					Animation = {
-						AnimationKey = "Suke.Suke1",
+						AnimationKey = "Phantom.Suke1",
 						EffectDelay = 0.35,
 						EffectMarkerNames = { "Fade", "Invisible", "Invisibility", "Vanish", "Activate" },
 						FadeTime = 0.06,
@@ -568,7 +569,7 @@ local DevilFruits = {
 						ParticleTransparency = 0.7,
 						ParticleLifetime = 0.65,
 						PulsePeriod = 0.7,
-						-- Authored vanish burst from Assets/VFX/Suke/FX, matching the workspace reference offset.
+						-- Authored vanish burst from Assets/VFX/Phantom/FX, matching the workspace reference offset.
 						AuthoredEffectName = "FX",
 						AuthoredEffectOffset = CFrame.new(0, -0.305, 0),
 						AuthoredEffectLifetime = 1.35,
@@ -577,16 +578,16 @@ local DevilFruits = {
 				},
 			},
 		},
-		Horo = {
-			Id = "HoroHoroNoMi",
-			FruitKey = "Horo",
-			DisplayName = "Horo Horo no Mi",
-			PlayerDisplayName = "Spirit Fruit",
-			AssetFolder = "Horo",
-			AbilityModule = "Horo",
+		Spirit = {
+			Id = "SpiritFruit",
+			FruitKey = "Spirit",
+			DisplayName = "Spirit Fruit",
+			AssetFolder = "Spirit",
+			LegacyAssetFolders = { "Horo" },
+			AbilityModule = "Spirit",
 			Rarity = "Common",
 			ToolGripBias = HELD_FRUIT_GRIP_BIAS,
-			Aliases = { "horo", "horo horo", "ghost", "ghost fruit", "projection fruit" },
+			Aliases = { "HoroHoroNoMi", "Horo Horo no Mi", "horo", "horo horo", "ghost", "ghost fruit", "projection fruit" },
 			Abilities = {
 				GhostProjection = {
 					KeyCode = Enum.KeyCode.Q,
@@ -618,7 +619,7 @@ local DevilFruits = {
 					},
 					Animation = {
 						Projection = {
-							AnimationKey = "Horo.HoroProjection",
+							AnimationKey = "Spirit.HoroProjection",
 							FadeTime = 0.06,
 							StopFadeTime = 0.1,
 							Looped = false,
@@ -627,7 +628,7 @@ local DevilFruits = {
 							ProjectedIdleDelay = 1,
 						},
 						Projected = {
-							AnimationKey = "Horo.HoroProjected",
+							AnimationKey = "Spirit.HoroProjected",
 							FadeTime = 0.12,
 							StopFadeTime = 0.12,
 							Looped = true,

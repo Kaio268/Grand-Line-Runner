@@ -46,6 +46,9 @@ local DevilFruitSecurity = require(ServerArchitectureFolder:WaitForChild("DevilF
 local DevilFruitReplication = require(ServerArchitectureFolder:WaitForChild("DevilFruitReplication"))
 local DevilFruitValidation = require(ServerArchitectureFolder:WaitForChild("DevilFruitValidation"))
 local DevilFruitAbilityRunner = require(ServerArchitectureFolder:WaitForChild("DevilFruitAbilityRunner"))
+local INFERNO_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Inferno"), "Missing Inferno fruit config")
+local GLACIAL_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Glacial"), "Missing Glacial fruit config")
+local BURROW_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Burrow"), "Missing Burrow fruit config")
 local syncFruitAttribute
 local serverFruitModuleLoader = FruitModuleLoader.new()
 local remoteBundle
@@ -426,7 +429,7 @@ local function ensureMoguClawsAttached(player)
 				return
 			end
 
-			if getEquippedFruit(player) ~= "Mogu Mogu no Mi" then
+			if getEquippedFruit(player) ~= BURROW_FRUIT_NAME then
 				destroyMoguClaws(character)
 				return
 			end
@@ -470,7 +473,7 @@ local function applyFruitCharacterModel(player, fruitName)
 		end
 	end
 
-	if fruitName == "Mogu Mogu no Mi" then
+	if fruitName == BURROW_FRUIT_NAME then
 		ensureMoguClawsAttached(player)
 	else
 		destroyMoguClaws(character)
@@ -518,7 +521,7 @@ local function isMeraDashDebugEnabled(player)
 end
 
 local function shouldLogMeraDashAttempt(fruitName, abilityName)
-	return abilityName == "FlameDash" or fruitName == "Mera Mera no Mi"
+	return abilityName == "FlameDash" or fruitName == INFERNO_FRUIT_NAME
 end
 
 local function logMeraDashServer(player, message, ...)
@@ -870,9 +873,9 @@ clearFruitRuntimeState = function(player, fruitName)
 		end
 	end
 
-	if fruitName == "Mera Mera no Mi" then
+	if fruitName == INFERNO_FRUIT_NAME then
 		player:SetAttribute("MeraFireBurstUntil", nil)
-	elseif fruitName == "Hie Hie no Mi" then
+	elseif fruitName == GLACIAL_FRUIT_NAME then
 		player:SetAttribute("HieIceBoostUntil", nil)
 		player:SetAttribute("HieIceBoostSpeedMultiplier", nil)
 		player:SetAttribute("HieIceBoostSpeedBonus", nil)
@@ -1115,7 +1118,7 @@ local function fireAbilityDenied(player, fruitName, abilityName, reason, readyAt
 end
 
 local function fireAbilityActivated(player, fruitName, abilityName, readyAt, payload)
-	if fruitName == "Mera Mera no Mi" and abilityName == "FireBurst" then
+	if fruitName == INFERNO_FRUIT_NAME and abilityName == "FireBurst" then
 		player:SetAttribute("MeraFireBurstUntil", os.clock() + ((payload and payload.Duration) or 0))
 	end
 

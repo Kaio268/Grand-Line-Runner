@@ -481,9 +481,13 @@ local function buildGeneratedHoroWorldModel(fruit)
 end
 
 local GENERATED_WORLD_MODEL_BUILDERS = {
+	Blast = buildGeneratedBomuWorldModel,
 	Bomu = buildGeneratedBomuWorldModel,
+	Spirit = buildGeneratedHoroWorldModel,
 	Horo = buildGeneratedHoroWorldModel,
+	Burrow = buildGeneratedMoguWorldModel,
 	Mogu = buildGeneratedMoguWorldModel,
+	Phantom = buildGeneratedSukeWorldModel,
 	Suke = buildGeneratedSukeWorldModel,
 }
 

@@ -177,7 +177,7 @@ function HazardProtection.GetProtection(target, options)
 		return nil
 	end
 
-	local moguServer = getServerFruitModule("Mogu", "MoguServer")
+	local moguServer = getServerFruitModule("Burrow", "BurrowServer")
 	local moguProtection = getMoguProtection(moguServer, targetPlayer, position, options)
 	if moguProtection then
 		logProtectionSkip(moguProtection, options)

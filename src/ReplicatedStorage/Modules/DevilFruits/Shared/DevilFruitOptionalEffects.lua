@@ -3,9 +3,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Registry = require(script.Parent:WaitForChild("Registry"))
+local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local DevilFruitOptionalEffects = {}
 
+local BLAST_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Blast"), "Missing Blast fruit config")
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local DEFAULT_EMIT_COUNT = 20
 local DEFAULT_VISUAL_LIFETIME = 2
@@ -234,7 +236,7 @@ end
 
 local function shouldSkipOptionalSound(fruitIdentifier, abilityName, payload)
 	local resolvedFruitName = Registry.ResolveFruitName(fruitIdentifier) or fruitIdentifier
-	return resolvedFruitName == "Bomu Bomu no Mi"
+	return resolvedFruitName == BLAST_FRUIT_NAME
 		and abilityName == "LandMine"
 		and type(payload) == "table"
 		and payload.Action == "Detonated"

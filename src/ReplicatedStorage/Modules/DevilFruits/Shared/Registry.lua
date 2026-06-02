@@ -5,7 +5,7 @@ local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local Registry = {}
 
 local EFFECT_CONTRACTS_BY_KEY = {
-	Hie = {
+	Glacial = {
 		FreezeShot = {
 			Phases = {
 				Launch = true,
@@ -25,7 +25,7 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
-	Mera = {
+	Inferno = {
 		FlameDash = {
 			Phases = {
 				Start = true,
@@ -45,7 +45,7 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
-	Mogu = {
+	Burrow = {
 		Burrow = {
 			Phases = {
 				Start = true,
@@ -56,7 +56,7 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
-	Suke = {
+	Phantom = {
 		Fade = {
 			Phases = {
 				Start = true,
@@ -66,7 +66,7 @@ local EFFECT_CONTRACTS_BY_KEY = {
 			ServerAuthoritative = true,
 		},
 	},
-	Horo = {
+	Spirit = {
 		GhostProjection = {
 			Phases = {
 				Start = true,
@@ -82,7 +82,7 @@ local EFFECT_CONTRACTS_BY_KEY = {
 }
 
 local UI_OVERRIDES_BY_KEY = {
-	Hie = {
+	Glacial = {
 		FreezeShot = {
 			DisplayName = "Freeze Shot",
 		},
@@ -90,7 +90,7 @@ local UI_OVERRIDES_BY_KEY = {
 			DisplayName = "Ice Boost",
 		},
 	},
-	Mera = {
+	Inferno = {
 		FlameDash = {
 			DisplayName = "Flame Dash",
 		},
@@ -98,12 +98,12 @@ local UI_OVERRIDES_BY_KEY = {
 			DisplayName = "Fire Burst",
 		},
 	},
-	Suke = {
+	Phantom = {
 		Fade = {
 			DisplayName = "Fade",
 		},
 	},
-	Horo = {
+	Spirit = {
 		GhostProjection = {
 			DisplayName = "Ghost Projection",
 		},
@@ -122,33 +122,33 @@ local DEFAULT_EFFECT_CONTRACT = {
 local fruitEntriesByName = {}
 local fruitEntriesByKey = {}
 local STRUCTURED_FRUIT_ENTRY_MODULES = {
-	Bomu = {
-		Client = "BomuClient",
-		Server = "BomuServer",
+	Blast = {
+		Client = "BlastClient",
+		Server = "BlastServer",
 	},
-	Gomu = {
-		Client = "GomuClient",
-		Server = "GomuServer",
+	Elastic = {
+		Client = "ElasticClient",
+		Server = "ElasticServer",
 	},
-	Mera = {
-		Client = "MeraClient",
-		Server = "MeraServer",
+	Inferno = {
+		Client = "InfernoClient",
+		Server = "InfernoServer",
 	},
-	Hie = {
-		Client = "HieClient",
-		Server = "HieServer",
+	Glacial = {
+		Client = "GlacialClient",
+		Server = "GlacialServer",
 	},
-	Mogu = {
-		Client = "MoguClient",
-		Server = "MoguServer",
+	Burrow = {
+		Client = "BurrowClient",
+		Server = "BurrowServer",
 	},
-	Suke = {
-		Client = "SukeClient",
-		Server = "SukeServer",
+	Phantom = {
+		Client = "PhantomClient",
+		Server = "PhantomServer",
 	},
-	Horo = {
-		Client = "HoroClient",
-		Server = "HoroServer",
+	Spirit = {
+		Client = "SpiritClient",
+		Server = "SpiritServer",
 	},
 	Phoenix = {
 		Client = "PhoenixClient",

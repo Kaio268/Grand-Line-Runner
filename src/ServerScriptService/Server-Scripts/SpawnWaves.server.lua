@@ -34,7 +34,7 @@ local DamageProtection = require(
 		:WaitForChild("DamageProtection")
 )
 local devilFruitModules = ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruits")
-local HoroServer = require(getNamedFolder(devilFruitModules, "Horo"):WaitForChild("Server"):WaitForChild("HoroServer"))
+local SpiritServer = require(getNamedFolder(devilFruitModules, "Spirit"):WaitForChild("Server"):WaitForChild("SpiritServer"))
 local phoenixFolder = getNamedFolder(devilFruitModules, "Phoenix")
 local PhoenixServer = require(phoenixFolder:WaitForChild("Server"):WaitForChild("PhoenixServer"))
 local PhoenixPassiveService = require(phoenixFolder:WaitForChild("Server"):WaitForChild("PhoenixPassiveService"))
@@ -700,8 +700,8 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 	if isHazardProtected then
 		return true
 	end
-	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
-		HoroServer.InterruptActiveProjection(player, "wave_touch")
+	if SpiritServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
+		SpiritServer.InterruptActiveProjection(player, "wave_touch")
 		return true
 	end
 	if PhoenixServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then
