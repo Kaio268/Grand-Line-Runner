@@ -3518,15 +3518,21 @@ local function hideLegacyInventory()
 end
 
 local function getToggleLayout()
-	local mobile = Responsive.isMobile()
+	local viewport = Responsive.getViewport()
+	local phone = Responsive.isPhoneViewport(viewport)
+	local tablet = Responsive.isTabletViewport(viewport)
+	local mobile = Responsive.isMobile(viewport)
+	local size = if phone then 56 elseif tablet then 62 else 74
 
 	return {
 		anchorPoint = Vector2.new(0, 0),
 		position = UDim2.fromOffset(0, 16),
-		size = UDim2.fromOffset(mobile and 56 or 74, mobile and 56 or 74),
+		size = UDim2.fromOffset(size, size),
 		compact = true,
 		dock = "hotbarLeft",
 		mobile = mobile,
+		phone = phone,
+		tablet = tablet,
 	}
 end
 

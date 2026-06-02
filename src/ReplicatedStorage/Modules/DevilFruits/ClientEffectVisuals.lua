@@ -7,19 +7,22 @@ local ClientEffectVisuals = {}
 ClientEffectVisuals.__index = ClientEffectVisuals
 
 local SharedFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared")
+local DevilFruitConfig = require(
+	ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits")
+)
 local AnimationResolver = require(SharedFolder:WaitForChild("AnimationResolver"))
 
 local DEFAULT_DIRECTION = Vector3.new(0, 0, -1)
 local DEFAULT_MIN_DIRECTION_MAGNITUDE = 0.01
-local DEFAULT_MERA_FRUIT_NAME = "Mera Mera no Mi"
+local DEFAULT_MERA_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Inferno"), "Missing Inferno fruit config")
 local DEFAULT_FIRE_BURST_ABILITY = "FireBurst"
-local DEFAULT_BOMU_FRUIT_NAME = "Bomu Bomu no Mi"
+local DEFAULT_BOMU_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Blast"), "Missing Blast fruit config")
 local DEFAULT_BOMU_DETONATION_ABILITY = "LandMine"
-local DEFAULT_PHOENIX_FRUIT_NAME = "Tori Tori no Mi"
+local DEFAULT_PHOENIX_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Phoenix"), "Missing Phoenix fruit config")
 local DEFAULT_PHOENIX_FLIGHT_ABILITY = "PhoenixFlight"
 local DEFAULT_PHOENIX_SHIELD_ABILITY = "PhoenixFlameShield"
 local DEFAULT_PHOENIX_REBIRTH_ABILITY = "PhoenixRebirth"
-local DEFAULT_GOMU_FRUIT_NAME = "Gomu Gomu no Mi"
+local DEFAULT_GOMU_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Elastic"), "Missing Elastic fruit config")
 local DEFAULT_RUBBER_LAUNCH_ABILITY = "RubberLaunch"
 local DEFAULT_PHOENIX_EFFECT_COLOR = Color3.fromRGB(108, 255, 214)
 local DEFAULT_PHOENIX_EFFECT_ACCENT_COLOR = Color3.fromRGB(255, 188, 113)
@@ -29,7 +32,7 @@ local FLAT_RING_ROTATION = CFrame.Angles(0, 0, math.rad(90))
 local DEFAULT_PHOENIX_SHIELD_RADIUS = 18
 local PHOENIX_SHIELD_AUTHORED_REFERENCE_RADIUS = 13
 local PHOENIX_WING_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
-local PHOENIX_WING_ASSET_FRUIT_KEY = "Tori"
+local PHOENIX_WING_ASSET_FRUIT_KEY = "Phoenix"
 local PHOENIX_BODY_TEMPLATE_FOLDER_NAME = "Phoenix Body Template"
 local PHOENIX_AUTHORED_FLIGHT_FX_NAME = "FlyFX"
 local PHOENIX_AUTHORED_SHIELD_FX_NAME = "ShieldFX"
@@ -49,12 +52,12 @@ local PHOENIX_AUTHORED_VFX_DEFAULT_OFFSETS = {
 	ReviveFX = CFrame.new(),
 }
 local PHOENIX_ANIMATION_KEYS = {
-	FlightStart = "Tori.PhoenixFlightStart",
-	FlightLoop = "Tori.PhoenixFlightLoop",
-	FlightIdle = "Tori.PhoenixFlightIdle",
-	FlightEnd = "Tori.PhoenixFlightEnd",
-	Shield = "Tori.PhoenixFlameShield",
-	Rebirth = "Tori.PhoenixRevive",
+	FlightStart = "Phoenix.PhoenixFlightStart",
+	FlightLoop = "Phoenix.PhoenixFlightLoop",
+	FlightIdle = "Phoenix.PhoenixFlightIdle",
+	FlightEnd = "Phoenix.PhoenixFlightEnd",
+	Shield = "Phoenix.PhoenixFlameShield",
+	Rebirth = "Phoenix.PhoenixRevive",
 }
 local PHOENIX_FLIGHT_AUDIO_CUES = {
 	LiftOff = "LiftOff",
@@ -75,12 +78,12 @@ local PHOENIX_FLIGHT_DEFAULT_AUDIO_MARKERS = {
 	Deactivate = { "Deactivate", "FlightEnd" },
 }
 local PHOENIX_ANIMATION_LENGTHS = {
-	["Tori.PhoenixFlightStart"] = 3.1666667,
-	["Tori.PhoenixFlightLoop"] = 5.2,
-	["Tori.PhoenixFlightIdle"] = 1,
-	["Tori.PhoenixFlightEnd"] = 1.2,
-	["Tori.PhoenixFlameShield"] = 1.6666667,
-	["Tori.PhoenixRevive"] = 2.4,
+	["Phoenix.PhoenixFlightStart"] = 3.1666667,
+	["Phoenix.PhoenixFlightLoop"] = 5.2,
+	["Phoenix.PhoenixFlightIdle"] = 1,
+	["Phoenix.PhoenixFlightEnd"] = 1.2,
+	["Phoenix.PhoenixFlameShield"] = 1.6666667,
+	["Phoenix.PhoenixRevive"] = 2.4,
 }
 local PHOENIX_FLIGHT_START_TRACK_GROUP = "PhoenixFlightStart"
 local PHOENIX_FLIGHT_SUSTAIN_TRACK_GROUP = "PhoenixFlightSustain"
@@ -224,8 +227,9 @@ end
 local function getPhoenixWingAssetRoot()
 	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
-	local toriVfxRoot = vfxFolder and vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY)
-	local bodyTemplate = toriVfxRoot and toriVfxRoot:FindFirstChild(PHOENIX_BODY_TEMPLATE_FOLDER_NAME)
+	local phoenixVfxRoot = vfxFolder
+		and (vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY) or vfxFolder:FindFirstChild("Tori"))
+	local bodyTemplate = phoenixVfxRoot and phoenixVfxRoot:FindFirstChild(PHOENIX_BODY_TEMPLATE_FOLDER_NAME)
 	if bodyTemplate and bodyTemplate:FindFirstChild("tori wings", true) then
 		return bodyTemplate
 	end
@@ -793,20 +797,24 @@ local function scalePhoenixAuthoredVfxClone(root, scale)
 	end)
 end
 
-local function getStandardToriVfxRoot()
+local function getStandardPhoenixVfxRoot()
 	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
-	return vfxFolder and vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY) or nil
+	if not vfxFolder then
+		return nil
+	end
+
+	return vfxFolder:FindFirstChild(PHOENIX_WING_ASSET_FRUIT_KEY) or vfxFolder:FindFirstChild("Tori")
 end
 
 local function findPhoenixMoveFolderVfxTemplate(assetName)
-	local toriVfxRoot = getStandardToriVfxRoot()
-	if not toriVfxRoot then
+	local phoenixVfxRoot = getStandardPhoenixVfxRoot()
+	if not phoenixVfxRoot then
 		return nil, nil
 	end
 
 	for _, moveFolderName in ipairs(PHOENIX_AUTHORED_VFX_MOVE_FOLDERS[assetName] or {}) do
-		local moveRoot = toriVfxRoot:FindFirstChild(moveFolderName)
+		local moveRoot = phoenixVfxRoot:FindFirstChild(moveFolderName)
 		if not moveRoot then
 			continue
 		end
@@ -1031,7 +1039,7 @@ function ClientEffectVisuals:GetPhoenixAnimationDefinition(animationKey)
 	end
 
 	local animation, descriptor = AnimationResolver.GetAnimation(animationKey, {
-		Context = "ToriVfx",
+		Context = "PhoenixVfx",
 	})
 	if not animation then
 		self.PhoenixAnimationDefinitions[animationKey] = false

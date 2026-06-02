@@ -481,9 +481,13 @@ local function buildGeneratedHoroWorldModel(fruit)
 end
 
 local GENERATED_WORLD_MODEL_BUILDERS = {
+	Blast = buildGeneratedBomuWorldModel,
 	Bomu = buildGeneratedBomuWorldModel,
+	Spirit = buildGeneratedHoroWorldModel,
 	Horo = buildGeneratedHoroWorldModel,
+	Burrow = buildGeneratedMoguWorldModel,
 	Mogu = buildGeneratedMoguWorldModel,
+	Phantom = buildGeneratedSukeWorldModel,
 	Suke = buildGeneratedSukeWorldModel,
 }
 
@@ -530,6 +534,16 @@ function DevilFruitAssets.GetFruitFolder(fruitIdentifier)
 	end
 
 	local fruitFolder = devilFruitsFolder:FindFirstChild(fruit.AssetFolder)
+	if not fruitFolder and type(fruit.LegacyAssetFolders) == "table" then
+		for _, legacyAssetFolder in ipairs(fruit.LegacyAssetFolders) do
+			if typeof(legacyAssetFolder) == "string" and legacyAssetFolder ~= "" then
+				fruitFolder = devilFruitsFolder:FindFirstChild(legacyAssetFolder)
+				if fruitFolder then
+					break
+				end
+			end
+		end
+	end
 	if not fruitFolder then
 		return nil, "missing_fruit_folder"
 	end
@@ -576,9 +590,9 @@ function DevilFruitAssets.ValidateWorldModel(fruitIdentifier)
 		return false, reason
 	end
 
-	local worldModel, reason = DevilFruitAssets.GetWorldModel(fruit.FruitKey)
+	local worldModel, worldModelReason = DevilFruitAssets.GetWorldModel(fruit.FruitKey)
 	if not worldModel then
-		return false, reason
+		return false, worldModelReason
 	end
 
 	local fruitKeyAttribute = worldModel:GetAttribute("FruitKey")

@@ -80,16 +80,31 @@ function ReactFrameModalAdapter.new(options)
 end
 
 function ReactFrameModalAdapter:_getAvailableViewportSize()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local viewport = Responsive.getViewport()
 	return Vector2.new(
 		math.max(1, viewport.X - VIEWPORT_MARGIN.X),
 		math.max(1, viewport.Y - VIEWPORT_MARGIN.Y)
 	)
 end
 
-function ReactFrameModalAdapter:_isMobileTestViewport()
-	return Responsive.isMobile()
+function ReactFrameModalAdapter:_usesPhoneModalLayout()
+	return Responsive.isPhoneViewport()
+end
+
+function ReactFrameModalAdapter:_getFrameConstraintScale()
+	if self:_usesPhoneModalLayout() then
+		return 1
+	end
+
+	return Responsive.getUiScale()
+end
+
+function ReactFrameModalAdapter:_getContentScale()
+	if self:_usesPhoneModalLayout() then
+		return MOBILE_CONTENT_SCALE
+	end
+
+	return self:_getFrameConstraintScale()
 end
 
 function ReactFrameModalAdapter:_bindViewportTracking()
@@ -249,8 +264,10 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 	if self.standalone or frame.Visible ~= true then
 		frame.Position = UDim2.fromScale(0.5, 0.5)
 	end
-	local mobileTest = self:_isMobileTestViewport()
-	local desiredSize = if mobileTest then UDim2.fromScale(MOBILE_FRAME_SCALE.X, MOBILE_FRAME_SCALE.Y) else (self.frameSize or UDim2.fromScale(0.9, 0.84))
+	local phoneLayout = self:_usesPhoneModalLayout()
+	local desiredSize = if phoneLayout
+		then UDim2.fromScale(MOBILE_FRAME_SCALE.X, MOBILE_FRAME_SCALE.Y)
+		else (self.frameSize or UDim2.fromScale(0.9, 0.84))
 	if self.standalone or frame.Visible ~= true then
 		frame.Size = desiredSize
 	end
@@ -265,17 +282,28 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 		end
 
 		local availableSize = self:_getAvailableViewportSize()
-		local configuredMaxSize = self.maxSize and Vector2.new(
-			math.min(self.maxSize.X, availableSize.X),
-			math.min(self.maxSize.Y, availableSize.Y)
+		local constraintScale = self:_getFrameConstraintScale()
+		local scaledMaxSize = self.maxSize and Vector2.new(
+			self.maxSize.X * constraintScale,
+			self.maxSize.Y * constraintScale
+		) or nil
+		local scaledMinSize = self.minSize and Vector2.new(
+			self.minSize.X * constraintScale,
+			self.minSize.Y * constraintScale
+		) or nil
+		local configuredMaxSize = scaledMaxSize and Vector2.new(
+			math.min(scaledMaxSize.X, availableSize.X),
+			math.min(scaledMaxSize.Y, availableSize.Y)
 		) or availableSize
-		local maxSize = if mobileTest
+		local maxSize = if phoneLayout
 			then Vector2.new(availableSize.X * MOBILE_FRAME_SCALE.X, availableSize.Y * MOBILE_FRAME_SCALE.Y)
 			else configuredMaxSize
-		local minSize = if mobileTest then Vector2.new(1, 1) else self.minSize and Vector2.new(
-			math.min(self.minSize.X, maxSize.X),
-			math.min(self.minSize.Y, maxSize.Y)
-		) or Vector2.zero
+		local minSize = if phoneLayout
+			then Vector2.new(1, 1)
+			else scaledMinSize and Vector2.new(
+				math.min(scaledMinSize.X, maxSize.X),
+				math.min(scaledMinSize.Y, maxSize.Y)
+			) or Vector2.zero
 
 		sizeConstraint.MinSize = minSize
 		sizeConstraint.MaxSize = maxSize
@@ -468,8 +496,7 @@ function ReactFrameModalAdapter:EnsureHost()
 		host.Parent = frame
 	end
 
-	local mobileTest = self:_isMobileTestViewport()
-	local contentScale = mobileTest and MOBILE_CONTENT_SCALE or 1
+	local contentScale = self:_getContentScale()
 	local scale = host:FindFirstChild(self.hostName .. "ContentScale")
 	if not scale then
 		scale = Instance.new("UIScale")

@@ -177,26 +177,26 @@ function HazardProtection.GetProtection(target, options)
 		return nil
 	end
 
-	local moguServer = getServerFruitModule("Mogu", "MoguServer")
+	local moguServer = getServerFruitModule("Burrow", "BurrowServer")
 	local moguProtection = getMoguProtection(moguServer, targetPlayer, position, options)
 	if moguProtection then
 		logProtectionSkip(moguProtection, options)
 		return moguProtection
 	end
 
-	local toriServer = getServerFruitModule("Tori", "ToriServer")
-	if toriServer and typeof(toriServer.GetProtection) == "function" then
-		local ok, protection = pcall(toriServer.GetProtection, targetPlayer, position, options)
+	local phoenixServer = getServerFruitModule("Phoenix", "PhoenixServer")
+	if phoenixServer and typeof(phoenixServer.GetProtection) == "function" then
+		local ok, protection = pcall(phoenixServer.GetProtection, targetPlayer, position, options)
 		if ok and type(protection) == "table" and protection.Protected == true then
 			return protection
 		end
-	elseif toriServer and typeof(toriServer.IsProtected) == "function" then
-		local ok, isProtected, reason = pcall(toriServer.IsProtected, targetPlayer, position, options)
+	elseif phoenixServer and typeof(phoenixServer.IsProtected) == "function" then
+		local ok, isProtected, reason = pcall(phoenixServer.IsProtected, targetPlayer, position, options)
 		if ok and isProtected == true then
 			return {
 				Protected = true,
-				Source = "Tori",
-				Reason = tostring(reason or "tori_protected"),
+				Source = "Phoenix",
+				Reason = tostring(reason or "phoenix_protected"),
 				Player = targetPlayer,
 				Position = position,
 			}

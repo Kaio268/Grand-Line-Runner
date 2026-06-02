@@ -583,9 +583,9 @@ local function hydrateRuntimeTitles(player)
 			TitleService.UnlockTitle(player, "EnemyOfTheSea")
 			local fruitConfig = DevilFruitConfig.GetFruit(equippedFruit)
 			local fruitKey = fruitConfig and tostring(fruitConfig.FruitKey or "") or ""
-			if fruitKey == "Gomu" then
+			if fruitKey == "Elastic" then
 				TitleService.UnlockTitle(player, "RubberRookie")
-			elseif fruitKey == "Tori" then
+			elseif fruitKey == "Phoenix" then
 				TitleService.UnlockTitle(player, "ThePhoenix")
 			end
 		end

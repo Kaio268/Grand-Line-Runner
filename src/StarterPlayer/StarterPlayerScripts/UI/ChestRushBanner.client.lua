@@ -21,8 +21,6 @@ local DISPLAY_ORDER = 124
 local CHEST_RUSH_GUI_DISPLAY_ORDER = DISPLAY_ORDER - 1
 local ANNOUNCEMENT_TOP_OFFSET = 176
 local ANNOUNCEMENT_MOBILE_TOP_OFFSET = 114
-local TIMER_TOP_OFFSET = 72
-local TIMER_MOBILE_TOP_OFFSET = 58
 local CHEST_RUSH_GUI_NAME = "ChestRushGui"
 local BASE_BANNER_SIZE = Vector2.new(400, 95)
 local BANNER_MOBILE_SCALE = 0.72
@@ -50,7 +48,6 @@ local BASE_CARD_COLOR_2 = Color3.fromRGB(18, 45, 56)
 local TEXT_MAIN = Color3.fromRGB(255, 250, 224)
 local TEXT_MUTED = Color3.fromRGB(238, 204, 126)
 local GOLD = Color3.fromRGB(255, 199, 82)
-local GOLD_BRIGHT = Color3.fromRGB(255, 224, 132)
 local GOLD_GLOW = Color3.fromRGB(255, 178, 56)
 
 local stateEvent = nil
@@ -493,12 +490,8 @@ local function getAnnouncementTopOffset()
 	return if isMobileViewport() then ANNOUNCEMENT_MOBILE_TOP_OFFSET else ANNOUNCEMENT_TOP_OFFSET
 end
 
-local function getTimerTopOffset()
-	return if isMobileViewport() then TIMER_MOBILE_TOP_OFFSET else TIMER_TOP_OFFSET
-end
-
 local function getAnnouncementScaleTarget()
-	return if isMobileViewport() then 0.76 else 1
+	return if isMobileViewport() then 0.76 else Responsive.getUiScale()
 end
 
 local function applyResponsiveLayout()

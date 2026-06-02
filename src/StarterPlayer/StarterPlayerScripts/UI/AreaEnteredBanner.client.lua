@@ -44,7 +44,7 @@ local function getBannerTopOffset()
 end
 
 local function getBannerScaleTarget()
-	return if isMobileViewport() then 0.84 else 1
+	return if isMobileViewport() then 0.84 else Responsive.getUiScale()
 end
 
 
@@ -276,7 +276,7 @@ local function applyResponsiveLayout()
 	root.Size = UDim2.new(UI_CONFIG.WidthScale, 0, 0, UI_CONFIG.Height)
 	sizeConstraint.MinSize = Vector2.new(UI_CONFIG.MinWidth, UI_CONFIG.Height)
 	sizeConstraint.MaxSize = Vector2.new(UI_CONFIG.MaxWidth, UI_CONFIG.Height)
-	rootScale.Scale = 0.98
+	rootScale.Scale = if isMobileViewport() then 0.68 else getBannerScaleTarget() * 0.98
 	card.Size = UDim2.new(1, 0, 0, 74)
 	entryLabel.TextSize = 11
 	entryLabel.Position = UDim2.fromOffset(24, 9)
@@ -320,7 +320,7 @@ local function playBanner(entry)
 	root.Visible = true
 	root.GroupTransparency = 1
 	root.Position = UDim2.new(0.5, 0, 0, topOffset + ANIMATION_CONFIG.SlideOffset)
-	rootScale.Scale = if isMobileViewport() then 0.68 else 0.98
+	rootScale.Scale = if isMobileViewport() then 0.68 else getBannerScaleTarget() * 0.98
 
 	tween(root, TweenInfo.new(
 		ANIMATION_CONFIG.FadeInTime,

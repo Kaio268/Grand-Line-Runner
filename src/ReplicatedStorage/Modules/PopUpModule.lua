@@ -59,6 +59,14 @@ local activeRewardTweens = setmetatable({}, { __mode = "k" })
 local rewardPoolWarmStarted = false
 local isMobileViewport
 
+local function getTransientUiScale()
+	if Responsive.isMobile() then
+		return 1
+	end
+
+	return Responsive.getUiScale()
+end
+
 local PopUpEvent = ReplicatedStorage:FindFirstChild("PopUpEvent")
 if not PopUpEvent then
 	PopUpEvent = Instance.new("RemoteEvent")
@@ -308,16 +316,16 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 	local template = popUpsFolder:WaitForChild("Template")
 
 	if activePopups[text] then
-			local data = activePopups[text]
-			local popup = data.popup
-			if data.removalInProgress then
-				if data.outTween then
-					data.outTween:Cancel()
-				end
-				popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
-				local uiScale = popup:FindFirstChildOfClass("UIScale")
+		local data = activePopups[text]
+		local popup = data.popup
+		if data.removalInProgress then
+			if data.outTween then
+				data.outTween:Cancel()
+			end
+			popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
+			local uiScale = popup:FindFirstChildOfClass("UIScale")
 			if uiScale then
-				uiScale.Scale = 1
+				uiScale.Scale = getTransientUiScale()
 			end
 			data.removalInProgress = false
 		end
@@ -342,7 +350,7 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 	end
 	playSound(isError and "Error" or "Success")
 	if uiScale then
-		TweenService:Create(uiScale, TweenInfo.new(POPUP_TWEEN_IN_TIME, EASING_STYLE_IN, EASING_DIRECTION_IN), {Scale = 1}):Play()
+		TweenService:Create(uiScale, TweenInfo.new(POPUP_TWEEN_IN_TIME, EASING_STYLE_IN, EASING_DIRECTION_IN), {Scale = getTransientUiScale()}):Play()
 	end
 
 	activePopups[text] = {
@@ -377,8 +385,8 @@ function PopUpModule:Local_ShowReward(rewardTable)
 
 	local function getTargetScale(count)
 		local countScale = if count > 6 then 6 / count else 1
-		local viewportScale = if isMobileViewport() then 0.74 else 1
-		return math.min(countScale, viewportScale)
+		local viewportScale = if isMobileViewport() then 0.74 else getTransientUiScale()
+		return countScale * viewportScale
 	end
 
 	local function updateScale(excludedRewards)
@@ -613,7 +621,7 @@ local function trySpawnNext()
 		local tweenIn = TweenService:Create(
 			uiScale,
 			TweenInfo.new(NOTIFY_TWEEN_IN_TIME, EASING_STYLE_IN, EASING_DIRECTION_IN),
-			{ Scale = 1 }
+			{ Scale = getTransientUiScale() }
 		)
 		tweenIn:Play()
 		task.delay(0.2, function()

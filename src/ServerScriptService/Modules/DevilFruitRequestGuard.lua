@@ -4,13 +4,15 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RubberLaunchMath = require(
 	ReplicatedStorage:WaitForChild("Modules")
 		:WaitForChild("DevilFruits")
-		:WaitForChild("Gomu")
+		:WaitForChild("Elastic")
 		:WaitForChild("Shared")
 		:WaitForChild("RubberLaunchMath")
 )
+local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
 local DevilFruitRequestGuard = {}
 
+local ELASTIC_FRUIT_NAME = assert(DevilFruitConfig.GetDisplayName("Elastic"), "Missing Elastic fruit config")
 local RUBBER_LAUNCH_TARGET_HINT_PADDING = 12
 
 local SETTINGS = {
@@ -161,7 +163,7 @@ end
 
 local function countPayloadKeys(payload)
 	local keyCount = 0
-	for key in pairs(payload) do
+	for _ in pairs(payload) do
 		keyCount += 1
 		if keyCount > SETTINGS.MaxPayloadKeys then
 			break
@@ -404,7 +406,7 @@ function DevilFruitRequestGuard.ValidateAndReserve(player, fruitName, abilityNam
 		return false, nil, reason, readyAt
 	end
 
-	if fruitName == "Gomu Gomu no Mi" and abilityName == "RubberLaunch" then
+	if fruitName == ELASTIC_FRUIT_NAME and abilityName == "RubberLaunch" then
 		return validateRubberLaunchHints(player, abilityConfig, sanitizedPayload, characterState)
 	end
 

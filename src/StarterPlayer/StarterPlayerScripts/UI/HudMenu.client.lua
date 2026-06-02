@@ -54,16 +54,24 @@ local TILE_DEFS = {
 	{ name = "Quest", label = "Quest", badgeText = "" },
 }
 
+local function round(value)
+	return math.floor(value + 0.5)
+end
+
 local function getHudLayout()
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
-	local mobile = Responsive.isMobile(viewport)
+	local viewport = Responsive.getViewport()
+	local phone = Responsive.isPhoneViewport(viewport)
+	local tablet = Responsive.isTabletViewport(viewport)
+	local mobile = phone or tablet
 	local compact = Responsive.isCompact(viewport)
-	local tileSize = if mobile then 42 elseif compact then 72 else 98
-	local columnGap = if mobile then 6 elseif compact then 6 else 10
-	local rowGap = if mobile then 6 elseif compact then 6 else 10
+	local uiScale = if mobile then 1 else Responsive.getUiScale(viewport)
+	local tileSize = round((if phone then 42 elseif tablet then 58 elseif compact then 72 else 98) * uiScale)
+	local columnGap = round((if phone then 6 elseif tablet then 8 elseif compact then 6 else 10) * uiScale)
+	local rowGap = round((if phone then 6 elseif tablet then 8 elseif compact then 6 else 10) * uiScale)
 	local stepX = tileSize + columnGap
 	local stepY = tileSize + rowGap
+	local containerOffsetX = round((if phone then 4 elseif tablet then 8 elseif compact then 8 else 10) * uiScale)
+	local containerOffsetY = round((if phone then 98 elseif tablet then 122 elseif compact then 160 else 250) * uiScale)
 	local mobilePositions = {
 		Store = Vector2.new(0, 0),
 		Index = Vector2.new(stepX, 0),
@@ -88,10 +96,10 @@ local function getHudLayout()
 		stepX = stepX,
 		stepY = stepY,
 		mobile = mobile,
-		containerPosition = if mobile
-			then UDim2.fromOffset(4, 98)
-			elseif compact then UDim2.fromOffset(8, 160)
-			else UDim2.fromOffset(10, 250),
+		phone = phone,
+		tablet = tablet,
+		uiScale = uiScale,
+		containerPosition = UDim2.fromOffset(containerOffsetX, containerOffsetY),
 		positions = if mobile then mobilePositions else stackedPositions,
 	}
 end
@@ -122,6 +130,15 @@ local HUD_MOBILE_ICON_SIZE_OVERRIDES = {
 	Settings = Vector2.new(38, 38),
 	Rebirth = Vector2.new(40, 40),
 	Quest = Vector2.new(42, 42),
+}
+
+local HUD_TABLET_ICON_SIZE_OVERRIDES = {
+	Store = Vector2.new(58, 58),
+	Index = Vector2.new(52, 52),
+	Gifts = Vector2.new(52, 52),
+	Settings = Vector2.new(52, 52),
+	Rebirth = Vector2.new(54, 54),
+	Quest = Vector2.new(58, 58),
 }
 
 local HUD_ICON_SCALE_TYPE_OVERRIDES = {
@@ -559,12 +576,21 @@ local function ensureBadge(button, defaultText)
 		badge.ClipsDescendants = false
 		badge.AnchorPoint = Vector2.new(1, 0)
 		badge.BackgroundColor3 = Color3.fromRGB(232, 72, 102)
-		badge.Position = layout.mobile and UDim2.new(1, 3, 0, -3) or UDim2.new(1, 8, 0, -6)
+		badge.Position = if layout.phone
+			then UDim2.new(1, 3, 0, -3)
+			elseif layout.tablet then UDim2.new(1, 5, 0, -4)
+			else UDim2.new(1, 8, 0, -6)
 		badge.ZIndex = math.max(badge.ZIndex, button.ZIndex + 28, 32)
 		if badgeTextValue == "NEW" then
-			badge.Size = layout.mobile and UDim2.fromOffset(28, 14) or UDim2.fromOffset(42, 22)
+			badge.Size = if layout.phone
+				then UDim2.fromOffset(28, 14)
+				elseif layout.tablet then UDim2.fromOffset(34, 18)
+				else UDim2.fromOffset(42, 22)
 		else
-			badge.Size = layout.mobile and UDim2.fromOffset(24, 14) or UDim2.fromOffset(34, 22)
+			badge.Size = if layout.phone
+				then UDim2.fromOffset(24, 14)
+				elseif layout.tablet then UDim2.fromOffset(28, 18)
+				else UDim2.fromOffset(34, 22)
 		end
 	end
 
@@ -593,7 +619,7 @@ local function ensureBadge(button, defaultText)
 		end
 		textLabel.TextStrokeColor3 = Color3.fromRGB(82, 12, 29)
 		textLabel.TextStrokeTransparency = 0.08
-		textLabel.TextSize = layout.mobile and 9 or textLabel.TextSize
+		textLabel.TextSize = if layout.phone then 9 elseif layout.tablet then 10 else textLabel.TextSize
 		textLabel.ZIndex = math.max(textLabel.ZIndex, badge.ZIndex + 1, 33)
 	end
 
@@ -674,12 +700,15 @@ local function ensureGiftSummaryTimer(button)
 	summary.BackgroundTransparency = 0.16
 	summary.BorderSizePixel = 0
 	summary.Font = Enum.Font.GothamBold
-	summary.Position = UDim2.new(0.5, 0, 0, layout.mobile and -1 or 4)
-	summary.Size = layout.mobile and UDim2.fromOffset(30, 8) or UDim2.fromOffset(60, 18)
+	summary.Position = UDim2.new(0.5, 0, 0, if layout.phone then -1 elseif layout.tablet then 2 else 4)
+	summary.Size = if layout.phone
+		then UDim2.fromOffset(30, 8)
+		elseif layout.tablet then UDim2.fromOffset(44, 12)
+		else UDim2.fromOffset(60, 18)
 	summary.Text = tostring(summary.Text ~= "" and summary.Text or "--")
 	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
 	summary.TextScaled = false
-	summary.TextSize = layout.mobile and 5 or 13
+	summary.TextSize = if layout.phone then 5 elseif layout.tablet then 8 else 13
 	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	summary.TextStrokeTransparency = 0
 	summary.TextXAlignment = Enum.TextXAlignment.Center
@@ -691,7 +720,7 @@ local function ensureGiftSummaryTimer(button)
 		corner = Instance.new("UICorner")
 		corner.Parent = summary
 	end
-	corner.CornerRadius = UDim.new(0, layout.mobile and 5 or 9)
+	corner.CornerRadius = UDim.new(0, if layout.phone then 5 elseif layout.tablet then 7 else 9)
 
 	local stroke = summary:FindFirstChildOfClass("UIStroke")
 	if not stroke then
@@ -702,7 +731,7 @@ local function ensureGiftSummaryTimer(button)
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Color = Color3.fromRGB(255, 237, 203)
 	stroke.Transparency = 0.6
-	stroke.Thickness = layout.mobile and 0.7 or 1
+	stroke.Thickness = if layout.phone then 0.7 elseif layout.tablet then 0.85 else 1
 	stroke.Enabled = true
 
 	local gradient = summary:FindFirstChildOfClass("UIGradient")
@@ -865,11 +894,14 @@ local function buildTileStyle(button)
 
 	if iconStyle then
 		local layout = getHudLayout()
-		local iconSize = if layout.mobile
+		local baseIconSize = if layout.phone
 			then (HUD_MOBILE_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(40, 40))
+			elseif layout.tablet then (HUD_TABLET_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(54, 54))
 			else (HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66))
-		local maxIconSize = layout.mobile and 42 or math.huge
-		iconStyle.position = UDim2.fromScale(0.5, layout.mobile and 0.36 or 0.34)
+		local iconScale = if layout.mobile then 1 else layout.uiScale
+		local iconSize = Vector2.new(round(baseIconSize.X * iconScale), round(baseIconSize.Y * iconScale))
+		local maxIconSize = if layout.phone then 42 elseif layout.tablet then 58 else math.huge
+		iconStyle.position = UDim2.fromScale(0.5, layout.mobile and 0.37 or 0.34)
 		iconStyle.size = UDim2.fromOffset(math.min(iconSize.X, maxIconSize), math.min(iconSize.Y, maxIconSize))
 		iconStyle.scaleType = HUD_ICON_SCALE_TYPE_OVERRIDES[button.Name] or Enum.ScaleType.Fit
 		iconStyle.backgroundTransparency = 1
@@ -879,10 +911,13 @@ local function buildTileStyle(button)
 	local titleStyle = normalizeTitleStyle(pickTitleStyle(button))
 	local layout = getHudLayout()
 	if layout.mobile then
-		titleStyle.position = UDim2.fromScale(0.5, 0.74)
-		titleStyle.size = UDim2.new(1, -4, 0, 12)
-		titleStyle.textSize = if button.Name == "Settings" then 8 else 10
+		titleStyle.position = UDim2.fromScale(0.5, layout.tablet and 0.76 or 0.74)
+		titleStyle.size = UDim2.new(1, -4, 0, layout.tablet and 14 or 12)
+		titleStyle.textSize = if layout.tablet then 11 elseif button.Name == "Settings" then 8 else 10
 		titleStyle.textWrapped = false
+	else
+		titleStyle.textSize = round(titleStyle.textSize * layout.uiScale)
+		titleStyle.size = UDim2.new(1, -round(8 * layout.uiScale), 0, titleStyle.textSize + round(4 * layout.uiScale))
 	end
 
 	return {

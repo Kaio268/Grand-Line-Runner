@@ -55,7 +55,7 @@ local function TutorialPrompt(props)
 	local anchorPoint = if hotbarSensitiveStep then Vector2.new(0.5, 0) else Vector2.new(0.5, 1)
 	local promptPosition = if hotbarSensitiveStep
 		then UDim2.new(0.5, 0, 0, 82)
-		else UDim2.new(0.5, 0, 1, mobile and -18 or -112)
+		else UDim2.new(0.5, 0, 1, mobile and -104 or -112)
 
 	return e("Frame", {
 		AnchorPoint = anchorPoint,

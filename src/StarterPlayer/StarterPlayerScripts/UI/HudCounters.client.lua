@@ -15,6 +15,7 @@ local Responsive = require(UiFolder:WaitForChild("Responsive"))
 local HudStatRow = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatRow"))
 local HudStatNotificationLayer = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatNotificationLayer"))
 local HudCounterConfig = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudCounterConfig"))
+local HudStatsTheme = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatsTheme"))
 
 local e = React.createElement
 
@@ -68,6 +69,19 @@ local root = ReactRoblox.createRoot(rootContainer)
 
 local destroyed = false
 local renderQueued = false
+
+local function round(value)
+	return math.floor(value + 0.5)
+end
+
+local function scalePadding(padding, scale)
+	return {
+		Left = round((padding.Left or 0) * scale),
+		Right = round((padding.Right or 0) * scale),
+		Top = round((padding.Top or 0) * scale),
+		Bottom = round((padding.Bottom or 0) * scale),
+	}
+end
 
 local function isReactNode(instance)
 	return typeof(instance) == "Instance" and string.sub(instance.Name, 1, 8) == "ReactHud"
@@ -132,22 +146,23 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	local _, bottomRightInset = GuiService:GetGuiInset()
 	local compact = Responsive.isCompact()
+	local uiScale = if compact then 1 else Responsive.getUiScale()
 	local bottomInset = if compact then 0 else bottomRightInset.Y
-	local rowHeight = compact and MOBILE_ROW_HEIGHT or TARGET_ROW_HEIGHT
-	local rowSpacing = compact and MOBILE_ROW_SPACING or TARGET_ROW_SPACING
-	local panelPadding = compact and MOBILE_PANEL_PADDING or HudCounterConfig.PanelPadding
+	local rowHeight = compact and MOBILE_ROW_HEIGHT or round(TARGET_ROW_HEIGHT * uiScale)
+	local rowSpacing = compact and MOBILE_ROW_SPACING or round(TARGET_ROW_SPACING * uiScale)
+	local panelPadding = compact and MOBILE_PANEL_PADDING or scalePadding(HudCounterConfig.PanelPadding, uiScale)
 	local panelTop = panelPadding.Top
 	local panelBottom = panelPadding.Bottom
 	local totalHeight = panelTop + panelBottom + (rowCount * rowHeight) + (math.max(0, rowCount - 1) * rowSpacing)
 	local moneyRowY = panelTop + ((math.min(3, math.max(1, rowCount)) - 1) * (rowHeight + rowSpacing))
-	local layerWidth = compact and MOBILE_COUNTER_WIDTH or COUNTERS_WIDTH
+	local layerWidth = compact and MOBILE_COUNTER_WIDTH or round(COUNTERS_WIDTH * uiScale)
 
 	layer.AnchorPoint = Vector2.new(0, 1)
 	layer.Position = UDim2.new(
 		0,
-		compact and 0 or COUNTERS_LEFT_PADDING,
+		compact and 0 or round(COUNTERS_LEFT_PADDING * uiScale),
 		1,
-		-((compact and 0 or COUNTERS_BOTTOM_PADDING) + bottomInset)
+		-((compact and 0 or round(COUNTERS_BOTTOM_PADDING * uiScale)) + bottomInset)
 	)
 	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1
@@ -167,26 +182,27 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	local notifications = layer:FindFirstChild("ReactHudCounterNotifications")
 	if notifications and notifications:IsA("Frame") then
-		local notificationHeight = HudCounterConfig.NotificationHeight
-		local notificationX = panelPadding.Left + (compact and 34 or (HudCounterConfig.getBarX() + 10))
+		local notificationHeight = compact and HudCounterConfig.NotificationHeight or round(HudCounterConfig.NotificationHeight * uiScale)
+		local notificationX = panelPadding.Left + (compact and 34 or round((HudCounterConfig.getBarX() + 10) * uiScale))
 		notifications.Position = UDim2.fromOffset(notificationX, math.max(0, moneyRowY - notificationHeight + 6))
-		notifications.Size = UDim2.fromOffset(compact and 108 or HudCounterConfig.NotificationWidth, notificationHeight)
+		notifications.Size = UDim2.fromOffset(compact and 108 or round(HudCounterConfig.NotificationWidth * uiScale), notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
 end
 
 local function getCounterRenderMetrics()
 	local compact = Responsive.isCompact()
+	local uiScale = if compact then 1 else Responsive.getUiScale()
 
 	return {
-		barGap = compact and 4 or BAR_GAP,
-		iconSlotInnerSize = compact and 20 or HudCounterConfig.IconSize,
-		iconSlotWidth = compact and 28 or ICON_SLOT_WIDTH,
-		labelTextSize = compact and 10 or nil,
-		panelPadding = compact and MOBILE_PANEL_PADDING or nil,
-		rowHeight = compact and MOBILE_ROW_HEIGHT or TARGET_ROW_HEIGHT,
-		rowSpacing = compact and MOBILE_ROW_SPACING or TARGET_ROW_SPACING,
-		valueTextSize = compact and 18 or nil,
+		barGap = compact and 4 or round(BAR_GAP * uiScale),
+		iconSlotInnerSize = compact and 20 or round(HudCounterConfig.IconSize * uiScale),
+		iconSlotWidth = compact and 28 or round(ICON_SLOT_WIDTH * uiScale),
+		panelPadding = compact and MOBILE_PANEL_PADDING or scalePadding(HudCounterConfig.PanelPadding, uiScale),
+		rowHeight = compact and MOBILE_ROW_HEIGHT or round(TARGET_ROW_HEIGHT * uiScale),
+		rowSpacing = compact and MOBILE_ROW_SPACING or round(TARGET_ROW_SPACING * uiScale),
+		valueTextSize = compact and 18 or round(HudStatsTheme.Typography.ValueSize * uiScale),
+		labelTextSize = compact and 10 or round(HudStatsTheme.Typography.LabelSize * uiScale),
 	}
 end
 

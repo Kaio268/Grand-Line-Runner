@@ -34,10 +34,10 @@ local DamageProtection = require(
 		:WaitForChild("DamageProtection")
 )
 local devilFruitModules = ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruits")
-local HoroServer = require(getNamedFolder(devilFruitModules, "Horo"):WaitForChild("Server"):WaitForChild("HoroServer"))
-local toriFolder = getNamedFolder(devilFruitModules, "Tori")
-local ToriServer = require(toriFolder:WaitForChild("Server"):WaitForChild("ToriServer"))
-local ToriPassiveService = require(toriFolder:WaitForChild("Server"):WaitForChild("ToriPassiveService"))
+local SpiritServer = require(getNamedFolder(devilFruitModules, "Spirit"):WaitForChild("Server"):WaitForChild("SpiritServer"))
+local phoenixFolder = getNamedFolder(devilFruitModules, "Phoenix")
+local PhoenixServer = require(phoenixFolder:WaitForChild("Server"):WaitForChild("PhoenixServer"))
+local PhoenixPassiveService = require(phoenixFolder:WaitForChild("Server"):WaitForChild("PhoenixPassiveService"))
 
 local CONFIG = {
 	SpawnDelayMin = 2,
@@ -265,7 +265,7 @@ local function getOrCreateRemoteEvent(parent, name)
 end
 
 local function isAirbornePhoenixFlight(player, humanoid, rootPart)
-	if not ToriServer.IsPhoenixFlightActive(player) then
+	if not PhoenixServer.IsPhoenixFlightActive(player) then
 		return false
 	end
 
@@ -297,7 +297,7 @@ local function applyAirbornePhoenixHazardKnockdown(player, humanoid, rootPart)
 		return false
 	end
 
-	hazardTrace("airborne Tori hazard knockdown player=%s pos=%s", player.Name, formatVector3(rootPart.Position))
+	hazardTrace("airborne Phoenix hazard knockdown player=%s pos=%s", player.Name, formatVector3(rootPart.Position))
 	return true
 end
 
@@ -700,17 +700,17 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 	if isHazardProtected then
 		return true
 	end
-	if HoroServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
-		HoroServer.InterruptActiveProjection(player, "wave_touch")
+	if SpiritServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
+		SpiritServer.InterruptActiveProjection(player, "wave_touch")
 		return true
 	end
-	if ToriServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then
+	if PhoenixServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then
 		return true
 	end
 	if applyAirbornePhoenixHazardKnockdown(player, humanoid, rootPart) then
 		return true
 	end
-	if ToriPassiveService.TryConsumeRebirth(player, "WaveKill") then
+	if PhoenixPassiveService.TryConsumeRebirth(player, "WaveKill") then
 		return true
 	end
 

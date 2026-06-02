@@ -1,4 +1,4 @@
-local TORI_LIVE_ANIMATION_IDS = {
+local PHOENIX_LIVE_ANIMATION_IDS = {
 	["Phoenix Flame Shield"] = "rbxassetid://97013962566487",
 	["Phoenix FlyEnd"] = "rbxassetid://71602814333465",
 	["Phoenix Flyidle"] = "rbxassetid://101255792958657",
@@ -7,22 +7,28 @@ local TORI_LIVE_ANIMATION_IDS = {
 	["Phoenix Revive"] = "rbxassetid://107891941161688",
 }
 
-local MOGU_LIVE_ANIMATION_IDS = {
+local BURROW_LIVE_ANIMATION_IDS = {
 	MoleDigStart = "rbxassetid://108648477455184",
 	MoleDigEnd = "rbxassetid://70605245221664",
 }
 
-local function toriAnimationPath(animationName)
+local function phoenixAnimationPath(animationName)
 	return {
 		"Assets",
 		"Animations",
-		"Tori",
+		"Phoenix",
 		animationName,
 	}
 end
 
-local function toriAnimationFallbackPaths(animationName)
+local function phoenixAnimationFallbackPaths(animationName)
 	return {
+		{
+			"Assets",
+			"Animations",
+			"Tori",
+			animationName,
+		},
 		{
 			"Assets",
 			"VFX",
@@ -44,26 +50,26 @@ local function toriAnimationFallbackPaths(animationName)
 	}
 end
 
-local function toriEmbeddedAnimation(animationName, length)
+local function phoenixEmbeddedAnimation(animationName, length)
 	return {
-		KeyframeSequencePath = toriAnimationPath(animationName),
-		FallbackKeyframeSequencePaths = toriAnimationFallbackPaths(animationName),
-		LiveAnimationId = TORI_LIVE_ANIMATION_IDS[animationName],
+		KeyframeSequencePath = phoenixAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = phoenixAnimationFallbackPaths(animationName),
+		LiveAnimationId = PHOENIX_LIVE_ANIMATION_IDS[animationName],
 		Length = length,
 	}
 end
 
-local function moguAnimationPath(animationName)
+local function burrowAnimationPath(animationName)
 	return {
 		"Assets",
 		"Animations",
-		"Mogu",
+		"Burrow",
 		"AnimSaves",
 		animationName,
 	}
 end
 
-local function moguAnimationFallbackPaths(animationName)
+local function burrowAnimationFallbackPaths(animationName)
 	return {
 		{
 			"Assets",
@@ -80,11 +86,11 @@ local function moguAnimationFallbackPaths(animationName)
 	}
 end
 
-local function moguEmbeddedAnimation(animationName, length)
+local function burrowEmbeddedAnimation(animationName, length)
 	return {
-		KeyframeSequencePath = moguAnimationPath(animationName),
-		FallbackKeyframeSequencePaths = moguAnimationFallbackPaths(animationName),
-		LiveAnimationId = MOGU_LIVE_ANIMATION_IDS[animationName],
+		KeyframeSequencePath = burrowAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = burrowAnimationFallbackPaths(animationName),
+		LiveAnimationId = BURROW_LIVE_ANIMATION_IDS[animationName],
 		Length = length,
 	}
 end
@@ -102,12 +108,12 @@ local Animations = {
 		R6G = "rbxassetid://95090703686197",
 	},
 
-	Mera = {
+	Inferno = {
 		FlameDash = "rbxassetid://85227673442132",
 		FlameBurstR6 = "rbxassetid://115575898741735",
 	},
 
-	Hie = {
+	Glacial = {
 		IceBlast = {
 			R6 = "rbxassetid://124055413998569",
 			-- R6G rigs are modified R15; use R6-authored fruit animations as a safe fallback.
@@ -124,41 +130,50 @@ local Animations = {
 		},
 	},
 
-	Gomu = {
+	Elastic = {
 		Rocket = "rbxassetid://122282628828007",
 	},
 
-	Bomu = {
+	Blast = {
 		Plant = "rbxassetid://107390126488207",
 		Detonate = "rbxassetid://83134643665375",
 		Jump = "rbxassetid://101430450037801",
 	},
 
-	Horo = {
+	Spirit = {
 		HoroProjection = "rbxassetid://125055360036938",
 		HoroProjected = "rbxassetid://126380618595818",
 	},
 
-	Mogu = {
-		MoleDigStart = moguEmbeddedAnimation("MoleDigStart", 2.6666667),
-		MoleDigEnd = moguEmbeddedAnimation("MoleDigEnd", 1.1833333),
-		-- Keep the legacy logical names alive while the Mogu config moves to the authored keyframe saves.
-		Dive = moguEmbeddedAnimation("MoleDigStart", 2.6666667),
-		Exit = moguEmbeddedAnimation("MoleDigEnd", 1.1833333),
+	Burrow = {
+		MoleDigStart = burrowEmbeddedAnimation("MoleDigStart", 2.6666667),
+		MoleDigEnd = burrowEmbeddedAnimation("MoleDigEnd", 1.1833333),
+		-- Keep the legacy logical names alive while the config moves to the authored keyframe saves.
+		Dive = burrowEmbeddedAnimation("MoleDigStart", 2.6666667),
+		Exit = burrowEmbeddedAnimation("MoleDigEnd", 1.1833333),
 	},
 
-	Suke = {
+	Phantom = {
 		Suke1 = "rbxassetid://126435163862959",
 	},
 
-	Tori = {
-		PhoenixFlightStart = toriEmbeddedAnimation("Phoenix Flystart", 3.1666667),
-		PhoenixFlightLoop = toriEmbeddedAnimation("Phoenix Flying", 5.2),
-		PhoenixFlightIdle = toriEmbeddedAnimation("Phoenix Flyidle", 1),
-		PhoenixFlightEnd = toriEmbeddedAnimation("Phoenix FlyEnd", 1.2),
-		PhoenixFlameShield = toriEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
-		PhoenixRevive = toriEmbeddedAnimation("Phoenix Revive", 2.4),
+	Phoenix = {
+		PhoenixFlightStart = phoenixEmbeddedAnimation("Phoenix Flystart", 3.1666667),
+		PhoenixFlightLoop = phoenixEmbeddedAnimation("Phoenix Flying", 5.2),
+		PhoenixFlightIdle = phoenixEmbeddedAnimation("Phoenix Flyidle", 1),
+		PhoenixFlightEnd = phoenixEmbeddedAnimation("Phoenix FlyEnd", 1.2),
+		PhoenixFlameShield = phoenixEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
+		PhoenixRevive = phoenixEmbeddedAnimation("Phoenix Revive", 2.4),
 	},
 }
+
+Animations.Mera = Animations.Inferno
+Animations.Hie = Animations.Glacial
+Animations.Gomu = Animations.Elastic
+Animations.Bomu = Animations.Blast
+Animations.Mogu = Animations.Burrow
+Animations.Suke = Animations.Phantom
+Animations.Horo = Animations.Spirit
+Animations.Tori = Animations.Phoenix
 
 return Animations

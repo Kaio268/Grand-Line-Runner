@@ -12,13 +12,15 @@ end
 
 local devilFruitModules = ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruits")
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
-local ToriPassiveService = require(getNamedFolder(devilFruitModules, "Tori"):WaitForChild("Server"):WaitForChild("ToriPassiveService"))
+local PhoenixPassiveService = require(
+	getNamedFolder(devilFruitModules, "Phoenix"):WaitForChild("Server"):WaitForChild("PhoenixPassiveService")
+)
 
 local DevilFruitServerController = {}
 
 function DevilFruitServerController.Start(startSource)
 	DevilFruitService.Start(startSource or "DevilFruitServerController")
-	ToriPassiveService.Start()
+	PhoenixPassiveService.Start()
 end
 
 return DevilFruitServerController
