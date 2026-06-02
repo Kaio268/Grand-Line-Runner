@@ -431,7 +431,7 @@ local function positionPreviewModel(previewModel, previewKind, previewName)
 		rotation = CFrame.Angles(math.rad(-14), math.rad(-26), 0)
 	elseif previewKind == "CrewMember" then
 		rotation = CREW_PREVIEW_ROTATION
-	elseif previewKind == "DevilFruit" and previewName == "Tori" then
+	elseif previewKind == "DevilFruit" and previewName == "Phoenix" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
 
@@ -4477,6 +4477,8 @@ local function App(props)
 	local dockToggleLeft = toggleLayout.dock == "hotbarLeft"
 	local dockToggleSlot = toggleLayout.dock == "hotbarSlot"
 	local mobileLayout = toggleLayout.mobile == true
+	local phoneLayout = toggleLayout.phone == true or (mobileLayout and toggleLayout.tablet ~= true)
+	local tabletLayout = toggleLayout.tablet == true
 	local toggleSlotIndex = math.max(1, math.floor(tonumber(toggleLayout.slotIndex) or 5))
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
 	local toggleGap = dockToggleLeft and (mobileLayout and 7 or 20) or 0
@@ -5462,8 +5464,11 @@ local function App(props)
 	local inventoryModal = e(AnimatedInventoryModal, {
 		isOpen = props.isOpen,
 		panelChildren = modalPanelChildren,
-		panelSize = mobileLayout and UDim2.fromScale(0.74, 0.8) or UDim2.fromScale(0.9, 0.82),
-		contentScale = mobileLayout and 0.62 or 1,
+		panelSize = if phoneLayout
+			then UDim2.fromScale(0.74, 0.8)
+			elseif tabletLayout then UDim2.fromScale(0.86, 0.78)
+			else UDim2.fromScale(0.9, 0.82),
+		contentScale = if phoneLayout then 0.62 elseif tabletLayout then 0.76 else 1,
 		openPosition = INVENTORY_MODAL_OPEN_POSITION,
 		closedPosition = INVENTORY_MODAL_CLOSED_POSITION,
 		backdropTransparency = INVENTORY_MODAL_BACKDROP_TRANSPARENCY,

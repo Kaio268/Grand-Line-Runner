@@ -1,4 +1,4 @@
-local TORI_LIVE_ANIMATION_IDS = {
+local PHOENIX_LIVE_ANIMATION_IDS = {
 	["Phoenix Flame Shield"] = "rbxassetid://97013962566487",
 	["Phoenix FlyEnd"] = "rbxassetid://71602814333465",
 	["Phoenix Flyidle"] = "rbxassetid://101255792958657",
@@ -12,17 +12,23 @@ local MOGU_LIVE_ANIMATION_IDS = {
 	MoleDigEnd = "rbxassetid://70605245221664",
 }
 
-local function toriAnimationPath(animationName)
+local function phoenixAnimationPath(animationName)
 	return {
 		"Assets",
 		"Animations",
-		"Tori",
+		"Phoenix",
 		animationName,
 	}
 end
 
-local function toriAnimationFallbackPaths(animationName)
+local function phoenixAnimationFallbackPaths(animationName)
 	return {
+		{
+			"Assets",
+			"Animations",
+			"Tori",
+			animationName,
+		},
 		{
 			"Assets",
 			"VFX",
@@ -44,11 +50,11 @@ local function toriAnimationFallbackPaths(animationName)
 	}
 end
 
-local function toriEmbeddedAnimation(animationName, length)
+local function phoenixEmbeddedAnimation(animationName, length)
 	return {
-		KeyframeSequencePath = toriAnimationPath(animationName),
-		FallbackKeyframeSequencePaths = toriAnimationFallbackPaths(animationName),
-		LiveAnimationId = TORI_LIVE_ANIMATION_IDS[animationName],
+		KeyframeSequencePath = phoenixAnimationPath(animationName),
+		FallbackKeyframeSequencePaths = phoenixAnimationFallbackPaths(animationName),
+		LiveAnimationId = PHOENIX_LIVE_ANIMATION_IDS[animationName],
 		Length = length,
 	}
 end
@@ -151,14 +157,16 @@ local Animations = {
 		Suke1 = "rbxassetid://126435163862959",
 	},
 
-	Tori = {
-		PhoenixFlightStart = toriEmbeddedAnimation("Phoenix Flystart", 3.1666667),
-		PhoenixFlightLoop = toriEmbeddedAnimation("Phoenix Flying", 5.2),
-		PhoenixFlightIdle = toriEmbeddedAnimation("Phoenix Flyidle", 1),
-		PhoenixFlightEnd = toriEmbeddedAnimation("Phoenix FlyEnd", 1.2),
-		PhoenixFlameShield = toriEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
-		PhoenixRevive = toriEmbeddedAnimation("Phoenix Revive", 2.4),
+	Phoenix = {
+		PhoenixFlightStart = phoenixEmbeddedAnimation("Phoenix Flystart", 3.1666667),
+		PhoenixFlightLoop = phoenixEmbeddedAnimation("Phoenix Flying", 5.2),
+		PhoenixFlightIdle = phoenixEmbeddedAnimation("Phoenix Flyidle", 1),
+		PhoenixFlightEnd = phoenixEmbeddedAnimation("Phoenix FlyEnd", 1.2),
+		PhoenixFlameShield = phoenixEmbeddedAnimation("Phoenix Flame Shield", 1.6666667),
+		PhoenixRevive = phoenixEmbeddedAnimation("Phoenix Revive", 2.4),
 	},
 }
+
+Animations.Tori = Animations.Phoenix
 
 return Animations

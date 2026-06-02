@@ -5,7 +5,7 @@ local DataManager = require(ServerScriptService.Data:WaitForChild("DataManager")
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local rewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
-local PLACE_ID = 129073777843683
+local PLACE_ID = game.PlaceId
 local GROUP_ID = 17179624
 
 local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)

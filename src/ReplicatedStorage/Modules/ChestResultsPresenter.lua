@@ -1295,7 +1295,7 @@ end
 
 local function fitDevilFruitRewardPreviewModel(previewModel, camera, fruitKey)
 	local rotation = CFrame.Angles(math.rad(-10), math.rad(24), 0)
-	if tostring(fruitKey or "") == "Tori" then
+	if tostring(fruitKey or "") == "Phoenix" then
 		rotation = CFrame.Angles(math.rad(-4), math.rad(24), 0)
 	end
 

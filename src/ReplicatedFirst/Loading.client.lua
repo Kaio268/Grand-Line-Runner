@@ -5,6 +5,18 @@ local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
+local Responsive = nil
+
+do
+	local uiFolder = ReplicatedStorage:FindFirstChild("UI")
+	local responsiveModule = uiFolder and uiFolder:FindFirstChild("Responsive")
+	if responsiveModule and responsiveModule:IsA("ModuleScript") then
+		local ok, result = pcall(require, responsiveModule)
+		if ok and typeof(result) == "table" then
+			Responsive = result
+		end
+	end
+end
 
 local PLAYER_GUI_TIMEOUT_SECONDS = 5
 local MIN_DISPLAY_SECONDS = 2.5
@@ -197,6 +209,14 @@ local function ensureUIScale(guiObject: Instance): UIScale
 	scale.Scale = 1
 	scale.Parent = guiObject
 	return scale
+end
+
+local function getLoadingUiScale()
+	if Responsive and typeof(Responsive.getUiScale) == "function" then
+		return Responsive.getUiScale()
+	end
+
+	return 1
 end
 
 local function ensureCorner(parent: Instance, radius: number)
@@ -445,6 +465,7 @@ end
 local screenGui, root = mountLoadingScreen()
 removeDefaultLoadingScreen()
 local rootScale = ensureUIScale(root)
+rootScale.Scale = getLoadingUiScale()
 local statusLabel: TextLabel? = nil
 local tipLabel: TextLabel? = nil
 local statusOverride: string? = nil
@@ -1007,7 +1028,7 @@ local function fadeOutAndDestroy()
 		end
 	end
 
-	table.insert(tweens, TweenService:Create(rootScale, shrinkInfo, { Scale = 0.9 }))
+	table.insert(tweens, TweenService:Create(rootScale, shrinkInfo, { Scale = getLoadingUiScale() * 0.9 }))
 	for _, tween in ipairs(tweens) do
 		tween:Play()
 	end

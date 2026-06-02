@@ -414,7 +414,7 @@ local TITLE_GROUPS = {
 			ThePhoenix = {
 				DisplayName = "The Phoenix",
 				Description = "Cloaked in sacred blue flames, this captain rises even when the sea thinks they have fallen.",
-				RequirementText = "Eat the Tori Tori Fruit.",
+				RequirementText = "Eat the Phoenix Fruit.",
 				UnlockType = "Persistent",
 			},
 			RebornFlame = {

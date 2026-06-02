@@ -250,6 +250,12 @@ local timerRoot = createInstance("CanvasGroup", {
 })
 timerRoot.Parent = screenGui
 
+local timerScale = createInstance("UIScale", {
+	Name = "ChestRushTimerScale",
+	Scale = 1,
+})
+timerScale.Parent = timerRoot
+
 local timerSize = createInstance("UISizeConstraint", {
 	Name = "ChestRushTimerSize",
 	MinSize = Vector2.new(220, 56),
@@ -306,7 +312,11 @@ local function getTimerTopOffset()
 end
 
 local function getAnnouncementScaleTarget()
-	return if isMobileViewport() then 0.76 else 1
+	return if isMobileViewport() then 0.76 else Responsive.getUiScale()
+end
+
+local function getTimerScaleTarget()
+	return if isMobileViewport() then 1 else Responsive.getUiScale()
 end
 
 local function applyResponsiveLayout()
@@ -331,6 +341,7 @@ local function applyResponsiveLayout()
 		timerLabel.TextSize = 20
 		timerLabel.Position = UDim2.fromOffset(14, 17)
 		timerLabel.Size = UDim2.new(1, -28, 0, 24)
+		timerScale.Scale = getTimerScaleTarget()
 	else
 		announcementRoot.Size = UDim2.new(0.82, 0, 0, 92)
 		announcementSize.MinSize = Vector2.new(280, 92)
@@ -352,6 +363,7 @@ local function applyResponsiveLayout()
 		timerLabel.TextSize = 26
 		timerLabel.Position = UDim2.fromOffset(18, 22)
 		timerLabel.Size = UDim2.new(1, -36, 0, 28)
+		timerScale.Scale = getTimerScaleTarget()
 	end
 
 	announcementRoot.Position = UDim2.new(0.5, 0, 0, getAnnouncementTopOffset())
@@ -379,7 +391,7 @@ local function showAnnouncement(title, subtitle)
 	announcementRoot.Visible = true
 	announcementRoot.GroupTransparency = 1
 	announcementRoot.Position = UDim2.new(0.5, 0, 0, topOffset + SLIDE_OFFSET)
-	announcementScale.Scale = if isMobileViewport() then 0.7 else 0.98
+	announcementScale.Scale = if isMobileViewport() then 0.7 else scaleTarget * 0.98
 
 	playTween(announcementTweens, announcementRoot, TweenInfo.new(
 		FADE_IN_TIME,

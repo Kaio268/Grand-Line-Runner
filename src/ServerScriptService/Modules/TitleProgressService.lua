@@ -277,7 +277,7 @@ function TitleProgressService.RecordFruitEaten(player, fruitName)
 	unlock(player, "EnemyOfTheSea")
 	if isFruitKey(fruitName, "Gomu") then
 		unlock(player, "RubberRookie")
-	elseif isFruitKey(fruitName, "Tori") then
+	elseif isFruitKey(fruitName, "Phoenix") then
 		unlock(player, "ThePhoenix")
 	end
 end

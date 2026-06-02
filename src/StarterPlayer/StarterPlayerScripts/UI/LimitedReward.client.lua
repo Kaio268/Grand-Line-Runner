@@ -16,7 +16,7 @@ local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local LimitedRewardScreen = require(UiFolder:WaitForChild("LimitedReward"):WaitForChild("LimitedRewardScreen"))
 
-local PLACE_ID = 129073777843683
+local PLACE_ID = game.PlaceId
 local ITEM_TYPE = Enum.AvatarItemType.Asset
 local COOLDOWN_TIME = 5
 local CLICK_COOLDOWN = 0.2

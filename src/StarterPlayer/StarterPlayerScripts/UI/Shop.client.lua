@@ -1,6 +1,5 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -13,6 +12,7 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdapter"))
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
 
 local ShopFolder = UiFolder:WaitForChild("Shop")
 local ShopShell = require(ShopFolder:WaitForChild("ShopShell"))
@@ -159,11 +159,13 @@ local function ensureStoreFrameLayout()
 		sizeConstraint.Parent = storeFrame
 	end
 
-	local camera = Workspace.CurrentCamera
-	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
+	local viewport = Responsive.getViewport()
+	local constraintScale = if Responsive.isMobile(viewport) then 1 else Responsive.getUiScale(viewport)
 	local availableSize = Vector2.new(math.max(1, viewport.X - 24), math.max(1, viewport.Y - 24))
-	local maxSize = Vector2.new(math.min(1340, availableSize.X), math.min(860, availableSize.Y))
-	sizeConstraint.MinSize = Vector2.new(math.min(980, maxSize.X), math.min(680, maxSize.Y))
+	local configuredMax = Vector2.new(1340 * constraintScale, 860 * constraintScale)
+	local configuredMin = Vector2.new(980 * constraintScale, 680 * constraintScale)
+	local maxSize = Vector2.new(math.min(configuredMax.X, availableSize.X), math.min(configuredMax.Y, availableSize.Y))
+	sizeConstraint.MinSize = Vector2.new(math.min(configuredMin.X, maxSize.X), math.min(configuredMin.Y, maxSize.Y))
 	sizeConstraint.MaxSize = maxSize
 end
 

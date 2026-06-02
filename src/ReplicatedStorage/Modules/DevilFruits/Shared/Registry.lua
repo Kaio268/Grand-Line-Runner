@@ -150,9 +150,9 @@ local STRUCTURED_FRUIT_ENTRY_MODULES = {
 		Client = "HoroClient",
 		Server = "HoroServer",
 	},
-	Tori = {
-		Client = "ToriClient",
-		Server = "ToriServer",
+	Phoenix = {
+		Client = "PhoenixClient",
+		Server = "PhoenixServer",
 	},
 }
 

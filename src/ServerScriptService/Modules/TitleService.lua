@@ -585,7 +585,7 @@ local function hydrateRuntimeTitles(player)
 			local fruitKey = fruitConfig and tostring(fruitConfig.FruitKey or "") or ""
 			if fruitKey == "Gomu" then
 				TitleService.UnlockTitle(player, "RubberRookie")
-			elseif fruitKey == "Tori" then
+			elseif fruitKey == "Phoenix" then
 				TitleService.UnlockTitle(player, "ThePhoenix")
 			end
 		end
