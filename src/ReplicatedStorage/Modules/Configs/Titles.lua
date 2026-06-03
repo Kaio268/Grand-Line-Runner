@@ -221,6 +221,10 @@ local TITLE_GROUPS = {
 				DisplayName = "Tester",
 				Description = "Temporary pre-release testing title.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.10,
+					resources = 0.10,
+				},
 				VisualStyle = {
 					AccentColor = Color3.fromRGB(105, 225, 255),
 					SurfaceColor = Color3.fromRGB(15, 48, 65),
@@ -369,8 +373,8 @@ local TITLE_GROUPS = {
 				RequirementText = "Own the Captain Pass.",
 				UnlockType = "Persistent",
 				Buffs = {
-					beli = 0.20,
-					resources = 0.20,
+					beli = 0.50,
+					resources = 0.50,
 					speed = 0.10,
 				},
 				VisualStyle = {
@@ -399,6 +403,9 @@ local TITLE_GROUPS = {
 				Description = "The weakest chest gave you something it had no business giving.",
 				RequirementText = "Get a high-rarity reward from a Wooden chest.",
 				UnlockType = "Persistent",
+				Buffs = {
+					resources = 0.10,
+				},
 			},
 			MaxDeck = {
 				DisplayName = "Max Deck",
@@ -422,7 +429,7 @@ local TITLE_GROUPS = {
 				RequirementText = "Complete an Abyssal run with less than 10 speed.",
 				UnlockType = "Persistent",
 				Buffs = {
-					speed = 2,
+					speed = 0.10,
 				},
 			},
 			ThePhoenix = {
@@ -436,9 +443,6 @@ local TITLE_GROUPS = {
 				Description = "The final blow came, the flames answered, and you stood back up anyway.",
 				RequirementText = "Trigger Phoenix Rebirth and survive.",
 				UnlockType = "Persistent",
-				Buffs = {
-					Speed = .10,
-				},
 			},
 			DespawnDenier = {
 				DisplayName = "Despawn Denier",
@@ -478,6 +482,7 @@ local TITLE_GROUPS = {
 				UnlockType = "Persistent",
 				Buffs = {
 					resources = 0.10,
+				},
 			},
 			InsuranceFraud = {
 				DisplayName = "Insurance Fraud",
@@ -485,7 +490,8 @@ local TITLE_GROUPS = {
 				RequirementText = "Trigger Phoenix Rebirth while carrying a reward.",
 				UnlockType = "Persistent",
 				Buffs = {
-					beli = 0.08,
+					beli = 0.10,
+				},
 			},
 			PirateEmperor = {
 				DisplayName = "Pirate Emperor",
@@ -494,6 +500,10 @@ local TITLE_GROUPS = {
 				UnlockType = "DynamicRank",
 				RankAttribute = "LB_Bounty",
 				RequiredRank = 1,
+				Buffs = {
+					beli = 1,
+					resources = 1,
+				},
 			},
 		},
 	},
