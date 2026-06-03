@@ -67,7 +67,7 @@ local ITEMS = {
 		DisplayName = "Wooden Chest",
 		Icon = "rbxassetid://88825249018556",
 		Category = "Chest",
-		Aliases = { "Wooden Chest", "Wooden Chests", "Wood Chest", "Wood Chests", "WoodChest" },
+		Aliases = { "Wooden Chest", "Wooden Chests", "Wood Chest", "Wood Chests", "WoodChest", "Supply Chest" },
 	},
 	IronChest = {
 		DisplayName = "Iron Chest",
@@ -94,18 +94,85 @@ local ITEMS = {
 		Aliases = {
 			"Devil Fruit Chest",
 			"Devil Fruit Chests",
+		},
+	},
+	CommonDevilFruitChest = {
+		DisplayName = "Common Devil Fruit Chest",
+		Icon = "rbxassetid://88825249018556",
+		Category = "Chest",
+		Aliases = {
 			"CommonDevilFruitChest",
 			"Common Devil Fruit Chest",
 			"Common Devil Fruit Chests",
+		},
+	},
+	RareDevilFruitChest = {
+		DisplayName = "Rare Devil Fruit Chest",
+		Icon = "rbxassetid://88825249018556",
+		Category = "Chest",
+		Aliases = {
 			"RareDevilFruitChest",
 			"Rare Devil Fruit Chest",
 			"Rare Devil Fruit Chests",
+		},
+	},
+	LegendaryDevilFruitChest = {
+		DisplayName = "Legendary Devil Fruit Chest",
+		Icon = "rbxassetid://88825249018556",
+		Category = "Chest",
+		Aliases = {
 			"LegendaryDevilFruitChest",
 			"Legendary Devil Fruit Chest",
 			"Legendary Devil Fruit Chests",
+		},
+	},
+	MythicDevilFruitChest = {
+		DisplayName = "Mythic Devil Fruit Chest",
+		Icon = "rbxassetid://88825249018556",
+		Category = "Chest",
+		Aliases = {
 			"MythicDevilFruitChest",
 			"Mythic Devil Fruit Chest",
 			"Mythic Devil Fruit Chests",
+		},
+	},
+	MoneyBoost = {
+		DisplayName = "Money Boost",
+		Icon = "rbxassetid://123727379614328",
+		Category = "Boost",
+		Aliases = {
+			"Beli Boost",
+			"2x Beli Boost",
+			"x2Money",
+			"x2MoneyTime",
+			"Potions.x2MoneyTime",
+			"Multipliers.MoneyMult",
+			"MoneyMult",
+		},
+	},
+	SpeedBoost = {
+		DisplayName = "Speed Boost",
+		Icon = "rbxassetid://96331945137652",
+		Category = "Boost",
+		Aliases = {
+			"Walk Speed Boost",
+			"Walkspeed Boost",
+			"x1.5 Speed Boost",
+			"x1.5 Walk Speed Boost",
+			"x15WalkSpeed",
+			"x15WalkSpeedTime",
+			"Potions.x15WalkSpeedTime",
+		},
+	},
+	LuckBoost = {
+		DisplayName = "Luck Boost",
+		Icon = "rbxassetid://99305009492305",
+		Category = "Boost",
+		Aliases = {
+			"Server Luck",
+			"xLuck",
+			"xLuckTime",
+			"Potions.xLuckTime",
 		},
 	},
 	MythicKey = {

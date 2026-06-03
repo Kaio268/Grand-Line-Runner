@@ -31,6 +31,11 @@ local noticeToken = 0
 local requestedSectionKey = nil
 local requestedSectionRequestId = 0
 
+local STORE_FRAME_SIZE = UDim2.fromScale(0.84, 0.78)
+local STORE_MOBILE_FRAME_SIZE = UDim2.fromScale(0.9, 0.84)
+local STORE_MIN_SIZE = Vector2.new(900, 620)
+local STORE_MAX_SIZE = Vector2.new(1200, 780)
+
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
 	frameName = "Store",
@@ -38,8 +43,9 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	backdropName = "ReactStoreBackdrop",
 	backdropActive = false,
 	modalStateKey = "ShopModal",
-	minSize = Vector2.new(980, 680),
-	maxSize = Vector2.new(1340, 860),
+	frameSize = STORE_FRAME_SIZE,
+	minSize = STORE_MIN_SIZE,
+	maxSize = STORE_MAX_SIZE,
 	createFrameIfMissing = true,
 	standalone = true,
 })
@@ -64,6 +70,7 @@ end
 
 local unregisterModal = ReactModalRegistry.Register("Store", {
 	toggle = function()
+		purchaseAdapter:refreshOwnership()
 		modalAdapter:Toggle()
 		if scheduleRender then
 			scheduleRender()
@@ -71,6 +78,7 @@ local unregisterModal = ReactModalRegistry.Register("Store", {
 	end,
 	open = function(payload)
 		requestSectionFromPayload(payload)
+		purchaseAdapter:refreshOwnership()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
 		end
@@ -161,9 +169,12 @@ local function ensureStoreFrameLayout()
 		return
 	end
 
+	local viewport = Responsive.getViewport()
+	local isMobile = Responsive.isMobile(viewport)
+
 	storeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	storeFrame.Position = UDim2.fromScale(0.5, 0.5)
-	storeFrame.Size = UDim2.fromScale(0.9, 0.84)
+	storeFrame.Size = if isMobile then STORE_MOBILE_FRAME_SIZE else STORE_FRAME_SIZE
 	storeFrame.ClipsDescendants = true
 	storeFrame.Active = true
 	storeFrame.ZIndex = 120
@@ -176,11 +187,10 @@ local function ensureStoreFrameLayout()
 		sizeConstraint.Parent = storeFrame
 	end
 
-	local viewport = Responsive.getViewport()
-	local constraintScale = if Responsive.isMobile(viewport) then 1 else Responsive.getUiScale(viewport)
+	local constraintScale = if isMobile then 1 else Responsive.getUiScale(viewport)
 	local availableSize = Vector2.new(math.max(1, viewport.X - 24), math.max(1, viewport.Y - 24))
-	local configuredMax = Vector2.new(1340 * constraintScale, 860 * constraintScale)
-	local configuredMin = Vector2.new(980 * constraintScale, 680 * constraintScale)
+	local configuredMax = Vector2.new(STORE_MAX_SIZE.X * constraintScale, STORE_MAX_SIZE.Y * constraintScale)
+	local configuredMin = Vector2.new(STORE_MIN_SIZE.X * constraintScale, STORE_MIN_SIZE.Y * constraintScale)
 	local maxSize = Vector2.new(math.min(configuredMax.X, availableSize.X), math.min(configuredMax.Y, availableSize.Y))
 	sizeConstraint.MinSize = Vector2.new(math.min(configuredMin.X, maxSize.X), math.min(configuredMin.Y, maxSize.Y))
 	sizeConstraint.MaxSize = maxSize

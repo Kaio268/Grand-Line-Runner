@@ -1140,6 +1140,9 @@ function ProfileMigrations.Apply(data)
 	local gamepasses = ensureTable(data, "Gamepasses")
 	gamepasses.x2MoneyValue = coerceNumber(gamepasses.x2MoneyValue, 1)
 
+	local multipliers = ensureTable(data, "Multipliers")
+	multipliers.MoneyMult = math.max(0, coerceNumber(multipliers.MoneyMult, 0))
+
 	local dailyClaims = ensureTable(data, "DailyClaims")
 	local captainSupply = ensureTable(dailyClaims, "CaptainSupply")
 	if typeof(captainSupply.LastClaimDate) ~= "string" then

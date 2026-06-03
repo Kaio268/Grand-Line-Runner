@@ -187,22 +187,18 @@ function ShopReceiptGrants.GrantStarterPack(player, profile, dataManager)
 	return true, "granted"
 end
 
-function ShopReceiptGrants.GrantCaptainDailyChest(player, dataManager)
-	addBeli(dataManager, player, 10000)
-	addValue(dataManager, player, "FoodInventory.Apple", 10)
-	addValue(dataManager, player, "FoodInventory.Rice", 5)
-	addValue(dataManager, player, "FoodInventory.Meat", 3)
-	addValue(dataManager, player, "FoodInventory.SeaBeastMeat", 1)
-	addValue(dataManager, player, "Materials.Timber", 75)
-	addValue(dataManager, player, "Materials.Iron", 20)
-	addValue(dataManager, player, "Materials.AncientTimber", 1)
-	triggerFoodAndShipTutorials(player, "shop_captain_daily_chest", {
-		Apple = 10,
-		Rice = 5,
-		Meat = 3,
-		SeaBeastMeat = 1,
+function ShopReceiptGrants.GrantCaptainDailyChest(player, profile, dataManager)
+	if typeof(profile) ~= "table" or typeof(profile.Data) ~= "table" then
+		return fail("profile_not_ready")
+	end
+
+	local unopened = addUnopenedChest(profile.Data, {
+		ChestKind = ChestRewards.ChestKinds.Standard,
+		Tier = "Wooden",
+		Source = "CaptainSupply",
 	})
-	return true
+	setValue(dataManager, player, "UnopenedChests", unopened)
+	return true, "granted"
 end
 
 function ShopReceiptGrants.GrantPermanentShieldSlot(player, dataManager)

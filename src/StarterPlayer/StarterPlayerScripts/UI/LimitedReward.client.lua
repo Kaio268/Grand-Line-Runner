@@ -1,6 +1,11 @@
+local LIMITED_REWARD_ENABLED = false
+
+if LIMITED_REWARD_ENABLED ~= true then
+	return
+end
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local AvatarEditorService = game:GetService("AvatarEditorService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -17,8 +22,7 @@ local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local LimitedRewardScreen = require(UiFolder:WaitForChild("LimitedReward"):WaitForChild("LimitedRewardScreen"))
 
 local PLACE_ID = game.PlaceId
-local ITEM_TYPE = Enum.AvatarItemType.Asset
-local COOLDOWN_TIME = 5
+local GROUP_ID = 17179624
 local CLICK_COOLDOWN = 0.2
 
 local RewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
@@ -43,12 +47,9 @@ local modalAdapter = ReactFrameModalAdapter.new({
 local destroyed = false
 local renderQueued = false
 local connections = {}
-local hasInventoryAccess = false
-local cooldownStarted = false
-local cooldownFinished = false
 local rewardAlreadyClaimedLocal = false
-local favoriteText = "0/1"
-local likeText = "0/1"
+local groupText = "0/1"
+local claimText = "0/1"
 local lastClick = 0
 local scheduleRender
 
@@ -99,20 +100,18 @@ local function hasRewardAlready()
 	return false
 end
 
-local function getFavoriteState()
-	if not hasInventoryAccess then
-		return false
-	end
+local function syncRequirementState()
+	local inGroup = false
 	local ok, result = pcall(function()
-		return AvatarEditorService:GetFavorite(PLACE_ID, ITEM_TYPE)
+		return player:IsInGroup(GROUP_ID)
 	end)
-	return ok and result == true
-end
+	if ok and result == true then
+		inGroup = true
+	end
 
-local function syncFavoriteState()
-	local isFavorited = getFavoriteState()
-	favoriteText = if isFavorited then "1/1" else "0/1"
-	return isFavorited
+	groupText = if inGroup then "1/1" else "0/1"
+	claimText = if hasRewardAlready() then "1/1" else "0/1"
+	return inGroup
 end
 
 scheduleRender = function()
@@ -129,9 +128,10 @@ scheduleRender = function()
 				return
 			end
 
+			syncRequirementState()
 			root:render(ReactRoblox.createPortal(React.createElement(LimitedRewardScreen, {
-				favoriteText = favoriteText,
-				likeText = likeText,
+				groupText = groupText,
+				claimText = claimText,
 				onClaim = function()
 					local now = os.clock()
 					if now - lastClick < CLICK_COOLDOWN then
@@ -144,66 +144,46 @@ scheduleRender = function()
 						return
 					end
 
-					if not hasInventoryAccess then
-						AvatarEditorService:PromptAllowInventoryReadAccess()
-					end
-
-					if not cooldownStarted then
-						cooldownStarted = true
-						task.delay(COOLDOWN_TIME, function()
-							cooldownFinished = true
-							if hasInventoryAccess and syncFavoriteState() then
-								likeText = "1/1"
-							end
-							scheduleRender()
-						end)
-					end
-
-					if not cooldownFinished then
-						local isFavorited = hasInventoryAccess and syncFavoriteState()
+					local inGroup = syncRequirementState()
+					if not inGroup then
 						scheduleRender()
-						if not hasInventoryAccess or not isFavorited then
-							showPopup("Please leave a favorite on the game.", Color3.new(0, 0, 0), true)
-						else
-							showPopup("You must leave a like on the game.", Color3.new(0, 0, 0), true)
-						end
+						showPopup("Join the group to claim this reward.", Color3.new(0, 0, 0), true)
 						return
 					end
 
-					local isFavorited = syncFavoriteState()
-					if isFavorited and likeText ~= "1/1" then
-						likeText = "1/1"
-					end
-
-					if likeText == "1/1" and isFavorited then
-						RewardRemote:FireServer(PLACE_ID, true, true)
-						showPopup("Reward claimed.", Color3.new(0, 0.8, 0), false)
-						rewardAlreadyClaimedLocal = true
-					elseif not isFavorited then
-						showPopup("Please leave a favorite on the game.", Color3.new(0, 0, 0), true)
-					else
-						showPopup("You must leave a like on the game.", Color3.new(0, 0, 0), true)
-					end
+					RewardRemote:FireServer(PLACE_ID)
+					showPopup("Checking reward claim...", Color3.new(0, 0.8, 0), false)
 					scheduleRender()
 				end,
 				onClose = function()
 					ReactModalRegistry.Close("LimitedReward")
 				end,
-				statusText = "Complete both steps, then claim your reward.",
+				statusText = "Join the group, then claim your one-time limited reward.",
 			}), host))
 			modalAdapter:SyncOverlayState()
 		end
 	end)
 end
 
-connections[#connections + 1] = AvatarEditorService.PromptAllowInventoryReadAccessCompleted:Connect(function(result)
-	hasInventoryAccess = result == Enum.AvatarPromptResult.Success
-	if hasInventoryAccess then
-		syncFavoriteState()
+connections[#connections + 1] = RewardRemote.OnClientEvent:Connect(function(status)
+	if status == "Granted" then
+		rewardAlreadyClaimedLocal = true
+		syncRequirementState()
+		showPopup("Reward claimed.", Color3.new(0, 0.8, 0), false)
+	elseif status == "AlreadyClaimed" then
+		rewardAlreadyClaimedLocal = true
+		syncRequirementState()
+		showPopup("You have already claimed this reward.", Color3.new(0.8, 0.8, 0.8), false)
+	elseif status == "NotInGroup" then
+		syncRequirementState()
+		showPopup("Join the group to claim this reward.", Color3.new(0, 0, 0), true)
+	else
+		showPopup("Reward is unavailable right now.", Color3.new(0, 0, 0), true)
 	end
 	scheduleRender()
 end)
 
+syncRequirementState()
 scheduleRender()
 
 script.Destroying:Connect(function()

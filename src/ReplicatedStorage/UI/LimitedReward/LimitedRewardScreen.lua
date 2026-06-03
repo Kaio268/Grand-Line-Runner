@@ -102,15 +102,15 @@ local function LimitedRewardScreen(props)
 				Padding = UDim.new(0, 10),
 				SortOrder = Enum.SortOrder.LayoutOrder,
 			}),
-			Like = e(statRow, {
-				label = "Leave a Like",
+			Group = e(statRow, {
+				label = "Join the Group",
 				layoutOrder = 1,
-				value = props.likeText,
+				value = props.groupText,
 			}),
-			Favorite = e(statRow, {
-				label = "Favorite the Game",
+			Claimed = e(statRow, {
+				label = "One-Time Claim",
 				layoutOrder = 2,
-				value = props.favoriteText,
+				value = props.claimText,
 			}),
 			Claim = e("TextButton", {
 				BackgroundColor3 = COLORS.Gold,

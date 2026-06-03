@@ -11,6 +11,7 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local QuestService = {}
@@ -767,7 +768,7 @@ end
 local function addRewardPopup(rewardPopup, reward)
 	local text = QuestConfig.FormatReward(reward)
 	if text ~= "" then
-		rewardPopup[#rewardPopup + 1] = { text, "" }
+		rewardPopup[#rewardPopup + 1] = { text, RewardIconResolver.GetIcon(reward) }
 	end
 end
 

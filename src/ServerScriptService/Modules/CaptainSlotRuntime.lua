@@ -263,6 +263,42 @@ local function getTitleBeliMultiplier(player)
 	return 1
 end
 
+local function getIndexMoneyMultiplier(player)
+	if typeof(callbacks.GetIndexMoneyMultiplier) == "function" then
+		return math.max(0, tonumber(callbacks.GetIndexMoneyMultiplier(player)) or 1)
+	end
+	if typeof(IncomeClaimMath.GetIndexMoneyMultiplier) == "function" then
+		return IncomeClaimMath.GetIndexMoneyMultiplier(player)
+	end
+
+	return 1
+end
+
+local function getRewardBeliMultiplier(player)
+	if typeof(callbacks.GetRewardBeliMultiplier) == "function" then
+		return math.max(0, tonumber(callbacks.GetRewardBeliMultiplier(player)) or 1)
+	end
+	if typeof(IncomeClaimMath.GetRewardBeliMultiplier) == "function" then
+		return IncomeClaimMath.GetRewardBeliMultiplier(player)
+	end
+
+	return getTitleBeliMultiplier(player) * getIndexMoneyMultiplier(player)
+end
+
+local function getRewardMultiplierMetadata(player)
+	if typeof(callbacks.GetRewardMultiplierMetadata) == "function" then
+		local metadata = callbacks.GetRewardMultiplierMetadata(player)
+		if typeof(metadata) == "table" then
+			return metadata
+		end
+	end
+
+	return {
+		TitleMultiplier = getTitleBeliMultiplier(player),
+		IndexMultiplier = getIndexMoneyMultiplier(player),
+	}
+end
+
 local function getCrewMemberLevel(player, crewMemberName, instanceId)
 	local target = if tostring(instanceId or "") ~= "" then tostring(instanceId) else tostring(crewMemberName or "")
 	if target ~= "" and typeof(callbacks.GetCrewMemberLevel) == "function" then
@@ -309,7 +345,8 @@ local function buildCaptainRateSummary(player, crewMemberName, instanceId)
 		getBaseIncome(player, crewMemberName, instanceId),
 		getBeliBoostMultiplier(player),
 		getCaptainCollectMultiplier(player, crewMemberName, instanceId),
-		getTitleBeliMultiplier(player)
+		getRewardBeliMultiplier(player),
+		getRewardMultiplierMetadata(player)
 	)
 end
 
@@ -317,7 +354,8 @@ local function buildCaptainClaimSummary(player, crewMemberName, instanceId, pend
 	return IncomeClaimMath.BuildClaimSummary(
 		pendingIncome,
 		getCaptainCollectMultiplier(player, crewMemberName, instanceId),
-		getTitleBeliMultiplier(player)
+		getRewardBeliMultiplier(player),
+		getRewardMultiplierMetadata(player)
 	)
 end
 

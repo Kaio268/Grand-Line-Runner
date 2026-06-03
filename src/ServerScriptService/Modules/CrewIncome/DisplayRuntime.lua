@@ -38,8 +38,11 @@ function Module.Install(ctx)
 	local function getStandClaimSummary(...)
 		return ctx.getStandClaimSummary(...)
 	end
-	local function getTitleBeliMultiplier(...)
-		return ctx.getTitleBeliMultiplier(...)
+	local function getRewardBeliMultiplier(...)
+		return ctx.getRewardBeliMultiplier(...)
+	end
+	local function getRewardMultiplierMetadata(...)
+		return ctx.getRewardMultiplierMetadata(...)
 	end
 	local function getStandSlotState(...)
 		return ctx.getStandSlotState(...)
@@ -329,8 +332,12 @@ function Module.Install(ctx)
 		if typeof(captainAssignment) == "table" then
 			local rawCaptainIncome = math.max(0, tonumber(captainAssignment.IncomeToCollect) or 0)
 			local captainCollectMultiplier = math.max(0, CaptainSlotRuntime.GetCaptainCollectMultiplier(player))
-			local captainClaimSummary =
-				IncomeClaimMath.BuildClaimSummary(rawCaptainIncome, captainCollectMultiplier, getTitleBeliMultiplier(player))
+			local captainClaimSummary = IncomeClaimMath.BuildClaimSummary(
+				rawCaptainIncome,
+				captainCollectMultiplier,
+				getRewardBeliMultiplier(player),
+				getRewardMultiplierMetadata(player)
+			)
 			local captainClaimReady = math.max(0, math.floor(tonumber(captainClaimSummary.FinalAmount) or 0))
 			local captainExactClaimReady = math.max(0, tonumber(captainClaimSummary.ExactAmount) or 0)
 			local captainClaimRemainder = math.max(0, captainExactClaimReady - captainClaimReady)

@@ -10,6 +10,7 @@ local RNG = Random.new()
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
 local DevilFruitAssets = require(
 	ReplicatedStorage
 		:WaitForChild("Modules")
@@ -65,6 +66,35 @@ local function getTransientUiScale()
 	end
 
 	return Responsive.getUiScale()
+end
+
+local function resolveRewardPopupEntry(rewardData)
+	local rewardText = ""
+	local explicitIcon = ""
+
+	if typeof(rewardData) == "table" then
+		rewardText = tostring(
+			rewardData[1]
+				or rewardData.Text
+				or rewardData.text
+				or rewardData.DisplayName
+				or rewardData.displayName
+				or rewardData.Name
+				or rewardData.name
+				or ""
+		)
+		explicitIcon = tostring(rewardData[2] or rewardData.Icon or rewardData.icon or rewardData.Image or rewardData.image or "")
+	elseif rewardData ~= nil then
+		rewardText = tostring(rewardData)
+	end
+
+	local resolved = RewardIconResolver.Resolve(rewardData, explicitIcon)
+	if rewardText == "" then
+		rewardText = tostring(resolved.displayName or "")
+	end
+
+	local iconImage = if explicitIcon ~= "" then explicitIcon else tostring(resolved.icon or "")
+	return rewardText, iconImage
 end
 
 local PopUpEvent = ReplicatedStorage:FindFirstChild("PopUpEvent")
@@ -481,12 +511,12 @@ function PopUpModule:Local_ShowReward(rewardTable)
 	for index, rewardData in ipairs(orderedRewards) do
 		local newReward = acquireRewardFrame(rewardsContainer, template, index)
 		newRewardLookup[newReward] = true
+		local rewardText, iconImage = resolveRewardPopupEntry(rewardData)
 
 		if newReward:FindFirstChild("RewardName") then
-			newReward.RewardName.Text = if typeof(rewardData) == "table" then tostring(rewardData[1] or "") else ""
+			newReward.RewardName.Text = rewardText
 		end
 		if newReward:FindFirstChild("Icon") then
-			local iconImage = if typeof(rewardData) == "table" then tostring(rewardData[2] or "") else ""
 			newReward.Icon.Image = ""
 			newReward.Icon.ImageTransparency = 1
 			rewardIconAssignments[#rewardIconAssignments + 1] = {
@@ -658,7 +688,14 @@ local function trySpawnNext()
 end
 
 function PopUpModule:Local_ShowNotify(Name, Amount, Icon, Duration)
-	table.insert(notifyQueue, { Name = Name, Amount = Amount, Icon = Icon, Duration = Duration })
+	local resolvedIcon = tostring(Icon or "")
+	if resolvedIcon == "" then
+		resolvedIcon = RewardIconResolver.GetIcon({
+			Name = Name,
+			Amount = Amount,
+		})
+	end
+	table.insert(notifyQueue, { Name = Name, Amount = Amount, Icon = resolvedIcon, Duration = Duration })
 	trySpawnNext()
 end
 

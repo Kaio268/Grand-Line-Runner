@@ -231,6 +231,29 @@ function Module.Install(ctx)
 		return 1
 	end
 
+	local function getIndexMoneyMultiplier(player)
+		if typeof(IncomeClaimMath.GetIndexMoneyMultiplier) == "function" then
+			return IncomeClaimMath.GetIndexMoneyMultiplier(player)
+		end
+
+		return 1
+	end
+
+	local function getRewardBeliMultiplier(player)
+		if typeof(IncomeClaimMath.GetRewardBeliMultiplier) == "function" then
+			return IncomeClaimMath.GetRewardBeliMultiplier(player)
+		end
+
+		return getTitleBeliMultiplier(player) * getIndexMoneyMultiplier(player)
+	end
+
+	local function getRewardMultiplierMetadata(player)
+		return {
+			TitleMultiplier = getTitleBeliMultiplier(player),
+			IndexMultiplier = getIndexMoneyMultiplier(player),
+		}
+	end
+
 	local function getToolCrewMemberInstanceId(tool)
 		if not tool or not tool:IsA("Tool") then
 			return ""
@@ -581,7 +604,8 @@ function Module.Install(ctx)
 		local summary = IncomeClaimMath.BuildClaimSummary(
 			base,
 			getStandCollectMultiplier(player, standName),
-			getTitleBeliMultiplier(player)
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
 		)
 		local display = math.max(0, tonumber(summary.FinalAmount) or 0)
 		standDebug(
@@ -598,7 +622,8 @@ function Module.Install(ctx)
 		return IncomeClaimMath.BuildClaimSummary(
 			getPlayerStandIncome(player, standName),
 			getStandCollectMultiplier(player, standName),
-			getTitleBeliMultiplier(player)
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
 		)
 	end
 
@@ -608,7 +633,8 @@ function Module.Install(ctx)
 			getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId),
 			getBeliBoostMultiplier(player),
 			getStandCollectMultiplier(player, standName),
-			getTitleBeliMultiplier(player)
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
 		)
 	end
 
@@ -668,6 +694,9 @@ function Module.Install(ctx)
 	ctx.getBaseIncome = getBaseIncome
 	ctx.getBeliBoostMultiplier = getBeliBoostMultiplier
 	ctx.getBeliBoostRemaining = getBeliBoostRemaining
+	ctx.getIndexMoneyMultiplier = getIndexMoneyMultiplier
+	ctx.getRewardBeliMultiplier = getRewardBeliMultiplier
+	ctx.getRewardMultiplierMetadata = getRewardMultiplierMetadata
 	ctx.getTitleBeliMultiplier = getTitleBeliMultiplier
 	ctx.getCrewMemberCanonicalReadGate = getCrewMemberCanonicalReadGate
 	ctx.getCrewMemberLevel = getCrewMemberLevel

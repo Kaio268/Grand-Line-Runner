@@ -228,6 +228,9 @@ local ProfileTemplate = {
 		x2Money = 1,
 		x15WalkSpeed = 1,
 	},
+	Multipliers = {
+		MoneyMult = 0,
+	},
 	Potions = {
 		x2Money = 0,
 		x2MoneyTime = 0,

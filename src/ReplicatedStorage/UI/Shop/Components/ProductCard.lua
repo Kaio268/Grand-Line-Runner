@@ -9,13 +9,107 @@ local PriceDisplay = require(script.Parent:WaitForChild("PriceDisplay"))
 
 local e = React.createElement
 
+local CARD_LAYOUTS = {
+	compact = {
+		standard = {
+			iconSize = 82,
+			iconTop = 7,
+			contentInset = 12,
+			titleY = 92,
+			titleHeight = 30,
+			titleTextSize = 20,
+			subtitleY = 123,
+			subtitleHeight = 18,
+			subtitleTextSize = 13,
+			descriptionY = 146,
+			descriptionHeight = 34,
+			descriptionTextSize = 11,
+			variantsY = 186,
+			tagsY = 188,
+			detailsY = 222,
+			footerHeight = 46,
+			cornerRadius = 16,
+		},
+		featured = {
+			iconSize = 96,
+			iconTop = 7,
+			contentInset = 12,
+			titleY = 106,
+			titleHeight = 32,
+			titleTextSize = 21,
+			subtitleY = 139,
+			subtitleHeight = 19,
+			subtitleTextSize = 14,
+			descriptionY = 162,
+			descriptionHeight = 36,
+			descriptionTextSize = 12,
+			variantsY = 204,
+			tagsY = 206,
+			detailsY = 238,
+			footerHeight = 48,
+			cornerRadius = 18,
+		},
+	},
+	stacked = {
+		standard = {
+			iconSize = 92,
+			iconTop = 7,
+			contentInset = 12,
+			titleY = 100,
+			titleHeight = 34,
+			titleTextSize = 20,
+			subtitleY = 134,
+			subtitleHeight = 20,
+			subtitleTextSize = 13,
+			descriptionY = 158,
+			descriptionHeight = 34,
+			descriptionTextSize = 11,
+			variantsY = 198,
+			tagsY = 200,
+			detailsY = 226,
+			footerHeight = 46,
+			cornerRadius = 16,
+		},
+		featured = {
+			iconSize = 110,
+			iconTop = 8,
+			contentInset = 12,
+			titleY = 120,
+			titleHeight = 36,
+			titleTextSize = 22,
+			subtitleY = 156,
+			subtitleHeight = 20,
+			subtitleTextSize = 14,
+			descriptionY = 182,
+			descriptionHeight = 38,
+			descriptionTextSize = 12,
+			variantsY = 230,
+			tagsY = 232,
+			detailsY = 256,
+			footerHeight = 50,
+			cornerRadius = 18,
+		},
+	},
+}
+
+local function getCardLayout(layoutMode, visualMode)
+	local mode = if tostring(layoutMode or "") == "compact" then "compact" else "stacked"
+	local variant = if tostring(visualMode or "") == "featured" then "featured" else "standard"
+
+	return CARD_LAYOUTS[mode][variant]
+end
+
+local function getContentBounds(layout)
+	return layout.contentInset, layout.contentInset
+end
+
 local function hasDetails(item)
 	return tostring(item.description or "") ~= ""
 		or #(item.includes or {}) > 0
 		or #(item.detailGroups or {}) > 0
 end
 
-local function buildTagRow(tags, positionY, zIndex)
+local function buildTagRow(tags, positionY, leftInset, rightInset, zIndex)
 	local tagChildren = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
@@ -49,7 +143,7 @@ local function buildTagRow(tags, positionY, zIndex)
 				Position = UDim2.fromOffset(4, 0),
 				Text = tostring(tags[index] or ""),
 				TextColor3 = Theme.Palette.Muted,
-				TextSize = 10,
+				TextSize = 11,
 				TextTruncate = Enum.TextTruncate.AtEnd,
 				TextXAlignment = Enum.TextXAlignment.Center,
 				ZIndex = zIndex and (zIndex + 1) or nil,
@@ -59,8 +153,8 @@ local function buildTagRow(tags, positionY, zIndex)
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(16, positionY),
-		Size = UDim2.new(1, -32, 0, 22),
+		Position = UDim2.fromOffset(leftInset, positionY),
+		Size = UDim2.new(1, -(leftInset + rightInset), 0, 22),
 		ZIndex = zIndex,
 	}, tagChildren)
 end
@@ -80,7 +174,7 @@ local function getSelectedVariant(item, selectedVariantId)
 	return variants[1]
 end
 
-local function buildVariantRow(item, selectedVariant, setSelectedVariantId, surface, zIndex)
+local function buildVariantRow(item, selectedVariant, setSelectedVariantId, surface, positionY, leftInset, rightInset, zIndex)
 	local variants = item.variants or {}
 	if #variants <= 0 then
 		return nil
@@ -139,8 +233,8 @@ local function buildVariantRow(item, selectedVariant, setSelectedVariantId, surf
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(16, 188),
-		Size = UDim2.new(1, -32, 0, 32),
+		Position = UDim2.fromOffset(leftInset, positionY),
+		Size = UDim2.new(1, -(leftInset + rightInset), 0, 32),
 		ZIndex = zIndex,
 	}, children)
 end
@@ -153,8 +247,10 @@ local function ProductCard(props)
 	local selectedVariant = getSelectedVariant(item, selectedVariantId)
 	local state = (selectedVariant and selectedVariant.purchaseState) or item.purchaseState or {}
 	local surface = Theme.getSurfaceTheme(item.themeKey)
+	local layout = getCardLayout(props.layoutMode, props.visualMode)
+	local contentLeftInset, contentRightInset = getContentBounds(layout)
 	local hovered, setHovered = React.useState(false)
-	local footerHeight = 46
+	local footerHeight = layout.footerHeight
 	local contentZ = props.zIndex and (props.zIndex + 2) or nil
 	local showDetails = hasDetails(item)
 	local hasVariants = #variants > 0
@@ -180,23 +276,24 @@ local function ProductCard(props)
 		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 12),
+			CornerRadius = UDim.new(0, layout.cornerRadius),
 		}),
 		Stroke = e("UIStroke", {
 			Color = surface.stroke,
-			Transparency = hovered and 0.08 or 0.28,
-			Thickness = hovered and 1.5 or 1,
+			Transparency = hovered and 0.04 or 0.24,
+			Thickness = hovered and 1.8 or 1.1,
 		}),
 		Gradient = e("UIGradient", {
-			Rotation = 90,
+			Rotation = 115,
 			Color = ColorSequence.new({
 				ColorSequenceKeypoint.new(0, surface.fill),
-				ColorSequenceKeypoint.new(1, surface.fillAlt),
+				ColorSequenceKeypoint.new(0.5, surface.fillAlt),
+				ColorSequenceKeypoint.new(1, surface.fill),
 			}),
 		}),
 		Icon = e(MonogramIcon, {
-			position = UDim2.new(0.5, -36, 0, 12),
-			size = UDim2.fromOffset(72, 72),
+			position = UDim2.new(0.5, -math.floor(layout.iconSize / 2), 0, layout.iconTop),
+			size = UDim2.fromOffset(layout.iconSize, layout.iconSize),
 			image = Theme.getItemIcon(item),
 			label = item.iconText,
 			themeKey = item.themeKey,
@@ -206,11 +303,13 @@ local function ProductCard(props)
 		Title = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(14, 86),
-			Size = UDim2.new(1, -28, 0, 34),
+			Position = UDim2.fromOffset(contentLeftInset, layout.titleY),
+			Size = UDim2.new(1, -(contentLeftInset + contentRightInset), 0, layout.titleHeight),
 			Text = item.title or "",
 			TextColor3 = Theme.Palette.Text,
-			TextSize = 20,
+			TextSize = layout.titleTextSize,
+			TextStrokeColor3 = Theme.Palette.Shadow,
+			TextStrokeTransparency = 0.74,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			TextYAlignment = Enum.TextYAlignment.Center,
@@ -219,11 +318,13 @@ local function ProductCard(props)
 		Subtitle = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(16, 121),
-			Size = UDim2.new(1, -32, 0, 20),
+			Position = UDim2.fromOffset(contentLeftInset, layout.subtitleY),
+			Size = UDim2.new(1, -(contentLeftInset + contentRightInset), 0, layout.subtitleHeight),
 			Text = tostring(item.subtitle or ""),
 			TextColor3 = surface.accentSoft,
-			TextSize = 13,
+			TextSize = layout.subtitleTextSize,
+			TextStrokeColor3 = surface.fillAlt,
+			TextStrokeTransparency = 0.7,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = contentZ,
@@ -231,28 +332,37 @@ local function ProductCard(props)
 		Description = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(16, 144),
-			Size = UDim2.new(1, -32, 0, 36),
+			Position = UDim2.fromOffset(contentLeftInset, layout.descriptionY),
+			Size = UDim2.new(1, -(contentLeftInset + contentRightInset), 0, layout.descriptionHeight),
 			Text = tostring(item.description or ""),
 			TextColor3 = Theme.Palette.Muted,
-			TextSize = 11,
+			TextSize = layout.descriptionTextSize,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			TextYAlignment = Enum.TextYAlignment.Top,
 			ZIndex = contentZ,
 		}),
-		Variants = buildVariantRow(item, selectedVariant, setSelectedVariantId, surface, contentZ),
-		Tags = if hasVariants then nil else buildTagRow(item.tags, 190, contentZ),
+		Variants = buildVariantRow(
+			item,
+			selectedVariant,
+			setSelectedVariantId,
+			surface,
+			layout.variantsY,
+			contentLeftInset,
+			contentRightInset,
+			contentZ
+		),
+		Tags = if hasVariants then nil else buildTagRow(item.tags, layout.tagsY, contentLeftInset, contentRightInset, contentZ),
 		Details = showDetails and e("TextButton", {
 			AutoButtonColor = false,
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(16, hasVariants and 222 or 218),
-			Size = UDim2.new(1, -32, 0, 18),
+			Position = UDim2.fromOffset(contentLeftInset, layout.detailsY),
+			Size = UDim2.new(1, -(contentLeftInset + contentRightInset), 0, 18),
 			Text = "Details",
 			TextColor3 = surface.accentSoft,
-			TextSize = 11,
+			TextSize = 12,
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = contentZ,
 			[React.Event.Activated] = function()

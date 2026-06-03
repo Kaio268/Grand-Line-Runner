@@ -1,10 +1,25 @@
+local LIMITED_REWARD_ENABLED = false
+
+if LIMITED_REWARD_ENABLED ~= true then
+	return
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local DataManager = require(ServerScriptService.Data:WaitForChild("DataManager"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
-local rewardRemote = ReplicatedStorage:WaitForChild("LimitedRewardClaim")
+local rewardRemote = ReplicatedStorage:FindFirstChild("LimitedRewardClaim")
+if rewardRemote and not rewardRemote:IsA("RemoteEvent") then
+	warn("[LimitedReward] ReplicatedStorage.LimitedRewardClaim exists but is not a RemoteEvent.")
+	rewardRemote = nil
+end
+if not rewardRemote then
+	rewardRemote = Instance.new("RemoteEvent")
+	rewardRemote.Name = "LimitedRewardClaim"
+	rewardRemote.Parent = ReplicatedStorage
+end
 local PLACE_ID = game.PlaceId
 local GROUP_ID = 17179624
 

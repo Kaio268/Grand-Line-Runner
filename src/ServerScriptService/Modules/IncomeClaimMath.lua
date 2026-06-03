@@ -7,6 +7,7 @@ local CrewIncomeBalance = require(
 )
 
 local cachedTitleService = nil
+local INDEX_MONEY_MULTIPLIER_PATH = "Multipliers.MoneyMult"
 
 local function sanitizeMultiplier(value)
 	return math.max(0, tonumber(value) or 1)
@@ -41,6 +42,41 @@ function IncomeClaimMath.GetTitleBeliMultiplier(player)
 	return if ok then sanitizeMultiplier(multiplier) else 1
 end
 
+function IncomeClaimMath.GetIndexMoneyMultiplier(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return 1
+	end
+
+	local valueObject = nil
+	local multipliers = player:FindFirstChild("Multipliers")
+	if multipliers then
+		valueObject = multipliers:FindFirstChild("MoneyMult")
+	end
+
+	local amount = 0
+	if valueObject and (valueObject:IsA("NumberValue") or valueObject:IsA("IntValue")) then
+		amount = tonumber(valueObject.Value) or 0
+	else
+		local current = player
+		for _, segment in ipairs(INDEX_MONEY_MULTIPLIER_PATH:split(".")) do
+			current = current and current:FindFirstChild(segment)
+			if not current then
+				break
+			end
+		end
+		if current and (current:IsA("NumberValue") or current:IsA("IntValue")) then
+			amount = tonumber(current.Value) or 0
+		end
+	end
+
+	return 1 + math.max(0, amount)
+end
+
+function IncomeClaimMath.GetRewardBeliMultiplier(player)
+	return sanitizeMultiplier(IncomeClaimMath.GetTitleBeliMultiplier(player))
+		* sanitizeMultiplier(IncomeClaimMath.GetIndexMoneyMultiplier(player))
+end
+
 function IncomeClaimMath.ApplyWholeAmountMultiplier(amount, multiplier)
 	local wholeAmount = math.max(0, math.floor(tonumber(amount) or 0))
 	local normalizedMultiplier = sanitizeMultiplier(multiplier)
@@ -54,12 +90,18 @@ function IncomeClaimMath.ApplyWholeAmountMultiplier(amount, multiplier)
 	return math.max(0, math.floor((wholeAmount * normalizedMultiplier) + 0.5))
 end
 
-function IncomeClaimMath.BuildClaimSummary(rawIncome, collectMultiplier, titleMultiplier)
+function IncomeClaimMath.BuildClaimSummary(rawIncome, collectMultiplier, rewardMultiplier, multiplierMetadata)
 	local normalizedCollectMultiplier = sanitizeMultiplier(collectMultiplier)
-	local normalizedTitleMultiplier = sanitizeMultiplier(titleMultiplier)
+	local normalizedRewardMultiplier = sanitizeMultiplier(rewardMultiplier)
+	local normalizedTitleMultiplier = sanitizeMultiplier(
+		multiplierMetadata and multiplierMetadata.TitleMultiplier or normalizedRewardMultiplier
+	)
+	local normalizedIndexMultiplier = sanitizeMultiplier(
+		multiplierMetadata and multiplierMetadata.IndexMultiplier or 1
+	)
 	local preTitleAmount, preTitleExactAmount =
 		CrewIncomeBalance.GetClaimableFromRaw(rawIncome, normalizedCollectMultiplier)
-	local finalAmount = IncomeClaimMath.ApplyWholeAmountMultiplier(preTitleAmount, normalizedTitleMultiplier)
+	local finalAmount = IncomeClaimMath.ApplyWholeAmountMultiplier(preTitleAmount, normalizedRewardMultiplier)
 	local rawRemainderAmount, exactRemainderAmount =
 		CrewIncomeBalance.GetRawRemainderAfterClaim(rawIncome, normalizedCollectMultiplier, preTitleAmount)
 
@@ -67,36 +109,48 @@ function IncomeClaimMath.BuildClaimSummary(rawIncome, collectMultiplier, titleMu
 		RawIncome = math.max(0, tonumber(rawIncome) or 0),
 		CollectMultiplier = normalizedCollectMultiplier,
 		TitleMultiplier = normalizedTitleMultiplier,
+		IndexMultiplier = normalizedIndexMultiplier,
+		RewardMultiplier = normalizedRewardMultiplier,
 		PreTitleAmount = preTitleAmount,
 		PreTitleExactAmount = preTitleExactAmount,
 		FinalAmount = finalAmount,
-		ExactAmount = preTitleExactAmount * normalizedTitleMultiplier,
+		ExactAmount = preTitleExactAmount * normalizedRewardMultiplier,
 		RawRemainderAmount = rawRemainderAmount,
 		ExactRemainderAmount = exactRemainderAmount,
-		IsBoosted = (normalizedCollectMultiplier * normalizedTitleMultiplier) > 1.001,
+		IsBoosted = (normalizedCollectMultiplier * normalizedRewardMultiplier) > 1.001,
 		TitleBoosted = normalizedTitleMultiplier > 1.001,
+		IndexBoosted = normalizedIndexMultiplier > 1.001,
 	}
 end
 
-function IncomeClaimMath.BuildRateSummary(baseIncome, bankMultiplier, collectMultiplier, titleMultiplier)
+function IncomeClaimMath.BuildRateSummary(baseIncome, bankMultiplier, collectMultiplier, rewardMultiplier, multiplierMetadata)
 	local normalizedBaseIncome = math.max(0, tonumber(baseIncome) or 0)
 	local normalizedBankMultiplier = sanitizeMultiplier(bankMultiplier)
 	local normalizedCollectMultiplier = sanitizeMultiplier(collectMultiplier)
-	local normalizedTitleMultiplier = sanitizeMultiplier(titleMultiplier)
-	local totalMultiplier = normalizedBankMultiplier * normalizedCollectMultiplier * normalizedTitleMultiplier
+	local normalizedRewardMultiplier = sanitizeMultiplier(rewardMultiplier)
+	local normalizedTitleMultiplier = sanitizeMultiplier(
+		multiplierMetadata and multiplierMetadata.TitleMultiplier or normalizedRewardMultiplier
+	)
+	local normalizedIndexMultiplier = sanitizeMultiplier(
+		multiplierMetadata and multiplierMetadata.IndexMultiplier or 1
+	)
+	local totalMultiplier = normalizedBankMultiplier * normalizedCollectMultiplier * normalizedRewardMultiplier
 	local preTitleAmount = normalizedBaseIncome * normalizedBankMultiplier * normalizedCollectMultiplier
-	local finalAmount = preTitleAmount * normalizedTitleMultiplier
+	local finalAmount = preTitleAmount * normalizedRewardMultiplier
 
 	return {
 		BaseIncome = normalizedBaseIncome,
 		BankMultiplier = normalizedBankMultiplier,
 		CollectMultiplier = normalizedCollectMultiplier,
 		TitleMultiplier = normalizedTitleMultiplier,
+		IndexMultiplier = normalizedIndexMultiplier,
+		RewardMultiplier = normalizedRewardMultiplier,
 		TotalMultiplier = totalMultiplier,
 		PreTitleAmount = preTitleAmount,
 		FinalAmount = finalAmount,
 		IsBoosted = totalMultiplier > 1.001,
 		TitleBoosted = normalizedTitleMultiplier > 1.001,
+		IndexBoosted = normalizedIndexMultiplier > 1.001,
 	}
 end
 

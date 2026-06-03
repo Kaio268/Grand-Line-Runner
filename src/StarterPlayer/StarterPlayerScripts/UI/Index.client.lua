@@ -42,12 +42,14 @@ local rewardConnections = {}
 
 local scheduleRender
 local scheduleViewModelRender
+local syncHudIndexBadge
 local fireClaimReward
 local indexDataModule = nil
 local indexScreenModule = nil
 local lastIndexModuleError = nil
 local lastIndexViewModelError = nil
 local claimRemoteConnection = nil
+local hudDescendantConnection = nil
 local pendingClaimRequests = {}
 local claimedRewardOverrides = {}
 local CLAIM_REWARD_RENDER_HOLD_TIME = 0.32
@@ -234,6 +236,9 @@ end
 
 scheduleViewModelRender = function()
 	invalidateViewModel()
+	if syncHudIndexBadge then
+		task.defer(syncHudIndexBadge)
+	end
 	deferRender()
 end
 
@@ -246,6 +251,9 @@ local function scheduleClaimAwareRender()
 		return
 	end
 	invalidateViewModel()
+	if syncHudIndexBadge then
+		task.defer(syncHudIndexBadge)
+	end
 
 	local remainingHold = claimRewardRenderHoldUntil - os.clock()
 	if remainingHold > 0 then
@@ -632,6 +640,33 @@ local function getCachedViewModel(previewMode)
 	return viewModel
 end
 
+local function getClaimableCount()
+	local viewModel = getCachedViewModel(false)
+	return math.max(0, tonumber(viewModel and viewModel.claimableCount) or 0)
+end
+
+syncHudIndexBadge = function()
+	local hud = playerGui:FindFirstChild("HUD")
+	local lButtons = hud and hud:FindFirstChild("LButtons")
+	local indexButton = lButtons and lButtons:FindFirstChild("Index")
+	if not indexButton then
+		return
+	end
+
+	local badge = indexButton:FindFirstChild("Not")
+	if not badge then
+		return
+	end
+
+	local claimableCount = getClaimableCount()
+	badge.Visible = claimableCount > 0
+
+	local textLabel = badge:FindFirstChild("TextLB", true)
+	if textLabel and textLabel:IsA("TextLabel") then
+		textLabel.Text = tostring(math.min(99, claimableCount))
+	end
+end
+
 local function findRemoteEventByName(parent, remoteName)
 	for _, child in ipairs(parent:GetChildren()) do
 		if child.Name == remoteName and child:IsA("RemoteEvent") then
@@ -1002,6 +1037,17 @@ end, cleanupConnections)
 trackConnection(playerGui.ChildAdded, function(child)
 	if child.Name == "Frames" or child.Name == "OpenUI" or child.Name == "HUD" then
 		modalAdapter:HandlePlayerGuiChildAdded(child)
+		if child.Name == "HUD" then
+			if hudDescendantConnection then
+				hudDescendantConnection:Disconnect()
+			end
+			hudDescendantConnection = child.DescendantAdded:Connect(function(descendant)
+				if descendant.Name == "Index" or descendant.Name == "Not" or descendant.Name == "TextLB" then
+					task.defer(syncHudIndexBadge)
+				end
+			end)
+			task.defer(syncHudIndexBadge)
+		end
 
 		task.defer(scheduleRender)
 	end
@@ -1012,11 +1058,24 @@ trackConnection(playerGui.ChildRemoved, function(child)
 		modalAdapter:HandlePlayerGuiChildRemoved(child)
 
 		task.defer(scheduleRender)
+	elseif child.Name == "HUD" and hudDescendantConnection then
+		hudDescendantConnection:Disconnect()
+		hudDescendantConnection = nil
 	end
 end, cleanupConnections)
 
+local initialHud = playerGui:FindFirstChild("HUD")
+if initialHud then
+	hudDescendantConnection = initialHud.DescendantAdded:Connect(function(descendant)
+		if descendant.Name == "Index" or descendant.Name == "Not" or descendant.Name == "TextLB" then
+			task.defer(syncHudIndexBadge)
+		end
+	end)
+end
+
 modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
+syncHudIndexBadge()
 render()
 
 script.Destroying:Connect(function()
@@ -1027,6 +1086,10 @@ script.Destroying:Connect(function()
 	disconnectAll(crewMemberInventoryConnections)
 	disconnectAll(devilFruitStateConnections)
 	disconnectAll(rewardConnections)
+	if hudDescendantConnection then
+		hudDescendantConnection:Disconnect()
+		hudDescendantConnection = nil
+	end
 	if claimRemoteConnection then
 		claimRemoteConnection:Disconnect()
 		claimRemoteConnection = nil

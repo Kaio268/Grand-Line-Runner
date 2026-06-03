@@ -9,7 +9,6 @@ local REACT_MODAL_NAMES = {
 	GearStore = true,
 	Index = true,
 	Inventory = true,
-	LimitedReward = true,
 	NamiShop = true,
 	Quest = true,
 	Rebirth = true,

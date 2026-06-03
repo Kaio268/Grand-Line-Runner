@@ -51,6 +51,7 @@ function Module.Install(ctx)
 	end
 	local EQUIPPED_TITLE_ATTRIBUTE = "EquippedTitleId"
 	local titleRefreshConnections = setmetatable({}, { __mode = "k" })
+	local multiplierRefreshConnections = setmetatable({}, { __mode = "k" })
 
 	local function disconnectTitleRefresh(player)
 		local connection = titleRefreshConnections[player]
@@ -58,6 +59,18 @@ function Module.Install(ctx)
 			connection:Disconnect()
 			titleRefreshConnections[player] = nil
 		end
+	end
+
+	local function disconnectMultiplierRefresh(player)
+		local connections = multiplierRefreshConnections[player]
+		if not connections then
+			return
+		end
+
+		for _, connection in ipairs(connections) do
+			connection:Disconnect()
+		end
+		multiplierRefreshConnections[player] = nil
 	end
 
 	local function refreshIncomeDisplaysForTitleChange(player)
@@ -79,9 +92,63 @@ function Module.Install(ctx)
 		end)
 	end
 
+	local function bindMultiplierRefresh(player)
+		disconnectMultiplierRefresh(player)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return
+		end
+
+		local connections = {}
+		multiplierRefreshConnections[player] = connections
+
+		local function refresh()
+			refreshIncomeDisplaysForTitleChange(player)
+		end
+
+		local function bindMoneyMult(valueObject)
+			if not valueObject or not (valueObject:IsA("NumberValue") or valueObject:IsA("IntValue")) then
+				return
+			end
+			table.insert(connections, valueObject:GetPropertyChangedSignal("Value"):Connect(refresh))
+		end
+
+		local function bindMultipliersFolder(folder)
+			if not folder then
+				return
+			end
+
+			bindMoneyMult(folder:FindFirstChild("MoneyMult"))
+			table.insert(connections, folder.ChildAdded:Connect(function(child)
+				if child.Name == "MoneyMult" then
+					bindMoneyMult(child)
+					task.defer(refresh)
+				end
+			end))
+			table.insert(connections, folder.ChildRemoved:Connect(function(child)
+				if child.Name == "MoneyMult" then
+					task.defer(refresh)
+				end
+			end))
+		end
+
+		bindMultipliersFolder(player:FindFirstChild("Multipliers"))
+		table.insert(connections, player.ChildAdded:Connect(function(child)
+			if child.Name == "Multipliers" then
+				bindMultipliersFolder(child)
+				task.defer(refresh)
+			end
+		end))
+		table.insert(connections, player.ChildRemoved:Connect(function(child)
+			if child.Name == "Multipliers" then
+				task.defer(refresh)
+			end
+		end))
+	end
+
 	local function bootstrapExistingCrewIncomePlayer(runtime, player)
 		runtime.standDebug("bootstrap existing_player=%s", player.Name)
 		bindTitleRefresh(player)
+		bindMultiplierRefresh(player)
 
 		local plot = runtime.waitForPlot(player, 5)
 		if plot then
@@ -174,6 +241,7 @@ function Module.Install(ctx)
 	Players.PlayerAdded:Connect(function(player)
 		standDebug("PlayerAdded player=%s", player.Name)
 		bindTitleRefresh(player)
+		bindMultiplierRefresh(player)
 		task.spawn(function()
 			saveTrace("PlayerAdded begin player=%s userId=%s event=restore_begin", player.Name, tostring(player.UserId))
 			logSavedShipSnapshot(player, "PlayerAdded")
@@ -203,6 +271,7 @@ function Module.Install(ctx)
 
 	Players.PlayerRemoving:Connect(function(player)
 		disconnectTitleRefresh(player)
+		disconnectMultiplierRefresh(player)
 		clearPlayerStandRuntime(player)
 		getCrewStorage().ClearIncomeShadowSyncState(player)
 	end)
@@ -215,6 +284,7 @@ function Module.Install(ctx)
 
 			clearPlayerStandRuntime(player)
 			disconnectTitleRefresh(player)
+			disconnectMultiplierRefresh(player)
 			getCrewStorage().ClearIncomeShadowSyncState(player)
 		end)
 	end
