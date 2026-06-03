@@ -13,7 +13,7 @@ local PLACE_ROLE_DEVELOPMENT = "Development"
 
 local PRODUCTION_MAIN_PLACE_ID = 110640828025742
 local PRODUCTION_AFK_PLACE_ID = 122987301330026
-local REQUIRED_PRODUCTION_KEY_ID = "prod-historical-v1"
+local REQUIRED_PRODUCTION_KEY_ID = "prod-release-v1"
 
 DataEnvironment.Environments = {
 	Production = ENVIRONMENT_PRODUCTION,
@@ -70,20 +70,39 @@ local function fail(placeInfo, message)
 	error("[DataEnvironment]: " .. message, 3)
 end
 
+local EXPLICIT_PLACEHOLDER_VALUES = {
+	[""] = true,
+	["defaultkey_123"] = true,
+	["replace_me"] = true,
+	["your_key_here"] = true,
+}
+
+local function trimText(value)
+	if typeof(value) ~= "string" then
+		return nil
+	end
+
+	return value:match("^%s*(.-)%s*$")
+end
+
 local function isNonEmptyString(value)
-	return typeof(value) == "string" and value ~= ""
+	local trimmed = trimText(value)
+	return trimmed ~= nil and trimmed ~= ""
 end
 
 local function isPlaceholder(value)
-	if typeof(value) ~= "string" then
+	local trimmed = trimText(value)
+	if trimmed == nil then
 		return true
 	end
 
-	local lowered = string.lower(value)
-	return lowered:find("replace", 1, true) ~= nil
+	local lowered = string.lower(trimmed)
+	return EXPLICIT_PLACEHOLDER_VALUES[lowered] == true
+		or lowered:find("replace", 1, true) ~= nil
 		or lowered:find("todo", 1, true) ~= nil
 		or lowered:find("change_me", 1, true) ~= nil
-		or value:match("^%s*<.+>%s*$") ~= nil
+		or trimmed:find("<", 1, true) ~= nil
+		or trimmed:find(">", 1, true) ~= nil
 end
 
 local function fnvFingerprint(value)
@@ -140,11 +159,11 @@ local function validateEntry(placeInfo, entry)
 		fail(placeInfo, string.format("Missing %s DataKeySecrets entry.", placeInfo.Environment))
 	end
 
-	local keyId = entry.KeyId
-	local dataKey = entry.DataKey
+	local keyId = trimText(entry.KeyId)
+	local dataKey = trimText(entry.DataKey)
 
-	if not isNonEmptyString(keyId) then
-		fail(placeInfo, string.format("%s DataKeySecrets.KeyId is missing.", placeInfo.Environment))
+	if not isNonEmptyString(keyId) or isPlaceholder(keyId) then
+		fail(placeInfo, string.format("%s DataKeySecrets.KeyId is missing or still a placeholder.", placeInfo.Environment))
 	end
 
 	if not isNonEmptyString(dataKey) or isPlaceholder(dataKey) then
@@ -153,7 +172,7 @@ local function validateEntry(placeInfo, entry)
 
 	if placeInfo.Environment == ENVIRONMENT_PRODUCTION and keyId ~= REQUIRED_PRODUCTION_KEY_ID then
 		fail(placeInfo, string.format(
-			"Production DataKeySecrets.KeyId must be %s for the historical production datastore.",
+			"Production DataKeySecrets.KeyId must be %s for the release production datastore.",
 			REQUIRED_PRODUCTION_KEY_ID
 		))
 	end

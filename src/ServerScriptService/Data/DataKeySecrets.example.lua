@@ -12,8 +12,8 @@ return {
 		DataKey = "REPLACE_WITH_PRIVATE_DEVELOPMENT_KEY",
 	},
 	RecoveryStores = {
-		-- Add suspected old production namespaces here only during a reviewed incident.
-		-- Use the alias in /datarecover source=<alias>; never type raw keys into chat.
+		-- Add recovery aliases only during a reviewed data incident.
+		-- Use aliases in /datarecover; never type raw datastore keys into chat.
 		OldProductionCandidate = {
 			KeyId = "old-production-candidate",
 			DataKey = "REPLACE_WITH_PRIVATE_RECOVERY_CANDIDATE_KEY",
