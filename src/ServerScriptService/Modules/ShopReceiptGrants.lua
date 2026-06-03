@@ -9,6 +9,7 @@ local CrewProtectionService = require(ServerScriptService:WaitForChild("Modules"
 local ShopReceiptGrants = {}
 
 local STARTER_PACK_FLAG = "Packs.StarterPack"
+local contextualTutorialTriggerService = nil
 
 local function fail(reason)
 	return false, tostring(reason or "grant_failed")
@@ -34,6 +35,36 @@ end
 local function addBeli(dataManager, player, amount)
 	addValue(dataManager, player, "leaderstats.Beli", amount)
 	addValue(dataManager, player, "TotalStats.TotalBeli", amount)
+end
+
+local function getContextualTutorialTriggerService()
+	if contextualTutorialTriggerService ~= nil then
+		return contextualTutorialTriggerService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		contextualTutorialTriggerService = service
+	end
+	return contextualTutorialTriggerService
+end
+
+local function triggerFoodAndShipTutorials(player, source, grantedFood)
+	local service = getContextualTutorialTriggerService()
+	if typeof(service) ~= "table" then
+		return
+	end
+	if typeof(service.OnFoodGranted) == "function" then
+		service.OnFoodGranted(player, source, grantedFood)
+	end
+	if typeof(service.CheckShipUpgradeAffordable) == "function" then
+		service.CheckShipUpgradeAffordable(player, source)
+	end
 end
 
 local function ensureUnopenedChests(dataRoot)
@@ -146,6 +177,12 @@ function ShopReceiptGrants.GrantStarterPack(player, profile, dataManager)
 	ShopReceiptGrants.GrantBoost(player, dataManager, "LuckBoost", 60 * 60)
 	assertOk(CrewProtectionService.GrantCrewShieldTokens(player, 3, dataManager))
 	setValue(dataManager, player, STARTER_PACK_FLAG, true)
+	triggerFoodAndShipTutorials(player, "shop_starter_pack", {
+		Apple = 20,
+		Rice = 15,
+		Meat = 10,
+		SeaBeastMeat = 3,
+	})
 
 	return true, "granted"
 end
@@ -159,6 +196,12 @@ function ShopReceiptGrants.GrantCaptainDailyChest(player, dataManager)
 	addValue(dataManager, player, "Materials.Timber", 75)
 	addValue(dataManager, player, "Materials.Iron", 20)
 	addValue(dataManager, player, "Materials.AncientTimber", 1)
+	triggerFoodAndShipTutorials(player, "shop_captain_daily_chest", {
+		Apple = 10,
+		Rice = 5,
+		Meat = 3,
+		SeaBeastMeat = 1,
+	})
 	return true
 end
 

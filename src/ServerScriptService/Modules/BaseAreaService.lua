@@ -11,6 +11,7 @@ local ACTIVE_MAP_ATTRIBUTE = "ActiveMapName"
 local BASE_AREA_PADDING = 24
 local TOUCH_HEAL_DEBOUNCE_SECONDS = 0.75
 local CHARACTER_SPAWN_HEAL_DELAY_SECONDS = 0.25
+local BASE_ENTERED_SIGNAL_DEBOUNCE_SECONDS = 1
 
 local BASE_AREA_NAMES = {
 	"StartingArea",
@@ -27,6 +28,10 @@ local warnedMissingTouchParts = false
 local touchConnections = {}
 local playerConnections = {}
 local lastHealAttemptByPlayer = {}
+local lastBaseEnteredSignalByPlayer = {}
+local playerEnteredBaseAreaEvent = Instance.new("BindableEvent")
+
+BaseAreaService.PlayerEnteredBaseArea = playerEnteredBaseAreaEvent.Event
 
 local function warnOnce(flagName, message)
 	if flagName == "verticalSliceUnavailable" then
@@ -190,6 +195,21 @@ local function getPlayerFromHit(hit)
 	return Players:GetPlayerFromCharacter(model)
 end
 
+local function notifyPlayerEnteredBaseArea(player, reason)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return
+	end
+
+	local now = os.clock()
+	local lastSignalAt = lastBaseEnteredSignalByPlayer[player]
+	if lastSignalAt and now - lastSignalAt < BASE_ENTERED_SIGNAL_DEBOUNCE_SECONDS then
+		return
+	end
+	lastBaseEnteredSignalByPlayer[player] = now
+
+	playerEnteredBaseAreaEvent:Fire(player, tostring(reason or "base_area"))
+end
+
 local function clearTouchConnections()
 	for _, connection in ipairs(touchConnections) do
 		connection:Disconnect()
@@ -210,6 +230,7 @@ local function bindBaseTouchParts()
 		touchConnections[#touchConnections + 1] = part.Touched:Connect(function(hit)
 			local player = getPlayerFromHit(hit)
 			if player then
+				notifyPlayerEnteredBaseArea(player, "base_area_touch")
 				BaseAreaService.HealPlayerInStartingArea(player, "base_area_touch")
 			end
 		end)
@@ -224,6 +245,7 @@ local function bindPlayer(player)
 	playerConnections[player] = player.CharacterAdded:Connect(function()
 		task.delay(CHARACTER_SPAWN_HEAL_DELAY_SECONDS, function()
 			if player.Parent == Players and BaseAreaService.IsPlayerInBaseArea(player) then
+				notifyPlayerEnteredBaseArea(player, "character_spawn")
 				BaseAreaService.HealPlayerInStartingArea(player, "character_spawn")
 			end
 		end)
@@ -231,6 +253,7 @@ local function bindPlayer(player)
 
 	task.defer(function()
 		if player.Parent == Players and BaseAreaService.IsPlayerInBaseArea(player) then
+			notifyPlayerEnteredBaseArea(player, "player_added")
 			BaseAreaService.HealPlayerInStartingArea(player, "player_added")
 		end
 	end)
@@ -312,6 +335,7 @@ function BaseAreaService.Start()
 			playerConnections[player] = nil
 		end
 		lastHealAttemptByPlayer[player] = nil
+		lastBaseEnteredSignalByPlayer[player] = nil
 	end)
 end
 

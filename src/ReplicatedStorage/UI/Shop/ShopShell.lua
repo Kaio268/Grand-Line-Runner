@@ -51,6 +51,21 @@ local function buildPageSections(catalog)
 	return sections
 end
 
+local function hasPageSection(sections, sectionKey)
+	sectionKey = tostring(sectionKey or "")
+	if sectionKey == "" then
+		return false
+	end
+
+	for _, section in ipairs(sections or {}) do
+		if tostring(section.key or "") == sectionKey then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function buildDetailRows(item, zIndex)
 	local rows = {
 		List = e("UIListLayout", {
@@ -160,6 +175,8 @@ local function ShopShell(props)
 	local titleTextSize = if isNarrow then 30 elseif contentWidth < 1040 then 34 else 38
 	local horizontalInset = isNarrow and 16 or 24
 	local pageSections = buildPageSections(props.catalog)
+	local requestedSectionKey = tostring(props.requestedSectionKey or "")
+	local requestedSectionRequestId = tonumber(props.requestedSectionRequestId) or 0
 
 	activeSectionKeyRef.current = activeSectionKey
 
@@ -196,6 +213,18 @@ local function ShopShell(props)
 			end
 		end)
 	end
+
+	React.useEffect(function()
+		if requestedSectionRequestId <= 0 or requestedSectionKey == "" then
+			return nil
+		end
+		if not hasPageSection(pageSections, requestedSectionKey) then
+			return nil
+		end
+
+		handleSectionSelected(requestedSectionKey)
+		return nil
+	end, { requestedSectionRequestId, requestedSectionKey })
 
 	React.useEffect(function()
 		local scroller = scrollerRef.current

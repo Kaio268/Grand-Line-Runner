@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ChestRewards = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushChestRewards"))
 local DevilFruits = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local ItemIconRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ItemIconRegistry"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -12,18 +13,7 @@ local ChestOpenResultFormatter = {}
 local FOOD_ORDER = { "Apple", "Rice", "Meat", "SeaBeastMeat" }
 local REWARD_TYPE_DEVIL_FRUIT = "DevilFruit"
 local DEFAULT_CHEST_IMAGE = "rbxassetid://104345752533382"
-local DEFAULT_CHEST_ICON = "rbxassetid://88825249018556"
-local REWARD_ICONS = {
-	["Ancient Timber"] = "rbxassetid://104684352334133",
-	Apple = "rbxassetid://130525653161326",
-	Beli = "rbxassetid://86551660159840",
-	["Devil Fruit"] = "rbxassetid://122583196938184",
-	Iron = "rbxassetid://109691838211287",
-	Meat = "rbxassetid://98603088450093",
-	["Mythic Key"] = "rbxassetid://122583196938184",
-	Rice = "rbxassetid://128596106748016",
-	Timber = "rbxassetid://108977229097543",
-}
+local DEFAULT_CHEST_ICON = ItemIconRegistry.GetIcon("Chest")
 local RARITY_RANK = {
 	Common = 1,
 	Rare = 2,
@@ -235,6 +225,206 @@ local function fruitDisplayName(fruitKey)
 	return tostring(fruitKey or "Unknown Devil Fruit"), ""
 end
 
+local function joinNonEmptyTexts(values)
+	local parts = {}
+	for _, value in ipairs(values or {}) do
+		local normalized = tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if normalized ~= "" then
+			parts[#parts + 1] = normalized
+		end
+	end
+	return table.concat(parts, "  ")
+end
+
+local function getPityTitleText(pityStatus)
+	if typeof(pityStatus) ~= "table" then
+		return ""
+	end
+	return joinNonEmptyTexts(pityStatus.activationTexts)
+end
+
+local function normalizeFruitRewardContext(rawContext)
+	if typeof(rawContext) ~= "table" then
+		return nil
+	end
+
+	local fruitKey = tostring(rawContext.FruitKey or rawContext.fruitKey or "")
+	local displayName = tostring(rawContext.DisplayName or rawContext.displayName or "")
+	local rarity = tostring(rawContext.Rarity or rawContext.rarity or rawContext.FruitRarity or rawContext.fruitRarity or "")
+	if displayName == "" and fruitKey ~= "" then
+		local resolvedName, resolvedRarity = fruitDisplayName(fruitKey)
+		displayName = resolvedName
+		if rarity == "" then
+			rarity = resolvedRarity
+		end
+	end
+
+	local source = tostring(rawContext.Source or rawContext.source or "")
+	if source == "" then
+		source = "standard_chest"
+	elseif source ~= "standard_chest" then
+		return nil
+	end
+
+	if rawContext.HasDevilFruitReward ~= true and fruitKey == "" and displayName == "" then
+		return nil
+	end
+
+	return {
+		HasDevilFruitReward = true,
+		Source = source,
+		FruitKey = fruitKey,
+		DisplayName = if displayName ~= "" then displayName else "Devil Fruit",
+		Rarity = rarity,
+		WasDuplicate = rawContext.WasDuplicate == true or rawContext.wasDuplicate == true,
+	}
+end
+
+local function collectFruitRewardContexts(openResult)
+	local contexts = {}
+
+	for _, rawContext in ipairs(openResult.FruitRewardContexts or {}) do
+		local context = normalizeFruitRewardContext(rawContext)
+		if context then
+			contexts[#contexts + 1] = context
+		end
+	end
+
+	local singleContext = normalizeFruitRewardContext(openResult.FruitRewardContext)
+	if singleContext then
+		contexts[#contexts + 1] = singleContext
+	end
+
+	if #contexts > 0 then
+		return contexts
+	end
+
+	if typeof(openResult.GrantedFruit) == "string" and openResult.GrantedFruit ~= "" then
+		local displayName, rarityName = fruitDisplayName(openResult.GrantedFruit)
+		contexts[#contexts + 1] = {
+			HasDevilFruitReward = true,
+			Source = "standard_chest",
+			FruitKey = openResult.GrantedFruit,
+			DisplayName = displayName,
+			Rarity = tostring(openResult.GrantedFruitRarity or rarityName or ""),
+			WasDuplicate = openResult.WasDuplicate == true,
+		}
+	end
+
+	for _, fruitEntry in ipairs(openResult.GrantedFruits or {}) do
+		local fruitKey = tostring(fruitEntry.FruitKey or "")
+		if fruitKey ~= "" then
+			local displayName, rarityName = fruitDisplayName(fruitKey)
+			contexts[#contexts + 1] = {
+				HasDevilFruitReward = true,
+				Source = "standard_chest",
+				FruitKey = fruitKey,
+				DisplayName = displayName,
+				Rarity = tostring(fruitEntry.Rarity or rarityName or ""),
+				WasDuplicate = false,
+			}
+		end
+	end
+
+	return contexts
+end
+
+local function getBestFruitAccentColor(contexts, fallbackColor)
+	local bestRank = -1
+	local bestColor = fallbackColor
+	for _, context in ipairs(contexts or {}) do
+		local rarity = tostring(context.Rarity or "")
+		local rank = RARITY_RANK[rarity] or 0
+		if rank > bestRank and RARITY_COLORS[rarity] then
+			bestRank = rank
+			bestColor = RARITY_COLORS[rarity]
+		end
+	end
+	return bestColor or RARITY_COLORS.Reward
+end
+
+local function buildFruitRewardBody(contexts)
+	local totalCount = #contexts
+	if totalCount <= 0 then
+		return ""
+	end
+
+	local duplicateCount = 0
+	for _, context in ipairs(contexts) do
+		if context.WasDuplicate == true then
+			duplicateCount += 1
+		end
+	end
+
+	if totalCount > 1 then
+		local body = string.format("%s Devil Fruit drop%s from standard chests.", formatCount(totalCount), totalCount == 1 and "" or "s")
+		if duplicateCount > 0 then
+			body ..= string.format(" %s duplicate%s converted.", formatCount(duplicateCount), duplicateCount == 1 and "" or "s")
+		end
+		return body
+	end
+
+	local context = contexts[1]
+	if context.WasDuplicate == true then
+		return "A Devil Fruit dropped from this chest. Duplicate fruit rolled; conversion reward applied."
+	end
+
+	return "A Devil Fruit dropped from this chest."
+end
+
+local function buildChestInfoBanner(openResult)
+	openResult = if typeof(openResult) == "table" then openResult else {}
+	local pityStatus = buildFruitPityStatus(openResult)
+	local pityTitle = getPityTitleText(pityStatus)
+	local pityBody = if typeof(pityStatus) == "table" then tostring(pityStatus.progressText or "") else ""
+	if pityBody == "" then
+		return nil
+	end
+
+	local contexts = collectFruitRewardContexts(openResult)
+
+	if #contexts <= 0 then
+		return {
+			titleText = pityTitle,
+			bodyText = pityBody,
+			activationTexts = if typeof(pityStatus.activationTexts) == "table" then pityStatus.activationTexts else {},
+			progressText = pityBody,
+			accentColor = pityStatus.accentColor or RARITY_COLORS.Reward,
+		}
+	end
+
+	local titleText = pityTitle
+	if titleText == "" then
+		if #contexts > 1 then
+			titleText = "DEVIL FRUIT DROPS"
+		elseif contexts[1].WasDuplicate == true then
+			titleText = "DEVIL FRUIT ROLLED"
+		else
+			titleText = "FRUIT OBTAINED"
+		end
+	end
+
+	local bodyParts = {}
+	local fruitBody = buildFruitRewardBody(contexts)
+	if fruitBody ~= "" then
+		bodyParts[#bodyParts + 1] = fruitBody
+	end
+	if pityBody ~= "" then
+		bodyParts[#bodyParts + 1] = pityBody
+	end
+	local bodyText = table.concat(bodyParts, " ")
+
+	return {
+		titleText = titleText,
+		bodyText = bodyText,
+		activationTexts = if titleText ~= "" then { titleText } else {},
+		progressText = bodyText,
+		accentColor = if typeof(pityStatus) == "table" and pityTitle ~= ""
+			then (pityStatus.accentColor or RARITY_COLORS.Reward)
+			else getBestFruitAccentColor(contexts, if typeof(pityStatus) == "table" then pityStatus.accentColor else nil),
+	}
+end
+
 local function pluralizeChestDisplay(name, count)
 	local displayName = tostring(name or "Chest")
 	if count == 1 then
@@ -247,8 +437,7 @@ local function pluralizeChestDisplay(name, count)
 end
 
 local function getRewardIcon(name, fallback)
-	local displayName = tostring(name or "")
-	return REWARD_ICONS[displayName] or fallback or ""
+	return ItemIconRegistry.GetIcon(name, fallback)
 end
 
 local function applyRewardMetadata(card, metadata)
@@ -307,25 +496,28 @@ local function addGrantedResourceCards(cards, grantedResources)
 	local materialRewards = if typeof(grantedResources.materials) == "table" then grantedResources.materials else {}
 
 	for _, foodKey in ipairs(FOOD_ORDER) do
-		local displayName = tostring(((Economy.Food or {})[foodKey] or {}).DisplayName or foodKey)
-		appendResultCard(cards, displayName, foodRewards[foodKey], getRewardIcon(displayName))
+		local fallbackName = tostring(((Economy.Food or {})[foodKey] or {}).DisplayName or foodKey)
+		local displayName = ItemIconRegistry.GetDisplayName(foodKey, fallbackName)
+		appendResultCard(cards, displayName, foodRewards[foodKey], getRewardIcon(foodKey))
 	end
 
 	local seenMaterials = {}
 	for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder or {}) do
 		seenMaterials[materialKey] = true
-		local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
-		appendResultCard(cards, displayName, materialRewards[materialKey], getRewardIcon(displayName))
+		local fallbackName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
+		local displayName = ItemIconRegistry.GetDisplayName(materialKey, fallbackName)
+		appendResultCard(cards, displayName, materialRewards[materialKey], getRewardIcon(materialKey))
 	end
 
 	for materialKey, amount in pairs(materialRewards) do
 		if seenMaterials[materialKey] ~= true then
-			local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
-			appendResultCard(cards, displayName, amount, getRewardIcon(displayName))
+			local fallbackName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
+			local displayName = ItemIconRegistry.GetDisplayName(materialKey, fallbackName)
+			appendResultCard(cards, displayName, amount, getRewardIcon(materialKey))
 		end
 	end
 
-	appendResultCard(cards, CurrencyUtil.getDisplayName(), getGrantedBeli(grantedResources), getRewardIcon(CurrencyUtil.getDisplayName()))
+	appendResultCard(cards, CurrencyUtil.getDisplayName(), getGrantedBeli(grantedResources), getRewardIcon("Beli"))
 end
 
 local function makeFeaturedReward(name, amount, icon, rarity, metadata)
@@ -334,7 +526,7 @@ local function makeFeaturedReward(name, amount, icon, rarity, metadata)
 		name = tostring(name or "Special Reward"),
 		amount = normalizedAmount,
 		amountText = "+" .. formatCount(normalizedAmount),
-		icon = getRewardIcon(name, icon or REWARD_ICONS["Devil Fruit"]),
+		icon = getRewardIcon(name, icon or getRewardIcon("DevilFruit")),
 		rarity = tostring(rarity or "Reward"),
 		isFeatured = true,
 	}
@@ -389,9 +581,9 @@ local function collectFruitResultCards(openResult, cards)
 	for index, record in ipairs(fruitRecords) do
 		local metadata = getDevilFruitRewardMetadata(record.key)
 		if index == 1 then
-			featured = makeFeaturedReward(record.name, record.amount, REWARD_ICONS["Devil Fruit"], record.rarity, metadata)
+			featured = makeFeaturedReward(record.name, record.amount, getRewardIcon("DevilFruit"), record.rarity, metadata)
 		else
-			appendResultCard(cards, record.name, record.amount, REWARD_ICONS["Devil Fruit"], record.rarity, metadata)
+			appendResultCard(cards, record.name, record.amount, getRewardIcon("DevilFruit"), record.rarity, metadata)
 		end
 	end
 
@@ -410,7 +602,7 @@ local function resolveConversionFeatured(openResult)
 		return makeFeaturedReward(
 			tostring(openResult.ConversionRewardDisplayName or "Mythic Key"),
 			math.max(1, tonumber(openResult.ConversionRewardAmount) or 1),
-			REWARD_ICONS["Mythic Key"],
+			getRewardIcon("MythicKey"),
 			"Mythic"
 		)
 	end
@@ -470,25 +662,28 @@ local function addGrantedResourceRows(rows, grantedResources)
 	local materialRewards = if typeof(grantedResources.materials) == "table" then grantedResources.materials else {}
 
 	for _, foodKey in ipairs(FOOD_ORDER) do
-		local displayName = tostring(((Economy.Food or {})[foodKey] or {}).DisplayName or foodKey)
-		appendRewardRow(rows, displayName, foodRewards[foodKey])
+		local fallbackName = tostring(((Economy.Food or {})[foodKey] or {}).DisplayName or foodKey)
+		local displayName = ItemIconRegistry.GetDisplayName(foodKey, fallbackName)
+		appendRewardRow(rows, displayName, foodRewards[foodKey], getRewardIcon(foodKey))
 	end
 
 	local seenMaterials = {}
 	for _, materialKey in ipairs(PlotUpgradeConfig.MaterialOrder or {}) do
 		seenMaterials[materialKey] = true
-		local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
-		appendRewardRow(rows, displayName, materialRewards[materialKey])
+		local fallbackName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
+		local displayName = ItemIconRegistry.GetDisplayName(materialKey, fallbackName)
+		appendRewardRow(rows, displayName, materialRewards[materialKey], getRewardIcon(materialKey))
 	end
 
 	for materialKey, amount in pairs(materialRewards) do
 		if seenMaterials[materialKey] ~= true then
-			local displayName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
-			appendRewardRow(rows, displayName, amount)
+			local fallbackName = tostring((PlotUpgradeConfig.MaterialDisplayNames or {})[materialKey] or materialKey)
+			local displayName = ItemIconRegistry.GetDisplayName(materialKey, fallbackName)
+			appendRewardRow(rows, displayName, amount, getRewardIcon(materialKey))
 		end
 	end
 
-	appendRewardRow(rows, CurrencyUtil.getDisplayName(), getGrantedBeli(grantedResources))
+	appendRewardRow(rows, CurrencyUtil.getDisplayName(), getGrantedBeli(grantedResources), getRewardIcon("Beli"))
 end
 
 local function resolveAccent(openResult)
@@ -534,6 +729,7 @@ local function buildBatchAcknowledgement(openResult)
 	local openedChestDisplay = tostring(((openResult.OpenedChest or {}).displayName) or "Chests")
 	local lines = {}
 	local rewardRows = {}
+	local chestInfoBanner = buildChestInfoBanner(openResult)
 	addGrantedResourceLines(lines, openResult.GrantedResources)
 	addGrantedResourceRows(rewardRows, openResult.GrantedResources)
 
@@ -577,7 +773,7 @@ local function buildBatchAcknowledgement(openResult)
 	local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
 	if mythicKeyCount > 0 then
 		appendLine(lines, string.format("+%s Mythic Key%s", formatCount(mythicKeyCount), mythicKeyCount == 1 and "" or "s"))
-		appendRewardRow(rewardRows, "Duplicate Refund - Mythic Key", mythicKeyCount, REWARD_ICONS["Mythic Key"])
+		appendRewardRow(rewardRows, "Duplicate Refund - Mythic Key", mythicKeyCount, getRewardIcon("MythicKey"))
 	end
 
 	local autoConvertedChestCount = math.max(0, tonumber(openResult.AutoConvertedChestCount) or 0)
@@ -609,7 +805,8 @@ local function buildBatchAcknowledgement(openResult)
 		ButtonColor = RARITY_COLORS.Reward,
 		Lines = lines,
 		RewardRows = rewardRows,
-		PityStatus = buildFruitPityStatus(openResult),
+		ChestInfoBanner = chestInfoBanner,
+		PityStatus = chestInfoBanner,
 	}
 end
 
@@ -624,6 +821,7 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 	local hadResources = addGrantedResourceLines(lines, openResult.GrantedResources)
 	local bodyRawText = nil
 	local bodyMode = nil
+	local chestInfoBanner = buildChestInfoBanner(openResult)
 
 	if openResult.GrantedFruit then
 		local displayName, rarityName = fruitDisplayName(openResult.GrantedFruit)
@@ -691,7 +889,8 @@ function ChestOpenResultFormatter.BuildAcknowledgementOptions(openResult)
 		BodyMode = bodyMode,
 		Lines = lines,
 		PreviewFruitKey = if typeof(openResult.GrantedFruit) == "string" then openResult.GrantedFruit else nil,
-		PityStatus = buildFruitPityStatus(openResult),
+		ChestInfoBanner = chestInfoBanner,
+		PityStatus = chestInfoBanner,
 	}
 end
 
@@ -703,6 +902,7 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 	local openedChestDisplayName = tostring(openedChest.displayName or "Chest")
 	local displayChestName = pluralizeChestDisplay(openedChestDisplayName, openedCount)
 	local rewardCards = {}
+	local chestInfoBanner = buildChestInfoBanner(openResult)
 
 	addGrantedResourceCards(rewardCards, openResult.GrantedResources)
 	local featuredReward = collectFruitResultCards(openResult, rewardCards)
@@ -724,14 +924,14 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 		end
 
 		local conversionBeli = math.max(0, tonumber(openResult.ConversionBeli) or tonumber(openResult.ConversionDoubloons) or 0)
-		appendResultCard(rewardCards, CurrencyUtil.getDisplayName(), conversionBeli, REWARD_ICONS.Beli, "Duplicate")
+		appendResultCard(rewardCards, CurrencyUtil.getDisplayName(), conversionBeli, getRewardIcon("Beli"), "Duplicate")
 
 		local mythicKeyCount = math.max(0, tonumber(openResult.MythicKeyCount) or 0)
 		appendResultCard(
 			rewardCards,
 			"Duplicate Refund - Mythic Key",
 			mythicKeyCount,
-			REWARD_ICONS["Mythic Key"],
+			getRewardIcon("MythicKey"),
 			"Mythic"
 		)
 
@@ -760,7 +960,7 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 				rewardCards,
 				CurrencyUtil.getDisplayName(),
 				math.max(0, tonumber(openResult.ConversionRewardAmount) or 0),
-				REWARD_ICONS.Beli,
+				getRewardIcon("Beli"),
 				"Duplicate"
 			)
 		end
@@ -784,7 +984,8 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 		chestVisualKey = resolveOpenedChestVisualKey(openedChest),
 		featuredReward = featuredReward,
 		rewardCards = rewardCards,
-		pityStatus = buildFruitPityStatus(openResult),
+		chestInfoBanner = chestInfoBanner,
+		pityStatus = chestInfoBanner,
 	}
 end
 

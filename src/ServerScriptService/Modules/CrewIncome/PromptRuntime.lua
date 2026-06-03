@@ -79,6 +79,31 @@ function Module.Install(ctx)
 	local function syncStandLevelFromCrewMember(...)
 		return ctx.syncStandLevelFromCrewMember(...)
 	end
+	local contextualTutorialTriggerService = nil
+	local function getContextualTutorialTriggerService()
+		if contextualTutorialTriggerService ~= nil then
+			return contextualTutorialTriggerService
+		end
+
+		local serverScriptService = game:GetService("ServerScriptService")
+		local module = serverScriptService:FindFirstChild("Modules")
+			and serverScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+		if not module then
+			return nil
+		end
+
+		local ok, service = pcall(require, module)
+		if ok then
+			contextualTutorialTriggerService = service
+		end
+		return contextualTutorialTriggerService
+	end
+	local function triggerCrewProtectionTutorial(player, instanceId, source)
+		local service = getContextualTutorialTriggerService()
+		if typeof(service) == "table" and typeof(service.OnCrewPlaced) == "function" then
+			service.OnCrewPlaced(player, instanceId, source)
+		end
+	end
 	local function tutorialStandPlacementLog(...)
 		return ctx.tutorialStandPlacementLog(...)
 	end
@@ -372,6 +397,7 @@ function Module.Install(ctx)
 								SwitchPlacement = true,
 							})
 						end
+						triggerCrewProtectionTutorial(plr, incomingInstanceId, "stand_switch")
 
 						standDebug(
 							"switch accepted player=%s stand=%s incoming=%s outgoing=%s incomingStorage=%s outgoingStorage=%s outgoingDestination=%s",
@@ -508,6 +534,7 @@ function Module.Install(ctx)
 						TutorialRewardConverted = true,
 					})
 				end
+				triggerCrewProtectionTutorial(plr, placedInstanceId, "stand_placement")
 				standDebug("place accepted player=%s stand=%s tool=%s instanceId=%s", plr.Name, standName, tostring(toolName), tostring(placedInstanceId))
 
 				local placedModel, visualReason = spawnStandCrewMember(plr, standModel, handle, placedInstance.StorageName)

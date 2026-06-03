@@ -32,6 +32,7 @@ local placementPickupGuardUntil = setmetatable({}, { __mode = "k" })
 local claimTouchDebounce = setmetatable({}, { __mode = "k" })
 local callbacks = {}
 local dataManagerModule = nil
+local contextualTutorialTriggerService = nil
 local incomeLoopStarted = false
 
 local function firstNonEmpty(...)
@@ -50,6 +51,30 @@ local function getDataManager()
 		dataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 	end
 	return dataManagerModule
+end
+
+local function getContextualTutorialTriggerService()
+	if contextualTutorialTriggerService ~= nil then
+		return contextualTutorialTriggerService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		contextualTutorialTriggerService = service
+	end
+	return contextualTutorialTriggerService
+end
+
+local function triggerCrewProtectionTutorial(player, instanceId, source)
+	local service = getContextualTutorialTriggerService()
+	if typeof(service) == "table" and typeof(service.OnCrewPlaced) == "function" then
+		service.OnCrewPlaced(player, instanceId, source)
+	end
 end
 
 local function dmGet(player, path)
@@ -603,6 +628,7 @@ local function assignEquippedCaptain(player, runtime)
 		TutorialPlacement = isTutorialPlacement == true,
 		TutorialRewardConverted = isTutorialPlacement == true,
 	})
+	triggerCrewProtectionTutorial(player, placedInstanceId, "captain_placement")
 	setRuntimeHasCaptain(player, true)
 	updatePromptText(player, runtime)
 	updateCaptainMoneyText(player, runtime)
@@ -670,6 +696,7 @@ local function switchEquippedCaptain(player, runtime, equippedInfo)
 		TutorialPlacement = isTutorialPlacement == true,
 		TutorialRewardConverted = isTutorialPlacement == true,
 	})
+	triggerCrewProtectionTutorial(player, incomingInstanceId, "captain_switch")
 	setRuntimeHasCaptain(player, true)
 	updatePromptText(player, runtime)
 	updateCaptainMoneyText(player, runtime)

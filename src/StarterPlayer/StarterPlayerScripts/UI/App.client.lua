@@ -15,7 +15,7 @@ local ClientRuntime = {
 
 local React, ReactRoblox, App, Responsive
 local CrewCatalog, CrewIncomeBalance, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
-local ChestUtils, ChestDropRates, Titles, Economy, PopUpModule
+local ChestUtils, ChestDropRates, Titles, Economy, ItemIconRegistry, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
 
@@ -40,6 +40,7 @@ do
 	ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
 	Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 	Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+	ItemIconRegistry = require(Modules:WaitForChild("Configs"):WaitForChild("ItemIconRegistry"))
 	PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 	ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
@@ -1221,18 +1222,26 @@ end
 
 local function getResourceInfo(resourceKey)
 	local food = Economy.Food[resourceKey]
+	local fallbackDisplayName = if food
+		then tostring(food.DisplayName or resourceKey)
+		else (RESOURCE_DISPLAY[resourceKey] or tostring(resourceKey))
+	local registryCategory = ItemIconRegistry.GetCategory(resourceKey)
+	local subtitle = registryCategory
+	if subtitle == "Reward" then
+		subtitle = if food then "Food" else "Material"
+	end
 	local rarity = RESOURCE_RARITY[resourceKey] or "Common"
 	if food then
 		return {
-			displayName = tostring(food.DisplayName or resourceKey),
-			subtitle = "Food",
+			displayName = ItemIconRegistry.GetDisplayName(resourceKey, fallbackDisplayName),
+			subtitle = subtitle,
 			rarity = rarity,
 		}
 	end
 
 	return {
-		displayName = RESOURCE_DISPLAY[resourceKey] or tostring(resourceKey),
-		subtitle = "Material",
+		displayName = ItemIconRegistry.GetDisplayName(resourceKey, fallbackDisplayName),
+		subtitle = subtitle,
 		rarity = rarity,
 	}
 end
@@ -1837,6 +1846,10 @@ local function getSubtitle(kind, name, state)
 end
 
 local function getIcon(kind, name, state)
+	if kind == "Resource" then
+		return ItemIconRegistry.GetIcon(name)
+	end
+
 	if isCrewItemKind(kind) then
 		local staticPreviewImage = getStaticCrewPreviewImage(name, state)
 		if staticPreviewImage ~= "" then

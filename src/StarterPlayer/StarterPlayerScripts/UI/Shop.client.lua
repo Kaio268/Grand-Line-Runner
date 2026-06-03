@@ -28,6 +28,8 @@ local destroyed = false
 local renderQueued = false
 local noticeText = nil
 local noticeToken = 0
+local requestedSectionKey = nil
+local requestedSectionRequestId = 0
 
 local modalAdapter = ReactFrameModalAdapter.new({
 	playerGui = playerGui,
@@ -46,6 +48,20 @@ local purchaseAdapter = PurchaseAdapter.new(player)
 local cleanupConnections = {}
 local scheduleRender
 
+local function requestSectionFromPayload(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+
+	local sectionKey = tostring(payload.SectionKey or payload.sectionKey or "")
+	if sectionKey == "" then
+		return
+	end
+
+	requestedSectionKey = sectionKey
+	requestedSectionRequestId += 1
+end
+
 local unregisterModal = ReactModalRegistry.Register("Store", {
 	toggle = function()
 		modalAdapter:Toggle()
@@ -53,7 +69,8 @@ local unregisterModal = ReactModalRegistry.Register("Store", {
 			scheduleRender()
 		end
 	end,
-	open = function()
+	open = function(payload)
+		requestSectionFromPayload(payload)
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
 		end
@@ -279,6 +296,8 @@ local function render()
 	root:render(ReactRoblox.createPortal(React.createElement(ShopShell, {
 		catalog = catalogView,
 		noticeText = noticeText,
+		requestedSectionKey = requestedSectionKey,
+		requestedSectionRequestId = requestedSectionRequestId,
 		onClose = function()
 			modalAdapter:Close()
 		end,

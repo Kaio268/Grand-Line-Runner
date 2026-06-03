@@ -10,6 +10,7 @@ local DevilFruitInventoryService = require(ServerScriptService:WaitForChild("Mod
 
 local ChestRewardResolver = {}
 local PLAYER_LUCK_MULTIPLIER = 1.25
+local FRUIT_REWARD_SOURCE_STANDARD_CHEST = "standard_chest"
 
 local function chooseWeightedKey(randomObject, weightTable, orderedKeys)
 	local totalWeight = 0
@@ -246,10 +247,30 @@ local function buildOpenResult(dataRoot, openedChest)
 		},
 		FruitPityProgress = nil,
 		FruitPityTriggered = nil,
+		FruitRewardContext = nil,
 		AutoConvertedMythicChest = false,
 		GrantedChest = nil,
 		Message = nil,
 	}
+end
+
+local function buildStandardFruitRewardContext(fruit, rarityName)
+	local fruitKey = tostring(fruit and fruit.FruitKey or "")
+	return {
+		HasDevilFruitReward = true,
+		Source = FRUIT_REWARD_SOURCE_STANDARD_CHEST,
+		FruitKey = fruitKey,
+		DisplayName = tostring((fruit and fruit.DisplayName) or fruitKey or "Devil Fruit"),
+		Rarity = tostring(rarityName or (fruit and fruit.Rarity) or ""),
+		WasDuplicate = false,
+	}
+end
+
+local function markFruitRewardDuplicate(openResult)
+	local context = openResult and openResult.FruitRewardContext
+	if typeof(context) == "table" then
+		context.WasDuplicate = true
+	end
 end
 
 local function grantFruit(dataRoot, fruitKey)
@@ -777,10 +798,16 @@ function ChestRewardResolver.Resolve(params)
 
 	local fruit = selectionPool[randomObject:NextInteger(1, #selectionPool)]
 	openResult.GrantedFruitRarity = effectiveRarity
+	if isStandardChest then
+		openResult.FruitRewardContext = buildStandardFruitRewardContext(fruit, effectiveRarity)
+	end
 
 	if DevilFruitInventoryService.HasStoredDevilFruit(params.Player, fruit.FruitKey) then
 		applyStandardFruitPityResult(params.DataRoot, chestData, effectiveRarity, changedRoots, openResult, triggeredPityRarity)
 		openResult.WasDuplicate = true
+		if isStandardChest then
+			markFruitRewardDuplicate(openResult)
+		end
 		openResult.GrantedFruit = nil
 		openResult.GrantedFruitRarity = nil
 		return {

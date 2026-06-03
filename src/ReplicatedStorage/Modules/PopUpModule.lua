@@ -1267,12 +1267,38 @@ local function getAcknowledgePityActivationText(pityStatus)
 	return table.concat(parts, "  ")
 end
 
-local function renderAcknowledgePityStatus(pityStatus)
+local function getAcknowledgeBannerTitle(chestInfo)
+	if typeof(chestInfo) ~= "table" then
+		return ""
+	end
+
+	local explicitTitle = tostring(chestInfo.titleText or chestInfo.TitleText or chestInfo.title or chestInfo.Title or "")
+	if explicitTitle ~= "" then
+		return explicitTitle
+	end
+
+	return getAcknowledgePityActivationText(chestInfo)
+end
+
+local function getAcknowledgeBannerBody(chestInfo)
+	if typeof(chestInfo) ~= "table" then
+		return ""
+	end
+
+	local explicitBody = tostring(chestInfo.bodyText or chestInfo.BodyText or chestInfo.body or chestInfo.Body or "")
+	if explicitBody ~= "" then
+		return explicitBody
+	end
+
+	return tostring(chestInfo.progressText or chestInfo.ProgressText or "")
+end
+
+local function renderAcknowledgePityStatus(chestInfo)
 	if not acknowledgePityBanner then
 		return
 	end
 
-	if typeof(pityStatus) ~= "table" or tostring(pityStatus.progressText or "") == "" then
+	if typeof(chestInfo) ~= "table" then
 		acknowledgePityBanner.Visible = false
 		if acknowledgePityActivation then
 			acknowledgePityActivation.Text = ""
@@ -1284,28 +1310,41 @@ local function renderAcknowledgePityStatus(pityStatus)
 		return
 	end
 
-	local accentColor = if typeof(pityStatus.accentColor) == "Color3"
-		then pityStatus.accentColor
+	local titleText = getAcknowledgeBannerTitle(chestInfo)
+	local bodyText = getAcknowledgeBannerBody(chestInfo)
+	if titleText == "" and bodyText == "" then
+		acknowledgePityBanner.Visible = false
+		if acknowledgePityActivation then
+			acknowledgePityActivation.Text = ""
+			acknowledgePityActivation.Visible = false
+		end
+		if acknowledgePityProgress then
+			acknowledgePityProgress.Text = ""
+		end
+		return
+	end
+
+	local accentColor = if typeof(chestInfo.accentColor) == "Color3"
+		then chestInfo.accentColor
 		else DEVIL_FRUIT_ACK_THEME.GoldHighlight
-	local activationText = getAcknowledgePityActivationText(pityStatus)
 	local bannerStroke = ensureAckStroke(acknowledgePityBanner, accentColor, 0.18, 2)
 	bannerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
 	if acknowledgePityActivation then
-		acknowledgePityActivation.Text = activationText
+		acknowledgePityActivation.Text = titleText
 		acknowledgePityActivation.TextColor3 = accentColor
-		acknowledgePityActivation.Visible = activationText ~= ""
+		acknowledgePityActivation.Visible = titleText ~= ""
 	end
 
 	if acknowledgePityProgress then
-		acknowledgePityProgress.Text = tostring(pityStatus.progressText)
-		acknowledgePityProgress.TextColor3 = if activationText ~= ""
+		acknowledgePityProgress.Text = bodyText
+		acknowledgePityProgress.TextColor3 = if titleText ~= ""
 			then DEVIL_FRUIT_ACK_THEME.TextSecondary
 			else DEVIL_FRUIT_ACK_THEME.TextMain
-		acknowledgePityProgress.Position = if activationText ~= ""
+		acknowledgePityProgress.Position = if titleText ~= ""
 			then UDim2.new(0, 14, 0.48, 0)
 			else UDim2.new(0, 14, 0.22, 0)
-		acknowledgePityProgress.Size = if activationText ~= ""
+		acknowledgePityProgress.Size = if titleText ~= ""
 			then UDim2.new(1, -28, 0.42, 0)
 			else UDim2.new(1, -28, 0.56, 0)
 	end
@@ -1415,7 +1454,7 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 		acknowledgePanelScale.Scale = getAcknowledgementScale()
 	end
 
-	renderAcknowledgePityStatus(options.PityStatus or options.pityStatus)
+	renderAcknowledgePityStatus(options.ChestInfoBanner or options.chestInfoBanner or options.PityStatus or options.pityStatus)
 
 	local title = tostring(options.Title or options.title or "Notice")
 	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")

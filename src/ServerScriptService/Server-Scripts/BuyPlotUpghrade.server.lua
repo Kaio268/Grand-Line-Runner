@@ -22,6 +22,7 @@ end
 local busy = {}
 local PLOT_UPGRADE_PATH = "HiddenLeaderstats.PlotUpgrade"
 local RESET_REFRESH_WAIT_TIMEOUT_SECONDS = 8
+local tutorialService = nil
 local MATERIAL_PATHS = {
 	Timber = {
 		Primary = "Materials.Timber",
@@ -189,6 +190,36 @@ local function fireUpgradeResult(player, payload)
 	end
 
 	upgradeResultRemote:FireClient(player, payload)
+end
+
+local function getTutorialService()
+	if tutorialService ~= nil then
+		return tutorialService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("TutorialService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		tutorialService = service
+	end
+	return tutorialService
+end
+
+local function completeContextualTutorial(player, tutorialId, context)
+	local service = getTutorialService()
+	if typeof(service) ~= "table" or typeof(service.Complete) ~= "function" then
+		return false, "tutorial_service_unavailable"
+	end
+
+	local ok, success, reason = pcall(service.Complete, player, tutorialId, context)
+	if not ok then
+		return false, "tutorial_complete_failed"
+	end
+	return success == true, reason
 end
 
 local function fireUpgradeSuccess(player, newLevel)
@@ -383,6 +414,14 @@ local function processUpgradePurchase(player)
 			"Please try again in a moment.",
 		}, current, "Your save data was not ready for this upgrade.")
 		return false
+	end
+
+	if current == 0 and newLevel == 1 then
+		completeContextualTutorial(player, "ShipUpgrade", {
+			Source = "first_ship_upgrade_purchase",
+			PreviousLevel = current,
+			NewLevel = newLevel,
+		})
 	end
 
 	local pushOk, pushErr = pcall(function()

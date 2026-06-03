@@ -27,8 +27,9 @@ local ProfileTemplate = {
 	},
 
 	Tutorials = {
-		SchemaVersion = 1,
+		SchemaVersion = 2,
 		Completed = {},
+		Queue = {},
 	},
 
 	TotalStats = {

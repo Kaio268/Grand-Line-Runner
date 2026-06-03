@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local ContextActionService = game:GetService("ContextActionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local SoundService = game:GetService("SoundService")
 local StarterGui = game:GetService("StarterGui")
@@ -13,6 +14,8 @@ local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local config = if typeof(EconomyConfig.AFKTeleport) == "table" then EconomyConfig.AFKTeleport else {}
 local remoteConfig = if typeof(config.Remotes) == "table" then config.Remotes else {}
 local rewardConfig = if typeof(config.Rewards) == "table" then config.Rewards else {}
+local AFK_PLACE_ID = math.max(0, math.floor(tonumber(config.AFKPlaceId) or 0))
+local IS_LOCAL_AFK_PLACE = AFK_PLACE_ID > 0 and game.PlaceId == AFK_PLACE_ID
 
 local STATE_EVENT_NAME = tostring(remoteConfig.StateEventName or "AFKTeleportState")
 local STATE_REQUEST_NAME = tostring(remoteConfig.StateRequestName or "AFKTeleportStateRequest")
@@ -45,7 +48,9 @@ local CARD_ALT = Color3.fromRGB(35, 38, 42)
 local TEXT = Color3.fromRGB(255, 249, 229)
 local MUTED = Color3.fromRGB(198, 204, 214)
 local TOAST_BG = Color3.fromRGB(16, 20, 25)
-local BACKGROUND_IMAGE = "rbxassetid://105877304453866"
+local BACKGROUND_IMAGE = "rbxassetid://124045609313388"
+local BACKGROUND_COLOR = Color3.fromRGB(10, 9, 13)
+local BACKGROUND_IMAGE_TINT = Color3.fromRGB(255, 238, 218)
 local DASHBOARD_MAX_WIDTH = 1160
 local DASHBOARD_DESKTOP_MARGIN = 48
 local DASHBOARD_MOBILE_MARGIN = 16
@@ -61,6 +66,8 @@ local DASHBOARD_MOBILE_CARD_HEIGHT = 124
 local DASHBOARD_DESKTOP_REWARDS_HEIGHT = 136
 local DASHBOARD_MOBILE_REWARDS_HEIGHT = 154
 local CARD_STROKE_SAFE_PADDING = 8
+local AFK_MOVEMENT_LOCK_ACTION_NAME = "AFKLobbyMovementLock"
+local AFK_MOVEMENT_LOCK_PRIORITY = Enum.ContextActionPriority.High.Value + 100
 
 local stateEvent = nil
 local stateRequest = nil
@@ -94,6 +101,41 @@ if remotes then
 	activityPingEvent = waitForRemote(remotes, ACTIVITY_PING_EVENT_NAME, "RemoteEvent")
 end
 
+local function clearLocalJump()
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.Jump = false
+	end
+end
+
+local function sinkAfkMovementAction()
+	clearLocalJump()
+	return Enum.ContextActionResult.Sink
+end
+
+local function bindAfkMovementLock()
+	ContextActionService:BindActionAtPriority(
+		AFK_MOVEMENT_LOCK_ACTION_NAME,
+		sinkAfkMovementAction,
+		false,
+		AFK_MOVEMENT_LOCK_PRIORITY,
+		Enum.PlayerActions.CharacterForward,
+		Enum.PlayerActions.CharacterBackward,
+		Enum.PlayerActions.CharacterLeft,
+		Enum.PlayerActions.CharacterRight,
+		Enum.PlayerActions.CharacterJump
+	)
+end
+
+if IS_LOCAL_AFK_PLACE then
+	bindAfkMovementLock()
+	player.CharacterAdded:Connect(function()
+		task.defer(clearLocalJump)
+	end)
+	UserInputService.JumpRequest:Connect(clearLocalJump)
+end
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "AFKTeleportGui"
 screenGui.DisplayOrder = DISPLAY_ORDER
@@ -105,8 +147,8 @@ screenGui.Parent = playerGui
 
 local backdrop = Instance.new("Frame")
 backdrop.Name = "Backdrop"
-backdrop.BackgroundColor3 = Color3.fromRGB(3, 5, 9)
-backdrop.BackgroundTransparency = 0.02
+backdrop.BackgroundColor3 = BACKGROUND_COLOR
+backdrop.BackgroundTransparency = 0
 backdrop.BorderSizePixel = 0
 backdrop.Size = UDim2.fromScale(1, 1)
 backdrop.Visible = false
@@ -128,6 +170,18 @@ local function applyStroke(parent, color, transparency)
 	return stroke
 end
 
+local function applyGradient(parent, name, color, transparency, rotation)
+	local gradient = Instance.new("UIGradient")
+	gradient.Name = name
+	gradient.Color = color
+	if transparency ~= nil then
+		gradient.Transparency = transparency
+	end
+	gradient.Rotation = rotation or 0
+	gradient.Parent = parent
+	return gradient
+end
+
 local function makeText(parent, name, font, color, size)
 	local label = Instance.new("TextLabel")
 	label.Name = name
@@ -146,28 +200,82 @@ local backgroundImage = Instance.new("ImageLabel")
 backgroundImage.Name = "BackgroundImage"
 backgroundImage.BackgroundTransparency = 1
 backgroundImage.Image = BACKGROUND_IMAGE
-backgroundImage.ImageColor3 = Color3.fromRGB(116, 132, 144)
-backgroundImage.ImageTransparency = 0.18
+backgroundImage.ImageColor3 = BACKGROUND_IMAGE_TINT
+backgroundImage.ImageTransparency = 0
 backgroundImage.ScaleType = Enum.ScaleType.Crop
 backgroundImage.Size = UDim2.fromScale(1, 1)
 backgroundImage.ZIndex = 1
 backgroundImage.Parent = backdrop
 
-local shade = Instance.new("Frame")
-shade.Name = "Shade"
-shade.BackgroundColor3 = Color3.fromRGB(3, 7, 12)
-shade.BackgroundTransparency = 0.08
-shade.BorderSizePixel = 0
-shade.Size = UDim2.fromScale(1, 1)
-shade.ZIndex = 2
-shade.Parent = backdrop
+local gradientHost = Instance.new("Frame")
+gradientHost.Name = "GradientHost"
+gradientHost.BackgroundTransparency = 1
+gradientHost.BorderSizePixel = 0
+gradientHost.Size = UDim2.fromScale(1, 1)
+gradientHost.ZIndex = 2
+gradientHost.Parent = backdrop
+
+local warmBloom = Instance.new("Frame")
+warmBloom.Name = "WarmBloom"
+warmBloom.AnchorPoint = Vector2.new(0.5, 0.5)
+warmBloom.BackgroundColor3 = Color3.fromRGB(255, 178, 72)
+warmBloom.BackgroundTransparency = 0.78
+warmBloom.BorderSizePixel = 0
+warmBloom.Position = UDim2.fromScale(0.62, 0.34)
+warmBloom.Rotation = -8
+warmBloom.Size = UDim2.fromScale(0.72, 0.58)
+warmBloom.ZIndex = 2
+warmBloom.Parent = gradientHost
+applyCorner(warmBloom, 36)
+applyGradient(warmBloom, "WarmBloomGradient", ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 220, 122)),
+	ColorSequenceKeypoint.new(0.55, Color3.fromRGB(255, 133, 54)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(43, 116, 190)),
+}), NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.92),
+	NumberSequenceKeypoint.new(0.45, 0.26),
+	NumberSequenceKeypoint.new(1, 0.96),
+}), 18)
+
+local vignette = Instance.new("Frame")
+vignette.Name = "Vignette"
+vignette.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+vignette.BackgroundTransparency = 0.06
+vignette.BorderSizePixel = 0
+vignette.Size = UDim2.fromScale(1, 1)
+vignette.ZIndex = 3
+vignette.Parent = backdrop
+applyGradient(vignette, "VignetteGradient", ColorSequence.new(Color3.new(0, 0, 0), Color3.new(0, 0, 0)), NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.2),
+	NumberSequenceKeypoint.new(0.34, 0.72),
+	NumberSequenceKeypoint.new(0.62, 0.64),
+	NumberSequenceKeypoint.new(1, 0.08),
+}), 90)
+
+local cinematicShade = Instance.new("Frame")
+cinematicShade.Name = "CinematicShade"
+cinematicShade.BackgroundColor3 = Color3.fromRGB(12, 8, 10)
+cinematicShade.BackgroundTransparency = 0.42
+cinematicShade.BorderSizePixel = 0
+cinematicShade.Size = UDim2.fromScale(1, 1)
+cinematicShade.ZIndex = 4
+cinematicShade.Parent = backdrop
+applyGradient(cinematicShade, "CinematicGradient", ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 22)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(8, 6, 7)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)),
+}), NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0.42),
+	NumberSequenceKeypoint.new(0.52, 0.8),
+	NumberSequenceKeypoint.new(1, 0.24),
+}), 90)
 
 local dashboard = Instance.new("Frame")
 dashboard.Name = "Dashboard"
 dashboard.BackgroundTransparency = 1
 dashboard.BorderSizePixel = 0
 dashboard.Size = UDim2.fromScale(1, 1)
-dashboard.ZIndex = 3
+dashboard.ZIndex = 5
 dashboard.Parent = backdrop
 
 local dashboardPadding = Instance.new("UIPadding")
@@ -184,7 +292,7 @@ dashboardContainer.BackgroundTransparency = 1
 dashboardContainer.BorderSizePixel = 0
 dashboardContainer.Position = UDim2.fromScale(0.5, 0.5)
 dashboardContainer.Size = UDim2.new(1, -DASHBOARD_DESKTOP_MARGIN * 2, 1, -DASHBOARD_DESKTOP_VERTICAL_MARGIN * 2)
-dashboardContainer.ZIndex = 3
+dashboardContainer.ZIndex = 5
 dashboardContainer.Parent = dashboard
 
 local header = Instance.new("Frame")
@@ -192,7 +300,7 @@ header.Name = "Header"
 header.BackgroundTransparency = 1
 header.BorderSizePixel = 0
 header.Size = UDim2.new(1, 0, 0, 104)
-header.ZIndex = 4
+header.ZIndex = 6
 header.Parent = dashboardContainer
 
 local headerTitle = makeText(header, "Title", Enum.Font.GothamBlack, GOLD_BRIGHT, 36)
@@ -200,7 +308,7 @@ headerTitle.Size = UDim2.new(1, 0, 0, 46)
 headerTitle.Text = "AFK Lobby"
 headerTitle.TextWrapped = false
 headerTitle.TextXAlignment = Enum.TextXAlignment.Center
-headerTitle.ZIndex = 4
+headerTitle.ZIndex = 6
 
 local headerSubtitle = makeText(header, "Subtitle", Enum.Font.Gotham, MUTED, 16)
 headerSubtitle.Position = UDim2.fromOffset(2, 50)
@@ -208,7 +316,7 @@ headerSubtitle.Size = UDim2.new(1, 0, 0, 26)
 headerSubtitle.Text = "Stay here to earn rewards while you're away."
 headerSubtitle.TextXAlignment = Enum.TextXAlignment.Center
 headerSubtitle.TextTruncate = Enum.TextTruncate.AtEnd
-headerSubtitle.ZIndex = 4
+headerSubtitle.ZIndex = 6
 
 local statusLabel = makeText(header, "Status", Enum.Font.GothamMedium, GREEN, 14)
 statusLabel.Position = UDim2.fromOffset(2, 78)
@@ -216,7 +324,7 @@ statusLabel.Size = UDim2.new(1, 0, 0, 22)
 statusLabel.Text = "Loading AFK rewards..."
 statusLabel.TextXAlignment = Enum.TextXAlignment.Center
 statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
-statusLabel.ZIndex = 4
+statusLabel.ZIndex = 6
 
 local footer = Instance.new("Frame")
 footer.Name = "Footer"
@@ -225,7 +333,7 @@ footer.BackgroundTransparency = 1
 footer.BorderSizePixel = 0
 footer.Position = UDim2.fromScale(0, 1)
 footer.Size = UDim2.new(1, 0, 0, 86)
-footer.ZIndex = 4
+footer.ZIndex = 6
 footer.Parent = dashboardContainer
 
 local button = Instance.new("TextButton")
@@ -241,7 +349,7 @@ button.Text = "Leave AFK Lobby"
 button.TextColor3 = PANEL_DARK
 button.TextSize = 16
 button.TextWrapped = true
-button.ZIndex = 5
+button.ZIndex = 7
 button.Parent = footer
 applyCorner(button, 8)
 applyStroke(button, GOLD_BRIGHT, 0.55)
@@ -252,7 +360,7 @@ autoSaveNote.Position = UDim2.new(0.5, 0, 0, 52)
 autoSaveNote.Size = UDim2.new(1, 0, 0, 24)
 autoSaveNote.Text = "Rewards are added to your inventory automatically."
 autoSaveNote.TextXAlignment = Enum.TextXAlignment.Center
-autoSaveNote.ZIndex = 5
+autoSaveNote.ZIndex = 7
 
 local scroll = Instance.new("ScrollingFrame")
 scroll.Name = "Scroll"
@@ -265,7 +373,7 @@ scroll.Position = UDim2.fromOffset(0, 116)
 scroll.ScrollBarImageColor3 = GOLD
 scroll.ScrollBarThickness = 6
 scroll.Size = UDim2.new(1, 0, 1, -214)
-scroll.ZIndex = 4
+scroll.ZIndex = 6
 scroll.Parent = dashboardContainer
 
 local scrollLayout = Instance.new("UIListLayout")
@@ -286,7 +394,7 @@ cardsGrid.Name = "Cards"
 cardsGrid.BackgroundTransparency = 1
 cardsGrid.LayoutOrder = 1
 cardsGrid.Size = UDim2.new(1, -CARD_STROKE_SAFE_PADDING * 2, 0, 256)
-cardsGrid.ZIndex = 4
+cardsGrid.ZIndex = 6
 cardsGrid.Parent = scroll
 
 local cardsGridLayout = Instance.new("UIGridLayout")
@@ -301,7 +409,7 @@ local function makeStatCard(cardTitle, value, detail, accent)
 	card.BackgroundColor3 = CARD
 	card.BorderSizePixel = 0
 	card.Size = UDim2.fromOffset(260, DASHBOARD_DESKTOP_CARD_HEIGHT)
-	card.ZIndex = 4
+	card.ZIndex = 6
 	applyCorner(card, 8)
 	applyStroke(card, accent, 0.38)
 
@@ -315,14 +423,14 @@ local function makeStatCard(cardTitle, value, detail, accent)
 	local titleLabel = makeText(card, "Title", Enum.Font.GothamMedium, MUTED, 14)
 	titleLabel.Size = UDim2.new(1, 0, 0, 22)
 	titleLabel.Text = cardTitle
-	titleLabel.ZIndex = 5
+	titleLabel.ZIndex = 7
 
 	local valueLabel = makeText(card, "Value", Enum.Font.GothamBlack, accent, 28)
 	valueLabel.Position = UDim2.fromOffset(0, 32)
 	valueLabel.Size = UDim2.new(1, 0, 0, 40)
 	valueLabel.Text = value
 	valueLabel.TextScaled = true
-	valueLabel.ZIndex = 5
+	valueLabel.ZIndex = 7
 
 	local sizeLimit = Instance.new("UITextSizeConstraint")
 	sizeLimit.MaxTextSize = 28
@@ -334,7 +442,7 @@ local function makeStatCard(cardTitle, value, detail, accent)
 	detailLabel.Size = UDim2.new(1, 0, 0, 34)
 	detailLabel.Text = detail
 	detailLabel.TextYAlignment = Enum.TextYAlignment.Top
-	detailLabel.ZIndex = 5
+	detailLabel.ZIndex = 7
 
 	return {
 		Frame = card,
@@ -350,7 +458,7 @@ local function makeWideCard(cardTitle, body, accent, height)
 	card.BorderSizePixel = 0
 	card.LayoutOrder = 0
 	card.Size = UDim2.new(1, -CARD_STROKE_SAFE_PADDING * 2, 0, height or DASHBOARD_DESKTOP_REWARDS_HEIGHT)
-	card.ZIndex = 4
+	card.ZIndex = 6
 	applyCorner(card, 8)
 	applyStroke(card, accent, 0.46)
 
@@ -364,7 +472,7 @@ local function makeWideCard(cardTitle, body, accent, height)
 	local titleLabel = makeText(card, "Title", Enum.Font.GothamBold, GOLD_BRIGHT, 16)
 	titleLabel.Size = UDim2.new(1, 0, 0, 24)
 	titleLabel.Text = cardTitle
-	titleLabel.ZIndex = 5
+	titleLabel.ZIndex = 7
 
 	local bodyLabel = makeText(card, "Body", Enum.Font.GothamMedium, TEXT, 15)
 	bodyLabel.Position = UDim2.fromOffset(0, 32)
@@ -372,7 +480,7 @@ local function makeWideCard(cardTitle, body, accent, height)
 	bodyLabel.Text = body
 	bodyLabel.TextWrapped = true
 	bodyLabel.TextYAlignment = Enum.TextYAlignment.Top
-	bodyLabel.ZIndex = 5
+	bodyLabel.ZIndex = 7
 
 	return {
 		Frame = card,
@@ -764,8 +872,7 @@ local function getAfkRateMultiplier(summary)
 end
 
 local function isLocalAfkPlace()
-	local placeId = math.max(0, math.floor(tonumber(config.AFKPlaceId) or 0))
-	return placeId > 0 and game.PlaceId == placeId
+	return IS_LOCAL_AFK_PLACE
 end
 
 local function getElapsedSinceState()
