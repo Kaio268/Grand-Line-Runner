@@ -379,7 +379,7 @@ local function sell(player, payload)
 		return result(false, tostring(removeReason or "sell_remove_failed"))
 	end
 
-	DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), price)
+	DataManager:AddValue(player, CurrencyUtil.getPrimaryPath(), price, { ApplyTitleBuff = false })
 	notifyChanged(player, "crew_sell")
 	return result(true, "ok", {
 		Action = "Sell",

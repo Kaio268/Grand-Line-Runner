@@ -1,8 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Configs = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
+local BuffDisplayFormatter = require(Modules:WaitForChild("BuffDisplayFormatter"))
 local GamepassesConfig = require(Configs:WaitForChild("Gamepasses"))
 local MonetizationConfig = require(Configs:WaitForChild("Monetization"))
+local MovementSpeedConfig = require(Configs:WaitForChild("MovementSpeed"))
 
 local Catalog = {}
 
@@ -16,6 +19,11 @@ local function formatRobux(price)
 		return tostring(numericPrice)
 	end
 	return "Soon"
+end
+
+local function formatSpeedBoostSubtitle()
+	local multiplier = tonumber(MovementSpeedConfig.PotionSpeedBoostMultiplier) or 1.5
+	return BuffDisplayFormatter.formatMultiplierLabel(multiplier, "Speed")
 end
 
 local function gamepassPurchase(gamepassKey)
@@ -202,7 +210,7 @@ local items = {
 		id = "speed-boost",
 		sectionKey = "boosts-chests",
 		title = "Speed Boost",
-		subtitle = "+15% speed",
+		subtitle = formatSpeedBoostSubtitle(),
 		description = "Run faster for a limited time.",
 		tags = { "Boost", "Speed" },
 		themeKey = "Cyan",

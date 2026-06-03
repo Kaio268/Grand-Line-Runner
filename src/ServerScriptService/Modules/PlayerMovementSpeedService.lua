@@ -2,12 +2,14 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local MapResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapResolver"))
 local HitEffectConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("HitEffects"))
 local MovementSpeedConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("MovementSpeed"))
 
 local PlayerMovementSpeedService = {}
+local cachedTitleService = nil
 
 local DEBUG_TRACE = RunService:IsStudio()
 local SELECTED_SPEED_SETTING_NAME = "SelectedSpeed"
@@ -15,6 +17,7 @@ local SPEED_AUTO_MAX_SETTING_NAME = "SpeedAutoMax"
 local SPEED_PATH = "HiddenLeaderstats.Speed"
 local SELECTED_SPEED_PATH = "Settings.SelectedSpeed"
 local SPEED_AUTO_MAX_PATH = "Settings.SpeedAutoMax"
+local EQUIPPED_TITLE_ATTRIBUTE = "EquippedTitleId"
 local HORO_GHOST_ATTRIBUTE = "HoroProjectionGhost"
 local HORO_BODY_ATTRIBUTE = "HoroProjectionBody"
 local HORO_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
@@ -310,9 +313,26 @@ local function getMoguMovementLockSpeedMultiplier(player)
 	return math.max(0, speedMultiplier)
 end
 
+local function getTitleSpeedMultiplier(player)
+	if cachedTitleService == nil then
+		local ok, result = pcall(function()
+			return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
+		end)
+		cachedTitleService = if ok and typeof(result) == "table" then result else false
+	end
+
+	if cachedTitleService == false then
+		return 1
+	end
+
+	local ok, multiplier = pcall(cachedTitleService.GetEquippedTitleBuffMultiplier, player, "speed")
+	return if ok then math.max(0, tonumber(multiplier) or 1) else 1
+end
+
 local function getPositiveSpeedMultiplier(player)
 	return getHieIceBoostSpeedMultiplier(player)
 		* getPotionSpeedBoostMultiplier(player)
+		* getTitleSpeedMultiplier(player)
 end
 
 local function getForcedSpeedMultiplier(player)
@@ -705,6 +725,10 @@ local function hookCharacter(player, character)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal(HitEffectConfig.Attributes.WalkSpeedMultiplier):Connect(function()
 		apply("hit_effect_multiplier_changed")
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(EQUIPPED_TITLE_ATTRIBUTE):Connect(function()
+		apply("equipped_title_changed")
 	end)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal("HoroProjectionGhostSpeed"):Connect(function()

@@ -221,6 +221,10 @@ local TITLE_GROUPS = {
 				DisplayName = "Tester",
 				Description = "Temporary pre-release testing title.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.10,
+					resources = 0.10,
+				},
 				VisualStyle = {
 					AccentColor = Color3.fromRGB(105, 225, 255),
 					SurfaceColor = Color3.fromRGB(15, 48, 65),
@@ -340,12 +344,18 @@ local TITLE_GROUPS = {
 				Description = "You were overloaded, slow, and still refused to drop the loot.",
 				RequirementText = "Extract while carrying the maximum number of rewards.",
 				UnlockType = "Persistent",
+				Buffs = {
+					resources = 0.15,
+				},
 			},
 			GoldFever = {
 				DisplayName = "Gold Fever",
 				Description = "If it shines, it is coming home with you.",
 				RequirementText = "Extract a Gold chest from any depth.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.08,
+				},
 			},
 		},
 	},
@@ -362,6 +372,11 @@ local TITLE_GROUPS = {
 				Description = "Permanent title granted by the Captain Pass.",
 				RequirementText = "Own the Captain Pass.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.50,
+					resources = 0.50,
+					speed = 0.10,
+				},
 				VisualStyle = {
 					AccentColor = Color3.fromRGB(255, 213, 92),
 					SurfaceColor = Color3.fromRGB(72, 48, 18),
@@ -388,6 +403,9 @@ local TITLE_GROUPS = {
 				Description = "The weakest chest gave you something it had no business giving.",
 				RequirementText = "Get a high-rarity reward from a Wooden chest.",
 				UnlockType = "Persistent",
+				Buffs = {
+					resources = 0.10,
+				},
 			},
 			MaxDeck = {
 				DisplayName = "Max Deck",
@@ -410,6 +428,9 @@ local TITLE_GROUPS = {
 				Description = "Too slow to survive, too bold to turn back.",
 				RequirementText = "Complete an Abyssal run with less than 10 speed.",
 				UnlockType = "Persistent",
+				Buffs = {
+					speed = 0.10,
+				},
 			},
 			ThePhoenix = {
 				DisplayName = "The Phoenix",
@@ -441,6 +462,9 @@ local TITLE_GROUPS = {
 				Description = "Even the darkest waters had to pay you.",
 				RequirementText = "Extract 10 rewards from Abyssal depth.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.10,
+				},
 			},
 		},
 	},
@@ -456,12 +480,18 @@ local TITLE_GROUPS = {
 				Description = "You found a name the world tried to hide.",
 				RequirementText = "Own or extract a Secret-rarity crewmate.",
 				UnlockType = "Persistent",
+				Buffs = {
+					resources = 0.10,
+				},
 			},
 			InsuranceFraud = {
 				DisplayName = "Insurance Fraud",
 				Description = "You died carrying treasure and came back like nothing happened.",
 				RequirementText = "Trigger Phoenix Rebirth while carrying a reward.",
 				UnlockType = "Persistent",
+				Buffs = {
+					beli = 0.10,
+				},
 			},
 			PirateEmperor = {
 				DisplayName = "Pirate Emperor",
@@ -470,6 +500,10 @@ local TITLE_GROUPS = {
 				UnlockType = "DynamicRank",
 				RankAttribute = "LB_Bounty",
 				RequiredRank = 1,
+				Buffs = {
+					beli = 1,
+					resources = 1,
+				},
 			},
 		},
 	},
@@ -485,6 +519,7 @@ local function applyTierDefaults(definition)
 	definition.TierRank = tier.Rank
 	definition.VisualStyle = definition.VisualStyle or tier.VisualStyle
 	definition.ChatStyle = definition.ChatStyle or tier.ChatStyle
+	definition.Buffs = definition.Buffs or {}
 	return definition
 end
 

@@ -35,6 +35,12 @@ function Module.Install(ctx)
 	local function getStandCollectMultiplier(...)
 		return ctx.getStandCollectMultiplier(...)
 	end
+	local function getStandClaimSummary(...)
+		return ctx.getStandClaimSummary(...)
+	end
+	local function getTitleBeliMultiplier(...)
+		return ctx.getTitleBeliMultiplier(...)
+	end
 	local function getStandSlotState(...)
 		return ctx.getStandSlotState(...)
 	end
@@ -280,8 +286,10 @@ function Module.Install(ctx)
 			if crewMemberName ~= "" then
 				local rawIncomeToCollect = math.max(0, tonumber(standData.IncomeToCollect) or 0)
 				local collectMultiplier = getStandCollectMultiplier(player, standName)
-				local claimReadyAmount, exactClaimReadyAmount =
-					IncomeClaimMath.GetWholeClaimableAmount(rawIncomeToCollect, collectMultiplier)
+				local claimSummary = getStandClaimSummary(player, standName)
+				local claimReadyAmount = math.max(0, math.floor(tonumber(claimSummary.FinalAmount) or 0))
+				local exactClaimReadyAmount = math.max(0, tonumber(claimSummary.ExactAmount) or 0)
+				local claimRemainderAmount = math.max(0, exactClaimReadyAmount - claimReadyAmount)
 				local incomePerSecond = math.max(0, getStandIncomePerSecond(player, standName, crewMemberName))
 
 				snapshot.Stands[standName] = {
@@ -291,10 +299,11 @@ function Module.Install(ctx)
 					StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 					RawIncomeToCollect = rawIncomeToCollect,
 					CollectMultiplier = collectMultiplier,
+					TitleMultiplier = math.max(0, tonumber(claimSummary.TitleMultiplier) or 1),
 					IncomePerSecond = incomePerSecond,
 					ExactClaimReadyAmount = exactClaimReadyAmount,
 					ClaimReadyAmount = claimReadyAmount,
-					ClaimRemainderAmount = math.max(0, exactClaimReadyAmount - claimReadyAmount),
+					ClaimRemainderAmount = claimRemainderAmount,
 				}
 				snapshot.TotalClaimReadyAmount += claimReadyAmount
 				appendCaptainLogRow({
@@ -307,10 +316,11 @@ function Module.Install(ctx)
 					StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
 					RawIncomeToCollect = rawIncomeToCollect,
 					CollectMultiplier = collectMultiplier,
+					TitleMultiplier = math.max(0, tonumber(claimSummary.TitleMultiplier) or 1),
 					IncomePerSecond = incomePerSecond,
 					ExactClaimReadyAmount = exactClaimReadyAmount,
 					ClaimReadyAmount = claimReadyAmount,
-					ClaimRemainderAmount = math.max(0, exactClaimReadyAmount - claimReadyAmount),
+					ClaimRemainderAmount = claimRemainderAmount,
 				})
 			end
 		end
@@ -319,8 +329,11 @@ function Module.Install(ctx)
 		if typeof(captainAssignment) == "table" then
 			local rawCaptainIncome = math.max(0, tonumber(captainAssignment.IncomeToCollect) or 0)
 			local captainCollectMultiplier = math.max(0, CaptainSlotRuntime.GetCaptainCollectMultiplier(player))
-			local captainClaimReady, captainExactClaimReady =
-				IncomeClaimMath.GetWholeClaimableAmount(rawCaptainIncome, captainCollectMultiplier)
+			local captainClaimSummary =
+				IncomeClaimMath.BuildClaimSummary(rawCaptainIncome, captainCollectMultiplier, getTitleBeliMultiplier(player))
+			local captainClaimReady = math.max(0, math.floor(tonumber(captainClaimSummary.FinalAmount) or 0))
+			local captainExactClaimReady = math.max(0, tonumber(captainClaimSummary.ExactAmount) or 0)
+			local captainClaimRemainder = math.max(0, captainExactClaimReady - captainClaimReady)
 			local captainIncomePerSecond = math.max(0, CaptainSlotRuntime.GetCaptainIncomePerSecond(player))
 			local captainCrewMemberName = tostring(
 				captainAssignment.CrewMemberName
@@ -344,10 +357,11 @@ function Module.Install(ctx)
 					StandLevel = captainStandLevel,
 					RawIncomeToCollect = rawCaptainIncome,
 					CollectMultiplier = captainCollectMultiplier,
+					TitleMultiplier = math.max(0, tonumber(captainClaimSummary.TitleMultiplier) or 1),
 					IncomePerSecond = captainIncomePerSecond,
 					ExactClaimReadyAmount = captainExactClaimReady,
 					ClaimReadyAmount = captainClaimReady,
-					ClaimRemainderAmount = math.max(0, captainExactClaimReady - captainClaimReady),
+					ClaimRemainderAmount = captainClaimRemainder,
 				}
 				snapshot.TotalClaimReadyAmount += captainClaimReady
 				appendCaptainLogRow({
@@ -360,10 +374,11 @@ function Module.Install(ctx)
 					StandLevel = captainStandLevel,
 					RawIncomeToCollect = rawCaptainIncome,
 					CollectMultiplier = captainCollectMultiplier,
+					TitleMultiplier = math.max(0, tonumber(captainClaimSummary.TitleMultiplier) or 1),
 					IncomePerSecond = captainIncomePerSecond,
 					ExactClaimReadyAmount = captainExactClaimReady,
 					ClaimReadyAmount = captainClaimReady,
-					ClaimRemainderAmount = math.max(0, captainExactClaimReady - captainClaimReady),
+					ClaimRemainderAmount = captainClaimRemainder,
 				}, true)
 			end
 		end

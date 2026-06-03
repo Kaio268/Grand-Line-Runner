@@ -13,6 +13,7 @@ function Module.Install(ctx)
 		GetBeliBoostMultiplier = ctx.getBeliBoostMultiplier,
 		GetCrewMemberLevel = ctx.getCrewMemberLevel,
 		GetEquippedCrewMemberToolInfo = ctx.getEquippedCrewMemberToolInfo,
+		GetTitleBeliMultiplier = ctx.getTitleBeliMultiplier,
 		LogCrewSwitchFailure = ctx.logCrewSwitchFailure,
 		RefreshNormalIncomeDisplays = ctx.refreshPlayerIncomeDisplays,
 		ResolveDisplayName = ctx.resolveStandStatusDisplayName,

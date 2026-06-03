@@ -30,8 +30,12 @@ function Module.Install(ctx)
 
 		return ""
 	end
-	local function isBeliBoostActive(...)
-		return ctx.isBeliBoostActive(...)
+	local function isStandIncomeBoosted(...)
+		if typeof(ctx.isStandIncomeBoosted) == "function" then
+			return ctx.isStandIncomeBoosted(...)
+		end
+
+		return false
 	end
 	local LEGACY_STAND_CREW_PLACEMENT_ROTATION_OFFSET_DEGREES = ctx.LEGACY_STAND_CREW_PLACEMENT_ROTATION_OFFSET_DEGREES
 	local OVERHEAD_ATTRIBUTES = ctx.OVERHEAD_ATTRIBUTES
@@ -147,6 +151,9 @@ function Module.Install(ctx)
 		local incomePerSecond = if isCaptainSlot
 			then CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 			else getStandIncomePerSecond(player, standModel.Name, canonicalName)
+		local incomeBoosted = if isCaptainSlot
+			then CaptainSlotRuntime.IsCaptainIncomeBoosted(player)
+			else isStandIncomeBoosted(player, standModel.Name, canonicalName)
 		local slotState = if isCaptainSlot then nil else getStandSlotState(player, standModel.Name)
 		local slotBonusInfo = slotState and slotState.BonusInfo or nil
 
@@ -155,7 +162,7 @@ function Module.Install(ctx)
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Rarity, if displayRarity ~= "" then displayRarity else "Common")
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.Variant, variantKey)
 		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.IncomePerSecond, math.max(0, incomePerSecond))
-		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.BeliBoosted, isBeliBoostActive(player))
+		setAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.BeliBoosted, incomeBoosted == true)
 		setAttributeIfChanged(
 			placedModel,
 			OVERHEAD_ATTRIBUTES.SlotBonusLabel,

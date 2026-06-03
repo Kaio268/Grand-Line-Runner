@@ -35,6 +35,7 @@ local MessageFunctions = require(script.MessageFunctions)
 local Settings = require(script.Settings)
 local Premades = require(script.Premades)
 local EconomyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 
 local ProductFunctions = nil
 local MonetizationConfig = nil
@@ -45,6 +46,7 @@ local ShopEntitlementService = nil
 local CrewProtectionService = nil
 local AFKGoldChestRewardService = nil
 local AFKTeleportService = nil
+local CachedTitleService = nil
   
 --// ProfileStore
 local PlayerStore = ProfileStore.New(Key, GetTemplate)
@@ -711,12 +713,91 @@ local function SetValueWithProfileReplica(player: Player, profile, replica, path
 	return true, nil
 end
 
-local function AddValueWithProfileReplica(player: Player, profile, replica, path: string, addValue: any)
+local function buildDotPath(path)
+	if typeof(path) == "table" then
+		local parts = {}
+		for _, part in ipairs(path) do
+			parts[#parts + 1] = tostring(part)
+		end
+		return table.concat(parts, ".")
+	end
+
+	return tostring(path or "")
+end
+
+local function getTitleService()
+	if CachedTitleService ~= nil then
+		return if CachedTitleService == false then nil else CachedTitleService
+	end
+
+	local module = game.ServerScriptService.Modules:FindFirstChild("TitleService")
+	if not module then
+		CachedTitleService = false
+		return nil
+	end
+
+	local ok, result = pcall(require, module)
+	CachedTitleService = if ok and typeof(result) == "table" then result else false
+	return if CachedTitleService == false then nil else CachedTitleService
+end
+
+local function getTitleBuffMultiplier(player, buffType)
+	local titleService = getTitleService()
+	if titleService == nil or typeof(titleService.GetEquippedTitleBuffMultiplier) ~= "function" then
+		return 1
+	end
+
+	local ok, multiplier = pcall(titleService.GetEquippedTitleBuffMultiplier, player, buffType)
+	return if ok then math.max(0, tonumber(multiplier) or 1) else 1
+end
+
+local function getTitleBuffTypeForAddPath(path)
+	local normalizedPath = buildDotPath(path)
+	if normalizedPath == CurrencyUtil.getPrimaryPath() or normalizedPath == CurrencyUtil.getTotalPath() then
+		return "beli"
+	end
+
+	local resourceRoots = {
+		"FoodInventory",
+		"Materials",
+	}
+	for _, root in ipairs(resourceRoots) do
+		if normalizedPath == root or normalizedPath:sub(1, #root + 1) == root .. "." then
+			return "resources"
+		end
+	end
+
+	return nil
+end
+
+local function applyTitleBuffToAddValue(player, path, addValue, options)
+	if typeof(addValue) ~= "number" or addValue <= 0 then
+		return addValue
+	end
+	if typeof(options) == "table" and options.ApplyTitleBuff == false then
+		return addValue
+	end
+
+	local buffType = getTitleBuffTypeForAddPath(path)
+	if buffType == nil then
+		return addValue
+	end
+
+	local multiplier = getTitleBuffMultiplier(player, buffType)
+	if math.abs(multiplier - 1) < 0.001 then
+		return addValue
+	end
+
+	return math.floor(addValue * multiplier + 0.5)
+end
+
+local function AddValueWithProfileReplica(player: Player, profile, replica, path: string, addValue: any, options: {[string]: any}?)
 	local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "AddValue")
 	if legacyWriteAllowed ~= true then
 		return false, legacyWriteReason
 	end
 
+	addValue = applyTitleBuffToAddValue(player, path, addValue, options)
 	local defaultValue = if typeof(addValue) == "number" then 0 else {}
 	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 
@@ -794,13 +875,13 @@ function DataManager:TrySetValue(player: Player, path: string, newValue)
 	return SetValueWithProfileReplica(player, profile, replica, path, newValue)
 end
 
-function DataManager:TryAddValue(player: Player, path: string, addValue)
+function DataManager:TryAddValue(player: Player, path: string, addValue, options: {[string]: any}?)
 	local profile, replica, readyReason = GetReadyProfileReplica(player)
 	if profile == nil or replica == nil then
 		return false, readyReason
 	end
 
-	return AddValueWithProfileReplica(player, profile, replica, path, addValue)
+	return AddValueWithProfileReplica(player, profile, replica, path, addValue, options)
 end
 
 --[[
@@ -933,7 +1014,7 @@ end
 	[path]: path to variable (e.g. leaderstats.Beli)
 	[addValue]: to which value it should be set 
 ]]
-function DataManager:AddValue(player, path, addValue)
+function DataManager:AddValue(player, path, addValue, options)
 	local profile = self:GetProfile(player)
 	local replica = self:GetReplica(player)
 	if not (profile and replica) then
@@ -946,6 +1027,7 @@ function DataManager:AddValue(player, path, addValue)
 		return false, legacyWriteReason
 	end
 
+	addValue = applyTitleBuffToAddValue(player, path, addValue, options)
 	local defaultValue = if typeof(addValue) == "number" then 0 else {}
 	local parent, leafKey, pathTable, currentValue, err = ResolveDataPath(profile, path, true, defaultValue)
 

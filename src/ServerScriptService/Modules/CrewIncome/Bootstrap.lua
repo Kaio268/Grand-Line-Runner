@@ -49,9 +49,39 @@ function Module.Install(ctx)
 	local function waitForPlot(...)
 		return ctx.waitForPlot(...)
 	end
+	local EQUIPPED_TITLE_ATTRIBUTE = "EquippedTitleId"
+	local titleRefreshConnections = setmetatable({}, { __mode = "k" })
+
+	local function disconnectTitleRefresh(player)
+		local connection = titleRefreshConnections[player]
+		if connection then
+			connection:Disconnect()
+			titleRefreshConnections[player] = nil
+		end
+	end
+
+	local function refreshIncomeDisplaysForTitleChange(player)
+		local activeShip = ShipRuntimeService.GetActiveShip(player)
+		if activeShip then
+			scanAndBindCaptainSlot(player, activeShip)
+		end
+		refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+	end
+
+	local function bindTitleRefresh(player)
+		disconnectTitleRefresh(player)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return
+		end
+
+		titleRefreshConnections[player] = player:GetAttributeChangedSignal(EQUIPPED_TITLE_ATTRIBUTE):Connect(function()
+			refreshIncomeDisplaysForTitleChange(player)
+		end)
+	end
 
 	local function bootstrapExistingCrewIncomePlayer(runtime, player)
 		runtime.standDebug("bootstrap existing_player=%s", player.Name)
+		bindTitleRefresh(player)
 
 		local plot = runtime.waitForPlot(player, 5)
 		if plot then
@@ -143,6 +173,7 @@ function Module.Install(ctx)
 
 	Players.PlayerAdded:Connect(function(player)
 		standDebug("PlayerAdded player=%s", player.Name)
+		bindTitleRefresh(player)
 		task.spawn(function()
 			saveTrace("PlayerAdded begin player=%s userId=%s event=restore_begin", player.Name, tostring(player.UserId))
 			logSavedShipSnapshot(player, "PlayerAdded")
@@ -171,6 +202,7 @@ function Module.Install(ctx)
 
 
 	Players.PlayerRemoving:Connect(function(player)
+		disconnectTitleRefresh(player)
 		clearPlayerStandRuntime(player)
 		getCrewStorage().ClearIncomeShadowSyncState(player)
 	end)
@@ -182,6 +214,7 @@ function Module.Install(ctx)
 			end
 
 			clearPlayerStandRuntime(player)
+			disconnectTitleRefresh(player)
 			getCrewStorage().ClearIncomeShadowSyncState(player)
 		end)
 	end

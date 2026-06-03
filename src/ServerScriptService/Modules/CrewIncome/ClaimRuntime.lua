@@ -28,10 +28,9 @@ function Module.Install(ctx)
 	local function getStandSlotState(...)
 		return ctx.getStandSlotState(...)
 	end
-	local function getStandCollectMultiplier(...)
-		return ctx.getStandCollectMultiplier(...)
+	local function getStandClaimSummary(...)
+		return ctx.getStandClaimSummary(...)
 	end
-	local IncomeClaimMath = ctx.IncomeClaimMath
 	local MoneyCollectedRE = ctx.MoneyCollectedRE
 	local function ownershipTrace(...)
 		return ctx.ownershipTrace(...)
@@ -186,22 +185,22 @@ function Module.Install(ctx)
 				return
 			end
 
-			local mult = getStandCollectMultiplier(plr, standName)
-			local collected = IncomeClaimMath.GetWholeClaimableAmount(baseToCollect, mult)
+			local claimSummary = getStandClaimSummary(plr, standName)
+			local collected = math.max(0, math.floor(tonumber(claimSummary and claimSummary.FinalAmount) or 0))
 			if collected <= 0 then
 				updateStandMoneyText(plr, standModel)
 				return
 			end
 
-			local remainingRawIncome = IncomeClaimMath.GetRawRemainderAfterClaim(baseToCollect, mult, collected)
+			local remainingRawIncome = math.max(0, tonumber(claimSummary and claimSummary.RawRemainderAmount) or 0)
 			if CrewStandIncomeAuthority.SetIncomeToCollect(plr, standName, remainingRawIncome, "income_collect") then
 				refreshCollectedIncomeShadow(plr)
 			else
 				return
 			end
 
-			DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected)
-			DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected)
+			DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected, { ApplyTitleBuff = false })
+			DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected, { ApplyTitleBuff = false })
 			QuestSignals.Record(plr, "EarnBeli", collected, {
 				Source = "StandIncome",
 				StandName = standName,

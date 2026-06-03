@@ -315,11 +315,11 @@ local function ensureTutorialStarterBeli(player)
 	if tutorialAmount > 0 then
 		local shortfall = math.max(0, tutorialAmount - getPrimaryBalance(player))
 		if shortfall > 0 then
-			local added = DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), shortfall)
+			local added = DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), shortfall, { ApplyTitleBuff = false })
 			if added ~= true then
 				return
 			end
-			DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), shortfall)
+			DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), shortfall, { ApplyTitleBuff = false })
 		end
 	end
 
