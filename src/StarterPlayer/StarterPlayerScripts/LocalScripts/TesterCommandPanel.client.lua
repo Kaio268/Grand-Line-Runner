@@ -5,6 +5,20 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 
+local WARNING_THROTTLE_SECONDS = 5
+local warningTimes = {}
+
+local function warnThrottled(key, message)
+	local now = os.clock()
+	local previous = warningTimes[key]
+	if previous and now - previous < WARNING_THROTTLE_SECONDS then
+		return
+	end
+
+	warningTimes[key] = now
+	warn("[TesterCommandPanel] " .. tostring(message))
+end
+
 local function safeWait(parent, name)
 	local obj = parent:WaitForChild(name, 15)
 	if not obj then
@@ -27,15 +41,30 @@ local testerStatusChangedEvent = findRemote("TesterStatusChanged", "RemoteEvent"
 local testerCommandRequestEvent = findRemote("TesterCommandRequest", "RemoteEvent")
 local adminCommandFeedbackEvent = findRemote("AdminCommandFeedback", "RemoteEvent")
 local isTester = false
+local lastTesterStatusReason = "unchecked"
+local lastTesterStatusDetail = ""
+local updateTesterLauncherVisibility = nil
+local warnTesterPanelBlocked = nil
+
 local function refreshTesterStatus()
 	testerStatusFunction = findRemote("TesterStatusRequest", "RemoteFunction") or testerStatusFunction
 	if testerStatusFunction and testerStatusFunction:IsA("RemoteFunction") then
 		local ok, result = pcall(function()
 			return testerStatusFunction:InvokeServer()
 		end)
-		isTester = ok and result == true
+		if ok then
+			isTester = result == true
+			lastTesterStatusReason = if isTester then "allowed" else "denied"
+			lastTesterStatusDetail = ""
+		else
+			isTester = false
+			lastTesterStatusReason = "invoke_failed"
+			lastTesterStatusDetail = tostring(result)
+		end
 	else
 		isTester = false
+		lastTesterStatusReason = "missing_status_remote"
+		lastTesterStatusDetail = ""
 	end
 	return isTester
 end
@@ -61,6 +90,9 @@ local function queueTesterStatusRefresh()
 		if gui and not active then
 			gui.Enabled = false
 		end
+		if updateTesterLauncherVisibility then
+			updateTesterLauncherVisibility()
+		end
 	end)
 end
 
@@ -79,8 +111,13 @@ local function bindTesterStatusChangedEvent()
 	testerStatusChangedEvent.OnClientEvent:Connect(function(payload)
 		if typeof(payload) == "table" and typeof(payload.IsTester) == "boolean" then
 			isTester = payload.IsTester
+			lastTesterStatusReason = if isTester then "allowed" else "denied"
+			lastTesterStatusDetail = ""
 			if gui and not isTester then
 				gui.Enabled = false
+			end
+			if updateTesterLauncherVisibility then
+				updateTesterLauncherVisibility()
 			end
 			return
 		end
@@ -1232,6 +1269,10 @@ local function makeCommandCard(command, layoutOrder)
 		if not refreshTesterStatus() then
 			gui.Enabled = false
 			setStatus("Equip the Tester title or get tester access first.", STATUS_ERROR)
+			if updateTesterLauncherVisibility then
+				updateTesterLauncherVisibility()
+			end
+			warnTesterPanelBlocked()
 			return
 		end
 
@@ -1251,6 +1292,7 @@ local function makeCommandCard(command, layoutOrder)
 		testerCommandRequestEvent = findRemote("TesterCommandRequest", "RemoteEvent") or testerCommandRequestEvent
 		if not (testerCommandRequestEvent and testerCommandRequestEvent:IsA("RemoteEvent")) then
 			setStatus("Tester command remote is not ready yet. Try again in a moment.", STATUS_ERROR)
+			warnThrottled("tester_run_missing_command_remote", "Tester command blocked: TesterCommandRequest remote is unavailable.")
 			return
 		end
 
@@ -1438,6 +1480,41 @@ ReplicatedStorage.ChildAdded:Connect(function(child)
 	end
 end)
 
+local function readEquippedTitleId()
+	local attributeValue = player:GetAttribute("EquippedTitleId")
+	if typeof(attributeValue) == "string" and trimText(attributeValue) ~= "" then
+		return trimText(attributeValue)
+	end
+
+	local titlesFolder = player:FindFirstChild("Titles")
+	local equippedValue = titlesFolder and titlesFolder:FindFirstChild("Equipped")
+	if equippedValue and equippedValue:IsA("StringValue") then
+		return trimText(equippedValue.Value)
+	end
+
+	return ""
+end
+
+warnTesterPanelBlocked = function()
+	if lastTesterStatusReason == "missing_status_remote" then
+		warnThrottled("tester_blocked_missing_status", "Tester panel blocked: TesterStatusRequest remote is unavailable.")
+	elseif lastTesterStatusReason == "invoke_failed" then
+		warnThrottled("tester_blocked_status_failed", "Tester panel blocked: TesterStatusRequest failed: " .. tostring(lastTesterStatusDetail))
+	else
+		local equippedTitleId = readEquippedTitleId()
+		if equippedTitleId ~= "Tester" then
+			warnThrottled(
+				"tester_blocked_not_tester",
+				("Tester panel blocked: tester access denied. Equip the Tester title or get tester access first. EquippedTitleId=%s"):format(
+					equippedTitleId ~= "" and equippedTitleId or "none"
+				)
+			)
+		else
+			warnThrottled("tester_blocked_denied", "Tester panel blocked: server did not grant tester access for this player.")
+		end
+	end
+end
+
 local lastToggleRequestedAt = 0
 local function requestTesterPanelToggle()
 	local now = os.clock()
@@ -1452,17 +1529,76 @@ local function requestTesterPanelToggle()
 
 	if not refreshTesterStatus() then
 		setPanelOpen(false)
+		if updateTesterLauncherVisibility then
+			updateTesterLauncherVisibility()
+		end
+		warnTesterPanelBlocked()
 		return
+	end
+
+	testerCommandRequestEvent = findRemote("TesterCommandRequest", "RemoteEvent") or testerCommandRequestEvent
+	if not (testerCommandRequestEvent and testerCommandRequestEvent:IsA("RemoteEvent")) then
+		warnThrottled("tester_command_remote_missing", "Tester panel can open, but TesterCommandRequest is unavailable; commands will not run yet.")
 	end
 
 	local nextOpen = not gui.Enabled
 	setPanelOpen(nextOpen)
 end
 
-UserInputService.InputBegan:Connect(function(input)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
 	if input.KeyCode ~= Enum.KeyCode.F8 then
 		return
 	end
 
 	requestTesterPanelToggle()
 end)
+
+local testerLauncherGui = nil
+updateTesterLauncherVisibility = function()
+	if testerLauncherGui then
+		testerLauncherGui.Enabled = isTester == true
+	end
+end
+
+local function createTesterLauncher()
+	local existing = playerGui:FindFirstChild("GrandLineRushTesterLauncher")
+	if existing then
+		existing:Destroy()
+	end
+
+	testerLauncherGui = create("ScreenGui", {
+		Name = "GrandLineRushTesterLauncher",
+		DisplayOrder = 9999,
+		Enabled = isTester == true,
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = playerGui,
+	})
+
+	local button = create("TextButton", {
+		Name = "OpenTesterCommands",
+		AnchorPoint = Vector2.new(1, 0),
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		Position = UDim2.new(1, -16, 0, 144),
+		Size = UDim2.fromOffset(132, 40),
+		Text = "Tester  F8",
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		ZIndex = 20,
+		Parent = testerLauncherGui,
+	})
+	addCorner(button, 12)
+	addStroke(button, COLORS.Cyan, 1, 0.18)
+
+	button.Activated:Connect(requestTesterPanelToggle)
+end
+
+createTesterLauncher()
+updateTesterLauncherVisibility()

@@ -46,6 +46,21 @@ local TEXT = Color3.fromRGB(255, 249, 229)
 local MUTED = Color3.fromRGB(198, 204, 214)
 local TOAST_BG = Color3.fromRGB(16, 20, 25)
 local BACKGROUND_IMAGE = "rbxassetid://105877304453866"
+local DASHBOARD_MAX_WIDTH = 1160
+local DASHBOARD_DESKTOP_MARGIN = 48
+local DASHBOARD_MOBILE_MARGIN = 16
+local DASHBOARD_DESKTOP_VERTICAL_MARGIN = 42
+local DASHBOARD_MOBILE_VERTICAL_MARGIN = 16
+local DASHBOARD_DESKTOP_HEIGHT = 720
+local DASHBOARD_MOBILE_HEIGHT = 700
+local DASHBOARD_COMPACT_BREAKPOINT = 720
+local DASHBOARD_DESKTOP_GRID_GAP = 18
+local DASHBOARD_MOBILE_GRID_GAP = 12
+local DASHBOARD_DESKTOP_CARD_HEIGHT = 132
+local DASHBOARD_MOBILE_CARD_HEIGHT = 124
+local DASHBOARD_DESKTOP_REWARDS_HEIGHT = 136
+local DASHBOARD_MOBILE_REWARDS_HEIGHT = 154
+local CARD_STROKE_SAFE_PADDING = 8
 
 local stateEvent = nil
 local stateRequest = nil
@@ -156,11 +171,21 @@ dashboard.ZIndex = 3
 dashboard.Parent = backdrop
 
 local dashboardPadding = Instance.new("UIPadding")
-dashboardPadding.PaddingBottom = UDim.new(0, 24)
-dashboardPadding.PaddingLeft = UDim.new(0, 24)
-dashboardPadding.PaddingRight = UDim.new(0, 24)
-dashboardPadding.PaddingTop = UDim.new(0, 24)
+dashboardPadding.PaddingBottom = UDim.new(0, 0)
+dashboardPadding.PaddingLeft = UDim.new(0, 0)
+dashboardPadding.PaddingRight = UDim.new(0, 0)
+dashboardPadding.PaddingTop = UDim.new(0, 0)
 dashboardPadding.Parent = dashboard
+
+local dashboardContainer = Instance.new("Frame")
+dashboardContainer.Name = "DashboardContainer"
+dashboardContainer.AnchorPoint = Vector2.new(0.5, 0.5)
+dashboardContainer.BackgroundTransparency = 1
+dashboardContainer.BorderSizePixel = 0
+dashboardContainer.Position = UDim2.fromScale(0.5, 0.5)
+dashboardContainer.Size = UDim2.new(1, -DASHBOARD_DESKTOP_MARGIN * 2, 1, -DASHBOARD_DESKTOP_VERTICAL_MARGIN * 2)
+dashboardContainer.ZIndex = 3
+dashboardContainer.Parent = dashboard
 
 local header = Instance.new("Frame")
 header.Name = "Header"
@@ -168,18 +193,20 @@ header.BackgroundTransparency = 1
 header.BorderSizePixel = 0
 header.Size = UDim2.new(1, 0, 0, 104)
 header.ZIndex = 4
-header.Parent = dashboard
+header.Parent = dashboardContainer
 
 local headerTitle = makeText(header, "Title", Enum.Font.GothamBlack, GOLD_BRIGHT, 36)
 headerTitle.Size = UDim2.new(1, 0, 0, 46)
 headerTitle.Text = "AFK Lobby"
 headerTitle.TextWrapped = false
+headerTitle.TextXAlignment = Enum.TextXAlignment.Center
 headerTitle.ZIndex = 4
 
 local headerSubtitle = makeText(header, "Subtitle", Enum.Font.Gotham, MUTED, 16)
 headerSubtitle.Position = UDim2.fromOffset(2, 50)
 headerSubtitle.Size = UDim2.new(1, 0, 0, 26)
 headerSubtitle.Text = "Stay here to earn rewards while you're away."
+headerSubtitle.TextXAlignment = Enum.TextXAlignment.Center
 headerSubtitle.TextTruncate = Enum.TextTruncate.AtEnd
 headerSubtitle.ZIndex = 4
 
@@ -187,6 +214,7 @@ local statusLabel = makeText(header, "Status", Enum.Font.GothamMedium, GREEN, 14
 statusLabel.Position = UDim2.fromOffset(2, 78)
 statusLabel.Size = UDim2.new(1, 0, 0, 22)
 statusLabel.Text = "Loading AFK rewards..."
+statusLabel.TextXAlignment = Enum.TextXAlignment.Center
 statusLabel.TextTruncate = Enum.TextTruncate.AtEnd
 statusLabel.ZIndex = 4
 
@@ -198,7 +226,7 @@ footer.BorderSizePixel = 0
 footer.Position = UDim2.fromScale(0, 1)
 footer.Size = UDim2.new(1, 0, 0, 86)
 footer.ZIndex = 4
-footer.Parent = dashboard
+footer.Parent = dashboardContainer
 
 local button = Instance.new("TextButton")
 button.Name = "LeaveButton"
@@ -222,7 +250,7 @@ local autoSaveNote = makeText(footer, "AutoSaveNote", Enum.Font.GothamMedium, MU
 autoSaveNote.AnchorPoint = Vector2.new(0.5, 0)
 autoSaveNote.Position = UDim2.new(0.5, 0, 0, 52)
 autoSaveNote.Size = UDim2.new(1, 0, 0, 24)
-autoSaveNote.Text = "Rewards are saved automatically."
+autoSaveNote.Text = "Rewards are added to your inventory automatically."
 autoSaveNote.TextXAlignment = Enum.TextXAlignment.Center
 autoSaveNote.ZIndex = 5
 
@@ -238,24 +266,32 @@ scroll.ScrollBarImageColor3 = GOLD
 scroll.ScrollBarThickness = 6
 scroll.Size = UDim2.new(1, 0, 1, -214)
 scroll.ZIndex = 4
-scroll.Parent = dashboard
+scroll.Parent = dashboardContainer
 
 local scrollLayout = Instance.new("UIListLayout")
-scrollLayout.Padding = UDim.new(0, 12)
+scrollLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+scrollLayout.Padding = UDim.new(0, DASHBOARD_DESKTOP_GRID_GAP)
 scrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
 scrollLayout.Parent = scroll
+
+local scrollPadding = Instance.new("UIPadding")
+scrollPadding.PaddingBottom = UDim.new(0, CARD_STROKE_SAFE_PADDING)
+scrollPadding.PaddingLeft = UDim.new(0, CARD_STROKE_SAFE_PADDING)
+scrollPadding.PaddingRight = UDim.new(0, CARD_STROKE_SAFE_PADDING)
+scrollPadding.PaddingTop = UDim.new(0, CARD_STROKE_SAFE_PADDING)
+scrollPadding.Parent = scroll
 
 local cardsGrid = Instance.new("Frame")
 cardsGrid.Name = "Cards"
 cardsGrid.BackgroundTransparency = 1
 cardsGrid.LayoutOrder = 1
-cardsGrid.Size = UDim2.new(1, -8, 0, 256)
+cardsGrid.Size = UDim2.new(1, -CARD_STROKE_SAFE_PADDING * 2, 0, 256)
 cardsGrid.ZIndex = 4
 cardsGrid.Parent = scroll
 
 local cardsGridLayout = Instance.new("UIGridLayout")
-cardsGridLayout.CellPadding = UDim2.fromOffset(12, 12)
-cardsGridLayout.CellSize = UDim2.new(0.5, -6, 0, 122)
+cardsGridLayout.CellPadding = UDim2.fromOffset(DASHBOARD_DESKTOP_GRID_GAP, DASHBOARD_DESKTOP_GRID_GAP)
+cardsGridLayout.CellSize = UDim2.new(0.5, -DASHBOARD_DESKTOP_GRID_GAP / 2, 0, DASHBOARD_DESKTOP_CARD_HEIGHT)
 cardsGridLayout.FillDirectionMaxCells = 2
 cardsGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 cardsGridLayout.Parent = cardsGrid
@@ -264,38 +300,38 @@ local function makeStatCard(cardTitle, value, detail, accent)
 	local card = Instance.new("Frame")
 	card.BackgroundColor3 = CARD
 	card.BorderSizePixel = 0
-	card.Size = UDim2.fromOffset(260, 122)
+	card.Size = UDim2.fromOffset(260, DASHBOARD_DESKTOP_CARD_HEIGHT)
 	card.ZIndex = 4
 	applyCorner(card, 8)
 	applyStroke(card, accent, 0.38)
 
 	local padding = Instance.new("UIPadding")
-	padding.PaddingBottom = UDim.new(0, 12)
-	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 14)
-	padding.PaddingTop = UDim.new(0, 12)
+	padding.PaddingBottom = UDim.new(0, 14)
+	padding.PaddingLeft = UDim.new(0, 16)
+	padding.PaddingRight = UDim.new(0, 16)
+	padding.PaddingTop = UDim.new(0, 14)
 	padding.Parent = card
 
-	local titleLabel = makeText(card, "Title", Enum.Font.GothamMedium, MUTED, 13)
+	local titleLabel = makeText(card, "Title", Enum.Font.GothamMedium, MUTED, 14)
 	titleLabel.Size = UDim2.new(1, 0, 0, 22)
 	titleLabel.Text = cardTitle
 	titleLabel.ZIndex = 5
 
-	local valueLabel = makeText(card, "Value", Enum.Font.GothamBlack, accent, 25)
-	valueLabel.Position = UDim2.fromOffset(0, 30)
-	valueLabel.Size = UDim2.new(1, 0, 0, 36)
+	local valueLabel = makeText(card, "Value", Enum.Font.GothamBlack, accent, 28)
+	valueLabel.Position = UDim2.fromOffset(0, 32)
+	valueLabel.Size = UDim2.new(1, 0, 0, 40)
 	valueLabel.Text = value
 	valueLabel.TextScaled = true
 	valueLabel.ZIndex = 5
 
 	local sizeLimit = Instance.new("UITextSizeConstraint")
-	sizeLimit.MaxTextSize = 25
+	sizeLimit.MaxTextSize = 28
 	sizeLimit.MinTextSize = 13
 	sizeLimit.Parent = valueLabel
 
-	local detailLabel = makeText(card, "Detail", Enum.Font.Gotham, MUTED, 12)
-	detailLabel.Position = UDim2.fromOffset(0, 72)
-	detailLabel.Size = UDim2.new(1, 0, 0, 30)
+	local detailLabel = makeText(card, "Detail", Enum.Font.Gotham, MUTED, 13)
+	detailLabel.Position = UDim2.fromOffset(0, 80)
+	detailLabel.Size = UDim2.new(1, 0, 0, 34)
 	detailLabel.Text = detail
 	detailLabel.TextYAlignment = Enum.TextYAlignment.Top
 	detailLabel.ZIndex = 5
@@ -313,7 +349,7 @@ local function makeWideCard(cardTitle, body, accent, height)
 	card.BackgroundColor3 = CARD_ALT
 	card.BorderSizePixel = 0
 	card.LayoutOrder = 0
-	card.Size = UDim2.new(1, -8, 0, height or 118)
+	card.Size = UDim2.new(1, -CARD_STROKE_SAFE_PADDING * 2, 0, height or DASHBOARD_DESKTOP_REWARDS_HEIGHT)
 	card.ZIndex = 4
 	applyCorner(card, 8)
 	applyStroke(card, accent, 0.46)
@@ -325,12 +361,12 @@ local function makeWideCard(cardTitle, body, accent, height)
 	padding.PaddingTop = UDim.new(0, 14)
 	padding.Parent = card
 
-	local titleLabel = makeText(card, "Title", Enum.Font.GothamBold, GOLD_BRIGHT, 15)
+	local titleLabel = makeText(card, "Title", Enum.Font.GothamBold, GOLD_BRIGHT, 16)
 	titleLabel.Size = UDim2.new(1, 0, 0, 24)
 	titleLabel.Text = cardTitle
 	titleLabel.ZIndex = 5
 
-	local bodyLabel = makeText(card, "Body", Enum.Font.GothamMedium, TEXT, 14)
+	local bodyLabel = makeText(card, "Body", Enum.Font.GothamMedium, TEXT, 15)
 	bodyLabel.Position = UDim2.fromOffset(0, 32)
 	bodyLabel.Size = UDim2.new(1, 0, 1, -34)
 	bodyLabel.Text = body
@@ -357,7 +393,7 @@ local beliEarnedCard = makeStatCard("Beli Earned", "0", "Saved while you stay AF
 beliEarnedCard.Frame.LayoutOrder = 3
 beliEarnedCard.Frame.Parent = cardsGrid
 
-local afkRateCard = makeStatCard("Your AFK Rate", "Loading", "Based on your ship crew.", CYAN)
+local afkRateCard = makeStatCard("Beli While Away", "Loading", "Based on your ship crew.", CYAN)
 afkRateCard.Frame.LayoutOrder = 4
 afkRateCard.Frame.Parent = cardsGrid
 
@@ -382,7 +418,7 @@ toastLayout.Padding = UDim.new(0, 8)
 toastLayout.Parent = toastHost
 
 local function updateGridHeight()
-	cardsGrid.Size = UDim2.new(1, -8, 0, cardsGridLayout.AbsoluteContentSize.Y)
+	cardsGrid.Size = UDim2.new(1, -CARD_STROKE_SAFE_PADDING * 2, 0, cardsGridLayout.AbsoluteContentSize.Y)
 end
 
 cardsGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateGridHeight)
@@ -390,46 +426,82 @@ task.defer(updateGridHeight)
 
 local function updateResponsiveLayout()
 	local width = backdrop.AbsoluteSize.X
-	local compact = width > 0 and width < 720
+	local height = backdrop.AbsoluteSize.Y
+	if width <= 0 or height <= 0 then
+		updateGridHeight()
+		return
+	end
+
+	local compact = width < DASHBOARD_COMPACT_BREAKPOINT
+	local horizontalMargin = if compact then DASHBOARD_MOBILE_MARGIN else DASHBOARD_DESKTOP_MARGIN
+	local verticalMargin = if compact then DASHBOARD_MOBILE_VERTICAL_MARGIN else DASHBOARD_DESKTOP_VERTICAL_MARGIN
+	local availableWidth = math.max(0, width - horizontalMargin * 2)
+	local availableHeight = math.max(0, height - verticalMargin * 2)
+	local containerWidth = if compact then availableWidth else math.min(availableWidth, DASHBOARD_MAX_WIDTH)
+	local targetHeight = if compact then DASHBOARD_MOBILE_HEIGHT else DASHBOARD_DESKTOP_HEIGHT
+	local containerHeight = math.min(availableHeight, targetHeight)
+	local headerHeight = if compact then 132 else 116
+	local footerHeight = if compact then 92 else 90
+	local gap = if compact then DASHBOARD_MOBILE_GRID_GAP else DASHBOARD_DESKTOP_GRID_GAP
+	local cardHeight = if compact then DASHBOARD_MOBILE_CARD_HEIGHT else DASHBOARD_DESKTOP_CARD_HEIGHT
+	local rewardsHeight = if compact then DASHBOARD_MOBILE_REWARDS_HEIGHT else DASHBOARD_DESKTOP_REWARDS_HEIGHT
+	local scrollTop = headerHeight + gap
+	local scrollHeight = math.max(0, containerHeight - headerHeight - footerHeight - gap * 2)
+
+	dashboardContainer.Size = UDim2.fromOffset(containerWidth, containerHeight)
+	dashboardContainer.Position = UDim2.fromScale(0.5, 0.5)
+
+	dashboardPadding.PaddingBottom = UDim.new(0, 0)
+	dashboardPadding.PaddingLeft = UDim.new(0, 0)
+	dashboardPadding.PaddingRight = UDim.new(0, 0)
+	dashboardPadding.PaddingTop = UDim.new(0, 0)
+
+	header.Position = UDim2.fromOffset(0, 0)
+	header.Size = UDim2.new(1, 0, 0, headerHeight)
+	footer.Position = UDim2.fromOffset(0, containerHeight)
+	footer.Size = UDim2.new(1, 0, 0, footerHeight)
+	scroll.Position = UDim2.fromOffset(0, scrollTop)
+	scroll.Size = UDim2.new(1, 0, 0, scrollHeight)
+	scrollLayout.Padding = UDim.new(0, gap)
+	scroll.ScrollBarThickness = if compact then 4 else 6
+	cardsGridLayout.CellPadding = UDim2.fromOffset(gap, gap)
+	cardsGridLayout.CellSize = if compact
+		then UDim2.new(1, 0, 0, cardHeight)
+		else UDim2.new(0.5, -gap / 2, 0, cardHeight)
+	bonusCard.Frame.Size = UDim2.new(1, -CARD_STROKE_SAFE_PADDING * 2, 0, rewardsHeight)
 
 	if compact then
-		dashboardPadding.PaddingBottom = UDim.new(0, 16)
-		dashboardPadding.PaddingLeft = UDim.new(0, 16)
-		dashboardPadding.PaddingRight = UDim.new(0, 16)
-		dashboardPadding.PaddingTop = UDim.new(0, 16)
-		header.Size = UDim2.new(1, 0, 0, 124)
-		headerTitle.TextSize = 30
-		headerSubtitle.Position = UDim2.fromOffset(0, 42)
+		headerTitle.Position = UDim2.fromOffset(0, 0)
+		headerTitle.Size = UDim2.new(1, 0, 0, 42)
+		headerTitle.TextSize = 32
+		headerSubtitle.Position = UDim2.fromOffset(0, 46)
 		headerSubtitle.Size = UDim2.new(1, 0, 0, 42)
 		headerSubtitle.TextTruncate = Enum.TextTruncate.None
-		statusLabel.Position = UDim2.fromOffset(0, 88)
-		statusLabel.Size = UDim2.new(1, 0, 0, 22)
-		footer.Size = UDim2.new(1, 0, 0, 88)
+		headerSubtitle.TextSize = 15
+		statusLabel.Position = UDim2.fromOffset(0, 94)
+		statusLabel.Size = UDim2.new(1, 0, 0, 24)
+		statusLabel.TextSize = 14
 		button.Size = UDim2.new(1, 0, 0, 44)
+		button.TextSize = 16
+		autoSaveNote.Position = UDim2.new(0.5, 0, 0, 52)
 		autoSaveNote.Size = UDim2.new(1, 0, 0, 30)
-		scroll.Position = UDim2.fromOffset(0, 136)
-		scroll.Size = UDim2.new(1, 0, 1, -234)
 		cardsGridLayout.FillDirectionMaxCells = 1
-		cardsGridLayout.CellSize = UDim2.new(1, 0, 0, 118)
 	else
-		dashboardPadding.PaddingBottom = UDim.new(0, 24)
-		dashboardPadding.PaddingLeft = UDim.new(0, 24)
-		dashboardPadding.PaddingRight = UDim.new(0, 24)
-		dashboardPadding.PaddingTop = UDim.new(0, 24)
-		header.Size = UDim2.new(1, 0, 0, 104)
-		headerTitle.TextSize = 36
-		headerSubtitle.Position = UDim2.fromOffset(2, 50)
+		headerTitle.Position = UDim2.fromOffset(0, 0)
+		headerTitle.Size = UDim2.new(1, 0, 0, 54)
+		headerTitle.TextSize = 42
+		headerSubtitle.Position = UDim2.fromOffset(0, 56)
 		headerSubtitle.Size = UDim2.new(1, 0, 0, 26)
 		headerSubtitle.TextTruncate = Enum.TextTruncate.AtEnd
-		statusLabel.Position = UDim2.fromOffset(2, 78)
-		statusLabel.Size = UDim2.new(1, 0, 0, 22)
-		footer.Size = UDim2.new(1, 0, 0, 86)
-		button.Size = UDim2.fromOffset(260, 44)
+		headerSubtitle.TextSize = 17
+		statusLabel.Position = UDim2.fromOffset(0, 84)
+		statusLabel.Size = UDim2.new(1, 0, 0, 24)
+		statusLabel.TextSize = 15
+		button.Size = UDim2.fromOffset(300, 46)
+		button.TextSize = 17
+		autoSaveNote.Position = UDim2.new(0.5, 0, 0, 56)
 		autoSaveNote.Size = UDim2.new(1, 0, 0, 24)
-		scroll.Position = UDim2.fromOffset(0, 116)
-		scroll.Size = UDim2.new(1, 0, 1, -214)
 		cardsGridLayout.FillDirectionMaxCells = 2
-		cardsGridLayout.CellSize = UDim2.new(0.5, -6, 0, 122)
 	end
 	updateGridHeight()
 end
@@ -753,20 +825,18 @@ local function formatChestRate(chestsPerInterval, chestTier, intervalSeconds)
 end
 
 local function getBonusText(rewards)
-	local standardSettings = if typeof(rewardConfig.Standard) == "table" then rewardConfig.Standard else {}
-	local vipSettings = if typeof(rewardConfig.VIP) == "table" then rewardConfig.VIP else {}
 	local chestTier = getChestTier(rewards)
-	local standardInterval = math.max(1, math.floor(tonumber(standardSettings.ChestIntervalSeconds) or 3600))
-	local standardChests = math.max(1, math.floor(tonumber(standardSettings.ChestsPerInterval) or 1))
-	local vipInterval = math.max(1, math.floor(tonumber(vipSettings.ChestIntervalSeconds) or 5400))
-	local vipChests = math.max(1, math.floor(tonumber(vipSettings.ChestsPerInterval) or 2))
-	return "Standard: "
-		.. formatChestRate(standardChests, chestTier, standardInterval)
-		.. "\nVIP: "
-		.. formatChestRate(vipChests, chestTier, vipInterval)
-		.. "\nAFK Beli: "
+	local intervalSeconds = getChestIntervalSeconds(rewards)
+	local chestsPerInterval = getChestsPerInterval(rewards)
+	local chestRateText = formatChestRate(chestsPerInterval, chestTier, intervalSeconds)
+	local chestLine = if getSummaryVip(rewards)
+		then "VIP Bonus Active: " .. chestRateText .. "."
+		else "You earn " .. chestRateText .. "."
+	return chestLine
+		.. "\nYou also earn "
 		.. formatPercent(getAfkRateMultiplier(rewards))
-		.. " of ship income"
+		.. " of your ship's Beli while AFK."
+		.. "\nRewards are added to your inventory automatically."
 end
 
 local function setStatCard(card, value, detail, accent)
@@ -822,7 +892,7 @@ end
 local function renderLoadingDashboard()
 	updateResponsiveLayout()
 	local fallbackRewards = getVisibleRewards()
-	statusLabel.Text = "Loading AFK rewards..."
+	statusLabel.Text = "Setting up your AFK rewards..."
 	statusLabel.TextColor3 = GOLD
 	setStatCard(chestsEarnedCard, "Loading", "Checking your saved rewards.", GOLD_BRIGHT)
 	setStatCard(nextChestCard, "Loading", "Chest timer is starting.", GREEN)
@@ -842,11 +912,10 @@ local function renderAfkDashboard()
 	local returnEnabled = dataReady and pending ~= true and returnInFlight ~= true and returnRequest ~= nil
 	local statusText = if dataReady
 		then "Rewards are saving automatically."
-		else "Loading your AFK rewards..."
+		else "Setting up your AFK rewards..."
 
 	if dataReady ~= true then
-		local reason = tostring(currentState.DataReason or "profile_not_ready")
-		statusText = "Loading your AFK rewards: " .. reason
+		statusText = "Setting up your AFK rewards..."
 	elseif pending or returnInFlight then
 		statusText = "Leaving the AFK lobby..."
 	elseif rewards.AutoSaveEnabled ~= true then

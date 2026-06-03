@@ -61,6 +61,7 @@ local returnRequest = nil
 local activityPingEvent = nil
 local runtimeByPlayer = {}
 local verticalSliceService = nil
+local settleAfkRewards = nil
 
 local function getConfig()
 	return if typeof(Economy.AFKTeleport) == "table" then Economy.AFKTeleport else {}
@@ -516,6 +517,83 @@ local function getSessionElapsedSeconds(session, now)
 	return math.max(0, math.floor(endedAt - startedAt))
 end
 
+local function getJoinTeleportData(player)
+	local ok, joinData = pcall(function()
+		return player:GetJoinData()
+	end)
+	if ok ~= true or typeof(joinData) ~= "table" or typeof(joinData.TeleportData) ~= "table" then
+		return {}
+	end
+	return joinData.TeleportData
+end
+
+local function isContinuableAfkTeleportKind(kind)
+	return kind == "EnterAFK" or kind == "RefreshAFK"
+end
+
+local function isMatchingAfkTeleportSession(session, teleportData)
+	local kind = tostring(teleportData and teleportData.Kind or "")
+	if isContinuableAfkTeleportKind(kind) ~= true then
+		return false
+	end
+
+	local sessionId = tostring(session and session.SessionId or "")
+	local teleportSessionId = tostring(teleportData and teleportData.SessionId or "")
+	return sessionId ~= "" and sessionId == teleportSessionId
+end
+
+local function finishSessionForRestart(afk, session, now)
+	if typeof(afk) ~= "table" or typeof(session) ~= "table" then
+		return
+	end
+	if session.Active ~= true and session.PendingReturn ~= true then
+		return
+	end
+
+	local elapsedSeconds = getSessionElapsedSeconds(session, now)
+	session.Active = false
+	session.PendingReturn = false
+	session.LastAccruedAtUnix = now
+	session.ClaimedThroughUnix = now
+	session.LastRewardSettledAtUnix = now
+	session.LastKnownPlaceId = game.PlaceId
+	session.LastClaimId = tostring(session.SessionId or "") .. ":" .. tostring(now)
+
+	if elapsedSeconds > 0 then
+		afk.Totals.ClaimedSeconds = math.max(0, math.floor(getNumber(afk.Totals.ClaimedSeconds, 0))) + elapsedSeconds
+		afk.Totals.Claims = math.max(0, math.floor(getNumber(afk.Totals.Claims, 0))) + 1
+	end
+end
+
+local function startFreshSession(session, now, source)
+	session.SessionId = HttpService:GenerateGUID(false)
+	session.StartedAtUnix = now
+	session.ClaimedThroughUnix = now
+	resetSessionRewardCursors(session, now)
+	session.RefreshCount = 0
+	session.Active = true
+	session.PendingReturn = false
+	session.LastAccruedAtUnix = now
+	session.LastKnownPlaceId = game.PlaceId
+	session.LastTeleportAtUnix = now
+	session.Source = tostring(source or "Manual")
+	session.LastClaimId = ""
+end
+
+local function continueTeleportSession(session, now, source)
+	session.Active = true
+	session.PendingReturn = false
+	if session.LastRewardSettledAtUnix <= 0 then
+		session.LastRewardSettledAtUnix = math.max(session.StartedAtUnix, session.ClaimedThroughUnix)
+	end
+	session.LastAccruedAtUnix = now
+	session.LastKnownPlaceId = game.PlaceId
+	session.LastTeleportAtUnix = now
+	if tostring(session.Source or "") == "" then
+		session.Source = tostring(source or "AFKTeleport")
+	end
+end
+
 local function buildRewardSummary(player, afk, now)
 	local session = afk and afk.Session or {}
 	local elapsedSeconds = getSessionElapsedSeconds(session, now)
@@ -857,7 +935,7 @@ local function settleAfkRewardsUnlocked(player, source)
 	return true, source or "settled", claim
 end
 
-local function settleAfkRewards(player, source)
+function settleAfkRewards(player, source)
 	local runtime = getRuntime(player)
 	if runtime.SettlementPending == true then
 		return false, "settlement_pending", nil
@@ -1046,21 +1124,24 @@ local function beginSession(player, source)
 	local now = os.time()
 	normalizeDaily(afk, now)
 	local session = afk.Session
-	if session.Active ~= true or session.SessionId == "" then
-		session.SessionId = HttpService:GenerateGUID(false)
-		session.StartedAtUnix = now
-		session.ClaimedThroughUnix = now
-		resetSessionRewardCursors(session, now)
-		session.RefreshCount = 0
-	elseif session.LastRewardSettledAtUnix <= 0 then
-		session.LastRewardSettledAtUnix = math.max(session.StartedAtUnix, session.ClaimedThroughUnix)
+	if session.Active == true or session.PendingReturn == true then
+		local settled, settleReason = settleAfkRewards(player, "entry_restart")
+		if settled ~= true then
+			return false, settleReason
+		end
+
+		afk, reason = getAfkData(player)
+		if afk == nil then
+			return false, reason
+		end
+
+		now = os.time()
+		normalizeDaily(afk, now)
+		session = afk.Session
+		finishSessionForRestart(afk, session, now)
 	end
-	session.Active = true
-	session.PendingReturn = false
-	session.LastAccruedAtUnix = now
-	session.LastKnownPlaceId = game.PlaceId
-	session.LastTeleportAtUnix = now
-	session.Source = tostring(source or "Manual")
+
+	startFreshSession(session, now, source)
 
 	return persistAfkData(player, afk)
 end
@@ -1354,20 +1435,36 @@ local function initializeAfkPlacePlayer(player)
 	local now = os.time()
 	normalizeDaily(afk, now)
 	local session = afk.Session
-	if session.Active ~= true then
-		session.Active = true
-		session.SessionId = if session.SessionId ~= "" then session.SessionId else HttpService:GenerateGUID(false)
-		session.StartedAtUnix = now
-		session.ClaimedThroughUnix = now
-		resetSessionRewardCursors(session, now)
-		session.RefreshCount = 0
-		session.Source = "DirectAFKPlaceJoin"
-	elseif session.LastRewardSettledAtUnix <= 0 then
-		session.LastRewardSettledAtUnix = math.max(session.StartedAtUnix, session.ClaimedThroughUnix)
+	local teleportData = getJoinTeleportData(player)
+	if session.Active == true and isMatchingAfkTeleportSession(session, teleportData) then
+		continueTeleportSession(session, now, firstNonEmpty(teleportData.Source, teleportData.Kind, session.Source))
+	else
+		if session.Active == true or session.PendingReturn == true then
+			local settled, settleReason = settleAfkRewards(player, "afk_join_restart")
+			if settled ~= true then
+				warn(string.format(
+					"[AFKTeleportService] Unable to settle stale AFK session before restart player=%s reason=%s",
+					player.Name,
+					tostring(settleReason)
+				))
+				fireState(player, "Setting up your AFK rewards...")
+				return
+			end
+
+			afk, reason = getAfkData(player)
+			if afk == nil then
+				warn("[AFKTeleportService] AFK place profile unavailable after stale settlement:", player.Name, reason)
+				return
+			end
+
+			now = os.time()
+			normalizeDaily(afk, now)
+			session = afk.Session
+			finishSessionForRestart(afk, session, now)
+		end
+
+		startFreshSession(session, now, "DirectAFKPlaceJoin")
 	end
-	session.PendingReturn = false
-	session.LastAccruedAtUnix = now
-	session.LastKnownPlaceId = game.PlaceId
 	persistAfkData(player, afk)
 	fireState(player, "AFK session active.")
 end

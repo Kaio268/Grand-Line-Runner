@@ -153,6 +153,16 @@ function ReactModalRegistry.IsVisible(name)
 	return false
 end
 
+function ReactModalRegistry.IsAnyVisible()
+	for _, handlers in pairs(entries) do
+		if typeof(handlers.isVisible) == "function" and handlers.isVisible() == true then
+			return true
+		end
+	end
+
+	return false
+end
+
 function ReactModalRegistry.GetChangedSignal()
 	return changedEvent.Event
 end

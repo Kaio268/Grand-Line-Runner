@@ -1545,8 +1545,40 @@ function PhoenixClient:ReportPhoenixFlightEnded(reason)
 	return true
 end
 
+local function shouldPreservePhoenixFlightExitVelocity(reason)
+	local normalizedReason = if typeof(reason) == "string" then string.lower(reason) else ""
+	return normalizedReason == "natural" or normalizedReason == "early_cancel"
+end
+
+local function clampPhoenixFlightExitVelocity(currentVelocity, maxPlanarSpeed, maxVerticalSpeed)
+	local resolvedPlanarMax = math.max(0, tonumber(maxPlanarSpeed) or 0)
+	local resolvedVerticalMax = math.max(0, tonumber(maxVerticalSpeed) or 0)
+	local planarVelocity = getPlanarVector(currentVelocity)
+
+	if resolvedPlanarMax > 0 and planarVelocity.Magnitude > resolvedPlanarMax then
+		planarVelocity = planarVelocity.Unit * resolvedPlanarMax
+	end
+
+	local verticalVelocity = currentVelocity.Y
+	if resolvedVerticalMax > 0 then
+		verticalVelocity = math.clamp(verticalVelocity, -resolvedVerticalMax, resolvedVerticalMax)
+	end
+
+	return Vector3.new(planarVelocity.X, verticalVelocity, planarVelocity.Z)
+end
+
+local function getStrictPhoenixFlightExitVelocity(currentVelocity, maxDescendSpeed)
+	local descendSpeed = math.max(DEFAULT_PHOENIX_END_DESCEND_SPEED, tonumber(maxDescendSpeed) or 0)
+	return Vector3.new(
+		currentVelocity.X * 0.2,
+		math.min(currentVelocity.Y, -descendSpeed),
+		currentVelocity.Z * 0.2
+	)
+end
+
 function PhoenixClient:StopPhoenixFlight(reason, options)
 	local flightState = self.phoenixFlightState
+
 	if not flightState.Active then
 		self:StopPhoenixFlightAudioForPlayer(self.player, { PlayDeactivation = false })
 		return
@@ -1555,9 +1587,14 @@ function PhoenixClient:StopPhoenixFlight(reason, options)
 	local resolvedReason = typeof(reason) == "string" and reason ~= "" and reason or "unknown"
 	local shouldReportEnd = not (type(options) == "table" and options.ReportEnd == false)
 	local shouldRestoreAutoRotate = not (type(options) == "table" and options.RestoreAutoRotate == false)
+	local shouldPreserveExitVelocity = shouldPreservePhoenixFlightExitVelocity(resolvedReason)
 	local now = os.clock()
 	local wasFlightStarted = flightState.FlightStarted
 	local remaining = wasFlightStarted and (flightState.EndTime - now) or nil
+	local flightSpeed = math.max(
+		0,
+		tonumber(flightState.FlightSpeed) or tonumber(flightState.BaseFlightSpeed) or DEFAULT_PHOENIX_FLIGHT_SPEED
+	)
 	local maxDescendSpeed = flightState.MaxDescendSpeed
 	local rootPart = getRootPart(self)
 	resetPhoenixFlightState(flightState)
@@ -1572,18 +1609,23 @@ function PhoenixClient:StopPhoenixFlight(reason, options)
 		if shouldRestoreAutoRotate then
 			humanoid.AutoRotate = true
 		end
-		humanoid:Move(Vector3.zero, true)
+		if not shouldPreserveExitVelocity then
+			humanoid:Move(Vector3.zero, true)
+		end
 		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 	end
 
 	if rootPart and rootPart.Parent then
 		local currentVelocity = rootPart.AssemblyLinearVelocity
-		local descendSpeed = math.max(DEFAULT_PHOENIX_END_DESCEND_SPEED, maxDescendSpeed)
-		rootPart.AssemblyLinearVelocity = Vector3.new(
-			currentVelocity.X * 0.2,
-			math.min(currentVelocity.Y, -descendSpeed),
-			currentVelocity.Z * 0.2
-		)
+		if shouldPreserveExitVelocity then
+			rootPart.AssemblyLinearVelocity = clampPhoenixFlightExitVelocity(
+				currentVelocity,
+				flightSpeed,
+				maxDescendSpeed
+			)
+		else
+			rootPart.AssemblyLinearVelocity = getStrictPhoenixFlightExitVelocity(currentVelocity, maxDescendSpeed)
+		end
 	end
 
 	self:StopPhoenixFlightLoopSound(self.player)
@@ -1627,9 +1669,9 @@ function PhoenixClient:BeginPhoenixFlightTakeoff(rootPart, now)
 
 	local currentVelocity = rootPart.AssemblyLinearVelocity
 	rootPart.AssemblyLinearVelocity = Vector3.new(
-		currentVelocity.X,
+		0,
 		math.max(currentVelocity.Y, self.phoenixFlightState.TakeoffVelocity),
-		currentVelocity.Z
+		0
 	)
 
 	flightLog(
@@ -1664,13 +1706,34 @@ function PhoenixClient:BeginPhoenixFlightControl(rootPart, now)
 	)
 end
 
+function PhoenixClient:SuppressPhoenixFlightStartupMovement(rootPart, humanoid, dt)
+	if humanoid and humanoid.Parent and humanoid.Health > 0 then
+		humanoid.Jump = false
+		humanoid:Move(Vector3.zero, true)
+	end
+
+	if rootPart and rootPart.Parent then
+		local currentVelocity = rootPart.AssemblyLinearVelocity
+		local response = math.clamp(self.phoenixFlightState.HorizontalResponsiveness * (dt or 0), 0, 1)
+		local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(Vector3.zero, response)
+		rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, currentVelocity.Y, nextPlanarVelocity.Z)
+		rootPart.AssemblyAngularVelocity = Vector3.zero
+	end
+end
+
 function PhoenixClient:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
+	if self.phoenixFlightState.TakeoffStarted then
+		return
+	end
+
 	local startupRootCFrame = self.phoenixFlightState.StartupRootCFrame
 	if typeof(startupRootCFrame) ~= "CFrame" then
+		self:SuppressPhoenixFlightStartupMovement(rootPart, humanoid, 0)
 		return
 	end
 
 	if humanoid and humanoid.Parent and humanoid.Health > 0 then
+		humanoid.Jump = false
 		humanoid:Move(Vector3.zero, true)
 	end
 
@@ -1686,16 +1749,16 @@ function PhoenixClient:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
 end
 
 function PhoenixClient:UpdatePhoenixFlightStartup(rootPart, humanoid, _dt, now)
+	local flightStartTime = self.phoenixFlightState.FlightStartTime
+	if now >= flightStartTime then
+		self:BeginPhoenixFlightTakeoff(rootPart, now)
+		return true
+	end
+
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
 	self:HoldPhoenixFlightStartupPosition(rootPart, humanoid)
 
 	if self:TryBeginPhoenixFlightControlAtHeight(rootPart, now) then
-		return true
-	end
-
-	local flightStartTime = self.phoenixFlightState.FlightStartTime
-	if now >= flightStartTime then
-		self:BeginPhoenixFlightTakeoff(rootPart, now)
 		return true
 	end
 
@@ -1748,20 +1811,16 @@ function PhoenixClient:UpdatePhoenixFlightTakeoff(rootPart, humanoid, dt, now)
 	end
 
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	humanoid.Jump = false
+	humanoid:Move(Vector3.zero, true)
 
 	local currentHeight = rootPart.Position.Y
 	local targetVerticalVelocity = self:GetTargetHoverVerticalVelocity(currentHeight, now)
 	local currentVelocity = rootPart.AssemblyLinearVelocity
 	local response = math.clamp(self.phoenixFlightState.HorizontalResponsiveness * dt, 0, 1)
-	local desiredFlightDirection = self:GetCameraRelativeFlightDirection(rootPart)
-	local scaledFlightSpeed = self:GetScaledPhoenixFlightSpeed(humanoid)
-	local desiredPlanarVelocity = desiredFlightDirection * scaledFlightSpeed
-	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(desiredPlanarVelocity, response)
+	-- Steering starts when full flight control begins; takeoff only lifts the player into flight.
+	local nextPlanarVelocity = getPlanarVector(currentVelocity):Lerp(Vector3.zero, response)
 	rootPart.AssemblyLinearVelocity = Vector3.new(nextPlanarVelocity.X, targetVerticalVelocity, nextPlanarVelocity.Z)
-
-	if desiredPlanarVelocity.Magnitude > MIN_DIRECTION_MAGNITUDE then
-		self:FaceCharacterTowards(desiredPlanarVelocity, dt)
-	end
 
 	if self:ShouldLogFlightDebug("Takeoff", now, FLIGHT_UPDATE_LOG_INTERVAL) then
 		flightLog(

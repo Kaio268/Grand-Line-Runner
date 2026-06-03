@@ -20,7 +20,9 @@ local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 local ChestRewardResolver = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRewardResolver"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewMember"))
+local CrewInventoryDerivedCache = require(ServerScriptService.Modules:WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
+local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
 local TitleProgressService = require(ServerScriptService.Modules:WaitForChild("TitleProgressService"))
@@ -30,6 +32,7 @@ local Service = {}
 local randomObject = Random.new()
 local requestRemote
 local stateRemote
+local crewMemberInventoryChangedRemote
 local stateChangedEvent = Instance.new("BindableEvent")
 local droppedChestWorldHandler = nil
 local started = false
@@ -58,6 +61,8 @@ local DEFAULT_UNLOCKED_CARRY_SLOTS = 1
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local STARTER_CREW_SOURCE = "GrandLineRushStarter"
+local CREW_INVENTORY_CHANGED_REMOTE_NAME = "CrewMemberInventoryChanged"
+local CREW_EXTRACTION_QUICK_SLOT_ASSIGN_REASON = "crew_extraction_quick_slot_assign"
 local CANONICAL_CREW_RARITY_ALIASES = {
 	Mythical = "Mythic",
 	Celestial = "Godly",
@@ -119,6 +124,14 @@ local function ensureRemotes()
 
 	requestRemote = getOrCreateRemote(remotesFolder, "RemoteFunction", remoteConfig.RequestName)
 	stateRemote = getOrCreateRemote(remotesFolder, "RemoteEvent", remoteConfig.StateEventName)
+end
+
+local function getCrewMemberInventoryChangedRemote()
+	if crewMemberInventoryChangedRemote == nil or crewMemberInventoryChangedRemote.Parent ~= ReplicatedStorage then
+		crewMemberInventoryChangedRemote =
+			getOrCreateRemote(ReplicatedStorage, "RemoteEvent", CREW_INVENTORY_CHANGED_REMOTE_NAME)
+	end
+	return crewMemberInventoryChangedRemote
 end
 
 local function getRuntime(player)
@@ -1600,6 +1613,57 @@ local function addCrewInstance(player, rewardData, source)
 	return canonicalInstanceId
 end
 
+local function tryAssignExtractedCrewToFirstEmptyQuickSlot(player, instanceId)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, {
+			Reason = "invalid_player",
+		}
+	end
+
+	local normalizedInstanceId = tostring(instanceId or "")
+	if normalizedInstanceId == "" then
+		return false, {
+			Reason = "invalid_instance_id",
+		}
+	end
+
+	local assignCallOk, assignOk, assignResult = pcall(function()
+		return CrewQuickSlotService.AssignInstanceToSlot(player, normalizedInstanceId, 0)
+	end)
+	if assignCallOk ~= true then
+		warn(string.format(
+			"[GrandLineRush] Extracted crew quick-slot assignment errored player=%s instanceId=%s error=%s",
+			player.Name,
+			normalizedInstanceId,
+			tostring(assignOk)
+		))
+		return false, {
+			Reason = "quick_slot_assign_error",
+		}
+	end
+
+	if assignOk == true then
+		CrewInventoryDerivedCache.MarkDirty(player, CREW_EXTRACTION_QUICK_SLOT_ASSIGN_REASON)
+		getCrewMemberInventoryChangedRemote():FireClient(player, {
+			Reason = CREW_EXTRACTION_QUICK_SLOT_ASSIGN_REASON,
+			UpdatedAt = os.clock(),
+		})
+		return true, assignResult
+	end
+
+	local reason = tostring(assignResult and assignResult.Reason or "")
+	if reason ~= "quick_slot_unavailable" then
+		warn(string.format(
+			"[GrandLineRush] Extracted crew quick-slot assignment failed player=%s instanceId=%s reason=%s",
+			player.Name,
+			normalizedInstanceId,
+			if reason ~= "" then reason else "unknown"
+		))
+	end
+
+	return false, assignResult
+end
+
 ensureStarterCrew = function(player)
 	local profile = getProfileAndReplica(player)
 	if not profile then
@@ -2016,6 +2080,7 @@ local function grantCarrySlotReward(player, slot)
 		if instanceId == nil then
 			return false, nil, "persist_crew_failed"
 		end
+		tryAssignExtractedCrewToFirstEmptyQuickSlot(player, instanceId)
 		message = string.format(
 			"Recruited %s (%s) as crew #%s.",
 			tostring(carriedReward.CrewDisplayName or carriedReward.CrewName or carriedReward.DisplayName),

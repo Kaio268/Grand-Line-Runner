@@ -7,10 +7,40 @@ local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 
+local WARNING_THROTTLE_SECONDS = 5
+local warningTimes = {}
+
+local function warnThrottled(key, message)
+	local now = os.clock()
+	local previous = warningTimes[key]
+	if previous and now - previous < WARNING_THROTTLE_SECONDS then
+		return
+	end
+
+	warningTimes[key] = now
+	warn("[AdminPanel] " .. tostring(message))
+end
+
 local function safeWait(parent, name)
 	local obj = parent:WaitForChild(name, 15)
 	if not obj then
 		error(("Missing %s in %s"):format(name, parent:GetFullName()))
+	end
+	return obj
+end
+
+local function waitForOptionalChild(parent, name, className, timeoutSeconds)
+	local obj = parent:FindFirstChild(name) or parent:WaitForChild(name, timeoutSeconds or 15)
+	if not obj then
+		warnThrottled("missing_" .. name, ("%s is unavailable in %s."):format(name, parent:GetFullName()))
+		return nil
+	end
+	if className and not obj:IsA(className) then
+		warnThrottled(
+			"wrong_class_" .. name,
+			("%s exists in %s but is a %s, expected %s."):format(name, parent:GetFullName(), obj.ClassName, className)
+		)
+		return nil
 	end
 	return obj
 end
@@ -48,22 +78,144 @@ local function numberValue(values, key, fallback)
 	return parsed
 end
 
-local adminStatusFunction = safeWait(ReplicatedStorage, "AdminStatusRequest")
+local function getOrCreateFrame(parent, name)
+	local frame = parent:FindFirstChild(name)
+	if frame and frame:IsA("Frame") then
+		return frame
+	end
+	if frame then
+		frame:Destroy()
+	end
+
+	frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundTransparency = 1
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+	return frame
+end
+
+local function getOrCreateTextLabel(parent, name)
+	local label = parent:FindFirstChild(name)
+	if label and label:IsA("TextLabel") then
+		return label
+	end
+	if label then
+		label:Destroy()
+	end
+
+	label = Instance.new("TextLabel")
+	label.Name = name
+	label.BackgroundTransparency = 1
+	label.BorderSizePixel = 0
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Color3.fromRGB(245, 249, 255)
+	label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	label.TextStrokeTransparency = 0.25
+	label.TextSize = 20
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.Parent = parent
+	return label
+end
+
+local function getOrCreateImageLabel(parent, name)
+	local image = parent:FindFirstChild(name)
+	if image and image:IsA("ImageLabel") then
+		return image
+	end
+	if image then
+		image:Destroy()
+	end
+
+	image = Instance.new("ImageLabel")
+	image.Name = name
+	image.BackgroundTransparency = 1
+	image.BorderSizePixel = 0
+	image.Parent = parent
+	return image
+end
+
+local function ensureAnnouncementTemplate(playerGui)
+	local hud = playerGui:FindFirstChild("HUD") or playerGui:WaitForChild("HUD", 15)
+	if not (hud and hud:IsA("ScreenGui")) then
+		warnThrottled("missing_hud_fallback", "PlayerGui.HUD was unavailable; using a local admin announcement fallback.")
+		hud = playerGui:FindFirstChild("AdminAnnouncementFallback")
+		if not (hud and hud:IsA("ScreenGui")) then
+			if hud then
+				hud:Destroy()
+			end
+			hud = Instance.new("ScreenGui")
+			hud.Name = "AdminAnnouncementFallback"
+			hud.DisplayOrder = 10050
+			hud.IgnoreGuiInset = true
+			hud.ResetOnSpawn = false
+			hud.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+			hud.Parent = playerGui
+		end
+	end
+
+	local adminInfo = hud:FindFirstChild("AdminInfo")
+	if not (adminInfo and adminInfo:IsA("Frame")) then
+		warnThrottled("missing_admin_info_fallback", "HUD.AdminInfo was unavailable; creating a local admin announcement host.")
+		adminInfo = getOrCreateFrame(hud, "AdminInfo")
+	end
+	adminInfo.Visible = true
+	adminInfo.Size = UDim2.new(1, 0, 0, 180)
+	adminInfo.Position = UDim2.fromOffset(0, 16)
+	adminInfo.ClipsDescendants = false
+
+	local announcementTemplate = adminInfo:FindFirstChild("AnnTemplate")
+	if not (announcementTemplate and announcementTemplate:IsA("Frame")) then
+		warnThrottled("missing_ann_template_fallback", "HUD.AdminInfo.AnnTemplate was unavailable; creating a local fallback template.")
+		announcementTemplate = getOrCreateFrame(adminInfo, "AnnTemplate")
+	end
+	announcementTemplate.Visible = false
+	announcementTemplate.Size = UDim2.fromOffset(460, 80)
+	announcementTemplate.Position = UDim2.fromOffset(16, 0)
+	announcementTemplate.BackgroundTransparency = 0.08
+	announcementTemplate.BackgroundColor3 = Color3.fromRGB(10, 21, 43)
+	announcementTemplate.ClipsDescendants = false
+
+	local textLB = getOrCreateTextLabel(announcementTemplate, "TextLB")
+	textLB.Position = UDim2.fromOffset(84, 16)
+	textLB.Size = UDim2.new(1, -104, 0, 44)
+	textLB.Text = ""
+	textLB.TextWrapped = true
+	textLB.ZIndex = math.max(textLB.ZIndex, 2)
+
+	local shadow = getOrCreateTextLabel(textLB, "Shadow")
+	shadow.Position = UDim2.fromOffset(2, 2)
+	shadow.Size = UDim2.fromScale(1, 1)
+	shadow.Text = ""
+	shadow.TextColor3 = Color3.fromRGB(0, 0, 0)
+	shadow.TextTransparency = 0.25
+	shadow.ZIndex = math.max(textLB.ZIndex - 1, 1)
+
+	local pfp = getOrCreateImageLabel(announcementTemplate, "PFP")
+	pfp.Position = UDim2.fromOffset(14, 12)
+	pfp.Size = UDim2.fromOffset(56, 56)
+	pfp.ZIndex = math.max(pfp.ZIndex, 2)
+
+	return announcementTemplate
+end
+
+local adminStatusFunction = waitForOptionalChild(ReplicatedStorage, "AdminStatusRequest", "RemoteFunction", 15)
 local isAdmin = false
-if adminStatusFunction:IsA("RemoteFunction") then
+if adminStatusFunction and adminStatusFunction:IsA("RemoteFunction") then
 	local ok, result = pcall(function()
 		return adminStatusFunction:InvokeServer()
 	end)
 	isAdmin = ok and result == true
+	if not ok then
+		warnThrottled("admin_status_failed", "AdminStatusRequest failed: " .. tostring(result))
+	end
 end
 
-local broadcastEvent = safeWait(ReplicatedStorage, "AdminAnnouncementBroadcast")
+local broadcastEvent = waitForOptionalChild(ReplicatedStorage, "AdminAnnouncementBroadcast", "RemoteEvent", 15)
 
 local playerGui = safeWait(player, "PlayerGui")
 local framesFolder = playerGui:FindFirstChild("Frames")
-local hud = safeWait(playerGui, "HUD")
-local adminInfo = safeWait(hud, "AdminInfo")
-local template = safeWait(adminInfo, "AnnTemplate")
+local template = ensureAnnouncementTemplate(playerGui)
 
 template.Visible = false
 
@@ -863,6 +1015,8 @@ for _, command in ipairs(COMMANDS) do
 	end
 	command.searchText = normalizeText(table.concat(parts, " "))
 end
+
+local updateAdminLauncherVisibility = nil
 
 local function buildDashboard()
 	local requestEvent = safeWait(ReplicatedStorage, "AdminAnnouncementRequest")
@@ -2371,6 +2525,9 @@ local function buildDashboard()
 				if not isAdmin then
 					gui.Enabled = false
 				end
+				if updateAdminLauncherVisibility then
+					updateAdminLauncherVisibility()
+				end
 			end
 
 			if message == "" then
@@ -2878,8 +3035,86 @@ end
 
 local dashboardGui = nil
 if isAdmin then
-	dashboardGui = buildDashboard()
+	local ok, result = pcall(buildDashboard)
+	if ok then
+		dashboardGui = result
+	else
+		warnThrottled("dashboard_build_failed", "Admin dashboard failed to build: " .. tostring(result))
+	end
 end
+
+local function setDashboardOpen(open)
+	if not isAdmin then
+		warnThrottled("admin_toggle_denied", "Admin panel blocked: AdminStatusRequest denied access for this player.")
+		return false
+	end
+	if not dashboardGui then
+		warnThrottled("admin_toggle_missing_dashboard", "Admin panel blocked: dashboard was not built; check admin remotes and startup warnings.")
+		return false
+	end
+
+	dashboardGui.Enabled = open == true
+	return true
+end
+
+local function toggleDashboard()
+	if not dashboardGui then
+		setDashboardOpen(true)
+		return
+	end
+	setDashboardOpen(not dashboardGui.Enabled)
+end
+
+local adminLauncherGui = nil
+updateAdminLauncherVisibility = function()
+	if adminLauncherGui then
+		adminLauncherGui.Enabled = isAdmin == true and dashboardGui ~= nil
+	end
+end
+
+local function createAdminLauncher()
+	if not isAdmin or not dashboardGui then
+		return
+	end
+
+	local existing = playerGui:FindFirstChild("GrandLineRushAdminLauncher")
+	if existing then
+		existing:Destroy()
+	end
+
+	adminLauncherGui = create("ScreenGui", {
+		Name = "GrandLineRushAdminLauncher",
+		DisplayOrder = 119,
+		Enabled = isAdmin == true,
+		IgnoreGuiInset = true,
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = playerGui,
+	})
+
+	local button = create("TextButton", {
+		Name = "OpenAdminCommands",
+		AnchorPoint = Vector2.new(1, 0),
+		AutoButtonColor = true,
+		BackgroundColor3 = COLORS.PanelRaised,
+		BorderSizePixel = 0,
+		Font = FONT,
+		Position = UDim2.new(1, -16, 0, 96),
+		Size = UDim2.fromOffset(132, 40),
+		Text = "Admin  P",
+		TextColor3 = COLORS.Text,
+		TextSize = 14,
+		ZIndex = 20,
+		Parent = adminLauncherGui,
+	})
+	addCorner(button, 12)
+	addStroke(button, COLORS.Gold, 1, 0.18)
+
+	button.Activated:Connect(toggleDashboard)
+end
+
+createAdminLauncher()
+updateAdminLauncherVisibility()
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then
@@ -2888,11 +3123,7 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if input.KeyCode ~= Enum.KeyCode.P then
 		return
 	end
-	if not isAdmin or not dashboardGui then
-		return
-	end
-
-	dashboardGui.Enabled = not dashboardGui.Enabled
+	toggleDashboard()
 end)
 
 local function makeParticle(layer: GuiObject, worldPos: Vector2)
@@ -3037,4 +3268,27 @@ local function showAnnouncement(payload)
 	end)
 end
 
-broadcastEvent.OnClientEvent:Connect(showAnnouncement)
+local broadcastConnected = false
+local function bindBroadcastEvent()
+	if broadcastConnected then
+		return
+	end
+
+	if not (broadcastEvent and broadcastEvent:IsA("RemoteEvent")) then
+		broadcastEvent = ReplicatedStorage:FindFirstChild("AdminAnnouncementBroadcast")
+	end
+	if not (broadcastEvent and broadcastEvent:IsA("RemoteEvent")) then
+		warnThrottled("broadcast_remote_missing", "AdminAnnouncementBroadcast is unavailable; admin announcements cannot display yet.")
+		return
+	end
+
+	broadcastConnected = true
+	broadcastEvent.OnClientEvent:Connect(showAnnouncement)
+end
+
+bindBroadcastEvent()
+ReplicatedStorage.ChildAdded:Connect(function(child)
+	if child.Name == "AdminAnnouncementBroadcast" then
+		task.defer(bindBroadcastEvent)
+	end
+end)

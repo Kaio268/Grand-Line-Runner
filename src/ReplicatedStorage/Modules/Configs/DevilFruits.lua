@@ -690,7 +690,8 @@ local DevilFruits = {
 					Cooldown = 13,
 					CooldownStartsOn = "End",
 					Duration = 10,
-					FlightStartupDuration = 0,
+					-- Grounded pre-rise wind-up; steering unlock is height-gated after scripted takeoff.
+					FlightStartupDuration = 0.3,
 					TakeoffDuration = 0.22,
 					InitialLift = 22,
 					MaxRiseHeight = 132,
@@ -844,6 +845,50 @@ end
 function DevilFruits.GetFruitKey(identifier)
 	local fruit = DevilFruits.GetFruit(identifier)
 	return fruit and fruit.FruitKey or nil
+end
+
+local unresolvedDisplayNameWarnings = {}
+
+local function getDisplayNameFallback(identifier)
+	if typeof(identifier) == "string" then
+		local text = identifier:match("^%s*(.-)%s*$")
+		if text ~= "" then
+			return text
+		end
+	end
+
+	return "Devil Fruit"
+end
+
+local function warnUnresolvedDisplayName(identifier, fallbackName)
+	local warningKey = normalizeIdentifier(identifier) or ("<" .. typeof(identifier) .. ">")
+	if unresolvedDisplayNameWarnings[warningKey] then
+		return
+	end
+
+	unresolvedDisplayNameWarnings[warningKey] = true
+	warn(string.format(
+		"[DevilFruits] GetDisplayName could not resolve fruit identifier %s; using %s.",
+		tostring(identifier),
+		tostring(fallbackName)
+	))
+end
+
+-- Uses the shared fruit lookup index: canonical keys, display names, ids, and
+-- legacy fruit aliases resolve here. Ability names are not a separate namespace.
+function DevilFruits.GetDisplayName(identifier)
+	if identifier == DevilFruits.None then
+		return DevilFruits.None
+	end
+
+	local fruit = DevilFruits.GetFruit(identifier)
+	if fruit and typeof(fruit.DisplayName) == "string" and fruit.DisplayName ~= "" then
+		return fruit.DisplayName
+	end
+
+	local fallbackName = getDisplayNameFallback(identifier)
+	warnUnresolvedDisplayName(identifier, fallbackName)
+	return fallbackName
 end
 
 local function nonEmptyText(value)

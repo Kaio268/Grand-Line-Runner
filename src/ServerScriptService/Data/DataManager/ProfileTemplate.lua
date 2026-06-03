@@ -239,6 +239,10 @@ local ProfileTemplate = {
 		SelectedSpeed = 1,
 		SpeedAutoMax = true,
 		PremiumStealProtectionEnabled = true,
+		HasFavoritedGamePromptCompleted = false,
+		FavoriteGamePromptCompletedAtUnix = 0,
+		FavoriteGamePromptAttemptCount = 0,
+		FavoriteGamePromptLastAttemptAtUnix = 0,
 	},
 	Packs = {},
 	DailyClaims = {
