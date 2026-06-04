@@ -15,7 +15,7 @@ local ClientRuntime = {
 
 local React, ReactRoblox, App, Responsive
 local CrewCatalog, CrewIncomeBalance, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
-local ChestUtils, ChestDropRates, Titles, Economy, PopUpModule
+local ChestUtils, ChestDropRates, Titles, Economy, ItemIconRegistry, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
 local UiModalState, ReactModalRegistry
 
@@ -40,6 +40,7 @@ do
 	ChestDropRates = require(Modules:WaitForChild("GrandLineRushChestDropRates"))
 	Titles = require(Modules:WaitForChild("Configs"):WaitForChild("Titles"))
 	Economy = require(Modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
+	ItemIconRegistry = require(Modules:WaitForChild("Configs"):WaitForChild("ItemIconRegistry"))
 	PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 	PlotUpgradeConfig = require(Modules:WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 	ShipVisuals = require(Modules:WaitForChild("Configs"):WaitForChild("ShipVisuals"))
@@ -1221,18 +1222,26 @@ end
 
 local function getResourceInfo(resourceKey)
 	local food = Economy.Food[resourceKey]
+	local fallbackDisplayName = if food
+		then tostring(food.DisplayName or resourceKey)
+		else (RESOURCE_DISPLAY[resourceKey] or tostring(resourceKey))
+	local registryCategory = ItemIconRegistry.GetCategory(resourceKey)
+	local subtitle = registryCategory
+	if subtitle == "Reward" then
+		subtitle = if food then "Food" else "Material"
+	end
 	local rarity = RESOURCE_RARITY[resourceKey] or "Common"
 	if food then
 		return {
-			displayName = tostring(food.DisplayName or resourceKey),
-			subtitle = "Food",
+			displayName = ItemIconRegistry.GetDisplayName(resourceKey, fallbackDisplayName),
+			subtitle = subtitle,
 			rarity = rarity,
 		}
 	end
 
 	return {
-		displayName = RESOURCE_DISPLAY[resourceKey] or tostring(resourceKey),
-		subtitle = "Material",
+		displayName = ItemIconRegistry.GetDisplayName(resourceKey, fallbackDisplayName),
+		subtitle = subtitle,
 		rarity = rarity,
 	}
 end
@@ -1837,6 +1846,10 @@ local function getSubtitle(kind, name, state)
 end
 
 local function getIcon(kind, name, state)
+	if kind == "Resource" then
+		return ItemIconRegistry.GetIcon(name)
+	end
+
 	if isCrewItemKind(kind) then
 		local staticPreviewImage = getStaticCrewPreviewImage(name, state)
 		if staticPreviewImage ~= "" then
@@ -2220,6 +2233,30 @@ local function resolveTitleVisualStyle(titleDefinition, unlocked)
 	}
 end
 
+local function buildTitleBuffs(titleDefinition)
+	local buffs = typeof(titleDefinition.Buffs) == "table" and titleDefinition.Buffs or {}
+	local entries = {}
+	local order = {
+		{ key = "beli", label = "Beli" },
+		{ key = "resources", label = "Resources" },
+		{ key = "speed", label = "Speed" },
+	}
+
+	for _, spec in ipairs(order) do
+		local amount = math.max(0, tonumber(buffs[spec.key]) or 0)
+		if amount > 0 then
+			entries[#entries + 1] = {
+				key = spec.key,
+				label = spec.label,
+				amount = amount,
+				multiplier = 1 + amount,
+			}
+		end
+	end
+
+	return entries
+end
+
 local function buildTitlesData(query)
 	local entries = {}
 	local totalCount = 0
@@ -2295,6 +2332,7 @@ local function buildTitlesData(query)
 			currentRank = currentRank,
 			rankLabel = rankLabel,
 			rankStatusKey = rankStatusKey,
+			buffs = buildTitleBuffs(titleDefinition),
 			accentColor = visualStyle.accentColor,
 			surfaceColor = visualStyle.surfaceColor,
 			surfaceColor2 = visualStyle.surfaceColor2,
@@ -3864,7 +3902,10 @@ local function bindTitleTracking()
 		end
 	end
 
-	trackConnection(player:GetAttributeChangedSignal("EquippedTitleId"), scheduleRender, titleAttributeConnections)
+	trackConnection(player:GetAttributeChangedSignal("EquippedTitleId"), function()
+		markIncomeStatusIncomeSnapshotStale()
+		scheduleRender()
+	end, titleAttributeConnections)
 end
 
 local function bindRebirthSummaryTracking()

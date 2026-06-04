@@ -11,6 +11,7 @@ local ReactRoblox = require(packages:WaitForChild("ReactRoblox"))
 local CurrencyUtil = require(modules:WaitForChild("CurrencyUtil"))
 local EconomyConfig = require(modules:WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local PopUpModule = require(modules:WaitForChild("PopUpModule"))
+local RewardIconResolver = require(modules:WaitForChild("RewardIconResolver"))
 local SettingsAudioController = require(modules:WaitForChild("SettingsAudioController"))
 local UiModalState = require(modules:WaitForChild("UiModalState"))
 
@@ -837,6 +838,11 @@ local function showReward(payload)
 	end
 
 	addEvent(message)
+	local rewardTier = tostring(payload.RewardTier or "Gold")
+	local rewardName = rewardTier .. " Chest"
+	PopUpModule:Local_ShowReward({
+		{ "1x " .. rewardName, RewardIconResolver.GetIcon(rewardName) },
+	})
 	PopUpModule:Local_SendPopUp(message, GOLD_BRIGHT, POPUP_STROKE, 3, false)
 
 	if typeof(payload.State) == "table" then

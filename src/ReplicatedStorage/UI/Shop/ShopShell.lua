@@ -51,6 +51,21 @@ local function buildPageSections(catalog)
 	return sections
 end
 
+local function hasPageSection(sections, sectionKey)
+	sectionKey = tostring(sectionKey or "")
+	if sectionKey == "" then
+		return false
+	end
+
+	for _, section in ipairs(sections or {}) do
+		if tostring(section.key or "") == sectionKey then
+			return true
+		end
+	end
+
+	return false
+end
+
 local function buildDetailRows(item, zIndex)
 	local rows = {
 		List = e("UIListLayout", {
@@ -144,22 +159,24 @@ local function ShopShell(props)
 	end, {})
 
 	local columns = 3
-	if contentWidth < 1080 then
+	if contentWidth < 900 then
 		columns = 2
 	end
-	if contentWidth < 720 then
+	if contentWidth < 640 then
 		columns = 1
 	end
 
 	local isNarrow = contentWidth < 760
-	local headerHeight = isNarrow and 78 or 88
+	local headerHeight = isNarrow and 76 or 82
 	local noticeHeight = props.noticeText and 42 or 0
-	local navHeight = isNarrow and 52 or 58
-	local navTop = headerHeight + noticeHeight + 8
-	local contentTop = navTop + navHeight + 10
+	local navHeight = isNarrow and 50 or 54
+	local navTop = headerHeight + noticeHeight + 6
+	local contentTop = navTop + navHeight + 8
 	local titleTextSize = if isNarrow then 30 elseif contentWidth < 1040 then 34 else 38
-	local horizontalInset = isNarrow and 16 or 24
+	local horizontalInset = isNarrow and 14 or 20
 	local pageSections = buildPageSections(props.catalog)
+	local requestedSectionKey = tostring(props.requestedSectionKey or "")
+	local requestedSectionRequestId = tonumber(props.requestedSectionRequestId) or 0
 
 	activeSectionKeyRef.current = activeSectionKey
 
@@ -196,6 +213,18 @@ local function ShopShell(props)
 			end
 		end)
 	end
+
+	React.useEffect(function()
+		if requestedSectionRequestId <= 0 or requestedSectionKey == "" then
+			return nil
+		end
+		if not hasPageSection(pageSections, requestedSectionKey) then
+			return nil
+		end
+
+		handleSectionSelected(requestedSectionKey)
+		return nil
+	end, { requestedSectionRequestId, requestedSectionKey })
 
 	React.useEffect(function()
 		local scroller = scrollerRef.current
@@ -237,14 +266,14 @@ local function ShopShell(props)
 
 	local contentChildren = {
 		List = e("UIListLayout", {
-			Padding = UDim.new(0, isNarrow and 18 or 22),
+			Padding = UDim.new(0, isNarrow and 14 or 16),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 		Padding = e("UIPadding", {
 			PaddingLeft = UDim.new(0, horizontalInset),
-			PaddingRight = UDim.new(0, horizontalInset + 8),
-			PaddingTop = UDim.new(0, isNarrow and 16 or 20),
-			PaddingBottom = UDim.new(0, 28),
+			PaddingRight = UDim.new(0, horizontalInset + 6),
+			PaddingTop = UDim.new(0, isNarrow and 12 or 14),
+			PaddingBottom = UDim.new(0, 22),
 		}),
 	}
 

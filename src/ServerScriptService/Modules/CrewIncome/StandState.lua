@@ -223,6 +223,37 @@ function Module.Install(ctx)
 		return if isBeliBoostActive(player) then 2 else 1
 	end
 
+	local function getTitleBeliMultiplier(player)
+		if typeof(IncomeClaimMath.GetTitleBeliMultiplier) == "function" then
+			return IncomeClaimMath.GetTitleBeliMultiplier(player)
+		end
+
+		return 1
+	end
+
+	local function getIndexMoneyMultiplier(player)
+		if typeof(IncomeClaimMath.GetIndexMoneyMultiplier) == "function" then
+			return IncomeClaimMath.GetIndexMoneyMultiplier(player)
+		end
+
+		return 1
+	end
+
+	local function getRewardBeliMultiplier(player)
+		if typeof(IncomeClaimMath.GetRewardBeliMultiplier) == "function" then
+			return IncomeClaimMath.GetRewardBeliMultiplier(player)
+		end
+
+		return getTitleBeliMultiplier(player) * getIndexMoneyMultiplier(player)
+	end
+
+	local function getRewardMultiplierMetadata(player)
+		return {
+			TitleMultiplier = getTitleBeliMultiplier(player),
+			IndexMultiplier = getIndexMoneyMultiplier(player),
+		}
+	end
+
 	local function getToolCrewMemberInstanceId(tool)
 		if not tool or not tool:IsA("Tool") then
 			return ""
@@ -570,16 +601,50 @@ function Module.Install(ctx)
 			standDebug("getStandIncomeDisplay early_zero player=%s stand=%s", player.Name, standName)
 			return 0
 		end
-		local display = IncomeClaimMath.GetWholeClaimableAmount(base, getStandCollectMultiplier(player, standName))
-		standDebug("getStandIncomeDisplay done player=%s stand=%s base=%s display=%s", player.Name, standName, tostring(base), tostring(display))
+		local summary = IncomeClaimMath.BuildClaimSummary(
+			base,
+			getStandCollectMultiplier(player, standName),
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
+		)
+		local display = math.max(0, tonumber(summary.FinalAmount) or 0)
+		standDebug(
+			"getStandIncomeDisplay done player=%s stand=%s base=%s display=%s",
+			player.Name,
+			standName,
+			tostring(base),
+			tostring(display)
+		)
 		return display
 	end
 
-	local function getStandIncomePerSecond(player, standName, crewMemberName)
+	local function buildStandClaimSummary(player, standName)
+		return IncomeClaimMath.BuildClaimSummary(
+			getPlayerStandIncome(player, standName),
+			getStandCollectMultiplier(player, standName),
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
+		)
+	end
+
+	local function buildStandIncomeRateSummary(player, standName, crewMemberName)
 		local crewMemberInstanceId = getPlayerStandCrewMemberInstanceId(player, standName)
-		return getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId)
-			* getBeliBoostMultiplier(player)
-			* getStandCollectMultiplier(player, standName)
+		return IncomeClaimMath.BuildRateSummary(
+			getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId),
+			getBeliBoostMultiplier(player),
+			getStandCollectMultiplier(player, standName),
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
+		)
+	end
+
+	local function getStandIncomePerSecond(player, standName, crewMemberName)
+		local summary = buildStandIncomeRateSummary(player, standName, crewMemberName)
+		return math.max(0, tonumber(summary.FinalAmount) or 0)
+	end
+
+	local function isStandIncomeBoosted(player, standName, crewMemberName)
+		return buildStandIncomeRateSummary(player, standName, crewMemberName).IsBoosted == true
 	end
 
 	local function normalizeIncomeSnapshotSlotKey(value)
@@ -629,6 +694,10 @@ function Module.Install(ctx)
 	ctx.getBaseIncome = getBaseIncome
 	ctx.getBeliBoostMultiplier = getBeliBoostMultiplier
 	ctx.getBeliBoostRemaining = getBeliBoostRemaining
+	ctx.getIndexMoneyMultiplier = getIndexMoneyMultiplier
+	ctx.getRewardBeliMultiplier = getRewardBeliMultiplier
+	ctx.getRewardMultiplierMetadata = getRewardMultiplierMetadata
+	ctx.getTitleBeliMultiplier = getTitleBeliMultiplier
 	ctx.getCrewMemberCanonicalReadGate = getCrewMemberCanonicalReadGate
 	ctx.getCrewMemberLevel = getCrewMemberLevel
 	ctx.getCrewStorage = getCrewStorage
@@ -643,6 +712,7 @@ function Module.Install(ctx)
 	ctx.getPlayerStandCrewMemberName = getPlayerStandCrewMemberName
 	ctx.getPlayerStandIncome = getPlayerStandIncome
 	ctx.getShipSlotsTable = getShipSlotsTable
+	ctx.getStandClaimSummary = buildStandClaimSummary
 	ctx.getStandIncomeDisplay = getStandIncomeDisplay
 	ctx.getStandIncomePerSecond = getStandIncomePerSecond
 	ctx.getStandCollectMultiplier = getStandCollectMultiplier
@@ -650,6 +720,7 @@ function Module.Install(ctx)
 	ctx.getToolCrewMemberInstanceId = getToolCrewMemberInstanceId
 	ctx.isActiveTutorialPlacementStep = isActiveTutorialPlacementStep
 	ctx.isBeliBoostActive = isBeliBoostActive
+	ctx.isStandIncomeBoosted = isStandIncomeBoosted
 	ctx.logCrewSwitchFailure = logCrewSwitchFailure
 	ctx.normalizeIncomeSnapshotSlotKey = normalizeIncomeSnapshotSlotKey
 	ctx.reconcileSlotAssignmentsForRender = reconcileSlotAssignmentsForRender

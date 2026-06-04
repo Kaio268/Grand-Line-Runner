@@ -22,6 +22,7 @@ LuckyTemplate.Archivable = true
 
 local PopUpModule = require(ReplicatedStorage.Modules:WaitForChild("PopUpModule"))
 local CurrencyUtil = require(ReplicatedStorage.Modules:WaitForChild("CurrencyUtil"))
+local RewardIconResolver = require(ReplicatedStorage.Modules:WaitForChild("RewardIconResolver"))
 
 local function getOrMakeRemote(name)
 	local r = ReplicatedStorage:FindFirstChild(name)
@@ -66,6 +67,15 @@ end)
 local POPUP_COLOR = Color3.new(1, 0.972549, 0.192157)
 local POPUP_STROKE = Color3.new(0.101961, 0.101961, 0.101961)
 local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
+
+local function formatDuration(seconds)
+	local totalSeconds = math.max(0, math.floor(tonumber(seconds) or 0))
+	local minutes = math.floor(totalSeconds / 60)
+	if minutes > 0 then
+		return tostring(minutes) .. " Min"
+	end
+	return tostring(totalSeconds) .. " Sec"
+end
 
 local function crewReward(legacyName, chance)
 	local displayName = CrewRewardService.GetDisplayName(legacyName)
@@ -387,7 +397,29 @@ local function sendRewardPopup(plr: Player, rewardName: string, rewardDef: table
 		msg = msg:gsub("{amount}", tostring(amount))
 	end
 
-	if msg and msg ~= "" then
+	if grantSucceeded ~= false and tostring(rewardName or "") ~= "Nothing" then
+		local displayName = tostring(rewardDef.DisplayName or rewardName or "Reward")
+		local rewardText
+		if rewardName == "Beli" then
+			rewardText = "+" .. CurrencyUtil.formatAmount(amount)
+		elseif rewardName == "MoneyBoost" then
+			rewardText = formatDuration(amount) .. " Money Boost"
+		elseif rewardName == "SpeedBoost" then
+			rewardText = formatDuration(amount) .. " Speed Boost"
+		elseif rewardDef.CrewRewardName ~= nil then
+			rewardText = "1x " .. displayName
+		else
+			rewardText = msg or displayName
+		end
+
+		PopUpModule:Server_ShowReward(plr, {
+			{ rewardText, RewardIconResolver.GetIcon({
+				Name = rewardName,
+				DisplayName = displayName,
+				Type = if rewardDef.CrewRewardName ~= nil then "Crew" else nil,
+			}) },
+		})
+	elseif msg and msg ~= "" then
 		PopUpModule:Server_SendPopUp(plr, msg, rewardDef.Color or POPUP_COLOR, rewardDef.Stroke or POPUP_STROKE, rewardDef.PopupDuration or 3, false)
 	end
 end

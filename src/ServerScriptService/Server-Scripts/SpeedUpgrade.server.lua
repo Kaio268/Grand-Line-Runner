@@ -85,7 +85,7 @@ local function applyTutorialSpeedRecovery(player, upgradeIndex, moneyPath, money
 		return true, 0
 	end
 
-	local added = DataManager:TryAddValue(player, moneyPath, shortfall)
+	local added = DataManager:TryAddValue(player, moneyPath, shortfall, { ApplyTitleBuff = false })
 	if added ~= true then
 		DataManager:TrySetValue(player, TUTORIAL_SPEED_TOP_UP_GRANTED_PATH, false)
 		return false, 0

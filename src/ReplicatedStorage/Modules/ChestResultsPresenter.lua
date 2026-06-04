@@ -814,39 +814,71 @@ local function getPityActivationText(pityStatus)
 	return table.concat(parts, "  ")
 end
 
-local function renderPityBanner(gui, pityStatus)
+local function getChestInfoTitle(chestInfo)
+	if typeof(chestInfo) ~= "table" then
+		return ""
+	end
+
+	local explicitTitle = tostring(chestInfo.titleText or chestInfo.TitleText or chestInfo.title or chestInfo.Title or "")
+	if explicitTitle ~= "" then
+		return explicitTitle
+	end
+
+	return getPityActivationText(chestInfo)
+end
+
+local function getChestInfoBody(chestInfo)
+	if typeof(chestInfo) ~= "table" then
+		return ""
+	end
+
+	local explicitBody = tostring(chestInfo.bodyText or chestInfo.BodyText or chestInfo.body or chestInfo.Body or "")
+	if explicitBody ~= "" then
+		return explicitBody
+	end
+
+	return tostring(chestInfo.progressText or chestInfo.ProgressText or "")
+end
+
+local function renderPityBanner(gui, chestInfo)
 	local banner = getPityBanner(gui)
 	if not banner then
 		return
 	end
 
-	if typeof(pityStatus) ~= "table" or tostring(pityStatus.progressText or "") == "" then
+	if typeof(chestInfo) ~= "table" then
 		banner.Visible = false
 		return
 	end
 
-	local accentColor = if typeof(pityStatus.accentColor) == "Color3"
-		then pityStatus.accentColor
+	local titleText = getChestInfoTitle(chestInfo)
+	local bodyText = getChestInfoBody(chestInfo)
+	if titleText == "" and bodyText == "" then
+		banner.Visible = false
+		return
+	end
+
+	local accentColor = if typeof(chestInfo.accentColor) == "Color3"
+		then chestInfo.accentColor
 		else Color3.fromRGB(255, 216, 107)
-	local activationText = getPityActivationText(pityStatus)
 	local activationLabel = findTextLabel(banner, "PityActivation")
 	local progressLabel = findTextLabel(banner, "PityProgress")
 
 	ensureStroke(banner, accentColor, 2, 0.18, Enum.ApplyStrokeMode.Border)
 
 	if activationLabel then
-		activationLabel.Text = activationText
+		activationLabel.Text = titleText
 		activationLabel.TextColor3 = accentColor
-		activationLabel.Visible = activationText ~= ""
+		activationLabel.Visible = titleText ~= ""
 	end
 
 	if progressLabel then
-		progressLabel.Text = tostring(pityStatus.progressText)
-		progressLabel.TextColor3 = if activationText ~= "" then PITY_BANNER_MUTED else PITY_BANNER_TEXT
-		progressLabel.Position = if activationText ~= ""
+		progressLabel.Text = bodyText
+		progressLabel.TextColor3 = if titleText ~= "" then PITY_BANNER_MUTED else PITY_BANNER_TEXT
+		progressLabel.Position = if titleText ~= ""
 			then UDim2.new(0, 14, 0.48, 0)
 			else UDim2.new(0, 14, 0.22, 0)
-		progressLabel.Size = if activationText ~= ""
+		progressLabel.Size = if titleText ~= ""
 			then UDim2.new(1, -28, 0.42, 0)
 			else UDim2.new(1, -28, 0.56, 0)
 	end
@@ -1654,7 +1686,7 @@ local function renderGui(gui, openResult)
 	end
 
 	renderChestPreview(gui, model)
-	renderPityBanner(gui, model.pityStatus)
+	renderPityBanner(gui, model.chestInfoBanner or model.pityStatus)
 
 	local rewardsFrame = getRewardsFrame(gui)
 	if not rewardsFrame then

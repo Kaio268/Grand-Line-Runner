@@ -12,6 +12,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Configs = Modules:WaitForChild("Configs")
 local IndexDiscovery = require(Modules:WaitForChild("Crew"):WaitForChild("IndexDiscovery"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
+local RewardIconResolver = require(Modules:WaitForChild("RewardIconResolver"))
 local Shorten = require(Modules:WaitForChild("Shorten"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 
@@ -346,7 +347,11 @@ local function buildRewardPopupTable(config)
 	for path, reward in pairs((config and config.Rewards) or {}) do
 		rewardPopupTable[#rewardPopupTable + 1] = {
 			string.format("%s %s", formatRewardLabel(path), formatRewardAmount(path, reward and reward.Amount)),
-			reward and reward.Icon or "",
+			RewardIconResolver.GetIcon({
+				Path = path,
+				Name = formatRewardLabel(path),
+				Icon = reward and reward.Icon or "",
+			}),
 		}
 	end
 

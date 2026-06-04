@@ -10,6 +10,7 @@ local RNG = Random.new()
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
 local DevilFruitAssets = require(
 	ReplicatedStorage
 		:WaitForChild("Modules")
@@ -65,6 +66,35 @@ local function getTransientUiScale()
 	end
 
 	return Responsive.getUiScale()
+end
+
+local function resolveRewardPopupEntry(rewardData)
+	local rewardText = ""
+	local explicitIcon = ""
+
+	if typeof(rewardData) == "table" then
+		rewardText = tostring(
+			rewardData[1]
+				or rewardData.Text
+				or rewardData.text
+				or rewardData.DisplayName
+				or rewardData.displayName
+				or rewardData.Name
+				or rewardData.name
+				or ""
+		)
+		explicitIcon = tostring(rewardData[2] or rewardData.Icon or rewardData.icon or rewardData.Image or rewardData.image or "")
+	elseif rewardData ~= nil then
+		rewardText = tostring(rewardData)
+	end
+
+	local resolved = RewardIconResolver.Resolve(rewardData, explicitIcon)
+	if rewardText == "" then
+		rewardText = tostring(resolved.displayName or "")
+	end
+
+	local iconImage = if explicitIcon ~= "" then explicitIcon else tostring(resolved.icon or "")
+	return rewardText, iconImage
 end
 
 local PopUpEvent = ReplicatedStorage:FindFirstChild("PopUpEvent")
@@ -481,12 +511,12 @@ function PopUpModule:Local_ShowReward(rewardTable)
 	for index, rewardData in ipairs(orderedRewards) do
 		local newReward = acquireRewardFrame(rewardsContainer, template, index)
 		newRewardLookup[newReward] = true
+		local rewardText, iconImage = resolveRewardPopupEntry(rewardData)
 
 		if newReward:FindFirstChild("RewardName") then
-			newReward.RewardName.Text = if typeof(rewardData) == "table" then tostring(rewardData[1] or "") else ""
+			newReward.RewardName.Text = rewardText
 		end
 		if newReward:FindFirstChild("Icon") then
-			local iconImage = if typeof(rewardData) == "table" then tostring(rewardData[2] or "") else ""
 			newReward.Icon.Image = ""
 			newReward.Icon.ImageTransparency = 1
 			rewardIconAssignments[#rewardIconAssignments + 1] = {
@@ -658,7 +688,14 @@ local function trySpawnNext()
 end
 
 function PopUpModule:Local_ShowNotify(Name, Amount, Icon, Duration)
-	table.insert(notifyQueue, { Name = Name, Amount = Amount, Icon = Icon, Duration = Duration })
+	local resolvedIcon = tostring(Icon or "")
+	if resolvedIcon == "" then
+		resolvedIcon = RewardIconResolver.GetIcon({
+			Name = Name,
+			Amount = Amount,
+		})
+	end
+	table.insert(notifyQueue, { Name = Name, Amount = Amount, Icon = resolvedIcon, Duration = Duration })
 	trySpawnNext()
 end
 
@@ -1267,12 +1304,38 @@ local function getAcknowledgePityActivationText(pityStatus)
 	return table.concat(parts, "  ")
 end
 
-local function renderAcknowledgePityStatus(pityStatus)
+local function getAcknowledgeBannerTitle(chestInfo)
+	if typeof(chestInfo) ~= "table" then
+		return ""
+	end
+
+	local explicitTitle = tostring(chestInfo.titleText or chestInfo.TitleText or chestInfo.title or chestInfo.Title or "")
+	if explicitTitle ~= "" then
+		return explicitTitle
+	end
+
+	return getAcknowledgePityActivationText(chestInfo)
+end
+
+local function getAcknowledgeBannerBody(chestInfo)
+	if typeof(chestInfo) ~= "table" then
+		return ""
+	end
+
+	local explicitBody = tostring(chestInfo.bodyText or chestInfo.BodyText or chestInfo.body or chestInfo.Body or "")
+	if explicitBody ~= "" then
+		return explicitBody
+	end
+
+	return tostring(chestInfo.progressText or chestInfo.ProgressText or "")
+end
+
+local function renderAcknowledgePityStatus(chestInfo)
 	if not acknowledgePityBanner then
 		return
 	end
 
-	if typeof(pityStatus) ~= "table" or tostring(pityStatus.progressText or "") == "" then
+	if typeof(chestInfo) ~= "table" then
 		acknowledgePityBanner.Visible = false
 		if acknowledgePityActivation then
 			acknowledgePityActivation.Text = ""
@@ -1284,28 +1347,41 @@ local function renderAcknowledgePityStatus(pityStatus)
 		return
 	end
 
-	local accentColor = if typeof(pityStatus.accentColor) == "Color3"
-		then pityStatus.accentColor
+	local titleText = getAcknowledgeBannerTitle(chestInfo)
+	local bodyText = getAcknowledgeBannerBody(chestInfo)
+	if titleText == "" and bodyText == "" then
+		acknowledgePityBanner.Visible = false
+		if acknowledgePityActivation then
+			acknowledgePityActivation.Text = ""
+			acknowledgePityActivation.Visible = false
+		end
+		if acknowledgePityProgress then
+			acknowledgePityProgress.Text = ""
+		end
+		return
+	end
+
+	local accentColor = if typeof(chestInfo.accentColor) == "Color3"
+		then chestInfo.accentColor
 		else DEVIL_FRUIT_ACK_THEME.GoldHighlight
-	local activationText = getAcknowledgePityActivationText(pityStatus)
 	local bannerStroke = ensureAckStroke(acknowledgePityBanner, accentColor, 0.18, 2)
 	bannerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
 	if acknowledgePityActivation then
-		acknowledgePityActivation.Text = activationText
+		acknowledgePityActivation.Text = titleText
 		acknowledgePityActivation.TextColor3 = accentColor
-		acknowledgePityActivation.Visible = activationText ~= ""
+		acknowledgePityActivation.Visible = titleText ~= ""
 	end
 
 	if acknowledgePityProgress then
-		acknowledgePityProgress.Text = tostring(pityStatus.progressText)
-		acknowledgePityProgress.TextColor3 = if activationText ~= ""
+		acknowledgePityProgress.Text = bodyText
+		acknowledgePityProgress.TextColor3 = if titleText ~= ""
 			then DEVIL_FRUIT_ACK_THEME.TextSecondary
 			else DEVIL_FRUIT_ACK_THEME.TextMain
-		acknowledgePityProgress.Position = if activationText ~= ""
+		acknowledgePityProgress.Position = if titleText ~= ""
 			then UDim2.new(0, 14, 0.48, 0)
 			else UDim2.new(0, 14, 0.22, 0)
-		acknowledgePityProgress.Size = if activationText ~= ""
+		acknowledgePityProgress.Size = if titleText ~= ""
 			then UDim2.new(1, -28, 0.42, 0)
 			else UDim2.new(1, -28, 0.56, 0)
 	end
@@ -1415,7 +1491,7 @@ function PopUpModule:Local_ShowAcknowledgement(options)
 		acknowledgePanelScale.Scale = getAcknowledgementScale()
 	end
 
-	renderAcknowledgePityStatus(options.PityStatus or options.pityStatus)
+	renderAcknowledgePityStatus(options.ChestInfoBanner or options.chestInfoBanner or options.PityStatus or options.pityStatus)
 
 	local title = tostring(options.Title or options.title or "Notice")
 	local accentText = tostring(options.AccentText or options.accentText or "UPDATE")

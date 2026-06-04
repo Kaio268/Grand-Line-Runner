@@ -27,8 +27,9 @@ local ProfileTemplate = {
 	},
 
 	Tutorials = {
-		SchemaVersion = 1,
+		SchemaVersion = 2,
 		Completed = {},
+		Queue = {},
 	},
 
 	TotalStats = {
@@ -226,6 +227,9 @@ local ProfileTemplate = {
 	Active = {
 		x2Money = 1,
 		x15WalkSpeed = 1,
+	},
+	Multipliers = {
+		MoneyMult = 0,
 	},
 	Potions = {
 		x2Money = 0,

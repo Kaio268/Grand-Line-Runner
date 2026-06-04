@@ -11,6 +11,7 @@ local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
 local QuestSignals = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushQuestSignals"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
 
 local QuestService = {}
@@ -31,6 +32,7 @@ local stateRemote
 local claimLocks = {}
 local progressLocks = {}
 local cachedChestToolService
+local contextualTutorialTriggerService
 local REQUEST_ACTION_ALLOWLIST = {
 	GetState = true,
 	ClaimQuest = true,
@@ -43,6 +45,48 @@ local MATERIAL_ALIASES = {
 
 local BACKFILL_APPLIED_KEY = "ProfileBackfillApplied"
 local CANONICAL_STARTER_CREW_SOURCE = "GrandLineRushStarter"
+
+local function getContextualTutorialTriggerService()
+	if contextualTutorialTriggerService ~= nil then
+		return contextualTutorialTriggerService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		contextualTutorialTriggerService = service
+	end
+	return contextualTutorialTriggerService
+end
+
+local function triggerTutorialsAfterQuestClaim(player, rewards, changedRoots)
+	local service = getContextualTutorialTriggerService()
+	if typeof(service) ~= "table" then
+		return
+	end
+
+	for _, reward in ipairs(rewards or {}) do
+		local rewardType = tostring(reward.Type or "")
+		if rewardType == "Food" and typeof(service.OnFoodGranted) == "function" then
+			service.OnFoodGranted(player, "quest_reward", {
+				[tostring(reward.Key or "")] = math.max(1, math.floor(tonumber(reward.Amount) or 1)),
+			})
+		elseif rewardType == "Chest" and typeof(service.OnQuestDevilFruitChestGranted) == "function" then
+			service.OnQuestDevilFruitChestGranted(player, "quest_reward")
+		end
+	end
+
+	if
+		(changedRoots.Leaderstats == true or changedRoots.Materials == true)
+		and typeof(service.CheckShipUpgradeAffordable) == "function"
+	then
+		service.CheckShipUpgradeAffordable(player, "quest_reward")
+	end
+end
 
 local function getOrCreateRemotesFolder()
 	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
@@ -724,7 +768,7 @@ end
 local function addRewardPopup(rewardPopup, reward)
 	local text = QuestConfig.FormatReward(reward)
 	if text ~= "" then
-		rewardPopup[#rewardPopup + 1] = { text, "" }
+		rewardPopup[#rewardPopup + 1] = { text, RewardIconResolver.GetIcon(reward) }
 	end
 end
 
@@ -941,6 +985,7 @@ local function claimQuestInternal(player, payload)
 	end
 
 	syncClaimMutation(player, replica, dataRoot, changedRoots)
+	triggerTutorialsAfterQuestClaim(player, rewards, changedRoots)
 	sendPopup(player, "Quest reward claimed!", false)
 	if #rewardPopup > 0 then
 		PopUpModule:Server_ShowReward(player, rewardPopup)

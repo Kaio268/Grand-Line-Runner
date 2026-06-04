@@ -228,6 +228,14 @@ local GiftsViewBridge = requireLogged(
 	waitForChildLogged(Modules, "GiftsViewBridge", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.GiftsViewBridge"),
 	"ReplicatedStorage.Modules.GiftsViewBridge"
 )
+local PopUpModule = requireLogged(
+	waitForChildLogged(Modules, "PopUpModule", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.PopUpModule"),
+	"ReplicatedStorage.Modules.PopUpModule"
+)
+local RewardIconResolver = requireLogged(
+	waitForChildLogged(Modules, "RewardIconResolver", REQUIRED_WAIT_SECONDS, "ReplicatedStorage.Modules.RewardIconResolver"),
+	"ReplicatedStorage.Modules.RewardIconResolver"
+)
 giftStartupLog(
 	"start",
 	"version",
@@ -3561,6 +3569,45 @@ requestServerSync = function(reason: string)
 	end)
 end
 
+local function formatClaimedRewardPopupText(rewardId, rewardName, amount)
+	local cfg = RewardsConfig[tonumber(rewardId)]
+	local name = tostring(rewardName or "")
+	local normalizedName = name:gsub("%s+", ""):lower()
+	local count = math.max(1, math.floor(tonumber(amount) or 1))
+
+	if normalizedName == "beli" or normalizedName == "money" or normalizedName == "doubloons" then
+		return tostring(count) .. " Beli"
+	elseif normalizedName == "x2moneytime" or normalizedName == "x15walkspeedtime" or normalizedName == "xlucktime" then
+		return tostring(cfg and cfg.RewName or name)
+	elseif name ~= "" then
+		return string.format("%dx %s", count, name)
+	end
+
+	return tostring(cfg and cfg.RewName or "Reward")
+end
+
+local function showClaimedRewardPopup(rewardId, rewardName, amount)
+	if not (PopUpModule and RewardIconResolver) then
+		return
+	end
+
+	local cfg = RewardsConfig[tonumber(rewardId)]
+	local name = tostring(rewardName or "")
+	local resolved = RewardIconResolver.Resolve({
+		Name = name,
+		DisplayName = name,
+		Amount = amount,
+	})
+	local icon = tostring(resolved.icon or "")
+	if tostring(resolved.category or "") == "Reward" and cfg and tostring(cfg.Icon or "") ~= "" then
+		icon = tostring(cfg.Icon)
+	end
+
+	PopUpModule:Local_ShowReward({
+		{ formatClaimedRewardPopupText(rewardId, rewardName, amount), icon },
+	})
+end
+
 giftStartupLog("remoteClientConnectionMade", "signal", "OnClientEvent", "remote", safeName(Remote))
 syncEventConnected = true
 Remote.OnClientEvent:Connect(function(action, a, b, c)
@@ -3682,6 +3729,7 @@ Remote.OnClientEvent:Connect(function(action, a, b, c)
 				tostring(c)
 			)
 		)
+		showClaimedRewardPopup(id, b, c)
 		updateHud()
 	elseif action == "notReady" then
 		local id = tonumber(a)

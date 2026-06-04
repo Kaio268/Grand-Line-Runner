@@ -35,7 +35,6 @@ local REACT_MODAL_FRAME_NAMES = {
 	Gifts = true,
 	GearStore = true,
 	Index = true,
-	LimitedReward = true,
 	Quest = true,
 	Rebirth = true,
 	Settings = true,

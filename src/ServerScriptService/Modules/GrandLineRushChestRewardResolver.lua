@@ -10,6 +10,24 @@ local DevilFruitInventoryService = require(ServerScriptService:WaitForChild("Mod
 
 local ChestRewardResolver = {}
 local PLAYER_LUCK_MULTIPLIER = 1.25
+local FRUIT_REWARD_SOURCE_STANDARD_CHEST = "standard_chest"
+local cachedTitleService = nil
+
+local function getTitleBuffMultiplier(player, buffType)
+	if cachedTitleService == nil then
+		local ok, result = pcall(function()
+			return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
+		end)
+		cachedTitleService = if ok and typeof(result) == "table" then result else false
+	end
+
+	if cachedTitleService == false then
+		return 1
+	end
+
+	local ok, multiplier = pcall(cachedTitleService.GetEquippedTitleBuffMultiplier, player, buffType)
+	return if ok then math.max(0, tonumber(multiplier) or 1) else 1
+end
 
 local function chooseWeightedKey(randomObject, weightTable, orderedKeys)
 	local totalWeight = 0
@@ -246,10 +264,30 @@ local function buildOpenResult(dataRoot, openedChest)
 		},
 		FruitPityProgress = nil,
 		FruitPityTriggered = nil,
+		FruitRewardContext = nil,
 		AutoConvertedMythicChest = false,
 		GrantedChest = nil,
 		Message = nil,
 	}
+end
+
+local function buildStandardFruitRewardContext(fruit, rarityName)
+	local fruitKey = tostring(fruit and fruit.FruitKey or "")
+	return {
+		HasDevilFruitReward = true,
+		Source = FRUIT_REWARD_SOURCE_STANDARD_CHEST,
+		FruitKey = fruitKey,
+		DisplayName = tostring((fruit and fruit.DisplayName) or fruitKey or "Devil Fruit"),
+		Rarity = tostring(rarityName or (fruit and fruit.Rarity) or ""),
+		WasDuplicate = false,
+	}
+end
+
+local function markFruitRewardDuplicate(openResult)
+	local context = openResult and openResult.FruitRewardContext
+	if typeof(context) == "table" then
+		context.WasDuplicate = true
+	end
 end
 
 local function grantFruit(dataRoot, fruitKey)
@@ -264,8 +302,13 @@ local function grantFruit(dataRoot, fruitKey)
 	ensureIndexCollection(dataRoot)[fruitKey] = true
 end
 
-local function addBeli(dataRoot, amount)
+local function addBeli(dataRoot, player, amount)
 	local increment = math.max(0, tonumber(amount) or 0)
+	if increment <= 0 then
+		return 0
+	end
+
+	increment = math.floor(increment * getTitleBuffMultiplier(player, "beli") + 0.5)
 	if increment <= 0 then
 		return 0
 	end
@@ -299,42 +342,50 @@ local function addGrantedAmount(target, key, amount)
 	return increment
 end
 
-local function grantFoodRewards(randomObject, foodInventory, grantedFood, foodRewards)
+local function grantFoodRewards(randomObject, player, foodInventory, grantedFood, foodRewards)
+	local multiplier = getTitleBuffMultiplier(player, "resources")
 	for foodKey, amountSpec in pairs(foodRewards or {}) do
 		local increment = rollRewardAmount(randomObject, amountSpec)
 		if increment > 0 then
-			foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + increment
-			addGrantedAmount(grantedFood, foodKey, increment)
+			increment = math.floor(increment * multiplier + 0.5)
+			if increment > 0 then
+				foodInventory[foodKey] = math.max(0, tonumber(foodInventory[foodKey]) or 0) + increment
+				addGrantedAmount(grantedFood, foodKey, increment)
+			end
 		end
 	end
 end
 
-local function grantMaterialRewards(randomObject, materials, grantedMaterials, materialRewards)
+local function grantMaterialRewards(randomObject, player, materials, grantedMaterials, materialRewards)
+	local multiplier = getTitleBuffMultiplier(player, "resources")
 	for materialKey, amountSpec in pairs(materialRewards or {}) do
 		local normalizedMaterialKey = normalizeMaterialKey(materialKey)
 		local increment = rollRewardAmount(randomObject, amountSpec)
 		if increment > 0 then
-			materials[normalizedMaterialKey] = math.max(0, tonumber(materials[normalizedMaterialKey]) or 0) + increment
-			addGrantedAmount(grantedMaterials, normalizedMaterialKey, increment)
+			increment = math.floor(increment * multiplier + 0.5)
+			if increment > 0 then
+				materials[normalizedMaterialKey] = math.max(0, tonumber(materials[normalizedMaterialKey]) or 0) + increment
+				addGrantedAmount(grantedMaterials, normalizedMaterialKey, increment)
+			end
 		end
 	end
 end
 
-local function grantRewardBundle(randomObject, dataRoot, grantedResources, rewardBundle)
+local function grantRewardBundle(randomObject, player, dataRoot, grantedResources, rewardBundle)
 	rewardBundle = if typeof(rewardBundle) == "table" then rewardBundle else {}
 
 	local foodInventory = ensureFoodInventory(dataRoot)
 	local materials = ensureMaterials(dataRoot)
 
-	grantFoodRewards(randomObject, foodInventory, grantedResources.food, rewardBundle.Food)
-	grantMaterialRewards(randomObject, materials, grantedResources.materials, rewardBundle.Materials)
+	grantFoodRewards(randomObject, player, foodInventory, grantedResources.food, rewardBundle.Food)
+	grantMaterialRewards(randomObject, player, materials, grantedResources.materials, rewardBundle.Materials)
 
 	materials.Timber = math.max(0, tonumber(materials.Timber) or tonumber(materials.CommonShipMaterial) or 0)
 	materials.Iron = math.max(0, tonumber(materials.Iron) or tonumber(materials.RareShipMaterial) or 0)
 	materials.CommonShipMaterial = materials.Timber
 	materials.RareShipMaterial = materials.Iron
 
-	local beliReward = addBeli(dataRoot, rollRewardAmount(randomObject, getBeliRewardSpec(rewardBundle)))
+	local beliReward = addBeli(dataRoot, player, rollRewardAmount(randomObject, getBeliRewardSpec(rewardBundle)))
 	grantedResources.beli += beliReward
 	grantedResources.doubloons = grantedResources.beli
 end
@@ -348,7 +399,7 @@ local function normalizeChance(rawChance)
 	return math.clamp(chance, 0, 1)
 end
 
-local function grantBonusRewards(randomObject, dataRoot, grantedResources, bonusRollConfig)
+local function grantBonusRewards(randomObject, player, dataRoot, grantedResources, bonusRollConfig)
 	if typeof(bonusRollConfig) ~= "table" then
 		return
 	end
@@ -363,12 +414,12 @@ local function grantBonusRewards(randomObject, dataRoot, grantedResources, bonus
 	for _ = 1, rolls do
 		if randomObject:NextNumber() <= chance then
 			local selectedReward = pool[randomObject:NextInteger(1, #pool)]
-			grantRewardBundle(randomObject, dataRoot, grantedResources, selectedReward)
+			grantRewardBundle(randomObject, player, dataRoot, grantedResources, selectedReward)
 		end
 	end
 end
 
-local function grantBaseRewards(randomObject, dataRoot, chestData, changedRoots)
+local function grantBaseRewards(randomObject, player, dataRoot, chestData, changedRoots)
 	local rewards = getTierRewards(chestData.Tier)
 	local grantedResources = {
 		food = {},
@@ -377,8 +428,8 @@ local function grantBaseRewards(randomObject, dataRoot, chestData, changedRoots)
 		doubloons = 0,
 	}
 
-	grantRewardBundle(randomObject, dataRoot, grantedResources, rewards)
-	grantBonusRewards(randomObject, dataRoot, grantedResources, rewards.BonusRoll)
+	grantRewardBundle(randomObject, player, dataRoot, grantedResources, rewards)
+	grantBonusRewards(randomObject, player, dataRoot, grantedResources, rewards.BonusRoll)
 
 	changedRoots.FoodInventory = true
 	changedRoots.Materials = true
@@ -579,7 +630,7 @@ local function applyStandardFruitPityResult(dataRoot, chestData, droppedRarity, 
 	end
 end
 
-local function applyFallbackBeli(dataRoot, chestData, openResult, changedRoots)
+local function applyFallbackBeli(dataRoot, player, chestData, openResult, changedRoots)
 	local fallbackReward = 0
 	if ChestRewards.FallbackReward.ScaleByTier == true then
 		fallbackReward = getScaledBeliReward(chestData.Tier)
@@ -587,7 +638,7 @@ local function applyFallbackBeli(dataRoot, chestData, openResult, changedRoots)
 		fallbackReward = math.max(0, tonumber(ChestRewards.FallbackReward.Amount) or 0)
 	end
 
-	local grantedAmount = addBeli(dataRoot, fallbackReward)
+	local grantedAmount = addBeli(dataRoot, player, fallbackReward)
 	if grantedAmount > 0 then
 		changedRoots.Leaderstats = true
 		changedRoots.TotalStats = true
@@ -609,7 +660,7 @@ local function handleDuplicateConversion(params, chestData, fruit, openResult, c
 			then getScaledBeliReward(chestData.Tier)
 			else math.max(0, tonumber(conversion.Amount) or 0)
 
-		local grantedAmount = addBeli(params.DataRoot, amount)
+		local grantedAmount = addBeli(params.DataRoot, params.Player, amount)
 		if grantedAmount > 0 then
 			changedRoots.Leaderstats = true
 			changedRoots.TotalStats = true
@@ -730,7 +781,7 @@ function ChestRewardResolver.Resolve(params)
 	})
 
 	if shouldGrantBaseRewards(chestData) then
-		openResult.GrantedResources = grantBaseRewards(randomObject, params.DataRoot, chestData, changedRoots)
+		openResult.GrantedResources = grantBaseRewards(randomObject, params.Player, params.DataRoot, chestData, changedRoots)
 	end
 
 	local requestedRarity = nil
@@ -763,7 +814,7 @@ function ChestRewardResolver.Resolve(params)
 		return {
 			OpenResult = openResult,
 			ChangedRoots = changedRoots,
-			RewardText = applyFallbackBeli(params.DataRoot, chestData, openResult, changedRoots),
+			RewardText = applyFallbackBeli(params.DataRoot, params.Player, chestData, openResult, changedRoots),
 		}
 	end
 
@@ -777,10 +828,16 @@ function ChestRewardResolver.Resolve(params)
 
 	local fruit = selectionPool[randomObject:NextInteger(1, #selectionPool)]
 	openResult.GrantedFruitRarity = effectiveRarity
+	if isStandardChest then
+		openResult.FruitRewardContext = buildStandardFruitRewardContext(fruit, effectiveRarity)
+	end
 
 	if DevilFruitInventoryService.HasStoredDevilFruit(params.Player, fruit.FruitKey) then
 		applyStandardFruitPityResult(params.DataRoot, chestData, effectiveRarity, changedRoots, openResult, triggeredPityRarity)
 		openResult.WasDuplicate = true
+		if isStandardChest then
+			markFruitRewardDuplicate(openResult)
+		end
 		openResult.GrantedFruit = nil
 		openResult.GrantedFruitRarity = nil
 		return {

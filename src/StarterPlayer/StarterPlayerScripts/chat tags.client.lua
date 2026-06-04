@@ -3,10 +3,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 local RunService = game:GetService("RunService")
 
+local SocialGroups = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SocialGroups"))
 local Titles = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Titles"))
 
 local Config = {
-	GROUP_ID = 17179624,
+	GROUP_ID = SocialGroups.ChatTagGroupId,
 	ANIMATION_FPS = 30,
 
 	GroupStyle = {
@@ -84,7 +85,9 @@ local function buildStyledTag(text: string, style: TagStyle?, timeNow: number): 
 
 	if style.color and not style.gradient then
 		local tag = string.format('<font color="%s">%s</font>', hex(style.color), inner)
-		if makeBold then tag = "<b>" .. tag .. "</b>" end
+		if makeBold then
+			tag = "<b>" .. tag .. "</b>"
+		end
 		return tag .. (spaceAfter and " " or "")
 	end
 
@@ -107,12 +110,16 @@ local function buildStyledTag(text: string, style: TagStyle?, timeNow: number): 
 		end
 
 		local tag = table.concat(buff)
-		if makeBold then tag = "<b>" .. tag .. "</b>" end
+		if makeBold then
+			tag = "<b>" .. tag .. "</b>"
+		end
 		return tag .. (spaceAfter and " " or "")
 	end
 
 	local tag = inner
-	if makeBold then tag = "<b>" .. tag .. "</b>" end
+	if makeBold then
+		tag = "<b>" .. tag .. "</b>"
+	end
 	return tag .. (spaceAfter and " " or "")
 end
 
@@ -192,20 +199,26 @@ function TagManager:GetPrefix(player: Player, timeNow: number): (string, boolean
 	local g, anim = self:_groupTag(player, timeNow)
 	if g then
 		table.insert(parts, g)
-		if anim then hasAnimated = true end
+		if anim then
+			hasAnimated = true
+		end
 	end
 
 	local titleTag, titleAnimated = self:_equippedTitleTag(player, timeNow)
 	if titleTag then
 		table.insert(parts, titleTag)
-		if titleAnimated then hasAnimated = true end
+		if titleAnimated then
+			hasAnimated = true
+		end
 	end
 
 	for _, def in ipairs(self._defs) do
 		local ok, show = pcall(def.condition, player)
 		if ok and show then
 			local isAnimated = def.style and def.style.animated and def.style.gradient ~= nil
-			if isAnimated then hasAnimated = true end
+			if isAnimated then
+				hasAnimated = true
+			end
 			table.insert(parts, buildStyledTag(def.name, def.style, timeNow))
 		end
 	end

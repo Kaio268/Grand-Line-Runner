@@ -781,6 +781,36 @@ function ProfileMigrations.Apply(data)
 			completedTutorials[tutorialId] = nil
 		end
 	end
+	local tutorialQueue = ensureTable(tutorials, "Queue")
+	local sanitizedQueue = {}
+	for _, entry in ipairs(tutorialQueue) do
+		if typeof(entry) == "table" then
+			local tutorialId = tostring(entry.Id or entry.TutorialId or "")
+			local definition = TutorialConfigs.GetDefinition(tutorialId)
+			if tutorialId ~= "" and definition ~= nil and definition.Enabled == true then
+				local context = {}
+				if typeof(entry.Context) == "table" then
+					for key, value in pairs(entry.Context) do
+						local keyText = tostring(key or "")
+						if keyText ~= "" then
+							local valueType = typeof(value)
+							if valueType == "string" or valueType == "number" or valueType == "boolean" then
+								context[keyText] = value
+							end
+						end
+					end
+				end
+
+				table.insert(sanitizedQueue, {
+					Id = tutorialId,
+					EnqueuedAtUnix = math.max(0, math.floor(coerceNumber(entry.EnqueuedAtUnix, os.time()))),
+					EligibleAtUnix = math.max(0, math.floor(coerceNumber(entry.EligibleAtUnix, os.time()))),
+					Context = context,
+				})
+			end
+		end
+	end
+	tutorials.Queue = sanitizedQueue
 	if hiddenLeaderstats.Tutorial == true then
 		if completedTutorials.FirstRun == nil then
 			completedTutorials.FirstRun = true
@@ -1109,6 +1139,9 @@ function ProfileMigrations.Apply(data)
 
 	local gamepasses = ensureTable(data, "Gamepasses")
 	gamepasses.x2MoneyValue = coerceNumber(gamepasses.x2MoneyValue, 1)
+
+	local multipliers = ensureTable(data, "Multipliers")
+	multipliers.MoneyMult = math.max(0, coerceNumber(multipliers.MoneyMult, 0))
 
 	local dailyClaims = ensureTable(data, "DailyClaims")
 	local captainSupply = ensureTable(dailyClaims, "CaptainSupply")

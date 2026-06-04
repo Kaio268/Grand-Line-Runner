@@ -1,6 +1,7 @@
 local Tutorials = {
-	SchemaVersion = 1,
+	SchemaVersion = 2,
 	CompletionRoot = "Tutorials.Completed",
+	QueueRoot = "Tutorials.Queue",
 	LegacyFirstRunCompletionPath = "HiddenLeaderstats.Tutorial",
 
 	Remotes = {
@@ -12,13 +13,12 @@ local Tutorials = {
 		Inventory = {
 			Id = "Inventory",
 			Title = "Inventory",
-			Enabled = true,
+			Enabled = false,
 			Trigger = {
 				Type = "ClientModalOpened",
 				ModalName = "Inventory",
 			},
 			SkipCompletes = true,
-			BackfillForLegacyFirstRunComplete = true,
 			Steps = {
 				{
 					Id = "inventory_opened",
@@ -30,19 +30,170 @@ local Tutorials = {
 				},
 			},
 		},
+
+		Resources = {
+			Id = "Resources",
+			Title = "Resources",
+			Enabled = true,
+			SkipCompletes = true,
+			EligibleDelaySeconds = 10,
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "ResourcesGui",
+				CompleteButtons = { "FeedButton" },
+			},
+			Steps = {
+				{
+					Id = "resources_intro",
+					Title = "Resources",
+					Body = "Beli, food, materials, and chests are the backbone of your crew.",
+					Instruction = "Keep an eye on rewards after runs and quests so you know what to spend next.",
+					ActionText = "Got it",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
+
+		FeedCrewmates = {
+			Id = "FeedCrewmates",
+			Title = "Feed Your Crewmates",
+			Enabled = true,
+			SkipCompletes = true,
+			TargetResolver = "CrewFeedPanel",
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "FeedYourCrewmatesGui",
+				CompleteButtons = { "SkipButton" },
+				ShowObjectiveIndicator = true,
+				ShowObjectivePath = true,
+			},
+			Steps = {
+				{
+					Id = "feed_crewmates",
+					Title = "Feed Your Crewmates",
+					Body = "Food can be used to level crewmates and improve the strength of your ship.",
+					Instruction = "Open your crew controls at your ship when you are ready to feed someone.",
+					ActionText = "Got it",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
+
+		Raiding = {
+			Id = "Raiding",
+			Title = "Raiding",
+			Enabled = true,
+			SkipCompletes = true,
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "RaidingGui",
+				CompleteButtons = { "GotItButton" },
+			},
+			Steps = {
+				{
+					Id = "raiding_intro",
+					Title = "Raiding",
+					Body = "Enemy ships can be raided, but carried rewards are only safe once you bring them home.",
+					Instruction = "Return to your base after risky plays so rewards can be secured.",
+					ActionText = "Got it",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
+
+		QuestReward = {
+			Id = "QuestReward",
+			Title = "Quest Rewards",
+			Enabled = true,
+			SkipCompletes = true,
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "QuestRewardGui",
+				CompleteButtons = { "FeedButton", "SkipButton" },
+			},
+			Steps = {
+				{
+					Id = "quest_reward",
+					Title = "Quest Rewards",
+					Body = "Some quests award Devil Fruit chests and other high-value items.",
+					Instruction = "Claim completed quests, then open reward chests from your inventory.",
+					ActionText = "Got it",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
+
+		ShipUpgrade = {
+			Id = "ShipUpgrade",
+			Title = "Ship Upgrade",
+			Enabled = true,
+			SkipCompletes = true,
+			TargetResolver = "ShipUpgradePanel",
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "UpgradeYourShipGui",
+				CompleteButtons = { "SkipButton" },
+				ShowObjectiveIndicator = true,
+				ShowObjectivePath = true,
+			},
+			Steps = {
+				{
+					Id = "ship_upgrade",
+					Title = "Upgrade Your Ship",
+					Body = "You have enough resources for your first ship upgrade.",
+					Instruction = "Visit your ship upgrade controls to unlock more room for your crew.",
+					ActionText = "Got it",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
+
+		CrewProtection = {
+			Id = "CrewProtection",
+			Title = "Crew Protection",
+			Enabled = true,
+			SkipCompletes = true,
+			TargetResolver = "ActiveShip",
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "CrewProtectionMonetisationGui",
+				CompleteButtons = { "SkipButton" },
+				ActionButtons = {
+					GotItButton = {
+						Type = "OpenReactModal",
+						ModalName = "Store",
+						Payload = {
+							SectionKey = "crew-protection",
+						},
+						CompleteTutorial = true,
+					},
+				},
+			},
+			Steps = {
+				{
+					Id = "crew_protection",
+					Title = "Protect Rare Crew",
+					Body = "Rare and stronger crewmates are valuable enough to protect from steals.",
+					Instruction = "Use protection options when you want extra safety for important crew.",
+					ActionText = "Got it",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
 	},
 }
 
 local definitionOrder = {
-	"Inventory",
+	"Resources",
+	"FeedCrewmates",
+	"Raiding",
+	"QuestReward",
+	"ShipUpgrade",
+	"CrewProtection",
 }
 
 local function copyArray(source)
-	local copy = {}
-	for index, value in ipairs(source or {}) do
-		copy[index] = value
-	end
-	return copy
+	return table.clone(source or {})
 end
 
 function Tutorials.GetDefinition(tutorialId)
@@ -69,6 +220,10 @@ function Tutorials.GetCompletionPath(tutorialId)
 	end
 
 	return string.format("%s.%s", Tutorials.CompletionRoot, id)
+end
+
+function Tutorials.GetQueuePath()
+	return Tutorials.QueueRoot
 end
 
 function Tutorials.GetDefinitionOrder()

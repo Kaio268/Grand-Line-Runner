@@ -123,6 +123,9 @@
       },
       "AFKBoot": {
         "$path": "src/AFK/ServerScriptService/AFKBoot.server.lua"
+      },
+      "AFKMovementLock": {
+        "$path": "src/AFK/ServerScriptService/AFKMovementLock.server.lua"
       }
     },
     "StarterPlayer": {

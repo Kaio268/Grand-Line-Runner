@@ -1,8 +1,11 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Configs = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Configs = Modules:WaitForChild("Configs")
+local BuffDisplayFormatter = require(Modules:WaitForChild("BuffDisplayFormatter"))
 local GamepassesConfig = require(Configs:WaitForChild("Gamepasses"))
 local MonetizationConfig = require(Configs:WaitForChild("Monetization"))
+local MovementSpeedConfig = require(Configs:WaitForChild("MovementSpeed"))
 
 local Catalog = {}
 
@@ -16,6 +19,11 @@ local function formatRobux(price)
 		return tostring(numericPrice)
 	end
 	return "Soon"
+end
+
+local function formatSpeedBoostSubtitle()
+	local multiplier = tonumber(MovementSpeedConfig.PotionSpeedBoostMultiplier) or 1.5
+	return BuffDisplayFormatter.formatMultiplierLabel(multiplier, "Speed")
 end
 
 local function gamepassPurchase(gamepassKey)
@@ -123,25 +131,20 @@ local items = {
 		sectionKey = "featured",
 		title = "Captain Pass",
 		subtitle = "Permanent VIP perks",
-		description = "Get a gold name, Captain title, extra Beli, and a free supply chest every day.",
+		description = "Get a gold name, Captain title, extra Beli, and a Supply Chest added to your inventory every day.",
 		includes = {
 			"Gold Name",
 			"Captain Title",
 			"+10% Beli",
-			"Daily Supply Chest",
+			"Supply Chest every day",
 		},
 		detailGroups = {
 			{
-				title = "Daily Chest",
+				title = "Supply Chest",
 				items = {
-					"10K Beli",
-					"10 Apples",
-					"5 Rice",
-					"3 Meat",
-					"1 Beast Meat",
-					"75 Timber",
-					"20 Iron",
-					"1 Ancient Timber",
+					"1 Wooden Chest",
+					"Added to normal chest inventory",
+					"Available once per day",
 				},
 			},
 		},
@@ -202,7 +205,7 @@ local items = {
 		id = "speed-boost",
 		sectionKey = "boosts-chests",
 		title = "Speed Boost",
-		subtitle = "+15% speed",
+		subtitle = formatSpeedBoostSubtitle(),
 		description = "Run faster for a limited time.",
 		tags = { "Boost", "Speed" },
 		themeKey = "Cyan",

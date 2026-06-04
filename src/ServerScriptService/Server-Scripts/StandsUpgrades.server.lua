@@ -44,11 +44,42 @@ local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
 local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
 local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
 local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
+local tutorialService = nil
 
 local function pushResourceState(player)
 	if GrandLineRushVerticalSliceService and typeof(GrandLineRushVerticalSliceService.PushState) == "function" then
 		GrandLineRushVerticalSliceService.PushState(player)
 	end
+end
+
+local function getTutorialService()
+	if tutorialService ~= nil then
+		return tutorialService
+	end
+
+	local module = game.ServerScriptService.Modules:FindFirstChild("TutorialService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		tutorialService = service
+	end
+	return tutorialService
+end
+
+local function completeContextualTutorial(player, tutorialId, context)
+	local service = getTutorialService()
+	if typeof(service) ~= "table" or typeof(service.Complete) ~= "function" then
+		return false, "tutorial_service_unavailable"
+	end
+
+	local ok, success, reason = pcall(service.Complete, player, tutorialId, context)
+	if not ok then
+		return false, "tutorial_complete_failed"
+	end
+	return success == true, reason
 end
 
 local function sendPopup(player, text, color, isError)
@@ -593,6 +624,14 @@ local function handleUpgradeRequest(player, payload)
 	pushResourceState(player)
 	syncStandStateForProgress(player, standName, progress)
 	CrewFoodProgression.RefreshProgressionShadow(player, "food_progression")
+	completeContextualTutorial(player, "FeedCrewmates", {
+		Source = "stand_auto_feed",
+		StandName = standName,
+		CrewInstanceId = tostring(progress.InstanceId or context.ProgressTarget or ""),
+		FoodKey = tostring(appliedStep.FoodKey or ""),
+		Level = tonumber(progress.Level) or 0,
+		LevelUps = tonumber(result.LevelUps) or 0,
+	})
 
 	local foodStatusDisplayName = getFoodStatusReadAuthorityDisplayNameForPopup(player, context, progress, appliedStep)
 		or getCanonicalFoodStatusDisplayNameForPopup(player, context)

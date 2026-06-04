@@ -69,6 +69,8 @@ local CANONICAL_CREW_RARITY_ALIASES = {
 }
 local canonicalCrewRewardPoolsByRarity = nil
 local canonicalCrewRewardPool = nil
+local contextualTutorialTriggerService = nil
+local tutorialService = nil
 
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
@@ -84,6 +86,68 @@ local function runTrace(message, ...)
 	end
 
 	print(string.format("[RUN TRACE] " .. message, ...))
+end
+
+local function getContextualTutorialTriggerService()
+	if contextualTutorialTriggerService ~= nil then
+		return contextualTutorialTriggerService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		contextualTutorialTriggerService = service
+	end
+	return contextualTutorialTriggerService
+end
+
+local function getTutorialService()
+	if tutorialService ~= nil then
+		return tutorialService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("TutorialService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		tutorialService = service
+	end
+	return tutorialService
+end
+
+local function completeContextualTutorial(player, tutorialId, context)
+	local service = getTutorialService()
+	if typeof(service) ~= "table" or typeof(service.Complete) ~= "function" then
+		return false, "tutorial_service_unavailable"
+	end
+
+	local ok, success, reason = pcall(service.Complete, player, tutorialId, context)
+	if not ok then
+		return false, "tutorial_complete_failed"
+	end
+	return success == true, reason
+end
+
+local function triggerResourceTutorialsAfterGrant(player, source, grantedResources)
+	local service = getContextualTutorialTriggerService()
+	if typeof(service) ~= "table" then
+		return
+	end
+
+	grantedResources = if typeof(grantedResources) == "table" then grantedResources else {}
+	if typeof(service.OnFoodGranted) == "function" then
+		service.OnFoodGranted(player, source, grantedResources.food)
+	end
+	if typeof(service.CheckShipUpgradeAffordable) == "function" then
+		service.CheckShipUpgradeAffordable(player, source)
+	end
 end
 
 local function hasCarriedCrewMember(player)
@@ -2669,6 +2733,7 @@ local function openChest(player, requestedChestId)
 			})
 		end
 	end
+	triggerResourceTutorialsAfterGrant(player, "chest_open", grantedResources)
 
 	for foodKey, amount in pairs(grantedResources.food or {}) do
 		rewardParts[#rewardParts + 1] = string.format("%dx %s", amount, Economy.Food[foodKey].DisplayName)
@@ -2773,6 +2838,7 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 	local mythicKeyCount = 0
 	local fruitPityProgress = nil
 	local fruitPityTriggers = {}
+	local fruitRewardContexts = {}
 
 	for _, result in ipairs(batchResults) do
 		if typeof(result.FruitPityProgress) == "table" then
@@ -2780,6 +2846,9 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		end
 		if typeof(result.FruitPityTriggered) == "table" then
 			fruitPityTriggers[#fruitPityTriggers + 1] = result.FruitPityTriggered
+		end
+		if typeof(result.FruitRewardContext) == "table" then
+			fruitRewardContexts[#fruitRewardContexts + 1] = result.FruitRewardContext
 		end
 		if result.GrantedFruit then
 			grantedFruits[#grantedFruits + 1] = {
@@ -2878,6 +2947,7 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 		MythicKeyCount = mythicKeyCount,
 		FruitPityProgress = fruitPityProgress,
 		FruitPityTriggers = fruitPityTriggers,
+		FruitRewardContexts = fruitRewardContexts,
 	}
 end
 
@@ -3019,6 +3089,7 @@ local function openChests(player, inventoryName, requestedAmount)
 		UnopenedChests = unopenedChests,
 	})
 	syncPaths(player, replica, changedPaths)
+	triggerResourceTutorialsAfterGrant(player, "chest_batch_open", aggregateResources)
 
 	local response = resolveActionResponse(player, true, string.format("Opened %d chests.", openedCount))
 	response.openResult = buildBatchOpenResult(targetInventoryName, openedCount, aggregateResources, batchResults)
@@ -3185,6 +3256,14 @@ local function feedCrew(player, crewInstanceId, foodKey)
 
 	syncPaths(player, replica, {
 		{ Path = { "FoodInventory" }, Value = foodInventory },
+	})
+
+	completeContextualTutorial(player, "FeedCrewmates", {
+		Source = "vertical_slice_feed_crew",
+		CrewInstanceId = tostring(canonicalInstanceId or crewInstanceId or ""),
+		FoodKey = tostring(foodKey or ""),
+		Level = level,
+		LevelUps = levelUps,
 	})
 
 	if levelUps > 0 then

@@ -4,6 +4,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
+local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
 local ShopReceiptGrants = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShopReceiptGrants"))
 local TitleService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleService"))
 
@@ -12,33 +14,12 @@ local ShopEntitlementService = {}
 local started = false
 local dataManagerRef = nil
 local promptConnection = nil
+local playerRemovingConnection = nil
+local captainSupplyGrantInFlight = {}
 
 local VIP_GAMEPASS_ID = tonumber(MonetizationConfig.ActiveChefsGamepasses.VIP and MonetizationConfig.ActiveChefsGamepasses.VIP.Id)
 local CAPTAIN_TITLE_ID = "Captain"
 local DAILY_STATE_PATH = "DailyClaims.CaptainSupply.LastClaimDate"
-
-local function getOrCreateRemotes()
-	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-	if not remotes then
-		remotes = Instance.new("Folder")
-		remotes.Name = "Remotes"
-		remotes.Parent = ReplicatedStorage
-	end
-
-	return remotes
-end
-
-local function getOrCreateRemoteFunction(parent, name)
-	local existing = parent:FindFirstChild(name)
-	if existing and existing:IsA("RemoteFunction") then
-		return existing
-	end
-
-	local remote = Instance.new("RemoteFunction")
-	remote.Name = name
-	remote.Parent = parent
-	return remote
-end
 
 local function todayUtc()
 	return os.date("!%Y-%m-%d")
@@ -102,7 +83,11 @@ function ShopEntitlementService.ApplyGamepassEntitlement(player, gamepassKey, da
 	end
 
 	if gamepassKey == "VIP" then
-		return setVip(player, dataManager, true)
+		local ok, reason = setVip(player, dataManager, true)
+		if ok == true then
+			ShopEntitlementService.TryGrantDailySupplyChest(player, dataManager)
+		end
+		return ok, reason
 	elseif gamepassKey == "StarterPack" then
 		return ShopReceiptGrants.GrantStarterPack(player, profile, dataManager)
 	elseif gamepassKey == "PermanentShieldSlot" then
@@ -147,67 +132,73 @@ function ShopEntitlementService.ApplyOwnedEntitlements(player, dataManager)
 	end)
 end
 
-function ShopEntitlementService.GetCaptainSupplyState(player, dataManager)
+function ShopEntitlementService.TryGrantDailySupplyChest(player, dataManager)
 	dataManager = dataManager or dataManagerRef
-	if dataManager == nil or typeof(dataManager.TryGetValue) ~= "function" then
-		return {
-			CanClaim = false,
-			Reason = "data_manager_unavailable",
-		}
+	if player == nil or player.Parent ~= Players then
+		return false, "player_unavailable"
+	end
+	if captainSupplyGrantInFlight[player] == true then
+		return false, "grant_in_flight"
+	end
+	if dataManager == nil
+		or typeof(dataManager.TryGetProfile) ~= "function"
+		or typeof(dataManager.TryGetValue) ~= "function"
+		or typeof(dataManager.TrySetValue) ~= "function"
+	then
+		return false, "data_manager_unavailable"
 	end
 
 	if hasVip(player) ~= true then
-		return {
-			CanClaim = false,
-			Reason = "captain_pass_required",
-		}
+		return false, "captain_pass_required"
 	end
 
 	local lastClaimDate = tostring(dataManager:TryGetValue(player, DAILY_STATE_PATH) or "")
 	local today = todayUtc()
-	return {
-		CanClaim = lastClaimDate ~= today,
-		LastClaimDate = lastClaimDate,
-		CurrentDate = today,
-		Reason = if lastClaimDate == today then "already_claimed" else nil,
-	}
-end
-
-function ShopEntitlementService.ClaimCaptainSupply(player, dataManager)
-	dataManager = dataManager or dataManagerRef
-	local state = ShopEntitlementService.GetCaptainSupplyState(player, dataManager)
-	if state.CanClaim ~= true then
-		return {
-			Ok = false,
-			State = state,
-			Reason = state.Reason,
-		}
+	if lastClaimDate == today then
+		return false, "already_claimed"
 	end
 
-	ShopReceiptGrants.GrantCaptainDailyChest(player, dataManager)
-	local ok, reason = dataManager:TrySetValue(player, DAILY_STATE_PATH, todayUtc())
-	if ok ~= true then
-		return {
-			Ok = false,
-			State = ShopEntitlementService.GetCaptainSupplyState(player, dataManager),
-			Reason = reason or "save_failed",
-		}
+	local profile = dataManager:TryGetProfile(player)
+	if profile == nil or typeof(profile.Data) ~= "table" then
+		return false, "profile_not_ready"
 	end
 
-	return {
-		Ok = true,
-		State = ShopEntitlementService.GetCaptainSupplyState(player, dataManager),
-	}
-end
+	captainSupplyGrantInFlight[player] = true
+	local ok, grantOk, grantReason = pcall(ShopReceiptGrants.GrantCaptainDailyChest, player, profile, dataManager)
+	if ok ~= true or grantOk ~= true then
+		captainSupplyGrantInFlight[player] = nil
+		local reason = if ok == true then grantReason else grantOk
+		warn(string.format(
+			"[ShopEntitlementService] Supply Chest grant failed player=%s reason=%s",
+			player.Name,
+			tostring(reason)
+		))
+		return false, tostring(reason or "grant_failed")
+	end
 
-local function setupRemotes(dataManager)
-	local remotes = getOrCreateRemotes()
-	getOrCreateRemoteFunction(remotes, "CaptainSupplyStateRequest").OnServerInvoke = function(player)
-		return ShopEntitlementService.GetCaptainSupplyState(player, dataManager)
+	local saved, saveReason = dataManager:TrySetValue(player, DAILY_STATE_PATH, today)
+	captainSupplyGrantInFlight[player] = nil
+	if saved ~= true then
+		warn(string.format(
+			"[ShopEntitlementService] Supply Chest date save failed player=%s reason=%s",
+			player.Name,
+			tostring(saveReason)
+		))
+		return false, tostring(saveReason or "save_failed")
 	end
-	getOrCreateRemoteFunction(remotes, "CaptainSupplyClaimRequest").OnServerInvoke = function(player)
-		return ShopEntitlementService.ClaimCaptainSupply(player, dataManager)
-	end
+
+	PopUpModule:Server_ShowReward(player, {
+		{ "1x Supply Chest", RewardIconResolver.GetIcon("Supply Chest") },
+	})
+	PopUpModule:Server_SendPopUp(
+		player,
+		"Supply Chest added to your inventory!",
+		Color3.fromRGB(255, 255, 255),
+		Color3.fromRGB(28, 170, 96),
+		3,
+		false
+	)
+	return true, "granted"
 end
 
 function ShopEntitlementService.Start(dataManager)
@@ -217,7 +208,6 @@ function ShopEntitlementService.Start(dataManager)
 
 	started = true
 	dataManagerRef = dataManager
-	setupRemotes(dataManager)
 
 	promptConnection = MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, gamepassId, wasPurchased)
 		if wasPurchased ~= true or player == nil or player.Parent ~= Players then
@@ -239,6 +229,10 @@ function ShopEntitlementService.Start(dataManager)
 			))
 		end
 	end)
+
+	playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
+		captainSupplyGrantInFlight[player] = nil
+	end)
 end
 
 function ShopEntitlementService.Stop()
@@ -246,8 +240,13 @@ function ShopEntitlementService.Stop()
 		promptConnection:Disconnect()
 		promptConnection = nil
 	end
+	if playerRemovingConnection then
+		playerRemovingConnection:Disconnect()
+		playerRemovingConnection = nil
+	end
 	started = false
 	dataManagerRef = nil
+	table.clear(captainSupplyGrantInFlight)
 end
 
 return ShopEntitlementService

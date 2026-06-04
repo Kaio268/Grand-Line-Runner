@@ -1,6 +1,6 @@
 local Index = {
 	[10] = {
-		Icon = "rbxassetid://109366282204505",
+		Icon = "rbxthumb://type=Asset&id=111322021374643&w=420&h=420",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
@@ -11,7 +11,7 @@ local Index = {
 	},
 
 	[25] = {
-		Icon = "rbxassetid://78084794507225",
+		Icon = "rbxthumb://type=Asset&id=89103080114659&w=420&h=420",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
@@ -22,7 +22,7 @@ local Index = {
 	},
 
 	[50] = {
-		Icon = "rbxassetid://138961339593392",
+		Icon = "rbxthumb://type=Asset&id=93806083078850&w=420&h=420",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
@@ -33,7 +33,7 @@ local Index = {
 	},
 
 	[100] = {
-		Icon = "rbxassetid://89791077688062",
+		Icon = "rbxthumb://type=Asset&id=74498066751440&w=420&h=420",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {
@@ -44,7 +44,7 @@ local Index = {
 	},
 
 	[150] = {
-		Icon = "rbxassetid://97561891716291",
+		Icon = "rbxthumb://type=Asset&id=105607021927070&w=420&h=420",
 		BgColor = Color3.new(1, 0.368627, 0.32549),
 
 		Rewards = {

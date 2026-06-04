@@ -9,7 +9,6 @@ local REACT_MODAL_NAMES = {
 	GearStore = true,
 	Index = true,
 	Inventory = true,
-	LimitedReward = true,
 	NamiShop = true,
 	Quest = true,
 	Rebirth = true,
@@ -29,6 +28,21 @@ local SIDE_MENU_MODAL_NAMES = {
 
 local function fireChanged(name)
 	changedEvent:Fire(name)
+end
+
+local function buildPendingOperation(action, payload)
+	return {
+		Action = action,
+		Payload = payload,
+	}
+end
+
+local function resolvePendingOperation(operation)
+	if typeof(operation) == "table" then
+		return tostring(operation.Action or ""), operation.Payload
+	end
+
+	return tostring(operation or ""), nil
 end
 
 local function closeVisibleSideMenusExcept(exceptName)
@@ -62,10 +76,11 @@ function ReactModalRegistry.Register(name, handlers)
 				return
 			end
 
-			if pendingOperation == "toggle" and typeof(handlers.toggle) == "function" then
-				handlers.toggle()
-			elseif pendingOperation == "open" and typeof(handlers.open) == "function" then
-				handlers.open()
+			local action, payload = resolvePendingOperation(pendingOperation)
+			if action == "toggle" and typeof(handlers.toggle) == "function" then
+				handlers.toggle(payload)
+			elseif action == "open" and typeof(handlers.open) == "function" then
+				handlers.open(payload)
 			end
 			fireChanged(key)
 		end)
@@ -87,40 +102,40 @@ function ReactModalRegistry.IsReactModal(name)
 	return REACT_MODAL_NAMES[tostring(name or "")] == true
 end
 
-function ReactModalRegistry.Toggle(name)
+function ReactModalRegistry.Toggle(name, payload)
 	local key = tostring(name or "")
 	local entry = entries[key]
 	if entry and typeof(entry.toggle) == "function" then
 		if SIDE_MENU_MODAL_NAMES[key] == true and ReactModalRegistry.IsVisible(key) ~= true then
 			closeVisibleSideMenusExcept(key)
 		end
-		entry.toggle()
+		entry.toggle(payload)
 		fireChanged(key)
 		return true
 	end
 
 	if REACT_MODAL_NAMES[key] then
-		pendingOperations[key] = "toggle"
+		pendingOperations[key] = buildPendingOperation("toggle", payload)
 		return true
 	end
 
 	return false
 end
 
-function ReactModalRegistry.Open(name)
+function ReactModalRegistry.Open(name, payload)
 	local key = tostring(name or "")
 	local entry = entries[key]
 	if entry and typeof(entry.open) == "function" then
 		if SIDE_MENU_MODAL_NAMES[key] == true then
 			closeVisibleSideMenusExcept(key)
 		end
-		entry.open()
+		entry.open(payload)
 		fireChanged(key)
 		return true
 	end
 
 	if REACT_MODAL_NAMES[key] then
-		pendingOperations[key] = "open"
+		pendingOperations[key] = buildPendingOperation("open", payload)
 		return true
 	end
 

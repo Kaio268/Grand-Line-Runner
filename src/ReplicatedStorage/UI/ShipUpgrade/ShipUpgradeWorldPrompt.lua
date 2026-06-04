@@ -2,7 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
-local ShopTheme = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Shop"):WaitForChild("Theme"))
+local ItemIconRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ItemIconRegistry"))
 
 local e = React.createElement
 
@@ -28,12 +28,6 @@ local THEME = {
 	ButtonDisabledBottom = Color3.fromRGB(58, 72, 92),
 	ButtonDisabledText = Color3.fromRGB(231, 238, 248),
 	ButtonText = Color3.fromRGB(18, 22, 26),
-}
-
-local RESOURCE_ICON_IMAGES = {
-	Beli = ShopTheme.Assets.BeliIcon,
-	Rebirth = ShopTheme.Assets.RebirthIcon,
-	Rebirths = ShopTheme.Assets.RebirthIcon,
 }
 
 local MATERIAL_ICON_COLORS = {
@@ -139,7 +133,7 @@ local function materialIcon(props)
 end
 
 local function resourceIcon(props)
-	local image = RESOURCE_ICON_IMAGES[props.Kind]
+	local image = ItemIconRegistry.GetIcon(props.Kind, "")
 	if image and image ~= "" then
 		return e("ImageLabel", {
 			AnchorPoint = props.AnchorPoint,

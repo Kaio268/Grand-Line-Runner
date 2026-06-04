@@ -2,9 +2,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
+local SocialGroups = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SocialGroups"))
 local ddata = require(script.Parent.Parent.Data.DataManager)
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
-local GROUP_ID = 17179624
+local GROUP_ID = SocialGroups.GroupRewardGroupId
 local REMOTE_NAME = "GroupRewardClaim"
 
 local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
@@ -48,6 +50,13 @@ remoteEvent.OnServerEvent:Connect(function(player)
 		end
 
 		ddata:SetValue(player, "HiddenLeaderstats.Group", true)
+		local rewardName = tostring(resolved.DisplayName or "Crewmate")
+		PopUpModule:Server_ShowReward(player, {
+			{ "1x " .. rewardName, RewardIconResolver.GetIcon({
+				Type = "Crew",
+				DisplayName = rewardName,
+			}) },
+		})
 		PopUpModule:Server_SendPopUp(player, "Reward received: " .. tostring(resolved.DisplayName) .. "!", Color3.fromRGB(60, 255, 60), Color3.fromRGB(0, 0, 0), 3, false)
 	else
 		print("Reward already claimed by " .. player.Name .. ". Cannot claim again.")

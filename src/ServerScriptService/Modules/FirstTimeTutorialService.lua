@@ -61,8 +61,34 @@ local sessions = {}
 local playerConnections = {}
 local objectiveCheckAccumulator = 0
 local registryEntries = nil
+local contextualTutorialTriggerService = nil
 
 local cleanupTutorialTarget
+
+local function getContextualTutorialTriggerService()
+	if contextualTutorialTriggerService ~= nil then
+		return contextualTutorialTriggerService
+	end
+
+	local module = ServerScriptService:FindFirstChild("Modules")
+		and ServerScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		contextualTutorialTriggerService = service
+	end
+	return contextualTutorialTriggerService
+end
+
+local function enqueueResourcesTutorial(player, reason)
+	local service = getContextualTutorialTriggerService()
+	if typeof(service) == "table" and typeof(service.EnqueueResources) == "function" then
+		service.EnqueueResources(player, reason)
+	end
+end
 
 local function hasCarriedCrewMember(player)
 	local carried = player:GetAttribute(CARRIED_CREW_MEMBER_ATTRIBUTE)
@@ -289,11 +315,11 @@ local function ensureTutorialStarterBeli(player)
 	if tutorialAmount > 0 then
 		local shortfall = math.max(0, tutorialAmount - getPrimaryBalance(player))
 		if shortfall > 0 then
-			local added = DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), shortfall)
+			local added = DataManager:TryAddValue(player, CurrencyUtil.getPrimaryPath(), shortfall, { ApplyTitleBuff = false })
 			if added ~= true then
 				return
 			end
-			DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), shortfall)
+			DataManager:TryAddValue(player, CurrencyUtil.getTotalPath(), shortfall, { ApplyTitleBuff = false })
 		end
 	end
 
@@ -1522,6 +1548,7 @@ local function completeTutorial(player)
 
 	sendPopup(player, "Tutorial complete!", false)
 	pushState(player)
+	enqueueResourcesTutorial(player, "first_time_tutorial_complete")
 	return true, nil
 end
 
@@ -1695,6 +1722,7 @@ local function skipTutorial(player)
 
 	sendPopup(player, "Tutorial skipped.", false)
 	pushState(player)
+	enqueueResourcesTutorial(player, "first_time_tutorial_skip")
 
 	return true, nil, {
 		RemovedTutorialRewards = math.max(0, tonumber(rewardCleanup.RemovedCount) or 0),

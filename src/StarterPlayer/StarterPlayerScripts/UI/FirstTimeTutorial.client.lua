@@ -4,15 +4,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local Packages = ReplicatedStorage:WaitForChild("Packages")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
-local React = require(Packages:WaitForChild("React"))
-local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local PopUpModule = require(Modules:WaitForChild("PopUpModule"))
 local TutorialConfig = require(Modules:WaitForChild("Configs"):WaitForChild("FirstTimeTutorial"))
-local ObjectiveIndicator = require(UiFolder:WaitForChild("Tutorial"):WaitForChild("ObjectiveIndicator"))
+local TutorialObjectiveIndicatorController = require(script.Parent:WaitForChild("TutorialObjectiveIndicatorController"))
 
 local REQUEST_REMOTE_NAME = TutorialConfig.Remotes.RequestName
 local STATE_REMOTE_NAME = TutorialConfig.Remotes.StateName
@@ -32,16 +28,11 @@ else
 	tutorialGui.Enabled = false
 end
 
-local objectiveGui = Instance.new("ScreenGui")
-objectiveGui.Name = OBJECTIVE_GUI_NAME
-objectiveGui.DisplayOrder = 181
-objectiveGui.IgnoreGuiInset = true
-objectiveGui.ResetOnSpawn = false
-objectiveGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-objectiveGui.Enabled = false
-objectiveGui.Parent = playerGui
-
-local objectiveRoot = ReactRoblox.createRoot(objectiveGui)
+local objectiveController = TutorialObjectiveIndicatorController.new(playerGui, {
+	Name = OBJECTIVE_GUI_NAME,
+	DisplayOrder = 181,
+	ZIndex = 184,
+})
 
 local destroyed = false
 local renderQueued = false
@@ -262,14 +253,13 @@ local function renderObjectiveIndicator(state)
 	local active = state and state.active == true and state.completed ~= true
 	local hasTarget = active and typeof(state.target) == "table"
 
-	objectiveGui.Enabled = hasTarget
 	if hasTarget then
-		objectiveRoot:render(React.createElement(ObjectiveIndicator, {
-			target = state.target,
-			zIndex = 184,
-		}))
+		objectiveController:SetTarget(state.target, {
+			ShowPath = true,
+			ZIndex = 184,
+		})
 	else
-		objectiveRoot:render(React.createElement(React.Fragment))
+		objectiveController:Clear()
 	end
 end
 
@@ -460,6 +450,5 @@ script.Destroying:Connect(function()
 	if tutorialGui then
 		tutorialGui.Enabled = false
 	end
-	objectiveRoot:unmount()
-	objectiveGui:Destroy()
+	objectiveController:Destroy()
 end)

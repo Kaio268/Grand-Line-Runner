@@ -32,6 +32,7 @@ local placementPickupGuardUntil = setmetatable({}, { __mode = "k" })
 local claimTouchDebounce = setmetatable({}, { __mode = "k" })
 local callbacks = {}
 local dataManagerModule = nil
+local contextualTutorialTriggerService = nil
 local incomeLoopStarted = false
 
 local function firstNonEmpty(...)
@@ -50,6 +51,30 @@ local function getDataManager()
 		dataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 	end
 	return dataManagerModule
+end
+
+local function getContextualTutorialTriggerService()
+	if contextualTutorialTriggerService ~= nil then
+		return contextualTutorialTriggerService
+	end
+
+	local module = ServerScriptService.Modules:FindFirstChild("ContextualTutorialTriggerService")
+	if not module then
+		return nil
+	end
+
+	local ok, service = pcall(require, module)
+	if ok then
+		contextualTutorialTriggerService = service
+	end
+	return contextualTutorialTriggerService
+end
+
+local function triggerCrewProtectionTutorial(player, instanceId, source)
+	local service = getContextualTutorialTriggerService()
+	if typeof(service) == "table" and typeof(service.OnCrewPlaced) == "function" then
+		service.OnCrewPlaced(player, instanceId, source)
+	end
 end
 
 local function dmGet(player, path)
@@ -76,13 +101,13 @@ local function dmSet(player, path, value)
 	return ok and result ~= false
 end
 
-local function dmAdd(player, path, amount)
+local function dmAdd(player, path, amount, options)
 	local ok, result = pcall(function()
 		local dataManager = getDataManager()
 		if typeof(dataManager.TryAddValue) == "function" then
-			return dataManager:TryAddValue(player, path, amount)
+			return dataManager:TryAddValue(player, path, amount, options)
 		end
-		return dataManager:AddValue(player, path, amount)
+		return dataManager:AddValue(player, path, amount, options)
 	end)
 
 	return ok and result ~= false
@@ -227,6 +252,53 @@ local function getBeliBoostMultiplier(player)
 	return 1
 end
 
+local function getTitleBeliMultiplier(player)
+	if typeof(callbacks.GetTitleBeliMultiplier) == "function" then
+		return math.max(0, tonumber(callbacks.GetTitleBeliMultiplier(player)) or 1)
+	end
+	if typeof(IncomeClaimMath.GetTitleBeliMultiplier) == "function" then
+		return IncomeClaimMath.GetTitleBeliMultiplier(player)
+	end
+
+	return 1
+end
+
+local function getIndexMoneyMultiplier(player)
+	if typeof(callbacks.GetIndexMoneyMultiplier) == "function" then
+		return math.max(0, tonumber(callbacks.GetIndexMoneyMultiplier(player)) or 1)
+	end
+	if typeof(IncomeClaimMath.GetIndexMoneyMultiplier) == "function" then
+		return IncomeClaimMath.GetIndexMoneyMultiplier(player)
+	end
+
+	return 1
+end
+
+local function getRewardBeliMultiplier(player)
+	if typeof(callbacks.GetRewardBeliMultiplier) == "function" then
+		return math.max(0, tonumber(callbacks.GetRewardBeliMultiplier(player)) or 1)
+	end
+	if typeof(IncomeClaimMath.GetRewardBeliMultiplier) == "function" then
+		return IncomeClaimMath.GetRewardBeliMultiplier(player)
+	end
+
+	return getTitleBeliMultiplier(player) * getIndexMoneyMultiplier(player)
+end
+
+local function getRewardMultiplierMetadata(player)
+	if typeof(callbacks.GetRewardMultiplierMetadata) == "function" then
+		local metadata = callbacks.GetRewardMultiplierMetadata(player)
+		if typeof(metadata) == "table" then
+			return metadata
+		end
+	end
+
+	return {
+		TitleMultiplier = getTitleBeliMultiplier(player),
+		IndexMultiplier = getIndexMoneyMultiplier(player),
+	}
+end
+
 local function getCrewMemberLevel(player, crewMemberName, instanceId)
 	local target = if tostring(instanceId or "") ~= "" then tostring(instanceId) else tostring(crewMemberName or "")
 	if target ~= "" and typeof(callbacks.GetCrewMemberLevel) == "function" then
@@ -268,13 +340,29 @@ local function getCaptainBankAmountPerTick(player, crewMemberName, instanceId)
 	return getBaseIncome(player, crewMemberName, instanceId) * getBeliBoostMultiplier(player)
 end
 
+local function buildCaptainRateSummary(player, crewMemberName, instanceId)
+	return IncomeClaimMath.BuildRateSummary(
+		getBaseIncome(player, crewMemberName, instanceId),
+		getBeliBoostMultiplier(player),
+		getCaptainCollectMultiplier(player, crewMemberName, instanceId),
+		getRewardBeliMultiplier(player),
+		getRewardMultiplierMetadata(player)
+	)
+end
+
+local function buildCaptainClaimSummary(player, crewMemberName, instanceId, pendingIncome)
+	return IncomeClaimMath.BuildClaimSummary(
+		pendingIncome,
+		getCaptainCollectMultiplier(player, crewMemberName, instanceId),
+		getRewardBeliMultiplier(player),
+		getRewardMultiplierMetadata(player)
+	)
+end
+
 local function getCaptainDisplayIncome(player, crewMemberName, instanceId)
 	local assignment = getSavedCaptainAssignment(player)
 	local pending = getCaptainIncomeToCollect(player, assignment)
-	return IncomeClaimMath.GetWholeClaimableAmount(
-		pending,
-		getCaptainCollectMultiplier(player, crewMemberName, instanceId)
-	)
+	return buildCaptainClaimSummary(player, crewMemberName, instanceId, pending).FinalAmount
 end
 
 local function setPlacementPickupGuard(player)
@@ -603,6 +691,7 @@ local function assignEquippedCaptain(player, runtime)
 		TutorialPlacement = isTutorialPlacement == true,
 		TutorialRewardConverted = isTutorialPlacement == true,
 	})
+	triggerCrewProtectionTutorial(player, placedInstanceId, "captain_placement")
 	setRuntimeHasCaptain(player, true)
 	updatePromptText(player, runtime)
 	updateCaptainMoneyText(player, runtime)
@@ -670,6 +759,7 @@ local function switchEquippedCaptain(player, runtime, equippedInfo)
 		TutorialPlacement = isTutorialPlacement == true,
 		TutorialRewardConverted = isTutorialPlacement == true,
 	})
+	triggerCrewProtectionTutorial(player, incomingInstanceId, "captain_switch")
 	setRuntimeHasCaptain(player, true)
 	updatePromptText(player, runtime)
 	updateCaptainMoneyText(player, runtime)
@@ -809,20 +899,20 @@ local function collectCaptainIncome(player, activeShip, runtime)
 		return
 	end
 
-	local collectMultiplier = getCaptainCollectMultiplier(player, crewMemberName, instanceId)
-	local collected = IncomeClaimMath.GetWholeClaimableAmount(baseToCollect, collectMultiplier)
+	local claimSummary = buildCaptainClaimSummary(player, crewMemberName, instanceId, baseToCollect)
+	local collected = math.max(0, math.floor(tonumber(claimSummary.FinalAmount) or 0))
 	if collected <= 0 then
 		updateCaptainMoneyText(player, runtime, assignment)
 		return
 	end
 
-	local remainingRawIncome = IncomeClaimMath.GetRawRemainderAfterClaim(baseToCollect, collectMultiplier, collected)
+	local remainingRawIncome = math.max(0, tonumber(claimSummary.RawRemainderAmount) or 0)
 	if not setCaptainIncomeToCollect(player, remainingRawIncome) then
 		return
 	end
 
-	dmAdd(player, CurrencyUtil.getPrimaryPath(), collected)
-	dmAdd(player, CurrencyUtil.getTotalPath(), collected)
+	dmAdd(player, CurrencyUtil.getPrimaryPath(), collected, { ApplyTitleBuff = false })
+	dmAdd(player, CurrencyUtil.getTotalPath(), collected, { ApplyTitleBuff = false })
 	QuestSignals.Record(player, "EarnBeli", collected, {
 		Source = "CaptainIncome",
 		StandName = CAPTAIN_SLOT_KEY,
@@ -1011,8 +1101,17 @@ function CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 		return 0
 	end
 
-	return getCaptainBankAmountPerTick(player, crewMemberName, instanceId)
-		* getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+	return math.max(0, tonumber(buildCaptainRateSummary(player, crewMemberName, instanceId).FinalAmount) or 0)
+end
+
+function CaptainSlotRuntime.IsCaptainIncomeBoosted(player)
+	local assignment = getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		return false
+	end
+
+	return buildCaptainRateSummary(player, crewMemberName, instanceId).IsBoosted == true
 end
 
 function CaptainSlotRuntime.GetCaptainCollectMultiplier(player)
@@ -1036,8 +1135,7 @@ function CaptainSlotRuntime.GetCaptainIncomeToCollect(player)
 		return 0
 	end
 
-	return getCaptainIncomeToCollect(player, assignment)
-		* getCaptainCollectMultiplier(player, crewMemberName, instanceId)
+	return getCaptainDisplayIncome(player, crewMemberName, instanceId)
 end
 
 function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
