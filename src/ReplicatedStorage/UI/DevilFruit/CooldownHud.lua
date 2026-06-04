@@ -42,12 +42,10 @@ local function abilityRow(props)
 	local rowHeight = compact and 34 or 58
 	local keySize = compact and Vector2.new(20, 16) or Vector2.new(34, 24)
 	local onActivateAbility = props.onActivateAbility
-	local showKeybind = not compact
-	local showDetail = not compact
+	local showKeybind = props.showKeybinds == true
 	local textLeft = showKeybind and 48 or 7
 	local statusWidth = compact and 68 or 118
-	local nameRightInset = compact and 14 or 58
-	local detailRightInset = compact and 68 or (textLeft + statusWidth + 18)
+	local nameRightPadding = compact and 7 or 10
 	local nameText = props.name
 	if compact and typeof(props.compactName) == "string" and props.compactName ~= "" then
 		nameText = props.compactName
@@ -102,11 +100,11 @@ local function abilityRow(props)
 		Name = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(textLeft, compact and 4 or 8),
-			Size = UDim2.new(1, -nameRightInset, 0, compact and 12 or 18),
+			Position = UDim2.fromOffset(textLeft, compact and 4 or 7),
+			Size = UDim2.new(1, -(textLeft + nameRightPadding), 0, compact and 13 or 22),
 			Text = nameText,
 			TextColor3 = THEME.TextMain,
-			TextSize = compact and 9 or 15,
+			TextSize = compact and 9 or 16,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 4,
@@ -123,18 +121,6 @@ local function abilityRow(props)
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = 4,
 		}),
-		Detail = showDetail and e("TextLabel", {
-			BackgroundTransparency = 1,
-			Font = Enum.Font.Gotham,
-			Position = UDim2.fromOffset(textLeft, 29),
-			Size = UDim2.new(1, -detailRightInset, 0, 12),
-			Text = props.detail,
-			TextColor3 = THEME.TextSecondary,
-			TextSize = 11,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			ZIndex = 4,
-		}) or nil,
 		Bar = e("Frame", {
 			AnchorPoint = Vector2.new(0, 1),
 			BackgroundColor3 = THEME.PrimaryBg,
@@ -188,7 +174,6 @@ local function CooldownHud(props)
 
 	for index, ability in ipairs(props.abilities or {}) do
 		rows["Ability" .. tostring(index)] = e(abilityRow, {
-			detail = ability.detail,
 			fillColor3 = ability.fillColor3,
 			abilityName = ability.abilityName,
 			keyCodeName = ability.keyCodeName,
@@ -199,6 +184,7 @@ local function CooldownHud(props)
 			name = ability.name,
 			onActivateAbility = props.onActivateAbility,
 			progress = ability.progress,
+			showKeybinds = props.showKeybinds,
 			status = ability.status,
 			statusColor3 = ability.statusColor3,
 		})

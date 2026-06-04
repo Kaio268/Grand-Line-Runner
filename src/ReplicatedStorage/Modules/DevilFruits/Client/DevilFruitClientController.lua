@@ -500,7 +500,6 @@ local function buildCooldownAbilities(fruitName)
 		local activeState, activeRemaining = getLocalActiveHudState(fruitName, abilityName, now)
 		local status = "READY"
 		local statusColor3 = DEVIL_FRUIT_UI.Ready
-		local detail = "Move ready"
 		local fillColor3 = DEVIL_FRUIT_UI.Ready
 		local progress = 1
 
@@ -508,7 +507,6 @@ local function buildCooldownAbilities(fruitName)
 			local total = math.max(tonumber(activeState.ActiveDuration) or 0, 0.001)
 			status = "ACTIVE " .. formatCooldownTime(activeRemaining)
 			statusColor3 = DEVIL_FRUIT_UI.Active
-			detail = "Active for " .. formatCooldownTime(activeRemaining)
 			fillColor3 = DEVIL_FRUIT_UI.ActiveFill
 			progress = math.clamp(activeRemaining / total, 0, 1)
 		else
@@ -534,14 +532,12 @@ local function buildCooldownAbilities(fruitName)
 					local total = math.max(startsAt - now + 0.001, 0.001)
 					status = "ACTIVE " .. formatCooldownTime(startsIn)
 					statusColor3 = DEVIL_FRUIT_UI.Active
-					detail = "Active for " .. formatCooldownTime(startsIn)
 					fillColor3 = DEVIL_FRUIT_UI.ActiveFill
 					progress = math.clamp(startsIn / total, 0, 1)
 				else
 					local total = math.max(getLocalCooldownDuration(cooldownState, cooldownValue), 0.001)
 					status = "COOLDOWN " .. formatCooldownTime(remaining)
 					statusColor3 = DEVIL_FRUIT_UI.Cooldown
-					detail = "Cooldown for " .. formatCooldownTime(remaining)
 					fillColor3 = DEVIL_FRUIT_UI.CooldownFill
 					progress = math.clamp(remaining / total, 0, 1)
 				end
@@ -552,7 +548,6 @@ local function buildCooldownAbilities(fruitName)
 		abilities[#abilities + 1] = {
 			abilityName = abilityName,
 			compactName = formatCompactAbilityName(abilityName),
-			detail = detail,
 			fillColor3 = fillColor3,
 			keyCodeName = keyCode and keyCode.Name or "?",
 			name = formatAbilityName(abilityName),
@@ -610,6 +605,10 @@ local function getHudLayoutMode()
 	return Responsive.getHudLayoutMode()
 end
 
+local function hasKeyboardInput()
+	return UserInputService.KeyboardEnabled == true
+end
+
 local function renderCooldownHud()
 	local ok, err = xpcall(function()
 		ensureCooldownHudRoot()
@@ -621,6 +620,7 @@ local function renderCooldownHud()
 			fruitName = fruit and DevilFruitConfig.GetPlayerDisplayName(fruit) or "",
 			layoutMode = getHudLayoutMode(),
 			onActivateAbility = activateAbilityByName,
+			showKeybinds = hasKeyboardInput(),
 			visible = cooldownHud.Visible == true,
 		}), getCooldownHudHost()))
 	end, debug.traceback)
@@ -1742,6 +1742,10 @@ local function initializeDevilFruitClient()
 
 	player:GetAttributeChangedSignal("DevilFruitCooldownBypass"):Connect(function()
 		updateCooldownHud(false)
+	end)
+
+	UserInputService:GetPropertyChangedSignal("KeyboardEnabled"):Connect(function()
+		updateCooldownHud(true)
 	end)
 
 	player.ChildAdded:Connect(function(child)
