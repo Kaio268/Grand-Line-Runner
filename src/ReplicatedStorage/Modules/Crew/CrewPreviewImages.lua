@@ -218,7 +218,7 @@ registerStaticPreview("rbxthumb://type=Asset&id=93229781511499&w=420&h=420", {
 	"Smoothie",
 })
 
-registerStaticPreview("rbxassetid://109925942347680", {
+registerStaticPreview("rbxthumb://type=Asset&id=97861787203978&w=420&h=420", {
 	"Frost Admiral",
 	"Aokiji",
 })
