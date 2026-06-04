@@ -1,6 +1,6 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local EXPECTED_AFK_PLACE_ID = 122987301330026
+local EXPECTED_AFK_PLACE_ID = 135767110031089
 
 workspace:SetAttribute("GrandTideRush_ProjectRole", "AFK")
 workspace:SetAttribute("GrandTideRush_ExpectedPlaceId", EXPECTED_AFK_PLACE_ID)

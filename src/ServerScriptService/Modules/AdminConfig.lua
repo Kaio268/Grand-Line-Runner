@@ -5,6 +5,6 @@ return {
 		[3897656396] = true, -- Nicholas_Mist123
 	},
 	Testers = {},
-	EnablePublicTesterTitle = true,
+	EnablePublicTesterTitle = false,
 	PublicTesterTitleId = "Tester",
 }

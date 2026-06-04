@@ -6,8 +6,8 @@ Grand Tide Rush uses ProfileStore with a datastore name resolved from `DataKeySe
 
 The public policy lives in `ServerScriptService.Data.DataEnvironment`. It contains place IDs, place roles, environment names, validation rules, and diagnostics. It does not contain raw datastore keys.
 
-- Production main place: `110640828025742`
-- Production AFK place: `122987301330026`
+- Production main place: `111129977331443`
+- Production AFK place: `135767110031089`
 - Required production key id: `prod-release-v1`
 
 Production main and AFK both resolve the same `Production` secret entry. That keeps both places on the same release production datastore environment when they are places inside the same Roblox experience/universe.
@@ -58,12 +58,13 @@ Before publishing either production place:
 2. Confirm `git status --short --ignored` shows the secrets file as ignored, not staged.
 3. Run the main Rojo build from `default.project.json`.
 4. Run the AFK Rojo build from `afk.project.json`.
-5. In Studio, verify `DataEnvironment_Name` is `Production`.
-6. Verify `DataEnvironment_KeyId` is `prod-release-v1`.
-7. Verify main reports `DataEnvironment_PlaceRole = Main`.
-8. Verify AFK reports `DataEnvironment_PlaceRole = AFK`.
-9. Run `/datadiag` only and compare key fingerprint/length without exposing the raw key.
-10. Confirm no restore, migration, wipe, reset, or recovery write command is being run during publish.
+5. Run `tools/validate-startup-build.ps1` against the fresh build outputs.
+6. In Studio, verify `DataEnvironment_Name` is `Production`.
+7. Verify `DataEnvironment_KeyId` is `prod-release-v1`.
+8. Verify main reports `DataEnvironment_PlaceRole = Main`.
+9. Verify AFK reports `DataEnvironment_PlaceRole = AFK`.
+10. Run `/datadiag` only and compare key fingerprint/length without exposing the raw key.
+11. Confirm no restore, migration, wipe, reset, or recovery write command is being run during publish.
 
 ## Rotation And Migration
 

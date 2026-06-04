@@ -23,8 +23,9 @@ Use this checklist before publishing the fresh release Main place or AFK Lobby p
 
 1. Run the main Rojo build from `default.project.json`.
 2. Run the AFK Rojo build from `afk.project.json`.
-3. Confirm no generated `.rbxlx` output is staged by accident.
-4. Confirm `git status --short --ignored` does not show the real `DataKeySecrets.lua` as staged or tracked.
+3. Run `tools/validate-startup-build.ps1` against the fresh build outputs and confirm no stale `Data_Key` boot code is present.
+4. Confirm no generated `.rbxlx` output is staged by accident.
+5. Confirm `git status --short --ignored` does not show the real `DataKeySecrets.lua` as staged or tracked.
 
 ## Studio Checks
 

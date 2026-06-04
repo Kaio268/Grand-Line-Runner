@@ -22,7 +22,12 @@ local pendingEquippedByPlayer = {}
 local hydrationTasksByPlayer = {}
 local validationConnectionsByPlayer = {}
 local cachedDataManager = nil
+local cachedAdminPermissions = nil
+local testerStateChangedConnection = nil
+local adminStateChangedConnection = nil
+local staffRoleStateChangedConnection = nil
 local dataManagerWarningPrinted = false
+local setEquippedTitleInternal = nil
 
 local function warnDataManagerUnavailable(reason)
 	if dataManagerWarningPrinted then
@@ -66,6 +71,60 @@ local function getDataManager()
 
 	cachedDataManager = dataManagerOrError
 	return cachedDataManager, nil
+end
+
+local function getAdminPermissions()
+	if cachedAdminPermissions ~= nil then
+		return if cachedAdminPermissions == false then nil else cachedAdminPermissions
+	end
+
+	local modulesFolder = ServerScriptService:FindFirstChild("Modules")
+	local module = modulesFolder and modulesFolder:FindFirstChild("AdminPermissions")
+	if not (module and module:IsA("ModuleScript")) then
+		return nil
+	end
+
+	local requireOk, permissionsOrError = pcall(require, module)
+	if not requireOk or typeof(permissionsOrError) ~= "table" then
+		cachedAdminPermissions = false
+		warn("[TitleService] AdminPermissions unavailable; restricted Tester title cannot be authorized.")
+		return nil
+	end
+
+	cachedAdminPermissions = permissionsOrError
+	return cachedAdminPermissions
+end
+
+local function hasTesterRoleAccess(player)
+	local adminPermissions = getAdminPermissions()
+	if typeof(adminPermissions) ~= "table" or typeof(adminPermissions.HasTesterRole) ~= "function" then
+		return false
+	end
+
+	local ok, hasRole = pcall(adminPermissions.HasTesterRole, player)
+	return ok and hasRole == true
+end
+
+local function adminPermissionIsTrue(adminPermissions, permissionName, player)
+	local permissionFunction = adminPermissions[permissionName]
+	if typeof(permissionFunction) ~= "function" then
+		return false
+	end
+
+	local ok, result = pcall(permissionFunction, player)
+	return ok and result == true
+end
+
+local function hasTesterTitleVisibilityAccess(player)
+	local adminPermissions = getAdminPermissions()
+	if typeof(adminPermissions) ~= "table" then
+		return false
+	end
+
+	return adminPermissionIsTrue(adminPermissions, "HasTesterRole", player)
+		or adminPermissionIsTrue(adminPermissions, "IsAdmin", player)
+		or adminPermissionIsTrue(adminPermissions, "IsSuperAdmin", player)
+		or adminPermissionIsTrue(adminPermissions, "IsOwnerRoot", player)
 end
 
 local function getOrCreateRemotesFolder()
@@ -136,10 +195,6 @@ local function getPublicTesterTitleId()
 	return titleId ~= NONE_EQUIPPED and titleId or "Tester"
 end
 
-local function isPublicTesterTitleEnabled()
-	return typeof(AdminConfig) == "table" and AdminConfig.EnablePublicTesterTitle == true
-end
-
 local function isPublicTesterTitle(titleId)
 	return normalizeTitleId(titleId) == getPublicTesterTitleId()
 end
@@ -181,6 +236,18 @@ local function ensureTitlesFolder(player)
 		runtimeUnlockedFolder.Parent = titlesFolder
 	end
 
+	local runtimeVisibleFolder = titlesFolder:FindFirstChild("RuntimeVisible")
+	if runtimeVisibleFolder and not runtimeVisibleFolder:IsA("Folder") then
+		runtimeVisibleFolder:Destroy()
+		runtimeVisibleFolder = nil
+	end
+
+	if not runtimeVisibleFolder then
+		runtimeVisibleFolder = Instance.new("Folder")
+		runtimeVisibleFolder.Name = "RuntimeVisible"
+		runtimeVisibleFolder.Parent = titlesFolder
+	end
+
 	local equippedValue = titlesFolder:FindFirstChild("Equipped")
 	if equippedValue and not equippedValue:IsA("StringValue") then
 		equippedValue:Destroy()
@@ -194,7 +261,7 @@ local function ensureTitlesFolder(player)
 		equippedValue.Parent = titlesFolder
 	end
 
-	return titlesFolder, unlockedFolder, equippedValue, runtimeUnlockedFolder
+	return titlesFolder, unlockedFolder, equippedValue, runtimeUnlockedFolder, runtimeVisibleFolder
 end
 
 local function getRuntimeUnlockValue(player, titleId)
@@ -217,6 +284,17 @@ local function getRuntimeOnlyUnlockValue(player, titleId)
 	end
 
 	return runtimeUnlockedFolder, valueObject
+end
+
+local function getRuntimeVisibleValue(player, titleId)
+	local _, _, _, _, runtimeVisibleFolder = ensureTitlesFolder(player)
+	local valueObject = runtimeVisibleFolder:FindFirstChild(titleId)
+	if valueObject and not valueObject:IsA("BoolValue") then
+		valueObject:Destroy()
+		valueObject = nil
+	end
+
+	return runtimeVisibleFolder, valueObject
 end
 
 local function getRuntimeEquippedValue(player)
@@ -252,11 +330,37 @@ local function setRuntimeOnlyTitleUnlocked(player, titleId, isUnlocked)
 	return valueObject
 end
 
-local function syncPublicTesterTitleUnlock(player)
+local function setRuntimeTitleVisible(player, titleId, isVisible)
+	local runtimeVisibleFolder, valueObject = getRuntimeVisibleValue(player, titleId)
+	if not valueObject then
+		valueObject = Instance.new("BoolValue")
+		valueObject.Name = titleId
+		valueObject.Value = isVisible == true
+		valueObject.Parent = runtimeVisibleFolder
+		return valueObject
+	end
+
+	valueObject.Value = isVisible == true
+	return valueObject
+end
+
+local function syncRestrictedTesterTitleState(player)
 	local testerTitleId = getPublicTesterTitleId()
 	if TitlesConfig.Get(testerTitleId) then
-		setRuntimeOnlyTitleUnlocked(player, testerTitleId, isPublicTesterTitleEnabled())
+		local hasEquipAccess = hasTesterRoleAccess(player)
+		local hasVisibilityAccess = hasTesterTitleVisibilityAccess(player)
+		setRuntimeTitleVisible(player, testerTitleId, hasVisibilityAccess)
+		setRuntimeOnlyTitleUnlocked(player, testerTitleId, hasEquipAccess)
+
+		local equippedValue = getRuntimeEquippedValue(player)
+		if not hasEquipAccess and equippedValue.Value == testerTitleId and setEquippedTitleInternal then
+			setEquippedTitleInternal(player, NONE_EQUIPPED, false)
+		end
+
+		return hasEquipAccess
 	end
+
+	return false
 end
 
 local function isRuntimeTitleUnlocked(player, titleId)
@@ -490,12 +594,15 @@ local function isTitleEquippable(player, titleId, allowPendingDynamic)
 	end
 
 	if titleDefinition.UnlockType == "Persistent" then
-		local publicTesterAllowed = isPublicTesterTitle(titleDefinition.Id) and isPublicTesterTitleEnabled()
 		local persistentUnlocked = isRuntimeTitleUnlocked(player, titleDefinition.Id)
 		local runtimeUnlocked = isRuntimeOnlyTitleUnlocked(player, titleDefinition.Id)
 
-		if publicTesterAllowed then
-			return true, "public_tester_title"
+		if isPublicTesterTitle(titleDefinition.Id) then
+			if syncRestrictedTesterTitleState(player) then
+				return true, "tester_role_unlocked"
+			end
+
+			return false, "tester_role_required"
 		end
 
 		if persistentUnlocked or runtimeUnlocked then
@@ -512,7 +619,7 @@ local function isTitleEquippable(player, titleId, allowPendingDynamic)
 	return false, "unsupported_unlock_type"
 end
 
-local function setEquippedTitleInternal(player, titleId, allowPendingDynamic)
+setEquippedTitleInternal = function(player, titleId, allowPendingDynamic)
 	local normalizedTitleId = normalizeTitleId(titleId)
 
 	if normalizedTitleId == NONE_EQUIPPED then
@@ -541,6 +648,60 @@ local function setEquippedTitleInternal(player, titleId, allowPendingDynamic)
 
 	pendingEquippedByPlayer[player] = nil
 	return true, reason or "equipped"
+end
+
+local function resolvePlayerFromStatePayload(player, payload)
+	if typeof(player) == "Instance" and player:IsA("Player") then
+		return player
+	end
+
+	if typeof(payload) ~= "table" then
+		return nil
+	end
+
+	local userId = math.floor(tonumber(payload.UserId or payload.TargetUserId) or 0)
+	if userId <= 0 then
+		return nil
+	end
+
+	return Players:GetPlayerByUserId(userId)
+end
+
+local function syncRestrictedTesterTitleStateFromPayload(player, payload)
+	local targetPlayer = resolvePlayerFromStatePayload(player, payload)
+	if targetPlayer then
+		syncRestrictedTesterTitleState(targetPlayer)
+		return
+	end
+
+	for _, currentPlayer in ipairs(Players:GetPlayers()) do
+		syncRestrictedTesterTitleState(currentPlayer)
+	end
+end
+
+local function bindTesterRoleChanges()
+	if testerStateChangedConnection and adminStateChangedConnection and staffRoleStateChangedConnection then
+		return
+	end
+
+	local adminPermissions = getAdminPermissions()
+	if typeof(adminPermissions) ~= "table" then
+		return
+	end
+
+	if not testerStateChangedConnection and typeof(adminPermissions.TesterStateChanged) == "RBXScriptSignal" then
+		testerStateChangedConnection = adminPermissions.TesterStateChanged:Connect(syncRestrictedTesterTitleStateFromPayload)
+	end
+
+	if not adminStateChangedConnection and typeof(adminPermissions.AdminStateChanged) == "RBXScriptSignal" then
+		adminStateChangedConnection = adminPermissions.AdminStateChanged:Connect(syncRestrictedTesterTitleStateFromPayload)
+	end
+
+	if not staffRoleStateChangedConnection and typeof(adminPermissions.StaffRoleStateChanged) == "RBXScriptSignal" then
+		staffRoleStateChangedConnection = adminPermissions.StaffRoleStateChanged:Connect(function(_, payload)
+			syncRestrictedTesterTitleStateFromPayload(nil, payload)
+		end)
+	end
 end
 
 local function validateEquippedTitle(player)
@@ -594,7 +755,7 @@ local function hydrateRuntimeTitles(player)
 	hydrationTasksByPlayer[player] = task.spawn(function()
 		ensureTitlesFolder(player)
 		publishEquippedTitle(player, NONE_EQUIPPED)
-		syncPublicTesterTitleUnlock(player)
+		syncRestrictedTesterTitleState(player)
 		hookValidationSignals(player)
 
 		local dataReady = waitForDataReady(player, HYDRATE_READY_TIMEOUT)
@@ -617,7 +778,7 @@ local function hydrateRuntimeTitles(player)
 				end
 			end
 		end
-		syncPublicTesterTitleUnlock(player)
+		syncRestrictedTesterTitleState(player)
 
 		local equippedFruit = dataManager:TryGetValue(player, "DevilFruit.Equipped")
 		if typeof(equippedFruit) == "string" and equippedFruit ~= DevilFruitConfig.None then
@@ -659,6 +820,7 @@ function TitleService.Start()
 	end
 
 	started = true
+	bindTesterRoleChanges()
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		hydrateRuntimeTitles(player)
@@ -686,18 +848,17 @@ function TitleService.UnlockTitle(player, titleId)
 		return false, "invalid_player"
 	end
 
-	local _, validationError = ensurePersistentTitle(titleId)
+	local titleDefinition, validationError = ensurePersistentTitle(titleId)
 	if validationError ~= nil then
 		return false, validationError
 	end
 
-	if isPublicTesterTitle(titleId) then
-		if isPublicTesterTitleEnabled() then
-			setRuntimeOnlyTitleUnlocked(player, titleId, true)
-			return true, "public_runtime_unlocked"
+	if isPublicTesterTitle(titleDefinition.Id) then
+		if syncRestrictedTesterTitleState(player) then
+			return true, "tester_role_unlocked"
 		end
 
-		return false, "public_tester_title_disabled"
+		return false, "tester_role_required"
 	end
 
 	if isRuntimeTitleUnlocked(player, titleId) then
@@ -747,8 +908,8 @@ function TitleService.IsTitleOwned(player, titleId)
 	end
 
 	if titleDefinition.UnlockType == "Persistent" then
-		if isPublicTesterTitle(titleId) and isPublicTesterTitleEnabled() then
-			return true
+		if isPublicTesterTitle(titleId) then
+			return hasTesterRoleAccess(player)
 		end
 
 		return isRuntimeTitleUnlocked(player, titleId) or isRuntimeOnlyTitleUnlocked(player, titleId)

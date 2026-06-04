@@ -1,5 +1,5 @@
-local AFK_PLACE_ID = 122987301330026
-local MAIN_PLACE_ID = 110640828025742
+local AFK_PLACE_ID = 135767110031089
+local MAIN_PLACE_ID = 111129977331443
 
 workspace:SetAttribute("GrandTideRush_ProjectRole", "Main")
 workspace:SetAttribute("GrandTideRush_ExpectedPlaceId", MAIN_PLACE_ID)

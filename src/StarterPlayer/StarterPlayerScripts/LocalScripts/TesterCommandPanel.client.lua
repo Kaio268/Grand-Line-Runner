@@ -1268,7 +1268,7 @@ local function makeCommandCard(command, layoutOrder)
 	runButton.Activated:Connect(function()
 		if not refreshTesterStatus() then
 			gui.Enabled = false
-			setStatus("Equip the Tester title or get tester access first.", STATUS_ERROR)
+			setStatus("Get tester access from a Super Admin first.", STATUS_ERROR)
 			if updateTesterLauncherVisibility then
 				updateTesterLauncherVisibility()
 			end
@@ -1505,7 +1505,7 @@ warnTesterPanelBlocked = function()
 		if equippedTitleId ~= "Tester" then
 			warnThrottled(
 				"tester_blocked_not_tester",
-				("Tester panel blocked: tester access denied. Equip the Tester title or get tester access first. EquippedTitleId=%s"):format(
+				("Tester panel blocked: tester access denied. Get tester access from a Super Admin first. EquippedTitleId=%s"):format(
 					equippedTitleId ~= "" and equippedTitleId or "none"
 				)
 			)

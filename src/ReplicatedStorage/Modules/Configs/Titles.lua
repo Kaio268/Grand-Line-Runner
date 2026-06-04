@@ -221,6 +221,7 @@ local TITLE_GROUPS = {
 				DisplayName = "Tester",
 				Description = "Temporary pre-release testing title.",
 				UnlockType = "Persistent",
+				Visibility = "TesterOrAdmin",
 				Buffs = {
 					beli = 0.10,
 					resources = 0.10,

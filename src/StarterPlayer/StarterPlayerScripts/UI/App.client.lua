@@ -2100,12 +2100,29 @@ function ClientRuntime.readTitleUnlockSets()
 	local titlesFolder = player:FindFirstChild("Titles")
 	local unlockedFolder = titlesFolder and titlesFolder:FindFirstChild("Unlocked")
 	local runtimeUnlockedFolder = titlesFolder and titlesFolder:FindFirstChild("RuntimeUnlocked")
-	return ClientRuntime.readTitleBoolSet(unlockedFolder), ClientRuntime.readTitleBoolSet(runtimeUnlockedFolder)
+	local runtimeVisibleFolder = titlesFolder and titlesFolder:FindFirstChild("RuntimeVisible")
+	return ClientRuntime.readTitleBoolSet(unlockedFolder),
+		ClientRuntime.readTitleBoolSet(runtimeUnlockedFolder),
+		ClientRuntime.readTitleBoolSet(runtimeVisibleFolder)
 end
 
 function ClientRuntime.isTitleUnlocked(titleId, persistentUnlocked, runtimeUnlocked)
 	local key = tostring(titleId or "")
 	return persistentUnlocked[key] == true or runtimeUnlocked[key] == true
+end
+
+function ClientRuntime.isTitleVisible(titleDefinition, runtimeVisible)
+	if typeof(titleDefinition) ~= "table" then
+		return false
+	end
+
+	local visibility = tostring(titleDefinition.Visibility or "")
+	if visibility == "" or visibility == "Public" then
+		return true
+	end
+
+	local titleId = tostring(titleDefinition.Id or "")
+	return titleId ~= "" and runtimeVisible[titleId] == true
 end
 
 local function readEquippedTitleId()
@@ -2275,12 +2292,16 @@ local function buildTitlesData(query)
 	local bountyRankLabel = "Checking Board..."
 	local bountyRankValue = nil
 	local bountyRankStatus = "PendingBoard"
-	local persistentUnlockedTitles, runtimeUnlockedTitles = ClientRuntime.readTitleUnlockSets()
+	local persistentUnlockedTitles, runtimeUnlockedTitles, runtimeVisibleTitles = ClientRuntime.readTitleUnlockSets()
 
 	for _, titleDefinition in ipairs(Titles.GetAll()) do
+		local titleId = tostring(titleDefinition.Id or "")
+		if not ClientRuntime.isTitleVisible(titleDefinition, runtimeVisibleTitles) then
+			continue
+		end
+
 		totalCount += 1
 
-		local titleId = tostring(titleDefinition.Id or "")
 		local persistentUnlocked = titleDefinition.UnlockType == "Persistent"
 				and persistentUnlockedTitles[titleId] == true
 			or false

@@ -334,8 +334,7 @@ end
 
 local function isTesterUserId(userId): boolean
 	local numericUserId = math.floor(tonumber(userId) or 0)
-	return numericUserId > 0
-		and (configuredTesters[numericUserId] == true or activePublicTesterTitleByUserId[numericUserId] == true)
+	return numericUserId > 0 and configuredTesters[numericUserId] == true
 end
 
 local function emitTesterStateChanged(player: Player?, userId, source: string?)
@@ -558,16 +557,12 @@ local function getTesterSource(userId: number): string
 	local isStatic = baseConfiguredTesters[numericUserId] == true
 	local isAdded = typeof(testerRoleOverrides.Added) == "table"
 		and testerRoleOverrides.Added[tostring(numericUserId)] == true
-	local isTitleActive = activePublicTesterTitleByUserId[numericUserId] == true
 
 	if isStatic then
 		table.insert(parts, "Configured Tester")
 	end
 	if isAdded then
 		table.insert(parts, "Persistent Tester")
-	end
-	if isTitleActive then
-		table.insert(parts, "Tester Title Active")
 	end
 
 	return table.concat(parts, " + ")
@@ -807,7 +802,7 @@ local function buildRosterEntry(userId: number, roleName: string, viewerUserId: 
 	local adminStatusReason = "offline"
 	local isConfiguredTesterRole = configuredTesters[numericUserId] == true
 	local isTesterTitleActive = activePublicTesterTitleByUserId[numericUserId] == true
-	local isTester = isConfiguredTesterRole or isTesterTitleActive
+	local isTester = isConfiguredTesterRole
 	local testerBlockReason = getTesterManageBlockedReason(numericUserId)
 
 	if onlinePlayer then
@@ -869,12 +864,6 @@ local function buildTesterRosterList(viewerUserId: number?)
 
 	for _, userId in ipairs(configuredTesterIds) do
 		addSortedUnique(ids, seen, userId)
-	end
-
-	for userId, active in pairs(activePublicTesterTitleByUserId) do
-		if active == true then
-			addSortedUnique(ids, seen, userId)
-		end
 	end
 
 	table.sort(ids)
@@ -1387,6 +1376,11 @@ end
 function AdminPermissions.IsTester(player: Player?): boolean
 	updatePublicTesterTitleState(player, "tester_status_check")
 	local userId = getUserId(player)
+	return userId ~= nil and isTesterUserId(userId)
+end
+
+function AdminPermissions.HasTesterRole(subject): boolean
+	local userId = getUserIdFromSubject(subject)
 	return userId ~= nil and isTesterUserId(userId)
 end
 

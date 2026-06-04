@@ -198,8 +198,8 @@ local Economy = {
 
 	AFKTeleport = {
 		Enabled = true,
-		MainPlaceId = 110640828025742,
-		AFKPlaceId = 122987301330026,
+		MainPlaceId = 111129977331443,
+		AFKPlaceId = 135767110031089,
 		ManualEnabled = true,
 		AutoEnabled = true,
 		InactivitySeconds = 1080,

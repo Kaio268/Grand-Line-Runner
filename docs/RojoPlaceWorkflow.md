@@ -2,8 +2,8 @@
 
 Grand Tide Rush has two Roblox places in one experience:
 
-- Main Place, `Grand Tide Rush`: `110640828025742`
-- AFK Lobby Place, `AFK Lobby`: `122987301330026`
+- Main Place, `Grand Tide Rush`: `111129977331443`
+- AFK Lobby Place, `AFK Lobby`: `135767110031089`
 
 Use one repo, but connect each place to its own Rojo project.
 
@@ -19,7 +19,7 @@ Use one repo, but connect each place to its own Rojo project.
    rojo serve default.project.json
    ```
 4. Connect Studio to `grand-tide-rush-main`.
-5. Publish only to place `110640828025742`.
+5. Publish only to place `111129977331443`.
 
 ## AFK Lobby
 
@@ -33,11 +33,12 @@ Use one repo, but connect each place to its own Rojo project.
    rojo serve afk.project.json
    ```
 4. Connect Studio to `grand-tide-rush-afk`.
-5. Publish only to place `122987301330026`.
+5. Publish only to place `135767110031089`.
 
 ## Safeguards
 
 - Never connect `default.project.json` to the AFK Lobby place.
 - Never connect `afk.project.json` to the main place.
+- Run `tools/validate-startup-build.ps1` against fresh Rojo build outputs before publishing.
 - If the wrong boot script reaches the wrong place, the place guard should warn and stop booting.
 - `afk.project.json` intentionally keeps `$ignoreUnknownInstances = true`; clean old polluted AFK instances manually after verifying the AFK place ID instead of relying on destructive deletion sync.
