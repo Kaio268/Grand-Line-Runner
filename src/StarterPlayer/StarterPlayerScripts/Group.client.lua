@@ -4,8 +4,9 @@ local GroupService = game:GetService("GroupService")
 
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ShipVisuals"))
+local SocialGroups = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SocialGroups"))
 
-local GROUP_ID = 17179624
+local GROUP_ID = SocialGroups.GroupRewardGroupId
 local REMOTE_NAME = "GroupRewardClaim"
 
 local player = Players.LocalPlayer

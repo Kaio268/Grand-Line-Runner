@@ -3,9 +3,10 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
+local SocialGroups = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("SocialGroups"))
 local ddata = require(script.Parent.Parent.Data.DataManager)
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
-local GROUP_ID = 17179624
+local GROUP_ID = SocialGroups.GroupRewardGroupId
 local REMOTE_NAME = "GroupRewardClaim"
 
 local CrewRewardService = require(script.Parent.Parent.Modules.CrewRewardService)
