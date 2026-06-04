@@ -7,12 +7,12 @@ local ItemIconRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ChestUtils = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestUtils"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
 
 local ChestOpenResultFormatter = {}
 
 local FOOD_ORDER = { "Apple", "Rice", "Meat", "SeaBeastMeat" }
 local REWARD_TYPE_DEVIL_FRUIT = "DevilFruit"
-local DEFAULT_CHEST_IMAGE = "rbxassetid://104345752533382"
 local DEFAULT_CHEST_ICON = ItemIconRegistry.GetIcon("Chest")
 local RARITY_RANK = {
 	Common = 1,
@@ -29,80 +29,71 @@ local RARITY_COLORS = {
 	Reward = Color3.fromRGB(116, 245, 183),
 	Duplicate = Color3.fromRGB(255, 179, 92),
 }
-local SUPPORTED_CHEST_VISUAL_KEYS = {
-	wood = true,
-	wooden = true,
-	woodenchest = true,
-	iron = true,
-	ironchest = true,
-	gold = true,
-	golden = true,
-	goldchest = true,
-	goldenchest = true,
-	devilfruit = true,
-	commondevilfruit = true,
-	raredevilfruit = true,
-	legendarydevilfruit = true,
-	mythicdevilfruit = true,
-}
 
-local function normalizeChestVisualKey(value)
+local function normalizeLookupKey(value)
 	local key = tostring(value or "")
 	key = key:gsub("%s+", "")
 	key = key:gsub("[_%-]", "")
 	return string.lower(key)
 end
 
-local function sanitizeChestVisualKey(candidate)
-	if tostring(candidate or "") == "" then
+local function appendIconCandidate(candidates, value)
+	local candidate = tostring(value or "")
+	if candidate ~= "" then
+		candidates[#candidates + 1] = candidate
+	end
+end
+
+local function resolveChestIconCandidate(candidate)
+	local resolved = RewardIconResolver.Resolve(candidate, "")
+	if tostring(resolved.category or resolved.Category or "") ~= "Chest" then
 		return nil
 	end
 
-	local parsed = ChestUtils.ParseInventoryName(candidate)
-	local styleName = ChestUtils.GetVisualStyleName(parsed)
-	if SUPPORTED_CHEST_VISUAL_KEYS[normalizeChestVisualKey(styleName)] then
-		return styleName
-	end
-
-	if SUPPORTED_CHEST_VISUAL_KEYS[normalizeChestVisualKey(candidate)] then
-		return tostring(candidate)
+	local icon = tostring(resolved.icon or resolved.Icon or "")
+	if icon ~= "" then
+		return icon
 	end
 
 	return nil
 end
 
-local function stripChestDisplaySuffix(displayName)
-	local value = tostring(displayName or "")
-	value = value:gsub("%s+[Cc]hests$", "")
-	value = value:gsub("%s+[Cc]hest$", "")
-	return value
+local function isDevilFruitChestKind(kind)
+	return normalizeLookupKey(kind):find("devilfruit", 1, true) ~= nil
 end
 
-local function resolveOpenedChestVisualKey(openedChest)
+local function resolveOpenedChestIcon(openedChest)
 	if typeof(openedChest) ~= "table" then
-		return nil
+		return DEFAULT_CHEST_ICON
 	end
 
-	local inventoryName = sanitizeChestVisualKey(openedChest.inventoryName)
-	if inventoryName then
-		return inventoryName
+	local candidates = {}
+	appendIconCandidate(candidates, openedChest.inventoryName)
+	appendIconCandidate(candidates, openedChest.InventoryName)
+	appendIconCandidate(candidates, openedChest.displayName)
+	appendIconCandidate(candidates, openedChest.DisplayName)
+
+	local kind = tostring(openedChest.kind or openedChest.ChestKind or "")
+	local fruitRarity = tostring(openedChest.fruitRarity or openedChest.FruitRarity or "")
+	if fruitRarity ~= "" and isDevilFruitChestKind(kind) then
+		appendIconCandidate(candidates, fruitRarity .. " Devil Fruit Chest")
+		appendIconCandidate(candidates, fruitRarity .. "DevilFruitChest")
 	end
 
-	local tierName = tostring(openedChest.tier or "")
-	if tierName ~= "" then
-		if tostring(openedChest.kind or "") == "DevilFruit" then
-			local fruitRarity = tostring(openedChest.fruitRarity or "")
-			if fruitRarity ~= "" then
-				return sanitizeChestVisualKey(fruitRarity .. " Devil Fruit")
-			end
+	local tier = tostring(openedChest.tier or openedChest.Tier or "")
+	if tier ~= "" then
+		appendIconCandidate(candidates, tier .. " Chest")
+		appendIconCandidate(candidates, tier .. "Chest")
+	end
 
-			return sanitizeChestVisualKey("Devil Fruit")
+	for _, candidate in ipairs(candidates) do
+		local icon = resolveChestIconCandidate(candidate)
+		if icon ~= nil then
+			return icon
 		end
-
-		return sanitizeChestVisualKey(tierName)
 	end
 
-	return sanitizeChestVisualKey(stripChestDisplaySuffix(openedChest.displayName))
+	return DEFAULT_CHEST_ICON
 end
 
 local function appendLine(lines, text)
@@ -113,16 +104,35 @@ local function appendLine(lines, text)
 	lines[#lines + 1] = text
 end
 
+local function getRewardIcon(name, fallback)
+	return RewardIconResolver.GetIcon(name, fallback)
+end
+
+local function resolveRewardRowIcon(name, icon)
+	local explicitIcon = if typeof(icon) == "string" then icon else ""
+	if explicitIcon ~= "" then
+		return getRewardIcon(name, explicitIcon)
+	end
+
+	local resolved = RewardIconResolver.Resolve(name, "")
+	if tostring(resolved.category or resolved.Category or "") == "Chest" then
+		return tostring(resolved.icon or resolved.Icon or "")
+	end
+
+	return ""
+end
+
 local function appendRewardRow(rows, name, amount, icon)
 	local normalizedAmount = math.max(0, tonumber(amount) or 0)
 	if tostring(name or "") == "" or normalizedAmount <= 0 then
 		return
 	end
+	local displayName = tostring(name)
 
 	rows[#rows + 1] = {
-		Name = tostring(name),
+		Name = displayName,
 		Amount = normalizedAmount,
-		Icon = if typeof(icon) == "string" then icon else "",
+		Icon = resolveRewardRowIcon(displayName, icon),
 	}
 end
 
@@ -434,10 +444,6 @@ local function pluralizeChestDisplay(name, count)
 		return displayName
 	end
 	return displayName .. "s"
-end
-
-local function getRewardIcon(name, fallback)
-	return ItemIconRegistry.GetIcon(name, fallback)
 end
 
 local function applyRewardMetadata(card, metadata)
@@ -980,8 +986,8 @@ function ChestOpenResultFormatter.BuildResultsScreenModel(openResult)
 		openedCount = openedCount,
 		openedChestDisplayName = openedChestDisplayName,
 		subtitle = string.format("You opened %s %s", formatCount(openedCount), displayChestName),
-		chestImage = DEFAULT_CHEST_IMAGE,
-		chestVisualKey = resolveOpenedChestVisualKey(openedChest),
+		chestImage = resolveOpenedChestIcon(openedChest),
+		chestVisualKey = nil,
 		featuredReward = featuredReward,
 		rewardCards = rewardCards,
 		chestInfoBanner = chestInfoBanner,

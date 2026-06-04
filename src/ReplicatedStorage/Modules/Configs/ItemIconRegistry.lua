@@ -65,19 +65,19 @@ local ITEMS = {
 	},
 	WoodenChest = {
 		DisplayName = "Wooden Chest",
-		Icon = "rbxassetid://88825249018556",
+		Icon = "rbxthumb://type=Asset&id=91690641750985&w=420&h=420",
 		Category = "Chest",
 		Aliases = { "Wooden Chest", "Wooden Chests", "Wood Chest", "Wood Chests", "WoodChest", "Supply Chest" },
 	},
 	IronChest = {
 		DisplayName = "Iron Chest",
-		Icon = "rbxassetid://88825249018556",
+		Icon = "rbxthumb://type=Asset&id=71609283893812&w=420&h=420",
 		Category = "Chest",
 		Aliases = { "Iron Chest", "Iron Chests" },
 	},
 	GoldChest = {
 		DisplayName = "Gold Chest",
-		Icon = "rbxassetid://88825249018556",
+		Icon = "rbxthumb://type=Asset&id=103014235347686&w=420&h=420",
 		Category = "Chest",
 		Aliases = { "Gold Chest", "Gold Chests", "GoldenChest", "Golden Chest", "Golden Chests" },
 	},
@@ -98,7 +98,7 @@ local ITEMS = {
 	},
 	CommonDevilFruitChest = {
 		DisplayName = "Common Devil Fruit Chest",
-		Icon = "rbxassetid://88825249018556",
+		Icon = "rbxthumb://type=Asset&id=136911249192921&w=420&h=420",
 		Category = "Chest",
 		Aliases = {
 			"CommonDevilFruitChest",
@@ -118,7 +118,7 @@ local ITEMS = {
 	},
 	LegendaryDevilFruitChest = {
 		DisplayName = "Legendary Devil Fruit Chest",
-		Icon = "rbxassetid://88825249018556",
+		Icon = "rbxthumb://type=Asset&id=125195396062890&w=420&h=420",
 		Category = "Chest",
 		Aliases = {
 			"LegendaryDevilFruitChest",

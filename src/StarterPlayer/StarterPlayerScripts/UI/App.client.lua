@@ -1850,6 +1850,11 @@ local function getIcon(kind, name, state)
 		return ItemIconRegistry.GetIcon(name)
 	end
 
+	if kind == "Chest" then
+		local displayName = ChestUtils.GetDisplayName(name)
+		return ItemIconRegistry.GetIcon(displayName, ItemIconRegistry.GetIcon(name, ""))
+	end
+
 	if isCrewItemKind(kind) then
 		local staticPreviewImage = getStaticCrewPreviewImage(name, state)
 		if staticPreviewImage ~= "" then
@@ -3247,9 +3252,6 @@ local function buildEntry(key, state)
 		staticPreviewImage = getStaticCrewPreviewImage(state.name, state, modelPreview, displayName)
 	elseif state.kind == "DevilFruit" then
 		previewKind = "DevilFruit"
-		previewName = state.name
-	elseif state.kind == "Chest" then
-		previewKind = "Chest"
 		previewName = state.name
 	elseif state.kind == "Resource" then
 		previewKind = "Resource"

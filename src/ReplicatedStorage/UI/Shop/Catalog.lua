@@ -124,6 +124,7 @@ local items = {
 		callToAction = "Buy",
 		themeKey = "Gold",
 		iconText = "SP",
+		iconImage = "rbxthumb://type=Asset&id=78820183613944&w=420&h=420",
 		purchase = productPurchase("StarterPack"),
 	}),
 	captainPass = item({
@@ -167,6 +168,7 @@ local items = {
 		callToAction = "Buy",
 		themeKey = "Violet",
 		iconText = "MF",
+		iconImage = "rbxthumb://type=Asset&id=83455906932066&w=420&h=420",
 		RequiresPaidRandomItemPolicy = true,
 		PaidRandomItem = true,
 		purchase = productPurchase("MythicFruitChest"),
@@ -226,6 +228,7 @@ local items = {
 		callToAction = "Buy",
 		themeKey = "Emerald",
 		iconText = "CS",
+		iconImage = "rbxthumb://type=Asset&id=111865826130056&w=420&h=420",
 		purchase = productPurchase("CrewShield"),
 	}),
 	fleetShield = item({
@@ -239,6 +242,7 @@ local items = {
 		callToAction = "Buy",
 		themeKey = "Cyan",
 		iconText = "FS",
+		iconImage = "rbxthumb://type=Asset&id=75122081978039&w=420&h=420",
 		purchase = productPurchase("FleetShield"),
 	}),
 	permanentShieldSlot = item({
@@ -252,6 +256,7 @@ local items = {
 		callToAction = "Buy",
 		themeKey = "Slate",
 		iconText = "PS",
+		iconImage = "rbxthumb://type=Asset&id=105145243589491&w=420&h=420",
 		purchase = productPurchase("PermanentShieldSlot"),
 	}),
 }
