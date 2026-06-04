@@ -6,6 +6,12 @@ local Workspace = game:GetService("Workspace")
 local HazardRuntime = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("HazardRuntime"))
 local DevilFruitLogger = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits"):WaitForChild("Shared"):WaitForChild("DevilFruitLogger"))
 local AffectableRegistry = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AffectableRegistry"))
+local ActiveCooldownHud = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("ActiveCooldownHud")
+)
 local HieAnimationController = require(script.Parent:WaitForChild("HieAnimationController"))
 local HitResolver = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitResolver"))
 local HitEffectService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("HitEffectService"))
@@ -64,8 +70,10 @@ local FREEZE_SHOT_ALLOWED_ENTITY_TYPES = {
 }
 
 local projectileSequence = 0
+local iceBoostSequence = 0
 local restoreTokensByPlayer = setmetatable({}, { __mode = "k" })
 local castSlowTokensByPlayer = setmetatable({}, { __mode = "k" })
+local activeIceBoostByPlayer = setmetatable({}, { __mode = "k" })
 local activeFreezePresentationsByTarget = setmetatable({}, { __mode = "k" })
 local cachedFreezeVisualTemplate = nil
 
@@ -572,9 +580,63 @@ local function clearIceBoostAttributes(player)
 	player:SetAttribute(HIE_ICE_BOOST_SPEED_BONUS_ATTRIBUTE, nil)
 end
 
-local function clearIceBoostRuntimeState(player, reason)
+local function disconnectConnections(connections)
+	if type(connections) ~= "table" then
+		return
+	end
+
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
+	end
+	table.clear(connections)
+end
+
+local function buildIceBoostExitPayload(state, reason)
+	return {
+		Phase = "End",
+		StartedAt = state and state.StartedAt or nil,
+		EndedAt = Workspace:GetServerTimeNow(),
+		EndTime = state and state.EndTime or nil,
+		Duration = state and state.Duration or nil,
+		SpeedMultiplier = state and state.SpeedMultiplier or nil,
+		ResolveReason = reason,
+	}
+end
+
+local function clearIceBoostRuntimeState(player, reason, options)
+	options = if type(options) == "table" then options else {}
+	local state = player and activeIceBoostByPlayer[player] or nil
+	if options.ExpectedSequence ~= nil then
+		if not state or state.Sequence ~= options.ExpectedSequence then
+			return false
+		end
+	end
+
+	if state then
+		activeIceBoostByPlayer[player] = nil
+		disconnectConnections(state.Connections)
+	end
 	clearIceBoostAttributes(player)
 	HieAnimationController.StopIceBoostAnimation(player, nil, reason or "runtime_clear")
+	if player and player.Parent and state then
+		if options.StartCooldown == true and typeof(state.StartAbilityCooldown) == "function" then
+			local cooldownDuration = tonumber(state.AbilityConfig and state.AbilityConfig.Cooldown) or 0
+			state.StartAbilityCooldown(cooldownDuration, ActiveCooldownHud.BuildCooldownStartedPayload(
+				buildIceBoostExitPayload(state, reason),
+				{
+					CooldownDuration = cooldownDuration,
+					RuntimeId = state.RuntimeId,
+				}
+			))
+		elseif options.EmitReadyHud == true and typeof(state.ClearAbilityCooldown) == "function" then
+			state.ClearAbilityCooldown(ActiveCooldownHud.BuildReadyPayload(buildIceBoostExitPayload(state, reason), {
+				Reason = reason,
+				RuntimeId = state.RuntimeId,
+			}))
+		end
+	end
+
+	return state ~= nil
 end
 
 local function stopPlanarVelocity(rootPart)
@@ -1757,9 +1819,26 @@ function GlacialServer.IceBoost(context)
 	local abilityConfig = context.AbilityConfig
 	local humanoid = context.Humanoid
 	local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid:FindFirstChild("Animator")) or nil
+	local activeState = activeIceBoostByPlayer[player]
+	if activeState and (tonumber(activeState.ExpiresAt) or 0) > os.clock() then
+		return {
+			Phase = "Ignored",
+			ResolveReason = "already_active",
+		}, {
+			ApplyCooldown = false,
+			SuppressActivatedEvent = true,
+		}
+	elseif activeState then
+		clearIceBoostRuntimeState(player, "stale_active_state")
+	end
+
 	local duration = math.max(0, tonumber(abilityConfig.Duration) or 0)
 	local speedMultiplier = math.max(1, tonumber(abilityConfig.SpeedMultiplier) or DEFAULT_ICE_BOOST_SPEED_MULTIPLIER)
+	local startedAt = Workspace:GetServerTimeNow()
 	local untilTime = os.clock() + duration
+	iceBoostSequence += 1
+	local sequence = iceBoostSequence
+	local runtimeId = string.format("%d:IceBoost:%d", player.UserId, sequence)
 	DevilFruitLogger.Info(
 		"MOVE",
 		"handler enter fruit=%s ability=%s player=%s character=%s humanoid=%s root=%s animator=%s payloadKeys=%d duration=%.2f speedMultiplier=%.2f",
@@ -1779,31 +1858,79 @@ function GlacialServer.IceBoost(context)
 	player:SetAttribute(HIE_ICE_BOOST_SPEED_MULTIPLIER_ATTRIBUTE, speedMultiplier)
 	player:SetAttribute(HIE_ICE_BOOST_SPEED_BONUS_ATTRIBUTE, nil)
 	HieAnimationController.PlayIceBoostAnimation(player, context.Character, abilityConfig.Animation, untilTime)
+	activeIceBoostByPlayer[player] = {
+		Sequence = sequence,
+		RuntimeId = runtimeId,
+		AbilityConfig = abilityConfig,
+		StartedAt = startedAt,
+		EndTime = startedAt + duration,
+		Duration = duration,
+		SpeedMultiplier = speedMultiplier,
+		ExpiresAt = untilTime,
+		StartAbilityCooldown = context.StartAbilityCooldown,
+		ClearAbilityCooldown = context.ClearAbilityCooldown,
+		Connections = {},
+	}
+	local state = activeIceBoostByPlayer[player]
+	if humanoid then
+		state.Connections[#state.Connections + 1] = humanoid.Died:Connect(function()
+			clearIceBoostRuntimeState(player, "humanoid_died", {
+				ExpectedSequence = sequence,
+				EmitReadyHud = true,
+			})
+		end)
+	end
+	state.Connections[#state.Connections + 1] = player.CharacterRemoving:Connect(function(character)
+		if character == context.Character then
+			clearIceBoostRuntimeState(player, "character_removing", {
+				ExpectedSequence = sequence,
+				EmitReadyHud = true,
+			})
+		end
+	end)
 
 	task.delay(duration + ICE_BOOST_DURATION_CLEANUP_BUFFER, function()
 		if player.Parent == nil then
-			HieAnimationController.StopIceBoostAnimation(player, untilTime, "player_removed")
+			clearIceBoostRuntimeState(player, "player_removed", {
+				ExpectedSequence = sequence,
+			})
 			return
 		end
 
-		local currentUntil = player:GetAttribute(HIE_ICE_BOOST_UNTIL_ATTRIBUTE)
-		if currentUntil == untilTime then
-			clearIceBoostAttributes(player)
-			HieAnimationController.StopIceBoostAnimation(player, untilTime, "duration_complete")
-		elseif typeof(currentUntil) ~= "number" or currentUntil < untilTime then
+		local currentState = activeIceBoostByPlayer[player]
+		if currentState and currentState.Sequence == sequence then
+			clearIceBoostRuntimeState(player, "duration_complete", {
+				ExpectedSequence = sequence,
+				StartCooldown = true,
+			})
+		elseif typeof(player:GetAttribute(HIE_ICE_BOOST_UNTIL_ATTRIBUTE)) ~= "number" then
 			HieAnimationController.StopIceBoostAnimation(player, untilTime, "interrupted")
 		end
 	end)
 
-	return {
+	local payload = {
+		Phase = "Start",
+		StartedAt = startedAt,
+		EndTime = startedAt + duration,
 		Duration = duration,
 		SpeedMultiplier = speedMultiplier,
+	}
+	return ActiveCooldownHud.BuildActivePayload(payload, {
+		StartedAt = startedAt,
+		ActiveEndsAt = startedAt + duration,
+		ActiveDuration = duration,
+		CooldownDuration = tonumber(abilityConfig.Cooldown) or 0,
+		RuntimeId = runtimeId,
+	}), {
+		ApplyCooldown = false,
 	}
 end
 
 function GlacialServer.ClearRuntimeState(player)
 	clearFreezeShotCastSlow(player)
-	clearIceBoostRuntimeState(player, "runtime_clear")
+	clearIceBoostRuntimeState(player, "runtime_clear", {
+		EmitReadyHud = true,
+	})
 end
 
 logMessage("INIT", "Freeze Shot runtime initialized")

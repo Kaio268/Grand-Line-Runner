@@ -376,6 +376,12 @@ local function getFallbackError(response)
 		or errorCode == "no_carried_item"
 	then
 		return "No carried item to drop."
+	elseif errorCode == "missing_selected_carry_id" or errorCode == "missing_selected_carry_slot" then
+		return "Select an item to drop."
+	elseif errorCode == "stale_selected_carry_item" or errorCode == "selected_carry_slot_mismatch" then
+		return "That carried item changed. Select it again."
+	elseif errorCode == "carry_drop_busy" or errorCode == "drop_in_progress" then
+		return "Drop already in progress."
 	elseif errorCode == "missing_drop_position" then
 		return "Move a little before dropping that."
 	elseif errorCode == "missing_context" or errorCode == "missing_state" then

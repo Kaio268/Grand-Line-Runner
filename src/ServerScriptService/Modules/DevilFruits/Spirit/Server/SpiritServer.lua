@@ -16,6 +16,12 @@ local DamageProtection = require(
 		:WaitForChild("Server")
 		:WaitForChild("DamageProtection")
 )
+local ActiveCooldownHud = require(
+	ServerScriptService:WaitForChild("Modules")
+		:WaitForChild("DevilFruits")
+		:WaitForChild("Server")
+		:WaitForChild("ActiveCooldownHud")
+)
 local HoroAnimationController = require(script.Parent:WaitForChild("HoroAnimationController"))
 local HoroGhostAnimateController = require(script.Parent:WaitForChild("HoroGhostAnimateController"))
 
@@ -33,9 +39,10 @@ local PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local PROJECTION_SOURCE_SPEED_ATTRIBUTE = "HoroProjectionSourceWalkSpeed"
 local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 
-local DEFAULT_DURATION = 5
+local DEFAULT_DURATION = 8
 local DEFAULT_GHOST_SPEED = 15
 local DEFAULT_CARRY_SPEED = 8
+local DEFAULT_GHOST_HAZARD_IMMUNE = true
 local DEFAULT_MAX_DISTANCE_FROM_BODY = 68
 local DEFAULT_REWARD_INTERACT_RADIUS = 12
 local DEFAULT_HAZARD_PROBE_RADIUS = 3.4
@@ -90,6 +97,12 @@ local PICKUP_OWNERSHIP_REFRESH_ATTEMPTS = 12
 local ACTION_TRY_PICKUP = "TryPickup"
 local ACTION_INTERRUPT = "Interrupt"
 local ACTION_BODY_HAZARD = "BodyHazard"
+local GHOST_HAZARD_INTERRUPT_REASONS = {
+	client_hazard = true,
+	hazard_overlap = true,
+	hazard_touch = true,
+	wave_touch = true,
+}
 
 local activeProjectionsByPlayer = setmetatable({}, { __mode = "k" })
 local actionRemote = nil
@@ -247,6 +260,23 @@ local function resolveColor(value, fallback)
 	end
 
 	return fallback
+end
+
+local function resolveGhostHazardImmune(abilityConfig)
+	if abilityConfig.GhostHazardImmune == false then
+		return false
+	end
+
+	return DEFAULT_GHOST_HAZARD_IMMUNE
+end
+
+local function isGhostHazardImmune(state)
+	return state and state.GhostHazardImmune == true
+end
+
+local function isGhostHazardInterruptReason(reason)
+	local normalizedReason = tostring(reason or "client_hazard")
+	return GHOST_HAZARD_INTERRUPT_REASONS[normalizedReason] == true
 end
 
 local function getVfxConfig(abilityConfig)
@@ -824,9 +854,16 @@ local function styleGhostModel(ghostModel, state)
 
 	for _, descendant in ipairs(ghostModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
+			local ghostHazardImmune = isGhostHazardImmune(state)
 			descendant.Anchored = false
-			descendant.CanTouch = true
-			descendant.CanQuery = true
+			if ghostHazardImmune then
+				descendant.CanCollide = false
+				descendant.CanTouch = false
+				descendant.CanQuery = false
+			else
+				descendant.CanTouch = true
+				descendant.CanQuery = true
+			end
 			descendant.CastShadow = false
 			descendant.Transparency = math.max(descendant.Transparency, ghostTransparency)
 			if descendant.Name ~= "HumanoidRootPart" then
@@ -1075,8 +1112,12 @@ local function dropCarriedRewards(state, dropPosition)
 
 	local crewMemberContext = CrewInteraction.GetActiveContext()
 	local droppedCrewMember = false
-	if not droppedAny then
-		droppedCrewMember = CrewInteraction.DropHeldAtPosition(crewMemberContext, player, nil, dropPosition)
+	local skipLegacyCrewFallback = typeof(response) == "table"
+		and (response.error == "carry_drop_busy" or response.error == "drop_in_progress")
+	if not droppedAny and skipLegacyCrewFallback ~= true then
+		droppedCrewMember = CrewInteraction.DropHeldAtPosition(crewMemberContext, player, nil, dropPosition, nil, {
+			Reason = "HoroProjection",
+		})
 		if droppedCrewMember then
 			droppedAny = true
 		end
@@ -1109,6 +1150,9 @@ local function handleGhostTouched(state, hit)
 	if not state or state.Resolved or activeProjectionsByPlayer[state.Player] ~= state then
 		return
 	end
+	if isGhostHazardImmune(state) then
+		return
+	end
 	if hit:IsDescendantOf(state.GhostModel) or hit:IsDescendantOf(state.Character) then
 		return
 	end
@@ -1128,6 +1172,10 @@ local function connectGhostTouch(state, part)
 end
 
 local function attachGhostTouchListeners(state)
+	if isGhostHazardImmune(state) then
+		return
+	end
+
 	for _, descendant in ipairs(state.GhostModel:GetDescendants()) do
 		if descendant:IsA("BasePart") then
 			connectGhostTouch(state, descendant)
@@ -1226,11 +1274,17 @@ finishProjection = function(state, reason, dropPosition, shouldDropReward)
 	if typeof(state.EmitEffect) == "function" and state.Player.Parent == Players then
 		state.EmitEffect(ABILITY_NAME, payload, state.Player)
 	end
+	local cooldownDuration = tonumber(state.AbilityConfig and state.AbilityConfig.Cooldown) or 0
 	if state.Player.Parent == Players
 		and shouldStartCooldownOnProjectionFinish(reason)
 		and typeof(state.StartAbilityCooldown) == "function"
 	then
-		local readyAt = state.StartAbilityCooldown(tonumber(state.AbilityConfig and state.AbilityConfig.Cooldown) or 0, payload)
+		payload = ActiveCooldownHud.BuildCooldownStartedPayload(payload, {
+			CooldownDuration = cooldownDuration,
+			EndedAt = payload.EndedAt,
+			RuntimeId = state.ProjectionId,
+		})
+		local readyAt = state.StartAbilityCooldown(cooldownDuration, payload)
 		horoTrace(
 			"finishProjection cooldownStarted player=%s projectionId=%s reason=%s readyAt=%s",
 			state.Player and state.Player.Name or "<nil>",
@@ -1238,6 +1292,11 @@ finishProjection = function(state, reason, dropPosition, shouldDropReward)
 			tostring(reason),
 			tostring(readyAt)
 		)
+	elseif state.Player.Parent == Players and reason ~= "player_removing" and typeof(state.ClearAbilityCooldown) == "function" then
+		state.ClearAbilityCooldown(ActiveCooldownHud.BuildReadyPayload(payload, {
+			Reason = reason,
+			RuntimeId = state.ProjectionId,
+		}))
 	end
 
 	if state.GhostModel and state.GhostModel.Parent then
@@ -1263,6 +1322,10 @@ finishProjection = function(state, reason, dropPosition, shouldDropReward)
 end
 
 local function probeHazards(state)
+	if isGhostHazardImmune(state) then
+		return false
+	end
+
 	if not state.GhostRoot or not state.GhostRoot.Parent then
 		return false
 	end
@@ -1519,6 +1582,16 @@ local function handleActionRemote(player, actionName, payload)
 	end
 
 	if actionName == ACTION_INTERRUPT then
+		local reason = payload and payload.Reason
+		if isGhostHazardImmune(state) and isGhostHazardInterruptReason(reason) then
+			horoTrace(
+				"clientInterrupt ignored player=%s projectionId=%s reason=%s route=ghost_hazard_immune",
+				player and player.Name or "<nil>",
+				tostring(state.ProjectionId),
+				tostring(reason)
+			)
+			return
+		end
 		if isDamageProtected(state.Player, state.GhostRoot and state.GhostRoot.Position or nil, "SpiritClientHazard") then
 			return
 		end
@@ -1571,7 +1644,7 @@ end
 
 local function buildStartPayload(state)
 	refreshProjectionSpeeds(state)
-	return {
+	local payload = {
 		Phase = "Start",
 		StartedAt = state.StartedAt,
 		EndTime = state.EndTime,
@@ -1586,6 +1659,7 @@ local function buildStartPayload(state)
 		MaxDistanceFromBody = getEffectiveMaxDistanceFromBody(state),
 		RewardInteractRadius = state.RewardInteractRadius,
 		HazardProbeRadius = state.HazardProbeRadius,
+		GhostHazardImmune = state.GhostHazardImmune == true,
 		HitboxDebugMode = "FollowWorldPart",
 		HitboxDebugSearchPath = {
 			"Workspace",
@@ -1607,6 +1681,13 @@ local function buildStartPayload(state)
 			},
 		},
 	}
+	return ActiveCooldownHud.BuildActivePayload(payload, {
+		StartedAt = state.StartedAt,
+		ActiveEndsAt = state.EndTime,
+		ActiveDuration = state.Duration,
+		CooldownDuration = tonumber(state.AbilityConfig and state.AbilityConfig.Cooldown) or 0,
+		RuntimeId = state.ProjectionId,
+	})
 end
 
 local function buildRejectedPayload(reason)
@@ -1774,6 +1855,7 @@ function SpiritServer.GhostProjection(context)
 		EndTime = startedAt + duration,
 		Duration = duration,
 		StartPosition = context.RootPart.Position,
+		GhostHazardImmune = resolveGhostHazardImmune(abilityConfig),
 		GhostSpeed = clampNumber(abilityConfig.GhostSpeed, DEFAULT_GHOST_SPEED, MIN_GHOST_SPEED, MAX_PROJECTION_MOVE_SPEED),
 		CarrySpeed = clampNumber(abilityConfig.CarrySpeed, DEFAULT_CARRY_SPEED, MIN_CARRY_SPEED, MAX_PROJECTION_MOVE_SPEED),
 		MaxDistanceFromBody = clampNumber(
@@ -1834,6 +1916,7 @@ function SpiritServer.GhostProjection(context)
 		Connections = {},
 		EmitEffect = context.EmitEffect,
 		StartAbilityCooldown = context.StartAbilityCooldown,
+		ClearAbilityCooldown = context.ClearAbilityCooldown,
 	}
 	refreshProjectionSpeeds(state)
 
@@ -1877,6 +1960,15 @@ end
 function SpiritServer.InterruptActiveProjection(player, reason, dropPosition)
 	local state = activeProjectionsByPlayer[player]
 	if not state then
+		return false
+	end
+	if isGhostHazardImmune(state) and isGhostHazardInterruptReason(reason) then
+		horoTrace(
+			"externalInterrupt ignored player=%s projectionId=%s reason=%s route=ghost_hazard_immune",
+			player and player.Name or "<nil>",
+			tostring(state.ProjectionId),
+			tostring(reason)
+		)
 		return false
 	end
 

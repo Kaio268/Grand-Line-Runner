@@ -1718,12 +1718,14 @@ local function initializeDevilFruitClient()
 	end)
 
 	player.CharacterRemoving:Connect(function()
+		table.clear(localAbilityHudStates)
 		activeFireBursts = {}
 		activeMoguBurrow = nil
 		fruitModuleLoader:ForEachLoadedController("HandleCharacterRemoving")
 		hazardSuppressionLoopRunning = false
 		restoreSuppressedParts(math.huge)
 		publishMoguHazardDiagnostics(true)
+		updateCooldownHud(false)
 	end)
 
 	Players.PlayerRemoving:Connect(function(leavingPlayer)

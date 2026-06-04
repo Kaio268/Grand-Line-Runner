@@ -27,6 +27,8 @@ local BOMU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "BomuMovementLockUntil"
 local BOMU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "BomuMovementLockSpeedMultiplier"
 local MOGU_MOVEMENT_LOCK_UNTIL_ATTRIBUTE = "MoguMovementLockUntil"
 local MOGU_MOVEMENT_LOCK_SPEED_ATTRIBUTE = "MoguMovementLockSpeedMultiplier"
+local SUKE_INVISIBILITY_UNTIL_ATTRIBUTE = "SukeInvisibilityUntil"
+local SUKE_INVISIBILITY_SPEED_ATTRIBUTE = "SukeInvisibilitySpeedMultiplier"
 local POTIONS_FOLDER_NAME = "Potions"
 local POTION_SPEED_BOOST_TIME_NAME = "x15WalkSpeedTime"
 local LEGACY_DECREASE_SPEED_FLOOR = nil
@@ -268,6 +270,21 @@ local function getHieIceBoostSpeedMultiplier(player)
 	return math.max(1, speedMultiplier)
 end
 
+local function getSukeInvisibilitySpeedMultiplier(player)
+	local untilTime = player:GetAttribute(SUKE_INVISIBILITY_UNTIL_ATTRIBUTE)
+	local speedMultiplier = player:GetAttribute(SUKE_INVISIBILITY_SPEED_ATTRIBUTE)
+
+	if typeof(untilTime) ~= "number" or typeof(speedMultiplier) ~= "number" then
+		return 1
+	end
+
+	if untilTime <= os.clock() then
+		return 1
+	end
+
+	return math.max(1, speedMultiplier)
+end
+
 local function getHieFreezeShotCastSpeedMultiplier(player)
 	local untilTime = player:GetAttribute(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE)
 	local speedMultiplier = player:GetAttribute(HIE_FREEZE_SHOT_CAST_SPEED_ATTRIBUTE)
@@ -331,6 +348,7 @@ end
 
 local function getPositiveSpeedMultiplier(player)
 	return getHieIceBoostSpeedMultiplier(player)
+		* getSukeInvisibilitySpeedMultiplier(player)
 		* getPotionSpeedBoostMultiplier(player)
 		* getTitleSpeedMultiplier(player)
 end
@@ -425,6 +443,7 @@ local function hookCharacter(player, character)
 	local updating = false
 	local bomuExpiryApplyToken = 0
 	local moguExpiryApplyToken = 0
+	local sukeExpiryApplyToken = 0
 	local disconnected = false
 	local conns = {}
 	local boundPotionBoostValues = {}
@@ -544,6 +563,22 @@ local function hookCharacter(player, character)
 		end)
 	end
 
+	local function scheduleSukeInvisibilityExpiryApply()
+		sukeExpiryApplyToken += 1
+		local token = sukeExpiryApplyToken
+		local untilTime = player:GetAttribute(SUKE_INVISIBILITY_UNTIL_ATTRIBUTE)
+		if typeof(untilTime) ~= "number" then
+			return
+		end
+
+		local delaySeconds = math.max(0, untilTime - os.clock()) + 0.05
+		task.delay(delaySeconds, function()
+			if token == sukeExpiryApplyToken and humanoid.Parent and humanoid.Health > 0 then
+				apply("suke_invisibility_expired")
+			end
+		end)
+	end
+
 	local function logSpeedState(reason, oldState, newState)
 		local part = getDecreasePart()
 		zoneTrace(
@@ -569,6 +604,7 @@ local function hookCharacter(player, character)
 	apply("character_hooked")
 	scheduleBomuLockExpiryApply()
 	scheduleMoguLockExpiryApply()
+	scheduleSukeInvisibilityExpiryApply()
 	zoneTrace(
 		"player=%s hookCharacter zone=%s initialInZone=%s appliedSpeed=%s character=%s",
 		player.Name,
@@ -691,6 +727,15 @@ local function hookCharacter(player, character)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal("HieIceBoostSpeedBonus"):Connect(function()
 		apply("hie_ice_bonus_changed")
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(SUKE_INVISIBILITY_UNTIL_ATTRIBUTE):Connect(function()
+		apply("suke_invisibility_until_changed")
+		scheduleSukeInvisibilityExpiryApply()
+	end)
+
+	conns[#conns + 1] = player:GetAttributeChangedSignal(SUKE_INVISIBILITY_SPEED_ATTRIBUTE):Connect(function()
+		apply("suke_invisibility_multiplier_changed")
 	end)
 
 	conns[#conns + 1] = player:GetAttributeChangedSignal(HIE_FREEZE_SHOT_CAST_UNTIL_ATTRIBUTE):Connect(function()

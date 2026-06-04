@@ -701,7 +701,6 @@ applyConfirmedWaveHit = function(player, character, humanoid, rootPart, hit, hit
 		return true
 	end
 	if SpiritServer.IsProjecting(player) and character:GetAttribute("HoroProjectionGhost") == true then
-		SpiritServer.InterruptActiveProjection(player, "wave_touch")
 		return true
 	end
 	if PhoenixServer.IsProtected(player, hit and hit.HitPosition or rootPart.Position) then

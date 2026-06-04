@@ -68,9 +68,13 @@ local function disconnectAll()
 	table.clear(connections)
 end
 
-local function setStatus(text, color)
-	statusText = text
-	statusColor3 = color
+local function openCrewmateInventory()
+	ReactModalRegistry.Close("NamiShop")
+	ReactModalRegistry.Open("Inventory", {
+		ActiveCategory = "CrewMembers",
+		ActiveView = "Inventory",
+		Source = "NamiShop",
+	})
 end
 
 local function buildViewModel()
@@ -98,12 +102,10 @@ local function render()
 			ReactModalRegistry.Close("NamiShop")
 		end,
 		onSellEquipped = function()
-			setStatus("Crew selling is in Inventory > CrewMembers for stored crewmates.", Color3.fromRGB(239, 199, 109))
-			task.defer(render)
+			openCrewmateInventory()
 		end,
 		onSellInventory = function()
-			setStatus("Crew selling is exact-instance only from Inventory > CrewMembers.", Color3.fromRGB(239, 199, 109))
-			task.defer(render)
+			openCrewmateInventory()
 		end,
 		statusColor3 = statusColor3,
 		statusText = statusText,

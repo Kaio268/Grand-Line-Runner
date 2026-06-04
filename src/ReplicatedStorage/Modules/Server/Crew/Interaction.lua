@@ -1,13 +1,16 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local PhysicsService = game:GetService("PhysicsService")
 
 local Interaction = {}
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local CarriedDropNotice = require(Modules:WaitForChild("CarriedDropNotice"))
 local CarriedRewardVisuals = require(Modules:WaitForChild("CarriedRewardVisuals"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local activeContext = nil
 local carrySlotAdapter = nil
+local worldPresentationAdapter = nil
 local HORO_PROJECTION_CARRY_ATTRIBUTE = "HoroProjectionCarryProjectionId"
 local TUTORIAL_CREW_MEMBER_ATTRIBUTE = "TutorialCrewMember"
 local TUTORIAL_OWNER_ATTRIBUTE = "TutorialOwnerUserId"
@@ -24,9 +27,21 @@ local CARRY_ROOT_REPAIR_DISTANCE = 2
 local CARRY_PART_REPAIR_DISTANCE = 3
 local CARRY_MAINTENANCE_INTERVAL = 0.2
 local CARRY_VISUAL_SPACING = CarriedRewardVisuals.DefaultSpacing
+local PLAYER_COLLISION_GROUP = "Players"
+local VIP_PLAYER_COLLISION_GROUP = "VIPPlayers"
+local VIP_BARRIER_COLLISION_GROUP = "VIPBarriers"
+local DEFAULT_COLLISION_GROUP = "Default"
+local CARRIED_CREWMATE_COLLISION_GROUP = "CarriedCrewmates"
+local DROPPED_CREWMATE_COLLISION_GROUP = "DroppedCrewmates"
+local CARRIED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE = "CarriedCrewmatePreviousCollisionGroup"
+local DROPPED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE = "DroppedCrewmatePreviousCollisionGroup"
 local carryMaintenanceEntries = {}
 local carryMaintenanceConnection = nil
 local carryMaintenanceElapsed = 0
+local carriedCrewCollisionGroupsConfigured = false
+local droppedCrewCollisionGroupsConfigured = false
+local DROP_SETTLE_RETRY_DELAY = 0.2
+local DROP_SETTLE_MAX_RETRIES = 3
 
 local function normalizeCarriedAttribute(value)
 	if typeof(value) == "string" and value ~= "" then
@@ -36,6 +51,42 @@ local function normalizeCarriedAttribute(value)
 		return tostring(value)
 	end
 	return nil
+end
+
+local function dropSettleTrace(message, ...)
+	if not RunService:IsStudio() then
+		return
+	end
+
+	print(string.format("[CrewInteraction][DropSettle] " .. tostring(message), ...))
+end
+
+local function getDropNoticeReason(options)
+	if typeof(options) ~= "table" then
+		return "Unknown"
+	end
+	return CarriedDropNotice.NormalizeReason(options.Reason or options.ReasonCode)
+end
+
+local function notifyCrewDrop(player, options, info)
+	options = if typeof(options) == "table" then options else {}
+	if options.SuppressDropNotice == true then
+		return nil
+	end
+
+	info = if typeof(info) == "table" then info else {}
+	return CarriedDropNotice.Notify(player, {
+		ReasonCode = getDropNoticeReason(options),
+		Count = tonumber(options.Count) or 1,
+		Source = info.Source or options.Source or "CrewInteraction",
+		Action = info.Action or options.Action,
+		ItemType = "CrewMember",
+		DisplayName = info.DisplayName,
+		CarryId = info.CarryId,
+		SlotIndex = info.SlotIndex,
+		Context = info.Context,
+		SuppressToast = options.SuppressDropNotice == true,
+	})
 end
 
 local function clearCarriedCrewMemberAttributes(player)
@@ -58,6 +109,10 @@ end
 
 function Interaction.SetCarrySlotAdapter(adapter)
 	carrySlotAdapter = if typeof(adapter) == "table" then adapter else nil
+end
+
+function Interaction.SetWorldPresentationAdapter(adapter)
+	worldPresentationAdapter = if typeof(adapter) == "table" then adapter else nil
 end
 
 local function getCrewMemberInfoFromState(st)
@@ -148,6 +203,195 @@ local function forEachPart(model, fn)
 	end
 end
 
+local function registerCollisionGroup(groupName)
+	pcall(function()
+		PhysicsService:RegisterCollisionGroup(groupName)
+	end)
+end
+
+local function setCollisionGroupCollidable(groupA, groupB, isCollidable)
+	local ok, err = pcall(function()
+		PhysicsService:CollisionGroupSetCollidable(groupA, groupB, isCollidable)
+	end)
+	if not ok then
+		warn(string.format(
+			"[CrewInteraction] Failed to set collision matrix %s vs %s = %s (%s)",
+			tostring(groupA),
+			tostring(groupB),
+			tostring(isCollidable),
+			tostring(err)
+		))
+	end
+end
+
+local function ensureDroppedCrewCollisionGroups()
+	if droppedCrewCollisionGroupsConfigured == true then
+		return
+	end
+	droppedCrewCollisionGroupsConfigured = true
+
+	registerCollisionGroup(PLAYER_COLLISION_GROUP)
+	registerCollisionGroup(VIP_PLAYER_COLLISION_GROUP)
+	registerCollisionGroup(DROPPED_CREWMATE_COLLISION_GROUP)
+
+	setCollisionGroupCollidable(DROPPED_CREWMATE_COLLISION_GROUP, DEFAULT_COLLISION_GROUP, true)
+	setCollisionGroupCollidable(DROPPED_CREWMATE_COLLISION_GROUP, PLAYER_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(DROPPED_CREWMATE_COLLISION_GROUP, VIP_PLAYER_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(DROPPED_CREWMATE_COLLISION_GROUP, DROPPED_CREWMATE_COLLISION_GROUP, false)
+end
+
+local function ensureCarriedCrewCollisionGroups()
+	if carriedCrewCollisionGroupsConfigured == true then
+		return
+	end
+	carriedCrewCollisionGroupsConfigured = true
+
+	registerCollisionGroup(PLAYER_COLLISION_GROUP)
+	registerCollisionGroup(VIP_PLAYER_COLLISION_GROUP)
+	registerCollisionGroup(VIP_BARRIER_COLLISION_GROUP)
+	registerCollisionGroup(CARRIED_CREWMATE_COLLISION_GROUP)
+	registerCollisionGroup(DROPPED_CREWMATE_COLLISION_GROUP)
+
+	setCollisionGroupCollidable(CARRIED_CREWMATE_COLLISION_GROUP, DEFAULT_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(CARRIED_CREWMATE_COLLISION_GROUP, PLAYER_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(CARRIED_CREWMATE_COLLISION_GROUP, VIP_PLAYER_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(CARRIED_CREWMATE_COLLISION_GROUP, VIP_BARRIER_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(CARRIED_CREWMATE_COLLISION_GROUP, CARRIED_CREWMATE_COLLISION_GROUP, false)
+	setCollisionGroupCollidable(CARRIED_CREWMATE_COLLISION_GROUP, DROPPED_CREWMATE_COLLISION_GROUP, false)
+end
+
+local function setPartCollisionGroup(part, groupName)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	pcall(function()
+		part.CollisionGroup = groupName
+	end)
+end
+
+local function applyCarriedCrewPartCollisionGroup(part)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	if part:GetAttribute(CARRIED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE) == nil
+		and part.CollisionGroup ~= CARRIED_CREWMATE_COLLISION_GROUP
+	then
+		part:SetAttribute(CARRIED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE, part.CollisionGroup)
+	end
+	setPartCollisionGroup(part, CARRIED_CREWMATE_COLLISION_GROUP)
+end
+
+local function restoreCarriedCrewPartCollisionGroup(part)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	local previousGroup = part:GetAttribute(CARRIED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE)
+	if typeof(previousGroup) == "string" and previousGroup ~= "" then
+		setPartCollisionGroup(part, previousGroup)
+		part:SetAttribute(CARRIED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE, nil)
+		return
+	end
+
+	if part.CollisionGroup == CARRIED_CREWMATE_COLLISION_GROUP then
+		setPartCollisionGroup(part, DEFAULT_COLLISION_GROUP)
+	end
+	part:SetAttribute(CARRIED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE, nil)
+end
+
+local function applyDroppedCrewPartCollisionGroup(part)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	if part:GetAttribute(DROPPED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE) == nil
+		and part.CollisionGroup ~= DROPPED_CREWMATE_COLLISION_GROUP
+	then
+		part:SetAttribute(DROPPED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE, part.CollisionGroup)
+	end
+	setPartCollisionGroup(part, DROPPED_CREWMATE_COLLISION_GROUP)
+end
+
+local function restoreDroppedCrewPartCollisionGroup(part)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	local previousGroup = part:GetAttribute(DROPPED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE)
+	if typeof(previousGroup) == "string" and previousGroup ~= "" then
+		setPartCollisionGroup(part, previousGroup)
+		part:SetAttribute(DROPPED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE, nil)
+		return
+	end
+
+	if part.CollisionGroup == DROPPED_CREWMATE_COLLISION_GROUP then
+		setPartCollisionGroup(part, DEFAULT_COLLISION_GROUP)
+	end
+	part:SetAttribute(DROPPED_PREVIOUS_COLLISION_GROUP_ATTRIBUTE, nil)
+end
+
+local function disconnectCarriedCrewCollisionWatcher(st)
+	local connection = st and st.CarriedCollisionGroupConn
+	if connection then
+		pcall(function()
+			connection:Disconnect()
+		end)
+	end
+	if st then
+		st.CarriedCollisionGroupConn = nil
+	end
+end
+
+local function disconnectDroppedCrewCollisionWatcher(st)
+	local connection = st and st.DroppedCollisionGroupConn
+	if connection then
+		pcall(function()
+			connection:Disconnect()
+		end)
+	end
+	if st then
+		st.DroppedCollisionGroupConn = nil
+	end
+end
+
+local function restoreCarriedCrewCollisionGroup(model, st)
+	disconnectCarriedCrewCollisionWatcher(st)
+	if not model then
+		return
+	end
+
+	forEachPart(model, restoreCarriedCrewPartCollisionGroup)
+end
+
+local function applyDroppedCrewCollisionGroup(model, st)
+	if not model then
+		return
+	end
+
+	ensureDroppedCrewCollisionGroups()
+	disconnectDroppedCrewCollisionWatcher(st)
+
+	forEachPart(model, applyDroppedCrewPartCollisionGroup)
+	if st then
+		st.DroppedCollisionGroupConn = model.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("BasePart") and model.Parent ~= nil and st.Held ~= true then
+				applyDroppedCrewPartCollisionGroup(descendant)
+			end
+		end)
+	end
+end
+
+local function restoreDroppedCrewCollisionGroup(model, st)
+	disconnectDroppedCrewCollisionWatcher(st)
+	if not model then
+		return
+	end
+
+	forEachPart(model, restoreDroppedCrewPartCollisionGroup)
+end
+
 local function setNetworkOwner(part, owner)
 	if part.Anchored then
 		return
@@ -156,6 +400,50 @@ local function setNetworkOwner(part, owner)
 	pcall(function()
 		part:SetNetworkOwner(owner)
 	end)
+end
+
+local function setCarriedCrewPartHeldPhysics(part, networkOwner)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	part.Anchored = false
+	part.CanCollide = false
+	part.CanTouch = false
+	part.CanQuery = false
+	part.Massless = true
+	part.AssemblyLinearVelocity = Vector3.zero
+	part.AssemblyAngularVelocity = Vector3.zero
+	setNetworkOwner(part, networkOwner)
+end
+
+local function applyCarriedCrewPartState(part, networkOwner)
+	if not part:IsA("BasePart") then
+		return
+	end
+
+	setCarriedCrewPartHeldPhysics(part, networkOwner)
+	applyCarriedCrewPartCollisionGroup(part)
+end
+
+local function applyCarriedCrewCollisionGroup(model, st, networkOwner)
+	if not model then
+		return
+	end
+
+	ensureCarriedCrewCollisionGroups()
+	disconnectCarriedCrewCollisionWatcher(st)
+
+	forEachPart(model, function(part)
+		applyCarriedCrewPartState(part, networkOwner)
+	end)
+	if st then
+		st.CarriedCollisionGroupConn = model.DescendantAdded:Connect(function(descendant)
+			if descendant:IsA("BasePart") and model.Parent ~= nil and st.Held == true then
+				applyCarriedCrewPartState(descendant, st.CarryOwner or networkOwner)
+			end
+		end)
+	end
 end
 
 local function setCarryPhysics(model, held, networkOwner)
@@ -538,16 +826,41 @@ local function computeHeadRotOnly(head)
 	return rot - rot.Position
 end
 
-local function getGroundPosition(pos, ignore)
+local function isHumanoidModel(model)
+	return model and model:IsA("Model") and model:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+local function isValidDropGroundResult(result, selfModel)
+	if not result or not result.Instance or not result.Instance:IsA("BasePart") then
+		return false
+	end
+
+	local hitPart = result.Instance
+	if selfModel and hitPart:IsDescendantOf(selfModel) then
+		return false
+	end
+	local hitModel = hitPart:FindFirstAncestorOfClass("Model")
+	if isHumanoidModel(hitModel) then
+		return false
+	end
+	return hitPart.CanCollide == true
+end
+
+local function resolveGroundPosition(pos, ignore, selfModel)
+	if typeof(pos) ~= "Vector3" then
+		return nil, nil
+	end
+
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = ignore or {}
+	params.IgnoreWater = true
 	local origin = pos + Vector3.new(0, 6, 0)
 	local result = workspace:Raycast(origin, Vector3.new(0, -300, 0), params)
-	if result then
-		return result.Position
+	if isValidDropGroundResult(result, selfModel) then
+		return result.Position, result
 	end
-	return pos
+	return nil, result
 end
 
 local function computePivotBottomOnPoint(model, point, rotOnly)
@@ -558,7 +871,148 @@ local function computePivotBottomOnPoint(model, point, rotOnly)
 	return desiredBoxCF * offset:Inverse()
 end
 
-local function settleToGroundThenAnchor(model, shouldContinue)
+local function describeDropSettleState(ctx, model, st, settleToken)
+	if not model then
+		return "missing_model"
+	end
+	if not model.Parent then
+		return "model_unparented"
+	end
+	if ctx and model.Parent ~= ctx.DroppedFolder then
+		return "model_left_dropped_folder"
+	end
+	if st and st.Held == true then
+		return "state_held_again"
+	end
+	if st and st.DropSettleToken ~= settleToken then
+		return "settle_token_changed"
+	end
+	return "continue"
+end
+
+local function restoreDroppedCrewMemberPresentation(ctx, model, st, settleToken, diagnostics)
+	diagnostics = if typeof(diagnostics) == "table" then diagnostics else {}
+	local adapter = worldPresentationAdapter
+	if typeof(adapter) ~= "table" or typeof(adapter.RestoreDroppedCrewMember) ~= "function" then
+		dropSettleTrace(
+			"presentationRestoreSkipped reason=%s carryId=%s model=%s detail=adapter_missing",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>")
+		)
+		return false
+	end
+	if not ctx or not model or not model.Parent or model.Parent ~= ctx.DroppedFolder then
+		dropSettleTrace(
+			"presentationRestoreSkipped reason=%s carryId=%s model=%s detail=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			describeDropSettleState(ctx, model, st, settleToken)
+		)
+		return false
+	end
+	if not st or st.Held == true or st.DropSettleToken ~= settleToken or st.Entry == nil then
+		dropSettleTrace(
+			"presentationRestoreSkipped reason=%s carryId=%s model=%s detail=%s entry=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			describeDropSettleState(ctx, model, st, settleToken),
+			tostring(st and st.Entry ~= nil)
+		)
+		return false
+	end
+
+	local ok, result, failure = pcall(function()
+		return adapter.RestoreDroppedCrewMember(model, st, {
+			Context = ctx,
+			ReasonCode = diagnostics.ReasonCode,
+			CarryId = diagnostics.CarryId,
+			RetryCount = diagnostics.RetryCount,
+			Source = "CrewInteractionDropSettle",
+		})
+	end)
+	if not ok then
+		dropSettleTrace(
+			"presentationRestoreFailed reason=%s carryId=%s model=%s error=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(result)
+		)
+		return false
+	end
+	if result == false then
+		dropSettleTrace(
+			"presentationRestoreFailed reason=%s carryId=%s model=%s detail=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(failure or "adapter_returned_false")
+		)
+		return false
+	end
+
+	dropSettleTrace(
+		"presentationRestoreComplete reason=%s carryId=%s model=%s result=%s",
+		tostring(diagnostics.ReasonCode or "Unknown"),
+		tostring(diagnostics.CarryId or ""),
+		tostring(model and model.Name or "<nil>"),
+		tostring(result)
+	)
+	return true
+end
+
+local function appendSettleCandidate(candidates, position)
+	if typeof(position) ~= "Vector3" then
+		return
+	end
+
+	for _, existing in ipairs(candidates) do
+		if (existing - position).Magnitude < 0.05 then
+			return
+		end
+	end
+
+	candidates[#candidates + 1] = position
+end
+
+local function buildDropSettleIgnoreList(model, diagnostics)
+	local ignore = { model }
+	local extraIgnore = diagnostics.ExtraIgnore
+	if typeof(extraIgnore) == "table" then
+		for _, instance in ipairs(extraIgnore) do
+			if typeof(instance) == "Instance" then
+				ignore[#ignore + 1] = instance
+			end
+		end
+	end
+	return ignore
+end
+
+local function resolveDropSettleGround(model, diagnostics)
+	local candidates = {}
+	appendSettleCandidate(candidates, model:GetPivot().Position)
+	appendSettleCandidate(candidates, diagnostics.DropPosition)
+	appendSettleCandidate(candidates, diagnostics.StartFallBasePosition)
+	appendSettleCandidate(candidates, diagnostics.StartPosition)
+
+	local ignore = buildDropSettleIgnoreList(model, diagnostics)
+	local firstRejectedResult = nil
+	for index, candidate in ipairs(candidates) do
+		local ground, result = resolveGroundPosition(candidate, ignore, model)
+		if ground then
+			return ground, result, candidate, index
+		end
+		firstRejectedResult = firstRejectedResult or result
+	end
+
+	return nil, firstRejectedResult, nil, nil
+end
+
+local function settleToGroundThenAnchor(model, shouldContinue, diagnostics)
+	diagnostics = if typeof(diagnostics) == "table" then diagnostics else {}
 	local function canContinue()
 		if typeof(shouldContinue) ~= "function" then
 			return true
@@ -568,15 +1022,38 @@ local function settleToGroundThenAnchor(model, shouldContinue)
 		return ok and result ~= false
 	end
 
+	dropSettleTrace(
+		"begin reason=%s carryId=%s model=%s start=%s",
+		tostring(diagnostics.ReasonCode or "Unknown"),
+		tostring(diagnostics.CarryId or ""),
+		tostring(model and model.Name or "<nil>"),
+		tostring(model and model:GetPivot().Position or "")
+	)
+
 	if not canContinue() then
-		return
+		dropSettleTrace(
+			"exitBeforeLoop reason=%s carryId=%s model=%s state=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled")
+		)
+		return "cancelled"
 	end
 
 	local primary = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
 	local t0 = os.clock()
 	while model.Parent and os.clock() - t0 < 2.5 do
 		if not canContinue() then
-			return
+			dropSettleTrace(
+				"exitDuringLoop reason=%s carryId=%s model=%s state=%s elapsed=%.2f",
+				tostring(diagnostics.ReasonCode or "Unknown"),
+				tostring(diagnostics.CarryId or ""),
+				tostring(model and model.Name or "<nil>"),
+				tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled"),
+				os.clock() - t0
+			)
+			return "cancelled"
 		end
 
 		task.wait(0.08)
@@ -594,8 +1071,33 @@ local function settleToGroundThenAnchor(model, shouldContinue)
 			end
 		end
 	end
-	if not model.Parent or not canContinue() then
-		return
+	if model.Parent and os.clock() - t0 >= 2.5 then
+		dropSettleTrace(
+			"timeoutFallback reason=%s carryId=%s model=%s pivot=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(model:GetPivot().Position)
+		)
+	end
+	if not model.Parent then
+		dropSettleTrace(
+			"exitBeforeAnchor reason=%s carryId=%s model=%s state=model_unparented",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>")
+		)
+		return "cancelled"
+	end
+	if not canContinue() then
+		dropSettleTrace(
+			"exitBeforeAnchor reason=%s carryId=%s model=%s state=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled")
+		)
+		return "cancelled"
 	end
 	local rot = model:GetPivot()
 	local lv = rot.LookVector
@@ -607,32 +1109,126 @@ local function settleToGroundThenAnchor(model, shouldContinue)
 	end
 	local rotOnly = CFrame.lookAt(Vector3.zero, dir, Vector3.yAxis)
 	rotOnly = rotOnly - rotOnly.Position
-	local ground = getGroundPosition(model:GetPivot().Position, { model })
+	local ground, result, candidate, candidateIndex = resolveDropSettleGround(model, diagnostics)
+	if not ground then
+		dropSettleTrace(
+			"settleNoGround reason=%s carryId=%s model=%s pivot=%s rejectedHit=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(model:GetPivot().Position),
+			tostring(result and result.Instance and result.Instance:GetFullName() or "")
+		)
+		return "no_ground"
+	end
 	local pivotTarget = computePivotBottomOnPoint(model, ground, rotOnly)
 	model:PivotTo(pivotTarget)
 	if not canContinue() then
-		return
+		dropSettleTrace(
+			"exitAfterPivot reason=%s carryId=%s model=%s state=%s pivot=%s",
+			tostring(diagnostics.ReasonCode or "Unknown"),
+			tostring(diagnostics.CarryId or ""),
+			tostring(model and model.Name or "<nil>"),
+			tostring(if typeof(diagnostics.DescribeCancel) == "function" then diagnostics.DescribeCancel() else "cancelled"),
+			tostring(model:GetPivot().Position)
+		)
+		return "cancelled"
 	end
 	anchorAll(model)
+	dropSettleTrace(
+		"anchorComplete reason=%s carryId=%s model=%s finalPivot=%s ground=%s candidate=%s candidateIndex=%s hit=%s",
+		tostring(diagnostics.ReasonCode or "Unknown"),
+		tostring(diagnostics.CarryId or ""),
+		tostring(model and model.Name or "<nil>"),
+		tostring(model:GetPivot().Position),
+		tostring(ground),
+		tostring(candidate),
+		tostring(candidateIndex or ""),
+		tostring(result and result.Instance and result.Instance:GetFullName() or "")
+	)
+	restoreDroppedCrewMemberPresentation(diagnostics.Context, model, diagnostics.State, diagnostics.SettleToken, diagnostics)
+	return "anchored"
 end
 
-local function scheduleDroppedCrewMemberSettle(ctx, model, st)
-	if not ctx or not model or not st then
-		return
-	end
+local function runDroppedCrewMemberSettle(ctx, model, st, settleToken, options, retryCount)
+	options = if typeof(options) == "table" then options else {}
+	retryCount = math.max(0, math.floor(tonumber(retryCount) or 0))
 
-	st.DropSettleToken = (tonumber(st.DropSettleToken) or 0) + 1
-	local settleToken = st.DropSettleToken
+	local reasonCode = CarriedDropNotice.NormalizeReason(options.Reason or options.ReasonCode)
+	local carryId = options.CarryId
+	local modelName = model.Name
+	local startPosition = model:GetPivot().Position
+	dropSettleTrace(
+		"scheduled reason=%s carryId=%s model=%s start=%s token=%s retry=%d",
+		tostring(reasonCode),
+		tostring(carryId or ""),
+		tostring(modelName),
+		tostring(startPosition),
+		tostring(settleToken),
+		retryCount
+	)
 	task.spawn(function()
-		settleToGroundThenAnchor(model, function()
+		local shouldContinue = function()
 			return model.Parent == ctx.DroppedFolder and st.Held ~= true and st.DropSettleToken == settleToken
+		end
+		local diagnostics = {
+			Context = ctx,
+			State = st,
+			SettleToken = settleToken,
+			ReasonCode = reasonCode,
+			CarryId = carryId,
+			ModelName = modelName,
+			StartPosition = startPosition,
+			DropPosition = options.DropPosition,
+			StartFallBasePosition = options.StartFallBasePosition,
+			ExtraIgnore = options.ExtraIgnore,
+			RetryCount = retryCount,
+			DescribeCancel = function()
+				return describeDropSettleState(ctx, model, st, settleToken)
+			end,
+		}
+		local result = settleToGroundThenAnchor(model, shouldContinue, diagnostics)
+		if result ~= "no_ground" then
+			return
+		end
+		if retryCount >= DROP_SETTLE_MAX_RETRIES then
+			dropSettleTrace(
+				"settleNoGroundExhausted reason=%s carryId=%s model=%s token=%s retries=%d",
+				tostring(reasonCode),
+				tostring(carryId or ""),
+				tostring(modelName),
+				tostring(settleToken),
+				retryCount
+			)
+			return
+		end
+
+		task.delay(DROP_SETTLE_RETRY_DELAY, function()
+			if not shouldContinue() then
+				dropSettleTrace(
+					"settleRetryAborted reason=%s carryId=%s model=%s token=%s state=%s",
+					tostring(reasonCode),
+					tostring(carryId or ""),
+					tostring(modelName),
+					tostring(settleToken),
+					describeDropSettleState(ctx, model, st, settleToken)
+				)
+				return
+			end
+			runDroppedCrewMemberSettle(ctx, model, st, settleToken, options, retryCount + 1)
 		end)
 	end)
 end
 
-local function isForcedCarryDropState(state)
-	return state == Enum.HumanoidStateType.Ragdoll
-		or state == Enum.HumanoidStateType.Physics
+local function scheduleDroppedCrewMemberSettle(ctx, model, st, options)
+	if not ctx or not model or not st then
+		return
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	st.DropSettleToken = (tonumber(st.DropSettleToken) or 0) + 1
+	local settleToken = st.DropSettleToken
+	runDroppedCrewMemberSettle(ctx, model, st, settleToken, options, 0)
 end
 
 function Interaction.NewContext(map)
@@ -933,19 +1529,25 @@ local function dropHeldCrewMember(ctx, player, model, st, dropPosition, options)
 
 	options = if typeof(options) == "table" then options else {}
 	local userId = player.UserId
+	local dropReason = getDropNoticeReason(options)
+	local carryId = st.CarryId
+	local carrySlotIndex = st.CarrySlotIndex
+	local crewMemberData = resolveCanonicalCrewMemberData(model, st)
+	local displayName = crewMemberData and crewMemberData.DisplayName or model.Name
 	if options.SkipCarrySlotRemove ~= true then
-		removeCrewCarrySlot(player, st.CarryId or st.CarrySlotIndex)
+		removeCrewCarrySlot(player, carryId or carrySlotIndex)
 	end
 	clearCarriedCrewMemberAttributes(player)
 	player:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
-	removeHeldModel(ctx, userId, st.CarryId, model)
+	removeHeldModel(ctx, userId, carryId, model)
 	refreshHeldCarryLayout(ctx, player)
 	if not ctx.HeldByUserId[userId] then
 		disconnectDeath(ctx, userId)
 		disconnectRagdoll(ctx, userId)
 	end
 	disconnectCarryPhysics(st)
+	restoreCarriedCrewCollisionGroup(model, st)
 	setCarriedHumanoidState(model, st, false)
 
 	destroyCarryAttachmentWeld(st)
@@ -994,7 +1596,20 @@ local function dropHeldCrewMember(ctx, player, model, st, dropPosition, options)
 		)
 	end
 	setDropPhysics(model)
-	scheduleDroppedCrewMemberSettle(ctx, model, st)
+	applyDroppedCrewCollisionGroup(model, st)
+	scheduleDroppedCrewMemberSettle(ctx, model, st, {
+		Reason = dropReason,
+		CarryId = carryId,
+		DropPosition = dropPos,
+		StartFallBasePosition = dropPos,
+		ExtraIgnore = if char then { char } else nil,
+	})
+	notifyCrewDrop(player, options, {
+		Action = "DropHeldCrewMember",
+		DisplayName = displayName,
+		CarryId = carryId,
+		SlotIndex = carrySlotIndex,
+	})
 
 	if st.Prompt then
 		st.Prompt.Enabled = true
@@ -1039,6 +1654,8 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 		return false
 	end
 
+	restoreDroppedCrewCollisionGroup(model, st)
+
 	if st.Prompt then
 		st.Prompt.Enabled = false
 	end
@@ -1055,6 +1672,7 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 	st.CarrySlotIndex = carrySlot.SlotIndex
 	st.CarryOrder = carrySlot.CarryOrder
 	model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, true)
+	applyCarriedCrewCollisionGroup(model, st, player)
 	setCarryPhysics(model, true, player)
 	setCarriedHumanoidState(model, st, true)
 	ensureCarryAssemblyWelds(model, primary)
@@ -1079,22 +1697,9 @@ local function carryCrewMemberOnPart(ctx, player, model, st, carrierPart)
 			local heldModel = ctx.HeldByCarryId[heldCarryId]
 			local heldState = ctx.Active and ctx.Active[heldModel]
 			if heldModel and heldModel.Parent and heldState then
-				dropHeldCrewMember(ctx, player, heldModel, heldState)
-			end
-		end
-	end)
-
-	ctx.RagdollConnByUserId[player.UserId] = hum.StateChanged:Connect(function(_, newState)
-		if not isForcedCarryDropState(newState) then
-			return
-		end
-
-		local heldCarryIds = table.clone(getHeldCarryIdList(ctx, player.UserId))
-		for _, heldCarryId in ipairs(heldCarryIds) do
-			local heldModel = ctx.HeldByCarryId[heldCarryId]
-			local heldState = ctx.Active and ctx.Active[heldModel]
-			if heldModel and heldModel.Parent and heldState then
-				dropHeldCrewMember(ctx, player, heldModel, heldState)
+				dropHeldCrewMember(ctx, player, heldModel, heldState, nil, {
+					Reason = "PlayerDeath",
+				})
 			end
 		end
 	end)
@@ -1256,6 +1861,8 @@ function Interaction.CollectHeld(ctx, player, active, slotIndexOrCarryId, option
 	end
 	disconnectCarryPhysics(st)
 	if st then
+		restoreCarriedCrewCollisionGroup(model, st)
+		restoreDroppedCrewCollisionGroup(model, st)
 		setCarriedHumanoidState(model, st, false)
 		destroyCarryAttachmentWeld(st)
 		clearCarryMaintenanceState(st)
@@ -1266,6 +1873,12 @@ function Interaction.CollectHeld(ctx, player, active, slotIndexOrCarryId, option
 		model:SetAttribute(CARRIED_MODEL_ATTRIBUTE, nil)
 		model:Destroy()
 	end)
+	notifyCrewDrop(player, options, {
+		Action = "CollectHeld",
+		DisplayName = collectedInfo.DisplayName,
+		CarryId = collectedInfo.CarryId,
+		SlotIndex = collectedInfo.CarrySlotIndex or collectedInfo.SlotIndex,
+	})
 
 	return collectedInfo
 end
@@ -1328,10 +1941,10 @@ function Interaction.CollectAllHeld(ctx, player, active, options)
 	return results
 end
 
-function Interaction.ForgetHeldCarryItem(ctx, player, active, slotIndexOrCarryId)
-	return Interaction.CollectHeld(ctx, player, active, slotIndexOrCarryId, {
-		SkipCarrySlotRemove = true,
-	})
+function Interaction.ForgetHeldCarryItem(ctx, player, active, slotIndexOrCarryId, options)
+	options = if typeof(options) == "table" then table.clone(options) else {}
+	options.SkipCarrySlotRemove = true
+	return Interaction.CollectHeld(ctx, player, active, slotIndexOrCarryId, options)
 end
 
 function Interaction.BindPrompt(ctx, model, st, ensurePrimaryPart)
@@ -1393,7 +2006,12 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 		if m and m.Parent then
 			local st = active[m]
 			if st then
+				local droppedCarryId = if carryId == "__legacy_first" then st.CarryId else carryId
+				local droppedSlotIndex = st.CarrySlotIndex
+				local crewMemberData = resolveCanonicalCrewMemberData(m, st)
+				local displayName = crewMemberData and crewMemberData.DisplayName or m.Name
 				disconnectCarryPhysics(st)
+				restoreCarriedCrewCollisionGroup(m, st)
 				setCarriedHumanoidState(m, st, false)
 				destroyCarryAttachmentWeld(st)
 				clearCarryMaintenanceState(st)
@@ -1403,7 +2021,8 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 				clearCarriedCrewMemberAttributes(plr)
 				plr:SetAttribute(HORO_PROJECTION_CARRY_ATTRIBUTE, nil)
 
-				local pos = m:GetPivot().Position + Vector3.new(0, 6, 0)
+				local dropBasePosition = m:GetPivot().Position
+				local pos = dropBasePosition + Vector3.new(0, 6, 0)
 				local rot = m:GetPivot()
 				local lv = rot.LookVector
 				local dir = Vector3.new(lv.X, 0, lv.Z)
@@ -1424,7 +2043,23 @@ function Interaction.OnPlayerRemoving(ctx, plr, active)
 				st.CarryOrder = nil
 				st.LastUpdate = os.clock()
 				setDropPhysics(m)
-				scheduleDroppedCrewMemberSettle(ctx, m, st)
+				applyDroppedCrewCollisionGroup(m, st)
+				scheduleDroppedCrewMemberSettle(ctx, m, st, {
+					Reason = "PlayerRemoving",
+					CarryId = droppedCarryId,
+					DropPosition = dropBasePosition,
+					StartFallBasePosition = dropBasePosition,
+					ExtraIgnore = if plr.Character then { plr.Character } else nil,
+				})
+				notifyCrewDrop(plr, {
+					Reason = "PlayerRemoving",
+					SuppressDropNotice = true,
+				}, {
+					Action = "OnPlayerRemoving",
+					DisplayName = displayName,
+					CarryId = droppedCarryId,
+					SlotIndex = droppedSlotIndex,
+				})
 
 				if st.Prompt then
 					st.Prompt.Enabled = true

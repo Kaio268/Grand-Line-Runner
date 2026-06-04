@@ -552,7 +552,10 @@ local function inHandSlot(props)
 	local locked = props.locked == true or (slot and slot.Locked == true)
 	local occupied = locked ~= true and ((slot and slot.Occupied == true) or props.item ~= nil or props.crewmate ~= nil)
 	local selected = props.selected == true
+	local selectionActive = props.selectionActive == true
+	local deemphasized = occupied and selectionActive and not selected
 	local canSelect = occupied and typeof(props.onSelect) == "function"
+	local compact = isCompactViewport()
 	local slotNumber = tostring((slot and slot.SlotIndex) or props.slotNumber or 1)
 	local item = if slot and typeof(slot.Item) == "table" then slot.Item else props.item or props.crewmate
 	local itemIsChest = occupied and isChestItem(item)
@@ -592,16 +595,23 @@ local function inHandSlot(props)
 		warnMissingCrewPreview(item, modelName)
 	end
 
-	local strokeColor = if locked then PALETTE.Border elseif occupied then PALETTE.Gold else PALETTE.Border
-	local strokeTransparency = if selected then 0.08 elseif locked then 0.68 elseif occupied then 0.24 else 0.58
+	local strokeColor = if selected
+		then PALETTE.Highlight
+		elseif locked
+			then PALETTE.Border
+			elseif occupied
+				then PALETTE.Gold
+				else PALETTE.Border
+	local strokeTransparency = if selected then 0.02 elseif locked then 0.68 elseif occupied then 0.34 else 0.58
 
 	return e("TextButton", {
 		Active = canSelect,
 		AutoButtonColor = false,
 		BackgroundColor3 = PALETTE.Ink,
-		BackgroundTransparency = if locked then 0.18 elseif occupied then 0.08 else 0.14,
+		BackgroundTransparency = if locked then 0.18 elseif selected then 0.02 elseif deemphasized then 0.22 elseif occupied then 0.08 else 0.14,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or props.slotNumber or 1,
+		Selectable = canSelect,
 		Size = UDim2.new(1 / 3, -6, 1, 0),
 		Text = "",
 		ZIndex = zIndex,
@@ -617,15 +627,83 @@ local function inHandSlot(props)
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, if locked or not occupied then PALETTE.Glass else PALETTE.GlassDeep),
+				ColorSequenceKeypoint.new(0, if selected
+					then PALETTE.Glass
+					elseif locked or not occupied
+						then PALETTE.Glass
+						else PALETTE.GlassDeep),
 				ColorSequenceKeypoint.new(1, PALETTE.Ink),
 			}),
 		}),
+		SelectedGlow = if selected
+			then e("UIStroke", {
+				Color = PALETTE.Gold,
+				Thickness = 5,
+				Transparency = 0.56,
+			})
+			else nil,
 		Stroke = e("UIStroke", {
 			Color = strokeColor,
-			Thickness = if selected then 2.25 elseif occupied then 1.75 else 1.25,
+			Thickness = if selected then 3 elseif occupied then 1.75 else 1.25,
 			Transparency = strokeTransparency,
 		}),
+		SelectedWash = if selected
+			then e("Frame", {
+				BackgroundColor3 = PALETTE.Highlight,
+				BackgroundTransparency = 0.9,
+				BorderSizePixel = 0,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = zIndex + 1,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 8),
+				}),
+			})
+			else nil,
+		SelectionDim = if deemphasized
+			then e("Frame", {
+				BackgroundColor3 = PALETTE.Ink,
+				BackgroundTransparency = 0.42,
+				BorderSizePixel = 0,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = zIndex + 2,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 8),
+				}),
+			})
+			else nil,
+		SelectionRibbon = if selected
+			then e("Frame", {
+				AnchorPoint = Vector2.new(1, 0),
+				BackgroundColor3 = PALETTE.Gold,
+				BackgroundTransparency = 0.04,
+				BorderSizePixel = 0,
+				Position = UDim2.new(1, -5, 0, 5),
+				Size = UDim2.fromOffset(compact and 54 or 72, compact and 14 or 16),
+				ZIndex = zIndex + 5,
+			}, {
+				Corner = e("UICorner", {
+					CornerRadius = UDim.new(0, 5),
+				}),
+				Stroke = e("UIStroke", {
+					Color = PALETTE.Highlight,
+					Thickness = 1,
+					Transparency = 0.24,
+				}),
+				Label = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Enum.Font.GothamBlack,
+					Size = UDim2.fromScale(1, 1),
+					Text = "SELECTED",
+					TextColor3 = PALETTE.Ink,
+					TextSize = compact and 7 or 8,
+					TextXAlignment = Enum.TextXAlignment.Center,
+					TextYAlignment = Enum.TextYAlignment.Center,
+					ZIndex = zIndex + 6,
+				}),
+			})
+			else nil,
 		NumberBadge = e("Frame", {
 			BackgroundColor3 = PALETTE.GlassDeep,
 			BackgroundTransparency = 0.06,
@@ -798,6 +876,7 @@ local function inHandCrewHud(props)
 			locked = if slots == nil then slotIndex > 1 else nil,
 			onSelect = props.onSelectSlot,
 			selected = slotKey ~= nil and selectedSlotKey == slotKey,
+			selectionActive = selectedSlotKey ~= nil,
 			slot = slot,
 			slotNumber = slotIndex,
 			zIndex = 44,
@@ -896,22 +975,40 @@ local function DropAction(props)
 	if pressed or props.isPending == true then
 		scale -= 0.055
 	end
-	local reward = props.reward
+	local hasSelectedCarrySlot = typeof(selectedSlot) == "table"
+	local selectedItem = if hasSelectedCarrySlot and typeof(selectedSlot.Item) == "table" then selectedSlot.Item else carriedItem
+	local reward = selectedItem or props.reward
 	local metaText = "ITEM"
-	if typeof(reward) == "table" and typeof(reward.RewardType) == "string" and reward.RewardType ~= "" then
-		metaText = string.upper(reward.RewardType)
+	if typeof(reward) == "table" then
+		local itemType = getInHandItemType(reward)
+		if itemType == "Crew" or itemType == "CrewMember" or itemType == "Crewmate" then
+			itemType = "Crewmate"
+		end
+		if itemType ~= "" then
+			metaText = string.upper(itemType)
+		end
+		if hasSelectedCarrySlot then
+			local selectedName = getInHandDisplayName(reward)
+			if compact or selectedName == "" then
+				metaText = "SELECTED " .. metaText
+			else
+				metaText = "SELECTED " .. metaText .. " - " .. selectedName
+			end
+		end
 	end
 	local panelTransparency = if pressed or props.isPending == true then 0.32 elseif hovered then 0.4 else 0.5
 	local strokeTransparency = if hovered then 0.58 else 0.74
 	local dropButtonHeight = compact and 42 or BUTTON_HEIGHT
 	local dropIconSize = compact and 38 or 76
 	local dropIconInnerSize = compact and 34 or 70
-	local dropTextX = compact and 58 or 110
-	local dropTextSize = compact and 22 or 36
-	local dropMetaTextSize = compact and 8 or 12
+	local dropTextX = compact and (hasSelectedCarrySlot and 52 or 58) or 110
+	local dropTextRightPadding = compact and 10 or 38
+	local dropTextSize = if hasSelectedCarrySlot then (compact and 13 or 28) else (compact and 22 or 36)
+	local dropMetaTextSize = if hasSelectedCarrySlot then (compact and 7 or 11) else (compact and 8 or 12)
 	local dropMetaHeight = compact and 10 or 16
 	local dropMetaY = compact and 6 or 15
 	local dropLabelY = compact and 8 or 12
+	local dropLabelText = if hasSelectedCarrySlot then "DROP SELECTED" else "DROP"
 
 	React.useEffect(function()
 		local button = buttonRef.current
@@ -947,6 +1044,7 @@ local function DropAction(props)
 		ClipsDescendants = true,
 		Position = UDim2.new(0.5, 0, 1, compact and -92 or -BUTTON_BOTTOM_OFFSET),
 		ref = buttonRef,
+		Selectable = canDrop,
 		Size = compact and UDim2.new(0.25, 0, 0, dropButtonHeight) or UDim2.new(0.45, 0, 0, BUTTON_HEIGHT),
 		Text = "",
 		ZIndex = 50,
@@ -1072,11 +1170,12 @@ local function DropAction(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				Position = UDim2.fromOffset(dropTextX, dropMetaY),
-				Size = UDim2.new(1, compact and -74 or -148, 0, dropMetaHeight),
+				Size = UDim2.new(1, -(dropTextX + dropTextRightPadding), 0, dropMetaHeight),
 				Text = metaText,
 				TextColor3 = PALETTE.MutedText,
 				TextSize = dropMetaTextSize,
 				TextStrokeTransparency = 1,
+				TextTruncate = Enum.TextTruncate.AtEnd,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Center,
 				ZIndex = 52,
@@ -1086,12 +1185,13 @@ local function DropAction(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBlack,
 				Position = UDim2.new(0, dropTextX, 0.5, dropLabelY),
-				Size = UDim2.new(1, compact and -74 or -148, 0, compact and 24 or 40),
-				Text = "DROP",
+				Size = UDim2.new(1, -(dropTextX + dropTextRightPadding), 0, compact and 24 or 40),
+				Text = dropLabelText,
 				TextColor3 = PALETTE.Text,
 				TextStrokeColor3 = PALETTE.GlassDeep,
 				TextStrokeTransparency = 0.48,
 				TextSize = dropTextSize,
+				TextTruncate = Enum.TextTruncate.AtEnd,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextYAlignment = Enum.TextYAlignment.Center,
 				ZIndex = 52,

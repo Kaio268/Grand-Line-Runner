@@ -253,10 +253,17 @@ local function forceDropCarriedItems(player, dropPosition, effectName)
 		end
 	end
 
+	local skipLegacyCrewFallback = typeof(dropResponse) == "table"
+		and (
+			dropResponse.error == "carry_drop_busy"
+			or dropResponse.error == "carry_drop_protected"
+			or dropResponse.error == "drop_in_progress"
+		)
 	local crewInteraction = getCrewInteraction()
 	if crewInteraction
 		and typeof(crewInteraction.GetActiveContext) == "function"
 		and typeof(crewInteraction.DropHeldAtPosition) == "function"
+		and skipLegacyCrewFallback ~= true
 	then
 		local context = crewInteraction.GetActiveContext()
 		local isHoldingCrewMember = hasCarriedCrewMember(player)
@@ -264,7 +271,12 @@ local function forceDropCarriedItems(player, dropPosition, effectName)
 			isHoldingCrewMember = crewInteraction.HasHeld(context, player) == true
 		end
 
-		if isHoldingCrewMember and crewInteraction.DropHeldAtPosition(context, player, nil, dropPosition) == true then
+		if
+			isHoldingCrewMember
+			and crewInteraction.DropHeldAtPosition(context, player, nil, dropPosition, nil, {
+				Reason = "HitEffect",
+			}) == true
+		then
 			droppedAny = true
 		end
 	end
@@ -396,6 +408,16 @@ function HitEffectService.ApplyEffect(target, effectName, options)
 		playDebuffSound(targetPlayer, rootPart, options)
 	end
 
+	local dropPosition = if typeof(options.DropPosition) == "Vector3" then options.DropPosition else rootPart.Position
+	local dropResponse = nil
+	local forcesCarryDrop = if options.ForcesCarryDrop ~= nil
+		then options.ForcesCarryDrop == true
+		else effectDefinition.ForcesCarryDrop == true
+
+	if forcesCarryDrop and targetPlayer then
+		dropResponse = forceDropCarriedItems(targetPlayer, dropPosition, effectName)
+	end
+
 	if options.RagdollJoints == true then
 		local ragdollService = getTemporaryRagdollService()
 		if ragdollService and character then
@@ -416,16 +438,6 @@ function HitEffectService.ApplyEffect(target, effectName, options)
 
 	if movement.State and humanoid.Health > 0 then
 		humanoid:ChangeState(movement.State)
-	end
-
-	local dropPosition = if typeof(options.DropPosition) == "Vector3" then options.DropPosition else rootPart.Position
-	local dropResponse = nil
-	local forcesCarryDrop = if options.ForcesCarryDrop ~= nil
-		then options.ForcesCarryDrop == true
-		else effectDefinition.ForcesCarryDrop == true
-
-	if forcesCarryDrop and targetPlayer then
-		dropResponse = forceDropCarriedItems(targetPlayer, dropPosition, effectName)
 	end
 
 	applyKnockback(rootPart, options.KnockbackVector or effectDefinition.Knockback, targetPlayer)

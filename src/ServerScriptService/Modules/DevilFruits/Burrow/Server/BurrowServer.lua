@@ -10,6 +10,7 @@ local MoguBurrowShared = require(
 )
 local MoguAnimationController = require(script.Parent:WaitForChild("MoguAnimationController"))
 local DamageProtection = require(script.Parent.Parent.Parent:WaitForChild("Server"):WaitForChild("DamageProtection"))
+local ActiveCooldownHud = require(script.Parent.Parent.Parent:WaitForChild("Server"):WaitForChild("ActiveCooldownHud"))
 
 local BurrowServer = {}
 local BURROW_PROTECTED_UNTIL_ATTRIBUTE = "MoguBurrowProtectedUntil"
@@ -783,11 +784,12 @@ local function setMovementLockState(player, untilTimestamp)
 	end
 end
 
-local function clearActiveBurrow(player, reason)
+local function clearActiveBurrow(player, reason, options)
 	if not player or not player:IsA("Player") then
 		return nil
 	end
 
+	options = if type(options) == "table" then options else {}
 	local burrowState = activeBurrowsByPlayer[player]
 	activeBurrowsByPlayer[player] = nil
 	clearInvalidProtection(player, normalizeProtectionClearReason(reason), {
@@ -807,6 +809,22 @@ local function clearActiveBurrow(player, reason)
 	burrowState.TimeoutToken = nil
 	burrowState.StateToken = nil
 	MoguAnimationController.StopAnimation(burrowState.AnimationState, reason)
+	if
+		options.EmitReadyHud == true
+		and player.Parent == Players
+		and typeof(burrowState.ClearAbilityCooldown) == "function"
+	then
+		burrowState.ClearAbilityCooldown(ActiveCooldownHud.BuildReadyPayload({
+			Phase = "Cleanup",
+			SessionId = burrowState.SessionId,
+			StartedAt = burrowState.StartedAt,
+			EndTime = burrowState.EndTime,
+			Duration = burrowState.Duration,
+		}, {
+			Reason = reason,
+			RuntimeId = burrowState.SessionId,
+		}))
+	end
 	return burrowState
 end
 
@@ -817,29 +835,39 @@ local function getActiveBurrow(player)
 	end
 
 	if burrowState.State == SESSION_STATE_CLEANUP then
-		clearActiveBurrow(player, CLEAR_REASON_RUNTIME_RESET)
+		clearActiveBurrow(player, CLEAR_REASON_RUNTIME_RESET, {
+			EmitReadyHud = true,
+		})
 		return nil
 	end
 
 	local character = burrowState.Character
 	local humanoid = burrowState.Humanoid
 	if not character or character.Parent == nil or player.Character ~= character then
-		clearActiveBurrow(player, CLEAR_REASON_CHARACTER_REMOVING)
+		clearActiveBurrow(player, CLEAR_REASON_CHARACTER_REMOVING, {
+			EmitReadyHud = true,
+		})
 		return nil
 	end
 	if humanoid and humanoid.Health <= 0 then
-		clearActiveBurrow(player, CLEAR_REASON_HUMANOID_DIED)
+		clearActiveBurrow(player, CLEAR_REASON_HUMANOID_DIED, {
+			EmitReadyHud = true,
+		})
 		return nil
 	end
 
 	if getSharedTimestamp() > (burrowState.EndTime + MoguBurrowShared.GetSurfaceResolveGrace(burrowState.AbilityConfig)) then
-		clearActiveBurrow(player, CLEAR_REASON_EXPIRED)
+		clearActiveBurrow(player, CLEAR_REASON_EXPIRED, {
+			EmitReadyHud = true,
+		})
 		return nil
 	end
 
 	local ineligibleReason = getProtectionIneligibleReason(player, burrowState)
 	if ineligibleReason then
-		clearActiveBurrow(player, ineligibleReason)
+		clearActiveBurrow(player, ineligibleReason, {
+			EmitReadyHud = true,
+		})
 		return nil
 	end
 
@@ -902,7 +930,7 @@ local function buildStartPayload(context, burrowState, startedAt, endsAt, direct
 	local resolvedStartPosition = startPosition or context.RootPart.Position
 	local hazardProtectionRadius = math.max(0, tonumber(abilityConfig.HazardProtectionRadius) or 0)
 
-	return {
+	local payload = {
 		Phase = PHASE_START,
 		SessionId = burrowState and burrowState.SessionId or nil,
 		ServerState = burrowState and burrowState.State or SESSION_STATE_STARTUP,
@@ -923,6 +951,15 @@ local function buildStartPayload(context, burrowState, startedAt, endsAt, direct
 		ConcealTransparency = MoguBurrowShared.GetConcealTransparency(abilityConfig),
 		TrailInterval = MoguBurrowShared.GetTrailInterval(abilityConfig),
 	}
+	local activeCountdownStartsAt = (burrowState and burrowState.UndergroundAt) or startedAt
+	return ActiveCooldownHud.BuildActivePayload(payload, {
+		StartedAt = startedAt,
+		ActiveCountdownStartsAt = activeCountdownStartsAt,
+		ActiveEndsAt = endsAt,
+		ActiveDuration = math.max(0, endsAt - activeCountdownStartsAt),
+		CooldownDuration = tonumber(abilityConfig.Cooldown) or 0,
+		RuntimeId = burrowState and burrowState.SessionId or nil,
+	})
 end
 
 local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
@@ -995,7 +1032,7 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 		context.Player:SetAttribute("MoguResolveWallBlockReason", wallBlocked and wallBlockInfo and wallBlockInfo.Reason or nil)
 	end
 
-	return {
+	local payload = {
 		Phase = PHASE_RESOLVE,
 		SessionId = burrowState.SessionId,
 		ServerState = SESSION_STATE_RESOLVING,
@@ -1011,6 +1048,11 @@ local function buildResolvePayload(context, burrowState, endedAt, resolveReason)
 		ResolveWallBlocked = wallBlocked,
 		EndedEarly = resolveReason ~= RESOLVE_REASON_DURATION_ELAPSED,
 	}
+	return ActiveCooldownHud.BuildCooldownStartedPayload(payload, {
+		CooldownDuration = tonumber(abilityConfig.Cooldown) or 0,
+		EndedAt = endedAt,
+		RuntimeId = burrowState.SessionId,
+	})
 end
 
 local function buildSessionContext(player, burrowState, requestPayload)
@@ -1111,7 +1153,9 @@ local function hookSessionCleanup(player, burrowState)
 				Source = "Humanoid.Died",
 			})
 			if activeBurrowsByPlayer[player] == burrowState then
-				clearActiveBurrow(player, CLEAR_REASON_HUMANOID_DIED)
+				clearActiveBurrow(player, CLEAR_REASON_HUMANOID_DIED, {
+					EmitReadyHud = true,
+				})
 			end
 		end)
 	end
@@ -1120,7 +1164,9 @@ local function hookSessionCleanup(player, burrowState)
 	if character then
 		connections[#connections + 1] = character.AncestryChanged:Connect(function(_, parent)
 			if parent == nil and activeBurrowsByPlayer[player] == burrowState then
-				clearActiveBurrow(player, CLEAR_REASON_CHARACTER_REMOVING)
+				clearActiveBurrow(player, CLEAR_REASON_CHARACTER_REMOVING, {
+					EmitReadyHud = true,
+				})
 			end
 		end)
 	end
@@ -1352,6 +1398,7 @@ function BurrowServer.Burrow(context)
 		RootPart = context.RootPart,
 		EmitEffect = context.EmitEffect,
 		StartAbilityCooldown = context.StartAbilityCooldown,
+		ClearAbilityCooldown = context.ClearAbilityCooldown,
 		CooldownApplied = false,
 	}
 	local protectedUntil = endsAt + MoguBurrowShared.GetSurfaceResolveGrace(abilityConfig)
@@ -1470,7 +1517,9 @@ end
 
 function BurrowServer.ClearRuntimeState(player)
 	-- Runtime cleanup should not emit a Resolve payload or start cooldown.
-	clearActiveBurrow(player, CLEAR_REASON_RUNTIME_RESET)
+	clearActiveBurrow(player, CLEAR_REASON_RUNTIME_RESET, {
+		EmitReadyHud = true,
+	})
 end
 
 function BurrowServer.GetLegacyHandler()

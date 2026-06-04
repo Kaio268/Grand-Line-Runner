@@ -19,9 +19,10 @@ local ABILITY_NAME = "GhostProjection"
 local REMOTE_NAME = "HoroProjectionAction"
 local WORLD_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local GHOSTS_FOLDER_NAME = "HoroGhosts"
-local DEFAULT_DURATION = 5
+local DEFAULT_DURATION = 8
 local DEFAULT_GHOST_SPEED = 15
 local DEFAULT_CARRY_SPEED = 8
+local DEFAULT_GHOST_HAZARD_IMMUNE = true
 local DEFAULT_MAX_DISTANCE_FROM_BODY = 68
 local DEFAULT_REWARD_INTERACT_RADIUS = 12
 local DEFAULT_HAZARD_PROBE_RADIUS = 3.4
@@ -56,6 +57,12 @@ local MAX_REMOTE_THROTTLE = 1
 local ACTION_TRY_PICKUP = "TryPickup"
 local ACTION_INTERRUPT = "Interrupt"
 local ACTION_BODY_HAZARD = "BodyHazard"
+local GHOST_HAZARD_INTERRUPT_REASONS = {
+	client_hazard = true,
+	hazard_overlap = true,
+	hazard_touch = true,
+	wave_touch = true,
+}
 local SOUND_ACTIVATE = "Activate"
 local SOUND_MOVE_LOOP = "MoveLoop"
 local SOUND_RETURN = "Return"
@@ -94,6 +101,26 @@ local function horoClientTrace(message, ...)
 	end
 
 	print(string.format("[HORO CLIENT TRACE] " .. tostring(message), ...))
+end
+
+local function resolveGhostHazardImmune(payload, abilityConfig)
+	if payload and typeof(payload.GhostHazardImmune) == "boolean" then
+		return payload.GhostHazardImmune
+	end
+	if abilityConfig.GhostHazardImmune == false then
+		return false
+	end
+
+	return DEFAULT_GHOST_HAZARD_IMMUNE
+end
+
+local function isGhostHazardImmune(state)
+	return state and state.GhostHazardImmune == true
+end
+
+local function isGhostHazardInterruptReason(reason)
+	local normalizedReason = tostring(reason or "client_hazard")
+	return GHOST_HAZARD_INTERRUPT_REASONS[normalizedReason] == true
 end
 
 local function getCarriedCrewMemberName(player)
@@ -810,6 +837,10 @@ function SpiritClient:StyleLocalGhost(ghostModel, localTransparency)
 end
 
 function SpiritClient:HookGhostTouches(state)
+	if isGhostHazardImmune(state) then
+		return
+	end
+
 	local function hookPart(part)
 		if not part:IsA("BasePart") then
 			return
@@ -912,6 +943,7 @@ function SpiritClient:StartLocalProjection(payload)
 			MIN_HAZARD_PROBE_RADIUS,
 			MAX_HAZARD_PROBE_RADIUS
 		),
+		GhostHazardImmune = resolveGhostHazardImmune(payload, abilityConfig),
 		ClientHazardReportThrottle = clampNumber(
 			abilityConfig.ClientHazardReportThrottle,
 			DEFAULT_CLIENT_HAZARD_REPORT_THROTTLE,
@@ -1174,6 +1206,9 @@ function SpiritClient:InterruptProjection(reason)
 	if not state then
 		return false
 	end
+	if isGhostHazardImmune(state) and isGhostHazardInterruptReason(reason) then
+		return false
+	end
 	if state.PendingInterrupt then
 		return false
 	end
@@ -1216,6 +1251,10 @@ function SpiritClient:ReportBodyHazard(reason)
 end
 
 function SpiritClient:ProbeGhostHazards(state, now)
+	if isGhostHazardImmune(state) then
+		return
+	end
+
 	if now < state.NextHazardProbeAt then
 		return
 	end
@@ -1293,7 +1332,9 @@ function SpiritClient:Update(dt)
 
 	self:DriveGhostMovement(state, dt)
 	local now = os.clock()
-	self:ProbeGhostHazards(state, now)
+	if not isGhostHazardImmune(state) then
+		self:ProbeGhostHazards(state, now)
+	end
 	self:ProbeBodyHazards(state, now)
 	self:UpdateHint(state)
 end

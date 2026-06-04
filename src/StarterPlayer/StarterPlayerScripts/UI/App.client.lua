@@ -520,6 +520,12 @@ local uiState = {
 	crewSortMode = "Default",
 	crewVariantFilter = "All",
 }
+local INVENTORY_MODAL_VIEW_KEYS = {
+	CaptainLog = true,
+	CrewManagement = true,
+	Inventory = true,
+	Titles = true,
+}
 local chestOpenPrompt = nil
 local chestDropRatesPrompt = nil
 local crewProtectionPending = false
@@ -3975,6 +3981,35 @@ local function setInventoryOpen(isOpen)
 	render()
 end
 
+local function applyInventoryOpenPayload(payload)
+	if typeof(payload) ~= "table" then
+		return
+	end
+
+	local requestedView = tostring(payload.ActiveView or payload.activeView or payload.View or payload.view or "")
+	local requestedCategory =
+		tostring(payload.ActiveCategory or payload.activeCategory or payload.Category or payload.category or "")
+	local hasRoute = false
+
+	if INVENTORY_MODAL_VIEW_KEYS[requestedView] == true then
+		uiState.activeView = requestedView
+		hasRoute = true
+	end
+
+	if CATEGORY_DEFS[requestedCategory] ~= nil then
+		uiState.activeView = "Inventory"
+		uiState.activeCategory = requestedCategory
+		hasRoute = true
+	end
+
+	if hasRoute then
+		uiState.query = ""
+		if uiState.activeCategory == "CrewMembers" then
+			uiState.crewVariantFilter = "All"
+		end
+	end
+end
+
 ClientRuntime.UnregisterInventoryModal = ReactModalRegistry.Register("Inventory", {
 	toggle = function()
 		if ClientRuntime.CrewInventoryFeedback.IsBlockingModalOpen() then
@@ -3982,7 +4017,8 @@ ClientRuntime.UnregisterInventoryModal = ReactModalRegistry.Register("Inventory"
 		end
 		setInventoryOpen(not uiState.isOpen)
 	end,
-	open = function()
+	open = function(payload)
+		applyInventoryOpenPayload(payload)
 		setInventoryOpen(true)
 	end,
 	close = function()

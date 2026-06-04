@@ -879,6 +879,23 @@ local function refreshVariantAura(model, entry)
 	})
 end
 
+local function restoreDroppedCrewMemberPresentation(model, st)
+	if typeof(model) ~= "Instance" or not model:IsA("Model") or not model.Parent then
+		return false, "invalid_model"
+	end
+	if typeof(st) ~= "table" or typeof(st.Entry) ~= "table" then
+		return false, "missing_entry"
+	end
+
+	refreshVariantAura(model, st.Entry)
+	tryPlayIdle(model, st.Entry)
+	return true
+end
+
+Interaction.SetWorldPresentationAdapter({
+	RestoreDroppedCrewMember = restoreDroppedCrewMemberPresentation,
+})
+
 local function getBiomeIndexFromName(name)
 	local indexText = tostring(name or ""):match(BIOME_FOLDER_PATTERN)
 	return indexText and tonumber(indexText) or nil
@@ -1480,8 +1497,12 @@ hitBox.Touched:Connect(function(hit)
 	end
 
 	local heldInfos = if typeof(Interaction.CollectAllHeld) == "function"
-		then Interaction.CollectAllHeld(ctx, plr, active)
-		else { Interaction.CollectHeld(ctx, plr, active) }
+		then Interaction.CollectAllHeld(ctx, plr, active, {
+			Reason = "CrewTurnIn",
+		})
+		else { Interaction.CollectHeld(ctx, plr, active, nil, {
+			Reason = "CrewTurnIn",
+		}) }
 	local collectedAny = false
 	for _, info in ipairs(heldInfos) do
 		if not (info and info.Name) then

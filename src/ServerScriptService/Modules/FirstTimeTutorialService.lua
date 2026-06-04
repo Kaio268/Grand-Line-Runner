@@ -528,7 +528,10 @@ local function destroyTutorialTargetModel(player, model)
 					context,
 					player,
 					context.Active,
-					activeState.CarryId or activeState.CarrySlotIndex
+					activeState.CarryId or activeState.CarrySlotIndex,
+					{
+						Reason = "TutorialCleanup",
+					}
 				)
 				if collectedInfo ~= nil then
 					wasHeldByPlayer = true

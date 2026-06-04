@@ -1,6 +1,8 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
+local ActiveCooldownHud = require(script.Parent.Parent.Parent:WaitForChild("Server"):WaitForChild("ActiveCooldownHud"))
+
 local PhoenixServer = {}
 
 local DEFAULT_PHOENIX_FLAME_SHIELD_RADIUS = 18
@@ -93,11 +95,23 @@ local function getActiveEndCooldownState(player, abilityName)
 	return bucket[player]
 end
 
+local function disconnectStateConnections(state)
+	if type(state and state.Connections) ~= "table" then
+		return
+	end
+
+	for _, connection in ipairs(state.Connections) do
+		connection:Disconnect()
+	end
+	table.clear(state.Connections)
+end
+
 local function clearActiveEndCooldownState(state)
 	local bucket = state and getStateBucket(state.AbilityName)
 	if bucket and bucket[state.Player] == state then
 		bucket[state.Player] = nil
 	end
+	disconnectStateConnections(state)
 end
 
 local function isPhoenixFlightEndPayload(payload)
@@ -215,6 +229,13 @@ local function abandonEndCooldownState(state, reason)
 
 	state.Ended = true
 	clearActiveEndCooldownState(state)
+	local endedAt = getSharedTimestamp()
+	if state.Player and state.Player.Parent == Players and typeof(state.ClearAbilityCooldown) == "function" then
+		state.ClearAbilityCooldown(ActiveCooldownHud.BuildReadyPayload(buildEndPayload(state, reason, endedAt), {
+			Reason = reason,
+			RuntimeId = state.RuntimeId,
+		}))
+	end
 	phoenixCooldownLog(
 		"%s cleared without cooldown player=%s userId=%s runtimeId=%s reason=%s",
 		tostring(state.AbilityName),
@@ -247,9 +268,25 @@ local function startEndCooldownState(context, abilityName, naturalDelay, cooldow
 		FallbackEndAt = startedAt + resolvedNaturalDelay + resolvedFallbackGrace,
 		CooldownDuration = math.max(0, tonumber(cooldownDuration) or 0),
 		StartAbilityCooldown = context.StartAbilityCooldown,
+		ClearAbilityCooldown = context.ClearAbilityCooldown,
+		Connections = {},
 	}
 
 	bucket[player] = state
+	local humanoid = context.Humanoid
+	if humanoid then
+		state.Connections[#state.Connections + 1] = humanoid.Died:Connect(function()
+			if getActiveEndCooldownState(player, abilityName) == state then
+				finishEndCooldownState(state, "humanoid_died")
+			end
+		end)
+	end
+	state.Connections[#state.Connections + 1] = player.CharacterRemoving:Connect(function(character)
+		if character == context.Character and getActiveEndCooldownState(player, abilityName) == state then
+			finishEndCooldownState(state, CHARACTER_REMOVING_REASON)
+		end
+	end)
+
 	local naturalToken = {}
 	state.NaturalToken = naturalToken
 

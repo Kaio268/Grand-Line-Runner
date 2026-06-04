@@ -12,6 +12,7 @@ local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local Economy = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushEconomy"))
 local MonetizationConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Monetization"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
+local CarriedDropNotice = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CarriedDropNotice"))
 local GrandLineRushCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushCrewCatalog"))
 local CanonicalCrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
@@ -63,6 +64,10 @@ local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local STARTER_CREW_SOURCE = "GrandLineRushStarter"
 local CREW_INVENTORY_CHANGED_REMOTE_NAME = "CrewMemberInventoryChanged"
 local CREW_EXTRACTION_QUICK_SLOT_ASSIGN_REASON = "crew_extraction_quick_slot_assign"
+local CRITICAL_CARRY_DROP_REASONS = {
+	AFKTeleport = true,
+	PlayerDeath = true,
+}
 local CANONICAL_CREW_RARITY_ALIASES = {
 	Mythical = "Mythic",
 	Celestial = "Godly",
@@ -71,6 +76,7 @@ local canonicalCrewRewardPoolsByRarity = nil
 local canonicalCrewRewardPool = nil
 local contextualTutorialTriggerService = nil
 local tutorialService = nil
+local carryDropTransactionSequence = 0
 
 local function chestDebug(message, ...)
 	if CHEST_DEBUG ~= true then
@@ -86,6 +92,26 @@ local function runTrace(message, ...)
 	end
 
 	print(string.format("[RUN TRACE] " .. message, ...))
+end
+
+local function carryDropTrace(message, ...)
+	runTrace("[CarryDrop] " .. tostring(message), ...)
+end
+
+local function notifyCarryDrop(player, reasonCode, info)
+	info = if typeof(info) == "table" then info else {}
+	return CarriedDropNotice.Notify(player, {
+		ReasonCode = reasonCode,
+		Count = tonumber(info.Count) or 1,
+		Source = info.Source or "GrandLineRushVerticalSliceService",
+		Action = info.Action,
+		ItemType = info.ItemType,
+		DisplayName = info.DisplayName,
+		CarryId = info.CarryId,
+		SlotIndex = info.SlotIndex,
+		Context = info.Context,
+		SuppressToast = info.SuppressToast == true,
+	})
 end
 
 local function getContextualTutorialTriggerService()
@@ -765,6 +791,20 @@ local function getFirstOccupiedCarrySlot(runtime)
 	return nil
 end
 
+local function findCarrySlotByCarryId(runtime, carryId)
+	if typeof(carryId) ~= "string" or carryId == "" then
+		return nil
+	end
+
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if slot.CarryId == carryId then
+			return slot
+		end
+	end
+
+	return nil
+end
+
 local function findCarrySlot(runtime, slotIndexOrCarryId)
 	for _, slot in ipairs(getCarrySlots(runtime)) do
 		if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
@@ -784,6 +824,31 @@ local function findCarrySlot(runtime, slotIndexOrCarryId)
 	end
 
 	return nil
+end
+
+local function validateSelectedCarrySlot(runtime, options)
+	options = if typeof(options) == "table" then options else {}
+	local carryId = options.CarryId
+	if typeof(carryId) ~= "string" or carryId == "" then
+		return nil, "missing_selected_carry_id"
+	end
+
+	local selectedSlotIndex = tonumber(options.SlotIndex)
+	if selectedSlotIndex == nil then
+		return nil, "missing_selected_carry_slot"
+	end
+	selectedSlotIndex = math.floor(selectedSlotIndex)
+
+	local slot = findCarrySlotByCarryId(runtime, carryId)
+	if not slot then
+		return nil, "stale_selected_carry_item"
+	end
+
+	if tonumber(slot.SlotIndex) ~= selectedSlotIndex then
+		return nil, "selected_carry_slot_mismatch"
+	end
+
+	return slot, nil
 end
 
 local function mirrorLegacyCarryState(player, runtime)
@@ -926,10 +991,28 @@ local function removeCarryItem(player, runtime, slotIndexOrCarryId)
 	return removed, nil
 end
 
-local function clearAllCarryItems(player, runtime, _reason)
+local function clearAllCarryItems(player, runtime, reason)
+	local clearedCount = 0
+	local firstCleared = nil
+	for _, slot in ipairs(getCarrySlots(runtime)) do
+		if typeof(slot.CarryId) == "string" and slot.CarryId ~= "" then
+			clearedCount += 1
+			if firstCleared == nil then
+				firstCleared = {
+					SlotIndex = slot.SlotIndex,
+					CarryId = slot.CarryId,
+					ItemType = slot.ItemType,
+					DisplayName = slot.DisplayName,
+				}
+			end
+		end
+	end
+
 	if player and CrewInteraction and typeof(CrewInteraction.CollectAllHeld) == "function" then
 		CrewInteraction.CollectAllHeld(CrewInteraction.GetActiveContext(), player, nil, {
+			Reason = reason or "Unknown",
 			SkipCarrySlotRemove = true,
+			SuppressDropNotice = true,
 		})
 	end
 
@@ -943,8 +1026,19 @@ local function clearAllCarryItems(player, runtime, _reason)
 	end
 
 	runtime.CarriedReward = nil
+	runtime.CarryDropTransaction = nil
 	clearCarryTool(player)
 	syncCarrySlotsToClient(player, runtime)
+	if clearedCount > 0 then
+		notifyCarryDrop(player, reason or "Unknown", {
+			Count = clearedCount,
+			Action = "ClearAllCarryItems",
+			ItemType = firstCleared and firstCleared.ItemType or nil,
+			DisplayName = firstCleared and firstCleared.DisplayName or nil,
+			CarryId = firstCleared and firstCleared.CarryId or nil,
+			SlotIndex = firstCleared and firstCleared.SlotIndex or nil,
+		})
+	end
 end
 
 local function hasCarryItems(runtime)
@@ -2022,7 +2116,14 @@ function Service.FailRun(player, reason)
 
 	runtime.InRun = false
 	runtime.SpawnedReward = nil
-	clearAllCarryItems(player, runtime, "fail_run")
+	local cleanupReason = "Unknown"
+	local reasonText = tostring(reason or "")
+	if string.find(reasonText, "AFK", 1, true) then
+		cleanupReason = "AFKTeleport"
+	elseif string.find(reasonText, "Defeated", 1, true) then
+		cleanupReason = "PlayerDeath"
+	end
+	clearAllCarryItems(player, runtime, cleanupReason)
 	runtime.ResolutionText = reason or "Run failed. Unextracted rewards were lost."
 
 	return resolveActionResponse(player, true, runtime.ResolutionText)
@@ -2222,9 +2323,21 @@ local function storeHeldCrewMember(player, options)
 	end
 
 	if slot.Data and slot.Data.Physical == true then
-		CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, carryId)
+		CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, carryId, {
+			Reason = "ExtractionCleanup",
+			SuppressDropNotice = true,
+		})
 	end
-	removeCarryItem(player, runtime, carryId)
+	local removed = removeCarryItem(player, runtime, carryId)
+	if removed then
+		notifyCarryDrop(player, "ExtractionCleanup", {
+			Action = "StoreHeldCrewMember",
+			ItemType = removed.ItemType,
+			DisplayName = removed.DisplayName,
+			CarryId = removed.CarryId,
+			SlotIndex = removed.SlotIndex,
+		})
+	end
 
 	return true, {
 		Action = "StoreHeld",
@@ -2272,9 +2385,21 @@ local function extractRun(player)
 		extractedCount += 1
 		messages[#messages + 1] = message
 		if slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
-			CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, slot.CarryId)
+			CrewInteraction.ForgetHeldCarryItem(CrewInteraction.GetActiveContext(), player, nil, slot.CarryId, {
+				Reason = "ExtractionCleanup",
+				SuppressDropNotice = true,
+			})
 		end
-		removeCarryItem(player, runtime, slot.CarryId)
+		local removed = removeCarryItem(player, runtime, slot.CarryId)
+		if removed then
+			notifyCarryDrop(player, "ExtractionCleanup", {
+				Action = "ExtractRun",
+				ItemType = removed.ItemType,
+				DisplayName = removed.DisplayName,
+				CarryId = removed.CarryId,
+				SlotIndex = removed.SlotIndex,
+			})
+		end
 	end
 
 	if extractedCount <= 0 then
@@ -2367,6 +2492,96 @@ local function canForceCarryDrop(player, runtime, options)
 	return true, nil
 end
 
+local function getCarryDropReason(options)
+	if typeof(options) ~= "table" then
+		return "Unknown"
+	end
+
+	local reason = tostring(options.Reason or "")
+	if reason == "" then
+		return "Unknown"
+	end
+	return reason
+end
+
+local function isCriticalCarryDropReason(reason)
+	return CRITICAL_CARRY_DROP_REASONS[tostring(reason or "")] == true
+end
+
+local function beginCarryDropTransaction(player, runtime, options, mode)
+	options = if typeof(options) == "table" then options else {}
+	if options.SkipDropTransaction == true then
+		return nil, nil
+	end
+
+	local reason = getCarryDropReason(options)
+	local active = runtime.CarryDropTransaction
+	if typeof(active) == "table" then
+		if not isCriticalCarryDropReason(reason) then
+			carryDropTrace(
+				"blocked player=%s mode=%s reason=%s activeMode=%s activeReason=%s activeId=%s",
+				player and player.Name or "<nil>",
+				tostring(mode),
+				tostring(reason),
+				tostring(active.Mode),
+				tostring(active.Reason),
+				tostring(active.Id)
+			)
+			return nil, "carry_drop_busy"
+		end
+
+		carryDropTrace(
+			"preempt player=%s mode=%s reason=%s activeMode=%s activeReason=%s activeId=%s",
+			player and player.Name or "<nil>",
+			tostring(mode),
+			tostring(reason),
+			tostring(active.Mode),
+			tostring(active.Reason),
+			tostring(active.Id)
+		)
+	end
+
+	carryDropTransactionSequence += 1
+	local transaction = {
+		Id = carryDropTransactionSequence,
+		Mode = tostring(mode or "single"),
+		Reason = reason,
+		StartedAt = os.clock(),
+	}
+	runtime.CarryDropTransaction = transaction
+	carryDropTrace(
+		"begin player=%s mode=%s reason=%s id=%s",
+		player and player.Name or "<nil>",
+		transaction.Mode,
+		transaction.Reason,
+		tostring(transaction.Id)
+	)
+	return transaction, nil
+end
+
+local function finishCarryDropTransaction(player, runtime, transaction, response)
+	if transaction == nil then
+		return
+	end
+
+	local ok = typeof(response) == "table" and response.ok == true
+	local errorCode = if typeof(response) == "table" then response.error else nil
+	carryDropTrace(
+		"end player=%s mode=%s reason=%s id=%s ok=%s error=%s elapsed=%.3f",
+		player and player.Name or "<nil>",
+		tostring(transaction.Mode),
+		tostring(transaction.Reason),
+		tostring(transaction.Id),
+		tostring(ok),
+		tostring(errorCode),
+		os.clock() - (tonumber(transaction.StartedAt) or os.clock())
+	)
+
+	if runtime.CarryDropTransaction == transaction then
+		runtime.CarryDropTransaction = nil
+	end
+end
+
 local function getActiveHoroDropRootPart(player)
 	if not player or player.Parent ~= Players then
 		return nil
@@ -2437,16 +2652,42 @@ end
 local function dropCarriedReward(player, options)
 	local runtime = getRuntime(player)
 	options = if typeof(options) == "table" then options else {}
+	local dropReasonCode = getCarryDropReason(options)
+	local transaction, transactionReason = beginCarryDropTransaction(player, runtime, options, "single")
+	if transactionReason ~= nil then
+		return resolveActionResponse(player, false, nil, transactionReason)
+	end
+	local function finishDrop(response)
+		finishCarryDropTransaction(player, runtime, transaction, response)
+		return response
+	end
+
 	local canDrop, reason = canForceCarryDrop(player, runtime, options)
 	if not canDrop then
-		return resolveActionResponse(player, false, nil, reason)
+		return finishDrop(resolveActionResponse(player, false, nil, reason))
 	end
 
 	local slotKey = options.CarryId or options.SlotIndex
-	local slot = findCarrySlot(runtime, slotKey)
+	local slot, slotReason
+	if options.RequireSelectedSlot == true then
+		slot, slotReason = validateSelectedCarrySlot(runtime, options)
+	else
+		slot = findCarrySlot(runtime, slotKey)
+	end
 	local droppedReward = buildLegacyRewardFromCarrySlot(slot)
 	if not droppedReward then
-		return resolveActionResponse(player, false, nil, "missing_carried_reward")
+		if options.RequireSelectedSlot == true then
+			notifyCarryDrop(player, "StaleCarryState", {
+				Action = "DropCarriedRewardRejected",
+				Context = slotReason,
+			})
+		end
+		return finishDrop(resolveActionResponse(player, false, nil, slotReason or "missing_carried_reward"))
+	end
+
+	slotKey = droppedReward.CarryId
+	if slot.DropInProgress == true then
+		return finishDrop(resolveActionResponse(player, false, nil, "drop_in_progress"))
 	end
 
 	local dropPosition = options.DropPosition
@@ -2454,33 +2695,104 @@ local function dropCarriedReward(player, options)
 		droppedReward.WorldDropPosition = dropPosition
 	end
 
+	slot.DropInProgress = true
+	carryDropTrace(
+		"single player=%s reason=%s slot=%s carryId=%s itemType=%s selected=%s",
+		player and player.Name or "<nil>",
+		dropReasonCode,
+		tostring(droppedReward.SlotIndex),
+		tostring(droppedReward.CarryId),
+		tostring(slot.ItemType),
+		tostring(options.RequireSelectedSlot == true)
+	)
+
 	if slot.ItemType == "Chest" then
-		if slot.DropInProgress == true then
-			return resolveActionResponse(player, false, nil, "drop_in_progress")
-		end
-
-		slot.DropInProgress = true
 		local dropped, dropReason = createDroppedWorldChest(player, droppedReward)
-		slot.DropInProgress = nil
 		if not dropped then
-			return resolveActionResponse(player, false, nil, tostring(dropReason or "dropped_chest_create_failed"))
+			slot.DropInProgress = nil
+			return finishDrop(resolveActionResponse(
+				player,
+				false,
+				nil,
+				tostring(dropReason or "dropped_chest_create_failed")
+			))
 		end
 
-		removeCarryItem(player, runtime, slotKey)
-	elseif slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
-		local droppedPhysical, dropReason = CrewInteraction.DropHeldAtPosition(CrewInteraction.GetActiveContext(), player, nil, dropPosition, droppedReward.CarryId, {
-			SkipCarrySlotRemove = true,
-		})
-		if not droppedPhysical then
-			return resolveActionResponse(player, false, nil, tostring(dropReason or "no_held_crew_member"))
+		local removed, removeReason = removeCarryItem(player, runtime, slotKey)
+		if not removed then
+			slot.DropInProgress = nil
+			return finishDrop(resolveActionResponse(
+				player,
+				false,
+				nil,
+				tostring(removeReason or "remove_carried_reward_failed")
+			))
 		end
-		removeCarryItem(player, runtime, slotKey)
+		notifyCarryDrop(player, dropReasonCode, {
+			Action = "DropCarriedChest",
+			ItemType = removed.ItemType,
+			DisplayName = removed.DisplayName,
+			CarryId = removed.CarryId,
+			SlotIndex = removed.SlotIndex,
+		})
+	elseif slot.ItemType == "CrewMember" and slot.Data and slot.Data.Physical == true then
+		local droppedPhysical, dropReason = CrewInteraction.DropHeldAtPosition(
+			CrewInteraction.GetActiveContext(),
+			player,
+			nil,
+			dropPosition,
+			droppedReward.CarryId,
+			{
+				Reason = dropReasonCode,
+				SkipCarrySlotRemove = true,
+			}
+		)
+		if not droppedPhysical then
+			slot.DropInProgress = nil
+			notifyCarryDrop(player, "StaleCarryState", {
+				Action = "PhysicalCrewDropRejected",
+				ItemType = slot.ItemType,
+				DisplayName = slot.DisplayName,
+				CarryId = droppedReward.CarryId,
+				SlotIndex = droppedReward.SlotIndex,
+				Context = dropReason,
+			})
+			return finishDrop(resolveActionResponse(player, false, nil, tostring(dropReason or "no_held_crew_member")))
+		end
+		local removed, removeReason = removeCarryItem(player, runtime, slotKey)
+		if not removed then
+			slot.DropInProgress = nil
+			return finishDrop(resolveActionResponse(
+				player,
+				false,
+				nil,
+				tostring(removeReason or "remove_carried_reward_failed")
+			))
+		end
 	else
 		if runtime.SpawnedReward ~= nil then
-			return resolveActionResponse(player, false, nil, "unresolved_spawned_reward")
+			slot.DropInProgress = nil
+			return finishDrop(resolveActionResponse(player, false, nil, "unresolved_spawned_reward"))
 		end
 		runtime.SpawnedReward = droppedReward
-		removeCarryItem(player, runtime, slotKey)
+		local removed, removeReason = removeCarryItem(player, runtime, slotKey)
+		if not removed then
+			slot.DropInProgress = nil
+			runtime.SpawnedReward = nil
+			return finishDrop(resolveActionResponse(
+				player,
+				false,
+				nil,
+				tostring(removeReason or "remove_carried_reward_failed")
+			))
+		end
+		notifyCarryDrop(player, dropReasonCode, {
+			Action = "DropCarriedReward",
+			ItemType = removed.ItemType,
+			DisplayName = removed.DisplayName,
+			CarryId = removed.CarryId,
+			SlotIndex = removed.SlotIndex,
+		})
 	end
 
 	if droppedReward.RewardType == "Chest" then
@@ -2493,15 +2805,24 @@ local function dropCarriedReward(player, options)
 	end
 	syncCarrySlotsToClient(player, runtime)
 
-	return resolveActionResponse(player, true, runtime.ResolutionText)
+	return finishDrop(resolveActionResponse(player, true, runtime.ResolutionText))
 end
 
 local function dropAllCarriedRewards(player, options)
 	local runtime = getRuntime(player)
 	options = if typeof(options) == "table" then options else {}
+	local transaction, transactionReason = beginCarryDropTransaction(player, runtime, options, "all")
+	if transactionReason ~= nil then
+		return resolveActionResponse(player, false, nil, transactionReason)
+	end
+	local function finishDrop(response)
+		finishCarryDropTransaction(player, runtime, transaction, response)
+		return response
+	end
+
 	local canDrop, reason = canForceCarryDrop(player, runtime, options)
 	if not canDrop then
-		return resolveActionResponse(player, false, nil, reason)
+		return finishDrop(resolveActionResponse(player, false, nil, reason))
 	end
 
 	local occupiedSlots = {}
@@ -2515,8 +2836,15 @@ local function dropAllCarriedRewards(player, options)
 	end
 
 	if #occupiedSlots <= 0 then
-		return resolveActionResponse(player, false, nil, "no_carried_reward")
+		return finishDrop(resolveActionResponse(player, false, nil, "no_carried_reward"))
 	end
+
+	carryDropTrace(
+		"all player=%s reason=%s count=%d",
+		player and player.Name or "<nil>",
+		getCarryDropReason(options),
+		#occupiedSlots
+	)
 
 	local droppedCount = 0
 	local firstError = nil
@@ -2524,6 +2852,7 @@ local function dropAllCarriedRewards(player, options)
 		local dropOptions = table.clone(options)
 		dropOptions.SlotIndex = slotRef.SlotIndex
 		dropOptions.CarryId = slotRef.CarryId
+		dropOptions.SkipDropTransaction = true
 		local response = dropCarriedReward(player, dropOptions)
 		if response and response.ok == true then
 			droppedCount += 1
@@ -2536,13 +2865,13 @@ local function dropAllCarriedRewards(player, options)
 	end
 
 	if droppedCount <= 0 then
-		return resolveActionResponse(player, false, nil, firstError or "drop_failed")
+		return finishDrop(resolveActionResponse(player, false, nil, firstError or "drop_failed"))
 	end
 
 	local message = if droppedCount == 1
 		then "Dropped carried item."
 		else string.format("Dropped %d carried items.", droppedCount)
-	return resolveActionResponse(player, true, message, firstError)
+	return finishDrop(resolveActionResponse(player, true, message, firstError))
 end
 
 local function dropCarriedChestRewardsForDeath(player, runtime)
@@ -2581,7 +2910,17 @@ local function dropCarriedChestRewardsForDeath(player, runtime)
 end
 
 local function dropCarriedCrewMember(player, dropPosition)
-	local ok, result = CrewInteraction.DropHeldAtPosition(CrewInteraction.GetActiveContext(), player, nil, dropPosition)
+	carryDropTrace("legacyCrew player=%s reason=PlayerDrop", player and player.Name or "<nil>")
+	local ok, result = CrewInteraction.DropHeldAtPosition(
+		CrewInteraction.GetActiveContext(),
+		player,
+		nil,
+		dropPosition,
+		nil,
+		{
+			Reason = "PlayerDrop",
+		}
+	)
 	if ok then
 		return resolveActionResponse(player, true, "Crewmate dropped.")
 	end
@@ -3331,6 +3670,7 @@ local function handleRequest(player, actionName, payload)
 				Reason = "PlayerDrop",
 				DropPosition = dropPosition,
 				IgnoreProtection = true,
+				RequireSelectedSlot = true,
 				SlotIndex = payload and payload.SlotIndex,
 				CarryId = payload and payload.CarryId,
 			})

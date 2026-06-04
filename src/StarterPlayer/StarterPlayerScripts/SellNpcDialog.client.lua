@@ -1,29 +1,57 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local ProximityPromptService = game:GetService("ProximityPromptService")
-
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
 local player = Players.LocalPlayer
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local MapResolver = require(Modules:WaitForChild("MapResolver"))
+local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 
-local function promptTextContains(prompt, needle)
-	local haystack = string.lower(table.concat({
-		tostring(prompt.Name or ""),
-		tostring(prompt.ActionText or ""),
-		tostring(prompt.ObjectText or ""),
-	}, " "))
-	return string.find(haystack, string.lower(needle), 1, true) ~= nil
+local refs = MapResolver.WaitForRefs(
+	{ "SellNpc" },
+	nil,
+	{
+		warn = true,
+		context = "SellNpcDialog",
+	}
+)
+local npc = refs.SellNpc
+if not npc then
+	return
 end
 
-ProximityPromptService.PromptTriggered:Connect(function(prompt, triggeringPlayer)
+local function waitForNpcPrompt(model)
+	local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if prompt then
+		return prompt
+	end
+
+	while model.Parent do
+		local descendant = model.DescendantAdded:Wait()
+		if descendant:IsA("ProximityPrompt") then
+			return descendant
+		end
+	end
+
+	return nil
+end
+
+local prompt = waitForNpcPrompt(npc)
+if not prompt then
+	return
+end
+
+local function openCrewmateInventory()
+	ReactModalRegistry.Open("Inventory", {
+		ActiveCategory = "CrewMembers",
+		ActiveView = "Inventory",
+		Source = "Nami",
+	})
+end
+
+prompt.Triggered:Connect(function(triggeringPlayer)
 	if triggeringPlayer and triggeringPlayer ~= player then
 		return
 	end
 
-	if not promptTextContains(prompt, "nami") then
-		return
-	end
-
-	ReactModalRegistry.Open("NamiShop")
+	openCrewmateInventory()
 end)
