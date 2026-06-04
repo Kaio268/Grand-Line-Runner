@@ -14,9 +14,15 @@ local ReactFrameModalAdapter = require(Modules:WaitForChild("ReactFrameModalAdap
 local ReactModalRegistry = require(Modules:WaitForChild("ReactModalRegistry"))
 local QuestScreen = require(UiFolder:WaitForChild("Quest"):WaitForChild("QuestScreen"))
 
-local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
-local requestRemote = Remotes and Remotes:WaitForChild("GrandLineRushQuestRequest", 10)
-local stateRemote = Remotes and Remotes:WaitForChild("GrandLineRushQuestState", 10)
+local REQUEST_REMOTE_NAME = "GrandLineRushQuestRequest"
+local STATE_REMOTE_NAME = "GrandLineRushQuestState"
+
+local remotes = nil
+local requestRemote = nil
+local stateRemote = nil
+local stateRemoteConnection = nil
+local remotesChildConnection = nil
+local requestedInitialState = false
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactQuestRoot"
@@ -46,6 +52,8 @@ local hudDescendantConnection = nil
 local cleanupConnections = {}
 local scheduleRender
 local requestQuestState
+local refreshRemotes
+local bindRemotesFolder
 
 local unregisterModal = ReactModalRegistry.Register("Quest", {
 	toggle = function()
@@ -79,6 +87,16 @@ local function disconnectAll()
 	if watchedFrameConnection then
 		watchedFrameConnection:Disconnect()
 		watchedFrameConnection = nil
+	end
+
+	if stateRemoteConnection then
+		stateRemoteConnection:Disconnect()
+		stateRemoteConnection = nil
+	end
+
+	if remotesChildConnection then
+		remotesChildConnection:Disconnect()
+		remotesChildConnection = nil
 	end
 end
 
@@ -142,6 +160,10 @@ local function setNotice(text)
 end
 
 requestQuestState = function()
+	if refreshRemotes then
+		refreshRemotes()
+	end
+
 	if not requestRemote then
 		setNotice("Quest service is starting.")
 		return
@@ -158,6 +180,10 @@ requestQuestState = function()
 end
 
 local function claimQuest(categoryId, questId)
+	if refreshRemotes then
+		refreshRemotes()
+	end
+
 	if not requestRemote then
 		setNotice("Quest service is starting.")
 		return
@@ -251,10 +277,68 @@ end
 modalAdapter:SetScheduleRender(scheduleRender)
 modalAdapter:BindFramesFolderTracking()
 
-if stateRemote then
-	table.insert(cleanupConnections, stateRemote.OnClientEvent:Connect(function(nextState)
+local function bindStateRemote(remote)
+	if stateRemote == remote and stateRemoteConnection then
+		return
+	end
+
+	if stateRemoteConnection then
+		stateRemoteConnection:Disconnect()
+		stateRemoteConnection = nil
+	end
+
+	stateRemote = remote
+	stateRemoteConnection = remote.OnClientEvent:Connect(function(nextState)
 		applyQuestState(nextState)
-	end))
+	end)
+	table.insert(cleanupConnections, stateRemoteConnection)
+end
+
+refreshRemotes = function()
+	if not remotes then
+		return
+	end
+
+	local foundRequest = remotes:FindFirstChild(REQUEST_REMOTE_NAME)
+	if foundRequest and foundRequest:IsA("RemoteFunction") then
+		requestRemote = foundRequest
+	end
+
+	local foundState = remotes:FindFirstChild(STATE_REMOTE_NAME)
+	if foundState and foundState:IsA("RemoteEvent") then
+		bindStateRemote(foundState)
+	end
+
+	if requestRemote and not requestedInitialState then
+		requestedInitialState = true
+		requestQuestState()
+	end
+end
+
+bindRemotesFolder = function(folder)
+	if not folder or folder.Name ~= "Remotes" then
+		return
+	end
+
+	if remotes == folder then
+		refreshRemotes()
+		return
+	end
+
+	if remotesChildConnection then
+		remotesChildConnection:Disconnect()
+		remotesChildConnection = nil
+	end
+
+	remotes = folder
+	remotesChildConnection = folder.ChildAdded:Connect(function(child)
+		if child.Name == REQUEST_REMOTE_NAME or child.Name == STATE_REMOTE_NAME then
+			task.defer(refreshRemotes)
+		end
+	end)
+	table.insert(cleanupConnections, remotesChildConnection)
+
+	refreshRemotes()
 end
 
 table.insert(cleanupConnections, playerGui.ChildAdded:Connect(function(child)
@@ -282,6 +366,17 @@ table.insert(cleanupConnections, playerGui.ChildRemoved:Connect(function(child)
 	end
 end))
 
+local existingRemotes = ReplicatedStorage:FindFirstChild("Remotes")
+if existingRemotes then
+	bindRemotesFolder(existingRemotes)
+end
+
+table.insert(cleanupConnections, ReplicatedStorage.ChildAdded:Connect(function(child)
+	if child.Name == "Remotes" then
+		bindRemotesFolder(child)
+	end
+end))
+
 local initialHud = playerGui:FindFirstChild("HUD")
 if initialHud then
 	hudDescendantConnection = initialHud.DescendantAdded:Connect(function(descendant)
@@ -291,7 +386,9 @@ if initialHud then
 	end)
 end
 
-requestQuestState()
+if not requestedInitialState then
+	requestQuestState()
+end
 render()
 
 script.Destroying:Connect(function()

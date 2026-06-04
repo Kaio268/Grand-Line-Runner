@@ -124,9 +124,9 @@ HudLayout.DevilFruit = {
 		width = 168,
 	},
 	tablet = {
-		compact = true,
+		compact = false,
 		position = UDim2.new(1, -12, 1, -300),
-		width = 210,
+		width = 318,
 	},
 	compactDesktop = {
 		compact = true,
