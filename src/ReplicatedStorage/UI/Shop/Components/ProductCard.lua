@@ -139,7 +139,7 @@ local function buildVariantRow(item, selectedVariant, setSelectedVariantId, surf
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(16, 188),
+		Position = UDim2.fromOffset(16, 224),
 		Size = UDim2.new(1, -32, 0, 32),
 		ZIndex = zIndex,
 	}, children)
@@ -195,8 +195,8 @@ local function ProductCard(props)
 			}),
 		}),
 		Icon = e(MonogramIcon, {
-			position = UDim2.new(0.5, -36, 0, 12),
-			size = UDim2.fromOffset(72, 72),
+			position = UDim2.new(0.5, -58, 0, 14),
+			size = UDim2.fromOffset(116, 116),
 			image = Theme.getItemIcon(item),
 			label = item.iconText,
 			themeKey = item.themeKey,
@@ -206,8 +206,8 @@ local function ProductCard(props)
 		Title = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(14, 86),
-			Size = UDim2.new(1, -28, 0, 34),
+			Position = UDim2.fromOffset(14, 134),
+			Size = UDim2.new(1, -28, 0, 32),
 			Text = item.title or "",
 			TextColor3 = Theme.Palette.Text,
 			TextSize = 20,
@@ -219,8 +219,8 @@ local function ProductCard(props)
 		Subtitle = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.BodyStrong,
-			Position = UDim2.fromOffset(16, 121),
-			Size = UDim2.new(1, -32, 0, 20),
+			Position = UDim2.fromOffset(16, 167),
+			Size = UDim2.new(1, -32, 0, 18),
 			Text = tostring(item.subtitle or ""),
 			TextColor3 = surface.accentSoft,
 			TextSize = 13,
@@ -231,8 +231,8 @@ local function ProductCard(props)
 		Description = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Body,
-			Position = UDim2.fromOffset(16, 144),
-			Size = UDim2.new(1, -32, 0, 36),
+			Position = UDim2.fromOffset(16, 188),
+			Size = UDim2.new(1, -32, 0, 30),
 			Text = tostring(item.description or ""),
 			TextColor3 = Theme.Palette.Muted,
 			TextSize = 11,
@@ -243,12 +243,12 @@ local function ProductCard(props)
 			ZIndex = contentZ,
 		}),
 		Variants = buildVariantRow(item, selectedVariant, setSelectedVariantId, surface, contentZ),
-		Tags = if hasVariants then nil else buildTagRow(item.tags, 190, contentZ),
+		Tags = if hasVariants then nil else buildTagRow(item.tags, 226, contentZ),
 		Details = showDetails and e("TextButton", {
 			AutoButtonColor = false,
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Label,
-			Position = UDim2.fromOffset(16, hasVariants and 222 or 218),
+			Position = UDim2.fromOffset(16, hasVariants and 258 or 254),
 			Size = UDim2.new(1, -32, 0, 18),
 			Text = "Details",
 			TextColor3 = surface.accentSoft,

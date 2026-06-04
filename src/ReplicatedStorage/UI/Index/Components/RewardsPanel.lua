@@ -12,20 +12,11 @@ local ROW_INNER_TOP = 14
 
 local function rewardChip(props)
 	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.Section,
-		BackgroundTransparency = 0.25,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.new(1 / 3, -10, 0, CHIP_HEIGHT),
 	}, {
-		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 12),
-		}),
-		Stroke = e("UIStroke", {
-			Color = Theme.Palette.GoldSoft,
-			Transparency = 0,
-			Thickness = 1.1,
-		}),
 		Icon = props.icon and props.icon ~= "" and e("ImageLabel", {
 			BackgroundTransparency = 1,
 			Image = props.icon,
@@ -61,22 +52,13 @@ local function statusButton(props)
 	local reward = props.reward or {}
 	local isClaimed = reward.claimed == true
 	local isClaimable = reward.claimable == true
-	local fillColor = Theme.Palette.Section
-	local textColor = Theme.Palette.Text
-	local strokeColor = Theme.Palette.GoldSoft
-	local buttonText = "Locked"
-
-	if isClaimed then
-		fillColor = Theme.Palette.Section
-		textColor = Theme.Palette.Emerald
-		strokeColor = Theme.Palette.GoldSoft
-		buttonText = "Claimed"
-	elseif isClaimable then
-		fillColor = Theme.Palette.Section
-		textColor = Theme.Palette.GoldSoft
-		strokeColor = Theme.Palette.GoldSoft
-		buttonText = "Claim"
-	end
+	local active = isClaimable
+	local hovered, setHovered = React.useState(false)
+	local buttonText = isClaimed and "Claimed" or (isClaimable and "Claim" or "Locked")
+	local textColor = active and Color3.new(1, 1, 1)
+		or (isClaimed and Theme.Palette.Emerald or Theme.Palette.MutedSoft)
+	local fillColor = active and Color3.fromRGB(228, 190, 78)
+		or (hovered and Color3.fromRGB(26, 26, 30) or Color3.fromRGB(8, 8, 9))
 
 	local function triggerClaim()
 		if isClaimable and props.onClaimRequested then
@@ -89,26 +71,58 @@ local function statusButton(props)
 		AnchorPoint = Vector2.new(1, 1),
 		AutoButtonColor = false,
 		BackgroundColor3 = fillColor,
-		BackgroundTransparency = 0.25,
+		BackgroundTransparency = 0,
 		BorderSizePixel = 0,
 		Position = UDim2.new(1, -16, 1, -14),
 		Size = UDim2.fromOffset(118, 32),
-		Text = buttonText,
-		TextColor3 = textColor,
-		TextSize = 12,
-		Font = Theme.Fonts.Button,
+		Text = "",
 		Selectable = isClaimable,
 		ZIndex = 3,
+		[React.Event.MouseEnter] = function()
+			setHovered(true)
+		end,
+		[React.Event.MouseLeave] = function()
+			setHovered(false)
+		end,
 		[React.Event.Activated] = triggerClaim,
 		[React.Event.MouseButton1Click] = triggerClaim,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 14),
+			CornerRadius = UDim.new(0, 10),
 		}),
-		Stroke = e("UIStroke", {
-			Color = strokeColor,
+		Outline = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Color = Color3.fromRGB(0, 0, 0),
+			Thickness = 1.8,
 			Transparency = 0,
-			Thickness = 1.2,
+		}, active and {
+			Grad = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new(Color3.fromRGB(80, 80, 80), Color3.fromRGB(0, 0, 0)),
+			}),
+		} or nil),
+		Sheen = e("UIGradient", {
+			Rotation = 90,
+			Color = active
+				and ColorSequence.new(Color3.fromRGB(255, 250, 222), Color3.fromRGB(216, 168, 64))
+				or ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
+		}),
+		TitleWrap = e("Frame", {
+			BackgroundTransparency = 1,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 4,
+		}, {
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = Theme.Fonts.Button,
+				Size = UDim2.fromScale(1, 1),
+				Text = buttonText,
+				TextColor3 = textColor,
+				TextSize = 13,
+				TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+				TextStrokeTransparency = active and 0 or 0.4,
+				ZIndex = 4,
+			}),
 		}),
 	})
 end

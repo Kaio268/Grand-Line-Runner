@@ -477,10 +477,12 @@ local function prepareFrame()
 	end
 	frame.BackgroundTransparency = 1
 	frame.ZIndex = 120
+	frame.ClipsDescendants = false -- let the gold pill / edge glow overflow past the panel
 
 	local host = frame:FindFirstChild("ReactSettingsHost")
 	if host and host:IsA("GuiObject") then
 		host.ZIndex = 140
+		host.ClipsDescendants = false
 	end
 end
 

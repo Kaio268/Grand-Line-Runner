@@ -6,27 +6,49 @@ local React = require(Packages:WaitForChild("React"))
 local Theme = require(script.Parent.Parent:WaitForChild("Index"):WaitForChild("Theme"))
 
 local e = React.createElement
+
+-- Design language shared with the SELL menu: flat black panels, brighter gold
+-- gradient borders, a soft gold glow behind the card, a gold SpecialElite pill
+-- badge, ropes on the top corners, a bottom-left anchor and Fredoka body text
+-- with black outlines.
 local SHELL = {
-	MenuBackgroundImage = "rbxassetid://120757950442747",
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	MenuOverlayTransparency = 0.45,
-	HeaderBackground = Color3.fromRGB(16, 35, 59),
-	HeaderTransparency = 0.25,
-	SectionBackground = Color3.fromRGB(27, 46, 68),
-	SectionHover = Color3.fromRGB(46, 74, 99),
-	WeeklyQuestBackground = Color3.fromRGB(42, 49, 112),
-	WeeklyQuestHover = Color3.fromRGB(65, 72, 148),
-	SpecialQuestBackground = Color3.fromRGB(153, 107, 29),
-	SpecialQuestHover = Color3.fromRGB(190, 139, 44),
-	FinalQuestBackground = Color3.fromRGB(126, 29, 38),
-	FinalQuestHover = Color3.fromRGB(170, 45, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
+	CardBg = Color3.fromRGB(8, 8, 9),
+	PanelBg = Color3.fromRGB(8, 8, 9),
+	GoldBase = Color3.fromRGB(228, 190, 78),
+	GoldHighlight = Color3.fromRGB(255, 224, 120),
+	GoldSoft = Color3.fromRGB(255, 244, 200),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
+	Cream = Color3.fromRGB(255, 222, 130),
+	TextMain = Color3.fromRGB(235, 235, 235),
+	TextMuted = Color3.fromRGB(180, 184, 190),
+	TextShadow = Color3.fromRGB(0, 0, 0),
+	Emerald = Color3.fromRGB(85, 255, 120),
 	CloseFill = Color3.fromRGB(200, 0, 9),
 	CloseFillSoft = Color3.fromRGB(235, 70, 78),
-	TextMain = Color3.fromRGB(230, 230, 230),
-	TextShadow = Color3.fromRGB(9, 17, 27),
+	-- category title tints (cards stay black; only the name/reward text is tinted)
+	DailyTint = Color3.fromRGB(245, 245, 245),
+	WeeklyTint = Color3.fromRGB(176, 154, 255),
+	SpecialTint = Color3.fromRGB(255, 214, 112),
+	FinalTint = Color3.fromRGB(255, 122, 122),
+	GlowImage = "rbxassetid://114516018211032",
+	MapImage = "rbxassetid://120757950442747",
 }
+
+local BADGE_FONT = Font.new("rbxasset://fonts/families/SpecialElite.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+local BODY = Enum.Font.FredokaOne
+
+local QuestConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("GrandLineRushQuests"))
+
+-- per-currency reward colors (Material is rendered with a silver gradient)
+local REWARD_TINT = {
+	Currency = Color3.fromRGB(85, 255, 120), -- Beli -> green
+	Food = Color3.fromRGB(255, 96, 96), -- Meat/food -> red
+}
+local SILVER_SEQUENCE = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(245, 247, 252)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(168, 172, 184)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(224, 227, 236)),
+})
 
 local DEFAULT_ORDER = { "Daily", "Weekly", "Special" }
 local TAB_WIDTH = 118
@@ -55,21 +77,47 @@ local function statusText(quest)
 	return "In Progress"
 end
 
+local function categoryTint(category)
+	if category == "Weekly" then
+		return SHELL.WeeklyTint
+	elseif category == "Special" then
+		return SHELL.SpecialTint
+	end
+	return SHELL.DailyTint
+end
+
+-- gold border with a brighter highlight->shadow gradient
+local function goldStroke(thickness, transparency)
+	return e("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = SHELL.GoldHighlight,
+		Transparency = transparency or 0,
+		Thickness = thickness or 1.5,
+	}, {
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, SHELL.GoldHighlight),
+				ColorSequenceKeypoint.new(1, SHELL.GoldShadow),
+			}),
+		}),
+	})
+end
+
 local function tabButton(props)
 	local active = props.active == true
 	local category = props.category or {}
 	local hovered, setHovered = React.useState(false)
 	local claimableCount = math.max(0, tonumber(category.claimableCount) or 0)
-	local fillColor = active and Theme.Palette.TabRewardFill or (hovered and SHELL.SectionHover or SHELL.HeaderBackground)
-	local textColor = active and SHELL.GoldHighlight or Theme.Palette.Text
+	local fillColor = active and SHELL.GoldBase or (hovered and Color3.fromRGB(26, 26, 30) or SHELL.PanelBg)
 
 	return e("TextButton", {
 		AutoButtonColor = false,
 		BackgroundColor3 = fillColor,
-		BackgroundTransparency = 0.15,
+		BackgroundTransparency = 0,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
-		Size = UDim2.fromOffset(TAB_WIDTH, 30),
+		Size = UDim2.fromOffset(TAB_WIDTH, 32),
 		Text = "",
 		[React.Event.MouseEnter] = function()
 			setHovered(true)
@@ -84,20 +132,24 @@ local function tabButton(props)
 		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 12),
+			CornerRadius = UDim.new(0, 10),
 		}),
-		Stroke = e("UIStroke", {
+		Outline = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Color = SHELL.GoldHighlight,
+			Color = Color3.fromRGB(0, 0, 0),
+			Thickness = 1.8,
 			Transparency = 0,
-			Thickness = 1.35,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, active and Theme.Palette.TabRewardFill or SHELL.SectionBackground),
-				ColorSequenceKeypoint.new(1, fillColor),
+		}, active and {
+			Grad = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new(Color3.fromRGB(80, 80, 80), Color3.fromRGB(0, 0, 0)),
 			}),
+		} or nil),
+		Sheen = e("UIGradient", {
+			Rotation = 90,
+			Color = active
+				and ColorSequence.new(Color3.fromRGB(255, 250, 222), Color3.fromRGB(216, 168, 64))
+				or ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
 		}),
 		TitleWrap = e("Frame", {
 			BackgroundTransparency = 1,
@@ -109,13 +161,13 @@ local function tabButton(props)
 			}),
 			Title = e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
+				Font = BODY,
 				Size = UDim2.fromScale(1, 1),
 				Text = tostring(category.label or category.id or ""),
-				TextColor3 = textColor,
-				TextSize = 14,
-				TextStrokeColor3 = SHELL.GoldHighlight,
-				TextStrokeTransparency = active and 0.4 or 0.56,
+				TextColor3 = active and Color3.new(1, 1, 1) or SHELL.TextMain,
+				TextSize = 15,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = active and 0 or 0.4,
 				TextXAlignment = Enum.TextXAlignment.Center,
 			}),
 		}),
@@ -131,10 +183,10 @@ local function tabButton(props)
 			}),
 			Text = e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
+				Font = BODY,
 				Size = UDim2.fromScale(1, 1),
 				Text = tostring(math.min(99, claimableCount)),
-				TextColor3 = Theme.Palette.Ink,
+				TextColor3 = Color3.fromRGB(20, 20, 20),
 				TextSize = 12,
 			}),
 		}) or nil,
@@ -147,7 +199,7 @@ local function progressBar(props)
 	local percent = math.clamp(progress / target, 0, 1)
 
 	return e("Frame", {
-		BackgroundColor3 = Theme.Palette.ProgressTrack,
+		BackgroundColor3 = Color3.fromRGB(20, 20, 22),
 		BorderSizePixel = 0,
 		Position = props.position,
 		Size = props.size,
@@ -156,22 +208,50 @@ local function progressBar(props)
 			CornerRadius = UDim.new(0, 8),
 		}),
 		Stroke = e("UIStroke", {
-			Color = Theme.Palette.ProgressStroke,
-			Transparency = 0.18,
+			Color = SHELL.GoldShadow,
+			Transparency = 0.3,
 			Thickness = 1,
 		}),
 		Fill = e("Frame", {
-			BackgroundColor3 = props.fillColor or Theme.Palette.ProgressFill,
+			BackgroundColor3 = SHELL.GoldBase,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(percent, 1),
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
 			}),
+			-- left-to-right gold flow, brightest at the leading edge
 			Gradient = e("UIGradient", {
+				Rotation = 0,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Theme.Palette.ProgressFill),
-					ColorSequenceKeypoint.new(1, Theme.Palette.Cyan),
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(176, 132, 44)),
+					ColorSequenceKeypoint.new(0.55, Color3.fromRGB(255, 214, 110)),
+					ColorSequenceKeypoint.new(0.85, Color3.fromRGB(255, 240, 180)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 252, 224)),
+				}),
+			}),
+			-- soft glow around the fill
+			Glow = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = Color3.fromRGB(255, 226, 130),
+				Thickness = 2,
+				Transparency = 0.45,
+			}),
+			-- top sheen highlight
+			Sheen = e("Frame", {
+				BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+				BackgroundTransparency = 0.55,
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(0, 0.08),
+				Size = UDim2.new(1, 0, 0.32, 0),
+			}, {
+				Corner = e("UICorner", { CornerRadius = UDim.new(0, 6) }),
+				Fade = e("UIGradient", {
+					Rotation = 90,
+					Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 0.4),
+						NumberSequenceKeypoint.new(1, 1),
+					}),
 				}),
 			}),
 		}),
@@ -183,23 +263,64 @@ local function questCard(props)
 	local hovered, setHovered = React.useState(false)
 	local claimable = quest.claimable == true
 	local claimed = quest.claimed == true
-	local buttonColor = if claimable then Theme.Palette.TabRewardFill else SHELL.HeaderBackground
-	local buttonTextColor = if claimed then Theme.Palette.Emerald
-		elseif claimable then SHELL.GoldHighlight
-		else Theme.Palette.Text
+	local buttonColor = if claimable then SHELL.GoldBase else SHELL.PanelBg
+	local buttonTextColor = if claimed then SHELL.Emerald
+		elseif claimable then Color3.new(1, 1, 1)
+		else SHELL.TextMain
 	local compact = props.compact == true
-	local isWeekly = quest.category == "Weekly"
-	local isSpecial = quest.category == "Special"
-	local isFinalQuest = quest.id == "special_final_golden_legend"
-	local cardBackground = if isFinalQuest then (hovered and SHELL.FinalQuestHover or SHELL.FinalQuestBackground)
-		elseif isSpecial then (hovered and SHELL.SpecialQuestHover or SHELL.SpecialQuestBackground)
-		elseif isWeekly then (hovered and SHELL.WeeklyQuestHover or SHELL.WeeklyQuestBackground)
-		else (hovered and SHELL.SectionHover or SHELL.SectionBackground)
+	local tint = categoryTint(quest.category)
+
+	-- colored reward segments: Beli green, food red, materials silver gradient
+	local rewards = quest.rewards or {}
+	local rewardChildren = {
+		Layout = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 5),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+		}),
+		Prefix = e("TextLabel", {
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundTransparency = 1,
+			Font = BODY,
+			LayoutOrder = 0,
+			Size = UDim2.new(0, 0, 1, 0),
+			Text = "Reward:",
+			TextColor3 = SHELL.Cream,
+			TextSize = 15,
+			TextStrokeColor3 = SHELL.TextShadow,
+			TextStrokeTransparency = 0.45,
+		}),
+	}
+	for i, reward in ipairs(rewards) do
+		local text = QuestConfig.FormatReward(reward)
+		if text ~= "" then
+			local kind = tostring(reward.Type or "")
+			if kind == "Currency" then
+				text = "$" .. text
+			end
+			local isMaterial = kind == "Material"
+			rewardChildren["R" .. i] = e("TextLabel", {
+				AutomaticSize = Enum.AutomaticSize.X,
+				BackgroundTransparency = 1,
+				Font = BODY,
+				LayoutOrder = i,
+				Size = UDim2.new(0, 0, 1, 0),
+				Text = text .. (i < #rewards and "," or ""),
+				TextColor3 = isMaterial and Color3.new(1, 1, 1) or (REWARD_TINT[kind] or SHELL.Cream),
+				TextSize = 15,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = 0,
+			}, isMaterial and {
+				Silver = e("UIGradient", { Rotation = 90, Color = SILVER_SEQUENCE }),
+			} or nil)
+		end
+	end
 
 	return e("Frame", {
 		Active = true,
-		BackgroundColor3 = cardBackground,
-		BackgroundTransparency = 0.25,
+		BackgroundColor3 = hovered and Color3.fromRGB(18, 18, 21) or SHELL.PanelBg,
+		BackgroundTransparency = 0,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.new(1, QUEST_CARD_WIDTH_OFFSET, 0, compact and 164 or QUEST_CARD_HEIGHT),
@@ -213,41 +334,43 @@ local function questCard(props)
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 10),
 		}),
-		Stroke = e("UIStroke", {
-			Color = SHELL.GoldHighlight,
-			Transparency = 0,
-			Thickness = 1.5,
-		}),
+		Stroke = goldStroke(1.5, 0),
 		Name = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
+			Font = BODY,
 			Position = UDim2.fromOffset(18, 12),
 			Size = UDim2.new(1, compact and -36 or -196, 0, 24),
 			Text = tostring(quest.name or "Quest"),
-			TextColor3 = Theme.Palette.Text,
+			TextColor3 = tint,
 			TextSize = 20,
+			TextStrokeColor3 = SHELL.TextShadow,
+			TextStrokeTransparency = 0.35,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Description = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Body,
+			Font = BODY,
 			Position = UDim2.fromOffset(18, 38),
 			Size = UDim2.new(1, compact and -36 or -196, 0, compact and 44 or 34),
 			Text = tostring(quest.description or ""),
-			TextColor3 = Theme.Palette.Muted,
-			TextSize = 16,
+			TextColor3 = SHELL.TextMuted,
+			TextSize = 15,
+			TextStrokeColor3 = SHELL.TextShadow,
+			TextStrokeTransparency = 0.55,
 			TextWrapped = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextYAlignment = Enum.TextYAlignment.Top,
 		}),
 		ProgressText = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.BodyStrong,
+			Font = BODY,
 			Position = UDim2.fromOffset(18, compact and 88 or 78),
 			Size = UDim2.fromOffset(120, 18),
 			Text = string.format("%d / %d", tonumber(quest.progress) or 0, tonumber(quest.target) or 1),
-			TextColor3 = Theme.Palette.Text,
+			TextColor3 = SHELL.TextMain,
 			TextSize = 15,
+			TextStrokeColor3 = SHELL.TextShadow,
+			TextStrokeTransparency = 0.5,
 			TextXAlignment = Enum.TextXAlignment.Left,
 		}),
 		Progress = e(progressBar, {
@@ -256,29 +379,26 @@ local function questCard(props)
 			position = UDim2.fromOffset(98, compact and 92 or 82),
 			size = UDim2.new(1, compact and -116 or -282, 0, 11),
 		}),
-		Reward = e("TextLabel", {
+		Reward = e("Frame", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.BodyStrong,
+			ClipsDescendants = false,
 			Position = UDim2.fromOffset(18, compact and 116 or 102),
 			Size = UDim2.new(1, compact and -36 or -196, 0, 18),
-			Text = "Reward: " .. tostring(quest.rewardText or ""),
-			TextColor3 = Theme.Palette.Gold,
-			TextSize = 15,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextXAlignment = Enum.TextXAlignment.Left,
-		}),
+		}, rewardChildren),
 		Status = e("TextButton", {
 			AnchorPoint = compact and Vector2.new(0, 0.5) or Vector2.new(1, 1),
 			AutoButtonColor = false,
 			BackgroundColor3 = buttonColor,
-			BackgroundTransparency = 0.15,
+			BackgroundTransparency = 0,
 			BorderSizePixel = 0,
 			Position = compact and UDim2.fromOffset(18, 144) or UDim2.new(1, -16, 1, -14),
 			Size = compact and UDim2.new(1, -36, 0, 34) or UDim2.fromOffset(122, 34),
 			Text = statusText(quest),
 			TextColor3 = buttonTextColor,
-			TextSize = 14,
-			Font = Theme.Fonts.Display,
+			TextSize = 15,
+			Font = BODY,
+			TextStrokeColor3 = SHELL.TextShadow,
+			TextStrokeTransparency = claimable and 0 or 0.5,
 			[React.Event.Activated] = function()
 				if claimable and props.onClaim then
 					props.onClaim(quest.category, quest.id)
@@ -286,12 +406,24 @@ local function questCard(props)
 			end,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 12),
+				CornerRadius = UDim.new(0, 10),
 			}),
-			Stroke = e("UIStroke", {
-				Color = SHELL.GoldHighlight,
+			Outline = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = Color3.fromRGB(0, 0, 0),
+				Thickness = 1.8,
 				Transparency = 0,
-				Thickness = 1.2,
+			}, claimable and {
+				Grad = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new(Color3.fromRGB(80, 80, 80), Color3.fromRGB(0, 0, 0)),
+				}),
+			} or nil),
+			Sheen = e("UIGradient", {
+				Rotation = 90,
+				Color = claimable
+					and ColorSequence.new(Color3.fromRGB(255, 250, 222), Color3.fromRGB(216, 168, 64))
+					or ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
 			}),
 		}),
 	})
@@ -367,39 +499,33 @@ local function QuestScreen(props)
 
 	return e("Frame", {
 		ref = rootRef,
-		BackgroundColor3 = SHELL.MenuOverlay,
+		BackgroundColor3 = SHELL.CardBg,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ClipsDescendants = true,
+		ClipsDescendants = false,
 		Size = UDim2.fromScale(1, 1),
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 18),
 		}),
-		BaseTexture = e("ImageLabel", {
+		Anchor = e("ImageLabel", {
 			BackgroundTransparency = 1,
-			BorderSizePixel = 0,
-			Image = SHELL.MenuBackgroundImage,
-			ImageTransparency = 0,
-			ScaleType = Enum.ScaleType.Stretch,
-			Position = UDim2.fromOffset(2, 2),
-			Size = UDim2.new(1, -4, 1, -4),
-			ZIndex = 1,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 16),
-			}),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.949, 0, 0.895, 0),
+			Size = UDim2.new(0.075, 0, 0.275, 0),
+			Image = "rbxassetid://87910431269362",
+			ScaleType = Enum.ScaleType.Fit,
+			ZIndex = 4,
 		}),
-		Overlay = e("Frame", {
-			BackgroundColor3 = SHELL.MenuOverlay,
-			BackgroundTransparency = SHELL.MenuOverlayTransparency,
+		-- semi-transparent black fill (like the Sell UI)
+		Fill = e("Frame", {
+			BackgroundColor3 = SHELL.CardBg,
+			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(2, 2),
-			Size = UDim2.new(1, -4, 1, -4),
-			ZIndex = 2,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = -2,
 		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 16),
-			}),
+			Corner = e("UICorner", { CornerRadius = UDim.new(0, 18) }),
 		}),
 		OuterBorder = e("Frame", {
 			BackgroundTransparency = 1,
@@ -411,81 +537,113 @@ local function QuestScreen(props)
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 16),
 			}),
-			Stroke = e("UIStroke", {
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = SHELL.GoldHighlight,
-				Thickness = 3,
-				Transparency = 0,
-			}),
+			Stroke = goldStroke(3, 0),
 		}),
-		Header = e("Frame", {
-			BackgroundColor3 = SHELL.HeaderBackground,
-			BackgroundTransparency = SHELL.HeaderTransparency,
+		InnerBorder = e("Frame", {
+			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(12, 10),
-			Size = UDim2.new(1, -24, 0, 54),
-			ZIndex = 3,
+			Position = UDim2.fromOffset(8, 8),
+			Size = UDim2.new(1, -16, 1, -16),
+			ZIndex = 10,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 10),
+				CornerRadius = UDim.new(0, 12),
+			}),
+			Stroke = goldStroke(1.2, 0.3),
+		}),
+		-- gold pill badge title
+		TitleBadge = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = SHELL.CardBg,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0.5, 0, 0, 6),
+			Size = UDim2.fromOffset(186, 42),
+			ZIndex = 25,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.5, 0),
 			}),
 			Stroke = e("UIStroke", {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = SHELL.GoldHighlight,
-				Thickness = 1.5,
-				Transparency = 0,
+				Color = SHELL.GoldBase,
+				Thickness = 2,
+				Transparency = 0.15,
+			}, {
+				Gradient = e("UIGradient", {
+					Rotation = 0,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 216, 107)),
+						ColorSequenceKeypoint.new(0.47, Color3.fromRGB(138, 90, 19)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 216, 107)),
+					}),
+				}),
 			}),
 			Title = e("TextLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.fromOffset(260, 32),
+				FontFace = BADGE_FONT,
+				Size = UDim2.fromScale(1, 1),
 				Text = "QUESTS",
-				TextColor3 = SHELL.TextMain,
+				TextColor3 = SHELL.GoldBase,
 				TextScaled = true,
-				TextSize = 30,
-				TextStrokeColor3 = SHELL.GoldHighlight,
-				TextStrokeTransparency = 0.36,
-				ZIndex = 4,
-			}),
-			Close = e("TextButton", {
-				AnchorPoint = Vector2.new(1, 0.5),
-				AutoButtonColor = false,
-				BackgroundColor3 = SHELL.CloseFill,
-				BorderSizePixel = 0,
-				Position = UDim2.new(1, -8, 0.5, 0),
-				Size = UDim2.fromOffset(34, 34),
-				Text = "X",
-				TextColor3 = Color3.new(1, 1, 1),
-				Font = Enum.Font.GothamBold,
-				TextScaled = true,
-				TextStrokeColor3 = SHELL.TextShadow,
-				TextStrokeTransparency = 0.4,
-				ZIndex = 4,
-				[React.Event.Activated] = props.onClose,
+				ZIndex = 26,
 			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 8),
-				}),
-				Stroke = e("UIStroke", {
-					Color = SHELL.GoldShadow,
-					Thickness = 1,
-					Transparency = 0.1,
-				}),
+				Constraint = e("UITextSizeConstraint", { MaxTextSize = 22 }),
 				Gradient = e("UIGradient", {
 					Rotation = 90,
 					Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, SHELL.CloseFillSoft),
-						ColorSequenceKeypoint.new(1, SHELL.CloseFill),
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 251, 230)),
+						ColorSequenceKeypoint.new(0.47, Color3.fromRGB(255, 216, 107)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(95, 56, 2)),
 					}),
+				}),
+				Outline = e("UIStroke", {
+					Color = Color3.fromRGB(36, 18, 0),
+					Thickness = 3,
+					Transparency = 0.2,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+					LineJoinMode = Enum.LineJoinMode.Miter,
+				}),
+			}),
+		}),
+		-- floating close button (top-right, inset, with gradient + dark outline)
+		Close = e("TextButton", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			AutoButtonColor = false,
+			BackgroundColor3 = SHELL.CloseFill,
+			BorderSizePixel = 0,
+			Position = UDim2.new(1, -4, 0, 4),
+			Size = UDim2.fromOffset(34, 34),
+			Text = "X",
+			TextColor3 = Color3.new(1, 1, 1),
+			Font = Enum.Font.GothamBold,
+			TextScaled = true,
+			TextStrokeColor3 = SHELL.TextShadow,
+			TextStrokeTransparency = 0.25,
+			ZIndex = 30,
+			[React.Event.Activated] = props.onClose,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 9),
+			}),
+			Outline = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = Color3.fromRGB(0, 0, 0),
+				Thickness = 1.6,
+				Transparency = 0,
+			}),
+			Gradient = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 96, 102)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(214, 24, 34)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 0, 6)),
 				}),
 			}),
 		}),
 		Body = e("Frame", {
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(18, 82),
-			Size = UDim2.new(1, -42, 1, -92),
+			Position = UDim2.fromOffset(18, 58),
+			Size = UDim2.new(1, -42, 1, -70),
 			ZIndex = 3,
 		}, {
 			Tabs = e("Frame", {
@@ -496,8 +654,8 @@ local function QuestScreen(props)
 				ZIndex = 4,
 			}, tabChildren),
 			Summary = e("Frame", {
-				BackgroundColor3 = SHELL.SectionBackground,
-				BackgroundTransparency = 0.25,
+				BackgroundColor3 = SHELL.PanelBg,
+				BackgroundTransparency = 0,
 				BorderSizePixel = 0,
 				Position = UDim2.fromOffset(0, 42),
 				Size = UDim2.new(1, 0, 0, 56),
@@ -506,55 +664,51 @@ local function QuestScreen(props)
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 10),
 				}),
-				Stroke = e("UIStroke", {
-					Color = SHELL.GoldHighlight,
-					Transparency = 0,
-					Thickness = 1.5,
-				}),
+				Stroke = goldStroke(1.5, 0),
 				Label = e("TextLabel", {
 					BackgroundTransparency = 1,
-					Font = Theme.Fonts.Display,
+					Font = BODY,
 					Position = UDim2.fromOffset(16, 7),
-					Size = UDim2.new(1, -32, 0, 18),
+					Size = UDim2.new(1, -32, 0, 20),
 					Text = activeCategory and tostring(activeCategory.label) or "Quests",
-					TextColor3 = Theme.Palette.Text,
+					TextColor3 = SHELL.Cream,
 					TextSize = 18,
-					TextStrokeColor3 = SHELL.GoldShadow,
-					TextStrokeTransparency = 0.58,
+					TextStrokeColor3 = SHELL.TextShadow,
+					TextStrokeTransparency = 0.4,
 					TextXAlignment = Enum.TextXAlignment.Left,
 				}),
 				Copy = e("TextLabel", {
 					BackgroundTransparency = 1,
-					Font = Theme.Fonts.Body,
+					Font = BODY,
 					Position = UDim2.fromOffset(16, 30),
-					Size = UDim2.new(1, -32, 0, 16),
+					Size = UDim2.new(1, -32, 0, 18),
 					Text = activeCategory and string.format("%d/%d complete - %s", activeCategory.completedCount or 0, activeCategory.totalCount or 0, activeCategory.resetText or "") or "Loading quests...",
-					TextColor3 = Theme.Palette.Muted,
+					TextColor3 = SHELL.TextMuted,
 					TextSize = 14,
+					TextStrokeColor3 = SHELL.TextShadow,
+					TextStrokeTransparency = 0.6,
 					TextXAlignment = Enum.TextXAlignment.Left,
 				}),
 			}),
 			Notice = props.noticeText and e("TextLabel", {
-				BackgroundColor3 = Theme.Palette.TabRewardFill,
-				BackgroundTransparency = 0.2,
+				BackgroundColor3 = SHELL.PanelBg,
+				BackgroundTransparency = 0,
 				BorderSizePixel = 0,
-				Font = Theme.Fonts.Body,
+				Font = BODY,
 				Position = UDim2.fromOffset(0, 108),
 				Size = UDim2.new(1, 0, 0, 36),
 				Text = tostring(props.noticeText),
 				TextColor3 = SHELL.GoldHighlight,
 				TextSize = 15,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = 0.4,
 				ZIndex = 4,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 10),
 				}),
-				Stroke = e("UIStroke", {
-					Color = SHELL.GoldHighlight,
-					Thickness = 1.2,
-					Transparency = 0,
-				}),
-			}),
+				Stroke = goldStroke(1.2, 0),
+			}) or nil,
 			List = e("ScrollingFrame", {
 				AutomaticCanvasSize = Enum.AutomaticSize.Y,
 				BackgroundTransparency = 1,

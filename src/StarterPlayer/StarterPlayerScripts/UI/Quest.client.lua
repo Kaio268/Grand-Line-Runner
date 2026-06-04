@@ -191,11 +191,12 @@ local function prepareQuestFrame()
 
 	frame.BackgroundTransparency = 1
 	frame.BorderSizePixel = 0
-	frame.ClipsDescendants = true
-	frame.Size = UDim2.fromScale(0.86, 0.8)
+	frame.ClipsDescendants = false
+	frame.Size = UDim2.fromScale(0.76, 0.72)
 	frame.ZIndex = 120
 	if host then
 		host.ZIndex = 140
+		host.ClipsDescendants = false -- let the QUESTS pill overlap past the top edge without being clipped
 	end
 
 	if watchedFrame ~= frame then

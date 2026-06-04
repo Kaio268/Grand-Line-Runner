@@ -1142,8 +1142,8 @@ local function ensureFallbackSlotContainer(expectedRewardCount: number)
 	giftsMainFrame.BackgroundTransparency = 1
 	giftsMainFrame.BorderSizePixel = 0
 	giftsMainFrame.ClipsDescendants = true
-	giftsMainFrame.Size = UDim2.new(1, -42, 1, -126)
-	giftsMainFrame.Position = UDim2.fromOffset(18, 116)
+	giftsMainFrame.Size = UDim2.new(1, -42, 1, -66)
+	giftsMainFrame.Position = UDim2.fromOffset(18, 50)
 	giftsMainFrame.ZIndex = math.max(giftsMainFrame.ZIndex, 3)
 
 	local scroll = giftsMainFrame:FindFirstChild("Scroll")
@@ -2456,8 +2456,8 @@ local function forceGiftsLayout(context: string, rows)
 	giftsMainFrame.BackgroundTransparency = 1
 	giftsMainFrame.BorderSizePixel = 0
 	giftsMainFrame.ClipsDescendants = true
-	giftsMainFrame.Size = UDim2.new(1, -42, 1, -126)
-	giftsMainFrame.Position = UDim2.fromOffset(18, 116)
+	giftsMainFrame.Size = UDim2.new(1, -42, 1, -66)
+	giftsMainFrame.Position = UDim2.fromOffset(18, 50)
 	giftsMainFrame.ZIndex = math.max(giftsMainFrame.ZIndex, 3)
 
 	local container = getGiftsSlotContainer()

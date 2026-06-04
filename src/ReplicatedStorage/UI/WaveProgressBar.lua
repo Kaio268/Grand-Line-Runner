@@ -4,9 +4,9 @@ local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
 
 local e = React.createElement
-local SEGMENT_GAP_PX = 4
-local AVATAR_MARKER_SIZE = 32
-local WAVE_MARKER_SIZE = 26
+local SEGMENT_GAP_PX = 0
+local AVATAR_MARKER_SIZE = 30
+local WAVE_MARKER_SIZE = 18
 
 local SEGMENT_COLORS = {
 	Color3.fromRGB(56, 67, 98),
@@ -107,34 +107,30 @@ local function waveMarker(props)
 		children = {
 			Icon = e("ImageLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
-				BackgroundColor3 = Color3.fromRGB(22, 25, 36),
-				BackgroundTransparency = 0.04,
+				BackgroundColor3 = Color3.fromRGB(20, 24, 34),
+				BackgroundTransparency = 0.05,
 				BorderSizePixel = 0,
 				Image = "",
-				ImageColor3 = Color3.new(1, 1, 1),
 				Position = UDim2.fromScale(0.5, 0.5),
-				Rotation = 45,
-				ScaleType = Enum.ScaleType.Fit,
 				Size = UDim2.fromScale(1, 1),
 				ZIndex = 9,
 			}, {
 				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 7),
+					CornerRadius = UDim.new(1, 0),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(255, 183, 132),
-					Transparency = 0.1,
-					Thickness = 1.4,
+					Color = Color3.fromRGB(255, 196, 150),
+					Transparency = 0.25,
+					Thickness = 1.2,
 				}),
-				ImageRotationFix = e("ImageLabel", {
+				Image = e("ImageLabel", {
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					BackgroundTransparency = 1,
 					Image = props.image or "",
 					ImageColor3 = Color3.new(1, 1, 1),
 					Position = UDim2.fromScale(0.5, 0.5),
-					Rotation = -45,
 					ScaleType = Enum.ScaleType.Fit,
-					Size = UDim2.fromScale(0.76, 0.76),
+					Size = UDim2.fromScale(0.72, 0.72),
 					ZIndex = 10,
 				}),
 			}),
@@ -153,62 +149,125 @@ local function segmentRow(props)
 		}),
 	}
 
+	local count = #sections
+	local radius = compact and 9 or 13
+
 	for index, section in ipairs(sections) do
 		local color = section.color
 			or if section.isImpact
-				then Color3.fromRGB(104, 56, 54)
+				then Color3.fromRGB(170, 58, 56)
 				else SEGMENT_COLORS[((index - 1) % #SEGMENT_COLORS) + 1]
-		local labelColor = if section.isImpact
-			then Color3.fromRGB(255, 228, 214)
-			else color:Lerp(Color3.new(1, 1, 1), 0.52)
-		local widthScale = section.widthScale or (1 / #sections)
-		children["Segment" .. tostring(index)] = e("Frame", {
-			BackgroundColor3 = color,
-			BackgroundTransparency = 0.08,
-			BorderSizePixel = 0,
-			LayoutOrder = index,
-			Size = UDim2.new(widthScale, -SEGMENT_GAP_PX, 1, 0),
-			ZIndex = 6,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 8),
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
+		local widthScale = section.widthScale or (1 / count)
+		local isFirst = index == 1
+		local isLast = index == count
+		local light = color:Lerp(Color3.new(1, 1, 1), 0.5)
+		local deep = color:Lerp(Color3.new(0, 0, 0), 0.42)
+
+		local segmentChildren = {
+			-- diagonal multi-stop sheen: bright tint -> biome color -> deep shade
+			Sheen = e("UIGradient", {
+				Rotation = 35,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, color:Lerp(Color3.new(1, 1, 1), 0.14)),
-					ColorSequenceKeypoint.new(1, color:Lerp(Color3.new(0, 0, 0), 0.08)),
+					ColorSequenceKeypoint.new(0, light),
+					ColorSequenceKeypoint.new(0.5, color),
+					ColorSequenceKeypoint.new(1, deep),
 				}),
 			}),
-			Stroke = e("UIStroke", {
-				Color = if section.isImpact
-					then Color3.fromRGB(255, 189, 168)
-					else color:Lerp(Color3.new(1, 1, 1), 0.2),
-				Transparency = if section.isImpact then 0.15 else 0.3,
-				Thickness = if section.isImpact then 1.6 else 1,
+			-- glassy top highlight
+			Gloss = e("Frame", {
+				BackgroundColor3 = Color3.new(1, 1, 1),
+				BorderSizePixel = 0,
+				Size = UDim2.new(1, 0, 0.5, 0),
+				ZIndex = 6,
+			}, {
+				Fade = e("UIGradient", {
+					Rotation = 90,
+					Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 0.5),
+						NumberSequenceKeypoint.new(1, 1),
+					}),
+				}),
+			}),
+			-- bottom depth shade
+			Shade = e("Frame", {
+				AnchorPoint = Vector2.new(0, 1),
+				BackgroundColor3 = Color3.new(0, 0, 0),
+				BorderSizePixel = 0,
+				Position = UDim2.fromScale(0, 1),
+				Size = UDim2.new(1, 0, 0.46, 0),
+				ZIndex = 6,
+			}, {
+				Fade = e("UIGradient", {
+					Rotation = 90,
+					Transparency = NumberSequence.new({
+						NumberSequenceKeypoint.new(0, 1),
+						NumberSequenceKeypoint.new(1, 0.62),
+					}),
+				}),
 			}),
 			Label = e("TextLabel", {
-				AnchorPoint = Vector2.new(0.5, 1),
+				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromScale(0.5, 0.92),
-				Size = UDim2.new(1, -8, 0, compact and 16 or 30),
+				Font = Enum.Font.GothamBlack,
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.new(1, -10, 1, 0),
 				Text = section.label or ("Biome " .. tostring(index)),
-				TextColor3 = labelColor,
-				TextSize = compact and 6 or 11,
-				TextStrokeColor3 = Color3.fromRGB(5, 8, 14),
-				TextStrokeTransparency = 0.18,
-				TextTransparency = if section.isImpact then 0.02 else 0.04,
-				TextWrapped = true,
+				TextColor3 = Color3.fromRGB(255, 255, 255),
+				TextSize = compact and 7 or 12,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextStrokeColor3 = Color3.fromRGB(8, 10, 16),
+				TextStrokeTransparency = 0.3,
 				TextXAlignment = Enum.TextXAlignment.Center,
 				TextYAlignment = Enum.TextYAlignment.Center,
 				ZIndex = 7,
+			}),
+		}
+
+		-- Round only the outer ends so the segments read as one continuous bar.
+		if isFirst or isLast then
+			segmentChildren.Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, radius),
+			})
+		end
+
+		children["Segment" .. tostring(index)] = e("Frame", {
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+			ClipsDescendants = true,
+			LayoutOrder = index,
+			Size = UDim2.new(widthScale, 0, 1, 0),
+			ZIndex = 6,
+		}, segmentChildren)
+	end
+
+	-- Angled, beveled dividers overlaid at the section boundaries for a faceted look.
+	local cumulative = 0
+	for index = 1, count - 1 do
+		cumulative += sections[index].widthScale or (1 / count)
+		children["Divider" .. tostring(index)] = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = Color3.fromRGB(10, 13, 21),
+			BackgroundTransparency = 0.12,
+			BorderSizePixel = 0,
+			Position = UDim2.fromScale(cumulative, 0.5),
+			Rotation = 14,
+			Size = UDim2.new(0, compact and 2 or 3, 1.5, 0),
+			ZIndex = 7,
+		}, {
+			Edge = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(58, 66, 88)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(10, 13, 21)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(58, 66, 88)),
+				}),
 			}),
 		})
 	end
 
 	return e("Frame", {
 		BackgroundTransparency = 1,
+		ClipsDescendants = true,
 		Size = UDim2.fromScale(1, 1),
 		ZIndex = 6,
 	}, children)
@@ -235,13 +294,13 @@ local function WaveProgressBar(props)
 		Root = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
-			Position = UDim2.new(0.5, 0, 0, compact and 8 or 18),
-			Size = UDim2.fromOffset(compact and 390 or 820, compact and 36 or 80),
+			Position = UDim2.new(0.5, 0, 0, compact and 8 or 16),
+			Size = UDim2.fromOffset(compact and 390 or 920, compact and 36 or 70),
 			ZIndex = 5,
 		}, {
 			Constraint = e("UISizeConstraint", {
-				MaxSize = compact and Vector2.new(430, 36) or Vector2.new(940, 80),
-				MinSize = compact and Vector2.new(280, 32) or Vector2.new(500, 72),
+				MaxSize = compact and Vector2.new(430, 36) or Vector2.new(1040, 70),
+				MinSize = compact and Vector2.new(280, 32) or Vector2.new(560, 64),
 			}),
 			IconBacking = compact and e("Frame", {
 				BackgroundColor3 = Color3.fromRGB(8, 12, 20),
@@ -267,9 +326,9 @@ local function WaveProgressBar(props)
 					CornerRadius = UDim.new(0, 14),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(109, 131, 171),
-					Transparency = 0.18,
-					Thickness = 1.4,
+					Color = Color3.fromRGB(150, 170, 205),
+					Transparency = 0.5,
+					Thickness = 1.1,
 				}),
 				Segments = segmentRow(props),
 			}),

@@ -35,7 +35,7 @@ local function SectionBlock(props)
 	local surface = Theme.getSurfaceTheme(section.themeKey)
 	local cardSafetyInset = columns > 1 and 12 or 4
 	local cellOffset = math.ceil((((columns - 1) * gap) + cardSafetyInset) / columns)
-	local cardHeight = columns <= 1 and 304 or 292
+	local cardHeight = columns <= 1 and 344 or 332
 
 	local rowChildren = {
 		List = e("UIListLayout", {
