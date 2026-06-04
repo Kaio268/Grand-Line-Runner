@@ -539,7 +539,7 @@ local function buildCooldownAbilities(fruitName)
 					status = "COOLDOWN " .. formatCooldownTime(remaining)
 					statusColor3 = DEVIL_FRUIT_UI.Cooldown
 					fillColor3 = DEVIL_FRUIT_UI.CooldownFill
-					progress = math.clamp(remaining / total, 0, 1)
+					progress = math.clamp(1 - (remaining / total), 0, 1)
 				end
 			end
 		end
