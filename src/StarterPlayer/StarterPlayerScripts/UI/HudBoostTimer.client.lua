@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -9,6 +10,8 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local HudBoostTimer = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudBoostTimer"))
 
 local rootContainer = Instance.new("Folder")
@@ -81,13 +84,15 @@ local function ensureHost()
 		host.Parent = hud
 	end
 
+	local mode = Responsive.getHudLayoutMode()
+	local layout = HudLayout.getBoostTimer(mode)
 	host.AnchorPoint = Vector2.new(1, 0)
 	host.AutomaticSize = Enum.AutomaticSize.None
 	host.BackgroundTransparency = 1
 	host.BorderSizePixel = 0
 	host.ClipsDescendants = false
-	host.Position = UDim2.new(1, -18, 0, 122)
-	host.Size = UDim2.fromOffset(360, 140)
+	host.Position = layout.position
+	host.Size = layout.size
 	host.Visible = true
 	host.ZIndex = 260
 
@@ -100,6 +105,7 @@ local function render()
 	local host = ensureHost()
 	if host then
 		root:render(ReactRoblox.createPortal(React.createElement(HudBoostTimer, {
+			layoutMode = Responsive.getHudLayoutMode(),
 			player = player,
 		}), host))
 	else
@@ -133,9 +139,31 @@ playerGui.DescendantRemoving:Connect(function(descendant)
 	end
 end)
 
+local viewportConnections = {}
+local function bindViewportConnections()
+	for _, connection in ipairs(viewportConnections) do
+		connection:Disconnect()
+	end
+	table.clear(viewportConnections)
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportConnections[#viewportConnections + 1] =
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(scheduleRender)
+	end
+	viewportConnections[#viewportConnections + 1] = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindViewportConnections()
+		scheduleRender()
+	end)
+end
+
+bindViewportConnections()
 scheduleRender()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	for _, connection in ipairs(viewportConnections) do
+		connection:Disconnect()
+	end
 	root:unmount()
 end)

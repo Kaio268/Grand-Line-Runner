@@ -5,8 +5,8 @@ local React = require(Packages:WaitForChild("React"))
 
 local e = React.createElement
 local SEGMENT_GAP_PX = 4
-local AVATAR_MARKER_SIZE = 32
-local WAVE_MARKER_SIZE = 26
+local AVATAR_MARKER_SIZE = 44
+local WAVE_MARKER_SIZE = 44
 
 local SEGMENT_COLORS = {
 	Color3.fromRGB(56, 67, 98),
@@ -145,6 +145,7 @@ end
 local function segmentRow(props)
 	local sections = getSections(props)
 	local compact = props.compact == true
+	local barHeight = tonumber(props.barHeight) or (compact and 34 or 44)
 	local children = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
@@ -192,10 +193,10 @@ local function segmentRow(props)
 				BackgroundTransparency = 1,
 				Font = Enum.Font.GothamBold,
 				Position = UDim2.fromScale(0.5, 0.92),
-				Size = UDim2.new(1, -8, 0, compact and 16 or 30),
+				Size = UDim2.new(1, -8, 0, math.max(18, barHeight - 10)),
 				Text = section.label or ("Biome " .. tostring(index)),
 				TextColor3 = labelColor,
-				TextSize = compact and 6 or 11,
+				TextSize = compact and 8 or 12,
 				TextStrokeColor3 = Color3.fromRGB(5, 8, 14),
 				TextStrokeTransparency = 0.18,
 				TextTransparency = if section.isImpact then 0.02 else 0.04,
@@ -216,6 +217,11 @@ end
 
 local function WaveProgressBar(props)
 	local compact = props.compact == true
+	local barHeight = tonumber(props.barHeight) or (compact and 34 or 44)
+	local rootWidth = compact and 520 or 900
+	local rootHeight = barHeight + 22
+	local topOffset = compact and 8 or 18
+	local barY = math.floor((rootHeight - barHeight) * 0.5)
 	local playerMarkers = {}
 	for index, markerProps in ipairs(props.players or {}) do
 		playerMarkers["Player" .. tostring(index)] = e(avatarMarker, markerProps)
@@ -235,32 +241,20 @@ local function WaveProgressBar(props)
 		Root = e("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
-			Position = UDim2.new(0.5, 0, 0, compact and 8 or 18),
-			Size = UDim2.fromOffset(compact and 390 or 820, compact and 36 or 80),
+			Position = UDim2.new(0.5, 0, 0, topOffset),
+			Size = UDim2.fromOffset(rootWidth, rootHeight),
 			ZIndex = 5,
 		}, {
 			Constraint = e("UISizeConstraint", {
-				MaxSize = compact and Vector2.new(430, 36) or Vector2.new(940, 80),
-				MinSize = compact and Vector2.new(280, 32) or Vector2.new(500, 72),
+				MaxSize = compact and Vector2.new(620, rootHeight) or Vector2.new(980, rootHeight),
+				MinSize = compact and Vector2.new(320, rootHeight) or Vector2.new(560, rootHeight),
 			}),
-			IconBacking = compact and e("Frame", {
-				BackgroundColor3 = Color3.fromRGB(8, 12, 20),
-				BackgroundTransparency = 0.38,
-				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, 2),
-				Size = UDim2.new(1, 0, 0, 32),
-				ZIndex = 4,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 14),
-				}),
-			}) or nil,
 			Backdrop = e("Frame", {
 				BackgroundColor3 = Color3.fromRGB(11, 15, 24),
 				BackgroundTransparency = 0.1,
 				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, compact and 7 or 16),
-				Size = UDim2.new(1, 0, 0, compact and 20 or 40),
+				Position = UDim2.fromOffset(0, barY),
+				Size = UDim2.new(1, 0, 0, barHeight),
 				ZIndex = 5,
 			}, {
 				Corner = e("UICorner", {

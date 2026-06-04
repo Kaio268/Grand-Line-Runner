@@ -3,9 +3,11 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
+local UiFolder = ReplicatedStorage:WaitForChild("UI")
 
 local React = require(Packages:WaitForChild("React"))
-local Responsive = require(script.Parent.Parent:WaitForChild("Responsive"))
+local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 
 local e = React.createElement
 
@@ -26,8 +28,8 @@ local BOOST_METADATA = {
 
 local DEFAULT_ACCENT = Color3.fromRGB(238, 191, 99)
 
-local function isCompactViewport()
-	return Responsive.isCompact()
+local function isCompactViewport(layoutMode)
+	return HudLayout.getBoostTimer(layoutMode or Responsive.getHudLayoutMode()).compact == true
 end
 
 local function trimTimeSuffix(name)
@@ -176,7 +178,7 @@ local function HudBoostTimer(props)
 	if #boostState.entries == 0 then
 		return nil
 	end
-	local compact = isCompactViewport()
+	local compact = isCompactViewport(props.layoutMode)
 
 	local children = {
 		Layout = e("UIListLayout", {

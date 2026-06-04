@@ -13,6 +13,7 @@ local ConfigsFolder = ModulesFolder:WaitForChild("Configs")
 local BiomeAreas = require(ConfigsFolder:WaitForChild("BiomeAreas"))
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 
 local STATE_EVENT_NAME = "GrandLineRushChestRushState"
 local STATE_REQUEST_NAME = "GrandLineRushChestRushStateRequest"
@@ -20,14 +21,9 @@ local STATE_REQUEST_NAME = "GrandLineRushChestRushStateRequest"
 local DISPLAY_ORDER = 124
 local CHEST_RUSH_GUI_DISPLAY_ORDER = DISPLAY_ORDER - 1
 local ANNOUNCEMENT_TOP_OFFSET = 176
-local ANNOUNCEMENT_MOBILE_TOP_OFFSET = 114
 local CHEST_RUSH_GUI_NAME = "ChestRushGui"
 local BASE_BANNER_SIZE = Vector2.new(400, 95)
-local BANNER_MOBILE_SCALE = 0.72
-local BANNER_COMPACT_SCALE = 0.88
 local BANNER_DESKTOP_SCALE = 1
-local BANNER_MOBILE_TOP_OFFSET = 76
-local BANNER_COMPACT_TOP_OFFSET = 90
 local BANNER_DESKTOP_TOP_OFFSET = 96
 local BANNER_MIN_SIZE = Vector2.new(288, 68)
 local BANNER_MAX_SIZE = Vector2.new(400, 95)
@@ -84,7 +80,8 @@ local currentCameraConnection = nil
 local activeAreaConnection = nil
 
 local function isMobileViewport()
-	return Responsive.isMobile()
+	local mode = Responsive.getHudLayoutMode()
+	return mode == "phone" or mode == "tablet"
 end
 
 local function createInstance(className, props, children)
@@ -220,27 +217,13 @@ local function setChestRushGuiRestState()
 end
 
 local function getBannerScale(viewport)
-	if Responsive.isMobile(viewport) then
-		return BANNER_MOBILE_SCALE
-	end
-
-	if Responsive.isCompact(viewport) then
-		return BANNER_COMPACT_SCALE
-	end
-
-	return BANNER_DESKTOP_SCALE
+	local layout = HudLayout.getTopBanner(Responsive.getHudLayoutMode(viewport))
+	return layout.scale or BANNER_DESKTOP_SCALE
 end
 
 local function getBannerTopOffset(viewport)
-	if Responsive.isMobile(viewport) then
-		return BANNER_MOBILE_TOP_OFFSET
-	end
-
-	if Responsive.isCompact(viewport) then
-		return BANNER_COMPACT_TOP_OFFSET
-	end
-
-	return BANNER_DESKTOP_TOP_OFFSET
+	local layout = HudLayout.getTopBanner(Responsive.getHudLayoutMode(viewport))
+	return layout.topOffset or BANNER_DESKTOP_TOP_OFFSET
 end
 
 local function applyChestRushGuiResponsiveLayout()
@@ -487,15 +470,19 @@ announcementSubtitle.Size = UDim2.new(1, -48, 0, 18)
 announcementSubtitle.Parent = announcementCard
 
 local function getAnnouncementTopOffset()
-	return if isMobileViewport() then ANNOUNCEMENT_MOBILE_TOP_OFFSET else ANNOUNCEMENT_TOP_OFFSET
+	local layout = HudLayout.getTopBanner()
+	return layout.announcementTopOffset or ANNOUNCEMENT_TOP_OFFSET
 end
 
 local function getAnnouncementScaleTarget()
-	return if isMobileViewport() then 0.76 else Responsive.getUiScale()
+	local layout = HudLayout.getTopBanner()
+	return layout.announcementScale or Responsive.getUiScale()
 end
 
 local function applyResponsiveLayout()
-	if isMobileViewport() then
+	local mode = Responsive.getHudLayoutMode()
+	local mobile = mode == "phone" or mode == "tablet"
+	if mobile then
 		announcementRoot.Size = UDim2.new(0.72, 0, 0, 68)
 		announcementSize.MinSize = Vector2.new(240, 68)
 		announcementSize.MaxSize = Vector2.new(380, 68)

@@ -12,6 +12,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local HudStatRow = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatRow"))
 local HudStatNotificationLayer = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudStatNotificationLayer"))
 local HudCounterConfig = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudCounterConfig"))
@@ -41,15 +42,6 @@ local TARGET_ROW_SPACING = HudCounterConfig.RowSpacing
 local ICON_SLOT_WIDTH = HudCounterConfig.IconSlotWidth
 local BAR_GAP = HudCounterConfig.BarGap
 local DISPLAY_LAYER_ZINDEX = HudCounterConfig.DisplayLayerZIndex
-local MOBILE_COUNTER_WIDTH = 132
-local MOBILE_ROW_HEIGHT = 26
-local MOBILE_ROW_SPACING = 3
-local MOBILE_PANEL_PADDING = {
-	Left = 2,
-	Right = 4,
-	Top = 3,
-	Bottom = 2,
-}
 
 local PROTECTED_NAMES = {
 	UIGradient = true,
@@ -145,25 +137,29 @@ local function layoutDisplayLayer(layer, rowCount)
 	end
 
 	local _, bottomRightInset = GuiService:GetGuiInset()
-	local compact = Responsive.isCompact()
+	local mode = Responsive.getHudLayoutMode()
+	local currencyLayout = HudLayout.getCurrency(mode)
+	local compact = mode ~= "desktop"
 	local uiScale = if compact then 1 else Responsive.getUiScale()
 	local bottomInset = if compact then 0 else bottomRightInset.Y
-	local rowHeight = compact and MOBILE_ROW_HEIGHT or round(TARGET_ROW_HEIGHT * uiScale)
-	local rowSpacing = compact and MOBILE_ROW_SPACING or round(TARGET_ROW_SPACING * uiScale)
-	local panelPadding = compact and MOBILE_PANEL_PADDING or scalePadding(HudCounterConfig.PanelPadding, uiScale)
+	local rowHeight = compact and currencyLayout.rowHeight or round(TARGET_ROW_HEIGHT * uiScale)
+	local rowSpacing = compact and currencyLayout.rowSpacing or round(TARGET_ROW_SPACING * uiScale)
+	local panelPadding = compact and currencyLayout.panelPadding or scalePadding(HudCounterConfig.PanelPadding, uiScale)
 	local panelTop = panelPadding.Top
 	local panelBottom = panelPadding.Bottom
 	local totalHeight = panelTop + panelBottom + (rowCount * rowHeight) + (math.max(0, rowCount - 1) * rowSpacing)
 	local moneyRowY = panelTop + ((math.min(3, math.max(1, rowCount)) - 1) * (rowHeight + rowSpacing))
-	local layerWidth = compact and MOBILE_COUNTER_WIDTH or round(COUNTERS_WIDTH * uiScale)
+	local layerWidth = compact and currencyLayout.width or round(COUNTERS_WIDTH * uiScale)
 
-	layer.AnchorPoint = Vector2.new(0, 1)
-	layer.Position = UDim2.new(
-		0,
-		compact and 0 or round(COUNTERS_LEFT_PADDING * uiScale),
-		1,
-		-((compact and 0 or round(COUNTERS_BOTTOM_PADDING * uiScale)) + bottomInset)
-	)
+	layer.AnchorPoint = if compact then (currencyLayout.anchorPoint or Vector2.new(0, 0)) else Vector2.new(0, 1)
+	layer.Position = if compact
+		then currencyLayout.position
+		else UDim2.new(
+			0,
+			round(COUNTERS_LEFT_PADDING * uiScale),
+			1,
+			-((round(COUNTERS_BOTTOM_PADDING * uiScale)) + bottomInset)
+		)
 	layer.Size = UDim2.fromOffset(layerWidth, totalHeight)
 	layer.BackgroundTransparency = 1
 	layer.BorderSizePixel = 0
@@ -182,27 +178,29 @@ local function layoutDisplayLayer(layer, rowCount)
 
 	local notifications = layer:FindFirstChild("ReactHudCounterNotifications")
 	if notifications and notifications:IsA("Frame") then
-		local notificationHeight = compact and HudCounterConfig.NotificationHeight or round(HudCounterConfig.NotificationHeight * uiScale)
+		local notificationHeight = compact and 76 or round(HudCounterConfig.NotificationHeight * uiScale)
 		local notificationX = panelPadding.Left + (compact and 34 or round((HudCounterConfig.getBarX() + 10) * uiScale))
 		notifications.Position = UDim2.fromOffset(notificationX, math.max(0, moneyRowY - notificationHeight + 6))
-		notifications.Size = UDim2.fromOffset(compact and 108 or round(HudCounterConfig.NotificationWidth * uiScale), notificationHeight)
+		notifications.Size = UDim2.fromOffset(compact and 112 or round(HudCounterConfig.NotificationWidth * uiScale), notificationHeight)
 		notifications.ZIndex = DISPLAY_LAYER_ZINDEX + 12
 	end
 end
 
 local function getCounterRenderMetrics()
-	local compact = Responsive.isCompact()
+	local mode = Responsive.getHudLayoutMode()
+	local currencyLayout = HudLayout.getCurrency(mode)
+	local compact = mode ~= "desktop"
 	local uiScale = if compact then 1 else Responsive.getUiScale()
 
 	return {
-		barGap = compact and 4 or round(BAR_GAP * uiScale),
-		iconSlotInnerSize = compact and 20 or round(HudCounterConfig.IconSize * uiScale),
-		iconSlotWidth = compact and 28 or round(ICON_SLOT_WIDTH * uiScale),
-		panelPadding = compact and MOBILE_PANEL_PADDING or scalePadding(HudCounterConfig.PanelPadding, uiScale),
-		rowHeight = compact and MOBILE_ROW_HEIGHT or round(TARGET_ROW_HEIGHT * uiScale),
-		rowSpacing = compact and MOBILE_ROW_SPACING or round(TARGET_ROW_SPACING * uiScale),
-		valueTextSize = compact and 18 or round(HudStatsTheme.Typography.ValueSize * uiScale),
-		labelTextSize = compact and 10 or round(HudStatsTheme.Typography.LabelSize * uiScale),
+		barGap = compact and currencyLayout.barGap or round(BAR_GAP * uiScale),
+		iconSlotInnerSize = compact and currencyLayout.iconSize or round(HudCounterConfig.IconSize * uiScale),
+		iconSlotWidth = compact and currencyLayout.iconSlotWidth or round(ICON_SLOT_WIDTH * uiScale),
+		panelPadding = compact and currencyLayout.panelPadding or scalePadding(HudCounterConfig.PanelPadding, uiScale),
+		rowHeight = compact and currencyLayout.rowHeight or round(TARGET_ROW_HEIGHT * uiScale),
+		rowSpacing = compact and currencyLayout.rowSpacing or round(TARGET_ROW_SPACING * uiScale),
+		valueTextSize = compact and currencyLayout.valueTextSize or round(HudStatsTheme.Typography.ValueSize * uiScale),
+		labelTextSize = compact and currencyLayout.labelTextSize or round(HudStatsTheme.Typography.LabelSize * uiScale),
 	}
 end
 

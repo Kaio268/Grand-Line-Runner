@@ -8,6 +8,7 @@ local Workspace = game:GetService("Workspace")
 local RNG = Random.new()
 
 local Responsive = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("Responsive"))
+local HudLayout = require(ReplicatedStorage:WaitForChild("UI"):WaitForChild("HudLayout"))
 local ChestOpenResultFormatter = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GrandLineRushChestOpenResultFormatter"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
 local RewardIconResolver = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RewardIconResolver"))
@@ -58,10 +59,10 @@ local REWARD_EASING_DIRECTION_IN = Enum.EasingDirection.Out
 local activePopups = {}
 local activeRewardTweens = setmetatable({}, { __mode = "k" })
 local rewardPoolWarmStarted = false
-local isMobileViewport
 
 local function getTransientUiScale()
-	if Responsive.isMobile() then
+	local mode = Responsive.getHudLayoutMode()
+	if mode == "phone" or mode == "tablet" then
 		return 1
 	end
 
@@ -415,7 +416,8 @@ function PopUpModule:Local_ShowReward(rewardTable)
 
 	local function getTargetScale(count)
 		local countScale = if count > 6 then 6 / count else 1
-		local viewportScale = if isMobileViewport() then 0.74 else getTransientUiScale()
+		local popupLayout = HudLayout.getPopups(Responsive.getHudLayoutMode())
+		local viewportScale = popupLayout.rewardScale or getTransientUiScale()
 		return countScale * viewportScale
 	end
 
@@ -734,10 +736,6 @@ local DEVIL_FRUIT_ACK_THEME = {
 local ACK_PREVIEW_WIDTH = 220
 local ACK_BODY_BOTTOM_PADDING = 62
 
-isMobileViewport = function()
-	return Responsive.isMobile()
-end
-
 local function getAcknowledgementScale()
 	local camera = Workspace.CurrentCamera
 	local viewport = camera and camera.ViewportSize or Vector2.new(1280, 720)
@@ -745,9 +743,8 @@ local function getAcknowledgementScale()
 	local availableY = math.max(220, viewport.Y - 28)
 	local scale = math.min(availableX / 620, availableY / 370, 1)
 
-	if isMobileViewport() then
-		scale = math.min(scale, 0.74)
-	end
+	local popupLayout = HudLayout.getPopups(Responsive.getHudLayoutMode())
+	scale = math.min(scale, popupLayout.acknowledgementMaxScale or 1)
 
 	return math.clamp(scale, 0.56, 1)
 end

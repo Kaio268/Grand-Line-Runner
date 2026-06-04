@@ -13,6 +13,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local HudMenuGroup = require(UiFolder:WaitForChild("Hud"):WaitForChild("HudMenuGroup"))
 
 local e = React.createElement
@@ -58,49 +59,56 @@ local function round(value)
 	return math.floor(value + 0.5)
 end
 
+local function getLeftMenuLayoutMode(viewport)
+	local hudMode = Responsive.getHudLayoutMode(viewport)
+	if hudMode ~= "desktop" then
+		return hudMode
+	end
+
+	local viewportMode = Responsive.getViewportLayoutMode(viewport)
+	if viewportMode ~= "desktop" then
+		return viewportMode
+	end
+
+	return hudMode
+end
+
 local function getHudLayout()
 	local viewport = Responsive.getViewport()
-	local phone = Responsive.isPhoneViewport(viewport)
-	local tablet = Responsive.isTabletViewport(viewport)
-	local mobile = phone or tablet
-	local compact = Responsive.isCompact(viewport)
-	local uiScale = if mobile then 1 else Responsive.getUiScale(viewport)
-	local tileSize = round((if phone then 42 elseif tablet then 58 elseif compact then 72 else 98) * uiScale)
-	local columnGap = round((if phone then 6 elseif tablet then 8 elseif compact then 6 else 10) * uiScale)
-	local rowGap = round((if phone then 6 elseif tablet then 8 elseif compact then 6 else 10) * uiScale)
-	local stepX = tileSize + columnGap
-	local stepY = tileSize + rowGap
-	local containerOffsetX = round((if phone then 4 elseif tablet then 8 elseif compact then 8 else 10) * uiScale)
-	local containerOffsetY = round((if phone then 98 elseif tablet then 122 elseif compact then 160 else 250) * uiScale)
-	local mobilePositions = {
-		Store = Vector2.new(0, 0),
-		Index = Vector2.new(stepX, 0),
-		Gifts = Vector2.new(stepX * 2, 0),
-		Quest = Vector2.new(0, stepY),
-		Rebirth = Vector2.new(stepX, stepY),
-		Settings = Vector2.new(stepX * 2, stepY),
-	}
-	local stackedPositions = {
-		Store = Vector2.new(0, 0),
-		Index = Vector2.new(stepX, 0),
-		Gifts = Vector2.new(0, stepY),
-		Quest = Vector2.new(stepX, stepY),
-		Rebirth = Vector2.new(0, stepY * 2),
-		Settings = Vector2.new(stepX, stepY * 2),
+	local mode = getLeftMenuLayoutMode(viewport)
+	local leftMenu = HudLayout.getLeftMenu(mode)
+	local containerSize = HudLayout.getLeftMenuSize(mode)
+	local mobile = mode == "phone" or mode == "tablet"
+	local layoutOrders = {
+		Store = 1,
+		Index = 2,
+		Gifts = 3,
+		Quest = 4,
+		Rebirth = 5,
+		Settings = 6,
 	}
 
 	return {
-		tileSize = tileSize,
-		columnGap = columnGap,
-		rowGap = rowGap,
-		stepX = stepX,
-		stepY = stepY,
+		badgeSize = leftMenu.badgeSize,
+		columns = leftMenu.columns,
+		containerSize = containerSize,
+		gap = leftMenu.gap,
+		iconSize = leftMenu.iconSize,
+		layoutMode = mode,
+		layoutOrders = layoutOrders,
 		mobile = mobile,
-		phone = phone,
-		tablet = tablet,
-		uiScale = uiScale,
-		containerPosition = UDim2.fromOffset(containerOffsetX, containerOffsetY),
-		positions = if mobile then mobilePositions else stackedPositions,
+		newBadgeSize = leftMenu.newBadgeSize,
+		orientation = leftMenu.orientation,
+		phone = mode == "phone",
+		tablet = mode == "tablet",
+		compactDesktop = mode == "compactDesktop",
+		timerSize = leftMenu.timerSize,
+		timerTextSize = leftMenu.timerTextSize,
+		tileSize = leftMenu.tileSize,
+		titleYScale = leftMenu.titleYScale,
+		textSize = leftMenu.textSize,
+		uiScale = 1,
+		containerPosition = leftMenu.position,
 	}
 end
 
@@ -194,6 +202,38 @@ local function isProtectedDescendant(button, descendant)
 	end
 
 	return false
+end
+
+local function ensureMenuGrid(container, layout)
+	for _, child in ipairs(container:GetChildren()) do
+		if
+			(child:IsA("UIGridLayout") or child:IsA("UIListLayout") or child:IsA("UIPageLayout"))
+			and child.Name ~= "ReactHudMenuGrid"
+		then
+			child:Destroy()
+		end
+	end
+
+	local grid = container:FindFirstChild("ReactHudMenuGrid")
+	if not grid or not grid:IsA("UIGridLayout") then
+		if grid then
+			grid:Destroy()
+		end
+		grid = Instance.new("UIGridLayout")
+		grid.Name = "ReactHudMenuGrid"
+		grid.Parent = container
+	end
+
+	grid.CellPadding = UDim2.fromOffset(layout.gap, layout.gap)
+	grid.CellSize = UDim2.fromOffset(layout.tileSize, layout.tileSize)
+	grid.FillDirection = Enum.FillDirection.Horizontal
+	grid.FillDirectionMaxCells = layout.columns
+	grid.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	grid.SortOrder = Enum.SortOrder.LayoutOrder
+	grid.StartCorner = Enum.StartCorner.TopLeft
+	grid.VerticalAlignment = Enum.VerticalAlignment.Top
+
+	return grid
 end
 
 local function extractImageStyle(source, host)
@@ -367,17 +407,14 @@ end
 local function ensureContainer(hud)
 	local layout = getHudLayout()
 	local lButtons = hud:FindFirstChild("LButtons")
-	local containerWidth = if layout.mobile
-		then (layout.tileSize * 3) + (layout.columnGap * 2)
-		else (layout.tileSize * 2) + layout.columnGap
-	local containerHeight = if layout.mobile
-		then (layout.tileSize * 2) + layout.rowGap
-		else (layout.tileSize * 3) + (layout.rowGap * 2)
+	local containerWidth = layout.containerSize.X
+	local containerHeight = layout.containerSize.Y
 	if lButtons and lButtons:IsA("GuiObject") then
 		lButtons.Visible = true
 		lButtons.ClipsDescendants = false
 		lButtons.Size = UDim2.fromOffset(containerWidth, containerHeight)
 		lButtons.Position = layout.containerPosition
+		ensureMenuGrid(lButtons, layout)
 		return lButtons
 	end
 
@@ -390,6 +427,8 @@ local function ensureContainer(hud)
 	created.Position = layout.containerPosition
 	created.Size = UDim2.fromOffset(containerWidth, containerHeight)
 	created.Parent = hud
+
+	ensureMenuGrid(created, layout)
 
 	return created
 end
@@ -470,18 +509,16 @@ end
 
 local function ensureShell(container, definition, index)
 	local layout = getHudLayout()
-	local mappedPosition = layout.positions[definition.name]
+	local layoutOrder = layout.layoutOrders[definition.name] or index
 	local existing = container:FindFirstChild(definition.name)
 	if existing and existing:IsA("GuiButton") then
 		existing.Visible = true
 		existing.Active = true
 		existing.ClipsDescendants = true
 		existing.Size = UDim2.fromOffset(layout.tileSize, layout.tileSize)
-		existing.LayoutOrder = index
+		existing.LayoutOrder = layoutOrder
+		existing.Position = UDim2.fromOffset(0, 0)
 		CollectionService:AddTag(existing, HUD_BUTTON_NO_ANIM_TAG)
-		if mappedPosition then
-			existing.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
-		end
 		return existing
 	end
 
@@ -494,14 +531,10 @@ local function ensureShell(container, definition, index)
 	button.ClipsDescendants = true
 	button.ImageTransparency = 1
 	button.Visible = true
-	button.LayoutOrder = index
+	button.LayoutOrder = layoutOrder
 	button.Size = UDim2.fromOffset(layout.tileSize, layout.tileSize)
 	CollectionService:AddTag(button, HUD_BUTTON_NO_ANIM_TAG)
-	if mappedPosition then
-		button.Position = UDim2.fromOffset(mappedPosition.X, mappedPosition.Y)
-	else
-		button.Position = UDim2.fromOffset(0, (index - 1) * layout.stepY)
-	end
+	button.Position = UDim2.fromOffset(0, 0)
 
 	button.Parent = container
 	return button
@@ -576,21 +609,14 @@ local function ensureBadge(button, defaultText)
 		badge.ClipsDescendants = false
 		badge.AnchorPoint = Vector2.new(1, 0)
 		badge.BackgroundColor3 = Color3.fromRGB(232, 72, 102)
-		badge.Position = if layout.phone
+		badge.Position = if layout.mobile or layout.compactDesktop
 			then UDim2.new(1, 3, 0, -3)
-			elseif layout.tablet then UDim2.new(1, 5, 0, -4)
 			else UDim2.new(1, 8, 0, -6)
 		badge.ZIndex = math.max(badge.ZIndex, button.ZIndex + 28, 32)
 		if badgeTextValue == "NEW" then
-			badge.Size = if layout.phone
-				then UDim2.fromOffset(28, 14)
-				elseif layout.tablet then UDim2.fromOffset(34, 18)
-				else UDim2.fromOffset(42, 22)
+			badge.Size = layout.newBadgeSize
 		else
-			badge.Size = if layout.phone
-				then UDim2.fromOffset(24, 14)
-				elseif layout.tablet then UDim2.fromOffset(28, 18)
-				else UDim2.fromOffset(34, 22)
+			badge.Size = layout.badgeSize
 		end
 	end
 
@@ -619,7 +645,7 @@ local function ensureBadge(button, defaultText)
 		end
 		textLabel.TextStrokeColor3 = Color3.fromRGB(82, 12, 29)
 		textLabel.TextStrokeTransparency = 0.08
-		textLabel.TextSize = if layout.phone then 9 elseif layout.tablet then 10 else textLabel.TextSize
+		textLabel.TextSize = math.max(7, layout.textSize - 1)
 		textLabel.ZIndex = math.max(textLabel.ZIndex, badge.ZIndex + 1, 33)
 	end
 
@@ -700,15 +726,12 @@ local function ensureGiftSummaryTimer(button)
 	summary.BackgroundTransparency = 0.16
 	summary.BorderSizePixel = 0
 	summary.Font = Enum.Font.GothamBold
-	summary.Position = UDim2.new(0.5, 0, 0, if layout.phone then -1 elseif layout.tablet then 2 else 4)
-	summary.Size = if layout.phone
-		then UDim2.fromOffset(30, 8)
-		elseif layout.tablet then UDim2.fromOffset(44, 12)
-		else UDim2.fromOffset(60, 18)
+	summary.Position = UDim2.new(0.5, 0, 0, if layout.mobile or layout.compactDesktop then 0 else 4)
+	summary.Size = layout.timerSize
 	summary.Text = tostring(summary.Text ~= "" and summary.Text or "--")
 	summary.TextColor3 = Color3.fromRGB(255, 255, 255)
 	summary.TextScaled = false
-	summary.TextSize = if layout.phone then 5 elseif layout.tablet then 8 else 13
+	summary.TextSize = layout.timerTextSize
 	summary.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	summary.TextStrokeTransparency = 0
 	summary.TextXAlignment = Enum.TextXAlignment.Center
@@ -731,7 +754,7 @@ local function ensureGiftSummaryTimer(button)
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 	stroke.Color = Color3.fromRGB(255, 237, 203)
 	stroke.Transparency = 0.6
-	stroke.Thickness = if layout.phone then 0.7 elseif layout.tablet then 0.85 else 1
+	stroke.Thickness = if layout.mobile or layout.compactDesktop then 0.8 else 1
 	stroke.Enabled = true
 
 	local gradient = summary:FindFirstChildOfClass("UIGradient")
@@ -894,15 +917,17 @@ local function buildTileStyle(button)
 
 	if iconStyle then
 		local layout = getHudLayout()
-		local baseIconSize = if layout.phone
-			then (HUD_MOBILE_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(40, 40))
-			elseif layout.tablet then (HUD_TABLET_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(54, 54))
-			else (HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66))
-		local iconScale = if layout.mobile then 1 else layout.uiScale
+		local baseIconSize = HUD_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(66, 66)
+		if layout.phone then
+			baseIconSize = HUD_MOBILE_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(40, 40)
+		elseif layout.tablet then
+			baseIconSize = HUD_TABLET_ICON_SIZE_OVERRIDES[button.Name] or Vector2.new(54, 54)
+		end
+		local longestSide = math.max(baseIconSize.X, baseIconSize.Y, 1)
+		local iconScale = layout.iconSize / longestSide
 		local iconSize = Vector2.new(round(baseIconSize.X * iconScale), round(baseIconSize.Y * iconScale))
-		local maxIconSize = if layout.phone then 42 elseif layout.tablet then 58 else math.huge
-		iconStyle.position = UDim2.fromScale(0.5, layout.mobile and 0.37 or 0.34)
-		iconStyle.size = UDim2.fromOffset(math.min(iconSize.X, maxIconSize), math.min(iconSize.Y, maxIconSize))
+		iconStyle.position = UDim2.fromScale(0.5, if layout.mobile or layout.compactDesktop then 0.36 else 0.34)
+		iconStyle.size = UDim2.fromOffset(iconSize.X, iconSize.Y)
 		iconStyle.scaleType = HUD_ICON_SCALE_TYPE_OVERRIDES[button.Name] or Enum.ScaleType.Fit
 		iconStyle.backgroundTransparency = 1
 		iconStyle.zIndex = math.max(clampNumber(iconStyle.zIndex, 14, 24), 18)
@@ -910,13 +935,13 @@ local function buildTileStyle(button)
 
 	local titleStyle = normalizeTitleStyle(pickTitleStyle(button))
 	local layout = getHudLayout()
-	if layout.mobile then
-		titleStyle.position = UDim2.fromScale(0.5, layout.tablet and 0.76 or 0.74)
-		titleStyle.size = UDim2.new(1, -4, 0, layout.tablet and 14 or 12)
-		titleStyle.textSize = if layout.tablet then 11 elseif button.Name == "Settings" then 8 else 10
+	if layout.mobile or layout.compactDesktop then
+		titleStyle.position = UDim2.fromScale(0.5, layout.titleYScale)
+		titleStyle.size = UDim2.new(1, -4, 0, math.max(12, layout.textSize + 3))
+		titleStyle.textSize = if button.Name == "Settings" then math.max(8, layout.textSize - 1) else layout.textSize
 		titleStyle.textWrapped = false
 	else
-		titleStyle.textSize = round(titleStyle.textSize * layout.uiScale)
+		titleStyle.textSize = layout.textSize
 		titleStyle.size = UDim2.new(1, -round(8 * layout.uiScale), 0, titleStyle.textSize + round(4 * layout.uiScale))
 	end
 

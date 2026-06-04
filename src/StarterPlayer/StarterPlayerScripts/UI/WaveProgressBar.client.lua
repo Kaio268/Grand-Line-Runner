@@ -15,11 +15,23 @@ local MapResolver = require(Modules:WaitForChild("MapResolver"))
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local LavaWaves = require(Modules:WaitForChild("Configs"):WaitForChild("LavaWaves"))
 local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
-local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
 
 local function isCompactViewport()
-	return Responsive.isCompact()
+	return HudLayout.getMode() ~= "desktop"
+end
+
+local function getWaveBarHeight()
+	return if isCompactViewport() then 34 else 44
+end
+
+local function getPlayerMarkerSize()
+	return getWaveBarHeight()
+end
+
+local function getWaveMarkerSize()
+	return getWaveBarHeight()
 end
 
 local function buildDefaultSections()
@@ -280,7 +292,7 @@ local function render()
 				alpha = alpha,
 				userId = tonumber(info.UserId) or 0,
 				isDead = humanoid ~= nil and humanoid.Health <= 0,
-				size = isCompactViewport() and 32 or nil,
+				size = getPlayerMarkerSize(),
 			}
 	end
 
@@ -298,13 +310,14 @@ local function render()
 				waveMarkers[#waveMarkers + 1] = {
 					alpha = alpha,
 					image = image,
-					size = isCompactViewport() and 24 or nil,
+					size = getWaveMarkerSize(),
 				}
 			end
 		end
 	end
 
 	root:render(ReactRoblox.createPortal(React.createElement(WaveProgressBar, {
+		barHeight = getWaveBarHeight(),
 		compact = isCompactViewport(),
 		players = playerMarkers,
 		waves = waveMarkers,

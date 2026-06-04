@@ -13,7 +13,7 @@ local ClientRuntime = {
 	TitleEquipRemoteMissingWarned = false,
 }
 
-local React, ReactRoblox, App, Responsive
+local React, ReactRoblox, App, Responsive, HudLayout
 local CrewCatalog, CrewIncomeBalance, CrewPreviewImages, Gears, DevilFruits, CrewMemberInventoryConfig, CrewQuickSlotConfig
 local ChestUtils, ChestDropRates, Titles, Economy, ItemIconRegistry, PopUpModule
 local PlotUpgradeConfig, ShipVisuals, RebirthConfig, MetaClient, BountyResolver
@@ -28,6 +28,7 @@ do
 	ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 	App = require(UiFolder:WaitForChild("App"))
 	Responsive = require(UiFolder:WaitForChild("Responsive"))
+	HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 
 	CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 	CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
@@ -3580,10 +3581,12 @@ end
 
 local function getToggleLayout()
 	local viewport = Responsive.getViewport()
-	local phone = Responsive.isPhoneViewport(viewport)
-	local tablet = Responsive.isTabletViewport(viewport)
-	local mobile = Responsive.isMobile(viewport)
-	local size = if phone then 56 elseif tablet then 62 else 74
+	local mode = Responsive.getHudLayoutMode(viewport)
+	local phone = mode == "phone"
+	local tablet = mode == "tablet"
+	local mobile = phone or tablet
+	local toggleLayout = HudLayout.getInventoryToggle(mode)
+	local size = toggleLayout.size
 
 	return {
 		anchorPoint = Vector2.new(0, 0),

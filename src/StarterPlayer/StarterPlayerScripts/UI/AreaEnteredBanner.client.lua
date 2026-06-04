@@ -2,6 +2,7 @@ local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local Workspace = game:GetService("Workspace")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -10,6 +11,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local BiomeAreas = require(Modules:WaitForChild("Configs"):WaitForChild("BiomeAreas"))
 local Responsive = require(UiFolder:WaitForChild("Responsive"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 
 local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 
@@ -32,19 +34,18 @@ local LOADING_SCREEN_NAME = "LoadingScreen"
 local LOADING_SCREEN_ACTIVE_ATTRIBUTE = "LoadingScreenActive"
 
 local function isMobileViewport()
-	return Responsive.isMobile()
+	local mode = Responsive.getHudLayoutMode()
+	return mode == "phone" or mode == "tablet"
 end
 
 local function getBannerTopOffset()
-	if isMobileViewport() then
-		return UI_CONFIG.MobileTopOffset or 52
-	end
-
-	return UI_CONFIG.TopOffset
+	local layout = HudLayout.getTopBanner()
+	return layout.topOffset or UI_CONFIG.TopOffset
 end
 
 local function getBannerScaleTarget()
-	return if isMobileViewport() then 0.84 else Responsive.getUiScale()
+	local layout = HudLayout.getTopBanner()
+	return layout.announcementScale or Responsive.getUiScale()
 end
 
 
@@ -253,7 +254,9 @@ rarityLabel.Parent = card
 local bannerHasSubtitle = true
 
 local function applyResponsiveLayout()
-	if isMobileViewport() then
+	local mode = Responsive.getHudLayoutMode()
+	local mobile = mode == "phone" or mode == "tablet"
+	if mobile then
 		sizeConstraint.MinSize = Vector2.new(220, 52)
 		sizeConstraint.MaxSize = Vector2.new(340, 52)
 		root.Size = UDim2.new(0.48, 0, 0, 52)
@@ -276,7 +279,7 @@ local function applyResponsiveLayout()
 	root.Size = UDim2.new(UI_CONFIG.WidthScale, 0, 0, UI_CONFIG.Height)
 	sizeConstraint.MinSize = Vector2.new(UI_CONFIG.MinWidth, UI_CONFIG.Height)
 	sizeConstraint.MaxSize = Vector2.new(UI_CONFIG.MaxWidth, UI_CONFIG.Height)
-	rootScale.Scale = if isMobileViewport() then 0.68 else getBannerScaleTarget() * 0.98
+	rootScale.Scale = getBannerScaleTarget() * 0.98
 	card.Size = UDim2.new(1, 0, 0, 74)
 	entryLabel.TextSize = 11
 	entryLabel.Position = UDim2.fromOffset(24, 9)
@@ -453,9 +456,35 @@ playerGui:GetAttributeChangedSignal(LOADING_SCREEN_ACTIVE_ATTRIBUTE):Connect(fun
 	end
 end)
 
+local viewportConnections = {}
+local function bindViewportConnections()
+	for _, connection in ipairs(viewportConnections) do
+		connection:Disconnect()
+	end
+	table.clear(viewportConnections)
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		viewportConnections[#viewportConnections + 1] =
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyResponsiveLayout)
+	end
+	viewportConnections[#viewportConnections + 1] = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		bindViewportConnections()
+		applyResponsiveLayout()
+	end)
+end
+
 player.CharacterAdded:Connect(function()
 	lastAnnouncedAreaKey = nil
 	task.defer(announceAreaFromAttribute)
 end)
 
+bindViewportConnections()
 task.defer(announceAreaFromAttribute)
+
+script.Destroying:Connect(function()
+	for _, connection in ipairs(viewportConnections) do
+		connection:Disconnect()
+	end
+	cancelActiveTweens()
+end)

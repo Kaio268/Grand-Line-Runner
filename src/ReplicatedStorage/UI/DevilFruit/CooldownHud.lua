@@ -1,7 +1,9 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
+local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
+local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 
 local e = React.createElement
 
@@ -35,15 +37,16 @@ local function gradient(first, second)
 end
 
 local function abilityRow(props)
-	local compact = props.compact == true
-	local rowHeight = compact and 24 or 58
+	local layout = HudLayout.getDevilFruit(props.layoutMode)
+	local compact = layout.compact == true or props.compact == true
+	local rowHeight = compact and 34 or 58
 	local keySize = compact and Vector2.new(20, 16) or Vector2.new(34, 24)
 	local onActivateAbility = props.onActivateAbility
 	local showKeybind = not compact
 	local showDetail = not compact
 	local textLeft = showKeybind and 48 or 7
 	local statusWidth = compact and 68 or 118
-	local nameRightInset = compact and 84 or 58
+	local nameRightInset = compact and 14 or 58
 	local detailRightInset = compact and 68 or (textLeft + statusWidth + 18)
 	local nameText = props.name
 	if compact and typeof(props.compactName) == "string" and props.compactName ~= "" then
@@ -100,10 +103,10 @@ local function abilityRow(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(textLeft, compact and 4 or 8),
-			Size = UDim2.new(1, -nameRightInset, 0, compact and 10 or 18),
+			Size = UDim2.new(1, -nameRightInset, 0, compact and 12 or 18),
 			Text = nameText,
 			TextColor3 = THEME.TextMain,
-			TextSize = compact and 7 or 15,
+			TextSize = compact and 9 or 15,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 4,
@@ -112,11 +115,11 @@ local function abilityRow(props)
 			AnchorPoint = Vector2.new(1, 0),
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(1, compact and -7 or -10, 0, compact and 4 or 29),
-			Size = UDim2.fromOffset(statusWidth, compact and 10 or 12),
+			Position = UDim2.new(1, compact and -7 or -10, 0, compact and 17 or 29),
+			Size = compact and UDim2.new(1, -14, 0, 10) or UDim2.fromOffset(statusWidth, 12),
 			Text = props.status,
 			TextColor3 = props.statusColor3,
-			TextSize = compact and 7 or 12,
+			TextSize = compact and 8 or 12,
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = 4,
 		}),
@@ -167,7 +170,8 @@ local function CooldownHud(props)
 		return e(React.Fragment)
 	end
 
-	local compact = props.compact == true
+	local layout = HudLayout.getDevilFruit(props.layoutMode)
+	local compact = layout.compact == true or props.compact == true
 
 	local rows = {
 		Layout = e("UIListLayout", {
@@ -190,6 +194,7 @@ local function CooldownHud(props)
 			keyCodeName = ability.keyCodeName,
 			compact = compact,
 			compactName = ability.compactName,
+			layoutMode = props.layoutMode,
 			layoutOrder = index,
 			name = ability.name,
 			onActivateAbility = props.onActivateAbility,
@@ -214,7 +219,7 @@ local function CooldownHud(props)
 	end
 
 	local listHeight = if #(props.abilities or {}) > 0
-		then (compact and 10 or 16) + (#(props.abilities or {}) * (compact and 24 or 58)) + ((#(props.abilities or {}) - 1) * (compact and 4 or 6))
+		then (compact and 10 or 16) + (#(props.abilities or {}) * (compact and 34 or 58)) + ((#(props.abilities or {}) - 1) * (compact and 4 or 6))
 		else (compact and 24 or 44)
 	local topBarHeight = compact and 28 or 58
 	local outerInset = compact and 5 or 10
@@ -227,8 +232,8 @@ local function CooldownHud(props)
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Position = compact and UDim2.new(1, -2, 1, -94) or UDim2.new(1, -24, 1, -24),
-		Size = UDim2.fromOffset(compact and 150 or 318, totalHeight),
+		Position = layout.position,
+		Size = UDim2.fromOffset(layout.width, totalHeight),
 		ZIndex = 30,
 	}, {
 		Corner = e("UICorner", {

@@ -606,6 +606,10 @@ local function isCompactHud()
 	return Responsive.isCompact()
 end
 
+local function getHudLayoutMode()
+	return Responsive.getHudLayoutMode()
+end
+
 local function renderCooldownHud()
 	local ok, err = xpcall(function()
 		ensureCooldownHudRoot()
@@ -615,6 +619,7 @@ local function renderCooldownHud()
 			abilities = cooldownHud.Abilities,
 			compact = isCompactHud(),
 			fruitName = fruit and DevilFruitConfig.GetPlayerDisplayName(fruit) or "",
+			layoutMode = getHudLayoutMode(),
 			onActivateAbility = activateAbilityByName,
 			visible = cooldownHud.Visible == true,
 		}), getCooldownHudHost()))

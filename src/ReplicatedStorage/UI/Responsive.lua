@@ -8,6 +8,10 @@ Responsive.BREAKPOINTS = {
 	MobileMaxWidth = 760,
 	MobileMaxHeight = 560,
 	MobileMaxArea = 760 * 720,
+	TabletLikeMaxLongSide = 1500,
+	TabletLikeMaxShortSide = 1100,
+	TabletLikeMinShortSide = 600,
+	TabletLikeMaxAspect = 1.7,
 	CompactMaxWidth = 900,
 	CompactMaxHeight = 700,
 	CompactMaxArea = 1100 * 720,
@@ -32,24 +36,8 @@ function Responsive.getViewport()
 	return Responsive.getViewportSize()
 end
 
-function Responsive.isMobile(viewport)
-	local size = viewport or Responsive.getViewportSize()
-	local width = size.X
-	local height = size.Y
-	local shortSide = math.min(width, height)
-	local area = width * height
-	local landscape = width > height
-	local breakpoints = Responsive.BREAKPOINTS
-
-	if UserInputService.TouchEnabled then
-		return true
-	end
-
-	if width <= breakpoints.MobileMaxWidth or shortSide <= breakpoints.MobileMaxHeight then
-		return true
-	end
-
-	return landscape and area <= breakpoints.MobileMaxArea
+function Responsive.hasTouchOnlyInput()
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
 
 function Responsive.isPhoneViewport(viewport)
@@ -66,10 +54,33 @@ function Responsive.isPhoneViewport(viewport)
 		or (landscape and area <= breakpoints.MobileMaxArea)
 end
 
+function Responsive.isMobile(viewport)
+	local size = viewport or Responsive.getViewportSize()
+
+	return Responsive.hasTouchOnlyInput() and (Responsive.isPhoneViewport(size) or Responsive.isTabletViewport(size))
+end
+
 function Responsive.isTabletViewport(viewport)
 	local size = viewport or Responsive.getViewportSize()
 
-	return UserInputService.TouchEnabled and not Responsive.isPhoneViewport(size)
+	return Responsive.hasTouchOnlyInput() and not Responsive.isPhoneViewport(size)
+end
+
+function Responsive.isTabletLikeViewport(viewport)
+	local size = viewport or Responsive.getViewportSize()
+	if Responsive.isPhoneViewport(size) then
+		return false
+	end
+
+	local longSide = math.max(size.X, size.Y)
+	local shortSide = math.min(size.X, size.Y)
+	local aspect = longSide / math.max(shortSide, 1)
+	local breakpoints = Responsive.BREAKPOINTS
+
+	return longSide <= breakpoints.TabletLikeMaxLongSide
+		and shortSide <= breakpoints.TabletLikeMaxShortSide
+		and shortSide >= breakpoints.TabletLikeMinShortSide
+		and aspect <= breakpoints.TabletLikeMaxAspect
 end
 
 function Responsive.isCompact(viewport)
@@ -80,15 +91,37 @@ function Responsive.isCompact(viewport)
 	local area = width * height
 	local breakpoints = Responsive.BREAKPOINTS
 
-	return Responsive.isMobile(size)
-		or width <= breakpoints.CompactMaxWidth
+	return width <= breakpoints.CompactMaxWidth
 		or height <= breakpoints.CompactMaxHeight
 		or shortSide <= breakpoints.MobileMaxHeight
 		or area <= breakpoints.CompactMaxArea
 end
 
+function Responsive.getHudLayoutMode(viewport)
+	local size = viewport or Responsive.getViewportSize()
+	if Responsive.hasTouchOnlyInput() then
+		return if Responsive.isPhoneViewport(size) then "phone" else "tablet"
+	end
+
+	return if Responsive.isCompact(size) then "compactDesktop" else "desktop"
+end
+
+function Responsive.getViewportLayoutMode(viewport)
+	local size = viewport or Responsive.getViewportSize()
+	if Responsive.isPhoneViewport(size) then
+		return "phone"
+	end
+
+	if Responsive.isTabletLikeViewport(size) then
+		return "tablet"
+	end
+
+	return if Responsive.isCompact(size) then "compactDesktop" else "desktop"
+end
+
 function Responsive.getClass(viewport)
-	return if Responsive.isMobile(viewport) then "mobile" elseif Responsive.isCompact(viewport) then "compact" else "desktop"
+	local mode = Responsive.getHudLayoutMode(viewport)
+	return if mode == "phone" or mode == "tablet" then "mobile" elseif mode == "compactDesktop" then "compact" else "desktop"
 end
 
 function Responsive.getDesktopScale(viewport)
@@ -104,7 +137,7 @@ end
 function Responsive.getUiScale(viewport)
 	local size = viewport or Responsive.getViewportSize()
 
-	if Responsive.isMobile(size) then
+	if Responsive.hasTouchOnlyInput() then
 		return 1
 	end
 
