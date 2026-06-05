@@ -43,6 +43,7 @@ local rewardConnections = {}
 local scheduleRender
 local scheduleViewModelRender
 local syncHudIndexBadge
+local refreshIndexDisplayMetadata
 local fireClaimReward
 local indexDataModule = nil
 local indexScreenModule = nil
@@ -60,7 +61,9 @@ local claimRewardRenderHoldUntil = 0
 local claimRewardRenderHoldQueued = false
 local indexDisplayMetadata = nil
 local indexDisplayMetadataExpiresAt = 0
+local indexDisplayMetadataIncludesModelPreview = false
 local indexDisplayMetadataRequestInFlight = false
+local indexDisplayMetadataPreviewRefreshPending = false
 local indexDisplayMetadataNextRefreshAt = 0
 local lastFruitLifetimeMismatchWarning = nil
 local DEBUG_INDEX_PERF = false
@@ -86,6 +89,11 @@ local modalAdapter = ReactFrameModalAdapter.new({
 local unregisterModal = ReactModalRegistry.Register("Index", {
 	toggle = function()
 		modalAdapter:Toggle()
+		if modalAdapter:IsVisible() and refreshIndexDisplayMetadata then
+			refreshIndexDisplayMetadata("modal_toggle_open", true, {
+				IncludeModelPreview = true,
+			})
+		end
 		if scheduleRender then
 			scheduleRender()
 		end
@@ -93,6 +101,11 @@ local unregisterModal = ReactModalRegistry.Register("Index", {
 	open = function()
 		if not modalAdapter:IsVisible() then
 			modalAdapter:Toggle()
+		end
+		if refreshIndexDisplayMetadata then
+			refreshIndexDisplayMetadata("modal_open", true, {
+				IncludeModelPreview = true,
+			})
 		end
 		if scheduleRender then
 			scheduleRender()
@@ -507,21 +520,36 @@ local function waitForRemoteFunctionByName(parent, remoteName, timeoutSeconds)
 	return findRemoteFunctionByName(parent, remoteName)
 end
 
-local function getActiveIndexDisplayMetadata()
+local function getActiveIndexDisplayMetadata(requireModelPreview)
 	if typeof(indexDisplayMetadata) == "table" and os.clock() < indexDisplayMetadataExpiresAt then
+		if requireModelPreview == true and indexDisplayMetadataIncludesModelPreview ~= true then
+			return nil
+		end
+
 		return indexDisplayMetadata
 	end
 
 	indexDisplayMetadata = nil
 	indexDisplayMetadataExpiresAt = 0
+	indexDisplayMetadataIncludesModelPreview = false
 	return nil
 end
 
-local function refreshIndexDisplayMetadata(reason, force)
-	if indexDisplayMetadataRequestInFlight or destroyed then
+refreshIndexDisplayMetadata = function(reason, force, options)
+	options = if typeof(options) == "table" then options else {}
+	if indexDisplayMetadataRequestInFlight then
+		if options.IncludeModelPreview == true then
+			indexDisplayMetadataPreviewRefreshPending = true
+		end
+		return
+	end
+	if destroyed then
 		return
 	end
 
+	local includeModelPreview = if options.IncludeModelPreview ~= nil
+		then options.IncludeModelPreview == true
+		else modalAdapter:IsVisible()
 	local now = os.clock()
 	if force ~= true and now < indexDisplayMetadataNextRefreshAt then
 		return
@@ -538,7 +566,10 @@ local function refreshIndexDisplayMetadata(reason, force)
 
 		if remote then
 			local ok, response = pcall(function()
-				return remote:InvokeServer(reason or "index_display")
+				return remote:InvokeServer({
+					Reason = tostring(reason or "index_display"),
+					IncludeModelPreview = includeModelPreview == true,
+				})
 			end)
 
 			if
@@ -554,13 +585,26 @@ local function refreshIndexDisplayMetadata(reason, force)
 					INDEX_DISPLAY_METADATA_MAX_CACHE_SECONDS
 				)
 				nextExpiresAt = os.clock() + expiresAfter
+				indexDisplayMetadataIncludesModelPreview = response.IncludeModelPreview == true
 			end
 		end
 
 		indexDisplayMetadata = nextMetadata
 		indexDisplayMetadataExpiresAt = nextExpiresAt
+		if nextMetadata == nil then
+			indexDisplayMetadataIncludesModelPreview = false
+		end
 		indexDisplayMetadataRequestInFlight = false
 		invalidateViewModel()
+
+		if indexDisplayMetadataPreviewRefreshPending and not destroyed then
+			indexDisplayMetadataPreviewRefreshPending = false
+			task.defer(function()
+				refreshIndexDisplayMetadata("pending_model_preview", true, {
+					IncludeModelPreview = true,
+				})
+			end)
+		end
 
 		if scheduleRender and not destroyed then
 			task.defer(scheduleRender)
@@ -576,9 +620,12 @@ local function buildViewModel(previewMode)
 		return buildEmptyViewModel()
 	end
 
-	local activeIndexDisplayMetadata = getActiveIndexDisplayMetadata()
+	local requireModelPreview = previewMode ~= true and modalAdapter:IsVisible()
+	local activeIndexDisplayMetadata = getActiveIndexDisplayMetadata(requireModelPreview)
 	if activeIndexDisplayMetadata == nil and previewMode ~= true then
-		refreshIndexDisplayMetadata("view_model")
+		refreshIndexDisplayMetadata("view_model", false, {
+			IncludeModelPreview = requireModelPreview == true,
+		})
 	end
 
 	local ok, viewModelOrError = pcall(indexData.buildViewModel, {
@@ -984,7 +1031,9 @@ scheduleRender = function()
 end
 
 refreshLiveFolders(true)
-refreshIndexDisplayMetadata("startup", true)
+refreshIndexDisplayMetadata("startup", true, {
+	IncludeModelPreview = false,
+})
 
 trackConnection(player.ChildAdded, function(child)
 	if child.Name == "Inventory" then

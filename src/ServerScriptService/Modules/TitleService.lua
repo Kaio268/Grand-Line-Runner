@@ -13,6 +13,7 @@ local NONE_EQUIPPED = ""
 local DATA_MANAGER_UNAVAILABLE_REASON = "data_manager_unavailable"
 
 local AdminConfig = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("AdminConfig"))
+local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
 local TitlesConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Titles"))
 local DevilFruitConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("DevilFruits"))
 
@@ -883,6 +884,10 @@ function TitleService.EquipTitle(player, titleId)
 		return false, "invalid_player"
 	end
 
+	if ServerRestartService.RejectIfFinalMinuteLocked(player, "changing titles") then
+		return false, "server_restart_final_minute"
+	end
+
 	return setEquippedTitleInternal(player, titleId, false)
 end
 
@@ -891,6 +896,10 @@ function TitleService.UnequipTitle(player)
 
 	if not player or not player:IsA("Player") then
 		return false, "invalid_player"
+	end
+
+	if ServerRestartService.RejectIfFinalMinuteLocked(player, "changing titles") then
+		return false, "server_restart_final_minute"
 	end
 
 	return setEquippedTitleInternal(player, NONE_EQUIPPED, false)

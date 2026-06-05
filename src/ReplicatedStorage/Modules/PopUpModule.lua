@@ -326,8 +326,9 @@ RunService.Heartbeat:Connect(function()
 			if uiScale then
 				TweenService:Create(uiScale, tweenInfo, {Scale = 0}):Play()
 			end
-			TweenService:Create(popup, tweenInfo, {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
-			data.outTween = true
+			local outTween = TweenService:Create(popup, tweenInfo, {TextTransparency = 1, TextStrokeTransparency = 1})
+			outTween:Play()
+			data.outTween = outTween
 			task.delay(0.25, function()
 				if popup and popup.Parent then
 					popup:Destroy()
@@ -350,9 +351,11 @@ function PopUpModule:Local_SendPopUp(text, textColor, strokeColor, duration, isE
 		local data = activePopups[text]
 		local popup = data.popup
 		if data.removalInProgress then
-			if data.outTween then
-				data.outTween:Cancel()
+			local outTween = data.outTween
+			if typeof(outTween) == "Instance" and outTween:IsA("Tween") then
+				outTween:Cancel()
 			end
+			data.outTween = nil
 			popup.TextTransparency, popup.TextStrokeTransparency = 0, 0
 			local uiScale = popup:FindFirstChildOfClass("UIScale")
 			if uiScale then

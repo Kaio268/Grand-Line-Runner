@@ -8,6 +8,7 @@ local Configs = Modules:WaitForChild("Configs")
 
 local CrewInstanceService = require(script.Parent:WaitForChild("CrewInstanceService"))
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
+local PlacedCrewState = require(Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 local RemoteGuard = require(script.Parent:WaitForChild("RemoteGuard"))
 local ShipVisuals = require(Configs:WaitForChild("ShipVisuals"))
 
@@ -141,7 +142,10 @@ end
 local function setModelAttributeIfChanged(instance, attributeName, value)
 	if instance:GetAttribute(attributeName) ~= value then
 		instance:SetAttribute(attributeName, value)
+		return true
 	end
+
+	return false
 end
 
 local function resolveProtectionDisplayStateFromData(player, instanceId, isPlaced, data, currentPlayTime)
@@ -236,9 +240,22 @@ local function applyProtectionAttributesFromData(player, placedModel, instanceId
 		data,
 		currentPlayTime
 	)
-	setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionType, displayState.Type)
-	setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionLabel, displayState.Label)
-	setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionDetail, displayState.Detail)
+	local protectionChanged = false
+	protectionChanged = setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionType, displayState.Type)
+		or protectionChanged
+	protectionChanged = setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionLabel, displayState.Label)
+		or protectionChanged
+	protectionChanged = setModelAttributeIfChanged(placedModel, OVERHEAD_ATTRIBUTES.ProtectionDetail, displayState.Detail)
+		or protectionChanged
+	protectionChanged = setModelAttributeIfChanged(placedModel, PlacedCrewState.Attribute.ProtectionType, displayState.Type)
+		or protectionChanged
+	protectionChanged = setModelAttributeIfChanged(placedModel, PlacedCrewState.Attribute.ProtectionLabel, displayState.Label)
+		or protectionChanged
+	protectionChanged = setModelAttributeIfChanged(placedModel, PlacedCrewState.Attribute.ProtectionDetail, displayState.Detail)
+		or protectionChanged
+	if protectionChanged then
+		setModelAttributeIfChanged(placedModel, PlacedCrewState.Attribute.UpdatedAtUnix, os.time())
+	end
 
 	return true
 end
@@ -407,6 +424,18 @@ function CrewProtectionService.RefreshPlacedProtectionAttributes(player, dataMan
 		if isOwnedPlacedOverheadModel(player, model) then
 			local instanceId = resolvePlacedModelInstanceId(player, model)
 			if applyProtectionAttributesFromData(player, model, instanceId, true, data, currentPlayTime) then
+				updatedCount += 1
+			end
+		end
+	end
+	for _, standModel in ipairs(CollectionService:GetTagged(PlacedCrewState.Tag)) do
+		if
+			standModel:IsA("Model")
+			and standModel:GetAttribute(PlacedCrewState.Attribute.Active) == true
+			and tonumber(standModel:GetAttribute(PlacedCrewState.Attribute.OwnerUserId)) == player.UserId
+		then
+			local instanceId = tostring(standModel:GetAttribute(PlacedCrewState.Attribute.CrewMemberInstanceId) or "")
+			if applyProtectionAttributesFromData(player, standModel, instanceId, true, data, currentPlayTime) then
 				updatedCount += 1
 			end
 		end

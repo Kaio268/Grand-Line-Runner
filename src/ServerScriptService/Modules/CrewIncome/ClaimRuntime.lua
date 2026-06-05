@@ -7,6 +7,7 @@ function Module.Install(ctx)
 	local CrewStandIncomeAuthority = ctx.CrewStandIncomeAuthority
 	local CurrencyUtil = ctx.CurrencyUtil
 	local DataManager = ctx.DataManager
+	local GTRActionDiagnostics = ctx.GTRActionDiagnostics
 	local function dmEnsureStandFolder(...)
 		return ctx.dmEnsureStandFolder(...)
 	end
@@ -51,6 +52,13 @@ function Module.Install(ctx)
 	local touchDebounce = ctx.touchDebounce
 	local function updateStandMoneyText(...)
 		return ctx.updateStandMoneyText(...)
+	end
+	local function publishClaimIncomeState(...)
+		if typeof(ctx.publishClaimIncomeState) == "function" then
+			return ctx.publishClaimIncomeState(...)
+		end
+
+		return false, "publish_unavailable"
 	end
 
 	local function getHitBoxPart(standModel, cache)
@@ -167,8 +175,36 @@ function Module.Install(ctx)
 			touchDebounce[plr][zone] = now
 
 			local standName = standModel.Name
+			local actionTrace = if GTRActionDiagnostics and typeof(GTRActionDiagnostics.Start) == "function"
+				then GTRActionDiagnostics.Start("IncomeClaim", plr, {
+					Target = standName,
+				})
+				else nil
+			local function phaseAction(phase, metadata)
+				if actionTrace == nil then
+					return
+				end
+				metadata = if typeof(metadata) == "table" then metadata else {}
+				if metadata.Target == nil then
+					metadata.Target = standName
+				end
+				actionTrace:phase(phase, metadata)
+			end
+			local function finishAction(result, metadata)
+				if actionTrace == nil then
+					return
+				end
+				metadata = if typeof(metadata) == "table" then metadata else {}
+				if metadata.Target == nil then
+					metadata.Target = standName
+				end
+				actionTrace:finish(result, metadata)
+			end
 
 			if not dmEnsureStandFolder(plr, standName) then
+				finishAction("failed", {
+					Reason = "stand_folder_unavailable",
+				})
 				return
 			end
 			local collectedCrewMemberName = getPlayerStandCrewMemberName(plr, standName)
@@ -176,12 +212,26 @@ function Module.Install(ctx)
 			local slotState = getStandSlotState(plr, standName)
 			if slotState.Visible and not slotState.Usable then
 				updateStandMoneyText(plr, standModel)
+				phaseAction("prompt_refresh", {
+					Result = "skipped",
+					Reason = "slot_unusable",
+				})
+				finishAction("failed", {
+					Reason = "slot_unusable",
+				})
 				return
 			end
 
 			local baseToCollect = getPlayerStandIncome(plr, standName)
 			if baseToCollect <= 0 then
 				updateStandMoneyText(plr, standModel)
+				phaseAction("prompt_refresh", {
+					Result = "skipped",
+					Reason = "no_income",
+				})
+				finishAction("failed", {
+					Reason = "no_income",
+				})
 				return
 			end
 
@@ -189,21 +239,75 @@ function Module.Install(ctx)
 			local collected = math.max(0, math.floor(tonumber(claimSummary and claimSummary.FinalAmount) or 0))
 			if collected <= 0 then
 				updateStandMoneyText(plr, standModel)
+				phaseAction("prompt_refresh", {
+					Result = "skipped",
+					Reason = "nothing_to_collect",
+				})
+				finishAction("failed", {
+					Reason = "nothing_to_collect",
+				})
 				return
 			end
 
 			local remainingRawIncome = math.max(0, tonumber(claimSummary and claimSummary.RawRemainderAmount) or 0)
-			if CrewStandIncomeAuthority.SetIncomeToCollect(plr, standName, remainingRawIncome, "income_collect") then
-				refreshCollectedIncomeShadow(plr)
-			else
+			phaseAction("validation_math", {
+				Result = "ok",
+			})
+
+			local primaryPath = CurrencyUtil.getPrimaryPath()
+			local totalPath = CurrencyUtil.getTotalPath()
+			local currentPrimary = math.max(0, tonumber(DataManager:GetValue(plr, primaryPath)) or 0)
+			local currentTotal = math.max(0, tonumber(DataManager:GetValue(plr, totalPath)) or 0)
+			local batchOk, batchResult = DataManager:TryApplyBatch(plr, {
+				CrewStandIncomeAuthority.BuildIncomeToCollectOperation(plr, standName, remainingRawIncome),
+				{
+					Kind = "Set",
+					Path = primaryPath,
+					Value = currentPrimary + collected,
+				},
+				{
+					Kind = "Set",
+					Path = totalPath,
+					Value = currentTotal + collected,
+				},
+			}, {
+				PerfContext = {
+					Target = "income_claim:" .. standName,
+				},
+			})
+			local writeCount = batchResult and batchResult.WriteCount or batchResult and batchResult.ReplicaWriteCount or 0
+			phaseAction("batch", {
+				WriteCount = writeCount,
+				Result = if batchOk then "ok" else "failed",
+				Reason = batchResult and batchResult.Reason or nil,
+			})
+			if batchOk ~= true then
+				finishAction("failed", {
+					WriteCount = writeCount,
+					Reason = batchResult and batchResult.Reason or "batch_failed",
+				})
 				return
 			end
+			CrewStandIncomeAuthority.RecordExternalIncomeWrite(1)
+			refreshCollectedIncomeShadow(plr)
+			local claimStateOk, claimStateReason = publishClaimIncomeState(plr, standModel, {
+				RawIncomeToCollect = remainingRawIncome,
+				ClaimReadyAmount = 0,
+			}, {
+				RefreshIncomeTimestamp = true,
+				RefreshUpdatedTimestamp = true,
+			})
+			phaseAction("claim_state", {
+				Result = if claimStateOk then "ok" else "failed",
+				Reason = claimStateReason,
+			})
 
-			DataManager:AddValue(plr, CurrencyUtil.getPrimaryPath(), collected, { ApplyTitleBuff = false })
-			DataManager:AddValue(plr, CurrencyUtil.getTotalPath(), collected, { ApplyTitleBuff = false })
 			QuestSignals.Record(plr, "EarnBeli", collected, {
 				Source = "StandIncome",
 				StandName = standName,
+			})
+			phaseAction("quest", {
+				Result = "ok",
 			})
 
 			local incomeToastDisplayPayload = buildIncomeToastDisplayPayload(plr, collectedCrewMemberName)
@@ -214,8 +318,18 @@ function Module.Install(ctx)
 					MoneyCollectedRE:FireClient(plr, standModel, collected)
 				end
 			end
+			phaseAction("client_event", {
+				Result = if MoneyCollectedRE then "ok" else "skipped",
+				Reason = if MoneyCollectedRE then nil else "missing_remote",
+			})
 
 			updateStandMoneyText(plr, standModel)
+			phaseAction("prompt_refresh", {
+				Result = "ok",
+			})
+			finishAction("ok", {
+				WriteCount = writeCount,
+			})
 		end)
 		cache.Connections.ZoneTouched = cache.ZoneTouchedConnection
 	end

@@ -161,6 +161,7 @@ local ProfileTemplate = {
 		Slots = {},
 		CaptainSlot = {
 			IncomeToCollect = 0,
+			LastAccruedAtUnix = 0,
 		},
 	},
 

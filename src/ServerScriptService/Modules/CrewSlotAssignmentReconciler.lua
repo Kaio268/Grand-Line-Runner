@@ -140,6 +140,7 @@ local function makeCaptainSlotDataFromInstance(instanceId, instanceData, existin
 		CrewMemberInstanceId = tostring(instanceId),
 		AssignedAt = math.max(0, math.floor(tonumber(existingRow.AssignedAt) or os.time())),
 		IncomeToCollect = math.max(0, tonumber(existingRow.IncomeToCollect) or 0),
+		LastAccruedAtUnix = math.max(0, math.floor(tonumber(existingRow.LastAccruedAtUnix) or os.time())),
 		Level = level,
 		CurrentXP = math.max(0, math.floor(tonumber(instanceData.CurrentXP) or tonumber(existingRow.CurrentXP) or 0)),
 	}
@@ -157,6 +158,7 @@ local function makeStandRowFromInstance(instanceId, instanceData, existingRow)
 		LegacyStorageName = tostring(instanceData.LegacyStorageName or existingRow.LegacyStorageName or ""),
 		CrewMemberInstanceId = tostring(instanceId),
 		IncomeToCollect = tonumber(existingRow.IncomeToCollect) or 0,
+		LastAccruedAtUnix = math.max(0, math.floor(tonumber(existingRow.LastAccruedAtUnix) or os.time())),
 		StandLevel = CrewIncomeBalance.NormalizeLevel(instanceData.Level or existingRow.StandLevel),
 	}
 end
@@ -186,6 +188,7 @@ local function makeStandRowFromLegacySlot(row)
 		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
 		CrewMemberInstanceId = instanceId,
 		IncomeToCollect = tonumber(row.IncomeToCollect or row.Income or row.Money or row.Cash) or 0,
+		LastAccruedAtUnix = math.max(0, math.floor(tonumber(row.LastAccruedAtUnix) or os.time())),
 		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level),
 	}
 end

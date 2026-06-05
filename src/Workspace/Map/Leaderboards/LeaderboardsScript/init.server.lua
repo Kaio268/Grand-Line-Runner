@@ -18,6 +18,7 @@ local PAGE_SIZE = 100
 local BOARD_WAIT_TIMEOUT = 5
 local BOUNTY_REFRESH_AFTER_WRITE_SECONDS = 6
 local MIN_BOUNTY_REFRESH_INTERVAL = 15
+local missingBoardWarnings = {}
 
 local function Round(v)
 	return math.floor((v or 0) + 0.5)
@@ -86,7 +87,8 @@ local function resolveBoardFolder(primaryName, fallbackName)
 		folder = Root:WaitForChild(fallbackName, 1)
 	end
 
-	if not folder then
+	if not folder and game:GetAttribute("LeaderboardMissingBoardWarnings") == true and missingBoardWarnings[primaryName] ~= true then
+		missingBoardWarnings[primaryName] = true
 		warn(("[Leaderboard] Board folder '%s' was not found under %s. Leaderboard rendering will stay disabled for that board."):format(primaryName, Root:GetFullName()))
 	end
 

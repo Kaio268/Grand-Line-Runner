@@ -53,6 +53,7 @@ local DevilFruitLogger = require(
 )
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
 local DevilFruitService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("DevilFruitService"))
+local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
 local IndexCollectionService =
 	require(ServerScriptService:WaitForChild("Modules"):WaitForChild("IndexCollectionService"))
 local dataManagerModule = nil
@@ -873,6 +874,10 @@ local function requestConsume(player, tool, source)
 		tostring(tool and tool.ManualActivationOnly)
 	)
 
+	if ServerRestartService.RejectIfFinalMinuteLocked(player, "eating devil fruits") then
+		return
+	end
+
 	local existingPending = pendingConsumeByPlayer[player]
 	if existingPending ~= nil then
 		if not isPendingConsumeExpired(existingPending) then
@@ -1073,6 +1078,10 @@ local function findConsumableFruitTool(player, fruitKey)
 end
 
 function DevilFruitInventoryService.RequestConsume(player, fruitIdentifier)
+	if ServerRestartService.RejectIfFinalMinuteLocked(player, "eating devil fruits") then
+		return false, "server_restart_final_minute"
+	end
+
 	local fruit, reason = resolveFruit(fruitIdentifier)
 	if not fruit then
 		consumeDebug(
@@ -1293,6 +1302,15 @@ local function handleConsumeResponse(player, accepted, fruitKey)
 		publishConsumeResult(player, {
 			Success = false,
 			Reason = "cancelled",
+		})
+		return
+	end
+
+	local restartBlocked = ServerRestartService.RejectIfFinalMinuteLocked(player, "eating devil fruits")
+	if restartBlocked then
+		publishConsumeResult(player, {
+			Success = false,
+			Reason = "server_restart_final_minute",
 		})
 		return
 	end

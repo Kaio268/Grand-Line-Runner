@@ -1,15 +1,19 @@
 local Players = game:GetService("Players")
+local ServerScriptService = game:GetService("ServerScriptService")
 
-local EXPECTED_AFK_PLACE_ID = 135767110031089
+local DataEnvironment = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataEnvironment"))
+
 local LOCKED_WALK_SPEED = 0
 local LOCKED_JUMP_POWER = 0
 local LOCKED_JUMP_HEIGHT = 0
 
-if game.PlaceId ~= EXPECTED_AFK_PLACE_ID then
+local placeInfo = DataEnvironment.ResolvePlace(game.PlaceId)
+if placeInfo.PlaceRole ~= DataEnvironment.PlaceRoles.AFK then
 	warn(string.format(
-		"[AFKMovementLock] Expected AFK place %d but running in %d; movement lock disabled.",
-		EXPECTED_AFK_PLACE_ID,
-		game.PlaceId
+		"[AFKMovementLock] Expected AFK role but running in %s/%s place %s; movement lock disabled.",
+		tostring(placeInfo.Environment),
+		tostring(placeInfo.PlaceRole),
+		tostring(game.PlaceId)
 	))
 	return
 end

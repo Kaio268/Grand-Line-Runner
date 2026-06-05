@@ -8,6 +8,7 @@ local CrewIncomeBalance = require(ReplicatedStorage:WaitForChild("Modules"):Wait
 local CrewInventoryStacks = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewInventoryStacks"))
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
+local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
 local dataManagerModule = nil
 local function getDataManager()
 	if dataManagerModule == nil then
@@ -1513,6 +1514,10 @@ end
 local function handleEquipToggleRequest(player, kind, name)
 	if typeof(kind) ~= "string" or typeof(name) ~= "string" then return end
 	kind = normalizeItemKind(kind)
+	if ServerRestartService.RejectIfFinalMinuteLocked(player, "changing inventory equipment") then
+		return
+	end
+
 	if kind == TOOL_KIND_DEVIL_FRUIT then
 		fruitEquipDebug(
 			"CrewMemberEquipToggleRemote received player=%s payload={kind=%s,name=%s}",

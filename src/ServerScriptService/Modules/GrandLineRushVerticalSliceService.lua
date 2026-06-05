@@ -24,8 +24,10 @@ local AddCrewMember = require(ServerScriptService.Modules:WaitForChild("AddCrewM
 local CrewInventoryDerivedCache = require(ServerScriptService.Modules:WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService.Modules:WaitForChild("CrewQuickSlotService"))
+local GTRActionDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRActionDiagnostics"))
 local PaidRandomItemPolicy = require(ServerScriptService.Modules:WaitForChild("PaidRandomItemPolicy"))
 local RemoteGuard = require(ServerScriptService.Modules:WaitForChild("RemoteGuard"))
+local ServerRestartService = require(ServerScriptService.Modules:WaitForChild("ServerRestartService"))
 local TitleProgressService = require(ServerScriptService.Modules:WaitForChild("TitleProgressService"))
 
 local Service = {}
@@ -59,6 +61,7 @@ local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
 local DEFAULT_MAX_CARRY_SLOTS = 3
 local DEFAULT_UNLOCKED_CARRY_SLOTS = 1
+local GET_STATE_READY_WAIT_SECONDS = 0.75
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local STARTER_CREW_SOURCE = "GrandLineRushStarter"
@@ -264,14 +267,58 @@ local function getProfileAndReplica(player)
 	return DataManager:GetProfile(player), DataManager:GetReplica(player)
 end
 
-local function syncPaths(player, replica, changedPaths)
-	if replica then
-		for _, entry in ipairs(changedPaths) do
-			replica:Set(entry.Path, entry.Value)
+local function getProfileAndReplicaNonBlocking(player)
+	if not DataManager:IsReady(player) then
+		return nil, nil
+	end
+
+	return DataManager:GetProfile(player), DataManager:GetReplica(player)
+end
+
+local function buildDataPath(path)
+	if typeof(path) == "table" then
+		local parts = {}
+		for _, segment in ipairs(path) do
+			parts[#parts + 1] = tostring(segment)
+		end
+		return table.concat(parts, ".")
+	end
+
+	return tostring(path or "")
+end
+
+local function syncPaths(player, _replica, changedPaths, perfContext)
+	local operations = {}
+	for _, entry in ipairs(if typeof(changedPaths) == "table" then changedPaths else {}) do
+		if typeof(entry) == "table" and entry.Value ~= nil then
+			operations[#operations + 1] = {
+				Kind = "Set",
+				Path = buildDataPath(entry.Path),
+				Value = entry.Value,
+			}
 		end
 	end
 
-	DataManager:UpdateData(player)
+	if #operations <= 0 then
+		return true, {
+			Reason = "empty",
+			WriteCount = 0,
+			ReplicaWriteCount = 0,
+			ChangedPaths = {},
+		}
+	end
+
+	local ok, result = DataManager:TryApplyBatch(player, operations, {
+		PerfContext = perfContext,
+	})
+	if ok ~= true then
+		warn(string.format(
+			"[GrandLineRush] targeted sync failed player=%s reason=%s",
+			player and player.Name or "unknown",
+			tostring(result and result.Reason or "unknown")
+		))
+	end
+	return ok == true, result
 end
 
 local function buildRewardChangedPaths(dataRoot, changedRoots, options)
@@ -1903,6 +1950,8 @@ local function addUnopenedChest(player, chestInfoOrTier, depthBand)
 
 	syncPaths(player, replica, {
 		{ Path = { "UnopenedChests" }, Value = unopenedChests },
+	}, {
+		Target = "glr_add_unopened_chest",
 	})
 
 	return chestId
@@ -1910,12 +1959,19 @@ end
 
 local function buildState(player, options)
 	options = if typeof(options) == "table" then options else {}
-	local profile, _ = getProfileAndReplica(player)
+	local profile, _
+	if options.WaitForData == false then
+		profile, _ = getProfileAndReplicaNonBlocking(player)
+	else
+		profile, _ = getProfileAndReplica(player)
+	end
 	local runtime = getRuntime(player)
 	syncCarrySlotsToClient(player, runtime)
 
 	if not profile then
 		return {
+			DataReady = false,
+			Loading = true,
 			Run = {
 				InRun = runtime.InRun,
 				DepthBand = runtime.DepthBand,
@@ -1966,6 +2022,8 @@ local function buildState(player, options)
 	end
 
 	return {
+		DataReady = true,
+		Loading = false,
 		Beli = CurrencyUtil.getAmountFromTable(leaderstats),
 		-- Legacy payload alias kept while older clients finish moving to Beli.
 		Doubloons = CurrencyUtil.getAmountFromTable(leaderstats),
@@ -2028,6 +2086,15 @@ local function resolveActionResponse(player, ok, message, errorCode, stateOption
 		error = errorCode,
 		state = state,
 	}
+end
+
+local function resolveRestartLockedResponse(player, actionName)
+	local blocked, message = ServerRestartService.RejectIfFinalMinuteLocked(player, actionName)
+	if blocked ~= true then
+		return nil
+	end
+
+	return resolveActionResponse(player, false, message, "server_restart_final_minute")
 end
 
 local carrySlotAdapterInstalled = false
@@ -2130,6 +2197,11 @@ function Service.FailRun(player, reason)
 end
 
 local function startRun(player, rewardType, depthBand)
+	local restartLocked = resolveRestartLockedResponse(player, "starting a run")
+	if restartLocked ~= nil then
+		return restartLocked
+	end
+
 	local runtime = getRuntime(player)
 	if runtime.InRun then
 		return resolveActionResponse(player, false, nil, "run_already_active")
@@ -2179,6 +2251,11 @@ local function startRun(player, rewardType, depthBand)
 end
 
 local function claimSpawnedReward(player)
+	local restartLocked = resolveRestartLockedResponse(player, "claiming a reward")
+	if restartLocked ~= nil then
+		return restartLocked
+	end
+
 	local runtime = getRuntime(player)
 	if runtime.SpawnedReward == nil then
 		if runtime.InRun ~= true then
@@ -2431,6 +2508,11 @@ local function extractRun(player)
 end
 
 local function claimWorldChest(player, rewardData)
+	local restartLocked = resolveRestartLockedResponse(player, "claiming a shared chest")
+	if restartLocked ~= nil then
+		return restartLocked
+	end
+
 	local runtime = getRuntime(player)
 	if runtime.InRun == true then
 		return resolveActionResponse(player, false, "Finish your current run before claiming a shared chest.", "run_already_active")
@@ -2929,6 +3011,11 @@ local function dropCarriedCrewMember(player, dropPosition)
 end
 
 local function openChest(player, requestedChestId)
+	local restartLocked = resolveRestartLockedResponse(player, "opening chests")
+	if restartLocked ~= nil then
+		return restartLocked
+	end
+
 	local profile, replica = getProfileAndReplica(player)
 	if not profile or not replica then
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
@@ -3035,7 +3122,9 @@ local function openChest(player, requestedChestId)
 		UnopenedChests = unopenedChests,
 	})
 
-	syncPaths(player, replica, changedPaths)
+	syncPaths(player, replica, changedPaths, {
+		Target = "glr_open_chest",
+	})
 
 	local rewardParts = {}
 	local grantedResources = (resolution.OpenResult and resolution.OpenResult.GrantedResources) or {}
@@ -3291,6 +3380,11 @@ local function buildBatchOpenResult(openedChestName, openedCount, aggregateResou
 end
 
 local function openChests(player, inventoryName, requestedAmount)
+	local restartLocked = resolveRestartLockedResponse(player, "opening chests")
+	if restartLocked ~= nil then
+		return restartLocked
+	end
+
 	local profile, replica = getProfileAndReplica(player)
 	if not profile or not replica then
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
@@ -3427,7 +3521,9 @@ local function openChests(player, inventoryName, requestedAmount)
 	local changedPaths = buildRewardChangedPaths(dataRoot, changedRoots, {
 		UnopenedChests = unopenedChests,
 	})
-	syncPaths(player, replica, changedPaths)
+	syncPaths(player, replica, changedPaths, {
+		Target = "glr_open_chests",
+	})
 	triggerResourceTutorialsAfterGrant(player, "chest_batch_open", aggregateResources)
 
 	local response = resolveActionResponse(player, true, string.format("Opened %d chests.", openedCount))
@@ -3488,7 +3584,9 @@ local function grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
 	local changedPaths = buildRewardChangedPaths(dataRoot, changedRoots, {
 		UnopenedChests = unopenedChests,
 	})
-	syncPaths(player, replica, changedPaths)
+	syncPaths(player, replica, changedPaths, {
+		Target = "glr_grant_specific_fruit",
+	})
 
 	local message = if resolution.OpenResult and resolution.OpenResult.WasDuplicate
 		then string.format(
@@ -3509,6 +3607,11 @@ local function grantSpecificFruitReward(player, fruitIdentifier, sourceOptions)
 end
 
 local function feedCrew(player, crewInstanceId, foodKey)
+	local restartLocked = resolveRestartLockedResponse(player, "feeding crewmates")
+	if restartLocked ~= nil then
+		return restartLocked
+	end
+
 	local profile, replica = getProfileAndReplica(player)
 	if not profile or not replica then
 		return resolveActionResponse(player, false, nil, "profile_not_ready")
@@ -3595,6 +3698,8 @@ local function feedCrew(player, crewInstanceId, foodKey)
 
 	syncPaths(player, replica, {
 		{ Path = { "FoodInventory" }, Value = foodInventory },
+	}, {
+		Target = "glr_feed_crew",
 	})
 
 	completeContextualTutorial(player, "FeedCrewmates", {
@@ -3628,6 +3733,19 @@ local function feedCrew(player, crewInstanceId, foodKey)
 end
 
 local function handleRequest(player, actionName, payload)
+	local actionLabel = "GrandLineRush." .. tostring(actionName or "unknown")
+	local actionTrace = GTRActionDiagnostics.Start(actionLabel, player, {
+		Target = tostring(actionName or ""),
+	})
+	local function finish(response)
+		local okResult = typeof(response) == "table" and response.ok == true
+		actionTrace:finish(if okResult then "ok" else "failed", {
+			Target = tostring(actionName or ""),
+			Reason = if typeof(response) == "table" then response.error else "invalid_response",
+		})
+		return response
+	end
+
 	-- Security: shared guard rejects malformed/spammed action calls before run/chest state can mutate.
 	if not RemoteGuard.Check(player, "GrandLineRushSliceRequest", { actionName, payload }, {
 		Cooldown = 0.05,
@@ -3638,55 +3756,61 @@ local function handleRequest(player, actionName, payload)
 			{ Type = "table", AllowNil = true },
 		},
 	}) then
-		return resolveActionResponse(player, false, nil, "remote_guard_rejected")
+		return finish(resolveActionResponse(player, false, nil, "remote_guard_rejected"))
 	end
 
 	if typeof(actionName) ~= "string" then
-		return resolveActionResponse(player, false, nil, "invalid_action")
+		return finish(resolveActionResponse(player, false, nil, "invalid_action"))
+	end
+
+	if actionName == "GetState" then
+		if not DataManager:IsReady(player) then
+			waitForDataReady(player, GET_STATE_READY_WAIT_SECONDS)
+		end
+		return finish(resolveActionResponse(player, true, nil, nil, {
+			IncludeCrews = typeof(payload) == "table" and payload.IncludeCrews == true,
+			WaitForData = false,
+		}))
 	end
 
 	local ready, errorResponse = preparePlayerState(player)
 	if not ready then
-		return errorResponse
+		return finish(errorResponse)
 	end
 
-	if actionName == "GetState" then
-		return resolveActionResponse(player, true, nil, nil, {
-			IncludeCrews = typeof(payload) == "table" and payload.IncludeCrews == true,
-		})
-	elseif actionName == "OpenChest" then
-		return openChest(player, payload and payload.ChestId)
+	if actionName == "OpenChest" then
+		return finish(openChest(player, payload and payload.ChestId))
 	elseif actionName == "OpenChests" then
-		return openChests(player, payload and payload.InventoryName, payload and payload.Amount)
+		return finish(openChests(player, payload and payload.InventoryName, payload and payload.Amount))
 	elseif actionName == "DropCarriedReward" then
 		local dropPosition = getManualDropPosition(player)
 		if typeof(dropPosition) ~= "Vector3" then
-			return resolveActionResponse(player, false, nil, "missing_drop_position")
+			return finish(resolveActionResponse(player, false, nil, "missing_drop_position"))
 		end
 
 		local runtime = getRuntime(player)
 		if hasCarryItems(runtime) then
-			return dropCarriedReward(player, {
+			return finish(dropCarriedReward(player, {
 				Reason = "PlayerDrop",
 				DropPosition = dropPosition,
 				IgnoreProtection = true,
 				RequireSelectedSlot = true,
 				SlotIndex = payload and payload.SlotIndex,
 				CarryId = payload and payload.CarryId,
-			})
+			}))
 		end
 
 		local crewMemberContext = CrewInteraction.GetActiveContext()
 		if hasCarriedCrewMember(player) or CrewInteraction.HasHeld(crewMemberContext, player) then
-			return dropCarriedCrewMember(player, dropPosition)
+			return finish(dropCarriedCrewMember(player, dropPosition))
 		end
 
-		return resolveActionResponse(player, false, nil, "no_carried_item")
+		return finish(resolveActionResponse(player, false, nil, "no_carried_item"))
 	elseif actionName == "FeedCrew" then
-		return feedCrew(player, payload and payload.CrewInstanceId, payload and payload.FoodKey)
+		return finish(feedCrew(player, payload and payload.CrewInstanceId, payload and payload.FoodKey))
 	end
 
-	return resolveActionResponse(player, false, nil, "unknown_action")
+	return finish(resolveActionResponse(player, false, nil, "unknown_action"))
 end
 
 local function bindCharacter(player, character)
@@ -3786,6 +3910,10 @@ function Service.SetDroppedChestWorldHandler(handler)
 end
 
 function Service.GetState(player, options)
+	options = if typeof(options) == "table" then table.clone(options) else {}
+	if options.WaitForData == nil then
+		options.WaitForData = false
+	end
 	return buildState(player, options)
 end
 
@@ -3945,6 +4073,8 @@ function Service.GrantChest(player, tierName, amount, depthBand, options)
 
 	syncPaths(player, replica, {
 		{ Path = { "UnopenedChests" }, Value = unopenedChests },
+	}, {
+		Target = "glr_grant_chest_reward",
 	})
 
 	local message = string.format(

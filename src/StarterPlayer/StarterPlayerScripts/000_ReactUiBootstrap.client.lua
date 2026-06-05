@@ -1,8 +1,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
-local playerGui = player:WaitForChild("PlayerGui")
+local BOOTSTRAP_STARTED_AT = os.clock()
+local PLAYER_GUI_TIMEOUT_SECONDS = 5
+local REMOTES_FOLDER_NAME = "Remotes"
+local LOAD_TELEMETRY_REMOTE_NAME = "GTRLoadTelemetry"
+local SLOW_LOAD_THRESHOLD_SECONDS = 12
+local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", PLAYER_GUI_TIMEOUT_SECONDS)
 local HUD_DEBUG = false
 local GIFT_BOOTSTRAP_DEBUG = true
 local GIFT_BOOTSTRAP_DEBUG_VERSION = "gifts-bootstrap-slots-debug-2026-05-01"
@@ -16,6 +22,91 @@ local ensureTextLabel
 local ensureImageLabel
 local ensureImageButton
 local ensureTextButton
+
+local function getBootstrapDuration(): number
+	return math.max(0, os.clock() - BOOTSTRAP_STARTED_AT)
+end
+
+local function sanitizeLogValue(value)
+	return (tostring(value):gsub("%s+", "_"))
+end
+
+local function gtrLoadLog(status: string, reason: string, extras: {[string]: any}?, useWarn: boolean?)
+	local fields = {
+		"[GTR_LOAD]",
+		"player=" .. sanitizeLogValue(player.Name),
+		"userId=" .. tostring(player.UserId),
+		"status=" .. sanitizeLogValue(status),
+		string.format("duration=%.2f", getBootstrapDuration()),
+		"reason=" .. sanitizeLogValue(reason),
+	}
+
+	if extras then
+		for key, value in pairs(extras) do
+			fields[#fields + 1] = sanitizeLogValue(key) .. "=" .. sanitizeLogValue(value)
+		end
+	end
+
+	local message = table.concat(fields, " ")
+	if useWarn then
+		warn(message)
+	else
+		print(message)
+	end
+end
+
+local function getDeviceInputType(): string
+	local ok, inputType = pcall(function()
+		return UserInputService:GetLastInputType()
+	end)
+	if ok and inputType then
+		return tostring(inputType.Name)
+	end
+	if UserInputService.TouchEnabled then
+		return "Touch"
+	end
+	if UserInputService.GamepadEnabled then
+		return "Gamepad"
+	end
+	if UserInputService.KeyboardEnabled then
+		return "Keyboard"
+	end
+	return "unknown"
+end
+
+local function submitBootstrapTelemetry(errorMessage: string)
+	local payload = {
+		UserId = player.UserId,
+		JoinTimestamp = os.time(),
+		LoadDuration = getBootstrapDuration(),
+		CloseReason = "bootstrap_error",
+		TimedOut = false,
+		OverlayRecovery = false,
+		CameraRecovery = false,
+		MissingMilestones = "StartupHudReady",
+		DeviceInputType = getDeviceInputType(),
+		BootstrapError = true,
+		DataInitError = false,
+		SlowThresholdSeconds = SLOW_LOAD_THRESHOLD_SECONDS,
+		Error = tostring(errorMessage):sub(1, 180),
+	}
+
+	task.spawn(function()
+		local remotes = ReplicatedStorage:FindFirstChild(REMOTES_FOLDER_NAME)
+			or ReplicatedStorage:WaitForChild(REMOTES_FOLDER_NAME, 5)
+		if not remotes then
+			return
+		end
+
+		local remote = remotes:FindFirstChild(LOAD_TELEMETRY_REMOTE_NAME)
+			or remotes:WaitForChild(LOAD_TELEMETRY_REMOTE_NAME, 5)
+		if remote and remote:IsA("RemoteEvent") then
+			pcall(function()
+				remote:FireServer(payload)
+			end)
+		end
+	end)
+end
 
 local UI_STYLE = {
 	PrimaryBg = Color3.fromRGB(30, 42, 56),
@@ -80,7 +171,19 @@ local function markHudReady()
 		end
 	end
 
-	playerGui:SetAttribute("StartupHudReady", true)
+	if playerGui and playerGui.Parent then
+		playerGui:SetAttribute("StartupHudReady", true)
+		return
+	end
+
+	player:SetAttribute("StartupHudReady", true)
+	task.spawn(function()
+		local latePlayerGui = player:WaitForChild("PlayerGui", 2)
+		if latePlayerGui and latePlayerGui:IsA("PlayerGui") then
+			playerGui = latePlayerGui
+			latePlayerGui:SetAttribute("StartupHudReady", true)
+		end
+	end)
 end
 
 local function ensureLegacyHudCompatibility(hud)
@@ -591,13 +694,28 @@ local function ensureFrames()
 	ensureScreenGui("Frames", 120)
 end
 
-giftBootstrapLog(
-	"start",
-	"version",
-	GIFT_BOOTSTRAP_DEBUG_VERSION,
-	"playerGui",
-	giftBootstrapSafeName(playerGui)
-)
-ensureHud()
-ensureFrames()
+local function runBootstrap()
+	if not (playerGui and playerGui.Parent) then
+		error(string.format("PlayerGui unavailable after %.1fs", PLAYER_GUI_TIMEOUT_SECONDS))
+	end
+
+	giftBootstrapLog(
+		"start",
+		"version",
+		GIFT_BOOTSTRAP_DEBUG_VERSION,
+		"playerGui",
+		giftBootstrapSafeName(playerGui)
+	)
+	ensureHud()
+	ensureFrames()
+end
+
+local ok, err = xpcall(runBootstrap, debug.traceback)
 markHudReady()
+if not ok then
+	local message = tostring(err)
+	gtrLoadLog("milestone_recovered", "bootstrap_error", {
+		error = message:sub(1, 180),
+	}, true)
+	submitBootstrapTelemetry(message)
+end

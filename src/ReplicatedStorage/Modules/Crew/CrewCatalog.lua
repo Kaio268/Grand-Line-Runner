@@ -10,6 +10,8 @@ local CrewIncomeBalance = require(script.Parent:WaitForChild("CrewIncomeBalance"
 local CrewCatalog = {}
 
 local warned = {}
+local baseInfoCache = {}
+local variantInfoCache = {}
 local emptyLegacyConfig = table.freeze({})
 local retiredAliases = table.freeze({
 	Bruiser = "Diamond Bruiser",
@@ -156,6 +158,14 @@ function CrewCatalog.GetLegacyConfig()
 	return emptyLegacyConfig
 end
 
+function CrewCatalog.ClearMemoizedCaches()
+	table.clear(baseInfoCache)
+	table.clear(variantInfoCache)
+	if CrewIncomeBalance and typeof(CrewIncomeBalance.ClearMemoizedCaches) == "function" then
+		CrewIncomeBalance.ClearMemoizedCaches()
+	end
+end
+
 function CrewCatalog.MakeVariantId(baseId, variantKey)
 	if variantKey == "Normal" or variantKey == nil then
 		return tostring(baseId)
@@ -184,7 +194,27 @@ end
 
 function CrewCatalog.GetBaseInfo(baseId)
 	local entry = getProductionEntry(tostring(baseId or ""))
-	return infoFromProductionEntry(entry)
+	if typeof(entry) ~= "table" then
+		return nil
+	end
+
+	local crewMemberId = tostring(entry.CrewMemberId or "")
+	if crewMemberId == "" then
+		return infoFromProductionEntry(entry)
+	end
+
+	local cached = baseInfoCache[crewMemberId]
+	if cached == nil then
+		cached = infoFromProductionEntry(entry)
+		if cached ~= nil then
+			baseInfoCache[crewMemberId] = cached
+		end
+	end
+	if cached == nil then
+		return nil
+	end
+
+	return cloneShallow(cached)
 end
 
 function CrewCatalog.GetInfoByLegacyId(legacyId)
@@ -373,13 +403,19 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	if not baseInfo then
 		return nil
 	end
+	local normalizedVariantKey = tostring(variantKey or "")
+	local cacheId = tostring(baseInfo.CrewMemberId or baseIdStr) .. "|" .. normalizedVariantKey
+	local cached = variantInfoCache[cacheId]
+	if cached ~= nil then
+		return cloneShallow(cached)
+	end
 
-	local variantInfo = getVariantConfig(variantKey)
-	local variantPrefix = tostring((variantInfo and variantInfo.Prefix) or (variantKey .. " "))
+	local variantInfo = getVariantConfig(normalizedVariantKey)
+	local variantPrefix = tostring((variantInfo and variantInfo.Prefix) or (normalizedVariantKey .. " "))
 	local variantCrewMemberId = variantPrefix .. tostring(baseInfo.CrewMemberId or baseIdStr)
 	local info = cloneShallow(baseInfo)
 	local baseDisplayName = getBaseDisplayName(baseInfo, baseIdStr)
-	local variantDisplayName = getVariantDisplayName(variantKey)
+	local variantDisplayName = getVariantDisplayName(normalizedVariantKey)
 
 	info.Id = variantCrewMemberId
 	info.CrewMemberId = variantCrewMemberId
@@ -389,25 +425,26 @@ function CrewCatalog.GetOrBuildVariantInfo(baseId, variantKey)
 	info.IsVariant = true
 	info.BaseId = tostring(baseInfo.CrewMemberId or baseIdStr)
 	info.CrewMemberBaseId = tostring(baseInfo.CrewMemberId or baseIdStr)
-	info.Variant = variantKey
+	info.Variant = normalizedVariantKey
 	info.BaseDisplayName = baseDisplayName
 	info.VariantDisplayName = variantDisplayName
 	info.VariantTag = variantDisplayName
 	info.ShowVariantTag = true
 	info.GoldenRender = baseInfo.GoldenRender
 	info.DiamondRender = baseInfo.DiamondRender
-	if variantKey == "Golden" then
+	if normalizedVariantKey == "Golden" then
 		info.Render = tostring(baseInfo.GoldenRender or baseInfo.Render or "")
-	elseif variantKey == "Diamond" then
+	elseif normalizedVariantKey == "Diamond" then
 		info.Render = tostring(baseInfo.DiamondRender or baseInfo.Render or "")
 	else
 		info.Render = tostring(baseInfo.Render or "")
 	end
 	local baseIncomeRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(info.Rarity)
-	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetVariantIncomeRange(info.Rarity, variantKey)
-	info.Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variantKey, nil, info.Rarity)
+	info.BaseIncomeMin, info.BaseIncomeMax = CrewIncomeBalance.GetVariantIncomeRange(info.Rarity, normalizedVariantKey)
+	info.Income = CrewIncomeBalance.ComputeIncome(baseIncomeRoll, normalizedVariantKey, nil, info.Rarity)
 
-	return info
+	variantInfoCache[cacheId] = info
+	return cloneShallow(info)
 end
 
 function CrewCatalog.FindInfoByName(name)

@@ -75,11 +75,13 @@ function Context.Create()
 	local CaptainSlotRuntime = require(ServerScriptService.Modules:WaitForChild("CaptainSlotRuntime"))
 	local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 	local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
+	local GTRActionDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRActionDiagnostics"))
 	local IncomeClaimMath = require(ServerScriptService.Modules:WaitForChild("IncomeClaimMath"))
 	local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 	local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 	local ShipRuntimeService = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 	local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
+	local GTRPerformanceDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRPerformanceDiagnostics"))
 
 	local Modules = ReplicatedStorage:WaitForChild("Modules")
 	local Configs = Modules:WaitForChild("Configs")
@@ -135,7 +137,7 @@ function Context.Create()
 	end)
 
 	local debugTrace = RunService:IsStudio() and game:GetAttribute("CrewIncomeDebugTrace") == true
-	local CREW_PICKUP_DEBUG = true
+	local CREW_PICKUP_DEBUG = game:GetAttribute("CrewPickupDebug") == true
 
 	local ctx = {
 		Players = Players,
@@ -151,6 +153,7 @@ function Context.Create()
 		CaptainSlotRuntime = CaptainSlotRuntime,
 		CrewSlotAssignmentReconciler = CrewSlotAssignmentReconciler,
 		CrewStandIncomeAuthority = CrewStandIncomeAuthority,
+		GTRActionDiagnostics = GTRActionDiagnostics,
 		IncomeClaimMath = IncomeClaimMath,
 		QuestSignals = QuestSignals,
 		PremiumCrewStealPromptRuntime = PremiumCrewStealPromptRuntime,
@@ -159,6 +162,7 @@ function Context.Create()
 		ShipRuntimeSignals = ShipRuntimeSignals,
 		ShipRuntimeService = ShipRuntimeService,
 		ShipSlotService = ShipSlotService,
+		GTRPerformanceDiagnostics = GTRPerformanceDiagnostics,
 		CurrencyUtil = CurrencyUtil,
 		PopUpModule = PopUpModule,
 		DataManager = DataManager,
@@ -221,7 +225,7 @@ function Context.Create()
 		warn(string.format("[GLR StandDebug] " .. tostring(message), ...))
 	end
 	ctx.crewPickupDebug = function(message, ...)
-		if CREW_PICKUP_DEBUG ~= true then
+		if CREW_PICKUP_DEBUG ~= true and game:GetAttribute("CrewPickupDebug") ~= true then
 			return
 		end
 
@@ -237,6 +241,23 @@ function Context.Create()
 		else
 			warn(prefix .. tostring(message))
 		end
+	end
+
+	if GTRPerformanceDiagnostics and typeof(GTRPerformanceDiagnostics.Start) == "function" then
+		GTRPerformanceDiagnostics.Start()
+		GTRPerformanceDiagnostics.SetStandCountsProvider(function()
+			local rows = {}
+			for player, stands in pairs(ctx.playerStandList) do
+				if player and player.Parent == Players and typeof(stands) == "table" then
+					rows[#rows + 1] = {
+						Name = player.Name,
+						UserId = player.UserId,
+						Count = #stands,
+					}
+				end
+			end
+			return rows
+		end)
 	end
 
 	return ctx

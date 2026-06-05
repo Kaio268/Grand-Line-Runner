@@ -13,6 +13,10 @@ local PLACE_ROLE_DEVELOPMENT = "Development"
 
 local PRODUCTION_MAIN_PLACE_ID = 111129977331443
 local PRODUCTION_AFK_PLACE_ID = 135767110031089
+local PRODUCTION_UNIVERSE_ID = 10268332509
+local STAGING_MAIN_PLACE_ID = 110640828025742
+local STAGING_AFK_PLACE_ID = 122987301330026
+local STAGING_UNIVERSE_ID = 10040962360
 local REQUIRED_PRODUCTION_KEY_ID = "prod-release-v1"
 
 DataEnvironment.Environments = {
@@ -31,6 +35,7 @@ DataEnvironment.Policy = {
 	Production = {
 		Environment = ENVIRONMENT_PRODUCTION,
 		RequiredKeyId = REQUIRED_PRODUCTION_KEY_ID,
+		UniverseId = PRODUCTION_UNIVERSE_ID,
 		Places = {
 			Main = PRODUCTION_MAIN_PLACE_ID,
 			AFK = PRODUCTION_AFK_PLACE_ID,
@@ -38,12 +43,26 @@ DataEnvironment.Policy = {
 	},
 	Staging = {
 		Environment = ENVIRONMENT_STAGING,
-		Places = {},
+		UniverseId = STAGING_UNIVERSE_ID,
+		Places = {
+			Main = STAGING_MAIN_PLACE_ID,
+			AFK = STAGING_AFK_PLACE_ID,
+		},
 	},
 	Development = {
 		Environment = ENVIRONMENT_DEVELOPMENT,
 		Places = {},
 	},
+}
+
+local RESOLVABLE_ENVIRONMENT_POLICIES = {
+	DataEnvironment.Policy.Production,
+	DataEnvironment.Policy.Staging,
+}
+
+local RESOLVABLE_PLACE_ROLES = {
+	PLACE_ROLE_MAIN,
+	PLACE_ROLE_AFK,
 }
 
 local function setAttribute(name, value)
@@ -57,6 +76,7 @@ local function recordDiagnostics(placeInfo, valid, keyId, message)
 	setAttribute("DataEnvironment_Name", placeInfo.Environment)
 	setAttribute("DataEnvironment_PlaceRole", placeInfo.PlaceRole)
 	setAttribute("DataEnvironment_PlaceId", placeInfo.PlaceId)
+	setAttribute("DataEnvironment_UniverseId", placeInfo.UniverseId or 0)
 	setAttribute("DataEnvironment_KeyId", keyId or "")
 	setAttribute("DataEnvironment_Valid", valid == true)
 	setAttribute("DataEnvironment_Error", if valid then "" else tostring(message or "invalid"))
@@ -145,10 +165,24 @@ local function requireSecrets(placeInfo)
 	return secrets
 end
 
-local function getStagingPlaceRole(placeId)
-	for role, stagingPlaceId in pairs(DataEnvironment.Policy.Staging.Places) do
-		if tonumber(stagingPlaceId) == placeId then
-			return role
+local function buildPlaceInfo(policy, role, placeId)
+	return {
+		Environment = policy.Environment,
+		PlaceRole = role,
+		PlaceId = placeId,
+		UniverseId = tonumber(policy.UniverseId) or 0,
+		IsProduction = policy.Environment == ENVIRONMENT_PRODUCTION,
+		IsStudio = RunService:IsStudio(),
+	}
+end
+
+local function resolveConfiguredPlace(placeId)
+	for _, policy in ipairs(RESOLVABLE_ENVIRONMENT_POLICIES) do
+		local places = if typeof(policy.Places) == "table" then policy.Places else {}
+		for _, role in ipairs(RESOLVABLE_PLACE_ROLES) do
+			if tonumber(places[role]) == placeId then
+				return buildPlaceInfo(policy, role, placeId)
+			end
 		end
 	end
 	return nil
@@ -182,36 +216,10 @@ end
 
 function DataEnvironment.ResolvePlace(placeId)
 	local numericPlaceId = tonumber(placeId) or 0
+	local configuredPlaceInfo = resolveConfiguredPlace(numericPlaceId)
 
-	if numericPlaceId == PRODUCTION_MAIN_PLACE_ID then
-		return {
-			Environment = ENVIRONMENT_PRODUCTION,
-			PlaceRole = PLACE_ROLE_MAIN,
-			PlaceId = numericPlaceId,
-			IsProduction = true,
-			IsStudio = RunService:IsStudio(),
-		}
-	end
-
-	if numericPlaceId == PRODUCTION_AFK_PLACE_ID then
-		return {
-			Environment = ENVIRONMENT_PRODUCTION,
-			PlaceRole = PLACE_ROLE_AFK,
-			PlaceId = numericPlaceId,
-			IsProduction = true,
-			IsStudio = RunService:IsStudio(),
-		}
-	end
-
-	local stagingRole = getStagingPlaceRole(numericPlaceId)
-	if stagingRole ~= nil then
-		return {
-			Environment = ENVIRONMENT_STAGING,
-			PlaceRole = stagingRole,
-			PlaceId = numericPlaceId,
-			IsProduction = false,
-			IsStudio = RunService:IsStudio(),
-		}
+	if configuredPlaceInfo ~= nil then
+		return configuredPlaceInfo
 	end
 
 	if RunService:IsStudio() then
@@ -219,6 +227,7 @@ function DataEnvironment.ResolvePlace(placeId)
 			Environment = ENVIRONMENT_DEVELOPMENT,
 			PlaceRole = PLACE_ROLE_DEVELOPMENT,
 			PlaceId = numericPlaceId,
+			UniverseId = 0,
 			IsProduction = false,
 			IsStudio = true,
 		}
@@ -228,8 +237,21 @@ function DataEnvironment.ResolvePlace(placeId)
 		Environment = "Unknown",
 		PlaceRole = "Unknown",
 		PlaceId = numericPlaceId,
+		UniverseId = 0,
 		IsProduction = false,
 		IsStudio = false,
+	}
+end
+
+function DataEnvironment.GetPlacePairForEnvironment(environmentName)
+	local policy = DataEnvironment.Policy[tostring(environmentName or "")]
+	if typeof(policy) ~= "table" or typeof(policy.Places) ~= "table" then
+		return nil
+	end
+
+	return {
+		MainPlaceId = tonumber(policy.Places[PLACE_ROLE_MAIN]) or 0,
+		AFKPlaceId = tonumber(policy.Places[PLACE_ROLE_AFK]) or 0,
 	}
 end
 
@@ -238,6 +260,7 @@ function DataEnvironment.GetDiagnostics(resolution)
 		Environment = resolution.Environment,
 		PlaceRole = resolution.PlaceRole,
 		PlaceId = resolution.PlaceId,
+		UniverseId = resolution.UniverseId,
 		KeyId = resolution.KeyId,
 		KeyFingerprint = resolution.KeyFingerprint,
 		KeyLength = resolution.KeyLength,
@@ -256,6 +279,20 @@ function DataEnvironment.ResolveDataKey()
 			tostring(placeInfo.PlaceId)
 		))
 	end
+	if RunService:IsStudio() ~= true then
+		local expectedUniverseId = tonumber(placeInfo.UniverseId) or 0
+		local actualUniverseId = tonumber(game.GameId) or 0
+		if expectedUniverseId > 0 and actualUniverseId ~= expectedUniverseId then
+			fail(placeInfo, string.format(
+				"Place %s is mapped to %s/%s for universe %s, but current universe is %s.",
+				tostring(placeInfo.PlaceId),
+				tostring(placeInfo.Environment),
+				tostring(placeInfo.PlaceRole),
+				tostring(expectedUniverseId),
+				tostring(actualUniverseId)
+			))
+		end
+	end
 
 	local secrets = requireSecrets(placeInfo)
 	local entry = secrets[placeInfo.Environment]
@@ -265,6 +302,7 @@ function DataEnvironment.ResolveDataKey()
 		Environment = placeInfo.Environment,
 		PlaceRole = placeInfo.PlaceRole,
 		PlaceId = placeInfo.PlaceId,
+		UniverseId = placeInfo.UniverseId,
 		KeyId = keyId,
 		DataKey = dataKey,
 		KeyFingerprint = getKeyFingerprint(dataKey),
@@ -289,6 +327,7 @@ function DataEnvironment.GetActiveDiagnostics(resolution)
 			Environment = workspace:GetAttribute("DataEnvironment_Name"),
 			PlaceRole = workspace:GetAttribute("DataEnvironment_PlaceRole"),
 			PlaceId = workspace:GetAttribute("DataEnvironment_PlaceId"),
+			UniverseId = workspace:GetAttribute("DataEnvironment_UniverseId"),
 			KeyId = workspace:GetAttribute("DataEnvironment_KeyId"),
 			KeyFingerprint = workspace:GetAttribute("DataEnvironment_KeyFingerprint"),
 			KeyLength = workspace:GetAttribute("DataEnvironment_KeyLength"),

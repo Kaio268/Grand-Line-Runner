@@ -1,15 +1,19 @@
-local AFK_PLACE_ID = 135767110031089
-local MAIN_PLACE_ID = 111129977331443
+local DataEnvironment = require(script.Parent.DataEnvironment)
+
+local placeInfo = DataEnvironment.ResolvePlace(game.PlaceId)
+local placePair = DataEnvironment.GetPlacePairForEnvironment(placeInfo.Environment)
+local expectedMainPlaceId = if placePair ~= nil then placePair.MainPlaceId else 0
 
 workspace:SetAttribute("GrandTideRush_ProjectRole", "Main")
-workspace:SetAttribute("GrandTideRush_ExpectedPlaceId", MAIN_PLACE_ID)
-workspace:SetAttribute("GrandTideRush_ProjectPlaceMismatch", game.PlaceId == AFK_PLACE_ID)
+workspace:SetAttribute("GrandTideRush_ExpectedPlaceId", expectedMainPlaceId)
+workspace:SetAttribute("GrandTideRush_ProjectPlaceMismatch", placeInfo.PlaceRole == DataEnvironment.PlaceRoles.AFK)
 
-if game.PlaceId == AFK_PLACE_ID then
+if placeInfo.PlaceRole == DataEnvironment.PlaceRoles.AFK then
 	warn(
 		string.format(
-			"[DataInit] Main project boot script is running in AFK Lobby place %s. Boot stopped.",
-			tostring(AFK_PLACE_ID)
+			"[DataInit] Main project boot script is running in %s AFK place %s. Boot stopped.",
+			tostring(placeInfo.Environment),
+			tostring(game.PlaceId)
 		)
 	)
 	return

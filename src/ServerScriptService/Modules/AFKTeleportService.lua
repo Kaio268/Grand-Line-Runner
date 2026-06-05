@@ -15,6 +15,7 @@ local ChestUtils = require(Modules:WaitForChild("GrandLineRushChestUtils"))
 local CrewCatalog = require(Modules:WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local RemoteGuard = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("RemoteGuard"))
+local DataEnvironment = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataEnvironment"))
 
 local AFKTeleportService = {}
 
@@ -87,12 +88,52 @@ local function getPlaceId(value)
 	return math.max(0, math.floor(getNumber(value, 0)))
 end
 
+local function normalizePlacePair(pair)
+	if typeof(pair) ~= "table" then
+		return nil
+	end
+
+	local mainPlaceId = getPlaceId(pair.MainPlaceId)
+	local afkPlaceId = getPlaceId(pair.AFKPlaceId)
+	if mainPlaceId <= 0 and afkPlaceId <= 0 then
+		return nil
+	end
+
+	return {
+		MainPlaceId = mainPlaceId,
+		AFKPlaceId = afkPlaceId,
+	}
+end
+
+local function getDefaultPlacePair()
+	return {
+		MainPlaceId = getPlaceId(getConfig().MainPlaceId),
+		AFKPlaceId = getPlaceId(getConfig().AFKPlaceId),
+	}
+end
+
+local function getConfigPlacePair(environmentName)
+	local placePairsByEnvironment = getConfig().PlacePairsByEnvironment
+	if typeof(placePairsByEnvironment) ~= "table" then
+		return nil
+	end
+
+	return normalizePlacePair(placePairsByEnvironment[tostring(environmentName or "")])
+end
+
+local function getCurrentPlacePair()
+	local placeInfo = DataEnvironment.ResolvePlace(game.PlaceId)
+	return getConfigPlacePair(placeInfo.Environment)
+		or normalizePlacePair(DataEnvironment.GetPlacePairForEnvironment(placeInfo.Environment))
+		or getDefaultPlacePair()
+end
+
 local function getAfkPlaceId()
-	return getPlaceId(getConfig().AFKPlaceId)
+	return getCurrentPlacePair().AFKPlaceId
 end
 
 local function getMainPlaceId()
-	return getPlaceId(getConfig().MainPlaceId)
+	return getCurrentPlacePair().MainPlaceId
 end
 
 local function isAfkPlace()

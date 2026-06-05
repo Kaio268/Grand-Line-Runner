@@ -18,7 +18,9 @@ local TUTORIAL_GUI_TIMEOUT_SECONDS = 10
 
 local tutorialGui = playerGui:WaitForChild(TUTORIAL_GUI_NAME, TUTORIAL_GUI_TIMEOUT_SECONDS)
 if not tutorialGui or not tutorialGui:IsA("ScreenGui") then
-	warn("[FirstTimeTutorial] Missing PlayerGui.FirstTimeTutorialGui; tutorial UI cannot render.")
+	if game:GetAttribute("TutorialMissingUiWarnings") == true then
+		warn("[FirstTimeTutorial] Missing PlayerGui.FirstTimeTutorialGui; tutorial UI cannot render.")
+	end
 	tutorialGui = nil
 else
 	tutorialGui.DisplayOrder = 180
@@ -74,7 +76,9 @@ local function warnMissingGuiPath(path)
 		return
 	end
 	warnedMissingGuiPath[path] = true
-	warn(string.format("[FirstTimeTutorial] Missing PlayerGui.FirstTimeTutorialGui.%s.", path))
+	if game:GetAttribute("TutorialMissingUiWarnings") == true then
+		warn(string.format("[FirstTimeTutorial] Missing PlayerGui.FirstTimeTutorialGui.%s.", path))
+	end
 end
 
 local function findGuiChild(parent, childName, path)

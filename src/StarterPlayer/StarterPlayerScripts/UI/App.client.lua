@@ -112,6 +112,18 @@ ClientRuntime.CrewActionRemote = ClientRuntime.waitForOptionalChild(
 	"RemoteFunction",
 	ClientRuntime.OptionalRemoteWaitSeconds
 )
+ClientRuntime.CrewActionEvent = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"CrewMemberActionSubmit",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
+ClientRuntime.CrewActionResultEvent = ClientRuntime.waitForOptionalChild(
+	ReplicatedStorage,
+	"CrewMemberActionResult",
+	"RemoteEvent",
+	ClientRuntime.OptionalRemoteWaitSeconds
+)
 ClientRuntime.CrewInventoryChangedRemote = ClientRuntime.waitForOptionalChild(
 	ReplicatedStorage,
 	"CrewMemberInventoryChanged",
@@ -186,7 +198,29 @@ function ClientRuntime.getCrewActionRemote()
 	return ClientRuntime.CrewActionRemote
 end
 
+function ClientRuntime.getCrewActionEvent()
+	if ClientRuntime.CrewActionEvent and ClientRuntime.CrewActionEvent:IsA("RemoteEvent") then
+		return ClientRuntime.CrewActionEvent
+	end
+
+	ClientRuntime.CrewActionEvent = ClientRuntime.findOptionalChild(ReplicatedStorage, "CrewMemberActionSubmit", "RemoteEvent")
+	return ClientRuntime.CrewActionEvent
+end
+
 function ClientRuntime.requestCrewAction(payload)
+	payload = if typeof(payload) == "table" then payload else {}
+	local event = ClientRuntime.getCrewActionEvent()
+	if event and event:IsA("RemoteEvent") then
+		ClientRuntime.CrewActionRequestSequence = (tonumber(ClientRuntime.CrewActionRequestSequence) or 0) + 1
+		local requestPayload = table.clone(payload)
+		requestPayload.RequestId = string.format("%d:%.3f", ClientRuntime.CrewActionRequestSequence, os.clock())
+		event:FireServer(requestPayload)
+		if ClientRuntime.ScheduleInventorySnapshotRequest ~= nil then
+			ClientRuntime.ScheduleInventorySnapshotRequest("crewActionSubmitted")
+		end
+		return
+	end
+
 	local remote = ClientRuntime.getCrewActionRemote()
 	if not (remote and remote:IsA("RemoteFunction")) then
 		warn("[InventoryUI] CrewMemberActionRequest is unavailable; crew action is temporarily disabled.")
@@ -4727,6 +4761,17 @@ if ClientRuntime.CrewInventoryChangedRemote and ClientRuntime.CrewInventoryChang
 	trackConnection(ClientRuntime.CrewInventoryChangedRemote.OnClientEvent, function()
 		if ClientRuntime.ScheduleInventorySnapshotRequest ~= nil then
 			ClientRuntime.ScheduleInventorySnapshotRequest("crewInventoryChanged")
+		end
+	end, cleanupConnections)
+end
+
+if ClientRuntime.CrewActionResultEvent and ClientRuntime.CrewActionResultEvent:IsA("RemoteEvent") then
+	trackConnection(ClientRuntime.CrewActionResultEvent.OnClientEvent, function(response)
+		if typeof(response) == "table" and response.Ok ~= true then
+			warn("[InventoryUI] Crew action rejected", tostring(response.Reason or "unknown"))
+		end
+		if ClientRuntime.ScheduleInventorySnapshotRequest ~= nil then
+			ClientRuntime.ScheduleInventorySnapshotRequest("crewActionResult")
 		end
 	end, cleanupConnections)
 end

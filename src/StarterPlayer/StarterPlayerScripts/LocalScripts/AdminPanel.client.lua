@@ -277,8 +277,10 @@ local CATEGORIES = {
 	"Spawning",
 	"Chests",
 	"Ship",
+	"Server Ops",
 	"Inventory",
 	"Gifts",
+	"Diagnostics",
 	"Danger Zone",
 	"Panel Actions",
 }
@@ -797,6 +799,42 @@ local COMMANDS = {
 		end,
 	},
 	{
+		id = "chestrush_start",
+		category = "Server Ops",
+		marker = "CR",
+		name = "Chest Rush Start",
+		syntax = "/chestrush start",
+		description = "Force-start Chest Rush across the active server state.",
+		example = "/chestrush start",
+		build = function()
+			return "/chestrush start"
+		end,
+	},
+	{
+		id = "chestrush_stop",
+		category = "Server Ops",
+		marker = "CR",
+		name = "Chest Rush Stop",
+		syntax = "/chestrush stop",
+		description = "Stop a forced Chest Rush and return to scheduled state.",
+		example = "/chestrush stop",
+		build = function()
+			return "/chestrush stop"
+		end,
+	},
+	{
+		id = "chestrush_status",
+		category = "Server Ops",
+		marker = "CR",
+		name = "Chest Rush Status",
+		syntax = "/chestrush status",
+		description = "Print Chest Rush active, forced, scheduled, and remaining-time status.",
+		example = "/chestrush status",
+		build = function()
+			return "/chestrush status"
+		end,
+	},
+	{
 		id = "ship_reset",
 		category = "Ship",
 		marker = "SH",
@@ -806,6 +844,54 @@ local COMMANDS = {
 		example = "/shipreset",
 		build = function()
 			return "/shipreset"
+		end,
+	},
+	{
+		id = "server_restart_10",
+		category = "Server Ops",
+		marker = "RS",
+		name = "Restart In 10m",
+		syntax = "/restart 10",
+		description = "Schedule a soft restart for all servers in 10 minutes.",
+		example = "/restart 10",
+		build = function()
+			return "/restart 10"
+		end,
+	},
+	{
+		id = "server_restart_5",
+		category = "Server Ops",
+		marker = "RS",
+		name = "Restart In 5m",
+		syntax = "/restart 5",
+		description = "Schedule a soft restart for all servers in 5 minutes.",
+		example = "/restart 5",
+		build = function()
+			return "/restart 5"
+		end,
+	},
+	{
+		id = "server_restart_1",
+		category = "Server Ops",
+		marker = "RS",
+		name = "Restart In 1m",
+		syntax = "/restart 1",
+		description = "Schedule a soft restart for all servers in 1 minute.",
+		example = "/restart 1",
+		build = function()
+			return "/restart 1"
+		end,
+	},
+	{
+		id = "server_restart_cancel",
+		category = "Server Ops",
+		marker = "RS",
+		name = "Cancel Restart",
+		syntax = "/restart cancel",
+		description = "Cancel the active soft restart across servers.",
+		example = "/restart cancel",
+		build = function()
+			return "/restart cancel"
 		end,
 	},
 	{
@@ -878,6 +964,91 @@ local COMMANDS = {
 		build = function(values)
 			local target = inputValue(values, "target", "")
 			return target ~= "" and ("/giftreset " .. target) or "/giftreset"
+		end,
+	},
+	{
+		id = "data_diag",
+		category = "Diagnostics",
+		marker = "DG",
+		name = "Data Diagnostics",
+		syntax = "/datadiag",
+		description = "Print active data environment diagnostics for this server.",
+		example = "/datadiag",
+		build = function()
+			return "/datadiag"
+		end,
+	},
+	{
+		id = "data_recover_dryrun",
+		category = "Diagnostics",
+		marker = "DR",
+		name = "Data Recovery Dry Run",
+		syntax = "/datarecover mode=dryrun userId=<id> source=<store> target=<store>",
+		description = "Compare a source and target player profile without restoring data.",
+		example = "/datarecover mode=dryrun userId=123456 source=production target=production",
+		inputs = {
+			{ key = "userId", label = "UserId", placeholder = "123456" },
+			{ key = "source", label = "Source store", placeholder = "production", default = "production" },
+			{ key = "target", label = "Target store", placeholder = "production", default = "production" },
+		},
+		build = function(values)
+			return "/datarecover mode=dryrun userId="
+				.. inputValue(values, "userId", "<id>")
+				.. " source="
+				.. inputValue(values, "source", "production")
+				.. " target="
+				.. inputValue(values, "target", "production")
+		end,
+	},
+	{
+		id = "data_recover_restore",
+		category = "Danger Zone",
+		marker = "DR",
+		name = "Data Recovery Restore",
+		syntax = "/datarecover mode=restore userId=<id> source=<store> target=<store> confirm",
+		description = "Restore one player from a source store into a target store. The server requires confirm for the restore step.",
+		example = "/datarecover mode=restore userId=123456 source=historical-fallback target=production confirm",
+		dangerous = true,
+		inputs = {
+			{ key = "userId", label = "UserId", placeholder = "123456" },
+			{ key = "source", label = "Source store", placeholder = "historical-fallback", default = "historical-fallback" },
+			{ key = "target", label = "Target store", placeholder = "production", default = "production" },
+		},
+		build = function(values, confirm)
+			local command = "/datarecover mode=restore userId="
+				.. inputValue(values, "userId", "<id>")
+				.. " source="
+				.. inputValue(values, "source", "historical-fallback")
+				.. " target="
+				.. inputValue(values, "target", "production")
+			return confirm and (command .. " confirm") or command
+		end,
+	},
+	{
+		id = "crewcanary_status",
+		category = "Diagnostics",
+		marker = "CC",
+		name = "Crew Canary Status",
+		syntax = "/crewcanary status",
+		description = "Print crew canonical read-gate canary status.",
+		example = "/crewcanary status",
+		build = function()
+			return "/crewcanary status"
+		end,
+	},
+	{
+		id = "crewcanary_advanced",
+		category = "Diagnostics",
+		marker = "CC",
+		name = "Crew Canary Advanced",
+		syntax = "/crewcanary <args>",
+		description = "Send custom crew canary debug arguments through the existing admin command parser.",
+		example = "/crewcanary status",
+		inputs = {
+			{ key = "args", label = "Arguments", placeholder = "status", default = "status" },
+		},
+		build = function(values)
+			return "/crewcanary " .. inputValue(values, "args", "status")
 		end,
 	},
 	{

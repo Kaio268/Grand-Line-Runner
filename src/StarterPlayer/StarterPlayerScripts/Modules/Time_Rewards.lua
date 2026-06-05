@@ -46,6 +46,10 @@ local function giftDebugWarn(...)
 end
 
 local function giftStartupWarn(...)
+	if GIFT_STARTUP_DEBUG ~= true and game:GetAttribute("GiftClientStartupWarnings") ~= true then
+		return
+	end
+
 	warn("[GIFT][CLIENT][WARN]", ...)
 end
 

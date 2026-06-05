@@ -89,6 +89,9 @@ local function warnScreenGuiIssue(key, message)
 		return
 	end
 	warnedScreenGuiIssues[key] = true
+	if game:GetAttribute("TutorialMissingUiWarnings") ~= true then
+		return
+	end
 	warn(message)
 end
 

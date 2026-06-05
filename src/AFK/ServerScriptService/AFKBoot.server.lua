@@ -1,17 +1,30 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 
-local EXPECTED_AFK_PLACE_ID = 135767110031089
+local DataEnvironment = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataEnvironment"))
+
+local placeInfo = DataEnvironment.ResolvePlace(game.PlaceId)
+local placePair = DataEnvironment.GetPlacePairForEnvironment(placeInfo.Environment)
+local expectedAfkPlaceId = if placePair ~= nil then placePair.AFKPlaceId else 0
 
 workspace:SetAttribute("GrandTideRush_ProjectRole", "AFK")
-workspace:SetAttribute("GrandTideRush_ExpectedPlaceId", EXPECTED_AFK_PLACE_ID)
-workspace:SetAttribute("GrandTideRush_ProjectPlaceMismatch", game.PlaceId ~= EXPECTED_AFK_PLACE_ID)
+workspace:SetAttribute("GrandTideRush_ExpectedPlaceId", expectedAfkPlaceId)
+workspace:SetAttribute("GrandTideRush_ProjectPlaceMismatch", placeInfo.PlaceRole ~= DataEnvironment.PlaceRoles.AFK)
 
-if game.PlaceId ~= EXPECTED_AFK_PLACE_ID then
+if placeInfo.Environment == "Unknown" then
+	error(string.format(
+		"[AFKBoot] Place %s is not mapped to a data environment; AFK boot cannot choose a fallback datastore.",
+		tostring(game.PlaceId)
+	), 0)
+end
+
+if placeInfo.PlaceRole ~= DataEnvironment.PlaceRoles.AFK then
 	warn(
 		string.format(
-			"[AFKBoot] AFK project is running in place %s, but expected AFK Lobby place %s. Boot stopped.",
+			"[AFKBoot] AFK project is running in %s/%s place %s, but expected AFK place %s. Boot stopped.",
+			tostring(placeInfo.Environment),
+			tostring(placeInfo.PlaceRole),
 			tostring(game.PlaceId),
-			tostring(EXPECTED_AFK_PLACE_ID)
+			tostring(expectedAfkPlaceId)
 		)
 	)
 	return

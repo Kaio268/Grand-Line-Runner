@@ -5,6 +5,13 @@ function Module.Install(ctx)
 		return ctx.bindStandPrompt(...)
 	end
 	local CaptainSlotRuntime = ctx.CaptainSlotRuntime
+	local function cancelCrewVisualRestoresForPlayer(...)
+		if typeof(ctx.cancelCrewVisualRestoresForPlayer) == "function" then
+			return ctx.cancelCrewVisualRestoresForPlayer(...)
+		end
+
+		return false, "visual_restore_queue_unavailable"
+	end
 	local function cleanupPlayerSlotRuntime(...)
 		return ctx.cleanupPlayerSlotRuntime(...)
 	end
@@ -69,8 +76,13 @@ function Module.Install(ctx)
 	end
 	local ShipRuntimeService = ctx.ShipRuntimeService
 	local ShipSlotService = ctx.ShipSlotService
-	local function spawnStandCrewMember(...)
-		return ctx.spawnStandCrewMember(...)
+	local PlacedCrewState = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
+	local function enqueueCrewVisualRestore(...)
+		if typeof(ctx.enqueueCrewVisualRestore) == "function" then
+			return ctx.enqueueCrewVisualRestore(...)
+		end
+
+		return false, "visual_restore_queue_unavailable"
 	end
 	local standCommandFunction = ctx.standCommandFunction
 	local function standDebug(...)
@@ -213,23 +225,49 @@ function Module.Install(ctx)
 						standDebug("registerStand before syncStandLevelFromCrewMember player=%s stand=%s", player.Name, standModel.Name)
 						syncStandLevelFromCrewMember(player, standModel.Name, restoredInstanceId ~= nil and tostring(restoredInstanceId) ~= "" and restoredInstanceId or name)
 						standDebug("registerStand after syncStandLevelFromCrewMember player=%s stand=%s", player.Name, standModel.Name)
-						standDebug("registerStand before spawnStandCrewMember player=%s stand=%s", player.Name, standModel.Name)
-						spawnStandCrewMember(player, standModel, handle, name)
+						standDebug("registerStand before enqueueCrewVisualRestore player=%s stand=%s", player.Name, standModel.Name)
+						local generation = ShipRuntimeService.GetCrewVisualGeneration(player)
+						local stateActive = standModel:GetAttribute(PlacedCrewState.Attribute.Active) == true
+						local stateCrewName = tostring(standModel:GetAttribute(PlacedCrewState.Attribute.CrewMemberName) or "")
+						local stateInstanceId = tostring(standModel:GetAttribute(PlacedCrewState.Attribute.CrewMemberInstanceId) or "")
+						local restoredInstanceKey = tostring(restoredInstanceId or "")
+						local stateGeneration = tonumber(standModel:GetAttribute(PlacedCrewState.Attribute.VisualGeneration))
+						local identityChanged = stateCrewName ~= tostring(name)
+							or (restoredInstanceKey ~= "" and stateInstanceId ~= restoredInstanceKey)
+						local shouldRefreshState = stateActive ~= true
+							or identityChanged
+							or stateGeneration ~= generation
+						local visualQueued, visualQueueReason = false, "already_spawned"
+						if stateActive ~= true then
+							visualQueued, visualQueueReason = enqueueCrewVisualRestore(player, standModel, handle, name, {
+								CrewMemberInstanceId = tostring(restoredInstanceId or ""),
+								Generation = generation,
+								Source = "stand_registry_restore",
+							})
+						end
 						local placedModel = standModel:FindFirstChild("PlacedCrewMember")
 						saveTrace(
-							"restoreApplied player=%s userId=%s stand=%s savedName=%s restoredInstanceId=%s placedModel=%s placedPivot=%s",
+							"restoreQueued player=%s userId=%s stand=%s savedName=%s restoredInstanceId=%s visualQueued=%s visualQueueReason=%s placedModel=%s placedPivot=%s",
 							player.Name,
 							tostring(player.UserId),
 							tostring(standModel.Name),
 							tostring(name),
 							tostring(restoredInstanceId),
+							tostring(visualQueued),
+							tostring(visualQueueReason),
 							formatInstancePath(placedModel),
 							formatVector3(placedModel and placedModel:IsA("Model") and placedModel:GetPivot().Position or nil)
 						)
-						standDebug("registerStand after spawnStandCrewMember player=%s stand=%s", player.Name, standModel.Name)
-						standDebug("registerStand before updateStandHover player=%s stand=%s", player.Name, standModel.Name)
-						updateStandHover(player, standModel, name)
-						standDebug("registerStand after updateStandHover player=%s stand=%s", player.Name, standModel.Name)
+						standDebug("registerStand after enqueueCrewVisualRestore player=%s stand=%s reason=%s", player.Name, standModel.Name, tostring(visualQueueReason))
+						if shouldRefreshState then
+							standDebug("registerStand before updateStandHover player=%s stand=%s", player.Name, standModel.Name)
+							updateStandHover(player, standModel, name, {
+								Reason = "stand_registry_restore",
+								RefreshIncomeTimestamp = stateActive ~= true or identityChanged,
+								RefreshUpdatedTimestamp = true,
+							})
+							standDebug("registerStand after updateStandHover player=%s stand=%s", player.Name, standModel.Name)
+						end
 						standDebug("registerStand restore-done player=%s stand=%s incomePerTick=%s", player.Name, standModel.Name, tostring(getIncomeWithLevel(player, name, restoredInstanceId)))
 					else
 						saveTrace(
@@ -371,6 +409,8 @@ function Module.Install(ctx)
 	local reconcilePlayerStandAssignments
 
 	local function clearPlayerStandRuntime(player)
+		cancelCrewVisualRestoresForPlayer(player, "stand_runtime_clear")
+
 		local stands = playerStandList[player]
 		if stands then
 			for i = 1, #stands do

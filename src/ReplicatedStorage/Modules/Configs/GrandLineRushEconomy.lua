@@ -200,6 +200,16 @@ local Economy = {
 		Enabled = true,
 		MainPlaceId = 111129977331443,
 		AFKPlaceId = 135767110031089,
+		PlacePairsByEnvironment = {
+			Production = {
+				MainPlaceId = 111129977331443,
+				AFKPlaceId = 135767110031089,
+			},
+			Staging = {
+				MainPlaceId = 110640828025742,
+				AFKPlaceId = 122987301330026,
+			},
+		},
 		ManualEnabled = true,
 		AutoEnabled = true,
 		InactivitySeconds = 1080,

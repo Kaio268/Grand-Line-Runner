@@ -11,6 +11,8 @@ function Module.Install(ctx)
 	local CrewStandIncomeAuthority = ctx.CrewStandIncomeAuthority
 	local CurrencyUtil = ctx.CurrencyUtil
 	local DataManager = ctx.DataManager
+	local GTRActionDiagnostics = ctx.GTRActionDiagnostics
+	local RunService = ctx.RunService
 	local function getEquippedCrewMemberToolInfo(...)
 		return ctx.getEquippedCrewMemberToolInfo(...)
 	end
@@ -20,6 +22,15 @@ function Module.Install(ctx)
 	local function getPlayerStandCrewMemberInstanceId(...)
 		return ctx.getPlayerStandCrewMemberInstanceId(...)
 	end
+	local function getPlayerStandCrewMemberInstanceIdReadOnly(...)
+		if typeof(ctx.getPlayerStandCrewMemberInstanceIdReadOnly) == "function" then
+			return ctx.getPlayerStandCrewMemberInstanceIdReadOnly(...)
+		end
+		return ctx.getPlayerStandCrewMemberInstanceId(...)
+	end
+	local function getPlayerStandIncome(...)
+		return ctx.getPlayerStandIncome(...)
+	end
 	local function getPlayerStandCrewMemberName(...)
 		return ctx.getPlayerStandCrewMemberName(...)
 	end
@@ -27,6 +38,12 @@ function Module.Install(ctx)
 		return ctx.getSlotRuntime(...)
 	end
 	local function getStandIncomeDisplay(...)
+		return ctx.getStandIncomeDisplay(...)
+	end
+	local function getStandIncomeDisplayReadOnly(...)
+		if typeof(ctx.getStandIncomeDisplayReadOnly) == "function" then
+			return ctx.getStandIncomeDisplayReadOnly(...)
+		end
 		return ctx.getStandIncomeDisplay(...)
 	end
 	local function getStandIncomePerSecond(...)
@@ -93,10 +110,15 @@ function Module.Install(ctx)
 		end
 		return true
 	end
-	local function updateStandHover(...)
-		return ctx.updateStandHover(...)
+	local function getCrewInventorySnapshot(player)
+		if DataManager and typeof(DataManager.TryGetValue) == "function" then
+			local inventory = DataManager:TryGetValue(player, "CrewMemberInventory")
+			if typeof(inventory) == "table" then
+				return inventory
+			end
+		end
+		return nil
 	end
-
 	local buildIncomeSnapshot
 
 	local function buildIncomeStatusDisplayMetadataResponse(player)
@@ -287,7 +309,7 @@ function Module.Install(ctx)
 			local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
 			local crewMemberName = tostring(standData and standData.CrewMemberName or "")
 			if crewMemberName ~= "" then
-				local rawIncomeToCollect = math.max(0, tonumber(standData.IncomeToCollect) or 0)
+				local rawIncomeToCollect = math.max(0, tonumber(getPlayerStandIncome(player, standName)) or 0)
 				local collectMultiplier = getStandCollectMultiplier(player, standName)
 				local claimSummary = getStandClaimSummary(player, standName)
 				local claimReadyAmount = math.max(0, math.floor(tonumber(claimSummary.FinalAmount) or 0))
@@ -330,7 +352,9 @@ function Module.Install(ctx)
 
 		local captainAssignment = CaptainSlotRuntime.GetAssignment(player)
 		if typeof(captainAssignment) == "table" then
-			local rawCaptainIncome = math.max(0, tonumber(captainAssignment.IncomeToCollect) or 0)
+			local rawCaptainIncome = if typeof(CaptainSlotRuntime.GetCaptainRawIncomeToCollect) == "function"
+				then math.max(0, tonumber(CaptainSlotRuntime.GetCaptainRawIncomeToCollect(player)) or 0)
+				else math.max(0, tonumber(captainAssignment.IncomeToCollect) or 0)
 			local captainCollectMultiplier = math.max(0, CaptainSlotRuntime.GetCaptainCollectMultiplier(player))
 			local captainClaimSummary = IncomeClaimMath.BuildClaimSummary(
 				rawCaptainIncome,
@@ -410,6 +434,12 @@ function Module.Install(ctx)
 		label.TextWrapped = true
 		label.Text = text
 		cache[fieldName] = text
+		if
+			ctx.GTRPerformanceDiagnostics
+			and typeof(ctx.GTRPerformanceDiagnostics.RecordDisplayUpdate) == "function"
+		then
+			ctx.GTRPerformanceDiagnostics.RecordDisplayUpdate("world_ui", 1)
+		end
 	end
 
 	local function setCachedLevelUpVisible(cache, visible)
@@ -492,7 +522,7 @@ function Module.Install(ctx)
 		return string.format("%dx %s", amountUsed, foodName)
 	end
 
-	local function updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
+	local function updateStandMoneyText(player, standModel, cache, slotState, crewMemberName, incomeDisplay)
 		if typeof(player) ~= "Instance" or not player:IsA("Player") then
 			return
 		end
@@ -513,7 +543,8 @@ function Module.Install(ctx)
 		end
 
 		crewMemberName = if crewMemberName ~= nil then crewMemberName else getPlayerStandCrewMemberName(player, standName)
-		local incomeText = CurrencyUtil.formatIncomeCompactAmount(getStandIncomeDisplay(player, standName))
+		local resolvedIncomeDisplay = if incomeDisplay ~= nil then incomeDisplay else getStandIncomeDisplay(player, standName)
+		local incomeText = CurrencyUtil.formatIncomeCompactAmount(resolvedIncomeDisplay)
 		if crewMemberName == "" and slotState.BonusInfo then
 			setMoneyLabelText(
 				cache,
@@ -686,53 +717,334 @@ function Module.Install(ctx)
 		updateLevelUpUI(player, captainSpot, cache, slotState, crewMemberName, crewMemberInstanceId, forceRefresh, totalFoodCount)
 	end
 
-	local function refreshPlayerIncomeDisplays(player)
-		if typeof(player) ~= "Instance" or not player:IsA("Player") then
-			return
+	local function getTotalFoodCountForRefresh(player)
+		if typeof(CrewFoodProgression.TryGetTotalFoodCount) == "function" then
+			return CrewFoodProgression.TryGetTotalFoodCount(player)
 		end
-		if not isPlayerDataReady(player) then
-			return
-		end
+		return CrewFoodProgression.GetTotalFoodCount(player)
+	end
 
+	local DISPLAY_REFRESH_BUDGET_SECONDS = 0.004
+	local DISPLAY_REFRESH_MAX_STANDS_PER_PASS = 4
+	local displayRefreshQueue = {}
+	local queuedPlayers = {}
+	local refreshOrder = {}
+	local refreshHeartbeatConnection = nil
+
+	local function findStandModel(player, standName)
 		local stands = playerStandList[player]
 		if typeof(stands) ~= "table" then
+			return nil, "stands_missing"
+		end
+
+		for _, candidate in ipairs(stands) do
+			if candidate and candidate.Parent and candidate.Name == standName then
+				return candidate, nil
+			end
+		end
+		return nil, "stand_not_found"
+	end
+
+	local function buildRefreshContext(player)
+		local totalFoodCount = getTotalFoodCountForRefresh(player)
+		if totalFoodCount == nil then
+			return nil, "food_count_unavailable"
+		end
+
+		return {
+			EquippedCrewMember = getEquippedCrewMemberToolInfo(player),
+			InventorySnapshot = getCrewInventorySnapshot(player),
+			TotalFoodCount = totalFoodCount,
+		}, nil
+	end
+
+	local function refreshStandIncomeDisplayForModel(player, standModel, _source, refreshContext)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
+		end
+		if typeof(standModel) ~= "Instance" or not standModel.Parent then
+			return false, "stand_not_found"
+		end
+
+		refreshContext = if typeof(refreshContext) == "table" then refreshContext else nil
+		if refreshContext == nil then
+			local context, reason = buildRefreshContext(player)
+			if context == nil then
+				return false, reason
+			end
+			refreshContext = context
+		end
+
+		local standName = standModel.Name
+		local cache = getSlotRuntime(player, standModel.Parent, standModel)
+		local slotState = getStandSlotState(player, standName)
+		local crewMemberName = getPlayerStandCrewMemberName(player, standName)
+		local crewMemberInstanceId = if crewMemberName ~= ""
+			then getPlayerStandCrewMemberInstanceIdReadOnly(player, standName, refreshContext.InventorySnapshot)
+			else ""
+		local incomeDisplay = getStandIncomeDisplayReadOnly(player, standName, refreshContext.InventorySnapshot)
+
+		updateStandMoneyText(player, standModel, cache, slotState, crewMemberName, incomeDisplay)
+		updateLevelUpUI(
+			player,
+			standModel,
+			cache,
+			slotState,
+			crewMemberName,
+			crewMemberInstanceId,
+			false,
+			refreshContext.TotalFoodCount
+		)
+		updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, refreshContext.EquippedCrewMember)
+		return true, nil
+	end
+
+	local function refreshStandIncomeDisplay(player, standName, source)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
+		end
+		if not isPlayerDataReady(player) then
+			return false, "data_not_ready"
+		end
+
+		standName = tostring(standName or "")
+		if standName == "" then
+			return false, "invalid_stand"
+		end
+
+		local standModel, findReason = findStandModel(player, standName)
+		if standModel == nil then
+			return false, findReason
+		end
+
+		return refreshStandIncomeDisplayForModel(player, standModel, source, nil)
+	end
+
+	local function countQueuedFullRefreshes()
+		local count = 0
+		for _, state in pairs(displayRefreshQueue) do
+			if state.FullQueued == true then
+				count += 1
+			end
+		end
+		return count
+	end
+
+	local function countDirtyRefreshes(state)
+		return if typeof(state) == "table" and typeof(state.DirtyOrder) == "table" then #state.DirtyOrder else 0
+	end
+
+	local function logRefreshPass(player, phase, durationSeconds, result, metadata)
+		if not GTRActionDiagnostics or typeof(GTRActionDiagnostics.Log) ~= "function" then
+			return
+		end
+		metadata = if typeof(metadata) == "table" then metadata else {}
+		GTRActionDiagnostics.Log("CrewIncome.DisplayRefresh", player, phase, durationSeconds, result, metadata)
+	end
+
+	local processRefreshQueue
+
+	local function ensureRefreshHeartbeat()
+		if refreshHeartbeatConnection ~= nil then
+			return
+		end
+		if not RunService or typeof(RunService.Heartbeat) ~= "RBXScriptSignal" then
 			return
 		end
 
-		local equippedCrewMember = getEquippedCrewMemberToolInfo(player)
-		local totalFoodCount = nil
-		if typeof(CrewFoodProgression.TryGetTotalFoodCount) == "function" then
-			totalFoodCount = CrewFoodProgression.TryGetTotalFoodCount(player)
-		else
-			totalFoodCount = CrewFoodProgression.GetTotalFoodCount(player)
+		refreshHeartbeatConnection = RunService.Heartbeat:Connect(function()
+			processRefreshQueue()
+		end)
+	end
+
+	local function enqueuePlayerForRefresh(player)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
 		end
-		if totalFoodCount == nil then
+		if queuedPlayers[player] == true then
+			return true, nil
+		end
+
+		queuedPlayers[player] = true
+		table.insert(refreshOrder, player)
+		ensureRefreshHeartbeat()
+		return true, nil
+	end
+
+	local function getRefreshState(player)
+		local state = displayRefreshQueue[player]
+		if state == nil then
+			state = {
+				DirtyMap = {},
+				DirtyOrder = {},
+				DirtySources = {},
+				FullIndex = 1,
+				FullQueued = false,
+				FullSource = "",
+			}
+			displayRefreshQueue[player] = state
+		end
+		return state
+	end
+
+	local function enqueueStandIncomeDisplayRefresh(player, standName, source)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
+		end
+		standName = tostring(standName or "")
+		if standName == "" then
+			return false, "invalid_stand"
+		end
+
+		local state = getRefreshState(player)
+		if state.DirtyMap[standName] ~= true then
+			state.DirtyMap[standName] = true
+			table.insert(state.DirtyOrder, standName)
+		end
+		state.DirtySources[standName] = tostring(source or "dirty_stand_refresh")
+		return enqueuePlayerForRefresh(player)
+	end
+
+	local function enqueuePlayerIncomeDisplayRefresh(player, source)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
+		end
+
+		local state = getRefreshState(player)
+		state.FullQueued = true
+		state.FullIndex = 1
+		state.FullSource = tostring(source or "full_display_refresh")
+		return enqueuePlayerForRefresh(player)
+	end
+
+	processRefreshQueue = function()
+		if #refreshOrder <= 0 then
+			if refreshHeartbeatConnection ~= nil then
+				refreshHeartbeatConnection:Disconnect()
+				refreshHeartbeatConnection = nil
+			end
 			return
 		end
-		for _, standModel in ipairs(stands) do
-			if standModel and standModel.Parent then
-				local standName = standModel.Name
-				local cache = getSlotRuntime(player, standModel.Parent, standModel)
-				local slotState = getStandSlotState(player, standName)
-				local crewMemberName = getPlayerStandCrewMemberName(player, standName)
-				local crewMemberInstanceId = if crewMemberName ~= "" then getPlayerStandCrewMemberInstanceId(player, standName) else ""
-				if crewMemberName ~= "" then
-					updateStandHover(player, standModel, crewMemberName)
+
+		local player = table.remove(refreshOrder, 1)
+		queuedPlayers[player] = nil
+		local state = displayRefreshQueue[player]
+		if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent ~= Players or typeof(state) ~= "table" then
+			displayRefreshQueue[player] = nil
+			return
+		end
+
+		if not isPlayerDataReady(player) then
+			task.delay(0.25, function()
+				if player and player.Parent == Players and displayRefreshQueue[player] ~= nil then
+					enqueuePlayerForRefresh(player)
 				end
-				updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
-				updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
-				updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, equippedCrewMember)
+			end)
+			return
+		end
+
+		local passStartedAt = os.clock()
+		local processed = 0
+		local failedReason = nil
+		local refreshContext, contextReason = buildRefreshContext(player)
+		if refreshContext == nil then
+			failedReason = contextReason or "refresh_context_unavailable"
+			task.delay(0.25, function()
+				if player and player.Parent == Players and displayRefreshQueue[player] ~= nil then
+					enqueuePlayerForRefresh(player)
+				end
+			end)
+		else
+			while
+				processed < DISPLAY_REFRESH_MAX_STANDS_PER_PASS
+				and (os.clock() - passStartedAt) < DISPLAY_REFRESH_BUDGET_SECONDS
+				and #state.DirtyOrder > 0
+			do
+				local standName = table.remove(state.DirtyOrder, 1)
+				if state.DirtyMap[standName] == true then
+					state.DirtyMap[standName] = nil
+					local source = state.DirtySources[standName] or "dirty_stand_refresh"
+					state.DirtySources[standName] = nil
+					local standModel = findStandModel(player, standName)
+					if standModel ~= nil then
+						local ok, reason = refreshStandIncomeDisplayForModel(player, standModel, source, refreshContext)
+						if ok == false then
+							failedReason = reason
+						end
+					end
+					processed += 1
+				end
 			end
+
+			if
+				#state.DirtyOrder <= 0
+				and state.FullQueued == true
+				and processed < DISPLAY_REFRESH_MAX_STANDS_PER_PASS
+				and (os.clock() - passStartedAt) < DISPLAY_REFRESH_BUDGET_SECONDS
+			then
+				local stands = playerStandList[player]
+				if typeof(stands) ~= "table" then
+					state.FullQueued = false
+					state.FullIndex = 1
+					failedReason = "stands_missing"
+				else
+					while
+						state.FullQueued == true
+						and state.FullIndex <= #stands
+						and processed < DISPLAY_REFRESH_MAX_STANDS_PER_PASS
+						and (os.clock() - passStartedAt) < DISPLAY_REFRESH_BUDGET_SECONDS
+					do
+						local standModel = stands[state.FullIndex]
+						state.FullIndex += 1
+						if standModel and standModel.Parent then
+							local ok, reason = refreshStandIncomeDisplayForModel(
+								player,
+								standModel,
+								state.FullSource or "queued_full_display_refresh",
+								refreshContext
+							)
+							if ok == false then
+								failedReason = reason
+							end
+							processed += 1
+						end
+					end
+
+					if state.FullIndex > #stands then
+						state.FullQueued = false
+						state.FullIndex = 1
+					end
+				end
+			end
+		end
+
+		local hasMoreWork = refreshContext ~= nil and (state.FullQueued == true or #state.DirtyOrder > 0)
+		local durationSeconds = os.clock() - passStartedAt
+		logRefreshPass(player, "pass", durationSeconds, if failedReason then "partial" else "ok", {
+			Reason = failedReason,
+			ProcessedStands = processed,
+			QueuedFull = countQueuedFullRefreshes(),
+			DirtyQueued = countDirtyRefreshes(state),
+			Source = state.FullSource,
+		})
+
+		if refreshContext == nil then
+			return
+		end
+
+		if hasMoreWork then
+			enqueuePlayerForRefresh(player)
+		else
+			displayRefreshQueue[player] = nil
 		end
 	end
 
+	local function refreshPlayerIncomeDisplays(player)
+		return enqueuePlayerIncomeDisplayRefresh(player, "refresh_player_income_displays")
+	end
+
 	local function refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
-		refreshPlayerIncomeDisplays(player)
-		task.defer(function()
-			if player and player.Parent == Players then
-				refreshPlayerIncomeDisplays(player)
-			end
-		end)
+		return enqueuePlayerIncomeDisplayRefresh(player, "lifecycle_update")
 	end
 
 
@@ -740,8 +1052,11 @@ function Module.Install(ctx)
 	ctx.buildIncomeStatusDisplayMetadataResponse = buildIncomeStatusDisplayMetadataResponse
 	ctx.fireMoneyCollected = fireMoneyCollected
 	ctx.getPlacementPickupGuardRemaining = getPlacementPickupGuardRemaining
+	ctx.enqueuePlayerIncomeDisplayRefresh = enqueuePlayerIncomeDisplayRefresh
+	ctx.enqueueStandIncomeDisplayRefresh = enqueueStandIncomeDisplayRefresh
 	ctx.refreshPlayerIncomeDisplays = refreshPlayerIncomeDisplays
 	ctx.refreshPlayerIncomeDisplaysAfterLifecycleUpdate = refreshPlayerIncomeDisplaysAfterLifecycleUpdate
+	ctx.refreshStandIncomeDisplay = refreshStandIncomeDisplay
 	ctx.setCachedLevelUpVisible = setCachedLevelUpVisible
 	ctx.setMoneyLabelText = setMoneyLabelText
 	ctx.setPlacementPickupGuard = setPlacementPickupGuard

@@ -522,6 +522,83 @@ local function SyncDataMutation(player: Player, replica, pathTable: {string}, va
 	Debug(player)
 end
 
+local BATCH_PERF_THRESHOLD_SECONDS = 0.025
+
+local function getPathParentKey(pathTable: {string}): (string, {string}, string)
+	local parentPath = {}
+	for index = 1, #pathTable - 1 do
+		parentPath[index] = pathTable[index]
+	end
+	return table.concat(parentPath, "\0"), parentPath, tostring(pathTable[#pathTable] or "")
+end
+
+local function validateBatchSetPath(profile, path: string, value: any)
+	if value == nil then
+		return nil, "nil_value"
+	end
+
+	local pathTable = GetPathTable(path)
+	if #pathTable == 0 then
+		return nil, "empty_path"
+	end
+
+	local pointer = profile.Data
+	for index = 1, #pathTable - 1 do
+		local key = pathTable[index]
+		local nextPointer = pointer[key]
+		if nextPointer == nil then
+			return pathTable, nil
+		end
+		if typeof(nextPointer) ~= "table" then
+			return nil, "non_table_parent"
+		end
+		pointer = nextPointer
+	end
+
+	local currentValue = pointer[pathTable[#pathTable]]
+	if currentValue ~= nil and typeof(currentValue) ~= typeof(value) then
+		return nil, "type_mismatch"
+	end
+
+	return pathTable, nil
+end
+
+local function syncBatchMutationToInstances(player: Player, entries)
+	if Settings.Experimental.CreateFolders then
+		for _, entry in ipairs(entries) do
+			SyncPathToInstances(player, entry.PathTable, entry.Value)
+		end
+		return
+	end
+
+	for _, entry in ipairs(entries) do
+		if GetRootDataKey(entry.PathTable) == "leaderstats" then
+			DataManager:Leaderstats(player)
+			return
+		end
+	end
+end
+
+local function logBatchPerf(player: Player, phase: string, durationSeconds: number, writeCount: number, result: string, reason: string?, context)
+	context = if typeof(context) == "table" then context else {}
+	local always = context.Always == true
+	if not always and game:GetAttribute("GTRPerformanceDebug") ~= true and durationSeconds < BATCH_PERF_THRESHOLD_SECONDS then
+		return
+	end
+
+	print(string.format(
+		"[GTR_PERF] phase=%s player=%s userId=%s target=%s durationMs=%.3f replicaWriteCount=%d result=%s reason=%s",
+		tostring(phase or "ReplicaFlush"),
+		player and player.Name or "unknown",
+		tostring(player and player.UserId or 0),
+		tostring(context.Target or ""),
+		durationSeconds * 1000,
+		math.max(0, tonumber(writeCount) or 0),
+		tostring(result or "ok"),
+		tostring(reason or "none")
+	))
+end
+
 
 local function SanitizeAttributeValue(raw)
 	local t = typeof(raw)
@@ -884,6 +961,198 @@ function DataManager:TryAddValue(player: Player, path: string, addValue, options
 	return AddValueWithProfileReplica(player, profile, replica, path, addValue, options)
 end
 
+function DataManager:TryApplyBatch(player: Player, operations: {any}, options: {[string]: any}?)
+	options = if typeof(options) == "table" then options else {}
+	local startedAt = os.clock()
+	local profile, replica, readyReason = GetReadyProfileReplica(player)
+	if profile == nil or replica == nil then
+		local durationSeconds = os.clock() - startedAt
+		return false, {
+			Reason = tostring(readyReason or "not_ready"),
+			FailureReason = tostring(readyReason or "not_ready"),
+			DurationSeconds = durationSeconds,
+			DurationMs = durationSeconds * 1000,
+			ReplicaWriteCount = 0,
+			WriteCount = 0,
+			ChangedPaths = {},
+		}
+	end
+
+	if typeof(operations) ~= "table" or #operations <= 0 then
+		local durationSeconds = os.clock() - startedAt
+		return true, {
+			Reason = "empty",
+			DurationSeconds = durationSeconds,
+			DurationMs = durationSeconds * 1000,
+			ReplicaWriteCount = 0,
+			WriteCount = 0,
+			ChangedPaths = {},
+		}
+	end
+
+	local entries = {}
+	local seenPaths = {}
+	for index, operation in ipairs(operations) do
+		if typeof(operation) ~= "table" then
+			local durationSeconds = os.clock() - startedAt
+			return false, {
+				Reason = "invalid_operation",
+				FailureReason = "invalid_operation",
+				OperationIndex = index,
+				DurationSeconds = durationSeconds,
+				DurationMs = durationSeconds * 1000,
+				ReplicaWriteCount = 0,
+				WriteCount = 0,
+				ChangedPaths = {},
+			}
+		end
+
+		local kind = tostring(operation.Kind or "Set")
+		if kind ~= "Set" then
+			local durationSeconds = os.clock() - startedAt
+			return false, {
+				Reason = "unsupported_kind",
+				FailureReason = "unsupported_kind",
+				OperationIndex = index,
+				DurationSeconds = durationSeconds,
+				DurationMs = durationSeconds * 1000,
+				ReplicaWriteCount = 0,
+				WriteCount = 0,
+				ChangedPaths = {},
+			}
+		end
+
+		local path = NormalizeDataPath(tostring(operation.Path or ""))
+		if path == "" or seenPaths[path] == true then
+			local reason = if path == "" then "empty_path" else "duplicate_path"
+			local durationSeconds = os.clock() - startedAt
+			return false, {
+				Reason = reason,
+				FailureReason = reason,
+				OperationIndex = index,
+				Path = path,
+				DurationSeconds = durationSeconds,
+				DurationMs = durationSeconds * 1000,
+				ReplicaWriteCount = 0,
+				WriteCount = 0,
+				ChangedPaths = {},
+			}
+		end
+		seenPaths[path] = true
+
+		local legacyWriteAllowed, legacyWriteReason = inspectLegacyWrite(player, profile, path, "SetValue")
+		if legacyWriteAllowed ~= true then
+			local reason = tostring(legacyWriteReason or "legacy_write_blocked")
+			local durationSeconds = os.clock() - startedAt
+			return false, {
+				Reason = reason,
+				FailureReason = reason,
+				OperationIndex = index,
+				Path = path,
+				DurationSeconds = durationSeconds,
+				DurationMs = durationSeconds * 1000,
+				ReplicaWriteCount = 0,
+				WriteCount = 0,
+				ChangedPaths = {},
+			}
+		end
+
+		local value = DeepCopyTable(operation.Value)
+		local pathTable, validateReason = validateBatchSetPath(profile, path, value)
+		if pathTable == nil then
+			local reason = tostring(validateReason or "invalid_path")
+			local durationSeconds = os.clock() - startedAt
+			return false, {
+				Reason = reason,
+				FailureReason = reason,
+				OperationIndex = index,
+				Path = path,
+				DurationSeconds = durationSeconds,
+				DurationMs = durationSeconds * 1000,
+				ReplicaWriteCount = 0,
+				WriteCount = 0,
+				ChangedPaths = {},
+			}
+		end
+
+		local parentKey, parentPath, leafKey = getPathParentKey(pathTable)
+		entries[#entries + 1] = {
+			Path = path,
+			PathTable = pathTable,
+			ParentKey = parentKey,
+			ParentPath = parentPath,
+			LeafKey = leafKey,
+			Value = value,
+		}
+	end
+
+	for _, entry in ipairs(entries) do
+		local parent, leafKey, _, _, err = ResolveDataPath(profile, entry.Path, true, DeepCopyTable(entry.Value))
+		if err then
+			local durationSeconds = os.clock() - startedAt
+			return false, {
+				Reason = "commit_path_failed",
+				FailureReason = "commit_path_failed",
+				Path = entry.Path,
+				Error = err,
+				DurationSeconds = durationSeconds,
+				DurationMs = durationSeconds * 1000,
+				ReplicaWriteCount = 0,
+				WriteCount = 0,
+				ChangedPaths = {},
+			}
+		end
+		parent[leafKey] = DeepCopyTable(entry.Value)
+	end
+
+	local groups = {}
+	local orderedGroups = {}
+	for _, entry in ipairs(entries) do
+		local group = groups[entry.ParentKey]
+		if group == nil then
+			group = {
+				Path = entry.ParentPath,
+				Values = {},
+			}
+			groups[entry.ParentKey] = group
+			orderedGroups[#orderedGroups + 1] = group
+		end
+		group.Values[entry.LeafKey] = entry.Value
+	end
+
+	local flushStartedAt = os.clock()
+	for _, entry in ipairs(entries) do
+		SyncCurrencyCompatibilityMirror(player, entry.PathTable, entry.Value)
+	end
+
+	local replicaWriteCount = 0
+	for _, group in ipairs(orderedGroups) do
+		replica:SetValues(group.Path, group.Values)
+		replicaWriteCount += 1
+	end
+	local flushDurationSeconds = os.clock() - flushStartedAt
+
+	syncBatchMutationToInstances(player, entries)
+	Debug(player)
+
+	local changedPaths = {}
+	for _, entry in ipairs(entries) do
+		changedPaths[#changedPaths + 1] = entry.Path
+	end
+
+	local result = {
+		Reason = "ok",
+		DurationSeconds = os.clock() - startedAt,
+		DurationMs = (os.clock() - startedAt) * 1000,
+		FlushDurationSeconds = flushDurationSeconds,
+		ReplicaWriteCount = replicaWriteCount,
+		WriteCount = replicaWriteCount,
+		ChangedPaths = changedPaths,
+	}
+	logBatchPerf(player, "ReplicaFlush", flushDurationSeconds, replicaWriteCount, "ok", nil, options.PerfContext)
+	return true, result
+end
+
 --[[
 	Function used to shorten code (isn't usable from the outside)
 ]]
@@ -1189,6 +1458,90 @@ local function waitForFinalProfileSave(profile, timeoutSeconds: number): (boolea
 	end
 
 	return false, "save_timeout"
+end
+
+function DataManager.FlushActiveProfilesForTeleport(_, timeoutSeconds: number?): (boolean, {[string]: any})
+	local timeout = math.max(1, tonumber(timeoutSeconds) or 8)
+	local entries = {}
+
+	for player, profile in pairs(Profiles) do
+		if profile ~= nil and player.Parent == Players then
+			local activeOk, isActive = pcall(function()
+				return profile:IsActive()
+			end)
+			if activeOk ~= true or isActive == true then
+				local entry = {
+					Player = player,
+					Profile = profile,
+					Saved = false,
+					Error = nil,
+					Connection = nil,
+				}
+				if profile.OnAfterSave ~= nil then
+					entry.Connection = profile.OnAfterSave:Connect(function()
+						entry.Saved = true
+					end)
+				end
+				entries[#entries + 1] = entry
+			end
+		end
+	end
+
+	for _, entry in ipairs(entries) do
+		local saveOk, saveError = pcall(function()
+			entry.Profile:Save()
+		end)
+		if saveOk ~= true then
+			entry.Error = tostring(saveError)
+		elseif entry.Connection == nil then
+			entry.Saved = true
+		end
+	end
+
+	local deadline = os.clock() + timeout
+	while os.clock() < deadline do
+		local pending = false
+		for _, entry in ipairs(entries) do
+			if entry.Saved ~= true and entry.Error == nil then
+				pending = true
+				break
+			end
+		end
+
+		if pending ~= true then
+			break
+		end
+
+		task.wait(0.1)
+	end
+
+	local saved = 0
+	local failed = 0
+	local errors = {}
+	for _, entry in ipairs(entries) do
+		if entry.Connection ~= nil then
+			entry.Connection:Disconnect()
+		end
+
+		if entry.Saved == true then
+			saved += 1
+		else
+			failed += 1
+			errors[#errors + 1] = {
+				UserId = entry.Player.UserId,
+				Name = entry.Player.Name,
+				Error = entry.Error or "save_timeout",
+			}
+		end
+	end
+
+	return failed == 0, {
+		Requested = #entries,
+		Saved = saved,
+		Failed = failed,
+		Errors = errors,
+		TimeoutSeconds = timeout,
+	}
 end
 
 local function acquireResetControlProfile(profileKey: string, userId: number)
@@ -2002,6 +2355,18 @@ function PlayerRemoving(player: Player)
 	disconnectPendingReplicaReadyConnection(player)
 	local profile = Profiles[player]
 	if profile ~= nil then
+		pcall(function()
+			local modules = game.ServerScriptService:FindFirstChild("Modules")
+			local crewIncomeRuntimeModule = modules and modules:FindFirstChild("CrewIncomeRuntime")
+			if not crewIncomeRuntimeModule then
+				return
+			end
+
+			local crewIncomeRuntime = require(crewIncomeRuntimeModule)
+			if typeof(crewIncomeRuntime) == "table" and typeof(crewIncomeRuntime.FlushPlayerAccruals) == "function" then
+				crewIncomeRuntime.FlushPlayerAccruals(player, "player_removing")
+			end
+		end)
 		profile:EndSession()
 		Profiles[player] = nil
 		ActiveBoostRoutines[player] = nil
@@ -3041,6 +3406,9 @@ local developerProductUniverseDiagnosticsStarted = false
 
 local function StartDeveloperProductUniverseDiagnostics()
 	if developerProductUniverseDiagnosticsStarted then
+		return
+	end
+	if game:GetAttribute("DataManagerProductUniverseDiagnosticsEnabled") ~= true then
 		return
 	end
 

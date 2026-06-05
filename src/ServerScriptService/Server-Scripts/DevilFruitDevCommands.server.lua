@@ -40,6 +40,7 @@ local GrandLineRushChestToolService = require(ServerScriptService.Modules:WaitFo
 local GrandLineRushVerticalSliceService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
 local GrandLineRushCorridorRunController = require(ServerScriptService.Modules:WaitForChild("GrandLineRushCorridorRunController"))
 local GrandLineRushChestRushService = require(ServerScriptService.Modules:WaitForChild("GrandLineRushChestRushService"))
+local ServerRestartService = require(ServerScriptService.Modules:WaitForChild("ServerRestartService"))
 local ShipResetService = require(ServerScriptService.Modules:WaitForChild("ShipResetService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local TimeRewardsService = require(ServerScriptService.Modules:WaitForChild("Time_Rewards_Server"))
@@ -199,6 +200,7 @@ local ADMIN_COMMAND_NAMES = {
 	shipreset = true,
 	clear = true,
 	chestrush = true,
+	restart = true,
 	tutorial = true,
 	wipeplayer = true,
 	resetprogress = true,
@@ -855,6 +857,10 @@ local function processChestRushCommand(player, argumentText, commandContext)
 	end
 
 	return false, "Usage: /chestrush start, /chestrush stop, or /chestrush status"
+end
+
+local function processRestartCommand(player, argumentText)
+	return ServerRestartService.HandleCommand(player, argumentText, "AdminCommand")
 end
 
 local function parseSignedAmount(text)
@@ -6834,6 +6840,13 @@ local function handleChatCommand(player, rawText, source)
 		return
 	end
 
+	if commandName == "restart" then
+		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
+			return processRestartCommand(player, argumentText)
+		end, commandContext)
+		return
+	end
+
 	if commandName == "shipreset" then
 		executeAdminCommandHandler(player, commandName, source, normalizedText, function()
 			return processShipResetCommand(player, argumentText)
@@ -7538,7 +7551,39 @@ local function setupTextChatCommand()
 		handleChatCommand(player, syntheticCommand, "TextChatCommand:ChestRushDevCommand")
 	end)
 
-	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=18")
+	local restartCommand = commandsFolder:FindFirstChild("RestartDevCommand")
+	if restartCommand and not restartCommand:IsA("TextChatCommand") then
+		restartCommand:Destroy()
+		restartCommand = nil
+	end
+
+	if not restartCommand then
+		restartCommand = Instance.new("TextChatCommand")
+		restartCommand.Name = "RestartDevCommand"
+		restartCommand.PrimaryAlias = "/restart"
+		restartCommand.SecondaryAlias = "/restart"
+		restartCommand.AutocompleteVisible = false
+		restartCommand.Parent = commandsFolder
+	end
+
+	restartCommand.Triggered:Connect(function(textSource, unfilteredText)
+		local player = textSource and Players:GetPlayerByUserId(textSource.UserId)
+		if not player then
+			adminCommandFlowWarn("TextChatCommand triggered command=RestartDevCommand reason=player_not_found textSourceUserId=%s text=%s", tostring(textSource and textSource.UserId), tostring(unfilteredText))
+			return
+		end
+
+		local normalizedText = normalizeText(unfilteredText)
+		if normalizedText:sub(1, 8) == "/restart" or normalizedText:sub(1, 9) == "/ restart" then
+			handleChatCommand(player, normalizedText, "TextChatCommand:RestartDevCommand")
+			return
+		end
+
+		local syntheticCommand = normalizedText ~= "" and ("/restart " .. normalizedText) or "/restart"
+		handleChatCommand(player, syntheticCommand, "TextChatCommand:RestartDevCommand")
+	end)
+
+	adminCommandFlowLog("setupTextChatCommand complete registeredAdminTextChatCommands=19")
 end
 
 for _, player in ipairs(Players:GetPlayers()) do

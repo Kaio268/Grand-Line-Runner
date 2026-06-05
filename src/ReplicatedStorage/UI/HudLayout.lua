@@ -340,6 +340,54 @@ local function getGridSize(layout)
 	return Vector2.new(width, height)
 end
 
+local function roundOffset(value)
+	return math.floor((tonumber(value) or 0) + 0.5)
+end
+
+local function scaleOffsetSize(size, scale)
+	return UDim2.new(
+		size.X.Scale,
+		roundOffset(size.X.Offset * scale),
+		size.Y.Scale,
+		roundOffset(size.Y.Offset * scale)
+	)
+end
+
+local function getLeftMenuScale(resolvedMode, layout, viewport)
+	if resolvedMode == "desktop" then
+		local targetScale = math.clamp(viewport.Y / 635, 1.25, 2.05)
+		local baseSize = getGridSize(layout)
+		local safeHeight = math.max(1, viewport.Y - 112 - 128)
+		local safeWidth = math.max(1, math.min(viewport.X * 0.22, 390))
+		local heightCap = safeHeight / math.max(baseSize.Y, 1)
+		local widthCap = safeWidth / math.max(baseSize.X, 1)
+		local safetyScale = math.max(1.05, math.min(heightCap, widthCap))
+
+		return math.clamp(math.min(targetScale, safetyScale), 1.05, 2.05)
+	elseif resolvedMode == "compactDesktop" then
+		local targetScale = math.min(viewport.X / 900, viewport.Y / 640) * 1.2
+		return math.clamp(targetScale, 1.05, 1.35)
+	elseif resolvedMode == "tablet" then
+		return math.clamp(math.min(viewport.X, viewport.Y) / 800, 0.9, 1.15)
+	elseif resolvedMode == "phone" then
+		return math.clamp(math.min(viewport.X, viewport.Y) / 420, 0.9, 1.2)
+	end
+
+	return 1
+end
+
+local function applyLeftMenuScale(layout, scale)
+	layout.tileSize = roundOffset(layout.tileSize * scale)
+	layout.iconSize = roundOffset(layout.iconSize * scale)
+	layout.textSize = roundOffset(layout.textSize * scale)
+	layout.gap = math.max(4, roundOffset(layout.gap * scale))
+	layout.timerTextSize = math.max(7, roundOffset(layout.timerTextSize * scale))
+	layout.badgeSize = scaleOffsetSize(layout.badgeSize, scale)
+	layout.newBadgeSize = scaleOffsetSize(layout.newBadgeSize, scale)
+	layout.timerSize = scaleOffsetSize(layout.timerSize, scale)
+	layout.uiScale = scale
+end
+
 function HudLayout.getMode(viewport)
 	return Responsive.getHudLayoutMode(viewport)
 end
@@ -352,16 +400,26 @@ function HudLayout.getLeftMenu(mode)
 
 	local layout = getByMode(LEFT_MENU, resolvedMode)
 	local viewport = Responsive.getViewportSize()
+	local scale = getLeftMenuScale(resolvedMode, layout, viewport)
+	applyLeftMenuScale(layout, scale)
 	local size = getGridSize(layout)
 	if layout.orientation == "horizontal" then
 		local x = math.clamp(layout.position.X.Offset, 6, math.max(6, viewport.X - size.X - 6))
-		layout.position = UDim2.fromOffset(x, layout.position.Y.Offset)
+		local topReserve = if resolvedMode == "phone" then 58 elseif resolvedMode == "tablet" then 110 else 76
+		local bottomReserve = if resolvedMode == "tablet" then 140 else 92
+		local maxY = math.max(topReserve, viewport.Y - size.Y - bottomReserve)
+		local y = math.clamp(layout.position.Y.Offset, topReserve, maxY)
+		layout.position = UDim2.fromOffset(x, y)
 	else
-		local bottomReserve = if resolvedMode == "desktop" then 150 else 92
-		local minY = if resolvedMode == "desktop" then 86 else 70
+		local bottomReserve = if resolvedMode == "desktop" then 128 else 92
+		local minY = if resolvedMode == "desktop" then 112 else 70
 		local maxY = math.max(minY, viewport.Y - size.Y - bottomReserve)
-		local y = math.clamp(layout.position.Y.Offset, minY, maxY)
-		layout.position = UDim2.fromOffset(layout.position.X.Offset, y)
+		local targetY = if resolvedMode == "desktop" then (viewport.Y - size.Y) * 0.5 else layout.position.Y.Offset
+		local y = math.clamp(targetY, minY, maxY)
+		local x = if resolvedMode == "desktop"
+			then math.clamp(roundOffset(viewport.X * 0.018), 18, 44)
+			else layout.position.X.Offset
+		layout.position = UDim2.fromOffset(x, y)
 	end
 	return layout
 end

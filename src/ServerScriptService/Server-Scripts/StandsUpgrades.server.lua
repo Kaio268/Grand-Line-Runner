@@ -1,4 +1,6 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local CREW_MEMBER_STAND_UPGRADE_REMOTE_NAME = "CrewMemberStandUpgradeRemote"
@@ -25,12 +27,15 @@ local crewMemberResultRemote = getOrCreateRemote(CREW_MEMBER_STAND_UPGRADE_RESUL
 
 local CaptainSlotRuntime = require(game.ServerScriptService.Modules:WaitForChild("CaptainSlotRuntime"))
 local CrewFoodProgression = require(game.ServerScriptService.Modules:WaitForChild("CrewFoodProgression"))
+local CrewIncomeRuntime = require(game.ServerScriptService.Modules:WaitForChild("CrewIncomeRuntime"))
 local CrewInstanceService = require(game.ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewMemberCanonicalReadGate = require(game.ServerScriptService.Modules:WaitForChild("CrewMemberCanonicalReadGate"))
 local CrewStandIncomeAuthority = require(game.ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 local GrandLineRushVerticalSliceService = require(game.ServerScriptService.Modules:WaitForChild("GrandLineRushVerticalSliceService"))
+local ServerRestartService = require(game.ServerScriptService.Modules:WaitForChild("ServerRestartService"))
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("PopUpModule"))
+local CrewCatalog = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("CrewCatalog"))
 local ShipSlotLevelPanelState = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Crew"):WaitForChild("ShipSlotLevelPanelState"))
 local ShipRuntimeService = require(game.ServerScriptService.Modules:WaitForChild("ShipRuntimeService"))
 local ShipSlotGuiIdentity = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShipSlotGuiIdentity"))
@@ -44,7 +49,52 @@ local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
 local CAPTAIN_RUNTIME_GUI_ATTRIBUTE = "ShipCaptainSlotRuntimeGui"
 local CAPTAIN_RUNTIME_GUI_SLOT_ATTRIBUTE = "ShipCaptainSlotKey"
 local CAPTAIN_RUNTIME_GUI_NAME = "ShipCaptainSlotLevelUp"
+local FOOD_STATUS_CANARY_ATTRIBUTE = "CrewMemberFoodStatusCanaryHotPathEnabled"
+local FOOD_STATUS_CANARY_SAMPLE_RATE = 0.01
+local FOOD_STATUS_CANARY_SAMPLE_THROTTLE_SECONDS = 60
+local MAX_UPGRADE_QUEUE_DEPTH = 8
+local PERF_THRESHOLD_SECONDS = 0.025
 local tutorialService = nil
+local foodStatusCanaryLastSampleByUserId = {}
+local upgradeQueues = {}
+local upgradeWorkers = {}
+
+local function logPerf(player, phase, target, durationSeconds, result, extra, always)
+	extra = if typeof(extra) == "table" then extra else {}
+	if always ~= true and game:GetAttribute("GTRPerformanceDebug") ~= true and durationSeconds < PERF_THRESHOLD_SECONDS then
+		return
+	end
+
+	print(string.format(
+		"[GTR_PERF] phase=%s player=%s userId=%s target=%s durationMs=%.3f replicaWriteCount=%s result=%s reason=%s",
+		tostring(phase or ""),
+		player and player.Name or "unknown",
+		tostring(player and player.UserId or 0),
+		tostring(target or ""),
+		durationSeconds * 1000,
+		tostring(extra.ReplicaWriteCount or ""),
+		tostring(result or "ok"),
+		tostring(extra.Reason or "none")
+	))
+end
+
+local function shouldRunFoodStatusCanary(player)
+	if RunService:IsStudio() or game:GetAttribute(FOOD_STATUS_CANARY_ATTRIBUTE) == true then
+		return true
+	end
+	if math.random() > FOOD_STATUS_CANARY_SAMPLE_RATE then
+		return false
+	end
+
+	local userId = player and player.UserId or 0
+	local now = os.clock()
+	local lastSampleAt = tonumber(foodStatusCanaryLastSampleByUserId[userId]) or 0
+	if now - lastSampleAt < FOOD_STATUS_CANARY_SAMPLE_THROTTLE_SECONDS then
+		return false
+	end
+	foodStatusCanaryLastSampleByUserId[userId] = now
+	return true
+end
 
 local function pushResourceState(player)
 	if GrandLineRushVerticalSliceService and typeof(GrandLineRushVerticalSliceService.PushState) == "function" then
@@ -127,6 +177,27 @@ local function getFailureMessage(errorCode)
 		return "Crewmate progress could not be loaded."
 	end
 	return "Unable to use food on this Crewmate right now."
+end
+
+local function getKnownFoodStatusDisplayNameForPopup(context, progress)
+	local crewMemberId = tostring(
+		(context and context.CrewMemberId)
+			or (progress and progress.StorageName)
+			or (progress and progress.CrewMemberId)
+			or ""
+	)
+	if crewMemberId == "" then
+		return nil
+	end
+
+	local _, info = CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
+	if typeof(info) == "table" then
+		local displayName = tostring(info.DisplayName or info.CrewMemberName or info.Name or "")
+		if displayName ~= "" then
+			return displayName
+		end
+	end
+	return crewMemberId
 end
 
 local function getCanonicalFoodStatusDisplayNameForPopup(player, context)
@@ -497,39 +568,13 @@ local function resolveUpgradeContext(player, standName)
 end
 
 local function syncStandStateForProgress(player, fallbackStandName, progress)
-	if fallbackStandName == CAPTAIN_SLOT_KEY then
-		updateStandGui(player, fallbackStandName, progress)
-		return
+	local startedAt = os.clock()
+	local standName = tostring(fallbackStandName or "")
+	updateStandGui(player, standName, progress)
+	if standName ~= CAPTAIN_SLOT_KEY and CrewIncomeRuntime and typeof(CrewIncomeRuntime.RefreshStand) == "function" then
+		CrewIncomeRuntime.RefreshStand(player, standName, "stand_upgrade_progress_sync")
 	end
-
-	local playerGui = player:FindFirstChild("PlayerGui")
-	local targetInstanceId = tostring(progress.InstanceId or "")
-	local updatedAnyStand = false
-
-	if playerGui then
-		for _, gui in ipairs(playerGui:GetChildren()) do
-			if not gui:IsA("SurfaceGui") then
-				continue
-			end
-
-			local guiStandName = ShipSlotGuiIdentity.GetSlotKeyFromGui(gui)
-			if not guiStandName then
-				continue
-			end
-
-			local guiCrewMemberInstanceId = CrewInstanceService.GetStandInstanceId(player, guiStandName)
-			if guiCrewMemberInstanceId == targetInstanceId then
-				CrewStandIncomeAuthority.SetStandLevel(player, guiStandName, progress.Level, "stand_upgrade_progress_sync")
-				updateStandGui(player, guiStandName, progress)
-				updatedAnyStand = true
-			end
-		end
-	end
-
-	if not updatedAnyStand then
-		CrewStandIncomeAuthority.SetStandLevel(player, fallbackStandName, progress.Level, "stand_upgrade_progress_sync")
-		updateStandGui(player, fallbackStandName, progress)
-	end
+	logPerf(player, "StandUpdate", standName, os.clock() - startedAt, "ok")
 end
 
 local function fireStepResult(player, payload)
@@ -568,8 +613,28 @@ crewMemberPreviewRemote.OnServerInvoke = function(player, standNameInput)
 end
 
 local function handleUpgradeRequest(player, payload)
+	local upgradeStartedAt = os.clock()
 	local standName = getStandName(payload)
+	local function finishUpgrade(result, reason, replicaWriteCount)
+		logPerf(player, "UpgradeComplete", standName, os.clock() - upgradeStartedAt, result, {
+			Reason = tostring(reason or "none"),
+			ReplicaWriteCount = replicaWriteCount or 0,
+		}, true)
+	end
+
 	if standName == "" then
+		finishUpgrade("failed", "invalid_stand")
+		return
+	end
+
+	local restartBlocked, restartMessage = ServerRestartService.RejectIfFinalMinuteLocked(player, "feeding crewmates")
+	if restartBlocked then
+		fireStepResult(player, buildFailurePayload(
+			standName,
+			"server_restart_final_minute",
+			restartMessage or "Server restart is in its final minute."
+		))
+		finishUpgrade("failed", "server_restart_final_minute")
 		return
 	end
 
@@ -584,6 +649,7 @@ local function handleUpgradeRequest(player, payload)
 			sendPopup(player, context.Message, ERROR_COLOR, true)
 		end
 		fireStepResult(player, context)
+		finishUpgrade("failed", context.Error or "context_failed")
 		return
 	end
 
@@ -593,11 +659,13 @@ local function handleUpgradeRequest(player, payload)
 		expectedFoodKey ~= "" and expectedFoodKey or nil,
 		{
 			DeferShadowRefresh = true,
+			StandName = standName,
 		}
 	)
 
 	local progress = success and result and result.Progress or CrewFoodProgression.GetProgress(player, context.ProgressTarget)
 	if not progress then
+		finishUpgrade("failed", "progress_missing_after_apply", result and result.BatchInfo and result.BatchInfo.ReplicaWriteCount or 0)
 		return
 	end
 
@@ -615,6 +683,7 @@ local function handleUpgradeRequest(player, payload)
 		sendPopup(player, failurePayload.Message, ERROR_COLOR, true)
 		updateStandGui(player, standName, progress)
 		fireStepResult(player, failurePayload)
+		finishUpgrade("failed", failurePayload.Error or "upgrade_failed", result and result.BatchInfo and result.BatchInfo.ReplicaWriteCount or 0)
 		return
 	end
 
@@ -633,8 +702,12 @@ local function handleUpgradeRequest(player, payload)
 		LevelUps = tonumber(result.LevelUps) or 0,
 	})
 
-	local foodStatusDisplayName = getFoodStatusReadAuthorityDisplayNameForPopup(player, context, progress, appliedStep)
-		or getCanonicalFoodStatusDisplayNameForPopup(player, context)
+	local foodStatusDisplayName = getKnownFoodStatusDisplayNameForPopup(context, progress)
+	if shouldRunFoodStatusCanary(player) then
+		foodStatusDisplayName = getFoodStatusReadAuthorityDisplayNameForPopup(player, context, progress, appliedStep)
+			or getCanonicalFoodStatusDisplayNameForPopup(player, context)
+			or foodStatusDisplayName
+	end
 	local foodUsedMessage = if foodStatusDisplayName ~= nil
 		then string.format(
 			"Used %dx %s on %s (+%d XP).",
@@ -695,8 +768,95 @@ local function handleUpgradeRequest(player, payload)
 		LevelUps = result.LevelUps,
 		ContinuePreview = continuePreview,
 	})
+	finishUpgrade("ok", "none", result.BatchInfo and result.BatchInfo.ReplicaWriteCount or 0)
 end
 
+local function startUpgradeWorker(player)
+	if upgradeWorkers[player] == true then
+		return
+	end
+	upgradeWorkers[player] = true
+
+	task.spawn(function()
+		while player.Parent == Players do
+			local queue = upgradeQueues[player]
+			local job = queue and table.remove(queue, 1)
+			if job == nil then
+				break
+			end
+
+			local ok, err = xpcall(handleUpgradeRequest, debug.traceback, player, job.Payload)
+			if not ok then
+				local standName = getStandName(job.Payload)
+				warn(string.format(
+					"[StandsUpgrades] upgrade handler failed player=%s userId=%s stand=%s error=%s",
+					player and player.Name or "unknown",
+					tostring(player and player.UserId or 0),
+					tostring(standName),
+					tostring(err)
+				))
+				fireStepResult(player, buildFailurePayload(
+					standName,
+					"upgrade_failed",
+					"Unable to use food on this Crewmate right now."
+				))
+				logPerf(player, "UpgradeComplete", standName, os.clock() - (job.EnqueuedAt or os.clock()), "failed", {
+					Reason = "handler_error",
+					ReplicaWriteCount = 0,
+				}, true)
+			end
+
+			task.wait()
+		end
+
+		upgradeWorkers[player] = nil
+		local queue = upgradeQueues[player]
+		if player.Parent == Players and queue ~= nil and #queue > 0 then
+			startUpgradeWorker(player)
+		end
+	end)
+end
+
+local function enqueueUpgradeRequest(player, payload)
+	if player.Parent ~= Players then
+		return
+	end
+
+	local queue = upgradeQueues[player]
+	if queue == nil then
+		queue = {}
+		upgradeQueues[player] = queue
+	end
+
+	if #queue >= MAX_UPGRADE_QUEUE_DEPTH then
+		local standName = getStandName(payload)
+		local failurePayload = buildFailurePayload(
+			standName,
+			"upgrade_queue_full",
+			"Upgrades are still processing. Please try again in a moment."
+		)
+		fireStepResult(player, failurePayload)
+		sendPopup(player, failurePayload.Message, ERROR_COLOR, true)
+		logPerf(player, "UpgradeComplete", standName, 0, "failed", {
+			Reason = "queue_full",
+			ReplicaWriteCount = 0,
+		}, true)
+		return
+	end
+
+	queue[#queue + 1] = {
+		Payload = payload,
+		EnqueuedAt = os.clock(),
+	}
+	startUpgradeWorker(player)
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	upgradeQueues[player] = nil
+	upgradeWorkers[player] = nil
+	foodStatusCanaryLastSampleByUserId[player.UserId] = nil
+end)
+
 crewMemberRemote.OnServerEvent:Connect(function(player, payload)
-	handleUpgradeRequest(player, payload)
+	enqueueUpgradeRequest(player, payload)
 end)

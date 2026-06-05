@@ -30,6 +30,14 @@ local crewActionRemote = ReplicatedStorage:WaitForChild("CrewMemberActionRequest
 if crewActionRemote and not crewActionRemote:IsA("RemoteFunction") then
 	crewActionRemote = nil
 end
+local crewActionEvent = ReplicatedStorage:WaitForChild("CrewMemberActionSubmit", 2)
+if crewActionEvent and not crewActionEvent:IsA("RemoteEvent") then
+	crewActionEvent = nil
+end
+local crewActionResultEvent = ReplicatedStorage:WaitForChild("CrewMemberActionResult", 2)
+if crewActionResultEvent and not crewActionResultEvent:IsA("RemoteEvent") then
+	crewActionResultEvent = nil
+end
 
 local rootContainer = Instance.new("Folder")
 rootContainer.Name = "ReactBaseHeldCrewRoot"
@@ -46,6 +54,8 @@ local destroyed = false
 local connections = {}
 local characterConnections = {}
 local toolAttributeConnections = {}
+local crewActionRequestSequence = 0
+local pendingCrewActionRequestId = nil
 
 local ACTIVE_AREA_ATTRIBUTE = BiomeAreas.ActiveAreaAttribute
 local STARTING_AREA_KEY = BiomeAreas.StartingAreaKey
@@ -326,26 +336,46 @@ local function render()
 		item = heldItem,
 		compact = Responsive.isCompact(),
 		onStore = function(item)
-			if pending or not crewActionRemote then
+			if pending or (not crewActionRemote and not crewActionEvent) then
 				return
 			end
 
 			pending = true
 			render()
+			local payload
+			if item and item.SourceKind == "HotbarCrew" then
+				payload = {
+					Action = "Unequip",
+					InstanceId = item.InstanceId,
+				}
+			else
+				payload = {
+					Action = "StoreHeld",
+					CarryId = item and item.CarryId,
+					SlotIndex = item and item.SlotIndex,
+				}
+			end
+			if crewActionEvent then
+				crewActionRequestSequence += 1
+				pendingCrewActionRequestId = string.format("%d:%.3f", crewActionRequestSequence, os.clock())
+				payload.RequestId = pendingCrewActionRequestId
+				crewActionEvent:FireServer(payload)
+				local requestId = pendingCrewActionRequestId
+				task.delay(8, function()
+					if pendingCrewActionRequestId == requestId then
+						pendingCrewActionRequestId = nil
+						pending = false
+						if not destroyed then
+							render()
+						end
+					end
+				end)
+				return
+			end
+
 			task.spawn(function()
 				pcall(function()
-					if item and item.SourceKind == "HotbarCrew" then
-						return crewActionRemote:InvokeServer({
-							Action = "Unequip",
-							InstanceId = item.InstanceId,
-						})
-					end
-
-					return crewActionRemote:InvokeServer({
-						Action = "StoreHeld",
-						CarryId = item and item.CarryId,
-						SlotIndex = item and item.SlotIndex,
-					})
+					return crewActionRemote:InvokeServer(payload)
 				end)
 				pending = false
 				if not destroyed then
@@ -396,6 +426,21 @@ trackConnection(stateRemote.OnClientEvent, function(payload)
 	currentState = payload
 	scheduleRender()
 end)
+
+if crewActionResultEvent then
+	trackConnection(crewActionResultEvent.OnClientEvent, function(response)
+		if pendingCrewActionRequestId ~= nil
+			and typeof(response) == "table"
+			and tostring(response.RequestId or "") ~= pendingCrewActionRequestId
+		then
+			return
+		end
+
+		pendingCrewActionRequestId = nil
+		pending = false
+		scheduleRender()
+	end)
+end
 
 local function bindCharacter(character)
 	disconnectCharacter()

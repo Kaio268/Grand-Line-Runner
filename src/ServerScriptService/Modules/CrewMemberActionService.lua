@@ -9,14 +9,25 @@ local PopUpModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 local CrewInventoryDerivedCache = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInventoryDerivedCache"))
 local CrewInstanceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewInstanceService"))
 local CrewQuickSlotService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewQuickSlotService"))
+local GTRActionDiagnostics = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GTRActionDiagnostics"))
+local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 
 local CrewMemberActionService = {}
 
 local ACTION_REMOTE_NAME = "CrewMemberActionRequest"
+local ACTION_EVENT_NAME = "CrewMemberActionSubmit"
+local ACTION_RESULT_EVENT_NAME = "CrewMemberActionResult"
 local CHANGED_REMOTE_NAME = "CrewMemberInventoryChanged"
 local SELL_TIME_SECONDS = 15
+local FINAL_MINUTE_LOCKED_ACTIONS = {
+	Equip = "equipping crewmates",
+	HoldEquipped = "holding crewmates",
+	Sell = "selling crewmates",
+	ToggleHoldEquipped = "holding crewmates",
+	Unequip = "unequipping crewmates",
+}
 
 local initialized = false
 local sliceServiceCache = nil
@@ -37,6 +48,8 @@ local function getOrCreateRemote(parent, remoteName, className)
 end
 
 local actionRemote = getOrCreateRemote(ReplicatedStorage, ACTION_REMOTE_NAME, "RemoteFunction")
+local actionEvent = getOrCreateRemote(ReplicatedStorage, ACTION_EVENT_NAME, "RemoteEvent")
+local actionResultEvent = getOrCreateRemote(ReplicatedStorage, ACTION_RESULT_EVENT_NAME, "RemoteEvent")
 local changedRemote = getOrCreateRemote(ReplicatedStorage, CHANGED_REMOTE_NAME, "RemoteEvent")
 
 local function getSliceService()
@@ -415,6 +428,16 @@ function CrewMemberActionService.HandleAction(player, payload)
 
 	payload = normalizePayload(payload)
 	local action = tostring(payload.Action or payload.Type or "")
+	local lockActionName = FINAL_MINUTE_LOCKED_ACTIONS[action]
+	if lockActionName ~= nil then
+		local blocked, message = ServerRestartService.RejectIfFinalMinuteLocked(player, lockActionName)
+		if blocked then
+			return result(false, "server_restart_final_minute", {
+				Message = message,
+			})
+		end
+	end
+
 	if action == "Equip" then
 		return equip(player, payload)
 	elseif action == "Unequip" then
@@ -439,8 +462,51 @@ function CrewMemberActionService.Start()
 	initialized = true
 
 	actionRemote.OnServerInvoke = function(player, payload)
-		return CrewMemberActionService.HandleAction(player, payload)
+		local action = if typeof(payload) == "table" then tostring(payload.Action or payload.Type or "") else "invalid"
+		local trace = GTRActionDiagnostics.Start("CrewMemberAction." .. action, player, {
+			Target = action,
+		})
+		local response = CrewMemberActionService.HandleAction(player, payload)
+		trace:finish(if typeof(response) == "table" and response.Ok == true then "ok" else "failed", {
+			Target = action,
+			Reason = if typeof(response) == "table" then response.Reason else "invalid_response",
+		})
+		return response
 	end
+
+	actionEvent.OnServerEvent:Connect(function(player, payload)
+		task.defer(function()
+			local action = if typeof(payload) == "table" then tostring(payload.Action or payload.Type or "") else "invalid"
+			local requestId = if typeof(payload) == "table" then tostring(payload.RequestId or "") else ""
+			local trace = GTRActionDiagnostics.Start("CrewMemberAction." .. action, player, {
+				Target = action,
+				RequestId = requestId,
+			})
+			local ok, response = xpcall(function()
+				return CrewMemberActionService.HandleAction(player, payload)
+			end, debug.traceback)
+			if ok ~= true then
+				warn(string.format(
+					"[CrewMemberActionService] async action failed player=%s action=%s error=%s",
+					player and player.Name or "unknown",
+					action,
+					tostring(response)
+				))
+				response = result(false, "server_error")
+			end
+			if typeof(response) == "table" then
+				response.RequestId = requestId
+			end
+			trace:finish(if typeof(response) == "table" and response.Ok == true then "ok" else "failed", {
+				Target = action,
+				RequestId = requestId,
+				Reason = if typeof(response) == "table" then response.Reason else "invalid_response",
+			})
+			if player and player.Parent == Players then
+				actionResultEvent:FireClient(player, response)
+			end
+		end)
+	end)
 end
 
 return CrewMemberActionService

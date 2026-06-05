@@ -14,7 +14,28 @@ local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local config = if typeof(EconomyConfig.AFKTeleport) == "table" then EconomyConfig.AFKTeleport else {}
 local remoteConfig = if typeof(config.Remotes) == "table" then config.Remotes else {}
 local rewardConfig = if typeof(config.Rewards) == "table" then config.Rewards else {}
-local AFK_PLACE_ID = math.max(0, math.floor(tonumber(config.AFKPlaceId) or 0))
+
+local function getPlaceId(value)
+	return math.max(0, math.floor(tonumber(value) or 0))
+end
+
+local function getLocalAfkPlaceId()
+	local placePairsByEnvironment = config.PlacePairsByEnvironment
+	if typeof(placePairsByEnvironment) == "table" then
+		for _, placePair in pairs(placePairsByEnvironment) do
+			if typeof(placePair) == "table" then
+				local afkPlaceId = getPlaceId(placePair.AFKPlaceId)
+				if afkPlaceId > 0 and game.PlaceId == afkPlaceId then
+					return afkPlaceId
+				end
+			end
+		end
+	end
+
+	return getPlaceId(config.AFKPlaceId)
+end
+
+local AFK_PLACE_ID = getLocalAfkPlaceId()
 local IS_LOCAL_AFK_PLACE = AFK_PLACE_ID > 0 and game.PlaceId == AFK_PLACE_ID
 
 local STATE_EVENT_NAME = tostring(remoteConfig.StateEventName or "AFKTeleportState")

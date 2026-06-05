@@ -2333,15 +2333,21 @@ end)
 
 local rrIndex = 0
 local lastReconcileAt = 0
+local SPAWN_LOOP_FRAME_BUDGET_SECONDS = 0.006
 
 while true do
 	local positions = getPlayerPositions()
 	local now = os.clock()
+	local sliceStartedAt = os.clock()
 	local shouldReconcile = (now - lastReconcileAt) >= RECONCILE_INTERVAL
 	if shouldReconcile then
 		lastReconcileAt = now
 		for i = 1, #partDataList do
 			reconcileSpawnData(partDataList[i], "periodic_audit")
+			if os.clock() - sliceStartedAt >= SPAWN_LOOP_FRAME_BUDGET_SECONDS then
+				task.wait()
+				sliceStartedAt = os.clock()
+			end
 		end
 	end
 
@@ -2377,6 +2383,10 @@ while true do
 				end
 			end
 		end
+		if os.clock() - sliceStartedAt >= SPAWN_LOOP_FRAME_BUDGET_SECONDS then
+			task.wait()
+			sliceStartedAt = os.clock()
+		end
 	end
 
 
@@ -2406,6 +2416,10 @@ while true do
 						end
 					end
 				end
+			end
+			if os.clock() - sliceStartedAt >= SPAWN_LOOP_FRAME_BUDGET_SECONDS then
+				task.wait()
+				sliceStartedAt = os.clock()
 			end
 		end
 	end

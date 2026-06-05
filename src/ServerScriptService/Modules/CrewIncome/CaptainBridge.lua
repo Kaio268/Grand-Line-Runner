@@ -18,6 +18,8 @@ function Module.Install(ctx)
 		GetRewardMultiplierMetadata = ctx.getRewardMultiplierMetadata,
 		GetTitleBeliMultiplier = ctx.getTitleBeliMultiplier,
 		LogCrewSwitchFailure = ctx.logCrewSwitchFailure,
+		EnqueueVisualRestore = ctx.enqueueCrewVisualRestore,
+		PublishPlacedCrewState = ctx.publishPlacedCrewState,
 		RefreshNormalIncomeDisplays = ctx.refreshPlayerIncomeDisplays,
 		ResolveDisplayName = ctx.resolveStandStatusDisplayName,
 		SpawnCrewMember = ctx.spawnStandCrewMember,

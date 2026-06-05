@@ -38,9 +38,52 @@ function Module.Install(ctx)
 	local getCrewMemberLevel
 	local getPlayerStandCrewMemberInstanceId
 	local getPlayerStandCrewMemberName
+	local getRawBankIncomePerSecond
+	local getRawBankIncomePerSecondReadOnly
 
 	local function resolveCanonicalCrewMemberId(...)
 		return ctx.resolveCanonicalCrewMemberId(...)
+	end
+
+	local function getRegisteredStandModel(player, standName)
+		local stands = ctx.playerStandList and ctx.playerStandList[player]
+		if typeof(stands) ~= "table" then
+			return nil
+		end
+
+		standName = tostring(standName or "")
+		for _, standModel in ipairs(stands) do
+			if
+				typeof(standModel) == "Instance"
+				and standModel:IsA("Model")
+				and standModel.Parent ~= nil
+				and standModel.Name == standName
+			then
+				return standModel
+			end
+		end
+
+		return nil
+	end
+
+	local function publishStandStateForName(player, standName, options)
+		if typeof(ctx.publishPlacedCrewState) ~= "function" then
+			return false, "publish_unavailable"
+		end
+
+		local standModel = getRegisteredStandModel(player, standName)
+		if not standModel then
+			return false, "stand_model_unavailable"
+		end
+
+		local crewMemberName = if typeof(getPlayerStandCrewMemberName) == "function"
+			then getPlayerStandCrewMemberName(player, standName)
+			else ""
+		if crewMemberName == "" then
+			return false, "missing_crew_member"
+		end
+
+		return ctx.publishPlacedCrewState(player, standModel, crewMemberName, options)
 	end
 
 	local function getCrewStorage()
@@ -546,14 +589,90 @@ function Module.Install(ctx)
 		return tostring(ensuredInstanceId or "")
 	end
 
+	local function getPlayerStandCrewMemberInstanceIdReadOnly(player, standName, inventoryOverride)
+		standName = tostring(standName or "")
+		if standName == "" then
+			return ""
+		end
+
+		local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
+		if typeof(standData) ~= "table" or tostring(standData.CrewMemberName or "") == "" then
+			return ""
+		end
+
+		if typeof(CrewInstanceService.GetStandInstanceIdReadOnly) == "function" then
+			return tostring(CrewInstanceService.GetStandInstanceIdReadOnly(player, standName, inventoryOverride) or "")
+		end
+
+		return ""
+	end
+
 	local function getPlayerStandIncome(player, standName)
 		dmEnsureStandFolder(player, standName)
 		local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
-		local v = standData and standData.IncomeToCollect
-		if typeof(v) ~= "number" then
-			return 0
+		local baseIncome = tonumber(standData and standData.IncomeToCollect) or 0
+		local crewMemberName = tostring(standData and standData.CrewMemberName or "")
+		if crewMemberName == "" then
+			return math.max(0, baseIncome)
 		end
-		return v
+
+		local lastAccruedAtUnix = math.max(0, math.floor(tonumber(standData.LastAccruedAtUnix) or 0))
+		if lastAccruedAtUnix <= 0 then
+			return math.max(0, baseIncome)
+		end
+
+		local elapsed = math.max(0, os.time() - lastAccruedAtUnix)
+		if elapsed <= 0 then
+			return math.max(0, baseIncome)
+		end
+
+		local crewMemberInstanceId = tostring(standData.CrewMemberInstanceId or "")
+		local rawIncomePerSecond = getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId)
+			* getBeliBoostMultiplier(player)
+		return math.max(0, baseIncome + (rawIncomePerSecond * elapsed))
+	end
+
+	local function getPlayerStandIncomeReadOnly(player, standName, inventoryOverride)
+		local standData = CrewStandIncomeAuthority.GetStandData(player, standName)
+		local baseIncome = tonumber(standData and standData.IncomeToCollect) or 0
+		local crewMemberName = tostring(standData and standData.CrewMemberName or "")
+		if crewMemberName == "" then
+			return math.max(0, baseIncome)
+		end
+
+		local lastAccruedAtUnix = math.max(0, math.floor(tonumber(standData.LastAccruedAtUnix) or 0))
+		if lastAccruedAtUnix <= 0 then
+			return math.max(0, baseIncome)
+		end
+
+		local elapsed = math.max(0, os.time() - lastAccruedAtUnix)
+		if elapsed <= 0 then
+			return math.max(0, baseIncome)
+		end
+
+		local crewMemberInstanceId = getPlayerStandCrewMemberInstanceIdReadOnly(player, standName, inventoryOverride)
+		local rawIncomePerSecond = getRawBankIncomePerSecondReadOnly(player, crewMemberName, crewMemberInstanceId, inventoryOverride)
+			* getBeliBoostMultiplier(player)
+		return math.max(0, baseIncome + (rawIncomePerSecond * elapsed))
+	end
+
+	local function materializeStandIncome(player, standName, sourcePath)
+		local accruedIncome = getPlayerStandIncome(player, standName)
+		local ok, reason = CrewStandIncomeAuthority.MaterializeIncomeToCollect(
+			player,
+			standName,
+			accruedIncome,
+			os.time(),
+			sourcePath or "income_materialize"
+		)
+		if ok == true then
+			publishStandStateForName(player, standName, {
+				Reason = sourcePath or "income_materialize",
+				RefreshIncomeTimestamp = true,
+				RefreshUpdatedTimestamp = true,
+			})
+		end
+		return ok, reason
 	end
 
 	getCrewMemberLevel = function(player, crewMemberName)
@@ -580,8 +699,27 @@ function Module.Install(ctx)
 		return base
 	end
 
-	local function getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId)
+	local function getBaseIncomeReadOnly(player, crewMemberName, crewMemberInstanceId, inventoryOverride)
+		crewMemberInstanceId = tostring(crewMemberInstanceId or "")
+		if crewMemberInstanceId ~= "" and typeof(CrewInstanceService.GetInstanceReadOnly) == "function" then
+			local _, instanceData = CrewInstanceService.GetInstanceReadOnly(player, crewMemberInstanceId, inventoryOverride)
+			local rawIncome = CrewIncomeBalance.GetRawBankIncomePerSecond(instanceData)
+			if rawIncome > 0 then
+				return rawIncome
+			end
+		end
+
+		local resolved = resolveCrewMemberRecord(player, crewMemberName)
+		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
+		return info and (tonumber(info.Income) or 0) or 0
+	end
+
+	getRawBankIncomePerSecond = function(player, crewMemberName, crewMemberInstanceId)
 		return getBaseIncome(player, crewMemberName, crewMemberInstanceId)
+	end
+
+	getRawBankIncomePerSecondReadOnly = function(player, crewMemberName, crewMemberInstanceId, inventoryOverride)
+		return getBaseIncomeReadOnly(player, crewMemberName, crewMemberInstanceId, inventoryOverride)
 	end
 
 	local function getIncomeWithLevel(player, crewMemberName, crewMemberInstanceId)
@@ -618,6 +756,21 @@ function Module.Install(ctx)
 		return display
 	end
 
+	local function getStandIncomeDisplayReadOnly(player, standName, inventoryOverride)
+		local base = getPlayerStandIncomeReadOnly(player, standName, inventoryOverride)
+		if base <= 0 then
+			return 0
+		end
+
+		local summary = IncomeClaimMath.BuildClaimSummary(
+			base,
+			getStandCollectMultiplier(player, standName),
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
+		)
+		return math.max(0, tonumber(summary.FinalAmount) or 0)
+	end
+
 	local function buildStandClaimSummary(player, standName)
 		return IncomeClaimMath.BuildClaimSummary(
 			getPlayerStandIncome(player, standName),
@@ -638,8 +791,24 @@ function Module.Install(ctx)
 		)
 	end
 
+	local function buildStandIncomeRateSummaryReadOnly(player, standName, crewMemberName, inventoryOverride)
+		local crewMemberInstanceId = getPlayerStandCrewMemberInstanceIdReadOnly(player, standName, inventoryOverride)
+		return IncomeClaimMath.BuildRateSummary(
+			getRawBankIncomePerSecondReadOnly(player, crewMemberName, crewMemberInstanceId, inventoryOverride),
+			getBeliBoostMultiplier(player),
+			getStandCollectMultiplier(player, standName),
+			getRewardBeliMultiplier(player),
+			getRewardMultiplierMetadata(player)
+		)
+	end
+
 	local function getStandIncomePerSecond(player, standName, crewMemberName)
 		local summary = buildStandIncomeRateSummary(player, standName, crewMemberName)
+		return math.max(0, tonumber(summary.FinalAmount) or 0)
+	end
+
+	local function getStandIncomePerSecondReadOnly(player, standName, crewMemberName, inventoryOverride)
+		local summary = buildStandIncomeRateSummaryReadOnly(player, standName, crewMemberName, inventoryOverride)
 		return math.max(0, tonumber(summary.FinalAmount) or 0)
 	end
 
@@ -661,19 +830,34 @@ function Module.Install(ctx)
 		return tostring(numeric)
 	end
 
-	local function updateStandHover(player, standModel, crewMemberName)
+	local function updateStandHover(player, standModel, crewMemberName, options)
 		local placed = standModel:FindFirstChild("PlacedCrewMember")
 		if placed and placed:IsA("Model") then
 			syncPlacedOverheadMetadata(player, standModel, crewMemberName, placed)
+		end
+		if typeof(ctx.publishPlacedCrewState) == "function" and tostring(crewMemberName or "") ~= "" then
+			ctx.publishPlacedCrewState(player, standModel, crewMemberName, options)
 		end
 	end
 
 	local function setStandLevel(player, standName, level)
 		local safeLevel = CrewIncomeBalance.NormalizeLevel(level)
 		if CrewStandIncomeAuthority.GetStandLevel(player, standName) ~= safeLevel then
-			CrewStandIncomeAuthority.SetStandLevel(player, standName, safeLevel, "stand_level_sync")
+			local changed = CrewStandIncomeAuthority.SetStandLevel(player, standName, safeLevel, "stand_level_sync")
+			if changed == true then
+				local crewMemberName = getPlayerStandCrewMemberName(player, standName)
+				local standModel = getRegisteredStandModel(player, standName)
+				if crewMemberName ~= "" and standModel then
+					updateStandHover(player, standModel, crewMemberName, {
+						Reason = "stand_level_changed",
+						RefreshIncomeTimestamp = true,
+						RefreshUpdatedTimestamp = true,
+					})
+				end
+			end
+			return safeLevel, changed == true
 		end
-		return safeLevel
+		return safeLevel, false
 	end
 
 	local function syncStandLevelFromCrewMember(player, standName, crewMemberName)
@@ -705,16 +889,21 @@ function Module.Install(ctx)
 	ctx.getIncomeWithLevel = getIncomeWithLevel
 	ctx.getInventoryQuantity = getInventoryQuantity
 	ctx.getRawBankIncomePerSecond = getRawBankIncomePerSecond
+	ctx.getRawBankIncomePerSecondReadOnly = getRawBankIncomePerSecondReadOnly
 	ctx.getPickupDebugField = getPickupDebugField
 	ctx.getPickupStandSnapshot = getPickupStandSnapshot
 	ctx.getPlayerShipUpgradeLevel = getPlayerShipUpgradeLevel
 	ctx.getPlayerStandCrewMemberInstanceId = getPlayerStandCrewMemberInstanceId
+	ctx.getPlayerStandCrewMemberInstanceIdReadOnly = getPlayerStandCrewMemberInstanceIdReadOnly
 	ctx.getPlayerStandCrewMemberName = getPlayerStandCrewMemberName
 	ctx.getPlayerStandIncome = getPlayerStandIncome
+	ctx.getPlayerStandIncomeReadOnly = getPlayerStandIncomeReadOnly
 	ctx.getShipSlotsTable = getShipSlotsTable
 	ctx.getStandClaimSummary = buildStandClaimSummary
 	ctx.getStandIncomeDisplay = getStandIncomeDisplay
+	ctx.getStandIncomeDisplayReadOnly = getStandIncomeDisplayReadOnly
 	ctx.getStandIncomePerSecond = getStandIncomePerSecond
+	ctx.getStandIncomePerSecondReadOnly = getStandIncomePerSecondReadOnly
 	ctx.getStandCollectMultiplier = getStandCollectMultiplier
 	ctx.getStandSlotState = getStandSlotState
 	ctx.getToolCrewMemberInstanceId = getToolCrewMemberInstanceId
@@ -728,6 +917,7 @@ function Module.Install(ctx)
 	ctx.refreshCollectedIncomeShadow = refreshCollectedIncomeShadow
 	ctx.refreshCrewMemberShadow = refreshCrewMemberShadow
 	ctx.resetHugeIncomeOnJoin = resetHugeIncomeOnJoin
+	ctx.materializeStandIncome = materializeStandIncome
 	ctx.setStandLevel = setStandLevel
 	ctx.syncShipSlotAssignment = syncShipSlotAssignment
 	ctx.syncStandLevelFromCrewMember = syncStandLevelFromCrewMember

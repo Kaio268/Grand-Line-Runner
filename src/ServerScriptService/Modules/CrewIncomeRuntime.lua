@@ -13,6 +13,7 @@ local installers = {
 	require(CrewIncomeFolder:WaitForChild("StandState")),
 	require(CrewIncomeFolder:WaitForChild("SlotRuntimeCache")),
 	require(CrewIncomeFolder:WaitForChild("VisualRuntime")),
+	require(CrewIncomeFolder:WaitForChild("VisualRestoreQueue")),
 	require(CrewIncomeFolder:WaitForChild("DisplayRuntime")),
 	require(CrewIncomeFolder:WaitForChild("ClaimRuntime")),
 	require(CrewIncomeFolder:WaitForChild("PromptRuntime")),
@@ -72,6 +73,71 @@ function CrewIncomeRuntime.RefreshPlayer(player, source)
 	end
 
 	return true, nil
+end
+
+function CrewIncomeRuntime.RefreshStand(player, standName, source)
+	CrewIncomeRuntime.Start()
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent ~= Players then
+		return false, "invalid_player"
+	end
+	if typeof(activeContext) ~= "table" then
+		return false, "context_unavailable"
+	end
+
+	standName = tostring(standName or "")
+	if standName == "" then
+		return false, "invalid_stand"
+	end
+
+	local ok, err = pcall(function()
+		if typeof(activeContext.enqueueStandIncomeDisplayRefresh) == "function" then
+			local queued, queueReason =
+				activeContext.enqueueStandIncomeDisplayRefresh(player, standName, source or "single_stand_refresh")
+			if queued == false then
+				error(tostring(queueReason or "single_stand_refresh_queue_failed"))
+			end
+			return
+		end
+
+		if typeof(activeContext.refreshStandIncomeDisplay) == "function" then
+			local refreshOk, refreshReason =
+				activeContext.refreshStandIncomeDisplay(player, standName, source or "single_stand_refresh")
+			if refreshOk == false then
+				error(tostring(refreshReason or "single_stand_refresh_failed"))
+			end
+		end
+	end)
+	if not ok then
+		return false, tostring(err)
+	end
+
+	return true, nil
+end
+
+function CrewIncomeRuntime.FlushPlayerAccruals(player, source)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+	if typeof(activeContext) ~= "table" or typeof(activeContext.flushPlayerStandIncome) ~= "function" then
+		return true, "runtime_inactive"
+	end
+
+	local standOk, standResult = activeContext.flushPlayerStandIncome(player, source or "crew_income_runtime_flush")
+	local captainOk, captainResult = true, nil
+	if
+		activeContext.CaptainSlotRuntime
+		and typeof(activeContext.CaptainSlotRuntime.FlushPlayerAccrual) == "function"
+	then
+		captainOk, captainResult = activeContext.CaptainSlotRuntime.FlushPlayerAccrual(player)
+	end
+	if standOk ~= true then
+		return false, standResult
+	end
+	if captainOk ~= true then
+		return false, captainResult
+	end
+
+	return true, standResult
 end
 
 return CrewIncomeRuntime

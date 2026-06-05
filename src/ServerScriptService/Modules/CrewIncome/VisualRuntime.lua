@@ -6,8 +6,7 @@ function Module.Install(ctx)
 	local CrewOverhead = ctx.CrewOverhead
 	local CrewCatalog = ctx.CrewCatalog
 	local CrewProtectionService = ctx.CrewProtectionService
-	local CrewAuraVisuals = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("CrewAuraVisuals"))
-	local CrewIdleAnimator = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("CrewIdleAnimator"))
+	local PlacedCrewState = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 	local function findCrewMemberInfoByName(...)
 		return ctx.findCrewMemberInfoByName(...)
 	end
@@ -58,56 +57,6 @@ function Module.Install(ctx)
 	local function standDebug(...)
 		return ctx.standDebug(...)
 	end
-	local function ensurePrimaryPart(model)
-		if model.PrimaryPart and model.PrimaryPart:IsA("BasePart") then
-			return model.PrimaryPart
-		end
-		local pp = model:FindFirstChildWhichIsA("BasePart", true)
-		if pp then
-			pcall(function()
-				model.PrimaryPart = pp
-			end)
-		end
-		return model.PrimaryPart or pp
-	end
-
-	local function anchorModel(model)
-		for _, d in ipairs(model:GetDescendants()) do
-			if d:IsA("BasePart") then
-				d.Anchored = true
-				d.AssemblyLinearVelocity = Vector3.zero
-				d.AssemblyAngularVelocity = Vector3.zero
-			end
-		end
-	end
-
-	local function makeStandVisualNonBlocking(model)
-		for _, d in ipairs(model:GetDescendants()) do
-			if d:IsA("BasePart") then
-				d.CanQuery = false
-				d.CanCollide = false
-			end
-		end
-	end
-
-	local function tryPlayIdle(model, crewMemberId, info)
-		CrewIdleAnimator.Start(model, {
-			CrewMemberId = crewMemberId,
-			Gender = info and info.Gender,
-			Info = info,
-			Source = "StandVisual",
-		})
-	end
-
-	local function refreshVariantAura(model, resolved, crewMemberName, info)
-		CrewAuraVisuals.Refresh(model, {
-			CrewMemberId = resolved and resolved.CanonicalName or crewMemberName,
-			Variant = resolved and resolved.VariantKey,
-			Info = info,
-			Source = "StandVisual",
-		})
-	end
-
 	local function removeLegacyCrewHover(model)
 		for _, descendant in ipairs(model:GetDescendants()) do
 			if descendant.Name == "CrewMemberHover" and descendant:IsA("BillboardGui") then
@@ -117,7 +66,7 @@ function Module.Install(ctx)
 	end
 
 	local function syncPlacedOverheadMetadata(player, standModel, crewMemberName, placedModel)
-		if not placedModel or not placedModel:IsA("Model") then
+		if typeof(placedModel) ~= "Instance" then
 			return
 		end
 
@@ -147,7 +96,20 @@ function Module.Install(ctx)
 
 		local displayRarity = rawRarity
 		local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standModel.Name)
-		local crewMemberInstanceId = tostring(getPlayerStandCrewMemberInstanceId(player, standModel.Name) or "")
+		local crewMemberInstanceId = if isCaptainSlot
+			then ""
+			else tostring(getPlayerStandCrewMemberInstanceId(player, standModel.Name) or "")
+		if isCaptainSlot and typeof(CaptainSlotRuntime.GetAssignment) == "function" then
+			local assignment = CaptainSlotRuntime.GetAssignment(player)
+			if typeof(assignment) == "table" then
+				crewMemberInstanceId = tostring(
+					assignment.CrewMemberInstanceId
+						or assignment.InstanceId
+						or assignment.CrewInstanceId
+						or crewMemberInstanceId
+				)
+			end
+		end
 		local incomePerSecond = if isCaptainSlot
 			then CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 			else getStandIncomePerSecond(player, standModel.Name, canonicalName)
@@ -183,6 +145,7 @@ function Module.Install(ctx)
 		if
 			CrewProtectionService
 			and typeof(CrewProtectionService.ApplyPlacedProtectionAttributes) == "function"
+			and placedModel:IsA("Model")
 		then
 			CrewProtectionService.ApplyPlacedProtectionAttributes(
 				player,
@@ -193,7 +156,250 @@ function Module.Install(ctx)
 			)
 		end
 		removeLegacyCrewHover(placedModel)
-		CollectionService:AddTag(placedModel, CrewOverhead.Tag)
+		if placedModel:IsA("Model") and not CollectionService:HasTag(placedModel, CrewOverhead.Tag) then
+			CollectionService:AddTag(placedModel, CrewOverhead.Tag)
+		end
+	end
+
+	local function getPlacedProtectionState(player, instanceId, isPlaced)
+		if
+			CrewProtectionService
+			and typeof(CrewProtectionService.ResolveProtectionDisplayState) == "function"
+		then
+			local state = CrewProtectionService.ResolveProtectionDisplayState(player, instanceId, isPlaced == true, ctx.DataManager)
+			if typeof(state) == "table" then
+				return state
+			end
+		end
+
+		return {
+			Type = "none",
+			Label = "",
+			Detail = "",
+		}
+	end
+
+	local timestampAttributes = {
+		[PlacedCrewState.Attribute.IncomeUpdatedAtUnix] = true,
+		[PlacedCrewState.Attribute.UpdatedAtUnix] = true,
+	}
+
+	local function hasAttributeChanges(instance, attributes)
+		if typeof(instance) ~= "Instance" or typeof(attributes) ~= "table" then
+			return false
+		end
+
+		for attributeName, value in pairs(attributes) do
+			if timestampAttributes[attributeName] ~= true and instance:GetAttribute(attributeName) ~= value then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	local function buildPlacedCrewStateAttributes(player, standModel, crewMemberName)
+		local resolved = resolveCrewMemberRecord(player, crewMemberName)
+		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
+		local canonicalName = resolved and resolved.CanonicalName or tostring(crewMemberName)
+		local rawName = info and tostring(info.Name or info.DisplayName or canonicalName) or tostring(crewMemberName)
+		local displayInfo = if CrewCatalog and typeof(CrewCatalog.GetDisplayInfo) == "function"
+			then CrewCatalog.GetDisplayInfo(canonicalName, {
+				DisplayName = rawName,
+				Variant = resolved and resolved.VariantKey,
+			})
+			else nil
+		local variantKey = tostring((displayInfo and displayInfo.Variant) or (resolved and resolved.VariantKey) or "Normal")
+		local displayName = tostring((displayInfo and displayInfo.DisplayName) or rawName)
+		local helperDisplayName = resolveStandStatusDisplayName(player, crewMemberName)
+		if helperDisplayName ~= "" then
+			local helperDisplayInfo = if CrewCatalog and typeof(CrewCatalog.GetDisplayInfo) == "function"
+				then CrewCatalog.GetDisplayInfo(canonicalName, {
+					DisplayName = helperDisplayName,
+					Variant = variantKey,
+				})
+				else nil
+			displayName = tostring((helperDisplayInfo and helperDisplayInfo.DisplayName) or helperDisplayName)
+		end
+
+		local standName = tostring(standModel and standModel.Name or "")
+		local isCaptainSlot = ShipSlotService.IsCaptainSlotName(standName)
+		local crewMemberInstanceId = if isCaptainSlot
+			then ""
+			else tostring(getPlayerStandCrewMemberInstanceId(player, standName) or "")
+		if isCaptainSlot and typeof(CaptainSlotRuntime.GetAssignment) == "function" then
+			local assignment = CaptainSlotRuntime.GetAssignment(player)
+			if typeof(assignment) == "table" then
+				crewMemberInstanceId = tostring(
+					assignment.CrewMemberInstanceId
+						or assignment.InstanceId
+						or assignment.CrewInstanceId
+						or crewMemberInstanceId
+				)
+			end
+		end
+		local slotState = if isCaptainSlot then nil else getStandSlotState(player, standName)
+		local slotBonusInfo = slotState and slotState.BonusInfo or nil
+		local incomePerSecond = if isCaptainSlot
+			then CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
+			else getStandIncomePerSecond(player, standName, canonicalName)
+		local rawIncomePerSecond = 0
+		local rawIncomeToCollect = 0
+		local claimReadyAmount = 0
+		if isCaptainSlot then
+			if typeof(CaptainSlotRuntime.GetCaptainRawIncomePerSecond) == "function" then
+				rawIncomePerSecond = CaptainSlotRuntime.GetCaptainRawIncomePerSecond(player)
+			end
+			if typeof(CaptainSlotRuntime.GetCaptainRawIncomeToCollect) == "function" then
+				rawIncomeToCollect = CaptainSlotRuntime.GetCaptainRawIncomeToCollect(player)
+			end
+			if typeof(CaptainSlotRuntime.GetCaptainIncomeToCollect) == "function" then
+				claimReadyAmount = CaptainSlotRuntime.GetCaptainIncomeToCollect(player)
+			end
+		else
+			if typeof(ctx.getRawBankIncomePerSecond) == "function" then
+				rawIncomePerSecond = ctx.getRawBankIncomePerSecond(player, canonicalName, crewMemberInstanceId)
+					* (if typeof(ctx.getBeliBoostMultiplier) == "function" then ctx.getBeliBoostMultiplier(player) else 1)
+			end
+			if typeof(ctx.getPlayerStandIncome) == "function" then
+				rawIncomeToCollect = ctx.getPlayerStandIncome(player, standName)
+			end
+			if typeof(ctx.getStandClaimSummary) == "function" then
+				local claimSummary = ctx.getStandClaimSummary(player, standName)
+				claimReadyAmount = math.max(0, tonumber(claimSummary and claimSummary.FinalAmount) or 0)
+			end
+		end
+
+		local protectionState = getPlacedProtectionState(player, crewMemberInstanceId, true)
+		local generation = if ctx.ShipRuntimeService and typeof(ctx.ShipRuntimeService.GetCrewVisualGeneration) == "function"
+			then ctx.ShipRuntimeService.GetCrewVisualGeneration(player)
+			else 0
+		local slotKey = if isCaptainSlot
+			then tostring(ctx.CAPTAIN_SLOT_KEY or "Captain")
+			else tostring(ShipSlotService.NormalizeSlotNumber(standName) or standName)
+		return {
+			Placed = {
+				[PlacedCrewState.Attribute.Active] = true,
+				[PlacedCrewState.Attribute.OwnerUserId] = player and player.UserId or 0,
+				[PlacedCrewState.Attribute.SlotKey] = slotKey,
+				[PlacedCrewState.Attribute.IsCaptain] = isCaptainSlot,
+				[PlacedCrewState.Attribute.CrewMemberName] = tostring(crewMemberName or ""),
+				[PlacedCrewState.Attribute.CanonicalName] = canonicalName,
+				[PlacedCrewState.Attribute.BaseName] = tostring(resolved and resolved.BaseName or canonicalName),
+				[PlacedCrewState.Attribute.CrewMemberInstanceId] = if crewMemberInstanceId ~= "" then crewMemberInstanceId else nil,
+				[PlacedCrewState.Attribute.DisplayName] = displayName,
+				[PlacedCrewState.Attribute.Rarity] = if tostring(info and info.Rarity or "") ~= "" then tostring(info.Rarity) else "Common",
+				[PlacedCrewState.Attribute.Variant] = variantKey,
+				[PlacedCrewState.Attribute.IncomePerSecond] = math.max(0, incomePerSecond),
+				[PlacedCrewState.Attribute.RawIncomePerSecond] = math.max(0, rawIncomePerSecond),
+				[PlacedCrewState.Attribute.RawIncomeToCollect] = math.max(0, rawIncomeToCollect),
+				[PlacedCrewState.Attribute.ClaimReadyAmount] = math.max(0, claimReadyAmount),
+				[PlacedCrewState.Attribute.ClaimIncomePerSecond] = math.max(0, incomePerSecond),
+				[PlacedCrewState.Attribute.BeliBoosted] = if isCaptainSlot
+					then CaptainSlotRuntime.IsCaptainIncomeBoosted(player)
+					else isStandIncomeBoosted(player, standName, canonicalName),
+				[PlacedCrewState.Attribute.SlotBonusLabel] = if slotBonusInfo then tostring(slotBonusInfo.Label or "Bonus") else nil,
+				[PlacedCrewState.Attribute.SlotBonusPercent] = if slotBonusInfo then math.max(0, slotState.BonusPercent or 0) else nil,
+				[PlacedCrewState.Attribute.ProtectionType] = tostring(protectionState.Type or "none"),
+				[PlacedCrewState.Attribute.ProtectionLabel] = tostring(protectionState.Label or ""),
+				[PlacedCrewState.Attribute.ProtectionDetail] = tostring(protectionState.Detail or ""),
+				[PlacedCrewState.Attribute.VisualGeneration] = generation,
+			},
+			Overhead = {
+				[OVERHEAD_ATTRIBUTES.Kind] = CrewOverhead.Kind.Placed,
+				[OVERHEAD_ATTRIBUTES.DisplayName] = displayName,
+				[OVERHEAD_ATTRIBUTES.Rarity] = if tostring(info and info.Rarity or "") ~= "" then tostring(info.Rarity) else "Common",
+				[OVERHEAD_ATTRIBUTES.Variant] = variantKey,
+				[OVERHEAD_ATTRIBUTES.IncomePerSecond] = math.max(0, incomePerSecond),
+				[OVERHEAD_ATTRIBUTES.BeliBoosted] = if isCaptainSlot
+					then CaptainSlotRuntime.IsCaptainIncomeBoosted(player)
+					else isStandIncomeBoosted(player, standName, canonicalName),
+				[OVERHEAD_ATTRIBUTES.SlotBonusLabel] = if slotBonusInfo then tostring(slotBonusInfo.Label or "Bonus") else nil,
+				[OVERHEAD_ATTRIBUTES.SlotBonusPercent] = if slotBonusInfo then math.max(0, slotState.BonusPercent or 0) else nil,
+				[OVERHEAD_ATTRIBUTES.InstanceId] = if crewMemberInstanceId ~= "" then crewMemberInstanceId else nil,
+				[OVERHEAD_ATTRIBUTES.ProtectionType] = tostring(protectionState.Type or "none"),
+				[OVERHEAD_ATTRIBUTES.ProtectionLabel] = tostring(protectionState.Label or ""),
+				[OVERHEAD_ATTRIBUTES.ProtectionDetail] = tostring(protectionState.Detail or ""),
+				[OVERHEAD_ATTRIBUTES.ExpiresAt] = nil,
+				[OVERHEAD_ATTRIBUTES.DespawnSeconds] = nil,
+			},
+		}
+	end
+
+	local function publishPlacedCrewState(player, standModel, crewMemberName, options)
+		if typeof(standModel) ~= "Instance" or not standModel:IsA("Model") then
+			return false, "invalid_stand"
+		end
+		if tostring(crewMemberName or "") == "" then
+			return false, "missing_crew_member"
+		end
+
+		options = if typeof(options) == "table" then options else {}
+		local attributes = buildPlacedCrewStateAttributes(player, standModel, crewMemberName)
+		local semanticChanged = hasAttributeChanges(standModel, attributes.Placed)
+			or hasAttributeChanges(standModel, attributes.Overhead)
+		local now = os.time()
+		if options.RefreshIncomeTimestamp == true then
+			attributes.Placed[PlacedCrewState.Attribute.IncomeUpdatedAtUnix] = now
+		end
+		if options.RefreshUpdatedTimestamp == true or semanticChanged then
+			attributes.Placed[PlacedCrewState.Attribute.UpdatedAtUnix] = now
+		end
+
+		PlacedCrewState.ApplyAttributes(standModel, attributes.Placed)
+		PlacedCrewState.ApplyAttributes(standModel, attributes.Overhead)
+		if
+			CrewProtectionService
+			and typeof(CrewProtectionService.ApplyPlacedProtectionAttributes) == "function"
+		then
+			CrewProtectionService.ApplyPlacedProtectionAttributes(
+				player,
+				standModel,
+				attributes.Placed[PlacedCrewState.Attribute.CrewMemberInstanceId],
+				true,
+				ctx.DataManager
+			)
+		end
+		if not CollectionService:HasTag(standModel, PlacedCrewState.Tag) then
+			CollectionService:AddTag(standModel, PlacedCrewState.Tag)
+		end
+		return true, nil
+	end
+
+	local function publishClaimIncomeState(_player, standModel, claimSummary, options)
+		if typeof(standModel) ~= "Instance" or not standModel:IsA("Model") then
+			return false, "invalid_stand"
+		end
+
+		claimSummary = if typeof(claimSummary) == "table" then claimSummary else {}
+		options = if typeof(options) == "table" then options else {}
+		local now = os.time()
+		local rawIncomeToCollect = math.max(
+			0,
+			tonumber(claimSummary.RawIncomeToCollect or claimSummary.RawRemainderAmount or claimSummary.RawIncome) or 0
+		)
+		local claimReadyAmount = math.max(
+			0,
+			tonumber(claimSummary.ClaimReadyAmount or claimSummary.FinalAmount) or 0
+		)
+
+		PlacedCrewState.SetAttributeIfChanged(
+			standModel,
+			PlacedCrewState.Attribute.RawIncomeToCollect,
+			rawIncomeToCollect
+		)
+		PlacedCrewState.SetAttributeIfChanged(
+			standModel,
+			PlacedCrewState.Attribute.ClaimReadyAmount,
+			claimReadyAmount
+		)
+		if options.RefreshIncomeTimestamp ~= false then
+			PlacedCrewState.SetAttributeIfChanged(standModel, PlacedCrewState.Attribute.IncomeUpdatedAtUnix, now)
+		end
+		if options.RefreshUpdatedTimestamp == true then
+			PlacedCrewState.SetAttributeIfChanged(standModel, PlacedCrewState.Attribute.UpdatedAtUnix, now)
+		end
+		return true, nil
 	end
 
 	local function clearStandVisual(standModel)
@@ -203,6 +409,10 @@ function Module.Install(ctx)
 		local existing = standModel:FindFirstChild("PlacedCrewMember")
 		if existing and existing:IsA("Model") then
 			existing:Destroy()
+		end
+		PlacedCrewState.ClearAttributes(standModel)
+		if CollectionService:HasTag(standModel, PlacedCrewState.Tag) then
+			CollectionService:RemoveTag(standModel, PlacedCrewState.Tag)
 		end
 		resetSlotRenderState(getExistingSlotRuntime(standModel))
 	end
@@ -242,21 +452,15 @@ function Module.Install(ctx)
 	end
 
 	local function getCrewPlacementCFrame(model, handle, standModel)
-		local boxCF, boxSize = model:GetBoundingBox()
-		local offset = model:GetPivot():ToObjectSpace(boxCF)
-		local up = handle.CFrame.UpVector
-		local surface = handle.Position + up * (handle.Size.Y / 2)
 		local rotationOffsetDegrees = getCrewPlacementRotationOffsetDegrees(standModel)
-		local rot = (handle.CFrame - handle.Position) * CFrame.Angles(0, math.rad(rotationOffsetDegrees), 0)
-		local desiredBox = CFrame.new(surface + up * (boxSize.Y / 2)) * rot
-		return desiredBox * offset:Inverse()
+		return PlacedCrewState.GetPlacementCFrame(model, handle, rotationOffsetDegrees)
 	end
 
 	local function placeModelBottomOnHandle(model, handle, standModel)
 		model:PivotTo(getCrewPlacementCFrame(model, handle, standModel))
 	end
 
-	local function spawnStandCrewMember(player, standModel, handle, crewMemberName)
+	local function spawnStandCrewMember(player, standModel, _handle, crewMemberName)
 		clearStandVisual(standModel)
 
 		local resolved = resolveCrewMemberRecord(player, crewMemberName)
@@ -279,32 +483,27 @@ function Module.Install(ctx)
 			return nil, "no_template"
 		end
 
-		local clone = template:Clone()
-		clone.Name = "PlacedCrewMember"
-		clone.Parent = standModel
-
-		ensurePrimaryPart(clone)
-		anchorModel(clone)
-		makeStandVisualNonBlocking(clone)
-		placeModelBottomOnHandle(clone, handle, standModel)
-
 		local info = resolved and resolved.Info or findCrewMemberInfoByName(crewMemberName, player)
-		refreshVariantAura(clone, resolved, crewMemberName, info)
-		tryPlayIdle(clone, resolved and resolved.CanonicalName or crewMemberName, info)
-
-		syncPlacedOverheadMetadata(player, standModel, crewMemberName, clone)
+		local published, publishReason = publishPlacedCrewState(player, standModel, crewMemberName, {
+			Reason = "spawn_stand_crew_member",
+			RefreshIncomeTimestamp = true,
+			RefreshUpdatedTimestamp = true,
+		})
+		if published ~= true then
+			return nil, publishReason or "state_publish_failed"
+		end
 		if PremiumCrewStealProtectionVisuals and typeof(PremiumCrewStealProtectionVisuals.UpdateStand) == "function" then
 			PremiumCrewStealProtectionVisuals.UpdateStand(player, standModel)
 		end
 		resetSlotRenderState(getExistingSlotRuntime(standModel))
 		standDebug(
-			"spawnStandCrewMember success player=%s stand=%s model=%s incomeBase=%s",
+			"spawnStandCrewMember state_published player=%s stand=%s template=%s incomeBase=%s",
 			player and player.Name or "?",
 			standModel and standModel.Name or "?",
-			clone:GetFullName(),
+			template:GetFullName(),
 			tostring(resolved and resolved.Info and resolved.Info.Income or info and info.Income or "nil")
 		)
-		return clone, nil
+		return standModel, nil
 	end
 
 
@@ -315,6 +514,8 @@ function Module.Install(ctx)
 	ctx.isNumericShipCrewSlot = isNumericShipCrewSlot
 	ctx.placeModelBottomOnHandle = placeModelBottomOnHandle
 	ctx.removeLegacyCrewHover = removeLegacyCrewHover
+	ctx.publishClaimIncomeState = publishClaimIncomeState
+	ctx.publishPlacedCrewState = publishPlacedCrewState
 	ctx.spawnStandCrewMember = spawnStandCrewMember
 	ctx.syncPlacedOverheadMetadata = syncPlacedOverheadMetadata
 end

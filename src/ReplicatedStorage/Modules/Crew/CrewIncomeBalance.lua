@@ -13,6 +13,12 @@ local DEFAULT_VARIANT = "Normal"
 local DEFAULT_MAX_LEVEL = 50
 local DEFAULT_MAX_LEVEL_INCOME_MULTIPLIER = 100
 local CLAIM_EPSILON = 1e-7
+local baseIncomeRangeCache = {}
+local baseIncomeRangeMidpointCache = {}
+local baseIncomePercentileCache = {}
+local variantIncomeRangeCache = {}
+local variantBandMappedIncomeCache = {}
+local computeIncomeCache = {}
 
 local BASE_INCOME_ROLL_RANGES_BY_VERSION = {
 	[1] = {
@@ -112,6 +118,23 @@ local function multiplyExtraMultipliers(extraMultipliers)
 	return multiplier
 end
 
+local function cacheKey(...)
+	local parts = table.create(select("#", ...))
+	for index = 1, select("#", ...) do
+		parts[index] = tostring(select(index, ...))
+	end
+	return table.concat(parts, "|")
+end
+
+function CrewIncomeBalance.ClearMemoizedCaches()
+	table.clear(baseIncomeRangeCache)
+	table.clear(baseIncomeRangeMidpointCache)
+	table.clear(baseIncomePercentileCache)
+	table.clear(variantIncomeRangeCache)
+	table.clear(variantBandMappedIncomeCache)
+	table.clear(computeIncomeCache)
+end
+
 function CrewIncomeBalance.NormalizeRarity(rarity)
 	local raw = tostring(rarity or "")
 	local normalized = RARITY_ALIASES[string.lower(raw)]
@@ -184,34 +207,73 @@ function CrewIncomeBalance.GetLevelIncomeMultiplier(level)
 end
 
 function CrewIncomeBalance.GetBaseIncomeRange(rarity)
-	return getConfiguredRangeFromTable(getIncomeRollConfig(), rarity)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local cached = baseIncomeRangeCache[normalizedRarity]
+	if cached then
+		return cached.Min, cached.Max, normalizedRarity
+	end
+
+	local minValue, maxValue = getConfiguredRangeFromTable(getIncomeRollConfig(), normalizedRarity)
+	baseIncomeRangeCache[normalizedRarity] = {
+		Min = minValue,
+		Max = maxValue,
+	}
+	return minValue, maxValue, normalizedRarity
 end
 
 function CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
-	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(rarity)
-	return roundWhole((minValue + maxValue) / 2)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local cached = baseIncomeRangeMidpointCache[normalizedRarity]
+	if cached ~= nil then
+		return cached
+	end
+
+	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(normalizedRarity)
+	local midpoint = roundWhole((minValue + maxValue) / 2)
+	baseIncomeRangeMidpointCache[normalizedRarity] = midpoint
+	return midpoint
 end
 
 function CrewIncomeBalance.GetBaseIncomePercentile(rarity, baseIncomeRoll)
-	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(rarity)
-	local normalizedRoll = CrewIncomeBalance.NormalizeBaseIncomeRoll(rarity, baseIncomeRoll)
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local normalizedRoll = CrewIncomeBalance.NormalizeBaseIncomeRoll(normalizedRarity, baseIncomeRoll)
 	if normalizedRoll == nil then
-		normalizedRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(rarity)
+		normalizedRoll = CrewIncomeBalance.GetBaseIncomeRangeMidpoint(normalizedRarity)
 	end
+	local key = cacheKey(normalizedRarity, normalizedRoll)
+	local cached = baseIncomePercentileCache[key]
+	if cached ~= nil then
+		return cached
+	end
+
+	local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(normalizedRarity)
 	if maxValue <= minValue then
+		baseIncomePercentileCache[key] = 0
 		return 0
 	end
 
-	return math.clamp((normalizedRoll - minValue) / (maxValue - minValue), 0, 1)
+	local percentile = math.clamp((normalizedRoll - minValue) / (maxValue - minValue), 0, 1)
+	baseIncomePercentileCache[key] = percentile
+	return percentile
 end
 
 function CrewIncomeBalance.GetVariantIncomeRange(rarity, variant)
 	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
 	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local cacheId = cacheKey(normalizedRarity, variantKey)
+	local cached = variantIncomeRangeCache[cacheId]
+	if cached then
+		return cached.Min, cached.Max, normalizedRarity, variantKey
+	end
+
 	local rarityBands = getVariantBandConfig()[normalizedRarity]
 	local range = if typeof(rarityBands) == "table" then rarityBands[variantKey] else nil
 	if typeof(range) ~= "table" then
 		local minValue, maxValue = CrewIncomeBalance.GetBaseIncomeRange(normalizedRarity)
+		variantIncomeRangeCache[cacheId] = {
+			Min = minValue,
+			Max = maxValue,
+		}
 		return minValue, maxValue, normalizedRarity, variantKey
 	end
 
@@ -221,13 +283,29 @@ function CrewIncomeBalance.GetVariantIncomeRange(rarity, variant)
 		maxValue = minValue
 	end
 
+	variantIncomeRangeCache[cacheId] = {
+		Min = minValue,
+		Max = maxValue,
+	}
 	return minValue, maxValue, normalizedRarity, variantKey
 end
 
 function CrewIncomeBalance.GetVariantBandMappedIncome(rarity, baseIncomeRoll, variant)
-	local percentile = CrewIncomeBalance.GetBaseIncomePercentile(rarity, baseIncomeRoll)
-	local minValue, maxValue = CrewIncomeBalance.GetVariantIncomeRange(rarity, variant)
-	return roundWhole(minValue + ((maxValue - minValue) * percentile))
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local normalizedRoll = CrewIncomeBalance.NormalizeBaseIncomeRoll(normalizedRarity, baseIncomeRoll)
+		or CrewIncomeBalance.GetBaseIncomeRangeMidpoint(normalizedRarity)
+	local key = cacheKey(normalizedRarity, variantKey, normalizedRoll)
+	local cached = variantBandMappedIncomeCache[key]
+	if cached ~= nil then
+		return cached
+	end
+
+	local percentile = CrewIncomeBalance.GetBaseIncomePercentile(normalizedRarity, normalizedRoll)
+	local minValue, maxValue = CrewIncomeBalance.GetVariantIncomeRange(normalizedRarity, variantKey)
+	local mapped = roundWhole(minValue + ((maxValue - minValue) * percentile))
+	variantBandMappedIncomeCache[key] = mapped
+	return mapped
 end
 
 function CrewIncomeBalance.RollBaseIncome(rarity, randomObject)
@@ -322,7 +400,20 @@ function CrewIncomeBalance.GetFinalCrewIncome(baseIncomeRoll, variant, level, ra
 end
 
 function CrewIncomeBalance.ComputeIncome(baseIncomeRoll, variant, level, rarity)
-	return roundWhole(CrewIncomeBalance.GetFinalCrewIncome(baseIncomeRoll, variant, level, rarity))
+	local normalizedRarity = CrewIncomeBalance.NormalizeRarity(rarity)
+	local variantKey = CrewIncomeBalance.NormalizeVariant(variant)
+	local normalizedRoll = CrewIncomeBalance.NormalizeBaseIncomeRoll(normalizedRarity, baseIncomeRoll)
+		or CrewIncomeBalance.GetBaseIncomeRangeMidpoint(normalizedRarity)
+	local normalizedLevel = CrewIncomeBalance.NormalizeLevel(level)
+	local key = cacheKey(normalizedRarity, variantKey, normalizedLevel, normalizedRoll)
+	local cached = computeIncomeCache[key]
+	if cached ~= nil then
+		return cached
+	end
+
+	local income = roundWhole(CrewIncomeBalance.GetFinalCrewIncome(normalizedRoll, variantKey, normalizedLevel, normalizedRarity))
+	computeIncomeCache[key] = income
+	return income
 end
 
 function CrewIncomeBalance.GetRawBankIncomePerSecond(instanceData)

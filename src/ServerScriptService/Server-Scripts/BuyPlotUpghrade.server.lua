@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("CrewSlotAssignmentReconciler"))
 local GrandLineRushVerticalSliceService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GrandLineRushVerticalSliceService"))
+local GTRActionDiagnostics = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GTRActionDiagnostics"))
 local ShipRuntimeService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipRuntimeService"))
 local TitleProgressService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TitleProgressService"))
 local cfg = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
@@ -38,48 +39,21 @@ local MATERIAL_PATHS = {
 	},
 }
 
-local function splitPath(path)
-	local segments = string.split(tostring(path), ".")
-	if segments[1] == "Data" then
-		table.remove(segments, 1)
-	end
-	return segments
-end
-
-local function setNestedValue(root, path, value)
-	local segments = splitPath(path)
-	local pointer = root
-
-	for index = 1, #segments - 1 do
-		local key = segments[index]
-		if typeof(pointer[key]) ~= "table" then
-			pointer[key] = {}
-		end
-		pointer = pointer[key]
-	end
-
-	pointer[segments[#segments]] = value
-	return segments
-end
-
 local function applyMutations(player, mutations)
-	local profile = DataManager:TryGetProfile(player)
-	local replica = DataManager:TryGetReplica(player)
-	if not (profile and replica) then
-		return false
+	local operations = {}
+	for _, mutation in ipairs(mutations) do
+		operations[#operations + 1] = {
+			Kind = "Set",
+			Path = mutation.Path,
+			Value = mutation.Value,
+		}
 	end
 
-	local pathTables = {}
-	for index, mutation in ipairs(mutations) do
-		pathTables[index] = setNestedValue(profile.Data, mutation.Path, mutation.Value)
-	end
-
-	for index, mutation in ipairs(mutations) do
-		replica:Set(pathTables[index], mutation.Value)
-	end
-
-	DataManager:UpdateData(player)
-	return true
+	return DataManager:TryApplyBatch(player, operations, {
+		PerfContext = {
+			Target = "ship_upgrade",
+		},
+	})
 end
 
 local function getCurrentUpgrade(player, path)
@@ -337,7 +311,7 @@ local function refreshShipAfterUpgrade(player)
 	return false, getRefreshReason(retryReason, retryDetails), retryDetails
 end
 
-local function processUpgradePurchase(player)
+local function processUpgradePurchase(player, actionTrace)
 	local current = getCurrentUpgrade(player, PLOT_UPGRADE_PATH)
 	if cfg.IsMaxLevel(current) then
 		fireUpgradeFailure(player, "max_level", "Ship Already Maxed", "Max Level", {
@@ -408,7 +382,16 @@ local function processUpgradePurchase(player)
 		end
 	end
 
-	if not applyMutations(player, mutations) then
+	local mutationOk, mutationResult = applyMutations(player, mutations)
+	if actionTrace then
+		actionTrace:phase("mutate", {
+			Target = "ship_upgrade",
+			WriteCount = mutationResult and mutationResult.WriteCount or mutationResult and mutationResult.ReplicaWriteCount or 0,
+			Result = if mutationOk then "ok" else "failed",
+			Reason = mutationResult and mutationResult.Reason or nil,
+		})
+	end
+	if mutationOk ~= true then
 		fireUpgradeFailure(player, "data_not_ready", "Ship Upgrade Failed", "Data Not Ready", {
 			"Your save data was not ready for this upgrade.",
 			"Please try again in a moment.",
@@ -424,38 +407,38 @@ local function processUpgradePurchase(player)
 		})
 	end
 
-	local pushOk, pushErr = pcall(function()
-		GrandLineRushVerticalSliceService.PushState(player)
-	end)
-	if not pushOk then
-		warn(("[BuyPlotUpgrade] PushState failed for %s after ship upgrade to level %d: %s"):format(
-			player.Name,
-			newLevel,
-			tostring(pushErr)
-		))
-	end
-
-	local refreshSuccess, refreshReason, refreshDetails = refreshShipAfterUpgrade(player)
-	if refreshSuccess ~= true then
-		local detailReason = getRefreshReason(refreshReason, refreshDetails)
-		warn(("[BuyPlotUpgrade] Ship refresh failed for %s after upgrade to level %d: %s"):format(
-			player.Name,
-			newLevel,
-			detailReason
-		))
-		fireUpgradeFailure(player, "refresh_failed", "Ship Upgrade Saved", "Refresh Failed", {
-			"Your upgrade was saved, but the active ship could not refresh.",
-			"Reason: " .. detailReason,
-			"Please try again or rejoin if the ship does not update.",
-		}, newLevel, "Ship upgrade saved, but refresh failed.", true, {
-			RefreshReason = detailReason,
-			RefreshDetails = refreshDetails,
-		})
-		return false
-	end
-
 	fireUpgradeSuccess(player, newLevel)
 	TitleProgressService.RecordShipUpgrade(player, newLevel)
+	task.defer(function()
+		local pushOk, pushErr = pcall(function()
+			GrandLineRushVerticalSliceService.PushState(player)
+		end)
+		if not pushOk then
+			warn(("[BuyPlotUpgrade] PushState failed for %s after ship upgrade to level %d: %s"):format(
+				player.Name,
+				newLevel,
+				tostring(pushErr)
+			))
+		end
+
+		local refreshSuccess, refreshReason, refreshDetails = refreshShipAfterUpgrade(player)
+		if refreshSuccess ~= true then
+			local detailReason = getRefreshReason(refreshReason, refreshDetails)
+			warn(("[BuyPlotUpgrade] Ship refresh failed for %s after upgrade to level %d: %s"):format(
+				player.Name,
+				newLevel,
+				detailReason
+			))
+			fireUpgradeFailure(player, "refresh_failed", "Ship Upgrade Saved", "Refresh Failed", {
+				"Your upgrade was saved, but the active ship could not refresh.",
+				"Reason: " .. detailReason,
+				"Please try again or rejoin if the ship does not update.",
+			}, newLevel, "Ship upgrade saved, but refresh failed.", true, {
+				RefreshReason = detailReason,
+				RefreshDetails = refreshDetails,
+			})
+		end
+	end)
 	return true
 end
 
@@ -468,8 +451,12 @@ remote.OnServerEvent:Connect(function(player)
 	end
 	busy[player] = true
 
+	local actionTrace = GTRActionDiagnostics.Start("ShipUpgrade", player, {
+		Target = "ship_upgrade",
+	})
+	local purchaseOk = false
 	local ok, err = xpcall(function()
-		processUpgradePurchase(player)
+		purchaseOk = processUpgradePurchase(player, actionTrace) == true
 	end, debug.traceback)
 
 	if not ok then
@@ -479,6 +466,10 @@ remote.OnServerEvent:Connect(function(player)
 			"Please try again in a moment.",
 		}, getCurrentUpgrade(player, PLOT_UPGRADE_PATH), "Something went wrong while upgrading your ship.")
 	end
+	actionTrace:finish(if ok and purchaseOk then "ok" else "failed", {
+		Target = "ship_upgrade",
+		Reason = if ok and purchaseOk then "saved_refresh_deferred" else "upgrade_failed",
+	})
 
 	busy[player] = nil
 end)

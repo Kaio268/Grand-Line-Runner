@@ -30,6 +30,7 @@ local VariantCfg = CrewCatalog.GetVariantConfig()
 local Module = {}
 local CrewStorageModule = nil
 local PROGRESSION_AUTHORITY_AUDIT_PATH = "CrewMemberProgressionAuthorityAudit"
+local PERF_THRESHOLD_SECONDS = 0.025
 
 local function getCrewStorage()
 	if CrewStorageModule == nil then
@@ -50,12 +51,31 @@ local function cloneValue(value)
 	return copy
 end
 
+local function logPerf(player, phase, target, durationSeconds, result, extra, always)
+	extra = if typeof(extra) == "table" then extra else {}
+	if always ~= true and game:GetAttribute("GTRPerformanceDebug") ~= true and durationSeconds < PERF_THRESHOLD_SECONDS then
+		return
+	end
+
+	print(string.format(
+		"[GTR_PERF] phase=%s player=%s userId=%s target=%s durationMs=%.3f replicaWriteCount=%s result=%s reason=%s",
+		tostring(phase or ""),
+		player and player.Name or "unknown",
+		tostring(player and player.UserId or 0),
+		tostring(target or ""),
+		durationSeconds * 1000,
+		tostring(extra.ReplicaWriteCount or ""),
+		tostring(result or "ok"),
+		tostring(extra.Reason or "none")
+	))
+end
+
 local function isProgressionWriteAuthorityEnabled()
 	local flags = getCrewStorage().GetShadowFlags()
 	return flags.CrewMemberProgressionWriteAuthorityEnabled == true, flags
 end
 
-local function updateProgressionAuthorityAudit(player, updates)
+local function buildProgressionAuthorityAudit(player, updates)
 	local audit = DataManager:GetValue(player, PROGRESSION_AUTHORITY_AUDIT_PATH)
 	if typeof(audit) ~= "table" then
 		audit = {}
@@ -72,6 +92,11 @@ local function updateProgressionAuthorityAudit(player, updates)
 		audit[tostring(key)] = nil
 	end
 	audit.UpdatedAt = os.time()
+	return audit
+end
+
+local function updateProgressionAuthorityAudit(player, updates)
+	local audit = buildProgressionAuthorityAudit(player, updates)
 	DataManager:TrySetValue(player, PROGRESSION_AUTHORITY_AUDIT_PATH, audit)
 	return audit
 end
@@ -173,6 +198,30 @@ local function syncCaptainSlotProgress(player, instanceId, instanceData, level)
 	return DataManager:SetValue(player, SHIP_CAPTAIN_SLOT_PATH, nextCaptainSlot) ~= false
 end
 
+local function buildCaptainSlotProgressOperation(player, instanceId, instanceData, level)
+	instanceId = tostring(instanceId or "")
+	if instanceId == "" or typeof(instanceData) ~= "table" then
+		return nil
+	end
+
+	local captainSlot = DataManager:GetValue(player, SHIP_CAPTAIN_SLOT_PATH)
+	if typeof(captainSlot) ~= "table" then
+		return nil
+	end
+	if tostring(captainSlot.CrewMemberInstanceId or captainSlot.InstanceId or captainSlot.CrewInstanceId or "") ~= instanceId then
+		return nil
+	end
+
+	local nextCaptainSlot = cloneValue(captainSlot)
+	nextCaptainSlot.Level = CrewIncomeBalance.NormalizeLevel(level or instanceData.Level)
+	nextCaptainSlot.CurrentXP = math.max(0, math.floor(tonumber(instanceData.CurrentXP) or 0))
+	return {
+		Kind = "Set",
+		Path = SHIP_CAPTAIN_SLOT_PATH,
+		Value = nextCaptainSlot,
+	}
+end
+
 function Module.RefreshProgressionShadow(player, reason)
 	return refreshCrewMemberShadow(player, tostring(reason or "food_progression"))
 end
@@ -192,6 +241,31 @@ local function syncAssignedStandLevel(player, instanceData, level, instanceId)
 
 	local safeLevel = CrewIncomeBalance.NormalizeLevel(level or instanceData.Level)
 	return CrewStandIncomeAuthority.SetStandLevel(player, assignedStand, safeLevel, "food_progression_stand_level")
+end
+
+local function buildAssignedStandLevelOperation(player, instanceData, level, instanceId)
+	if typeof(instanceData) ~= "table" then
+		return nil, ""
+	end
+
+	local assignedStand = tostring(instanceData.AssignedStand or "")
+	if assignedStand == "" then
+		return nil, ""
+	end
+	if assignedStand == CAPTAIN_SLOT_KEY then
+		return buildCaptainSlotProgressOperation(player, instanceId, instanceData, level), assignedStand
+	end
+
+	local safeLevel = CrewIncomeBalance.NormalizeLevel(level or instanceData.Level)
+	local standRow = CrewStandIncomeAuthority.BuildStandLevelUpdate(player, assignedStand, safeLevel)
+	if typeof(standRow) ~= "table" then
+		return nil, assignedStand
+	end
+	return {
+		Kind = "Set",
+		Path = "CrewMemberIncome." .. assignedStand,
+		Value = standRow,
+	}, assignedStand
 end
 
 local function normalizeRarity(rawRarity)
@@ -650,6 +724,7 @@ end
 
 function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options)
 	options = typeof(options) == "table" and options or {}
+	local stepStartedAt = os.clock()
 	local progressionAuthorityEnabled = isProgressionWriteAuthorityEnabled()
 	local progress = Module.GetProgress(player, crewMemberId)
 	if not progress then
@@ -685,25 +760,6 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 		}
 	end
 
-	local snapshot = if progressionAuthorityEnabled then buildProgressionMutationSnapshot(player, "apply_auto_feed_step") else nil
-	if progressionAuthorityEnabled then
-		updateProgressionAuthorityAudit(player, {
-			LastRollbackSnapshot = snapshot,
-			LastMutation = {
-				SourcePath = "apply_auto_feed_step",
-				InstanceId = tostring(progress.InstanceId),
-				FoodKey = tostring(stepPreview.FoodKey),
-				AmountUsed = tonumber(stepPreview.AmountUsed) or 0,
-				XPGained = tonumber(stepPreview.XPGained) or 0,
-				StartedAt = os.time(),
-			},
-			LastFailClosedReason = nil,
-		})
-	end
-
-	DataManager:AddValue(player, "FoodInventory." .. stepPreview.FoodKey, -stepPreview.AmountUsed)
-	foodInventory[stepPreview.FoodKey] = math.max(0, math.floor(tonumber(foodInventory[stepPreview.FoodKey]) or 0) - stepPreview.AmountUsed)
-
 	local levelAfter, currentXPAfter = normalizeProgress(
 		progress.Rarity,
 		progress.Variant,
@@ -711,51 +767,100 @@ function Module.ApplyAutoFeedStep(player, crewMemberId, expectedFoodKey, options
 		math.max(0, progress.CurrentXP) + stepPreview.XPGained
 	)
 
-	local updated = CrewInstanceService.UpdateProgress(player, progress.InstanceId, levelAfter, currentXPAfter)
+	local updateStartedAt = os.clock()
+	local updated, nextCrewInventory, updateReason, resolvedInstanceId =
+		CrewInstanceService.BuildProgressUpdate(player, progress.InstanceId, levelAfter, currentXPAfter)
+	logPerf(player, "CrewInstanceService.UpdateProgress", progress.InstanceId, os.clock() - updateStartedAt, if updated then "ok" else "failed", {
+		Reason = updateReason,
+	})
 	if not updated then
-		if progressionAuthorityEnabled then
-			local restoreOk, restoreReason = restoreProgressionMutationSnapshot(player, snapshot, "apply_auto_feed_step_progression_write_failed")
-			updateProgressionAuthorityAudit(player, {
-				LastFailClosedReason = "progression_write_failed",
-				LastRollbackRestoreOk = restoreOk,
-				LastRollbackRestoreReason = restoreReason,
-			})
-		end
+		logPerf(player, "ApplyAutoFeedStep", progress.InstanceId, os.clock() - stepStartedAt, "failed", {
+			Reason = tostring(updateReason or "progression_write_failed"),
+		}, true)
 		return false, {
 			Error = "progression_write_failed",
 			Progress = progress,
 			Step = stepPreview,
 		}
 	end
-	if updated then
-		syncAssignedStandLevel(player, updated, levelAfter, progress.InstanceId)
-		if options.DeferShadowRefresh ~= true then
-			refreshCrewMemberShadow(player, "food_progression")
-		end
+
+	local nextFoodCount = math.max(
+		0,
+		math.floor(tonumber(foodInventory[stepPreview.FoodKey]) or 0) - (tonumber(stepPreview.AmountUsed) or 0)
+	)
+	local operations = {
+		{
+			Kind = "Set",
+			Path = "FoodInventory." .. tostring(stepPreview.FoodKey),
+			Value = nextFoodCount,
+		},
+		{
+			Kind = "Set",
+			Path = "CrewMemberInventory",
+			Value = nextCrewInventory,
+		},
+	}
+	local standOperation, assignedStand =
+		buildAssignedStandLevelOperation(player, updated, levelAfter, resolvedInstanceId or progress.InstanceId)
+	if standOperation ~= nil then
+		operations[#operations + 1] = standOperation
 	end
 	if progressionAuthorityEnabled then
-		updateProgressionAuthorityAudit(player, {
-			LastMutation = {
-				SourcePath = "apply_auto_feed_step",
-				InstanceId = tostring(progress.InstanceId),
-				FoodKey = tostring(stepPreview.FoodKey),
-				AmountUsed = tonumber(stepPreview.AmountUsed) or 0,
-				XPGained = tonumber(stepPreview.XPGained) or 0,
-				LevelAfter = levelAfter,
-				CurrentXPAfter = currentXPAfter,
-				CompletedAt = os.time(),
-			},
-			ClearKeys = {
-				"LastFailClosedReason",
-				"LastFailClosedIssues",
-				"LastRollbackRestoreOk",
-				"LastRollbackRestoreReason",
-			},
-		})
+		operations[#operations + 1] = {
+			Kind = "Set",
+			Path = PROGRESSION_AUTHORITY_AUDIT_PATH,
+			Value = buildProgressionAuthorityAudit(player, {
+				LastMutation = {
+					SourcePath = "apply_auto_feed_step",
+					InstanceId = tostring(progress.InstanceId),
+					FoodKey = tostring(stepPreview.FoodKey),
+					AmountUsed = tonumber(stepPreview.AmountUsed) or 0,
+					XPGained = tonumber(stepPreview.XPGained) or 0,
+					LevelAfter = levelAfter,
+					CurrentXPAfter = currentXPAfter,
+					CompletedAt = os.time(),
+				},
+				ClearKeys = {
+					"LastFailClosedReason",
+					"LastFailClosedIssues",
+					"LastRollbackRestoreOk",
+					"LastRollbackRestoreReason",
+				},
+			}),
+		}
 	end
+
+	local batchOk, batchInfo = DataManager:TryApplyBatch(player, operations, {
+		PerfContext = {
+			Target = tostring(assignedStand ~= "" and assignedStand or progress.InstanceId),
+		},
+	})
+	if batchOk ~= true then
+		logPerf(player, "ApplyAutoFeedStep", progress.InstanceId, os.clock() - stepStartedAt, "failed", {
+			Reason = batchInfo and batchInfo.Reason or "batch_failed",
+			ReplicaWriteCount = batchInfo and batchInfo.ReplicaWriteCount or 0,
+		}, true)
+		return false, {
+			Error = "progression_write_failed",
+			Progress = progress,
+			Step = stepPreview,
+			BatchInfo = batchInfo,
+		}
+	end
+
+	CrewInstanceService.NotifyInventorySaved(player, nextCrewInventory)
+	if options.DeferShadowRefresh ~= true then
+		refreshCrewMemberShadow(player, "food_progression")
+	end
+
+	logPerf(player, "ApplyAutoFeedStep", progress.InstanceId, os.clock() - stepStartedAt, "ok", {
+		ReplicaWriteCount = batchInfo and batchInfo.ReplicaWriteCount or 0,
+	})
 
 	local result = {
 		AppliedStep = stepPreview,
+		AssignedStand = assignedStand,
+		BatchInfo = batchInfo,
 		LevelUps = math.max(0, levelAfter - progress.Level),
 		Progress = {
 			InstanceId = tostring(progress.InstanceId),

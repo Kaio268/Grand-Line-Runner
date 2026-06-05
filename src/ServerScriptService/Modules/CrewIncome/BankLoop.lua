@@ -1,5 +1,9 @@
 local Module = {}
 
+local BANK_MAINTENANCE_INTERVAL_SECONDS = 5
+local SAFETY_FLUSH_INTERVAL_SECONDS = 60
+local BANK_LOOP_FRAME_BUDGET_SECONDS = 0.006
+
 function Module.Install(ctx)
 	local function getPlayerIncomeTickReadiness(runtime, player)
 		if typeof(player) ~= "Instance" or not player:IsA("Player") then
@@ -20,7 +24,17 @@ function Module.Install(ctx)
 		return true, nil
 	end
 
-	local function updateCrewStandIncomeForTick(runtime, player, standModel, equippedCrewMember, totalFoodCount, zeroIncomeLogged)
+	local PlacedCrewState = require(ctx.Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
+
+	local function updateCrewStandIncomeForTick(
+		runtime,
+		player,
+		standModel,
+		equippedCrewMember,
+		totalFoodCount,
+		zeroIncomeLogged,
+		materializeIncome
+	)
 
 		if not standModel or not standModel.Parent then
 
@@ -50,8 +64,6 @@ function Module.Install(ctx)
 
 			runtime.clearStandVisual(standModel)
 
-			runtime.updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
-
 			runtime.updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
 
 			runtime.updateStandPromptTexts(player, standModel, cache, slotState, crewMemberName, equippedCrewMember)
@@ -66,13 +78,21 @@ function Module.Install(ctx)
 
 		if crewMemberName ~= "" then
 
-			if not standModel:FindFirstChild("PlacedCrewMember") then
+			if standModel:GetAttribute(PlacedCrewState.Attribute.Active) ~= true then
 
 				local handle = cache and cache.Handle or runtime.resolveSlotHandle(standModel)
 
-				if handle and handle:IsA("BasePart") then
+				if
+					handle
+					and handle:IsA("BasePart")
+					and typeof(runtime.enqueueCrewVisualRestore) == "function"
+				then
 
-					runtime.spawnStandCrewMember(player, standModel, handle, crewMemberName)
+					runtime.enqueueCrewVisualRestore(player, standModel, handle, crewMemberName, {
+						CrewMemberInstanceId = crewMemberInstanceId,
+						Generation = runtime.ShipRuntimeService.GetCrewVisualGeneration(player),
+						Source = "bank_loop_missing_visual",
+					})
 
 				end
 
@@ -80,21 +100,10 @@ function Module.Install(ctx)
 
 
 
-			local inc = runtime.getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId)
-				* runtime.getBeliBoostMultiplier(player)
-
 			zeroIncomeLogged[player] = zeroIncomeLogged[player] or {}
 
-			if inc ~= 0 then
-
+			if runtime.getRawBankIncomePerSecond(player, crewMemberName, crewMemberInstanceId) ~= 0 then
 				zeroIncomeLogged[player][standName] = nil
-
-				if runtime.CrewStandIncomeAuthority.AdjustIncomeToCollect(player, standName, inc, "income_bank") then
-
-					didBankIncome = true
-
-				end
-
 			elseif zeroIncomeLogged[player][standName] ~= true then
 
 				zeroIncomeLogged[player][standName] = true
@@ -105,13 +114,14 @@ function Module.Install(ctx)
 
 
 
-			runtime.updateStandHover(player, standModel, crewMemberName)
+			if materializeIncome == true and typeof(runtime.materializeStandIncome) == "function" then
+				if runtime.materializeStandIncome(player, standName, "income_safety_flush") then
+					didBankIncome = true
+				end
+			end
 
 		end
 
-
-
-		runtime.updateStandMoneyText(player, standModel, cache, slotState, crewMemberName)
 
 		runtime.updateLevelUpUI(player, standModel, cache, slotState, crewMemberName, crewMemberInstanceId, false, totalFoodCount)
 
@@ -125,7 +135,7 @@ function Module.Install(ctx)
 
 
 
-	local function updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
+	local function updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged, materializeIncome)
 
 		local ready, readinessReason = getPlayerIncomeTickReadiness(runtime, player)
 
@@ -163,12 +173,28 @@ function Module.Install(ctx)
 
 
 
+		local sliceStartedAt = os.clock()
 		for i = 1, #stands do
 
-			if updateCrewStandIncomeForTick(runtime, player, stands[i], equippedCrewMember, totalFoodCount, zeroIncomeLogged) then
+			if
+				updateCrewStandIncomeForTick(
+					runtime,
+					player,
+					stands[i],
+					equippedCrewMember,
+					totalFoodCount,
+					zeroIncomeLogged,
+					materializeIncome
+				)
+			then
 
 				didBankIncome = true
 
+			end
+
+			if os.clock() - sliceStartedAt >= BANK_LOOP_FRAME_BUDGET_SECONDS then
+				task.wait()
+				sliceStartedAt = os.clock()
 			end
 
 		end
@@ -188,18 +214,40 @@ function Module.Install(ctx)
 	local function runCrewIncomeBankLoop(runtime)
 
 		local zeroIncomeLogged = {}
+		local nextSafetyFlushAt = os.clock() + SAFETY_FLUSH_INTERVAL_SECONDS
 
 
 
 		while true do
 
-			task.wait(1)
+			task.wait(BANK_MAINTENANCE_INTERVAL_SECONDS)
 
 
+			local loopStartedAt = os.clock()
+			local materializeIncome = loopStartedAt >= nextSafetyFlushAt
+			if materializeIncome then
+				nextSafetyFlushAt = loopStartedAt + SAFETY_FLUSH_INTERVAL_SECONDS
+			end
+			local playersProcessed = 0
+			local standsProcessed = 0
+			local occupiedStands = 0
+			local outerSliceStartedAt = loopStartedAt
 
 			for player, stands in pairs(runtime.playerStandList) do
 				local ok, err = xpcall(function()
-					updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged)
+					playersProcessed += 1
+					if typeof(stands) == "table" then
+						standsProcessed += #stands
+						for _, standModel in ipairs(stands) do
+							if
+								typeof(standModel) == "Instance"
+								and standModel:GetAttribute(PlacedCrewState.Attribute.Active) == true
+							then
+								occupiedStands += 1
+							end
+						end
+					end
+					updateCrewPlayerIncomeForTick(runtime, player, stands, zeroIncomeLogged, materializeIncome)
 				end, debug.traceback)
 				if not ok then
 					warn(("[CrewIncome] Bank loop tick failed for %s: %s"):format(
@@ -207,12 +255,54 @@ function Module.Install(ctx)
 						tostring(err)
 					))
 				end
+				if os.clock() - outerSliceStartedAt >= BANK_LOOP_FRAME_BUDGET_SECONDS then
+					task.wait()
+					outerSliceStartedAt = os.clock()
+				end
+			end
+			if
+				runtime.GTRPerformanceDiagnostics
+				and typeof(runtime.GTRPerformanceDiagnostics.RecordBankLoop) == "function"
+			then
+				runtime.GTRPerformanceDiagnostics.RecordBankLoop(
+					os.clock() - loopStartedAt,
+					playersProcessed,
+					standsProcessed,
+					occupiedStands
+				)
 			end
 		end
 	end
 
+	local function flushPlayerStandIncome(runtime, player, sourcePath)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
+		end
+		local stands = runtime.playerStandList[player]
+		if typeof(stands) ~= "table" then
+			return true, "no_stands"
+		end
+
+		local flushed = 0
+		for _, standModel in ipairs(stands) do
+			if standModel and standModel.Parent then
+				local standName = standModel.Name
+				local crewMemberName = runtime.getPlayerStandCrewMemberName(player, standName)
+				if crewMemberName ~= "" and typeof(runtime.materializeStandIncome) == "function" then
+					if runtime.materializeStandIncome(player, standName, sourcePath or "income_flush") then
+						flushed += 1
+					end
+				end
+			end
+		end
+		return true, flushed
+	end
+
 
 	ctx.runCrewIncomeBankLoop = runCrewIncomeBankLoop
+	ctx.flushPlayerStandIncome = function(player, sourcePath)
+		return flushPlayerStandIncome(ctx, player, sourcePath)
+	end
 	ctx.updateCrewPlayerIncomeForTick = updateCrewPlayerIncomeForTick
 	ctx.updateCrewStandIncomeForTick = updateCrewStandIncomeForTick
 

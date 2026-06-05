@@ -481,6 +481,10 @@ local function applyFruitCharacterModel(player, fruitName)
 end
 
 local function debugPrint(...)
+	if game:GetAttribute("DevilFruitDebugLogs") ~= true then
+		return
+	end
+
 	print("[DevilFruitService]", ...)
 end
 

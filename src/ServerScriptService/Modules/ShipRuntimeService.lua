@@ -28,6 +28,7 @@ local SHIP_SPAWN_RETRY_DELAY_SECONDS = 0.4
 local SHIP_READY_RETRY_COUNT = 6
 local SHIP_READY_RETRY_DELAY_SECONDS = 0.75
 local RUNTIME_SPAWN_LOCATION_ATTRIBUTE = "ShipRuntimeSpawnLocation"
+local CREW_VISUAL_GENERATION_ATTRIBUTE = "CrewVisualGeneration"
 
 local runtimeStateByPlayer = {}
 local pendingRefreshAfterResetByPlayer = setmetatable({}, { __mode = "k" })
@@ -124,11 +125,28 @@ local function getRuntimeState(player)
 			positionIndex = nil,
 			respawnRequestId = 0,
 			ship = nil,
+			crewVisualGeneration = 0,
 		}
 		runtimeStateByPlayer[player] = state
 	end
 
 	return state
+end
+
+local function bumpCrewVisualGeneration(player, activeShip)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return 0
+	end
+
+	local state = getRuntimeState(player)
+	state.crewVisualGeneration = (tonumber(state.crewVisualGeneration) or 0) + 1
+	local generation = state.crewVisualGeneration
+	local targetShip = activeShip or state.ship
+	if typeof(targetShip) == "Instance" and targetShip.Parent ~= nil then
+		targetShip:SetAttribute(CREW_VISUAL_GENERATION_ATTRIBUTE, generation)
+	end
+
+	return generation
 end
 
 local function disconnectConnections(connections)
@@ -1485,6 +1503,19 @@ function ShipRuntimeService.GetActiveShip(player)
 	return activeShip
 end
 
+function ShipRuntimeService.GetCrewVisualGeneration(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return 0
+	end
+
+	local state = runtimeStateByPlayer[player]
+	return math.max(0, tonumber(state and state.crewVisualGeneration) or 0)
+end
+
+function ShipRuntimeService.GetCrewVisualGenerationAttribute()
+	return CREW_VISUAL_GENERATION_ATTRIBUTE
+end
+
 function ShipRuntimeService.GetAssignedPosition(player)
 	local state = runtimeStateByPlayer[player]
 	return state and state.position or nil
@@ -1579,6 +1610,7 @@ function ShipRuntimeService.ClearPlayerShip(player, options)
 
 	local state = runtimeStateByPlayer[player]
 	if state then
+		bumpCrewVisualGeneration(player)
 		state.ship = nil
 
 		if options.ReleasePosition ~= false then
@@ -1739,6 +1771,8 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 			return makeLoggedRefreshFailure(player, runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
 		end
 
+		bumpCrewVisualGeneration(player, currentShip)
+
 		local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, currentShip, upgradeLevel)
 		if not slotRefreshOk then
 			return makeLoggedRefreshFailure(player, "slot_interaction_refresh_failed", {
@@ -1809,6 +1843,8 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	state.ship = clone
 	state.position = position
 	state.positionIndex = positionIndex
+
+	bumpCrewVisualGeneration(player, clone)
 
 	local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, clone, upgradeLevel)
 	if not slotRefreshOk then

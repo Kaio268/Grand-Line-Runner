@@ -12,6 +12,7 @@ local CANONICAL_ROOT = "CrewMemberIncome"
 local AUDIT_ROOT = "CrewMemberStandIncomeAuthorityAudit"
 
 local dataManagerModule = nil
+local diagnosticsModule = nil
 local INCOME_COMPARE_EPSILON = 1e-6
 
 local function getDataManager()
@@ -19,6 +20,17 @@ local function getDataManager()
 		dataManagerModule = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 	end
 	return dataManagerModule
+end
+
+local function getDiagnostics()
+	if diagnosticsModule == nil then
+		local ok, diagnostics = pcall(function()
+			return require(ServerScriptService:WaitForChild("Modules"):WaitForChild("GTRPerformanceDiagnostics"))
+		end)
+		diagnosticsModule = if ok then diagnostics else false
+	end
+
+	return if diagnosticsModule ~= false then diagnosticsModule else nil
 end
 
 local function cloneValue(value)
@@ -107,6 +119,7 @@ local function normalizeStandRow(row)
 		CrewMemberName = crewMemberName,
 		CrewMemberInstanceId = crewMemberInstanceId,
 		IncomeToCollect = tonumber(row.IncomeToCollect) or 0,
+		LastAccruedAtUnix = math.max(0, math.floor(tonumber(row.LastAccruedAtUnix) or 0)),
 		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel),
 		LegacyStorageName = legacyStorageName,
 		NeedsCanonicalRepair = rawCrewMemberName ~= "" and crewMemberName ~= "" and rawCrewMemberName ~= crewMemberName,
@@ -122,6 +135,7 @@ local function standRowFromCanonicalRow(row)
 		LegacyStorageName = row.LegacyStorageName,
 		CrewMemberInstanceId = firstNonEmpty(row.CrewMemberInstanceId),
 		IncomeToCollect = row.IncomeToCollect,
+		LastAccruedAtUnix = row.LastAccruedAtUnix,
 		StandLevel = row.StandLevel,
 	})
 end
@@ -138,12 +152,18 @@ local function canonicalFromStandRow(player, standName, standRow)
 		standLevel = 1
 	end
 
+	local lastAccruedAtUnix = math.max(0, math.floor(tonumber(standRow.LastAccruedAtUnix) or 0))
+	if storageName ~= "" and lastAccruedAtUnix <= 0 then
+		lastAccruedAtUnix = os.time()
+	end
+
 	return {
 		CrewMemberName = if storageName ~= "" then getCanonicalCrewMemberId(storageName, info) else "",
 		CrewMemberDisplayName = if storageName ~= "" then getDisplayName(storageName, info) else "",
 		CrewMemberInstanceId = tostring(standRow.CrewMemberInstanceId or ""),
 		LegacyStorageName = legacyStorageName,
 		IncomeToCollect = if standRow.HasInvalidCrewMember == true then 0 else tonumber(standRow.IncomeToCollect) or 0,
+		LastAccruedAtUnix = lastAccruedAtUnix,
 		StandLevel = standLevel,
 		QuarantinedCrewMemberName = tostring(standRow.QuarantinedCrewMemberName or ""),
 		QuarantineReason = if standRow.HasInvalidCrewMember == true then "unknown_crew_member_id" else nil,
@@ -224,6 +244,11 @@ local function compareRows(standRow, canonicalRow)
 	end
 	if not numbersNearlyEqual(canonicalRow.IncomeToCollect, expected.IncomeToCollect) then
 		return false, "income_mismatch"
+	end
+	if math.max(0, math.floor(tonumber(canonicalRow.LastAccruedAtUnix) or 0))
+		~= math.max(0, math.floor(tonumber(expected.LastAccruedAtUnix) or 0))
+	then
+		return false, "last_accrued_at_mismatch"
 	end
 	if CrewIncomeBalance.NormalizeLevel(canonicalRow.StandLevel) ~= CrewIncomeBalance.NormalizeLevel(expected.StandLevel) then
 		return false, "stand_level_mismatch"
@@ -327,6 +352,10 @@ function CrewStandIncomeAuthority.SetStandData(player, standName, standRow, sour
 		},
 		LastFailClosedReason = nil,
 	})
+	local diagnostics = getDiagnostics()
+	if diagnostics and typeof(diagnostics.RecordIncomeWrite) == "function" then
+		diagnostics.RecordIncomeWrite(1)
+	end
 	return true, nil
 end
 
@@ -341,7 +370,15 @@ end
 function CrewStandIncomeAuthority.SetIncomeToCollect(player, standName, value, sourcePath)
 	return CrewStandIncomeAuthority.UpdateStandData(player, standName, {
 		IncomeToCollect = tonumber(value) or 0,
+		LastAccruedAtUnix = os.time(),
 	}, sourcePath)
+end
+
+function CrewStandIncomeAuthority.MaterializeIncomeToCollect(player, standName, value, accruedAtUnix, sourcePath)
+	return CrewStandIncomeAuthority.UpdateStandData(player, standName, {
+		IncomeToCollect = tonumber(value) or 0,
+		LastAccruedAtUnix = math.max(0, math.floor(tonumber(accruedAtUnix) or os.time())),
+	}, sourcePath or "income_materialize")
 end
 
 function CrewStandIncomeAuthority.AdjustIncomeToCollect(player, standName, delta, sourcePath)
@@ -355,6 +392,50 @@ function CrewStandIncomeAuthority.GetStandLevel(player, standName)
 	return CrewIncomeBalance.NormalizeLevel(row and row.StandLevel)
 end
 
+function CrewStandIncomeAuthority.BuildStandLevelUpdate(player, standName, level)
+	local row = CrewStandIncomeAuthority.GetStandData(player, standName)
+	row.StandLevel = CrewIncomeBalance.NormalizeLevel(level)
+	return canonicalFromStandRow(player, standName, row)
+end
+
+function CrewStandIncomeAuthority.BuildStandSetOperation(player, standName, updates)
+	standName = tostring(standName or "")
+	local row = CrewStandIncomeAuthority.GetStandData(player, standName)
+	for key, value in pairs(if typeof(updates) == "table" then updates else {}) do
+		row[key] = value
+	end
+
+	return {
+		Kind = "Set",
+		Path = CANONICAL_ROOT .. "." .. standName,
+		Value = canonicalFromStandRow(player, standName, row),
+	}
+end
+
+function CrewStandIncomeAuthority.BuildIncomeToCollectOperation(player, standName, value, accruedAtUnix)
+	return CrewStandIncomeAuthority.BuildStandSetOperation(player, standName, {
+		IncomeToCollect = tonumber(value) or 0,
+		LastAccruedAtUnix = math.max(0, math.floor(tonumber(accruedAtUnix) or os.time())),
+	})
+end
+
+function CrewStandIncomeAuthority.BuildClearStandOperation(player, standName)
+	return CrewStandIncomeAuthority.BuildStandSetOperation(player, standName, {
+		CrewMemberName = "",
+		CrewMemberInstanceId = "",
+		IncomeToCollect = 0,
+		LastAccruedAtUnix = os.time(),
+		StandLevel = 1,
+	})
+end
+
+function CrewStandIncomeAuthority.RecordExternalIncomeWrite(count)
+	local diagnostics = getDiagnostics()
+	if diagnostics and typeof(diagnostics.RecordIncomeWrite) == "function" then
+		diagnostics.RecordIncomeWrite(math.max(1, tonumber(count) or 1))
+	end
+end
+
 function CrewStandIncomeAuthority.SetStandLevel(player, standName, level, sourcePath)
 	return CrewStandIncomeAuthority.UpdateStandData(player, standName, {
 		StandLevel = CrewIncomeBalance.NormalizeLevel(level),
@@ -366,6 +447,7 @@ function CrewStandIncomeAuthority.ClearStandData(player, standName, sourcePath)
 		CrewMemberName = "",
 		CrewMemberInstanceId = "",
 		IncomeToCollect = 0,
+		LastAccruedAtUnix = os.time(),
 		StandLevel = 1,
 	}, sourcePath or "stand_clear")
 end

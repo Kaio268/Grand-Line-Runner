@@ -3,8 +3,11 @@ local TweenService = game:GetService("TweenService")
 local ReplicatedFirst = game:GetService("ReplicatedFirst")
 local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
+local loadStartedAt = os.clock()
+local joinTimestamp = os.time()
 local Responsive = nil
 
 do
@@ -38,6 +41,10 @@ local STARTUP_CRITICAL_ASSETS_TIMED_OUT_ATTRIBUTE = "StartupCriticalAssetsTimedO
 local STARTUP_LOADING_TIMED_OUT_ATTRIBUTE = "StartupLoadingTimedOut"
 local STARTUP_BACKGROUND_PRELOAD_COMPLETE_ATTRIBUTE = "StartupBackgroundPreloadComplete"
 
+local REMOTES_FOLDER_NAME = "Remotes"
+local LOAD_TELEMETRY_REMOTE_NAME = "GTRLoadTelemetry"
+local SLOW_LOAD_THRESHOLD_SECONDS = 12
+local POST_CLOSE_RECOVERY_DELAY_SECONDS = 4
 local FALLBACK_DISPLAY_ORDER = 10000
 local SOURCE_TEMPLATE_STYLE_MARKER = "UseLoadingScreenDefaultStyle"
 local BACKGROUND_IMAGE_ASSET = "rbxassetid://124045609313388"
@@ -148,40 +155,356 @@ local BACKGROUND_PRELOAD_BATCHES = {
 	},
 }
 
+local playerGui: PlayerGui? = nil
+local loadingScreenGui: ScreenGui? = nil
+local loadingRoot: GuiObject? = nil
+local reactContext = nil
+local loadingScreenDestroying = false
+local loadingScreenFinished = false
+local telemetrySubmitted = false
+local overlayRecoveryApplied = false
+local cameraRecoveryApplied = false
+local closeReason = "unknown"
+local closeTimedOut = false
+local lastMissingMilestones = ""
+
+local loadSummary = {
+	UserId = player.UserId,
+	JoinTimestamp = joinTimestamp,
+	LoadDuration = 0,
+	CloseReason = "unknown",
+	TimedOut = false,
+	OverlayRecovery = false,
+	CameraRecovery = false,
+	MissingMilestones = "",
+	DeviceInputType = "unknown",
+	BootstrapError = false,
+	DataInitError = false,
+	SlowThresholdSeconds = SLOW_LOAD_THRESHOLD_SECONDS,
+}
+
+local function getLoadDuration(): number
+	return math.max(0, os.clock() - loadStartedAt)
+end
+
+local function sanitizeLogValue(value: any): string
+	local text = tostring(value)
+	text = text:gsub("%s+", "_")
+	return text
+end
+
+local function getFullPath(inst: Instance?): string
+	if not inst then
+		return "nil"
+	end
+	local ok, fullName = pcall(function()
+		return inst:GetFullName()
+	end)
+	return ok and fullName or tostring(inst)
+end
+
+local function logGtrLoad(status: string, reason: string, extras: {[string]: any}?, useWarn: boolean?)
+	local fields = {
+		"[GTR_LOAD]",
+		"player=" .. sanitizeLogValue(player.Name),
+		"userId=" .. tostring(player.UserId),
+		"status=" .. sanitizeLogValue(status),
+		string.format("duration=%.2f", getLoadDuration()),
+		"reason=" .. sanitizeLogValue(reason),
+	}
+
+	if extras then
+		for key, value in pairs(extras) do
+			fields[#fields + 1] = sanitizeLogValue(key) .. "=" .. sanitizeLogValue(value)
+		end
+	end
+
+	local message = table.concat(fields, " ")
+	if useWarn then
+		warn(message)
+	else
+		print(message)
+	end
+end
+
+local function getDeviceInputType(): string
+	local ok, inputType = pcall(function()
+		return UserInputService:GetLastInputType()
+	end)
+	if ok and inputType then
+		return tostring(inputType.Name)
+	end
+	if UserInputService.TouchEnabled then
+		return "Touch"
+	end
+	if UserInputService.GamepadEnabled then
+		return "Gamepad"
+	end
+	if UserInputService.KeyboardEnabled then
+		return "Keyboard"
+	end
+	return "unknown"
+end
+
+local function isAlive(inst: Instance?): boolean
+	return inst ~= nil and inst.Parent ~= nil and inst:IsDescendantOf(game)
+end
+
+local function setSummaryField(key: string, value: any)
+	loadSummary[key] = value
+end
+
+local function copyLoadSummary(): {[string]: any}
+	loadSummary.LoadDuration = getLoadDuration()
+	loadSummary.DeviceInputType = getDeviceInputType()
+	loadSummary.CloseReason = closeReason
+	loadSummary.TimedOut = closeTimedOut
+	loadSummary.OverlayRecovery = overlayRecoveryApplied
+	loadSummary.CameraRecovery = cameraRecoveryApplied
+	loadSummary.MissingMilestones = lastMissingMilestones
+
+	local copy = {}
+	for key, value in pairs(loadSummary) do
+		local valueType = typeof(value)
+		if valueType == "string" or valueType == "number" or valueType == "boolean" then
+			copy[key] = value
+		end
+	end
+	return copy
+end
+
+local function submitLoadTelemetry()
+	if telemetrySubmitted then
+		return
+	end
+	telemetrySubmitted = true
+	local payload = copyLoadSummary()
+
+	task.spawn(function()
+		local remotes = ReplicatedStorage:FindFirstChild(REMOTES_FOLDER_NAME)
+			or ReplicatedStorage:WaitForChild(REMOTES_FOLDER_NAME, 5)
+		if not remotes then
+			return
+		end
+
+		local remote = remotes:FindFirstChild(LOAD_TELEMETRY_REMOTE_NAME)
+			or remotes:WaitForChild(LOAD_TELEMETRY_REMOTE_NAME, 5)
+		if remote and remote:IsA("RemoteEvent") then
+			pcall(function()
+				remote:FireServer(payload)
+			end)
+		end
+	end)
+end
+
+local function setPlayerGuiOrPlayerAttribute(attributeName: string, value: any)
+	if playerGui and playerGui.Parent then
+		playerGui:SetAttribute(attributeName, value)
+	else
+		player:SetAttribute(attributeName, value)
+	end
+end
+
+local function mirrorLoadingAttributesToPlayerGui(gui: PlayerGui)
+	for _, attributeName in ipairs({
+		LOADING_SCREEN_ACTIVE_ATTRIBUTE,
+		LOADING_SCREEN_COMPLETE_ATTRIBUTE,
+		STARTUP_LOADING_STARTED_AT_ATTRIBUTE,
+		STARTUP_LOADING_TIMED_OUT_ATTRIBUTE,
+	}) do
+		local value = player:GetAttribute(attributeName)
+		if value ~= nil then
+			gui:SetAttribute(attributeName, value)
+		end
+	end
+end
+
+local function setLoadingCompleteAttributes()
+	setPlayerGuiOrPlayerAttribute(LOADING_SCREEN_ACTIVE_ATTRIBUTE, false)
+	setPlayerGuiOrPlayerAttribute(LOADING_SCREEN_COMPLETE_ATTRIBUTE, true)
+end
+
+local function isActualLoadingScreenObject(inst: Instance): boolean
+	return loadingScreenDestroying
+		and loadingScreenGui ~= nil
+		and (inst == loadingScreenGui or inst:IsDescendantOf(loadingScreenGui))
+end
+
+local function isFullscreenBlackOverlay(guiObject: GuiObject, viewportSize: Vector2): boolean
+	if isActualLoadingScreenObject(guiObject) then
+		return false
+	end
+	if not guiObject.Visible then
+		return false
+	end
+	if viewportSize.X <= 0 or viewportSize.Y <= 0 then
+		return false
+	end
+
+	local size = guiObject.AbsoluteSize
+	if size.X < viewportSize.X * 0.9 or size.Y < viewportSize.Y * 0.9 then
+		return false
+	end
+
+	local transparency = guiObject.BackgroundTransparency
+	if transparency > 0.25 then
+		return false
+	end
+
+	local color = guiObject.BackgroundColor3
+	return color.R <= 0.08 and color.G <= 0.08 and color.B <= 0.08
+end
+
+local function findBlackOverlays(gui: PlayerGui?): {GuiObject}
+	local overlays = {}
+	if not gui then
+		return overlays
+	end
+
+	local camera = workspace.CurrentCamera
+	local viewportSize = camera and camera.ViewportSize or Vector2.zero
+	for _, descendant in ipairs(gui:GetDescendants()) do
+		if descendant:IsA("GuiObject") and isFullscreenBlackOverlay(descendant, viewportSize) then
+			overlays[#overlays + 1] = descendant
+		end
+	end
+
+	return overlays
+end
+
+local function getCharacterHumanoid(): (Model?, Humanoid?)
+	local character = player.Character
+	if not character or not character.Parent then
+		return character, nil
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	return character, humanoid
+end
+
+local function verifyPostLoadingState(sourceReason: string)
+	local currentGui = playerGui
+	if not currentGui or not currentGui.Parent then
+		currentGui = player:FindFirstChildOfClass("PlayerGui")
+		playerGui = currentGui
+	end
+	if currentGui then
+		mirrorLoadingAttributesToPlayerGui(currentGui)
+	end
+
+	local character, humanoid = getCharacterHumanoid()
+	local camera = workspace.CurrentCamera
+	local cameraSubjectValid = camera ~= nil and camera.CameraSubject ~= nil
+	local overlays = findBlackOverlays(currentGui)
+
+	local needsRecovery = currentGui == nil
+		or character == nil
+		or humanoid == nil
+		or not cameraSubjectValid
+		or #overlays > 0
+
+	if not needsRecovery then
+		submitLoadTelemetry()
+		return
+	end
+
+	for _, overlay in ipairs(overlays) do
+		local path = getFullPath(overlay)
+		overlay.Visible = false
+		overlayRecoveryApplied = true
+		logGtrLoad("recovered", "overlay_hidden", {
+			path = path,
+			source = sourceReason,
+		}, true)
+	end
+
+	if camera and humanoid and camera.CameraSubject ~= humanoid then
+		camera.CameraType = Enum.CameraType.Custom
+		camera.CameraSubject = humanoid
+		cameraRecoveryApplied = true
+		logGtrLoad("recovered", "camera_subject_restored", {
+			source = sourceReason,
+		}, true)
+	end
+
+	task.defer(function()
+		local latestCharacter, latestHumanoid = getCharacterHumanoid()
+		local latestCamera = workspace.CurrentCamera
+		local latestGui = playerGui or player:FindFirstChildOfClass("PlayerGui")
+		local remainingOverlays = findBlackOverlays(latestGui)
+		local latestCameraValid = latestCamera ~= nil and latestCamera.CameraSubject ~= nil
+		if latestGui == nil or latestCharacter == nil or latestHumanoid == nil or not latestCameraValid or #remainingOverlays > 0 then
+			logGtrLoad("recovery_incomplete", "post_close_invalid", {
+				playerGui = tostring(latestGui ~= nil),
+				character = tostring(latestCharacter ~= nil),
+				humanoid = tostring(latestHumanoid ~= nil),
+				cameraSubject = tostring(latestCameraValid),
+				blackOverlays = tostring(#remainingOverlays),
+				source = sourceReason,
+			}, true)
+		end
+		submitLoadTelemetry()
+	end)
+end
+
+local function schedulePostCloseRecovery(reason: string)
+	task.delay(POST_CLOSE_RECOVERY_DELAY_SECONDS, function()
+		verifyPostLoadingState(reason)
+	end)
+end
+
 local function removeDefaultLoadingScreen()
 	pcall(function()
 		ReplicatedFirst:RemoveDefaultLoadingScreen()
 	end)
 end
 
-local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", PLAYER_GUI_TIMEOUT_SECONDS)
+playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", PLAYER_GUI_TIMEOUT_SECONDS)
 if not playerGui then
-	warn(string.format(
-		"[LoadingScreen] PlayerGui was not available for %s(%d) after %.1fs; keeping the Roblox default loading screen.",
-		player.Name,
-		player.UserId,
-		PLAYER_GUI_TIMEOUT_SECONDS
-	))
+	removeDefaultLoadingScreen()
+	closeReason = "playergui_missing"
+	lastMissingMilestones = table.concat({
+		STARTUP_DATA_REQUEST_SENT_ATTRIBUTE,
+		STARTUP_HUD_READY_ATTRIBUTE,
+		STARTUP_CHARACTER_OBSERVED_ATTRIBUTE,
+	}, ",")
+	setLoadingCompleteAttributes()
+	logGtrLoad("fail_open", "playergui_missing", {
+		missingMilestones = lastMissingMilestones,
+	}, true)
+	task.spawn(function()
+		local latePlayerGui = player:WaitForChild("PlayerGui", 10)
+		if latePlayerGui and latePlayerGui:IsA("PlayerGui") then
+			playerGui = latePlayerGui
+			mirrorLoadingAttributesToPlayerGui(latePlayerGui)
+			local lateLoadingScreen = latePlayerGui:FindFirstChild("LoadingScreen")
+			if lateLoadingScreen then
+				local path = getFullPath(lateLoadingScreen)
+				lateLoadingScreen:Destroy()
+				logGtrLoad("recovered", "late_playergui_loading_destroyed", {
+					path = path,
+				}, true)
+			end
+		end
+	end)
+	schedulePostCloseRecovery("playergui_missing")
 	return
 end
 
 local function setStartupAttribute(attributeName: string, value: any)
-	if playerGui and playerGui.Parent then
-		playerGui:SetAttribute(attributeName, value)
-	end
+	setPlayerGuiOrPlayerAttribute(attributeName, value)
 end
 
 local function isStartupAttributeTrue(attributeName: string): boolean
-	return playerGui:GetAttribute(attributeName) == true
+	if playerGui and playerGui.Parent then
+		return playerGui:GetAttribute(attributeName) == true
+	end
+	return player:GetAttribute(attributeName) == true
 end
 
 setStartupAttribute(LOADING_SCREEN_ACTIVE_ATTRIBUTE, true)
 setStartupAttribute(LOADING_SCREEN_COMPLETE_ATTRIBUTE, false)
 setStartupAttribute(STARTUP_LOADING_STARTED_AT_ATTRIBUTE, os.clock())
-
-local function isAlive(inst: Instance?): boolean
-	return inst ~= nil and inst.Parent ~= nil and inst:IsDescendantOf(game)
-end
 
 local function ensureChild(parent: Instance, className: string, name: string): Instance
 	local existing = parent:FindFirstChild(name)
@@ -462,9 +785,9 @@ local function mountLoadingScreen(): (ScreenGui, GuiObject)
 	return createFallbackLoadingScreen()
 end
 
-local screenGui, root = mountLoadingScreen()
+loadingScreenGui, loadingRoot = mountLoadingScreen()
 removeDefaultLoadingScreen()
-local rootScale = ensureUIScale(root)
+local rootScale = ensureUIScale(loadingRoot)
 rootScale.Scale = getLoadingUiScale()
 local statusLabel: TextLabel? = nil
 local tipLabel: TextLabel? = nil
@@ -482,20 +805,19 @@ local loadingState = {
 	tip = TIP_MESSAGES[1],
 }
 
-local reactContext = nil
 local reactHydrationFailed = false
 local fallbackVisualsHidden = false
 local lastReactRenderAt = 0
 
 local function setFallbackVisualsVisible(visible: boolean)
-	if root and root:IsA("GuiObject") and isAlive(root) then
-		root.Visible = visible
+	if loadingRoot and loadingRoot:IsA("GuiObject") and isAlive(loadingRoot) then
+		loadingRoot.Visible = visible
 	end
 	fallbackVisualsHidden = not visible
 end
 
 local function renderReactLoading(force: boolean?)
-	if not reactContext or not isAlive(screenGui) then
+	if not reactContext or not isAlive(loadingScreenGui) then
 		return
 	end
 
@@ -516,7 +838,7 @@ local function renderReactLoading(force: boolean?)
 			statusMessage = loadingState.statusMessage,
 			timedOut = loadingState.timedOut,
 			tip = loadingState.tip,
-		}), screenGui))
+		}), loadingScreenGui))
 	end)
 
 	if not ok then
@@ -553,7 +875,7 @@ local function waitForChildBounded(parent: Instance, childName: string, timeoutS
 	end
 
 	local deadline = os.clock() + timeoutSeconds
-	while os.clock() < deadline and isAlive(screenGui) do
+	while os.clock() < deadline and isAlive(loadingScreenGui) do
 		existing = parent:FindFirstChild(childName)
 		if existing then
 			return existing
@@ -602,13 +924,13 @@ local function startReactHydration()
 			return
 		end
 
-		if not isAlive(screenGui) then
+		if not isAlive(loadingScreenGui) then
 			return
 		end
 
 		local rootContainer = Instance.new("Folder")
 		rootContainer.Name = "ReactLoadingScreenRoot"
-		rootContainer.Parent = screenGui
+		rootContainer.Parent = loadingScreenGui
 
 		reactContext = {
 			React = React,
@@ -633,7 +955,7 @@ local characterConnection = player.CharacterAdded:Connect(function()
 end)
 
 do
-	local bar = root:FindFirstChild("Bar")
+	local bar = loadingRoot:FindFirstChild("Bar")
 	if bar then
 		local main = bar:FindFirstChild("Main")
 		if main and main:IsA("GuiObject") then
@@ -696,7 +1018,7 @@ end
 startReactHydration()
 
 do
-	local gradientContainer = root:FindFirstChild("Gradinet")
+	local gradientContainer = loadingRoot:FindFirstChild("Gradinet")
 	if gradientContainer then
 		for _, descendant in ipairs(gradientContainer:GetDescendants()) do
 			if descendant:IsA("UIGradient") then
@@ -711,7 +1033,7 @@ do
 end
 
 do
-	local loadingObj = root:FindFirstChild("Loading")
+	local loadingObj = loadingRoot:FindFirstChild("Loading")
 	if loadingObj and loadingObj:IsA("TextLabel") then
 		local label = loadingObj
 		local labelScale = ensureUIScale(label)
@@ -736,7 +1058,7 @@ do
 end
 
 do
-	local randomLabel = root:FindFirstChild("TextLabel")
+	local randomLabel = loadingRoot:FindFirstChild("TextLabel")
 	if randomLabel and randomLabel:IsA("TextLabel") then
 		statusLabel = randomLabel
 		local scale = ensureUIScale(randomLabel)
@@ -791,7 +1113,7 @@ do
 end
 
 do
-	local tipObj = root:FindFirstChild("Tip")
+	local tipObj = loadingRoot:FindFirstChild("Tip")
 	if tipObj and tipObj:IsA("TextLabel") then
 		tipLabel = tipObj
 		local rng = Random.new()
@@ -900,7 +1222,7 @@ local function collectCriticalPreloadItems(): {any}
 		addPreloadItem(list, seen, assetId)
 	end
 
-	addPreloadablesFrom(screenGui, list, seen, 120)
+	addPreloadablesFrom(loadingScreenGui, list, seen, 120)
 	return list
 end
 
@@ -961,6 +1283,7 @@ local function preloadItems(items: {any}, onProgress: ((number) -> ())?): (boole
 end
 
 local backgroundPreloadStarted = false
+local getMissingStartupMilestones
 
 local function startBackgroundPreload()
 	if backgroundPreloadStarted then
@@ -989,16 +1312,20 @@ local function startBackgroundPreload()
 end
 
 local function markLoadingScreenFinished()
+	if loadingScreenFinished then
+		setLoadingCompleteAttributes()
+		return
+	end
+	loadingScreenFinished = true
 	if characterConnection and characterConnection.Connected then
 		characterConnection:Disconnect()
 	end
 
-	setStartupAttribute(LOADING_SCREEN_ACTIVE_ATTRIBUTE, false)
-	setStartupAttribute(LOADING_SCREEN_COMPLETE_ATTRIBUTE, true)
+	setLoadingCompleteAttributes()
 end
 
 local function fadeOutAndDestroy()
-	if not isAlive(screenGui) then
+	if not isAlive(loadingScreenGui) then
 		markLoadingScreenFinished()
 		return
 	end
@@ -1009,7 +1336,7 @@ local function fadeOutAndDestroy()
 	local fadeInfo = TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut)
 	local shrinkInfo = TweenInfo.new(0.6, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 
-	for _, inst in ipairs(screenGui:GetDescendants()) do
+	for _, inst in ipairs(loadingScreenGui:GetDescendants()) do
 		if inst:IsA("UIStroke") then
 			table.insert(tweens, TweenService:Create(inst, fadeInfo, { Transparency = 1 }))
 		elseif inst:IsA("TextLabel") or inst:IsA("TextButton") then
@@ -1044,11 +1371,74 @@ local function fadeOutAndDestroy()
 		reactContext = nil
 	end
 
-	if isAlive(screenGui) then
-		screenGui:Destroy()
+	if isAlive(loadingScreenGui) then
+		loadingScreenGui:Destroy()
 	end
 
 	markLoadingScreenFinished()
+end
+
+local function forceFinalLoadingCleanup(reason: string, errorMessage: string?)
+	loadingScreenDestroying = true
+	if reactContext then
+		pcall(function()
+			reactContext.Root:unmount()
+		end)
+		if reactContext.Container then
+			pcall(function()
+				reactContext.Container:Destroy()
+			end)
+		end
+		reactContext = nil
+	end
+
+	if loadingScreenGui and loadingScreenGui.Parent then
+		pcall(function()
+			loadingScreenGui:Destroy()
+		end)
+	end
+
+	if playerGui and playerGui.Parent then
+		local lingering = playerGui:FindFirstChild("LoadingScreen")
+		if lingering then
+			pcall(function()
+				lingering:Destroy()
+			end)
+		end
+	end
+
+	markLoadingScreenFinished()
+	if errorMessage then
+		logGtrLoad("fail_open", reason, {
+			error = errorMessage,
+		}, true)
+	end
+end
+
+local function safeFadeOutAndDestroy(reason: string, timedOut: boolean?)
+	if loadingScreenFinished then
+		return
+	end
+
+	closeReason = reason
+	closeTimedOut = timedOut == true
+	setSummaryField("CloseReason", closeReason)
+	setSummaryField("TimedOut", closeTimedOut)
+	lastMissingMilestones = table.concat(getMissingStartupMilestones(), ",")
+	setSummaryField("MissingMilestones", lastMissingMilestones)
+
+	loadingScreenDestroying = true
+	local ok, err = xpcall(fadeOutAndDestroy, debug.traceback)
+	if not ok then
+		forceFinalLoadingCleanup("fade_destroy_error", tostring(err))
+	else
+		forceFinalLoadingCleanup(reason, nil)
+	end
+
+	logGtrLoad(if closeTimedOut then "timeout" else "closed", reason, {
+		missingMilestones = if lastMissingMilestones ~= "" then lastMissingMilestones else "none",
+	}, closeTimedOut)
+	schedulePostCloseRecovery(reason)
 end
 
 local function getStartupMilestoneProgress(): number
@@ -1065,7 +1455,7 @@ local function getStartupMilestoneProgress(): number
 	return progress
 end
 
-local function getMissingStartupMilestones(): {string}
+function getMissingStartupMilestones(): {string}
 	local missing = {}
 	if not isStartupAttributeTrue(STARTUP_DATA_REQUEST_SENT_ATTRIBUTE) then
 		missing[#missing + 1] = STARTUP_DATA_REQUEST_SENT_ATTRIBUTE
@@ -1090,6 +1480,7 @@ task.spawn(function()
 	local criticalDone = false
 	local criticalTimedOut = false
 	local maxTimedOut = false
+	local finalCloseReason = "startup_ready"
 	local startTime = os.clock()
 
 	task.spawn(function()
@@ -1108,7 +1499,7 @@ task.spawn(function()
 	end)
 
 	local displayed = 0
-	while isAlive(screenGui) do
+	while isAlive(loadingScreenGui) do
 		local elapsed = os.clock() - startTime
 
 		if not criticalDone and not criticalTimedOut and elapsed >= CRITICAL_PRELOAD_TIMEOUT_SECONDS then
@@ -1130,6 +1521,7 @@ task.spawn(function()
 
 		if elapsed >= MAX_LOADING_SCREEN_SECONDS then
 			maxTimedOut = true
+			finalCloseReason = "startup_visual_cover_max"
 			setStartupAttribute(STARTUP_LOADING_TIMED_OUT_ATTRIBUTE, true)
 			setLoadingState({
 				phase = "Startup timeout",
@@ -1148,6 +1540,7 @@ task.spawn(function()
 
 		if elapsed >= EMERGENCY_WATCHDOG_SECONDS then
 			maxTimedOut = true
+			finalCloseReason = "emergency_watchdog"
 			setStartupAttribute(STARTUP_LOADING_TIMED_OUT_ATTRIBUTE, true)
 			setLoadingState({
 				phase = "Emergency timeout",
@@ -1190,7 +1583,7 @@ task.spawn(function()
 	}, true)
 	setFallbackBarProgress(1)
 	task.wait(0.2)
-	fadeOutAndDestroy()
+	safeFadeOutAndDestroy(finalCloseReason, maxTimedOut)
 	if not criticalTimedOut then
 		startBackgroundPreload()
 	elseif reactHydrationFailed then

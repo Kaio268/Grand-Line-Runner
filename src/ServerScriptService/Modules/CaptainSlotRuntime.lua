@@ -7,7 +7,9 @@ local Configs = Modules:WaitForChild("Configs")
 
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
+local GTRPerformanceDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRPerformanceDiagnostics"))
 local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
+local PlacedCrewState = require(Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
 local IncomeClaimMath = require(ServerScriptService.Modules:WaitForChild("IncomeClaimMath"))
 local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
@@ -20,10 +22,13 @@ local CaptainSlotRuntime = {}
 local CAPTAIN_SLOT_KEY = CrewSlotAssignmentReconciler.CaptainSlotKey or ShipSlotService.CaptainSlotKey or "Captain"
 local CAPTAIN_SLOT_DATA_PATH = "Ship.CaptainSlot"
 local CAPTAIN_INCOME_FIELD = "IncomeToCollect"
+local CAPTAIN_LAST_ACCRUED_FIELD = "LastAccruedAtUnix"
 local CAPTAIN_INCOME_PATH = CAPTAIN_SLOT_DATA_PATH .. "." .. CAPTAIN_INCOME_FIELD
+local CAPTAIN_LAST_ACCRUED_PATH = CAPTAIN_SLOT_DATA_PATH .. "." .. CAPTAIN_LAST_ACCRUED_FIELD
 local PLACEMENT_PICKUP_GUARD_SECONDS = 1.25
 local CLAIM_TOUCH_DEBOUNCE_SECONDS = 0.35
-local INCOME_TICK_SECONDS = 1
+local INCOME_TICK_SECONDS = 5
+local SAFETY_FLUSH_INTERVAL_SECONDS = 60
 local LOCKED_LABEL = "LOCKED"
 local EMPTY_LABEL = "CAPTAIN"
 
@@ -223,17 +228,15 @@ local function getCaptainAssignmentCrewName(player, assignment)
 	return crewMemberName, instanceId
 end
 
-local function getCaptainIncomeToCollect(player, captainSlot)
-	captainSlot = if typeof(captainSlot) == "table" then captainSlot else dmGet(player, CAPTAIN_SLOT_DATA_PATH)
-	if typeof(captainSlot) ~= "table" then
-		return 0
-	end
-
-	return math.max(0, tonumber(captainSlot[CAPTAIN_INCOME_FIELD]) or 0)
-end
-
 local function setCaptainIncomeToCollect(player, amount)
-	return dmSet(player, CAPTAIN_INCOME_PATH, math.max(0, tonumber(amount) or 0))
+	local ok = dmSet(player, CAPTAIN_INCOME_PATH, math.max(0, tonumber(amount) or 0))
+	if ok then
+		dmSet(player, CAPTAIN_LAST_ACCRUED_PATH, os.time())
+		if typeof(GTRPerformanceDiagnostics.RecordIncomeWrite) == "function" then
+			GTRPerformanceDiagnostics.RecordIncomeWrite(1)
+		end
+	end
+	return ok
 end
 
 local function getBaseIncome(player, crewMemberName, instanceId)
@@ -359,9 +362,38 @@ local function buildCaptainClaimSummary(player, crewMemberName, instanceId, pend
 	)
 end
 
+local function getCaptainRawIncomeToCollect(player, captainSlot)
+	captainSlot = if typeof(captainSlot) == "table" then captainSlot else dmGet(player, CAPTAIN_SLOT_DATA_PATH)
+	if typeof(captainSlot) ~= "table" then
+		return 0
+	end
+
+	local baseIncome = math.max(0, tonumber(captainSlot[CAPTAIN_INCOME_FIELD]) or 0)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, captainSlot)
+	if crewMemberName == "" then
+		return baseIncome
+	end
+
+	local lastAccruedAtUnix = math.max(0, math.floor(tonumber(captainSlot[CAPTAIN_LAST_ACCRUED_FIELD]) or 0))
+	if lastAccruedAtUnix <= 0 then
+		return baseIncome
+	end
+
+	local elapsed = math.max(0, os.time() - lastAccruedAtUnix)
+	if elapsed <= 0 then
+		return baseIncome
+	end
+
+	return math.max(0, baseIncome + (getCaptainBankAmountPerTick(player, crewMemberName, instanceId) * elapsed))
+end
+
+local function materializeCaptainIncome(player)
+	return setCaptainIncomeToCollect(player, getCaptainRawIncomeToCollect(player))
+end
+
 local function getCaptainDisplayIncome(player, crewMemberName, instanceId)
 	local assignment = getSavedCaptainAssignment(player)
-	local pending = getCaptainIncomeToCollect(player, assignment)
+	local pending = getCaptainRawIncomeToCollect(player, assignment)
 	return buildCaptainClaimSummary(player, crewMemberName, instanceId, pending).FinalAmount
 end
 
@@ -504,6 +536,9 @@ local function setRuntimeHasCaptain(player, hasCaptain)
 	end
 end
 
+local publishCaptainPlacedState
+local syncCaptainOverhead
+
 local function logCrewSwitchFailure(player, reason, detail)
 	if typeof(callbacks.LogCrewSwitchFailure) == "function" then
 		callbacks.LogCrewSwitchFailure(player, CAPTAIN_SLOT_KEY, reason, detail)
@@ -580,7 +615,7 @@ local function renderAssignedCaptain(player, runtime)
 	end
 
 	local assignment = getSavedCaptainAssignment(player)
-	local crewMemberName = getCaptainAssignmentCrewName(player, assignment)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
 	local hasCaptain = crewMemberName ~= ""
 	setRuntimeHasCaptain(player, hasCaptain)
 	if not hasCaptain then
@@ -592,23 +627,40 @@ local function renderAssignedCaptain(player, runtime)
 		return
 	end
 
-	local spawnCrewMember = callbacks.SpawnCrewMember
-	if typeof(spawnCrewMember) ~= "function" then
-		logCrewSwitchFailure(player, "captain_visual_refresh_failed", "missing_spawn_callback")
+	local enqueueVisualRestore = callbacks.EnqueueVisualRestore
+	if typeof(enqueueVisualRestore) ~= "function" then
+		logCrewSwitchFailure(player, "captain_visual_refresh_failed", "missing_visual_restore_queue")
 		updatePromptText(player, runtime)
 		updateCaptainMoneyText(player, runtime, assignment)
 		updateCaptainLevelUpUI(player, runtime, assignment, true)
 		return
 	end
 
-	local placedModel, visualReason = spawnCrewMember(player, runtime.CaptainSpot, runtime.Handle, crewMemberName)
-	if not placedModel then
+	local visualQueued, visualReason = false, "already_spawned"
+	if runtime.CaptainSpot:GetAttribute(PlacedCrewState.Attribute.Active) ~= true then
+		visualQueued, visualReason = enqueueVisualRestore(player, runtime.CaptainSpot, runtime.Handle, crewMemberName, {
+			CrewMemberInstanceId = instanceId,
+			Priority = 0,
+			Source = "captain_restore",
+		})
+	end
+	if
+		visualQueued ~= true
+		and visualReason ~= "already_spawned"
+		and visualReason ~= "already_pending"
+		and visualReason ~= "updated_pending"
+	then
 		logCrewSwitchFailure(
 			player,
 			"captain_visual_refresh_failed",
 			string.format("reason=%s", tostring(visualReason or "unknown"))
 		)
 	end
+	syncCaptainOverhead(player, runtime, crewMemberName, {
+		Reason = "captain_render_refresh",
+		RefreshIncomeTimestamp = true,
+		RefreshUpdatedTimestamp = true,
+	})
 	updatePromptText(player, runtime)
 	setClaimTouchEnabled(runtime, true)
 	updateCaptainMoneyText(player, runtime, assignment)
@@ -670,6 +722,7 @@ local function assignEquippedCaptain(player, runtime)
 		callbacks.GetCrewMemberLevel(player, placedInstanceId)
 	end
 	setPlacementPickupGuard(player)
+	materializeCaptainIncome(player)
 
 	local spawnCrewMember = callbacks.SpawnCrewMember
 	if typeof(spawnCrewMember) == "function" then
@@ -733,6 +786,7 @@ local function switchEquippedCaptain(player, runtime, equippedInfo)
 		callbacks.GetCrewMemberLevel(player, incomingInstanceId)
 	end
 	setPlacementPickupGuard(player)
+	materializeCaptainIncome(player)
 
 	local spawnCrewMember = callbacks.SpawnCrewMember
 	if typeof(spawnCrewMember) == "function" then
@@ -893,7 +947,7 @@ local function collectCaptainIncome(player, activeShip, runtime)
 		return
 	end
 
-	local baseToCollect = getCaptainIncomeToCollect(player, assignment)
+	local baseToCollect = getCaptainRawIncomeToCollect(player, assignment)
 	if baseToCollect <= 0 then
 		updateCaptainMoneyText(player, runtime, assignment)
 		return
@@ -910,6 +964,11 @@ local function collectCaptainIncome(player, activeShip, runtime)
 	if not setCaptainIncomeToCollect(player, remainingRawIncome) then
 		return
 	end
+	publishCaptainPlacedState(player, runtime, crewMemberName, {
+		Reason = "captain_income_claim",
+		RefreshIncomeTimestamp = true,
+		RefreshUpdatedTimestamp = true,
+	})
 
 	dmAdd(player, CurrencyUtil.getPrimaryPath(), collected, { ApplyTitleBuff = false })
 	dmAdd(player, CurrencyUtil.getTotalPath(), collected, { ApplyTitleBuff = false })
@@ -963,21 +1022,38 @@ local function bindClaimHitBox(player, activeShip, runtime)
 	end)
 end
 
-local function syncCaptainOverhead(player, runtime, crewMemberName)
+publishCaptainPlacedState = function(player, runtime, crewMemberName, options)
 	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
-		return
+		return false, "captain_spot_unavailable"
 	end
-	if typeof(callbacks.SyncPlacedOverheadMetadata) ~= "function" then
-		return
+	if typeof(callbacks.PublishPlacedCrewState) ~= "function" then
+		return false, "publish_unavailable"
+	end
+
+	crewMemberName = tostring(crewMemberName or "")
+	if crewMemberName == "" then
+		crewMemberName = getCaptainAssignmentCrewName(player, getSavedCaptainAssignment(player))
+	end
+	if crewMemberName == "" then
+		return false, "missing_captain"
+	end
+
+	return callbacks.PublishPlacedCrewState(player, runtime.CaptainSpot, crewMemberName, options)
+end
+
+syncCaptainOverhead = function(player, runtime, crewMemberName, options)
+	if not runtime or not runtime.CaptainSpot or not runtime.CaptainSpot.Parent then
+		return false, "captain_spot_unavailable"
 	end
 
 	local placedModel = runtime.CaptainSpot:FindFirstChild("PlacedCrewMember")
-	if placedModel and placedModel:IsA("Model") then
+	if placedModel and placedModel:IsA("Model") and typeof(callbacks.SyncPlacedOverheadMetadata) == "function" then
 		callbacks.SyncPlacedOverheadMetadata(player, runtime.CaptainSpot, crewMemberName, placedModel)
 	end
+	return publishCaptainPlacedState(player, runtime, crewMemberName, options)
 end
 
-local function bankCaptainIncome(player, runtime)
+local function bankCaptainIncome(player, runtime, materializeIncome)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent == nil then
 		CaptainSlotRuntime.CleanupPlayer(player)
 		return
@@ -1012,7 +1088,7 @@ local function bankCaptainIncome(player, runtime)
 	setClaimTouchEnabled(runtime, true)
 
 	local assignment = getSavedCaptainAssignment(player)
-	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	local crewMemberName = getCaptainAssignmentCrewName(player, assignment)
 	if crewMemberName == "" then
 		setRuntimeHasCaptain(player, false)
 		updatePromptText(player, runtime)
@@ -1022,13 +1098,15 @@ local function bankCaptainIncome(player, runtime)
 	end
 
 	setRuntimeHasCaptain(player, true)
-	local incomeDelta = getCaptainBankAmountPerTick(player, crewMemberName, instanceId)
-	if incomeDelta > 0 then
-		local nextIncome = getCaptainIncomeToCollect(player, assignment) + incomeDelta
-		setCaptainIncomeToCollect(player, nextIncome)
+	if materializeIncome == true then
+		if materializeCaptainIncome(player) then
+			publishCaptainPlacedState(player, runtime, crewMemberName, {
+				Reason = "captain_income_safety_flush",
+				RefreshIncomeTimestamp = true,
+				RefreshUpdatedTimestamp = true,
+			})
+		end
 	end
-
-	syncCaptainOverhead(player, runtime, crewMemberName)
 	updatePromptText(player, runtime)
 	updateCaptainMoneyText(player, runtime)
 	updateCaptainLevelUpUI(player, runtime, assignment, false)
@@ -1041,12 +1119,18 @@ local function ensureIncomeLoopStarted()
 	incomeLoopStarted = true
 
 	task.spawn(function()
+		local nextSafetyFlushAt = os.clock() + SAFETY_FLUSH_INTERVAL_SECONDS
 		while true do
 			task.wait(INCOME_TICK_SECONDS)
+			local now = os.clock()
+			local materializeIncome = now >= nextSafetyFlushAt
+			if materializeIncome then
+				nextSafetyFlushAt = now + SAFETY_FLUSH_INTERVAL_SECONDS
+			end
 
 			for player, runtime in pairs(runtimeByPlayer) do
 				local ok, err = xpcall(function()
-					bankCaptainIncome(player, runtime)
+					bankCaptainIncome(player, runtime, materializeIncome)
 				end, debug.traceback)
 				if not ok then
 					warn(("[CaptainSlotRuntime] Captain income tick failed for %s: %s"):format(
@@ -1104,6 +1188,16 @@ function CaptainSlotRuntime.GetCaptainIncomePerSecond(player)
 	return math.max(0, tonumber(buildCaptainRateSummary(player, crewMemberName, instanceId).FinalAmount) or 0)
 end
 
+function CaptainSlotRuntime.GetCaptainRawIncomePerSecond(player)
+	local assignment = getSavedCaptainAssignment(player)
+	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
+	if crewMemberName == "" then
+		return 0
+	end
+
+	return math.max(0, getCaptainBankAmountPerTick(player, crewMemberName, instanceId))
+end
+
 function CaptainSlotRuntime.IsCaptainIncomeBoosted(player)
 	local assignment = getSavedCaptainAssignment(player)
 	local crewMemberName, instanceId = getCaptainAssignmentCrewName(player, assignment)
@@ -1136,6 +1230,37 @@ function CaptainSlotRuntime.GetCaptainIncomeToCollect(player)
 	end
 
 	return getCaptainDisplayIncome(player, crewMemberName, instanceId)
+end
+
+function CaptainSlotRuntime.GetCaptainRawIncomeToCollect(player)
+	local assignment = getSavedCaptainAssignment(player)
+	if not assignment then
+		return 0
+	end
+
+	return getCaptainRawIncomeToCollect(player, assignment)
+end
+
+function CaptainSlotRuntime.FlushPlayerAccrual(player)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+	if getSavedCaptainAssignment(player) == nil then
+		return true, "no_captain"
+	end
+
+	local ok, reason = materializeCaptainIncome(player)
+	if ok == true then
+		local runtime = runtimeByPlayer[player]
+		if runtime then
+			publishCaptainPlacedState(player, runtime, nil, {
+				Reason = "captain_income_flush",
+				RefreshIncomeTimestamp = true,
+				RefreshUpdatedTimestamp = true,
+			})
+		end
+	end
+	return ok, reason
 end
 
 function CaptainSlotRuntime.RefreshPlayer(player, activeShip)

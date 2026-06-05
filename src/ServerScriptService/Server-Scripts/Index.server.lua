@@ -95,6 +95,22 @@ local function getRequestedCrewMemberItemIds(requestedItemIds)
 	return itemIds
 end
 
+local function parseIndexDisplayMetadataRequest(request)
+	if typeof(request) == "table" then
+		return {
+			Reason = tostring(request.Reason or "index_display"),
+			ItemIds = request.ItemIds or request.RequestedItemIds,
+			IncludeModelPreview = request.IncludeModelPreview == true,
+		}
+	end
+
+	return {
+		Reason = tostring(request or "index_display"),
+		ItemIds = nil,
+		IncludeModelPreview = true,
+	}
+end
+
 local function summarizeIndexDisplayValidation(result)
 	local counts = result and result.BlockingCounts or {}
 	return {
@@ -219,7 +235,7 @@ local function logIndexDisplayMetadataSummary(player, result)
 	))
 end
 
-local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
+local function buildIndexDisplayMetadataResponse(player, request)
 	if player.Parent ~= Players then
 		return {
 			Ready = false,
@@ -228,7 +244,9 @@ local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
 		}
 	end
 
-	local itemIds = getRequestedCrewMemberItemIds(requestedItemIds)
+	local requestOptions = parseIndexDisplayMetadataRequest(request)
+	local includeModelPreview = requestOptions.IncludeModelPreview == true
+	local itemIds = getRequestedCrewMemberItemIds(requestOptions.ItemIds)
 	local metadataById = {}
 	local fallbackReasonCounts = {}
 	local modelPreviewFallbackReasonCounts = {}
@@ -242,11 +260,14 @@ local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
 			SkipSelectionLog = true,
 		})
 		responseFlags = responseFlags or result.Flags
-		local modelPreviewResult = CrewMemberCanonicalReadGate.ResolveIndexModelPreviewDescriptor(player, itemId, {
-			LogThrottleSeconds = 60,
-			SkipLog = true,
-		})
-		responseFlags = responseFlags or modelPreviewResult.Flags
+		local modelPreviewResult = nil
+		if includeModelPreview then
+			modelPreviewResult = CrewMemberCanonicalReadGate.ResolveIndexModelPreviewDescriptor(player, itemId, {
+				LogThrottleSeconds = 60,
+				SkipLog = true,
+			})
+			responseFlags = responseFlags or modelPreviewResult.Flags
+		end
 
 		local fallbackReason = result.DisplayReadFallbackReason or result.FallbackReason
 		if result.DisplayReadUseCanonical == true then
@@ -254,17 +275,19 @@ local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
 		else
 			addFallbackReason(fallbackReasonCounts, fallbackReason)
 		end
-		if modelPreviewResult.UsedCanonical == true then
-			canonicalModelPreviewUsedCount += 1
-		else
-			addFallbackReason(modelPreviewFallbackReasonCounts, modelPreviewResult.FallbackReason)
+		if modelPreviewResult ~= nil then
+			if modelPreviewResult.UsedCanonical == true then
+				canonicalModelPreviewUsedCount += 1
+			else
+				addFallbackReason(modelPreviewFallbackReasonCounts, modelPreviewResult.FallbackReason)
+			end
 		end
 
 		metadataById[itemId] = {
 			DisplayName = metadata and metadata.DisplayName or itemId,
 			Rarity = metadata and metadata.Rarity or "",
 			Render = metadata and metadata.Render or "",
-			ModelPreview = buildIndexModelPreviewDescriptor(modelPreviewResult),
+			ModelPreview = if modelPreviewResult ~= nil then buildIndexModelPreviewDescriptor(modelPreviewResult) else nil,
 			Source = metadata and metadata.Source or "LegacyFallbackMissing",
 			CanonicalDisplayUsed = result.DisplayReadUseCanonical == true,
 			FallbackReason = fallbackReason,
@@ -281,6 +304,7 @@ local function buildIndexDisplayMetadataResponse(player, requestedItemIds)
 		CanonicalModelPreviewUsedCount = canonicalModelPreviewUsedCount,
 		FallbackReasonCounts = fallbackReasonCounts,
 		ModelPreviewFallbackReasonCounts = modelPreviewFallbackReasonCounts,
+		IncludeModelPreview = includeModelPreview,
 		ExpiresAfterSeconds = INDEX_DISPLAY_METADATA_CACHE_SECONDS,
 		Flags = responseFlags or {},
 	}

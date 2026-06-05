@@ -501,6 +501,7 @@ local function buildCrewSlotIncomeRow(row)
 		LegacyStorageName = firstNonEmpty(row.LegacyStorageName, row.StorageName, row.Name, row.BrainrotName),
 		CrewMemberInstanceId = instanceId,
 		IncomeToCollect = coerceNumberish(row.IncomeToCollect or row.Income or row.Money or row.Cash, 0),
+		LastAccruedAtUnix = math.max(0, math.floor(coerceNumber(row.LastAccruedAtUnix, os.time()))),
 		StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel or row.Level),
 	}
 end
@@ -907,10 +908,20 @@ function ProfileMigrations.Apply(data)
 	ship.Slots = ensureTable(ship, "Slots")
 	ship.CaptainSlot = ensureTable(ship, "CaptainSlot")
 	ship.CaptainSlot.IncomeToCollect = coerceNumber(ship.CaptainSlot.IncomeToCollect, 0)
+	ship.CaptainSlot.LastAccruedAtUnix = math.max(0, math.floor(coerceNumber(ship.CaptainSlot.LastAccruedAtUnix, os.time())))
 	ship.MaxSlots = Economy.Rules.MaxShipSlots
 	migrateLegacyCrewSlotRows(data, ship.Slots)
 	migrateLegacyCrewSlotRows(data, data.IncomeBrainrots)
 	migrateLegacyStandLevels(data, data.StandsLevels)
+	local crewMemberIncome = ensureTable(data, "CrewMemberIncome")
+	local migrationTimestamp = os.time()
+	for _, row in pairs(crewMemberIncome) do
+		if typeof(row) == "table" then
+			row.IncomeToCollect = coerceNumber(row.IncomeToCollect, 0)
+			row.LastAccruedAtUnix = math.max(0, math.floor(coerceNumber(row.LastAccruedAtUnix, migrationTimestamp)))
+			row.StandLevel = CrewIncomeBalance.NormalizeLevel(row.StandLevel)
+		end
+	end
 
 	local chef = ensureTable(data, "Chef")
 	local bank = ensureTable(chef, "Bank")

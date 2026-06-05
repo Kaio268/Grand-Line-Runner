@@ -7,6 +7,7 @@ if not dmModule then
 end
 local DataManager = require(dmModule)
 local ShipResetService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipResetService"))
+local ServerRestartService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ServerRestartService"))
 local TutorialService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TutorialService"))
 
 local Rebirths = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
@@ -55,6 +56,10 @@ local function getShipLevel(player)
 end
 
 RebirthRemote.OnServerEvent:Connect(function(player)
+	if ServerRestartService.RejectIfFinalMinuteLocked(player, "rebirthing") then
+		return
+	end
+
 	if serverDebounce[player] then return end
 	serverDebounce[player] = true
 

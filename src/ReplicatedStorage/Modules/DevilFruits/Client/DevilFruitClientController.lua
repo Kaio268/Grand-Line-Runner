@@ -116,6 +116,10 @@ local STATE_RECONCILE_INTERVAL = 0.25
 local nextStateReconcileAt = 0
 
 local function logDevilFruitClient(message, ...)
+	if game:GetAttribute("DevilFruitClientDebugLogs") ~= true then
+		return
+	end
+
 	print(string.format("[DEVILFRUIT CLIENT] " .. message, ...))
 end
 

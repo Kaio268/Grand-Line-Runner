@@ -113,6 +113,7 @@ local COMMAND_DISPLAY_NAMES = {
 	money = "Beli",
 	rebirth = "Rebirth",
 	resetprogress = "Reset progress",
+	restart = "Server restart",
 	serverLuck = "Server luck",
 	setspeed = "Speed",
 	shipreset = "Ship reset",
