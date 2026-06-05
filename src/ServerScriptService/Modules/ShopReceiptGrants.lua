@@ -201,6 +201,21 @@ function ShopReceiptGrants.GrantCaptainDailyChest(player, profile, dataManager)
 	return true, "granted"
 end
 
+function ShopReceiptGrants.GrantChest(player, profile, dataManager, chestData, amount)
+	if typeof(profile) ~= "table" or typeof(profile.Data) ~= "table" then
+		return fail("profile_not_ready")
+	end
+
+	local grantAmount = math.max(1, math.floor(tonumber(amount) or 1))
+	local unopened = nil
+	for _ = 1, grantAmount do
+		unopened = addUnopenedChest(profile.Data, chestData)
+	end
+
+	setValue(dataManager, player, "UnopenedChests", unopened)
+	return true, "granted"
+end
+
 function ShopReceiptGrants.GrantPermanentShieldSlot(player, dataManager)
 	return CrewProtectionService.GrantPermanentSlots(player, 1, dataManager)
 end

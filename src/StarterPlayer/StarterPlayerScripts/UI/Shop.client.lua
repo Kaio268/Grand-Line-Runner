@@ -27,9 +27,11 @@ local root = ReactRoblox.createRoot(rootContainer)
 local destroyed = false
 local renderQueued = false
 local noticeText = nil
+local noticeKind = nil
 local noticeToken = 0
 local requestedSectionKey = nil
 local requestedSectionRequestId = 0
+local redeemCodeRequest = nil
 
 local STORE_FRAME_SIZE = UDim2.fromScale(0.84, 0.78)
 local STORE_MOBILE_FRAME_SIZE = UDim2.fromScale(0.9, 0.84)
@@ -228,8 +230,9 @@ local function hideLegacyStoreContents()
 	end
 end
 
-local function setNotice(text)
+local function setNotice(text, kind)
 	noticeText = text
+	noticeKind = kind or "info"
 	noticeToken += 1
 	local currentToken = noticeToken
 
@@ -244,11 +247,83 @@ local function setNotice(text)
 			end
 
 			noticeText = nil
+			noticeKind = nil
 			if scheduleRender then
 				scheduleRender()
 			end
 		end)
 	end
+end
+
+local function getCodeResponseNotice(response)
+	if typeof(response) ~= "table" then
+		return "Code redeem failed. Try again.", "error"
+	end
+
+	if response.ok == true then
+		return "Code redeemed successfully!", "success"
+	end
+
+	local errorCode = tostring(response.error or "")
+	if errorCode == "invalid_code" then
+		return "Invalid code.", "error"
+	elseif errorCode == "already_redeemed" then
+		return "You already redeemed this code.", "error"
+	elseif errorCode == "expired" then
+		return "This code has expired.", "error"
+	elseif errorCode == "not_in_group" then
+		return "Join our Roblox group to claim codes.", "error"
+	elseif errorCode == "empty_code" then
+		return "Enter a code first.", "error"
+	end
+
+	return tostring(response.message or "Code could not be redeemed."), "error"
+end
+
+local function getRedeemCodeRequest()
+	if redeemCodeRequest and redeemCodeRequest.Parent ~= nil then
+		return redeemCodeRequest
+	end
+
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:WaitForChild("Remotes", 10)
+	if not remotes then
+		return nil
+	end
+
+	local remote = remotes:FindFirstChild("RedeemCodeRequest") or remotes:WaitForChild("RedeemCodeRequest", 10)
+	if remote and remote:IsA("RemoteFunction") then
+		redeemCodeRequest = remote
+		return remote
+	end
+
+	return nil
+end
+
+local function redeemCode(codeText)
+	local code = tostring(codeText or "")
+	if code:match("^%s*$") then
+		setNotice("Enter a code first.", "error")
+		return false
+	end
+
+	local remote = getRedeemCodeRequest()
+	if not remote then
+		setNotice("Codes are not ready yet.", "error")
+		return false
+	end
+
+	local ok, response = pcall(function()
+		return remote:InvokeServer(code)
+	end)
+
+	if not ok or typeof(response) ~= "table" then
+		setNotice("Code redeem failed. Try again.", "error")
+		return false
+	end
+
+	local message, kind = getCodeResponseNotice(response)
+	setNotice(message, kind)
+	return response.ok == true
 end
 
 local function buildCatalogViewModel()
@@ -306,6 +381,7 @@ local function render()
 	root:render(ReactRoblox.createPortal(React.createElement(ShopShell, {
 		catalog = catalogView,
 		noticeText = noticeText,
+		noticeKind = noticeKind,
 		requestedSectionKey = requestedSectionKey,
 		requestedSectionRequestId = requestedSectionRequestId,
 		onClose = function()
@@ -317,6 +393,7 @@ local function render()
 				setNotice(message)
 			end
 		end,
+		onCodeRedeemRequested = redeemCode,
 		onSectionSelected = function()
 		end,
 	}), host))

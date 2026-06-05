@@ -6,14 +6,33 @@ local React = require(Packages:WaitForChild("React"))
 local Theme = require(script.Parent.Parent:WaitForChild("Theme"))
 
 local e = React.createElement
+local SUBMIT_UNLOCK_DELAY = 0.45
 
 local function RedeemCodesPanel(props)
 	local codeText, setCodeText = React.useState("")
+	local isSubmitting, setIsSubmitting = React.useState(false)
 
 	local function submitCode()
-		if props.onRedeemRequested then
-			props.onRedeemRequested(codeText)
+		if isSubmitting or not props.onRedeemRequested then
+			return
 		end
+
+		local submittedCode = codeText
+		setIsSubmitting(true)
+		task.spawn(function()
+			local ok, redeemed = pcall(props.onRedeemRequested, submittedCode)
+			if redeemed == true then
+				setCodeText("")
+			end
+
+			task.delay(SUBMIT_UNLOCK_DELAY, function()
+				setIsSubmitting(false)
+			end)
+
+			if not ok then
+				warn("[RedeemCodesPanel] redeem callback failed: " .. tostring(redeemed))
+			end
+		end)
 	end
 
 	return e("Frame", {
@@ -97,7 +116,9 @@ local function RedeemCodesPanel(props)
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 			[React.Change.Text] = function(rbx)
-				setCodeText(rbx.Text)
+				if not isSubmitting then
+					setCodeText(rbx.Text)
+				end
 			end,
 			[React.Event.FocusLost] = function(enterPressed)
 				if enterPressed then
@@ -130,9 +151,11 @@ local function RedeemCodesPanel(props)
 			Button = e("TextButton", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				AutoButtonColor = false,
-				BackgroundColor3 = Theme.Palette.Gold,
+				Active = not isSubmitting,
+				BackgroundColor3 = if isSubmitting then Theme.Palette.ButtonInactive else Theme.Palette.Gold,
 				BorderSizePixel = 0,
 				Position = UDim2.fromScale(0.5, 0.5),
+				Selectable = not isSubmitting,
 				Size = UDim2.fromScale(1, 1),
 				Text = "",
 				ZIndex = props.zIndex and (props.zIndex + 2) or nil,
@@ -142,15 +165,15 @@ local function RedeemCodesPanel(props)
 					CornerRadius = UDim.new(0, 14),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Theme.Palette.GoldSoft,
-					Transparency = 0.12,
+					Color = if isSubmitting then Theme.Palette.BorderSoft else Theme.Palette.GoldSoft,
+					Transparency = if isSubmitting then 0.34 else 0.12,
 					Thickness = 1.1,
 				}),
 				Gradient = e("UIGradient", {
 					Rotation = 90,
 					Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, Theme.Palette.GoldSoft),
-						ColorSequenceKeypoint.new(1, Theme.Palette.Gold),
+						ColorSequenceKeypoint.new(0, if isSubmitting then Theme.Palette.PanelSoft else Theme.Palette.GoldSoft),
+						ColorSequenceKeypoint.new(1, if isSubmitting then Theme.Palette.ButtonInactive else Theme.Palette.Gold),
 					}),
 				}),
 				Label = e("TextLabel", {
@@ -159,8 +182,8 @@ local function RedeemCodesPanel(props)
 					Font = Theme.Fonts.Display,
 					Position = UDim2.fromScale(0.5, 0.5),
 					Size = UDim2.new(1, -16, 1, -8),
-					Text = props.buttonText or "Redeem",
-					TextColor3 = Theme.Palette.Ink,
+					Text = if isSubmitting then "Checking..." else (props.buttonText or "Redeem"),
+					TextColor3 = if isSubmitting then Theme.Palette.Muted else Theme.Palette.Ink,
 					TextSize = 15,
 					TextWrapped = true,
 					ZIndex = props.zIndex and (props.zIndex + 3) or nil,

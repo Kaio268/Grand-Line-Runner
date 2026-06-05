@@ -46,6 +46,7 @@ local ShopEntitlementService = nil
 local CrewProtectionService = nil
 local AFKGoldChestRewardService = nil
 local AFKTeleportService = nil
+local CouponCodeService = nil
 local CachedTitleService = nil
   
 --// ProfileStore
@@ -142,6 +143,13 @@ local function getAFKTeleportService()
 	return AFKTeleportService
 end
 
+local function getCouponCodeService()
+	if CouponCodeService == nil then
+		CouponCodeService = require(game.ServerScriptService.Modules.CouponCodeService)
+	end
+	return CouponCodeService
+end
+
 local function loadMainBootDependencies()
 	getProductFunctions()
 	getMonetizationConfig()
@@ -151,6 +159,7 @@ local function loadMainBootDependencies()
 	getShopEntitlementService()
 	getCrewProtectionService()
 	getAFKGoldChestRewardService()
+	getCouponCodeService()
 end
 
 --// GlobalStore
@@ -3119,6 +3128,7 @@ DataManager.init = function(options)
 		getShopEntitlementService().Start(DataManager)
 		getCrewProtectionService().Start(DataManager)
 		getAFKGoldChestRewardService().Start(DataManager)
+		getCouponCodeService().Start(DataManager)
 	end
 	getAFKTeleportService().Start(DataManager)
 

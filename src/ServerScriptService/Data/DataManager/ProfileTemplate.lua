@@ -198,6 +198,8 @@ local ProfileTemplate = {
 		LastClaimPlayTime = 0,
 	},
 
+	RedeemedCodes = {},
+
 	Quests = {
 		Daily = {
 			CycleId = "",
