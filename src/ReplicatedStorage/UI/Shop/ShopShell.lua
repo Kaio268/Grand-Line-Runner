@@ -178,22 +178,6 @@ local function ShopShell(props)
 	local pageSections = buildPageSections(props.catalog)
 	local requestedSectionKey = tostring(props.requestedSectionKey or "")
 	local requestedSectionRequestId = tonumber(props.requestedSectionRequestId) or 0
-	local noticeKind = tostring(props.noticeKind or "info")
-	local isSuccessNotice = noticeKind == "success"
-	local isErrorNotice = noticeKind == "error"
-	local noticeFill = if isSuccessNotice
-		then Color3.fromRGB(16, 56, 35)
-		elseif isErrorNotice then Color3.fromRGB(67, 24, 31)
-		else Theme.Palette.PanelSoft
-	local noticeStroke = if isSuccessNotice
-		then Theme.Palette.Emerald
-		elseif isErrorNotice then Theme.Palette.Rose
-		else Theme.Palette.BorderSoft
-	local noticeLabel = if isSuccessNotice then "SUCCESS" elseif isErrorNotice then "ERROR" else "NOTICE"
-	local noticeAccent = if isSuccessNotice
-		then Theme.Palette.Emerald
-		elseif isErrorNotice then Theme.Palette.Rose
-		else Theme.Palette.Cyan
 
 	activeSectionKeyRef.current = activeSectionKey
 
@@ -310,7 +294,7 @@ local function ShopShell(props)
 	contentChildren.RedeemCodes = e(RedeemCodesPanel, {
 		layoutOrder = #pageSections + 1,
 		title = "Redeem Codes",
-		description = "Claim limited chest rewards with one-time codes.",
+		description = "Enter your code to claim rewards.",
 		helperText = "Codes can only be redeemed once per account.",
 		onRedeemRequested = props.onCodeRedeemRequested,
 		zIndex = 8,
@@ -426,7 +410,7 @@ local function ShopShell(props)
 			}),
 		}),
 		Notice = props.noticeText and e("Frame", {
-			BackgroundColor3 = noticeFill,
+			BackgroundColor3 = Theme.Palette.PanelSoft,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(horizontalInset, headerHeight),
 			Size = UDim2.new(1, -(horizontalInset * 2), 0, 36),
@@ -435,38 +419,11 @@ local function ShopShell(props)
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 10),
 			}),
-			Stroke = e("UIStroke", {
-				Color = noticeStroke,
-				Transparency = 0.08,
-				Thickness = 1.2,
-			}),
-			Accent = e("Frame", {
-				BackgroundColor3 = noticeAccent,
-				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(8, 8),
-				Size = UDim2.fromOffset(5, 20),
-				ZIndex = 11,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 999),
-				}),
-			}),
-			Status = e("TextLabel", {
-				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(20, 0),
-				Size = UDim2.fromOffset(76, 36),
-				Text = noticeLabel,
-				TextColor3 = noticeAccent,
-				TextSize = 11,
-				TextXAlignment = Enum.TextXAlignment.Left,
-				ZIndex = 11,
-			}),
 			Label = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = Theme.Fonts.Label,
-				Position = UDim2.fromOffset(96, 0),
-				Size = UDim2.new(1, -108, 1, 0),
+				Position = UDim2.fromOffset(12, 0),
+				Size = UDim2.new(1, -24, 1, 0),
 				Text = props.noticeText,
 				TextColor3 = Theme.Palette.Text,
 				TextSize = 12,
