@@ -7,6 +7,7 @@ if not dmModule then
 end
 local DataManager = require(dmModule)
 local ShipResetService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("ShipResetService"))
+local TutorialService = require(ServerScriptService:WaitForChild("Modules"):WaitForChild("TutorialService"))
 
 local Rebirths = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("Rebirths"))
 local CurrencyUtil = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CurrencyUtil"))
@@ -67,6 +68,7 @@ RebirthRemote.OnServerEvent:Connect(function(player)
 		return
 	end
 
+	local rebirthsAfterReset = nil
 	local resetOk = ShipResetService.ResetPlayerShip(player, {
 		Reason = "rebirth",
 		MutateProfile = function()
@@ -80,12 +82,21 @@ RebirthRemote.OnServerEvent:Connect(function(player)
 				return false, rebirthReason or "failed_to_increment_rebirths"
 			end
 
+			rebirthsAfterReset = rebirthsAfter
 			return true
 		end,
 	})
 	if resetOk == false then
 		serverDebounce[player] = nil
 		return
+	end
+
+	if rebirthsCount == 0 and rebirthsAfterReset == 1 then
+		TutorialService.Enqueue(player, "RebirthInfo", {
+			Source = "FirstRebirth",
+			RebirthsBefore = rebirthsCount,
+			RebirthsAfter = rebirthsAfterReset,
+		}, nil)
 	end
 
 	serverDebounce[player] = nil

@@ -81,7 +81,7 @@ function RandomCrewReward.GetPoolForRarity(rarityName)
 	local pool = {}
 
 	for _, entry in ipairs(CrewMembers.GetEntries()) do
-		if tostring(entry.Rarity or "") == normalizedRarity then
+		if CrewMembers.IsReleased(entry) and tostring(entry.Rarity or "") == normalizedRarity then
 			table.insert(pool, entry)
 		end
 	end

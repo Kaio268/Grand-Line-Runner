@@ -360,6 +360,7 @@ CrewMembers.Entries = {
 		RealCharacterName = "Queen",
 		Arc = "Dressrosa",
 		Rarity = "Secret",
+		Released = false,
 		ModelName = "Queen",
 		ModelNameVerified = true,
 		LegacyId = "Esok Sekolah",
@@ -475,12 +476,42 @@ local function cloneEntry(entry)
 	return if entry then table.clone(entry) else nil
 end
 
+local function isReleasedEntry(entry)
+	if type(entry) ~= "table" then
+		return false
+	end
+
+	return entry.Released ~= false
+end
+
 function CrewMembers.GetEntries()
 	local entries = {}
 	for index, entry in ipairs(CrewMembers.Entries) do
 		entries[index] = table.clone(entry)
 	end
 	return entries
+end
+
+function CrewMembers.GetReleasedEntries()
+	local entries = {}
+	for _, entry in ipairs(CrewMembers.Entries) do
+		if isReleasedEntry(entry) then
+			entries[#entries + 1] = table.clone(entry)
+		end
+	end
+	return entries
+end
+
+function CrewMembers.IsReleased(entryOrCrewMemberId)
+	if type(entryOrCrewMemberId) == "table" then
+		return isReleasedEntry(entryOrCrewMemberId)
+	end
+
+	local id = tostring(entryOrCrewMemberId or "")
+	return isReleasedEntry(byCrewMemberId[id]
+		or byDisplayName[id]
+		or byLegacyId[id]
+		or byRealCharacterName[id])
 end
 
 function CrewMembers.GetByCrewMemberId(crewMemberId)

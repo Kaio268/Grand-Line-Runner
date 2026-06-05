@@ -81,7 +81,7 @@ function CrewRegistry.Build()
 	local entries = {}
 	local globalMaxFoot = 4
 
-	for _, crewMember in ipairs(CrewCatalog.GetBaseEntries()) do
+	for _, crewMember in ipairs(CrewCatalog.GetReleasedBaseEntries()) do
 		local id = crewMember.Id
 		local info = crewMember.Info
 		local template = CrewRegistry.GetTemplateStrict(id, "Normal")

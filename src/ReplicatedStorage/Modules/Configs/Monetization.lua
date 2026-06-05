@@ -28,7 +28,7 @@ Monetization.ShopGamepasses = {}
 
 Monetization.ShopDeveloperProducts = {
 	StarterPack = {
-		Id = 3600539456,
+		Id = 3602757770,
 		Active = true,
 		Name = "Starter Pack",
 		PriceRobux = 499,
@@ -37,7 +37,7 @@ Monetization.ShopDeveloperProducts = {
 		OwnedPath = "Packs.StarterPack",
 	},
 	MythicFruitChest = {
-		Id = 3600539928,
+		Id = 3602758581,
 		Active = true,
 		Name = "Mythic Fruit Chest",
 		PriceRobux = 3000,
@@ -46,7 +46,7 @@ Monetization.ShopDeveloperProducts = {
 		PaidRandomItem = true,
 	},
 	MoneyBoost15 = {
-		Id = 3600539532,
+		Id = 3602757835,
 		Active = true,
 		Name = "Money Boost 15 min",
 		PriceRobux = 49,
@@ -54,7 +54,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 15 * 60,
 	},
 	MoneyBoost30 = {
-		Id = 3600539577,
+		Id = 3602757963,
 		Active = true,
 		Name = "Money Boost 30 min",
 		PriceRobux = 79,
@@ -62,7 +62,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 30 * 60,
 	},
 	MoneyBoost60 = {
-		Id = 3600539622,
+		Id = 3602758006,
 		Active = true,
 		Name = "Money Boost 60 min",
 		PriceRobux = 129,
@@ -70,7 +70,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 60 * 60,
 	},
 	LuckBoost15 = {
-		Id = 3600539668,
+		Id = 3602758052,
 		Active = true,
 		Name = "Luck Boost 15 min",
 		PriceRobux = 79,
@@ -78,7 +78,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 15 * 60,
 	},
 	LuckBoost30 = {
-		Id = 3600539718,
+		Id = 3602758094,
 		Active = true,
 		Name = "Luck Boost 30 min",
 		PriceRobux = 129,
@@ -86,7 +86,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 30 * 60,
 	},
 	LuckBoost60 = {
-		Id = 3600539770,
+		Id = 3602758223,
 		Active = true,
 		Name = "Luck Boost 60 min",
 		PriceRobux = 199,
@@ -94,7 +94,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 60 * 60,
 	},
 	SpeedBoost15 = {
-		Id = 3600539821,
+		Id = 3602758272,
 		Active = true,
 		Name = "Speed Boost 15 min",
 		PriceRobux = 49,
@@ -102,7 +102,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 15 * 60,
 	},
 	SpeedBoost30 = {
-		Id = 3600539874,
+		Id = 3602758504,
 		Active = true,
 		Name = "Speed Boost 30 min",
 		PriceRobux = 79,
@@ -110,7 +110,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 30 * 60,
 	},
 	CrewShield = {
-		Id = 3600539971,
+		Id = 3602758627,
 		Active = true,
 		Name = "Crew Shield",
 		PriceRobux = 99,
@@ -118,7 +118,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 24 * 60 * 60,
 	},
 	FleetShield = {
-		Id = 3600540015,
+		Id = 3602758660,
 		Active = true,
 		Name = "Fleet Shield",
 		PriceRobux = 499,
@@ -126,7 +126,7 @@ Monetization.ShopDeveloperProducts = {
 		DurationSeconds = 24 * 60 * 60,
 	},
 	PermanentShieldSlot = {
-		Id = 3600540049,
+		Id = 3602757496,
 		Active = true,
 		Name = "Permanent Shield Slot",
 		PriceRobux = 999,
@@ -136,7 +136,7 @@ Monetization.ShopDeveloperProducts = {
 
 Monetization.ActiveChefsGamepasses = {
 	VIP = {
-		Id = 1827239335,
+		Id = 1867999050,
 		Name = "VIP",
 	},
 }

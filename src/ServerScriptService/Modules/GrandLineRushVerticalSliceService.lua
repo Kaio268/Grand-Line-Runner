@@ -1210,7 +1210,7 @@ local function getCanonicalCrewRewardPools()
 
 	local poolsByRarity = {}
 	local allEntries = {}
-	for _, entry in ipairs(CanonicalCrewCatalog.GetBaseEntries()) do
+	for _, entry in ipairs(CanonicalCrewCatalog.GetReleasedBaseEntries()) do
 		local rewardEntry = buildCanonicalCrewRewardEntry(entry.Id, entry.Info)
 		if rewardEntry then
 			local canonicalRarity = rewardEntry.CanonicalRarity

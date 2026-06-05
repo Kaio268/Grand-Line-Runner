@@ -258,7 +258,7 @@ end
 local function getSortedBaseEntries()
 	local entries = {}
 
-	for _, entry in ipairs(CrewMembers.GetEntries()) do
+	for _, entry in ipairs(CrewMembers.GetReleasedEntries()) do
 		if type(entry) == "table" then
 			local crewMemberId = tostring(entry.CrewMemberId or "")
 			local info = CrewCatalog.GetInfoById(crewMemberId) or entry

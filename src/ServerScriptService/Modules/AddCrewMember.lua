@@ -60,6 +60,8 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		return rejectGrant(plr, "non_positive_amount", "amount=" .. tostring(amount))
 	end
 
+	options = if typeof(options) == "table" then options else {}
+
 	local canonicalCrewMemberName, resolvedInfo, legacyStorageName = CrewCatalog.ResolveCrewMemberId(crewMemberName)
 	if resolvedInfo then
 		crewMemberName = canonicalCrewMemberName
@@ -68,6 +70,18 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 	local displayInfo = CrewCatalog.GetDisplayInfo(crewMemberName, resolvedInfo)
 	local variantKey = tostring(displayInfo.Variant or "Normal")
 	local baseName = tostring(displayInfo.BaseId or crewMemberName)
+	local releaseInfo = resolvedInfo or CrewCatalog.GetInfoById(baseName)
+
+	if releaseInfo and CrewCatalog.IsPubliclyObtainable(releaseInfo) ~= true and options.AllowUnreleased ~= true then
+		return rejectGrant(plr, "crew_member_unreleased", string.format(
+			"requested=%s canonical=%s base=%s variant=%s source=%s",
+			tostring(requestedCrewMemberName),
+			tostring(crewMemberName),
+			tostring(baseName),
+			tostring(variantKey),
+			tostring(options.Source or "")
+		))
+	end
 
 	local model = findModelFor(variantKey, baseName)
 	if not model then
@@ -91,7 +105,6 @@ function Module:AddCrewMember(plr, crewMemberName, amount, options)
 		))
 	end
 
-	options = if typeof(options) == "table" then options else {}
 	if tostring(options.LegacyStorageName or "") ~= "" then
 		legacyStorageName = tostring(options.LegacyStorageName)
 	elseif legacyStorageName == "" and tostring(info.LegacyId or "") ~= "" then

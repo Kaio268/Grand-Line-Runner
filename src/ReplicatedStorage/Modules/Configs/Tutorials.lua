@@ -79,6 +79,35 @@ local Tutorials = {
 			},
 		},
 
+		RebirthInfo = {
+			Id = "RebirthInfo",
+			Title = "Rebirth Guide",
+			Enabled = true,
+			SkipCompletes = true,
+			Presentation = {
+				Type = "ScreenGui",
+				GuiName = "RebirthInfoGui",
+				CompleteButtons = { "SkipButton" },
+				ActionButtons = {
+					OpenInventoryButton = {
+						Type = "OpenReactModal",
+						ModalName = "Inventory",
+						CompleteTutorial = true,
+					},
+				},
+			},
+			Steps = {
+				{
+					Id = "rebirth_info",
+					Title = "Your Crew is Saved",
+					Body = "Rebirth gives you a fresh start, but your collected Crewmates are saved.",
+					Instruction = "Open Inventory, then select your Crewmates.",
+					ActionText = "Open Inventory",
+					CompletionMode = "Acknowledge",
+				},
+			},
+		},
+
 		Raiding = {
 			Id = "Raiding",
 			Title = "Raiding",
@@ -186,6 +215,7 @@ local Tutorials = {
 local definitionOrder = {
 	"Resources",
 	"FeedCrewmates",
+	"RebirthInfo",
 	"Raiding",
 	"QuestReward",
 	"ShipUpgrade",

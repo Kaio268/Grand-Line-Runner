@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -79,6 +80,8 @@ local TRAIL_PULSE_POOL_LIMIT = 48
 local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.5
 local WARN_COOLDOWN = 3
+local MIN_BURROW_MOVE_INPUT_MAGNITUDE = 0.05
+local GAMEPAD_THUMBSTICK_DEADZONE = 0.12
 local NIL_DIAGNOSTIC_ATTRIBUTE_VALUE = {}
 local DEFAULT_ENTRY_CUE_MARKERS = {
 	"EnterGround",
@@ -717,6 +720,80 @@ local function getHumanoidMoveDirection(humanoid)
 	end
 
 	return nil
+end
+
+local function normalizeMoveVector(moveVector)
+	if typeof(moveVector) ~= "Vector3" then
+		return Vector3.zero
+	end
+
+	local flatMove = Vector3.new(moveVector.X, 0, moveVector.Z)
+	if flatMove.Magnitude > 1 then
+		return flatMove.Unit
+	end
+
+	return flatMove
+end
+
+local function getPlayerControls(player)
+	local playerScripts = player and player:FindFirstChild("PlayerScripts")
+	local playerModuleScript = playerScripts and playerScripts:FindFirstChild("PlayerModule")
+	if not playerModuleScript then
+		return nil
+	end
+
+	local ok, playerModule = pcall(require, playerModuleScript)
+	if not ok or type(playerModule) ~= "table" or typeof(playerModule.GetControls) ~= "function" then
+		return nil
+	end
+
+	local controlsOk, controls = pcall(function()
+		return playerModule:GetControls()
+	end)
+	if controlsOk then
+		return controls
+	end
+
+	return nil
+end
+
+local function getControlMoveVector(controls)
+	if type(controls) ~= "table" or typeof(controls.GetMoveVector) ~= "function" then
+		return Vector3.zero
+	end
+
+	local ok, moveVector = pcall(function()
+		return controls:GetMoveVector()
+	end)
+	if ok then
+		return normalizeMoveVector(moveVector)
+	end
+
+	return Vector3.zero
+end
+
+local function getGamepadMoveVector()
+	local ok, gamepadState = pcall(function()
+		return UserInputService:GetGamepadState(Enum.UserInputType.Gamepad1)
+	end)
+	if not ok or type(gamepadState) ~= "table" then
+		return Vector3.zero
+	end
+
+	for _, inputObject in ipairs(gamepadState) do
+		if inputObject.KeyCode == Enum.KeyCode.Thumbstick1 then
+			local position = inputObject.Position
+			if typeof(position) ~= "Vector3" then
+				return Vector3.zero
+			end
+
+			local x = if math.abs(position.X) >= GAMEPAD_THUMBSTICK_DEADZONE then position.X else 0
+			local y = if math.abs(position.Y) >= GAMEPAD_THUMBSTICK_DEADZONE then position.Y else 0
+			return normalizeMoveVector(Vector3.new(x, 0, -y))
+		end
+	end
+
+	return Vector3.zero
 end
 
 local function getResolveAnimationPosition(surfacePosition, direction, rootPart, abilityConfig)
@@ -1360,6 +1437,7 @@ function BurrowClient.Create(config)
 		Left = false,
 		Right = false,
 	}
+	self.burrowControls = nil
 	self.burrowStates = {}
 	self.visualBurrowStates = {}
 	self.concealStates = {}
@@ -1515,7 +1593,27 @@ function BurrowClient:GetBurrowInputAxes()
 		rightAxis -= 1
 	end
 
-	return forwardAxis, rightAxis
+	if forwardAxis ~= 0 or rightAxis ~= 0 or UserInputService:GetFocusedTextBox() then
+		return forwardAxis, rightAxis
+	end
+
+	if not self.burrowControls then
+		self.burrowControls = getPlayerControls(self.player)
+	end
+
+	local moveVector = getControlMoveVector(self.burrowControls)
+	if moveVector.Magnitude <= MIN_BURROW_MOVE_INPUT_MAGNITUDE then
+		moveVector = getGamepadMoveVector()
+	end
+	if moveVector.Magnitude <= MIN_BURROW_MOVE_INPUT_MAGNITUDE then
+		return forwardAxis, rightAxis
+	end
+
+	return -moveVector.Z, moveVector.X
+end
+
+function BurrowClient:ClearBurrowControls()
+	self.burrowControls = nil
 end
 
 function BurrowClient:GetCameraRelativeBurrowDirection(rootPart)
@@ -4411,6 +4509,7 @@ function BurrowClient:HandleCharacterRemoving()
 	self.burrowInputState.Backward = false
 	self.burrowInputState.Left = false
 	self.burrowInputState.Right = false
+	self:ClearBurrowControls()
 end
 
 function BurrowClient:HandlePlayerRemoving(leavingPlayer)
@@ -4419,6 +4518,7 @@ function BurrowClient:HandlePlayerRemoving(leavingPlayer)
 		self:CancelLocalStartFeedback("player_removing")
 		self:ReleaseStartupMovementLock(self.burrowStates[leavingPlayer], "player_removing")
 		self:RestoreBurrowCameraStabilization(self.burrowStates[leavingPlayer], "player_removing")
+		self:ClearBurrowControls()
 	end
 	clearBurrowCueState(self.burrowStates[leavingPlayer])
 	clearBurrowLifecycleState(self.burrowStates[leavingPlayer])

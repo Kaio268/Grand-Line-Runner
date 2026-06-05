@@ -268,6 +268,24 @@ function CrewCatalog.ResolveCanonicalCrewMemberId(crewMemberId)
 	return canonicalId, info, legacyStorageName
 end
 
+function CrewCatalog.IsReleased(crewMemberIdOrInfo)
+	if typeof(crewMemberIdOrInfo) == "table" then
+		local baseId = tostring(crewMemberIdOrInfo.BaseId or crewMemberIdOrInfo.CrewMemberBaseId or "")
+		if baseId ~= "" then
+			return CrewCatalog.IsReleased(baseId)
+		end
+
+		return CrewMembers.IsReleased(crewMemberIdOrInfo)
+	end
+
+	local _, info = CrewCatalog.ResolveCrewMemberId(crewMemberIdOrInfo)
+	return info ~= nil and CrewCatalog.IsReleased(info)
+end
+
+function CrewCatalog.IsPubliclyObtainable(crewMemberIdOrInfo)
+	return CrewCatalog.IsReleased(crewMemberIdOrInfo)
+end
+
 function CrewCatalog.GetInfoByAnyId(crewMemberId)
 	local _, info = CrewCatalog.ResolveCrewMemberId(crewMemberId)
 	return info
@@ -425,12 +443,13 @@ function CrewCatalog.FindInfoByName(name)
 	return nil, nil
 end
 
-function CrewCatalog.GetBaseEntries()
+function CrewCatalog.GetBaseEntries(options)
+	local includeUnreleased = typeof(options) == "table" and options.IncludeUnreleased == true
 	local entries = {}
 
 	for _, entry in ipairs(CrewMembers.GetEntries()) do
 		local crewInfo = infoFromProductionEntry(entry)
-		if crewInfo then
+		if crewInfo and (includeUnreleased or CrewCatalog.IsReleased(crewInfo)) then
 			entries[#entries + 1] = {
 				Id = tostring(crewInfo.CrewMemberId),
 				Info = crewInfo,
@@ -439,6 +458,10 @@ function CrewCatalog.GetBaseEntries()
 	end
 
 	return entries
+end
+
+function CrewCatalog.GetReleasedBaseEntries()
+	return CrewCatalog.GetBaseEntries()
 end
 
 return CrewCatalog

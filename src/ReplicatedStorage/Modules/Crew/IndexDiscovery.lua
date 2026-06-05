@@ -5,8 +5,10 @@ local CrewVariants = CrewCatalog.GetVariantConfig()
 
 local IndexDiscovery = {}
 
-local VALID_CREW_MEMBER_ITEM_IDS = {}
-local SORTED_CREW_MEMBER_ITEM_IDS = {}
+local ALL_CREW_MEMBER_ITEM_IDS = {}
+local PUBLIC_CREW_MEMBER_ITEM_IDS = {}
+local SORTED_ALL_CREW_MEMBER_ITEM_IDS = {}
+local SORTED_PUBLIC_CREW_MEMBER_ITEM_IDS = {}
 
 for _, entry in ipairs(CrewMembers.GetEntries()) do
 	if type(entry) == "table" then
@@ -14,14 +16,31 @@ for _, entry in ipairs(CrewMembers.GetEntries()) do
 		if crewMemberId ~= "" then
 			for _, variantKey in ipairs(CrewVariants.Order or { "Normal", "Golden", "Diamond" }) do
 				local itemId = CrewCatalog.MakeVariantId(crewMemberId, variantKey)
-				VALID_CREW_MEMBER_ITEM_IDS[itemId] = true
-				SORTED_CREW_MEMBER_ITEM_IDS[#SORTED_CREW_MEMBER_ITEM_IDS + 1] = itemId
+				ALL_CREW_MEMBER_ITEM_IDS[itemId] = true
+				SORTED_ALL_CREW_MEMBER_ITEM_IDS[#SORTED_ALL_CREW_MEMBER_ITEM_IDS + 1] = itemId
+				if CrewMembers.IsReleased(entry) then
+					PUBLIC_CREW_MEMBER_ITEM_IDS[itemId] = true
+					SORTED_PUBLIC_CREW_MEMBER_ITEM_IDS[#SORTED_PUBLIC_CREW_MEMBER_ITEM_IDS + 1] = itemId
+				end
 			end
 		end
 	end
 end
 
-table.sort(SORTED_CREW_MEMBER_ITEM_IDS)
+table.sort(SORTED_ALL_CREW_MEMBER_ITEM_IDS)
+table.sort(SORTED_PUBLIC_CREW_MEMBER_ITEM_IDS)
+
+local function includeUnreleased(options)
+	return typeof(options) == "table" and options.IncludeUnreleased == true
+end
+
+local function getCrewMemberItemIdSet(options)
+	return if includeUnreleased(options) then ALL_CREW_MEMBER_ITEM_IDS else PUBLIC_CREW_MEMBER_ITEM_IDS
+end
+
+local function getSortedCrewMemberItemIds(options)
+	return if includeUnreleased(options) then SORTED_ALL_CREW_MEMBER_ITEM_IDS else SORTED_PUBLIC_CREW_MEMBER_ITEM_IDS
+end
 
 local function getVariantInfo(variantKey)
 	if variantKey == "Normal" or not variantKey then
@@ -110,15 +129,15 @@ local function readStringField(container, childName)
 	return text
 end
 
-function IndexDiscovery.IsValidCrewMemberItemId(itemId)
-	return VALID_CREW_MEMBER_ITEM_IDS[tostring(itemId or "")] == true
+function IndexDiscovery.IsValidCrewMemberItemId(itemId, options)
+	return getCrewMemberItemIdSet(options)[tostring(itemId or "")] == true
 end
 
-function IndexDiscovery.GetSortedCrewMemberItemIds()
-	return table.clone(SORTED_CREW_MEMBER_ITEM_IDS)
+function IndexDiscovery.GetSortedCrewMemberItemIds(options)
+	return table.clone(getSortedCrewMemberItemIds(options))
 end
 
-function IndexDiscovery.ResolveCrewMemberItemId(crewMemberId, baseName, variantKey)
+function IndexDiscovery.ResolveCrewMemberItemId(crewMemberId, baseName, variantKey, options)
 	local crewMemberIdValue = tostring(crewMemberId or "")
 	local baseNameValue = tostring(baseName or "")
 	local rawVariantKey = tostring(variantKey or "")
@@ -127,7 +146,7 @@ function IndexDiscovery.ResolveCrewMemberItemId(crewMemberId, baseName, variantK
 	local shouldTrustExactItemId = crewMemberIdValue ~= ""
 		and baseNameValue == ""
 		and rawVariantKey == ""
-		and IndexDiscovery.IsValidCrewMemberItemId(crewMemberIdValue)
+		and IndexDiscovery.IsValidCrewMemberItemId(crewMemberIdValue, options)
 	if shouldTrustExactItemId then
 		return crewMemberIdValue
 	end
@@ -145,18 +164,18 @@ function IndexDiscovery.ResolveCrewMemberItemId(crewMemberId, baseName, variantK
 
 	if baseNameValue ~= "" then
 		local itemId = getVariantItemId(normalizedVariant, baseNameValue)
-		if itemId and IndexDiscovery.IsValidCrewMemberItemId(itemId) then
+		if itemId and IndexDiscovery.IsValidCrewMemberItemId(itemId, options) then
 			return itemId
 		end
 	end
 
 	if crewMemberIdValue ~= "" then
 		local resolvedId, resolvedInfo = CrewCatalog.ResolveCrewMemberId(crewMemberIdValue)
-		if resolvedInfo and IndexDiscovery.IsValidCrewMemberItemId(resolvedId) then
+		if resolvedInfo and IndexDiscovery.IsValidCrewMemberItemId(resolvedId, options) then
 			return resolvedId
 		end
 
-		if IndexDiscovery.IsValidCrewMemberItemId(crewMemberIdValue) then
+		if IndexDiscovery.IsValidCrewMemberItemId(crewMemberIdValue, options) then
 			return crewMemberIdValue
 		end
 	end
@@ -306,7 +325,7 @@ function IndexDiscovery.CanonicalizeIndexCollectionMap(history)
 	for rawItemId, isDiscovered in pairs(history) do
 		local rawKey = tostring(rawItemId or "")
 		if isDiscovered == true then
-			local itemId = IndexDiscovery.ResolveCrewMemberItemId(rawKey)
+			local itemId = IndexDiscovery.ResolveCrewMemberItemId(rawKey, nil, nil, { IncludeUnreleased = true })
 			if itemId then
 				repaired[itemId] = true
 				if itemId == rawKey then

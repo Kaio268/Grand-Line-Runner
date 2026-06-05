@@ -139,23 +139,23 @@ PremiumCrewStealConfig.VariantMultipliers = {
 PremiumCrewStealConfig.MaxPriceRobux = 2999
 
 PremiumCrewStealConfig.ProductBuckets = {
-	{ Key = "Steal_19", PriceRobux = 19, ProductId = 3599208654, Enabled = true },
+	{ Key = "Steal_19", PriceRobux = 19, ProductId = 3602757693, Enabled = true },
 	{ Key = "Steal_29", PriceRobux = 29, ProductId = 0, Enabled = false },
-	{ Key = "Steal_49", PriceRobux = 49, ProductId = 3599215515, Enabled = true },
+	{ Key = "Steal_49", PriceRobux = 49, ProductId = 3602757734, Enabled = true },
 	{ Key = "Steal_79", PriceRobux = 79, ProductId = 0, Enabled = false },
-	{ Key = "Steal_99", PriceRobux = 99, ProductId = 3599215578, Enabled = true },
+	{ Key = "Steal_99", PriceRobux = 99, ProductId = 3602757769, Enabled = true },
 	{ Key = "Steal_149", PriceRobux = 149, ProductId = 0, Enabled = false },
-	{ Key = "Steal_199", PriceRobux = 199, ProductId = 3599215651, Enabled = true },
+	{ Key = "Steal_199", PriceRobux = 199, ProductId = 3602757796, Enabled = true },
 	{ Key = "Steal_299", PriceRobux = 299, ProductId = 0, Enabled = false },
-	{ Key = "Steal_399", PriceRobux = 399, ProductId = 3599215703, Enabled = true },
+	{ Key = "Steal_399", PriceRobux = 399, ProductId = 3602757815, Enabled = true },
 	{ Key = "Steal_499", PriceRobux = 499, ProductId = 0, Enabled = false },
-	{ Key = "Steal_799", PriceRobux = 799, ProductId = 3599215757, Enabled = true },
+	{ Key = "Steal_799", PriceRobux = 799, ProductId = 3602757899, Enabled = true },
 	{ Key = "Steal_999", PriceRobux = 999, ProductId = 0, Enabled = false },
 	{ Key = "Steal_1299", PriceRobux = 1299, ProductId = 0, Enabled = false },
-	{ Key = "Steal_1499", PriceRobux = 1499, ProductId = 3599215832, Enabled = true },
-	{ Key = "Steal_1999", PriceRobux = 1999, ProductId = 3599466903, Enabled = true },
-	{ Key = "Steal_2499", PriceRobux = 2499, ProductId = 3599467166, Enabled = true },
-	{ Key = "Steal_2999", PriceRobux = 2999, ProductId = 3599215920, Enabled = true },
+	{ Key = "Steal_1499", PriceRobux = 1499, ProductId = 3602757929, Enabled = true },
+	{ Key = "Steal_1999", PriceRobux = 1999, ProductId = 3602758001, Enabled = true },
+	{ Key = "Steal_2499", PriceRobux = 2499, ProductId = 3602758065, Enabled = true },
+	{ Key = "Steal_2999", PriceRobux = 2999, ProductId = 3602757946, Enabled = true },
 }
 
 local bucketsByProductId = {}

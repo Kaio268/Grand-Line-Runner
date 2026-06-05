@@ -2996,6 +2996,8 @@ local function processCrewCanaryCommand(player, argumentText)
 				return false, "inventory_write_authority_disabled"
 			end
 			local ok, grantResult = AddCrewMember:AddCrewMember(player, storageName, count, {
+				AllowUnreleased = true,
+				Source = "AdminCommand",
 				_QuickSlotCapacityReserved = true,
 			})
 			local status = CrewInstanceService.BuildInventoryAuthorityStatus(player)

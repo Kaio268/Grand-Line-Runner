@@ -3037,6 +3037,49 @@ local function SetupPaidRandomItemPolicyRemotes()
 	})
 end
 
+local developerProductUniverseDiagnosticsStarted = false
+
+local function StartDeveloperProductUniverseDiagnostics()
+	if developerProductUniverseDiagnosticsStarted then
+		return
+	end
+
+	developerProductUniverseDiagnosticsStarted = true
+
+	task.spawn(function()
+		local monetizationConfig = getMonetizationConfig()
+		local currentUniverseId = tonumber(game.GameId) or 0
+		local activeProductIds = monetizationConfig.GetDeveloperProductIdsForStatus(monetizationConfig.Status.Active)
+
+		for _, productId in ipairs(activeProductIds) do
+			local ok, info = pcall(function()
+				return MarketPlaceService:GetProductInfo(productId, Enum.InfoType.Product)
+			end)
+
+			if ok and typeof(info) == "table" then
+				local configuredUniverseId = tonumber(info.UniverseId)
+				if configuredUniverseId and configuredUniverseId ~= currentUniverseId then
+					warn(string.format(
+						"[DataManager]: Active developer product universe mismatch productId=%s productName=%s configuredUniverseId=%s currentUniverseId=%s",
+						tostring(productId),
+						tostring(info.Name or info.DisplayName or "<unknown>"),
+						tostring(configuredUniverseId),
+						tostring(currentUniverseId)
+					))
+				end
+			elseif not ok then
+				warn(string.format(
+					"[DataManager]: Active developer product universe diagnostic failed productId=%s error=%s",
+					tostring(productId),
+					tostring(info)
+				))
+			end
+
+			task.wait(0.1)
+		end
+	end)
+end
+
 
 DataManager.init = function(options)
 	local requestedBootMode = normalizeBootMode(options)
@@ -3069,6 +3112,7 @@ DataManager.init = function(options)
 	if isMainBootMode() then
 		loadMainBootDependencies()
 		MarketPlaceService.ProcessReceipt = ProcessReceipt
+		StartDeveloperProductUniverseDiagnostics()
 		getAnnouncementEvent()
 		SetupShopProductPromptRemote()
 		SetupPaidRandomItemPolicyRemotes()
