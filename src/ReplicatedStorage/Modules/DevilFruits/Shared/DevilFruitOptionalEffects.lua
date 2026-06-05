@@ -196,6 +196,12 @@ local function buildFruitFolderCandidates(fruitIdentifier)
 	appendUnique(candidates, seen, fruitEntry and fruitEntry.Id)
 	appendUnique(candidates, seen, fruitEntry and fruitEntry.DisplayName)
 	appendUnique(candidates, seen, fruitEntry and fruitEntry.Config and fruitEntry.Config.AbilityModule)
+	local legacyAssetFolders = fruitEntry and fruitEntry.Config and fruitEntry.Config.LegacyAssetFolders
+	if type(legacyAssetFolders) == "table" then
+		for _, legacyAssetFolder in ipairs(legacyAssetFolders) do
+			appendUnique(candidates, seen, legacyAssetFolder)
+		end
+	end
 	appendUnique(candidates, seen, typeof(fruitIdentifier) == "string" and fruitIdentifier or nil)
 
 	return candidates
@@ -240,6 +246,13 @@ local function shouldSkipOptionalSound(fruitIdentifier, abilityName, payload)
 		and abilityName == "LandMine"
 		and type(payload) == "table"
 		and payload.Action == "Detonated"
+end
+
+local function shouldSkipOptionalVisual(fruitIdentifier, abilityName, payload)
+	local resolvedFruitName = Registry.ResolveFruitName(fruitIdentifier) or fruitIdentifier
+	return resolvedFruitName == BLAST_FRUIT_NAME
+		and abilityName == "LandMine"
+		and (type(payload) ~= "table" or payload.Action ~= "Detonated")
 end
 
 local function createEffectAnchor(position, direction)
@@ -587,7 +600,10 @@ end
 
 function DevilFruitOptionalEffects.Play(targetPlayer, fruitIdentifier, abilityName, payload)
 	local rootPart = resolvePlayerRootPart(targetPlayer)
-	local visualTemplate = DevilFruitOptionalEffects.ResolveVisualTemplate(fruitIdentifier, abilityName)
+	local visualTemplate = nil
+	if not shouldSkipOptionalVisual(fruitIdentifier, abilityName, payload) then
+		visualTemplate = DevilFruitOptionalEffects.ResolveVisualTemplate(fruitIdentifier, abilityName)
+	end
 	local soundTemplate = nil
 	if not shouldSkipOptionalSound(fruitIdentifier, abilityName, payload) then
 		soundTemplate = DevilFruitOptionalEffects.ResolveSoundTemplate(fruitIdentifier, abilityName)

@@ -349,6 +349,17 @@ local function playLandMinePlacementPulse(worldPosition)
 	return true
 end
 
+local function playAuthoredLandMineEffect(self, targetPlayer, payload)
+	if type(self.playOptionalEffect) ~= "function" then
+		return false
+	end
+	if type(payload) ~= "table" or payload.Action ~= LAND_MINE_ACTION_DETONATED then
+		return false
+	end
+
+	return self.playOptionalEffect(targetPlayer, FRUIT_NAME, LAND_MINE_ABILITY, payload) == true
+end
+
 local function getLandMineAbilityConfig(fruitEntry)
 	if type(fruitEntry) ~= "table" then
 		return nil
@@ -701,8 +712,10 @@ function BlastClient:HandleEffect(targetPlayer, abilityName, payload)
 		end
 		playLandMineDetonateSound(targetPlayer, payload)
 
-		-- Detonation still falls through so the current generic Bomu explosion
-		-- fallback stays in control of that visual path.
+		if playAuthoredLandMineEffect(self, targetPlayer, payload) then
+			return true
+		end
+
 		return false
 	end
 
@@ -721,7 +734,7 @@ function BlastClient:HandleEffect(targetPlayer, abilityName, payload)
 	local minePosition = payload.MinePosition or payload.OriginPosition
 	local playedPulse = playLandMinePlacementPulse(minePosition)
 
-	return playedAnimation or playedPulse
+	return playedAnimation or playedPulse or true
 end
 
 function BlastClient:HandleStateEvent(_eventName, _abilityName, _value, _payload)
