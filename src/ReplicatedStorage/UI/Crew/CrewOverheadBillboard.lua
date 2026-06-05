@@ -29,11 +29,11 @@ local SHADOW = Color3.fromRGB(0, 0, 0)
 local SHIELD_GLYPH = utf8.char(0x1F6E1)
 
 local PLACED_LAYOUT_WIDTH_DESKTOP = 304
-local PLACED_LAYOUT_WIDTH_MOBILE = 264
+local PLACED_LAYOUT_WIDTH_MOBILE = 200
 local PLACED_LAYOUT_HEIGHT = 104
 local PLACED_WORLD_WIDTH_DESKTOP_STUDS = 8.6
-local PLACED_WORLD_WIDTH_MOBILE_STUDS = 7.5
-local PLACED_WORLD_HEIGHT_STUDS = 2.95
+local PLACED_WORLD_WIDTH_MOBILE_STUDS = 5.5
+local PLACED_WORLD_HEIGHT_STUDS = 2.48
 
 local function formatIncome(value)
 	return CurrencyUtil.formatIncomeCompactPerSecond(math.max(0, tonumber(value) or 0))
@@ -44,7 +44,7 @@ local function blendColor(baseColor, accentColor, alpha)
 end
 
 local function isMobileViewport()
-	return Responsive.isMobile()
+	return Responsive.isMobile() or Responsive.isPhoneViewport(Responsive.getViewportSize())
 end
 
 local function proportion(value, total)
@@ -255,26 +255,26 @@ local function CrewOverheadBillboard(props)
 		then SHIELD_GLYPH .. " " .. protectionBadgeText
 		else protectionBadgeText
 	local incomeColor = if entry.beliBoosted == true then BOOST_GOLD else GOLD
-	local rarityPillWidth = if mobile then 72 else 92
-	local variantPillWidth = if hasVariant then (if mobile then 58 else 70) else 0
+	local rarityPillWidth = if mobile then 64 else 92
+	local variantPillWidth = if hasVariant then (if mobile then 52 else 70) else 0
 	local layoutWidth = if mobile then PLACED_LAYOUT_WIDTH_MOBILE else PLACED_LAYOUT_WIDTH_DESKTOP
-	local rowGap = 4
-	local protectionRowHeight = if hasProtection then 18 else 0
+	local rowGap = if mobile then 3 else 4
+	local protectionRowHeight = if hasProtection then (if mobile then 14 else 18) else 0
 	local protectionExtraHeight = if hasProtection then protectionRowHeight + rowGap else 0
-	local layoutHeight = PLACED_LAYOUT_HEIGHT + protectionExtraHeight
+	local layoutHeight = (if mobile then 78 else PLACED_LAYOUT_HEIGHT) + protectionExtraHeight
 	local billboardStudWidth = if mobile then PLACED_WORLD_WIDTH_MOBILE_STUDS else PLACED_WORLD_WIDTH_DESKTOP_STUDS
 	local billboardStudHeight = PLACED_WORLD_HEIGHT_STUDS + (if hasProtection then 0.52 else 0)
-	local panelPaddingX = 12
-	local panelPaddingY = 6
-	local nameRowHeight = 22
-	local pillHeight = 22
-	local incomeRowHeight = 20
-	local slotBonusRowHeight = 16
-	local nameTextSize = 16
-	local labelTextSize = if mobile then 10 else 12
-	local incomeTextSize = 14
-	local metaTextSize = 11
-	local protectionTextSize = if mobile then 10 else 11
+	local panelPaddingX = if mobile then 9 else 12
+	local panelPaddingY = if mobile then 4 else 6
+	local nameRowHeight = if mobile then 16 else 22
+	local pillHeight = if mobile then 16 else 22
+	local incomeRowHeight = if mobile then 14 else 20
+	local slotBonusRowHeight = if mobile then 12 else 16
+	local nameTextSize = if mobile then 11 else 16
+	local labelTextSize = if mobile then 8 else 12
+	local incomeTextSize = if mobile then 9 else 14
+	local metaTextSize = if mobile then 8 else 11
+	local protectionTextSize = if mobile then 8 else 11
 	local contentLayoutWidth = layoutWidth - (panelPaddingX * 2)
 	local contentLayoutHeight = layoutHeight - (panelPaddingY * 2)
 	local displayName = getVariantDisplayName(entry.displayName, variantStyle.variantLabel)

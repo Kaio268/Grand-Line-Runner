@@ -81,7 +81,7 @@ local activeAreaConnection = nil
 
 local function isMobileViewport()
 	local mode = Responsive.getHudLayoutMode()
-	return mode == "phone" or mode == "tablet"
+	return mode == "phone" or mode == "tablet" or Responsive.isPhoneViewport(Responsive.getViewportSize())
 end
 
 local function createInstance(className, props, children)
@@ -470,18 +470,23 @@ announcementSubtitle.Size = UDim2.new(1, -48, 0, 18)
 announcementSubtitle.Parent = announcementCard
 
 local function getAnnouncementTopOffset()
-	local layout = HudLayout.getTopBanner()
+	local mode = Responsive.getHudLayoutMode()
+	if isMobileViewport() then
+		return HudLayout.getBelowWaveTopOffset(mode, 6)
+	end
+
+	local layout = HudLayout.getTopBanner(mode)
 	return layout.announcementTopOffset or ANNOUNCEMENT_TOP_OFFSET
 end
 
 local function getAnnouncementScaleTarget()
-	local layout = HudLayout.getTopBanner()
+	local layout = HudLayout.getTopBanner(Responsive.getHudLayoutMode())
 	return layout.announcementScale or Responsive.getUiScale()
 end
 
 local function applyResponsiveLayout()
 	local mode = Responsive.getHudLayoutMode()
-	local mobile = mode == "phone" or mode == "tablet"
+	local mobile = mode == "phone" or mode == "tablet" or Responsive.isPhoneViewport(Responsive.getViewportSize())
 	if mobile then
 		announcementRoot.Size = UDim2.new(0.72, 0, 0, 68)
 		announcementSize.MinSize = Vector2.new(240, 68)

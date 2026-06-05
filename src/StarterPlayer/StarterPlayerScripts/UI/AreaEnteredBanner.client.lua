@@ -35,16 +35,21 @@ local LOADING_SCREEN_ACTIVE_ATTRIBUTE = "LoadingScreenActive"
 
 local function isMobileViewport()
 	local mode = Responsive.getHudLayoutMode()
-	return mode == "phone" or mode == "tablet"
+	return mode == "phone" or mode == "tablet" or Responsive.isPhoneViewport(Responsive.getViewportSize())
 end
 
 local function getBannerTopOffset()
-	local layout = HudLayout.getTopBanner()
+	local mode = Responsive.getHudLayoutMode()
+	if isMobileViewport() then
+		return HudLayout.getBelowWaveTopOffset(mode, 6)
+	end
+
+	local layout = HudLayout.getTopBanner(mode)
 	return layout.topOffset or UI_CONFIG.TopOffset
 end
 
 local function getBannerScaleTarget()
-	local layout = HudLayout.getTopBanner()
+	local layout = HudLayout.getTopBanner(Responsive.getHudLayoutMode())
 	return layout.announcementScale or Responsive.getUiScale()
 end
 
@@ -255,7 +260,7 @@ local bannerHasSubtitle = true
 
 local function applyResponsiveLayout()
 	local mode = Responsive.getHudLayoutMode()
-	local mobile = mode == "phone" or mode == "tablet"
+	local mobile = mode == "phone" or mode == "tablet" or Responsive.isPhoneViewport(Responsive.getViewportSize())
 	if mobile then
 		sizeConstraint.MinSize = Vector2.new(220, 52)
 		sizeConstraint.MaxSize = Vector2.new(340, 52)

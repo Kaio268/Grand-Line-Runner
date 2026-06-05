@@ -134,7 +134,7 @@ HudLayout.DevilFruit = {
 		nameTextSize = 8,
 		statusTextSize = 7,
 		nameY = 3,
-		statusY = 14,
+		statusY = 11,
 		barHeight = 2,
 		barBottom = 3,
 		barInset = 4,
@@ -404,11 +404,21 @@ function HudLayout.getDevilFruit(mode)
 end
 
 function HudLayout.getTopBanner(mode)
-	return getByMode(HudLayout.TopBanner, mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.TopBanner, resolvedMode)
 end
 
 function HudLayout.getBoostTimer(mode)
-	return getByMode(HudLayout.BoostTimer, mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.BoostTimer, resolvedMode)
 end
 
 function HudLayout.getInventoryToggle(mode)
@@ -430,7 +440,12 @@ function HudLayout.getHotbar(mode)
 end
 
 function HudLayout.getPopups(mode)
-	return getByMode(HudLayout.Popups, mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.Popups, resolvedMode)
 end
 
 function HudLayout.getWaveProgress(mode)
@@ -440,6 +455,13 @@ function HudLayout.getWaveProgress(mode)
 	end
 
 	return getByMode(HudLayout.WaveProgress, resolvedMode)
+end
+
+function HudLayout.getBelowWaveTopOffset(mode, spacing)
+	local layout = HudLayout.getWaveProgress(mode)
+	local topOffset = tonumber(layout.topOffset) or 0
+	local barHeight = tonumber(layout.barHeight) or 0
+	return topOffset + barHeight + 22 + (tonumber(spacing) or 6)
 end
 
 return HudLayout

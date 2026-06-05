@@ -94,7 +94,7 @@ end
 
 local function RewardOverheadBillboard(props)
 	props = props or {}
-	local mobile = Responsive.isMobile()
+	local mobile = Responsive.isMobile() or Responsive.isPhoneViewport(Responsive.getViewportSize())
 	local remaining = tonumber(props.remaining)
 	local showTimer = remaining ~= nil
 	local timerState = if showTimer then getTimerState(remaining, props.totalSeconds) else nil
@@ -115,22 +115,22 @@ local function RewardOverheadBillboard(props)
 	local hasMeta = metaLabel ~= ""
 
 	local panelWidth = if showTimer
-		then (if hasExtra then (if mobile then 360 else 420) else (if mobile then 332 else 372))
-		else (if hasExtra then (if mobile then 292 else 328) else (if mobile then 256 else 280))
-	local panelHeight = if showTimer then (if mobile then 92 else 98) else (if hasHelper then 76 else 58)
-	local timerWidth = if showTimer then (if mobile then 108 else 126) else 0
-	local contentX = if showTimer then timerWidth + 24 else 12
+		then (if hasExtra then (if mobile then 240 else 420) else (if mobile then 224 else 372))
+		else (if hasExtra then (if mobile then 200 else 328) else (if mobile then 180 else 280))
+	local panelHeight = if showTimer then (if mobile then 58 else 98) else (if hasHelper then (if mobile then 48 else 76) else (if mobile then 38 else 58))
+	local timerWidth = if showTimer then (if mobile then 68 else 126) else 0
+	local contentX = if showTimer then timerWidth + (if mobile then 12 else 24) else 12
 	local contentWidth = panelWidth - contentX - 12
-	local pillHeight = if mobile then 18 else 22
-	local labelTextSize = if mobile then 10 else 12
-	local titleTextSize = if mobile then 18 else 20
-	local helperTextSize = if mobile then 11 else 13
-	local typePillWidth = getPillWidth(typeLabel, if mobile then 62 else 68, if mobile then 88 else 98)
-	local extraPillWidth = getPillWidth(extraLabel, if mobile then 56 else 64, if mobile then 78 else 92)
-	local metaPillWidth = getPillWidth(metaLabel, if mobile then 64 else 72, if mobile then 96 else 112)
-	local metaPillX = contentX + typePillWidth + (if hasExtra then extraPillWidth + 16 else 8)
-	local pillY = if showTimer then 52 else 40
-	local helperY = if showTimer then 72 else 58
+	local pillHeight = if mobile then 12 else 22
+	local labelTextSize = if mobile then 7 else 12
+	local titleTextSize = if mobile then 12 else 20
+	local helperTextSize = if mobile then 8 else 13
+	local typePillWidth = getPillWidth(typeLabel, if mobile then 38 else 68, if mobile then 48 else 98)
+	local extraPillWidth = getPillWidth(extraLabel, if mobile then 36 else 64, if mobile then 44 else 92)
+	local metaPillWidth = getPillWidth(metaLabel, if mobile then 40 else 72, if mobile then 48 else 112)
+	local metaPillX = contentX + typePillWidth + (if hasExtra then extraPillWidth + (if mobile then 10 else 16) else 5)
+	local pillY = if showTimer then (if mobile then 32 else 52) else (if mobile then 26 else 40)
+	local helperY = if showTimer then (if mobile then 45 else 72) else (if mobile then 36 else 58)
 	local outerColor = if showTimer then timerState.color else (props.borderColor or accentColor)
 	local glowTransparency = if urgentPulseOn then 0.22 elseif showTimer then 0.58 else (props.glowTransparency or 0.84)
 	local panelFill = props.panelFill or PANEL_FILL
@@ -203,39 +203,39 @@ local function RewardOverheadBillboard(props)
 					Caption = e("TextLabel", {
 						BackgroundTransparency = 1,
 						Font = IndexTheme.Fonts.Label,
-						Position = UDim2.fromOffset(8, 7),
-						Size = UDim2.new(1, -16, 0, 12),
+						Position = UDim2.fromOffset(8, if mobile then 4 else 7),
+						Size = UDim2.new(1, -16, 0, if mobile then 8 else 12),
 						Text = "DESPAWN",
 						TextColor3 = timerState.color,
-						TextSize = 9,
+						TextSize = if mobile then 6 else 9,
 						TextStrokeColor3 = SHADOW,
 						TextStrokeTransparency = 0.5,
 					}),
 					Value = e("TextLabel", {
 						BackgroundTransparency = 1,
 						Font = IndexTheme.Fonts.Display,
-						Position = UDim2.fromOffset(8, if mobile then 20 else 21),
-						Size = UDim2.new(1, -16, 0, if mobile then 36 else 40),
+						Position = UDim2.fromOffset(8, if mobile then 14 else 21),
+						Size = UDim2.new(1, -16, 0, if mobile then 22 else 40),
 						Text = formatRemaining(remaining),
 						TextColor3 = timerState.color,
 						TextScaled = true,
-						TextSize = if mobile then 32 else 38,
+						TextSize = if mobile then 20 else 38,
 						TextStrokeColor3 = SHADOW,
 						TextStrokeTransparency = 0.18,
 					}, {
 						TextSizeConstraint = e("UITextSizeConstraint", {
-							MaxTextSize = if mobile then 32 else 38,
-							MinTextSize = 16,
+							MaxTextSize = if mobile then 20 else 38,
+							MinTextSize = if mobile then 12 else 16,
 						}),
 					}),
 					Subcaption = e("TextLabel", {
 						BackgroundTransparency = 1,
 						Font = IndexTheme.Fonts.Label,
-						Position = UDim2.fromOffset(8, panelHeight - 36),
-						Size = UDim2.new(1, -16, 0, 14),
+						Position = UDim2.fromOffset(8, panelHeight - (if mobile then 19 else 36)),
+						Size = UDim2.new(1, -16, 0, if mobile then 8 else 14),
 						Text = "REMAINING",
 						TextColor3 = MUTED,
-						TextSize = 9,
+						TextSize = if mobile then 6 else 9,
 						TextStrokeColor3 = SHADOW,
 						TextStrokeTransparency = 0.55,
 					}),
@@ -244,8 +244,8 @@ local function RewardOverheadBillboard(props)
 			Name = e("TextLabel", {
 				BackgroundTransparency = 1,
 				Font = IndexTheme.Fonts.Display,
-				Position = UDim2.fromOffset(contentX, if showTimer then 11 else 7),
-				Size = UDim2.fromOffset(contentWidth, if showTimer then 30 else 24),
+				Position = UDim2.fromOffset(contentX, if showTimer then (if mobile then 7 else 11) else 7),
+				Size = UDim2.fromOffset(contentWidth, if showTimer then (if mobile then 18 else 30) else 24),
 				Text = title,
 				TextColor3 = TEXT,
 				TextSize = titleTextSize,
@@ -267,7 +267,7 @@ local function RewardOverheadBillboard(props)
 					extraLabel,
 					extraColor,
 					UDim2.fromOffset(extraPillWidth, pillHeight),
-					UDim2.fromOffset(contentX + typePillWidth + 8, pillY),
+					UDim2.fromOffset(contentX + typePillWidth + (if mobile then 5 else 8), pillY),
 					labelTextSize
 				)
 				else nil,

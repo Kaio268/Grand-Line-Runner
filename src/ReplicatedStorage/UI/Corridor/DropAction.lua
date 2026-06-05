@@ -61,6 +61,10 @@ local function isCompactViewport()
 	return Responsive.isCompact()
 end
 
+local function isPhoneFitViewport()
+	return Responsive.isPhoneViewport(Responsive.getViewportSize())
+end
+
 local function useButtonState(enabled)
 	local hovered, setHovered = React.useState(false)
 	local pressed, setPressed = React.useState(false)
@@ -854,6 +858,7 @@ end
 
 local function inHandCrewHud(props)
 	local compact = isCompactViewport()
+	local phoneFit = isPhoneFitViewport()
 	local item = props.item or props.crewmate
 	local slots = if typeof(props.slots) == "table" then props.slots else nil
 	local selectedSlotKey = props.selectedSlotKey
@@ -890,16 +895,20 @@ local function inHandCrewHud(props)
 		BackgroundTransparency = 0.14,
 		BorderSizePixel = 0,
 		ClipsDescendants = false,
-		Position = UDim2.new(1, compact and -140 or -24, 1, compact and -226 or -IN_HAND_BOTTOM_OFFSET),
-		Size = compact and UDim2.new(0.26, 0, 0, 104) or UDim2.new(0.32, 0, 0, IN_HAND_HEIGHT),
+		Position = if phoneFit
+			then UDim2.new(1, -96, 1, -194)
+			else UDim2.new(1, compact and -140 or -24, 1, compact and -226 or -IN_HAND_BOTTOM_OFFSET),
+		Size = if phoneFit
+			then UDim2.new(0.2, 0, 0, 82)
+			else compact and UDim2.new(0.26, 0, 0, 104) or UDim2.new(0.32, 0, 0, IN_HAND_HEIGHT),
 		ZIndex = 42,
 	}, {
 		Scale = e("UIScale", {
-			Scale = compact and 0.78 or 1,
+			Scale = if phoneFit then 0.62 else compact and 0.78 or 1,
 		}),
 		SizeLimit = e("UISizeConstraint", {
-			MaxSize = compact and Vector2.new(310, 104) or IN_HAND_MAX_SIZE,
-			MinSize = compact and Vector2.new(230, 94) or IN_HAND_MIN_SIZE,
+			MaxSize = if phoneFit then Vector2.new(232, 82) else compact and Vector2.new(310, 104) or IN_HAND_MAX_SIZE,
+			MinSize = if phoneFit then Vector2.new(172, 72) else compact and Vector2.new(230, 94) or IN_HAND_MIN_SIZE,
 		}),
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 8),
@@ -921,7 +930,7 @@ local function inHandCrewHud(props)
 			BackgroundColor3 = PALETTE.GlassDeep,
 			BorderSizePixel = 0,
 			Position = UDim2.new(0.5, 0, 0, 4),
-			Size = UDim2.fromOffset(96, 22),
+			Size = UDim2.fromOffset(if phoneFit then 78 else 96, if phoneFit then 18 else 22),
 			ZIndex = 48,
 		}, {
 			Corner = e("UICorner", {
@@ -938,7 +947,7 @@ local function inHandCrewHud(props)
 				Size = UDim2.fromScale(1, 1),
 				Text = "IN HAND",
 				TextColor3 = PALETTE.Text,
-				TextSize = 12,
+				TextSize = if phoneFit then 9 else 12,
 				TextStrokeColor3 = PALETTE.Ink,
 				TextStrokeTransparency = 0.45,
 				ZIndex = 49,
@@ -947,8 +956,8 @@ local function inHandCrewHud(props)
 		Slots = e("Frame", {
 			Active = false,
 			BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(10, 20),
-			Size = UDim2.new(1, -20, 1, -28),
+			Position = UDim2.fromOffset(if phoneFit then 8 else 10, if phoneFit then 16 else 20),
+			Size = if phoneFit then UDim2.new(1, -16, 1, -22) else UDim2.new(1, -20, 1, -28),
 			ZIndex = 43,
 		}, slotChildren),
 	})
