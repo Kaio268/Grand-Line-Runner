@@ -14,68 +14,70 @@ HudLayout.Modes = {
 local LEFT_MENU = {
 	phone = {
 		orientation = "horizontal",
-		tileSize = 50,
-		iconSize = 44,
-		textSize = 9,
-		gap = 8,
+		tileSize = 100,
+		iconSize = 88,
+		textSize = 18,
+		gap = 16,
 		columns = 3,
 		rows = 2,
 		position = UDim2.fromOffset(4, 192),
-		badgeSize = UDim2.fromOffset(24, 14),
-		newBadgeSize = UDim2.fromOffset(30, 14),
-		timerSize = UDim2.fromOffset(36, 10),
-		timerTextSize = 6,
+		badgeSize = UDim2.fromOffset(48, 28),
+		newBadgeSize = UDim2.fromOffset(60, 28),
+		timerSize = UDim2.fromOffset(72, 20),
+		timerTextSize = 12,
 		titleYScale = 0.74,
 	},
 	tablet = {
 		orientation = "horizontal",
-		tileSize = 66,
-		iconSize = 60,
-		textSize = 12,
-		gap = 8,
+		tileSize = 132,
+		iconSize = 120,
+		textSize = 24,
+		gap = 16,
 		columns = 3,
 		rows = 2,
 		position = UDim2.fromOffset(8, 196),
-		badgeSize = UDim2.fromOffset(30, 17),
-		newBadgeSize = UDim2.fromOffset(38, 18),
-		timerSize = UDim2.fromOffset(48, 13),
-		timerTextSize = 8,
+		badgeSize = UDim2.fromOffset(60, 34),
+		newBadgeSize = UDim2.fromOffset(76, 36),
+		timerSize = UDim2.fromOffset(96, 26),
+		timerTextSize = 16,
 		titleYScale = 0.75,
 	},
 	compactDesktop = {
 		orientation = "horizontal",
-		tileSize = 44,
-		iconSize = 36,
-		textSize = 10,
-		gap = 8,
+		tileSize = 88,
+		iconSize = 72,
+		textSize = 20,
+		gap = 16,
 		columns = 6,
 		rows = 1,
 		position = UDim2.fromOffset(130, 88),
-		badgeSize = UDim2.fromOffset(26, 15),
-		newBadgeSize = UDim2.fromOffset(32, 15),
-		timerSize = UDim2.fromOffset(38, 10),
-		timerTextSize = 7,
+		badgeSize = UDim2.fromOffset(52, 30),
+		newBadgeSize = UDim2.fromOffset(64, 30),
+		timerSize = UDim2.fromOffset(76, 20),
+		timerTextSize = 14,
 		titleYScale = 0.75,
 	},
 	desktop = {
 		orientation = "grid",
-		tileSize = 98,
-		iconSize = 66,
-		textSize = 16,
-		gap = 10,
+		tileSize = 196,
+		iconSize = 132,
+		textSize = 32,
+		gap = 20,
 		columns = 2,
 		rows = 3,
-		position = UDim2.fromOffset(10, 250),
-		badgeSize = UDim2.fromOffset(34, 22),
-		newBadgeSize = UDim2.fromOffset(42, 22),
-		timerSize = UDim2.fromOffset(60, 18),
-		timerTextSize = 13,
+		position = UDim2.fromOffset(10, 80),
+		badgeSize = UDim2.fromOffset(68, 44),
+		newBadgeSize = UDim2.fromOffset(84, 44),
+		timerSize = UDim2.fromOffset(120, 36),
+		timerTextSize = 26,
 		titleYScale = 0.78,
 	},
 }
 
 local CURRENCY = {
 	phone = {
+		anchorPoint = Vector2.new(0, 1),
+		position = UDim2.new(0, 16, 1, -24),
 		width = 132,
 		rowHeight = 26,
 		rowSpacing = 3,
@@ -85,9 +87,10 @@ local CURRENCY = {
 		valueTextSize = 18,
 		labelTextSize = 10,
 		panelPadding = { Left = 2, Right = 4, Top = 3, Bottom = 2 },
-		preferredPosition = UDim2.fromOffset(16, 146),
 	},
 	tablet = {
+		anchorPoint = Vector2.new(0, 1),
+		position = UDim2.new(0, 16, 1, -24),
 		width = 150,
 		rowHeight = 28,
 		rowSpacing = 4,
@@ -97,9 +100,10 @@ local CURRENCY = {
 		valueTextSize = 18,
 		labelTextSize = 10,
 		panelPadding = { Left = 4, Right = 5, Top = 4, Bottom = 3 },
-		preferredPosition = UDim2.fromOffset(16, 152),
 	},
 	compactDesktop = {
+		anchorPoint = Vector2.new(0, 1),
+		position = UDim2.new(0, 16, 1, -24),
 		width = 150,
 		rowHeight = 28,
 		rowSpacing = 4,
@@ -109,7 +113,6 @@ local CURRENCY = {
 		valueTextSize = 18,
 		labelTextSize = 10,
 		panelPadding = { Left = 4, Right = 5, Top = 4, Bottom = 3 },
-		preferredPosition = UDim2.fromOffset(16, 144),
 	},
 	desktop = {
 		anchorPoint = Vector2.new(0, 1),
@@ -267,18 +270,9 @@ function HudLayout.rectsIntersect(a, b)
 	return a.x < b.x + b.width and b.x < a.x + a.width and a.y < b.y + b.height and b.y < a.y + a.height
 end
 
-function HudLayout.getCurrency(mode, leftMenuRect)
+function HudLayout.getCurrency(mode, _leftMenuRect)
 	local resolvedMode = mode or HudLayout.getMode()
 	local layout = getByMode(CURRENCY, resolvedMode)
-	if resolvedMode == "desktop" then
-		return layout
-	end
-
-	local rect = leftMenuRect or HudLayout.getLeftMenuRect(resolvedMode)
-	local y = rect.y + rect.height + 8
-	layout.anchorPoint = Vector2.new(0, 0)
-	layout.position = UDim2.fromOffset(16, y)
-	layout.preferredPosition = layout.position
 	return layout
 end
 
