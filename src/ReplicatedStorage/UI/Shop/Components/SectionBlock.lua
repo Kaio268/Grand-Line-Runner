@@ -35,7 +35,8 @@ local function SectionBlock(props)
 	local gap = if columns >= 3 then 10 else 12
 	local rows = buildRows(section.items or {}, columns)
 	local surface = Theme.getSurfaceTheme(section.themeKey)
-	local cellOffset = math.ceil((gap * math.max(0, columns - 1)) / columns)
+	local cardSafetyInset = columns > 1 and 8 or 4
+	local cellOffset = math.ceil(((gap * math.max(0, columns - 1)) + cardSafetyInset) / columns)
 	local layoutMode = columns >= 3 and "compact" or "stacked"
 	local cardHeight
 	if layoutMode == "compact" then

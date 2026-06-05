@@ -45,6 +45,26 @@ rewardCount = math.max(rewardCount, 1)
 local destroyed = false
 local render
 
+-- The modal adapter (and Time_Rewards) re-clip the frame/host in their own passes,
+-- which was cutting off the overlapping GIFTS pill / X button. Force ClipsDescendants
+-- to stay false by re-asserting it whenever something flips it back to true.
+local noClipGuarded = setmetatable({}, { __mode = "k" })
+local function keepUnclipped(inst)
+	if not inst then
+		return
+	end
+	inst.ClipsDescendants = false
+	if noClipGuarded[inst] then
+		return
+	end
+	noClipGuarded[inst] = true
+	inst:GetPropertyChangedSignal("ClipsDescendants"):Connect(function()
+		if inst.ClipsDescendants then
+			inst.ClipsDescendants = false
+		end
+	end)
+end
+
 local unregisterModal = ReactModalRegistry.Register("Gifts", {
 	toggle = function()
 		modalAdapter:Toggle()
@@ -77,6 +97,16 @@ render = function()
 	if not host then
 		return
 	end
+
+	-- let the gold pill badge / edge glow overflow past the top edge without being clipped
+	-- (mirror the Quest client: raise ZIndex and keep clipping permanently disabled)
+	local frame = modalAdapter:GetFrame()
+	if frame then
+		frame.ZIndex = 120
+		keepUnclipped(frame)
+	end
+	host.ZIndex = 140
+	keepUnclipped(host)
 
 	root:render(ReactRoblox.createPortal(React.createElement(GiftsScreen, {
 		onClose = function()

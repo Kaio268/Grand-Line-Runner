@@ -75,8 +75,8 @@ local modalAdapter = ReactFrameModalAdapter.new({
 	backdropName = "ReactIndexBackdrop",
 	backdropActive = false,
 	modalStateKey = "IndexModal",
-	minSize = Vector2.new(1080, 680),
-	maxSize = Vector2.new(1360, 860),
+	minSize = Vector2.new(960, 560),
+	maxSize = Vector2.new(1200, 720),
 	allowFallback = true,
 	createFrameIfMissing = true,
 	standalone = true,
@@ -912,6 +912,25 @@ fireClaimReward = function(rewardId)
 	end
 end
 
+-- Keep the frame/host un-clipped so the gold INDEX pill + close button can overlap
+-- the top edge (the modal adapter re-clips the frame on its own styling passes).
+local noClipGuarded = setmetatable({}, { __mode = "k" })
+local function keepUnclipped(inst)
+	if not inst then
+		return
+	end
+	inst.ClipsDescendants = false
+	if noClipGuarded[inst] then
+		return
+	end
+	noClipGuarded[inst] = true
+	inst:GetPropertyChangedSignal("ClipsDescendants"):Connect(function()
+		if inst.ClipsDescendants then
+			inst.ClipsDescendants = false
+		end
+	end)
+end
+
 local function render()
 	if destroyed then
 		return
@@ -926,6 +945,14 @@ local function render()
 			debugPerfLog("render skipped while hidden")
 			return
 		end
+
+		local frame = modalAdapter:GetFrame()
+		if frame then
+			frame.ZIndex = 120
+			keepUnclipped(frame)
+		end
+		host.ZIndex = 140
+		keepUnclipped(host)
 
 		local content
 		local _, indexScreen = loadIndexModules()

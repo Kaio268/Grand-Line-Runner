@@ -765,27 +765,6 @@ local function IndexCard(props)
 		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
 
 	if not unit.discovered then
-		local lockedChildren = createLockedPreview(unit, props.renderPreview)
-		local hiddenProduction = tostring(unit.hiddenProduction or "")
-		if not isFruit and hiddenProduction ~= "" then
-			lockedChildren.Production = productionBadge(hiddenProduction)
-		end
-
-		lockedChildren.Question = e("TextLabel", {
-			AnchorPoint = Vector2.new(1, 0),
-			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
-			Position = UDim2.new(1, -8, 0, 6),
-			Size = UDim2.fromOffset(44, 18),
-			Text = "???",
-			TextColor3 = Theme.Palette.QuestionText,
-			TextSize = 14,
-			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
-			TextStrokeTransparency = 0.4,
-			TextXAlignment = Enum.TextXAlignment.Right,
-			ZIndex = 4,
-		})
-
 		return baseCard({
 			backgroundTransparency = cardBackgroundTransparency,
 			layoutOrder = props.layoutOrder,
@@ -814,15 +793,21 @@ local function IndexCard(props)
 						ColorSequenceKeypoint.new(1, Theme.Palette.CardShell),
 					}),
 				}),
-				ImageArea = e("Frame", {
-					BackgroundColor3 = Theme.Palette.CardBackdrop,
-					BackgroundTransparency = backdropBackgroundTransparency,
-					BorderSizePixel = 0,
-					ClipsDescendants = true,
-					Position = UDim2.fromOffset(4, 4),
-					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
-				}, imageAreaShell(lockedChildren)),
-				Footer = footer("???", "???", Theme.Palette.Text),
+				Question = e("TextLabel", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					Font = Theme.Fonts.Display,
+					Position = UDim2.fromScale(0.5, 0.5),
+					Size = UDim2.fromScale(0.82, 0.82),
+					Text = "?",
+					TextColor3 = Theme.Palette.QuestionText,
+					TextScaled = true,
+					TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+					TextStrokeTransparency = 0.4,
+					ZIndex = 4,
+				}, {
+					Constraint = e("UITextSizeConstraint", { MaxTextSize = 150 }),
+				}),
 			},
 		})
 	end

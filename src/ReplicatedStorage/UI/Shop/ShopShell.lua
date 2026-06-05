@@ -306,7 +306,7 @@ local function ShopShell(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Image = Theme.Assets.ShopBackground,
-			ImageTransparency = 0,
+			ImageTransparency = 0.88,
 			ScaleType = Enum.ScaleType.Stretch,
 			Position = UDim2.fromOffset(2, 2),
 			Size = UDim2.new(1, -4, 1, -4),
@@ -333,9 +333,12 @@ local function ShopShell(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = Theme.Palette.Border,
-			Transparency = 0.05,
-			Thickness = 1.6,
+			Transparency = 0,
+			Thickness = 3,
 		}),
+		GlowInner = e("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Round, Color = Color3.fromRGB(255, 228, 140), Thickness = 4, Transparency = 0.4 }),
+		GlowMid = e("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Round, Color = Color3.fromRGB(255, 205, 95), Thickness = 9, Transparency = 0.66 }),
+		GlowOuter = e("UIStroke", { ApplyStrokeMode = Enum.ApplyStrokeMode.Border, LineJoinMode = Enum.LineJoinMode.Round, Color = Color3.fromRGB(255, 190, 80), Thickness = 16, Transparency = 0.84 }),
 		Gradient = e("UIGradient", {
 			Rotation = 90,
 			Color = ColorSequence.new({

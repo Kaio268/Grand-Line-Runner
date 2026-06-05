@@ -80,8 +80,8 @@ local PALETTE = {
 	BoardDeep = Color3.fromRGB(33, 22, 17),
 	Panel = Color3.fromRGB(28, 20, 17),
 	PanelAlt = Color3.fromRGB(40, 29, 24),
-	Ink = Color3.fromRGB(8, 15, 28),
-	InkSoft = Color3.fromRGB(15, 23, 40),
+	Ink = Color3.fromRGB(8, 8, 9),
+	InkSoft = Color3.fromRGB(14, 14, 18),
 	Card = Color3.fromRGB(57, 42, 33),
 	CardSoft = Color3.fromRGB(45, 33, 28),
 	Stroke = Color3.fromRGB(130, 93, 58),
@@ -102,17 +102,17 @@ local PALETTE = {
 }
 
 local INVENTORY_UI = {
-	PrimaryBg = Color3.fromRGB(30, 42, 56),
-	SecondaryBg = Color3.fromRGB(36, 52, 71),
-	HeaderBg = Color3.fromRGB(16, 35, 59),
-	SectionBg = Color3.fromRGB(27, 46, 68),
-	SectionHover = Color3.fromRGB(46, 74, 99),
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	GoldBase = Color3.fromRGB(212, 175, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
-	ButtonIdle = Color3.fromRGB(7, 22, 41),
-	ButtonIdleBottom = Color3.fromRGB(4, 16, 31),
+	PrimaryBg = Color3.fromRGB(16, 16, 20),
+	SecondaryBg = Color3.fromRGB(22, 22, 27),
+	HeaderBg = Color3.fromRGB(8, 8, 9),
+	SectionBg = Color3.fromRGB(15, 15, 18),
+	SectionHover = Color3.fromRGB(30, 30, 35),
+	MenuOverlay = Color3.fromRGB(8, 8, 9),
+	GoldBase = Color3.fromRGB(228, 190, 78),
+	GoldHighlight = Color3.fromRGB(255, 224, 120),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
+	ButtonIdle = Color3.fromRGB(12, 12, 15),
+	ButtonIdleBottom = Color3.fromRGB(8, 8, 10),
 	ButtonActive = Color3.fromRGB(58, 47, 18),
 	ButtonActiveBottom = Color3.fromRGB(33, 25, 10),
 	TextMain = Color3.fromRGB(230, 230, 230),
@@ -1022,7 +1022,7 @@ end
 local function hotbarSlot(props)
 	local slot = props.slot or {}
 	local item = slot.item
-	local accent = item and item.accentColor or Color3.fromRGB(76, 96, 132)
+	local accent = (item and item.emptySlot ~= true and item.accentColor) or Color3.fromRGB(228, 190, 78)
 	local lockedSlot = item and item.lockedSlot == true
 	local emptySlot = item and item.emptySlot == true
 	local interactive = item ~= nil and item.interactive ~= false and props.onActivated ~= nil
@@ -1030,9 +1030,9 @@ local function hotbarSlot(props)
 	local zIndexBase = props.zIndexBase or 0
 	local slotSize = math.max(32, math.floor(tonumber(props.slotSize) or 64))
 	local hoverZIndexOffset = hovered and 12 or 0
-	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(20, 28, 44), 0.78) or Color3.fromRGB(13, 19, 31)
-	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 39, 61), 0.84) or Color3.fromRGB(18, 26, 41)
-	local slotBottomColor = item and accent:Lerp(Color3.fromRGB(12, 17, 30), 0.92) or Color3.fromRGB(10, 14, 24)
+	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(18, 18, 22), 0.82) or Color3.fromRGB(14, 14, 18)
+	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 28, 33), 0.86) or Color3.fromRGB(22, 22, 27)
+	local slotBottomColor = item and accent:Lerp(Color3.fromRGB(12, 12, 15), 0.92) or Color3.fromRGB(10, 10, 13)
 	local staticPreviewImage = getStaticCrewPreviewImage(item)
 	local hasStaticPreview = staticPreviewImage ~= ""
 	local compactSlot = slotSize <= 40
@@ -1100,7 +1100,7 @@ local function hotbarSlot(props)
 			}),
 		}),
 		Inset = e("Frame", {
-			BackgroundColor3 = Color3.fromRGB(7, 11, 20),
+			BackgroundColor3 = Color3.fromRGB(8, 8, 9),
 			BackgroundTransparency = item and (hovered and 0.5 or 0.58) or 0.86,
 			BorderSizePixel = 0,
 			ClipsDescendants = true,
@@ -1255,22 +1255,22 @@ local function inventoryToggleButton(props)
 			Gradient = e("UIGradient", {
 				Rotation = 90,
 				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromRGB(21, 31, 49)),
-					ColorSequenceKeypoint.new(1, Color3.fromRGB(8, 13, 24)),
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 35)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 13)),
 				}),
 			}),
 			Stroke = e("UIStroke", {
-				Color = Color3.fromRGB(72, 98, 146),
+				Color = Color3.fromRGB(228, 190, 78),
 				Transparency = hovered and 0.08 or (compact and 0.22 or 0.18),
 				Thickness = compact and (hovered and 2 or 1.8) or (hovered and 1.7 or 1.4),
 			}),
 			Shadow = e("UIStroke", {
-				Color = PALETTE.Sea,
+				Color = Color3.fromRGB(255, 224, 120),
 				Transparency = hovered and (compact and 0.82 or 0.84) or (compact and 0.94 or 0.95),
 				Thickness = compact and 3 or 2,
 			}),
 			Inset = e("Frame", {
-				BackgroundColor3 = Color3.fromRGB(7, 11, 20),
+				BackgroundColor3 = Color3.fromRGB(8, 8, 9),
 				BackgroundTransparency = compact and 0.66 or 0.74,
 				BorderSizePixel = 0,
 				Position = UDim2.fromOffset(4, 4),
@@ -1284,7 +1284,7 @@ local function inventoryToggleButton(props)
 			Icon = iconChild,
 			KeyHint = compact and e("TextLabel", {
 				AnchorPoint = Vector2.new(0.5, 0),
-				BackgroundColor3 = Color3.fromRGB(11, 18, 32),
+				BackgroundColor3 = Color3.fromRGB(8, 8, 9),
 				BackgroundTransparency = 0.14,
 				BorderSizePixel = 0,
 				Font = Enum.Font.GothamBlack,
@@ -1300,7 +1300,7 @@ local function inventoryToggleButton(props)
 					CornerRadius = UDim.new(0, 5),
 				}),
 				Stroke = e("UIStroke", {
-					Color = Color3.fromRGB(91, 117, 166),
+					Color = Color3.fromRGB(228, 190, 78),
 					Transparency = 0.3,
 					Thickness = 1,
 				}),
@@ -5040,10 +5040,23 @@ local function App(props)
 						Transparency = 0.76,
 					}),
 				}),
+				BackpackTitle = e("TextLabel", {
+					BackgroundTransparency = 1,
+					Font = Enum.Font.Cartoon,
+					Position = UDim2.fromOffset(28, 14),
+					Size = UDim2.fromOffset(162, 42),
+					Text = "Backpack",
+					TextColor3 = INVENTORY_UI.GoldHighlight,
+					TextSize = 30,
+					TextStrokeColor3 = Color3.fromRGB(11, 12, 17),
+					TextStrokeTransparency = 0.5,
+					TextXAlignment = Enum.TextXAlignment.Left,
+					ZIndex = 8,
+				}),
 				TopTabs = e("Frame", {
 					AnchorPoint = Vector2.new(0, 0),
 					BackgroundTransparency = 1,
-					Position = UDim2.fromOffset(24, 16),
+					Position = UDim2.fromOffset(198, 18),
 					Size = UDim2.fromOffset(606, 40),
 					ZIndex = 8,
 				}, topModeChildren),
@@ -5154,7 +5167,7 @@ local function App(props)
 					BackgroundTransparency = 0.12,
 					BorderSizePixel = 0,
 					Position = UDim2.fromOffset(286, 90),
-					Size = showingInventory and UDim2.new(1, -312, 1, -186) or UDim2.new(1, -312, 1, -116),
+					Size = UDim2.new(1, -312, 1, -116),
 					ZIndex = 7,
 				}, {
 					Corner = e("UICorner", {
@@ -5267,13 +5280,20 @@ local function App(props)
 							end,
 						}),
 					}),
+					FilterBar = showingInventory and e("Frame", {
+						BackgroundTransparency = 1,
+						BorderSizePixel = 0,
+						Position = UDim2.fromOffset(18, 82),
+						Size = UDim2.new(1, -36, 0, 44),
+						ZIndex = 8,
+					}, footerChildren) or nil,
 					GridShell = e("Frame", {
 						BackgroundColor3 = INVENTORY_UI.MenuOverlay,
 						BackgroundTransparency = showingInventory and 0.2 or 0.34,
 						BorderSizePixel = 0,
 						ClipsDescendants = true,
-						Position = UDim2.fromOffset(18, 84),
-						Size = UDim2.new(1, -36, 1, -102),
+						Position = showingInventory and UDim2.fromOffset(18, 134) or UDim2.fromOffset(18, 84),
+						Size = showingInventory and UDim2.new(1, -36, 1, -152) or UDim2.new(1, -36, 1, -102),
 						ZIndex = 7,
 					}, {
 						Corner = e("UICorner", {
@@ -5521,7 +5541,7 @@ local function App(props)
 					ClipsDescendants = true,
 					Position = UDim2.new(0, 286, 1, -86),
 					Size = UDim2.new(1, -312, 0, 58),
-					Visible = showingInventory,
+					Visible = false,
 					ZIndex = 7,
 				}, {
 					Corner = e("UICorner", {
@@ -5537,7 +5557,7 @@ local function App(props)
 						Position = UDim2.fromOffset(10, 7),
 						Size = UDim2.new(1, -20, 1, -14),
 						ZIndex = 8,
-					}, footerChildren),
+					}, {}),
 				}),
 			}),
 		}
