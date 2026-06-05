@@ -29,6 +29,7 @@ function Module.Install(ctx)
 	end
 	local CrewFoodProgression = ctx.CrewFoodProgression
 	local CrewInstanceService = ctx.CrewInstanceService
+	local JoinRestoreScheduler = ctx.JoinRestoreScheduler
 	local ensuredStandFolders = ctx.ensuredStandFolders
 	local function formatInstancePath(...)
 		return ctx.formatInstancePath(...)
@@ -108,7 +109,8 @@ function Module.Install(ctx)
 		return ctx.waitForPlot(...)
 	end
 
-	local function registerStand(player, plot, standModel)
+	local function registerStand(player, plot, standModel, options)
+		options = if typeof(options) == "table" then options else {}
 		standDebug("registerStand begin player=%s stand=%s", player.Name, standModel.Name)
 		saveTrace(
 			"registerStand begin player=%s userId=%s plot=%s stand=%s standPath=%s ownerUserId=%s ownerName=%s",
@@ -164,7 +166,7 @@ function Module.Install(ctx)
 		bindStandPrompt(player, plot, standModel)
 		standDebug("registerStand after bindStandPrompt player=%s stand=%s", player.Name, standModel.Name)
 
-		task.spawn(function()
+		local function runStandInit()
 			standDebug("registerStand init-task begin player=%s stand=%s", player.Name, standModel.Name)
 			local ok, err = xpcall(function()
 				standDebug("registerStand before handle lookup player=%s stand=%s", player.Name, standModel.Name)
@@ -300,7 +302,13 @@ function Module.Install(ctx)
 					tostring(err)
 				))
 			end
-		end)
+		end
+
+		if options.DeferInit == false then
+			runStandInit()
+		else
+			task.spawn(runStandInit)
+		end
 	end
 
 
@@ -461,7 +469,133 @@ function Module.Install(ctx)
 		end
 	end
 
-	standCommandFunction.OnInvoke = function(action, player)
+	local function queuePlayerStandRuntimeRefresh(player, activeShip, options)
+		if typeof(player) ~= "Instance" or not player:IsA("Player") then
+			return false, "invalid_player"
+		end
+		if not JoinRestoreScheduler or typeof(JoinRestoreScheduler.Enqueue) ~= "function" then
+			return refreshPlayerStandRuntime(player)
+		end
+
+		options = if typeof(options) == "table" then options else {}
+		activeShip = if typeof(activeShip) == "Instance" and activeShip:IsA("Model")
+			then activeShip
+			else ShipRuntimeService.GetActiveShip(player)
+		if typeof(activeShip) ~= "Instance" or not activeShip:IsA("Model") then
+			return false, "active_ship_not_found"
+		end
+
+		local generation = tonumber(options.Generation) or ShipRuntimeService.GetCrewVisualGeneration(player)
+		local source = tostring(options.Source or "join_restore")
+		if activeShip:GetAttribute("GTRRuntimeShell") == true then
+			if JoinRestoreScheduler and typeof(JoinRestoreScheduler.Log) == "function" then
+				JoinRestoreScheduler.Log(player, "stand_restore_blocked", 0, "blocked_shell_not_active", {
+					Always = true,
+					Generation = generation,
+				})
+			end
+			return false, "blocked_shell_not_active"
+		end
+
+		clearPlayerStandRuntime(player)
+		plotScanBound[activeShip] = true
+		saveTrace(
+			"queuePlayerStandRuntimeRefresh player=%s userId=%s ship=%s generation=%s source=%s",
+			player.Name,
+			tostring(player.UserId),
+			formatInstancePath(activeShip),
+			tostring(generation),
+			source
+		)
+
+		local function validate()
+			return player.Parent ~= nil
+				and activeShip.Parent ~= nil
+				and ShipRuntimeService.GetActiveShip(player) == activeShip
+				and ShipRuntimeService.GetCrewVisualGeneration(player) == generation
+		end
+
+		JoinRestoreScheduler.Enqueue(player, {
+			Phase = "stand_captain_restore",
+			Key = "stand_captain_restore",
+			Generation = generation,
+			Priority = 200,
+			Step = function()
+				if not validate() then
+					return true, "stale"
+				end
+				scanAndBindCaptainSlot(player, activeShip)
+				return true, "ok"
+			end,
+		})
+
+		local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(activeShip)
+		if #slotNumbers == 0 then
+			warn(("[CrewIncomeRuntime] Active ship has no numbered crew slots with Handles: %s"):format(activeShip:GetFullName()))
+		end
+
+		for _, slotNumber in ipairs(slotNumbers) do
+			local slotName = tostring(slotNumber)
+			JoinRestoreScheduler.Enqueue(player, {
+				Phase = "stand_register",
+				Key = "stand_register:" .. slotName,
+				Generation = generation,
+				Priority = 300 + (tonumber(slotName) or 999),
+				Step = function()
+					if not validate() then
+						return true, "stale"
+					end
+
+					local slotModel = ShipSlotService.GetSlot(activeShip, slotName)
+					if slotModel and slotModel:IsA("Model") then
+						registerStand(player, activeShip, slotModel, {
+							DeferInit = false,
+							Source = source,
+						})
+					elseif slotModel then
+						warn(("[CrewIncomeRuntime] Ship slot %s is not a Model and cannot host crew visuals yet: %s"):format(
+							tostring(slotName),
+							slotModel:GetFullName()
+						))
+					end
+					return true, "ok"
+				end,
+			})
+		end
+
+		JoinRestoreScheduler.Enqueue(player, {
+			Phase = "stand_reconcile",
+			Key = "stand_reconcile",
+			Generation = generation,
+			Priority = 20000,
+			Step = function()
+				if not validate() then
+					return true, "stale"
+				end
+				reconcileSlotAssignmentsForRender(player, activeShip, source .. "_scheduled_repair")
+				reconcilePlayerStandAssignments(player)
+				return true, "ok"
+			end,
+		})
+
+		JoinRestoreScheduler.Enqueue(player, {
+			Phase = "stand_display_refresh",
+			Key = "stand_display_refresh",
+			Generation = generation,
+			Priority = 20100,
+			Step = function()
+				if not validate() then
+					return true, "stale"
+				end
+				refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+				return true, "ok"
+			end,
+		})
+
+		return true, "queued"
+	end
+
+	standCommandFunction.OnInvoke = function(action, player, options)
 		if typeof(player) ~= "Instance" or not player:IsA("Player") then
 			return false, "invalid_player"
 		end
@@ -475,6 +609,13 @@ function Module.Install(ctx)
 			return refreshPlayerStandRuntime(player)
 		end
 
+		if action == "queue_refresh" then
+			local activeShip = if typeof(options) == "table" and typeof(options.ActiveShip) == "Instance"
+				then options.ActiveShip
+				else nil
+			return queuePlayerStandRuntimeRefresh(player, activeShip, options)
+		end
+
 		return false, "unsupported_action"
 	end
 
@@ -484,6 +625,7 @@ function Module.Install(ctx)
 	ctx.clearPlotScanStateForPlayer = clearPlotScanStateForPlayer
 	ctx.reconcilePlayerStandAssignments = reconcilePlayerStandAssignments
 	ctx.refreshPlayerStandRuntime = refreshPlayerStandRuntime
+	ctx.queuePlayerStandRuntimeRefresh = queuePlayerStandRuntimeRefresh
 	ctx.registerStand = registerStand
 	ctx.scanAndBindCaptainSlot = scanAndBindCaptainSlot
 	ctx.scanAndBindPlot = scanAndBindPlot

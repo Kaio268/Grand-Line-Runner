@@ -1,4 +1,6 @@
-local GIFT_BOOT_DEBUG = true
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local GIFT_BOOT_DEBUG = ReplicatedStorage:GetAttribute("GiftClientLoaderDebug") == true
 local GIFT_CLIENT_DEBUG_VERSION = "gifts-client-ui-slots-debug-2026-05-01"
 
 local function giftBootLog(...)

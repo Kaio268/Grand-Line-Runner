@@ -1,14 +1,21 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local GearToolsFolder = ReplicatedStorage:WaitForChild("Gears")
+local GearToolsFolder = ReplicatedStorage:FindFirstChild("Gears") or ReplicatedStorage:WaitForChild("Gears", 10)
+if not GearToolsFolder then
+	warn("[EquipGear] ReplicatedStorage.Gears is missing; gear equip sync disabled.")
+	return
+end
 
 local function getBackpack(player)
-	return player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack")
+	return player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
 end
 
 local function removeTool(player, gearName)
 	local backpack = getBackpack(player)
+	if not backpack then
+		return
+	end
 	local t1 = backpack:FindFirstChild(gearName)
 	if t1 and t1:IsA("Tool") then
 		t1:Destroy()
@@ -25,6 +32,9 @@ end
 
 local function equipTool(player, gearName)
 	local backpack = getBackpack(player)
+	if not backpack then
+		return
+	end
 	if backpack:FindFirstChild(gearName) then
 		return
 	end
@@ -59,7 +69,10 @@ local function bindBool(player, bv)
 end
 
 local function syncEquippedOnSpawn(player)
-	local gearsFolder = player:WaitForChild("Gears")
+	local gearsFolder = player:FindFirstChild("Gears") or player:WaitForChild("Gears", 10)
+	if not gearsFolder then
+		return
+	end
 	for _, inst in ipairs(gearsFolder:GetChildren()) do
 		if inst:IsA("BoolValue") and inst.Value == true then
 			equipTool(player, inst.Name)
@@ -68,7 +81,11 @@ local function syncEquippedOnSpawn(player)
 end
 
 local function onPlayerAdded(player)
-	local gearsFolder = player:WaitForChild("Gears")
+	local gearsFolder = player:FindFirstChild("Gears") or player:WaitForChild("Gears", 10)
+	if not gearsFolder then
+		warn(string.format("[EquipGear] Player %s missing Gears folder; skipping gear equip binding.", player.Name))
+		return
+	end
 
 	for _, inst in ipairs(gearsFolder:GetChildren()) do
 		bindBool(player, inst)

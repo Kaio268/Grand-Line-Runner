@@ -5,6 +5,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local PlotUpgradeConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("PlotUpgrade"))
 local ShipSlotGuiIdentity = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ShipSlotGuiIdentity"))
 local ShipVisuals = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Configs"):WaitForChild("ShipVisuals"))
+local JoinRestoreScheduler = require(ServerScriptService.Modules:WaitForChild("JoinRestoreScheduler"))
 local ShipSlotService = require(ServerScriptService.Modules:WaitForChild("ShipSlotService"))
 
 local ShipSlotInteractionService = {}
@@ -819,6 +820,227 @@ function ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, option
 	warnForMissingUsableSlots(player, activeShip, upgradeLevel, rebirthCount)
 
 	return true
+end
+
+function ShipSlotInteractionService.QueueRefreshPlayerShip(player, activeShip, options)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	if typeof(activeShip) ~= "Instance" or not activeShip:IsA("Model") then
+		return false, "invalid_ship"
+	end
+	if activeShip:GetAttribute("GTRRuntimeShell") == true then
+		JoinRestoreScheduler.Log(player, "slot_restore_blocked", 0, "blocked_shell_not_active", {
+			Always = true,
+			Generation = options.Generation,
+		})
+		return false, "blocked_shell_not_active"
+	end
+
+	local generation = tonumber(options.Generation)
+	local upgradeLevel = getPlayerUpgradeLevel(player, options.UpgradeLevel)
+	local rebirthCount = getPlayerRebirthCount(player)
+	local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(activeShip)
+	local allSlotNumbers = ShipSlotService.GetAllSlotNumbers(activeShip)
+	local activeSlots = {}
+	local disableRoots = {}
+	local disableRootIndex = 1
+	local extraIndex = 1
+	local cleanupKeys = nil
+	local cleanupIndex = 1
+	local runtimePointsFolderName = tostring((ShipVisuals.RuntimePoints and ShipVisuals.RuntimePoints.FolderName) or "ShipRuntimePoints")
+
+	local function validate()
+		return player.Parent == Players and activeShip.Parent ~= nil
+	end
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "slot_prepare",
+		Key = "slot_prepare",
+		Generation = generation,
+		Priority = 40,
+		Step = function()
+			if not validate() then
+				return true, "stale"
+			end
+
+			local state = getState(player)
+			if state.activeShip ~= activeShip then
+				cleanupAllRuntimeGuis(player)
+				state.activeShip = activeShip
+			end
+
+			table.clear(disableRoots)
+			for _, child in ipairs(activeShip:GetChildren()) do
+				if normalizeSlotName(child.Name) then
+					continue
+				end
+				if child.Name == "CrewSlots" then
+					continue
+				end
+				if ShipSlotService.IsCaptainSlotName(child.Name) then
+					continue
+				end
+				if child.Name == runtimePointsFolderName then
+					continue
+				end
+				disableRoots[#disableRoots + 1] = child
+			end
+
+			return true, "ok"
+		end,
+	})
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "slot_disable_nonnumeric",
+		Key = "slot_disable_nonnumeric",
+		Generation = generation,
+		Priority = 45,
+		Step = function(_job, deadline)
+			if not validate() then
+				return true, "stale"
+			end
+
+			local processed = 0
+			while disableRootIndex <= #disableRoots and (processed == 0 or os.clock() < deadline) do
+				local root = disableRoots[disableRootIndex]
+				disableRootIndex += 1
+				if root and root.Parent then
+					disableInteractionDescendants(root)
+				end
+				processed += 1
+			end
+
+			return disableRootIndex > #disableRoots, "ok"
+		end,
+	})
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "slot_captain_setup",
+		Key = "slot_captain_setup",
+		Generation = generation,
+		Priority = 50,
+		Step = function()
+			if not validate() then
+				return true, "stale"
+			end
+
+			local captainSpot, captainInfo = setupCaptainSpot(player, activeShip, upgradeLevel, rebirthCount)
+			if captainSpot and captainInfo then
+				setupCaptainLevelUpSurfaceGui(player, activeShip, captainSpot, captainInfo)
+			else
+				cleanupCaptainRuntimeGui(player)
+			end
+			return true, "ok"
+		end,
+	})
+
+	for _, slotName in ipairs(slotNumbers) do
+		local priority = 100 + (tonumber(slotName) or 999)
+		JoinRestoreScheduler.Enqueue(player, {
+			Phase = "slot_setup",
+			Key = "slot_setup:" .. tostring(slotName),
+			Generation = generation,
+			Priority = priority,
+			Step = function()
+				if not validate() then
+					return true, "stale"
+				end
+
+				local slotModel, handle = ShipSlotService.GetSlotHandle(activeShip, slotName)
+				if slotModel and slotModel:IsA("Model") then
+					activeSlots[slotName] = true
+
+					local slotState = setSlotAttributes(slotModel, slotName, upgradeLevel, rebirthCount)
+					markCrewSlotInteractions(player, slotModel, handle, slotName)
+					setSlotInteractionEnabled(slotModel, handle, slotState)
+					setupLevelUpSurfaceGui(player, activeShip, slotModel, slotName, slotState)
+				end
+				return true, "ok"
+			end,
+		})
+	end
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "slot_extra_cleanup",
+		Key = "slot_extra_cleanup",
+		Generation = generation,
+		Priority = 10000,
+		Step = function(_job, deadline)
+			if not validate() then
+				return true, "stale"
+			end
+
+			local processed = 0
+			while extraIndex <= #allSlotNumbers and (processed == 0 or os.clock() < deadline) do
+				local slotName = allSlotNumbers[extraIndex]
+				extraIndex += 1
+				if not activeSlots[slotName] then
+					local slotModel = ShipSlotService.GetSlot(activeShip, slotName)
+					if slotModel then
+						slotModel:SetAttribute(SLOT_ATTRIBUTES.Visible, false)
+						slotModel:SetAttribute(SLOT_ATTRIBUTES.Usable, false)
+						slotModel:SetAttribute(SLOT_ATTRIBUTES.Locked, true)
+						slotModel:SetAttribute(SLOT_ATTRIBUTES.Role, "extra")
+						slotModel:SetAttribute(SLOT_ATTRIBUTES.BonusPercent, 0)
+						slotModel:SetAttribute(SLOT_ATTRIBUTES.UnlockLevel, nil)
+						disableInteractionDescendants(slotModel)
+					end
+				end
+				processed += 1
+			end
+
+			return extraIndex > #allSlotNumbers, "ok"
+		end,
+	})
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "slot_finalize",
+		Key = "slot_finalize",
+		Generation = generation,
+		Priority = 10100,
+		Step = function(_job, deadline)
+			if not validate() then
+				return true, "stale"
+			end
+
+			local state = getState(player)
+			if cleanupKeys == nil then
+				cleanupKeys = {}
+				for slotName in pairs(state.guisBySlot) do
+					cleanupKeys[#cleanupKeys + 1] = slotName
+				end
+			end
+
+			local processed = 0
+			while cleanupIndex <= #cleanupKeys and (processed == 0 or os.clock() < deadline) do
+				local slotName = cleanupKeys[cleanupIndex]
+				cleanupIndex += 1
+				if not activeSlots[slotName] then
+					cleanupRuntimeGuiBySlot(player, slotName)
+				end
+				processed += 1
+			end
+
+			if cleanupIndex <= #cleanupKeys then
+				return false, "pending"
+			end
+
+			if #slotNumbers == 0 then
+				warnOnce(
+					"no_numeric_slots_" .. activeShip:GetFullName(),
+					"[ShipSlotInteractionService] Active ship has no numeric crew slots with Handles: %s",
+					activeShip:GetFullName()
+				)
+			end
+			warnForMissingUsableSlots(player, activeShip, upgradeLevel, rebirthCount)
+			return true, "ok"
+		end,
+	})
+
+	return true, "queued"
 end
 
 function ShipSlotInteractionService.CleanupPlayer(player)

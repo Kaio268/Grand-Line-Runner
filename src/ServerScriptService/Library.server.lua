@@ -1,4 +1,5 @@
 local parent = script.Parent.Modules
+local LOG_LOADED_MODULES = game:GetAttribute("LibraryModuleLoadDebug") == true
 
 local function requireModules()
 	local modules = {}
@@ -28,7 +29,9 @@ local function requireModules()
 			local success, result = tryRequire(module)
 
 			if success then
-				print("[Library] Loaded module:", module.Name)
+				if LOG_LOADED_MODULES then
+					print("[Library] Loaded module:", module.Name)
+				end
 				table.remove(modules, index)
 			else
 				failureCounts[module] = (failureCounts[module] or 0) + 1

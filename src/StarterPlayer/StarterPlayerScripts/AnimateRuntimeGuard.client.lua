@@ -674,15 +674,20 @@ local function resolveMovementState(state)
 end
 
 local function playResolvedState(state, key, speed)
+	local playbackSpeed = tonumber(speed) or 1
+	if playbackSpeed ~= playbackSpeed or playbackSpeed == math.huge or playbackSpeed == -math.huge or playbackSpeed <= 0 then
+		playbackSpeed = 1
+	end
+
 	if state.CurrentKey == key then
 		local currentTrack = state.CurrentTrack
 		if currentTrack then
 			if currentTrack.IsPlaying then
 				pcall(function()
-					currentTrack:AdjustSpeed(speed)
+					currentTrack:AdjustSpeed(playbackSpeed)
 				end)
 			else
-				currentTrack:Play(TRANSITION_FADE_TIME, 1, speed)
+				currentTrack:Play(TRANSITION_FADE_TIME, 1, playbackSpeed)
 			end
 		end
 		return
@@ -699,7 +704,7 @@ local function playResolvedState(state, key, speed)
 
 	state.CurrentTrack = track
 	state.CurrentKey = key
-	track:Play(TRANSITION_FADE_TIME, 1, speed)
+	track:Play(TRANSITION_FADE_TIME, 1, playbackSpeed)
 	logInfo("character=%s state=%s", state.Character.Name, key)
 end
 

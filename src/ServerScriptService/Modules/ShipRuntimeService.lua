@@ -7,6 +7,7 @@ local Workspace = game:GetService("Workspace")
 
 local DataManager = require(ServerScriptService:WaitForChild("Data"):WaitForChild("DataManager"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
+local JoinRestoreScheduler = require(ServerScriptService.Modules:WaitForChild("JoinRestoreScheduler"))
 local ShipSlotInteractionService = require(ServerScriptService.Modules:WaitForChild("ShipSlotInteractionService"))
 local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
 local ShipSailNameService = require(ServerScriptService.Modules:WaitForChild("ShipSailNameService"))
@@ -28,6 +29,7 @@ local SHIP_SPAWN_RETRY_DELAY_SECONDS = 0.4
 local SHIP_READY_RETRY_COUNT = 6
 local SHIP_READY_RETRY_DELAY_SECONDS = 0.75
 local RUNTIME_SPAWN_LOCATION_ATTRIBUTE = "ShipRuntimeSpawnLocation"
+local RUNTIME_SHELL_ATTRIBUTE = "GTRRuntimeShell"
 local CREW_VISUAL_GENERATION_ATTRIBUTE = "CrewVisualGeneration"
 
 local runtimeStateByPlayer = {}
@@ -115,6 +117,10 @@ local function namesMatchIgnoringCase(left, right)
 	return tostring(left or ""):lower() == tostring(right or ""):lower()
 end
 
+local function isRuntimeShell(instance)
+	return typeof(instance) == "Instance" and instance:GetAttribute(RUNTIME_SHELL_ATTRIBUTE) == true
+end
+
 local function getRuntimeState(player)
 	local state = runtimeStateByPlayer[player]
 	if not state then
@@ -125,6 +131,8 @@ local function getRuntimeState(player)
 			positionIndex = nil,
 			respawnRequestId = 0,
 			ship = nil,
+			pendingShipRestore = nil,
+			spawnFallbackShell = nil,
 			crewVisualGeneration = 0,
 		}
 		runtimeStateByPlayer[player] = state
@@ -146,6 +154,21 @@ local function bumpCrewVisualGeneration(player, activeShip)
 		targetShip:SetAttribute(CREW_VISUAL_GENERATION_ATTRIBUTE, generation)
 	end
 
+	return generation
+end
+
+local function setCrewVisualGeneration(player, activeShip, generation)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return 0
+	end
+
+	generation = math.max(0, math.floor(tonumber(generation) or 0))
+	local state = getRuntimeState(player)
+	state.crewVisualGeneration = generation
+	local targetShip = activeShip or state.ship
+	if typeof(targetShip) == "Instance" and targetShip.Parent ~= nil then
+		targetShip:SetAttribute(CREW_VISUAL_GENERATION_ATTRIBUTE, generation)
+	end
 	return generation
 end
 
@@ -391,7 +414,7 @@ local function getActiveShipsForPlayer(player)
 	local ships = {}
 
 	for _, child in ipairs(activeShips:GetChildren()) do
-		if child:IsA("Model") and child:GetAttribute(ATTR.OwnerUserId) == player.UserId then
+		if child:IsA("Model") and not isRuntimeShell(child) and child:GetAttribute(ATTR.OwnerUserId) == player.UserId then
 			ships[#ships + 1] = child
 		end
 	end
@@ -401,6 +424,23 @@ end
 
 local function getRuntimeName(player)
 	return string.format("%s_%d", tostring(ShipVisuals.RuntimeModelName or "ActiveShip"), player.UserId)
+end
+
+local function destroyRuntimeShellsForPlayer(player)
+	local activeShips = getActiveShipsFolder()
+	if not activeShips then
+		return
+	end
+
+	local runtimeName = getRuntimeName(player)
+	for _, child in ipairs(activeShips:GetChildren()) do
+		if child:IsA("Model")
+			and isRuntimeShell(child)
+			and (child:GetAttribute(ATTR.OwnerUserId) == player.UserId or child.Name == runtimeName)
+		then
+			child:Destroy()
+		end
+	end
 end
 
 local function getPositionIndexForInstance(positions, position)
@@ -425,7 +465,7 @@ local function getOccupiedPositionIndexes(playerToIgnore)
 	if activeShips then
 		for _, child in ipairs(activeShips:GetChildren()) do
 			local ownerUserId = child:GetAttribute(ATTR.OwnerUserId)
-			if ownerUserId and (not playerToIgnore or ownerUserId ~= playerToIgnore.UserId) then
+			if not isRuntimeShell(child) and ownerUserId and (not playerToIgnore or ownerUserId ~= playerToIgnore.UserId) then
 				local positionIndex = tonumber(child:GetAttribute(ATTR.PositionIndex))
 				if positionIndex then
 					occupied[positionIndex] = true
@@ -589,50 +629,44 @@ local function isForcedNoCollisionPart(part)
 	return part:GetAttribute(safetyAttributes.ForceNoCollision) == true or isUnderNoCollisionFolder(part)
 end
 
-local function sanitizeRuntimeClone(model)
-	local preservePhysics = model:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreservePhysics) == true
-	local allowScripts = model:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.AllowScripts) == true
+local function sanitizeRuntimeDescendant(descendant, preservePhysics, allowScripts)
 	local walkableCollisionParts = 0
 	local runtimeCollidableParts = 0
 
-	for _, descendant in ipairs(model:GetDescendants()) do
-		if descendant:IsA("BasePart") then
-			local interactive = partHasInteraction(descendant)
-			local walkableCollision = isWalkableCollisionPart(descendant)
-			local forcedNoCollision = isForcedNoCollisionPart(descendant)
+	if descendant:IsA("BasePart") then
+		local interactive = partHasInteraction(descendant)
+		local walkableCollision = isWalkableCollisionPart(descendant)
+		local forcedNoCollision = isForcedNoCollisionPart(descendant)
 
-			if not preservePhysics then
-				descendant.Anchored = true
-			end
-
-			if forcedNoCollision then
-				descendant.CanCollide = false
-			elseif walkableCollision then
-				walkableCollisionParts += 1
-				descendant.CanCollide = true
-				descendant.CanTouch = descendant:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreserveTouch) == true
-				descendant.CanQuery = true
-			end
-
-			if not walkableCollision and descendant:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreserveTouch) ~= true and not interactive then
-				descendant.CanTouch = false
-			end
-
-			if not walkableCollision and descendant:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreserveQuery) ~= true and not interactive then
-				descendant.CanQuery = false
-			end
-
-			if descendant.CanCollide then
-				runtimeCollidableParts += 1
-			end
-		elseif not allowScripts and (descendant:IsA("Script") or descendant:IsA("LocalScript")) then
-			descendant.Disabled = true
+		if not preservePhysics then
+			descendant.Anchored = true
 		end
+
+		if forcedNoCollision then
+			descendant.CanCollide = false
+		elseif walkableCollision then
+			walkableCollisionParts = 1
+			descendant.CanCollide = true
+			descendant.CanTouch = descendant:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreserveTouch) == true
+			descendant.CanQuery = true
+		end
+
+		if not walkableCollision and descendant:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreserveTouch) ~= true and not interactive then
+			descendant.CanTouch = false
+		end
+
+		if not walkableCollision and descendant:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreserveQuery) ~= true and not interactive then
+			descendant.CanQuery = false
+		end
+
+		if descendant.CanCollide then
+			runtimeCollidableParts = 1
+		end
+	elseif not allowScripts and (descendant:IsA("Script") or descendant:IsA("LocalScript")) then
+		descendant.Disabled = true
 	end
 
-	model:SetAttribute("ShipWalkableCollisionParts", walkableCollisionParts)
-	model:SetAttribute("ShipRuntimeCollidableParts", runtimeCollidableParts)
-	return runtimeCollidableParts
+	return walkableCollisionParts, runtimeCollidableParts
 end
 
 local function warnIfMissingWalkableCollision(model, visual)
@@ -1241,76 +1275,6 @@ local function getUpgradeLevel(player)
 	return PlotUpgradeConfig.ClampLevel(storedUpgrade)
 end
 
-local function runStandRefresh(player)
-	local standCommand = ShipRuntimeSignals.GetStandCommandFunction()
-	if not standCommand or not standCommand:IsA("BindableFunction") then
-		return false, "stand_refresh_missing", {
-			Reason = "stand_refresh_missing",
-		}
-	end
-
-	local ok, result, reason = xpcall(function()
-		return standCommand:Invoke("refresh", player)
-	end, debug.traceback)
-
-	if not ok then
-		return false, "stand_refresh_failed", {
-			Reason = "stand_refresh_failed",
-			Error = tostring(result),
-		}
-	end
-
-	if result == false then
-		return false, tostring(reason or "stand_refresh_failed"), {
-			Reason = tostring(reason or "stand_refresh_failed"),
-		}
-	end
-
-	return true, reason or result
-end
-
-local function invokeStandRefresh(player)
-	local ok, reason, details = runStandRefresh(player)
-	if ok then
-		return true, reason
-	end
-
-	task.delay(0.25, function()
-		if player.Parent ~= Players then
-			return
-		end
-
-		local retryOk, retryReason, retryDetails = runStandRefresh(player)
-		if retryOk then
-			return
-		end
-
-		local detailText = if typeof(retryDetails) == "table" and retryDetails.Error
-			then tostring(retryDetails.Error)
-			else tostring(retryReason)
-		warn(("[ShipRuntimeService] Failed to refresh crew slots for %s after ship refresh: %s"):format(
-			formatPlayer(player),
-			detailText
-		))
-	end)
-
-	return false, reason, details
-end
-
-local function refreshSlotInteractions(player, activeShip, upgradeLevel)
-	local ok, err = xpcall(function()
-		ShipSlotInteractionService.RefreshPlayerShip(player, activeShip, {
-			UpgradeLevel = upgradeLevel,
-		})
-	end, debug.traceback)
-
-	if ok then
-		return true
-	end
-
-	return false, tostring(err)
-end
-
 local function queueRefreshAfterReset(player, options)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false, "invalid_player"
@@ -1479,8 +1443,225 @@ local function teleportPlayerToShipSpawnDeferred(player, context)
 	end)
 end
 
+local function queueStandRefresh(player, activeShip, generation, source)
+	local standCommand = ShipRuntimeSignals.GetStandCommandFunction()
+	if not standCommand or not standCommand:IsA("BindableFunction") then
+		return false, "stand_refresh_missing"
+	end
+
+	local ok, result, reason = xpcall(function()
+		return standCommand:Invoke("queue_refresh", player, {
+			ActiveShip = activeShip,
+			Generation = generation,
+			Source = tostring(source or "ship_restore"),
+		})
+	end, debug.traceback)
+
+	if not ok then
+		return false, tostring(result)
+	end
+	if result == false then
+		return false, tostring(reason or "stand_refresh_failed")
+	end
+	return true, tostring(reason or result or "queued")
+end
+
+local function enqueueActiveShipRestore(player, activeShip, upgradeLevel, generation, source)
+	if isRuntimeShell(activeShip) then
+		JoinRestoreScheduler.Log(player, "active_ship_restore_blocked", 0, "blocked_shell_not_active", {
+			Always = true,
+			Generation = generation,
+		})
+		return false, "blocked_shell_not_active"
+	end
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "slot_restore_enqueue",
+		Key = "slot_restore_enqueue",
+		Generation = generation,
+		Priority = 30,
+		Step = function()
+			if player.Parent ~= Players or activeShip.Parent == nil then
+				return true, "stale"
+			end
+			ShipSlotInteractionService.QueueRefreshPlayerShip(player, activeShip, {
+				Generation = generation,
+				UpgradeLevel = upgradeLevel,
+				Source = source,
+			})
+			return true, "queued"
+		end,
+	})
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "stand_restore_enqueue",
+		Key = "stand_restore_enqueue",
+		Generation = generation,
+		Priority = 190,
+		Step = function()
+			if player.Parent ~= Players or activeShip.Parent == nil then
+				return true, "stale"
+			end
+			queueStandRefresh(player, activeShip, generation, source)
+			return true, "queued"
+		end,
+	})
+
+	return true, "queued"
+end
+
+local function enqueuePostCloneRestore(player, context)
+	local clone = context.Clone
+	if typeof(clone) ~= "Instance" or not clone:IsA("Model") then
+		return false, "invalid_clone"
+	end
+
+	local stack = { clone }
+	local preservePhysics = clone:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.PreservePhysics) == true
+	local allowScripts = clone:GetAttribute(ShipVisuals.RuntimeSafetyAttributes.AllowScripts) == true
+	local walkableCollisionParts = 0
+	local runtimeCollidableParts = 0
+
+	local function pendingCloneStillCurrent()
+		if player.Parent ~= Players then
+			return false
+		end
+
+		local state = getRuntimeState(player)
+		local pending = state.pendingShipRestore
+		return typeof(pending) == "table"
+			and pending.Clone == clone
+			and pending.Generation == context.Generation
+			and ShipRuntimeService.GetCrewVisualGeneration(player) == context.Generation
+	end
+
+	local function cancelPendingClone()
+		local state = runtimeStateByPlayer[player]
+		local pending = state and state.pendingShipRestore
+		if typeof(pending) ~= "table" or pending.Clone ~= clone then
+			return
+		end
+
+		state.pendingShipRestore = nil
+		if state.ship ~= clone and clone.Parent == nil then
+			clone:Destroy()
+		end
+	end
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "ship_sanitize",
+		Key = "ship_sanitize",
+		Generation = context.Generation,
+		Priority = 20,
+		OnCancel = cancelPendingClone,
+		Step = function(_job, deadline)
+			if not pendingCloneStillCurrent() then
+				return true, "stale"
+			end
+
+			local processed = 0
+			while #stack > 0 and processed < 96 and (processed == 0 or os.clock() < deadline) do
+				local instance = table.remove(stack)
+				for _, child in ipairs(instance:GetChildren()) do
+					stack[#stack + 1] = child
+				end
+				if instance ~= clone then
+					local walkableDelta, collidableDelta =
+						sanitizeRuntimeDescendant(instance, preservePhysics, allowScripts)
+					walkableCollisionParts += walkableDelta
+					runtimeCollidableParts += collidableDelta
+				end
+				processed += 1
+			end
+
+			if #stack > 0 then
+				return false, "pending"
+			end
+
+			clone:SetAttribute("ShipWalkableCollisionParts", walkableCollisionParts)
+			clone:SetAttribute("ShipRuntimeCollidableParts", runtimeCollidableParts)
+			warnIfMissingWalkableCollision(clone, context.Visual)
+			return true, "ok"
+		end,
+	})
+
+	JoinRestoreScheduler.Enqueue(player, {
+		Phase = "ship_finalize",
+		Key = "ship_finalize",
+		Generation = context.Generation,
+		Priority = 25,
+		AlwaysLog = true,
+		OnCancel = cancelPendingClone,
+		Step = function()
+			if not pendingCloneStillCurrent() then
+				return true, "stale"
+			end
+
+			if #stack > 0 then
+				return false, "pending"
+			end
+
+			local state = getRuntimeState(player)
+			local activeShips = context.ActiveShips
+			if typeof(activeShips) ~= "Instance" or activeShips.Parent == nil then
+				state.pendingShipRestore = nil
+				clone:Destroy()
+				return true, "active_ships_missing"
+			end
+
+			applyRuntimeAttributes(
+				clone,
+				player,
+				context.Visual,
+				context.UpgradeLevel,
+				context.PositionIndex,
+				context.Position
+			)
+			clone:PivotTo(context.Position.CFrame)
+			destroyRuntimeShellsForPlayer(player)
+			clone.Parent = activeShips
+			ShipSailNameService.Apply(player, clone, context.Visual)
+
+			local runtimePoints, runtimePointReason = ensureRuntimePoints(player, clone)
+			if not runtimePoints then
+				state.pendingShipRestore = nil
+				clone:Destroy()
+				return true, runtimePointReason or "ship_spawn_not_ready"
+			end
+
+			destroyShips(context.ExistingShips or {})
+			state.ship = clone
+			state.position = context.Position
+			state.positionIndex = context.PositionIndex
+			setCrewVisualGeneration(player, clone, context.Generation)
+			state.pendingShipRestore = nil
+
+			enqueueActiveShipRestore(
+				player,
+				clone,
+				context.UpgradeLevel,
+				context.Generation,
+				context.Source or "ship_clone_restore"
+			)
+
+			if context.TeleportAfterReplace then
+				teleportPlayerToShipSpawnDeferred(player, "ship_replacement")
+			end
+			return true, "ok"
+		end,
+	})
+
+	return true, "queued"
+end
+
 function ShipRuntimeService.IsActiveShip(instance)
-	return typeof(instance) == "Instance" and instance:GetAttribute(ATTR.IsActiveShip) == true
+	return typeof(instance) == "Instance"
+		and instance:GetAttribute(ATTR.IsActiveShip) == true
+		and not isRuntimeShell(instance)
+end
+
+function ShipRuntimeService.IsRuntimeShell(instance)
+	return isRuntimeShell(instance)
 end
 
 function ShipRuntimeService.GetActiveShip(player)
@@ -1600,6 +1781,7 @@ function ShipRuntimeService.ClearPlayerShip(player, options)
 
 	options = options or {}
 
+	JoinRestoreScheduler.CancelPlayer(player, tostring(options.Reason or "clear_player_ship"))
 	ShipSlotInteractionService.CleanupPlayer(player)
 
 	local ships = getActiveShipsForPlayer(player)
@@ -1607,9 +1789,18 @@ function ShipRuntimeService.ClearPlayerShip(player, options)
 		clearPlayerRespawnLocation(player, ship)
 	end
 	destroyShips(ships)
+	destroyRuntimeShellsForPlayer(player)
 
 	local state = runtimeStateByPlayer[player]
 	if state then
+		if state.pendingShipRestore and typeof(state.pendingShipRestore.Clone) == "Instance" then
+			state.pendingShipRestore.Clone:Destroy()
+		end
+		state.pendingShipRestore = nil
+		if state.spawnFallbackShell and state.spawnFallbackShell.Parent then
+			state.spawnFallbackShell:Destroy()
+		end
+		state.spawnFallbackShell = nil
 		bumpCrewVisualGeneration(player)
 		state.ship = nil
 
@@ -1712,6 +1903,27 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		tostring(getChildCount(activeShips))
 	)
 
+	local existingState = runtimeStateByPlayer[player]
+	local pendingRestore = existingState and existingState.pendingShipRestore
+	if typeof(pendingRestore) == "table" and typeof(pendingRestore.Clone) == "Instance" then
+		if not options.ForceReplace and pendingRestore.Generation == ShipRuntimeService.GetCrewVisualGeneration(player) then
+			JoinRestoreScheduler.Log(player, "restore_pending", 0, "clone_pending", {
+				Generation = pendingRestore.Generation,
+			})
+			diag(
+				"refresh_return player=%s userId=%s ok=true branch=clone_pending_existing ship=%s generation=%s",
+				player.Name,
+				tostring(player.UserId),
+				getInstancePath(pendingRestore.Clone),
+				tostring(pendingRestore.Generation)
+			)
+			return true, pendingRestore.Clone
+		end
+
+		pendingRestore.Clone:Destroy()
+		existingState.pendingShipRestore = nil
+	end
+
 	local existingShips = getActiveShipsForPlayer(player)
 	local currentShip = existingShips[1]
 	local currentTier = currentShip and tonumber(currentShip:GetAttribute(ATTR.ActiveTier))
@@ -1771,15 +1983,9 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 			return makeLoggedRefreshFailure(player, runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
 		end
 
-		bumpCrewVisualGeneration(player, currentShip)
-
-		local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, currentShip, upgradeLevel)
-		if not slotRefreshOk then
-			return makeLoggedRefreshFailure(player, "slot_interaction_refresh_failed", {
-				Error = slotRefreshError,
-			})
-		end
-		invokeStandRefresh(player)
+		local generation = bumpCrewVisualGeneration(player, currentShip)
+		JoinRestoreScheduler.BeginPlayerRestore(player, tostring(options.Reason or "ship_reuse"), generation)
+		enqueueActiveShipRestore(player, currentShip, upgradeLevel, generation, "ship_reuse")
 
 		diag(
 			"refresh_return player=%s userId=%s ok=true branch=reuse ship=%s activeShipsChildCount=%s",
@@ -1800,9 +2006,22 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		getInstancePath(sourceModel),
 		getRuntimeName(player)
 	)
+	local generation = bumpCrewVisualGeneration(player)
+	JoinRestoreScheduler.BeginPlayerRestore(player, tostring(options.Reason or "ship_clone_restore"), generation)
+	local state = getRuntimeState(player)
+	if state.pendingShipRestore and typeof(state.pendingShipRestore.Clone) == "Instance" then
+		state.pendingShipRestore.Clone:Destroy()
+	end
+	state.pendingShipRestore = nil
+
+	local cloneStartedAt = os.clock()
 	local cloneOk, cloneOrError = xpcall(function()
 		return sourceModel:Clone()
 	end, debug.traceback)
+	JoinRestoreScheduler.Log(player, "ship_clone_sync", os.clock() - cloneStartedAt, if cloneOk then "ok" else "error", {
+		Always = true,
+		Generation = generation,
+	})
 	if not cloneOk or typeof(cloneOrError) ~= "Instance" or not cloneOrError:IsA("Model") then
 		return makeLoggedRefreshFailure(player, "clone_failed", {
 			UpgradeLevel = upgradeLevel,
@@ -1813,57 +2032,34 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 
 	local clone = cloneOrError
 	clone.Name = getRuntimeName(player)
-	sanitizeRuntimeClone(clone)
-	applyRuntimeAttributes(clone, player, visual, upgradeLevel, positionIndex, position)
-	ShipSlotInteractionService.InitializeOwnerOnlyInteractions(player, clone)
-	warnIfMissingWalkableCollision(clone, visual)
-	clone:PivotTo(position.CFrame)
-	clone.Parent = activeShips
-	diag(
-		"refresh_clone_parented player=%s userId=%s clone=%s parent=%s activeShipsChildCount=%s walkableCollisionParts=%s runtimeCollidableParts=%s",
-		player.Name,
-		tostring(player.UserId),
-		getInstancePath(clone),
-		getInstancePath(activeShips),
-		tostring(getChildCount(activeShips)),
-		tostring(clone:GetAttribute("ShipWalkableCollisionParts")),
-		tostring(clone:GetAttribute("ShipRuntimeCollidableParts"))
-	)
-	ShipSailNameService.Apply(player, clone, visual)
-
-	local runtimePoints, runtimePointReason, runtimePointDetails = ensureRuntimePoints(player, clone)
-	if not runtimePoints then
-		clone:Destroy()
-		return makeLoggedRefreshFailure(player, runtimePointReason or "ship_spawn_not_ready", runtimePointDetails)
-	end
-
-	destroyShips(existingShips)
-
-	local state = getRuntimeState(player)
-	state.ship = clone
+	clone:SetAttribute(RUNTIME_SHELL_ATTRIBUTE, nil)
 	state.position = position
 	state.positionIndex = positionIndex
-
-	bumpCrewVisualGeneration(player, clone)
-
-	local slotRefreshOk, slotRefreshError = refreshSlotInteractions(player, clone, upgradeLevel)
-	if not slotRefreshOk then
-		return makeLoggedRefreshFailure(player, "slot_interaction_refresh_failed", {
-			Error = slotRefreshError,
-		})
-	end
-	invokeStandRefresh(player)
-
-	if teleportAfterReplace then
-		teleportPlayerToShipSpawnDeferred(player, "ship_replacement")
-	end
+	state.pendingShipRestore = {
+		Clone = clone,
+		Generation = generation,
+		Source = tostring(options.Reason or "ship_clone_restore"),
+	}
+	enqueuePostCloneRestore(player, {
+		ActiveShips = activeShips,
+		Clone = clone,
+		ExistingShips = existingShips,
+		Generation = generation,
+		Position = position,
+		PositionIndex = positionIndex,
+		Source = tostring(options.Reason or "ship_clone_restore"),
+		TeleportAfterReplace = teleportAfterReplace,
+		UpgradeLevel = upgradeLevel,
+		Visual = visual,
+	})
 
 	diag(
-		"refresh_return player=%s userId=%s ok=true branch=clone ship=%s activeShipsChildCount=%s",
+		"refresh_return player=%s userId=%s ok=true branch=clone_pending ship=%s activeShipsChildCount=%s generation=%s",
 		player.Name,
 		tostring(player.UserId),
 		getInstancePath(clone),
-		tostring(getChildCount(activeShips))
+		tostring(getChildCount(activeShips)),
+		tostring(generation)
 	)
 	return true, clone
 end

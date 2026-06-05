@@ -1,6 +1,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local localPlayer = Players.LocalPlayer
@@ -22,12 +23,17 @@ local FULL_DISTANCE = 225
 local REDUCED_DISTANCE = 475
 local MAX_FULL_VISUALS = 80
 local MAX_REDUCED_VISUALS = 150
+local REFRESH_BUDGET_SECONDS = 0.004
+local REFRESH_MAX_STANDS_PER_FRAME = 6
 local BUBBLE_NAME = "ClientPremiumCrewStealProtectionBubble"
 
 local tracked = {}
 local fullVisualCount = 0
 local reducedVisualCount = 0
 local refreshQueued = false
+local refreshConnection = nil
+local refreshQueue = {}
+local refreshCursor = 1
 
 local function normalizeName(name)
 	return string.lower(tostring(name or "")):gsub("[^%w]", "")
@@ -223,6 +229,26 @@ local function placeClone(standModel, clone)
 	return false
 end
 
+local function scheduleFullVisualEffects(record, standModel, clone)
+	task.defer(function()
+		if record.Clone ~= clone or record.Mode ~= "full" or not clone.Parent or not standModel.Parent then
+			return
+		end
+
+		local crewId = tostring(standModel:GetAttribute(ATTR.CanonicalName) or standModel:GetAttribute(ATTR.CrewMemberName) or "")
+		local variant = tostring(standModel:GetAttribute(ATTR.Variant) or "Normal")
+		CrewAuraVisuals.Refresh(clone, {
+			CrewMemberId = crewId,
+			Variant = variant,
+			Source = "ClientPlacedCrewVisual",
+		})
+		CrewIdleAnimator.Start(clone, {
+			CrewMemberId = crewId,
+			Source = "ClientPlacedCrewVisual",
+		})
+	end)
+end
+
 local function ensureVisual(record, mode)
 	local standModel = record.StandModel
 	if not standModel or standModel.Parent == nil then
@@ -260,25 +286,14 @@ local function ensureVisual(record, mode)
 		return
 	end
 
-	if mode == "full" then
-		local crewId = tostring(standModel:GetAttribute(ATTR.CanonicalName) or standModel:GetAttribute(ATTR.CrewMemberName) or "")
-		local variant = tostring(standModel:GetAttribute(ATTR.Variant) or "Normal")
-		CrewAuraVisuals.Refresh(clone, {
-			CrewMemberId = crewId,
-			Variant = variant,
-			Source = "ClientPlacedCrewVisual",
-		})
-		CrewIdleAnimator.Start(clone, {
-			CrewMemberId = crewId,
-			Source = "ClientPlacedCrewVisual",
-		})
-	end
-
 	applyProtectionBubble(clone)
 	CollectionService:AddTag(clone, CrewOverhead.Tag)
 	record.Clone = clone
 	record.Mode = mode
 	record.VisualKey = visualKey
+	if mode == "full" then
+		scheduleFullVisualEffects(record, standModel, clone)
+	end
 end
 
 local function resolveMode(record, focusPosition)
@@ -331,30 +346,110 @@ local function updateMoneyLabel(standModel)
 	end
 end
 
-local function refreshAll()
+local function getRecordPriority(record, focusPosition)
+	local standModel = record.StandModel
+	if not standModel or standModel.Parent == nil then
+		return math.huge
+	end
+
+	local ownerUserId = tonumber(standModel:GetAttribute(ATTR.OwnerUserId)) or 0
+	local isOwner = ownerUserId == localPlayer.UserId
+	local isCaptain = standModel:GetAttribute(ATTR.IsCaptain) == true
+	local handle = findHandle(standModel)
+	local distance = if handle then (handle.Position - focusPosition).Magnitude else REDUCED_DISTANCE + 1000
+
+	local priority = distance
+	if isOwner then
+		priority -= 10000
+	end
+	if isCaptain then
+		priority -= 2000
+	end
+	return priority
+end
+
+local function clearRefreshConnection()
+	if refreshConnection then
+		refreshConnection:Disconnect()
+		refreshConnection = nil
+	end
+end
+
+local processRefreshQueue
+
+local function finishRefreshQueue()
 	refreshQueued = false
-	fullVisualCount = 0
-	reducedVisualCount = 0
+	refreshQueue = {}
+	refreshCursor = 1
+	clearRefreshConnection()
+end
+
+processRefreshQueue = function()
+	local startedAt = os.clock()
+	local processed = 0
 	local focusPosition = getFocusPosition()
 
-	for standModel, record in pairs(tracked) do
-		if standModel.Parent == nil then
-			stopVisual(record)
-			tracked[standModel] = nil
+	while
+		refreshCursor <= #refreshQueue
+		and processed < REFRESH_MAX_STANDS_PER_FRAME
+		and (os.clock() - startedAt) < REFRESH_BUDGET_SECONDS
+	do
+		local record = refreshQueue[refreshCursor]
+		refreshCursor += 1
+		processed += 1
+
+		local standModel = record and record.StandModel
+		if not standModel or standModel.Parent == nil then
+			if record then
+				stopVisual(record)
+			end
+			if standModel then
+				tracked[standModel] = nil
+			end
 		else
 			local mode = resolveMode(record, focusPosition)
 			ensureVisual(record, mode)
 			updateMoneyLabel(standModel)
 		end
 	end
+
+	if refreshCursor > #refreshQueue then
+		finishRefreshQueue()
+	end
+end
+
+local function ensureRefreshConnection()
+	if refreshConnection then
+		return
+	end
+
+	refreshConnection = RunService.Heartbeat:Connect(processRefreshQueue)
 end
 
 local function requestRefresh()
 	if refreshQueued then
 		return
 	end
+
 	refreshQueued = true
-	task.defer(refreshAll)
+	refreshCursor = 1
+	fullVisualCount = 0
+	reducedVisualCount = 0
+	local focusPosition = getFocusPosition()
+	refreshQueue = {}
+	for _, record in pairs(tracked) do
+		refreshQueue[#refreshQueue + 1] = record
+	end
+	table.sort(refreshQueue, function(left, right)
+		return getRecordPriority(left, focusPosition) < getRecordPriority(right, focusPosition)
+	end)
+
+	if #refreshQueue == 0 then
+		finishRefreshQueue()
+		return
+	end
+
+	ensureRefreshConnection()
 end
 
 local function disconnectRecord(record)
@@ -413,13 +508,14 @@ local removedConnection = CollectionService:GetInstanceRemovedSignal(PlacedCrewS
 task.spawn(function()
 	while true do
 		task.wait(UPDATE_INTERVAL_SECONDS)
-		refreshAll()
+		requestRefresh()
 	end
 end)
 
 script.Destroying:Connect(function()
 	addedConnection:Disconnect()
 	removedConnection:Disconnect()
+	clearRefreshConnection()
 	for standModel, record in pairs(tracked) do
 		disconnectRecord(record)
 		tracked[standModel] = nil

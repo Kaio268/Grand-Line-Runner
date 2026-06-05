@@ -1103,9 +1103,10 @@ local function render()
 	end
 
 	local isAfkLobby = currentState.Role == "AFKPlace"
-	setAfkVisualIsolation(isAfkLobby)
-	backdrop.Visible = isAfkLobby
-	if not isAfkLobby then
+	local showAfkBackdrop = isAfkLobby and isLocalAfkPlace()
+	setAfkVisualIsolation(showAfkBackdrop)
+	backdrop.Visible = showAfkBackdrop
+	if not showAfkBackdrop then
 		return
 	end
 

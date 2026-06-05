@@ -22,7 +22,7 @@ local VIP_GAMEPASS_ID = assert(tonumber(GamepassesConfig.VIP and GamepassesConfi
 local FEEDBACK_COOLDOWN_SECONDS = 8
 local POPUP_COLOR = Color3.fromRGB(255, 86, 86)
 local POPUP_STROKE = Color3.fromRGB(0, 0, 0)
-local DEBUG_LOGS = RunService:IsStudio()
+local DEBUG_LOGS = RunService:IsStudio() and game:GetAttribute("VIPBarrierDebug") == true
 local REMOTES_FOLDER_NAME = "Remotes"
 local ACCESS_STATE_EVENT_NAME = "VIPBarrierAccessStateChanged"
 local ACCESS_STATE_REQUEST_NAME = "VIPBarrierAccessStateRequest"

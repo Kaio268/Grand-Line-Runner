@@ -5,7 +5,7 @@ local DiagnosticLogLimiter = require(script.Parent:WaitForChild("DiagnosticLogLi
 
 local AnimationLoadDiagnostics = {}
 
-local DEBUG_INFO = RunService:IsStudio()
+local DEBUG_INFO = RunService:IsStudio() and ReplicatedStorage:GetAttribute("AnimationLoadDebug") == true
 local INFO_COOLDOWN = 0.5
 local WARN_COOLDOWN = 3
 local PERMISSION_DENIED_COOLDOWN = 300

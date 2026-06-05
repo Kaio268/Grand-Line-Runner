@@ -1,8 +1,12 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
-local mainEventsFolder = ReplicatedStorage:WaitForChild("MainEvents")
-local currentEventValue = Workspace:WaitForChild("CurrentEvent")
+local mainEventsFolder = ReplicatedStorage:FindFirstChild("MainEvents") or ReplicatedStorage:WaitForChild("MainEvents", 10)
+local currentEventValue = Workspace:FindFirstChild("CurrentEvent") or Workspace:WaitForChild("CurrentEvent", 10)
+if not mainEventsFolder or not currentEventValue then
+	warn("[EVENTS] MainEvents or Workspace.CurrentEvent missing; event visual sync disabled.")
+	return
+end
 
 local eventsFolder = Workspace:FindFirstChild("Events")
 if not eventsFolder then

@@ -1218,6 +1218,7 @@ local function buildDashboard()
 		BackgroundTransparency = 0.24,
 		BorderSizePixel = 0,
 		Size = UDim2.fromScale(1, 1),
+		Visible = false,
 		Parent = gui,
 	})
 
@@ -2695,6 +2696,7 @@ local function buildDashboard()
 				isAdmin = payload.IsAdmin or payload.IsSuperAdmin == true
 				if not isAdmin then
 					gui.Enabled = false
+					dim.Visible = false
 				end
 				if updateAdminLauncherVisibility then
 					updateAdminLauncherVisibility()
@@ -3137,6 +3139,7 @@ local function buildDashboard()
 	runButton.Activated:Connect(runSelected)
 	closeButton.Activated:Connect(function()
 		gui.Enabled = false
+		dim.Visible = false
 	end)
 
 	local function updateCanvas()
@@ -3225,6 +3228,10 @@ local function setDashboardOpen(open)
 	end
 
 	dashboardGui.Enabled = open == true
+	local dim = dashboardGui:FindFirstChild("Dim")
+	if dim and dim:IsA("GuiObject") then
+		dim.Visible = open == true
+	end
 	return true
 end
 

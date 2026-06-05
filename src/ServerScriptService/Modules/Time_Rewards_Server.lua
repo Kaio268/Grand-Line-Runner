@@ -5,7 +5,7 @@ local TimeRewardsFolder = ReplicatedStorage:WaitForChild("Modules"):WaitForChild
 
 local GIFT_DEBUG = false
 local GIFT_SYNC_DEBUG = false
-local GIFT_CLAIM_DEBUG = true
+local GIFT_CLAIM_DEBUG = game:GetAttribute("GiftServerClaimDebug") == true
 local AUTHORITATIVE_TIME_REWARD_REMOTE_ATTRIBUTE = "TimeRewardsAuthoritativeRemote"
 
 local function giftLog(tag: string, ...)

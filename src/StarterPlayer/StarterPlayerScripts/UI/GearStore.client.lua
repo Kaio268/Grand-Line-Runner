@@ -70,8 +70,12 @@ local unregisterModal = ReactModalRegistry.Register("GearStore", {
 	end,
 })
 
-local gearsFolder = player:WaitForChild("Gears")
-local backpack = player:WaitForChild("Backpack")
+local gearsFolder = player:FindFirstChild("Gears") or player:WaitForChild("Gears", 10)
+local backpack = player:FindFirstChildOfClass("Backpack") or player:WaitForChild("Backpack", 10)
+if not gearsFolder or not backpack then
+	warn("[GearStore] Player Gears or Backpack folder missing; gear store UI disabled.")
+	return
+end
 
 for gearName, gearData in pairs(Gears) do
 	gearList[#gearList + 1] = {

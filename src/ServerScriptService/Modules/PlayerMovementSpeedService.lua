@@ -11,7 +11,7 @@ local MovementSpeedConfig = require(ReplicatedStorage:WaitForChild("Modules"):Wa
 local PlayerMovementSpeedService = {}
 local cachedTitleService = nil
 
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("PlayerMovementSpeedDebugTrace") == true
 local SELECTED_SPEED_SETTING_NAME = "SelectedSpeed"
 local SPEED_AUTO_MAX_SETTING_NAME = "SpeedAutoMax"
 local SPEED_PATH = "HiddenLeaderstats.Speed"

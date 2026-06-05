@@ -8,6 +8,7 @@ local Configs = Modules:WaitForChild("Configs")
 local CrewInstanceService = require(ServerScriptService.Modules:WaitForChild("CrewInstanceService"))
 local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 local GTRPerformanceDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRPerformanceDiagnostics"))
+local JoinRestoreScheduler = require(ServerScriptService.Modules:WaitForChild("JoinRestoreScheduler"))
 local CrewIncomeBalance = require(Modules:WaitForChild("Crew"):WaitForChild("CrewIncomeBalance"))
 local PlacedCrewState = require(Modules:WaitForChild("Crew"):WaitForChild("PlacedCrewState"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
@@ -1270,6 +1271,15 @@ function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 	if typeof(activeShip) ~= "Instance" or not activeShip:IsA("Model") then
 		CaptainSlotRuntime.CleanupPlayer(player)
 		return false, "invalid_active_ship"
+	end
+	if activeShip:GetAttribute("GTRRuntimeShell") == true then
+		if JoinRestoreScheduler and typeof(JoinRestoreScheduler.Log) == "function" then
+			JoinRestoreScheduler.Log(player, "captain_restore_blocked", 0, "blocked_shell_not_active", {
+				Always = true,
+				Generation = activeShip:GetAttribute("CrewVisualGeneration"),
+			})
+		end
+		return false, "blocked_shell_not_active"
 	end
 
 	local existingRuntime = runtimeByPlayer[player]

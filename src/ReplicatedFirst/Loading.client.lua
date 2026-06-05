@@ -1473,6 +1473,33 @@ local function areStartupMilestonesReady(): boolean
 	return #getMissingStartupMilestones() == 0
 end
 
+local function getMissingVisualStartupMilestones(): {string}
+	local missing = {}
+	if not (playerGui and playerGui.Parent) then
+		missing[#missing + 1] = "PlayerGui"
+	end
+	if not isStartupAttributeTrue(STARTUP_HUD_READY_ATTRIBUTE) then
+		missing[#missing + 1] = STARTUP_HUD_READY_ATTRIBUTE
+	end
+	if not isStartupAttributeTrue(STARTUP_CHARACTER_OBSERVED_ATTRIBUTE) then
+		missing[#missing + 1] = STARTUP_CHARACTER_OBSERVED_ATTRIBUTE
+	end
+
+	local camera = workspace.CurrentCamera
+	local _, humanoid = getCharacterHumanoid()
+	if camera == nil then
+		missing[#missing + 1] = "CurrentCamera"
+	elseif camera.CameraSubject == nil and humanoid == nil then
+		missing[#missing + 1] = "CameraSubject"
+	end
+
+	return missing
+end
+
+local function areVisualStartupMilestonesReady(): boolean
+	return #getMissingVisualStartupMilestones() == 0
+end
+
 task.spawn(function()
 	setDisplayedProgress(0)
 
@@ -1569,6 +1596,12 @@ task.spawn(function()
 		setDisplayedProgress(displayed)
 
 		if elapsed >= MIN_DISPLAY_SECONDS and (criticalDone or criticalTimedOut) and areStartupMilestonesReady() then
+			finalCloseReason = "startup_ready"
+			break
+		end
+
+		if elapsed >= MIN_DISPLAY_SECONDS and (criticalDone or criticalTimedOut) and areVisualStartupMilestonesReady() then
+			finalCloseReason = "startup_visual_ready"
 			break
 		end
 

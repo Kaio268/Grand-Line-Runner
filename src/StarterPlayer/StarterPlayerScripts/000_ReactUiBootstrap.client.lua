@@ -10,7 +10,7 @@ local LOAD_TELEMETRY_REMOTE_NAME = "GTRLoadTelemetry"
 local SLOW_LOAD_THRESHOLD_SECONDS = 12
 local playerGui = player:FindFirstChildOfClass("PlayerGui") or player:WaitForChild("PlayerGui", PLAYER_GUI_TIMEOUT_SECONDS)
 local HUD_DEBUG = false
-local GIFT_BOOTSTRAP_DEBUG = true
+local GIFT_BOOTSTRAP_DEBUG = ReplicatedStorage:GetAttribute("GiftBootstrapDebug") == true
 local GIFT_BOOTSTRAP_DEBUG_VERSION = "gifts-bootstrap-slots-debug-2026-05-01"
 local DEFAULT_COUNTER_ICONS = {
 	Comet = "",

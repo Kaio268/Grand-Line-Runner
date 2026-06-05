@@ -27,6 +27,8 @@ if not LikeGoalSpawnSecret then
 end
 
 local firstRun = true
+local lastLikeFetchWarningAt = 0
+local LIKE_FETCH_WARNING_COOLDOWN_SECONDS = 120
 
 local surfaceGuis = {}
 for _, model in ipairs(workspace:WaitForChild("LikeGoals"):GetChildren()) do
@@ -81,7 +83,11 @@ local function pollLikes()
 		Method = "GET",
 	})
 	if not ok or res.StatusCode < 200 or res.StatusCode >= 300 then
-		warn("Like-fetch failed:", res)
+		local now = os.clock()
+		if game:GetAttribute("LikeFetchDebug") == true or now - lastLikeFetchWarningAt >= LIKE_FETCH_WARNING_COOLDOWN_SECONDS then
+			lastLikeFetchWarningAt = now
+			warn("Like-fetch failed:", res)
+		end
 		return
 	end
 
@@ -109,4 +115,3 @@ while true do
 	pollLikes()
 	task.wait(pollDelay)
 end
- 

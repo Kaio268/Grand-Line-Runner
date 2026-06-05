@@ -61,7 +61,6 @@ local CARRIED_CREW_MEMBER_ATTRIBUTE = "CarriedCrewMember"
 local CARRIED_CREW_MEMBER_IMAGE_ATTRIBUTE = "CarriedCrewMemberImage"
 local DEFAULT_MAX_CARRY_SLOTS = 3
 local DEFAULT_UNLOCKED_CARRY_SLOTS = 1
-local GET_STATE_READY_WAIT_SECONDS = 0.75
 local HORO_EFFECTS_FOLDER_NAME = "DevilFruitWorldEffects"
 local HORO_GHOSTS_FOLDER_NAME = "HoroGhosts"
 local STARTER_CREW_SOURCE = "GrandLineRushStarter"
@@ -3756,21 +3755,53 @@ local function handleRequest(player, actionName, payload)
 			{ Type = "table", AllowNil = true },
 		},
 	}) then
-		return finish(resolveActionResponse(player, false, nil, "remote_guard_rejected"))
+		actionTrace:phase("guard", {
+			Result = "failed",
+			Reason = "remote_guard_rejected",
+		})
+		return finish(resolveActionResponse(player, false, nil, "remote_guard_rejected", {
+			WaitForData = false,
+		}))
 	end
+	actionTrace:phase("guard", {
+		Result = "ok",
+	})
 
 	if typeof(actionName) ~= "string" then
-		return finish(resolveActionResponse(player, false, nil, "invalid_action"))
+		return finish(resolveActionResponse(player, false, nil, "invalid_action", {
+			WaitForData = false,
+		}))
 	end
 
 	if actionName == "GetState" then
-		if not DataManager:IsReady(player) then
-			waitForDataReady(player, GET_STATE_READY_WAIT_SECONDS)
-		end
-		return finish(resolveActionResponse(player, true, nil, nil, {
+		local dataReady = DataManager:IsReady(player)
+		actionTrace:phase("ready_check", {
+			Result = if dataReady then "ok" else "loading",
+			Reason = if dataReady then nil else "data_not_ready",
+		})
+		local response = resolveActionResponse(player, true, nil, nil, {
 			IncludeCrews = typeof(payload) == "table" and payload.IncludeCrews == true,
 			WaitForData = false,
-		}))
+		})
+		if not dataReady then
+			response.loading = true
+			response.partial = true
+			response.reason = "data_not_ready"
+			if typeof(response.state) == "table" then
+				response.state.Loading = true
+				response.state.Partial = true
+				response.state.Reason = "data_not_ready"
+			end
+			actionTrace:phase("partial_state", {
+				Result = "loading",
+				Reason = "data_not_ready",
+			})
+		else
+			actionTrace:phase("full_state_build", {
+				Result = "ok",
+			})
+		end
+		return finish(response)
 	end
 
 	local ready, errorResponse = preparePlayerState(player)

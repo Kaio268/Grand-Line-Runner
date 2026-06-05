@@ -1,5 +1,4 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local DevilFruits = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("DevilFruits")
 local AnimationLoadDiagnostics = require(DevilFruits:WaitForChild("AnimationLoadDiagnostics"))
@@ -105,7 +104,7 @@ local function getCrewCatalog()
 end
 
 local function logInfo(message, ...)
-	if not RunService:IsStudio() and not isDebugEnabled() then
+	if not isDebugEnabled() then
 		return
 	end
 
@@ -117,7 +116,7 @@ local function logInfo(message, ...)
 end
 
 local function logWarn(message, ...)
-	if not RunService:IsStudio() and not isDebugEnabled() then
+	if not isDebugEnabled() then
 		return
 	end
 

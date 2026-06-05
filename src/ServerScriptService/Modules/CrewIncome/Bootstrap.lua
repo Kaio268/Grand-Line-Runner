@@ -30,6 +30,12 @@ function Module.Install(ctx)
 	local function refreshPlayerIncomeDisplaysAfterLifecycleUpdate(...)
 		return ctx.refreshPlayerIncomeDisplaysAfterLifecycleUpdate(...)
 	end
+	local function queuePlayerStandRuntimeRefresh(...)
+		if typeof(ctx.queuePlayerStandRuntimeRefresh) == "function" then
+			return ctx.queuePlayerStandRuntimeRefresh(...)
+		end
+		return false, "queue_unavailable"
+	end
 	local function resetHugeIncomeOnJoin(...)
 		return ctx.resetHugeIncomeOnJoin(...)
 	end
@@ -152,10 +158,18 @@ function Module.Install(ctx)
 
 		local plot = runtime.waitForPlot(player, 5)
 		if plot then
-			runtime.scanAndBindPlot(player, plot)
-			runtime.reconcilePlayerStandAssignments(player)
 			runtime.resetHugeIncomeOnJoin(player)
-			runtime.refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+			local queued = false
+			if typeof(runtime.queuePlayerStandRuntimeRefresh) == "function" then
+				queued = runtime.queuePlayerStandRuntimeRefresh(player, plot, {
+					Source = "bootstrap_existing_player",
+				}) == true
+			end
+			if not queued then
+				runtime.scanAndBindPlot(player, plot)
+				runtime.reconcilePlayerStandAssignments(player)
+				runtime.refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+			end
 		else
 			runtime.standDebug("bootstrap existing_player=%s reason=no_active_ship", player.Name)
 		end
@@ -227,12 +241,21 @@ function Module.Install(ctx)
 				end
 
 				local activeShip = ShipRuntimeService.GetActiveShip(player)
-				reconcileSlotAssignmentsForRender(player, activeShip, "inventory_saved")
+				local queued = false
 				if activeShip then
-					scanAndBindCaptainSlot(player, activeShip)
+					queued = queuePlayerStandRuntimeRefresh(player, activeShip, {
+						Generation = ShipRuntimeService.GetCrewVisualGeneration(player),
+						Source = "inventory_saved",
+					}) == true
 				end
-				reconcilePlayerStandAssignments(player)
-				refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+				if not queued then
+					reconcileSlotAssignmentsForRender(player, activeShip, "inventory_saved")
+					if activeShip then
+						scanAndBindCaptainSlot(player, activeShip)
+					end
+					reconcilePlayerStandAssignments(player)
+					refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+				end
 			end)
 		end
 	end)
@@ -262,9 +285,15 @@ function Module.Install(ctx)
 				typeof(plot:GetAttribute("OwnerUserId")),
 				tostring(plot:GetAttribute("OwnerName"))
 			)
-			scanAndBindPlot(player, plot)
-			reconcilePlayerStandAssignments(player)
-			refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+			local queued = queuePlayerStandRuntimeRefresh(player, plot, {
+				Generation = ShipRuntimeService.GetCrewVisualGeneration(player),
+				Source = "player_added",
+			}) == true
+			if not queued then
+				scanAndBindPlot(player, plot)
+				reconcilePlayerStandAssignments(player)
+				refreshPlayerIncomeDisplaysAfterLifecycleUpdate(player)
+			end
 		end)
 	end)
 
@@ -294,6 +323,7 @@ function Module.Install(ctx)
 		standDebug = standDebug,
 		waitForPlot = waitForPlot,
 		scanAndBindPlot = scanAndBindPlot,
+		queuePlayerStandRuntimeRefresh = queuePlayerStandRuntimeRefresh,
 		reconcilePlayerStandAssignments = reconcilePlayerStandAssignments,
 		resetHugeIncomeOnJoin = resetHugeIncomeOnJoin,
 		refreshPlayerIncomeDisplaysAfterLifecycleUpdate = refreshPlayerIncomeDisplaysAfterLifecycleUpdate,

@@ -26,9 +26,9 @@ local FRAMES_DISPLAY_ORDER = 120
 local CONTROLLER_GENERATION_ATTRIBUTE = "OpenUIControllerGeneration"
 local OPENED_FRAME_ATTRIBUTE = "OpenUIOpened"
 local BYPASS_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
-local GIFT_OPENUI_DEBUG = true
+local GIFT_OPENUI_DEBUG = ReplicatedStorage:GetAttribute("GiftOpenUIDebug") == true
 local GIFT_OPENUI_DEBUG_VERSION = "gifts-openui-x-debug-2026-05-01"
-local CLOSE_BUTTON_DEBUG = true
+local CLOSE_BUTTON_DEBUG = ReplicatedStorage:GetAttribute("OpenUICloseButtonDebug") == true
 local CLOSE_BUTTON_DEBUG_VERSION = "close-buttons-live-debug-2026-05-01"
 local REACT_MODAL_FRAME_NAMES = {
 	CometMerchant = true,

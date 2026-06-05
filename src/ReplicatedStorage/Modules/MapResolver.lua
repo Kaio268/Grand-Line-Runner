@@ -10,7 +10,7 @@ local STUDIO_STARTUP_ACTIVE_MAP_NAME = DEFAULT_MAP_NAME
 local PLAYABLE_MAP_ROOT_NAMES = { "Main Map", "MainMap" }
 local warnedMessages = {}
 local tracedStates = {}
-local DEBUG_TRACE = RunService:IsStudio()
+local DEBUG_TRACE = RunService:IsStudio() and game:GetAttribute("MapResolverDebugTrace") == true
 
 local PATH_LABELS = {
 	Map = "active map gameplay root",

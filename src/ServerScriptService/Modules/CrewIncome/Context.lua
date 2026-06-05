@@ -76,6 +76,7 @@ function Context.Create()
 	local CrewSlotAssignmentReconciler = require(ServerScriptService.Modules:WaitForChild("CrewSlotAssignmentReconciler"))
 	local CrewStandIncomeAuthority = require(ServerScriptService.Modules:WaitForChild("CrewStandIncomeAuthority"))
 	local GTRActionDiagnostics = require(ServerScriptService.Modules:WaitForChild("GTRActionDiagnostics"))
+	local JoinRestoreScheduler = require(ServerScriptService.Modules:WaitForChild("JoinRestoreScheduler"))
 	local IncomeClaimMath = require(ServerScriptService.Modules:WaitForChild("IncomeClaimMath"))
 	local QuestSignals = require(ServerScriptService.Modules:WaitForChild("GrandLineRushQuestSignals"))
 	local ShipRuntimeSignals = require(ServerScriptService.Modules:WaitForChild("ShipRuntimeSignals"))
@@ -154,6 +155,7 @@ function Context.Create()
 		CrewSlotAssignmentReconciler = CrewSlotAssignmentReconciler,
 		CrewStandIncomeAuthority = CrewStandIncomeAuthority,
 		GTRActionDiagnostics = GTRActionDiagnostics,
+		JoinRestoreScheduler = JoinRestoreScheduler,
 		IncomeClaimMath = IncomeClaimMath,
 		QuestSignals = QuestSignals,
 		PremiumCrewStealPromptRuntime = PremiumCrewStealPromptRuntime,

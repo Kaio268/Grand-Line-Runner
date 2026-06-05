@@ -114,6 +114,18 @@ function CrewIncomeRuntime.RefreshStand(player, standName, source)
 	return true, nil
 end
 
+function CrewIncomeRuntime.QueuePlayerRestore(player, activeShip, options)
+	CrewIncomeRuntime.Start()
+	if typeof(player) ~= "Instance" or not player:IsA("Player") or player.Parent ~= Players then
+		return false, "invalid_player"
+	end
+	if typeof(activeContext) ~= "table" or typeof(activeContext.queuePlayerStandRuntimeRefresh) ~= "function" then
+		return false, "queue_unavailable"
+	end
+
+	return activeContext.queuePlayerStandRuntimeRefresh(player, activeShip, options)
+end
+
 function CrewIncomeRuntime.FlushPlayerAccruals(player, source)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return false, "invalid_player"
