@@ -217,10 +217,11 @@ end
 
 local function WaveProgressBar(props)
 	local compact = props.compact == true
-	local barHeight = tonumber(props.barHeight) or (compact and 34 or 44)
-	local rootWidth = compact and 520 or 900
+	local layout = props.layout or {}
+	local barHeight = tonumber(props.barHeight) or tonumber(layout.barHeight) or (compact and 34 or 44)
+	local rootWidth = tonumber(layout.rootWidth) or (compact and 520 or 900)
 	local rootHeight = barHeight + 22
-	local topOffset = compact and 8 or 18
+	local topOffset = tonumber(layout.topOffset) or (compact and 8 or 18)
 	local barY = math.floor((rootHeight - barHeight) * 0.5)
 	local playerMarkers = {}
 	for index, markerProps in ipairs(props.players or {}) do
@@ -246,8 +247,8 @@ local function WaveProgressBar(props)
 			ZIndex = 5,
 		}, {
 			Constraint = e("UISizeConstraint", {
-				MaxSize = compact and Vector2.new(620, rootHeight) or Vector2.new(980, rootHeight),
-				MinSize = compact and Vector2.new(320, rootHeight) or Vector2.new(560, rootHeight),
+				MaxSize = Vector2.new(tonumber(layout.maxWidth) or (compact and 620 or 980), rootHeight),
+				MinSize = Vector2.new(tonumber(layout.minWidth) or (compact and 320 or 560), rootHeight),
 			}),
 			Backdrop = e("Frame", {
 				BackgroundColor3 = Color3.fromRGB(11, 15, 24),

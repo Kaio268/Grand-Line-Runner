@@ -1028,7 +1028,7 @@ local function hotbarSlot(props)
 	local interactive = item ~= nil and item.interactive ~= false and props.onActivated ~= nil
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(interactive)
 	local zIndexBase = props.zIndexBase or 0
-	local slotSize = math.max(46, math.floor(tonumber(props.slotSize) or 64))
+	local slotSize = math.max(32, math.floor(tonumber(props.slotSize) or 64))
 	local hoverZIndexOffset = hovered and 12 or 0
 	local slotBaseColor = item and accent:Lerp(Color3.fromRGB(20, 28, 44), 0.78) or Color3.fromRGB(13, 19, 31)
 	local slotTopColor = item and accent:Lerp(Color3.fromRGB(28, 39, 61), 0.84) or Color3.fromRGB(18, 26, 41)
@@ -1191,10 +1191,11 @@ local function inventoryToggleButton(props)
 	local position = layout.position or UDim2.new(1, -26, 1, -24)
 	local size = layout.size or UDim2.fromOffset(154, 54)
 	local compact = layout.compact == true
+	local compactIconPixels = math.max(24, math.floor(math.min(size.X.Offset, size.Y.Offset) * 0.76))
 	local hovered, pressed, handlers, hoverRef = useInteractiveState(props.onToggle ~= nil)
 	local zIndexBase = props.zIndexBase or 0
 	local iconPosition = compact and UDim2.fromScale(0.5, 0.5) or UDim2.fromScale(0.5, 0.44)
-	local iconSize = compact and UDim2.fromOffset(46, 46) or UDim2.fromOffset(34, 34)
+	local iconSize = compact and UDim2.fromOffset(compactIconPixels, compactIconPixels) or UDim2.fromOffset(34, 34)
 	local toggleIcon = props.toggleIcon or {}
 	local hasLegacyIcon = typeof(toggleIcon.image) == "string" and toggleIcon.image ~= ""
 
@@ -4550,18 +4551,28 @@ local function App(props)
 	local mobileLayout = toggleLayout.mobile == true
 	local phoneLayout = toggleLayout.phone == true or (mobileLayout and toggleLayout.tablet ~= true)
 	local tabletLayout = toggleLayout.tablet == true
+	local hotbarLayout = toggleLayout.hotbar or {}
 	local toggleSlotIndex = math.max(1, math.floor(tonumber(toggleLayout.slotIndex) or 5))
 	local toggleWidth = dockToggleLeft and ((toggleLayout.size and toggleLayout.size.X.Offset) or 74) or 0
-	local toggleGap = dockToggleLeft and (mobileLayout and 7 or 20) or 0
+	local toggleGap = dockToggleLeft
+		and (tonumber(hotbarLayout.toggleGap) or (mobileLayout and 7 or 20))
+		or 0
 	local hotbarSlotCount = math.max(1, #(props.hotbarSlots or {}))
-	local hotbarSlotWidth = mobileLayout and 50 or 64
-	local hotbarSlotGap = mobileLayout and 5 or 10
+	local hotbarSlotWidth = tonumber(hotbarLayout.slotSize) or (mobileLayout and 50 or 64)
+	local hotbarSlotGap = tonumber(hotbarLayout.slotGap) or (mobileLayout and 5 or 10)
 	local hotbarWidth = hotbarSlotCount * hotbarSlotWidth + math.max(0, hotbarSlotCount - 1) * hotbarSlotGap
 	local bottomBarWidth = dockToggleLeft and (toggleWidth + toggleGap + hotbarWidth) or hotbarWidth
 	local toggleSlotX = math.max(0, (toggleSlotIndex - 1) * (hotbarSlotWidth + hotbarSlotGap))
-	local resolvedTogglePosition = dockToggleLeft and UDim2.fromOffset(0, mobileLayout and 4 or 20)
+	local resolvedTogglePosition = dockToggleLeft
+			and UDim2.fromOffset(0, tonumber(hotbarLayout.toggleY) or (mobileLayout and 4 or 20))
 		or (dockToggleSlot and UDim2.fromOffset(toggleSlotX, 20) or toggleLayout.position)
 	local hotbarOffsetX = dockToggleLeft and (toggleWidth + toggleGap) or 0
+	local bottomBarXOffset = tonumber(hotbarLayout.bottomXOffset) or (mobileLayout and 28 or 0)
+	local bottomBarOffset = tonumber(hotbarLayout.bottomOffset) or (mobileLayout and -10 or -20)
+	local bottomBarHeight = tonumber(hotbarLayout.bottomBarHeight) or (mobileLayout and 66 or 104)
+	local hotbarHeight = tonumber(hotbarLayout.hotbarHeight) or (mobileLayout and 64 or 96)
+	local scrollerHeight = tonumber(hotbarLayout.scrollerHeight) or (mobileLayout and 58 or 78)
+	local scrollerY = tonumber(hotbarLayout.scrollerY) or (mobileLayout and 4 or 18)
 	local bottomBarZIndex = props.isOpen and 2 or 10
 	local filledHotbarCount = 0
 	local activeAccent = PALETTE.Sea
@@ -4632,8 +4643,8 @@ local function App(props)
 			AnchorPoint = Vector2.new(0.5, 1),
 			BackgroundTransparency = 1,
 			ClipsDescendants = false,
-			Position = UDim2.new(0.5, mobileLayout and 28 or 0, 1, mobileLayout and -10 or -20),
-			Size = UDim2.fromOffset(bottomBarWidth, mobileLayout and 66 or 104),
+			Position = UDim2.new(0.5, bottomBarXOffset, 1, bottomBarOffset),
+			Size = UDim2.fromOffset(bottomBarWidth, bottomBarHeight),
 			ZIndex = bottomBarZIndex,
 		}, {
 			Toggle = e(inventoryToggleButton, {
@@ -4651,7 +4662,7 @@ local function App(props)
 				BackgroundTransparency = 1,
 				ClipsDescendants = false,
 				Position = UDim2.fromOffset(hotbarOffsetX, 0),
-				Size = UDim2.fromOffset(hotbarWidth, mobileLayout and 64 or 96),
+				Size = UDim2.fromOffset(hotbarWidth, hotbarHeight),
 				ZIndex = bottomBarZIndex,
 			}, {
 				Label = not mobileLayout and e("TextLabel", {
@@ -4673,11 +4684,11 @@ local function App(props)
 						BorderSizePixel = 0,
 						CanvasSize = UDim2.new(),
 						ClipsDescendants = false,
-						Position = UDim2.fromOffset(0, mobileLayout and 4 or 18),
+						Position = UDim2.fromOffset(0, scrollerY),
 						ScrollBarImageTransparency = 1,
 						ScrollBarThickness = 0,
 						ScrollingDirection = Enum.ScrollingDirection.X,
-						Size = UDim2.new(1, 0, 0, mobileLayout and 58 or 78),
+						Size = UDim2.new(1, 0, 0, scrollerHeight),
 						ZIndex = bottomBarZIndex + 1,
 					},
 					(function()

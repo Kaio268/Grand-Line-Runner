@@ -61,11 +61,15 @@ end
 
 local function getLeftMenuLayoutMode(viewport)
 	local hudMode = Responsive.getHudLayoutMode(viewport)
+	local viewportMode = Responsive.getViewportLayoutMode(viewport)
+	if viewportMode == "phone" then
+		return viewportMode
+	end
+
 	if hudMode ~= "desktop" then
 		return hudMode
 	end
 
-	local viewportMode = Responsive.getViewportLayoutMode(viewport)
 	if viewportMode ~= "desktop" then
 		return viewportMode
 	end

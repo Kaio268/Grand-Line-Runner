@@ -18,20 +18,20 @@ local WaveHazardVisuals = require(Modules:WaitForChild("WaveHazardVisuals"))
 local HudLayout = require(UiFolder:WaitForChild("HudLayout"))
 local WaveProgressBar = require(UiFolder:WaitForChild("WaveProgressBar"))
 
-local function isCompactViewport()
-	return HudLayout.getMode() ~= "desktop"
+local function getWaveLayout()
+	return HudLayout.getWaveProgress(HudLayout.getMode())
 end
 
 local function getWaveBarHeight()
-	return if isCompactViewport() then 34 else 44
+	return getWaveLayout().barHeight
 end
 
 local function getPlayerMarkerSize()
-	return getWaveBarHeight()
+	return getWaveLayout().markerSize
 end
 
 local function getWaveMarkerSize()
-	return getWaveBarHeight()
+	return getWaveLayout().markerSize
 end
 
 local function buildDefaultSections()
@@ -318,11 +318,12 @@ local function render()
 
 	root:render(ReactRoblox.createPortal(React.createElement(WaveProgressBar, {
 		barHeight = getWaveBarHeight(),
-		compact = isCompactViewport(),
+		compact = getWaveLayout().compact == true,
 		players = playerMarkers,
 		waves = waveMarkers,
 		sections = DEFAULT_SECTIONS,
 		displayOrder = 118,
+		layout = getWaveLayout(),
 	}), playerGui))
 end
 

@@ -14,17 +14,17 @@ HudLayout.Modes = {
 local LEFT_MENU = {
 	phone = {
 		orientation = "horizontal",
-		tileSize = 100,
-		iconSize = 88,
-		textSize = 18,
-		gap = 16,
+		tileSize = 42,
+		iconSize = 36,
+		textSize = 10,
+		gap = 8,
 		columns = 3,
 		rows = 2,
-		position = UDim2.fromOffset(4, 192),
-		badgeSize = UDim2.fromOffset(48, 28),
-		newBadgeSize = UDim2.fromOffset(60, 28),
-		timerSize = UDim2.fromOffset(72, 20),
-		timerTextSize = 12,
+		position = UDim2.fromOffset(12, 68),
+		badgeSize = UDim2.fromOffset(28, 16),
+		newBadgeSize = UDim2.fromOffset(36, 16),
+		timerSize = UDim2.fromOffset(42, 13),
+		timerTextSize = 8,
 		titleYScale = 0.74,
 	},
 	tablet = {
@@ -44,17 +44,17 @@ local LEFT_MENU = {
 	},
 	compactDesktop = {
 		orientation = "horizontal",
-		tileSize = 88,
-		iconSize = 72,
-		textSize = 20,
-		gap = 16,
+		tileSize = 56,
+		iconSize = 48,
+		textSize = 12,
+		gap = 8,
 		columns = 6,
 		rows = 1,
-		position = UDim2.fromOffset(130, 88),
-		badgeSize = UDim2.fromOffset(52, 30),
-		newBadgeSize = UDim2.fromOffset(64, 30),
-		timerSize = UDim2.fromOffset(76, 20),
-		timerTextSize = 14,
+		position = UDim2.fromOffset(122, 92),
+		badgeSize = UDim2.fromOffset(34, 20),
+		newBadgeSize = UDim2.fromOffset(42, 20),
+		timerSize = UDim2.fromOffset(52, 16),
+		timerTextSize = 10,
 		titleYScale = 0.75,
 	},
 	desktop = {
@@ -77,15 +77,15 @@ local LEFT_MENU = {
 local CURRENCY = {
 	phone = {
 		anchorPoint = Vector2.new(0, 1),
-		position = UDim2.new(0, 16, 1, -24),
-		width = 132,
-		rowHeight = 26,
-		rowSpacing = 3,
-		iconSlotWidth = 28,
-		iconSize = 20,
-		barGap = 4,
-		valueTextSize = 18,
-		labelTextSize = 10,
+		position = UDim2.new(0, 12, 1, -12),
+		width = 112,
+		rowHeight = 20,
+		rowSpacing = 2,
+		iconSlotWidth = 22,
+		iconSize = 16,
+		barGap = 3,
+		valueTextSize = 14,
+		labelTextSize = 8,
 		panelPadding = { Left = 2, Right = 4, Top = 3, Bottom = 2 },
 	},
 	tablet = {
@@ -123,8 +123,27 @@ local CURRENCY = {
 HudLayout.DevilFruit = {
 	phone = {
 		compact = true,
-		position = UDim2.new(1, -8, 1, -164),
-		width = 168,
+		position = UDim2.new(1, 0, 1, -128),
+		width = 142,
+		rowHeight = 26,
+		rowGap = 3,
+		listInset = 7,
+		topBarHeight = 22,
+		outerInset = 4,
+		sectionGap = 4,
+		nameTextSize = 8,
+		statusTextSize = 7,
+		nameY = 3,
+		statusY = 14,
+		barHeight = 2,
+		barBottom = 3,
+		barInset = 4,
+		headerTitleY = 1,
+		headerTitleHeight = 8,
+		headerTitleTextSize = 5,
+		fruitNameY = 9,
+		fruitNameHeight = 11,
+		fruitNameTextSize = 10,
 	},
 	tablet = {
 		compact = false,
@@ -194,10 +213,61 @@ HudLayout.BoostTimer = {
 }
 
 HudLayout.InventoryToggle = {
-	phone = { size = 56 },
+	phone = { size = 38 },
 	tablet = { size = 62 },
 	compactDesktop = { size = 62 },
 	desktop = { size = 74 },
+}
+
+HudLayout.Hotbar = {
+	phone = {
+		slotSize = 36,
+		slotGap = 4,
+		toggleGap = 5,
+		bottomXOffset = 16,
+		bottomOffset = -6,
+		bottomBarHeight = 46,
+		hotbarHeight = 44,
+		scrollerHeight = 40,
+		scrollerY = 2,
+		toggleY = 2,
+	},
+	tablet = {
+		slotSize = 46,
+		slotGap = 5,
+		toggleGap = 7,
+		bottomXOffset = 28,
+		bottomOffset = -10,
+		bottomBarHeight = 62,
+		hotbarHeight = 58,
+		scrollerHeight = 52,
+		scrollerY = 4,
+		toggleY = 4,
+	},
+	compactDesktop = {
+		slotSize = 42,
+		slotGap = 5,
+		toggleGap = 6,
+		bottomXOffset = 18,
+		bottomOffset = -8,
+		bottomBarHeight = 54,
+		hotbarHeight = 50,
+		scrollerHeight = 46,
+		scrollerY = 3,
+		toggleY = 3,
+	},
+	desktop = {
+		slotSize = 64,
+		slotGap = 10,
+		toggleGap = 20,
+		bottomXOffset = 0,
+		bottomOffset = -20,
+		bottomBarHeight = 104,
+		hotbarHeight = 96,
+		scrollerHeight = 78,
+		scrollerY = 18,
+		toggleY = 20,
+	},
 }
 
 HudLayout.Popups = {
@@ -205,6 +275,45 @@ HudLayout.Popups = {
 	tablet = { rewardScale = 0.82, acknowledgementMaxScale = 0.82 },
 	compactDesktop = { rewardScale = nil, acknowledgementMaxScale = 0.9 },
 	desktop = { rewardScale = nil, acknowledgementMaxScale = 1 },
+}
+
+HudLayout.WaveProgress = {
+	phone = {
+		barHeight = 20,
+		markerSize = 26,
+		rootWidth = 390,
+		topOffset = 8,
+		minWidth = 280,
+		maxWidth = 450,
+		compact = true,
+	},
+	tablet = {
+		barHeight = 30,
+		markerSize = 34,
+		rootWidth = 500,
+		topOffset = 8,
+		minWidth = 320,
+		maxWidth = 580,
+		compact = true,
+	},
+	compactDesktop = {
+		barHeight = 18,
+		markerSize = 22,
+		rootWidth = 340,
+		topOffset = 8,
+		minWidth = 240,
+		maxWidth = 380,
+		compact = true,
+	},
+	desktop = {
+		barHeight = 44,
+		markerSize = 44,
+		rootWidth = 900,
+		topOffset = 18,
+		minWidth = 560,
+		maxWidth = 980,
+		compact = false,
+	},
 }
 
 local function cloneTable(source)
@@ -236,7 +345,12 @@ function HudLayout.getMode(viewport)
 end
 
 function HudLayout.getLeftMenu(mode)
-	local layout = getByMode(LEFT_MENU, mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	local layout = getByMode(LEFT_MENU, resolvedMode)
 	if layout.orientation == "horizontal" then
 		local viewport = Responsive.getViewportSize()
 		local size = getGridSize(layout)
@@ -272,12 +386,21 @@ end
 
 function HudLayout.getCurrency(mode, _leftMenuRect)
 	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
 	local layout = getByMode(CURRENCY, resolvedMode)
 	return layout
 end
 
 function HudLayout.getDevilFruit(mode)
-	return getByMode(HudLayout.DevilFruit, mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.DevilFruit, resolvedMode)
 end
 
 function HudLayout.getTopBanner(mode)
@@ -289,11 +412,34 @@ function HudLayout.getBoostTimer(mode)
 end
 
 function HudLayout.getInventoryToggle(mode)
-	return getByMode(HudLayout.InventoryToggle, mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.InventoryToggle, resolvedMode)
+end
+
+function HudLayout.getHotbar(mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.Hotbar, resolvedMode)
 end
 
 function HudLayout.getPopups(mode)
 	return getByMode(HudLayout.Popups, mode)
+end
+
+function HudLayout.getWaveProgress(mode)
+	local resolvedMode = mode or HudLayout.getMode()
+	if resolvedMode == "compactDesktop" and Responsive.isPhoneViewport(Responsive.getViewportSize()) then
+		resolvedMode = "phone"
+	end
+
+	return getByMode(HudLayout.WaveProgress, resolvedMode)
 end
 
 return HudLayout

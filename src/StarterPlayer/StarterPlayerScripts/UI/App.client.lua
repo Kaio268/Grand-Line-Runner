@@ -3588,18 +3588,22 @@ end
 local function getToggleLayout()
 	local viewport = Responsive.getViewport()
 	local mode = Responsive.getHudLayoutMode(viewport)
-	local phone = mode == "phone"
-	local tablet = mode == "tablet"
+	local viewportMode = Responsive.getViewportLayoutMode(viewport)
+	local layoutMode = if viewportMode == "phone" then "phone" else mode
+	local phone = layoutMode == "phone"
+	local tablet = layoutMode == "tablet"
 	local mobile = phone or tablet
-	local toggleLayout = HudLayout.getInventoryToggle(mode)
+	local toggleLayout = HudLayout.getInventoryToggle(layoutMode)
+	local hotbarLayout = HudLayout.getHotbar(layoutMode)
 	local size = toggleLayout.size
 
 	return {
 		anchorPoint = Vector2.new(0, 0),
-		position = UDim2.fromOffset(0, 16),
+		position = UDim2.fromOffset(0, hotbarLayout.toggleY or 16),
 		size = UDim2.fromOffset(size, size),
 		compact = true,
 		dock = "hotbarLeft",
+		hotbar = hotbarLayout,
 		mobile = mobile,
 		phone = phone,
 		tablet = tablet,
