@@ -64,19 +64,37 @@ local function getVfxConfig()
 	return getAbilityConfig().Vfx or {}
 end
 
+local function getResolvedVfxConfig(abilityConfig)
+	local abilityVfxConfig = type(abilityConfig) == "table" and abilityConfig.Vfx or nil
+	if type(abilityVfxConfig) == "table" then
+		return abilityVfxConfig
+	end
+
+	return getVfxConfig()
+end
+
 local function getStageConfig(stageKey, abilityConfig)
 	local vfxConfig = type(abilityConfig) == "table" and abilityConfig.Vfx or nil
 	return type(vfxConfig) == "table" and vfxConfig[stageKey] or {}
 end
 
-local function getRootSegments()
-	local configuredSegments = getVfxConfig().RootSegments
+local function getRootSegments(abilityConfig)
+	local configuredSegments = getResolvedVfxConfig(abilityConfig).RootSegments
 	if type(configuredSegments) == "table" and #configuredSegments > 0 then
 		return configuredSegments
 	end
 
 	local assetFolderName = getFruitConfig().AssetFolder or "Mogu"
 	return { "Assets", "VFX", assetFolderName }
+end
+
+local function appendUniqueText(target, seen, value)
+	if typeof(value) ~= "string" or value == "" or seen[value] then
+		return
+	end
+
+	seen[value] = true
+	target[#target + 1] = value
 end
 
 local function appendUniqueInstance(target, seen, instance)
@@ -88,19 +106,68 @@ local function appendUniqueInstance(target, seen, instance)
 	target[#target + 1] = instance
 end
 
-local function getVfxRoots()
+local function appendRootBySegments(roots, seen, segments)
+	if type(segments) ~= "table" or #segments <= 0 then
+		return
+	end
+
+	appendUniqueInstance(roots, seen, VfxCommon.FindAsset(table.unpack(segments)))
+end
+
+local function appendFallbackRootSegments(roots, seen, abilityConfig)
+	local fallbackSegments = getResolvedVfxConfig(abilityConfig).FallbackRootSegments
+	if type(fallbackSegments) ~= "table" or #fallbackSegments <= 0 then
+		return
+	end
+
+	if type(fallbackSegments[1]) == "table" then
+		for _, segments in ipairs(fallbackSegments) do
+			appendRootBySegments(roots, seen, segments)
+		end
+	else
+		appendRootBySegments(roots, seen, fallbackSegments)
+	end
+end
+
+local function getAssetFolderNames()
+	local fruitConfig = getFruitConfig()
+	local names = {}
+	local seen = {}
+
+	appendUniqueText(names, seen, fruitConfig.AssetFolder)
+	appendUniqueText(names, seen, fruitConfig.FruitKey)
+
+	local legacyAssetFolders = fruitConfig.LegacyAssetFolders
+	if type(legacyAssetFolders) == "table" then
+		for _, legacyAssetFolder in ipairs(legacyAssetFolders) do
+			appendUniqueText(names, seen, legacyAssetFolder)
+		end
+	end
+
+	if #names == 0 then
+		appendUniqueText(names, seen, "Mogu")
+	end
+
+	return names
+end
+
+local function getVfxRoots(abilityConfig)
 	local roots = {}
 	local seen = {}
-	local assetFolderName = getFruitConfig().AssetFolder or "Mogu"
 
-	appendUniqueInstance(roots, seen, VfxCommon.FindAsset(table.unpack(getRootSegments())))
+	appendRootBySegments(roots, seen, getRootSegments(abilityConfig))
+	appendFallbackRootSegments(roots, seen, abilityConfig)
 
 	local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
 	local vfxFolder = assetsFolder and assetsFolder:FindFirstChild("VFX")
-	appendUniqueInstance(roots, seen, vfxFolder and vfxFolder:FindFirstChild(assetFolderName))
+	for _, assetFolderName in ipairs(getAssetFolderNames()) do
+		appendUniqueInstance(roots, seen, vfxFolder and vfxFolder:FindFirstChild(assetFolderName))
+	end
 
 	local replicatedVfxFolder = ReplicatedStorage:FindFirstChild("VFX")
-	appendUniqueInstance(roots, seen, replicatedVfxFolder and replicatedVfxFolder:FindFirstChild(assetFolderName))
+	for _, assetFolderName in ipairs(getAssetFolderNames()) do
+		appendUniqueInstance(roots, seen, replicatedVfxFolder and replicatedVfxFolder:FindFirstChild(assetFolderName))
+	end
 
 	return roots
 end
@@ -113,12 +180,12 @@ local function isEffectRootCandidate(instance)
 	return instance:IsA("Model") or instance:IsA("Folder") or instance:IsA("BasePart")
 end
 
-local function findExactEffectRoot(assetName)
+local function findExactEffectRoot(assetName, abilityConfig)
 	if typeof(assetName) ~= "string" or assetName == "" then
 		return nil
 	end
 
-	for _, root in ipairs(getVfxRoots()) do
+	for _, root in ipairs(getVfxRoots(abilityConfig)) do
 		if typeof(root) ~= "Instance" then
 			continue
 		end
@@ -182,7 +249,7 @@ local function resolveEffectRoot(stageKey, abilityConfig)
 		return nil
 	end
 
-	local exactEffectRoot = findExactEffectRoot(stageConfig.AssetName)
+	local exactEffectRoot = findExactEffectRoot(stageConfig.AssetName, abilityConfig)
 	if exactEffectRoot then
 		logInfo("resolved stage=%s asset=%s mode=exact", tostring(stageKey), exactEffectRoot:GetFullName())
 		return exactEffectRoot
@@ -193,7 +260,7 @@ local function resolveEffectRoot(stageKey, abilityConfig)
 	local bestEffectRoot = nil
 	local bestScore = 0
 
-	for _, root in ipairs(getVfxRoots()) do
+	for _, root in ipairs(getVfxRoots(abilityConfig)) do
 		for _, effectRoot in ipairs(getEffectCandidateContainers(root)) do
 			local score = scoreEffectRoot(effectRoot, candidateNames, keywords)
 			if score > bestScore then
