@@ -59,18 +59,18 @@ local LEFT_MENU = {
 	},
 	desktop = {
 		orientation = "grid",
-		tileSize = 196,
-		iconSize = 132,
-		textSize = 32,
-		gap = 20,
+		tileSize = 86,
+		iconSize = 66,
+		textSize = 15,
+		gap = 8,
 		columns = 2,
 		rows = 3,
-		position = UDim2.fromOffset(10, 80),
-		badgeSize = UDim2.fromOffset(68, 44),
-		newBadgeSize = UDim2.fromOffset(84, 44),
-		timerSize = UDim2.fromOffset(120, 36),
-		timerTextSize = 26,
-		titleYScale = 0.78,
+		position = UDim2.fromOffset(18, 124),
+		badgeSize = UDim2.fromOffset(34, 22),
+		newBadgeSize = UDim2.fromOffset(44, 22),
+		timerSize = UDim2.fromOffset(54, 17),
+		timerTextSize = 11,
+		titleYScale = 0.8,
 	},
 }
 
@@ -351,11 +351,17 @@ function HudLayout.getLeftMenu(mode)
 	end
 
 	local layout = getByMode(LEFT_MENU, resolvedMode)
+	local viewport = Responsive.getViewportSize()
+	local size = getGridSize(layout)
 	if layout.orientation == "horizontal" then
-		local viewport = Responsive.getViewportSize()
-		local size = getGridSize(layout)
 		local x = math.clamp(layout.position.X.Offset, 6, math.max(6, viewport.X - size.X - 6))
 		layout.position = UDim2.fromOffset(x, layout.position.Y.Offset)
+	else
+		local bottomReserve = if resolvedMode == "desktop" then 150 else 92
+		local minY = if resolvedMode == "desktop" then 86 else 70
+		local maxY = math.max(minY, viewport.Y - size.Y - bottomReserve)
+		local y = math.clamp(layout.position.Y.Offset, minY, maxY)
+		layout.position = UDim2.fromOffset(layout.position.X.Offset, y)
 	end
 	return layout
 end
