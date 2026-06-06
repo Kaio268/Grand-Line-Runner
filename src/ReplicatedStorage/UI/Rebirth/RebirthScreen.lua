@@ -6,20 +6,22 @@ local React = require(Packages:WaitForChild("React"))
 local e = React.createElement
 
 local COLORS = {
-	Backdrop = Color3.fromRGB(7, 14, 25),
-	Panel = Color3.fromRGB(15, 28, 47),
-	PanelSoft = Color3.fromRGB(21, 38, 61),
-	Gold = Color3.fromRGB(212, 175, 55),
-	GoldSoft = Color3.fromRGB(242, 209, 107),
-	Text = Color3.fromRGB(241, 237, 226),
-	Muted = Color3.fromRGB(187, 196, 211),
-	Good = Color3.fromRGB(120, 224, 154),
+	Backdrop = Color3.fromRGB(8, 8, 9),
+	Panel = Color3.fromRGB(16, 16, 19),
+	PanelSoft = Color3.fromRGB(20, 20, 24),
+	Gold = Color3.fromRGB(228, 190, 78),
+	GoldSoft = Color3.fromRGB(255, 224, 120),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
+	Text = Color3.fromRGB(235, 235, 235),
+	Muted = Color3.fromRGB(190, 194, 202),
+	Good = Color3.fromRGB(129, 232, 168),
+	ButtonText = Color3.fromRGB(30, 24, 14),
 }
 
 local function requirementRow(props)
 	return e("Frame", {
 		BackgroundColor3 = COLORS.PanelSoft,
-		BackgroundTransparency = 0.12,
+		BackgroundTransparency = 0.04,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder,
 		Size = UDim2.new(1, 0, 0, 76),
@@ -28,9 +30,9 @@ local function requirementRow(props)
 			CornerRadius = UDim.new(0, 8),
 		}),
 		Stroke = e("UIStroke", {
-			Color = COLORS.Gold,
-			Transparency = 0.56,
-			Thickness = 1,
+			Color = props.complete and COLORS.Good or COLORS.GoldSoft,
+			Transparency = props.complete and 0.4 or 0.48,
+			Thickness = 1.1,
 		}),
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -53,8 +55,8 @@ local function requirementRow(props)
 			TextXAlignment = Enum.TextXAlignment.Right,
 		}),
 		Track = e("Frame", {
-			BackgroundColor3 = Color3.fromRGB(8, 13, 23),
-			BackgroundTransparency = 0.08,
+			BackgroundColor3 = Color3.fromRGB(8, 8, 9),
+			BackgroundTransparency = 0,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(16, 44),
 			Size = UDim2.new(1, -32, 0, 16),
@@ -77,8 +79,8 @@ end
 
 local function rewardRow(props)
 	return e("Frame", {
-		BackgroundColor3 = COLORS.PanelSoft,
-		BackgroundTransparency = 0.18,
+		BackgroundColor3 = COLORS.Panel,
+		BackgroundTransparency = 0.12,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder,
 		Size = UDim2.new(1, 0, 0, 48),
@@ -86,12 +88,23 @@ local function rewardRow(props)
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 8),
 		}),
+		Stroke = e("UIStroke", {
+			Color = COLORS.Gold,
+			Transparency = 0.68,
+			Thickness = 1,
+		}),
 		Icon = props.icon ~= "" and e("ImageLabel", {
-			BackgroundTransparency = 1,
+			BackgroundColor3 = COLORS.PanelSoft,
+			BackgroundTransparency = 0.08,
+			BorderSizePixel = 0,
 			Image = props.icon,
 			Position = UDim2.fromOffset(10, 8),
 			ScaleType = Enum.ScaleType.Fit,
 			Size = UDim2.fromOffset(32, 32),
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 8),
+			}),
 		}) or nil,
 		Label = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -133,21 +146,40 @@ local function RebirthScreen(props)
 			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = COLORS.Gold,
+			Color = COLORS.GoldSoft,
 			Transparency = 0.08,
-			Thickness = 1.4,
+			Thickness = 1.6,
+		}),
+		Gradient = e("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, COLORS.Panel),
+				ColorSequenceKeypoint.new(0.46, COLORS.Backdrop),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 5, 6)),
+			}),
+			Rotation = 90,
 		}),
 		Header = e("TextLabel", {
-			BackgroundTransparency = 1,
+			BackgroundColor3 = COLORS.Panel,
+			BackgroundTransparency = 0.02,
+			BorderSizePixel = 0,
 			Font = Enum.Font.GothamBlack,
 			Position = UDim2.fromOffset(22, 16),
-			Size = UDim2.new(1, -88, 0, 32),
+			Size = UDim2.fromOffset(190, 36),
 			Text = "REBIRTH",
 			TextColor3 = COLORS.GoldSoft,
-			TextSize = 26,
+			TextSize = 22,
 			TextStrokeColor3 = COLORS.GoldSoft,
-			TextStrokeTransparency = 0.52,
-			TextXAlignment = Enum.TextXAlignment.Left,
+			TextStrokeTransparency = 0.62,
+			TextXAlignment = Enum.TextXAlignment.Center,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = COLORS.GoldSoft,
+				Transparency = 0.22,
+				Thickness = 1.2,
+			}),
 		}),
 		Close = e("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
@@ -163,6 +195,11 @@ local function RebirthScreen(props)
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
+			}),
+			Stroke = e("UIStroke", {
+				Color = COLORS.GoldShadow,
+				Transparency = 0.18,
+				Thickness = 1,
 			}),
 		}),
 		Body = e("Frame", {
@@ -211,12 +248,24 @@ local function RebirthScreen(props)
 				LayoutOrder = 5,
 				Size = UDim2.new(1, 0, 0, 46),
 				Text = props.isMaxed and "MAXED" or "REBIRTH",
-				TextColor3 = props.canRebirth and Color3.fromRGB(30, 24, 14) or COLORS.Muted,
+				TextColor3 = props.canRebirth and COLORS.ButtonText or COLORS.Muted,
 				TextSize = 18,
 				[React.Event.Activated] = if props.canRebirth then props.onRebirth else nil,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(0, 8),
+				}),
+				Stroke = e("UIStroke", {
+					Color = props.canRebirth and COLORS.GoldSoft or COLORS.GoldShadow,
+					Transparency = props.canRebirth and 0.18 or 0.58,
+					Thickness = 1.2,
+				}),
+				Gradient = e("UIGradient", {
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, props.canRebirth and COLORS.GoldSoft or COLORS.PanelSoft),
+						ColorSequenceKeypoint.new(1, props.canRebirth and COLORS.Gold or COLORS.Panel),
+					}),
+					Rotation = 90,
 				}),
 			}),
 		}),

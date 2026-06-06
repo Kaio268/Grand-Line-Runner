@@ -7,27 +7,27 @@ local ItemIconRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitF
 local e = React.createElement
 
 local THEME = {
-	Panel = Color3.fromRGB(17, 29, 45),
-	PanelTop = Color3.fromRGB(28, 45, 67),
-	PanelBottom = Color3.fromRGB(12, 20, 34),
-	Header = Color3.fromRGB(14, 31, 53),
-	Section = Color3.fromRGB(26, 47, 70),
-	SectionSoft = Color3.fromRGB(33, 55, 77),
-	Stroke = Color3.fromRGB(224, 177, 65),
-	StrokeSoft = Color3.fromRGB(101, 82, 47),
-	Text = Color3.fromRGB(240, 240, 236),
-	Muted = Color3.fromRGB(176, 190, 207),
-	Gold = Color3.fromRGB(242, 209, 107),
-	GoldDeep = Color3.fromRGB(146, 111, 31),
-	Sea = Color3.fromRGB(91, 212, 255),
-	Green = Color3.fromRGB(119, 222, 151),
-	Red = Color3.fromRGB(235, 91, 102),
-	Button = Color3.fromRGB(212, 175, 55),
-	ButtonHover = Color3.fromRGB(236, 190, 94),
-	ButtonDisabled = Color3.fromRGB(96, 113, 138),
-	ButtonDisabledBottom = Color3.fromRGB(58, 72, 92),
-	ButtonDisabledText = Color3.fromRGB(231, 238, 248),
-	ButtonText = Color3.fromRGB(18, 22, 26),
+	Panel = Color3.fromRGB(8, 8, 9),
+	PanelTop = Color3.fromRGB(16, 16, 19),
+	PanelBottom = Color3.fromRGB(5, 5, 6),
+	Header = Color3.fromRGB(16, 16, 19),
+	Section = Color3.fromRGB(18, 18, 21),
+	SectionSoft = Color3.fromRGB(28, 28, 33),
+	Stroke = Color3.fromRGB(255, 224, 120),
+	StrokeSoft = Color3.fromRGB(150, 112, 42),
+	Text = Color3.fromRGB(235, 235, 235),
+	Muted = Color3.fromRGB(190, 194, 202),
+	Gold = Color3.fromRGB(255, 224, 120),
+	GoldDeep = Color3.fromRGB(150, 112, 42),
+	Sea = Color3.fromRGB(126, 209, 255),
+	Green = Color3.fromRGB(129, 232, 168),
+	Red = Color3.fromRGB(255, 132, 150),
+	Button = Color3.fromRGB(228, 190, 78),
+	ButtonHover = Color3.fromRGB(255, 224, 120),
+	ButtonDisabled = Color3.fromRGB(36, 36, 42),
+	ButtonDisabledBottom = Color3.fromRGB(20, 20, 24),
+	ButtonDisabledText = Color3.fromRGB(190, 194, 202),
+	ButtonText = Color3.fromRGB(30, 24, 14),
 }
 
 local MATERIAL_ICON_COLORS = {
@@ -269,7 +269,7 @@ local function statCard(props)
 
 	return e("Frame", {
 		BackgroundColor3 = THEME.Section,
-		BackgroundTransparency = 0.12,
+		BackgroundTransparency = 0.04,
 		BorderSizePixel = 0,
 		LayoutOrder = props.LayoutOrder,
 		Size = UDim2.new(0.5, -8, 1, 0),
@@ -280,7 +280,7 @@ local function statCard(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = accent,
-			Transparency = 0.36,
+			Transparency = 0.28,
 			Thickness = 1.4,
 		}),
 		Gradient = e("UIGradient", {
@@ -319,8 +319,8 @@ local function requirementCard(props)
 	local strokeColor = if isMax then THEME.Green elseif ok then THEME.StrokeSoft else THEME.Red
 
 	return e("Frame", {
-		BackgroundColor3 = ok and THEME.Section or Color3.fromRGB(44, 32, 44),
-		BackgroundTransparency = ok and 0.1 or 0.02,
+		BackgroundColor3 = ok and THEME.Section or Color3.fromRGB(40, 18, 24),
+		BackgroundTransparency = ok and 0.04 or 0.02,
 		BorderSizePixel = 0,
 		LayoutOrder = props.LayoutOrder,
 		ZIndex = 3,
@@ -330,7 +330,7 @@ local function requirementCard(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = strokeColor,
-			Transparency = ok and 0.48 or 0.22,
+			Transparency = ok and 0.42 or 0.2,
 			Thickness = 1.2,
 		}),
 		Icon = if isMax
@@ -418,9 +418,9 @@ local function ShipUpgradeWorldPrompt(props)
 		}),
 		Gradient = e("UIGradient", {
 			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.fromRGB(17, 29, 47)),
-				ColorSequenceKeypoint.new(0.48, Color3.fromRGB(9, 18, 31)),
-				ColorSequenceKeypoint.new(1, Color3.fromRGB(6, 13, 22)),
+				ColorSequenceKeypoint.new(0, THEME.PanelTop),
+				ColorSequenceKeypoint.new(0.48, THEME.Panel),
+				ColorSequenceKeypoint.new(1, THEME.PanelBottom),
 			}),
 			Rotation = 90,
 		}),
@@ -461,7 +461,7 @@ local function ShipUpgradeWorldPrompt(props)
 			}),
 			Level = e("Frame", {
 				AnchorPoint = Vector2.new(1, 0),
-				BackgroundColor3 = Color3.fromRGB(17, 27, 42),
+				BackgroundColor3 = THEME.Panel,
 				BackgroundTransparency = 0.02,
 				BorderSizePixel = 0,
 				Position = UDim2.new(1, -34, 0, 30),
@@ -577,8 +577,8 @@ local function ShipUpgradeWorldPrompt(props)
 				CornerRadius = UDim.new(0, 10),
 			}),
 			Stroke = e("UIStroke", {
-				Color = buttonEnabled and Color3.fromRGB(255, 255, 255) or THEME.Muted,
-				Transparency = buttonEnabled and 0.72 or 0.48,
+				Color = buttonEnabled and THEME.Gold or THEME.StrokeSoft,
+				Transparency = buttonEnabled and 0.18 or 0.48,
 				Thickness = 1.2,
 			}),
 			Gradient = e("UIGradient", {

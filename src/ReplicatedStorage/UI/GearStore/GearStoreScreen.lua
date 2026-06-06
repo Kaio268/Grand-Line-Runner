@@ -6,20 +6,21 @@ local React = require(Packages:WaitForChild("React"))
 local e = React.createElement
 
 local COLORS = {
-	Backdrop = Color3.fromRGB(7, 14, 25),
-	Panel = Color3.fromRGB(15, 28, 47),
-	PanelSoft = Color3.fromRGB(21, 38, 61),
-	Gold = Color3.fromRGB(212, 175, 55),
-	GoldSoft = Color3.fromRGB(242, 209, 107),
-	Text = Color3.fromRGB(241, 237, 226),
-	Muted = Color3.fromRGB(187, 196, 211),
+	Backdrop = Color3.fromRGB(8, 8, 9),
+	Panel = Color3.fromRGB(16, 16, 19),
+	PanelSoft = Color3.fromRGB(20, 20, 24),
+	Gold = Color3.fromRGB(228, 190, 78),
+	GoldSoft = Color3.fromRGB(255, 224, 120),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
+	Text = Color3.fromRGB(235, 235, 235),
+	Muted = Color3.fromRGB(190, 194, 202),
 	ButtonText = Color3.fromRGB(30, 24, 14),
 }
 
 local function gearRow(props)
 	return e("Frame", {
 		BackgroundColor3 = COLORS.PanelSoft,
-		BackgroundTransparency = 0.1,
+		BackgroundTransparency = 0.04,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder,
 		Size = UDim2.new(1, 0, 0, 88),
@@ -28,28 +29,33 @@ local function gearRow(props)
 			CornerRadius = UDim.new(0, 8),
 		}),
 		Stroke = e("UIStroke", {
-			Color = COLORS.Gold,
-			Transparency = 0.56,
-			Thickness = 1,
+			Color = COLORS.GoldSoft,
+			Transparency = 0.48,
+			Thickness = 1.1,
 		}),
 		Icon = e("ImageLabel", {
 			BackgroundColor3 = COLORS.Panel,
-			BackgroundTransparency = 0.08,
+			BackgroundTransparency = 0.02,
 			BorderSizePixel = 0,
 			Image = props.icon,
-			Position = UDim2.fromOffset(12, 17),
+			Position = UDim2.fromOffset(12, 14),
 			ScaleType = Enum.ScaleType.Fit,
-			Size = UDim2.fromOffset(54, 54),
+			Size = UDim2.fromOffset(60, 60),
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
+			}),
+			Stroke = e("UIStroke", {
+				Color = COLORS.Gold,
+				Transparency = 0.62,
+				Thickness = 1,
 			}),
 		}),
 		Name = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(78, 12),
-			Size = UDim2.new(1, -352, 0, 24),
+			Position = UDim2.fromOffset(84, 12),
+			Size = UDim2.new(1, -358, 0, 24),
 			Text = props.name,
 			TextColor3 = COLORS.Text,
 			TextSize = 17,
@@ -58,8 +64,8 @@ local function gearRow(props)
 		Type = e("TextLabel", {
 			BackgroundTransparency = 1,
 			Font = Enum.Font.Gotham,
-			Position = UDim2.fromOffset(78, 40),
-			Size = UDim2.new(1, -352, 0, 20),
+			Position = UDim2.fromOffset(84, 40),
+			Size = UDim2.new(1, -358, 0, 20),
 			Text = props.typeText,
 			TextColor3 = COLORS.Muted,
 			TextSize = 14,
@@ -80,6 +86,18 @@ local function gearRow(props)
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
 			}),
+			Stroke = e("UIStroke", {
+				Color = COLORS.GoldSoft,
+				Transparency = 0.22,
+				Thickness = 1,
+			}),
+			Gradient = e("UIGradient", {
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, COLORS.GoldSoft),
+					ColorSequenceKeypoint.new(1, COLORS.Gold),
+				}),
+				Rotation = 90,
+			}),
 		}),
 		Robux = props.showRobux and e("TextButton", {
 			AnchorPoint = Vector2.new(1, 1),
@@ -97,8 +115,8 @@ local function gearRow(props)
 				CornerRadius = UDim.new(0, 8),
 			}),
 			Stroke = e("UIStroke", {
-				Color = COLORS.Gold,
-				Transparency = 0.42,
+				Color = COLORS.GoldSoft,
+				Transparency = 0.36,
 				Thickness = 1,
 			}),
 		}) or nil,
@@ -142,21 +160,40 @@ local function GearStoreScreen(props)
 			CornerRadius = UDim.new(0, 12),
 		}),
 		Stroke = e("UIStroke", {
-			Color = COLORS.Gold,
+			Color = COLORS.GoldSoft,
 			Transparency = 0.08,
-			Thickness = 1.4,
+			Thickness = 1.6,
+		}),
+		Gradient = e("UIGradient", {
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, COLORS.Panel),
+				ColorSequenceKeypoint.new(0.46, COLORS.Backdrop),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 5, 6)),
+			}),
+			Rotation = 90,
 		}),
 		Header = e("TextLabel", {
-			BackgroundTransparency = 1,
+			BackgroundColor3 = COLORS.Panel,
+			BackgroundTransparency = 0.02,
+			BorderSizePixel = 0,
 			Font = Enum.Font.GothamBlack,
 			Position = UDim2.fromOffset(22, 16),
-			Size = UDim2.new(1, -88, 0, 32),
+			Size = UDim2.fromOffset(230, 36),
 			Text = "GEAR STORE",
 			TextColor3 = COLORS.GoldSoft,
-			TextSize = 26,
+			TextSize = 22,
 			TextStrokeColor3 = COLORS.GoldSoft,
-			TextStrokeTransparency = 0.52,
-			TextXAlignment = Enum.TextXAlignment.Left,
+			TextStrokeTransparency = 0.62,
+			TextXAlignment = Enum.TextXAlignment.Center,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(1, 0),
+			}),
+			Stroke = e("UIStroke", {
+				Color = COLORS.GoldSoft,
+				Transparency = 0.22,
+				Thickness = 1.2,
+			}),
 		}),
 		Close = e("TextButton", {
 			AnchorPoint = Vector2.new(1, 0),
@@ -172,6 +209,11 @@ local function GearStoreScreen(props)
 		}, {
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 8),
+			}),
+			Stroke = e("UIStroke", {
+				Color = COLORS.GoldShadow,
+				Transparency = 0.18,
+				Thickness = 1,
 			}),
 		}),
 		List = e("ScrollingFrame", {

@@ -7,24 +7,24 @@ local React = require(Packages:WaitForChild("React"))
 local e = React.createElement
 
 local THEME = {
-	PrimaryBg = Color3.fromRGB(30, 42, 56),
-	SecondaryBg = Color3.fromRGB(36, 52, 71),
-	PanelFillDark = Color3.fromRGB(34, 49, 66),
-	GoldBase = Color3.fromRGB(212, 175, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
-	TextMain = Color3.fromRGB(230, 230, 230),
-	TextSecondary = Color3.fromRGB(184, 193, 204),
-	TextBright = Color3.fromRGB(247, 249, 255),
-	HeaderBackground = Color3.fromRGB(16, 35, 59),
-	SectionBackground = Color3.fromRGB(27, 46, 68),
-	SectionHover = Color3.fromRGB(46, 74, 99),
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	BeliFill = Color3.fromRGB(177, 135, 29),
-	BeliFillHover = Color3.fromRGB(214, 168, 43),
-	RobuxFill = Color3.fromRGB(26, 51, 82),
-	RobuxFillHover = Color3.fromRGB(38, 74, 116),
-	Success = Color3.fromRGB(125, 219, 159),
+	PrimaryBg = Color3.fromRGB(8, 8, 9),
+	SecondaryBg = Color3.fromRGB(16, 16, 19),
+	PanelFillDark = Color3.fromRGB(12, 12, 14),
+	GoldBase = Color3.fromRGB(228, 190, 78),
+	GoldHighlight = Color3.fromRGB(255, 224, 120),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
+	TextMain = Color3.fromRGB(235, 235, 235),
+	TextSecondary = Color3.fromRGB(190, 194, 202),
+	TextBright = Color3.fromRGB(255, 247, 216),
+	HeaderBackground = Color3.fromRGB(16, 16, 19),
+	SectionBackground = Color3.fromRGB(18, 18, 21),
+	SectionHover = Color3.fromRGB(30, 30, 35),
+	MenuOverlay = Color3.fromRGB(8, 8, 9),
+	BeliFill = Color3.fromRGB(228, 190, 78),
+	BeliFillHover = Color3.fromRGB(255, 224, 120),
+	RobuxFill = Color3.fromRGB(20, 20, 24),
+	RobuxFillHover = Color3.fromRGB(30, 30, 35),
+	Success = Color3.fromRGB(129, 232, 168),
 	CloseBright = Color3.fromRGB(200, 0, 9),
 	CloseBrightSoft = Color3.fromRGB(235, 70, 78),
 	BackgroundImage = "rbxassetid://75192947200012",
@@ -86,7 +86,7 @@ local function purchaseButton(props)
 		Stroke = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 			Color = THEME.GoldHighlight,
-			Transparency = 0.06,
+			Transparency = 0.18,
 			Thickness = 1.25,
 		}),
 		Gradient = gradient(fill, props.gradientEndColor3 or THEME.PrimaryBg),
@@ -106,8 +106,8 @@ end
 
 local function statPill(props)
 	return e("Frame", {
-		BackgroundColor3 = THEME.HeaderBackground,
-		BackgroundTransparency = 0.18,
+		BackgroundColor3 = THEME.PanelFillDark,
+		BackgroundTransparency = 0.04,
 		BorderSizePixel = 0,
 		Position = props.position,
 		Size = props.size,
@@ -119,7 +119,7 @@ local function statPill(props)
 		Stroke = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 			Color = THEME.GoldHighlight,
-			Transparency = 0.28,
+			Transparency = 0.42,
 			Thickness = 1,
 		}),
 		Label = e("TextLabel", {
@@ -173,7 +173,7 @@ local function upgradeRow(props)
 		Stroke = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 			Color = THEME.GoldHighlight,
-			Transparency = 0,
+			Transparency = hovered and 0.16 or 0.34,
 			Thickness = 1.5,
 		}),
 		Title = e("TextLabel", {
@@ -205,13 +205,13 @@ local function upgradeRow(props)
 		Buy = e(purchaseButton, {
 			buttonRef = props.buyRef,
 			color3 = THEME.BeliFill,
-			gradientEndColor3 = Color3.fromRGB(105, 76, 16),
+			gradientEndColor3 = THEME.GoldShadow,
 			hoverColor3 = THEME.BeliFillHover,
 			onActivated = props.onBuy,
 			position = UDim2.new(1, -132, 0.5, 0),
 			size = UDim2.fromOffset(116, 34),
 			text = props.buyText,
-			textColor3 = THEME.GoldHighlight,
+			textColor3 = Color3.new(1, 1, 1),
 		}),
 		Robux = e(purchaseButton, {
 			color3 = THEME.RobuxFill,
@@ -287,6 +287,7 @@ local function SpeedUpgradeScreen(props)
 			Position = UDim2.fromOffset(2, 2),
 			ScaleType = Enum.ScaleType.Stretch,
 			Size = UDim2.new(1, -4, 1, -4),
+			ImageTransparency = 0.48,
 			ZIndex = 1,
 		}, {
 			Corner = e("UICorner", {
@@ -295,7 +296,7 @@ local function SpeedUpgradeScreen(props)
 		}),
 		Overlay = e("Frame", {
 			BackgroundColor3 = THEME.MenuOverlay,
-			BackgroundTransparency = 0.45,
+			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(2, 2),
 			Size = UDim2.new(1, -4, 1, -4),
@@ -318,13 +319,13 @@ local function SpeedUpgradeScreen(props)
 			Stroke = e("UIStroke", {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 				Color = THEME.GoldHighlight,
-				Transparency = 0,
-				Thickness = 3,
+				Transparency = 0.08,
+				Thickness = 2.5,
 			}),
 		}),
 		TopBar = e("Frame", {
 			BackgroundColor3 = THEME.HeaderBackground,
-			BackgroundTransparency = 0.25,
+			BackgroundTransparency = 0.04,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(10, 8),
 			Size = UDim2.new(1, -20, 0, 44),
@@ -336,9 +337,10 @@ local function SpeedUpgradeScreen(props)
 			Stroke = e("UIStroke", {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 				Color = THEME.GoldHighlight,
-				Transparency = 0,
+				Transparency = 0.18,
 				Thickness = 1.5,
 			}),
+			Gradient = gradient(THEME.SecondaryBg, THEME.PrimaryBg),
 			Title = e("TextLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
@@ -346,11 +348,11 @@ local function SpeedUpgradeScreen(props)
 				Position = UDim2.fromScale(0.5, 0.5),
 				Size = UDim2.fromOffset(300, 26),
 				Text = "SPEED UPGRADES",
-				TextColor3 = THEME.TextMain,
+				TextColor3 = THEME.GoldHighlight,
 				TextScaled = true,
 				TextSize = 24,
 				TextStrokeColor3 = THEME.GoldHighlight,
-				TextStrokeTransparency = 0.42,
+				TextStrokeTransparency = 0.58,
 				TextXAlignment = Enum.TextXAlignment.Center,
 				ZIndex = 6,
 			}),
