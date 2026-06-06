@@ -15,15 +15,6 @@ local IMAGE_CORNER_RADIUS = UDim.new(0, 9)
 local DEFAULT_CARD_BACKGROUND_TRANSPARENCY = 0.18
 local FRUIT_CARD_BACKGROUND_TRANSPARENCY = 0.26
 local FRUIT_BACKDROP_BACKGROUND_TRANSPARENCY = 0.28
-local LOCKED_FRUIT_SILHOUETTE_COLOR = Color3.fromRGB(6, 7, 9)
-local LOCKED_FRUIT_RIM_COLOR = Color3.fromRGB(215, 175, 86)
-local LOCKED_FRUIT_AMBIENT = Color3.fromRGB(28, 30, 36)
-local LOCKED_FRUIT_LIGHT = Color3.fromRGB(58, 54, 46)
-local LOCKED_FRUIT_RIM_AMBIENT = Color3.fromRGB(16, 14, 11)
-local LOCKED_FRUIT_RIM_LIGHT = Color3.fromRGB(82, 68, 34)
-local LOCKED_CREW_SILHOUETTE_COLOR = Color3.fromRGB(0, 0, 0)
-local LOCKED_CREW_AMBIENT = Color3.fromRGB(4, 4, 5)
-local LOCKED_CREW_LIGHT = Color3.fromRGB(10, 10, 12)
 local BLACK = Color3.fromRGB(0, 0, 0)
 local PREVIEW_ANCHOR = Vector2.new(0.5, 0.5)
 local PREVIEW_POSITION = UDim2.fromScale(0.5, 0.54)
@@ -491,147 +482,6 @@ local function createRarityChrome(rarityStyle, hovered)
 	return chromeChildren
 end
 
-local function createLockedImagePreview(image, unit, isFruit)
-	if isFruit then
-		return {
-			Character = e("ImageLabel", {
-				AnchorPoint = PREVIEW_ANCHOR,
-				BackgroundTransparency = 1,
-				Image = image,
-				ImageColor3 = BLACK,
-				ImageTransparency = 0,
-				Position = PREVIEW_POSITION,
-				ScaleType = Enum.ScaleType.Fit,
-				Size = UDim2.fromScale(0.8, 0.8),
-				ZIndex = 3,
-			}),
-		}
-	end
-
-	local previewSize = getIndexStaticPreviewSize(unit)
-	return {
-		Shadow = e("ImageLabel", {
-			AnchorPoint = PREVIEW_ANCHOR,
-			BackgroundTransparency = 1,
-			Image = image,
-			ImageColor3 = BLACK,
-			ImageTransparency = 0.3,
-			Position = UDim2.fromScale(0.5, 0.56),
-			ScaleType = Enum.ScaleType.Fit,
-			Size = previewSize,
-			ZIndex = 1,
-		}),
-		Character = e("ImageLabel", {
-			AnchorPoint = PREVIEW_ANCHOR,
-			BackgroundTransparency = 1,
-			Image = image,
-			ImageColor3 = BLACK,
-			ImageTransparency = 0,
-			Position = UDim2.fromScale(0.5, 0.5),
-			ScaleType = Enum.ScaleType.Fit,
-			Size = previewSize,
-			ZIndex = 3,
-		}),
-	}
-end
-
-local function createLockedCrewModelPreview(previewName)
-	return {
-		Character = e(PreviewViewport, {
-			previewKind = "CrewMember",
-			previewName = previewName,
-			preferModel = true,
-			size = UDim2.fromScale(0.86, 0.86),
-			position = PREVIEW_POSITION,
-			anchorPoint = PREVIEW_ANCHOR,
-			tintColor = LOCKED_CREW_SILHOUETTE_COLOR,
-			tintTransparency = 0,
-			tintMaterial = Enum.Material.Plastic,
-			ambient = LOCKED_CREW_AMBIENT,
-			lightColor = LOCKED_CREW_LIGHT,
-			lightDirection = Vector3.new(0.2, -0.2, -1),
-			zIndex = 3,
-		}),
-	}
-end
-
-local function createLockedPreview(unit, renderPreview)
-	local isFruit = unit and unit.itemKind == "DevilFruit"
-
-	if unit.previewKind and unit.previewName then
-		if renderPreview == false then
-			return {
-				Fallback = fallbackSilhouette(),
-			}
-		end
-
-		if isFruit then
-			return {
-				Rim = e(PreviewViewport, {
-					previewKind = unit.previewKind,
-					previewName = unit.previewName,
-					size = UDim2.fromScale(0.88, 0.88),
-					position = PREVIEW_POSITION,
-					anchorPoint = PREVIEW_ANCHOR,
-					tintColor = LOCKED_FRUIT_RIM_COLOR,
-					tintTransparency = 0.74,
-					tintMaterial = Enum.Material.Plastic,
-					ambient = LOCKED_FRUIT_RIM_AMBIENT,
-					lightColor = LOCKED_FRUIT_RIM_LIGHT,
-					lightDirection = Vector3.new(0.15, -0.2, -1),
-					zIndex = 2,
-				}),
-				Character = e(PreviewViewport, {
-					previewKind = unit.previewKind,
-					previewName = unit.previewName,
-					size = UDim2.fromScale(0.84, 0.84),
-					position = PREVIEW_POSITION,
-					anchorPoint = PREVIEW_ANCHOR,
-					tintColor = LOCKED_FRUIT_SILHOUETTE_COLOR,
-					tintTransparency = 0,
-					tintMaterial = Enum.Material.Plastic,
-					ambient = LOCKED_FRUIT_AMBIENT,
-					lightColor = LOCKED_FRUIT_LIGHT,
-					lightDirection = Vector3.new(0.2, -0.25, -1),
-					zIndex = 3,
-				}),
-			}
-		end
-
-		return createLockedCrewModelPreview(unit.previewName)
-	end
-
-	local crewModelName = tostring(unit.crewModelName or "")
-	if not isFruit and crewModelName ~= "" and renderPreview ~= false then
-		return createLockedCrewModelPreview(crewModelName)
-	end
-
-	local staticPreviewImage = tostring(unit.staticPreviewImage or "")
-	if staticPreviewImage ~= "" then
-		if isFruit then
-			return createLockedImagePreview(staticPreviewImage, unit, isFruit)
-		end
-
-		return {
-			Fallback = fallbackSilhouette(),
-		}
-	end
-
-	if unit.image and unit.image ~= "" then
-		if isFruit then
-			return createLockedImagePreview(unit.image, unit, isFruit)
-		end
-
-		return {
-			Fallback = fallbackSilhouette(),
-		}
-	end
-
-	return {
-		Fallback = fallbackSilhouette(),
-	}
-end
-
 local function createStaticImagePreview(image, unit)
 	local previewSize = getIndexStaticPreviewSize(unit)
 
@@ -765,26 +615,7 @@ local function IndexCard(props)
 		or DEFAULT_CARD_BACKGROUND_TRANSPARENCY
 
 	if not unit.discovered then
-		local lockedChildren = createLockedPreview(unit, props.renderPreview)
 		local hiddenProduction = tostring(unit.hiddenProduction or "")
-		if not isFruit and hiddenProduction ~= "" then
-			lockedChildren.Production = productionBadge(hiddenProduction)
-		end
-
-		lockedChildren.Question = e("TextLabel", {
-			AnchorPoint = Vector2.new(1, 0),
-			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
-			Position = UDim2.new(1, -8, 0, 6),
-			Size = UDim2.fromOffset(44, 18),
-			Text = "???",
-			TextColor3 = Theme.Palette.QuestionText,
-			TextSize = 14,
-			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
-			TextStrokeTransparency = 0.4,
-			TextXAlignment = Enum.TextXAlignment.Right,
-			ZIndex = 4,
-		})
 
 		return baseCard({
 			backgroundTransparency = cardBackgroundTransparency,
@@ -814,15 +645,24 @@ local function IndexCard(props)
 						ColorSequenceKeypoint.new(1, Theme.Palette.CardShell),
 					}),
 				}),
-				ImageArea = e("Frame", {
-					BackgroundColor3 = Theme.Palette.CardBackdrop,
-					BackgroundTransparency = backdropBackgroundTransparency,
-					BorderSizePixel = 0,
-					ClipsDescendants = true,
-					Position = UDim2.fromOffset(4, 4),
-					Size = UDim2.new(1, -8, 1, -(FOOTER_HEIGHT + 8)),
-				}, imageAreaShell(lockedChildren)),
-				Footer = footer("???", "???", Theme.Palette.Text),
+				Question = e("TextLabel", {
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					BackgroundTransparency = 1,
+					Font = Theme.Fonts.Display,
+					Position = UDim2.fromScale(0.5, 0.5),
+					Size = UDim2.fromScale(0.82, 0.82),
+					Text = "?",
+					TextColor3 = Theme.Palette.QuestionText,
+					TextScaled = true,
+					TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+					TextStrokeTransparency = 0.4,
+					ZIndex = 4,
+				}, {
+					Constraint = e("UITextSizeConstraint", {
+						MaxTextSize = 150,
+					}),
+				}),
+				Production = not isFruit and hiddenProduction ~= "" and productionBadge(hiddenProduction) or nil,
 			},
 		})
 	end

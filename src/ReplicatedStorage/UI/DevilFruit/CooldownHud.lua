@@ -9,16 +9,16 @@ local e = React.createElement
 
 local THEME = {
 	FruitBackgroundImage = "rbxassetid://134053886107384",
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	PrimaryBg = Color3.fromRGB(30, 42, 56),
-	SecondaryBg = Color3.fromRGB(36, 52, 71),
-	HeaderBg = Color3.fromRGB(16, 35, 59),
-	SectionBg = Color3.fromRGB(27, 46, 68),
-	GoldBase = Color3.fromRGB(212, 175, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
-	TextMain = Color3.fromRGB(230, 230, 230),
-	TextSecondary = Color3.fromRGB(184, 193, 204),
+	MenuOverlay = Color3.fromRGB(5, 6, 10),
+	PrimaryBg = Color3.fromRGB(8, 9, 12),
+	SecondaryBg = Color3.fromRGB(15, 15, 19),
+	HeaderBg = Color3.fromRGB(12, 12, 16),
+	SectionBg = Color3.fromRGB(13, 14, 18),
+	GoldBase = Color3.fromRGB(208, 160, 62),
+	GoldHighlight = Color3.fromRGB(247, 216, 118),
+	GoldShadow = Color3.fromRGB(116, 77, 24),
+	TextMain = Color3.fromRGB(247, 242, 226),
+	TextSecondary = Color3.fromRGB(188, 184, 171),
 	Ready = Color3.fromRGB(116, 255, 161),
 	Active = Color3.fromRGB(116, 208, 255),
 	ActiveFill = Color3.fromRGB(67, 171, 255),
@@ -54,6 +54,9 @@ local function abilityRow(props)
 	local barBottom = tonumber(layout.barBottom) or (compact and 4 or 8)
 	local barInset = tonumber(layout.barInset) or (compact and 5 or 10)
 	local nameText = props.name
+	local detailText = if typeof(props.detail) == "string" then props.detail else ""
+	local showDetail = detailText ~= "" and not compact
+	local fillColor = props.fillColor3 or THEME.Ready
 	if compact and typeof(props.compactName) == "string" and props.compactName ~= "" then
 		nameText = props.compactName
 	end
@@ -61,8 +64,9 @@ local function abilityRow(props)
 	return e("TextButton", {
 		AutoButtonColor = false,
 		BackgroundColor3 = THEME.SectionBg,
-		BackgroundTransparency = 0.18,
+		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
+		ClipsDescendants = true,
 		LayoutOrder = props.layoutOrder,
 		Size = UDim2.new(1, 0, 0, rowHeight),
 		Text = "",
@@ -79,10 +83,25 @@ local function abilityRow(props)
 		Stroke = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 			Color = THEME.GoldHighlight,
-			Transparency = 0.1,
-			Thickness = 1,
+			Transparency = 0.18,
+			Thickness = 1.15,
 		}),
 		Gradient = gradient(THEME.SecondaryBg, THEME.PrimaryBg),
+		TopSheen = e("Frame", {
+			BackgroundColor3 = Color3.fromRGB(255, 236, 174),
+			BackgroundTransparency = 0.92,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, 0, 0, math.max(1, math.floor(rowHeight * 0.28))),
+			ZIndex = 3,
+		}, {
+			Fade = e("UIGradient", {
+				Rotation = 90,
+				Transparency = NumberSequence.new({
+					NumberSequenceKeypoint.new(0, 0.5),
+					NumberSequenceKeypoint.new(1, 1),
+				}),
+			}),
+		}),
 		Key = showKeybind and e("TextLabel", {
 			AnchorPoint = Vector2.new(0, 0.5),
 			BackgroundColor3 = THEME.GoldBase,
@@ -108,14 +127,28 @@ local function abilityRow(props)
 			BackgroundTransparency = 1,
 			Font = Enum.Font.GothamBold,
 			Position = UDim2.fromOffset(textLeft, nameY),
-			Size = UDim2.new(1, -(textLeft + nameRightPadding), 0, compact and 11 or 22),
+			Size = UDim2.new(1, -(textLeft + nameRightPadding), 0, showDetail and 17 or (compact and 11 or 22)),
 			Text = nameText,
 			TextColor3 = THEME.TextMain,
 			TextSize = nameTextSize,
+			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeTransparency = 0.5,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			ZIndex = 4,
 		}),
+		Detail = showDetail and e("TextLabel", {
+			BackgroundTransparency = 1,
+			Font = Enum.Font.GothamMedium,
+			Position = UDim2.fromOffset(textLeft, nameY + 18),
+			Size = UDim2.new(1, -(textLeft + statusWidth + 16), 0, 12),
+			Text = detailText,
+			TextColor3 = THEME.TextSecondary,
+			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			ZIndex = 4,
+		}) or nil,
 		Status = e("TextLabel", {
 			AnchorPoint = Vector2.new(1, 0),
 			BackgroundTransparency = 1,
@@ -125,12 +158,14 @@ local function abilityRow(props)
 			Text = props.status,
 			TextColor3 = props.statusColor3,
 			TextSize = statusTextSize,
+			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeTransparency = 0.48,
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = 4,
 		}),
 		Bar = e("Frame", {
 			AnchorPoint = Vector2.new(0, 1),
-			BackgroundColor3 = THEME.PrimaryBg,
+			BackgroundColor3 = Color3.fromRGB(4, 5, 8),
 			BorderSizePixel = 0,
 			Position = UDim2.new(0, barInset, 1, -barBottom),
 			Size = UDim2.new(1, -(barInset * 2), 0, barHeight),
@@ -145,13 +180,20 @@ local function abilityRow(props)
 				Thickness = 0.8,
 			}),
 			Fill = e("Frame", {
-				BackgroundColor3 = props.fillColor3,
+				BackgroundColor3 = fillColor,
 				BorderSizePixel = 0,
 				Size = UDim2.fromScale(props.progress, 1),
 				ZIndex = 5,
 			}, {
 				Corner = e("UICorner", {
 					CornerRadius = UDim.new(1, 0),
+				}),
+				Gloss = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 244, 202)),
+						ColorSequenceKeypoint.new(1, fillColor),
+					}),
 				}),
 			}),
 		}),
@@ -194,6 +236,7 @@ local function CooldownHud(props)
 
 	for index, ability in ipairs(props.abilities or {}) do
 		rows["Ability" .. tostring(index)] = e(abilityRow, {
+			detail = ability.detail,
 			fillColor3 = ability.fillColor3,
 			abilityName = ability.abilityName,
 			keyCodeName = ability.keyCodeName,
@@ -232,7 +275,7 @@ local function CooldownHud(props)
 	return e("Frame", {
 		AnchorPoint = Vector2.new(1, 1),
 		BackgroundColor3 = THEME.PrimaryBg,
-		BackgroundTransparency = 0.08,
+		BackgroundTransparency = 0.03,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Position = layout.position,
@@ -245,7 +288,24 @@ local function CooldownHud(props)
 		Stroke = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 			Color = THEME.GoldHighlight,
-			Thickness = 1.6,
+			Transparency = 0.05,
+			Thickness = 1.8,
+		}),
+		Glow = e("Frame", {
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = 0,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 14),
+			}),
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = THEME.GoldHighlight,
+				Transparency = 0.72,
+				Thickness = 4,
+			}),
 		}),
 		Backdrop = e("ImageLabel", {
 			BackgroundTransparency = 1,
@@ -261,7 +321,7 @@ local function CooldownHud(props)
 		}),
 		Overlay = e("Frame", {
 			BackgroundColor3 = THEME.MenuOverlay,
-			BackgroundTransparency = 0.42,
+			BackgroundTransparency = 0.18,
 			BorderSizePixel = 0,
 			Size = UDim2.fromScale(1, 1),
 			ZIndex = 1,
@@ -272,7 +332,7 @@ local function CooldownHud(props)
 		}),
 		TopBar = e("Frame", {
 			BackgroundColor3 = THEME.HeaderBg,
-			BackgroundTransparency = 0.24,
+			BackgroundTransparency = 0.08,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(outerInset, outerInset),
 			Size = UDim2.new(1, -(outerInset * 2), 0, topBarHeight),
@@ -284,6 +344,7 @@ local function CooldownHud(props)
 			Stroke = e("UIStroke", {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 				Color = THEME.GoldHighlight,
+				Transparency = 0.12,
 				Thickness = 1.2,
 			}),
 			Gradient = gradient(THEME.SecondaryBg, THEME.PrimaryBg),
@@ -314,7 +375,7 @@ local function CooldownHud(props)
 		}),
 		List = e("Frame", {
 			BackgroundColor3 = THEME.SectionBg,
-			BackgroundTransparency = 0.2,
+			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
 			ClipsDescendants = true,
 			Position = UDim2.fromOffset(outerInset, outerInset + topBarHeight + gap),

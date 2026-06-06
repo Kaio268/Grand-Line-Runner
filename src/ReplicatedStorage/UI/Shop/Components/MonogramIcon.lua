@@ -8,9 +8,8 @@ local Theme = require(script.Parent.Parent:WaitForChild("Theme"))
 local e = React.createElement
 
 local function MonogramIcon(props)
-	local surface = Theme.getSurfaceTheme(props.themeKey)
 	local size = props.size or UDim2.fromOffset(78, 78)
-	local iconInset = props.iconInset or (props.isLarge and 2 or 4)
+	local hasImage = props.image and props.image ~= ""
 
 	return e("Frame", {
 		AnchorPoint = props.anchorPoint,
@@ -20,7 +19,7 @@ local function MonogramIcon(props)
 		Size = size,
 		ZIndex = props.zIndex,
 	}, {
-		Icon = (props.image and props.image ~= "") and e("ImageLabel", {
+		Icon = hasImage and e("ImageLabel", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
@@ -29,21 +28,21 @@ local function MonogramIcon(props)
 			ImageTransparency = 0,
 			Position = UDim2.fromScale(0.5, 0.5),
 			ScaleType = Enum.ScaleType.Fit,
-			Size = UDim2.new(1, -iconInset, 1, -iconInset),
-			ZIndex = props.zIndex and (props.zIndex + 3) or nil,
+			Size = UDim2.fromScale(1, 1),
+			ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		}) or e("TextLabel", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			BackgroundTransparency = 1,
 			Font = Theme.Fonts.Display,
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.new(1, -10, 1, -10),
+			Size = UDim2.fromScale(1, 1),
 			Text = tostring(props.label or "?"),
-			TextColor3 = Theme.Palette.Text,
+			TextColor3 = Theme.Palette.GoldSoft,
 			TextScaled = true,
-			TextStrokeColor3 = surface.accent,
-			TextStrokeTransparency = 0.45,
+			TextStrokeColor3 = Color3.fromRGB(0, 0, 0),
+			TextStrokeTransparency = 0.4,
 			TextWrapped = true,
-			ZIndex = props.zIndex and (props.zIndex + 3) or nil,
+			ZIndex = props.zIndex and (props.zIndex + 1) or nil,
 		}),
 	})
 end

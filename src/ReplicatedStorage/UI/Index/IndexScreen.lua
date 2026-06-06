@@ -5,8 +5,6 @@ local React = require(Packages:WaitForChild("React"))
 
 local Theme = require(script.Parent:WaitForChild("Theme"))
 local IndexData = require(script.Parent:WaitForChild("IndexData"))
-local CategorySidebar = require(script.Parent:WaitForChild("Components"):WaitForChild("CategorySidebar"))
-local CategoryTabs = require(script.Parent:WaitForChild("Components"):WaitForChild("CategoryTabs"))
 local IndexGrid = require(script.Parent:WaitForChild("Components"):WaitForChild("IndexGrid"))
 local RewardsPanel = require(script.Parent:WaitForChild("Components"):WaitForChild("RewardsPanel"))
 
@@ -16,19 +14,140 @@ local SHELL = {
 	IndexBackgroundImage = "rbxassetid://75192947200012",
 	FruitsBackgroundImage = "rbxassetid://134053886107384",
 	RewardsBackgroundImage = "rbxassetid://130097582075753",
-	MenuOverlay = Color3.fromRGB(15, 27, 42),
-	MenuOverlayTransparency = 0.45,
-	HeaderBackground = Color3.fromRGB(16, 35, 59),
-	HeaderTransparency = 0.25,
-	SectionBackground = Color3.fromRGB(27, 46, 68),
-	SectionHover = Color3.fromRGB(46, 74, 99),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
+	CardBg = Color3.fromRGB(8, 8, 9),
+	MenuOverlay = Color3.fromRGB(8, 8, 9),
+	MenuOverlayTransparency = 0.12,
+	HeaderBackground = Color3.fromRGB(8, 8, 9),
+	HeaderTransparency = 0.1,
+	SectionBackground = Color3.fromRGB(20, 20, 24),
+	SectionHover = Color3.fromRGB(30, 30, 35),
+	GoldBase = Color3.fromRGB(228, 190, 78),
+	GoldHighlight = Color3.fromRGB(255, 224, 120),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
 	CloseFill = Color3.fromRGB(200, 0, 9),
 	CloseFillSoft = Color3.fromRGB(235, 70, 78),
-	TextMain = Color3.fromRGB(230, 230, 230),
-	TextShadow = Color3.fromRGB(9, 17, 27),
+	TextMain = Color3.fromRGB(235, 235, 235),
+	TextShadow = Color3.fromRGB(0, 0, 0),
 }
+
+local BADGE_FONT = Font.new("rbxasset://fonts/families/SpecialElite.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+local BODY = Enum.Font.FredokaOne
+
+local function goldStroke(thickness, transparency)
+	return e("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = SHELL.GoldHighlight,
+		Transparency = transparency or 0,
+		Thickness = thickness or 1.5,
+	}, {
+		Grad = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, SHELL.GoldHighlight),
+				ColorSequenceKeypoint.new(1, SHELL.GoldShadow),
+			}),
+		}),
+	})
+end
+
+local function titleBadge(labelText, width)
+	return e("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		BackgroundColor3 = SHELL.CardBg,
+		BorderSizePixel = 0,
+		Position = UDim2.new(0.5, 0, 0, 6),
+		Size = UDim2.fromOffset(width or 208, 42),
+		ZIndex = 25,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0.5, 0),
+		}),
+		Stroke = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Color = SHELL.GoldBase,
+			Thickness = 2,
+			Transparency = 0.15,
+		}, {
+			Grad = e("UIGradient", {
+				Rotation = 0,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 216, 107)),
+					ColorSequenceKeypoint.new(0.47, Color3.fromRGB(138, 90, 19)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 216, 107)),
+				}),
+			}),
+		}),
+		Title = e("TextLabel", {
+			BackgroundTransparency = 1,
+			FontFace = BADGE_FONT,
+			Size = UDim2.fromScale(1, 1),
+			Text = labelText,
+			TextColor3 = SHELL.GoldBase,
+			TextScaled = true,
+			ZIndex = 26,
+		}, {
+			Constraint = e("UITextSizeConstraint", {
+				MaxTextSize = 22,
+			}),
+			Grad = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 251, 230)),
+					ColorSequenceKeypoint.new(0.47, Color3.fromRGB(255, 216, 107)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(95, 56, 2)),
+				}),
+			}),
+			Outline = e("UIStroke", {
+				Color = Color3.fromRGB(36, 18, 0),
+				Thickness = 3,
+				Transparency = 0.2,
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+				LineJoinMode = Enum.LineJoinMode.Miter,
+			}),
+		}),
+	})
+end
+
+local function closeButton(onClose)
+	return e("TextButton", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		AutoButtonColor = false,
+		BackgroundColor3 = SHELL.CloseFill,
+		BorderSizePixel = 0,
+		Font = Enum.Font.GothamBold,
+		Position = UDim2.new(1, -4, 0, 4),
+		Size = UDim2.fromOffset(34, 34),
+		Text = "X",
+		TextColor3 = Color3.new(1, 1, 1),
+		TextScaled = true,
+		TextStrokeColor3 = SHELL.TextShadow,
+		TextStrokeTransparency = 0.25,
+		ZIndex = 30,
+		[React.Event.Activated] = function()
+			if onClose then
+				onClose()
+			end
+		end,
+	}, {
+		Corner = e("UICorner", {
+			CornerRadius = UDim.new(0, 9),
+		}),
+		Outline = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Color = Color3.fromRGB(0, 0, 0),
+			Transparency = 0,
+			Thickness = 1.6,
+		}),
+		Gradient = e("UIGradient", {
+			Rotation = 90,
+			Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 96, 102)),
+				ColorSequenceKeypoint.new(0.5, Color3.fromRGB(214, 24, 34)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 0, 6)),
+			}),
+		}),
+	})
+end
 
 local DEBUG_INDEX_UI_PERF = false
 
@@ -61,16 +180,14 @@ local function tabButton(props)
 	local tab = props.tab or {}
 	local isRewardTab = tab.id == "rewards"
 	local hovered, setHovered = React.useState(false)
-	local fillColor = active and Theme.Palette.TabRewardFill or (hovered and SHELL.SectionHover or SHELL.HeaderBackground)
-	local strokeColor = SHELL.GoldHighlight
-	local textColor = active and SHELL.GoldHighlight or Theme.Palette.Text
 	local countText = isRewardTab and (props.claimableCount or 0) > 0 and tostring(props.claimableCount) or nil
 	local buttonWidth = isRewardTab and 120 or 116
+	local fillColor = active and SHELL.GoldBase or (hovered and Color3.fromRGB(26, 26, 30) or SHELL.CardBg)
 
 	return e("TextButton", {
 		AutoButtonColor = false,
 		BackgroundColor3 = fillColor,
-		BackgroundTransparency = 0.15,
+		BackgroundTransparency = 0,
 		BorderSizePixel = 0,
 		LayoutOrder = props.layoutOrder or 0,
 		Size = UDim2.fromOffset(buttonWidth, 30),
@@ -87,53 +204,231 @@ local function tabButton(props)
 		end,
 	}, {
 		Corner = e("UICorner", {
-			CornerRadius = UDim.new(0, 12),
+			CornerRadius = UDim.new(0, 10),
 		}),
-		Stroke = e("UIStroke", {
+		Outline = e("UIStroke", {
 			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Color = strokeColor,
+			Color = Color3.fromRGB(0, 0, 0),
+			Thickness = 1.8,
 			Transparency = 0,
-			Thickness = 1.35,
-		}),
-		Gradient = e("UIGradient", {
-			Rotation = 90,
-			Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, active and Theme.Palette.TabRewardFill or SHELL.SectionBackground),
-				ColorSequenceKeypoint.new(1, fillColor),
+		}, active and {
+			Grad = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new(Color3.fromRGB(80, 80, 80), Color3.fromRGB(0, 0, 0)),
 			}),
+		} or nil),
+		Sheen = e("UIGradient", {
+			Rotation = 90,
+			Color = active
+				and ColorSequence.new(Color3.fromRGB(255, 250, 222), Color3.fromRGB(216, 168, 64))
+				or ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
 		}),
-		Title = e("TextLabel", {
+		TitleWrap = e("Frame", {
 			BackgroundTransparency = 1,
-			Font = Theme.Fonts.Display,
-			Position = UDim2.fromOffset(10, 1),
-			Size = UDim2.new(1, if countText then -30 else -20, 1, 0),
-			Text = tostring(tab.label or ""),
-			TextColor3 = textColor,
-			TextSize = 12,
-			TextStrokeColor3 = SHELL.GoldHighlight,
-			TextStrokeTransparency = active and 0.38 or 0.54,
+			Size = UDim2.fromScale(1, 1),
 			ZIndex = 9,
+		}, {
+			Padding = e("UIPadding", {
+				PaddingLeft = UDim.new(0, 8),
+				PaddingRight = UDim.new(0, countText and 28 or 8),
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY,
+				Size = UDim2.fromScale(1, 1),
+				Text = tostring(tab.label or ""),
+				TextColor3 = active and Color3.new(1, 1, 1) or SHELL.TextMain,
+				TextSize = 14,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = active and 0 or 0.4,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				ZIndex = 9,
+			}),
 		}),
 		Count = countText and e("Frame", {
 			AnchorPoint = Vector2.new(1, 0.5),
-			BackgroundColor3 = Theme.Palette.TabRewardAccent,
+			BackgroundColor3 = SHELL.GoldHighlight,
 			BorderSizePixel = 0,
-			Position = UDim2.new(1, -6, 0.5, 0),
-			Size = UDim2.fromOffset(18, 18),
-			ZIndex = 9,
+			Position = UDim2.new(1, -7, 0.5, 0),
+			Size = UDim2.fromOffset(20, 18),
+			ZIndex = 10,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(1, 0),
+				CornerRadius = UDim.new(0, 8),
 			}),
 			Text = e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Theme.Fonts.Display,
+				Font = BODY,
 				Size = UDim2.fromScale(1, 1),
 				Text = countText,
-				TextColor3 = Theme.Palette.Ink,
-				TextSize = 11,
-				ZIndex = 10,
+				TextColor3 = Color3.fromRGB(20, 20, 20),
+				TextSize = 12,
+				ZIndex = 11,
 			}),
+		}) or nil,
+	})
+end
+
+local function categoryDropdown(props)
+	local categories = props.categories or {}
+	local active = props.activeCategory
+	local open, setOpen = React.useState(false)
+	local hovered, setHovered = React.useState(false)
+
+	local activeLabel = "Filter"
+	for _, category in ipairs(categories) do
+		if tostring(category.id) == tostring(active) then
+			activeLabel = tostring(category.label or "Filter")
+		end
+	end
+
+	local optionChildren = {
+		List = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Vertical,
+			Padding = UDim.new(0, 3),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+	}
+
+	for index, category in ipairs(categories) do
+		local isActive = tostring(category.id) == tostring(active)
+		optionChildren["Opt" .. tostring(category.id)] = e("TextButton", {
+			AutoButtonColor = false,
+			BackgroundColor3 = isActive and SHELL.GoldBase or SHELL.CardBg,
+			BackgroundTransparency = 0,
+			BorderSizePixel = 0,
+			LayoutOrder = index,
+			Size = UDim2.new(1, 0, 0, 26),
+			Text = "",
+			ZIndex = 44,
+			[React.Event.Activated] = function()
+				setOpen(false)
+				if props.onSelect then
+					props.onSelect(category.id)
+				end
+			end,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 8),
+			}),
+			Outline = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = Color3.fromRGB(0, 0, 0),
+				Thickness = 1.6,
+			}, isActive and {
+				Grad = e("UIGradient", {
+					Rotation = 90,
+					Color = ColorSequence.new(Color3.fromRGB(80, 80, 80), Color3.fromRGB(0, 0, 0)),
+				}),
+			} or nil),
+			Sheen = e("UIGradient", {
+				Rotation = 90,
+				Color = isActive
+						and ColorSequence.new(Color3.fromRGB(255, 250, 222), Color3.fromRGB(216, 168, 64))
+					or ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
+			}),
+			Title = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY,
+				Size = UDim2.fromScale(1, 1),
+				Text = tostring(category.label or ""),
+				TextColor3 = isActive and Color3.new(1, 1, 1) or SHELL.TextMain,
+				TextSize = 14,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = isActive and 0 or 0.4,
+				ZIndex = 45,
+			}),
+		})
+	end
+
+	return e("Frame", {
+		BackgroundTransparency = 1,
+		LayoutOrder = props.layoutOrder or 99,
+		Size = UDim2.fromOffset(126, 30),
+		ZIndex = 41,
+	}, {
+		Button = e("TextButton", {
+			AutoButtonColor = false,
+			BackgroundColor3 = hovered and Color3.fromRGB(26, 26, 30) or SHELL.CardBg,
+			BackgroundTransparency = 0,
+			BorderSizePixel = 0,
+			Size = UDim2.fromScale(1, 1),
+			Text = "",
+			ZIndex = 42,
+			[React.Event.MouseEnter] = function()
+				setHovered(true)
+			end,
+			[React.Event.MouseLeave] = function()
+				setHovered(false)
+			end,
+			[React.Event.Activated] = function()
+				setOpen(not open)
+			end,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
+			}),
+			Outline = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = Color3.fromRGB(0, 0, 0),
+				Thickness = 1.8,
+			}),
+			Sheen = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(200, 200, 200)),
+			}),
+			Label = e("TextLabel", {
+				BackgroundTransparency = 1,
+				Font = BODY,
+				Position = UDim2.fromOffset(10, 0),
+				Size = UDim2.new(1, -28, 1, 0),
+				Text = activeLabel,
+				TextColor3 = SHELL.TextMain,
+				TextSize = 13,
+				TextStrokeColor3 = SHELL.TextShadow,
+				TextStrokeTransparency = 0.4,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				ZIndex = 43,
+			}),
+			Chevron = e("TextLabel", {
+				AnchorPoint = Vector2.new(1, 0.5),
+				BackgroundTransparency = 1,
+				Font = Enum.Font.GothamBold,
+				Position = UDim2.new(1, -8, 0.5, 0),
+				Size = UDim2.fromOffset(14, 14),
+				Text = open and "^" or "v",
+				TextColor3 = SHELL.TextMain,
+				TextSize = 12,
+				ZIndex = 43,
+			}),
+		}),
+		Menu = open and e("Frame", {
+			BackgroundColor3 = SHELL.CardBg,
+			BackgroundTransparency = 0.04,
+			BorderSizePixel = 0,
+			Position = UDim2.fromOffset(0, 34),
+			Size = UDim2.new(1, 0, 0, #categories * 29 + 8),
+			ZIndex = 43,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 10),
+			}),
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = SHELL.GoldHighlight,
+				Thickness = 1.35,
+			}),
+			Pad = e("UIPadding", {
+				PaddingTop = UDim.new(0, 4),
+				PaddingBottom = UDim.new(0, 4),
+				PaddingLeft = UDim.new(0, 4),
+				PaddingRight = UDim.new(0, 4),
+			}),
+			Options = e("Frame", {
+				BackgroundTransparency = 1,
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = 44,
+			}, optionChildren),
 		}) or nil,
 	})
 end
@@ -142,6 +437,7 @@ local function header(props)
 	local tabChildren = {
 		List = e("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
 			Padding = UDim.new(0, 10),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
@@ -157,43 +453,33 @@ local function header(props)
 		})
 	end
 
+	if props.activeTab == "index" then
+		tabChildren.CategoryFilter = e(categoryDropdown, {
+			categories = props.categories,
+			activeCategory = props.activeCategory,
+			onSelect = props.onSelect,
+			layoutOrder = #(props.tabs or {}) + 1,
+		})
+	end
+
 	return e("Frame", {
 		BackgroundColor3 = SHELL.HeaderBackground,
 		BackgroundTransparency = SHELL.HeaderTransparency,
 		BorderSizePixel = 0,
-		ClipsDescendants = true,
+		ClipsDescendants = false,
 		Size = UDim2.new(1, 0, 0, Theme.Layout.HeaderHeight),
 		ZIndex = 7,
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 10),
 		}),
-		Stroke = e("UIStroke", {
-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Color = SHELL.GoldHighlight,
-			Thickness = 1.5,
-			Transparency = 0,
-		}),
-		Title = e("TextLabel", {
-			AnchorPoint = Vector2.new(0.5, 0),
-			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.new(0.5, 0, 0, 6),
-			Size = UDim2.fromOffset(220, 24),
-			Text = "INDEX",
-			TextColor3 = SHELL.TextMain,
-			TextSize = 28,
-			TextStrokeColor3 = SHELL.GoldHighlight,
-			TextStrokeTransparency = 0.36,
-			ZIndex = 8,
-		}),
 		Collected = e("TextLabel", {
 			BackgroundTransparency = 1,
-			Font = Enum.Font.GothamBold,
-			Position = UDim2.fromOffset(14, 26),
+			Font = BODY,
+			Position = UDim2.fromOffset(14, 8),
 			Size = UDim2.fromOffset(180, 18),
 			Text = string.format("%d / %d Collected", props.collected or 0, props.total or 0),
-			TextColor3 = Theme.Palette.MutedSoft,
+			TextColor3 = SHELL.GoldHighlight,
 			TextSize = 12,
 			TextStrokeColor3 = SHELL.TextShadow,
 			TextStrokeTransparency = 0.45,
@@ -204,7 +490,7 @@ local function header(props)
 			AnchorPoint = Vector2.new(0.5, 0),
 			BackgroundTransparency = 1,
 			Position = UDim2.new(0.5, 0, 0, 36),
-			Size = UDim2.fromOffset(376, 34),
+			Size = UDim2.fromOffset(520, 34),
 			ZIndex = 8,
 		}, {
 			Padding = e("UIPadding", {
@@ -215,41 +501,6 @@ local function header(props)
 				BackgroundTransparency = 1,
 				Size = UDim2.fromScale(1, 1),
 			}, tabChildren),
-		}),
-		Close = e("TextButton", {
-			AnchorPoint = Vector2.new(1, 0),
-			AutoButtonColor = false,
-			BackgroundColor3 = SHELL.CloseFill,
-			BorderSizePixel = 0,
-			Position = UDim2.new(1, -10, 0, 10),
-			Size = UDim2.fromOffset(34, 34),
-			Text = "X",
-			TextColor3 = Color3.new(1, 1, 1),
-			TextSize = 16,
-			Font = Enum.Font.GothamBold,
-			TextStrokeColor3 = SHELL.TextShadow,
-			TextStrokeTransparency = 0.4,
-			ZIndex = 9,
-			[React.Event.Activated] = function()
-				if props.onClose then
-					props.onClose()
-				end
-			end,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 7),
-			}),
-			Stroke = e("UIStroke", {
-				Color = SHELL.GoldShadow,
-				Transparency = 0.1,
-			}),
-			Gradient = e("UIGradient", {
-				Rotation = 90,
-				Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, SHELL.CloseFillSoft),
-					ColorSequenceKeypoint.new(1, SHELL.CloseFill),
-				}),
-			}),
 		}),
 	})
 end
@@ -278,11 +529,6 @@ local function progressStrip(props)
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 10),
-		}),
-		Stroke = e("UIStroke", {
-			Color = SHELL.GoldHighlight,
-			Transparency = 0,
-			Thickness = 1.5,
 		}),
 		Title = e("TextLabel", {
 			BackgroundTransparency = 1,
@@ -333,8 +579,6 @@ local function progressStrip(props)
 end
 
 local function IndexScreen(props)
-	local rootRef = React.useRef(nil)
-	local contentWidth, setContentWidth = React.useState(1200)
 	local fallbackViewModel = (not props.categories or not props.units or not props.collectionStats or not props.devilFruitCollection)
 		and IndexData.getDefaultViewModel()
 		or nil
@@ -361,23 +605,6 @@ local function IndexScreen(props)
 	})
 	local tabSwitchStartedAtRef = React.useRef(nil)
 	local categorySwitchStartedAtRef = React.useRef(nil)
-
-	React.useEffect(function()
-		local root = rootRef.current
-		if not root then
-			return nil
-		end
-
-		local function updateWidth()
-			setContentWidth(root.AbsoluteSize.X)
-		end
-
-		updateWidth()
-		local connection = root:GetPropertyChangedSignal("AbsoluteSize"):Connect(updateWidth)
-		return function()
-			connection:Disconnect()
-		end
-	end, {})
 
 	React.useEffect(function()
 		if DEBUG_INDEX_UI_PERF and tabSwitchStartedAtRef.current then
@@ -440,13 +667,11 @@ local function IndexScreen(props)
 		total = #fruitUnits,
 	}
 	local contentTop = Theme.Layout.HeroHeight + Theme.Layout.ContentGap
-	local indexFooterHeight = Theme.Layout.FooterTabsHeight + Theme.Layout.ContentGap
+	local indexFooterHeight = 0
 	local claimableCount = props.claimableCount or stats.claimableCount or 0
-	local isCompact = contentWidth < 720
-	local showCategoryNavigation = activeTab == "index" and not isCompact
 	local activeStats = activeTab == "fruits" and fruitStats or stats
-	local mainX = showCategoryNavigation and (Theme.Layout.SidebarWidth + Theme.Layout.ContentGap) or 0
-	local mainWidth = showCategoryNavigation and -(Theme.Layout.SidebarWidth + Theme.Layout.ContentGap) or 0
+	local mainX = 0
+	local mainWidth = 0
 	local backgroundImage = getBackgroundImageForTab(activeTab)
 	local indexGridHeight = UDim2.new(1, 0, 1, -(contentTop + indexFooterHeight))
 	local fullPanelHeight = UDim2.new(1, 0, 1, -contentTop)
@@ -488,10 +713,10 @@ local function IndexScreen(props)
 	end
 
 	return e("Frame", {
-		ref = rootRef,
 		BackgroundColor3 = SHELL.MenuOverlay,
+		BackgroundTransparency = 0.4,
 		BorderSizePixel = 0,
-		ClipsDescendants = true,
+		ClipsDescendants = false,
 		Size = UDim2.fromScale(1, 1),
 	}, {
 		Corner = e("UICorner", {
@@ -501,7 +726,7 @@ local function IndexScreen(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Image = backgroundImage,
-			ImageTransparency = 0,
+			ImageTransparency = 1,
 			ScaleType = Enum.ScaleType.Stretch,
 			Position = UDim2.fromOffset(2, 2),
 			Size = UDim2.new(1, -4, 1, -4),
@@ -513,7 +738,7 @@ local function IndexScreen(props)
 		}),
 		Overlay = e("Frame", {
 			BackgroundColor3 = SHELL.MenuOverlay,
-			BackgroundTransparency = SHELL.MenuOverlayTransparency,
+			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Position = UDim2.fromOffset(2, 2),
 			Size = UDim2.new(1, -4, 1, -4),
@@ -533,15 +758,15 @@ local function IndexScreen(props)
 			Corner = e("UICorner", {
 				CornerRadius = UDim.new(0, 16),
 			}),
-			Stroke = e("UIStroke", {
-				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = SHELL.GoldHighlight,
-				Thickness = 3,
-				Transparency = 0,
-			}),
+			Stroke = goldStroke(3, 0),
 		}),
+		TitleBadge = titleBadge("INDEX", 208),
+		CloseButton = closeButton(props.onClose),
 		Header = header({
 			activeTab = activeTab,
+			categories = categories,
+			activeCategory = activeCategory,
+			onSelect = handleCategorySelect,
 			claimableCount = claimableCount,
 			collected = activeStats.collected,
 			onClose = props.onClose,
@@ -555,32 +780,6 @@ local function IndexScreen(props)
 			Size = UDim2.new(1, -(Theme.Layout.OuterPadding * 2), 1, -(Theme.Layout.HeaderHeight + (Theme.Layout.OuterPadding * 2))),
 			ZIndex = 3,
 		}, {
-			SidebarShell = showCategoryNavigation and e("Frame", {
-				BackgroundColor3 = Theme.Palette.SidebarFill,
-				BackgroundTransparency = 0.25,
-				BorderSizePixel = 0,
-				ClipsDescendants = true,
-				Size = UDim2.new(0, Theme.Layout.SidebarWidth, 1, 0),
-				ZIndex = 4,
-			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 12),
-				}),
-				Stroke = e("UIStroke", {
-					Color = Theme.Palette.BorderSoft,
-					Transparency = 0.18,
-					Thickness = 1,
-				}),
-				Padding = e("UIPadding", {
-					PaddingBottom = UDim.new(0, 6),
-					PaddingTop = UDim.new(0, 6),
-				}),
-				Sidebar = e(CategorySidebar, {
-					activeCategory = activeCategory,
-					categories = categories,
-					onSelect = handleCategorySelect,
-				}),
-			}) or nil,
 			Main = e("Frame", {
 				BackgroundTransparency = 1,
 				Position = UDim2.fromOffset(mainX, 0),
@@ -619,19 +818,6 @@ local function IndexScreen(props)
 						rewards = rewards,
 					}),
 				}) or nil,
-				FooterTabs = e("Frame", {
-					AnchorPoint = Vector2.new(0, 1),
-					BackgroundTransparency = 1,
-					Position = UDim2.fromScale(0, 1),
-					Size = UDim2.new(1, 0, 0, Theme.Layout.FooterTabsHeight),
-					Visible = activeTab == "index",
-				}, {
-					Tabs = e(CategoryTabs, {
-						activeCategory = activeCategory,
-						categories = categories,
-						onSelect = handleCategorySelect,
-					}),
-				}),
 			}),
 		}),
 	})

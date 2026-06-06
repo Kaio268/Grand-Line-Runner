@@ -217,11 +217,12 @@ local function prepareQuestFrame()
 
 	frame.BackgroundTransparency = 1
 	frame.BorderSizePixel = 0
-	frame.ClipsDescendants = true
+	frame.ClipsDescendants = false
 	frame.Size = UDim2.fromScale(0.86, 0.8)
 	frame.ZIndex = 120
 	if host then
 		host.ZIndex = 140
+		host.ClipsDescendants = false
 	end
 
 	if watchedFrame ~= frame then

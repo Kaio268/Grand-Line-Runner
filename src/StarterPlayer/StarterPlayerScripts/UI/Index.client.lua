@@ -966,6 +966,14 @@ local function render()
 
 	local host = modalAdapter:EnsureHost()
 	if host then
+		local frame = modalAdapter:GetFrame()
+		if frame then
+			frame.ClipsDescendants = false
+			frame.ZIndex = 120
+		end
+		host.ClipsDescendants = false
+		host.ZIndex = 140
+
 		modalAdapter:SetFallbackEnabled(false)
 		local isVisible = modalAdapter:IsVisible()
 		if not isVisible then

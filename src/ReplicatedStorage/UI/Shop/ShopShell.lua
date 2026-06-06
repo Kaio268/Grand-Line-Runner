@@ -159,21 +159,21 @@ local function ShopShell(props)
 	end, {})
 
 	local columns = 3
-	if contentWidth < 900 then
+	if contentWidth < 1080 then
 		columns = 2
 	end
-	if contentWidth < 640 then
+	if contentWidth < 720 then
 		columns = 1
 	end
 
 	local isNarrow = contentWidth < 760
-	local headerHeight = isNarrow and 76 or 82
+	local headerHeight = isNarrow and 78 or 88
 	local noticeHeight = props.noticeText and 42 or 0
-	local navHeight = isNarrow and 50 or 54
-	local navTop = headerHeight + noticeHeight + 6
-	local contentTop = navTop + navHeight + 8
+	local navHeight = isNarrow and 52 or 58
+	local navTop = headerHeight + noticeHeight + 8
+	local contentTop = navTop + navHeight + 10
 	local titleTextSize = if isNarrow then 30 elseif contentWidth < 1040 then 34 else 38
-	local horizontalInset = isNarrow and 14 or 20
+	local horizontalInset = isNarrow and 16 or 24
 	local pageSections = buildPageSections(props.catalog)
 	local requestedSectionKey = tostring(props.requestedSectionKey or "")
 	local requestedSectionRequestId = tonumber(props.requestedSectionRequestId) or 0
@@ -266,14 +266,14 @@ local function ShopShell(props)
 
 	local contentChildren = {
 		List = e("UIListLayout", {
-			Padding = UDim.new(0, isNarrow and 14 or 16),
+			Padding = UDim.new(0, isNarrow and 18 or 22),
 			SortOrder = Enum.SortOrder.LayoutOrder,
 		}),
 		Padding = e("UIPadding", {
 			PaddingLeft = UDim.new(0, horizontalInset),
-			PaddingRight = UDim.new(0, horizontalInset + 6),
-			PaddingTop = UDim.new(0, isNarrow and 12 or 14),
-			PaddingBottom = UDim.new(0, 22),
+			PaddingRight = UDim.new(0, horizontalInset + 8),
+			PaddingTop = UDim.new(0, isNarrow and 16 or 20),
+			PaddingBottom = UDim.new(0, 28),
 		}),
 	}
 
@@ -306,7 +306,7 @@ local function ShopShell(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			Image = Theme.Assets.ShopBackground,
-			ImageTransparency = 0,
+			ImageTransparency = 0.88,
 			ScaleType = Enum.ScaleType.Stretch,
 			Position = UDim2.fromOffset(2, 2),
 			Size = UDim2.new(1, -4, 1, -4),
@@ -333,8 +333,29 @@ local function ShopShell(props)
 		}),
 		Stroke = e("UIStroke", {
 			Color = Theme.Palette.Border,
-			Transparency = 0.05,
-			Thickness = 1.6,
+			Transparency = 0,
+			Thickness = 3,
+		}),
+		GlowInner = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			LineJoinMode = Enum.LineJoinMode.Round,
+			Color = Color3.fromRGB(255, 228, 140),
+			Thickness = 4,
+			Transparency = 0.4,
+		}),
+		GlowMid = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			LineJoinMode = Enum.LineJoinMode.Round,
+			Color = Color3.fromRGB(255, 205, 95),
+			Thickness = 9,
+			Transparency = 0.66,
+		}),
+		GlowOuter = e("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			LineJoinMode = Enum.LineJoinMode.Round,
+			Color = Color3.fromRGB(255, 190, 80),
+			Thickness = 16,
+			Transparency = 0.84,
 		}),
 		Gradient = e("UIGradient", {
 			Rotation = 90,

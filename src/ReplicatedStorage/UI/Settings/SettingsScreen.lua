@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local Packages = ReplicatedStorage:WaitForChild("Packages")
 local React = require(Packages:WaitForChild("React"))
@@ -8,21 +9,22 @@ local React = require(Packages:WaitForChild("React"))
 local e = React.createElement
 
 local THEME = {
-	MenuBackgroundImage = "rbxassetid://75192947200012",
-	MenuOverlay = Color3.fromRGB(15, 27, 42), -- #0f1b2a
-	HeaderBackground = Color3.fromRGB(16, 35, 59), -- #10233b
-	SectionBackground = Color3.fromRGB(27, 46, 68), -- #1b2e44
-	SectionHover = Color3.fromRGB(46, 74, 99), -- #2e4a63
-	GoldBase = Color3.fromRGB(212, 175, 55),
-	GoldHighlight = Color3.fromRGB(242, 209, 107),
-	GoldShadow = Color3.fromRGB(140, 107, 31),
-	TextMain = Color3.fromRGB(230, 230, 230),
+	CardBg = Color3.fromRGB(8, 8, 9),
+	HeaderBackground = Color3.fromRGB(14, 14, 16),
+	SectionBackground = Color3.fromRGB(14, 14, 16),
+	SectionHover = Color3.fromRGB(24, 24, 28),
+	GoldBase = Color3.fromRGB(228, 190, 78),
+	GoldHighlight = Color3.fromRGB(255, 224, 120),
+	GoldShadow = Color3.fromRGB(150, 112, 42),
+	TextMain = Color3.fromRGB(235, 235, 235),
 	TextBright = Color3.fromRGB(247, 249, 255),
-	TextShadow = Color3.fromRGB(9, 17, 27),
-	CloseFill = Color3.fromRGB(200, 0, 9), -- #c80009
-	CloseFillSoft = Color3.fromRGB(235, 70, 78),
-	SwitchFill = Color3.fromRGB(16, 35, 59),
+	TextShadow = Color3.fromRGB(0, 0, 0),
+	CloseFill = Color3.fromRGB(200, 0, 9),
+	SwitchFill = Color3.fromRGB(20, 20, 24),
 }
+
+local BADGE_FONT = Font.new("rbxasset://fonts/families/SpecialElite.json", Enum.FontWeight.Bold, Enum.FontStyle.Normal)
+local BODY = Enum.Font.FredokaOne
 
 local ROW_HEIGHT = 72
 local ROW_PADDING = 10
@@ -113,8 +115,8 @@ local function IconBubble(props)
 			BackgroundTransparency = 1,
 			Image = props.icon,
 			Position = UDim2.fromOffset(4, 4),
-			Size = UDim2.fromOffset(38, 38),
 			ScaleType = Enum.ScaleType.Fit,
+			Size = UDim2.fromOffset(38, 38),
 			ZIndex = 6,
 		}) or nil,
 	})
@@ -127,6 +129,7 @@ local function SliderRow(props)
 	if maxValue < minValue then
 		maxValue = minValue
 	end
+
 	local step = math.max(1, round(props.step or 1))
 	local function clampSliderValue(value)
 		local clamped = clamp(round(value), minValue, maxValue)
@@ -136,6 +139,7 @@ local function SliderRow(props)
 		end
 		return clamped
 	end
+
 	local externalValue = clampSliderValue(props.value)
 	local displayValue, setDisplayValue = React.useState(externalValue)
 	local displayValueRef = React.useRef(externalValue)
@@ -146,8 +150,20 @@ local function SliderRow(props)
 	local knobHovered, setKnobHovered = React.useState(false)
 	local sliderRange = math.max(0, maxValue - minValue)
 	local progress = if sliderRange > 0 then clamp((displayValue - minValue) / sliderRange, 0, 1) else 1
-	local knobDiameter = knobHovered and 40 or 36
+	local knobDiameter = 36
 	local knobOffset = math.floor((0.5 - progress) * knobDiameter)
+	local knobScaleRef = React.useRef(nil)
+
+	React.useEffect(function()
+		local scale = knobScaleRef.current
+		if not scale then
+			return
+		end
+
+		TweenService:Create(scale, TweenInfo.new(0.16, Enum.EasingStyle.Quad), {
+			Scale = knobHovered and 1.12 or 1,
+		}):Play()
+	end, { knobHovered })
 
 	local function setDisplayAndPreview(nextValue)
 		local clamped = clampSliderValue(nextValue)
@@ -237,10 +253,10 @@ local function SliderRow(props)
 		if type(screenX) ~= "number" then
 			screenX = UserInputService:GetMouseLocation().X
 		end
+
 		debugSlider(props.id, "startDrag id=%s screenX=%s", tostring(props.id), tostring(screenX))
 		draggingRef.current = true
 		updateFromScreenX(screenX)
-
 		disconnectDragConnections()
 
 		inputChangedConnectionRef.current = UserInputService.InputChanged:Connect(function(input)
@@ -248,19 +264,13 @@ local function SliderRow(props)
 				return
 			end
 
-			if
-				input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
+			if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 				updateFromScreenX(input.Position.X)
 			end
 		end)
 
 		inputEndedConnectionRef.current = UserInputService.InputEnded:Connect(function(input)
-			if
-				input.UserInputType == Enum.UserInputType.MouseButton1
-				or input.UserInputType == Enum.UserInputType.Touch
-			then
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 				endDrag(true)
 			end
 		end)
@@ -294,10 +304,7 @@ local function SliderRow(props)
 
 	local function beginDragFromInput(_, input)
 		local userInputType = input and input.UserInputType
-		if
-			userInputType ~= Enum.UserInputType.MouseButton1
-			and userInputType ~= Enum.UserInputType.Touch
-		then
+		if userInputType ~= Enum.UserInputType.MouseButton1 and userInputType ~= Enum.UserInputType.Touch then
 			return
 		end
 
@@ -322,25 +329,25 @@ local function SliderRow(props)
 			}),
 			Label = e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
+				Font = BODY,
 				Position = UDim2.fromOffset(74, 19),
 				Size = UDim2.fromOffset(188, 28),
 				Text = props.label,
 				TextColor3 = THEME.TextMain,
-				TextSize = 20,
 				TextScaled = false,
+				TextSize = 20,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 6,
 			}),
 			RangeLabel = props.rangeText and props.rangeText ~= "" and e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
+				Font = BODY,
 				Position = UDim2.fromOffset(74, 44),
 				Size = UDim2.fromOffset(178, 18),
 				Text = tostring(props.rangeText),
 				TextColor3 = THEME.GoldHighlight,
-				TextSize = 14,
 				TextScaled = false,
+				TextSize = 14,
 				TextStrokeColor3 = THEME.TextShadow,
 				TextStrokeTransparency = 0.45,
 				TextXAlignment = Enum.TextXAlignment.Left,
@@ -349,11 +356,11 @@ local function SliderRow(props)
 			Track = e("TextButton", {
 				ref = trackRef,
 				Active = true,
+				AnchorPoint = Vector2.new(0, 0.5),
 				AutoButtonColor = false,
 				BackgroundColor3 = THEME.HeaderBackground,
 				BackgroundTransparency = 1,
 				BorderSizePixel = 0,
-				AnchorPoint = Vector2.new(0, 0.5),
 				Position = UDim2.new(0, 266, 0.5, 6),
 				Size = UDim2.new(1, -348, 0, 64),
 				Text = "",
@@ -363,17 +370,14 @@ local function SliderRow(props)
 					if not draggingRef.current then
 						return
 					end
-					if
-						input.UserInputType == Enum.UserInputType.MouseMovement
-						or input.UserInputType == Enum.UserInputType.Touch
-					then
+					if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 						updateFromScreenX(input.Position.X)
 					end
 				end,
 			}, {
 				TrackBar = e("Frame", {
-					AnchorPoint = Vector2.new(0, 0.5),
 					Active = true,
+					AnchorPoint = Vector2.new(0, 0.5),
 					BackgroundColor3 = THEME.HeaderBackground,
 					BackgroundTransparency = 0.25,
 					BorderSizePixel = 0,
@@ -385,10 +389,7 @@ local function SliderRow(props)
 						if not draggingRef.current then
 							return
 						end
-						if
-							input.UserInputType == Enum.UserInputType.MouseMovement
-							or input.UserInputType == Enum.UserInputType.Touch
-						then
+						if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 							updateFromScreenX(input.Position.X)
 						end
 					end,
@@ -413,10 +414,7 @@ local function SliderRow(props)
 							if not draggingRef.current then
 								return
 							end
-							if
-								input.UserInputType == Enum.UserInputType.MouseMovement
-								or input.UserInputType == Enum.UserInputType.Touch
-							then
+							if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 								updateFromScreenX(input.Position.X)
 							end
 						end,
@@ -434,8 +432,8 @@ local function SliderRow(props)
 					}),
 				}),
 				Knob = e("TextButton", {
-					AnchorPoint = Vector2.new(0.5, 0.5),
 					Active = true,
+					AnchorPoint = Vector2.new(0.5, 0.5),
 					AutoButtonColor = false,
 					BackgroundColor3 = THEME.GoldBase,
 					BorderSizePixel = 0,
@@ -448,10 +446,7 @@ local function SliderRow(props)
 						if not draggingRef.current then
 							return
 						end
-						if
-							input.UserInputType == Enum.UserInputType.MouseMovement
-							or input.UserInputType == Enum.UserInputType.Touch
-						then
+						if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 							updateFromScreenX(input.Position.X)
 						end
 					end,
@@ -468,6 +463,9 @@ local function SliderRow(props)
 						setKnobHovered(false)
 					end,
 				}, {
+					Scale = e("UIScale", {
+						ref = knobScaleRef,
+					}),
 					Corner = e("UICorner", {
 						CornerRadius = UDim.new(1, 0),
 					}),
@@ -479,7 +477,7 @@ local function SliderRow(props)
 					}),
 					Value = e("TextLabel", {
 						BackgroundTransparency = 1,
-						Font = Enum.Font.GothamBold,
+						Font = BODY,
 						Size = UDim2.fromScale(1, 1),
 						Text = tostring(displayValue),
 						TextColor3 = THEME.TextBright,
@@ -515,29 +513,29 @@ local function SwitchRow(props)
 			}),
 			Label = e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
+				Font = BODY,
 				Position = UDim2.fromOffset(74, if hasStatus then 13 else 22),
 				Size = UDim2.new(1, -240, 0, 28),
 				Text = props.label,
 				TextColor3 = THEME.TextMain,
-				TextSize = 20,
 				TextScaled = false,
+				TextSize = 20,
 				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 6,
 			}),
 			Status = hasStatus and e("TextLabel", {
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
+				Font = BODY,
 				Position = UDim2.fromOffset(74, 42),
 				Size = UDim2.new(1, -240, 0, 18),
 				Text = props.statusText,
 				TextColor3 = THEME.GoldHighlight,
-				TextSize = 14,
 				TextScaled = false,
+				TextSize = 14,
 				TextStrokeColor3 = THEME.TextShadow,
 				TextStrokeTransparency = 0.45,
-				TextXAlignment = Enum.TextXAlignment.Left,
 				TextTruncate = Enum.TextTruncate.AtEnd,
+				TextXAlignment = Enum.TextXAlignment.Left,
 				ZIndex = 6,
 			}) or nil,
 			Switch = e("TextButton", {
@@ -567,7 +565,7 @@ local function SwitchRow(props)
 				}),
 				State = e("TextLabel", {
 					BackgroundTransparency = 1,
-					Font = Enum.Font.GothamBold,
+					Font = BODY,
 					Position = UDim2.fromOffset(if enabled then 8 else 34, 0),
 					Size = UDim2.fromOffset(42, 40),
 					Text = labelText,
@@ -651,38 +649,33 @@ local function SettingsScreen(props)
 	end
 
 	return e("Frame", {
-		BackgroundColor3 = THEME.MenuOverlay,
+		BackgroundColor3 = THEME.CardBg,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		ClipsDescendants = true,
+		ClipsDescendants = false,
 		Size = UDim2.fromScale(1, 1),
 	}, {
 		Corner = e("UICorner", {
 			CornerRadius = UDim.new(0, 18),
 		}),
-		BaseTexture = e("ImageLabel", {
+		Anchor = e("ImageLabel", {
 			BackgroundTransparency = 1,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Image = "rbxassetid://87910431269362",
+			Position = UDim2.fromScale(0.949, 0.895),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = UDim2.fromScale(0.075, 0.275),
+			ZIndex = 4,
+		}),
+		Fill = e("Frame", {
+			BackgroundColor3 = THEME.CardBg,
+			BackgroundTransparency = 0.12,
 			BorderSizePixel = 0,
-			Image = THEME.MenuBackgroundImage,
-			ImageTransparency = 0,
-			ScaleType = Enum.ScaleType.Stretch,
-			Position = UDim2.fromOffset(2, 2),
-			Size = UDim2.new(1, -4, 1, -4),
+			Size = UDim2.fromScale(1, 1),
 			ZIndex = 1,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 16),
-			}),
-		}),
-		Overlay = e("Frame", {
-			BackgroundColor3 = THEME.MenuOverlay,
-			BackgroundTransparency = 0.45,
-			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(2, 2),
-			Size = UDim2.new(1, -4, 1, -4),
-			ZIndex = 2,
-		}, {
-			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 16),
+				CornerRadius = UDim.new(0, 18),
 			}),
 		}),
 		OuterBorder = e("Frame", {
@@ -702,67 +695,109 @@ local function SettingsScreen(props)
 				Transparency = 0,
 			}),
 		}),
-		Header = e("Frame", {
-			BackgroundColor3 = THEME.HeaderBackground,
-			BackgroundTransparency = 0.25,
+		InnerBorder = e("Frame", {
+			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
-			Position = UDim2.fromOffset(12, 10),
-			Size = UDim2.new(1, -24, 0, 54),
-			ZIndex = 3,
+			Position = UDim2.fromOffset(8, 8),
+			Size = UDim2.new(1, -16, 1, -16),
+			ZIndex = 10,
 		}, {
 			Corner = e("UICorner", {
-				CornerRadius = UDim.new(0, 10),
+				CornerRadius = UDim.new(0, 12),
 			}),
 			Stroke = e("UIStroke", {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 				Color = THEME.GoldHighlight,
-				Thickness = 1.5,
-				Transparency = 0,
+				Thickness = 1.2,
+				Transparency = 0.3,
+			}),
+		}),
+		TitleBadge = e("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundColor3 = THEME.CardBg,
+			BorderSizePixel = 0,
+			Position = UDim2.new(0.5, 0, 0, 6),
+			Size = UDim2.fromOffset(208, 42),
+			ZIndex = 25,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0.5, 0),
+			}),
+			Stroke = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = THEME.GoldBase,
+				Thickness = 2,
+				Transparency = 0.15,
+			}, {
+				Grad = e("UIGradient", {
+					Rotation = 0,
+					Color = ColorSequence.new({
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 216, 107)),
+						ColorSequenceKeypoint.new(0.47, Color3.fromRGB(138, 90, 19)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 216, 107)),
+					}),
+				}),
 			}),
 			Title = e("TextLabel", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
 				BackgroundTransparency = 1,
-				Font = Enum.Font.GothamBold,
-				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.fromOffset(260, 32),
+				FontFace = BADGE_FONT,
+				Size = UDim2.fromScale(1, 1),
 				Text = "SETTINGS",
-				TextColor3 = THEME.TextMain,
-				TextSize = 30,
+				TextColor3 = THEME.GoldBase,
 				TextScaled = true,
-				TextStrokeColor3 = THEME.GoldHighlight,
-				TextStrokeTransparency = 0.36,
-				ZIndex = 4,
-			}),
-			Close = e("TextButton", {
-				AnchorPoint = Vector2.new(1, 0.5),
-				AutoButtonColor = false,
-				BackgroundColor3 = THEME.CloseFill,
-				BorderSizePixel = 0,
-				Position = UDim2.new(1, -8, 0.5, 0),
-				Size = UDim2.fromOffset(34, 34),
-				Text = "X",
-				TextColor3 = Color3.new(1, 1, 1),
-				Font = Enum.Font.GothamBold,
-				TextScaled = true,
-				TextStrokeColor3 = THEME.TextShadow,
-				TextStrokeTransparency = 0.4,
-				ZIndex = 4,
-				[React.Event.Activated] = props.onClose,
+				ZIndex = 26,
 			}, {
-				Corner = e("UICorner", {
-					CornerRadius = UDim.new(0, 8),
+				Constraint = e("UITextSizeConstraint", {
+					MaxTextSize = 22,
 				}),
-				Stroke = e("UIStroke", {
-					Color = THEME.GoldShadow,
-					Thickness = 1,
-					Transparency = 0.1,
-				}),
-				Gradient = e("UIGradient", {
+				Grad = e("UIGradient", {
 					Rotation = 90,
 					Color = ColorSequence.new({
-						ColorSequenceKeypoint.new(0, THEME.CloseFillSoft),
-						ColorSequenceKeypoint.new(1, THEME.CloseFill),
+						ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 251, 230)),
+						ColorSequenceKeypoint.new(0.47, Color3.fromRGB(255, 216, 107)),
+						ColorSequenceKeypoint.new(1, Color3.fromRGB(95, 56, 2)),
 					}),
+				}),
+				Outline = e("UIStroke", {
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual,
+					Color = Color3.fromRGB(36, 18, 0),
+					LineJoinMode = Enum.LineJoinMode.Miter,
+					Thickness = 3,
+					Transparency = 0.2,
+				}),
+			}),
+		}),
+		Close = e("TextButton", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			AutoButtonColor = false,
+			BackgroundColor3 = THEME.CloseFill,
+			BorderSizePixel = 0,
+			Font = BODY,
+			Position = UDim2.new(1, -4, 0, 4),
+			Size = UDim2.fromOffset(34, 34),
+			Text = "X",
+			TextColor3 = Color3.new(1, 1, 1),
+			TextScaled = true,
+			TextStrokeColor3 = THEME.TextShadow,
+			TextStrokeTransparency = 0.25,
+			ZIndex = 30,
+			[React.Event.Activated] = props.onClose,
+		}, {
+			Corner = e("UICorner", {
+				CornerRadius = UDim.new(0, 9),
+			}),
+			Outline = e("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = Color3.fromRGB(0, 0, 0),
+				Thickness = 1.6,
+				Transparency = 0,
+			}),
+			Gradient = e("UIGradient", {
+				Rotation = 90,
+				Color = ColorSequence.new({
+					ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 96, 102)),
+					ColorSequenceKeypoint.new(0.5, Color3.fromRGB(214, 24, 34)),
+					ColorSequenceKeypoint.new(1, Color3.fromRGB(150, 0, 6)),
 				}),
 			}),
 		}),
@@ -771,10 +806,10 @@ local function SettingsScreen(props)
 			BackgroundTransparency = 1,
 			BorderSizePixel = 0,
 			CanvasSize = UDim2.new(),
-			Position = UDim2.fromOffset(18, 116),
+			Position = UDim2.fromOffset(18, 62),
 			ScrollBarImageColor3 = THEME.GoldHighlight,
 			ScrollBarThickness = 8,
-			Size = UDim2.new(1, -42, 1, -126),
+			Size = UDim2.new(1, -42, 1, -76),
 			VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar,
 			ZIndex = 3,
 		}, {

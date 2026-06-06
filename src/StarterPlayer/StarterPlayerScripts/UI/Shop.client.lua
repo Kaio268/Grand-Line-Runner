@@ -175,9 +175,10 @@ local function ensureStoreFrameLayout()
 	storeFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	storeFrame.Position = UDim2.fromScale(0.5, 0.5)
 	storeFrame.Size = if isMobile then STORE_MOBILE_FRAME_SIZE else STORE_FRAME_SIZE
-	storeFrame.ClipsDescendants = true
+	storeFrame.ClipsDescendants = false
 	storeFrame.Active = true
 	storeFrame.ZIndex = 120
+	shopHost.ClipsDescendants = false
 	shopHost.ZIndex = 140
 
 	local sizeConstraint = storeFrame:FindFirstChild("ReactStoreSizeConstraint")
@@ -218,7 +219,8 @@ local function hideLegacyStoreContents()
 	syncOverlayState()
 	storeFrame.BackgroundTransparency = 1
 	storeFrame.BorderSizePixel = 0
-	storeFrame.ClipsDescendants = true
+	storeFrame.ClipsDescendants = false
+	shopHost.ClipsDescendants = false
 	suppressLegacyStoreDecor()
 
 	for _, child in ipairs(storeFrame:GetChildren()) do
