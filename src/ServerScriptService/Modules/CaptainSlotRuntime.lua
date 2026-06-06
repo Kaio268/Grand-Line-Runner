@@ -1281,6 +1281,16 @@ function CaptainSlotRuntime.RefreshPlayer(player, activeShip)
 		end
 		return false, "blocked_shell_not_active"
 	end
+	if activeShip:GetAttribute("ShipRuntimeActive") ~= true or tonumber(activeShip:GetAttribute("OwnerUserId")) ~= player.UserId then
+		if JoinRestoreScheduler and typeof(JoinRestoreScheduler.Log) == "function" then
+			JoinRestoreScheduler.Log(player, "captain_restore_blocked", 0, "blocked_invalid_ship", {
+				Always = true,
+				Generation = activeShip:GetAttribute("CrewVisualGeneration"),
+			})
+		end
+		CaptainSlotRuntime.CleanupPlayer(player)
+		return false, "blocked_invalid_ship"
+	end
 
 	local existingRuntime = runtimeByPlayer[player]
 	if existingRuntime and existingRuntime.ActiveShip ~= activeShip then

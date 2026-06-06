@@ -534,6 +534,99 @@ local function syncShipSlotsMirror(player, slotKeys)
 	return changed
 end
 
+local function migrateShipSlotMirrorSlot(player, slotKey, shipSlots)
+	local slotData = typeof(shipSlots) == "table" and shipSlots[slotKey] or nil
+	local legacyRow = makeStandRowFromLegacySlot(slotData)
+	if not legacyRow then
+		return 0
+	end
+
+	local currentStandData = CrewStandIncomeAuthority.GetStandData(player, slotKey)
+	if hasStandAssignment(currentStandData) then
+		return 0
+	end
+
+	local ok, reason = CrewStandIncomeAuthority.SetStandData(
+		player,
+		slotKey,
+		legacyRow,
+		"ship_slot_mirror_migration_incremental"
+	)
+	if ok then
+		return 1
+	end
+
+	warn(("[CrewSlotAssignmentReconciler] Failed to migrate Ship.Slots[%s] for %s: %s"):format(
+		slotKey,
+		player.Name,
+		tostring(reason)
+	))
+	return 0
+end
+
+local function rebuildMissingIncomeRowForSlot(player, slotKey, crewMemberInventory)
+	local standData = CrewStandIncomeAuthority.GetStandData(player, slotKey)
+	if hasStandAssignment(standData) then
+		return 0
+	end
+
+	local instanceId, instanceData = findAssignedInventoryInstance(crewMemberInventory, slotKey)
+	local row = makeStandRowFromInstance(instanceId, instanceData, standData)
+	if not row then
+		return 0
+	end
+
+	local ok, reason = CrewStandIncomeAuthority.SetStandData(
+		player,
+		slotKey,
+		row,
+		"assigned_inventory_rehydrate_incremental"
+	)
+	if ok then
+		return 1
+	end
+
+	warn(("[CrewSlotAssignmentReconciler] Failed to rebuild CrewMemberIncome[%s] for %s: %s"):format(
+		slotKey,
+		player.Name,
+		tostring(reason)
+	))
+	return 0
+end
+
+local function syncShipSlotMirrorSlot(slotKey, shipSlots, standData)
+	if typeof(shipSlots) ~= "table" then
+		return false
+	end
+
+	if hasStandAssignment(standData) then
+		local nextSlotData = {
+			CrewMemberName = tostring(standData.CrewMemberName or ""),
+			CrewMemberInstanceId = tostring(standData.CrewMemberInstanceId or ""),
+			IncomeToCollect = tonumber(standData.IncomeToCollect) or 0,
+			StandLevel = CrewIncomeBalance.NormalizeLevel(standData.StandLevel),
+			LegacyStorageName = tostring(standData.LegacyStorageName or ""),
+		}
+
+		local current = shipSlots[slotKey]
+		if
+			typeof(current) ~= "table"
+			or tostring(current.CrewMemberName or "") ~= nextSlotData.CrewMemberName
+			or tostring(current.CrewMemberInstanceId or "") ~= nextSlotData.CrewMemberInstanceId
+			or tonumber(current.IncomeToCollect) ~= nextSlotData.IncomeToCollect
+			or CrewIncomeBalance.NormalizeLevel(current.StandLevel) ~= nextSlotData.StandLevel
+		then
+			shipSlots[slotKey] = nextSlotData
+			return true
+		end
+	elseif shipSlots[slotKey] ~= nil then
+		shipSlots[slotKey] = nil
+		return true
+	end
+
+	return false
+end
+
 function CrewSlotAssignmentReconciler.GetCaptainSlotKey()
 	return CAPTAIN_SLOT_KEY
 end
@@ -1034,6 +1127,100 @@ function CrewSlotAssignmentReconciler.ResetAssignmentsForRebirth(player, options
 		ClearedShipSlots = true,
 		ClearedCaptainSlot = true,
 	}
+end
+
+function CrewSlotAssignmentReconciler.BeginIncrementalReconcile(player, options)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return nil, "invalid_player"
+	end
+
+	options = if typeof(options) == "table" then options else {}
+	if CrewSlotAssignmentReconciler.IsResetInProgress(player) and options.AllowDuringReset ~= true then
+		return nil, "reset_in_progress"
+	end
+
+	local slotKeys = {}
+	if typeof(options.SlotKeys) == "table" then
+		for _, slotKey in ipairs(options.SlotKeys) do
+			addSlotKey(slotKeys, slotKey)
+		end
+	end
+
+	local shipSlots = getShipSlots(player)
+	collectActiveShipSlotKeys(slotKeys, options.ActiveShip)
+	collectIncomeSlotKeys(slotKeys, player)
+
+	local crewMemberInventory = CrewInstanceService.GetCrewInventory(player)
+	collectInventorySlotKeys(slotKeys, crewMemberInventory)
+	collectShipSlotMirrorKeys(slotKeys, shipSlots)
+
+	local sortedKeys = sortedSlotKeys(slotKeys)
+	return {
+		Source = tostring(options.Source or "incremental_reconcile"),
+		SlotKeys = sortedKeys,
+		SlotIndex = 1,
+		SlotCount = #sortedKeys,
+		CrewMemberInventory = crewMemberInventory,
+		ShipSlots = shipSlots,
+		ProcessedSlotKeys = {},
+		MigratedShipSlots = 0,
+		RebuiltIncomeRows = 0,
+		ReconciledSlots = 0,
+		MirrorChanged = false,
+		MirrorFlushed = false,
+		Failures = {},
+		Finished = false,
+	}
+end
+
+function CrewSlotAssignmentReconciler.StepIncrementalReconcile(player, plan, deadline)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return true, "invalid_player", nil
+	end
+	if typeof(plan) ~= "table" then
+		return true, "missing_plan", nil
+	end
+	if plan.Finished == true then
+		return true, if #plan.Failures > 0 then "slot_reconcile_failed" else "ok", plan
+	end
+
+	local processedThisStep = 0
+	local slotKeys = if typeof(plan.SlotKeys) == "table" then plan.SlotKeys else {}
+	local slotIndex = math.max(1, math.floor(tonumber(plan.SlotIndex) or 1))
+	while slotIndex <= #slotKeys and (processedThisStep == 0 or os.clock() < deadline) do
+		local slotKey = tostring(slotKeys[slotIndex])
+		plan.MigratedShipSlots += migrateShipSlotMirrorSlot(player, slotKey, plan.ShipSlots)
+		plan.RebuiltIncomeRows += rebuildMissingIncomeRowForSlot(player, slotKey, plan.CrewMemberInventory)
+
+		local ok, reason = CrewInstanceService.ReconcileStandAssignment(player, slotKey)
+		if ok then
+			plan.ReconciledSlots += 1
+		else
+			plan.Failures[#plan.Failures + 1] = string.format("%s:%s", slotKey, tostring(reason))
+		end
+
+		local standData = CrewStandIncomeAuthority.GetStandData(player, slotKey)
+		if syncShipSlotMirrorSlot(slotKey, plan.ShipSlots, standData) then
+			plan.MirrorChanged = true
+		end
+
+		plan.ProcessedSlotKeys[slotKey] = true
+		slotIndex += 1
+		processedThisStep += 1
+	end
+	plan.SlotIndex = slotIndex
+
+	if slotIndex <= #slotKeys then
+		return false, "pending", plan
+	end
+
+	if plan.MirrorChanged == true and plan.MirrorFlushed ~= true then
+		DataManager:SetValue(player, SHIP_SLOTS_PATH, if typeof(plan.ShipSlots) == "table" then plan.ShipSlots else {})
+		plan.MirrorFlushed = true
+	end
+
+	plan.Finished = true
+	return true, if #plan.Failures > 0 then "slot_reconcile_failed" else "ok", plan
 end
 
 function CrewSlotAssignmentReconciler.ReconcilePlayer(player, options)

@@ -23,6 +23,8 @@ end
 local busy = {}
 local PLOT_UPGRADE_PATH = "HiddenLeaderstats.PlotUpgrade"
 local RESET_REFRESH_WAIT_TIMEOUT_SECONDS = 8
+local DATA_READY_PURCHASE_WAIT_SECONDS = 5
+local SHIP_FINALIZE_WAIT_TIMEOUT_SECONDS = 10
 local tutorialService = nil
 local MATERIAL_PATHS = {
 	Timber = {
@@ -149,13 +151,6 @@ local function addMaterialMutations(mutations, materialKey, remainingAmount)
 		Path = pathInfo.Primary,
 		Value = remainingAmount,
 	}
-
-	for _, aliasPath in ipairs(pathInfo.Aliases) do
-		mutations[#mutations + 1] = {
-			Path = aliasPath,
-			Value = remainingAmount,
-		}
-	end
 end
 
 local function fireUpgradeResult(player, payload)
@@ -248,6 +243,20 @@ local function fireRebirthUpgradeFailure(player, targetLevel, requiredRebirths, 
 	})
 end
 
+local function isReadinessFailureReason(reason)
+	local normalizedReason = tostring(reason or "")
+	return normalizedReason == "not_ready"
+		or normalizedReason == "invalid_player"
+		or normalizedReason == "hard_reset_pending"
+end
+
+local function fireDataNotReadyUpgradeFailure(player, current)
+	fireUpgradeFailure(player, "data_not_ready", "Ship Upgrade Failed", "Data Not Ready", {
+		"Your save data was not ready for this upgrade.",
+		"Please try again in a moment.",
+	}, current, "Your save data was not ready for this upgrade.")
+end
+
 local function getRefreshReason(reason, details)
 	if typeof(details) == "table" and details.Reason ~= nil then
 		return tostring(details.Reason)
@@ -258,7 +267,12 @@ end
 
 local function refreshShipAfterUpgrade(player)
 	local refreshOk, refreshSuccess, refreshReason, refreshDetails = xpcall(function()
-		return ShipRuntimeService.RefreshPlayerShip(player)
+		return ShipRuntimeService.RefreshPlayerShip(player, {
+			FinalizeTimeoutSeconds = SHIP_FINALIZE_WAIT_TIMEOUT_SECONDS,
+			Reason = "ship_upgrade",
+			TeleportAfterReplace = true,
+			WaitForFinalize = true,
+		})
 	end, debug.traceback)
 
 	if not refreshOk then
@@ -292,7 +306,10 @@ local function refreshShipAfterUpgrade(player)
 
 	local retryOk, retrySuccess, retryReason, retryDetails = xpcall(function()
 		return ShipRuntimeService.RefreshPlayerShip(player, {
+			FinalizeTimeoutSeconds = SHIP_FINALIZE_WAIT_TIMEOUT_SECONDS,
 			Reason = "ship_upgrade_after_reset_retry",
+			TeleportAfterReplace = true,
+			WaitForFinalize = true,
 		})
 	end, debug.traceback)
 
@@ -382,20 +399,49 @@ local function processUpgradePurchase(player, actionTrace)
 		end
 	end
 
+	if typeof(DataManager.WaitUntilReady) == "function"
+		and not DataManager:WaitUntilReady(player, DATA_READY_PURCHASE_WAIT_SECONDS)
+	then
+		if actionTrace then
+			actionTrace:phase("mutate", {
+				Target = "ship_upgrade",
+				WriteCount = 0,
+				Result = "failed",
+				Reason = "not_ready",
+			})
+		end
+		fireDataNotReadyUpgradeFailure(player, current)
+		return false
+	end
+
 	local mutationOk, mutationResult = applyMutations(player, mutations)
+	local mutationReason = tostring(
+		(mutationResult and (mutationResult.Reason or mutationResult.FailureReason))
+			or "batch_failed"
+	)
 	if actionTrace then
 		actionTrace:phase("mutate", {
 			Target = "ship_upgrade",
 			WriteCount = mutationResult and mutationResult.WriteCount or mutationResult and mutationResult.ReplicaWriteCount or 0,
 			Result = if mutationOk then "ok" else "failed",
-			Reason = mutationResult and mutationResult.Reason or nil,
+			Reason = if mutationOk then mutationResult and mutationResult.Reason or nil else mutationReason,
 		})
 	end
 	if mutationOk ~= true then
-		fireUpgradeFailure(player, "data_not_ready", "Ship Upgrade Failed", "Data Not Ready", {
-			"Your save data was not ready for this upgrade.",
+		if isReadinessFailureReason(mutationReason) then
+			fireDataNotReadyUpgradeFailure(player, current)
+			return false
+		end
+
+		warn(("[BuyPlotUpgrade] Ship upgrade mutation failed for %s: %s"):format(
+			player.Name,
+			mutationReason
+		))
+		fireUpgradeFailure(player, mutationReason, "Ship Upgrade Failed", "Try Again", {
+			"Your ship upgrade could not be saved.",
+			"Reason: " .. mutationReason,
 			"Please try again in a moment.",
-		}, current, "Your save data was not ready for this upgrade.")
+		}, current, "Ship upgrade failed: " .. mutationReason)
 		return false
 	end
 

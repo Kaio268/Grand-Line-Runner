@@ -15,6 +15,10 @@ local RUNTIME_GUI_SLOT_ATTRIBUTE = ShipSlotGuiIdentity.SlotNumberAttribute
 local RUNTIME_GUI_SHIP_ATTRIBUTE = "ShipSlotRuntimeShip"
 local OWNER_ONLY_ATTRIBUTE = ShipVisuals.Attributes.OwnerOnlyInteraction or "ShipOwnerOnlyInteraction"
 local OWNER_USER_ID_ATTRIBUTE = ShipVisuals.Attributes.OwnerUserId or "OwnerUserId"
+local IS_ACTIVE_SHIP_ATTRIBUTE = ShipVisuals.Attributes.IsActiveShip or "ShipRuntimeActive"
+local ACTIVE_MODEL_NAME_ATTRIBUTE = ShipVisuals.Attributes.ActiveModelName or "ActiveShipModelName"
+local ACTIVE_UPGRADE_LEVEL_ATTRIBUTE = ShipVisuals.Attributes.ActiveUpgradeLevel or "ActiveShipUpgradeLevel"
+local NORMAL_CREW_SLOTS_ATTRIBUTE = ShipVisuals.Attributes.NormalCrewSlots or "ActiveShipNormalCrewSlots"
 local INTERACTION_KIND_ATTRIBUTE = ShipVisuals.Attributes.InteractionKind or "ShipInteractionKind"
 local INTERACTION_SLOT_ATTRIBUTE = ShipVisuals.Attributes.InteractionSlotKey or "ShipInteractionSlotKey"
 local CAPTAIN_SLOT_KEY = ShipSlotService.CaptainSlotKey or "Captain"
@@ -109,6 +113,83 @@ local function getState(player)
 	end
 
 	return state
+end
+
+local function getExpectedOptions(options)
+	local expected = if typeof(options.ExpectedShip) == "table" then options.ExpectedShip else options
+	return {
+		CaptainSlotUnlocked = expected.ExpectedCaptainSlotUnlocked == true or expected.CaptainSlotUnlocked == true,
+		ModelName = tostring(expected.ExpectedModelName or expected.ModelName or ""),
+		NormalCrewSlots = math.max(0, math.floor(tonumber(expected.ExpectedNormalCrewSlots or expected.NormalCrewSlots) or 0)),
+		UpgradeLevel = tonumber(expected.ExpectedUpgradeLevel or expected.UpgradeLevel),
+	}
+end
+
+local function getCaptainHandle(activeShip)
+	local captainSlot = ShipSlotService.GetCaptainSlot(activeShip)
+	if not captainSlot then
+		return nil, nil
+	end
+
+	if captainSlot:IsA("BasePart") then
+		return captainSlot, captainSlot
+	end
+
+	local handle = captainSlot:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		return captainSlot, handle
+	end
+
+	handle = captainSlot:FindFirstChild("Handle", true)
+	if handle and handle:IsA("BasePart") then
+		return captainSlot, handle
+	end
+
+	return captainSlot, nil
+end
+
+local function validateQueuedActiveShip(player, activeShip, options)
+	if typeof(activeShip) ~= "Instance" or not activeShip:IsA("Model") then
+		return false, "blocked_invalid_ship"
+	end
+	if activeShip:GetAttribute("GTRRuntimeShell") == true then
+		return false, "blocked_shell_not_active"
+	end
+	if tonumber(activeShip:GetAttribute(OWNER_USER_ID_ATTRIBUTE)) ~= player.UserId then
+		return false, "blocked_invalid_ship"
+	end
+	if activeShip:GetAttribute(IS_ACTIVE_SHIP_ATTRIBUTE) ~= true then
+		return false, "blocked_invalid_ship"
+	end
+
+	local expected = getExpectedOptions(options)
+	if expected.ModelName ~= "" and tostring(activeShip:GetAttribute(ACTIVE_MODEL_NAME_ATTRIBUTE) or "") ~= expected.ModelName then
+		return false, "blocked_invalid_ship"
+	end
+	if expected.UpgradeLevel ~= nil and tonumber(activeShip:GetAttribute(ACTIVE_UPGRADE_LEVEL_ATTRIBUTE)) ~= expected.UpgradeLevel then
+		return false, "blocked_invalid_ship"
+	end
+	if expected.CaptainSlotUnlocked then
+		local _, handle = getCaptainHandle(activeShip)
+		if not handle then
+			return false, "blocked_invalid_ship"
+		end
+	end
+
+	local expectedSlots = expected.NormalCrewSlots
+	if expectedSlots <= 0 then
+		expectedSlots = math.max(0, math.floor(tonumber(activeShip:GetAttribute(NORMAL_CREW_SLOTS_ATTRIBUTE)) or 0))
+	end
+	if expectedSlots > 0 then
+		local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(activeShip, {
+			MaxSlots = expectedSlots,
+		})
+		if #slotNumbers < expectedSlots then
+			return false, "blocked_invalid_ship"
+		end
+	end
+
+	return true, "ok"
 end
 
 local function isRuntimeGui(instance)
@@ -838,6 +919,14 @@ function ShipSlotInteractionService.QueueRefreshPlayerShip(player, activeShip, o
 		})
 		return false, "blocked_shell_not_active"
 	end
+	local validShip, shipBlockReason = validateQueuedActiveShip(player, activeShip, options)
+	if not validShip then
+		JoinRestoreScheduler.Log(player, "slot_restore_blocked", 0, shipBlockReason or "blocked_invalid_ship", {
+			Always = true,
+			Generation = options.Generation,
+		})
+		return false, shipBlockReason or "blocked_invalid_ship"
+	end
 
 	local generation = tonumber(options.Generation)
 	local upgradeLevel = getPlayerUpgradeLevel(player, options.UpgradeLevel)
@@ -853,7 +942,11 @@ function ShipSlotInteractionService.QueueRefreshPlayerShip(player, activeShip, o
 	local runtimePointsFolderName = tostring((ShipVisuals.RuntimePoints and ShipVisuals.RuntimePoints.FolderName) or "ShipRuntimePoints")
 
 	local function validate()
-		return player.Parent == Players and activeShip.Parent ~= nil
+		return player.Parent == Players
+			and activeShip.Parent ~= nil
+			and activeShip:GetAttribute("GTRRuntimeShell") ~= true
+			and activeShip:GetAttribute(IS_ACTIVE_SHIP_ATTRIBUTE) == true
+			and tonumber(activeShip:GetAttribute(OWNER_USER_ID_ATTRIBUTE)) == player.UserId
 	end
 
 	JoinRestoreScheduler.Enqueue(player, {

@@ -28,9 +28,11 @@ local SHIP_SPAWN_RETRY_COUNT = 12
 local SHIP_SPAWN_RETRY_DELAY_SECONDS = 0.4
 local SHIP_READY_RETRY_COUNT = 6
 local SHIP_READY_RETRY_DELAY_SECONDS = 0.75
+local SHIP_FINALIZE_WAIT_TIMEOUT_SECONDS = 10
 local RUNTIME_SPAWN_LOCATION_ATTRIBUTE = "ShipRuntimeSpawnLocation"
 local RUNTIME_SHELL_ATTRIBUTE = "GTRRuntimeShell"
 local CREW_VISUAL_GENERATION_ATTRIBUTE = "CrewVisualGeneration"
+local SHIP_FINALIZE_SUCCESS_RESULT = "finalized_real_ship_ok"
 
 local runtimeStateByPlayer = {}
 local pendingRefreshAfterResetByPlayer = setmetatable({}, { __mode = "k" })
@@ -132,6 +134,8 @@ local function getRuntimeState(player)
 			respawnRequestId = 0,
 			ship = nil,
 			pendingShipRestore = nil,
+			shipFinalizeWaiters = {},
+			finalizedShipRestore = nil,
 			spawnFallbackShell = nil,
 			crewVisualGeneration = 0,
 		}
@@ -239,6 +243,63 @@ local function makeLoggedRefreshFailure(player, reason, details)
 	)
 
 	return makeRefreshFailure(reason, details)
+end
+
+local function getPendingShipRestore(player)
+	local state = runtimeStateByPlayer[player]
+	local pending = state and state.pendingShipRestore
+	if typeof(pending) ~= "table" or typeof(pending.Clone) ~= "Instance" then
+		return nil
+	end
+
+	return pending
+end
+
+local function removeShipFinalizeWaiter(state, generation, waiter)
+	local waitersByGeneration = state and state.shipFinalizeWaiters
+	local waiters = waitersByGeneration and waitersByGeneration[generation]
+	if not waiters then
+		return
+	end
+
+	for index = #waiters, 1, -1 do
+		if waiters[index] == waiter then
+			table.remove(waiters, index)
+			break
+		end
+	end
+	if #waiters == 0 then
+		waitersByGeneration[generation] = nil
+	end
+end
+
+local function completeShipFinalizeWaiters(player, generation, result, ship, details)
+	local state = runtimeStateByPlayer[player]
+	if not state then
+		return
+	end
+
+	generation = math.max(0, math.floor(tonumber(generation) or 0))
+	local safeResult = tostring(result or "unknown_error")
+	local payload = if typeof(details) == "table" then table.clone(details) else {}
+	payload.Generation = generation
+	payload.Reason = safeResult
+	payload.Result = safeResult
+	payload.Ship = ship
+	state.finalizedShipRestore = payload
+
+	local waitersByGeneration = state.shipFinalizeWaiters
+	local waiters = waitersByGeneration and waitersByGeneration[generation]
+	if not waiters then
+		return
+	end
+
+	waitersByGeneration[generation] = nil
+	for _, waiter in ipairs(waiters) do
+		if waiter.Event then
+			waiter.Event:Fire(payload)
+		end
+	end
 end
 
 local function cloneRefreshOptions(options)
@@ -405,7 +466,194 @@ local function getActiveShipsFolder()
 	return activeShips
 end
 
-local function getActiveShipsForPlayer(player)
+local function getRuntimeName(player)
+	return string.format("%s_%d", tostring(ShipVisuals.RuntimeModelName or "ActiveShip"), player.UserId)
+end
+
+local function makeExpectedShip(visual, upgradeLevel)
+	if typeof(visual) ~= "table" then
+		return {
+			UpgradeLevel = tonumber(upgradeLevel),
+		}
+	end
+
+	return {
+		UpgradeLevel = tonumber(upgradeLevel),
+		ModelName = tostring(visual.ModelName or ""),
+		NormalCrewSlots = math.max(0, math.floor(tonumber(visual.NormalCrewSlots) or 0)),
+		CaptainSlotUnlocked = visual.CaptainSlotUnlocked == true,
+	}
+end
+
+local function getExpectedCaptainUnlocked(expected)
+	if typeof(expected) == "table" and expected.CaptainSlotUnlocked ~= nil then
+		return expected.CaptainSlotUnlocked == true
+	end
+
+	local upgradeLevel = tonumber(expected and expected.UpgradeLevel)
+	if upgradeLevel ~= nil and PlotUpgradeConfig and typeof(PlotUpgradeConfig.IsCaptainSlotUnlocked) == "function" then
+		return PlotUpgradeConfig.IsCaptainSlotUnlocked(upgradeLevel) == true
+	end
+
+	return false
+end
+
+local function getExpectedNormalCrewSlots(shipModel, expected)
+	if typeof(expected) == "table" and expected.NormalCrewSlots ~= nil then
+		return math.max(0, math.floor(tonumber(expected.NormalCrewSlots) or 0))
+	end
+
+	return math.max(0, math.floor(tonumber(shipModel and shipModel:GetAttribute(ATTR.NormalCrewSlots)) or 0))
+end
+
+local function getCaptainHandle(activeShip)
+	local captainSlot = ShipSlotService.GetCaptainSlot(activeShip)
+	if not captainSlot then
+		return nil, nil
+	end
+
+	if captainSlot:IsA("BasePart") then
+		return captainSlot, captainSlot
+	end
+
+	local handle = captainSlot:FindFirstChild("Handle")
+	if handle and handle:IsA("BasePart") then
+		return captainSlot, handle
+	end
+
+	handle = captainSlot:FindFirstChild("Handle", true)
+	if handle and handle:IsA("BasePart") then
+		return captainSlot, handle
+	end
+
+	return captainSlot, nil
+end
+
+local function getValidationResultForReason(reason)
+	if reason == "runtime_shell" then
+		return "rejected_runtime_shell"
+	elseif reason == "missing_captain" or reason == "missing_captain_handle" then
+		return "rejected_missing_captain"
+	elseif reason == "missing_slots" then
+		return "rejected_missing_slots"
+	end
+
+	return "rejected_invalid_active_ship"
+end
+
+local function validateActiveShipForPlayer(player, shipModel, expected)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player", {}
+	end
+	if typeof(shipModel) ~= "Instance" or not shipModel:IsA("Model") then
+		return false, "invalid_model", {}
+	end
+	if isRuntimeShell(shipModel) then
+		return false, "runtime_shell", {
+			Path = getInstancePath(shipModel),
+		}
+	end
+
+	local ownerUserId = tonumber(shipModel:GetAttribute(ATTR.OwnerUserId))
+	if ownerUserId ~= player.UserId then
+		return false, "wrong_owner", {
+			OwnerUserId = ownerUserId,
+			Path = getInstancePath(shipModel),
+		}
+	end
+
+	if shipModel:GetAttribute(ATTR.IsActiveShip) ~= true then
+		return false, "not_runtime_active", {
+			Path = getInstancePath(shipModel),
+		}
+	end
+
+	if typeof(expected) == "table" then
+		local expectedModelName = tostring(expected.ModelName or "")
+		if expectedModelName ~= "" and tostring(shipModel:GetAttribute(ATTR.ActiveModelName) or "") ~= expectedModelName then
+			return false, "wrong_model", {
+				ExpectedModelName = expectedModelName,
+				ActualModelName = tostring(shipModel:GetAttribute(ATTR.ActiveModelName) or ""),
+				Path = getInstancePath(shipModel),
+			}
+		end
+
+		local expectedLevel = tonumber(expected.UpgradeLevel)
+		if expectedLevel ~= nil and tonumber(shipModel:GetAttribute(ATTR.ActiveUpgradeLevel)) ~= expectedLevel then
+			return false, "wrong_upgrade_level", {
+				ExpectedUpgradeLevel = expectedLevel,
+				ActualUpgradeLevel = tonumber(shipModel:GetAttribute(ATTR.ActiveUpgradeLevel)),
+				Path = getInstancePath(shipModel),
+			}
+		end
+	end
+
+	local captainSlotUnlocked = getExpectedCaptainUnlocked(expected)
+	if typeof(expected) ~= "table" then
+		local activeUpgradeLevel = tonumber(shipModel:GetAttribute(ATTR.ActiveUpgradeLevel))
+		if activeUpgradeLevel ~= nil
+			and PlotUpgradeConfig
+			and typeof(PlotUpgradeConfig.IsCaptainSlotUnlocked) == "function"
+		then
+			captainSlotUnlocked = PlotUpgradeConfig.IsCaptainSlotUnlocked(activeUpgradeLevel) == true
+		end
+	end
+
+	if captainSlotUnlocked then
+		local _, captainHandle = getCaptainHandle(shipModel)
+		if not ShipSlotService.GetCaptainSlot(shipModel) then
+			return false, "missing_captain", {
+				Path = getInstancePath(shipModel),
+			}
+		end
+		if not captainHandle then
+			return false, "missing_captain_handle", {
+				Path = getInstancePath(shipModel),
+			}
+		end
+	end
+
+	local expectedSlots = getExpectedNormalCrewSlots(shipModel, expected)
+	if expectedSlots > 0 then
+		local slotNumbers = ShipSlotService.GetAvailableSlotNumbers(shipModel, {
+			MaxSlots = expectedSlots,
+		})
+		if #slotNumbers < expectedSlots then
+			return false, "missing_slots", {
+				ExpectedSlots = expectedSlots,
+				ActualSlots = #slotNumbers,
+				Path = getInstancePath(shipModel),
+			}
+		end
+	end
+
+	return true, "ok", {
+		Path = getInstancePath(shipModel),
+	}
+end
+
+local function rejectInvalidActiveShip(player, shipModel, reason, details, generation)
+	local result = getValidationResultForReason(reason)
+	JoinRestoreScheduler.Log(player, "active_ship_validation", 0, result, {
+		Always = true,
+		Generation = generation or ShipRuntimeService.GetCrewVisualGeneration(player),
+	})
+
+	local state = runtimeStateByPlayer[player]
+	if state and state.ship == shipModel then
+		state.ship = nil
+	end
+
+	if typeof(shipModel) == "Instance" and shipModel.Parent == getActiveShipsFolder() then
+		shipModel:SetAttribute(ATTR.IsActiveShip, false)
+		shipModel:SetAttribute("GTRRejectedActiveShipReason", tostring(reason or result))
+		shipModel:Destroy()
+	end
+
+	return result, details
+end
+
+local function getActiveShipsForPlayer(player, expected)
 	local activeShips = getActiveShipsFolder()
 	if not activeShips then
 		return {}
@@ -414,16 +662,32 @@ local function getActiveShipsForPlayer(player)
 	local ships = {}
 
 	for _, child in ipairs(activeShips:GetChildren()) do
-		if child:IsA("Model") and not isRuntimeShell(child) and child:GetAttribute(ATTR.OwnerUserId) == player.UserId then
-			ships[#ships + 1] = child
+		if child:IsA("Model") and tonumber(child:GetAttribute(ATTR.OwnerUserId)) == player.UserId then
+			local ok, reason, details = validateActiveShipForPlayer(player, child, expected)
+			if ok then
+				ships[#ships + 1] = child
+			else
+				rejectInvalidActiveShip(player, child, reason, details)
+			end
+		elseif child:IsA("Model") and child.Name == getRuntimeName(player) and isRuntimeShell(child) then
+			local ok, reason, details = validateActiveShipForPlayer(player, child, expected)
+			if not ok then
+				rejectInvalidActiveShip(player, child, reason, details)
+			end
 		end
 	end
 
-	return ships
-end
+	table.sort(ships, function(left, right)
+		local leftNameMatches = left.Name == getRuntimeName(player)
+		local rightNameMatches = right.Name == getRuntimeName(player)
+		if leftNameMatches ~= rightNameMatches then
+			return leftNameMatches
+		end
 
-local function getRuntimeName(player)
-	return string.format("%s_%d", tostring(ShipVisuals.RuntimeModelName or "ActiveShip"), player.UserId)
+		return tostring(left.Name) < tostring(right.Name)
+	end)
+
+	return ships
 end
 
 local function destroyRuntimeShellsForPlayer(player)
@@ -465,7 +729,10 @@ local function getOccupiedPositionIndexes(playerToIgnore)
 	if activeShips then
 		for _, child in ipairs(activeShips:GetChildren()) do
 			local ownerUserId = child:GetAttribute(ATTR.OwnerUserId)
-			if not isRuntimeShell(child) and ownerUserId and (not playerToIgnore or ownerUserId ~= playerToIgnore.UserId) then
+			if ShipRuntimeService.IsActiveShip(child)
+				and ownerUserId
+				and (not playerToIgnore or ownerUserId ~= playerToIgnore.UserId)
+			then
 				local positionIndex = tonumber(child:GetAttribute(ATTR.PositionIndex))
 				if positionIndex then
 					occupied[positionIndex] = true
@@ -1443,7 +1710,7 @@ local function teleportPlayerToShipSpawnDeferred(player, context)
 	end)
 end
 
-local function queueStandRefresh(player, activeShip, generation, source)
+local function queueStandRefresh(player, activeShip, generation, source, expected)
 	local standCommand = ShipRuntimeSignals.GetStandCommandFunction()
 	if not standCommand or not standCommand:IsA("BindableFunction") then
 		return false, "stand_refresh_missing"
@@ -1452,6 +1719,7 @@ local function queueStandRefresh(player, activeShip, generation, source)
 	local ok, result, reason = xpcall(function()
 		return standCommand:Invoke("queue_refresh", player, {
 			ActiveShip = activeShip,
+			ExpectedShip = expected,
 			Generation = generation,
 			Source = tostring(source or "ship_restore"),
 		})
@@ -1466,13 +1734,23 @@ local function queueStandRefresh(player, activeShip, generation, source)
 	return true, tostring(reason or result or "queued")
 end
 
-local function enqueueActiveShipRestore(player, activeShip, upgradeLevel, generation, source)
+local function enqueueActiveShipRestore(player, activeShip, upgradeLevel, generation, source, expected)
 	if isRuntimeShell(activeShip) then
 		JoinRestoreScheduler.Log(player, "active_ship_restore_blocked", 0, "blocked_shell_not_active", {
 			Always = true,
 			Generation = generation,
 		})
 		return false, "blocked_shell_not_active"
+	end
+
+	local valid, validationReason = validateActiveShipForPlayer(player, activeShip, expected)
+	if not valid then
+		local result = if validationReason == "runtime_shell" then "blocked_shell_not_active" else "blocked_invalid_ship"
+		JoinRestoreScheduler.Log(player, "active_ship_restore_blocked", 0, result, {
+			Always = true,
+			Generation = generation,
+		})
+		return false, result
 	end
 
 	JoinRestoreScheduler.Enqueue(player, {
@@ -1485,6 +1763,10 @@ local function enqueueActiveShipRestore(player, activeShip, upgradeLevel, genera
 				return true, "stale"
 			end
 			ShipSlotInteractionService.QueueRefreshPlayerShip(player, activeShip, {
+				ExpectedCaptainSlotUnlocked = expected and expected.CaptainSlotUnlocked,
+				ExpectedModelName = expected and expected.ModelName,
+				ExpectedNormalCrewSlots = expected and expected.NormalCrewSlots,
+				ExpectedUpgradeLevel = expected and expected.UpgradeLevel,
 				Generation = generation,
 				UpgradeLevel = upgradeLevel,
 				Source = source,
@@ -1502,7 +1784,7 @@ local function enqueueActiveShipRestore(player, activeShip, upgradeLevel, genera
 			if player.Parent ~= Players or activeShip.Parent == nil then
 				return true, "stale"
 			end
-			queueStandRefresh(player, activeShip, generation, source)
+			queueStandRefresh(player, activeShip, generation, source, expected)
 			return true, "queued"
 		end,
 	})
@@ -1543,6 +1825,10 @@ local function enqueuePostCloneRestore(player, context)
 		end
 
 		state.pendingShipRestore = nil
+		completeShipFinalizeWaiters(player, context.Generation, "ship_finalize_cancelled", nil, {
+			Generation = context.Generation,
+			Reason = "ship_finalize_cancelled",
+		})
 		if state.ship ~= clone and clone.Parent == nil then
 			clone:Destroy()
 		end
@@ -1594,6 +1880,10 @@ local function enqueuePostCloneRestore(player, context)
 		OnCancel = cancelPendingClone,
 		Step = function()
 			if not pendingCloneStillCurrent() then
+				completeShipFinalizeWaiters(player, context.Generation, "stale", nil, {
+					Generation = context.Generation,
+					Reason = "stale",
+				})
 				return true, "stale"
 			end
 
@@ -1605,6 +1895,10 @@ local function enqueuePostCloneRestore(player, context)
 			local activeShips = context.ActiveShips
 			if typeof(activeShips) ~= "Instance" or activeShips.Parent == nil then
 				state.pendingShipRestore = nil
+				completeShipFinalizeWaiters(player, context.Generation, "active_ships_missing", nil, {
+					Generation = context.Generation,
+					Reason = "active_ships_missing",
+				})
 				clone:Destroy()
 				return true, "active_ships_missing"
 			end
@@ -1625,11 +1919,40 @@ local function enqueuePostCloneRestore(player, context)
 			local runtimePoints, runtimePointReason = ensureRuntimePoints(player, clone)
 			if not runtimePoints then
 				state.pendingShipRestore = nil
+				completeShipFinalizeWaiters(player, context.Generation, runtimePointReason or "ship_spawn_not_ready", nil, {
+					Generation = context.Generation,
+					Reason = runtimePointReason or "ship_spawn_not_ready",
+				})
 				clone:Destroy()
 				return true, runtimePointReason or "ship_spawn_not_ready"
 			end
 
+			local valid, validationReason = validateActiveShipForPlayer(player, clone, context.ExpectedShip)
+			if not valid then
+				local result = getValidationResultForReason(validationReason)
+				state.pendingShipRestore = nil
+				clone:SetAttribute(ATTR.IsActiveShip, false)
+				clone:SetAttribute("GTRRejectedActiveShipReason", tostring(validationReason))
+				completeShipFinalizeWaiters(player, context.Generation, result, nil, {
+					Generation = context.Generation,
+					Reason = result,
+					ValidationReason = tostring(validationReason),
+				})
+				clone:Destroy()
+				return true, result
+			end
+
 			destroyShips(context.ExistingShips or {})
+			local pending = state.pendingShipRestore
+			local shouldTeleportAfterReplace = context.TeleportAfterReplace
+			if typeof(pending) == "table"
+				and pending.Clone == clone
+				and pending.Generation == context.Generation
+				and pending.TeleportAfterReplace == true
+			then
+				shouldTeleportAfterReplace = true
+			end
+
 			state.ship = clone
 			state.position = context.Position
 			state.positionIndex = context.PositionIndex
@@ -1641,13 +1964,20 @@ local function enqueuePostCloneRestore(player, context)
 				clone,
 				context.UpgradeLevel,
 				context.Generation,
-				context.Source or "ship_clone_restore"
+				context.Source or "ship_clone_restore",
+				context.ExpectedShip
 			)
 
-			if context.TeleportAfterReplace then
+			if shouldTeleportAfterReplace then
 				teleportPlayerToShipSpawnDeferred(player, "ship_replacement")
 			end
-			return true, "ok"
+			completeShipFinalizeWaiters(player, context.Generation, SHIP_FINALIZE_SUCCESS_RESULT, clone, {
+				Generation = context.Generation,
+				Reason = SHIP_FINALIZE_SUCCESS_RESULT,
+				Result = SHIP_FINALIZE_SUCCESS_RESULT,
+				Ship = clone,
+			})
+			return true, SHIP_FINALIZE_SUCCESS_RESULT
 		end,
 	})
 
@@ -1656,6 +1986,7 @@ end
 
 function ShipRuntimeService.IsActiveShip(instance)
 	return typeof(instance) == "Instance"
+		and instance:IsA("Model")
 		and instance:GetAttribute(ATTR.IsActiveShip) == true
 		and not isRuntimeShell(instance)
 end
@@ -1664,14 +1995,22 @@ function ShipRuntimeService.IsRuntimeShell(instance)
 	return isRuntimeShell(instance)
 end
 
+function ShipRuntimeService.IsValidActiveShipForPlayer(player, shipModel, expected)
+	return validateActiveShipForPlayer(player, shipModel, expected)
+end
+
 function ShipRuntimeService.GetActiveShip(player)
 	if typeof(player) ~= "Instance" or not player:IsA("Player") then
 		return nil
 	end
 
 	local state = runtimeStateByPlayer[player]
-	if state and state.ship and state.ship.Parent and ShipRuntimeService.IsActiveShip(state.ship) then
-		return state.ship
+	if state and state.ship and state.ship.Parent then
+		local valid = validateActiveShipForPlayer(player, state.ship, nil)
+		if valid then
+			return state.ship
+		end
+		state.ship = nil
 	end
 
 	local ships = getActiveShipsForPlayer(player)
@@ -1735,6 +2074,13 @@ function ShipRuntimeService.TeleportPlayerToShip(player, targetCharacter, contex
 		return false, "horo_projection"
 	end
 
+	local pending = getPendingShipRestore(player)
+	if pending then
+		return false, "ship_restore_pending", {
+			Generation = pending.Generation,
+		}
+	end
+
 	local activeShip = ShipRuntimeService.GetActiveShip(player)
 	if not activeShip then
 		local refreshed, result, details = ShipRuntimeService.RefreshPlayerShip(player)
@@ -1794,6 +2140,10 @@ function ShipRuntimeService.ClearPlayerShip(player, options)
 	local state = runtimeStateByPlayer[player]
 	if state then
 		if state.pendingShipRestore and typeof(state.pendingShipRestore.Clone) == "Instance" then
+			completeShipFinalizeWaiters(player, state.pendingShipRestore.Generation, "ship_finalize_cancelled", nil, {
+				Generation = state.pendingShipRestore.Generation,
+				Reason = "ship_finalize_cancelled",
+			})
 			state.pendingShipRestore.Clone:Destroy()
 		end
 		state.pendingShipRestore = nil
@@ -1815,6 +2165,89 @@ end
 
 function ShipRuntimeService.QueueRefreshAfterReset(player, options)
 	return queueRefreshAfterReset(player, options)
+end
+
+function ShipRuntimeService.WaitForShipFinalized(player, generation, timeoutSeconds)
+	if typeof(player) ~= "Instance" or not player:IsA("Player") then
+		return false, "invalid_player"
+	end
+
+	generation = math.max(0, math.floor(tonumber(generation) or 0))
+	if generation <= 0 then
+		return false, "invalid_generation"
+	end
+
+	local state = getRuntimeState(player)
+	local finalized = state.finalizedShipRestore
+	if typeof(finalized) == "table" and tonumber(finalized.Generation) == generation then
+		if finalized.Result == SHIP_FINALIZE_SUCCESS_RESULT
+			and typeof(finalized.Ship) == "Instance"
+			and finalized.Ship.Parent ~= nil
+		then
+			return true, finalized.Ship, finalized
+		end
+
+		return false, tostring(finalized.Result or finalized.Reason or "ship_finalize_failed"), finalized
+	end
+
+	local pending = getPendingShipRestore(player)
+	if not pending or tonumber(pending.Generation) ~= generation then
+		local activeShip = state.ship
+		if typeof(activeShip) == "Instance"
+			and activeShip.Parent ~= nil
+			and ShipRuntimeService.IsActiveShip(activeShip)
+			and ShipRuntimeService.GetCrewVisualGeneration(player) == generation
+		then
+			return true, activeShip, {
+				Generation = generation,
+				Reason = SHIP_FINALIZE_SUCCESS_RESULT,
+				Result = SHIP_FINALIZE_SUCCESS_RESULT,
+				Ship = activeShip,
+			}
+		end
+
+		return false, "ship_finalize_not_pending", {
+			Generation = generation,
+		}
+	end
+
+	local waiter = {
+		Event = Instance.new("BindableEvent"),
+	}
+	state.shipFinalizeWaiters = state.shipFinalizeWaiters or {}
+	state.shipFinalizeWaiters[generation] = state.shipFinalizeWaiters[generation] or {}
+	table.insert(state.shipFinalizeWaiters[generation], waiter)
+
+	local completed = false
+	local timeout = math.max(0.1, tonumber(timeoutSeconds) or SHIP_FINALIZE_WAIT_TIMEOUT_SECONDS)
+	local timeoutThread = task.delay(timeout, function()
+		if not completed and waiter.Event then
+			waiter.Event:Fire(nil)
+		end
+	end)
+
+	local payload = waiter.Event.Event:Wait()
+	completed = true
+	pcall(task.cancel, timeoutThread)
+	removeShipFinalizeWaiter(state, generation, waiter)
+	waiter.Event:Destroy()
+	waiter.Event = nil
+
+	if typeof(payload) ~= "table" then
+		return false, "ship_finalize_timeout", {
+			Generation = generation,
+			TimeoutSeconds = timeout,
+		}
+	end
+
+	if payload.Result == SHIP_FINALIZE_SUCCESS_RESULT
+		and typeof(payload.Ship) == "Instance"
+		and payload.Ship.Parent ~= nil
+	then
+		return true, payload.Ship, payload
+	end
+
+	return false, tostring(payload.Result or payload.Reason or "ship_finalize_failed"), payload
 end
 
 function ShipRuntimeService.RefreshPlayerShip(player, options)
@@ -1877,6 +2310,7 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		tostring(visual.Tier),
 		tostring(visual.NormalCrewSlots)
 	)
+	local expectedShip = makeExpectedShip(visual, upgradeLevel)
 
 	local position, positionIndex = assignPosition(player)
 	if not position then
@@ -1907,6 +2341,9 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 	local pendingRestore = existingState and existingState.pendingShipRestore
 	if typeof(pendingRestore) == "table" and typeof(pendingRestore.Clone) == "Instance" then
 		if not options.ForceReplace and pendingRestore.Generation == ShipRuntimeService.GetCrewVisualGeneration(player) then
+			if options.TeleportAfterReplace == true then
+				pendingRestore.TeleportAfterReplace = true
+			end
 			JoinRestoreScheduler.Log(player, "restore_pending", 0, "clone_pending", {
 				Generation = pendingRestore.Generation,
 			})
@@ -1917,14 +2354,29 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 				getInstancePath(pendingRestore.Clone),
 				tostring(pendingRestore.Generation)
 			)
+			if options.WaitForFinalize == true then
+				local finalized, finalizedResult, finalizedDetails = ShipRuntimeService.WaitForShipFinalized(
+					player,
+					pendingRestore.Generation,
+					options.FinalizeTimeoutSeconds or options.WaitForFinalizeTimeoutSeconds
+				)
+				if finalized then
+					return true, finalizedResult, finalizedDetails
+				end
+				return makeLoggedRefreshFailure(player, finalizedResult, finalizedDetails)
+			end
 			return true, pendingRestore.Clone
 		end
 
+		completeShipFinalizeWaiters(player, pendingRestore.Generation, "ship_finalize_cancelled", nil, {
+			Generation = pendingRestore.Generation,
+			Reason = "ship_finalize_cancelled",
+		})
 		pendingRestore.Clone:Destroy()
 		existingState.pendingShipRestore = nil
 	end
 
-	local existingShips = getActiveShipsForPlayer(player)
+	local existingShips = getActiveShipsForPlayer(player, expectedShip)
 	local currentShip = existingShips[1]
 	local currentTier = currentShip and tonumber(currentShip:GetAttribute(ATTR.ActiveTier))
 	local currentModelName = currentShip and tostring(currentShip:GetAttribute(ATTR.ActiveModelName) or "")
@@ -1942,6 +2394,7 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		and currentTier == visual.Tier
 		and currentModelName == visual.ModelName
 		and currentPositionIndex == positionIndex
+		and validateActiveShipForPlayer(player, currentShip, expectedShip) == true
 	diag(
 		"refresh_existing_ships player=%s userId=%s existingCount=%s currentShip=%s currentModel=%s currentTier=%s currentPositionIndex=%s isCorrect=%s",
 		player.Name,
@@ -1985,7 +2438,11 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 
 		local generation = bumpCrewVisualGeneration(player, currentShip)
 		JoinRestoreScheduler.BeginPlayerRestore(player, tostring(options.Reason or "ship_reuse"), generation)
-		enqueueActiveShipRestore(player, currentShip, upgradeLevel, generation, "ship_reuse")
+		enqueueActiveShipRestore(player, currentShip, upgradeLevel, generation, "ship_reuse", expectedShip)
+
+		if options.TeleportAfterReplace == true then
+			teleportPlayerToShipSpawnDeferred(player, tostring(options.Reason or "ship_reuse"))
+		end
 
 		diag(
 			"refresh_return player=%s userId=%s ok=true branch=reuse ship=%s activeShipsChildCount=%s",
@@ -2039,11 +2496,13 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		Clone = clone,
 		Generation = generation,
 		Source = tostring(options.Reason or "ship_clone_restore"),
+		TeleportAfterReplace = teleportAfterReplace,
 	}
 	enqueuePostCloneRestore(player, {
 		ActiveShips = activeShips,
 		Clone = clone,
 		ExistingShips = existingShips,
+		ExpectedShip = expectedShip,
 		Generation = generation,
 		Position = position,
 		PositionIndex = positionIndex,
@@ -2061,6 +2520,17 @@ function ShipRuntimeService.RefreshPlayerShip(player, options)
 		tostring(getChildCount(activeShips)),
 		tostring(generation)
 	)
+	if options.WaitForFinalize == true then
+		local finalized, finalizedResult, finalizedDetails = ShipRuntimeService.WaitForShipFinalized(
+			player,
+			generation,
+			options.FinalizeTimeoutSeconds or options.WaitForFinalizeTimeoutSeconds
+		)
+		if finalized then
+			return true, finalizedResult, finalizedDetails
+		end
+		return makeLoggedRefreshFailure(player, finalizedResult, finalizedDetails)
+	end
 	return true, clone
 end
 
@@ -2118,6 +2588,13 @@ local function loadCharacterWithFallbackSpawn(player, respawnReason, blockedReas
 end
 
 local function ensureActiveShipSpawnReady(player, activeShip)
+	local pending = getPendingShipRestore(player)
+	if pending then
+		return false, "ship_restore_pending", {
+			Generation = pending.Generation,
+		}
+	end
+
 	if not activeShip or not activeShip.Parent or not ShipRuntimeService.IsActiveShip(activeShip) then
 		return false, "active_ship_not_found"
 	end
@@ -2145,6 +2622,13 @@ local function ensureActiveShipSpawnReady(player, activeShip)
 end
 
 local function ensureShipReadyForCharacterLoad(player, reason)
+	local pending = getPendingShipRestore(player)
+	if pending then
+		return false, "ship_restore_pending", {
+			Generation = pending.Generation,
+		}
+	end
+
 	local activeShip = ShipRuntimeService.GetActiveShip(player)
 	if activeShip then
 		local spawnReady, spawnResult, spawnDetails = ensureActiveShipSpawnReady(player, activeShip)

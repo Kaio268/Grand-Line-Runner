@@ -72,6 +72,13 @@ local function logJoin(player, phase, durationSeconds, result, metadata)
 		return
 	end
 
+	local suffix = ""
+	local cursorIndex = metadata.CursorIndex or metadata.cursorIndex
+	local cursorCount = metadata.CursorCount or metadata.cursorCount
+	if cursorIndex ~= nil and cursorCount ~= nil then
+		suffix ..= string.format(" cursor=%s/%s", tostring(cursorIndex), tostring(cursorCount))
+	end
+
 	print(string.format(
 		"[GTR_JOIN] player=%s userId=%s phase=%s durationMs=%.3f jobsProcessed=%s pendingJobs=%s budgetExceeded=%s generation=%s result=%s",
 		getPlayerName(player),
@@ -83,7 +90,7 @@ local function logJoin(player, phase, durationSeconds, result, metadata)
 		tostring(metadata.BudgetExceeded == true or metadata.budgetExceeded == true),
 		tostring(metadata.Generation or metadata.generation or ""),
 		tostring(result or metadata.Result or "ok")
-	))
+	) .. suffix)
 end
 
 local function addActivePlayer(player)
@@ -202,6 +209,8 @@ local function runJobStep(job, deadline)
 			JobsProcessed = 1,
 			BudgetExceeded = os.clock() >= deadline,
 			Generation = job.Generation,
+			CursorIndex = job.CursorIndex,
+			CursorCount = job.CursorCount,
 		})
 	end
 	return done, reason

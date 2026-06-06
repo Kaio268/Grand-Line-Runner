@@ -122,6 +122,23 @@ function CrewIncomeRuntime.QueuePlayerRestore(player, activeShip, options)
 	if typeof(activeContext) ~= "table" or typeof(activeContext.queuePlayerStandRuntimeRefresh) ~= "function" then
 		return false, "queue_unavailable"
 	end
+	if activeContext.ShipRuntimeService and typeof(activeContext.ShipRuntimeService.IsValidActiveShipForPlayer) == "function" then
+		local ok, reason = activeContext.ShipRuntimeService.IsValidActiveShipForPlayer(
+			player,
+			activeShip,
+			typeof(options) == "table" and options.ExpectedShip or nil
+		)
+		if not ok then
+			local result = if reason == "runtime_shell" then "blocked_shell_not_active" else "blocked_invalid_ship"
+			if activeContext.JoinRestoreScheduler and typeof(activeContext.JoinRestoreScheduler.Log) == "function" then
+				activeContext.JoinRestoreScheduler.Log(player, "crew_income_restore_blocked", 0, result, {
+					Always = true,
+					Generation = typeof(options) == "table" and options.Generation or nil,
+				})
+			end
+			return false, result
+		end
+	end
 
 	return activeContext.queuePlayerStandRuntimeRefresh(player, activeShip, options)
 end

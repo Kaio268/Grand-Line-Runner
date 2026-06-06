@@ -29,6 +29,7 @@ function Module.Install(ctx)
 	end
 	local CrewFoodProgression = ctx.CrewFoodProgression
 	local CrewInstanceService = ctx.CrewInstanceService
+	local CrewSlotAssignmentReconciler = ctx.CrewSlotAssignmentReconciler
 	local JoinRestoreScheduler = ctx.JoinRestoreScheduler
 	local ensuredStandFolders = ctx.ensuredStandFolders
 	local function formatInstancePath(...)
@@ -45,6 +46,13 @@ function Module.Install(ctx)
 	end
 	local function getPlayerStandCrewMemberInstanceId(...)
 		return ctx.getPlayerStandCrewMemberInstanceId(...)
+	end
+	local function getPlayerStandCrewMemberInstanceIdReadOnly(...)
+		if typeof(ctx.getPlayerStandCrewMemberInstanceIdReadOnly) == "function" then
+			return ctx.getPlayerStandCrewMemberInstanceIdReadOnly(...)
+		end
+
+		return ""
 	end
 	local function getPlayerStandCrewMemberName(...)
 		return ctx.getPlayerStandCrewMemberName(...)
@@ -311,6 +319,165 @@ function Module.Install(ctx)
 		end
 	end
 
+	local STAND_REGISTER_STAGE_COUNT = 7
+
+	local function createStandRegisterCursor(player, plot, standModel, options)
+		options = if typeof(options) == "table" then options else {}
+		local cursor = {
+			Stage = 1,
+			Cache = nil,
+			Handle = nil,
+			Name = "",
+			InstanceId = "",
+			RestoredInstance = nil,
+			SlotState = nil,
+			RepairNeeded = false,
+			SkipPlacedRestore = false,
+			Source = tostring(options.Source or "stand_registry_cursor_restore"),
+		}
+
+		local function advance(job)
+			cursor.Stage += 1
+			if job then
+				job.CursorIndex = cursor.Stage
+				job.CursorCount = STAND_REGISTER_STAGE_COUNT
+			end
+		end
+
+		return function(job, deadline)
+			job.CursorCount = STAND_REGISTER_STAGE_COUNT
+
+			while cursor.Stage <= STAND_REGISTER_STAGE_COUNT do
+				job.CursorIndex = cursor.Stage
+
+				if cursor.Stage == 1 then
+					local list = playerStandList[player]
+					if not list then
+						list = {}
+						playerStandList[player] = list
+					end
+
+					local alreadyRegistered = false
+					for index = 1, #list do
+						if list[index] == standModel then
+							alreadyRegistered = true
+							break
+						end
+					end
+					if not alreadyRegistered then
+						table.insert(list, standModel)
+					end
+
+					cursor.Cache = getSlotRuntime(player, plot, standModel)
+					bindStandPrompt(player, plot, standModel)
+					advance(job)
+				elseif cursor.Stage == 2 then
+					cursor.Handle = cursor.Cache and cursor.Cache.Handle or resolveSlotHandle(standModel)
+					if not cursor.Handle or not cursor.Handle:IsA("BasePart") then
+						cursor.SkipPlacedRestore = true
+						cursor.Stage = 6
+						continue
+					end
+
+					cursor.Name = tostring(getPlayerStandCrewMemberName(player, standModel.Name) or "")
+					if cursor.Name ~= "" then
+						cursor.InstanceId = tostring(getPlayerStandCrewMemberInstanceIdReadOnly(player, standModel.Name) or "")
+						cursor.RepairNeeded = cursor.InstanceId == ""
+					end
+					advance(job)
+				elseif cursor.Stage == 3 then
+					if cursor.Name == "" then
+						clearPlacedStandIncome(player, standModel.Name)
+						setStandLevel(player, standModel.Name, 1)
+						clearStandVisual(standModel)
+						cursor.SkipPlacedRestore = true
+						cursor.Stage = 6
+						continue
+					end
+
+					cursor.SlotState = getStandSlotState(player, standModel.Name)
+					if not cursor.SlotState.Usable then
+						clearStandVisual(standModel)
+						cursor.SkipPlacedRestore = true
+						cursor.Stage = 6
+						continue
+					end
+					advance(job)
+				elseif cursor.Stage == 4 then
+					if cursor.Name ~= "" and cursor.RepairNeeded then
+						local restoredInstanceId, restoredInstance =
+							CrewInstanceService.EnsureStandInstance(player, standModel.Name, cursor.Name)
+						cursor.InstanceId = tostring(restoredInstanceId or "")
+						cursor.RestoredInstance = restoredInstance
+						if restoredInstance and restoredInstance.StorageName then
+							cursor.Name = tostring(restoredInstance.StorageName)
+						end
+					end
+					advance(job)
+				elseif cursor.Stage == 5 then
+					if cursor.Name ~= "" and not cursor.SkipPlacedRestore then
+						local crewKey = if cursor.InstanceId ~= "" then cursor.InstanceId else cursor.Name
+						getCrewMemberLevel(player, crewKey)
+						syncStandLevelFromCrewMember(player, standModel.Name, crewKey)
+					end
+					advance(job)
+				elseif cursor.Stage == 6 then
+					if cursor.Name ~= "" and not cursor.SkipPlacedRestore and cursor.Handle then
+						local generation = ShipRuntimeService.GetCrewVisualGeneration(player)
+						local stateActive = standModel:GetAttribute(PlacedCrewState.Attribute.Active) == true
+						local stateCrewName =
+							tostring(standModel:GetAttribute(PlacedCrewState.Attribute.CrewMemberName) or "")
+						local stateInstanceId =
+							tostring(standModel:GetAttribute(PlacedCrewState.Attribute.CrewMemberInstanceId) or "")
+						local stateGeneration =
+							tonumber(standModel:GetAttribute(PlacedCrewState.Attribute.VisualGeneration))
+						local identityChanged = stateCrewName ~= cursor.Name
+							or (cursor.InstanceId ~= "" and stateInstanceId ~= cursor.InstanceId)
+						local shouldRefreshState = stateActive ~= true
+							or identityChanged
+							or stateGeneration ~= generation
+
+						if stateActive ~= true then
+							enqueueCrewVisualRestore(player, standModel, cursor.Handle, cursor.Name, {
+								CrewMemberInstanceId = cursor.InstanceId,
+								Generation = generation,
+								Source = cursor.Source,
+							})
+						end
+
+						if shouldRefreshState then
+							updateStandHover(player, standModel, cursor.Name, {
+								Reason = cursor.Source,
+								RefreshIncomeTimestamp = stateActive ~= true or identityChanged,
+								RefreshUpdatedTimestamp = true,
+							})
+						end
+					end
+					advance(job)
+				elseif cursor.Stage == 7 then
+					updateStandMoneyText(player, standModel, cursor.Cache, cursor.SlotState, cursor.Name)
+					updateLevelUpUI(
+						player,
+						standModel,
+						cursor.Cache,
+						cursor.SlotState,
+						cursor.Name,
+						cursor.InstanceId,
+						true
+					)
+					updateStandPromptTexts(player, standModel, cursor.Cache, cursor.SlotState, cursor.Name)
+					advance(job)
+				end
+
+				if cursor.Stage <= STAND_REGISTER_STAGE_COUNT and os.clock() >= deadline then
+					return false, "pending"
+				end
+			end
+
+			return true, "ok"
+		end
+	end
+
 
 	local plotScanBound = {} 
 
@@ -487,6 +654,7 @@ function Module.Install(ctx)
 
 		local generation = tonumber(options.Generation) or ShipRuntimeService.GetCrewVisualGeneration(player)
 		local source = tostring(options.Source or "join_restore")
+		local expectedShip = if typeof(options.ExpectedShip) == "table" then options.ExpectedShip else nil
 		if activeShip:GetAttribute("GTRRuntimeShell") == true then
 			if JoinRestoreScheduler and typeof(JoinRestoreScheduler.Log) == "function" then
 				JoinRestoreScheduler.Log(player, "stand_restore_blocked", 0, "blocked_shell_not_active", {
@@ -495,6 +663,19 @@ function Module.Install(ctx)
 				})
 			end
 			return false, "blocked_shell_not_active"
+		end
+		if typeof(ShipRuntimeService.IsValidActiveShipForPlayer) == "function" then
+			local validShip, validationReason = ShipRuntimeService.IsValidActiveShipForPlayer(player, activeShip, expectedShip)
+			if not validShip then
+				local result = if validationReason == "runtime_shell" then "blocked_shell_not_active" else "blocked_invalid_ship"
+				if JoinRestoreScheduler and typeof(JoinRestoreScheduler.Log) == "function" then
+					JoinRestoreScheduler.Log(player, "stand_restore_blocked", 0, result, {
+						Always = true,
+						Generation = generation,
+					})
+				end
+				return false, result
+			end
 		end
 
 		clearPlayerStandRuntime(player)
@@ -536,22 +717,25 @@ function Module.Install(ctx)
 
 		for _, slotNumber in ipairs(slotNumbers) do
 			local slotName = tostring(slotNumber)
+			local cursorStep = nil
 			JoinRestoreScheduler.Enqueue(player, {
 				Phase = "stand_register",
 				Key = "stand_register:" .. slotName,
 				Generation = generation,
 				Priority = 300 + (tonumber(slotName) or 999),
-				Step = function()
+				Step = function(job, deadline)
 					if not validate() then
 						return true, "stale"
 					end
 
 					local slotModel = ShipSlotService.GetSlot(activeShip, slotName)
 					if slotModel and slotModel:IsA("Model") then
-						registerStand(player, activeShip, slotModel, {
-							DeferInit = false,
-							Source = source,
-						})
+						if cursorStep == nil then
+							cursorStep = createStandRegisterCursor(player, activeShip, slotModel, {
+								Source = source,
+							})
+						end
+						return cursorStep(job, deadline)
 					elseif slotModel then
 						warn(("[CrewIncomeRuntime] Ship slot %s is not a Model and cannot host crew visuals yet: %s"):format(
 							tostring(slotName),
@@ -563,18 +747,87 @@ function Module.Install(ctx)
 			})
 		end
 
+		local reconcilePlan = nil
 		JoinRestoreScheduler.Enqueue(player, {
-			Phase = "stand_reconcile",
-			Key = "stand_reconcile",
+			Phase = "stand_reconcile_prepare",
+			Key = "stand_reconcile_prepare",
 			Generation = generation,
 			Priority = 20000,
-			Step = function()
+			Step = function(job)
 				if not validate() then
 					return true, "stale"
 				end
-				reconcileSlotAssignmentsForRender(player, activeShip, source .. "_scheduled_repair")
-				reconcilePlayerStandAssignments(player)
-				return true, "ok"
+				local plan, reason = CrewSlotAssignmentReconciler.BeginIncrementalReconcile(player, {
+					ActiveShip = activeShip,
+					Source = source .. "_scheduled_repair",
+				})
+				reconcilePlan = plan
+				if typeof(plan) == "table" then
+					job.CursorIndex = 0
+					job.CursorCount = tonumber(plan.SlotCount) or 0
+					return true, "ok"
+				end
+				return true, tostring(reason or "prepare_failed")
+			end,
+		})
+
+		JoinRestoreScheduler.Enqueue(player, {
+			Phase = "stand_reconcile_slot",
+			Key = "stand_reconcile_slot",
+			Generation = generation,
+			Priority = 20010,
+			Step = function(job, deadline)
+				if not validate() then
+					return true, "stale"
+				end
+				if typeof(reconcilePlan) ~= "table" then
+					return true, "missing_plan"
+				end
+				job.CursorIndex = tonumber(reconcilePlan.SlotIndex) or 0
+				job.CursorCount = tonumber(reconcilePlan.SlotCount) or 0
+				local done, reason = CrewSlotAssignmentReconciler.StepIncrementalReconcile(player, reconcilePlan, deadline)
+				job.CursorIndex = math.min(tonumber(reconcilePlan.SlotIndex) or 0, tonumber(reconcilePlan.SlotCount) or 0)
+				job.CursorCount = tonumber(reconcilePlan.SlotCount) or 0
+				return done, reason
+			end,
+		})
+
+		local registeredStandIndex = 1
+		JoinRestoreScheduler.Enqueue(player, {
+			Phase = "stand_reconcile_registered_stand",
+			Key = "stand_reconcile_registered_stand",
+			Generation = generation,
+			Priority = 20020,
+			Step = function(job, deadline)
+				if not validate() then
+					return true, "stale"
+				end
+
+				clearCrewRecordCache(player)
+				local stands = playerStandList[player]
+				if typeof(stands) ~= "table" then
+					return true, "no_stands"
+				end
+
+				job.CursorCount = #stands
+				local processed = 0
+				while registeredStandIndex <= #stands and (processed == 0 or os.clock() < deadline) do
+					job.CursorIndex = registeredStandIndex
+					local standModel = stands[registeredStandIndex]
+					registeredStandIndex += 1
+					processed += 1
+					if standModel and standModel.Parent then
+						local standKey = tostring(standModel.Name)
+						local alreadyProcessed = typeof(reconcilePlan) == "table"
+							and typeof(reconcilePlan.ProcessedSlotKeys) == "table"
+							and reconcilePlan.ProcessedSlotKeys[standKey] == true
+						if not alreadyProcessed then
+							CrewInstanceService.ReconcileStandAssignment(player, standKey)
+						end
+					end
+				end
+
+				return registeredStandIndex > #stands, "ok"
 			end,
 		})
 
