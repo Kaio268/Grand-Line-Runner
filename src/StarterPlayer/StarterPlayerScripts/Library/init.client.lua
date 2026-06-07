@@ -1,8 +1,7 @@
-if not game:IsLoaded() then game.Loaded:Wait() end
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
 local Start = tick()
-
-local Players = game:GetService("Players")
-local Player = Players.LocalPlayer
 
 local Modules_Table = {}
 
@@ -30,8 +29,6 @@ end
 
 local localModulesFolder = script.Parent.Modules
 requireModules(localModulesFolder)
-
-local UIStrokeAdjuster = require(script.UIStrokeAdjuster)
 
  
 print("✅ Client {RP} took " .. (tick() - Start) .. "s to load!")

@@ -1,332 +1,410 @@
---[=[
-	Awesom3_Eric
-	12/24/2024 @ 12:01AM
-	@module UIStrokesAdjuster
-		Adjusts the UIStrokes of GuiObjects based on viewport size and distance from BillboardGuis
-]=]
-
 --!strict
 
-
-
------[[ Configuration ]]-----
-
--- Paste the following code into the command bar and change the Studio_Viewport_Size to the values in the output bar:
--- print(workspace.CurrentCamera.ViewportSize)
-local Studio_Viewport_Size = Vector2.new(1920, 1080)
-
--- Set to true to automatically tag BillboardGuis and ScreenGuis recursively in PlayerGui
--- It's advised to use the :TagScreenGui() and :TagBillboardGui() features for the best performance
-local Auto_Tag = true
-
--- Stroke sizes update every Update_Delay seconds
-local Update_Delay = 1
-
--- Change if you want
-local Billboard_Tag = "Billboard"
-local Screen_Gui_Tag = "ScreenGui"
-local UIStroke_Tag = "UIStroke"
-local Screen_Stroke_Tag = "ScreenStroke"
-local Default_Billboard_Distance = 15 -- Estimated distance if "Distance" attribute of BillboardGui is not set
-
-
-
-
-
------[[ Initialization ]]-----
-
--- Services
-local CollectionService = game:GetService("CollectionService")
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-
--- Player
-local player = Players.LocalPlayer
-local PlayerGui = player:WaitForChild("PlayerGui", 100)
-
--- Variables
-local camera = workspace.CurrentCamera
-
-
-
-
-
------[[ Utility Functions ]]-----
-
 --[=[
-	Returns average resolution of Vector2
-		@param vector2: Vector2
-		@return min: number
+	Explicit opt-in UIStroke scaling helper.
+
+	ScreenGui roots can be registered to scale UIStroke thickness by viewport
+	size. BillboardGui roots can be registered to scale UIStroke thickness by
+	viewport size and distance from the camera. Nothing is auto-tagged on
+	require.
 ]=]
-local function getBox(vector2: Vector2): number
-	return math.min(vector2.X, vector2.Y)
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local RuntimeScheduler = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("RuntimeScheduler"))
+
+local STUDIO_VIEWPORT_SIZE = Vector2.new(1920, 1080)
+local UPDATE_DELAY = 1
+local DEFAULT_BILLBOARD_DISTANCE = 15
+local ORIGINAL_THICKNESS_ATTRIBUTE = "OriginalThickness"
+local BILLBOARD_SCHEDULER_TASK_ID = "UIStrokeAdjuster:BillboardDistance"
+
+type ConnectionList = { RBXScriptConnection }
+
+type RootRecord<T> = {
+	Root: T,
+	Strokes: { UIStroke },
+	Connections: ConnectionList,
+}
+
+type RegistrationHandle = {
+	Disconnect: (self: RegistrationHandle) -> (),
+	IsConnected: (self: RegistrationHandle) -> boolean,
+}
+
+type UIStrokeAdjuster = {
+	RegisterScreenGui: (self: UIStrokeAdjuster, screenGui: ScreenGui) -> RegistrationHandle?,
+	UnregisterScreenGui: (self: UIStrokeAdjuster, screenGui: ScreenGui) -> (),
+	RegisterBillboardGui: (self: UIStrokeAdjuster, billboardGui: BillboardGui) -> RegistrationHandle?,
+	UnregisterBillboardGui: (self: UIStrokeAdjuster, billboardGui: BillboardGui) -> (),
+	TagScreenGui: (self: UIStrokeAdjuster, screenGui: ScreenGui) -> RegistrationHandle?,
+	TagBillboardGui: (self: UIStrokeAdjuster, billboardGui: BillboardGui) -> RegistrationHandle?,
+}
+
+local UIStrokeAdjuster = {} :: UIStrokeAdjuster
+
+local screenRecords: { [ScreenGui]: RootRecord<ScreenGui> } = {}
+local billboardRecords: { [BillboardGui]: RootRecord<BillboardGui> } = {}
+local viewportConnection: RBXScriptConnection? = nil
+local billboardSchedulerHandle: any = nil
+
+local function getCamera(): Camera?
+	return Workspace.CurrentCamera
 end
 
---[=[
-	Returns ratio of current viewport size to studio viewport size
-		@return viewportSize: number
-]=]
+local function getBox(vector: Vector2): number
+	return math.min(vector.X, vector.Y)
+end
+
 local function getScreenRatio(): number
-	return getBox(camera.ViewportSize)/getBox(Studio_Viewport_Size)
+	local camera = getCamera()
+	if not camera then
+		return 1
+	end
+
+	return getBox(camera.ViewportSize) / getBox(STUDIO_VIEWPORT_SIZE)
 end
 
---[=[
-	Recursively tags instance with tag based on objectType
-	Listens for added instances
-		@param instance: Instance
-		@param objectType: string
-		@param tag: string
-]=]
-local function tagRecursive(instance: Instance, objectType: string, tag: string)
-	if instance:IsA(objectType) then
-		instance:AddTag(tag)
+local function disconnectAll(connections: ConnectionList)
+	for _, connection in ipairs(connections) do
+		connection:Disconnect()
 	end
-	for _, child in instance:GetChildren() do
-		tagRecursive(child, objectType, tag)
-	end
-	instance.ChildAdded:Connect(function(child)
-		tagRecursive(child, objectType, tag)
-	end)
+	table.clear(connections)
 end
 
---[=[
-	Returns position of part or model (for relative BillboardGui position)
-		@param instance: Instance
-		@return position: Vector3
-]=]
-local function getInstancePosition(instance: Instance): Vector3
-	if instance:IsA("Part") then
+local function hasAnyScreenRecord(): boolean
+	return next(screenRecords) ~= nil
+end
+
+local function hasAnyBillboardRecord(): boolean
+	return next(billboardRecords) ~= nil
+end
+
+local function ensureOriginalThickness(uiStroke: UIStroke)
+	if uiStroke:GetAttribute(ORIGINAL_THICKNESS_ATTRIBUTE) == nil then
+		uiStroke:SetAttribute(ORIGINAL_THICKNESS_ATTRIBUTE, uiStroke.Thickness)
+	end
+end
+
+local function appendStroke(record, uiStroke: UIStroke)
+	ensureOriginalThickness(uiStroke)
+	record.Strokes[#record.Strokes + 1] = uiStroke
+end
+
+local function collectStrokes(root: Instance, record)
+	if root:IsA("UIStroke") then
+		appendStroke(record, root)
+	end
+
+	for _, descendant in ipairs(root:GetDescendants()) do
+		if descendant:IsA("UIStroke") then
+			appendStroke(record, descendant)
+		end
+	end
+end
+
+local function updateScreenRecord(record: RootRecord<ScreenGui>)
+	local ratio = getScreenRatio()
+	for index = #record.Strokes, 1, -1 do
+		local uiStroke = record.Strokes[index]
+		if not uiStroke:IsDescendantOf(record.Root) then
+			table.remove(record.Strokes, index)
+			continue
+		end
+
+		local originalThickness = tonumber(uiStroke:GetAttribute(ORIGINAL_THICKNESS_ATTRIBUTE))
+		if originalThickness then
+			uiStroke.Thickness = originalThickness * ratio
+		end
+	end
+end
+
+local function updateScreenRecords()
+	for _, record in pairs(screenRecords) do
+		if record.Root.Parent == nil then
+			UIStrokeAdjuster:UnregisterScreenGui(record.Root)
+		else
+			updateScreenRecord(record)
+		end
+	end
+end
+
+local function ensureViewportConnection()
+	if viewportConnection or not hasAnyScreenRecord() then
+		return
+	end
+
+	local camera = getCamera()
+	if camera then
+		viewportConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScreenRecords)
+	end
+end
+
+local function disconnectViewportIfIdle()
+	if hasAnyScreenRecord() then
+		return
+	end
+
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+end
+
+local function rebindViewportConnection()
+	if viewportConnection then
+		viewportConnection:Disconnect()
+		viewportConnection = nil
+	end
+	ensureViewportConnection()
+end
+
+local function getInstancePosition(instance: Instance): Vector3?
+	if instance:IsA("BasePart") then
 		return instance.Position
 	elseif instance:IsA("Model") then
 		return instance:GetPivot().Position
 	end
-	return Vector3.new(0, 0, 0)
+
+	return nil
 end
 
-
-
-
-
------[[ ScreenGui Updating ]]-----
-
--- Set OriginalThickness attribute
-local function initTaggedUIStroke(uiStroke: UIStroke)
-	-- Check if tagged instance is a UIStroke
-	if not uiStroke:IsA("UIStroke") then
-		uiStroke:RemoveTag(Screen_Stroke_Tag)
-		uiStroke:RemoveTag(UIStroke_Tag)
+local function updateBillboardRecord(record: RootRecord<BillboardGui>)
+	local billboardGui = record.Root
+	local camera = getCamera()
+	if not camera then
 		return
 	end
 
-	-- Initialize OriginalThickness
-	if not uiStroke:GetAttribute("OriginalThickness") then
-		uiStroke:SetAttribute("OriginalThickness", uiStroke.Thickness)
+	local adornee = billboardGui.Adornee
+	local origin = if adornee then getInstancePosition(adornee) else nil
+	if not origin and billboardGui.Parent then
+		origin = getInstancePosition(billboardGui.Parent)
 	end
-
-	-- Initialize if has screen tag
-	if uiStroke:HasTag(Screen_Stroke_Tag) then
-		uiStroke.Thickness *= getScreenRatio()
-	end
-end
-
--- Initialize tagged UI Strokes
-for _, uiStroke: UIStroke in CollectionService:GetTagged(UIStroke_Tag) do
-	initTaggedUIStroke(uiStroke)
-end
-
--- Listen for tagged UI Strokes
-CollectionService:GetInstanceAddedSignal(UIStroke_Tag):Connect(initTaggedUIStroke)
-
-
--- Initialize currently tagged UIStrokes
-for _, uiStroke: UIStroke in CollectionService:GetTagged(Screen_Stroke_Tag) do
-	uiStroke:AddTag("UIStroke")
-end
-
--- Indexes UIStroke in ScreenStrokes and its original thickness to update
-CollectionService:GetInstanceAddedSignal(Screen_Stroke_Tag):Connect(function(uiStroke: UIStroke)
-	uiStroke:AddTag("UIStroke")
-end)
-
-
--- Recurisvely tags UIStrokes in ScreenGui that are currently tagged
-for _, screenGui in CollectionService:GetTagged(Screen_Gui_Tag) do
-	if not screenGui:IsA("ScreenGui") then
-		screenGui:RemoveTag(Screen_Gui_Tag)
-		continue
-	end
-	tagRecursive(screenGui, "UIStroke", Screen_Stroke_Tag)
-end
-
--- Listen for new instances that are tagged
-CollectionService:GetInstanceAddedSignal(Screen_Gui_Tag):Connect(function(screenGui: ScreenGui)
-	if not screenGui:IsA("ScreenGui") then
+	if not origin then
 		return
 	end
-	tagRecursive(screenGui, "UIStroke", Screen_Stroke_Tag)
-end)
 
+	local magnitude = (camera.CFrame.Position - origin).Magnitude
+	if magnitude <= 0.001 then
+		return
+	end
 
--- Updates ScreenGui strokes
-local function updateScreenGuiStrokes()
-	for _, uiStroke: UIStroke in CollectionService:GetTagged(Screen_Stroke_Tag) do
-		local originalThickness = uiStroke:GetAttribute("OriginalThickness") :: number
+	local maxDistance = billboardGui.MaxDistance
+	if maxDistance > 0 and magnitude > maxDistance then
+		return
+	end
+
+	local distanceRatio = ((tonumber(billboardGui:GetAttribute("Distance")) or DEFAULT_BILLBOARD_DISTANCE) / magnitude)
+	local screenRatio = getScreenRatio()
+	for index = #record.Strokes, 1, -1 do
+		local uiStroke = record.Strokes[index]
+		if not uiStroke:IsDescendantOf(billboardGui) then
+			table.remove(record.Strokes, index)
+			continue
+		end
+
+		local originalThickness = tonumber(uiStroke:GetAttribute(ORIGINAL_THICKNESS_ATTRIBUTE))
 		if originalThickness then
-			uiStroke.Thickness = originalThickness * getScreenRatio()
+			uiStroke.Thickness = originalThickness * distanceRatio * screenRatio
 		end
 	end
 end
 
--- Updates UIStrokes thickness in ScreenStrokes when camera viewport size changes
-camera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScreenGuiStrokes)
-
-
-
-
-
------[[ BillboardGui Updating ]]-----
-
--- This dictionary keeps track of the UIStrokes that are children of a billboard gui
--- Used to iterate and update UIStrokes based on distances
-local BillboardData: {[BillboardGui]: {UIStroke}} = {}
-
--- Recurisvely tag ui strokes and append to BillboardData
-local function recurseGetUIStrokes(instance: Instance, billboardGui: BillboardGui)
-	if instance:IsA("UIStroke") then
-		instance:AddTag("UIStroke")
-		table.insert(BillboardData[billboardGui], instance)
+local function updateBillboardRecords()
+	if not hasAnyBillboardRecord() then
+		return false
 	end
-	for _, child in instance:GetChildren() do
-		recurseGetUIStrokes(child, billboardGui)
+
+	for _, record in pairs(billboardRecords) do
+		if record.Root.Parent == nil then
+			UIStrokeAdjuster:UnregisterBillboardGui(record.Root)
+		else
+			updateBillboardRecord(record)
+		end
 	end
-	instance.ChildAdded:Connect(function(child: Instance)
-		recurseGetUIStrokes(child, billboardGui)
-	end)
+
+	return hasAnyBillboardRecord()
 end
 
--- Initialize billboard
-local function initBillboard(billboardGui: BillboardGui)	
-	-- Remove tag is not billboard
-	if not billboardGui:IsA("BillboardGui") then
-		billboardGui:RemoveTag(Billboard_Tag)
+local function ensureBillboardScheduler()
+	if not hasAnyBillboardRecord() then
 		return
 	end
 
-	-- Create billboard
-	-- Add clean function
-	BillboardData[billboardGui] = {}
-	billboardGui.Destroying:Once(function()
-		BillboardData[billboardGui] = nil
+	if billboardSchedulerHandle and billboardSchedulerHandle:IsConnected() then
+		return
+	end
+
+	billboardSchedulerHandle = RuntimeScheduler.GetDefault():Schedule({
+		Id = BILLBOARD_SCHEDULER_TASK_ID,
+		Phase = "Heartbeat",
+		Interval = UPDATE_DELAY,
+		Priority = -25,
+		Callback = function()
+			return updateBillboardRecords()
+		end,
+		OnStop = function()
+			billboardSchedulerHandle = nil
+		end,
+	})
+end
+
+local function stopBillboardSchedulerIfIdle()
+	if hasAnyBillboardRecord() then
+		return
+	end
+
+	if billboardSchedulerHandle and billboardSchedulerHandle:IsConnected() then
+		billboardSchedulerHandle:Disconnect("idle")
+	end
+	billboardSchedulerHandle = nil
+end
+
+local function makeHandle(unregisterCallback: () -> ()): RegistrationHandle
+	local connected = true
+	local handle = {} :: RegistrationHandle
+
+	function handle:Disconnect()
+		if not connected then
+			return
+		end
+		connected = false
+		unregisterCallback()
+	end
+
+	function handle:IsConnected(): boolean
+		return connected
+	end
+
+	return handle
+end
+
+function UIStrokeAdjuster:RegisterScreenGui(screenGui: ScreenGui): RegistrationHandle?
+	if not screenGui:IsA("ScreenGui") then
+		return nil
+	end
+
+	if screenRecords[screenGui] then
+		return makeHandle(function()
+			UIStrokeAdjuster:UnregisterScreenGui(screenGui)
+		end)
+	end
+
+	local record: RootRecord<ScreenGui> = {
+		Root = screenGui,
+		Strokes = {},
+		Connections = {},
+	}
+	screenRecords[screenGui] = record
+
+	collectStrokes(screenGui, record)
+	updateScreenRecord(record)
+
+	record.Connections[#record.Connections + 1] = screenGui.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("UIStroke") then
+			appendStroke(record, descendant)
+			updateScreenRecord(record)
+		end
+	end)
+	record.Connections[#record.Connections + 1] = screenGui.Destroying:Connect(function()
+		UIStrokeAdjuster:UnregisterScreenGui(screenGui)
+	end)
+	record.Connections[#record.Connections + 1] = screenGui.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			UIStrokeAdjuster:UnregisterScreenGui(screenGui)
+		end
 	end)
 
-	-- Get UIStrokes from Billboard recursively
-	recurseGetUIStrokes(billboardGui, billboardGui)
+	ensureViewportConnection()
+
+	return makeHandle(function()
+		UIStrokeAdjuster:UnregisterScreenGui(screenGui)
+	end)
 end
 
--- Tag billboard guis
-for _, billboardGui: BillboardGui in CollectionService:GetTagged(Billboard_Tag) do
-	initBillboard(billboardGui)
-end
-
--- Listen for tagged billboards
-CollectionService:GetInstanceAddedSignal(Billboard_Tag):Connect(initBillboard)
-
-
-
--- Update UIStrokes every Update_Delay seconds
-local start = tick()
-local update; update = RunService.Heartbeat:Connect(function()
-	if tick() - start < Update_Delay then 
-		return 
+function UIStrokeAdjuster:UnregisterScreenGui(screenGui: ScreenGui)
+	local record = screenRecords[screenGui]
+	if not record then
+		return
 	end
-	start = tick()
 
-	-- Update
-	for billboardGui, uiStrokes in BillboardData do
-		local adornee = billboardGui.Adornee
-		local origin: Vector3
+	disconnectAll(record.Connections)
+	screenRecords[screenGui] = nil
+	disconnectViewportIfIdle()
+end
 
-		-- Check adornee or parent
-		if adornee then
-			origin = getInstancePosition(adornee)
-		else
-			if billboardGui.Parent then
-				origin = getInstancePosition(billboardGui.Parent)
-			end
-		end
+function UIStrokeAdjuster:RegisterBillboardGui(billboardGui: BillboardGui): RegistrationHandle?
+	if not billboardGui:IsA("BillboardGui") then
+		return nil
+	end
 
-		-- If no origin is defined, don't update
-		if not origin then
-			continue
-		end
+	if billboardRecords[billboardGui] then
+		return makeHandle(function()
+			UIStrokeAdjuster:UnregisterBillboardGui(billboardGui)
+		end)
+	end
 
-		-- Check if camera is within range
-		local magnitude = (camera.CFrame.Position - origin).Magnitude
-		local maxDistance = billboardGui.MaxDistance
-		if magnitude > maxDistance then
-			continue
+	local record: RootRecord<BillboardGui> = {
+		Root = billboardGui,
+		Strokes = {},
+		Connections = {},
+	}
+	billboardRecords[billboardGui] = record
+
+	collectStrokes(billboardGui, record)
+	updateBillboardRecord(record)
+
+	record.Connections[#record.Connections + 1] = billboardGui.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("UIStroke") then
+			appendStroke(record, descendant)
+			updateBillboardRecord(record)
 		end
-		
-		-- Update BillboardStrokes
-		local distanceRatio = ((billboardGui:GetAttribute("Distance") or Default_Billboard_Distance)/magnitude)
-		for _, uiStroke in uiStrokes do
-			if not uiStroke:IsDescendantOf(billboardGui) then
-				table.remove(uiStrokes, table.find(uiStrokes, uiStroke))
-			end
-			
-			local originalThickness = uiStroke:GetAttribute("OriginalThickness") :: number
-			if originalThickness then
-				uiStroke.Thickness = originalThickness * distanceRatio * getScreenRatio()
-			end
+	end)
+	record.Connections[#record.Connections + 1] = billboardGui.Destroying:Connect(function()
+		UIStrokeAdjuster:UnregisterBillboardGui(billboardGui)
+	end)
+	record.Connections[#record.Connections + 1] = billboardGui.AncestryChanged:Connect(function(_, parent)
+		if parent == nil then
+			UIStrokeAdjuster:UnregisterBillboardGui(billboardGui)
 		end
+	end)
+
+	ensureBillboardScheduler()
+
+	return makeHandle(function()
+		UIStrokeAdjuster:UnregisterBillboardGui(billboardGui)
+	end)
+end
+
+function UIStrokeAdjuster:UnregisterBillboardGui(billboardGui: BillboardGui)
+	local record = billboardRecords[billboardGui]
+	if not record then
+		return
+	end
+
+	disconnectAll(record.Connections)
+	billboardRecords[billboardGui] = nil
+	stopBillboardSchedulerIfIdle()
+end
+
+function UIStrokeAdjuster:TagScreenGui(screenGui: ScreenGui): RegistrationHandle?
+	return self:RegisterScreenGui(screenGui)
+end
+
+function UIStrokeAdjuster:TagBillboardGui(billboardGui: BillboardGui): RegistrationHandle?
+	return self:RegisterBillboardGui(billboardGui)
+end
+
+Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	if hasAnyScreenRecord() then
+		rebindViewportConnection()
+		updateScreenRecords()
+	end
+	if hasAnyBillboardRecord() then
+		updateBillboardRecords()
 	end
 end)
 
-
-
-
-
------[[ Auto_Tag ]]-----
-
--- Automatically tag ScreenGuis and BillboardGuis in PlayerGui if Auto_Tag == true
-if Auto_Tag then
-	tagRecursive(PlayerGui, "ScreenGui", Screen_Gui_Tag)
-	tagRecursive(PlayerGui, "BillboardGui", Billboard_Tag)
-end
-
-
-
-
-
------[[  Module Functions ]]-----
-
-type UIStrokeAdjuster = {
-	TagScreenGui: (self: UIStrokeAdjuster, screenGui: ScreenGui) -> (),
-	TagBillboardGui: (self: UIStrokeAdjuster, billboardGui: BillboardGui) -> (),
-}
-type _UIStrokeAdjuster = UIStrokeAdjuster & {
-
-}
-local UIStrokeAdjuster = {} :: any
-
---[=[
-	Tags ScreenGui to apply UIStrokes update
-		@param screenGui: ScreenGui
-]=]
-function UIStrokeAdjuster.TagScreenGui(self: _UIStrokeAdjuster, screenGui: ScreenGui)
-	if screenGui:IsA("ScreenGui") then
-		CollectionService:AddTag(screenGui, Screen_Gui_Tag)
-	end
-end
-
---[=[
-	Tags ScreenGui to apply UIStrokes update
-		@param billboardGui: BillboardGui
-]=]
-function UIStrokeAdjuster.TagBillboardGui(self: _UIStrokeAdjuster, billboardGui: BillboardGui)
-	if billboardGui:IsA("BillboardGui") then
-		CollectionService:AddTag(billboardGui, Billboard_Tag)
-	end
-end
-
-return UIStrokeAdjuster :: UIStrokeAdjuster
+return UIStrokeAdjuster

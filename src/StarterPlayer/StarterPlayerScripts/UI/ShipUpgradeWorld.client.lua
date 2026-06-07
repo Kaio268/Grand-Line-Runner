@@ -20,6 +20,7 @@ local ShipUpgradeWorldPrompt = require(UiFolder:WaitForChild("ShipUpgrade"):Wait
 
 local plotUpgradeRemote = Remotes:WaitForChild("PlotUpgradeRemote")
 local shipUpgradeResultRemote = Remotes:WaitForChild("ShipUpgradeResultRemote", 15)
+local DEBUG_TRACE = ReplicatedStorage:GetAttribute("ShipUpgradeWorldDebug") == true
 
 local ATTR = ShipVisuals.Attributes
 local RUNTIME_POINTS = ShipVisuals.RuntimePoints or {}
@@ -96,6 +97,15 @@ local function warnOnce(key, message, ...)
 
 	warnedKeys[key] = true
 	warn(string.format(message, ...))
+end
+
+local function traceOnce(key, message, ...)
+	if not DEBUG_TRACE or warnedKeys[key] then
+		return
+	end
+
+	warnedKeys[key] = true
+	print(string.format(message, ...))
 end
 
 local function track(connection, bucket)
@@ -344,7 +354,7 @@ local function refreshUpgradeMarker()
 
 	fallbackCFrame = getUpgradeFallbackCFrame()
 	local shipName = activeShip and tostring(activeShip:GetAttribute(ATTR.ActiveModelName) or activeShip.Name) or "<none>"
-	warnOnce(
+	traceOnce(
 		"missing_upgrade_marker_" .. shipName,
 		"[ShipUpgradeWorld] %s is missing ShipUpgradePoint; using bounding-box fallback for the React upgrade prompt.",
 		shipName

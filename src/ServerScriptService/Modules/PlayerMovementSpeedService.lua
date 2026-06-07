@@ -99,7 +99,7 @@ local function resolveDecreasePart()
 	decreasePart = nil
 	if not missingDecreaseSpeedWarned then
 		missingDecreaseSpeedWarned = true
-		warn("[PlayerMovementSpeedService] Workspace.DecreaseSpeed is missing or not a BasePart; slow-zone speed handling is disabled.")
+		zoneTrace("Workspace.DecreaseSpeed is missing or not a BasePart; legacy slow-zone speed handling is disabled.")
 	end
 	return nil
 end

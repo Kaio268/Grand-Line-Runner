@@ -550,6 +550,9 @@ refreshIndexDisplayMetadata = function(reason, force, options)
 	local includeModelPreview = if options.IncludeModelPreview ~= nil
 		then options.IncludeModelPreview == true
 		else modalAdapter:IsVisible()
+	if force ~= true and not modalAdapter:IsVisible() then
+		return
+	end
 	local now = os.clock()
 	if force ~= true and now < indexDisplayMetadataNextRefreshAt then
 		return
@@ -620,9 +623,10 @@ local function buildViewModel(previewMode)
 		return buildEmptyViewModel()
 	end
 
-	local requireModelPreview = previewMode ~= true and modalAdapter:IsVisible()
+	local indexModalVisible = modalAdapter:IsVisible()
+	local requireModelPreview = previewMode ~= true and indexModalVisible
 	local activeIndexDisplayMetadata = getActiveIndexDisplayMetadata(requireModelPreview)
-	if activeIndexDisplayMetadata == nil and previewMode ~= true then
+	if activeIndexDisplayMetadata == nil and previewMode ~= true and indexModalVisible then
 		refreshIndexDisplayMetadata("view_model", false, {
 			IncludeModelPreview = requireModelPreview == true,
 		})
@@ -1039,7 +1043,7 @@ scheduleRender = function()
 end
 
 refreshLiveFolders(true)
-refreshIndexDisplayMetadata("startup", true, {
+refreshIndexDisplayMetadata("startup", false, {
 	IncludeModelPreview = false,
 })
 

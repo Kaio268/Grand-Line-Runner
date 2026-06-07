@@ -7,7 +7,6 @@ local AnimationRegistry = require(script.Parent:WaitForChild("AnimationRegistry"
 
 local AnimationResolver = {}
 
-local DEBUG_INFO = RunService:IsStudio()
 local INFO_COOLDOWN = 0.2
 local WARN_COOLDOWN = 5
 local ATTRIBUTE_RIG_NAMES = {
@@ -28,7 +27,7 @@ local EMBEDDED_LIVE_ANIMATION_ID_KEYS = {
 }
 
 local function shouldLogInfo()
-	return DEBUG_INFO or ReplicatedStorage:GetAttribute("DebugAnimationRegistry") == true
+	return ReplicatedStorage:GetAttribute("DebugAnimationRegistry") == true
 end
 
 local function logInfo(message, ...)

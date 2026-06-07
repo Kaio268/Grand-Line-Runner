@@ -395,7 +395,7 @@ local function verifyPostLoadingState(sourceReason: string)
 	local character, humanoid = getCharacterHumanoid()
 	local camera = workspace.CurrentCamera
 	local cameraSubjectValid = camera ~= nil and camera.CameraSubject ~= nil
-	local overlays = findBlackOverlays(currentGui)
+	local overlays = if overlayRecoveryApplied then {} else findBlackOverlays(currentGui)
 
 	local needsRecovery = currentGui == nil
 		or character == nil
@@ -431,7 +431,7 @@ local function verifyPostLoadingState(sourceReason: string)
 		local latestCharacter, latestHumanoid = getCharacterHumanoid()
 		local latestCamera = workspace.CurrentCamera
 		local latestGui = playerGui or player:FindFirstChildOfClass("PlayerGui")
-		local remainingOverlays = findBlackOverlays(latestGui)
+		local remainingOverlays = if overlayRecoveryApplied then {} else findBlackOverlays(latestGui)
 		local latestCameraValid = latestCamera ~= nil and latestCamera.CameraSubject ~= nil
 		if latestGui == nil or latestCharacter == nil or latestHumanoid == nil or not latestCameraValid or #remainingOverlays > 0 then
 			logGtrLoad("recovery_incomplete", "post_close_invalid", {

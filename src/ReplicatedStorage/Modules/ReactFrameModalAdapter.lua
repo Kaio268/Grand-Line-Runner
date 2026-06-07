@@ -11,6 +11,10 @@ ReactFrameModalAdapter.__index = ReactFrameModalAdapter
 local FRAMES_DISPLAY_ORDER = 120
 local STANDALONE_LAYER_NAME = "ReactModalLayer"
 local BYPASS_OPEN_UI_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
+local ADAPTER_FRAME_ATTRIBUTE = "ReactFrameModalAdapterFrame"
+local ADAPTER_HOST_ATTRIBUTE = "ReactFrameModalAdapterHost"
+local ADAPTER_BACKDROP_ATTRIBUTE = "ReactFrameModalAdapterBackdrop"
+local ADAPTER_MODAL_NAME_ATTRIBUTE = "ReactFrameModalAdapterModalName"
 local VIEWPORT_MARGIN = Vector2.new(24, 24)
 local MOBILE_FRAME_SCALE = Vector2.new(0.74, 0.8)
 local MOBILE_CONTENT_SCALE = 0.62
@@ -27,6 +31,86 @@ local function trackConnection(signal, callback, bucket)
 	local connection = signal:Connect(callback)
 	table.insert(bucket, connection)
 	return connection
+end
+
+local function isManagedForModal(child, managedAttribute, modalName)
+	if child:GetAttribute(managedAttribute) ~= true then
+		return false
+	end
+
+	local childModalName = child:GetAttribute(ADAPTER_MODAL_NAME_ATTRIBUTE)
+	return modalName == nil or childModalName == nil or childModalName == modalName
+end
+
+local function scoreManagedChild(child, options)
+	local score = 0
+	local descendantCount = #child:GetDescendants()
+
+	if child:IsA("GuiObject") and child.Visible then
+		score += 10000
+	end
+
+	score += descendantCount
+
+	if options and options.hostName then
+		local host = child:FindFirstChild(options.hostName)
+		if host and host:IsA("Frame") then
+			score += 1000
+			if isManagedForModal(host, options.hostAttribute, options.modalName) then
+				score += 1000
+			end
+
+			local hostDescendantCount = #host:GetDescendants()
+			if hostDescendantCount > 1 then
+				score += 5000 + hostDescendantCount
+			end
+
+			if host:IsA("GuiObject") and host.Visible then
+				score += 100
+			end
+		end
+	end
+
+	if options and options.modalName and child:GetAttribute(ADAPTER_MODAL_NAME_ATTRIBUTE) == options.modalName then
+		score += 100
+	end
+
+	return score
+end
+
+local function findManagedNamedChild(parent, childName, className, managedAttribute, options)
+	local selected = nil
+	local selectedScore = -math.huge
+	local modalName = options and options.modalName or nil
+
+	for _, child in ipairs(parent:GetChildren()) do
+		if
+			child.Name == childName
+			and child:IsA(className)
+			and isManagedForModal(child, managedAttribute, modalName)
+		then
+			local score = scoreManagedChild(child, options)
+			if selected == nil or score > selectedScore then
+				selected = child
+				selectedScore = score
+			end
+		end
+	end
+
+	if selected then
+		for _, child in ipairs(parent:GetChildren()) do
+			if
+				child ~= selected
+				and child.Name == childName
+				and child:IsA(className)
+				and isManagedForModal(child, managedAttribute, modalName)
+			then
+				child:Destroy()
+			end
+		end
+	end
+
+	return selected
 end
 
 local function isUsableUiController(controller)
@@ -206,11 +290,13 @@ function ReactFrameModalAdapter:_ensureBackdrop()
 		return nil
 	end
 
-	if self.backdrop and self.backdrop.Parent == framesGui then
-		return self.backdrop
+	local backdrop = findManagedNamedChild(framesGui, self.backdropName, "Frame", ADAPTER_BACKDROP_ATTRIBUTE, {
+		modalName = self.frameName,
+	})
+	local existingBackdrop = framesGui:FindFirstChild(self.backdropName)
+	if not backdrop and existingBackdrop and existingBackdrop:IsA("Frame") then
+		backdrop = existingBackdrop
 	end
-
-	local backdrop = framesGui:FindFirstChild(self.backdropName)
 	if not backdrop then
 		backdrop = Instance.new("Frame")
 		backdrop.Name = self.backdropName
@@ -224,13 +310,16 @@ function ReactFrameModalAdapter:_ensureBackdrop()
 		backdrop.Parent = framesGui
 	end
 
+	backdrop:SetAttribute(ADAPTER_BACKDROP_ATTRIBUTE, true)
+	backdrop:SetAttribute(ADAPTER_MODAL_NAME_ATTRIBUTE, self.frameName)
 	backdrop.Active = self.backdropActive
 	self.backdrop = backdrop
 	return backdrop
 end
 
 function ReactFrameModalAdapter:SyncOverlayState()
-	local isVisible = self.legacyFrame ~= nil and self.legacyFrame.Parent ~= nil and self.legacyFrame.Visible == true
+	local frame = self:_findOrCreateFrame()
+	local isVisible = frame ~= nil and frame.Parent ~= nil and frame.Visible == true
 	local backdrop = self:_ensureBackdrop()
 	if backdrop then
 		backdrop.Visible = isVisible
@@ -249,6 +338,8 @@ function ReactFrameModalAdapter:_applyFrameStyling(frame)
 		framesGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	end
 
+	frame:SetAttribute(ADAPTER_FRAME_ATTRIBUTE, true)
+	frame:SetAttribute(ADAPTER_MODAL_NAME_ATTRIBUTE, self.frameName)
 	frame.Active = true
 	frame.AnchorPoint = Vector2.new(0.5, 0.5)
 	frame.BackgroundTransparency = self.frameBackgroundTransparency ~= nil and self.frameBackgroundTransparency or 1
@@ -368,6 +459,15 @@ function ReactFrameModalAdapter:_disconnectLegacySuppression()
 	self.boundLegacySuppressionHost = nil
 end
 
+function ReactFrameModalAdapter:_setLegacyFrame(frame)
+	if self.legacyFrame == frame then
+		return
+	end
+
+	self:_disconnectLegacySuppression()
+	self.legacyFrame = frame
+end
+
 function ReactFrameModalAdapter:_bindLegacyChildSuppression(frame, host, child)
 	if child == nil or child == host or (host and child:IsDescendantOf(host)) then
 		return
@@ -445,20 +545,25 @@ function ReactFrameModalAdapter:_bindLegacySuppression(frame, host)
 end
 
 function ReactFrameModalAdapter:_findOrCreateFrame()
-	if self.legacyFrame and self.legacyFrame.Parent ~= nil then
-		return self.legacyFrame
-	end
-
-	self.legacyFrame = nil
-
 	local framesGui = self:_getFramesGui(2)
 	if not framesGui then
+		self:_setLegacyFrame(nil)
 		return nil
 	end
 
-	local frame = framesGui:FindFirstChild(self.frameName) or framesGui:WaitForChild(self.frameName, 1)
+	local frame = findManagedNamedChild(framesGui, self.frameName, "Frame", ADAPTER_FRAME_ATTRIBUTE, {
+		modalName = self.frameName,
+		hostName = self.hostName,
+		hostAttribute = ADAPTER_HOST_ATTRIBUTE,
+	})
+
+	if not frame and self.legacyFrame and self.legacyFrame.Parent == framesGui and self.legacyFrame.Name == self.frameName then
+		frame = self.legacyFrame
+	end
+
+	frame = frame or framesGui:FindFirstChild(self.frameName) or framesGui:WaitForChild(self.frameName, 1)
 	if frame and frame:IsA("Frame") then
-		self.legacyFrame = frame
+		self:_setLegacyFrame(frame)
 		return frame
 	end
 
@@ -470,7 +575,7 @@ function ReactFrameModalAdapter:_findOrCreateFrame()
 	frame.Name = self.frameName
 	frame.Visible = false
 	frame.Parent = framesGui
-	self.legacyFrame = frame
+	self:_setLegacyFrame(frame)
 
 	return frame
 end
@@ -484,7 +589,13 @@ function ReactFrameModalAdapter:EnsureHost()
 
 	self:_applyFrameStyling(frame)
 
-	local host = frame:FindFirstChild(self.hostName)
+	local host = findManagedNamedChild(frame, self.hostName, "Frame", ADAPTER_HOST_ATTRIBUTE, {
+		modalName = self.frameName,
+	})
+	local existingHost = frame:FindFirstChild(self.hostName)
+	if not host and existingHost and existingHost:IsA("Frame") then
+		host = existingHost
+	end
 	if not host then
 		host = Instance.new("Frame")
 		host.Name = self.hostName
@@ -496,6 +607,8 @@ function ReactFrameModalAdapter:EnsureHost()
 		host.Parent = frame
 	end
 
+	host:SetAttribute(ADAPTER_HOST_ATTRIBUTE, true)
+	host:SetAttribute(ADAPTER_MODAL_NAME_ATTRIBUTE, self.frameName)
 	local contentScale = self:_getContentScale()
 	local scale = host:FindFirstChild(self.hostName .. "ContentScale")
 	if not scale then
@@ -512,7 +625,7 @@ function ReactFrameModalAdapter:EnsureHost()
 	self:_bindLegacySuppression(frame, host)
 	self:SyncOverlayState()
 
-	self.legacyFrame = frame
+	self:_setLegacyFrame(frame)
 	return host
 end
 
@@ -632,7 +745,7 @@ function ReactFrameModalAdapter:HandlePlayerGuiChildRemoved(child)
 end
 
 function ReactFrameModalAdapter:GetFrame()
-	return self.legacyFrame or self:_findOrCreateFrame()
+	return self:_findOrCreateFrame()
 end
 
 function ReactFrameModalAdapter:IsVisible()

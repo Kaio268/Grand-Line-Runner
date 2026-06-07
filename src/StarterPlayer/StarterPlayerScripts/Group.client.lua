@@ -72,6 +72,7 @@ end
 
 local currentShip = nil
 local promptConn = nil
+local missingPromptWarnedByShip = setmetatable({}, { __mode = "k" })
 local busy = false
 
 local function disconnectPrompt()
@@ -153,9 +154,16 @@ local function tryBind()
 
 	if currentShip ~= ship then
 		currentShip = ship
+		disconnectPrompt()
+	end
+
+	if not promptConn then
 		local prompt = getPromptFromShip(ship)
 		if not prompt then
-			warn("GroupReward prompt not found on your active ship.")
+			if not missingPromptWarnedByShip[ship] then
+				missingPromptWarnedByShip[ship] = true
+				warn("GroupReward prompt not found on your active ship.")
+			end
 			return
 		end
 		connectPrompt(prompt)
@@ -177,7 +185,7 @@ if ActiveShips then
 end
 
 task.defer(function()
-	while not currentShip do
+	while not promptConn do
 		tryBind()
 		task.wait(0.5)
 	end

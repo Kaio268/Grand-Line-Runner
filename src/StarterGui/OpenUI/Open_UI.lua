@@ -26,6 +26,7 @@ local FRAMES_DISPLAY_ORDER = 120
 local CONTROLLER_GENERATION_ATTRIBUTE = "OpenUIControllerGeneration"
 local OPENED_FRAME_ATTRIBUTE = "OpenUIOpened"
 local BYPASS_SCALE_ANIMATION_ATTRIBUTE = "OpenUIBypassScaleAnimation"
+local REACT_MODAL_ADAPTER_FRAME_ATTRIBUTE = "ReactFrameModalAdapterFrame"
 local GIFT_OPENUI_DEBUG = ReplicatedStorage:GetAttribute("GiftOpenUIDebug") == true
 local GIFT_OPENUI_DEBUG_VERSION = "gifts-openui-x-debug-2026-05-01"
 local CLOSE_BUTTON_DEBUG = ReplicatedStorage:GetAttribute("OpenUICloseButtonDebug") == true
@@ -33,7 +34,6 @@ local CLOSE_BUTTON_DEBUG_VERSION = "close-buttons-live-debug-2026-05-01"
 local REACT_MODAL_FRAME_NAMES = {
 	CometMerchant = true,
 	Gifts = true,
-	GearStore = true,
 	Index = true,
 	Quest = true,
 	Rebirth = true,
@@ -108,6 +108,12 @@ end
 
 local function shouldBypassScaleAnimation(frame: Frame): boolean
 	return frame:GetAttribute(BYPASS_SCALE_ANIMATION_ATTRIBUTE) == true
+end
+
+local function shouldSkipDescendantWiring(frame: Frame): boolean
+	return frame:GetAttribute(REACT_MODAL_ADAPTER_FRAME_ATTRIBUTE) == true
+		or shouldBypassScaleAnimation(frame)
+		or REACT_MODAL_FRAME_NAMES[frame.Name] == true
 end
 
 local function setFrameScale(frame: Frame, scaleValue: number): UIScale
@@ -439,14 +445,20 @@ function UIController:_initializeFrame(frame: Instance)
 		typedFrame.Position = UDim2.fromScale(0.5, 10)
 	end
 
+	self._frameDescendantConnections = self._frameDescendantConnections or {}
+	if self._frameDescendantConnections[typedFrame] then
+		self._frameDescendantConnections[typedFrame]:Disconnect()
+		self._frameDescendantConnections[typedFrame] = nil
+	end
+
+	if shouldSkipDescendantWiring(typedFrame) then
+		return
+	end
+
 	for _, obj in ipairs(typedFrame:GetDescendants()) do
 		self:_connectFrameCloseButton(typedFrame, obj)
 	end
 
-	self._frameDescendantConnections = self._frameDescendantConnections or {}
-	if self._frameDescendantConnections[typedFrame] then
-		self._frameDescendantConnections[typedFrame]:Disconnect()
-	end
 	self._frameDescendantConnections[typedFrame] = typedFrame.DescendantAdded:Connect(function(obj)
 		self:_connectFrameCloseButton(typedFrame, obj)
 	end)

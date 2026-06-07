@@ -127,17 +127,52 @@ local function scheduleRender()
 	end)
 end
 
-playerGui.DescendantAdded:Connect(function(descendant)
-	if descendant.Name == "HUD" or descendant.Name == "LButtons" or descendant.Name == "Boosts" then
-		task.defer(scheduleRender)
-	end
-end)
+local watchedHudChildren = {
+	Boosts = true,
+	LButtons = true,
+	ReactHudBoostTimerHost = true,
+}
 
-playerGui.DescendantRemoving:Connect(function(descendant)
-	if descendant.Name == "HUD" or descendant.Name == "LButtons" or descendant.Name == "Boosts" then
+local hudConnections = {}
+local playerGuiConnections = {}
+
+local function disconnectHudConnections()
+	for _, connection in ipairs(hudConnections) do
+		connection:Disconnect()
+	end
+	table.clear(hudConnections)
+end
+
+local function bindHudConnections()
+	disconnectHudConnections()
+
+	local hud = playerGui:FindFirstChild("HUD")
+	if not hud then
+		return
+	end
+
+	hudConnections[#hudConnections + 1] = hud.ChildAdded:Connect(function(child)
+		if watchedHudChildren[child.Name] then
+			task.defer(scheduleRender)
+		end
+	end)
+	hudConnections[#hudConnections + 1] = hud.ChildRemoved:Connect(function(child)
+		if watchedHudChildren[child.Name] then
+			task.defer(scheduleRender)
+		end
+	end)
+end
+
+local function handlePlayerGuiChildChanged(child)
+	if child.Name == "HUD" then
+		bindHudConnections()
 		task.defer(scheduleRender)
 	end
-end)
+end
+
+playerGuiConnections[#playerGuiConnections + 1] = playerGui.ChildAdded:Connect(handlePlayerGuiChildChanged)
+playerGuiConnections[#playerGuiConnections + 1] = playerGui.ChildRemoved:Connect(handlePlayerGuiChildChanged)
+bindHudConnections()
 
 local viewportConnections = {}
 local function bindViewportConnections()
@@ -162,6 +197,10 @@ scheduleRender()
 
 script.Destroying:Connect(function()
 	destroyed = true
+	for _, connection in ipairs(playerGuiConnections) do
+		connection:Disconnect()
+	end
+	disconnectHudConnections()
 	for _, connection in ipairs(viewportConnections) do
 		connection:Disconnect()
 	end

@@ -14,6 +14,7 @@ local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local CrewOverhead = require(Modules:WaitForChild("Crew"):WaitForChild("CrewOverhead"))
 local ChestOverhead = require(Modules:WaitForChild("ChestOverhead"))
+local UIStrokeAdjuster = require(script.Parent.Parent:WaitForChild("Library"):WaitForChild("UIStrokeAdjuster"))
 local CrewOverheadBillboard = require(UiFolder:WaitForChild("Crew"):WaitForChild("CrewOverheadBillboard"))
 local ChestOverheadBillboard = require(UiFolder:WaitForChild("ChestOverheadBillboard"))
 
@@ -38,6 +39,7 @@ local changedEvent = Instance.new("BindableEvent")
 local trackedModels = {}
 local modelConnections = {}
 local nextModelKey = 0
+local billboardRegistrations = {}
 
 local function disconnectModel(model)
 	local connections = modelConnections[model]
@@ -52,6 +54,31 @@ end
 
 local function fireChanged()
 	changedEvent:Fire()
+end
+
+local function registerBillboardGui(instance)
+	if not instance:IsA("BillboardGui") or billboardRegistrations[instance] then
+		return
+	end
+
+	local handle = UIStrokeAdjuster:RegisterBillboardGui(instance)
+	if handle then
+		billboardRegistrations[instance] = handle
+	end
+end
+
+local function unregisterBillboardGui(instance)
+	local handle = billboardRegistrations[instance]
+	if handle then
+		handle:Disconnect()
+		billboardRegistrations[instance] = nil
+	end
+end
+
+local function registerExistingPortalBillboards()
+	for _, descendant in ipairs(portalHost:GetDescendants()) do
+		registerBillboardGui(descendant)
+	end
 end
 
 local function getAdornee(model)
@@ -236,8 +263,11 @@ end)
 local respawnConnection = player.CharacterAdded:Connect(function()
 	fireChanged()
 end)
+local portalBillboardAddedConnection = portalHost.DescendantAdded:Connect(registerBillboardGui)
+local portalBillboardRemovingConnection = portalHost.DescendantRemoving:Connect(unregisterBillboardGui)
 
 root:render(React.createElement(CrewOverheadLayer))
+task.defer(registerExistingPortalBillboards)
 
 script.Destroying:Connect(function()
 	crewAddedConnection:Disconnect()
@@ -245,8 +275,14 @@ script.Destroying:Connect(function()
 	chestAddedConnection:Disconnect()
 	chestRemovedConnection:Disconnect()
 	respawnConnection:Disconnect()
+	portalBillboardAddedConnection:Disconnect()
+	portalBillboardRemovingConnection:Disconnect()
 	for model in pairs(trackedModels) do
 		disconnectModel(model)
+	end
+	for billboardGui, handle in pairs(billboardRegistrations) do
+		handle:Disconnect()
+		billboardRegistrations[billboardGui] = nil
 	end
 	changedEvent:Destroy()
 	root:unmount()

@@ -1212,6 +1212,7 @@ local SHARED_WAVE_VISUAL_MAX_LEAD = 0.08
 local SHARED_WAVE_VISUAL_DECAY_DELAY = 0.12
 local SHARED_WAVE_VISUAL_SNAP_DISTANCE = 90
 local SHARED_WAVE_VISUAL_REBUILD_DELAY = 0.05
+local SHARED_WAVE_VISUAL_MISSING_HITBOX_WARN_DELAY = 1
 local SHARED_WAVE_DIAGNOSTICS_INTERVAL = 2
 local WAVE_SOUND_VOLUME = 0.7
 local WAVE_SOUND_ROLLOFF_MIN_DISTANCE = 45
@@ -1508,6 +1509,8 @@ local function createSharedHazardVisualSmoother(hazard)
 		Destroyed = false,
 		RefreshQueued = false,
 		VisualPreloadRoot = nil,
+		MissingHitboxFirstSeenAt = nil,
+		MissingHitboxRetryQueued = false,
 	}
 
 	sharedHazardVisualSmoothers[hazard] = controller
@@ -1604,6 +1607,9 @@ local function createSharedHazardVisualSmoother(hazard)
 			return nil
 		end
 
+		self.MissingHitboxFirstSeenAt = nil
+		self.MissingHitboxRetryQueued = false
+
 		local root = Instance.new("Model")
 		root.Name = tostring(self.Hazard.Name) .. "_LocalVisualRoot"
 		root:SetAttribute(SMOOTHED_VISUAL_SOURCE_ATTRIBUTE, self.Hazard:GetFullName())
@@ -1623,6 +1629,41 @@ local function createSharedHazardVisualSmoother(hazard)
 		self.VisualRoot = root
 		self.VisualTargetPart = targetPart
 		return root
+	end
+
+	function controller:QueueMissingHitboxRetry()
+		if self.Destroyed or self.MissingHitboxRetryQueued then
+			return
+		end
+
+		self.MissingHitboxRetryQueued = true
+		task.delay(SHARED_WAVE_VISUAL_REBUILD_DELAY, function()
+			if self.Destroyed then
+				return
+			end
+
+			self.MissingHitboxRetryQueued = false
+			self:Refresh()
+		end)
+	end
+
+	function controller:HandleMissingHitbox()
+		local missingHitboxNow = os.clock()
+		if not self.MissingHitboxFirstSeenAt then
+			self.MissingHitboxFirstSeenAt = missingHitboxNow
+		end
+
+		self:QueueMissingHitboxRetry()
+
+		if missingHitboxNow - self.MissingHitboxFirstSeenAt < SHARED_WAVE_VISUAL_MISSING_HITBOX_WARN_DELAY then
+			return
+		end
+
+		waveWarnOnce(
+			"timeline_visual_root_missing_" .. tostring(self.Hazard.Name),
+			"shared wave local visual skipped missing hitbox hazard=%s",
+			formatInstancePath(self.Hazard)
+		)
 	end
 
 	function controller:PreloadPreparedVisuals(root, preparedVisuals)
@@ -1682,11 +1723,7 @@ local function createSharedHazardVisualSmoother(hazard)
 	function controller:RefreshClientVisualRoot()
 		local root = self:EnsureClientVisualRoot()
 		if not root then
-			waveWarnOnce(
-				"timeline_visual_root_missing_" .. tostring(self.Hazard.Name),
-				"shared wave local visual skipped missing hitbox hazard=%s",
-				formatInstancePath(self.Hazard)
-			)
+			self:HandleMissingHitbox()
 			return
 		end
 

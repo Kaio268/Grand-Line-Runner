@@ -12,6 +12,7 @@ local UiFolder = ReplicatedStorage:WaitForChild("UI")
 local React = require(Packages:WaitForChild("React"))
 local ReactRoblox = require(Packages:WaitForChild("ReactRoblox"))
 local CurrencyUtil = require(Modules:WaitForChild("CurrencyUtil"))
+local UIStrokeAdjuster = require(script.Parent.Parent:WaitForChild("Library"):WaitForChild("UIStrokeAdjuster"))
 local PlayerOverheadBillboard = require(UiFolder:WaitForChild("Player"):WaitForChild("PlayerOverheadBillboard"))
 
 local BOARD_ATTRIBUTES = {
@@ -44,9 +45,35 @@ local leaderstatsConnections = {}
 local currencyConnections = {}
 local statusConnections = {}
 local nextPlayerKey = 0
+local billboardRegistrations = {}
 
 local function fireChanged()
 	changedEvent:Fire()
+end
+
+local function registerBillboardGui(instance)
+	if not instance:IsA("BillboardGui") or billboardRegistrations[instance] then
+		return
+	end
+
+	local handle = UIStrokeAdjuster:RegisterBillboardGui(instance)
+	if handle then
+		billboardRegistrations[instance] = handle
+	end
+end
+
+local function unregisterBillboardGui(instance)
+	local handle = billboardRegistrations[instance]
+	if handle then
+		handle:Disconnect()
+		billboardRegistrations[instance] = nil
+	end
+end
+
+local function registerExistingPortalBillboards()
+	for _, descendant in ipairs(portalHost:GetDescendants()) do
+		registerBillboardGui(descendant)
+	end
 end
 
 local function disconnectConnections(connections)
@@ -377,14 +404,23 @@ local removingConnection = Players.PlayerRemoving:Connect(function(player)
 	disconnectPlayer(player)
 	fireChanged()
 end)
+local portalBillboardAddedConnection = portalHost.DescendantAdded:Connect(registerBillboardGui)
+local portalBillboardRemovingConnection = portalHost.DescendantRemoving:Connect(unregisterBillboardGui)
 
 root:render(React.createElement(PlayerOverheadLayer))
+task.defer(registerExistingPortalBillboards)
 
 script.Destroying:Connect(function()
 	addedConnection:Disconnect()
 	removingConnection:Disconnect()
+	portalBillboardAddedConnection:Disconnect()
+	portalBillboardRemovingConnection:Disconnect()
 	for player in pairs(trackedPlayers) do
 		disconnectPlayer(player)
+	end
+	for billboardGui, handle in pairs(billboardRegistrations) do
+		handle:Disconnect()
+		billboardRegistrations[billboardGui] = nil
 	end
 	changedEvent:Destroy()
 	root:unmount()

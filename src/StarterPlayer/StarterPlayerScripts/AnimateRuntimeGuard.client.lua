@@ -15,12 +15,14 @@ local AnimationResolver = require(
 
 local player = Players.LocalPlayer
 
-local DEBUG_INFO = RunService:IsStudio()
+local DEBUG_ATTRIBUTE = "DebugSafeAnimateRuntime"
 local INFO_COOLDOWN = 1
 local WARN_COOLDOWN = 4
 local ENABLE_ATTRIBUTE = "UseSafeAnimateRuntime"
 local DEFAULT_ENABLED = true
 local TRANSITION_FADE_TIME = 0.12
+local SPEED_ADJUST_EPSILON = 0.05
+local SPEED_ADJUST_INTERVAL = 0.18
 local CATALOG_DISCOVERY_TIMEOUT = 4
 local CATALOG_RETRY_INTERVAL = 0.2
 local CATALOG_STATE_ORDER = { "Idle", "Walk", "Run", "Jump", "Fall", "Climb", "Swim", "SwimIdle", "Sit" }
@@ -67,8 +69,12 @@ local DEFAULT_R6G_CATALOG = {
 local syntheticAnimationsById = {}
 local activeState
 
+local function shouldLogInfo()
+	return ReplicatedStorage:GetAttribute(DEBUG_ATTRIBUTE) == true
+end
+
 local function logInfo(message, ...)
-	if not DEBUG_INFO then
+	if not shouldLogInfo() then
 		return
 	end
 
@@ -683,10 +689,21 @@ local function playResolvedState(state, key, speed)
 		local currentTrack = state.CurrentTrack
 		if currentTrack then
 			if currentTrack.IsPlaying then
-				pcall(function()
-					currentTrack:AdjustSpeed(playbackSpeed)
-				end)
+				local now = os.clock()
+				local lastPlaybackSpeed = tonumber(state.LastPlaybackSpeed)
+				local speedChanged = lastPlaybackSpeed == nil
+					or math.abs(playbackSpeed - lastPlaybackSpeed) >= SPEED_ADJUST_EPSILON
+				local intervalElapsed = (now - (tonumber(state.LastSpeedAdjustAt) or 0)) >= SPEED_ADJUST_INTERVAL
+				if speedChanged or intervalElapsed then
+					state.LastPlaybackSpeed = playbackSpeed
+					state.LastSpeedAdjustAt = now
+					pcall(function()
+						currentTrack:AdjustSpeed(playbackSpeed)
+					end)
+				end
 			else
+				state.LastPlaybackSpeed = playbackSpeed
+				state.LastSpeedAdjustAt = os.clock()
 				currentTrack:Play(TRANSITION_FADE_TIME, 1, playbackSpeed)
 			end
 		end
@@ -704,6 +721,8 @@ local function playResolvedState(state, key, speed)
 
 	state.CurrentTrack = track
 	state.CurrentKey = key
+	state.LastPlaybackSpeed = playbackSpeed
+	state.LastSpeedAdjustAt = os.clock()
 	track:Play(TRANSITION_FADE_TIME, 1, playbackSpeed)
 	logInfo("character=%s state=%s", state.Character.Name, key)
 end
@@ -763,6 +782,8 @@ local function startRuntimeAnimate(character)
 		Tracks = validation.Tracks,
 		CurrentTrack = nil,
 		CurrentKey = nil,
+		LastPlaybackSpeed = nil,
+		LastSpeedAdjustAt = 0,
 		Destroyed = false,
 	}
 	activeState = state
